@@ -286,6 +286,7 @@ public:
     // discretization-node-wall-implicit-dirichlet)。これが無いと壁速度が再循環域でドリフトする。
     // 非 node (cell) / explicit では no-op。0 で旧挙動 (弱形式半割面のみ)。
     int nodeWallDirichlet = 1;
+    int nodeInletCornerWall = 0;   // 1: 変換時に入口∩壁コーナーの入口側半割面を壁へ帰属 (node)。methods/discretization.md §7.2 (D)
 
     // (撤去 2026-08-16) nodeAxisDirichlet: 軸ノードを第一内点コピーで置換する対症。保存を破り軸を 1 次化するため
     // 削除。軸ノードは通常 DOF として解き、u_r=0 は壁 no-slip と同じ三点セット (状態ピン+残差 0+Jacobian 行) で課す

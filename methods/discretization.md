@@ -544,6 +544,16 @@ Ux=+51.7(流入, 旧 -798 逆流)、Uy≈0 — **SU2 (P=3.99,Ux=+54.8,Uy=0) と�
   状態値 $\phi_p$ を境界面値として加算して閉じる (§6.2)。壁は $u_p=0$ が Dirichlet ピン済みのため、これは事実上
   「壁面値 0 の GG 境界寄与」と同値になり、壁せん断は内部双対面が担う (theory §6.3)。
 
+**(D) 入口∩壁コーナーの半割面所有 (`mesh.nodeInletCornerWall: 1`, 変換時, 2026-09-04)**:
+マルチマーカ方式では入口∩壁の角ノード CV は入口側半割面 (入口速度で質量流入) と壁側半割面を両方持つが、
+壁ノードは `nodeWallDirichlet` で $\mathbf u=0$ に固定されるため、入ってきた質量を内部双対面から流し出せず
+角 CV に質量が溜まり $P$ が数十 bar に暴走する (case/47 Burrows–Kurkov: 1 次風上では延命、2 次で NaN。入口 BL
+プロファイル + Crocco–Busemann ρ でも解消しない)。対策として **`inlet_*` 境界エッジの壁ノード側半割面を壁 bcond
+に帰属**させる (`gmshReader::buildMedianDual`, `inletCornerWall`)。角 CV の境界は壁半割面 (pressure-only, 流入なし) だけに
+なり $\mathbf u=0$ ピンと整合する。閉性は変わらない (半割面ベクトルは壁側に合算)。落とす流入質量は第 1 スペーシングの
+半分 × 壁近傍速度で、BL プロファイル併用なら無視できる。既定 0 (従来のマルチマーカ・ビット不変)。出口∩壁は流入が
+無いので対象外 (`inlet_` プレフィクスのみ)。軸∩入口 (§7.0) は壁でないので不変。
+
 **(C) viscous は explicit (cfl≤0.1)**: 近壁の極小双対 CV (vol~1.8e-9) に対する粘性が **block-DPLUR の近似対角では
 十分 implicit 化されず** (cfl 2→0.1 で発散 step13→610=構造的)、陰解法は viscous node で発散する。一方 **explicit
 (timeIntegration=3 RK3) は `setDT` の粘性スペクトル半径 `2(visc+vt)/(ro·dx_min)` で局所 dt が近壁で縮むため安定**。
