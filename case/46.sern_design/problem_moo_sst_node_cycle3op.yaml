@@ -96,7 +96,8 @@ mesh:
   nj_wake: 9
   vehicle_clearance: 0.02
   first_top_frac: 0.02
-  vehicle_taper: 2.0      # 後縁手前 2H で機体厚を 0 に絞り TE 共有 (鉛直 base は node で発散: run_0034)
+  vehicle_taper: 0.35     # 機体後端テーパ長 = L_ramp の 35 %。係数は smoothstep (C¹) — 線形 clip はテーパ開始点で
+                          # 上面が水平から不連続に折れ、M∞10 のスリップ壁上の凸角として ω 発散した (run_0071 inf_00/01)
   ramp_fillet: 0.1        # ランプ膨張角部 (x=0) の丸め半径 /H。鋭角だと SST が θ_r0 ≳ 18° で roOmega 発散 (run_0055-0057)。
                           # 曲率ジャンプ 1010 → 12.5、壁の持ち上げは最大 0.0019 H。NASA TM X-71972 も小半径で接続している
 evaluate:

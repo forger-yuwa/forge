@@ -56,9 +56,12 @@ class SernMeshParams:
     ramp_fillet: float = 0.0             # ランプ膨張角部 (x=0) の丸め半径 / H。0 = 鋭角 (従来)。
                                          # 鋭角だと SST が θ_r0 ≳ 18° で `roOmega` 発散する (case/46 run_0055-0057)。
                                          # NASA TM X-71972 も "linear segments joined by small radii" と記す
-    vehicle_taper: float = 0.0           # >0: 機体を後縁手前この長さ (/H) で厚さ 0 に絞り TE を共有 (base 無し)。
-                                         # 0: 鉛直 base + wake ブロック。node では base の 90° 二重 slip 角で step 5 発散
-                                         # (run_0034) したのでテーパ (カウルと同じ構造) を使う
+    vehicle_taper: float = 0.0           # >0: 機体後端のテーパ長。**L_ramp に対する比**で与える (0.2 = 後縁手前 20 %)。
+                                         # 絶対長 (H) にしていた 2026-09-05 版は短ランプ設計で破綻した: L_ramp 4.29 に対し
+                                         # taper 2.0 H が 47 % を占め、θ_e>0 でランプが後縁まで上がるため機体厚が
+                                         # 入口から clearance と同オーダーに潰れ、first_top_frac と同じ大きさのセルが並んで
+                                         # ω が発散した (run_0071 inf_00/inf_01 の m10_on)。
+                                         # 0: 鉛直 base + wake ブロック。node では base の 90° 二重 slip 角で step 5 発散 (run_0034)
 
 
 def _cluster_stations(x0, x1, n, ends=(True, True), w=0.15, a=3.0):
@@ -244,12 +247,20 @@ def _add_ext_top(coords, quads, bedges, xs, yt, k, L_ramp, y_e, up, njt, prm, ex
     """ランプ側外部流ブロック (top バンド + wake ブロック) を既存ノード・セルの後ろに足す (plan §4.11)。
     k = ランプ後縁の station。yt = noz バンド上境界 (ランプ/プルーム上線)。"""
     ni = len(xs); njT, njW = int(prm.nj_ext_top), int(prm.nj_wake)
-    y_veh = float(yt[:k + 1].max()) + float(prm.vehicle_clearance)
+    # 機体上面はランプ最大 y の上に置く。クリアランスは絶対値 (H) だが、壁第一セル (first_top_frac) より
+    # 十分厚くないとテーパ区間で潰れるので下限を課す (run_0071 の発散対策)
+    clr = max(float(prm.vehicle_clearance), 3.0 * float(prm.first_top_frac))
+    y_veh = float(yt[:k + 1].max()) + clr
     ii = np.arange(ni)
     if prm.vehicle_taper > 0.0:
-        # 機体厚 t_v(x) = (y_veh − ランプ y) × 係数。係数は x ≤ L_ramp − taper で 1、TE で 0 (線形)。
-        # → 上面は x ≤ L_ramp − taper で水平 y_veh、以降ランプ形に沿って絞られ TE でランプと一致 (共有ノード)。
-        fac = np.clip((L_ramp - xs) / prm.vehicle_taper, 0.0, 1.0)
+        # 機体厚 t_v(x) = (y_veh − ランプ y) × 係数。taper は **L_ramp 比**で、短ランプでも全長を食い潰さない。
+        # 係数は **smoothstep** (C¹): 線形 clip だとテーパ開始点で上面の勾配が水平から不連続に折れ、
+        # そこが M∞10 のスリップ壁上の凸角になって ω が発散した (run_0071 inf_00/inf_01 の m10_on,
+        # 折れ角 −11.8°、テーパを短くすると −25.8° と悪化する)。smoothstep は両端で fac' = 0 なので
+        # 上面はテーパ開始点でも TE でも勾配が連続になる。
+        taper_len = float(prm.vehicle_taper) * L_ramp
+        _t = np.clip((L_ramp - xs) / taper_len, 0.0, 1.0)
+        fac = _t * _t * (3.0 - 2.0 * _t)
         y3_veh = yt + (y_veh - yt) * fac
         y3_veh[k] = y_e
         h_base = 0.0
