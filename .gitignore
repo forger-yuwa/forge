@@ -27,6 +27,11 @@ solver_density_cuda/build-verify/
 solver_density_cuda/build-warn/
 solver_density_cuda/build-warn-cxx/
 solver_density_cuda/build-dual/
+# 参照文献の PDF は追跡しない (2026-08-31 に履歴から purge 済み。README.md だけ追跡する)
+papers/**
+!papers/README.md
+*.pdf:Zone.Identifier
+
 # ローカル作業用 (エージェントメモリ / 一時 / 外部依存)
 .claude/*
 !.claude/skills/
