@@ -60,10 +60,31 @@ class SernCampaign:
 
     # -- 逆設計の成立判定 (粗い kernel で高速化) ----------------------------------
     def feasible(self, x) -> bool:
+        if self._near_failed(x):
+            return False
         try:
             self._design_probe(x); return True
         except Exception:
             return False
+
+    def _near_failed(self, x, rtol: float = 0.06) -> bool:
+        """**CFD で落ちた点の近傍**を提案対象から外す (2026-09-06)。
+
+        `_design_probe` は逆設計の成立しか見ないので、「逆設計は成立するが CFD が発散する」領域を
+        optimizer が何度でも提案してしまう。実際 run_0071 の iter 0 は 2 点とも同じ隅
+        (M_c 2.40 = 下限, θ_r0 21.9 ≈ 上限) を提案して両方 FAIL し、HV が 1 mm も動かなかった。
+        失敗点は `_XF` (PASS のみ) に入らないので Kriging にも伝わらない。
+        梯子 (標準 → 緩レシピ) の両方で落ちた点は「評価できない点」なので、正規化 dv 空間で
+        半径 `rtol` の球を除外する。"""
+        bad = [r["x"] for r in self.rows if r["status"] != "PASS"]
+        if not bad:
+            return False
+        lo, hi = self.bounds[:, 0], self.bounds[:, 1]
+        xn = (np.asarray(x, dtype=float) - lo) / (hi - lo)
+        for b in bad:
+            if np.linalg.norm(xn - (np.asarray(b, dtype=float) - lo) / (hi - lo)) < rtol:
+                return True
+        return False
 
     def _design_probe(self, x):
         raw = self.base_raw; geo = raw["geometry"]; st_in = raw["spec"]["inflow"]
