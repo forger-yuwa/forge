@@ -74,6 +74,9 @@ PYTHONPATH=. .venv-opt/bin/python -m forge_design.evaluate.runner_sern \
 | `run_0070_aws_smoke_m6on` | **AWS g5 (A10G, CUDA 13.2)** での動作確認。設計点 m6_on | C_T 0.9091 / 摩擦込み 0.9019 / C_M −8.259、STEADY。ローカル run_0063 と一致 (C_L のみ 2e-4 差) | active (ref) |
 | `run_0071_moo_cycle3op_wide` | **S6 MOO 本番 (AWS)**: L_cowl 上限 4.5 H の広い箱。3 作動点 × node SST × 丸め × 3 段起動 + 梯子、DOE 40 + infill 8×2 = 56 評価 | 実行中 (AWS `~/forge/case/46.sern_design/`) | active |
 | `run_0072_warm_*` / `run_0073_warm_*` | **作動点間 warm start の検証** (codex レビュー A′): m6_on の収束場を熱力学整合リマップ (ρ,u,P を入口比でスケール、目標 γ で roe 再構成、k~u², ω~u) → 適応段 500 step → mid → 本段。2 形状 (既定 dv / L_cowl 3.5) で m10_on を cold と warm 両方 | **cold と一致**: A C_T 0.92462 = 0.92462 (差 0.000 %)、摩擦込み 0.91749 = 0.91749、C_M 0.042 % 差。B C_T 0.95902 = 0.95902、C_M 0.020 % 差。**短縮 27–28 %** (148→109 s)。飛ばしたのは暖機+soft 4000 step、適応段 500 step 追加で正味 3500/12000 = 29 % — 計算どおり | active (ref) |
+| `run_0074_tapercheck_m10on` | テーパ smoothstep 化後の確認 (落ちた dv inf_01_1) | **FAIL** (mid 段 step 87)。NaN は (3.07, 2.25) = 機体上面テーパ区間 | 破棄予定 |
+| `run_0075_diverge_watch` | **発散の過程を捉える診断 run**: mid 段を **5 step 刻み**で出力 (元は 2000 刻みで NaN ダンプしか無く過程が見えなかった) | `CONVERGENCE_VERDICT.txt` = **DIVERGED (NaN/Inf)** (意図どおり)。順序を確定: **P 床 (1 Pa) 着地 → 負密度 (step 65, 2 ノード) → 圧力 1.5e7 Pa 暴走 → ω 発散**。膨張の中央値 0.235 p∞ は PM 予測 0.080 より緩く**物理的**、床に落ちるのは 18 % のノードのみ。h5 (step 0/65/70/75/80/85/90) と図 `diverge_taper_vacuum.png` / `vehicle_surface_pressure.png` | **active (ref・診断の正本)** |
+| `run_0076_relax_*` | `implicitRelax` / `pMin` の切り分け (5 通り) | relax 0.7 単独・relax 0.7 + cfl 2.0 とも **mid 段で FAIL** → **implicitRelax は無効**。pMin 50 Pa の 2 例は**私のログ出力バグ**で未測定 | 一部 active (ref) / pMin は再試行 |
 ### S4(b) NASA TM X-71972 傾向照合のまとめ (2026-09-04, run_0003–0007, 図 `nasa_trends.png`, 表 `nasa_trend_table.py`)
 
 - **内面 (ランプ + カウル内面) の力は forge Euler と MOC が全 5 形状で C_T +0.0006〜+0.0012、C_M 0.01〜0.05 以内で一致**。差の残りは
