@@ -304,6 +304,51 @@ def restart_by_index(res_h5, mesh_h5) -> None:
                 dst["VALUE"][k][:] = src["VALUE"][k][:]
 
 
+def warm_from_run(dst_run_dir, src_run_dir) -> dict:
+    """**別作動点**の収束場を同一メッシュの run へ移植する (plan §4.7 / §5.1-1c、codex レビューの A′)。
+
+    保存量の素コピー (`restart_by_index`) は**作動点間では使えない**: 同じ `roe` を別の γ で読むと
+    P = (γ−1)(roe − ½ρ|u|²) が (γ_dst−1)/(γ_src−1) 倍ずれる (m6_on→m10_on で 1.24 倍、→m4_off で 2.18 倍)。
+    そこで入口状態の比で相似スケールし、**目標作動点の γ で roe を組み直す**:
+
+        ρ' = ρ·sρ,  (ρu)' = (ρu)·sρ·su,  P' = P·sP,  roe' = P'/(γ_dst−1) + ½|ρu'|²/ρ'
+        (ρk)' = (ρk)·sρ·su²   (k ~ u²),   (ρω)' = (ρω)·sρ·su   (ω ~ u/L, L は同一メッシュで不変)
+
+    sρ, su, sP は入口 (燃焼器出口) 状態の比。NPR が違えば内部の波の当たり方は変わるので、
+    移植後に**短い適応段**を必ず入れる (run_staged の warm_adapt_steps)。戻り値 = 使ったスケール。
+    """
+    dst_run_dir, src_run_dir = Path(dst_run_dir), Path(src_run_dir)
+    si = json.loads((src_run_dir / "prepare_info.json").read_text())
+    di = json.loads((dst_run_dir / "prepare_info.json").read_text())
+    if si["mesh"]["cells"] != di["mesh"]["cells"] or si["design"]["L_ramp"] != di["design"]["L_ramp"]:
+        raise ValueError("warm_from_run: メッシュが同一でない (同一設計・同一 dv の run 間でのみ使う)")
+    se, de = si["states"]["exhaust"], di["states"]["exhaust"]
+    g_s = float(si["operating_point"]["gas"]["gamma"]); g_d = float(di["operating_point"]["gas"]["gamma"])
+    s_ro, s_u, s_P = de["ro"] / se["ro"], de["u"] / se["u"], de["P"] / se["P"]
+    res = sorted(src_run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
+    if not res:
+        raise RuntimeError(f"warm_from_run: {src_run_dir} に res_*.h5 が無い")
+    with h5py.File(res[-1], "r") as src, h5py.File(dst_run_dir / MESH, "r+") as dst:
+        n = len(dst["VALUE/ro"])
+        if len(src["VALUE/ro"]) != n:
+            raise ValueError("warm_from_run: VALUE 長が一致しない")
+        ro = src["VALUE/ro"][:].astype(np.float64)
+        mom = [src[f"VALUE/{k}"][:].astype(np.float64) for k in ("roUx", "roUy", "roUz")]
+        roe = src["VALUE/roe"][:].astype(np.float64)
+        P = (g_s - 1.0) * (roe - 0.5 * sum(m * m for m in mom) / np.maximum(ro, 1e-30))
+        ro_n = ro * s_ro
+        mom_n = [m * (s_ro * s_u) for m in mom]
+        roe_n = P * s_P / (g_d - 1.0) + 0.5 * sum(m * m for m in mom_n) / np.maximum(ro_n, 1e-30)
+        dst["VALUE/ro"][:] = ro_n
+        for k, m in zip(("roUx", "roUy", "roUz"), mom_n):
+            dst["VALUE"][k][:] = m
+        dst["VALUE/roe"][:] = roe_n
+        if "roK" in src["VALUE"] and "roK" in dst["VALUE"]:
+            dst["VALUE/roK"][:] = src["VALUE/roK"][:] * (s_ro * s_u * s_u)
+            dst["VALUE/roOmega"][:] = src["VALUE/roOmega"][:] * (s_ro * s_u)
+    return {"src": str(src_run_dir), "s_ro": s_ro, "s_u": s_u, "s_P": s_P, "gamma": [g_s, g_d]}
+
+
 def run_forge(run_dir) -> int:
     r = subprocess.run([str(FORGE_TOOLS / "run_case.sh"), str(Path(run_dir).resolve())], env=_ENV, capture_output=True, text=True)
     (Path(run_dir) / "run_case_stdout.log").write_text(r.stdout + r.stderr)
@@ -311,7 +356,8 @@ def run_forge(run_dir) -> int:
 
 
 def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: float = 0.5, soft_conv: int = 0,
-               warm_lam_steps: int = 0, warm_lam_cfl: float = 0.2, mid_steps: int = 0) -> int:
+               warm_lam_steps: int = 0, warm_lam_cfl: float = 0.2, mid_steps: int = 0,
+               warm_src=None, warm_adapt_steps: int = 500) -> int:
     """soft_cfl / soft_conv: soft 段の CFL と convMethod (既定 0.5 / 1 次)。3D SST の後縁 3 重点など、1 次でも
     立ち上がりが厳しいケースで下げる。
 
@@ -321,7 +367,11 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
     暖機で平均場を作ってから乱流方程式を入れると 3 作動点とも通り、力係数は暖機なしの成功例と一致する (case/46 run_0048)。
 
     mid_steps > 0: soft と本段の間に **2 次 + soft CFL** の段を入れる。次数と CFL を同時に上げるとランプ膨張角部で
-    `roOmega` が発散する (case/46 run_0054 doe_000, θ_r0 18.3°)。`procedures/solver-settings.md` の段階戦略に沿う。"""
+    `roOmega` が発散する (case/46 run_0054 doe_000, θ_r0 18.3°)。`procedures/solver-settings.md` の段階戦略に沿う。
+
+    warm_src: **別作動点の収束 run ディレクトリ**。与えると層流暖機と soft を飛ばし、`warm_from_run` で
+    熱力学整合リマップ → **適応段** (1 次, soft CFL, warm_adapt_steps) → mid → 本段 とする。
+    NPR が大きく違う作動点間 (m6_on 35.4 ↔ m4_off 2.8) では使わないこと (§5.1-1c)。"""
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig_main.yaml").read_text() if (run_dir / "solverConfig_main.yaml").exists() \
         else (run_dir / "solverConfig.yaml").read_text()
@@ -334,6 +384,22 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
         return run_forge(run_dir)
     if stages == "none":
         return run_forge(run_dir)
+    if warm_src is not None:      # 別作動点からの warm start: 暖機と soft を飛ばし、適応段だけ入れる
+        info_warm = warm_from_run(run_dir, warm_src)
+        (run_dir / "WARM_START.json").write_text(json.dumps(info_warm, indent=1))
+        ad = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {soft_cfl}, cfl_pseudo: {soft_cfl}", cfg_main)
+        ad = ad.replace("convMethod: 1", f"convMethod: {soft_conv}")
+        ad = re.sub(r"nStepOuter: \d+", f"nStepOuter: {warm_adapt_steps}", ad)
+        ad = re.sub(r"outStepInterval: \d+", f"outStepInterval: {warm_adapt_steps}", ad)
+        (run_dir / "solverConfig.yaml").write_text(ad)
+        rc = run_forge(run_dir)
+        res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
+        if rc != 0 or not res:
+            raise RuntimeError("warm start の適応段が失敗 (res_nan_*.h5 / forge_run.log を見る)")
+        restart_by_index(res[-1], run_dir / MESH)
+        for f in run_dir.glob("res_*"):
+            f.unlink()
+        warm_lam_steps = 0      # 以降は mid → 本段
     if warm_lam_steps > 0 and 'model: "sst"' in cfg_main:      # 層流暖機段 (SST を後から入れる)
         lam = re.sub(r'turbulence: \{model: "sst"[^}]*\}', 'turbulence: {model: "none"}', cfg_main)
         if 'model: "none"' not in lam:
@@ -350,6 +416,8 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
         restart_by_index(res[-1], run_dir / MESH)
         for f in run_dir.glob("res_*"):
             f.unlink()
+    if warm_src is not None:      # soft は適応段で代替済み → mid へ
+        return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps)
     soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {soft_cfl}, cfl_pseudo: {soft_cfl}", cfg_main)
     soft = soft.replace("convMethod: 1", f"convMethod: {soft_conv}")
     soft = re.sub(r"nStepOuter: \d+", f"nStepOuter: {soft_steps}", soft)
@@ -362,6 +430,11 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
     restart_by_index(res[-1], run_dir / MESH)
     for f in run_dir.glob("res_*"):
         f.unlink()
+    return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps)
+
+
+def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int) -> int:
+    """mid 段 (2 次 + soft CFL) → 本段。soft/暖機/warm start の後段として共用する。"""
     if mid_steps > 0:      # mid 段: 2 次に上げるが CFL は soft のまま (次数と CFL を同時に上げない)
         mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {soft_cfl}, cfl_pseudo: {soft_cfl}", cfg_main)
         mid = re.sub(r"nStepOuter: \d+", f"nStepOuter: {mid_steps}", mid)

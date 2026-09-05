@@ -31,6 +31,8 @@ spec:
     gas: {gamma: 1.1828, cp: 2202.1}
   - name: m10_on           # 最大飛行 M (φ=1.5 rich)。NPR 56.4 = 不足膨張側
     weight: 0.3
+    warm_from: m6_on       # NPR 35.4 → 56.4 で近いので m6_on の収束場から立ち上げる (熱力学整合リマップ + 適応段)。
+                           # m4_off (NPR 2.8, 空気 γ1.40) は遠すぎるので cold start のまま — plan §5.1-1c
     external: {M_inf: 10.0, p_inf: 1026.0, T_inf: 227.5}
     inflow: {M_in: 2.7486, p_in: 57935.0, T_in: 2222.0}
     gas: {gamma: 1.2263, cp: 2118.8}
@@ -109,5 +111,6 @@ opt:
   warm_lam_steps: 2000     # soft 段の前に層流暖機 (turbulence none)。カウル後縁のせん断層で SST が発散するのを防ぐ
   warm_lam_cfl: 0.2        # (板厚では m4_off と m10_on で要求が逆転して解けなかった。run_0046-0048)
   mid_steps: 2000          # soft と本段の間に 2 次 + soft CFL の段 (次数と CFL を同時に上げない)
+  warm_adapt_steps: 500    # warm start 後の適応段 (1 次, soft CFL)。BC の違いを馴染ませる
   cm_min: -7.0             # 重み付き C_M (x_ref −20H) の下限。設計点 MOC C_M の dv 箱分布 (sweep_moc_dv_cycle3op.log: p10 −10.7 / med −6.9 /
                            # p90 −2.5) と重み付き比 ≈0.7 (m10_on/m4_off で緩む) から、最悪 ~15 % を落とす値。旧 −2.5 は L 3.8H 前提で候補が全滅する

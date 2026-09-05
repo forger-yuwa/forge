@@ -86,12 +86,20 @@ class SernCampaign:
         """1 作動点を標準レシピで回し、落ちたら緩レシピ (step 倍・cfl 半分) で 1 回だけ再試行する (plan §4.13)。
         戻り値 (run_dir, rc, metrics, degraded)。degraded = rc != 0 でも力係数が使えた場合に True。"""
         oc = self.optcfg
+        # YAML の operating_points[].warm_from で「どの作動点の収束場から立ち上げるか」を指定する
+        # (同一メッシュ・熱力学整合リマップ。NPR が遠い作動点には付けない — plan §5.1-1c)
+        wf = next((o.get("warm_from") for o in self.ops if o["name"] == op), None)
+        warm_src = self.dir / f"{tag}_{wf}" if wf else None
+        if warm_src is not None and not (warm_src / "prepare_info.json").exists():
+            print(f"   [{tag}/{op}] warm_from={wf} の run が無いので cold start", flush=True)
+            warm_src = None
         ladder = [(dict(soft_steps=int(oc.get("soft_steps", 1500)), soft_cfl=float(oc.get("soft_cfl", 0.5)),
                         warm_lam_steps=int(oc.get("warm_lam_steps", 0)), warm_lam_cfl=float(oc.get("warm_lam_cfl", 0.2)),
-                        mid_steps=int(oc.get("mid_steps", 0))), ""),
+                        mid_steps=int(oc.get("mid_steps", 0)), warm_src=warm_src,
+                        warm_adapt_steps=int(oc.get("warm_adapt_steps", 500))), ""),
                    (dict(soft_steps=2 * int(oc.get("soft_steps", 1500)), soft_cfl=0.5 * float(oc.get("soft_cfl", 0.5)),
                          warm_lam_steps=2 * int(oc.get("warm_lam_steps", 0)), warm_lam_cfl=0.5 * float(oc.get("warm_lam_cfl", 0.2)),
-                         mid_steps=2 * int(oc.get("mid_steps", 0))), "_retry")]
+                         mid_steps=2 * int(oc.get("mid_steps", 0)), warm_src=None), "_retry")]   # 再試行は cold start に落とす
         last = None
         for kw, suffix in ladder:
             rd = self.dir / f"{tag}_{op}{suffix}"
