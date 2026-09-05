@@ -142,4 +142,8 @@
 - 📁 取得済 ([`papers/nozzle_design/`](../../papers/nozzle_design/)、git 未追跡): `Small Weidner Johnston 1974 ... (NASA TM X-71972).pdf`; `Cain 2010 Scramjet Nozzles (RTO-EN-AVT-185 Lecture 12).pdf`。
 - 📁 リポジトリ既存: Ogawa & Boyce 2012 (`papers/nozzle_design/`)。
 - 要旨のみ: Mo 2014 *JPP*; Lv 2017 *AST* 66/71; Yu 2019 *AST* 92; Yu 2020 *Acta Astro.* 166 / *AST* 105; Yu 2021 *JAE*; Lv & Xu 2021 *JSR*; Li 2021 *AST* 113; Tong 2025 *AST*; Lv 2023 *PAS* 143 (総説); Kunze–Smart–Gollan 2021 *JPP*; Zhang–Song–Zhou 2026 *Aeronaut. J.*; Pei 2025 *Acta Aeronaut. Astronaut. Sinica* 46(8); Yu 2023 *Aerospace* / 2024 *Aeronaut. J.*; Lv 2019 *AST* (実験・TBCC); Gruhn 2000 *AST*; Huang 2013 *Acta Astro.*; IOP *MSE* 912 (2020)。
-- 未読: Tang 2016 *J. Propulsion Technology* 37 (中国語); Vahl & Weidner NASA TM-81841 (1980); Evvard & Maslen NACA TN-2688 (1952); Guderley & Hantsch 1955; Rao 1958。
+- 📁 **取得済 (2026-09-05 追加、平面版 Rao の一次資料)**: `Shyne 1988 ... (NASA TM-100955).pdf` (88 p) と
+  `Shyne Keith 1990 ... (NASA TM-103175, AIAA-90-2222).pdf` — **Rao 法の 2 次元修正 + カウル切り詰め (scarf) + 外部流**。
+  §5 の「最大推力理論の 2D 版の具体式は本文未確認 → 自前導出」は**解消**。乗数条件は TM-103175 の式 11–15。
+  Shyne はカウル切り詰め位置に最適値があると結論している。
+- 未読: Tang 2016 *J. Propulsion Technology* 37 (中国語); Vahl & Weidner NASA TM-81841 (1980); Evvard & Maslen NACA TN-2688 (1952); Guderley & Hantsch 1955; Rao 1958 (有償 `10.2514/8.7324`。上記 2 件が引用元として使えるので優先度は下がった); Nickerson 1982 SEA Report 6/82/800.1。
