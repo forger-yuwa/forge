@@ -73,6 +73,7 @@ PYTHONPATH=. .venv-opt/bin/python -m forge_design.evaluate.runner_sern \
 | `run_0069_moo_cycle3op` | MOO 第 3 回 (丸め + 梯子, L_cowl 上限 2.5)。**22 評価 / PASS 14 で打ち切り** | 失敗は L_cowl ≲ 0.7 に集中。最良 doe_004 C_T_w 0.9434 @ Lc 2.30。**C_T が L_cowl 上限に張り付いていたため箱を広げて再投入** (plan §8-8) | 破棄予定 |
 | `run_0070_aws_smoke_m6on` | **AWS g5 (A10G, CUDA 13.2)** での動作確認。設計点 m6_on | C_T 0.9091 / 摩擦込み 0.9019 / C_M −8.259、STEADY。ローカル run_0063 と一致 (C_L のみ 2e-4 差) | active (ref) |
 | `run_0071_moo_cycle3op_wide` | **S6 MOO 本番 (AWS)**: L_cowl 上限 4.5 H の広い箱。3 作動点 × node SST × 丸め × 3 段起動 + 梯子、DOE 40 + infill 8×2 = 56 評価 | 実行中 (AWS `~/forge/case/46.sern_design/`) | active |
+| `run_0072_warm_*` / `run_0073_warm_*` | **作動点間 warm start の検証** (codex レビュー A′): m6_on の収束場を熱力学整合リマップ (ρ,u,P を入口比でスケール、目標 γ で roe 再構成、k~u², ω~u) → 適応段 500 step → mid → 本段。2 形状 (既定 dv / L_cowl 3.5) で m10_on を cold と warm 両方 | **cold と一致**: A C_T 0.92462 = 0.92462 (差 0.000 %)、摩擦込み 0.91749 = 0.91749、C_M 0.042 % 差。B C_T 0.95902 = 0.95902、C_M 0.020 % 差。**短縮 27–28 %** (148→109 s)。飛ばしたのは暖機+soft 4000 step、適応段 500 step 追加で正味 3500/12000 = 29 % — 計算どおり | active (ref) |
 ### S4(b) NASA TM X-71972 傾向照合のまとめ (2026-09-04, run_0003–0007, 図 `nasa_trends.png`, 表 `nasa_trend_table.py`)
 
 - **内面 (ランプ + カウル内面) の力は forge Euler と MOC が全 5 形状で C_T +0.0006〜+0.0012、C_M 0.01〜0.05 以内で一致**。差の残りは
