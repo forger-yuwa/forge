@@ -122,15 +122,26 @@ def design_from_problem(p: Problem, design: dict | None = None):
 
 
 def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: float) -> str:
+    """`evaluate.implicit_relax` / `evaluate.p_min` を deltaT / space に挿入できる (2026-09-06)。
+
+    SERN は元から `blockDPLUR: 1` (陰解法) だが `implicitRelax` を設定しておらず既定 1.0 だった。
+    風洞チェーンは同じ陰解法に対し「cfl 6 + implicitRelax 0.7 が生産推奨」(case/45 run_0018) と配管済みで、
+    メモリ [[implicit-cfl-ceiling-eos-floor]] も「NS 陰解法の上限は P 床洗浄律速、効くのは implicitRelax のみ」
+    と記録している。run_0075 の発散 (M∞10 の boat-tail 膨張で 18 % のノードが pMin=1 Pa に着地 → 負密度) は
+    まさにこの指紋なので、relax を効かせる。"""
+    ir = p.evaluate.get("implicit_relax")
+    _relax = f", implicitRelax: {float(ir)}" if ir is not None else ""
+    pm = p.evaluate.get("p_min")
+    _pmin = f", pMin: {float(pm)}" if pm is not None else ""   # physProp 配下 (space ではない)
     disc = p.mesh.get("discretization", "cell")
     model = p.evaluate.get("model", "euler")
     node_keys = ", nodeWallDirichlet: 1" if (disc == "node" and model != "euler") else ""
     if model == "euler":
-        phys = f"physProp: {{isCompressible: 1, thermalMethod: 0, viscMethod: 0, ro: 1.2, visc: 0.0, thermCond: 0.0, cp: {p.cp}, gamma: {p.gamma}}}"
+        phys = f"physProp: {{isCompressible: 1, thermalMethod: 0, viscMethod: 0, ro: 1.2, visc: 0.0, thermCond: 0.0, cp: {p.cp}, gamma: {p.gamma}{_pmin}}}"
         turb = 'turbulence: {model: "none"}'
     else:
         phys = (f"physProp: {{isCompressible: 1, thermalMethod: 0, viscMethod: 1, ro: 1.2, visc: 1.8e-5, thermCond: 0.0257, "
-                f"thermCondMethod: 1, prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}}}")
+                f"thermCondMethod: 1, prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}{_pmin}}}")
         turb = 'turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 1}'
     return f"""mesh: {{meshFormat: "hdf5", discretization: "{disc}", isAxisymmetric: 0{node_keys}, meshFileName: "{MESH}", valueFileName: "{MESH}"}}
 gpu: 1
@@ -141,7 +152,7 @@ time:
   dualTime: 0
   last: {{control: 0, nStepOuter: {nsteps}}}
   deltaT: {{control: 1, dt: 1e-8, cfl: {cfl}, cfl_pseudo: {cfl},
-           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}}
+           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1{_relax}, lowMachPrecond: 0, detectNaN: 1}}
   outStepStart: 0
   outStepInterval: {out_int}
   timeIntegration: 11
