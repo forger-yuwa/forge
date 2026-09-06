@@ -75,7 +75,7 @@ def parse_conne(conne, ncells):
         np.array(vtk_types, dtype=np.uint8)
 
 
-def write_vtu(path, points, conn, offsets, types, cell_data):
+def write_vtu(path, points, conn, offsets, types, cell_data, point_data=None):
     n_pts = len(points)
     n_cells = len(offsets)
     out = []
@@ -117,6 +117,17 @@ def write_vtu(path, points, conn, offsets, types, cell_data):
             out.append("        </DataArray>")
         out.append("      </CellData>")
 
+    # point data (node 離散化の節点値)
+    if point_data:
+        names = ",".join(point_data.keys())
+        out.append(f'      <PointData Scalars="{names}">')
+        for name, arr in point_data.items():
+            out.append(f'        <DataArray type="Float32" Name="{name}" '
+                       f'format="ascii">')
+            out.append(_fmt(arr, 6))
+            out.append("        </DataArray>")
+        out.append("      </PointData>")
+
     out.append("    </Piece>")
     out.append("  </UnstructuredGrid>")
     out.append("</VTKFile>")
@@ -145,16 +156,19 @@ def main():
         coord = np.array(f["MESH/COORD"], dtype=np.float64).reshape(-1, 3)
         conne = np.array(f["MESH/CONNE"])
         # nCells: 属性が無い res_*.h5 もあるので VALUE 配列長 → 属性 → CONNE の順で決める
+        # node 離散化では VALUE 長 = **節点数** でセル数と違うので、VALUE 長を無条件に
+        # nCells とみなしてはいけない (2026-09-06 修正: case/46 の node run が
+        # 「CONNE が NumberOfElements より短い」で弾かれていた)。CONNE の走査を第一の根拠にする。
         ncells = None
         if "MESH" in f and "nCells" in f["MESH"].attrs:
             ncells = int(np.array(f["MESH"].attrs["nCells"]).ravel()[0])
-        elif "VALUE" in f and "ro" in f["VALUE"]:
-            ncells = int(f["VALUE/ro"].shape[0])
         if ncells is None:
             ncells = _count_cells(conne)
+        nnodes = coord.shape[0]
         conn, offsets, types = parse_conne(conne, ncells)
 
-        cell_data = {}
+        # VALUE 長で cell データか point データかを振り分ける
+        cell_data, point_data = {}, {}
         if "VALUE" in f:
             names = args.fields if args.fields else list(f["VALUE"].keys())
             for name in names:
@@ -164,11 +178,12 @@ def main():
                 arr = np.array(f["VALUE/" + name], dtype=np.float32)
                 if arr.size == ncells:
                     cell_data[name] = arr
+                elif arr.size == nnodes:      # node 離散化の節点値
+                    point_data[name] = arr
 
-    write_vtu(out, coord, conn, offsets, types, cell_data)
-    nfin = sum(np.isfinite(v).all() for v in cell_data.values())
+    write_vtu(out, coord, conn, offsets, types, cell_data, point_data)
     print(f"-> {out}  (points={len(coord)}, cells={ncells}, "
-          f"fields={len(cell_data)})")
+          f"cell fields={len(cell_data)}, point fields={len(point_data)})")
 
 
 if __name__ == "__main__":
