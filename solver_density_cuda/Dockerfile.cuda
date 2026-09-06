@@ -40,11 +40,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # --- レイヤ 2: ソルバが必要とする外部ライブラリ ---
-# libboost-dev はヘッダのみ利用 (mesh/gmshReader.hpp の boost::split)。
-# 以前の Dockerfile には書かれておらず、ParaView / matplotlib が引きずり込む
-# 依存にたまたま乗っていただけだった。GUI を外すと即座にビルドが落ちるので明示する。
+# forge の外部依存はこれで全部。boost は不要 (2026-09-06 に除去。
+# `boost::split` は common/stringUtil.hpp の splitOnSpace、`boost::scoped_array` は
+# std::unique_ptr に置換した)。ビルド対象外の solvePoisson_amgcl.* だけが boost を残しており、
+# それを CMake に組み込むときは libboost-dev と amgcl をここに足すこと。
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      libhdf5-dev libyaml-cpp-dev libmetis-dev libboost-dev \
+      libhdf5-dev libyaml-cpp-dev libmetis-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # Ubuntu の HDF5 (serial) の典型パス (tools/build.sh が CMake へ渡す)

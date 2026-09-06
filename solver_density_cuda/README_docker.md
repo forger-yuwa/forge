@@ -15,7 +15,7 @@ This directory is set up to use Docker as a disposable development environment f
 
 | stage | tag | 内容 | 用途 |
 | --- | --- | --- | --- |
-| `base` | `forge-solver:cuda-base` | コンパイラ + HDF5 / yaml-cpp / METIS / boost(headers) + ccache | `forge` のビルドと計算実行。これだけで足りる |
+| `base` | `forge-solver:cuda-base` | コンパイラ + HDF5 / yaml-cpp / METIS + ccache | `forge` のビルドと計算実行。これだけで足りる |
 | `cloud` | `forge-solver:cuda-cloud` | base + Python (numpy/h5py/matplotlib) + gmsh (ヘッドレス) | メッシュ生成・後処理込み。AWS など GPU インスタンス向け |
 | `dev` | `forge-solver:cuda-dev` | cloud + ParaView / GUI 依存 / gdb | ローカル開発 (WSLg で GUI を出す) |
 
@@ -412,11 +412,13 @@ Recommended interpretation:
 
 These are passed to CMake because the current project still expects explicit HDF5 paths.
 
-- `libboost-dev` は `base` ステージで明示的に入れている。`mesh/gmshReader.hpp` が
-  `boost::split` / `boost::is_space` を使うためで、無いとビルドが通らない。
-  以前の Dockerfile には書かれておらず、ParaView (dev) と python3-matplotlib (cloud) が
-  引きずり込む依存にたまたま乗っていただけだった。GUI を外した瞬間に落ちる状態だったので明示した。
-  ヘッダのみ利用でリンクはしない。
+- **boost は不要** (2026-09-06 に除去)。以前は `mesh/gmshReader.hpp` が `boost::split` を、
+  probe と壁距離が `boost::scoped_array` を使っていたにもかかわらず、`libboost-dev` は
+  どちらの Dockerfile にも書かれておらず、**ParaView (dev) と python3-matplotlib (cloud) が
+  引きずり込む依存にたまたま乗っていただけ**だった (GUI を外した瞬間にビルドが落ちる状態)。
+  現在は `common/stringUtil.hpp` の `splitOnSpace` と `std::unique_ptr` に置換済み。
+  ビルド対象外の `solvePoisson_amgcl.*` だけが boost を残しており、これを CMake に
+  組み込むときは `libboost-dev` と amgcl を `base` ステージに足すこと。
 
 ## Known gaps
 
