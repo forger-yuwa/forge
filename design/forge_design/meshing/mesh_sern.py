@@ -56,6 +56,7 @@ class SernMeshParams:
     ramp_fillet: float = 0.0             # ランプ膨張角部 (x=0) の丸め半径 / H。0 = 鋭角 (従来)。
                                          # 鋭角だと SST が θ_r0 ≳ 18° で `roOmega` 発散する (case/46 run_0055-0057)。
                                          # NASA TM X-71972 も "linear segments joined by small radii" と記す
+    vehicle_wedge_deg: float = 3.0       # 機体後縁のくさび半角 [deg] (0 = カスプ)。§4.11
     vehicle_taper: float = 0.0           # >0: 機体後端のテーパ長。**L_ramp に対する比**で与える (0.2 = 後縁手前 20 %)。
                                          # 絶対長 (H) にしていた 2026-09-05 版は短ランプ設計で破綻した: L_ramp 4.29 に対し
                                          # taper 2.0 H が 47 % を占め、θ_e>0 でランプが後縁まで上がるため機体厚が
@@ -253,15 +254,24 @@ def _add_ext_top(coords, quads, bedges, xs, yt, k, L_ramp, y_e, up, njt, prm, ex
     y_veh = float(yt[:k + 1].max()) + clr
     ii = np.arange(ni)
     if prm.vehicle_taper > 0.0:
-        # 機体厚 t_v(x) = (y_veh − ランプ y) × 係数。taper は **L_ramp 比**で、短ランプでも全長を食い潰さない。
-        # 係数は **smoothstep** (C¹): 線形 clip だとテーパ開始点で上面の勾配が水平から不連続に折れ、
-        # そこが M∞10 のスリップ壁上の凸角になって ω が発散した (run_0071 inf_00/inf_01 の m10_on,
-        # 折れ角 −11.8°、テーパを短くすると −25.8° と悪化する)。smoothstep は両端で fac' = 0 なので
-        # 上面はテーパ開始点でも TE でも勾配が連続になる。
+        # 機体上面はランプを参照せず、テーパ開始点 → ランプ後縁を **3 次エルミートで直接**引く (plan §4.11)。
+        # 旧式 t_v(x) = (y_veh − ランプ y) × smoothstep は **ランプ曲率を上面に転写**し、θ_r0 22° で
+        # 曲率 1.02・勾配 −11.0°…+12.1° の凸角を作って m10_on を発散させていた。
+        # 端点勾配は x0 で 0、TE で min(tanθ_e, 0) − tan(wedge)。**TE を θ_e に寝かせる**のが要で、
+        # 水平に着地させると θ_e<0 の設計 (ランプが途中にピークを持つ) で上面がランプに
+        # **食い込む** (設計点で最大 0.0222 H)。くさび角は厚み 0 のカスプを避けるため
+        # (厚み < 0.002 H の区間が 0.523 H → 0.039 H に縮む。カスプはメッシュが切れない)。
         taper_len = float(prm.vehicle_taper) * L_ramp
-        _t = np.clip((L_ramp - xs) / taper_len, 0.0, 1.0)
-        fac = _t * _t * (3.0 - 2.0 * _t)
-        y3_veh = yt + (y_veh - yt) * fac
+        x0 = L_ramp - taper_len
+        m_e = (yt[k] - yt[k - 1]) / max(xs[k] - xs[k - 1], 1e-12)
+        m1 = min(m_e, 0.0) - np.tan(np.radians(float(prm.vehicle_wedge_deg)))
+        _s = np.clip((xs - x0) / taper_len, 0.0, 1.0)
+        y3_veh = ((2.0 * _s ** 3 - 3.0 * _s ** 2 + 1.0) * y_veh + (-2.0 * _s ** 3 + 3.0 * _s ** 2) * y_e
+                  + (_s ** 3 - _s ** 2) * taper_len * m1)
+        y3_veh = np.where(xs < x0, y_veh, y3_veh)
+        # 保険: 上面は必ずランプより上。最小厚 = 後縁から張ったくさびの厚み (TE で 0 なので端点条件と衝突しない)
+        y3_veh = np.maximum(y3_veh, yt + np.clip(np.tan(np.radians(float(prm.vehicle_wedge_deg)))
+                                                 * (L_ramp - xs), 0.0, clr))
         y3_veh[k] = y_e
         h_base = 0.0
     else:
@@ -325,7 +335,7 @@ def _add_ext_top(coords, quads, bedges, xs, yt, k, L_ramp, y_e, up, njt, prm, ex
         for j in range(njW - 1):
             bedges["outlet"].append((wake(ni - 1, j), wake(ni - 1, j + 1)))
     ext.update({"nj_ext_top": njT, "nj_wake": njW if has_wake else 0, "y_veh": y_veh, "h_base": h_base,
-                "has_wake": has_wake, "i_ramp_te": int(k), "vehicle_taper": float(prm.vehicle_taper)})
+                "has_wake": has_wake, "i_ramp_te": int(k), "vehicle_taper": float(prm.vehicle_taper), "vehicle_wedge_deg": float(prm.vehicle_wedge_deg)})
     return coords, quads
 
 

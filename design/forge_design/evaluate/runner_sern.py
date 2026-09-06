@@ -258,7 +258,8 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
                         ext_top=bool(int(m.get("ext_top", 0))), top_depth=float(m.get("top_depth", 2.0)),
                         nj_ext_top=int(m.get("nj_ext_top", 41)), nj_wake=int(m.get("nj_wake", 9)),
                         vehicle_clearance=float(m.get("vehicle_clearance", 0.02)), first_top_frac=float(m.get("first_top_frac", 0.02)),
-                        vehicle_taper=float(m.get("vehicle_taper", 0.0)), ramp_fillet=float(m.get("ramp_fillet", 0.0)),
+                        vehicle_taper=float(m.get("vehicle_taper", 0.0)),
+                        vehicle_wedge_deg=float(m.get("vehicle_wedge_deg", 3.0)), ramp_fillet=float(m.get("ramp_fillet", 0.0)),
                         scale=H)
     if wall_offset:
         design = apply_wall_offset(design, wall_offset, H)
@@ -510,7 +511,14 @@ def main(argv=None):
     print(json.dumps({k: info[k] for k in ("design", "moc_forces", "mesh")}, indent=1))
     if a.prepare_only:
         return 0
-    rc = run_staged(a.run_dir, a.stages)
+    # 段階起動のパラメータは problem の `opt:` に置いてある (driver_sern と同じ正本)。
+    # ここで読まないと既定 (層流暖機なし・soft CFL 0.5) で回り、生産と別物になる (run_0078 で 1 本無駄にした)。
+    o = (load_problem(a.problem).raw.get("opt") or {})
+    rc = run_staged(a.run_dir, a.stages,
+                    soft_steps=int(o.get("soft_steps", 3000)), soft_cfl=float(o.get("soft_cfl", 0.5)),
+                    warm_lam_steps=int(o.get("warm_lam_steps", 0)), warm_lam_cfl=float(o.get("warm_lam_cfl", 0.2)),
+                    mid_steps=int(o.get("mid_steps", 0)),
+                    warm_adapt_steps=int(o.get("warm_adapt_steps", 500)))
     out = collect(a.problem, a.run_dir)
     print(json.dumps({k: v for k, v in out.items() if k != "history"}, indent=1))
     return rc

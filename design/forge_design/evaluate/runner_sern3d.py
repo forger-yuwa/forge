@@ -123,9 +123,9 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
 
 
 def run_staged(run_dir, stages="full", soft_steps=2000, soft_cfl=0.5, soft_conv=0,
-               warm_lam_steps=0, warm_lam_cfl=0.2):
+               warm_lam_steps=0, warm_lam_cfl=0.2, mid_steps=0):
     return R2.run_staged(run_dir, stages, soft_steps, soft_cfl=soft_cfl, soft_conv=soft_conv,
-                         warm_lam_steps=warm_lam_steps, warm_lam_cfl=warm_lam_cfl)
+                         warm_lam_steps=warm_lam_steps, warm_lam_cfl=warm_lam_cfl, mid_steps=mid_steps)
 
 
 def warm_from_same_mesh(run_dir, res_h5, keep_turb: bool = True) -> None:
@@ -234,7 +234,13 @@ def main(argv=None):
     info = prepare(a.problem, a.run_dir, a.steps, op=a.op); print(json.dumps({k: info[k] for k in ("design", "mesh", "moc_forces")}, indent=1))
     if a.prepare_only:
         return 0
-    rc = run_staged(a.run_dir, a.stages, a.soft_steps); out = collect(a.problem, a.run_dir)
+    # 2D と同じく段階起動は problem の `opt:` を正本にする (§4.12 のレシピを 3D にそのまま移植するため)
+    o = (load_problem(a.problem).raw.get("opt") or {})
+    rc = run_staged(a.run_dir, a.stages, int(o.get("soft_steps", a.soft_steps)),
+                    soft_cfl=float(o.get("soft_cfl", 0.5)), soft_conv=int(o.get("soft_conv", 0)),
+                    warm_lam_steps=int(o.get("warm_lam_steps", 0)), warm_lam_cfl=float(o.get("warm_lam_cfl", 0.2)),
+                    mid_steps=int(o.get("mid_steps", 0)))
+    out = collect(a.problem, a.run_dir)
     print(json.dumps({k: v for k, v in out.items() if k != "history"}, indent=1)); return rc
 
 
