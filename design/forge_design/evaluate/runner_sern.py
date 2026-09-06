@@ -129,6 +129,7 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     メモリ [[implicit-cfl-ceiling-eos-floor]] も「NS 陰解法の上限は P 床洗浄律速、効くのは implicitRelax のみ」
     と記録している。run_0075 の発散 (M∞10 の boat-tail 膨張で 18 % のノードが pMin=1 Pa に着地 → 負密度) は
     まさにこの指紋なので、relax を効かせる。"""
+    _lim = int(p.evaluate.get("limiter", 2))   # 2=Venkatakrishnan (既定), 1=Barth
     ir = p.evaluate.get("implicit_relax")
     _relax = f", implicitRelax: {float(ir)}" if ir is not None else ""
     pm = p.evaluate.get("p_min")
@@ -157,7 +158,7 @@ time:
   outStepInterval: {out_int}
   timeIntegration: 11
   nStepInner: 5
-space: {{convMethod: 1, limiter: 2, pRef: {p_ref}}}
+space: {{convMethod: 1, limiter: {_lim}, pRef: {p_ref}}}
 {turb}
 initial: "uniform_p101325_u10"
 """
