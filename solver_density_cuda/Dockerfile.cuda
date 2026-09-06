@@ -1,0 +1,98 @@
+# forge/solver_density_cuda 用 CUDA イメージ (多段構成)
+#
+#   base  : ビルド・実行に必要な最小構成 (コンパイラ + HDF5 / yaml-cpp / METIS + ccache)
+#   cloud : base + Python 科学スタック + gmsh (ヘッドレス)。メッシュ生成と後処理まで完結する
+#   dev   : cloud + ParaView / GUI 依存 / デバッガ。ローカル開発 (WSLg) 向け
+#
+# ビルド (推奨は tools/docker_build.sh):
+#   ./tools/docker_build.sh base    # forge-solver:cuda-base
+#   ./tools/docker_build.sh cloud   # forge-solver:cuda-cloud
+#   ./tools/docker_build.sh dev     # forge-solver:cuda-dev   (既定)
+#   ./tools/docker_build.sh all
+#
+# 直接叩く場合:
+#   docker build -f Dockerfile.cuda --target cloud -t forge-solver:cuda-cloud .
+#   docker build -f Dockerfile.cuda                -t forge-solver:cuda-dev   .   # 最終 = dev
+#
+# 設計意図:
+#   - apt / Python / gmsh / ParaView をそれぞれ独立した RUN に分けてある。
+#     以前は 1 つの巨大 RUN だったため、gmsh の取得に失敗すると apt (~2 GB) から
+#     まるごとやり直しになっていた。今は失敗したレイヤ以降だけが再実行される。
+#   - 「変わりにくいもの → 変わりやすいもの」の順に並べてキャッシュヒット率を上げる。
+#     最も壊れやすい gmsh の取得を cloud ステージの最後に置いている。
+#   - forge のビルドと実行に必要なのは base だけ。GUI (ParaView) は dev にしかない。
+#   - COPY / ADD は行わない (ソースはバインドマウント)。.dockerignore でコンテキストは空。
+
+ARG CUDA_IMAGE=nvidia/cuda:12.4.1-devel-ubuntu22.04
+
+# ============================================================================
+# base: forge のビルドと実行に必要な最小構成
+# ============================================================================
+FROM ${CUDA_IMAGE} AS base
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- レイヤ 1: ツールチェイン (ほぼ変わらない) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake ninja-build git pkg-config ccache \
+      ca-certificates curl locales \
+ && locale-gen en_US.UTF-8 \
+ && rm -rf /var/lib/apt/lists/*
+
+# --- レイヤ 2: ソルバが必要とする外部ライブラリ ---
+# libboost-dev はヘッダのみ利用 (mesh/gmshReader.hpp の boost::split)。
+# 以前の Dockerfile には書かれておらず、ParaView / matplotlib が引きずり込む
+# 依存にたまたま乗っていただけだった。GUI を外すと即座にビルドが落ちるので明示する。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libhdf5-dev libyaml-cpp-dev libmetis-dev libboost-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# Ubuntu の HDF5 (serial) の典型パス (tools/build.sh が CMake へ渡す)
+ENV HDF5_INC=/usr/include/hdf5/serial \
+    HDF5_LIBDIR=/usr/lib/x86_64-linux-gnu/hdf5/serial
+
+# ccache はバインドマウントされたワークスペース側に置き、コンテナを捨てても残るようにする。
+ENV CCACHE_DIR=/workspace/.ccache \
+    CCACHE_MAXSIZE=5G
+
+WORKDIR /workspace
+
+# ============================================================================
+# cloud: base + Python 科学スタック + gmsh (ヘッドレス)
+#        AWS などの GPU インスタンス向け。GUI は含まない → procedures/cloud-aws-gpu.md
+# ============================================================================
+FROM base AS cloud
+
+ARG GMSH_VERSION=4.15.2
+
+# --- レイヤ 3: Python と後処理まわり ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-pip python-is-python3 \
+      python3-h5py python3-numpy python3-matplotlib \
+ && rm -rf /var/lib/apt/lists/*
+
+# --- レイヤ 4: gmsh が dlopen する OpenGL / X ランタイム ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libgl1 libglu1-mesa libxcursor1 libxft2 libxinerama1 \
+ && rm -rf /var/lib/apt/lists/*
+
+# --- レイヤ 5: gmsh (最も壊れやすいので単独・最後) ---
+# PyPI wheel のみで導入する (python API + CLI 実行ファイル同梱)。
+# gmsh.info のバイナリ tarball は配布サーバが不安定なため使わない (2026-08-30 接続不可を確認)。
+RUN python3 -m pip install --no-cache-dir "gmsh==${GMSH_VERSION}" \
+ && gmsh --version
+
+# ============================================================================
+# dev: cloud + ParaView / GUI / デバッガ (ローカル開発用)
+# ============================================================================
+FROM cloud AS dev
+
+# --- レイヤ 6: デバッガ・Fortran・GUI 依存 ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      gdb gfortran xauth libqt5svg5 adwaita-icon-theme \
+ && rm -rf /var/lib/apt/lists/*
+
+# --- レイヤ 7: ParaView (単独で ~1.5 GB。ここだけ切り離しておく) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      paraview \
+ && rm -rf /var/lib/apt/lists/*

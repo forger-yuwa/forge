@@ -1,7 +1,9 @@
-build/
-.git/
-.devcontainer/
-.vscode/
-**/__pycache__/
-**/*.pyc
-*.ipynb
+# Dockerfile.cuda は COPY / ADD を一切行わない (ソースはバインドマウントで渡す)。
+# したがってビルドコンテキストは空でよい。
+#
+# 以前は build/ など数エントリだけを除外していたため、build-*/ ・.build-native/ ・
+# run_*/ を含む約 1 GB がビルドのたびに docker デーモンへ転送されていた (実測 1.058 GB)。
+# 全除外にして 6.6 kB になった。
+#
+# 注意: Dockerfile に COPY を足すときは、この * を外して必要なものを !パターンで戻すこと。
+*

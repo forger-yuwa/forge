@@ -27,6 +27,8 @@ solver_density_cuda/build-verify/
 solver_density_cuda/build-warn/
 solver_density_cuda/build-warn-cxx/
 solver_density_cuda/build-dual/
+# ccache (Docker/native の両方でここに置く。tools/build.sh 参照)
+solver_density_cuda/.ccache/
 # 参照文献の PDF は追跡しない (2026-08-31 に履歴から purge 済み。README.md だけ追跡する)
 papers/**
 !papers/README.md

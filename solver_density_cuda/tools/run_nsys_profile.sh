@@ -47,7 +47,7 @@ fi
 if ! docker image inspect "$image_name" >/dev/null 2>&1; then
   echo "[run_nsys_profile] ERROR: docker image '$image_name' not found" >&2
   echo "[run_nsys_profile] Build it first from solver_density_cuda:" >&2
-  echo "  docker build -f Dockerfile.cuda.dev -t $image_name ." >&2
+  echo "  ./tools/docker_build.sh dev" >&2
   exit 2
 fi
 
@@ -104,7 +104,7 @@ exec docker "${docker_args[@]}" "$image_name" bash -lc '
   set -euo pipefail
   if ! command -v nsys >/dev/null 2>&1; then
     echo "[run_nsys_profile] ERROR: nsys is not installed in the container image" >&2
-    echo "[run_nsys_profile] Use run_ncu_profile.sh for kernel metrics, or extend Dockerfile.cuda.dev with Nsight Systems if you need timelines." >&2
+    echo "[run_nsys_profile] Use run_ncu_profile.sh for kernel metrics, or extend Dockerfile.cuda (dev ステージ) with Nsight Systems if you need timelines." >&2
     exit 10
   fi
   mkdir -p "$HOME" "$XDG_CONFIG_HOME"

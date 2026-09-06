@@ -51,6 +51,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [tooling-docker-image-split.md](accepted/tooling-docker-image-split.md) | `architecture / tooling` | **Docker イメージの多段分割とビルド時間短縮 (2026-09-06)**: `Dockerfile.cuda.dev` / `.cloud` を多段 `Dockerfile.cuda` (base / cloud / dev) へ統合し、apt・gmsh・ParaView を工程ごとのレイヤに分割 (gmsh 失敗で apt ~2 GB からやり直す状態を解消)。`.dockerignore` でコンテキスト 1.058 GB→6.6 kB、`tools/build.sh` に CUDA arch 1 種絞り込み + ccache (フルビルド 2:25→1:07、ccache 温 3.9 s)。**`libboost-dev` はどちらの Dockerfile にも未宣言で、ParaView / matplotlib の依存に相乗りしていただけ**と判明 (base に明示)。残: buildx 導入・`boost::split` 置換 |
 | [tooling-nozzle-deltastar-core-matched-euler.md](accepted/tooling-nozzle-deltastar-core-matched-euler.md) | `tooling / design / boundary layer` | **排除厚さ更新 (2026-09-04 完了)**: CONTUR 運動量積分の初期壁 + 固定 Euler 基準・帯局所抽出 (BL 直外の帯で q_NS/q_E を線形フィット) の半径方向固定点反復。旧相関はスロート δ\* を 3〜12 倍過大に与え NS 質量流量 +0.8〜3.7 %・試験部 M −0.2〜−0.7 % の主因だった。case/45 M6: ṁ 比 0.9999・出口コア M +0.01 % を Md トリムなしで達成 (run_0020–0023)、case/42 M5・case/44 も設定不変で合格。Md トリム/law 帰還/x_lo は廃止 |
 | [discretization-median-dual-2d-facevect-precision.md](accepted/discretization-median-dual-2d-facevect-precision.md) | `discretization` | **2D 双対幾何+CW 判定の桁落ち除去** (ローカル原点+double, 2026-08-31): 真犯人は makeMesh の float shoelace CW 判定 (スリバーで境界 surfVect 誤反転)。閉性 1e-7・第一セル 2.4 μm (y+1 真値) 変換可能に |
 | [design-isobutane-wt-m5-sweep.md](accepted/design-isobutane-wt-m5-sweep.md) | `design campaign` | イソブタン風洞 **M5** R×L_U×L_c 27 点スイープ完了 (2026-08-30): quintic 不成立→knot MK2.5・L_c≥14、パレート 9 点、**推奨 R3/L_U9/L_c14** (4.37 m, dM 0.043 %M_d)。凝縮後段確認 +29 K で dry 確定 |

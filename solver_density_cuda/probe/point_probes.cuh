@@ -12,7 +12,7 @@
 #include "flowFormat.hpp"
 #include "input/solverConfig.hpp"
 #include "mesh/mesh.hpp"
-#include <boost/scoped_array.hpp>
+#include <memory>
 #ifdef HAVE_KDTREE
 #include <kdtree.h>
 #endif

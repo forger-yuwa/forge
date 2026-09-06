@@ -34,8 +34,7 @@ fi
 git -C "$repo_dir" submodule update --init --depth 1 solver_density_cuda/third_party/HighFive
 
 echo "== [3/5] 計算用 Docker イメージのビルド =="
-docker build -f "$repo_dir/solver_density_cuda/Dockerfile.cuda.cloud" \
-  -t forge-solver:cuda-cloud "$repo_dir/solver_density_cuda"
+"$repo_dir/solver_density_cuda/tools/docker_build.sh" cloud
 
 echo "== [4/5] コンテナ内ビルド (Release) =="
 # CMAKE_CUDA_ARCHITECTURES はコンパイラ検出時に 52 で「定義済み」になり

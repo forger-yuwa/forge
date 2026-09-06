@@ -93,6 +93,13 @@ RunPod/Vast 系は価格最安だが「Docker で環境構築」自体ができ�
 6. **P2 前提確認**: 4 GPU インスタンスを短時間起動し、`nvidia-smi` で 4 GPU 認識・CUDA-aware OpenMPI 入りイメージのビルドまで確認 (MPI 実装は別 plan)
 7. **文書化**: `procedures/cloud-aws-gpu.md` を新規作成 (起動→実行→回収→停止の一連手順)、`procedures/development-environment.md` と `procedures/README.md` からリンク
 
+### 5.1 残作業 (優先順)
+
+| # | 項目 | 内容 |
+| --- | --- | --- |
+| 1 | 4GPU 起動確認 (§5 ステップ 6) | `*.12xlarge` を短時間起動し 4 GPU 認識と CUDA-aware OpenMPI 入りイメージのビルドまで。**現 quota (8 vCPU) では起動できないため再申請が前提**。これが済めば本計画は accepted へ移せる |
+| 2 | `setup_instance.sh` の実機再確認 | 2026-09-06 の Docker 多段化に伴い `docker_build.sh cloud` 呼び出しへ変更済み。P1 実機で 1 回通す |
+
 ## 6. 検証
 
 - **単体 / ビルド**: EC2 上で Docker build 成功、native build 成功 (対象 CC で)
@@ -134,3 +141,8 @@ RunPod/Vast 系は価格最安だが「Docker で環境構築」自体ができ�
   - **速度ベースライン (§5-5)**: bump hiM imp 3000 step ×3、native ビルド・`FORGE_PROFILE=1`。**A10G 6.75/6.74/6.79 s (ばらつき 0.7% → 計測基準として成立)** vs RTX 3060 (WSL native) 15.51/14.12/15.64 s (ばらつき ~10%) → **A10G ≈2.2 倍速**。`ncu` OK (要 sudo)。`nsys` OK (スタンドアロン版導入・手順は procedures 参照)。カーネル内訳 (nsys, hiM imp): block-DPLUR 59% / limiter 10% / SLAU 8.8%。
   - 立ち上げで追加した修正: idle_autostop に CPU load 条件 (native ビルド中の誤 shutdown 実績への対処)、bump loM 正準 run の probe.yaml を追跡化、native ビルドの CUDA13/CCCL・boost・pip h5py 対応 (procedures に反映)。
   - **残タスク: 4GPU 起動確認 (§5-6) のみ** (ユーザー側 quota 状況の確認待ち)。完了後に本計画を accepted へ移動する。
+- `2026-09-06` — **クラウド用イメージの所在が変わった**。`Dockerfile.cuda.cloud` は廃止し、多段
+  [`Dockerfile.cuda`](../../solver_density_cuda/Dockerfile.cuda) の `cloud` ステージに統合した。
+  ビルドは `solver_density_cuda/tools/docker_build.sh cloud` で、`tools/cloud/setup_instance.sh`
+  も同様に更新済み (実機での再確認は未実施)。経緯と設計判断は
+  [tooling-docker-image-split.md](../accepted/tooling-docker-image-split.md) を参照。

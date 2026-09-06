@@ -4,10 +4,26 @@
 
 This directory is set up to use Docker as a disposable development environment for `solver_density_cuda`.
 
-- The main target is CUDA development with `Dockerfile.cuda.dev`.
+- The CUDA images are defined in a single multi-stage `Dockerfile.cuda`.
 - Source code is bind-mounted into the container, so edits stay on the host.
 - Build artifacts are generated in the mounted workspace, not inside an image layer.
 - The intended workflow is `build image -> run container -> build inside container`.
+
+### Image stages
+
+`Dockerfile.cuda` は 3 段構成になっており、必要な段だけをビルドできる。
+
+| stage | tag | 内容 | 用途 |
+| --- | --- | --- | --- |
+| `base` | `forge-solver:cuda-base` | コンパイラ + HDF5 / yaml-cpp / METIS / boost(headers) + ccache | `forge` のビルドと計算実行。これだけで足りる |
+| `cloud` | `forge-solver:cuda-cloud` | base + Python (numpy/h5py/matplotlib) + gmsh (ヘッドレス) | メッシュ生成・後処理込み。AWS など GPU インスタンス向け |
+| `dev` | `forge-solver:cuda-dev` | cloud + ParaView / GUI 依存 / gdb | ローカル開発 (WSLg で GUI を出す) |
+
+各段は下の段のレイヤをそのまま再利用するので、3 つ作っても ParaView 分 (~1.5 GB) 以外は重複しない。
+
+以前は 1 つの巨大な `RUN` に apt・gmsh・ParaView をまとめていたため、**gmsh の取得に失敗すると
+apt (~2 GB) から丸ごとやり直し**になっていた。現在は工程ごとにレイヤを分けてあり、
+壊れやすい gmsh は `cloud` の最後に置いてある。失敗しても再実行されるのはそのレイヤ以降だけ。
 
 In practice, the image is the reusable part. Containers are expected to be short-lived.
 
@@ -46,14 +62,25 @@ From this directory:
 
 ```bash
 cd /home/sano/work/forge/solver_density_cuda
-docker build -f Dockerfile.cuda.dev -t forge-solver:cuda-dev .
+./tools/docker_build.sh dev      # forge-solver:cuda-dev   (既定)
+./tools/docker_build.sh cloud    # forge-solver:cuda-cloud
+./tools/docker_build.sh base     # forge-solver:cuda-base
+./tools/docker_build.sh all      # base -> cloud -> dev
 ```
 
-This creates a local image named `forge-solver:cuda-dev`.
+直接 `docker build` を叩く場合は `--target` でステージを選ぶ。
+
+```bash
+docker build -f Dockerfile.cuda --target cloud -t forge-solver:cuda-cloud .
+docker build -f Dockerfile.cuda                -t forge-solver:cuda-dev   .   # 最終 = dev
+```
+
+`.dockerignore` でビルドコンテキストを空にしてある (Dockerfile は `COPY` を持たない)。
+これを入れる前は `build*/` や `run_*/` を含む約 1 GB が毎回 docker デーモンへ転送されていた。
 
 You only need to rebuild it when:
 
-- `Dockerfile.cuda.dev` changes
+- `Dockerfile.cuda` changes
 - system packages in the image need refreshing
 - you want to invalidate the previous build cache
 
@@ -63,10 +90,13 @@ After the image exists, run:
 
 ```bash
 docker run --rm -it --gpus all \
+	--user "$(id -u):$(id -g)" \
 	-v "$(pwd)":/workspace \
 	-w /workspace \
 	forge-solver:cuda-dev bash
 ```
+
+ビルドと計算実行だけなら `forge-solver:cuda-base` で足りる (ParaView / gmsh を含まない分だけ軽い)。
 
 What this does:
 
@@ -89,13 +119,34 @@ Inside the container:
 ```
 
 This script configures CMake with the HDF5 include and library paths that are already exported by the image.
+あわせてビルド時間を詰めるために次を行う。
+
+- **CUDA アーキテクチャを実機 1 つに絞る**。`CMakeLists.txt` の既定は `75;86;89;90` の 4 種で、
+  すべての `.cu` を 4 回コード生成するため約 2 倍の時間がかかる。`nvidia-smi` から compute
+  capability を読んで 1 つだけ指定する (`FORGE_CUDA_ARCHITECTURES=86` のように上書きも可)。
+  他機に配る fatbin が要るときだけ明示的に複数指定する。
+- **ccache をコンパイラランチャに使う**。キャッシュはイメージ側で `/workspace/.ccache`
+  (= ホストの `solver_density_cuda/.ccache`) を指しているので、コンテナを捨てても残る。
+  `FORGE_NO_CCACHE=1` で無効化できる。
+
+実測 (RTX 3060 / 12 並列, `forge-solver:cuda-base`):
+
+| 条件 | 時間 |
+| --- | --- |
+| フルビルド・4 arch・ccache なし (従来) | 2 分 25 秒 |
+| フルビルド・1 arch・ccache なし | 1 分 07 秒 |
+| `build/` を消してのフルビルド・1 arch・ccache 温 | 3.9 秒 |
+
+その他の環境変数: `FORGE_BUILD_DIR` (既定 `build`)、`CMAKE_BUILD_PARALLEL_LEVEL`。
 
 ## Docker Compose option
 
 There is also a minimal Compose definition in `compose.yml`.
 
 ```bash
-docker compose run --rm dev-cuda bash
+docker compose run --rm dev   bash   # ParaView / GUI 込み
+docker compose run --rm cloud bash   # Python + gmsh、GUI なし
+docker compose run --rm base  bash   # ビルド最小構成
 ```
 
 Then inside the container:
@@ -106,9 +157,8 @@ Then inside the container:
 
 Notes:
 
-- `dev-cuda` matches the current repository state.
-- `dev-cpu` is listed in `compose.yml`, but there is no `Dockerfile.dev` in the repository at the moment.
-- Treat the CUDA path as the maintained path unless a CPU Dockerfile is added.
+- 各サービスは `Dockerfile.cuda` の同名ステージに対応する。
+- `dev-cuda` は旧名の互換エイリアスで、中身は `dev` と同じ。
 
 ## Host shell helpers
 
@@ -156,11 +206,11 @@ On WSL2, they are set up for WSLg and do the following automatically:
 - create a private `XDG_RUNTIME_DIR` inside the container
 - forward the required Wayland, Pulse, and X11 sockets
 
-If toolbar icons are missing in ParaView, rebuild the image so the GUI dependencies from `Dockerfile.cuda.dev` are included:
+If toolbar icons are missing in ParaView, rebuild the `dev` stage so the GUI dependencies are included:
 
 ```bash
 cd /home/sano/work/forge/solver_density_cuda
-docker build -f Dockerfile.cuda.dev -t forge-solver:cuda-dev .
+./tools/docker_build.sh dev
 ```
 
 On native Linux, you may still need to adjust environment variables or mounts depending on your desktop session.
@@ -362,8 +412,14 @@ Recommended interpretation:
 
 These are passed to CMake because the current project still expects explicit HDF5 paths.
 
+- `libboost-dev` は `base` ステージで明示的に入れている。`mesh/gmshReader.hpp` が
+  `boost::split` / `boost::is_space` を使うためで、無いとビルドが通らない。
+  以前の Dockerfile には書かれておらず、ParaView (dev) と python3-matplotlib (cloud) が
+  引きずり込む依存にたまたま乗っていただけだった。GUI を外した瞬間に落ちる状態だったので明示した。
+  ヘッダのみ利用でリンクはしない。
+
 ## Known gaps
 
-- `README_docker.md` previously mentioned `Dockerfile.dev`, but that file is not present now.
-- The current maintained path is the CUDA development image.
-- If you want a CPU-only Docker workflow, add a matching `Dockerfile.dev` first.
+- CPU 専用の Docker ワークフローは無い。必要なら `Dockerfile.cuda` に CPU ステージを足す。
+- `nsys` (Nsight Systems) はどのステージにも入っていない。
+- `kdtree` はイメージに入っていないため `HAVE_KDTREE` の経路は無効。壁距離は非 kdtree 経路が使われる。

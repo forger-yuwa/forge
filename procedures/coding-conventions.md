@@ -49,7 +49,7 @@ solver_density_cuda/
 ```bash
 cd solver_density_cuda
 # イメージ (初回 / Dockerfile 変更時)
-docker build -f Dockerfile.cuda.dev -t forge-solver:cuda-dev .
+./tools/docker_build.sh dev      # forge-solver:cuda-dev (ビルドだけなら base で足りる)
 # コンテナ内でビルド (build/ に出力)
 ./tools/build.sh
 ```

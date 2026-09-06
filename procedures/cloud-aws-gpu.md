@@ -63,7 +63,7 @@ git clone --depth 1 git@github.com:forger-yuwa/forge.git ~/forge
 ~/forge/solver_density_cuda/tools/cloud/setup_instance.sh
 ```
 
-スクリプトが行うこと: GPU/Docker 確認 → HighFive submodule 取得 → クラウド用イメージ `forge-solver:cuda-cloud` のビルド ([`Dockerfile.cuda.cloud`](../solver_density_cuda/Dockerfile.cuda.cloud): dev イメージから ParaView GUI/Qt を除き、gmsh はヘッドレスで同梱) → コンテナ内 Release ビルド → idle auto-stop cron の登録。
+スクリプトが行うこと: GPU/Docker 確認 → HighFive submodule 取得 → クラウド用イメージ `forge-solver:cuda-cloud` のビルド ([`Dockerfile.cuda`](../solver_density_cuda/Dockerfile.cuda) の `cloud` ステージ: dev から ParaView GUI/Qt を除き、gmsh はヘッドレスで同梱) → コンテナ内 Release ビルド → idle auto-stop cron の登録。
 
 ### 移設で必ず踏む 4 点 (2026-09-05, case/46 SERN チェーンで実測)
 

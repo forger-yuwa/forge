@@ -11,7 +11,7 @@
 #include "mesh/mesh.hpp"
 #include "cuda_forge/cudaConfig.cuh"
 #include "cuda_forge/cudaWrapper.cuh"
-#include <boost/scoped_array.hpp>
+#include <memory>
 #include </home/kumpei/app/kdtree/install/include/kdtree.h>
 
 
