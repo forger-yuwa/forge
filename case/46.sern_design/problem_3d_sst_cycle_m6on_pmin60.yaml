@@ -1,0 +1,103 @@
+# ⑤ SERN S6 多作動点 MOO — 作動点を**サイクル値**で定義した生産構成 (plan §4.10、2026-09-05)。
+# アンカー = NASA TM X-71972 TABLE 1 (定動圧 1500 psf 経路の station 3 = 燃焼器出口) + CEA2 で γ/M_3 を補完。
+# 導出は case/46.sern_design/cea/tmx_operating_points.py (CEA 入出力は同 cea/)。
+#
+#   設計点 = M∞6 powered (spec.inflow / spec.external / gas)。逆設計はこれで固定 (作動点で形状は変えない)。
+#   作動点 = m6_on (巡航, NPR 35.4, w 0.5) / m10_on (最大 M, NPR 56.4, w 0.3) / m4_off (燃料遮断, NPR 2.8, w 0.2)
+#   低 NPR 点は「低速飛行」ではなく**燃料遮断 (power-off)**。M_3 = 2.91 で超音速なので sonic_throat 不要。
+#
+# 目的 = −(摩擦込み C_T の重み付き平均), L_ramp/H。制約 C_M,w (x_ref −20H) ≥ −2.5。剥離割合を台帳に記録。
+name: sern_3d_sst_cycle_m6on
+type: sern_2d
+gas:                       # 設計点のガス = m6_on (H2-air 平衡, CEA GAMMAs / Mbar 24.43)
+  gamma: 1.1828
+  cp: 2202.1
+spec:
+  H_m: 0.1
+  inflow:                  # 設計点 = 燃焼器出口 (TM X-71972 station 3, M∞6 φ=1)
+    mode: supersonic
+    M_in: 1.6745
+    p_in: 101027.0
+    T_in: 2328.0
+  external:                # 設計点 = 自由流 (q̄ 71850 N/m^2 → h 24.2 km)
+    M_inf: 6.0
+    p_inf: 2851.0
+    T_inf: 220.8
+  operating_points:
+  - name: m6_on
+    weight: 1.0
+    external: {M_inf: 6.0, p_inf: 2851.0, T_inf: 220.8}
+    inflow: {M_in: 1.6745, p_in: 101027.0, T_in: 2328.0}
+    gas: {gamma: 1.1828, cp: 2202.1}
+  moment_ref:
+  - -20.0
+  - 0.0
+dv:
+  M_c: 2.9
+  f: 0.45
+  theta_r0_deg: 15.0
+  theta_c0_deg: 5.0
+  L_cowl: 1.2
+geometry:
+  x_max_kernel: 20.0       # L_cowl 上限 4.5 に合わせて広げる (打ち切りは key point で効く)
+  nj_moc: 301
+  dx_moc: 0.002
+  nj_moc_probe: 151
+  dx_moc_probe: 0.004
+  L_ramp_max: 20.0         # NASA 基準形 18.5 H と同スケール
+mesh:
+  discretization: node
+  cowl_thickness: 0.005    # カウル TE のせん断層で ω→inf を防ぐ数値措置。0 は m4_off でも落ち (run_0035)、2e-3 は m10_on で落ちる
+                           # (run_0042)。5e-3 で 3 作動点とも通る (run_0043)。1e-2 と力係数は 0.3 % 以内で同じ = 物理は動かない
+  ni_up: 16
+  ni_noz: 160              # L_ramp ~10 H に対する解像度補償 (旧 100 は L_ramp ~4 H 前提)
+  ni_plume: 180
+  nj_top: 81
+  nj_bot: 51
+  L_up: 0.5
+  x_out_extra: 2.0
+  bot_depth: 3.0
+  first_wall_frac: 0.004
+  ext_top: 1               # ランプ側外部流 (機体上面・base・後流 + 自由流バンド, plan §4.11)。無いと過膨張でも剥離が起きない
+  top_depth: 2.0
+  nj_ext_top: 41
+  nj_wake: 9
+  vehicle_clearance: 0.02
+  first_top_frac: 0.02
+  vehicle_taper: 0.35     # 機体後端テーパ長 = L_ramp の 35 %。係数は smoothstep (C¹) — 線形 clip はテーパ開始点で
+                          # 上面が水平から不連続に折れ、M∞10 のスリップ壁上の凸角として ω 発散した (run_0071 inf_00/01)
+  ramp_fillet: 0.1        # ランプ膨張角部 (x=0) の丸め半径 /H。鋭角だと SST が θ_r0 ≳ 18° で roOmega 発散 (run_0055-0057)。
+                          # 曲率ジャンプ 1010 → 12.5、壁の持ち上げは最大 0.0019 H。NASA TM X-71972 も小半径で接続している
+evaluate:
+  top_out_kind: slip       # 3D は top_out を slip 壁 (ランプ延長) にする (run_0027 で確立)
+  model: sst
+  nStepOuter: 4000
+  p_min: 60.0              # EOS 圧力床 [Pa]。既定 1.0 Pa は m10_on の p∞ (1026 Pa) の 1/1000 で低すぎ、
+                           # 機体上面 boat-tail の膨張で床を割ったノードが負密度に転落 → 圧力暴走 → ω 発散した
+                           # (run_0075 で順序を確定)。20 Pa と 100 Pa で解は完全に同一 (C_T 0.9187, C_M −0.266,
+                           # run_0077) なので、床は過渡の一瞬を守るだけで収束解には触れていない。所要も 150→32 s
+  cfl_main: 0.5            # 本段 CFL。1.0 は限界的で、同一メッシュ・同一 config でも run により m10_on が step 171 で発散した
+                           # (run_0048 成功 / run_0049 失敗)。0.5 で m10_on 2 回とも同一値、答えは 1.0 と一致 (run_0050-0053)
+  outStepInterval: 500
+opt:
+  soft_steps: 2000
+  soft_cfl: 0.2            # soft 段 CFL。既定 0.5 では m10_on が入口面∩カウル外面の角で step 3 発散 (run_0041)
+  warm_lam_steps: 2000     # soft 段の前に層流暖機 (turbulence none)。カウル後縁のせん断層で SST が発散するのを防ぐ
+  warm_lam_cfl: 0.2        # (板厚では m4_off と m10_on で要求が逆転して解けなかった。run_0046-0048)
+  mid_steps: 2000          # soft と本段の間に 2 次 + soft CFL の段 (次数と CFL を同時に上げない)
+  warm_adapt_steps: 500    # warm start 後の適応段 (1 次, soft CFL)。BC の違いを馴染ませる
+  cm_min: -7.0             # 重み付き C_M (x_ref −20H) の下限。設計点 MOC C_M の dv 箱分布 (sweep_moc_dv_cycle3op.log: p10 −10.7 / med −6.9 /
+                           # p90 −2.5) と重み付き比 ≈0.7 (m10_on/m4_off で緩む) から、最悪 ~15 % を落とす値。旧 −2.5 は L 3.8H 前提で候補が全滅する
+mesh3d:
+  W: 2.0
+  Z_ext: 1.5
+  L_sw: 0.8                # カウル後縁と側壁後縁を分離する (run_0082 で 3D SST が通る条件)
+  nz_in: 25
+  nz_out: 15
+  ni_up: 10
+  ni_noz: 90
+  ni_plume: 130
+  nj_top: 49
+  nj_bot: 31
+  first_wall_frac: 0.004
+  first_z_frac: 0.004

@@ -129,6 +129,12 @@ PYTHONPATH=. .venv-opt/bin/python -m forge_design.evaluate.runner_sern \
 | `run_0081_moo_cycle3op_vehsurf` | **S6 MOO 本番 (再取得)**: 新機体上面 + `p_min 20` + L_cowl 上限 4.5 H。3 作動点 × node SST、DOE 40 + infill 8×2 = 56 評価 | 実行中 (ローカル、log `/tmp/moo_0081.log`) | active |
 | `run_0080_3d_sst_ladder` | **3D SST 再挑戦**: 2D の段階起動 (層流暖機 2000 + soft cfl 0.2 + mid 2000 + 本段 cfl 0.5) と `p_min 20` を 3D に移植 | **暖機段は完走** (run_0028 が落ちた三重点を通過) したが、SST 投入直後の soft 段 **step 3** で同じ三重点 (x 1.081 H, y −0.140 H, z 1.004 H) に ω 発散。soft 段 step 0 の **rms_roK = 1.1e7**。段階起動だけでは足りない | 診断 (ref) |
 | `run_0082_3d_sst_lsw08` | **3D node SST 初成功**: 上に加えて `mesh3d.L_sw: 0.8` でカウル後縁と側壁後縁を x 方向に分離 | **全段完走** (524628 セル, メッシュ PASS AR 535.8 / skew 0.365, 本段 4000 step 262 s)。**C_T 0.9385 (圧力) / 0.9262 (摩擦込み) / C_L −0.1787 / C_M +0.9892**、力係数 3 つとも **STEADY** (8 スナップショット)。同条件 3D Euler run_0027 (0.932 / −0.204 / +1.07) と整合。揚力の主役はランプ幅外 (C_L −0.0903 vs 幅内 −0.0014) | **active (3D の基準 run)** |
+| `run_0083_3d_sst_cycle_m6on` | 3D SST を**生産作動点 m6_on** (dv = 設計点, L_cowl 1.2, `L_sw` 0.8) で評価 | **DIVERGED**: mid 段 (2 次) step 48。位置 x/H 1.187–1.200, z/H 0.972–0.986 = **カウル後縁の刃先** (スパン端の 0.014–0.028 H 内側)。`L_sw` を離しても残る別の特異点 | 診断 (ref) |
+| `run_0084_3d_sst_cycle_pmin60` | 同上 + `p_min` 20 → 60 Pa | **同じ step 48・同じ 22 ノード・同じ位置** → 圧力床は原因でない (床に着地するのは結果) | 診断 (ref) |
+| `run_0085_3d_sst_cycle_barth` | 同上 + リミッタ Barth | step 34 に**悪化** → リミッタでもない | 診断 (ref) |
+| `run_0086_3d_sst_cycle_thick` | 3D メッシャにカウル板厚 0.005 を実装 (z 一様) | **暖機段 step 4** で ro NaN。NaN は側壁後縁 (x/H 0.785–0.824, z/H 1.000–1.010) = 厚さ 0 の側壁スリットの内外で中間線がずれた | 破棄予定 |
+| `run_0087_3d_sst_cycle_thick_ztaper` | 板厚を側壁の 2 セル手前から 0 に絞る | 暖機段は完走 (残差 1.4–2.3 桁低下)、mid 段 **step 57** (48 → 57 と改善するが未解決)。位置は run_0083 と同じ刃先 | 診断 (ref) |
+| `run_0088_3d_sst_cycle_cfl01` | 同上 + mid 段 CFL 0.2 → 0.1 | mid 段 **step 109** = 57 のほぼ倍 = **同じ物理時刻** → CFL はつまみでない。次はカウル後縁の鈍頭化 | 診断 (ref) |
 
 ### S7 3D の現状 (2026-09-05)
 
