@@ -43,6 +43,10 @@ void speciesBoundary_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, bcond& b
 // 全 bcond をループして化学種 ghost を埋める (applyRansScalarBoundaries と同形)。
 void applySpeciesBoundaries(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 
+// node 入口ピン (scalarDirichletPin==1) ノードの res_roY{s}/src_jac_Y{s} を 0 化する (化学ソース集計の後に呼ぶ)。
+// cell / 単成分では no-op。入口 Dirichlet の境界ノード値は speciesBoundary_d_wrapper (node 分岐) が毎 step ピンする。
+void speciesPinResidual_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+
 // 化学種移流残差を組み立てる (res_roY{s} / transport_diag をゼロ初期化してから集計)。
 // 粘性 (viscMethod!=0) かつ nSpecies>=2 のとき M4 の Fick 拡散 + ΣJ=0 補正 + エンタルピー拡散も加える。
 void speciesTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);

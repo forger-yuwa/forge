@@ -17,6 +17,7 @@
 | [`recommended-settings.md`](recommended-settings.md) | **推奨解析設定の正本**: 解析種別ごとの現行レシピ (日付付き) と旧設定 (superseded) 一覧。config を組む前に必ず参照 |
 | [`solver-settings.md`](solver-settings.md) | `convMethod` / `limiter` などの数値設定リファレンス (運用上の設定の意味) |
 | [`su2-cross-check.md`](su2-cross-check.md) | 同一メッシュ・同一 BC で SU2 と比較し forge 固有の問題を切り分ける手順 |
+| [`inlet-profile.md`](inlet-profile.md) | 入口分布 (全温 / 全圧 / 組成 H2O / k・ω / 超音速入口の ρ,U,Ps) の与え方: `inletProfile` CSV の生成 (`gen_inlet_profile.py`)・起動ログ確認・結果照合 |
 
 ## 開発環境
 
