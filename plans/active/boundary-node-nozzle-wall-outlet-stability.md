@@ -378,6 +378,37 @@ node wf=0 の ṁ −4.5% 異常 (§2.8 系) は y+1+幾何修正後は 0.26% �
   する」運用と README 注記は解除。y+1 low-Re の node η_CF = **0.975**、y+30 wf の node
   η_CF = **0.969** が修正後の正値。
 
+## 2.12 追補 (2026-09-05 → 本ブランチ 2026-09-07 移植): TP 亜音速出口の特性構成が γ を混用し偽逆流/出口列加圧を課していた — 修正済
+
+`outlet_statPress_d` の亜音速分岐 (SU2 BC_Outlet 型特性構成) が `c_int = sonic[ic]` (TP の真の音速, γ_mix) と
+`c_exit = √(ga_cfg·P_exit/ρ_new)` (config 定数 γ) を混用していた。P_int = P_exit でも c_int ≠ c_exit となり、
+Riemann 不変量 $V_{n,exit} = U_n + 2(c_{int}-c_{exit})/(\gamma-1)$ が数十 m/s ずれる。超音速出口 (全量外挿) では
+通らず CPG では γ が同一なので無害 — **TP × 亜音速出口だけが壊れていた**。
+
+- **修正** (feature/chemistry-finite-rate `876ec8b4` の `boundaryCond_d.cu` 部分のみを本ブランチへ移植): TP では
+  特性構成の γ をセル局所 γ_mix(T) (`var.c_d["gamma"]`) に統一し、`c_int` も同じ γ で √(γP/ρ) と再構成。
+  超音速判定は従来どおり `sonic[ic]`。CPG・超音速はビット不変。
+- **本ブランチでの指紋 (case/16 run_0198, node × TP split × SST, 2026-09-07)**: 出口壁ノード (u=0 ピン) は常に亜音速
+  なのでこの分岐を通り、出口列の P が 2 kPa 指定を無視して 45〜57 kPa へ上昇 → ノズルが unstart (全域 M≈0.3,
+  P≈Pt)。cell (run_0191/0196) は出口が全面超音速で無害だった。`nodeInletCornerWall` は入口角 P>Pt 暴走を消したが
+  (run_0195 → run_0198)、この出口欠陥が残っていた。修正後の再計算は run_0199。
+
+## 2.13 追補 (2026-09-07): node の出口壁列は常に亜音速 — `outlet_statPress` の Ps が実出口圧より桁違いに低いと SST で unstart (case/16)
+
+case/16 (Wyslouzil, 平面, Pt 59 kPa, 出口 M1.8 / P≈10.4 kPa, Ps 指定 2 kPa) の node SST が出口側から unstart した (run_0198–0201)。
+100 step 再現で、最終列に壁向き Uy (上流列の 5–10 倍) と +5 % の P バンプが**層流でも**あり (bounded)、SST では最終列の k が
+上流の 5–8 倍に膨れて BL が閉塞→剥離前線が x≈94 mm から上流へ伝播→全域 unstart、と特定。TP/CPG・dilatation・壁関数・
+`nodeWallDirichlet`・出口 k/ω・壁第一層 (0.6/2.4/8 µm) は無関係 (全て同一の失敗)。
+
+- **機構**: cell では出口面が全面超音速で背圧ゴーストは通らないが、node では壁ノード (u=0) と壁列が常に亜音速分岐を通る。
+  Ps=2 kPa に対し実出口圧 10.4 kPa なので Riemann 構成のゴーストが Vn_exit≈+365 m/s の強い膨張を毎 step 課し、最終列の
+  半 CV に壁向き速度/P バンプを作る。case/45 (Ps 2237 ≈ 実出口 2245 Pa) では同じ最終列バンプが +1.2 % に収まり無害。
+- **対策 (2 通り、どちらも有効を確認)**: (a) 出口を `outflow` (全量外挿) にする (run_0210/0211/0212/0213) — 超音速出口の標準扱い。
+  (b) `outlet_statPress` のまま Ps を実出口圧に合わせる (run_0214, case/45 流)。**node の超音速ノズルでは (a) を既定**にする
+  (`run_user_profile.py` / 3D も同じ)。
+- **残課題**: 最終列の壁向き Uy・P バンプ自体 (§2.10 の残り) は `outflow` でも僅かに残る可能性があり、出口積分量を使うときは
+  最終列を避ける (§2.11 の方針どおり)。
+
 ## 3. 修正方針 (次セッションの作業項目)
 
 (§2.6 で課題定義を再構成済み。旧 2./3. の仮説 — 壁 k/ω 行 Jacobian・壁隣接 MUSCL — は

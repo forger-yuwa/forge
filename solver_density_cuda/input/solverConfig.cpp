@@ -195,6 +195,10 @@ void solverConfig::read(std::string fname)
         if (config["mesh"]["axisCentroidShift"]) {
             this->axisCentroidShift = config["mesh"]["axisCentroidShift"].as<int>();
         }
+        if (config["mesh"]["nodeInletCornerWall"]) {
+            this->nodeInletCornerWall = config["mesh"]["nodeInletCornerWall"].as<int>();
+            std::cout << "'nodeInletCornerWall' in 'mesh': " << this->nodeInletCornerWall << std::endl;
+        }
         if (config["mesh"]["nodeWallDirichlet"]) {
             this->nodeWallDirichlet = config["mesh"]["nodeWallDirichlet"].as<int>();
         }

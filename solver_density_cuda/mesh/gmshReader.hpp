@@ -58,6 +58,9 @@ public:
     // [nBconds][各 bcond が所有する境界ノード] (壁優先所有後)。iCells 設定用。壁所有 bcond は plane を emit
     // しない (ghost 不要・Dirichlet) が、wall_flag 構築のためノード列はここに残し h5 の iCells に書く。
     std::vector<std::vector<geom_int>> dualBcondNodes;
+    // 入口∩壁コーナー (node): 壁ノードに属する inlet_* 側の半割面を壁 bcond へ帰属させる (mesh.nodeInletCornerWall)。
+    // 壁ノードは u=0 に Dirichlet されるため入口半割面から質量が入ると角 CV に溜まり P が暴走する (case/47 2026-09-04)。
+    bool inletCornerWall = false;
 
     class lineEnt
     {
@@ -1497,8 +1500,22 @@ public:
         // 蓄積も double で行い、格納時に geom_float へ cast する。
         std::vector<std::map<geom_int, std::array<double,3>>> halfByOwner(nBc);
         std::vector<std::map<geom_int, std::array<double,4>>> hcentByOwner(nBc);
+        // 入口∩壁コーナー所有 (inletCornerWall): 壁ノード → その壁 bcond index (最初に見つかった壁)。
+        // inlet_* の境界エッジの半割面のうち、壁ノード側の半割面は壁 bcond に計上する (u=0 ピンと整合、流入なし)。
+        std::vector<geom_int> wallOwnerOf(nN, -1);
+        if (inletCornerWall) {
+            for (geom_int ib = 0; ib < nBc; ++ib) {
+                const std::string& k = this->bconds[ib].bcondKind;
+                if (k != "wall" && k != "wall_isothermal") continue;
+                for (const geom_int ip : this->bconds[ib].iPlanes)
+                    for (const geom_int N : {this->planes[ip].iNodes[0], this->planes[ip].iNodes[1]})
+                        if (wallOwnerOf[N] < 0) wallOwnerOf[N] = ib;
+            }
+        }
+        geom_int nCornerReassigned = 0;
         for (geom_int ib = 0; ib < nBc; ++ib)
         {
+            const bool isInlet = (this->bconds[ib].bcondKind.rfind("inlet_", 0) == 0);
             for (const geom_int ip : this->bconds[ib].iPlanes)
             {
                 const geom_int A = this->planes[ip].iNodes[0];
@@ -1519,8 +1536,10 @@ public:
                     const geom_int O = (N == A) ? B : A;
                     // 閉性は全半割面を集計 (幾何、所有に依らない)
                     bnodeAccum[3*N + 0] += hx; bnodeAccum[3*N + 1] += hy; bnodeAccum[3*N + 2] += hz;
-                    // 寄与はこの境界面が属する bcond へ (マルチマーカ: コーナーは各 incident bcond に計上)
-                    const int ow = ib;
+                    // 寄与はこの境界面が属する bcond へ (マルチマーカ: コーナーは各 incident bcond に計上)。
+                    // 例外 (inletCornerWall): 入口エッジの壁ノード側半割面は壁 bcond へ (入口∩壁コーナーの質量蓄積防止)。
+                    int ow = ib;
+                    if (inletCornerWall && isInlet && wallOwnerOf[N] >= 0) { ow = wallOwnerOf[N]; ++nCornerReassigned; }
                     auto& h = halfByOwner[ow][N];
                     h[0] += hx; h[1] += hy; h[2] += hz;
                     // ノード N の半割 (N→エッジ中点 M) の重心 = (3N+O)/4
@@ -1533,6 +1552,9 @@ public:
             }
         }
 
+        if (inletCornerWall)
+            std::cout << "[buildMedianDual] nodeInletCornerWall: " << nCornerReassigned
+                      << " inlet half-faces at wall nodes reassigned to wall bconds\n";
         // emit: 各 bcond が自分の境界面に属するノードの半割面 plane を emit する (ghost を生成し、勾配/粘性の
         // 境界閉性を保つ)。マルチマーカなのでコーナー (壁∩出口) は壁・出口の双方から半割面 ghost を 1 枚ずつ
         // 得る (壁側 mirror ghost + 出口側 ghost)。両半割面ベクトルの総和でコーナー CV が閉じる。壁ノードの
@@ -1845,8 +1867,22 @@ public:
 
         std::vector<std::map<geom_int, std::array<double,3>>> halfByOwner(nBc);
         std::vector<std::map<geom_int, std::array<double,4>>> hcentByOwner(nBc);
+        // 入口∩壁コーナー所有 (inletCornerWall, 2D と同型): 壁ノード → 壁 bcond index。inlet_* 境界面の
+        // 壁ノード側半割面は壁 bcond に計上する (壁ノードは u=0 Dirichlet なので入口半割面から流入させない)。
+        std::vector<geom_int> wallOwnerOf(nN, -1);
+        if (inletCornerWall) {
+            for (geom_int ib = 0; ib < nBc; ++ib) {
+                const std::string& k = this->bconds[ib].bcondKind;
+                if (k != "wall" && k != "wall_isothermal") continue;
+                for (const geom_int ip : this->bconds[ib].iPlanes)
+                    for (const geom_int N : this->planes[ip].iNodes)
+                        if (wallOwnerOf[N] < 0) wallOwnerOf[N] = ib;
+            }
+        }
+        geom_int nCornerReassigned = 0;
         for (geom_int ib = 0; ib < nBc; ++ib)
         {
+            const bool isInlet = (this->bconds[ib].bcondKind.rfind("inlet_", 0) == 0);
             for (const geom_int ip : this->bconds[ib].iPlanes)
             {
                 const auto& fn = this->planes[ip].iNodes;       // 周回ノード (surfVect と整合)
@@ -1879,13 +1915,18 @@ public:
                                            0.25*(Nc[1]+Mn[1]+Fcen[1]+Mp[1]),
                                            0.25*(Nc[2]+Mn[2]+Fcen[2]+Mp[2]) };
                     bnodeAccum[3*N+0]+=hv[0]; bnodeAccum[3*N+1]+=hv[1]; bnodeAccum[3*N+2]+=hv[2];
-                    auto& h = halfByOwner[ib][N];
+                    int ow = ib;
+                    if (inletCornerWall && isInlet && wallOwnerOf[N] >= 0) { ow = wallOwnerOf[N]; ++nCornerReassigned; }
+                    auto& h = halfByOwner[ow][N];
                     h[0]+=hv[0]; h[1]+=hv[1]; h[2]+=hv[2];
-                    auto& c = hcentByOwner[ib][N];
+                    auto& c = hcentByOwner[ow][N];
                     c[0]+=w*sc[0]; c[1]+=w*sc[1]; c[2]+=w*sc[2]; c[3]+=w;
                 }
             }
         }
+        if (inletCornerWall)
+            std::cout << "[buildMedianDual3D] nodeInletCornerWall: " << nCornerReassigned
+                      << " inlet half-faces at wall nodes reassigned to wall bconds\n";
 
         for (geom_int ib = 0; ib < nBc; ++ib) {
             dualBcondPhysID[ib] = this->bconds[ib].physID;
