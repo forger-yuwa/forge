@@ -53,6 +53,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [output-level-and-h0.md](accepted/output-level-and-h0.md) | `architecture / output` | `res_*.h5` の出力量を `output.level` (既定 1 = 保存量 + 原始量 + `h0`, 2.08M で 681→290 MB) で絞る。全エンタルピー `h0` (sstEnergyIncludesK なら +k, 属性 `h0_includes_k`) をソルバが書き、全温・全圧の後処理はそこから作る (2026-09-08) |
 | [turbulence-sst-energy-includes-k.md](accepted/turbulence-sst-energy-includes-k.md) | `turbulence / thermophysics / convection` | **全エネルギーに ρk を含める** (`sstEnergyIncludesK`, 分割保持形: roe は E_m のまま、E_t の流束 H*/p*/k 拡散 + k 更新後 roe−=Δ(ρk)、dual-time は BDF に ρk)。周期箱減衰で E_t 保存 1e-7、2D/平板回帰 ≤0.1 %。**既定 0 で確定 (E_m 形が安全, ユーザ決定 2026-09-08)、opt-in** |
 | [turbulence-sst-node-corner-heating.md](accepted/turbulence-sst-node-corner-heating.md) | `turbulence / boundary (node)` | node × SST の 2 壁角線で ω が壁漸近解の 1/30 に落ち角部が Tt 超え加熱 (case/16 3D)。真因は k/ω 拡散の絶対ゼロ割ガード 1e-12 [m³] (codex レビュー) → 相対ガード化で解決 (2026-09-08) |
 | [tooling-docker-image-split.md](accepted/tooling-docker-image-split.md) | `architecture / tooling` | **Docker イメージの多段分割とビルド時間短縮 (2026-09-06)**: `Dockerfile.cuda.dev` / `.cloud` を多段 `Dockerfile.cuda` (base / cloud / dev) へ統合し、apt・gmsh・ParaView を工程ごとのレイヤに分割 (gmsh 失敗で apt ~2 GB からやり直す状態を解消)。`.dockerignore` でコンテキスト 1.058 GB→6.6 kB、`tools/build.sh` に CUDA arch 1 種絞り込み + ccache (フルビルド 2:25→1:07、ccache 温 3.9 s)。**`libboost-dev` はどちらの Dockerfile にも未宣言で、ParaView / matplotlib の依存に相乗りしていただけ**と判明 → `splitOnSpace` / `std::unique_ptr` へ置換して **boost 依存を完全除去** (等価性 532,628 ケース一致、メッシュ変換 4 種 435 データセット完全一致)。残: buildx 導入 (要 sudo)・AWS 実機確認 |

@@ -30,6 +30,13 @@ public:
     int nStepOuter;
     int outStepInterval;
     int outStepStart;
+    // 出力する場の量の絞り込み (config `output:` ブロック, 2026-09-08)。
+    //   level 0: リスタート最小 (保存量 ro/roU/roe/roK/roOmega/roY*/凝縮モーメント) のみ
+    //   level 1 (既定): 0 + 原始量 P/T/U/k/omega/sonic/Y*, vis_lam/vis_turb, wall_dist, h0 (全エンタルピー; sstEnergyIncludesK なら +k)
+    //   level 2: 従来どおり全診断量 (勾配・リミッタ・SST 診断・DES 診断 …)
+    //   extraFields: level 0/1 に個別追加する名前 (output_cellValNames にあるもの)
+    int outputLevel = 1;
+    std::vector<std::string> outputExtraFields;
 
     int dtControl; // 0: use dt , 1: cfl
     flow_float totalTime=0.0;

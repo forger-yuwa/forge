@@ -194,6 +194,25 @@ turbulence: {model: "sst", ..., sstNodeWallKPin: 1, sstOmegaProdFromPk: 1, sstSi
 検証 (plan [turbulence-sst-consistency-options](../plans/active/turbulence-sst-consistency-options.md)): case/16 2D node SST では全オプションが壁圧比 ≤0.25 % の差、case/26 平板 Cf と case/16 3D の結果は同 plan 参照。
 `tools/test_scale_invariance.py` (相似メッシュで無次元残差の一致を見る) は単位付き閾値の検出用。
 
+## output — 出力する場の量の絞り込みと h0 (2026-09-08)
+
+```yaml
+output: {level: 1, extraFields: [ducros, volume]}   # 省略時 level 1
+```
+
+| level | 出力 | 目安 (2.08M 節点 SST) |
+|---|---|---|
+| 0 | リスタート最小: `ro roUx roUy roUz roe roK roOmega roY*` + 凝縮モーメント保存量 | ~190 MB (うちメッシュ CONNE/COORD 98 MB) |
+| **1 (既定)** | 0 + 原始量 `P T Ux Uy Uz k omega sonic Y*`、`vis_lam vis_turb wall_dist`、**`h0`** | ~290 MB |
+| 2 | 従来どおり全診断量 (勾配 27 本・リミッタ・SST/DES 診断・`cfl dt_local ducros volume` …) | ~680 MB |
+
+- `extraFields` で level 0/1 に個別追加する (名前は `variables.hpp` の `output_cellValNames`)。旧解析スクリプトが読む診断量
+  (`volume`: case/09 の保存則解析、`cfl`: `sweep_cfl_implicit.py`、`ducros`: `analyze_ducros.py`) はここで足すか level 2 にする。
+- **`h0`** = 全エンタルピー (単位質量) = e + p/ρ + u²/2 で、`sstEnergyIncludesK: 1` のときだけ + k を含む (属性 `h0_includes_k`)。
+  **全温・全圧の後処理は `VALUE/h0` から作る** (CPG: T₀ = h₀/c_p, semi-perfect: h(T₀)=h₀ の逆算, P₀ は s°(T₀)−s°(T)=R ln(P₀/P))。
+  スクリプトで `T + u²/2c_p` を自前で組まない (k を含めるかどうかの判断がソルバ側に閉じる)。
+- 原則: **後処理で導出できる量はソルバから出さない**。勾配・リミッタ・診断は必要な run だけ level 2 で取る。
+
 ## mesh.wallDistExtraPhysIDs — 壁距離に含める非 wall 境界 (変換時)
 
 ```yaml

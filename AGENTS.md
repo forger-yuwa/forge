@@ -40,6 +40,7 @@
 
 エージェント自身が計算検証を実行する場合も、既存の `run_*` ディレクトリをそのまま使い回さず、必ず複製した新しい `run_*` ディレクトリで実行すること。
 また、計算を実行した場合は `residual_history.csv` から `residual_history.png` も生成して残すこと。
+**出力と後処理の原則**: `res_*.h5` は `output.level` (既定 1 = 保存量 + 原始量 + `h0`) で絞る。勾配・リミッタ・診断量は必要な run だけ `level: 2` か `extraFields` で取る。**全温・全圧は `VALUE/h0` (全エンタルピー; `sstEnergyIncludesK` のとき k 込み, 属性 `h0_includes_k`) から作り、スクリプトで `T + u²/2c_p` を自前で組まない** ([`procedures/solver-settings.md`](procedures/solver-settings.md) の「output」)。
 
 **計算結果ディレクトリの明示 (必須)**: 後からどの検証がどこにあるか追えるよう、計算の「投入時」と「結果まとめ時」の両方で、結果が出力される `run_*` ディレクトリを**リポジトリルートからの相対パスで明示**すること。
 

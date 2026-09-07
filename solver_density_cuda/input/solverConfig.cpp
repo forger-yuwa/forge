@@ -402,6 +402,15 @@ void solverConfig::read(std::string fname)
         this->nSubIterDualTime = getOptionalValidatedValue<int>(config["time"], "nSubIterDualTime", 20, "time");
         this->bdfOrder = getOptionalValidatedValue<int>(config["time"], "bdfOrder", 2, "time");
 
+        // 出力の絞り込み (output: {level: 0|1|2, extraFields: [...]}; 省略時 level 1)
+        if (config["output"]) {
+            auto out = config["output"];
+            this->outputLevel = getOptionalValidatedValue<int>(out, "level", 1, "output");
+            if (this->outputLevel < 0 || this->outputLevel > 2) throw std::runtime_error("Key 'level' in 'output' must be 0, 1, or 2.");
+            if (out["extraFields"]) this->outputExtraFields = out["extraFields"].as<std::vector<std::string>>();
+        }
+        std::cout << "'output': level=" << this->outputLevel << " extraFields=" << this->outputExtraFields.size() << "\n";
+
         // 空間設定
         auto space = config["space"];
         this->convMethod = getValidatedValue<int>(space, "convMethod", "space");
