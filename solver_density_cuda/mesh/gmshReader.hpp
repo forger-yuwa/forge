@@ -5,6 +5,7 @@
 #include <string>
 #include <array>
 #include <map>
+#include <algorithm>
 
 #include <flowFormat.hpp>
 #include <mesh/elementType.hpp>
@@ -1729,8 +1730,54 @@ public:
         };
 
         // ---- 双対面アキュムレータ: 正規化エッジ (min,max) をキーに集約 ----
+        // 2026-09-08 高速化: 旧実装は std::map<pair,DFA> (6M エッジ) + セル毎の std::map (2M 回構築) で
+        // 2M 節点 hex に 106 s かかっていた。→ (1) 局所エッジ→隣接 2 面の表は要素型ごとに 1 回だけ作る、
+        // (2) 全セルのエッジキー (min,max) を uint64 に詰めて sort+unique した昇順配列をエッジ番号表にし、
+        // 寄与は lower_bound で引いて配列に加算する。キー昇順 = 旧 std::map の反復順なので双対面の並びは同一。
         struct DFA { double v[3] = {0,0,0}; double c[3] = {0,0,0}; double w = 0.0; };
-        std::map<std::pair<geom_int,geom_int>, DFA> dfMap;
+        auto packKey = [](geom_int A, geom_int B) -> unsigned long long {
+            if (A > B) std::swap(A, B);
+            return ((unsigned long long)(unsigned)A << 32) | (unsigned long long)(unsigned)B;
+        };
+        // 要素型ごとの局所エッジ表: {局所節点 a, 局所節点 b, 面 f1, 面 f2}
+        std::map<geom_int, std::vector<std::array<int,4>>> localEdgeTable;
+        auto edgesOf = [&](geom_int ieleType) -> const std::vector<std::array<int,4>>& {
+            auto it = localEdgeTable.find(ieleType);
+            if (it != localEdgeTable.end()) return it->second;
+            const auto& faces = this->eleTypeMap.mapElementFromGmshID[ieleType].nodesOrderPlanes;
+            std::map<std::pair<int,int>, std::vector<int>> ce;
+            for (size_t lf = 0; lf < faces.size(); ++lf) {
+                const auto& L = faces[lf]; const int m = (int)L.size();
+                for (int k = 0; k < m; ++k) {
+                    const int a = (int)L[k], b = (int)L[(k+1)%m];
+                    ce[(a<b)?std::make_pair(a,b):std::make_pair(b,a)].push_back((int)lf);
+                }
+            }
+            std::vector<std::array<int,4>> tab;
+            for (auto& ekv : ce) {
+                if (ekv.second.size() != 2) {
+                    cerr << "[buildMedianDual3D] local edge (" << ekv.first.first << "," << ekv.first.second
+                         << ") of element type " << ieleType << " borders " << ekv.second.size() << " faces (expected 2).\n";
+                    exit(EXIT_FAILURE);
+                }
+                tab.push_back({ekv.first.first, ekv.first.second, ekv.second[0], ekv.second[1]});
+            }
+            return localEdgeTable.emplace(ieleType, std::move(tab)).first->second;
+        };
+        // pass 1: 全エッジキーを集めて昇順一意化 → エッジ番号表
+        std::vector<unsigned long long> edgeKeys;
+        {
+            size_t total = 0;
+            for (geom_int ic = 0; ic < this->nCells; ++ic) total += edgesOf(cells[ic].ieleType).size();
+            edgeKeys.reserve(total);
+            for (geom_int ic = 0; ic < this->nCells; ++ic) {
+                const auto& cn = cells[ic].iNodes;
+                for (const auto& e : edgesOf(cells[ic].ieleType)) edgeKeys.push_back(packKey(cn[e[0]], cn[e[1]]));
+            }
+            std::sort(edgeKeys.begin(), edgeKeys.end());
+            edgeKeys.erase(std::unique(edgeKeys.begin(), edgeKeys.end()), edgeKeys.end());
+        }
+        std::vector<DFA> dfa(edgeKeys.size());
 
         for (geom_int ic = 0; ic < this->nCells; ++ic)
         {
@@ -1751,29 +1798,16 @@ public:
                 Fc[lf] = { cx*inv, cy*inv, cz*inv };
             }
 
-            // 局所エッジ -> 接する 2 面 (local face id)。多面体エッジは必ず 2 面に属する。
-            std::map<std::pair<geom_int,geom_int>, std::vector<int>> ceFaces;
-            for (size_t lf = 0; lf < faces.size(); ++lf) {
-                const auto& L = faces[lf]; const int m = (int)L.size();
-                for (int k = 0; k < m; ++k) {
-                    const geom_int A = cn[L[k]], B = cn[L[(k+1)%m]];
-                    ceFaces[(A<B)?std::make_pair(A,B):std::make_pair(B,A)].push_back((int)lf);
-                }
-            }
-
-            for (auto& kv : ceFaces)
+            // 局所エッジ -> 接する 2 面 (要素型ごとの表, 上で 1 回だけ構築)
+            for (const auto& e : edgesOf(cells[ic].ieleType))
             {
-                const geom_int A = kv.first.first, B = kv.first.second;
-                if (kv.second.size() != 2) {
-                    cerr << "[buildMedianDual3D] edge (" << A << "," << B << ") in cell " << ic
-                         << " borders " << kv.second.size() << " faces (expected 2).\n";
-                    exit(EXIT_FAILURE);
-                }
+                geom_int A = cn[e[0]], B = cn[e[1]];
+                if (A > B) std::swap(A, B);
                 const double Ac[3] = { nodes[A].coords[0], nodes[A].coords[1], nodes[A].coords[2] };
                 const double Bc[3] = { nodes[B].coords[0], nodes[B].coords[1], nodes[B].coords[2] };
                 const double M[3]  = { 0.5*(Ac[0]+Bc[0]), 0.5*(Ac[1]+Bc[1]), 0.5*(Ac[2]+Bc[2]) };
-                const auto& F1 = Fc[kv.second[0]];
-                const auto& F2 = Fc[kv.second[1]];
+                const auto& F1 = Fc[e[2]];
+                const auto& F2 = Fc[e[3]];
 
                 // 双対面パッチ (M, F1, G, F2) を Newell 法で。A->B 向きに統一。
                 // 桁落ち対策 (plan architecture-median-dual-3d-double-geometry): Newell は
@@ -1792,7 +1826,8 @@ public:
                 const double pc[3] = { 0.25*(M[0]+F1[0]+G[0]+F2[0]),
                                        0.25*(M[1]+F1[1]+G[1]+F2[1]),
                                        0.25*(M[2]+F1[2]+G[2]+F2[2]) };
-                DFA& acc = dfMap[kv.first];
+                const auto kit = std::lower_bound(edgeKeys.begin(), edgeKeys.end(), packKey(A, B));
+                DFA& acc = dfa[(size_t)(kit - edgeKeys.begin())];
                 acc.v[0]+=pv[0]; acc.v[1]+=pv[1]; acc.v[2]+=pv[2];
                 acc.c[0]+=parea*pc[0]; acc.c[1]+=parea*pc[1]; acc.c[2]+=parea*pc[2]; acc.w+=parea;
 
@@ -1811,18 +1846,18 @@ public:
             }
         }
 
-        // ---- dfMap を双対面配列へ平坦化 (キー順=決定的) ----
-        const geom_int nDF = (geom_int)dfMap.size();
+        // ---- 双対面配列へ平坦化 (キー昇順 = 決定的、旧 std::map と同順) ----
+        const geom_int nDF = (geom_int)edgeKeys.size();
         dualFaceCells.assign(nDF * 2, -1);
         dualFaceVect.assign(nDF * 3, 0.0);
         dualFaceArea.assign(nDF, 0.0);
         dualFaceCent.assign(nDF * 3, 0.0);
         {
-            geom_int idf = 0;
-            for (auto& kv : dfMap) {
-                const DFA& a = kv.second;
-                dualFaceCells[2*idf+0] = kv.first.first;
-                dualFaceCells[2*idf+1] = kv.first.second;
+            for (geom_int idf = 0; idf < nDF; ++idf) {
+                const DFA& a = dfa[idf];
+                const geom_int keyA = (geom_int)(edgeKeys[idf] >> 32), keyB = (geom_int)(edgeKeys[idf] & 0xffffffffULL);
+                dualFaceCells[2*idf+0] = keyA;
+                dualFaceCells[2*idf+1] = keyB;
                 dualFaceVect[3*idf+0] = a.v[0];
                 dualFaceVect[3*idf+1] = a.v[1];
                 dualFaceVect[3*idf+2] = a.v[2];
@@ -1832,13 +1867,13 @@ public:
                     dualFaceCent[3*idf+1] = a.c[1]/a.w;
                     dualFaceCent[3*idf+2] = a.c[2]/a.w;
                 } else {
-                    const geom_int A = kv.first.first, B = kv.first.second;
-                    dualFaceCent[3*idf+0] = 0.5*(nodes[A].coords[0]+nodes[B].coords[0]);
-                    dualFaceCent[3*idf+1] = 0.5*(nodes[A].coords[1]+nodes[B].coords[1]);
-                    dualFaceCent[3*idf+2] = 0.5*(nodes[A].coords[2]+nodes[B].coords[2]);
+                    dualFaceCent[3*idf+0] = 0.5*(nodes[keyA].coords[0]+nodes[keyB].coords[0]);
+                    dualFaceCent[3*idf+1] = 0.5*(nodes[keyA].coords[1]+nodes[keyB].coords[1]);
+                    dualFaceCent[3*idf+2] = 0.5*(nodes[keyA].coords[2]+nodes[keyB].coords[2]);
                 }
-                ++idf;
             }
+            std::vector<DFA>().swap(dfa);
+            std::vector<unsigned long long>().swap(edgeKeys);
         }
 
         // 面積加重重心を正規化 (= 双対 CV の FV セル中心)。

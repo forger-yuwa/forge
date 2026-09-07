@@ -1,4 +1,5 @@
 #include "input/calcWallDistance_kdtree.hpp"
+#include <cstdlib>
 
 namespace {
 inline geom_float dist(const Point &a, const Point &b) {
@@ -39,6 +40,71 @@ void compute_bruteforce(const std::vector<Point> &walls,
             dmin = std::min(dmin, dist(w, c));
         }
         distance.push_back(dmin == std::numeric_limits<geom_float>::max() ? 0.0 : dmin);
+    }
+}
+
+// 内蔵 k-d tree (外部ライブラリ不要)。壁点集合を再帰的に中央値分割し、最近接探索は枝刈り付き。
+// 2026-09-08: 外部 kdtree が見つからないビルド (WSL native / AWS) はブルートフォース O(N·M) に落ちていて、
+// 2M 節点 × 13 万壁点で数分〜十数分かかっていた (変換時間の主因)。本実装で数秒。
+// 最近接距離は一意 (同距離のタイは距離値が同じ) なので結果はブルートフォースと一致する (float 丸めの範囲)。
+struct BuiltinKdTree {
+    struct Node { int lo, hi; int axis; geom_float split; int left, right; };
+    const std::vector<Point> &pts;
+    std::vector<int> idx;
+    std::vector<Node> nodes;
+    static constexpr int LEAF = 8;
+    explicit BuiltinKdTree(const std::vector<Point> &p) : pts(p), idx(p.size()) {
+        for (size_t i = 0; i < p.size(); ++i) idx[i] = (int)i;
+        if (!p.empty()) build(0, (int)p.size(), 0);
+    }
+    static geom_float coord(const Point &q, int ax) { return ax == 0 ? q.x : (ax == 1 ? q.y : q.z); }
+    int build(int lo, int hi, int depth) {
+        Node nd; nd.lo = lo; nd.hi = hi; nd.left = nd.right = -1; nd.axis = -1; nd.split = 0;
+        const int me = (int)nodes.size(); nodes.push_back(nd);
+        if (hi - lo > LEAF) {
+            // 分割軸: 範囲が最大の軸
+            geom_float mn[3] = { std::numeric_limits<geom_float>::max(), std::numeric_limits<geom_float>::max(), std::numeric_limits<geom_float>::max() };
+            geom_float mx[3] = { -mn[0], -mn[1], -mn[2] };
+            for (int i = lo; i < hi; ++i) for (int a = 0; a < 3; ++a) { const geom_float v = coord(pts[idx[i]], a); mn[a] = std::min(mn[a], v); mx[a] = std::max(mx[a], v); }
+            int ax = 0; for (int a = 1; a < 3; ++a) if (mx[a] - mn[a] > mx[ax] - mn[ax]) ax = a;
+            const int mid = (lo + hi) / 2;
+            std::nth_element(idx.begin() + lo, idx.begin() + mid, idx.begin() + hi,
+                             [&](int a, int b) { return coord(pts[a], ax) < coord(pts[b], ax); });
+            nodes[me].axis = ax; nodes[me].split = coord(pts[idx[mid]], ax);
+            const int l = build(lo, mid, depth + 1);
+            const int r = build(mid, hi, depth + 1);
+            nodes[me].left = l; nodes[me].right = r;
+        }
+        return me;
+    }
+    void nearest(int n, const Point &q, geom_float &best2) const {
+        const Node &nd = nodes[n];
+        if (nd.axis < 0) {
+            for (int i = nd.lo; i < nd.hi; ++i) {
+                const Point &w = pts[idx[i]];
+                const geom_float dx = w.x - q.x, dy = w.y - q.y, dz = w.z - q.z;
+                best2 = std::min(best2, dx*dx + dy*dy + dz*dz);
+            }
+            return;
+        }
+        const geom_float d = coord(q, nd.axis) - nd.split;
+        const int first = (d < 0) ? nd.left : nd.right, second = (d < 0) ? nd.right : nd.left;
+        nearest(first, q, best2);
+        if (d * d < best2) nearest(second, q, best2);
+    }
+};
+
+void compute_with_builtin_kdtree(const std::vector<Point> &walls,
+                                 const std::vector<Point> &cells,
+                                 std::vector<geom_float> &distance) {
+    if (walls.empty()) { distance.assign(cells.size(), geom_float(0)); return; }
+    BuiltinKdTree tree(walls);
+    distance.resize(cells.size());
+    #pragma omp parallel for schedule(static)
+    for (long j = 0; j < (long)cells.size(); ++j) {
+        geom_float best2 = std::numeric_limits<geom_float>::max();
+        tree.nearest(0, cells[j], best2);
+        distance[j] = std::sqrt(best2);
     }
 }
 } // namespace
@@ -91,7 +157,11 @@ void calcWallDistance_kdtree(solverConfig &cfg, mesh &msh, variables &var) {
 #ifdef HAVE_KDTREE
         compute_with_kdtree(wall_points, cell_points, distance);
 #else
-        compute_bruteforce(wall_points, cell_points, distance);
+        (void)compute_bruteforce;   // 参照用に残す (検証時は FORGE_WALLDIST_BRUTE=1 で切替)
+        if (std::getenv("FORGE_WALLDIST_BRUTE") != nullptr)
+            compute_bruteforce(wall_points, cell_points, distance);
+        else
+            compute_with_builtin_kdtree(wall_points, cell_points, distance);
 #endif
 
         // Copy into variable array (assumes var.c["wall_dist"] sized nCells_all)
