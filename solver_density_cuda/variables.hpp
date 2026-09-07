@@ -293,7 +293,7 @@ public:
     // 化学種 (M2): cellValNames / output_cellValNames へ 1 化学種ごとの変数を追加し、
     // c / c_d マップにも空エントリを作る。allocVariables より前に 1 度だけ呼ぶこと。
     // nSpecies <= 1 のときは何もしない (単成分は M1 経路)。
-    void registerSpecies(int nSpecies);
+    void registerSpecies(int nSpecies, int chemistry = 0);
 
     // 非平衡凝縮 (Phase 1): 凝縮種ごとに 4 モーメント (ρg,ρQ2,ρQ1,ρQ0) の保存量・原始量・RK ステージ・
     // 残差・point-implicit 対角を cellValNames / c / c_d へ追加する。allocVariables より前に

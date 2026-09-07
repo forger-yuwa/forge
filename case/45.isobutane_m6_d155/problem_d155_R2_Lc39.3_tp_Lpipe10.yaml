@@ -1,0 +1,62 @@
+# ② イソブタン燃焼ガス M6 / 出口径 1.55 m (物理壁定義) — 最短ロバスト点の Euler 検証
+# 条件 (2026-08-31 ユーザ指示): Pt 5.5 MPa / Tt 1600 K / φ=0.9 組成 (case/42 と同一) /
+#   出口径 1.55 m は δ* 込み物理壁で定義 / 全長最小化 / 出口 M ≈ 6 厳密。
+# 最短探索 (search_shortest.py, 基準 = plans/accepted/tooling-nozzle-shortest-robust-axis.md
+#   margin≥1°・topo≥0.02・hard gate・単峰, n1200 確認):
+#   R2: L_c=39.3/M_K=2.7 x_F=95.104 r_t (勝者) / R3: 39.7/2.8 x_F=95.433 → R2 採用。
+# r_t 導出: 物理出口半径 0.775 m = r_t·(A/A*)^0.5 + δ*_exit。semi-perfect Tt1600 の
+#   A/A*(M6)=88.21 (r_F/r_t=9.392)。δ*_exit 初期推定 0.66 r_t (case/42 run_0105 実測
+#   0.783 r_t を Re・全長でスケール) → r_t = 0.775/(9.392+0.66) = 0.0771 m。
+#   NS v3 の δ* 実測後に r_t を 1 回補正する (設計は r_t 単位で不変)。
+# p_ambient: P/Pt(M6, semi-perfect Tt1600) = 4.067e-4 × 5.5 MPa = 2237 Pa。
+# 凝縮の事前見積り: 出口 T 233.5 K vs H2O 飽和 263.9 K (x_H2O 0.1356, pH2O 303 Pa)
+#   = −30 K 過冷却 → dry 前提は出口近傍で破れる。方針 (a): 本 run は dry、採用点で
+#   凝縮 ON restart 再評価 (split_h2o は最初から有効にしておく)。
+name: isobutane_m6_d155_R2_Lc39.3_tp_Lpipe10
+type: wind_tunnel_axisym_axismach
+gas:
+  model: semiperfect
+  species: {CO2: 0.1677, H2O: 0.0858, O2: 0.0220, N2: 0.7245}
+  # 参照値 (semi-perfect では NASA-9 が優先。IC 初期推定と CPG フォールバック):
+  gamma: 1.27354        # γ* (スロート 1409 K, Tt 1600)
+  cp: 1360.0            # cp(T*=1409 K)
+
+spec:
+  Pt: 5.5e6
+  Tt: 1600.0
+  p_ambient: 2237.0
+  r_throat: 0.0771      # [m] 上記導出 (δ* 実測後に補正予定)
+  M_design: 6.0
+
+dv:
+  L_c: {value: 39.3, min: 20.0, max: 80.0}   # 最短ロバスト境界 (margin 1.002°)
+
+geometry:
+  R: 2.0
+  r_inlet: 6.485        # 入口配管の物理半径 0.5 m / r_t (収縮比 A_in/A* = 42.1)
+  L_U: 12.0             # μ = L_U²/(RΔr) = 13.1 ≤ 20 (単調収縮 OK)
+  L_pipe: 10.0
+  start_line: throat_char
+  n_start: 41
+  n_axis_inv: 1200
+  axis_dx0: 0.03
+  x_end_margin: 2.3
+  wall_mode: cplus
+  exit_mode: characteristic
+  axis_law: knot
+  M_knot: 2.7
+  Lc_mode: explicit
+
+mesh:
+  discretization: node
+  ni: 1100
+  nj: 65
+  wall_first_frac: 5.0e-3
+  throat_refine: 3.0
+
+evaluate:
+  nStepOuter: 12000
+  outStepInterval: 4000
+  cfl_main: 2.0
+  mid_stage: true
+  tp_species: split_h2o   # dry でも pseudo と同一 (M4.2 検証済)。凝縮 restart を可能にしておく

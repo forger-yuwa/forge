@@ -318,6 +318,15 @@ void solverConfig::read(std::string fname)
         this->implicitRelax = getOptionalValidatedValue<double>(deltaT, "implicitRelax", 1.0, "time.deltaT");
         this->updateGuardAlpha = getOptionalValidatedValue<double>(deltaT, "updateGuardAlpha", 0.0, "time.deltaT");
         this->lineImplicit = getOptionalValidatedValue<int>(deltaT, "lineImplicit", 0, "time.deltaT");
+        // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md):
+        //   lineKFreeze: dual-time のサブ反復間で K/diag/LU 分解を凍結 (subiter 0 のみ抽出・分解)。
+        //   lineViscCoupling: line 面にスカラー粘性結合 (K += α·I, 対角は 2α→α で真の [−α,2α,−α] 化)。
+        //   lineViscousDtRelief: on-line セルの擬似 dt 粘性スペクトル半径を (1−θ) 倍に割引 (θ∈[0,1])。
+        this->lineKFreeze = getOptionalValidatedValue<int>(deltaT, "lineKFreeze", 0, "time.deltaT");
+        this->lineViscCoupling = getOptionalValidatedValue<int>(deltaT, "lineViscCoupling", 0, "time.deltaT");
+        this->lineViscousDtRelief = getOptionalValidatedValue<double>(deltaT, "lineViscousDtRelief", 0.0, "time.deltaT");
+        this->lineDtDirectional = getOptionalValidatedValue<int>(deltaT, "lineDtDirectional", 0, "time.deltaT");
+        this->lineDtWallRelief = getOptionalValidatedValue<int>(deltaT, "lineDtWallRelief", 0, "time.deltaT");
         {
             double raw = getOptionalValidatedValue<double>(deltaT, "implicitRelaxSST", -1.0, "time.deltaT");
             this->implicitRelaxSST = (raw < 0.0) ? this->implicitRelax : (flow_float)raw;
@@ -606,6 +615,19 @@ void solverConfig::read(std::string fname)
         if (physProp["speciesDBFile"])          this->speciesDBFile = physProp["speciesDBFile"].as<std::string>();
         if (physProp["speciesDiffusionMethod"]) this->speciesDiffusionMethod = physProp["speciesDiffusionMethod"].as<int>();
         if (physProp["thermoHrefTemp"])         this->thermoHrefTemp = physProp["thermoHrefTemp"].as<double>();
+        if (physProp["chemistry"]) {
+            const YAML::Node ch = physProp["chemistry"];
+            this->chemEnabled       = getOptionalValidatedValue<int>(ch, "enabled", 0, "physProp.chemistry");
+            if (ch["mechanismFile"]) this->chemMechanismFile = ch["mechanismFile"].as<std::string>();
+            this->chemTmaxReaction  = getOptionalValidatedValue<double>(ch, "tMaxReaction", 6000.0, "physProp.chemistry");
+            this->chemFreezeBelowT  = getOptionalValidatedValue<double>(ch, "freezeBelowT", 0.0, "physProp.chemistry");
+            this->chemJacobianMode  = getOptionalValidatedValue<int>(ch, "jacobianMode", 1, "physProp.chemistry");
+            if (this->chemEnabled != 0) {
+                if (this->thermalMethod != 2) throw std::runtime_error("'physProp.chemistry.enabled: 1' requires thermalMethod: 2.");
+                if (this->nSpecies < 2)      throw std::runtime_error("'physProp.chemistry.enabled: 1' requires >=2 species.");
+                if (this->chemMechanismFile.empty()) throw std::runtime_error("'physProp.chemistry.mechanismFile' is required.");
+            }
+        }
         if (physProp["Sc"])                     this->Sc = physProp["Sc"].as<double>();
         if (physProp["Sc_t"])                   this->Sc_t = physProp["Sc_t"].as<double>();
         // 乱流シュミット数は turbulence.turbulentSchmidt でも設定可 (turbulentPrandtl と同じ場所)。

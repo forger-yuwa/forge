@@ -192,6 +192,10 @@ public:
     flow_float* line_Knext_d = nullptr;   // [25*nCells] 次隣への近傍行列
     double* line_W_d = nullptr;           // [25*nCells] Thomas scratch (D̃⁻¹·Knext)
     double* line_y_d = nullptr;           // [5*nCells]  Thomas scratch (前進 rhs)
+    double* line_LU_d = nullptr;          // [25*nCells] v2: D̃ の LU 因子 (factor/solve 分離)
+    signed char* line_piv_d = nullptr;    // [5*nCells]  v2: ピボット
+    unsigned char* line_fail_d = nullptr; // [nLines]    v2: factor 失敗フラグ (solve は dq 据え置き)
+    unsigned char* plane_wall_flag_d = nullptr; // [nPlanes] wall 種 bcond の境界面フラグ (lineDtWallRelief 診断用)
     void buildImplicitLines(const flow_float* ccx, const flow_float* ccy, const flow_float* ccz);
 
     // 等温壁 CV フラグ [nCells] (wall_isothermal bcond の CV=1)。node-centered 等温壁の壁ノード

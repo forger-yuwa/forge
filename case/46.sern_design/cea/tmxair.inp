@@ -1,0 +1,18 @@
+# TM X-71972 Table 1, power-off (phi=0) rows: pure air at (T3,p3)
+problem case=m4_off tp  t,k=338  p,bar=0.17888
+reac
+  name=Air moles=1 t,k=300
+output siunits
+end
+
+problem case=m6_off tp  t,k=448  p,bar=0.16327
+reac
+  name=Air moles=1 t,k=300
+output siunits
+end
+
+problem case=m10off tp  t,k=772  p,bar=0.14172
+reac
+  name=Air moles=1 t,k=300
+output siunits
+end

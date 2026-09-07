@@ -1,17 +1,14 @@
+# Dockerfile.cuda の各ステージに対応するサービス。
+#   docker compose run --rm dev    bash   # ParaView / GUI 込み (ローカル開発)
+#   docker compose run --rm cloud  bash   # Python + gmsh、GUI なし
+#   docker compose run --rm base   bash   # ビルド最小構成 (最軽量)
 services:
-  dev-cpu:
+  base:
+    image: forge-solver:cuda-base
     build:
       context: .
-      dockerfile: Dockerfile.dev
-    working_dir: /workspace
-    volumes:
-      - ./:/workspace
-    tty: true
-
-  dev-cuda:
-    build:
-      context: .
-      dockerfile: Dockerfile.cuda.dev
+      dockerfile: Dockerfile.cuda
+      target: base
     working_dir: /workspace
     volumes:
       - ./:/workspace
@@ -21,3 +18,40 @@ services:
         reservations:
           devices:
             - capabilities: [gpu]
+
+  cloud:
+    image: forge-solver:cuda-cloud
+    build:
+      context: .
+      dockerfile: Dockerfile.cuda
+      target: cloud
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+
+  dev:
+    image: forge-solver:cuda-dev
+    build:
+      context: .
+      dockerfile: Dockerfile.cuda
+      target: dev
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+
+  # 旧名の互換エイリアス (dev と同じ)
+  dev-cuda:
+    extends:
+      service: dev

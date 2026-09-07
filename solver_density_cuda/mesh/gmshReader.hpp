@@ -17,9 +17,6 @@
 #include <fstream>
 #include <iostream>
 
-#include <boost/algorithm/string.hpp>
-#include <boost/foreach.hpp>
-
 #include <stdio.h>                                                                                       
 
 #include <highfive/H5File.hpp>
@@ -248,7 +245,7 @@ public:
         getline(inputFile, line);
         getline(inputFile, line);
 
-        boost::split(l_str, line, boost::is_space());
+        splitOnSpace(l_str, line);
 
         this->gmshVersion = l_str[0];
 
@@ -270,7 +267,7 @@ public:
 
         getline(inputFile, line);
 
-        boost::split(l_str, line, boost::is_space());
+        splitOnSpace(l_str, line);
 
         if (l_str[0] != "$PhysicalNames") {
             cerr << "Error: unknown gmsh format phys" << endl;                                                                                                     
@@ -283,7 +280,7 @@ public:
         for (geom_int i = 0 ; i < nPhysName ; i++)
         {
             getline(inputFile, line);
-            boost::split(l_str, line, boost::is_space());
+            splitOnSpace(l_str, line);
 
             geom_int physDim = stoi(l_str[0]);
             geom_int physID  = stoi(l_str[1]);
@@ -304,7 +301,7 @@ public:
         getline(inputFile, line);
         getline(inputFile, line);
 
-        boost::split(l_str, line, boost::is_space());
+        splitOnSpace(l_str, line);
         this->nLineEnt   = stoi(l_str[1]);
         this->nSurfEnt   = stoi(l_str[2]);
         this->nVolumeEnt = stoi(l_str[3]);
@@ -320,7 +317,7 @@ public:
         for (geom_int i = 0 ; i<nLineEnt; i++)
         {
             getline(inputFile, line);
-            boost::split(l_str, line, boost::is_space());
+            splitOnSpace(l_str, line);
             lineEnt lineEnt_temp = lineEnt(stoi(l_str[0]), stof(l_str[1]), stof(l_str[2]), stof(l_str[3]),
                                            stof(l_str[4]), stof(l_str[5]), stof(l_str[6]),
                                            stoi(l_str[7]), stoi(l_str[8]));
@@ -342,7 +339,7 @@ public:
         for (geom_int i = 0 ; i<this->nSurfEnt ; i++)
         {
             getline(inputFile, line);
-            boost::split(l_str, line, boost::is_space());
+            splitOnSpace(l_str, line);
 
             surfEnt surfEnt_temp = surfEnt(stoi(l_str[0]), stof(l_str[1]), stof(l_str[2]), stof(l_str[3]),
                                            stof(l_str[4]), stof(l_str[5]), stof(l_str[6]),
@@ -353,7 +350,6 @@ public:
                 std::cerr << "nPhysTag = " << surfEnt_temp.nPhysTag << " " << surfEnt_temp.physTag  << std::endl;                                                                                                     
                 std::cerr << "Ent id = " << i   << std::endl;                                                                                                     
 
-                //BOOST_FOREACH (std::string s, l_str)
                 //{
                 //    std::cout << s << std::endl;
                 //}
@@ -369,7 +365,7 @@ public:
         for (geom_int i = 0 ; i<this->nVolumeEnt ; i++)
         {
             getline(inputFile, line);
-            boost::split(l_str, line, boost::is_space());
+            splitOnSpace(l_str, line);
 
             volumeEnt volumeEnt_temp = volumeEnt(stoi(l_str[0]), stof(l_str[1]), stof(l_str[2]), stof(l_str[3]),
                                                  stof(l_str[4]), stof(l_str[5]), stof(l_str[6]),
@@ -398,7 +394,7 @@ public:
         getline(inputFile, line);
         cout << line << endl;
 
-        boost::split(l_str, line, boost::is_space());
+        splitOnSpace(l_str, line);
         this->nNodes = stoi(l_str[1]);
         cout << "numNodes = " << this->nNodes << endl;
 
@@ -413,7 +409,7 @@ public:
         while (id_now < this->nNodes)
         {
             getline(inputFile, line);
-            boost::split(l_str, line, boost::is_space());
+            splitOnSpace(l_str, line);
             geom_int nn = stoi(l_str[3]);
 
             id_now += nn;
@@ -426,7 +422,7 @@ public:
             for (geom_int i = 0 ; i < nn ; i++)
             {
                 getline(inputFile, line);
-                boost::split(l_str, line, boost::is_space());
+                splitOnSpace(l_str, line);
                 geom_float x = stof(l_str[0]);
                 geom_float y = stof(l_str[1]);
                 geom_float z = stof(l_str[2]);
@@ -453,7 +449,7 @@ public:
         getline(inputFile, line); // $Elements
         getline(inputFile, line); // numEntities, numElements, iBegin, iEnd
 
-        boost::split(l_str, line, boost::is_space());
+        splitOnSpace(l_str, line);
         this->nElements= stoi(l_str[1]);
         cout << "numElements = " << this->nElements << endl;
 
@@ -470,13 +466,13 @@ public:
         while (iEle < this->nElements)
         {
             getline(inputFile, line);
-            boost::split(l_str, line, boost::is_space());
+            splitOnSpace(l_str, line);
             geom_int dimension   = stoi(l_str[0]);
             geom_int entTag      = stoi(l_str[1]);
             geom_int eleTypeGmsh = stoi(l_str[2]);
             geom_int nEleEnt     = stoi(l_str[3]);
 
-            boost::split(l_str, line, boost::is_space());
+            splitOnSpace(l_str, line);
 
 
             elementTypeFormat eleType = this->eleTypeMap.mapElementFromGmshID[eleTypeGmsh];
@@ -488,7 +484,7 @@ public:
             for (geom_int i = 0 ; i < nEleEnt ; i++)
             {
                 getline(inputFile, line);
-                boost::split(l_str, line, boost::is_space());
+                splitOnSpace(l_str, line);
 
                 vector<geom_int> nodes_temp;
 
@@ -1617,6 +1613,40 @@ public:
         }
 
         // 許容値は geom_float=float の累積丸めを考慮した値 (実バグは O(0.1-1) で明確に検出される)。
+        // 閉じていないノードを特定して出す (どこか分からないと切り分けができないため)。
+        // 閉性 = Σ(内部双対面) + 境界半割面 なので、**境界面に Physical タグが無い** (bcond に入らない
+        // → 半割面が作られない) ノードが最頻の原因。次いで非適合接続・重複ノード・未対応要素型。
+        // float 累積の丸めなら normalized は O(1e-3) 程度に留まり、実バグは O(0.1-1) になる。
+        auto reportOpenNodes = [&](double tol) {
+            std::vector<char> onBc(nN, 0);
+            for (const geom_int id : dualBnodeId) if (id >= 0 && id < nN) onBc[id] = 1;
+            std::vector<std::pair<double, geom_int>> bad;
+            for (geom_int in = 0; in < nN; ++in) {
+                const double c = std::sqrt(clos[3*in+0]*clos[3*in+0]
+                                         + clos[3*in+1]*clos[3*in+1]
+                                         + clos[3*in+2]*clos[3*in+2]) / std::max(refArea, 1e-30);
+                if (c > tol) bad.emplace_back(c, in);
+            }
+            if (bad.empty()) return;
+            geom_int nTagged = 0;
+            for (const auto& b : bad) if (onBc[b.second]) nTagged++;
+            std::sort(bad.begin(), bad.end(), std::greater<>());
+            cerr << "[buildMedianDual] 閉じていないノード: " << bad.size() << " / " << nN
+                 << " (うち bcond に属する = " << nTagged
+                 << ", 属さない = " << (geom_int)bad.size() - nTagged << ")\n";
+            if ((geom_int)bad.size() - nTagged > 0)
+                cerr << "[buildMedianDual]   → bcond に属さないノードが残っている場合、その面の "
+                        "Physical タグ漏れ (境界半割面が作られていない) を最初に疑うこと\n";
+            const size_t nShow = std::min<size_t>(bad.size(), 10);
+            cerr << "[buildMedianDual]   worst " << nShow << " (normalized, xyz, bcond所属):\n";
+            for (size_t k = 0; k < nShow; ++k) {
+                const geom_int in = bad[k].second;
+                cerr << "[buildMedianDual]     " << bad[k].first
+                     << "  (" << this->nodes[in].coords[0] << ", " << this->nodes[in].coords[1]
+                     << ", " << this->nodes[in].coords[2] << ")  "
+                     << (onBc[in] ? "bcond有" : "bcond無") << "\n";
+            }
+        };
         const double closTol = 1e-3;
         const double volTol  = 1e-3;
         if (volErr > volTol) {
@@ -1626,6 +1656,7 @@ public:
         if (maxClos/std::max(refArea,1e-30) > closTol) {
             cerr << "[buildMedianDual] ERROR: dual faces not closed (normalized="
                  << maxClos/std::max(refArea,1e-30) << ")\n";
+            reportOpenNodes(closTol);
             exit(EXIT_FAILURE);
         }
 
@@ -1920,6 +1951,40 @@ public:
                  << " primalArea=" << primalA << " sum|halfVect|=" << halfA << "\n";
         }
 
+        // 閉じていないノードを特定して出す (どこか分からないと切り分けができないため)。
+        // 閉性 = Σ(内部双対面) + 境界半割面 なので、**境界面に Physical タグが無い** (bcond に入らない
+        // → 半割面が作られない) ノードが最頻の原因。次いで非適合接続・重複ノード・未対応要素型。
+        // float 累積の丸めなら normalized は O(1e-3) 程度に留まり、実バグは O(0.1-1) になる。
+        auto reportOpenNodes = [&](double tol) {
+            std::vector<char> onBc(nN, 0);
+            for (const geom_int id : dualBnodeId) if (id >= 0 && id < nN) onBc[id] = 1;
+            std::vector<std::pair<double, geom_int>> bad;
+            for (geom_int in = 0; in < nN; ++in) {
+                const double c = std::sqrt(clos[3*in+0]*clos[3*in+0]
+                                         + clos[3*in+1]*clos[3*in+1]
+                                         + clos[3*in+2]*clos[3*in+2]) / std::max(refArea, 1e-30);
+                if (c > tol) bad.emplace_back(c, in);
+            }
+            if (bad.empty()) return;
+            geom_int nTagged = 0;
+            for (const auto& b : bad) if (onBc[b.second]) nTagged++;
+            std::sort(bad.begin(), bad.end(), std::greater<>());
+            cerr << "[buildMedianDual] 閉じていないノード: " << bad.size() << " / " << nN
+                 << " (うち bcond に属する = " << nTagged
+                 << ", 属さない = " << (geom_int)bad.size() - nTagged << ")\n";
+            if ((geom_int)bad.size() - nTagged > 0)
+                cerr << "[buildMedianDual]   → bcond に属さないノードが残っている場合、その面の "
+                        "Physical タグ漏れ (境界半割面が作られていない) を最初に疑うこと\n";
+            const size_t nShow = std::min<size_t>(bad.size(), 10);
+            cerr << "[buildMedianDual]   worst " << nShow << " (normalized, xyz, bcond所属):\n";
+            for (size_t k = 0; k < nShow; ++k) {
+                const geom_int in = bad[k].second;
+                cerr << "[buildMedianDual]     " << bad[k].first
+                     << "  (" << this->nodes[in].coords[0] << ", " << this->nodes[in].coords[1]
+                     << ", " << this->nodes[in].coords[2] << ")  "
+                     << (onBc[in] ? "bcond有" : "bcond無") << "\n";
+            }
+        };
         const double closTol = 1e-3;
         const double volTol  = 1e-3;
         if (volErr > volTol) {
@@ -1929,6 +1994,7 @@ public:
         if (maxClos/std::max(refArea,1e-30) > closTol) {
             cerr << "[buildMedianDual] ERROR: dual faces not closed (normalized="
                  << maxClos/std::max(refArea,1e-30) << ")\n";
+            reportOpenNodes(closTol);
             exit(EXIT_FAILURE);
         }
 

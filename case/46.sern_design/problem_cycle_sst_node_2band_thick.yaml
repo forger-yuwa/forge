@@ -1,0 +1,100 @@
+# ⑤ SERN 切り分け用: サイクル値作動点 × node SST を**旧 2 バンド** (ext_top 0) + カウル板厚 2e-3 で。
+# run_0035 (ext_top, 板厚 0) はカウル TE (x 1.2, y −0.11) で ω→inf (step 702) したので、板厚の効果を ext_top と分離して見る。
+#
+#   設計点 = M∞6 powered (spec.inflow / spec.external / gas)。逆設計はこれで固定 (作動点で形状は変えない)。
+#   作動点 = m6_on (巡航, NPR 35.4, w 0.5) / m10_on (最大 M, NPR 56.4, w 0.3) / m4_off (燃料遮断, NPR 2.8, w 0.2)
+#   低 NPR 点は「低速飛行」ではなく**燃料遮断 (power-off)**。M_3 = 2.91 で超音速なので sonic_throat 不要。
+#
+# 目的 = −(摩擦込み C_T の重み付き平均), L_ramp/H。制約 C_M,w (x_ref −20H) ≥ −2.5。剥離割合を台帳に記録。
+name: sern_cycle_sst_m4off_2band_thick
+type: sern_2d
+gas:                       # 設計点のガス = m6_on (H2-air 平衡, CEA GAMMAs / Mbar 24.43)
+  gamma: 1.1828
+  cp: 2202.1
+spec:
+  H_m: 0.1
+  inflow:                  # 設計点 = 燃焼器出口 (TM X-71972 station 3, M∞6 φ=1)
+    mode: supersonic
+    M_in: 1.6745
+    p_in: 101027.0
+    T_in: 2328.0
+  external:                # 設計点 = 自由流 (q̄ 71850 N/m^2 → h 24.2 km)
+    M_inf: 6.0
+    p_inf: 2851.0
+    T_inf: 220.8
+  operating_points:
+  - name: m6_on            # 巡航 (設計点と同一)。NPR 35.4
+    weight: 0.5
+    external: {M_inf: 6.0, p_inf: 2851.0, T_inf: 220.8}
+    inflow: {M_in: 1.6745, p_in: 101027.0, T_in: 2328.0}
+    gas: {gamma: 1.1828, cp: 2202.1}
+  - name: m10_on           # 最大飛行 M (φ=1.5 rich)。NPR 56.4 = 不足膨張側
+    weight: 0.3
+    external: {M_inf: 10.0, p_inf: 1026.0, T_inf: 227.5}
+    inflow: {M_in: 2.7486, p_in: 57935.0, T_in: 2222.0}
+    gas: {gamma: 1.2263, cp: 2118.8}
+  - name: m4_off           # 燃料遮断 (φ=0, 空気)。NPR 2.8 = 強い過膨張 → 剥離評価の対象
+    weight: 0.2
+    external: {M_inf: 4.0, p_inf: 6415.0, T_inf: 216.7}
+    inflow: {M_in: 2.9101, p_in: 17888.0, T_in: 338.0}
+    gas: {gamma: 1.3986, cp: 1007.2}
+  moment_ref:
+  - -20.0
+  - 0.0
+dv:
+  # M_c 範囲は設計点の変更で張り直した (2026-09-05): NPR 35.4 / γ 1.183 では完全膨張 M_e = 3.59 で、
+  # kernel 内に key point が在るのは M_c ≲ 3.4 まで。M_c 3.2 で既に L_ramp 16-20 H (旧 3.2-4.4 は不成立)。
+  M_c:
+    min: 2.4
+    max: 3.4
+    value: 2.9
+  f:
+    min: 0.35
+    max: 0.6
+    value: 0.45
+  theta_r0_deg:            # NASA 基準形のランプ 20° を範囲に含む
+    min: 10.0
+    max: 22.0
+    value: 15.0
+  theta_c0_deg:            # NASA 基準形のカウル 6° を範囲に含む
+    min: 2.0
+    max: 8.0
+    value: 5.0
+  L_cowl:                  # ランプが 2 倍以上長くなったので上限を広げた (NASA 基準形は 3.12 H)
+    min: 0.6
+    max: 2.5
+    value: 1.2
+geometry:
+  x_max_kernel: 14.0       # L_ramp が伸びたので kernel の march 上限も広げる (打ち切りは key point で効く)
+  nj_moc: 301
+  dx_moc: 0.002
+  nj_moc_probe: 151
+  dx_moc_probe: 0.004
+  L_ramp_max: 20.0         # NASA 基準形 18.5 H と同スケール
+mesh:
+  discretization: node
+  cowl_thickness: 0.002
+  ni_up: 16
+  ni_noz: 160              # L_ramp ~10 H に対する解像度補償 (旧 100 は L_ramp ~4 H 前提)
+  ni_plume: 180
+  nj_top: 81
+  nj_bot: 51
+  L_up: 0.5
+  x_out_extra: 2.0
+  bot_depth: 3.0
+  first_wall_frac: 0.004
+  ext_top: 0               # ランプ側外部流 (機体上面・base・後流 + 自由流バンド, plan §4.11)。無いと過膨張でも剥離が起きない
+  top_depth: 2.0
+  nj_ext_top: 41
+  nj_wake: 9
+  vehicle_clearance: 0.02
+  first_top_frac: 0.02
+  vehicle_taper: 2.0      # 後縁手前 2H で機体厚を 0 に絞り TE 共有 (鉛直 base は node で発散: run_0034)
+evaluate:
+  model: sst
+  nStepOuter: 4000
+  cfl_main: 1.0
+  outStepInterval: 500
+opt:
+  soft_steps: 2000
+  cm_min: -2.5

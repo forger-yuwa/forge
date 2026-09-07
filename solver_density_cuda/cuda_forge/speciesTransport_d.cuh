@@ -19,6 +19,9 @@ void speciesInit_d(solverConfig& cfg, variables& var);
 // dependentVariables_d_wrapper へ渡す device roY 配列ポインタ。
 // 単成分時は nullptr (混合則 thermo は Y={1} に縮退)。
 flow_float** species_roY_device_ptr();
+// 化学反応ソース (chemistry_d.cu) 用: res_roY{s} / src_jac_Y{s} の device ポインタ配列 (単成分は nullptr)。
+flow_float** species_resroY_device_ptr();
+flow_float** species_srcjac_device_ptr();
 
 // face 整合再構成 (speciesFaceReconstruction==1) 用: Y{s}/∇Y{s} の device ポインタ配列と勾配計算。
 flow_float** species_Y_device_ptr();

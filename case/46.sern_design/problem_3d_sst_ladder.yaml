@@ -1,0 +1,77 @@
+# 3D 外側空間あり・加速点・node SST、top_out = slip。
+# **2D で確立した段階起動レシピ (plan §4.12) を 3D にそのまま移植**した構成 (2026-09-06)。
+# run_0028 は「Euler 場を index コピー + soft cfl 0.25」で soft 段 step 686 に 3 重点で ω 発散した。
+# 2D の決定打だった **層流暖機段 (turbulence none + 粘性)** と **mid 段 (2 次 + soft CFL)** は 3D で未試行だった。
+name: sern_3d_sst_ladder
+type: sern_2d
+gas:
+  gamma: 1.4
+  cp: 1004.5
+spec:
+  H_m: 0.1
+  inflow:
+    mode: supersonic
+    M_in: 2.5
+    p_in: 20000.0
+    T_in: 900.0
+  external:
+    M_inf: 6.0
+    p_inf: 1000.0
+    T_inf: 220.0
+  moment_ref:
+  - 0.0
+  - 0.0
+  operating_points:
+  - name: accel
+    weight: 1.0
+    external:
+      M_inf: 3.5
+      p_inf: 4000.0
+      T_inf: 230.0
+dv:
+  M_c: 3.9
+  f: 0.45
+  theta_r0_deg: 15.0
+  theta_c0_deg: 5.0
+  L_cowl: 1.0
+geometry:
+  x_max_kernel: 9.0
+  nj_moc: 301
+  dx_moc: 0.002
+mesh:
+  discretization: node
+  cowl_thickness: 0.0
+  ni_up: 16
+  ni_noz: 120
+  ni_plume: 220
+  nj_top: 101
+  nj_bot: 61
+  L_up: 0.5
+  x_out_extra: 2.0
+  bot_depth: 3.0
+  first_wall_frac: 0.004
+evaluate:
+  model: sst
+  nStepOuter: 4000
+  cfl_main: 0.5            # 2D で 1.0 は限界的だった (run により発散)。3D は 3 重点があるので最初から 0.5
+  p_min: 20.0              # 2D と同じ EOS 圧力床 (既定 1.0 Pa は外部流の膨張で割れる)
+  outStepInterval: 500
+  top_out_kind: slip
+mesh3d:
+  W: 2.0
+  Z_ext: 1.5
+  nz_in: 25
+  nz_out: 15
+  ni_up: 10
+  ni_noz: 60
+  ni_plume: 110
+  nj_top: 49
+  nj_bot: 31
+  first_wall_frac: 0.004
+  first_z_frac: 0.004
+opt:
+  warm_lam_steps: 2000     # 層流暖機 (turbulence none)。2D でカウル TE せん断層の ω 発散を止めた決定打
+  warm_lam_cfl: 0.2
+  soft_steps: 2000
+  soft_cfl: 0.2            # 2D の 0.5 では m10_on が角で発散した。3D も同値から入る
+  mid_steps: 2000          # 2 次 + soft CFL の中間段 (次数と CFL を同時に上げない)

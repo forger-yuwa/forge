@@ -762,7 +762,8 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
  const geom_int* line_next,
  flow_float* Kprev,
  flow_float* Knext,
- int storeLU
+ int storeLU,
+ int lineViscCoupling
 )
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
@@ -888,7 +889,21 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
                 // 粘性対角は residual の粘性流束 Jacobian (2ν·ss²/dcc_dot_s = 2ν·delta/dcc) と整合させる
                 // (旧 face_area·(2ν/delta) は ≈2ν に潰れ近軸で r 重み喪失・ゼロ面積面にスプリアス。詳細は site1 コメント)。
                 const ST viscous_diag = static_cast<ST>(2.0) * nu_eff * delta / dcc;
-                block_dplur::add_identity_scaled(diag_block, viscous_diag);
+                if (isLineFace && lineViscCoupling != 0) {
+                    // v2 (plans/active/time_integration-line-implicit-viscous-v2.md): line 面は
+                    // スカラー粘性結合 K += α·I (α=ν_eff·δ/dcc) と対にし、対角は 2α→α に置換して
+                    // 真の 1D 拡散行 [−α, 2α, −α] を line 内で完成させる (off-line 面は従来 2α のまま)。
+                    const ST alpha = static_cast<ST>(0.5) * viscous_diag;
+                    block_dplur::add_identity_scaled(diag_block, alpha);
+                    if (storeLU != 0) {
+                        flow_float* Kdst = (other_ic == lp) ? Kprev : Knext;
+                        #pragma unroll
+                        for (int i = 0; i < 5; ++i)
+                            if (!rowDec[i]) Kdst[(size_t)ic * 25 + i * 5 + i] += static_cast<flow_float>(alpha);
+                    }
+                } else {
+                    block_dplur::add_identity_scaled(diag_block, viscous_diag);
+                }
             }
         }
 
@@ -1287,7 +1302,7 @@ void swapScalarImplicitCorrectionBuffers(variables& var)
 //TODO     __syncthreads();
 //TODO }
 
-void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
+void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var , int lineStoreK)
 {
     // 軸対称エンコード: 0=非軸対称 / 1=r 重み方式 (hoop Jacobian) / 2=SU2 流 planar+ソース (SU2 4x4 Jacobian)。
     // ==1 判定しかしない旧カーネル (scalar/lowmach) は 2 のとき軸対称 Jacobian を持たない (source lag, 定常解不変)。
@@ -1400,7 +1415,7 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 ((cfg.discretization == "node") ? 1 : 0),  /* isNode: 5e 境界半割面の粘性対角スキップ */ \
                 ((cfg.lineImplicit == 1) ? msh.line_prev_d : nullptr), \
                 ((cfg.lineImplicit == 1) ? msh.line_next_d : nullptr), \
-                msh.line_Kprev_d, msh.line_Knext_d, ((loop == 0) ? 1 : 0)  /* line-implicit */
+                msh.line_Kprev_d, msh.line_Knext_d, (((loop == 0) && (lineStoreK != 0)) ? 1 : 0), cfg.lineViscCoupling  /* line-implicit */
             if (cfg.implicitSolvePrecision == 1)
                 implicit_defect_correction_block_d<double><<<block_grid , block_threads>>>(FORGE_BDPLUR_ARGS);
             else
@@ -1638,6 +1653,149 @@ __global__ void lineThomas_d
     }
 }
 
+// v2 (plans/active/time_integration-line-implicit-viscous-v2.md): factor/solve 分離。
+// 前進消去の M̃_k = D_k − Kprev·W_{k−1} の構築・LU 分解・W_k = M̃⁻¹Knext は rhs に依存しない
+// (D, K は storeLU 時に凍結) ので、storeLU のタイミングで 1 回だけ行い LU/piv/W を保存する。
+// sweep 毎の solve は保存済み因子での代入 (Kp·y 25 積 + LASWP 前進/後退) だけになる。
+// モノリシック版 (lineThomas_d) は毎 sweep この 5 列 solve + Kp·W (625 積) を再計算しており、
+// これが DDES A/B での step 単価 2.44 倍の主犯 — 分離は厳密 (近似ゼロ) の最適化。
+__global__ void lineThomasFactor_d
+(
+ geom_int nLines,
+ const geom_int* line_offsets,
+ const geom_int* line_cells,
+ const flow_float* Kprev, const flow_float* Knext,
+ const flow_float* d00, const flow_float* d01, const flow_float* d02, const flow_float* d03, const flow_float* d04,
+ const flow_float* d10, const flow_float* d11, const flow_float* d12, const flow_float* d13, const flow_float* d14,
+ const flow_float* d20, const flow_float* d21, const flow_float* d22, const flow_float* d23, const flow_float* d24,
+ const flow_float* d30, const flow_float* d31, const flow_float* d32, const flow_float* d33, const flow_float* d34,
+ const flow_float* d40, const flow_float* d41, const flow_float* d42, const flow_float* d43, const flow_float* d44,
+ double* Wd, double* LUd, signed char* pivd, unsigned char* faild
+)
+{
+    const geom_int l = blockDim.x * blockIdx.x + threadIdx.x;
+    if (l >= nLines) return;
+    const geom_int b = line_offsets[l];
+    const geom_int e = line_offsets[l + 1];
+    faild[l] = 0;
+
+    for (geom_int p = b; p < e; ++p) {
+        const geom_int ic = line_cells[p];
+        double M[5][5] = {
+            {(double)d00[ic],(double)d01[ic],(double)d02[ic],(double)d03[ic],(double)d04[ic]},
+            {(double)d10[ic],(double)d11[ic],(double)d12[ic],(double)d13[ic],(double)d14[ic]},
+            {(double)d20[ic],(double)d21[ic],(double)d22[ic],(double)d23[ic],(double)d24[ic]},
+            {(double)d30[ic],(double)d31[ic],(double)d32[ic],(double)d33[ic],(double)d34[ic]},
+            {(double)d40[ic],(double)d41[ic],(double)d42[ic],(double)d43[ic],(double)d44[ic]}};
+        if (p > b) {
+            const geom_int icm = line_cells[p - 1];
+            double Kp[5][5];
+            for (int i = 0; i < 5; ++i)
+                for (int j = 0; j < 5; ++j)
+                    Kp[i][j] = (double)Kprev[(size_t)ic * 25 + i * 5 + j];
+            for (int i = 0; i < 5; ++i)
+                for (int j = 0; j < 5; ++j) {
+                    double macc = 0.0;
+                    for (int m = 0; m < 5; ++m) macc += Kp[i][m] * Wd[(size_t)icm * 25 + m * 5 + j];
+                    M[i][j] -= macc;
+                }
+        }
+        int piv[5];
+        if (!line_implicit::lu5_factor(M, piv)) { faild[l] = 1; return; }
+        for (int i = 0; i < 5; ++i) {
+            pivd[(size_t)ic * 5 + i] = (signed char)piv[i];
+            for (int j = 0; j < 5; ++j) LUd[(size_t)ic * 25 + i * 5 + j] = M[i][j];
+        }
+        if (p + 1 < e) {                                        // W_k = M̃⁻¹·Knext_k
+            for (int j = 0; j < 5; ++j) {
+                double col[5];
+                for (int i = 0; i < 5; ++i) col[i] = (double)Knext[(size_t)ic * 25 + i * 5 + j];
+                line_implicit::lu5_solve(M, piv, col);
+                for (int i = 0; i < 5; ++i) Wd[(size_t)ic * 25 + i * 5 + j] = col[i];
+            }
+        }
+    }
+}
+
+__global__ void lineThomasSolve_d
+(
+ geom_int nLines,
+ const geom_int* line_offsets,
+ const geom_int* line_cells,
+ const flow_float* Kprev,
+ const double* Wd, const double* LUd, const signed char* pivd, const unsigned char* faild,
+ const flow_float* rhs0, const flow_float* rhs1, const flow_float* rhs2, const flow_float* rhs3, const flow_float* rhs4,
+ const flow_float* dq_old_0, const flow_float* dq_old_1, const flow_float* dq_old_2, const flow_float* dq_old_3, const flow_float* dq_old_4,
+ flow_float* dq_new_0, flow_float* dq_new_1, flow_float* dq_new_2, flow_float* dq_new_3, flow_float* dq_new_4,
+ flow_float implicit_relax,
+ double* yd
+)
+{
+    const geom_int l = blockDim.x * blockIdx.x + threadIdx.x;
+    if (l >= nLines) return;
+    const geom_int b = line_offsets[l];
+    const geom_int e = line_offsets[l + 1];
+    if (faild[l] != 0) {
+        for (geom_int p = b; p < e; ++p) {
+            const geom_int ic = line_cells[p];
+            dq_new_0[ic] = dq_old_0[ic]; dq_new_1[ic] = dq_old_1[ic]; dq_new_2[ic] = dq_old_2[ic];
+            dq_new_3[ic] = dq_old_3[ic]; dq_new_4[ic] = dq_old_4[ic];
+        }
+        return;
+    }
+
+    // ---- 前進 (保存因子で代入のみ) ----
+    for (geom_int p = b; p < e; ++p) {
+        const geom_int ic = line_cells[p];
+        double bk[5] = {(double)rhs0[ic],(double)rhs1[ic],(double)rhs2[ic],(double)rhs3[ic],(double)rhs4[ic]};
+        if (p > b) {
+            const geom_int icm = line_cells[p - 1];
+            for (int i = 0; i < 5; ++i) {
+                double bacc = 0.0;
+                for (int m = 0; m < 5; ++m)
+                    bacc += (double)Kprev[(size_t)ic * 25 + i * 5 + m] * yd[(size_t)icm * 5 + m];
+                bk[i] += bacc;
+            }
+        }
+        double M[5][5];
+        int piv[5];
+        for (int i = 0; i < 5; ++i) {
+            piv[i] = (int)pivd[(size_t)ic * 5 + i];
+            for (int j = 0; j < 5; ++j) M[i][j] = LUd[(size_t)ic * 25 + i * 5 + j];
+        }
+        line_implicit::lu5_solve(M, piv, bk);
+        for (int i = 0; i < 5; ++i) yd[(size_t)ic * 5 + i] = bk[i];
+    }
+
+    // ---- 後退代入 (relax を掛けて dq_new へ) ----
+    double dq[5];
+    {
+        const geom_int ic = line_cells[e - 1];
+        for (int i = 0; i < 5; ++i) dq[i] = yd[(size_t)ic * 5 + i];
+        dq_new_0[ic] = (flow_float)(implicit_relax * dq[0]);
+        dq_new_1[ic] = (flow_float)(implicit_relax * dq[1]);
+        dq_new_2[ic] = (flow_float)(implicit_relax * dq[2]);
+        dq_new_3[ic] = (flow_float)(implicit_relax * dq[3]);
+        dq_new_4[ic] = (flow_float)(implicit_relax * dq[4]);
+    }
+    for (geom_int p = e - 2; p >= b; --p) {
+        const geom_int ic = line_cells[p];
+        double nx[5];
+        for (int i = 0; i < 5; ++i) {
+            double acc = yd[(size_t)ic * 5 + i];
+            for (int m = 0; m < 5; ++m) acc += Wd[(size_t)ic * 25 + i * 5 + m] * dq[m];
+            nx[i] = acc;
+        }
+        for (int i = 0; i < 5; ++i) dq[i] = nx[i];
+        dq_new_0[ic] = (flow_float)(implicit_relax * dq[0]);
+        dq_new_1[ic] = (flow_float)(implicit_relax * dq[1]);
+        dq_new_2[ic] = (flow_float)(implicit_relax * dq[2]);
+        dq_new_3[ic] = (flow_float)(implicit_relax * dq[3]);
+        dq_new_4[ic] = (flow_float)(implicit_relax * dq[4]);
+        if (p == b) break;   // geom_int が unsigned の場合の負回りガード
+    }
+}
+
 // 診断: ライン CV を「保存済み diag/rhs の点解」だけで更新する (K/Thomas 不使用)。
 // FORGE_LINE_DEBUG_POINT=1 で有効。格納 (diag/rhs) の正しさと Thomas 本体の切り分け用。
 __global__ void lineDebugPoint_d
@@ -1679,6 +1837,34 @@ __global__ void lineDebugPoint_d
     }
 }
 
+// v2: モノリシック版へ戻す退避スイッチ (FORGE_LINE_MONO=1)。既定は factor/solve 分離。
+static bool lineMonoEnabled() {
+    static const bool v = [](){ const char* e = getenv("FORGE_LINE_MONO"); return e && atoi(e) != 0; }();
+    return v;
+}
+
+// factor 位相: storeLU した sweep の直後に 1 回だけ呼ぶ (blockDPLURSolve が管理)。
+void lineThomasFactor_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    if (msh.nImplicitLines <= 0) return;
+    if (lineMonoEnabled()) return;   // モノリシック時は毎 sweep の lineThomas_d が全てやる
+    static const bool dbgPoint = [](){ const char* e = getenv("FORGE_LINE_DEBUG_POINT"); return e && atoi(e) != 0; }();
+    static const bool dbgNoop = [](){ const char* e = getenv("FORGE_LINE_NOOP"); return e && atoi(e) != 0; }();
+    if (dbgNoop || dbgPoint) return;
+    const int threads = 64;
+    const int grid = (int)((msh.nImplicitLines + threads - 1) / threads);
+    lineThomasFactor_d<<<grid, threads>>>(
+        msh.nImplicitLines, msh.line_offsets_d, msh.line_cells_d,
+        msh.line_Kprev_d, msh.line_Knext_d,
+        var.c_d["diag_block_00"], var.c_d["diag_block_01"], var.c_d["diag_block_02"], var.c_d["diag_block_03"], var.c_d["diag_block_04"],
+        var.c_d["diag_block_10"], var.c_d["diag_block_11"], var.c_d["diag_block_12"], var.c_d["diag_block_13"], var.c_d["diag_block_14"],
+        var.c_d["diag_block_20"], var.c_d["diag_block_21"], var.c_d["diag_block_22"], var.c_d["diag_block_23"], var.c_d["diag_block_24"],
+        var.c_d["diag_block_30"], var.c_d["diag_block_31"], var.c_d["diag_block_32"], var.c_d["diag_block_33"], var.c_d["diag_block_34"],
+        var.c_d["diag_block_40"], var.c_d["diag_block_41"], var.c_d["diag_block_42"], var.c_d["diag_block_43"], var.c_d["diag_block_44"],
+        msh.line_W_d, msh.line_LU_d, msh.line_piv_d, msh.line_fail_d);
+    gpuErrchk( cudaPeekAtLastError() );
+}
+
 void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     if (msh.nImplicitLines <= 0) return;
@@ -1703,6 +1889,20 @@ void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, va
     }
     const int threads = 64;
     const int grid = (int)((msh.nImplicitLines + threads - 1) / threads);
+    if (!lineMonoEnabled()) {
+        // v2 既定: 保存済み LU/piv/W での代入のみ (factor は lineThomasFactor_d_wrapper が実施済み)。
+        lineThomasSolve_d<<<grid, threads>>>(
+            msh.nImplicitLines, msh.line_offsets_d, msh.line_cells_d,
+            msh.line_Kprev_d,
+            msh.line_W_d, msh.line_LU_d, msh.line_piv_d, msh.line_fail_d,
+            var.c_d["rhs_block_0"], var.c_d["rhs_block_1"], var.c_d["rhs_block_2"], var.c_d["rhs_block_3"], var.c_d["rhs_block_4"],
+            var.c_d["dq_block_old_0"], var.c_d["dq_block_old_1"], var.c_d["dq_block_old_2"], var.c_d["dq_block_old_3"], var.c_d["dq_block_old_4"],
+            var.c_d["dq_block_new_0"], var.c_d["dq_block_new_1"], var.c_d["dq_block_new_2"], var.c_d["dq_block_new_3"], var.c_d["dq_block_new_4"],
+            cfg.implicitRelax,
+            msh.line_y_d);
+        gpuErrchk( cudaPeekAtLastError() );
+        return;
+    }
     lineThomas_d<<<grid, threads>>>(
         msh.nImplicitLines, msh.line_offsets_d, msh.line_cells_d,
         msh.line_Kprev_d, msh.line_Knext_d,

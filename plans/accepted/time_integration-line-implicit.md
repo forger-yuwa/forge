@@ -85,3 +85,11 @@ case/45 M6 NS (run_0015_cflsweep probes7–10):
 - 2026-09-02: 起票・実装 (mesh ライン構築 / sweep カーネル K 抽出・保存 / lineThomas / config)。
 - 2026-09-02: lu5 ピボットバグ修正・検証完了。上限不変 (+15 %/step) で done。診断 env
   (`FORGE_LINE_MAXLEN`/`FORGE_LINE_NOOP`/`FORGE_LINE_DEBUG_POINT`) は残置。
+- 2026-09-02: **壁解像 DDES での A/B (case/39 periodic hills ny160, run_diag_lineimp_ctrl/on)** —
+  本番 dual-time 構成 (dt 2e-6, nSub20, cfl_pseudo1, ir0.5) の発達乱流場 300 step 同一窓。
+  持続サブ反復収束は roe +0.12 桁/20subiter・roUx +0.04 桁のみ (ctrl@20 相当到達 subiter 17-19)、
+  step 単価は 2.44 倍 → **DDES では不採用**。ωバースト統計不変。リスタート過渡の回復のみ顕著 (roe 終端 1/18)。
+  解釈: v1 は対流 K のみで粘性隣接結合が line 行列に無く (`viscous_diag` の対角集中のみ)、
+  pseudo-dt の粘性スペクトル半径 (`setDT_d.cu` の 2ν/Δn 項) を割り引く根拠が作れない。
+  DDES で効かせるには ①粘性非対角ブロック (まずスカラー αI 近似) の追加 + line 方向粘性 CFL の段階割引
+  (lineViscousDtRelief) と ② K 抽出コストの削減 (サブ反復間の K 凍結等) の両方が前提。

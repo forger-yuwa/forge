@@ -13,7 +13,7 @@ void compute_with_kdtree(const std::vector<Point> &walls,
                                                  const std::vector<Point> &cells,
                                                  std::vector<geom_float> &distance) {
     kdtree *tree = kd_create(3);
-    boost::scoped_array<int> indices(new int[walls.size()]);
+    std::unique_ptr<int[]> indices(new int[walls.size()]);
     for (int i = 0; i < static_cast<int>(walls.size()); ++i) {
         indices[i] = i;
         kd_insert3(tree, walls[i].x, walls[i].y, walls[i].z, &indices[i]);

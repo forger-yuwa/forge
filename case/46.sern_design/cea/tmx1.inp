@@ -1,0 +1,42 @@
+# NASA TM X-71972 Table 1 combustor-exit states -> gas properties (equilibrium) at given (T3,p3)
+problem case=m4_on tp  t,k=2343  p,bar=1.57717
+   o/f=34.32
+reac
+  fuel=H2  wt%=100 t,k=300
+  oxid=Air wt%=100 t,k=300
+output siunits
+end
+
+problem case=m6_on tp  t,k=2328  p,bar=1.01027
+   o/f=34.32
+reac
+  fuel=H2  wt%=100 t,k=300
+  oxid=Air wt%=100 t,k=300
+output siunits
+end
+
+problem case=m10on tp  t,k=2222  p,bar=0.57935
+   o/f=22.88
+reac
+  fuel=H2  wt%=100 t,k=300
+  oxid=Air wt%=100 t,k=300
+output siunits
+end
+
+problem case=m4_off tp  t,k=338  p,bar=0.17888
+reac
+  oxid=Air wt%=100 t,k=300
+output siunits
+end
+
+problem case=m6_off tp  t,k=448  p,bar=0.16327
+reac
+  oxid=Air wt%=100 t,k=300
+output siunits
+end
+
+problem case=m10off tp  t,k=772  p,bar=0.14172
+reac
+  oxid=Air wt%=100 t,k=300
+output siunits
+end

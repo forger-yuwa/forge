@@ -146,7 +146,7 @@ Docker 経由で上記を手動実行する場合は、必ず `--user "$(id -u):
 
 ```bash
 cd /home/sano/work/forge/solver_density_cuda
-docker build -f Dockerfile.cuda.dev -t forge-solver:cuda-dev .
+./tools/docker_build.sh dev      # forge-solver:cuda-dev
 
 cd /home/sano/work/forge/case/20.naca_ml/001.test
 cp -r run_slau run_slau_20260510_implicit_check
@@ -188,7 +188,7 @@ cd /home/sano/work/forge/solver_density_cuda
 
 - これらのスクリプトはコンテナ内ではなくホスト側から実行する。
 - WSL2 では WSLg を前提に GUI 転送する。
-- ParaView のアイコン表示が崩れる場合は `solver_density_cuda/Dockerfile.cuda.dev` から Docker イメージを再ビルドする。
+- ParaView のアイコン表示が崩れる場合は `solver_density_cuda/tools/docker_build.sh dev` で Docker イメージを再ビルドする。
 
 ## ParaView プラグイン (マッハ数 / シュリーレン / Q 値 / ヘリシティ)
 

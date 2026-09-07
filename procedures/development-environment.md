@@ -5,7 +5,9 @@
 ## 基本方針
 
 - 通常のコード修正、ビルド、ケース実行は Docker コンテナを基本とする。
-- `solver_density_cuda` の開発環境は、`Dockerfile.cuda.dev` とそのコンテナ実行を既定の流れとして扱う。
+- `solver_density_cuda` の開発環境は、`Dockerfile.cuda` の `dev` ステージとそのコンテナ実行を既定の流れとして扱う。
+  イメージは 1 つの多段 Dockerfile から `base` (ビルド最小) / `cloud` (+Python・gmsh) / `dev` (+ParaView・GUI) を切り出す。
+  ビルドは `solver_density_cuda/tools/docker_build.sh {base|cloud|dev|all}`。詳細は [`solver_density_cuda/README_docker.md`](../solver_density_cuda/README_docker.md)。
 - コンテナ内でビルドした成果物を使ってケースを実行する運用を標準とする。
 
 ## Docker を既定とする理由
@@ -97,7 +99,7 @@ docker run --rm --gpus all \
 AWS の GPU インスタンス (基準: `g5.xlarge`, us-east-1) で Docker ビルド・計算投入・速度計測を行う手順は
 [`cloud-aws-gpu.md`](cloud-aws-gpu.md) を参照。クラウドの Linux native ホストでは本文書の
 「速度評価は native」ルールをそのまま適用でき、WSL で不能だった `nsys` の解析までインスタンス内で完結する。
-クラウド用イメージは `solver_density_cuda/Dockerfile.cuda.cloud` (ParaView GUI 無し、gmsh はヘッドレス同梱)。
+クラウド用イメージは `Dockerfile.cuda` の `cloud` ステージ (ParaView GUI 無し、gmsh はヘッドレス同梱)。`./tools/docker_build.sh cloud` で作る。
 メッシングは gmsh スクリプトで、可視化は pvserver + SSH トンネルでクラウド完結できる (手順は同文書)。
 
 ## 関連文書

@@ -518,3 +518,4 @@ Tt 1058 K / 旧組成 H₂O 4.63 mol%)** を流し、それぞれ dry / 非平�
 | `run_0018_va_R2_LU6_Lc8_ns_v2` | v2 初回 — 本段開始時に binary 再ビルド中で rc 127 | 結果なし、削除済 (`run_0020` で再投入) | 削除済 |
 | — | 設計のみスイープ 21 点 → `study_design_va.json` (`study_design_va.py`; R2/L_c11 のみ単調窓外、他全合格) | | ref |
 | — | 推奨形状エクスポート `export_wall_va.py` → `points_va_best_{euler,ns}.csv` / `nozzle_va_best_{euler,ns}.geo` (+ L_c9 版) | | ref |
+| **`run_0107_va_R2_LU6_Lc8_ns_ib_pass0`** | **排除厚さ更新計画 V4 (移植性)**: 積分法 (CONTUR) 初期壁 pass 0 を case/45 と同一設定で適用 (`feedback/deltastar_loop.py --init-integral`, 固定 Euler 参照 `run_0005`, 半径方向オフセット, IC=run_0021 cross-mesh; [plan](../../plans/accepted/tooling-nozzle-deltastar-core-matched-euler.md)) | 完走・NaN 0・品質 PASS・ALL STEADY。**ṁ_NS/ṁ_E = 0.9992 (v3 run_0021 は 1.0080)、出口面コア M 4.1900〜4.1914 (0.00〜+0.03 %; v3 は −0.17〜−0.28 %)、軸 M は試験部で Euler +0.02〜0.12 %**。抽出 δ_r との差 ≤1 %。スロート補正 0.0010 r_t (v3 0.0053) | active (**新チェーン正本**) |

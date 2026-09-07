@@ -1,4 +1,8 @@
-"""v3 用 δ*(x) の構成 (case/44): NS run から x≥x_meas_lo で δ* を抽出 (x<8 も測れる — コアの半径方向
+"""[非推奨 2026-09-04] 旧 v3 継ぎはぎ (ρU_x 最大縁 + x<x_lo は相関×比)。生産経路は
+feedback/deltastar_loop.py (固定 Euler 基準・帯局所抽出) に置換済み — plans/active/tooling-nozzle-deltastar-core-matched-euler.md。
+記録用に残す。
+
+v3 用 δ*(x) の構成 (case/44): NS run から x≥x_meas_lo で δ* を抽出 (x<8 も測れる — コアの半径方向
 一様性が十分な本 case では ok)、x<x_meas_lo は相関を測定端の比でスケールして接続、全域を平滑化して
 x∈[-0.8, x_F] を覆う CSV を出す (prepare_ns の --dstar-csv + --dstar-blend -1,-0.5 で全域採用)。
 使い方: design/.venv-opt/bin/python build_dstar_v3_va.py <run_dir> [--x-lo 3.0] [--dx 0.25]

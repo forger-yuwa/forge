@@ -1,0 +1,605 @@
+description: 'Jachimowski (1988) NASA TP-2791 Table I hydrogen-air mechanism. Rate
+  units: cm3, mol, s, cal/mol. Thermo: NASA-9 from CEA thermo.inp. Third-body efficiencies
+  relative to N2=1.'
+units:
+  length: cm
+  quantity: mol
+  activation-energy: cal/mol
+phases:
+- name: gas
+  thermo: ideal-gas
+  elements:
+  - H
+  - O
+  - N
+  species:
+  - H2
+  - O2
+  - H
+  - O
+  - OH
+  - H2O
+  - HO2
+  - H2O2
+  - N2
+  - N
+  - 'NO'
+  - NO2
+  - HNO
+  kinetics: gas
+  state:
+    T: 300.0
+    P: 101325.0
+species:
+- name: H2
+  composition:
+    H: 2
+  thermo:
+    model: NASA9
+    temperature-ranges:
+    - 200.0
+    - 1000.0
+    - 6000.0
+    data:
+    - - 40783.2321
+      - -800.918604
+      - 8.21470201
+      - -0.01269714457
+      - 1.753605076e-05
+      - -1.20286027e-08
+      - 3.36809349e-12
+      - 2682.484665
+      - -30.43788844
+    - - 560812.801
+      - -837.150474
+      - 2.975364532
+      - 0.001252249124
+      - -3.74071619e-07
+      - 5.9366252e-11
+      - -3.6069941e-15
+      - 5339.82441
+      - -2.202774769
+  note: NASA CEA thermo.inp (same source as forge species_db)
+- name: O2
+  composition:
+    O: 2
+  thermo:
+    model: NASA9
+    temperature-ranges:
+    - 200.0
+    - 1000.0
+    - 6000.0
+    data:
+    - - -34255.6342
+      - 484.700097
+      - 1.119010961
+      - 0.00429388924
+      - -6.83630052e-07
+      - -2.0233727e-09
+      - 1.039040018e-12
+      - -3391.45487
+      - 18.4969947
+    - - -1037939.022
+      - 2344.830282
+      - 1.819732036
+      - 0.001267847582
+      - -2.188067988e-07
+      - 2.053719572e-11
+      - -8.19346705e-16
+      - -16890.10929
+      - 17.38716506
+  note: NASA CEA thermo.inp (same source as forge species_db)
+- name: H
+  composition:
+    H: 1
+  thermo:
+    model: NASA9
+    temperature-ranges:
+    - 200.0
+    - 1000.0
+    - 6000.0
+    data:
+    - - 0.0
+      - 0.0
+      - 2.5
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 25473.70801
+      - -0.446682853
+    - - 60.7877425
+      - -0.1819354417
+      - 2.500211817
+      - -1.226512864e-07
+      - 3.73287633e-11
+      - -5.68774456e-15
+      - 3.410210197e-19
+      - 25474.86398
+      - -0.448191777
+  note: NASA CEA thermo.inp (same source as forge species_db)
+- name: O
+  composition:
+    O: 1
+  thermo:
+    model: NASA9
+    temperature-ranges:
+    - 200.0
+    - 1000.0
+    - 6000.0
+    data:
+    - - -7953.6113
+      - 160.7177787
+      - 1.966226438
+      - 0.00101367031
+      - -1.110415423e-06
+      - 6.5175075e-10
+      - -1.584779251e-13
+      - 28403.62437
+      - 8.40424182
+    - - 261902.0262
+      - -729.872203
+      - 3.31717727
+      - -0.000428133436
+      - 1.036104594e-07
+      - -9.43830433e-12
+      - 2.725038297e-16
+      - 33924.2806
+      - -0.667958535
+  note: NASA CEA thermo.inp (same source as forge species_db)
+- name: OH
+  composition:
+    O: 1
+    H: 1
+  thermo:
+    model: NASA9
+    temperature-ranges:
+    - 200.0
+    - 1000.0
+    - 6000.0
+    data:
+    - - -1998.85899
+      - 93.0013616
+      - 3.050854229
+      - 0.001529529288
+      - -3.157890998e-06
+      - 3.31544618e-09
+      - -1.138762683e-12
+      - 2991.214235
+      - 4.67411079
+    - - 1017393.379
+      - -2509.957276
+      - 5.11654786
+      - 0.000130529993
+      - -8.28432226e-08
+      - 2.006475941e-11
+      - -1.556993656e-15
+      - 20196.40206
+      - -11.01282337
+  note: NASA CEA thermo.inp (same source as forge species_db)
+- name: H2O
+  composition:
+    H: 2
+    O: 1
+  thermo:
+    model: NASA9
+    temperature-ranges:
+    - 200.0
+    - 1000.0
+    - 6000.0
+    data:
+    - - -39479.6083
+      - 575.573102
+      - 0.931782653
+      - 0.00722271286
+      - -7.34255737e-06
+      - 4.95504349e-09
+      - -1.336933246e-12
+      - -33039.7431
+      - 17.24205775
+    - - 1034972.096
+      - -2412.698562
+      - 4.64611078
+      - 0.002291998307
+      - -6.83683048e-07
+      - 9.42646893e-11
+      - -4.82238053e-15
+      - -13842.86509
+      - -7.97814851
+  note: NASA CEA thermo.inp (same source as forge species_db)
+- name: HO2
+  composition:
+    H: 1
+    O: 2
+  thermo:
+    model: NASA9
+    temperature-ranges:
+    - 200.0
+    - 1000.0
+    - 6000.0
+    data:
+    - - -75988.8254
+      - 1329.383918
+      - -4.67738824
+      - 0.02508308202
+      - -3.006551588e-05
+      - 1.895600056e-08
+      - -4.82856739e-12
+      - -5873.35096
+      - 51.9360214
+    - - -1810669.724
+      - 4963.19203
+      - -1.039498992
+      - 0.00456014853
+      - -1.061859447e-06
+      - 1.144567878e-10
+      - -4.76306416e-15
+      - -32008.1719
+      - 40.6685092
+  note: NASA CEA thermo.inp (same source as forge species_db)
+- name: H2O2
+  composition:
+    H: 2
+    O: 2
+  thermo:
+    model: NASA9
+    temperature-ranges:
+    - 200.0
+    - 1000.0
+    - 6000.0
+    data:
+    - - -92795.3358
+      - 1564.748385
+      - -5.97646014
+      - 0.0327074452
+      - -3.93219326e-05
+      - 2.509255235e-08
+      - -6.46504529e-12
+      - -24940.04728
+      - 58.7717418
+    - - 1489428.027
+      - -5170.82178
+      - 11.2820497
+      - -8.04239779e-05
+      - -1.818383769e-08
+      - 6.94726559e-12
+      - -4.8278319e-16
+      - 14182.51038
+      - -46.5085566
+  note: NASA CEA thermo.inp (same source as forge species_db)
+- name: N2
+  composition:
+    N: 2
+  thermo:
+    model: NASA9
+    temperature-ranges:
+    - 200.0
+    - 1000.0
+    - 6000.0
+    data:
+    - - 22103.71497
+      - -381.846182
+      - 6.08273836
+      - -0.00853091441
+      - 1.384646189e-05
+      - -9.62579362e-09
+      - 2.519705809e-12
+      - 710.846086
+      - -10.76003744
+    - - 587712.406
+      - -2239.249073
+      - 6.06694922
+      - -0.00061396855
+      - 1.491806679e-07
+      - -1.923105485e-11
+      - 1.061954386e-15
+      - 12832.10415
+      - -15.86640027
+  note: NASA CEA thermo.inp (same source as forge species_db)
+- name: N
+  composition:
+    N: 1
+  thermo:
+    model: NASA9
+    temperature-ranges:
+    - 200.0
+    - 1000.0
+    - 6000.0
+    data:
+    - - 0.0
+      - 0.0
+      - 2.5
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 56104.6378
+      - 4.193905036
+    - - 88765.0138
+      - -107.12315
+      - 2.362188287
+      - 0.0002916720081
+      - -1.7295151e-07
+      - 4.01265788e-11
+      - -2.677227571e-15
+      - 56973.5133
+      - 4.865231506
+  note: NASA CEA thermo.inp (same source as forge species_db)
+- name: 'NO'
+  composition:
+    N: 1
+    O: 1
+  thermo:
+    model: NASA9
+    temperature-ranges:
+    - 200.0
+    - 1000.0
+    - 6000.0
+    data:
+    - - -11439.16503
+      - 153.6467592
+      - 3.43146873
+      - -0.002668592368
+      - 8.48139912e-06
+      - -7.68511105e-09
+      - 2.386797655e-12
+      - 9098.21441
+      - 6.72872549
+    - - 223901.8716
+      - -1289.651623
+      - 5.43393603
+      - -0.00036560349
+      - 9.88096645e-08
+      - -1.416076856e-11
+      - 9.38018462e-16
+      - 17503.17656
+      - -8.50166909
+  note: NASA CEA thermo.inp (same source as forge species_db)
+- name: NO2
+  composition:
+    N: 1
+    O: 2
+  thermo:
+    model: NASA9
+    temperature-ranges:
+    - 200.0
+    - 1000.0
+    - 6000.0
+    data:
+    - - -56420.3878
+      - 963.308572
+      - -2.434510974
+      - 0.01927760886
+      - -1.874559328e-05
+      - 9.14549773e-09
+      - -1.777647635e-12
+      - -1547.925037
+      - 40.6785121
+    - - 721300.157
+      - -3832.6152
+      - 11.13963285
+      - -0.002238062246
+      - 6.54772343e-07
+      - -7.6113359e-11
+      - 3.32836105e-15
+      - 25024.97403
+      - -43.0513004
+  note: NASA CEA thermo.inp (same source as forge species_db)
+- name: HNO
+  composition:
+    H: 1
+    N: 1
+    O: 1
+  thermo:
+    model: NASA9
+    temperature-ranges:
+    - 200.0
+    - 1000.0
+    - 6000.0
+    data:
+    - - -68547.6486
+      - 955.16272
+      - -0.600072021
+      - 0.00799517675
+      - -6.54707916e-07
+      - -3.6705134e-09
+      - 1.783392519e-12
+      - 6435.35126
+      - 30.48166179
+    - - -5795614.98
+      - 19454.57427
+      - -21.52568374
+      - 0.01797428992
+      - -4.97604067e-06
+      - 6.39792417e-10
+      - -3.142619368e-14
+      - -110419.2372
+      - 181.8650338
+  note: NASA CEA thermo.inp (same source as forge species_db)
+reactions:
+- equation: H2 + O2 <=> OH + OH
+  rate-constant:
+    A: 17000000000000.0
+    b: 0.0
+    Ea: 48000
+- equation: H + O2 <=> OH + O
+  rate-constant:
+    A: 260000000000000.0
+    b: 0.0
+    Ea: 16800
+- equation: O + H2 <=> OH + H
+  rate-constant:
+    A: 18000000000.0
+    b: 1.0
+    Ea: 8900
+- equation: OH + H2 <=> H2O + H
+  rate-constant:
+    A: 22000000000000.0
+    b: 0.0
+    Ea: 5150
+- equation: OH + OH <=> H2O + O
+  rate-constant:
+    A: 6300000000000.0
+    b: 0.0
+    Ea: 1090
+- equation: H + OH + M <=> H2O + M
+  rate-constant:
+    A: 2.2e+22
+    b: -2.0
+    Ea: 0
+  type: three-body
+  efficiencies:
+    H2O: 6.0
+- equation: H + H + M <=> H2 + M
+  rate-constant:
+    A: 6.4e+17
+    b: -1.0
+    Ea: 0
+  type: three-body
+  efficiencies:
+    H2: 2.0
+    H2O: 6.0
+- equation: H + O + M <=> OH + M
+  rate-constant:
+    A: 6.0e+16
+    b: -0.6
+    Ea: 0
+  type: three-body
+  efficiencies:
+    H2O: 5.0
+- equation: H + O2 + M <=> HO2 + M
+  rate-constant:
+    A: 2100000000000000.0
+    b: 0.0
+    Ea: -1000
+  type: three-body
+  efficiencies:
+    H2: 2.0
+    H2O: 16.0
+- equation: HO2 + H <=> H2 + O2
+  rate-constant:
+    A: 13000000000000.0
+    b: 0.0
+    Ea: 0
+- equation: HO2 + H <=> OH + OH
+  rate-constant:
+    A: 140000000000000.0
+    b: 0.0
+    Ea: 1080
+- equation: HO2 + H <=> H2O + O
+  rate-constant:
+    A: 10000000000000.0
+    b: 0.0
+    Ea: 1080
+- equation: HO2 + O <=> O2 + OH
+  rate-constant:
+    A: 15000000000000.0
+    b: 0.0
+    Ea: 950
+- equation: HO2 + OH <=> H2O + O2
+  rate-constant:
+    A: 8000000000000.0
+    b: 0.0
+    Ea: 0
+- equation: HO2 + HO2 <=> H2O2 + O2
+  rate-constant:
+    A: 2000000000000.0
+    b: 0.0
+    Ea: 0
+- equation: H + H2O2 <=> H2 + HO2
+  rate-constant:
+    A: 1400000000000.0
+    b: 0.0
+    Ea: 3600
+- equation: O + H2O2 <=> OH + HO2
+  rate-constant:
+    A: 14000000000000.0
+    b: 0.0
+    Ea: 6400
+- equation: OH + H2O2 <=> H2O + HO2
+  rate-constant:
+    A: 6100000000000.0
+    b: 0.0
+    Ea: 1430
+- equation: M + H2O2 <=> OH + OH + M
+  rate-constant:
+    A: 1.2e+17
+    b: 0.0
+    Ea: 45500
+  type: three-body
+  efficiencies:
+    H2O: 15.0
+- equation: O + O + M <=> O2 + M
+  rate-constant:
+    A: 6.0e+17
+    b: 0.0
+    Ea: -1800
+  type: three-body
+- equation: N + N + M <=> N2 + M
+  rate-constant:
+    A: 2.8e+17
+    b: -0.75
+    Ea: 0
+  type: three-body
+- equation: N + O2 <=> NO + O
+  rate-constant:
+    A: 6400000000.0
+    b: 1.0
+    Ea: 6300
+- equation: N + NO <=> N2 + O
+  rate-constant:
+    A: 16000000000000.0
+    b: 0.0
+    Ea: 0
+- equation: N + OH <=> NO + H
+  rate-constant:
+    A: 630000000000.0
+    b: 0.5
+    Ea: 0
+- equation: H + NO + M <=> HNO + M
+  rate-constant:
+    A: 5400000000000000.0
+    b: 0.0
+    Ea: -600
+  type: three-body
+- equation: H + HNO <=> NO + H2
+  rate-constant:
+    A: 4800000000000.0
+    b: 0.0
+    Ea: 0
+- equation: O + HNO <=> NO + OH
+  rate-constant:
+    A: 500000000000.0
+    b: 0.5
+    Ea: 0
+- equation: OH + HNO <=> NO + H2O
+  rate-constant:
+    A: 36000000000000.0
+    b: 0.0
+    Ea: 0
+- equation: HO2 + HNO <=> NO + H2O2
+  rate-constant:
+    A: 2000000000000.0
+    b: 0.0
+    Ea: 0
+- equation: HO2 + NO <=> NO2 + OH
+  rate-constant:
+    A: 3400000000000.0
+    b: 0.0
+    Ea: -260
+- equation: H + NO2 <=> NO + OH
+  rate-constant:
+    A: 350000000000000.0
+    b: 0.0
+    Ea: 1500
+- equation: O + NO2 <=> NO + O2
+  rate-constant:
+    A: 10000000000000.0
+    b: 0.0
+    Ea: 600
+- equation: M + NO2 <=> NO + O + M
+  rate-constant:
+    A: 1.16e+16
+    b: 0.0
+    Ea: 66000
+  type: three-body

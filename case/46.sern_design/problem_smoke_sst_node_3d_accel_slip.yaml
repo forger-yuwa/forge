@@ -1,0 +1,67 @@
+# 3D 外側空間あり・加速点・node SST、top_out = slip、Euler (run_0024 soft 段末尾) から暖機
+name: sern_smoke_sst_node_3d_accel_slip
+type: sern_2d
+gas:
+  gamma: 1.4
+  cp: 1004.5
+spec:
+  H_m: 0.1
+  inflow:
+    mode: supersonic
+    M_in: 2.5
+    p_in: 20000.0
+    T_in: 900.0
+  external:
+    M_inf: 6.0
+    p_inf: 1000.0
+    T_inf: 220.0
+  moment_ref:
+  - 0.0
+  - 0.0
+  operating_points:
+  - name: accel
+    weight: 1.0
+    external:
+      M_inf: 3.5
+      p_inf: 4000.0
+      T_inf: 230.0
+dv:
+  M_c: 3.9
+  f: 0.45
+  theta_r0_deg: 15.0
+  theta_c0_deg: 5.0
+  L_cowl: 1.0
+geometry:
+  x_max_kernel: 9.0
+  nj_moc: 301
+  dx_moc: 0.002
+mesh:
+  discretization: node
+  cowl_thickness: 0.0
+  ni_up: 16
+  ni_noz: 120
+  ni_plume: 220
+  nj_top: 101
+  nj_bot: 61
+  L_up: 0.5
+  x_out_extra: 2.0
+  bot_depth: 3.0
+  first_wall_frac: 0.004
+evaluate:
+  model: sst
+  nStepOuter: 4000
+  cfl_main: 1.0
+  outStepInterval: 500
+  top_out_kind: slip
+mesh3d:
+  W: 2.0
+  Z_ext: 1.5
+  nz_in: 25
+  nz_out: 15
+  ni_up: 10
+  ni_noz: 60
+  ni_plume: 110
+  nj_top: 49
+  nj_bot: 31
+  first_wall_frac: 0.004
+  first_z_frac: 0.004

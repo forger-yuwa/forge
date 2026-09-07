@@ -52,7 +52,7 @@ fi
 if ! docker image inspect "$image_name" >/dev/null 2>&1; then
   echo "[run_ncu_profile] ERROR: docker image '$image_name' not found" >&2
   echo "[run_ncu_profile] Build it first from solver_density_cuda:" >&2
-  echo "  docker build -f Dockerfile.cuda.dev -t $image_name ." >&2
+  echo "  ./tools/docker_build.sh dev" >&2
   exit 2
 fi
 

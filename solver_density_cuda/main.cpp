@@ -48,6 +48,7 @@
 #include "cuda_forge/ransTransport_d.cuh"
 #include "cuda_forge/ransSource_d.cuh"
 #include "cuda_forge/speciesTransport_d.cuh"
+#include "cuda_forge/chemistrySource_d.cuh"
 #include "cuda_forge/condensationTransport_d.cuh"
 #include "cuda_forge/viscousFlux_d.cuh"
 #include "cuda_forge/updateCenterVelocity_d.cuh"
@@ -787,6 +788,7 @@ cudaConfig initializeSimulation(
 
     cout << "Init Thermo DB \n";
     thermo_init_db(cfg);   // NASA-9/LJ 化学種 DB を構築し device へアップロード (thermalMethod==2 用)
+    chemistry_init(cfg);   // 有限速度化学: 反応機構を読み device へ (chemistry.enabled==1 のみ)
 
     cout << "Read Mesh \n";
     if (cfg.meshFormat == "hdf5") {
@@ -808,7 +810,7 @@ cudaConfig initializeSimulation(
     applyInletProfiles(cfg , msh);
 
     // 化学種変数を登録 (allocVariables より前)。nSpecies<=1 では no-op。
-    var.registerSpecies(cfg.nSpecies);
+    var.registerSpecies(cfg.nSpecies, cfg.chemEnabled);
 
     // 非平衡凝縮モーメント変数を登録 (allocVariables より前)。condensation==0 では no-op。
     var.registerCondensation(cfg.nCondSpecies);
@@ -992,6 +994,7 @@ void assembleResidual(StepContext& s, int stage_index)
     });
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         speciesTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);  // 化学種移流残差
+        chemistrySource_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);   // 有限速度化学ソース (ω_s, Q̇, 対角 Jacobian)
     });
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         condensationTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);  // 液相モーメント移流残差 (Phase 1)
@@ -1045,7 +1048,7 @@ void logResidualSnapshot(StepContext& s, int inner_index)
 
 // 古典 DPLUR 線形ソルバ。固定残差 res_* に対し Q を更新せず dq_block を nStepInner 回 Jacobi 緩和する。
 // 各 sweep 後にバッファを swap し、最終補正は dq_block_old に残る（commit は呼び出し側）。
-void blockDPLURSolve(StepContext& s)
+void blockDPLURSolve(StepContext& s, int subiter = 0)
 {
     // 古典 DPLUR は dq=0 から開始する。前ステップの残留値による近傍参照を避けるため明示ゼロ化。
     // blockDPLUR==1: 5×5 block 版 (dq_block_*)、blockDPLUR==0: scalar 対角版 (dq_ro_* 等)。
@@ -1065,14 +1068,22 @@ void blockDPLURSolve(StepContext& s)
         cudaMemset(s.var.c_d["dq_roe_old"],  0, bytes);
     }
 
+    // line-implicit v2: lineKFreeze==1 の dual-time では K/diag 抽出と LU 分解をサブ反復 0 に
+    // 限定し、以後のサブ反復は保存因子での solve だけにする (LHS 凍結 = defect-correction の
+    // 近似強化。収束経路のみ変わり収束解は不変)。定常経路は subiter=0 固定で従来どおり毎回構築。
+    const int lineStoreK =
+        (s.cfg.lineKFreeze == 1) ? ((subiter == 0) ? 1 : 0) : 1;
     const int nSweep = std::max(1, s.cfg.nStepInner);
     for (int iSweep = 0; iSweep < nSweep; ++iSweep) {
         s.profiler.measureCuda(ProfileSection::TimeIntegration, [&]() {
-            timeIntegration_d_wrapper(iSweep, s.cfg , s.cuda_cfg , s.msh , s.var);
+            timeIntegration_d_wrapper(iSweep, s.cfg , s.cuda_cfg , s.msh , s.var, lineStoreK);
         });
         // line-implicit: ライン CV の dq_new を block-Thomas で上書き (swap 前)
         if (useBlock && s.cfg.lineImplicit == 1) {
             s.profiler.measureCuda(ProfileSection::TimeIntegration, [&]() {
+                if (iSweep == 0 && lineStoreK == 1) {
+                    lineThomasFactor_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+                }
                 lineThomas_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
             });
         }
@@ -1300,16 +1311,35 @@ void advanceImplicitDualTime(StepContext& s)
         s.profiler.measureCuda(ProfileSection::SetDt, [&]() {
             setDT_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, /*adaptDt=*/true, /*printCfl=*/printCflDt);
         });
-        blockDPLURSolve(s);
+        blockDPLURSolve(s, m);
+        // 診断 (FORGE_RESID_SNAP=1): subiter 0 の res (BDF 込み R*) と最終 dq を退避 (局所収縮率 g の分母)。
+        {
+            // FORGE_RESID_SNAP=<m>: 退避する subiter 番号 (既定 0 相当は "0"。未設定なら無効)。
+            static const int snapM = [](){ const char* e = getenv("FORGE_RESID_SNAP"); return e ? atoi(e) : -1; }();
+            if (snapM >= 0 && m == snapM) {
+                const size_t nb = (size_t)s.msh.nCells_all * sizeof(flow_float);
+                const char* src[] = {"res_ro","res_roUx","res_roUy","res_roUz","res_roe",
+                                     "dq_block_old_0","dq_block_old_1","dq_block_old_2","dq_block_old_3","dq_block_old_4"};
+                const char* dst[] = {"res_ro_m","res_roUx_m","res_roUy_m","res_roUz_m","res_roe_m",
+                                     "dq_ro_new","dq_roUx_new","dq_roUy_new","dq_roUz_new","dq_roe_new"};
+                for (int q = 0; q < 10; ++q)
+                    gpuErrchk(cudaMemcpy(s.var.c_d[dst[q]], s.var.c_d[src[q]], nb, cudaMemcpyDeviceToDevice));
+            }
+        }
         // dual-time の commit は in-place（roN=Q^n は BDF 基準で固定のため roN+dq は使えない）。
         s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
             applyBlockImplicitCorrectionInPlace_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         });
-        if (include_scalar) {
+        // FORGE_FREEZE_TURB=1 は dual-time でも SST 状態更新を凍結する (2026-09-03 修正: 従来この
+        // 経路は無条件更新で、freeze 診断が定常専用だった — dual-time A/B は無効だった)。
+        if (include_scalar && !freezeTurbEnabled()) {
             s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
                 applySSTPointImplicit(s.cfg , s.cuda_cfg , s.msh , s.var , s.mat_ns);
                 periodicMirrorScalarState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var); // §4.5 k/ω 周期ミラー
             });
+        } else if (include_scalar) {
+            static bool logged = false;
+            if (!logged) { printf("[FREEZE_TURB] dual-time: SST state update frozen\n"); logged = true; }
         }
         // 液相モーメント (非平衡凝縮) を segregated point-implicit で更新。condensation==0 で no-op。
         s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
@@ -1448,6 +1478,26 @@ int main(void) {
     ImplicitDiagLogger implicit_diag_logger;
 
     cudaConfig cuda_cfg = initializeSimulation(cfg, msh, mat_ns, var, fluct, pprobes);
+    // 診断 (FORGE_OUT_RESIDUALS=1): 流れ残差場と陰的補正 dq を h5 出力へ追加する
+    // (サブ反復収縮の空間局在の測定用。既定 off = 出力不変)。書かれる値は「最終サブ反復・
+    // 最終 sweep 時点」の res_* (BDF 項込み R*) と dq_block_new_* (implicitRelax 適用後)。
+    // 注意: blockDPLURSolve は sweep 毎に new/old を swap するため、最終補正は dq_block_old_* に
+    // 残る (dq_block_new_* は 1 sweep 前 — 2026-09-03 Codex 指摘で修正)。
+    if (const char* e = getenv("FORGE_OUT_RESIDUALS"); e && atoi(e) != 0) {
+        for (const char* n : {"res_ro","res_roUx","res_roUy","res_roUz","res_roe",
+                              "dq_block_old_0","dq_block_old_1","dq_block_old_2",
+                              "dq_block_old_3","dq_block_old_4"})
+            var.output_cellValNames.push_back(n);
+        printf("[FORGE_OUT_RESIDUALS] residual/dq fields added to h5 outputs\n");
+    }
+    // FORGE_RESID_SNAP=1: dual-time の subiter 0 直後の res/dq を未使用スロット (res_*_m / dq_*_new
+    // スカラー枠) へ退避して出力に含める → 局所収縮率 g=|dq_final|/|dq_sub0| を場で測れる。
+    if (const char* e = getenv("FORGE_RESID_SNAP"); e != nullptr) {  // 値は退避 subiter 番号 ("0" も有効)
+        for (const char* n : {"res_ro_m","res_roUx_m","res_roUy_m","res_roUz_m","res_roe_m",
+                              "dq_ro_new","dq_roUx_new","dq_roUy_new","dq_roUz_new","dq_roe_new"})
+            var.output_cellValNames.push_back(n);
+        printf("[FORGE_RESID_SNAP] subiter-0 residual/dq snapshots added to h5 outputs\n");
+    }
     // line-implicit (plans/active/time_integration-line-implicit.md): 壁法線ラインを構築。
     // blockDPLUR==1 専用・完全前処理 (lowMachPrecond>=2) とは併用不可。
     if (cfg.lineImplicit == 1) {
@@ -1456,6 +1506,24 @@ int main(void) {
             exit(1);
         }
         msh.buildImplicitLines(var.c.at("ccx").data(), var.c.at("ccy").data(), var.c.at("ccz").data());
+        // lineDtWallRelief 診断用: wall 種 bcond の境界面フラグ (kind に "wall" を含む bcond のみ。
+        // inlet/outlet/periodic は除外しない — 壁境界 Λ の律速仮説の切り分け専用)。
+        if (cfg.lineDtWallRelief == 1) {
+            std::vector<unsigned char> pw(msh.nPlanes, 0);
+            geom_int nw = 0;
+            for (auto& bc : msh.bconds) {
+                if (bc.bcondKind.find("wall") == std::string::npos) continue;
+                for (auto ip : bc.iPlanes) { pw[ip] = 1; ++nw; }
+            }
+            gpuErrchk(cudaMalloc((void**)&msh.plane_wall_flag_d, sizeof(unsigned char)*msh.nPlanes));
+            gpuErrchk(cudaMemcpy(msh.plane_wall_flag_d, pw.data(), sizeof(unsigned char)*msh.nPlanes, cudaMemcpyHostToDevice));
+            printf("[lineDtWallRelief] wall boundary planes flagged: %d\n", (int)nw);
+        }
+    } else if (cfg.lineKFreeze != 0 || cfg.lineViscCoupling != 0 ||
+               cfg.lineViscousDtRelief != (flow_float)0.0 || cfg.lineDtDirectional != 0 ||
+               cfg.lineDtWallRelief != 0) {
+        fprintf(stderr, "[lineImplicit] lineKFreeze/lineViscCoupling/lineViscousDtRelief require lineImplicit=1\n");
+        exit(1);
     }
     ResidualCsvLogger residual_logger("residual_history.csv", cfg, msh, var);
 

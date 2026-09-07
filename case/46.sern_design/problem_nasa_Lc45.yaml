@@ -1,0 +1,18 @@
+# NASA TM X-71972 基準形の傾向照合 (S4(b)): 平板ランプ 20°/18.54H、カウル角 6°、カウル長 4.5 H (基準 3.12)。
+# 飛行 M10、q=71850 Pa → p∞=1026 Pa、T∞=220 K。燃焼器出口は代表値 (M 2.0, p_in 20 p∞, T 2500 K, γ 1.3)。
+name: sern_nasa_Lcowl4.5
+type: sern_2d
+gas: {gamma: 1.3, cp: 1248.0}
+spec:
+  H_m: 0.1
+  inflow: {mode: supersonic, M_in: 2.0, p_in: 20520.0, T_in: 2500.0}
+  external: {M_inf: 10.0, p_inf: 1026.0, T_inf: 220.0}
+  moment_ref: [0.0, 0.0]
+dv:
+  L_ramp: 18.54
+  theta_r0_deg: 20.0
+  theta_c0_deg: 6.0
+  L_cowl: 4.5
+geometry: {mode: straight, x_max_kernel: 19.0, nj_moc: 301, dx_moc: 3.0e-3}
+mesh: {discretization: cell, ni_up: 16, ni_noz: 140, ni_plume: 260, nj_top: 101, nj_bot: 61, L_up: 0.5, x_out_extra: 2.0, bot_depth: 3.0, first_wall_frac: 2.0e-3}
+evaluate: {model: euler, nStepOuter: 6000, cfl_main: 4.0, outStepInterval: 500}

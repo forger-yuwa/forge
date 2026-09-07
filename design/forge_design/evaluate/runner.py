@@ -25,8 +25,10 @@ from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
 from .ic import paste_isentropic_ic
 
-FORGE_TOOLS = Path("/home/sano/work/forge/solver_density_cuda/tools")
-FORGE_BUILD = Path("/home/sano/work/forge/solver_density_cuda/build")
+# リポジトリ位置から導く (AWS など別マシンでも動くように。FORGE_ROOT で上書き可)
+FORGE_ROOT = Path(os.environ.get("FORGE_ROOT", Path(__file__).resolve().parents[3]))
+FORGE_TOOLS = FORGE_ROOT / "solver_density_cuda" / "tools"
+FORGE_BUILD = FORGE_ROOT / "solver_density_cuda" / "build"
 _ENV = dict(os.environ, LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/hdf5/serial")
 
 

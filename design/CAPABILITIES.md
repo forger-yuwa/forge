@@ -18,6 +18,7 @@
 | `wind_tunnel_axisym` | `evaluate/runner_wt.py` | 🔧 | 旧生産系 (B8)。axismach に置換済み、回帰対照として保持 |
 | `wind_tunnel_axisym_walldriven` | `evaluate/runner_walldriven.py` | 🔧 | 壁駆動系。axismach に置換済み |
 | `wind_tunnel_axisym_axismach` | `evaluate/runner_axismach.py` | ✅ | 現行生産 (case/42 isobutane, case/44 vitiated air)。ガス・凝縮メニューが最も厚い |
+| `sern_2d` | `evaluate/runner_sern.py` | ✅ | ⑤ SERN: 燃焼器出口 starting line + 2D 平面最大推力 key point 逆設計 (`geometry/moc_sern.py`) + メッシュ/評価 (`meshing/mesh_sern.py`, `evaluate/runner_sern.py`, `metrics/sern_forces.py`)。**cell Euler で MOC・NASA TM X-71972 傾向と照合済み** (case/46 run_0002–0007)。RANS は node/cell とも SST で完走 (node の発散は stage 間 interp 移植が真因、index コピーで解決)、δ* 一発補正 (`metrics/sern_deltastar.py`)、多作動点 MOO (`opt/driver_sern.py`; case/46 run_0010 Euler 17 PASS, run_0017 node SST 10 PASS + C_M 制約) まで検証済み。plan: [`plans/active/tooling-nozzle-sern-chain.md`](../plans/active/tooling-nozzle-sern-chain.md) (2026-09-04 起票) |
 
 ## 2. ガスモデル・物理メニュー (`evaluate.*` / `gas.*` キー)
 

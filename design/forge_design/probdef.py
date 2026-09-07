@@ -12,7 +12,7 @@ import numpy as np
 import yaml
 
 KNOWN_TYPES = ("thruster_bell", "wind_tunnel_axisym", "wind_tunnel_axisym_walldriven",
-               "wind_tunnel_axisym_axismach")
+               "wind_tunnel_axisym_axismach", "sern_2d")
 
 
 @dataclass

@@ -12,7 +12,7 @@
 
 #ifdef HAVE_KDTREE
 #include <kdtree.h>
-#include <boost/scoped_array.hpp>
+#include <memory>
 #endif
 
 #include "flowFormat.hpp"

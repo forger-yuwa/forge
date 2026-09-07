@@ -628,28 +628,45 @@ $x_F$ 22.85→19.11 (−16%) が上限 — **$x_F - x_E \approx 12.6\,r_t$ (終�
 「全長を設計変数にする」節) を使う — このスイープの知見 (内部衝撃波の下限・一様化区間の床)
 は $L_c$ と $x_F$ のどちらを dv にしても同じ制約として効く。
 
-### 粘性 δ\* 補正 (A12, `runner_axismach.prepare_ns` / `metrics/deltastar.py`)
+### 粘性 δ\* 補正 — 積分法初期壁 + 固定 Euler 基準・帯局所抽出 (2026-09-04 確定)
 
-計画: [`plans/accepted/tooling-nozzle-axismach-viscous-deltastar.md`](../../plans/accepted/tooling-nozzle-axismach-viscous-deltastar.md)。
+計画: [`plans/accepted/tooling-nozzle-deltastar-core-matched-euler.md`](../../plans/accepted/tooling-nozzle-deltastar-core-matched-euler.md)
+(旧 A12 [`tooling-nozzle-axismach-viscous-deltastar.md`](../../plans/accepted/tooling-nozzle-axismach-viscous-deltastar.md) を置換)。
+根拠: [調査ノート](../../notes/investigations/nozzle-deltastar-throat-review.md) — 旧方式 (平板相関 + ρU_x 最大縁抽出 +
+$x<x_{lo}$ を相関×比で補完) は**スロート δ\* を NS 実効値の 3〜12 倍**に与えており、NS 質量流量が Euler 設計比 +0.8〜3.7 %、
+試験部 M −0.2〜−0.7 % の主因だった。旧記述「相関 δ\* で十分」は撤回。
 
-物理壁 = inviscid 壁 (cplus) + 排除厚 $\delta^*(x)$ の法線オフセット。**相関 δ\*
-(`feedback/deltastar.py`, Eckert 参照温度 + 乱流平板) で十分** — CFD 抽出 δ\* との差
-(~10%、下流ほど増) は RANS 軸 M に観測可能な影響を持たず (v1/v2 でプロファイル全点
-1e-3 一致)、δ\* は 1 反復で固定点に達する (run_0070/0071 実測)。
+**現行仕様 (2 段構成)**:
 
-- **RANS チェーン**: coarse SST 中継 (y+~50, 43 s) → y+1.5 低 Re SST 本計算
-  (48k step cfl1, 162 s)。起動レシピは B8 系 NS v1 (run_0028–0030) のものを流用
-  (`prepare_ns` / `run_staged_ns` に実装: 3 段起動・ω 底層フロア・整合背圧 6588 Pa)。
-- **無帰還の到達点**: RANS 軸 M ‖ΔM‖∞ **0.533% $M_d$** (B8 系の 1.2% の半分以下)。
-  残差は δ\* で表現できない設計側残差 (Euler の x≈6 谷と同源) + 近スロート粘性効果で、
-  0.5% ゲート化には law 側帰還 (A5 の RANS 版) が要る (future work)。
-- **δ\* 抽出** (`metrics/deltastar.py`): 質量流束欠損の積分。探索窓はフリーストリーム
-  まで (1.5 $r_t$)、x<8 はコア未一様で測らず相関へブレンド。測定域端は端勾配の
-  線形外挿 (端値クリップは壁 B-spline を非単調化する — 実測)。
-- **case/44 (M4.19, TP, r_t 0.21 m) での知見 (2026-08-18)**: 相関 δ\* は強い加速域で**過大** (x=8 で CFD/相関 0.68、
-  x=3 で 0.51) となり得る — 符号は case 依存で v1 だけでは決められない。BL 縁で ρu が極大なら x≥3 でも δ\* は測れるので、
-  `prepare_ns(dstar_blend=(x_lo, x_hi))` でブレンド区間を変え (負値で CSV 全域採用) CFD δ\* を全域に使う。末端 (出口 BC 影響で
-  抽出勾配が急増) はトレンド勾配で外挿する。δ\* は 2 反復で固定点 (1.001)。残る軸 M 残差 (近スロート −0.2〜−0.3 %) は δ\* 非表現。
+1. **初回 NS 用の壁**: 境界層積分法 (`feedback/deltastar_integral.py`, CONTUR = Sivells AEDC-TR-78-63 §5 の軸対称 von Kármán
+   運動量積分 + べき乗則プロファイル + Spalding–Chi 摩擦) を入口から前進積分し $\delta^*_n(x)$ を得る。断熱壁 / 指定壁温 (定数・テーブル)
+   を同一実装で扱う。**初期値生成専用**で、CFD との一致率は合否条件にしない。半径方向補正 $\delta_r = \delta^*_n/\cos	heta_w$。
+2. **NS 後の固定点反復**: 設計 Euler run (設計壁・反復中固定) と NS run を**同じ物理 $r$** で比べる
+   (`metrics/deltastar.py::deltastar_from_core_matched_euler`, 断面ごとの純関数は `band_local_deficit`)。
+   参照 $q_{ref}$ は**境界層のすぐ外側の帯** $y\in[y_b, 1.5y_b]$ で比 $q_{NS}/q_E$ を $y$ の 1 次でフィットし境界層域へ延長して作る。
+   $y_b$ は境界層内 ($1.5\delta_{in}$) から始め、帯内の比の変化が 1 % 未満になるまで 1.25 倍ずつ広げる適応帯 (δ99 の 1.1〜1.7 倍に落ち着く)。
+   壁の異なる 4 場での δ_r ばらつき 3 %、尾部取りこぼしの系統バイアス −3 % (出口 M で ≤0.05 %)。
+   **δ_r の平滑化は 5 次 P-spline** (3 階差分ペナルティ, ノット 2 r_t 相当, λ=1) — 壁曲率が滑らかになる (曲率ノイズ 2e-4 [1/r_t]; 3 次平滑化では 1e-3〜8e-3 で設計曲率並みに凸凹した)。壁更新は単調性ガード付き (非単調なら λ を強める)。
+   符号付き質量欠損 $D=2\pi\int_{y<y_b}(q_{ref}-q_{NS})r\,dr$ を壁側の円環に詰め直した $\delta_r = r_{w,NS}-r_{eff}$ を
+   **直管〜出口の全列**で取る ($x_{lo}$ なし・縁判定なし・相関補完なし)。内側 30 % コアの単一倍率 α とコア RMS は診断
+   (同じ $x$ でコア全体を合わせる方式は、上流の壁 δ 誤差が特性線で下流の軸へ運ぶ波を欠損に取り込み反復が収縮しなかった —
+   case/45 run_0019)。実測: 壁の異なる 3 つの NS 場から同じ $\delta_r(x)$ が ±1 % で出る。
+   壁更新は半径方向 $r^{k+1}_{phys} = r_{inv} + (1-\omega)\delta^k_{in} + \omega\,\delta^k_{ext}$ ($\omega$=0.5 → 1.0)。
+   真のスロート探索 (A13) と上流 Hermite 再生成は維持。反復ドライバは `feedback/deltastar_loop.py`。
+3. **帳簿 (必須)**: NS/Euler 質量流量比 (= 有効音速スロート面積比) と質量流量由来の等価スロート補正量 $r_{t,W}-\sqrt{\dot m_{NS}/\dot m_E}$
+   を `collect` が出す。ゲート $|\dot m_{NS}/\dot m_E - 1| \le 0.3\,\%$。
+
+廃止 (生産経路から): 温度縁 / ρU_x 最大縁の生産抽出 (`deltastar_from_run` は比較用に残置) / $x_{lo}$ / 上流相関補完 /
+積分法と CFD のブレンド / Md トリム / law 側 Mach 帰還。
+
+- **RANS チェーン**: coarse SST 中継 (y+~50) → y+1〜1.4 低 Re SST 本計算 (`prepare_ns` / `run_staged_ns`: 3 段起動・ω 底層フロア・整合背圧)。
+- **到達点 (2026-09-04)**: case/45 M6 (run_0022/0023) ṁ_NS/ṁ_E 0.999〜1.000・出口面コア M +0.01〜0.06 %・軸 M ±0.15〜0.45 % を **Md トリムなし**で;
+  case/42 M5 (run_0108) +0.02〜0.05 %、case/44 (run_0107) 0.00〜+0.03 % (設定不変)。**積分法初期壁の pass 0 だけで主ゲートを満たす**ので、
+  生産は「積分法初期壁 + 抽出 1 pass (ω≤1)」。反復を重ねると抽出ノイズ (3 %) が壁の波 → 軸 M ±0.5 % の波になるため、ゲート達成後は止める。
+   **NS の起動 (warm start)**: `--stages none --cfl 5 --implicit-relax 0.7 --steps 12000` (soft/mid 不要、全残差が cfl1/30000 step と同水準に
+   5000〜9000 step で到達、出口 M は 8000 step で凍結; NS 1 本 ≈ 95 s — case/45 run_0026)。cold start は **中継 (y+~50 の踏み台 run) 不要**: Euler 場から直接 y+~1 メッシュへ cross-mesh し `--stages full` (soft/mid は必要: 抜くと step 1 で NaN) + 本段 cfl 5/relax 0.7 12000 step (case/45 run_0029/0031)。Euler は cfl 6 + implicitRelax 0.7、soft + 本段 12000 (run_0028, ALL PASS)。
+- **旧方式の実測 (記録)**: v1 相関 / v3 (ρU_x 最大縁, x≥x_lo) の到達点は case/42 M5 −0.29 %, M6 −0.43 %, case/45 −0.24 % (出口コア)。
+  「1〜2 反復で固定点」は $x\ge x_{lo}$ のみの確認で、スロートは検証外だった。
 
 **壁表現の方針 (2026-08-16 確定)**: MOC 壁テーブルは**平滑化せず補間** 5 次 B-spline で
 表現し、スロート端は**必ず上流 (U→T Hermite) の $(r'=0,\ r''=1/R)$ にクランプ**する
@@ -751,3 +768,38 @@ r: 壁側幾何級数クラスタリング)、**gmsh msh4.1 テキストを直�
 $\varepsilon_M$ (コア質量流束重み RMS)、$\varepsilon_\theta$、$\eta=C_F/C_{F,ideal}$、
 $L/r_t$、$q_{peak}$ (条件付き) 等。抽出は `res_*.h5` を形状相対の固定サンプリング格子へ
 補間してから行う (メッシュ解像度非依存)。
+
+## SERN チェーン (⑤ — 2026-09-04 起票、S0–S1 [逆設計] 実装済み・評価/MOO 未)
+
+計画: [`plans/active/tooling-nozzle-sern-chain.md`](../../plans/active/tooling-nozzle-sern-chain.md)。
+出典調査: [`notes/investigations/sern-design-method-survey.md`](../../notes/investigations/sern-design-method-survey.md)。
+親計画 §4.6 ⑤ の旧方針 (ランプ壁圧 $p_w(x)$ Bézier を dv にした局所 $p\to\theta$ 帰還 + 3D FFD in-loop) は
+撤回し、次のチェーンに置き換える。S1 (平面 MOC + key point 逆設計) は `geometry/moc_sern.py` に実装済み
+(テスト `design/tests/run_sern_moc_tests.py`: 対称 MLN 極限で面積比・流量・推力を 0.03% 以内で再現)。
+
+$$\text{燃焼器出口 starting line} \rightarrow \text{平面最大推力理論の key point } (M_c,\theta_c,\dot m_c/\dot m) \rightarrow \text{逆 MOC (ランプ壁)} \rightarrow \text{forge 2D RANS} \times \text{作動点セット} \rightarrow \text{MOO}$$
+
+- **形状**: 平面 2D、燃焼器出口高さ $H=1$。ランプ = 上壁 (角部で $\theta_{r0}$ 膨張)、カウル = 下壁
+  ($\theta_{c0}$、長さ $L_{\rm cowl}$)。カウル後縁以降は等圧せん断層 ($p=p_{\rm ext}$)。
+- **作動点**: 飛行条件だけでなく燃焼器出口 $(M_{\rm in}, p_{\rm in}, T_{\rm in})$ とガス $(\gamma, c_p)$ も作動点で変わる (`operating_points[].inflow / .gas`)。逆設計は**設計点** (`spec.inflow/external/gas`) で固定し、作動点は CFD 条件だけを変える。 公知のアンカーは NASA TM X-71972 TABLE 1 (定動圧 1500 psf 経路の燃焼器出口) + CEA2 (plan §4.10)。低 NPR は低速飛行ではなく燃料遮断で作る。
+- **理論**: 制御面 = ランプ後縁から出る最終 C⁻。質量流量一定・長さ固定で推力を最大化する Lagrange
+  問題 (Guderley–Hantsch 1955 / Rao 1958) の平面版。乗数関係 (Cain 2010 式 4.1–4.2 の $y$ 非依存形) と
+  縁条件 $\tfrac12\rho_e w_e^2\sin2\theta_e=(p_e-p_a)\cot\mu_e$ で制御面上の状態が決まり、平面では
+  C⁻ 上の $\theta+\nu=$ const と併せて一様になる見込み (S1 で確認)。**出力は輪郭ではなく最終特性線上の
+  状態** で、壁はその従属結果。
+- **key point 逆設計** (NUAA 徐グループ 2019–2021 の方式): kernel と制御面の接合点 $c$ の状態
+  $(M_c,\theta_c)$ と $c$–$e$ 間の質量流量比を dv として与え、kernel (入口一様流 + 両角部の扇 +
+  カウル壁) の中に $c$ を探し、目標 C⁻ を張って壁流線を抽出する。設計 $p_e/p_a$ は縁条件から従属。
+  DOE では推力 ← $M_c,\theta_c$、揚力と長さ ← $M_c$ と質量流量比、と役割が分離する (Yu 2020)。
+- **dv** ($d=6$): $M_c$, $\theta_c$, $\dot m_c/\dot m$, $\theta_{r0}$, $\theta_{c0}$, $L_{\rm cowl}$。
+  壁座標・壁圧は dv にしない。
+- **評価**: forge 2D 平面 RANS (SST, node) を 4 ブロック (ノズル+プルーム / カウル下外部流 / **ランプ側外部流 = 機体上面・base・後流**、`mesh.ext_top`; ランプ側に外気が無いと過膨張でも剥離が起きないため) 構造メッシュで
+  作動点セット (設計 NPR + オフデザイン) について回し、ランプ・カウル内外面の $p,\tau_w$ 積分から
+  $C_T, C_L, C_M$ (基準点指定) と剥離位置を取る。低 NPR の RSS/FSS は `OSCILLATING` 統計で報告。
+- **粘性**: NS 帰還ループは持たない。設計点の RANS 場から `metrics/deltastar.py` で $\delta^*(x)$ を
+  抽出し法線オフセットする**一発補正**のみ。
+- **壁圧規定の位置づけ**: 剥離制約 ($\tau_w$ 符号 / $p_w/p_a$) の判定量と、二段膨張オプション
+  (基部の壁圧プラトーで衝撃位置を固定、④延長部と共通機構) に限定。
+- **3D**: 2D パレート数点を側壁・隅 R 付きで 3D RANS 確認。3D MOC の文献値 (推力 +0.45%、揚力 +8%)
+  から推力は 2D で決まる前提。乖離時のみ流線追跡 / FFD を別 plan で検討。
+- **問題タイプ**: `sern_2d` (📋 — [`design/CAPABILITIES.md`](../../design/CAPABILITIES.md))。

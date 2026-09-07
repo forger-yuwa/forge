@@ -1108,4 +1108,9 @@ void mesh::buildImplicitLines(const flow_float* ccx, const flow_float* ccy, cons
     gpuErrchk(cudaMemset(this->line_Knext_d, 0, sizeof(flow_float)*25*this->nCells_all));
     gpuErrchk(cudaMalloc((void**)&this->line_W_d, sizeof(double)*25*this->nCells_all));
     gpuErrchk(cudaMalloc((void**)&this->line_y_d, sizeof(double)*5*this->nCells_all));
+    // v2: factor/solve 分離用 (D̃ の LU 因子・ピボット・ライン失敗フラグ)。
+    gpuErrchk(cudaMalloc((void**)&this->line_LU_d, sizeof(double)*25*this->nCells_all));
+    gpuErrchk(cudaMalloc((void**)&this->line_piv_d, sizeof(signed char)*5*this->nCells_all));
+    gpuErrchk(cudaMalloc((void**)&this->line_fail_d, sizeof(unsigned char)*std::max(nLines,(geom_int)1)));
+    gpuErrchk(cudaMemset(this->line_fail_d, 0, sizeof(unsigned char)*std::max(nLines,(geom_int)1)));
 }

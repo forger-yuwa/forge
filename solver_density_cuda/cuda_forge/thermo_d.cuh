@@ -48,6 +48,8 @@ struct SpeciesThermo {
     double Thi;       // 高温端 [K]
     double low[9];    // Tlo  <= T <  Tmid の係数
     double high[9];   // Tmid <= T <= Thi  の係数
+    double h_datum;   // sensible datum で係数から除いた絶対エンタルピー h_abs(Tref) [J/mol] (既定 0)。
+                      // 反応流の反応熱 Q̇=−Σ(h_datum/W)ω と平衡定数 (H_abs=h+h_datum) が使う。
 };
 
 // -----------------------------------------------------------------------------

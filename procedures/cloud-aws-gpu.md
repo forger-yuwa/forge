@@ -26,7 +26,7 @@
 
 3. **Budgets**: 月 $50 のコストアラートを作成 (Billing → Budgets → Cost budget)。
 4. **キーペア / セキュリティグループ**: SSH (22) は自宅 IP 制限で 1 つ作成。inbound は SSH のみ。
-5. **GitHub deploy key**: 計算機からの clone 用に read-only deploy key を `SanoKum/forge` に登録する。鍵はローカルで `ssh-keygen -t ed25519 -f forge-deploy` して公開鍵を GitHub → リポジトリ Settings → Deploy keys へ。秘密鍵は起動したインスタンスの `~/.ssh/` に `scp` で配置し、`~/.ssh/config` に:
+5. **GitHub deploy key**: 計算機からの clone 用に read-only deploy key を `forger-yuwa/forge` に登録する。鍵はローカルで `ssh-keygen -t ed25519 -f forge-deploy` して公開鍵を GitHub → リポジトリ Settings → Deploy keys へ。秘密鍵は起動したインスタンスの `~/.ssh/` に `scp` で配置し、`~/.ssh/config` に:
 
    ```
    Host github.com
@@ -59,11 +59,35 @@ aws ec2 run-instances --region us-east-1 \
 SSH ログイン (ユーザーは `ubuntu`) し、deploy key を配置してから:
 
 ```bash
-git clone --depth 1 git@github.com:SanoKum/forge.git ~/forge
+git clone --depth 1 git@github.com:forger-yuwa/forge.git ~/forge
 ~/forge/solver_density_cuda/tools/cloud/setup_instance.sh
 ```
 
-スクリプトが行うこと: GPU/Docker 確認 → HighFive submodule 取得 → クラウド用イメージ `forge-solver:cuda-cloud` のビルド ([`Dockerfile.cuda.cloud`](../solver_density_cuda/Dockerfile.cuda.cloud): dev イメージから ParaView GUI/Qt を除き、gmsh はヘッドレスで同梱) → コンテナ内 Release ビルド → idle auto-stop cron の登録。
+スクリプトが行うこと: GPU/Docker 確認 → HighFive submodule 取得 → クラウド用イメージ `forge-solver:cuda-cloud` のビルド ([`Dockerfile.cuda`](../solver_density_cuda/Dockerfile.cuda) の `cloud` ステージ: dev から ParaView GUI/Qt を除き、gmsh はヘッドレスで同梱) → コンテナ内 Release ビルド → idle auto-stop cron の登録。
+
+### 移設で必ず踏む 4 点 (2026-09-05, case/46 SERN チェーンで実測)
+
+1. **submodule**: `git clone` 直後は HighFive が無く cmake が `HighFive headers not found` で止まる →
+   `GIT_SSH_COMMAND="ssh -i ~/.ssh/forge-deploy" git submodule update --init --recursive`。
+2. **CUDA 13 の thrust/cub**: CUDA 13.x は thrust/cub を `$CUDA_HOME/include/cccl/` に移したため
+   `fatal error: thrust/extrema.h: No such file or directory` になる → configure に
+   `-DCMAKE_CUDA_FLAGS=-I/usr/local/cuda/include/cccl -DCMAKE_CXX_FLAGS=-I/usr/local/cuda/include/cccl` を足す。
+   `CUDAARCHS` も必須 (g5 の A10G は `86`)。
+3. **converter の終了 assert**: `convertGmshToForge` は h5 を書き切ってから終了時に
+   `GPUassert: invalid argument (cudaWrapper.cu 73)` で非零終了する (既知・無害)。
+   成否は **exit code ではなく出力ファイルの存在とサイズ**で判定する
+   (`evaluate/runner_sern.py::convert_mesh` がその形。`check=True` にすると全 run が落ちる)。
+4. **design/ の python 依存**: `numpy scipy h5py pyyaml matplotlib` だけでは `opt/` が動かない。
+   MOO には **`pymoo` / `scikit-learn` / `smt`** も要る (ローカルと同版を推奨):
+
+   ```bash
+   python3 -m venv design/.venv-opt
+   design/.venv-opt/bin/pip install numpy scipy h5py pyyaml matplotlib \
+       "pymoo==0.6.2" "scikit-learn==1.9.0" "smt==2.14.1"
+   ```
+
+`evaluate/` の runner はリポジトリ位置から forge のパスを導く (`FORGE_ROOT` 環境変数で上書き可)
+ので、`~/forge` 以外に置いても動く。
 
 ## メッシングと可視化 (クラウドで完結させる)
 

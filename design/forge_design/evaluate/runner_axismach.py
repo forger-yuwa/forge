@@ -25,6 +25,7 @@ CFD-in-the-loop アンカー更新 (A5) は problem YAML の geometry キーで�
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -423,7 +424,7 @@ def design_chain(p: Problem) -> dict:
             "cd_series": float(ht.cd_series())}
 
 
-def prepare(problem_path, run_dir, nsteps=None, ic_from=None) -> dict:
+def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, implicit_relax=None) -> dict:
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
         raise ValueError("runner_axismach は wind_tunnel_axisym_axismach 専用")
@@ -465,8 +466,12 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None) -> dict:
     if q.returncode != 0:
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
     # node 変換 (node config を書いてから変換 — 必須) + 等エントロピー IC
-    (run_dir / "solverConfig.yaml").write_text(
-        _apply_gas_to_config(_config_euler_node(p, n, out_int, 4.0, 1), p, run_dir))
+    cfg_e = _apply_gas_to_config(_config_euler_node(p, n, out_int, 4.0, 1), p, run_dir)
+    if cfl_main is not None:
+        cfg_e = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {float(cfl_main)}, cfl_pseudo: {float(cfl_main)}", cfg_e)
+    if implicit_relax is not None:
+        cfg_e = cfg_e.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
+    (run_dir / "solverConfig.yaml").write_text(cfg_e)
     subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
@@ -500,7 +505,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None) -> dict:
     return info
 
 
-def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False,
+def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, stages: str = "full",
                mesh_h5: str = "nozzle.h5") -> int:
     """soft 段 (1次+cfl0.5, 3000 step) → [mid 段 (2次+cfl1, 3000 step)] → 本段。
     walldriven W3 と同方式・段階起動必須。`cfl_main` で本段 CFL を上書き
@@ -528,10 +533,13 @@ def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False,
         for f in run_dir.glob("res_*"):
             f.unlink()
 
+    if stages == "none":
+        (run_dir / "solverConfig.yaml").write_text(cfg_main)
+        return run_forge(run_dir)
     soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 0.5, cfl_pseudo: 0.5", cfg_main)
     soft = soft.replace("convMethod: 1", "convMethod: 0")
     _stage(soft, 3000, "soft")
-    if mid_stage:
+    if mid_stage and stages == "full":
         mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 1.0, cfl_pseudo: 1.0", cfg_main)
         _stage(mid, 3000, "mid")
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
@@ -566,7 +574,15 @@ def collect(problem_path, run_dir) -> dict:
                               x_d=info["x_E"] * scale, gamma=p.gamma)
     except Exception as e:  # noqa: BLE001 — 一様性は診断 (核心は軸 M)
         uni = {"error": str(e)}
+    mf = None
+    if info.get("euler_ref"):
+        try:
+            from ..metrics.deltastar import massflow_ratio
+            mf = massflow_ratio(run_dir, info["euler_ref"])
+        except Exception as e:  # noqa: BLE001 — 帳簿は診断
+            mf = {"error": str(e)}
     out = {"res_file": res[-1].name,
+           "massflow": mf,
            "dM_max": float(np.max(np.abs(dM))),
            "dM_max_rel_Md": float(np.max(np.abs(dM)) / Md),
            "dM_rms": float(np.sqrt(np.mean(dM ** 2))),
@@ -588,15 +604,23 @@ def main(argv=None) -> int:
     ap.add_argument("run_dir")
     ap.add_argument("--steps", type=int, default=None)
     ap.add_argument("--prepare-only", action="store_true")
+    ap.add_argument("--cfl", type=float, default=None, help="本段 cfl (YAML evaluate.cfl_main を上書き)")
+    ap.add_argument("--implicit-relax", type=float, default=None, help="implicitRelax を deltaT に挿入")
+    ap.add_argument("--stages", default="full", choices=("full", "soft", "none"), help="full=soft/mid/本段, soft=soft+本段, none=本段のみ")
+    ap.add_argument("--ic-from", default=None)
     a = ap.parse_args(argv)
-    info = prepare(a.problem, a.run_dir, nsteps=a.steps)
-    print(json.dumps(info, indent=1))
+    info = prepare(a.problem, a.run_dir, nsteps=a.steps, ic_from=a.ic_from, cfl_main=a.cfl, implicit_relax=a.implicit_relax)
+    info["stages"] = a.stages
+    (Path(a.run_dir) / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
+    print(json.dumps(info, indent=1, default=str))
     if a.prepare_only:
         return 0
     pp = load_problem(a.problem)
-    rc = run_staged(a.run_dir, cfl_main=pp.evaluate.get("cfl_main"),
-                    mid_stage=bool(pp.evaluate.get("mid_stage", pp.is_semiperfect)))
-    print(f"forge exit={rc}")
+    import time as _t
+    t0 = _t.time()
+    rc = run_staged(a.run_dir, cfl_main=(a.cfl if a.cfl is not None else pp.evaluate.get("cfl_main")),
+                    mid_stage=bool(pp.evaluate.get("mid_stage", pp.is_semiperfect)), stages=a.stages)
+    print(f"forge exit={rc} (wall {_t.time() - t0:.0f} s, stages={a.stages})")
     print(json.dumps(collect(a.problem, a.run_dir), indent=1))
     return rc
 
@@ -607,7 +631,10 @@ if __name__ == "__main__":
 
 # --- A12: 粘性 δ* 補正 (RANS 経路) ------------------------------------------------
 def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
-               dstar_csv=None, dstar_blend=(6.0, 9.0)) -> dict:
+               dstar_csv=None, dstar_blend=(6.0, 9.0),
+               delta_r_csv=None, offset: str = "normal", euler_ref=None,
+               omega: float | None = None, prev_run=None, initializer=None,
+               cfl_main: float | None = None, implicit_relax: float | None = None) -> dict:
     r"""**物理壁 (inviscid + δ*) の RANS run** を準備する (A12)。
 
     plan: plans/active/tooling-nozzle-axismach-viscous-deltastar.md。
@@ -619,6 +646,10 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       (-1, -0.5) 等で CSV を全域採用 [case/44 v3])
     - メッシュ/段階起動レシピは B8 系 NS v1 (run_0028-0030) で確立したものを流用。
       coarse 中継 (y+~50) は YAML の mesh/evaluate 設定だけの違いで同じ関数で作る
+    - **`delta_r_csv` (生産経路, plans/active/tooling-nozzle-deltastar-core-matched-euler.md)**:
+      半径方向補正 δ_r(x) [r_t] の CSV (列 x_rt, delta_r; `feedback.deltastar_loop` が作る
+      `delta_r_next.csv`) を全域そのまま使い、`offset="radial"` で壁を作る。`dstar_csv`/`dstar_blend`
+      (旧 v3 継ぎはぎ) とは排他。`euler_ref` (固定 Euler 参照 run) は帳簿用に prepare_info へ記録。
     """
     from ..feedback.deltastar import _sutherland
     from ..geometry.wall_axismach import PhysicalNozzleWall
@@ -646,9 +677,55 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             w = w * w * (3.0 - 2.0 * w)
             csv = np.interp(np.clip(x, _tbl[0, 0], _tbl[-1, 0]), _tbl[:, 0], _tbl[:, 1])
             return (1.0 - w) * _corr(x) + w * csv
+    delta_r_x = None
+    init_info = None
+    init_cfg = initializer if initializer is not None else p.raw.get("deltastar_initializer")
+    if init_cfg and delta_r_csv is None and dstar_csv is None:
+        # 積分法初期壁 (plan §4.1): 初回 NS 専用。断熱 / 指定壁温は thermal_bc で。
+        from ..feedback.deltastar_integral import integral_bl, delta_r_function
+        model = str(init_cfg.get("model", "contur"))
+        if model not in ("contur", "contur_momentum_integral"):
+            raise ValueError(f"deltastar_initializer.model={model!r} は未対応 (contur のみ)")
+        res_init = integral_bl(d["wall"], wall_inv, _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]),
+                               scale, thermal_bc=init_cfg.get("thermal_bc"),
+                               theta0_m=init_cfg.get("theta0_m"), x_virtual_m=init_cfg.get("x_virtual_m"),
+                               a_crocco=float(init_cfg.get("a_crocco", 1.0)), closure=str(init_cfg.get("closure", "contur")))
+        # 積分法の出力も同じ 5 次 P-spline で平滑化 (N(Re) テーブルの折れ目などを壁曲率に持ち込まない)
+        from ..metrics.deltastar import smooth_delta_quintic
+        f_s, sm_diag = smooth_delta_quintic(res_init["x"], res_init["delta_r"], knot_spacing=2.0, lam=1.0)
+        res_init["delta_r_raw_integral"] = res_init["delta_r"].copy()
+        res_init["delta_r"] = f_s(res_init["x"])
+        delta_r_x = delta_r_function(res_init)
+        offset = "radial"
+        init_info = dict(res_init["settings"])
+        init_info["smooth"] = {"kind": "quintic_pspline", **sm_diag}
+        init_info["delta_r_throat"] = float(np.interp(0.0, res_init["x"], res_init["delta_r"]))
+        init_info["delta_r_exit"] = float(res_init["delta_r"][-1])
+        (run_dir / "delta_r_initial.csv").write_text("")   # 後で上書き (run_dir は下で作る)
+    if delta_r_csv is not None:
+        if dstar_csv is not None:
+            raise ValueError("delta_r_csv と dstar_csv は排他")
+        tbl_r = np.loadtxt(delta_r_csv, delimiter=",", skiprows=1)
+        if not np.all(np.isfinite(tbl_r[:, 1])):
+            raise ValueError("delta_r_csv に非有限値がある (deltastar_loop.extract_and_merge で前回値保持済みの CSV を渡す)")
+        delta_r_x = lambda x, _t=tbl_r: np.interp(x, _t[:, 0], _t[:, 1])
+        offset = "radial"
     wall = PhysicalNozzleWall(d["wall"], wall_inv, scale, float(p.spec["Pt"]),
-                              float(p.spec["Tt"]), _gam_or_gas(p), p.cp, dstar_x=dstar_x)
-    dstar_src = "correlation_hist_v1" if dstar_csv is None else f"{dstar_csv} (blend {dstar_blend})"
+                              float(p.spec["Tt"]), _gam_or_gas(p), p.cp, dstar_x=dstar_x,
+                              offset=offset, delta_r_x=delta_r_x)
+    if init_info is not None:
+        np.savetxt(run_dir / "delta_r_initial.csv",
+                   np.c_[res_init["x"], res_init["delta_r"], res_init["dstar_n"], res_init["theta"] * scale,
+                         res_init["H"], res_init["N"], res_init["Cf"], res_init["M"], res_init["Tw"], res_init["Taw"]],
+                   delimiter=",", comments="",
+                   header="x_rt,delta_r_rt,dstar_n_rt,theta_m,H,N,Cf,M_e,Tw,Taw")
+        (run_dir / "delta_r_initial.json").write_text(json.dumps(init_info, indent=1, default=str))
+    if init_info is not None:
+        dstar_src = f"integral_bl:{init_info['model']} thermal_bc={init_info['thermal_bc']} (radial)"
+    elif delta_r_csv is not None:
+        dstar_src = f"delta_r_csv:{delta_r_csv} (radial, core-matched Euler ref {euler_ref}, omega {omega})"
+    else:
+        dstar_src = ("correlation_hist_v1" if dstar_csv is None else f"{dstar_csv} (blend {dstar_blend})") + f" ({offset})"
     msgs = wall.validate()
     if msgs:
         raise ValueError("物理壁フィルタ不合格: " + "; ".join(msgs))
@@ -671,7 +748,11 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                delimiter=",", header="x_m,r_m", comments="")
     n = nsteps or int(p.evaluate.get("nStepOuter", 48000))
     out_int = int(p.evaluate.get("outStepInterval", max(n // 6, 1)))
-    cfl_main = float(p.evaluate.get("cfl_main", 1.0))
+    if n % out_int:
+        # forge は outStepInterval の倍数でしか res を書かない → 最終 step の res が残るよう n を割り切る間隔に直す
+        out_int = next(n // k for k in (3, 2, 4, 6, 1) if n % k == 0)
+    cfl_main = float(cfl_main if cfl_main is not None else p.evaluate.get("cfl_main", 1.0))
+    implicit_relax = implicit_relax if implicit_relax is not None else p.evaluate.get("implicit_relax")
     (run_dir / "bcondConfig.yaml").write_text(_bcond_with_species(_bcond(p, euler=False), _tp_species_Y(p)))
     (run_dir / "probe.yaml").write_text(PROBE_STUB)
     # 品質は cell 変換コピーで検査 (品質ツールは node CONNE 非対応)
@@ -688,8 +769,11 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     if q.returncode != 0:
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
     # node/SST 変換 (config を先に書く — wall_dist は no-slip 壁で作られる)
-    (run_dir / "solverConfig.yaml").write_text(
-        _apply_gas_to_config(_config_sst_node(p, n, out_int, cfl_main), p, run_dir))
+    cfg_ns = _apply_gas_to_config(_config_sst_node(p, n, out_int, cfl_main), p, run_dir)
+    if implicit_relax is not None:
+        # 陰解法の緩和 (cfl 6 + implicitRelax 0.7 が生産推奨: case/45 run_0018)。deltaT ブロックに挿入
+        cfg_ns = cfg_ns.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
+    (run_dir / "solverConfig.yaml").write_text(cfg_ns)
     subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
@@ -729,26 +813,36 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "dstar_source": dstar_src, "mdot_ratio_moc": None,
             "throat_physical": {"x": wall.x_throat, "r": wall.r_throat,
                                 "kappa": wall.kappa_throat,
-                                "dstar_throat": float(wall._dstar_hist(0.0))},
+                                "dstar_throat_correlation": float(wall._dstar_hist(0.0)),
+                                "delta_r_throat_applied": float(wall.r_throat - 1.0)},
+            "offset": wall.offset_mode, "euler_ref": (str(euler_ref) if euler_ref else None),
+            "initializer": init_info,
+            "omega": omega, "prev_run": (str(prev_run) if prev_run else None),
+            "delta_r_csv": (str(delta_r_csv) if delta_r_csv else None),
             "x0": d["x0"], "x_A": d["x_A"], "x_E": d["x_E"], "L_c": d["L_c"],
             "Lc_mode": d["Lc_mode"], "Lc_solve": d["Lc_solve"],
             "anchor": list(d["anchor"]), "anchor_source": d["anchor_source"],
             "start_line": d["start_line"], "wall_mode": d["wall_mode"],
             "Md": d["Md"], "R": d["R"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},
-            "nStepOuter": n, "cfl_main": cfl_main, "scale_m": scale,
+            "nStepOuter": n, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
             "ic_from": str(ic_from) if ic_from else None,
             "mesh": {"ni": mp.ni, "nj": mp.nj, "wall_first_frac": mp.wall_first_frac}}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 
 
-def run_staged_ns(run_dir) -> int:
-    """NS の 3 段起動 (run_0030 レシピ): soft (1次 cfl0.5 ni10) → mid (1次 cfl1)
-    → 本段 (2次 cfl_main)。各段の最終場を IC に引き継ぐ。"""
+def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 1000) -> int:
+    """NS の起動。stages:
+    - "full" (既定・run_0030 レシピ): soft (1次 cfl0.5 ni10, 3000 step) → mid (1次 cfl1, 3000) → 本段 (2次 cfl_main)。
+    - "none": 本段だけ (収束済み NS 場からの warm start 用)。
+    - "ramp": 2 次のまま cfl を `ramp` (例 (1, 2, 3.5)) の順に各 ramp_steps だけ回して本段 cfl_main へ
+      (forge に CFL ランプ機能は無いので restart で段階化する。本段の step 数はランプ分を差し引く)。
+    各段の最終場を IC に引き継ぐ。"""
     import re
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
+    n_main = int(re.search(r"nStepOuter: (\d+)", cfg_main).group(1))
 
     def _stage(cfg, nsteps):
         cfg = re.sub(r"nStepOuter: \d+", f"nStepOuter: {nsteps}", cfg)
@@ -765,15 +859,28 @@ def run_staged_ns(run_dir) -> int:
         for f in run_dir.glob("res_*"):
             f.unlink()
 
-    soft = cfg_main
-    soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 0.5, cfl_pseudo: 0.5", soft)
-    soft = soft.replace("convMethod: 1", "convMethod: 0")
-    soft = soft.replace("nStepInner: 5", "nStepInner: 10")
-    _stage(soft, 3000)
-    mid = cfg_main
-    mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 1.0, cfl_pseudo: 1.0", mid)
-    mid = mid.replace("convMethod: 1", "convMethod: 0")
-    mid = mid.replace("nStepInner: 5", "nStepInner: 10")
-    _stage(mid, 3000)
+    if stages == "full":
+        soft = cfg_main
+        soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 0.5, cfl_pseudo: 0.5", soft)
+        soft = soft.replace("convMethod: 1", "convMethod: 0")
+        soft = soft.replace("nStepInner: 5", "nStepInner: 10")
+        _stage(soft, 3000)
+        mid = cfg_main
+        mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 1.0, cfl_pseudo: 1.0", mid)
+        mid = mid.replace("convMethod: 1", "convMethod: 0")
+        mid = mid.replace("nStepInner: 5", "nStepInner: 10")
+        _stage(mid, 3000)
+    elif stages == "ramp":
+        ramp = tuple(ramp or (1.0, 2.0, 3.5))
+        for c in ramp:
+            st = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", cfg_main)
+            _stage(st, int(ramp_steps))
+        n_main = max(n_main - int(ramp_steps) * len(ramp), int(ramp_steps))
+        # 最終 res が書かれるよう outStepInterval の倍数に丸める (forge は outStepInterval の倍数でしか res を書かない)
+        out_int = int(re.search(r"outStepInterval: (\d+)", cfg_main).group(1))
+        n_main = max((n_main // out_int) * out_int, out_int)
+        cfg_main = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_main}", cfg_main)
+    elif stages != "none":
+        raise ValueError("stages は 'full' / 'none' / 'ramp'")
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
     return run_forge(run_dir)

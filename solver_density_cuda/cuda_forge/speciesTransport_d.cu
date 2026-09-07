@@ -419,6 +419,10 @@ __global__ void species_eos_final_commit_d(
 
 }  // namespace
 
+static flow_float** g_srcjac_dev = nullptr;   // src_jac_Y{s} の device ポインタ配列 (化学反応ソース用)
+flow_float** species_resroY_device_ptr() { return g_resroY_dev; }
+flow_float** species_srcjac_device_ptr() { return g_srcjac_dev; }
+
 void speciesInit_d(solverConfig& cfg, variables& var)
 {
     (void)cfg;
@@ -429,13 +433,14 @@ void speciesInit_d(solverConfig& cfg, variables& var)
     }
     g_nSpecies = var.nSpeciesRegistered;
 
-    std::vector<flow_float*> hroY(g_nSpecies), hroYN(g_nSpecies), hres(g_nSpecies), htd(g_nSpecies);
+    std::vector<flow_float*> hroY(g_nSpecies), hroYN(g_nSpecies), hres(g_nSpecies), htd(g_nSpecies), hsj(g_nSpecies);
     for (int s = 0; s < g_nSpecies; s++) {
         const std::string i = std::to_string(s);
         hroY[s]  = var.c_d["roY"+i];
         hroYN[s] = var.c_d["roY"+i+"N"];
         hres[s]  = var.c_d["res_roY"+i];
         htd[s]   = var.c_d["transport_diag_Y"+i];
+        hsj[s]   = var.c_d["src_jac_Y"+i];
     }
     const size_t pbytes = g_nSpecies*sizeof(flow_float*);
     gpuErrchk( cudaMalloc((void**)&g_roY_dev,      pbytes) );
@@ -446,6 +451,8 @@ void speciesInit_d(solverConfig& cfg, variables& var)
     gpuErrchk( cudaMemcpy(g_roYN_dev,      hroYN.data(), pbytes, cudaMemcpyHostToDevice) );
     gpuErrchk( cudaMemcpy(g_resroY_dev,    hres.data(),  pbytes, cudaMemcpyHostToDevice) );
     gpuErrchk( cudaMemcpy(g_transdiag_dev, htd.data(),   pbytes, cudaMemcpyHostToDevice) );
+    gpuErrchk( cudaMalloc((void**)&g_srcjac_dev, pbytes) );
+    gpuErrchk( cudaMemcpy(g_srcjac_dev, hsj.data(), pbytes, cudaMemcpyHostToDevice) );
 
     // face 整合再構成用 Y / ∇Y ポインタ配列。
     std::vector<flow_float*> hY(g_nSpecies), hdx(g_nSpecies), hdy(g_nSpecies), hdz(g_nSpecies);

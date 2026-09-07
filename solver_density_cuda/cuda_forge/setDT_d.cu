@@ -121,7 +121,23 @@ __global__ void setCFL_cell_d
  // 軸対称 near-axis 安定化 (isAxisymmetric==1 かつ axisBeta>0 のときのみ作用)
  int isAxisymmetric,
  flow_float* A_planar,
- flow_float axisBeta
+ flow_float axisBeta,
+
+ // v2 line-implicit 粘性 CFL 割引 (plans/active/time_integration-line-implicit-viscous-v2.md):
+ // on-line セルに限り、面 λ の粘性項 2ν_eff/(ρ·dx_min) 由来の CFL を (1−θ) 倍に割引く。
+ // 壁近傍セルの dx_min は壁法線 (=line 方向) なので方向整合は近似的に成立。θ=0 で完全不変。
+ geom_int* plane_cells,
+ flow_float visc_lam,
+ flow_float* vis_turb,
+ flow_float lineReliefTheta,
+ const geom_int* line_prev,
+ const geom_int* line_next,
+ // 方向別 dt (lineDtDirectional==1): line 面 (Thomas が厳密に解く結合) の λ を CFL の max から
+ // 完全除外し、Δτ を off-line 面 (lag 側) の λ だけで決める。壁セルの Δτ は streamwise 基準 (×AR)。
+ int lineDtDirectional,
+ // 診断 (lineDtWallRelief==1): wall 種境界半割面の λ も on-line セルの max から除外 (壁端点律速の切り分け)。
+ const unsigned char* plane_wall,
+ int lineDtWallRelief
 )
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
@@ -135,10 +151,34 @@ __global__ void setCFL_cell_d
         cfl[ic] = 0.0;
         //cfl_pseudo[ic] = 0.0;
 
+        const bool onLine = (line_prev != nullptr && (line_prev[ic] >= 0 || line_next[ic] >= 0));
+        const bool lineRelief = (lineReliefTheta > (flow_float)0.0 && onLine);
+
         for (geom_int ilp=index_st; ilp<index_en; ilp++) {
             geom_int ip = cell_planes[ilp];
 
-            cfl[ic] = max(cfl[ic], cfl_pln[ip]);
+            if (lineDtWallRelief != 0 && onLine && plane_wall != nullptr && plane_wall[ip] != 0) continue;
+            if (lineDtDirectional != 0 && onLine) {
+                const geom_int ic0 = plane_cells[2*ip+0];
+                const geom_int ic1 = plane_cells[2*ip+1];
+                const geom_int other = (ic0 == ic) ? ic1 : ic0;
+                if (other == line_prev[ic] || other == line_next[ic]) continue;  // line 面は除外
+            }
+            flow_float cfl_p = cfl_pln[ip];
+            if (lineRelief) {
+                // setCFL_pln_d と同一式で面の粘性 CFL を再計算し θ 分を引く (対流+音響分は必ず残る)。
+                const geom_int ic0 = plane_cells[2*ip+0];
+                const geom_int ic1 = plane_cells[2*ip+1];
+                const flow_float f = fx[ip];
+                const flow_float sss = ss[ip];
+                const flow_float dx_min = min(vol[ic0]/sss, vol[ic1]/sss);
+                const flow_float rof = f*ro[ic0] + ((flow_float)1.0-f)*ro[ic1];
+                const flow_float v_turb = f*vis_turb[ic0] + ((flow_float)1.0-f)*vis_turb[ic1];
+                const flow_float cfl_visc = dt * (flow_float)2.0 * (visc_lam + v_turb)
+                                            / (rof * dx_min * dx_min);
+                cfl_p = max(cfl_p - lineReliefTheta * cfl_visc, (flow_float)0.0);
+            }
+            cfl[ic] = max(cfl[ic], cfl_p);
         }
 
         // 軸対称 near-axis 半径音響スペクトル半径を加える: λ_axis = β·(|u_r|+c)·A_planar。
@@ -304,7 +344,18 @@ void setDT_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , vari
         // 軸対称 near-axis 安定化
         cfg.isAxisymmetric,
         (cfg.isAxisymmetric == 1) ? var.c_d["A_planar"] : var.c_d["volume"],
-        cfg.axisTimestepBeta
+        cfg.axisTimestepBeta,
+
+        // v2 line-implicit 粘性 CFL 割引 (lineViscousDtRelief=0 で完全不変)
+        msh.map_plane_cells_d,
+        cfg.visc,
+        var.c_d["vis_turb"],
+        (cfg.lineImplicit == 1) ? cfg.lineViscousDtRelief : (flow_float)0.0,
+        (cfg.lineImplicit == 1) ? msh.line_prev_d : nullptr,
+        (cfg.lineImplicit == 1) ? msh.line_next_d : nullptr,
+        (cfg.lineImplicit == 1) ? cfg.lineDtDirectional : 0,
+        (cfg.lineImplicit == 1) ? msh.plane_wall_flag_d : nullptr,
+        (cfg.lineImplicit == 1) ? cfg.lineDtWallRelief : 0
     ) ;
     gpuErrchk( cudaPeekAtLastError() );
 

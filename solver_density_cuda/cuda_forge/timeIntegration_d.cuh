@@ -98,7 +98,8 @@ __global__ void runge_kutta_exp_d
 );
 
 
-void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);
+void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var , int lineStoreK = 1);
+void lineThomasFactor_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);
 // line-implicit: sweep カーネル保存の diag/K/rhs でライン block-Thomas を解き dq_new を上書き
 void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 

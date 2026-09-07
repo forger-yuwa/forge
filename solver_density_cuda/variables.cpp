@@ -51,7 +51,7 @@ static std::list<std::string> speciesCellVarNames(int s)
     };
 }
 
-void variables::registerSpecies(int nSpecies)
+void variables::registerSpecies(int nSpecies, int chemistry)
 {
     // 単成分 (<=1) は M1 と同一経路を保つため化学種変数を登録しない。
     if (nSpecies <= 1) {
@@ -76,8 +76,18 @@ void variables::registerSpecies(int nSpecies)
         this->output_cellValNames.push_back("Y"+std::to_string(s));
     }
 
+    // 有限速度化学 (chemistry.enabled): 反応熱 Q̇ [W/m3] と化学時間 τ_c [s] の診断出力。
+    if (chemistry != 0) {
+        for (const auto& name : {std::string("chemQdot"), std::string("chemTau")}) {
+            this->cellValNames.push_back(name);
+            this->c.emplace(name, std::vector<flow_float>{});
+            this->c_d.emplace(name, nullptr);
+            this->output_cellValNames.push_back(name);
+        }
+    }
+
     std::cout << "registerSpecies: nSpecies=" << nSpecies
-              << " -> registered " << nSpecies*10 << " cell variables\n";
+              << " -> registered " << nSpecies*10 << " cell variables" << (chemistry ? " (+chemistry diagnostics)" : "") << "\n";
 }
 
 // 非平衡凝縮 (Phase 1): 1 モーメント (保存量名 consName 例 "rog_0") ごとに必要なセル変数名を生成する。

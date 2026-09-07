@@ -49,6 +49,7 @@ SpeciesThermo makeSpecies(double MW, double sigma, double eps_kB,
     s.MW = MW; s.sigma_LJ = sigma; s.eps_kB = eps_kB;
     s.Tlo = Tlo; s.Tmid = Tmid; s.Thi = Thi;
     for (int i=0;i<9;i++){ s.low[i]=low[i]; s.high[i]=high[i]; }
+    s.h_datum = 0.0;
     return s;
 }
 
@@ -213,6 +214,7 @@ void thermo_init_db(solverConfig& cfg)
             const double da7   = -h_ref / THERMO_RU;
             g_host[i].low[7]  += da7;
             g_host[i].high[7] += da7;
+            g_host[i].h_datum  = h_ref;   // 反応熱・K_c 用に除いた分を保持 (chemistry_d.cuh)
         }
         std::cout << "[thermo_d] enthalpy datum offset applied: h_s(Tref="
                   << Tref << "K)=0 for all species" << std::endl;

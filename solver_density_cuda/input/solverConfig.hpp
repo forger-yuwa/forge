@@ -48,6 +48,12 @@ public:
     // blockDPLUR==1 専用・lowMachPrecond>=2 とは併用不可 (config 検証で拒否)。
     // plans/active/time_integration-line-implicit.md
     int lineImplicit = 0;
+    // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md)。lineImplicit==1 専用。
+    int lineKFreeze = 0;              // 1: dual-time サブ反復間で K/diag/LU を凍結 (subiter 0 のみ構築)
+    int lineViscCoupling = 0;         // 1: line 面にスカラー粘性結合 K+=α·I (対角 2α→α)
+    flow_float lineViscousDtRelief = 0.0;  // θ: on-line セルの擬似 dt 粘性項を (1−θ) 倍
+    int lineDtDirectional = 0;        // 1: 方向別 dt — line 面の λ (音響込み) を CFL の max から除外
+    int lineDtWallRelief = 0;         // 1: (診断) wall 種境界半割面の λ も on-line セルの CFL max から除外
     // 軸対称 near-axis 安定化: 擬似時間スペクトル半径に軸項 λ_axis=β·(|u_r|+c)·A_planar を加える。
     // 近軸 (r→0) で Δτ∝CFL·r/(|u_r|+c) を自然に与え半径運動量不安定を抑える。0=不変 (既定)。
     flow_float axisTimestepBeta = 0.0;
@@ -343,6 +349,12 @@ public:
                                                // だが、種ごとに桁違いの生成エンタルピー (H2O≈-13.4MJ/kg) を
                                                // 除いて多成分 implicit の roe/roY 緩和ミスマッチ起因の T ジャンプ
                                                // を抑え安定化する。0 (既定) で従来 NASA 絶対基準・ビット不変。
+    // 有限速度化学 (physProp.chemistry, methods/chemistry.md)。既定 off で全経路ビット不変。
+    int chemEnabled = 0;                       // 1: 反応ソース項 ω_s・反応熱 Q̇ を有効化 (thermalMethod==2, nSpecies>=2 必須)
+    std::string chemMechanismFile = "";        // 反応機構 (Cantera YAML サブセット)
+    double chemTmaxReaction = 6000.0;          // 速度式評価の温度上限 [K]
+    double chemFreezeBelowT = 0.0;             // この温度未満で反応を凍結 (ω=0) [K]
+    int chemJacobianMode = 1;                  // 0: 陽ソースのみ, 1: 対角 point-implicit (src_jac_Y), 2: 全ブロック (Phase 2)
     flow_float Sc = 0.7;                       // 定数 Schmidt 数 (speciesDiffusionMethod==0)
     flow_float Sc_t = 0.7;                     // 乱流 Schmidt 数 (D_t=mu_t/(ro*Sc_t))。
                                                // turbulence.turbulentSchmidt でも設定可 (physProp.Sc_t は後方互換、turbulence 優先)

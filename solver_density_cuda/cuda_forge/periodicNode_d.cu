@@ -1,3 +1,5 @@
+#include <vector>
+#include <string>
 #include "periodicNode_d.cuh"
 #include "cuda_forge/cudaWrapper.cuh"
 
@@ -79,16 +81,20 @@ void periodicNodeGather_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
 
-    // RANS SST: k/ω 残差も merged CV で合算する (周期境界の k/ω DOF 同一視)。1配列版を使う。
-    if (cfg.LESorRANS == 2 && cfg.RANSmodel == 1) {
-        for (const char* k : {"res_roK", "res_roOmega"}) {
-            auto it = var.c_d.find(k);
-            if (it == var.c_d.end() || it->second == nullptr) continue;
-            periodicGather1ToRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, it->second);
-            gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
-            periodicBroadcast1FromRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, it->second);
-            gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
-        }
+    // RANS SST の k/ω 残差、多成分の化学種残差 res_roY{s}、凝縮モーメント残差も merged CV で合算する
+    // (周期境界の DOF 同一視)。化学種を合算しないと seam で移流・反応ソースが部分体積分しか効かず
+    // (面 1/2・辺 1/4・角 1/8)、エネルギー (合算済) と不整合になる (case/35 run_0049 で発覚, 2026-09-04)。
+    std::vector<std::string> extra;
+    if (cfg.LESorRANS == 2 && cfg.RANSmodel == 1) { extra.push_back("res_roK"); extra.push_back("res_roOmega"); }
+    for (const auto& nm : var.speciesVarNames)     extra.push_back("res_" + nm);
+    for (const auto& nm : var.condMomentConsNames) extra.push_back("res_" + nm);
+    for (const auto& k : extra) {
+        auto it = var.c_d.find(k);
+        if (it == var.c_d.end() || it->second == nullptr) continue;
+        periodicGather1ToRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, it->second);
+        gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+        periodicBroadcast1FromRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, it->second);
+        gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
     }
 }
 
@@ -104,6 +110,16 @@ void periodicMirrorNSState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , 
     );
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+    // 化学種・凝縮モーメントの保存量も root→member でミラー (残差 gather と対にして drift を防ぐ)。
+    std::vector<std::string> extra;
+    for (const auto& nm : var.speciesVarNames)     extra.push_back(nm);
+    for (const auto& nm : var.condMomentConsNames) extra.push_back(nm);
+    for (const auto& k : extra) {
+        auto it = var.c_d.find(k);
+        if (it == var.c_d.end() || it->second == nullptr) continue;
+        periodicBroadcast1FromRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, it->second);
+        gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+    }
 }
 
 // RANS SST: k/ω 状態 (roK, roOmega) を周期 group の root へ member からミラー (§4.5)。

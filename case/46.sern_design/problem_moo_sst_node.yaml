@@ -1,0 +1,24 @@
+# ⑤ SERN S6 多作動点 MOO (RANS 版): node + SST (壁関数)。作動点 = 巡航 (M∞6, p_ext/p_in 0.05, w 0.6) と
+# 加速 (M∞3.5, p_ext/p_in 0.20 = 過膨張, w 0.4)。目的 = −(摩擦込み C_T の重み付き平均), L_ramp/H。
+# 制約: C_M,w (x_ref = −20H, 頭上げ正) ≥ −2.5。剥離割合は台帳に記録。
+name: sern_moo_sst_node
+type: sern_2d
+gas: {gamma: 1.4, cp: 1004.5}
+spec:
+  H_m: 0.1
+  inflow: {mode: supersonic, M_in: 2.5, p_in: 20000.0, T_in: 900.0}
+  external: {M_inf: 6.0, p_inf: 1000.0, T_inf: 220.0}
+  operating_points:
+    - {name: cruise, weight: 0.6, external: {M_inf: 6.0, p_inf: 1000.0, T_inf: 220.0}}
+    - {name: accel,  weight: 0.4, external: {M_inf: 3.5, p_inf: 4000.0, T_inf: 230.0}}
+  moment_ref: [-20.0, 0.0]
+dv:
+  M_c:           {min: 3.2, max: 4.4, value: 3.9}
+  f:             {min: 0.35, max: 0.60, value: 0.45}
+  theta_r0_deg:  {min: 10.0, max: 20.0, value: 15.0}
+  theta_c0_deg:  {min: 2.0, max: 8.0, value: 5.0}
+  L_cowl:        {min: 0.6, max: 1.6, value: 1.0}
+geometry: {x_max_kernel: 9.0, nj_moc: 301, dx_moc: 2.0e-3, nj_moc_probe: 151, dx_moc_probe: 4.0e-3, L_ramp_max: 20.0}
+mesh: {discretization: node, cowl_thickness: 0.0, ni_up: 16, ni_noz: 100, ni_plume: 180, nj_top: 81, nj_bot: 51, L_up: 0.5, x_out_extra: 2.0, bot_depth: 3.0, first_wall_frac: 4.0e-3}
+evaluate: {model: sst, nStepOuter: 4000, cfl_main: 1.0, outStepInterval: 500}
+opt: {soft_steps: 2000, cm_min: -2.5}

@@ -425,6 +425,32 @@ lag から **block 三重対角の直接解 (block-Thomas, 1 ライン 1 スレ�
 する。反復に残る lag はライン外 (流れ方向) のみになる。**ただし case/45 M6 ノズルの実測では cfl 上限は不変** (律速は壁法線でなく streamwise lag と判明) で、効果は同一設定の収束 −14 %/step に留まる — 詳細と罠 (lu5 ピボット/printf 引数上限) は plan 参照。`lineImplicit: 1`
 (既定 0 = 挙動不変)。blockDPLUR==1 専用、lowMachPrecond>=2 と併用不可。
 
+### v2: factor/solve 分離・K 凍結・粘性結合・粘性 dt 割引 (2026-09-02)
+
+計画: [`plans/accepted/time_integration-line-implicit-viscous-v2.md`](../../plans/accepted/time_integration-line-implicit-viscous-v2.md)。
+
+- **factor/solve 分離 (常時, 厳密)**: D̃ の LU 分解・W=D̃⁻¹Knext・Kprev·W は rhs に依存しない
+  ため `lineThomasFactor_d` (storeLU 時 1 回) と `lineThomasSolve_d` (毎 sweep, 保存因子で代入
+  のみ) に分離。v1 モノリシックの毎 sweep 再分解が DDES で 2.44× だったコストの主犯で、分離
+  だけで 1.59× に落ちる。`FORGE_LINE_MONO=1` で旧動作。因子は `line_LU_d`/`line_piv_d`。
+- **`lineKFreeze: 1`**: dual-time サブ反復間で K 抽出・LU 分解を凍結 (subiter 0 のみ構築)。
+  LHS 近似の強化で収束経路のみ変化 (実測で収束軌道は非凍結と一致)。コスト 1.32× まで低減。
+- **`lineViscCoupling: 1`**: line 面にスカラー粘性結合 K += α·I (α=ν_eff·δ/dcc)、対角は
+  2α→α で line 内に真の拡散行 [−α, 2α, −α] を完成。**圧縮性 pseudo-dt の壁法線律速は音響
+  (λ_visc/λ_ac = 2ν/(Δn·c) ≪ 1) なので効果は僅差** — 意味を持つのは Δn < 2ν/c の超極薄セルのみ。
+- **`lineViscousDtRelief: θ`**: on-line セルの擬似 dt 粘性スペクトル半径を (1−θ) 倍 (`setDT_d`
+  で面ごとに割引、対流+音響分は残す)。θ=1 でも安定 (上と同じ理由で利得も僅差)。
+- **`lineDtDirectional: 1`**: 方向別 dt — line 面 (Thomas が厳密に解く結合) の λ を音響込みで
+  CFL の max から除外し、Δτ を off-line 面 (lag 側) の λ だけで決める。**注意: 除外は
+  `line_prev/next` に一致する内部面のみで、壁ノードの境界半割面は残る** — 壁 CV 自身の Δτ は
+  境界面の音響制約のまま、Δτ が streamwise 基準 (×AR) に伸びるのは壁の 1 つ内側以降。
+  case/39 DDES で cp4 安定・ωバースト最大 9.5→6.15 (directional による低減, 帰属機構は未分離)。
+- **実測の価値は pseudo-CFL 引き上げ** (case/39 ny160 DDES): point は cfl_pseudo 2 で発散、
+  line は 8 まで安定。**cfl_pseudo 4 + nSub 13 で point (cp1+nSub20) の 0.88 倍時間・同品質**、
+  同時間ならより深い収束・ωバースト低減。定常 (M6) と dual-time DDES で律速モードが違う点に注意。
+  サブ反復収縮の残る律速候補は off-line lag / segregated SST / 2次 KEEP RHS×1次 FVS LHS の
+  defect-correction 不整合の 3 者。
+
 ## 既知の TODO / 注意点
 
 - 非定常 dual-time 陰解法（`tI==11 && unsteady==1 && dualTime==1`）は実装済（2026-06、`blockDPLUR==1` のみ、物理 $\Delta t$ 固定 `control=0`）。`implicitCorrection_d.cu` の `dualtime_explicit_d` は SLAU/Roe 用の別系統補助で本流とは独立（未使用）。

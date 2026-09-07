@@ -253,9 +253,12 @@ class PhysicalNozzleWall:
 
     def __init__(self, design_wall, wall_tbl, rt_m: float, Pt: float, Tt: float,
                  gamma: float = 1.4, cp: float = 1004.5, dstar_x=None,
-                 x_offset_lo: float = -0.8) -> None:
+                 x_offset_lo: float = -0.8, offset: str = "normal", delta_r_x=None) -> None:
         """design_wall: AxisMachCFDWall (非粘性)。wall_tbl: (n,4) MOC 壁 [x,r,θ,M]。
-        dstar_x: 任意の δ*(x) [r_t 単位] (None = 上流履歴込み相関)。"""
+        dstar_x: 任意の δ*(x) [r_t 単位] (None = 上流履歴込み相関)。
+        offset: "normal" (旧: 壁法線オフセット + x シフト) / "radial" (半径方向 r_W = r + δ_r(x)、
+        plans/active/tooling-nozzle-deltastar-core-matched-euler.md §4.5 の生産経路)。
+        delta_r_x: 半径方向補正 δ_r(x) [r_t 単位] を直接与える (与えると offset="radial" 固定)。"""
         from ..evaluate.ic import invert_area_ratio
         from ..feedback.deltastar import dstar_flatplate
         self.design = design_wall
@@ -290,11 +293,24 @@ class PhysicalNozzleWall:
         # --- 法線オフセット (窓 [x_offset_lo, x_F] — 真のスロート探索を含む) ---
         mw = xg >= x_offset_lo
         th_w = np.arctan(rpg[mw])
-        dsv = np.asarray(dstar(xg[mw]), dtype=float)
-        xw = xg[mw] - dsv * np.sin(th_w)
-        rw = rg[mw] + dsv * np.cos(th_w)
-        o = np.argsort(xw)
-        xw, rw = xw[o], rw[o]
+        if delta_r_x is not None:
+            offset = "radial"
+        self.offset_mode = offset
+        if offset == "radial":
+            drv = np.asarray((delta_r_x if delta_r_x is not None else dstar)(xg[mw]), dtype=float)
+            xw = xg[mw].copy()
+            rw = rg[mw] + drv
+            self._delta_r_applied = lambda x, _x=xw.copy(), _d=drv.copy(): np.interp(x, _x, _d)
+        elif offset == "normal":
+            dsv = np.asarray(dstar(xg[mw]), dtype=float)
+            xw = xg[mw] - dsv * np.sin(th_w)
+            rw = rg[mw] + dsv * np.cos(th_w)
+            o = np.argsort(xw)
+            xw, rw = xw[o], rw[o]
+            self._delta_r_applied = lambda x, _x=xw.copy(), _r=rw.copy(), _dw=design_wall: \
+                np.interp(x, _x, _r) - _dw.r(np.asarray(x, dtype=float))
+        else:
+            raise ValueError("offset は 'normal' か 'radial'")
         self._xw_dbg, self._rw_dbg = xw.copy(), rw.copy()   # 感度診断用に保持
 
         # --- 真の幾何スロート: オフセット点群を spline 化 → r'(x)=0 を root solve ---

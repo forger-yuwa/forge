@@ -52,7 +52,7 @@ geom_float norm2_(const Point &l, const Point &r) {
 static void useKDTree(const std::vector<Point> &left, const std::vector<Point> &right, std::vector<geom_float> &distance, std::vector<geom_int> &index) {
     kdtree *tree = kd_create(3);
 
-    boost::scoped_array<int> indexes(new int[left.size()]);
+    std::unique_ptr<int[]> indexes(new int[left.size()]);
     for (int i = 0; i < (int)left.size(); ++i) {
         indexes[i] = i;
         kd_insert3(tree, left[i].x, left[i].y, left[i].z, &indexes[i]);
