@@ -319,6 +319,7 @@ Pt 59070 Pa / Tt 286.65 K、出口 Ps=Pt=2000 Pa、Euler = slip + `visc 0` `ther
 | `run_0230_user_node_sst_cond_outflow` (ローカル) | **2D node SST 凝縮** (run_0213 の場から index コピー, outflow, cfl 2, 12000) | NS (SST) | **on** | onset 23.0 mm、壁 p/p0 は実験 cond と onset 帯 −3〜−5 % / 下流 +4〜+5 % (cell run_0197 と同傾向) | — | active (2D node 凝縮対照) |
 | `run_0231_ab2d_{base_kpin0,base,omegaPk,sigmaBlend,isoStress,energyK,all}` | SST 整合オプション A/B (run_0213 の場から 3000 step, plan turbulence-sst-consistency-options §3.1) | NS (SST) | off | 壁 p/p0 差は base 比 ≤0.25 % (isoStress +0.2, energyK −0.1, omegaPk +0.1, sigmaBlend 0)。壁 k ピンは 2D で無差 | — | 破棄予定 (A/B 記録) |
 | `run_0232_ab3d_{base,all}` (AWS) | 同 A/B の 3D 版 (run_0228 の場から 6000 step) | NS (SST) | off | (plan §3.3) | — | 破棄予定 (A/B 記録) |
+| `run_0233_ab2d_nodewd` | node 壁距離をノード座標基準に修正した変換 h5 で run_0213 の場から 3000 step (旧 = 双対重心間距離) | NS (SST) | off | 第一層 wall_dist 最大 +30 % (1.34→1.74 µm)、壁 p/p0 −0.1〜−0.3 %、x=46 の壁 ω ピン 2.0e11→1.2e11、Tmax ≤ Tt。plan turbulence-sst-consistency-options §3.5 | — | 破棄予定 (A/B 記録) |
 
 **結果 (`compare_user_profile.png`)**:
 - **NS dry が実験 isentrope に乗る** (x≥11 mm で +1〜2 %; 旧形状 run_0048 は 1 次精度で ±1.5 %)。Euler dry は排除厚がないので −4〜−13 % 下 (下流ほど乖離)。

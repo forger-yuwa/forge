@@ -130,7 +130,7 @@ __global__ void rans_sst_source_d(
         const flow_float wy = dUxdz[ic] - dUzdx[ic];
         const flow_float wz = dUydx[ic] - dUxdy[ic];
         const flow_float Om_sq = wx*wx + wy*wy + wz*wz; // = 2 Omega_ij Omega_ij = |omega|^2
-        S_prod = sqrt(S_sq * Om_sq);                    // = sqrt(S_sq)*sqrt(Om_sq) = S*Omega
+        S_prod = sqrt(S_sq) * sqrt(Om_sq);              // S*Omega。積 S_sq*Om_sq は float32 で overflow し得る (相似試験 α=1e-3 で Inf, codex 2026-09-08)
     }
 
     // 交差拡散項（F1 ブレンドに使用）
@@ -197,8 +197,10 @@ __global__ void rans_sst_source_d(
     }
     // sstOmegaProdFromPk=1: P_ω = α P_k/ν_t (k 側のリミッタ・dilatation・壁関数置換後の P_k と整合, TMR/SST-1994 形)。
     // 0 (既定): P_ω = α ρ S² (SST-2003 形, 現行)。リミッタ非発動時は両者一致。
-    const flow_float Pw = (omegaProdFromPk != 0)
-        ? alpha * rho * Pk / max(mu_t_eff, static_cast<flow_float>(1.0e-30))
+    // ν_t は closure の正本 vis_turb (mu_t) を使う (mu_t_eff の 1e-12 切替は a1 分ずれる, codex 2026-09-08)。μt→0 の極限では
+    // P_k→0 かつ P_k/ν_t→ρS² なので αρS_prod にフォールバック (相対閾値: μt < 1e-6 μ)。
+    const flow_float Pw = (omegaProdFromPk != 0 && mu_t > static_cast<flow_float>(1.0e-6) * mu_lam)
+        ? alpha * rho * Pk / mu_t
         : alpha * rho * S_prod_omega;
 
     // omega 消滅項

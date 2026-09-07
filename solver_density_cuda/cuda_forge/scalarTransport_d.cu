@@ -110,8 +110,11 @@ __global__ void scalar_diffusion_first_order_d(
         const flow_float delta = dcc * sss * sss / safe_denom;
 
         // sstSigmaBlend: σ = F1·σ1 + (1−F1)·σ2 をノードごとに (F1 は前 step の ransSource 値, 初期 1)
-        const flow_float sig0 = (F1blend != nullptr) ? (F1blend[ic0] * sigma + (static_cast<flow_float>(1.0) - F1blend[ic0]) * sigma2) : sigma;
-        const flow_float sig1 = (F1blend != nullptr) ? (F1blend[ic1] * sigma + (static_cast<flow_float>(1.0) - F1blend[ic1]) * sigma2) : sigma;
+        // cell モードの境界 ghost (ic >= nCells) は F1 を持たないので内部側の F1 を使う (codex 2026-09-08)
+        const flow_float F1a = (F1blend != nullptr) ? F1blend[(ic0 < nCells) ? ic0 : ic1] : static_cast<flow_float>(1.0);
+        const flow_float F1b = (F1blend != nullptr) ? F1blend[(ic1 < nCells) ? ic1 : ic0] : static_cast<flow_float>(1.0);
+        const flow_float sig0 = (F1blend != nullptr) ? (F1a * sigma + (static_cast<flow_float>(1.0) - F1a) * sigma2) : sigma;
+        const flow_float sig1 = (F1blend != nullptr) ? (F1b * sigma + (static_cast<flow_float>(1.0) - F1b) * sigma2) : sigma;
         const flow_float mu0 = vis_lam[ic0] + sig0 * max(vis_turb[ic0], static_cast<flow_float>(0.0));
         const flow_float mu1 = vis_lam[ic1] + sig1 * max(vis_turb[ic1], static_cast<flow_float>(0.0));
         const flow_float mu_face = f * mu0 + (1.0 - f) * mu1;

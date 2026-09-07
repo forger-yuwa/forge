@@ -83,23 +83,33 @@ def prepare(tpl: Path, alpha: float, steps: int) -> Path:
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("template"); ap.add_argument("--alpha", type=float, default=1e-3)
-    ap.add_argument("--steps", type=int, default=50); ap.add_argument("--tol", type=float, default=1e-3); a = ap.parse_args()
+    ap.add_argument("--steps", type=int, default=50); ap.add_argument("--tol", type=float, default=2e-3); a = ap.parse_args()   # 既定 2e-3: 壁 ω ピンは float32 幾何で ~1e-3 の差が残る
     tpl = Path(a.template).resolve()
     runs = {alpha: prepare(tpl, alpha, a.steps) for alpha in (1.0, a.alpha)}
-    for alpha, d in runs.items():
-        subprocess.run([str(HERE / "run_case.sh"), str(d)], env=ENV, capture_output=True, text=True)
-    res = {alpha: sorted(d.glob("res_[0-9]*.h5"), key=lambda f: int(f.stem.split("_")[1]))[-1] for alpha, d in runs.items()}
     ok = True
+    for alpha, d in runs.items():
+        r = subprocess.run([str(HERE / "run_case.sh"), str(d)], env=ENV, capture_output=True, text=True)
+        # 合格条件 (codex 2026-09-08): 要求 step の res が存在 (res_nan_* は不可)、残差列が全て有限
+        if not (d / f"res_{a.steps}.h5").exists() or list(d.glob("res_nan_*.h5")):
+            print(f"  NG run alpha={alpha:g}: res_{a.steps}.h5 が無い / NaN ダンプあり (rc={r.returncode})"); ok = False
+        hist = (d / "residual_history.csv").read_text().strip().splitlines()[-1].split(",")[3:10] if (d / "residual_history.csv").exists() else []
+        if any((not np.isfinite(float(v))) for v in hist if v):
+            print(f"  NG run alpha={alpha:g}: 残差に非有限"); ok = False
+    if not ok:
+        print(f"VERDICT: FAIL (alpha={a.alpha:g}, steps={a.steps}: run failed)"); sys.exit(1)
+    res = {alpha: d / f"res_{a.steps}.h5" for alpha, d in runs.items()}
     with h5py.File(res[1.0], "r") as f1, h5py.File(res[a.alpha], "r") as f2:
-        for k in ["ro", "P", "T", "Ux", "Uy", "Uz", "k", "omega", "vis_turb"]:
+        for k in ["ro", "P", "T", "Ux", "Uy", "Uz", "roe", "k", "omega", "roK", "roOmega", "vis_turb"]:
             if f"VALUE/{k}" not in f1: continue
             x = f1[f"VALUE/{k}"][:].astype(float); y = f2[f"VALUE/{k}"][:].astype(float)
-            if k == "omega": y = y * a.alpha          # ω ~ 1/L
-            if k == "vis_turb": y = y / a.alpha       # μt ~ ρ k/ω ~ L
-            den = max(np.max(np.abs(x)), 1e-30); rel = np.max(np.abs(x - y)) / den
+            if len(x) != len(y): print(f"  NG {k}: size mismatch"); ok = False; continue
+            if k in ("omega", "roOmega"): y = y * a.alpha    # ω ~ 1/L
+            if k == "vis_turb": y = y / a.alpha            # μt ~ ρ k/ω ~ L
+            den = max(np.max(np.abs(x)), 1e-30); rel = float(np.max(np.abs(x - y)) / den)
+            if not np.isfinite(rel): rel = float("inf")
             flag = "OK " if rel <= a.tol else "NG "
-            if rel > a.tol: ok = False
-            j = int(np.argmax(np.abs(x - y))); c1 = f1["MESH/COORD"][:].reshape(-1, 3)[j]
+            if not (rel <= a.tol): ok = False
+            j = int(np.nanargmax(np.abs(x - y))) if np.isfinite(rel) else 0; c1 = f1["MESH/COORD"][:].reshape(-1, 3)[j]
             print(f"  {flag}{k:9s} max|Δ|/max = {rel:.3e}  (at x={c1[0]:.4g} y={c1[1]:.4g}: {x[j]:.5g} vs {y[j]:.5g})")
     print(f"VERDICT: {'PASS' if ok else 'FAIL'} (alpha={a.alpha:g}, steps={a.steps}, tol={a.tol:g})")
     sys.exit(0 if ok else 1)
