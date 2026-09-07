@@ -326,6 +326,11 @@ Pt 59070 Pa / Tt 286.65 K、出口 Ps=Pt=2000 Pa、Euler = slip + `visc 0` `ther
 | `run_0232_ab3d_{base,all}` (AWS) | 同 A/B の 3D 版 (run_0228 の場から 6000 step) | NS (SST) | off | (plan §3.3) | — | 破棄予定 (A/B 記録) |
 | `run_0233_ab2d_nodewd` | node 壁距離をノード座標基準に修正した変換 h5 で run_0213 の場から 3000 step (旧 = 双対重心間距離) | NS (SST) | off | 第一層 wall_dist 最大 +30 % (1.34→1.74 µm)、壁 p/p0 −0.1〜−0.3 %、x=46 の壁 ω ピン 2.0e11→1.2e11、Tmax ≤ Tt。plan turbulence-sst-consistency-options §3.5 | — | 破棄予定 (A/B 記録) |
 
+**実験比較まとめ (2026-09-08, `compare_exp_wall_pp0.py` → `compare_exp_wall_pp0.{png,txt}`, 入力 `wall_pp0_csv/`)**: 輪郭壁 p/p0 (3D は対称面) を Fig.3 と比較した x≥10 mm の平均偏差。
+dry (参照 isentrope): 2D Euler node run_0193 −10.0 % / 2D SST node run_0213 +1.5 % / 2D SST cell run_0196 +1.5 % / **3D 層流 node run_0221 0.7 %** / 3D SST node run_0228 +8.8 % (下流ほど乖離、側壁合流域の乱流 BL 過厚が未解決)。
+凝縮 1.00 kPa (参照 実験点): 2D Euler cond run_0194 7.7 % / 2D SST cond cell run_0197 4.1 % / **3D 層流 cond run_0224 1.9 %**。3 run とも x=21 mm で −5 %、42〜52 mm で +2〜+5 % (onset が実験より ~5 mm 下流)。
+VERDICT: run_0213/0221/0224/0228 は `check_quasisteady` pmax/machmax STEADY、run_0221/0224 は全列 falling、run_0213/0228 は roe/roOmega plateau、cell は既知の床。
+
 **結果 (`compare_user_profile.png`)**:
 - **NS dry が実験 isentrope に乗る** (x≥11 mm で +1〜2 %; 旧形状 run_0048 は 1 次精度で ±1.5 %)。Euler dry は排除厚がないので −4〜−13 % 下 (下流ほど乖離)。
 - **凝縮の効果**: onset は Euler 20.2 mm → NS 23.2 mm (境界層で膨張が緩み過冷却到達が遅れる)。潜熱で中心線 M は出口で 1.91→1.70 (Euler) / 1.79→1.60 (NS)、静圧は +21 % (Euler) / +19 % (NS)、静温 +33 K。液滴質量分率は両者とも x≈50 mm で 0.010 に達しほぼ全量 (Y_H2O 0.01095) が凝縮。
