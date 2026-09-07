@@ -315,6 +315,11 @@ Pt 59070 Pa / Tt 286.65 K、出口 Ps=Pt=2000 Pa、Euler = slip + `visc 0` `ther
 
 | **`run_0228_user_node3d_sst_dry_half_ext_ps_relguard`** (AWS) | run_0227 の最終場から index コピー、**k/ω 拡散の相対ガード** (`scalarTransport_d.cu`, 旧 1e-12 [m³] 絶対値 → 1e-6·|d||S|)、他は run_0226 と同一 (バッファ + 静圧固定 10.3 kPa + cfl 6) | NS (SST) | off | **角部加熱が消滅**: T > Tt+1 のノード 0 個 (旧 42896)、角線 T−Tt −9〜−17 K。角対角線の ω が壁漸近解 6ν/(β₁d²) に一致 (0.6 µm: 1.8e10 vs 1.7e10; 2.5 µm: 1.4e9 vs 1.0e9)、k は粘性底層で 1e-5 (旧 1.2e3)。壁 p/p0 @x=46 0.328 → **0.273** (2D SST 0.257, 層流 0.255, exp 0.254)、@x=85 0.251 → 0.206 (2D 0.187)。`wall_pp0_guard_fix.png` | `check_convergence`: roUx/roUy 3 桁↓, roOmega 5 桁↓, rms_ro 7e-11 falling; pmax STEADY; 壁 p/p0 は末尾 2000 step で −0.0006 (まだ僅かに下降) | active (**3D node SST の正本**) |
 
+| **`run_0229_user_node3d_sst_cond_half_ext_ps`** (AWS) | 3D SST **凝縮 ON** (run_0228 の場から index コピー, バッファ + 静圧固定, cfl 2, 12000) | NS (SST) | **on** | 完走・NaN 0。onset **24.7 mm** (2D SST cond 23.0 / 3D 層流 cond 23.4)、g_exit 0.0109。壁 p/p0 は実験 cond より +9〜+11 % (dry の +7 % 上乗せ)、cond/dry 比 1.13〜1.24 は実験 1.18〜1.20 と整合。T max 297 K (潜熱, 2D と同じく物理)。`wall_pp0_cond_all.png` | rms_ro 2.6e-11 falling, roe/roK 2.7 桁↓; pmax STEADY | active (3D SST 凝縮) |
+| `run_0230_user_node_sst_cond_outflow` (ローカル) | **2D node SST 凝縮** (run_0213 の場から index コピー, outflow, cfl 2, 12000) | NS (SST) | **on** | onset 23.0 mm、壁 p/p0 は実験 cond と onset 帯 −3〜−5 % / 下流 +4〜+5 % (cell run_0197 と同傾向) | — | active (2D node 凝縮対照) |
+| `run_0231_ab2d_{base_kpin0,base,omegaPk,sigmaBlend,isoStress,energyK,all}` | SST 整合オプション A/B (run_0213 の場から 3000 step, plan turbulence-sst-consistency-options §3.1) | NS (SST) | off | 壁 p/p0 差は base 比 ≤0.25 % (isoStress +0.2, energyK −0.1, omegaPk +0.1, sigmaBlend 0)。壁 k ピンは 2D で無差 | — | 破棄予定 (A/B 記録) |
+| `run_0232_ab3d_{base,all}` (AWS) | 同 A/B の 3D 版 (run_0228 の場から 6000 step) | NS (SST) | off | (plan §3.3) | — | 破棄予定 (A/B 記録) |
+
 **結果 (`compare_user_profile.png`)**:
 - **NS dry が実験 isentrope に乗る** (x≥11 mm で +1〜2 %; 旧形状 run_0048 は 1 次精度で ±1.5 %)。Euler dry は排除厚がないので −4〜−13 % 下 (下流ほど乖離)。
 - **凝縮の効果**: onset は Euler 20.2 mm → NS 23.2 mm (境界層で膨張が緩み過冷却到達が遅れる)。潜熱で中心線 M は出口で 1.91→1.70 (Euler) / 1.79→1.60 (NS)、静圧は +21 % (Euler) / +19 % (NS)、静温 +33 K。液滴質量分率は両者とも x≈50 mm で 0.010 に達しほぼ全量 (Y_H2O 0.01095) が凝縮。
