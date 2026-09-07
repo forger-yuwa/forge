@@ -68,7 +68,9 @@ __global__ void scalar_diffusion_first_order_d(
     flow_float* vis_turb,
     flow_float sigma,
     flow_float* res_rho_phi,
-    flow_float* transport_diag)
+    flow_float* transport_diag,
+    flow_float sigma2,
+    flow_float* F1blend)
 {
     geom_int ih = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -107,8 +109,11 @@ __global__ void scalar_diffusion_first_order_d(
         const flow_float safe_denom = (abs(denom) < denom_floor) ? ((denom >= 0.0) ? denom_floor : -denom_floor) : denom;
         const flow_float delta = dcc * sss * sss / safe_denom;
 
-        const flow_float mu0 = vis_lam[ic0] + sigma * max(vis_turb[ic0], static_cast<flow_float>(0.0));
-        const flow_float mu1 = vis_lam[ic1] + sigma * max(vis_turb[ic1], static_cast<flow_float>(0.0));
+        // sstSigmaBlend: σ = F1·σ1 + (1−F1)·σ2 をノードごとに (F1 は前 step の ransSource 値, 初期 1)
+        const flow_float sig0 = (F1blend != nullptr) ? (F1blend[ic0] * sigma + (static_cast<flow_float>(1.0) - F1blend[ic0]) * sigma2) : sigma;
+        const flow_float sig1 = (F1blend != nullptr) ? (F1blend[ic1] * sigma + (static_cast<flow_float>(1.0) - F1blend[ic1]) * sigma2) : sigma;
+        const flow_float mu0 = vis_lam[ic0] + sig0 * max(vis_turb[ic0], static_cast<flow_float>(0.0));
+        const flow_float mu1 = vis_lam[ic1] + sig1 * max(vis_turb[ic1], static_cast<flow_float>(0.0));
         const flow_float mu_face = f * mu0 + (1.0 - f) * mu1;
 
         const flow_float dphi = phi[ic1] - phi[ic0];
@@ -240,7 +245,9 @@ void scalarTransportResidual_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
             var.c_d["vis_turb"],
             desc.sigma,
             desc.res_rho_phi,
-            desc.transport_diag);
+            desc.transport_diag,
+            desc.sigma2,
+            desc.F1);
     }
 }
 

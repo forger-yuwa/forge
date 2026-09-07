@@ -465,6 +465,16 @@ void solverConfig::read(std::string fname)
         this->sstCrossDiffJac = getOptionalValidatedValue<int>(turb, "sstCrossDiffJac", 0, "turbulence");
 
         this->katoLaunder = getOptionalValidatedValue<int>(turb, "katoLaunder", 0, "turbulence");
+        this->sstNodeWallKPin    = getOptionalValidatedValue<int>(turb, "sstNodeWallKPin", 1, "turbulence");
+        this->sstOmegaProdFromPk = getOptionalValidatedValue<int>(turb, "sstOmegaProdFromPk", 0, "turbulence");
+        this->sstSigmaBlend      = getOptionalValidatedValue<int>(turb, "sstSigmaBlend", 0, "turbulence");
+        this->sstIsotropicStress = getOptionalValidatedValue<int>(turb, "sstIsotropicStress", 0, "turbulence");
+        this->sstEnergyKSource   = getOptionalValidatedValue<int>(turb, "sstEnergyKSource", 0, "turbulence");
+        for (auto* kv : {&this->sstNodeWallKPin, &this->sstOmegaProdFromPk, &this->sstSigmaBlend, &this->sstIsotropicStress, &this->sstEnergyKSource}) {
+            if (*kv < 0 || *kv > 1) throw std::runtime_error("SST option keys sst{NodeWallKPin,OmegaProdFromPk,SigmaBlend,IsotropicStress,EnergyKSource} in 'turbulence' must be 0 or 1.");
+        }
+        std::cout << "'sst options' in 'turbulence': nodeWallKPin=" << this->sstNodeWallKPin << " omegaProdFromPk=" << this->sstOmegaProdFromPk
+                  << " sigmaBlend=" << this->sstSigmaBlend << " isotropicStress=" << this->sstIsotropicStress << " energyKSource=" << this->sstEnergyKSource << "\n";
 
         if (this->katoLaunder < 0 || this->katoLaunder > 1) {
             throw std::runtime_error("Key 'katoLaunder' in 'turbulence' must be 0 or 1.");

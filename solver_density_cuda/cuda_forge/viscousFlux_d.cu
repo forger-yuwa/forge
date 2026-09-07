@@ -79,6 +79,8 @@ __global__ void viscousFlux_d
  // (Couette 恒等式 q+τu=0: T_W=Taw で全流束ゼロ、∂F/∂T_W<0 の負帰還で T_W→Taw)。
  // 運動量行は不変。nullptr (mode≠3) で従来経路ビット不変。Taw_diag は defect の目標温度。
  flow_float* Taw_HTnx, flow_float* Taw_HTny, flow_float* Taw_HTnz, flow_float* Taw_diag
+,
+ flow_float* kturb, int isoStress   // sstIsotropicStress: -(2/3) rho k delta_ij (nullptr/0 で無効)
 )
 {
     geom_int ip = blockDim.x*blockIdx.x + threadIdx.x;
@@ -159,16 +161,19 @@ __global__ void viscousFlux_d
         tau_x += mu_total*(dUxdxf*k_x +dUxdyf*k_y +dUxdzf*k_z);
         tau_x += mu_total*(dUxdxf*sxx +dUydxf*syy +dUzdxf*szz);
         tau_x += -mu_total*2.0/3.0*(divu)*sxx;
+        if (isoStress != 0 && kturb != nullptr) tau_x += -(2.0/3.0)*(f*ro[ic0]+(1.0-f)*ro[ic1])*(f*kturb[ic0]+(1.0-f)*kturb[ic1])*sxx;
 
         flow_float tau_y = mu_total*((Uy[ic1] -Uy[ic0])/dcc)*delta;
         tau_y += mu_total*(dUydxf*k_x +dUydyf*k_y +dUydzf*k_z);
         tau_y += mu_total*(dUxdyf*sxx +dUydyf*syy +dUzdyf*szz);
         tau_y += -mu_total*2.0/3.0*(divu)*syy;
+        if (isoStress != 0 && kturb != nullptr) tau_y += -(2.0/3.0)*(f*ro[ic0]+(1.0-f)*ro[ic1])*(f*kturb[ic0]+(1.0-f)*kturb[ic1])*syy;
 
         flow_float tau_z = mu_total*((Uz[ic1] -Uz[ic0])/dcc)*delta;
         tau_z += mu_total*(dUzdxf*k_x +dUzdyf*k_y +dUzdzf*k_z);
         tau_z += mu_total*(dUxdzf*sxx +dUydzf*syy +dUzdzf*szz);
         tau_z += -mu_total*2.0/3.0*(divu)*szz;
+        if (isoStress != 0 && kturb != nullptr) tau_z += -(2.0/3.0)*(f*ro[ic0]+(1.0-f)*ro[ic1])*(f*kturb[ic0]+(1.0-f)*kturb[ic1])*szz;
 
         // SST node 壁関数 (SU2 AddTauWall): 片端のみ壁ノードの内部双対面 (W-I) で、解像した粘性 traction
         // の接線成分をモデル τ_w に再スケールする。粗い y+ メッシュでは生の解像勾配が τ_w を過小評価する
@@ -890,7 +895,9 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
             ? var.c_d["Taw_HTnz"] : nullptr,
         (cfg.discretization == "node" && cfg.LESorRANS == 2 && cfg.RANSmodel == 1
          && cfg.wallTreatmentSST == 1 && cfg.sstThermalWallFunction == 3)
-            ? var.c_d["Taw_diag"] : nullptr
+            ? var.c_d["Taw_diag"] : nullptr,
+        (cfg.LESorRANS == 2 && cfg.RANSmodel == 1 && var.c_d.count("k")) ? var.c_d["k"] : nullptr,
+        cfg.sstIsotropicStress
     ) ;
 
     gpuErrchk( cudaPeekAtLastError() );

@@ -69,7 +69,12 @@ __global__ void rans_sst_source_d(
     flow_float* roOmega_wf,
     // node 入口 (Dirichlet スカラー境界) ピン: ==1 のノードで res_roK/res_roOmega/src_jac_* を 0 化
     // (保存量は ransBoundary で ρ·Dirichlet 値にピン済)。nullptr/全0 で無効 (cell 不変)。
-    flow_float* scalarDirichletPin)
+    flow_float* scalarDirichletPin,
+    int omegaProdFromPk,
+    int energyKSource,
+    flow_float* res_roe,
+    flow_float* sstF1,
+    int nodeWallKPin)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -142,6 +147,7 @@ __global__ void rans_sst_source_d(
     const flow_float arg1_c = static_cast<flow_float>(4.0) * rho * kSigmaW2 * k_c / (CD_kw * y * y);
     const flow_float arg1   = min(max(arg1_a, arg1_b), arg1_c);
     const flow_float F1     = tanh(arg1 * arg1 * arg1 * arg1);
+    if (sstF1 != nullptr) sstF1[ic] = F1;   // 次 step の σ_k/σ_ω ブレンド用 (sstSigmaBlend)
 
     // ブレンドされた係数
     const flow_float alpha = F1 * kAlpha1 + (static_cast<flow_float>(1.0) - F1) * kAlpha2;
@@ -189,7 +195,11 @@ __global__ void rans_sst_source_d(
         && wf_sprod[ic] >= static_cast<flow_float>(0.0)) {
         S_prod_omega = wf_sprod[ic];
     }
-    const flow_float Pw = alpha * rho * S_prod_omega;
+    // sstOmegaProdFromPk=1: P_ω = α P_k/ν_t (k 側のリミッタ・dilatation・壁関数置換後の P_k と整合, TMR/SST-1994 形)。
+    // 0 (既定): P_ω = α ρ S² (SST-2003 形, 現行)。リミッタ非発動時は両者一致。
+    const flow_float Pw = (omegaProdFromPk != 0)
+        ? alpha * rho * Pk / max(mu_t_eff, static_cast<flow_float>(1.0e-30))
+        : alpha * rho * S_prod_omega;
 
     // omega 消滅項
     const flow_float Dw = beta * rho * w_c * w_c;
@@ -210,6 +220,11 @@ __global__ void rans_sst_source_d(
     // 残差に加算（符号: ソース項は保存変数を増加させる正方向）
     atomicAdd(&res_roK[ic],     (Pk - Dk) * v);
     atomicAdd(&res_roOmega[ic], (Pw - Dw + CDw) * v);
+    // sstEnergyKSource=1: E=e+u²/2 (k を含まない) の定式化で、k に溜まる (減る) 分 P_k−D_k を平均流エネルギーから
+    // 引く (足す)。局所平衡 P_k≈D_k では 0。SU2 型 (E に k を含める) の代替 (plan turbulence-sst-node-corner-heating §3.5)。
+    if (energyKSource != 0 && res_roe != nullptr) {
+        atomicAdd(&res_roe[ic], -(Pk - Dk) * v);
+    }
 
     // axisymMethod==1 (SU2 流): k/ω の 1/y 移流拡散ソース (SU2 ResidualAxisymmetricConvectionDiffusion
     // の符号反転移植)。S_φ = -(1/y)·(ρv·φ − (μ + σ_φ μ_t)·∂φ/∂y)。軸ノード (axis_flag==1) と y≤eps は 0。
@@ -255,6 +270,14 @@ __global__ void rans_sst_source_d(
     if (omega_pinned) {
         res_roOmega[ic]   = static_cast<flow_float>(0.0);
         src_jac_omega[ic] = static_cast<flow_float>(0.0);
+    }
+    // node 低 Re 壁ノード: k=0 / ω=ω_w とも ransBoundary でピン済 → 残差・対角を 0 化 (更新なし, rms 汚染回避)
+    // (sstNodeWallKPin=0 で旧挙動: 壁ノードの ω は ransBoundary で毎 step 再ピンされるだけで残差は残る)
+    if (nodeWallKPin != 0 && isNode != 0 && wallTreatment == 0 && wall_flag != nullptr && wall_flag[ic] == 1) {
+        res_roOmega[ic]   = static_cast<flow_float>(0.0);
+        src_jac_omega[ic] = static_cast<flow_float>(0.0);
+        res_roK[ic]       = static_cast<flow_float>(0.0);
+        src_jac_k[ic]     = static_cast<flow_float>(0.0);
     }
     // node k Dirichlet (第一内層ノード): k は roK_wf に固定するので残差・対角は不要 (rms_roK 汚染回避)。
     if (roK_wf != nullptr && roK_wf[ic] >= static_cast<flow_float>(0.0)) {
@@ -346,7 +369,12 @@ void ransSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, va
         (cfg.discretization == "node") ? 1 : 0,
         (cfg.discretization == "node" && cfg.wallTreatmentSST == 1 && cfg.nodeKwfDirichlet == 1) ? var.c_d["roK_wf"] : nullptr,
         (cfg.discretization == "node" && cfg.wallTreatmentSST == 1 && cfg.nodeOmegaWfDirichlet == 1) ? var.c_d["roOmega_wf"] : nullptr,
-        (cfg.discretization == "node") ? var.c_d["scalarDirichletPin"] : nullptr);
+        (cfg.discretization == "node") ? var.c_d["scalarDirichletPin"] : nullptr,
+        cfg.sstOmegaProdFromPk,
+        cfg.sstEnergyKSource,
+        var.c_d["res_roe"],
+        var.c_d.count("sstF1") ? var.c_d["sstF1"] : nullptr,
+        cfg.sstNodeWallKPin);
 
     gpuErrchk(cudaPeekAtLastError());
     gpuErrchkKernelSync();
