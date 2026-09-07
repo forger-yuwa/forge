@@ -45,6 +45,8 @@ class SernMesh3DParams:
     interface_angle: float = 0.0
     top_ext_angle: float = 0.0
     scale: float = 1.0
+    cowl_thickness: float = 0.0  # カウル板厚 /H (0 = 厚さ 0 のスリット)。2D と同じ x 分布で TE に向け 0 に絞る。
+                                 # 側端 (z = W/2) の外は板が無いので、最後の z セルで厚さ 0 に閉じる
     x_cluster_w: float = 0.15
     x_cluster_a: float = 3.0
 
@@ -89,13 +91,21 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
     nz = len(zs); k_sw = prm.nz_in - 1
     no_outer = prm.nz_out == 0
     # --- 2D 断面 (各 station の y 列) ---
-    Y2 = np.zeros((ni, NJ))
+    # カウル板厚 (2D の `cowl_thickness` と同じ法則): 入口から 0.8 L_cowl まで t、TE で 0。
+    # 厚さ 0 のスリットは node で双子ノードになり、2D では m6_on/m10_on とも発散した (case/46 run_0035)。
+    # 板は z <= W/2 にしか無いので、内側 (k <= k_sw) だけ ym±t/2 に割り、外側は単一の ym にする。
+    t_c = float(prm.cowl_thickness)
+    tk = (np.interp(xs, [-prm.L_up, 0.8 * L_cowl, L_cowl], [t_c, t_c, 0.0], left=t_c, right=0.0)
+          if t_c > 0.0 else np.zeros_like(xs))
+    Y2 = np.zeros((ni, NJ))       # 板の外側 (z > W/2) 用: 中間線は単一
+    Yin = np.zeros((ni, NJ))      # 板の内側 (z <= W/2) 用: 中間線は ym ± t/2
     for i in range(ni):
-        h_lo = max(ym[i] - y_bot, 1e-12); h_up = max(yt[i] - ym[i], 1e-12)
-        s_bot = _radial_fracs(njb, min(prm.first_wall_frac / h_lo, 0.5 / (njb - 1)))
-        s_top = _tanh_two_sided(njt, min(prm.first_wall_frac / h_up, 0.5 / (njt - 1)))
-        Y2[i, :njb] = y_bot + s_bot * (ym[i] - y_bot)
-        Y2[i, jm:] = ym[i] + s_top * (yt[i] - ym[i])
+        for Y, lo, up in ((Y2, ym[i], ym[i]), (Yin, ym[i] - 0.5 * tk[i], ym[i] + 0.5 * tk[i])):
+            h_lo = max(lo - y_bot, 1e-12); h_up = max(yt[i] - up, 1e-12)
+            s_bot = _radial_fracs(njb, min(prm.first_wall_frac / h_lo, 0.5 / (njb - 1)))
+            s_top = _tanh_two_sided(njt, min(prm.first_wall_frac / h_up, 0.5 / (njt - 1)))
+            Y[i, :njb] = y_bot + s_bot * (lo - y_bot)
+            Y[i, jm:] = up + s_top * (yt[i] - up)
     # --- ノード番号 ---
     N_base = ni * NJ * nz
     def base(i, j, k): return (i * NJ + j) * nz + k
@@ -108,13 +118,27 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
     for i in (range(0) if no_outer else range(i_sw)):   # 側壁後縁 (i_sw) は共有 (カウル TE と同じ)。外側空間なしなら重複なし
         for j in range(jm + 1, NJ):            # ランプ線 (j = NJ−1) も内外 2 重: 共有すると入口面で
             dup2[(i, j)] = nid; nid += 1       # inlet_nozzle と inlet_ext の両方に属し step 3 で発散した
+    # 板厚の z 分布: 側壁 (z = W/2) は**厚さ 0 のスリット**なので、そこまで板厚を効かせると
+    # スリットの内外で中間線の高さがずれ、側壁後縁が破綻する (run_0086: 暖機段 step 4 で ro NaN)。
+    # 最後の 2 セルで厚さを 0 に絞り、k_sw では内外が一致するようにする。
+    sz = np.ones(nz)
+    if t_c > 0.0:
+        kt = max(k_sw - 2, 0)
+        if k_sw > kt:
+            u = (zs[kt:k_sw + 1] - zs[kt]) / max(zs[k_sw] - zs[kt], 1e-30)
+            sz[kt:k_sw + 1] = 1.0 - u * u * (3.0 - 2.0 * u)
+        sz[k_sw + 1:] = 0.0
     coords = np.zeros((nid, 3))
     for i in range(ni):
         for j in range(NJ):
             b = base(i, j, 0)
-            coords[b:b + nz, 0] = xs[i]; coords[b:b + nz, 1] = Y2[i, j]; coords[b:b + nz, 2] = zs
+            coords[b:b + nz, 0] = xs[i]; coords[b:b + nz, 2] = zs
+            # base(i, jm, k) は「下側 (cowl_out)」。板がある内側 (k <= k_sw) だけ Yin、外側は Y2 (= 単一の中間線)。
+            coords[b:b + nz, 1] = Y2[i, j]
+            if t_c > 0.0 and tk[i] > 0.0:
+                coords[b:b + nz, 1] += (Yin[i, j] - Y2[i, j]) * sz
     for (i, k), n in dup1.items():
-        coords[n] = (xs[i], ym[i], zs[k])
+        coords[n] = (xs[i], ym[i] + 0.5 * tk[i] * sz[k], zs[k])   # 上側 (cowl_in)
     for (i, j), n in dup2.items():
         coords[n] = (xs[i], Y2[i, j], zs[k_sw])
 
@@ -183,7 +207,7 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
                 B["sidewall_out"].append((node(i, j, k_sw, "up_out"), node(i, j + 1, k_sw, "up_out"), node(i + 1, j + 1, k_sw, "up_out"), node(i + 1, j, k_sw, "up_out")))
     coords *= prm.scale
     info = {"ni": ni, "NJ": NJ, "nz": nz, "jm": jm, "k_sw": k_sw, "i_te": i_te, "i_sw": i_sw, "cells": int(hexes.shape[0]),
-            "nodes": int(coords.shape[0]), "W": prm.W, "Z_far": float(zs[-1]), "L_sw": L_sw, "x_out": x_out, "y_bot": y_bot,
+            "nodes": int(coords.shape[0]), "W": prm.W, "Z_far": float(zs[-1]), "L_sw": L_sw, "cowl_thickness": t_c, "x_out": x_out, "y_bot": y_bot,
             "L_cowl": L_cowl, "L_ramp": L_ramp, "n_dup_cowl": len(dup1), "n_dup_side": len(dup2)}
     return coords, hexes, B, info, y_mid
 
