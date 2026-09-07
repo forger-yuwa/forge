@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `turbulence / thermophysics / convection`
-- **status**: `in_progress` (2026-09-08 実装済・検証中、既定値未決)
+- **status**: `done` (2026-09-08 実装・検証済。**既定は 0 (roe に k を含めない) で確定**、opt-in 機能として保持)
 - **related_docs**:
   - `methods/turbulence/theory.md` §7 (圧縮性補正・等方項), `methods/turbulence/implementation.md` (整合オプション)
   - `methods/convection/implementation.md` (SLAU 圧力流束・全エンタルピー), `methods/diffusion.md`
@@ -35,6 +35,14 @@
 - 前提: `sstOmegaProdFromPk` / `sstSigmaBlend` 既定 ON (turbulence-sst-consistency-options §2.1) の上に積む。
 
 ## 4. 設計方針
+
+### 4.0 既定値の決定 (2026-09-08, ユーザ決定)
+
+**既定は `sstEnergyIncludesK: 0` (roe に k を含めない E_m 形) で確定。** 理由: E_t 形は乱流モデルの過渡 (k の跳ね) が
+T に直接伝わる (ΔT = −Δk/c_v; 切替時に rms_roe が 100 倍跳ねる実測 §6.1) ため、きれいに解ける系ばかりではない実運用では
+E_m 形の方が安全。エネルギー整合 (断熱で k 込み全温が保存) が要る検証・比較では opt-in で 1 にする。
+1 を使うときは後処理の全温を T + u²/2c_p + k/c_p で評価する (残作業 3)。分離型 `sstEnergyKSource`/`sstIsotropicStress` は
+1 のとき無効化されるだけで、0 のときは従来どおり個別に使える (既定 0 のまま)。
 
 ### 4.1 収支 (なぜ交換ソースが消えるか)
 
@@ -99,9 +107,9 @@ T は E_m から出るので k を除いた温度そのもの。§4.5 の「旧 
 | --- | --- | --- |
 | 1 | ~~ステップ 1–3 (config・熱力学・p*)~~ | 済 (分割保持形, §4.4a)。キー 0 は前バイナリと 1e-6 で一致 (run_0309) |
 | 2 | ~~ステップ 4 (k 拡散のエネルギー流束)~~ | 済 (`viscousFlux_d.cu`, 内部面) |
-| 3 | 後処理の全温 T0 + k/c_p (centerline / wall_pp0 / metrics) | 未 (キー 1 を常用にする時点で) |
-| 4 | 既定値の判断 (ユーザ懸念: k の跳ねが T に伝播する脆弱性) と分離型 4/5 の撤去 | 未 (§6.1 の結果と対話で決める) |
-| 5 | 3D (1.04M, `mesh/nozzle_user_3d_finexy_z25.msh`) で k 込み全温が Tt を超えないこと | 未 (ローカル ~55 分) |
+| 3 | 後処理の全温 T0 + k/c_p (centerline / wall_pp0 / metrics) にオプションを付ける | 未 (キー 1 を使う検証を始める時点で) |
+| 4 | ~~既定値の判断~~ | 決着 (§4.0: 既定 0、opt-in)。分離型 4/5 は撤去せず現状維持 |
+| 5 | 3D (1.04M, `mesh/nozzle_user_3d_finexy_z25.msh`, `run_0312_ek_node3d_finexy_z25`) で k 込み全温が Tt を超えないこと | 実行中 (2026-09-08, 結果は case/16 README に追記) |
 
 ## 6. 検証
 
@@ -132,13 +140,14 @@ T は E_m から出るので k を除いた温度そのもの。§4.5 の「旧 
 
 ## 8. 完了条件
 
-- [ ] 関連 `methods/` の現在仕様を更新済み
+- [x] 関連 `methods/` の現在仕様を更新済み
 - [ ] 実装・検証完了 (§6)
 - [ ] `status: done`、§9 に変更ログ
 - [ ] `plans/active/` → `plans/accepted/` へ移動、`plans/README.md` 同期
-- [ ] `turbulence-sst-consistency-options.md` の 4/5 を superseded と記載
+- [x] `turbulence-sst-consistency-options.md` に本 plan の決着 (既定 0, opt-in) を記載
 
 ## 9. 変更ログ
 
 - `2026-09-08` — 初稿。ユーザ決定「R3 直行」(対話 2026-09-08): 分離型 `sstEnergyKSource`/`sstIsotropicStress` (p* 一括化案を含む) は本計画で置換。
 - `2026-09-08` — 分割保持形で実装 (§4.4a; `sstEnergyIncludesK`, 既定 0)。周期箱減衰で E_t 厳密保存 (explicit / dual-time)、相似試験 PASS、2D node/cell/平板の回帰 (§6.1)。経路別の補正: explicit RK = roe −= (ρk − ρk_N)、steady point-implicit = 増分形、dual-time = エネルギー行 BDF に ρk を含める。
+- `2026-09-08` — ユーザ決定: **既定 0 で確定** (E_m 形が安全; E_t 形は k の跳ねが T に伝播する)。opt-in 機能として保持し plan を accepted へ。
