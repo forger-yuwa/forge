@@ -522,14 +522,34 @@ strain-based 生産の stagnation/加速アノマリー (theory.md §7.5) を抑
 ## 整合オプション (2026-09-08, codex レビュー由来)
 
 codex レビュー (plans/accepted/turbulence-sst-node-corner-heating.md §3.5) が指摘した標準 SST からのずれを、
-`turbulence.sst*` キー (procedures/solver-settings.md) で選択できるようにした。既定は現行挙動 (例外: node 壁 k ピン)。
+`turbulence.sst*` キー (procedures/solver-settings.md) で選択できるようにした。既定は 2026-09-08 から壁 k ピン・P_ω 整合・σ ブレンドが ON (plan turbulence-sst-consistency-options §2.1)、等方応力・エネルギー k 源は OFF。
 
 | キー | 内容 | 実装 |
 |---|---|---|
 | `sstNodeWallKPin` (既定 1) | node 低 Re 壁ノードの k/roK を 0 にピンし残差を 0 化。旧は ghost 反射のみで、node は境界半割面の拡散を skip するため壁 k=0 が効いていなかった | `ransBoundary_d.cu` 低 Re node 分岐, `ransSource_d.cu` 末尾 |
-| `sstOmegaProdFromPk` | $P_\omega = \alpha P_k/\nu_t$ (リミッタ後の $P_k$ と整合)。0 は $P_\omega=\alpha\rho S^2$ (Menter 2003 形) | `ransSource_d.cu` |
-| `sstSigmaBlend` | $\sigma_k = F_1\,0.85 + (1-F_1)\,1.0$, $\sigma_\omega = F_1\,0.5 + (1-F_1)\,0.856$。$F_1$ は前 step の値 (`sstF1`) | `scalarTransport_d.cu` 拡散カーネル, `ransTransport_d.cu` |
+| `sstOmegaProdFromPk` (既定 1, 2026-09-08〜) | $P_\omega = \alpha P_k/\nu_t$ (リミッタ後の $P_k$ と整合)。0 は $P_\omega=\alpha\rho S^2$ (Menter 2003 形)。等方項 $-\tfrac23\rho k\,\nabla\!\cdot\!\mathbf u$ (dilatation 2) はリミッタ $\min(\cdot,10\beta^*\rho k\omega)$ の前に加える (キー非依存) | `ransSource_d.cu` |
+| `sstSigmaBlend` (既定 1, 2026-09-08〜) | $\sigma_k = F_1\,0.85 + (1-F_1)\,1.0$, $\sigma_\omega = F_1\,0.5 + (1-F_1)\,0.856$。$F_1$ は同 step の前処理 `ransBlendF1_d_wrapper` (`ransGradient` の直後・`ransTransport` の直前) が `sstF1` に書く。残差評価順は gradient → F1 → transport(拡散) → source | `ransSource_d.cu` (`rans_sst_blend_f1_d`), `scalarTransport_d.cu` 拡散カーネル, `main.cpp` |
 | `sstIsotropicStress` | 応力に $-\tfrac23\rho k\,\delta_{ij}$ (内部面のみ) | `viscousFlux_d.cu` 内部面カーネル |
 | `sstEnergyKSource` | エネルギー式に $-(P_k - D_k)V$ | `ransSource_d.cu` |
 
 検証と既定値の判断は plan `turbulence-sst-consistency-options.md`。スケール不変性の単体試験は `tools/test_scale_invariance.py`。
+
+## 全エネルギーに ρk を含める (`sstEnergyIncludesK`, 2026-09-08)
+
+現行の保存量 $E_m = \rho(e + u^2/2)$ は乱流運動エネルギー $k$ を含まず、せん断生産 $P_k$ は $\mu_t$ の粘性仕事として直接熱に入り、
+散逸 $\varepsilon$ は熱に戻らない。$E_t = \rho(e + u^2/2 + k)$ (SU2 形) では $k$ 式の $P_k - \varepsilon$ が $E_t$ 内部の配分になり、
+$E_t$ の式に交換ソースは現れない。理論と設計判断は plan `turbulence-sst-energy-includes-k.md` §4。
+
+**実装形 (分割保持)**: 保存量 `roe` は $E_m$ のまま格納し (熱力学・境界・IC・restart のコードは不変)、
+エネルギー残差だけを $E_t$ の流束で組む。
+
+| 項 | 実装 | 場所 |
+|---|---|---|
+| 対流 | 面エンタルピー $H^* = h + u^2/2 + \tfrac53 k$ (セル値 $k$、$k$ 式の 1 次風上と同じ upwind)。圧力流束 $p^* = p + \tfrac23\rho k$ (SLAU の $\tilde p$ と $\Delta p$; 面温度・音速・Mach スイッチは $p$) | `convectiveFlux_slau_d.inc.cuh` (`CondArgs.kturb/energyK`), node 境界 `convectiveFlux_boundary_d` (入口は bvar `k`、他は内部値) |
+| 拡散 | $(\mu + \sigma_k\mu_t)\nabla k\cdot S$ を内部面のエネルギー流束に加算 ($k$ 式の拡散と同形: 法線項のみ・相対ゼロ割ガード・$\sigma_k$ は `sstF1` ブレンド) | `viscousFlux_d.cu` |
+| 軸対称 | hoop 源 $(p^* - p_{ref})A$、method 1 の $H^*$ | `axisymmetricSource_d.cu` |
+| 更新 | $k$ 更新後に `roe -= Δ(ρk)` ($\Delta(\rho k) = \rho k - \rho k_N$、各 stage は N 状態から) → $E_t^{n+1} = E_t^n + \Delta t\,R(E_t)$ が各 CV で厳密に成立 ($k$ 式の点陰化・床置きの如何によらず) | `ransTransport_d.cu` (`sstEnergyKCorrection_d_wrapper`), `main.cpp` (explicit RK 経路 / implicit 経路の `applySSTPointImplicit` 直後) |
+
+ghost の $k$ は node では書かれない (ghostless) ため主ループの ghost 側は内部値を使う。`sstIsotropicStress` / `sstEnergyKSource` は 1 のとき無効化 (後継)。
+検証 (plan §6): 周期箱の一様減衰で $\Sigma V(E_m + \rho k)$ が 1e-7 で保存し $c_v\Delta T = -\Delta k$、$u=0$ 維持 (case/09 run_0046–0048)。
+後処理の全温は $T + u^2/2c_p + k/c_p$ で比較する。

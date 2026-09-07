@@ -161,6 +161,43 @@ void ransTimeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cu
     gpuErrchkKernelSync();
 }
 
+// sstEnergyIncludesK (plan turbulence-sst-energy-includes-k §4): 保存量 roe は平均流エネルギー E_m のまま保持し、
+// エネルギー残差は E_t = E_m + ρk の流束で組む。流れの更新は E_t の更新と見なせるので、k 更新後に
+// roe -= Δ(ρk) とすると E_t^{new} = E_t^{old} + Δ·R(E_t) が各 CV で厳密に成立する (k 式の点陰化・床置きの如何によらず)。
+// Δ(ρk) の基準は流れの更新形に合わせる:
+//   fromN=1 (explicit RK): 各 stage が N 状態から組み直すので Δ = roK − roKN。
+//   fromN=0 (point-implicit / dual-time subiter): roe += dq の増分更新なので Δ = roK − (k 更新直前の roK)。
+//   → begin で roK を退避し、end で差を引く。
+namespace {
+flow_float* g_sstEkPrev = nullptr; geom_int g_sstEkPrevN = 0;
+__global__ void sst_energy_k_correction_d(geom_int nCells, flow_float* roe, flow_float* roK, flow_float* roKref)
+{
+    const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic < nCells) roe[ic] -= (roK[ic] - roKref[ic]);
+}
+}
+
+void sstEnergyKCorrection_begin_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    if (cfg.sstEnergyIncludesK == 0 || !ransTransportEnabled(cfg)) return;
+    if (g_sstEkPrev == nullptr || g_sstEkPrevN != msh.nCells) {
+        if (g_sstEkPrev != nullptr) cudaFree(g_sstEkPrev);
+        CHECK_CUDA_ERROR(cudaMalloc(&g_sstEkPrev, msh.nCells * sizeof(flow_float)));
+        g_sstEkPrevN = msh.nCells;
+    }
+    CHECK_CUDA_ERROR(cudaMemcpy(g_sstEkPrev, var.c_d["roK"], msh.nCells * sizeof(flow_float), cudaMemcpyDeviceToDevice));
+}
+
+void sstEnergyKCorrection_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int fromN)
+{
+    if (cfg.sstEnergyIncludesK == 0 || !ransTransportEnabled(cfg)) return;
+    flow_float* ref = (fromN != 0) ? var.c_d["roKN"] : g_sstEkPrev;
+    if (ref == nullptr) return;
+    sst_energy_k_correction_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(msh.nCells, var.c_d["roe"], var.c_d["roK"], ref);
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchkKernelSync();
+}
+
 void ransGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     if (!ransTransportEnabled(cfg)) {

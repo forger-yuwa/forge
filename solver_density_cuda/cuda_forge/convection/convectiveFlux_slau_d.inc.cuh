@@ -39,6 +39,8 @@ __global__ void SLAU_d
     flow_float*      g_total  = cnd.g_total;
     flow_float*      T_cell   = cnd.T_cell;
     const int        condModel= cnd.condModel;
+    flow_float*      kturb    = cnd.kturb;      // sstEnergyIncludesK: セル k (nullptr で無効)
+    const int        energyK  = cnd.energyK;
 
     const geom_int nCells       = geom.nCells;
     const geom_int nPlanes      = geom.nPlanes;
@@ -358,6 +360,20 @@ __global__ void SLAU_d
 
         //flow_float VnL = ((Ux[ic0])*sxx +(Uy[ic0])*syy +(Uz[ic0])*szz)/sss;
         //flow_float VnR = ((Ux[ic1])*sxx +(Uy[ic1])*syy +(Uz[ic1])*szz)/sss;
+        // SST 全エネルギー E_t = E_m + ρk (sstEnergyIncludesK, plan turbulence-sst-energy-includes-k §4):
+        //   エネルギー流束は H* = h + u²/2 + k + (2/3)k (E_t + p*)/ρ、圧力流束は p* = p + (2/3)ρk。
+        //   k はセル値 (1 次, k 式の 1 次風上移流と同じ upwind で運ぶ)。熱力学 (面温度・音速) は p のまま。
+        flow_float Pf_L = P_L, Pf_R = P_R;   // 圧力流束用 (p*)
+        if (energyK != 0 && kturb != nullptr) {
+            const flow_float kL = max(kturb[ic0], (flow_float)0.0);
+            // ghost (ic1>=nCells) の k は node では書かれない (ghostless) ので内部値で代用 (壁/出口は Neumann、入口は境界カーネル側の bvar k が担う)
+            const flow_float kR = (ic1 < nCells) ? max(kturb[ic1], (flow_float)0.0) : kL;
+            h_p  += (flow_float)(5.0/3.0)*kL;
+            h_m  += (flow_float)(5.0/3.0)*kR;
+            Pf_L += (flow_float)(2.0/3.0)*ro_L*kL;
+            Pf_R += (flow_float)(2.0/3.0)*ro_R*kR;
+        }
+
         flow_float Vn_p = ((Ux_L)*sxx +(Uy_L)*syy +(Uz_L)*szz)/sss;
         flow_float Vn_m = ((Ux_R)*sxx +(Uy_R)*syy +(Uz_R)*szz)/sss;
 
@@ -399,7 +415,7 @@ __global__ void SLAU_d
         flow_float M_p = Vn_p/c_hat;
         flow_float M_m = Vn_m/c_hat;
 
-        flow_float P_del = P_R - P_L;
+        flow_float P_del = Pf_R - Pf_L;   // p* 差 (sstEnergyIncludesK off では P_R−P_L)
 
         flow_float beta_p, beta_m;
 
@@ -427,7 +443,7 @@ __global__ void SLAU_d
         flow_float M_hat = min(one, sqrt(half*(velocity2_R + velocity2_L))/c_hat);
         flow_float chi = (1.0-M_hat)*(1.0-M_hat);
 
-        flow_float pressure_sum = P_L + P_R;
+        flow_float pressure_sum = Pf_L + Pf_R;
         // 圧力束の第3項のみ slauVariant で分岐 (mdot は SLAU/SLAU2 共通)。
         // SLAU : (1-chi)(beta_p+beta_m-1) * (P_L+P_R)/2   ... 低マッハで消失し圧力散逸が乏しい
         // SLAU2: (beta_p+beta_m-1) * sqrt((|u_L|^2+|u_R|^2)/2) * roBar * c_hat  ... M に比例した低マッハ散逸
@@ -438,7 +454,7 @@ __global__ void SLAU_d
         } else {
             p_third = (one-chi)*(beta_p+beta_m-one)*half*pressure_sum;
         }
-        flow_float p_tilde = half*pressure_sum + half*(beta_p-beta_m)*(P_L-P_R) + p_third;
+        flow_float p_tilde = half*pressure_sum + half*(beta_p-beta_m)*(Pf_L-Pf_R) + p_third;
 
         // 低マッハ前処理: 圧力散逸項のスケール c_hat を前処理音速 c_diss に置き換える。
         // lowMachPrecond==0 では c_diss==c_hat でビット不変。M>=1 でも c'=c_hat に復帰。

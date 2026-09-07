@@ -189,6 +189,12 @@ if (lowMachThornber == 1) {
 > (理由・データは theory.md 同節の検証所見および計画 §9 `2026-06-08`)。`lowMachThornber` は
 > 正しく opt-in (既定 0・OFF 経路不変) で実装ずみだが、本症状の根治用途では使わない。
 
+#### SST 全エネルギー (`sstEnergyIncludesK`) の p*・H* (2026-09-08)
+
+`CondArgs.energyK != 0` のとき、L/R の面エンタルピーに $\tfrac53 k$ (セル値) を足し、圧力流束 ($\tilde p$ の $P_L, P_R$ と質量流束の $\Delta p$) を
+$p^* = p + \tfrac23\rho k$ で評価する。面温度 (TP の $h(T_f)$)・音速・$\chi$/β の Mach スイッチは熱力学圧 $p$ のまま。ghost 側 (ic1 ≥ nCells) の $k$ は
+内部値で代用する (node ghostless)。詳細は `methods/turbulence/implementation.md` の同名節。
+
 ### `ROE_d` ([L1474](../../solver_density_cuda/cuda_forge/convectiveFlux_d.cu#L1474))
 
 並列単位は `nNormal_halo_Planes`。レジスタ圧が最も高いカーネル。

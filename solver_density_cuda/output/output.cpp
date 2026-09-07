@@ -5,6 +5,8 @@
 
 #include <vector>
 #include <string>
+#include <list>
+#include <algorithm>
 
 #include "mesh/mesh.hpp"
 #include "mesh/elementType.hpp"
@@ -27,10 +29,43 @@ flow_float outputTimeValue(const solverConfig& cfg, int iStep)
 
 }
 
+// 出力する場の量を config output.level で絞る (procedures/solver-settings.md「output」)。
+//   level 2: output_cellValNames 全部 (従来)。level 0/1: 下の基本集合 + extraFields を output_cellValNames の順で。
+//   h0 (全エンタルピー) は level>=1 で合成出力 (Ht [+k]) し、属性 h0_includes_k を付ける。
+static std::list<std::string> effectiveOutputNames(const solverConfig& cfg, const variables& var)
+{
+    if (cfg.outputLevel >= 2) return var.output_cellValNames;
+    std::vector<std::string> base = {"ro","roUx","roUy","roUz","roe","roK","roOmega"};
+    for (const auto& n : var.speciesVarNames) base.push_back(n);            // roY{s}
+    for (const auto& n : var.condMomentConsNames) base.push_back(n);        // 凝縮モーメント保存量
+    if (cfg.outputLevel >= 1) {
+        for (const char* n : {"P","T","Ux","Uy","Uz","k","omega","sonic","vis_lam","vis_turb","wall_dist"}) base.push_back(n);
+        for (const auto& n : var.speciesVarNames) base.push_back(n.substr(2));   // Y{s}
+        for (const auto& n : var.condMomentConsNames) base.push_back(n.substr(2));
+    }
+    for (const auto& n : cfg.outputExtraFields) base.push_back(n);
+    std::list<std::string> out;
+    for (const auto& n : var.output_cellValNames) {
+        if (std::find(base.begin(), base.end(), n) != base.end()) out.push_back(n);
+    }
+    for (const auto& n : cfg.outputExtraFields) {
+        if (std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), n) == var.output_cellValNames.end()) {
+            static bool warned = false;
+            if (!warned) { std::cerr << "[output] extraFields: '" << n << "' is not an output variable (ignored)\n"; warned = true; }
+        }
+    }
+    return out;
+}
+
 static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , variables& var , const int& iStep , const std::string& prefix)
 {
+    const std::list<std::string> outNames = effectiveOutputNames(cfg, var);
+    const bool writeH0 = (cfg.outputLevel >= 1) && var.c.count("Ht") && var.c.count("k");
+    const bool h0IncludesK = (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1);
     if (cfg.gpu == 1) {
-        var.copyVariables_cell_D2H(var.output_cellValNames);
+        std::list<std::string> d2h = outNames;
+        if (writeH0) { d2h.push_back("Ht"); d2h.push_back("k"); }
+        var.copyVariables_cell_D2H(d2h);
     }
 
     elementTypeMap eleTypeMap;
@@ -106,8 +141,8 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
     {
         string name = v.first;
 
-        auto itr = std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), name);
-        if (itr == var.output_cellValNames.end()) {
+        auto itr = std::find(outNames.begin(), outNames.end(), name);
+        if (itr == outNames.end()) {
             continue; // notfound
         }
 
@@ -117,6 +152,16 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
 
         //file.createDataSet("/VALUE/"+name , v.second);
         file.createDataSet("/VALUE/"+name , vtemp);
+    }
+    // h0: 全エンタルピー (単位質量) = Ht = e + p/ρ + u²/2 (+ k は sstEnergyIncludesK のときだけ)。
+    // 全温・全圧の後処理はこれを逆算して作る (自前で T + u²/2c_p を組まない: plan output-level-and-h0)。
+    if (writeH0) {
+        std::vector<flow_float> h0(msh.nCells);
+        const auto& Ht = var.c.at("Ht"); const auto& kk = var.c.at("k");
+        for (geom_int i = 0; i < msh.nCells; ++i) h0[i] = Ht[i] + (h0IncludesK ? std::max(kk[i], (flow_float)0.0) : (flow_float)0.0);
+        auto ds = file.createDataSet("/VALUE/h0", h0);
+        const int flag = h0IncludesK ? 1 : 0;
+        ds.createAttribute<int>("h0_includes_k", HighFive::DataSpace::From(flag)).write(flag);
     }
 
     // ------------
@@ -145,7 +190,9 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
     ofs << "        </Geometry>\n";
 
     const char* centerAttr = nodeViz ? "Node" : "Cell";
-    for (string name : var.output_cellValNames)
+    std::list<std::string> xmfNames = outNames;
+    if (writeH0) xmfNames.push_back("h0");
+    for (string name : xmfNames)
     {
     //for (auto& v : var.c) {
         //string name = v.first;

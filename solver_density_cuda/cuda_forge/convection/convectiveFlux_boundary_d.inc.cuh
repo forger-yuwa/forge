@@ -62,7 +62,9 @@ __global__ void convectiveFlux_boundary_d // slau
  flow_float* res_roUx  ,
  flow_float* res_roUy  ,
  flow_float* res_roUz  ,
- flow_float* res_roe   
+ flow_float* res_roe   ,
+ // sstEnergyIncludesK (plan turbulence-sst-energy-includes-k): 内部 k / 境界 k (nullptr なら内部値) / 有効フラグ
+ flow_float* kturb, flow_float* kb, int energyK
 )
 {
     geom_int ib  = blockDim.x*blockIdx.x + threadIdx.x;
@@ -178,6 +180,14 @@ __global__ void convectiveFlux_boundary_d // slau
         //flow_float chi = (1.0-M_hat)*(1.0-M_hat);
 
         flow_float p_tilde = (pTildeInterior != 0) ? Ps[ic] : P_R;
+        // SST 全エネルギー E_t (sstEnergyIncludesK): h に +(5/3)k、圧力流束に p* = p + (2/3)ρk (境界側 k は bvar kb / 入口 k / 内部値)。
+        if (energyK != 0 && kturb != nullptr) {
+            const flow_float kL = max(kturb[ic], (flow_float)0.0);
+            const flow_float kR = (kb != nullptr) ? max(kb[ib], (flow_float)0.0) : kL;   // 入口は bvar k (指定値)、他は内部値 (Neumann)
+            h_p += (flow_float)(5.0/3.0)*kL;
+            h_m += (flow_float)(5.0/3.0)*kR;
+            p_tilde += (pTildeInterior != 0) ? (flow_float)(2.0/3.0)*ro_L*kL : (flow_float)(2.0/3.0)*ro_R*kR;
+        }
 
         flow_float mdot = sss*(ro_R*Vn_m);
 

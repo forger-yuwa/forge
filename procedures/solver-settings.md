@@ -179,19 +179,42 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
 ## turbulence.sst* — SST 整合オプション (2026-09-08, codex レビュー由来)
 
 ```yaml
-turbulence: {model: "sst", ..., sstNodeWallKPin: 1, sstOmegaProdFromPk: 0, sstSigmaBlend: 0, sstIsotropicStress: 0, sstEnergyKSource: 0}
+turbulence: {model: "sst", ..., sstNodeWallKPin: 1, sstOmegaProdFromPk: 1, sstSigmaBlend: 1, sstIsotropicStress: 0, sstEnergyKSource: 0, sstEnergyIncludesK: 0}
 ```
 
 | キー | 既定 | 意味 |
 |---|---|---|
 | `sstNodeWallKPin` | 1 | node 低 Re 壁 (`wallTreatmentSST: 0`) で壁ノードの k/roK を 0 にピンし、壁ノードの k/ω 残差を 0 化する。旧 (0) は ghost 反射のみで、node は境界半割面の拡散を skip するため壁 k=0 が実際には効いていなかった。cell には無関係 |
-| `sstOmegaProdFromPk` | 0 | 1: P_ω = α P_k/ν_t (k 側のリミッタ・dilatation・壁関数置換後の P_k と整合。NASA TMR は 2003 論文の αρS² を誤植とし、訂正式をこの形としている)。0: P_ω = α ρ S² (現行)。リミッタ・等方項・壁関数置換の非発動域では同一。ν_t は `vis_turb` (μt<1e-6μ では 0 側にフォールバック) |
-| `sstSigmaBlend` | 0 | 1: 拡散係数 σ_k = F1·0.85 + (1−F1)·1.0, σ_ω = F1·0.5 + (1−F1)·0.856 (正式ブレンド, F1 は前 step の値 `sstF1`)。0: k-ω 側定数 (現行)。壁近傍 (F1=1) では同一 |
+| `sstOmegaProdFromPk` | **1** (2026-09-08 から) | 1: P_ω = α P_k/ν_t (k 側のリミッタ・dilatation・壁関数置換後の P_k と整合。NASA TMR は 2003 論文の αρS² を誤植とし、訂正式をこの形としている)。0: P_ω = α ρ S² (旧既定)。リミッタ・等方項・壁関数置換の非発動域では同一。ν_t は `vis_turb` (μt<1e-6μ では 0 側にフォールバック)。等方項 (dilatation 2) はリミッタ**前**に加算 (2026-09-08 変更, キー非依存) |
+| `sstSigmaBlend` | **1** (2026-09-08 から) | 1: 拡散係数 σ_k = F1·0.85 + (1−F1)·1.0, σ_ω = F1·0.5 + (1−F1)·0.856 (正式ブレンド)。F1 は同 step の前処理 `ransBlendF1` が `sstF1` に書く (拡散の前に k/ω 勾配→F1 を評価する順序に変更、ラグ無し)。0: k-ω 側定数 (旧既定)。壁近傍 (F1=1) では同一 |
 | `sstIsotropicStress` | 0 | 1: 運動量/エネルギーの応力に等方 Reynolds 応力 −(2/3)ρk δᵢⱼ を加える (内部面のみ; `dilatationCorrection: 2` の k 生産側 −(2/3)ρk∇·u と対をなす)。0: 無し (現行) |
-| `sstEnergyKSource` | 0 | 1: エネルギー式に −(P_k − D_k)·V を源として加える (E = e + u²/2 に k を含まない定式化で、k に溜まる分を平均流エネルギーから引く。SU2 型 E に k を含める方式の代替)。0: 無し (現行) |
+| `sstEnergyKSource` | 0 | 1: エネルギー式に −(P_k − D_k)·V を源として加える (E = e + u²/2 に k を含まない定式化で、k に溜まる分を平均流エネルギーから引く。SU2 型 E に k を含める方式の代替)。0: 無し (現行)。**`sstEnergyIncludesK: 1` のときは無効化される (後継)** |
+| `sstEnergyIncludesK` | 0 | 1: **全エネルギーに乱流運動エネルギーを含める** (E_t = ρ(e + u²/2 + k), SU2 形; plan [turbulence-sst-energy-includes-k](../plans/active/turbulence-sst-energy-includes-k.md))。実装は「分割保持」: 保存量 `roe` は平均流 E_m のまま (T/P/IC/restart は不変)、エネルギー残差を E_t の流束 (面エンタルピー +(5/3)k、圧力流束 p* = p + (2/3)ρk、k 拡散 (μ+σ_k μt)∇k·S、軸対称 hoop p*) で組み、k 更新後に `roe -= Δ(ρk)` とする。周期箱の一様減衰で ΣV(E_m+ρk) が 1e-7 で保存し、k の散逸がそのまま T に戻る。1 のとき `sstIsotropicStress`/`sstEnergyKSource` は強制 0。SLAU/SLAU2 のみ。後処理の全温は T + u²/2c_p **+ k/c_p** で評価する。0: 従来 (平均流 E_m のみ保存、k の散逸は熱に戻らない) |
 
 検証 (plan [turbulence-sst-consistency-options](../plans/active/turbulence-sst-consistency-options.md)): case/16 2D node SST では全オプションが壁圧比 ≤0.25 % の差、case/26 平板 Cf と case/16 3D の結果は同 plan 参照。
 `tools/test_scale_invariance.py` (相似メッシュで無次元残差の一致を見る) は単位付き閾値の検出用。
+
+## output — 出力する場の量の絞り込みと h0 (2026-09-08)
+
+```yaml
+output: {level: 1, extraFields: [ducros, volume]}   # 省略時 level 1
+```
+
+| level | 出力 | 目安 (2.08M 節点 SST) |
+|---|---|---|
+| 0 | リスタート最小: `ro roUx roUy roUz roe roK roOmega roY*` + 凝縮モーメント保存量 | ~190 MB (うちメッシュ CONNE/COORD 98 MB) |
+| **1 (既定)** | 0 + 原始量 `P T Ux Uy Uz k omega sonic Y*`、`vis_lam vis_turb wall_dist`、**`h0`** | ~290 MB |
+| 2 | 従来どおり全診断量 (勾配 27 本・リミッタ・SST/DES 診断・`cfl dt_local ducros volume` …) | ~680 MB |
+
+- `extraFields` で level 0/1 に個別追加する (名前は `variables.hpp` の `output_cellValNames`)。旧解析スクリプトが読む診断量
+  (`volume`: case/09 の保存則解析、`cfl`: `sweep_cfl_implicit.py`、`ducros`: `analyze_ducros.py`) はここで足すか level 2 にする。
+- **`h0`** = 全エンタルピー (単位質量) = e + p/ρ + u²/2 で、`sstEnergyIncludesK: 1` のときだけ + k を含む (属性 `h0_includes_k`)。
+  **全温・全圧の後処理は `VALUE/h0` から作る** (CPG: T₀ = h₀/c_p, semi-perfect: h(T₀)=h₀ の逆算, P₀ は s°(T₀)−s°(T)=R ln(P₀/P))。
+  スクリプトで `T + u²/2c_p` を自前で組まない (k を含めるかどうかの判断がソルバ側に閉じる)。逆算は
+  **`solver_density_cuda/tools/total_quantities.py RUN_DIR [--res res_N.h5] [--write] [--Tt ..]`** (CPG 閉形式 / TP は NASA-9 Newton、
+  P₀ は s° 差、凝縮は凍結組成の気相のみ・警告) を使う。`--write` で `VALUE/T0`, `VALUE/P0` を res に追記 (属性 includes_k / method)。
+  Python からは `total_state(run_dir, res_path)`。
+- 原則: **後処理で導出できる量はソルバから出さない**。勾配・リミッタ・診断は必要な run だけ level 2 で取る。
 
 ## mesh.wallDistExtraPhysIDs — 壁距離に含める非 wall 境界 (変換時)
 

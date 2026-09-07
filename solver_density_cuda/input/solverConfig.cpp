@@ -402,6 +402,15 @@ void solverConfig::read(std::string fname)
         this->nSubIterDualTime = getOptionalValidatedValue<int>(config["time"], "nSubIterDualTime", 20, "time");
         this->bdfOrder = getOptionalValidatedValue<int>(config["time"], "bdfOrder", 2, "time");
 
+        // 出力の絞り込み (output: {level: 0|1|2, extraFields: [...]}; 省略時 level 1)
+        if (config["output"]) {
+            auto out = config["output"];
+            this->outputLevel = getOptionalValidatedValue<int>(out, "level", 1, "output");
+            if (this->outputLevel < 0 || this->outputLevel > 2) throw std::runtime_error("Key 'level' in 'output' must be 0, 1, or 2.");
+            if (out["extraFields"]) this->outputExtraFields = out["extraFields"].as<std::vector<std::string>>();
+        }
+        std::cout << "'output': level=" << this->outputLevel << " extraFields=" << this->outputExtraFields.size() << "\n";
+
         // 空間設定
         auto space = config["space"];
         this->convMethod = getValidatedValue<int>(space, "convMethod", "space");
@@ -466,15 +475,21 @@ void solverConfig::read(std::string fname)
 
         this->katoLaunder = getOptionalValidatedValue<int>(turb, "katoLaunder", 0, "turbulence");
         this->sstNodeWallKPin    = getOptionalValidatedValue<int>(turb, "sstNodeWallKPin", 1, "turbulence");
-        this->sstOmegaProdFromPk = getOptionalValidatedValue<int>(turb, "sstOmegaProdFromPk", 0, "turbulence");
-        this->sstSigmaBlend      = getOptionalValidatedValue<int>(turb, "sstSigmaBlend", 0, "turbulence");
+        this->sstOmegaProdFromPk = getOptionalValidatedValue<int>(turb, "sstOmegaProdFromPk", 1, "turbulence");
+        this->sstSigmaBlend      = getOptionalValidatedValue<int>(turb, "sstSigmaBlend", 1, "turbulence");
         this->sstIsotropicStress = getOptionalValidatedValue<int>(turb, "sstIsotropicStress", 0, "turbulence");
         this->sstEnergyKSource   = getOptionalValidatedValue<int>(turb, "sstEnergyKSource", 0, "turbulence");
+        this->sstEnergyIncludesK = getOptionalValidatedValue<int>(turb, "sstEnergyIncludesK", 0, "turbulence");
+        if (this->sstEnergyIncludesK < 0 || this->sstEnergyIncludesK > 1) throw std::runtime_error("Key 'sstEnergyIncludesK' in 'turbulence' must be 0 or 1.");
+        if (this->sstEnergyIncludesK == 1 && (this->sstIsotropicStress != 0 || this->sstEnergyKSource != 0)) {
+            std::cout << "[WARN] turbulence.sstEnergyIncludesK=1 supersedes sstIsotropicStress/sstEnergyKSource (both forced to 0)\n";
+            this->sstIsotropicStress = 0; this->sstEnergyKSource = 0;
+        }
         for (auto* kv : {&this->sstNodeWallKPin, &this->sstOmegaProdFromPk, &this->sstSigmaBlend, &this->sstIsotropicStress, &this->sstEnergyKSource}) {
             if (*kv < 0 || *kv > 1) throw std::runtime_error("SST option keys sst{NodeWallKPin,OmegaProdFromPk,SigmaBlend,IsotropicStress,EnergyKSource} in 'turbulence' must be 0 or 1.");
         }
         std::cout << "'sst options' in 'turbulence': nodeWallKPin=" << this->sstNodeWallKPin << " omegaProdFromPk=" << this->sstOmegaProdFromPk
-                  << " sigmaBlend=" << this->sstSigmaBlend << " isotropicStress=" << this->sstIsotropicStress << " energyKSource=" << this->sstEnergyKSource << "\n";
+                  << " sigmaBlend=" << this->sstSigmaBlend << " isotropicStress=" << this->sstIsotropicStress << " energyKSource=" << this->sstEnergyKSource << " energyIncludesK=" << this->sstEnergyIncludesK << "\n";
 
         if (this->katoLaunder < 0 || this->katoLaunder > 1) {
             throw std::runtime_error("Key 'katoLaunder' in 'turbulence' must be 0 or 1.");
