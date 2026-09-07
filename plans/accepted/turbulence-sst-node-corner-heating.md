@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `turbulence / boundary (node)`
-- **status**: `in_progress` (codex レビュー済 2026-09-08 → 真因 = k/ω 拡散の絶対値ガード。修正・A/B 中)
+- **status**: `done` (2026-09-08: 相対ガードで角部加熱消滅・ω が壁漸近解に一致。accepted へ移動)
 - **related_docs**: `methods/turbulence/theory.md`, `methods/turbulence/implementation.md`, `methods/discretization.md` §7
 - **related_plans**: `boundary-node-nozzle-wall-outlet-stability.md` (§2.12–2.13 出口側), `boundary-node-inlet-corner-wall.md`
 - **created**: `2026-09-08`
@@ -138,8 +138,9 @@ E に ρk を含める (SU2/OpenFOAM 流) か、粘性仕事の μt 分と (P_k�
 | 優先 | 項目 | 状態 |
 |---|---|---|
 | 1 | 本 plan を codex にレビューさせ、R1 の妥当性と見落としを確認 | 進行中 (2026-09-08) |
-| 2 | R1 実装 + 2D 回帰 (run_0213 と bit/1e-6 同一) + 3D run_0226 からの再計算で角線 T−Tt ≤ 0 を確認 | 未 |
-| 3 | R2 の収支 dump | 未 |
+| 2 | ~~R1 実装~~ → P0 相対ガード実装 + 2D 300 step 健全 (2D は |d·S| ≫ 1e-12 で不変) + 3D run_0228 で角線 T−Tt −9〜−17 K・T>Tt+1 ノード 0 | 済 |
+| 3 | R2 の収支 dump | 不要 (P0 で解決) |
+| 4 | codex 副次指摘 (ω 生産 αρS², σk/σω の F1 ブレンド無し, 壁 k=0 の未ピン, dilatation 2 の等方応力, H2 の E–k 整合, 相似メッシュ単体試験) を別 plan に切り出す | 未 |
 | 4 | run_0302 (fine (x,y) × z 25) の結果で y₁ 0.6 µm 側が引き金か確定し §2.1 に追記 | 済 (2026-09-07: 再現、引き金は角セルの異方性側) |
 | 5 | node 変換 `wall_dist` を「ノード座標 → 壁ノード座標」に直す (§2.1 別件, 2D 回帰 run_0213 で確認) | 未 (別 plan 化) |
 | 6 | `wf_irep` の角線退避 (候補なし → u_τ=0) を 2-ring で救う (wallTreatmentSST=1 を 3D で使う前に) | 未 |
@@ -147,3 +148,4 @@ E に ρk を含める (SU2/OpenFOAM 流) か、粘性仕事の μt 分と (P_k�
 ## 6. 変更ログ
 
 - `2026-09-08` — 初稿 (観測・仮説・打ち手案)。
+- `2026-09-08` — codex レビュー (§3.5) → `scalarTransport_d.cu` の絶対ガードを相対化 (commit f10ace73)。3D A/B run_0228: 角対角線の ω が 6ν/(β₁d²) に一致、k 粘性底層 1e-5、T>Tt+1 ノード 0、壁 p/p0 @x=46 0.328→0.273 (2D SST 0.257)。status done。
