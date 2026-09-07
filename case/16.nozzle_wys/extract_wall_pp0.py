@@ -7,19 +7,26 @@ usage: extract_wall_pp0.py RES.h5 OUT.csv [p0=59070]"""
 import sys, h5py, numpy as np
 fn, out = sys.argv[1], sys.argv[2]; p0 = float(sys.argv[3]) if len(sys.argv) > 3 else 59070.0
 f = h5py.File(fn, "r"); c = np.array(f["MESH/COORD"]).reshape(-1, 3); P = np.array(f["VALUE/P"]); wd = np.array(f["VALUE/wall_dist"])
+G = np.array(f["VALUE/g_0"]) if "VALUE/g_0" in f else None      # 凝縮液滴質量分率 (あれば)
+TT = np.array(f["VALUE/T"])
 zmax = c[:, 2].max(); is3d = zmax > 1e-6
 xs = np.round(c[:, 0], 7); ux = np.unique(xs)
-def line(mask, pick):
+def line(mask, pick, arr=None):
     xx, pp = [], []
     for xv in ux:
         cand = np.where(mask & (xs == xv))[0]
         if len(cand) == 0: continue
-        j = pick(cand); xx.append(c[j, 0] * 1e3); pp.append(P[j] / p0)
+        j = pick(cand); xx.append(c[j, 0] * 1e3); pp.append((P[j] / p0) if arr is None else arr[j])
     return np.array(xx), np.array(pp)
 plane = (np.abs(c[:, 2] - zmax) < 1e-7) if is3d else np.ones(len(c), bool)
 cx, cp = line(plane & (wd <= 0) & (c[:, 1] > 0), lambda cand: cand[np.argmax(c[cand, 1])])
 mx, mp = line(plane, lambda cand: cand[np.argmin(np.abs(c[cand, 1]))])
 cols = {"x_mm": cx, "contour_wall": cp, "center": np.interp(cx, mx, mp)}
+pickc = lambda cand: cand[np.argmin(np.abs(c[cand, 1]))]
+cols["center_T"] = np.interp(cx, *line(plane, pickc, TT))
+if G is not None:
+    cols["center_g"] = np.interp(cx, *line(plane, pickc, G))
+    cols["contour_g"] = line(plane & (wd <= 0) & (c[:, 1] > 0), lambda cand: cand[np.argmax(c[cand, 1])], G)[1]
 if is3d:
     sx, sp = line((np.abs(c[:, 2]) < 1e-9), lambda cand: cand[np.argmin(np.abs(c[cand, 1]))])
     cols["side_wall_mid"] = np.interp(cx, sx, sp)
