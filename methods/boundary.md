@@ -188,8 +188,25 @@ SST automatic wall treatment (`wallTreatmentSST`) とはコードパスが分離
 - **入力**: run dir の `inlet_profile_<physID>.csv`。**1 行目ヘッダで補間方向と量を指定**する。
   - 先頭の連続する `x`/`y`/`z` 列 = **補間座標**。1 列 (例 `y`) → **1D 線形補間** (その軸でテーブルを
     昇順ソートし線形補間、範囲外は端値クランプ)。3 列 (`x y z`) → **3D 最近傍**。
-  - 残り列 = **bvar 量名** (`Ux Uy Uz Tt Pt Ts Ps ro k omega` 等)。その inlet が持つ bvar のみ反映。
+  - 残り列 = **bvar 量名** (`Ux Uy Uz Tt Pt Ts Ps ro k omega`、多成分 TP は `Y0..Y{n-1}` 等)。その inlet が
+    持つ bvar のみ反映 (無い列名は黙って無視。`inlet_uniformVelocity` に `Tt` を書いても効かない)。
   - 例 (1D-y): ヘッダ `y Ux Uy Uz` に続けて行 `1.0 0 0 0` / `1.02 30 0 0` …。
+- **種別ごとに分布化できる量** (2026-09-08 検証): `inlet_Pressure` (亜音速) は `Tt Pt Y{s} k omega`、
+  `inlet_uniformVelocity` (超音速・全量固定) は `ro Ux Uy Uz Ps Y{s} k omega`。全温分布を超音速入口に与えるには
+  静的状態 (ρ, U, Ps) に換算する。`k/omega` は `rans_dirichlet_scalar_boundary_d`、`Y{s}` は
+  `species_dirichlet_boundary_d` がそれぞれ per-face `bvar` を読む。凝縮モーメントは入口で常に 0 (分布不可)。
+- **node の化学種入口ピン** (2026-09-08 修正): node は境界半割面の化学種流束に ghost を使わず境界ノード自身の
+  組成を使うため、ghost だけの Dirichlet では入口ノードの `Y{s}` が初期値のまま凍結していた (一様値の変更も
+  分布も入らない)。k/ω と同じく `species_dirichlet_boundary_d` (node 分岐) が境界ノードを `Y_s^in` にピンし
+  `scalarDirichletPin` を立て、`speciesPinResidual_d_wrapper` (化学ソース集計後) が `res_roY{s}`/`src_jac_Y{s}`
+  を 0 化する。連成陰解法 (`speciesImplicitCoupling: 1/2`) の `species_dplur_sweep_d` はピン行を δ(ρY)=0 に
+  拘束する (残差 0 だけでは隣接補正が Jacobi sweep で漏れる)。cell は不変 (ghost Dirichlet のまま)。
+  `applyInletProfiles` は反映列 (`applied:`) と無視列 (`IGNORED`) をログに出し、多成分では各 face の
+  0≤Y_s≤1・ΣY_s=1 を検査する。`inlet_Pressure_dir` は組成 `Yb` を受け取らない単成分熱物性なので多成分非対応。検証: case/16 run_0317 (node) / run_0318 (cell) /
+  run_0319 (node 一様入口の回帰, 旧バイナリと 1e-6 以下)。
+- **生成・照合ツール**: [`tools/gen_inlet_profile.py`](../solver_density_cuda/tools/gen_inlet_profile.py)
+  (`gen`: 座標の式または測定表から CSV。TP は NASA-9 で Tt/M/Ps→ρ,U,Ps 換算。`verify`: 境界ノード/第 1 セルの
+  T0 (h0 由来)・Y・k・ω を目標と比較)。運用手順は [`procedures/inlet-profile.md`](../procedures/inlet-profile.md)。
 - **適用箇所**: `main.cpp` で `readBcondConfig` (bvar セット) の直後・最初の `applyBconds` より前に
   `applyInletProfiles(cfg, msh)` を呼ぶ。face 重心 `msh.planes[ip].centCoords` で補間し host `bvar` に
   セット → `bvar_d` に再アップロード。`inletProfile` 未指定の inlet は一様のまま (挙動不変)。

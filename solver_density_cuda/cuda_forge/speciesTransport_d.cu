@@ -91,18 +91,50 @@ __global__ void species_neumann_boundary_d(
 // ρ[ig] は applyBconds (inlet カーネル) が設定済みの ghost 密度。Yb は per-face 入口組成 bvar。
 __global__ void species_dirichlet_boundary_d(
     geom_int nb,
+    geom_int* bplane_cell,
     geom_int* bplane_cell_ghst,
     flow_float* ro,
     flow_float* Yb,
     flow_float* roY,
-    flow_float* Y)
+    flow_float* Y,
+    flow_float* scalarDirichletPin,
+    int isNode)
 {
     const geom_int ib = blockDim.x * blockIdx.x + threadIdx.x;
     if (ib < nb) {
         const geom_int ig = bplane_cell_ghst[ib];
-        const flow_float Yin = Yb[ib];
+        const flow_float Yin = max(Yb[ib], static_cast<flow_float>(0.0));   // 入口カーネルの負値クリップと整合
         Y[ig]   = Yin;
         roY[ig] = ro[ig] * Yin;
+        // node-centered: 境界半割面の化学種流束は ghost を読まず境界ノード自身の組成を使う
+        // (species_advection_faceY_d / scalarTransport の nodeBnd 分岐)。ghost だけ書いても入口ノードの
+        // Y_s は初期値のまま凍結し、入口分布 (inletProfile の Y{s} 列) も一様値の変更も場に入らなかった
+        // (2026-09-08, case/16 run_0317)。k/ω (rans_dirichlet_scalar_boundary_d) と同じく境界ノードを
+        // Dirichlet 値にピンし、scalarDirichletPin で残差を除外する (speciesPinResidual_d_wrapper)。
+        if (isNode != 0) {
+            const geom_int ic = bplane_cell[ib];
+            Y[ic]   = Yin;
+            roY[ic] = ro[ic] * Yin;
+            scalarDirichletPin[ic] = static_cast<flow_float>(1.0);
+        }
+    }
+}
+
+// node 入口ピン (scalarDirichletPin==1) のノードで化学種残差・ソース Jacobian を 0 化する
+// (ransSource の k/ω 残差除外と同形)。移流残差と化学ソースの集計後に呼ぶ。
+__global__ void species_pin_residual_d(
+    geom_int nCells,
+    int nSpecies,
+    flow_float** res_roY,
+    flow_float** src_jac,
+    flow_float* scalarDirichletPin)
+{
+    const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic < nCells && scalarDirichletPin[ic] == static_cast<flow_float>(1.0)) {
+        for (int s = 0; s < nSpecies; ++s) {
+            res_roY[s][ic] = static_cast<flow_float>(0.0);
+            src_jac[s][ic] = static_cast<flow_float>(0.0);
+        }
     }
 }
 
@@ -281,10 +313,17 @@ __global__ void species_dplur_sweep_d(
     flow_float* transport_diag,
     flow_float* src_jac,
     flow_float* dq_old,
-    flow_float* dq_new)
+    flow_float* dq_new,
+    flow_float* scalarDirichletPin)   // node 入口ピン (==1 の行は δ(ρY)=0 に拘束。cell/非ピンは無効)
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic < nCells) {
+        // ピン行: 残差 0 だけでは隣接の δ(ρY) が Jacobi sweep で漏れ込み、第 2 sweep 以降に入口の補正が
+        // 非ゼロになる (方式 2 では EOS クロス流束にも伝播)。行そのものを δ=0 に拘束する。
+        if (scalarDirichletPin != nullptr && scalarDirichletPin[ic] == static_cast<flow_float>(1.0)) {
+            dq_new[ic] = static_cast<flow_float>(0.0);
+            return;
+        }
         const flow_float dt_l = dt_local[ic];
         const geom_float v = vol[ic];
 
@@ -645,11 +684,14 @@ void speciesBoundary_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, bcond& b
         if (isInlet && ybIt != bc.bvar_d.end()) {
             species_dirichlet_boundary_d<<<cuda_cfg.dimGrid_bplane, cuda_cfg.dimBlock>>>(
                 nb,
+                bc.map_bplane_cell_d,
                 bc.map_bplane_cell_ghst_d,
                 var.c_d["ro"],
                 ybIt->second,
                 var.c_d["roY"+i],
-                var.c_d["Y"+i]);
+                var.c_d["Y"+i],
+                var.c_d["scalarDirichletPin"],
+                (cfg.discretization == "node") ? 1 : 0);
         } else {
             species_neumann_boundary_d<<<cuda_cfg.dimGrid_bplane, cuda_cfg.dimBlock>>>(
                 nb,
@@ -659,6 +701,14 @@ void speciesBoundary_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, bcond& b
                 var.c_d["Y"+i]);
         }
     }
+}
+
+void speciesPinResidual_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    if (!speciesEnabled(var) || cfg.discretization != "node" || g_resroY_dev == nullptr || g_srcjac_dev == nullptr) return;
+    species_pin_residual_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
+        msh.nCells, g_nSpecies, g_resroY_dev, g_srcjac_dev, var.c_d["scalarDirichletPin"]);
+    gpuErrchk( cudaPeekAtLastError() );
 }
 
 void applySpeciesBoundaries(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
@@ -781,7 +831,8 @@ void speciesImplicitDPLURSolve_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg
                 var.c_d["transport_diag_Y"+i],
                 var.c_d["src_jac_Y"+i],
                 var.c_d["dq_roY"+i+"_old"],
-                var.c_d["dq_roY"+i]);
+                var.c_d["dq_roY"+i],
+                (cfg.discretization == "node") ? var.c_d["scalarDirichletPin"] : nullptr);
         }
         // sweep 後に old↔new を swap (最終補正は dq_old 側に残る)。
         for (int s = 0; s < nSpecies; s++) {
@@ -845,7 +896,8 @@ void speciesEOSCrossPredictInject_d_wrapper(solverConfig& cfg, cudaConfig& cuda_
                 msh.map_plane_cells_d, msh.map_cell_planes_index_d, msh.map_cell_planes_d,
                 var.p_d["massflux"], var.c_d["roN"],
                 var.c_d["res_roY"+i], var.c_d["transport_diag_Y"+i], var.c_d["src_jac_Y"+i],
-                var.c_d["dq_roY"+i+"_old"], var.c_d["dq_roY"+i]);
+                var.c_d["dq_roY"+i+"_old"], var.c_d["dq_roY"+i],
+                (cfg.discretization == "node") ? var.c_d["scalarDirichletPin"] : nullptr);
         }
         for (int s = 0; s < nSpecies; ++s) {
             const std::string i = std::to_string(s);

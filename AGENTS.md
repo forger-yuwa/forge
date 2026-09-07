@@ -15,6 +15,7 @@
 | [`procedures/recommended-settings.md`](procedures/recommended-settings.md) | **推奨解析設定の正本** (解析種別ごとの現行レシピ・日付付き・旧設定一覧)。config を組む/点検するときは skill `forge-config` の手順で参照 |
 | [`procedures/solver-settings.md`](procedures/solver-settings.md) | `convMethod` / `limiter` などの数値設定リファレンス |
 | [`procedures/su2-cross-check.md`](procedures/su2-cross-check.md) | 同一メッシュ・同一 BC で SU2 と比較し forge 固有の問題を切り分ける手順 |
+| [`procedures/inlet-profile.md`](procedures/inlet-profile.md) | 入口に分布 (全温・全圧・組成・k/ω・超音速入口の ρ,U,Ps) を与える手順 (`inletProfile` CSV + `gen_inlet_profile.py`)。Claude は skill `forge-inlet-profile` |
 | [`procedures/development-environment.md`](procedures/development-environment.md) | 開発環境とビルド (Docker / WSL native) の方針 |
 | [`procedures/coding-conventions.md`](procedures/coding-conventions.md) | ソース構成・C++/CUDA 命名規約・ビルド/テスト実行手順 |
 | [`procedures/verification/`](procedures/verification/README.md) | 検証ケース選定 (`README.md`) と各標準検証ケースの個別手順 |

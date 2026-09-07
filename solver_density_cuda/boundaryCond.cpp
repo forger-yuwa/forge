@@ -8,6 +8,7 @@
 #include "cuda_forge/fluct_variables_d.cuh"
 
 #include <fstream>
+#include <cmath>
 #include <sstream>
 #include <algorithm>
 #include <array>
@@ -231,6 +232,11 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
             std::sort(order.begin(), order.end(), [&](int a, int b){ return rowC[a][ax] < rowC[b][ax]; });
         }
 
+        auto isInputQuantity = [&](const std::string& qn) {
+            const auto vt = bc.valueTypes.find(qn);
+            return vt != bc.valueTypes.end() && vt->second == 1 && bc.bvar.find(qn) != bc.bvar.end();
+        };
+
         // ---- 各 inlet face で補間し bvar をセット ----
         for (size_t i = 0; i < bc.iPlanes.size(); ++i)
         {
@@ -263,8 +269,11 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
                 }
                 qv = rowQ[best];
             }
-            // bvar へ反映 (その inlet が持つ量のみ)
+            // bvar へ反映: この種別の「入力量」(valueTypes==1, config の一様値を読む量) だけ。
+            // type 0 の量 (例 inlet_Pressure の Ux/Ps, inlet_uniformVelocity の Tt) は kernel が毎 step 書き換える
+            // 出力/作業用で、CSV を書いても効かないので反映しない (ログの IGNORED に出す)。
             for (size_t k = 0; k < qnames.size(); ++k) {
+                if (!isInputQuantity(qnames[k])) continue;
                 auto bit = bc.bvar.find(qnames[k]);
                 if (bit != bc.bvar.end() && i < bit->second.size()) bit->second[i] = (flow_float)qv[k];
             }
@@ -273,6 +282,7 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
         // ---- device へ再アップロード ----
         if (cfg.gpu == 1) {
             for (const auto& qn : qnames) {
+                if (!isInputQuantity(qn)) continue;
                 auto bit = bc.bvar.find(qn);
                 auto dit = bc.bvar_d.find(qn);
                 if (bit != bc.bvar.end() && dit != bc.bvar_d.end() && dit->second != nullptr) {
@@ -281,10 +291,48 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
                 }
             }
         }
+        // 適用できた列 (この種別の bvar に存在) と無視した列を分けて報告する。
+        // 例: inlet_uniformVelocity に Tt 列を書いても kernel は読まない (bvar 無し) → ignored に出す。
+        std::string applied, ignored;
+        for (const auto& qn : qnames) {
+            if (isInputQuantity(qn)) applied += " " + qn; else ignored += " " + qn;
+        }
         std::cout << "[applyInletProfiles] physID=" << bc.physID << " kind=" << bc.bcondKind
                   << ": set " << qnames.size() << " quantities from " << fname
-                  << " (" << (oneD ? "1D interp" : "3D nearest") << ", " << nrow << " rows, "
-                  << bc.iPlanes.size() << " faces).\n";
+                  << " (" << (oneD ? "1D interp" : (std::to_string(ncoord) + "D nearest")) << ", " << nrow << " rows, "
+                  << bc.iPlanes.size() << " faces). applied:" << (applied.empty() ? " (none)" : applied)
+                  << (ignored.empty() ? "" : "  IGNORED (not an input quantity of this kind):" + ignored) << "\n";
+        if (applied.empty()) {
+            std::cerr << "[applyInletProfiles] " << fname << ": no column matches a boundary value of kind "
+                      << bc.bcondKind << " (see procedures/inlet-profile.md).\n";
+            exit(EXIT_FAILURE);
+        }
+        // 多成分入口: 組成列があれば各 face で 0<=Y_s<=1・ΣY_s≈1 を検査する (入口カーネルは負値クリップ+正規化するが、
+        // node ピンは値をそのまま使うので、ここで弾く)。
+        if (cfg.nSpecies >= 2) {
+            bool anyY = false;
+            for (const auto& qn : qnames) if (qn.size() >= 2 && qn[0] == 'Y' && isInputQuantity(qn)) anyY = true;
+            if (anyY) {
+                for (size_t i = 0; i < bc.iPlanes.size(); ++i) {
+                    double ysum = 0.0;
+                    for (int sidx = 0; sidx < cfg.nSpecies; ++sidx) {
+                        const auto it2 = bc.bvar.find("Y" + std::to_string(sidx));
+                        const double y = (it2 != bc.bvar.end()) ? (double)it2->second[i] : 0.0;
+                        if (!(y >= -1.0e-6 && y <= 1.0 + 1.0e-6)) {
+                            std::cerr << "[applyInletProfiles] " << fname << ": Y" << sidx << "=" << y
+                                      << " at face " << i << " is outside [0,1].\n";
+                            exit(EXIT_FAILURE);
+                        }
+                        ysum += y;
+                    }
+                    if (std::fabs(ysum - 1.0) > 1.0e-3) {
+                        std::cerr << "[applyInletProfiles] " << fname << ": sum of Y_s = " << ysum << " at face " << i
+                                  << " (must be 1 within 1e-3; write all species columns or use gen_inlet_profile.py).\n";
+                        exit(EXIT_FAILURE);
+                    }
+                }
+            }
+        }
     }
 }
 

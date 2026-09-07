@@ -53,7 +53,9 @@ output: {level: 1}                                      # 保存量 + 原始量 
 ### 1.1 境界条件 — 現行 (2026-09-07)
 
 - 入口: `inlet_Pressure` (Pt/Tt/組成/k/ω)。node NS では `mesh.nodeInletCornerWall: 1` を**変換時**に付ける
-  (入口∩壁角の質量溜まりを根治)。入口境界層は `inletProfile` CSV。
+  (入口∩壁角の質量溜まりを根治)。入口境界層・全温分布・組成 (H2O) 分布は `ints: {inletProfile: 1}` +
+  `inlet_profile_<physID>.csv` (`tools/gen_inlet_profile.py` で生成・照合, 手順は
+  [`inlet-profile.md`](inlet-profile.md); 超音速入口 `inlet_uniformVelocity` は Tt を ρ/U/Ps に換算)。
 - 出口: 亜音速は `outlet_statPress` に **逆流用 Pt/Tt を必ず添える**。超音速出口は `outflow`、または
   `outlet_statPress` の Ps を実出口圧に合わせる (node は壁列が常に亜音速なので Ps ≪ 実圧だと SST が出口列から
   unstart [node-supersonic-exit-outflow])。3D の出口角線で unstart が続く場合は出口バッファ (slip 延長, physID 別)
