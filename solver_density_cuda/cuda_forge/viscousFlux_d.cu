@@ -80,10 +80,15 @@ __global__ void viscousFlux_d
  // 運動量行は不変。nullptr (mode≠3) で従来経路ビット不変。Taw_diag は defect の目標温度。
  flow_float* Taw_HTnx, flow_float* Taw_HTny, flow_float* Taw_HTnz, flow_float* Taw_diag
 ,
- flow_float* kturb, int isoStress   // sstIsotropicStress: -(2/3) rho k delta_ij (nullptr/0 で無効)
+ flow_float* kturb, int isoStress,   // sstIsotropicStress: -(2/3) rho k delta_ij (nullptr/0 で無効)
+ // sstEnergyIncludesK (plan turbulence-sst-energy-includes-k §4.2): E_t のエネルギー流束に k 拡散
+ //   (μ + σ_k μt)(∂k/∂n) S を足す。離散化は scalarTransport の k 拡散 (法線 over-relaxed 項のみ、相対ゼロ割ガード、
+ //   σ_k は sstF1 ブレンド) と同形。nullptr/0 で無効。
+ flow_float* dKdx_e, flow_float* dKdy_e, flow_float* dKdz_e, flow_float* sstF1_e, int sigmaBlend_e, int energyK
 )
 {
     geom_int ip = blockDim.x*blockIdx.x + threadIdx.x;
+    (void)dKdx_e; (void)dKdy_e; (void)dKdz_e;   // 勾配クロス項は k 式と同じく使わない (法線項のみ)
 
 
     //if (ip < nPlanes) { 
@@ -275,6 +280,22 @@ __global__ void viscousFlux_d
         flow_float res_roUz_temp = tau_z;
         flow_float res_roe_temp  = tau_x*Uxf +tau_y*Uyf +tau_z*Uzf;
         res_roe_temp += heatflux;
+
+        // sstEnergyIncludesK: k 拡散のエネルギー流束 (k 式の拡散と同形: 法線項のみ・相対ガード・σ_k ブレンド)
+        if (energyK != 0 && kturb != nullptr) {
+            const flow_float denom_k = dcc_x*sxx + dcc_y*syy + dcc_z*szz;
+            const flow_float floor_k = (flow_float)1.0e-6 * dcc * sss;
+            const flow_float safe_k  = (fabs(denom_k) < floor_k) ? ((denom_k >= (flow_float)0.0) ? floor_k : -floor_k) : denom_k;
+            const flow_float delta_k = dcc*sss*sss/safe_k;
+            const flow_float F1a = (sigmaBlend_e != 0 && sstF1_e != nullptr) ? sstF1_e[(ic0 < nCells) ? ic0 : ic1] : (flow_float)1.0;
+            const flow_float F1b = (sigmaBlend_e != 0 && sstF1_e != nullptr) ? sstF1_e[(ic1 < nCells) ? ic1 : ic0] : (flow_float)1.0;
+            const flow_float sig0 = F1a*(flow_float)0.85 + ((flow_float)1.0 - F1a)*(flow_float)1.0;
+            const flow_float sig1 = F1b*(flow_float)0.85 + ((flow_float)1.0 - F1b)*(flow_float)1.0;
+            const flow_float mu0 = vis_lam[ic0] + sig0*max(vis_turb[ic0], (flow_float)0.0);
+            const flow_float mu1 = vis_lam[ic1] + sig1*max(vis_turb[ic1], (flow_float)0.0);
+            const flow_float mu_k = f*mu0 + ((flow_float)1.0 - f)*mu1;
+            res_roe_temp += mu_k * ((kturb[ic1] - kturb[ic0])/dcc) * delta_k;
+        }
 
         // SST 断熱壁 defect-flux 閉包 (mode 3): 片端のみ壁 (|H⃗|>0) の W-I 辺で、エネルギー行の
         // (伝導+仕事) を F=(S_out·H⃗)(Taw−T_W) に置換 (±保存)。運動量 (AddTauWall 済) は不変。
@@ -897,7 +918,12 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
          && cfg.wallTreatmentSST == 1 && cfg.sstThermalWallFunction == 3)
             ? var.c_d["Taw_diag"] : nullptr,
         (cfg.LESorRANS == 2 && cfg.RANSmodel == 1 && var.c_d.count("k")) ? var.c_d["k"] : nullptr,
-        cfg.sstIsotropicStress
+        cfg.sstIsotropicStress,
+        // sstEnergyIncludesK: k 拡散のエネルギー流束 (SST のときのみ)
+        var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"],
+        var.c_d.count("sstF1") ? var.c_d["sstF1"] : nullptr,
+        cfg.sstSigmaBlend,
+        (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? 1 : 0
     ) ;
 
     gpuErrchk( cudaPeekAtLastError() );

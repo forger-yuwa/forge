@@ -192,6 +192,7 @@ public:
     int sstSigmaBlend       = 1; // 1 (既定 2026-09-08): σ_k/σ_ω を F1 ブレンド (0.85/1.0, 0.5/0.856; F1 は同 step の前処理 sstF1)。0: k-ω 側定数 (旧既定)
     int sstIsotropicStress  = 0; // 1: 運動量/エネルギーの応力に等方項 -(2/3)ρk δij を加える (dilatation 2 と整合)。0: 無し (現行)
     int sstEnergyKSource    = 0; // 1: エネルギー式に -(P_k - D_k) を源として加える (E に k を含まない定式化の整合)。0: 無し (現行)
+    int sstEnergyIncludesK  = 0; // 1: 全エネルギー E_t = E_m + ρk (SU2 形, plan turbulence-sst-energy-includes-k): 面エンタルピー +(5/3)k・圧力流束 p*=p+(2/3)ρk・k 拡散のエネルギー流束・k 更新後 roe-=Δ(ρk)。roe の格納は E_m のまま。1 のとき sstIsotropicStress/sstEnergyKSource は無効化
     int wallTreatmentSST = 1; // SST壁処理 0:low-Re壁解像(60ν/β₁y²) 1:automatic(y⁺非依存) 既定:1 (methods/turbulence §6.5)
     int sstThermalWallFunction = 0; // SST壁関数の熱的閉包 (§6.5(f))。0=OFF / 1=output-only (Tsb=Taw_diag, 場非介入, 生産baseline) / 2=experimental SU2 coupled (Taw primitive overlay, 未採用) / 3=experimental defect-flux (保存的壁層エネルギー流束 H_T(Taw−T_W), T[W]→Taw を残差の解として実現)。wallTreatmentSST==1時のみ有効
     int sstEnergyWallFunction = 0;  // SST壁関数のエネルギー流束置換: 等温壁のKader q_w (§6.5(g))。wallTreatmentSST==1×wall_isothermalのみ有効。既定0=OFF

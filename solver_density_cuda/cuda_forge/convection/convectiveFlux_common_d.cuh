@@ -277,6 +277,10 @@ struct CondArgs {
     flow_float* g_total;
     flow_float* T_cell;
     int         condModel;
+    // SST 全エネルギーに ρk を含める (sstEnergyIncludesK, plan turbulence-sst-energy-includes-k):
+    //   kturb = セル k (nullptr で無効)。energyK!=0 のとき面エンタルピーに +(5/3)k、圧力流束に p*=p+(2/3)ρk。
+    flow_float* kturb = nullptr;
+    int         energyK = 0;
 };
 // thermally-perfect 多成分の化学種データと face 整合再構成用配列 (SLAU の種別再構成で使用)。
 struct SpeciesArgs {

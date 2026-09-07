@@ -5,6 +5,7 @@
 #include "condensationProperties_d.cuh"  // n2_latent (二相エネルギー流束の潜熱補正)
 #include "convectiveFlux_common_d.cuh"
 
+#include <stdexcept>
 #include "convectiveFlux_slau_d.inc.cuh"
 
 #include "legacy/convectiveFlux_ausm_keep_d.inc.cuh"
@@ -174,7 +175,12 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         var.c_d["dUydx"], var.c_d["dUydy"], var.c_d["dUydz"],
         var.c_d["dUzdx"], var.c_d["dUzdy"], var.c_d["dUzdz"],
         var.c_d["dPdx"] , var.c_d["dPdy"] , var.c_d["dPdz"] };
-    CondArgs cnd { cfg.cp, cond_g, var.c_d["T"], cfg.condModel };
+    // SST 全エネルギー E_t = E_m + ρk (sstEnergyIncludesK): 面エンタルピー +(5/3)k, 圧力流束 p* = p + (2/3)ρk。
+    const bool sstEnergyK = (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1);
+    if (sstEnergyK && !(cfg.solver == "SLAU" || cfg.solver == "SLAU2")) {
+        throw std::runtime_error("turbulence.sstEnergyIncludesK=1 is implemented for solver SLAU/SLAU2 only");
+    }
+    CondArgs cnd { cfg.cp, cond_g, var.c_d["T"], cfg.condModel, sstEnergyK ? var.c_d["k"] : nullptr, sstEnergyK ? 1 : 0 };
 
     if (cfg.solver == "SLAU" || cfg.solver == "SLAU2") {
         int slauVariant = (cfg.solver == "SLAU2") ? 2 : 1;
@@ -314,7 +320,12 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             var.c_d["res_roUx"] ,
             var.c_d["res_roUy"] ,
             var.c_d["res_roUz"] ,
-            var.c_d["res_roe"]  
+            var.c_d["res_roe"]  ,
+            // sstEnergyIncludesK: 内部側 k と境界側 k (bvar kb / 入口 k / 無ければ内部値)
+            sstEnergyK ? var.c_d["k"] : nullptr,
+            // 境界側 k: 入口 (Dirichlet, bvar "k" = 指定値) のみ bvar を使う。壁/出口/slip の bvar kb は node では未充填になり得るため内部値 (Neumann)
+            (sstEnergyK && bc.bcondKind.rfind("inlet", 0) == 0 && bc.bvar_d.count("k")) ? bc.bvar_d["k"] : nullptr,
+            sstEnergyK ? 1 : 0
         ) ;
     }
 

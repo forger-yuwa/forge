@@ -1159,9 +1159,11 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
     // 直前の assembleResidual (ransSource) で確定済み、dt_local は setDT 済み。
     if (scalarResidualEnabled(s.cfg) && !freezeTurb) {
         s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
+            sstEnergyKCorrection_begin_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // sstEnergyIncludesK: roK 退避
             applySSTPointImplicit(s.cfg , s.cuda_cfg , s.msh , s.var , s.mat_ns);
             // node 周期 DOF 同一視 (§4.5): point-implicit SST 更新後に k/ω 状態を root→member ミラーし drift を防ぐ。
             periodicMirrorScalarState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            sstEnergyKCorrection_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, 0);   // E_t 保存: roe -= (roK − roK_prev) (増分更新)
         });
     }
 
@@ -1222,6 +1224,7 @@ void advanceExplicitRK(StepContext& s)
             // 残差 gather だけでは初期 desync (非周期 seed 摂動) が残り継ぎ目フラックス不整合を生むため。cell/非周期で no-op。
             periodicMirrorNSState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
             ransTimeIntegration_d_wrapper(iloop, s.cfg , s.cuda_cfg , s.msh , s.var);
+            sstEnergyKCorrection_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, 1);   // E_t 保存: roe -= (roK − roKN) (RK stage は N から組み直す)
             speciesTimeIntegration_d_wrapper(iloop, s.cfg , s.cuda_cfg , s.msh , s.var);
             speciesRenormalize_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // ρY_s>=0, ΣρY_s=ρ
             condensationTimeIntegration_d_wrapper(iloop, s.cfg , s.cuda_cfg , s.msh , s.var);  // 液相モーメント (Phase 1 ソース=0)
@@ -1338,6 +1341,7 @@ void advanceImplicitDualTime(StepContext& s)
         // 経路は無条件更新で、freeze 診断が定常専用だった — dual-time A/B は無効だった)。
         if (include_scalar && !freezeTurbEnabled()) {
             s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
+                // sstEnergyIncludesK: dual-time は addUnsteadyTimeTerm でエネルギー行の BDF に ρk を含めるので、ここでの roe 補正は不要
                 applySSTPointImplicit(s.cfg , s.cuda_cfg , s.msh , s.var , s.mat_ns);
                 periodicMirrorScalarState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var); // §4.5 k/ω 周期ミラー
             });

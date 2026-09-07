@@ -32,7 +32,8 @@ __global__ void axisymmetricSource_d
     // free-stream 保存の基準静圧 (space.pRef)。対流流束は (p_tilde − pRef)·S で組まれるので、
     // hoop ソースも同じゲージ (P − pRef)·A にしないと一様圧 p=pRef で source だけが残り、
     // 偽の半径力 pRef·A が立つ (case/43 自由流テストで 1.25e6 m/s² を実測)。既定 pRef=0 で従来どおり。
-    flow_float pRef
+    flow_float pRef,
+    flow_float* roK_e, int energyK   // sstEnergyIncludesK: hoop 圧力に p* = p + (2/3)ρk (nullptr/0 で無効)
 )
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
@@ -46,9 +47,10 @@ __global__ void axisymmetricSource_d
             - (flow_float)(2.0 / 3.0) * mu_total * axisym_divU[ic];
         // axisRFloor>0: A_planar = 床適用後の Σ_f S_f,y (全面床の CV で 0)。τθθ は床帯で
         // uy_over_r=0 のため発散項のみだが面積も ~0 で実質不活性。x は圧力の閉性欠損補正のみ。
-        res_roUy[ic] += (P[ic] - pRef - tau_theta_theta) * A_planar[ic];
+        const flow_float pk = (energyK != 0 && roK_e != nullptr) ? (flow_float)(2.0/3.0)*max(roK_e[ic], (flow_float)0.0) : (flow_float)0.0;
+        res_roUy[ic] += (P[ic] + pk - pRef - tau_theta_theta) * A_planar[ic];
         if (axisRFloor > (flow_float)0.0) {
-            res_roUx[ic] += (P[ic] - pRef) * A_closure_x[ic];
+            res_roUx[ic] += (P[ic] + pk - pRef) * A_closure_x[ic];
         }
     }
 }
@@ -117,7 +119,9 @@ void axisymmetricSource_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
         var.c_d["ccy"],
         (cfg.hoopAreaFromClosure == 1 && cfg.axisRFloor <= (flow_float)0.0) ? (flow_float)1.0e-30 : cfg.axisRFloor,
         var.c_d["res_roUx"], var.c_d["A_closure_x"],
-        cfg.pRef
+        cfg.pRef,
+        (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? var.c_d["roK"] : nullptr,
+        (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? 1 : 0
     );
 
     gpuErrchk( cudaPeekAtLastError() );
@@ -206,7 +210,8 @@ __global__ void axisymmetricSourceSU2_d
     flow_float* dTdy,
     flow_float* dA0dx, flow_float* dA0dy, flow_float* dA1dy, flow_float* dA2dx,
     int viscous,
-    flow_float* res_ro, flow_float* res_roUx, flow_float* res_roUy, flow_float* res_roe
+    flow_float* res_ro, flow_float* res_roUx, flow_float* res_roUy, flow_float* res_roe,
+    flow_float* roK_e, int energyK   // sstEnergyIncludesK: H → (E_t + p*)/ρ (nullptr/0 で無効)
 )
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
@@ -220,7 +225,9 @@ __global__ void axisymmetricSourceSU2_d
     const flow_float rho = ro[ic];
     const flow_float u = Ux[ic];
     const flow_float w = Uy[ic];   // 半径方向速度
-    const flow_float H = (roe[ic] + P[ic]) / max(rho, (flow_float)1.0e-30);
+    // sstEnergyIncludesK: H* = (E_m + ρk + p + (2/3)ρk)/ρ
+    const flow_float rk_e = (energyK != 0 && roK_e != nullptr) ? max(roK_e[ic], (flow_float)0.0) : (flow_float)0.0;
+    const flow_float H = (roe[ic] + P[ic] + (flow_float)(5.0/3.0)*rk_e) / max(rho, (flow_float)1.0e-30);
 
     // 非粘性 (SU2 residual を符号反転): S = -(1/y)·[ρv, ρuv, ρv², ρvH]
     flow_float s0 = -yinv * rho * w;
@@ -283,7 +290,9 @@ void axisymmetricSourceSU2_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , 
         var.c_d["dTdy"],
         var.c_d["dAux0dx"], var.c_d["dAux0dy"], var.c_d["dAux1dy"], var.c_d["dAux2dx"],
         viscous,
-        var.c_d["res_ro"], var.c_d["res_roUx"], var.c_d["res_roUy"], var.c_d["res_roe"]);
+        var.c_d["res_ro"], var.c_d["res_roUx"], var.c_d["res_roUy"], var.c_d["res_roe"],
+        (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? var.c_d["roK"] : nullptr,
+        (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? 1 : 0);
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
 }

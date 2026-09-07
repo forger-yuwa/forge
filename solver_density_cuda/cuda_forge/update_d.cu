@@ -397,7 +397,8 @@ __global__ void addUnsteadyTimeTerm_d
  flow_float* roK,   flow_float* roOmega,
  flow_float* roKN,  flow_float* roOmegaN,
  flow_float* roKNN, flow_float* roOmegaNN,
- flow_float* res_roK, flow_float* res_roOmega
+ flow_float* res_roK, flow_float* res_roOmega,
+ int energyK   // sstEnergyIncludesK: エネルギー行の BDF を E_t = roe + roK に (plan turbulence-sst-energy-includes-k §4.4a)
 )
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
@@ -408,6 +409,10 @@ __global__ void addUnsteadyTimeTerm_d
         res_roUy[ic] -= coef * (a*roUy[ic] - b*roUyN[ic] + c*roUyNN[ic]);
         res_roUz[ic] -= coef * (a*roUz[ic] - b*roUzN[ic] + c*roUzNN[ic]);
         res_roe[ic]  -= coef * (a*roe[ic]  - b*roeN[ic]  + c*roeNN[ic]);
+        if (energyK != 0 && include_scalar) {
+            // E_t の時間項: 平均流 E_m の項に加えて ρk の BDF を足す (k 式側の時間項とは別勘定。E_t 式の保存は subiter 収束で成立)
+            res_roe[ic] -= coef * (a*roK[ic] - b*roKN[ic] + c*roKNN[ic]);
+        }
         if (include_scalar) {
             res_roK[ic]     -= coef * (a*roK[ic]     - b*roKN[ic]     + c*roKNN[ic]);
             res_roOmega[ic] -= coef * (a*roOmega[ic] - b*roOmegaN[ic] + c*roOmegaNN[ic]);
@@ -431,7 +436,8 @@ void addUnsteadyTimeTerm_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , me
         var.c_d["roK"],   var.c_d["roOmega"],
         var.c_d["roKN"],  var.c_d["roOmegaN"],
         var.c_d["roKNN"], var.c_d["roOmegaNN"],
-        var.c_d["res_roK"], var.c_d["res_roOmega"]
+        var.c_d["res_roK"], var.c_d["res_roOmega"],
+        (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? 1 : 0
     );
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

@@ -179,7 +179,7 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
 ## turbulence.sst* — SST 整合オプション (2026-09-08, codex レビュー由来)
 
 ```yaml
-turbulence: {model: "sst", ..., sstNodeWallKPin: 1, sstOmegaProdFromPk: 1, sstSigmaBlend: 1, sstIsotropicStress: 0, sstEnergyKSource: 0}
+turbulence: {model: "sst", ..., sstNodeWallKPin: 1, sstOmegaProdFromPk: 1, sstSigmaBlend: 1, sstIsotropicStress: 0, sstEnergyKSource: 0, sstEnergyIncludesK: 0}
 ```
 
 | キー | 既定 | 意味 |
@@ -188,7 +188,8 @@ turbulence: {model: "sst", ..., sstNodeWallKPin: 1, sstOmegaProdFromPk: 1, sstSi
 | `sstOmegaProdFromPk` | **1** (2026-09-08 から) | 1: P_ω = α P_k/ν_t (k 側のリミッタ・dilatation・壁関数置換後の P_k と整合。NASA TMR は 2003 論文の αρS² を誤植とし、訂正式をこの形としている)。0: P_ω = α ρ S² (旧既定)。リミッタ・等方項・壁関数置換の非発動域では同一。ν_t は `vis_turb` (μt<1e-6μ では 0 側にフォールバック)。等方項 (dilatation 2) はリミッタ**前**に加算 (2026-09-08 変更, キー非依存) |
 | `sstSigmaBlend` | **1** (2026-09-08 から) | 1: 拡散係数 σ_k = F1·0.85 + (1−F1)·1.0, σ_ω = F1·0.5 + (1−F1)·0.856 (正式ブレンド)。F1 は同 step の前処理 `ransBlendF1` が `sstF1` に書く (拡散の前に k/ω 勾配→F1 を評価する順序に変更、ラグ無し)。0: k-ω 側定数 (旧既定)。壁近傍 (F1=1) では同一 |
 | `sstIsotropicStress` | 0 | 1: 運動量/エネルギーの応力に等方 Reynolds 応力 −(2/3)ρk δᵢⱼ を加える (内部面のみ; `dilatationCorrection: 2` の k 生産側 −(2/3)ρk∇·u と対をなす)。0: 無し (現行) |
-| `sstEnergyKSource` | 0 | 1: エネルギー式に −(P_k − D_k)·V を源として加える (E = e + u²/2 に k を含まない定式化で、k に溜まる分を平均流エネルギーから引く。SU2 型 E に k を含める方式の代替)。0: 無し (現行) |
+| `sstEnergyKSource` | 0 | 1: エネルギー式に −(P_k − D_k)·V を源として加える (E = e + u²/2 に k を含まない定式化で、k に溜まる分を平均流エネルギーから引く。SU2 型 E に k を含める方式の代替)。0: 無し (現行)。**`sstEnergyIncludesK: 1` のときは無効化される (後継)** |
+| `sstEnergyIncludesK` | 0 | 1: **全エネルギーに乱流運動エネルギーを含める** (E_t = ρ(e + u²/2 + k), SU2 形; plan [turbulence-sst-energy-includes-k](../plans/active/turbulence-sst-energy-includes-k.md))。実装は「分割保持」: 保存量 `roe` は平均流 E_m のまま (T/P/IC/restart は不変)、エネルギー残差を E_t の流束 (面エンタルピー +(5/3)k、圧力流束 p* = p + (2/3)ρk、k 拡散 (μ+σ_k μt)∇k·S、軸対称 hoop p*) で組み、k 更新後に `roe -= Δ(ρk)` とする。周期箱の一様減衰で ΣV(E_m+ρk) が 1e-7 で保存し、k の散逸がそのまま T に戻る。1 のとき `sstIsotropicStress`/`sstEnergyKSource` は強制 0。SLAU/SLAU2 のみ。後処理の全温は T + u²/2c_p **+ k/c_p** で評価する。0: 従来 (平均流 E_m のみ保存、k の散逸は熱に戻らない) |
 
 検証 (plan [turbulence-sst-consistency-options](../plans/active/turbulence-sst-consistency-options.md)): case/16 2D node SST では全オプションが壁圧比 ≤0.25 % の差、case/26 平板 Cf と case/16 3D の結果は同 plan 参照。
 `tools/test_scale_invariance.py` (相似メッシュで無次元残差の一致を見る) は単位付き閾値の検出用。

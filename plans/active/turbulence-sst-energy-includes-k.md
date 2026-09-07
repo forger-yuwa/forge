@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `turbulence / thermophysics / convection`
-- **status**: `draft` (2026-09-08 方針決定、実装未着手)
+- **status**: `in_progress` (2026-09-08 実装済・検証中、既定値未決)
 - **related_docs**:
   - `methods/turbulence/theory.md` §7 (圧縮性補正・等方項), `methods/turbulence/implementation.md` (整合オプション)
   - `methods/convection/implementation.md` (SLAU 圧力流束・全エンタルピー), `methods/diffusion.md`
@@ -62,6 +62,15 @@ E_m 形: ∂(ρk)/∂t + … = P_k − ε, ∂E_m/∂t + … = −P_k + ε (こ�
 block-DPLUR の対角ブロックは p = (γ−1)(E_t − ½ρ|u|² − ρk) の ∂p/∂E_t = γ−1 (不変)、∂p/∂(ρk) はラグ (k は分離解法)。
 p* の (2/3)ρk も源同様にラグ扱い (定常では問題なし。非定常 dual-time は subiter 内で更新されるので整合)。
 
+### 4.4a 実装形: 分割保持 (2026-09-08 決定, 実装済)
+
+保存量 `roe` は**平均流 E_m のまま格納**し、エネルギー残差だけを E_t の流束 (§4.2) で組む。流れの更新は E_t の更新と見なせる
+(残差が E_t のものだから) ので、k 更新後に `roe -= Δ(ρk)` とすると各 CV で E_t^{new} = E_t^{old} + Δt·R(E_t) が**厳密に**
+成立する (k 式の点陰化・床置きの如何によらず)。Δ(ρk) の基準は流れの更新形に合わせる: explicit RK は各 stage を N から組み直す
+ので Δ = ρk − ρk_N、point-implicit / dual-time subiter は roe += dq の増分更新なので Δ = ρk − (k 更新直前の ρk) (`begin` で退避)。
+利点: 熱力学 (`dependentVariables`)・全境界カーネル・IC 貼付・restart・後処理の T は**無改変** (旧 res からの restart も変換不要)。
+T は E_m から出るので k を除いた温度そのもの。§4.5 の「旧 res 変換」は不要になった。
+
 ### 4.5 後処理・IC・restart
 
 - 全温 T0 = T + |u|²/2c_p + k/c_p、全圧はそこから (T は k 込みの E_t から出た値なので、ツールは T0 に k/c_p を足すだけ)。
@@ -88,10 +97,11 @@ p* の (2/3)ρk も源同様にラグ扱い (定常では問題なし。非定�
 
 | # | 項目 | 内容 |
 | --- | --- | --- |
-| 1 | ステップ 1–3 (config・熱力学・p*) | 上記ファイル。`sstEnergyIncludesK: 0` でビット同一を先に確認 |
-| 2 | ステップ 4 (k 拡散のエネルギー流束) | `viscousFlux_d.cu` |
-| 3 | ステップ 5–6 (IC/restart/後処理) | ツール群 |
-| 4 | §6 回帰 → 既定 1、分離型 4/5 の撤去、docs | — |
+| 1 | ~~ステップ 1–3 (config・熱力学・p*)~~ | 済 (分割保持形, §4.4a)。キー 0 は前バイナリと 1e-6 で一致 (run_0309) |
+| 2 | ~~ステップ 4 (k 拡散のエネルギー流束)~~ | 済 (`viscousFlux_d.cu`, 内部面) |
+| 3 | 後処理の全温 T0 + k/c_p (centerline / wall_pp0 / metrics) | 未 (キー 1 を常用にする時点で) |
+| 4 | 既定値の判断 (ユーザ懸念: k の跳ねが T に伝播する脆弱性) と分離型 4/5 の撤去 | 未 (§6.1 の結果と対話で決める) |
+| 5 | 3D (1.04M, `mesh/nozzle_user_3d_finexy_z25.msh`) で k 込み全温が Tt を超えないこと | 未 (ローカル ~55 分) |
 
 ## 6. 検証
 
@@ -102,6 +112,17 @@ p* の (2/3)ρk も源同様にラグ扱い (定常では問題なし。非定�
   境界層内で Tt に対し ±1 K)、case/23 軸対称 (hoop 整合: 一様 k の自由流で残差 0)、case/16 3D 1.04M (`mesh/nozzle_user_3d_finexy_z25.msh`) で
   k 込み全温が Tt を超えないこと。すべて `check_convergence` / `check_quasisteady` の VERDICT を貼る。
 - **判定基準**: 上の許容内で、断熱ケースの max(T0 + k/c_p) − Tt ≤ +1 K (Pr 効果分は別途 2D 参照値と比較)。
+
+### 6.1 結果 (2026-09-08, ローカル RTX 3060)
+
+| 試験 | run | 結果 |
+|---|---|---|
+| キー 0 のビット同等 | case/16 2D node `run_0309_ek_node_off` vs `run_0305_sstdef_new` (前バイナリ) | P/T/k/ω ≤ 7e-6, 壁 p/p0 同一 |
+| 相似試験 | `_scaletest_tpl2` (キー 1) α=1e-3 | PASS (ω 9.2e-4, 他 ≤1e-5)。※最初の FAIL はテンプレートに IC h5 を入れ忘れた不備 (既定 IC のコールドスタート) で、キー 0 でも同じ挙動 |
+| 一様乱流減衰 (周期箱 node, RK4 explicit, u=0, k=0.1, ω=1, 400 step) | case/09 `run_0046_sst_hdt_uniform_ek1` / `run_0047_..._ek0` / `run_0048_sst_hdt_sine_ek1` | **ek1: ΣV(E_m+ρk) の変化 ≤1.3e-7、max|u| 1.9e-7 (一様 p* で偽の力なし)、k 0.100→0.0847 の減少分が c_v ΔT に 5 桁一致 (Δe=+0.01534 = −Δk)**。ek0: E_t が −0.81 % 減 (k の散逸が消える)、T 不変。sine (k=0.1(1+0.5 sin x)): p* 勾配で u≈0.02 の流れが立つが ΣV E_t 変化 ≤1.1e-7、質量 4e-8 |
+| 一様乱流減衰 **dual-time** (timeIntegration 11 + dualTime 1) | case/09 `run_0049_sst_hdt_uniform_ek1_dual` / `run_0050_sst_hdt_sine_ek1_dual` | エネルギー行の BDF に ρk を含める修正 (`addUnsteadyTimeTerm_d`) 後: E_t 変化 +3.5e-7 / −3.1e-6 (subiter 収束で決まる)、c_p ΔT = +0.02148 (explicit と同一)。**修正前は E_t が −0.81 % で T 不変** (subiter 内の roe 補正は dq→0 で消えるため無効だった) |
+| case/16 2D node/cell (陰解法 point-implicit, 増分形補正) | `run_0310_ek_node_on` / `run_0311_ek_cell_on` (キー 0 = run_0305 / run_0308 との差) | 壁 p/p0 @16.4/45.6/85: node 0.3658/0.2575/0.1876 → 0.3659/0.2577/0.1877, cell 0.3644/0.2579/0.1872 → 0.3645/0.2581/0.1874 (**+0.03〜+0.08 %**)。max(T0−Tt) 1.96→1.56 K (node) / 2.00→1.58 K (cell)、境界層内 max(T0+k/c_p−Tt) +1.38 K。k/μt ≤ 数 %。`check_convergence`: node rms_ro 3.0 桁↓・roK 3.6 桁↓・roe 1.9 桁↓ still converging、cell plateau (既知)。切替直後 rms_roK 7e-3 / rms_roe 1e-1 のスパイク→6000 step で床 (rms_roe の床は 1.1e-3 で off の 3e-4 より高い = E_t 残差に k 項が入るため) |
+| case/26 平板 node | `run_0027_ek_on` (vs `run_0026_sstdef_new`) | Cf/Schlichting 0.8920/0.9307/0.9562 → 0.8918/0.9305/0.9559 (**−0.03 %**), P ≤2e-4, k 2e-3, μt 9e-3。全列 falling |
 
 ## 7. 影響範囲
 
@@ -120,3 +141,4 @@ p* の (2/3)ρk も源同様にラグ扱い (定常では問題なし。非定�
 ## 9. 変更ログ
 
 - `2026-09-08` — 初稿。ユーザ決定「R3 直行」(対話 2026-09-08): 分離型 `sstEnergyKSource`/`sstIsotropicStress` (p* 一括化案を含む) は本計画で置換。
+- `2026-09-08` — 分割保持形で実装 (§4.4a; `sstEnergyIncludesK`, 既定 0)。周期箱減衰で E_t 厳密保存 (explicit / dual-time)、相似試験 PASS、2D node/cell/平板の回帰 (§6.1)。経路別の補正: explicit RK = roe −= (ρk − ρk_N)、steady point-implicit = 増分形、dual-time = エネルギー行 BDF に ρk を含める。
