@@ -14,6 +14,7 @@
 | --- | --- |
 | [`calculation-workflow.md`](calculation-workflow.md) | 計算ケース準備・メッシュ生成/変換・`forge` 実行の標準手順 |
 | [`divergence-and-startup.md`](divergence-and-startup.md) | 発散 (NaN/残差爆発) の主因と段階起動の手順。**新規計算・発散時に必ず参照** |
+| [`recommended-settings.md`](recommended-settings.md) | **推奨解析設定の正本**: 解析種別ごとの現行レシピ (日付付き) と旧設定 (superseded) 一覧。config を組む前に必ず参照 |
 | [`solver-settings.md`](solver-settings.md) | `convMethod` / `limiter` などの数値設定リファレンス (運用上の設定の意味) |
 | [`su2-cross-check.md`](su2-cross-check.md) | 同一メッシュ・同一 BC で SU2 と比較し forge 固有の問題を切り分ける手順 |
 

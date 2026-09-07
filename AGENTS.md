@@ -12,6 +12,7 @@
 | [`procedures/`](procedures/README.md) | forge を使う/開発するための**運用・開発ハンドブック**。以下が主要文書 |
 | [`procedures/calculation-workflow.md`](procedures/calculation-workflow.md) | 計算ケース準備・メッシュ生成/変換・`forge` 実行の標準手順 |
 | [`procedures/divergence-and-startup.md`](procedures/divergence-and-startup.md) | 発散の主因と安定起動の手順 (新規計算 / 発散時に必ず参照) |
+| [`procedures/recommended-settings.md`](procedures/recommended-settings.md) | **推奨解析設定の正本** (解析種別ごとの現行レシピ・日付付き・旧設定一覧)。config を組む/点検するときは skill `forge-config` の手順で参照 |
 | [`procedures/solver-settings.md`](procedures/solver-settings.md) | `convMethod` / `limiter` などの数値設定リファレンス |
 | [`procedures/su2-cross-check.md`](procedures/su2-cross-check.md) | 同一メッシュ・同一 BC で SU2 と比較し forge 固有の問題を切り分ける手順 |
 | [`procedures/development-environment.md`](procedures/development-environment.md) | 開発環境とビルド (Docker / WSL native) の方針 |
@@ -32,7 +33,7 @@
 
 計算の実行方法、ケース準備、メッシュ生成、メッシュ変換、`forge` の起動、Docker 経由の Gmsh/ParaView 利用について回答するときは、まず `procedures/calculation-workflow.md` を参照し、その手順に合わせて案内すること。計算手順の本文はこのファイルに重複記載しない。
 
-`solverConfig.yaml` の `convMethod`・`limiter` などの数値設定を変更・確認するときは、必ず `procedures/solver-settings.md` を参照すること。設定値の意味を記憶や推測で判断しないこと。
+`solverConfig.yaml` の `convMethod`・`limiter` などの数値設定を変更・確認するときは、必ず `procedures/solver-settings.md` を参照すること。設定値の意味を記憶や推測で判断しないこと。**新規 config を組む・既存 config を点検するときは [`procedures/recommended-settings.md`](procedures/recommended-settings.md) (現行レシピの正本、日付付き) を先に読み、§9 の旧設定・廃止キーを混入させない** (Claude は skill `forge-config`)。
 
 **`mesh.bndFirstOrder` は使用禁止**。新規 config に書かないこと。既存 run から複製するときも必ず落とすこと。このフラグは (1) 対流再構成だけでなく `viscousFlux` が読む速度勾配も 0 にするため**粘性応力を破壊**し、(2) `bnode_flag` が「いずれかの bcond の CV」なので疑似 2D (1 セル厚) メッシュでは spanwise 境界が全ノードを覆い**全域に効いてしまう**。したがって安定化しても交絡した副作用であり、切り分けにも対策にも使えない。詳細と削除計画は [`procedures/solver-settings.md`](procedures/solver-settings.md) の該当節と [`plans/active/architecture-bndfirstorder-removal.md`](plans/active/architecture-bndfirstorder-removal.md) を参照。
 
