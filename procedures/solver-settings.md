@@ -210,7 +210,10 @@ output: {level: 1, extraFields: [ducros, volume]}   # 省略時 level 1
   (`volume`: case/09 の保存則解析、`cfl`: `sweep_cfl_implicit.py`、`ducros`: `analyze_ducros.py`) はここで足すか level 2 にする。
 - **`h0`** = 全エンタルピー (単位質量) = e + p/ρ + u²/2 で、`sstEnergyIncludesK: 1` のときだけ + k を含む (属性 `h0_includes_k`)。
   **全温・全圧の後処理は `VALUE/h0` から作る** (CPG: T₀ = h₀/c_p, semi-perfect: h(T₀)=h₀ の逆算, P₀ は s°(T₀)−s°(T)=R ln(P₀/P))。
-  スクリプトで `T + u²/2c_p` を自前で組まない (k を含めるかどうかの判断がソルバ側に閉じる)。
+  スクリプトで `T + u²/2c_p` を自前で組まない (k を含めるかどうかの判断がソルバ側に閉じる)。逆算は
+  **`solver_density_cuda/tools/total_quantities.py RUN_DIR [--res res_N.h5] [--write] [--Tt ..]`** (CPG 閉形式 / TP は NASA-9 Newton、
+  P₀ は s° 差、凝縮は凍結組成の気相のみ・警告) を使う。`--write` で `VALUE/T0`, `VALUE/P0` を res に追記 (属性 includes_k / method)。
+  Python からは `total_state(run_dir, res_path)`。
 - 原則: **後処理で導出できる量はソルバから出さない**。勾配・リミッタ・診断は必要な run だけ level 2 で取る。
 
 ## mesh.wallDistExtraPhysIDs — 壁距離に含める非 wall 境界 (変換時)

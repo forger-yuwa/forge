@@ -5,6 +5,17 @@ import sys, glob, os, re
 import numpy as np
 import h5py
 
+def _cell_volume(f, path):
+    """セル体積: res には既定 (output.level 1) で volume が無いので、mesh h5 (solverConfig の meshFileName) の CELLS/volume を読む。"""
+    import os, yaml
+    if "VALUE/volume" in f:
+        return f["VALUE/volume"][:].astype(np.float64)
+    rd = os.path.dirname(os.path.abspath(path))
+    mesh = yaml.safe_load(open(os.path.join(rd, "solverConfig.yaml")))["mesh"]["meshFileName"]
+    with h5py.File(os.path.join(rd, mesh), "r") as m:
+        return m["CELLS/volume"][:].astype(np.float64)
+
+
 gamma = 1.4
 cp = 0.4
 cv = cp / gamma   # calorically perfect
@@ -16,7 +27,7 @@ def step_of(p):
 
 def totals(path):
     with h5py.File(path, "r") as f:
-        V  = f["VALUE/volume"][:].astype(np.float64)
+        V = _cell_volume(f, path)
         ro = f["VALUE/ro"][:].astype(np.float64)
         ux = f["VALUE/Ux"][:].astype(np.float64)
         uy = f["VALUE/Uy"][:].astype(np.float64)

@@ -3,6 +3,7 @@
 
 Both runs restart from run_0046 developed field; identical binary; only ducrosLimiter (1 vs 0).
 Outputs: compare_ducros_centerline.png, ducros_summary.txt
+Note: VALUE/ducros は output.level 2 か `output: {extraFields: [ducros]}` の run にしか無い (既定 level 1 では出ない, 2026-09-08)。
 """
 import h5py, numpy as np, os
 import matplotlib; matplotlib.use("Agg")

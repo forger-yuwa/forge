@@ -50,8 +50,8 @@ XMF にも同じ名前を書く。D2H コピーも絞るので出力時間も減
 | # | 項目 | 内容 |
 | --- | --- | --- |
 | 1 | ~~検証 (§6)~~ | 済: case/16 `run_0313`–`0316` (level 1: 23 データセット 5.2 MB / level 2: 71, 13.2 MB / level 0+extra: 11 / energyK で `h0_includes_k`=1)。`check_quasisteady` 動作。3D 2.08M 換算 level 1 ≈290 MB (level 2 681 MB; メッシュ部 98 MB) |
-| 2 | `tools/total_quantities.py` (h0 → T0/P0: CPG 閉形式 / semi-perfect Newton / 凍結凝縮) | 後続 |
-| 3 | case/09 の保存則スクリプト (volume を res から読む) を mesh h5 の `CELLS/volume` 読みに直すか、case 側 config に `extraFields: [volume]` | 後続 |
+| 2 | ~~`tools/total_quantities.py` (h0 → T0/P0)~~ | 済 (2026-09-08): CPG は閉形式 (平板 run_0028 で T+u²/2c_p と 7e-5 K 一致)、TP は species_db の NASA-9 (thermoHrefTemp datum) を Newton で逆算・P0 は s° 差 (case/16 run_0313/0316 で h0_includes_k 0/1 とも動作)。凝縮は凍結組成の気相逆算のみ (潜熱項未対応・警告) |
+| 3 | ~~case/09 の保存則スクリプトの volume 読み替え~~ | 済: 4 本に `_cell_volume()` (res に無ければ solverConfig の meshFileName の `CELLS/volume`)。case/36 `analyze_ducros.py` は既存 run 専用で、新 run は `extraFields: [ducros]` が要る旨を注記。case/45 `sweep_cfl_implicit.py` の `cfl` は h5 フィールドでなく設定値 (対応不要) |
 
 ## 6. 検証
 
@@ -75,3 +75,4 @@ XMF にも同じ名前を書く。D2H コピーも絞るので出力時間も減
 
 - `2026-09-08` — 初稿・実装 (ユーザ要請「後処理で出せるものはソルバから出さない」「全温・全圧の k 込みルールを浸透させる」)。
 - `2026-09-08` — 検証 (case/16 run_0313–0316) 完了、accepted へ。残: `tools/total_quantities.py`、case/09 保存則スクリプトの volume 読み替え。
+- `2026-09-08` — `tools/total_quantities.py` 追加、case/09 保存則スクリプトの volume 読み替え、docs 反映。残作業なし。
