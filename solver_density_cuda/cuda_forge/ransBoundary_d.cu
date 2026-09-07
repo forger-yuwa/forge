@@ -29,7 +29,9 @@ __global__ void rans_wall_scalar_boundary_d(
     int wallTreatment,
     flow_float* utau,
     flow_float* roOmega,
-    int isNode)
+    int isNode,
+    flow_float* roK,
+    int nodeWallKPin)
 {
     const geom_int ib = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -70,6 +72,12 @@ __global__ void rans_wall_scalar_boundary_d(
             if (isNode != 0) {
                 omega[ic]   = omegab[ib];
                 roOmega[ic] = rho_c * omegab[ib];
+                // k=0 Dirichlet も壁ノードに直接ピンする (旧: ghost 反射のみで、node は境界半割面の拡散を
+                // skip するため壁 k が実際には拘束されていなかった — codex レビュー 2026-09-08)。
+                if (nodeWallKPin != 0) {
+                    k[ic]   = static_cast<flow_float>(0.0);
+                    roK[ic] = static_cast<flow_float>(0.0);
+                }
             }
         }
     }
@@ -237,7 +245,9 @@ void ransBoundary_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , bcond& bc
             cfg.wallTreatmentSST,
             bc.bvar_d["utau"],
             var.c_d["roOmega"],
-            (cfg.discretization == "node") ? 1 : 0);
+            (cfg.discretization == "node") ? 1 : 0,
+            var.c_d["roK"],
+            cfg.sstNodeWallKPin);
         return;
     }
 

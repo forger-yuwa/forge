@@ -25,9 +25,11 @@ struct ScalarTransportDesc {
     flow_float* src_jac;        // 源項消散ヤコビアン対角 (∂D/∂(ρφ)≥0)。陽解法 RK の point-implicit 減衰に使用
     flow_float* transport_diag; // 輸送(移流+拡散)ヤコビアン対角 [m³/s]。advection/diffusion kernel で集計
     flow_float floor;           // realizability 下限。陰解法 point-implicit と整合
-    flow_float sigma;           // 拡散係数スケール (有効粘性 = vis_lam + sigma·vis_turb)
+    flow_float sigma;           // 拡散係数スケール (有効粘性 = vis_lam + sigma·vis_turb)。F1 ブレンド時は k-ω 側 (F1=1) の値
     int diffusion;              // 1: 汎用拡散 (μ ベース, RANS k/ω) を使う / 0: 移流のみ
                                 //   (化学種は Fick 拡散を speciesTransport 側で別途扱うため 0)
+    flow_float sigma2 = static_cast<flow_float>(0.0);   // F1 ブレンド時の k-ε 側 (F1=0) σ (sstSigmaBlend=1 のときのみ使用)
+    flow_float* F1 = nullptr;                             // ブレンド関数 (nullptr なら sigma 定数)
 };
 
 // 1 変数ぶんの移流 + (任意) 拡散残差を組み立てる。

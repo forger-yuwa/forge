@@ -130,9 +130,13 @@ void calcWallDistance_kdtree(solverConfig &cfg, mesh &msh, variables &var) {
             if (nodeMode) {
                 for (auto &ic : bc.iCells) {
                     if (ic < 0 || ic >= static_cast<geom_int>(msh.cells.size())) continue;
-                    geom_float x = msh.cells[ic].centCoords[0];
-                    geom_float y = msh.cells[ic].centCoords[1];
-                    geom_float z = msh.cells[ic].centCoords[2];
+                    // node の値位置はノード座標 (solver 読込時に centCoords ← nodes[ic].coords)。変換時の centCoords は
+                    // axisCentroidShift で双対 CV 重心になり得るので、ノード座標が使えるときはそれを使う (codex 2026-09-08:
+                    // 相似試験で壁 ω が 2〜3 % ずれた原因 = 壁距離の評価点が重心だった)。
+                    const bool useNode = (msh.nodes.size() == msh.cells.size());
+                    geom_float x = useNode ? msh.nodes[ic].coords[0] : msh.cells[ic].centCoords[0];
+                    geom_float y = useNode ? msh.nodes[ic].coords[1] : msh.cells[ic].centCoords[1];
+                    geom_float z = useNode ? msh.nodes[ic].coords[2] : msh.cells[ic].centCoords[2];
                     wall_points.emplace_back(x, y, z);
                 }
             } else {
@@ -149,10 +153,12 @@ void calcWallDistance_kdtree(solverConfig &cfg, mesh &msh, variables &var) {
 
     if (wall_count > 0) {
         cell_points.reserve(msh.cells.size());
-        for (auto &icell : msh.cells) {
-            geom_float x = icell.centCoords[0];
-            geom_float y = icell.centCoords[1];
-            geom_float z = icell.centCoords[2];
+        const bool useNodeEval = nodeMode && (msh.nodes.size() == msh.cells.size());
+        for (size_t ic = 0; ic < msh.cells.size(); ++ic) {
+            const auto &icell = msh.cells[ic];
+            geom_float x = useNodeEval ? msh.nodes[ic].coords[0] : icell.centCoords[0];
+            geom_float y = useNodeEval ? msh.nodes[ic].coords[1] : icell.centCoords[1];
+            geom_float z = useNodeEval ? msh.nodes[ic].coords[2] : icell.centCoords[2];
             cell_points.emplace_back(x, y, z);
         }
 

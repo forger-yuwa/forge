@@ -114,6 +114,8 @@ public:
         // 診断 (k 収支調査用, node/cell 近壁 SST 比較): ransSource が確定した最終 k 生産項 P_k
         // (wall-function 置換後)。res_roK へ加える値そのもの。non-RANS では未使用。
         "Pk_diag",
+        // SST F1 ブレンド関数 (ransSource が毎 step 書く; sstSigmaBlend=1 のとき次 step の k/ω 拡散 σ に使う, 初期 1)
+        "sstF1",
         // 診断 (2026-08-11): Crocco 型 断熱回復温度モデル T_aw = T_rep + r·U_t²/(2cp), r=Pr_lam^{1/3}
         // (SU2 壁関数の熱的閉包と同式)。壁関数対象セル (cell=第一セル / node=壁ノード) に格納、
         // 非対象は -1。現状は**出力のみ** (壁状態へは未適用 — 適用は保存整合の plan 化後)。
