@@ -109,7 +109,7 @@ T は E_m から出るので k を除いた温度そのもの。§4.5 の「旧 
 | 2 | ~~ステップ 4 (k 拡散のエネルギー流束)~~ | 済 (`viscousFlux_d.cu`, 内部面) |
 | 3 | 後処理の全温 T0 + k/c_p (centerline / wall_pp0 / metrics) にオプションを付ける | 未 (キー 1 を使う検証を始める時点で) |
 | 4 | ~~既定値の判断~~ | 決着 (§4.0: 既定 0、opt-in)。分離型 4/5 は撤去せず現状維持 |
-| 5 | 3D (1.04M, `mesh/nozzle_user_3d_finexy_z25.msh`, `run_0312_ek_node3d_finexy_z25`) で k 込み全温が Tt を超えないこと | 実行中 (2026-09-08, 結果は case/16 README に追記) |
+| 5 | ~~3D (1.04M, `run_0312_ek_node3d_finexy_z25`) で k 込み全温が Tt を超えないこと~~ | 済: T>Tt ノード 0、max(T0+k/c_p−Tt) +2.07 K (2D と同じ Pr 効果)、出口角壁 −3.9 K、全列 falling (case/16 README) |
 
 ## 6. 検証
 
