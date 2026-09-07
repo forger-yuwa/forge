@@ -522,13 +522,13 @@ strain-based 生産の stagnation/加速アノマリー (theory.md §7.5) を抑
 ## 整合オプション (2026-09-08, codex レビュー由来)
 
 codex レビュー (plans/accepted/turbulence-sst-node-corner-heating.md §3.5) が指摘した標準 SST からのずれを、
-`turbulence.sst*` キー (procedures/solver-settings.md) で選択できるようにした。既定は現行挙動 (例外: node 壁 k ピン)。
+`turbulence.sst*` キー (procedures/solver-settings.md) で選択できるようにした。既定は 2026-09-08 から壁 k ピン・P_ω 整合・σ ブレンドが ON (plan turbulence-sst-consistency-options §2.1)、等方応力・エネルギー k 源は OFF。
 
 | キー | 内容 | 実装 |
 |---|---|---|
 | `sstNodeWallKPin` (既定 1) | node 低 Re 壁ノードの k/roK を 0 にピンし残差を 0 化。旧は ghost 反射のみで、node は境界半割面の拡散を skip するため壁 k=0 が効いていなかった | `ransBoundary_d.cu` 低 Re node 分岐, `ransSource_d.cu` 末尾 |
-| `sstOmegaProdFromPk` | $P_\omega = \alpha P_k/\nu_t$ (リミッタ後の $P_k$ と整合)。0 は $P_\omega=\alpha\rho S^2$ (Menter 2003 形) | `ransSource_d.cu` |
-| `sstSigmaBlend` | $\sigma_k = F_1\,0.85 + (1-F_1)\,1.0$, $\sigma_\omega = F_1\,0.5 + (1-F_1)\,0.856$。$F_1$ は前 step の値 (`sstF1`) | `scalarTransport_d.cu` 拡散カーネル, `ransTransport_d.cu` |
+| `sstOmegaProdFromPk` (既定 1, 2026-09-08〜) | $P_\omega = \alpha P_k/\nu_t$ (リミッタ後の $P_k$ と整合)。0 は $P_\omega=\alpha\rho S^2$ (Menter 2003 形)。等方項 $-\tfrac23\rho k\,\nabla\!\cdot\!\mathbf u$ (dilatation 2) はリミッタ $\min(\cdot,10\beta^*\rho k\omega)$ の前に加える (キー非依存) | `ransSource_d.cu` |
+| `sstSigmaBlend` (既定 1, 2026-09-08〜) | $\sigma_k = F_1\,0.85 + (1-F_1)\,1.0$, $\sigma_\omega = F_1\,0.5 + (1-F_1)\,0.856$。$F_1$ は同 step の前処理 `ransBlendF1_d_wrapper` (`ransGradient` の直後・`ransTransport` の直前) が `sstF1` に書く。残差評価順は gradient → F1 → transport(拡散) → source | `ransSource_d.cu` (`rans_sst_blend_f1_d`), `scalarTransport_d.cu` 拡散カーネル, `main.cpp` |
 | `sstIsotropicStress` | 応力に $-\tfrac23\rho k\,\delta_{ij}$ (内部面のみ) | `viscousFlux_d.cu` 内部面カーネル |
 | `sstEnergyKSource` | エネルギー式に $-(P_k - D_k)V$ | `ransSource_d.cu` |
 

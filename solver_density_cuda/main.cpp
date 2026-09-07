@@ -990,6 +990,11 @@ void assembleResidual(StepContext& s, int stage_index)
         convectiveFlux_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, s.mat_ns);
     });
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
+        // k/ω 勾配と F1 を拡散の**前**に評価する (2026-09-08, plan turbulence-sst-consistency-options §2.1):
+        // 旧順序 (transport → gradient → source) では拡散の非直交補正と σ ブレンドの F1 が前回評価の値
+        // (Picard ラグ) だった。ransSource の F1 は同式・同入力なので sstF1 と一致する。
+        ransGradient_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        ransBlendF1_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         ransTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);
     });
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
@@ -1001,8 +1006,7 @@ void assembleResidual(StepContext& s, int stage_index)
         condensationSource_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 核生成+成長ソース (Phase 2)
     });
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
-        ransGradient_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
-        ransSource_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        ransSource_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // k/ω 勾配は上 (ransTransport の前) で評価済み
     });
     s.profiler.measureCuda(ProfileSection::AxisymmetricSource, [&]() {
         axisymmetricSource_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);      // method 0 (r 重み): hoop 源

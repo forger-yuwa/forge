@@ -188,8 +188,8 @@ public:
     int katoLaunder = 0; // SST生産項 Kato-Launder 補正 0:標準 mu_t S^2 1:mu_t S Omega 既定:0 (methods/turbulence §7.5)
     // 2026-09-08 codex レビュー由来の SST 整合オプション (plans/accepted/turbulence-sst-node-corner-heating.md §3.5)。既定は現行挙動。
     int sstNodeWallKPin     = 1; // node 低 Re 壁: 壁ノードの k/roK を 0 にピン (BC の k=0 を実際に効かせる)。0=旧 (ghost 反射のみ)
-    int sstOmegaProdFromPk  = 0; // 1: P_ω = α P_k/ν_t (リミッタ後の P_k と整合; NASA TMR は 2003 論文の αρS² を誤植とし訂正式をこれとする)。0: P_ω = α ρ S² (現行)
-    int sstSigmaBlend       = 0; // 1: σ_k/σ_ω を F1 ブレンド (0.85/1.0, 0.5/0.856)。0: k-ω 側定数 (現行)
+    int sstOmegaProdFromPk  = 1; // 1 (既定 2026-09-08): P_ω = α P_k/ν_t (リミッタ後の P_k と整合; NASA TMR は 2003 論文の αρS² を誤植とし訂正式をこれとする)。0: P_ω = α ρ S² (旧既定)
+    int sstSigmaBlend       = 1; // 1 (既定 2026-09-08): σ_k/σ_ω を F1 ブレンド (0.85/1.0, 0.5/0.856; F1 は同 step の前処理 sstF1)。0: k-ω 側定数 (旧既定)
     int sstIsotropicStress  = 0; // 1: 運動量/エネルギーの応力に等方項 -(2/3)ρk δij を加える (dilatation 2 と整合)。0: 無し (現行)
     int sstEnergyKSource    = 0; // 1: エネルギー式に -(P_k - D_k) を源として加える (E に k を含まない定式化の整合)。0: 無し (現行)
     int wallTreatmentSST = 1; // SST壁処理 0:low-Re壁解像(60ν/β₁y²) 1:automatic(y⁺非依存) 既定:1 (methods/turbulence §6.5)

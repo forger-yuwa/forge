@@ -466,8 +466,8 @@ void solverConfig::read(std::string fname)
 
         this->katoLaunder = getOptionalValidatedValue<int>(turb, "katoLaunder", 0, "turbulence");
         this->sstNodeWallKPin    = getOptionalValidatedValue<int>(turb, "sstNodeWallKPin", 1, "turbulence");
-        this->sstOmegaProdFromPk = getOptionalValidatedValue<int>(turb, "sstOmegaProdFromPk", 0, "turbulence");
-        this->sstSigmaBlend      = getOptionalValidatedValue<int>(turb, "sstSigmaBlend", 0, "turbulence");
+        this->sstOmegaProdFromPk = getOptionalValidatedValue<int>(turb, "sstOmegaProdFromPk", 1, "turbulence");
+        this->sstSigmaBlend      = getOptionalValidatedValue<int>(turb, "sstSigmaBlend", 1, "turbulence");
         this->sstIsotropicStress = getOptionalValidatedValue<int>(turb, "sstIsotropicStress", 0, "turbulence");
         this->sstEnergyKSource   = getOptionalValidatedValue<int>(turb, "sstEnergyKSource", 0, "turbulence");
         for (auto* kv : {&this->sstNodeWallKPin, &this->sstOmegaProdFromPk, &this->sstSigmaBlend, &this->sstIsotropicStress, &this->sstEnergyKSource}) {

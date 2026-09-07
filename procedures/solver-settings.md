@@ -179,14 +179,14 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
 ## turbulence.sst* — SST 整合オプション (2026-09-08, codex レビュー由来)
 
 ```yaml
-turbulence: {model: "sst", ..., sstNodeWallKPin: 1, sstOmegaProdFromPk: 0, sstSigmaBlend: 0, sstIsotropicStress: 0, sstEnergyKSource: 0}
+turbulence: {model: "sst", ..., sstNodeWallKPin: 1, sstOmegaProdFromPk: 1, sstSigmaBlend: 1, sstIsotropicStress: 0, sstEnergyKSource: 0}
 ```
 
 | キー | 既定 | 意味 |
 |---|---|---|
 | `sstNodeWallKPin` | 1 | node 低 Re 壁 (`wallTreatmentSST: 0`) で壁ノードの k/roK を 0 にピンし、壁ノードの k/ω 残差を 0 化する。旧 (0) は ghost 反射のみで、node は境界半割面の拡散を skip するため壁 k=0 が実際には効いていなかった。cell には無関係 |
-| `sstOmegaProdFromPk` | 0 | 1: P_ω = α P_k/ν_t (k 側のリミッタ・dilatation・壁関数置換後の P_k と整合。NASA TMR は 2003 論文の αρS² を誤植とし、訂正式をこの形としている)。0: P_ω = α ρ S² (現行)。リミッタ・等方項・壁関数置換の非発動域では同一。ν_t は `vis_turb` (μt<1e-6μ では 0 側にフォールバック) |
-| `sstSigmaBlend` | 0 | 1: 拡散係数 σ_k = F1·0.85 + (1−F1)·1.0, σ_ω = F1·0.5 + (1−F1)·0.856 (正式ブレンド, F1 は前 step の値 `sstF1`)。0: k-ω 側定数 (現行)。壁近傍 (F1=1) では同一 |
+| `sstOmegaProdFromPk` | **1** (2026-09-08 から) | 1: P_ω = α P_k/ν_t (k 側のリミッタ・dilatation・壁関数置換後の P_k と整合。NASA TMR は 2003 論文の αρS² を誤植とし、訂正式をこの形としている)。0: P_ω = α ρ S² (旧既定)。リミッタ・等方項・壁関数置換の非発動域では同一。ν_t は `vis_turb` (μt<1e-6μ では 0 側にフォールバック)。等方項 (dilatation 2) はリミッタ**前**に加算 (2026-09-08 変更, キー非依存) |
+| `sstSigmaBlend` | **1** (2026-09-08 から) | 1: 拡散係数 σ_k = F1·0.85 + (1−F1)·1.0, σ_ω = F1·0.5 + (1−F1)·0.856 (正式ブレンド)。F1 は同 step の前処理 `ransBlendF1` が `sstF1` に書く (拡散の前に k/ω 勾配→F1 を評価する順序に変更、ラグ無し)。0: k-ω 側定数 (旧既定)。壁近傍 (F1=1) では同一 |
 | `sstIsotropicStress` | 0 | 1: 運動量/エネルギーの応力に等方 Reynolds 応力 −(2/3)ρk δᵢⱼ を加える (内部面のみ; `dilatationCorrection: 2` の k 生産側 −(2/3)ρk∇·u と対をなす)。0: 無し (現行) |
 | `sstEnergyKSource` | 0 | 1: エネルギー式に −(P_k − D_k)·V を源として加える (E = e + u²/2 に k を含まない定式化で、k に溜まる分を平均流エネルギーから引く。SU2 型 E に k を含める方式の代替)。0: 無し (現行) |
 

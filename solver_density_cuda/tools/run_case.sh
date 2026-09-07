@@ -14,7 +14,8 @@ RUNDIR="${1:-$PWD}"
 cd "$RUNDIR" || { echo "run_case: bad run dir $RUNDIR"; exit 1; }
 
 echo "[run_case] forge in $RUNDIR"
-"$ROOT/solver_density_cuda/build/forge" > forge_run.log 2>&1
+# FORGE_BIN で別ビルドの forge を指定できる (A/B 回帰で旧バイナリを回す用途。既定は build/forge)
+"${FORGE_BIN:-$ROOT/solver_density_cuda/build/forge}" > forge_run.log 2>&1
 rc=$?
 echo "[run_case] forge exit=$rc"
 

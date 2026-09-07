@@ -147,22 +147,25 @@ __global__ void rans_sst_source_d(
     const flow_float arg1_c = static_cast<flow_float>(4.0) * rho * kSigmaW2 * k_c / (CD_kw * y * y);
     const flow_float arg1   = min(max(arg1_a, arg1_b), arg1_c);
     const flow_float F1     = tanh(arg1 * arg1 * arg1 * arg1);
-    if (sstF1 != nullptr) sstF1[ic] = F1;   // 次 step の σ_k/σ_ω ブレンド用 (sstSigmaBlend)
+    // sstF1 は ransBlendF1_d_wrapper (拡散の前) が同式・同入力で書いており、ここでは同じ値を再書込するだけ
+    // (σ ブレンドと生成の F1 が同一 step で一致することの保証)。
+    if (sstF1 != nullptr) sstF1[ic] = F1;
 
     // ブレンドされた係数
     const flow_float alpha = F1 * kAlpha1 + (static_cast<flow_float>(1.0) - F1) * kAlpha2;
     const flow_float beta  = F1 * kBeta1  + (static_cast<flow_float>(1.0) - F1) * kBeta2;
 
     // k 生産項（10 beta* rho k omega でリミット）。S_prod は katoLaunder で S^2 / S*Omega。
-    flow_float Pk = min(mu_t_eff * S_prod,
-        static_cast<flow_float>(10.0) * kBetaStar * rho * k_c * w_c);
-
-    // (B) 等方項 -2/3 rho k divU を k 生産に加算 (dilatationCorrection >= 2, theory.md §7.3)
-    //   膨張(divU>0)でシンク, 圧縮(divU<0)でソース。負生産を防ぐため Pk>=0 でクリップ。
+    // (B) 等方項 -2/3 rho k divU (dilatationCorrection >= 2, theory.md §7.3) は**リミッタの前**に足す:
+    //   Menter/Wilcox の圧縮性形は P_k = τ_ij ∂u_i/∂x_j (τ に -2/3ρk δ_ij を含む) をリミットする。旧順序
+    //   (リミット後に加算) では最終 P_k が 10β*ρkω を超え得た (codex 2026-09-08, plan
+    //   turbulence-sst-consistency-options §2.1)。膨張(divU>0)でシンク, 圧縮(divU<0)でソース。負生産は 0 でクリップ。
+    flow_float Pk_raw = mu_t_eff * S_prod;
     if (dilatationCorrection >= 2) {
-        Pk -= static_cast<flow_float>(2.0 / 3.0) * rho * k_c * divU;
-        Pk = max(Pk, static_cast<flow_float>(0.0));
+        Pk_raw -= static_cast<flow_float>(2.0 / 3.0) * rho * k_c * divU;
     }
+    flow_float Pk = min(Pk_raw, static_cast<flow_float>(10.0) * kBetaStar * rho * k_c * w_c);
+    Pk = max(Pk, static_cast<flow_float>(0.0));
 
     // automatic wall treatment (methods/turbulence §6.5(d)): wall-adjacent セル (wf_pk>=0) では
     // 解像勾配ベースの P_k を wall-function 生産 P_k=ρu_τ⁴/ν·g(1-g) に置換する。ω はピン留め済み
@@ -301,6 +304,48 @@ __global__ void rans_sst_source_d(
     }
 }
 
+// F1 前処理 (σ ブレンド用)。rans_sst_source_d の F1 と**同じ式・同じ演算順**で書くこと (両者が一致する前提)。
+__global__ void rans_sst_blend_f1_d(
+    geom_int nCells,
+    flow_float* ro, flow_float* k, flow_float* omega, flow_float* vis_lam, flow_float* wall_dist,
+    flow_float* dKdx,     flow_float* dKdy,     flow_float* dKdz,
+    flow_float* dOmegadx, flow_float* dOmegady, flow_float* dOmegadz,
+    flow_float* sstF1)
+{
+    geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    const flow_float rho    = max(ro[ic], kSmall);
+    const flow_float k_c    = max(k[ic],  static_cast<flow_float>(0.0));
+    const flow_float w_c    = max(omega[ic], kSmall);
+    const flow_float mu_lam = vis_lam[ic];
+    const flow_float y      = max(wall_dist[ic], kSmall);
+    const flow_float grad_k_dot_w =
+        dKdx[ic] * dOmegadx[ic] + dKdy[ic] * dOmegady[ic] + dKdz[ic] * dOmegadz[ic];
+    const flow_float CD_kw = max(
+        static_cast<flow_float>(2.0) * rho * kSigmaW2 / w_c * grad_k_dot_w,
+        static_cast<flow_float>(1.0e-10));
+    const flow_float nu     = mu_lam / rho;
+    const flow_float arg1_a = sqrt(k_c) / (kBetaStar * w_c * y);
+    const flow_float arg1_b = static_cast<flow_float>(500.0) * nu / (w_c * y * y);
+    const flow_float arg1_c = static_cast<flow_float>(4.0) * rho * kSigmaW2 * k_c / (CD_kw * y * y);
+    const flow_float arg1   = min(max(arg1_a, arg1_b), arg1_c);
+    sstF1[ic] = tanh(arg1 * arg1 * arg1 * arg1);
+}
+
+}
+
+void ransBlendF1_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    if (!(cfg.LESorRANS == 2 && cfg.RANSmodel == 1)) return;
+    if (!var.c_d.count("sstF1")) return;
+    rans_sst_blend_f1_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
+        msh.nCells,
+        var.c_d["ro"], var.c_d["k"], var.c_d["omega"], var.c_d["vis_lam"], var.c_d["wall_dist"],
+        var.c_d["dKdx"],     var.c_d["dKdy"],     var.c_d["dKdz"],
+        var.c_d["dOmegadx"], var.c_d["dOmegady"], var.c_d["dOmegadz"],
+        var.c_d["sstF1"]);
+    gpuErrchk(cudaPeekAtLastError());
+    gpuErrchkKernelSync();
 }
 
 void ransSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
