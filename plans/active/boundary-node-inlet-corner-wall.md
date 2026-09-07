@@ -19,7 +19,8 @@ node モードで入口と no-slip 壁を共有する角ノードの質量蓄積
 ## 2. スコープ
 
 - **やる**: `buildMedianDual` (2D) で `inlet_*` 境界エッジの壁ノード側半割面を壁 bcond に帰属 (`mesh.nodeInletCornerWall: 1`, 変換時)。
-- **やらない**: 3D (`buildMedianDual3D`) は未対応 (同じ問題があれば同型で追加)。出口∩壁 (流入なし)、solver 実行時の切替。
+- **やる (2026-09-07 追加)**: 3D (`buildMedianDual3D`) にも同型で追加 (case/16 の 12.7 mm 押し出し 3D node NS で入口∩4 壁の角ノードが同じ構造を持つため)。
+- **やらない**: 出口∩壁 (流入なし)、solver 実行時の切替。
 
 ## 3. 関連 docs と前提
 
@@ -34,6 +35,7 @@ node モードで入口と no-slip 壁を共有する角ノードの質量蓄積
 ## 5. 実装ステップ
 
 1. `mesh/gmshReader.hpp` (所有ロジック), `input/solverConfig.*` (キー), `mesh/convertGmshToForge.cpp` (受け渡し) — 済 (2026-09-04)
+1b. `buildMedianDual3D` に同じ所有ロジック (`wallOwnerOf` / `isInlet` / 再帰属カウント出力) を追加 — 済 (2026-09-07, feature/sern-design)。3D の検証は case/16 3D node NS run で行う
 2. case/47 で全壁 no-slip + 入口 BL プロファイル (`run_0014` 以降) が 2 次・cfl 2 で安定することを確認 — 進行中
 
 ## 6. 検証
@@ -54,3 +56,4 @@ node モードで入口と no-slip 壁を共有する角ノードの質量蓄積
 ## 9. 変更ログ
 
 - `2026-09-04` — 初稿・実装。
+- `2026-09-07` — feature/sern-design へ cherry-pick (`8a284318`)。3D `buildMedianDual3D` へ同型拡張。case/16 run_0198 (2D node SST) で入口角の P>Pt 暴走 (run_0195) が消えたことを確認 (ただし別の出口側 unstart が残る → plan boundary-node-nozzle-wall-outlet-stability §2.12 以降)。

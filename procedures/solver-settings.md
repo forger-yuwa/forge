@@ -172,13 +172,17 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
 - 出力: `chemQdot` [W/m³], `chemTau` [s] (=1/max|∂ω_s/∂ρY_s|、化学時間の目安。`dt` や `cfl_pseudo` の妥当性判断に使う)。
 - 検証: `case/35.uniform_periodic_box/run_0049_node_h2_ignition` (0-D 着火 vs Cantera)。
 
+**TP (`thermalMethod: 2`) × 亜音速 `outlet_statPress` の γ 混用は修正済 (2026-09-07 移植)**: 出口列が指定 Ps を無視して
+一様に加圧/逆流する症状 (node では出口壁ノードが常に亜音速なので必ず通る) はこのバグの指紋
+([plan §2.12](../plans/active/boundary-node-nozzle-wall-outlet-stability.md))。
+
 ## mesh.nodeInletCornerWall — node の入口∩壁コーナー (変換時)
 
 node (median-dual) で入口 (`inlet_*`) と no-slip 壁が角ノードを共有するメッシュでは、角 CV に入口流束が入るのに
 壁ピン ($\mathbf u=0$) で流し出せず $P$ が暴走する (1 次で延命・2 次で NaN)。`mesh: {nodeInletCornerWall: 1}` を
 **`convertGmshToForge` 実行時の solverConfig に置く**と、入口エッジの壁ノード側半割面を壁 bcond に帰属させて回避する
 ([methods/discretization.md](../methods/discretization.md) §7.2 (D))。solver 実行時には読むだけで挙動は変わらない (メッシュに焼き込まれる)。
-既定 0。入口壁角を slip で逃がす旧回避 (case/47 run_0006–0008) は不要になる。
+既定 0。入口壁角を slip で逃がす旧回避 (case/47 run_0006–0008) は不要になる。2D/3D とも対応 (3D は 2026-09-07)。
 
 ## discretization / bndFirstOrder — 離散化レイアウト (node-centered)
 

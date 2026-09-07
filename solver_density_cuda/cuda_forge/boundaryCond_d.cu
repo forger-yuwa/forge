@@ -509,6 +509,7 @@ void outlet_statPress_d
  flow_float cp,
  int thermalMethod, const SpeciesThermo* sp,
  flow_float* const* roY, int nSpecies,   // 多成分: ghost/backflow 組成 = 内部セル組成
+ const flow_float* gamma_cell,           // TP: per-cell γ_mix(T) (dependentVariables)。特性構成の γ に使う (下記)
 
  // mesh structure
  geom_int nb,
@@ -601,20 +602,29 @@ flow_float* Psb
         // (壁∩出口コーナー) へ高 stagnation エンタルピ/全圧を注入し過加圧→発散させた (case36 層流で実証)。
         // さらに旧速度構築 (Uxnew=-Ux[ic]*nx) は物理的に妥当な速度ベクトルでなく、forward↔backflow の
         // ばたつきと相まって不整合ゴーストを生んでいた。逆流出口でも静圧のみ規定するのが整合的。
-        // 注: thermalMethod==2 (TP) では γ/cp が温度依存のため本構築は近似 (CPG 同型)。TP の厳密化は別途。
-        const flow_float c_int = max(sonic[ic], (flow_float)1.0e-20);
-        const bool supersonic_out = (Un > (flow_float)0.0 && Umagc/c_int >= (flow_float)1.0);
+        // 注: thermalMethod==2 (TP) では γ が温度・組成依存。特性構成 (等エントロピー・Riemann 不変量・c_exit) の
+        //     γ は **セル局所 γ_mix(T)** (gamma_cell) を使い、c_int も同じ γ で sqrt(γP/ρ) と再構成する。
+        //     旧実装は c_int=sonic[ic] (真の TP 音速) と c_exit=sqrt(ga_cfg·P_exit/ρ) (config 定数 γ) を混用しており、
+        //     P_int=P_exit でも c_int≠c_exit → Vn_exit = Un + 2(c_int−c_exit)/(γ−1) が数十 m/s ずれる。
+        //     低マッハ出口 (case/48 Cabra coflow 3.5 m/s, γ_mix 1.30 vs config 1.35) では −65 m/s の偽逆流を
+        //     毎ステップ課し、出口列に質量が蓄積して圧力上昇→全出口列が逆流→発散した (2026-09-05 特定)。
+        //     超音速流出 (全量外挿) と CPG (γ 定数) はビット不変。
+        const flow_float ga_loc = (thermalMethod == 2 && gamma_cell != nullptr) ? max(gamma_cell[ic], (flow_float)1.0001) : ga;
+        const flow_float c_int = (thermalMethod == 2 && gamma_cell != nullptr)
+                                 ? max(sqrt(ga_loc*P[ic]/max(ro[ic], (flow_float)1.0e-30)), (flow_float)1.0e-20)
+                                 : max(sonic[ic], (flow_float)1.0e-20);
+        const bool supersonic_out = (Un > (flow_float)0.0 && Umagc/max(sonic[ic], (flow_float)1.0e-20) >= (flow_float)1.0);
         if (supersonic_out) {
             // 超音速流出: P_back を課さず全量外挿 (SU2: Mach>=1 で V_outlet=V_domain)。
             Pnew = P[ic]; ronew = ro[ic];   // Uxnew/Uynew/Uznew は既に内部値
         } else {
             // 亜音速流出 / 局所逆流: 静圧 P_exit + 内部エントロピー + 外向き Riemann で統一構築。
             const flow_float P_exit = Psb[ib];
-            const flow_float s_int  = P[ic]/pow(ro[ic], ga);         // 内部エントロピー P/ρ^γ
-            const flow_float Rplus  = Un + (flow_float)2.0*c_int/(ga-(flow_float)1.0); // 外向き Riemann 不変量
-            ronew = pow(P_exit/s_int, (flow_float)1.0/ga);            // ρ on interior isentrope
-            const flow_float c_exit = sqrt(ga*P_exit/ronew);
-            const flow_float Vn_exit= Rplus - (flow_float)2.0*c_exit/(ga-(flow_float)1.0); // 逆流なら <0 を許容 (クランプ無)
+            const flow_float s_int  = P[ic]/pow(ro[ic], ga_loc);         // 内部エントロピー P/ρ^γ (γ=局所)
+            const flow_float Rplus  = Un + (flow_float)2.0*c_int/(ga_loc-(flow_float)1.0); // 外向き Riemann 不変量
+            ronew = pow(P_exit/s_int, (flow_float)1.0/ga_loc);            // ρ on interior isentrope
+            const flow_float c_exit = sqrt(ga_loc*P_exit/ronew);
+            const flow_float Vn_exit= Rplus - (flow_float)2.0*c_exit/(ga_loc-(flow_float)1.0); // 逆流なら <0 を許容 (クランプ無)
             const flow_float nx=sxx/sss, ny=syy/sss, nz=szz/sss;
             Pnew  = P_exit;
             Uxnew = Ux[ic] + (Vn_exit-Un)*nx;   // 接線=内部外挿, 法線のみ Vn_exit へ補正
@@ -694,6 +704,7 @@ void outlet_statPress_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , bcond
         cfg.cp,
         cfg.thermalMethod, thermo_species_device_ptr(),
         species_roY_device_ptr(), cfg.nSpecies,
+        (cfg.thermalMethod == 2) ? var.c_d["gamma"] : nullptr,
 
         bc.iPlanes.size(),
         bc.map_bplane_plane_d,

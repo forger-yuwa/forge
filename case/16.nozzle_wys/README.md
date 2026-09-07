@@ -291,7 +291,12 @@ Pt 59070 Pa / Tt 286.65 K、出口 Ps=Pt=2000 Pa、Euler = slip + `visc 0` `ther
 | `run_0191_user_cell_sst_dry` → **`run_0196_user_cell_sst_dry_cont`** (+24000) | cell | NS (SST) | off | M 1.792, p/p0 0.1762, T 174.8 K。**exp isentrope と x≥11 mm で +0.9〜+1.9 %** (throat 直後 x=0.9 mm は +4.6 %) | rms_ro 4e-8 plateau (2 次リミッタ), 継続 24000 step で p/p0 変化 ≤1e-4, **STEADY** | active (0191 は中継) |
 | `run_0192_user_cell_sst_cond` → **`run_0197_user_cell_sst_cond_cont`** (+24000) | cell | NS (SST) | **on** | onset **x=23.2 mm**, g_exit 0.0108, M 1.600, p/p0 0.2090, T 208.0 K。exp cond 1 kPa と −5〜−3 % (x 21–32 mm, onset 帯) / +4〜+5 % (x 42–72 mm) | rms_ro 4e-8 plateau, 継続で不変, **STEADY** | active (0192 は中継) |
 | `run_0193_user_node_euler_dry` / `run_0194_user_node_euler_cond` | **node** (平面一様) | Euler | off / on | **cell と一致**: p/p0 0.1460/0.1767 (cell 0.1465/0.1771), onset 20.2 mm 同一, g 0.0109 同一 | rms_ro 4.3e-9 (2.7 桁), STEADY | active (node 対照) |
-| `run_0195_user_node_sst_dry` | node (平面壁クラスタ) | NS (SST) | off | **不成立** (既知の申し送りと同じ指紋: 壁ノード T 504 K > Tt, P 126 kPa > Pt が x=−40 mm から、本段 6000 step で出口側 unstart)。途中で停止 | — | 削除済み(2026-08-31) |
+| `run_0195_user_node_sst_dry` | node (平面壁クラスタ) | NS (SST) | off | **不成立 (2026-09-07 に解決: run_0212/0213 参照)** (既知の申し送りと同じ指紋: 壁ノード T 504 K > Tt, P 126 kPa > Pt が x=−40 mm から、本段 6000 step で出口側 unstart)。途中で停止 | — | 削除済み(2026-08-31) |
+
+| `run_0198_user_node_sst_dry` / `run_0199_..._outfix` | node (平面壁クラスタ) | NS (SST) | off | **unstart** (出口列 P 45–57 kPa > 指定 2 kPa、全域 M≈0.3)。`nodeInletCornerWall: 1` で run_0195 の入口角 P>Pt は消えたが出口側が残る。0199 は TP 出口 γ 修正の効果確認 (bit 同一 = 無関係) | — | 破棄予定 (診断) |
+| `run_0200`–`run_0211` (診断) | node | NS | off | 切り分け: TP/CPG・dilatation・壁関数・nodeWallDirichlet・出口 k/ω・壁第一層 0.6/2.4/8 µm は全て同じ失敗、層流 (0203) は健全。100 step 再現 (0201) で出口列の壁向き Uy・+5 % P バンプ→SST の k 膨張→剥離前線が上流へ、と特定。**`outflow` (全量外挿) で解消** (0210 CPG / 0211 TP) | — | 破棄予定 (診断) |
+| `run_0214_ab_ps_matched` | node | NS (SST, CPG) | off | `outlet_statPress` のまま Ps を実出口圧 10.4 kPa に合わせても解消 (case/45 と同じ構成)。真因 = **Ps 指定 (2 kPa) ≪ 実出口圧 (10.4 kPa) × node の亜音速壁列** | mid 段 rms_ro 3.9e-7 (outflow と同一) | 破棄予定 (診断) |
+| `run_0212_user_node_sst_dry_outflow` → **`run_0213_user_node_sst_dry_outflow_cont`** (+24000) | **node** (平面壁クラスタ, `nodeInletCornerWall: 1`, 出口 `outflow`, katoLaunder) | NS (SST) | off | **cell run_0196 と中心線 0.1 % 以内で一致** (出口 M 1.793 / p/p0 0.1759 / T 174.7 K)。`compare_node_vs_cell_sst.png` | `check_convergence`: rms_ro 4.3e-9 プラトー (0212 から計 2.7 桁↓), roe/roK/roOmega still falling; `check_quasisteady` machmax/pmax **STEADY** | active (node NS 生産) |
 
 **結果 (`compare_user_profile.png`)**:
 - **NS dry が実験 isentrope に乗る** (x≥11 mm で +1〜2 %; 旧形状 run_0048 は 1 次精度で ±1.5 %)。Euler dry は排除厚がないので −4〜−13 % 下 (下流ほど乖離)。

@@ -1867,8 +1867,22 @@ public:
 
         std::vector<std::map<geom_int, std::array<double,3>>> halfByOwner(nBc);
         std::vector<std::map<geom_int, std::array<double,4>>> hcentByOwner(nBc);
+        // 入口∩壁コーナー所有 (inletCornerWall, 2D と同型): 壁ノード → 壁 bcond index。inlet_* 境界面の
+        // 壁ノード側半割面は壁 bcond に計上する (壁ノードは u=0 Dirichlet なので入口半割面から流入させない)。
+        std::vector<geom_int> wallOwnerOf(nN, -1);
+        if (inletCornerWall) {
+            for (geom_int ib = 0; ib < nBc; ++ib) {
+                const std::string& k = this->bconds[ib].bcondKind;
+                if (k != "wall" && k != "wall_isothermal") continue;
+                for (const geom_int ip : this->bconds[ib].iPlanes)
+                    for (const geom_int N : this->planes[ip].iNodes)
+                        if (wallOwnerOf[N] < 0) wallOwnerOf[N] = ib;
+            }
+        }
+        geom_int nCornerReassigned = 0;
         for (geom_int ib = 0; ib < nBc; ++ib)
         {
+            const bool isInlet = (this->bconds[ib].bcondKind.rfind("inlet_", 0) == 0);
             for (const geom_int ip : this->bconds[ib].iPlanes)
             {
                 const auto& fn = this->planes[ip].iNodes;       // 周回ノード (surfVect と整合)
@@ -1901,13 +1915,18 @@ public:
                                            0.25*(Nc[1]+Mn[1]+Fcen[1]+Mp[1]),
                                            0.25*(Nc[2]+Mn[2]+Fcen[2]+Mp[2]) };
                     bnodeAccum[3*N+0]+=hv[0]; bnodeAccum[3*N+1]+=hv[1]; bnodeAccum[3*N+2]+=hv[2];
-                    auto& h = halfByOwner[ib][N];
+                    int ow = ib;
+                    if (inletCornerWall && isInlet && wallOwnerOf[N] >= 0) { ow = wallOwnerOf[N]; ++nCornerReassigned; }
+                    auto& h = halfByOwner[ow][N];
                     h[0]+=hv[0]; h[1]+=hv[1]; h[2]+=hv[2];
-                    auto& c = hcentByOwner[ib][N];
+                    auto& c = hcentByOwner[ow][N];
                     c[0]+=w*sc[0]; c[1]+=w*sc[1]; c[2]+=w*sc[2]; c[3]+=w;
                 }
             }
         }
+        if (inletCornerWall)
+            std::cout << "[buildMedianDual3D] nodeInletCornerWall: " << nCornerReassigned
+                      << " inlet half-faces at wall nodes reassigned to wall bconds\n";
 
         for (geom_int ib = 0; ib < nBc; ++ib) {
             dualBcondPhysID[ib] = this->bconds[ib].physID;
