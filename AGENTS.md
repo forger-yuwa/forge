@@ -166,3 +166,4 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
 - **push**: commit 後は現在の feature ブランチへ push する。`main` へ直接 commit / push しない。`main` 上にいる場合は先に feature ブランチを切ってから作業する。
 - **commit メッセージ**: 英語の命令形で記述する (例: `Add Menter SST turbulence model with dilatation correction`)。
 - 無関係な既存の作業ツリー変更を巻き込まないよう、commit 前に `git status` / `git diff` で対象を確認すること。
+- **PDF・`papers/` 配下・20 MB 超のファイルはコミットしない** (履歴に残り clone が肥大化する。2026-09-05 の再流入で main に 41 MB が残り 2026-09-08 に再 rewrite)。各 clone で `git config core.hooksPath solver_density_cuda/tools/git-hooks` を 1 回実行して pre-commit フックを有効にすること。

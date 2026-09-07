@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# forge pre-commit: 論文 PDF・papers/ 配下・巨大バイナリのコミットを止める (2026-09-08)。
+#   有効化: git config core.hooksPath solver_density_cuda/tools/git-hooks   (各 clone / AWS で 1 回)
+#   背景: 2026-08-31 に filter-repo で purge した PDF が 2026-09-05 に papers/nozzle_design/ へ再流入し
+#         main の履歴に 41 MB 残った → 2026-09-08 に再度 rewrite。同じ事故を hook で防ぐ。
+set -u
+bad=0
+while IFS= read -r f; do
+  case "$f" in
+    *.pdf|*.PDF|papers/*|*/papers/*) echo "pre-commit: BLOCKED (pdf/papers): $f"; bad=1 ;;
+  esac
+  if [ -f "$f" ]; then
+    sz=$(stat -c %s "$f" 2>/dev/null || echo 0)
+    if [ "$sz" -gt 20000000 ]; then echo "pre-commit: BLOCKED (>20 MB): $f ($sz bytes)"; bad=1; fi
+  fi
+done < <(git diff --cached --name-only --diff-filter=AM)
+if [ $bad -ne 0 ]; then
+  echo "pre-commit: PDF / papers/ / 20 MB 超のファイルはコミットしない (AGENTS.md「コミット・push 運用」)。意図的なら git commit --no-verify"
+  exit 1
+fi
+exit 0
