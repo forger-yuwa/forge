@@ -76,6 +76,8 @@ turb = ('turbulence: {model: "none"}' if (euler or a.laminar) else
         'turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInf: 1.0, omegaInf: 1000.0}')
 # node NS: 入口∩壁の角ノード CV の入口側半割面を壁へ帰属 (変換時に焼き込み。run_0195 の壁ノード P>Pt 暴走の根治)
 corner = "  nodeInletCornerWall: 1\n" if (node and not euler) else ""
+if a.ext:
+    corner += "  wallDistExtraPhysIDs: [6]\n"   # 出口バッファの slip 壁も壁距離に含める (SST の wall_dist 不連続を防ぐ)
 species_cfg = "" if a.cpg else '  species: ["MIXDRY", "H2O"]\n  speciesDBFile: "species_db.yaml"\n  thermoHrefTemp: 298.15\n'
 cfg = f"""mesh:
   meshFormat: "hdf5"

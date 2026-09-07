@@ -100,7 +100,6 @@ void compute_with_builtin_kdtree(const std::vector<Point> &walls,
     if (walls.empty()) { distance.assign(cells.size(), geom_float(0)); return; }
     BuiltinKdTree tree(walls);
     distance.resize(cells.size());
-    #pragma omp parallel for schedule(static)
     for (long j = 0; j < (long)cells.size(); ++j) {
         geom_float best2 = std::numeric_limits<geom_float>::max();
         tree.nearest(0, cells[j], best2);
@@ -124,7 +123,10 @@ void calcWallDistance_kdtree(solverConfig &cfg, mesh &msh, variables &var) {
 
     int wall_count = 0;
     for (auto &bc : msh.bconds) {
-        if (bc.bcondKind == "wall_isothermal" || bc.bcondKind == "wall") {
+        // wallDistExtraPhysIDs: 指定 physID の境界 (例: 出口バッファの slip 壁) も壁点集合に加える
+        // (2026-09-08, case/16 3D 出口バッファ: no-slip→slip 接合で wall_dist が 0→数 mm に跳ぶと SST ω が接合直後で爆発した)
+        const bool extra = std::find(cfg.wallDistExtraPhysIDs.begin(), cfg.wallDistExtraPhysIDs.end(), bc.physID) != cfg.wallDistExtraPhysIDs.end();
+        if (bc.bcondKind == "wall_isothermal" || bc.bcondKind == "wall" || extra) {
             if (nodeMode) {
                 for (auto &ic : bc.iCells) {
                     if (ic < 0 || ic >= static_cast<geom_int>(msh.cells.size())) continue;
