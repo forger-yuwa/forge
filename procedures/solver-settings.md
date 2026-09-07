@@ -176,6 +176,17 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
 一様に加圧/逆流する症状 (node では出口壁ノードが常に亜音速なので必ず通る) はこのバグの指紋
 ([plan §2.12](../plans/active/boundary-node-nozzle-wall-outlet-stability.md))。
 
+## mesh.wallDistExtraPhysIDs — 壁距離に含める非 wall 境界 (変換時)
+
+```yaml
+mesh: {wallDistExtraPhysIDs: [6]}
+```
+
+壁距離 (`wall_dist`, SST の F1/F2・ω 壁 BC が読む) は既定で `wall` / `wall_isothermal` の境界だけを壁点集合にする。
+出口バッファのように **no-slip 壁の下流を slip 壁で延長**すると、接合 x で wall_dist が 0 → 数 mm に跳び、
+BL をそのまま運んでいる slip 壁近傍で SST の ω が爆発する (case/16 3D run_0223: 接合直後 x=100 mm, y=壁, ω 1e21 → NaN)。
+このキーで指定した physID (slip 等) を壁点集合に加えると wall_dist が連続になる。対称面 (slip) は含めないこと。既定は空。
+
 ## mesh.nodeInletCornerWall — node の入口∩壁コーナー (変換時)
 
 node (median-dual) で入口 (`inlet_*`) と no-slip 壁が角ノードを共有するメッシュでは、角 CV に入口流束が入るのに

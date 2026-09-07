@@ -100,7 +100,11 @@ __global__ void scalar_diffusion_first_order_d(
         const flow_float dcc = sqrt(dcc_x * dcc_x + dcc_y * dcc_y + dcc_z * dcc_z);
 
         const flow_float denom = dcc_x * sxx + dcc_y * syy + dcc_z * szz;
-        const flow_float safe_denom = (abs(denom) < 1.0e-12) ? ((denom >= 0.0) ? 1.0e-12 : -1.0e-12) : denom;
+        // ゼロ割ガードは相対値 (|d||S| の 1e-6) にする。旧 1.0e-12 は [m³] の絶対値で、3D の µm 級双対面
+        // (|d·S| ~ 1e-15) では拡散コンダクタンスそのものを 1/10〜1/1000 に削っていた (case/16 3D 角線で ω が
+        // 壁漸近解の 1/30 に落ち k 未減衰→角部加熱; codex レビュー 2026-09-08, plan turbulence-sst-node-corner-heating)。
+        const flow_float denom_floor = static_cast<flow_float>(1.0e-6) * dcc * sss;
+        const flow_float safe_denom = (abs(denom) < denom_floor) ? ((denom >= 0.0) ? denom_floor : -denom_floor) : denom;
         const flow_float delta = dcc * sss * sss / safe_denom;
 
         const flow_float mu0 = vis_lam[ic0] + sigma * max(vis_turb[ic0], static_cast<flow_float>(0.0));

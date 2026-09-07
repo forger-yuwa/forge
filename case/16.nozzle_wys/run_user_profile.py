@@ -42,6 +42,8 @@ ap.add_argument("--stage-steps", type=int, default=3000, help="soft/mid 各段�
 ap.add_argument("--out-interval", type=int, default=3000)
 ap.add_argument("--cpg", action="store_true", help="診断用: CPG 単成分 (thermalMethod 0, species 無し)")
 ap.add_argument("--laminar", action="store_true", help="診断用: NS 層流 (turbulence none)")
+ap.add_argument("--ext", action="store_true", help="3D 出口バッファ付きメッシュ (mesh/nozzle_user_3d_ext.msh, 延長部 physID 6 = slip)")
+ap.add_argument("--ic-index-from", default=None, help="同一メッシュの res_*.h5 を index コピーで IC にする (3D 同メッシュ用; interp は使わない)")
 ap.add_argument("--reuse-h5", default=None, help="変換済み h5 を流用 (convert をスキップ; 同じ msh/config の run から)")
 ap.add_argument("--msh", default=None, help="mesh/ 内の .msh 名を上書き (壁厚感度試験用)")
 ap.add_argument("--cfg-sub", action="append", default=[], help="診断用: solverConfig 文字列置換 OLD=NEW (複数可)")
@@ -74,6 +76,8 @@ turb = ('turbulence: {model: "none"}' if (euler or a.laminar) else
         'turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInf: 1.0, omegaInf: 1000.0}')
 # node NS: 入口∩壁の角ノード CV の入口側半割面を壁へ帰属 (変換時に焼き込み。run_0195 の壁ノード P>Pt 暴走の根治)
 corner = "  nodeInletCornerWall: 1\n" if (node and not euler) else ""
+if a.ext:
+    corner += "  wallDistExtraPhysIDs: [6]\n"   # 出口バッファの slip 壁も壁距離に含める (SST の wall_dist 不連続を防ぐ)
 species_cfg = "" if a.cpg else '  species: ["MIXDRY", "H2O"]\n  speciesDBFile: "species_db.yaml"\n  thermoHrefTemp: 298.15\n'
 cfg = f"""mesh:
   meshFormat: "hdf5"
@@ -146,6 +150,15 @@ sym:
   ints:
   floats:
 """
+if a.ext:
+    bc += """
+wall_ext:
+  physID: 6
+  kind: slip          # 出口バッファ (x>95 mm) の輪郭壁 + 側壁: slip
+  outputHDFflg: 0
+  ints:
+  floats:
+"""
 if not node and not a.mesh3d:
     bc += """
 frontback:
@@ -164,7 +177,7 @@ shutil.copy(CASE / "run_0050_fig3_2d_sst_kwhk" / "probe.yaml", run_dir / "probe.
 msh = {("cell", True): "nozzle_user_2d.msh", ("cell", False): "nozzle_user_2d.msh",
        ("node", True): "nozzle_user_2d_planar_inv.msh", ("node", False): "nozzle_user_2d_planar.msh"}[(a.disc, euler)]
 if a.mesh3d:
-    msh = "nozzle_user_3d.msh"
+    msh = "nozzle_user_3d_ext.msh" if a.ext else "nozzle_user_3d.msh"
 if a.msh:
     msh = a.msh
 if a.reuse_h5:
@@ -207,6 +220,15 @@ if a.ic_from:
                    env=_ENV, check=True, capture_output=True, text=True)
     (run_dir / "IC_FROM.txt").write_text(str(Path(a.ic_from).resolve()) + "\n")
     print("IC interpolated from", a.ic_from)
+if a.ic_index_from:
+    with h5py.File(Path(a.ic_index_from).resolve(), "r") as src, h5py.File(run_dir / MESH_H5, "r+") as dst:
+        n = len(dst["VALUE/ro"]); nk = 0
+        for k in src["VALUE"]:
+            if k == "wall_dist" or k not in dst["VALUE"] or len(src["VALUE"][k]) != n:
+                continue
+            dst["VALUE"][k][:] = src["VALUE"][k][:]; nk += 1
+    (run_dir / "IC_FROM.txt").write_text(str(Path(a.ic_index_from).resolve()) + " (index copy)\n")
+    print("IC index-copied from", a.ic_index_from, nk, "fields")
 if node and not euler:
     print("wall nodes zeroed:", zero_wall_velocity_ic(str(run_dir / MESH_H5)))
 print("prepared", run_dir)

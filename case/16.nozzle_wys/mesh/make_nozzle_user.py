@@ -35,6 +35,10 @@ DENSE_DX = 0.25     # スプライン制御点間隔 [mm]
 # 片側幾何集中 NZ_HALF 節点 (=NZ_HALF-1 層)、第一層 Z1_MM (2D の壁法線 y1 0.6–3 µm と同程度)。
 NZ_HALF = int(os.environ.get("NOZZLE_NZ", "50"))   # 半幅の節点数
 Z1_MM = 0.002                                      # 側壁第一層厚 [mm] (= 2 µm)
+# 出口バッファ (3d モード, env NOZZLE_EXT [mm] > 0 で有効): 出口 x=95 から等断面で延長し、延長部の輪郭壁・側壁を
+# 別 physID 6 (slip) にする。node SST で側壁∩輪郭壁∩出口の角線から unstart が始まる問題の切り分け用 (2026-09-08)。
+EXT_MM = float(os.environ.get("NOZZLE_EXT", "0"))
+EXT_DX = 0.42                                      # 延長部の streamwise 間隔 [mm] (本体の発散部と同程度)
 
 
 def z_layer_heights():
@@ -130,20 +134,44 @@ def build_geo(mode):
     elif mode == "3d":
         r, h = z_layer_heights()
         nl = len(h)
+        layers = f"Layers{{ {{{', '.join(['1'] * nl)}}}, {{{', '.join(f'{v:.8f}' for v in h)}}} }}"
         L.append("")
         L.append(f"// 3D 半幅+対称面: z 押し出し {0.5*SPAN_MM} mm (全幅 {SPAN_MM} の半分) を片側幾何集中 {nl} 層 (第一層 {Z1_MM*1e3:.1f} µm @z=0 側壁, 公比 {r:.3f})。")
         L.append("//   z=0: 側壁 (no-slip, physID 3 に含める), z=半幅: 対称面 (slip, physID 4)")
-        L.append(f"e[] = Extrude {{0, 0, {0.5*SPAN_MM}}} {{ Surface{{1}}; Layers{{ {{{', '.join(['1'] * nl)}}}, {{{', '.join(f'{v:.8f}' for v in h)}}} }}; Recombine; }};")
         nt, nb = len(top), len(bot)
+        if EXT_MM > 0:
+            # 出口バッファ: Surface 2 (x=95..95+EXT, 等断面) を別に作って別々に押し出す (共有辺の押し出し面は gmsh が共有する)
+            yex = y_user_mm(X_EXIT); n_ext = max(int(round(EXT_MM / EXT_DX)), 4) + 1
+            p_et = add_pt(X_EXIT + EXT_MM, yex); p_eb = add_pt(X_EXIT + EXT_MM, -yex)
+            l_te = cid; L.append(f"Line({l_te}) = {{{p_out_top}, {p_et}}};"); cid += 1
+            l_oe = cid; L.append(f"Line({l_oe}) = {{{p_et}, {p_eb}}};"); cid += 1
+            l_be = cid; L.append(f"Line({l_be}) = {{{p_out_bot}, {p_eb}}};"); cid += 1
+            L.append(f"Transfinite Line {{{l_te}, {l_be}}} = {n_ext};")
+            L.append(f"Transfinite Line {{{l_oe}}} = {NY} Using Bump {BUMP};")
+            L.append(f"Curve Loop(2) = {{{l_te}, {l_oe}, {-l_be}, {-l_out}}};")
+            L.append("Plane Surface(2) = {2};")
+            L.append(f"Transfinite Surface {{2}} = {{{p_out_top}, {p_et}, {p_eb}, {p_out_bot}}};")
+            L.append("Recombine Surface(2);")
+            L.append(f"// 出口バッファ {EXT_MM} mm (等断面, {n_ext} 節点, 壁は slip physID 6)")
+        L.append(f"e[] = Extrude {{0, 0, {0.5*SPAN_MM}}} {{ Surface{{1}}; {layers}; Recombine; }};")
         top_faces = [f"e[{2+i}]" for i in range(nt)]
         out_face = f"e[{2+nt}]"
         bot_faces = [f"e[{2+nt+1+i}]" for i in range(nb)]
         in_face = f"e[{2+nt+1+nb}]"
         L.append(f'Physical Surface("inlet", 1)  = {{{in_face}}};')
-        L.append(f'Physical Surface("outlet", 2) = {{{out_face}}};')
-        L.append(f'Physical Surface("wall", 3)   = {{{", ".join(top_faces + bot_faces)}, 1}};   // 輪郭壁 + 側壁 (z=0)')
-        L.append('Physical Surface("sym", 4)    = {e[0]};   // 対称面 (z=半幅)')
-        L.append('Physical Volume("fluid", 5) = {e[1]};')
+        if EXT_MM > 0:
+            L.append(f"f[] = Extrude {{0, 0, {0.5*SPAN_MM}}} {{ Surface{{2}}; {layers}; Recombine; }};")
+            # f[0]=top(sym), f[1]=volume, f[2]=top_ext 側面, f[3]=出口, f[4]=bot_ext 側面, f[5]=共有面 (=e[out])
+            L.append('Physical Surface("outlet", 2) = {f[3]};')
+            L.append(f'Physical Surface("wall", 3)   = {{{", ".join(top_faces + bot_faces)}, 1}};   // 輪郭壁 + 側壁 (z=0), x<=95')
+            L.append('Physical Surface("sym", 4)    = {e[0], f[0]};   // 対称面 (z=半幅)')
+            L.append('Physical Surface("wall_ext", 6) = {f[2], f[4], 2};   // 延長部の輪郭壁 + 側壁 (slip)')
+            L.append('Physical Volume("fluid", 5) = {e[1], f[1]};')
+        else:
+            L.append(f'Physical Surface("outlet", 2) = {{{out_face}}};')
+            L.append(f'Physical Surface("wall", 3)   = {{{", ".join(top_faces + bot_faces)}, 1}};   // 輪郭壁 + 側壁 (z=0)')
+            L.append('Physical Surface("sym", 4)    = {e[0]};   // 対称面 (z=半幅)')
+            L.append('Physical Volume("fluid", 5) = {e[1]};')
     else:
         L.append("")
         L.append("// planar 2D (node 用): 押し出しなし。physID は forge 規約 (inlet 1 / outlet 2 / wall 3 / fluid 5)")
@@ -159,7 +187,7 @@ def main():
     assert mode in ("cell", "planar", "planar_inv", "3d")
     name = {"cell": "nozzle_user_2d", "planar": "nozzle_user_2d_planar", "planar_inv": "nozzle_user_2d_planar_inv",
             "3d": "nozzle_user_3d"}[mode]
-    suffix = os.environ.get("NOZZLE_SUFFIX", "")
+    suffix = os.environ.get("NOZZLE_SUFFIX", "") + ("_ext" if (mode == "3d" and EXT_MM > 0) else "")
     out = os.path.join(HERE, name + suffix + ".geo")
     with open(out, "w") as f:
         f.write(build_geo(mode))

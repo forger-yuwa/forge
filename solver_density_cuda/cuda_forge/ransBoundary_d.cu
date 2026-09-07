@@ -159,7 +159,10 @@ __global__ void compute_wall_y_eff_d(
                 const geom_int a = plane_cells[2 * ip + 0];
                 const geom_int b = plane_cells[2 * ip + 1];
                 const geom_int other = (a == ic) ? b : a;
-                if (other < nCells && wall_flag[other] == 0) {
+                // wall_dist==0 の非壁ノード (slip 壁が wallDistExtraPhysIDs で壁点集合に入っている場合の
+                // slip 壁ノード) は第一オフ壁点ではないので除外する (2026-09-08: no-slip→slip 接合の壁ノードで
+                // y_eff=kSmall→ω=1e23→NaN になった, case/16 run_0225)
+                if (other < nCells && wall_flag[other] == 0 && wall_dist[other] > kSmall) {
                     ymin = min(ymin, max(wall_dist[other], kSmall));
                     ++cnt;
                 }
@@ -180,7 +183,7 @@ __global__ void compute_wall_y_eff_d(
                         const geom_int a2 = plane_cells[2 * ip2 + 0];
                         const geom_int b2 = plane_cells[2 * ip2 + 1];
                         const geom_int other2 = (a2 == nb) ? b2 : a2;
-                        if (other2 < nCells && other2 != ic && wall_flag[other2] == 0) {
+                        if (other2 < nCells && other2 != ic && wall_flag[other2] == 0 && wall_dist[other2] > kSmall) {
                             ymin = min(ymin, max(wall_dist[other2], kSmall));
                             ++cnt;
                         }
