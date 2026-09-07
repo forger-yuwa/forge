@@ -324,6 +324,8 @@ python3 solver_density_cuda/tools/interp_field.py <past_run>/res_NNNN.h5 <new_ru
 
 ## メッシュ品質チェック (計算前・必須)
 
+
+> **node 変換 h5 もそのまま渡せる (2026-09-08)**: `check_mesh_quality.py` は `/VIZMESH/CONNE` (primal セル) を自動で測るので、node 用に cell 再変換する必要はない。計算はセル型ごとに numpy ベクトル化済み (2M セルで 12 s。`--loop` で旧セル毎ループ)。変換器側も壁距離を内蔵 kd-tree、3D 双対構築を配列化して 2M 節点で 26 s (旧 6 分超)。
 メッシュを `convertGmshToForge` で HDF5 化したら、**計算を投入する前に必ずメッシュ品質を確認する**。歪んだ/極端に細長いセルは発散・精度劣化・非物理解の原因になる。専用ツールで判定する:
 
 ```bash

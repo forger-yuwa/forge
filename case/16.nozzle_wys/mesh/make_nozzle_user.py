@@ -9,7 +9,7 @@ usage:
   make_nozzle_user.py cell        -> nozzle_user_2d.geo         (1 層押し出し pseudo-2D, cell 用, 壁クラスタ)
   make_nozzle_user.py planar      -> nozzle_user_2d_planar.geo  (平面 2D, node 用, 壁クラスタ)
   make_nozzle_user.py planar_inv  -> nozzle_user_2d_planar_inv.geo (平面 2D, node 非粘性用, 一様)
-  make_nozzle_user.py 3d          -> nozzle_user_3d.geo (12.7 mm 押し出し, 側壁も no-slip 壁, z 両側幾何集中; node/cell 共用)
+  make_nozzle_user.py 3d          -> nozzle_user_3d.geo (半幅 6.35 mm 押し出し: z=0 側壁 no-slip / z=6.35 対称面 slip, 片側幾何集中 NOZZLE_NZ 節点)
 単位 mm (Mesh.ScalingFactor 0.001)。throat x=0。
 """
 import sys, os
@@ -31,26 +31,28 @@ NY = 120
 BUMP = float(os.environ.get("NOZZLE_BUMP", "0.004"))   # 壁集中 (両端): 既存 nozzle_fig3_2d と同じ。env NOZZLE_BUMP で上書き (壁厚感度試験用)
 SPAN_MM = 12.7      # z 押し出し (cell 用 1 層 / 3d モードの全幅 = Wyslouzil 断面幅)
 DENSE_DX = 0.25     # スプライン制御点間隔 [mm]
-# 3d モード: z を両側幾何集中で分割 (側壁 no-slip を解像)。1 層 = 1 要素、片側 NHALF_Z 層、第一層 Z1_MM。
-NHALF_Z = 16        # 片側層数 (全 2*NHALF_Z 層 = 33 節点)
-Z1_MM = 0.004       # 側壁第一層厚 [mm] (= 4 µm; 2D 壁法線 y1≈0.5–5 µm と同程度)
+# 3d モード (半幅+対称面, 2026-09-07 ユーザ指定): z=0 が側壁 (no-slip), z=SPAN_MM/2 が対称面 (slip)。
+# 片側幾何集中 NZ_HALF 節点 (=NZ_HALF-1 層)、第一層 Z1_MM (2D の壁法線 y1 0.6–3 µm と同程度)。
+NZ_HALF = int(os.environ.get("NOZZLE_NZ", "50"))   # 半幅の節点数
+Z1_MM = 0.002                                      # 側壁第一層厚 [mm] (= 2 µm)
 
 
 def z_layer_heights():
-    """両側幾何集中の累積正規化高さ列 (Extrude Layers 用)。公比 r は等比和 = 半幅 で二分法。"""
-    a = Z1_MM / SPAN_MM
+    """片側幾何集中の累積正規化高さ列 (Extrude Layers 用)。半幅 SPAN_MM/2 を NZ_HALF-1 層で、初項 Z1_MM の等比。"""
+    half = 0.5 * SPAN_MM
+    n = NZ_HALF - 1
+    a = Z1_MM / half
     def ssum(r):
-        return a * NHALF_Z if abs(r - 1) < 1e-12 else a * (r ** NHALF_Z - 1) / (r - 1)
+        return a * n if abs(r - 1) < 1e-12 else a * (r ** n - 1) / (r - 1)
     lo, hi = 1.0, 10.0
     for _ in range(200):
         mid = 0.5 * (lo + hi)
-        lo, hi = (mid, hi) if ssum(mid) < 0.5 else (lo, mid)
+        lo, hi = (mid, hi) if ssum(mid) < 1.0 else (lo, mid)
     r = 0.5 * (lo + hi)
     pos = [0.0]
-    for k in range(NHALF_Z):
+    for k in range(n):
         pos.append(pos[-1] + a * r ** k)
-    pos[-1] = 0.5
-    h = pos[1:] + [1.0 - pos[NHALF_Z - k] for k in range(1, NHALF_Z + 1)]
+    h = [v / pos[-1] for v in pos[1:]]
     h[-1] = 1.0
     return r, h
 
@@ -129,8 +131,9 @@ def build_geo(mode):
         r, h = z_layer_heights()
         nl = len(h)
         L.append("")
-        L.append(f"// 3D: z 押し出し {SPAN_MM} mm を両側幾何集中 {nl} 層 (第一層 {Z1_MM*1e3:.1f} µm, 公比 {r:.3f})。4 壁すべて no-slip 壁 (physID 3)")
-        L.append(f"e[] = Extrude {{0, 0, {SPAN_MM}}} {{ Surface{{1}}; Layers{{ {{{', '.join(['1'] * nl)}}}, {{{', '.join(f'{v:.8f}' for v in h)}}} }}; Recombine; }};")
+        L.append(f"// 3D 半幅+対称面: z 押し出し {0.5*SPAN_MM} mm (全幅 {SPAN_MM} の半分) を片側幾何集中 {nl} 層 (第一層 {Z1_MM*1e3:.1f} µm @z=0 側壁, 公比 {r:.3f})。")
+        L.append("//   z=0: 側壁 (no-slip, physID 3 に含める), z=半幅: 対称面 (slip, physID 4)")
+        L.append(f"e[] = Extrude {{0, 0, {0.5*SPAN_MM}}} {{ Surface{{1}}; Layers{{ {{{', '.join(['1'] * nl)}}}, {{{', '.join(f'{v:.8f}' for v in h)}}} }}; Recombine; }};")
         nt, nb = len(top), len(bot)
         top_faces = [f"e[{2+i}]" for i in range(nt)]
         out_face = f"e[{2+nt}]"
@@ -138,7 +141,8 @@ def build_geo(mode):
         in_face = f"e[{2+nt+1+nb}]"
         L.append(f'Physical Surface("inlet", 1)  = {{{in_face}}};')
         L.append(f'Physical Surface("outlet", 2) = {{{out_face}}};')
-        L.append(f'Physical Surface("wall", 3)   = {{{", ".join(top_faces + bot_faces)}, 1, e[0]}};   // 輪郭壁 + 側壁 (front/back)')
+        L.append(f'Physical Surface("wall", 3)   = {{{", ".join(top_faces + bot_faces)}, 1}};   // 輪郭壁 + 側壁 (z=0)')
+        L.append('Physical Surface("sym", 4)    = {e[0]};   // 対称面 (z=半幅)')
         L.append('Physical Volume("fluid", 5) = {e[1]};')
     else:
         L.append("")

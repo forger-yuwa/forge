@@ -14,9 +14,10 @@ usage: python3 run_user_profile.py RUN_DIR --disc cell|node --phys euler|sst [--
                                    [--prepare-only] [--mesh3d] [--ic-from RES.h5] [--stage-steps 3000]
 """
 import subprocess, sys, shutil, os, re, argparse
+from pathlib import Path
 import numpy as np
 from pathlib import Path
-sys.path.insert(0, "/home/sano/work/forge/design")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "design"))   # リポジトリ相対 (AWS でも動く)
 import yaml, h5py
 from forge_design.gas.semiperfect import mixture_pseudo_species_split, GasSemiPerfect
 from forge_design.evaluate.ic import paste_isentropic_ic, zero_wall_velocity_ic
@@ -41,6 +42,7 @@ ap.add_argument("--stage-steps", type=int, default=3000, help="soft/mid 各段�
 ap.add_argument("--out-interval", type=int, default=3000)
 ap.add_argument("--cpg", action="store_true", help="診断用: CPG 単成分 (thermalMethod 0, species 無し)")
 ap.add_argument("--laminar", action="store_true", help="診断用: NS 層流 (turbulence none)")
+ap.add_argument("--reuse-h5", default=None, help="変換済み h5 を流用 (convert をスキップ; 同じ msh/config の run から)")
 ap.add_argument("--msh", default=None, help="mesh/ 内の .msh 名を上書き (壁厚感度試験用)")
 ap.add_argument("--cfg-sub", action="append", default=[], help="診断用: solverConfig 文字列置換 OLD=NEW (複数可)")
 ap.add_argument("--bc-sub", action="append", default=[], help="診断用: bcondConfig 文字列置換 OLD=NEW (複数可)")
@@ -135,6 +137,15 @@ wall:
   ints:
   floats:
 """
+if a.mesh3d:
+    bc += """
+sym:
+  physID: 4
+  kind: slip          # 半幅モデルの対称面 (z=6.35 mm)
+  outputHDFflg: 0
+  ints:
+  floats:
+"""
 if not node and not a.mesh3d:
     bc += """
 frontback:
@@ -156,24 +167,25 @@ if a.mesh3d:
     msh = "nozzle_user_3d.msh"
 if a.msh:
     msh = a.msh
-shutil.copy(CASE / "mesh" / msh, run_dir / msh)
-r = subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), msh, MESH_H5], cwd=run_dir, env=_ENV,
+if a.reuse_h5:
+    shutil.copy(Path(a.reuse_h5).resolve(), run_dir / MESH_H5)
+    (run_dir / "convert.log").write_text(f"reused {Path(a.reuse_h5).resolve()}\n")
+    class _R: returncode = 0
+    r = _R()
+else:
+    shutil.copy(CASE / "mesh" / msh, run_dir / msh)
+    r = subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), msh, MESH_H5], cwd=run_dir, env=_ENV,
+                       capture_output=True, text=True)
+    (run_dir / "convert.log").write_text(r.stdout + r.stderr)
+# AWS (CUDA 13 ホスト) では convertGmshToForge が h5 を書き切った後の cudaFree で非零終了する (既知・無害,
+# procedures/cloud-aws-gpu.md「移設で必ず踏む 4 点」③) → 成否は exit code でなく出力ファイルで判定する
+if not (run_dir / MESH_H5).exists() or (run_dir / MESH_H5).stat().st_size < 1024:
+    raise RuntimeError(f"convertGmshToForge failed (rc={r.returncode}); see convert.log")
+# 品質検査: check_mesh_quality.py は node 変換 h5 の /VIZMESH (primal セル) を直接測れる (2026-09-08,
+# ベクトル化済み) ので cell 再変換は不要
+q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"), str(run_dir / MESH_H5)],
                    capture_output=True, text=True)
-(run_dir / "convert.log").write_text(r.stdout + r.stderr)
-r.check_returncode()
-# 品質検査 (品質ツールは node CONNE 非対応 → node は cell 変換の一時コピーで検査、品質は primal の性質)
-qc_h5 = MESH_H5
-if node:
-    (run_dir / "solverConfig.yaml").write_text(cfg.replace('discretization: "node"', 'discretization: "cell"'))
-    subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), msh, "nozzle_qc.h5"], cwd=run_dir, env=_ENV,
-                   check=True, capture_output=True, text=True)
-    (run_dir / "solverConfig.yaml").write_text(cfg)
-    qc_h5 = "nozzle_qc.h5"
-q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"), str(run_dir / qc_h5)],
-                   capture_output=True, text=True)
-(run_dir / "MESH_QUALITY.txt").write_text(("# cell 変換コピーで検査 (品質は primal の性質)\n" if node else "") + q.stdout + q.stderr)
-if node:
-    (run_dir / "nozzle_qc.h5").unlink()
+(run_dir / "MESH_QUALITY.txt").write_text(q.stdout + q.stderr)
 print(q.stdout.strip().splitlines()[-1] if q.stdout.strip() else q.stderr[-300:])
 
 # 4. IC: 1D 等エントロピー (平面: A/A* = y/y_t。paste_isentropic_ic は (r/r_t)^2 なので r=sqrt(y/y_t)*r_t を渡す)
@@ -212,8 +224,14 @@ def _stage(c, nsteps, label):
     res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int(f.stem.split("_")[1]))
     if rc != 0 or not res or int(res[-1].stem.split("_")[1]) < nsteps:
         raise RuntimeError(f"{label} 段が失敗 (rc={rc}); res_nan_*.h5 を見る")
-    subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"), str(res[-1]), str(run_dir / MESH_H5)],
-                   env=_ENV, check=True, capture_output=True, text=True)
+    # 同一メッシュの段間引き継ぎは index コピー (interp_field は (x,y) 最近傍なので 3D では z 列を混同し
+    # k/ω が step 2 で爆発する — AWS run_0219 で実害, 2026-09-08。[[interp-field-coincident-nodes-trap]] と同趣旨)
+    with h5py.File(res[-1], "r") as src, h5py.File(run_dir / MESH_H5, "r+") as dst:
+        n = len(dst["VALUE/ro"])
+        for k in src["VALUE"]:
+            if k == "wall_dist" or k not in dst["VALUE"] or len(src["VALUE"][k]) != n:
+                continue
+            dst["VALUE"][k][:] = src["VALUE"][k][:]
     shutil.copy(run_dir / "residual_history.csv", run_dir / f"residual_history_{label}.csv")
     for f in run_dir.glob("res_*"):
         f.unlink()
