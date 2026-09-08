@@ -1,0 +1,60 @@
+mesh:
+  meshFormat: hdf5
+  discretization: node
+  isAxisymmetric: 0
+  nodeWallDirichlet: 1
+  nodeInletCornerWall: 1
+  meshFileName: nozzle_user_2d.h5
+  valueFileName: nozzle_user_2d.h5
+gpu: 1
+solver: SLAU
+physProp:
+  isCompressible: 1
+  thermalMethod: 2
+  viscMethod: 1
+  visc: 1.75e-05
+  thermCond: 0.0241
+  thermCondMethod: 1
+  prandtlLam: 0.72
+  ro: 1.2
+  cp: 1039.0
+  gamma: 1.4
+  species:
+  - MIXDRY
+  - H2O
+  speciesDBFile: species_db.yaml
+  thermoHrefTemp: 298.15
+time:
+  unsteady: 0
+  dualTime: 0
+  last:
+    control: 0
+    nStepOuter: 1000
+  deltaT:
+    control: 1
+    dt: 1.0e-05
+    cfl: 2.0
+    cfl_pseudo: 2.0
+    implicitRelax: 1.0
+    blockDPLUR: 1
+    dt_min: 1.0e-08
+    dt_max: 1.0
+    detectNaN: 1
+  outStepInterval: 250
+  outStepStart: 0
+  timeIntegration: 11
+  nStepInner: 5
+space:
+  convMethod: 1
+  limiter: 2
+turbulence:
+  model: sst
+  scalarDiffusion: 1
+  dilatationCorrection: 2
+  katoLaunder: 1
+  wallTreatmentSST: 0
+  turbulentPrandtl: 0.9
+  kInf: 1.0
+  omegaInf: 1000.0
+  sstEnergyIncludesK: 1
+initial: nozzle_wys

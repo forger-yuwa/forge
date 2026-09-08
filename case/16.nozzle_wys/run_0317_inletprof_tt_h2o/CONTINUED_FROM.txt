@@ -1,0 +1,2 @@
+run_0316_outlevel1_ek/nozzle_user_2d.h5 (= run_0213/res_24000 index copy, 同一 IC)
+入口分布テスト: inletProfile=1, Tt(y) +30K Gaussian bump, Y_H2O(y) 0.005+0.012 Gaussian (gen_inlet_profile.py)

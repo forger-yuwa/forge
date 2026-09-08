@@ -135,7 +135,7 @@ PYTHONPATH=. .venv-opt/bin/python -m forge_design.evaluate.runner_sern \
 | `run_0086_3d_sst_cycle_thick` | 3D メッシャにカウル板厚 0.005 を実装 (z 一様) | **暖機段 step 4** で ro NaN。NaN は側壁後縁 (x/H 0.785–0.824, z/H 1.000–1.010) = 厚さ 0 の側壁スリットの内外で中間線がずれた | 破棄予定 |
 | `run_0087_3d_sst_cycle_thick_ztaper` | 板厚を側壁の 2 セル手前から 0 に絞る | 暖機段は完走 (残差 1.4–2.3 桁低下)、mid 段 **step 57** (48 → 57 と改善するが未解決)。位置は run_0083 と同じ刃先 | 診断 (ref) |
 | `run_0088_3d_sst_cycle_cfl01` | 同上 + mid 段 CFL 0.2 → 0.1 | mid 段 **step 109** = 57 のほぼ倍 = **同じ物理時刻** → CFL はつまみでない。次はカウル後縁の鈍頭化 | 診断 (ref) |
-| `run_0089_inletprof_supersonic_tt` | **超音速入口 (`inlet_uniformVelocity`) の入口分布検証**: run_0029 (node CPG Euler 2D) の config/IC + `inletProfile: 1`, Tt(y)=2025+200·exp(−((y−0.05)/0.02)²) K, M 2.5, Ps 20 kPa を `tools/gen_inlet_profile.py gen --Tt --M --Ps` で ρ/Ux/Ps に換算 (往復誤差 1e-12 K), 600 step。手順 [procedures/inlet-profile.md](../../procedures/inlet-profile.md) | `verify`: 入口ノード ρ・U が目標と 1e-5、h0 由来 T0 が換算元 Tt と 6e-4 K で一致。NaN 0 (600 step の過渡, 収束評価対象外) | active (機能検証 ref) |
+| `run_0089_inletprof_supersonic_tt` | **超音速入口 (`inlet_uniformVelocity`) の入口分布検証**: run_0029 (node CPG Euler 2D) の config/IC + `inletProfile: 1`, Tt(y)=2025+200·exp(−((y−0.05)/0.02)²) K, M 2.5, Ps 20 kPa を `tools/gen_inlet_profile.py gen --Tt --M --Ps` で ρ/Ux/Ps に換算 (往復誤差 1e-12 K), 600 step。手順 [procedures/inlet-profile.md](../../procedures/inlet-profile.md) | `verify`: 入口ノード ρ・U が目標と 1e-5、h0 由来 T0 が換算元 Tt と 6e-4 K で一致。NaN 0 (600 step の過渡, 収束評価対象外) | active (機能検証 ref; 入力 config/CSV を git 追跡) |
 
 ### S7 3D の現状 (2026-09-05)
 

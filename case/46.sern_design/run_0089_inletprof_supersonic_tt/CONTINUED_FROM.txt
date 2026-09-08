@@ -1,0 +1,2 @@
+run_0029_ref2d_euler_node_accel_slip の config/sern.h5 を複製 (IC uniform_p101325_u10 と同じ起動)
+超音速入口の分布テスト: inletProfile=1, Tt(y)=2025+200*Gaussian, M=2.5, Ps=20000 → ro/Ux/Ps 換算 (gen_inlet_profile.py)

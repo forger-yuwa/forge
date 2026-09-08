@@ -1,0 +1,29 @@
+inlet:
+  physID: 1
+  kind: inlet_Pressure
+  outputHDFflg: 0
+  ints: {inletProfile: 1}
+  floats:
+    Pt: 59070.0
+    Tt: 286.65
+    Y0: 0.98905
+    Y1: 0.01095
+    k: 1.0
+    omega: 1000.0
+
+outlet:
+  physID: 2
+  kind: outflow
+  outputHDFflg: 0
+  ints:
+  floats:
+    Ps: 2000.0
+    Pt: 2000.0
+    Tt: 286.65
+
+wall:
+  physID: 3
+  kind: wall          # Euler: slip / NS: no-slip 断熱壁
+  outputHDFflg: 0
+  ints:
+  floats:
