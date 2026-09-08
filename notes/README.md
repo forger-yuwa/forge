@@ -5,6 +5,9 @@
 
 - `investigations/` — 技術調査・サーベイ・外部ソルバ棚卸し (コード変更を伴わない研究)。結論は該当 `plans/` 計画や `methods/` に反映する。
 - `sessions/` — 使い捨ての作業セッション用プロンプト・引き継ぎメモ。恒久参照を意図しない。
+- `reviews/` — codex 外部レビューの出力 (`solver_density_cuda/tools/codex_review.py` が生成、`<日付>-<plan>-<stage>.md`)。
+  採否と対応は各 plan の §6.1 レビュー記録に書く ([`procedures/codex-review.md`](../procedures/codex-review.md))。
+  一覧は [`reviews/README.md`](reviews/README.md)。
 
 ## investigations
 

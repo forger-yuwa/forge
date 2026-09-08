@@ -371,6 +371,7 @@ S0→S1 は CFD 不要で先行できる。S2–S3 は S1 と並行可 (固定�
 
 | # | 項目 | 内容 |
 | --- | --- | --- |
+| 0 | **codex plan レビュー (2026-09-09, NO-GO, C2/M7) の採否を決める** (§6.1) | 推奨は「評価器の成立確認 → 最適化再開」への組み直し。優先順案: (1) 発散評価の採用撤回と `steadiness` の NaN→STEADY 修正 + 有限値/全残差/実目的量ゲート + 力の集計範囲 (幅外機体面の分離)、(2) 作動点の凍結 TP 化と外気=空気物性、(3) 2D/3D 外部領域と格子・領域独立性、(4) 現行バイナリで生産 3 作動点の 3D SST 再現、(5) 小規模探索で判別能力確認後に MOO 再取得。各項目の採用/却下を決めたらこの行を消し、採用分を個別行に、却下理由を §6.1 に書く |
 | 1 | ~~作動点のサイクル値化~~ **実装・検証済 (2026-09-05, §10)**。残 = **MOO の再取得** (第 1 回 run_0040 は起動不安定で破棄、確定レシピ §4.12 で run_0054 を投入済) | `problem_moo_sst_node_cycle3op.yaml` (ext_top・板厚 2e-3・cm_min −7.0)。前提の §4.11 / 1b / §8-6 は全て決着。run_0019 の結論は非物理な作動点が駆動したので破棄 |
 | 1c | ~~warm start が plan と実装で食い違っている~~ **実装・検証済 (2026-09-06)**。残 = 本段の早期停止 | §4.7 は「作動点間は warm restart (同一メッシュ = index コピー)」と書いているが、`driver_sern._eval_op` は **3 作動点それぞれを一様 IC から 4 段梯子で立ち上げている**。1 評価 = 3 × 12000 step。案: (A) op 間 warm start (同一メッシュなので `restart_by_index` が使える。ただし NPR が 35.4 ↔ 2.8 と 12 倍違うので相似スケーリングが要る、順序は NPR の近い順)、(B) 本段 CFL を固定 0.5 から風洞チェーン (`runner_axismach.run_staged_ns` の `stages="ramp"`) 方式の段階昇圧へ (風洞は cfl_main 2.0–3.5 に到達している)、(C) 候補間 seeding は `interp_field` の座標一致ノード問題があるので後回し。**codex レビュー反映済**: (A) は素の index コピーが熱力学的に非互換 (同じ roe を別 γ で読むと圧力が (γ_dst−1)/(γ_src−1) 倍ずれる。m6→m10 で 1.24 倍、→m4_off で 2.18 倍) → **相似リマップ + 適応段**の A′ に変更し `warm_from_run` として実装。m10_on のみ m6_on から (NPR 35.4→56.4)、m4_off (2.8) は cold のまま。2 形状で cold と C_T が 5 桁一致・**27–28 % 短縮** (run_0072/0073)。(B) の CFL ランプは**撤回** — 風洞の ramp は「収束済み場から同条件へ restart」の文脈で効くもので、case/45 run_0027 の A/B で **warm start では利得なし**と実測されている。短縮の残りは**本段 (6000 step) を力係数の定常判定で早期停止**するほうが効く |
 | 1b | ~~`opt.cm_min` の再設定~~ **決着 (2026-09-05): −7.0** | dv 箱 324 点の MOC スイープ (`case/46/sweep_moc_dv_cycle3op.{py,log}`, 成立 246): 設計点 $C_M$ min −13.8 / p10 −10.7 / med −6.9 / p90 −2.5 / max +1.5、$C_T$ 0.81–0.965。重み付き $C_M$ は設計点の ≈0.7 倍 (m10_on −6.1、m4_off +1.0 で緩む) なので −7.0 で最悪 ~15 % を落とす。旧 −2.5 は候補の 9 割を落とす |
@@ -402,6 +403,15 @@ S0→S1 は CFD 不要で先行できる。S2–S3 は S1 と並行可 (固定�
   $C_T$ 0.932 vs 0.976 (**−4.5 %**)、$C_L$ −0.204 vs +0.004 (**符号反転**)、$C_M$ +1.07 vs −0.001。
   **2D チェーンが精密に解いている量 (摩擦 1 %、δ\* が $C_L$ で 5 %) より 3D で落ちている量が大きい**。
   したがって「2D 設計 + 3D 確認」では閉じず、§5.1-4 の手当てが要る。
+
+### 6.1 レビュー記録 (codex)
+
+[`AGENTS.md`](../../AGENTS.md) 「codex レビュー」の記録表 (`solver_density_cuda/tools/codex_review.py`、手順 [`procedures/codex-review.md`](../../procedures/codex-review.md))。
+本 plan は 2026-09-04 起票で S0–S6 実装済みのため `plan` 段は事後レビュー (残作業表の優先 3 件に重点)。
+
+| 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
+| --- | --- | --- | --- | --- |
+| plan | 2026-09-09 | [2026-09-09-tooling-nozzle-sern-chain-plan.md](../../notes/reviews/2026-09-09-tooling-nozzle-sern-chain-plan.md) | NO-GO, C2/M7/m0 | **採否未決 (ユーザ判断待ち、§5.1 #0)**。当日のスポット検証: C1 の `steadiness([1,1,1,NaN])` → `STEADY` は再現 (実バグ)、M3 の run_0083/0088 `DIVERGED (NaN/Inf)` は `check_convergence.py` で再確認。C2 (外気と排気で同じ γ,R → 外部動圧 −15 %) と M5 (3D 推力 −4.5 % に幅外機体下面の集計混入) は未検証 |
 
 ## 7. 影響範囲
 
@@ -513,6 +523,8 @@ dv 箱を動かすと**作動点 × 形状の組み合わせごとに固い場�
 - [ ] `status: done` にして §10 に変更ログ、`plans/accepted/` へ移動、`plans/README.md` 同期
 
 ## 10. 変更ログ
+
+- `2026-09-09` — codex plan 段レビュー (NO-GO, C2/M7) を §6.1 に記録。採否は未決 (§5.1 #0)。
 
 - `2026-09-04` — 初稿。調査ノート [`sern-design-method-survey.md`](../../notes/investigations/sern-design-method-survey.md) の推奨 (§4) を計画化。親 plan §4.6 ⑤ の壁圧 Bézier dv・局所帰還・3D FFD in-loop を撤回し本計画に差し替え。branch `feature/sern-design`。
 - `2026-09-04` — **S0–S1 実装** (`geometry/{sern_geometry,rao_planar,moc_sern}.py`, `probdef.KNOWN_TYPES` に `sern_2d`,

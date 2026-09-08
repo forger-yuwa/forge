@@ -26,6 +26,7 @@
 | [`development-environment.md`](development-environment.md) | 開発環境とビルド (Docker / WSL native)、速度評価の基準環境 |
 | [`cloud-aws-gpu.md`](cloud-aws-gpu.md) | AWS EC2 GPU インスタンスでの環境構築・計算投入・速度計測・結果回収の手順 |
 | [`coding-conventions.md`](coding-conventions.md) | ソース構成・C++/CUDA 命名規約・ビルド/テスト実行手順 |
+| [`codex-review.md`](codex-review.md) | 計画立案時・検証結果時の codex 外部レビュー (`codex_review.py`) の手順と記録の残し方 |
 
 ## 検証運用
 

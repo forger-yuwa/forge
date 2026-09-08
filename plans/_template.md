@@ -61,6 +61,17 @@
 - **検証ケース**: `case/<case_name>/` のどれを使うか、[`../procedures/verification/README.md`](../procedures/verification/README.md) 参照。
 - **判定基準**: 残差・物理量・性能の合否ライン。
 
+### 6.1 レビュー記録 (codex)
+
+[`AGENTS.md`](../AGENTS.md) 「codex レビュー」の記録表。`plan` 段 (§4 が書けた時点、実装前) と `result` 段
+(検証が出そろい `done` にする前) の 2 回、`python3 solver_density_cuda/tools/codex_review.py <この plan> --stage plan|result`
+を回し、出力 `notes/reviews/*.md` をここに繋ぐ。Critical / Major は採否を決めて §5.1 残作業表へ (却下なら理由をここに)。
+免除するときは段階欄を `plan 免除` / `result 免除` にし理由を書く (`check_plans.py` が見る)。
+
+| 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
+| --- | --- | --- | --- | --- |
+| plan | `YYYY-MM-DD` | [`notes/reviews/...-plan.md`](../../notes/reviews/) | GO-with-changes, C0/M2/m3 | M1 採用→§5.1 #1, M2 却下 (理由) |
+
 ## 7. 影響範囲
 
 - 触るモジュール / ファイル一覧
@@ -71,6 +82,7 @@
 
 - [ ] 関連 `methods/<area>/` の現在仕様を更新済み
 - [ ] 実装・検証完了 (本計画の §6 を満たす)
+- [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録し、Critical / Major の採否を残作業表に反映済み
 - [ ] 本計画の `status` を `done` に変更し、§9 に変更ログを記載
 - [ ] ファイルを `plans/active/` → `plans/accepted/` (superseded なら `archived/`) へ移動
 - [ ] [`plans/README.md`](README.md) の一覧を同期 (移動元・移動先)
