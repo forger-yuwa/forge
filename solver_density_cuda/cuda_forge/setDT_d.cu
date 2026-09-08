@@ -392,7 +392,8 @@ void setDT_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , vari
     }
 
     // max cfl の host 読み出し (thrust::max_element は D2H + 同期)。
-    //  - printCfl: printf が値を host で要するため、本質的に host read が必要。
+    //  - printCfl: モニタ行表示用に cfg.monitorCflMax へ格納するため host read が必要 (呼び出し側が
+    //    unsteady==1 かつ monitor step のときだけ true にする)。
     //  - dt 適応 (adaptDt && dtControl==1): 原理的には device 上で完結できる (cfl_max も cfg.dt も device 化すれば
     //    host 同期不要) が、現状 cfg.dt が host スカラ (多数カーネルに値渡し・dual-time BDF 係数等で host 使用) の
     //    ため host で計算している。よってこの条件は「現実装の都合」であり本質的要請ではない。
@@ -415,6 +416,13 @@ void setDT_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , vari
         thrust::device_ptr<flow_float> d_ptr = thrust::device_pointer_cast(var.c_d["cfl"]);
         const flow_float cfl_max = *(thrust::max_element(d_ptr, d_ptr + msh.nCells));
 
+        // 印字は console モニタ行 (main.cpp StepMonitor) が担う。cfl_max とそれを評価した dt を対で格納する
+        // (下の適応で cfg.dt が変わっても表示の対応が崩れないように、適応前に取る)。
+        if (printCfl) {
+            cfg.monitorCflMax = cfl_max;
+            cfg.monitorCflDt  = cfg.dt;
+        }
+
         if (adaptDt && cfg.dtControl == 1) { // cfl based time control
             flow_float cfl_target = cfg.cfl;
             cfg.dt = cfg.dt*cfl_target/cfl_max;
@@ -423,10 +431,6 @@ void setDT_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , vari
             cfg.dt = min(cfg.dt, cfg.dt_max);
         }
 
-        if (printCfl) {
-            printf("  max cfl : %f    \n", cfl_max);
-            printf("  dt      : %e [s]\n", cfg.dt);
-        }
     }
 
     gpuErrchk( cudaPeekAtLastError() );

@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <stdio.h>                                                                                       
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <time.h>
 #include <limits>
@@ -317,7 +318,7 @@ public:
         writeRowImmediate(step, -1, ResidualPhase::OuterEnd, last_snapshot_, last_correction_snapshot_);
     }
 
-    // buffer に残った残差を強制 flush する (停止前などに使用)。
+    // buffer に残った残差を強制 flush する (停止前・console モニタ行の直前などに使用)。
     void flush()
     {
         if (gpu_) {
@@ -325,7 +326,41 @@ public:
         }
     }
 
+    // console モニタ行用の要約: 最新 outer_end 行の rms と、step 0 outer_begin の rms (基準)。
+    // flush 済みの値 (= CSV に書いた値そのもの) を返すので追加 reduction は無い。
+    struct Summary {
+        bool valid = false;
+        int step = -1;
+        std::vector<std::string> names;
+        std::vector<double> rms;    // 最新 outer_end
+        std::vector<double> rms0;   // step 0 outer_begin (基準)。未取得なら空
+    };
+    Summary latestSummary() const
+    {
+        Summary sm;
+        sm.valid = last_end_valid_;
+        sm.step = last_end_step_;
+        sm.names = residual_names_;
+        sm.rms = last_end_rms_;
+        if (has_rms0_) sm.rms0 = rms0_;
+        return sm;
+    }
+
 private:
+    // 要約状態の更新 (CPU/GPU 両経路の行書き出しから呼ぶ)。
+    void noteRow(int step, ResidualPhase phase, const flow_float* v, int n)
+    {
+        if (phase == ResidualPhase::OuterBegin && !has_rms0_) {
+            rms0_.assign(v, v + n);
+            has_rms0_ = true;
+        }
+        if (phase == ResidualPhase::OuterEnd) {
+            last_end_rms_.assign(v, v + n);
+            last_end_step_ = step;
+            last_end_valid_ = true;
+        }
+    }
+
     struct RowDesc {
         int step;
         int inner;
@@ -362,6 +397,7 @@ private:
         }
         stream_ << "\n";
         stream_.flush();
+        noteRow(step, phase, snapshot.rms.data(), static_cast<int>(snapshot.rms.size()));
     }
 
     // device buffer を host へ一括転送し、buffer 済みの全行を書き出して reset する (同期点はここだけ)。
@@ -381,6 +417,7 @@ private:
                 stream_ << ',' << std::setprecision(16) << static_cast<flow_float>(0.0);  // rms_dq_* は常に 0
             }
             stream_ << "\n";
+            noteRow(rd.step, rd.phase, v, reducer_.nVar);
         }
         stream_.flush();
         rows_.clear();
@@ -404,6 +441,135 @@ private:
     int buf_capacity_ = 1;
     int device_count_ = 0;
     int last_slot_ = 0;
+
+    // console モニタ行用の要約状態
+    std::vector<double> rms0_;
+    bool has_rms0_ = false;
+    std::vector<double> last_end_rms_;
+    int last_end_step_ = -1;
+    bool last_end_valid_ = false;
+};
+
+// console モニタ行 (methods/architecture/overview.md §8.5, plans/accepted/architecture-runtime-monitor-line.md)。
+// monitorInterval ステップごとに 1 行: [unsteady のみ t/dt/maxCFL] | 壁時計 ms/step・経過・ETA | 残差要約。
+// 定常 (unsteady==0) では cfg.dt/max cfl は dt_local から打ち消されて無意味なので出さない (陽・陰とも)。
+class StepMonitor {
+public:
+    using clock = std::chrono::steady_clock;
+
+    StepMonitor(const solverConfig& cfg, ResidualCsvLogger& logger)
+        : cfg_(cfg), logger_(logger), t_start_(clock::now()), t_last_(t_start_) {}
+
+    // 起動時のモード要約 (1 回)。
+    void printHeader() const
+    {
+        const bool unsteady = (cfg_.unsteady == 1);
+        const bool implicit = (cfg_.isImplicit == 1);
+        std::string mode;
+        if (!unsteady && implicit)      mode = "steady implicit (block-DPLUR, local pseudo-dt)";
+        else if (!unsteady && !implicit) mode = "steady explicit (local pseudo-dt)";
+        else if (unsteady && implicit)  mode = "unsteady dual-time implicit";
+        else                            mode = "unsteady explicit RK";
+        std::cout << "[monitor] mode: " << mode
+                  << "  nStepOuter=" << cfg_.mainLoopCount()
+                  << "  monitorInterval=" << cfg_.monitorInterval;
+        if (implicit) {
+            std::cout << "  cfl_pseudo=" << cfg_.cfl_pseudo
+                      << "  implicitRelax=" << cfg_.implicitRelax
+                      << "  nStepInner=" << cfg_.nStepInner;
+            if (unsteady) std::cout << "  nSubIterDualTime=" << cfg_.nSubIterDualTime;
+        } else if (!unsteady) {
+            std::cout << "  cfl_pseudo=" << cfg_.cfl_pseudo;
+        }
+        if (unsteady) {
+            std::cout << "  dt=" << cfg_.dt
+                      << (cfg_.dtControl == 1 ? " (CFL-adaptive)" : " (fixed)");
+        }
+        std::cout << "\n";
+        std::cout << "[monitor] columns: step"
+                  << (unsteady ? ((cfg_.dtControl == 1 && !implicit) ? " | t dt maxCFL dt_next" : " | t dt maxCFL") : "")
+                  << " | ms/step elapsed eta | rms_ro (log10 change vs step 0) worst column (log10 change) [from0 column]\n";
+    }
+
+    // 各ステップ末尾で呼ぶ。monitor step のみ出力 (それ以外は何もしない = 同期なし)。
+    void report(int iStep)
+    {
+        steps_since_++;
+        if (iStep % cfg_.monitorInterval != 0) return;
+
+        logger_.flush();   // 残差を host へ (monitor step ではいずれ起きる D2H を前倒し)
+        const auto now = clock::now();
+        const double elapsed = std::chrono::duration<double>(now - t_start_).count();
+        const double interval = std::chrono::duration<double>(now - t_last_).count();
+        const double ms_per_step = (steps_since_ > 0) ? interval * 1.0e3 / steps_since_ : 0.0;
+        const int remaining = cfg_.mainLoopCount() - (iStep + 1);
+        const double eta = (remaining > 0) ? remaining * ms_per_step * 1.0e-3 : 0.0;
+        t_last_ = now;
+        steps_since_ = 0;
+
+        std::ostringstream os;
+        os << "step " << std::setw(8) << (iStep + 1);
+        if (cfg_.unsteady == 1) {
+            // dt と maxCFL は同じ刻みで対にする: monitorCflDt = この step の前進に使った dt で評価した CFL。
+            // dtControl==1 (適応) では setDT が既に cfg.dt を次 step 用に更新しているので dt_next として別表示。
+            const bool haveCfl = (cfg_.monitorCflMax >= 0.0 && cfg_.monitorCflDt > 0.0);
+            const double dtUsed = haveCfl ? cfg_.monitorCflDt : cfg_.dt;
+            os << " | t " << std::scientific << std::setprecision(4) << cfg_.totalTime
+               << " dt " << std::setprecision(2) << dtUsed;
+            if (haveCfl) {
+                os << " maxCFL " << std::fixed << std::setprecision(2) << cfg_.monitorCflMax;
+            }
+            if (cfg_.dtControl == 1 && cfg_.isImplicit == 0) {
+                os << " dt_next " << std::scientific << std::setprecision(2) << cfg_.dt;
+            }
+        }
+        os << " | " << std::fixed << std::setprecision(2) << ms_per_step << " ms/step"
+           << " elapsed " << std::setprecision(1) << elapsed << " s"
+           << " eta " << std::setprecision(0) << eta << " s";
+
+        const auto sm = logger_.latestSummary();
+        if (sm.valid && !sm.rms.empty()) {
+            bool nonfinite = false;
+            int worst = -1;
+            double worst_dec = std::numeric_limits<double>::infinity();
+            int from0 = -1;          // 初期残差 0 → 現在非 0 の列 (低下桁数が定義できないので別表示)
+            double from0_val = 0.0;
+            std::vector<double> dec(sm.rms.size(), std::numeric_limits<double>::quiet_NaN());
+            for (size_t i = 0; i < sm.rms.size(); ++i) {
+                if (!std::isfinite(sm.rms[i])) { nonfinite = true; continue; }
+                if (i < sm.rms0.size() && sm.rms0[i] > 0.0 && sm.rms[i] > 0.0) {
+                    dec[i] = std::log10(sm.rms0[i] / sm.rms[i]);
+                    if (dec[i] < worst_dec) { worst_dec = dec[i]; worst = static_cast<int>(i); }
+                } else if (i < sm.rms0.size() && sm.rms0[i] == 0.0 && sm.rms[i] > from0_val) {
+                    from0 = static_cast<int>(i); from0_val = sm.rms[i];
+                }
+            }
+            os << " | rms_" << sm.names[0] << " " << std::scientific << std::setprecision(2) << sm.rms[0];
+            if (std::isfinite(dec[0])) os << " (" << std::fixed << std::showpos << std::setprecision(1) << -dec[0] << std::noshowpos << ")";
+            if (worst >= 0 && worst != 0) {
+                os << " worst rms_" << sm.names[worst] << " " << std::scientific << std::setprecision(2) << sm.rms[worst]
+                   << " (" << std::fixed << std::showpos << std::setprecision(1) << -dec[worst] << std::noshowpos << ")";
+            }
+            if (from0 >= 0) {
+                os << " from0 rms_" << sm.names[from0] << " " << std::scientific << std::setprecision(2) << sm.rms[from0];
+            }
+            if (nonfinite) os << " *** NaN ***";
+        }
+        std::cout << os.str() << "\n";
+        std::cout.flush();
+    }
+
+    double elapsedSeconds() const
+    {
+        return std::chrono::duration<double>(clock::now() - t_start_).count();
+    }
+
+private:
+    const solverConfig& cfg_;
+    ResidualCsvLogger& logger_;
+    clock::time_point t_start_;
+    clock::time_point t_last_;
+    int steps_since_ = 0;
 };
 
 class ImplicitDiagLogger {
@@ -1127,7 +1293,8 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
     // unsteady でここに来る経路は無い (implicit unsteady は dual-time) が、防御的に毎ステップ adapt にする。
     const bool onMonitor = (s.iStep % s.cfg.monitorInterval == 0);
     const bool adaptDt  = (s.cfg.unsteady != 0) || onMonitor;
-    const bool printCfl = onMonitor;
+    // max cfl の host 読みは unsteady のモニタ行にしか要らない (定常では cfg.dt が無意味なので読まない)。
+    const bool printCfl = onMonitor && (s.cfg.unsteady == 1);
     s.profiler.measureCuda(ProfileSection::SetDt, [&]() {
         setDT_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, adaptDt, printCfl);
     });
@@ -1216,7 +1383,7 @@ void advanceExplicitRK(StepContext& s)
             condensationUpdateInner_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // 液相モーメント M ステージ始点
         });
 
-        cout << "       " << iteration_label << " : " << iloop+1 << "\n";
+        (void)iteration_label;   // 旧 "Stage : n" 行は廃止 (console モニタ行に集約)
         assembleResidual(s, iloop + 1);
         logResidualSnapshot(s, iloop);
         s.profiler.measureCuda(ProfileSection::TimeIntegration, [&]() {
@@ -1245,15 +1412,18 @@ void advanceExplicitRK(StepContext& s)
     s.profiler.measureWall(ProfileSection::WriteOutputs, [&]() {
         writeStepOutputs(s.cfg , s.cuda_cfg , s.msh , s.var , s.pprobes , s.iStep+1);
     });
-    // explicit (陽解法) は cfg.dt を時間前進に使うため dt 適応は毎ステップ行う。表示のみ monitorInterval で間引く。
-    const bool printCflExp = (s.iStep % s.cfg.monitorInterval == 0);
+    // explicit (陽解法) は cfg.dt を時間前進に使うため dt 適応は毎ステップ行う。max cfl の host 読みは
+    // unsteady のモニタ行用に monitorInterval で間引く (定常局所 dt では cfg.dt は無意味なので読まない)。
+    const bool printCflExp = (s.iStep % s.cfg.monitorInterval == 0) && (s.cfg.unsteady == 1);
+    // 物理時間はこの step の前進に使った dt で進める。setDT (dtControl==1 の適応) の後に足すと次 step 用の dt が
+    // 加算され t がずれる (旧実装のバグ。適応 sod で step 1 の t=1.087e-6 ≠ 使用 dt 1.097e-6 として露見, 2026-09-09)。
+    if (s.cfg.unsteady == 1) {
+        s.cfg.totalTime += s.cfg.dt;
+    }
     s.profiler.measureCuda(ProfileSection::SetDt, [&]() {
         setDT_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, /*adaptDt=*/true, /*printCfl=*/printCflExp);
     });
     s.residual_logger.logOuterEnd(s.iStep);
-    if (s.cfg.unsteady == 1) {
-        s.cfg.totalTime += s.cfg.dt;
-    }
 }
 
 // 定常 block DPLUR 陰解法。メインループ（nStepOuter）を擬似時間とし、1 ステップ = 1 非線形更新の縮退形。
@@ -1312,9 +1482,8 @@ void advanceImplicitDualTime(StepContext& s)
         // 残差に物理時間 BDF 項を加える: res* = res - (V/Δt)(a Q - b Q^n + c Q^{n-1})。
         addUnsteadyTimeTerm_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, a, b, c, include_scalar);
         logResidualSnapshot(s, m);
-        // dual-time も pseudo/physical の時間を CFL に基づき変えうるため、dt 適応は毎サブ反復で行う
-        // (adaptDt=true → dtControl==1 のとき cfg.dt を適応; host 読み出しもそのとき発生)。表示のみ
-        // monitorInterval で間引く。
+        // dual-time は dtControl==0 を強制している (上の検査) ので adaptDt=true でも cfg.dt は変わらない
+        // (host 読みは printCflDt のときだけ発生)。max cfl (物理 CFL) の格納は monitorInterval で間引く (モニタ行が表示)。
         const bool printCflDt = (s.iStep % s.cfg.monitorInterval == 0);
         s.profiler.measureCuda(ProfileSection::SetDt, [&]() {
             setDT_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, /*adaptDt=*/true, /*printCfl=*/printCflDt);
@@ -1440,13 +1609,7 @@ void advanceOneStep(
     ImplicitDiagLogger& implicit_diag_logger,
     int iStep)
 {
-    cout << "----------------------------\n";
-    cout << "Step : " << iStep;
-    if (cfg.unsteady == 1) {
-        cout << "  Time : " << cfg.totalTime;
-    }
-    cout << "\n";
-
+    // 旧 "Step : N / Time : t" ヘッダは廃止。console 出力は StepMonitor (main ループ) の 1 行に集約。
     StepContext s{cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes,
                   profiler, residual_logger, implicit_diag_logger, iStep};
 
@@ -1475,7 +1638,6 @@ void advanceOneStep(
 }
 
 int main(void) {
-    clock_t start = clock();
     RuntimeProfiler profiler;
 
     solverConfig cfg;
@@ -1538,14 +1700,17 @@ int main(void) {
 
     writeInitialOutputs(cfg , msh , var);
 
+    StepMonitor monitor(cfg, residual_logger);
+    monitor.printHeader();
     cout << "Start Calculation \n";
     for (int iStep = 0 ; iStep < cfg.mainLoopCount() ; iStep++) {
         advanceOneStep(cfg , cuda_cfg , msh , mat_ns , var , fluct , pprobes , profiler , residual_logger , implicit_diag_logger , iStep);
+        monitor.report(iStep);
     }
 
-    clock_t end = clock();
-    double time = (double)(end - start) / CLOCKS_PER_SEC;
-    printf("Time = %.3f s\n", time); 
+    // 壁時計 (旧実装は clock() = CPU 時間で、GPU 待ちを含まなかった)。書式 "Time = %.3f s" は grep 互換のため維持。
+    printf("Time = %.3f s (wall, %d steps, %.2f ms/step)\n", monitor.elapsedSeconds(), cfg.mainLoopCount(),
+           monitor.elapsedSeconds() * 1.0e3 / std::max(1, cfg.mainLoopCount())); 
     profiler.printSummary();
 
 	return 0;

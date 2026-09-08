@@ -43,15 +43,18 @@
 - `unsteady == 0` または `dualTime == 1` のとき、局所刻みは `setDTlocal_pseudo_cell_d` で
   `dt_local = cfl_pseudo * dt / cfl_cell` と設定される。`cfl_cell` は同じ `dt` から計算されるため
   `dt` が相殺し、**実効局所 CFL = `cfl_pseudo`** になる。
-- `cfg.cfl` は表示用の `cfg.dt` (および `max cfl` 表示) をスケールするだけで、
-  定常計算の積分自体には効かない。したがって定常で `cfl` だけを上げても収束は速くならない。
+- `cfg.cfl` は `cfg.dt` をスケールするだけで、定常計算の積分自体には効かない。したがって定常で `cfl`
+  だけを上げても収束は速くならない。このため console モニタ行は定常では `dt`/`maxCFL` を表示しない
+  (2026-09-09 以降。[`methods/architecture/overview.md`](../methods/architecture/overview.md) §8.5)。
 
 運用ルール:
 
 - **定常 (`unsteady: 0`) の収束を速めたいときは `cfl_pseudo` を上げる** (例: 陰解法 `blockDPLUR: 1`
   なら `cfl_pseudo` を 20〜50 程度まで)。`cfl` を上げても無意味。
 - 非定常 (`unsteady: 1`, `dualTime: 0`) の物理時間刻みは `cfl` (または `dt`) で決まる。
-- ログの `max cfl` 表示は `cfg.cfl` に追従する値であり、実効積分 CFL ではない点に注意する。
+- console モニタ行の `maxCFL` は非定常 (`unsteady: 1`) のみ表示され、そのときは `cfg.dt` 基準の物理 CFL である
+  (dual-time では経験的に ≲12 が安定域)。定常には表示されない (以前の `max cfl : ...` 行は `cfg.dt`
+  に追従するだけの無意味な値だったため廃止)。
 
 ## lineImplicit — 壁法線 line-implicit (block-Thomas) と v2 オプション
 

@@ -14,6 +14,8 @@
 | `run_0010_aws_cell_smoke` (EC2) | 同上の cell 版 | 完走・NaN なし。run_0012 と最大相対差 2.2e-6 / L2 1.2e-7 で一致 | ref (EC2 上) |
 | `run_0011_aws_repro_node` | run_0009 の**ローカル再現** (EC2 生成の sod3d.h5 を bit 同一入力に使用、現行 HEAD native ビルド) | AWS↔ローカル一致の判定根拠 (上記) | ref |
 | `run_0012_aws_repro_cell` | run_0010 のローカル再現 | 同上 | ref |
+| `run_0013_monitor_explicit` | run_0012 の複製。**console モニタ行** ([plans/accepted/architecture-runtime-monitor-line.md](../../plans/accepted/architecture-runtime-monitor-line.md)) の非定常陽解法 (RK3, 固定 dt) 検証: `t`/`dt`/`maxCFL` + ms/step + 残差要約。`_baseline/` は旧バイナリ比較用 | 完走・NaN 0。`t/dt/maxCFL 0.07` 表示、log 1512→312 行、CSV 旧×2/新×2 列別比較 (`csv_compare.txt`) 合格 | 破棄予定 (ログ形式検証) |
+| `run_0014_monitor_explicit_adaptdt` | run_0012 + `deltaT.control: 1` (CFL 0.2 適応) + `monitorInterval: 5`。モニタ行の `dt` (使用)/`maxCFL`/`dt_next` の刻み対応と `totalTime` 加算順修正の検証 (codex result Major 1)。`_baseline/ _baseline2/ _new2/` は CSV 比較用 | 完走・NaN 0。step 1: `t 1.0969e-06 dt 1.10e-06 maxCFL 0.20 dt_next 1.09e-06` (t = 使用 dt)。`csv_compare.txt` 合格 | 破棄予定 (ログ形式検証) |
 
 **結論**: node sod 3D periodic が **安定・物理的・spanwise 完全均一**で動作 (検証完結)。当初「node-explicit-shock 限界」とした発散は**誤診**で、真因は壊れた IC (非次元→P均一) + 過大 CFL だった (user 指摘で判明)。periodic 実装は transient 衝撃でも健全。
 

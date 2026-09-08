@@ -94,13 +94,21 @@ public:
                                    // ステップごとにのみ host へ読み出す (per-step 同期を避ける)。
     int detectNaNInterval = 1;     // detectNaN==1 時にフラグを host 読み出しする間隔 [step] (既定 1=毎ステップ)。
                                    // 大きくすると per-step 同期が減るが NaN 検知が最大 (interval-1) step 遅れる。
-    // モニタリング出力 (= 残差 CSV の device→host flush と、`max cfl`/`dt` の console 出力) を行う共通間隔 [step]。
+    // モニタリング出力 (= 残差 CSV の device→host flush と、console モニタ行) を行う共通間隔 [step]。
     // 既定 1=毎ステップ (従来挙動)。>1 で per-step の host 同期 (残差 reduction の D2H・max cfl の thrust::max_element)
     // をまとめて間引く。残差は毎ステップ device バッファに記録され、この間隔ごとに一括 D2H+CSV 書き出しされる
-    // (毎ステップの値・行構成は不変)。`max cfl`/`dt` は console にこの間隔ごとに表示される。
+    // (毎ステップの値・行構成は不変)。console モニタ行 (methods/architecture/overview.md §8.5) もこの間隔ごとに 1 行出る。
     // 注意: dt 適応 (dtControl==1) はこの間隔とは独立 (下記)。詳細:
-    // plans/accepted/architecture-residual-monitor-async.md, architecture-perphase-profiling-hotspot.md。
+    // plans/accepted/architecture-residual-monitor-async.md, architecture-perphase-profiling-hotspot.md,
+    // plans/accepted/architecture-runtime-monitor-line.md。
     int monitorInterval = 1;
+    // setDT_d_wrapper(printCfl=true) が host 読みした max CFL (= cfg.dt 基準の物理 CFL) の格納先。console モニタ行が
+    // unsteady==1 のときだけ表示する (定常では cfg.dt が dt_local から打ち消され無意味なので読みも表示もしない)。
+    // 負値 = 未取得。monitorCflDt は cfl を評価した時点の cfg.dt (= その step の前進に使った dt)。dtControl==1 では
+    // setDT が直後に cfg.dt を次 step 用に適応するので、モニタ行は (monitorCflDt, monitorCflMax) を対で表示し、
+    // 適応後の cfg.dt は dt_next として別に出す (codex result レビュー Major 1)。
+    flow_float monitorCflMax = -1.0;
+    flow_float monitorCflDt  = -1.0;
     int lowMachPrecond = 0;        // Weiss-Smith 低マッハ前処理。0: off (従来・ビット不変),
                                    // 1: フラックス散逸前処理のみ (RHS, c_hat→c'。収束解を低マッハ域で変更),
                                    // 2: RHS(c' 散逸)+LHS 完全 Γ⁻¹A 前処理 (block-DPLUR 擬似時間項+setDT 拡大),

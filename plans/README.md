@@ -97,6 +97,7 @@
 | [architecture-axisymmetric.md](accepted/architecture-axisymmetric.md) | `architecture` | architecture-axisymmetric — 軸対称ソルバ Phase 1 |
 | [architecture-detect-nan.md](accepted/architecture-detect-nan.md) | `architecture` | detectNaN — NaN/Inf 検知・自動ダンプ診断オプション |
 | [architecture-rans-sst.md](accepted/architecture-rans-sst.md) | `architecture` | architecture-rans-sst — RANS SST 親計画 |
+| [architecture-runtime-monitor-line.md](accepted/architecture-runtime-monitor-line.md) | `architecture` | console モニタ行 (2026-09-09): 定常で無意味な `max cfl`/`dt` 印字を廃し、モード別に壁時計 ms/step・ETA・残差要約 (worst 列) を 1 行/monitor で出す。3 モードで CSV 不変を検証。残: EOS 床ヒット数・境界 ṁ の追加 |
 | [architecture-residual-monitor-async.md](accepted/architecture-residual-monitor-async.md) | `architecture` | 残差モニタの device 常駐化 (per-step host 同期の除去) |
 | [architecture-perphase-profiling-hotspot.md](accepted/architecture-perphase-profiling-hotspot.md) | `architecture` | per-phase 計測駆動の host 律速最適化 (13.4→5.9s/2000step, −56%)。残レバー (CUDA Graph/renumbering) は不採用理由ごと記録 |
 | [boundary-outlet-characteristic-backflow.md](accepted/boundary-outlet-characteristic-backflow.md) | `boundary` | 静圧固定流出 BC の特性ベース化と逆流統一 |
