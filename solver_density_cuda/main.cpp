@@ -18,6 +18,7 @@
 #include "variables.hpp"
 
 #include "input/solverConfig.hpp"
+#include "input/condSonicResolve.hpp"
 #include "input/setInitial.hpp"
 
 #include "mesh/gmshReader.hpp"
@@ -970,6 +971,21 @@ cudaConfig initializeSimulation(
 
     cout << "Read Boundary Conditions \n";
     readBcondConfig(cfg , msh.bconds);
+
+    // 凝縮セルの二相 frozen 音速 (condSonicModel) の自動解決: bcond 種別が揃った後に確定し理由をログに出す
+    // (plans/active/condensation-kantrowitz-gamma-twophase-sonic.md §4.2)。
+    {
+        std::vector<std::string> kinds;
+        for (const auto& bc : msh.bconds) kinds.push_back(bc.bcondKind);
+        std::string reason, warn;
+        const int resolved = resolveCondSonicModel(cfg.condSonicModel, cfg.condensation, cfg.thermalMethod, cfg.condGasSpecies,
+                                                   cfg.condModel, cfg.condEquilibrium, kinds, reason, warn);
+        if (cfg.condensation == 1) {
+            cout << "[condensation] condSonicModel=" << resolved << " (" << reason << ")\n";
+            if (!warn.empty()) cout << "[condensation] WARNING: " << warn << "\n";
+        }
+        cfg.condSonicModel = resolved;
+    }
 
     // 入口分布プロファイル (ints:{inletProfile:1} の inlet): per-face bvar を CSV から face 重心で補間。
     // mesh.planes (重心) と bvar が揃った後・最初の applyBconds より前に適用。未指定 inlet は一様のまま。

@@ -687,6 +687,8 @@ void solverConfig::read(std::string fname)
             this->condModel = getOptionalValidatedValue<int>(cond, "condModel", 0, "condensation");
             this->condGasSpecies = getOptionalValidatedValue<int>(cond, "condGasSpecies", -1, "condensation");
             this->condKantrowitz = getOptionalValidatedValue<int>(cond, "condKantrowitz", 0, "condensation");
+            this->condKantrowitzGammaMode = getOptionalValidatedValue<int>(cond, "condKantrowitzGammaMode", 0, "condensation");
+            this->condSonicModel = getOptionalValidatedValue<int>(cond, "condSonicModel", -1, "condensation");
             this->condGrowthModel = getOptionalValidatedValue<int>(cond, "condGrowthModel", 0, "condensation");
             this->condGyarmathyC = getOptionalValidatedValue<double>(cond, "condGyarmathyC", 3.18, "condensation");
             this->condTwoTemp = getOptionalValidatedValue<int>(cond, "condTwoTemp", 0, "condensation");

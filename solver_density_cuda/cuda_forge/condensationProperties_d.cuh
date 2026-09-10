@@ -285,8 +285,11 @@ __host__ __device__ inline CondSpeciesProps condProps_H2O()
     CondSpeciesProps s;
     s.model = COND_MODEL_H2O;
     s.R  = 461.5;
-    s.cv = 1418.0;   // 蒸気 cv (参考、TP では NASA を使う)
-    s.cp = 1880.0;
+    // 蒸気 cp/cv: NASA-9 (species_db.yaml H2O) の 200–300 K 平均 (cp 1851–1865, γ_v 1.329–1.332)。
+    // Kantrowitz 非等温補正の γ_v=cp/cv=1.331 に使う (純蒸気形の係数 2(γ_v−1)/(γ_v+1)=R_v/(c_v,v+R_v/2))。
+    // 気相 EOS は TP では NASA-9 を使うのでここは核生成補正専用 (plans/active/condensation-kantrowitz-gamma-twophase-sonic.md)。
+    s.cv = 1393.5;
+    s.cp = 1855.0;
     s.Tt = 273.16;
     s.Tc = 647.096;
     s.M  = 0.0180153;

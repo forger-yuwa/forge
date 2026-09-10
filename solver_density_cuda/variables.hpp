@@ -224,7 +224,7 @@ public:
     {
         "ro"    , "Ux"    , "Uy"    , "Uz"  , "T" , "P" ,
         "roUx"  , "roUy"  , "roUz"  , "roe" , "roK" , "roOmega" , "k" , "omega" ,
-        "cfl"   , "volume", "sonic" , 
+        "cfl"   , "volume", "sonic" , "gamma" ,   // gamma: per-cell γ (TP では γ_mix / 凝縮二相では γ_2φ; 実カーネル照合用)
         "dUxdx" , "dUxdy" , "dUxdz" , 
         "dUydx" , "dUydy" , "dUydz" , 
         "dUzdx" , "dUzdy" , "dUzdz" ,

@@ -126,6 +126,23 @@ __host__ __device__ inline double cond_T_from_e_onetemp(
     return T;
 }
 
+// 二相 frozen 音速 (固定 g,Y; plans/active/condensation-kantrowitz-gamma-twophase-sonic.md §4.2, methods/condensation.md §5)。
+//   一温度二相 EOS p=ρ R_eff T, e=e^全蒸気(T)+g(R_w T−L(T)) の g,Y 固定の等エントロピー微分:
+//     c² = (∂p/∂ρ)_e + (p/ρ²)(∂p/∂e)_ρ = γ_2φ R_eff T,
+//     c_p,2φ = c_p^全蒸気 − g L'(T)  (L'=c_p,v−c_l なので「g ぶんの蒸気 c_p を液 c_l に置換」),  c_v,2φ = c_p,2φ − R_eff.
+//   carrier: R_eff=R_mix−g R_w、pure: R_eff=(1−g)R。c_v,2φ は温度反転 Newton の de/dT と同一。
+//   戻り値 false = 熱力学的に不整合 (c_v,2φ<=0.05 c_p,2φ、N2 潜熱フィットの低温 L'>0 など) → 呼び出し側は旧式にフォールバック。
+__host__ __device__ inline bool cond_twophase_sonic(
+    double cp_allvap, double R_eff, double g, double dLdT, double T, double* gamma2, double* c2)
+{
+    const double cp2 = cp_allvap - g*dLdT;
+    const double cv2 = cp2 - R_eff;
+    if (!(cv2 > 0.05*cp2) || !(R_eff > 0.0) || !(T > 0.0)) return false;
+    *gamma2 = cp2/cv2;
+    *c2 = (*gamma2)*R_eff*T;
+    return (*c2 > 0.0);
+}
+
 // 平衡凝縮 (condEquilibrium=1): 現セル状態から e 一定で液相を Δ だけ変えたときの
 //   T(Δ) = T + Δ (L - R_w T)/(c_vg + g R_w)  (二相 EOS の線形化), p_v(Δ) = ρ (y_v0 - Δ) R_w T(Δ)
 // が p_sat(T(Δ)) と釣り合う Δ ∈ [-g, y_v0] を二分法で解く (F は Δ について単調減少)。

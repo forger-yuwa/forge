@@ -112,6 +112,12 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
   定常 precond × 多成分は `speciesPrecondDt: 1` (既定)。TP 亜音速 `outlet_statPress` の γ 混用は修正済。
 - 凝縮: `condensation: 1, condEquilibrium: 2` (EOS 拘束形、厳密 S=1) が既定。蒸発は既定 ON。
   凝縮 run は h0 保存を確認する (面温度修正済み)。onset は実験より ~5 mm 下流 (case/16 2026-09-08 比較)。
+- 凝縮 (2026-09-10, plan [condensation-kantrowitz-gamma-twophase-sonic](../plans/active/condensation-kantrowitz-gamma-twophase-sonic.md)):
+  Kantrowitz 補正 (`condKantrowitz: 1`) の γ は凝縮種 (蒸気) の γ_v が既定 (`condKantrowitzGammaMode: 0`; 旧=1)。
+  凝縮セルの音速は `condSonicModel` (未指定=自動): **TP carrier H2O・`condEquilibrium 0`・境界が
+  `inlet_Pressure`/`outflow`/`wall`/`slip`/`periodic` のみ** のとき二相 frozen 音速 (1)、それ以外は旧の全蒸気音速 (0)。
+  起動ログ `[condensation] condSonicModel=... (理由)` で解決値を確認する。`outlet_statPress`/`wall_isothermal` を含む構成と
+  `condEquilibrium 1/2`・pure N2・CPG は未検証 (明示 1 は警告つきで可)。
 - 化学 (H₂): 定常陰解法は `speciesImplicitCoupling: 2` + `jacobianMode: 2` 必須、Cabra は dual-time 必須
   ([chemistry-finite-rate-direction], branch feature/chemistry-finite-rate)。
 

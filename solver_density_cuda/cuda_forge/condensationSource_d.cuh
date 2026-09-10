@@ -27,10 +27,11 @@
 //   N2: ×exp(A+B/T) [Iland]。H2O: 等温 CNT (キャリア N2 がクラスタを熱平衡化し Kantrowitz 非等温抑制は
 //        ~1 に量子化されるため、希薄水-N2 では等温近似。過抑制を避ける; 必要なら carrier-Kantrowitz を後段)。
 // 核生成 (CNT × 種ごと補正 × 任意 Kantrowitz 非等温補正)。
-//   kantrowitz!=0 のとき J を 1/(1+θ) 倍する (Feder/Kantrowitz 非等温補正):
-//     θ = 2(γ-1)/(γ+1) · b(b-1/2),  b = L/(R_v T)  (γ=熱を運ぶ気相の比熱比 gamma_gas)。
-//   純蒸気では θ が大きく J を桁で抑える。キャリア気体 (N2) 中ではキャリアが潜熱を奪い θ→小 となるが、
-//   ここでは感度評価用に純蒸気形 (gamma_gas=carrier γ) をそのまま掛ける on/off スイッチとして実装。
+//   kantrowitz!=0 のとき J を 1/(1+θ) 倍する (Feder/Kantrowitz 非等温補正, 純蒸気形):
+//     θ = 2(γ_v-1)/(γ_v+1) · b(b-1/2),  b = L/(R_v T)  (γ_v = 凝縮種 (蒸気) 自身の比熱比。gamma_gas 引数に渡す。
+//     2(γ_v−1)/(γ_v+1)=R_v/(c_v,v+R_v/2) は蒸気分子との衝突で持ち去れるエネルギー揺らぎの尺度なので蒸気の熱容量を使う)。
+//   純蒸気では θ が大きく J を桁で抑える。キャリア気体 (N2) 中ではキャリア衝突が潜熱を奪い θ はさらに小さい (Feder 拡張, 未実装)。
+//   2026-09-10 まではセル気相混合の γ (carrier では ≈1.40) を渡していた (旧挙動は condKantrowitzGammaMode=1)。
 __host__ __device__ inline void cond_nucleation(
     const CondSpeciesProps& cp, double T, double p_v, double rho_v,
     double* J_out, double* rstar_out,

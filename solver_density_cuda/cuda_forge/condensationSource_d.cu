@@ -37,7 +37,7 @@ __host__ __device__ inline void cond_vapor_state(
 __global__ void condensation_source_d(
     geom_int nCells,
     int condModel, int carrier, double Rw, double M,
-    int kantrowitz, int growthModel, double gyarC, int twoTemp,
+    int kantrowitz, int kwGammaMode, int growthModel, double gyarC, int twoTemp,
     int evap, double evapRmin, int evapKelvin, double evapLamMin,
     int eq, double eqRelax, double eqDgMax, double eqDTmax,
     flow_float cp_cpg, flow_float gamma_cpg,
@@ -79,8 +79,10 @@ __global__ void condensation_source_d(
     double pv, rho_v;
     cond_vapor_state(carrier, rod, Pd, Td, g, Yw, Rw, &pv, &rho_v);
 
-    // Kantrowitz 用の気相比熱比、Gyarmathy Kn 用の全圧 (carrier=Pd, pure=pv)
-    const double gamma_gas = cpg/cvg;
+    // Kantrowitz 用の比熱比: 既定は凝縮種 (蒸気) 自身の γ_v (純蒸気形の係数 2(γ_v−1)/(γ_v+1)=R_v/(c_v,v+R_v/2))。
+    // kwGammaMode=1 は旧挙動 (セル気相混合 cp/cv。carrier では N2 支配 ≈1.40 で θ が過大) を A/B 用に残す。
+    // Gyarmathy Kn 用の全圧 (carrier=Pd, pure=pv)
+    const double gamma_gas = (kwGammaMode == 1) ? (cpg/cvg) : (cprops.cp/cprops.cv);
     const double p_gas = carrier ? Pd : pv;
 
     // 診断: 過飽和 S=p_v/p_sat(T)
@@ -255,7 +257,7 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
         condensation_source_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells,
             cfg.condModel, carrier, Rw, M,
-            cfg.condKantrowitz, cfg.condGrowthModel, cfg.condGyarmathyC, cfg.condTwoTemp,
+            cfg.condKantrowitz, cfg.condKantrowitzGammaMode, cfg.condGrowthModel, cfg.condGyarmathyC, cfg.condTwoTemp,
             cfg.condEvaporation, cfg.condEvapRmin, cfg.condEvapKelvin, evapLamMin,
             cfg.condEquilibrium, cfg.condEqRelax, cfg.condEqDgMax, cfg.condEqDTmax,
             cfg.cp, cfg.gamma,

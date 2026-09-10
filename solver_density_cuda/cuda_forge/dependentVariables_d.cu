@@ -24,6 +24,7 @@ __global__ void dependentVariables_d
  int condensation , int nCondSpecies , flow_float** rog ,
  int condGasSpecies , int condModel ,   // carrier+condensible: 凝縮気相種 index / モデル(0:N2,1:H2O)
  int condEquilibrium ,                  // 2: EOS 拘束形平衡 ((T,g) 同時反転 → rog 射影)。0/1 は従来経路
+ int condSonicModel ,                   // 1: 二相 frozen 音速/γ (TP 分岐, g>0 セル)。0: 旧 (全蒸気 √(γ_mix R_mix T))
 
  // mesh structure
  geom_int nCells_all , geom_int nCells,
@@ -167,8 +168,18 @@ __global__ void dependentVariables_d
             roe[ic]       = (flow_float)((double)ro_temp * (e_mix + (double)ek));
             // 総エンタルピー Ht = e_mix + p/ρ + ek (g=0 → hmix+ek と一致)
             Ht[ic]        = (flow_float)(e_mix + (double)Pnew/(double)ro_temp + (double)ek);
-            sonic[ic]     = (flow_float)sqrt(gmix * Rmix * Tnew);  // 気相 frozen 音速 (loose coupling 近似)
-            gam_array[ic] = (flow_float)gmix;
+            // 音速と γ: 既定 (condSonicModel 0 / g=0) は全蒸気気相 √(γ_mix R_mix T)。condSonicModel 1 かつ g>0 では
+            // 一温度二相 EOS と整合する固定 g,Y の frozen 音速 c²=γ_2φ R_eff T (cond_twophase_sonic)。γ_2φ は block-DPLUR の
+            // κ=γ−1 (固定 g,Y の frozen 近似) と TP 出口 BC が読む。g<1e-12 は式順序も従来と同一 (dry セル bit 同一)。
+            double sonic2 = gmix * Rmix * Tnew, gam_out = gmix;
+            if (condSonicModel == 1 && g_liq > 1.0e-12) {
+                const double dL   = (cond_latent(cprops, Tnew + 0.1) - cond_latent(cprops, Tnew - 0.1)) / 0.2;
+                const double Reff = carrier ? (Rmix - g_liq*Rw) : ((1.0 - g_liq)*Rmix);
+                double g2, c2;
+                if (cond_twophase_sonic(cpmix, Reff, g_liq, dL, Tnew, &g2, &c2)) { sonic2 = c2; gam_out = g2; }
+            }
+            sonic[ic]     = (flow_float)sqrt(sonic2);
+            gam_array[ic] = (flow_float)gam_out;
             cp_array[ic]  = (flow_float)cpmix;
             Rmix_array[ic]= (flow_float)Rmix;
         } else {
@@ -259,6 +270,7 @@ void dependentVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
         cfg.condensation , var.nCondSpeciesRegistered , cond_rog_device_ptr() ,
         cfg.condGasSpecies , cfg.condModel ,
         cfg.condEquilibrium ,
+        cfg.condSonicModel ,
 
         // mesh structure
         msh.nCells_all , msh.nCells ,

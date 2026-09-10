@@ -23,6 +23,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [condensation-kantrowitz-gamma-twophase-sonic.md](active/condensation-kantrowitz-gamma-twophase-sonic.md) | `condensation` | **Kantrowitz 補正の γ を蒸気 γ_v に修正 + 凝縮セルの二相 frozen 音速** (2026-09-10 起票): 旧実装はセル気相混合 γ (H2O–N2 で 1.40) と g を無視した全蒸気音速。A/B キー `condKantrowitzGammaMode` / `condSonicModel`、Wyslouzil 2D (case/16) で変化量を定量化 |
 | [chemistry-finite-rate-h2.md](active/chemistry-finite-rate-h2.md) | `thermophysics / chemistry` | **有限速度化学 (H₂ 燃焼・ノズル化学非平衡)** (2026-09-04 起票): 種ブロック point-implicit + sensible datum 反応熱陽注入。Phase 0 (CEA スクリーニング・熱力学 DB ツール・Jachimowski YAML) 完了、Phase 1 ソース項から実装 |
 | [boundary-node-inlet-corner-wall.md](active/boundary-node-inlet-corner-wall.md) | `boundary / discretization` | node の入口∩壁コーナーで質量が溜まり P 暴走する問題の根治: 変換時に入口側半割面を壁へ帰属 (`mesh.nodeInletCornerWall`)。Burrows–Kurkov (case/47) で発覚 (2026-09-04) |
 | [turbulence-sst-consistency-options.md](active/turbulence-sst-consistency-options.md) | `turbulence` | codex 副次指摘の SST 整合オプション 5 件 (node 壁 k ピン既定 ON / P_ω from P_k / σ F1 ブレンド / 等方応力 / E–k 源) + 相似メッシュ試験ツール。P_ω from P_k / σ F1 ブレンドは整理後 既定 ON (2026-09-08, §2.1/§3.6)。等方応力 / E–k 源は R3 で置換予定 |
