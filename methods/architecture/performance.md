@@ -10,10 +10,13 @@
 
 速度評価は native で行う ([`procedures/development-environment.md`](../../procedures/development-environment.md))。
 
-1. **ms/step**: `solver_density_cuda/tools/bench_steps.sh <run_dir> <nsteps> <label>`。run の `solverConfig.yaml` を
-   `nStepOuter=<nsteps>`・出力なしに書き換え (`solverConfig.yaml.orig` を保存)、`FORGE_PROFILE=1` で回して
-   `Time = ... (wall, N steps, X ms/step)` と "Runtime Profile Summary" (セクション別) を `bench_<label>_n<N>.log` に残す。
-   起動 (メッシュ読込・初期化) を相殺するには 2 種類の step 数で回して差分を取る。
+1. **ms/step**: `solver_density_cuda/tools/bench_steps.sh <template_run> <nsteps> <label>`。template の入力 (config・bcond・species・
+   probe・メッシュ h5 のハードリンク) から専用ディレクトリ `<template_run>_bench/<label>_n<N>/` を作り、`nStepOuter=<N>`・出力なし
+   (`outStepInterval` 巨大) で回して `Time = ... (wall, N steps, X ms/step)` を `bench_<日時>.log` に残す (バイナリ・入力の sha256 も記録)。
+   既存 label には上書きしない (別 label か `FORGE_BENCH_OVERWRITE=1`)。既定 `FORGE_PROFILE=0`; `FORGE_PROFILE=1` はセクション別計時用で
+   同期が入るので合否判定には使わない。`FORGE_CFG_SUB="old=new"` で config を差し替えて A/B できる。計時は時間ループ全体 (`main.cpp` の
+   壁時計; 初期化・I/O は含まない) で warm-up 区間の除外はしていないので、A/B は基準/変更版を**交互に 2 回以上**回し中央値で比べる
+   (100 step で 1 step 目の影響は 1 % 未満)。
 2. **カーネル別時間**: `nsys profile --trace=cuda --sample=none --cpuctxsw=none -o <out> forge` →
    `nsys stats --report cuda_gpu_kern_sum --format csv <out>.nsys-rep`。
 3. **律速の種別** (演算/メモリ/FP64): `ncu` は GPU 性能カウンタの権限が要るので **`sudo -E` で起動**し、
@@ -53,7 +56,8 @@
   `block-DPLUR` カーネル (`static_cast<ST>` で徹底) が手本。
 - **double を使う箇所は明示し、根拠を残す**: 幾何前処理 (双対体積・重心・閉性 Σr_f S_f の桁落ち対策)、
   周期・軸対称の閉性、凝縮 EOS の (T,g) 同時反転など、桁落ちが実測で問題になった箇所に限る。
-  熱力学 (NASA-9) の**面ごと**評価は float 版を使い、セルごとに前計算できる量 (h_s(T_c), D_s) はセル配列に置く。
+  熱力学 (NASA-9) の**面ごと**評価は float 版 (`SpeciesThermoF`) を使う。評価点は従来どおり面状態 (T_f, P_f, Y_f) で、セル値の補間に
+  置き換えない (離散式が変わる: codex plan レビュー M1)。WALE/SIGMA の高次べき乗 (`pow(x, 5/2)` 等) は float では高勾配で overflow するため double のまま。
 - **TP の温度反転** (`physProp.thermoFloat`, 既定 1): float Newton (warm start, 最大 12 反復) → double Newton 1 段研磨。double 評価は cph_mix 1 回。
   誤差 ≤1e-8·T (float の T 格納 ulp 6e-8 未満; `tools/test_thermo_float.cpp`)。`thermoHrefTemp>0` が前提 (絶対 datum の H2O は float 段が収束しない)。
 - **gather 系の試み (結果)**: 近傍 dq / 原始量の stride-8 AoS パック (`blockDPLURDqPack`, `mesh.primPack`) は A10G で +0.7〜+2.7 ms/step の逆効果、

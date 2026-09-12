@@ -70,7 +70,12 @@ $$ f(T) = e_{\mathrm{mix}}(T) - e = 0, \qquad f'(T) = c_{v,\mathrm{mix}}(T) = c_
 
 $$ T^{(k+1)} = T^{(k)} - \frac{e_{\mathrm{mix}}(T^{(k)}) - e}{c_{v,\mathrm{mix}}(T^{(k)})}. $$
 
-厳密微分 $c_{v,\mathrm{mix}}$ により 2 次収束する。初期値は前ステップの $T$ をウォームスタートに使い (定常で約 2 反復)、各反復で $T\in[T_{\min},T_{\max}]$ にクランプする。FP32 では多項式和・Newton が破綻するため、**反転と多項式評価はカーネル内で double** で行う。
+厳密微分 $c_{v,\mathrm{mix}}$ により 2 次収束する。初期値は前ステップの $T$ をウォームスタートに使い (定常で約 2 反復)、各反復で $T\in[T_{\min},T_{\max}]$ にクランプする。反転の精度は次のとおり (2026-09-12 改訂, plan performance-3d-node-sst-speedup §4.2-3): 既定 `physProp.thermoFloat: 1` では
+**ハイブリッド** = float 係数 (`SpeciesThermoF`) の Newton (warm start, 最大 12 反復) で ~1e-6·T まで寄せ、double の Newton を
+収束 (|ΔT| < 1e-3 + 1e-6·T) まで最大 3 段当てて研磨する (`thermo_T_from_e_hybrid`; 通常 1 段)。厳密 double 参照との誤差は ≤4e-10·T
+(`tools/test_thermo_float.cpp`, 冷間開始・組成端点・50–6000 K 込み)。`thermoHrefTemp>0` が前提で、絶対 datum (H2O の h≈−13 MJ/kg)
+では float 段が収束しないので datum 無し config では自動的に従来の **全 double Newton** (`thermoFloat: 0` 相当) に落ちる。
+面ごとの h_mix(Y_f, T_f) (SLAU) と化学種拡散の h_s(T_f) も float 係数で評価する (評価点は不変)。
 
 ### 3. 化学種輸送方程式
 

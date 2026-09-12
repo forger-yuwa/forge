@@ -26,8 +26,8 @@ case/16 の 3D node SST 多成分 TP 生産計算 (run_0234 相当, 2.37 M 節�
 
 - **やる**: 計測基盤 (`tools/bench_steps.sh`, nsys/ncu 手順の記録)、FP64 混入の除去 (リテラル昇格・熱力学の
   面評価)、化学種拡散カーネルの再構成、リミッタの間接呼び出し除去、block-DPLUR sweep の対角キャッシュと占有率改善、
-  小カーネル融合。各項目は A/B 計測 + 場の一致確認を伴う。
-- **やらない**: MPI 多 GPU 化、メッシュ再番号付け (locality) は候補として記録するのみ (§5.1 末尾)、
+  小カーネル融合、節点の RCM 再番号付け (変換時 opt-in, 2026-09-12 に追加)。各項目は A/B 計測 + 場の一致確認を伴う。
+- **やらない**: MPI 多 GPU 化、
   スキーム自体の変更 (SLAU/SST の式は不変)。倍精度が意図的に必要な箇所 (幾何前処理の閉性、双対体積・重心 float32 桁落ち対策
   [`node-yp1-dual-geometry-float32-fix`]、周期・軸対称の閉性) は触らない。
 
@@ -104,17 +104,21 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
   (`cmp_by_walldist.py`)。実測 (`run_0401_perf_verify`, lit2 / thermof): 全ビン・全場で p99.9 がノイズの ≤1.5 倍、壁第 1 層への
   集中なし (max は単一節点の非決定性で 2〜9 倍ぶれる)。今回触っていないもの: 双対体積/重心・LSQ 擬似逆・閉性 (double のまま)、
   状態量・幾何量の格納精度 (元から float32)。
-- **場の一致**: 各項目後に同 IC から 100 step 継続し、`VALUE/*` 全量 (ro,P,T,Ux,Uy,Uz,roe,roY*,Y*,k,ω,vis_turb,h0 …) の
-  正規化最大差がノイズ床の **2 倍以内**なら「収束解不変」の候補、超えたら原因を切り分ける (`cmp_h5.py`)。
+- **場の一致 (2026-09-12 改訂, codex result M3 採用)**: 各項目後に同 IC から 100 step 継続し、`VALUE/*` 全量の正規化最大差
+  (`cmp_h5.py`) を見る。float 化は熱力学の丸めを 1e-6 相対で意図的に変えるので、**基準は絶対値**: ρ/P/T ≤ 1e-5、U/k/ω/ρY ≤ 1e-4、
+  vis_turb ≤ 1e-2 (いずれも場のスケール正規化)。run-to-run ノイズ床 (基準×基準 ≥3 本) は参考値として併記し、ノイズの 2 倍を超えた
+  変数は項目別に原因を書く (2D node TP 300 step: ρ 2.3 倍・Ux 2.2 倍 = 絶対 1.2e-6 / 2.4e-6、float 熱力学の系統差)。
   ビット一致は「固定入力に対する単一カーネル出力」にだけ要求する (リミッタ template 化など)。
 - **収束と準定常** (codex M5): 最終バイナリで run_0234 config を同 IC から 12000 step 走らせ、基準 run と**両方**が
   `check_convergence.py` で同じ verdict 区分 (全保存量の到達残差が同桁以上) であること、`check_quasisteady.py`
   (pmax/machmax) が両方 STEADY であること、壁 p/p0 の差 ≤ 0.1 % (壁圧の時系列も末尾 2000 step で頭打ち) を必須にする。
   未収束なら比較を確定しない。
-- **12000 step 本 run の判定 (2026-09-12 実測)**: run_0410 (thermoFloat, nStepInner 5) / run_0411 (同, 3) は run_0234 と同 IC・同 config で
-  `check_convergence` が同区分 (NOT CONVERGED plateau: roUy/roK 頭打ち・他 falling、到達残差は同桁: rms_ro 1.2e-11 vs 6.4e-12,
-  roe 6.0e-6 vs 5.0e-6, roOmega 1.8e-2 同値)、`check_quasisteady` pmax/machmax **ALL STEADY**、壁 p/p0 (x 10–95 mm, contour/side/center)
-  の run_0234 比の最大差 **1.1e-6 (sweep 5) / 9.5e-6 (sweep 3)** ≪ 0.1 %。
+- **12000 step 本 run の判定 (2026-09-12 実測, 表現は codex result M4 採用で改訂)**: run_0410 (thermoFloat, nStepInner 5) / run_0411 (3) /
+  run_0413 (4) / run_0414 (4, cfl 8) は run_0234 と同 IC・同 config。**いずれも (基準 run_0234 も) `check_convergence` は NOT CONVERGED
+  (plateau: roUy/roK 頭打ち・他 falling) で、「収束解」の比較ではない**。比較は「同一プラトー状態での有限時間継続の差」として報告する:
+  到達残差は同桁 (rms_ro 1.2e-11 vs 6.4e-12, roe 6.0e-6 vs 5.0e-6, roOmega 1.8e-2 同値)、`check_quasisteady` pmax/machmax ALL STEADY、
+  **壁 p/p0 の時系列** (3000 step 間隔スナップショット, x 10–95 mm): 末尾 2 枚の差 3.7e-4 (run_0413) / 2.2e-4 (run_0234) で両者とも同じ
+  ゆっくりした漂いが残り、バイナリ間の差 (最終スナップショット比 3.4e-6〜8.1e-5) はその漂いより 1 桁小さい。
 - **速度** (codex M4): 合否は `FORGE_PROFILE=0` (セクション同期なし)、warm-up 後、専用 run ディレクトリで基準/変更版を
   交互に 2 回以上回して ms/step (時間ループ内の壁時計 `Time = ...`; 初期化・I/O は含まない) の中央値で判定する。
   `FORGE_PROFILE=1` / nsys / ncu は原因分析用。FP64 稼働率 = 削減可能時間ではない。
@@ -149,7 +153,7 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 | 5' | (旧 #5 記録) | 対角キャッシュは実装したが **不採用** (0fb8ee73, `blockDPLURDiagCache` 既定 0): 44.0→46.5 ms/step と遅化 (25 floats/cell の保存+4 読込 ≈1.2 GB/step > 省ける gather)。sweep はレイテンシ律速 (占有率 28 %) → `BLOCK_DPLUR_MINBLOCKS` で占有率実験中。次候補: dq の AoS 化 (5 配列→stride 5), nStepInner 5→3 の壁時計比較 (#8) |
 | 6 | 面ループ融合・小物 (§4.2-6) | **済** (d2663103/f8de4ae0/600e03c3): k/ω 移流+拡散と化学種移流を多スカラー面カーネルに融合、`speciesFaceReconstruction=0` で読者の無い ∇Y を省略 (−1.2 ms)、DPLUR/LSQ の読み取り専用引数を `const __restrict__`。A/B `fuse3`: **35.5/36.0 ms/step** (base 82.34/82.35), 場はノイズ床内 (`cmp_fuse3.txt`)。小物 (d5637b31: DPLUR の未読 rhs 書込撤去, `fill_limiter5_d`, 定数転送の変化時のみ化) → A/B `small4`: **34.7 ms/step** (34.71/34.69 vs base 82.38/82.37), ノイズ床内 (`cmp_small4.txt`) |
 | 7 | dependentVariables ハイブリッド反転 (§4.2-3) | 済 (045f4b5e): 単体検証 PASS (≤1e-8·T)。3D A/B (`thermoFloat: 1`): **38.4 ms/step** (38.44/38.41 vs base 82.41/82.37), 場はノイズ床内 (`cmp_thermofl.txt` vis_turb 1.90e-3, 他 ≤ 床)。**ユーザ決定 (2026-09-12): 既定 1** (datum 無しは自動 0 + 警告、明示 1 で datum 無しはエラー) |
-| 8 | 陰解法 sweep 数の壁時計比較 (§4.2-7) | **済**: run_0410/0411/0412 (nStepInner 5/3/2, run_0234 と同 IC・config + thermoFloat, 12000 step)。**3 は 5 と全残差列が一致** (末尾平均 rms_ro 1.22e-11/1.23e-11, roe 6.11e-6 同値, 5 の到達残差に着く step も同じ ±60) で 38.9→34.6 ms/step (−11 %)。**2 は発散** (rms_roe 8.7e-6→4.5e-2 上昇, roOmega 79 で停滞)。→ **ユーザ決定 (2026-09-12): 推奨レシピは `nStepInner: 4`**。確認 run_0413 (sweep 4, `thermoFloat` 既定 1): 末尾残差が 5 と同値 (rms_ro 1.23e-11, roe 6.11e-6, roOmega 1.90e-2)、pmax/machmax STEADY、run_0234 比の壁 p/p0 差 ≤3.4e-6。(壁時計 68.5 ms/step は別セッションの chem run と GPU 共有のため無効)。**cfl_pseudo 6→8** (run_0414, sweep 4): 33.0 ms/step (クリーン)、cfl 6 の到達残差に着く step 11751→11222 (−4.5 %)、末尾残差は同等〜わずかに低い (roe 5.96e-6, roOmega 1.68e-2)、ALL STEADY、run_0234 比の壁 p/p0 差 8.1e-5 (cfl 6 の 3.4e-6 より大きいが ≪0.1 %)。効果が小さいので**推奨レシピは cfl 6 のまま** (8 は任意、+5 %)。CFL 側 (cfl_pseudo 6→8) は未試験 |
+| 8 | 陰解法 sweep 数の壁時計比較 (§4.2-7) | **済**: run_0410/0411/0412 (nStepInner 5/3/2, run_0234 と同 IC・config + thermoFloat, 12000 step)。**3 は 5 と全残差列が一致** (末尾平均 rms_ro 1.22e-11/1.23e-11, roe 6.11e-6 同値, 5 の到達残差に着く step も同じ ±60) で 38.9→34.6 ms/step (−11 %)。**2 は発散** (rms_roe 8.7e-6→4.5e-2 上昇, roOmega 79 で停滞)。→ **ユーザ決定 (2026-09-12): 推奨レシピは `nStepInner: 4`**。確認 run_0413 (sweep 4, `thermoFloat` 既定 1): 末尾残差が 5 と同値 (rms_ro 1.23e-11, roe 6.11e-6, roOmega 1.90e-2)、pmax/machmax STEADY、run_0234 比の壁 p/p0 差 ≤3.4e-6。(壁時計 68.5 ms/step は別セッションの chem run と GPU 共有のため無効)。**cfl_pseudo 6→8** (run_0414, sweep 4): 33.0 ms/step (クリーン)、cfl 6 の到達残差に着く step 11751→11222 (−4.5 %)、末尾残差は同等〜わずかに低い (roe 5.96e-6, roOmega 1.68e-2)、ALL STEADY、run_0234 比の壁 p/p0 差 8.1e-5 (cfl 6 の 3.4e-6 より大きいが ≪0.1 %)。効果が小さいので**推奨レシピは cfl 6 のまま** (8 は任意、+5 %)。|
 | 9 | AoS gather (実装済・A/B 待ち) | (a) block-DPLUR の近傍 dq を stride-8 AoS (`blockDPLURDqPack`, 874e54d1) + loop 0 の gather 省略 (dq_old≡0)、(b) 原始量 (ro,Ux,Uy,Uz,P,T) の AoS パック (`mesh.primPack`) を applyBconds 後に組み LSQ 勾配とリミッタが 1 セクタで gather。いずれも同じ値を別レイアウトで読むだけ (ビット同一)。**不採用 (既定 0, opt-in 記録)**: ローカル RTX 3060 の 3D 257k 節点 (`run_0452_perf_bench3d_coarse`, 200 step ×3) で dq パック 22.84/23.15 vs off 22.66/22.72、原始量パック on/off 22.9–23.1 vs 22.8–22.9 ms/step と差なし〜微増。gather は L2 ヒットで、セクタ数削減より追加書込が勝つ。loop 0 の gather 省略のみ残す |
 | 10 | 節点の RCM 再番号付け (実装済・3D 大規模の A/B 待ち) | `convertGmshToForge` に `mesh.renumber: rcm` (makeMesh 前に nodes と要素 iNodes を並べ替え、`/MESH/RENUMBER_PERM` に new→old を保存; `tools/permute_res_h5.py` で旧番号の res を移植)。ローカル coarse 3D 257k: 帯域 256481→3024、同一変換器の非 RCM と場の差はノイズ級 (k 5.5e-4, vis_turb 8e-4, 他 ≤1.4e-4)、速度 −1〜−4 % (ローカル GPU は別セッションと共有で不安定)。**注意**: 旧 h5 (2026-09-08 以前の変換) とは wall_dist 定義が 6.75 % 違うので比較は同一変換器で。2.37M ローカル RTX 3060 (`run_0455_perf_big_{norcm,rcm}`, run_0234/res_12000 を perm 移植, 100 step ×2): base 177/173 → head 63.9/66.0、RCM 65.0/62.0、RCM+dq 66.1/68.2、RCM+prim 65.6/64.1 ms/step = **RCM・パックとも差なし** (帯域 2369972→12000 でも gather は L2 で吸収済、sweep はレイテンシ律速)。**A10G (`run_0415_perf_rcm_baseline`, 100 step ×2, 同値再現)**: norcm 33.87 / **rcm 32.74 (−3.3 %)** / rcm+dq 35.34 / rcm+prim 33.41 / dq 36.58 ms/step → RCM は小さいが再現する利得、パック 2 種は逆効果 (既定 0 確定)。`mesh.renumber: rcm` は opt-in (既定 none): 節点順が変わるので旧 res の restart は `tools/permute_res_h5.py` (`/MESH/RENUMBER_PERM`) 経由 |
 
@@ -173,7 +177,7 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
-| result | `2026-09-12` | (未取得: `codex_review.py --stage result --base 0512823d` が codex の利用上限 "You've hit your usage limit ... try again at 5:26 PM" で失敗。生ログ `notes/reviews/2026-09-12-performance-3d-node-sst-speedup-result.log`。17:26 以降に再実行し、GO なら `accepted/` へ移す) | — | status は `in_progress` のまま |
+| result | `2026-09-12` | [`notes/reviews/2026-09-12-performance-3d-node-sst-speedup-result.md`](../../notes/reviews/2026-09-12-performance-3d-node-sst-speedup-result.md) | **NO-GO**, C0/M5/m2 | M1 採用 (WALE/SIGMA の float pow を double に戻す, ac9262e8) / M2 採用 (研磨を収束まで最大 3 段, 単体試験を本番 12 反復・冷間開始・float 組成・再格納ドリフト込みに: errHyb ≤3.4e-10·T PASS) / M3 採用 (基準 5 本でノイズ再計測、§4.3 を絶対値基準に改訂、「全てノイズ床内」撤回) / M4 採用 (「収束解不変」撤回、同一プラトーの有限時間差と壁圧時系列で記述) / M5 採用 (AWS 証拠を `case/16.nozzle_wys/_aws_perf_evidence/` に回収: bench ログ・cmp・VERDICT・壁圧・残差 CSV・バイナリ/メッシュ sha256; 周期/軸対称/凝縮の回帰は §6 に追記) / m6 採用 (bench の上書き拒否、手順書を実装に合わせ更新) / m7 採用 (thermophysics.md / performance.md / §2 / §5.1 / §8 / README 索引を整理)。修正後に result 段を再実行する |
 | plan | `2026-09-12` | [`notes/reviews/2026-09-12-performance-3d-node-sst-speedup-plan.md`](../../notes/reviews/2026-09-12-performance-3d-node-sst-speedup-plan.md) | GO-with-changes, C0/M7/m2 | M1 採用 (セル前計算→面状態 float 評価に変更, §4.2-2) / M2 採用 (Newton float は後段+単体検証, §5.1 #7) / M3 採用 (ノイズ床基準, §4.3) / M4 採用 (PROFILE=0・交互実行, §4.3, bench_steps.sh) / M5 採用 (両 run PASS+STEADY+壁圧, §4.3) / M6 採用 (float point 経路限定+回帰, §4.2-4) / M7 採用 (専用 run・削除撤去, §5.1 #0) / m8 採用 (M6 関係を §4.1 に明記) / m9 採用 (1/64, launch_bounds 記述訂正) |
 
 ## 7. 影響範囲
@@ -188,7 +192,7 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 ## 8. 完了条件
 
 - [ ] `methods/architecture/performance.md` を作成し index に登録
-- [ ] §5.1 #1–#8 の実装と A/B (§4.3 の判定) 完了
+- [ ] §5.1 #1–#10 の実装と A/B (§4.3 の判定) 完了 (#5/#9 は不採用で確定、#10 RCM は opt-in)
 - [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録
 - [ ] `status: done`、§9 変更ログ、`plans/accepted/` へ移動、`plans/README.md` 同期
 
@@ -197,7 +201,8 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 - `2026-09-12` — 起票。ベースライン計測 (run_0400_perf_baseline @A10G 82.85 ms/step)、nsys/ncu で FP64 律速を同定 (§4.1)。
 - `2026-09-12` — codex plan レビュー (GO-with-changes, M7/m2) を全件採用し §4.2/§4.3/§5.1 を改訂。リミッタ template 化 (−1 ms) と batch1 リテラル修正 (82.85→70.55 ms/step, ノイズ床内) を実測。
 - `2026-09-12` — DPLUR 対角キャッシュ (§4.2-4) は 46.5 ms/step と遅化したため既定 0 (opt-in 記録)。sweep は gather 数でなくレイテンシ律速。`__launch_bounds__` minBlocks 4/6 も不変/悪化。
-- `2026-09-12` — ユーザ決定: `thermoFloat` 既定 1、推奨 `nStepInner` 4 (recommended-settings.md 反映)。run_0413 (sweep 4) / run_0414 (cfl 8) で確認 (§5.1 #8)。RCM 再番号付け・AoS パックはローカル 2.37M で差なし (§5.1 #9, #10)。
+- `2026-09-12` — ユーザ決定: `thermoFloat` 既定 1、推奨 `nStepInner` 4 (recommended-settings.md 反映)。run_0413 (sweep 4) / run_0414 (cfl 8) で確認 (§5.1 #8)。RCM 再番号付けは A10G −3.3 % (opt-in)、AoS パック 2 種は逆効果で既定 0 (§5.1 #9, #10)。
+- `2026-09-12` — codex result レビュー NO-GO (M5/m2) を全件採用: WALE double 復帰・研磨反復化・判定基準の絶対値化・「収束解不変」の撤回・証拠回収 (§6.1)。最終バイナリ (ac9262e8) は A10G 33.9 ms/step、場は基準内。
 - `2026-09-12` — 小物 3 件で **34.7 ms/step** (small4)。累積 82.4→34.7 (2.37 倍)、nStepInner 3 併用で ≈30.5 ms/step (2.7 倍)。
 - `2026-09-12` — 12000 step 本 run (run_0410/0411) は run_0234 と壁 p/p0 差 ≤1e-5・STEADY・同 verdict 区分 (§4.3)。面ループ融合+∇Y 省略+restrict で **35.7 ms/step** (fuse3)。sweep 数比較: nStepInner 3 は 5 と残差経路一致で 34.6 ms/step、2 は発散 (§5.1 #8)。累積: 82.4 → 35.7 (2.3 倍)、nStepInner 3 併用で ≈31.5 ms/step (2.6 倍)。
 - `2026-09-12` — ハイブリッド温度反転 (`thermoFloat: 1`) で **38.4 ms/step** (累積 82.4→38.4, 2.15 倍)。ローカル回帰 4 ケース (node/cell × CPG/TP × 陽/陰) は全てノイズ床内 (§6)。k/ω・化学種の面ループ融合、未使用 ∇Y の省略、DPLUR/LSQ の `__restrict__` を実装 (A/B 待ち)。sweep 数比較 run_0410–0412 投入。
