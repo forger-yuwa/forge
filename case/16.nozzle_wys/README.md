@@ -64,9 +64,9 @@ exit Mach の単調序列 (非粘性 1.99 > 層流 1.94 > 2D乱流 1.88 > 3D乱�
 
 | run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
 | --- | --- | --- | --- |
-| `run_0400_perf_baseline` (AWS) | 速度計測テンプレート: run_0234 の入力 (メッシュ h5・config) + `res_12000.h5` の index コピー IC。`tools/bench_steps.sh` が `run_0400_perf_baseline_bench/<label>_n<N>/` に専用 dir を切って回す (res は書かない) | base 82.85 → limtpl 81.9 → lit1 70.6 → lit2 67.4 → thermof 44.0 → thermofl (`thermoFloat: 1`) **38.4 ms/step** (A10G, 100 step, 交互 2 回)。dcache 46.5 / lb6 62.9 は却下。nsys/ncu は `run_0400_perf_baseline/profiles/`, `_bench/prof_*` | active (計測テンプレート) |
+| `run_0400_perf_baseline` (AWS) | 速度計測テンプレート: run_0234 の入力 (メッシュ h5・config) + `res_12000.h5` の index コピー IC。`tools/bench_steps.sh` が `run_0400_perf_baseline_bench/<label>_n<N>/` に専用 dir を切って回す (res は書かない) | base 82.85 → limtpl 81.9 → lit1 70.6 → lit2 67.4 → thermof 44.0 → thermofl (`thermoFloat: 1`) 38.4 → fuse3 **35.7 ms/step** (A10G, 100 step, 交互 2 回)。dcache 46.5 / lb6 62.9 は却下。nsys/ncu は `run_0400_perf_baseline/profiles/`, `_bench/prof_*` | active (計測テンプレート) |
 | `run_0401_perf_verify` (AWS) | 同 IC から 100 step 継続し `res_100.h5` を基準バイナリ (`~/forge-bin/forge_base`) と比較 (`cmp_<label>.txt`, `cmp_by_walldist.py`)。base×base ×3 (`ref_base{,2,3}_res_100.h5`) がノイズ床 | 全変更が壁距離ビン別 p99.9 でノイズ床の ≤1.5 倍 (plan §4.3) | active (検証基準) |
-| `run_0410_sweep5_thermofl` / `run_0411_sweep3_thermofl` / `run_0412_sweep2_thermofl` (AWS) | run_0234 と同 IC (run_0228/res_12000 index コピー)・同 config + `thermoFloat: 1` で 12000 step、`nStepInner` 5 / 3 / 2 の壁時計 vs 残差比較 (plan §5.1 #8) | (投入中 2026-09-12) `CONVERGENCE_VERDICT.txt` / `residual_history.png` | active (sweep 数の決定用) |
+| `run_0410_sweep5_thermofl` / `run_0411_sweep3_thermofl` / `run_0412_sweep2_thermofl` (AWS) | run_0234 と同 IC (run_0228/res_12000 index コピー)・同 config + `thermoFloat: 1` で 12000 step、`nStepInner` 5 / 3 / 2 の壁時計 vs 残差比較 (plan §5.1 #8) | 5: 38.9 ms/step, 3: **34.6** (残差全列が 5 と一致: 末尾 rms_ro 1.2e-11 / roe 6.1e-6 / roOmega 1.9e-2, 5 の到達残差に着く step も同じ), 2: 32.8 だが **発散** (rms_roe 上昇, roOmega 79 停滞)。verdict は run_0234 と同区分 (NOT CONVERGED plateau: roUy/roK 頭打ち, 他 falling)、pmax/machmax ALL STEADY、壁 p/p0 の run_0234 比最大差 1.1e-6 (5) / 9.5e-6 (3)。`CONVERGENCE_VERDICT.txt` / `residual_history.png` / `wall_pp0.csv` | active (推奨 `nStepInner: 3`) |
 
 ## 非平衡凝縮 (H2O) run 一覧 — Wyslouzil Fig.3 検証
 
