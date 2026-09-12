@@ -51,6 +51,7 @@ SpeciesThermo makeSpecies(double MW, double sigma, double eps_kB,
     s.Tlo = Tlo; s.Tmid = Tmid; s.Thi = Thi;
     for (int i=0;i<9;i++){ s.low[i]=low[i]; s.high[i]=high[i]; }
     s.h_datum = 0.0;
+    s.invMW = 1.0/MW;
     return s;
 }
 
@@ -196,6 +197,7 @@ void thermo_init_db(solverConfig& cfg)
         g_host.push_back(it->second);
     }
     g_n = static_cast<int>(g_host.size());
+    for (auto& s : g_host) s.invMW = 1.0/s.MW;   // 研磨段の乗算用 (yaml 由来の種も含め全種)
 
     // -------------------------------------------------------------------------
     // エンタルピー基準オフセット (sensible-enthalpy datum, thermoHrefTemp>0)

@@ -50,6 +50,7 @@ struct SpeciesThermo {
     double high[9];   // Tmid <= T <= Thi  の係数
     double h_datum;   // sensible datum で係数から除いた絶対エンタルピー h_abs(Tref) [J/mol] (既定 0)。
                       // 反応流の反応熱 Q̇=−Σ(h_datum/W)ω と平衡定数 (H_abs=h+h_datum) が使う。
+    double invMW;     // 1/MW (ハイブリッド温度反転の研磨段で除算を避ける。thermo_init_db が設定、既定 0=未設定)
 };
 
 // -----------------------------------------------------------------------------
@@ -584,15 +585,34 @@ THERMO_HD float thermo_Dmix_species_f(const SpeciesThermoF* sp, int n, const flo
 //   datum オフセット無し (h_abs≈-13 MJ/kg の H2O) では float 段が収束せず張り付くことがあるので
 //   thermoFloat は thermoHrefTemp>0 を必須にする (config で検査)。検証: tools/test_thermo_float.cpp。
 // -----------------------------------------------------------------------------
+// 研磨段用: cp/h の混合を invMW 乗算で (除算 2n 回を回避)。値は thermo_cph_mix と最終 bit まで同一ではないが
+// double 精度 (相対 1e-16) で同じ。invMW 未設定 (0) の DB では従来の除算版へ。
+THERMO_HD void thermo_cph_mix_polish(const SpeciesThermo* sp, int n, const double* Y, double T, double* cp_out, double* h_out)
+{
+    if (!(sp[0].invMW > 0.0)) { thermo_cph_mix(sp, n, Y, T, cp_out, h_out); return; }
+    double cp = 0.0, h = 0.0;
+    for (int i=0;i<n;i++) {
+        double cpi, hi;
+        thermo_cph_molar(sp[i], T, &cpi, &hi);
+        const double w = Y[i]*sp[i].invMW;
+        cp += w*cpi; h += w*hi;
+    }
+    *cp_out = cp; *h_out = h;
+}
+
 THERMO_HD double thermo_T_from_e_hybrid(const SpeciesThermo* sp, const SpeciesThermoF* spf, int n,
                                         const double* Y, const float* Yf,
                                         double e, double T_guess, double T_min, double T_max,
                                         double* cp_at_Tf, double* h_at_Tf, double* Tf_out, int maxIterF = 8)
 {
     const float Tf = thermo_T_from_e_f(spf, n, Yf, (float)e, (float)T_guess, (float)T_min, (float)T_max, nullptr, maxIterF);
-    const double R = thermo_R_mix(sp, n, Y);
+    // R_mix は double で (float だと 6e-8·R·T の残差誤差が dT≈2.4e-8·T に化け、格納分解能と同程度になる)。
+    // 除算は invMW 乗算で回避 (invMW 未設定 DB は従来の除算版)。
+    double R;
+    if (sp[0].invMW > 0.0) { double s = 0.0; for (int i=0;i<n;i++) s += Y[i]*sp[i].invMW; R = THERMO_RU * s; }
+    else R = thermo_R_mix(sp, n, Y);
     double cp_T, h_T;
-    thermo_cph_mix(sp, n, Y, (double)Tf, &cp_T, &h_T);
+    thermo_cph_mix_polish(sp, n, Y, (double)Tf, &cp_T, &h_T);
     const double cv  = cp_T - R;
     const double cvf = (cv > 1.0e-2*R ? cv : 1.0e-2*R);
     double dT = ((h_T - R*(double)Tf) - e)/cvf;

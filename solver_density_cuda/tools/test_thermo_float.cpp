@@ -10,7 +10,7 @@
 #include "../cuda_forge/thermo_d.cuh"
 
 static SpeciesThermo mk(double MW,double sig,double eps,const double lo[9],const double hi[9]){
-    SpeciesThermo s; s.MW=MW; s.sigma_LJ=sig; s.eps_kB=eps; s.Tlo=200.0; s.Tmid=1000.0; s.Thi=6000.0; s.h_datum=0.0;
+    SpeciesThermo s; s.MW=MW; s.sigma_LJ=sig; s.eps_kB=eps; s.Tlo=200.0; s.Tmid=1000.0; s.Thi=6000.0; s.h_datum=0.0; s.invMW=1.0/MW;
     for(int i=0;i<9;i++){ s.low[i]=lo[i]; s.high[i]=hi[i]; } return s;
 }
 static SpeciesThermoF toF(const SpeciesThermo& s){

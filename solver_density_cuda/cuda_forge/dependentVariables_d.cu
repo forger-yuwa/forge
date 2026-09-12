@@ -160,12 +160,16 @@ __global__ void dependentVariables_d
                 Tnew = thermo_T_from_e(sp, nSpecies, Y, e_in, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
             }
 
-            const double Rmix  = thermo_R_mix (sp, nSpecies, Y);
+            double Rmix;
+            if (hybrid && sp[0].invMW > 0.0) { double s_ = 0.0; for (int s=0;s<nSpecies;s++) s_ += Y[s]*sp[s].invMW; Rmix = THERMO_RU * s_; }
+            else Rmix = thermo_R_mix (sp, nSpecies, Y);
             double cpmix, hmix;
             if (hybrid) { cpmix = hybrid_cp; hmix = hybrid_h; }
             else thermo_cph_mix(sp, nSpecies, Y, Tnew, &cpmix, &hmix);  // cp,h を 1 スイープ (全蒸気混合)
             const double cvmix = cpmix - Rmix;
-            const double gmix  = cpmix / (cvmix > 1.0e-6 ? cvmix : 1.0e-6);
+            // γ は出力 float なので、ハイブリッド経路は float の除算で十分 (double 除算を避ける)。
+            const double gmix  = hybrid ? (double)((float)cpmix / (float)(cvmix > 1.0e-6 ? cvmix : 1.0e-6))
+                                        : cpmix / (cvmix > 1.0e-6 ? cvmix : 1.0e-6);
 
             const double e_v   = hmix - Rmix*Tnew;
             const double Lcond = (g_liq > 1.0e-12) ? cond_latent(cprops, Tnew) : 0.0;
@@ -200,7 +204,7 @@ __global__ void dependentVariables_d
                 double g2, c2;
                 if (cond_twophase_sonic(cpmix, Reff, g_liq, dL, Tnew, &g2, &c2)) { sonic2 = c2; gam_out = g2; }
             }
-            sonic[ic]     = (flow_float)sqrt(sonic2);
+            sonic[ic]     = hybrid ? sqrtf((flow_float)sonic2) : (flow_float)sqrt(sonic2);
             gam_array[ic] = (flow_float)gam_out;
             cp_array[ic]  = (flow_float)cpmix;
             Rmix_array[ic]= (flow_float)Rmix;
