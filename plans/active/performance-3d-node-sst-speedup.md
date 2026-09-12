@@ -96,6 +96,11 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 - **非決定性の前提**: 面流束は float `atomicAdd` で蓄積されるため同一バイナリでも全場のビット一致はしない。
   基準バイナリ同士 (base×base) の 100 step 継続で **run-to-run ノイズ床**を測る (2026-09-12 実測, `run_0401_perf_verify`
   `cmp_base2.txt`: 場のスケール max|a| で正規化した最大差は vis_turb 1.85e-3 / Uz 4.8e-4 / h0 1.9e-4 / 他 ≤6e-5)。
+- **メッシュ品質の悪いセルでの確認 (ユーザ指摘 2026-09-12)**: float 化で高 AR・歪みセルが悪化しないかを、差 |Δ| を**壁距離ビン**
+  (壁第 1 層 y₁ 0.6 µm・AR ~1200 が最小ビン) ごとに max / 99.9 パーセンタイルで集計し base×base ノイズと比較する
+  (`cmp_by_walldist.py`)。実測 (`run_0401_perf_verify`, lit2 / thermof): 全ビン・全場で p99.9 がノイズの ≤1.5 倍、壁第 1 層への
+  集中なし (max は単一節点の非決定性で 2〜9 倍ぶれる)。今回触っていないもの: 双対体積/重心・LSQ 擬似逆・閉性 (double のまま)、
+  状態量・幾何量の格納精度 (元から float32)。
 - **場の一致**: 各項目後に同 IC から 100 step 継続し、`VALUE/*` 全量 (ro,P,T,Ux,Uy,Uz,roe,roY*,Y*,k,ω,vis_turb,h0 …) の
   正規化最大差がノイズ床の **2 倍以内**なら「収束解不変」の候補、超えたら原因を切り分ける (`cmp_h5.py`)。
   ビット一致は「固定入力に対する単一カーネル出力」にだけ要求する (リミッタ template 化など)。
@@ -133,7 +138,7 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 | 2 | リテラル昇格除去 (§4.2-1) | 済: batch1 (limiter/viscous/setDT, e2fe1ee) 70.55 → batch2 (SLAU/common/boundary/scalar/gradient/ransSource/turb_visc/gasProperties/depVar CPG 経路, 5c1d7455) **67.4 ms/step** (交互 2 回 67.42/67.35 vs base 82.37/82.36)、ノイズ床内 (`cmp_lit2.txt`) |
 | 3 | 化学種拡散の float 化 (§4.2-2, 面状態評価のまま) | 済 (fad80e54): `SpeciesThermoF` ミラー + `thermo_*_f`、species_diffusion 13.6→1.64 ms |
 | 4 | SLAU TP 面エンタルピー float (§4.2-2) | 済 (fad80e54): SLAU 16.2→2.92 ms。#3+#4 で **44.0 ms/step** (43.97/44.02 vs base 82.37/82.38)、場はノイズ床内 (`cmp_thermof.txt`: vis_turb 2.17e-3 = 床の 1.17 倍, 他 ≤ 床) |
-| 5 | block-DPLUR 対角キャッシュ・占有率 (§4.2-4, float point 経路限定) | `timeIntegration_d.cu` / `main.cpp blockDPLURSolve`; Taylor-Green (周期)・軸対称・等温壁の回帰を追加 |
+| 5 | block-DPLUR 対角キャッシュ・占有率 (§4.2-4) | 対角キャッシュは実装したが **不採用** (0fb8ee73, `blockDPLURDiagCache` 既定 0): 44.0→46.5 ms/step と遅化 (25 floats/cell の保存+4 読込 ≈1.2 GB/step > 省ける gather)。sweep はレイテンシ律速 (占有率 28 %) → `BLOCK_DPLUR_MINBLOCKS` で占有率実験中。次候補: dq の AoS 化 (5 配列→stride 5), nStepInner 5→3 の壁時計比較 (#8) |
 | 6 | 小物 (§4.2-6) | `limiter_d.cu` fill 融合, `gasProperties_d.cu` powf, `convectiveFlux_d.cu` の毎ステップ `cudaMemcpyToSymbol` |
 | 7 | dependentVariables float Newton (§4.2-3, 後段) | 単体検証ツール (double 参照) → opt-in `physProp.thermoFloat` |
 | 8 | 陰解法 sweep/CFL の壁時計比較 (§4.2-7) | run_0234 config で 12000 step、同一到達残差までの壁時計 |
@@ -174,4 +179,5 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 
 - `2026-09-12` — 起票。ベースライン計測 (run_0400_perf_baseline @A10G 82.85 ms/step)、nsys/ncu で FP64 律速を同定 (§4.1)。
 - `2026-09-12` — codex plan レビュー (GO-with-changes, M7/m2) を全件採用し §4.2/§4.3/§5.1 を改訂。リミッタ template 化 (−1 ms) と batch1 リテラル修正 (82.85→70.55 ms/step, ノイズ床内) を実測。
+- `2026-09-12` — DPLUR 対角キャッシュ (§4.2-4) は 46.5 ms/step と遅化したため既定 0 (opt-in 記録)。sweep は gather 数でなくレイテンシ律速。
 - `2026-09-12` — batch2 リテラル修正 67.4 ms/step、thermo float ミラー (SLAU h_mix + 化学種拡散) で **44.0 ms/step** (−47 %)。再プロファイル: block-DPLUR 5 sweep 14.9 (34 %) / dependentVariables 6.6 / SLAU 2.9 / lsqPreGrad 2.8 / k-ω 輸送 3.3 / species_diffusion 1.6 / viscous 1.5 / limiter 1.25。次は DPLUR 対角キャッシュ・占有率、dependentVariables float Newton (単体検証付き)、k/ω 面ループ融合。

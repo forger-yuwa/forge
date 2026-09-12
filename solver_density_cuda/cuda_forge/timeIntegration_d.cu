@@ -647,12 +647,17 @@ __global__ void implicit_defect_correction_d
 // 5×5 行列を複数保持しレジスタ消費が大きいため、block 上限を超えないよう __launch_bounds__ で
 // 1 block あたりスレッド数を 128 に制限する（起動時の "too many resources" を回避）。
 #define BLOCK_DPLUR_THREADS 128
+// 占有率実験用: __launch_bounds__ の最小常駐ブロック数 (既定 1 = 従来どおり制限なし, 128 regs → 占有率 ~28 %)。
+// -DBLOCK_DPLUR_MINBLOCKS=n でビルドすると regs ≤ 65536/(128 n) に制限され (spill と引き換えに) 占有率が上がる。
+#ifndef BLOCK_DPLUR_MINBLOCKS
+#define BLOCK_DPLUR_MINBLOCKS 1
+#endif
 // block-DPLUR の閉形式 FVS 版。線形 solve の内部精度を ST (float 既定 / double で軸対称近軸を根治) で
 // テンプレート化。残差/状態 (flow_float=float) を ST へキャストして取り込み、R/L を作らず閉形式で
 // diag/nbr を畳み、ST で in-place 5×5 solve、補正を float dq_new へ書戻す (混合精度 iterative refinement)。
 // 詳細: plans/archived/precision-mixed-axisym.md。
 template<typename ST>
-__global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correction_block_d
+__global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) implicit_defect_correction_block_d
 (
  int loop,
  flow_float dt,

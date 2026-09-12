@@ -326,7 +326,7 @@ void solverConfig::read(std::string fname)
         this->implicitRelax = getOptionalValidatedValue<double>(deltaT, "implicitRelax", 1.0, "time.deltaT");
         this->updateGuardAlpha = getOptionalValidatedValue<double>(deltaT, "updateGuardAlpha", 0.0, "time.deltaT");
         this->lineImplicit = getOptionalValidatedValue<int>(deltaT, "lineImplicit", 0, "time.deltaT");
-        this->blockDPLURDiagCache = getOptionalValidatedValue<int>(deltaT, "blockDPLURDiagCache", 1, "time.deltaT");
+        this->blockDPLURDiagCache = getOptionalValidatedValue<int>(deltaT, "blockDPLURDiagCache", 0, "time.deltaT");
         // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md):
         //   lineKFreeze: dual-time のサブ反復間で K/diag/LU 分解を凍結 (subiter 0 のみ抽出・分解)。
         //   lineViscCoupling: line 面にスカラー粘性結合 (K += α·I, 対角は 2α→α で真の [−α,2α,−α] 化)。

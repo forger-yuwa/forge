@@ -80,8 +80,10 @@ public:
     int implicitSolvePrecision = 0; // block-DPLUR 線形 solve の内部精度。0: float (既定・高速), 1: double。
     // block-DPLUR 対角キャッシュ: sweep 0 で組んだ 5×5 対角 (状態凍結で不変) を diag_block_** に保存し、sweep≥1 は
     // 近傍積 + solve だけにする (ビット同一)。float・point 経路 (implicitSolvePrecision 0, lineImplicit 0) のみ有効。
-    // 0 で従来どおり毎 sweep 再構築 (A/B 用)。plans/active/performance-3d-node-sst-speedup.md §4.2-4。
-    int blockDPLURDiagCache = 1;
+    // **既定 0**: A10G 3D 2.37 M 節点で 44.0→46.5 ms/step と逆に遅化した (対角 25 floats/cell の保存+4 回読込 ≈1.2 GB/step の
+    // 帯域が、省ける近傍幾何読み・組立より高い。sweep はレイテンシ律速で gather 数の削減が効かない)。opt-in 記録用に残す。
+    // plans/active/performance-3d-node-sst-speedup.md §4.2-4 / §9。
+    int blockDPLURDiagCache = 0;
                                     // 残差/状態は float のまま、Jacobian 構築+5×5 solve のみ double 化する混合精度
                                     // (iterative refinement)。軸対称 近軸の float 陰解固着 (Uy が −15 でなく
                                     // −0.6 固着) を根治するが double は遅い (RTX で ~×2.6)。詳細:
