@@ -1,5 +1,7 @@
 #include "condensationTransport_d.cuh"  // wrapper 宣言 + 必要なクラス
 #include "condensationSource_d.cuh"
+#include "thermo_d.cuh"            // SpeciesThermo / thermo_cp_mass (Feder carrier 形)
+#include "speciesTransport_d.cuh"  // species_roY_device_ptr()
 #include "condensationEOS_d.cuh"       // cond_equilibrium_delta (緩和形平衡)
 
 #include <string>
@@ -37,7 +39,9 @@ __host__ __device__ inline void cond_vapor_state(
 __global__ void condensation_source_d(
     geom_int nCells,
     int condModel, int carrier, double Rw, double M,
-    int kantrowitz, int kwGammaMode, int growthModel, double gyarC, int twoTemp,
+    int kantrowitz, int kwGammaMode, double sigmaScale,
+    const SpeciesThermo* sp, int nSpecies, flow_float* const* roYall, int condGasSpecies,   // Feder carrier 形の衝突項用 (TP のみ; CPG は nullptr)
+    int growthModel, double gyarC, int twoTemp,
     int evap, double evapRmin, int evapKelvin, double evapLamMin,
     int eq, double eqRelax, double eqDgMax, double eqDTmax,
     flow_float cp_cpg, flow_float gamma_cpg,
@@ -48,17 +52,20 @@ __global__ void condensation_source_d(
     flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
     flow_float* res_rog, flow_float* res_roQ0, flow_float* res_roQ1, flow_float* res_roQ2,
     flow_float* sj_g, flow_float* sj_Q0, flow_float* sj_Q1, flow_float* sj_Q2,
-    flow_float* diagS, flow_float* diagDrdt, flow_float* diagR30, flow_float* diagTsat)
+    flow_float* diagS, flow_float* diagDrdt, flow_float* diagR30, flow_float* diagTsat,
+    flow_float* diagTheta, flow_float* diagLim)
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     sj_Q0[ic] = 0.0; sj_Q1[ic] = 0.0; sj_Q2[ic] = 0.0; sj_g[ic] = 0.0;
     diagS[ic] = 0.0; diagDrdt[ic] = 0.0; diagR30[ic] = 0.0; diagTsat[ic] = 0.0;
+    diagTheta[ic] = 0.0; diagLim[ic] = 1.0;   // θ (非等温補正) / ソース律速係数 (1=律速なし)
 
     const double rod = (double)ro[ic];
     if (rod <= 1.0e-20) return;
 
-    const CondSpeciesProps cprops = (condModel == 1) ? condProps_H2O() : condProps_N2();
+    CondSpeciesProps cprops = (condModel == 1) ? condProps_H2O() : condProps_N2();
+    cprops.sigmaScale = sigmaScale;   // 感度試験用 σ 倍率 (既定 1.0)
     const double Td = (double)T[ic];
     const double Pd = (double)P[ic];
 
@@ -89,6 +96,32 @@ __global__ void condensation_source_d(
     const double psat_T = cond_psat(cprops, Td);
     diagS[ic] = (flow_float)(pv/(psat_T > 1.0e-300 ? psat_T : 1.0e-300));
     diagTsat[ic] = (flow_float)cond_Tsat(cprops, pv, Td);
+
+    // Feder carrier 形 (condKantrowitz 2/3) の衝突項: 種 DB (NASA-9 c_v(T), M_i) と種質量分率から種別に集計
+    // (plans/active/condensation-kantrowitz-carrier.md §4.1)。TP carrier 以外 (CPG / pure) は純蒸気形 (carrierSum=0)。
+    // 温度摂動 (src_jac) でも同じ値を使う (T 凍結)。
+    CondNucCarrier car;
+    car.a_v = 1.0; car.carrierSum = 0.0; car.cvv_tilde = cprops.cv*cprops.M/COND_RU;
+    if (carrier && sp != nullptr && roYall != nullptr && condGasSpecies >= 0 && condGasSpecies < nSpecies) {
+        const SpeciesThermo& sv = sp[condGasSpecies];
+        const double Mv = sv.MW;
+        car.cvv_tilde = (thermo_cp_mass(sv, Td) - thermo_R_species(sv))*Mv/COND_RU;
+        car.a_v = ((Yw - g) > 0.0 ? (Yw - g) : 0.0)/Mv;
+        double sum = 0.0;
+        for (int i = 0; i < nSpecies; ++i) {
+            if (i == condGasSpecies) continue;
+            const double Yi = (double)roYall[i][ic]/rod;
+            if (!(Yi > 0.0)) continue;
+            const double Mi  = sp[i].MW;
+            const double cvi = (thermo_cp_mass(sp[i], Td) - thermo_R_species(sp[i]))*Mi/COND_RU;
+            sum += (Yi/Mi)*sqrt(Mv/Mi)*(cvi + 0.5);
+        }
+        car.carrierSum = sum;
+    }
+    if (kantrowitz && pv > psat_T) {
+        const double gamma_kw = (kwGammaMode == 1) ? (cpg/cvg) : (cprops.cp/cprops.cv);
+        diagTheta[ic] = (flow_float)cond_kantrowitz_theta(cprops, Td, log(pv/psat_T), kantrowitz, gamma_kw, &car);
+    }
 
     // ---- 平衡凝縮・EOS 拘束形 (condEquilibrium=2): g は dependentVariables が (T,g) 同時反転で決めて rog に
     //      射影済み (plans/accepted/condensation-equilibrium-eos.md)。ここでは診断 (上の S, Tsat) だけ書き、rog の輸送残差を
@@ -166,7 +199,7 @@ __global__ void condensation_source_d(
 
     // 核生成・成長 (freeze, 亜臨界停止・蒸発 clamp)
     double J, rstar;
-    cond_nucleation(cprops, Td, pv, rho_v, &J, &rstar, kantrowitz, gamma_gas);
+    cond_nucleation(cprops, Td, pv, rho_v, &J, &rstar, kantrowitz, gamma_gas, &car);
     if (J > Jmax) J = Jmax;
     if (J < 0.0)  J = 0.0;
     double r_bar = (q0 > 1.0e-30) ? (q1/q0) : rstar;
@@ -205,7 +238,7 @@ __global__ void condensation_source_d(
         cond_vapor_state(carrier, rod, Pd, Td+dTp, g, Yw, Rw, &pvp, &rvp);
         double a0,a1,a2,ag;
         cond_source_vector(cprops, Td+dTp, pvp, rvp, q0, q1, q2, &a0,&a1,&a2,&ag,
-                           kantrowitz, growthModel, gamma_gas, p_gas, gyarC, twoTemp);
+                           kantrowitz, growthModel, gamma_gas, p_gas, gyarC, twoTemp, &car);   // 本体と同じ carrier 項 (T 凍結)
         if (ag < 0.0) ag = 0.0;
         const double dSgdT  = (ag - Sg)/dTp;
         const double dTdrog = (L - (carrier?Rw:Rg)*Td)/(rod*cvg);
@@ -216,13 +249,14 @@ __global__ void condensation_source_d(
             const double dq1 = (q1 > 0.0 ? 0.01*q1 : 1.0e-3);
             double b0,b1,b2,bg;
             cond_source_vector(cprops, Td, pv, rho_v, q0, q1+dq1, q2, &b0,&b1,&b2,&bg,
-                               kantrowitz, growthModel, gamma_gas, p_gas, gyarC, twoTemp);
+                               kantrowitz, growthModel, gamma_gas, p_gas, gyarC, twoTemp, &car);
             double sjq1 = -theta*(b1 - SQ1)/dq1;
             if (sjq1 < 0.0) sjq1 = 0.0;
             sj_Q1[ic] = (flow_float)sjq1;
         }
     }
 
+    diagLim[ic] = (flow_float)theta;   // ソース律速係数 (核生成域で 1 に近いことを確認する診断)
     SQ0 *= theta; SQ1 *= theta; SQ2 *= theta; Sg *= theta;
     const double v = (double)vol[ic];
     res_roQ0[ic] += (flow_float)(SQ0*v);
@@ -257,7 +291,10 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
         condensation_source_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells,
             cfg.condModel, carrier, Rw, M,
-            cfg.condKantrowitz, cfg.condKantrowitzGammaMode, cfg.condGrowthModel, cfg.condGyarmathyC, cfg.condTwoTemp,
+            cfg.condKantrowitz, cfg.condKantrowitzGammaMode, cfg.condSigmaScale,
+            (cfg.thermalMethod == 2) ? thermo_species_device_ptr() : nullptr, cfg.nSpecies,
+            (cfg.thermalMethod == 2) ? species_roY_device_ptr() : nullptr, cfg.condGasSpecies,
+            cfg.condGrowthModel, cfg.condGyarmathyC, cfg.condTwoTemp,
             cfg.condEvaporation, cfg.condEvapRmin, cfg.condEvapKelvin, evapLamMin,
             cfg.condEquilibrium, cfg.condEqRelax, cfg.condEqDgMax, cfg.condEqDTmax,
             cfg.cp, cfg.gamma,
@@ -268,7 +305,8 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
             var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
             var.c_d["res_rog_"+i], var.c_d["res_roQ0_"+i], var.c_d["res_roQ1_"+i], var.c_d["res_roQ2_"+i],
             var.c_d["src_jac_g_"+i], var.c_d["src_jac_Q0_"+i], var.c_d["src_jac_Q1_"+i], var.c_d["src_jac_Q2_"+i],
-            var.c_d["condS_"+i], var.c_d["condDrdt_"+i], var.c_d["condR30_"+i], var.c_d["condTsat_"+i]);
+            var.c_d["condS_"+i], var.c_d["condDrdt_"+i], var.c_d["condR30_"+i], var.c_d["condTsat_"+i],
+            var.c_d["condTheta_"+i], var.c_d["condLim_"+i]);
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

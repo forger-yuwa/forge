@@ -23,6 +23,8 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [condensation-kantrowitz-carrier.md](active/condensation-kantrowitz-carrier.md) | `condensation` | **carrier 中の非等温核生成補正 (Feder 形 `condKantrowitz 2/3`) と H2O 表面張力の小半径妥当性** (2026-09-12 起票, branch feature/condensation-air): H2O–N2 では N2 衝突がクラスタを冷やし θ が純蒸気形の 1/40; Wysłouzil 2D で 0/1/2/3 と σ ±3 % 感度 |
+| [condensation-air.md](active/condensation-air.md) | `condensation` | **空気そのものの凝縮** (2026-09-12 起票): `n2_latent` の低温 $L'>0$ 整合修正、pure CPG への二相音速、空気擬似種 `condModel 2` (O2/N2 理想溶液露点線 + N2 核生成)、case/34 Arthur 回帰と Daum & Gyarmathy onset 曲線比較 |
 | [condensation-kantrowitz-gamma-twophase-sonic.md](active/condensation-kantrowitz-gamma-twophase-sonic.md) | `condensation` | **Kantrowitz 補正の γ を蒸気 γ_v に修正 + 凝縮セルの二相 frozen 音速** (2026-09-10 起票): 旧実装はセル気相混合 γ (H2O–N2 で 1.40) と g を無視した全蒸気音速。A/B キー `condKantrowitzGammaMode` / `condSonicModel`、Wyslouzil 2D (case/16) で変化量を定量化 |
 | [chemistry-finite-rate-h2.md](active/chemistry-finite-rate-h2.md) | `thermophysics / chemistry` | **有限速度化学 (H₂ 燃焼・ノズル化学非平衡)** (2026-09-04 起票): 種ブロック point-implicit + sensible datum 反応熱陽注入。Phase 0 (CEA スクリーニング・熱力学 DB ツール・Jachimowski YAML) 完了、Phase 1 ソース項から実装 |
 | [boundary-node-inlet-corner-wall.md](active/boundary-node-inlet-corner-wall.md) | `boundary / discretization` | node の入口∩壁コーナーで質量が溜まり P 暴走する問題の根治: 変換時に入口側半割面を壁へ帰属 (`mesh.nodeInletCornerWall`)。Burrows–Kurkov (case/47) で発覚 (2026-09-04) |

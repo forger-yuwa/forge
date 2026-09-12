@@ -687,6 +687,10 @@ void solverConfig::read(std::string fname)
             this->condModel = getOptionalValidatedValue<int>(cond, "condModel", 0, "condensation");
             this->condGasSpecies = getOptionalValidatedValue<int>(cond, "condGasSpecies", -1, "condensation");
             this->condKantrowitz = getOptionalValidatedValue<int>(cond, "condKantrowitz", 0, "condensation");
+            if (this->condKantrowitz < 0 || this->condKantrowitz > 3)
+                throw std::runtime_error("Key 'condKantrowitz' in 'condensation' must be 0 (isothermal), 1 (Kantrowitz pure-vapor), 2 or 3 (Feder carrier form).");
+            this->condSigmaScale = getOptionalValidatedValue<double>(cond, "condSigmaScale", 1.0, "condensation");
+            if (!(this->condSigmaScale > 0.0)) throw std::runtime_error("Key 'condSigmaScale' in 'condensation' must be > 0.");
             this->condKantrowitzGammaMode = getOptionalValidatedValue<int>(cond, "condKantrowitzGammaMode", 0, "condensation");
             this->condSonicModel = getOptionalValidatedValue<int>(cond, "condSonicModel", -1, "condensation");
             this->condGrowthModel = getOptionalValidatedValue<int>(cond, "condGrowthModel", 0, "condensation");

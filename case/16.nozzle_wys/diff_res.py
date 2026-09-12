@@ -21,8 +21,11 @@ for k in keys:
     if not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))): rows.append((k, "NON-FINITE", float("inf"), 0, "FAIL")); fail = True; continue
     d = np.abs(x - y); den = np.max(np.abs(x)); rel = (d.max()/den) if den > 0 else (0.0 if d.max() == 0 else np.inf)
     rels[k] = rel; nz = int((d > 0).sum()); worst = max(worst, rel)
-    lim = (tolmap.get(k, None) or 0.0)*a.factor if a.tolfile else a.tol
-    verdict = "" if lim is None else ("ok" if rel <= lim else "FAIL")
+    if a.tolfile and k not in tolmap:   # ノイズ床の記録に無いキー (例: 旧バイナリが出力しなかった gamma) は判定せず記録のみ
+        lim = None; verdict = "n/a (no noise ref)"
+    else:
+        lim = tolmap[k]*a.factor if a.tolfile else a.tol
+        verdict = "" if lim is None else ("ok" if rel <= lim else "FAIL")
     if verdict == "FAIL": fail = True
     rows.append((k, f"{d.max():.3e}", rel, nz, (f"{verdict} (tol {lim:.1e})" if lim is not None else "")))
 print("| key | max|Δ| | max|Δ|/max|ref| | #diff | 判定 |")

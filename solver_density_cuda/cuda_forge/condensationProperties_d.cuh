@@ -37,6 +37,7 @@ struct CondSpeciesProps {
     double Tt;      // 三重点温度 [K] (液/固 切替)
     double Tc;      // 臨界温度 [K]
     double M;       // 分子量 [kg/mol]
+    double sigmaScale; // 表面張力の倍率 (感度試験専用 condSigmaScale, 既定 1.0; 核生成・Kelvin・蒸発に一貫)
 };
 
 // N2 既定パラメータ。R=296.8, γ=1.4 → cv=R/(γ-1)=742, cp=γcv=1038.8。
@@ -50,6 +51,7 @@ __host__ __device__ inline CondSpeciesProps condProps_N2()
     s.Tt = 63.15;
     s.Tc = 126.192;
     s.M  = 0.0280134;
+    s.sigmaScale = 1.0;
     return s;
 }
 
@@ -251,7 +253,8 @@ __host__ __device__ inline double cond_latent(const CondSpeciesProps& s, double 
 }
 __host__ __device__ inline double cond_sigma(const CondSpeciesProps& s, double T)
 {
-    return (s.model == COND_MODEL_H2O) ? h2o_sigma(T) : n2_sigma(T);
+    // sigmaScale は感度試験専用の一定倍率 (既定 1.0: ×1.0 は IEEE 恒等でビット不変)。
+    return s.sigmaScale * ((s.model == COND_MODEL_H2O) ? h2o_sigma(T) : n2_sigma(T));
 }
 
 // 飽和温度 T_sat(p_v): ln p_sat(T) = ln p_v を Clausius-Clapeyron 勾配 d ln p/dT = L/(R T^2) の Newton で反転。
@@ -293,5 +296,6 @@ __host__ __device__ inline CondSpeciesProps condProps_H2O()
     s.Tt = 273.16;
     s.Tc = 647.096;
     s.M  = 0.0180153;
+    s.sigmaScale = 1.0;
     return s;
 }

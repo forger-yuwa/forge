@@ -15,7 +15,39 @@
 
 #define COND_KB 1.380649e-23      // Boltzmann [J/K]
 #define COND_NA 6.02214076e23     // Avogadro [1/mol]
+#define COND_RU 8.314462618       // 気体定数 [J/(mol K)]
 #define COND_PI 3.141592653589793
+
+// carrier 中の非等温核生成補正 (Feder et al. 1966; plans/active/condensation-kantrowitz-carrier.md §4.1) に渡す衝突項。
+//   a_v        = (Y_w - g)/M_v  [mol/kg]      蒸気の物質量 (Y_v→0 で θ→0 に連続に落とすための正規化)
+//   carrierSum = Σ_{i≠v} (Y_i/M_i) √(M_v/M_i) (c̃_v,i + 1/2)   キャリア各種の衝突・熱容量重み (種 DB から種別に集計)
+//   cvv_tilde  = c_v,v M_v / R_u  蒸気 1 分子の定積熱容量 [k_B 単位]
+// nullptr (または carrierSum=0, a_v=1) は純蒸気 (Feder 純蒸気形)。
+struct CondNucCarrier { double a_v; double carrierSum; double cvv_tilde; };
+
+// 非等温補正 θ (J_noniso = J_iso/(1+θ))。mode: 1=Kantrowitz 原形 (純蒸気, 2(γ_v−1)/(γ_v+1)·b(b−½)),
+//   2=Feder carrier 形 (q̂ = b − ½), 3=Feder carrier 形 + 表面仕事 (q̂ = b − ½ − ln S; Wedekind 2008 式 8–10 に対応)。
+//   θ = a_v q̂² / [a_v (c̃_v,v+½) + carrierSum]。純蒸気 (carrierSum=0) では q̂²/(c̃_v,v+½) = Feder 純蒸気形 (mode 1 と 2 % 差)。
+//   q̂<0 (ln S > b−½) は Feder 形の適用外だが q̂² のまま返す (黙って等温に落とさない; 診断 condTheta で監視)。
+__host__ __device__ inline double cond_kantrowitz_theta(
+    const CondSpeciesProps& cp, double T, double lnS, int mode, double gamma_gas, const CondNucCarrier* car)
+{
+    const double b = cond_latent(cp, T) / (cp.R*T);
+    if (mode == 1) {
+        const double theta = (2.0*(gamma_gas-1.0)/(gamma_gas+1.0)) * b * (b - 0.5);
+        return (theta > 0.0) ? theta : 0.0;
+    }
+    if (mode >= 2) {
+        const double cvv = car ? car->cvv_tilde : cp.cv*cp.M/COND_RU;
+        const double av  = car ? car->a_v : 1.0;
+        const double cs  = car ? car->carrierSum : 0.0;
+        const double qhat = b - 0.5 - ((mode == 3) ? lnS : 0.0);
+        const double den  = av*(cvv + 0.5) + cs;
+        if (!(den > 0.0) || !(av > 0.0)) return 0.0;   // 蒸気ゼロ: 等温極限
+        return av*qhat*qhat/den;
+    }
+    return 0.0;
+}
 
 // 核生成は臨界半径 r* ちょうどで生むと成長則の (1-r*/r) が 0 (不安定平衡) になり、
 // 平均半径 r̄ が r* に張り付いて成長が起動しない。わずかに超臨界 r_nuc = COND_RNUC_FAC*r*
@@ -35,7 +67,7 @@
 __host__ __device__ inline void cond_nucleation(
     const CondSpeciesProps& cp, double T, double p_v, double rho_v,
     double* J_out, double* rstar_out,
-    int kantrowitz = 0, double gamma_gas = 1.4)
+    int kantrowitz = 0, double gamma_gas = 1.4, const CondNucCarrier* car = nullptr)
 {
     const double psat = cond_psat(cp, T);
     const double S = p_v / (psat > 1.0e-300 ? psat : 1.0e-300);
@@ -52,9 +84,9 @@ __host__ __device__ inline void cond_nucleation(
     if (cp.model == COND_MODEL_N2) corr = exp(-55.0 + 4270.0/T); // Iland 経験補正
     // H2O: corr=1 (carrier-thermalized 等温 CNT)
     if (kantrowitz) {
-        const double b = cond_latent(cp, T) / (R*T);
-        const double theta = (2.0*(gamma_gas-1.0)/(gamma_gas+1.0)) * b * (b - 0.5);
-        corr /= (1.0 + (theta > 0.0 ? theta : 0.0));   // 非等温抑制 (θ<0 は掛けない)
+        // mode 1: Kantrowitz 原形 (従来と同一の演算順でビット不変)。mode 2/3: Feder carrier 形 (cond_kantrowitz_theta)。
+        const double theta = cond_kantrowitz_theta(cp, T, lnS, kantrowitz, gamma_gas, car);
+        corr /= (1.0 + theta);   // 非等温抑制 (θ>=0)
     }
     const double expo = -dG/(COND_KB*T);
     const double J = (expo > -700.0) ? Kcnt*exp(expo)*corr : 0.0;
@@ -144,11 +176,11 @@ __host__ __device__ inline void cond_source_vector(
     double roQ0, double roQ1, double roQ2,
     double* SQ0, double* SQ1, double* SQ2, double* Sg,
     int kantrowitz = 0, int growthModel = 0, double gamma_gas = 1.4, double p_gas = -1.0,
-    double gyarC = 3.18, int twoTemp = 0)
+    double gyarC = 3.18, int twoTemp = 0, const CondNucCarrier* car = nullptr)
 {
     if (rho_v < 0.0) rho_v = 0.0;
     double J, rstar;
-    cond_nucleation(cp, T, p_v, rho_v, &J, &rstar, kantrowitz, gamma_gas);
+    cond_nucleation(cp, T, p_v, rho_v, &J, &rstar, kantrowitz, gamma_gas, car);   // 本体と同じモデル (src_jac 摂動も同一)
     const double r_bar = (roQ0 > 1.0e-30) ? (roQ1/roQ0) : rstar;
     // 成長は r̄>r* のときのみ・蒸発(<0)はしない (本体 kernel と整合; 亜臨界での発散を防ぐ)。
     double drdt = 0.0;

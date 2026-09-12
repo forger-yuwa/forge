@@ -136,7 +136,9 @@ void variables::registerCondensation(int nCondSpecies)
         // 診断 (source kernel が毎ステップ書く): 過飽和 S=p_v/p_sat, 成長率 dr/dt [m/s] (負=蒸発),
         // 体積平均半径 r30 [m] (蒸発分岐で評価; 0=未評価)。確保時に 0 初期化 (prefix "cond")。
         // condTsat_: 飽和温度 T_sat(p_v) [K] (過冷却度 T_sat-T の評価用, plans/accepted/condensation-equilibrium.md)
-        for (const auto& d : {std::string("condS_"), std::string("condDrdt_"), std::string("condR30_"), std::string("condTsat_")}) {
+        // condTheta_: 非等温核生成補正 θ (condKantrowitz 1–3; S>1 のセル), condLim_: ソース律速係数 (1=律速なし)。
+        for (const auto& d : {std::string("condS_"), std::string("condDrdt_"), std::string("condR30_"), std::string("condTsat_"),
+                              std::string("condTheta_"), std::string("condLim_")}) {
             const std::string name = d + std::to_string(s);
             this->cellValNames.push_back(name);
             this->c.emplace(name, std::vector<flow_float>{});

@@ -11,11 +11,8 @@
 - **related_docs**:
   - [`methods/thermophysics.md`](../../methods/thermophysics.md) — 多成分 TP gas 基盤
 - **created**: `2026-06-28`
-- **updated**: `2026-07-07` (ブラッシュアップ第2ラウンド)
 - **owner**: (未定)
 - **手法**: deep-research ハーネス 2 回 (前段=素過程, 後段=end-to-end 深掘り)。各回 5 アングル × 22 ソース取得 × ~90 主張抽出 → 上位 25 を 3 票方式で敵対的検証。
-- **第2ラウンド (2026-07-07)**: 主要主張の個別再検証 (テーマ1 は 10 件、テーマ2 は 7 件を一次資料・アブスト・博士論文まで遡って照合)。**書誌訂正 4 件・数値棄却 1 件** (§6 参照)。あわせて OA PDF を [`papers/condensation/`](../../papers/condensation/) へ収集 (本文中 📁 印 = PDF 収蔵済み)。
-- **第3ラウンド (2026-07-07)**: 課題 A (蒸発拡張) の検証体系を citation 追跡で構築 — 衝撃誘起蒸発の**実験アンカー実在を確認** (van Dongen 系衝撃管、§1-3)、**設計先行例 Luo et al. 2006 (蒸発+脱核 Euler 型) を発見**、Wen 2020 を精読し code-to-code に格下げ、Duke-Walker 系を課題 D 向けと判定。未入手文献一覧 (§7 末尾) と研究課題提案 (§9) を追加。
 
 > **位置づけ**: 本文書は実装計画ではなく **技術調査レポート**。極超音速燃焼風洞での凝縮液滴の挙動 (テーマ1) と、降雨中飛翔時の雨滴の燃焼器到達 (テーマ2) について、一次文献・支配無次元数・数値手法を棚卸しする。forge への展開を判断する場合は [`condensation-nonequilibrium.md`](../../plans/active/condensation-nonequilibrium.md) 等の plan 側で別途設計すること。
 
@@ -27,7 +24,6 @@
 | ○ | 検証バッチで 2-0 / 2-1 など過半数で確証 (一部留保) |
 | △ | 情報源は取得したが今回の検証バッチで独立確証されていない (要追検証) |
 | ✗ | 検証で棄却された主張 (誤りとして本文に記録) |
-| 📁 | OA PDF を [`papers/condensation/`](../../papers/condensation/) に収蔵済み |
 
 ---
 
@@ -37,10 +33,9 @@
 - **テーマ1 の運命 (蒸発 vs 成長)**: 衝撃通過直後の水滴は昇温により **「凝縮成長」ではなく「蒸発」側**に推移する ◎。ただし弱衝撃 ($M_{sf,0}=1.3$) では蒸発による径減少はわずか (~0.2 μm)、強衝撃でブレイクアップが起きると最終径は初期径によらず **~4 μm に収束** ◎。
 - **テーマ1 の汚染**: 燃焼加熱型 (vitiated) 風洞の **H2O/CO2 気相汚染**は着火遅れ・燃焼特性・推力を実質的に変え、scramjet 試験データを汚染する ◎。FAA が規制するほど water ingestion は重大 ◎。
 - **テーマ2 (降雨中飛翔)**: 雨滴は弓状/斜め衝撃波通過後に **Weber 数** (遷移 We は **Ohnesorge 数**の関数) で支配される空力ブレイクアップ (bag〜sheet/wave-crest stripping) を起こす ◎。鈍頭体への到達/運動量伝達は **「ブレイクアップ時間 vs 機体到達までの利用可能時間の競合」**で決まる ◎。
-- **数値手法**: 支配的なのは**一方向結合 Euler-Lagrange** + **KHRT/TAB** ブレイクアップ + 変形考慮の経験的抗力。最新は **Eulerian-Lagrangian (EL)** でブレイクアップ+蒸発を同時解析 (2D double-wedge / 3D cone-cylinder-flare, TAMU) ◎。凝縮側の Euler モーメント法は**蒸発+脱核まで入れて実験検証した先行 (Luo 2006, TU/e 系) が存在**し、商用コード (CFX/Fluent) の 2 方程式単分散 wet steam はその縮約版に留まる (§4, §9 課題 A)。
-- **蒸発の検証データ (第3ラウンド)**: 「凝縮→衝撃→再蒸発」サイクルは**衝撃管実験の実測が実在** (Smolders & van Dongen 1992 ほか、§1-3) し、d²-law の成立域・準定常成長則の逸脱マップ (Finneran 2021) まで揃う。**課題 A は実験に接地した検証チェーンが組める** ◎。
-- **🔴 最大の空白 (あなたの2つの問いの核心)**: 「凝縮液滴/雨滴が**実機 scramjet 供試体の衝撃波系を通過して燃焼器に到達するか**」の **end-to-end 定量評価**を直接扱った一次文献は、2 回の深掘り+第2/3ラウンドの追跡でも確立できなかった。素過程 (凝縮・蒸発・ブレイクアップ) は堅固だが、それらを燃焼器入口までつないだ統合研究は **open** (§5)。forge での攻め方は §9 に課題 A〜E として整理。
-- **🔴 高マッハ域の限界**: shock-droplet 相互作用の確立データは概ね **M≲5-6**。真の極超音速 (M≫6) は **LLNL+TAMU** が **Mach 5-30 の normal shock** を数値で埋めつつあるが、実験検証は乏しく、古典相関 (Ranger & Nicholls) の高マッハ外挿は**実験検証付きでは未確立** ✗ (ただし第2ラウンドで両方向の新証拠: M5-30 数値の early results は R&N **支持**側、TUM の We 固定 Mach 走査実験は圧縮性の独立効果 = R&N **限界**側。§2-4)。
+- **数値手法**: 支配的なのは**一方向結合 Euler-Lagrange** + **KHRT/TAB** ブレイクアップ + 変形考慮の経験的抗力。最新は **Eulerian-Lagrangian (EL)** でブレイクアップ+蒸発を同時解析 (2D double-wedge / 3D cone-cylinder-flare, TAMU) ◎。
+- **🔴 最大の空白 (あなたの2つの問いの核心)**: 「凝縮液滴/雨滴が**実機 scramjet 供試体の衝撃波系を通過して燃焼器に到達するか**」の **end-to-end 定量評価**を直接扱った一次文献は、2 回の深掘りでも確立できなかった。素過程 (凝縮・蒸発・ブレイクアップ) は堅固だが、それらを燃焼器入口までつないだ統合研究は **open** (§5)。
+- **🔴 高マッハ域の限界**: shock-droplet 相互作用の確立データは概ね **M≲5-6**。真の極超音速 (M≫6) は TAMU 等が **Mach 5-30 の normal shock** を数値で埋めつつあるが、実験検証は乏しく、古典相関 (Ranger & Nicholls) の高マッハ外挿は**棄却** ✗。
 
 ---
 
@@ -48,36 +43,24 @@
 
 ### 1-1. ノズル膨張での非平衡凝縮の物理
 
-**空気主成分 (N2) の均質凝縮** ◎ — 極超音速ノズルの急膨張で純窒素 N2 が均質凝縮する。M=10/14/18 の純窒素流で凝縮の発現・消失が実験観測され (**等圧過冷却 22-25 K で部分凝縮流へ遷移、凝縮質量分率 12-14%**。過冷却限界は「昇華線から Gibbs 絶対安定限界までの温度差の ~60%」)、半経験モデル (簡易化 DFT でナノスケール N2 液滴をモデル化、自由エネルギー障壁・表面張力・臨界液滴密度を核生成・成長モデルに供給) が確立。軸対称 Mach10 ノズルの凝縮開始静温で公表値と**最大 3.5 K の偏差**で一致、施設で達成可能な過冷却は ~10 K 程度。
-〈出典〉Lederer, Yanta, Ragsdale, Hudson & Griffith, AIAA 90-1392 (1990) = NTRS [19900050882](https://ntrs.nasa.gov/citations/19900050882) の実体 (第2ラウンドで書誌特定)。数値 22-25 K / 12-14% の一次帰属は journal 版 **Griffith, Yanta & Ragsdale, "Supercooling in hypersonic nitrogen wind tunnels", J. Fluid Mech. 269:283-299 (1994)** (アブストで逐語確認)。半経験モデルは **Lax & Leonov**, AIAA SciTech [2020-0381](https://www.researchgate.net/publication/338400653_Homogeneous_Condensation_of_Nitrogen_in_Hypersonic_Wind_Tunnels_A_Semi-Empirical_Model) (journal 版 AIAA J 58(11), [10.2514/1.J059519](https://doi.org/10.2514/1.J059519))
+**空気主成分 (N2) の均質凝縮** ◎ — 極超音速ノズルの急膨張で純窒素 N2 が均質凝縮する。M=10/14/18 の純窒素流で凝縮の発現・消失が実験観測され (過冷却 ~22-25 K、凝縮質量分率 12-14%)、半経験モデル (簡易化 DFT でナノスケール N2 液滴をモデル化、自由エネルギー障壁・表面張力・臨界液滴密度を核生成・成長モデルに供給) が確立。軸対称 Mach10 ノズルの凝縮開始静温で公表値と**最大 3.5 K の偏差**で一致。
+〈出典〉NASA NTRS [19900050882](https://ntrs.nasa.gov/citations/19900050882) / AIAA SciTech 2020-0381 [Homogeneous Condensation of Nitrogen in Hypersonic Wind Tunnels](https://www.researchgate.net/publication/338400653_Homogeneous_Condensation_of_Nitrogen_in_Hypersonic_Wind_Tunnels_A_Semi-Empirical_Model)
 
-**非平衡過冷却が本質** ◎ — 蒸気相は平衡飽和線を**超えて大幅に過冷却**してから核生成する (平衡飽和点では始まらない)。過冷却の到達度は**ノズル形状とシーディング (汚染物) に依存**。contoured ノズルや低膨張率 (膨張率パラメータ $\dot{P}<1000$) では過冷却が著しく制限され**不均質核生成が支配的**になる (contoured ノズルの過冷却は <2.5 K)。均質 (spontaneous) 核生成理論は $\dot{P}>1000$ で実験と一致、小 $\dot{P}$ で乖離。Longshot の標準運転条件は凝縮フリーで、低 T0 実験では **T∞≈47 K で onset** (不均質核生成と整合)。
-〈出典〉NTRS 19900050882 / VKI Longshot [AIAA 2014-1153 (Grossir & Rambaud)](https://dipot.ulb.ac.be/dspace/bitstream/2013/208925/3/AIAA_2014_1153_Grossir.pdf) 📁 (第2ラウンドで OA 全文から逐語確認)
+**非平衡過冷却が本質** ◎ — 蒸気相は平衡飽和線を**超えて大幅に過冷却**してから核生成する (平衡飽和点では始まらない)。過冷却の到達度は**ノズル形状とシーディング (汚染物) に依存**。contoured ノズルや低膨張率 (膨張率パラメータ $\dot{P}<1000$) では過冷却が著しく制限され**不均質核生成が支配的**になる。均質 (spontaneous) 核生成理論は $\dot{P}>1000$ で実験と一致、小 $\dot{P}$ で乖離。
+〈出典〉NTRS 19900050882 / VKI Longshot [AIAA 2014-1153 (Grossir)](https://dipot.ulb.ac.be/dspace/bitstream/2013/208925/3/AIAA_2014_1153_Grossir.pdf)
 
-**水蒸気の凝縮衝撃波** ◎ — H2O の非平衡凝縮はノズルのスロート〜末広部で**凝縮衝撃波 (condensation shock)** として顕在化。Schlieren 高速可視化で凝縮衝撃波・弱擾乱波の位置・角度から発現位置を実測できる (impulse 施設の shock-tunnel/Ludwieg 両モード、N2/H2O RH 25-100%・293-343 K)。
-〈出典〉**Mahmoudian, Mazzelli, Milazzo, Malpress & Buttsworth (2021)**, "Experiments on water vapour condensation within supersonic nozzle flow generated by an impulse tunnel", *Int. J. Multiphase Flow* 134:103473, [10.1016/j.ijmultiphaseflow.2020.103473](https://doi.org/10.1016/j.ijmultiphaseflow.2020.103473) (**書誌訂正**: 初稿の「Buttsworth et al. 2020 / S030193222030584X」は著者順・誌名とも不正確。IJMF が正)
+**水蒸気の凝縮衝撃波** ◎ — H2O の非平衡凝縮はノズルのスロート〜末広部で**凝縮衝撃波 (condensation shock)** として顕在化。Schlieren 高速可視化で凝縮衝撃波・弱擾乱波の位置・角度から発現位置を実測できる。
+〈出典〉Buttsworth et al. 2020, impulse tunnel TUSQ (N2/H2O 混合気) [ScienceDirect S030193222030584X](https://www.sciencedirect.com/science/article/abs/pii/S030193222030584X)
 
 **理論的基盤 (古典核生成理論 CNT)** ◎ — Wyslouzil & Wölk のレビューが基盤文献。等温核生成速度の標準測定法 (膨張チャンバ、nucleation-pulse、超音速ノズル) と CNT 理論対実験の比較 (Wölk-Strey 経験補正含む) を扱う。
 〈出典〉[J. Chem. Phys. 145, 211702 (2016)](https://pubs.aip.org/aip/jcp/article/145/21/211702/196311/Overview-Homogeneous-nucleation-from-the-vapor)
 
-> **歴史的基準文献**: **Wegener & Mack「Condensation in Supersonic and Hypersonic Wind Tunnels」(Advances in Applied Mechanics, Vol. 5, pp. 307-447, 1958, Elsevier)** が古典レビュー (第2ラウンドで書誌確証 ◎。paywall のため claim 抽出には未使用)。本テーマの出発点。
-
-### 1-1bis. 施設運用の凝縮 onset 基準 (定量) — 第2ラウンド追補
-
-実在の極超音速施設が「凝縮フリー運転」をどう定量担保しているかの一次資料群。forge で風洞ノズル凝縮を解く際の検証データ候補でもある。
-
-- **Griffith, Yanta & Ragsdale (1994), J. Fluid Mech. 269:283-299** ○ — N2 の過冷却上限を「昇華線→Gibbs 絶対安定限界の温度差の 60%」と定式化。等圧過冷却 22-25 K で部分凝縮流へ遷移 (凝縮質量分率 12-14%)。§1-1 の NSWC データの journal 版であり、数値の一次帰属先。
-- **Balla, Rhode & Everhart (2014), AIAA J 52(7):1452-1465** △ — NASA Langley 31-Inch Mach 10 (空気) の**過飽和域を p0=1.0-10.0 MPa, T0=357-1000 K で系統マップ**。計測器 (全温プローブ/pitot/Rayleigh 散乱) ごとに定量計測可能な過飽和域が異なること、Rayleigh 密度が過飽和域の大半で理論値 ±15% であること、**振動非平衡からのエネルギー移動がクラスタ形成を抑制する nucleation reduction mechanism** を初提示。[10.2514/1.J052608](https://doi.org/10.2514/1.J052608)
-- **AIAA 1994-199** △ — NSWC Hypervelocity Wind Tunnel No. 9 (N2) の過冷却限界の実験決定。[10.2514/6.1994-199](https://doi.org/10.2514/6.1994-199)。関連して AIAA 2021-0982 (Tunnel 9 の Mach 18 拡張較正, HyTIP) が M18 N2 運転の onset マージンを扱うはず (本文未確認)。
-- **Grossir & Dias (2020), NATO STO-EN-AVT-325-02** ◎📁 — 凝縮 onset 制約を組み込んだ VKI Longshot の施設特性評価 (講義ノート、OA)。[`papers/condensation/Grossir_2020_STO-EN-AVT-325-02_Longshot_flow_characterization.pdf`](../../papers/condensation/Grossir_2020_STO-EN-AVT-325-02_Longshot_flow_characterization.pdf)
-- **Lax & Leonov (2020/2021)** — M6/M10 施設で達成可能な過冷却 ~10 K、M10 onset 静温の再現偏差 3.5 K (§1-1)。
-- (補助) Notre Dame 修士論文 (2023) "Hypersonic Wind Tunnel Flow Characterization, Condensation Detection, and Valve Modifications" — arc-heated M6 と M5.7 静粛風洞で static probe + Rayleigh 散乱により onset を検出し「最小静温条件」を施設運用に設定 (OA, curate.nd.edu)。
-- **未確認**: Pope & Goin (High-Speed Wind Tunnel Testing) の具体的数値則は書籍にアクセスできず確認不能。
+> **歴史的基準文献**: **Wegener & Mack「Condensation in Supersonic and Hypersonic Wind Tunnels」(1958, Advances in Applied Mechanics)** が古典レビュー (検索で最重要一次文献として浮上、paywall のため claim 抽出には未使用 △)。本テーマの出発点。
 
 ### 1-2. 燃焼加熱型 (combustion-heated) 風洞での凝縮
 
 炭化水素燃焼を熱源とする燃焼加熱型風洞では、**燃焼生成物の水蒸気がノズル膨張で凝縮**して二相流を生じ、設計流れ条件 (ノズル出口の熱力学環境) を変える ◎。相変化と圧縮性流れの連成のため見積もりは困難で、縮約モデルは 2 段階に分ける: (1) 凝縮なしの実在気体ノズル流で**過飽和**出口状態を得る、(2) ノズル末端で過飽和→飽和へ**不連続ジャンプ**する。
-〈出典〉Lin, Luo, Qin & Yang, "A reduced theoretical model for estimating condensation effects in combustion-heated hypersonic tunnel", Shock Waves 28(2):321-333, 2018 [10.1007/s00193-017-0724-x](https://link.springer.com/article/10.1007/s00193-017-0724-x) (第2ラウンドで 2 段階分割の記述をアブスト逐語確認 ◎)。なお同著者の先行論文 **Lin et al. 2014, Shock Waves 24:179-189** (N2 ノズル凝縮のモーメント法+CNT+修正 Gyarmathy 成長) は forge 凝縮実装の主参照で、PDF は [`papers/on nitrogen condensation in hypersonic nozzle flows.pdf`](../../papers/on%20nitrogen%20condensation%20in%20hypersonic%20nozzle%20flows.pdf) に収蔵済み。
+〈出典〉Lin et al., Shock Waves 28:321-333, 2018 [10.1007/s00193-017-0724-x](https://link.springer.com/article/10.1007/s00193-017-0724-x)
 
 ### 1-3. 衝撃波背後で蒸発するか残存するか (供試体まわり)
 
@@ -87,28 +70,10 @@
 - **細径プローブ**は薄い衝撃層で**蒸発が間に合わず凝縮を検出**できる。
 - 凝縮は潜熱放出で静温を上げ、密度ほぼ不変ゆえ静圧も同程度上がる → **静温・静圧が凝縮検出に好適**。
 
-〈出典〉VKI Longshot AIAA 2014-1153 (M=14, N2) 📁 — 第2ラウンドで OA 全文から逐語確認 ("Large probes have a large shock stand-off distance so that the residence time … might be long enough for the condensed elements to evaporate"、25.4 mm プローブの pitot/淀み点熱流束不感、static T/P が検出に好適)。滞留時間論の原典は McBride & Sherman (AIAA J 9)
+〈出典〉VKI Longshot AIAA 2014-1153 (M=14, N2)、McBride & Sherman 参照
 
 **衝撃通過後の運命 = 蒸発側** ◎ (深掘りで確認) — 衝撃通過直後の水滴は「凝縮成長」ではなく「蒸発」側に推移する。弱衝撃 ($M_{sf,0}=1.3$) では $d_{d,0}=$30/50 μm はブレイクアップせず、蒸発による径減少は ~0.2 μm にとどまる。$d_{d,0}=$70/90 μm では衝撃通過直後にブレイクアップし、最終径は初期径によらず **~4 μm に収束**。
-〈出典〉Huang & Zhang, ICLASS 2021 [arXiv 2103.10576](https://arxiv.org/pdf/2103.10576) 📁 (逐語確認、ただし 1 次元衝撃管・弱衝撃・TAB モデル。著者は §2-2 の書誌訂正参照)
-
-**衝撃背後の液滴蒸発の実験データ (第3ラウンド追補・2026-07-07)** — 「衝撃 → 液滴蒸発」は数値だけでなく**衝撃管の実測データが実在する** (課題 A の実験検証アンカー):
-
-- **Goossens, Cleijne, Smolders & van Dongen (1988)**, "Shock wave induced evaporation of water droplets in a gas-droplet mixture", *Exp. Fluids* **6**:561-568, [10.1007/BF00196603](https://doi.org/10.1007/BF00196603) ○ — 衝撃 **M=1.2-2.1**、液滴質量分率 5×10⁻³、初期半径 **1-1.4 μm** の水霧で蒸発を光学計測。**$r^2$-時間の線形関係 (d²-law) を実測**し、特性蒸発時間が衝撃強度に強く依存することを示す (paywall)。
-- **Smolders & van Dongen (1992)**, "Shock wave structure in a mixture of gas, vapour and droplets", *Shock Waves* **2**:255-267, [10.1007/BF01414761](https://doi.org/10.1007/BF01414761) ○ — **希薄波で不均質凝縮させた霧を衝撃波で再蒸発させる「凝縮→衝撃→蒸発」の全サイクル**を衝撃管で実験し、圧力・温度・飽和度・液滴径を実測。準定常 wet-bulb モデルが膨張側・衝撃側とも良好に予測。M<2・半径 1-5 μm では蒸発は**熱伝導と蒸気拡散のバランス律速** (paywall)。
-- **Hanson, Davidson & Hanson (2005)**, AIAA 2005-0350 — aerosol shock tube で水/n-dodecane 液滴 (1-10 μm) の**高温蒸発 (475-870 K, 0.6-1.8 atm)** を IR レーザー Mie 消光で初計測 △。
-
-> forge 課題 A (§9) の検証は、**実験アンカー = Smolders & van Dongen 1992 (サイクル全体) + Goossens 1988 (d²-law と蒸発時間)**、code-to-code = Wen 2020、という組み合わせが妥当。Wen 2020 単独では実験検証にならない (§1-3bis(d) 注記)。
-
-**これらの実験の数値再現・後継 (第3ラウンド citation 追跡)** — シード実験を検証ケースに使った先行数値研究が複数実在し、forge 検証のテンプレートになる:
-
-- ★ **Luo, Prast, van Dongen, Hoeijmakers & Yang (2006)**, "On phase transition in compressible flows: modelling and validation", *J. Fluid Mech.* 548:403-430, [10.1017/S0022112005007809](https://doi.org/10.1017/S0022112005007809) ○ — TU/e 直系。**核生成・液滴成長・蒸発・脱核 (de-nucleation) を全部入りにした Euler 型モデル**を、衝撃管・Ludwieg 管の「凝縮→衝撃→再蒸発」実験で検証。**蒸発時の液滴数密度 sink (課題 A の閉包問題) を扱った、forge に最も近い先行例**。本文 paywall だが内容は **Luo 博士論文 (TU/e 2004, [10.6100/IR576382](https://doi.org/10.6100/IR576382)) に包含** 📁 `Luo_2004_PhD_thesis_unsteady_flows_phase_transition.pdf`。
-- **Smolders 博士論文 (TU/e 1992)** ◎📁 `Smolders_1992_PhD_thesis_nonlinear_waves_gas_vapour_phase_transition.pdf` — シード実験 2 本+それを再現する数値モデル (核生成/成長/蒸発+RCM/Euler 解法) の完全版 (190p, OA)。
-- **Huang & Zhang (2020)**, *Phys. Fluids* 32:123315, [10.1063/5.0035968](https://doi.org/10.1063/5.0035968) ○📁 `Huang_Zhang_2020_PoF_shock_evaporating_water_droplets_interaction.pdf` — **Goossens 1988 の条件 (66 kPa/275 K, Ms=1.17-1.6) をそのまま初期条件に採用**した Euler-Lagrange (OpenFOAM) 双方向結合。ICLASS 2021 (§1-3 上記) の元論文。
-- **Kersey, Loth & Lankford (2010)**, "Effects of Evaporating Droplets on Shock Waves", *AIAA J* 48(9), [10.2514/1.J050162](https://doi.org/10.2514/1.J050162) △ — 蒸発液滴による衝撃減衰の 1D+Lagrangian 古典再現 (paywall)。
-- **現代版の実験**: **Duke-Walker, Allen, Maxon & McFarland (2020)**, IJMF 133:103464 (Q-PLIF/PIV による衝撃駆動多相不安定 SDMI での蒸発定量) ○📁 / **Duke-Walker, Musick & McFarland (2023)**, IJMF 161:104389 (**アセトン液滴 10-40 μm × M~2.09 平面衝撃、PDPA+shadowgraphy で高 We の分裂+蒸発同時測定**) ○📁 / 対応する数値 **JFM 908:A13 (2021)** (蒸発モデルを実験検証した E-L, 低 Re/低 We の新分裂モデル込み) ○📁。Hanson 2005 のジャーナル完全版は **Phys. Fluids 19:056104 (2007)** で、全データは **T.C. Hanson 博士論文 (Stanford 2005)** 📁 に収録。
-  - ⚠️ **適性注記 (本文精読)**: Duke-Walker 系は**作動流体がアセトン**で、SDMI 構成 (液滴雲界面の衝撃加速) は**速度スリップ・分裂・2D 混合形態が支配** = Lagrangian solver の検証用に設計されている。**forge 課題 A (Euler モーメント法、無スリップ・分裂なし) の検証には不向き**で、**課題 D (Lagrangian 液滴モジュール) の D2/D3 段の検証ターゲット**と位置づけるのが正しい。課題 A の実験アンカーはあくまで 1D 緩和域の Goossens/Smolders (μm 級水滴・スリップ緩和が速く無スリップ近似が成立)。
-- **蒸発モデルの適用限界**: **Finneran, Garner & Nadal (2021)**, *Proc. R. Soc. A* 477:20210078 ○📁 — 準定常 (d²-law 系) モデルからの逸脱を系統定量 (気相過渡だけで寿命 80% 過大の条件を提示)。**衝撃直後の急加熱過渡に準定常成長則を使う妥当性判定に直接使える**。/ Sazhin (2017), *Fuel* 196:69 — 液滴加熱・蒸発モデルの包括レビュー (paywall)。/ **Luo, Cao & Qin (2018)**, IJHMT 117:1032 — **モーメント法に速度スリップを入れる phase-slip moment method** (forge 拡張の参考, paywall)。
+〈出典〉Huang/Zhu/Davy [arXiv 2103.10576](https://arxiv.org/pdf/2103.10576) (逐語確認、ただし 1 次元衝撃管・弱衝撃・TAB モデル)
 
 **極低温風洞 N2 凝縮の翼まわり影響** ◎ — 局所ガス温度が飽和線を越えかつ臨界 (過冷却/Wilson) 点より低温になって初めて、流れ特性 (圧力・温度・マッハ数) を顕著に変える量の凝縮物が生じる。凝縮影響は**圧力係数 $C_p$・抗力係数 $C_d$** として解析。3D 化 (ONERA M6 翼、NASA Langley TCT 条件) も Euler-Euler+古典核生成+液滴成長モデルで実施。
 〈出典〉Cryogenics 2020 (NACA0012-64) [S0011227520301673](https://www.sciencedirect.com/science/article/abs/pii/S0011227520301673) / Eng. Appl. CFD 2024 (ONERA M6) [10.1080/19942060.2024.2387055](https://www.tandfonline.com/doi/full/10.1080/19942060.2024.2387055)
@@ -129,8 +94,8 @@
   〈出典〉[NTRS 19930083979](https://ntrs.nasa.gov/citations/19930083979)
 
 **(b) 極超音速だが「freestream 凝縮 → 模型計測汚染」の系統** △ (極超音速で本テーマに最も近い)
-- **Daum (1963), AIAA J 1(5):1043-1046** — "Air Condensation in a Hypersonic Wind Tunnel"。**M=9.5–17**、pitot・static 圧が凝縮で強く影響され大きな見かけの過飽和。極超音速で計測信頼性に直結する一次データ。〈出典〉[10.2514/3.1722](https://doi.org/10.2514/3.1722) (**DOI 訂正**: 初稿の 10.2514/3.4520 は 1968 論文のもの。paywall のため本文逐語確認は未 △)
-- **Daum & Gyarmathy (1968), AIAA J 6(3):458-465** — "Condensation of air and nitrogen in hypersonic wind tunnels"。低圧域で空気が実質純窒素として振る舞い窒素自発凝縮が onset。air/N2 の onset 圧力・温度を reservoir パラメータで相関 (Grossir 2014 が Fig.4 を replot しており独立に確証 ○)。[10.2514/3.4520](https://doi.org/10.2514/3.4520)
+- **Daum (1963), AIAA J 1:1043** — "Air Condensation in a Hypersonic Wind Tunnel"。**M=9.5–17**、pitot・static 圧が凝縮で強く影響され大きな見かけの過飽和。極超音速で計測信頼性に直結する一次データ。〈出典〉[arc 10.2514/3.4520 系](https://arc.aiaa.org/doi/abs/10.2514/3.4520)
+- **Daum & Gyarmathy, AIAA J 6:458** — "Condensation of air and nitrogen in hypersonic wind tunnels"。低圧域で空気が実質純窒素として振る舞い窒素自発凝縮が onset。
 - **NTRS 19900050882** (§1-1 で既出) — 純窒素 M=10/14/18、pitot/static/レーザー散乱で onset 観測。
 - **AIAA J 10.2514/1.J052608** — M=10 freestream 凝縮検知 (supersaturation/pitot/Rayleigh)。
   > これらは**3D 場の解析ではなく freestream→計測誤差**の枠組みである点に注意。
@@ -142,8 +107,7 @@
 
 **(d) ★「膨張で凝縮 → 衝撃越えで蒸発」サイクルを陽に扱う (テーマ1 の核心に最も合致)** ○
 - **"Transonic flow of moist air around an NACA 0012 airfoil with non-equilibrium condensation" (Progress in Natural Science, 2005)** — 翼まわりの**膨張凝縮と衝撃背後の蒸発を両方**扱い、「翼後部での蒸発による昇圧」まで明記。RH90% で圧力抵抗 +160%・上下面交互の**自励振動**。〈出典〉[T&F 10.1080/10020070512331343000](https://www.tandfonline.com/doi/abs/10.1080/10020070512331343000)
-- **Wen et al. (2020), Int. J. Heat Mass Transfer** — **「衝撃波の発生が平衡を変え凝縮液滴の再蒸発を起こす」を明示**。形状は超音速セパレータ (内部流) だが**衝撃背後の再蒸発の物理記述として最も明確**。〈出典〉[S0017931019323816](https://www.sciencedirect.com/science/article/abs/pii/S0017931019323816) 📁
-  - ⚠️ **本文精読 (2026-07-07)**: 手法は 2 方程式 wet steam (液分率 Y + 液滴数 N, 単分散, Young 成長則 [蒸発可], CNT+Kantrowitz) であり**モーメント法ではない** (forge 4 モーメントの縮約版に相当。N は蒸発で減らない素朴な扱い)。実験検証は**衝撃のない Hedbäck 高圧蒸気ノズル G37-B (13.83 MPa/674 K, 静圧+液滴半径の図上一致) のみ**で、**核心の「衝撃背後の再蒸発」自体は実験比較なしの純数値予測**。§9 課題 A では code-to-code 比較先と位置づけ、蒸発則の較正は Huang & Zhang (1D 衝撃管) 側で行うこと。
+- **Wen et al. (2020), Int. J. Heat Mass Transfer** — **「衝撃波の発生が平衡を変え凝縮液滴の再蒸発を起こす」を明示**。形状は超音速セパレータ (内部流) だが**衝撃背後の再蒸発の物理記述として最も明確**。〈出典〉[S0017931019323816](https://www.sciencedirect.com/science/article/abs/pii/S0017931019323816)
 
 **(e) 凝縮-衝撃結合の不安定性 (forge の非定常凝縮で要注意)** △
 - **Schnerr, Adam, Mundinger 系** — 凝縮の潜熱付加が衝撃と結合し、対称形状でも**斜め衝撃の上流伝播・周期振動・ヒステリシス分岐**を生む。原因は粘性 (境界層) でなく**核生成速度との結合**。〈出典〉[Springer 10.1007/978-3-7091-2688-2_8](https://link.springer.com/chapter/10.1007/978-3-7091-2688-2_8)
@@ -153,7 +117,7 @@
 ### 1-3ter. Ma & Chen (2026) の詳細と参照文献 — 「マッハ数が凝縮の有無を支配」
 
 > §1-3bis(c) で挙げた Ma & Chen (2026) は「機体まわり凝縮」の最新一次文献として重要なので、本文要点・参照文献・あなたの極超音速関心への含意を別建てで詳述する。
-> 正確書誌: **Tao Ma, Qi Chen, Jiang Lai, RuHao Hua, JianQiang Chen (2026)**, "Effect of water vapor condensation on a supersonic vehicle in proximity to a water surface", *Int. J. Heat Mass Transfer* **262**:128603, [10.1016/j.ijheatmasstransfer.2026.128603](https://doi.org/10.1016/j.ijheatmasstransfer.2026.128603) (参照 51 件、被引用 0=2026 掲載で後続なし)。確証度: 本文 403、アブスト/出版社スニペット + 構造化書誌 (Crossref/Semantic Scholar) で確認。**第2ラウンド追記**: 著者リスト・巻号・「shock-induced heating at Mach > 2.0 suppresses supersaturation and eliminates condensation」・CL/CD/Cm 変化 4.72%/1.39%/29.04% はアブストで逐語確認 ○。ただし「**Ma≤1.2**」という下側閾値の明示だけはアブストから確認できず (低 Mach で凝縮顕著・空力改善までは確認) — 下記の 1.2 という数値は本文確認までは △ 扱い。
+> 正確書誌: **Tao Ma, Qi Chen, Jiang Lai, RuHao Hua, JianQiang Chen (2026)**, "Effect of water vapor condensation on a supersonic vehicle in proximity to a water surface", *Int. J. Heat Mass Transfer*, [10.1016/j.ijheatmasstransfer.2026.128603](https://doi.org/10.1016/j.ijheatmasstransfer.2026.128603) (参照 51 件、被引用 0=2026 掲載で後続なし)。確証度: 本文 403、アブスト/出版社スニペット + 構造化書誌 (Crossref/Semantic Scholar) で確認。
 
 **本文要点** — **NACA0012 翼**の超音速 sea-skimming (海面近接=高湿度大気) 飛行で、翼まわりの急膨張による**非平衡凝縮** (均質核生成 + 液滴成長) を直接 CFD。RH・温度・マッハを走査し空力 (CL/CD/Cm) への影響を評価:
 - **マッハ数が凝縮の有無を支配する**。**Ma ≤ 1.2** で過飽和成立 → 凝縮が顕著で圧力分布を変え低マッハで空力改善。
@@ -168,8 +132,7 @@
 - **Zhang et al. (2025), Aerosp. Sci. Technol.** — "Effect of moist air non-equilibrium condensation on airfoil performance based on a novel model"。**翼まわり凝縮の空力影響**を扱う最新の直接先行 (本論文の方法論的下敷き)。[10.1016/j.ast.2025.110108](https://doi.org/10.1016/j.ast.2025.110108) △
 - **Hill (1966), J. Fluid Mech.** — "Condensation of water vapour during supersonic expansion in nozzles"。**液滴成長則 (Hill) の原典**、本論文の成長モデル中核。[10.1017/S0022112066000284](https://doi.org/10.1017/S0022112066000284) ◎(書誌)
 - **Luo et al. (2006/2007), J. Fluid Mech.** — Ludwieg 管実験+数値による圧縮性均質凝縮の検証 (相転移モデル検証)。[2007: 10.1017/S0022112006003727](https://doi.org/10.1017/S0022112006003727)
-- **Dingilian et al. (2020), Phys. Chem. Chem. Phys. 22(34):19282-19298** 📁 — "Homogeneous nucleation of **CO2** in supersonic nozzles I"。**CO2 均質核生成**の実験+古典理論検証 (あなたの CO2/燃焼生成物凝縮の関心に直結)。CO2 2-39 mol% (Ar キャリア)、**onset 75-92 K・CO2 分圧 39-793 Pa**。[10.1039/D0CP02279A](https://doi.org/10.1039/D0CP02279A) ○
-  - 続編・周辺 (第2ラウンド): **Halonen et al. (2021) Part II** (MD, 75-105 K), *PCCP* 23:4517-4529, [10.1039/D0CP05653G](https://doi.org/10.1039/D0CP05653G) △ / **Lax & Leonov (2021)** "Review of Reduced-Order Models for Homogeneous CO2 Nucleation in Supersonic and Hypersonic Expansion Flows", *Aerospace* 8(12):368, [10.3390/aerospace8120368](https://doi.org/10.3390/aerospace8120368) (OA 📁 — 極超音速膨張流用 CO2 核生成縮約モデル総説、forge 実装時の最短リファレンス)
+- **Dingilian et al. (2020), Phys. Chem. Chem. Phys.** — "Homogeneous nucleation of **CO2** in supersonic nozzles I"。**CO2 均質核生成**の実験+古典理論検証 (あなたの CO2/燃焼生成物凝縮の関心に直結)。△
 - **Kong et al. (2023), Phys. Fluids** — 超音速 sea-skimming 飛行の数値計算 (DG+AMR、凝縮なし)。本論文の飛行シナリオの直接先行。[10.1063/5.0176472](https://doi.org/10.1063/5.0176472)
 - (古典) **Hermann (1942)** — "Der Kondensationsstoß in Überschall-Windkanaldüsen" (超音速風洞ノズルの凝縮衝撃) / **Prandtl (1936)** — 圧縮性流れ凝縮の最古典。
 
@@ -181,8 +144,7 @@
 > 確証度: 本文取得は Campbell et al. (NTRS) のみ。他は AIP/AIAA/SD/T&F が 403 でアブスト/スニペット確認 (引用は実在書誌、定量値は本文再確認推奨)。
 
 **(1) 迎角による揚力・抗力・モーメント影響 (充実)** △
-- **Goodheart & Schnerr (2005), J. Aircraft 42(2):402-412** — ONERA M6 / F-16 翼 (3D, 遷音速)。**迎角 α=1.07°/3.06°/6.06° を実走査** (この走査角は確証)。機構は潜熱解放による吸込み側 Cp 変化。**本テーマの中核** (迎角依存性を定量化した唯一明快な3D実翼)。[arc 10.2514/1.5137](https://arc.aiaa.org/doi/10.2514/1.5137)
-  - ⚠️ **数値棄却 (第2ラウンド)** ✗: 初稿に記載した「RH 30→70% で L/D 劣化 α=1.07° −21.6% / 3.06° −41.5% / 6.06° −64.3%」は、**同著者の TU München 博士論文 (Goodheart 2004, 266p, 同一計算系, OA 📁) を全文検索しても出現せず、出典不明のため棄却**。博論の実際の値: in-draft M6 (α=3.06°) で RH30→70% は **cL −22%・cD −4.1%**、α=1.07° の **L/D 最大偏差 −32%** (摩擦込 −24%)、**F-16 で L/D −17〜−21%**、総括は「heterogeneous condensation で L/D 最大 ~20%」。さらに **α=6.06° は adiabatic 剥離があり効果は単調拡大ではない** (剥離時は凝縮が L/D を改善する場合すらある)。→「迎角とともに劣化が単調拡大」という描像も要修正。博論: [`papers/condensation/Goodheart_2004_PhD_3D_transonic_condensation.pdf`](../../papers/condensation/Goodheart_2004_PhD_3D_transonic_condensation.pdf)
+- **Goodheart & Schnerr (2005), J. Aircraft 42:402** — ONERA M6 / F-16 翼 (3D, 遷音速)。**迎角 α=1.07°/3.06°/6.06° を実走査**。RH 30→70% で**揚抗比 L/D の劣化が迎角とともに拡大**: α=1.07° で **−21.6%**、3.06° で **−41.5%**、6.06° で **−64.3%**。機構は潜熱解放による吸込み側 Cp 変化。**本テーマの中核** (迎角依存性を定量化した唯一明快な3D実翼)。[arc 10.2514/1.5137](https://arc.aiaa.org/doi/10.2514/1.5137)
 - **Rusak & Lee (2000), J. Fluid Mech. 403:173** — 薄翼 near-sonic の small-disturbance 理論。**翼厚比・迎角・水蒸気量の非線形相互作用**で lift/drag/**pitching moment** 係数への影響を導出し、**「変動の符号が自由流マッハ数と迎角に敏感に依存して変わる」と明言**。CL–α 非線形化・空力中心シフトの理論的中核。[ADS 2000JFM...403..173R](https://ui.adsabs.harvard.edu/abs/2000JFM...403..173R/abstract)
 - **Zhang et al. (2025), Aerosp. Sci. Technol. 161:110108** — 改良凝縮モデルで**異なる湿度・迎角**の遷音速翼凝縮を予測、**対称翼 vs 非対称翼**を比較 (=迎角・キャンバーによる吸込み側偏りを正面から)。最新2D。[10.1016/j.ast.2025.110108](https://doi.org/10.1016/j.ast.2025.110108)
 - **Karabelas & Markatos (2008), Aerosp. Sci. Technol. 12:150** — NACA0012 亜音速高 Re。迎角×湿度で lift/pitch moment 評価、RH>0.7 で**翼後部に高液相濃度域**。[10.1016/j.ast.2007.05.003](https://doi.org/10.1016/j.ast.2007.05.003)
@@ -193,8 +155,8 @@
 - → **「翼で迎角を上げ下げした CL–α の凝縮点灯/消灯ヒステリシス」を正面から扱う一次文献は確認できず = 空白**。
 
 **(3) 凝縮誘起の衝撃振動・バフェット (部分的に充実)** △
-- **Takuma, Hagita, Miyazawa, Furusawa & Yamamoto, "Effects of humidity on transonic buffet over an airfoil", Phys. Fluids 38(3):036129 (2026)** — OAT15A 超臨界翼 DDES + 非平衡凝縮。**湿度上昇→主衝撃上流の潜熱解放→実効マッハ低下→衝撃弱化・下流移動**は確証 ○。アブストは「空力性能は湿度に対し非単調」「DMD で dry/高湿のフィードバック機構が異なる」。⚠️ 初稿の「**RH~60% で振動停止 (standing shock 化)**」の具体値は本文未読で確認できず △。湿度が**バフェットを抑制**する向き。現象3 の最重要最新。[PoF 38/3/036129](https://pubs.aip.org/aip/pof/article/38/3/036129/3384688/)
-- **Liang, Lu, Liu, Li, Liu & Song (2026), Phys. Fluids 38(4):043307**, [10.1063/5.0320450](https://doi.org/10.1063/5.0320450) — "Numerical study on the effect of moist air non-equilibrium condensation on the aerodynamic performance of a supersonic airfoil"。RAE2822 超音速・湿度/流速/高度走査は確証 ○。アブストの実内容: **L/D 2.63→2.33 低下、後縁凝縮、初期過冷却 15.4-15.5 K、高高度では凝縮抑制 (液滴半径 0.035→0.006 μm)**。⚠️ 初稿の「周期的自励振動」「吸込み側ピーク Mach 1.1→1.3」「極超音速機設計動機の明記」は**アブストと不整合のため本文確認まで △ に格下げ** (第2ラウンド)。
+- **"Effects of humidity on transonic buffet over an airfoil", Phys. Fluids 38:036129 (2026)** — OAT15A 超臨界翼 DDES。**湿度上昇→主衝撃前の潜熱解放→実効マッハ低下→衝撃弱化・下流移動、RH~60% で振動停止 (standing shock 化)**。湿度が**バフェットを抑制**する向き。現象3 の最重要最新。[PoF 38/3/036129](https://pubs.aip.org/aip/pof/article/38/3/036129/3384688/)
+- **Liang et al. (2026), Phys. Fluids 38:043307** — RAE2822 **超音速** (極超音速機設計を動機に明記)。高 RH で**周期的自励振動**、吸込み側ピークマッハ 1.1→1.3。現象3+5 の希少例。[PoF 38/4/043307](https://pubs.aip.org/aip/pof/article-abstract/38/4/043307/3385914/)
 - 関連: 内部流の "shock induced oscillation around an airfoil in transonic internal flows" (Int. J. Mech. Sci. 2011)。
 
 **(4) 前縁渦・渦コアの凝縮 (可視化のみ、モデリングは空白)** ◎(観測)/空白(CFD)
@@ -216,17 +178,6 @@
 
 > **注意**: vitiation は**気相 H2O 汚染**であり、液滴取り込み (テーマ2) とは物理が別。切り分けが必要。
 
-### 1-5. 極超音速エンジン入口・precooler の水凝縮/着霜 (第2ラウンド追補 — 「燃焼器到達」ギャップの隣接文献)
-
-「凝縮水/氷が燃焼器に到達する前段で、precooler・インテーク低温部に**着霜として蓄積する**」という経路の一次文献群。§5-1 (end-to-end 空白) の橋渡し領域として価値が高い。
-
-- **ATREX precooler**: Harada, Tanatsugu et al., "Development Study of a Precooler for the Air-Turboramjet Expander-Cycle Engine", *J. Propulsion and Power*, [10.2514/2.5869](https://doi.org/10.2514/2.5869) △ — **吸気中水蒸気の着氷が precooler 性能低下の主要因**であることを実験実証した古典。
-- **凝縮性ガス添加による着霜抑制**: Kobayashi/Sato 系 "Improvement of the Precooler Performance against the Icing Problem by Using the Condensable Gas" (CiNii 10012565783) △ — エタノール/メタノール添加。最適メタノール質量比 ~1.1 (二次ソース、原典未特定)。
-- **SABRE/Reaction Engines**: JBIS "An experimental precooler for airbreathing rocket engines" + 2019 Colorado 試験 (Mach 3.3 相当, 420°C→−150°C を frost なしで実証、frost 制御はメタノール注入) △ — 査読一次論文は少なく多くは報道・特許。
-- **microtubule precooler の着霜/除霜**: Applied Thermal Engineering 2022 (PII S1359431122000680) / 2023 (PII S1359431123006257) △ — 自由流湿度と着霜特性の実験 (paywall)。
-
-> **ネガティブ所見 (第2ラウンド)**: 衝撃波型高エンタルピー施設 (HIEST/T4/T5/LENS) で報告される汚染は **driver-gas contamination・ノズルスロート溶損**であり、**試験気体凝縮を主題化した一次文献は 5 アングルの検索でも見つからなかった**。X2/X3 の Mars 条件 (96%CO2, 8.6 km/s) でも freestream CO2 凝縮を正面から扱う文献は未確認。combustion-heated 系は依然 Lin 2018 が最有力 → §5 の空白リストに追加。
-
 ---
 
 ## テーマ2: 降雨中飛翔時の雨滴が燃焼器に到達するか
@@ -234,45 +185,34 @@
 ### 2-1. 対象の径スケールとリスク
 
 雨滴・雲滴・燃料噴霧は高速機体に対しエロージョンおよび water ingestion のリスク ◎。径範囲: **雲滴 1-100 μm、雨滴 100-10000 μm、scramjet 燃料噴霧 10-200 μm**。極超音速飛翔体は上層雲の sub-micron 〜 海面近くの mm 雨滴に遭遇する ◎。
-〈出典〉Hess, Kessler & Johnson (NRL), AIAA 2021-0751 [Evaluation of Droplet Aerodynamic Breakup Models](https://www.researchgate.net/publication/348240253_Evaluation_of_Droplet_Aerodynamic_Breakup_Models_in_Supersonic_and_Hypersonic_Flows) / Huang, Zhu & Davy, FTaC 114:243-273 (2025) [10.1007/s10494-024-00581-z](https://link.springer.com/article/10.1007/s10494-024-00581-z) / [TAMU FMECL](https://fmecl.engr.tamu.edu/research/hypersonic-droplet-breakup/)
+〈出典〉AIAA 2021-0751 [Evaluation of Droplet Aerodynamic Breakup Models](https://www.researchgate.net/publication/348240253_Evaluation_of_Droplet_Aerodynamic_Breakup_Models_in_Supersonic_and_Hypersonic_Flows) / FTaC 2024 [10.1007/s10494-024-00581-z](https://link.springer.com/article/10.1007/s10494-024-00581-z) / [TAMU FMECL](https://fmecl.engr.tamu.edu/research/hypersonic-droplet-breakup/)
 
 ### 2-2. 空力ブレイクアップの支配則 (Weber / Ohnesorge)
 
-ブレイクアップは **Weber 数** (空力 vs 界面張力) が支配し、レジームは**遷移 Weber 数**で区分される。その**遷移 We は Ohnesorge 数の関数** (粘性が高いほど遷移 We が増大): 原典は **Pilch & Erdman (1987), Int. J. Multiphase Flow 13(6):741-757** の 5 レジーム分類と $We_c = 12(1+1.077\,Oh^{1.6})$ ◎ (第2ラウンドで係数まで確認)。モードは vibrational / bag / bag-and-stamen / sheet stripping / (wave crest stripping を伴う) catastrophic。標準レビューは **Guildenbecher, López-Rivera & Sojka, Exp. Fluids 46:371-402 (2009)** と **Theofanous, Annu. Rev. Fluid Mech. 43:661-690 (2011)**。入射衝撃 Mach 数が上がる (We 大) ほど**ブレイクアップ完了距離と最終液滴径がともに減少** (径20-80 μm、$M_0$=1.3-4.0、初期 We 10.0-4758.3 で網羅)。
-〈出典〉AIAA 2021-0751 / **Huang, Zhu & Davy, "The Aerodynamic Breakup and Interactions of Evaporating Water Droplets with a Propagating Shock Wave", FTaC 114:243-273 (2025)** [10.1007/s10494-024-00581-z](https://doi.org/10.1007/s10494-024-00581-z)
-> ⚠️ **書誌訂正 (第2ラウンド)**: 初稿は「Huang/Zhu/Davy (arXiv 2103.10576, FTaC 2024)」と 1 本扱いしていたが、**別の 2 論文**である: ① arXiv [2103.10576](https://arxiv.org/pdf/2103.10576) 📁 = **Huang & Zhang (NUS), ICLASS 2021** (1D 衝撃管・弱衝撃・蒸発、§1-3 の「衝撃通過後の運命」の根拠)、② **FTaC 114:243-273 (2025) = Huang, Zhu & Davy** (We 10-4758 の網羅、arXiv に対応プレプリントなし)。両論文とも主張数値は第2ラウンドで確証済み。
+ブレイクアップは **Weber 数** (空力 vs 界面張力) が支配し、レジームは**遷移 Weber 数**で区分される。その**遷移 We は Ohnesorge 数の関数** (粘性が高いほど遷移 We が増大) ◎。モードは bag / bag-and-stamen / sheet stripping / wave crest stripping。入射衝撃 Mach 数が上がる (We 大) ほど**ブレイクアップ完了距離と最終液滴径がともに減少** (径20-80 μm、$M_0$=1.3-4.0、初期 We 10.0-4758.3 で網羅)。
+〈出典〉AIAA 2021-0751 / Huang/Zhu/Davy FTaC 2024
 
-**ブレイクアップ機構 (多段階連成)** ◎ — 液滴扁平化 → 表面不安定性・穿孔の形成 → 変形一次液滴のリガメントからの二次液滴放出。駆動は強い加速・せん断・表面張力に起因する流体力学的不安定性 (**Rayleigh-Taylor / Kelvin-Helmholtz** — ただしこれは先行研究群の結論の引用で、We 増で KH 優勢)。Weber 数で RTP mode (We<100) / SIE mode (We>1000) に大別 (Theofanous & Li の分類。境界値は Oh 依存の近似で厳密な普遍定数ではない。100<We<1000 は遷移域)。Ranger & Nicholls の無次元時間 $\tau$ で規格化すると Mach 2 と Mach 3 でブレイクアップ過程はほぼ同速度 (ただし Mach 2-3 限定、M≫6 一般化は未確立)。
-〈出典〉**Ullman (Michigan), Bielawski (UCF) & Raman, "Timescales and Statistics of Shock-induced Droplet Breakup", Phys. Rev. Fluids 10:124301 (2025)** [arXiv 2504.09007](https://arxiv.org/abs/2504.09007) 📁 (逐語確認。平面衝撃 M2/M3 × 単一 100 μm 水滴の**界面解像** (two-phase 熱力学整合 + AMR)。対象は $10^3<We<10^5$ = SIE/catastrophic 域のみ。**研究動機は RDE 液体燃料であり雨滴ではない**点に注意) / TAMU FMECL
+**ブレイクアップ機構 (多段階連成)** ◎ — 液滴扁平化 → 表面不安定性・穿孔の形成 → 変形一次液滴のリガメントからの二次液滴放出。駆動は強い加速・せん断・表面張力に起因する流体力学的不安定性 (**Rayleigh-Taylor / Kelvin-Helmholtz**)。Weber 数で RTP mode (We<100) / SIE mode (We>1000) に大別。Ranger & Nicholls の無次元時間 $\tau$ で規格化すると Mach 2 と Mach 3 でブレイクアップ過程はほぼ同速度 (ただし Mach 2-3 限定、M≫6 一般化は未確立)。
+〈出典〉Ullman, Bielawski & Raman, PRF [arXiv 2504.09007](https://arxiv.org/abs/2504.09007) (逐語確認) / TAMU FMECL
 
 ### 2-3. 鈍頭体への到達を決める一次機構
 
-鈍頭体先端への液滴衝突・運動量伝達は、**ブレイクアップ時間と、液滴が弓状衝撃波通過後に機体へ到達するまでの利用可能時間との競合**で支配され、スケーリング則でよく特徴づけられる ◎ (第2ラウンドでアブスト逐語確認: "dominant mechanism ... was a competition between breakup time and the time available for a droplet to reach the body after encountering the bow shock")。これが「雨滴がインテーク方向にどれだけ慣性を保って到達するか」を決める一次機構。
-〈出典〉**Briney & Balachandar, "Euler-Lagrange stochastic modeling of droplet breakup and impact in supersonic flight", Phys. Fluids 35, 016103 (2023)**, [10.1063/5.0131815](https://doi.org/10.1063/5.0131815) 📁 (Mach 2/3/6 鈍頭体, 2D/軸対称定常場, one-way Euler-Lagrange + stochastic TAB。**DOI 訂正**: 初稿リンクの記事 ID は正しいが引用整備時に 10.1063/5.0131930 と誤記しやすい — それは無関係のキャビテーション論文)
+鈍頭体先端への液滴衝突・運動量伝達は、**ブレイクアップ時間と、液滴が弓状衝撃波通過後に機体へ到達するまでの利用可能時間との競合**で支配され、スケーリング則でよく特徴づけられる ◎。これが「雨滴がインテーク方向にどれだけ慣性を保って到達するか」を決める一次機構。
+〈出典〉Briney & Balachandar, Phys. Fluids 35, 016103, 2023 (Mach 2/3/6 鈍頭体, one-way Euler-Lagrange + stochastic TAB) [リンク](https://pubs.aip.org/aip/pof/article/35/1/016103/2868366/Euler-Lagrange-stochastic-modeling-of-droplet)
 
-> 🔴 **棄却された直感** ✗ (第2ラウンドで限定を明確化): 「弓状衝撃波で液滴がブレイクアップ→微小化→慣性低下で機体衝突を回避」という単純描像は「**一次機構としては**」棄却 (3 票棄権)。正しくは上記の「ブレイクアップ時間 vs 到達時間の競合」が支配機構。ただし Briney & Balachandar のアブスト自体が「小液滴は慣性低下で回避されやすい」ことを機構の**一部**として明記しており、微小化→回避が起きないわけではない。large な雨滴はブレイクアップ完了前に機体/インテークに到達し得る、が要点。
+> 🔴 **棄却された直感** ✗: 「弓状衝撃波で液滴がブレイクアップ→微小化→慣性低下で機体衝突を回避」という単純描像は **3 票棄権で棄却 (支持なし)**。正しくは上記の「ブレイクアップ時間 vs 到達時間の競合」が支配機構。large な雨滴はブレイクアップ完了前に機体/インテークに到達し得る。
 
 ### 2-4. 真の極超音速 (M≫6) の shock-droplet 相互作用
 
-水滴の変形・ブレイクアップは **Mach 5 まではよく研究**されているが、それを超える高マッハ域のデータは乏しく、これが現在の研究動機 ◎。**Mach 5-30 の normal shock** に対する液滴ブレイクアップを数値シミュレーションで取得し、極超音速域 (M≫6) を埋めつつある。弓状衝撃波構造は複雑で、液滴は衝撃波・膨張波の系を通過し非定常な加速履歴を経験する (供試体/インテーク前縁での運命に直結)。
-〈出典・帰属訂正 (第2ラウンド)〉
-- **AIAA 2025-1500 "Hypersonic Shock Droplet Interactions"** = **Young, Cook, Bauer, Goodrich, Perfect (LLNL, Miranda コード) + McFarland (TAMU)** [10.2514/6.2025-1500](https://doi.org/10.2514/6.2025-1500) — **M5-30 normal shock はこちら** (初稿の「TAMU」単独帰属は不正確、LLNL 主体の共同)。前段の LLNL 2023 ポスター 📁 で界面解像計算の実体を確認可能。
-- **AIAA 2025-1501 "The Role of Breakup and Evaporation in Particle-Laden Flows Approaching Hypersonic Vehicles"** = **Ramesh & Jarrahbashi (TAMU)** [10.2514/6.2025-1501](https://doi.org/10.2514/6.2025-1501) — **EL + 2D double-wedge (大剥離) / 3D cone-cylinder-flare (小剥離) + ブレイクアップ+蒸発同時解析はこちら**。ジャーナル版 **AIAA J [10.2514/1.J064314](https://doi.org/10.2514/1.J064314) (2025)** は rain/snow/ice hydrometeors を明示。姉妹編 AIAA 2025-1503 (Sukumaran, Boyd & Jarrahbashi) は蒸発カップリング。
-- [TAMU FMECL](https://fmecl.engr.tamu.edu/research/hypersonic-droplet-breakup/)
+水滴の変形・ブレイクアップは **Mach 5 まではよく研究**されているが、それを超える高マッハ域のデータは乏しく、これが現在の研究動機 ◎。TAMU 等は **Mach 5-30 の normal shock** に対する液滴ブレイクアップを数値シミュレーションで取得し、極超音速域 (M≫6) を埋めつつある。弓状衝撃波構造は複雑で、液滴は衝撃波・膨張波の系を通過し非定常な加速履歴を経験する (供試体/インテーク前縁での運命に直結)。
+〈出典〉AIAA 2025-1500/1501 [2025-1500](https://arc.aiaa.org/doi/abs/10.2514/6.2025-1500) / [TAMU FMECL](https://fmecl.engr.tamu.edu/research/hypersonic-droplet-breakup/)
 
-> ⚠️ **留意 + R&N の再評価 (第2ラウンド)**: M5-30 は **normal-shock マッハ数** (自由流飛行マッハ数ではない) かつ**数値のみ・予備的 (early results)**。古典相関 (**Ranger & Nicholls** 📁) の Mach 30 外挿の**実験検証付き確立**は依然としてない (棄却 ✗ はこの意味で維持)。ただし新証拠は両方向:
-> - **R&N 支持側**: AIAA 2025-1500 のアブストは「**early results suggest the Ranger & Nicholls model provides a reasonable estimate of the breakup time** (M5-30)」と明記 — 「破綻が実証された」とも読めない。
-> - **R&N 限界側 (定量)**: **Wang, Hopfes, Giglmaier & Adams (TUM), Exp. Fluids 61:193 (2020)** 📁 [10.1007/s00348-020-03026-1](https://doi.org/10.1007/s00348-020-03026-1) — **We=1100 固定で M∞=0.3→1.19 を走査**し、破砕形態・開始遅れ・変形量が Mach で系統変化 =「**We を固定しても Mach が独立に効く**」直接実験。「R&N 時間スケールは compressibility を考慮していない」と本文明言。/ **Theofanous, Li & Dinh, J. Fluids Eng. 126:516 (2004)** [10.1115/1.1777234](https://doi.org/10.1115/1.1777234) — 希薄超音速で従来描像を否定、**We・Ma・Kn の同時スケーリングが必要**。/ **Hébert et al., SN Appl. Sci. 2:69 (2020)** 📁 — M4.4・We>10⁵ の SIE 高速端実験。
-> - **高温・蒸発 (実在気体) が支配する域での R&N 破綻/成立の定量文献は未発見** — 空白のまま (§5-4)。
+> ⚠️ **留意**: M5-30 は **normal-shock マッハ数** (自由流飛行マッハ数ではない) かつ**数値のみ・予備的 (early results)**。古典相関 (**Ranger & Nicholls**) の Mach 30 までの外挿妥当性は **0-3 で棄却** ✗。
 
 ### 2-5. water ingestion の燃焼への定量影響
 
-**規制になるほど重大** ◎ — エンジンコアへの water ingestion は熱力学サイクルの変化で圧縮機サージ・推力損失・フレームアウトを引き起こす。機序は「燃焼器内での液体水の蒸発→火炎温度低下→化学反応速度低下→完全燃焼阻害→燃焼効率・安定性の低下」で、燃焼器は **sub-idle 運転時に最も失火しやすい**。FAA は飛行安全上の脅威と認め **Advisory Circular 33.78-1** を発行 (第2ラウンドで本文 19 頁を直接取得し逐語確認 📁: "compressor surge"・"flameout"・"the combustor is most susceptible to flameout when it is required to operate at a sub-idle operating condition"。**14 CFR §33.78(c) は超音速機搭載エンジンを明示的に対象とする**)。
-〈出典〉[FAA AC 33.78-1](https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_33_78-1.pdf) 📁 / [Federal Register 00-3702](https://www.federalregister.gov/documents/2000/02/16/00-3702/advisory-circular-turbine-engine-power-loss-and-instability-in-extreme-conditions-of-rain-and-hail) (告示の実在確認のみ、内容は AC 本文で検証)
-
-**意図的水噴射 = accidental ingestion の代理データ (第2ラウンド追補)** △ — 「高速推進系に大量の水を入れた場合」の系統データは**意図的噴射**の文献に存在し、雨滴 ingestion 影響の上限側アナログに使える:
-- **Xiong, Qin, Cheng & Wang, "Influence of water injection on performance of scramjet engine", Energy 200:117477 (2020)** [10.1016/j.energy.2020.117477](https://doi.org/10.1016/j.energy.2020.117477) — 熱力学モデルで水量 vs scramjet 性能を定量。**比推力は水噴射で増強されるが fuel impulse は低下**、高飛行 Mach ほど水噴射が有利。scramjet 燃焼器の water/air 比 vs 性能の最接近文献。
-- **MIPCC (前圧縮機水噴射)**: Kloesel & Clark (NASA), NTRS [20140008928](https://ntrs.nasa.gov/citations/20140008928) 📁 — F-4/F-15 ベース高 Mach ターボジェットへの大量水噴射時のエンジン挙動・性能の一次解析。Carter & Balepin, AIAA 2002-4127 も同系。
+**規制になるほど重大** ◎ — エンジンコアへの water ingestion は熱力学サイクルの変化で圧縮機サージ・推力損失・フレームアウトを引き起こす。機序は「燃焼器内での液体水の蒸発→火炎温度低下→化学反応速度低下→完全燃焼阻害→燃焼効率・安定性の低下」で、燃焼器は **sub-idle 運転時に最も失火しやすい**。FAA は飛行安全上の脅威と認め **Advisory Circular 33.78-1** を発行。
+〈出典〉[FAA AC 33.78-1](https://www.faa.gov/documentLibrary/media/Advisory_Circular/AC_33_78-1.pdf) / [Federal Register 00-3702](https://www.federalregister.gov/documents/2000/02/16/00-3702/advisory-circular-turbine-engine-power-loss-and-instability-in-extreme-conditions-of-rain-and-hail)
 
 **水/燃料比 vs 燃焼温度の定量** △ — WFR=0.5 で液体水を噴射すると燃焼器出口 (火炎) 温度が、メタン+空気で ~39-43℃、ディーゼル+空気で 39℃ 低下。ディーゼルエマルジョン予混合では 52.8℃、メタン+蒸気予混合では 19.1℃。
 〈出典〉MSc thesis [DiVA 1793877](https://www.diva-portal.org/smash/get/diva2:1793877/FULLTEXT01.pdf) (STAR-CCM+/Cantera、査読論文より証拠強度弱い)
@@ -282,25 +222,6 @@
 
 > **注意**: water ingestion の燃焼定量影響の一次根拠は主に**航空ターボエンジン (FAA, IPS) とガスタービン/内燃の水噴射**であり、scramjet/ramjet 燃焼器そのものの定量データではない。機序は確立だが scramjet への外挿は推論を含む。臨界 water/air 比などの定量閾値はケース依存 (「水 5% で熱効率 41.2% 低下」の主張は **1-2 で否決** ✗)。
 
-### 2-6. Rain erosion の歴史的一次データと氷粒子遭遇 (第2ラウンド追補)
-
-**Mach 5 級 rain erosion の実測は 1970-80 年代に存在する** — 「極超音速の雨滴データは乏しい」は空力ブレイクアップの話であり、**材料侵食側には sled 試験の一次データがある**:
-
-- **Letson & Burleson (1979), US Army MICOM TR T-79-42** ◎📁 — Holloman sled の人工雨場で **1270-1740 m/s (M3.7-5.0)** のレドーム材 (slip-cast fused silica) 侵食を速度・入射角別に実測。本テーマの歴史的一次資料の最有力 (DTIC ADA077348, OA)。
-- **G.F. Schmitt (AFML) の系譜** △ — "Velocity-Erosion Rate Relationships of Materials in Rain at Supersonic Speeds" (1970)、AFML-TR-67-211 (1968) 等、超音速域の速度-侵食率則の原典群 (DTIC 本文未入手)。
-- **van der Zwaag, Dear, Townsend & Walley (1986), AFWAL-TR-86-4032** ◎📁 — Cavendish Lab による液滴衝突損傷機構 (水撃圧 water-hammer・側方ジェット) と材料評価 (DTIC ADA259783, OA)。
-- 現代版: **Gonuleri et al., AIAA 2023-2024** "CFD-Informed Rain Drop Impact Damage Predictions at Hypersonic Conditions" △ — CFD で減速・変形した雨滴を損傷モデルへ連成する最新枠組み (paywall)。
-
-**2020 年代の shock-droplet 研究の広がり (TAMU/LLNL 以外)** — §2-4 の Wang (TUM)/Hébert (CEA) に加え:
-- **Song, Long & Pan (NWPU), arXiv [2306.11255](https://arxiv.org/abs/2306.11255)** 📁 — **相変化 (蒸発) を含む界面解像 shock-droplet** (n-dodecane)。蒸発が破砕形態・波系に与える影響を直接扱う。
-- **Rao & Basu (IISc), arXiv [2502.05976](https://arxiv.org/abs/2502.05976)** 📁 — 高 We 極限の**リガメント媒介破砕の自己相似性** (JFM 投稿版)。
-- 希薄・高エンタルピー域は Theofanous-Li-Dinh (2004) 以降まとまった追試が薄く、**依然として空白に近い**。
-
-**氷粒子・mixed-phase 遭遇 (雨滴の氷版)** △:
-- **Stebbins & Loth, AIAA 2024-0887** [10.2514/6.2024-0887](https://doi.org/10.2514/6.2024-0887) — **極超音速前胴への氷粒子衝突**の軌道・衝突条件シミュレーション。weather-encounter リスクの直接文献 (paywall)。
-- Ramesh & Jarrahbashi AIAA J 2025 (§2-4) は rain/snow/ice hydrometeors を明示的にスコープに含む。
-- ice crystal icing (ICI) のエンタルピー基盤モデルは arXiv 2403.20071 (対象はターボファン)。**高速機体のエンジン内 ICI は空白のまま**。UND で ONR 資金の実験プログラムが 2023 年から進行中 (査読論文は今後)。
-
 ---
 
 ## §4. 数値手法・支配無次元数の整理 (forge への含意)
@@ -308,12 +229,11 @@
 | 対象 | 支配無次元数 | モデル/相関 | 数値手法 |
 |---|---|---|---|
 | ノズル非平衡凝縮 | 過冷却度・過飽和度、Knudsen | 古典核生成理論 CNT (自由エネルギー障壁)、Hertz-Knudsen 液滴成長、Wölk-Strey 補正 | Euler-Euler / Euler-Lagrange-Euler (気相-液滴-液膜)、2 段階縮約 (過飽和→飽和ジャンプ) |
-| **衝撃背後の液滴蒸発 (再蒸発)** | 過熱度、Knudsen、蒸発 Damköhler (滞留時間/蒸発時間) | **準定常 wet-bulb** (Smolders — M<2・1-5 μm では熱伝導+蒸気拡散律速)、Young 成長則 (蒸発可)、d²-law とその逸脱マップ (Finneran 2021: 気相過渡だけで寿命 80% 過大の域あり) | Euler モーメント法+**脱核 (de-nucleation)** 閉包 (Luo 2006, 実験検証済) / 2 方程式 wet steam (Wen 2020、CFX/Fluent 商用実装もこの縮約度・脱核なし) / E-L (Huang & Zhang 2020) |
-| 液滴ブレイクアップ | **Weber** (遷移 We = f(**Ohnesorge**): Pilch-Erdman $We_c=12(1+1.077\,Oh^{1.6})$)、Mach、$\tau$ (Ranger-Nicholls 無次元時間) | KHRT、TAB (stochastic)、変形考慮の経験的抗力 | 一方向結合 Euler-Lagrange 粒子追跡 |
-| 衝撃-液滴/蒸発の同時解析 | We, Oh, Re, Stokes、蒸発 Damköhler | RTP (We<100) / SIE (We>1000)、RT/KH 不安定性 | **Eulerian-Lagrangian (EL)** (2D double-wedge / 3D cone-cylinder-flare)、界面解像+相変化 (Song 2023, Boyd 2024) |
+| 液滴ブレイクアップ | **Weber** (遷移 We = f(**Ohnesorge**))、Mach、$\tau$ (Ranger-Nicholls 無次元時間) | KHRT、TAB (stochastic)、変形考慮の経験的抗力 | 一方向結合 Euler-Lagrange 粒子追跡 |
+| 衝撃-液滴/蒸発の同時解析 | We, Oh, Re, Stokes、蒸発 Damköhler | RTP (We<100) / SIE (We>1000)、RT/KH 不安定性 | **Eulerian-Lagrangian (EL)** (2D double-wedge / 3D cone-cylinder-flare) |
 
-**数値手法の到達点** ◎ — 超音速/極超音速の液滴問題で支配的なのは**一方向結合 Euler-Lagrange**。ブレイクアップは KHRT / stochastic TAB、抗力は液滴変形を取り込む経験的抗力。KHRT+変形抗力は物理的に妥当だが、**高 Mach・高 We 域の較正には追加実験データが必要** (系統的検証が不足)。最新は EL でブレイクアップ+蒸発を**同時解析** (TAMU)。凝縮・蒸発の Euler 側は **TU/e 系 (Smolders 1992 → Luo 2006) が「核生成+成長+蒸発+脱核」を実験検証付きで確立済み**で、これが forge 4 モーメント拡張 (課題 A) の設計テンプレート。商用 (CFX/Fluent) は 2 方程式単分散止まり。
-〈出典〉AIAA 2021-0751 / Phys. Fluids 35, 016103 / AIAA 2025-1501 / JFM 548:403 (Luo 2006) / Smolders・Luo 博士論文 📁
+**数値手法の到達点** ◎ — 超音速/極超音速の液滴問題で支配的なのは**一方向結合 Euler-Lagrange**。ブレイクアップは KHRT / stochastic TAB、抗力は液滴変形を取り込む経験的抗力。KHRT+変形抗力は物理的に妥当だが、**高 Mach・高 We 域の較正には追加実験データが必要** (系統的検証が不足)。最新は EL でブレイクアップ+蒸発を**同時解析** (TAMU)。
+〈出典〉AIAA 2021-0751 / Phys. Fluids 35, 016103 / AIAA 2025-1501
 
 主要数値手法ソース: [Modified Euler-Lagrange-Euler for condensing droplets/films (Int. J. Heat Mass Transfer)](https://www.sciencedirect.com/science/article/pii/S0017931022010067)
 
@@ -323,13 +243,12 @@
 
 2 回の深掘りでも、**素過程は堅固だが燃焼器入口までの end-to-end 評価は文献から合成できなかった**:
 
-1. **【テーマ1+2 の核心 / end-to-end】** 風洞凝縮物または降雨/SLD 雨滴が、**実機 scramjet 供試体の弓状衝撃→斜め衝撃→インテーク圧縮場**を通過する一連の経路で、ブレイクアップ+空力加熱蒸発が**燃焼器到達『前』に完了するか?** 蒸発完了距離 vs 実機インテーク長さの定量比較を行った一次文献は確立できなかった。canonical 形状の EL 解析と 1 次元衝撃管はあるが、実機インテーク統合評価は **open**。**第2ラウンド追記**: 隣接領域として precooler/インテーク低温部の**着霜蓄積**経路の一次文献群は存在 (§1-5) — 「燃焼器に届く前にどこかに溜まる」側の部分回答。
+1. **【テーマ1+2 の核心 / end-to-end】** 風洞凝縮物または降雨/SLD 雨滴が、**実機 scramjet 供試体の弓状衝撃→斜め衝撃→インテーク圧縮場**を通過する一連の経路で、ブレイクアップ+空力加熱蒸発が**燃焼器到達『前』に完了するか?** 蒸発完了距離 vs 実機インテーク長さの定量比較を行った一次文献は確立できなかった。canonical 形状の EL 解析と 1 次元衝撃管はあるが、実機インテーク統合評価は **open**。
 2. **【テーマ1 後半 / 計測汚染】** 風洞 test-section の凝縮物 (N2/H2O/CO2 氷粒子・液滴) が供試体内部 (インテーク〜燃焼室) に残留して燃焼・点火・PIV/圧力/熱流束計測を**実際に汚染した『事例』**を報告した一次文献は見つからなかった。
-3. **【テーマ2 / 燃焼定量】** scramjet/ramjet 燃焼器『そのもの』への water ingestion が失火・着火限界・推力・燃焼効率に与える定量データ (航空ターボエンジン/内燃機関ではなく超音速燃焼器固有の water/air 比 vs 性能低下相関)。機序は確立だが scramjet 固有の定量閾値は未確立。**第2ラウンド追記**: **意図的水噴射**なら定量が存在 (Xiong et al. 2020 Energy = scramjet 水噴射の熱力学定量、MIPCC = 高 Mach ターボジェットへの大量水噴射)。accidental ingestion の代理データとして §2-5 に採録。空白は「雨滴由来・非制御の ingestion」に狭まった。
-4. **【高マッハ外挿】** $\tau$ 規格化でブレイクアップ速度が衝撃強度に依らずほぼ一定という知見は **Mach 2-3 のみ**確認。真の極超音速域 (M≫6、高温・高 We・蒸発 Damköhler 数が支配的になり得る域) でこの規格化や古典相関が成立するかは実験検証付きで未確立。**第2ラウンド追記**: 状況は両方向に更新 — LLNL+TAMU の M5-30 数値 (AIAA 2025-1500) の early results は「**R&N は妥当な breakup time 推定**」を示唆する一方、TUM 実験 (Wang 2020, We 固定 Mach 走査) は「**We を固定しても Mach が独立に効く** = R&N は compressibility 非考慮」を実証。両者は「低速〜M1.2 で圧縮性補正が要る/強衝撃背後の実効条件では R&N が有効に戻る可能性」として整合し得るが、**接続する系統研究と実験検証が空白** (§2-4)。
+3. **【テーマ2 / 燃焼定量】** scramjet/ramjet 燃焼器『そのもの』への water ingestion が失火・着火限界・推力・燃焼効率に与える定量データ (航空ターボエンジン/内燃機関ではなく超音速燃焼器固有の water/air 比 vs 性能低下相関)。機序は確立だが scramjet 固有の定量閾値は未確立。
+4. **【高マッハ外挿】** $\tau$ 規格化でブレイクアップ速度が衝撃強度に依らずほぼ一定という知見は **Mach 2-3 のみ**確認。真の極超音速域 (M≫6、高温・高 We・蒸発 Damköhler 数が支配的になり得る域) でこの規格化や古典相関が成立するかは実験検証付きで未確立。
 5. **【極超音速の供試体/翼まわり3D 凝縮】** §1-3bis の文献追跡で、**供試体/翼/物体まわりの凝縮・蒸発を直接扱う先行研究は遷音速〜超音速では確立**していると判明 (NACA TN-2690 / Goodheart-Schnerr / Prog. Nat. Sci. 2005 / Wen 2020 / Ma & Chen 2026)。極超音速側は **Daum 系の「freestream 凝縮→計測汚染」(M=9.5-17) 止まり**で 3D 場解析ではない。**「極超音速 (M>5) × 3D × 模型まわりの凝縮場 (蒸発残存含む) を直接扱った一次研究」は依然不在** = 明確な研究空白。橋渡しは ① NACA TN-2690 の枠組みを極超音速へ拡張、② Ma & Chen 2026 / Goodheart-Schnerr を M>5・3D へ拡張。
 6. **【迎角 × 凝縮】** (§1-3quater) 揚力/性能への迎角影響 (現象1) は充実だが、次は空白: **(a) 翼の CL–α 凝縮 onset ヒステリシス** (ノズルでは Adam-Schnerr が確立、翼の迎角掃引は未)、**(b) 高迎角の前縁渦/翼端渦コアの凝縮モデリング** (可視化=Campbell 1989 はあるが核生成 CFD は未)、**(c) 極超音速 (M>5) × 迎角 × 風下膨張凝縮** (Liang 2026 が超音速で最接近、M>5 は未)。あなたの直感「迎角で吸込み側に凝縮が偏り過冷却が深まる」を正面から扱う一次研究の余地が大きい。
-7. **【衝撃波型高エンタルピー施設の試験気体凝縮】** (第2ラウンド新規) HIEST/T4/T5/LENS 系で報告される汚染は driver-gas contamination・スロート溶損であり、**試験気体そのものの凝縮 (再圧縮後の再凝縮含む) を主題化した一次文献が見つからない**。X2/X3 の Mars 条件 (96%CO2) ですら freestream CO2 凝縮の直接評価は未確認。燃焼加熱系の Lin 2018 に対応する「衝撃波加熱系の凝縮評価」は空白。
 
 ---
 
@@ -343,45 +262,25 @@
 | 1-2 ✗ | jet-A1 への水エマルジョンで水 5% 超で熱効率が約 41.2% 低下 (定量閾値はケース依存、確証されず) |
 | 0-3 ✗ | 燃焼器出口温度が WFR 0→1 で単調低下する一般的定量関係 (条件依存で一般化不可) |
 
-### 第2ラウンド (2026-07-07) で棄却・訂正した初稿の記載
-
-| 種別 | 内容 |
-|---|---|
-| 数値棄却 ✗ | Goodheart & Schnerr の「RH30→70% で L/D 劣化 −21.6%/−41.5%/−64.3% (α=1.07/3.06/6.06°)」— 同著者博士論文 (2004, 全文 📁) に出現せず出典不明。実際は cL −22%・cD −4.1% (α=3.06°)、L/D 最大 −32% (α=1.07°)、F-16 −17〜−21%。α=6.06° は剥離で非単調 (§1-3quater) |
-| 書誌訂正 | 「Buttsworth et al. 2020」→ **Mahmoudian et al. (2021), Int. J. Multiphase Flow 134:103473** (§1-1) |
-| 書誌訂正 | Daum 1963 の DOI: 10.2514/3.4520 (誤=1968 論文) → **10.2514/3.1722** (§1-3bis) |
-| 書誌訂正 | 「Huang/Zhu/Davy (arXiv 2103.10576, FTaC 2024)」は別の 2 論文の混同: arXiv 2103.10576 = **Huang & Zhang, ICLASS 2021** / FTaC 114:243-273 (2025) = **Huang, Zhu & Davy** (§2-2) |
-| 帰属訂正 | AIAA 2025-1500 (M5-30) は TAMU 単独でなく **LLNL (Miranda) 主体 + TAMU McFarland** の共同 (§2-4) |
-| △ 格下げ | Liang et al. 2026 (PoF 38:043307) の「周期的自励振動」「ピーク Mach 1.1→1.3」「極超音速機設計動機」— アブストと不整合、本文確認まで保留 (§1-3quater) |
-| △ 格下げ | PoF 38:036129 の「RH~60% で振動停止 (standing shock 化)」— 本文未読で確認できず (§1-3quater) |
-| △ 注記 | Ma & Chen 2026 の「Ma≤1.2」下側閾値 — アブストで確認できるのは「Ma>2.0 で凝縮消失」側のみ (§1-3ter) |
-
 ---
 
 ## §7. 主要一次文献リスト
 
-> 📁 = OA PDF を [`papers/condensation/`](../../papers/condensation/) に収蔵済み (2026-07-07 時点 **34 件**、第3ラウンドで蒸発検証系 11 件を追加)。paywall 文献は Unpaywall 等で OA 版を探索済みだが見つからなかったもの (一覧は本節末尾の「未入手文献一覧」)。
-
 **テーマ1 (凝縮)**
-- Lederer et al., AIAA 90-1392 (= NTRS 19900050882) — M=10/14/18 純 N2 凝縮の実験+理論 ◎ (journal 版: **Griffith, Yanta & Ragsdale, J. Fluid Mech. 269:283-299 (1994)** — 過冷却 22-25 K・凝縮質量分率 12-14% の一次帰属先)
-- Lax & Leonov, AIAA SciTech 2020-0381 (journal 版 AIAA J 58(11) 10.2514/1.J059519) — N2 均質凝縮 半経験モデル (簡易 DFT) ◎ (paywall)
-- **Mahmoudian, Mazzelli, Milazzo, Malpress & Buttsworth (2021), Int. J. Multiphase Flow 134:103473** — 水蒸気凝縮衝撃波 (TUSQ 系 impulse 施設) ◎ (書誌訂正済み)
-- J. Chem. Phys. 145, 211702 (2016) — Wyslouzil & Wölk, CNT レビュー ◎📁 `Wyslouzil_Wolk_2016_JCP145_overview_homogeneous_nucleation_vapor_phase.pdf`
-- Shock Waves 28:321-333 (2018) — Lin et al., 燃焼加熱風洞の凝縮縮約モデル ◎ (paywall。先行の **Lin et al. 2014, Shock Waves 24:179** = forge 実装主参照は [`papers/`](../../papers/) ルートに PDF 収蔵済み)
-- VKI Longshot AIAA 2014-1153 (Grossir & Rambaud) — 凝縮検出・プローブ滞留時間依存 ◎📁 `Grossir_Rambaud_2014_AIAA-2014-1153_nitrogen_condensation_detection_VKI_Longshot.pdf`
-- Grossir & Dias (2020), NATO STO-EN-AVT-325-02 — Longshot 施設特性 (凝縮 onset 制約込み) ◎📁 `Grossir_2020_STO-EN-AVT-325-02_Longshot_flow_characterization.pdf`
-- Balla, Rhode & Everhart (2014), AIAA J 52(7):1452 — Langley 31-Inch Mach 10 過飽和マップ・nucleation reduction mechanism △
-- AIAA 1994-199 — NSWC Tunnel 9 (N2) 過冷却限界 △
+- NASA NTRS 19900050882 — M=10/14/18 純 N2 凝縮の実験+理論 ◎
+- AIAA SciTech 2020-0381 — N2 均質凝縮 半経験モデル (簡易 DFT) ◎
+- ScienceDirect S030193222030584X — Buttsworth et al. 2020, 水蒸気凝縮衝撃波 (TUSQ) ◎
+- J. Chem. Phys. 145, 211702 (2016) — Wyslouzil & Wölk, CNT レビュー ◎
+- Shock Waves 28:321-333 (2018) — Lin et al., 燃焼加熱風洞の凝縮縮約モデル ◎
+- VKI Longshot AIAA 2014-1153 (Grossir) — 凝縮検出・プローブ滞留時間依存 ◎
 - Cryogenics 2020 (S0011227520301673) / Eng. Appl. CFD 2024 — N2 凝縮 翼まわり影響 ◎ (**遷音速クライオ風洞 M≈0.8、極超音速ではない**。手法リファレンスとして有効、§1-3 レジーム注記参照)
 - AIAA 2021-4177 / Acta Mech Sinica 10.1007/s10409-014-0014-0 — vitiation 汚染 ◎
-- (歴史的基準) Wegener & Mack 1958, Adv. Appl. Mech. 5:307-447 ◎(書誌)
-- Lax & Leonov (2021), Aerospace 8(12):368 — CO2 核生成縮約モデル総説 📁 `MDPI_2021_CO2_nucleation_reduced_order_review.pdf` / Halonen et al. (2021) PCCP Part II (MD) △
-- Harada/Tanatsugu (ATREX precooler 着氷) / SABRE precooler 系 — §1-5 参照 △
+- (歴史的基準) Wegener & Mack 1958 △
 
 **テーマ1bis (供試体・翼・物体まわりの凝縮/蒸発、§1-3bis)**
-- NACA TN-2690 (Hansen & Nothwang 1952) — 模型まわりへの凝縮影響を主題化 (超音速) △📁 `Hansen_Nothwang_1952_NACA-TN-2690_air_condensation_supersonic_tunnels.pdf`
-- AIAA J 1(5):1043 (Daum 1963, DOI 10.2514/3.1722) / AIAA J 6(3):458 (Daum & Gyarmathy 1968, DOI 10.2514/3.4520) — 極超音速 freestream 凝縮→計測汚染 (M=9.5-17) △ (paywall, DOI 訂正済み)
-- J. Aircraft 42(2):402 (Goodheart & Schnerr 2005) — ONERA M6/F-16 翼 3D 凝縮 (クライオ M6 論文の先行研究) △。元データ一式 = **Goodheart 博士論文 (TUM 2004)** 📁 `Goodheart_2004_PhD_3D_transonic_condensation.pdf`
+- NACA TN-2690 (Hansen & Nothwang 1952) — 模型まわりへの凝縮影響を主題化 (超音速) △
+- AIAA J 1:1043 (Daum 1963) / AIAA J 6:458 (Daum & Gyarmathy) — 極超音速 freestream 凝縮→計測汚染 (M=9.5-17) △
+- J. Aircraft 42:402 (Goodheart & Schnerr 2005) — ONERA M6/F-16 翼 3D 凝縮 (クライオ M6 論文の先行研究) △
 - AIAA J 28:1187 (Schnerr & Dohrmann 1990) — 翼まわり凝縮潜熱供給の原典 △
 - Prog. Nat. Sci. 2005 (NACA0012 moist air) — **凝縮→衝撃→蒸発サイクルを陽に扱う** ○
 - Int. J. Heat Mass Transfer S0017931019323816 (Wen et al. 2020) — 衝撃背後の再蒸発を明示 ○
@@ -389,10 +288,9 @@
 - Springer 10.1007/978-3-7091-2688-2_8 (Schnerr-Adam-Mundinger 系) — 凝縮-衝撃結合の自励振動 △
 - AIP Conf. Proc. 10.1063/1.1362002 (White & Young 2000) — 凝縮流の核生成×衝撃波相互作用 △
 - Aerosp. Sci. Technol. 10.1016/j.ast.2025.110108 (Zhang et al. 2025) — 湿り空気凝縮の翼空力影響 (Ma&Chen の先行) △
-- J. Fluid Mech. 10.1017/S0022112066000284 (Hill 1966) — 液滴成長則 (Hill) の原典 ◎(書誌) (paywall, OA なし)
+- J. Fluid Mech. 10.1017/S0022112066000284 (Hill 1966) — 液滴成長則 (Hill) の原典 ◎(書誌)
 - J. Fluid Mech. 10.1017/S0022112006003727 (Luo et al. 2007) — Ludwieg 管 均質凝縮の検証
-- Phys. Chem. Chem. Phys. 22(34):19282 (Dingilian et al. 2020) — **CO2** 均質核生成 (超音速ノズル) ○📁 `Dingilian_2020_PCCP_homogeneous_nucleation_CO2_supersonic_nozzles_I.pdf`
-- Int. J. Heat Mass Transfer (Wen et al. 2020) — 衝撃背後の再蒸発 ○📁 `Wen_2020_IJHMT_nonequilibrium_condensation_water_vapour_supersonic_shock_waves.pdf`
+- Phys. Chem. Chem. Phys. (Dingilian et al. 2020) — **CO2** 均質核生成 (超音速ノズル) △
 - Phys. Fluids 10.1063/5.0176472 (Kong et al. 2023) — 超音速 sea-skimming 飛行数値 (凝縮なし)
 
 **テーマ1quater (迎角依存の凝縮効果、§1-3quater)**
@@ -402,138 +300,25 @@
 - Aerosp. Sci. Technol. 12:150 (Karabelas & Markatos 2008) — NACA0012 亜音速、迎角×湿度 △
 - Phys. Fluids 38:036129 (2026) — 湿度×遷音速バフェット (湿度が buffet 抑制) △
 - Phys. Fluids 38:043307 (Liang et al. 2026) — 超音速翼 凝縮自励振動 (極超音速機設計動機) △
-- J. Aircraft 26:593 (Campbell, Chambers & Rumsey 1989, AIAA 88-0191) — 自然凝縮による渦/衝撃の飛行可視化 ◎ (NTRS 19880034912 はアブストのみで PDF なし)
+- J. Aircraft 26:593 (Campbell, Chambers & Rumsey 1989) — 自然凝縮による渦/衝撃の飛行可視化 ◎
 - Int. J. Mech. Sci. 2011 (S0020740311002396) — 内部流の凝縮×衝撃振動 △ / (源流) Adam & Schnerr 1997 ノズル自励振動・ヒステリシス分岐 △
 
 **テーマ2 (液滴ブレイクアップ/ingestion)**
-- Phys. Fluids 35, 016103 (2023), DOI 10.1063/5.0131815 — Briney & Balachandar, Euler-Lagrange stochastic ◎📁 `Briney_Balachandar_2023_PoF35_euler_lagrange_droplet_breakup_supersonic_flight.pdf` (accepted manuscript)
-- AIAA 2021-0751 (Hess, Kessler & Johnson, NRL) — Droplet aerodynamic breakup models 評価 ◎ (paywall)
-- **Huang & Zhang, ICLASS 2021** (arXiv 2103.10576) — 弱衝撃×蒸発水滴 1D ◎📁 `Huang_Zhu_Davy_2021_shock_droplet_interaction_ICLASS_arxiv2103.10576.pdf` / **Huang, Zhu & Davy, FTaC 114:243-273 (2025)** — We 10-4758 網羅 ◎ (paywall。初稿で 1 本に混同していた 2 論文)
-- Phys. Rev. Fluids 10:124301 (2025) (arXiv 2504.09007) — Ullman, Bielawski & Raman, ブレイクアップ多段階機構 (SIE 域, 界面解像) ◎📁 `Ullman_Bielawski_Raman_2025_shock_induced_droplet_breakup_timescales_arxiv2504.09007.pdf`
-- AIAA 2025-1500 (LLNL Young et al. + TAMU McFarland, M5-30 normal shock) / AIAA 2025-1501 (TAMU Ramesh & Jarrahbashi, EL+蒸発; journal 版 AIAA J 10.2514/1.J064314) ◎ (paywall。LLNL 2023 ポスター 📁 `Young_2023_LLNL_hypersonic_shock_droplet_interactions_poster.pdf`)
-- Ranger & Nicholls 1969 (AIAA 68-83), AIAA J 7(2):285 — 古典ブレイクアップ時間相関の原典 📁 `Ranger_Nicholls_1969_aerodynamic_shattering_liquid_drops_AIAA-68-83.pdf`
-- Pilch & Erdman 1987, IJMF 13(6):741 — $We_c=12(1+1.077\,Oh^{1.6})$・5 レジーム分類の原典 ◎ (paywall) / Guildenbecher et al. 2009 Exp. Fluids 46:371 / Theofanous 2011 ARFM 43:661 — 標準レビュー (paywall)
-- Wang, Hopfes, Giglmaier & Adams 2020, Exp. Fluids 61:193 — We 固定 Mach 走査 (圧縮性の独立効果) ◎📁 `Wang_Hopfes_Giglmaier_Adams_2020_Mach_effect_droplet_aerobreakup_ExpFluids.pdf`
-- Hébert et al. 2020, SN Appl. Sci. 2:69 — M4.4・We>10⁵ ◎📁 `Hebert_Rullier_2020_water_drop_breakup_Mach4.4_We1e5_SNApplSci.pdf` / Theofanous, Li & Dinh 2004, J. Fluids Eng. 126:516 — 希薄超音速 We-Ma-Kn △ (paywall)
-- Song, Long & Pan (arXiv 2306.11255) — 相変化つき界面解像 shock-droplet 📁 / Rao & Basu (arXiv 2502.05976) — リガメント媒介破砕の自己相似性 📁
-- **Smolders & van Dongen 1992, Shock Waves 2:255-267** — 凝縮→衝撃→再蒸発サイクルの衝撃管実験+wet-bulb モデル ○ (paywall。実験+モデル完全版 = **Smolders 博士論文 TU/e 1992** 📁) / **Goossens, Cleijne, Smolders & van Dongen 1988, Exp. Fluids 6:561-568** — 衝撃誘起蒸発の d²-law 実測 (M=1.2-2.1) ○ (paywall) / Hanson, Davidson & Hanson, AIAA 2005-0350 (journal 版 PoF 19:056104, 2007; 全データ = **Hanson 博士論文 Stanford 2005** 📁) — **課題 A の実験アンカー (第3ラウンド追加)**
-- **Luo et al. 2006, JFM 548:403-430** — 核生成+成長+**蒸発+脱核**入り Euler 型モデルを凝縮→衝撃→再蒸発実験で検証 (**課題 A 設計の一次先行例**。内容包含の **Luo 博士論文 TU/e 2004** 📁) ○ / Luo, Cao & Qin 2018, IJHMT 117:1032 — phase-slip moment method △ (paywall)
-- **Huang & Zhang 2020, PoF 32:123315** — Goossens 1988 条件の E-L 数値再現 ○📁 / Kersey, Loth & Lankford 2010, AIAA J 48(9) — 蒸発液滴による衝撃減衰 △ (paywall)
-- **Duke-Walker & McFarland 系**: IJMF 133:103464 (2020, PDPA 蒸発測定法) ○📁 / IJMF 161:104389 (2023, 高 We 分裂+蒸発) ○📁 / JFM 908:A13 (2021, 実験対比つき E-L 数値) ○📁
-- **蒸発モデル限界系**: Finneran et al. 2021, Proc. R. Soc. A 477:20210078 — 準定常蒸発モデルの逸脱定量 ○📁 / Yu & Chen 2020 (arXiv 2006.15808) — 高温高圧 d²-law 補正理論 📁 / Sazhin 2017, Fuel 196:69 — 包括レビュー △ (paywall) / Boyd & Jarrahbashi 2021, PRF 6:113601 — 遷臨界衝撃-液滴 △ (paywall) / Boyd, Becker & Ling 2024 (arXiv 2410.20585) — 蒸発が空力分裂に与える影響 📁 / Das & Udaykumar 2020, IJMF 130:103299 — 衝撃加熱 Al 液滴気化の界面解像 📁
-- Letson & Burleson 1979 (MICOM T-79-42) — M3.7-5.0 sled rain erosion ◎📁 `Letson_Burleson_1979_rain_erosion_sled_Mach3.7-5.0_fused_silica_radome_ADA077348.pdf` / van der Zwaag et al. 1986 (AFWAL-TR-86-4032) — 液滴衝突損傷機構 ◎📁 / Gonuleri et al. AIAA 2023-2024 △ (paywall)
-- Stebbins & Loth, AIAA 2024-0887 — 極超音速前胴への氷粒子衝突 △ (paywall)
-- Xiong et al. 2020, Energy 200:117477 — scramjet 水噴射の性能定量 △ (paywall) / Kloesel & Clark (NASA), NTRS 20140008928 — MIPCC 水噴射 📁 `Kloesel_Clark_2014_MIPCC_water_injection_F4_F15_high_Mach_NASA.pdf`
+- Phys. Fluids 35, 016103 (2023) — Briney & Balachandar, Euler-Lagrange stochastic ◎
+- AIAA 2021-0751 — Droplet aerodynamic breakup models 評価 ◎
+- FTaC 2024 10.1007/s10494-024-00581-z (arXiv 2103.10576) — Huang/Zhu/Davy, shock-droplet ◎
+- arXiv 2504.09007 (PRF) — Ullman, Bielawski & Raman, ブレイクアップ多段階機構 ◎
+- AIAA 2025-1500 / 2025-1501 + TAMU FMECL — 極超音速 (M5-30) EL ブレイクアップ+蒸発 ◎
 - Int. J. Heat Mass Transfer S0017931022010067 — Euler-Lagrange-Euler 凝縮 △
-- FAA AC 33.78-1 / Federal Register 00-3702 — rain/hail エンジン失火規制 ◎📁 `FAA_2000_AC-33.78-1_turbine_engine_power_loss_rain_hail.pdf`
-- DiVA 1793877 — WFR vs 燃焼温度 (MSc thesis) △📁 `Linkoping_thesis_2023_fuel_water_injection_diva1793877.pdf`
+- FAA AC 33.78-1 / Federal Register 00-3702 — rain/hail エンジン失火規制 ◎
+- DiVA 1793877 — WFR vs 燃焼温度 (MSc thesis) △
 - SAGE 09544100231162425 — IPS 水膜形成 ◎
 
-### 未入手 (paywall) 文献一覧 (2026-07-07 時点)
-
-OA 探索 (Unpaywall / arXiv / NTRS / DTIC / 機関リポジトリ / Wayback) を実施した上で入手できなかったもの。**「代替」列に OA の実質的代替があるものは急がない**。優先度は forge の検証・設計への直結度。
-
-| 優先 | 文献 | DOI / ID | 関連節 | 代替・備考 |
-|---|---|---|---|---|
-| 高 | Lin et al. 2018, Shock Waves 28:321 (燃焼加熱風洞 凝縮縮約モデル) | 10.1007/s00193-017-0724-x | §1-2, 課題C | 先行 Lin 2014 は papers/ に収蔵済み |
-| 高 | Huang, Zhu & Davy 2025, FTaC 114:243 (We 10-4758 網羅) | 10.1007/s10494-024-00581-z | §2-2 | 先行 Huang & Zhang 2020 PoF は 📁 |
-| 高 | Goossens et al. 1988, Exp. Fluids 6:561 (衝撃誘起蒸発 d²-law) | 10.1007/BF00196603 | §1-3, 課題A | 条件・データの大部分は Smolders 博論 📁 に収録 |
-| 高 | Smolders & van Dongen 1992, Shock Waves 2:255 | 10.1007/BF01414761 | §1-3, 課題A | **Smolders 博論 📁 で実質代替可** |
-| 高 | Luo et al. 2006, JFM 548:403 (蒸発+脱核 Euler 型) | 10.1017/S0022112005007809 | §1-3, 課題A | **Luo 博論 📁 で実質代替可** |
-| 高 | Peters & Paikert 1994, IJHMT 37:293 (単分散液滴の成長/蒸発) | 10.1016/0017-9310(94)90100-7 | 課題A | クリーンな 0D/1D 検証点。代替なし |
-| 高 | Hill 1966, JFM 25:593 (液滴成長則の原典) | 10.1017/S0022112066000284 | §1-3ter | 二次資料 (Luo 博論等) で式は追える |
-| 高 | Griffith, Yanta & Ragsdale 1994, JFM 269:283 (N2 過冷却 22-25K) | 10.1017/S0022112094001564 (要確認) | §1-1 | アブストで数値確認済み |
-| 高 | Ma & Chen 2026, IJHMT 262:128603 (Ma≥2 凝縮抑制) | 10.1016/j.ijheatmasstransfer.2026.128603 | §1-3ter, 課題B | Ma≤1.2 閾値の本文確認が残 |
-| 高 | AIAA 2025-1500 / 1501 / 1503 (M5-30 shock-droplet, EL+蒸発) | 10.2514/6.2025-1500 等 | §2-4 | LLNL 2023 ポスター 📁 が部分代替 |
-| 高 | Pilch & Erdman 1987, IJMF 13:741 (We_c=f(Oh) 原典) | 10.1016/0301-9322(87)90063-2 | §2-2 | 式は多数の二次資料で確認済み |
-| 中 | Mahmoudian et al. 2021, IJMF 134:103473 (TUSQ 凝縮衝撃) | 10.1016/j.ijmultiphaseflow.2020.103473 | §1-1 | |
-| 中 | Lax & Leonov 2020, AIAA J 58(11) (N2 半経験モデル) | 10.2514/1.J059519 | §1-1 | CO2 総説 (同著者) は 📁 |
-| 中 | Lederer et al. 1990, AIAA 90-1392 (M10/14/18 N2 実験) | NTRS 19900050882 (アブストのみ) | §1-1 | JFM 1994 と重複データ |
-| 中 | Daum 1963 / Daum & Gyarmathy 1968, AIAA J (air/N2 onset 相関) | 10.2514/3.1722 / 10.2514/3.4520 | §1-3bis | Grossir 2014 📁 に onset 図の replot あり |
-| 中 | Goodheart & Schnerr 2005, J. Aircraft 42:402 | 10.2514/1.5137 | §1-3quater | **博論 📁 で実質代替可** |
-| 中 | Balla, Rhode & Everhart 2014, AIAA J 52:1452 (Langley M10 過飽和マップ) | 10.2514/1.J052608 | §1-1bis | |
-| 中 | AIAA 1994-199 (Tunnel 9 過冷却限界) | 10.2514/6.1994-199 | §1-1bis | |
-| 中 | Hanson et al. 2007, PoF 19:056104 (aerosol 蒸発 journal 版) | 10.1063/1.2736082 | §1-3, 課題A | **Hanson 博論 📁 で実質代替可** |
-| 中 | Kersey, Loth & Lankford 2010, AIAA J 48(9) (蒸発液滴×衝撃減衰) | 10.2514/1.J050162 | §1-3 | |
-| 中 | Xiong et al. 2020, Energy 200:117477 (scramjet 水噴射) | 10.1016/j.energy.2020.117477 | §2-5, 課題D | |
-| 中 | Boyd & Jarrahbashi 2021, PRF 6:113601 (遷臨界 shock-droplet) | 10.1103/PhysRevFluids.6.113601 | §7 蒸発系 | Boyd 2024 arXiv 📁 が後続 |
-| 中 | Theofanous, Li & Dinh 2004, J. Fluids Eng. 126:516 (We-Ma-Kn) | 10.1115/1.1777234 | §2-4 | |
-| 中 | Guildenbecher et al. 2009 / Theofanous 2011 (二次微粒化レビュー) | 10.1007/s00348-008-0593-2 / 10.1146/annurev-fluid-122109-160638 | §2-2 | |
-| 中 | Zhang et al. 2025, AST 161:110108 / PoF 38:036129 / PoF 38:043307 (2026) | 10.1016/j.ast.2025.110108 / 10.1063/5.0320450 等 | §1-3quater | 043307 は △ 格下げ済み・本文確認待ち |
-| 中 | Sazhin 2017, Fuel 196:69 (蒸発モデル包括レビュー) | 10.1016/j.fuel.2017.01.048 | 課題A | 旧版 PECS 2006 も paywall |
-| 中 | Stebbins & Loth 2024 (氷粒子×極超音速前胴) | 10.2514/6.2024-0887 | §2-6 | |
-| 中 | Gonuleri et al. 2023 (雨滴衝突損傷 CFD 連成) | 10.2514/6.2023-2024 | §2-6 | |
-| 低 | Wegener & Mack 1958, Adv. Appl. Mech. 5:307 (歴史的基準) | 10.1016/S0065-2156(08)70022-X (要確認) | §1-1 | 書籍章。Pope & Goin (書籍) も未入手 |
-| 低 | Schnerr & Dohrmann 1990 / Adam & Schnerr 1997 / White & Young 2000 (凝縮×衝撃振動系) | AIAA J 28:1187 / JFM 348 / 10.1063/1.1362002 | §1-3bis(e), 課題E | |
-| 低 | Rusak & Lee 2000, JFM 403:173 / Karabelas & Markatos 2008 / Prog. Nat. Sci. 2005 | — | §1-3quater | |
-| 低 | Luo et al. 2007, JFM 572:339 / Cheng, Luo & van Dongen 2010, JFM 651:145 (Ludwieg 管) | 10.1017/S0022112006003727 / 10.1017/S0022112009993879 | §1-3 | 大枠は Luo 博論 📁 に包含 |
-| 低 | Smolders, Niessen & van Dongen 1992, Comput. Fluids 21:63 (RCM 数値法) | 10.1016/0045-7930(92)90033-R | 課題A | 博論 📁 に包含 |
-| 低 | Hess et al. AIAA 2021-0751 (ブレイクアップモデル評価) | 10.2514/6.2021-0751 | §2-1 | |
-| 低 | Hargis 2020 RSI / Chauvin 2011 PoF / Paudel 2018 IJMF / Dai 2015 IJHMT / Golubkina 2022 / Yeom & Chang 2010 / Hrebtov 2020 | — | §1-3, §2 | 周辺文献 |
-| 低 | Lin et al. 2026, PoF 38:013311 (dfHighSpeedFoam, 蒸発つき EL OSS) | 10.1063/5.0309688 | 課題D | コード自体は公開 |
-| 低 | Luo, Cao & Qin 2018, IJHMT 117:1032 (phase-slip moment) | 10.1016/j.ijheatmasstransfer.2017.11.028 | 課題A 発展 | |
-| 低 | Schmitt (AFML) rain erosion 原典群 / SAGE IPS 水膜 / Harada ATREX / ATE precooler 2022-2023 | — | §2-6, §1-5 | |
-| 低 | Halonen et al. 2021, PCCP 23:4517 (CO2 MD Part II) | 10.1039/D0CP05653G | §1-3ter | AM は HTML のみ取得可 |
-| 低 | Federal Register 00-3702 (本文) | — | §2-5 | 内容は AC 33.78-1 📁 で検証済み |
-
 ---
 
-## §8. forge への含意 (第3ラウンドで §9 の課題 A〜E に具体化済み)
+## §8. forge への含意・次アクション候補
 
-> 本節は初稿の「含意」を最新知見で更新したもの。**具体的な着手順・検証チェーンは §9 が正**。
-
-- **テーマ1 は [`condensation-nonequilibrium.md`](../../plans/active/condensation-nonequilibrium.md) と直結**: forge が実装済みの路線 (CNT + Hertz-Knudsen/Gyarmathy 成長 + 4 モーメント) は本調査で確立された標準路線と一致。さらに第3ラウンドで、**同じ系譜の「完成形」= Luo 2006 (蒸発+脱核入り、実験検証済み)** が特定できた。forge の次の一歩 (課題 A) は白紙の設計ではなく **Luo の定式化の移植+forge 流 (float/GPU/point-implicit) への適合**である。
-- **蒸発拡張は検証データが揃っている**: 実験 (Smolders/Goossens 衝撃管) → 先行数値 (Luo 2006, Huang & Zhang 2020) → モデル適用限界 (Finneran 2021) の 3 点セットが §1-3 に整理済み。**Wen 2020 は code-to-code 専用** (再蒸発は実験比較なし)。
-- **「蒸発 vs 成長」の判定**: 衝撃層滞留時間と蒸発時間スケールの比 (蒸発 Damköhler) をローカル評価する後処理は、実装ゼロで既存 run に適用でき、課題 A/B の前段として最初に作る (§9 推奨順序)。
-- **end-to-end は研究空白 = 新規性の余地**: §5-1 の統合評価は依然 open。素過程は §9 の A→B/C→D で段階的に埋める。**商用コード (CFX/Fluent) は 2 方程式単分散 wet steam 止まり**なので、4 モーメント+蒸発+脱核の forge は商用比でも差別化になる (課題 A 新規性欄)。
-- **高マッハは外挿に注意**: M≫6 のブレイクアップ/蒸発モデルは較正データ不足。R&N は「M5-30 数値では妥当・圧縮性の独立効果は実験で確認」という両面の証拠があり (§2-4)、流用は検証付きで。
-- **着手時は開発フロー通り** `methods/` 更新 + plan 作成 (§9 末尾)。
-
----
-
-## §9. 直近の研究課題の提案 (2026-07-07 追記)
-
-本調査の空白 (§5) と forge の現有能力を突き合わせた、直近着手候補の研究課題。forge の現状: 4 モーメント非平衡凝縮は N2 (case/34 Arthur, Fig.2 一致) と H2O (case/16 Wyslouzil Fig.3, 分圧スイープ汎化) で検証済み。ただし**蒸発は未実装** ($dr/dt<0$ を 0 にクランプ)、TP gas は <200K の冷・高マッハ域で数値不安定 (CPG carrier で回避中)、Lagrangian 粒子は未実装 ([`plans/active/condensation-nonequilibrium.md`](../../plans/active/condensation-nonequilibrium.md))。
-
-### 課題 A: モーメント法への蒸発拡張 + 衝撃背後の再蒸発検証 (最直近・小〜中規模)
-
-- **ギャップ**: テーマ1 の核心「凝縮物は供試体の衝撃層で蒸発するか残存するか」(§1-3) を forge で解くには蒸発が必須だが、現行は $dr/dt<0$ をクランプしており**凝縮の一方通行**。
-- **やること**: `condensationSource_d` の成長則を蒸発側 ($p_v<p_{sat}$, $\bar r>r_*$ 崩れ) へ拡張。難所はモーメント法の realizability — 蒸発で $\bar r\to0$ に向かうときの液滴消滅 (Q0 の sink) の閉包で、分布仮定つき消滅モデルか最小径カットオフが要る。**この閉包は Luo et al. (2006, JFM 548) が「脱核 (de-nucleation)」として定式化し実験検証済み** — Luo 博士論文 📁 が設計の一次資料 (§1-3)。準定常成長則を衝撃直後の急加熱過渡に使う妥当性は Finneran 2021 📁 の逸脱マップで判定。$g\to0$ での単相復帰と保存性 (総水・全エンタルピー) の検証を含む。
-- **検証データ (実験アンカーを軸に 3 層)**:
-  1. **実験 = Smolders & van Dongen 1992, Shock Waves 2:255** —「希薄波で凝縮 → 衝撃で再蒸発」の全サイクルを衝撃管で実測 (P/T/飽和度/液滴径)。**課題 A の一次検証ターゲット** (1D 衝撃管なので forge の擬 1D ケースで直接再現可能。実験詳細は Smolders 博士論文 📁 に完全収録)。補助に **Goossens et al. 1988, Exp. Fluids 6:561** (d²-law と蒸発時間 vs 衝撃強度 M=1.2-2.1)、Hanson et al. 2007 PoF 19:056104 (高温 475-870 K の蒸発率、全データは Hanson 博士論文 📁)。※ Duke-Walker & McFarland 2020/2023 📁 は現代版だが SDMI 構成 (アセトン・スリップ/分裂支配) のため**課題 D 向き** — §1-3 適性注記。詳細は §1-3。
-  1'. **先行数値再現 = Luo et al. 2006 (JFM 548, 蒸発+脱核入り Euler 型を同系実験で検証)** と **Huang & Zhang 2020 (PoF 32, Goossens 条件を E-L で再現)** 📁 — forge の結果をこれらと突き合わせれば実験・他手法の両面から挟める。
-  2. **code-to-code = Wen et al. 2020** 📁 — セパレータのノズル+衝撃系での再蒸発プロファイル比較。ただし**同論文の再蒸発は実験比較のない純数値予測** (検証は衝撃なしノズルのみ) なので、あくまでモデル間比較 (§1-3bis(d) 注記)。
-  3. **定性 = Huang & Zhang (ICLASS 2021)** 📁 — 弱衝撃ケース (30/50 μm で蒸発径減少 ~0.2 μm) との傾向比較。
-- **新規性/価値**: それ自体の新規性は中程度だが、**課題 B・C の前提**であり、「凝縮→衝撃→蒸発サイクル」(§1-3bis(d)) を極超音速に持ち込む鍵。なお**商用コード (ANSYS CFX/Fluent) の非平衡湿り蒸気モデルは 2 方程式 (液分率+液滴数)・単分散**で、蒸発 (負の質量ソース) は入るが **Luo 2006 型の脱核閉包や多モーメントは入っていない** (Fluent Theory Guide / Grübel et al. 2018 の CFX 実装評価より。CFX は核生成物性を液滴温度で評価する既知の実装癖もあり)。4 モーメント+蒸発+脱核を検証付きで持つ forge は商用比でも差別化になる。
-- **前段の即効タスク (実装ゼロ)**: 衝撃層滞留時間 vs Hertz-Knudsen 蒸発時間の比 (蒸発 Damköhler) を既存 `res_*.h5` から出す**後処理ツール** (§8 で既提案)。課題 A の検証にもそのまま使える。
-
-### 課題 B: 極超音速 (M>5) 供試体まわりの 2D/3D 凝縮場 — §5-5 の空白を直接埋める (直近・中規模)
-
-- **ギャップ**: 「M>5 × 3D × 模型まわり凝縮場」の一次研究は不在 (第2ラウンドの反証探索でも見つからず、空白は**強化**された)。最接近の Ma & Chen 2026 も超音速止まり。迎角×凝縮 (§5-6c) も M>5 は完全空白。
-- **やること**: くさび/鈍頭体/翼型 (NACA0012) まわりの湿り空気 or N2 凝縮を M=2→8 で走査し、(1) **「Ma≥2 で衝撃加熱が凝縮を抑制」(Ma & Chen) の極超音速側への外挿検証**、(2) 前縁膨張ファン・肩部膨張・風下側の**局所凝縮残存マップ** (過飽和 S と蒸発 Damköhler の同時マップ)、(3) 迎角スイープで吸込み側偏りとヒステリシス (§5-6a) の初調査。まず CPG carrier + H2O (実装済) の 2D で開始し、TP は >200K の条件を選ぶ。
-- **検証データ**: 遷音速側は Goodheart 博士論文 📁 (M6 翼の 3D 凝縮場・cL/cD 変化) と Zhang 2025 / Liang 2026 (アブスト数値: L/D 2.63→2.33、過冷却 15.4-15.5 K)。極超音速側は直接データがない (=それ自体が新規性) ので、dry 極超音速場の妥当性 + 凝縮 onset の物理整合 (Wilson 点) で担保。
-- **新規性/価値**: **論文になる空白ど真ん中**。テーマ1 の「風洞凝縮物が供試体でどうなるか」への直接回答にもなる。課題 A (蒸発) 完了後が理想だが、「凝縮 onset の有無マップ」だけなら現行コードで開始可能。
-
-### 課題 C: 燃焼加熱風洞の多成分凝縮 (H2O+CO2) と試験気体条件のずれ (直近・小〜中規模)
-
-- **ギャップ**: 燃焼加熱風洞の凝縮は Lin 2018 の**縮約モデルのみ**で、full CFD との比較検証がない。CO2 凝縮の縮約モデル群は Lax & Leonov 2021 総説 📁 に整理済みだが、風洞ノズル全系での適用例は薄い。衝撃波型施設の凝縮は §5-7 (新規空白)。
-- **やること**: forge の carrier+condensible 枠組 (N2+H2O 検証済) を **air+H2O+CO2 の 2 凝縮種**へ拡張 (種ごと物性 dispatch は設計済みで増設は小)。燃焼加熱風洞の代表条件 (Lin 2018 の013 施設条件) でノズル膨張→試験部の凝縮量・試験気体条件のずれ (静温/静圧/M) を定量し、**Lin 2018 縮約モデルの検証/較正**というポジションを取る。vitiation 気相汚染 (§1-4) と合わせ「凝縮+汚染の複合が試験条件に与える影響」まで拡げると統合評価はギャップ。
-- **検証データ**: Lin 2018 (モデル値)、Mahmoudian 2021 📁 (impulse 施設の凝縮衝撃位置)、CO2 は Dingilian 2020 📁 の onset (75-92 K, 39-793 Pa)。
-- **新規性/価値**: ユーザの本来用途 (>200K の燃焼風洞凝縮 — TP+凝縮が使える域) に直結し、**実務価値が最も高い**。plan の Phase 2/3 資産をほぼそのまま使う。
-
-### 課題 D: Lagrangian 液滴モジュール → 雨滴のインテーク到達性 end-to-end (中期・大規模)
-
-- **ギャップ**: §5-1 の最大空白 =「雨滴/凝縮液滴が実機インテーク圧縮系を通って燃焼器に到達するか」の統合評価は誰もやっていない。canonical 鈍頭体 (Briney & Balachandar 📁) と normal shock (LLNL+TAMU) までしか存在しない。
-- **やること (段階分け)**: **D1**: one-way Lagrangian 慣性粒子追跡 + 変形考慮抗力 (氷粒子なら breakup 不要で Stebbins-Loth 型の衝突マップがすぐ出る) → **D2**: stochastic TAB / KHRT ブレイクアップ → **D3**: 蒸発 (高温衝撃層) を追加し、**ブレイクアップ時間 vs 到達時間の競合スケーリング (Briney) をインテーク形状 (斜め衝撃列+コウル) へ一般化**する。
-- **検証データ**: D1-D2 は Briney & Balachandar 📁 (M2/3/6 鈍頭体、スケーリング則) の再現が定量ベンチ。D3 は Song et al. 📁 (相変化つき shock-droplet) と Huang & Zhang 📁。
-- **新規性/価値**: **学術空白の本丸で寄与が最大**だが実装規模も最大 (CUDA 粒子追跡・確率的 breakup・壁相互作用)。CFD 側は既存の定常場を使う one-way でよいので、ソルバ本体への侵襲は小さい。着手時は独立 plan を起こす。
-
-### 課題 E: 凝縮×衝撃の自励振動・ヒステリシス (中期・中規模)
-
-- **ギャップ**: 翼の CL–α 凝縮ヒステリシス (§5-6a) と凝縮誘起振動の湿度依存 (PoF 2026 ×2、いずれも遷音速) は極超音速はおろか超音速でも薄い。
-- **やること**: dual-time + 凝縮でラバルノズルの Adam & Schnerr 型自励振動 (周波数分岐・ヒステリシス) を再現 → 翼へ展開。forge の非定常+凝縮結合の検証ベンチとしても価値。
-- **リスク**: 既知の気相 odd-even 市松 (plan 記載, pre-existing) が振動と干渉する可能性 — 先に市松対策の目処が要る。凝縮ソースの point-implicit と物理振動の時間精度の切り分けも必要。
-
-### 推奨順序
-
-**A (蒸発拡張) → B と C を並行** (B=学術新規性、C=実務価値) **→ E → D**。前段として、実装ゼロの「蒸発 Damköhler 後処理ツール」を A の着手前に作り既存 run へ適用しておくと、B/C の解析にもそのまま効く。いずれも着手時は開発フロー通り `methods/` 更新 + `plans/active/` に plan を起こすこと (課題 A/C は既存 [`condensation-nonequilibrium.md`](../../plans/active/condensation-nonequilibrium.md) の Phase 4/5 として拡張でもよい)。
+- **テーマ1 は [`condensation-nonequilibrium.md`](../../plans/active/condensation-nonequilibrium.md) と直結**: 非平衡凝縮 (CNT + Hertz-Knudsen 成長) は本調査で確立された標準路線であり、forge の NASA 多項式 TP gas と整合させやすい。Euler-Lagrange-Euler (気相-液滴-液膜) が数値手法の主流。
+- **「蒸発 vs 成長」の判定**: forge で供試体まわりの凝縮物の運命を扱うなら、衝撃層滞留時間と蒸発時間スケール (Hertz-Knudsen) の比をローカルに評価する後処理が定性判定に有効。
+- **end-to-end は研究空白 = 新規性の余地**: §5 の 4 問は一次文献が薄く、forge (多成分 TP + 非平衡凝縮 + 将来の Lagrangian 粒子) で実機インテーク統合解析を行えば学術的寄与になり得る。着手時は plan を起こすこと。
+- **高マッハは外挿に注意**: M≫6 のブレイクアップ/蒸発モデルは較正データ不足。古典相関の流用は検証付きで。

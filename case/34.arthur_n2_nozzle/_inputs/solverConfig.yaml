@@ -1,0 +1,44 @@
+mesh:
+  meshFormat: "hdf5"
+  meshFileName: "arthur_nozzle.h5"
+  valueFileName: "restart_dry.h5"   # 収束 dry 場から restart (凝縮 onset を切り分け)
+gpu: 1
+solver: "SLAU"
+physProp:
+  isCompressible: 1
+  thermalMethod: 0
+  viscMethod: 0          # 0: inviscid (Euler) — Arthur の source-flow 検証は非粘性 dry 膨張
+  ro : 5.959             # ignored for compressible (throat ref)
+  visc : 0.0000178       # N2 (Euler では未使用)
+  thermCond: 0.0258
+  cp : 1038.8            # N2: gamma*R/(gamma-1), R_N2=296.8
+  gamma : 1.4
+time:
+  unsteady: 0
+  dualTime: 0
+  last:
+    control: 0
+    nStepOuter: 8000
+    time: 1.00
+  deltaT:
+    control: 1
+    dt: 0.00001
+    cfl: 1.0
+    cfl_pseudo: 1
+    implicitRelax: 1.0
+    blockDPLUR: 1
+    dt_min: 0.00000001
+    dt_max: 1.0
+    detectNaN: 1
+  outStepInterval: 4000
+  outStepStart: 0
+  timeIntegration: 11
+  nStepInner: 20
+space:
+  convMethod: 1          # 2次風上 (restart from converged 1st-order)
+  limiter: 2
+turbulence: {model: "none"}
+condensation:
+  condensation: 1        # Phase 2: N2 非平衡凝縮 (核生成+成長ソース ON)
+  nCondSpecies: 1
+initial: "arthur_n2"

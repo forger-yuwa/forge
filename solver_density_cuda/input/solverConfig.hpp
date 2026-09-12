@@ -391,7 +391,9 @@ public:
                              //   1: H2O (Murphy-Koop, CNT+Kantrowitz+Hertz-Knudsen, carrier+TP)
     int condGasSpecies = -1; // carrier+condensible: 凝縮する気相化学種の index (roY{s})。
                              //   -1: pure-condensible (気相=凝縮種, N2 Arthur)。>=0: H2O 等の希薄凝縮 (Wyslouzil)
-    int condKantrowitz = 0;  // 核生成の Kantrowitz 非等温補正。0: off (等温 CNT, 既定), 1: on
+    int condKantrowitz = 0;  // 核生成の非等温補正。0: off (等温 CNT, 既定), 1: Kantrowitz 純蒸気形 (旧結果再現),
+                             //   2: Feder carrier 形 (キャリア衝突による冷却を含む, q は潜熱項のみ), 3: Feder carrier 形 + 表面仕事項 (物理モデル)
+    double condSigmaScale = 1.0; // 表面張力の一定倍率 (感度試験専用; 核生成・Kelvin・蒸発に一貫)。1.0 でビット不変
     int condKantrowitzGammaMode = 0; // Kantrowitz θ の γ。0: 凝縮種 (蒸気) の γ_v=CondSpeciesProps.cp/cv (既定, 2026-09-10),
                                      //   1: 旧挙動 (セル気相混合 cp/cv; H2O–N2 では ≈1.40 で θ が 17 % 過大)。A/B 用
     int condSonicModel = -1; // 凝縮セルの音速と γ。1: 二相 frozen c²=γ_2φ R_eff T (TP 分岐のみ), 0: 旧 (全蒸気 √(γ_mix R_mix T)),
