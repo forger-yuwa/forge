@@ -144,7 +144,7 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 | 5 | block-DPLUR 対角キャッシュ・占有率 (§4.2-4) | **占有率実験も却下**: `BLOCK_DPLUR_MINBLOCKS` 4 (regs≤128) は不変 44.4/43.9、6 (regs≤85, spill) は 62.9 ms/step。|
 | 5' | (旧 #5 記録) | 対角キャッシュは実装したが **不採用** (0fb8ee73, `blockDPLURDiagCache` 既定 0): 44.0→46.5 ms/step と遅化 (25 floats/cell の保存+4 読込 ≈1.2 GB/step > 省ける gather)。sweep はレイテンシ律速 (占有率 28 %) → `BLOCK_DPLUR_MINBLOCKS` で占有率実験中。次候補: dq の AoS 化 (5 配列→stride 5), nStepInner 5→3 の壁時計比較 (#8) |
 | 6 | 小物 (§4.2-6) | `limiter_d.cu` fill 融合, `gasProperties_d.cu` powf, `convectiveFlux_d.cu` の毎ステップ `cudaMemcpyToSymbol` |
-| 7 | dependentVariables ハイブリッド反転 (§4.2-3) | 実装済 (`thermo_T_from_e_hybrid`, opt-in `physProp.thermoFloat`), 単体検証 PASS (≤1e-8·T)。3D A/B 中 |
+| 7 | dependentVariables ハイブリッド反転 (§4.2-3) | 済 (045f4b5e): 単体検証 PASS (≤1e-8·T)。3D A/B (`thermoFloat: 1`): **38.4 ms/step** (38.44/38.41 vs base 82.41/82.37), 場はノイズ床内 (`cmp_thermofl.txt` vis_turb 1.90e-3, 他 ≤ 床)。既定は 0 のまま (ユーザ判断待ち) |
 | 8 | 陰解法 sweep/CFL の壁時計比較 (§4.2-7) | run_0234 config で 12000 step、同一到達残差までの壁時計 |
 | 9 | 候補 (未着手): メッシュ再番号付け (RCM/Hilbert) で gather の L2 ヒット率改善 | L2 hit 62–75 % の改善余地。変換器側 |
 
@@ -156,6 +156,13 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 - **収束**: 最終バイナリで run_0234 config を 12000 step 再実行 (`run_0410_perf_final_12k`)、`check_convergence.py` VERDICT と
   `wall_pp0.csv` を run_0234 と比較。
 - **標準検証ケース**: case/20.naca_ml node/cell、case/08.bump verify (`verify/run_verification.sh`)、case/16 2D SST 継続。
+- **ローカル回帰 (2026-09-12 実施, RTX 3060, 基準 = 0512823d の native ビルド, 各 300 step 継続, base×2 でノイズ床)**:
+  case/20 `run_perf_regress_cell_slau_explicit` (cell, CPG 層流, 陽解法 RK3, IC run_slau/res_4000) / `run_perf_regress_cell_tpair_explicit`
+  (cell, TP 空気, 陽解法, IC run_tp_air/res_2000) / case/16 `run_0450_perf_regress_node2d_tp` (node 2D TP SST 陰解法, IC run_0213/res_24000) /
+  `run_0451_perf_regress_cell2d_tp` (cell 2D TP SST 陰解法, IC run_0196/res_24000)。new と new+`thermoFloat:1` の全場差はいずれも
+  base×base ノイズと同程度 (P/T/ρ/U/k/ω/ρY ≤ 1.5 倍)。注記: 2D 平面 (naca) で面外速度 Uz が基準 3.7e-10 → 新 2.8e-6 m/s
+  (主流 ~300 m/s の 1e-8, 旧 double 中間演算で打ち消していた z 成分の float 丸め)。物理的影響なし。
+  `run_cmp_node_sst`/`run_cmp_cell_sst` は旧キー `LESorRANS` で現行 config 非互換のため使わず。
 
 ### 6.1 レビュー記録 (codex)
 
@@ -183,5 +190,6 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 
 - `2026-09-12` — 起票。ベースライン計測 (run_0400_perf_baseline @A10G 82.85 ms/step)、nsys/ncu で FP64 律速を同定 (§4.1)。
 - `2026-09-12` — codex plan レビュー (GO-with-changes, M7/m2) を全件採用し §4.2/§4.3/§5.1 を改訂。リミッタ template 化 (−1 ms) と batch1 リテラル修正 (82.85→70.55 ms/step, ノイズ床内) を実測。
-- `2026-09-12` — DPLUR 対角キャッシュ (§4.2-4) は 46.5 ms/step と遅化したため既定 0 (opt-in 記録)。sweep は gather 数でなくレイテンシ律速。
+- `2026-09-12` — DPLUR 対角キャッシュ (§4.2-4) は 46.5 ms/step と遅化したため既定 0 (opt-in 記録)。sweep は gather 数でなくレイテンシ律速。`__launch_bounds__` minBlocks 4/6 も不変/悪化。
+- `2026-09-12` — ハイブリッド温度反転 (`thermoFloat: 1`) で **38.4 ms/step** (累積 82.4→38.4, 2.15 倍)。ローカル回帰 4 ケース (node/cell × CPG/TP × 陽/陰) は全てノイズ床内 (§6)。k/ω・化学種の面ループ融合、未使用 ∇Y の省略、DPLUR/LSQ の `__restrict__` を実装 (A/B 待ち)。sweep 数比較 run_0410–0412 投入。
 - `2026-09-12` — batch2 リテラル修正 67.4 ms/step、thermo float ミラー (SLAU h_mix + 化学種拡散) で **44.0 ms/step** (−47 %)。再プロファイル: block-DPLUR 5 sweep 14.9 (34 %) / dependentVariables 6.6 / SLAU 2.9 / lsqPreGrad 2.8 / k-ω 輸送 3.3 / species_diffusion 1.6 / viscous 1.5 / limiter 1.25。次は DPLUR 対角キャッシュ・占有率、dependentVariables float Newton (単体検証付き)、k/ω 面ループ融合。
