@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `architecture / performance`
-- **status**: `in_progress`
+- **status**: `done`
 - **related_docs**:
   - [`methods/architecture/performance.md`](../../methods/architecture/performance.md) (性能プロファイルと数値精度方針の現在仕様)
   - [`methods/architecture/overview.md`](../../methods/architecture/overview.md)
@@ -11,15 +11,15 @@
 - **related_plans**:
   - [`thermophysics-multicomponent-tpgas.md`](../accepted/thermophysics-multicomponent-tpgas.md) (M6: 輸送係数 FP32 化・cp+h 融合・Rmix キャッシュは実装済。本 plan はその後に残る double 演算が対象)
   - [`gpu-implicit-plan.md`](../accepted/gpu-implicit-plan.md) (block-DPLUR の構造)
-  - [`tooling-cloud-gpu-env.md`](tooling-cloud-gpu-env.md) (AWS g5 環境)
+  - [`tooling-cloud-gpu-env.md`](../active/tooling-cloud-gpu-env.md) (AWS g5 環境)
 - **created**: `2026-09-12`
 - **owner**: `Claude (branch feature/perf-3d-speedup)`
 
 ## 1. 目的
 
 case/16 の 3D node SST 多成分 TP 生産計算 (run_0234 相当, 2.37 M 節点 / 7.04 M 双対面) は A10G で
-**82.85 ms/step** (12000 step ≈ 17 分) かかる。律速を計測で同定し、**収束解を変えずに** 1 step の
-所要時間を段階的に下げる。目標は同一 case で **≤ 40 ms/step (2 倍以上)**。さらに陰解法側
+**82.85 ms/step** (12000 step ≈ 17 分) かかる。律速を計測で同定し、1 step の所要時間を段階的に下げる。**保証範囲は「指定ケース・同一 IC からの継続時間における
+場の非劣化 (§4.3) と速度改善」**であり、収束解の不変は未検証 (基準・最終とも `check_convergence` は NOT CONVERGED のプラトー; codex result-4 m2)。目標は同一 case で **≤ 40 ms/step (2 倍以上)**。さらに陰解法側
 (sweep 数・CFL) の工夫で「収束までの壁時計」も短縮する。
 
 ## 2. スコープ
@@ -111,7 +111,7 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
   診断量 (res_*, limiter_*, dt_local, wall_dist, 勾配 d*d*, 凝縮診断) は除外し、欠落・形状不一致・非有限値は FAIL (`perf_regress.py cmp --noise`, 2026-09-12 codex result-3 m4)。run-to-run ノイズ床 (基準×基準 ≥3 本) は参考値として併記し、ノイズの 2 倍を超えた
   変数は項目別に原因を書く (2D node TP 300 step: ρ 2.3 倍・Ux 2.2 倍 = 絶対 1.2e-6 / 2.4e-6、float 熱力学の系統差)。
   ビット一致は「固定入力に対する単一カーネル出力」にだけ要求する (リミッタ template 化など)。
-- **double 対照 (2026-09-12 追加, §5.1 #13 の決着で導入)**: 絶対基準・ノイズ床の両方で落ちた場は、基準コミットの **double ビルド** (`solver_density_cuda/flowFormat.hpp` の `flow_float/geom_float/flow_float3/geom_float3` を double に変えて別ディレクトリでビルド; SLAU カーネルがレジスタ超過するので `FORGE_CUDA_BLOCKSIZE=128 FORGE_CUDA_BLOCKSIZE_SMALL=128` で実行, RTX 3060 で float の 1.6 倍の時間) を同 IC・同 step で回し、**新バイナリの double 解からの距離が基準バイナリの距離以下なら合格** (`perf_regress.py cmp --truth <double run ラベル>`)。「基準と違う」が「基準より悪い」を意味しない場合 (基準自身が同じだけ float 丸めで double 解からずれている) を扱う。double 解は run-to-run 1e-9 以下で決定論的。距離が基準より大きい場は EXCEED のまま (原因を項目別に書く)。
+- **double 高精度参照 (2026-09-12 追加, §5.1 #13 の決着で導入)**: 絶対基準・ノイズ床の両方で落ちた場は、基準コミットの **double ビルド** (`solver_density_cuda/flowFormat.hpp` の `flow_float/geom_float/flow_float3/geom_float3` を double に変えて別ディレクトリでビルド; SLAU カーネルがレジスタ超過するので `FORGE_CUDA_BLOCKSIZE=128 FORGE_CUDA_BLOCKSIZE_SMALL=128` で実行, RTX 3060 で float の 1.6 倍の時間) を同 IC・同 step で回し、**新バイナリの double 解からの距離が基準バイナリの距離以下なら合格** (`perf_regress.py cmp --truth <double run ラベル>`)。double 解は「真値」ではなく同一入力・同一継続時間に対する**高精度参照** (収束解ではない; codex result-4 m2)。「基準と違う」が「基準より悪い」を意味しない場合 (基準自身が同じだけ float 丸めで double 解からずれている) を扱う。double 解は run-to-run 1e-9 以下で決定論的。距離が基準より大きい場は EXCEED のまま (原因を項目別に書く)。**データ検査が先** (codex result-4 M1): 基準・新版・ノイズ・参照の全ラベルで判定対象の場の欠落・形状不一致・非有限値を数値判定の前に検出し、無条件で終了コード 2 (`tools/test_perf_regress.py` が退行試験 4 件, VERDICT PASS)。
 - **収束と準定常** (codex M5): 最終バイナリで run_0234 config を同 IC から 12000 step 走らせ、基準 run と**両方**が
   `check_convergence.py` で同じ verdict 区分 (全保存量の到達残差が同桁以上) であること、`check_quasisteady.py`
   (pmax/machmax) が両方 STEADY であること、壁 p/p0 の差 ≤ 0.1 % (壁圧の時系列も末尾 2000 step で頭打ち) を必須にする。
@@ -135,7 +135,7 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 3. §4.2-1 リテラル昇格除去: `viscousFlux_d.cu`, `setDT_d.cu`, `convectiveFlux_slau_d.inc.cuh`, `convectiveFlux_common_d.cuh`,
    `convectiveFlux_boundary_d.inc.cuh`, `scalarTransport_d.cu`, `calcGradient_d.cu`, `ransSource_d.cu`, `turbulent_viscosity_d.cu`,
    `limiter_d.cu`, `boundaryCond_d.cu` (順に、各ファイルごとに SASS の DFMA 数と ms/step を確認)。
-4. §4.2-2 化学種拡散: per-cell 前計算カーネル (`species_cell_props_d`: h_s(T_c), D_s^{lam}(T_c,P_c,X_c)) + 面カーネル float 化。
+4. §4.2-2 化学種拡散: 面状態 (Y_f, T_f, P_f) での評価を維持したまま `species_diffusion_d` を `SpeciesThermoF` で float 化 (per-cell 前計算案は codex plan レビュー M1 で却下、離散式を変えない)。
 5. §4.2-2 SLAU TP 面エンタルピー: `thermo_h_mix_f` (float) と `thermo_cph_*_f`。
 6. §4.2-3 `dependentVariables_d` float Newton (config キー付き)。
 7. §4.2-4 block-DPLUR 対角キャッシュ / 占有率 / LU 保存。
@@ -160,8 +160,10 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 | 9 | AoS gather (**不採用で確定**, opt-in 残置) | (a) block-DPLUR の近傍 dq を stride-8 AoS (`blockDPLURDqPack`, 874e54d1) + loop 0 の gather 省略 (dq_old≡0)、(b) 原始量 (ro,Ux,Uy,Uz,P,T) の AoS パック (`mesh.primPack`) を applyBconds 後に組み LSQ 勾配とリミッタが 1 セクタで gather。いずれも同じ値を別レイアウトで読むだけ (ビット同一)。**不採用 (既定 0, opt-in 記録)**: ローカル RTX 3060 の 3D 257k 節点 (`run_0452_perf_bench3d_coarse`, 200 step ×3) で dq パック 22.84/23.15 vs off 22.66/22.72、原始量パック on/off 22.9–23.1 vs 22.8–22.9 ms/step と差なし〜微増。gather は L2 ヒットで、セクタ数削減より追加書込が勝つ。loop 0 の gather 省略のみ残す |
 | 10 | 節点の RCM 再番号付け (**A10G −3.3 %, opt-in で確定**) | `convertGmshToForge` に `mesh.renumber: rcm` (makeMesh 前に nodes と要素 iNodes を並べ替え、`/MESH/RENUMBER_PERM` に new→old を保存; `tools/permute_res_h5.py` で旧番号の res を移植)。ローカル coarse 3D 257k: 帯域 256481→3024、同一変換器の非 RCM と場の差はノイズ級 (k 5.5e-4, vis_turb 8e-4, 他 ≤1.4e-4)、速度 −1〜−4 % (ローカル GPU は別セッションと共有で不安定)。**注意**: 旧 h5 (2026-09-08 以前の変換) とは wall_dist 定義が 6.75 % 違うので比較は同一変換器で。2.37M ローカル RTX 3060 (`run_0455_perf_big_{norcm,rcm}`, run_0234/res_12000 を perm 移植, 100 step ×2): base 177/173 → head 63.9/66.0、RCM 65.0/62.0、RCM+dq 66.1/68.2、RCM+prim 65.6/64.1 ms/step = **RCM・パックとも差なし** (帯域 2369972→12000 でも gather は L2 で吸収済、sweep はレイテンシ律速)。**A10G (`run_0415_perf_rcm_baseline`, 100 step ×2, 同値再現)**: norcm 33.87 / **rcm 32.74 (−3.3 %)** / rcm+dq 35.34 / rcm+prim 33.41 / dq 36.58 ms/step → RCM は小さいが再現する利得、パック 2 種は逆効果 (既定 0 確定)。`mesh.renumber: rcm` は opt-in (既定 none): 節点順が変わるので旧 res の restart は `tools/permute_res_h5.py` (`/MESH/RENUMBER_PERM`) 経由 |
 | 11 | 最終バイナリでの長時間比較と定常性の VERDICT (codex result-2 M1/M3) | **済**: `forge_final` (ソース 9333df5c = ソルバは ac9262e8、sha256 49f5db32…, 入力 sha256 は `run_0416_final_sweep4/INPUT_SHA256.txt`) で run_0416 (12000 step, nStepInner 4, 既定 thermoFloat): **32.62 ms/step** (A10G, クリーン)、check_convergence NOT CONVERGED plateau (基準 run_0234 と同区分: roUy/roK 頭打ち)、check_quasisteady pmax/machmax ALL STEADY、壁 p/p0 時系列 (2000 step 間隔 6 枚) の隣接差 2.2e-3→1.0e-3→5.4e-4→3.3e-4→2.2e-4 (単調減衰、末尾 <1e-3/2000 step = STEADY 判定, `WALL_PP0_SERIES_VERDICT.txt`)、run_0234 最終比 3.1e-6。証拠は `case/16.nozzle_wys/_aws_perf_evidence/run_0416_final_sweep4/`。「収束解不変」は主張しない (§4.3) |
-| 13 | **決着 (2026-09-12)**: node 軸対称 SST TP 等温壁 (case/44 `run_0200_perf_regress_node_axisym_sst_tp`, run_0117/res_24000 から 300 step) の T 差 3.8e-5 (0.03 K @838 K, 燃焼室壁 BL 帯, 基準同士 4.3e-6 の 8 倍) は **基準 (旧 double 昇格コード) 側の float 丸めパターンであり、コード修正なし**。根拠: (1) 行単位二分 (worktree `forge-perf-bisect` @5c1d7455, 5 区画): 再構成 / Thornber / 物性 / SLAU 本体 (β±・χ・ṁ) を double に戻しても同値 (T 3.8〜4.0e-5)、**運動量流束の組み立て 3 行** (`res_roU*_temp = ½(ṁ+|ṁ|)U_L + ½(ṁ−|ṁ|)U_R + p̃_r S`) だけを戻すと消える (T 7e-6)。旧コードは `p̃_r·S` を float に丸めてから double で加算、新コードは FMA で `p̃_r·S` を正確に足す (S5c: 3 行とも厳密 double にしても新コードと同値 = 新コードの方が丸めが少ない)。(2) **double ビルド** (0512823d, `flowFormat.hpp` の typedef を double、`FORGE_CUDA_BLOCKSIZE=128`; run-to-run 5.9e-10) を真値にすると、float 版はどれも BL 帯で T 3.1〜3.7e-5 ずれる: 基準 3.58e-5 / 最終 3.14e-5 / 最終+対角キャッシュ 3.11e-5 / `thermoFloat:0` 3.21e-5 (ρ も 1.53e-5 → 1.30e-5)。**新バイナリは基準より double 解に近い**。(3) `--fmad=false` の基準 (丸めパターンだけ変えた対照) は基準と同値 (T 4.1e-6) → この帯が「あらゆる丸め変化」に敏感なのではなく、`p̃·S` の丸め (1.1 MPa × S の ulp が ṁU と同桁) が効く。判定は `perf_regress.py cmp --truth <double run>` (絶対・ノイズで落ちた場は double 解からの距離が基準以下なら合格) を §4.3 に追加し **PASS (18/18 ×3)**。証拠: `run_0200/bisect_slau_summary.txt`, `cmp_final_truth.txt`。同 case Euler+凝縮 (`run_0201`) と cell 軸対称 TP (case/23) は元から PASS |
+| 13 | **決着 (2026-09-12)**: node 軸対称 SST TP 等温壁 (case/44 `run_0200_perf_regress_node_axisym_sst_tp`, run_0117/res_24000 から 300 step) の T 差 3.8e-5 (0.03 K @838 K, 燃焼室壁 BL 帯, 基準同士 4.3e-6 の 8 倍) は **基準 (旧 double 昇格コード) 側の float 丸めパターンであり、コード修正なし**。根拠: (1) 行単位二分 (worktree `forge-perf-bisect` @5c1d7455, 5 区画): 再構成 / Thornber / 物性 / SLAU 本体 (β±・χ・ṁ) を double に戻しても同値 (T 3.8〜4.0e-5)、**運動量流束の組み立て 3 行** (`res_roU*_temp = ½(ṁ+|ṁ|)U_L + ½(ṁ−|ṁ|)U_R + p̃_r S`) だけを戻すと消える (T 7e-6)。旧コードは `p̃_r·S` を float に丸めてから double で加算、新コードは FMA で `p̃_r·S` を正確に足す (S5c: 3 行とも厳密 double にしても新コードと同値 = 新コードの方が丸めが少ない)。(2) **double ビルド** (0512823d, `flowFormat.hpp` の typedef を double、`FORGE_CUDA_BLOCKSIZE=128`; run-to-run 5.9e-10) を高精度参照にすると、float 版はどれも BL 帯で T 3.1〜3.7e-5 ずれる: 基準 3.58e-5 / 最終 3.14e-5 / 最終+対角キャッシュ 3.11e-5 / `thermoFloat:0` 3.21e-5 (ρ も 1.53e-5 → 1.30e-5)。**新バイナリは基準より double 解に近い**。(3) `--fmad=false` の基準 (丸めパターンだけ変えた対照) は基準と同値 (T 4.1e-6) → この帯が「あらゆる丸め変化」に敏感なのではなく、`p̃·S` の丸め (1.1 MPa × S の ulp が ṁU と同桁) が効く。判定は `perf_regress.py cmp --truth <double run>` (絶対・ノイズで落ちた場は double 解からの距離が基準以下なら合格) を §4.3 に追加し **PASS (18/18 ×3)**。証拠: `run_0200/bisect_slau_summary.txt`, `cmp_final_truth.txt`。同 case Euler+凝縮 (`run_0201`) と cell 軸対称 TP (case/23) は元から PASS |
 | 12 | line-implicit 経路の回帰 (codex result-2 M4) | **済**: case/39 `run_0100_perf_regress_node_lineimplicit_dualtime` (node 周期 1.58 M 節点・dual-time 20 サブ反復・lineImplicit 1・lineKFreeze 1・SST-DDES, run_diag_lineimp2_frz2/res_100 から 20 step): 基準 ×2 vs 最終 **PASS 18/18** (ノイズ比判定, `perf_regress.py cmp --noise`)、1533→1365 ms/step |
+| 14 | 回帰ツールのデータ検査 (codex result-4 M1) | **済**: `perf_regress.py cmp` は基準・新版・`--noise`・`--truth` の全ラベルについて場の欠落・形状不一致・非有限値 (基準自身も) を数値判定の前に検査し終了コード 2 (inf をノイズ床/参照距離に流さない)。退行試験 `tools/test_perf_regress.py` (正常 PASS / ノイズ欠落 T + 新版 T 100 倍 / 基準 ro 形状違い / 新版 NaN) VERDICT PASS。修正後に全ローカル回帰を再集計: naca cell CPG 陽 / naca cell TP 陽 (基準 4 本) / node 2D TP (基準 5 本, final_r1/r2/new_tf) / cell 2D TP / node 2D 凝縮 / TG 周期 dual-time / cell 軸対称 TP WALE / node 軸対称 Euler 凝縮 / node line-implicit / node 軸対称 SST TP (`--truth base_dbl_r1`): **全て PASS、DATA CHECK 不備 0** |
+| 15 | 保証範囲の表現統一 (codex result-4 m2) | **済**: §1・§4.3・§8 を「指定ケース・継続時間における非劣化と速度改善」に統一、収束解不変は未検証と明記、double 解は「高精度参照」(真値と呼ばない)、§5 手順 4 を実装どおり面状態評価に修正 |
 
 ## 6. 検証
 
@@ -187,7 +189,7 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
   2026-09-12 再集計 — node 2D TP (基準 5 本) / cell 2D TP / node 2D 凝縮 / naca cell CPG 陽 / naca cell TP 陽 (基準 4 本; ρ がノイズの 2.0 倍 = 2.2e-5) /
   cell 軸対称 TP WALE / node 周期 dual-time (速度は base×base 0.28 の減衰乱流ばらつきでノイズ比判定) / node line-implicit: **全て PASS**。
   温度反転の単体試験 (`tools/test_thermo_float.cpp`): 誤差 ≤1.0e-8·T、float 格納 roe の 10 往復ドリフトは従来 double 反転と同値 (float 格納固有, 7e-8〜4.4e-7·T)。
-- **node 軸対称 SST TP 等温壁 (case/44 `run_0200`, 2026-09-12, codex result-3 M2)**: 絶対・ノイズ判定では T 3.8e-5 / ρ 1.7e-5 / 音速 2.0e-5 / μ 2.6e-5 が EXCEED (燃焼室壁 BL 帯 ~220 節点)。SLAU 行単位二分で運動量流束組み立て 3 行の丸め順 (旧: `p̃·S` を float 丸め後に double 加算 / 新: FMA) と特定し、double ビルドを真値にした距離で **新 (T 3.14e-5) < 基準 (3.58e-5)**、`cmp --noise base_r2 --truth base_dbl_r1` で final / final_dcache / final_tf0 とも **PASS 18/18** (§5.1 #13, 証拠 `run_0200/bisect_slau_summary.txt`, `cmp_final_truth.txt`)。同 case Euler+平衡凝縮 `run_0201` は 30/30 PASS (絶対基準)。
+- **node 軸対称 SST TP 等温壁 (case/44 `run_0200`, 2026-09-12, codex result-3 M2)**: 絶対・ノイズ判定では T 3.8e-5 / ρ 1.7e-5 / 音速 2.0e-5 / μ 2.6e-5 が EXCEED (燃焼室壁 BL 帯 ~220 節点)。SLAU 行単位二分で運動量流束組み立て 3 行の丸め順 (旧: `p̃·S` を float 丸め後に double 加算 / 新: FMA) と特定し、double ビルド (高精度参照) からの距離で **新 (T 3.14e-5) < 基準 (3.58e-5)**、`cmp --noise base_r2 --truth base_dbl_r1` で final / final_dcache / final_tf0 とも **PASS 18/18** (§5.1 #13, 証拠 `run_0200/bisect_slau_summary.txt`, `cmp_final_truth.txt`)。同 case Euler+平衡凝縮 `run_0201` は 30/30 PASS (絶対基準)。
 
 ### 6.1 レビュー記録 (codex)
 
@@ -195,6 +197,8 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 | --- | --- | --- | --- | --- |
 | result | `2026-09-12` | [`notes/reviews/2026-09-12-performance-3d-node-sst-speedup-result.md`](../../notes/reviews/2026-09-12-performance-3d-node-sst-speedup-result.md) | **NO-GO**, C0/M5/m2 | M1 採用 (WALE/SIGMA の float pow を double に戻す, ac9262e8) / M2 採用 (研磨を収束まで最大 3 段, 単体試験を本番 12 反復・冷間開始・float 組成・再格納ドリフト込みに: errHyb ≤3.4e-10·T PASS) / M3 採用 (基準 5 本でノイズ再計測、§4.3 を絶対値基準に改訂、「全てノイズ床内」撤回) / M4 採用 (「収束解不変」撤回、同一プラトーの有限時間差と壁圧時系列で記述) / M5 採用 (AWS 証拠を `case/16.nozzle_wys/_aws_perf_evidence/` に回収: bench ログ・cmp・VERDICT・壁圧・残差 CSV・バイナリ/メッシュ sha256; 周期/軸対称/凝縮の回帰は §6 に追記) / m6 採用 (bench の上書き拒否、手順書を実装に合わせ更新) / m7 採用 (thermophysics.md / performance.md / §2 / §5.1 / §8 / README 索引を整理)。修正後に result 段を再実行する |
 | result (2 回目) | `2026-09-12` | [`notes/reviews/2026-09-12-performance-3d-node-sst-speedup-result-2.md`](../../notes/reviews/2026-09-12-performance-3d-node-sst-speedup-result-2.md) | **NO-GO**, C0/M4/m2 | M1 採用 (recommended-settings の「収束解不変」撤回, 未収束区分の明記) / M2 採用 (速度の正規化を \|U\| 尺度に、絶対基準 or 2×ノイズ床の判定に確定、全回帰を再集計し EXCEED 0) / M3 採用 (最終バイナリ run_0416 + sha256 + 壁圧時系列 VERDICT) / M4 採用 (line-implicit 回帰 PASS) / m5 採用 (float 格納往復ドリフト試験, double 反転と同値) / m6 採用 (performance.md 研磨段数・判定基準, plans/README, §5.1 見出し整理)。3 回目を実行 |
+| result (3 回目) | `2026-09-12` | [`notes/reviews/2026-09-12-performance-3d-node-sst-speedup-result-3.md`](../../notes/reviews/2026-09-12-performance-3d-node-sst-speedup-result-3.md) | **NO-GO**, C0/M2/m3 | M1 採用 (最終バイナリ run_0416 の証拠回収: 生ログ・INPUT_SHA256・基準 run_0234 の残差/準定常 VERDICT を `_aws_perf_evidence/ref_run_0234_evidence/` に, §5.1 #11) / M2 採用 (node 軸対称 SST TP 回帰 case/44 run_0200/0201 を追加、T 3.8e-5 は #13 で二分→double 参照で決着) / m3 採用 (反転試験のドリフト集計を float 格納/ハイブリッド/double の 3 経路で同一量・同一単位に) / m4 採用 (`perf_regress.py cmp` の欠落・形状不一致・非有限値を FAIL に、終了コード非ゼロ) / m5 採用 (performance.md / thermophysics.md / index 表の記述を実装値に統一)。4 回目を実行 |
+| result (4 回目) | `2026-09-12` | [`notes/reviews/2026-09-12-performance-3d-node-sst-speedup-result-4.md`](../../notes/reviews/2026-09-12-performance-3d-node-sst-speedup-result-4.md) | **GO-with-changes**, C0/M1/m2 | M1 採用 (データ検査を数値判定の前に分離し無条件で終了 2、退行試験 `test_perf_regress.py` 追加、全回帰を再集計: §5.1 #14) / m2 採用 (§1・§4.3・§8 の保証範囲を「継続時間の非劣化」に統一、double は「高精度参照」、§5 手順 4 の却下案を修正: #15) / m3 採用 (本表に result-3 の行と採否を追記)。#13 (SLAU 現実装維持) は支持。codex の推奨どおり 1→2→3 を修正して `accepted/` へ移動 (再レビューなし; 修正は文書・ツール検査のみで数値結果は不変) |
 | plan | `2026-09-12` | [`notes/reviews/2026-09-12-performance-3d-node-sst-speedup-plan.md`](../../notes/reviews/2026-09-12-performance-3d-node-sst-speedup-plan.md) | GO-with-changes, C0/M7/m2 | M1 採用 (セル前計算→面状態 float 評価に変更, §4.2-2) / M2 採用 (Newton float は後段+単体検証, §5.1 #7) / M3 採用 (ノイズ床基準, §4.3) / M4 採用 (PROFILE=0・交互実行, §4.3, bench_steps.sh) / M5 採用 (両 run PASS+STEADY+壁圧, §4.3) / M6 採用 (float point 経路限定+回帰, §4.2-4) / M7 採用 (専用 run・削除撤去, §5.1 #0) / m8 採用 (M6 関係を §4.1 に明記) / m9 採用 (1/64, launch_bounds 記述訂正) |
 
 ## 7. 影響範囲
@@ -208,10 +212,10 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 
 ## 8. 完了条件
 
-- [ ] `methods/architecture/performance.md` を作成し index に登録
-- [ ] §5.1 #1–#10 の実装と A/B (§4.3 の判定) 完了 (#5/#9 は不採用で確定、#10 RCM は opt-in)
-- [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録
-- [ ] `status: done`、§9 変更ログ、`plans/accepted/` へ移動、`plans/README.md` 同期
+- [x] `methods/architecture/performance.md` を作成し index に登録
+- [x] §5.1 #1–#10 の実装と A/B (§4.3 の判定) 完了 (#5/#9 は不採用で確定、#10 RCM は opt-in)。保証範囲は「指定ケース・同一 IC からの継続時間における場の非劣化 (絶対基準 / 2×ノイズ床 / double 高精度参照との距離) と速度改善」。収束解の不変は未検証 (基準・最終とも NOT CONVERGED プラトー)
+- [x] codex レビュー (`plan` 1 回 / `result` 4 回) を §6.1 に記録、Critical/Major は全件採用
+- [x] `status: done`、§9 変更ログ、`plans/accepted/` へ移動、`plans/README.md` 同期
 
 ## 9. 変更ログ
 
@@ -225,4 +229,5 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 - `2026-09-12` — 12000 step 本 run (run_0410/0411) は run_0234 と壁 p/p0 差 ≤1e-5・STEADY・同 verdict 区分 (§4.3)。面ループ融合+∇Y 省略+restrict で **35.7 ms/step** (fuse3)。sweep 数比較: nStepInner 3 は 5 と残差経路一致で 34.6 ms/step、2 は発散 (§5.1 #8)。累積: 82.4 → 35.7 (2.3 倍)、nStepInner 3 併用で ≈31.5 ms/step (2.6 倍)。
 - `2026-09-12` — ハイブリッド温度反転 (`thermoFloat: 1`) で **38.4 ms/step** (累積 82.4→38.4, 2.15 倍)。ローカル回帰 4 ケース (node/cell × CPG/TP × 陽/陰) は全てノイズ床内 (§6)。k/ω・化学種の面ループ融合、未使用 ∇Y の省略、DPLUR/LSQ の `__restrict__` を実装 (A/B 待ち)。sweep 数比較 run_0410–0412 投入。
 - `2026-09-12` — batch2 リテラル修正 67.4 ms/step、thermo float ミラー (SLAU h_mix + 化学種拡散) で **44.0 ms/step** (−47 %)。再プロファイル: block-DPLUR 5 sweep 14.9 (34 %) / dependentVariables 6.6 / SLAU 2.9 / lsqPreGrad 2.8 / k-ω 輸送 3.3 / species_diffusion 1.6 / viscous 1.5 / limiter 1.25。次は DPLUR 対角キャッシュ・占有率、dependentVariables float Newton (単体検証付き)、k/ω 面ループ融合。
-- `2026-09-12` — §5.1 #13 決着: case/44 run_0200 の T 3.8e-5 は SLAU 運動量流束組み立ての丸め順 (旧 double 昇格コード側の `p̃·S` 先行丸め)。double ビルド (typedef 差し替え, blocksize 128) を真値にすると新バイナリの方が近い (T 3.14e-5 vs 3.58e-5)。`perf_regress.py cmp --truth` を追加し §4.3 に double 対照を明文化、コード変更なし (SLAU は全 float のまま)。
+- `2026-09-12` — §5.1 #13 決着: case/44 run_0200 の T 3.8e-5 は SLAU 運動量流束組み立ての丸め順 (旧 double 昇格コード側の `p̃·S` 先行丸め)。double ビルド (typedef 差し替え, blocksize 128) を高精度参照にすると新バイナリの方が近い (T 3.14e-5 vs 3.58e-5)。`perf_regress.py cmp --truth` を追加し §4.3 に double 対照を明文化、コード変更なし (SLAU は全 float のまま)。
+- `2026-09-12` — codex result 4 回目 GO-with-changes (M1/m2) を全件採用: `perf_regress.py cmp` のデータ検査を数値判定の前に分離 (退行試験 4 件 PASS)、全ローカル回帰を再集計 (全 PASS)、保証範囲の表現を「継続時間の非劣化」に統一。**status done、`plans/accepted/` へ移動**。最終: A10G 82.85 → 32.62 ms/step (推奨レシピ nStepInner 4, thermoFloat 1; 2.54 倍)。

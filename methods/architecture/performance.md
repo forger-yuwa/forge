@@ -4,7 +4,7 @@
 
 `solver_density_cuda` の 1 ステップがどこで時間を使っているか (現状のプロファイル)、計測の手順、
 そしてカーネル内の数値精度 (float32 / double) をどう使い分けるかの現在仕様をまとめる。
-設計判断の経緯は [`plans/active/performance-3d-node-sst-speedup.md`](../../plans/active/performance-3d-node-sst-speedup.md)。
+設計判断の経緯は [`plans/accepted/performance-3d-node-sst-speedup.md`](../../plans/accepted/performance-3d-node-sst-speedup.md)。
 
 ## 2. 計測手順 (native)
 
@@ -66,4 +66,4 @@
 - 面流束の `atomicAdd` 蓄積のため同一バイナリでも全場はビット一致しない。精度変更の採否は場ごとに「**絶対基準** (場のスケール正規化最大差:
   ρ/P/T/ρY ≤1e-5、速度 [|U| 尺度]/エネルギー/k/ω ≤1e-4、μt ≤1e-2) **または** 基準バイナリ同士の run-to-run ノイズ床の 2 倍以内」で判定する
   (`tools/perf_regress.py cmp --noise`; 欠落・形状不一致・非有限値は FAIL、勾配・診断量は除外。判定基準は plan §4.3)。
-  両方で落ちた場は **double ビルド** (`flowFormat.hpp` の typedef を double にした基準コミット, `FORGE_CUDA_BLOCKSIZE=128` で実行) を真値にし、新バイナリの距離が基準以下なら合格 (`cmp --truth`)。例: 等温壁境界層の T は float 版がどれも double 解から ~3.5e-5 ずれ、旧コードの運動量流束組み立て (`p̃·S` を float 丸め後に加算) より FMA の新コードの方が近い (case/44 run_0200, plan §5.1 #13)。
+  両方で落ちた場は **double ビルド** (`flowFormat.hpp` の typedef を double にした基準コミット, `FORGE_CUDA_BLOCKSIZE=128` で実行) を**高精度参照** (同一入力・同一継続時間; 収束解ではない) にし、新バイナリの距離が基準以下なら合格 (`cmp --truth`; 欠落・形状不一致・非有限値は数値判定の前に検出して終了コード 2, `tools/test_perf_regress.py`)。例: 等温壁境界層の T は float 版がどれも double 解から ~3.5e-5 ずれ、旧コードの運動量流束組み立て (`p̃·S` を float 丸め後に加算) より FMA の新コードの方が近い (case/44 run_0200, plan §5.1 #13)。

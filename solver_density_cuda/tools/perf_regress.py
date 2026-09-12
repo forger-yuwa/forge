@@ -109,6 +109,24 @@ def cmp(a):
     同じだけ double 解からずれている場合。2026-09-12 case/44 run_0200: 等温壁 BL の T は float 版がどれも double 解から 3.1〜3.7e-5)。"""
     cfg = read_cfg(a.dst); n = int(re.search(r"nStepOuter\s*:\s*(\d+)", cfg).group(1))
     ref = h5py.File(os.path.join(a.dst, a.ref, "res_%d.h5" % n), "r")["VALUE"]
+    # データ不備の事前検査 (codex result-4 M1): 基準・新版・ノイズ・double 対照の全ラベルについて、判定対象の場の欠落・形状不一致・
+    # 非有限値 (基準自身の非有限値も) を数値判定の **前** に検出し、無条件で終了コード 2。inf を許容差やノイズ床に流し込まない。
+    keys = [k for k in sorted(ref.keys()) if category(k) is not None]
+    problems = []
+    for k in keys:
+        if int((~np.isfinite(ref[k][...])).sum()) > 0: problems.append("%s: NONFINITE in ref %s" % (k, a.ref))
+    for lab in list(a.labels) + list(a.noise or []) + ([a.truth] if a.truth else []):
+        path = os.path.join(a.dst, lab, "res_%d.h5" % n)
+        if not os.path.exists(path): problems.append("%s: MISSING file" % lab); continue
+        g = h5py.File(path, "r")["VALUE"]
+        for k in keys:
+            if k not in g: problems.append("%s: MISSING field %s" % (lab, k))
+            elif g[k].shape != ref[k].shape: problems.append("%s: SHAPE %s %s vs ref %s" % (lab, k, g[k].shape, ref[k].shape))
+            elif int((~np.isfinite(g[k][...])).sum()) > 0: problems.append("%s: NONFINITE %s" % (lab, k))
+    if problems:
+        print("--- DATA CHECK FAILED (%d problems); no numeric verdict" % len(problems))
+        for q in problems: print("  " + q)
+        sys.exit(2)
     truth_ref = {}
     if a.truth:
         truth = h5py.File(os.path.join(a.dst, a.truth, "res_%d.h5" % n), "r")["VALUE"]

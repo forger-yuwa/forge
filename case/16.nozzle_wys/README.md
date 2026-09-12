@@ -60,7 +60,7 @@ Wyslouzil et al., *J. Chem. Phys.* **113**, 7317 (2000)
 exit Mach の単調序列 (非粘性 1.99 > 層流 1.94 > 2D乱流 1.88 > 3D乱流 1.53) は
 境界層変位による有効面積減少として物理的に整合。中心線静温はいずれも全温 293 K 以下。
 
-### 速度計測 run (2026-09-12, branch `feature/perf-3d-speedup`, AWS `~/forge-perf/case/16.nozzle_wys`, plan [performance-3d-node-sst-speedup](../../plans/active/performance-3d-node-sst-speedup.md))
+### 速度計測 run (2026-09-12, branch `feature/perf-3d-speedup`, AWS `~/forge-perf/case/16.nozzle_wys`, plan [performance-3d-node-sst-speedup](../../plans/accepted/performance-3d-node-sst-speedup.md))
 
 | run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
 | --- | --- | --- | --- |
