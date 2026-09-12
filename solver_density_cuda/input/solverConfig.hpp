@@ -86,10 +86,13 @@ public:
     int blockDPLURDiagCache = 0;
     // block-DPLUR sweep の近傍 dq gather を stride-8 AoS バッファから読む (5 セクタ→1 セクタ)。0 で SoA 5 配列 (従来)。
     // 結果はビット同一 (同じ値を別レイアウトで読むだけ)。line-implicit / node 周期では自動で off。
-    int blockDPLURDqPack = 1;
+    // **既定 0**: RTX 3060 の 3D 257k 節点で差なし (22.8 vs 22.9 ms/step, 2026-09-12)。gather は L2 に乗っており
+    // セクタ数削減が効かない。opt-in 記録用。
+    int blockDPLURDqPack = 0;
     // 原始量 (ro,Ux,Uy,Uz,P,T) の AoS パックを applyBconds 後に組み、LSQ 勾配 (gradLSQ==2) とリミッタの近傍 gather が
-    // 1 セクタで読む (mesh.primPack, 既定 1, 0 で従来の 6 配列 gather)。値は同じなのでビット同一。
-    int primPack = 1;
+    // 1 セクタで読む (mesh.primPack, 0 で従来の 6 配列 gather)。値は同じなのでビット同一。
+    // **既定 0**: 3D 257k 節点 (RTX 3060) で差なし (パック構築の書込が相殺)。opt-in 記録用。
+    int primPack = 0;
                                     // 残差/状態は float のまま、Jacobian 構築+5×5 solve のみ double 化する混合精度
                                     // (iterative refinement)。軸対称 近軸の float 陰解固着 (Uy が −15 でなく
                                     // −0.6 固着) を根治するが double は遅い (RTX で ~×2.6)。詳細:
