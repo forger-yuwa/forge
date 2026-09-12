@@ -214,4 +214,5 @@ laminar chemistry (セル平均で Arrhenius を評価) では自着火安定化
   (反応離脱は不変)。CUDA 13 (CCCL 3) で `thrust::identity` が消えたので自前述語に (da44f74c)。**AWS g5 (44.222.71.7, `~/forge-chem`,
   native build `.build-native/relwithdebinfo`, `build` はシンボリックリンク; `/home/sano/work/...` の絶対パスもリンクで解決)** で
   `run_0111_dt_c7_xifix` (1045 K, 1500 step) を検証中。OK なら T_c スイープを AWS で回す。
+- `2026-09-12 (18)` — **スイープ script の couple 5 残り**: `run_tc_sweep.sh` は couple 5 時代に書いたまま `--couple 5` を渡していた (run_0110 と AWS の旧 run_0112/0113 は couple 5 で無効; run_0112 は平均 T が PDF 診断 T より −200 K で気付いた)。`--couple 7` に修正 (commit 本)、AWS の polite ランチャー (30 分毎に GPU 空きを確認して 1 本ずつ) で 1045/1030/1060/1015/1075 K を再投入 (run_0112–0116)。教訓: 投入直後に `cmcQInit_d: ... couple=N` のログ行を確認する。
 
