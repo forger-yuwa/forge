@@ -746,10 +746,10 @@ void speciesTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
         // S3: convectiveFlux が書いた同一 face 組成で移流 (energy 流束と整合)。diag は 1 次のまま。
         speciesAdvectionFaceY_d_wrapper(cfg, cuda_cfg, msh, var);
     } else {
-        for (int s = 0; s < var.nSpeciesRegistered; s++) {
-            const ScalarTransportDesc desc = buildSpeciesDesc(var, s);
-            scalarTransportResidual_d(cfg, cuda_cfg, msh, var, desc);
-        }
+        // 化学種の 1 次風上移流を最大 4 種ずつ 1 面ループで融合 (massflux・ρ の読みを共有)。
+        std::vector<ScalarTransportDesc> descs;
+        for (int s = 0; s < var.nSpeciesRegistered; s++) descs.push_back(buildSpeciesDesc(var, s));
+        scalarTransportResidualMulti_d(cfg, cuda_cfg, msh, var, descs.data(), (int)descs.size());
     }
 
     // M4: 粘性ケースのみ Fick 拡散 + ΣJ=0 補正 + エンタルピー拡散 (res_roe へ加算)。

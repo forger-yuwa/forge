@@ -137,9 +137,8 @@ void ransTransport_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& ms
 
     const auto scalar_descs = buildScalarDescs(var, cfg, cuda_cfg, msh.nCells);
 
-    for (const auto& desc : scalar_descs) {
-        scalarTransportResidual_d(cfg, cuda_cfg, msh, var, desc);
-    }
+    // k/ω を 1 面ループで融合 (面幾何・massflux・μ の読みを共有)。面ごとの式は単一版と同一。
+    scalarTransportResidualMulti_d(cfg, cuda_cfg, msh, var, scalar_descs.data(), 2);
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

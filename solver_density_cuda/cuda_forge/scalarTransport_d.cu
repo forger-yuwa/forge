@@ -1,4 +1,5 @@
 #include "scalarTransport_d.cuh"
+#include <algorithm>
 
 namespace {
 
@@ -137,6 +138,92 @@ __global__ void scalar_diffusion_first_order_d(
     }
 }
 
+// ---- 複数スカラー融合版 (N ≤ SCALAR_MULTI_MAX)。面ごとの式は単一版と同一 ----
+struct MultiScalarPtrs {
+    flow_float* phi[SCALAR_MULTI_MAX];
+    flow_float* res[SCALAR_MULTI_MAX];
+    flow_float* diag[SCALAR_MULTI_MAX];
+    flow_float  sigma[SCALAR_MULTI_MAX];
+    flow_float  sigma2[SCALAR_MULTI_MAX];
+    flow_float* F1[SCALAR_MULTI_MAX];
+    int         diffusion[SCALAR_MULTI_MAX];
+};
+
+template<int N>
+__global__ void scalar_advection_multi_d(
+    geom_int nCells, geom_int nNormalHaloPlanes, int isNode,
+    geom_int* normal_halo_planes, geom_int* plane_cells,
+    flow_float* ro, flow_float* massflux, MultiScalarPtrs P)
+{
+    geom_int ih = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ih >= nNormalHaloPlanes) return;
+    const geom_int ip = normal_halo_planes[ih];
+    const geom_int ic0 = plane_cells[2 * ip + 0];
+    const geom_int ic1 = plane_cells[2 * ip + 1];
+    const flow_float mdot = massflux[ip];
+    const bool ext_is_self = (isNode != 0 && ic1 >= nCells);   // node 境界半割面: ghost を読まず ic0 値
+    const bool in0 = (ic0 < nCells), in1 = (ic1 < nCells);
+    const flow_float d0 = max(mdot, static_cast<flow_float>(0.0)) / max(ro[ic0], static_cast<flow_float>(1.0e-30));
+    const flow_float d1 = max(-mdot, static_cast<flow_float>(0.0)) / max(ro[ic1], static_cast<flow_float>(1.0e-30));
+    #pragma unroll
+    for (int s = 0; s < N; ++s) {
+        const flow_float p0 = P.phi[s][ic0];
+        const flow_float phi_ext = ext_is_self ? p0 : P.phi[s][ic1];
+        const flow_float flux = mdot * ((mdot >= 0.0f) ? p0 : phi_ext);
+        if (in0) { atomicAdd(&P.res[s][ic0], -flux); atomicAdd(&P.diag[s][ic0], d0); }
+        if (in1) { atomicAdd(&P.res[s][ic1],  flux); atomicAdd(&P.diag[s][ic1], d1); }
+    }
+}
+
+template<int N>
+__global__ void scalar_diffusion_multi_d(
+    geom_int nCells, geom_int nNormalHaloPlanes, int isNode,
+    geom_int* normal_halo_planes, geom_int* plane_cells,
+    geom_float* ccx, geom_float* ccy, geom_float* ccz,
+    geom_float* fx, geom_float* sx, geom_float* sy, geom_float* sz, geom_float* ss,
+    flow_float* ro, flow_float* vis_lam, flow_float* vis_turb, MultiScalarPtrs P)
+{
+    geom_int ih = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ih >= nNormalHaloPlanes) return;
+    const geom_int ip = normal_halo_planes[ih];
+    const geom_int ic0 = plane_cells[2 * ip + 0];
+    const geom_int ic1 = plane_cells[2 * ip + 1];
+    if (isNode != 0 && (ic0 >= nCells || ic1 >= nCells)) return;   // node 境界半割面は skip (単一版と同じ)
+    const geom_float f = fx[ip];
+    const geom_float sxx = sx[ip], syy = sy[ip], szz = sz[ip], sss = ss[ip];
+    const flow_float dcc_x = ccx[ic1] - ccx[ic0];
+    const flow_float dcc_y = ccy[ic1] - ccy[ic0];
+    const flow_float dcc_z = ccz[ic1] - ccz[ic0];
+    const flow_float dcc = sqrt(dcc_x * dcc_x + dcc_y * dcc_y + dcc_z * dcc_z);
+    const flow_float denom = dcc_x * sxx + dcc_y * syy + dcc_z * szz;
+    const flow_float denom_floor = static_cast<flow_float>(1.0e-6) * dcc * sss;
+    const flow_float safe_denom = (abs(denom) < denom_floor) ? ((denom >= 0.0f) ? denom_floor : -denom_floor) : denom;
+    const flow_float delta = dcc * sss * sss / safe_denom;
+    const flow_float vl0 = vis_lam[ic0], vl1 = vis_lam[ic1];
+    const flow_float vt0 = max(vis_turb[ic0], static_cast<flow_float>(0.0));
+    const flow_float vt1 = max(vis_turb[ic1], static_cast<flow_float>(0.0));
+    const flow_float inv_ro0 = static_cast<flow_float>(1.0) / max(ro[ic0], static_cast<flow_float>(1.0e-30));
+    const flow_float inv_ro1 = static_cast<flow_float>(1.0) / max(ro[ic1], static_cast<flow_float>(1.0e-30));
+    const flow_float geo = fabs(delta) / max(dcc, static_cast<flow_float>(1.0e-30));
+    #pragma unroll
+    for (int s = 0; s < N; ++s) {
+        if (!P.diffusion[s]) continue;
+        const flow_float* F1b = P.F1[s];
+        const flow_float F1a = (F1b != nullptr) ? F1b[(ic0 < nCells) ? ic0 : ic1] : static_cast<flow_float>(1.0);
+        const flow_float F1c = (F1b != nullptr) ? F1b[(ic1 < nCells) ? ic1 : ic0] : static_cast<flow_float>(1.0);
+        const flow_float sig0 = (F1b != nullptr) ? (F1a * P.sigma[s] + (static_cast<flow_float>(1.0) - F1a) * P.sigma2[s]) : P.sigma[s];
+        const flow_float sig1 = (F1b != nullptr) ? (F1c * P.sigma[s] + (static_cast<flow_float>(1.0) - F1c) * P.sigma2[s]) : P.sigma[s];
+        const flow_float mu0 = vl0 + sig0 * vt0;
+        const flow_float mu1 = vl1 + sig1 * vt1;
+        const flow_float mu_face = f * mu0 + (1.0f - f) * mu1;
+        const flow_float dphi = P.phi[s][ic1] - P.phi[s][ic0];
+        const flow_float flux = mu_face * (dphi / dcc) * delta;
+        const flow_float diag_face = mu_face * geo;
+        atomicAdd(&P.res[s][ic0], flux);   atomicAdd(&P.diag[s][ic0], diag_face * inv_ro0);
+        atomicAdd(&P.res[s][ic1], -flux);  atomicAdd(&P.diag[s][ic1], diag_face * inv_ro1);
+    }
+}
+
 __global__ void runge_kutta_exp_scalar_4th_d(
     int loop,
     flow_float coef_DT,
@@ -251,6 +338,48 @@ void scalarTransportResidual_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
             desc.transport_diag,
             desc.sigma2,
             desc.F1);
+    }
+}
+
+void scalarTransportResidualMulti_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
+                                    const ScalarTransportDesc* descs, int n)
+{
+    if (n <= 0) return;
+    if (n > SCALAR_MULTI_MAX) {
+        // 4 本ずつ分割
+        for (int s = 0; s < n; s += SCALAR_MULTI_MAX)
+            scalarTransportResidualMulti_d(cfg, cuda_cfg, msh, var, descs + s, std::min(n - s, SCALAR_MULTI_MAX));
+        return;
+    }
+    dim3 dimGrid_normal_halo = dim3(ceil(msh.nNormal_halo_Planes / (flow_float)cuda_cfg.blocksize));
+    const int isNode = (cfg.discretization == "node") ? 1 : 0;
+    MultiScalarPtrs P{};
+    bool anyDiff = false;
+    for (int s = 0; s < n; ++s) {
+        P.phi[s] = descs[s].phi; P.res[s] = descs[s].res_rho_phi; P.diag[s] = descs[s].transport_diag;
+        P.sigma[s] = descs[s].sigma; P.sigma2[s] = descs[s].sigma2; P.F1[s] = descs[s].F1;
+        P.diffusion[s] = (cfg.scalarDiffusion == 1 && descs[s].diffusion == 1) ? 1 : 0;
+        anyDiff = anyDiff || (P.diffusion[s] != 0);
+    }
+    #define FORGE_SCALAR_ADV_ARGS msh.nCells, msh.nNormal_halo_Planes, isNode, msh.normal_halo_planes_d, msh.map_plane_cells_d, var.c_d["ro"], var.p_d["massflux"], P
+    switch (n) {
+        case 1: scalar_advection_multi_d<1><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_ADV_ARGS); break;
+        case 2: scalar_advection_multi_d<2><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_ADV_ARGS); break;
+        case 3: scalar_advection_multi_d<3><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_ADV_ARGS); break;
+        default: scalar_advection_multi_d<4><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_ADV_ARGS); break;
+    }
+    #undef FORGE_SCALAR_ADV_ARGS
+    if (anyDiff) {
+        #define FORGE_SCALAR_DIFF_ARGS msh.nCells, msh.nNormal_halo_Planes, isNode, msh.normal_halo_planes_d, msh.map_plane_cells_d, \
+            var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"], var.p_d["fx"], var.p_d["sx"], var.p_d["sy"], var.p_d["sz"], var.p_d["ss"], \
+            var.c_d["ro"], var.c_d["vis_lam"], var.c_d["vis_turb"], P
+        switch (n) {
+            case 1: scalar_diffusion_multi_d<1><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_DIFF_ARGS); break;
+            case 2: scalar_diffusion_multi_d<2><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_DIFF_ARGS); break;
+            case 3: scalar_diffusion_multi_d<3><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_DIFF_ARGS); break;
+            default: scalar_diffusion_multi_d<4><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_DIFF_ARGS); break;
+        }
+        #undef FORGE_SCALAR_DIFF_ARGS
     }
 }
 
