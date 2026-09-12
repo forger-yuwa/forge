@@ -172,6 +172,12 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
   base×base ノイズと同程度 (P/T/ρ/U/k/ω/ρY ≤ 1.5 倍)。注記: 2D 平面 (naca) で面外速度 Uz が基準 3.7e-10 → 新 2.8e-6 m/s
   (主流 ~300 m/s の 1e-8, 旧 double 中間演算で打ち消していた z 成分の float 丸め)。物理的影響なし。
   `run_cmp_node_sst`/`run_cmp_cell_sst` は旧キー `LESorRANS` で現行 config 非互換のため使わず。
+- **最終版 (ac9262e8, WALE double 復帰・研磨反復化後) の追加回帰 (2026-09-12, codex result M5 採用, `tools/perf_regress.py`)**:
+  case/09 `run_0052_perf_regress_node_periodic_dualtime` (node 周期・dual-time・SST・E_t): P/T/k/ω/μt ≤4.3e-7 = base×base 同等
+  (速度は base×base 自体 0.32 の減衰乱流ばらつきで比較不能); case/23 `run_0100_perf_regress_cell_axisym_tp_implicit` (cell 軸対称 TP
+  陰解法 WALE): 全場 ≤3.4e-6 = base×base 同等; case/16 `run_0456_perf_regress_node2d_cond` (node 2D SST 凝縮): 全場 ≤1.6e-5、
+  g_0/rog_0 3〜4e-6 = base×base 同等; `run_0450` は基準 5 本で再計測 (ρ 2.3 倍・Ux 2.2 倍 = 絶対 1.2e-6/2.4e-6, §4.3 絶対基準内)。
+  line-implicit (`lineImplicit: 1`) は本 plan の変更 (対角キャッシュ/パック) が自動 off になる経路で、専用 run は未実施。
 
 ### 6.1 レビュー記録 (codex)
 
