@@ -458,7 +458,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
-                        "nozzle_qc.h5"], cwd=run_dir, env=_ENV,
+                            "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
                        capture_output=True, text=True)
     (run_dir / "MESH_QUALITY.txt").write_text(
         "# cell 変換コピーで検査 (品質は primal の性質)\n" + q.stdout + q.stderr)
@@ -774,7 +774,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
-                        "nozzle_qc.h5"], cwd=run_dir, env=_ENV,
+                            "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
                        capture_output=True, text=True)
     (run_dir / "MESH_QUALITY.txt").write_text(
         "# cell 変換コピーで検査 (品質は primal の性質)\n" + q.stdout + q.stderr)

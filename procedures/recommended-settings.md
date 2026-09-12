@@ -152,7 +152,7 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 
 ## 8. メッシュ — 現行 (2026-09)
 
-- AR ≤ 1000, skew ≤ 0.9 (`check_mesh_quality.py`)、y⁺≈1 が要るときは第一層と接線長のバランスで AR を守る。
+- AR ≤ 1000, skew ≤ 0.9 (`check_mesh_quality.py`)、y⁺≈1 が要るときは第一層と接線長のバランスで AR を守る。**壁法線の構造層に限り AR ≤ 5000 まで緩和可** (2026-09-12; `--ar-max 5000` / 問題 YAML `mesh.ar_max`, 台帳に明記)。冷却壁では y⁺ が ×5〜6 に上がるので `mesh.wall_first_frac_throat` (スロートだけ第一セルを詰める) と併用する。
 - node 2D は平面メッシュ、3D は六面体押し出し可。3D の角線ノード (2 壁交線) は内部隣接ゼロだが受動で問題なし
   (2026-09-07 検証)。y₁ 0.6 µm × z₁ 2 µm の極端な異方角セルは旧バイナリで角部加熱を起こした (相対ガードで解消)。
 - SST メッシュは壁 bcond を no-slip `wall` で変換 (wall_dist)。slip 延長壁は `wallDistExtraPhysIDs`。

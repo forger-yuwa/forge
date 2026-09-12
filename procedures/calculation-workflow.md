@@ -335,7 +335,8 @@ python3 solver_density_cuda/tools/check_mesh_quality.py <run_dir>/mesh.h5
 - **アスペクト比 (AR) ≤ 1000 を目標**。最長辺/最短辺。境界層クラスタリングで薄いセルを作るときに監視する。
 - **スキューネス (equiangle skew) ≤ 0.9 を目標**。四角形の内角の直交からのずれ (0=直交, 1=退化)。
 - ツールは AR・skew の max / p99 / 違反セル数を出し `VERDICT: PASS / SOFT-PASS / FAIL` を返す。**FAIL なら計算を投入しない**。`SOFT-PASS` (違反<0.1%) は局所外れ値として許容しうるが、場所を確認する。
-- 近壁を細分化 (wall-resolved, 第一セル数μm) すると AR が増えやすい。**接線方向セルを細かくしすぎず、AR が 1000 を超えないよう第一セル厚と接線長のバランスを取る** (高 Re では y+~1 と AR≤1000 は両立しないことがあり、その場合は y+~30-80 + `wallTreatmentSST=1` を選ぶ)。
+- 近壁を細分化 (wall-resolved, 第一セル数μm) すると AR が増えやすい。**接線方向セルを細かくしすぎず、AR が 1000 を超えないよう第一セル厚と接線長のバランスを取る**。
+- **AR 緩和 (2026-09-12 ユーザ決定)**: 壁法線に沿った構造格子の境界層層 (スキュー無し) に限り **AR ≤ 5000** まで可。`check_mesh_quality.py mesh.h5 --ar-max 5000` で判定し (設計チェーンは問題 YAML `mesh.ar_max: 5000`)、README/台帳に「AR 緩和 (≤5000)」と明記する。冷却壁 (T_w 300 K) は同じ第一セルで y⁺ が ×5〜6 に上がり、AR ≤ 1000 のままではスロート y⁺≈1 が取れない (case/44: ni 2 万級が要る) ことが動機。裏付けは plan `tooling-nozzle-isothermal-wall-chain` §8-3 の A/B (AR 846 vs 4140)。
 - 「メッシュできた」「収束した」と報告する応答には、本ツールの品質 VERDICT も根拠として併記する。
 - なお `check_mesh_quality.py` は **primal (cell) 変換の h5 専用**で、median-dual (node) 変換した
   h5 を渡すと `CONNE が NumberOfElements より短い` で落ちる (ツール側の制約)。node メッシュの

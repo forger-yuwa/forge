@@ -85,7 +85,7 @@
 
 **メッシュ変更後の restart (必須)**: メッシュを変えた (quad↔tri↔構造化, 解像度変更) ときは **uniform 初期値から計算を始めない** (超音速/衝撃波/SST は uniform IC から step 数回で発散する)。`solver_density_cuda/tools/interp_field.py SRC.h5 新メッシュ入力.h5` で過去の収束済み場を**最近傍interpolateして cross-mesh restart** する (保存量+roK/roOmega+スカラー輸送を移植、wall_dist は移植せず新メッシュの値を使う)。同一メッシュの restart は `restart_field.py`。
 
-**メッシュ品質チェック (計算前・必須)**: メッシュを HDF5 化したら計算投入前に必ず `solver_density_cuda/tools/check_mesh_quality.py <mesh.h5>` で品質を確認する。**アスペクト比 ≤ 1000、スキューネス ≤ 0.9 を目標**とし、`VERDICT: FAIL` のメッシュは投入しない。近壁細分化で AR が増えやすいので接線長と第一セル厚のバランスを取る (高 Re では y+~1 と AR≤1000 が両立しないことがあり、その場合 y+~30-80 + `wallTreatmentSST=1` を選ぶ)。詳細は [`procedures/calculation-workflow.md`](procedures/calculation-workflow.md) の「メッシュ品質チェック」。「メッシュできた/収束した」と報告する応答には品質 VERDICT も併記する。
+**メッシュ品質チェック (計算前・必須)**: メッシュを HDF5 化したら計算投入前に必ず `solver_density_cuda/tools/check_mesh_quality.py <mesh.h5>` で品質を確認する。**アスペクト比 ≤ 1000、スキューネス ≤ 0.9 を目標**とし、`VERDICT: FAIL` のメッシュは投入しない。近壁細分化で AR が増えやすいので接線長と第一セル厚のバランスを取る。**例外 (2026-09-12 ユーザ決定): 壁法線に沿った構造格子の境界層セル (壁解像 y⁺≈1〜2 が要る冷却壁など、内角 90° 近傍でスキューの無い層) は AR ≤ 5000 まで可**。その場合は `check_mesh_quality.py --ar-max 5000` (設計チェーンは問題 YAML `mesh.ar_max`) で判定し、run の README/台帳に「AR 緩和 (≤5000)」と明記する。緩和の裏付けは [`plans/active/tooling-nozzle-isothermal-wall-chain.md`](plans/active/tooling-nozzle-isothermal-wall-chain.md) §8-3 (AR 846 メッシュとの A/B)。非構造・スキュー有りのセルには適用しない。壁関数 (y+~30-80 + `wallTreatmentSST=1`) は AR 回避の代替だが、圧縮性冷却壁では未検証。詳細は [`procedures/calculation-workflow.md`](procedures/calculation-workflow.md) の「メッシュ品質チェック」。「メッシュできた/収束した」と報告する応答には品質 VERDICT も併記する。
 
 forge の結果が「軸対称・乱流・近軸で forge だけ妙な値になる」ようなときは、推測で結論づけず [`procedures/su2-cross-check.md`](procedures/su2-cross-check.md) の手順で **同一メッシュ・同一 BC の SU2 と比較**して切り分けること。
 

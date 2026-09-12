@@ -333,7 +333,7 @@ def prepare(problem_path, run_dir, euler: bool = True, nsteps=None,
         subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"],
                        cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
         q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
-                            "nozzle_qc.h5"], cwd=run_dir, env=_ENV,
+                            "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
                            capture_output=True, text=True)
         (run_dir / "MESH_QUALITY.txt").write_text("# cell 変換コピーで検査 (品質は primal の性質)\n"
                                                   + q.stdout + q.stderr)
@@ -345,7 +345,7 @@ def prepare(problem_path, run_dir, euler: bool = True, nsteps=None,
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     if euler:
         q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
-                            "nozzle.h5"], cwd=run_dir, env=_ENV, capture_output=True, text=True)
+                            "nozzle.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV, capture_output=True, text=True)
         (run_dir / "MESH_QUALITY.txt").write_text(q.stdout + q.stderr)
         if q.returncode != 0:
             raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")

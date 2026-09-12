@@ -61,7 +61,7 @@ for cd in cands:
     coords, quads, bedges = generate_axisym_mesh(wallobj, mp)
     write_msh41_2d(tmp / "m.msh", coords, quads, bedges)
     r = subprocess.run([str(ROOT / "solver_density_cuda/build/convertGmshToForge"), "m.msh", "m.h5"], cwd=tmp, env=ENV, capture_output=True, text=True)
-    q = subprocess.run([sys.executable, str(ROOT / "solver_density_cuda/tools/check_mesh_quality.py"), str(tmp / "m.h5")], capture_output=True, text=True)
+    q = subprocess.run([sys.executable, str(ROOT / "solver_density_cuda/tools/check_mesh_quality.py"), str(tmp / "m.h5"), "--ar-max", str(cd.get("armax", 1000))], capture_output=True, text=True)
     ar = [l for l in q.stdout.splitlines() if "aspect" in l or "VERDICT" in l]
     # y1(x): 壁点列と隣接点
     X = coords[:, 0].reshape(cd["ni"], cd["nj"]); Rr = coords[:, 1].reshape(cd["ni"], cd["nj"])
