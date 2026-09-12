@@ -41,6 +41,7 @@ static std::list<std::string> speciesCellVarNames(int s)
     const std::string i = std::to_string(s);
     return {
         "roY"+i, "Y"+i, "roY"+i+"N", "roY"+i+"M",
+        "roY"+i+"P", "roY"+i+"PP",   // dual-time の物理時間レベル Q^n, Q^{n-1} (BDF 項用; N/M は擬似時間の始点)
         "res_roY"+i, "res_roY"+i+"_m",
         "transport_diag_Y"+i, "src_jac_Y"+i,
         // 緩和整合 scalar-DPLUR (speciesImplicitCoupling==1) の Jacobi 補正 new/old バッファ。

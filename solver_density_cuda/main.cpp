@@ -1193,6 +1193,10 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
         s.profiler.measureCuda(ProfileSection::SpeciesImplicit, [&]() {
             if (eosCoupled) {
                 speciesEOSFinalCommit_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+                // CMC 結合 (couple≥1) では緩和ソースと壁/リップ近傍の ρ 変化で Σ_s ρY_s と ρ がずれて伝播した
+                // (run_0107–0116: 混合層で ΣY≈0.5, 軸で 1.12)。案C の接空間射影は ΣY^N=1 の維持しか保証しないので
+                // 実現可能性の再正規化 (ΣρY_s=ρ) で閉じる。非 CMC 経路は従来どおり (ビット不変)。
+                if (cmc_coupling_active()) speciesRenormalize_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
             } else {
                 speciesUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // roY_N = roY_M = roY
                 if (speciesImplicitCoupled(s.cfg, s.var)) {
@@ -1328,7 +1332,13 @@ void advanceImplicitDualTime(StepContext& s)
     // 物理時間レベルシフト: roNN ← roN, roN ← ro（現在の ro = Q^n）。
     s.profiler.measureWall(ProfileSection::UpdateOuter, [&]() {
         shiftDualTimeLevels_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        speciesShiftDualTimeLevels_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // roY_PP ← roY_P ← roY
     });
+    // 化学種 (多成分): 2026-09-13 まで dual-time は化学種を一切更新していなかった (ρY_s が初期場のまま凍結、
+    // ρ だけ動いて ΣY_s=ρ⁰/ρ になる; case/48 run_0103/0107 で混合層 ΣY≈0.5)。定常陰解法と同じ 案C 予測→block→commit を
+    // 各サブ反復で回し、残差には BDF 項を入れる。commit の δρ 基準は予測時点の ρ (speciesEOSCrossPredictInject で保存)。
+    const bool freezeSpeciesDT = freezeSpeciesEnabled();
+    const bool eosCoupledDT = speciesEOSCoupled(s.cfg, s.var) && !freezeSpeciesDT;
 
     // BDF 係数: 初回ステップ or bdfOrder==1 は BDF1 (1,1,0)、以降 BDF2 (3/2,2,1/2)。
     const bool useBDF2 = (s.cfg.bdfOrder >= 2) && (s.iStep > 0);
@@ -1344,6 +1354,13 @@ void advanceImplicitDualTime(StepContext& s)
         assembleResidual(s, 1);
         // 残差に物理時間 BDF 項を加える: res* = res - (V/Δt)(a Q - b Q^n + c Q^{n-1})。
         addUnsteadyTimeTerm_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, a, b, c, include_scalar);
+        speciesAddUnsteadyTimeTerm_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, a, b, c);
+        if (eosCoupledDT) {
+            s.profiler.measureCuda(ProfileSection::SpeciesImplicit, [&]() {
+                speciesUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 擬似時間の始点 roY_N = roY
+                speciesEOSCrossPredictInject_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            });
+        }
         logResidualSnapshot(s, m);
         // dual-time も pseudo/physical の時間を CFL に基づき変えうるため、dt 適応は毎サブ反復で行う
         // (adaptDt=true → dtControl==1 のとき cfg.dt を適応; host 読み出しもそのとき発生)。表示のみ
@@ -1371,6 +1388,18 @@ void advanceImplicitDualTime(StepContext& s)
         s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
             applyBlockImplicitCorrectionInPlace_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         });
+        if (!freezeSpeciesDT && s.var.nSpeciesRegistered > 1) {
+            s.profiler.measureCuda(ProfileSection::SpeciesImplicit, [&]() {
+                if (eosCoupledDT) {
+                    speciesEOSFinalCommit_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+                } else {
+                    speciesUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+                    speciesTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
+                }
+                speciesRenormalize_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // ΣρY_s = ρ
+                speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // Y = ρY/ρ (次の残差・出力用)
+            });
+        }
         // FORGE_FREEZE_TURB=1 は dual-time でも SST 状態更新を凍結する (2026-09-03 修正: 従来この
         // 経路は無条件更新で、freeze 診断が定常専用だった — dual-time A/B は無効だった)。
         if (include_scalar && !freezeTurbEnabled()) {

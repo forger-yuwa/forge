@@ -16,6 +16,8 @@ namespace {
 // speciesInit_d で 1 度だけ構築 (kinetic 拡散カーネルが化学種ループするため)。
 flow_float** g_roY_dev = nullptr;
 flow_float** g_roYN_dev = nullptr;   // roYN: species ステップ始点ベースライン (speciesUpdateOuter で roY に一致)
+static flow_float* g_roPred_dev = nullptr;   // 案C 予測時点の ρ (dual-time では roN=ρ^n が固定なので、commit の δρ 基準はこちら)
+static size_t g_roPred_cap = 0;
 flow_float** g_resroY_dev = nullptr;
 flow_float** g_transdiag_dev = nullptr;
 int          g_nSpecies = 0;
@@ -806,6 +808,52 @@ void speciesTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConfig& c
     gpuErrchkKernelSync();
 }
 
+namespace {
+__global__ void species_shift_levels_d(geom_int nCells_all, const flow_float* roY, flow_float* P, flow_float* PP)
+{
+    const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic < nCells_all) { PP[ic] = P[ic]; P[ic] = roY[ic]; }
+}
+__global__ void species_add_unsteady_d(geom_int nCells, const geom_float* vol, flow_float dt, flow_float a, flow_float b, flow_float c,
+                                       const flow_float* roY, const flow_float* P, const flow_float* PP, flow_float* res, flow_float* tdiag)
+{
+    const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic < nCells) {
+        const flow_float V = static_cast<flow_float>(vol[ic]);
+        res[ic]   -= (V / dt) * (a * roY[ic] - b * P[ic] + c * PP[ic]);
+        tdiag[ic] += V * a / dt;
+    }
+}
+int g_speciesLevelShifts = 0;   // 物理レベルの充填回数 (BDF2 に切り替える判定)
+}
+
+void speciesShiftDualTimeLevels_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    (void)cfg;
+    if (!speciesEnabled(var)) return;
+    for (int s = 0; s < var.nSpeciesRegistered; ++s) {
+        const std::string i = std::to_string(s);
+        species_shift_levels_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(msh.nCells_all, var.c_d["roY"+i], var.c_d["roY"+i+"P"], var.c_d["roY"+i+"PP"]);
+    }
+    ++g_speciesLevelShifts;
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchkKernelSync();
+}
+
+void speciesAddUnsteadyTimeTerm_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
+                                          flow_float a, flow_float b, flow_float c)
+{
+    if (!speciesEnabled(var)) return;
+    if (g_speciesLevelShifts < 2) { a = 1.0; b = 1.0; c = 0.0; }   // Q^{n-1} 未充填 (restart 直後を含む) は BDF1
+    for (int s = 0; s < var.nSpeciesRegistered; ++s) {
+        const std::string i = std::to_string(s);
+        species_add_unsteady_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(msh.nCells, var.c_d["volume"], cfg.dt, a, b, c,
+            var.c_d["roY"+i], var.c_d["roY"+i+"P"], var.c_d["roY"+i+"PP"], var.c_d["res_roY"+i], var.c_d["transport_diag_Y"+i]);
+    }
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchkKernelSync();
+}
+
 void speciesRenormalize_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     (void)cfg;
@@ -974,6 +1022,16 @@ void speciesEOSCrossPredictInject_d_wrapper(solverConfig& cfg, cudaConfig& cuda_
     const int nSpecies = var.nSpeciesRegistered;
     const size_t bytes = static_cast<size_t>(msh.nCells_all) * sizeof(flow_float);
 
+    // 予測時点の ρ を保存 (commit の δρ = ρ_after − ρ_predict)。定常陰解法では roN==ro なので従来と同一、
+    // dual-time では roN=ρ^n (物理時間レベル, 内部反復中は固定) を基準にすると内部反復ごとに δρ が
+    // 累積/欠落して Σ_s ρY_s と ρ がずれる (run_0103/0107: 冷却過渡で混合層 ΣY≈0.5, 軸 1.12)。
+    if (g_roPred_cap < static_cast<size_t>(msh.nCells_all)) {
+        if (g_roPred_dev) cudaFree(g_roPred_dev);
+        gpuErrchk( cudaMalloc((void**)&g_roPred_dev, bytes) );
+        g_roPred_cap = msh.nCells_all;
+    }
+    gpuErrchk( cudaMemcpy(g_roPred_dev, var.c_d["ro"], bytes, cudaMemcpyDeviceToDevice) );
+
     // --- species scalar-DPLUR sweep で δ(ρY_s)* を予測 (dq=0 から, commit しない) ---
     for (int s = 0; s < nSpecies; ++s) {
         const std::string i = std::to_string(s);
@@ -1001,7 +1059,7 @@ void speciesEOSCrossPredictInject_d_wrapper(solverConfig& cfg, cudaConfig& cuda_
 
     // --- 接空間射影 z_s = δz*_s - Y_s Σδz* (dq_old を in-place で z に) ---
     species_eos_project_tangent_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
-        msh.nCells, nSpecies, g_dqYold_dev, g_roYN_dev, var.c_d["roN"]);
+        msh.nCells, nSpecies, g_dqYold_dev, g_roYN_dev, g_roPred_dev);
 
     // --- 解析 δp_Y をセルごとに評価 ---
     if (g_dpY_cap < msh.nCells_all) {
@@ -1012,12 +1070,12 @@ void speciesEOSCrossPredictInject_d_wrapper(solverConfig& cfg, cudaConfig& cuda_
     cudaMemset(g_dpY_eos, 0, bytes);
     species_eos_dp_cell_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells, nSpecies, thermo_species_device_ptr(),
-        g_dqYold_dev, g_roYN_dev, var.c_d["roN"], var.c_d["T"], g_dpY_eos);
+        g_dqYold_dev, g_roYN_dev, g_roPred_dev, var.c_d["T"], g_dpY_eos);
 
     // --- クロスエネルギー流束を res_roe へ移項 (内部 normal plane のみ) ---
     species_eos_cross_flux_d<<<cuda_cfg.dimGrid_plane, cuda_cfg.dimBlock>>>(
         msh.nNormalPlanes, msh.map_plane_cells_d,
-        var.p_d["massflux"], g_dpY_eos, var.c_d["roN"], var.c_d["res_roe"]);
+        var.p_d["massflux"], g_dpY_eos, g_roPred_dev, var.c_d["res_roe"]);
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
@@ -1031,7 +1089,7 @@ void speciesEOSFinalCommit_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
     rebuildDqYoldPtrs(var, nSpecies);   // PredictInject 後と同じ z (dq_old) を指す
     species_eos_final_commit_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells, nSpecies, g_roY_dev, g_roYN_dev, g_dqYold_dev,
-        var.c_d["ro"], var.c_d["roN"]);
+        var.c_d["ro"], g_roPred_dev ? g_roPred_dev : var.c_d["roN"]);
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
 }

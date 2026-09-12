@@ -2,6 +2,9 @@
 // chemistry_d.cu — 有限速度化学ソース項 (Phase 1: 陽ソース + 対角 point-implicit Jacobian)
 //   methods/chemistry.md 実装 §2。反応表は chemistry_mech_io.hpp で読み device へ 1 度アップロード。
 // =============================================================================
+#ifndef CMC7_TFREEZE_BYPASS
+#define CMC7_TFREEZE_BYPASS 1
+#endif
 #include <iostream>
 #include <vector>
 #include <cstring>
@@ -226,7 +229,7 @@ __global__ void chemistry_source_d(
         if (chem_diag) for (int k = 0; k < nSpecies; ++k) chem_diag[(size_t)ic*nSpecies + k] = 0.0;
     } else { chemQdot[ic] = 0.0; }
     if (!(rho > 0.0) || !(Tc > 0.0)) return;
-    if (Tc < Tfreeze && !(cmcMode == 7 && cmcYpdf)) return;   // couple 7 の緩和ソースは冷たい噴流コアにも要る (初期場の OH が凍結域に残る run_0107)
+    if (Tc < Tfreeze && !(cmcMode == 7 && cmcYpdf && CMC7_TFREEZE_BYPASS)) return;   // couple 7 の緩和ソースは冷たい噴流コアにも要る (初期場の OH が凍結域に残る run_0107)
     if (Tc > Tmax) Tc = Tmax;
     if (Tc < 200.0) Tc = 200.0;
 

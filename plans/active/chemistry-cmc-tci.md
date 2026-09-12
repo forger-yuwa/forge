@@ -215,4 +215,14 @@ laminar chemistry (セル平均で Arrhenius を評価) では自着火安定化
   native build `.build-native/relwithdebinfo`, `build` はシンボリックリンク; `/home/sano/work/...` の絶対パスもリンクで解決)** で
   `run_0111_dt_c7_xifix` (1045 K, 1500 step) を検証中。OK なら T_c スイープを AWS で回す。
 - `2026-09-12 (18)` — **スイープ script の couple 5 残り**: `run_tc_sweep.sh` は couple 5 時代に書いたまま `--couple 5` を渡していた (run_0110 と AWS の旧 run_0112/0113 は couple 5 で無効; run_0112 は平均 T が PDF 診断 T より −200 K で気付いた)。`--couple 7` に修正 (commit 本)、AWS の polite ランチャー (30 分毎に GPU 空きを確認して 1 本ずつ) で 1045/1030/1060/1015/1075 K を再投入 (run_0112–0116)。教訓: 投入直後に `cmcQInit_d: ... couple=N` のログ行を確認する。
+- `2026-09-13 (19)` — **重大バグ: dual-time は化学種を一切更新していなかった** (`advanceImplicitDualTime` に species の予測/commit/
+  時間積分が無く、ρY_s が初期場のまま凍結、ρ だけ動いて ΣY_s=ρ⁰/ρ。混合層で ΣY≈0.5、軸で 1.12; `run_0103` (chem 0) でも同じ →
+  CMC 無関係の共通バグ)。**修正 (本 commit)**: dual-time ループに (i) 物理レベル `roY{s}P/PP` のシフト、(ii) 残差への BDF 項
+  −(V/Δt)(a ρY − b ρY^n + c ρY^{n−1}) と輸送対角 +Va/Δt (レベル未充填の 2 step は BDF1)、(iii) 案C 予測 → block → commit
+  (commit の δρ 基準を予測時点の ρ に変更 — 定常では roN と同一でビット不変)、(iv) 再正規化 + primitive を追加。30 step 検証
+  `run_0123` (chem 0) / `run_0124` (couple 7): ΣY = 1.000 (全ノード)、化学種が発達する。
+  **影響**: run_0077/0079 (laminar dual-time) と run_0102–0116 (CMC dual-time, T_c スイープ含む) は化学種凍結の結果であり無効。
+  「dual-time では ξ フラックスが保存」は凍結の産物で、定常 vs dual-time の比較 (§9 (14)) は要再検証。couple 7 の「平均 T 一致」
+  (run_0107) は組成凍結 + h 緩和による見かけ。**再検証**: run_0077 の場から couple 7 dual-time 3000 step (`run_0125_dt_c7_fixed`) →
+  T_c スイープをやり直す。他ケースの dual-time 多成分 run も同バグの影響下 (要周知)。
 

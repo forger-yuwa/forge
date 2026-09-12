@@ -80,5 +80,11 @@ void speciesEOSFinalCommit_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
 void speciesRenormalize_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 
 // RK ステップ/ステージ始点の保存 (roY{s}N / roY{s}M)。NS の updateVariablesOuter/Inner に対応。
+// dual-time: 物理時間レベルのシフト roY_PP ← roY_P ← roY (物理ステップ冒頭、flow の shiftDualTimeLevels と同時)。
+void speciesShiftDualTimeLevels_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+// dual-time: 化学種残差に BDF 項 −(V/Δt)(a ρY − b ρY^n + c ρY^{n−1}) を加え、輸送対角に V a/Δt を足す
+// (assembleResidual の後、予測/点陰解の前)。レベル未充填の最初の 2 物理ステップは BDF1 に落とす。
+void speciesAddUnsteadyTimeTerm_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
+                                          flow_float a, flow_float b, flow_float c);
 void speciesUpdateOuter_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 void speciesUpdateInner_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
