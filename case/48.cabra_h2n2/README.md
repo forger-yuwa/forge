@@ -76,7 +76,9 @@ Cabra et al. (UC Berkeley; NASA/CR-2004-212887 Table 6.1, [`papers/combustion/`]
 | (無効) 旧 `run_0112_cmc_tc1045` / `run_0113_cmc_tc1030` (AWS, 2026-09-12 午前) | `run_tc_sweep.sh` が `--couple 5` のままだった (run_0110 も同じ) → couple 5 の熱欠陥で平均 T が PDF 診断 T より −200 K 遅れ、無効。ディレクトリは再投入で上書き | 破棄 |
 | `run_0112_cmc_tc1045` … `run_0116_cmc_tc1075` (AWS) | T_c 応答曲線 (couple 7, ξ 整合修正後): 各 3000 step dual-time | 完走したが **dual-time の化学種凍結バグ (plan §9 (19)) で無効** (H/d 11.2/10.4/9.7/8.6/6.7 @1015/1030/1045/1060/1075 K は組成凍結下の値)。ΣY が混合層で 0.5 | 無効 (参考) |
 | `run_0117`–`run_0124` (ローカル, 30〜300 step) | ΣY 欠陥の切り分け: coupling 0 / τ_c 1e-2 / Tfreeze bypass / 再正規化 / commit 基準 → いずれも無効果、chem 0 でも再現 → dual-time に化学種更新が無いことを特定。`run_0123` (chem 0) / `run_0124` (couple 7) は修正後 ΣY=1.000 | 破棄予定 (run_0123/0124 は修正の証拠として保持) |
-| `run_0125_dt_c7_fixed` | **修正後の基準**: run_0077 の場から couple 7 dual-time 3000 step (30 ms), T_c 1045 K | (実行中) | active |
+| `run_0125_dt_c7_fixed` | 修正後: run_0077 の場から couple 7 dual-time 3000 step (30 ms), T_c 1045 K | ΣY=1.000 (全ノード)、基部 x/d 7.1 (T_Q) / 8.2 (OH)、半径 T 差 +2/−13/+45/+36 K。ただし **coflow 柱の音響モードが激励** (断面質量流量 −39〜+94 g/s, 公称 37; 周期 ~25 ms, coflow が逆流): 付着火炎の組成が CMC で未燃に戻る初期過渡 (密度ジャンプ) が ±2 kPa の圧力波を励起 | ref (過渡) |
+| `run_0126_dt_c7_from0101` | 初期過渡を避ける試み: 定常 CMC 場 run_0101 (組成が Q と整合) から couple 7 dual-time 3000 step | (実行中) | active |
+| `run_0127_dt_c7_cont0125` | run_0125 の続き 3000 step (柱モードが減衰するか) | (実行中) | active |
 | `run_0099_cmc_c5_fp32_cont` | run_0098 の step 4000 (場 + `cmc_Q_4000.bin`) から fp32 化学 (`cmc.fp32: 1`, 最適化後バイナリ) で 16000 step 継続。Q(η) restart 経路の初使用と fp32 の長期 A/B | (実行中) | active |
 | `run_0087_cmc_sc0` | run_0086 から CMC couple 3 (α 0.05), sdm 0, Li, 6000 step | **step 322 NaN**: 未着火のままリップ (x 0.4 mm r 2.7 mm, ξ 0.31) の T が 1034→400 K, P 95 MPa。管壁伝導・Le≠1 で T は混合線 T(ξ) と一致しない → **h のブレンドは非物理 (couple 3 不採用)** | 破棄予定 (根拠) |
 | `run_0088_cmc_c4_diag` | **couple 4** (組成のみ α=0.05 ブレンド + その反応熱 −Σc_sΔρY_s をエネルギーへ), sdm 0, 400 step (100 毎出力) | NaN なし、P 100–102 kPa、rms_roe 横ばい (~1.2)、T_Q max 1356 K (条件付き空間で着火開始)。リップ付近で max|ΔT| 349 K (受動対照 run_0090 と比較) | ref (couple 4 診断) |
