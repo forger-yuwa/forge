@@ -130,9 +130,9 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 | --- | --- | --- |
 | 0 | 基準の固定 (codex M4/M7) | 基準バイナリ `~/forge-bin/forge_base`・入力ハッシュ・生ログ・ノイズ床 (`run_0401_perf_verify/cmp_base2.txt`) を保存 (済)。run_0234 の VERDICT/メッシュ品質/旧キー監査/IC 確認は README 表を参照。`bench_steps.sh` は専用 run・`FORGE_PROFILE=0` 既定・ワイルドカード削除撤去・失敗即終了に修正 |
 | 1 | リミッタ template 化 (§4.2-5) | 済 (d331a29b)。81.9 ms/step (−1 ms)。関数ポインタは主因でなく、venkata の `2.0*` 昇格 (double 除算) が主因 → #2 で解消 |
-| 2 | リテラル昇格除去 (§4.2-1) | batch1 (limiter/viscous/setDT, e2fe1ee) 済 → 70.55 ms/step、ノイズ床内。batch2 (SLAU/common/boundary/scalar/gradient/ransSource/turb_visc/gasProperties/depVar CPG 経路) 適用中 |
-| 3 | 化学種拡散の float 化 (§4.2-2, 面状態評価のまま) | `speciesTransport_d.cu`: 面状態 Y_f/T_f/P_f・J_s・補正・`thermo_h_mass_f(T_f)` を float に |
-| 4 | SLAU TP 面エンタルピー float (§4.2-2) | `thermo_d.cuh` float 版 + `convectiveFlux_slau_d.inc.cuh` |
+| 2 | リテラル昇格除去 (§4.2-1) | 済: batch1 (limiter/viscous/setDT, e2fe1ee) 70.55 → batch2 (SLAU/common/boundary/scalar/gradient/ransSource/turb_visc/gasProperties/depVar CPG 経路, 5c1d7455) **67.4 ms/step** (交互 2 回 67.42/67.35 vs base 82.37/82.36)、ノイズ床内 (`cmp_lit2.txt`) |
+| 3 | 化学種拡散の float 化 (§4.2-2, 面状態評価のまま) | 済 (fad80e54): `SpeciesThermoF` ミラー + `thermo_*_f`、species_diffusion 13.6→1.64 ms |
+| 4 | SLAU TP 面エンタルピー float (§4.2-2) | 済 (fad80e54): SLAU 16.2→2.92 ms。#3+#4 で **44.0 ms/step** (43.97/44.02 vs base 82.37/82.38)、場はノイズ床内 (`cmp_thermof.txt`: vis_turb 2.17e-3 = 床の 1.17 倍, 他 ≤ 床) |
 | 5 | block-DPLUR 対角キャッシュ・占有率 (§4.2-4, float point 経路限定) | `timeIntegration_d.cu` / `main.cpp blockDPLURSolve`; Taylor-Green (周期)・軸対称・等温壁の回帰を追加 |
 | 6 | 小物 (§4.2-6) | `limiter_d.cu` fill 融合, `gasProperties_d.cu` powf, `convectiveFlux_d.cu` の毎ステップ `cudaMemcpyToSymbol` |
 | 7 | dependentVariables float Newton (§4.2-3, 後段) | 単体検証ツール (double 参照) → opt-in `physProp.thermoFloat` |
@@ -174,3 +174,4 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 
 - `2026-09-12` — 起票。ベースライン計測 (run_0400_perf_baseline @A10G 82.85 ms/step)、nsys/ncu で FP64 律速を同定 (§4.1)。
 - `2026-09-12` — codex plan レビュー (GO-with-changes, M7/m2) を全件採用し §4.2/§4.3/§5.1 を改訂。リミッタ template 化 (−1 ms) と batch1 リテラル修正 (82.85→70.55 ms/step, ノイズ床内) を実測。
+- `2026-09-12` — batch2 リテラル修正 67.4 ms/step、thermo float ミラー (SLAU h_mix + 化学種拡散) で **44.0 ms/step** (−47 %)。再プロファイル: block-DPLUR 5 sweep 14.9 (34 %) / dependentVariables 6.6 / SLAU 2.9 / lsqPreGrad 2.8 / k-ω 輸送 3.3 / species_diffusion 1.6 / viscous 1.5 / limiter 1.25。次は DPLUR 対角キャッシュ・占有率、dependentVariables float Newton (単体検証付き)、k/ω 面ループ融合。

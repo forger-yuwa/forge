@@ -763,7 +763,12 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
  flow_float* Kprev,
  flow_float* Knext,
  int storeLU,
- int lineViscCoupling
+ int lineViscCoupling,
+ // 対角キャッシュ (plans/active/performance-3d-node-sst-speedup.md §4.2-4): 1 のとき loop==0 で組んだ対角 5×5
+ // (拘束行の単位行化込み) を diag_** に保存し、loop>0 は対角組立・粘性対角・軸対称 Jacobian・近傍幾何読みを省略して
+ // 保存値を読む。状態は sweep 中凍結なので結果はビット同一。線形 solve・rhs 拘束・近傍積は毎 sweep 従来どおり。
+ // 呼び出し側で float・point 経路 (line_prev==nullptr) に限定する。
+ int useDiagCache
 )
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
@@ -779,12 +784,14 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
         const ST velocity_z = static_cast<ST>(Uz[ic]);
         const ST local_sonic = max(static_cast<ST>(sonic[ic]), static_cast<ST>(1.0e-8));
         const ST local_Ht = static_cast<ST>(Ht[ic]);   // 一般EOS固有系のエネルギー成分 (TP)
-        const ST nu_eff = (static_cast<ST>(laminar_visc) + max(static_cast<ST>(vis_turb[ic]), static_cast<ST>(0.0))) / density;
-
         // line-implicit: 自 CV の役割 (ラインに載るか) と decouple 行マスク (保存 K の行ゼロ化用)
         const geom_int lp = (line_prev != nullptr) ? line_prev[ic] : (geom_int)(-1);
         const geom_int ln_ = (line_next != nullptr) ? line_next[ic] : (geom_int)(-1);
         const bool onLine = (lp >= 0) || (ln_ >= 0);
+        // 対角キャッシュを読む sweep か (loop>0 かつ line に載らない CV)。
+        const bool cached = (useDiagCache != 0) && (loop > 0) && !onLine;
+        ST nu_eff = static_cast<ST>(0.0);
+        if (!cached) nu_eff = (static_cast<ST>(laminar_visc) + max(static_cast<ST>(vis_turb[ic]), static_cast<ST>(0.0))) / density;
         bool rowDec[5] = {false, false, false, false, false};
         if (onLine) {
             if (axis_ur_flag != nullptr && axis_ur_flag[ic] == 1) rowDec[2] = true;
@@ -798,9 +805,11 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
 
         ST diag_block[5][5];
         block_dplur::zero5x5(diag_block);
-        block_dplur::add_identity_scaled(diag_block, static_cast<ST>(v / max(dt_l, static_cast<ST>(1.0e-30))));
-        // dual-time: 物理時間項 a·V/Δt を対角へ（定常は unsteady_diag==0）。
-        block_dplur::add_identity_scaled(diag_block, v * static_cast<ST>(unsteady_diag));
+        if (!cached) {
+            block_dplur::add_identity_scaled(diag_block, static_cast<ST>(v / max(dt_l, static_cast<ST>(1.0e-30))));
+            // dual-time: 物理時間項 a·V/Δt を対角へ（定常は unsteady_diag==0）。
+            block_dplur::add_identity_scaled(diag_block, v * static_cast<ST>(unsteady_diag));
+        }
 
         ST rhs[5] = {
             static_cast<ST>(res_ro[ic]),
@@ -842,11 +851,19 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
                 sdq[3] = face_area * static_cast<ST>(dq_old_3[other_ic]);
                 sdq[4] = face_area * static_cast<ST>(dq_old_4[other_ic]);
             }
-            block_dplur::accumulate_split_jacobian_cf<ST>(
-                gamma, nx, ny, nz, velocity_x, velocity_y, velocity_z,
-                local_sonic, local_Ht, thermallyPerfect != 0,
-                face_area, has_nbr, sdq, diag_block, neighbor_accum
-            );
+            if (cached) {
+                block_dplur::accumulate_split_jacobian_cf<ST, false>(
+                    gamma, nx, ny, nz, velocity_x, velocity_y, velocity_z,
+                    local_sonic, local_Ht, thermallyPerfect != 0,
+                    face_area, has_nbr, sdq, diag_block, neighbor_accum
+                );
+            } else {
+                block_dplur::accumulate_split_jacobian_cf<ST>(
+                    gamma, nx, ny, nz, velocity_x, velocity_y, velocity_z,
+                    local_sonic, local_Ht, thermallyPerfect != 0,
+                    face_area, has_nbr, sdq, diag_block, neighbor_accum
+                );
+            }
             // K 行列の列抽出 (状態凍結ゆえ storeLU=loop0 のみ): nbr 寄与は sdq に線形なので
             // 単位ベクトル×face_area で列が得られる (対角へは dummy に捨てる)。decouple 行は 0。
             if (isLineFace && storeLU != 0) {
@@ -876,7 +893,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
             // 退化 (dcc≈0) し 2ν·delta/dcc が爆発→対角巨大→dq≈0 で境界ノードが凍結する (出口 BL 崩壊・残差
             // プラトーの真因)。境界粘性は弱形式カーネルが残差側で担う。内部 node-to-node 面のみ粘性対角を課す。
             // cell モード (isNode=0) は境界ゴーストが法線方向に正しく置かれ非退化なので従来どおり境界面も課す。
-            if (!(isNode != 0 && !has_nbr)) {
+            if (!cached && !(isNode != 0 && !has_nbr)) {
                 const ST dcc_x = static_cast<ST>(ccx[other_ic]) - static_cast<ST>(ccx[ic]);
                 const ST dcc_y = static_cast<ST>(ccy[other_ic]) - static_cast<ST>(ccy[ic]);
                 const ST dcc_z = static_cast<ST>(ccz[other_ic]) - static_cast<ST>(ccz[ic]);
@@ -914,7 +931,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
 
         // 軸対称ソース項のヤコビアンを対角ブロックに加える（roUy 行 = index 2）。詳細は実装ドキュメント参照。
         // axisRFloor 帯 (r 床, ソース不課) は Jacobian も課さない。
-        if (isAxisymmetric == 1 &&
+        if (!cached && isAxisymmetric == 1 &&
             !(static_cast<ST>(axisRFloor) > static_cast<ST>(0.0) && static_cast<ST>(ccy[ic]) < static_cast<ST>(axisRFloor))) {
             const ST A_pl = static_cast<ST>(A_planar[ic]);
             const ST r_eff = max(v / max(A_pl, static_cast<ST>(1.0e-30)), static_cast<ST>(1.0e-30));
@@ -929,7 +946,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
             diag_block[2][4] += -A_pl * g1;
             // 診断: 近軸半径音響スペクトル半径 α·A_pl·c を roUy 対角に補う (FORGE_AXIS_DIAG_ALPHA>0 のみ)。
             diag_block[2][2] += static_cast<ST>(g_axisDiagAlpha) * A_pl * local_sonic;
-        } else if (isAxisymmetric == 2) {
+        } else if (!cached && isAxisymmetric == 2) {
             // SU2 流 (axisymMethod==1) 非粘性軸対称ソースの解析 Jacobian (CSourceAxisymmetric_Flow 移植,
             // 行/列 = [ro, roUx, roUy, roe] → forge [0,1,2,4])。forge 対角は -∂S/∂U = +SU2 jacobian。
             // 軸ノード (axis_flag_src==1) と y≤eps はソース 0 のためスキップ。γ は frozen (gamma_arr)。
@@ -961,8 +978,10 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
 
         // node × 軸対称: 軸ノードの半径運動量行のみ decouple (dq_roUy=0)。状態は enforceAxisSymmetry がピン。
         if (axis_ur_flag != nullptr && axis_ur_flag[ic] == 1) {
-            for (int jj = 0; jj < 5; ++jj) diag_block[2][jj] = static_cast<ST>(0.0);
-            diag_block[2][2] = static_cast<ST>(1.0);
+            if (!cached) {
+                for (int jj = 0; jj < 5; ++jj) diag_block[2][jj] = static_cast<ST>(0.0);
+                diag_block[2][2] = static_cast<ST>(1.0);
+            }
             rhs[2] = static_cast<ST>(0.0);
         }
 
@@ -972,8 +991,10 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
         // 壁運動量を連成し dq≠0 を返して壁速度が drift する問題を Jacobian 整合で根治する。
         if (wall_flag != nullptr && wall_flag[ic] == 1) {
             for (int row = 1; row <= 3; ++row) {
-                for (int jj = 0; jj < 5; ++jj) diag_block[row][jj] = static_cast<ST>(0.0);
-                diag_block[row][row] = static_cast<ST>(1.0);
+                if (!cached) {
+                    for (int jj = 0; jj < 5; ++jj) diag_block[row][jj] = static_cast<ST>(0.0);
+                    diag_block[row][row] = static_cast<ST>(1.0);
+                }
                 rhs[row] = static_cast<ST>(0.0);
             }
         }
@@ -981,9 +1002,27 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
         // 等温壁ノード: エネルギー行 (4) も単位行に置換し dq_roe=0 → 壁ノード T は pin (applyBconds 位相) が
         // 一意に決める。連続 (0) 行は保持 (ρ は保存式で発展し P=ρRTw が追従)。
         if (iso_wall_flag != nullptr && iso_wall_flag[ic] == 1) {
-            for (int jj = 0; jj < 5; ++jj) diag_block[4][jj] = static_cast<ST>(0.0);
-            diag_block[4][4] = static_cast<ST>(1.0);
+            if (!cached) {
+                for (int jj = 0; jj < 5; ++jj) diag_block[4][jj] = static_cast<ST>(0.0);
+                diag_block[4][4] = static_cast<ST>(1.0);
+            }
             rhs[4] = static_cast<ST>(0.0);
+        }
+
+        // 対角キャッシュ: loop>0 は保存値を読む / loop==0 (useDiagCache かつ line 外) は組んだ対角を保存する。
+        // ST=float・point 経路に限定して呼ばれる (呼び出し側ゲート) ので、保存/読込で丸めは発生しない (ビット同一)。
+        if (cached) {
+            diag_block[0][0]=static_cast<ST>(diag_00[ic]); diag_block[0][1]=static_cast<ST>(diag_01[ic]); diag_block[0][2]=static_cast<ST>(diag_02[ic]); diag_block[0][3]=static_cast<ST>(diag_03[ic]); diag_block[0][4]=static_cast<ST>(diag_04[ic]);
+            diag_block[1][0]=static_cast<ST>(diag_10[ic]); diag_block[1][1]=static_cast<ST>(diag_11[ic]); diag_block[1][2]=static_cast<ST>(diag_12[ic]); diag_block[1][3]=static_cast<ST>(diag_13[ic]); diag_block[1][4]=static_cast<ST>(diag_14[ic]);
+            diag_block[2][0]=static_cast<ST>(diag_20[ic]); diag_block[2][1]=static_cast<ST>(diag_21[ic]); diag_block[2][2]=static_cast<ST>(diag_22[ic]); diag_block[2][3]=static_cast<ST>(diag_23[ic]); diag_block[2][4]=static_cast<ST>(diag_24[ic]);
+            diag_block[3][0]=static_cast<ST>(diag_30[ic]); diag_block[3][1]=static_cast<ST>(diag_31[ic]); diag_block[3][2]=static_cast<ST>(diag_32[ic]); diag_block[3][3]=static_cast<ST>(diag_33[ic]); diag_block[3][4]=static_cast<ST>(diag_34[ic]);
+            diag_block[4][0]=static_cast<ST>(diag_40[ic]); diag_block[4][1]=static_cast<ST>(diag_41[ic]); diag_block[4][2]=static_cast<ST>(diag_42[ic]); diag_block[4][3]=static_cast<ST>(diag_43[ic]); diag_block[4][4]=static_cast<ST>(diag_44[ic]);
+        } else if (useDiagCache != 0 && !onLine) {
+            diag_00[ic]=static_cast<flow_float>(diag_block[0][0]); diag_01[ic]=static_cast<flow_float>(diag_block[0][1]); diag_02[ic]=static_cast<flow_float>(diag_block[0][2]); diag_03[ic]=static_cast<flow_float>(diag_block[0][3]); diag_04[ic]=static_cast<flow_float>(diag_block[0][4]);
+            diag_10[ic]=static_cast<flow_float>(diag_block[1][0]); diag_11[ic]=static_cast<flow_float>(diag_block[1][1]); diag_12[ic]=static_cast<flow_float>(diag_block[1][2]); diag_13[ic]=static_cast<flow_float>(diag_block[1][3]); diag_14[ic]=static_cast<flow_float>(diag_block[1][4]);
+            diag_20[ic]=static_cast<flow_float>(diag_block[2][0]); diag_21[ic]=static_cast<flow_float>(diag_block[2][1]); diag_22[ic]=static_cast<flow_float>(diag_block[2][2]); diag_23[ic]=static_cast<flow_float>(diag_block[2][3]); diag_24[ic]=static_cast<flow_float>(diag_block[2][4]);
+            diag_30[ic]=static_cast<flow_float>(diag_block[3][0]); diag_31[ic]=static_cast<flow_float>(diag_block[3][1]); diag_32[ic]=static_cast<flow_float>(diag_block[3][2]); diag_33[ic]=static_cast<flow_float>(diag_block[3][3]); diag_34[ic]=static_cast<flow_float>(diag_block[3][4]);
+            diag_40[ic]=static_cast<flow_float>(diag_block[4][0]); diag_41[ic]=static_cast<flow_float>(diag_block[4][1]); diag_42[ic]=static_cast<flow_float>(diag_block[4][2]); diag_43[ic]=static_cast<flow_float>(diag_block[4][3]); diag_44[ic]=static_cast<flow_float>(diag_block[4][4]);
         }
 
         if (onLine) {
@@ -1415,7 +1454,8 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 ((cfg.discretization == "node") ? 1 : 0),  /* isNode: 5e 境界半割面の粘性対角スキップ */ \
                 ((cfg.lineImplicit == 1) ? msh.line_prev_d : nullptr), \
                 ((cfg.lineImplicit == 1) ? msh.line_next_d : nullptr), \
-                msh.line_Kprev_d, msh.line_Knext_d, (((loop == 0) && (lineStoreK != 0)) ? 1 : 0), cfg.lineViscCoupling  /* line-implicit */
+                msh.line_Kprev_d, msh.line_Knext_d, (((loop == 0) && (lineStoreK != 0)) ? 1 : 0), cfg.lineViscCoupling,  /* line-implicit */ \
+                ((cfg.implicitSolvePrecision == 0 && cfg.lineImplicit == 0 && cfg.blockDPLURDiagCache != 0) ? 1 : 0)  /* useDiagCache: float・point 経路のみ */
             if (cfg.implicitSolvePrecision == 1)
                 implicit_defect_correction_block_d<double><<<block_grid , block_threads>>>(FORGE_BDPLUR_ARGS);
             else
