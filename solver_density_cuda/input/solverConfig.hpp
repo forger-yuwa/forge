@@ -84,6 +84,9 @@ public:
     // 帯域が、省ける近傍幾何読み・組立より高い。sweep はレイテンシ律速で gather 数の削減が効かない)。opt-in 記録用に残す。
     // plans/active/performance-3d-node-sst-speedup.md §4.2-4 / §9。
     int blockDPLURDiagCache = 0;
+    // block-DPLUR sweep の近傍 dq gather を stride-8 AoS バッファから読む (5 セクタ→1 セクタ)。0 で SoA 5 配列 (従来)。
+    // 結果はビット同一 (同じ値を別レイアウトで読むだけ)。line-implicit / node 周期では自動で off。
+    int blockDPLURDqPack = 1;
                                     // 残差/状態は float のまま、Jacobian 構築+5×5 solve のみ double 化する混合精度
                                     // (iterative refinement)。軸対称 近軸の float 陰解固着 (Uy が −15 でなく
                                     // −0.6 固着) を根治するが double は遅い (RTX で ~×2.6)。詳細:

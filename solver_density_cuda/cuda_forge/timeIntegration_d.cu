@@ -773,7 +773,13 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
  // (拘束行の単位行化込み) を diag_** に保存し、loop>0 は対角組立・粘性対角・軸対称 Jacobian・近傍幾何読みを省略して
  // 保存値を読む。状態は sweep 中凍結なので結果はビット同一。線形 solve・rhs 拘束・近傍積は毎 sweep 従来どおり。
  // 呼び出し側で float・point 経路 (line_prev==nullptr) に限定する。
- int useDiagCache
+ int useDiagCache,
+ // 近傍 dq の AoS 版 (stride 8 floats = 32 B セクタ整列, [0..4] を使用)。非 nullptr のとき近傍 gather は
+ // dq_pack_old から float4+float の 2 ロード (SoA 5 配列の 5 ロード = 5 セクタから 1 セクタへ)。dq_pack_new には
+ // dq_new と同じ値を書く。SoA の dq_new_* も従来どおり書く (commit・周期ミラー・診断が読む)。
+ // line-implicit / node 周期 (SoA だけを書き換える経路) では呼び出し側が nullptr を渡す。
+ const flow_float* __restrict__ dq_pack_old,
+ flow_float* dq_pack_new
 )
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
@@ -848,12 +854,23 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
             // ライン面: dq_old の lag 参照をスキップ (Thomas が厳密連成) — sdq=0 で対角 A⁺ だけ積む
             const bool isLineFace = onLine && has_nbr && (other_ic == lp || other_ic == ln_);
             ST sdq[5] = {static_cast<ST>(0.0), static_cast<ST>(0.0), static_cast<ST>(0.0), static_cast<ST>(0.0), static_cast<ST>(0.0)};
-            if (has_nbr && !isLineFace) {
-                sdq[0] = face_area * static_cast<ST>(dq_old_0[other_ic]);
-                sdq[1] = face_area * static_cast<ST>(dq_old_1[other_ic]);
-                sdq[2] = face_area * static_cast<ST>(dq_old_2[other_ic]);
-                sdq[3] = face_area * static_cast<ST>(dq_old_3[other_ic]);
-                sdq[4] = face_area * static_cast<ST>(dq_old_4[other_ic]);
+            // loop==0 は dq_old≡0 (blockDPLURSolve の memset) なので gather を省く (寄与は厳密に 0 = ビット同一)。
+            if (has_nbr && !isLineFace && loop > 0) {
+                if (dq_pack_old != nullptr) {
+                    const float4 q4 = *reinterpret_cast<const float4*>(dq_pack_old + (size_t)other_ic * 8);
+                    const flow_float q5 = dq_pack_old[(size_t)other_ic * 8 + 4];
+                    sdq[0] = face_area * static_cast<ST>(q4.x);
+                    sdq[1] = face_area * static_cast<ST>(q4.y);
+                    sdq[2] = face_area * static_cast<ST>(q4.z);
+                    sdq[3] = face_area * static_cast<ST>(q4.w);
+                    sdq[4] = face_area * static_cast<ST>(q5);
+                } else {
+                    sdq[0] = face_area * static_cast<ST>(dq_old_0[other_ic]);
+                    sdq[1] = face_area * static_cast<ST>(dq_old_1[other_ic]);
+                    sdq[2] = face_area * static_cast<ST>(dq_old_2[other_ic]);
+                    sdq[3] = face_area * static_cast<ST>(dq_old_3[other_ic]);
+                    sdq[4] = face_area * static_cast<ST>(dq_old_4[other_ic]);
+                }
             }
             if (cached) {
                 block_dplur::accumulate_split_jacobian_cf<ST, false>(
@@ -1070,6 +1087,12 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
         dq_new_2[ic] = static_cast<flow_float>(correction[2]);
         dq_new_3[ic] = static_cast<flow_float>(correction[3]);
         dq_new_4[ic] = static_cast<flow_float>(correction[4]);
+        if (dq_pack_new != nullptr) {
+            *reinterpret_cast<float4*>(dq_pack_new + (size_t)ic * 8) =
+                make_float4(static_cast<flow_float>(correction[0]), static_cast<flow_float>(correction[1]),
+                            static_cast<flow_float>(correction[2]), static_cast<flow_float>(correction[3]));
+            dq_pack_new[(size_t)ic * 8 + 4] = static_cast<flow_float>(correction[4]);
+        }
         // rhs_** の診断書き出しは撤去 (読者なし。5 配列×sweep の書込 ≈240 MB/step を節約, 2026-09-12)。
         // line 経路 (上の onLine 分岐) は Thomas カーネルが rhs を読むので従来どおり書く。
         }
@@ -1264,8 +1287,14 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
 
 // block DPLUR の sweep 間バッファ入れ替え。ドライバ側から各 sweep 後に明示的に呼ぶ
 // （旧実装は wrapper 内部で暗黙に swap していたが、古典 DPLUR では制御フローを明示化する）。
+// 近傍 dq の AoS バッファ (stride 8)。wrapper で nCells_all に合わせて確保し、swap で old/new を入れ替える。
+static flow_float* g_dqPackOld = nullptr;
+static flow_float* g_dqPackNew = nullptr;
+static geom_int    g_dqPackN   = 0;
+
 void swapBlockImplicitCorrectionBuffers(variables& var)
 {
+    std::swap(g_dqPackOld, g_dqPackNew);
     std::swap(var.c_d["dq_block_old_0"], var.c_d["dq_block_new_0"]);
     std::swap(var.c_d["dq_block_old_1"], var.c_d["dq_block_new_1"]);
     std::swap(var.c_d["dq_block_old_2"], var.c_d["dq_block_new_2"]);
@@ -1455,7 +1484,18 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 ((cfg.lineImplicit == 1) ? msh.line_prev_d : nullptr), \
                 ((cfg.lineImplicit == 1) ? msh.line_next_d : nullptr), \
                 msh.line_Kprev_d, msh.line_Knext_d, (((loop == 0) && (lineStoreK != 0)) ? 1 : 0), cfg.lineViscCoupling,  /* line-implicit */ \
-                ((cfg.implicitSolvePrecision == 0 && cfg.lineImplicit == 0 && cfg.blockDPLURDiagCache != 0) ? 1 : 0)  /* useDiagCache: float・point 経路のみ */
+                ((cfg.implicitSolvePrecision == 0 && cfg.lineImplicit == 0 && cfg.blockDPLURDiagCache != 0) ? 1 : 0),  /* useDiagCache: float・point 経路のみ */ \
+                (usePack ? (const flow_float*)g_dqPackOld : nullptr), (usePack ? g_dqPackNew : nullptr)  /* 近傍 dq の AoS 版 */
+            // 近傍 dq の AoS 経路: line-implicit と node 周期 (SoA だけを直接書き換える) では使わない。
+            const bool usePack = (cfg.lineImplicit == 0) && (cfg.blockDPLURDqPack != 0) &&
+                                 !(cfg.discretization == "node" && msh.periodicRoot_d != nullptr && msh.nPeriodicMembers > 0);
+            if (usePack && (g_dqPackOld == nullptr || g_dqPackN != msh.nCells_all)) {
+                if (g_dqPackOld) { cudaFree(g_dqPackOld); cudaFree(g_dqPackNew); }
+                const size_t nb = (size_t)msh.nCells_all * 8 * sizeof(flow_float);
+                gpuErrchk(cudaMalloc((void**)&g_dqPackOld, nb)); gpuErrchk(cudaMalloc((void**)&g_dqPackNew, nb));
+                gpuErrchk(cudaMemset(g_dqPackOld, 0, nb)); gpuErrchk(cudaMemset(g_dqPackNew, 0, nb));
+                g_dqPackN = msh.nCells_all;
+            }
             if (cfg.implicitSolvePrecision == 1)
                 implicit_defect_correction_block_d<double><<<block_grid , block_threads>>>(FORGE_BDPLUR_ARGS);
             else
