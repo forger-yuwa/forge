@@ -21,14 +21,19 @@ D="${TPL}_bench/${LABEL}_n${NSTEP}"
 mkdir -p "$D"
 for f in bcondConfig.yaml species_db.yaml probe.yaml IC_FROM.txt; do [ -f "$TPL/$f" ] && cp "$TPL/$f" "$D/"; done
 for h in "$TPL"/*.h5; do case "$(basename "$h")" in res_*) ;; *) [ -e "$D/$(basename "$h")" ] || ln "$h" "$D/$(basename "$h")" 2>/dev/null || cp "$h" "$D/";; esac; done
-python3 - "$SRC_CFG" "$D/solverConfig.yaml" "$NSTEP" <<'PY'
+python3 - "$SRC_CFG" "$D/solverConfig.yaml" "$NSTEP" "${FORGE_CFG_SUB:-}" <<'PY'
 import re, sys
-src, dst, n = sys.argv[1], sys.argv[2], sys.argv[3]
+src, dst, n, sub = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 t = open(src).read()
 t, c1 = re.subn(r'(nStepOuter:\s*)\d+', r'\g<1>' + n, t, count=1)
 t, c2 = re.subn(r'(outStepInterval:\s*)\d+', r'\g<1>1000000', t, count=1)
 if c1 != 1 or c2 != 1:
     raise SystemExit(f"[bench] config rewrite failed (nStepOuter matches={c1}, outStepInterval matches={c2})")
+if sub:   # FORGE_CFG_SUB="old=new" (A/B 用の config 差し替え, \n 可)
+    old, new = sub.split("=", 1)
+    old = old.encode().decode("unicode_escape"); new = new.encode().decode("unicode_escape")
+    if old not in t: raise SystemExit("[bench] FORGE_CFG_SUB old text not found in solverConfig")
+    t = t.replace(old, new); print("[bench] cfgsub applied:", repr(new))
 open(dst, "w").write(t)
 PY
 cd "$D"

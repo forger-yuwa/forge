@@ -374,6 +374,9 @@ public:
     std::vector<std::string> speciesNames;     // 混合を構成する化学種名。順序が index s を定義
     std::string speciesDBFile = "";            // 任意: NASA-9/LJ 係数の外部 DB (yaml)。空なら内蔵 DB
     int speciesDiffusionMethod = 1;            // 0: 定数 Schmidt, 1: kinetic theory 混合平均拡散
+    // TP の温度反転をハイブリッド (float Newton + double 1 段研磨, thermo_T_from_e_hybrid) にする。0: 従来 double Newton。
+    // thermoHrefTemp>0 が必須 (config で検査)。凝縮 (二相 EOS) セルは常に従来経路。plan performance-3d-node-sst-speedup §4.2-3。
+    int thermoFloat = 0;
     double thermoHrefTemp = 0.0;               // >0: 各化学種のエンタルピー基準を h_s(thermoHrefTemp)=0 へ
                                                // オフセット (sensible-enthalpy datum)。非反応流では物理不変
                                                // だが、種ごとに桁違いの生成エンタルピー (H2O≈-13.4MJ/kg) を

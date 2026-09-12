@@ -19,6 +19,8 @@ __global__ void dependentVariables_d
 
  // thermally-perfect (thermalMethod==2) 用化学種データ
  const SpeciesThermo* sp , int nSpecies , flow_float** roY ,
+ // ハイブリッド温度反転 (thermoFloat==1): float ミラー係数。0 のとき未使用。
+ const SpeciesThermoF* spf , int thermoFloat ,
 
  // 非平衡凝縮 (一温度 二相 EOS)。condensation==0 のとき従来経路 (ビット不変)。
  int condensation , int nCondSpecies , flow_float** rog ,
@@ -117,6 +119,7 @@ __global__ void dependentVariables_d
 
             // 温度反転。g≈0 は従来 thermo_T_from_e で厳密縮約。
             double Tnew;
+            bool hybrid = false; double hybrid_cp = 0.0, hybrid_h = 0.0;
             if (condensation == 1 && condEquilibrium == 2 && rog != nullptr) {
                 // EOS 拘束形平衡: g を状態量として (T,g) を同時反転し、rog[0] に射影する
                 // (plans/accepted/condensation-equilibrium-eos.md)。輸送値 g_liq は初期値にだけ使う。
@@ -135,13 +138,22 @@ __global__ void dependentVariables_d
                 Tnew = cond_T_from_e_carrier(sp, nSpecies, Y, e_in, g_liq, Rw, cprops, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
             } else if (g_liq > 1.0e-12f) {
                 Tnew = cond_T_from_e_onetemp(sp, nSpecies, Y, e_in, g_liq, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
+            } else if (thermoFloat != 0 && spf != nullptr) {
+                // ハイブリッド: float Newton + double 1 段研磨。cp/h は研磨点 T_f の double 値から Taylor で組む
+                // (double 評価 1 回で従来の反復数+1 回分を置換)。乾き (g=0) セルのみ。
+                float Yf[THERMO_MAX_SPECIES];
+                for (int s=0;s<nSpecies;s++) Yf[s] = (float)Y[s];
+                double cpTf, hTf, Tf;
+                Tnew = thermo_T_from_e_hybrid(sp, spf, nSpecies, Y, Yf, e_in, Tg, DEPVAR_TMIN, DEPVAR_TMAX, &cpTf, &hTf, &Tf, 12);
+                hybrid_cp = cpTf; hybrid_h = hTf + cpTf*(Tnew - Tf); hybrid = true;
             } else {
                 Tnew = thermo_T_from_e(sp, nSpecies, Y, e_in, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
             }
 
             const double Rmix  = thermo_R_mix (sp, nSpecies, Y);
             double cpmix, hmix;
-            thermo_cph_mix(sp, nSpecies, Y, Tnew, &cpmix, &hmix);  // cp,h を 1 スイープ (全蒸気混合)
+            if (hybrid) { cpmix = hybrid_cp; hmix = hybrid_h; }
+            else thermo_cph_mix(sp, nSpecies, Y, Tnew, &cpmix, &hmix);  // cp,h を 1 スイープ (全蒸気混合)
             const double cvmix = cpmix - Rmix;
             const double gmix  = cpmix / (cvmix > 1.0e-6 ? cvmix : 1.0e-6);
 
@@ -265,6 +277,7 @@ void dependentVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
         // thermally-perfect 用化学種データ。多成分 (M2, nSpecies>=2) では device roY 配列を渡し、
         // 単成分のときは nullptr (混合則は Y={1} に縮退)。
         thermo_species_device_ptr() , cfg.nSpecies , species_roY_device_ptr() ,
+        thermo_species_device_ptr_f() , cfg.thermoFloat ,
 
         // 非平衡凝縮 (二相 EOS)。condensation==0 で rog=nullptr/g=0 → 従来経路ビット不変。
         cfg.condensation , var.nCondSpeciesRegistered , cond_rog_device_ptr() ,

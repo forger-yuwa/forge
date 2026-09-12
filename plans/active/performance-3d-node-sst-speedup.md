@@ -78,9 +78,12 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
    float へキャスト、クランプ・外挿の分岐は同一) を追加し、SLAU の `h_mix(Y, T_face)`・化学種拡散の面状態組立と
    エンタルピー結合 `Σ h_s(T_f) J_s` で使う。**評価点は現行どおり面状態 (T_f, P_f, Y_f)** — セル値を評価してから補間する案は
    `h(fT0+(1−f)T1) ≠ f h(T0)+(1−f)h(T1)` で離散式が変わるため採らない (codex plan レビュー M1)。
-3. **`dependentVariables_d` の Newton (後段・検証付き)**: float 版 `thermo_T_from_e_f` は **本 plan の後段**に置き、
-   double 参照との単体検証 (使用 DB・組成端点・微量成分・50–6000 K・区間境界・外挿・datum 有無、温度誤差 + エネルギー残差 +
-   反復上限 + 反転→再構成ドリフト) を通してから opt-in キー `physProp.thermoFloat` で入れる (codex M2)。未検証条件は double のまま。
+3. **`dependentVariables_d` の温度反転はハイブリッド** (`physProp.thermoFloat: 1`, opt-in): float Newton (warm start, 最大 12 反復)
+   で ~1e-6·T まで寄せ、double の Newton を 1 段だけ当てて研磨する (`thermo_T_from_e_hybrid`)。double 評価は cph_mix 1 回
+   (従来は反復数+1 回)。cp/h は研磨点の double 値から Taylor で組む。単体検証 `tools/test_thermo_float.cpp` (DB 4 種・組成 8 通り・
+   50–6000 K・区間境界・datum 有無、厳密 double 参照比): **誤差 ≤1.0e-8·T** (float の T 格納 ulp 6e-8 未満) で全 PASS。
+   純 float 反転は ~1e-6·T で、abs datum の H2O は 20 反復に張り付くため採らず、`thermoFloat` は `thermoHrefTemp>0` を必須にした
+   (codex M2 対応)。凝縮 (二相 EOS) セルは従来経路。
 4. **block-DPLUR**: sweep 0 で組んだ対角 5×5 を保存し sweep ≥1 は対角組立と近傍幾何読みを省略する。**適用は float・
    point-DPLUR 経路 (implicitSolvePrecision 0, lineImplicit 0) に限定**、キャッシュは各 `blockDPLURSolve` 呼び出しで更新、
    軸/壁/等温壁の拘束行と RHS 処理・周期ミラー・ピボット失敗処理は各 sweep で従来どおり (codex M6)。現行は
@@ -138,9 +141,10 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 | 2 | リテラル昇格除去 (§4.2-1) | 済: batch1 (limiter/viscous/setDT, e2fe1ee) 70.55 → batch2 (SLAU/common/boundary/scalar/gradient/ransSource/turb_visc/gasProperties/depVar CPG 経路, 5c1d7455) **67.4 ms/step** (交互 2 回 67.42/67.35 vs base 82.37/82.36)、ノイズ床内 (`cmp_lit2.txt`) |
 | 3 | 化学種拡散の float 化 (§4.2-2, 面状態評価のまま) | 済 (fad80e54): `SpeciesThermoF` ミラー + `thermo_*_f`、species_diffusion 13.6→1.64 ms |
 | 4 | SLAU TP 面エンタルピー float (§4.2-2) | 済 (fad80e54): SLAU 16.2→2.92 ms。#3+#4 で **44.0 ms/step** (43.97/44.02 vs base 82.37/82.38)、場はノイズ床内 (`cmp_thermof.txt`: vis_turb 2.17e-3 = 床の 1.17 倍, 他 ≤ 床) |
-| 5 | block-DPLUR 対角キャッシュ・占有率 (§4.2-4) | 対角キャッシュは実装したが **不採用** (0fb8ee73, `blockDPLURDiagCache` 既定 0): 44.0→46.5 ms/step と遅化 (25 floats/cell の保存+4 読込 ≈1.2 GB/step > 省ける gather)。sweep はレイテンシ律速 (占有率 28 %) → `BLOCK_DPLUR_MINBLOCKS` で占有率実験中。次候補: dq の AoS 化 (5 配列→stride 5), nStepInner 5→3 の壁時計比較 (#8) |
+| 5 | block-DPLUR 対角キャッシュ・占有率 (§4.2-4) | **占有率実験も却下**: `BLOCK_DPLUR_MINBLOCKS` 4 (regs≤128) は不変 44.4/43.9、6 (regs≤85, spill) は 62.9 ms/step。|
+| 5' | (旧 #5 記録) | 対角キャッシュは実装したが **不採用** (0fb8ee73, `blockDPLURDiagCache` 既定 0): 44.0→46.5 ms/step と遅化 (25 floats/cell の保存+4 読込 ≈1.2 GB/step > 省ける gather)。sweep はレイテンシ律速 (占有率 28 %) → `BLOCK_DPLUR_MINBLOCKS` で占有率実験中。次候補: dq の AoS 化 (5 配列→stride 5), nStepInner 5→3 の壁時計比較 (#8) |
 | 6 | 小物 (§4.2-6) | `limiter_d.cu` fill 融合, `gasProperties_d.cu` powf, `convectiveFlux_d.cu` の毎ステップ `cudaMemcpyToSymbol` |
-| 7 | dependentVariables float Newton (§4.2-3, 後段) | 単体検証ツール (double 参照) → opt-in `physProp.thermoFloat` |
+| 7 | dependentVariables ハイブリッド反転 (§4.2-3) | 実装済 (`thermo_T_from_e_hybrid`, opt-in `physProp.thermoFloat`), 単体検証 PASS (≤1e-8·T)。3D A/B 中 |
 | 8 | 陰解法 sweep/CFL の壁時計比較 (§4.2-7) | run_0234 config で 12000 step、同一到達残差までの壁時計 |
 | 9 | 候補 (未着手): メッシュ再番号付け (RCM/Hilbert) で gather の L2 ヒット率改善 | L2 hit 62–75 % の改善余地。変換器側 |
 
