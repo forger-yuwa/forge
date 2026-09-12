@@ -217,6 +217,7 @@ void solverConfig::read(std::string fname)
             }
         }
         if (config["mesh"]["primPack"]) this->primPack = config["mesh"]["primPack"].as<int>();
+        if (config["mesh"]["renumber"]) { this->meshRenumber = config["mesh"]["renumber"].as<std::string>(); std::cout << "'renumber' in 'mesh': " << this->meshRenumber << std::endl; }
         if (config["mesh"]["gradLSQ"]) {
             this->gradLSQ = config["mesh"]["gradLSQ"].as<int>();
             if (this->gradLSQ < 0 || this->gradLSQ > 2) {

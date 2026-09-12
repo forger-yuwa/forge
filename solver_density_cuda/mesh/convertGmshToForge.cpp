@@ -27,6 +27,7 @@ int main(int argc , char *argv[])
     cout << "----------------- \n";
     cout << "*** Read Mesh *** \n";
     cout << "----------------- \n";
+    gmshReader::renumberRCM = (cfg.meshRenumber == "rcm");
     gmshReader gmsh = gmshReader(argv[1]);
 
     cout << "-------------------------------- \n";

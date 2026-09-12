@@ -93,6 +93,8 @@ public:
     // 1 セクタで読む (mesh.primPack, 0 で従来の 6 配列 gather)。値は同じなのでビット同一。
     // **既定 0**: 3D 257k 節点 (RTX 3060) で差なし (パック構築の書込が相殺)。opt-in 記録用。
     int primPack = 0;
+    // 変換時の節点再番号付け: "none" (既定) / "rcm" (Reverse Cuthill–McKee; node では CV 順 = gather の局所性)。
+    std::string meshRenumber = "none";
                                     // 残差/状態は float のまま、Jacobian 構築+5×5 solve のみ double 化する混合精度
                                     // (iterative refinement)。軸対称 近軸の float 陰解固着 (Uy が −15 でなく
                                     // −0.6 固着) を根治するが double は遅い (RTX で ~×2.6)。詳細:

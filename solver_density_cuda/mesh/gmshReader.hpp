@@ -187,6 +187,79 @@ public:
 
     list<elementsOfEntity> elements_summary;
 
+    // ---- 節点の RCM 再番号付け (plan performance-3d-node-sst-speedup §5.1 #10) ----
+    // node (median-dual) では節点 = CV なので、gmsh の節点順がそのまま GPU の CV 順 = gather の局所性を決める。
+    // convertGmshToForge が mesh.renumber: rcm のとき true にする。makeMesh の前に nodes と全要素の iNodes を
+    // 並べ替えるので、以降の primal/dual 構築・境界・VIZMESH は自動で新番号に従う。
+    // renumberPerm[new] = old を h5 の /MESH/RENUMBER_PERM に書き、旧番号の res_*.h5 を新メッシュへ移すのに使う
+    // (tools/permute_res_h5.py)。
+    inline static bool renumberRCM = false;
+    vector<geom_int> renumberPerm;   // new -> old (空なら未実施)
+
+    void renumberNodesRCM()
+    {
+        const geom_int n = static_cast<geom_int>(this->nodes.size());
+        if (n == 0) return;
+        // 隣接 (全要素の節点対, 対角も含む = キャッシュ局所性の目的では十分)。CSR を 2 パスで組む。
+        vector<geom_int> deg(n, 0);
+        for (auto& ent : elements_summary)
+            for (auto& ele : ent.elements) {
+                const int k = static_cast<int>(ele.iNodes.size());
+                for (int i = 0; i < k; ++i) deg[ele.iNodes[i]] += (k - 1);
+            }
+        vector<size_t> off(n + 1, 0);
+        for (geom_int i = 0; i < n; ++i) off[i + 1] = off[i] + deg[i];
+        vector<geom_int> adj(off[n]);
+        vector<size_t> fill(off.begin(), off.end() - 1);
+        for (auto& ent : elements_summary)
+            for (auto& ele : ent.elements) {
+                const int k = static_cast<int>(ele.iNodes.size());
+                for (int i = 0; i < k; ++i) for (int j = 0; j < k; ++j) if (i != j) adj[fill[ele.iNodes[i]]++] = ele.iNodes[j];
+            }
+        // 行ごとに sort/unique
+        vector<size_t> rowEnd(n);
+        for (geom_int i = 0; i < n; ++i) {
+            auto b = adj.begin() + off[i], e = adj.begin() + off[i + 1];
+            sort(b, e); rowEnd[i] = off[i] + (unique(b, e) - b);
+        }
+        auto rowDeg = [&](geom_int i) { return static_cast<geom_int>(rowEnd[i] - off[i]); };
+        // RCM: 各連結成分で最小次数ノードから BFS、近傍を次数昇順で並べる。最後に反転。
+        vector<geom_int> order; order.reserve(n);
+        vector<char> visited(n, 0);
+        vector<geom_int> byDeg(n); for (geom_int i = 0; i < n; ++i) byDeg[i] = i;
+        sort(byDeg.begin(), byDeg.end(), [&](geom_int a, geom_int b) { return rowDeg(a) < rowDeg(b); });
+        vector<geom_int> nb;
+        for (geom_int s : byDeg) {
+            if (visited[s]) continue;
+            size_t head = order.size(); order.push_back(s); visited[s] = 1;
+            while (head < order.size()) {
+                const geom_int v = order[head++];
+                nb.clear();
+                for (size_t q = off[v]; q < rowEnd[v]; ++q) { const geom_int w = adj[q]; if (!visited[w]) { visited[w] = 1; nb.push_back(w); } }
+                sort(nb.begin(), nb.end(), [&](geom_int a, geom_int b) { return rowDeg(a) < rowDeg(b); });
+                for (geom_int w : nb) order.push_back(w);
+            }
+        }
+        reverse(order.begin(), order.end());        // Reverse Cuthill–McKee
+        vector<geom_int> inv(n);                     // old -> new
+        for (geom_int i = 0; i < n; ++i) inv[order[i]] = i;
+        // 帯域の前後
+        long long bwOld = 0, bwNew = 0;
+        for (geom_int i = 0; i < n; ++i) for (size_t q = off[i]; q < rowEnd[i]; ++q) {
+            bwOld = max(bwOld, (long long)llabs((long long)adj[q] - i));
+            bwNew = max(bwNew, (long long)llabs((long long)inv[adj[q]] - inv[i]));
+        }
+        // 適用
+        vector<node> newNodes(n);
+        for (geom_int i = 0; i < n; ++i) newNodes[i] = this->nodes[order[i]];
+        this->nodes.swap(newNodes);
+        for (auto& ent : elements_summary)
+            for (auto& ele : ent.elements)
+                for (auto& id : ele.iNodes) id = inv[id];
+        this->renumberPerm = order;
+        cout << "[renumber] RCM node renumbering: n=" << n << " bandwidth " << bwOld << " -> " << bwNew << endl;
+    }
+
     geom_int nLineEnt;
     geom_int nSurfEnt;
     geom_int nVolumeEnt;
@@ -234,6 +307,7 @@ public:
         }
         this->readNodes(inputFile);
         this->readElements(inputFile);
+        if (renumberRCM) this->renumberNodesRCM();
 
         // *** Make Grid ***
         cout << "makeMesh in gmsh Reader\n";
@@ -2287,6 +2361,7 @@ public:
 
 
         file.createDataSet("/MESH/COORD",COORD);
+        if (!renumberPerm.empty()) file.createDataSet("/MESH/RENUMBER_PERM", renumberPerm);   // new -> old (元 gmsh 節点順)
 
         vector<geom_int> CONNE;
         geom_int CONNE_dim = 0;
