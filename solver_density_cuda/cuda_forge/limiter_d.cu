@@ -192,9 +192,13 @@ __global__ void limiter_r1_d
 // limiter_r1_d の 5 変数 (ro,Ux,Uy,Uz,P) 融合版。connectivity/geometry を 1 回読み・plane ループを共有して
 // 5 変数の min/max と limiter を同時計算する (per-variable 5 回 launch の冗長 geometry 読みを除去)。
 // 数式は limiter_r1_d と同一 (#pragma unroll で k は定数化 → Qk 等は constant param のまま, ポインタ配列は消える)。
+// limiter_scheme は template 引数 (SCHEME) にして、リミッタ関数をコンパイル時に確定させる。
+// 旧実装の関数ポインタ経由の呼び出しは device 上で間接 CALL になり (インライン化不可・レジスタ退避)、
+// 2 パス × 5 変数 × 近傍面のループで 1 セルあたり数十回の CALL が入って 3D 2.37 M 節点で 9.5 ms/step を
+// 食っていた (plans/active/performance-3d-node-sst-speedup.md §4.1)。数式・演算順序は同一 (ビット同一)。
+template<int SCHEME>
 __global__ void limiter_r1_fused5_d
 (
- int limiter_scheme,
  geom_int nCells,
  geom_int nPlanes, geom_int nNormalPlanes, geom_int* plane_cells,
  geom_int* cell_planes_index, geom_int* cell_planes,
@@ -218,17 +222,10 @@ __global__ void limiter_r1_fused5_d
     flow_float* dQy[5] = {d0y,d1y,d2y,d3y,d4y};
     flow_float* dQz[5] = {d0z,d1z,d2z,d3z,d4z};
 
-    if (limiter_scheme == 0) {
+    if (SCHEME == 0) {
         #pragma unroll
         for (int k=0;k<5;k++) Lim[k][ic0] = 1.0;
         return;
-    }
-
-    flow_float (*limiter_function)(flow_float, flow_float, flow_float, flow_float);
-    if (limiter_scheme == 1) {                       // barth
-        limiter_function = barth_Jespersen_limiter;
-    } else {                                         // venkata (2 or -1)
-        limiter_function = venkata_limiter;
     }
 
     const geom_int index_st = cell_planes_index[ic0];
@@ -262,7 +259,10 @@ __global__ void limiter_r1_fused5_d
         #pragma unroll
         for (int k=0;k<5;k++){
             flow_float Qt = qc[k] + gx[k]*dcp_x + gy[k]*dcp_y + gz[k]*dcp_z;
-            ltmp[k] = min(ltmp[k], limiter_function(qmax[k]-qc[k], qmin[k]-qc[k], Qt-qc[k], volume));
+            const flow_float lk = (SCHEME == 1)
+                ? barth_Jespersen_limiter(qmax[k]-qc[k], qmin[k]-qc[k], Qt-qc[k], volume)
+                : venkata_limiter        (qmax[k]-qc[k], qmin[k]-qc[k], Qt-qc[k], volume);
+            ltmp[k] = min(ltmp[k], lk);
         }
     }
 
@@ -290,21 +290,25 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
     }
 
     // ro,Ux,Uy,Uz,P を 1 カーネルに融合 (connectivity/geometry の 5 重読みを除去)。数式は per-variable と同一。
-    limiter_r1_fused5_d<<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (
-        cfg.limiter,
-        msh.nCells,
-        msh.nPlanes , msh.nNormalPlanes , msh.map_plane_cells_d,
-        msh.map_cell_planes_index_d , msh.map_cell_planes_d ,
-        var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
-        var.p_d["pcx"]   , var.p_d["pcy"], var.p_d["pcz"], var.p_d["fx"],
-        var.c_d["ro"], var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["P"],
-        var.c_d["limiter_ro"], var.c_d["limiter_Ux"], var.c_d["limiter_Uy"], var.c_d["limiter_Uz"], var.c_d["limiter_P"],
-        var.c_d["drodx"], var.c_d["drody"], var.c_d["drodz"],
-        var.c_d["dUxdx"], var.c_d["dUxdy"], var.c_d["dUxdz"],
-        var.c_d["dUydx"], var.c_d["dUydy"], var.c_d["dUydz"],
-        var.c_d["dUzdx"], var.c_d["dUzdy"], var.c_d["dUzdz"],
+    // SCHEME: 1=Barth-Jespersen, それ以外 (2 / -1 は上で return 済) = Venkatakrishnan。
+    #define FORGE_LIMITER_FUSED5_ARGS \
+        msh.nCells, \
+        msh.nPlanes , msh.nNormalPlanes , msh.map_plane_cells_d, \
+        msh.map_cell_planes_index_d , msh.map_cell_planes_d , \
+        var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"], \
+        var.p_d["pcx"]   , var.p_d["pcy"], var.p_d["pcz"], var.p_d["fx"], \
+        var.c_d["ro"], var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["P"], \
+        var.c_d["limiter_ro"], var.c_d["limiter_Ux"], var.c_d["limiter_Uy"], var.c_d["limiter_Uz"], var.c_d["limiter_P"], \
+        var.c_d["drodx"], var.c_d["drody"], var.c_d["drodz"], \
+        var.c_d["dUxdx"], var.c_d["dUxdy"], var.c_d["dUxdz"], \
+        var.c_d["dUydx"], var.c_d["dUydy"], var.c_d["dUydz"], \
+        var.c_d["dUzdx"], var.c_d["dUzdy"], var.c_d["dUzdz"], \
         var.c_d["dPdx"] , var.c_d["dPdy"] , var.c_d["dPdz"]
-    ) ;
+    if (cfg.limiter == 1)
+        limiter_r1_fused5_d<1><<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (FORGE_LIMITER_FUSED5_ARGS);
+    else
+        limiter_r1_fused5_d<2><<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (FORGE_LIMITER_FUSED5_ARGS);
+    #undef FORGE_LIMITER_FUSED5_ARGS
 
     // 多成分 face 整合再構成: 各化学種 Y_s に Venkat リミタ ψ_Y を計算 (∇Y は speciesGradient 済)。
     // speciesFaceReconstruction==1 のみ。flux では min(ψ_ρ, ψ_Y) を Y 再構成に使う (boundedness)。

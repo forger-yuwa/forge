@@ -23,6 +23,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [performance-3d-node-sst-speedup.md](active/performance-3d-node-sst-speedup.md) | `architecture / performance` | **3D node SST 生産計算の速度向上** (2026-09-12 起票): A10G 82.85 ms/step の半分が FP64 パイプ (リテラル昇格 + 熱力学の面 double 評価)、block-DPLUR はメモリ律速。float 化・per-cell 前計算・対角キャッシュ・リミッタ template 化で ≤40 ms/step を狙う。branch `feature/perf-3d-speedup` |
 | [condensation-kantrowitz-gamma-twophase-sonic.md](active/condensation-kantrowitz-gamma-twophase-sonic.md) | `condensation` | **Kantrowitz 補正の γ を蒸気 γ_v に修正 + 凝縮セルの二相 frozen 音速** (2026-09-10 起票): 旧実装はセル気相混合 γ (H2O–N2 で 1.40) と g を無視した全蒸気音速。A/B キー `condKantrowitzGammaMode` / `condSonicModel`、Wyslouzil 2D (case/16) で変化量を定量化 |
 | [chemistry-finite-rate-h2.md](active/chemistry-finite-rate-h2.md) | `thermophysics / chemistry` | **有限速度化学 (H₂ 燃焼・ノズル化学非平衡)** (2026-09-04 起票): 種ブロック point-implicit + sensible datum 反応熱陽注入。Phase 0 (CEA スクリーニング・熱力学 DB ツール・Jachimowski YAML) 完了、Phase 1 ソース項から実装 |
 | [boundary-node-inlet-corner-wall.md](active/boundary-node-inlet-corner-wall.md) | `boundary / discretization` | node の入口∩壁コーナーで質量が溜まり P 暴走する問題の根治: 変換時に入口側半割面を壁へ帰属 (`mesh.nodeInletCornerWall`)。Burrows–Kurkov (case/47) で発覚 (2026-09-04) |
