@@ -738,10 +738,10 @@ __global__ void lsqPre_coefInternal_d(
 
 // runtime 1/2: 内部 incidence の gather (per-node, atomic なし)。6 変数 × 3 成分を直接書く。
 __global__ void lsqPreGrad_internal_d(
-    geom_int nCells, geom_int* plane_cells,
-    geom_int* cell_planes_index, geom_int* cell_planes, geom_int nNormalPlanes,
+    geom_int nCells, const geom_int* __restrict__ plane_cells,
+    const geom_int* __restrict__ cell_planes_index, const geom_int* __restrict__ cell_planes, geom_int nNormalPlanes,
     const flow_float* cInt,
-    flow_float* ro, flow_float* Ux, flow_float* Uy, flow_float* Uz, flow_float* P, flow_float* T,
+    const flow_float* __restrict__ ro, const flow_float* __restrict__ Ux, const flow_float* __restrict__ Uy, const flow_float* __restrict__ Uz, const flow_float* __restrict__ P, const flow_float* __restrict__ T,
     flow_float* drodx, flow_float* drody, flow_float* drodz,
     flow_float* dUxdx, flow_float* dUxdy, flow_float* dUxdz,
     flow_float* dUydx, flow_float* dUydy, flow_float* dUydz,

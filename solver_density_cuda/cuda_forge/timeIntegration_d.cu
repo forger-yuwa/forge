@@ -661,49 +661,49 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
 (
  int loop,
  flow_float dt,
- flow_float* dt_local,
+ const flow_float* __restrict__ dt_local,
  flow_float implicit_relax,
- flow_float* gamma_arr,   // per-cell γ (TP: γ_mix(T), CPG: cfg.gamma)。frozen-coefficient Jacobian 用
+ const flow_float* __restrict__ gamma_arr,   // per-cell γ (TP: γ_mix(T), CPG: cfg.gamma)。frozen-coefficient Jacobian 用
  int thermallyPerfect,    // 1: TP 固有系 (実 Ht・χ_eos=c²−κh, κ=γ−1), 0: CPG 閉形式 (従来・ビット不変)
 
  geom_int nCells_all , geom_int nCells,
- geom_float* vol,
- geom_int* plane_cells,
- geom_int* cell_planes_index,
- geom_int* cell_planes,
- geom_float* ccx,
- geom_float* ccy,
- geom_float* ccz,
- geom_float* sx,
- geom_float* sy,
- geom_float* sz,
- geom_float* ss,
+ const geom_float* __restrict__ vol,
+ const geom_int* __restrict__ plane_cells,
+ const geom_int* __restrict__ cell_planes_index,
+ const geom_int* __restrict__ cell_planes,
+ const geom_float* __restrict__ ccx,
+ const geom_float* __restrict__ ccy,
+ const geom_float* __restrict__ ccz,
+ const geom_float* __restrict__ sx,
+ const geom_float* __restrict__ sy,
+ const geom_float* __restrict__ sz,
+ const geom_float* __restrict__ ss,
 
- flow_float* ro,
- flow_float* roUx,
- flow_float* roUy,
- flow_float* roUz,
- flow_float* roe,
+ const flow_float* __restrict__ ro,
+ const flow_float* __restrict__ roUx,
+ const flow_float* __restrict__ roUy,
+ const flow_float* __restrict__ roUz,
+ const flow_float* __restrict__ roe,
 
  flow_float laminar_visc,
- flow_float* vis_turb,
- flow_float* sonic,
- flow_float* Ux,
- flow_float* Uy,
- flow_float* Uz,
- flow_float* Ht,
+ const flow_float* __restrict__ vis_turb,
+ const flow_float* __restrict__ sonic,
+ const flow_float* __restrict__ Ux,
+ const flow_float* __restrict__ Uy,
+ const flow_float* __restrict__ Uz,
+ const flow_float* __restrict__ Ht,
 
- flow_float* res_ro,
- flow_float* res_roUx,
- flow_float* res_roUy,
- flow_float* res_roUz,
- flow_float* res_roe,
+ const flow_float* __restrict__ res_ro,
+ const flow_float* __restrict__ res_roUx,
+ const flow_float* __restrict__ res_roUy,
+ const flow_float* __restrict__ res_roUz,
+ const flow_float* __restrict__ res_roe,
 
- flow_float* dq_old_0,
- flow_float* dq_old_1,
- flow_float* dq_old_2,
- flow_float* dq_old_3,
- flow_float* dq_old_4,
+ const flow_float* __restrict__ dq_old_0,
+ const flow_float* __restrict__ dq_old_1,
+ const flow_float* __restrict__ dq_old_2,
+ const flow_float* __restrict__ dq_old_3,
+ const flow_float* __restrict__ dq_old_4,
 
  flow_float* dq_new_0,
  flow_float* dq_new_1,
@@ -725,7 +725,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
 
  // 軸対称ソースヤコビアン用（isAxisymmetric==1 のときのみ使用）
  int isAxisymmetric,
- flow_float* A_planar,
+ const flow_float* __restrict__ A_planar,
 
  // 軸対称 r 床 (axisymMethod==0): ccy < axisRFloor の帯は hoop ソース不課につき Jacobian も課さない。
  flow_float axisRFloor,
@@ -735,23 +735,23 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
 
  // node-centered 軸対称: 軸上 CV で半径方向運動量 (roUy, index2) 行を decouple する (nullptr 可)。
  // SU2 流の対称面を Jacobian 内で課す = solve の外で状態を手術せず一貫して dq_roUy=0 を得る。
- geom_int* axis_flag,     // (未使用: 旧 nodeAxisDirichlet の全 5 行 decouple。常に nullptr)
+ const geom_int* __restrict__ axis_flag,     // (未使用: 旧 nodeAxisDirichlet の全 5 行 decouple。常に nullptr)
  // node × 軸対称: 軸ノードで roUy 行 (index 2) のみ単位行化 (nullptr で無効)。
- geom_int* axis_ur_flag,
+ const geom_int* __restrict__ axis_ur_flag,
 
  // axisymMethod==1 (isAxisymmetric enc==2) の軸ソース Jacobian ガード: 軸上ノード (==1) はソース 0 なので
  // Jacobian も加えない。decouple 用 axis_flag (nodeAxisDirichlet ゲート) とは独立に渡す (nullptr 可)。
- geom_int* axis_flag_src,
+ const geom_int* __restrict__ axis_flag_src,
 
  // node-centered 壁 no-slip: 壁ノードで運動量3行 (index1=roUx,2=roUy,3=roUz) を decouple する (nullptr 可)。
  // SU2 `DeleteValsRowi` 相当。残差射影だけでは block-DPLUR が壁運動量を連成したまま dq≠0 を返し速度 drift
  // するのを防ぐ。連続(行0)・エネルギー(行4)は保持。methods/discretization.md §7.2.1。
- geom_int* wall_flag,
+ const geom_int* __restrict__ wall_flag,
 
  // node-centered 等温壁: 壁ノードでエネルギー行 (index4=roe) を decouple する (nullptr 可)。
  // 壁ノード T ピン (applyNodeIsothermalWallPin / WMLES 等温 pin) と対。ピンで状態を上書きしながら
  // エネルギー行を連成したまま解くと Jacobian 不整合で発散する (2026-07-20 純伝導検証で実測)。
- geom_int* iso_wall_flag,
+ const geom_int* __restrict__ iso_wall_flag,
 
  // node-centered 弱形式 (Phase 2, 5e): node モードはゴーストセルを使わない。境界半割面 (has_nbr=false=ゴースト
  // 側) をこの node-to-node Jacobian ループから完全に除外する (continue)。境界ノードは物理境界上に乗るため
@@ -804,9 +804,8 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
             if (iso_wall_flag != nullptr && iso_wall_flag[ic] == 1) rowDec[4] = true;
         }
 
-        if (loop == 0) {
-            dq_old_0[ic] = 0.0; dq_old_1[ic] = 0.0; dq_old_2[ic] = 0.0; dq_old_3[ic] = 0.0; dq_old_4[ic] = 0.0;
-        }
+        // (loop==0 の dq_old ゼロ化は blockDPLURSolve の cudaMemset が担う。dq_old は本カーネルでは読み取り専用
+        //  (const __restrict__) にして read-only キャッシュ経路を許す。dq_new とは別バッファ = 別名無し。)
 
         ST diag_block[5][5];
         block_dplur::zero5x5(diag_block);
