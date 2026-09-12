@@ -60,6 +60,7 @@ AXISYMMETRIC= YES
 RESTART_SOL= YES
 RESTART_FILENAME= restart_flow
 SOLUTION_FILENAME= restart_flow_in
+READ_BINARY_RESTART= NO
 FLUID_MODEL= IDEAL_GAS
 GAMMA_VALUE= {gam}
 GAS_CONSTANT= {R:.4f}
@@ -141,8 +142,9 @@ def write_su2_restart(forge_run, su2_dir, su2_mesh, header=None):
             s = fh.readline().split(); pts.append((float(s[0]), float(s[1])))
     pts = np.array(pts)
     tree = cKDTree(c[:, :2]); dist, idx = tree.query(pts)
-    if dist.max() > 1e-8:
-        raise RuntimeError(f"SU2/forge 節点が一致しない (max dist {dist.max():.3e})")
+    # forge h5 の座標は float32 → 数 e-7 m のずれは正常。最小セル 0.5 µm より十分小さい 1e-6 を許容し、対応の一意性を確認
+    if dist.max() > 1e-6 or len(set(idx.tolist())) != len(idx):
+        raise RuntimeError(f"SU2/forge 節点が一致しない (max dist {dist.max():.3e}, unique {len(set(idx.tolist()))}/{len(idx)})")
     e = CP / GAM * T + 0.5 * (u ** 2 + v ** 2)          # e_int = cv T (CPG), E = e + ek
     hdr = header or ["PointID", "x", "y", "Density", "Momentum_x", "Momentum_y", "Energy", "Turb_Kin_Energy", "Omega"]
     with open(Path(su2_dir) / "restart_flow_in.csv", "w", newline="") as fo:
