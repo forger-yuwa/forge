@@ -35,7 +35,7 @@ int main(){
         {"N2/H2O trace 1e-6",{0,1},{1.0-1e-6,1e-6}}, {"N2/HE 0.5/0.5",{0,3},{0.5,0.5}} };
     // T_max=6000 を超える e は反転不能 (クランプ) なので範囲内のみ。<200 K は低温端の線形外挿 (反転可)。
     const double Tlist_edges[] = {50,60,100,150,199.9,200,200.1,250,298.15,300,400,600,800,950,999.9,1000,1000.1,1200,1500,2000,3000,4000,5000,5900,5999,6000};
-    printf("%-30s %-6s %9s %9s %9s %9s %9s %9s %6s %6s\n","mix","datum","errF[K]","errF/T","errD[K]","errHyb/T","drift/T","driftD/T","itF","itD");
+    printf("%-30s %-6s %9s %9s %9s %9s %9s %9s %9s %6s\n","mix","datum","errF[K]","errF/T","errD[K]","errHyb/T","driftH/T","driftD/T","driftF/T","itF");
     // errF/errD: 厳密参照 (double Newton, tol 1e-9, 60 反復) に対する float 版 / 生産 double 版 (tol 1e-3+1e-6T) の誤差
     int fails=0;
     for (int datum=0; datum<2; ++datum) {
@@ -47,7 +47,7 @@ int main(){
               const float inv=1.0f/(ys>1e-30f?ys:1e-30f); for (int i=0;i<n;i++){ Yf[i]*=inv; m.Y[i]=(double)Yf[i]; } }
             if (datum) for (int i=0;i<n;i++){ const double h_ref=thermo_h_molar(sp[i],298.15); const double da7=-h_ref/THERMO_RU; sp[i].low[7]+=da7; sp[i].high[7]+=da7; }
             for (int i=0;i<n;i++) spf[i]=toF(sp[i]);
-            double maxdT=0, maxrel=0, maxres=0, maxdrift=0, maxdh=0, maxdTrelT=0, maxresRelT=0, maxHyb=0, maxdriftD=0; int itFmax=0, itDmax=0;
+            double maxdT=0, maxrel=0, maxres=0, maxdrift=0, maxdh=0, maxdTrelT=0, maxresRelT=0, maxHyb=0, maxdriftD=0, maxdriftF=0; int itFmax=0, itDmax=0;
             for (double T : Tlist_edges) {
                 // 参照: double で e(T)
                 double cpd, hd; thermo_cph_mix(sp.data(), n, m.Y.data(), T, &cpd, &hd);
@@ -69,7 +69,7 @@ int main(){
                     float cpf,hf; thermo_cph_mix_f(spf.data(),n,Yf.data(),Tf,&cpf,&hf);
                     const float Rf=thermo_R_mix_f(spf.data(),n,Yf.data()); const float e2=hf-Rf*Tf;
                     const float Tf2=thermo_T_from_e_f(spf.data(),n,Yf.data(),e2,Tf,50.0f,6000.0f,nullptr);
-                    maxdrift=std::max(maxdrift,(double)fabsf(Tf2-Tf));
+                    maxdriftF=std::max(maxdriftF,(double)fabsf(Tf2-Tf)/Tref);   // 純 float 反転の再反転ドリフト (相対, 参考値)
                     // ハイブリッド (float 8 反復 + double 研磨 1 段) の誤差
                     { double cpH,hH,TfH; const double Th=thermo_T_from_e_hybrid(sp.data(),spf.data(),n,m.Y.data(),Yf.data(),e,g,50.0,6000.0,&cpH,&hH,&TfH,12);
                       maxHyb=std::max(maxHyb,fabs(Th-Tref)/Tref);
@@ -107,9 +107,9 @@ int main(){
             // ドリフトは float 格納そのものに由来する (従来 double 反転でも同程度)。判定: ハイブリッドのドリフトが double 反転の 2 倍 + 1e-8 以内。
             const bool ok = (maxHyb < 3.0e-8) && (datum == 0 || maxdrift <= 2.0*maxdriftD + 1.0e-8);
             if (!ok) fails++;
-            printf("%-30s %-6s %9.2e %9.2e %9.2e %9.2e %9.2e %9.2e %6d %6d %s\n", m.name.c_str(), datum?"298K":"abs", maxdT, maxdTrelT, maxrel, maxHyb, maxdrift, maxdriftD, itFmax, itDmax, ok?"OK":"FAIL");
+            printf("%-30s %-6s %9.2e %9.2e %9.2e %9.2e %9.2e %9.2e %9.2e %6d %s\n", m.name.c_str(), datum?"298K":"abs", maxdT, maxdTrelT, maxrel, maxHyb, maxdrift, maxdriftD, maxdriftF, itFmax, ok?"OK":"FAIL");
         }
     }
-    printf("VERDICT: %s (fails=%d; 判定 errHyb/T < 3e-8 [float の T 格納分解能未満] かつ float 再格納 10 往復のドリフトが従来 double 反転の 2 倍+1e-8 以内)\n", fails?"FAIL":"PASS", fails);
+    printf("VERDICT: %s (fails=%d; 判定 errHyb/T < 3e-8 [float の T 格納分解能未満] かつ float 格納 roe 10 往復のハイブリッド反転ドリフト driftH/T が従来 double 反転 driftD/T の 2 倍+1e-8 以内; driftF は純 float 反転の参考値)\n", fails?"FAIL":"PASS", fails);
     return fails?1:0;
 }

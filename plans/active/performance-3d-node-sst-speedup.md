@@ -107,7 +107,8 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 - **場の一致 (2026-09-12 改訂, codex result M3 採用)**: 各項目後に同 IC から 100 step 継続し、`VALUE/*` 全量の正規化最大差
   (`tools/perf_regress.py cmp`) を見る。float 化は熱力学の丸めを 1e-6 相対で意図的に変えるので、**基準は絶対値**: A = ρ/P/T/ρY/音速/μ ≤ 1e-5、
   B = 速度成分 (**|U| ベクトル尺度で正規化**; 成分の max で割ると 2D の Uz や小さい成分が過大評価される [codex result-2 M2])・ρe/h0/k/ω/ρK/ρΩ/凝縮量 ≤ 1e-4、
-  C = vis_turb ≤ 1e-2。診断量 (res_*, limiter_*, dt_local, wall_dist 等) は除外。run-to-run ノイズ床 (基準×基準 ≥3 本) は参考値として併記し、ノイズの 2 倍を超えた
+  C = vis_turb ≤ 1e-2、**または**基準バイナリ同士のノイズ床の 2 倍以内 (場ごと; cell の atomicAdd 床や減衰乱流のように絶対基準がノイズ以下の場を扱う)。
+  診断量 (res_*, limiter_*, dt_local, wall_dist, 勾配 d*d*, 凝縮診断) は除外し、欠落・形状不一致・非有限値は FAIL (`perf_regress.py cmp --noise`, 2026-09-12 codex result-3 m4)。run-to-run ノイズ床 (基準×基準 ≥3 本) は参考値として併記し、ノイズの 2 倍を超えた
   変数は項目別に原因を書く (2D node TP 300 step: ρ 2.3 倍・Ux 2.2 倍 = 絶対 1.2e-6 / 2.4e-6、float 熱力学の系統差)。
   ビット一致は「固定入力に対する単一カーネル出力」にだけ要求する (リミッタ template 化など)。
 - **収束と準定常** (codex M5): 最終バイナリで run_0234 config を同 IC から 12000 step 走らせ、基準 run と**両方**が
@@ -178,7 +179,7 @@ block-DPLUR は逆にメモリ律速で、sweep ごとに対角 5×5 と近傍�
 - **最終版 (ac9262e8, WALE double 復帰・研磨反復化後) の追加回帰 (2026-09-12, codex result M5 採用, `tools/perf_regress.py`)**:
   case/09 `run_0052_perf_regress_node_periodic_dualtime` (node 周期・dual-time・SST・E_t): P/T/k/ω/μt ≤4.3e-7 = base×base 同等
   (速度は base×base 自体 0.32 の減衰乱流ばらつきで比較不能); case/23 `run_0100_perf_regress_cell_axisym_tp_implicit` (cell 軸対称 TP
-  陰解法 WALE): 全場 ≤3.4e-6 = base×base 同等; case/16 `run_0456_perf_regress_node2d_cond` (node 2D SST 凝縮): 全場 ≤1.6e-5、
+  陰解法 WALE): 全場 ≤3.4e-6 = base×base 同等; case/16 `run_0456_perf_regress_node2d_cond` (node 2D SST 凝縮): 状態量 ≤1.6e-5 (Uy)、h0 2.1e-5 (基準同士 3.2e-5)、vis_turb 1.08e-3 (基準同士 9.2e-4)、
   g_0/rog_0 3〜4e-6 = base×base 同等; `run_0450` は基準 5 本で再計測 (ρ 2.3 倍・Ux 2.2 倍 = 絶対 1.2e-6/2.4e-6, §4.3 絶対基準内)。
   line-implicit は §5.1 #12 (PASS)。判定ツールは `tools/perf_regress.py cmp --noise <基準ラベル>` (絶対基準 or 2×ノイズ床で場ごとに合否、勾配・診断量は除外):
   2026-09-12 再集計 — node 2D TP (基準 5 本) / cell 2D TP / node 2D 凝縮 / naca cell CPG 陽 / naca cell TP 陽 (基準 4 本; ρ がノイズの 2.0 倍 = 2.2e-5) /

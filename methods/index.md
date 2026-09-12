@@ -12,7 +12,7 @@ forge の理論的背景と実装解説の索引。運用方針は [README.md](R
 | 領域 | ドキュメント | 状態 |
 | --- | --- | --- |
 | アーキテクチャ全体 | [architecture/overview.md](architecture/overview.md) | 整備済み |
-- [`architecture/performance.md`](architecture/performance.md) — 性能プロファイル (カーネル別 ms/step)・計測手順 (bench_steps/nsys/ncu/cuobjdump)・数値精度 (float32 既定, リテラル接尾辞, double の限定) の方針
+| 性能・数値精度方針 | [architecture/performance.md](architecture/performance.md) | 整備済み (2026-09-12: プロファイル・計測手順・float32/double 方針・判定基準) |
 | 離散化レイアウト (cell/node) | [discretization.md](discretization.md) | 整備中 (median-dual 両対応) |
 | 勾配再構成 | [gradient.md](gradient.md) | 整備済み |
 | リミッタ | [limiter.md](limiter.md) | 整備済み |

@@ -63,6 +63,6 @@
   `thermoHrefTemp>0` が前提 (絶対 datum の H2O は float 段が収束しない; datum 無しは自動で double 反転)。
 - **gather 系の試み (結果)**: 近傍 dq / 原始量の stride-8 AoS パック (`blockDPLURDqPack`, `mesh.primPack`) は A10G で +0.7〜+2.7 ms/step の逆効果、
   節点 RCM 再番号付け (`mesh.renumber: rcm`) は −3.3 %。gather は既に L2 で吸収されておりレイテンシ律速 (占有率 28 %) が残る。パックは既定 0、RCM は opt-in。
-- 面流束の `atomicAdd` 蓄積のため同一バイナリでも全場はビット一致しない。精度変更の採否は**絶対基準** (場のスケール正規化最大差:
-  ρ/P/T/ρY ≤1e-5、速度 [|U| 尺度]/エネルギー/k/ω ≤1e-4、μt ≤1e-2; `tools/perf_regress.py cmp`) で判定し、基準バイナリ同士の
-  run-to-run ノイズ床を併記する (判定基準は plan §4.3)。
+- 面流束の `atomicAdd` 蓄積のため同一バイナリでも全場はビット一致しない。精度変更の採否は場ごとに「**絶対基準** (場のスケール正規化最大差:
+  ρ/P/T/ρY ≤1e-5、速度 [|U| 尺度]/エネルギー/k/ω ≤1e-4、μt ≤1e-2) **または** 基準バイナリ同士の run-to-run ノイズ床の 2 倍以内」で判定する
+  (`tools/perf_regress.py cmp --noise`; 欠落・形状不一致・非有限値は FAIL、勾配・診断量は除外。判定基準は plan §4.3)。

@@ -88,11 +88,16 @@ def cmp_fields(ref, f, verbose=True):
     sc = scales(ref); rows = []
     for k in sorted(ref.keys()):
         cat = category(k)
-        if cat is None or k not in f: continue
+        if cat is None: continue
+        if k not in f:                       # 比較先に無い場は明示的に FAIL (黙って除外しない, codex result-3 m4)
+            rows.append((k, cat, float("inf"), float("inf"), TOL[cat], False, -1)); continue
         x = ref[k][...].astype(np.float64); y = f[k][...].astype(np.float64)
-        if x.shape != y.shape: continue
+        if x.shape != y.shape:
+            rows.append((k, cat, float("inf"), float("inf"), TOL[cat], False, -2)); continue
         s = max(sc.get(k, np.abs(x).max()), 1e-30); d = np.abs(x - y)
-        rows.append((k, cat, d.max()/s, np.sqrt((d**2).mean())/s, TOL[cat], d.max()/s <= TOL[cat], int(np.isnan(y).sum())))
+        nonfinite = int((~np.isfinite(y)).sum())
+        mx = float(d.max()) / s if nonfinite == 0 else float("inf")
+        rows.append((k, cat, mx, (np.sqrt((d**2).mean())/s if nonfinite == 0 else float("inf")), TOL[cat], (mx <= TOL[cat]) and nonfinite == 0, nonfinite))
     return rows
 
 def cmp(a):
@@ -105,17 +110,20 @@ def cmp(a):
     for nl in (a.noise or []):
         for k, cat, mx, rms, tol, ok, nn in cmp_fields(ref, h5py.File(os.path.join(a.dst, nl, "res_%d.h5" % n), "r")["VALUE"]):
             noise[k] = max(noise.get(k, 0.0), mx)
+    anyfail = False
     for label in a.labels:
         f = h5py.File(os.path.join(a.dst, label, "res_%d.h5" % n), "r")["VALUE"]
         rows = cmp_fields(ref, f); out = []; nbad = 0
         for k, cat, mx, rms, tol, ok, nn in rows:
-            nz = noise.get(k); by_noise = (nz is not None and mx <= 2.0 * nz)
+            nz = noise.get(k); by_noise = (nz is not None and np.isfinite(mx) and mx <= 2.0 * nz)
             passed = ok or by_noise
             if not passed: nbad += 1
-            out.append("  %-10s [%s] max=%.2e rms=%.2e tol=%.0e%s %s%s" % (k, cat, mx, rms, tol, (" noise=%.2e" % nz) if nz is not None else "",
-                       "ok" if ok else ("ok(noise x%.1f)" % (mx / nz) if by_noise else "EXCEED"), (" nan=%d" % nn) if nn else ""))
+            tag = "ok" if ok else ("ok(noise x%.1f)" % (mx / nz) if by_noise else ("MISSING" if nn == -1 else "SHAPE" if nn == -2 else ("NONFINITE(%d)" % nn) if nn > 0 else "EXCEED"))
+            out.append("  %-10s [%s] max=%.2e rms=%.2e tol=%.0e%s %s" % (k, cat, mx, rms, tol, (" noise=%.2e" % nz) if nz is not None else "", tag))
         print("--- %s vs %s : %s (%d/%d fields; noise labels: %s)" % (a.ref, label, "PASS" if nbad == 0 else "FAIL", len(rows) - nbad, len(rows), ",".join(a.noise or [])))
         for o in out: print(o)
+        anyfail = anyfail or (nbad > 0)
+    if anyfail: sys.exit(1)
 
 ap = argparse.ArgumentParser(); sp = ap.add_subparsers(dest="cmd", required=True)
 p = sp.add_parser("prep"); p.add_argument("src"); p.add_argument("dst"); p.add_argument("ic"); p.add_argument("--mesh"); p.add_argument("--value"); p.add_argument("--nsteps", type=int, default=300); p.set_defaults(fn=prep)
