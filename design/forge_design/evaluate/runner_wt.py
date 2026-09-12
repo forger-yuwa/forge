@@ -277,10 +277,10 @@ initial: "uniform_p101325_u10"
 def _bcond(p: Problem, euler: bool) -> str:
     Pt, Tt = float(p.spec["Pt"]), float(p.spec["Tt"])
     pa = float(p.spec.get("p_ambient", 1000.0))
-    wall_kind = "slip" if euler else "wall"
+    # 壁行は Problem.wall_bcond_line (spec.wall_thermal が単一ソース: 断熱 wall / 等温 wall_isothermal+Ts)
     return f"""inlet:  {{physID: 1, kind: inlet_Pressure,   outputHDFflg: 0, ints: , floats: {{Pt: {Pt}, Tt: {Tt}, k: 1.0, omega: 18000.0}}}}
 outlet: {{physID: 2, kind: outlet_statPress, outputHDFflg: 1, ints: , floats: {{Ps: {pa}, Pt: {pa}, Tt: 300.0}}}}
-wall:   {{physID: 3, kind: {wall_kind},             outputHDFflg: 1, ints: , floats: }}
+wall:   {p.wall_bcond_line(euler, phys_id=3, output=1)}
 axis:   {{physID: 4, kind: axis,             outputHDFflg: 0, ints: , floats: }}
 """
 

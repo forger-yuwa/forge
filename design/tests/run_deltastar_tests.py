@@ -258,5 +258,48 @@ def hf2(v):
 check("P-spline: δ'' の高周波が生値の 1/50 以下", hf2(d_s) < hf2(d_noisy) / 50, f"{hf2(d_s):.2e} vs {hf2(d_noisy):.2e}")
 check("P-spline: 重み 0 の点を無視 (x<-0.5 の外挿値が有限)", bool(np.all(np.isfinite(f_s(np.array([-0.9, -0.7]))))))
 
+
+# ---------------------------------------------------------------- 符号付き δ_r (2026-09-12, 等温壁 plan / codex M1)
+# 冷却壁では壁近傍の ρu が参照 (Euler) より大きく質量「過剰」→ δ_r < 0 が物理。正 / 零 / 負を横断して復元する。
+print("\n--- signed delta_r (positive / zero / negative) ---")
+rw = 5.0
+r = wall_clustered_grid(rw, n=161, first_frac=1e-4)
+qE = lambda rr: np.full_like(np.asarray(rr, float), 2.0)
+
+
+def annulus_excess(r, rw_ns, delta_neg, q0=2.0, eps=0.5):
+    """壁側の円環 [rw_ns - t, rw_ns] で q = q0 (1+eps) (過剰)。等価 δ_r は 2π∫ q0·eps r dr = -2π q0 ∫_{rw}^{r_eff} r dr
+    → r_eff² = rw² + eps (rw² - (rw-t)²) から。delta_neg は返り値の期待値として呼び出し側で計算する。"""
+    q = qE(r).copy()
+    q[r >= rw_ns - delta_neg] = q0 * (1.0 + eps)
+    return q
+
+
+for t in (0.02, 0.05, 0.10):
+    eps = 0.5
+    qN = annulus_excess(r, rw, t, eps=eps)
+    r_eff = np.sqrt(rw ** 2 + eps * (rw ** 2 - (rw - t) ** 2))
+    d_true = rw - r_eff                       # < 0
+    res = core_matched_deficit(r, qN, qE(r), rw)
+    resb = band_local_deficit(r, qN, qE, rw, delta_in=0.0)
+    check(f"core_matched 負 δ_r (t={t})", np.isfinite(res["delta_r"]) and res["delta_r"] < 0 and abs(res["delta_r"] / d_true - 1) < 0.05,
+          f"got {res['delta_r']:.5f} exact {d_true:.5f} reason={res['reason']}")
+    check(f"band_local 負 δ_r (t={t})", resb is not None and np.isfinite(resb["delta_r"]) and resb["delta_r"] < 0 and abs(resb["delta_r"] / d_true - 1) < 0.10,
+          f"got {resb['delta_r'] if resb else None} exact {d_true:.5f}")
+res0 = core_matched_deficit(r, qE(r), qE(r), rw)
+check("零欠損 → δ_r = 0", abs(res0["delta_r"]) < 1e-6, f"{res0['delta_r']:.2e}")
+# 正 (欠損) は既存テストで担保。ここでは同じ厚さの欠損と過剰が符号だけ変えて同程度の大きさになることを見る
+qD = qE(r).copy(); qD[r >= rw - 0.05] = 2.0 * 0.5
+resP = core_matched_deficit(r, qD, qE(r), rw); resN = core_matched_deficit(r, annulus_excess(r, rw, 0.05, eps=0.5), qE(r), rw)
+check("欠損と過剰が反対符号・同程度", resP["delta_r"] > 0 and resN["delta_r"] < 0 and abs(abs(resN["delta_r"]) / resP["delta_r"] - 1) < 0.1,
+      f"+{resP['delta_r']:.4f} / {resN['delta_r']:.4f}")
+# 平滑化: positive=False は負値を保つ、True は 0 に丸める
+from forge_design.metrics.deltastar import smooth_delta_quintic
+xx = np.linspace(0.0, 40.0, 200); dd = -0.01 + 0.002 * xx
+f_signed, _ = smooth_delta_quintic(xx, dd, positive=False); f_pos, _ = smooth_delta_quintic(xx, dd, positive=True)
+check("P-spline positive=False は負値を保持", np.all(f_signed(xx[:20]) < 0) and abs(f_signed(xx[100]) - dd[100]) < 1e-3, f"{f_signed(xx[0]):.4f}")
+check("P-spline positive=True は 0 に丸める", np.all(f_pos(xx[:20]) == 0.0))
+
+
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAIL'}")
 sys.exit(1 if FAIL else 0)

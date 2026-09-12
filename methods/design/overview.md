@@ -759,6 +759,37 @@ r: 壁側幾何級数クラスタリング)、**gmsh msh4.1 テキストを直�
 同一トポロジで再生成するため、帰還パス間の場移植は同 index コピーで済む (補間ノイズなし)。
 生成のたび `check_mesh_quality.py` ゲート (AR≤1000 / skew≤0.9) を通す。
 
+### 壁の熱境界条件 (断熱 / 等温) と壁温影響の評価 (2026-09-12 起票、検証中)
+
+計画: [`plans/active/tooling-nozzle-isothermal-wall-chain.md`](../../plans/active/tooling-nozzle-isothermal-wall-chain.md)。
+
+NS 評価の壁は既定で断熱 (`wall`) だが、問題定義 `spec.wall_thermal: {mode: isothermal, Tw: <K>}` で
+**等温壁** (`wall_isothermal`, floats `Ts`) に切り替える。同じ値が (i) bcond 生成 (`runner_wt._bcond`、SERN の runner も共通)、
+(ii) 積分法初期壁 (`feedback/deltastar_integral.py` の `thermal_bc = prescribed_temperature`)、(iii) 帳簿 (`prepare_info.json` /
+metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (ρu 質量収支) は熱境界条件に依らない定義なので変更なし。
+壁処理は **low-Re SST (`wallTreatmentSST: 0`) のみ** — 壁関数 × 等温壁の Kader 熱流束は圧縮性冷却壁で過大 (+87 %,
+[`plans/active/turbulence-sst-thermal-flux-model.md`](../../plans/active/turbulence-sst-thermal-flux-model.md) §7) のため設計チェーンでは使わない。
+
+**冷却壁とメッシュ**: 壁単位の $y^+ = y_1\sqrt{\rho_w\tau_w}/\mu_w$ は同じ $y_1$ でも冷却で上がる ($\rho_w$ 増・$\mu_w$ 減・$\tau_w$ 増)。
+ノズル出口相当 (M 4.2, $T_w/T_{aw}$≈0.26) で ×4〜5 の見積り。断熱で y⁺1 のメッシュは冷却壁で y⁺4〜5 になるので、
+`wall_first_frac` は冷却壁の実測 y₁⁺ で決め、AR ゲートと競合するときは `ni` を増やす (許容 y₁⁺ は平板の掃引で確定、plan §4.2)。
+
+**実装 (2026-09-12)**: `Problem.wall_thermal` / `wall_bcond_line` / `wall_thermal_bc_integral` (`probdef.py`)、`runner_wt._bcond`・`runner_sern` の壁行、
+`prepare_ns` (thermal_bc を spec から強制、`prepare_info.wall_thermal`)。**符号付き δ\***: `metrics/deltastar.py::_negative_delta_r`
+(参照 ρu を壁値で外へ延長し $r_{eff}^2 = r_w^2 - D/(\pi q_w)$; `negative_deficit` は soft)、P-spline の `positive` は断熱のみ True。
+**x 依存の第一セル**: `mesh2d.Mesh2DParams.wall_first_frac_throat` (+ `wall_first_blend_x0/x1`, `wall_first_up_x0/x1`) でスロート近傍だけ
+第一セルを詰める (問題 YAML の `mesh:` に同名キー)。case/44 冷却壁の実例: ni 4001 / nj 113 / 1.8e-5 / 2.5e-6 / throat_refine 30 で AR max 846。
+平板の実測 (case/48): 冷却で y₁⁺ は ×5.7、δ\*/θ は y₁⁺ ≤ 3.6 で 2 % 内、$q_w$ は y₁⁺ ≤ 1 で 1.5 % 内。
+
+**検証の物差し** (plan §4.3): 摩擦は van Driest II ($C_f(Re_\theta; M_e, T_w/T_{aw})$、非圧縮基準 Kármán–Schoenherr)、
+熱流束は Reynolds アナロジー係数 $2St/C_f$ 1.0–1.2、積分厚さは CONTUR 積分法 (同じ $T_w$) と Crocco–Busemann 温度–速度関係、
+コード間は同一メッシュ SU2 (素 SST)。
+
+**壁温影響の評価方針** (plan §4.6): $T_w$ は dv ではなく作動点と同じ**環境シナリオ**。公称形状で断熱と $T_w^{\rm nom}$ の
+2 run から目的量の感度ブラケットを取り、設計公差より小さければ断熱設計 + ロバスト性記録、大きければ公称 $T_w$ で設計
+(等温 δ\* 反復)、壁温不確かさが支配するならシナリオを作動点として束ねたロバスト MOO。$T_w(x)$ 未知の連成は
+フル CHT の前に「弱 CHT ループ」(NS の $q_w$ → 1D 壁伝導 + 冷却剤モデル → $T_w(x)$ → `wallProfile`) を使う。
+
 ## 評価と目的関数
 
 バッチ評価 CLI が run ディレクトリを生成し (`run_*` 命名規約・case README 追記)、forge を

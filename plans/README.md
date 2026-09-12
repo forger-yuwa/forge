@@ -23,6 +23,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [tooling-nozzle-isothermal-wall-chain.md](active/tooling-nozzle-isothermal-wall-chain.md) | `tooling / boundary layer` | **ノズル設計チェーンの等温壁化** (2026-09-12 起票): `spec.wall_thermal` を単一ソースに bcond/積分法初期壁/帳簿を駆動、超音速冷却壁平板 (case/48, M4.19, $T_w/T_{aw}$ 0.26, y₁⁺ 掃引) で低 Re SST を van Driest II / RAF / CONTUR / SU2 と照合 → ノズル CPG × SU2 等温 → 生産 TP (case/44) の等温 δ\* 反復と壁温感度台帳。壁関数と CHT は対象外 (弱 CHT ループの方針のみ §4.6) |
 | [condensation-kantrowitz-gamma-twophase-sonic.md](active/condensation-kantrowitz-gamma-twophase-sonic.md) | `condensation` | **Kantrowitz 補正の γ を蒸気 γ_v に修正 + 凝縮セルの二相 frozen 音速** (2026-09-10 起票): 旧実装はセル気相混合 γ (H2O–N2 で 1.40) と g を無視した全蒸気音速。A/B キー `condKantrowitzGammaMode` / `condSonicModel`、Wyslouzil 2D (case/16) で変化量を定量化 |
 | [chemistry-finite-rate-h2.md](active/chemistry-finite-rate-h2.md) | `thermophysics / chemistry` | **有限速度化学 (H₂ 燃焼・ノズル化学非平衡)** (2026-09-04 起票): 種ブロック point-implicit + sensible datum 反応熱陽注入。Phase 0 (CEA スクリーニング・熱力学 DB ツール・Jachimowski YAML) 完了、Phase 1 ソース項から実装 |
 | [boundary-node-inlet-corner-wall.md](active/boundary-node-inlet-corner-wall.md) | `boundary / discretization` | node の入口∩壁コーナーで質量が溜まり P 暴走する問題の根治: 変換時に入口側半割面を壁へ帰属 (`mesh.nodeInletCornerWall`)。Burrows–Kurkov (case/47) で発覚 (2026-09-04) |

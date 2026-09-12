@@ -116,6 +116,15 @@ def massflow_ratio(ns_run, euler_run) -> dict:
 
 
 
+def _negative_delta_r(D: float, rwN: float, q_wall_ref: float) -> float:
+    r"""符号付き δ_r (2026-09-12, plan tooling-nozzle-isothermal-wall-chain §4.1 / codex M1):
+    質量欠損 $D<0$ (冷却壁で壁近傍の ρu が参照より大きい = 過剰) のときは、参照 ρu を壁値で壁の外へ延長し
+    $2\pi\int_{r_w}^{r_{eff}} q_{ref,w}\, r\,dr = -D$ を解く: $r_{eff}^2 = r_w^2 - D/(\pi q_{ref,w})$、
+    $\delta_r = r_w - r_{eff} < 0$ (壁が実効的に外へ動く)。旧実装の線形化 $D/(2\pi r_w \bar q)$ を置換 (診断値だった)。"""
+    qw = max(float(q_wall_ref), 1e-30)
+    return float(rwN - np.sqrt(rwN * rwN - D / (np.pi * qw)))
+
+
 def core_matched_deficit(r, q_ns, q_e, rw_e: float, core_frac: float = 0.30,
                          n_axis_skip: int = 1, outer_frac: float = 0.25, refine: int = 4):
     r"""1 断面の**コア整合質量欠損 → 半径方向等価排除厚** (純関数、単体試験対象)。
@@ -153,8 +162,7 @@ def core_matched_deficit(r, q_ns, q_e, rw_e: float, core_frac: float = 0.30,
     r_desc = r[::-1]
     reason = []
     if D < 0:
-        q_scale = max(float(np.mean(qref[mc])), 1e-30)
-        delta_r = D / (2 * np.pi * rwN * q_scale)                          # 線形化 (負値, 診断用)
+        delta_r = _negative_delta_r(D, rwN, qref[-1])                      # 符号付き (負値 = 過剰質量)
         reason.append("negative_deficit")
     elif D > F_from_wall[-1]:
         delta_r = float("nan"); reason.append("no_root")
@@ -258,8 +266,7 @@ def band_local_deficit(r, q_ns, q_e, rw_e: float, delta_in: float | None = None,
     r_desc = rr[::-1]
     reason = []
     if D < 0:
-        q_scale = max(float(np.mean(qref[mz])), 1e-30)
-        delta_r = D / (2 * np.pi * rwN * q_scale)
+        delta_r = _negative_delta_r(D, rwN, qref[-1])                      # 符号付き (負値 = 過剰質量)
         reason.append("negative_deficit")
     else:
         F_zone = float(np.interp(rwN - y_b, r_desc[::-1], F_from_wall[::-1]))  # 帯下端までの容量
@@ -376,7 +383,8 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     x = np.array([r_["x"] for r_ in rows])
     draw = np.array([r_["delta_r"] for r_ in rows])
     sens = np.array([r_["delta_r_sens"] for r_ in rows])
-    HARD = ("negative_deficit", "no_root", "nan")
+    # negative_deficit は 2026-09-12 から soft (符号付き δ_r を採用: 冷却壁では物理)。hard は根なし/NaN のみ
+    HARD = ("no_root", "nan")
     ok = np.ones(len(rows), bool); hard_ok = np.ones(len(rows), bool); reasons = []
     for k, r_ in enumerate(rows):
         rs = list(r_["reason"])

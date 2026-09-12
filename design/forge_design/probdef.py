@@ -47,6 +47,40 @@ class Problem:
             return GasSemiPerfect(dict(gs["species"]), Tt=float(self.spec["Tt"]))
         raise ValueError(f"gas.model '{kind}' は未知 (cpg | semiperfect)")
 
+    # --- 壁の熱境界条件 (2026-09-12, plan tooling-nozzle-isothermal-wall-chain §4.1) ---
+    # spec.wall_thermal: {mode: adiabatic} (既定) | {mode: isothermal, Tw: <K>}。
+    # bcond (wall / wall_isothermal+Ts)・積分法初期壁 (thermal_bc)・帳簿の 3 箇所が全てここを読む (単一ソース)。
+    @property
+    def wall_thermal(self) -> dict:
+        wt = self.spec.get("wall_thermal") or {"mode": "adiabatic"}
+        mode = str(wt.get("mode", "adiabatic"))
+        if mode == "adiabatic":
+            return {"mode": "adiabatic"}
+        if mode == "isothermal":
+            Tw = float(wt["Tw"])
+            if not Tw > 0.0:
+                raise ValueError("spec.wall_thermal.Tw は正の温度 [K]")
+            return {"mode": "isothermal", "Tw": Tw}
+        raise ValueError(f"spec.wall_thermal.mode '{mode}' は未知 (adiabatic | isothermal)")
+
+    @property
+    def wall_thermal_bc_integral(self) -> dict:
+        """積分法初期壁 (`feedback/deltastar_integral.integral_bl`) に渡す thermal_bc。"""
+        wt = self.wall_thermal
+        if wt["mode"] == "isothermal":
+            return {"mode": "prescribed_temperature", "Tw": wt["Tw"]}
+        return {"mode": "adiabatic"}
+
+    def wall_bcond_line(self, euler: bool, phys_id: int = 3, output: int = 1) -> str:
+        """forge bcondConfig の壁 1 行。Euler は slip、NS は wall_thermal に従い wall / wall_isothermal (Ts)。"""
+        if euler:
+            return f"{{physID: {phys_id}, kind: slip,             outputHDFflg: {output}, ints: , floats: }}"
+        wt = self.wall_thermal
+        if wt["mode"] == "isothermal":
+            return (f"{{physID: {phys_id}, kind: wall_isothermal,  outputHDFflg: {output}, ints: , "
+                    f"floats: {{Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: {wt['Tw']}}}}}")
+        return f"{{physID: {phys_id}, kind: wall,             outputHDFflg: {output}, ints: , floats: }}"
+
     @property
     def is_semiperfect(self) -> bool:
         return str(self.raw.get("gas", {}).get("model", "cpg")) == "semiperfect"

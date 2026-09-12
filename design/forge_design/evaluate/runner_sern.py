@@ -166,7 +166,6 @@ initial: "uniform_p101325_u10"
 
 def _bcond_config(p: Problem, st: dict) -> str:
     model = p.evaluate.get("model", "euler")
-    wall_kind = "slip" if model == "euler" else "wall"
     ex, en = st["exhaust"], st["ext"]
 
     def inlet(name, pid, s):
@@ -178,7 +177,8 @@ def _bcond_config(p: Problem, st: dict) -> str:
                 f"floats: {{Ps: {en['P']:.6g}, Pt: {en['P']:.6g}, Tt: {en['T']:.6g}}}}}\n")
 
     def wall(name, pid):
-        return f"{name}: {{physID: {pid}, kind: {wall_kind}, outputHDFflg: 1, ints: , floats: }}\n"
+        # 壁行は spec.wall_thermal が単一ソース (断熱 wall / 等温 wall_isothermal+Ts)。Euler は slip
+        return f"{name}: {p.wall_bcond_line(model == 'euler', phys_id=pid, output=1)}\n"
     P = PHYS_SERN
     return (inlet("inlet_nozzle", P["inlet_nozzle"], ex) + inlet("inlet_ext", P["inlet_ext"], en)
             + outlet("outlet", P["outlet"]) + wall("ramp", P["ramp"]) + wall("cowl_in", P["cowl_in"])

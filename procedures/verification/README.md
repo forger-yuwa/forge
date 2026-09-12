@@ -9,6 +9,7 @@
 - `case/08.bump`
 - `case/20.naca_ml`
 - `case/13.nozzle_H`
+- `case/48.flat_plate_cooled_m4` (等温壁 × 低 Re SST の冷却超音速平板: [48-flat-plate-cooled.md](48-flat-plate-cooled.md))
 
 ## 既定の検証先
 

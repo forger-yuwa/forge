@@ -686,13 +686,19 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         model = str(init_cfg.get("model", "contur"))
         if model not in ("contur", "contur_momentum_integral"):
             raise ValueError(f"deltastar_initializer.model={model!r} は未対応 (contur のみ)")
+        # 熱境界条件は spec.wall_thermal が単一ソース (plan tooling-nozzle-isothermal-wall-chain §4.1)。
+        # initializer/YAML の thermal_bc 指定は無視し、食い違えば警告する (NS と積分法が別の壁温を読む状態を作らない)。
+        tbc = p.wall_thermal_bc_integral
+        if init_cfg.get("thermal_bc") and dict(init_cfg["thermal_bc"]) != tbc:
+            print(f"[prepare_ns] warning: initializer.thermal_bc={init_cfg['thermal_bc']} は無視 (spec.wall_thermal={p.wall_thermal} を使用)")
         res_init = integral_bl(d["wall"], wall_inv, _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]),
-                               scale, thermal_bc=init_cfg.get("thermal_bc"),
+                               scale, thermal_bc=tbc,
                                theta0_m=init_cfg.get("theta0_m"), x_virtual_m=init_cfg.get("x_virtual_m"),
                                a_crocco=float(init_cfg.get("a_crocco", 1.0)), closure=str(init_cfg.get("closure", "contur")))
         # 積分法の出力も同じ 5 次 P-spline で平滑化 (N(Re) テーブルの折れ目などを壁曲率に持ち込まない)
         from ..metrics.deltastar import smooth_delta_quintic
-        f_s, sm_diag = smooth_delta_quintic(res_init["x"], res_init["delta_r"], knot_spacing=2.0, lam=1.0)
+        f_s, sm_diag = smooth_delta_quintic(res_init["x"], res_init["delta_r"], knot_spacing=2.0, lam=1.0,
+                                            positive=(p.wall_thermal["mode"] == "adiabatic"))  # 等温は符号付き
         res_init["delta_r_raw_integral"] = res_init["delta_r"].copy()
         res_init["delta_r"] = f_s(res_init["x"])
         delta_r_x = delta_r_function(res_init)
@@ -732,6 +738,13 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     mp = Mesh2DParams(ni=int(p.mesh.get("ni", 561)), nj=int(p.mesh.get("nj", 97)),
                       wall_first_frac=float(p.mesh.get("wall_first_frac", 4.5e-5)),
                       throat_refine=float(p.mesh.get("throat_refine", 3.0)),
+                      throat_width=float(p.mesh.get("throat_width", 1.5)),
+                      wall_first_frac_throat=(None if p.mesh.get("wall_first_frac_throat") is None
+                                              else float(p.mesh["wall_first_frac_throat"])),
+                      wall_first_blend_x0=float(p.mesh.get("wall_first_blend_x0", 0.5)),
+                      wall_first_blend_x1=float(p.mesh.get("wall_first_blend_x1", 6.0)),
+                      wall_first_up_x0=(None if p.mesh.get("wall_first_up_x0") is None else float(p.mesh["wall_first_up_x0"])),
+                      wall_first_up_x1=(None if p.mesh.get("wall_first_up_x1") is None else float(p.mesh["wall_first_up_x1"])),
                       scale=scale)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
@@ -826,6 +839,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "Md": d["Md"], "R": d["R"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},
             "nStepOuter": n, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
+            "wall_thermal": p.wall_thermal,
             "ic_from": str(ic_from) if ic_from else None,
             "mesh": {"ni": mp.ni, "nj": mp.nj, "wall_first_frac": mp.wall_first_frac}}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
