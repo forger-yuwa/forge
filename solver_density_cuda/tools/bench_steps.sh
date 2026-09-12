@@ -1,38 +1,49 @@
 #!/usr/bin/env bash
-# 速度計測用の短時間 run: run ディレクトリの solverConfig.yaml を nStepOuter=N・出力なしに書き換えて
-# FORGE_PROFILE=1 で forge を回し、Time / ms/step / Runtime Profile Summary を bench_<label>.log に残す。
+# 速度計測用の短時間 run。<template_run> の入力 (config/bcond/species/probe + メッシュ h5 のハードリンク) から
+# 専用ディレクトリ <template_run>_bench/<label>_n<N>/ を作り、nStepOuter=N・出力なしで forge を回して
+# "Time = ... ms/step" (時間ループ内の壁時計; 初期化・I/O を含まない) をログに残す。
 #
-# 使い方: bench_steps.sh <run_dir> <nsteps> <label> [FORGE_BIN=...] [FORGE_ENV="K=V K=V"]
-#   - run_dir は複製済みの run_* (入力 h5 + solverConfig/bcondConfig) であること。res_*.h5 は書かない。
-#   - 同じ run_dir で label を変えて A/B する (バイナリは FORGE_BIN で切替)。
-#   - 起動 (メッシュ読込・初期化) を相殺するには nsteps を 2 種類 (例 100/300) で回し差分を取る。
-set -uo pipefail
+# 使い方: bench_steps.sh <template_run> <nsteps> <label>
+#   環境変数: FORGE_BIN=<binary>   (既定 build/forge)
+#             FORGE_PROFILE=1      (セクション別計時。cudaEventSynchronize が入るので合否判定には使わない。既定 0)
+#             FORGE_ENV="K=V ..."  (追加の環境変数)
+#   - template_run の入力は変更しない (専用 dir に複製)。res_*.h5 は書かない (outStepInterval を巨大化)。
+#   - A/B は基準/変更版を交互に 2 回以上回し中央値で判定する (plan performance-3d-node-sst-speedup §4.3)。
+set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-RUNDIR="$1"; NSTEP="$2"; LABEL="$3"
+TPL="$1"; NSTEP="$2"; LABEL="$3"
 BIN="${FORGE_BIN:-$ROOT/solver_density_cuda/build/forge}"
 export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial:${LD_LIBRARY_PATH:-}
-cd "$RUNDIR" || exit 1
-[ -f solverConfig.yaml.orig ] || cp solverConfig.yaml solverConfig.yaml.orig
-python3 - "$NSTEP" <<'PY'
+[ -d "$TPL" ] || { echo "[bench] template run dir not found: $TPL"; exit 1; }
+TPL="$(cd "$TPL" && pwd)"
+SRC_CFG="$TPL/solverConfig.yaml.orig"; [ -f "$SRC_CFG" ] || SRC_CFG="$TPL/solverConfig.yaml"
+D="${TPL}_bench/${LABEL}_n${NSTEP}"
+mkdir -p "$D"
+for f in bcondConfig.yaml species_db.yaml probe.yaml IC_FROM.txt; do [ -f "$TPL/$f" ] && cp "$TPL/$f" "$D/"; done
+for h in "$TPL"/*.h5; do case "$(basename "$h")" in res_*) ;; *) [ -e "$D/$(basename "$h")" ] || ln "$h" "$D/$(basename "$h")" 2>/dev/null || cp "$h" "$D/";; esac; done
+python3 - "$SRC_CFG" "$D/solverConfig.yaml" "$NSTEP" <<'PY'
 import re, sys
-n = sys.argv[1]
-t = open("solverConfig.yaml.orig").read()
+src, dst, n = sys.argv[1], sys.argv[2], sys.argv[3]
+t = open(src).read()
 t, c1 = re.subn(r'(nStepOuter:\s*)\d+', r'\g<1>' + n, t, count=1)
 t, c2 = re.subn(r'(outStepInterval:\s*)\d+', r'\g<1>1000000', t, count=1)
-assert c1 == 1 and c2 == 1, (c1, c2)
-open("solverConfig.yaml", "w").write(t)
+if c1 != 1 or c2 != 1:
+    raise SystemExit(f"[bench] config rewrite failed (nStepOuter matches={c1}, outStepInterval matches={c2})")
+open(dst, "w").write(t)
 PY
-LOG="bench_${LABEL}_n${NSTEP}.log"
-echo "[bench] $BIN  nstep=$NSTEP  label=$LABEL  env=${FORGE_ENV:-}" | tee "$LOG"
-( export FORGE_PROFILE=1; for kv in ${FORGE_ENV:-}; do export "$kv"; done; /usr/bin/time -f "wall=%e s maxrss=%M KB" "$BIN" ) >> "$LOG" 2>&1
+cd "$D"
+LOG="bench_$(date +%Y%m%d_%H%M%S).log"
+{
+  echo "[bench] bin=$BIN sha256=$(sha256sum "$BIN" | cut -c1-16) template=$TPL nstep=$NSTEP label=$LABEL"
+  echo "[bench] FORGE_PROFILE=${FORGE_PROFILE:-0} FORGE_ENV=${FORGE_ENV:-} gpu=$(nvidia-smi --query-gpu=name,clocks.sm,temperature.gpu --format=csv,noheader 2>/dev/null | head -1)"
+  echo "[bench] inputs: $(sha256sum solverConfig.yaml bcondConfig.yaml 2>/dev/null | awk '{print substr($1,1,12), $2}' | tr '\n' ' ')"
+} | tee "$LOG"
+set +e
+( export FORGE_PROFILE="${FORGE_PROFILE:-0}"; for kv in ${FORGE_ENV:-}; do export "$kv"; done; "$BIN" ) >> "$LOG" 2>&1
 rc=$?
+set -e
 echo "[bench] exit=$rc"
-grep -E "^Time = |wall=|Profiled steps|total_ms" "$LOG" | sed 's/^/  /'
-python3 - "$LOG" "$NSTEP" <<'PY'
-import re, sys
-t = open(sys.argv[1]).read(); n = int(sys.argv[2])
-m = re.search(r'^Time = ([0-9.]+) s', t, re.M)
-if m: print(f"[bench] Time={float(m.group(1)):.2f}s  ->  {1000*float(m.group(1))/n:.2f} ms/step (incl. startup)")
-PY
-rm -f res_*.h5 res_*.xmf
+grep -E "^Time = |Profiled steps|total_ms" "$LOG" | sed 's/^/  /'
+steps_done=$(grep -c "^Step : " "$LOG" || true)
+echo "[bench] steps logged=$steps_done (expected $NSTEP) log=$D/$LOG"
 exit $rc

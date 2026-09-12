@@ -56,10 +56,10 @@ __global__ void gasProperties_d
                 : thermCond_const;                             // 既存どおり一定 (face 平均で同値)
 
         } else if (viscMethod == 1) { // sutherland (熱伝導は thermCondMethod で選択)
-            flow_float T0  = 273.0;
-            flow_float mu0 = 1.716e-5;
-            flow_float Smu = 111.0;
-            vis_lam_array[ic]   = mu0*pow(T[ic]/T0,3.0/2.0)*(T0+Smu)/(T[ic]+Smu);
+            flow_float T0  = 273.0f;
+            flow_float mu0 = 1.716e-5f;
+            flow_float Smu = 111.0f;
+            vis_lam_array[ic]   = mu0*pow(T[ic]/T0,3.0f/2.0f)*(T0+Smu)/(T[ic]+Smu);
             // constant-Pr: k=μ(T)·cp/Pr で分子 Pr を一定に保つ (一定 k は高温で Pr~1.5-1.9 に漂う)。
             thermCond_array[ic] = (thermCondMethod == 1)
                 ? vis_lam_array[ic]*cp_array[ic]/prandtlLam
@@ -71,7 +71,7 @@ __global__ void gasProperties_d
             double X[THERMO_MAX_SPECIES];
             const double ro_d = (double)max(ro[ic], (flow_float)1.0e-30);
             if (nSpecies <= 1 || roY == nullptr) {
-                Y[0] = 1.0;
+                Y[0] = 1.0f;
             } else {
                 double ysum = 0.0;
                 for (int s=0;s<nSpecies;s++){ double y=(double)roY[s][ic]/ro_d; if(y<0.0)y=0.0; Y[s]=y; ysum+=y; }

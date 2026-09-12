@@ -73,7 +73,7 @@ __global__ void dependentVariables_d
         Uy[ic] = roUy[ic]/ro_temp;
         Uz[ic] = roUz[ic]/ro_temp;
 
-        ek = 0.5*(Ux[ic]*Ux[ic] +Uy[ic]*Uy[ic] +Uz[ic]*Uz[ic]);
+        ek = 0.5f*(Ux[ic]*Ux[ic] +Uy[ic]*Uy[ic] +Uz[ic]*Uz[ic]);
         intE =(roe[ic]/ro_temp -ek);
 
         if (thermalMethod == 2) {
@@ -81,12 +81,12 @@ __global__ void dependentVariables_d
             // 内部計算は全て double。組成 Y を構築 (nSpecies==1 は Y={1})。
             double Y[THERMO_MAX_SPECIES];
             if (nSpecies <= 1 || roY == nullptr) {
-                Y[0] = 1.0;
+                Y[0] = 1.0f;
             } else {
                 double ysum = 0.0;
                 for (int s=0;s<nSpecies;s++){
                     double y = (double)roY[s][ic]/(double)ro_temp;
-                    if (y < 0.0) y = 0.0;
+                    if (y < 0.0f) y = 0.0f;
                     Y[s] = y; ysum += y;
                 }
                 double inv = 1.0/(ysum > 1.0e-30 ? ysum : 1.0e-30);
@@ -102,14 +102,14 @@ __global__ void dependentVariables_d
             if (condensation == 1 && rog != nullptr) {
                 for (int s = 0; s < nCondSpecies; ++s) {
                     double gs = (double)rog[s][ic] / (double)ro_temp;
-                    if (gs > 0.0) g_liq += gs;
+                    if (gs > 0.0f) g_liq += gs;
                 }
                 // realizability: carrier は g≤Y_凝縮種 (蒸気以上は凝縮しない)、pure は g≤0.99。
                 if (carrier && roY != nullptr) {
                     double Yw = (double)roY[condGasSpecies][ic]/(double)ro_temp;
-                    if (g_liq > Yw) g_liq = (Yw > 0.0 ? Yw : 0.0);
-                } else if (g_liq > 0.99) g_liq = 0.99;
-                if (g_liq < 0.0) g_liq = 0.0;
+                    if (g_liq > Yw) g_liq = (Yw > 0.0f ? Yw : 0.0f);
+                } else if (g_liq > 0.99f) g_liq = 0.99f;
+                if (g_liq < 0.0f) g_liq = 0.0f;
             }
 
             const CondSpeciesProps cprops = (condModel == 1) ? condProps_H2O() : condProps_N2();
@@ -131,9 +131,9 @@ __global__ void dependentVariables_d
                 }
                 g_liq = g_eq;
                 rog[0][ic] = (flow_float)((double)ro_temp*g_eq);
-            } else if (g_liq > 1.0e-12 && carrier) {
+            } else if (g_liq > 1.0e-12f && carrier) {
                 Tnew = cond_T_from_e_carrier(sp, nSpecies, Y, e_in, g_liq, Rw, cprops, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
-            } else if (g_liq > 1.0e-12) {
+            } else if (g_liq > 1.0e-12f) {
                 Tnew = cond_T_from_e_onetemp(sp, nSpecies, Y, e_in, g_liq, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
             } else {
                 Tnew = thermo_T_from_e(sp, nSpecies, Y, e_in, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
@@ -152,11 +152,11 @@ __global__ void dependentVariables_d
                 // carrier+condensible: e_mix=e_全蒸気+g(R_w T-L)、p=ρT(R_mix-g R_w)(凝縮で蒸気モル減)。
                 e_mix = e_v + g_liq*(Rw*Tnew - Lcond);
                 Pnew  = (double)ro_temp * Tnew * (Rmix - g_liq*Rw);
-                oneMg = 1.0;  // 気相質量は別途、p で表現済
+                oneMg = 1.0f;  // 気相質量は別途、p で表現済
             } else {
                 // pure-condensible (気相=凝縮種): e_l=e_v+R_vT-L、p=(1-g)ρR T。
                 e_mix = e_v + g_liq*Rmix*Tnew - g_liq*Lcond;
-                oneMg = 1.0 - g_liq;
+                oneMg = 1.0f - g_liq;
                 Pnew  = (double)ro_temp * oneMg * Rmix * Tnew;
             }
             if (Pnew < (double)pMin) Pnew = (double)pMin;
@@ -172,7 +172,7 @@ __global__ void dependentVariables_d
             // 一温度二相 EOS と整合する固定 g,Y の frozen 音速 c²=γ_2φ R_eff T (cond_twophase_sonic)。γ_2φ は block-DPLUR の
             // κ=γ−1 (固定 g,Y の frozen 近似) と TP 出口 BC が読む。g<1e-12 は式順序も従来と同一 (dry セル bit 同一)。
             double sonic2 = gmix * Rmix * Tnew, gam_out = gmix;
-            if (condSonicModel == 1 && g_liq > 1.0e-12) {
+            if (condSonicModel == 1 && g_liq > 1.0e-12f) {
                 const double dL   = (cond_latent(cprops, Tnew + 0.1) - cond_latent(cprops, Tnew - 0.1)) / 0.2;
                 const double Reff = carrier ? (Rmix - g_liq*Rw) : ((1.0 - g_liq)*Rmix);
                 double g2, c2;
@@ -189,10 +189,10 @@ __global__ void dependentVariables_d
             if (condensation == 1 && rog != nullptr) {
                 for (int s = 0; s < nCondSpecies; ++s) {
                     double gs = (double)rog[s][ic] / (double)ro_temp;
-                    if (gs > 0.0) g_liq += gs;
+                    if (gs > 0.0f) g_liq += gs;
                 }
-                if (g_liq > 0.99) g_liq = 0.99;   // realizability
-                if (g_liq < 0.0)  g_liq = 0.0;
+                if (g_liq > 0.99f) g_liq = 0.99f;   // realizability
+                if (g_liq < 0.0f)  g_liq = 0.0f;
             }
 
             const double cv = (double)cp/(double)gamma;            // cv = cp/γ
@@ -208,7 +208,7 @@ __global__ void dependentVariables_d
                 rog[0][ic] = (flow_float)((double)ro_temp*g_liq);
             }
 
-            if (g_liq > 1.0e-12) {
+            if (g_liq > 1.0e-12f) {
                 // 二相: e = cv T - g L(T) = intE を Newton で反転、p=(1-g)ρRT。
                 const double e_in = (double)intE;
                 const double Tguess = (double)max(intE/(cp/gamma), tMin);
@@ -230,19 +230,19 @@ __global__ void dependentVariables_d
             } else {
                 // 単相 CPG (従来経路, フロア未指定ならビット不変)
                 T_temp = max(intE/(cp/gamma), tMin);
-                P_temp = max((gamma-1.0)*(roe[ic]-ro_temp*ek), pMin);
+                P_temp = max((gamma-1.0f)*(roe[ic]-ro_temp*ek), pMin);
 
                 T[ic] = T_temp;
                 P[ic] = P_temp;
 
                 ro[ic] = ro_temp;
-                roe[ic] = P_temp/(gamma-1.0) + ro_temp*ek;
+                roe[ic] = P_temp/(gamma-1.0f) + ro_temp*ek;
 
                 Ht[ic] = roe[ic]/ro_temp + P_temp/ro_temp;
 
                 sonic[ic] = sqrt(gamma*P_temp/ro_temp);
                 // CPG の混合比気体定数 R = cp - cv = (γ-1)cp/γ (定数。SLAU 単成分経路は未使用だが整合のため埋める)
-                Rmix_array[ic] = (gamma-1.0)*cp/gamma;
+                Rmix_array[ic] = (gamma-1.0f)*cp/gamma;
             }
         }
 

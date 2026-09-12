@@ -54,7 +54,7 @@ __global__ void zeroWallDirichletResiduals_d
         res_roUy[ic] = (flow_float)0.0;
         res_roUz[ic] = (flow_float)0.0;
         if (res_roOmega != nullptr) res_roOmega[ic] = (flow_float)0.0;
-        if (Qw_Wall != nullptr && Qw_Wall[ic] > (flow_float)-0.5) res_roe[ic] = (flow_float)0.0;
+        if (Qw_Wall != nullptr && Qw_Wall[ic] > (flow_float)-0.5f) res_roe[ic] = (flow_float)0.0;
     }
 }
 

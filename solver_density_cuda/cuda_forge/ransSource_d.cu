@@ -5,7 +5,7 @@
 namespace {
 
 constexpr flow_float kBetaStar  = static_cast<flow_float>(0.09);
-constexpr flow_float kAlpha1    = static_cast<flow_float>(5.0 / 9.0);
+constexpr flow_float kAlpha1    = static_cast<flow_float>(5.0 / 9.0f);
 constexpr flow_float kAlpha2    = static_cast<flow_float>(0.44);
 constexpr flow_float kBeta1     = static_cast<flow_float>(0.075);
 constexpr flow_float kBeta2     = static_cast<flow_float>(0.0828);
@@ -115,7 +115,7 @@ __global__ void rans_sst_source_d(
     // (A) deviatoric トレース除去 (dilatationCorrection >= 1, methods/turbulence/theory.md §7.3)
     //   S^2 = 2 Sij Sij から 2/3 (divU)^2 を引く (= 2 * 1/3 (divU)^2)
     if (dilatationCorrection >= 1) {
-        S_sq -= static_cast<flow_float>(2.0 / 3.0) * divU * divU;
+        S_sq -= static_cast<flow_float>(2.0 / 3.0f) * divU * divU;
         S_sq = max(S_sq, static_cast<flow_float>(0.0));
     }
 
@@ -162,7 +162,7 @@ __global__ void rans_sst_source_d(
     //   turbulence-sst-consistency-options §2.1)。膨張(divU>0)でシンク, 圧縮(divU<0)でソース。負生産は 0 でクリップ。
     flow_float Pk_raw = mu_t_eff * S_prod;
     if (dilatationCorrection >= 2) {
-        Pk_raw -= static_cast<flow_float>(2.0 / 3.0) * rho * k_c * divU;
+        Pk_raw -= static_cast<flow_float>(2.0 / 3.0f) * rho * k_c * divU;
     }
     flow_float Pk = min(Pk_raw, static_cast<flow_float>(10.0) * kBetaStar * rho * k_c * w_c);
     Pk = max(Pk, static_cast<flow_float>(0.0));

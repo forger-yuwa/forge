@@ -28,7 +28,7 @@ __global__ void scalar_advection_first_order_d(
         // 境界値=ic0 値) を使い、ghost phi[ic1] への依存を断つ (cell は従来どおり ghost)。
         flow_float phi_ext = phi[ic1];
         if (isNode != 0 && ic1 >= nCells) phi_ext = phi[ic0];
-        const flow_float phi_upwind = (mdot >= 0.0) ? phi[ic0] : phi_ext;
+        const flow_float phi_upwind = (mdot >= 0.0f) ? phi[ic0] : phi_ext;
         const flow_float flux = mdot * phi_upwind;
 
         // point-implicit 移流対角: 1次風上の -∂res/∂(ρφ) は流出側セルに max(±ṁ,0)/ρ [m³/s]。
@@ -106,7 +106,7 @@ __global__ void scalar_diffusion_first_order_d(
         // (|d·S| ~ 1e-15) では拡散コンダクタンスそのものを 1/10〜1/1000 に削っていた (case/16 3D 角線で ω が
         // 壁漸近解の 1/30 に落ち k 未減衰→角部加熱; codex レビュー 2026-09-08, plan turbulence-sst-node-corner-heating)。
         const flow_float denom_floor = static_cast<flow_float>(1.0e-6) * dcc * sss;
-        const flow_float safe_denom = (abs(denom) < denom_floor) ? ((denom >= 0.0) ? denom_floor : -denom_floor) : denom;
+        const flow_float safe_denom = (abs(denom) < denom_floor) ? ((denom >= 0.0f) ? denom_floor : -denom_floor) : denom;
         const flow_float delta = dcc * sss * sss / safe_denom;
 
         // sstSigmaBlend: σ = F1·σ1 + (1−F1)·σ2 をノードごとに (F1 は前 step の ransSource 値, 初期 1)
@@ -117,7 +117,7 @@ __global__ void scalar_diffusion_first_order_d(
         const flow_float sig1 = (F1blend != nullptr) ? (F1b * sigma + (static_cast<flow_float>(1.0) - F1b) * sigma2) : sigma;
         const flow_float mu0 = vis_lam[ic0] + sig0 * max(vis_turb[ic0], static_cast<flow_float>(0.0));
         const flow_float mu1 = vis_lam[ic1] + sig1 * max(vis_turb[ic1], static_cast<flow_float>(0.0));
-        const flow_float mu_face = f * mu0 + (1.0 - f) * mu1;
+        const flow_float mu_face = f * mu0 + (1.0f - f) * mu1;
 
         const flow_float dphi = phi[ic1] - phi[ic0];
         const flow_float flux = mu_face * (dphi / dcc) * delta;
@@ -157,7 +157,7 @@ __global__ void runge_kutta_exp_scalar_4th_d(
         const geom_float v = vol[ic];
 
         if (loop == 0) {
-            res_rho_phi_m[ic] = 0.0;
+            res_rho_phi_m[ic] = 0.0f;
         }
 
         res_rho_phi_m[ic] += coef_Res * res_rho_phi[ic] * dt_l / v;

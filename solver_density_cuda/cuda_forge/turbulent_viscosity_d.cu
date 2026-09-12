@@ -30,9 +30,9 @@ __global__ void WALE_d
 
     if (ic < nCells ) {
 
-        flow_float karman = 0.41;
+        flow_float karman = 0.41f;
         //flow_float Cw = 0.5;
-        flow_float Cw = 0.325;
+        flow_float Cw = 0.325f;
 
         geom_float volume = vol[ic];
 
@@ -60,27 +60,27 @@ __global__ void WALE_d
         flow_float q31 = g31*g11 + g32*g21 + g33*g31;
         flow_float q32 = g31*g12 + g32*g22 + g33*g32;
         flow_float q33 = g31*g13 + g32*g23 + g33*g33;
-        flow_float qtr3 = (q11 + q22 + q33)/3.0;
+        flow_float qtr3 = (q11 + q22 + q33)/3.0f;
         flow_float Sd11 = q11 - qtr3;
-        flow_float Sd12 = 0.5*(q12+q21);
-        flow_float Sd13 = 0.5*(q13+q31);
+        flow_float Sd12 = 0.5f*(q12+q21);
+        flow_float Sd13 = 0.5f*(q13+q31);
         flow_float Sd21 = Sd12;
         flow_float Sd22 = q22 - qtr3;
-        flow_float Sd23 = 0.5*(q23+q32);
+        flow_float Sd23 = 0.5f*(q23+q32);
         flow_float Sd31 = Sd13;
         flow_float Sd32 = Sd23;
         flow_float Sd33 = q33 - qtr3;
 
 
-        flow_float S11 = 0.5*(g11+g11);
-        flow_float S12 = 0.5*(g12+g21);
-        flow_float S13 = 0.5*(g13+g31);
-        flow_float S21 = 0.5*(g21+g12);
-        flow_float S22 = 0.5*(g22+g22);
-        flow_float S23 = 0.5*(g23+g32);
-        flow_float S31 = 0.5*(g31+g13);
-        flow_float S32 = 0.5*(g32+g23);
-        flow_float S33 = 0.5*(g33+g33);
+        flow_float S11 = 0.5f*(g11+g11);
+        flow_float S12 = 0.5f*(g12+g21);
+        flow_float S13 = 0.5f*(g13+g31);
+        flow_float S21 = 0.5f*(g21+g12);
+        flow_float S22 = 0.5f*(g22+g22);
+        flow_float S23 = 0.5f*(g23+g32);
+        flow_float S31 = 0.5f*(g31+g13);
+        flow_float S32 = 0.5f*(g32+g23);
+        flow_float S33 = 0.5f*(g33+g33);
 
         flow_float SdijSdij = Sd11*Sd11 + Sd12*Sd12 + Sd13*Sd13
                             + Sd21*Sd21 + Sd22*Sd22 + Sd23*Sd23
@@ -91,13 +91,13 @@ __global__ void WALE_d
                           + S31*S31 + S32*S32 + S33*S33;
 
         geom_float d = wall_dist[ic];
-        flow_float Ls = min(karman*d , Cw*pow(vol[ic],1.0/3.0));
+        flow_float Ls = min(karman*d , Cw*pow(vol[ic],1.0f/3.0f));
 
         // WALE は一様流（勾配ゼロ）で分子分母とも 0 になり 0/0=NaN を生む。標準的に分母へ
         // 小さな正則化項を加える（無勾配では vis_turb=0 となり物理的に正しい）。
-        const flow_float wale_denom = pow(SijSij, 5.0/2.0) + pow(SdijSdij, 5.0/4.0)
+        const flow_float wale_denom = pow(SijSij, 5.0f/2.0f) + pow(SdijSdij, 5.0f/4.0f)
                                     + static_cast<flow_float>(1.0e-30);
-        vis_turb[ic] =  ro[ic]*Ls*Ls*pow(SdijSdij, 3.0/2.0)/wale_denom;
+        vis_turb[ic] =  ro[ic]*Ls*Ls*pow(SdijSdij, 3.0f/2.0f)/wale_denom;
     }
 }
 
@@ -302,10 +302,10 @@ __device__ static flow_float compute_l_iddes(
 
     // 近壁ブレンド f_B と log-layer mismatch 補正 f_e (付着 log 層 r_dt≈1 では f_t→1 で自動停止)
     const flow_float fb  = min(static_cast<flow_float>(2.0)
-                               * exp(static_cast<flow_float>(-9.0) * al2), one);
+                               * exp(static_cast<flow_float>(-9.0f) * al2), one);
     const flow_float fe1 = (al >= static_cast<flow_float>(0.0))
-        ? static_cast<flow_float>(2.0) * exp(static_cast<flow_float>(-11.09) * al2)
-        : static_cast<flow_float>(2.0) * exp(static_cast<flow_float>(-9.0)  * al2);
+        ? static_cast<flow_float>(2.0) * exp(static_cast<flow_float>(-11.09f) * al2)
+        : static_cast<flow_float>(2.0) * exp(static_cast<flow_float>(-9.0f)  * al2);
     const flow_float argt = kCt * kCt * rdt;
     const flow_float ft   = tanh(argt * argt * argt);
     const flow_float argl  = kCl * kCl * rdl;                 // (C_l² r_dl)^10 を乗算で構成
@@ -504,7 +504,7 @@ void turbulent_viscosity_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , me
         }
 
     } else {
-        CHECK_CUDA_ERROR(cudaMemset(var.c_d["vis_turb"], 0.0, msh.nCells_all*sizeof(flow_float)));
+        CHECK_CUDA_ERROR(cudaMemset(var.c_d["vis_turb"], 0.0f, msh.nCells_all*sizeof(flow_float)));
     }
 
     gpuErrchk( cudaPeekAtLastError() );

@@ -96,8 +96,8 @@ __device__ flow_float interp_MUSCL_3rd(int scheme, int limit_scheme,
     flow_float r;
     flow_float psi_r;
 
-    k = 1.0/3.0;
-    phif = phiC + limiter*(0.5*k*(phiD-phiC) +(1.0-k)*(dphidx*cpdx +dphidy*cpdy +dphidz*cpdz));
+    k = 1.0f/3.0f;
+    phif = phiC + limiter*(0.5f*k*(phiD-phiC) +(1.0f-k)*(dphidx*cpdx +dphidy*cpdy +dphidz*cpdz));
 
     return phif;
 };
@@ -135,17 +135,17 @@ __device__ flow_float interp_MINMOD(int scheme, int limit_scheme,
     flow_float phiU;
     flow_float limit;
 
-    DD2dx = (2.0*f-1.0)*dx;
-    DD2dy = (2.0*f-1.0)*dy;
-    DD2dz = (2.0*f-1.0)*dz;
+    DD2dx = (2.0f*f-1.0f)*dx;
+    DD2dy = (2.0f*f-1.0f)*dy;
+    DD2dz = (2.0f*f-1.0f)*dz;
 
     phiDD = phiD - (DD2dx*dphidxD + DD2dy*dphidyD + DD2dz*dphidzD );
-    phiU  = phiDD -4.0*(1.0-f)*(dx*dphidxC + dy*dphidyC + dz*dphidzC );
+    phiU  = phiDD -4.0f*(1.0f-f)*(dx*dphidxC + dy*dphidyC + dz*dphidzC );
 
     r = (phiC - phiU)/(phiD - phiC);
 
     //limit = sign_sano(r)*max(0.0, (min(abs(r), sign_sano(r))));
-    limit = max(0.0, min(1.0,r));
+    limit = max(0.0f, min(1.0f,r));
 
     phif = phiC + limit*(dphidxC*cpdx +dphidyC*cpdy +dphidzC*cpdz);
 
@@ -201,11 +201,11 @@ __device__ __forceinline__ flow_float interp_dispatch(int scheme, int limit_sche
 
 __device__ __forceinline__ flow_float apply_ducros_limiter(flow_float limiter, flow_float duc)
 {
-    if (duc <= 0.8) {
+    if (duc <= 0.8f) {
         return limiter;
     }
 
-    return max(0.0, (1.0 - duc) * limiter);
+    return max(0.0f, (1.0f - duc) * limiter);
 }
 
 
@@ -218,19 +218,19 @@ inline __device__ flow_float sign_sano(flow_float x)
 
 __device__ flow_float betaPls_slau(flow_float M)
 {
-    if (abs(M) >= 1.0) {
-        return 0.25*(2.0-M)*sq(M+1.0);
+    if (abs(M) >= 1.0f) {
+        return 0.25f*(2.0f-M)*sq(M+1.0f);
     } else {
-        return 0.5*(1.0+sign_sano(+M));
+        return 0.5f*(1.0f+sign_sano(+M));
     }
 }
 
 __device__ flow_float betaMns_slau(flow_float M)
 {
-    if (abs(M) >= 1.0) {
-        return 0.25*(2.0+M)*sq(M-1.0);
+    if (abs(M) >= 1.0f) {
+        return 0.25f*(2.0f+M)*sq(M-1.0f);
     } else {
-        return 0.5*(1.0+sign_sano(-M));
+        return 0.5f*(1.0f+sign_sano(-M));
     }
 }
 

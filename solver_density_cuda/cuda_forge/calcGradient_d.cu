@@ -47,15 +47,15 @@ __global__ void calcGradient_1_d
         geom_int  ic1 = plane_cells[2*ip+1];
 
         geom_float f   = fx[ip];
-        flow_float Uxf = f*Ux[ic0] + (1.0-f)*Ux[ic1];
-        flow_float Uyf = f*Uy[ic0] + (1.0-f)*Uy[ic1];
-        flow_float Uzf = f*Uz[ic0] + (1.0-f)*Uz[ic1];
+        flow_float Uxf = f*Ux[ic0] + (1.0f-f)*Ux[ic1];
+        flow_float Uyf = f*Uy[ic0] + (1.0f-f)*Uy[ic1];
+        flow_float Uzf = f*Uz[ic0] + (1.0f-f)*Uz[ic1];
 
-        flow_float Pf  = f*P[ic0]  + (1.0-f)*P[ic1];
-        flow_float Tf  = f*T[ic0]  + (1.0-f)*T[ic1];
-        flow_float rof = f*ro[ic0] + (1.0-f)*ro[ic1];
-        flow_float roef= f*roe[ic0]+ (1.0-f)*roe[ic1];
-        flow_float Htf= f*Ht[ic0]+ (1.0-f)*Ht[ic1];
+        flow_float Pf  = f*P[ic0]  + (1.0f-f)*P[ic1];
+        flow_float Tf  = f*T[ic0]  + (1.0f-f)*T[ic1];
+        flow_float rof = f*ro[ic0] + (1.0f-f)*ro[ic1];
+        flow_float roef= f*roe[ic0]+ (1.0f-f)*roe[ic1];
+        flow_float Htf= f*Ht[ic0]+ (1.0f-f)*Ht[ic1];
         geom_float sxx = sx[ip];
         geom_float syy = sy[ip];
         geom_float szz = sz[ip];
@@ -235,7 +235,7 @@ __global__ void calcGradient_b_d
         flow_float Uxf = Ux[ic];
         flow_float Uyf = Uy[ic];
         flow_float Uzf = Uz[ic];
-        flow_float ek  = 0.5*(Uxf*Uxf + Uyf*Uyf + Uzf*Uzf);
+        flow_float ek  = 0.5f*(Uxf*Uxf + Uyf*Uyf + Uzf*Uzf);
         flow_float Pf  = P[ic];
         flow_float Tf  = T[ic];
         flow_float roef= roe[ic];
@@ -328,9 +328,9 @@ __global__ void calcGradient_cellgather_d
         if (ip >= gradPlaneSkipFrom) continue;   // node: 境界半割面は calcGradient_b_d で処理
         geom_int ic0 = plane_cells[2*ip+0];
         geom_int ic1 = plane_cells[2*ip+1];
-        flow_float sgn = (ic0==ic) ? 1.0 : -1.0;   // 外向き法線符号（owner ic0 が +）
+        flow_float sgn = (ic0==ic) ? 1.0f : -1.0f;   // 外向き法線符号（owner ic0 が +）
         geom_float f = fx[ip];
-        flow_float g = 1.0 - f;
+        flow_float g = 1.0f - f;
 
         flow_float Uxf=f*Ux[ic0]+g*Ux[ic1];
         flow_float Uyf=f*Uy[ic0]+g*Uy[ic1];
@@ -796,28 +796,28 @@ void calcGradient_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh
     flow_float* grad_ss = (cfg.isAxisymmetric == 1) ? var.p_d["ss_planar"] : var.p_d["ss"];
 
     // initialize
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUxdx"], 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUxdy"], 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUxdz"], 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUydx"], 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUydy"], 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUydz"], 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUzdx"], 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUzdy"], 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUzdz"], 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["drodx"], 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["drody"], 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["drodz"], 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dPdx"] , 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dPdy"] , 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dPdz"] , 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dTdx"] , 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dTdy"] , 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dTdz"] , 0.0, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUxdx"], 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUxdy"], 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUxdz"], 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUydx"], 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUydy"], 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUydz"], 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUzdx"], 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUzdy"], 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dUzdz"], 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["drodx"], 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["drody"], 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["drodz"], 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dPdx"] , 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dPdy"] , 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dPdz"] , 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dTdx"] , 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dTdy"] , 0.0f, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["dTdz"] , 0.0f, msh.nCells*sizeof(flow_float)));
     //CHECK_CUDA_ERROR(cudaMemset(var.c_d["dHtdx"] , 0.0, msh.nCells*sizeof(flow_float)));
     //CHECK_CUDA_ERROR(cudaMemset(var.c_d["dHtdy"] , 0.0, msh.nCells*sizeof(flow_float)));
     //CHECK_CUDA_ERROR(cudaMemset(var.c_d["dHtdz"] , 0.0, msh.nCells*sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["divU"] , 0.0, msh.nCells*sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["divU"] , 0.0f, msh.nCells*sizeof(flow_float)));
 
     //CHECK_CUDA_ERROR(cudaMemset(var.c_d["droUxdx"], 0.0, msh.nCells*sizeof(flow_float)));
     //CHECK_CUDA_ERROR(cudaMemset(var.c_d["droUxdy"], 0.0, msh.nCells*sizeof(flow_float)));

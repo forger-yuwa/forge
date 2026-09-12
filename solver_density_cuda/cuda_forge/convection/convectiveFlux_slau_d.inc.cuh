@@ -89,8 +89,8 @@ __global__ void SLAU_d
         }
 
         // D2a/D4 診断: 多成分 TP 内部面の組成センサ s_Y = max_s|Y_sR-Y_sL|/(Y_sR+Y_sL+ε)。
-        flow_float sY_dbg = 0.0;
-        if ((g_contact1st || g_contactLog || g_contactBlend > 0.0) && nSpecies > 1 && roY != nullptr && ic1 < nCells) {
+        flow_float sY_dbg = 0.0f;
+        if ((g_contact1st || g_contactLog || g_contactBlend > 0.0f) && nSpecies > 1 && roY != nullptr && ic1 < nCells) {
             const flow_float ro0 = max(ro[ic0], (flow_float)1.0e-30);
             const flow_float ro1 = max(ro[ic1], (flow_float)1.0e-30);
             for (int s = 0; s < nSpecies; ++s) {
@@ -131,8 +131,8 @@ __global__ void SLAU_d
         flow_float dc1p_y = pcy[ip] - ccy_1;
         flow_float dc1p_z = pcz[ip] - ccz_1;
         if (g_reconEdgeMid == 1 && ip < nNormalPlanes) {   // node: 目標点 = エッジ中点 (SU2 流)
-            dc0p_x = 0.5*dcc_x; dc0p_y = 0.5*dcc_y; dc0p_z = 0.5*dcc_z;
-            dc1p_x = -0.5*dcc_x; dc1p_y = -0.5*dcc_y; dc1p_z = -0.5*dcc_z;
+            dc0p_x = 0.5f*dcc_x; dc0p_y = 0.5f*dcc_y; dc0p_z = 0.5f*dcc_z;
+            dc1p_x = -0.5f*dcc_x; dc1p_y = -0.5f*dcc_y; dc1p_z = -0.5f*dcc_z;
         }
 
         //flow_float lim_ro = min(limiter_ro[ic0], limiter_ro[ic1]);
@@ -173,14 +173,14 @@ __global__ void SLAU_d
         //flow_float Uz_L = roUz_L/ro_L;
         // velocity2_L / h_p はブレンド後に算出するため後段へ移動 (lowMachThornber 対応)。
 
-        flow_float ro_R  = interp_dispatch(conv_scheme, limit_scheme, ro[ic1], ro[ic0], drodx[ic1], drody[ic1], drodz[ic1], drodx[ic0], drody[ic0], drodz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0-f, lim_rho_R);
-        flow_float Ux_R  = interp_dispatch(conv_scheme, limit_scheme, Ux[ic1], Ux[ic0], dUxdx[ic1], dUxdy[ic1], dUxdz[ic1], dUxdx[ic0], dUxdy[ic0], dUxdz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0-f, limiter_Ux[ic1]);
-        flow_float Uy_R  = interp_dispatch(conv_scheme, limit_scheme, Uy[ic1], Uy[ic0], dUydx[ic1], dUydy[ic1], dUydz[ic1], dUydx[ic0], dUydy[ic0], dUydz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0-f, limiter_Uy[ic1]);
-        flow_float Uz_R  = interp_dispatch(conv_scheme, limit_scheme, Uz[ic1], Uz[ic0], dUzdx[ic1], dUzdy[ic1], dUzdz[ic1], dUzdx[ic0], dUzdy[ic0], dUzdz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0-f, limiter_Uz[ic1]);
-        flow_float P_R   = interp_dispatch(conv_scheme, limit_scheme, Ps[ic1], Ps[ic0], dPdx[ic1] , dPdy[ic1] , dPdz[ic1] , dPdx[ic0] , dPdy[ic0] , dPdz[ic0] ,-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0-f, limiter_P[ic1]);
+        flow_float ro_R  = interp_dispatch(conv_scheme, limit_scheme, ro[ic1], ro[ic0], drodx[ic1], drody[ic1], drodz[ic1], drodx[ic0], drody[ic0], drodz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, lim_rho_R);
+        flow_float Ux_R  = interp_dispatch(conv_scheme, limit_scheme, Ux[ic1], Ux[ic0], dUxdx[ic1], dUxdy[ic1], dUxdz[ic1], dUxdx[ic0], dUxdy[ic0], dUxdz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limiter_Ux[ic1]);
+        flow_float Uy_R  = interp_dispatch(conv_scheme, limit_scheme, Uy[ic1], Uy[ic0], dUydx[ic1], dUydy[ic1], dUydz[ic1], dUydx[ic0], dUydy[ic0], dUydz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limiter_Uy[ic1]);
+        flow_float Uz_R  = interp_dispatch(conv_scheme, limit_scheme, Uz[ic1], Uz[ic0], dUzdx[ic1], dUzdy[ic1], dUzdz[ic1], dUzdx[ic0], dUzdy[ic0], dUzdz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limiter_Uz[ic1]);
+        flow_float P_R   = interp_dispatch(conv_scheme, limit_scheme, Ps[ic1], Ps[ic0], dPdx[ic1] , dPdy[ic1] , dPdz[ic1] , dPdx[ic0] , dPdy[ic0] , dPdz[ic0] ,-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limiter_P[ic1]);
 
         // D2a 連続ブレンド (chatter-free): 強組成勾配ほど flow 再構成をセル値(1次)へ滑らかに寄せる。
-        if (g_contactBlend > 0.0 && sY_dbg > 0.0) {
+        if (g_contactBlend > 0.0f && sY_dbg > 0.0f) {
             const flow_float w = min((flow_float)1.0, sY_dbg / g_contactBlend);
             if (w > (flow_float)0.0) {
                 const flow_float w1 = (flow_float)1.0 - w;
@@ -192,14 +192,14 @@ __global__ void SLAU_d
         // O(1/M) に増大する速度ジャンプ由来の散逸を抑える。lowMachThornber==0 で恒等 (ビット不変)、
         // M>=1 で z=1 (超音速域不変)。圧力 P_L/R・密度 ro_L/R は不変。理論は methods/convection/theory.md。
         if (lowMachThornber == 1) {
-            flow_float c_hat_th = 0.5*(sonic[ic0] + sonic[ic1]);
+            flow_float c_hat_th = 0.5f*(sonic[ic0] + sonic[ic1]);
             flow_float v2L_th = Ux_L*Ux_L + Uy_L*Uy_L + Uz_L*Uz_L;
             flow_float v2R_th = Ux_R*Ux_R + Uy_R*Uy_R + Uz_R*Uz_R;
-            flow_float z_th = min(static_cast<flow_float>(1.0), sqrt(0.5*(v2L_th + v2R_th))/c_hat_th);
+            flow_float z_th = min(static_cast<flow_float>(1.0), sqrt(0.5f*(v2L_th + v2R_th))/c_hat_th);
             flow_float um, du;
-            um = 0.5*(Ux_L+Ux_R); du = 0.5*(Ux_L-Ux_R); Ux_L = um + z_th*du; Ux_R = um - z_th*du;
-            um = 0.5*(Uy_L+Uy_R); du = 0.5*(Uy_L-Uy_R); Uy_L = um + z_th*du; Uy_R = um - z_th*du;
-            um = 0.5*(Uz_L+Uz_R); du = 0.5*(Uz_L-Uz_R); Uz_L = um + z_th*du; Uz_R = um - z_th*du;
+            um = 0.5f*(Ux_L+Ux_R); du = 0.5f*(Ux_L-Ux_R); Ux_L = um + z_th*du; Ux_R = um - z_th*du;
+            um = 0.5f*(Uy_L+Uy_R); du = 0.5f*(Uy_L-Uy_R); Uy_L = um + z_th*du; Uy_R = um - z_th*du;
+            um = 0.5f*(Uz_L+Uz_R); du = 0.5f*(Uz_L-Uz_R); Uz_L = um + z_th*du; Uz_R = um - z_th*du;
         }
         // velocity2_L / h_p はブレンド後に算出 (L 再構成直後から移動)。
         flow_float velocity2_L = Ux_L*Ux_L + Uy_L*Uy_L + Uz_L*Uz_L;
@@ -242,10 +242,10 @@ __global__ void SLAU_d
                         flow_float yrr = interp_dispatch(conv_scheme, limit_scheme, Yd_recon[s][ic1], Yd_recon[s][ic0],
                             dYdx_recon[s][ic1], dYdy_recon[s][ic1], dYdz_recon[s][ic1],
                             dYdx_recon[s][ic0], dYdy_recon[s][ic0], dYdz_recon[s][ic0],
-                            -dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0-f, lim_rho_R);
-                        if (ylr < 0.0 || ylr > 1.0) ovL = true;
-                        if (yrr < 0.0 || yrr > 1.0) ovR = true;
-                        if (ylr < 0.0 || ylr > 1.0 || yrr < 0.0 || yrr > 1.0) atomicAdd(&g_speciesOvershoot, 1ULL);
+                            -dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, lim_rho_R);
+                        if (ylr < 0.0f || ylr > 1.0f) ovL = true;
+                        if (yrr < 0.0f || yrr > 1.0f) ovR = true;
+                        if (ylr < 0.0f || ylr > 1.0f || yrr < 0.0f || yrr > 1.0f) atomicAdd(&g_speciesOvershoot, 1ULL);
                         YL[s]=(double)ylr; YR[s]=(double)yrr;
                     }
                     if (ovL) { ro_L = ro[ic0]; for (int s=0;s<nSpecies;s++) YL[s]=cellYL[s]; atomicAdd(&g_rhoYFallback, 1ULL); }
@@ -253,8 +253,8 @@ __global__ void SLAU_d
                     if (ovR) { ro_R = ro[ic1]; for (int s=0;s<nSpecies;s++) YR[s]=cellYR[s]; atomicAdd(&g_rhoYFallback, 1ULL); }
                     else { double sRr=0.0; for(int s=0;s<nSpecies;s++) sRr+=YR[s]; const double iRr=1.0/(sRr>1.0e-30?sRr:1.0e-30); for(int s=0;s<nSpecies;s++) YR[s]*=iRr; }
                     for (int s=0;s<nSpecies;s++){
-                        atomicMin(&g_Yface_min_scaled, (int)(min(YL[s],YR[s])*1.0e6));
-                        atomicMax(&g_Yface_max_scaled, (int)(max(YL[s],YR[s])*1.0e6));
+                        atomicMin(&g_Yface_min_scaled, (int)(min(YL[s],YR[s])*1.0e6f));
+                        atomicMax(&g_Yface_max_scaled, (int)(max(YL[s],YR[s])*1.0e6f));
                     }
                     RgL = thermo_R_mix(sp, nSpecies, YL);
                     RgR = thermo_R_mix(sp, nSpecies, YR);
@@ -277,8 +277,8 @@ __global__ void SLAU_d
                         flow_float yrr = interp_dispatch(conv_scheme, limit_scheme, Yd_recon[s][ic1], Yd_recon[s][ic0],
                             dYdx_recon[s][ic1], dYdy_recon[s][ic1], dYdz_recon[s][ic1],
                             dYdx_recon[s][ic0], dYdy_recon[s][ic0], dYdz_recon[s][ic0],
-                            -dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0-f, limR);
-                        if (ylr < 0.0 || ylr > 1.0 || yrr < 0.0 || yrr > 1.0) atomicAdd(&g_speciesOvershoot, 1ULL);
+                            -dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limR);
+                        if (ylr < 0.0f || ylr > 1.0f || yrr < 0.0f || yrr > 1.0f) atomicAdd(&g_speciesOvershoot, 1ULL);
                         ylr = min(max(ylr,(flow_float)0.0),(flow_float)1.0);
                         yrr = min(max(yrr,(flow_float)0.0),(flow_float)1.0);
                         YL[s]=(double)ylr; YR[s]=(double)yrr; sLr+=(double)ylr; sRr+=(double)yrr;
@@ -337,8 +337,8 @@ __global__ void SLAU_d
                 h_m -= (flow_float)((double)g_total[ic1]*cond_latent(cprL, (double)T_cell[ic1]));
             }
         } else {
-            h_p = ga*P_L/((ga-1.0)*ro_L) + 0.5*velocity2_L;
-            h_m = ga*P_R/((ga-1.0)*ro_R) + 0.5*velocity2_R;
+            h_p = ga*P_L/((ga-1.0f)*ro_L) + 0.5f*velocity2_L;
+            h_m = ga*P_R/((ga-1.0f)*ro_R) + 0.5f*velocity2_R;
             // 非平衡凝縮 (二相): 単相 h=cp(1-g)T+ek を二相全エンタルピー h=cpT-gL+ek に補正。
             //   差 = g(cpT - L)。これを落とすとエネルギー流束が潜熱分を運ばず全エンタルピー非保存になる。
             //   c_hat (音速) は気相近似で単相のまま。g・T はセル値(1次, g は元来1次風上移流で整合)。
@@ -368,10 +368,10 @@ __global__ void SLAU_d
             const flow_float kL = max(kturb[ic0], (flow_float)0.0);
             // ghost (ic1>=nCells) の k は node では書かれない (ghostless) ので内部値で代用 (壁/出口は Neumann、入口は境界カーネル側の bvar k が担う)
             const flow_float kR = (ic1 < nCells) ? max(kturb[ic1], (flow_float)0.0) : kL;
-            h_p  += (flow_float)(5.0/3.0)*kL;
-            h_m  += (flow_float)(5.0/3.0)*kR;
-            Pf_L += (flow_float)(2.0/3.0)*ro_L*kL;
-            Pf_R += (flow_float)(2.0/3.0)*ro_R*kR;
+            h_p  += (flow_float)(5.0f/3.0f)*kL;
+            h_m  += (flow_float)(5.0f/3.0f)*kR;
+            Pf_L += (flow_float)(2.0f/3.0f)*ro_L*kL;
+            Pf_R += (flow_float)(2.0f/3.0f)*ro_R*kR;
         }
 
         flow_float Vn_p = ((Ux_L)*sxx +(Uy_L)*syy +(Uz_L)*szz)/sss;
@@ -381,17 +381,17 @@ __global__ void SLAU_d
         flow_float Vn_m_abs = abs(Vn_m);
 
 //TODO: change c
-        flow_float c_hat = 0.5*(sonic[ic0] + sonic[ic1]);
+        flow_float c_hat = 0.5f*(sonic[ic0] + sonic[ic1]);
 
         // D4 診断: 強組成勾配面の L/R 状態を出力 (mixed-order face-state / limiter chatter 観察)。
         // 一面=一行/step。後処理で ip でフィルタすれば pseudo-step 時系列になる。
         if (g_contactLog && sY_dbg > g_contactLogThresh) {
             const flow_float RgL = (nSpecies > 1 && Rmix_cell != nullptr) ? Rmix_cell[ic0] : (flow_float)0.0;
             const flow_float RgR = (nSpecies > 1 && Rmix_cell != nullptr) ? Rmix_cell[ic1] : (flow_float)0.0;
-            const flow_float TL  = (RgL > 0.0) ? P_L / (ro_L * RgL) : (flow_float)0.0;
-            const flow_float TR  = (RgR > 0.0) ? P_R / (ro_R * RgR) : (flow_float)0.0;
+            const flow_float TL  = (RgL > 0.0f) ? P_L / (ro_L * RgL) : (flow_float)0.0;
+            const flow_float TR  = (RgR > 0.0f) ? P_R / (ro_R * RgR) : (flow_float)0.0;
             // mixed-order 誤差: 整合 face 組成 (面平均 Y) で R_mix を作った場合の T との差 ΔT_f^MO。
-            flow_float Rmix_face = 0.0;
+            flow_float Rmix_face = 0.0f;
             if (nSpecies > 1 && roY != nullptr) {
                 const flow_float ro0c = max(ro[ic0],(flow_float)1e-30), ro1c = max(ro[ic1],(flow_float)1e-30);
                 for (int s = 0; s < nSpecies; ++s) {
@@ -399,7 +399,7 @@ __global__ void SLAU_d
                     Rmix_face += yf * (flow_float)thermo_R_species(sp[s]);
                 }
             }
-            const flow_float TL_cons = (Rmix_face > 0.0) ? P_L/(ro_L*Rmix_face) : (flow_float)0.0;
+            const flow_float TL_cons = (Rmix_face > 0.0f) ? P_L/(ro_L*Rmix_face) : (flow_float)0.0;
             const flow_float dT_MO   = TL - TL_cons;
             // limiter (ψ_ρ,ψ_p,ψ_u) と cell 値も出し、再構成が実際に効いていたか (sharp で ψ≈0 か) を判定可能に。
             printf("CLOG ip=%d ic0=%d ic1=%d sY=%.4f roL=%.5f roR=%.5f PL=%.1f PR=%.1f UxL=%.4f UxR=%.4f limP=%.4f limRo=%.4f limUx=%.4f roC=%.5f PC=%.1f UxC=%.4f RgL=%.2f RgR=%.2f TL=%.2f TR=%.2f hL=%.6e cL=%.2f\n",
@@ -419,29 +419,29 @@ __global__ void SLAU_d
 
         flow_float beta_p, beta_m;
 
-        if (abs(M_p)>=1.0){
-            beta_p = 0.5*(M_p + abs(M_p))/M_p;
+        if (abs(M_p)>=1.0f){
+            beta_p = 0.5f*(M_p + abs(M_p))/M_p;
         } else {
-            beta_p = 0.25*sq((M_p+1.0))*(2.0-M_p);
+            beta_p = 0.25f*sq((M_p+1.0f))*(2.0f-M_p);
         }
 
-        if (abs(M_m)>=1.0){
-            beta_m = 0.5*(M_m - abs(M_m))/M_m;
+        if (abs(M_m)>=1.0f){
+            beta_m = 0.5f*(M_m - abs(M_m))/M_m;
         } else {
-            beta_m = 0.25*sq((M_m-1.0))*(2.0+M_m);
+            beta_m = 0.25f*sq((M_m-1.0f))*(2.0f+M_m);
         }
 
-        flow_float zero = 0.0;
-        flow_float one  = 1.0;
-        flow_float half = 0.5;
+        flow_float zero = 0.0f;
+        flow_float one  = 1.0f;
+        flow_float half = 0.5f;
 
         flow_float g = -max(min(M_p,zero),-one)*min(max(M_m,zero),one);
         flow_float Vn_hat_abs   = (ro_L*Vn_p_abs + ro_R*Vn_m_abs)/(ro_L + ro_R);
-        flow_float Vn_hat_p_abs = (1.0-g)*Vn_hat_abs + g*Vn_p_abs;
-        flow_float Vn_hat_m_abs = (1.0-g)*Vn_hat_abs + g*Vn_m_abs;
+        flow_float Vn_hat_p_abs = (1.0f-g)*Vn_hat_abs + g*Vn_p_abs;
+        flow_float Vn_hat_m_abs = (1.0f-g)*Vn_hat_abs + g*Vn_m_abs;
 
         flow_float M_hat = min(one, sqrt(half*(velocity2_R + velocity2_L))/c_hat);
-        flow_float chi = (1.0-M_hat)*(1.0-M_hat);
+        flow_float chi = (1.0f-M_hat)*(1.0f-M_hat);
 
         flow_float pressure_sum = Pf_L + Pf_R;
         // 圧力束の第3項のみ slauVariant で分岐 (mdot は SLAU/SLAU2 共通)。
@@ -466,7 +466,7 @@ __global__ void SLAU_d
             c_diss = lowMachCprime(c_hat, velMag_face, Un_face, precondEps);
         }
 
-        flow_float mdot = sss*0.5*((ro_L*(Vn_p+Vn_hat_p_abs)+ro_R*(Vn_m-Vn_hat_m_abs)) -chi/(c_diss)*P_del);
+        flow_float mdot = sss*0.5f*((ro_L*(Vn_p+Vn_hat_p_abs)+ro_R*(Vn_m-Vn_hat_m_abs)) -chi/(c_diss)*P_del);
         massflux[ip] = mdot;
 
         // S3: 同一の再構成 face 組成 (upwind) を Yface_out[ip*nSpecies+s] へ書き出す。species 移流がこれを読む。
@@ -478,10 +478,10 @@ __global__ void SLAU_d
 
         flow_float res_ro_temp   = mdot;
         flow_float p_tilde_r = p_tilde - d_pRef;   // free-stream 保存: 基準静圧を差し引いて float32 桁落ちを抑制
-        flow_float res_roUx_temp = 0.5*(mdot+abs(mdot))*Ux_L +0.5*(mdot-abs(mdot))*Ux_R +p_tilde_r*sxx;
-        flow_float res_roUy_temp = 0.5*(mdot+abs(mdot))*Uy_L +0.5*(mdot-abs(mdot))*Uy_R +p_tilde_r*syy;
-        flow_float res_roUz_temp = 0.5*(mdot+abs(mdot))*Uz_L +0.5*(mdot-abs(mdot))*Uz_R +p_tilde_r*szz;
-        flow_float res_roe_temp  = 0.5*(mdot+abs(mdot))*h_p +0.5*(mdot-abs(mdot))*h_m ;
+        flow_float res_roUx_temp = 0.5f*(mdot+abs(mdot))*Ux_L +0.5f*(mdot-abs(mdot))*Ux_R +p_tilde_r*sxx;
+        flow_float res_roUy_temp = 0.5f*(mdot+abs(mdot))*Uy_L +0.5f*(mdot-abs(mdot))*Uy_R +p_tilde_r*syy;
+        flow_float res_roUz_temp = 0.5f*(mdot+abs(mdot))*Uz_L +0.5f*(mdot-abs(mdot))*Uz_R +p_tilde_r*szz;
+        flow_float res_roe_temp  = 0.5f*(mdot+abs(mdot))*h_p +0.5f*(mdot-abs(mdot))*h_m ;
 
         atomicAdd(&res_ro[ic0]  , -res_ro_temp);
         atomicAdd(&res_roUx[ic0], -res_roUx_temp);
