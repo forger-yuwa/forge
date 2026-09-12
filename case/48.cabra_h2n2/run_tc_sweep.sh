@@ -12,7 +12,7 @@ for tc in $TCS; do
   d=$(printf "run_%04d_cmc_tc%d" "$n" "$tc")
   echo "== $d (T_c=$tc K)"
   rm -rf "$HERE/$d"
-  (cd "$HERE" && $PY setup_cabra_case.py "$d" --chem 1 --mixfrac 1 --sdm 0 --cmc 1 --couple 5 --cmcchem 1 --cmcdt 0.5 --jac 2 --ji 5 --tci 0 \
+  (cd "$HERE" && $PY setup_cabra_case.py "$d" --chem 1 --mixfrac 1 --sdm 0 --cmc 1 --couple 7 --cmcchem 1 --cmcdt 0.5 --jac 2 --ji 5 --tci 0 \
       --cfl 0.5 --conv 1 --relax 0.5 --iccol 1 --nstep "$NSTEP" --out 500 --cmcfp32 1 --dualtime "${DT:-1e-5}" --tcof "$tc" --restart "$RES" --cmcq "$QBIN" | tail -1)
   cp "$ROOT/solver_density_cuda/tools/mechanisms/h2co_li2004_cantera.yaml" "$HERE/$d/mech.yaml"
   (cd "$ROOT" && bash solver_density_cuda/tools/run_case.sh "case/48.cabra_h2n2/$d" > "$HERE/$d.launch.log" 2>&1) || true   # run_case.sh はリポジトリルート相対
