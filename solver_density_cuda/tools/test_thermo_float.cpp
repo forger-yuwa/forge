@@ -42,7 +42,9 @@ int main(){
         for (auto& m : mixes) {
             const int n=(int)m.idx.size();
             std::vector<SpeciesThermo> sp(n); std::vector<SpeciesThermoF> spf(n); std::vector<float> Yf(n);
-            for (int i=0;i<n;i++){ sp[i]=db[m.idx[i]].second; Yf[i]=(float)m.Y[i]; }
+            // 本番 (dependentVariables useHybrid) と同じく Y は float で組んで正規化し、double 側は (double)Yf を使う
+            { float ys=0.f; for (int i=0;i<n;i++){ sp[i]=db[m.idx[i]].second; Yf[i]=(float)m.Y[i]; ys+=Yf[i]; }
+              const float inv=1.0f/(ys>1e-30f?ys:1e-30f); for (int i=0;i<n;i++){ Yf[i]*=inv; m.Y[i]=(double)Yf[i]; } }
             if (datum) for (int i=0;i<n;i++){ const double h_ref=thermo_h_molar(sp[i],298.15); const double da7=-h_ref/THERMO_RU; sp[i].low[7]+=da7; sp[i].high[7]+=da7; }
             for (int i=0;i<n;i++) spf[i]=toF(sp[i]);
             double maxdT=0, maxrel=0, maxres=0, maxdrift=0, maxdh=0, maxdTrelT=0, maxresRelT=0, maxHyb=0; int itFmax=0, itDmax=0;
@@ -51,7 +53,7 @@ int main(){
                 double cpd, hd; thermo_cph_mix(sp.data(), n, m.Y.data(), T, &cpd, &hd);
                 const double R=thermo_R_mix(sp.data(),n,m.Y.data()); const double e=hd-R*T;
                 // 反転 (double, warm start は T の 0.9 倍・1.1 倍・300K の 3 通り)
-                for (double g : {0.9*T, 1.1*T, 300.0}) {
+                for (double g : {0.9*T, 1.1*T, 300.0, 50.1, 6000.0}) {
                     const double Td = thermo_T_from_e(sp.data(), n, m.Y.data(), e, g, 50.0, 6000.0);
                     int itF=0;
                     const float Tf = thermo_T_from_e_f(spf.data(), n, Yf.data(), (float)e, (float)g, 50.0f, 6000.0f, &itF);
@@ -69,8 +71,12 @@ int main(){
                     const float Tf2=thermo_T_from_e_f(spf.data(),n,Yf.data(),e2,Tf,50.0f,6000.0f,nullptr);
                     maxdrift=std::max(maxdrift,(double)fabsf(Tf2-Tf));
                     // ハイブリッド (float 8 反復 + double 研磨 1 段) の誤差
-                    { double cpH,hH,TfH; const double Th=thermo_T_from_e_hybrid(sp.data(),spf.data(),n,m.Y.data(),Yf.data(),e,g,50.0,6000.0,&cpH,&hH,&TfH,20);
-                      maxHyb=std::max(maxHyb,fabs(Th-Tref)/Tref); }
+                    { double cpH,hH,TfH; const double Th=thermo_T_from_e_hybrid(sp.data(),spf.data(),n,m.Y.data(),Yf.data(),e,g,50.0,6000.0,&cpH,&hH,&TfH,12);
+                      maxHyb=std::max(maxHyb,fabs(Th-Tref)/Tref);
+                      // 再格納ドリフト: h(T)=h(T_f)+cp·(T−T_f) (本番の Taylor 再構成) から e を組み直し、もう一度反転して T の動きを見る
+                      const double e2=(hH+cpH*(Th-TfH))-thermo_R_mix(sp.data(),n,m.Y.data())*Th;
+                      double cp2,h2,Tf2; const double Th2=thermo_T_from_e_hybrid(sp.data(),spf.data(),n,m.Y.data(),Yf.data(),e2,Th,50.0,6000.0,&cp2,&h2,&Tf2,12);
+                      maxdrift=std::max(maxdrift,fabs(Th2-Th)/Th); }
                     maxdh=std::max(maxdh, fabs((double)hf-hd)/(cpd*T));
                     itFmax=std::max(itFmax,itF); itDmax=std::max(itDmax,itD);
                 }

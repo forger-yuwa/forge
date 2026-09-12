@@ -18,6 +18,7 @@ export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial:${LD_LIBRARY_PATH:-
 TPL="$(cd "$TPL" && pwd)"
 SRC_CFG="$TPL/solverConfig.yaml.orig"; [ -f "$SRC_CFG" ] || SRC_CFG="$TPL/solverConfig.yaml"
 D="${TPL}_bench/${LABEL}_n${NSTEP}"
+if [ -e "$D" ] && [ "${FORGE_BENCH_OVERWRITE:-0}" != "1" ]; then echo "[bench] $D exists; use a new label or FORGE_BENCH_OVERWRITE=1"; exit 2; fi
 mkdir -p "$D"
 for f in bcondConfig.yaml species_db.yaml probe.yaml IC_FROM.txt; do [ -f "$TPL/$f" ] && cp "$TPL/$f" "$D/"; done
 for h in "$TPL"/*.h5; do case "$(basename "$h")" in res_*) ;; *) [ -e "$D/$(basename "$h")" ] || ln "$h" "$D/$(basename "$h")" 2>/dev/null || cp "$h" "$D/";; esac; done

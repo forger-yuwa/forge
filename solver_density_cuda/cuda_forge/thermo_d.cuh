@@ -613,15 +613,26 @@ THERMO_HD double thermo_T_from_e_hybrid(const SpeciesThermo* sp, const SpeciesTh
     else R = thermo_R_mix(sp, n, Y);
     double cp_T, h_T;
     thermo_cph_mix_polish(sp, n, Y, (double)Tf, &cp_T, &h_T);
-    const double cv  = cp_T - R;
-    const double cvf = (cv > 1.0e-2*R ? cv : 1.0e-2*R);
-    double dT = ((h_T - R*(double)Tf) - e)/cvf;
-    if (dT >  0.5*(double)Tf) dT =  0.5*(double)Tf;
-    if (dT < -0.5*(double)Tf) dT = -0.5*(double)Tf;
-    double T = (double)Tf - dT;
-    if (T < T_min) T = T_min;
-    if (T > T_max) T = T_max;
-    *cp_at_Tf = cp_T; *h_at_Tf = h_T; *Tf_out = (double)Tf;
+    // 研磨は「収束するまで」(最大 3 段)。float 段が未収束 (冷間開始で maxIterF に達した等) でも 1 段で打ち切ると
+    // 二次収束にならず誤差が残る (codex result レビュー M2: 5900 K 目標・50 K 開始で 3e-6·T)。各段の |dT| が
+    // 1e-3+1e-6·T [K] (double 版と同じ判定) 未満になったら終了。通常 (warm start) は 1 段で終わる。
+    double Tp = (double)Tf;
+    double T  = Tp;
+    for (int k = 0; k < 3; ++k) {
+        const double cv  = cp_T - R;
+        const double cvf = (cv > 1.0e-2*R ? cv : 1.0e-2*R);
+        double dT = ((h_T - R*Tp) - e)/cvf;
+        if (dT >  0.5*Tp) dT =  0.5*Tp;
+        if (dT < -0.5*Tp) dT = -0.5*Tp;
+        T = Tp - dT;
+        if (T < T_min) T = T_min;
+        if (T > T_max) T = T_max;
+        if (fabs(dT) < 1.0e-3 + 1.0e-6*T) break;
+        // 未収束: 研磨点を更新して再評価 (double cph をもう 1 回)
+        Tp = T;
+        thermo_cph_mix_polish(sp, n, Y, Tp, &cp_T, &h_T);
+    }
+    *cp_at_Tf = cp_T; *h_at_Tf = h_T; *Tf_out = Tp;
     return T;
 }
 
