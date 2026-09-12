@@ -25,6 +25,7 @@ __global__ void SLAU_d
     // --- struct 引数をローカルへ展開 (以降の本体は旧シグネチャのまま無改変) ---
     const int            thermalMethod  = spA.thermalMethod;
     const SpeciesThermo* sp             = spA.sp;
+    const SpeciesThermoF* spf           = spA.spf;   // float32 ミラー (面エンタルピー用)
     const int            nSpecies       = spA.nSpecies;
     flow_float**         roY            = spA.roY;
     flow_float**         Yd_recon       = spA.Yd_recon;
@@ -215,17 +216,20 @@ __global__ void SLAU_d
             //   He/N2 の質量基準 cp は ~5 倍違うため、sp[0] 固定だと混合 contact で
             //   エネルギー束が不整合になり圧力発散する。
             if (nSpecies > 1 && roY != nullptr) {
-                double YL[THERMO_MAX_SPECIES], YR[THERMO_MAX_SPECIES];
-                const double roL_c = (double)max(ro[ic0], (flow_float)1.0e-30);
-                const double roR_c = (double)max(ro[ic1], (flow_float)1.0e-30);
-                double sL=0.0, sR=0.0;
+                // 面エンタルピー評価は float32 (SpeciesThermoF)。評価点 (T_L/R = P/(ρR_mix) の面状態) は不変
+                // (plan performance-3d-node-sst-speedup §4.2-2)。診断分岐 (g_rhoYCommonLim / g_faceThermoY) は
+                // 従来どおり double 配列を併用する。
+                flow_float YL[THERMO_MAX_SPECIES], YR[THERMO_MAX_SPECIES];
+                const flow_float inv_roL_c = 1.0f/max(ro[ic0], (flow_float)1.0e-30f);
+                const flow_float inv_roR_c = 1.0f/max(ro[ic1], (flow_float)1.0e-30f);
+                flow_float sL=0.0f, sR=0.0f;
                 for (int s=0;s<nSpecies;s++){
-                    double yl=(double)roY[s][ic0]/roL_c; if(yl<0.0)yl=0.0; YL[s]=yl; sL+=yl;
-                    double yr=(double)roY[s][ic1]/roR_c; if(yr<0.0)yr=0.0; YR[s]=yr; sR+=yr;
+                    flow_float yl=roY[s][ic0]*inv_roL_c; if(yl<0.0f)yl=0.0f; YL[s]=yl; sL+=yl;
+                    flow_float yr=roY[s][ic1]*inv_roR_c; if(yr<0.0f)yr=0.0f; YR[s]=yr; sR+=yr;
                 }
-                const double iL=1.0/(sL>1.0e-30?sL:1.0e-30), iR=1.0/(sR>1.0e-30?sR:1.0e-30);
+                const flow_float iL=1.0f/(sL>1.0e-30f?sL:1.0e-30f), iR=1.0f/(sR>1.0e-30f?sR:1.0e-30f);
                 for (int s=0;s<nSpecies;s++){ YL[s]*=iL; YR[s]*=iR; }
-                double RgL, RgR;
+                flow_float RgL, RgR;
                 if (g_speciesFaceRecon && Yd_recon != nullptr && g_rhoYCommonLim) {
                     // rho-Y 共通リミタ (opt-in 診断): ρ と同一の ψ_ρY=min(ψ_ρ,min_s ψ_Y) (lim_rho_L/R) で Y を再構成。
                     //   → ρ_f と Y_f が常に同次数 = ρ_f=ρ(Y_f) の熱力学整合だけを切り分ける。
@@ -246,7 +250,7 @@ __global__ void SLAU_d
                         if (ylr < 0.0f || ylr > 1.0f) ovL = true;
                         if (yrr < 0.0f || yrr > 1.0f) ovR = true;
                         if (ylr < 0.0f || ylr > 1.0f || yrr < 0.0f || yrr > 1.0f) atomicAdd(&g_speciesOvershoot, 1ULL);
-                        YL[s]=(double)ylr; YR[s]=(double)yrr;
+                        YL[s]=ylr; YR[s]=yrr;
                     }
                     if (ovL) { ro_L = ro[ic0]; for (int s=0;s<nSpecies;s++) YL[s]=cellYL[s]; atomicAdd(&g_rhoYFallback, 1ULL); }
                     else { double sLr=0.0; for(int s=0;s<nSpecies;s++) sLr+=YL[s]; const double iLr=1.0/(sLr>1.0e-30?sLr:1.0e-30); for(int s=0;s<nSpecies;s++) YL[s]*=iLr; }
@@ -256,8 +260,8 @@ __global__ void SLAU_d
                         atomicMin(&g_Yface_min_scaled, (int)(min(YL[s],YR[s])*1.0e6f));
                         atomicMax(&g_Yface_max_scaled, (int)(max(YL[s],YR[s])*1.0e6f));
                     }
-                    RgL = thermo_R_mix(sp, nSpecies, YL);
-                    RgR = thermo_R_mix(sp, nSpecies, YR);
+                    RgL = thermo_R_mix_f(spf, nSpecies, YL);
+                    RgR = thermo_R_mix_f(spf, nSpecies, YR);
                     for (int s=0;s<nSpecies;s++){ YLf_s3[s]=YL[s]; YRf_s3[s]=YR[s]; }
                     haveYf_s3 = true;
                 } else if (g_speciesFaceRecon && Yd_recon != nullptr) {
@@ -281,12 +285,12 @@ __global__ void SLAU_d
                         if (ylr < 0.0f || ylr > 1.0f || yrr < 0.0f || yrr > 1.0f) atomicAdd(&g_speciesOvershoot, 1ULL);
                         ylr = min(max(ylr,(flow_float)0.0),(flow_float)1.0);
                         yrr = min(max(yrr,(flow_float)0.0),(flow_float)1.0);
-                        YL[s]=(double)ylr; YR[s]=(double)yrr; sLr+=(double)ylr; sRr+=(double)yrr;
+                        YL[s]=ylr; YR[s]=yrr; sLr+=(double)ylr; sRr+=(double)yrr;
                     }
                     const double iLr=1.0/(sLr>1.0e-30?sLr:1.0e-30), iRr=1.0/(sRr>1.0e-30?sRr:1.0e-30);
                     for (int s=0;s<nSpecies;s++){ YL[s]*=iLr; YR[s]*=iRr; }
-                    RgL = thermo_R_mix(sp, nSpecies, YL);
-                    RgR = thermo_R_mix(sp, nSpecies, YR);
+                    RgL = thermo_R_mix_f(spf, nSpecies, YL);
+                    RgR = thermo_R_mix_f(spf, nSpecies, YR);
                     // S3: 正規化済み再構成 face 組成 (ΣY=1) を保存し、mdot 確定後に upwind を Yface_out へ。
                     for (int s=0;s<nSpecies;s++){ YLf_s3[s]=YL[s]; YRf_s3[s]=YR[s]; }
                     haveYf_s3 = true;
@@ -296,12 +300,12 @@ __global__ void SLAU_d
                     double Yf[THERMO_MAX_SPECIES], sf=0.0;
                     for (int s=0;s<nSpecies;s++){ Yf[s] = (double)f*YL[s] + (1.0-(double)f)*YR[s]; sf+=Yf[s]; }
                     const double inv = 1.0/(sf>1.0e-30?sf:1.0e-30);
-                    for (int s=0;s<nSpecies;s++){ Yf[s]*=inv; YL[s]=Yf[s]; YR[s]=Yf[s]; }
-                    RgL = RgR = thermo_R_mix(sp, nSpecies, Yf);
+                    for (int s=0;s<nSpecies;s++){ Yf[s]*=inv; YL[s]=(flow_float)Yf[s]; YR[s]=(flow_float)Yf[s]; }
+                    RgL = RgR = (flow_float)thermo_R_mix(sp, nSpecies, Yf);
                 } else {
                     // R_mix はセル組成のみの定数 (現行 mixed-order)。dependentVariables で計算済の per-cell 値。
-                    RgL = (double)Rmix_cell[ic0];
-                    RgR = (double)Rmix_cell[ic1];
+                    RgL = Rmix_cell[ic0];
+                    RgR = Rmix_cell[ic1];
                 }
                 // 二相 (凝縮 g>0): 状態の圧力は蒸気のみ P=ρT(R_mix−gR_w) (dependentVariables) なので、
                 // 面温度の再構成も同じ気体定数で行う。全水分を気相と数えた R_mix で T=P/(ρR_mix) と
@@ -310,24 +314,24 @@ __global__ void SLAU_d
                 // 836→841 kJ/kg、出口ノードだけ境界流束 [Ht 直読] で整合し T が 5 K 低い「跳ね」)。
                 if (g_total != nullptr) {
                     const CondSpeciesProps cprR = (condModel == 1) ? condProps_H2O() : condProps_N2();
-                    RgL -= (double)g_total[ic0]*cprR.R; if (RgL < 1.0) RgL = 1.0;
-                    RgR -= (double)g_total[ic1]*cprR.R; if (RgR < 1.0) RgR = 1.0;
+                    RgL -= g_total[ic0]*(flow_float)cprR.R; if (RgL < 1.0f) RgL = 1.0f;
+                    RgR -= g_total[ic1]*(flow_float)cprR.R; if (RgR < 1.0f) RgR = 1.0f;
                 }
-                const double Tl = (double)P_L/((double)ro_L*RgL);
-                const double Tr = (double)P_R/((double)ro_R*RgR);
-                h_p = (flow_float)(thermo_h_mix(sp, nSpecies, YL, Tl) + 0.5*(double)velocity2_L);
-                h_m = (flow_float)(thermo_h_mix(sp, nSpecies, YR, Tr) + 0.5*(double)velocity2_R);
+                const flow_float Tl = P_L/(ro_L*RgL);
+                const flow_float Tr = P_R/(ro_R*RgR);
+                h_p = thermo_h_mix_f(spf, nSpecies, YL, Tl) + 0.5f*velocity2_L;
+                h_m = thermo_h_mix_f(spf, nSpecies, YR, Tr) + 0.5f*velocity2_R;
             } else {
-                double Rg = thermo_R_species(sp[0]);
-                double RgL1 = Rg, RgR1 = Rg;
+                const flow_float Rg = spf[0].R;
+                flow_float RgL1 = Rg, RgR1 = Rg;
                 if (g_total != nullptr) {   // pure-condensible TP: P=ρ(1−g)RT
-                    RgL1 = Rg*(1.0 - (double)g_total[ic0]); if (RgL1 < 1.0) RgL1 = 1.0;
-                    RgR1 = Rg*(1.0 - (double)g_total[ic1]); if (RgR1 < 1.0) RgR1 = 1.0;
+                    RgL1 = Rg*(1.0f - g_total[ic0]); if (RgL1 < 1.0f) RgL1 = 1.0f;
+                    RgR1 = Rg*(1.0f - g_total[ic1]); if (RgR1 < 1.0f) RgR1 = 1.0f;
                 }
-                const double Tl = (double)P_L/((double)ro_L*RgL1);
-                const double Tr = (double)P_R/((double)ro_R*RgR1);
-                h_p = (flow_float)(thermo_h_mass(sp[0], Tl) + 0.5*(double)velocity2_L);
-                h_m = (flow_float)(thermo_h_mass(sp[0], Tr) + 0.5*(double)velocity2_R);
+                const flow_float Tl = P_L/(ro_L*RgL1);
+                const flow_float Tr = P_R/(ro_R*RgR1);
+                h_p = thermo_h_mass_f(spf[0], Tl) + 0.5f*velocity2_L;
+                h_m = thermo_h_mass_f(spf[0], Tr) + 0.5f*velocity2_R;
             }
             // carrier+condensible (H2O in N2) 二相補正: 凝縮した水の潜熱を引く
             //   h_2phase = h_gas^全蒸気 - g L_w + ek。気相混合 h は全蒸気なので -g L_w を足すだけ。

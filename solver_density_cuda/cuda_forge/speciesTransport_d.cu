@@ -172,13 +172,16 @@ __global__ void species_diffusion_d(
     geom_int* plane_cells,
     geom_float* ccx, geom_float* ccy, geom_float* ccz,
     geom_float* fx, geom_float* sx, geom_float* sy, geom_float* sz, geom_float* ss,
-    const SpeciesThermo* sp, int nSpecies,
+    const SpeciesThermoF* sp, int nSpecies,
     flow_float** roY, flow_float** res_roY, flow_float** transport_diag,
     flow_float* ro, flow_float* T, flow_float* P, flow_float* vis_lam, flow_float* vis_turb,
     flow_float* res_roe,
     int diffMethod, flow_float Sc, flow_float Sc_t,
     int isNode, flow_float** dYdx, flow_float** dYdy, flow_float** dYdz)
 {
+    // 面ループは float32 で評価する (係数は SpeciesThermoF, 評価点は従来どおり面状態 T_f/P_f/Y_f。
+    // 離散式は不変, plan performance-3d-node-sst-speedup §4.2-2)。旧 double 版は FP64 パイプ律速で
+    // 3D 2.37 M 節点 13.6 ms/step を食っていた。
     geom_int ih = blockDim.x * blockIdx.x + threadIdx.x;
     if (ih >= nNormalHaloPlanes) return;
 
@@ -186,8 +189,8 @@ __global__ void species_diffusion_d(
     const geom_int ic0 = plane_cells[2 * ip + 0];
     const geom_int ic1 = plane_cells[2 * ip + 1];
 
-    const geom_float f   = fx[ip];
-    const geom_float sxx = sx[ip], syy = sy[ip], szz = sz[ip], sss = ss[ip];
+    const flow_float f   = fx[ip];
+    const flow_float sxx = sx[ip], syy = sy[ip], szz = sz[ip], sss = ss[ip];
 
     // node モードの境界半割面 (ghost を含む面): 拡散流束を加えない (skip)。
     // 根拠 (plan diffusion-node-boundary-real-distance.md §3 (c), scalar_diffusion_first_order_d と同方針):
@@ -203,62 +206,68 @@ __global__ void species_diffusion_d(
     const flow_float dccx = ccx[ic1] - ccx[ic0];
     const flow_float dccy = ccy[ic1] - ccy[ic0];
     const flow_float dccz = ccz[ic1] - ccz[ic0];
-    const flow_float dcc  = sqrt(dccx*dccx + dccy*dccy + dccz*dccz);
+    const flow_float dcc  = sqrtf(dccx*dccx + dccy*dccy + dccz*dccz);
     const flow_float denom = dccx*sxx + dccy*syy + dccz*szz;
-    const flow_float Dsafe = (fabs(denom) < 1.0e-30) ? ((denom>=0)?1.0e-30:-1.0e-30) : denom;
+    const flow_float Dsafe = (fabsf(denom) < 1.0e-30f) ? ((denom>=0.0f)?1.0e-30f:-1.0e-30f) : denom;
     const flow_float delta = dcc * sss * sss / Dsafe;       // over-relaxed 法線
 
-    const double ro0 = (double)max(ro[ic0], (flow_float)1.0e-30);
-    const double ro1 = (double)max(ro[ic1], (flow_float)1.0e-30);
-    const double ro_face = (double)f*ro0 + (1.0-(double)f)*ro1;
-    const double T_face  = (double)f*(double)T[ic0] + (1.0-(double)f)*(double)T[ic1];
-    const double P_face  = (double)f*(double)P[ic0] + (1.0-(double)f)*(double)P[ic1];
+    const flow_float ro0 = max(ro[ic0], (flow_float)1.0e-30f);
+    const flow_float ro1 = max(ro[ic1], (flow_float)1.0e-30f);
+    const flow_float inv_ro0 = 1.0f/ro0, inv_ro1 = 1.0f/ro1;
+    const flow_float g = 1.0f - f;
+    const flow_float ro_face = f*ro0 + g*ro1;
+    const flow_float T_face  = f*T[ic0] + g*T[ic1];
+    const flow_float P_face  = f*P[ic0] + g*P[ic1];
 
     // 面の質量分率 Yf (正規化) -> モル分率 X
-    double Yf[THERMO_MAX_SPECIES], X[THERMO_MAX_SPECIES];
-    double ysum = 0.0;
+    flow_float Yf[THERMO_MAX_SPECIES], X[THERMO_MAX_SPECIES];
+    flow_float Ys0[THERMO_MAX_SPECIES], Ys1[THERMO_MAX_SPECIES];
+    flow_float ysum = 0.0f;
     for (int s=0;s<nSpecies;s++){
-        double y = (double)f*((double)roY[s][ic0]/ro0) + (1.0-(double)f)*((double)roY[s][ic1]/ro1);
-        if (y<0.0) y=0.0; Yf[s]=y; ysum+=y;
+        Ys0[s] = roY[s][ic0]*inv_ro0;
+        Ys1[s] = roY[s][ic1]*inv_ro1;
+        flow_float y = f*Ys0[s] + g*Ys1[s];
+        if (y<0.0f) y=0.0f; Yf[s]=y; ysum+=y;
     }
-    const double yinv = 1.0/(ysum>1.0e-30?ysum:1.0e-30);
+    const flow_float yinv = 1.0f/(ysum>1.0e-30f?ysum:1.0e-30f);
     for (int s=0;s<nSpecies;s++) Yf[s]*=yinv;
-    thermo_X_from_Y(sp, nSpecies, Yf, X);
+    thermo_X_from_Y_f(sp, nSpecies, Yf, X);
 
-    const double mu_face = (double)f*(double)vis_lam[ic0] + (1.0-(double)f)*(double)vis_lam[ic1];
-    const double mut_face = (double)f*(double)vis_turb[ic0] + (1.0-(double)f)*(double)vis_turb[ic1];
+    const flow_float mu_face  = f*vis_lam[ic0]  + g*vis_lam[ic1];
+    const flow_float mut_face = f*vis_turb[ic0] + g*vis_turb[ic1];
     // 乱流化学種拡散 D_t = μ_t/(ρ Sc_t) は全種共通で加える。
-    const double Dt = (mut_face > 0.0) ? mut_face/(ro_face*(double)Sc_t) : 0.0;
+    const flow_float Dt = (mut_face > 0.0f) ? mut_face/(ro_face*Sc_t) : 0.0f;
+    const flow_float inv_dcc = 1.0f/dcc;
+    const flow_float diag_geo = fabsf(delta) / max(dcc,(flow_float)1.0e-30f);
 
     // 各化学種の非補正 Fick flux J_s と Σ
-    double Js[THERMO_MAX_SPECIES];
-    double sumJ = 0.0;
+    flow_float Js[THERMO_MAX_SPECIES];
+    flow_float sumJ = 0.0f;
     for (int s=0;s<nSpecies;s++){
-        const double Ys0 = (double)roY[s][ic0]/ro0;
-        const double Ys1 = (double)roY[s][ic1]/ro1;
-        double D;
-        if (diffMethod == 1) D = thermo_Dmix_species(sp, nSpecies, X, s, T_face, P_face);
-        else                 D = mu_face/(ro_face*(double)Sc);
+        flow_float D;
+        if (diffMethod == 1) D = thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face);
+        else                 D = mu_face/(ro_face*Sc);
         D += Dt;  // 層流 (Fick/Sc) + 乱流 (μ_t/Sc_t)
-        Js[s] = ro_face * D * ((Ys1 - Ys0)/(double)dcc) * (double)delta;
+        const flow_float roD = ro_face * D;
+        Js[s] = roD * ((Ys1[s] - Ys0[s])*inv_dcc) * delta;
         sumJ += Js[s];
         // point-implicit 拡散対角 (各セル ρ で正規化)
-        const double diag = ro_face * D * fabs((double)delta) / (double)max(dcc,(flow_float)1.0e-30);
-        if (ic0 < nCells) atomicAdd(&transport_diag[s][ic0], (flow_float)(diag/ro0));
-        if (ic1 < nCells) atomicAdd(&transport_diag[s][ic1], (flow_float)(diag/ro1));
+        const flow_float diag = roD * diag_geo;
+        if (ic0 < nCells) atomicAdd(&transport_diag[s][ic0], diag*inv_ro0);
+        if (ic1 < nCells) atomicAdd(&transport_diag[s][ic1], diag*inv_ro1);
     }
 
     // 補正 J_s* = J_s - Y_s Σ_k J_k (Σ J_s* = 0) と エネルギー結合 Σ h_s J_s*
-    double q = 0.0;
+    flow_float q = 0.0f;
     for (int s=0;s<nSpecies;s++){
-        const double Jc = Js[s] - Yf[s]*sumJ;
-        if (ic0 < nCells) atomicAdd(&res_roY[s][ic0],  (flow_float)Jc);
-        if (ic1 < nCells) atomicAdd(&res_roY[s][ic1], -(flow_float)Jc);
-        const double hs = thermo_h_mass(sp[s], T_face);   // NASA 絶対エンタルピー [J/kg]
+        const flow_float Jc = Js[s] - Yf[s]*sumJ;
+        if (ic0 < nCells) atomicAdd(&res_roY[s][ic0],  Jc);
+        if (ic1 < nCells) atomicAdd(&res_roY[s][ic1], -Jc);
+        const flow_float hs = thermo_h_mass_f(sp[s], T_face);   // NASA エンタルピー [J/kg] (datum 込み)
         q += hs * Jc;
     }
-    if (ic0 < nCells) atomicAdd(&res_roe[ic0],  (flow_float)q);
-    if (ic1 < nCells) atomicAdd(&res_roe[ic1], -(flow_float)q);
+    if (ic0 < nCells) atomicAdd(&res_roe[ic0],  q);
+    if (ic1 < nCells) atomicAdd(&res_roe[ic1], -q);
 }
 
 // TP 多成分気体の組成-エネルギー整合補正 (M-stagger 修正)。
@@ -750,7 +759,7 @@ void speciesTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
             msh.nCells, msh.nNormal_halo_Planes, msh.normal_halo_planes_d, msh.map_plane_cells_d,
             var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
             var.p_d["fx"], var.p_d["sx"], var.p_d["sy"], var.p_d["sz"], var.p_d["ss"],
-            thermo_species_device_ptr(), g_nSpecies,
+            thermo_species_device_ptr_f(), g_nSpecies,
             g_roY_dev, g_resroY_dev, g_transdiag_dev,
             var.c_d["ro"], var.c_d["T"], var.c_d["P"], var.c_d["vis_lam"], var.c_d["vis_turb"],
             var.c_d["res_roe"],

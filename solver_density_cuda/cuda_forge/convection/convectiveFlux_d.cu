@@ -185,7 +185,7 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
     if (cfg.solver == "SLAU" || cfg.solver == "SLAU2") {
         int slauVariant = (cfg.solver == "SLAU2") ? 2 : 1;
         SpeciesArgs spA {
-            cfg.thermalMethod, thermo_species_device_ptr(), cfg.nSpecies,
+            cfg.thermalMethod, thermo_species_device_ptr(), thermo_species_device_ptr_f(), cfg.nSpecies,
             species_roY_device_ptr(),
             species_Y_device_ptr(), species_dYdx_device_ptr(), species_dYdy_device_ptr(), species_dYdz_device_ptr(),
             species_limiterY_device_ptr(),

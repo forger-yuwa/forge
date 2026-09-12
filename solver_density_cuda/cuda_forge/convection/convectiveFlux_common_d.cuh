@@ -286,6 +286,7 @@ struct CondArgs {
 struct SpeciesArgs {
     int                  thermalMethod;
     const SpeciesThermo* sp;
+    const SpeciesThermoF* spf;   // float32 ミラー (面エンタルピー h_mix(Y_f,T_f) の評価用)
     int                  nSpecies;
     flow_float**         roY;
     flow_float**         Yd_recon;

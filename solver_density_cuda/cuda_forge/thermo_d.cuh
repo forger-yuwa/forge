@@ -53,6 +53,91 @@ struct SpeciesThermo {
 };
 
 // -----------------------------------------------------------------------------
+// float32 ミラー (面ごとの熱力学評価用, plan performance-3d-node-sst-speedup §4.2-2)。
+//   面ループ (SLAU の h_mix(Y_f,T_f), 化学種拡散の h_s(T_f)・D_s(T_f,P_f,X_f)) で double 版を呼ぶと
+//   CC 8.6 では FP64 パイプ (FP32 の 1/64) が律速になる。係数は double の SpeciesThermo から
+//   1 度だけ float へ焼き込み (datum オフセット込み)、クランプ・外挿の分岐は double 版と同一にする。
+//   セルごとの Newton 反転 (thermo_T_from_e) や初期条件は引き続き double 版を使う。
+// -----------------------------------------------------------------------------
+#define THERMO_RU_F 8.314462618f
+struct SpeciesThermoF {
+    float MW;         // [kg/mol]
+    float invMW;      // 1/MW
+    float R;          // Ru/MW [J/(kg K)]
+    float sigma_LJ;   // [Angstrom]
+    float eps_kB;     // [K]
+    float Tlo, Tmid, Thi;
+    float low[9];
+    float high[9];
+};
+
+THERMO_HD const float* thermo_pick_coeffs_f(const SpeciesThermoF& sp, float Tc)
+{
+    return (Tc < sp.Tmid) ? sp.low : sp.high;
+}
+THERMO_HD float thermo_cp_molar_clamped_f(const SpeciesThermoF& sp, float Tc)
+{
+    const float* a = thermo_pick_coeffs_f(sp, Tc);
+    const float Ti  = 1.0f/Tc;
+    const float Ti2 = Ti*Ti;
+    return THERMO_RU_F * ( a[0]*Ti2 + a[1]*Ti + a[2]
+                         + a[3]*Tc + a[4]*Tc*Tc + a[5]*Tc*Tc*Tc + a[6]*Tc*Tc*Tc*Tc );
+}
+THERMO_HD float thermo_h_molar_clamped_f(const SpeciesThermoF& sp, float Tc)
+{
+    const float* a = thermo_pick_coeffs_f(sp, Tc);
+    const float Ti  = 1.0f/Tc;
+    const float Ti2 = Ti*Ti;
+    const float lnT = logf(Tc);
+    const float hRT = -a[0]*Ti2 + a[1]*lnT*Ti + a[2]
+                    + a[3]*Tc/2.0f + a[4]*Tc*Tc/3.0f + a[5]*Tc*Tc*Tc/4.0f
+                    + a[6]*Tc*Tc*Tc*Tc/5.0f + a[7]*Ti;
+    return THERMO_RU_F * Tc * hRT;
+}
+THERMO_HD float thermo_cp_molar_f(const SpeciesThermoF& sp, float T)
+{
+    float Tc = T;
+    if (Tc < sp.Tlo) Tc = sp.Tlo;
+    if (Tc > sp.Thi) Tc = sp.Thi;
+    return thermo_cp_molar_clamped_f(sp, Tc);
+}
+THERMO_HD float thermo_h_molar_f(const SpeciesThermoF& sp, float T)
+{
+    if (T < sp.Tlo) {
+        const float h0  = thermo_h_molar_clamped_f(sp, sp.Tlo);
+        const float cp0 = thermo_cp_molar_clamped_f(sp, sp.Tlo);
+        return h0 + cp0*(T - sp.Tlo);
+    }
+    if (T > sp.Thi) {
+        const float h1  = thermo_h_molar_clamped_f(sp, sp.Thi);
+        const float cp1 = thermo_cp_molar_clamped_f(sp, sp.Thi);
+        return h1 + cp1*(T - sp.Thi);
+    }
+    return thermo_h_molar_clamped_f(sp, T);
+}
+THERMO_HD float thermo_cp_mass_f(const SpeciesThermoF& sp, float T) { return thermo_cp_molar_f(sp, T) * sp.invMW; }
+THERMO_HD float thermo_h_mass_f (const SpeciesThermoF& sp, float T) { return thermo_h_molar_f (sp, T) * sp.invMW; }
+THERMO_HD float thermo_R_mix_f(const SpeciesThermoF* sp, int n, const float* Y)
+{
+    float s = 0.0f;
+    for (int i=0;i<n;i++) s += Y[i]*sp[i].invMW;
+    return THERMO_RU_F * s;
+}
+THERMO_HD float thermo_h_mix_f(const SpeciesThermoF* sp, int n, const float* Y, float T)
+{
+    float h = 0.0f;
+    for (int i=0;i<n;i++) h += Y[i]*thermo_h_mass_f(sp[i], T);
+    return h;
+}
+THERMO_HD void thermo_X_from_Y_f(const SpeciesThermoF* sp, int n, const float* Y, float* X)
+{
+    float s = 0.0f;
+    for (int i=0;i<n;i++) { X[i] = Y[i]*sp[i].invMW; s += X[i]; }
+    const float inv = 1.0f/(s > 1.0e-30f ? s : 1.0e-30f);
+    for (int i=0;i<n;i++) X[i] *= inv;
+}
+
+// -----------------------------------------------------------------------------
 // 単一化学種の NASA-9 評価 (全て double)。範囲外は端でクランプし、
 // エンタルピーは線形外挿 (h(T) ~ h(Tc) + cp(Tc)(T-Tc)) して衝撃波での暴走を防ぐ。
 // -----------------------------------------------------------------------------
@@ -397,6 +482,32 @@ THERMO_HD float thermo_Dmix_species(const SpeciesThermo* sp, int n, const double
     return (1.0f - (float)X[i])/denom;
 }
 
+// 二元/混合平均拡散係数の float 版 (SpeciesThermoF)。式は thermo_Dbinary / thermo_Dmix_species と同一。
+THERMO_HD float thermo_Dbinary_f(const SpeciesThermoF& a, const SpeciesThermoF& b, float T, float P)
+{
+    const float Mi   = a.MW*1000.0f, Mj = b.MW*1000.0f;      // g/mol
+    const float sig  = 0.5f*(a.sigma_LJ + b.sigma_LJ);       // Å
+    const float epsp = a.eps_kB * b.eps_kB;
+    const float eps  = sqrtf(epsp > 1.0e-30f ? epsp : 1.0e-30f);
+    const float Tstar = T / eps;
+    const float om   = thermo_omega11(Tstar);
+    const float Patm = P / 101325.0f;
+    const float Dcm2 = 1.8583e-3f * sqrtf(T*T*T*(1.0f/Mi + 1.0f/Mj)) / (Patm * sig*sig * om);
+    return Dcm2 * 1.0e-4f;
+}
+THERMO_HD float thermo_Dmix_species_f(const SpeciesThermoF* sp, int n, const float* X, int i, float T, float P)
+{
+    if (n == 1) return 0.0f;
+    float denom = 0.0f;
+    for (int j=0;j<n;j++) {
+        if (j==i) continue;
+        const float Dij = thermo_Dbinary_f(sp[i], sp[j], T, P);
+        denom += X[j]/(Dij > 1.0e-30f ? Dij : 1.0e-30f);
+    }
+    if (denom < 1.0e-30f) return thermo_Dbinary_f(sp[i], sp[i], T, P);
+    return (1.0f - X[i])/denom;
+}
+
 // -----------------------------------------------------------------------------
 // 温度反転: 比内部エネルギー e [J/kg] と組成 Y から T を Newton 反転で求める。
 //   f(T) = e_mix(T) - e = 0, f'(T) = cv_mix(T) = cp_mix(T) - R_mix (厳密微分)
@@ -636,6 +747,7 @@ class solverConfig;
 
 void                 thermo_init_db(solverConfig& cfg);
 const SpeciesThermo* thermo_species_device_ptr();   // device global memory
+const SpeciesThermoF* thermo_species_device_ptr_f(); // float32 ミラー (面ループ用, 同じ datum)
 int                  thermo_num_species();
 const SpeciesThermo* thermo_species_host();          // host array (length = thermo_num_species)
 
