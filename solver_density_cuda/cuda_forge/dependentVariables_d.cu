@@ -82,8 +82,20 @@ __global__ void dependentVariables_d
             // ---- 多成分 thermally-perfect gas (NASA-9) ----
             // 内部計算は全て double。組成 Y を構築 (nSpecies==1 は Y={1})。
             double Y[THERMO_MAX_SPECIES];
+            float  Yf[THERMO_MAX_SPECIES];   // thermoFloat 用 (float で組んで double へ昇格: DP 除算を避ける)
+            const bool useHybrid = (thermoFloat != 0 && spf != nullptr && condensation == 0);
             if (nSpecies <= 1 || roY == nullptr) {
-                Y[0] = 1.0f;
+                Y[0] = 1.0; Yf[0] = 1.0f;
+            } else if (useHybrid) {
+                const float inv_ro = 1.0f/ro_temp;
+                float ysum = 0.0f;
+                for (int s=0;s<nSpecies;s++){
+                    float y = roY[s][ic]*inv_ro;
+                    if (y < 0.0f) y = 0.0f;
+                    Yf[s] = y; ysum += y;
+                }
+                const float inv = 1.0f/(ysum > 1.0e-30f ? ysum : 1.0e-30f);
+                for (int s=0;s<nSpecies;s++) { Yf[s] *= inv; Y[s] = (double)Yf[s]; }
             } else {
                 double ysum = 0.0;
                 for (int s=0;s<nSpecies;s++){
@@ -138,11 +150,9 @@ __global__ void dependentVariables_d
                 Tnew = cond_T_from_e_carrier(sp, nSpecies, Y, e_in, g_liq, Rw, cprops, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
             } else if (g_liq > 1.0e-12f) {
                 Tnew = cond_T_from_e_onetemp(sp, nSpecies, Y, e_in, g_liq, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
-            } else if (thermoFloat != 0 && spf != nullptr) {
+            } else if (useHybrid) {
                 // ハイブリッド: float Newton + double 1 段研磨。cp/h は研磨点 T_f の double 値から Taylor で組む
-                // (double 評価 1 回で従来の反復数+1 回分を置換)。乾き (g=0) セルのみ。
-                float Yf[THERMO_MAX_SPECIES];
-                for (int s=0;s<nSpecies;s++) Yf[s] = (float)Y[s];
+                // (double 評価 1 回で従来の反復数+1 回分を置換)。凝縮 off のときのみ (二相 EOS は従来経路)。
                 double cpTf, hTf, Tf;
                 Tnew = thermo_T_from_e_hybrid(sp, spf, nSpecies, Y, Yf, e_in, Tg, DEPVAR_TMIN, DEPVAR_TMAX, &cpTf, &hTf, &Tf, 12);
                 hybrid_cp = cpTf; hybrid_h = hTf + cpTf*(Tnew - Tf); hybrid = true;

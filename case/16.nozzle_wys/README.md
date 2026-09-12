@@ -60,6 +60,14 @@ Wyslouzil et al., *J. Chem. Phys.* **113**, 7317 (2000)
 exit Mach の単調序列 (非粘性 1.99 > 層流 1.94 > 2D乱流 1.88 > 3D乱流 1.53) は
 境界層変位による有効面積減少として物理的に整合。中心線静温はいずれも全温 293 K 以下。
 
+### 速度計測 run (2026-09-12, branch `feature/perf-3d-speedup`, AWS `~/forge-perf/case/16.nozzle_wys`, plan [performance-3d-node-sst-speedup](../../plans/active/performance-3d-node-sst-speedup.md))
+
+| run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
+| --- | --- | --- | --- |
+| `run_0400_perf_baseline` (AWS) | 速度計測テンプレート: run_0234 の入力 (メッシュ h5・config) + `res_12000.h5` の index コピー IC。`tools/bench_steps.sh` が `run_0400_perf_baseline_bench/<label>_n<N>/` に専用 dir を切って回す (res は書かない) | base 82.85 → limtpl 81.9 → lit1 70.6 → lit2 67.4 → thermof 44.0 → thermofl (`thermoFloat: 1`) **38.4 ms/step** (A10G, 100 step, 交互 2 回)。dcache 46.5 / lb6 62.9 は却下。nsys/ncu は `run_0400_perf_baseline/profiles/`, `_bench/prof_*` | active (計測テンプレート) |
+| `run_0401_perf_verify` (AWS) | 同 IC から 100 step 継続し `res_100.h5` を基準バイナリ (`~/forge-bin/forge_base`) と比較 (`cmp_<label>.txt`, `cmp_by_walldist.py`)。base×base ×3 (`ref_base{,2,3}_res_100.h5`) がノイズ床 | 全変更が壁距離ビン別 p99.9 でノイズ床の ≤1.5 倍 (plan §4.3) | active (検証基準) |
+| `run_0410_sweep5_thermofl` / `run_0411_sweep3_thermofl` / `run_0412_sweep2_thermofl` (AWS) | run_0234 と同 IC (run_0228/res_12000 index コピー)・同 config + `thermoFloat: 1` で 12000 step、`nStepInner` 5 / 3 / 2 の壁時計 vs 残差比較 (plan §5.1 #8) | (投入中 2026-09-12) `CONVERGENCE_VERDICT.txt` / `residual_history.png` | active (sweep 数の決定用) |
+
 ## 非平衡凝縮 (H2O) run 一覧 — Wyslouzil Fig.3 検証
 
 Wyslouzil et al. JCP 113, 7317 (2000) **Fig.3 (pv0=1.0 kPa 水)** 条件で、N2 キャリア中の
