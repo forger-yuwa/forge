@@ -8,6 +8,9 @@
 #include <thrust/copy.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/functional.h>
+
+// thrust::identity は CCCL 3 (CUDA 13) で削除されたので自前の述語 (CUDA 12/13 両対応)
+struct CmcFlagNonZero { __host__ __device__ bool operator()(int f) const { return f != 0; } };
 #include "chemistrySource_d.cuh"
 #include "chemistry_d.cuh"
 #include <vector>
@@ -1062,7 +1065,7 @@ static void cmcStepLaunch(cudaConfig& cuda_cfg, variables& var, int doChem)
     else cmc_stepD0_temp_d<<<grid(nPair), blk>>>(g_nCells, g_nCellsAll, thermo_species_device_ptr(), g_OmD, g_Q, g_TEtaD, g_qrelEtaD, g_QdEtaD, g_activeFlag, doChem);
     {   // 活性対の圧縮リスト (thrust copy_if; 順序は idx 昇順で決定的)
         thrust::device_ptr<int> flag(g_activeFlag), list(g_activeList);
-        auto end = thrust::copy_if(thrust::counting_iterator<int>(0), thrust::counting_iterator<int>((int)nPair), flag, list, thrust::identity<int>());
+        auto end = thrust::copy_if(thrust::counting_iterator<int>(0), thrust::counting_iterator<int>((int)nPair), flag, list, CmcFlagNonZero());
         g_nActive = (int)(end - list);
     }
     if (g_timerS.every > 0 && !g_omHist) { gpuErrchk( cudaMalloc((void**)&g_omHist, 4 * sizeof(unsigned long long)) ); gpuErrchk( cudaMemset(g_omHist, 0, 4 * sizeof(unsigned long long)) ); }
