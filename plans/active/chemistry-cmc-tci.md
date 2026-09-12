@@ -206,4 +206,12 @@ laminar chemistry (セル平均で Arrhenius を評価) では自着火安定化
   残る差は z/d 26 の半径方向の肩 (r 10〜20 mm で +100 K; RANS 丸噴流の拡がり)。欠陥 1 件: `chemistry_source_d` の Tfreeze 早期 return で
   冷たい噴流コアに緩和ソースが入らず初期場の OH が残る → couple 7 は Tfreeze を通すよう修正。**couple 7 + dual-time を生産構成に確定**
   (定常反復は柱モードで不可、couple 5/6 は dual-time で音響過渡)。`run_0108` (続き 40 ms) と T_c スイープ `run_0110–0113` を投入。
+- `2026-09-12 (17)` — **ξ 崩落の真因 = 離散 β-PDF の 1 次モーメント偏り × 緩和ソース**: T_c 1030 K の `run_0110` は 15 ms で吹き飛んだ後、
+  ξ が z/d 10 以降で 0.008 に崩落 (couple 6 の `run_0102` と同じ症状)。`cmc_xiOm−xi` を ξ ビン別に見ると希薄側で −0.5〜−2.3 %、濃厚側で
+  +0.1 % の系統偏り (端ビンの質量を η=0/1 節点に載せる + 台形則)。couple 7 の ω_s=ρ(Ỹ_pdf−Y)/τ_c はこの偏りを 1/τ_c=1e4/s で刷り込むので
+  希薄側の燃料元素シンク (dξ/dt ≈ −50ξ /s) になり、定常反復の α/Δτ (~300/s) ではさらに速い → `run_0099/0101` の下流 ξ 崩落もこれ
+  (柱モードは別件で実在)。**修正 71daa48e**: 目標 Ỹ_pdf, h̃_pdf を混合線に沿って (ξ̃−ξ_Ω) だけ平行移動し Bilger ξ(Ỹ_pdf)=ξ̃ を厳密化
+  (反応離脱は不変)。CUDA 13 (CCCL 3) で `thrust::identity` が消えたので自前述語に (da44f74c)。**AWS g5 (44.222.71.7, `~/forge-chem`,
+  native build `.build-native/relwithdebinfo`, `build` はシンボリックリンク; `/home/sano/work/...` の絶対パスもリンクで解決)** で
+  `run_0111_dt_c7_xifix` (1045 K, 1500 step) を検証中。OK なら T_c スイープを AWS で回す。
 
