@@ -1070,12 +1070,8 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
         dq_new_2[ic] = static_cast<flow_float>(correction[2]);
         dq_new_3[ic] = static_cast<flow_float>(correction[3]);
         dq_new_4[ic] = static_cast<flow_float>(correction[4]);
-        // rhs_** は読者が無いが従来通り残置（診断用）。
-        rhs_0[ic] = static_cast<flow_float>(rhs[0]);
-        rhs_1[ic] = static_cast<flow_float>(rhs[1]);
-        rhs_2[ic] = static_cast<flow_float>(rhs[2]);
-        rhs_3[ic] = static_cast<flow_float>(rhs[3]);
-        rhs_4[ic] = static_cast<flow_float>(rhs[4]);
+        // rhs_** の診断書き出しは撤去 (読者なし。5 配列×sweep の書込 ≈240 MB/step を節約, 2026-09-12)。
+        // line 経路 (上の onLine 分岐) は Thomas カーネルが rhs を読むので従来どおり書く。
         }
     }
 }

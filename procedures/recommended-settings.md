@@ -42,6 +42,10 @@ output: {level: 1}                                      # 保存量 + 原始量 
 - 対流は SLAU。`convMethod: 1, limiter: 2` が本段の標準、`limiter: 0` は使わない、**`mesh.bndFirstOrder` は禁止**。
 - 定常は陰解法 `timeIntegration: 11` + `blockDPLUR: 1`。実効 CFL は `cfl_pseudo` (§solver-settings「CFL の定義」)。
   `cfl` は表示用なので同じ値を入れておく。`nStepInner` は 5 (node NS の soft/mid 段は 10)。
+  **計測メモ (2026-09-12, 3D node SST TP case/16 run_0410–0412)**: 本段の `nStepInner: 3` は 5 と残差経路が全列一致
+  (到達 step も同じ) で 1 step が 11 % 速い。2 は発散。3D 本段では 3 を試す価値がある (2D・他 case は未検証)。
+  同じ計測で `physProp.thermoFloat: 1` (TP の温度反転をハイブリッド float+double 研磨にする, `thermoHrefTemp>0` 必須) は
+  収束解不変 (壁圧差 ≤1e-5) で 1 step −13 %。既定は 0 のまま (plan performance-3d-node-sst-speedup)。
 - **`cfl_pseudo` の目安**: node NS ノズル 4〜6 + `implicitRelax: 0.7` (上限は EOS 圧力床の洗浄で決まり、
   relax のみ有効: cfl 8 + relax 0.7 ≈ 3〜4 倍速 [implicit-cfl-ceiling-eos-floor])、Euler 設計評価 4、
   bump など易しい流れは 50 まで。TP 多成分の陰解法は 0.5〜2 から (§3)。

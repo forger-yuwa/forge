@@ -9,6 +9,12 @@ __global__ void fill_limiter_d(flow_float* values, geom_int nValues, flow_float 
         values[index] = value;
     }
 }
+__global__ void fill_limiter5_d(flow_float* a, flow_float* b, flow_float* c, flow_float* d, flow_float* e,
+                                geom_int nValues, flow_float value)
+{
+    geom_int index = blockDim.x * blockIdx.x + threadIdx.x;
+    if (index < nValues) { a[index] = value; b[index] = value; c[index] = value; d[index] = value; e[index] = value; }
+}
 
 // Limiters for Unstructured Higher-Order Accurate Solutions of the Euler Equations
 // Krzysztof Michalak
@@ -273,11 +279,10 @@ __global__ void limiter_r1_fused5_d
 
 void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
 {
-    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_ro"], msh.nCells_all, 1.0f);
-    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_Ux"], msh.nCells_all, 1.0f);
-    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_Uy"], msh.nCells_all, 1.0f);
-    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_Uz"], msh.nCells_all, 1.0f);
-    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_P"], msh.nCells_all, 1.0f);
+    // 5 配列の 1.0 充填を 1 カーネルに (起動 5→1)。
+    fill_limiter5_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
+        var.c_d["limiter_ro"], var.c_d["limiter_Ux"], var.c_d["limiter_Uy"], var.c_d["limiter_Uz"], var.c_d["limiter_P"],
+        msh.nCells_all, 1.0f);
 
     // limiter<=0: 0=明示 off、-1=「リミタ off」(solverConfig.cpp が受理する正式値。KEEP は lim を
     // 一切参照しないため計算自体が無駄 — 修正前は == 0 のみ早期 return しており、-1 が Venkatakrishnan

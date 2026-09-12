@@ -29,13 +29,16 @@
 
 void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var , matrix& mat_ns)
 {
-    // free-stream 保存: 基準静圧 pRef を device 定数へ転送 (既定 0.0 でビット不変)
-    {
+    // free-stream 保存: 基準静圧 pRef と参照一様流を device 定数へ転送 (既定 0.0 でビット不変)。
+    // cfg 値は run 中不変なので値が変わったときだけ転送する (毎ステップの同期 H2D ×5 を回避, 2026-09-12)。
+    static double s_pRef = -1.0e300, s_roRef = -1.0e300, s_uRefX = -1.0e300, s_uRefY = -1.0e300, s_uRefZ = -1.0e300;
+    if (s_pRef != cfg.pRef) {
         flow_float pRef_h = static_cast<flow_float>(cfg.pRef);
         CHECK_CUDA_ERROR(cudaMemcpyToSymbol(d_pRef, &pRef_h, sizeof(flow_float)));
+        s_pRef = cfg.pRef;
     }
-    // U∞≠0 の移流基準差分 (KEEP CPG): 参照一様流を device 定数へ (既定 0.0 = off でビット不変)
-    {
+    if (s_roRef != cfg.roRef || s_uRefX != cfg.uRefX || s_uRefY != cfg.uRefY || s_uRefZ != cfg.uRefZ) {
+        s_roRef = cfg.roRef; s_uRefX = cfg.uRefX; s_uRefY = cfg.uRefY; s_uRefZ = cfg.uRefZ;
         flow_float roRef_h = static_cast<flow_float>(cfg.roRef);
         flow_float uRefX_h = static_cast<flow_float>(cfg.uRefX);
         flow_float uRefY_h = static_cast<flow_float>(cfg.uRefY);
