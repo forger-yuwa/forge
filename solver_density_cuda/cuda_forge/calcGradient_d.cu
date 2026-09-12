@@ -737,11 +737,27 @@ __global__ void lsqPre_coefInternal_d(
 }
 
 // runtime 1/2: 内部 incidence の gather (per-node, atomic なし)。6 変数 × 3 成分を直接書く。
+// 原始量 AoS パック (plan performance-3d-node-sst-speedup): stride 8 floats/cell = [ro,Ux,Uy,Uz,P,T,0,0]。
+static flow_float* g_primPack = nullptr;
+static geom_int    g_primPackN = 0;
+const flow_float* prim_pack_device_ptr() { return g_primPack; }
+__global__ void buildPrimPack_d(geom_int n, const flow_float* __restrict__ ro, const flow_float* __restrict__ Ux,
+                                const flow_float* __restrict__ Uy, const flow_float* __restrict__ Uz,
+                                const flow_float* __restrict__ P, const flow_float* __restrict__ T, flow_float* pack)
+{
+    const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
+    if (ic >= n) return;
+    float4* p4 = reinterpret_cast<float4*>(pack + (size_t)ic*8);
+    p4[0] = make_float4(ro[ic], Ux[ic], Uy[ic], Uz[ic]);
+    p4[1] = make_float4(P[ic], T[ic], 0.0f, 0.0f);
+}
+
 __global__ void lsqPreGrad_internal_d(
     geom_int nCells, const geom_int* __restrict__ plane_cells,
     const geom_int* __restrict__ cell_planes_index, const geom_int* __restrict__ cell_planes, geom_int nNormalPlanes,
     const flow_float* cInt,
     const flow_float* __restrict__ ro, const flow_float* __restrict__ Ux, const flow_float* __restrict__ Uy, const flow_float* __restrict__ Uz, const flow_float* __restrict__ P, const flow_float* __restrict__ T,
+    const flow_float* __restrict__ prim,   // AoS パック (nullptr なら 6 配列から gather)
     flow_float* drodx, flow_float* drody, flow_float* drodz,
     flow_float* dUxdx, flow_float* dUxdy, flow_float* dUxdz,
     flow_float* dUydx, flow_float* dUydy, flow_float* dUydz,
@@ -760,13 +776,19 @@ __global__ void lsqPreGrad_internal_d(
         const geom_int ic0=plane_cells[2*ip+0], ic1=plane_cells[2*ip+1];
         const geom_int jc=(ic0==ic)?ic1:ic0;
         const flow_float c0=cInt[3*ilp+0], c1=cInt[3*ilp+1], c2=cInt[3*ilp+2];
+        flow_float rj, uxj, uyj, uzj, pj, tj;
+        if (prim != nullptr) {
+            const float4 a = *reinterpret_cast<const float4*>(prim + (size_t)jc*8);
+            const float4 b = *reinterpret_cast<const float4*>(prim + (size_t)jc*8 + 4);
+            rj=a.x; uxj=a.y; uyj=a.z; uzj=a.w; pj=b.x; tj=b.y;
+        } else { rj=ro[jc]; uxj=Ux[jc]; uyj=Uy[jc]; uzj=Uz[jc]; pj=P[jc]; tj=T[jc]; }
         flow_float d;
-        d=ro[jc]-r0;  gro[0]+=c0*d; gro[1]+=c1*d; gro[2]+=c2*d;
-        d=Ux[jc]-ux0; gux[0]+=c0*d; gux[1]+=c1*d; gux[2]+=c2*d;
-        d=Uy[jc]-uy0; guy[0]+=c0*d; guy[1]+=c1*d; guy[2]+=c2*d;
-        d=Uz[jc]-uz0; guz[0]+=c0*d; guz[1]+=c1*d; guz[2]+=c2*d;
-        d=P[jc]-p0;   gp[0]+=c0*d;  gp[1]+=c1*d;  gp[2]+=c2*d;
-        d=T[jc]-t0;   gt[0]+=c0*d;  gt[1]+=c1*d;  gt[2]+=c2*d;
+        d=rj-r0;  gro[0]+=c0*d; gro[1]+=c1*d; gro[2]+=c2*d;
+        d=uxj-ux0; gux[0]+=c0*d; gux[1]+=c1*d; gux[2]+=c2*d;
+        d=uyj-uy0; guy[0]+=c0*d; guy[1]+=c1*d; guy[2]+=c2*d;
+        d=uzj-uz0; guz[0]+=c0*d; guz[1]+=c1*d; guz[2]+=c2*d;
+        d=pj-p0;   gp[0]+=c0*d;  gp[1]+=c1*d;  gp[2]+=c2*d;
+        d=tj-t0;   gt[0]+=c0*d;  gt[1]+=c1*d;  gt[2]+=c2*d;
     }
     drodx[ic]=gro[0]; drody[ic]=gro[1]; drodz[ic]=gro[2];
     dUxdx[ic]=gux[0]; dUxdy[ic]=gux[1]; dUxdz[ic]=gux[2];
@@ -869,10 +891,21 @@ void calcGradient_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh
             cudaFree(Minv6); cudaFree(degD);
             pre_n = msh.nCells;
         }
+        // 原始量 AoS パックを組む (applyBconds 後 = 壁ノードのピン込みの最新値)。LSQ 勾配とリミッタが読む。
+        if (cfg.primPack != 0) {
+            if (g_primPack == nullptr || g_primPackN != msh.nCells_all) {
+                if (g_primPack) cudaFree(g_primPack);
+                gpuErrchk(cudaMalloc(&g_primPack, sizeof(flow_float)*8*(size_t)msh.nCells_all));
+                g_primPackN = msh.nCells_all;
+            }
+            buildPrimPack_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells_all,
+                var.c_d["ro"],var.c_d["Ux"],var.c_d["Uy"],var.c_d["Uz"],var.c_d["P"],var.c_d["T"], g_primPack);
+        }
         lsqPreGrad_internal_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
             msh.nCells, msh.map_plane_cells_d,
             msh.map_cell_planes_index_d, msh.map_cell_planes_d, msh.nNormalPlanes, cInt,
             var.c_d["ro"],var.c_d["Ux"],var.c_d["Uy"],var.c_d["Uz"],var.c_d["P"],var.c_d["T"],
+            (cfg.primPack != 0) ? (const flow_float*)g_primPack : nullptr,
             var.c_d["drodx"],var.c_d["drody"],var.c_d["drodz"],
             var.c_d["dUxdx"],var.c_d["dUxdy"],var.c_d["dUxdz"],
             var.c_d["dUydx"],var.c_d["dUydy"],var.c_d["dUydz"],

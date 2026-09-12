@@ -1,4 +1,5 @@
 #include "limiter_d.cuh"
+#include "calcGradient_d.cuh"
 #include "cuda_forge/cudaWrapper.cuh"
 
 __global__ void fill_limiter_d(flow_float* values, geom_int nValues, flow_float value)
@@ -216,7 +217,8 @@ __global__ void limiter_r1_fused5_d
  flow_float* d1x, flow_float* d1y, flow_float* d1z,
  flow_float* d2x, flow_float* d2y, flow_float* d2z,
  flow_float* d3x, flow_float* d3y, flow_float* d3z,
- flow_float* d4x, flow_float* d4y, flow_float* d4z
+ flow_float* d4x, flow_float* d4y, flow_float* d4z,
+ const flow_float* __restrict__ prim   // 原始量 AoS パック [ro,Ux,Uy,Uz,P,...] (nullptr なら Q0..Q4 から gather)
 )
 {
     geom_int ic0 = blockDim.x*blockIdx.x + threadIdx.x;
@@ -251,8 +253,16 @@ __global__ void limiter_r1_fused5_d
         geom_int ip = cell_planes[ilp];
         if (ip >= nNormalPlanes) continue;
         geom_int ic1 = plane_cells[2*ip+0] + plane_cells[2*ip+1] - ic0;
+        if (prim != nullptr) {
+            const float4 a = *reinterpret_cast<const float4*>(prim + (size_t)ic1*8);
+            const flow_float qn5 = prim[(size_t)ic1*8 + 4];
+            const flow_float qn[5] = {a.x, a.y, a.z, a.w, qn5};
+            #pragma unroll
+            for (int k=0;k<5;k++){ qmax[k]=max(qmax[k],qn[k]); qmin[k]=min(qmin[k],qn[k]); }
+        } else {
         #pragma unroll
         for (int k=0;k<5;k++){ flow_float qn=Q[k][ic1]; qmax[k]=max(qmax[k],qn); qmin[k]=min(qmin[k],qn); }
+        }
     }
 
     // pass2: limiter
@@ -308,7 +318,8 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         var.c_d["dUxdx"], var.c_d["dUxdy"], var.c_d["dUxdz"], \
         var.c_d["dUydx"], var.c_d["dUydy"], var.c_d["dUydz"], \
         var.c_d["dUzdx"], var.c_d["dUzdy"], var.c_d["dUzdz"], \
-        var.c_d["dPdx"] , var.c_d["dPdy"] , var.c_d["dPdz"]
+        var.c_d["dPdx"] , var.c_d["dPdy"] , var.c_d["dPdz"], \
+        ((cfg.primPack != 0 && cfg.gradLSQ == 2) ? prim_pack_device_ptr() : nullptr)
     if (cfg.limiter == 1)
         limiter_r1_fused5_d<1><<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (FORGE_LIMITER_FUSED5_ARGS);
     else

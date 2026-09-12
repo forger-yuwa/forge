@@ -75,3 +75,7 @@ __global__ void calcGradient_2_d
 );
 
 void calcGradient_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);
+
+// 原始量の AoS パック (stride 8: ro,Ux,Uy,Uz,P,T,0,0)。calcGradient_d_wrapper (gradLSQ==2) が applyBconds 後に組み、
+// LSQ 勾配とリミッタの近傍 gather が 6 配列 (6 セクタ) の代わりに 1 セクタで読む。未構築なら nullptr。
+const flow_float* prim_pack_device_ptr();
