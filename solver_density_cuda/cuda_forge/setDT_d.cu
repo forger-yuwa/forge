@@ -73,13 +73,13 @@ __global__ void setCFL_pln_d
         flow_float Uy1 = Uy[ic1];
         flow_float Uz1 = Uz[ic1];
 
-        flow_float US  = (f*Ux0 + (1.0-f)*Ux1)*sxx
-                        +(f*Uy0 + (1.0-f)*Uy1)*syy
-                        +(f*Uz0 + (1.0-f)*Uz1)*szz;
+        flow_float US  = (f*Ux0 + (1.0f-f)*Ux1)*sxx
+                        +(f*Uy0 + (1.0f-f)*Uy1)*syy
+                        +(f*Uz0 + (1.0f-f)*Uz1)*szz;
 
-        flow_float rof = f*ro[ic0] + (1.0-f)*ro[ic1];
-        flow_float v_turb = f*vis_turb[ic0] + (1.0-f)*vis_turb[ic1];
-        flow_float lambda = abs(US)/sss + sonic[ic0] + 2.0*(visc+v_turb)/(rof*dx_min);
+        flow_float rof = f*ro[ic0] + (1.0f-f)*ro[ic1];
+        flow_float v_turb = f*vis_turb[ic0] + (1.0f-f)*vis_turb[ic1];
+        flow_float lambda = abs(US)/sss + sonic[ic0] + 2.0f*(visc+v_turb)/(rof*dx_min);
 
         cfl_pln[ip] = dt*lambda/dx_min;
 
@@ -148,7 +148,7 @@ __global__ void setCFL_cell_d
         geom_int index_en = cell_planes_index[ic+1];
         geom_int np = index_en - index_st;
 
-        cfl[ic] = 0.0;
+        cfl[ic] = 0.0f;
         //cfl_pseudo[ic] = 0.0;
 
         const bool onLine = (line_prev != nullptr && (line_prev[ic] >= 0 || line_next[ic] >= 0));
@@ -404,7 +404,7 @@ void setDT_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , vari
     {
         static const double dtOutletScale = [](){ const char* e = getenv("FORGE_DT_OUTLET_SCALE"); return e ? atof(e) : 0.0; }();
         static const double dtOutletXmin  = [](){ const char* e = getenv("FORGE_DT_OUTLET_XMIN");  return e ? atof(e) : 0.0; }();
-        if (dtOutletScale > 0.0 && dtOutletScale < 1.0) {
+        if (dtOutletScale > 0.0f && dtOutletScale < 1.0f) {
             scaleOutletDt_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(
                 msh.nCells, var.c_d["ccx"], (flow_float)dtOutletXmin, (flow_float)dtOutletScale, var.c_d["dt_local"]);
             gpuErrchk( cudaPeekAtLastError() );

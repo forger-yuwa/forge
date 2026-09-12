@@ -16,22 +16,22 @@ __global__ void fill_limiter_d(flow_float* values, geom_int nValues, flow_float 
 __device__ flow_float venkata_limiter(flow_float delta_p_max, flow_float delta_p_min, 
                                       flow_float delta_m, flow_float volume) {
 
-    flow_float K = 1.;
+    flow_float K = 1.f;
     flow_float eps2 = K*K*K*volume;
     //return (x*x + 2.0*x + eps*eps)/(x*x + x + 2.0 + eps*eps);
     flow_float res;
 
     // K11: 元は /(...)/delta_m と除算2回。/(denom*delta_m) に統合して除算1回に（compute律速の limiter 向け）。
-    if (delta_m > 1e-20) {
+    if (delta_m > 1e-20f) {
         flow_float delta_p = delta_p_max;
         res = ((delta_p*delta_p+eps2)*delta_m +2*delta_m*delta_m*delta_p)
-              /((delta_p*delta_p +2.0*delta_m*delta_m +delta_p*delta_m +eps2)*delta_m);
-    } else if (delta_m < -1e-20) {
+              /((delta_p*delta_p +2.0f*delta_m*delta_m +delta_p*delta_m +eps2)*delta_m);
+    } else if (delta_m < -1e-20f) {
         flow_float delta_p = delta_p_min;
         res = ((delta_p*delta_p+eps2)*delta_m +2*delta_m*delta_m*delta_p)
-              /((delta_p*delta_p +2.0*delta_m*delta_m +delta_p*delta_m +eps2)*delta_m);
+              /((delta_p*delta_p +2.0f*delta_m*delta_m +delta_p*delta_m +eps2)*delta_m);
     } else {
-        res = 1.0;
+        res = 1.0f;
     }
 
     return res;
@@ -42,15 +42,15 @@ __device__ flow_float barth_Jespersen_limiter(flow_float delta_p_max, flow_float
 
     flow_float res;
 
-    if (delta_m > 1e-20) {
-        res = min(1.0, delta_p_max/delta_m);
-    } else if (delta_m < -1e-20) {
-        res = min(1.0, delta_p_min/delta_m);
+    if (delta_m > 1e-20f) {
+        res = min(1.0f, delta_p_max/delta_m);
+    } else if (delta_m < -1e-20f) {
+        res = min(1.0f, delta_p_min/delta_m);
     } else {
-        res = 1.0;
+        res = 1.0f;
     }
 
-    return min(res, 1.0);
+    return min(res, 1.0f);
 }
 
 
@@ -96,7 +96,7 @@ __global__ void limiter_r1_d
 
     if (ic0 < nCells) {
         if (limiter_scheme == 0) {
-            limiter_Q[ic0] = 1.0;
+            limiter_Q[ic0] = 1.0f;
             return;
         }
 
@@ -119,8 +119,8 @@ __global__ void limiter_r1_d
 
         flow_float denomi;
 
-        flow_float limiter_Q_temp  = 1.0;
-        flow_float limiter_Q_temp2 = 1.0;
+        flow_float limiter_Q_temp  = 1.0f;
+        flow_float limiter_Q_temp2 = 1.0f;
 
         deltas delta;
         deltas delta_dash;
@@ -181,7 +181,7 @@ __global__ void limiter_r1_d
             limiter_Q_temp2 = min(limiter_Q_temp2, limiter_Q_temp);
         }
 
-        limiter_Q[ic0] = min(max(limiter_Q_temp2, 0.0),1.0);
+        limiter_Q[ic0] = min(max(limiter_Q_temp2, 0.0f),1.0f);
 
             //ic1 = plane_cells[2*ip+0] + plane_cells[2*ip+1] -ic0;
         //limiter_Q[ic1] = dQdx[ic0];
@@ -224,7 +224,7 @@ __global__ void limiter_r1_fused5_d
 
     if (SCHEME == 0) {
         #pragma unroll
-        for (int k=0;k<5;k++) Lim[k][ic0] = 1.0;
+        for (int k=0;k<5;k++) Lim[k][ic0] = 1.0f;
         return;
     }
 
@@ -237,7 +237,7 @@ __global__ void limiter_r1_fused5_d
     #pragma unroll
     for (int k=0;k<5;k++){
         qc[k]=Q[k][ic0]; qmax[k]=qc[k]; qmin[k]=qc[k];
-        gx[k]=dQx[k][ic0]; gy[k]=dQy[k][ic0]; gz[k]=dQz[k][ic0]; ltmp[k]=1.0;
+        gx[k]=dQx[k][ic0]; gy[k]=dQy[k][ic0]; gz[k]=dQz[k][ic0]; ltmp[k]=1.0f;
     }
 
     // pass1: neighbor min/max (geometry/connectivity を 1 回だけ読む)
@@ -273,11 +273,11 @@ __global__ void limiter_r1_fused5_d
 
 void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
 {
-    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_ro"], msh.nCells_all, 1.0);
-    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_Ux"], msh.nCells_all, 1.0);
-    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_Uy"], msh.nCells_all, 1.0);
-    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_Uz"], msh.nCells_all, 1.0);
-    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_P"], msh.nCells_all, 1.0);
+    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_ro"], msh.nCells_all, 1.0f);
+    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_Ux"], msh.nCells_all, 1.0f);
+    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_Uy"], msh.nCells_all, 1.0f);
+    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_Uz"], msh.nCells_all, 1.0f);
+    fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_P"], msh.nCells_all, 1.0f);
 
     // limiter<=0: 0=明示 off、-1=「リミタ off」(solverConfig.cpp が受理する正式値。KEEP は lim を
     // 一切参照しないため計算自体が無駄 — 修正前は == 0 のみ早期 return しており、-1 が Venkatakrishnan
@@ -315,7 +315,7 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
     if (cfg.speciesFaceReconstruction >= 1 && var.nSpeciesRegistered >= 2) {
         for (int s = 0; s < var.nSpeciesRegistered; ++s) {
             const std::string i = std::to_string(s);
-            fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_Y"+i], msh.nCells_all, 1.0);
+            fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_Y"+i], msh.nCells_all, 1.0f);
             limiter_r1_d<<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (
                 cfg.limiter, msh.nCells, msh.nPlanes , msh.nNormalPlanes , msh.map_plane_cells_d,
                 msh.map_cell_planes_index_d , msh.map_cell_planes_d ,

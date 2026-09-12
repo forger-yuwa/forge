@@ -117,25 +117,25 @@ __global__ void viscousFlux_d
         flow_float dcc_z = ccz_1 - ccz_0;
         flow_float dcc   = sqrt(dcc_x*dcc_x +dcc_y*dcc_y +dcc_z*dcc_z) ;
 
-        flow_float Uxf = f*Ux[ic0] + (1.0-f)*Ux[ic1];
-        flow_float Uyf = f*Uy[ic0] + (1.0-f)*Uy[ic1];
-        flow_float Uzf = f*Uz[ic0] + (1.0-f)*Uz[ic1];
+        flow_float Uxf = f*Ux[ic0] + (1.0f-f)*Ux[ic1];
+        flow_float Uyf = f*Uy[ic0] + (1.0f-f)*Uy[ic1];
+        flow_float Uzf = f*Uz[ic0] + (1.0f-f)*Uz[ic1];
 
-        flow_float dUxdxf = f*dUxdx[ic0] + (1.0-f)*dUxdx[ic1];
-        flow_float dUxdyf = f*dUxdy[ic0] + (1.0-f)*dUxdy[ic1];
-        flow_float dUxdzf = f*dUxdz[ic0] + (1.0-f)*dUxdz[ic1];
+        flow_float dUxdxf = f*dUxdx[ic0] + (1.0f-f)*dUxdx[ic1];
+        flow_float dUxdyf = f*dUxdy[ic0] + (1.0f-f)*dUxdy[ic1];
+        flow_float dUxdzf = f*dUxdz[ic0] + (1.0f-f)*dUxdz[ic1];
 
-        flow_float dUydxf = f*dUydx[ic0] + (1.0-f)*dUydx[ic1];
-        flow_float dUydyf = f*dUydy[ic0] + (1.0-f)*dUydy[ic1];
-        flow_float dUydzf = f*dUydz[ic0] + (1.0-f)*dUydz[ic1];
+        flow_float dUydxf = f*dUydx[ic0] + (1.0f-f)*dUydx[ic1];
+        flow_float dUydyf = f*dUydy[ic0] + (1.0f-f)*dUydy[ic1];
+        flow_float dUydzf = f*dUydz[ic0] + (1.0f-f)*dUydz[ic1];
 
-        flow_float dUzdxf = f*dUzdx[ic0] + (1.0-f)*dUzdx[ic1];
-        flow_float dUzdyf = f*dUzdy[ic0] + (1.0-f)*dUzdy[ic1];
-        flow_float dUzdzf = f*dUzdz[ic0] + (1.0-f)*dUzdz[ic1];
+        flow_float dUzdxf = f*dUzdx[ic0] + (1.0f-f)*dUzdx[ic1];
+        flow_float dUzdyf = f*dUzdy[ic0] + (1.0f-f)*dUzdy[ic1];
+        flow_float dUzdzf = f*dUzdz[ic0] + (1.0f-f)*dUzdz[ic1];
 
-        flow_float dTdxf = f*dTdx[ic0] + (1.0-f)*dTdx[ic1];
-        flow_float dTdyf = f*dTdy[ic0] + (1.0-f)*dTdy[ic1];
-        flow_float dTdzf = f*dTdz[ic0] + (1.0-f)*dTdz[ic1];
+        flow_float dTdxf = f*dTdx[ic0] + (1.0f-f)*dTdx[ic1];
+        flow_float dTdyf = f*dTdy[ic0] + (1.0f-f)*dTdy[ic1];
+        flow_float dTdzf = f*dTdz[ic0] + (1.0f-f)*dTdz[ic1];
 #ifdef VISC_DIAG_NOGRAD
         // 診断: 面勾配 (Green-Gauss) 由来の項 (転置・非直交補正) を 0 にし、over-relaxed 法線 Laplacian のみ残す。
         dUxdxf=dUxdyf=dUxdzf=0; dUydxf=dUydyf=dUydzf=0; dUzdxf=dUzdyf=dUzdzf=0; dTdxf=dTdyf=dTdzf=0;
@@ -152,11 +152,11 @@ __global__ void viscousFlux_d
         flow_float k_z = szz - delta_z;
         // 軸対称は完全発散 (u_r/r 込み) を面補間。デカルトは従来どおり ∂xUx+∂yUy+∂zUz。
         flow_float divu = (isAxisymmetric == 1)
-            ? (f*axisym_divU[ic0] + (1.0-f)*axisym_divU[ic1])
+            ? (f*axisym_divU[ic0] + (1.0f-f)*axisym_divU[ic1])
             : (dUxdxf+dUydyf+dUzdzf);
 
-        flow_float v_lam  = f*vis_lam [ic0] + (1.0-f)*vis_lam [ic1] ;
-        flow_float v_turb = f*vis_turb[ic0] + (1.0-f)*vis_turb[ic1] ;
+        flow_float v_lam  = f*vis_lam [ic0] + (1.0f-f)*vis_lam [ic1] ;
+        flow_float v_turb = f*vis_turb[ic0] + (1.0f-f)*vis_turb[ic1] ;
         flow_float mu_total = v_lam + v_turb;
 
         // 完全な Newton 応力 tau_ij S_j = mu(du_i/dx_j + du_j/dx_i)S_j - (2/3)mu divu S_i。
@@ -165,20 +165,20 @@ __global__ void viscousFlux_d
         flow_float tau_x = mu_total*((Ux[ic1] -Ux[ic0])/dcc)*delta;
         tau_x += mu_total*(dUxdxf*k_x +dUxdyf*k_y +dUxdzf*k_z);
         tau_x += mu_total*(dUxdxf*sxx +dUydxf*syy +dUzdxf*szz);
-        tau_x += -mu_total*2.0/3.0*(divu)*sxx;
-        if (isoStress != 0 && kturb != nullptr) tau_x += -(2.0/3.0)*(f*ro[ic0]+(1.0-f)*ro[ic1])*(f*kturb[ic0]+(1.0-f)*kturb[ic1])*sxx;
+        tau_x += -mu_total*2.0f/3.0f*(divu)*sxx;
+        if (isoStress != 0 && kturb != nullptr) tau_x += -(2.0f/3.0f)*(f*ro[ic0]+(1.0f-f)*ro[ic1])*(f*kturb[ic0]+(1.0f-f)*kturb[ic1])*sxx;
 
         flow_float tau_y = mu_total*((Uy[ic1] -Uy[ic0])/dcc)*delta;
         tau_y += mu_total*(dUydxf*k_x +dUydyf*k_y +dUydzf*k_z);
         tau_y += mu_total*(dUxdyf*sxx +dUydyf*syy +dUzdyf*szz);
-        tau_y += -mu_total*2.0/3.0*(divu)*syy;
-        if (isoStress != 0 && kturb != nullptr) tau_y += -(2.0/3.0)*(f*ro[ic0]+(1.0-f)*ro[ic1])*(f*kturb[ic0]+(1.0-f)*kturb[ic1])*syy;
+        tau_y += -mu_total*2.0f/3.0f*(divu)*syy;
+        if (isoStress != 0 && kturb != nullptr) tau_y += -(2.0f/3.0f)*(f*ro[ic0]+(1.0f-f)*ro[ic1])*(f*kturb[ic0]+(1.0f-f)*kturb[ic1])*syy;
 
         flow_float tau_z = mu_total*((Uz[ic1] -Uz[ic0])/dcc)*delta;
         tau_z += mu_total*(dUzdxf*k_x +dUzdyf*k_y +dUzdzf*k_z);
         tau_z += mu_total*(dUxdzf*sxx +dUydzf*syy +dUzdzf*szz);
-        tau_z += -mu_total*2.0/3.0*(divu)*szz;
-        if (isoStress != 0 && kturb != nullptr) tau_z += -(2.0/3.0)*(f*ro[ic0]+(1.0-f)*ro[ic1])*(f*kturb[ic0]+(1.0-f)*kturb[ic1])*szz;
+        tau_z += -mu_total*2.0f/3.0f*(divu)*szz;
+        if (isoStress != 0 && kturb != nullptr) tau_z += -(2.0f/3.0f)*(f*ro[ic0]+(1.0f-f)*ro[ic1])*(f*kturb[ic0]+(1.0f-f)*kturb[ic1])*szz;
 
         // SST node 壁関数 (SU2 AddTauWall): 片端のみ壁ノードの内部双対面 (W-I) で、解像した粘性 traction
         // の接線成分をモデル τ_w に再スケールする。粗い y+ メッシュでは生の解像勾配が τ_w を過小評価する
@@ -220,8 +220,8 @@ __global__ void viscousFlux_d
         // 熱を運んでいたため、乱流境界層で散逸熱が逃げ場を失い T が全温を超えて
         // overshoot していた。RANS のエネルギー保存には乱流熱伝導が必須。
         // cp は thermally-perfect の温度依存を反映するためセル配列を面平均で使う。
-        flow_float cp_face = f*cp[ic0] + (1.0-f)*cp[ic1];
-        flow_float tc_face = f*thermCond[ic0] + (1.0-f)*thermCond[ic1];
+        flow_float cp_face = f*cp[ic0] + (1.0f-f)*cp[ic1];
+        flow_float tc_face = f*thermCond[ic0] + (1.0f-f)*thermCond[ic1];
         tc_face += cp_face*v_turb/Prt;
         // W-I 内部熱拡散は既定で DOF 状態 (Ts) と DOF 勾配で評価する。モデル温度の単純 compact
         // 代入は禁止 (上の Taw_Ov コメント参照)。例外は mode 2 の SU2 corrected-gradient (下)。
@@ -265,8 +265,8 @@ __global__ void viscousFlux_d
         if (Qw_Wall != nullptr) {
             const flow_float q0 = Qw_Wall[ic0];
             const flow_float q1 = Qw_Wall[ic1];
-            const bool wq0 = (q0 > (flow_float)-0.5);
-            const bool wq1 = (q1 > (flow_float)-0.5);
+            const bool wq0 = (q0 > (flow_float)-0.5f);
+            const bool wq1 = (q1 > (flow_float)-0.5f);
             if (wq0 != wq1) {                          // 片端のみ壁ノード (xor)
                 const flow_float qw = wq0 ? q0 : q1;
                 // 符号: res_roe[ic0]+=heatflux / res_roe[ic1]-=heatflux。内部側が +q_w·S を受ける向き。
@@ -274,7 +274,7 @@ __global__ void viscousFlux_d
             }
         }
 
-        flow_float res_ro_temp   = 0.0;
+        flow_float res_ro_temp   = 0.0f;
         flow_float res_roUx_temp = tau_x;
         flow_float res_roUy_temp = tau_y;
         flow_float res_roUz_temp = tau_z;
@@ -309,7 +309,7 @@ __global__ void viscousFlux_d
             const bool w1 = (h1 > (flow_float)0.0);
             if (w0 != w1) {                                    // 片端のみ壁ノード (xor)
                 const geom_int  icW  = w0 ? ic0 : ic1;
-                const flow_float sgnW = w0 ? (flow_float)1.0 : (flow_float)-1.0; // S を W から離れる向きへ
+                const flow_float sgnW = w0 ? (flow_float)1.0 : (flow_float)-1.0f; // S を W から離れる向きへ
                 const flow_float a = sgnW * (sxx*Taw_HTnx[icW] + syy*Taw_HTny[icW] + szz*Taw_HTnz[icW]);
                 const flow_float Fin = a * (Taw_diag[icW] - Ts[icW]);  // 壁ノードへ入る向き正 [W]
                 // res_roe[ic0] += temp / res_roe[ic1] -= temp の符号系で W が +Fin を受ける形に置換
@@ -472,17 +472,17 @@ __global__ void viscousFlux_wall_d
         flow_float tau_x = (isNode != 0) ? mu_total*(dUxdxf*sxx +dUxdyf*syy +dUxdzf*szz)
                                          : mu_total*((Ux[ig] - Ux[ic])/dcc)*sss;
         tau_x += mu_total*(dUxdxf*sxx +dUydxf*syy +dUzdxf*szz);
-        tau_x += -mu_total*2.0/3.0*(divu)*sxx;
+        tau_x += -mu_total*2.0f/3.0f*(divu)*sxx;
 
         flow_float tau_y = (isNode != 0) ? mu_total*(dUydxf*sxx +dUydyf*syy +dUydzf*szz)
                                          : mu_total*((Uy[ig] - Uy[ic])/dcc)*sss;
         tau_y += mu_total*(dUxdyf*sxx +dUydyf*syy +dUzdyf*szz);
-        tau_y += -mu_total*2.0/3.0*(divu)*syy;
+        tau_y += -mu_total*2.0f/3.0f*(divu)*syy;
 
         flow_float tau_z = (isNode != 0) ? mu_total*(dUzdxf*sxx +dUzdyf*syy +dUzdzf*szz)
                                          : mu_total*((Uz[ig] - Uz[ic])/dcc)*sss;
         tau_z += mu_total*(dUxdzf*sxx +dUydzf*syy +dUzdzf*szz);
-        tau_z += -mu_total*2.0/3.0*(divu)*szz;
+        tau_z += -mu_total*2.0f/3.0f*(divu)*szz;
 
         // SST automatic wall treatment (methods/turbulence §6.5 (c)): 粗メッシュで分子勾配が τ_w を
         // 過小評価するため、接線せん断を modeled τ_w=ρu_τ² (有効壁粘性) に置換する。u_τ は壁関数で
@@ -502,8 +502,8 @@ __global__ void viscousFlux_wall_d
             const flow_float Ut = sqrt(utx*utx + uty*uty + utz*utz);
             const flow_float utau_w = utau_b[ib];
             const flow_float tauw = ro[ic]*utau_w*utau_w;   // modeled 壁せん断応力の大きさ
-            flow_float etx = 0.0, ety = 0.0, etz = 0.0;
-            if (Ut > 1.0e-12) { etx = utx/Ut; ety = uty/Ut; etz = utz/Ut; }
+            flow_float etx = 0.0f, ety = 0.0f, etz = 0.0f;
+            if (Ut > 1.0e-12f) { etx = utx/Ut; ety = uty/Ut; etz = utz/Ut; }
             // 流れを減速させる向き (-ê_t) に τ_w·面積 を課す。法線粘性・体積項は落とす (壁関数)。
             tau_x = -tauw*etx*sss;
             tau_y = -tauw*ety*sss;
@@ -530,7 +530,7 @@ __global__ void viscousFlux_wall_d
                                             ? tc_w*(dTdx[ic]*sxx +dTdy[ic]*syy +dTdz[ic]*szz)
                                             : tc_w*((Ts[ig]- Ts[ic])/dcc)*sss;
 
-        flow_float res_ro_temp   = 0.0;
+        flow_float res_ro_temp   = 0.0f;
         flow_float res_roUx_temp = tau_x;
         flow_float res_roUy_temp = tau_y;
         flow_float res_roUz_temp = tau_z;
@@ -630,7 +630,7 @@ __global__ void wallStressForOutput_node_d
         const flow_float Uwz = Uz_b[ib];
 
         // W の CV に内部双対面から入る粘性運動量 flux の総和 (= 流体が壁 CV に及ぼす粘性力)
-        flow_float fX = 0.0, fY = 0.0, fZ = 0.0;
+        flow_float fX = 0.0f, fY = 0.0f, fZ = 0.0f;
 
         for (geom_int j = cell_planes_index[W]; j < cell_planes_index[W+1]; ++j) {
             const geom_int ip = cell_planes[j];
@@ -641,7 +641,7 @@ __global__ void wallStressForOutput_node_d
             if (wall_flag[I] != 0) continue;            // 内部ノードのみ (壁-壁エッジ除外, 寄与≈0)
 
             // 面法線 S を W->I 向きへ揃える (格納は a->b)。
-            const flow_float sgn = (a == W) ? (flow_float)1.0 : (flow_float)-1.0;
+            const flow_float sgn = (a == W) ? (flow_float)1.0 : (flow_float)-1.0f;
             const flow_float sxx = sgn*sx[ip];
             const flow_float syy = sgn*sy[ip];
             const flow_float szz = sgn*sz[ip];
@@ -686,17 +686,17 @@ __global__ void wallStressForOutput_node_d
             flow_float tx = mu_total*((Ux[I]-Uwx)/dcc)*delta;
             tx += mu_total*(dUxdxf*k_x + dUxdyf*k_y + dUxdzf*k_z);
             tx += mu_total*(dUxdxf*sxx + dUydxf*syy + dUzdxf*szz);
-            tx += -mu_total*(flow_float)(2.0/3.0)*divu*sxx;
+            tx += -mu_total*(flow_float)(2.0f/3.0f)*divu*sxx;
 
             flow_float ty = mu_total*((Uy[I]-Uwy)/dcc)*delta;
             ty += mu_total*(dUydxf*k_x + dUydyf*k_y + dUydzf*k_z);
             ty += mu_total*(dUxdyf*sxx + dUydyf*syy + dUzdyf*szz);
-            ty += -mu_total*(flow_float)(2.0/3.0)*divu*syy;
+            ty += -mu_total*(flow_float)(2.0f/3.0f)*divu*syy;
 
             flow_float tz = mu_total*((Uz[I]-Uwz)/dcc)*delta;
             tz += mu_total*(dUzdxf*k_x + dUzdyf*k_y + dUzdzf*k_z);
             tz += mu_total*(dUxdzf*sxx + dUydzf*syy + dUzdzf*szz);
-            tz += -mu_total*(flow_float)(2.0/3.0)*divu*szz;
+            tz += -mu_total*(flow_float)(2.0f/3.0f)*divu*szz;
 
             fX += tx; fY += ty; fZ += tz;
         }
