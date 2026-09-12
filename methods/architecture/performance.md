@@ -26,20 +26,23 @@
 
 ## 3. 現状プロファイル (2026-09-12, A10G, case/16 3D node SST TP 2.37 M 節点)
 
-ベースライン 82.85 ms/step (`run_0400_perf_baseline`, 収束場から 100 step 継続)。
+ベースライン 82.85 ms/step → 高速化後 **34.7 ms/step** (`thermoFloat: 1`, nStepInner 5)。`run_0400_perf_baseline_bench/prof_*`。
 
-| カーネル | ms/step | 律速 |
-| --- | --- | --- |
-| `SLAU_d` (対流流束, 7.04 M 面) | 16.2 | FP64 (面ごとの `thermo_h_mix` double + リテラル昇格) |
-| `implicit_defect_correction_block_d` ×5 sweep | 14.9 | メモリ (gather, 占有率 28 %) |
-| `species_diffusion_d` | 13.6 | FP64 (面状態組立・J_s・h_s(T_f) が double; `thermo_Dbinary` は float 済) |
-| `limiter_r1_fused5_d` | 9.5 | 関数ポインタ経由の呼び出し |
-| `dependentVariables_d` | 6.1 | FP64 (TP Newton) |
-| `viscousFlux_d` | 4.7 | FP64 (リテラル昇格のみ) |
-| `lsqPreGrad_internal_d` | 2.7 | gather |
-| その他 (k/ω 輸送・ソース、setDT、gasProperties、境界、残差 reduction) | ~15 | — |
+| カーネル | 基準 ms/step | 最終 ms/step | 処置 / 律速 |
+| --- | --- | --- | --- |
+| `SLAU_d` (対流流束, 7.04 M 面) | 16.2 | 2.9 | リテラル f、面エンタルピー h_mix(Y_f,T_f) を `SpeciesThermoF` (float 係数) で評価 |
+| `implicit_defect_correction_block_d` ×5 sweep | 14.9 | 10.9 | `__restrict__`・未読 rhs 撤去。メモリ (レイテンシ) 律速、占有率 28 %。対角キャッシュ / launch_bounds は逆効果 |
+| `species_diffusion_d` | 13.6 | 1.6 | 面状態組立と h_s(T_f) を float (離散式不変) |
+| `limiter_r1_fused5_d` | 9.5 | 1.2 | venkata の `2.0*` (double 除算) → f、関数ポインタ除去 |
+| `dependentVariables_d` | 6.4 | 3.9 | ハイブリッド温度反転 (float Newton + double 1 段研磨) |
+| `viscousFlux_d` | 4.7 | 1.5 | リテラル f のみ |
+| `lsqPreGrad_internal_d` | 2.7 | 2.8 | gather 律速 (原始量 AoS パックで改善見込み) |
+| k/ω 移流+拡散・化学種移流 | 3.3 | 2.3 | 多スカラー面カーネルに融合 (6 起動→3) |
+| `species_gradient_d` (+normalize) | 1.2 | 0 | 読者が無い (speciesFaceReconstruction=0) ので省略 |
+| その他 (setDT・ソース・境界・reduction・更新) | ~10 | ~8 | — |
 
-host 側 (残差ログ・モニタ) のオーバーヘッドは無視できる。
+**陰解法 sweep 数**: 同 IC・同 config の 12000 step で `nStepInner` 3 と 5 は全残差列が一致、2 は発散 (run_0410–0412)。推奨レシピは 4
+(procedures/recommended-settings.md)。
 
 ## 4. 数値精度の方針
 
@@ -51,5 +54,9 @@ host 側 (残差ログ・モニタ) のオーバーヘッドは無視できる�
 - **double を使う箇所は明示し、根拠を残す**: 幾何前処理 (双対体積・重心・閉性 Σr_f S_f の桁落ち対策)、
   周期・軸対称の閉性、凝縮 EOS の (T,g) 同時反転など、桁落ちが実測で問題になった箇所に限る。
   熱力学 (NASA-9) の**面ごと**評価は float 版を使い、セルごとに前計算できる量 (h_s(T_c), D_s) はセル配列に置く。
+- **TP の温度反転** (`physProp.thermoFloat`, 既定 1): float Newton (warm start, 最大 12 反復) → double Newton 1 段研磨。double 評価は cph_mix 1 回。
+  誤差 ≤1e-8·T (float の T 格納 ulp 6e-8 未満; `tools/test_thermo_float.cpp`)。`thermoHrefTemp>0` が前提 (絶対 datum の H2O は float 段が収束しない)。
+- **AoS gather**: 近傍 gather が支配するカーネル (DPLUR の dq, LSQ 勾配・リミッタの原始量) は stride-8 の AoS パックから float4 で読む
+  (`blockDPLURDqPack`, `mesh.primPack`; 同じ値の別レイアウト = ビット同一)。
 - 面流束の `atomicAdd` 蓄積のため同一バイナリでも全場はビット一致しない。精度変更は、基準バイナリ同士の run-to-run
   ノイズ床 (場のスケールで正規化した最大差) を先に測り、その 2 倍以内に収まることを A/B で示してから採用する (判定基準は plan §4.3)。
