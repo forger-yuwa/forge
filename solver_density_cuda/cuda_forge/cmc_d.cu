@@ -804,7 +804,7 @@ __global__ void cmc_q_timeint_d(geom_int nCells, int nSlice, geom_int nCells_all
 }
 
 // (E) node 毎: roQ 再同期, 診断, PDF 平均ソースの書き出し (旧 kernel の末尾と同じ)
-__global__ void cmc_stepE_finalize_d(geom_int nCells, geom_int nCells_all, const flow_float* ro, const flow_float* dt_local, flow_float* const* roY_dev,
+__global__ void cmc_stepE_finalize_d(geom_int nCells, geom_int nCells_all, const flow_float* ro, const flow_float* xi, const flow_float* dt_local, flow_float* const* roY_dev,
                                      const flow_float* Q, flow_float* roQ, const double* Om, const double* TEta, const double* qrelEta, const double* QdEta,
                                      const double* ypdfD, const double* hpdfD, const double* omegaAcc, const double* jacAcc,
                                      flow_float* omegaBar, flow_float* qdotBar, flow_float* jacBar, flow_float* cmc_dY, flow_float* cmc_TQmax,
@@ -825,19 +825,25 @@ __global__ void cmc_stepE_finalize_d(geom_int nCells, geom_int nCells_all, const
         qrel += qrelEta[i]; qbar += QdEta[i]; xo += Om[i] * g_cmc.eta[k];
     }
     for (int s = 0; s <= ns; ++s) for (int k = 0; k < ne; ++k) { const size_t i = sl(s, k) * nCells_all + ic; roQ[i] = (flow_float)(rho * (double)Q[i]); }
+    // 混合分率の整合補正 (2026-09-12): 離散 β-PDF 重みの 1 次モーメント ξ_Ω = Σ Ω_k η_k は端ビン (質量を η=0/1 の節点に載せる) と台形則の
+    //   誤差で輸送 ξ̃ から希薄側 −0.5〜−2 %・濃厚側 +0.1 % ずれる。緩和ソース ω_s = ρ(Ỹ_pdf−Y)/τ_c はこの偏りを 1/τ_c の速さで平均場に
+    //   刷り込み、希薄側で燃料元素の恒常的なシンクになって ξ が崩落する (run_0110: 50 ms で軸 ξ 0.5→0.008; 定常反復の run_0099/0101 も同じ)。
+    //   目標組成・エンタルピーを混合線に沿って (ξ̃ − ξ_Ω) だけ平行移動し、Bilger ξ(Ỹ_pdf) = ξ̃ を厳密に保つ (反応離脱 D_pdf は不変)。
+    const double xit = fmin(fmax((double)xi[ic], 0.0), 1.0), dxi = xit - xo;
     double dy = 0.0, bpdf = 0.0;
     for (int s = 0; s < ns; ++s) {
-        const double yp = ypdfD[(size_t)s * nCells + ic];
+        const double yp = ypdfD[(size_t)s * nCells + ic] + dxi * (g_cmc.YF[s] - g_cmc.YO[s]);
         const double ym = (double)roY_dev[s][ic] / fmax(rho, 1.0e-30); dy = fmax(dy, fabs(yp - ym));
         bpdf += g_bilger.c[s] * yp;
-        dpdfOut[(size_t)s * nCells + ic] = (flow_float)(yp - (xo * g_cmc.YF[s] + (1.0 - xo) * g_cmc.YO[s]));
+        dpdfOut[(size_t)s * nCells + ic] = (flow_float)(yp - (xit * g_cmc.YF[s] + (1.0 - xit) * g_cmc.YO[s]));
         ypdfOut[(size_t)s * nCells + ic] = (flow_float)yp;
         omegaBar[(size_t)s * nCells + ic] = (flow_float)omegaAcc[(size_t)s * nCells + ic];
     }
     cmc_dY[ic] = (flow_float)dy; cmc_TQmax[ic] = (flow_float)TQmax; cmc_TQst[ic] = (flow_float)TQst;
     cmc_xiOm[ic] = (flow_float)xo; cmc_xipdf[ic] = (flow_float)fmin(fmax((bpdf - g_bilger.betaO) / (g_bilger.betaF - g_bilger.betaO), 0.0), 1.0);
-    hpdfOut[ic] = (flow_float)hpdfD[ic];
-    { const double hline = xo * g_cmc.hF + (1.0 - xo) * g_cmc.hO; gateOut[ic] = (flow_float)fmin(fmax((hpdfD[ic] - hline) / (1500.0 * g_cmc.dTgate), 0.0), 1.0); }
+    const double hp = hpdfD[ic] + dxi * (g_cmc.hF - g_cmc.hO);
+    hpdfOut[ic] = (flow_float)hp;
+    { const double hline = xit * g_cmc.hF + (1.0 - xit) * g_cmc.hO; gateOut[ic] = (flow_float)fmin(fmax((hp - hline) / (1500.0 * g_cmc.dTgate), 0.0), 1.0); }
     tauOut[ic]  = (flow_float)fmax((double)dt_local[ic] * g_cmc.relax, 1.0e-9);
     qdotBar[ic] = (flow_float)qbar; qrelOut[ic] = (flow_float)qrel;
     for (int i = 0; i < ns * ns; ++i) jacBar[(size_t)ic * ns * ns + i] = (flow_float)jacAcc[(size_t)ic * ns * ns + i];
@@ -1065,7 +1071,7 @@ static void cmcStepLaunch(cudaConfig& cuda_cfg, variables& var, int doChem)
     else if (g_nActive > 0) cmc_stepD1_chem_d<<<grid((size_t)g_nActive), blk>>>(g_nCells, g_nCellsAll, g_nActive, g_activeList, thermo_species_device_ptr(), chemistry_table_device(),
         var.c_d.at("P"), var.c_d.at("dt_local"), g_OmD, g_Q, g_TEtaD, g_qrelEtaD, g_QdEtaD, g_omegaAccD, g_jacAccD, accumSrc, g_omHist);
     g_timerS.mark(4);
-    cmc_stepE_finalize_d<<<grid(g_nCells), blk>>>(g_nCells, g_nCellsAll, var.c_d.at("ro"), var.c_d.at("dt_local"), species_roY_device_ptr(),
+    cmc_stepE_finalize_d<<<grid(g_nCells), blk>>>(g_nCells, g_nCellsAll, var.c_d.at("ro"), var.c_d.at("xi"), var.c_d.at("dt_local"), species_roY_device_ptr(),
         g_Q, g_roQ, g_OmD, g_TEtaD, g_qrelEtaD, g_QdEtaD, g_ypdfD, g_hpdfD, g_omegaAccD, g_jacAccD,
         g_omega, g_qdot, g_jac, var.c_d.at("cmc_dY"), var.c_d.at("cmc_TQmax"),
         g_ypdf, g_hpdf, g_tau, var.c_d.at("cmc_TQst"), var.c_d.at("cmc_xiOm"), var.c_d.at("cmc_xipdf"), g_dpdf, g_qrel, g_gate);
