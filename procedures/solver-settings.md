@@ -169,6 +169,7 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
 | `tMaxReaction` | 6000 | 速度式評価の温度上限 [K] |
 | `freezeBelowT` | 0 | この温度未満で反応を凍結 ($\dot\omega=0$) [K]。試験部の低温域で反応評価を省く用 |
 
+- **`thermoFloat`** (physProp, 既定 1, 2026-09-12): thermally-perfect の温度反転を float Newton + double 1 段研磨のハイブリッドにする (誤差 ≤1e-8·T, 3D 2.37 M 節点で 1 step −13 %)。`thermoHrefTemp>0` が前提で、datum 無しなら自動で 0 (従来 double Newton) に落ちる。`0` で従来経路。plan performance-3d-node-sst-speedup §4.2-3。
 - **`thermoHrefTemp: 298.15` を必ず指定する** (反応熱は sensible datum の残差項 $\dot Q=-\sum_s h^{abs}_s(T_{ref})\dot\omega_s$ として入る。絶対 datum (0) でも動くが陰解法は不安定)。
 - 機構に現れる種は `species` に全て含めること (無ければ起動時エラー)。`species` にだけある種は不活性として扱う。
 - 熱力学 DB は `tools/cea_thermo_to_species_db.py thermo.inp --species ...` で CEA から生成する (ラジカルは内蔵 DB に無い)。

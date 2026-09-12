@@ -649,11 +649,16 @@ void solverConfig::read(std::string fname)
         if (physProp["speciesDBFile"])          this->speciesDBFile = physProp["speciesDBFile"].as<std::string>();
         if (physProp["speciesDiffusionMethod"]) this->speciesDiffusionMethod = physProp["speciesDiffusionMethod"].as<int>();
         if (physProp["thermoHrefTemp"])         this->thermoHrefTemp = physProp["thermoHrefTemp"].as<double>();
-        if (physProp["thermoFloat"])            this->thermoFloat = physProp["thermoFloat"].as<int>();
+        const bool thermoFloatExplicit = static_cast<bool>(physProp["thermoFloat"]);
+        if (thermoFloatExplicit)                this->thermoFloat = physProp["thermoFloat"].as<int>();
         if (this->thermoFloat != 0 && this->thermalMethod == 2 && !(this->thermoHrefTemp > 0.0)) {
-            throw std::runtime_error("physProp.thermoFloat=1 requires physProp.thermoHrefTemp > 0 (sensible-enthalpy datum; the float Newton stage does not converge with absolute NASA enthalpies).");
+            if (thermoFloatExplicit) {
+                throw std::runtime_error("physProp.thermoFloat=1 requires physProp.thermoHrefTemp > 0 (sensible-enthalpy datum; the float Newton stage does not converge with absolute NASA enthalpies).");
+            }
+            this->thermoFloat = 0;
+            std::cout << "[config] physProp.thermoFloat: default 1 disabled because thermoHrefTemp is not set (absolute NASA enthalpy datum); set thermoHrefTemp: 298.15 to enable the hybrid inversion." << std::endl;
         }
-        if (this->thermoFloat != 0) std::cout << "'thermoFloat' in 'physProp': " << this->thermoFloat << " (hybrid float Newton + double polish)" << std::endl;
+        if (this->thermalMethod == 2) std::cout << "'thermoFloat' in 'physProp': " << this->thermoFloat << (this->thermoFloat ? " (hybrid float Newton + double polish)" : " (double Newton)") << std::endl;
         if (physProp["chemistry"]) {
             const YAML::Node ch = physProp["chemistry"];
             this->chemEnabled       = getOptionalValidatedValue<int>(ch, "enabled", 0, "physProp.chemistry");
