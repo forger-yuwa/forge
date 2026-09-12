@@ -169,6 +169,7 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
 | `tMaxReaction` | 6000 | 速度式評価の温度上限 [K] |
 | `freezeBelowT` | 0 | この温度未満で反応を凍結 ($\dot\omega=0$) [K]。試験部の低温域で反応評価を省く用 |
 
+- **`mesh.renumber`** (変換時, 既定 `none`, 2026-09-12): `rcm` で `convertGmshToForge` が節点を Reverse Cuthill–McKee で再番号付けする (node では CV 順 = gather の局所性)。A10G 3D 2.37 M 節点で 1 step −3.3 %。順列は `/MESH/RENUMBER_PERM` (new→old) に入り、旧番号の `res_*.h5` は `tools/permute_res_h5.py SRC_res.h5 DST_mesh.h5` で移植する (index コピー不可)。
 - **`thermoFloat`** (physProp, 既定 1, 2026-09-12): thermally-perfect の温度反転を float Newton + double 1 段研磨のハイブリッドにする (誤差 ≤1e-8·T, 3D 2.37 M 節点で 1 step −13 %)。`thermoHrefTemp>0` が前提で、datum 無しなら自動で 0 (従来 double Newton) に落ちる。`0` で従来経路。plan performance-3d-node-sst-speedup §4.2-3。
 - **`thermoHrefTemp: 298.15` を必ず指定する** (反応熱は sensible datum の残差項 $\dot Q=-\sum_s h^{abs}_s(T_{ref})\dot\omega_s$ として入る。絶対 datum (0) でも動くが陰解法は不安定)。
 - 機構に現れる種は `species` に全て含めること (無ければ起動時エラー)。`species` にだけある種は不活性として扱う。
