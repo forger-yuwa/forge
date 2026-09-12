@@ -45,7 +45,7 @@ output: {level: 1}                                      # 保存量 + 原始量 
   根拠 (2026-09-12, 3D node SST TP case/16 run_0410–0412): 本段の `nStepInner: 3` は 5 と残差経路が全列一致
   (到達 step も同じ) で 1 step が 11 % 速く、2 は発散 → 余裕を見て 4 をユーザ決定 (旧レシピ 5 は過剰反復)。
 - **TP の温度反転は `physProp.thermoFloat: 1` が既定** (2026-09-12 ユーザ決定): float Newton + double 1 段研磨で
-  収束解不変 (壁圧差 ≤1e-5, 誤差 ≤1e-8·T)・1 step −13 %。`thermoHrefTemp: 298.15` が前提で、datum 無し config では
+  基準バイナリと同じ (未収束プラトーの) 状態に留まり、12000 step 後の壁圧差 ≤1e-4・温度反転誤差 ≤4e-10·T、1 step −13 %。`thermoHrefTemp: 298.15` が前提で、datum 無し config では
   自動で 0 (double Newton) に落ちて警告が出る (plan performance-3d-node-sst-speedup)。
 - **`cfl_pseudo` の目安**: node NS ノズル 4〜6 + `implicitRelax: 0.7` (上限は EOS 圧力床の洗浄で決まり、
   relax のみ有効: cfl 8 + relax 0.7 ≈ 3〜4 倍速 [implicit-cfl-ceiling-eos-floor])、Euler 設計評価 4、

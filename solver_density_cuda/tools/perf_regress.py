@@ -24,7 +24,10 @@ def prep(a):
     for f in ["bcondConfig.yaml", "species_db.yaml", "probe.yaml"]:
         if os.path.exists(os.path.join(a.src, f)): shutil.copy(os.path.join(a.src, f), a.dst)
     for f in {mesh, value}:
-        shutil.copy(os.path.join(a.src, f), os.path.join(a.dst, f))
+        sf, df = os.path.join(a.src, f), os.path.join(a.dst, f)
+        if os.path.exists(sf): shutil.copy(sf, df)
+        elif os.path.exists(df): print("using existing", df)          # 元 run にメッシュが無い (別 run から借用) 場合
+        else: raise SystemExit("mesh/value file not found: %s (copy it into %s first)" % (sf, a.dst))
     with h5py.File(a.ic, "r") as s, h5py.File(os.path.join(a.dst, value), "r+") as d:
         n = len(d["VALUE/ro"]); nk = 0; created = []
         for k in s["VALUE"]:
@@ -61,21 +64,61 @@ def run(a):
         m = re.search(r"^Time = .*$", t, re.M)
         print("%s/%s exit=%d %s" % (os.path.basename(a.dst), label, rc, m.group(0) if m else "(no Time line)"))
 
+# 場の差の判定 (plan performance-3d-node-sst-speedup §4.3, 2026-09-12 改訂):
+#   正規化: 速度成分 (Ux,Uy,Uz,roUx,roUy,roUz) は速度ベクトルの尺度 max|U| (roU* は max|ρU| ベクトル) で、他は各場の max|a| で割る。
+#   絶対基準: A (ro,P,T,roY*,Y*,sonic,vis_lam) ≤1e-5 / B (速度,roe,h0,k,omega,roK,roOmega,g_*,rog_*,roQ*) ≤1e-4 / C (vis_turb) ≤1e-2。
+#   wall_dist・res_*・dt_local・限定子など診断量は除外。
+CAT_A = {"ro","P","T","sonic","vis_lam"}; CAT_C = {"vis_turb"}
+SKIP_PREFIX = ("wall_dist","res_","dt_local","limiter_","ducros","cfl","volume","transport_diag","src_jac","delta_les","l_des","rd_des","fd_","fe_","Pk_diag","Taw_diag","wf_","roK_wf","axisym_divU","condDrdt","condR30","condJ","condTsat","condS_")
+import re as _re
+GRAD_RE = _re.compile(r"^d[A-Za-z]+d[xyz]$")   # 勾配診断 (dPdx, drody, dUxdz ...) は判定対象外
+def category(k):
+    if k.startswith(SKIP_PREFIX) or GRAD_RE.match(k): return None
+    if k in CAT_A or k.startswith("roY") or (len(k)==2 and k[0]=="Y" and k[1].isdigit()): return "A"
+    if k in CAT_C: return "C"
+    return "B"
+TOL = {"A":1e-5, "B":1e-4, "C":1e-2}
+def scales(v):
+    import numpy as np
+    U = np.sqrt(sum(v[c][...].astype(np.float64)**2 for c in ("Ux","Uy","Uz") if c in v)); rU = np.sqrt(sum(v[c][...].astype(np.float64)**2 for c in ("roUx","roUy","roUz") if c in v))
+    return {"Ux":U.max(),"Uy":U.max(),"Uz":U.max(),"roUx":rU.max(),"roUy":rU.max(),"roUz":rU.max()}
+
+def cmp_fields(ref, f, verbose=True):
+    """ref/f: h5 VALUE group。判定表を返す (list of (key, cat, normdiff, tol, ok))"""
+    sc = scales(ref); rows = []
+    for k in sorted(ref.keys()):
+        cat = category(k)
+        if cat is None or k not in f: continue
+        x = ref[k][...].astype(np.float64); y = f[k][...].astype(np.float64)
+        if x.shape != y.shape: continue
+        s = max(sc.get(k, np.abs(x).max()), 1e-30); d = np.abs(x - y)
+        rows.append((k, cat, d.max()/s, np.sqrt((d**2).mean())/s, TOL[cat], d.max()/s <= TOL[cat], int(np.isnan(y).sum())))
+    return rows
+
 def cmp(a):
+    """判定: 各場について max 差 ≤ 絶対基準 (TOL) **または** ≤ 2×ノイズ床 (基準バイナリ同士 [ref と --noise ラベル群] の最大差)。
+    ノイズ床が絶対基準を超える場 (cell の atomicAdd 床、減衰乱流の速度など) は絶対基準では判定できないので、ノイズ比で判定し
+    その旨を表示する。--noise を与えない場合は絶対基準のみ。"""
     cfg = read_cfg(a.dst); n = int(re.search(r"nStepOuter\s*:\s*(\d+)", cfg).group(1))
     ref = h5py.File(os.path.join(a.dst, a.ref, "res_%d.h5" % n), "r")["VALUE"]
+    noise = {}
+    for nl in (a.noise or []):
+        for k, cat, mx, rms, tol, ok, nn in cmp_fields(ref, h5py.File(os.path.join(a.dst, nl, "res_%d.h5" % n), "r")["VALUE"]):
+            noise[k] = max(noise.get(k, 0.0), mx)
     for label in a.labels:
         f = h5py.File(os.path.join(a.dst, label, "res_%d.h5" % n), "r")["VALUE"]
-        print("--- %s vs %s" % (a.ref, label))
-        worst = 0.0
-        for k in sorted(ref.keys()):
-            if k not in f or k == "wall_dist": continue
-            x = ref[k][...].astype(np.float64); y = f[k][...].astype(np.float64)
-            s = max(np.abs(x).max(), 1e-30); d = np.abs(x - y)
-            print("  %-10s max|d|/max|a|=%.2e rms=%.2e nan=%d" % (k, d.max() / s, np.sqrt((d ** 2).mean()) / s, int(np.isnan(y).sum())))
+        rows = cmp_fields(ref, f); out = []; nbad = 0
+        for k, cat, mx, rms, tol, ok, nn in rows:
+            nz = noise.get(k); by_noise = (nz is not None and mx <= 2.0 * nz)
+            passed = ok or by_noise
+            if not passed: nbad += 1
+            out.append("  %-10s [%s] max=%.2e rms=%.2e tol=%.0e%s %s%s" % (k, cat, mx, rms, tol, (" noise=%.2e" % nz) if nz is not None else "",
+                       "ok" if ok else ("ok(noise x%.1f)" % (mx / nz) if by_noise else "EXCEED"), (" nan=%d" % nn) if nn else ""))
+        print("--- %s vs %s : %s (%d/%d fields; noise labels: %s)" % (a.ref, label, "PASS" if nbad == 0 else "FAIL", len(rows) - nbad, len(rows), ",".join(a.noise or [])))
+        for o in out: print(o)
 
 ap = argparse.ArgumentParser(); sp = ap.add_subparsers(dest="cmd", required=True)
 p = sp.add_parser("prep"); p.add_argument("src"); p.add_argument("dst"); p.add_argument("ic"); p.add_argument("--mesh"); p.add_argument("--value"); p.add_argument("--nsteps", type=int, default=300); p.set_defaults(fn=prep)
 p = sp.add_parser("run"); p.add_argument("dst"); p.add_argument("--bin", action="append", required=True); p.add_argument("--cfgsub"); p.set_defaults(fn=run)
-p = sp.add_parser("cmp"); p.add_argument("dst"); p.add_argument("ref"); p.add_argument("labels", nargs="+"); p.set_defaults(fn=cmp)
+p = sp.add_parser("cmp"); p.add_argument("dst"); p.add_argument("ref"); p.add_argument("labels", nargs="+"); p.add_argument("--noise", action="append", help="基準バイナリの別 run ラベル (ノイズ床用, 複数可)"); p.set_defaults(fn=cmp)
 a = ap.parse_args(); a.fn(a)

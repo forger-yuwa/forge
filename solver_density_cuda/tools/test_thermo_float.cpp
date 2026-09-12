@@ -35,7 +35,7 @@ int main(){
         {"N2/H2O trace 1e-6",{0,1},{1.0-1e-6,1e-6}}, {"N2/HE 0.5/0.5",{0,3},{0.5,0.5}} };
     // T_max=6000 を超える e は反転不能 (クランプ) なので範囲内のみ。<200 K は低温端の線形外挿 (反転可)。
     const double Tlist_edges[] = {50,60,100,150,199.9,200,200.1,250,298.15,300,400,600,800,950,999.9,1000,1000.1,1200,1500,2000,3000,4000,5000,5900,5999,6000};
-    printf("%-30s %-6s %9s %9s %9s %9s %9s %9s %6s %6s\n","mix","datum","errF[K]","errF/T","errD[K]","errHyb/T","maxDrift","maxdh/cpT","itF","itD");
+    printf("%-30s %-6s %9s %9s %9s %9s %9s %9s %6s %6s\n","mix","datum","errF[K]","errF/T","errD[K]","errHyb/T","drift/T","driftD/T","itF","itD");
     // errF/errD: 厳密参照 (double Newton, tol 1e-9, 60 反復) に対する float 版 / 生産 double 版 (tol 1e-3+1e-6T) の誤差
     int fails=0;
     for (int datum=0; datum<2; ++datum) {
@@ -47,7 +47,7 @@ int main(){
               const float inv=1.0f/(ys>1e-30f?ys:1e-30f); for (int i=0;i<n;i++){ Yf[i]*=inv; m.Y[i]=(double)Yf[i]; } }
             if (datum) for (int i=0;i<n;i++){ const double h_ref=thermo_h_molar(sp[i],298.15); const double da7=-h_ref/THERMO_RU; sp[i].low[7]+=da7; sp[i].high[7]+=da7; }
             for (int i=0;i<n;i++) spf[i]=toF(sp[i]);
-            double maxdT=0, maxrel=0, maxres=0, maxdrift=0, maxdh=0, maxdTrelT=0, maxresRelT=0, maxHyb=0; int itFmax=0, itDmax=0;
+            double maxdT=0, maxrel=0, maxres=0, maxdrift=0, maxdh=0, maxdTrelT=0, maxresRelT=0, maxHyb=0, maxdriftD=0; int itFmax=0, itDmax=0;
             for (double T : Tlist_edges) {
                 // 参照: double で e(T)
                 double cpd, hd; thermo_cph_mix(sp.data(), n, m.Y.data(), T, &cpd, &hd);
@@ -73,10 +73,25 @@ int main(){
                     // ハイブリッド (float 8 反復 + double 研磨 1 段) の誤差
                     { double cpH,hH,TfH; const double Th=thermo_T_from_e_hybrid(sp.data(),spf.data(),n,m.Y.data(),Yf.data(),e,g,50.0,6000.0,&cpH,&hH,&TfH,12);
                       maxHyb=std::max(maxHyb,fabs(Th-Tref)/Tref);
-                      // 再格納ドリフト: h(T)=h(T_f)+cp·(T−T_f) (本番の Taylor 再構成) から e を組み直し、もう一度反転して T の動きを見る
-                      const double e2=(hH+cpH*(Th-TfH))-thermo_R_mix(sp.data(),n,m.Y.data())*Th;
-                      double cp2,h2,Tf2; const double Th2=thermo_T_from_e_hybrid(sp.data(),spf.data(),n,m.Y.data(),Yf.data(),e2,Th,50.0,6000.0,&cp2,&h2,&Tf2,12);
-                      maxdrift=std::max(maxdrift,fabs(Th2-Th)/Th); }
+                      // 再格納ドリフト (本番 dependentVariables と同じ経路): h(T)=h(T_f)+cp·(T−T_f) から e_mix を組み、
+                      // roe=ρ(e_mix+ek) を **float に格納**して読み戻し、e=roe/ρ−ek を float→double で再反転する。
+                      // 反復 (10 回) で T が漂わないこと・有限であることを合否に含める (codex result-2 m5)。
+                      { const double R=thermo_R_mix(sp.data(),n,m.Y.data()); const float rho=1.0f; const float ek=0.5f*300.0f*300.0f;
+                        double Tk=Th, cpk=cpH, hk=hH, Tfk=TfH; double Tfirst=Th;
+                        double Td_k=Td;                                          // 同じ float 格納往復を従来 double 反転で
+                        for (int it=0; it<10; ++it) {
+                          const double e_mix=(hk+cpk*(Tk-Tfk))-R*Tk;
+                          const float roe=(float)(rho*(e_mix+(double)ek));      // float 格納 (本番)
+                          const float e_re=roe/rho-ek;                           // float 読み戻し (本番 intE)
+                          double cp2,h2,Tf2; const double Tn=thermo_T_from_e_hybrid(sp.data(),spf.data(),n,m.Y.data(),Yf.data(),(double)e_re,Tk,50.0,6000.0,&cp2,&h2,&Tf2,12);
+                          if (!std::isfinite(Tn)) { maxdrift=1e9; break; }
+                          Tk=Tn; cpk=cp2; hk=h2; Tfk=Tf2;
+                          double cpd,hd2; thermo_cph_mix(sp.data(),n,m.Y.data(),Td_k,&cpd,&hd2);
+                          const float roed=(float)(rho*((hd2-R*Td_k)+(double)ek)); const float e_red=roed/rho-ek;
+                          Td_k=thermo_T_from_e(sp.data(),n,m.Y.data(),(double)e_red,Td_k,50.0,6000.0);
+                        }
+                        maxdrift=std::max(maxdrift,fabs(Tk-Tfirst)/Tfirst);
+                        maxdriftD=std::max(maxdriftD,fabs(Td_k-Td)/Td); } }
                     maxdh=std::max(maxdh, fabs((double)hf-hd)/(cpd*T));
                     itFmax=std::max(itFmax,itF); itDmax=std::max(itDmax,itD);
                 }
@@ -87,11 +102,14 @@ int main(){
             // 合否 (採用経路はハイブリッド): errHyb/T < 3e-8 = float の T 格納分解能 (ulp 6e-8) の半分未満。
             // 1 段研磨後の残差は NASA 係数の温度域境界 (Tmid/Tlo) を float 段が跨ぐときの cp 段差由来で ~1e-8 まで残る。
             // float 単独 (errF/T ~1e-6, abs datum H2O は 20 反復張り付き) は参考値。
-            const bool ok = (maxHyb < 3.0e-8);
+            // 再格納ドリフト (10 往復, float 格納込み) は float の e 分解能 (ulp/e ≈ 6e-8 → ΔT/T ≈ 3e-8·(e/(cv T)) ≲ 1e-7) の範囲: < 3e-7·T。
+            // abs datum (thermoHrefTemp 無し) は本番でハイブリッドを使わない (自動で double 反転) ので、ドリフトは参考値扱い。
+            // ドリフトは float 格納そのものに由来する (従来 double 反転でも同程度)。判定: ハイブリッドのドリフトが double 反転の 2 倍 + 1e-8 以内。
+            const bool ok = (maxHyb < 3.0e-8) && (datum == 0 || maxdrift <= 2.0*maxdriftD + 1.0e-8);
             if (!ok) fails++;
-            printf("%-30s %-6s %9.2e %9.2e %9.2e %9.2e %9.2e %9.2e %6d %6d %s\n", m.name.c_str(), datum?"298K":"abs", maxdT, maxdTrelT, maxrel, maxHyb, maxdrift, maxdh, itFmax, itDmax, ok?"OK":"FAIL");
+            printf("%-30s %-6s %9.2e %9.2e %9.2e %9.2e %9.2e %9.2e %6d %6d %s\n", m.name.c_str(), datum?"298K":"abs", maxdT, maxdTrelT, maxrel, maxHyb, maxdrift, maxdriftD, itFmax, itDmax, ok?"OK":"FAIL");
         }
     }
-    printf("VERDICT: %s (fails=%d; 判定 ハイブリッド反転の誤差 errHyb/T < 3e-8 [float の T 格納分解能未満])\n", fails?"FAIL":"PASS", fails);
+    printf("VERDICT: %s (fails=%d; 判定 errHyb/T < 3e-8 [float の T 格納分解能未満] かつ float 再格納 10 往復のドリフトが従来 double 反転の 2 倍+1e-8 以内)\n", fails?"FAIL":"PASS", fails);
     return fails?1:0;
 }

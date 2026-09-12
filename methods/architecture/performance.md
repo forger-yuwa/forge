@@ -58,9 +58,11 @@
   周期・軸対称の閉性、凝縮 EOS の (T,g) 同時反転など、桁落ちが実測で問題になった箇所に限る。
   熱力学 (NASA-9) の**面ごと**評価は float 版 (`SpeciesThermoF`) を使う。評価点は従来どおり面状態 (T_f, P_f, Y_f) で、セル値の補間に
   置き換えない (離散式が変わる: codex plan レビュー M1)。WALE/SIGMA の高次べき乗 (`pow(x, 5/2)` 等) は float では高勾配で overflow するため double のまま。
-- **TP の温度反転** (`physProp.thermoFloat`, 既定 1): float Newton (warm start, 最大 12 反復) → double Newton 1 段研磨。double 評価は cph_mix 1 回。
-  誤差 ≤1e-8·T (float の T 格納 ulp 6e-8 未満; `tools/test_thermo_float.cpp`)。`thermoHrefTemp>0` が前提 (絶対 datum の H2O は float 段が収束しない)。
+- **TP の温度反転** (`physProp.thermoFloat`, 既定 1): float Newton (warm start, 最大 12 反復) → double Newton 研磨を収束 (|ΔT|<1e-3+1e-6·T) まで最大 3 段
+  (通常 1 段 = double 評価 1 回)。厳密参照との誤差 ≤4e-10·T、float 格納 roe の 10 往復ドリフト <3e-7·T (`tools/test_thermo_float.cpp`)。
+  `thermoHrefTemp>0` が前提 (絶対 datum の H2O は float 段が収束しない; datum 無しは自動で double 反転)。
 - **gather 系の試み (結果)**: 近傍 dq / 原始量の stride-8 AoS パック (`blockDPLURDqPack`, `mesh.primPack`) は A10G で +0.7〜+2.7 ms/step の逆効果、
   節点 RCM 再番号付け (`mesh.renumber: rcm`) は −3.3 %。gather は既に L2 で吸収されておりレイテンシ律速 (占有率 28 %) が残る。パックは既定 0、RCM は opt-in。
-- 面流束の `atomicAdd` 蓄積のため同一バイナリでも全場はビット一致しない。精度変更は、基準バイナリ同士の run-to-run
-  ノイズ床 (場のスケールで正規化した最大差) を先に測り、その 2 倍以内に収まることを A/B で示してから採用する (判定基準は plan §4.3)。
+- 面流束の `atomicAdd` 蓄積のため同一バイナリでも全場はビット一致しない。精度変更の採否は**絶対基準** (場のスケール正規化最大差:
+  ρ/P/T/ρY ≤1e-5、速度 [|U| 尺度]/エネルギー/k/ω ≤1e-4、μt ≤1e-2; `tools/perf_regress.py cmp`) で判定し、基準バイナリ同士の
+  run-to-run ノイズ床を併記する (判定基準は plan §4.3)。
