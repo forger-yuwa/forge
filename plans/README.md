@@ -23,7 +23,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
-| [condensation-float-speedup.md](active/condensation-float-speedup.md) | `architecture / performance` | **凝縮経路の float 化** (2026-09-13 起票): 凝縮 ON の 3D node SST TP が dry の 2.6 倍 (33.8→89.5 ms/step)。物性の区分 3 次表 (範囲外は double 退避)・対数空間 CNT・面潜熱の表評価 (g=0 面スキップ)・二相反転ハイブリッド (残差判定)・clamp/移流融合で ≤45 ms/step (A10G) を狙う。ローカル RTX 3060 で 197→84 ms/step。`condFloat` で旧 double 経路を残す |
+| [condensation-float-speedup.md](active/condensation-float-speedup.md) | `architecture / performance` | **凝縮経路の float 化** (2026-09-13 起票): 凝縮 ON の 3D node SST TP が dry の 2.6 倍 (33.8→89.5 ms/step)。物性の区分 3 次表 (範囲外は double 退避)・対数空間 CNT・面潜熱の表評価 (g=0 面スキップ)・二相反転ハイブリッド (残差判定)・clamp/移流融合で ≤45 ms/step (A10G) を狙う。A10G 実測 (2026-09-13): 起動区間 89.4→44.0 (目標達成)、発達場 98.0→52.3 ms/step (目標 50 に 4.6 % 未達 → followups F-cf3)、dry 不変。`condFloat` で旧 double 経路を残す |
 | [condensation-followups.md](active/condensation-followups.md) | `condensation` | **凝縮モデルの後続課題の正本** (2026-09-13 起票, draft): α 感度 / 分圧スイープ / 既定値 / σ0.97 h0 変動 / Arthur 壁圧過大の切り分け / CPG 二相音速 / 露点線 / Longshot 条件 / 境界試験・流束収支 / check_quasisteady 統合 |
 | [condensation-kantrowitz-gamma-twophase-sonic.md](active/condensation-kantrowitz-gamma-twophase-sonic.md) | `condensation` | **Kantrowitz 補正の γ を蒸気 γ_v に修正 + 凝縮セルの二相 frozen 音速** (2026-09-10 起票): 旧実装はセル気相混合 γ (H2O–N2 で 1.40) と g を無視した全蒸気音速。A/B キー `condKantrowitzGammaMode` / `condSonicModel`、Wyslouzil 2D (case/16) で変化量を定量化 |
 | [chemistry-finite-rate-h2.md](active/chemistry-finite-rate-h2.md) | `thermophysics / chemistry` | **有限速度化学 (H₂ 燃焼・ノズル化学非平衡)** (2026-09-04 起票): 種ブロック point-implicit + sensible datum 反応熱陽注入。Phase 0 (CEA スクリーニング・熱力学 DB ツール・Jachimowski YAML) 完了、Phase 1 ソース項から実装 |
