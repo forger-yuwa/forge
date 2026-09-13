@@ -6,7 +6,9 @@ import sys, os, h5py, yaml, numpy as np
 run, res = sys.argv[1], sys.argv[2]
 cfg = yaml.safe_load(open(os.path.join(run, "solverConfig.yaml"))); cond = cfg["condensation"]; mode = int(cond.get("condKantrowitz", 0))
 sp = cfg["physProp"]["species"]; db = yaml.safe_load(open(os.path.join(run, "species_db.yaml"))); iv = int(cond["condGasSpecies"])
-Ru = 8.314462618; kB = 1.380649e-23; NA = 6.02214076e23; Rw = 461.5; Mw = 0.0180153; cvv_const = 1393.5; cpv_const = 1855.0
+Ru = 8.314462618; kB = 1.380649e-23; NA = 6.02214076e23; Mw = 0.0180153; Rw = Ru/Mw   # h2o_latent の Rw は Ru/M=461.5223 (CondSpeciesProps.R 461.5 とは別; codex 2026-09-12)
+cvv_const = 1393.5; cpv_const = 1855.0
+Rcp = 461.5   # CondSpeciesProps.R (p_v と b=L/(R T) はこちら)
 def cp_nasa9(T, c): return c[0]/T**2 + c[1]/T + c[2] + c[3]*T + c[4]*T**2 + c[5]*T**3 + c[6]*T**4
 def cp_mass(name, T):
     s = db[name]; T = np.clip(T, s["Tlo"], s["Thi"]); c = np.where(T < s["Tmid"], cp_nasa9(T, s["nasa9_low"]), cp_nasa9(T, s["nasa9_high"])); return c*Ru/s["MW"]
@@ -23,8 +25,8 @@ def psat_mk(T):  # Murphy & Koop 2005 liquid
 f = h5py.File(res, "r"); V = f["VALUE"]
 T = np.array(V["T"], dtype=float); P = np.array(V["P"], dtype=float); ro = np.array(V["ro"], dtype=float)
 Y = [np.array(V[f"Y{i}"], dtype=float) for i in range(len(sp))]; g = np.array(V["g_0"], dtype=float)
-pv = ro*np.maximum(Y[iv] - g, 0)*Rw*T; ps = psat_mk(T); S = pv/ps
-b = latent(T)/(Rw*T)
+pv = ro*np.maximum(Y[iv] - g, 0)*Rcp*T; ps = psat_mk(T); S = pv/ps
+b = latent(T)/(Rcp*T)
 Mv = db[sp[iv]]["MW"]
 if mode == 1:
     gam = cpv_const/cvv_const; th = np.maximum(2*(gam - 1)/(gam + 1)*b*(b - 0.5), 0.0)
@@ -38,7 +40,15 @@ elif mode >= 2:
 else: th = np.zeros_like(T)
 thr = np.array(V["condTheta_0"], dtype=float); lim = np.array(V["condLim_0"], dtype=float) if "condLim_0" in V else None
 ms = (S > 1.0)                 # 過飽和セル (condLim 統計用)
-m = ms & (thr > 0)             # θ 照合は θ>0 のセル (mode 0 では空)
+# 比較対象は **期待値側** で決める: mode>=1 なら S>1 かつ蒸気あり (Y_w−g>0) のセルで θ_host>0 が期待される。
+# 出力が誤って全ゼロでも FAIL になるように、期待セルで θ_res>0 (nonzero coverage) を要求する (codex 2026-09-12 M2)。
+exp_pos = ms & (np.maximum(Y[iv] - g, 0) > 0) if mode >= 1 else np.zeros_like(ms)
+m = exp_pos
+cover_ok = True
+if mode >= 1 and exp_pos.any():
+    nzf = (thr[exp_pos] > 0).mean(); cover_ok = bool(nzf > 0.999)
+    print(f"coverage: expected-positive cells={int(exp_pos.sum())}, fraction with theta_res>0 = {nzf:.6f}")
+if mode == 0: cover_ok = bool(np.all(thr == 0.0)); print(f"mode 0: all theta_res == 0 -> {cover_ok}")
 # 相対差は θ_res>0.1 のセルで評価 (蒸気枯渇 a_v→0 で θ→0 のセルは float 保存の Y,g の丸めが相対差を増幅するので絶対差で見る)
 mc = m & (thr > 0.1)
 rel = np.abs(th[mc] - thr[mc])/np.maximum(thr[mc], 1e-300) if mc.any() else np.array([0.0])
@@ -48,5 +58,9 @@ Sres = np.array(V["condS_0"], dtype=float); relS = np.abs(S[m] - Sres[m])/np.max
 print(f"mode={mode}  S>1 cells={int(m.sum())}  theta_res range [{thr[m].min() if m.any() else 0:.3g}, {thr[m].max() if m.any() else 0:.3g}]  max rel |theta_host-theta_res| (theta>0.1) = {rel.max():.2e}, max abs = {absd:.2e}  (S recon rel {relS.max():.1e})")
 if lim is not None and ms.any():
     nuc = ms & (g < 1e-4); print(f"condLim_0: min over S>1 = {lim[ms].min():.3f}; over nucleation zone (S>1, g<1e-4) min={lim[nuc].min() if nuc.any() else float('nan'):.3f} mean={lim[nuc].mean() if nuc.any() else float('nan'):.3f}; cells with lim<0.9: {int((lim[ms] < 0.9).sum())}")
-ok = rel.max() < 2e-4 and absd < 1e-3
+# 許容: 相対 1e-5 (θ>0.1), 絶対 1e-4 (float 保存の丸め; 定数を合わせれば host と ~6e-8 で一致する)。非有限・coverage 欠落は FAIL。
+# mode 2/3 の θ は ln S (float 保存の ρ,T,Y,g から再構成した S) に依存するので、許容は S 再構成誤差の 5 倍と 1e-5 の大きい方 (mode 1 は 1e-5 で 6e-8 一致)。
+tol_rel = max(1e-5, 5.0*float(relS.max())) if mode >= 2 else 1e-5
+print(f"tolerance: rel {tol_rel:.1e} (mode {mode}; S recon rel {relS.max():.1e}), abs 1e-3")
+ok = bool(np.all(np.isfinite(th)) and np.all(np.isfinite(thr)) and rel.max() < tol_rel and absd < 1e-3 and cover_ok)
 print("VERDICT(verify_theta):", "PASS" if ok else "FAIL"); sys.exit(0 if ok else 1)

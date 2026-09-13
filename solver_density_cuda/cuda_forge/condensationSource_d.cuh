@@ -120,7 +120,7 @@ __host__ __device__ inline double cond_growth(
         if (p_v <= psat) return 0.0;
         const double driving = log(p_v / (psat > 1.0e-300 ? psat : 1.0e-300));
         const double L   = cond_latent(cp, T);
-        const double k   = n2_kgas(T);                 // キャリア (N2) 熱伝導率
+        const double k   = cond_kgas(cp, T);           // キャリア (N2/空気) 熱伝導率
         const double lam = cond_mean_free_path(T, pK, R);
         const double Kn  = lam/(2.0*r_bar);
         const double fac = (1.0 - rstar/r_bar) / (r_bar*(1.0 + gyarC*Kn));
@@ -133,7 +133,7 @@ __host__ __device__ inline double cond_growth(
         double Td = T;
         if (twoTemp) {
             const double L  = cond_latent(cp, T);
-            const double kg = n2_kgas(T);                       // キャリア (N2) 熱伝導率
+            const double kg = cond_kgas(cp, T);                 // キャリア (N2/空気) 熱伝導率
             const double lam= cond_mean_free_path(T, pK, R);
             const double Kn = lam/(2.0*r_bar);
             const double h  = kg/(r_bar*(1.0 + 3.18*Kn));       // 熱伝達係数 [W/m^2/K]
@@ -161,7 +161,7 @@ __host__ __device__ inline double cond_growth(
     } else {
         const double driving = log(p_v / (psat > 1.0e-300 ? psat : 1.0e-300));
         const double L   = cond_latent(cp, T);
-        const double k   = n2_kgas(T);
+        const double k   = cond_kgas(cp, T);
         const double lam = cond_mean_free_path(T, pK, R);
         const double Kn  = lam/(2.0*r_bar);
         const double fFS = (1.0+2.0*Kn)/(r_bar*(1.0+3.42*Kn+5.32*Kn*Kn)) * (1.0 - rstar/r_bar);
@@ -229,7 +229,7 @@ __host__ __device__ inline double cond_evap_rate(
     // Goodheart (N2 既定) / Gyarmathy: 前因子 kRT²/(ρ_l L²) × 駆動力 ln(p_v/p_d) × Kn 補正。
     const double driving = log(p_v/(pd > 1.0e-300 ? pd : 1.0e-300));   // < 0
     const double L   = cond_latent(cp, T);
-    const double k   = n2_kgas(T);
+    const double k   = cond_kgas(cp, T);
     const double pK  = (p_gas > 0.0) ? p_gas : p_v;
     const double lam = cond_mean_free_path(T, pK, R);
     const double Kn  = lam/(2.0*r);

@@ -39,7 +39,7 @@ __host__ __device__ inline void cond_vapor_state(
 __global__ void condensation_source_d(
     geom_int nCells,
     int condModel, int carrier, double Rw, double M,
-    int kantrowitz, int kwGammaMode, double sigmaScale,
+    int kantrowitz, int kwGammaMode, CondPropOpts opts,   // opts: σ 倍率・N2 低温物性切替・kgas モデル・CPG carrier の Y_w (plans/active/condensation-air.md)
     const SpeciesThermo* sp, int nSpecies, flow_float* const* roYall, int condGasSpecies,   // Feder carrier 形の衝突項用 (TP のみ; CPG は nullptr)
     int growthModel, double gyarC, int twoTemp,
     int evap, double evapRmin, int evapKelvin, double evapLamMin,
@@ -64,8 +64,7 @@ __global__ void condensation_source_d(
     const double rod = (double)ro[ic];
     if (rod <= 1.0e-20) return;
 
-    CondSpeciesProps cprops = (condModel == 1) ? condProps_H2O() : condProps_N2();
-    cprops.sigmaScale = sigmaScale;   // 感度試験用 σ 倍率 (既定 1.0)
+    const CondSpeciesProps cprops = condProps_make(condModel, opts);   // σ 倍率・N2 低温物性・kgas モデルを反映
     const double Td = (double)T[ic];
     const double Pd = (double)P[ic];
 
@@ -75,7 +74,8 @@ __global__ void condensation_source_d(
     const double cvg = (cpg - Rg > 1.0e-3) ? (cpg - Rg) : 1.0e-3;
 
     double g = (double)rog[ic]/rod; if (g < 0.0) g = 0.0;
-    const double Yw = (carrier && roY_w) ? (double)roY_w[ic]/rod : 1.0;
+    // carrier の凝縮種質量分率: TP は roY_w (輸送), CPG carrier (空気の N2 選択凝縮) は config 定数 opts.Yw
+    const double Yw = (carrier && roY_w) ? (double)roY_w[ic]/rod : ((carrier && opts.Yw > 0.0) ? opts.Yw : 1.0);
     const double gmax = carrier ? Yw : 0.99;
     if (g > gmax) g = (gmax > 0.0 ? gmax : 0.0);
     double q0 = (double)roQ0[ic]; if (q0 < 0.0) q0 = 0.0;
@@ -271,8 +271,9 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
 {
     if (!condensationEnabled(cfg)) return;
 
-    const int carrier = (cfg.condGasSpecies >= 0) ? 1 : 0;
-    const CondSpeciesProps cprops = (cfg.condModel == 1) ? condProps_H2O() : condProps_N2();
+    const int carrier = (cfg.condGasSpecies >= 0 || cfg.condVaporMassFraction > 0.0) ? 1 : 0;   // TP carrier / CPG carrier (空気)
+    const CondPropOpts opts = cond_prop_opts(cfg);
+    const CondSpeciesProps cprops = condProps_make(cfg.condModel, opts);
     const double M  = cprops.M;
     const double Rw = cprops.R;
     const double Jmax   = 1.0e35;
@@ -291,7 +292,7 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
         condensation_source_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells,
             cfg.condModel, carrier, Rw, M,
-            cfg.condKantrowitz, cfg.condKantrowitzGammaMode, cfg.condSigmaScale,
+            cfg.condKantrowitz, cfg.condKantrowitzGammaMode, opts,
             (cfg.thermalMethod == 2) ? thermo_species_device_ptr() : nullptr, cfg.nSpecies,
             (cfg.thermalMethod == 2) ? species_roY_device_ptr() : nullptr, cfg.condGasSpecies,
             cfg.condGrowthModel, cfg.condGyarmathyC, cfg.condTwoTemp,

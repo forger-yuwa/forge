@@ -61,11 +61,12 @@ __global__ void cond_realizability_clamp_d(
     flow_float* ro, flow_float* roY_w,   // roY_w: carrier の総水保存量 (pure では nullptr)
     flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
     int evap, int condModel, double Rw, double rmin, double g_rm,
-    flow_float* T, flow_float* P)
+    flow_float* T, flow_float* P, CondPropOpts opts)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
-    const flow_float gmax = (roY_w != nullptr) ? roY_w[ic] : (flow_float)0.99*ro[ic];
+    // 実現可能性 g<=Y_w: TP carrier は roY_w (輸送), CPG carrier (空気) は定数 opts.Yw, pure は 0.99
+    const flow_float gmax = (roY_w != nullptr) ? roY_w[ic] : ((opts.Yw > 0.0) ? (flow_float)opts.Yw*ro[ic] : (flow_float)0.99*ro[ic]);
     flow_float r = rog[ic];
     if (r < (flow_float)0.0) r = (flow_float)0.0;
     if (r > gmax)            r = gmax;
@@ -84,7 +85,7 @@ __global__ void cond_realizability_clamp_d(
     const bool dust = (r <= (flow_float)0.0) &&
         (roQ0[ic] > (flow_float)0.0 || roQ1[ic] > (flow_float)0.0 || roQ2[ic] > (flow_float)0.0);
     if (r <= (flow_float)0.0 && !dust) return;
-    const CondSpeciesProps cprops = (condModel == 1) ? condProps_H2O() : condProps_N2();
+    const CondSpeciesProps cprops = condProps_make(condModel, opts);
     const double Td = (double)T[ic];
     double pv;
     if (roY_w != nullptr) {
@@ -176,13 +177,14 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
     for (int s = 0; s < var.nCondSpeciesRegistered; ++s) {
         const std::string i = std::to_string(s);
         flow_float* roY_w = carrier ? var.c_d["roY" + std::to_string(cfg.condGasSpecies)] : nullptr;
-        const CondSpeciesProps cprops = (cfg.condModel == 1) ? condProps_H2O() : condProps_N2();
+        const CondPropOpts opts = cond_prop_opts(cfg);
+        const CondSpeciesProps cprops = condProps_make(cfg.condModel, opts);
         const double g_rm = 5.0e-7;   // 消滅硬クランプを許す g 上限 (潜熱飛び ΔT=gL/cv ≲ 1.5 K)
         cond_realizability_clamp_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells, var.c_d["ro"], roY_w,
             var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
             cfg.condEvaporation, cfg.condModel, cprops.R, cfg.condEvapRmin, g_rm,
-            var.c_d["T"], var.c_d["P"]);
+            var.c_d["T"], var.c_d["P"], opts);
     }
 
     for (const auto& consName : var.condMomentConsNames) {

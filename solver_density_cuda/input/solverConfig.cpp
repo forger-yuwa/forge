@@ -691,6 +691,11 @@ void solverConfig::read(std::string fname)
                 throw std::runtime_error("Key 'condKantrowitz' in 'condensation' must be 0 (isothermal), 1 (Kantrowitz pure-vapor), 2 or 3 (Feder carrier form).");
             this->condSigmaScale = getOptionalValidatedValue<double>(cond, "condSigmaScale", 1.0, "condensation");
             if (!(this->condSigmaScale > 0.0)) throw std::runtime_error("Key 'condSigmaScale' in 'condensation' must be > 0.");
+            this->condVaporMassFraction = getOptionalValidatedValue<double>(cond, "condVaporMassFraction", -1.0, "condensation");
+            this->condN2LatentLowT = getOptionalValidatedValue<int>(cond, "condN2LatentLowT", 1, "condensation");
+            this->condN2PsatLowT   = getOptionalValidatedValue<int>(cond, "condN2PsatLowT", 1, "condensation");
+            this->condN2LiquidCp   = getOptionalValidatedValue<double>(cond, "condN2LiquidCp", 2000.0, "condensation");
+            if (!(this->condN2LiquidCp > 0.0)) throw std::runtime_error("Key 'condN2LiquidCp' in 'condensation' must be > 0 (positive liquid heat capacity).");
             this->condKantrowitzGammaMode = getOptionalValidatedValue<int>(cond, "condKantrowitzGammaMode", 0, "condensation");
             this->condSonicModel = getOptionalValidatedValue<int>(cond, "condSonicModel", -1, "condensation");
             this->condGrowthModel = getOptionalValidatedValue<int>(cond, "condGrowthModel", 0, "condensation");
@@ -703,6 +708,23 @@ void solverConfig::read(std::string fname)
             this->condEqRelax     = getOptionalValidatedValue<double>(cond, "condEqRelax", 1.0, "condensation");
             this->condEqDTmax     = getOptionalValidatedValue<double>(cond, "condEqDTmax", 10.0, "condensation");
             this->condEqDgMax     = getOptionalValidatedValue<double>(cond, "condEqDgMax", 0.05, "condensation");
+            // CPG carrier 形 (空気の N2 選択凝縮) の受付範囲 (plans/active/condensation-air.md §4.1): SLAU × CPG × N2 × 単一種 × 非平衡 × Kantrowitz<=1。
+            if (this->condensation == 1 && this->condVaporMassFraction > 0.0) {
+                if (!(this->condVaporMassFraction <= 1.0)) throw std::runtime_error("condVaporMassFraction must be in (0,1].");
+                if (this->thermalMethod != 0) throw std::runtime_error("condVaporMassFraction (CPG carrier) requires thermalMethod 0 (CPG); TP uses condGasSpecies instead.");
+                if (!(this->solver == "SLAU" || this->solver == "SLAU2")) throw std::runtime_error("condVaporMassFraction (CPG carrier) is implemented for solver SLAU/SLAU2 only (Roe/KEEP keep the pure two-phase enthalpy).");
+                if (this->condModel != 0) throw std::runtime_error("condVaporMassFraction (CPG carrier) supports condModel 0 (N2) only.");
+                if (this->nCondSpecies != 1) throw std::runtime_error("condVaporMassFraction (CPG carrier) supports nCondSpecies 1 only.");
+                if (this->condEquilibrium != 0) throw std::runtime_error("condVaporMassFraction (CPG carrier) supports condEquilibrium 0 only.");
+                if (this->condKantrowitz > 1) throw std::runtime_error("condVaporMassFraction (CPG carrier): condKantrowitz 2/3 (Feder carrier form) is not available in CPG (no species DB for the O2 collision term); use 0 or 1.");
+                if (this->condGasSpecies >= 0) throw std::runtime_error("condVaporMassFraction and condGasSpecies are exclusive.");
+                const double Rair = (this->gamma - 1.0)*this->cp/this->gamma, RN2 = 8.314462618/0.0280134;
+                if (!(Rair - this->condVaporMassFraction*RN2 > 0.0)) throw std::runtime_error("condVaporMassFraction: R_air - Y_w R_N2 must stay positive.");
+            }
+            // N2 低温物性の旧設定 (診断) は SLAU 経路でのみ面エンタルピーに反映される (Roe/HLLE は既定物性)。
+            if (this->condensation == 1 && (this->condN2LatentLowT == 0 || this->condN2PsatLowT == 0 || this->condN2LiquidCp != 2000.0)
+                && !(this->solver == "SLAU" || this->solver == "SLAU2"))
+                throw std::runtime_error("condN2LatentLowT/condN2PsatLowT/condN2LiquidCp non-default values are honoured by the SLAU flux only.");
         }
         if (this->condensation != 0 && this->condensation != 1) {
             throw std::runtime_error("Key 'condensation' in 'condensation' must be 0 or 1.");

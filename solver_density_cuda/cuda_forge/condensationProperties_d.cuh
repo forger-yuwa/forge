@@ -38,6 +38,21 @@ struct CondSpeciesProps {
     double Tc;      // 臨界温度 [K]
     double M;       // 分子量 [kg/mol]
     double sigmaScale; // 表面張力の倍率 (感度試験専用 condSigmaScale, 既定 1.0; 核生成・Kelvin・蒸発に一貫)
+    // N2 低温物性の切替 (plans/active/condensation-air.md §4.2)。H2O では未使用。
+    int    latentLowT;   // 1: 70 K 未満の潜熱を c_l 一定の線形外挿 (既定), 0: 旧 4 次多項式 (60 K 未満で L'>0)
+    int    psatLowT;     // 1: 50 K 未満の飽和圧 C–C 外挿を新 L(T) の積分で再構成 (既定), 0: 旧 (L_poly(50) 一定の C–C; 診断用)
+    double liquidCp;     // 液 N2 の比熱 c_l [J/(kg K)] (線形外挿の傾き c_p,v − c_l に使う; 既定 2000)
+    int    gasKgasModel; // 成長則の気相熱伝導率: 0=N2 (n2_kgas), 1=空気 Sutherland (CPG carrier 空気)
+};
+
+// kernel に値渡しする物性オプション (config 由来)。condProps_make() で CondSpeciesProps に反映する。
+struct CondPropOpts {
+    int    latentLowT;
+    int    psatLowT;
+    double liquidCp;
+    int    gasKgasModel;
+    double sigmaScale;
+    double Yw;           // CPG carrier 形の凝縮種質量分率 (condVaporMassFraction; <=0 で pure)
 };
 
 // N2 既定パラメータ。R=296.8, γ=1.4 → cv=R/(γ-1)=742, cp=γcv=1038.8。
@@ -52,6 +67,7 @@ __host__ __device__ inline CondSpeciesProps condProps_N2()
     s.Tc = 126.192;
     s.M  = 0.0280134;
     s.sigmaScale = 1.0;
+    s.latentLowT = 1; s.psatLowT = 1; s.liquidCp = 2000.0; s.gasKgasModel = 0;
     return s;
 }
 
@@ -66,13 +82,25 @@ __host__ __device__ inline double cond_clamp_Tprop(double T, double Tc)
 }
 
 // --- N2 潜熱 (蒸発) L(T) [J/kg] --- 式26 (4次多項式 MJ/kg)。psat の C-C 外挿でも使うため前方に置く。
-__host__ __device__ inline double n2_latent(double T)
+// 【注意】この多項式は 60 K 未満で dL/dT>0 (液比熱 c_l=c_p,v−L' が負) となり熱力学的に不整合 (2026-09-10/12 codex 指摘)。
+//   低温整合版は n2_latent_ex(T, lowT=1, c_l) (70 K 未満を c_l 一定の線形外挿, C0 接続)。本関数 (旧) は A/B 用に残す。
+__host__ __device__ inline double n2_latent_poly(double T)
 {
     const double Tcl = cond_clamp_Tprop(T, 126.192);
     const double p1 = -2.137e-8, p2 = 7.18e-6, p3 = -9.142e-4, p4 = 0.05069, p5 = -0.809;
     const double L = p1*Tcl*Tcl*Tcl*Tcl + p2*Tcl*Tcl*Tcl + p3*Tcl*Tcl + p4*Tcl + p5; // MJ/kg
     const double Lj = L * 1.0e6;
     return (Lj > 0.0) ? Lj : 0.0;
+}
+__host__ __device__ inline double n2_latent(double T) { return n2_latent_poly(T); }   // 旧 (A/B 用)
+
+#define COND_N2_LATENT_TA 70.0   // 線形外挿の接続温度 [K] (C0 接続; L'(70) は多項式 −1072 vs 線形 c_p,v−c_l で不連続)
+#define COND_N2_CPV 1038.8       // N2 蒸気 c_p [J/(kg K)] (CPG)
+// 低温整合版: T>=Ta は多項式、T<Ta は L(T)=L(Ta)+(c_p,v−c_l)(T−Ta) (c_l>0 なら L'<0 が保証される)。lowT=0 で旧多項式。
+__host__ __device__ inline double n2_latent_ex(double T, int lowT, double cl)
+{
+    if (!lowT || T >= COND_N2_LATENT_TA) return n2_latent_poly(T);
+    return n2_latent_poly(COND_N2_LATENT_TA) + (COND_N2_CPV - cl)*(T - COND_N2_LATENT_TA);
 }
 
 // Jacobsen 液飽和圧 (式22, atm→Pa)。有効域内の生評価。
@@ -95,21 +123,30 @@ __host__ __device__ inline double n2_psat_jacobsen(double Tcl)
 // 45K クランプ (cond_clamp_Tprop) では psat を凍結し過飽和 S=p/psat を潰してしまい核生成が起きないため、
 // psat だけは C-C 外挿を使う (σ,ρ_l,L は緩変化なのでクランプのまま)。L_ref=L(T_sw)。
 #define COND_PSAT_TSWITCH 50.0
-__host__ __device__ inline double n2_psat(double T)
+// psatLowT=1 (既定): 50 K 未満の C–C 外挿を低温整合潜熱 L(T)=L_a+c'(T−T_a) の積分 (閉形式) で再構成:
+//   ln(p/p_s) = (1/R)[(L_a − c' T_a)(1/T_s − 1/T) + c' ln(T/T_s)],  c' = c_p,v − c_l。接続 (50 K) は C0 (微分は不連続)。
+//   38 K で旧 (L_poly(50)=204 kJ/kg 一定の C–C) の 0.518 倍 (plans/active/condensation-air.md §4.2)。
+// psatLowT=0: 旧 C–C (診断「潜熱だけ新」の A/B 用)。latentLowT=0 のときは閉形式の L も多項式側では定義できないので旧 C–C に落とす。
+__host__ __device__ inline double n2_psat_ex(double T, int psatLowT, int latentLowT, double cl)
 {
     const double Tc = 126.192;
     if (T >= COND_PSAT_TSWITCH) {
         double Tcl = (T < Tc - 0.5) ? T : (Tc - 0.5);  // 臨界直下のみ上クランプ
         return n2_psat_jacobsen(Tcl);
     }
-    // C-C 外挿 (T < T_switch)
     const double Tsw  = COND_PSAT_TSWITCH;
     const double psw  = n2_psat_jacobsen(Tsw);
-    const double Lref = n2_latent(Tsw);   // ~2.04e5 J/kg
     const double Rv   = 296.8;
     double Tlo = (T > 5.0) ? T : 5.0;     // 0 割回避
+    if (psatLowT && latentLowT) {
+        const double Ta = COND_N2_LATENT_TA, La = n2_latent_poly(Ta), cpr = COND_N2_CPV - cl;
+        const double lnr = ((La - cpr*Ta)*(1.0/Tsw - 1.0/Tlo) + cpr*log(Tlo/Tsw))/Rv;
+        return psw * exp(lnr);
+    }
+    const double Lref = n2_latent_poly(Tsw);   // 旧: ~2.04e5 J/kg 一定
     return psw * exp(-(Lref/Rv)*(1.0/Tlo - 1.0/Tsw));
 }
+__host__ __device__ inline double n2_psat(double T) { return n2_psat_ex(T, 0, 0, 2000.0); }   // 旧 (A/B 用)
 
 // --- N2 凝縮相 (液) 密度 ρ_l(T) [kg/m³] --- Nowak (式24)。
 __host__ __device__ inline double n2_rho_cond(double T)
@@ -241,7 +278,19 @@ __host__ __device__ inline double h2o_sigma(double T)
 // --- 種ディスパッチ (model で N2 / H2O を切替) ---
 __host__ __device__ inline double cond_psat(const CondSpeciesProps& s, double T)
 {
-    return (s.model == COND_MODEL_H2O) ? h2o_psat(T) : n2_psat(T);
+    return (s.model == COND_MODEL_H2O) ? h2o_psat(T) : n2_psat_ex(T, s.psatLowT, s.latentLowT, s.liquidCp);
+}
+// 空気 (CPG carrier) の気相熱伝導率 [W/(m K)]: Sutherland μ (μ0=1.716e-5 @273 K, C=111) × c_p/Pr (c_p 1008.7, Pr 0.72)。低温外挿 (近似)。
+__host__ __device__ inline double air_kgas(double T)
+{
+    const double mu0 = 1.716e-5, T0 = 273.0, C = 111.0, cp = 1008.7, Pr = 0.72;
+    double Tc = (T > 5.0) ? T : 5.0;
+    return mu0 * (T0 + C)/(Tc + C) * pow(Tc/T0, 1.5) * cp/Pr;
+}
+// 成長則・蒸発・二温度が使う気相 (キャリア) 熱伝導率のディスパッチ (gasKgasModel: 0=N2, 1=空気)。
+__host__ __device__ inline double cond_kgas(const CondSpeciesProps& s, double T)
+{
+    return (s.gasKgasModel == 1) ? air_kgas(T) : n2_kgas(T);
 }
 __host__ __device__ inline double cond_rho_cond(const CondSpeciesProps& s, double T)
 {
@@ -249,7 +298,7 @@ __host__ __device__ inline double cond_rho_cond(const CondSpeciesProps& s, doubl
 }
 __host__ __device__ inline double cond_latent(const CondSpeciesProps& s, double T)
 {
-    return (s.model == COND_MODEL_H2O) ? h2o_latent(T) : n2_latent(T);
+    return (s.model == COND_MODEL_H2O) ? h2o_latent(T) : n2_latent_ex(T, s.latentLowT, s.liquidCp);
 }
 __host__ __device__ inline double cond_sigma(const CondSpeciesProps& s, double T)
 {
@@ -297,5 +346,14 @@ __host__ __device__ inline CondSpeciesProps condProps_H2O()
     s.Tc = 647.096;
     s.M  = 0.0180153;
     s.sigmaScale = 1.0;
+    s.latentLowT = 1; s.psatLowT = 1; s.liquidCp = 2000.0; s.gasKgasModel = 0;   // H2O では未使用
+    return s;
+}
+
+// config 由来のオプションを反映した凝縮種物性 (kernel 内で構築する場合はこれを使う)。
+__host__ __device__ inline CondSpeciesProps condProps_make(int model, const CondPropOpts& o)
+{
+    CondSpeciesProps s = (model == COND_MODEL_H2O) ? condProps_H2O() : condProps_N2();
+    s.sigmaScale = o.sigmaScale; s.latentLowT = o.latentLowT; s.psatLowT = o.psatLowT; s.liquidCp = o.liquidCp; s.gasKgasModel = o.gasKgasModel;
     return s;
 }

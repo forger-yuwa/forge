@@ -6,6 +6,7 @@
 #include "flowFormat.hpp"
 #include "mesh/mesh.hpp"
 #include "input/solverConfig.hpp"
+#include "cuda_forge/condensationProperties_d.cuh"   // CondPropOpts / condProps_make
 #include "variables.hpp"
 
 // 非平衡凝縮 (Phase 1): 凝縮種ごとの 4 モーメント (ρg,ρQ2,ρQ1,ρQ0) を、汎用スカラ輸送コア
@@ -19,6 +20,16 @@ void condensationInit_d(solverConfig& cfg, variables& var);
 
 // 二相 EOS へ渡す device rog 配列ポインタ。凝縮無効時は nullptr。
 flow_float** cond_rog_device_ptr();
+
+// config → kernel 値渡しの凝縮物性オプション (plans/active/condensation-air.md, condensation-kantrowitz-carrier.md)
+inline CondPropOpts cond_prop_opts(const solverConfig& cfg)
+{
+    CondPropOpts o;
+    o.latentLowT = cfg.condN2LatentLowT; o.psatLowT = cfg.condN2PsatLowT; o.liquidCp = cfg.condN2LiquidCp;
+    o.gasKgasModel = (cfg.condVaporMassFraction > 0.0) ? 1 : 0;   // CPG carrier (空気) は空気 Sutherland
+    o.sigmaScale = cfg.condSigmaScale; o.Yw = cfg.condVaporMassFraction;
+    return o;
+}
 int          cond_num_species();
 
 // 原始量 φ = ρφ/ρ を全セル (ghost 含む) について更新する。スカラ移流の上流値に使う。

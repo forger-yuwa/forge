@@ -115,10 +115,11 @@ $$
   診断 `condTheta_<s>` (θ) と `condLim_<s>` (ソース律速係数) を出力する。
 
   **Wysłouzil 2D (case/16 run_0350–0355, node SST, 48000 step, 2026-09-12)**: onset [中心線 g=10⁻³, mm] は 等温 12.3 / mode 3 14.3 / mode 2 14.8 /
-  mode 1 22.5 で局所 θ の序列どおり。壁 p/p₀ @21 mm の実験偏差は +21.6 / +17.5 / +15.0 / −4.5 %。**carrier 形は等温側に寄り、実験より 8 mm 早く onset する**。
-  σ の一定倍率 ±3 % (mode 3) で onset は ∓2.3 mm。解釈: キャリア冷却を入れると J は等温 CNT に近づき、水の CNT が低温で J を桁で過大評価する既知の傾向
-  (Wölk & Strey 2001) が露出する。純蒸気 Kantrowitz (mode 1) の実験との一致は、この過大を非等温抑制が偶然補償していたと見るのが整合的。
-  物理モデルは mode 3 + 別途の J 較正が筋で、mode 1 は経験的較正として残す (既定は 0 のまま)。
+  mode 1 22.5 で局所 θ の序列どおり。壁 p/p₀ @21 mm の実験偏差は +21.6 / +17.5 / +15.0 / −4.5 %。**carrier 形は等温側に寄り、計算上の onset が mode 1 より
+  8.2 mm 上流に移る (モデル間差) 結果、21 mm の壁圧偏差が増える**。σ の一定倍率 ±3 % (mode 3) で onset は −2.2 (未収束 run の過渡参考値) / +2.5 mm。
+  原因 (核生成 J か成長 dr/dt か) は未同定: Hertz–Knudsen の α=1 は自由分子流束の上限で、J 過大と dr/dt 過大は onset 位置では縦退する。
+  なお「水の CNT は低温で J を過大評価する」という説明は誤りで撤回 (Wölk & Strey 2001 の補正 $\exp(-27.56+6500/T)$ は 230 K で ×2、214 K で ×17 と
+  低温で CNT を**増幅**する側; codex 指摘 2026-09-12)。mode 1 は旧結果再現用、mode 3 は物理モデル (較正は別問題)、既定は 0 のまま。
 
 #### 表面張力の妥当性 (過冷却・小半径)
 
@@ -489,12 +490,14 @@ $n_1=1.48654237,\ n_2=-0.280476066,\ n_3=0.0894143085,\ n_4=-0.119879866$。
 
 N2 は従来どおり Lin 2014 のフィット (`n2_latent`)。
 
-#### 潜熱 $L(T)$ の低温整合 (`condN2LatentLowT`, 計画 [condensation-air](../plans/active/condensation-air.md))
+#### 潜熱 $L(T)$ と飽和圧の低温整合 (`condN2LatentLowT`, 計画 [condensation-air](../plans/active/condensation-air.md))
 
 式 26 の 4 次多項式は 60 K 未満で $dL/dT>0$ となり液の比熱 $c_l=c_{p,v}-L'$ が負 (45 K で −3100 J/kg/K) になる (熱力学的に不整合;
-二相 frozen 音速の $c_{v,2\phi}$ が負になる原因、2026-09-10 codex 指摘)。`condN2LatentLowT: 1` (既定) では 70 K 未満を
-$L(T)=L(70)+(c_{p,v}-c_l)(T-70)$、$c_l$=2000 J/kg/K (液 N2 63–77 K の実測 $c_{p,l}$≈2.0 kJ/kg/K) の線形外挿に置き換える
-(45 K で 233 kJ/kg, 旧 188)。旧多項式は `condN2LatentLowT: 0` (A/B 用)。
+二相 frozen 音速の $c_{v,2\phi}$ が負になる原因、2026-09-10 codex 指摘)。`condN2LatentLowT: 1` (既定, 計画中) では 70 K 未満を
+$L(T)=L(70)+(c_{p,v}-c_l)(T-70)$、$c_l$=2000 J/kg/K (液 N2 63–77 K の実測 $c_{p,l}$≈2.0 kJ/kg/K; 30–60 K は実測が無く「正の熱容量を保証する閉包」)
+の線形外挿に置き換える (45 K で 233 kJ/kg, 旧 188)。**飽和圧の 50 K 未満 Clausius–Clapeyron 外挿も同じ $L(T)$ の積分で再構成する**
+(旧は $L_{old}(50)$=204 kJ/kg 一定; 潜熱だけ変えると 38 K で $p_{sat}$ が 0.59 倍動くので連動させる, codex 指摘 2026-09-12)。
+旧一式 (潜熱・飽和圧とも) は `condN2LatentLowT: 0` (A/B 用)。
 
 #### 表面張力 $\sigma(T)$
 
@@ -626,21 +629,31 @@ $r_{\rm nuc}$ を使う** (ヤコビアンだけガード無しだと亜臨界�
 (HK/Gyar) が過早・オーバーシュート (0.44 vs exp 0.36)、Kantrowitz 有り (Kw+HK/Kw+Gyar) が onset を遅らせ実験に最良**
 (Fluent UDF で Kw+HK が最適だった知見と一致)。残課題: x≈3cm のピークが実験よりやや高い (onset レート微調整)。
 
-#### 空気擬似種 (`condModel: 2`, 計画 [condensation-air](../plans/active/condensation-air.md))
+#### 空気: CPG carrier 形 (N2 選択凝縮 + O2 キャリア; `condVaporMassFraction`, 計画 [condensation-air](../plans/active/condensation-air.md))
 
 極超音速ノズルで試験ガスの空気そのものが凝縮する解析用。Daum & Gyarmathy (1968) の「低圧域では空気は純 N2 として振る舞い N2 の自発核生成が
-onset を決める」に基づき、**核生成 (CNT×Iland) と成長 (Goodheart) は N2 の式**を使い、熱力学量だけ空気にする:
+onset を決める」に従い、**気相は空気 (CPG)、凝縮するのは N2 だけ、O2 (+Ar) は凝縮しないキャリア**とする。TP の H2O–N2 carrier 経路と同じ定義を
+CPG に載せる (凝縮種の質量分率 $Y_w=Y_{N_2}$ は config 定数 `condVaporMassFraction`):
 
-- 気体: $M$=28.9647 g/mol, $R$=287.05, $c_p$=1004.6 (γ 1.4)。
-- 飽和線: O2/N2 理想溶液の**露点線** (Hansen & Nothwang 1952 式 A1–A2) $p_{dew}(T)=\big[y_{N_2}/p^{sat}_{N_2}(T)+y_{O_2}/p^{sat}_{O_2}(T)\big]^{-1}$
-  ($y_{N_2}$=0.79, $y_{O_2}$=0.21)、N2 は Jacobsen (+C–C 外挿)、O2 は NIST Antoine ($\log_{10}p[\mathrm{bar}]=3.9523-340.024/(T-4.144)$, 54–154 K, 以下 C–C)。
-  空気の飽和線は N2 より ~1 K 高温側。
-- 凝縮相: 液相組成 $x_{O_2}=y_{O_2}p_{dew}/p^{sat}_{O_2}$ で $\rho_l$・σ・$L$ を N2/O2 の混合 (O2: $\rho_l$ 1141 kg/m³ @90.19 K 線形、σ$=\sigma_0(1-T/154.58)^{1.25}$ で
-  13.2 mN/m @90.19 K、$L$=213 kJ/kg @90.19 K + $(c_{p,v}-c_l)(T-90.19)$, $c_l$ 1.7 kJ/kg/K)。
-- 成長則の $k_{gas}$ は空気 Sutherland ($\mu_0$ 1.716e-5 @273 K, C 111) × $c_p/\mathrm{Pr}$。
+$$
+p_v=\rho\,(Y_w-g)\,R_{N_2}T,\qquad p=\rho T\,(R_{air}-gR_{N_2}),\qquad e=(c_{v,air}+gR_{N_2})\,T-g\,L_{N_2}(T),\qquad 0\le g\le Y_w
+$$
 
-検証は case/34 Arthur ノズルの空気版で onset $(p,T)$ を Daum & Gyarmathy の最小 onset 曲線
-([notes/investigations/condensation-carrier-kantrowitz-air-survey.md](../notes/investigations/condensation-carrier-kantrowitz-air-survey.md) §3.2) と比較する。
+- $g$ は**総混合物に対する液 N2 の質量分率**で、EOS・核生成 ($R$, $M$, $\rho_v$ は N2; CNT×Iland)・成長 (Goodheart, $k_{gas}$ は空気 Sutherland)・蒸発・枯渇上限・
+  SLAU 面エンタルピー ($h_{2\phi}=c_{p,air}T-gL$)・実現可能性 ($g\le Y_w$) の全てで同じ定義を使う。pure ($Y_w=1$, $R_w=R$) は既存 pure 形に一致。
+- 空気の定数は二成分 N2/O2 = 0.79/0.21 mol から: $M$=28.850 g/mol, $R_{air}$=288.19, $c_{p,air}$=1008.7 (γ 1.4), $Y_{N_2}$=0.7671。
+- 空気は CPG のまま (`thermalMethod 0`): NASA-9 は 200 K 未満を線形外挿し温度反転の下限 50 K で Arthur の 27 K を表現できない。CPG pure/carrier の音速は
+  旧式 (全気相 $\sqrt{\gamma p/\rho}$) のまま (二相 frozen 音速の CPG 適用は一般 EOS 固有系への切替と一括で後続)。
+- O2/N2 理想溶液の露点線 (O2 濃厚な最初の液滴; Hansen & Nothwang 1952) は Python で組むと 1 atm の露点 82.2 K だが N2 飽和線より 4.5 K 高温側で、
+  Daum & Gyarmathy の onset データ (空気 ≈ N2) と合わない → 混合液モデルは後続。
+- `slip` 境界の ghost は内部の熱力学状態 ($T$, $c$, $\rho e$) を保持する (旧 $T=p/(\rho R)$ 再構成は二相と不整合)。
+
+検証 (2026-09-13, case/34 run_0014–0026, cell/node): onset $(p,T)$ を Daum & Gyarmathy の **膨張率 $\dot P$ を揃えた理論 onset 線** (Grossir 2014 Fig. 4b,
+$\dot P$=20000 /s: 1 kPa で 38.5 K; `case/34.arthur_n2_nozzle/daum_gyarmathy_theory_onset_Pdot20000_n2.csv`) と比較。N2 旧物性 678 Pa / 37.85 K (+1.0 K)、
+**N2 新物性 800 Pa / 39.67 K (+2.1 K)、空気 CPG carrier 750 Pa / 38.94 K (+1.7 K)** — いずれも ±3 K 以内で、空気は N2 より 0.7 K 低温 ($S=y_{N_2}p/p_{sat}$)。
+node/cell の onset は 0.1 K 以内で一致。Arthur 実験の壁 cond/dry (3/4/5 in: 1.133/1.250/1.500) に対しては N2 新 +9.6/+9.7/−1.6 %、空気 +7.1/+8.1/−3.0 % で、
+3–4 in の過大は物性修正の前後で同程度 (レート側の較正課題)。実装: `condProps_make`/`CondPropOpts`, `n2_latent_ex`/`n2_psat_ex`, `cond_T_from_e_cpg` (括弧付き),
+SLAU CPG 二相の面状態一貫化, `slip_d` の状態保持。単体 `tests/unit/test_cond_air.cpp`。
 
 #### モデル切替 (config フラグ)
 

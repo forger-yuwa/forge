@@ -66,29 +66,45 @@ __host__ __device__ inline double cond_T_from_e_carrier(
 //   e = (1-g)e_v + g e_l = (c_v + g R_v) T - g L(T)   (e_v=c_v T)
 //   ⇒ T = (e_in + g L(T))/(c_v + g R_v)  (= Eq.18, Cv0=Cvv=c_v)
 // **L の温度依存は入れる** (n2_latent(T))。g=0 で T=e_in/cv (従来 CPG と一致)。cv=cp/γ, R=(γ-1)cv。
+// 括弧付き Newton + 二分法退避 (plans/active/condensation-air.md §4.1, codex 2026-09-12 M2)。
+//   旧 30 回 Newton は物性クランプ (45 K 床 / 臨界直下) をまたいで往復すると未収束のまま T を返し (g=0.75, T=122 K で 99 K, e −28 kJ/kg)、
+//   呼び出し側がその T で roe を上書きして保存量を壊した。G(T)=aT−gL(T)−e_in は L'<0 (整合物性) なら単調増なので [T_lo,T_hi] で括弧を作り、
+//   Newton 反復が括弧外に出たら二分法。成功条件 |G|<=1e-9|e_in|+0.05 J/kg を *ok に返す (失敗時は呼び出し側で保存量を上書きしない)。
+//   R は凝縮種の気体定数 (pure: 気相 R, CPG carrier: R_w)。
 __host__ __device__ inline double cond_T_from_e_cpg(
     double e_in, double g_tot, double cv, double R, double T_guess,
-    const CondSpeciesProps& cprops)
+    const CondSpeciesProps& cprops, bool* ok = nullptr)
 {
     const double a = cv + g_tot*R;   // 実効熱容量 (T に対し一定)
+    const double tol = 1.0e-9*fabs(e_in) + 0.05;   // [J/kg] (Newton は 2 次収束なので厳しくしてもコストは増えない)
+    double lo = 1.0, hi = 6000.0;
+    double Glo = a*lo - g_tot*cond_latent(cprops, lo) - e_in;
+    double Ghi = a*hi - g_tot*cond_latent(cprops, hi) - e_in;
     double T = T_guess;
-    if (!(T > 1.0)) T = 1.0;
+    if (!(T > lo)) T = lo;
+    if (T > hi) T = hi;
+    bool bracketed = (Glo < 0.0 && Ghi > 0.0);
+    double G = 0.0;
     #pragma unroll 1
-    for (int it = 0; it < 30; ++it) {
+    for (int it = 0; it < 80; ++it) {
         const double L  = cond_latent(cprops, T);
+        G = a*T - g_tot*L - e_in;
+        if (fabs(G) <= tol) { if (ok) *ok = true; return T; }
+        if (bracketed) { if (G < 0.0) lo = T; else hi = T; }
         const double dL = (cond_latent(cprops, T + 0.1) - cond_latent(cprops, T - 0.1)) / 0.2;
-        const double G  = a*T - g_tot*L - e_in;
         const double Gp = a - g_tot*dL;
-        const double Gpf = (Gp > 1.0e-2*a) ? Gp : 1.0e-2*a;
-        double dT = G / Gpf;
-        if (dT >  0.5*T) dT =  0.5*T;
-        if (dT < -0.5*T) dT = -0.5*T;
-        T -= dT;
-        if (T < 1.0)    T = 1.0;
-        if (T > 6000.0) T = 6000.0;
-        if (dT < 0.0) dT = -dT;
-        if (dT < 1.0e-3 + 1.0e-6*T) break;
+        double Tn = (Gp > 1.0e-2*a) ? (T - G/Gp) : T;
+        if (bracketed) {
+            if (!(Tn > lo && Tn < hi)) Tn = 0.5*(lo + hi);          // 括弧外 → 二分法
+            if (hi - lo < 1.0e-9*hi) { T = 0.5*(lo + hi); break; }
+        } else {
+            double dT = T - Tn; if (dT > 0.5*T) dT = 0.5*T; if (dT < -0.5*T) dT = -0.5*T; Tn = T - dT;   // 旧 Newton の保護
+            if (Tn < 1.0) Tn = 1.0; if (Tn > 6000.0) Tn = 6000.0;
+        }
+        T = Tn;
     }
+    G = a*T - g_tot*cond_latent(cprops, T) - e_in;
+    if (ok) *ok = (fabs(G) <= 10.0*tol);
     return T;
 }
 
