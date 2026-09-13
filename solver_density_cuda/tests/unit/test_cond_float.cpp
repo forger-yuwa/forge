@@ -10,6 +10,7 @@
 #include <vector>
 #include "cuda_forge/condensationTables_d.cuh"
 #include "cuda_forge/condensationSourceF_d.cuh"
+#include "cuda_forge/condensationEOS_d.cuh"
 #include <cstdlib>
 
 static int g_fail = 0;
@@ -162,6 +163,61 @@ static void test_chain(const char* name, const CondSpeciesProps& s, int carrier,
     snprintf(b, sizeof b, "%s evaporation lambda abs (worst T=%.1f S=%.3g)", name, wjac.T, wjac.S); check(wjac.v <= 5e-4, b, wjac.v, 5e-4);   // S→1 (0.999) の (p_v−p_d) 相殺で相対 2e-3 → λ 絶対 1.4e-4; 半径縮小比の誤差 <5e-4/step
 }
 
+// (3) 一温度二相反転のハイブリッド (float Newton → double 研磨 → 残差判定) vs 厳密 double 参照。N2/H2O carrier (datum 298.15 K)。
+//     許容: |ΔT| ≤ 1e-8·T (研磨後), float 格納 roe の 10 往復ドリフト ≤ 従来 double 反転のドリフト × 1.5 + 1e-7·T, 失敗 (ok=false) 0 件。
+static SpeciesThermo mk(double MW,double sig,double eps,const double lo[9],const double hi[9]){
+    SpeciesThermo s; s.MW=MW; s.sigma_LJ=sig; s.eps_kB=eps; s.Tlo=200.0; s.Tmid=1000.0; s.Thi=6000.0; s.h_datum=0.0; s.invMW=1.0/MW;
+    for(int i=0;i<9;i++){ s.low[i]=lo[i]; s.high[i]=hi[i]; } return s; }
+static SpeciesThermoF toF(const SpeciesThermo& s){
+    SpeciesThermoF f; f.MW=(float)s.MW; f.invMW=(float)(1.0/s.MW); f.R=(float)(THERMO_RU/s.MW);
+    f.sigma_LJ=(float)s.sigma_LJ; f.eps_kB=(float)s.eps_kB; f.Tlo=(float)s.Tlo; f.Tmid=(float)s.Tmid; f.Thi=(float)s.Thi;
+    for(int k=0;k<9;k++){ f.low[k]=(float)s.low[k]; f.high[k]=(float)s.high[k]; } return f; }
+
+static void test_inversion()
+{
+    const double N2lo[9]={2.210371497e+04,-3.818461820e+02,6.082738360e+00,-8.530914410e-03,1.384646189e-05,-9.625793620e-09,2.519705809e-12,7.108460860e+02,-1.076003744e+01};
+    const double N2hi[9]={5.877124060e+05,-2.239249073e+03,6.066949220e+00,-6.139685500e-04,1.491806679e-07,-1.923105485e-11,1.061954386e-15,1.283210415e+04,-1.586640027e+01};
+    const double H2Olo[9]={-3.947960830e+04,5.755731020e+02,9.317826530e-01,7.222712860e-03,-7.342557370e-06,4.955043490e-09,-1.336933246e-12,-3.303974310e+04,1.724205775e+01};
+    const double H2Ohi[9]={1.034972096e+06,-2.412698562e+03,4.646110780e+00,2.291998307e-03,-6.836830480e-07,9.426468930e-11,-4.822380530e-15,-1.384286509e+04,-7.978148510e+00};
+    std::vector<SpeciesThermo> sp = { mk(0.0280134,3.621,97.53,N2lo,N2hi), mk(0.0180153,2.605,572.4,H2Olo,H2Ohi) };
+    for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); s.low[7] += -hr/THERMO_RU; s.high[7] += -hr/THERMO_RU; }
+    std::vector<SpeciesThermoF> spf = { toF(sp[0]), toF(sp[1]) };
+    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o);
+    CondTablesHost ht; cond_tables_build_host(cp, ht); const CondTablesF tb = cond_tables_view_host(ht);
+    const double Rw = cp.R;
+    double wT = 0.0, wDriftH = 0.0, wDriftD = 0.0; int nfail = 0, n = 0;
+    for (double Yw : {0.0113, 0.05, 0.2}) for (double gfrac : {0.001, 0.1, 0.5, 0.99}) for (double T : {150.0, 199.9, 200.1, 220.0, 250.0, 298.15, 350.0, 500.0, 900.0, 1500.0}) {
+        const double g = gfrac*Yw; float Yf[2] = {(float)(1.0 - Yw), (float)Yw}; const double Y[2] = {(double)Yf[0], (double)Yf[1]};
+        // 参照 e_in = e_mix(T) (double)
+        double cpT, hT; thermo_cph_mix(sp.data(), 2, Y, T, &cpT, &hT); const double R = thermo_R_mix(sp.data(), 2, Y);
+        const double e_in = (hT - R*T) + g*(Rw*T - cond_latent(cp, T));
+        for (double Tg : {0.9*T, 1.1*T, 300.0}) {
+            bool ok = true;
+            const double Th = cond_T_from_e_twophase_hybrid(sp.data(), spf.data(), 2, Y, Yf, tb, e_in, g, Rw, 1, cp, Tg, 50.0, 6000.0, &ok);
+            if (!ok) ++nfail;
+            ++n;
+            const double eT = fabs(Th - T)/T; if (eT > wT) wT = eT;
+            if (eT > 1.0e-8 && n <= 400) { static int nprint = 0; if (nprint++ < 8) { double Gp; const double G = cond_twophase_resid(sp.data(), 2, Y, Th, g, Rw, 1, cp, e_in, &Gp);
+                printf("      dbg: T=%.2f Yw=%.4f g=%.2e Tg=%.1f -> Th=%.6f (err %.2e) ok=%d G=%.3e Gp=%.1f tol=%.3e e_in=%.4e\n", T, Yw, g, Tg, Th, eT, (int)ok, G, Gp, 1.0e-9*fabs(e_in)+0.05, e_in); } }
+            // 10 往復ドリフト: roe を float で格納 → 反転 → e_mix(T) を再構成 (double) → float 格納 ... (dependentVariables の roe 再構成相当)
+            double Tc = Th, Td = cond_T_from_e_carrier(sp.data(), 2, Y, e_in, g, Rw, cp, Tg, 50.0, 6000.0);
+            for (int k = 0; k < 10; ++k) {
+                bool ok2 = true;
+                const float ef = (float)cond_twophase_resid(sp.data(), 2, Y, Tc, g, Rw, 1, cp, 0.0);   // e_mix(Tc) を float 格納
+                Tc = cond_T_from_e_twophase_hybrid(sp.data(), spf.data(), 2, Y, Yf, tb, (double)ef, g, Rw, 1, cp, Tc, 50.0, 6000.0, &ok2);
+                const float ed = (float)cond_twophase_resid(sp.data(), 2, Y, Td, g, Rw, 1, cp, 0.0);
+                Td = cond_T_from_e_carrier(sp.data(), 2, Y, (double)ed, g, Rw, cp, Td, 50.0, 6000.0);
+            }
+            const double dH = fabs(Tc - T)/T, dD = fabs(Td - T)/T;
+            if (dH > wDriftH) wDriftH = dH; if (dD > wDriftD) wDriftD = dD;
+        }
+    }
+    char b[160];
+    snprintf(b, sizeof b, "two-phase hybrid |dT|/T (%d cases, %d fail)", n, nfail); check(wT <= 1.0e-8 && nfail == 0, b, wT, 1.0e-8);
+    snprintf(b, sizeof b, "two-phase 10-roundtrip drift hybrid %.2e vs double %.2e (limit 1.5x+1e-7)", wDriftH, wDriftD); check(wDriftH <= 1.5*wDriftD + 1.0e-7, b, wDriftH, 1.5*wDriftD + 1.0e-7);
+}
+
 int main()
 {
     printf("== (1) property tables vs double ==\n");
@@ -174,6 +230,8 @@ int main()
     test_chain("N2 pure", condProps_make(COND_MODEL_N2, o), 0, 39.0, 125.5, 1.0);
     test_chain("N2 (old lowT) pure", condProps_make(COND_MODEL_N2, o2), 0, 39.0, 125.5, 1.0);
     test_chain("H2O carrier", condProps_make(COND_MODEL_H2O, o), 1, 150.0, 400.0, 2.5);
+    printf("== (3) two-phase hybrid inversion ==\n");
+    test_inversion();
     printf("%s (%d failures)\n", g_fail ? "FAILED" : "ALL PASS", g_fail);
     return g_fail ? 1 : 0;
 }

@@ -389,14 +389,15 @@ __host__ __device__ inline double cond_T_from_e_twophase_hybrid(
     double e_in, double g, double Rw, int carrier, const CondSpeciesProps& cprops,
     double T_guess, double T_min, double T_max, bool* ok)
 {
-    const double tol = 1.0e-9*fabs(e_in) + 0.05;   // [J/kg]
+    const double tol = 1.0e-9*fabs(e_in) + 0.05;   // 成功判定 [J/kg] (CPG 経路 cond_T_from_e_cpg と同じ)
+    const double tolP = 1.0e-9*fabs(e_in) + 1.0e-3; // 研磨の停止 [J/kg] (~1e-6 K; float 推定 [~0.05 J/kg] のまま返さず最低 1 段は double で研磨して 1e-8·T を出す)
     double T = (double)cond_T_from_e_twophase_f(spf, nSp, Yf, tb, (float)e_in, (float)g, (float)Rw, carrier,
                                                 (float)T_guess, (float)T_min, (float)T_max, 12);
     #pragma unroll 1
     for (int k = 0; k < 3; ++k) {
         double Gp;
         const double G = cond_twophase_resid(sp, nSp, Y, T, g, Rw, carrier, cprops, e_in, &Gp);
-        if (isfinite(G) && fabs(G) <= tol) { *ok = true; return T; }
+        if (isfinite(G) && fabs(G) <= tolP) { *ok = true; return T; }
         const double cvfl = 1.0e-2*(Gp > 0.0 ? Gp : 1.0);
         double dT = G/((Gp > cvfl) ? Gp : cvfl);
         if (dT >  0.5*T) dT =  0.5*T;
