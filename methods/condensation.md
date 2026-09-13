@@ -871,7 +871,7 @@ SLAU の二相面エンタルピー補正の**演算**は double で書かれて
   (codex plan レビュー 2026-09-13 M1)。一様格子 (N2: $T_0$=20 K, $h$=0.1 K, 上端 125.6 K; H2O: $T_0$=120.15 K, $h$=0.25 K, 上端 1200.15 K) で、
   接続点 (N2 45/50/70 K、H2O 273.15 K) は格子点に置き、区間の両端で**片側**微分を使って区間をまたぐ漏れを無くす。3 次の打切りは
   $h^4 f^{(4)}/384$ で無視でき、誤差は float 丸め (6e-8) が支配 → 単体試験で 0.01 K 刻みの全域で double と比較 (許容: $\ln p_{sat}$ 絶対 2e-6、
-  他は相対 2e-6)。**表範囲外** (N2 20–125.6 K、H2O 120.15–647 K の外) は端クランプせず旧 double 関数へ退避する: ソース kernel は範囲外セルの dry 判定 (S≤1, g=0, Q0=0) を旧 double 飽和圧で行い、dry なら診断だけ書いて退出、それ以外は旧 kernel 本体 (`condensation_source_cell_d`) に丸ごと委譲する (旧式の物性ごとのクランプや μ_gas の上限なしと一致させるため; codex result 1/2 回目 M1)。面潜熱・clamp も範囲外は旧 double 関数。$\ln p_{sat}$ の dry 診断 (S, T_sat) だけは表範囲 (H2O は 1200 K まで) で表を使う。
+  他は相対 2e-6)。**表範囲外** (N2 20–125.6 K、H2O 120.15–647 K の外) は端クランプせず旧 double 関数へ退避する: 範囲判定は現在温度だけでなく src_jac の摂動点 T+0.1 K が表範囲内であることを要求し、ソース kernel は範囲外セルの dry 判定 (S≤1, g=0, Q0=0) を旧 double 飽和圧で行い、dry なら診断だけ書いて退出、それ以外は旧 kernel 本体 (`condensation_source_cell_d`) に丸ごと委譲する (旧式の物性ごとのクランプや μ_gas の上限なしと一致させるため; codex result 1/2 回目 M1)。面潜熱・clamp も範囲外は旧 double 関数。$\ln p_{sat}$ の dry 診断 (S, T_sat) だけは表範囲 (H2O は 1200 K まで) で表を使う。
 - **核生成率は float では対数空間で組み、指数化前に上限を掛ける**: $m=M/N_A\approx3\times10^{-26}$ kg の $m^3$ が float の範囲を割るため
   $$\ln J=\tfrac12\ln\frac{2\sigma}{\pi}-\tfrac32\ln m+2\ln\rho_v-\ln\rho_l-\frac{\Delta G^*}{k_BT}+\ln(\mathrm{corr}),\qquad
     \ln J\leftarrow\min(\ln J,\ln J_{max}),\quad J=e^{\ln J}\ (\ln J<-80\Rightarrow0).$$
