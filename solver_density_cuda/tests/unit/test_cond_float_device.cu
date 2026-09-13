@@ -83,9 +83,10 @@ static void run_case(const char* name, int model, int carrier, const std::vector
         const State& s = st[i];
         // 表範囲外の湿潤セルは float kernel が double 実体へ委譲する → 全出力がビット一致するはず (plan §5.1 #8)
         const bool outTab = !(s.T >= tb.Tmin && s.T <= tb.TwetMax);
-        if (outTab && (s.g > 0.0 || s.q0 > 0.0)) { ++nOutTab;
-            const bool same = (rr[i]==frr[i] && r0[i]==fr0[i] && r1[i]==fr1[i] && r2[i]==fr2[i] && sg[i]==fsg[i] && s1[i]==fs1[i] && dD[i]==fdD[i] && dR[i]==fdR[i] && dL[i]==fdL[i]);
-            if (same) ++nOutTabBit; continue; }
+        if (outTab) { ++nOutTab;   // 範囲外: 湿潤/過飽和は double 委譲、dry は双方 0 → 残差・Jacobian・diag はビット一致 (T_sat 診断は float のまま)
+            const bool same = (rr[i]==frr[i] && r0[i]==fr0[i] && r1[i]==fr1[i] && r2[i]==fr2[i] && sg[i]==fsg[i] && s1[i]==fs1[i] && dD[i]==fdD[i] && dR[i]==fdR[i] && dL[i]==fdL[i] && dS[i]==fdS[i]);
+            if (same) ++nOutTabBit; else printf("    out-of-table mismatch: T=%.1f g=%.1e q0=%.1e  res_g %.3e/%.3e res_Q0 %.3e/%.3e S %.4g/%.4g\n", s.T, s.g, s.q0, rr[i], frr[i], r0[i], fr0[i], dS[i], fdS[i]);
+            continue; }
         const double psat = cond_psat(cp, s.T);
         const double pv = carrier ? s.ro*(s.Yw - s.g)*Rw*s.T : s.P;
         const double S = pv/psat;
@@ -175,6 +176,9 @@ int main()
             if (P > 1.0e6) continue;   // 10 bar 超 (臨界 34 bar に近い) は除外: T_sat の double 診断 (C–C 勾配の Newton) が不正確で比較にならない; case/34 は ≤5 bar
             s2.push_back({T, P, ro, 1.0, g, q0, q0*rb, q0*rb*rb});
         }
+      // codex result-2 M1 の反例: 表範囲外の低温 (15 K)・液相なし・旧式では過飽和 (p_v = 0.9 p_sat(20 K) > p_sat(15 K)) → double 委譲で核生成が出るべき
+      for (double T : {15.0, 18.0}) for (double S20 : {0.9, 0.5}) { const double pv = S20*cond_psat(cp, 20.0); const double ro = pv/(cp.R*T);
+          s2.push_back({T, pv, ro, 1.0, 0.0, 0.0, 0.0, 0.0}); }
       for (double T : {126.0, 130.0, 300.0}) for (double g : {1.0e-6, 1.0e-3}) for (double q0 : {0.0, 1.0e14}) for (double P : {1.0e5, 5.0e5}) {   // 表範囲外 (125.6 K 超) の湿潤セル (T_c 超なので P は固定)
           const double ro = P/((1.0 - g)*cp.R*T);
           s2.push_back({T, P, ro, 1.0, g, q0, q0*1.0e-8, q0*1.0e-16}); }

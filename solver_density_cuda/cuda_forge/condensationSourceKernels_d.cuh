@@ -346,11 +346,19 @@ __global__ void condensation_source_f_d(
         const float gamma_kw = (kwGammaMode == 1) ? (cpg/cvg) : (cpf.cp/cpf.cv);
         diagTheta[ic] = cond_kantrowitz_theta_f(cpf, tb, Td, lnS, kantrowitz, gamma_kw, &car);
     }
+    // 表範囲外 (T < T_min または T > T_wetMax: N2 125.6 K, H2O 647 K) のセル (plan §5.1 #8, codex result M1/2 回目 M1):
+    //   dry 判定は表の端値でなく旧 double 飽和圧で行う (端クランプした p_sat で「未飽和」と誤判定すると、旧式では過飽和のセル
+    //   [例: N2 15 K, p_v=0.9 p_sat(20 K)] の核生成を消してしまう)。double 判定で dry (S<=1, g=0, Q0=0) なら診断だけ書いて退出、
+    //   それ以外は旧 double 実体へ丸ごと委譲 (表の端クランプは旧式の物性ごとのクランプと一致しないため)。
+    const bool inTab = (Td >= tb.Tmin && Td <= tb.TwetMax);
+    if (!inTab) {
+        const double psd = cond_psat(dbl.cprops, (double)Td);
+        const bool dryD = !((double)pv > psd) && g <= 0.0f && q0 <= 1.0e-30f;
+        if (dryD) { diagS[ic] = (float)((double)pv/(psd > 1.0e-300 ? psd : 1.0e-300)); return; }
+    }
     // dry セルの早期退出 (plan §4.2-3): S<=1 (J=0), g=0 (蒸発なし), Q0=0 (成長なし) → ソース・src_jac とも恒等 0。res_* は触らない。
-    if (!(lnS > 0.0f) && g <= 0.0f && q0 <= 1.0e-30f) return;
-    // 表範囲外 (T < T_min または T > T_wetMax: N2 125.6 K, H2O 647 K) の湿潤セルは旧 double 実体へ委譲 (plan §5.1 #8, codex result M1):
-    // 表の端クランプは旧式の物性ごとのクランプと一致しない (μ_gas は上限なし)。診断 (S, T_sat) は上で表から書いたが、double 実体が書き直す。
-    if (!(Td >= tb.Tmin && Td <= tb.TwetMax)) {
+    if (inTab && !(lnS > 0.0f) && g <= 0.0f && q0 <= 1.0e-30f) return;
+    if (!inTab) {
         condensation_source_cell_d(ic, dbl.condModel, carrier, dbl.Rw, dbl.M, kantrowitz, kwGammaMode, dbl.opts, dbl.sp, nSpecies, roYall, condGasSpecies,
             growthModel, dbl.gyarC, dbl.twoTemp, evap, dbl.evapRmin, evapKelvin, dbl.evapLamMin, 0, 1.0, 5.0e-3, 10.0, cp_cpg, gamma_cpg,
             dbl.Jmax, dbl.dg_max, dbl.dT_max, vol, dt_local, T, P, ro, cp_cell, Rmix_cell, roY_w, rog, roQ0, roQ1, roQ2,
