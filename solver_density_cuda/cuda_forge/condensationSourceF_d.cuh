@@ -242,3 +242,13 @@ __host__ __device__ inline float cond_Tsat_f(const CondTablesF& tb, float pv, fl
     }
     return T;
 }
+
+// CPG 二相の面全エンタルピー (float 表版; double は condensationEOS_d.cuh cond_face_h_cpg と同じ規約: R_eff 非正/非有限は乾き面へ退避)。
+__host__ __device__ inline float cond_face_h_cpg_f(const CondTablesF& tb, float cp_gas, float R_gas, float R_w,
+                                                   float g_f, float p_f, float rho_f, float ek)
+{
+    float Reff = R_gas - g_f*R_w;
+    if (!(Reff > 0.0f) || !isfinite(Reff)) { Reff = R_gas; g_f = 0.0f; }
+    const float Tf = p_f/(rho_f*Reff);
+    return cp_gas*Tf - g_f*cond_tab_latent_f(tb, Tf) + ek;
+}

@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include "../condensationTransport_d.cuh"   // cond_prop_opts() (凝縮物性オプション → CondArgs)
 #include "../condensationEOS_d.cuh"         // cond_face_h_cpg (SLAU CPG 二相の面エンタルピー)
+#include "../condensationSourceF_d.cuh"     // cond_face_h_cpg_f / cond_tab_latent_f (float 面潜熱, plan condensation-float-speedup)
 #include "convectiveFlux_d.cuh"
 #include "lowMachPrecond_d.cuh"
 #include "speciesTransport_d.cuh"  // species_roY_device_ptr()
@@ -188,6 +189,8 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
     CondArgs cnd { cfg.cp, cond_g, var.c_d["T"], cfg.condModel, sstEnergyK ? var.c_d["k"] : nullptr, sstEnergyK ? 1 : 0 };
     cnd.cprops = condProps_make(cfg.condModel, cond_prop_opts(cfg));   // σ 倍率・N2 低温物性を面エンタルピーの潜熱にも反映
     cnd.Yw     = cfg.condVaporMassFraction;
+    cnd.tables    = cond_tables_device();
+    cnd.condFloat = (cfg.condFloat != 0 && cnd.tables.valid) ? 1 : 0;
 
     if (cfg.solver == "SLAU" || cfg.solver == "SLAU2") {
         int slauVariant = (cfg.solver == "SLAU2") ? 2 : 1;

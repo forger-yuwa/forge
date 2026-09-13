@@ -285,6 +285,9 @@ struct CondArgs {
     // (brace 初期化の位置引数順を壊さないよう末尾に置く; 構築後に代入)
     CondSpeciesProps cprops{};
     double      Yw = -1.0;
+    // float 経路 (condFloat=1): 面の潜熱 L(T_cell) / L(T_f) を物性表で引く (plans/active/condensation-float-speedup.md §4.2-4)。g=0 の面は評価しない。
+    CondTablesF tables{};
+    int         condFloat = 0;
 };
 // thermally-perfect 多成分の化学種データと face 整合再構成用配列 (SLAU の種別再構成で使用)。
 struct SpeciesArgs {

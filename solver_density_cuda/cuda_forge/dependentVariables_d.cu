@@ -29,7 +29,8 @@ __global__ void dependentVariables_d
  int condGasSpecies , int condModel ,   // carrier+condensible: 凝縮気相種 index / モデル(0:N2,1:H2O)
  int condEquilibrium ,                  // 2: EOS 拘束形平衡 ((T,g) 同時反転 → rog 射影)。0/1 は従来経路
  int condSonicModel ,                   // 1: 二相 frozen 音速/γ (TP 分岐, g>0 セル)。0: 旧 (全蒸気 √(γ_mix R_mix T))
- CondPropOpts condOpts ,                 // σ 倍率・N2 低温物性・CPG carrier の Y_w (plans/accepted/condensation-air.md)
+ CondPropOpts condOpts ,
+ int condFloat , CondTablesF condTb ,   // 凝縮 float 経路 (二相ハイブリッド反転; plans/active/condensation-float-speedup.md §4.2-5)                 // σ 倍率・N2 低温物性・CPG carrier の Y_w (plans/accepted/condensation-air.md)
 
  // mesh structure
  geom_int nCells_all , geom_int nCells,
@@ -86,7 +87,8 @@ __global__ void dependentVariables_d
             // 内部計算は全て double。組成 Y を構築 (nSpecies==1 は Y={1})。
             double Y[THERMO_MAX_SPECIES];
             float  Yf[THERMO_MAX_SPECIES];   // thermoFloat 用 (float で組んで double へ昇格: DP 除算を避ける)
-            const bool useHybrid = (thermoFloat != 0 && spf != nullptr && condensation == 0);
+            // 凝縮 ON でも condFloat=1 なら g≈0 セルはハイブリッド (組成 Y の float 構築も同条件で切替; plan condensation-float-speedup §4.2-6)
+            const bool useHybrid = (thermoFloat != 0 && spf != nullptr && (condensation == 0 || condFloat != 0));
             if (nSpecies <= 1 || roY == nullptr) {
                 Y[0] = 1.0; Yf[0] = 1.0f;
             } else if (useHybrid) {
@@ -135,6 +137,7 @@ __global__ void dependentVariables_d
             // 温度反転。g≈0 は従来 thermo_T_from_e で厳密縮約。
             double Tnew;
             bool hybrid = false; double hybrid_cp = 0.0, hybrid_h = 0.0;
+            bool twophaseFail = false;   // 二相反転が収束しなかったセル: roe を上書きしない (保存量保護)
             if (condensation == 1 && condEquilibrium == 2 && rog != nullptr) {
                 // EOS 拘束形平衡: g を状態量として (T,g) を同時反転し、rog[0] に射影する
                 // (plans/accepted/condensation-equilibrium-eos.md)。輸送値 g_liq は初期値にだけ使う。
@@ -149,10 +152,19 @@ __global__ void dependentVariables_d
                 }
                 g_liq = g_eq;
                 rog[0][ic] = (flow_float)((double)ro_temp*g_eq);
-            } else if (g_liq > 1.0e-12f && carrier) {
-                Tnew = cond_T_from_e_carrier(sp, nSpecies, Y, e_in, g_liq, Rw, cprops, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
             } else if (g_liq > 1.0e-12f) {
-                Tnew = cond_T_from_e_onetemp(sp, nSpecies, Y, e_in, g_liq, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
+                // 一温度二相反転: condFloat=1 は float Newton + double 研磨 + 成功判定、それ以外は現行 double (成功判定のみ追加)。
+                bool okc = true;
+                if (useHybrid && condFloat != 0 && condTb.valid) {
+                    Tnew = cond_T_from_e_twophase_hybrid(sp, spf, nSpecies, Y, Yf, condTb, e_in, g_liq, Rw, carrier ? 1 : 0, cprops,
+                                                         Tg, DEPVAR_TMIN, DEPVAR_TMAX, &okc);
+                } else {
+                    Tnew = carrier ? cond_T_from_e_carrier(sp, nSpecies, Y, e_in, g_liq, Rw, cprops, Tg, DEPVAR_TMIN, DEPVAR_TMAX)
+                                   : cond_T_from_e_onetemp(sp, nSpecies, Y, e_in, g_liq, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
+                    const double G = cond_twophase_resid(sp, nSpecies, Y, Tnew, g_liq, Rw, carrier ? 1 : 0, cprops, e_in);
+                    okc = isfinite(G) && isfinite(Tnew) && (fabs(G) <= 10.0*(1.0e-9*fabs(e_in) + 0.05));
+                }
+                if (!okc) { twophaseFail = true; atomicAdd(&g_condTinvFail, 1u); }
             } else if (useHybrid) {
                 // ハイブリッド: float Newton + double 1 段研磨。cp/h は研磨点 T_f の double 値から Taylor で組む
                 // (double 評価 1 回で従来の反復数+1 回分を置換)。凝縮 off のときのみ (二相 EOS は従来経路)。
@@ -194,9 +206,10 @@ __global__ void dependentVariables_d
             P[ic]         = (flow_float)Pnew;
             ro[ic]        = ro_temp;
             // roe を (floor 済 ro, 反転 T, 混合内部エネルギー) と整合させて再構成
-            roe[ic]       = (flow_float)((double)ro_temp * (e_mix + (double)ek));
-            // 総エンタルピー Ht = e_mix + p/ρ + ek (g=0 → hmix+ek と一致)
-            Ht[ic]        = (flow_float)(e_mix + (double)Pnew/(double)ro_temp + (double)ek);
+            if (!twophaseFail) roe[ic] = (flow_float)((double)ro_temp * (e_mix + (double)ek));
+            // 総エンタルピー Ht = e_mix + p/ρ + ek (g=0 → hmix+ek と一致)。反転失敗セルは保存量 roe から (整合を保つ)。
+            Ht[ic]        = twophaseFail ? (flow_float)((double)roe[ic]/(double)ro_temp + (double)Pnew/(double)ro_temp)
+                                         : (flow_float)(e_mix + (double)Pnew/(double)ro_temp + (double)ek);
             // 音速と γ: 既定 (condSonicModel 0 / g=0) は全蒸気気相 √(γ_mix R_mix T)。condSonicModel 1 かつ g>0 では
             // 一温度二相 EOS と整合する固定 g,Y の frozen 音速 c²=γ_2φ R_eff T (cond_twophase_sonic)。γ_2φ は block-DPLUR の
             // κ=γ−1 (固定 g,Y の frozen 近似) と TP 出口 BC が読む。g<1e-12 は式順序も従来と同一 (dry セル bit 同一)。
@@ -316,6 +329,7 @@ void dependentVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
         cfg.condEquilibrium ,
         cfg.condSonicModel ,
         cond_prop_opts(cfg) ,
+        cfg.condFloat , cond_tables_device() ,
 
         // mesh structure
         msh.nCells_all , msh.nCells ,

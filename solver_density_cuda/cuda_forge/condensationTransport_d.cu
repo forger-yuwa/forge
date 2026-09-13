@@ -1,6 +1,7 @@
 #include "condensationTransport_d.cuh"
 #include "condensationSource_d.cuh"   // COND_PI, 物性 (消滅クランプ)
-#include "condensationEOS_d.cuh"      // cond_clamp_vapor_pressure (蒸発塵判定の蒸気分圧)
+#include "condensationEOS_d.cuh"
+#include "condensationSourceF_d.cuh"   // float 実体 (clamp の表評価)      // cond_clamp_vapor_pressure (蒸発塵判定の蒸気分圧)
 
 #include "scalarTransport_d.cuh"
 
@@ -37,6 +38,16 @@ ScalarTransportDesc buildCondMomentDesc(variables& var, const std::string& consN
     };
 }
 
+// 原始量 φ = ρφ/ρ を最大 4 モーメント同時に (起動数削減; plan condensation-float-speedup §4.2-7)。
+struct CondPrimPtrs { flow_float* rophi[4]; flow_float* phi[4]; int n; };
+__global__ void cond_primitive_multi_d(geom_int nCells_all, flow_float* ro, CondPrimPtrs P)
+{
+    geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic < nCells_all) {
+        const flow_float inv = static_cast<flow_float>(1.0) / max(ro[ic], kSmall);
+        for (int k = 0; k < P.n; ++k) P.phi[k][ic] = P.rophi[k][ic] * inv;
+    }
+}
 // 原始量 φ = ρφ/ρ (全セル, ghost 含む)。
 __global__ void cond_primitive_d(
     geom_int nCells_all,
@@ -103,6 +114,49 @@ __global__ void cond_realizability_clamp_d(
         rog[ic] = (flow_float)0.0; roQ0[ic] = (flow_float)0.0;
         roQ1[ic] = (flow_float)0.0; roQ2[ic] = (flow_float)0.0;
     }
+}
+
+
+// float 実体 (condFloat=1): 判定は閾値比較 (p_v<=p_sat, r30<2 r_min) なので ULP 差で消滅 step が 1 つずれ得る (plan §4.2-4)。
+__global__ void cond_realizability_clamp_f_d(
+    geom_int nCells,
+    flow_float* ro, flow_float* roY_w,
+    flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
+    int evap, float Rw, float rmin, float g_rm, float Yw_const,
+    flow_float* T, flow_float* P, CondTablesF tb)
+{
+    geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    const flow_float gmax = (roY_w != nullptr) ? roY_w[ic] : ((Yw_const > 0.0f) ? Yw_const*ro[ic] : 0.99f*ro[ic]);
+    flow_float r = rog[ic];
+    if (r < 0.0f) r = 0.0f;
+    if (r > gmax) r = gmax;
+    rog[ic] = r;
+    if (roQ0[ic] < 0.0f) roQ0[ic] = 0.0f;
+    if (roQ1[ic] < 0.0f) roQ1[ic] = 0.0f;
+    if (roQ2[ic] < 0.0f) roQ2[ic] = 0.0f;
+    if (!evap) return;
+    const float rod = ro[ic];
+    if (rod <= 1.0e-20f) return;
+    const float g = r/rod;
+    if (g > g_rm) return;
+    const bool dust = (r <= 0.0f) && (roQ0[ic] > 0.0f || roQ1[ic] > 0.0f || roQ2[ic] > 0.0f);
+    if (r <= 0.0f && !dust) return;
+    const float Td = T[ic];
+    // 蒸気分圧 (source kernel と同じ定義): TP carrier=ρ(Y_w−g)R_wT, CPG carrier=ρ(Y_w,const−g)R_wT, pure=全圧
+    float pv;
+    if (roY_w != nullptr)      { float yv = roY_w[ic]/rod - g; if (yv < 0.0f) yv = 0.0f; pv = rod*yv*Rw*Td; }
+    else if (Yw_const > 0.0f)  { float yv = Yw_const - g;     if (yv < 0.0f) yv = 0.0f; pv = rod*yv*Rw*Td; }
+    else                         pv = P[ic];
+    if (pv > 0.0f && logf(pv) > cond_tab_lnpsat_f(tb, Td)) return;   // 過飽和: 消滅させない
+    const float q0 = roQ0[ic];
+    bool remove = dust || (q0 <= 1.0e-30f);
+    if (!remove) {
+        const float rho_l = cond_tab_rhol_f(tb, Td);
+        const float r30 = cbrtf(g/((4.0f/3.0f)*COND_PI_F*rho_l*q0/rod));
+        remove = (r30 < 2.0f*rmin);
+    }
+    if (remove) { rog[ic] = 0.0f; roQ0[ic] = 0.0f; roQ1[ic] = 0.0f; roQ2[ic] = 0.0f; }
 }
 
 // Neumann (zero-gradient) ghost 充填: rophi[ig]=rophi[ic], phi[ig]=phi[ic]。
@@ -189,6 +243,13 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
         const CondPropOpts opts = cond_prop_opts(cfg);
         const CondSpeciesProps cprops = condProps_make(cfg.condModel, opts);
         const double g_rm = 5.0e-7;   // 消滅硬クランプを許す g 上限 (潜熱飛び ΔT=gL/cv ≲ 1.5 K)
+        if (cfg.condFloat != 0 && g_condTables.valid) {
+            cond_realizability_clamp_f_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
+                msh.nCells, var.c_d["ro"], roY_w,
+                var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
+                cfg.condEvaporation, (float)cprops.R, (float)cfg.condEvapRmin, (float)g_rm, (float)opts.Yw,
+                var.c_d["T"], var.c_d["P"], g_condTables);
+        } else
         cond_realizability_clamp_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells, var.c_d["ro"], roY_w,
             var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
@@ -196,13 +257,15 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
             var.c_d["T"], var.c_d["P"], opts);
     }
 
-    for (const auto& consName : var.condMomentConsNames) {
-        const std::string prim = consName.substr(2);
-        cond_primitive_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
-            msh.nCells_all,
-            var.c_d["ro"],
-            var.c_d[consName],
-            var.c_d[prim]);
+    {
+        // 4 モーメントずつ 1 起動 (φ=ρφ/ρ は除算 1 回を逆数乗算に; 値は 1 ulp 以内)
+        CondPrimPtrs P{}; P.n = 0;
+        for (const auto& consName : var.condMomentConsNames) {
+            const std::string prim = consName.substr(2);
+            P.rophi[P.n] = var.c_d[consName]; P.phi[P.n] = var.c_d[prim]; ++P.n;
+            if (P.n == 4) { cond_primitive_multi_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(msh.nCells_all, var.c_d["ro"], P); P.n = 0; }
+        }
+        if (P.n > 0) cond_primitive_multi_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(msh.nCells_all, var.c_d["ro"], P);
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
@@ -259,10 +322,11 @@ void condensationTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
         CHECK_CUDA_ERROR(cudaMemset(var.c_d["src_jac_"+prim], 0, msh.nCells * sizeof(flow_float)));
     }
 
-    for (const auto& consName : var.condMomentConsNames) {
-        const ScalarTransportDesc desc = buildCondMomentDesc(var, consName);
-        scalarTransportResidual_d(cfg, cuda_cfg, msh, var, desc);
-    }
+    // 4 モーメント (ρg, ρQ0, ρQ1, ρQ2) の 1 次風上移流を 1 面ループに融合 (k/ω と同じ MultiScalarPtrs; 拡散なし)。
+    // 面ごとの流束の算術は単独版と同一 (起動数 4→1; plan condensation-float-speedup §4.2-7)。
+    std::vector<ScalarTransportDesc> descs;
+    for (const auto& consName : var.condMomentConsNames) descs.push_back(buildCondMomentDesc(var, consName));
+    scalarTransportResidualMulti_d(cfg, cuda_cfg, msh, var, descs.data(), (int)descs.size());
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
