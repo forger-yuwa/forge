@@ -13,6 +13,10 @@ CL/CD・massflux・推力・peak μt 等を「○○だ」と報告する応答�
 使い方:
   python3 tools/check_quasisteady.py <run_dir> [--quantity shock,asym] [--mesh mesh.h5]
   python3 tools/check_quasisteady.py <run_dir> --tail 0.4 --drift 0.05 --osc 0.10
+  python3 tools/check_quasisteady.py --series-csv <run_dir>/force_history.csv --series-cols C_T_with_shear,C_L,C_M
+    (CSV 系列モード: `step` 列を持つ CSV の指定列を **同じ classify** で判定する。設計チェーンの力係数履歴
+     [`forge_design.metrics.sern_forces` が書く `force_history.csv`] など、res_*.h5 から直接抽出できない
+     派生量を正式ツールの VERDICT で報告するための入口。非有限値を含む列は NONFINITE (最重症) にする)
 終了コード: 全量が STEADY なら 0、1つでも DRIFTING/UNSETTLED があれば 1 (CI/スクリプトで使える)。
 OSCILLATING (リミットサイクル) は 0 扱いだが「平均±振幅」で報告すること (瞬時値で報告しない)。
 
@@ -276,7 +280,44 @@ def classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps):
     return 'STEADY', detail, (mean, amp)
 
 
-SEV = {'STEADY': 0, 'OSCILLATING': 1, 'TRANSIENT-UNSETTLED': 2, 'DRIFTING': 3}
+SEV = {'STEADY': 0, 'OSCILLATING': 1, 'TRANSIENT-UNSETTLED': 2, 'DRIFTING': 3, 'NONFINITE': 4}
+
+
+def classify_series(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps):
+    """classify の非有限値を **黙って落とさない** 版 (CSV 系列モード / 外部呼び出し用)。
+    classify は NaN を除いて判定するので、[1,1,1,NaN] のような発散末尾を STEADY にしてしまう
+    (case/46 の `steadiness` で実害: codex 指摘 2026-09-09)。ここでは非有限値が 1 つでもあれば
+    NONFINITE を返し、詳細に個数を残す。戻り値は classify と同形 (verdict, detail, (mean, amp))。"""
+    v = np.asarray(vals, float)
+    bad = int(np.count_nonzero(~np.isfinite(v)))
+    if bad:
+        return 'NONFINITE', f"{bad}/{len(v)} non-finite value(s) in series", None
+    return classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps)
+
+
+def analyze_series_csv(path, cols, tail_frac, drift_tol, osc_tol, min_snaps):
+    """`step` 列を持つ CSV の指定列を classify_series で判定する。戻り値は worst の SEV。"""
+    import csv
+    with open(path) as fh:
+        rows = list(csv.DictReader(fh))
+    if not rows:
+        print(f"\n=== {path}  -> ERROR: empty CSV ==="); return 4
+    missing = [c for c in cols if c not in rows[0]]
+    if missing or 'step' not in rows[0]:
+        print(f"\n=== {path}  -> ERROR: missing column(s) {missing + ([] if 'step' in rows[0] else ['step'])} "
+              f"(available: {sorted(rows[0].keys())}) ==="); return 4
+    steps = [float(r['step']) for r in rows]
+    worst = 0; lines = []
+    for c in cols:
+        vals = [float(r[c]) if r[c] not in ('', 'None') else float('nan') for r in rows]
+        verdict, detail, _ = classify_series(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps)
+        worst = max(worst, SEV[verdict])
+        lines.append(f"  {c:16s}: {detail:55s} {verdict}")
+    overall = [k for k, vv in SEV.items() if vv == worst][0]
+    print(f"\n=== {path}  [{len(rows)} rows, steps {steps[0]:g}..{steps[-1]:g}]  -> {overall} ===")
+    for l in lines:
+        print(l)
+    return worst
 BUILTIN = ['shock', 'asym', 'machmax', 'pmax']
 # 平板専用 (明示指定のときだけ有効): --quantity theta,cf_retheta
 FLATPLATE = ['theta', 'cf_retheta', 'cf_momentum']
@@ -418,7 +459,10 @@ def analyze(run_dir, want, tail_frac, drift_tol, osc_tol, min_snaps, mesh_arg, c
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('run_dirs', nargs='+')
+    ap.add_argument('run_dirs', nargs='*')
+    ap.add_argument('--series-csv', default=None,
+                    help='CSV 系列モード: `step` 列を持つ CSV の --series-cols を同じ classify で判定する')
+    ap.add_argument('--series-cols', default=None, help='--series-csv で判定する列名 (カンマ区切り)')
     ap.add_argument('--quantity', default=','.join(BUILTIN),
                     help='comma list of: ' + ','.join(BUILTIN + FLATPLATE + WALL) +
                          ' (default all applicable; theta/cf_retheta are flat-plate specific '
@@ -446,6 +490,13 @@ def main():
     args = ap.parse_args()
     want = [q.strip() for q in args.quantity.split(',') if q.strip()]
     worst = 0
+    if args.series_csv:
+        if not args.series_cols:
+            ap.error('--series-csv には --series-cols が必要')
+        cols = [c.strip() for c in args.series_cols.split(',') if c.strip()]
+        worst = max(worst, analyze_series_csv(args.series_csv, cols, args.tail, args.drift, args.osc, args.min_snaps))
+    elif not args.run_dirs:
+        ap.error('run_dir か --series-csv を指定すること')
     for rd in args.run_dirs:
         worst = max(worst, analyze(rd, want, args.tail, args.drift, args.osc, args.min_snaps,
                                    args.mesh, args.cf_x, args.cf_ytop,

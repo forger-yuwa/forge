@@ -800,7 +800,7 @@ $\varepsilon_M$ (コア質量流束重み RMS)、$\varepsilon_\theta$、$\eta=C_
 $L/r_t$、$q_{peak}$ (条件付き) 等。抽出は `res_*.h5` を形状相対の固定サンプリング格子へ
 補間してから行う (メッシュ解像度非依存)。
 
-## SERN チェーン (⑤ — 2026-09-04 起票、S0–S1 [逆設計] 実装済み・評価/MOO 未)
+## SERN チェーン (⑤ — 2026-09-04 起票。S0–S7 実装済み、評価ゲート R1 完了 2026-09-13、MOO 再取得は plan §5.1 R7)
 
 計画: [`plans/active/tooling-nozzle-sern-chain.md`](../../plans/active/tooling-nozzle-sern-chain.md)。
 出典調査: [`notes/investigations/sern-design-method-survey.md`](../../notes/investigations/sern-design-method-survey.md)。
@@ -822,11 +822,15 @@ $$\text{燃焼器出口 starting line} \rightarrow \text{平面最大推力理�
   $(M_c,\theta_c)$ と $c$–$e$ 間の質量流量比を dv として与え、kernel (入口一様流 + 両角部の扇 +
   カウル壁) の中に $c$ を探し、目標 C⁻ を張って壁流線を抽出する。設計 $p_e/p_a$ は縁条件から従属。
   DOE では推力 ← $M_c,\theta_c$、揚力と長さ ← $M_c$ と質量流量比、と役割が分離する (Yu 2020)。
-- **dv** ($d=6$): $M_c$, $\theta_c$, $\dot m_c/\dot m$, $\theta_{r0}$, $\theta_{c0}$, $L_{\rm cowl}$。
-  壁座標・壁圧は dv にしない。
+- **dv** ($d=5$, `driver_sern.DV_ORDER`): $M_c$, $f=\dot m_c/\dot m$, $\theta_{r0}$, $\theta_{c0}$, $L_{\rm cowl}$ ($\theta_c$ は kernel の場から決まる従属量)。
+  壁座標・壁圧は dv にしない。目的は 2 個 ($-\sum_k w_k C_T^{(k)}$ と $L_{\rm ramp}/H$)、$C_M$ は制約 (加重平均窓 + 作動点別窓)。
 - **評価**: forge 2D 平面 RANS (SST, node) を 4 ブロック (ノズル+プルーム / カウル下外部流 / **ランプ側外部流 = 機体上面・base・後流**、`mesh.ext_top`; ランプ側に外気が無いと過膨張でも剥離が起きないため) 構造メッシュで
   作動点セット (設計 NPR + オフデザイン) について回し、ランプ・カウル内外面の $p,\tau_w$ 積分から
-  $C_T, C_L, C_M$ (基準点指定) と剥離位置を取る。低 NPR の RSS/FSS は `OSCILLATING` 統計で報告。
+  $C_T, C_L, C_M$ (基準点指定) と剥離位置を取る。
+- **受理ゲート** (`metrics/sern_gates.py`, plan §4.7/§4.13): 1 作動点 run は forge `rc == 0`・最終場の有限/正値・全残差に NaN/rising 無し・
+  実目的量 (`C_T_with_shear`) と $C_T,C_L,C_M$ の `STEADY` (正式ツール `check_quasisteady.classify_series`) を**全て**満たしたときだけ
+  サロゲート学習と Pareto に入る。発散 run の力係数採用はしない。`force_history.csv` を `check_quasisteady.py --series-csv` で再判定でき、
+  既存キャンペーンは `driver_sern --rejudge` で判定し直せる。定常擬似時間の `OSCILLATING` は物理的振動と解釈しない (振動を扱うなら dual-time)。
 - **粘性**: NS 帰還ループは持たない。設計点の RANS 場から `metrics/deltastar.py` で $\delta^*(x)$ を
   抽出し法線オフセットする**一発補正**のみ。
 - **壁圧規定の位置づけ**: 剥離制約 ($\tau_w$ 符号 / $p_w/p_a$) の判定量と、二段膨張オプション

@@ -20,7 +20,8 @@ import numpy as np
 from ..geometry.moc_sern import PlanarMOC, SernKernelSpec, wall_forces
 from ..geometry.rao_planar import ideal_gross_thrust
 from ..meshing.mesh_sern import PHYS_SERN, SernMeshParams, generate_sern_mesh, write_msh41_named
-from ..metrics.sern_forces import force_history, steadiness
+from ..metrics.sern_forces import force_history, write_force_history_csv
+from ..metrics.sern_gates import evaluate_gates, forge_rc_from_log
 from ..probdef import Problem, dv_value, load_problem
 
 # リポジトリ位置から導く (AWS など別マシンでも動くように。FORGE_ROOT で上書き可)
@@ -464,25 +465,30 @@ def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int) -
     return run_forge(run_dir)
 
 
-def collect(problem_path, run_dir) -> dict:
+def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass: bool = False) -> dict:
+    """力係数履歴 + 受理ゲート (plan §5.1 R1)。metrics.json / force_history.csv は out_dir (既定 run_dir) に書く
+    (再判定で元 run を汚さない)。rc は forge の終了コード (None なら run_case_stdout.log から読む)。"""
     p = load_problem(problem_path)
-    run_dir = Path(run_dir)
+    run_dir = Path(run_dir); out_dir = Path(out_dir) if out_dir else run_dir; out_dir.mkdir(parents=True, exist_ok=True)
     info = json.loads((run_dir / "prepare_info.json").read_text())
     st = info["states"]; ex, en = st["exhaust"], st["ext"]; H = info["H_m"]
     xr, yr = p.spec.get("moment_ref", [0.0, 0.0])
     hist = force_history(run_dir, p_a=en["P"], F_ideal=info["F_ideal_N_per_m"], H=H, x_ref=float(xr) * H, y_ref=float(yr) * H,
                          mdot_u_in=ex["ro"] * ex["u"] ** 2 * H, p_in=ex["P"],
                          twall_on_fluid=(info.get("discretization", "cell") == "cell"))
+    if rc is None:
+        rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
-    out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist,
-           "operating_point": info.get("operating_point"), "L_ramp": info["design"]["L_ramp"]}
+    gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass)
+    out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "forge_rc": rc,
+           "operating_point": info.get("operating_point"), "L_ramp": info["design"]["L_ramp"],
+           "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"]}
     if hist:
         last = hist[-1]
         out.update({k: last[k] for k in ("step", "C_T", "C_T_wall", "C_L", "C_M", "T_wall", "L", "M_noseup")})
         for k in ("C_T_with_shear", "C_T_friction", "sep_frac_ramp", "sep_x_min_ramp"):
             if k in last:
                 out[k] = last[k]
-        out["steadiness"] = {k: steadiness([h[k] for h in hist]) for k in ("C_T", "C_L", "C_M")}
         out["moc_forces"] = info["moc_forces"]
         # MOC は**設計点**の値なので、作動点が設計点と一致するときだけ差を出す (2026-09-05, plan §4.10:
         # 作動点は inflow/gas も動かすので、オフデザイン run で差を取ると意味の無い数になる)。
@@ -492,7 +498,8 @@ def collect(problem_path, run_dir) -> dict:
         out["on_design_point"] = on_design
         if on_design:
             out["cfd_vs_moc"] = {k: (last[k] - info["moc_forces"][k]) for k in ("C_T", "C_L", "C_M")}
-    (run_dir / "metrics.json").write_text(json.dumps(out, indent=1))
+        write_force_history_csv(out_dir / "force_history.csv", hist)
+    (out_dir / "metrics.json").write_text(json.dumps(out, indent=1))
     return out
 
 
@@ -519,8 +526,9 @@ def main(argv=None):
                     warm_lam_steps=int(o.get("warm_lam_steps", 0)), warm_lam_cfl=float(o.get("warm_lam_cfl", 0.2)),
                     mid_steps=int(o.get("mid_steps", 0)),
                     warm_adapt_steps=int(o.get("warm_adapt_steps", 500)))
-    out = collect(a.problem, a.run_dir)
-    print(json.dumps({k: v for k, v in out.items() if k != "history"}, indent=1))
+    out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))
+    print(json.dumps({k: v for k, v in out.items() if k not in ("history", "gates")}, indent=1))
+    g = out["gates"]; print(f"GATES: {g['verdict']} fail_class={g['fail_class']} objective={g['objective']} reasons={g['reasons']}")
     return rc
 
 

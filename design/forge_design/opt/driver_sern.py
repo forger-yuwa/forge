@@ -4,11 +4,19 @@ dv = (M_c, f, theta_r0_deg, theta_c0_deg, L_cowl) [YAML の dv.min/max]。1 評�
 (`spec.operating_points[]`、重み w_k)。目的 (最小化):
     f1 = −Σ_k w_k C_T^(k)      (Kriging。RANS では摩擦込み C_T)
     f2 = L_ramp / H            (逆設計の決定的結果。候補点では Kriging で近似)
-ゲート: 逆設計成立 (kernel 内に key point、C⁻ が直線ランプに着地)、メッシュ品質 PASS、各作動点で
-NaN なし・力係数 STEADY。C_M (機体 CG 基準) は台帳に記録し制約は任意 (`opt.cm_min/cm_max`)。
+ゲート (plan §5.1 R1, `metrics/sern_gates.py`): 逆設計成立 (kernel 内に key point、C⁻ が直線ランプに着地、
+`L_ramp_max` は最終輪郭で再検査)、メッシュ品質 PASS、各作動点で **rc == 0 かつ 保存場が有限・正値、全残差に NaN/rising 無し、
+実目的量 (RANS は C_T_with_shear) と C_T/C_L/C_M が STEADY**。発散した評価の採用 (旧 §4.13-3) は撤回した:
+ゲート不合格はサロゲート学習と Pareto から外す (accepted `tooling-nozzle-moo-loop.md` と同じ)。
+status: PASS / INFEASIBLE (物理: 設計不成立 `DESIGN`, `L_RAMP_MAX`, `CM_WINDOW`) / FAIL (数値: `DIVERGED`,
+`RESIDUAL_RISING`, `NOT_CONVERGED`, `UNSTEADY`, `NO_FORCES`, `ERROR`)。`degraded` = 緩レシピ (再試行) で通った評価
+(台帳と pareto.json の両方に残す)。C_M (機体 CG 基準) は台帳に記録し制約は任意 (`opt.cm_min/cm_max` = 加重平均、
+`opt.cm_window: {op: [lo, hi]}` = 作動点別の窓 [R6(d)])。
 既存 `opt/` (lhs / KrigingSet / propose_infill / hypervolume2d) を再利用。使い方:
 
   design/.venv-opt/bin/python -m forge_design.opt.driver_sern <problem.yaml> <campaign_dir> [--n-doe 12 --n-iter 3 --batch 2]
+  design/.venv-opt/bin/python -m forge_design.opt.driver_sern <problem.yaml> <campaign_dir> --rejudge <out_dir>
+      (CFD を回さず既存 run を現行ゲートで再判定: out_dir に ledger_rejudged.jsonl / pareto_rejudged.json / rejudge_summary.md)
 """
 from __future__ import annotations
 
@@ -31,6 +39,18 @@ from .moo import propose_infill
 from .surrogate import KrigingSet
 
 DV_ORDER = ("M_c", "f", "theta_r0_deg", "theta_c0_deg", "L_cowl")
+GATE_KEYS = ("C_T", "C_L", "C_M")
+
+
+class DesignInfeasible(ValueError):
+    """物理的に成立しない候補 (逆設計不成立 / L_ramp_max 超過)。数値失敗と区別する (R1)。"""
+
+
+class EvalFailure(RuntimeError):
+    """CFD 評価の数値失敗 (ゲート不合格)。fail_class を持つ。"""
+
+    def __init__(self, fail_class: str, msg: str) -> None:
+        super().__init__(msg); self.fail_class = fail_class
 
 
 class _KrgBoth:
@@ -83,8 +103,9 @@ class SernCampaign:
         return d
 
     def _eval_op(self, prob, tag: str, op: str, row: dict):
-        """1 作動点を標準レシピで回し、落ちたら緩レシピ (step 倍・cfl 半分) で 1 回だけ再試行する (plan §4.13)。
-        戻り値 (run_dir, rc, metrics, degraded)。degraded = rc != 0 でも力係数が使えた場合に True。"""
+        """1 作動点を標準レシピで回し、ゲート不合格なら緩レシピ (step 倍・cfl 半分) で 1 回だけ再試行する (plan §4.13-1,2)。
+        戻り値 (run_dir, rc, metrics, degraded)。**採用条件は rc == 0 かつ gates.verdict == PASS のみ** (旧 §4.13-3 の
+        「rc != 0 でも力係数 STEADY なら採用」は撤回、R1)。degraded = 再試行 (緩レシピ) で通った場合 True。"""
         oc = self.optcfg
         # YAML の operating_points[].warm_from で「どの作動点の収束場から立ち上げるか」を指定する
         # (同一メッシュ・熱力学整合リマップ。NPR が遠い作動点には付けない — plan §5.1-1c)
@@ -106,48 +127,75 @@ class SernCampaign:
             if rd.exists():
                 continue
             info = R.prepare(prob, rd, op=op)
-            if info["design"]["warnings"]:
-                raise ValueError("design warnings: " + "; ".join(info["design"]["warnings"]))
+            self._check_design(info)
             try:
                 rc = R.run_staged(rd, "full", **kw)
             except RuntimeError as e:      # 起動段で落ちた: 壁出力が無いので次の梯子へ
-                last = (rd, 1, {}, True); print(f"   [{tag}/{op}{suffix}] {e}", flush=True)
+                last = (rd, 1, {"gates": {"verdict": "FAIL", "fail_class": "DIVERGED", "reasons": [str(e)[:200]]}}, True)
+                print(f"   [{tag}/{op}{suffix}] {e}", flush=True)
                 continue
-            out = R.collect(prob, rd)
-            st = out.get("steadiness", {})
-            ok = all(st.get(k, {}).get("verdict") == "STEADY" for k in ("C_T", "C_L", "C_M"))
-            if rc == 0 and ok:
-                return rd, rc, out, False
+            out = R.collect(prob, rd, rc=rc, require_residual_pass=bool(oc.get("require_residual_pass", False)))
+            g = out["gates"]
+            if rc == 0 and g["verdict"] == "PASS":
+                return rd, rc, out, suffix == "_retry"
+            print(f"   [{tag}/{op}{suffix}] gate {g['fail_class']}: {'; '.join(g['reasons'])[:200]}", flush=True)
             last = (rd, rc, out, True)
-            if ok:                          # 発散はしたが力積分は収束済み → 再試行せず採用 (§4.13-3)
-                return last
         if last is None:                    # 梯子の全段が既存ディレクトリでスキップされた (resume 時)
             raise RuntimeError(f"{tag}/{op}: 梯子の全段が既存ディレクトリ。再開するなら該当 run を消すこと")
         return last
+
+    def _check_design(self, info: dict) -> None:
+        """設計段の物理的成立性 (INFEASIBLE)。L_ramp_max は probe (粗い kernel) でなく**最終輪郭**で再検査する (R6(d)/§5.1-8b)。"""
+        if info["design"]["warnings"]:
+            raise DesignInfeasible("design warnings: " + "; ".join(info["design"]["warnings"]))
+        Lmax = float(self.base_raw["geometry"].get("L_ramp_max", 1e9))
+        if float(info["design"]["L_ramp"]) > Lmax * (1 + float(self.optcfg.get("l_ramp_tol", 0.0))):
+            raise DesignInfeasible(f"L_ramp {info['design']['L_ramp']:.3f} > L_ramp_max {Lmax} (final contour)")
+
+    @staticmethod
+    def _op_summary(out: dict, rd) -> dict:
+        g = out.get("gates", {})
+        return {"C_T": out.get(g.get("objective", "C_T"), out.get("C_T")), "C_T_p": out.get("C_T"), "C_L": out.get("C_L"), "C_M": out.get("C_M"),
+                "step": out.get("step"), "run_dir": str(rd), "sep_frac_ramp": out.get("sep_frac_ramp"), "sep_x_min_ramp": out.get("sep_x_min_ramp"),
+                "forge_rc": out.get("forge_rc"), "gate": g.get("verdict"), "gate_fail_class": g.get("fail_class"),
+                "residual": g.get("residual", {}).get("verdict"), "objective": g.get("objective"),
+                "steadiness": {k: v.get("verdict") for k, v in g.get("steadiness", {}).get("series", {}).items()}}
+
+    def _cm_check(self, row: dict) -> None:
+        """C_M 制約: 加重平均の窓 (`cm_min/cm_max`) と作動点別の窓 (`cm_window: {op: [lo, hi]}`, R6(d))。物理的 INFEASIBLE。"""
+        lo, hi = self.optcfg.get("cm_min"), self.optcfg.get("cm_max")
+        if (lo is not None and row["C_M_w"] < lo) or (hi is not None and row["C_M_w"] > hi):
+            raise DesignInfeasible(f"C_M_w {row['C_M_w']:.3f} outside [{lo}, {hi}]")
+        for op, win in (self.optcfg.get("cm_window") or {}).items():
+            cm = row["ops"].get(op, {}).get("C_M")
+            if cm is None:
+                continue
+            wlo, whi = (win + [None, None])[:2] if isinstance(win, list) else (win.get("min"), win.get("max"))
+            if (wlo is not None and cm < wlo) or (whi is not None and cm > whi):
+                raise DesignInfeasible(f"C_M[{op}] {cm:.3f} outside [{wlo}, {whi}]")
 
     # -- 1 点評価 -----------------------------------------------------------------
     def evaluate(self, x, tag: str) -> dict:
         x = [float(v) for v in np.asarray(x, dtype=float)]
         t0 = time.time(); prob = self._write_problem(x, self.dir / f"{tag}.yaml")
-        row = {"tag": tag, "x": x, "status": "FAIL", "fail_class": None, "ops": {}, "note": ""}
+        row = {"tag": tag, "x": x, "status": "FAIL", "fail_class": None, "ops": {}, "note": "", "degraded": False, "degraded_ops": []}
         try:
             ct_w, L_ramp, cm_w, wsum = 0.0, None, 0.0, 0.0
             for o in self.ops:
                 rd, rc, out, degraded = self._eval_op(prob, tag, o["name"], row)
                 info = json.loads((rd / "prepare_info.json").read_text())
                 L_ramp = info["design"]["L_ramp"]
-                st = out.get("steadiness", {}); ct = out.get("C_T_with_shear", out.get("C_T"))   # RANS は摩擦込み
+                g = out.get("gates", {"verdict": "FAIL", "fail_class": "ERROR", "reasons": ["no gates"]})
+                row["ops"][o["name"]] = self._op_summary(out, rd)
+                if rc != 0 or g["verdict"] != "PASS":
+                    raise EvalFailure(g.get("fail_class") or "DIVERGED", f"{o['name']}: rc={rc} {'; '.join(g.get('reasons', []))[:200]}")
+                ct = out[g["objective"]]
                 if ct is None or not np.isfinite(ct):
-                    row["fail_class"] = "DIVERGED"; raise RuntimeError(f"{o['name']}: forge rc={rc} / C_T={ct}")
-                # plan §4.13-3: 力係数が 4 点以上で 3 成分とも STEADY なら、rc != 0 でも degraded として採用する
-                if any(st.get(k, {}).get("verdict") != "STEADY" for k in ("C_T", "C_L", "C_M")):
-                    row["fail_class"] = "UNSTEADY"; raise RuntimeError(f"{o['name']}: C_T {st.get('C_T')}")
+                    raise EvalFailure("DIVERGED", f"{o['name']}: objective {g['objective']}={ct}")
                 if degraded:
-                    row.setdefault("degraded_ops", []).append(o["name"])
+                    row["degraded_ops"].append(o["name"])
                 w = float(o.get("weight", 1.0)); wsum += w
                 ct_w += w * ct; cm_w += w * out["C_M"]
-                row["ops"][o["name"]] = {"C_T": ct, "C_T_p": out["C_T"], "C_L": out["C_L"], "C_M": out["C_M"], "step": out["step"], "run_dir": str(rd),
-                                         "sep_frac_ramp": out.get("sep_frac_ramp"), "sep_x_min_ramp": out.get("sep_x_min_ramp")}
                 # 容量節約: 場は最終ステップのみ残す。**.xmf も一緒に消す** (h5 だけ消すと XDMF が消えた
                 # h5 を指し続けて「中身の無い xmf」が残る — 2026-09-05 修正)
                 vol = sorted(rd.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
@@ -155,19 +203,22 @@ class SernCampaign:
                     f_.unlink()
                     f_.with_suffix(".xmf").unlink(missing_ok=True)
             row.update({"status": "PASS", "C_T_w": ct_w / wsum, "C_M_w": cm_w / wsum, "L_ramp": float(L_ramp),
-                        "degraded": bool(row.get("degraded_ops"))})
-            lo, hi = self.optcfg.get("cm_min"), self.optcfg.get("cm_max")
-            if (lo is not None and row["C_M_w"] < lo) or (hi is not None and row["C_M_w"] > hi):
-                row["status"] = "INFEASIBLE"; row["fail_class"] = "CM_WINDOW"
-        except Exception as e:
+                        "degraded": bool(row["degraded_ops"])})
+            self._cm_check(row)
+        except DesignInfeasible as e:       # 物理的に不成立 (学習対象外だが「失敗」ではない)
             row["note"] = str(e)[:300]
-            if row["fail_class"] is None:
-                row["fail_class"] = "INFEASIBLE" if isinstance(e, ValueError) else "RETRYABLE"
+            row["status"] = "INFEASIBLE"
+            row["fail_class"] = "CM_WINDOW" if "C_M" in str(e) else ("L_RAMP_MAX" if "L_ramp_max" in str(e) else "DESIGN")
+        except EvalFailure as e:            # 数値失敗 (ゲート不合格)
+            row["note"] = str(e)[:300]; row["status"] = "FAIL"; row["fail_class"] = e.fail_class
+        except Exception as e:              # 想定外 (I/O 等)。INFEASIBLE と混同しない
+            row["note"] = f"{type(e).__name__}: {str(e)[:280]}"; row["status"] = "FAIL"; row["fail_class"] = "ERROR"
         row["elapsed_s"] = time.time() - t0
         with open(self.ledger, "a") as fh:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
         self.rows.append(row)
-        print(f"[{tag}] {row['status']} x={np.round(x, 3).tolist()} C_T_w={row.get('C_T_w')} L={row.get('L_ramp')} C_M_w={row.get('C_M_w')} ({row['elapsed_s']:.0f}s) {row['note']}", flush=True)
+        print(f"[{tag}] {row['status']}{'/' + row['fail_class'] if row['fail_class'] else ''}{' (degraded)' if row['degraded'] else ''} "
+              f"x={np.round(x, 3).tolist()} C_T_w={row.get('C_T_w')} L={row.get('L_ramp')} C_M_w={row.get('C_M_w')} ({row['elapsed_s']:.0f}s) {row['note']}", flush=True)
         return row
 
     def _XF(self):
@@ -200,14 +251,90 @@ class SernCampaign:
                 tag = f"inf_{it:02d}_{j}"
                 if tag not in done:
                     self.evaluate(x, tag)
-        X, F = self._XF(); mask = nondominated_mask(F)
-        pareto = [{"x": dict(zip(DV_ORDER, X[i].tolist())), "C_T_w": float(-F[i, 0]), "L_ramp": float(F[i, 1]),
-                   "C_M_w": [r for r in self.rows if r["status"] == "PASS"][i]["C_M_w"]} for i in np.where(mask)[0]]
-        pareto.sort(key=lambda r: r["L_ramp"])
-        summary = {"n_eval": len(self.rows), "n_pass": int(len(X)), "hv": hypervolume2d(F, self.ref), "ref": self.ref,
-                   "operating_points": self.ops, "pareto": pareto}
+        summary = self.summary()
         (self.dir / "pareto.json").write_text(json.dumps(summary, indent=1, ensure_ascii=False))
         print(json.dumps(summary, indent=1, ensure_ascii=False), flush=True)
+
+    def summary(self, rows=None) -> dict:
+        """Pareto 要約。**degraded / tag / 作動点ごとのゲート要約を落とさない** (R1: pareto.json でも追える)。"""
+        rows = self.rows if rows is None else rows
+        ok = [r for r in rows if r["status"] == "PASS"]
+        X = np.array([r["x"] for r in ok]); F = np.array([[-r["C_T_w"], r["L_ramp"]] for r in ok])
+        pareto = []
+        if len(ok):
+            for i in np.where(nondominated_mask(F))[0]:
+                r = ok[i]
+                pareto.append({"tag": r["tag"], "x": dict(zip(DV_ORDER, X[i].tolist())), "C_T_w": float(-F[i, 0]), "L_ramp": float(F[i, 1]),
+                               "C_M_w": r["C_M_w"], "degraded": bool(r.get("degraded")), "degraded_ops": r.get("degraded_ops", []),
+                               "ops": {op: {k: v.get(k) for k in ("C_T", "C_M", "gate", "residual", "steadiness")} for op, v in r.get("ops", {}).items()}})
+        pareto.sort(key=lambda r: r["L_ramp"])
+        classes = {}
+        for r in rows:
+            k = r["status"] + ("/" + r["fail_class"] if r.get("fail_class") else "")
+            classes[k] = classes.get(k, 0) + 1
+        return {"n_eval": len(rows), "n_pass": int(len(ok)), "n_degraded": int(sum(1 for r in ok if r.get("degraded"))),
+                "hv": (hypervolume2d(F, self.ref) if len(ok) else 0.0), "ref": self.ref, "status_counts": classes,
+                "gate_policy": "R1: rc==0 + finite field + residual no NaN/rising + objective & C_T/C_L/C_M STEADY (no divergent adoption)",
+                "operating_points": self.ops, "pareto": pareto}
+
+    # -- 既存キャンペーンの再判定 (CFD なし) ----------------------------------------
+    def rejudge(self, out_dir) -> dict:
+        """台帳の各評価を現行ゲートで判定し直す。元 run は読むだけ (metrics/force_history は out_dir/<tag>_<op>/ に書く)。
+        rc は台帳に無いので run_case_stdout.log から復元する。"""
+        out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
+        new_rows = []; lines = ["| tag | 旧 status | 新 status | fail_class | degraded | C_T_w (旧→新) | 理由 |", "| --- | --- | --- | --- | --- | --- | --- |"]
+        for r0 in self.rows:
+            tag = r0["tag"]; prob = self.dir / f"{tag}.yaml"
+            row = {"tag": tag, "x": r0["x"], "status": "FAIL", "fail_class": None, "ops": {}, "note": "", "degraded": False, "degraded_ops": [],
+                   "old_status": r0["status"], "old_fail_class": r0.get("fail_class"), "old_C_T_w": r0.get("C_T_w")}
+            try:
+                if not prob.exists():
+                    raise EvalFailure("ERROR", "problem yaml missing")
+                ct_w, cm_w, wsum, L_ramp = 0.0, 0.0, 0.0, None
+                for o in self.ops:
+                    rd_std, rd_retry = self.dir / f"{tag}_{o['name']}", self.dir / f"{tag}_{o['name']}_retry"
+                    cands = [d for d in (rd_std, rd_retry) if (d / "prepare_info.json").exists()]
+                    if not cands:
+                        raise EvalFailure("NO_FORCES", f"{o['name']}: no run dir")
+                    chosen = None
+                    for rd in cands:       # 標準 → 再試行の順に、現行ゲートを通る最初の run を採る
+                        out = R.collect(prob, rd, out_dir=out_dir / rd.name, require_residual_pass=bool(self.optcfg.get("require_residual_pass", False)))
+                        row["ops"][o["name"]] = self._op_summary(out, rd)
+                        if out["forge_rc"] == 0 and out["gates"]["verdict"] == "PASS":
+                            chosen = (rd, out); break
+                    if chosen is None:
+                        g = out["gates"]
+                        raise EvalFailure(g.get("fail_class") or "DIVERGED", f"{o['name']}: rc={out['forge_rc']} {'; '.join(g['reasons'])[:200]}")
+                    rd, out = chosen
+                    info = json.loads((rd / "prepare_info.json").read_text()); self._check_design(info); L_ramp = info["design"]["L_ramp"]
+                    if rd.name.endswith("_retry"):
+                        row["degraded_ops"].append(o["name"])
+                    w = float(o.get("weight", 1.0)); wsum += w; ct_w += w * out[out["gates"]["objective"]]; cm_w += w * out["C_M"]
+                row.update({"status": "PASS", "C_T_w": ct_w / wsum, "C_M_w": cm_w / wsum, "L_ramp": float(L_ramp), "degraded": bool(row["degraded_ops"])})
+                self._cm_check(row)
+            except DesignInfeasible as e:
+                row["note"] = str(e)[:300]; row["status"] = "INFEASIBLE"
+                row["fail_class"] = "CM_WINDOW" if "C_M" in str(e) else ("L_RAMP_MAX" if "L_ramp_max" in str(e) else "DESIGN")
+            except EvalFailure as e:
+                row["note"] = str(e)[:300]; row["status"] = "FAIL"; row["fail_class"] = e.fail_class
+            except Exception as e:
+                row["note"] = f"{type(e).__name__}: {str(e)[:280]}"; row["status"] = "FAIL"; row["fail_class"] = "ERROR"
+            new_rows.append(row)
+            ctn = row.get("C_T_w"); cto = r0.get("C_T_w")
+            lines.append(f"| {tag} | {r0['status']}{'/' + r0['fail_class'] if r0.get('fail_class') else ''} | {row['status']} | {row['fail_class'] or ''} | "
+                         f"{'yes' if row['degraded'] else ''} | {'' if cto is None else f'{cto:.4f}'} → {'' if ctn is None else f'{ctn:.4f}'} | {row['note'][:120]} |")
+        with open(out_dir / "ledger_rejudged.jsonl", "w") as fh:
+            for r in new_rows:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        summ = self.summary(new_rows); summ["source_campaign"] = str(self.dir)
+        old_ok = [r for r in self.rows if r["status"] == "PASS"]
+        summ["old"] = {"n_pass": len(old_ok), "hv": (hypervolume2d(np.array([[-r["C_T_w"], r["L_ramp"]] for r in old_ok]), self.ref) if old_ok else 0.0)}
+        (out_dir / "pareto_rejudged.json").write_text(json.dumps(summ, indent=1, ensure_ascii=False))
+        md = [f"# 再判定 (R1 ゲート): {self.dir}", "", f"旧: PASS {summ['old']['n_pass']} / HV {summ['old']['hv']:.4f} → "
+              f"新: PASS {summ['n_pass']} (degraded {summ['n_degraded']}) / HV {summ['hv']:.4f}", "", f"status 内訳: {summ['status_counts']}", ""] + lines
+        (out_dir / "rejudge_summary.md").write_text("\n".join(md) + "\n")
+        print("\n".join(md), flush=True)
+        return summ
 
 
 def main(argv=None) -> int:
@@ -216,8 +343,12 @@ def main(argv=None) -> int:
     ap.add_argument("--n-doe", type=int, default=12); ap.add_argument("--n-iter", type=int, default=3)
     ap.add_argument("--batch", type=int, default=2); ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--ref", type=float, nargs=2, default=(-0.90, 20.0))
+    ap.add_argument("--rejudge", default=None, metavar="OUT_DIR", help="CFD を回さず既存キャンペーンを現行ゲートで再判定して OUT_DIR に書く")
     a = ap.parse_args(argv)
-    SernCampaign(a.problem, a.campaign_dir, ref=tuple(a.ref), seed=a.seed).run(a.n_doe, a.n_iter, a.batch)
+    c = SernCampaign(a.problem, a.campaign_dir, ref=tuple(a.ref), seed=a.seed)
+    if a.rejudge:
+        c.rejudge(a.rejudge); return 0
+    c.run(a.n_doe, a.n_iter, a.batch)
     return 0
 
 

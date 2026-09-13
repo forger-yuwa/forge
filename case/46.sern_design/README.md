@@ -15,6 +15,11 @@ PYTHONPATH=. .venv-opt/bin/python -m forge_design.evaluate.runner_sern \
 壁は `outputHDFflg: 1` で `res_wall_<id>_<step>.h5` を吐き、力係数はそこから積分する
 (`metrics/sern_forces.py`)。規約: 推力 = 壁力の −x、揚力 = +y、モーメント = 頭上げ正。
 
+**受理ゲート (2026-09-13, plan §4.7/§4.13 R1)**: 各 run の `metrics.json` の `gates` に verdict (PASS/FAIL) と fail_class
+(`DIVERGED` / `RESIDUAL_RISING` / `NOT_CONVERGED` / `UNSTEADY` / `NO_FORCES`) を残す。力係数履歴は `force_history.csv` に書き、
+`python3 solver_density_cuda/tools/check_quasisteady.py --series-csv <run>/force_history.csv --series-cols C_T_with_shear,C_L,C_M --drift 0.02 --osc 0.05`
+で正式ツールの VERDICT を再取得できる。既存キャンペーンの再判定は `driver_sern <problem> <campaign> --rejudge <out_dir>`。
+
 ## 計算 run 一覧
 
 | run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
@@ -136,6 +141,8 @@ PYTHONPATH=. .venv-opt/bin/python -m forge_design.evaluate.runner_sern \
 | `run_0087_3d_sst_cycle_thick_ztaper` | 板厚を側壁の 2 セル手前から 0 に絞る | 暖機段は完走 (残差 1.4–2.3 桁低下)、mid 段 **step 57** (48 → 57 と改善するが未解決)。位置は run_0083 と同じ刃先 | 診断 (ref) |
 | `run_0088_3d_sst_cycle_cfl01` | 同上 + mid 段 CFL 0.2 → 0.1 | mid 段 **step 109** = 57 のほぼ倍 = **同じ物理時刻** → CFL はつまみでない。次はカウル後縁の鈍頭化 | 診断 (ref) |
 | `run_0089_inletprof_supersonic_tt` | **超音速入口 (`inlet_uniformVelocity`) の入口分布検証**: run_0029 (node CPG Euler 2D) の config/IC + `inletProfile: 1`, Tt(y)=2025+200·exp(−((y−0.05)/0.02)²) K, M 2.5, Ps 20 kPa を `tools/gen_inlet_profile.py gen --Tt --M --Ps` で ρ/Ux/Ps に換算 (往復誤差 1e-12 K), 600 step。手順 [procedures/inlet-profile.md](../../procedures/inlet-profile.md) | `verify`: 入口ノード ρ・U が目標と 1e-5、h0 由来 T0 が換算元 Tt と 6e-4 K で一致。NaN 0 (600 step の過渡, 収束評価対象外) | active (機能検証 ref; 入力 config/CSV を git 追跡) |
+| `run_0090_rejudge_r1_gates/` | **R1 評価ゲート (plan §4.7/§4.13, 2026-09-13) で既存キャンペーンを CFD 無しで再判定** (`driver_sern --rejudge`; 元 run は読むだけ)。`run_0069_moo_cycle3op/` (rejudge_summary.md, ledger_rejudged.jsonl, pareto_rejudged.json, 各 run の metrics.json + force_history.csv)、`run_0054_moo_cycle3op/`、`run_0027_3d_bookkeeping/` + `run_0029_2d_ref/` (R2 集計分離) | run_0069: 旧 PASS 14 → **新 10** (HV 2.6835 → 2.6450)。除外 = RESIDUAL_RISING 3 (doe_004/015 m6_on: 本段末尾で ρ,ρu,ρe 残差 2 倍リバウンド; doe_014 m4_off: step 5461 から rms_roOmega 1e1→5e18 の本物の発散、力係数は STEADY のまま) + UNSTEADY 1 (doe_016 m4_off の C_M TRANSIENT-UNSETTLED, 1.3 %/tail)。run_0054: 1/1 DIVERGED 不変。run_0027 3D 再集計: ノズル C_T 0.9578 / 機体 −0.0253 / 総計 0.9325 (codex 検算と一致), 2D run_0029 0.9762 比 −1.9 % (両 run NOT CONVERGED) | active (判定記録) |
+| `run_0091_smoke_r1_driver/` | **R1 ゲート入り driver の実機スモーク**: run_0069 doe_001 (旧 PASS, C_T_w 0.9333, L 11.89) を現行 `driver_sern.evaluate` で再評価 (`replay.py`; 3 作動点 m6_on / m10_on [warm from m6_on] / m4_off, 生産 YAML `problem_moo_sst_node_cycle3op.yaml`)。バイナリ = 主 checkout `solver_density_cuda/build/forge` (2026-09-10 21:16 ビルド ≈ 5db69d93 世代、worktree から symlink) | **PASS** (degraded なし, 172 s / 3 作動点): C_T_w **0.93308** (旧 run_0069 doe_001 0.93331, −0.02 % = バイナリ差・run 間ノイズ), C_M_w −3.43, L 11.89。作動点別 C_T(摩擦込)/C_M: m6_on 0.9330/−5.93, m10_on 0.9304/−4.01, m4_off 0.9373/+3.69。全 op で rc 0・場有限・残差 NaN/rising 無し (verdict は NOT CONVERGED stalled/plateau = 本ケースの性格)・C_T_with_shear,C_T,C_L,C_M 全て STEADY (`check_quasisteady --series-csv` ALL STEADY)。`pareto.json` に tag/degraded/ops ゲート要約あり。`residual_history.png` 各 run | active |
 
 ### S7 3D の現状 (2026-09-05)
 
