@@ -247,6 +247,10 @@ __host__ __device__ inline double cond_evap_rate(
     // Goodheart (N2 既定) / Gyarmathy: 前因子 kRT²/(ρ_l L²) × 駆動力 ln(p_v/p_d) × Kn 補正。
     const double driving = log(p_v/(pd > 1.0e-300 ? pd : 1.0e-300));   // < 0
     const double L   = cond_latent(cp, T);
+    // 前因子が 1/L^2 なので L=0 はゼロ除算になる。物性側は臨界点の手前で L を凍結して L>0 を保証している
+    // (h2o_latent の COND_H2O_LW_TFR) が、モデル差し替えで 0 が来ても Inf を場と診断配列に流さない
+    // (plans/active/condensation-h2o-latent-supercritical.md, codex plan M1)。
+    if (!(L > 0.0)) return 0.0;
     const double k   = cond_kgas(cp, T);
     const double pK  = (p_gas > 0.0) ? p_gas : p_v;
     const double lam = cond_mean_free_path(T, pK, R);

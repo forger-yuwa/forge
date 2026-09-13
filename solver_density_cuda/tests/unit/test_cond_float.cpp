@@ -55,13 +55,15 @@ static void test_tables(const char* name, const CondSpeciesProps& s, double Tlo,
             const double dlpd = (log(cond_psat(s, T + d)) - log(cond_psat(s, T - d)))/(2*d);
             const double dLd  = (cond_latent(s, T + d) - cond_latent(s, T - d))/(2*d);
             wdlp.upd(fabs(dlp - dlpd)/(fabs(dlpd) + 1e-4*fabs(log(cond_psat(s, T))) + 1e-6), T);
-            if (s.model != COND_MODEL_H2O || T <= 400.0) wdL.upd(0.5*fabs(dL - dLd)/(fabs(dLd) + 500.0), T);   // |ΔL'| ≤ 2e-4|L'| + 0.1 J/kg/K (Newton の傾きにしか使わない; H2O 液相 NASA-9 の高次項で 3 次内挿の微分誤差が 1.5e-4)
+            // |ΔL'| ≤ 2e-4|L'| + 0.1 J/kg/K (Newton の傾きにしか使わない; H2O 液相 NASA-9 の高次項で 3 次内挿の微分誤差が 1.5e-4)。
+            // H2O は 646.15 K の Watson 凍結点 (折れ点) をまたぐ区間だけ除く (2026-09-14)。
+            if (s.model != COND_MODEL_H2O || T <= 645.8 || T >= 646.5) wdL.upd(0.5*fabs(dL - dLd)/(fabs(dLd) + 500.0), T);
         }
     }
     char b[128];
     snprintf(b, sizeof b, "%s ln p_sat abs/(1+0.075|ln p|) (worst at %.2f K)", name, wlp.T); check(wlp.v <= 2e-6, b, wlp.v, 2e-6);
     snprintf(b, sizeof b, "%s L rel (worst at %.2f K)", name, wL.T);         check(wL.v <= 2e-6, b, wL.v, 2e-6);
-    if (s.model == COND_MODEL_H2O) { snprintf(b, sizeof b, "%s L rel T>400K (L floor kink; worst at %.2f K)", name, wLhi.T); check(wLhi.v <= 1e-4, b, wLhi.v, 1e-4); }
+    if (s.model == COND_MODEL_H2O) { snprintf(b, sizeof b, "%s L rel T>400K (Watson branch + 646.15 K freeze; worst at %.2f K)", name, wLhi.T); check(wLhi.v <= 1e-4, b, wLhi.v, 1e-4); }
     snprintf(b, sizeof b, "%s sigma rel|abs<=1e-8 (worst at %.2f K)", name, ws.T); check(ws.v <= 2e-6, b, ws.v, 2e-6);
     snprintf(b, sizeof b, "%s rho_l rel (worst at %.2f K)", name, wr.T);     check(wr.v <= 2e-6, b, wr.v, 2e-6);
     snprintf(b, sizeof b, "%s k_gas rel (worst at %.2f K)", name, wk.T);     check(wk.v <= 2e-6, b, wk.v, 2e-6);

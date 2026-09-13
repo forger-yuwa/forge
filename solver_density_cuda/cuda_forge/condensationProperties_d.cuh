@@ -268,6 +268,20 @@ __host__ __device__ inline double h2o_gas_h_mass(const double* a, double T)
     }
     return h2o_nasa9_h_mass(a, T);
 }
+// --- 373.15 K 超の L: Watson 型外挿 (2026-09-14, plans/active/condensation-h2o-latent-supercritical.md) ---
+//   L(T) = L(T0) [(Tc-T)/(Tc-T0)]^0.38。T0=373.15 K は CEA 液相フィットの上端で、アンカー L(T0) は従来の
+//   h_v-h_l の値そのもの (値は連続、傾きは -2327 → -3148 J/(kg K^2) で不連続)。指数 0.38 は Watson の標準値で、
+//   IAPWS 飽和線に対し 400-623 K で rms 1.4 % (0.28-0.40 の中で最小)。
+//   **T_fr=646.15 K で凍結**: L→0 は (a) 成長則の前因子 kRT^2/(rho_l L^2) をゼロ除算にし、(b) dL/dT→-inf が
+//   0.25 K 刻みの float 物性表の最終区間を壊す (647.0 K で -24 %)。T_fr は物性表の格子点そのもの
+//   ((646.15-120.15)/0.25 = 2104) なので片側微分構成が折れを正確に表す。T>=Tc に液相は存在し得ないので
+//   この 0.95 K の帯は**モデルの定義域外**であり、凍結値は数値ガードでしかない。
+#define COND_H2O_TC     647.096         // 臨界温度 [K]
+#define COND_H2O_LW_T0  373.15          // Watson のアンカー温度 = CEA 液相フィットの上端 [K]
+// アンカー L(T0) は**その場で h_v(T0)-h_l(T0) から計算する** (値をベタ書きすると 373.15 K の接続が
+// 1e-9 ずれる。参考値 2,269,078.99 J/kg)。
+#define COND_H2O_LW_N   0.38            // Watson 指数
+#define COND_H2O_LW_TFR 646.15          // 凍結温度 [K] (物性表の格子点)
 __host__ __device__ inline double h2o_latent(double T)
 {
     // 気相 H2O (CEA, 200–1000 K 区間; 1000 K 超は本用途で不要だが単調に外挿される)
@@ -279,10 +293,18 @@ __host__ __device__ inline double h2o_latent(double T)
     const double Tf = 273.15;
     double Tg = (T > COND_T_PROP_FLOOR) ? T : COND_T_PROP_FLOOR;
     const double hv = h2o_gas_h_mass(ag, Tg);   // 200 K 未満 / 1000 K 超は cp 一定の線形外挿 (種 DB と同規約)
+    // 373.15 K 超: 液相フィットが無いので h_l を伸ばさず、L 自体を Watson 型で臨界点へ向けて外挿する
+    // (旧実装は h_l を 373.15 K でクランプしており、c_p,l を失って L が温度とともに**増加**していた:
+    //  473 K で 2.460 対 真値 1.940 MJ/kg、573 K で 2.657 対 1.404、T_c で 0 のはずが 2.807)。
+    if (Tg > COND_H2O_LW_T0) {
+        const double L0 = h2o_gas_h_mass(ag, COND_H2O_LW_T0) - h2o_nasa9_h_mass(al, COND_H2O_LW_T0);
+        const double x  = (COND_H2O_TC - ((Tg < COND_H2O_LW_TFR) ? Tg : COND_H2O_LW_TFR))
+                        / (COND_H2O_TC - COND_H2O_LW_T0);
+        return L0 * pow(x, COND_H2O_LW_N);
+    }
     double hl;
     if (Tg >= Tf) {
-        const double Tl = (Tg < 373.15) ? Tg : 373.15;
-        hl = h2o_nasa9_h_mass(al, Tl);
+        hl = h2o_nasa9_h_mass(al, Tg);
     } else {
         // 273.15 K 未満: cp_l(273.15) 一定で線形外挿 (過冷却水)
         const double h0  = h2o_nasa9_h_mass(al, Tf);
@@ -290,6 +312,7 @@ __host__ __device__ inline double h2o_latent(double T)
                                                         // 有効域 273.15 K の外を踏んでいた; 差は 0.05 J/kgK)
         hl = h0 - cpl*(Tf - Tg);
     }
+    // 安全網。45-373.15 K の素の値は 2.27-3.04 MJ/kg でどちらにも当たらない (373.15 K 超は上で return 済み)。
     double L = hv - hl;
     if (L < 1.5e6) L = 1.5e6;
     if (L > 3.5e6) L = 3.5e6;
@@ -350,7 +373,14 @@ __host__ __device__ inline double cond_Tsat(const CondSpeciesProps& s, double pv
         const double ps = cond_psat(s, T);
         if (!(ps > 1.0e-300)) { T *= 1.2; continue; }
         const double f  = log(ps) - lnpv;
-        double dfdT = cond_latent(s, T)/(s.R*T*T);
+        // d ln p_sat/dT は **飽和圧そのものの微分**で取る (2026-09-14)。旧実装は Clausius-Clapeyron 近似
+        // L/(R T^2) を使っていたため、L の外挿規約を変えると Tsat 診断まで道連れになった (codex plan M3:
+        // p_sat(640 K) を 500 K 初期値から反転すると 471 K に落ちる)。float 版 cond_Tsat_f は元から表の
+        // ln p_sat の微分を使っており、これで両経路の規約が揃う。
+        const double dT_fd = 1.0e-3*T;
+        const double pp = cond_psat(s, T + dT_fd), pm = cond_psat(s, T - dT_fd);
+        double dfdT = (pp > 1.0e-300 && pm > 1.0e-300) ? (log(pp) - log(pm))/(2.0*dT_fd)
+                                                       : cond_latent(s, T)/(s.R*T*T);
         if (dfdT < 1.0e-6) dfdT = 1.0e-6;
         double dT = f/dfdT;
         if (dT >  0.3*T) dT =  0.3*T;

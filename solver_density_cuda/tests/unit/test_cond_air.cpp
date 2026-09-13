@@ -210,5 +210,86 @@ int main() {
         check("dL/dT is continuous across the 200 K join", dm, dp, 5e-5);
     }
 
+    // (i) H2O 潜熱の 373 K 超 Watson 外挿 (2026-09-14, plans/active/condensation-h2o-latent-supercritical.md §6)。
+    //     旧実装は h_l を 373.15 K でクランプしており L が温度とともに増加していた。
+    printf("== (i) H2O latent heat above 373.15 K (Watson extrapolation) ==\n");
+    {
+        const CondSpeciesProps w = condProps_H2O();
+        const double Tc = 647.096, T0 = 373.15, Tfr = 646.15;
+        // 1. 373.15 K で値が連続 / 373.15-647 K で単調非増加
+        // 接続点の両側を近づけて比べる (±1e-6 K だと傾き ~3000 J/(kg K) 分の 2.4e-9 が残り、連続性の判定にならない)
+        check("value is continuous at the 373.15 K anchor",
+              cond_latent(w, T0 - 1e-9), cond_latent(w, T0 + 1e-9), 1e-11);
+        {
+            int nup = 0; double prev = cond_latent(w, T0);
+            for (double T = T0 + 0.05; T <= Tc; T += 0.05) {
+                const double v = cond_latent(w, T); if (v > prev + 1e-6) ++nup; prev = v;
+            }
+            checkb("L is monotonically non-increasing over 373.15-647.1 K", nup == 0);
+        }
+        // 2. IAPWS 飽和線 (h_g - h_f) の慣用表値との比較。参照は 100/150/200/250/300/350 degC。
+        {
+            const double Tref[6] = {373.15, 423.15, 473.15, 523.15, 573.15, 623.15};
+            const double Lref[6] = {2257e3, 2114e3, 1940e3, 1716e3, 1404e3, 893e3};
+            double worst = 0.0, ss = 0.0;
+            for (int i = 0; i < 6; ++i) {
+                const double e = (cond_latent(w, Tref[i]) - Lref[i])/Lref[i];
+                worst = std::max(worst, std::fabs(e)); ss += e*e;
+            }
+            const double rms = std::sqrt(ss/6.0);
+            printf("      vs IAPWS 6 points: max |err| = %.2f %%, rms = %.2f %%\n", 100*worst, 100*rms);
+            checkb("within 3 % of the IAPWS saturation line (max)", worst < 0.03);
+            checkb("within 2 % of the IAPWS saturation line (rms)", rms < 0.02);
+            // 指数 0.38 が 0.28-0.40 の中で rms 最小であること (計画 §4.2 の探索を回帰させる)
+            const double L0 = cond_latent(w, T0);
+            double best = 1e30; double bestn = 0.0;
+            for (double n = 0.28; n <= 0.401; n += 0.01) {
+                double s2 = 0.0;
+                for (int i = 0; i < 6; ++i) {
+                    const double Lw = L0*std::pow((Tc - Tref[i])/(Tc - T0), n);
+                    const double e = (Lw - Lref[i])/Lref[i]; s2 += e*e;
+                }
+                if (s2 < best) { best = s2; bestn = n; }
+            }
+            printf("      exponent search over 0.28-0.40: best n = %.2f\n", bestn);
+            checkb("Watson exponent 0.38 minimises the rms error", std::fabs(bestn - 0.38) < 0.005);
+        }
+        // 4. 凍結帯: T_fr 以上は一定、全域で L>0
+        check("L is frozen above 646.15 K (647 K)",  cond_latent(w, 647.0),  cond_latent(w, Tfr), 1e-14);
+        check("L is frozen above 646.15 K (1200 K)", cond_latent(w, 1200.0), cond_latent(w, Tfr), 1e-14);
+        {
+            int nz = 0;
+            for (double T = 130.0; T <= 1200.0; T += 0.5) if (!(cond_latent(w, T) > 0.0)) ++nz;
+            checkb("L stays strictly positive over 130-1200 K", nz == 0);
+        }
+        // 5. 成長則の有限性 (codex plan M1 の再現ケースを含む)
+        {
+            int nbad = 0; double worst_abs = 0.0;
+            for (int gm = 0; gm <= 1; ++gm)
+              for (double T : {400.0, 600.0, 646.0, 650.0, 700.0})
+                for (double r : {1.0e-8, 1.0e-7}) {
+                    const double pv = 1.0e5, pg = 1.0e5;   // p_v < p_sat (蒸発側) になる高温
+                    const double d = cond_growth(w, T, pv, r, 0.0, gm, pg);
+                    if (!std::isfinite(d)) { ++nbad; printf("      FAIL gm=%d T=%.0f r=%.0e drdt=%g\n", gm, T, r, d); }
+                    else worst_abs = std::max(worst_abs, std::fabs(d));
+                }
+            printf("      max |dr/dt| over the hot sweep = %.4g m/s\n", worst_abs);
+            checkb("growth/evaporation rate stays finite above 373 K (no 1/L^2 blow-up)", nbad == 0);
+        }
+        // 6. T_sat の往復 (codex plan M3: 根から離れた初期推定でも収束すること)
+        {
+            int nbad = 0; double worst = 0.0;
+            for (double T : {300.0, 450.0, 550.0, 640.0})
+                for (double guess : {250.0, 500.0, 900.0}) {
+                    const double ps = cond_psat(w, T), Ts = cond_Tsat(w, ps, guess);
+                    const double e = std::fabs(Ts - T);
+                    worst = std::max(worst, e);
+                    if (!(e < 1.0e-3)) { ++nbad; printf("      FAIL T=%.1f guess=%.0f -> Tsat=%.6f\n", T, guess, Ts); }
+                }
+            printf("      worst |Tsat(psat(T)) - T| = %.2e K\n", worst);
+            checkb("Tsat inverts psat from far-away guesses (300-640 K)", nbad == 0);
+        }
+    }
+
     printf("%s (%d failures)\n", nfail ? "FAILED" : "ALL PASS", nfail); return nfail ? 1 : 0;
 }
