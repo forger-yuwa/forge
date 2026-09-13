@@ -63,7 +63,7 @@
   `thermoHrefTemp>0` が前提 (絶対 datum の H2O は float 段が収束しない; datum 無しは自動で double 反転)。
 - **gather 系の試み (結果)**: 近傍 dq / 原始量の stride-8 AoS パック (`blockDPLURDqPack`, `mesh.primPack`) は A10G で +0.7〜+2.7 ms/step の逆効果、
   節点 RCM 再番号付け (`mesh.renumber: rcm`) は −3.3 %。gather は既に L2 で吸収されておりレイテンシ律速 (占有率 28 %) が残る。パックは既定 0、RCM は opt-in。
-- **凝縮 ON の経路** (相変化ソース・二相 EOS・面潜熱・clamp) は 2026-09-13 に float 化 (`condensation.condFloat`, 既定 1): 物性は double で作った区分 3 次表を float で引き、表範囲外の湿潤セルは旧 double 実体へ退避、核生成は対数空間、二相反転は float Newton + double 研磨。凝縮 ON の 3D は A10G で 89.5 ms/step (dry 33.8) だったものがローカル RTX 3060 で 197→84 ms/step (dry 63)。設計と判定は [plans/active/condensation-float-speedup.md](../../plans/active/condensation-float-speedup.md)、仕様は [condensation.md](../condensation.md) 実装 §9。
+- **凝縮 ON の経路** (相変化ソース・二相 EOS・面潜熱・clamp) は 2026-09-13 に float 化 (`condensation.condFloat`, 既定 1): 物性は double で作った区分 3 次表を float で引き、表範囲外の湿潤セルは旧 double 実体へ退避、核生成は対数空間、二相反転は float Newton + double 研磨。凝縮 ON の 3D は A10G で起動区間 89.4 → 44.0、発達場 (湿潤 23 %) 98.0 → 52.3 ms/step (dry 33.8 不変; 2026-09-13)。設計と判定は [plans/active/condensation-float-speedup.md](../../plans/active/condensation-float-speedup.md)、仕様は [condensation.md](../condensation.md) 実装 §9。
 - 面流束の `atomicAdd` 蓄積のため同一バイナリでも全場はビット一致しない。精度変更の採否は場ごとに「**絶対基準** (場のスケール正規化最大差:
   ρ/P/T/ρY ≤1e-5、速度 [|U| 尺度]/エネルギー/k/ω ≤1e-4、μt ≤1e-2) **または** 基準バイナリ同士の run-to-run ノイズ床の 2 倍以内」で判定する
   (`tools/perf_regress.py cmp --noise`; 欠落・形状不一致・非有限値は FAIL、勾配・診断量は除外。判定基準は plan §4.3)。
