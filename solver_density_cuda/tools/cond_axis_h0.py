@@ -109,6 +109,9 @@ def main():
         okd = steady_r and delta <= a.allow and dn <= max(a.frac * a.h0scale, dref + a.steady)   # 参照側の定常揺らぎ (--steady) を許す
         print("vs ref @step %d: new %.3f  ref %.3f  new-ref %+.3f J/kg (allow %.0f; new <= max(%.0f, ref+%.0f)) -> %s" % (s, dn, dref, delta, a.allow, a.frac * a.h0scale, a.steady, "ok" if okd else "EXCEED"))
         fail = fail or (not okd)
+    # 2 つの判定を別々に出す (codex result-3 m2): 絶対ゲート (0.1 % 規約) と非劣化ゲート (参照比)。終了コードは非劣化ゲート (--ref 無しは絶対ゲート)。
+    print("ABSOLUTE_VERDICT: %s (metric %.3f J/kg vs limit %.0f)" % ("PASS" if ok else "FAIL", last[1], a.frac * a.h0scale))
+    if a.ref: print("NONDEGRADATION_VERDICT: %s" % ("FAIL" if fail else "PASS"))
     print("VERDICT: %s" % ("FAIL" if fail else "PASS"))
     sys.exit(1 if fail else 0)
 
