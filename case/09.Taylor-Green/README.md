@@ -37,6 +37,7 @@ $m=2^{(境界方向数)}$ で割って一意 1 個分に補正する (`plot_ke_e
 | `run_0007_node_keep_pure_visc` | node (median-dual) | pure KEEP, 粘性 (Re≈160) | 質量厳密・運動量 ~1e-7 保存。**KE 物理減衰 K/K0→0.644、エントロピー +1.3e-2 (第二法則)** | active ✅ |
 | `run_0008_cell_pure_visc` | cell (primal hex) | pure KEEP, 粘性 | **修正後: 運動量 ~1e-7 保存・KE 物理減衰 K/K0→0.661** (node とほぼ一致; 残差は primal/dual メッシュ差)。修正前は KE×8 スプリアス増殖 | active ✅ |
 | `run_keep`, `run_keep_M0.1` | cell | 旧参照入力 (旧スキーマ config) | — | ref |
+| `run_0053_cond_periodic_conservation` (ローカル, 2026-09-13) | 凝縮モーメント移流の融合 (plan condensation-float-speedup §5.1 #12b): run_0052 config + N2 CPG 凝縮 `condEquilibrium: 2` (Q0–Q2 はソース 0 の移流のみ) + 非一様 ρQ IC、ラベル merged/merged1/merged1b (融合前) と condf/condf1 (融合後), 1 step と 20 step | 1 step の Σ ρQ_n V 変化は両者 5.60e-6 で一致 (差 ≤5e-10 = 反復ノイズ); 20 step は両者 +1.1e-3 (既存挙動) | active (回帰) |
 
 ### KEEP 陰解法 (block-DPLUR dual-time) 物理CFL掃引 (2026-06-29)
 

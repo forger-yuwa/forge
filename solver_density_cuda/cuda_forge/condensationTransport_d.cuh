@@ -7,6 +7,7 @@
 #include "mesh/mesh.hpp"
 #include "input/solverConfig.hpp"
 #include "cuda_forge/condensationProperties_d.cuh"   // CondPropOpts / condProps_make
+#include "cuda_forge/condensationTables_d.cuh"       // CondTablesF (float 経路の物性表)
 #include "variables.hpp"
 
 // 非平衡凝縮 (Phase 1): 凝縮種ごとの 4 モーメント (ρg,ρQ2,ρQ1,ρQ0) を、汎用スカラ輸送コア
@@ -20,6 +21,7 @@ void condensationInit_d(solverConfig& cfg, variables& var);
 
 // 二相 EOS へ渡す device rog 配列ポインタ。凝縮無効時は nullptr。
 flow_float** cond_rog_device_ptr();
+const CondTablesF& cond_tables_device();   // condensationInit_d が構築 (valid=0 なら float 経路は使わない)
 
 // config → kernel 値渡しの凝縮物性オプション (plans/accepted/condensation-air.md, condensation-kantrowitz-carrier.md)
 inline CondPropOpts cond_prop_opts(const solverConfig& cfg)

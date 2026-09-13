@@ -719,6 +719,8 @@ void solverConfig::read(std::string fname)
             this->condEvapRmin    = getOptionalValidatedValue<double>(cond, "condEvapRmin", 1.0e-9, "condensation");
             this->condEvapKelvin  = getOptionalValidatedValue<int>(cond, "condEvapKelvin", 0, "condensation");
             this->condEquilibrium = getOptionalValidatedValue<int>(cond, "condEquilibrium", 0, "condensation");
+            this->condFloat = getOptionalValidatedValue<int>(cond, "condFloat", 1, "condensation");
+            if (this->condFloat != 0 && this->condFloat != 1) throw std::runtime_error("Key 'condFloat' in 'condensation' must be 0 or 1.");
             this->condEqRelax     = getOptionalValidatedValue<double>(cond, "condEqRelax", 1.0, "condensation");
             this->condEqDTmax     = getOptionalValidatedValue<double>(cond, "condEqDTmax", 10.0, "condensation");
             this->condEqDgMax     = getOptionalValidatedValue<double>(cond, "condEqDgMax", 0.05, "condensation");

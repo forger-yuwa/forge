@@ -327,3 +327,125 @@ __host__ __device__ inline double cond_equilibrium_Tg_pure_cpg(
     };
     return cond_eq_solve_g(tfun, dTdg, cprops, rho*R, 1.0, g_guess, T_guess, T_out);
 }
+
+// =====================================================================================
+// 一温度二相反転のハイブリッド (plans/active/condensation-float-speedup.md §4.2-5, codex plan M3)。
+//   float Newton (SpeciesThermoF + 物性表の L, dL/dT, 最大 12 回) → double 研磨 (最大 3 段) → 二相エネルギー残差
+//   |G(T)| = |e_mix(T) − e_in| ≤ 1e-9|e_in| + 0.05 J/kg で成功判定。不成立なら現行 double 関数 (30 回) を続行し 10 倍の許容で再判定。
+//   呼び出し側は ok=false のセルで roe を上書きしない (保存量保護) — CPG 経路 cond_T_from_e_cpg と同じ規約。
+//   pure (carrier=0) の残差は cond_T_from_e_onetemp と同じ n2_latent (旧 N2 多項式) を使う (現行の反転と整合)。
+// =====================================================================================
+#include "condensationTables_d.cuh"
+// tb (任意): 物性表があれば Newton の傾き dL/dT を表の解析微分 (float) で取る (double の両側差分 = NASA-9 4 回を省く; 傾きは収束速度にしか効かず
+//   残差 G と成功判定は double のまま)。表範囲外や tb=nullptr は従来の double 差分。
+__host__ __device__ inline double cond_twophase_resid(
+    const SpeciesThermo* sp, int nSp, const double* Y, double T, double g, double Rw, int carrier,
+    const CondSpeciesProps& cprops, double e_in, double* dGdT = nullptr, const CondTablesF* tb = nullptr)
+{
+    double cp_T, h_T;
+    if (sp[0].invMW > 0.0) thermo_cph_mix_polish(sp, nSp, Y, T, &cp_T, &h_T); else thermo_cph_mix(sp, nSp, Y, T, &cp_T, &h_T);
+    double R;
+    if (sp[0].invMW > 0.0) { double s_ = 0.0; for (int i = 0; i < nSp; ++i) s_ += Y[i]*sp[i].invMW; R = THERMO_RU*s_; } else R = thermo_R_mix(sp, nSp, Y);
+    const double ev = h_T - R*T;
+    const double cv = cp_T - R;
+    if (carrier) {
+        const double L  = cond_latent(cprops, T);
+        if (dGdT) {
+            double dL;
+            if (tb != nullptr && tb->valid && cond_tab_wet_ok(*tb, (float)T)) { float d; cond_tab_latent_f(*tb, (float)T, &d); dL = (double)d; }
+            else dL = (cond_latent(cprops, T+0.1) - cond_latent(cprops, T-0.1))/0.2;
+            *dGdT = cv + g*(Rw - dL);
+        }
+        return ev + g*(Rw*T - L) - e_in;
+    }
+    const double L = n2_latent(T);
+    if (dGdT) { const double dL = (n2_latent(T+0.1) - n2_latent(T-0.1))/0.2; *dGdT = cv + g*R - g*dL; }
+    return ev + g*R*T - g*L - e_in;
+}
+
+__host__ __device__ inline float cond_T_from_e_twophase_f(
+    const SpeciesThermoF* spf, int nSp, const float* Yf, const CondTablesF& tb,
+    float e_in, float g, float Rw, int carrier, float T_guess, float T_min, float T_max, int maxIter)
+{
+    const float R = thermo_R_mix_f(spf, nSp, Yf);
+    float T = T_guess;
+    if (!(T > T_min)) T = T_min;
+    if (T > T_max) T = T_max;
+    #pragma unroll 1
+    for (int it = 0; it < maxIter; ++it) {
+        float cp_T, h_T, dL;
+        thermo_cph_mix_f(spf, nSp, Yf, T, &cp_T, &h_T);
+        const float L  = cond_tab_latent_f(tb, T, &dL);
+        const float ev = h_T - R*T;
+        const float cv = cp_T - R;
+        const float G  = carrier ? (ev + g*(Rw*T - L) - e_in) : (ev + g*R*T - g*L - e_in);
+        float Gp = carrier ? (cv + g*(Rw - dL)) : (cv + g*R - g*dL);
+        if (Gp < 1.0e-2f*cv) Gp = 1.0e-2f*cv;
+        float dT = G/Gp;
+        if (dT >  0.5f*T) dT =  0.5f*T;
+        if (dT < -0.5f*T) dT = -0.5f*T;
+        T -= dT;
+        if (T < T_min) T = T_min;
+        if (T > T_max) T = T_max;
+        if (fabsf(dT) < 1.0e-3f + 4.0e-6f*T) break;
+    }
+    return T;
+}
+
+// double Newton を残差 tol=1e-9|e|+0.05 J/kg まで続ける研磨 (最大 10 段)。旧 double 経路 (condFloat=0) と float 経路の退避後の両方で使い、
+// 成功条件を全経路で同一にする (codex result M2)。満たさなければ ok=false (呼び出し側は roe を上書きしない)。
+__host__ __device__ inline double cond_twophase_polish(
+    const SpeciesThermo* sp, int nSp, const double* Y, double T, double e_in, double g, double Rw, int carrier,
+    const CondSpeciesProps& cprops, double T_min, double T_max, bool* ok, const CondTablesF* tb = nullptr)
+{
+    const double tol = 1.0e-9*fabs(e_in) + 0.05;
+    #pragma unroll 1
+    for (int k = 0; k < 10; ++k) {
+        double Gp;
+        const double G = cond_twophase_resid(sp, nSp, Y, T, g, Rw, carrier, cprops, e_in, &Gp, tb);
+        if (!isfinite(G) || !isfinite(T)) { *ok = false; return T; }
+        if (fabs(G) <= tol) { *ok = true; return T; }
+        const double cvfl = 1.0e-2*(Gp > 0.0 ? Gp : 1.0);
+        double dT = G/((Gp > cvfl) ? Gp : cvfl);
+        if (dT >  0.5*T) dT =  0.5*T;
+        if (dT < -0.5*T) dT = -0.5*T;
+        T -= dT;
+        if (T < T_min) T = T_min;
+        if (T > T_max) T = T_max;
+    }
+    const double G = cond_twophase_resid(sp, nSp, Y, T, g, Rw, carrier, cprops, e_in);
+    *ok = isfinite(G) && isfinite(T) && (fabs(G) <= tol);
+    return T;
+}
+
+__host__ __device__ inline double cond_T_from_e_twophase_hybrid(
+    const SpeciesThermo* sp, const SpeciesThermoF* spf, int nSp, const double* Y, const float* Yf, const CondTablesF& tb,
+    double e_in, double g, double Rw, int carrier, const CondSpeciesProps& cprops,
+    double T_guess, double T_min, double T_max, bool* ok)
+{
+    const double tol = 1.0e-9*fabs(e_in) + 0.05;   // 成功判定 [J/kg] (CPG 経路 cond_T_from_e_cpg と同じ)
+    const double tolP = 1.0e-9*fabs(e_in) + 1.0e-3; // 研磨の停止 [J/kg] (~1e-6 K; float 推定 [~0.05 J/kg] のまま返さず最低 1 段は double で研磨して 1e-8·T を出す)
+    double T = (double)cond_T_from_e_twophase_f(spf, nSp, Yf, tb, (float)e_in, (float)g, (float)Rw, carrier,
+                                                (float)T_guess, (float)T_min, (float)T_max, 12);
+    #pragma unroll 1
+    for (int k = 0; k < 3; ++k) {
+        double Gp;
+        const double G = cond_twophase_resid(sp, nSp, Y, T, g, Rw, carrier, cprops, e_in, &Gp, &tb);
+        if (isfinite(G) && fabs(G) <= tolP) { *ok = true; return T; }
+        const double cvfl = 1.0e-2*(Gp > 0.0 ? Gp : 1.0);
+        double dT = G/((Gp > cvfl) ? Gp : cvfl);
+        if (dT >  0.5*T) dT =  0.5*T;
+        if (dT < -0.5*T) dT = -0.5*T;
+        T -= dT;
+        if (T < T_min) T = T_min;
+        if (T > T_max) T = T_max;
+    }
+    {
+        const double G = cond_twophase_resid(sp, nSp, Y, T, g, Rw, carrier, cprops, e_in);
+        if (isfinite(G) && fabs(G) <= tol) { *ok = true; return T; }
+    }
+    // 退避: 現行 double Newton (30 回) → 同じ残差条件 tol まで研磨を続ける (codex result M2: 全経路で同一の成功条件)。
+    T = carrier ? cond_T_from_e_carrier(sp, nSp, Y, e_in, g, Rw, cprops, T_guess, T_min, T_max)
+                : cond_T_from_e_onetemp(sp, nSp, Y, e_in, g, T_guess, T_min, T_max);
+    return cond_twophase_polish(sp, nSp, Y, T, e_in, g, Rw, carrier, cprops, T_min, T_max, ok, &tb);
+}

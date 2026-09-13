@@ -336,9 +336,18 @@ __global__ void SLAU_d
             // carrier+condensible (H2O in N2) 二相補正: 凝縮した水の潜熱を引く
             //   h_2phase = h_gas^全蒸気 - g L_w + ek。気相混合 h は全蒸気なので -g L_w を足すだけ。
             if (g_total != nullptr) {
-                const CondSpeciesProps& cprL = cnd.cprops;
-                h_p -= (flow_float)((double)g_total[ic0]*cond_latent(cprL, (double)T_cell[ic0]));
-                h_m -= (flow_float)((double)g_total[ic1]*cond_latent(cprL, (double)T_cell[ic1]));
+                // g=0 の面は補正が恒等 0 なので評価しない (h − 0·L = h; double 経路もビット不変)。float 経路は物性表 (plan condensation-float-speedup §4.2-4)。
+                const flow_float gL = g_total[ic0], gR = g_total[ic1];
+                if (gL > 0.0f || gR > 0.0f) {
+                    if (cnd.condFloat) {
+                        if (gL > 0.0f) h_p -= gL*cond_latent_tab_or_d(cnd.tables, cnd.cprops, T_cell[ic0]);
+                        if (gR > 0.0f) h_m -= gR*cond_latent_tab_or_d(cnd.tables, cnd.cprops, T_cell[ic1]);
+                    } else {
+                        const CondSpeciesProps& cprL = cnd.cprops;
+                        if (gL > 0.0f) h_p -= (flow_float)((double)gL*cond_latent(cprL, (double)T_cell[ic0]));
+                        if (gR > 0.0f) h_m -= (flow_float)((double)gR*cond_latent(cprL, (double)T_cell[ic1]));
+                    }
+                }
             }
         } else {
             h_p = ga*P_L/((ga-1.0f)*ro_L) + 0.5f*velocity2_L;
@@ -348,11 +357,22 @@ __global__ void SLAU_d
             //   新: g_f=セル値 (1 次), R_eff=R_air−g_f R_w (pure: R_w=R_air → (1−g)R), T_f=p_f/(ρ_f R_eff), h_f=c_p T_f − g_f L(T_f) + ek。
             //   c_hat (音速) は気相近似で単相のまま。g_total==nullptr (凝縮 off) で従来 (ビット不変)。
             if (g_total != nullptr) {
+                const flow_float gL = g_total[ic0], gR = g_total[ic1];
+                if (cnd.condFloat) {
+                    // float 経路: g>0 の側だけ二相面エンタルピー (表)。g=0 の側は乾き面 (上の単相式; cp·T_f+ek と丸めレベルで一致)。
+                    if (gL > 0.0f || gR > 0.0f) {
+                        const float Rgas = (ga - 1.0f)*cp_cpg/ga;
+                        const float Rw   = (cnd.Yw > 0.0) ? (float)cnd.cprops.R : Rgas;
+                        if (gL > 0.0f) h_p = cond_face_h_cpg_f(cnd.tables, cnd.cprops, cp_cpg, Rgas, Rw, gL, P_L, ro_L, 0.5f*velocity2_L);
+                        if (gR > 0.0f) h_m = cond_face_h_cpg_f(cnd.tables, cnd.cprops, cp_cpg, Rgas, Rw, gR, P_R, ro_R, 0.5f*velocity2_R);
+                    }
+                } else {
                 const CondSpeciesProps& cprC = cnd.cprops;
                 const double Rgas = ((double)ga - 1.0)*(double)cp_cpg/(double)ga;
                 const double Rw   = (cnd.Yw > 0.0) ? cprC.R : Rgas;          // CPG carrier (空気の N2) / pure
                 h_p = (flow_float)cond_face_h_cpg(cprC, (double)cp_cpg, Rgas, Rw, (double)g_total[ic0], (double)P_L, (double)ro_L, 0.5*(double)velocity2_L);
                 h_m = (flow_float)cond_face_h_cpg(cprC, (double)cp_cpg, Rgas, Rw, (double)g_total[ic1], (double)P_R, (double)ro_R, 0.5*(double)velocity2_R);
+                }
             }
         }
 

@@ -50,6 +50,9 @@
 | 8 | 条件の拡張 | Longshot 級 (M 10–14, Ṗ 小) と Daum & Gyarmathy の複数条件で理論線・実験点との比較 (air #9) |
 | 9 | 境界試験の実装経由化・流束収支 | slip ghost/bvar を kernel 経由で通す試験、node/cell の質量・エネルギー流束収支 (air #6b) |
 | 10 | `check_quasisteady.py` 統合 | onset/壁圧比 (dry 参照場を要する case 固有量) を `--quantity` に (air #6c) |
+| F-cf1 | node 周期の凝縮モーメント輸送が非保存 (2026-09-13, condensation-float-speedup §5.1 #12b): case/09 `run_0053` (run_0052 + N2 CPG `condEquilibrium 2`, Q0–Q2 はソース 0) で Σ ρQ_n V が 1 step +5.6e-6、20 step +1.1e-3 (融合前後の両バイナリで同値)。処理別収支 (移流 / dual-time 部分反復 / clamp / periodic seam) で原因を切り分ける | 未着手 |
+| F-cf2 | cell 凝縮 run の軸 h0 非保存が 0.1 % 規約を超える (2026-09-13, condensation-float-speedup §5.1 #10): case/34 cell 空気 434 J/kg (1.4e-3 of 3e5), N2 cell 482 J/kg (1.6e-3); node は 129 / 272 J/kg で規約内。基準バイナリ側の既存挙動 (float 化での変化は ≤6 J/kg)。cell の二相面エンタルピー/clamp の収支を確認する | 未着手 |
+| F-cf3 | 凝縮 ON 3D 発達場の A10G 52.3 ms/step (目標 ≤50, dry 33.8) の残り: `condensation_source_f_d` 9.6 ms と `dependentVariables_d` の湿潤セル分 +4.8 ms は warp 分岐 (湿潤 22.5 %) と二相反転の double 研磨が主で、ブロックサイズは効かない。候補: 湿潤セルだけを別起動 (インデックス圧縮) で反転・ソース評価、src_jac の摂動評価 2 回→1 回、`cond_primitive_multi_d` の 2 起動統合 (1.3 ms) | 未着手 |
 
 ## 6. 検証
 
