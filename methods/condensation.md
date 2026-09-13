@@ -855,3 +855,36 @@ $\mu_n=Q_n/(N_{ref}r_{ref}^n)$ ($N_{ref}=10^{18}$/kg, $r_{ref}=1$ nm) を導入�
 モーメント間比も無次元量どうしで安定。float で桁落ちが顕在化したら、その時点でモーメントの
 double 化 (混合精度 cond storage、`flow_float` とは別の `cond_float=double`) をフォールバックとして
 導入する。
+
+### 9. 混合精度実装 — 凝縮経路の float 化 (2026-09-13, plan [condensation-float-speedup](../plans/active/condensation-float-speedup.md))
+
+実装 §8 の「まず全 float」はモーメントの**格納**についての方針で、相変化ソース (`condensation_source_d`)・二相 EOS の温度反転・
+SLAU の二相面エンタルピー補正の**演算**は double で書かれていた (`condensationProperties_d.cuh` 冒頭「物性評価は exp/log で桁が飛ぶため
+内部は double」)。CC 8.6 (A10G / RTX 3060) では FP64 が FP32 の 1/64 のため、3D node SST TP (2.37 M 節点) で凝縮 ON が dry の 2.6 倍
+(33.8 → 89.5 ms/step, 発達した凝縮場では 108 ms/step) になっていた。以下の方式で float 化する (モデル式・評価点・律速規約は不変。
+`condensation.condFloat: 0` で従来の double 経路)。
+
+- **物性は区分 3 次 Hermite 表** (`condensationTables_d.cuh`): $\ln p_{sat}(T)$, $L(T)$, $\sigma(T)$, $\rho_l(T)$, $k_{gas}(T)$, $\mu_{gas}(T)$ を
+  現行の double 関数 (クランプ・低温外挿込み) からホストで double で作り、区間ごとの 4 係数を float で持つ。物性式を直接 float で評価する案は
+  棄却した: H2O の潜熱 $L=h_v-h_l$ は液相 NASA-9 (係数 $10^9/T^2$ 級) の相殺で float だと相対 9e-3、N2 の Jacobsen 飽和圧は 3e-4 ずれる
+  (codex plan レビュー 2026-09-13 M1)。一様格子 (N2: $T_0$=20 K, $h$=0.1 K, 上端 125.6 K; H2O: $T_0$=120.15 K, $h$=0.25 K, 上端 1200.15 K) で、
+  接続点 (N2 45/50/70 K、H2O 273.15 K) は格子点に置き、区間の両端で**片側**微分を使って区間をまたぐ漏れを無くす。3 次の打切りは
+  $h^4 f^{(4)}/384$ で無視でき、誤差は float 丸め (6e-8) が支配 → 単体試験で 0.01 K 刻みの全域で double と比較 (許容: $\ln p_{sat}$ 絶対 2e-6、
+  他は相対 2e-6)。範囲外は端でクランプ (N2 の $T_c-0.5$=125.69 K と 125.6 K の間、H2O の 120.15 K 未満は近似; 物理的に凝縮しない領域)。
+- **核生成率は float では対数空間で組み、指数化前に上限を掛ける**: $m=M/N_A\approx3\times10^{-26}$ kg の $m^3$ が float の範囲を割るため
+  $$\ln J=\tfrac12\ln\frac{2\sigma}{\pi}-\tfrac32\ln m+2\ln\rho_v-\ln\rho_l-\frac{\Delta G^*}{k_BT}+\ln(\mathrm{corr}),\qquad
+    \ln J\leftarrow\min(\ln J,\ln J_{max}),\quad J=e^{\ln J}\ (\ln J<-80\Rightarrow0).$$
+  $\ln J_{max}=80.6$ は float の $\ln(\mathrm{FLT\_MAX})=88.7$ より小さい (N2 60 K・S=100 で $\ln J=93$ になる例がある)。上限は本体と src_jac の
+  摂動評価の両方に掛かるので、上限に張り付いたセルの src_jac は 0 になる (double 経路は摂動側が無制限で線形化が不整合だった; float 経路の
+  意図的な変更)。誤差は連鎖で評価する: $\delta\ln J\approx2(\Delta G^*/k_BT)\,\delta\ln S$ なので表の $\delta\ln p_{sat}\le2\times10^{-6}$ で
+  $\Delta G^*/k_BT\le200$ なら $\delta\ln J\le10^{-3}$。
+- **dry セルの早期退出**: $S\le1$, $g=0$, $\rho Q_0=0$ のセルは核生成・成長・蒸発・数値ヤコビアンが恒等的に 0 なので、sj_*/診断の初期化だけ行い
+  輸送残差に触れずに return する。$T_{sat}$ 診断は前 step の値から warm start した float Newton (表の $\ln p_{sat}$ と解析微分)。
+- **面の潜熱**: TP carrier の補正 $h\mathrel{-}=g\,L(T_{cell})$ と CPG 二相の $L(T_f)$ は面カーネル内で表から引く (セル配列にキャッシュする案は、
+  dependentVariables 後の境界処理 [`nodeWallDirichlet_d`] が壁ノードの $T$ を書き換えて評価時点がずれるため不採用)。$g_L=g_R=0$ の面は
+  補正を評価しない。
+- **温度反転**: 凝縮 ON でも $g\le10^{-12}$ のセルはハイブリッド反転 ([thermophysics.md](thermophysics.md) `thermoFloat`) を使う。$g>0$ の
+  一温度二相反転は float Newton (`SpeciesThermoF` + 表の $L, dL/dT$) → double 研磨 (最大 3 段) → 二相エネルギー残差 $|e_{mix}(T)-e_{in}|\le
+  10^{-9}|e_{in}|+0.05$ J/kg で成功判定。不成立なら現行 double Newton を続行、それでも失敗したセルは `roe` を上書きしない (保存量保護,
+  `g_condTinvFail` に計上)。平衡形 (`condEquilibrium`)、CPG 二相の括弧付き Newton、二相音速、二温度は double のまま。
+- `condFloat` の分岐表・ビット一致の範囲・FP64 命令監査・判定基準は plan §4.2-6〜8 / §4.3。
