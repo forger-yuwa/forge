@@ -31,11 +31,16 @@ static void test_tables(const char* name, const CondSpeciesProps& s, double Tlo,
     for (double T = Tlo; T <= Thi + 1e-9; T += 0.01) {
         const float Tf = (float)T;
         // 表の範囲外は端クランプ: double 側も同じ温度で評価 (範囲内の誤差だけを判定)
-        const double Tc = (T < tb.Tmin) ? tb.Tmin : ((T > tb.Tmax) ? tb.Tmax : T);
-        float dlp, dL;
-        const double lp = cond_tab_lnpsat_f(tb, Tf, &dlp), lpd = log(cond_psat(s, Tc));
-        wlp.upd(fabs(lp - lpd)/(1.0 + 0.15*fabs(lpd)), T);    // 許容 2e-6·(1 + 0.15|ln p|) = 2e-6 + 3e-7|ln p| (~5 ulp of |ln p|)
-        const double L = cond_tab_latent_f(tb, Tf, &dL), Ld = cond_latent(s, Tc);
+        const double Tc = T;   // 参照は実温度 (codex result M1): 表範囲外は float 側が double 関数へ退避する (下の *_tab_or_d) ので一致するはず
+        float dlp = 0.0f, dL = 0.0f;
+        // ln p_sat は dry 診断 (S, T_sat) 用に表範囲 [Tmin, Tmax] で表を使う (外は端クランプ = 診断のみで判定対象外; 湿潤セルは double 実体へ退避)
+        if (T >= tb.Tmin && T <= tb.Tmax) {
+            const double lp = cond_tab_lnpsat_f(tb, Tf, &dlp), lpd = log(cond_psat(s, Tc));
+            wlp.upd(fabs(lp - lpd)/(1.0 + 0.15*fabs(lpd)), T);    // 許容 2e-6·(1 + 0.15|ln p|) = 2e-6 + 3e-7|ln p| (~5 ulp of |ln p|)
+        }
+        // 湿潤経路の物性は表範囲 [Tmin, TwetMax] の外で double 関数へ退避: 退避値 = double の float 変換 (丸め 6e-8) を確認
+        const double L = cond_tab_wet_ok(tb, Tf) ? cond_tab_latent_f(tb, Tf, &dL) : cond_latent_tab_or_d(tb, s, Tf), Ld = cond_latent(s, Tc);
+        if (!cond_tab_wet_ok(tb, Tf)) { const double Lfb = cond_latent(s, (double)Tf); if (fabs(L - Lfb) > 1.5e-7*Lfb) { printf("   fallback L mismatch at %.2f K\n", T); ++g_fail; } continue; }   // 退避は同じ float 入力 Tf の double 関数値 (T_c 直下は L の傾きが急で T の float 丸めが効く)
         if (s.model != COND_MODEL_H2O || T <= 400.0) wL.upd(fabs(L - Ld)/Ld, T); else wLhi.upd(fabs(L - Ld)/Ld, T);
         const double sg = cond_tab_sigma_f(tb, Tf), sgd = cond_sigma(s, Tc);
         { const double e = fabs(sg - sgd); ws.upd((e <= 1e-8 || (sgd < 1e-3 && e <= 1e-5)) ? 0.0 : e/sgd, T); }   // T_c 直下 (σ<1e-3) は絶対 1e-5
@@ -49,7 +54,7 @@ static void test_tables(const char* name, const CondSpeciesProps& s, double Tlo,
             const double d = 1e-3;
             const double dlpd = (log(cond_psat(s, T + d)) - log(cond_psat(s, T - d)))/(2*d);
             const double dLd  = (cond_latent(s, T + d) - cond_latent(s, T - d))/(2*d);
-            wdlp.upd(fabs(dlp - dlpd)/(fabs(dlpd) + 1e-4*fabs(lpd) + 1e-6), T);
+            wdlp.upd(fabs(dlp - dlpd)/(fabs(dlpd) + 1e-4*fabs(log(cond_psat(s, T))) + 1e-6), T);
             if (s.model != COND_MODEL_H2O || T <= 400.0) wdL.upd(0.5*fabs(dL - dLd)/(fabs(dLd) + 500.0), T);   // |ΔL'| ≤ 2e-4|L'| + 0.1 J/kg/K (Newton の傾きにしか使わない; H2O 液相 NASA-9 の高次項で 3 次内挿の微分誤差が 1.5e-4)
         }
     }
@@ -213,6 +218,14 @@ static void test_inversion()
             if (dH > wDriftH) wDriftH = dH; if (dD > wDriftD) wDriftD = dD;
         }
     }
+    // 意図的な失敗: e_in を T_max=6000 K の外 (T≈9000 K 相当) に置く → 上限に張り付き残差が残る → ok=false (codex result M2)
+    { float Yf[2] = {(float)(1.0 - 0.0113), 0.0113f}; const double Y[2] = {(double)Yf[0], (double)Yf[1]};
+      double cpT, hT; thermo_cph_mix(sp.data(), 2, Y, 6000.0, &cpT, &hT); const double R = thermo_R_mix(sp.data(), 2, Y);
+      const double e_big = (hT - R*6000.0)*1.5;
+      bool ok = true; const double Tb = cond_T_from_e_twophase_hybrid(sp.data(), spf.data(), 2, Y, Yf, tb, e_big, 1.0e-3, Rw, 1, cp, 300.0, 50.0, 6000.0, &ok);
+      bool ok2 = true; const double Tb2 = cond_twophase_polish(sp.data(), 2, Y, 300.0, e_big, 1.0e-3, Rw, 1, cp, 50.0, 6000.0, &ok2);
+      printf("  [%s] forced failure (e beyond T_max): hybrid ok=%d T=%.0f, double-path polish ok=%d T=%.0f (both must be ok=0)\n", (!ok && !ok2) ? "PASS" : "FAIL", (int)ok, Tb, (int)ok2, Tb2);
+      if (ok || ok2) ++g_fail; }
     char b[160];
     snprintf(b, sizeof b, "two-phase hybrid |dT|/T (%d cases, %d fail)", n, nfail); check(wT <= 1.0e-8 && nfail == 0, b, wT, 1.0e-8);
     snprintf(b, sizeof b, "two-phase 10-roundtrip drift hybrid %.2e vs double %.2e (limit 1.5x+1e-7)", wDriftH, wDriftD); check(wDriftH <= 1.5*wDriftD + 1.0e-7, b, wDriftH, 1.5*wDriftD + 1.0e-7);
@@ -222,10 +235,10 @@ int main()
 {
     printf("== (1) property tables vs double ==\n");
     CondPropOpts o; o.latentLowT = 1; o.psatLowT = 1; o.liquidCp = 2000.0; o.gasKgasModel = 0; o.sigmaScale = 1.0; o.Yw = 0.0;
-    test_tables("N2 (default)", condProps_make(COND_MODEL_N2, o), 20.0, 125.6);
+    test_tables("N2 (default)", condProps_make(COND_MODEL_N2, o), 15.0, 140.0);
     CondPropOpts o2 = o; o2.latentLowT = 0; o2.psatLowT = 0; o2.gasKgasModel = 1; o2.sigmaScale = 1.03;
-    test_tables("N2 (old lowT, air kgas, sigma x1.03)", condProps_make(COND_MODEL_N2, o2), 20.0, 125.6);
-    test_tables("H2O", condProps_make(COND_MODEL_H2O, o), 120.15, 1200.15);
+    test_tables("N2 (old lowT, air kgas, sigma x1.03)", condProps_make(COND_MODEL_N2, o2), 15.0, 140.0);
+    test_tables("H2O", condProps_make(COND_MODEL_H2O, o), 100.0, 1250.0);
     printf("== (2) source chain float vs double ==\n");
     test_chain("N2 pure", condProps_make(COND_MODEL_N2, o), 0, 39.0, 125.5, 1.0);
     test_chain("N2 (old lowT) pure", condProps_make(COND_MODEL_N2, o2), 0, 39.0, 125.5, 1.0);

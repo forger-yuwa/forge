@@ -3,7 +3,7 @@
 //   build: nvcc --expt-relaxed-constexpr -I. -o test_cond_float_device tests/unit/test_cond_float_device.cu
 // 状態: H2O TP carrier (N2/H2O, Y_w=0.0113) と N2 pure CPG。T × S × Q0 × g の格子 + S<1 (蒸発) + 実 run で差が出たセル状態。
 // 判定: res_* / sj_* は相対 1e-3 + ln J 許容 (S→1 の CNT 感度) または絶対 1e-4×成長流束尺度、diagS 相対 1e-5、T_sat 2e-3 K、
-//       θ 相対 1e-5 (S≈1 の境界セルは除外)、condLim 絶対 1e-4。sj_* は両実体とも有限・非負。
+//       θ 相対 1e-5 (S≈1 の境界セルは除外)、condLim 絶対 1e-4、蒸発端 0.99<S<1 の sj は 1 step の陰的更新差 |Δsj|·dt ≤ 1e-4。sj_* は両実体とも有限・非負、全出力有限。
 #include <cstdio>
 #include <cmath>
 #include <vector>
@@ -63,16 +63,29 @@ static void run_case(const char* name, int model, int carrier, const std::vector
         growthModel, 3.18, 0, evap, 1.0e-9, 0, 0.5, 0, 1.0, 5.0e-3, 10.0, cp_cpg, gamma_cpg, 1.0e35, 5.0e-3, 1.0,
         dvol, ddt, dT, dP, dro, carrier ? dcp : nullptr, carrier ? dRm : nullptr, carrier ? dY1 : nullptr,
         A.rog, A.q0, A.q1, A.q2, A.rr, A.r0, A.r1, A.r2, A.sg, A.s0, A.s1, A.s2, A.dS, A.dD, A.dR, A.dT, A.dTh, A.dL);
-    condensation_source_f_d<<<grd,blk>>>(n, carrier, (float)Rw, kantrowitz, 0, condProps_to_f(cp), tb, 0.0f, carrier ? dspf : nullptr, nSp, carrier ? dYall : nullptr, carrier ? cgs : -1,
+    CondDoubleArgs dbl; dbl.opts = o; dbl.sp = carrier ? dsp : nullptr; dbl.condModel = model; dbl.Rw = Rw; dbl.M = M; dbl.twoTemp = 0;
+    dbl.gyarC = 3.18; dbl.evapRmin = 1.0e-9; dbl.evapLamMin = 0.5; dbl.Jmax = 1.0e35; dbl.dg_max = 5.0e-3; dbl.dT_max = 1.0; dbl.cprops = cp;
+    condensation_source_f_d<<<grd,blk>>>(n, carrier, (float)Rw, kantrowitz, 0, condProps_to_f(cp), tb, 0.0f, dbl, carrier ? dspf : nullptr, nSp, carrier ? dYall : nullptr, carrier ? cgs : -1,
         growthModel, 3.18f, evap, 1.0e-9f, 0, 0.5f, cp_cpg, gamma_cpg, 5.0e-3f, 1.0f,
         dvol, ddt, dT, dP, dro, carrier ? dcp : nullptr, carrier ? dRm : nullptr, carrier ? dY1 : nullptr,
         B.rog, B.q0, B.q1, B.q2, B.rr, B.r0, B.r1, B.r2, B.sg, B.s0, B.s1, B.s2, B.dS, B.dD, B.dR, B.dT, B.dTh, B.dL);
     cudaError_t e = cudaDeviceSynchronize(); if (e != cudaSuccess) { printf("CUDA error %s\n", cudaGetErrorString(e)); ++g_fail; return; }
     auto rr=down(A.rr,n), r0=down(A.r0,n), r1=down(A.r1,n), r2=down(A.r2,n), sg=down(A.sg,n), s1=down(A.s1,n), dS=down(A.dS,n), dD=down(A.dD,n), dR=down(A.dR,n), dT_=down(A.dT,n), dTh=down(A.dTh,n), dL=down(A.dL,n);
     auto frr=down(B.rr,n), fr0=down(B.r0,n), fr1=down(B.r1,n), fr2=down(B.r2,n), fsg=down(B.sg,n), fs1=down(B.s1,n), fdS=down(B.dS,n), fdD=down(B.dD,n), fdR=down(B.dR,n), fdT=down(B.dT,n), fdTh=down(B.dTh,n), fdL=down(B.dL,n);
-    Worst wres, wsj, wS, wTs, wTh, wL, wD; int nBoundary = 0, nSjNeg = 0, nCapped = 0;
+    Worst wres, wsj, wS, wTs, wTh, wL, wD, wEvapSj; int nBoundary = 0, nSjNeg = 0, nCapped = 0;
+    int nNonFinite = 0, nOutTab = 0, nOutTabBit = 0;
+    for (int i = 0; i < n; ++i) {
+        const double outs[22] = {rr[i],r0[i],r1[i],r2[i],sg[i],s1[i],dS[i],dD[i],dR[i],dT_[i],dTh[i],dL[i], frr[i],fr0[i],fr1[i],fr2[i],fsg[i],fs1[i],fdS[i],fdD[i],fdR[i],fdT[i]};
+        for (double v : outs) if (!std::isfinite(v)) { ++nNonFinite; break; }
+        if (!std::isfinite((double)fdTh[i]) || !std::isfinite((double)fdL[i])) ++nNonFinite;
+    }
     for (int i = 0; i < n; ++i) {
         const State& s = st[i];
+        // 表範囲外の湿潤セルは float kernel が double 実体へ委譲する → 全出力がビット一致するはず (plan §5.1 #8)
+        const bool outTab = !(s.T >= tb.Tmin && s.T <= tb.TwetMax);
+        if (outTab && (s.g > 0.0 || s.q0 > 0.0)) { ++nOutTab;
+            const bool same = (rr[i]==frr[i] && r0[i]==fr0[i] && r1[i]==fr1[i] && r2[i]==fr2[i] && sg[i]==fsg[i] && s1[i]==fs1[i] && dD[i]==fdD[i] && dR[i]==fdR[i] && dL[i]==fdL[i]);
+            if (same) ++nOutTabBit; continue; }
         const double psat = cond_psat(cp, s.T);
         const double pv = carrier ? s.ro*(s.Yw - s.g)*Rw*s.T : s.P;
         const double S = pv/psat;
@@ -98,7 +111,8 @@ static void run_case(const char* name, int model, int carrier, const std::vector
             const double a = k ? s1[i] : sg[i], b = k ? fs1[i] : fsg[i];
             if (!(a >= 0.0) || !(b >= 0.0) || !std::isfinite(a) || !std::isfinite(b)) ++nSjNeg;
             if (capped) continue;   // J 上限セルは float 実体の設計変更 (対数上限を摂動側にも) で除外 (計数は上)
-            if (S > 0.99 && S < 1.0) continue;   // 蒸発端 (1−S<1 %): T 摂動 0.1 K (ΔS 0.6 %) が (p_v−p_d) の尺度を跨ぎ数値微分が両精度とも粗い (有限・非負は上で検査)
+            if (S > 0.99 && S < 1.0) {   // 蒸発端 (1−S<1 %): T 摂動 0.1 K (ΔS 0.6 %) が (p_v−p_d) の尺度を跨ぎ数値微分が両精度とも粗い → 1 step の陰的更新差 |Δsj|·dt ≤ 1e-6 で判定
+                wEvapSj.upd(fabs(a - b)*1.0e-7, i, k ? "sj_Q1 evap-edge" : "sj_g evap-edge"); continue; }
             if (a == 0.0 && b == 0.0) continue;
             // 判定は陰的項 sj·(ρφ) を残差 S と比べる: |Δsj|·(ρφ) ≤ (1e-3+tolJ)·(|S| + sj·ρφ)。核生成が支配する (J r_nuc ≫ Q0 dr/dt) セルでは
             // float で成長項の微分が J r_nuc の丸めに埋もれて 0 になるが、その sj は残差に対し無視できる。
@@ -120,7 +134,9 @@ static void run_case(const char* name, int model, int carrier, const std::vector
         printf("  [%s] %-14s %-10s worst=%.3e tol=%.1e", ok ? "PASS" : "FAIL", name, w, x.v, tol);
         if (x.i >= 0) { const State& s = st[x.i]; printf("  at T=%.2f g=%.1e q0=%.1e S=%.4g", s.T, s.g, s.q0, (carrier ? s.ro*(s.Yw-s.g)*Rw*s.T : s.P)/cond_psat(cp, s.T)); }
         printf("\n"); };
-    printf("-- %s: n=%d, S=1 boundary cells skipped=%d, J capped=%d, sj negative/nonfinite=%d\n", name, n, nBoundary, nCapped, nSjNeg);
+    printf("-- %s: n=%d, S=1 boundary cells skipped=%d, J capped=%d, sj negative/nonfinite=%d, non-finite outputs=%d, out-of-table wet cells=%d (bit-identical %d)\n", name, n, nBoundary, nCapped, nSjNeg, nNonFinite, nOutTab, nOutTabBit);
+    if (nNonFinite) ++g_fail;
+    if (nOutTab != nOutTabBit) ++g_fail;
     auto dump = [&](int i, const char* tag) { if (i < 0) return; const State& s = st[i];
         printf("    [%s] i=%d T=%.2f P=%.4g ro=%.4g g=%.2e q0=%.2e q1=%.2e q2=%.2e\n", tag, i, s.T, s.P, s.ro, s.g, s.q0, s.q1, s.q2);
         printf("      D: res g/Q0/Q1/Q2 = %.4e %.4e %.4e %.4e  sj_g %.4e sj_Q1 %.4e  drdt %.4e r30 %.4e S %.5g Tsat %.3f\n", rr[i], r0[i], r1[i], r2[i], sg[i], s1[i], dD[i], dR[i], dS[i], dT_[i]);
@@ -128,7 +144,7 @@ static void run_case(const char* name, int model, int carrier, const std::vector
     dump(wres.i, "worst res"); dump(wsj.i, "worst sj"); dump(n-1, "last state");
     if (nSjNeg) ++g_fail;
     rep("res (norm)", wres, 1.0); rep("src_jac (norm)", wsj, 1.0); rep("condS rel", wS, 1.0e-5); rep("condTsat [K]", wTs, 2.0e-3);
-    rep("condTheta rel", wTh, 1.0e-5); rep("condLim abs", wL, 1.0e-4); rep("condDrdt (norm)", wD, 1.0);
+    rep("condTheta rel", wTh, 1.0e-5); rep("condLim abs", wL, 1.0e-4); rep("condDrdt (norm)", wD, 1.0); rep("evap-edge |dsj|dt", wEvapSj, 1.0e-4);   // 蒸発端 0.99<S<1: Δg/ΔT 律速の境界で分岐が ULP で変わる (double 摂動でも cvg の float 差で) → 1 step の陰的更新差 ≤1e-4 を実測基準に
 }
 
 int main()
@@ -144,6 +160,8 @@ int main()
             st.push_back({T, ro*Rmix*T, ro, Yw, g, q0, q0*rb, q0*rb*rb});
         }
       st.push_back({238.30882, 30887.66, 0.4340555, 0.004752914, 6.0e-13, 8018105000.0, 11.575916, 2.3136373e-08});   // run_0456 1 step 目で差が出たセル
+      for (double T : {700.0, 900.0}) for (double g : {1.0e-6, 1.0e-3}) for (double q0 : {0.0, 1.0e14}) {   // 表範囲外 (T_c 超) の湿潤セル → double 委譲
+          const double ro = 1.0; st.push_back({T, ro*Rmix*T, ro, Yw, g, q0, q0*1.0e-8, q0*1.0e-16}); }
       printf("== H2O TP carrier: %zu states ==\n", st.size());
       run_case("H2O Kw1 HK", COND_MODEL_H2O, 1, st, 1, 0, 1);
       run_case("H2O Kw3 Gyar", COND_MODEL_H2O, 1, st, 3, 1, 1);
@@ -157,6 +175,9 @@ int main()
             if (P > 1.0e6) continue;   // 10 bar 超 (臨界 34 bar に近い) は除外: T_sat の double 診断 (C–C 勾配の Newton) が不正確で比較にならない; case/34 は ≤5 bar
             s2.push_back({T, P, ro, 1.0, g, q0, q0*rb, q0*rb*rb});
         }
+      for (double T : {126.0, 130.0, 300.0}) for (double g : {1.0e-6, 1.0e-3}) for (double q0 : {0.0, 1.0e14}) for (double P : {1.0e5, 5.0e5}) {   // 表範囲外 (125.6 K 超) の湿潤セル (T_c 超なので P は固定)
+          const double ro = P/((1.0 - g)*cp.R*T);
+          s2.push_back({T, P, ro, 1.0, g, q0, q0*1.0e-8, q0*1.0e-16}); }
       printf("== N2 pure CPG: %zu states ==\n", s2.size());
       run_case("N2 Kw1 Goodh", COND_MODEL_N2, 0, s2, 1, 0, 1);
       run_case("N2 Kw0 Gyar", COND_MODEL_N2, 0, s2, 0, 1, 1);

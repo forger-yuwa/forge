@@ -46,10 +46,14 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
         // float 実体 (plans/active/condensation-float-speedup.md §4.2-6 の分岐表): condFloat=1 かつ平衡形/二温度でない (それらは double のまま)。
         const bool useFloat = (cfg.condFloat != 0) && cfg.condEquilibrium == 0 && cfg.condTwoTemp == 0 && cond_tables_device().valid;
         if (useFloat) {
+            CondDoubleArgs dbl;
+            dbl.opts = opts; dbl.sp = (cfg.thermalMethod == 2) ? thermo_species_device_ptr() : nullptr; dbl.condModel = cfg.condModel;
+            dbl.Rw = Rw; dbl.M = M; dbl.twoTemp = cfg.condTwoTemp; dbl.gyarC = cfg.condGyarmathyC; dbl.evapRmin = cfg.condEvapRmin;
+            dbl.evapLamMin = evapLamMin; dbl.Jmax = Jmax; dbl.dg_max = dg_max; dbl.dT_max = dT_max; dbl.cprops = cprops;
             condensation_source_f_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
                 msh.nCells,
                 carrier, (float)Rw,
-                cfg.condKantrowitz, cfg.condKantrowitzGammaMode, condProps_to_f(cprops), cond_tables_device(), (float)opts.Yw,
+                cfg.condKantrowitz, cfg.condKantrowitzGammaMode, condProps_to_f(cprops), cond_tables_device(), (float)opts.Yw, dbl,
                 (cfg.thermalMethod == 2) ? thermo_species_device_ptr_f() : nullptr, cfg.nSpecies,
                 (cfg.thermalMethod == 2) ? species_roY_device_ptr() : nullptr, cfg.condGasSpecies,
                 cfg.condGrowthModel, (float)cfg.condGyarmathyC,

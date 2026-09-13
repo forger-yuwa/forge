@@ -123,7 +123,7 @@ __global__ void cond_realizability_clamp_f_d(
     flow_float* ro, flow_float* roY_w,
     flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
     int evap, float Rw, float rmin, float g_rm, float Yw_const,
-    flow_float* T, flow_float* P, CondTablesF tb)
+    flow_float* T, flow_float* P, CondTablesF tb, CondSpeciesProps cpd)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -148,11 +148,13 @@ __global__ void cond_realizability_clamp_f_d(
     if (roY_w != nullptr)      { float yv = roY_w[ic]/rod - g; if (yv < 0.0f) yv = 0.0f; pv = rod*yv*Rw*Td; }
     else if (Yw_const > 0.0f)  { float yv = Yw_const - g;     if (yv < 0.0f) yv = 0.0f; pv = rod*yv*Rw*Td; }
     else                         pv = P[ic];
-    if (pv > 0.0f && logf(pv) > cond_tab_lnpsat_f(tb, Td)) return;   // 過飽和: 消滅させない
+    const bool inTab = cond_tab_wet_ok(tb, Td);   // 表範囲外は旧 double 関数 (plan §5.1 #8)
+    const float lnps = inTab ? cond_tab_lnpsat_f(tb, Td) : (float)log(cond_psat(cpd, (double)Td) > 1.0e-300 ? cond_psat(cpd, (double)Td) : 1.0e-300);
+    if (pv > 0.0f && logf(pv) > lnps) return;   // 過飽和: 消滅させない
     const float q0 = roQ0[ic];
     bool remove = dust || (q0 <= 1.0e-30f);
     if (!remove) {
-        const float rho_l = cond_tab_rhol_f(tb, Td);
+        const float rho_l = inTab ? cond_tab_rhol_f(tb, Td) : (float)cond_rho_cond(cpd, (double)Td);
         const float r30 = cbrtf(g/((4.0f/3.0f)*COND_PI_F*rho_l*q0/rod));
         remove = (r30 < 2.0f*rmin);
     }
@@ -248,7 +250,7 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
                 msh.nCells, var.c_d["ro"], roY_w,
                 var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
                 cfg.condEvaporation, (float)cprops.R, (float)cfg.condEvapRmin, (float)g_rm, (float)opts.Yw,
-                var.c_d["T"], var.c_d["P"], g_condTables);
+                var.c_d["T"], var.c_d["P"], g_condTables, cprops);
         } else
         cond_realizability_clamp_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells, var.c_d["ro"], roY_w,

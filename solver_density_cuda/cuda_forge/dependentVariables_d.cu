@@ -159,10 +159,10 @@ __global__ void dependentVariables_d
                     Tnew = cond_T_from_e_twophase_hybrid(sp, spf, nSpecies, Y, Yf, condTb, e_in, g_liq, Rw, carrier ? 1 : 0, cprops,
                                                          Tg, DEPVAR_TMIN, DEPVAR_TMAX, &okc);
                 } else {
+                    // 旧 double Newton → 同じ残差条件 (1e-9|e|+0.05 J/kg) まで研磨 (全経路で成功条件を統一; codex result M2)。
                     Tnew = carrier ? cond_T_from_e_carrier(sp, nSpecies, Y, e_in, g_liq, Rw, cprops, Tg, DEPVAR_TMIN, DEPVAR_TMAX)
                                    : cond_T_from_e_onetemp(sp, nSpecies, Y, e_in, g_liq, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
-                    const double G = cond_twophase_resid(sp, nSpecies, Y, Tnew, g_liq, Rw, carrier ? 1 : 0, cprops, e_in);
-                    okc = isfinite(G) && isfinite(Tnew) && (fabs(G) <= 10.0*(1.0e-9*fabs(e_in) + 0.05));
+                    Tnew = cond_twophase_polish(sp, nSpecies, Y, Tnew, e_in, g_liq, Rw, carrier ? 1 : 0, cprops, DEPVAR_TMIN, DEPVAR_TMAX, &okc);
                 }
                 if (!okc) { twophaseFail = true; atomicAdd(&g_condTinvFail, 1u); }
             } else if (useHybrid) {

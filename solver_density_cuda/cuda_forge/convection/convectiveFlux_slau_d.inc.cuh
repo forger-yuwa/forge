@@ -340,8 +340,8 @@ __global__ void SLAU_d
                 const flow_float gL = g_total[ic0], gR = g_total[ic1];
                 if (gL > 0.0f || gR > 0.0f) {
                     if (cnd.condFloat) {
-                        if (gL > 0.0f) h_p -= gL*cond_tab_latent_f(cnd.tables, T_cell[ic0]);
-                        if (gR > 0.0f) h_m -= gR*cond_tab_latent_f(cnd.tables, T_cell[ic1]);
+                        if (gL > 0.0f) h_p -= gL*cond_latent_tab_or_d(cnd.tables, cnd.cprops, T_cell[ic0]);
+                        if (gR > 0.0f) h_m -= gR*cond_latent_tab_or_d(cnd.tables, cnd.cprops, T_cell[ic1]);
                     } else {
                         const CondSpeciesProps& cprL = cnd.cprops;
                         if (gL > 0.0f) h_p -= (flow_float)((double)gL*cond_latent(cprL, (double)T_cell[ic0]));
@@ -363,8 +363,8 @@ __global__ void SLAU_d
                     if (gL > 0.0f || gR > 0.0f) {
                         const float Rgas = (ga - 1.0f)*cp_cpg/ga;
                         const float Rw   = (cnd.Yw > 0.0) ? (float)cnd.cprops.R : Rgas;
-                        if (gL > 0.0f) h_p = cond_face_h_cpg_f(cnd.tables, cp_cpg, Rgas, Rw, gL, P_L, ro_L, 0.5f*velocity2_L);
-                        if (gR > 0.0f) h_m = cond_face_h_cpg_f(cnd.tables, cp_cpg, Rgas, Rw, gR, P_R, ro_R, 0.5f*velocity2_R);
+                        if (gL > 0.0f) h_p = cond_face_h_cpg_f(cnd.tables, cnd.cprops, cp_cpg, Rgas, Rw, gL, P_L, ro_L, 0.5f*velocity2_L);
+                        if (gR > 0.0f) h_m = cond_face_h_cpg_f(cnd.tables, cnd.cprops, cp_cpg, Rgas, Rw, gR, P_R, ro_R, 0.5f*velocity2_R);
                     }
                 } else {
                 const CondSpeciesProps& cprC = cnd.cprops;

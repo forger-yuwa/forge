@@ -384,6 +384,32 @@ __host__ __device__ inline float cond_T_from_e_twophase_f(
     return T;
 }
 
+// double Newton を残差 tol=1e-9|e|+0.05 J/kg まで続ける研磨 (最大 10 段)。旧 double 経路 (condFloat=0) と float 経路の退避後の両方で使い、
+// 成功条件を全経路で同一にする (codex result M2)。満たさなければ ok=false (呼び出し側は roe を上書きしない)。
+__host__ __device__ inline double cond_twophase_polish(
+    const SpeciesThermo* sp, int nSp, const double* Y, double T, double e_in, double g, double Rw, int carrier,
+    const CondSpeciesProps& cprops, double T_min, double T_max, bool* ok)
+{
+    const double tol = 1.0e-9*fabs(e_in) + 0.05;
+    #pragma unroll 1
+    for (int k = 0; k < 10; ++k) {
+        double Gp;
+        const double G = cond_twophase_resid(sp, nSp, Y, T, g, Rw, carrier, cprops, e_in, &Gp);
+        if (!isfinite(G) || !isfinite(T)) { *ok = false; return T; }
+        if (fabs(G) <= tol) { *ok = true; return T; }
+        const double cvfl = 1.0e-2*(Gp > 0.0 ? Gp : 1.0);
+        double dT = G/((Gp > cvfl) ? Gp : cvfl);
+        if (dT >  0.5*T) dT =  0.5*T;
+        if (dT < -0.5*T) dT = -0.5*T;
+        T -= dT;
+        if (T < T_min) T = T_min;
+        if (T > T_max) T = T_max;
+    }
+    const double G = cond_twophase_resid(sp, nSp, Y, T, g, Rw, carrier, cprops, e_in);
+    *ok = isfinite(G) && isfinite(T) && (fabs(G) <= tol);
+    return T;
+}
+
 __host__ __device__ inline double cond_T_from_e_twophase_hybrid(
     const SpeciesThermo* sp, const SpeciesThermoF* spf, int nSp, const double* Y, const float* Yf, const CondTablesF& tb,
     double e_in, double g, double Rw, int carrier, const CondSpeciesProps& cprops,
@@ -410,10 +436,8 @@ __host__ __device__ inline double cond_T_from_e_twophase_hybrid(
         const double G = cond_twophase_resid(sp, nSp, Y, T, g, Rw, carrier, cprops, e_in);
         if (isfinite(G) && fabs(G) <= tol) { *ok = true; return T; }
     }
-    // 退避: 現行 double Newton (30 回)。10 倍の許容 (現行の停止条件 |ΔT|<1e-3 K ≈ c_v·1e-3 = 1.4 J/kg に相当)。
+    // 退避: 現行 double Newton (30 回) → 同じ残差条件 tol まで研磨を続ける (codex result M2: 全経路で同一の成功条件)。
     T = carrier ? cond_T_from_e_carrier(sp, nSp, Y, e_in, g, Rw, cprops, T_guess, T_min, T_max)
                 : cond_T_from_e_onetemp(sp, nSp, Y, e_in, g, T_guess, T_min, T_max);
-    const double G = cond_twophase_resid(sp, nSp, Y, T, g, Rw, carrier, cprops, e_in);
-    *ok = isfinite(G) && isfinite(T) && (fabs(G) <= 10.0*tol);
-    return T;
+    return cond_twophase_polish(sp, nSp, Y, T, e_in, g, Rw, carrier, cprops, T_min, T_max, ok);
 }

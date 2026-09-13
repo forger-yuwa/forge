@@ -10,8 +10,10 @@
 // 相変化ソース kernel。pure (N2/CPG) と carrier (H2O/TP) の両対応。一温度 T_v=T_d=T。
 // J,r*,dr/dt は現在セル状態から freeze。安定化: J 上限、dr/dt<0→0、r̄≤r* 成長停止、g≤g_max、
 //   1 step の Δg・潜熱 ΔT・蒸気枯渇を θ で律速 (全モーメント同 θ)。src_jac=潜熱自己抑制 (g)。
-__global__ void condensation_source_d(
-    geom_int nCells,
+// 1 セルぶんの double 実体 (旧 kernel 本体そのまま)。double kernel と、float kernel の表範囲外セル (plan §5.1 #8) から呼ぶ。
+__device__ __forceinline__ void condensation_source_cell_d(
+    geom_int ic,
+
     int condModel, int carrier, double Rw, double M,
     int kantrowitz, int kwGammaMode, CondPropOpts opts,   // opts: σ 倍率・N2 低温物性切替・kgas モデル・CPG carrier の Y_w (plans/accepted/condensation-air.md)
     const SpeciesThermo* sp, int nSpecies, flow_float* const* roYall, int condGasSpecies,   // Feder carrier 形の衝突項用 (TP のみ; CPG は nullptr)
@@ -29,8 +31,6 @@ __global__ void condensation_source_d(
     flow_float* diagS, flow_float* diagDrdt, flow_float* diagR30, flow_float* diagTsat,
     flow_float* diagTheta, flow_float* diagLim)
 {
-    geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
-    if (ic >= nCells) return;
     sj_Q0[ic] = 0.0; sj_Q1[ic] = 0.0; sj_Q2[ic] = 0.0; sj_g[ic] = 0.0;
     diagS[ic] = 0.0; diagDrdt[ic] = 0.0; diagR30[ic] = 0.0; diagTsat[ic] = 0.0;
     diagTheta[ic] = 0.0; diagLim[ic] = 1.0;   // θ (非等温補正) / ソース律速係数 (1=律速なし)
@@ -239,16 +239,46 @@ __global__ void condensation_source_d(
     res_rog[ic]  += (flow_float)(Sg *v);
 }
 
+__global__ void condensation_source_d(
+
+    geom_int nCells,
+    int condModel, int carrier, double Rw, double M,
+    int kantrowitz, int kwGammaMode, CondPropOpts opts,   // opts: σ 倍率・N2 低温物性切替・kgas モデル・CPG carrier の Y_w (plans/accepted/condensation-air.md)
+    const SpeciesThermo* sp, int nSpecies, flow_float* const* roYall, int condGasSpecies,   // Feder carrier 形の衝突項用 (TP のみ; CPG は nullptr)
+    int growthModel, double gyarC, int twoTemp,
+    int evap, double evapRmin, int evapKelvin, double evapLamMin,
+    int eq, double eqRelax, double eqDgMax, double eqDTmax,
+    flow_float cp_cpg, flow_float gamma_cpg,
+    double Jmax, double dg_max, double dT_max,
+    geom_float* vol, flow_float* dt_local,
+    flow_float* T, flow_float* P, flow_float* ro, flow_float* cp_cell, flow_float* Rmix_cell,
+    flow_float* roY_w,   // carrier: 凝縮気相種の保存量 ρY_w (pure では nullptr)
+    flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
+    flow_float* res_rog, flow_float* res_roQ0, flow_float* res_roQ1, flow_float* res_roQ2,
+    flow_float* sj_g, flow_float* sj_Q0, flow_float* sj_Q1, flow_float* sj_Q2,
+    flow_float* diagS, flow_float* diagDrdt, flow_float* diagR30, flow_float* diagTsat,
+    flow_float* diagTheta, flow_float* diagLim)
+{
+    geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    condensation_source_cell_d(ic, condModel, carrier, Rw, M, kantrowitz, kwGammaMode, opts, sp, nSpecies, roYall, condGasSpecies, growthModel, gyarC, twoTemp, evap, evapRmin, evapKelvin, evapLamMin, eq, eqRelax, eqDgMax, eqDTmax, cp_cpg, gamma_cpg, Jmax, dg_max, dT_max, vol, dt_local, T, P, ro, cp_cell, Rmix_cell, roY_w, rog, roQ0, roQ1, roQ2, res_rog, res_roQ0, res_roQ1, res_roQ2, sj_g, sj_Q0, sj_Q1, sj_Q2, diagS, diagDrdt, diagR30, diagTsat, diagTheta, diagLim);
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // float 実体 (condFloat=1, condEquilibrium=0, condTwoTemp=0 のとき wrapper が選ぶ)。上の double kernel の写し。
 //   差: 物性は表、核生成は対数空間 (上限を対数で本体・摂動の両方に)、dry セル (S<=1, g=0, Q0=0) は診断だけ書いて早期退出、
 //       T_sat は前 step 値から warm start。sj_*/diag* の初期化と res_* を触らない規約は double と同じ。
 // ---------------------------------------------------------------------------------------------------------------
+// float kernel が表範囲外の湿潤セルを double 実体へ委譲するための double 引数 (wrapper が cfg から詰める)。
+struct CondDoubleArgs {
+    CondPropOpts opts; const SpeciesThermo* sp; int condModel; double Rw, M; int twoTemp;
+    double gyarC, evapRmin, evapLamMin, Jmax, dg_max, dT_max;
+    CondSpeciesProps cprops;   // 蒸発 Jacobian の double 摂動評価用
+};
 __global__ void condensation_source_f_d(
     geom_int nCells,
     int carrier, float Rw,
-    int kantrowitz, int kwGammaMode, CondSpeciesPropsF cpf, CondTablesF tb, float Yw_const,
+    int kantrowitz, int kwGammaMode, CondSpeciesPropsF cpf, CondTablesF tb, float Yw_const, CondDoubleArgs dbl,
     const SpeciesThermoF* spf, int nSpecies, flow_float* const* roYall, int condGasSpecies,
     int growthModel, float gyarC,
     int evap, float evapRmin, int evapKelvin, float evapLamMin,
@@ -265,6 +295,7 @@ __global__ void condensation_source_f_d(
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
+    const CondSpeciesProps* dbl_cprops = &dbl.cprops;
     const float Tsat_prev = diagTsat[ic];   // warm start (初期化前に読む)
     sj_Q0[ic] = 0.0f; sj_Q1[ic] = 0.0f; sj_Q2[ic] = 0.0f; sj_g[ic] = 0.0f;
     diagS[ic] = 0.0f; diagDrdt[ic] = 0.0f; diagR30[ic] = 0.0f; diagTsat[ic] = 0.0f;
@@ -317,6 +348,15 @@ __global__ void condensation_source_f_d(
     }
     // dry セルの早期退出 (plan §4.2-3): S<=1 (J=0), g=0 (蒸発なし), Q0=0 (成長なし) → ソース・src_jac とも恒等 0。res_* は触らない。
     if (!(lnS > 0.0f) && g <= 0.0f && q0 <= 1.0e-30f) return;
+    // 表範囲外 (T < T_min または T > T_wetMax: N2 125.6 K, H2O 647 K) の湿潤セルは旧 double 実体へ委譲 (plan §5.1 #8, codex result M1):
+    // 表の端クランプは旧式の物性ごとのクランプと一致しない (μ_gas は上限なし)。診断 (S, T_sat) は上で表から書いたが、double 実体が書き直す。
+    if (!(Td >= tb.Tmin && Td <= tb.TwetMax)) {
+        condensation_source_cell_d(ic, dbl.condModel, carrier, dbl.Rw, dbl.M, kantrowitz, kwGammaMode, dbl.opts, dbl.sp, nSpecies, roYall, condGasSpecies,
+            growthModel, dbl.gyarC, dbl.twoTemp, evap, dbl.evapRmin, evapKelvin, dbl.evapLamMin, 0, 1.0, 5.0e-3, 10.0, cp_cpg, gamma_cpg,
+            dbl.Jmax, dbl.dg_max, dbl.dT_max, vol, dt_local, T, P, ro, cp_cell, Rmix_cell, roY_w, rog, roQ0, roQ1, roQ2,
+            res_rog, res_roQ0, res_roQ1, res_roQ2, sj_g, sj_Q0, sj_Q1, sj_Q2, diagS, diagDrdt, diagR30, diagTsat, diagTheta, diagLim);
+        return;
+    }
     // ---- 蒸発分岐 (S<=1, 液相あり) ----
     if (evap && g > 0.0f && !(lnS > 0.0f)) {
         const float dt = dt_local[ic];
@@ -327,23 +367,30 @@ __global__ void condensation_source_f_d(
                            &SQ0, &SQ1, &SQ2, &Sg, &r30, &drdt);
         diagDrdt[ic] = drdt; diagR30[ic] = r30;
         if (Sg < 0.0f) {
-            const float L = cond_tab_latent_f(tb, Td);
-            float a0,a1,a2,ag,rr,dd;
-            const float dg = 1.0e-3f*g;
-            float pvg, rvg; cond_vapor_state_f(carrier, rod, Pd, Td, g - dg, Yw, Rw, &pvg, &rvg);
-            cond_evap_source_f(cpf, tb, Td, pvg, rod, g - dg, q0, q1, q2, dt,
-                               evapRmin, evapLamMin, dg_max, dT_max, cvg,
-                               growthModel, p_gas, gyarC, evapKelvin, &a0,&a1,&a2,&ag,&rr,&dd);
-            const float dSgdrog = (Sg - ag)/(rod*dg);
-            const float dTp = 0.1f;
-            float pvT, rvT; cond_vapor_state_f(carrier, rod, Pd, Td+dTp, g, Yw, Rw, &pvT, &rvT);
-            cond_evap_source_f(cpf, tb, Td+dTp, pvT, rod, g, q0, q1, q2, dt,
-                               evapRmin, evapLamMin, dg_max, dT_max, cvg,
-                               growthModel, p_gas, gyarC, evapKelvin, &a0,&a1,&a2,&ag,&rr,&dd);
-            const float dSgdT  = (ag - Sg)/dTp;
-            const float dTdrog = (L - (carrier?Rw:Rg)*Td)/(rod*cvg);
-            const float sjg = -(dSgdrog + dSgdT*dTdrog);
-            sj_g[ic] = fmaxf(sjg, 0.0f);
+            // src_jac (蒸発): 数値微分は (S_g − S_g(g−dg))/(ρ dg) の相殺 (dg=1e-3 g) で float だと相対 1e-4 ずれ、Δg 律速が効くと
+            // 分岐構造 (λ³≥1−dg_max/g) も絡むので、摂動評価は double 実体 (cond_evap_source) で行う (蒸発セルは少数; plan §5.1 #11)。
+            const double rodd = (double)rod, gd = (double)g, Tdd = (double)Td, dtd = (double)dt;
+            const double q0d = (double)q0, q1d = (double)q1, q2d = (double)q2;
+            const CondSpeciesProps& cpd = *dbl_cprops;
+            double a0,a1,a2,ag,rr,dd;
+            double pv0, rv0; cond_vapor_state(carrier, rodd, (double)Pd, Tdd, gd, (double)Yw, dbl.Rw, &pv0, &rv0);
+            double S0,S1,S2,Sg0;
+            cond_evap_source(cpd, Tdd, pv0, rodd, gd, q0d, q1d, q2d, dtd, dbl.evapRmin, dbl.evapLamMin, dbl.dg_max, dbl.dT_max, (double)cvg,
+                             growthModel, (double)p_gas, dbl.gyarC, evapKelvin, &S0,&S1,&S2,&Sg0,&rr,&dd);
+            const double L = cond_latent(cpd, Tdd);
+            const double dg = 1.0e-3*gd;
+            double pvg, rvg; cond_vapor_state(carrier, rodd, (double)Pd, Tdd, gd - dg, (double)Yw, dbl.Rw, &pvg, &rvg);
+            cond_evap_source(cpd, Tdd, pvg, rodd, gd - dg, q0d, q1d, q2d, dtd, dbl.evapRmin, dbl.evapLamMin, dbl.dg_max, dbl.dT_max, (double)cvg,
+                             growthModel, (double)p_gas, dbl.gyarC, evapKelvin, &a0,&a1,&a2,&ag,&rr,&dd);
+            const double dSgdrog = (Sg0 - ag)/(rodd*dg);
+            const double dTp = 0.1;
+            double pvT, rvT; cond_vapor_state(carrier, rodd, (double)Pd, Tdd+dTp, gd, (double)Yw, dbl.Rw, &pvT, &rvT);
+            cond_evap_source(cpd, Tdd+dTp, pvT, rodd, gd, q0d, q1d, q2d, dtd, dbl.evapRmin, dbl.evapLamMin, dbl.dg_max, dbl.dT_max, (double)cvg,
+                             growthModel, (double)p_gas, dbl.gyarC, evapKelvin, &a0,&a1,&a2,&ag,&rr,&dd);
+            const double dSgdT  = (ag - Sg0)/dTp;
+            const double dTdrog = (L - (carrier ? dbl.Rw : (double)Rg)*Tdd)/(rodd*(double)cvg);
+            const double sjg = -(dSgdrog + dSgdT*dTdrog);
+            sj_g[ic] = (sjg > 0.0) ? (float)sjg : 0.0f;
         }
         const float v = vol[ic];
         res_roQ0[ic] += SQ0*v;

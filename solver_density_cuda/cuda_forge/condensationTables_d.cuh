@@ -19,7 +19,9 @@ struct CondTableF {
 
 struct CondTablesF {
     CondTableF lnpsat, latent, sigma, rhol, kgas, mugas;
-    float Tmin = 0.0f, Tmax = 0.0f;   // 表の範囲 [T0, T0 + n h]
+    float Tmin = 0.0f, Tmax = 0.0f;   // 表の範囲 [T0, T0 + n h] (ln p_sat の診断はこの範囲で表を使う; 外は端クランプ)
+    float TwetMax = 0.0f;             // 湿潤セル (成長・蒸発・面潜熱・clamp) に表を使う上限: N2 125.6 K (旧式のクランプ T_c−0.5 の手前), H2O 647.0 K (σ→0 の T_c)。
+                                      // これを超える湿潤セルは旧 double 関数へ退避する (plan §5.1 #8)
     int   valid = 0;                  // 0: 未構築 (float 経路は使えない)
 };
 
@@ -51,6 +53,7 @@ __host__ __device__ inline float cond_tab_eval(const CondTableF& t, float T, flo
     if (dfdT) *dfdT = (c.y + u*(2.0f*c.z + 3.0f*u*c.w)) * t.invH;
     return c.x + u*(c.y + u*(c.z + u*c.w));
 }
+__host__ __device__ inline bool  cond_tab_wet_ok(const CondTablesF& tb, float T) { return (T >= tb.Tmin && T <= tb.TwetMax); }
 __host__ __device__ inline float cond_tab_lnpsat_f(const CondTablesF& tb, float T, float* d = nullptr) { return cond_tab_eval(tb.lnpsat, T, d); }
 __host__ __device__ inline float cond_tab_psat_f  (const CondTablesF& tb, float T) { return expf(cond_tab_eval(tb.lnpsat, T)); }
 __host__ __device__ inline float cond_tab_latent_f(const CondTablesF& tb, float T, float* d = nullptr) { return cond_tab_eval(tb.latent, T, d); }
@@ -114,6 +117,7 @@ inline CondTablesF cond_tables_view_host(const CondTablesHost& ht)
     auto mk = [&](const std::vector<float4>& v){ CondTableF t; t.c = v.data(); t.T0 = (float)ht.T0; t.invH = (float)(1.0/ht.h); t.n = ht.n; return t; };
     tb.lnpsat = mk(ht.lnpsat); tb.latent = mk(ht.latent); tb.sigma = mk(ht.sigma); tb.rhol = mk(ht.rhol); tb.kgas = mk(ht.kgas); tb.mugas = mk(ht.mugas);
     tb.Tmin = (float)ht.T0; tb.Tmax = (float)(ht.T0 + ht.h*ht.n); tb.valid = 1;
+    tb.TwetMax = (ht.T0 < 100.0) ? 125.6f : 647.0f;   // N2 / H2O (cond_tables_grid の規約)
     return tb;
 }
 
