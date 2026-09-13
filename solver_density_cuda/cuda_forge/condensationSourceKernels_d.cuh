@@ -350,7 +350,9 @@ __global__ void condensation_source_f_d(
     //   dry 判定は表の端値でなく旧 double 飽和圧で行う (端クランプした p_sat で「未飽和」と誤判定すると、旧式では過飽和のセル
     //   [例: N2 15 K, p_v=0.9 p_sat(20 K)] の核生成を消してしまう)。double 判定で dry (S<=1, g=0, Q0=0) なら診断だけ書いて退出、
     //   それ以外は旧 double 実体へ丸ごと委譲 (表の端クランプは旧式の物性ごとのクランプと一致しないため)。
-    const bool inTab = (Td >= tb.Tmin && Td <= tb.TwetMax);
+    // 表範囲の判定は摂動評価点 (src_jac の T+0.1 K) も含める: 本体が範囲内でも T+0.1 K が表外だと摂動側が端クランプで
+    // 評価され Jacobian が崩れる (codex result-5 M1: N2 125.6 K で src_jac_g が 97 % 過小)。
+    const bool inTab = (Td >= tb.Tmin && Td + 0.1f <= tb.TwetMax);
     if (!inTab) {
         const double psd = cond_psat(dbl.cprops, (double)Td);
         const bool dryD = !((double)pv > psd) && g <= 0.0f && q0 <= 1.0e-30f;

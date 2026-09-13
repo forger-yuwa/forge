@@ -82,7 +82,7 @@ static void run_case(const char* name, int model, int carrier, const std::vector
     for (int i = 0; i < n; ++i) {
         const State& s = st[i];
         // 表範囲外の湿潤セルは float kernel が double 実体へ委譲する → 全出力がビット一致するはず (plan §5.1 #8)
-        const bool outTab = !(s.T >= tb.Tmin && s.T <= tb.TwetMax);
+        const bool outTab = !((float)s.T >= tb.Tmin && (float)s.T + 0.1f <= tb.TwetMax);   // kernel と同じ float 演算での判定 (摂動点 T+0.1 K を含む)
         if (outTab) { ++nOutTab;   // 範囲外: 湿潤/過飽和は double 委譲、dry は双方 0 → 残差・Jacobian・diag はビット一致 (T_sat 診断は float のまま)
             const bool same = (rr[i]==frr[i] && r0[i]==fr0[i] && r1[i]==fr1[i] && r2[i]==fr2[i] && sg[i]==fsg[i] && s1[i]==fs1[i] && dD[i]==fdD[i] && dR[i]==fdR[i] && dL[i]==fdL[i] && dS[i]==fdS[i]);
             if (same) ++nOutTabBit; else printf("    out-of-table mismatch: T=%.1f g=%.1e q0=%.1e  res_g %.3e/%.3e res_Q0 %.3e/%.3e S %.4g/%.4g\n", s.T, s.g, s.q0, rr[i], frr[i], r0[i], fr0[i], dS[i], fdS[i]);
@@ -125,7 +125,7 @@ static void run_case(const char* name, int model, int carrier, const std::vector
             wsj.upd(fabs(a - b)*q/den, i, k ? "sj_Q1" : "sj_g");
         }
         if (dS[i] > 0.0) wS.upd(fabs(dS[i] - fdS[i])/dS[i], i, "condS");
-        if (dT_[i] > 0.0) wTs.upd(fabs(dT_[i] - fdT[i]), i, "condTsat");
+        if (dT_[i] > 0.0 && pv < 1.0e6) wTs.upd(fabs(dT_[i] - fdT[i]), i, "condTsat");   // 10 bar 超 (臨界近傍) は double 側の C–C 勾配 Newton が不正確で比較対象外
         if (dTh[i] > 0.0) wTh.upd(fabs(dTh[i] - fdTh[i])/dTh[i], i, "condTheta");
         wL.upd(fabs(dL[i] - fdL[i]), i, "condLim");
         { const double a = dD[i], b = fdD[i]; if (a != 0.0 || b != 0.0) { const double den = (1.0e-4 + 2.0e-6/fabs(log(S > 0 ? S : 1.0) + 1e-30))*fabs(a) + 1.0e-5*dsc; wD.upd(fabs(a - b)/den, i, "condDrdt"); } }
@@ -179,6 +179,9 @@ int main()
       // codex result-2 M1 の反例: 表範囲外の低温 (15 K)・液相なし・旧式では過飽和 (p_v = 0.9 p_sat(20 K) > p_sat(15 K)) → double 委譲で核生成が出るべき
       for (double T : {15.0, 18.0}) for (double S20 : {0.9, 0.5}) { const double pv = S20*cond_psat(cp, 20.0); const double ro = pv/(cp.R*T);
           s2.push_back({T, pv, ro, 1.0, 0.0, 0.0, 0.0, 0.0}); }
+      // 表上端 125.6 K の前後 ±0.1 K (codex result-5 M1: T+0.1 K の摂動点が表外に出る境界): 本体は範囲内でも摂動点が外なら double 委譲
+      for (double T : {125.45, 125.5, 125.55, 125.6, 125.65, 125.7}) for (double P : {3.0e6, 3.305e6}) for (double q0 : {0.0, 1.0e14}) { const double ro = P/(cp.R*T);
+          s2.push_back({T, P, ro, 1.0, 0.0, q0, q0*1.0e-8, q0*1.0e-16}); }
       for (double T : {126.0, 130.0, 300.0}) for (double g : {1.0e-6, 1.0e-3}) for (double q0 : {0.0, 1.0e14}) for (double P : {1.0e5, 5.0e5}) {   // 表範囲外 (125.6 K 超) の湿潤セル (T_c 超なので P は固定)
           const double ro = P/((1.0 - g)*cp.R*T);
           s2.push_back({T, P, ro, 1.0, g, q0, q0*1.0e-8, q0*1.0e-16}); }
