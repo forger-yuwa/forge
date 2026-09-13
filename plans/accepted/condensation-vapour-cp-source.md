@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `condensation`
-- **status**: `in_progress`
+- **status**: `done`
 - **related_docs**:
   - [`methods/condensation.md`](../../methods/condensation.md) §8b 物性の外挿規約
 - **related_plans**: [`plans/accepted/condensation-air.md`](../accepted/condensation-air.md) (70 K 未満の Kirchhoff 外挿の出典)、
@@ -41,7 +41,8 @@ CPG は「気相の比熱はこの 1 つの定数」というモデルなので�
 厳密には Kirchhoff の関係に入るべきは**凝縮する窒素蒸気**の $c_p$ で、空気キャリアの 1008.7 はその値ではない。
 ただし CPG 二相 EOS は液相の顕熱にも混合気の熱容量 ($c_v+R_w=1014.7$) を当てており、**凝縮種固有の $c_p$ を
 そもそも表現できない**。config の値に統一するのはその枠内で自己整合を取る選択で、差 30 J/(kg·K) は
-液相比熱 $c_l$ 自体の感度幅 ($\pm500$ J/(kg·K)) の内側にある。
+液相比熱 $c_l$ 自体の感度幅 ($\pm500$ J/(kg·K)) の内側にある。**これは「厳密に整合する」という意味ではない**:
+config 値に統一しても 70 K 未満の実効液比熱は 2008.6 J/(kg·K) で、意図した 2000 から +0.43 % 残る (§5.1 #1)。
 
 ### 4.1 触ってはいけないもの (codex result M1)
 
@@ -69,17 +70,21 @@ $\theta=2(\gamma-1)/(\gamma+1)\,b(b-0.5)$ が負になって 0 にクリップ�
 
 | # | 項目 | 内容 |
 | --- | --- | --- |
-| 1 | CPG carrier EOS の液相顕熱 | 二相 EOS が液相にも混合気の $c_v+R_w$ (空気 1014.7) を当てており、実効液比熱が意図した 2000 でなく 1976 になる (1.2 %)。定式化そのものの近似。直すには液相の顕熱を凝縮種の $c_p$ で持つ必要がある |
+| 1 | CPG carrier EOS の液相顕熱 | 二相 EOS は液相にも混合気の $c_v+R_w$ を当てる。空気では $c_v=1008.7/1.4=720.5$、$c_v+R_w=1017.3$ なので、70 K 未満の実効液比熱は $1017.3-(1008.7-2000)=2008.6$ J/(kg·K) となり、意図した 2000 から **+0.43 %** ずれる (codex result-2 m3)。つまり config 値への統一でも**厳密な熱力学的整合は得られない**。直すには液相の顕熱を凝縮種の $c_p$ で持つ必要がある |
 | 2 | cell のノイズ床の取り方 | case/16 cell は 3 反復では床を過小評価し、同じ比較が FAIL→PASS に変わった (§8.1)。凝縮 cell 系では反復数を増やすか床の取り方を規約化する |
 
 ## 6. 検証
 
 - **単体**: 凝縮 8 本すべて PASS。新規に `kirchhoffCpv` の上書き、`cp`/`cv` 不変、$\gamma_v=1.4$ (N2) と
   1.331 (H2O)、$c_p-c_v=R$、H2O の Kantrowitz $\theta>0$、70 K 未満の傾きが $(c_{p,v}^{new}-c_{p,v}^{old})$ だけ動くこと。
-- **case/34 (空気, node と cell)**: 内蔵 1038.8 と config 1008.7 の A/B。**onset (格子点判定) が動かないこと**が合否。
+- **case/34 (空気, node と cell)**: 内蔵 1038.8 と config 1008.7 の A/B。
+  **合否は onset**: 圧力基準 ($\Delta p/p_{dry}>1\%$) と $g>10^{-4}$ の**両方**を、末尾窓の全スナップショットで出し、
+  変化が「格子刻みと同 run の時間変動の分解能内」に収まること (`ONSET_SERIES.txt`)。
   場の差は変数別ノイズ床 + `diff_res.py --factor 2` で報告する (**PASS は期待しない。物性が変わるので場は動く**)。
 - **case/34 (純 N2, node)**: config が 1038.8 なので**ノイズ床以内で不変**であること。
-- **case/16 (H2O, node と cell)**: §4.2 の不具合が解消し、`483de03b` (gasCp 導入前) とノイズ床以内で一致すること。
+- **case/16 (H2O, node と cell)**: §4.2 の不具合が解消していること。判定は
+  **「同じ config・同じ反復数 (300 step) で、`483de03b` (gasCp 導入前) との差が同一バイナリ反復のノイズ許容内」**。
+  これらの run は未収束なので**定常解が一致したという主張ではない** (codex result-2 M1)。
 - **判定基準**: (1) 単体全 PASS、(2) 空気 node/cell の onset が両判定基準とも不変、(3) 純 N2 と case/16 が床以内。
 
 ### 6.1 レビュー記録 (codex)
@@ -88,6 +93,7 @@ $\theta=2(\gamma-1)/(\gamma+1)\,b(b-0.5)$ が負になって 0 にクリップ�
 | --- | --- | --- | --- | --- |
 | plan 免除 | `2026-09-14` | — | — | F-cf9 として `condensation-followups.md` に起票済みの課題を、codex result レビューの指摘 (M3: 集約 plan に埋めるな) を受けて分離したもの。設計は下の result レビューで評価済み |
 | result | `2026-09-14` | [`notes/reviews/2026-09-14-condensation-followups-result.md`](../../notes/reviews/2026-09-14-condensation-followups-result.md) | NO-GO, C0/M3/m2 | **全件採用** (§9) |
+| result (2) | `2026-09-14` | [`notes/reviews/2026-09-14-condensation-vapour-cp-source-result.md`](../../notes/reviews/2026-09-14-condensation-vapour-cp-source-result.md) | GO-with-changes, C0/M2/m2 | **全件採用**: M1 (H2O の「一致」は未収束の反復ノイズ比較に限定) → §6/§8.1 を修正。M2 (onset の合否に g 基準が入っていない・cell は 0.02 in 揺れる) → 両 onset の時系列を `ONSET_SERIES.txt` に保存し「分解能内」に限定。m3 (実効液比熱は 1976 でなく 2008.6、残差 +0.43 %) → §4/§5.1/methods を訂正。m4 (旧実装のコメントが残存) → コメントを `kirchhoffCpv` のみ更新に統一し H2O では未使用と明記 |
 
 ## 7. 影響範囲
 
@@ -101,7 +107,7 @@ $\theta=2(\gamma-1)/(\gamma+1)\,b(b-0.5)$ が負になって 0 にクリップ�
 - [x] `methods/condensation.md` を更新
 - [x] 実装・検証完了 (§6、結果は §8.1)
 - [x] codex レビューを §6.1 に記録し採否を反映
-- [ ] `status` を `done` にし `accepted/` へ移動 (result 再レビュー後)
+- [x] `status` を `done` にし `accepted/` へ移動
 
 ## 8.1 検証結果 (2026-09-14)
 
@@ -111,17 +117,22 @@ $\theta=2(\gamma-1)/(\gamma+1)\,b(b-0.5)$ が負になって 0 にクリップ�
 
 | 量 | node 1038.8 | node 1008.7 | cell 1038.8 | cell 1008.7 |
 | --- | --- | --- | --- | --- |
-| onset ($\Delta p/p_{dry}>1\%$) | 2.20 in | **2.20 in** | 2.21 in | **2.21 in** |
-| onset ($g>10^{-4}$) | 2.10 in | **2.10 in** | 2.13 in | **2.13 in** |
+| onset ($\Delta p/p_{dry}>1\%$) 最終場 | 2.20 in | **2.20 in** | 2.21 in | **2.21 in** |
+| 同 末尾窓 (step ≥ 8000) の振れ幅 | 0.000 in | 0.000 in | **0.020 in** | 0.000 in |
+| onset ($g>10^{-4}$) 最終場 / 振れ幅 | 2.10 in / 0.000 | **2.10 in** / 0.000 | 2.13 in / 0.000 | **2.13 in** / 0.000 |
 | $g_{exit}$ | 0.0583 | 0.0581 | 0.0590 | 0.0589 |
 | 保存モーメント $\rho Q_0$ の最大差/基準場最大値 | — | 2.43 % | — | 2.92 % |
 
 差の尺度は `max|Δfield|/max|base field|` (局所相対差でも出口値でもない)。`diff_res.py --factor 2` は
 node/cell とも exit 1 (= 床超) で、これは**物性が変わったのだから当然**。合否は onset で見る。
+**node は両 onset とも末尾窓で完全に一定、cell は圧力 onset が base 側で 0.020 in 揺れる** (`ONSET_SERIES.txt`)。
+したがって「onset は動かない」は**格子刻みと同 run の時間変動の分解能内**という意味であり、
+連続位置まで不変という主張ではない (codex result-2 M2)。
 
 **case/34 純 N2 (node)**: `diff_res.py --tolfile --factor 2` exit 0 (床以内)。config が 1038.8 で内蔵値と同じため。
 
-**case/16 H2O (300 step, `483de03b` 直前のバイナリとの比較)**: node exit 0。
+**case/16 H2O (300 step, `483de03b` 直前のバイナリとの比較。両者とも NOT CONVERGED / TRANSIENT-UNSETTLED で、
+定常解の一致ではなく「同じ反復数での差が反復ノイズ許容内」の確認)**: node exit 0。
 cell は 3 反復床では exit 1 だったが、**5 反復 (現行) + 3 反復 (旧) の合成床では exit 0**。
 cell の atomicAdd 非決定性に対し 3 反復は床の推定が不十分だった (§5.1 #2)。
 
@@ -140,3 +151,6 @@ case/34 は `onset_analysis.py --series` が STEADY なので、報告する ons
   case/34 は空気 cell を追加。m4 (測定量の表記) → 「保存モーメント $\rho Q_0$ の最大差/基準場最大値」に統一。
   m5 (判定の適用範囲) → 未収束の準定常比較であること、onset は格子点判定であることを明記。
   M3 (集約 plan に埋めるな) → 本計画として分離。
+- `2026-09-14` — codex result レビュー 2 回目 (C0/M2/m2) を全件採用。検証の表現を「未収束・同一反復数での
+  反復ノイズ比較」に限定し、両 onset の時系列 (`ONSET_SERIES.txt`) を保存、実効液比熱を 2008.6 J/(kg·K)
+  (+0.43 % 残差) に訂正、旧実装のコメントを一掃した。

@@ -60,10 +60,12 @@ struct CondPropOpts {
     int    gasKgasModel;
     double sigmaScale;
     double Yw;           // CPG carrier 形の凝縮種質量分率 (condVaporMassFraction; <=0 で pure)
-    // 蒸気の定圧比熱 c_p,v [J/(kg K)]。Kirchhoff の傾き L' = c_p,v − c_l と Kantrowitz の γ_v に使う
-    // (CondSpeciesProps::cp を上書きする)。**CPG では config の physProp.cp をそのまま入れる**
+    // Kirchhoff の傾き L' = c_p,v − c_l **専用** の蒸気比熱 [J/(kg K)]。更新するのは
+    // CondSpeciesProps::kirchhoffCpv だけで、**cp/cv/R (Kantrowitz の γ_v) には触らない**。
+    // **CPG では carrier/pure を問わず config の physProp.cp をそのまま入れる**
     // (CPG は「気相の c_p はこの 1 つの定数」というモデルなので、物性相関だけ別の定数を持たない)。
-    // 0 以下で内蔵値 (N2 1038.8 / H2O 1855) = TP のとき。methods/condensation.md §8b。
+    // 0 以下で内蔵値 (N2 1038.8) = TP のとき。H2O は n2_latent_ex を通らないので実際には未使用。
+    // methods/condensation.md §8b / plans/active/condensation-vapour-cp-source.md。
     double gasCp = 0.0;
 };   // ↑ gasCp は既存の位置指定初期化 ({1,1,2000.0,0,1.0,-1.0}) を壊さないよう末尾に置く
 

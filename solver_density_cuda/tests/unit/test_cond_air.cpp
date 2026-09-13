@@ -170,7 +170,8 @@ int main() {
         checkb("non-finite g_f falls back to the dry face", std::isfinite(cond_face_h_cpg(n2n, cp_air, R_air, RN2, std::numeric_limits<double>::quiet_NaN(), 800.0, 0.1, 0.0)));
     }
     // (g) 蒸気 c_p,v の出どころ (2026-09-14): Kirchhoff の傾き L' = c_p,v − c_l は **凝縮する蒸気** の c_p を使う。
-    //     pure-condensible CPG だけ config の physProp.cp を渡す (CondPropOpts::gasCp)。carrier では渡さない。
+    //     CPG は carrier/pure を問わず config の physProp.cp を渡す (CondPropOpts::gasCp → kirchhoffCpv)。
+    //     cp/cv/R は種固有のまま (Kantrowitz の γ_v)。H2O は n2_latent_ex を通らないので kirchhoffCpv は未使用。
     printf("== (g) vapour c_p source for the Kirchhoff slope (below 70 K) ==\n");
     {
         CondPropOpts o{1, 1, 2000.0, 0, 1.0, -1.0};          // gasCp 未指定 = 内蔵 1038.8

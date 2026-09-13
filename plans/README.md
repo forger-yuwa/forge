@@ -23,7 +23,6 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
-| [condensation-vapour-cp-source.md](active/condensation-vapour-cp-source.md) | `condensation` | **凝縮物性の蒸気比熱 c_p,v の出どころ** (2026-09-14 起票, in_progress): CPG なら `physProp.cp`、TP なら種固有内蔵値。Kantrowitz の γ_v 用 cp/cv とは分離。空気キャリアで onset 不変・液滴モーメント 2.4–2.9 % 変化 |
 | [condensation-followups.md](active/condensation-followups.md) | `condensation` | **凝縮モデルの後続課題の正本** (2026-09-13 起票, draft): α 感度 / 分圧スイープ / 既定値 / σ0.97 h0 変動 / Arthur 壁圧過大の切り分け / CPG 二相音速 / 露点線 / Longshot 条件 / 境界試験・流束収支 / check_quasisteady 統合 |
 | [condensation-kantrowitz-gamma-twophase-sonic.md](active/condensation-kantrowitz-gamma-twophase-sonic.md) | `condensation` | **Kantrowitz 補正の γ を蒸気 γ_v に修正 + 凝縮セルの二相 frozen 音速** (2026-09-10 起票): 旧実装はセル気相混合 γ (H2O–N2 で 1.40) と g を無視した全蒸気音速。A/B キー `condKantrowitzGammaMode` / `condSonicModel`、Wyslouzil 2D (case/16) で変化量を定量化 |
 | [chemistry-finite-rate-h2.md](active/chemistry-finite-rate-h2.md) | `thermophysics / chemistry` | **有限速度化学 (H₂ 燃焼・ノズル化学非平衡)** (2026-09-04 起票): 種ブロック point-implicit + sensible datum 反応熱陽注入。Phase 0 (CEA スクリーニング・熱力学 DB ツール・Jachimowski YAML) 完了、Phase 1 ソース項から実装 |
@@ -56,6 +55,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [condensation-vapour-cp-source.md](accepted/condensation-vapour-cp-source.md) | `condensation` | **凝縮物性の蒸気比熱 c_p,v の出どころ** (2026-09-14 done): CPG なら `physProp.cp`、TP なら種固有内蔵値。Kantrowitz の γ_v 用 cp/cv とは別フィールドに分離。空気キャリアで onset は分解能内で不変、液滴モーメント 2.4–2.9 % 変化 |
 | [condensation-h2o-latent-supercritical.md](accepted/condensation-h2o-latent-supercritical.md) | `condensation` | **H2O 潜熱を臨界点まで伸ばす** (2026-09-14 done): 373.15 K 超で h_l がクランプされ L が増加していた (647 K で 2.807 MJ/kg, 本来 0) のを Watson 型外挿 (指数 0.38, 646.15 K 凍結) に差し替え。IAPWS 飽和線と 400–623 K で rms 1.4 %。`cond_Tsat` の勾配も飽和圧の微分へ |
 | [condensation-kantrowitz-carrier.md](accepted/condensation-kantrowitz-carrier.md) | `condensation` | **[done 2026-09-13]** **carrier 中の非等温核生成補正 (Feder 形 `condKantrowitz 2/3`) と H2O 表面張力の小半径妥当性** (2026-09-12 起票, branch feature/condensation-air): H2O–N2 では N2 衝突がクラスタを冷やし θ が純蒸気形の 1/40; Wysłouzil 2D で 0/1/2/3 と σ ±3 % 感度 |
 | [condensation-air.md](accepted/condensation-air.md) | `condensation` | **[done 2026-09-13]** **空気そのものの凝縮** (2026-09-12 起票, codex plan 2 回 → 実装・検証 2026-09-13): CPG carrier 形 (N2 選択凝縮 + O2 キャリア, `condVaporMassFraction`)、`n2_latent`/飽和圧の低温整合 (C0, 閉形式 C–C)、括弧付き EOS 反転、SLAU 面状態一貫化、slip 状態保持。case/34 Arthur (node/cell): N2 新 +2.1 K / 空気 +1.7 K で $\dot P$ 対応理論線 ±3 K 以内、空気−N2 0.7 K |
