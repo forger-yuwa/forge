@@ -183,41 +183,46 @@ __host__ __device__ inline float cond_evap_source_f(
     int growthModel, float p_gas, float gyarC, int kelvin,
     float* SQ0, float* SQ1, float* SQ2, float* Sg, float* r30_out, float* drdt_out)
 {
+    // λ=r_new/r30 は 1 に近い (|λ−1| ~ dr/dt·dt/r30 ~ 1e-8) ので float では λ を作らず δ=λ−1 で組む
+    // (λ を作ると 1−1e-8 が 1.0f に丸まり S≡0 になる)。λ³−1 = δ(3+3δ+δ²), λ²−1 = δ(2+δ)。
     *SQ0 = 0.0f; *SQ1 = 0.0f; *SQ2 = 0.0f; *Sg = 0.0f; *r30_out = 0.0f; *drdt_out = 0.0f;
     if (g <= 0.0f || dt <= 0.0f) return 1.0f;
     const float lnps = cond_tab_lnpsat_f(tb, T);
     if (p_v > 0.0f && logf(p_v) > lnps) return 1.0f;      // 過飽和: 蒸発分岐ではない
     const float rho_l = cond_tab_rhol_f(tb, T);
-    float lam;
+    float delta;                                          // δ = λ − 1 (≤ 0)
+    bool vanish = false;
     if (q0 <= 1.0e-30f) {
-        lam = 0.0f;
+        vanish = true;
     } else {
         const float r30 = cbrtf(g/((4.0f/3.0f)*COND_PI_F*rho_l*q0/rod));
         *r30_out = r30;
         if (r30 < 2.0f*rmin) {
-            lam = 0.0f;
+            vanish = true;
         } else {
             const float drdt = cond_evap_rate_f(cp, tb, T, p_v, r30, growthModel, p_gas, gyarC, kelvin);
             *drdt_out = drdt;
-            lam = 1.0f + drdt*dt/r30;
-            if (lam < lam_min) lam = lam_min;
+            delta = drdt*dt/r30;
+            if (delta < lam_min - 1.0f) delta = lam_min - 1.0f;
         }
     }
+    if (vanish) delta = -1.0f;
     {
-        float lam3_min = 1.0f - dg_max/g;
-        const float lam3_T = 1.0f - dT_max*cvg/(g*cond_tab_latent_f(tb, T));
-        if (lam3_T > lam3_min) lam3_min = lam3_T;
-        if (lam3_min > 0.0f) {
-            const float lam_T = cbrtf(lam3_min);
-            if (lam < lam_T) lam = lam_T;
+        // Δg 律速と潜熱冷却律速: λ³ ≥ 1 − x, x = min(dg_max/g, dT_max c_v/(g L)) → δ ≥ (1−x)^{1/3} − 1 = expm1(log1p(−x)/3)
+        float x = dg_max/g;
+        const float xT = dT_max*cvg/(g*cond_tab_latent_f(tb, T));
+        if (xT < x) x = xT;
+        if (x < 1.0f) {
+            const float delta_T = expm1f(log1pf(-x)/3.0f);
+            if (delta < delta_T) delta = delta_T;
         }
-        if (lam > 1.0f) lam = 1.0f;
+        if (delta > 0.0f) delta = 0.0f;
     }
-    const float lam2 = lam*lam, lam3 = lam2*lam;
+    const float lam = 1.0f + delta;
     *SQ0 = (lam <= 0.0f) ? (-q0/dt) : 0.0f;
-    *SQ1 = (lam - 1.0f)*q1/dt;
-    *SQ2 = (lam2 - 1.0f)*q2/dt;
-    *Sg  = (lam3 - 1.0f)*rod*g/dt;
+    *SQ1 = delta*q1/dt;
+    *SQ2 = delta*(2.0f + delta)*q2/dt;
+    *Sg  = delta*(3.0f + delta*(3.0f + delta))*rod*g/dt;
     return lam;
 }
 

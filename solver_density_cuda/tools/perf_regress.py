@@ -69,7 +69,7 @@ def run(a):
 #   絶対基準: A (ro,P,T,roY*,Y*,sonic,vis_lam) ≤1e-5 / B (速度,roe,h0,k,omega,roK,roOmega,g_*,rog_*,roQ*) ≤1e-4 / C (vis_turb) ≤1e-2。
 #   wall_dist・res_*・dt_local・限定子など診断量は除外。
 CAT_A = {"ro","P","T","sonic","vis_lam"}; CAT_C = {"vis_turb"}
-SKIP_PREFIX = ("wall_dist","res_","dt_local","limiter_","ducros","cfl","volume","transport_diag","src_jac","delta_les","l_des","rd_des","fd_","fe_","Pk_diag","Taw_diag","wf_","roK_wf","axisym_divU","condDrdt","condR30","condJ","condTsat","condS_")
+SKIP_PREFIX = ("wall_dist","res_","dt_local","limiter_","ducros","cfl","volume","transport_diag","src_jac","delta_les","l_des","rd_des","fd_","fe_","Pk_diag","Taw_diag","wf_","roK_wf","axisym_divU","condDrdt","condR30","condJ","condTsat","condS_","condTheta","condLim")
 import re as _re
 GRAD_RE = _re.compile(r"^d[A-Za-z]+d[xyz]$")   # 勾配診断 (dPdx, drody, dUxdz ...) は判定対象外
 def category(k):
