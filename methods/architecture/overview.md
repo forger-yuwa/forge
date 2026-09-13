@@ -214,7 +214,9 @@
 (2026-09-13〜、`FORGE_CONFIG_LOG_DEFAULTS=0` で抑止)。ただしこれは**ヘルパーを通った省略の記録**であって
 最終的な実効値ではない。`if (config["mesh"]["discretization"])` のようにヘルパーを通らない経路や、
 `time.deltaT.detectNaN` をトップレベルの同名キーが上書きする経路、node で `gradLSQ` を強制する経路は
-ここに出ない (最終値はその後の `'<key>' in '<section>':` 行や個別の `[config]` 行で確認する)。
+ここに出ない。とくに `detectNaN` の上書きは `config["detectNaN"]` を直接読むので**最終値がログに一切残らない**
+(ネスト側の値だけが出る)。解決後の実効値をまとめて出す仕組みは未実装
+([`plans/active/tooling-config-self-documentation.md`](../../plans/active/tooling-config-self-documentation.md) §5.1 #4)。
 
 ### 7.2 `bcondConfig.yaml`
 

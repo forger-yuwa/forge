@@ -171,8 +171,8 @@ public:
                                    // 同等 Pareto 点 (市松 3.9e-8/KE 1.10% ≈ c'+σ0.05 の 7.1e-8/1.36%) に届く。
                                    // 1 (既定): マッハ混在流 (チャンバー低M+プルーム超音速) でグローバル σ が
                                    //   両立できないケース向け。0: フル c — 単一領域で σ を手動較正する運用。
-    flow_float dt_max;   // 適応時間刻み (time.deltaT.control=1) の上限 [s]   // 可変刻みの上限 [s]
-    flow_float dt_min;   // 適応時間刻み (time.deltaT.control=1) の下限 [s]   // 可変刻みの下限 [s]
+    flow_float dt_max;   // 適応時間刻み (time.deltaT.control=1) の上限 [s]
+    flow_float dt_min;   // 適応時間刻み (time.deltaT.control=1) の下限 [s]
 
     int unsteady; // steady , unsteady
     int dualTime; // 0: off , 1: on
@@ -326,7 +326,7 @@ public:
     // 非 node (cell) / explicit では no-op。0 で旧挙動 (弱形式半割面のみ)。
     int nodeWallDirichlet = 1;
     int nodeInletCornerWall = 0;   // node: 入口∩壁の角ノードを壁として扱う (1)。角の P 暴走対策 (変換時に指定)
-    std::vector<int> wallDistExtraPhysIDs;   // 壁距離の壁点集合に加える非 wall bcond の physID (例: 出口バッファの slip 壁)。SST の F1/F2 用   // 1: 変換時に入口∩壁コーナーの入口側半割面を壁へ帰属 (node)。methods/discretization.md §7.2 (D)
+    std::vector<int> wallDistExtraPhysIDs;   // 壁距離の壁点集合に加える非 wall bcond の physID (例: 出口バッファの slip 壁)。SST の F1/F2 用
 
     // (撤去 2026-08-16) nodeAxisDirichlet: 軸ノードを第一内点コピーで置換する対症。保存を破り軸を 1 次化するため
     // 削除。軸ノードは通常 DOF として解き、u_r=0 は壁 no-slip と同じ三点セット (状態ピン+残差 0+Jacobian 行) で課す

@@ -384,6 +384,15 @@ def wrap_comment(text, ind, width=96):
     return out
 
 
+def same_yaml(a, b):
+    """2 つの YAML テキストが同じ値を表すか。ブロックスカラー内への挿入など「原文復元では見えない」破壊を捕まえる。"""
+    import yaml
+    try:
+        return yaml.safe_load(a) == yaml.safe_load(b)
+    except yaml.YAMLError:
+        return False
+
+
 def _notes_for(path, ind, keys, dep, sections):
     """1 キーの上に差し込むコメント行。節そのものには何も付けない。"""
     name = path[-1]
@@ -401,30 +410,59 @@ def _notes_for(path, ind, keys, dep, sections):
     return ["%s# [未知] ソルバは読まない" % ind]
 
 
-def annotate_text(src, keys, dep):
-    """**元のテキストを保ったまま**コメント行だけを挿入する。
+def _key_positions(src):
+    """YAML を構文解析して (パス, 行, 桁) を集める。
 
-    値を YAML で読み書きし直すと `species: [N2, NO]` の `NO` が false になる (YAML 1.1 の真偽値)。
-    注釈は「行の上にコメントを足す」だけにして、値の表記には一切触れない。
+    行を正規表現で見るだけだと、ブロックスカラー (`|-`) の中の `drive: mesh.h5` をキーと誤認して
+    文字列の内側に `#` を挿し込む・複数行のフロー形式 (`deltaT: {..., \n  dt_min: ...}`) の入れ子を
+    取り違える、という事故が起きる (codex result-2 M1/M2)。構文木の位置を使えばどちらも起きない。
+    """
+    import yaml
+    out = []
+
+    def rec(node, path):
+        if isinstance(node, yaml.MappingNode):
+            for k, v in node.value:
+                if not isinstance(k, yaml.ScalarNode):
+                    continue
+                p = path + (str(k.value),)
+                out.append((p, k.start_mark.line, k.start_mark.column))
+                rec(v, p)
+
+    rec(yaml.compose(src), ())
+    return out
+
+
+def annotate_text(src, keys, dep):
+    """**元のテキストを保ったまま**、キーの行の前にコメント行だけを挿入する。
+
+    - 行頭に単独で現れるキーには、その字下げで説明ブロックを差し込む。
+    - 1 行に複数キーが並ぶフロー形式 (`space: {convMethod: 1, limiter: 2}`) では、その行の前に
+      フルパス付きの 1 行要約をまとめて置く (行の中には手を入れない)。
     返り値は (出力行, 挿入した行かどうかのフラグ)。
     """
     sections = {path[:-1] for path in keys if len(path) > 1}
-    out, added, stack = [], [], []
-    for raw in src.splitlines():
-        m = re.match(r"^(\s*)([A-Za-z_][\w.\-]*)\s*:(\s|$)(.*)$", raw)
-        if m is None or raw.lstrip().startswith("#"):
-            out.append(raw); added.append(False)
-            continue
-        ind, name, _sp, rest = m.groups()
-        n = len(ind)
-        while stack and stack[-1][0] >= n:
-            stack.pop()
-        path = tuple(x[1] for x in stack) + (name,)
-        for ln in _notes_for(path, ind, keys, dep, sections):
-            out.append(ln); added.append(True)
+    lines = src.splitlines()
+    per_line = {}
+    for path, line, col in _key_positions(src):
+        per_line.setdefault(line, []).append((col, path))
+
+    out, added = [], []
+    for i, raw in enumerate(lines):
+        entries = sorted(per_line.get(i, []))
+        if entries:
+            indent = raw[:len(raw) - len(raw.lstrip())]
+            own_line = len(entries) == 1 and entries[0][0] == len(indent)
+            if own_line:
+                notes = _notes_for(entries[0][1], indent, keys, dep, sections)
+            else:
+                notes = []
+                for _col, path in entries:
+                    for ln in _notes_for(path, indent, keys, dep, sections):
+                        notes.append(ln.replace("# ", "# %s: " % disp(path), 1) if ln.strip().startswith("#") else ln)
+            for ln in notes:
+                out.append(ln); added.append(True)
         out.append(raw); added.append(False)
-        if rest.strip() == "":
-            stack.append((n, name))
     return out, added
 
 
@@ -439,10 +477,12 @@ def cmd_annotate(a):
               file=sys.stderr)
         return 2
     lines, added = annotate_text(src, keys, dep)
-    # 挿入したコメント行を取り除くと元テキストに戻ることを確かめる (値・表記を 1 文字も変えていない保証)
+    # 二重に確かめる: (1) 挿入行を外すと元テキストに戻る (2) YAML として読んだ値が同じ
+    # (1) だけでは、ブロックスカラーの内側に `#` を挿した場合を見逃す
     kept = "\n".join(ln for ln, ad in zip(lines, added) if not ad)
-    if kept.rstrip("\n") != src.rstrip("\n"):
-        print("拒否: 注釈を外したテキストが元 config と一致しない。出力しない。", file=sys.stderr)
+    body = "\n".join(lines) + "\n"
+    if kept.rstrip("\n") != src.rstrip("\n") or not same_yaml(body, src):
+        print("拒否: 生成した写しが元 config と一致しない (原文復元または YAML 値)。出力しない。", file=sys.stderr)
         return 2
     head = ["# solverConfig.yaml の注釈つきの写し (tools/config_doc.py annotate が生成; 実行には使わない)",
             "# 説明と既定値は solver_density_cuda/input/solverConfig.{cpp,hpp} から抽出したもの。",
@@ -538,12 +578,26 @@ SELFTEST = [
 ]
 
 SELFTEST_TEXT = [
+    ("ブロックスカラーの中身をキーと誤認しない",
+     "mesh:\n  meshFileName: |-\n    drive: mesh.h5\n"),
+    ("複数行のフロー形式でも入れ子を取り違えない",
+     "time:\n  deltaT: {control: 1, dt: 1e-5,\n           dt_min: 1e-8, dt_max: 1.0}\n"),
+    ("キーの後ろのコメントを入れ子開始と誤認しない",
+     "time: # 時間設定\n  unsteady: 0\n"),
     ("YAML 真偽値に見える化学種名 (NO) を壊さない",
      "physProp:\n  species: [\"MIXDRY\", NO]\n  cp: 1039.0\n"),
     ("空の節を潰さない",
      "output: {}\nturbulence:\n  model: \"sst\"\n"),
     ("引用符・バックスラッシュを含む文字列",
      "mesh:\n  meshFileName: \"a'b\\\\c.h5\"\n"),
+]
+
+
+# フロー形式の実 config でも、正しいキーに正しい注釈が付くこと (誤った [節違い] を付けない)
+SELFTEST_NOTES = [
+    ("フロー形式のキーにフルパス付きの注釈が付く",
+     "time:\n  deltaT: {control: 1, dt: 1e-5,\n           dt_min: 1e-8, dt_max: 1.0}\n",
+     ["time.deltaT.dt_min", "time.deltaT.dt_max"]),
 ]
 
 
@@ -563,9 +617,18 @@ def cmd_selftest(a):
     for title, text in SELFTEST_TEXT:
         lines, added = annotate_text(text, keys, dep)
         kept = "\n".join(ln for ln, ad in zip(lines, added) if not ad)
-        ok = kept.rstrip("\n") == text.rstrip("\n")
-        print("%s %s (注釈を外すと元テキストに戻る)" % ("PASS" if ok else "FAIL", title))
+        body = "\n".join(lines) + "\n"
+        ok = kept.rstrip("\n") == text.rstrip("\n") and same_yaml(body, text)
+        print("%s %s (原文復元 + YAML 値一致)" % ("PASS" if ok else "FAIL", title))
         if not ok:
+            ng += 1
+    for title, text, expect in SELFTEST_NOTES:
+        lines, added = annotate_text(text, keys, dep)
+        got = [ln.strip() for ln, ad in zip(lines, added) if ad]
+        ok = all(any(e in g for g in got) for e in expect) and not any("[節違い]" in g for g in got if "dt_min" in g)
+        print("%s %s" % ("PASS" if ok else "FAIL", title))
+        if not ok:
+            print("     期待に含む %s / 実際 %s" % (expect, got))
             ng += 1
     print("%s coverage: 解析できなかった読み出し %d 件" % ("PASS" if not misses else "FAIL", len(misses)))
     ng += 1 if misses else 0

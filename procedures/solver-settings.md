@@ -51,10 +51,12 @@ python3 solver_density_cuda/tools/config_doc.py list     [--missing-desc]      #
 **`[default]` は「ヘルパーを通った省略」の記録であって、最終的な実効値ではない**。次はここに出ない。
 
 - `mesh.discretization` のようにヘルパーを通さず `if (config[...]) ... else ...` で既定を決めている経路
-- `time.deltaT.detectNaN` を出したあとトップレベルの同名キーが上書きする経路 (最終値は後続行で確認する)
+- `time.deltaT.detectNaN` を出したあとトップレベルの同名キーが上書きする経路。**上書き後の最終値はログに出ない**
+  (上書きは `config["detectNaN"]` を直接読むので `[default]` も通常行も出さない)
 - node で `gradLSQ` を強制するような、読み込み後にコードが書き換える経路
 
-最終値は `'<key>' in '<section>':` の行と、`[config]` で始まる個別の通知行を合わせて読むこと。
+最終値は `'<key>' in '<section>':` の行と、`[config]` で始まる個別の通知行を合わせて読む。
+それでも分からないものが残る (上の 3 例)。実効値をまとめて出す仕組みは未実装。
 
 ## convMethod — 対流スキームの次数
 

@@ -23,7 +23,6 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
-| [tooling-config-self-documentation.md](active/tooling-config-self-documentation.md) | `architecture / tooling` | **solverConfig.yaml を読めるようにする** (2026-09-13 起票, in_progress): 意味・既定値・廃止をコードから抽出して注釈生成/点検する `tools/config_doc.py` と、省略キーを `[default]` として残す起動ログ。config にコメントは書かない (複製で腐るため) |
 | [condensation-followups.md](active/condensation-followups.md) | `condensation` | **凝縮モデルの後続課題の正本** (2026-09-13 起票, draft): α 感度 / 分圧スイープ / 既定値 / σ0.97 h0 変動 / Arthur 壁圧過大の切り分け / CPG 二相音速 / 露点線 / Longshot 条件 / 境界試験・流束収支 / check_quasisteady 統合 |
 | [condensation-kantrowitz-gamma-twophase-sonic.md](active/condensation-kantrowitz-gamma-twophase-sonic.md) | `condensation` | **Kantrowitz 補正の γ を蒸気 γ_v に修正 + 凝縮セルの二相 frozen 音速** (2026-09-10 起票): 旧実装はセル気相混合 γ (H2O–N2 で 1.40) と g を無視した全蒸気音速。A/B キー `condKantrowitzGammaMode` / `condSonicModel`、Wyslouzil 2D (case/16) で変化量を定量化 |
 | [chemistry-finite-rate-h2.md](active/chemistry-finite-rate-h2.md) | `thermophysics / chemistry` | **有限速度化学 (H₂ 燃焼・ノズル化学非平衡)** (2026-09-04 起票): 種ブロック point-implicit + sensible datum 反応熱陽注入。Phase 0 (CEA スクリーニング・熱力学 DB ツール・Jachimowski YAML) 完了、Phase 1 ソース項から実装 |
@@ -55,9 +54,10 @@
 ## accepted (現役の設計判断)
 
 | Plan | area | 概要 |
+| --- | --- | --- |
 | [condensation-kantrowitz-carrier.md](accepted/condensation-kantrowitz-carrier.md) | `condensation` | **[done 2026-09-13]** **carrier 中の非等温核生成補正 (Feder 形 `condKantrowitz 2/3`) と H2O 表面張力の小半径妥当性** (2026-09-12 起票, branch feature/condensation-air): H2O–N2 では N2 衝突がクラスタを冷やし θ が純蒸気形の 1/40; Wysłouzil 2D で 0/1/2/3 と σ ±3 % 感度 |
 | [condensation-air.md](accepted/condensation-air.md) | `condensation` | **[done 2026-09-13]** **空気そのものの凝縮** (2026-09-12 起票, codex plan 2 回 → 実装・検証 2026-09-13): CPG carrier 形 (N2 選択凝縮 + O2 キャリア, `condVaporMassFraction`)、`n2_latent`/飽和圧の低温整合 (C0, 閉形式 C–C)、括弧付き EOS 反転、SLAU 面状態一貫化、slip 状態保持。case/34 Arthur (node/cell): N2 新 +2.1 K / 空気 +1.7 K で $\dot P$ 対応理論線 ±3 K 以内、空気−N2 0.7 K |
-| --- | --- | --- |
+| [tooling-config-self-documentation.md](accepted/tooling-config-self-documentation.md) | `architecture / tooling` | **solverConfig.yaml を読めるようにする** (2026-09-13 done): 意味・既定値・廃止をコードから抽出して注釈生成/点検する `tools/config_doc.py` (`check`/`annotate`/`template`/`list`/`coverage`/`selftest`) と、省略キーを `[default]` として残す起動ログ。config にコメントは書かない (複製で腐るため) |
 | [performance-3d-node-sst-speedup.md](accepted/performance-3d-node-sst-speedup.md) | `architecture / performance` | **3D node SST 生産計算の速度向上** (2026-09-12 起票・完了): A10G 82.85 ms/step の半分が FP64 パイプ (リテラル昇格 + 熱力学の面 double 評価)。リテラル f 接尾辞・面熱力学の float 係数評価・ハイブリッド温度反転 (`thermoFloat` 既定 1)・面ループ融合で **82.85→32.62 ms/step** (推奨レシピ nStepInner 4; 対角キャッシュ/AoS パックは却下、RCM は −3 % opt-in)。保証範囲は「同一 IC からの継続時間における場の非劣化 (絶対基準 / 2×ノイズ床 / double 高精度参照との距離) と速度」で収束解不変は未検証。codex result 4 回 (NO-GO×3 → GO-with-changes) 全件採用。branch `feature/perf-3d-speedup` |
 | [condensation-float-speedup.md](accepted/condensation-float-speedup.md) | `architecture / performance` | **凝縮経路の float 化** (2026-09-13 起票・2026-09-14 完了): 凝縮 ON の 3D node SST TP が dry の 2.6 倍 (33.8→89.5 ms/step)。物性の区分 3 次表 (範囲外は double 退避)・対数空間 CNT・面潜熱の表評価 (g=0 面スキップ)・二相反転ハイブリッド (残差判定)・clamp/移流融合で ≤45 ms/step (A10G) を狙う。A10G 実測 (2026-09-13): 起動区間 89.4→44.0 (目標達成)、発達場 98.0→52.3 ms/step (目標 50 に 4.6 % 未達 → followups F-cf3)、dry 不変。`condFloat` で旧 double 経路を残す |
 | [output-level-and-h0.md](accepted/output-level-and-h0.md) | `architecture / output` | `res_*.h5` の出力量を `output.level` (既定 1 = 保存量 + 原始量 + `h0`, 2.08M で 681→290 MB) で絞る。全エンタルピー `h0` (sstEnergyIncludesK なら +k, 属性 `h0_includes_k`) をソルバが書き、全温・全圧の後処理はそこから作る (2026-09-08) |

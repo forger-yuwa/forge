@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `architecture`
-- **status**: `in_progress`
+- **status**: `done`
 - **related_docs**:
   - `procedures/solver-settings.md` (数値設定リファレンス)
   - `procedures/recommended-settings.md` (推奨レシピの正本)
@@ -64,8 +64,13 @@
 実際に `gpu` を「GPU 番号」と誤記していた (正しくは 0/1 フラグ。`boundaryCond.cpp` が 1 以外をエラーにする)。
 同様に `initial` は変換器専用、`time.last.control` は現在どこからも参照されていない (codex 指摘 M3)。
 
-**生成物の安全性**: `annotate` は値を YAML シリアライザで書き、生成物を読み戻して元の config と一致することを
-確認してから出力する (引用符・バックスラッシュを含む文字列で壊れた)。出力先が入力と同一ファイルなら拒否する。
+**生成物の安全性**: `annotate` は**元のテキストに一切触れず、キーの行の前にコメント行を挿入するだけ**にする。
+値を読み書きし直す方式は捨てた (`species: [N2, NO]` の `NO` が YAML 1.1 の真偽値として `false` になり、
+空の節 `output: {}` が null に潰れた)。挿入位置は正規表現ではなく **YAML 構文木のキー位置** (`yaml.compose` の
+`start_mark`) から決める。行を見るだけだと、ブロックスカラー (`|-`) の中の `drive: mesh.h5` をキーと誤認して
+文字列の内側に `#` を挿し込み、複数行のフロー形式の入れ子を取り違える。
+検査は 2 本立て: (1) 挿入行を外すと元テキストに 1 文字違わず戻る、(2) YAML として読んだ値が元と一致する。
+(1) だけではブロックスカラー内への挿入を見逃す。出力先が入力と同一ファイルなら拒否する。
 `template` は廃止・使用禁止キーを出さず、既定値が無いキーは `REQUIRED` / `SEE_CODE` の明示プレースホルダにする
 (codex 指摘 M4/M5)。
 
@@ -89,7 +94,7 @@
 | 1 | 死にキーの掃除 | 実測で見つかった `turbulence.kInf` / `turbulence.omegaInf` / `time.last.time` / `time.implicit.nLoop` / `mesh.nodeWallViscGradFlux` はソルバが読まない。生産 config から落とす (別コミット) |
 | 2 | 旧 config の必須欠落 | `case/04.laval_nozzle/run_slau` 等の古い run は現ソルバの必須キーを欠く。参照用に残すなら README に「現ソルバでは起動しない」と明記 |
 | 3 | CI 的な常用 | 新規 run 投入前に `config_doc.py check` を回す運用を `calculation-workflow.md` に入れるか検討 |
-| 4 | 実効値のログ | `[default]` はヘルパー経由の省略のみ。解決後の最終値を 1 箇所にまとめて出す (`[config effective]`) のは別途 |
+| 4 | 実効値のログ | `[default]` はヘルパー経由の省略のみ。**`detectNaN` のトップレベル上書きは最終値がログに一切残らない**。解決後の最終値を 1 箇所にまとめて出す (`[config effective]`) のは別途 |
 | 5 | `time.last.control` | 必須なのに未参照 (`endTimeControl` がどこからも読まれない)。廃止するか終了条件として実装するか決める |
 
 ## 6. 検証
@@ -99,8 +104,11 @@
 - **期待値つき試験 (M6)**: 仕込みの config 1 本で次を同時に確認する
   — 節違い (`space.keepDissCoeff`) / 未知キー (`turbulence.kInf`) / 配列キー (`mesh.wallDistExtraPhysIDs`, 誤検知しない) /
   廃止キー (`mesh.bndFirstOrder`) / 引用符・バックスラッシュを含む文字列の往復。
-- **生成物 (M5)**: `annotate` の出力を読み戻して元 config と**構造・値が完全一致**すること。
-  出力先に入力自身を指定したら拒否 (exit 2) すること。`template` の出力が YAML として読め、廃止キーを含まないこと。
+- **生成物 (M5)**: `annotate` の出力から挿入コメント行を外すと**元テキストに 1 文字違わず戻る**こと、かつ
+  **YAML として読んだ値が元と一致する**こと。出力先に入力自身を指定したら拒否 (exit 2) すること。
+  `template` の出力が YAML として読め、廃止キーを含まないこと。
+- **注釈の中身 (result-2 M2)**: フロー形式を含む実 config で、正しいキーに正しいフルパスの注釈が付き、
+  正しいキーに `[節違い]` を付けないこと。
 - **説明の正しさ (M3)**: 追加した説明は値の消費箇所 (`variables.cpp` / `main.cpp` / `setInitial.hpp` 等) まで当たって確認する。
 - **C++ 側 (B)**: `g++ -std=c++17 -fsyntax-only` を通し、`solverConfig::read()` だけを呼ぶ最小ハーネスを
   実 config に対して実行して「明示キーの行が従来書式のまま」「省略キーが `[default]` として出る」
@@ -114,6 +122,7 @@
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result (2) | `2026-09-13` | [`notes/reviews/2026-09-13-tooling-config-self-documentation-result-2.md`](../../notes/reviews/2026-09-13-tooling-config-self-documentation-result-2.md) | GO-with-changes, C0/M2/m2 | **全件採用** (下記) |
 | result | `2026-09-13` | [`notes/reviews/2026-09-13-tooling-config-self-documentation-result.md`](../../notes/reviews/2026-09-13-tooling-config-self-documentation-result.md) | GO-with-changes, C0/M2/m3 | **全件採用** (下記) |
 | plan | `2026-09-13` | [`notes/reviews/2026-09-13-tooling-config-self-documentation-plan.md`](../../notes/reviews/2026-09-13-tooling-config-self-documentation-plan.md) | GO-with-changes, C0/M6/m3 | **全件採用** (下記) |
 
@@ -131,7 +140,16 @@
 | m8 | `recommended-settings.md` 自体が死にキー `kInf`/`omegaInf` を推奨している | 推奨レシピを `kInit`/`omegaInit` に訂正し、適用条件 (IC に `roK`/`roOmega` が無いときだけ効く) を追記。`methods/turbulence/implementation.md` の旧キー列にも注記 |
 | m9 | plan/result レビュー統合は免除条件に当たらない。`methods/` 更新も無い | 本レビューを `plan` 段として記録し `result` 段は別途実施。`methods/architecture/overview.md` §7.1 を更新 |
 
-**result 段の採否** (すべて採用・対応済み):
+**result 段 (2 回目) の採否** (すべて採用・対応済み):
+
+| 指摘 | 内容 | 対応 |
+| --- | --- | --- |
+| M1 | 行を正規表現で見る注釈挿入が、ブロックスカラー (`\|-`) の中身をキーと誤認して**文字列の内側に `#` を挿す**。原文復元検査は通ってしまう | 挿入位置を **YAML 構文木のキー位置** (`yaml.compose` の `start_mark`) から決める方式に変更。検査に「YAML として読んだ値が一致するか」を追加 (原文復元だけでは見えないため) |
+| M2 | 複数行のフロー形式の入れ子を取り違え、正しい `time.deltaT.dt_min` に誤った `[節違い]` を付ける。フロー形式内のキーに注釈が付かない | 同じ構文木からフルパスを取得。1 行に複数キーが並ぶ行には、その行の前にフルパス付きの注釈をまとめて置く |
+| m3 | `detectNaN` の最終値をログで確認できるという説明が誤り (上書き時は何も出さない) | `procedures/solver-settings.md` と `methods/architecture/overview.md` を「上書き後の最終値はログに残らない」に訂正。実効値ログは §5.1 #4 |
+| m4 | plan §4/§6 が旧方式 (YAML シリアライザ + 読み戻し) のまま | §4 と §6 を実際の方式 (コメント挿入 + 2 本立て検査) に更新 |
+
+**result 段 (1 回目) の採否** (すべて採用・対応済み):
 
 | 指摘 | 内容 | 対応 |
 | --- | --- | --- |
@@ -150,11 +168,12 @@
 
 ## 8. 完了条件
 
-- [ ] 関連 `procedures/` を更新済み
-- [ ] 実装・検証完了 (§6)
-- [ ] codex レビューを §6.1 に記録
-- [ ] `status` を `done` に変更し §9 に変更ログ
-- [ ] `plans/accepted/` へ移動、`plans/README.md` を同期
+- [x] 関連 `procedures/` を更新済み (`solver-settings.md` に「config を読む・点検する」節、`recommended-settings.md` の死にキー訂正)
+- [x] `methods/architecture/overview.md` §7.1 と `methods/turbulence/implementation.md` の旧キー列を更新
+- [x] 実装・検証完了 (§6。記録は `notes/investigations/2026-09-13-config-doc-verification.md`)
+- [x] codex レビュー 3 回 (plan / result / result-2) を §6.1 に記録し、Critical 0 / Major 10 / Minor 8 をすべて採用
+- [x] `status` を `done` に変更し §9 に変更ログ
+- [x] `plans/accepted/` へ移動、`plans/README.md` を同期
 
 ## 9. 変更ログ
 
@@ -164,6 +183,9 @@
   `template` から禁止キーを除外。誤説明 (`gpu` ほか 6 件) を消費箇所まで当たって訂正。
   `recommended-settings.md` の死にキー推奨 (`kInf`/`omegaInf` → `kInit`/`omegaInit`) と
   `methods/architecture/overview.md` §7.1 を更新。
+- `2026-09-13` — codex result レビュー 2 回目 (C0/M2/m2) を全件採用。注釈の挿入位置を YAML 構文木から決める方式に
+  変更し (ブロックスカラー内への `#` 挿入・複数行フロー形式の取り違えを根絶)、検査を「原文復元 + YAML 値一致」の
+  2 本立てに。`detectNaN` 上書きの最終値がログに残らない件を文書に明記。`selftest` を 16 項目へ。
 - `2026-09-13` — codex result レビュー (C0/M2/m3) を全件採用。`annotate` を「元テキストにコメント行を挿入する」
   方式へ作り直し (`species: [N2, NO]` の `NO` が false になる事故を根絶)、config の照合をパスのタプルに変更して
   入れ子の取り違えと空辞書の見逃しを解消。`selftest` (期待値つき) と検証記録を追加。`keepDissCoeffMax` の説明を訂正。
