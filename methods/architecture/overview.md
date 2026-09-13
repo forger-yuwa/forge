@@ -244,7 +244,7 @@ GPU 計算中でも、出力前には必要なセル変数を `copyVariables_cel
 device バッファに常駐**させる (`DeviceResidualReducer` / `residualSumSq_d`)。host へは `monitorInterval`
 ステップごとに 1 回だけまとめて D2H 転送し CSV へ書き出す。これにより毎ステップの値は保ったまま、
 変数ごとの `thrust::transform_reduce` (host スカラ返り = `cudaStreamSynchronize`) による per-step 同期を除く。
-`monitorInterval` は `max cfl`/`dt` の console 出力頻度も兼ねる (モニタリング出力の共通間隔)。
+`monitorInterval` は console のモニタ行 (§8.5) の出力頻度も兼ねる (モニタリング出力の共通間隔)。
 dt 適応 (`setDT` の `thrust::max_element`→`cfg.dt`) はこれとは独立に制御する (定常では間引き可・解に不影響、
 explicit/dual-time は必要に応じ毎ステップ適応; 表示のみ `monitorInterval` で間引く)。
 
@@ -256,6 +256,48 @@ explicit/dual-time は必要に応じ毎ステップ適応; 表示のみ `monito
 
 GPU 計算結果をホストで使う一般則は変わらない: 出力・監視のために値を host で読む箇所は同期点になるため、
 頻度を必要最小限にするか device 常駐＋まとめ転送にするのが基本方針。
+
+### 8.5 console モニタ行 (stdout / `forge_run.log`)
+
+`main.cpp` の `StepMonitor` が、`monitorInterval` ステップごとに **1 行**の要約を stdout へ出す。残差の正本は
+`residual_history.csv` (§8.4) で変わらないが、`tail -f forge_run.log` だけで「速いか・収束しているか・壊れ始めて
+いないか」を読めるようにするのが目的。旧形式 (`Step :` / `max cfl :` / `dt :` の 3〜4 行/step と RK/inner の
+`Stage : n` 行) は廃止した。
+
+**出力する量はモードで変える**。判定軸は `time.unsteady` であり、`isImplicit` ではない (下表)。
+
+| モード | `unsteady` | `isImplicit` | 時間刻みの意味 | モニタ行に出す時間量 |
+| --- | --- | --- | --- | --- |
+| 定常 陰解法 (block-DPLUR) | 0 | 1 | `dt_local = cfl_pseudo·V/λ` (局所擬似時間)。`cfg.dt` は打ち消されて無意味 | 出さない (`cfl_pseudo`/`implicitRelax` を起動時に 1 回) |
+| 定常 陽解法 (局所 dt) | 0 | 0 | 同上 (`setDTlocal_pseudo_cell_d`) | 出さない (同上) |
+| 非定常 陽解法 (RK) | 1 | 0 | `cfg.dt` が一様物理 dt (dtControl=1 なら CFL 適応) | `t`, `dt`, `maxCFL` (物理 CFL) |
+| 非定常 dual-time 陰解法 | 1 | 1 | `cfg.dt` が固定物理 dt、サブ反復は `cfl_pseudo` | `t`, `dt`, `maxCFL` (物理 CFL; 経験的に ≲12 が安定域) |
+
+`max cfl` は `setDT_d_wrapper` が host 読みした値を `cfg.monitorCflMax` に格納するだけにし、印字はモニタ行が担う。
+CFL を評価した刻みは `cfg.monitorCflDt` に対で保存する: `dtControl: 1` (CFL 適応) の陽解法では `setDT` が直後に
+`cfg.dt` を次 step 用に更新するので、モニタ行は「この step の前進に使った `dt`」と「その dt での `maxCFL`」を対で出し、
+更新後の値は `dt_next` として別に出す。定常モードでは `printCfl=false` を渡すので**表示目的**の host 読みは無くなる
+(`dtControl: 1` のときの dt 適応目的の読み (`adaptDt`) は従来どおり残る。定常では適応結果は解に効かない)。
+
+モニタ行の構成 (1 行, 空白区切り, `|` で区分):
+
+```
+step     200 | 3.96 ms/step elapsed 0.8 s eta 0 s | rms_ro 7.14e-06 (-0.3) worst rms_roOmega 6.16e+03 (+2.4)
+step     200 | t 5.0000e-05 dt 2.50e-07 maxCFL 0.07 | 4.06 ms/step elapsed 0.6 s eta 0 s | rms_ro 8.16e-03 (-0.1) worst rms_roUx 6.43e+00 (-0.0) from0 rms_roUy 3.7e-06
+```
+(1 行目: 定常陰解法 case/16 run_0330、2 行目: 非定常陽解法 case/05 run_0013。`(+2.4)` は増大 = 初期比 10^2.4 倍)
+
+- **時間量** (unsteady のみ): 物理時間 `t`、物理 `dt`、`maxCFL`。
+- **速度**: 直前 monitor 区間の壁時計 (`steady_clock`) 平均 `ms/step`、開始からの経過秒、`nStepOuter` までの予想残り秒。
+  終了時の `Time = ... s` も CPU 時間 (`clock()`) から壁時計へ変えた (GPU 待ちが含まれる値になる)。
+- **残差**: その step の `outer_end` 行から、`rms_ro` と「初期値 (step 0 `outer_begin`) からの低下桁数が最小の列」
+  (= worst) を値と `log10(現在/初期)` (負 = 低下, 正 = 増大) で示す。初期値が 0 の列は桁数が定義できないので、
+  現在非 0 なら最大のものを `from0` として別表示する。全列の詳細は CSV。非有限値があれば末尾に `*** NaN ***` を付ける。
+  値は `ResidualCsvLogger` が flush 時に保持した最新 `outer_end` 行 (`latestSummary()`) を使うので、CSV と同じ数値・
+  追加の reduction 無し。
+
+同期コストは monitor ステップでの CSV flush (D2H 1 回) と、unsteady の `max cfl` 読み (従来どおり) だけ。
+`monitorInterval: 1` (既定) なら毎ステップ 1 行。
 
 ## 9. CUDA 側実装の見取り図
 

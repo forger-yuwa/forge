@@ -46,6 +46,9 @@ def main():
         "AGENTS.md 「方針の反映トリガは『実装』ではなく『決定』」より: 各 plans/active/*.md は\n"
         "**優先順つきの残作業表を持つ** (雛型は plans/_template.md §5.1)。残作業の実体はここに置き、\n"
         "notes/sessions/ の引き継ぎ文書には写しとポインタだけを置く。\n"
+        "AGENTS.md 「codex レビュー」より: plan 段 (実装前) と result 段 (done にする前) の codex レビューを\n"
+        "§6.1 レビュー記録に残す (`codex_review.py <plan> --stage plan|result`。2026-09-09 以前起票の実装済 plan は\n"
+        "`plan 免除` 行 + 理由で可)。\n"
         "この plan を触ったついでに不足分を足すこと (編集自体は成功しています)。")
     print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
 

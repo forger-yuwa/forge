@@ -77,6 +77,64 @@ $$
 - **Kantrowitz 非等温補正** (H2O): 生成中の臨界核が放出潜熱を捨てきれず自己加熱し $J$ が下がる効果を
   **核生成項そのもの**に織り込む。N2 では使わず (自己加熱は成長側 $T_d$ で扱う、下記)。
 
+  $$
+  J_{noniso}=\frac{J_{iso}}{1+\theta},\qquad
+  \theta=\frac{2(\gamma_v-1)}{\gamma_v+1}\,b\Big(b-\tfrac12\Big),\qquad b=\frac{L(T)}{R_vT}
+  $$
+
+  ここで $\gamma_v=c_{p,v}/c_{v,v}$ は**凝縮種 (蒸気) 自身の比熱比** (Kantrowitz 1951 / Feder et al. 1966 の純蒸気形:
+  H2O 蒸気 1.331 [NASA-9, 200–300 K]、N2 1.4)。$\theta$ はクラスタが 1 分子を取り込むたびに受け取る潜熱
+  $L$ を、蒸気分子との衝突で持ち去れるエネルギー揺らぎ ($\propto c_{v,v}+R_v/2$) で割った比なので、
+  比熱比はキャリア (N2) や気相混合のものではなく蒸気のものを使う ($\frac{2(\gamma_v-1)}{\gamma_v+1}=\frac{R_v}{c_{v,v}+R_v/2}$)。
+  **2026-09-10 以前の実装はセルの気相混合 $\gamma=c_{p,gas}/c_{v,gas}$ (H2O–N2 では N2 支配 ≈1.40) を使っていた**
+  ($\theta$ が ~17 % 過大 → 純蒸気形の $J$ が ~15 % 過小; Wyslouzil 2D では onset が 0.45 mm 上流へ移り onset 帯の壁圧偏差が −4.8 → −4.5 % に縮む, 2026-09-10 検証)。
+  これは**純蒸気形近似の中での係数修正**であり、
+  旧挙動は `condKantrowitzGammaMode: 1` で A/B 用に残す。キャリア気体分子との衝突も揺らぎに数える Feder の
+  carrier 拡張 ($b^2$ に $p_c/p_v\sqrt{m_v/m_c}$ 重みの項が加わり $\theta$ が大幅に小さくなる; Wedekind et al.) は `condKantrowitz 2/3` として実装済み (次節「carrier 中の非等温核生成補正 (Feder 形)」; 既定は 0 のまま)。
+  $J_{pure}\le J_{carrier}\le J_{iso}$ は「同一の核生成障壁・前因子を固定し、衝突による熱除去だけを追加したモデル間」の関係で、
+  carrier 中の核生成率の真値の保証範囲ではない (Wedekind et al. は carrier の $pV$ 仕事など逆向きの寄与も区別する)。
+  純蒸気形は onset の実験一致を保証するものではない。
+  計画: [plans/active/condensation-kantrowitz-gamma-twophase-sonic.md](../plans/active/condensation-kantrowitz-gamma-twophase-sonic.md)。
+
+- **carrier 中の非等温補正 (Feder 形, `condKantrowitz: 2, 3`; 計画 [condensation-kantrowitz-carrier](../plans/accepted/condensation-kantrowitz-carrier.md))**:
+  Feder et al. (1966) の一般形では、クラスタの余剰エネルギーを持ち去る衝突に**キャリア分子も数える**:
+
+  $$
+  \frac{J}{J_{iso}}=\frac{1}{1+\theta},\quad \theta=\frac{q^2}{b^2},\quad
+  q=m_vL-k_BT\Big(\tfrac12+[\ln S]_{\text{mode 3}}\Big),\quad
+  b^2=k_B^2T^2\Big[\tilde c_{v,v}+\tfrac12+\frac{N_c}{N_v}\sqrt{\frac{m_v}{m_c}}\big(\tilde c_{v,c}+\tfrac12\big)\Big]
+  $$
+
+  ($\tilde c_v=c_vm/k_B$ は 1 分子あたり熱容量、$N_c/N_v$ はキャリア/蒸気の分子数比)。mode 2 は $q$ を Kantrowitz と同じ潜熱項だけに、mode 3 は
+  臨界核の表面仕事 $\gamma\,\partial A/\partial n=2\sigma v_l/r_*=k_BT\ln S$ も差し引く (Feder の原形)。$N_c=0$ で Feder の純蒸気形
+  $\theta=(b_L-\tfrac12)^2/(\tilde c_{v,v}+\tfrac12)$ に戻る (mode 1 の $b_L(b_L-\tfrac12)$ と 2 % 差)。**Wysłouzil (H2O 1 % in N2, 230 K) では
+  $N_c/N_v$=58, $\sqrt{m_v/m_c}$=0.80 で $b^2$ が純蒸気の 41 倍になり $\theta$ 167 → 4.1 (mode 3: 3.0)、$J/J_{iso}$ 0.006 → 0.20 (0.25)**。
+  つまり carrier 形は等温と純蒸気形の間の等温寄りに来る。pV 仕事 (Wedekind 2008) は $v_lp_c/(k_BT\ln S)\sim10^{-5}$ で無視。
+  導出と見積りは [notes/investigations/condensation-carrier-kantrowitz-air-survey.md](../notes/investigations/condensation-carrier-kantrowitz-air-survey.md) §1。
+  実装は `cond_kantrowitz_theta` (衝突項 `CondNucCarrier` は kernel が種 DB から種別に集計し、本体と src_jac 摂動の全呼び出しに同一値を渡す)。
+  診断 `condTheta_<s>` (θ) と `condLim_<s>` (ソース律速係数) を出力する。
+
+  **Wysłouzil 2D (case/16 run_0350–0355, node SST, 48000 step, 2026-09-12)**: onset [中心線 g=10⁻³, mm] は 等温 12.3 / mode 3 14.3 / mode 2 14.8 /
+  mode 1 22.5 で局所 θ の序列どおり。壁 p/p₀ @21 mm の実験偏差は +21.6 / +17.5 / +15.0 / −4.5 %。**carrier 形は等温側に寄り、計算上の onset が mode 1 より
+  8.2 mm 上流に移る (モデル間差) 結果、21 mm の壁圧偏差が増える**。σ の一定倍率 ±3 % (mode 3) で onset は −2.2 (未収束 run の過渡参考値) / +2.5 mm。
+  原因 (核生成 J か成長 dr/dt か) は未同定: Hertz–Knudsen の α=1 は自由分子流束の上限で、J 過大と dr/dt 過大は onset 位置では縦退する。
+  なお「水の CNT は低温で J を過大評価する」という説明は誤りで撤回 (Wölk & Strey 2001 の補正 $\exp(-27.56+6500/T)$ は 230 K で ×2、214 K で ×17 と
+  低温で CNT を**増幅**する側; codex 指摘 2026-09-12)。mode 1 は旧結果再現用、mode 3 は物理モデル (較正は別問題)、既定は 0 のまま。
+
+#### 表面張力の妥当性 (過冷却・小半径)
+
+- `h2o_sigma` は IAPWS R1-76 形 $\sigma=0.2358\,\tau^{1.256}(1-0.625\tau)$ を 273 K 未満へ外挿している。過冷却水の実測: Hrubý et al. 2014 と
+  Vinš et al. 2015 (−25 °C まで) は**滑らかな IAPWS 外挿と一致し第二変曲点の証拠なし**、一方 Vinš et al. 2020 (−31.4 °C=241.8 K まで) は
+  **−20 °C 未満で外挿式から有意な偏差を検出し、深い過冷却で異常の余地を報告**している。→ 平面 σ の外挿は T ≳ 250 K では実測で支持されるが、
+  Wysłouzil の核生成温度 (~215–235 K) は**実測域の外**で精度は保証されない (これは平面界面の温度外挿の問題で、曲率依存とは別)。
+- 曲率依存 (Tolman): $\sigma(r)=\sigma_\infty(1-2\delta/r)$。水の $\delta$ は Wilhelmsen et al. 2015 (square-gradient theory + CPA EOS) で負の小さい値
+  (~−0.05 nm) と報告される。**成長した液滴 ($r\sim50$ nm) では 0.2 % で無視でき、Kelvin 項・成長則・蒸発は平面 σ で十分**。一方 臨界核
+  ($r_*\sim1$ nm, 液密度 994 kg/m³ で ~140 分子) では ~10 % で、$J\propto\exp(-16\pi\sigma^3v_l^2/3k^3T^3\ln^2S)$ の σ³ 依存を通じ障壁が
+  $[(1.1)^3-1]\,\Delta G^*/k_BT\approx17$–23 $k_BT$ 増える ($\Delta G^*/k_BT\sim50$–70)。これは capillarity 近似 (CNT) 自体の精度限界で、
+  CNT+平面 σ は経験的に較正された妥協 (Wölk & Strey 2001 の水の補正が例)。
+- forge では Tolman 補正を実装しない。理由は「異常が否定された」からではなく、対象温度・臨界核サイズで採用する曲率モデルと係数の検証が
+  不足しているため。σ の不確かさは `condSigmaScale` (σ 倍率, 既定 1.0) の**一定倍率による局所感度**として示す (温度依存・曲率依存の誤差モデルの代替ではない)。
+
 ---
 
 ### 3. 成長モデル (droplet growth) — **液滴温度 $T_d$ で評価**
@@ -148,7 +206,7 @@ pure-condensible では $p_v=\rho(1-g)R_vT$、$Y_w\to1$。
 緩和形との関係: 定常解の固定点は同一 (どちらも「飽和線上か乾き」)。差は (i) onset 直後の θ 遅れが無い、
 (ii) 過渡・非定常でも各ステップで厳密平衡、(iii) $g$ が対流でなく熱力学で決まるので流線に沿った履歴を持たない
 (平衡なので本来そうあるべき)。飽和線は緩和形と同じ過冷却液 (Murphy–Koop)。陰解法との結合は従来どおり loose
-(NS ブロックの $\kappa$ は気相 frozen のまま。平衡音速への置換は未実装 — 収束不良時の候補)。
+(NS ブロックの音速と $\kappa$ は全蒸気 frozen のまま。`condSonicModel` の自動解決は `condEquilibrium 2` を対象外にする (§5「二相 frozen 音速」、2026-09-10)。平衡音速への置換は未実装)。
 `nCondSpecies>=2` では未対応 (エラー)。実装は `cond_eq_solve_g` / `cond_equilibrium_Tg_{carrier,pure_tp,pure_cpg}` (`condensationEOS_d.cuh`)、
 単体テスト `tests/unit/test_cond_equilibrium_eos.cpp`。case/44 `run_0098` (旧条件×va3 形状) で onset 以降 S=1.0000・過冷却 0.000 K、下流は緩和形と一致。設定・検証は
 [plans/accepted/condensation-equilibrium-eos.md](../plans/accepted/condensation-equilibrium-eos.md)。
@@ -432,6 +490,15 @@ $n_1=1.48654237,\ n_2=-0.280476066,\ n_3=0.0894143085,\ n_4=-0.119879866$。
 
 N2 は従来どおり Lin 2014 のフィット (`n2_latent`)。
 
+#### 潜熱 $L(T)$ と飽和圧の低温整合 (`condN2LatentLowT`, 計画 [condensation-air](../plans/accepted/condensation-air.md))
+
+式 26 の 4 次多項式は ≈61 K で $dL/dT$ が正に転じ、55 K 未満で $L'>c_{p,v}$ となって液の比熱 $c_l=c_{p,v}-L'$ が負 (45 K で −3100 J/kg/K) になる (熱力学的に不整合;
+二相 frozen 音速の $c_{v,2\phi}$ が負になる原因、2026-09-10 codex 指摘)。`condN2LatentLowT: 1` (既定) では 70 K 未満を
+$L(T)=L(70)+(c_{p,v}-c_l)(T-70)$、$c_l$=2000 J/kg/K (液 N2 63–77 K の実測 $c_{p,l}$≈2.0 kJ/kg/K; 30–60 K は実測が無く「正の熱容量を保証する閉包」)
+の線形外挿に置き換える (45 K で 233 kJ/kg, 旧 188)。**飽和圧の 50 K 未満 Clausius–Clapeyron 外挿も同じ $L(T)$ の積分で再構成する**
+(旧は $L_{old}(50)$=204 kJ/kg 一定; 潜熱を変えると 38 K で $p_{sat}$ が 0.518 倍動く (`condN2PsatLowT: 1`, 閉形式 C–C; 単体 `test_cond_air` で確認) ので連動させる, codex 指摘 2026-09-12)。
+旧一式 (潜熱・飽和圧とも) は `condN2LatentLowT: 0` (A/B 用)。
+
 #### 表面張力 $\sigma(T)$
 
 - **液 (Stansfield, 式28)** [dyn/cm], $T_c=126$, $\sigma_0=29.06$: $\sigma_l=\sigma_0(1-T/T_c)^{1.247}$ (→ ×$10^{-3}$ で N/m)。
@@ -562,6 +629,34 @@ $r_{\rm nuc}$ を使う** (ヤコビアンだけガード無しだと亜臨界�
 (HK/Gyar) が過早・オーバーシュート (0.44 vs exp 0.36)、Kantrowitz 有り (Kw+HK/Kw+Gyar) が onset を遅らせ実験に最良**
 (Fluent UDF で Kw+HK が最適だった知見と一致)。残課題: x≈3cm のピークが実験よりやや高い (onset レート微調整)。
 
+#### 空気: CPG carrier 形 (N2 選択凝縮 + O2 キャリア; `condVaporMassFraction`, 計画 [condensation-air](../plans/accepted/condensation-air.md))
+
+極超音速ノズルで試験ガスの空気そのものが凝縮する解析用。Daum & Gyarmathy (1968) の「低圧域では空気は純 N2 として振る舞い N2 の自発核生成が
+onset を決める」に従い、**気相は空気 (CPG)、凝縮するのは N2 だけ、O2 (+Ar) は凝縮しないキャリア**とする。TP の H2O–N2 carrier 経路と同じ定義を
+CPG に載せる (凝縮種の質量分率 $Y_w=Y_{N_2}$ は config 定数 `condVaporMassFraction`):
+
+$$
+p_v=\rho\,(Y_w-g)\,R_{N_2}T,\qquad p=\rho T\,(R_{air}-gR_{N_2}),\qquad e=(c_{v,air}+gR_{N_2})\,T-g\,L_{N_2}(T),\qquad 0\le g\le Y_w
+$$
+
+- $g$ は**総混合物に対する液 N2 の質量分率**で、EOS・核生成 ($R$, $M$, $\rho_v$ は N2; CNT×Iland)・成長 (Goodheart, $k_{gas}$ は空気 Sutherland)・蒸発・枯渇上限・
+  SLAU 面エンタルピー ($h_{2\phi}=c_{p,air}T-gL$)・実現可能性 ($g\le Y_w$) の全てで同じ定義を使う。pure ($Y_w=1$, $R_w=R$) は既存 pure 形に一致。
+- 空気の定数は二成分 N2/O2 = 0.79/0.21 mol から: $M$=28.850 g/mol, $R_{air}$=288.19, $c_{p,air}$=1008.7 (γ 1.4), $Y_{N_2}$=0.7671。
+- 空気は CPG のまま (`thermalMethod 0`): NASA-9 は 200 K 未満を線形外挿し温度反転の下限 50 K で Arthur の 27 K を表現できない。CPG pure/carrier の音速は
+  旧式 $c=\sqrt{\gamma R_{air}T}$ (気相定数 × 二相温度; `dependentVariables_d.cu`) のまま。二相では $\sqrt{\gamma p/\rho}=\sqrt{\gamma R_{eff}T}$ と異なる ($R_{eff}=R_{air}-gR_w$; 二相 frozen 音速の CPG 適用は一般 EOS 固有系への切替と一括で後続)。
+- 温度反転 `cond_T_from_e_cpg` は非有限の $e,g,T_{guess}$・非正の熱容量を反転不能 (ok=false) とし、成功条件にも $T,G$ の有限性を要求する ($e=\pm\infty$ は tol=∞ で「成功」に化けていた; codex 2026-09-13)。失敗セルでは $T,p,c,H_t$ を前ステップ値のまま残し、$\rho e$ を反転結果で上書きしない (密度床と速度の更新は通常どおり先に済んでいる) — `[condensation] WARNING: CPG two-phase temperature inversion failed in N cells` を出す。
+- SLAU 面エンタルピー `cond_face_h_cpg` の $R_{eff}$ は正で有限ならそのまま使う (旧 1.0 床は受付範囲の枯渇近傍 $R_{eff}<1$ で面温度を EOS と食い違わせた)。非正・非有限は乾き面 ($g_f=0$) に退避。
+- O2/N2 理想溶液の露点線 (O2 濃厚な最初の液滴; Hansen & Nothwang 1952) は Python で組むと 1 atm の露点 82.2 K だが N2 飽和線より 4.5 K 高温側で、
+  Daum & Gyarmathy の onset データ (空気 ≈ N2) と合わない → 混合液モデルは後続。
+- `slip` 境界の ghost は内部の熱力学状態 ($T$, $c$, $\rho e$) を保持する (旧 $T=p/(\rho R)$ 再構成は二相と不整合)。
+
+検証 (2026-09-13, case/34 run_0014–0026, cell/node): onset $(p,T)$ を Daum & Gyarmathy の **膨張率 $\dot P$ を揃えた理論 onset 線** (Grossir 2014 Fig. 4b,
+$\dot P$=20000 /s: 1 kPa で 38.5 K; `case/34.arthur_n2_nozzle/daum_gyarmathy_theory_onset_Pdot20000_n2.csv`) と比較。N2 旧物性 678 Pa / 37.85 K (+1.0 K)、
+**N2 新物性 800 Pa / 39.67 K (+2.1 K)、空気 CPG carrier 750 Pa / 38.94 K (+1.7 K)** — いずれも ±3 K 以内で、空気は N2 より 0.7 K 低温 ($S=y_{N_2}p/p_{sat}$)。
+node/cell の onset は 0.1 K 以内で一致。Arthur 実験の壁 cond/dry (3/4/5 in: 1.133/1.250/1.500) に対しては N2 新 +9.6/+9.7/−1.6 %、空気 +7.1/+8.1/−3.0 % で、
+3–4 in の過大は物性修正の前後で同程度で、原因 (核生成 $J$ / 成長 $\dot r$ / 壁圧抽出) は未切り分け。実装: `condProps_make`/`CondPropOpts`, `n2_latent_ex`/`n2_psat_ex`, `cond_T_from_e_cpg` (括弧付き),
+SLAU CPG 二相の面状態一貫化, `slip_d` の状態保持。単体 `tests/unit/test_cond_air.cpp`。
+
 #### モデル切替 (config フラグ)
 
 核生成/成長/補正は **enum + switch (device)** で種ごとに切替 (`CondSpeciesProps.model` で N2/H2O)。
@@ -569,7 +664,12 @@ $r_{\rm nuc}$ を使う** (ヤコビアンだけガード無しだと亜臨界�
 
 | フラグ | 既定 | 効果 |
 | --- | --- | --- |
-| `condKantrowitz` | 0 | 1 で核生成に **Kantrowitz 非等温補正** $J\to J/(1+\theta)$, $\theta=\frac{2(\gamma-1)}{\gamma+1}b(b-\tfrac12)$, $b=L/(R_vT)$ ($\gamma$=気相比熱比)。0 は等温 CNT。|
+| `condKantrowitz` | 0 | 1 で核生成に **Kantrowitz 非等温補正** $J\to J/(1+\theta)$, $\theta=\frac{2(\gamma_v-1)}{\gamma_v+1}b(b-\tfrac12)$, $b=L/(R_vT)$ ($\gamma_v$=**凝縮種 (蒸気) の比熱比**: H2O 1.331 / N2 1.4, `CondSpeciesProps.cp/cv`)。0 は等温 CNT。|
+| `condKantrowitz` 2 / 3 | — | **Feder carrier 形** (キャリア衝突による冷却を $b^2$ に含める)。2=$q$ は潜熱項のみ、3=表面仕事 $k_BT\ln S$ も差し引く。pure では Feder 純蒸気形。計画 condensation-kantrowitz-carrier |
+| `condSigmaScale` | 1.0 | 表面張力の倍率 (感度試験専用; 核生成・Kelvin・蒸発に一貫して掛かる) |
+| `condN2LatentLowT` | 1 | N2 潜熱の 70 K 未満を $c_l$=2 kJ/kg/K の線形外挿に (旧多項式は 0) |
+| `condKantrowitzGammaMode` | 0 | Kantrowitz の $\gamma$ の取り方。0=蒸気 $\gamma_v$ (既定, 2026-09-10)、1=**旧挙動** (セル気相混合 $c_p/c_v$; H2O–N2 では ≈1.40 で $\theta$ が 17 % 過大)。A/B 用。|
+| `condSonicModel` | 自動 | 凝縮セルの音速と $\gamma$。1=**二相 frozen** $c^2=\gamma_{2\phi}\,p/\rho$ (§5「二相 frozen 音速」)、0=旧挙動 (全蒸気気相 $\sqrt{\gamma_{mix}R_{mix}T}$、$g$ を無視)。未指定時は `input/condSonicResolve.hpp` が bcond 読込後に解決: **TP carrier H2O (`thermalMethod 2`, `condGasSpecies>=0`, `condModel 1`) かつ `condEquilibrium 0` かつ全 bcond が `inlet_Pressure`/`outflow`/`wall`/`slip`/`periodic` のとき 1、それ以外 0** (pure / CPG / `condEquilibrium 1,2` / `outlet_statPress`・`wall_isothermal` 等の ghost 再構築が全蒸気 EOS の境界は未検証のため旧式; 2026-09-10)。明示 1 は未検証構成でも従うが起動ログに警告。CPG 分岐 (`thermalMethod 0`) にはキーを 1 にしても効かない。|
 | `condGrowthModel` | 0 | 0=既定 (H2O: Hertz–Knudsen 質量律速 / N2: Goodheart)、1=**Gyarmathy** 熱伝導律速 $\frac{dr}{dt}=\frac{kRT^2}{\rho_lL^2}\ln S\frac{1-r_*/r}{r(1+3.18Kn)}$ (極超音速ノズル凝縮で標準)。|
 | `condGyarmathyC` | 3.18 | Gyarmathy の Knudsen 補正係数 $1/(1+C\,Kn)$。小さいほど成長速く onset 早、大きいほど遅。標準 3.18。|
 | `condTwoTemp` | 0 | 1 で **液滴温度 $T_d$** を準定常 Hill バランスで解き Hertz–Knudsen 成長の駆動力 $p_v-p_d(T_d)$ に反映 (自己加熱で成長↓)。theory.md §4 参照。Gyarmathy 経路には非適用。|
@@ -634,10 +734,56 @@ $$
 をセルごとに Newton で解く ($L'$ は数値微分)。$g$ は総液相質量分率 $\sum_s \rho g_s/\rho$ ($g_s$ は
 device `rog` 配列、`condensationInit_d` が構築)。$g<10^{-12}$ で従来 CPG 経路 ($T=e_{in}/c_v$) を呼び、
 **単相 CPG に bit 同一**を保証 (圧力も $(1-g)=1$ で従来 $\rho R T$ と一致)。$\rho e$・$Ht$ は
-$e_{mix}=(c_v+gR_v)T-gL$ で再構成、frozen 音速は気相 $\sqrt{\gamma R_v T}$ (loose coupling 近似)。
+$e_{mix}=(c_v+gR_v)T-gL$ で再構成、音速は下記「二相 frozen 音速」。
 
 TP 版 (`thermalMethod 2`, 後続 B) は $e_v(T)$ を NASA-9 thermo で評価する以外は同形
 ($e=e_v(T)+gR_vT-gL$, `cond_T_from_e_onetemp`)、$g=0$ で `thermo_T_from_e` に厳密縮約。
+
+#### 二相 frozen 音速 (2026-09-10, `condSonicModel: 1`)
+
+流束 (SLAU の $\hat c$)・局所 $\Delta t$・block-DPLUR の音響固有値が使う音速は、上の一温度二相 EOS
+$p=p(\rho,e,g)$ と整合した **frozen (相変化なし・液滴は気相と同速度・同温度) の等エントロピー微分**
+$c^2=(\partial p/\partial\rho)_{e,g}+(p/\rho^2)(\partial p/\partial e)_{\rho,g}$ で定義する。
+$p=\rho R_{eff}T$、$e=e_{gas}^{全蒸気}(T)+g(R_wT-L(T))$ から
+
+$$
+c^2=\gamma_{2\phi}\,R_{eff}\,T=\gamma_{2\phi}\frac{p}{\rho},\qquad
+\gamma_{2\phi}=\frac{c_{p,2\phi}}{c_{v,2\phi}},\quad
+c_{p,2\phi}=c_{p}^{全蒸気}-g\,L'(T),\quad c_{v,2\phi}=c_{p,2\phi}-R_{eff}
+$$
+
+- carrier (H2O in N2): $R_{eff}=R_{mix}-gR_w$ ($R_{mix}=\sum_iY_iR_i$ は総水を蒸気と数えた混合)。
+- pure TP: $R_{eff}=(1-g)R_v$、$c_p^{全蒸気}=c_p(T)$。**CPG 分岐 (`thermalMethod 0`, pure N2 case/34) は旧式のまま**:
+  `n2_latent` の多項式は低温 (例 45 K) で $L'>0$ ($c_l=c_{p,v}-L'<0$, 熱力学的に不整合) となり $g=0.2$ で $c_{v,2\phi}<0$ になる
+  (codex 指摘 2026-09-10)。潜熱の低温整合 (`condN2LatentLowT`, 上記) で $c_l>0$ は解消済みで、残る理由は CPG 分岐の一般 EOS 固有系・Jacobian への切替 (γ_2φ, 実 $H_t$) を二相音速と一括で行う必要があること (後続 [condensation-followups](../plans/active/condensation-followups.md) #6)。
+- $L'(T)=dL/dT=c_{p,v}-c_l$ (Kirchhoff) なので $c_{p,2\phi}$ は「$g$ ぶんの蒸気 $c_{p,v}$ を液 $c_l$ に置き換えた」混合比熱
+  ($c_{p,2\phi}=(1-g)c_{p,v}+gc_l$ に pure で一致)。$c_{v,2\phi}$ は温度反転 Newton の $de_{mix}/dT$ と同一。
+- $g=0$ で $\gamma_{mix}R_{mix}T$ (従来) に厳密に戻る。`condensation: 0` はコード経路不変。
+- 旧実装 (`condSonicModel: 0`) は $g$ を無視した全蒸気気相 $\sqrt{\gamma_{mix}R_{mix}T}$ で、$g$ が大きいほど
+  $c$ を過大評価した (H2O–N2 Wyslouzil の出口 $g\approx0.011$ で +1.6 %、pure N2 case/34 の $g\sim0.2$ では +10 % 超)。
+- per-cell `gamma` (block-DPLUR の $\kappa=\gamma-1$, TP 出口 BC) も $\gamma_{2\phi}$ にする。固定 $g,Y$ では
+  $(\partial p/\partial e)_{\rho,g,Y}/\rho=R_{eff}/c_{v,2\phi}=\gamma_{2\phi}-1$ なので、一般 EOS Jacobian の $\kappa$, $\chi=c^2-\kappa h$ は
+  **固定 $g,Y$ の frozen 近似**として整合する。ただし NS 保存量を更新してから `rog` を別更新する分離解法なので、$\rho g$ 列
+  ($\partial p/\partial(\rho g)|_{\rho,\rho e}=-R_wT+\kappa(L-R_wT)$) を含む厳密 Jacobian ではない (LHS 近似; 収束経路にのみ効く)。
+  `cp` 配列 (粘性・熱伝導の Pr 換算用) は全蒸気 $c_p$ のまま。
+- 防御: $c_{v,2\phi}\le0.05\,c_{p,2\phi}$ か $c^2\le0$ のセルは旧式にフォールバック (H2O は $L'<0$ で起きない; pure N2 TP を明示 ON した場合の保険)。
+- 境界: `outflow` (超音速) は内部 `sonic` をコピーするので二相音速がそのまま出る。TP 亜音速 `outlet_statPress` の ghost 再構築と
+  node 等温壁ピン (`pin_wall_node_temperature_d`) は全蒸気 EOS のままなので内部と ghost の音速が不連続 (既存近似、未対応)。
+- 平衡音速 (相変化を許す $S=1$ 拘束下の微分) は別物で未実装。`condEquilibrium: 2` は $g$ を状態量として再決定する経路で
+  frozen 音速の妥当性は未検証 → 既定 OFF。
+
+実装 `cond_twophase_sonic` ([condensationEOS_d.cuh](../solver_density_cuda/cuda_forge/condensationEOS_d.cuh))、
+単体テスト `tests/unit/test_cond_sonic.cpp` (有限差分 $(\partial p/\partial\rho)_e+(p/\rho^2)(\partial p/\partial e)_\rho$ との一致 ≤1e-7、T×Y_w×g 掃引 84 状態で $c_{v,2\phi}>0$、`resolveCondSonicModel` の選択条件) と `tools/test_eos_jacobian.cpp` mode 2 (固定 $g,Y$ 二相状態で実 `accumulate_split_jacobian_cf` が流束 FD と 2e-8、float32 で 3e-7)。
+計画・検証は [plans/active/condensation-kantrowitz-gamma-twophase-sonic.md](../plans/active/condensation-kantrowitz-gamma-twophase-sonic.md)。
+
+**検証 (2026-09-10, case/16 Wyslouzil 2D node/cell SST 凝縮, `run_0331`–`run_0342`)**: 旧キー回帰は反復ノイズ床以内
+(node 1.3e-5 vs 床 1.6e-5, cell ≤1.5 倍)、凝縮 OFF はコード経路不変。**γ_v 修正で onset 22.96 → 22.51 mm (−0.45 mm 上流)、
+onset 帯の壁 p/p0 偏差 −4.8 → −4.5 %** (下流 +4.8 → +5.1 %)。**二相音速は凝縮帯の $c$ を −1.3 % (最大 −1.63 %) 下げるが、今回の条件では
+収束場の差は小さい** (参照との差 $g$ 1.4e-5, $U_y$ 1.1e-5, $P$/$T$ ≤2e-6 = 同一バイナリ反復ノイズと同水準)。凝縮帯は流れ方向に M≥1.3 だが
+SLAU は面法線速度で Mach を作るので横向き面は亜音速のまま (codex 計測: 凝縮帯内部面 16,726 のうち 8,304 面が両側とも法線亜音速) で
+圧力流束は $c$ に依存する。差が小さい理由は特定していない (「全風上で影響 0」ではない)。
+出力の Mach は二相 $c$ で定義されるので出口 M は 1.605 → 1.631 (+1.7 %)。実カーネルの `sonic`/`gamma` は host 式と
+3e-7 / 5e-7 で一致。全 node run で `check_convergence` PASS (48000 step) と報告量の時系列 STEADY。
 
 #### 検証 (host unit test 済)
 

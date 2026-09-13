@@ -377,7 +377,7 @@ python3 solver_density_cuda/tools/check_mesh_quality.py <run_dir>/mesh.h5
 
 - 投入直後に序盤 (数十ステップ) で `residual_history.csv` の `rms_*` が NaN になっていないか早期確認する。`step 0`/`step 1` から NaN なら初手発散。
 - まとめ前に最終・中間 `res_*.h5` の `VALUE/*` (`ro`,`P`,`T`,`roe`,勾配など) の NaN/Inf と物理妥当性 (静圧≤全圧, `ro>0`, `T>0`) を確認する。
-- `max cfl` ログが有限でも残差は NaN のことがある。CFL だけで安定と判断しない。
+- console モニタ行 (`forge_run.log`) の残差要約に `*** NaN ***` が付いたら即発散。`maxCFL` (非定常のみ表示) が有限でも残差は NaN のことがある。CFL だけで安定と判断しない。
 - 発散時は「収束」と報告せず、最初に NaN が出たステップ・境界/セルを切り分けて原因 (BC のゼロ割・IC と BC の不整合・CFL 過大・メッシュ不良) を特定してから対処する。
 
 ## 運用上の位置づけ

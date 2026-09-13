@@ -1,4 +1,6 @@
 #include <cstdlib>
+#include "../condensationTransport_d.cuh"   // cond_prop_opts() (凝縮物性オプション → CondArgs)
+#include "../condensationEOS_d.cuh"         // cond_face_h_cpg (SLAU CPG 二相の面エンタルピー)
 #include "convectiveFlux_d.cuh"
 #include "lowMachPrecond_d.cuh"
 #include "speciesTransport_d.cuh"  // species_roY_device_ptr()
@@ -181,6 +183,8 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         throw std::runtime_error("turbulence.sstEnergyIncludesK=1 is implemented for solver SLAU/SLAU2 only");
     }
     CondArgs cnd { cfg.cp, cond_g, var.c_d["T"], cfg.condModel, sstEnergyK ? var.c_d["k"] : nullptr, sstEnergyK ? 1 : 0 };
+    cnd.cprops = condProps_make(cfg.condModel, cond_prop_opts(cfg));   // σ 倍率・N2 低温物性を面エンタルピーの潜熱にも反映
+    cnd.Yw     = cfg.condVaporMassFraction;
 
     if (cfg.solver == "SLAU" || cfg.solver == "SLAU2") {
         int slauVariant = (cfg.solver == "SLAU2") ? 2 : 1;

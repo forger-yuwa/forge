@@ -281,6 +281,10 @@ struct CondArgs {
     //   kturb = セル k (nullptr で無効)。energyK!=0 のとき面エンタルピーに +(5/3)k、圧力流束に p*=p+(2/3)ρk。
     flow_float* kturb = nullptr;
     int         energyK = 0;
+    // 凝縮種物性 (config オプション反映済み) と CPG carrier の Y_w (<=0 で pure)。面状態 T_f=p_f/(ρ_f R_eff) の再構成に使う。
+    // (brace 初期化の位置引数順を壊さないよう末尾に置く; 構築後に代入)
+    CondSpeciesProps cprops{};
+    double      Yw = -1.0;
 };
 // thermally-perfect 多成分の化学種データと face 整合再構成用配列 (SLAU の種別再構成で使用)。
 struct SpeciesArgs {

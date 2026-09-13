@@ -6,6 +6,9 @@
   1. 残作業表      — 見出しに「残作業」を含む節があり、実体 (表行 `|` か箇条書き) が 1 行以上ある
   2. 変更ログ      — `## ... 変更ログ` の節がある
   3. README 記載   — plans/README.md の一覧にファイル名が出てくる
+  4. レビュー記録  — 見出しに「レビュー記録」を含む節があり (雛型 §6.1)、status に応じた codex レビュー行がある:
+                     in_progress 以上 → `plan` 行、done → `result` 行 (免除は `plan 免除` / `result 免除` + 理由)。
+                     行の記録欄に書かれた notes/reviews/*.md は実在すること (AGENTS.md 「codex レビュー」)
 
 使い方:
   python3 solver_density_cuda/tools/check_plans.py                 # plans/active/*.md を全部見る
@@ -21,6 +24,67 @@ ACTIVE = os.path.join(ROOT, "plans", "active")
 README = os.path.join(ROOT, "plans", "README.md")
 
 HEAD_RE = re.compile(r"^(#{2,4})\s+(.*)$")
+STATUS_RE = re.compile(r"\*\*status\*\*\s*[:：]\s*`?([A-Za-z_\-]+)`?")
+REVIEW_ROW_RE = re.compile(r"^\s*\|\s*(plan|result)\s*(免除)?\s*\|", re.IGNORECASE)
+REVIEW_FILE_RE = re.compile(r"notes/reviews/[\w\-.]+\.md")
+
+
+def plan_status(text):
+    m = STATUS_RE.search(text)
+    if not m:
+        return ""
+    return m.group(1).lower().replace("-", "_")
+
+
+def review_rows(secs):
+    """レビュー記録節の表行 → [(stage, exempt, cells)]"""
+    rows = []
+    for h, b in secs:
+        if "レビュー記録" not in h:
+            continue
+        for ln in b:
+            m = REVIEW_ROW_RE.match(ln)
+            if not m:
+                continue
+            cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+            rows.append((m.group(1).lower(), bool(m.group(2)), cells))
+    return rows
+
+
+def check_reviews(path, text, secs):
+    """[(ok, ラベル, 補足)] — レビュー記録の存在と status 整合。"""
+    has_sec = any("レビュー記録" in h for h, _ in secs)
+    if not has_sec:
+        return [(False, "レビュー記録", "「レビュー記録」の節が無い (plans/_template.md §6.1。codex レビューの記録表)")]
+    rows = review_rows(secs)
+    st = plan_status(text)
+    out = []
+    need = []
+    if st in ("in_progress", "done"):
+        need.append("plan")
+    if st == "done":
+        need.append("result")
+    for stage in need:
+        have = [r for r in rows if r[0] == stage]
+        if not have:
+            out.append((False, "レビュー記録",
+                        f"status `{st}` なのに `{stage}` 段の codex レビュー行が無い "
+                        f"(`{stage}` 行を足すか、`{stage} 免除` 行 + 理由。実行: codex_review.py <plan> --stage {stage})"))
+    for stage, exempt, cells in rows:
+        if exempt:
+            reason = cells[-1] if len(cells) >= 4 else ""
+            if not reason or reason.startswith("<"):
+                out.append((False, "レビュー記録", f"`{stage} 免除` 行に理由が無い"))
+            continue
+        joined = " ".join(cells)
+        m = REVIEW_FILE_RE.search(joined)
+        if not m:
+            out.append((False, "レビュー記録", f"`{stage}` 行の記録欄に notes/reviews/*.md のパスが無い"))
+        elif not os.path.isfile(os.path.join(ROOT, m.group(0))):
+            out.append((False, "レビュー記録", f"`{stage}` 行の記録 {m.group(0)} が実在しない"))
+    if not out:
+        out.append((True, "レビュー記録", ""))
+    return out
 
 
 def sections(text):
@@ -57,6 +121,8 @@ def check(path, readme_text):
 
     listed = os.path.basename(path) in readme_text
     res.append((listed, "README 記載", "" if listed else "plans/README.md の一覧に無い"))
+
+    res.extend(check_reviews(path, text, secs))
     return res
 
 

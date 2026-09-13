@@ -112,6 +112,21 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
   定常 precond × 多成分は `speciesPrecondDt: 1` (既定)。TP 亜音速 `outlet_statPress` の γ 混用は修正済。
 - 凝縮: `condensation: 1, condEquilibrium: 2` (EOS 拘束形、厳密 S=1) が既定。蒸発は既定 ON。
   凝縮 run は h0 保存を確認する (面温度修正済み)。onset は実験より ~5 mm 下流 (case/16 2026-09-08 比較)。
+- 凝縮 (2026-09-10, plan [condensation-kantrowitz-gamma-twophase-sonic](../plans/active/condensation-kantrowitz-gamma-twophase-sonic.md)):
+  Kantrowitz 補正 (`condKantrowitz: 1`) の γ は凝縮種 (蒸気) の γ_v が既定 (`condKantrowitzGammaMode: 0`; 旧=1)。
+  凝縮セルの音速は `condSonicModel` (未指定=自動): **TP carrier H2O・`condEquilibrium 0`・境界が
+  `inlet_Pressure`/`outflow`/`wall`/`slip`/`periodic` のみ** のとき二相 frozen 音速 (1)、それ以外は旧の全蒸気音速 (0)。
+  起動ログ `[condensation] condSonicModel=... (理由)` で解決値を確認する。`outlet_statPress`/`wall_isothermal` を含む構成と
+  `condEquilibrium 1/2`・pure N2・CPG は未検証 (明示 1 は警告つきで可)。
+- 凝縮 (2026-09-13, branch feature/condensation-air; plan [condensation-kantrowitz-carrier](../plans/accepted/condensation-kantrowitz-carrier.md) /
+  [condensation-air](../plans/accepted/condensation-air.md)):
+  - `condKantrowitz`: **省略時既定 0** (非等温補正なし; `solverConfig.cpp`) / 1=Kantrowitz (純蒸気形) / **2=Feder carrier 形** (キャリアの冷却込み, $\hat q=b-\tfrac12$) / 3=同+表面項 ($\hat q=b-\tfrac12-\ln S$)。
+    Wysłouzil 参照設定 (case/16 run_0335 系) は 1 を明示する。2/3 は θ 167→3–4 で計算上の onset が mode 1 より 8.2 mm 上流に動く (**モデル間差**; 実験との位置差ではない) ため推奨は 1 のまま。診断出力は `condTheta_0`/`condLim_0` (`extraFields`, 種番号付き)。
+  - `condSigmaScale` (既定 1.0): 表面張力の定数倍感度。Wysłouzil mode 3 基準で σ×1.03 は onset +2.5 mm (収束 PASS+STEADY)、σ×0.97 は −2.2 mm だが**未収束の準定常参考値** (残差 plateau, h0 偏差 OSCILLATING; case/16 run_0354)。Tolman 補正の代替ではない。
+  - 空気凝縮 (CPG carrier 形): `physProp: {cp: 1008.7, gamma: 1.4}` (二成分空気 R 288.19) + `condensation: {condModel: 0, nCondSpecies: 1, condVaporMassFraction: 0.7671}`。
+    受付は SLAU × `thermalMethod 0` × 非平衡 × `condKantrowitz ≤1` × 境界 `inlet_uniformVelocity`/`outlet_statPress`/`slip` のみ (config 検査で拒否)。
+  - N2 低温物性: `condN2LatentLowT: 1` / `condN2PsatLowT: 1` (既定, 70 K 未満の潜熱線形外挿と整合する飽和圧), `condN2LiquidCp: 2000` (J/kg/K; 1500/2000/2500 で onset 38.95/39.67/40.25 K = +500 で +0.58 K, −500 で −0.72 K の同符号)。
+    0/0 は旧一式 (A/B 用)。ログの `[condensation] WARNING: CPG two-phase temperature inversion failed` が出た run は使わない (保存量を凍結して継続する退避)。
 - 化学 (H₂): 定常陰解法は `speciesImplicitCoupling: 2` + `jacobianMode: 2` 必須、Cabra は dual-time 必須
   ([chemistry-finite-rate-direction], branch feature/chemistry-finite-rate)。
 

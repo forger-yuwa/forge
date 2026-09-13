@@ -15,12 +15,13 @@
 | [`procedures/recommended-settings.md`](procedures/recommended-settings.md) | **推奨解析設定の正本** (解析種別ごとの現行レシピ・日付付き・旧設定一覧)。config を組む/点検するときは skill `forge-config` の手順で参照 |
 | [`procedures/solver-settings.md`](procedures/solver-settings.md) | `convMethod` / `limiter` などの数値設定リファレンス |
 | [`procedures/su2-cross-check.md`](procedures/su2-cross-check.md) | 同一メッシュ・同一 BC で SU2 と比較し forge 固有の問題を切り分ける手順 |
+| [`procedures/codex-review.md`](procedures/codex-review.md) | 計画立案時・検証結果時の **codex 外部レビュー**の手順 (`codex_review.py`、記録の残し方、指摘の採否ルール) |
 | [`procedures/inlet-profile.md`](procedures/inlet-profile.md) | 入口に分布 (全温・全圧・組成・k/ω・超音速入口の ρ,U,Ps) を与える手順 (`inletProfile` CSV + `gen_inlet_profile.py`)。Claude は skill `forge-inlet-profile` |
 | [`procedures/development-environment.md`](procedures/development-environment.md) | 開発環境とビルド (Docker / WSL native) の方針 |
 | [`procedures/coding-conventions.md`](procedures/coding-conventions.md) | ソース構成・C++/CUDA 命名規約・ビルド/テスト実行手順 |
 | [`procedures/verification/`](procedures/verification/README.md) | 検証ケース選定 (`README.md`) と各標準検証ケースの個別手順 |
 | [`plans/`](plans/README.md) | 変更単位の設計判断文書。`active/` (検討中・進行中) / `accepted/` (現役の設計判断) / `archived/` (superseded・終了)。着手前に参照する基準文書 |
-| [`notes/`](notes/README.md) | 調査メモ・作業ログ。`investigations/` (技術調査・サーベイ) / `sessions/` (使い捨て作業プロンプト) |
+| [`notes/`](notes/README.md) | 調査メモ・作業ログ。`investigations/` (技術調査・サーベイ) / `sessions/` (使い捨て作業プロンプト) / `reviews/` (codex レビュー出力) |
 | [`methods/`](methods/index.md) | 現在の仕様と解説 (機能単位 `<area>/`)。「なぜそうしたか」は `plans/` 側 |
 | `papers/` | 参照文献 (PDF)。理論・スキームの一次資料。本文では引用元として参照 |
 
@@ -152,10 +153,32 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
   「決着 (日付, 参照節)」を付ける。判断の履歴を残す。
 
 構造の存在確認は `python3 solver_density_cuda/tools/check_plans.py [PATH ...]` で行う (残作業表・変更ログ・
-`plans/README.md` 記載の有無のみを見る機械的な lint)。`plans/active/*.md` を編集すると PostToolUse フック
+`plans/README.md` 記載・レビュー記録の有無のみを見る機械的な lint)。`plans/active/*.md` を編集すると PostToolUse フック
 (`hook_plan_todo_gate.py`) が編集したファイルだけを検査して不足を知らせるので、**触った plan から順に直す**。
 フックの登録は `.claude/settings.json` (git 追跡対象。`.claude/` の他は追跡外)。これは Claude Code のみが読む
 仕組みなので、Copilot 側には本節の記述そのものが規範として効く。
+
+### codex レビュー (計画立案時と検証結果時の 2 回)
+
+上のフローを踏む変更 (新規機能・スキーム/設計方針の変更。例外はフローと同じ) は、**計画段階と検証結果が出た段階の
+2 回、codex による外部レビューを受ける**。自分の設計をセルフレビューしても盲点は残る (過去に codex が見つけた
+真因: k/ω 拡散の絶対ゼロ割ガード、陰解法 sweep のピン行漏れ、H2O 生成エンタルピーの増幅 等)。
+手順の本文は [`procedures/codex-review.md`](procedures/codex-review.md)。
+
+- **トリガ 1 (plan 段)**: `plans/active/<plan>.md` の設計方針 (§4) と検証計画 (§6) が書けた時点、**実装着手前**に
+  `python3 solver_density_cuda/tools/codex_review.py <plan> --stage plan` を回す。
+- **トリガ 2 (result 段)**: 検証 run の VERDICT が出そろい `status: done` にして `accepted/` へ移す**前**に
+  `--stage result` を回す (実装 diff と run の実測を突き合わせる)。
+- **記録** (run パス明示・VERDICT 貼付と同じ「痕跡が残る形」): 出力は `notes/reviews/<日付>-<plan>-<stage>.md` に残り、
+  plan の **§6.1 レビュー記録**の表に日付・記録・判定・指摘数・対応を 1 行書く。**レビューを回した/反映した応答には
+  その記録ファイルのパスと採否を書く**。
+- **採否は plan に書く**: Critical / Major は「採用して §5.1 残作業表に入れる」か「却下 (理由を §6.1 に書く)」の
+  どちらかにする。読んだだけで plan に痕跡が無いものは「レビューしていない」とみなす。指摘を鵜呑みにもしない
+  (根拠が `ファイル:行` / run の数値で示されていない指摘は再検証してから採否を決める)。
+- **強制**: `check_plans.py` が status に応じて行の有無を見る (`in_progress` 以上は `plan` 行、`done` は `result` 行。
+  記録ファイルの実在も確認)。plan 編集時の PostToolUse フックがこれを返す。**2026-09-09 以前に起票済みで既に
+  実装が進んでいる plan は `plan 免除` 行 + 理由で通す** (以後の `result` 段は免除しない)。
+- 別セッションが同じツリーで並行作業しているときは、相手の plan にレビュー行を書き込まない (自分の plan だけ)。
 
 ## コミット・push 運用
 

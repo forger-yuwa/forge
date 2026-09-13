@@ -3,7 +3,8 @@
 収束判定ツール (AGENTS.md「収束確認 (必須)」の実体化)。
 
 forge の run ディレクトリの residual_history.csv を読み、**全保存量の残差列**
-(rms_ro, rms_roUx, rms_roUy, rms_roUz, rms_roe, RANS時 rms_roK/rms_roOmega) について
+(rms_ro, rms_roUx, rms_roUy, rms_roUz, rms_roe, RANS時 rms_roK/rms_roOmega, 化学種 rms_roY*,
+凝縮 rms_rog_*/rms_roQ*_*) について
 初期値・最終値・低下桁数・末尾トレンド (falling/flat/rising) を出し、明確な VERDICT を返す。
 
 目的: 「rms_ro と NaN だけ見て収束と判断する」ことを防ぐ (AGENTS.md 違反の常習を防止)。
@@ -37,6 +38,14 @@ def load_series(path):
     for c in CONSERVED:
         if rows and c in rows[0]:
             cols[c] = [float(r[c]) for r in rows]
+    # 化学種 (rms_roY*) と凝縮 (rms_rog_*, rms_roQ{0,1,2}_*) の保存量残差も検査する (存在時)。
+    # 凝縮 run で NS 5 本 + SST 2 本だけ見て「収束」と判定していた穴 (codex 指摘 2026-09-10) を塞ぐ。
+    if rows:
+        for c in rows[0].keys():
+            if c in cols or not c.startswith('rms_') or c.startswith('rms_dq_'):
+                continue
+            if c.startswith('rms_roY') or c.startswith('rms_rog_') or c.startswith('rms_roQ'):
+                cols[c] = [float(r[c]) for r in rows]
     return rows, cols
 
 
@@ -75,14 +84,9 @@ def analyze(path, min_drop, tail_frac):
         trend = ('rising' if (ma > mb * 1.05 and ma > 2.0 * smin)
                  else ('flat' if ma > mb * 0.9 else 'falling'))
 
-        # init==0 (例: アライン格子で Uy が初期厳密 0): 相対低下は無意味。最大初期残差から
-        # 立ち上がっていなければ inactive 扱い (rising でなければ収束済みとみなす)。
-        if init == 0.0:
-            col_ok = trend != 'rising'
-            report[c] = (f"init=0 fin={fin:.2e} (near-zero from start) {trend:7s}"
-                         f"{'' if col_ok else '  <-- rising!'}", col_ok)
-            ok = ok and col_ok
-            continue
+        # init==0 (例: アライン格子で Uy が初期厳密 0) も下のピーク基準で判定する。旧特例 (rising でなければ
+        # 合格) は [0,1,1,...] のように立ち上がって落ちない列を合格にしてしまった (codex 指摘 2026-09-10)。
+        # 全期間ゼロの列だけを上の all-zero で除外する。
 
         # 低下桁数は **step 0 ではなく系列のピーク**から測る。IC の作り方によっては
         # ある成分の step 0 残差が過渡ピークより桁違いに小さいことがあり (node の

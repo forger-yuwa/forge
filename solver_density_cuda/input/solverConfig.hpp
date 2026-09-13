@@ -94,13 +94,21 @@ public:
                                    // ステップごとにのみ host へ読み出す (per-step 同期を避ける)。
     int detectNaNInterval = 1;     // detectNaN==1 時にフラグを host 読み出しする間隔 [step] (既定 1=毎ステップ)。
                                    // 大きくすると per-step 同期が減るが NaN 検知が最大 (interval-1) step 遅れる。
-    // モニタリング出力 (= 残差 CSV の device→host flush と、`max cfl`/`dt` の console 出力) を行う共通間隔 [step]。
+    // モニタリング出力 (= 残差 CSV の device→host flush と、console モニタ行) を行う共通間隔 [step]。
     // 既定 1=毎ステップ (従来挙動)。>1 で per-step の host 同期 (残差 reduction の D2H・max cfl の thrust::max_element)
     // をまとめて間引く。残差は毎ステップ device バッファに記録され、この間隔ごとに一括 D2H+CSV 書き出しされる
-    // (毎ステップの値・行構成は不変)。`max cfl`/`dt` は console にこの間隔ごとに表示される。
+    // (毎ステップの値・行構成は不変)。console モニタ行 (methods/architecture/overview.md §8.5) もこの間隔ごとに 1 行出る。
     // 注意: dt 適応 (dtControl==1) はこの間隔とは独立 (下記)。詳細:
-    // plans/accepted/architecture-residual-monitor-async.md, architecture-perphase-profiling-hotspot.md。
+    // plans/accepted/architecture-residual-monitor-async.md, architecture-perphase-profiling-hotspot.md,
+    // plans/accepted/architecture-runtime-monitor-line.md。
     int monitorInterval = 1;
+    // setDT_d_wrapper(printCfl=true) が host 読みした max CFL (= cfg.dt 基準の物理 CFL) の格納先。console モニタ行が
+    // unsteady==1 のときだけ表示する (定常では cfg.dt が dt_local から打ち消され無意味なので読みも表示もしない)。
+    // 負値 = 未取得。monitorCflDt は cfl を評価した時点の cfg.dt (= その step の前進に使った dt)。dtControl==1 では
+    // setDT が直後に cfg.dt を次 step 用に適応するので、モニタ行は (monitorCflDt, monitorCflMax) を対で表示し、
+    // 適応後の cfg.dt は dt_next として別に出す (codex result レビュー Major 1)。
+    flow_float monitorCflMax = -1.0;
+    flow_float monitorCflDt  = -1.0;
     int lowMachPrecond = 0;        // Weiss-Smith 低マッハ前処理。0: off (従来・ビット不変),
                                    // 1: フラックス散逸前処理のみ (RHS, c_hat→c'。収束解を低マッハ域で変更),
                                    // 2: RHS(c' 散逸)+LHS 完全 Γ⁻¹A 前処理 (block-DPLUR 擬似時間項+setDT 拡大),
@@ -383,7 +391,18 @@ public:
                              //   1: H2O (Murphy-Koop, CNT+Kantrowitz+Hertz-Knudsen, carrier+TP)
     int condGasSpecies = -1; // carrier+condensible: 凝縮する気相化学種の index (roY{s})。
                              //   -1: pure-condensible (気相=凝縮種, N2 Arthur)。>=0: H2O 等の希薄凝縮 (Wyslouzil)
-    int condKantrowitz = 0;  // 核生成の Kantrowitz 非等温補正。0: off (等温 CNT, 既定), 1: on
+    int condKantrowitz = 0;  // 核生成の非等温補正。0: off (等温 CNT, 既定), 1: Kantrowitz 純蒸気形 (旧結果再現),
+                             //   2: Feder carrier 形 (キャリア衝突による冷却を含む, q は潜熱項のみ), 3: Feder carrier 形 + 表面仕事項 (物理モデル)
+    double condSigmaScale = 1.0; // 表面張力の一定倍率 (感度試験専用; 核生成・Kelvin・蒸発に一貫)。1.0 でビット不変
+    // 空気 (CPG carrier 形: N2 選択凝縮 + O2 キャリア) と N2 低温物性 (plans/accepted/condensation-air.md)
+    double condVaporMassFraction = -1.0; // >0: CPG carrier 形。凝縮種 (N2) の質量分率 Y_w を定数で与える (二成分空気 0.7671)。<=0: 従来 pure
+    int    condN2LatentLowT = 1;   // 1: N2 潜熱の 70 K 未満を c_l 一定の線形外挿 (既定), 0: 旧 4 次多項式 (60 K 未満で L'>0)
+    int    condN2PsatLowT   = 1;   // 1: N2 飽和圧の 50 K 未満 C–C 外挿を新 L(T) の積分で再構成 (既定), 0: 旧 (診断: 「潜熱だけ新」)
+    double condN2LiquidCp   = 2000.0; // 液 N2 比熱 c_l [J/(kg K)] (線形外挿の傾き; 感度 1500/2500)
+    int condKantrowitzGammaMode = 0; // Kantrowitz θ の γ。0: 凝縮種 (蒸気) の γ_v=CondSpeciesProps.cp/cv (既定, 2026-09-10),
+                                     //   1: 旧挙動 (セル気相混合 cp/cv; H2O–N2 では ≈1.40 で θ が 17 % 過大)。A/B 用
+    int condSonicModel = -1; // 凝縮セルの音速と γ。1: 二相 frozen c²=γ_2φ R_eff T (TP 分岐のみ), 0: 旧 (全蒸気 √(γ_mix R_mix T)),
+                             //   -1: 自動 (bcond 読込後に input/condSonicResolve.hpp で解決: TP carrier H2O・condEquilibrium 0・検証済み境界のみ 1)
     int condGrowthModel = 0; // 成長則。0: 既定 (H2O=Hertz-Knudsen, N2=Goodheart), 1: Gyarmathy(熱伝導律速)
     double condGyarmathyC = 3.18; // Gyarmathy の Knudsen 補正係数 1/(1+C·Kn)。標準 3.18 (感度評価用に可変)
     int condTwoTemp = 0;     // 液滴温度 T_d 考慮 (Hertz-Knudsen 経路, 準定常 Hill バランス)。0: 一温度(既定), 1: 二温度
