@@ -9,6 +9,7 @@
 
 // device rog (液相質量分率の保存量) ポインタ配列。二相 EOS が読む。condensationInit_d で構築。
 static flow_float** g_rog_dev = nullptr;
+static CondTablesF g_condTables;   // float 経路の物性表 (condensationInit_d で構築)
 static int          g_nCond   = 0;
 
 namespace {
@@ -158,7 +159,19 @@ void condensationInit_d(solverConfig& cfg, variables& var)
     gpuErrchk( cudaMemcpy(g_rog_dev, hrog.data(), pbytes, cudaMemcpyHostToDevice) );
 
     std::cout << "condensationInit_d: built device rog[] for nCondSpecies=" << g_nCond << "\n";
+    // float 経路の物性表 (plans/active/condensation-float-speedup.md §4.2-1): 現行 double 関数から区分 3 次表を作り device へ。
+    if (cfg.condFloat != 0) {
+        CondTablesHost ht;
+        cond_tables_build_host(condProps_make(cfg.condModel, cond_prop_opts(cfg)), ht);
+        g_condTables = cond_tables_upload(ht);
+        std::cout << "condensationInit_d: property tables for condFloat (model " << cfg.condModel << ", T0=" << ht.T0
+                  << " h=" << ht.h << " n=" << ht.n << ", " << (6*ht.n*sizeof(float4))/1024 << " KB)\n";
+    } else {
+        g_condTables = CondTablesF();
+        std::cout << "condensationInit_d: condFloat=0 (double condensation path)\n";
+    }
 }
+const CondTablesF& cond_tables_device() { return g_condTables; }
 
 flow_float** cond_rog_device_ptr() { return g_rog_dev; }
 int          cond_num_species()    { return g_nCond; }

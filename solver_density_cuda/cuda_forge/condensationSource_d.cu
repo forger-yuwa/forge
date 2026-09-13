@@ -3,6 +3,7 @@
 #include "thermo_d.cuh"            // SpeciesThermo / thermo_cp_mass (Feder carrier 形)
 #include "speciesTransport_d.cuh"  // species_roY_device_ptr()
 #include "condensationEOS_d.cuh"       // cond_equilibrium_delta (緩和形平衡)
+#include "condensationSourceF_d.cuh"   // float 実体 (物性表・対数 CNT; plans/active/condensation-float-speedup.md)
 
 #include <string>
 
@@ -249,6 +250,182 @@ __global__ void condensation_source_d(
     res_rog[ic]  += (flow_float)(Sg *v);
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------
+// float 実体 (condFloat=1, condEquilibrium=0, condTwoTemp=0 のとき wrapper が選ぶ)。上の double kernel の写し。
+//   差: 物性は表、核生成は対数空間 (上限を対数で本体・摂動の両方に)、dry セル (S<=1, g=0, Q0=0) は診断だけ書いて早期退出、
+//       T_sat は前 step 値から warm start。sj_*/diag* の初期化と res_* を触らない規約は double と同じ。
+// ---------------------------------------------------------------------------------------------------------------
+__global__ void condensation_source_f_d(
+    geom_int nCells,
+    int carrier, float Rw,
+    int kantrowitz, int kwGammaMode, CondSpeciesPropsF cpf, CondTablesF tb, float Yw_const,
+    const SpeciesThermoF* spf, int nSpecies, flow_float* const* roYall, int condGasSpecies,
+    int growthModel, float gyarC,
+    int evap, float evapRmin, int evapKelvin, float evapLamMin,
+    float cp_cpg, float gamma_cpg,
+    float dg_max, float dT_max,
+    geom_float* vol, flow_float* dt_local,
+    flow_float* T, flow_float* P, flow_float* ro, flow_float* cp_cell, flow_float* Rmix_cell,
+    flow_float* roY_w,
+    flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
+    flow_float* res_rog, flow_float* res_roQ0, flow_float* res_roQ1, flow_float* res_roQ2,
+    flow_float* sj_g, flow_float* sj_Q0, flow_float* sj_Q1, flow_float* sj_Q2,
+    flow_float* diagS, flow_float* diagDrdt, flow_float* diagR30, flow_float* diagTsat,
+    flow_float* diagTheta, flow_float* diagLim)
+{
+    geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    const float Tsat_prev = diagTsat[ic];   // warm start (初期化前に読む)
+    sj_Q0[ic] = 0.0f; sj_Q1[ic] = 0.0f; sj_Q2[ic] = 0.0f; sj_g[ic] = 0.0f;
+    diagS[ic] = 0.0f; diagDrdt[ic] = 0.0f; diagR30[ic] = 0.0f; diagTsat[ic] = 0.0f;
+    diagTheta[ic] = 0.0f; diagLim[ic] = 1.0f;
+    const float rod = ro[ic];
+    if (rod <= 1.0e-20f) return;
+    const float Td = T[ic];
+    const float Pd = P[ic];
+    const float cpg = (carrier && cp_cell) ? cp_cell[ic] : cp_cpg;
+    const float Rg  = (carrier && Rmix_cell) ? Rmix_cell[ic] : (gamma_cpg-1.0f)*cp_cpg/gamma_cpg;
+    const float cvg = (cpg - Rg > 1.0e-3f) ? (cpg - Rg) : 1.0e-3f;
+    float g = rog[ic]/rod; if (g < 0.0f) g = 0.0f;
+    const float Yw = (carrier && roY_w) ? roY_w[ic]/rod : ((carrier && Yw_const > 0.0f) ? Yw_const : 1.0f);
+    const float gmax = carrier ? Yw : 0.99f;
+    if (g > gmax) g = (gmax > 0.0f ? gmax : 0.0f);
+    float q0 = roQ0[ic]; if (q0 < 0.0f) q0 = 0.0f;
+    float q1 = roQ1[ic]; if (q1 < 0.0f) q1 = 0.0f;
+    float q2 = roQ2[ic]; if (q2 < 0.0f) q2 = 0.0f;
+    float pv, rho_v;
+    cond_vapor_state_f(carrier, rod, Pd, Td, g, Yw, Rw, &pv, &rho_v);
+    const float gamma_gas = (kwGammaMode == 1) ? (cpg/cvg) : (cpf.cp/cpf.cv);
+    const float p_gas = carrier ? Pd : pv;
+    // 診断: S = p_v/p_sat, T_sat
+    const float lnpsat = cond_tab_lnpsat_f(tb, Td);
+    const float lnS = (pv > 0.0f) ? (logf(pv) - lnpsat) : -1.0e30f;
+    diagS[ic]    = (pv > 0.0f) ? expf(lnS) : 0.0f;
+    diagTsat[ic] = cond_Tsat_f(tb, pv, (Tsat_prev > 0.0f) ? Tsat_prev : Td);
+    // Feder carrier 形の衝突項 (TP carrier のみ)
+    CondNucCarrierF car;
+    car.a_v = 1.0f; car.carrierSum = 0.0f; car.cvv_tilde = cpf.cv*cpf.M/COND_RU_F;
+    if (carrier && spf != nullptr && roYall != nullptr && condGasSpecies >= 0 && condGasSpecies < nSpecies) {
+        const SpeciesThermoF& sv = spf[condGasSpecies];
+        const float Mv = sv.MW;
+        car.cvv_tilde = thermo_cp_molar_f(sv, Td)/COND_RU_F - 1.0f;       // (c_p,mass − R_v) M_v/R_u = c_p,molar/R_u − 1
+        car.a_v = ((Yw - g) > 0.0f ? (Yw - g) : 0.0f)/Mv;
+        float sum = 0.0f;
+        for (int i = 0; i < nSpecies; ++i) {
+            if (i == condGasSpecies) continue;
+            const float Yi = roYall[i][ic]/rod;
+            if (!(Yi > 0.0f)) continue;
+            const float Mi  = spf[i].MW;
+            const float cvi = thermo_cp_molar_f(spf[i], Td)/COND_RU_F - 1.0f;
+            sum += (Yi/Mi)*sqrtf(Mv/Mi)*(cvi + 0.5f);
+        }
+        car.carrierSum = sum;
+    }
+    if (kantrowitz && lnS > 0.0f) {
+        const float gamma_kw = (kwGammaMode == 1) ? (cpg/cvg) : (cpf.cp/cpf.cv);
+        diagTheta[ic] = cond_kantrowitz_theta_f(cpf, tb, Td, lnS, kantrowitz, gamma_kw, &car);
+    }
+    // dry セルの早期退出 (plan §4.2-3): S<=1 (J=0), g=0 (蒸発なし), Q0=0 (成長なし) → ソース・src_jac とも恒等 0。res_* は触らない。
+    if (!(lnS > 0.0f) && g <= 0.0f && q0 <= 1.0e-30f) return;
+    // ---- 蒸発分岐 (S<=1, 液相あり) ----
+    if (evap && g > 0.0f && !(lnS > 0.0f)) {
+        const float dt = dt_local[ic];
+        float SQ0, SQ1, SQ2, Sg, r30, drdt;
+        cond_evap_source_f(cpf, tb, Td, pv, rod, g, q0, q1, q2, dt,
+                           evapRmin, evapLamMin, dg_max, dT_max, cvg,
+                           growthModel, p_gas, gyarC, evapKelvin,
+                           &SQ0, &SQ1, &SQ2, &Sg, &r30, &drdt);
+        diagDrdt[ic] = drdt; diagR30[ic] = r30;
+        if (Sg < 0.0f) {
+            const float L = cond_tab_latent_f(tb, Td);
+            float a0,a1,a2,ag,rr,dd;
+            const float dg = 1.0e-3f*g;
+            float pvg, rvg; cond_vapor_state_f(carrier, rod, Pd, Td, g - dg, Yw, Rw, &pvg, &rvg);
+            cond_evap_source_f(cpf, tb, Td, pvg, rod, g - dg, q0, q1, q2, dt,
+                               evapRmin, evapLamMin, dg_max, dT_max, cvg,
+                               growthModel, p_gas, gyarC, evapKelvin, &a0,&a1,&a2,&ag,&rr,&dd);
+            const float dSgdrog = (Sg - ag)/(rod*dg);
+            const float dTp = 0.1f;
+            float pvT, rvT; cond_vapor_state_f(carrier, rod, Pd, Td+dTp, g, Yw, Rw, &pvT, &rvT);
+            cond_evap_source_f(cpf, tb, Td+dTp, pvT, rod, g, q0, q1, q2, dt,
+                               evapRmin, evapLamMin, dg_max, dT_max, cvg,
+                               growthModel, p_gas, gyarC, evapKelvin, &a0,&a1,&a2,&ag,&rr,&dd);
+            const float dSgdT  = (ag - Sg)/dTp;
+            const float dTdrog = (L - (carrier?Rw:Rg)*Td)/(rod*cvg);
+            float sjg = -(dSgdrog + dSgdT*dTdrog);
+            if (sjg < 0.0f) sjg = 0.0f;
+            sj_g[ic] = sjg;
+        }
+        const float v = vol[ic];
+        res_roQ0[ic] += SQ0*v;
+        res_roQ1[ic] += SQ1*v;
+        res_roQ2[ic] += SQ2*v;
+        res_rog[ic]  += Sg *v;
+        return;
+    }
+    // ---- 核生成・成長 ----
+    float J, rstar;
+    cond_nucleation_f(cpf, tb, Td, pv, rho_v, &J, &rstar, kantrowitz, gamma_gas, &car);   // 上限は関数内 (対数)
+    if (J < 0.0f) J = 0.0f;
+    float r_bar = (q0 > 1.0e-30f) ? (q1/q0) : rstar;
+    float drdt = 0.0f;
+    if (q0 > 1.0e-30f && rstar > 0.0f && r_bar > rstar) {
+        drdt = cond_growth_f(cpf, tb, Td, pv, r_bar, rstar, growthModel, p_gas, gyarC);
+        if (drdt < 0.0f) drdt = 0.0f;
+    }
+    diagDrdt[ic] = drdt;
+    const float rho_l = cond_tab_rhol_f(tb, Td);
+    const float r_nuc = COND_RNUC_FAC_F*rstar;
+    float SQ0 = J;
+    float SQ1 = J*r_nuc + q0*drdt;
+    float SQ2 = J*r_nuc*r_nuc + 2.0f*q1*drdt;
+    float Sg  = (4.0f/3.0f)*COND_PI_F*rho_l*(J*r_nuc*r_nuc*r_nuc + 3.0f*q2*drdt);
+    if (Sg < 0.0f) Sg = 0.0f;
+    const float dt = dt_local[ic];
+    const float L  = cond_tab_latent_f(tb, Td);
+    float theta = 1.0f;
+    if (Sg > 0.0f && dt > 0.0f) {
+        const float dg  = Sg*dt/rod;
+        const float dTl = dg*L/cvg;
+        const float avail = carrier ? (Yw - g) : (1.0f - g);
+        if (dg  > dg_max)    theta = fminf(theta, dg_max/dg);
+        if (dTl > dT_max)    theta = fminf(theta, dT_max/dTl);
+        if (avail > 0.0f && dg > 0.9f*avail) theta = fminf(theta, 0.9f*avail/fmaxf(dg, 1.0e-30f));
+        else if (avail <= 0.0f) theta = 0.0f;
+    }
+    {
+        const float dTp = 0.1f;
+        float pvp, rvp;
+        cond_vapor_state_f(carrier, rod, Pd, Td+dTp, g, Yw, Rw, &pvp, &rvp);
+        float a0,a1,a2,ag;
+        cond_source_vector_f(cpf, tb, Td+dTp, pvp, rvp, q0, q1, q2, &a0,&a1,&a2,&ag,
+                             kantrowitz, growthModel, gamma_gas, p_gas, gyarC, &car);
+        if (ag < 0.0f) ag = 0.0f;
+        const float dSgdT  = (ag - Sg)/dTp;
+        const float dTdrog = (L - (carrier?Rw:Rg)*Td)/(rod*cvg);
+        float sjg = -theta*dSgdT*dTdrog;
+        if (sjg < 0.0f) sjg = 0.0f;
+        sj_g[ic] = sjg;
+        if (q0 > 1.0e-30f) {
+            const float dq1 = (q1 > 0.0f ? 0.01f*q1 : 1.0e-3f);
+            float b0,b1,b2,bg;
+            cond_source_vector_f(cpf, tb, Td, pv, rho_v, q0, q1+dq1, q2, &b0,&b1,&b2,&bg,
+                                 kantrowitz, growthModel, gamma_gas, p_gas, gyarC, &car);
+            float sjq1 = -theta*(b1 - SQ1)/dq1;
+            if (sjq1 < 0.0f) sjq1 = 0.0f;
+            sj_Q1[ic] = sjq1;
+        }
+    }
+    diagLim[ic] = theta;
+    SQ0 *= theta; SQ1 *= theta; SQ2 *= theta; Sg *= theta;
+    const float v = vol[ic];
+    res_roQ0[ic] += SQ0*v;
+    res_roQ1[ic] += SQ1*v;
+    res_roQ2[ic] += SQ2*v;
+    res_rog[ic]  += Sg *v;
+}
+
 }  // namespace
 
 void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
@@ -273,6 +450,29 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
         // (= carrier N2 の cp/R)。TP のみ per-cell 配列を渡す。
         flow_float* cp_cell   = (cfg.thermalMethod == 2) ? var.c_d["cp"]   : nullptr;
         flow_float* Rmix_cell = (cfg.thermalMethod == 2) ? var.c_d["Rmix"] : nullptr;
+        // float 実体 (plans/active/condensation-float-speedup.md §4.2-6 の分岐表): condFloat=1 かつ平衡形/二温度でない (それらは double のまま)。
+        const bool useFloat = (cfg.condFloat != 0) && cfg.condEquilibrium == 0 && cfg.condTwoTemp == 0 && cond_tables_device().valid;
+        if (useFloat) {
+            condensation_source_f_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
+                msh.nCells,
+                carrier, (float)Rw,
+                cfg.condKantrowitz, cfg.condKantrowitzGammaMode, condProps_to_f(cprops), cond_tables_device(), (float)opts.Yw,
+                (cfg.thermalMethod == 2) ? thermo_species_device_ptr_f() : nullptr, cfg.nSpecies,
+                (cfg.thermalMethod == 2) ? species_roY_device_ptr() : nullptr, cfg.condGasSpecies,
+                cfg.condGrowthModel, (float)cfg.condGyarmathyC,
+                cfg.condEvaporation, (float)cfg.condEvapRmin, cfg.condEvapKelvin, (float)evapLamMin,
+                cfg.cp, cfg.gamma,
+                (float)dg_max, (float)dT_max,
+                var.c_d["volume"], var.c_d["dt_local"],
+                var.c_d["T"], var.c_d["P"], var.c_d["ro"], cp_cell, Rmix_cell,
+                roY_w,
+                var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
+                var.c_d["res_rog_"+i], var.c_d["res_roQ0_"+i], var.c_d["res_roQ1_"+i], var.c_d["res_roQ2_"+i],
+                var.c_d["src_jac_g_"+i], var.c_d["src_jac_Q0_"+i], var.c_d["src_jac_Q1_"+i], var.c_d["src_jac_Q2_"+i],
+                var.c_d["condS_"+i], var.c_d["condDrdt_"+i], var.c_d["condR30_"+i], var.c_d["condTsat_"+i],
+                var.c_d["condTheta_"+i], var.c_d["condLim_"+i]);
+            continue;
+        }
         condensation_source_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells,
             cfg.condModel, carrier, Rw, M,
