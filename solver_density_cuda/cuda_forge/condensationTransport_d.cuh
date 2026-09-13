@@ -21,7 +21,7 @@ void condensationInit_d(solverConfig& cfg, variables& var);
 // 二相 EOS へ渡す device rog 配列ポインタ。凝縮無効時は nullptr。
 flow_float** cond_rog_device_ptr();
 
-// config → kernel 値渡しの凝縮物性オプション (plans/active/condensation-air.md, condensation-kantrowitz-carrier.md)
+// config → kernel 値渡しの凝縮物性オプション (plans/accepted/condensation-air.md, condensation-kantrowitz-carrier.md)
 inline CondPropOpts cond_prop_opts(const solverConfig& cfg)
 {
     CondPropOpts o;

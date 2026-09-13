@@ -394,7 +394,7 @@ public:
     int condKantrowitz = 0;  // 核生成の非等温補正。0: off (等温 CNT, 既定), 1: Kantrowitz 純蒸気形 (旧結果再現),
                              //   2: Feder carrier 形 (キャリア衝突による冷却を含む, q は潜熱項のみ), 3: Feder carrier 形 + 表面仕事項 (物理モデル)
     double condSigmaScale = 1.0; // 表面張力の一定倍率 (感度試験専用; 核生成・Kelvin・蒸発に一貫)。1.0 でビット不変
-    // 空気 (CPG carrier 形: N2 選択凝縮 + O2 キャリア) と N2 低温物性 (plans/active/condensation-air.md)
+    // 空気 (CPG carrier 形: N2 選択凝縮 + O2 キャリア) と N2 低温物性 (plans/accepted/condensation-air.md)
     double condVaporMassFraction = -1.0; // >0: CPG carrier 形。凝縮種 (N2) の質量分率 Y_w を定数で与える (二成分空気 0.7671)。<=0: 従来 pure
     int    condN2LatentLowT = 1;   // 1: N2 潜熱の 70 K 未満を c_l 一定の線形外挿 (既定), 0: 旧 4 次多項式 (60 K 未満で L'>0)
     int    condN2PsatLowT   = 1;   // 1: N2 飽和圧の 50 K 未満 C–C 外挿を新 L(T) の積分で再構成 (既定), 0: 旧 (診断: 「潜熱だけ新」)

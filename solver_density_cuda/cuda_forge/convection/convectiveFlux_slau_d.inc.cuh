@@ -339,7 +339,7 @@ __global__ void SLAU_d
         } else {
             h_p = ga*P_L/((ga-1.0)*ro_L) + 0.5*velocity2_L;
             h_m = ga*P_R/((ga-1.0)*ro_R) + 0.5*velocity2_R;
-            // 非平衡凝縮 (二相, CPG): 面エンタルピーを面状態で一貫して構成する (plans/active/condensation-air.md §4.1, codex 2026-09-12 M3)。
+            // 非平衡凝縮 (二相, CPG): 面エンタルピーを面状態で一貫して構成する (plans/accepted/condensation-air.md §4.1, codex 2026-09-12 M3)。
             //   旧: 単相 γp/((γ−1)ρ) にセル温度の補正 g(cpT_cell−L(T_cell)) を足す混在 (面二相温度とセル温度の差で ~1 kJ/kg ずれた)。
             //   新: g_f=セル値 (1 次), R_eff=R_air−g_f R_w (pure: R_w=R_air → (1−g)R), T_f=p_f/(ρ_f R_eff), h_f=c_p T_f − g_f L(T_f) + ek。
             //   c_hat (音速) は気相近似で単相のまま。g_total==nullptr (凝縮 off) で従来 (ビット不変)。

@@ -708,7 +708,7 @@ void solverConfig::read(std::string fname)
             this->condEqRelax     = getOptionalValidatedValue<double>(cond, "condEqRelax", 1.0, "condensation");
             this->condEqDTmax     = getOptionalValidatedValue<double>(cond, "condEqDTmax", 10.0, "condensation");
             this->condEqDgMax     = getOptionalValidatedValue<double>(cond, "condEqDgMax", 0.05, "condensation");
-            // CPG carrier 形 (空気の N2 選択凝縮) の受付範囲 (plans/active/condensation-air.md §4.1): SLAU × CPG × N2 × 単一種 × 非平衡 × Kantrowitz<=1。
+            // CPG carrier 形 (空気の N2 選択凝縮) の受付範囲 (plans/accepted/condensation-air.md §4.1): SLAU × CPG × N2 × 単一種 × 非平衡 × Kantrowitz<=1。
             if (!std::isfinite(this->condVaporMassFraction)) throw std::runtime_error("condVaporMassFraction must be a finite number (<=0 disables the CPG carrier form).");
             if (this->condensation == 1 && this->condVaporMassFraction > 0.0) {
                 if (!(this->condVaporMassFraction <= 1.0)) throw std::runtime_error("condVaporMassFraction must be in (0,1].");

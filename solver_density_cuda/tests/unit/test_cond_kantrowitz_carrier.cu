@@ -1,6 +1,6 @@
 // =============================================================================
 // test_cond_kantrowitz_carrier.cu  (host + device 単体検証; nvcc)
-//   plans/active/condensation-kantrowitz-carrier.md §5(5)/§6:
+//   plans/accepted/condensation-kantrowitz-carrier.md §5(5)/§6:
 //   (a) 純蒸気極限の解析値: mode 2 = (b−½)²/(c̃+½), mode 3 = 同 + 表面項 (1e-12)
 //   (b) Wysłouzil 条件 (230 K, ln S 3.4, Y_w 0.01095, N2 carrier): θ1=167.4 / θ2=4.05 / θ3=2.98 (±1 %)
 //   (c) 掃引 T 200–260 K × ln S 2–6 × Y_w 0.005–0.05 × g/Y_w 0–0.99: θ 有限・非負、Yv→0 で θ→0、Yc→0 で純蒸気形、
@@ -124,7 +124,8 @@ int main() {
         const double psat = cond_psat(h2o, T), pv0 = std::exp(lnS)*psat, P = pv0/(Yw - g)*1.0;   // p_v = ρ(Y_w−g)R_w T ⇔ 全圧 P から逆算 (下で cond_vapor_state に渡す)
         const double Rw = h2o.R; const double rod = pv0/((Yw - g)*Rw*T);   // ρ を p_v 整合に取る
         const double rbar = 20.0e-9, rho_l = cond_rho_cond(h2o, T);
-        const double q0 = g/((4.0/3.0)*COND_PI*rho_l*rbar*rbar*rbar), q1 = q0*rbar, q2 = q0*rbar*rbar;   // [1/kg, m/kg, m²/kg]
+        // cond_source_vector の入力は体積当たりの保存量 ρQn (codex 2026-09-13 result ② m2): 単分散 r̄ の N=ρg/(4/3 π ρ_l r̄³) [1/m³]
+        const double q0 = rod*g/((4.0/3.0)*COND_PI*rho_l*rbar*rbar*rbar), q1 = q0*rbar, q2 = q0*rbar*rbar;   // [1/m³, m/m³, m²/m³]
         const CondNucCarrier car = build_car(sp, 2, 1, Y, g, T);
         double pv, rv; cond_vapor_state(1, rod, P, T, g, Yw, Rw, &pv, &rv);
         check("cond_vapor_state (carrier) p_v == rho (Yw-g) Rw T", pv, rod*(Yw - g)*Rw*T, 1e-12);

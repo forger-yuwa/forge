@@ -6,7 +6,7 @@
 
 // 温度反転のクランプ範囲 (NASA-9 の有効域より広めに取り, 範囲外は外挿)
 #define DEPVAR_TMIN 50.0
-// CPG 二相の温度反転が収束しなかったセル数 (診断; plans/active/condensation-air.md §4.1)。wrapper が毎ステップ読み出して警告する。
+// CPG 二相の温度反転が収束しなかったセル数 (診断; plans/accepted/condensation-air.md §4.1)。wrapper が毎ステップ読み出して警告する。
 __device__ unsigned int g_condTinvFail = 0u;
 #define DEPVAR_TMAX 6000.0
 
@@ -27,7 +27,7 @@ __global__ void dependentVariables_d
  int condGasSpecies , int condModel ,   // carrier+condensible: 凝縮気相種 index / モデル(0:N2,1:H2O)
  int condEquilibrium ,                  // 2: EOS 拘束形平衡 ((T,g) 同時反転 → rog 射影)。0/1 は従来経路
  int condSonicModel ,                   // 1: 二相 frozen 音速/γ (TP 分岐, g>0 セル)。0: 旧 (全蒸気 √(γ_mix R_mix T))
- CondPropOpts condOpts ,                 // σ 倍率・N2 低温物性・CPG carrier の Y_w (plans/active/condensation-air.md)
+ CondPropOpts condOpts ,                 // σ 倍率・N2 低温物性・CPG carrier の Y_w (plans/accepted/condensation-air.md)
 
  // mesh structure
  geom_int nCells_all , geom_int nCells,
@@ -188,7 +188,7 @@ __global__ void dependentVariables_d
         } else {
             // ---- calorically perfect gas ----
             // 非平衡凝縮 (一温度 二相 EOS, CPG): 総液相質量分率 g を集計。condensation==0 で g=0 (従来経路)。
-            // CPG carrier (空気の N2 選択凝縮, condOpts.Yw>0): g<=Y_w、p=ρT(R_air−gR_w)、e=(c_v+gR_w)T−gL (plans/active/condensation-air.md §4.1)。
+            // CPG carrier (空気の N2 選択凝縮, condOpts.Yw>0): g<=Y_w、p=ρT(R_air−gR_w)、e=(c_v+gR_w)T−gL (plans/accepted/condensation-air.md §4.1)。
             const bool carrierCpg = (condensation == 1 && condOpts.Yw > 0.0);
             double g_liq = 0.0;
             if (condensation == 1 && rog != nullptr) {
@@ -224,7 +224,7 @@ __global__ void dependentVariables_d
                 bool ok = true;
                 const double Tn = eq2 ? Tn_eq : cond_T_from_e_cpg(e_in, g_liq, cv, Rw, Tguess, cpropsCpg, &ok);
                 if (!ok) {
-                    // 反転が収束しなかったセル: 原始量 (T,P,sonic,Ht) も保存量 (roe) も更新せず前ステップ値を保持し、診断カウンタに数える
+                    // 反転が収束しなかったセル: T,P,sonic,Ht は前ステップ値のまま残し、roe を反転結果で上書きしない (密度床・速度は上で更新済み)。診断カウンタに数える
                     // (codex 2026-09-12 M2 / 2026-09-13 M1: 失敗した温度で流束・核生成を評価しない)。密度床だけ反映。
                     atomicAdd(&g_condTinvFail, 1u);
                     ro[ic] = ro_temp;

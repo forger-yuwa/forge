@@ -1,6 +1,6 @@
 // =============================================================================
 // test_cond_air.cpp  (host 単体検証; nvcc -x cu --expt-relaxed-constexpr -I. -o test_cond_air tests/unit/test_cond_air.cpp)
-//   plans/active/condensation-air.md §5 (7):
+//   plans/accepted/condensation-air.md §5 (7):
 //   (a) N2 潜熱/飽和圧の低温整合: 70 K / 50 K の C0 接続 (値連続)、片側微分 (c_l>0 ⇔ L'<0)、p_sat の単調増、旧一式 (lowT=0) が旧関数と bitwise、
 //       38 K の p_sat 比 (新/旧) = 0.518 (閉形式)
 //   (b) CPG carrier EOS の往復: e(T,g) → T (括弧付き Newton) → e、g∈[0,0.99 Y_w], T∈[25,125] K、codex の反例 (g=0.75, T=122 K) で収束

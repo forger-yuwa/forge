@@ -18,7 +18,7 @@
 #define COND_RU 8.314462618       // 気体定数 [J/(mol K)]
 #define COND_PI 3.141592653589793
 
-// carrier 中の非等温核生成補正 (Feder et al. 1966; plans/active/condensation-kantrowitz-carrier.md §4.1) に渡す衝突項。
+// carrier 中の非等温核生成補正 (Feder et al. 1966; plans/accepted/condensation-kantrowitz-carrier.md §4.1) に渡す衝突項。
 //   a_v        = (Y_w - g)/M_v  [mol/kg]      蒸気の物質量 (Y_v→0 で θ→0 に連続に落とすための正規化)
 //   carrierSum = Σ_{i≠v} (Y_i/M_i) √(M_v/M_i) (c̃_v,i + 1/2)   キャリア各種の衝突・熱容量重み (種 DB から種別に集計)
 //   cvv_tilde  = c_v,v M_v / R_u  蒸気 1 分子の定積熱容量 [k_B 単位]

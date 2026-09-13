@@ -90,13 +90,13 @@ $$
   ($\theta$ が ~17 % 過大 → 純蒸気形の $J$ が ~15 % 過小; Wyslouzil 2D では onset が 0.45 mm 上流へ移り onset 帯の壁圧偏差が −4.8 → −4.5 % に縮む, 2026-09-10 検証)。
   これは**純蒸気形近似の中での係数修正**であり、
   旧挙動は `condKantrowitzGammaMode: 1` で A/B 用に残す。キャリア気体分子との衝突も揺らぎに数える Feder の
-  carrier 拡張 ($b^2$ に $p_c/p_v\sqrt{m_v/m_c}$ 重みの項が加わり $\theta$ が大幅に小さくなる; Wedekind et al.) は未実装。
+  carrier 拡張 ($b^2$ に $p_c/p_v\sqrt{m_v/m_c}$ 重みの項が加わり $\theta$ が大幅に小さくなる; Wedekind et al.) は `condKantrowitz 2/3` として実装済み (次節「carrier 中の非等温核生成補正 (Feder 形)」; 既定は 0 のまま)。
   $J_{pure}\le J_{carrier}\le J_{iso}$ は「同一の核生成障壁・前因子を固定し、衝突による熱除去だけを追加したモデル間」の関係で、
   carrier 中の核生成率の真値の保証範囲ではない (Wedekind et al. は carrier の $pV$ 仕事など逆向きの寄与も区別する)。
   純蒸気形は onset の実験一致を保証するものではない。
   計画: [plans/active/condensation-kantrowitz-gamma-twophase-sonic.md](../plans/active/condensation-kantrowitz-gamma-twophase-sonic.md)。
 
-- **carrier 中の非等温補正 (Feder 形, `condKantrowitz: 2, 3`; 計画 [condensation-kantrowitz-carrier](../plans/active/condensation-kantrowitz-carrier.md))**:
+- **carrier 中の非等温補正 (Feder 形, `condKantrowitz: 2, 3`; 計画 [condensation-kantrowitz-carrier](../plans/accepted/condensation-kantrowitz-carrier.md))**:
   Feder et al. (1966) の一般形では、クラスタの余剰エネルギーを持ち去る衝突に**キャリア分子も数える**:
 
   $$
@@ -490,7 +490,7 @@ $n_1=1.48654237,\ n_2=-0.280476066,\ n_3=0.0894143085,\ n_4=-0.119879866$。
 
 N2 は従来どおり Lin 2014 のフィット (`n2_latent`)。
 
-#### 潜熱 $L(T)$ と飽和圧の低温整合 (`condN2LatentLowT`, 計画 [condensation-air](../plans/active/condensation-air.md))
+#### 潜熱 $L(T)$ と飽和圧の低温整合 (`condN2LatentLowT`, 計画 [condensation-air](../plans/accepted/condensation-air.md))
 
 式 26 の 4 次多項式は ≈61 K で $dL/dT$ が正に転じ、55 K 未満で $L'>c_{p,v}$ となって液の比熱 $c_l=c_{p,v}-L'$ が負 (45 K で −3100 J/kg/K) になる (熱力学的に不整合;
 二相 frozen 音速の $c_{v,2\phi}$ が負になる原因、2026-09-10 codex 指摘)。`condN2LatentLowT: 1` (既定) では 70 K 未満を
@@ -629,7 +629,7 @@ $r_{\rm nuc}$ を使う** (ヤコビアンだけガード無しだと亜臨界�
 (HK/Gyar) が過早・オーバーシュート (0.44 vs exp 0.36)、Kantrowitz 有り (Kw+HK/Kw+Gyar) が onset を遅らせ実験に最良**
 (Fluent UDF で Kw+HK が最適だった知見と一致)。残課題: x≈3cm のピークが実験よりやや高い (onset レート微調整)。
 
-#### 空気: CPG carrier 形 (N2 選択凝縮 + O2 キャリア; `condVaporMassFraction`, 計画 [condensation-air](../plans/active/condensation-air.md))
+#### 空気: CPG carrier 形 (N2 選択凝縮 + O2 キャリア; `condVaporMassFraction`, 計画 [condensation-air](../plans/accepted/condensation-air.md))
 
 極超音速ノズルで試験ガスの空気そのものが凝縮する解析用。Daum & Gyarmathy (1968) の「低圧域では空気は純 N2 として振る舞い N2 の自発核生成が
 onset を決める」に従い、**気相は空気 (CPG)、凝縮するのは N2 だけ、O2 (+Ar) は凝縮しないキャリア**とする。TP の H2O–N2 carrier 経路と同じ定義を
@@ -644,7 +644,7 @@ $$
 - 空気の定数は二成分 N2/O2 = 0.79/0.21 mol から: $M$=28.850 g/mol, $R_{air}$=288.19, $c_{p,air}$=1008.7 (γ 1.4), $Y_{N_2}$=0.7671。
 - 空気は CPG のまま (`thermalMethod 0`): NASA-9 は 200 K 未満を線形外挿し温度反転の下限 50 K で Arthur の 27 K を表現できない。CPG pure/carrier の音速は
   旧式 $c=\sqrt{\gamma R_{air}T}$ (気相定数 × 二相温度; `dependentVariables_d.cu`) のまま。二相では $\sqrt{\gamma p/\rho}=\sqrt{\gamma R_{eff}T}$ と異なる ($R_{eff}=R_{air}-gR_w$; 二相 frozen 音速の CPG 適用は一般 EOS 固有系への切替と一括で後続)。
-- 温度反転 `cond_T_from_e_cpg` は非有限の $e,g,T_{guess}$・非正の熱容量を反転不能 (ok=false) とし、成功条件にも $T,G$ の有限性を要求する ($e=\pm\infty$ は tol=∞ で「成功」に化けていた; codex 2026-09-13)。失敗セルは原始量・$\rho e$ とも前ステップ値を保持し `[condensation] WARNING: CPG two-phase temperature inversion failed` を出す。
+- 温度反転 `cond_T_from_e_cpg` は非有限の $e,g,T_{guess}$・非正の熱容量を反転不能 (ok=false) とし、成功条件にも $T,G$ の有限性を要求する ($e=\pm\infty$ は tol=∞ で「成功」に化けていた; codex 2026-09-13)。失敗セルでは $T,p,c,H_t$ を前ステップ値のまま残し、$\rho e$ を反転結果で上書きしない (密度床と速度の更新は通常どおり先に済んでいる) — `[condensation] WARNING: CPG two-phase temperature inversion failed in N cells` を出す。
 - SLAU 面エンタルピー `cond_face_h_cpg` の $R_{eff}$ は正で有限ならそのまま使う (旧 1.0 床は受付範囲の枯渇近傍 $R_{eff}<1$ で面温度を EOS と食い違わせた)。非正・非有限は乾き面 ($g_f=0$) に退避。
 - O2/N2 理想溶液の露点線 (O2 濃厚な最初の液滴; Hansen & Nothwang 1952) は Python で組むと 1 atm の露点 82.2 K だが N2 飽和線より 4.5 K 高温側で、
   Daum & Gyarmathy の onset データ (空気 ≈ N2) と合わない → 混合液モデルは後続。
@@ -755,7 +755,7 @@ $$
 - carrier (H2O in N2): $R_{eff}=R_{mix}-gR_w$ ($R_{mix}=\sum_iY_iR_i$ は総水を蒸気と数えた混合)。
 - pure TP: $R_{eff}=(1-g)R_v$、$c_p^{全蒸気}=c_p(T)$。**CPG 分岐 (`thermalMethod 0`, pure N2 case/34) は旧式のまま**:
   `n2_latent` の多項式は低温 (例 45 K) で $L'>0$ ($c_l=c_{p,v}-L'<0$, 熱力学的に不整合) となり $g=0.2$ で $c_{v,2\phi}<0$ になる
-  (codex 指摘 2026-09-10)。潜熱フィットの整合修正が先 (plan §5.1)。
+  (codex 指摘 2026-09-10)。潜熱の低温整合 (`condN2LatentLowT`, 上記) で $c_l>0$ は解消済みで、残る理由は CPG 分岐の一般 EOS 固有系・Jacobian への切替 (γ_2φ, 実 $H_t$) を二相音速と一括で行う必要があること (後続 [condensation-followups](../plans/active/condensation-followups.md) #6)。
 - $L'(T)=dL/dT=c_{p,v}-c_l$ (Kirchhoff) なので $c_{p,2\phi}$ は「$g$ ぶんの蒸気 $c_{p,v}$ を液 $c_l$ に置き換えた」混合比熱
   ($c_{p,2\phi}=(1-g)c_{p,v}+gc_l$ に pure で一致)。$c_{v,2\phi}$ は温度反転 Newton の $de_{mix}/dT$ と同一。
 - $g=0$ で $\gamma_{mix}R_{mix}T$ (従来) に厳密に戻る。`condensation: 0` はコード経路不変。

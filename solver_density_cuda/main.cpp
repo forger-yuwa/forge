@@ -989,7 +989,7 @@ cudaConfig initializeSimulation(
                  << " condN2LatentLowT=" << cfg.condN2LatentLowT << " condN2PsatLowT=" << cfg.condN2PsatLowT << " condN2LiquidCp=" << cfg.condN2LiquidCp << "\n";
         }
         cfg.condSonicModel = resolved;
-        // CPG carrier 形 (空気の N2 選択凝縮) の境界受付範囲 (plans/active/condensation-air.md §4.1; codex 2026-09-13 M3):
+        // CPG carrier 形 (空気の N2 選択凝縮) の境界受付範囲 (plans/accepted/condensation-air.md §4.1; codex 2026-09-13 M3):
         //   ghost/ピンを単相 EOS で再構成する境界 (wall, wall_isothermal, inlet_Pressure, outflow, periodic 等) は未対応。
         //   出口 outlet_statPress は超音速全量外挿のときだけ整合 (実行時条件) → 後処理 onset_analysis.py --series の u_n/c>1 で確認する。
         if (cfg.condensation == 1 && cfg.condVaporMassFraction > 0.0) {

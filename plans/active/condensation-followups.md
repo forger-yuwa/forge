@@ -6,7 +6,7 @@
 - **status**: `draft`
 - **related_docs**:
   - `methods/condensation.md` (現在仕様: 核生成・成長・Kantrowitz/Feder 補正・空気 CPG carrier 形・N2 低温物性)
-- **related_plans**: 親 [condensation-kantrowitz-carrier.md](condensation-kantrowitz-carrier.md), [condensation-air.md](condensation-air.md), [condensation-kantrowitz-gamma-twophase-sonic.md](condensation-kantrowitz-gamma-twophase-sonic.md)
+- **related_plans**: 親 [condensation-kantrowitz-carrier.md](../accepted/condensation-kantrowitz-carrier.md), [condensation-air.md](../accepted/condensation-air.md), [condensation-kantrowitz-gamma-twophase-sonic.md](condensation-kantrowitz-gamma-twophase-sonic.md)
 - **created**: `2026-09-13`
 - **owner**: `sano`
 
@@ -23,8 +23,8 @@
 
 ## 3. 関連 docs と前提
 
-- Feder carrier 形と σ 感度: [condensation-kantrowitz-carrier.md](condensation-kantrowitz-carrier.md) §9 (Wysłouzil node run_0350–0356)。
-- 空気 CPG carrier 形と N2 低温物性: [condensation-air.md](condensation-air.md) §9 (case/34 run_0014–0035)。
+- Feder carrier 形と σ 感度: [condensation-kantrowitz-carrier.md](../accepted/condensation-kantrowitz-carrier.md) §9 (Wysłouzil node run_0350–0356)。
+- 空気 CPG carrier 形と N2 低温物性: [condensation-air.md](../accepted/condensation-air.md) §9 (case/34 run_0014–0035)。
 - 実験差の現状: Wysłouzil は mode 1 が壁圧 −4.5 % (21 mm)、mode 2/3 は +15〜+18 % (計算上の onset が 8 mm 上流 = モデル間差)。
   Arthur は壁 cond/dry が 3–4 in で実験より ~9 % 過大 (物性修正で解消せず、原因未切り分け)。
 
@@ -40,9 +40,9 @@
 
 | # | 項目 | 内容 (出典) |
 | --- | --- | --- |
-| 1 | 成長率 dr/dt の α 感度 | Hertz–Knudsen の質量適応係数 α=1 (上限) を `condAccommodation` キーにし、Wysłouzil mode 3 で α=0.5/0.1 の onset・壁圧応答を見る。J と dr/dt の寄与を分離する (carrier plan #5b, ユーザ指摘 2026-09-12) |
+| 1 | 成長率 dr/dt の α 感度 | Hertz–Knudsen の質量適応係数 α=1 (上限) を `condAccommodation` キーにし、Wysłouzil mode 3 で α=0.5/0.1 の応答を見る。**onset だけでは J と dr/dt を区別できない**ので観測量は onset・壁圧上昇幅 (Δp/p₀ の最大と勾配)・出口液滴径 (r30, Q1/Q0)・実験の SAXS 液滴径 (Wysłouzil の SAXS 文献を取得) を併記して J/dr/dt の寄与を分離する (carrier plan #5b・§5 (6), ユーザ指摘 2026-09-12) |
 | 2 | 分圧スイープ | Wysłouzil の p_v0 0.5 / 0.26 kPa の dry node 場を作り mode 1/2/3 の分圧応答 (実験 Fig.3 との比較) (carrier #5) |
-| 3 | `condKantrowitz` 既定値の決定 | 1 と 2/3 のどちらを既定にするかを #1–#2 と実験一致で判断 (carrier #6) |
+| 3 | `condKantrowitz` 既定値の決定 | **グローバル省略時既定は現行 0 (補正なし)**。これを維持するか 1 または 2/3 に変えるかを #1–#2 と実験一致で判断する。Wysłouzil 参照設定 (case/16 run_0335 系) が 1 を明示していることとグローバル既定は別 (carrier #6) |
 | 4 | σ 0.97 系の h0 変動 | case/16 run_0354 の中心線 h0 偏差 (平均 1.200 ± 0.015 kJ/kg, 4 点で上昇傾向) が限界サイクルか drift か: 保存間隔を密にして判定し `check_quasisteady.py` に h0err を統合 (carrier #7) |
 | 5 | Arthur 3–4 in の壁圧 ~9 % 過大の原因切り分け | 候補: 核生成 J (CNT×Iland), 成長 dr/dt (Goodheart, α), 壁圧の抽出位置 (壁セル列 vs 静圧孔), Arthur 記号の読み取り。J/dr/dt 各 ×0.5/×2 の感度と Fig.2 再デジタイズ (air #10) |
 | 6 | CPG 二相音速 | γ_2φ + 実 Ht + 一般 EOS 固有系を CPG 二相 (N2/空気) へ; 流束 FD 照合 (double/float32) (air #7, sonic plan) |

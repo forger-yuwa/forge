@@ -89,7 +89,7 @@ void slip_d
         const flow_float ek_b  = 0.5*(Ux_b*Ux_b   + Uy_b*Uy_b   + Uz_b*Uz_b);
         rob[ib]   = ro[ic];
         Psb[ib]   = P[ic];
-        // slip 反射は熱力学状態を保存する (EOS 非依存; plans/active/condensation-air.md §4.3, codex 2026-09-12 M4/m1):
+        // slip 反射は熱力学状態を保存する (EOS 非依存; plans/accepted/condensation-air.md §4.3, codex 2026-09-12 M4/m1):
         //   ghost は速度反射で |u| 不変 → ρe も不変 (roe[ig]=roe[ic])、T・c は内部値コピー。旧 CPG 式 T=p/(ρR), ρe=p/(γ−1)+ρe_k は
         //   二相 (p=ρR_eff T) で内部と矛盾した。bvar は法線成分を除いた接線速度なので ρE_b = ρE_i − ½ρU_n²。
         //   dry 単相では旧式と丸め差のみ (回帰は反復ノイズ以内を確認)。

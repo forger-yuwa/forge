@@ -38,7 +38,7 @@ struct CondSpeciesProps {
     double Tc;      // 臨界温度 [K]
     double M;       // 分子量 [kg/mol]
     double sigmaScale; // 表面張力の倍率 (感度試験専用 condSigmaScale, 既定 1.0; 核生成・Kelvin・蒸発に一貫)
-    // N2 低温物性の切替 (plans/active/condensation-air.md §4.2)。H2O では未使用。
+    // N2 低温物性の切替 (plans/accepted/condensation-air.md §4.2)。H2O では未使用。
     int    latentLowT;   // 1: 70 K 未満の潜熱を c_l 一定の線形外挿 (既定), 0: 旧 4 次多項式 (60 K 未満で L'>0)
     int    psatLowT;     // 1: 50 K 未満の飽和圧 C–C 外挿を新 L(T) の積分で再構成 (既定), 0: 旧 (L_poly(50) 一定の C–C; 診断用)
     double liquidCp;     // 液 N2 の比熱 c_l [J/(kg K)] (線形外挿の傾き c_p,v − c_l に使う; 既定 2000)
@@ -125,7 +125,7 @@ __host__ __device__ inline double n2_psat_jacobsen(double Tcl)
 #define COND_PSAT_TSWITCH 50.0
 // psatLowT=1 (既定): 50 K 未満の C–C 外挿を低温整合潜熱 L(T)=L_a+c'(T−T_a) の積分 (閉形式) で再構成:
 //   ln(p/p_s) = (1/R)[(L_a − c' T_a)(1/T_s − 1/T) + c' ln(T/T_s)],  c' = c_p,v − c_l。接続 (50 K) は C0 (微分は不連続)。
-//   38 K で旧 (L_poly(50)=204 kJ/kg 一定の C–C) の 0.518 倍 (plans/active/condensation-air.md §4.2)。
+//   38 K で旧 (L_poly(50)=204 kJ/kg 一定の C–C) の 0.518 倍 (plans/accepted/condensation-air.md §4.2)。
 // psatLowT=0: 旧 C–C (診断「潜熱だけ新」の A/B 用)。latentLowT=0 のときは閉形式の L も多項式側では定義できないので旧 C–C に落とす。
 __host__ __device__ inline double n2_psat_ex(double T, int psatLowT, int latentLowT, double cl)
 {

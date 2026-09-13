@@ -2,7 +2,7 @@
 
 ## メタ
 
-- **種別**: 技術調査 (コード変更は plan 側: [condensation-kantrowitz-carrier](../../plans/active/condensation-kantrowitz-carrier.md), [condensation-air](../../plans/active/condensation-air.md))
+- **種別**: 技術調査 (コード変更は plan 側: [condensation-kantrowitz-carrier](../../plans/accepted/condensation-kantrowitz-carrier.md), [condensation-air](../../plans/accepted/condensation-air.md))
 - **日付**: 2026-09-12
 - **動機**: ユーザ指摘「carrier (N2) 中の H2O 凝縮では Kantrowitz 補正はキャリアによる冷却を考慮すべきでは」「表面張力の式は 50 nm 級でも成り立つか」「空気そのものの凝縮解析機能を検証したい」。
 

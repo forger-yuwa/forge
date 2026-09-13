@@ -66,7 +66,7 @@ __host__ __device__ inline double cond_T_from_e_carrier(
 //   e = (1-g)e_v + g e_l = (c_v + g R_v) T - g L(T)   (e_v=c_v T)
 //   ⇒ T = (e_in + g L(T))/(c_v + g R_v)  (= Eq.18, Cv0=Cvv=c_v)
 // **L の温度依存は入れる** (n2_latent(T))。g=0 で T=e_in/cv (従来 CPG と一致)。cv=cp/γ, R=(γ-1)cv。
-// SLAU の CPG 二相 面全エンタルピー (面状態で一貫; plans/active/condensation-air.md §4.1, codex 2026-09-12 M3)。
+// SLAU の CPG 二相 面全エンタルピー (面状態で一貫; plans/accepted/condensation-air.md §4.1, codex 2026-09-12 M3)。
 //   g_f はセル値 (1 次)。R_eff = R_gas − g_f R_w (pure: R_w=R_gas → (1−g)R)。T_f = p_f/(ρ_f R_eff), h_f = c_p T_f − g_f L(T_f) + e_k。
 //   float 保存量からの復元を単体で検査できるように関数化 (tests/unit/test_cond_air.cpp)。
 __host__ __device__ inline double cond_face_h_cpg(const CondSpeciesProps& cp, double cp_gas, double R_gas, double R_w,
@@ -91,7 +91,7 @@ __host__ __device__ inline double cond_clamp_vapor_pressure(double rod, double g
     return P;
 }
 
-// 括弧付き Newton + 二分法退避 (plans/active/condensation-air.md §4.1, codex 2026-09-12 M2)。
+// 括弧付き Newton + 二分法退避 (plans/accepted/condensation-air.md §4.1, codex 2026-09-12 M2)。
 //   旧 30 回 Newton は物性クランプ (45 K 床 / 臨界直下) をまたいで往復すると未収束のまま T を返し (g=0.75, T=122 K で 99 K, e −28 kJ/kg)、
 //   呼び出し側がその T で roe を上書きして保存量を壊した。G(T)=aT−gL(T)−e_in は L'<0 (整合物性) なら単調増なので [T_lo,T_hi] で括弧を作り、
 //   Newton 反復が括弧外に出たら二分法。成功条件 |G|<=1e-9|e_in|+0.05 J/kg を *ok に返す (失敗時は呼び出し側で保存量を上書きしない)。

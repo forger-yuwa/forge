@@ -23,7 +23,7 @@ inline bool condensationEnabled(const solverConfig& cfg)
 __global__ void condensation_source_d(
     geom_int nCells,
     int condModel, int carrier, double Rw, double M,
-    int kantrowitz, int kwGammaMode, CondPropOpts opts,   // opts: σ 倍率・N2 低温物性切替・kgas モデル・CPG carrier の Y_w (plans/active/condensation-air.md)
+    int kantrowitz, int kwGammaMode, CondPropOpts opts,   // opts: σ 倍率・N2 低温物性切替・kgas モデル・CPG carrier の Y_w (plans/accepted/condensation-air.md)
     const SpeciesThermo* sp, int nSpecies, flow_float* const* roYall, int condGasSpecies,   // Feder carrier 形の衝突項用 (TP のみ; CPG は nullptr)
     int growthModel, double gyarC, int twoTemp,
     int evap, double evapRmin, int evapKelvin, double evapLamMin,
@@ -82,7 +82,7 @@ __global__ void condensation_source_d(
     diagTsat[ic] = (flow_float)cond_Tsat(cprops, pv, Td);
 
     // Feder carrier 形 (condKantrowitz 2/3) の衝突項: 種 DB (NASA-9 c_v(T), M_i) と種質量分率から種別に集計
-    // (plans/active/condensation-kantrowitz-carrier.md §4.1)。TP carrier 以外 (CPG / pure) は純蒸気形 (carrierSum=0)。
+    // (plans/accepted/condensation-kantrowitz-carrier.md §4.1)。TP carrier 以外 (CPG / pure) は純蒸気形 (carrierSum=0)。
     // 温度摂動 (src_jac) でも同じ値を使う (T 凍結)。
     CondNucCarrier car;
     car.a_v = 1.0; car.carrierSum = 0.0; car.cvv_tilde = cprops.cv*cprops.M/COND_RU;
