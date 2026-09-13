@@ -178,12 +178,12 @@ float だと相対 **9.2e-3**、N2 の Jacobsen 飽和圧は **2.9e-4**、係数
 | # | 項目 | 内容 |
 | --- | --- | --- |
 | 0 | codex plan レビュー | **済** (2026-09-13, GO-with-changes M7/m2, 全件採用 → §4.2 v2) |
-| 1 | ① 物性表 + CNT 対数化 + host 単体試験 (§4.2-1,2; codex M1/M2) | 表の精度 ≤2e-6 と連鎖の許容を先に確立。満たせない物性は double に残す |
-| 2 | ② 反転の成功判定・`roe` 保護・`condFloat` 分岐表 (§4.2-5,6; codex M3/M5) | 現行 TP carrier 反転にも成功判定を入れる |
-| 3 | ①③ ソース kernel・clamp・SLAU 面潜熱 (表, g=0 スキップ)・移流融合 (§4.2-3,4,7) | `condL` 配列は不採用 (codex M4) |
-| 4 | ③ device 単体試験 + `condFloat: 0` のビット一致 + FP64 命令監査 (§4.3; codex M7/m9) | |
-| 5 | ④ 短期回帰 (静かな case) + 物理検証 (onset / h0 / 定常性; codex M6) | pure N2 cell/node run を新設、`cond_axis_h0.py` |
-| 6 | ⑤ 発達場・起動区間の速度 + 証拠回収 (codex m8) | `_aws_perf_evidence/cond/` |
+| 1 | ① 物性表 + CNT 対数化 + host 単体試験 (§4.2-1,2; codex M1/M2) | **済** (8b32f3f1): 表は全物性 ≤2e-6 (ln p_sat は float 表現 5 ulp を含めた形), 連鎖 (J, r*, dr/dt, S ベクトル, 蒸発 λ, T_sat) ALL PASS。許容の最終形は methods/condensation.md 実装 §9 |
+| 2 | ② 反転の成功判定・`roe` 保護・`condFloat` 分岐表 (§4.2-5,6; codex M3/M5) | **済** (8629f569, b021bca1): 研磨は残差 1e-3 J/kg まで → |ΔT|/T ≤ 7.5e-12、10 往復ドリフト = double 反転と同値、失敗 0/360; 失敗セルは roe 不変 + `g_condTinvFail`。分岐表どおり `condFloat: 0` で source/clamp 診断が変更前とビット一致 (run_0458 凍結 1 step) |
+| 3 | ①③ ソース kernel・clamp・SLAU 面潜熱 (表, g=0 スキップ)・移流融合 (§4.2-3,4,7) | **済** (8b32f3f1, 8629f569, 0449725a): float 実体は template でなく別関数 (double はビット不変)。蒸発は δ=λ−1 で組む (float で λ=1 に丸まる問題を device 試験で検出)。移流 4 起動→1、原始量 8→1 |
+| 4 | ③ device 単体試験 + `condFloat: 0` のビット一致 + FP64 命令監査 (§4.3; codex M7/m9) | **済**: `test_cond_float_device.cu` (H2O carrier 7426 状態 × Kw1/HK・Kw3/Gyar、N2 CPG 3744 状態 × Kw1/Goodheart・Kw0/Gyar) ALL PASS; `cuobjdump -sass`: `condensation_source_f_d` FP64 0/6432 命令, `cond_realizability_clamp_f_d` 0/360 (double 実体 16802/40016, 617/1552) |
+| 5 | ④ 短期回帰 (静かな case) + 物理検証 (onset / h0 / 定常性; codex M6) | **ローカル予備** (RTX 3060, 2026-09-13): case/16 run_0456 (node 2D H2O) PASS 32/32 (T 9e-7 ≤ ノイズ 2e-6), case/44 run_0201 PASS 30/30, `cond_axis_h0.py` run_0456: 軸 h0 の非保存 271.8 J/kg (9.1e-4 of 3e5) で新旧差 −0.04 J/kg PASS。case/34 (12000 step, 床 = 同一バイナリ反復): cell 空気 PASS 28/28 (T ノイズ ×1.1, ρg ×1.2 = マージ後バイナリと同等), node 空気 PASS 28/28 (T 1.7e-6 ≤ ノイズ 1.8e-6), cell dry PASS 20/20; 反転失敗 0。**AWS での正式取得 (pure N2 cell/node 新設・12000 step 物理検証・反復床) はインスタンス停止中 (44.211.54.88 応答なし) で未了** |
+| 6 | ⑤ 発達場・起動区間の速度 + 証拠回収 (codex m8) | **未了 (AWS 停止中)**。ローカル 2D 参考: run_0456 300 step 4.83 → 2.9 ms/step (ソース float のみの段階) |
 | 7 | codex result レビュー → accepted | |
 
 ## 6. 検証
@@ -225,3 +225,6 @@ float だと相対 **9.2e-3**、N2 の Jacobsen 飽和圧は **2.9e-4**、係数
 
 - `2026-09-13` — 起票。A10G で dry 33.8 / 凝縮 ON 89.5 ms/step、nsys で凝縮ソース 31.7・SLAU 面潜熱 11.5・反転 10.2 ms/step を同定 (§4.1)。
 - `2026-09-13` — codex plan レビュー GO-with-changes (M7/m2) を全件採用し §4.2/§4.3/§5/§6 を v2 に改訂 (物性は区分 3 次表、CNT は対数上限、反転に成功判定と保存量保護、condL 不採用、3D は速度/統計のみ)。
+- `2026-09-13` — 実装 (8b32f3f1 → b021bca1): 物性表 + 対数 CNT の float ソース kernel、float 面潜熱 (g=0 面スキップ)、float clamp、二相ハイブリッド反転 (残差判定・roe 保護)、
+  移流/原始量の融合、`condFloat`、host/device 単体試験 ALL PASS、FP64 命令 0。実装上の差 (template でなく別関数、蒸発 δ 形、研磨 tol 1e-3 J/kg、
+  単体許容の最終形) は methods/condensation.md 実装 §9 に記載。ローカル予備回帰 PASS (run_0456 / run_0201 / h0 保存)。AWS (速度・正式回帰・物理検証) はインスタンス停止で未了。

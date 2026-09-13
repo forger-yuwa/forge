@@ -127,6 +127,7 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
   [condensation-air](../plans/accepted/condensation-air.md)):
   - `condKantrowitz`: **省略時既定 0** (非等温補正なし; `solverConfig.cpp`) / 1=Kantrowitz (純蒸気形) / **2=Feder carrier 形** (キャリアの冷却込み, $\hat q=b-\tfrac12$) / 3=同+表面項 ($\hat q=b-\tfrac12-\ln S$)。
     Wysłouzil 参照設定 (case/16 run_0335 系) は 1 を明示する。2/3 は θ 167→3–4 で計算上の onset が mode 1 より 8.2 mm 上流に動く (**モデル間差**; 実験との位置差ではない) ため推奨は 1 のまま。診断出力は `condTheta_0`/`condLim_0` (`extraFields`, 種番号付き)。
+  - `condFloat` (既定 1, 2026-09-13): 凝縮経路の float 実体 (凝縮 ON の速度; [methods/condensation.md](../methods/condensation.md) 実装 §9)。A/B や旧結果の再現には 0。
   - `condSigmaScale` (既定 1.0): 表面張力の定数倍感度。Wysłouzil mode 3 基準で σ×1.03 は onset +2.5 mm (収束 PASS+STEADY)、σ×0.97 は −2.2 mm だが**未収束の準定常参考値** (残差 plateau, h0 偏差 OSCILLATING; case/16 run_0354)。Tolman 補正の代替ではない。
   - 空気凝縮 (CPG carrier 形): `physProp: {cp: 1008.7, gamma: 1.4}` (二成分空気 R 288.19) + `condensation: {condModel: 0, nCondSpecies: 1, condVaporMassFraction: 0.7671}`。
     受付は SLAU × `thermalMethod 0` × 非平衡 × `condKantrowitz ≤1` × 境界 `inlet_uniformVelocity`/`outlet_statPress`/`slip` のみ (config 検査で拒否)。
