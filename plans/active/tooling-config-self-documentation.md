@@ -105,12 +105,16 @@
 - **C++ 側 (B)**: `g++ -std=c++17 -fsyntax-only` を通し、`solverConfig::read()` だけを呼ぶ最小ハーネスを
   実 config に対して実行して「明示キーの行が従来書式のまま」「省略キーが `[default]` として出る」
   「`FORGE_CONFIG_LOG_DEFAULTS=0` で `[default]` が 0 行になる」を確認する。数値計算経路は触らない。
-- **既存 config の一掃**: 既存 run の config 40 本に `check` をかけ、出た指摘がすべて実在の問題であること。
+- **既存 config の一掃**: 既存 run の config に `check` をかけ、出た指摘がすべて実在の問題であること。
+- **記録**: 実行結果・対象一覧・指摘の内訳は
+  [`notes/investigations/2026-09-13-config-doc-verification.md`](../../notes/investigations/2026-09-13-config-doc-verification.md) に残す。
+  試験入力と期待値はツール内の `SELFTEST` / `SELFTEST_TEXT` にあり、`config_doc.py selftest` でいつでも再実行できる。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result | `2026-09-13` | [`notes/reviews/2026-09-13-tooling-config-self-documentation-result.md`](../../notes/reviews/2026-09-13-tooling-config-self-documentation-result.md) | GO-with-changes, C0/M2/m3 | **全件採用** (下記) |
 | plan | `2026-09-13` | [`notes/reviews/2026-09-13-tooling-config-self-documentation-plan.md`](../../notes/reviews/2026-09-13-tooling-config-self-documentation-plan.md) | GO-with-changes, C0/M6/m3 | **全件採用** (下記) |
 
 **採否** (すべて採用・対応済み):
@@ -126,6 +130,16 @@
 | m7 | `[default]` は実効設定の完全な記録にならない | §4 とツール/文書の説明を「ヘルパー経由の省略記録」に限定。最終値の記録は §5.1 #4 へ |
 | m8 | `recommended-settings.md` 自体が死にキー `kInf`/`omegaInf` を推奨している | 推奨レシピを `kInit`/`omegaInit` に訂正し、適用条件 (IC に `roK`/`roOmega` が無いときだけ効く) を追記。`methods/turbulence/implementation.md` の旧キー列にも注記 |
 | m9 | plan/result レビュー統合は免除条件に当たらない。`methods/` 更新も無い | 本レビューを `plan` 段として記録し `result` 段は別途実施。`methods/architecture/overview.md` §7.1 を更新 |
+
+**result 段の採否** (すべて採用・対応済み):
+
+| 指摘 | 内容 | 対応 |
+| --- | --- | --- |
+| M1 | `annotate` が化学種名 `NO` を YAML 真偽値として読み `false` に書き換える。往復検証も変換後どうしを比べていて通ってしまう | **値を読み書きし直す方式をやめた**。元テキストの行の上にコメントを挿入するだけにし、検証も「挿入した行を外すと元テキストに 1 文字違わず戻るか」に変更。`NO` / 空節 / 引用符・バックスラッシュを `selftest` に追加 |
+| M2 | `check` が節をドット連結するため、トップレベルの `"time.deltaT"` という 1 キーと入れ子 `time: {deltaT: ...}` を同一視。`mesh.bndFirstOrder: {}` のような空辞書も見逃す | パスをタプルで保持する方式に変更。辞書そのものも点検対象にし、`[型違い]` (スカラーのキーに辞書) と未知の節を検出。廃止・型違いの下は掘らず、未知の節の下は「正しい節が分かる子」だけ出す |
+| m3 | 空の節 (`output: {}`) を含む config を注釈生成できない (exit 2) | M1 の方式変更で解消 (テキストを保つので空節も原文のまま) |
+| m4 | `keepDissCoeffMax` の説明が適用領域を逆に書いている | `convectiveFlux_keep_d.inc.cuh` の `max(keepDissCoeff, ransFrac*keepDissCoeffMax)` を確認し「RANS 帯で使う上限」に訂正 |
+| m5 | 検証の実測・対象一覧・期待値の記録が無い | `config_doc.py selftest` (期待値つき 12 項目) を追加し、実行結果・対象 config 一覧・指摘の内訳を `notes/investigations/2026-09-13-config-doc-verification.md` に保存。§6 から参照 |
 
 ## 7. 影響範囲
 
@@ -150,3 +164,6 @@
   `template` から禁止キーを除外。誤説明 (`gpu` ほか 6 件) を消費箇所まで当たって訂正。
   `recommended-settings.md` の死にキー推奨 (`kInf`/`omegaInf` → `kInit`/`omegaInit`) と
   `methods/architecture/overview.md` §7.1 を更新。
+- `2026-09-13` — codex result レビュー (C0/M2/m3) を全件採用。`annotate` を「元テキストにコメント行を挿入する」
+  方式へ作り直し (`species: [N2, NO]` の `NO` が false になる事故を根絶)、config の照合をパスのタプルに変更して
+  入れ子の取り違えと空辞書の見逃しを解消。`selftest` (期待値つき) と検証記録を追加。`keepDissCoeffMax` の説明を訂正。

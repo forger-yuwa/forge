@@ -152,7 +152,7 @@ public:
     // f_d 駆動 σ ブレンド (turbulence-iddes-sst §4.8, 既定 0=ビット不変)。1 で ES 散逸の σ を
     // face ごと σ_f=max(keepDissCoeff, (1-f̃_d)·keepDissCoeffMax) に置換 (DESmode>0 必須)。
     int keepDissFdBlend = 0;
-    flow_float keepDissCoeffMax = 1.0;   // DES シールド外で使う σ_f の上限 (DESmode>0 のとき有効)
+    flow_float keepDissCoeffMax = 1.0;   // RANS 帯で使う ES 散逸係数 σ_f の上限 (σ_f=max(keepDissCoeff, ransFrac·これ))。keepDissFdBlend=1 + DESmode>0 で有効
     // 高周波圧力欠陥駆動 mass-flux 補正 (Rhie–Chow 型市松キラー, matrix CPG 枝のみ)。
     // δṁ=−½C_cb·S·δp^HF/Ur を [1,ū,H̄t] で全保存量へ整合配布 (sign gate で面ごと ES 保証)。
     // keepDissJump>=1 必須。plans/active/convection-keep-cb-pressure-correction.md

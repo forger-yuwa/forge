@@ -29,8 +29,9 @@
   config_doc.py template [--section s]         全キー入りの注釈付き雛形を stdout に出す (廃止キーは出さない)
   config_doc.py list     [--section s]         キー・節・既定値・説明の一覧 (docs 生成用)
   config_doc.py coverage                       抽出できなかった読み出し箇所を行番号付きで出す (0 件であるべき)
+  config_doc.py selftest                       期待値つきの自己試験 (過去に壊れた入力をそのまま残してある)
 """
-import argparse, os, re, sys
+import argparse, os, re, sys, unicodedata
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "input")
@@ -50,7 +51,7 @@ DEPRECATED_FALLBACK = {
 KEY_DESC = {
     ("physProp", "species"): "混合を構成する化学種名のリスト。並び順が index s (roY{s}) を決める。物性は speciesDBFile から引く",
     ("space", "uRef"): "移流ゲージの参照速度 [m/s] ([ux, uy, uz])。space.roRef と対で KEEP の一様流保存に使う",
-    ("", "bodyForce"): "一様体積力 [N/m³] ([fx, fy, fz])。周期チャネル等の駆動に使う",
+    ("bodyForce",): "一様体積力 [N/m³] ([fx, fy, fz])。周期チャネル等の駆動に使う",
     ("turbulence", "model"): "乱流モデル: none | wale | sigma | sst | sst-ddes | sst-iddes (旧 LESorRANS/RANSmodel は起動エラー)",
     ("mesh", "wallDistExtraPhysIDs"): "壁距離の計算に含める非 wall 境界の physical ID リスト (変換時, procedures/solver-settings.md)",
     ("output", "extraFields"): "output.level で落とされる場のうち個別に追加したい名前のリスト (output_cellValNames にあるもの)",
@@ -158,19 +159,20 @@ def load_keys():
     def put(section, key, typ, default, pos, required, cond):
         if section is None:
             return False
+        path = tuple(section.split(".")) + (key,) if section else (key,)
         member = _member_before(cpp, pos)
-        cur = keys.get((section, key))
+        cur = keys.get(path)
         if cur is None:
-            keys[(section, key)] = dict(
+            keys[path] = dict(
                 type=typ, default=default, member=member,
-                desc=KEY_DESC.get((section, key)) or desc.get(member) or desc.get(key, ""),
+                desc=KEY_DESC.get(path) or desc.get(member) or desc.get(key, ""),
                 required=required, cond=cond, lines=[_line_of(cpp, pos)])
         else:
             cur["lines"].append(_line_of(cpp, pos))
             if cur["default"].startswith("(") and not default.startswith("("):
                 cur.update(type=typ, default=default)
             if not cur["desc"]:
-                cur["desc"] = KEY_DESC.get((section, key)) or desc.get(member) or desc.get(key, "")
+                cur["desc"] = KEY_DESC.get(path) or desc.get(member) or desc.get(key, "")
             if required and not cur["required"]:
                 cur.update(required=True, cond=cond)
         return True
@@ -211,11 +213,11 @@ def load_keys():
             put(sec, key, typ, "(コード側で分岐)", m.start(), False, False)
     # 存在判定だけで拾ったもののうち、(a) 節そのもの `if (config["mesh"])` と (b) 廃止キーの検出
     # `if (last["nStep"])` は「設定キー」ではないので落とす
-    sections = {s for (s, _k) in keys}
+    sections = {path[:-1] for path in keys if len(path) > 1}
     dep_keys = set(load_deprecated())
-    for sk in [(s, k) for (s, k), i in keys.items()
-               if i["type"] == "?" and ((("%s.%s" % (s, k)) if s else k) in sections or k in dep_keys)]:
-        del keys[sk]
+    for path in [pp for pp, i in keys.items()
+                 if i["type"] == "?" and (pp in sections or pp[-1] in dep_keys)]:
+        del keys[path]
 
     # 拾えなかった getValidated* 呼び出し (正規表現の取りこぼし検出)
     for m in re.finditer(r"get(?:Optional)?ValidatedValue\s*<", cpp):
@@ -259,21 +261,38 @@ def config_path(arg):
     return os.path.join(arg, "solverConfig.yaml") if os.path.isdir(arg) else arg
 
 
-def walk(node, section=""):
-    """config を (ドット付き節名, キー, 値) に平坦化。トップレベルのスカラーは節名 ''。"""
+def disp(path):
+    return ".".join(path)
+
+
+def _width(t):
+    """端末での表示幅 (日本語は 2 桁)。列を揃えるため。"""
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in t)
+
+
+def pad(t, n):
+    return t + " " * max(1, n - _width(t))
+
+
+def walk(node, path=()):
+    """config を (パスのタプル, 値, 辞書か) に平坦化。辞書そのものも 1 件として出す
+    (`mesh.bndFirstOrder: {}` のような空の節や、スカラーのキーに辞書を書いた事故を見逃さないため)。"""
     if not isinstance(node, dict):
         return
     for k, v in node.items():
+        p = path + (str(k),)
         if isinstance(v, dict):
-            yield from walk(v, "%s.%s" % (section, k) if section else k)
+            yield (p, v, True)
+            yield from walk(v, p)
         else:
-            yield (section, k, v)
+            yield (p, v, False)
 
 
 def fmt(v):
-    """YAML として読み戻したとき値が変わらない表記にする (引用符・バックスラッシュを含む文字列対策)。"""
+    """表示用。YAML として読み戻したとき値が変わらない表記にする。"""
     import yaml
-    return yaml.safe_dump(v, default_flow_style=True, allow_unicode=True, width=10**6).strip().rstrip("\n").removesuffix("...").strip()
+    t = yaml.safe_dump(v, default_flow_style=True, allow_unicode=True, width=10**6).strip()
+    return t.removesuffix("...").strip()
 
 
 def same_as_default(val, default):
@@ -284,6 +303,54 @@ def same_as_default(val, default):
         return str(val).strip('"') == d.strip('"')
 
 
+def check_config(cfg, keys, dep, show_missing=False):
+    """点検結果を (種別, 表示名, 値, 説明) の列で返す。種別が '非既定'/'未指定' 以外なら要修正。"""
+    out = []
+    sections = {path[:-1] for path in keys if len(path) > 1}
+    have = {p for (p, _v, _d) in walk(cfg)}
+    flagged = set()          # 廃止・型違いの辞書の下は掘らない (同じ誤りを子の数だけ繰り返さない)
+    unknown_sec = set()      # 未知の節の下は「正しい節はここ」と言える子だけ出す
+    for path, val, is_dict in walk(cfg):
+        if any(path[:i] in flagged for i in range(1, len(path))):
+            continue
+        under_unknown = any(path[:i] in unknown_sec for i in range(1, len(path)))
+        name, label = path[-1], disp(path)
+        same_name = sorted({pp[:-1] for pp in keys if pp[-1] == name})
+        if name in dep:
+            out.append(("廃止", label, val, dep[name]))
+            if is_dict:
+                flagged.add(path)
+        elif is_dict:
+            if path in keys:
+                out.append(("型違い", label, val, "スカラーのキーに辞書が書かれている (ソルバは読めない)"))
+                flagged.add(path)
+            elif path not in sections:
+                if not under_unknown:
+                    out.append(("未知", label, val, "ソルバはこの節を読まない (綴り間違い/旧キー/別ツール用)"))
+                unknown_sec.add(path)
+        elif path in keys:
+            info = keys[path]
+            if not info["required"] and not info["default"].startswith("(") \
+                    and not same_as_default(val, info["default"]):
+                out.append(("非既定", label, val, "(既定 %s) %s" % (info["default"], info["desc"][:60])))
+        elif same_name:
+            out.append(("節違い", label, val, "ここでは読まれない。正しい節は %s"
+                        % " / ".join((disp(w + (name,)) if w else "トップレベルの " + name) for w in same_name)))
+        elif not under_unknown:
+            out.append(("未知", label, val, "ソルバは読まない (綴り間違い/旧キー/別ツール用)"))
+    for path, info in sorted(keys.items()):
+        if info["required"] and not info["cond"] and path not in have:
+            out.append(("必須欠落", disp(path), None, "現ソルバでは必須 (無いと起動時エラー)  " + info["desc"][:40]))
+    if show_missing:
+        for path, info in sorted(keys.items()):
+            if path not in have and info["desc"]:
+                out.append(("未指定", disp(path), None, "既定 %-10s %s" % (info["default"], info["desc"][:60])))
+    return out
+
+
+OK_KINDS = ("非既定", "未指定")
+
+
 def cmd_check(a):
     keys, misses = load_keys()
     dep = load_deprecated()
@@ -291,36 +358,14 @@ def cmd_check(a):
     for arg in a.paths:
         p = config_path(arg)
         print("== %s" % os.path.relpath(p, REPO))
-        seen = list(walk(read_yaml(p)))
-        have = {(s, k) for (s, k, _v) in seen}
-        for section, key, val in seen:
-            info = keys.get((section, key))
-            label = "%s.%s" % (section, key) if section else key
-            where = sorted({s2 for (s2, k2) in keys if k2 == key})
-            if key in dep:
-                print("  [廃止]   %-28s = %-12s %s" % (label, fmt(val), dep[key]))
+        for kind, label, val, note in check_config(read_yaml(p), keys, dep, a.missing):
+            shown = "" if val is None else fmt(val)
+            if isinstance(val, dict):
+                shown = "{...}" if val else "{}"
+            print("  %s%s%s%s" % (pad("[%s]" % kind, 12), pad(label, 30),
+                                  pad(("= " + shown) if val is not None else "", 16), note))
+            if kind not in OK_KINDS:
                 bad += 1
-            elif info is not None:
-                if not info["required"] and not info["default"].startswith("(") \
-                        and not same_as_default(val, info["default"]):
-                    print("  [非既定] %-28s = %-12s (既定 %s) %s" % (label, fmt(val), info["default"], info["desc"][:60]))
-            elif where:
-                print("  [節違い] %-28s = %-12s ここでは読まれない。正しい節は %s"
-                      % (label, fmt(val), " / ".join(("%s.%s" % (w, key)) if w else ("トップレベルの " + key) for w in where)))
-                bad += 1
-            else:
-                print("  [未知]   %-28s = %-12s ソルバは読まない (綴り間違い/旧キー/別ツール用)" % (label, fmt(val)))
-                bad += 1
-        for (s2, k2), info in sorted(keys.items()):
-            if info["required"] and not info["cond"] and (s2, k2) not in have:
-                print("  [必須欠落] %-26s 現ソルバでは必須 (無いと起動時エラー)  %s"
-                      % ("%s.%s" % (s2, k2) if s2 else k2, info["desc"][:40]))
-                bad += 1
-        if a.missing:
-            for (s, k), info in sorted(keys.items()):
-                if (s, k) not in have and (s or k) and info["desc"]:
-                    print("  [未指定] %-28s   既定 %-10s %s"
-                          % ("%s.%s" % (s, k) if s else k, info["default"], info["desc"][:60]))
     if misses:
         print("\n警告: 解析できなかった読み出しが %d 件ある (config_doc.py coverage で確認)。点検は不完全。" % len(misses))
         bad += 1
@@ -339,53 +384,70 @@ def wrap_comment(text, ind, width=96):
     return out
 
 
-def annotated_lines(cfg, keys, dep, section="", depth=0):
-    """元の構造と値を保ったまま、各キーの上に説明と既定値のコメントを差し込む。"""
-    out, ind = [], "  " * depth
-    for k, v in cfg.items():
-        path = "%s.%s" % (section, k) if section else k
-        if isinstance(v, dict):
-            out.append("%s%s:" % (ind, k))
-            out.extend(annotated_lines(v, keys, dep, path, depth + 1))
-            if depth == 0:
-                out.append("")
+def _notes_for(path, ind, keys, dep, sections):
+    """1 キーの上に差し込むコメント行。節そのものには何も付けない。"""
+    name = path[-1]
+    if name in dep:
+        return ["%s# [廃止] %s" % (ind, dep[name])]
+    if path in keys:
+        info = keys[path]
+        lines = wrap_comment(info["desc"], ind) if info["desc"] else []
+        return lines + ["%s# 既定 %s  (型 %s)" % (ind, info["default"], info["type"])]
+    if path in sections:
+        return []
+    same_name = sorted({pp[:-1] for pp in keys if pp[-1] == name})
+    if same_name:
+        return ["%s# [節違い] 正しい節は %s" % (ind, " / ".join(disp(w) or "トップレベル" for w in same_name))]
+    return ["%s# [未知] ソルバは読まない" % ind]
+
+
+def annotate_text(src, keys, dep):
+    """**元のテキストを保ったまま**コメント行だけを挿入する。
+
+    値を YAML で読み書きし直すと `species: [N2, NO]` の `NO` が false になる (YAML 1.1 の真偽値)。
+    注釈は「行の上にコメントを足す」だけにして、値の表記には一切触れない。
+    返り値は (出力行, 挿入した行かどうかのフラグ)。
+    """
+    sections = {path[:-1] for path in keys if len(path) > 1}
+    out, added, stack = [], [], []
+    for raw in src.splitlines():
+        m = re.match(r"^(\s*)([A-Za-z_][\w.\-]*)\s*:(\s|$)(.*)$", raw)
+        if m is None or raw.lstrip().startswith("#"):
+            out.append(raw); added.append(False)
             continue
-        info = keys.get((section, k))
-        if k in dep:
-            out.append("%s# [廃止] %s" % (ind, dep[k]))
-        elif info is None:
-            where = sorted({s2 for (s2, k2) in keys if k2 == k})
-            out.append("%s# [%s] %s" % (ind, "節違い" if where else "未知",
-                                        ("正しい節は " + " / ".join(w or "トップレベル" for w in where))
-                                        if where else "ソルバは読まない"))
-        else:
-            out.extend(wrap_comment(info["desc"], ind) if info["desc"] else [])
-            out.append("%s# 既定 %s  (型 %s)" % (ind, info["default"], info["type"]))
-        out.append("%s%s: %s" % (ind, k, fmt(v)))
-    return out
+        ind, name, _sp, rest = m.groups()
+        n = len(ind)
+        while stack and stack[-1][0] >= n:
+            stack.pop()
+        path = tuple(x[1] for x in stack) + (name,)
+        for ln in _notes_for(path, ind, keys, dep, sections):
+            out.append(ln); added.append(True)
+        out.append(raw); added.append(False)
+        if rest.strip() == "":
+            stack.append((n, name))
+    return out, added
 
 
 def cmd_annotate(a):
-    import yaml
     keys, _ = load_keys()
     dep = load_deprecated()
     p = os.path.abspath(config_path(a.path))
-    cfg = read_yaml(p)
+    src = open(p, encoding="utf-8").read()
     dst = os.path.abspath(a.out or os.path.join(os.path.dirname(p), "solverConfig.annotated.yaml"))
     if dst == p or (os.path.exists(dst) and os.path.samefile(dst, p)):
         print("拒否: 出力先が入力と同じファイル (%s)。annotate は写しを作るもので、元 config は書き換えない。" % dst,
               file=sys.stderr)
         return 2
+    lines, added = annotate_text(src, keys, dep)
+    # 挿入したコメント行を取り除くと元テキストに戻ることを確かめる (値・表記を 1 文字も変えていない保証)
+    kept = "\n".join(ln for ln, ad in zip(lines, added) if not ad)
+    if kept.rstrip("\n") != src.rstrip("\n"):
+        print("拒否: 注釈を外したテキストが元 config と一致しない。出力しない。", file=sys.stderr)
+        return 2
     head = ["# solverConfig.yaml の注釈つきの写し (tools/config_doc.py annotate が生成; 実行には使わない)",
             "# 説明と既定値は solver_density_cuda/input/solverConfig.{cpp,hpp} から抽出したもの。",
             "# 元: %s" % os.path.relpath(p, REPO), ""]
-    body = "\n".join(head + annotated_lines(cfg, keys, dep)) + "\n"
-    # 生成物を読み戻して値が変わっていないことを確かめる (引用符・バックスラッシュ・数値表記の事故防止)
-    back = yaml.safe_load(body)
-    if back != cfg:
-        print("拒否: 生成した写しを読み戻すと元の config と一致しない。出力しない。", file=sys.stderr)
-        return 2
-    open(dst, "w", encoding="utf-8").write(body)
+    open(dst, "w", encoding="utf-8").write("\n".join(head + lines) + "\n")
     print("wrote %s" % os.path.relpath(dst, REPO))
     return 0
 
@@ -396,32 +458,32 @@ def cmd_template(a):
     print("# solverConfig.yaml の注釈つき雛形 (tools/config_doc.py template が生成)")
     print("# 全キーを列挙してある。**使うキーだけ残す** こと (既定のままのキーは書かない方が読みやすい)。")
     print("# 廃止キー・使用禁止キーは除いてある。推奨値は procedures/recommended-settings.md が正本 (ここはコード上の既定値)。")
-    live = {(s, k): i for (s, k), i in keys.items() if k not in dep}
-    sections = sorted({s for (s, _k) in live})
+    live = {path: i for path, i in keys.items() if path[-1] not in dep}
+    sections = sorted({path[:-1] for path in live})
     if a.section:
-        sections = [s for s in sections if s == a.section or s.startswith(a.section + ".")]
+        want = tuple(a.section.split("."))
+        sections = [s2 for s2 in sections if s2[:len(want)] == want]
     printed = set()
     for sec in sections:
-        parts = sec.split(".") if sec else []
-        for d in range(len(parts)):
-            head = ".".join(parts[:d + 1])
+        for d in range(len(sec)):
+            head = sec[:d + 1]
             if head not in printed:
-                print("\n%s%s:" % ("  " * d, parts[d]))
+                print("\n%s%s:" % ("  " * d, sec[d]))
                 printed.add(head)
         if not sec:
             print("\n# --- トップレベル ---")
-        ind = "  " * len(parts)
-        for (s2, k), info in sorted(live.items()):
-            if s2 != sec:
+        ind = "  " * len(sec)
+        for path, info in sorted(live.items()):
+            if path[:-1] != sec:
                 continue
             if info["desc"]:
                 for ln in wrap_comment(info["desc"], ind):
                     print(ln)
             if info["default"].startswith("("):
                 val = "REQUIRED" if info["required"] else "SEE_CODE"
-                print("%s%s: %s   # %s (%s) — 値を入れてから使う" % (ind, k, val, info["default"], info["type"]))
+                print("%s%s: %s   # %s (%s) — 値を入れてから使う" % (ind, path[-1], val, info["default"], info["type"]))
             else:
-                print("%s%s: %s" % (ind, k, info["default"]))
+                print("%s%s: %s" % (ind, path[-1], info["default"]))
     return 0
 
 
@@ -429,17 +491,18 @@ def cmd_list(a):
     keys, misses = load_keys()
     print("| セクション | キー | 型 | 既定値 | 説明 |")
     print("| --- | --- | --- | --- | --- |")
-    for (s, k), info in sorted(keys.items()):
-        if a.section and s != a.section:
+    for path, info in sorted(keys.items()):
+        sec = disp(path[:-1])
+        if a.section and sec != a.section:
             continue
-        print("| %s | `%s` | %s | `%s` | %s |" % (s or "(top)", k, info["type"], info["default"], info["desc"]))
+        print("| %s | `%s` | %s | `%s` | %s |" % (sec or "(top)", path[-1], info["type"], info["default"], info["desc"]))
     nd = sum(1 for i in keys.values() if not i["desc"])
     print("\n抽出 %d キー。説明なし %d キー。解析できなかった読み出し %d 件。" % (len(keys), nd, len(misses)))
     if a.missing_desc:
         print("\n説明が無いキー (solverConfig.hpp に行末コメントを足すと出る):")
-        for (s, k), info in sorted(keys.items()):
+        for path, info in sorted(keys.items()):
             if not info["desc"]:
-                print("  %s.%s" % (s, k) if s else "  %s" % k)
+                print("  %s" % disp(path))
     return 1 if misses else 0
 
 
@@ -450,9 +513,67 @@ def cmd_coverage(a):
         print("  input/solverConfig.cpp:%d  %s" % (line, why))
     if a.verbose:
         print("\n読み出し位置 (input/solverConfig.cpp の行):")
-        for (s, k), info in sorted(keys.items()):
-            print("  %-40s %s" % ("%s.%s" % (s, k) if s else k, ",".join(str(x) for x in sorted(set(info["lines"])))))
+        for path, info in sorted(keys.items()):
+            print("  %-40s %s" % (disp(path), ",".join(str(x) for x in sorted(set(info["lines"])))))
     return 1 if misses else 0
+
+
+# 期待値つきの自己試験。過去に実際に壊れた入力をそのまま残してある (codex レビュー 2 回分の指摘)。
+SELFTEST = [
+    ("節違い (同名キーがトップレベルにあっても見逃さない)",
+     "space:\n  convMethod: 1\n  keepDissCoeff: 0.05\n", [("節違い", "space.keepDissCoeff")]),
+    ("未知キー (綴り間違い)",
+     "turbulence:\n  model: \"sst\"\n  kInf: 1.0\n", [("未知", "turbulence.kInf")]),
+    ("配列キーは誤検知しない",
+     "mesh:\n  wallDistExtraPhysIDs: [6]\n", []),
+    ("使用禁止キー (値が空の辞書でも見逃さない)",
+     "mesh:\n  bndFirstOrder: {}\n", [("廃止", "mesh.bndFirstOrder")]),
+    ("ドット入りのキー名を入れ子と同一視しない",
+     "time.deltaT:\n  cfl: 1\n", [("未知", "time.deltaT"), ("節違い", "time.deltaT.cfl")]),
+    ("未知の節の下でも、正しい節が分かる子は出す",
+     "time:\n  implicit:\n    nLoop: 10\n    cfl_pseudo: 0.5\n",
+     [("未知", "time.implicit"), ("節違い", "time.implicit.cfl_pseudo")]),
+    ("スカラーのキーに辞書",
+     "space:\n  limiter: {a: 1}\n", [("型違い", "space.limiter")]),
+]
+
+SELFTEST_TEXT = [
+    ("YAML 真偽値に見える化学種名 (NO) を壊さない",
+     "physProp:\n  species: [\"MIXDRY\", NO]\n  cp: 1039.0\n"),
+    ("空の節を潰さない",
+     "output: {}\nturbulence:\n  model: \"sst\"\n"),
+    ("引用符・バックスラッシュを含む文字列",
+     "mesh:\n  meshFileName: \"a'b\\\\c.h5\"\n"),
+]
+
+
+def cmd_selftest(a):
+    import io, yaml
+    keys, misses = load_keys()
+    dep = load_deprecated()
+    ng = 0
+    for title, text, expect in SELFTEST:
+        got = [(k, lbl) for (k, lbl, _v, _n) in check_config(yaml.safe_load(text), keys, dep)
+               if k not in OK_KINDS and k != "必須欠落"]
+        ok = sorted(got) == sorted(expect)
+        print("%s %s" % ("PASS" if ok else "FAIL", title))
+        if not ok:
+            print("     期待 %s / 実際 %s" % (sorted(expect), sorted(got)))
+            ng += 1
+    for title, text in SELFTEST_TEXT:
+        lines, added = annotate_text(text, keys, dep)
+        kept = "\n".join(ln for ln, ad in zip(lines, added) if not ad)
+        ok = kept.rstrip("\n") == text.rstrip("\n")
+        print("%s %s (注釈を外すと元テキストに戻る)" % ("PASS" if ok else "FAIL", title))
+        if not ok:
+            ng += 1
+    print("%s coverage: 解析できなかった読み出し %d 件" % ("PASS" if not misses else "FAIL", len(misses)))
+    ng += 1 if misses else 0
+    nd = sum(1 for i in keys.values() if not i["desc"])
+    print("%s 説明なし %d キー / 抽出 %d キー" % ("PASS" if nd == 0 else "FAIL", nd, len(keys)))
+    ng += 1 if nd else 0
+    print("\nVERDICT: %s" % ("PASS" if ng == 0 else "FAIL (%d 件)" % ng))
+    return 1 if ng else 0
 
 
 def main():
@@ -463,6 +584,7 @@ def main():
     p = sp.add_parser("template"); p.add_argument("--section"); p.set_defaults(fn=cmd_template)
     p = sp.add_parser("list"); p.add_argument("--section"); p.add_argument("--missing-desc", action="store_true"); p.set_defaults(fn=cmd_list)
     p = sp.add_parser("coverage"); p.add_argument("-v", "--verbose", action="store_true"); p.set_defaults(fn=cmd_coverage)
+    p = sp.add_parser("selftest"); p.set_defaults(fn=cmd_selftest)
     a = ap.parse_args()
     sys.exit(a.fn(a))
 
