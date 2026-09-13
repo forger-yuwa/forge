@@ -323,10 +323,10 @@ __global__ void condensation_source_f_d(
     const float lnS = (pv > 0.0f) ? (logf(pv) - lnpsat) : -1.0e30f;
     diagS[ic]    = (pv > 0.0f) ? expf(lnS) : 0.0f;
     diagTsat[ic] = cond_Tsat_f(tb, pv, (Tsat_prev > 0.0f) ? Tsat_prev : Td);
-    // Feder carrier 形の衝突項 (TP carrier のみ)
+    // Feder carrier 形 (condKantrowitz 2/3) の衝突項 (TP carrier のみ; mode 1 は使わないので評価しない)
     CondNucCarrierF car;
     car.a_v = 1.0f; car.carrierSum = 0.0f; car.cvv_tilde = cpf.cv*cpf.M/COND_RU_F;
-    if (carrier && spf != nullptr && roYall != nullptr && condGasSpecies >= 0 && condGasSpecies < nSpecies) {
+    if (kantrowitz >= 2 && carrier && spf != nullptr && roYall != nullptr && condGasSpecies >= 0 && condGasSpecies < nSpecies) {
         const SpeciesThermoF& sv = spf[condGasSpecies];
         const float Mv = sv.MW;
         car.cvv_tilde = thermo_cp_molar_f(sv, Td)/COND_RU_F - 1.0f;       // (c_p,mass − R_v) M_v/R_u = c_p,molar/R_u − 1

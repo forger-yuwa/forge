@@ -215,7 +215,9 @@ __global__ void dependentVariables_d
             // κ=γ−1 (固定 g,Y の frozen 近似) と TP 出口 BC が読む。g<1e-12 は式順序も従来と同一 (dry セル bit 同一)。
             double sonic2 = gmix * Rmix * Tnew, gam_out = gmix;
             if (condSonicModel == 1 && g_liq > 1.0e-12f) {
-                const double dL   = (cond_latent(cprops, Tnew + 0.1) - cond_latent(cprops, Tnew - 0.1)) / 0.2;
+                double dL;
+                if (useHybrid && condFloat != 0 && condTb.valid && cond_tab_wet_ok(condTb, (float)Tnew)) { float dd; cond_tab_latent_f(condTb, (float)Tnew, &dd); dL = (double)dd; }   // 表の解析微分 (float; c_p,2φ の相対誤差 ≤1e-8)
+                else dL = (cond_latent(cprops, Tnew + 0.1) - cond_latent(cprops, Tnew - 0.1)) / 0.2;
                 const double Reff = carrier ? (Rmix - g_liq*Rw) : ((1.0 - g_liq)*Rmix);
                 double g2, c2;
                 if (cond_twophase_sonic(cpmix, Reff, g_liq, dL, Tnew, &g2, &c2)) { sonic2 = c2; gam_out = g2; }
