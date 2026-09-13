@@ -831,10 +831,20 @@ $$\text{燃焼器出口 starting line} \rightarrow \text{平面最大推力理�
   実目的量 (`C_T_with_shear`) と $C_T,C_L,C_M$ の `STEADY` (正式ツール `check_quasisteady.classify_series`) を**全て**満たしたときだけ
   サロゲート学習と Pareto に入る。発散 run の力係数採用はしない。`force_history.csv` を `check_quasisteady.py --series-csv` で再判定でき、
   既存キャンペーンは `driver_sern --rejudge` で判定し直せる。定常擬似時間の `OSCILLATING` は物理的振動と解釈しない (振動を扱うなら dual-time)。
+- **ガス (R3, 2026-09-13)**: `gas.model: frozen_tp` で排気 = CEA (tp, 燃焼器出口) の平衡組成を**凍結**した NASA-9 擬似種 `EXH`、
+  外気 = 空気 `AIR` の 2 種 thermally-perfect (`thermalMethod: 2`, `thermoHrefTemp: 298.15`)。入口状態 (ρ = p/RT, u = M a(T))・
+  IC の内部エネルギー・理想推力 (`gas/frozen.py` の等エントロピー膨張) を同じ物性で計算し、逆設計 kernel だけ設計点の凍結 γ の CPG
+  (形状パラメータ化)。作動点 YAML は `cea/tmx_operating_points.py` が凍結音速の M_in と組成 (`'NO'` はクォート) を出力する。
+  旧 `cpg` は外気にも排気の (γ, R) を使い外部動圧が −15 % ずれていた (codex C2)。
+- **3D の帳簿 (R2, 2026-09-13)**: メッシャは幅外の機体下面を `vehicle` タグ (W/2 < z ≤ W_vehicle/2) に分け、`forces3d` の $C_T,C_L,C_M$ は
+  ノズル面 (ramp z ≤ W/2 + cowl + 側壁) だけ。機体力は `C_T_vehicle` 等の別枠。`metrics/sern_momentum.py` が BCONDS 全面の運動量収支で
+  帳簿を検算する (閉じ残差 ~1–2 % of $F_{\rm ideal}$ が離散化差の目安)。
 - **粘性**: NS 帰還ループは持たない。設計点の RANS 場から `metrics/deltastar.py` で $\delta^*(x)$ を
   抽出し法線オフセットする**一発補正**のみ。
 - **壁圧規定の位置づけ**: 剥離制約 ($\tau_w$ 符号 / $p_w/p_a$) の判定量と、二段膨張オプション
   (基部の壁圧プラトーで衝撃位置を固定、④延長部と共通機構) に限定。
 - **3D**: 2D パレート数点を側壁・隅 R 付きで 3D RANS 確認。3D MOC の文献値 (推力 +0.45%、揚力 +8%)
   から推力は 2D で決まる前提。乖離時のみ流線追跡 / FFD を別 plan で検討。
+  実測 (Euler, 加速点, case/46 run_0092 vs run_0093): ノズル $C_T$ は 3D −1.9 % (旧 −4.5 % は幅外機体面の混入)、$C_L$ は 3D −0.10 vs 2D 0.00、
+  $C_M$ +0.72 vs 0.00 で揚力・モーメントは 3D 効果が支配的。SST での再判定は plan §5.1 R5 の後。
 - **問題タイプ**: `sern_2d` (📋 — [`design/CAPABILITIES.md`](../../design/CAPABILITIES.md))。

@@ -9,7 +9,9 @@
   D2 側壁: k = k_sw (z = W/2), i < i_sw (後縁 station は共有), 上バンド j (jm < j ≤ NJ−1、ランプ線含む) を内外 2 重。j = jm では内側 = cowl_in 側の
      上コピー、外側 = 中間線の元ノード (cowl_out 兼)。ランプ線を共有すると入口面で 2 種の入口に属する矛盾ノードになる。
 境界面 (quad): inlet_nozzle / inlet_ext / outlet / ramp / top_out / cowl_in / cowl_out / bottom / sym (z=0) /
-              side_far (z = Z_far) / sidewall_in / sidewall_out。
+              side_far (z = Z_far) / sidewall_in / sidewall_out / **vehicle** (幅外の機体下面: x ≤ L_ramp, W/2 < z ≤ W_vehicle/2)。
+  R2 (codex M5, 2026-09-13): `ramp` タグはノズル幅内 (z ≤ W/2) だけにし、幅外の機体下面は `vehicle` に分ける。
+  `W_vehicle` (全幅/H, None = 遠方境界まで) の外は `top_out` (遠方境界の産物で力の帳簿に入れない)。
 hex は gmsh 型 5 (底面 4 点 CCW → 上面 4 点)。座標一致ノードを持つので stage 間 restart は index コピーにすること。
 """
 from __future__ import annotations
@@ -22,7 +24,7 @@ from .mesh2d import _radial_fracs
 from .mesh_sern import _cluster_stations, _tanh_two_sided
 
 PHYS_SERN3D = {"inlet_nozzle": 1, "inlet_ext": 2, "outlet": 3, "ramp": 4, "cowl_in": 5, "cowl_out": 6, "bottom": 7,
-               "top_out": 8, "sym": 9, "side_far": 10, "sidewall_in": 11, "sidewall_out": 12, "fluid": 13}
+               "top_out": 8, "sym": 9, "side_far": 10, "sidewall_in": 11, "sidewall_out": 12, "fluid": 13, "vehicle": 14}
 
 
 @dataclass
@@ -37,6 +39,7 @@ class SernMesh3DParams:
     W: float = 2.0           # ノズル幅 / H (全幅)
     Z_ext: float = 1.5       # 側壁外側の空間 / H
     L_sw: float | None = None  # 側壁の x 範囲 (None → L_cowl)
+    W_vehicle: float | None = None  # 機体の物理幅 / H (全幅)。None = 遠方境界まで機体下面 (旧挙動)。W/2 < z ≤ W_vehicle/2 が vehicle タグ
     L_up: float = 0.5
     x_out_extra: float = 2.0
     bot_depth: float = 3.0
@@ -187,9 +190,16 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
         for k in range(nz - 1):
             sdk = "up_in" if k < k_sw else "up_out"; sdk1 = "up_in" if k + 1 < k_sw or k + 1 == k_sw and k < k_sw else "up_out"
             B["bottom"].append((base(i, 0, k), base(i + 1, 0, k), base(i + 1, 0, k + 1), base(i, 0, k + 1)))
-            xm = 0.5 * (xs[i] + xs[i + 1])
+            xm = 0.5 * (xs[i] + xs[i + 1]); zm = 0.5 * (zs[k] + zs[k + 1])
             top = (node(i, NJ - 1, k, sdk), node(i, NJ - 1, k + 1, sdk1), node(i + 1, NJ - 1, k + 1, sdk1), node(i + 1, NJ - 1, k, sdk))
-            (B["ramp"] if xm <= L_ramp else B["top_out"]).append(top)
+            if xm > L_ramp:
+                B["top_out"].append(top)
+            elif k < k_sw:                       # ノズル幅内 (z ≤ W/2) = ramp
+                B["ramp"].append(top)
+            elif prm.W_vehicle is None or zm <= 0.5 * float(prm.W_vehicle):
+                B["vehicle"].append(top)         # 幅外の機体下面 (R2)
+            else:
+                B["top_out"].append(top)         # 機体幅の外 = 遠方境界の産物
             if i + 1 <= i_te and k + 1 <= k_sw:
                 B["cowl_in"].append((node(i, jm, k, "up_in"), node(i + 1, jm, k, "up_in"), node(i + 1, jm, k + 1, "up_in"), node(i, jm, k + 1, "up_in")))
                 B["cowl_out"].append((base(i, jm, k), base(i, jm, k + 1), base(i + 1, jm, k + 1), base(i + 1, jm, k)))
@@ -208,7 +218,8 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
     coords *= prm.scale
     info = {"ni": ni, "NJ": NJ, "nz": nz, "jm": jm, "k_sw": k_sw, "i_te": i_te, "i_sw": i_sw, "cells": int(hexes.shape[0]),
             "nodes": int(coords.shape[0]), "W": prm.W, "Z_far": float(zs[-1]), "L_sw": L_sw, "cowl_thickness": t_c, "x_out": x_out, "y_bot": y_bot,
-            "L_cowl": L_cowl, "L_ramp": L_ramp, "n_dup_cowl": len(dup1), "n_dup_side": len(dup2)}
+            "L_cowl": L_cowl, "L_ramp": L_ramp, "n_dup_cowl": len(dup1), "n_dup_side": len(dup2),
+            "W_vehicle": prm.W_vehicle, "n_vehicle_faces": len(B["vehicle"])}
     return coords, hexes, B, info, y_mid
 
 

@@ -45,7 +45,12 @@ class Problem:
         if kind == "semiperfect":
             from .gas import GasSemiPerfect
             return GasSemiPerfect(dict(gs["species"]), Tt=float(self.spec["Tt"]))
-        raise ValueError(f"gas.model '{kind}' は未知 (cpg | semiperfect)")
+        if kind == "frozen_tp":
+            # SERN ⑤ R3: 逆設計 (平面 MOC) は設計点 γ の CPG のまま (形状パラメータ化)。CFD・入口状態・正規化は
+            # runner 側で FrozenGas (排気 = CEA 凍結組成, 外気 = 空気) を使う
+            from .gas import GasCPG
+            return GasCPG(self.gamma, self.cp)
+        raise ValueError(f"gas.model '{kind}' は未知 (cpg | semiperfect | frozen_tp)")
 
     # --- 壁の熱境界条件 (2026-09-12, plan tooling-nozzle-isothermal-wall-chain §4.1) ---
     # spec.wall_thermal: {mode: adiabatic} (既定) | {mode: isothermal, Tw: <K>}。
@@ -84,6 +89,11 @@ class Problem:
     @property
     def is_semiperfect(self) -> bool:
         return str(self.raw.get("gas", {}).get("model", "cpg")) == "semiperfect"
+
+    @property
+    def is_frozen_tp(self) -> bool:
+        """SERN ⑤ R3: 排気 = 凍結組成 TP 擬似種 (`gas.exhaust_composition` [モル分率] / 作動点 `gas.composition`)、外気 = 空気。"""
+        return str(self.raw.get("gas", {}).get("model", "cpg")) == "frozen_tp"
 
 
 def load_problem(path) -> Problem:
