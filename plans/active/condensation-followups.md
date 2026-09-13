@@ -53,6 +53,9 @@
 | F-cf1 | node 周期の凝縮モーメント輸送が非保存 (2026-09-13, condensation-float-speedup §5.1 #12b): case/09 `run_0053` (run_0052 + N2 CPG `condEquilibrium 2`, Q0–Q2 はソース 0) で Σ ρQ_n V が 1 step +5.6e-6、20 step +1.1e-3 (融合前後の両バイナリで同値)。処理別収支 (移流 / dual-time 部分反復 / clamp / periodic seam) で原因を切り分ける | 未着手 |
 | F-cf2 | cell 凝縮 run の軸 h0 非保存が 0.1 % 規約を超える (2026-09-13, condensation-float-speedup §5.1 #10): case/34 cell 空気 434 J/kg (1.4e-3 of 3e5), N2 cell 482 J/kg (1.6e-3); node は 129 / 272 J/kg で規約内。基準バイナリ側の既存挙動 (float 化での変化は ≤6 J/kg)。cell の二相面エンタルピー/clamp の収支を確認する | 未着手 |
 | F-cf3 | 凝縮 ON 3D 発達場の A10G 52.3 ms/step (目標 ≤50, dry 33.8) の残り: `condensation_source_f_d` 9.6 ms と `dependentVariables_d` の湿潤セル分 +4.8 ms は warp 分岐 (湿潤 22.5 %) と二相反転の double 研磨が主で、ブロックサイズは効かない。候補: 湿潤セルだけを別起動 (インデックス圧縮) で反転・ソース評価、src_jac の摂動評価 2 回→1 回、`cond_primitive_multi_d` の 2 起動統合 (1.3 ms) | 未着手 |
+| F-cf4 | N2/空気の σ・ρ_l が 45 K で凍結しており、生産域に入っている (2026-09-14, methods/condensation.md §8b 既知の限界 1): case/34 の onset は T=39.7 K。相関を延長すると σ +9 % (39.2 K)、onset 点で J が 1.2e-6 倍 → onset が数 mm 下流へ動く見込み。`condSigmaScale` と同形の opt-in にして onset 感度と同時に測る | 未着手 |
+| F-cf5 | H2O の潜熱が 373.15 K 超で増加する (§8b 既知の限界 2): h_l のクランプで実質 c_p,l=0 となり dL/dT の符号が反転。L(400)=2.320 MJ/kg (真値 2.183)、L(600)=2.711 (本来は T_c=647 K で 0)。凝縮しない温度域だが g>0 のセルが高温へ飛ぶと潜熱が過大。h_l を臨界点まで伸びる相関へ差し替える | 未着手 |
+| F-cf6 | H2O の h_v が二重ソース (§8b 既知の限界 3): EOS は種 DB (定 cp 外挿)、`h2o_latent` は生の多項式。200 K 未満で暗黙の h_l が 150 K で 0.47、120 K で 2.39 kJ/kg ずれる (L の 9e-4)。運転域 200–240 K では実質ゼロ。種 DB 経由に統一するか、差を許容と明記するか決める | 未着手 |
 
 ## 6. 検証
 
