@@ -643,7 +643,9 @@ $$
   SLAU 面エンタルピー ($h_{2\phi}=c_{p,air}T-gL$)・実現可能性 ($g\le Y_w$) の全てで同じ定義を使う。pure ($Y_w=1$, $R_w=R$) は既存 pure 形に一致。
 - 空気の定数は二成分 N2/O2 = 0.79/0.21 mol から: $M$=28.850 g/mol, $R_{air}$=288.19, $c_{p,air}$=1008.7 (γ 1.4), $Y_{N_2}$=0.7671。
 - 空気は CPG のまま (`thermalMethod 0`): NASA-9 は 200 K 未満を線形外挿し温度反転の下限 50 K で Arthur の 27 K を表現できない。CPG pure/carrier の音速は
-  旧式 (全気相 $\sqrt{\gamma p/\rho}$) のまま (二相 frozen 音速の CPG 適用は一般 EOS 固有系への切替と一括で後続)。
+  旧式 $c=\sqrt{\gamma R_{air}T}$ (気相定数 × 二相温度; `dependentVariables_d.cu`) のまま。二相では $\sqrt{\gamma p/\rho}=\sqrt{\gamma R_{eff}T}$ と異なる ($R_{eff}=R_{air}-gR_w$; 二相 frozen 音速の CPG 適用は一般 EOS 固有系への切替と一括で後続)。
+- 温度反転 `cond_T_from_e_cpg` は非有限の $e,g,T_{guess}$・非正の熱容量を反転不能 (ok=false) とし、成功条件にも $T,G$ の有限性を要求する ($e=\pm\infty$ は tol=∞ で「成功」に化けていた; codex 2026-09-13)。失敗セルは原始量・$\rho e$ とも前ステップ値を保持し `[condensation] WARNING: CPG two-phase temperature inversion failed` を出す。
+- SLAU 面エンタルピー `cond_face_h_cpg` の $R_{eff}$ は正で有限ならそのまま使う (旧 1.0 床は受付範囲の枯渇近傍 $R_{eff}<1$ で面温度を EOS と食い違わせた)。非正・非有限は乾き面 ($g_f=0$) に退避。
 - O2/N2 理想溶液の露点線 (O2 濃厚な最初の液滴; Hansen & Nothwang 1952) は Python で組むと 1 atm の露点 82.2 K だが N2 飽和線より 4.5 K 高温側で、
   Daum & Gyarmathy の onset データ (空気 ≈ N2) と合わない → 混合液モデルは後続。
 - `slip` 境界の ghost は内部の熱力学状態 ($T$, $c$, $\rho e$) を保持する (旧 $T=p/(\rho R)$ 再構成は二相と不整合)。

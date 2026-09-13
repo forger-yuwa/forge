@@ -11,6 +11,8 @@
 // =============================================================================
 #include <cstdio>
 #include <cmath>
+#include <limits>
+#include <algorithm>
 #include <vector>
 #include "../../cuda_forge/condensationEOS_d.cuh"
 #include "../../cuda_forge/condensationSource_d.cuh"
@@ -124,6 +126,48 @@ int main() {
         check("pure: pv = total P", pv_pure, P, 1e-14);
         checkb("CPG carrier: P > psat (old rule keeps dust) but pv < psat (new rule removes it)", P > ps && pv_cpg < ps);
         check("g -> Yw: pv -> 0 (clamped, not negative)", cond_clamp_vapor_pressure(rod, Yw*1.01, -1.0, Yw, RN2, T, P), 0.0, 1e-300);
+    }
+    printf("== (i) inversion rejects abnormal inputs (codex 2026-09-13 result-2 M1) ==\n");
+    {
+        const double inf = std::numeric_limits<double>::infinity(), nan = std::numeric_limits<double>::quiet_NaN();
+        struct Case { const char* name; double e, g, Tg; } cases[] = {
+            {"e=+Inf", +inf, 0.1, 40.0}, {"e=-Inf", -inf, 0.1, 40.0}, {"e=NaN", nan, 0.1, 40.0}, {"g=NaN", 1.0e4, nan, 40.0},
+            {"T_guess=NaN", 1.0e4, 0.1, nan}, {"e beyond T=6000 K (unreachable)", (cv_air + 0.1*RN2)*7000.0, 0.1, 40.0},
+            {"e below T=1 K (unreachable)", (cv_air + 0.1*RN2)*0.2 - 0.1*cond_latent(n2n, 1.0), 0.1, 40.0} };
+        int nb = 0;
+        for (const Case& c : cases) {
+            bool ok = true; const double Tr = cond_T_from_e_cpg(c.e, c.g, cv_air, RN2, c.Tg, n2n, &ok);
+            const bool good = (!ok) && std::isfinite(Tr);
+            if (!good) ++nb;
+            printf("      %-36s ok=%d T=%g -> %s\n", c.name, (int)ok, Tr, good ? "rejected" : "ACCEPTED (BUG)");
+        }
+        checkb("all abnormal inputs return ok=false with finite T", nb == 0);
+        bool ok = false; const double T0 = 40.0, e0 = (cv_air + 0.1*RN2)*T0 - 0.1*cond_latent(n2n, T0);
+        check("normal input still converges (ok=true)", cond_T_from_e_cpg(e0, 0.1, cv_air, RN2, 300.0, n2n, &ok), T0, 1e-9); checkb("  ok flag true", ok);
+    }
+    printf("== (j) face enthalpy near depletion (R_eff < 1) is the EOS state, no floor (codex 2026-09-13 result-2 M3) ==\n");
+    {
+        // 受付条件 (R_air − Y_w R_w > 0) だけを満たす Y_w=g=0.999 (R_eff=0.26): 面温度は EOS 温度に一致し h_f = e + p/ρ + ek。
+        // 気相定数 2 組: 空気 (R 288.19; Y_w≤0.97 まで受付) と codex の反例 (γ 1.4, cp 1038.67 → R_gas=R_N2: Y_w=g=0.999 で R_eff=0.297)
+        int nb = 0, nlow = 0; double worst = 0.0, reff_min = 1e300;
+        for (int k = 0; k < 2; ++k) {
+            const double Rg = (k == 0) ? R_air : RN2, cpg = 3.5*Rg, cvg = 2.5*Rg;
+            for (double Ywx : {0.7671, 0.95, 0.99, 0.999}) for (double f : {0.9, 0.999, 1.0}) for (double T : {30.0, 40.0, 60.0}) {
+                const double g = f*Ywx, Reff = Rg - g*RN2; if (!(Reff > 0.0)) continue;   // 受付条件 R_gas − Y_w R_w > 0 の範囲だけ
+                reff_min = std::min(reff_min, Reff); if (Reff < 1.0) ++nlow;
+                const double rho = 1.0, P = rho*Reff*T, e = (cvg + g*RN2)*T - g*cond_latent(n2n, T);
+                const double h = cond_face_h_cpg(n2n, cpg, Rg, RN2, g, P, rho, 0.0), href = e + P/rho;
+                const double d = std::fabs(h - href)/std::fabs(href); worst = std::max(worst, d);
+                if (d > 1e-12) { ++nb; printf("      FAIL Rgas=%.2f Yw=%.4f g=%.5f T=%.0f Reff=%.4f h=%.4f href=%.4f\n", Rg, Ywx, g, T, Reff, h, href); }
+            }
+        }
+        printf("      worst rel |h_f - (e+p/rho)| = %.2e over accepted states; min R_eff hit = %.4f (%d states with R_eff < 1)\n", worst, reff_min, nlow);
+        checkb("sweep reaches R_eff < 1 (old floor would have altered these)", nlow > 0);
+        checkb("h_f == e + p/rho for all accepted states incl. R_eff < 1", nb == 0);
+        // 異常 (g_f > Y_w → R_eff <= 0, または非有限): 乾き面へ退避して有限
+        const double hbad = cond_face_h_cpg(n2n, cp_air, R_air, RN2, 1.2, 800.0, 0.1, 0.0);
+        checkb("R_eff <= 0 falls back to the dry face (finite, = cp T_dry)", std::isfinite(hbad) && std::fabs(hbad - cp_air*(800.0/(0.1*R_air))) < 1e-9*hbad);
+        checkb("non-finite g_f falls back to the dry face", std::isfinite(cond_face_h_cpg(n2n, cp_air, R_air, RN2, std::numeric_limits<double>::quiet_NaN(), 800.0, 0.1, 0.0)));
     }
     printf("%s (%d failures)\n", nfail ? "FAILED" : "ALL PASS", nfail); return nfail ? 1 : 0;
 }

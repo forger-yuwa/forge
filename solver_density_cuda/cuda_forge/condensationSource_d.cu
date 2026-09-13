@@ -13,23 +13,7 @@ inline bool condensationEnabled(const solverConfig& cfg)
     return cfg.condensation == 1 && cfg.nCondSpecies >= 1;
 }
 
-// 凝縮種の蒸気分圧 p_v と蒸気密度 rho_v を返す。
-//   pure-condensible (carrier=0, N2 Arthur): 気相=凝縮種。p_v=P(気相圧)、rho_v=(1-g)ρ。
-//   carrier+condensible (carrier=1, H2O in N2): p_v=ρ(Y_w-g)R_w T、rho_v=ρ(Y_w-g)。
-__host__ __device__ inline void cond_vapor_state(
-    int carrier, double rod, double Pd, double Td, double g, double Yw, double Rw,
-    double* pv, double* rho_v)
-{
-    if (carrier) {
-        double yv = Yw - g; if (yv < 0.0) yv = 0.0;
-        *rho_v = rod*yv;
-        *pv    = rod*yv*Rw*Td;
-    } else {
-        double omg = 1.0 - g; if (omg < 0.0) omg = 0.0;
-        *rho_v = rod*omg;
-        *pv    = Pd;
-    }
-}
+// cond_vapor_state は condensationSource_d.cuh へ移動 (単体試験 test_cond_kantrowitz_carrier (b3) が kernel と同じ蒸気状態再評価を呼ぶため)。
 
 // cond_equilibrium_delta (緩和形平衡の Δ) は condensationEOS_d.cuh へ移動 (EOS 拘束形と単体テストで共用)。
 

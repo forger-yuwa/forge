@@ -58,8 +58,9 @@ Sres = np.array(V["condS_0"], dtype=float); relS = np.abs(S[m] - Sres[m])/np.max
 print(f"mode={mode}  S>1 cells={int(m.sum())}  theta_res range [{thr[m].min() if m.any() else 0:.3g}, {thr[m].max() if m.any() else 0:.3g}]  max rel |theta_host-theta_res| (theta>0.1) = {rel.max():.2e}, max abs = {absd:.2e}  (S recon rel {relS.max():.1e})")
 if lim is not None and ms.any():
     nuc = ms & (g < 1e-4); print(f"condLim_0: min over S>1 = {lim[ms].min():.3f}; over nucleation zone (S>1, g<1e-4) min={lim[nuc].min() if nuc.any() else float('nan'):.3f} mean={lim[nuc].mean() if nuc.any() else float('nan'):.3f}; cells with lim<0.9: {int((lim[ms] < 0.9).sum())}")
-# 許容: 相対 1e-5 (θ>0.1), 絶対 1e-4 (float 保存の丸め; 定数を合わせれば host と ~6e-8 で一致する)。非有限・coverage 欠落は FAIL。
-# mode 2/3 の θ は ln S (float 保存の ρ,T,Y,g から再構成した S) に依存するので、許容は S 再構成誤差の 5 倍と 1e-5 の大きい方 (mode 1 は 1e-5 で 6e-8 一致)。
+# 許容 (plan §6 5 と同一): 相対 (θ>0.1) は mode 1 で 1e-5 (定数を合わせれば host と ~6e-8 で一致)、mode 2/3 では max(1e-5, 5×S 再構成誤差);
+#   mode 2 の θ は ln S に依らないが a_v・種別和が float 保存の Y, g (Y_v=Y_w−g の桁落ち) に依存し、同じ保存量から作る S の再構成誤差をその代理指標にする。
+#   絶対 1e-3 (float 保存の丸め)。非有限・coverage 欠落は FAIL。
 tol_rel = max(1e-5, 5.0*float(relS.max())) if mode >= 2 else 1e-5
 print(f"tolerance: rel {tol_rel:.1e} (mode {mode}; S recon rel {relS.max():.1e}), abs 1e-3")
 ok = bool(np.all(np.isfinite(th)) and np.all(np.isfinite(thr)) and rel.max() < tol_rel and absd < 1e-3 and cover_ok)

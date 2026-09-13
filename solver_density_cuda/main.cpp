@@ -983,6 +983,10 @@ cudaConfig initializeSimulation(
         if (cfg.condensation == 1) {
             cout << "[condensation] condSonicModel=" << resolved << " (" << reason << ")\n";
             if (!warn.empty()) cout << "[condensation] WARNING: " << warn << "\n";
+            // 読込後の実効値 (省略時既定の確認用; codex 2026-09-13 carrier result M3): condKantrowitz 0=補正なし/1=Kantrowitz/2,3=Feder carrier
+            cout << "[condensation] condKantrowitz=" << cfg.condKantrowitz << " condKantrowitzGammaMode=" << cfg.condKantrowitzGammaMode
+                 << " condSigmaScale=" << cfg.condSigmaScale << " condVaporMassFraction=" << cfg.condVaporMassFraction
+                 << " condN2LatentLowT=" << cfg.condN2LatentLowT << " condN2PsatLowT=" << cfg.condN2PsatLowT << " condN2LiquidCp=" << cfg.condN2LiquidCp << "\n";
         }
         cfg.condSonicModel = resolved;
         // CPG carrier 形 (空気の N2 選択凝縮) の境界受付範囲 (plans/active/condensation-air.md §4.1; codex 2026-09-13 M3):

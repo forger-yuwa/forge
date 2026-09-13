@@ -72,7 +72,10 @@ __host__ __device__ inline double cond_T_from_e_carrier(
 __host__ __device__ inline double cond_face_h_cpg(const CondSpeciesProps& cp, double cp_gas, double R_gas, double R_w,
                                                   double g_f, double p_f, double rho_f, double ek)
 {
-    double Reff = R_gas - g_f*R_w; if (Reff < 1.0) Reff = 1.0;
+    // R_eff は正で有限ならそのまま使う (受付条件 R_air−Y_w R_w>0 の範囲では常に正; 旧 1.0 床は枯渇近傍 R_eff<1 で面温度を EOS と食い違わせた,
+    // codex 2026-09-13 result-2 M3)。非正・非有限 (g_f が Y_w を超えた異常値) は乾き面 (g_f=0, R_gas) に退避する。
+    double Reff = R_gas - g_f*R_w;
+    if (!(Reff > 0.0) || !isfinite(Reff)) { Reff = R_gas; g_f = 0.0; }
     const double Tf = p_f/(rho_f*Reff);
     return cp_gas*Tf - g_f*cond_latent(cp, Tf) + ek;
 }
@@ -98,6 +101,11 @@ __host__ __device__ inline double cond_T_from_e_cpg(
     const CondSpeciesProps& cprops, bool* ok = nullptr)
 {
     const double a = cv + g_tot*R;   // 実効熱容量 (T に対し一定)
+    // 非有限入力 (e=±Inf/NaN, g NaN) と非正の熱容量は反転不能として即 ok=false (codex 2026-09-13 result-2 M1: ±Inf は tol=Inf で「成功」に化けていた)。
+    if (!isfinite(e_in) || !isfinite(g_tot) || !isfinite(T_guess) || !(a > 0.0)) {
+        if (ok) *ok = false;
+        return (isfinite(T_guess) && T_guess > 1.0) ? T_guess : 1.0;
+    }
     const double tol = 1.0e-9*fabs(e_in) + 0.05;   // [J/kg] (Newton は 2 次収束なので厳しくしてもコストは増えない)
     double lo = 1.0, hi = 6000.0;
     double Glo = a*lo - g_tot*cond_latent(cprops, lo) - e_in;
@@ -111,7 +119,7 @@ __host__ __device__ inline double cond_T_from_e_cpg(
     for (int it = 0; it < 80; ++it) {
         const double L  = cond_latent(cprops, T);
         G = a*T - g_tot*L - e_in;
-        if (fabs(G) <= tol) { if (ok) *ok = true; return T; }
+        if (fabs(G) <= tol && isfinite(T) && isfinite(G)) { if (ok) *ok = true; return T; }
         if (bracketed) { if (G < 0.0) lo = T; else hi = T; }
         const double dL = (cond_latent(cprops, T + 0.1) - cond_latent(cprops, T - 0.1)) / 0.2;
         const double Gp = a - g_tot*dL;
@@ -126,7 +134,7 @@ __host__ __device__ inline double cond_T_from_e_cpg(
         T = Tn;
     }
     G = a*T - g_tot*cond_latent(cprops, T) - e_in;
-    if (ok) *ok = (fabs(G) <= 10.0*tol);
+    if (ok) *ok = (fabs(G) <= 10.0*tol) && isfinite(T) && isfinite(G);
     return T;
 }
 

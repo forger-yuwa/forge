@@ -105,6 +105,24 @@ __host__ __device__ inline void cond_nucleation(
 //   潜熱解放 L·j(T_d) = 気相への熱伝導 h·(T_d−T_g),  j=α(p_v−p_d(T_d))/√(2πR T_g)
 //   p_d(T_d)=p_sat(T_d)·exp(2σ/(ρ_l R T_d r)),  h=λ_g/(r(1+3.18Kn))。
 // Gyarmathy(growthModel=1, 熱伝導律速)は元来 T_d≈T_s を内包するため twoTemp は適用しない。
+// 凝縮種の蒸気分圧 p_v と蒸気密度 rho_v を返す。
+//   pure-condensible (carrier=0, N2 Arthur): 気相=凝縮種。p_v=P(気相圧)、rho_v=(1-g)ρ。
+//   carrier+condensible (carrier=1, H2O in N2): p_v=ρ(Y_w-g)R_w T、rho_v=ρ(Y_w-g)。
+__host__ __device__ inline void cond_vapor_state(
+    int carrier, double rod, double Pd, double Td, double g, double Yw, double Rw,
+    double* pv, double* rho_v)
+{
+    if (carrier) {
+        double yv = Yw - g; if (yv < 0.0) yv = 0.0;
+        *rho_v = rod*yv;
+        *pv    = rod*yv*Rw*Td;
+    } else {
+        double omg = 1.0 - g; if (omg < 0.0) omg = 0.0;
+        *rho_v = rod*omg;
+        *pv    = Pd;
+    }
+}
+
 __host__ __device__ inline double cond_growth(
     const CondSpeciesProps& cp, double T, double p_v, double r_bar, double rstar,
     int growthModel = 0, double p_gas = -1.0, double gyarC = 3.18, int twoTemp = 0)

@@ -117,6 +117,47 @@ int main() {
         check("pure N2 mode 1 (Kantrowitz, gamma 1.4) ~ mode 2 within 3 %", cond_kantrowitz_theta(n2, Tn, 3.0, 1, 1.4, &pn), cond_kantrowitz_theta(n2, Tn, 3.0, 2, 1.4, &pn), 3e-2);
         cudaFree(dsp); cudaFree(dro); cudaFree(dY0); cudaFree(dY1); cudaFree(dptr); cudaFree(dout);
     }
+    printf("== (b3) source vector with non-zero moments + kernel-mirrored jacobian (codex 2026-09-13 result M3) ==\n");
+    {
+        // 状態: Wysłouzil 230 K, ln S 3.4, TP carrier (N2 98.9 %), 液相あり (g=2e-3, Q0/Q1/Q2 は r̄=20 nm の単分散相当)
+        const double T = 230.0, lnS = 3.4, Y[2] = {0.98905, 0.01095}, Yw = Y[1], g = 2.0e-3, rho = 0.05;
+        const double psat = cond_psat(h2o, T), pv0 = std::exp(lnS)*psat, P = pv0/(Yw - g)*1.0;   // p_v = ρ(Y_w−g)R_w T ⇔ 全圧 P から逆算 (下で cond_vapor_state に渡す)
+        const double Rw = h2o.R; const double rod = pv0/((Yw - g)*Rw*T);   // ρ を p_v 整合に取る
+        const double rbar = 20.0e-9, rho_l = cond_rho_cond(h2o, T);
+        const double q0 = g/((4.0/3.0)*COND_PI*rho_l*rbar*rbar*rbar), q1 = q0*rbar, q2 = q0*rbar*rbar;   // [1/kg, m/kg, m²/kg]
+        const CondNucCarrier car = build_car(sp, 2, 1, Y, g, T);
+        double pv, rv; cond_vapor_state(1, rod, P, T, g, Yw, Rw, &pv, &rv);
+        check("cond_vapor_state (carrier) p_v == rho (Yw-g) Rw T", pv, rod*(Yw - g)*Rw*T, 1e-12);
+        // (1) 非零モーメントの Sg/SQ1/SQ2 が核生成 + 成長の合成に一致 (kernel の式をそのまま)
+        double J, rs; cond_nucleation(h2o, T, pv, rv, &J, &rs, 3, gv, &car);
+        const double drdt = cond_growth(h2o, T, pv, q1/q0, rs, 0, 1.0e4, 3.18, 0), rn = COND_RNUC_FAC*rs;
+        double S0, S1, S2, Sg; cond_source_vector(h2o, T, pv, rv, q0, q1, q2, &S0, &S1, &S2, &Sg, 3, 0, gv, 1.0e4, 3.18, 0, &car);
+        checkb("growth active (drdt > 0, r_bar > r*)", drdt > 0.0 && q1/q0 > rs);
+        check("SQ0 = J", S0, J, 1e-12); check("SQ1 = J r_nuc + q0 drdt", S1, J*rn + q0*drdt, 1e-12);
+        check("SQ2 = J r_nuc^2 + 2 q1 drdt", S2, J*rn*rn + 2.0*q1*drdt, 1e-12);
+        check("Sg = 4/3 pi rho_l (J r_nuc^3 + 3 q2 drdt)", Sg, (4.0/3.0)*COND_PI*rho_l*(J*rn*rn*rn + 3.0*q2*drdt), 1e-12);
+        checkb("growth term dominates Sg at these moments (test is not degenerate to J only)", 3.0*q2*drdt > 10.0*J*rn*rn*rn);
+        // (2) kernel の src_jac ブロックと同じ手順: T+dT で蒸気状態を再評価して前進差分 dSg/dT → 中心差分と 1 % 以内、符号は負 (潜熱自己抑制)
+        const double dTp = 0.1; double pvp, rvp, pvm, rvm, a0,a1,a2,ag, m0,m1,m2,mg;
+        cond_vapor_state(1, rod, P, T + dTp, g, Yw, Rw, &pvp, &rvp); cond_source_vector(h2o, T + dTp, pvp, rvp, q0, q1, q2, &a0,&a1,&a2,&ag, 3, 0, gv, 1.0e4, 3.18, 0, &car);
+        cond_vapor_state(1, rod, P, T - dTp, g, Yw, Rw, &pvm, &rvm); cond_source_vector(h2o, T - dTp, pvm, rvm, q0, q1, q2, &m0,&m1,&m2,&mg, 3, 0, gv, 1.0e4, 3.18, 0, &car);
+        check("vapor state re-evaluated: p_v(T+dT) = rho (Yw-g) Rw (T+dT)", pvp, rod*(Yw - g)*Rw*(T + dTp), 1e-12);
+        const double dSg_fwd = (ag - Sg)/dTp, dSg_ctr = (ag - mg)/(2.0*dTp);
+        printf("      dSg/dT forward %.4e, central %.4e (1/(m3 s K)); Sg=%.4e\n", dSg_fwd, dSg_ctr, Sg);
+        checkb("dSg/dT < 0 (latent-heat self-limitation has the right sign)", dSg_fwd < 0.0);
+        check("forward vs central difference of Sg(T) within 2 %", dSg_fwd, dSg_ctr, 2e-2);
+        const double cvg = 718.0, L = cond_latent(h2o, T), dTdrog = (L - Rw*T)/(rod*cvg), sjg = -dSg_fwd*dTdrog;
+        checkb("sj_g = -dSg/dT dT/d(rho g) > 0 (diagonal damping, theta=1)", sjg > 0.0 && std::isfinite(sjg));
+        // (3) Q1 摂動 (kernel: dq1=0.01 q1, 他固定) → d(SQ1)/dq1 = q0 d(drdt)/dr̄ / q0 = d(drdt)/dr̄ の前進差分と一致、sj_Q1 = −(b1−SQ1)/dq1
+        const double dq1 = 0.01*q1; double b0,b1,b2,bg; cond_source_vector(h2o, T, pv, rv, q0, q1 + dq1, q2, &b0,&b1,&b2,&bg, 3, 0, gv, 1.0e4, 3.18, 0, &car);
+        const double drdt_p = cond_growth(h2o, T, pv, (q1 + dq1)/q0, rs, 0, 1.0e4, 3.18, 0);
+        check("SQ1 perturbation = q0 (drdt(r_bar+dr) - drdt(r_bar))", b1 - S1, q0*(drdt_p - drdt), 1e-10);
+        check("SQ0 unchanged by Q1 perturbation (J independent of moments)", b0, S0, 1e-15);
+        const double sjq1 = -(b1 - S1)/dq1; printf("      d(SQ1)/dq1 = %.4e (1/s), sj_Q1 = %.4e\n", (b1 - S1)/dq1, sjq1);
+        checkb("Q1 branch reached (q0>0) and sj_Q1 finite", std::isfinite(sjq1));
+        // Kelvin 効果で r̄ 増 → 成長率増 (1−r*/r̄ 因子) なので d(SQ1)/dq1 > 0 → kernel は sj_Q1<0 を 0 にクランプ (陰的減衰は入れない)。この符号を記録
+        printf("      note: d(drdt)/dr_bar %s 0 -> kernel sj_Q1 = %s\n", (drdt_p > drdt) ? ">" : "<=", (sjq1 < 0.0) ? "0 (clamped)" : "positive");
+    }
     printf("== (c) sweep ==\n");
     { int bad = 0, ntot = 0; double qmin = 1e300, tmax = 0;
       for (double T : {200.0, 215.0, 230.0, 245.0, 260.0}) for (double lnS : {2.0, 3.0, 4.0, 5.0, 6.0}) for (double Yw : {0.005, 0.011, 0.02, 0.05}) for (double f : {0.0, 0.5, 0.9, 0.99}) {

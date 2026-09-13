@@ -119,8 +119,10 @@ Tolman 補正を今回入れないのは、対象温度・臨界核サイズで�
 | --- | --- | --- |
 | 1 | ~~codex plan レビュー~~ | 決着 (2026-09-12, §6.1): GO-with-changes M6/m3 全件採用 |
 | 2 | ~~実装 (§5 1–5)~~ | 決着 (2026-09-12, §9): 実装・単体 ALL PASS |
-| 3 | Wysłouzil run (§6) | node 5 run (mode 0/1/2/3, σ 1.03) + 凝縮 OFF + cell 対照 完了 (§9)。σ 0.97 (run_0354) は 48000 step で未収束 (rms_roe 1.2 桁 plateau, h0 drift) → **96000 step・cfl_pseudo 1.0 に延長した結果 (2026-09-13)**: 残差は plateau のまま (`check_convergence` NOT CONVERGED; ro 2.1 / roUx 2.0 / roe 1.1 桁)、報告量は 60000–96000 の窓で onset 振幅 4e-5 mm・壁偏差 1e-3 %pt・g_exit 3e-8 と頭打ち、`--series` は **h0err のみ OSCILLATING (振幅 0.03 kJ/kg ≈ 1e-4 h0)** → リミットサイクル準定常として onset 12.09 mm を報告 (平均±振幅は報告量では 0)。cfl 低減は plateau を解消しない (codex result M3 の残作業はここで閉じる) |
-| 3b | ~~単体試験の拡充 (codex result M4)~~ | 決着 (2026-09-13): `test_cond_kantrowitz_carrier.cu` (b2) に float 保存量→device 種別和 (host と 1e-6, θ への丸め影響 6e-8)、本体と `cond_source_vector` (T 摂動含む) の J 一致、car 渡し忘れの検出、pure N2 の Feder 純蒸気形を追加。キー省略時の既定 (0 / 1.0) は `solverConfig` の in-class 既定値で保証 (yaml 依存のため単体では読まず、run_0356 dry の起動ログで確認) |
+| 3 | Wysłouzil run (§6) | node 5 run (mode 0/1/2/3, σ 1.03) + 凝縮 OFF + cell 対照 完了 (§9)。**σ 0.97 (run_0354) は合否基準 3 (PASS+STEADY) 未達のまま**: 96000 step・cfl_pseudo 1.0 に延長しても残差 plateau (`check_convergence` NOT CONVERGED; ro 2.1 / roUx 2.0 / roe 1.1 桁)、報告量 (onset 12.0888 mm 半範囲 2e-5 mm, 壁偏差@21 21.171 % 半範囲 3e-4 %pt, g_exit) は 60000–96000 の 4 保存場で頭打ちだが、中心線 h0 偏差は 1.1833/1.2063/1.1961/1.2135 kJ/kg (平均 1.200, 半範囲 0.015, 上昇傾向) で `--series` OSCILLATING、疎な 4 点ではリミットサイクルとも drift とも断定できない → **「未収束の準定常参考結果」として報告し、収束済み感度とは扱わない** (codex result ② M2)。エネルギー変動の解明は後続 #7 |
+| 3b | ~~単体試験の拡充 (codex result M4)~~ | 決着 (2026-09-13): `test_cond_kantrowitz_carrier.cu` (b2) に float 保存量→device 種別和 (host と 1e-6, θ への丸め影響 6e-8)、本体と `cond_source_vector` (T 摂動含む) の J 一致、car 渡し忘れの検出、pure N2 の Feder 純蒸気形を追加。キー省略時の既定 (0 / 1.0) は `solverConfig` の in-class 既定値で保証 (yaml 依存のため単体では読まず、run_0356 dry の起動ログで確認); (b3) 非零モーメント・差分係数は 3d |
+| 3d | ~~ソース・差分係数の検査 (codex result ② M3)~~ | 決着 (2026-09-13): `test_cond_kantrowitz_carrier.cu` (b3) — 非零モーメント (g 2e-3, r̄ 20 nm 単分散) で `cond_source_vector` の SQ0/SQ1/SQ2/Sg が核生成+成長の合成式と 1e-12、成長項が Sg を支配 (J 項の 10 倍超)、kernel と同じ `cond_vapor_state` 再評価つき T 摂動で dSg/dT<0 (前進 vs 中心差分 1.1 %)、sj_g>0、Q1 摂動 (dq1=0.01 q1) で d(SQ1)/dq1 = q0 Δ(dr/dt) (1.8e-13)、`cond_vapor_state` を header へ移動。読込試験: case/34 `run_0034_cfg_default_check` (凝縮有効・両キー省略) の起動ログ `condKantrowitz=0 condKantrowitzGammaMode=0` (main.cpp に実効値出力を追加) |
+| 7 | (後続) σ 0.97 系の h0 変動 | run_0354 の中心線 h0 偏差 (平均 1.200 ± 0.015 kJ/kg, 4 点で上昇傾向) が限界サイクルか drift かを保存間隔を密にして判定; `check_quasisteady.py` に h0err を統合。σ 0.97 の感度値はこれが決着するまで参考値 |
 | 3c | 記述の訂正 (codex result M1/m1/m2) | 「CNT の J 過大の露出」を撤回 (Wölk–Strey 補正 $\exp(-27.56+6500/T)$ は 230 K で ×2.0、213.8 K で ×17 = 低温で CNT を**増幅**する側)、8 mm は**モデル間差**、cell 場差は床の 2.4–3.0 倍で FAIL、methods/index.md の凝縮フェーズ表記 |
 | 4 | codex result レビュー | → `status: done` |
 | 5 | (後続) 分圧スイープ | 0.5 / 0.26 kPa の dry node 場を作ってから mode 1/2/3 の分圧応答 |
@@ -147,7 +149,7 @@ Tolman 補正を今回入れないのは、対象温度・臨界核サイズで�
   2. 回帰: `run_0350` (mode 1, σ 1.0) が main 側 run_0335 と `diff_res.py --tolfile noise_node_48000.json --factor 2` で PASS; `run_0356` 凝縮 OFF が新旧バイナリで反復ノイズ以内。
   3. 全 node run NaN 0、`check_convergence.py` PASS (凝縮列込み)、`compare_condfix.py --series` STEADY (未達なら延長、届かなければ「未収束」と明記)。cell は非ゲート。
   4. 核生成域で `condLim_<s>` (律速係数) が 1 に近い (律速が結果を支配していない)。支配していれば cfl を下げた対照を追加。
-  5. 実 CUDA 照合: run の `condTheta_<s>` を res の (T, P, ρ, Y, g) から host 式で再計算し一致 (≤1e-5)。
+  5. 実 CUDA 照合 (`verify_theta.py RUN RES`): res の float 保存量 (T, P, ρ, Y, g) から host 式で θ を再構成し `condTheta_<s>` と比較。**許容** (codex result ② m4 で統一): 相対 (θ>0.1) は mode 1 で 1e-5、mode 2/3 では max(1e-5, 5×S 再構成誤差) — mode 2 の θ は ln S に依らないが a_v・種別和が float 保存の Y, g (Y_v=Y_w−g の桁落ち) に依存し、S 再構成誤差はその代理指標 (同じ量から作る) — 絶対 1e-3 (float 保存の丸め)。run 別の実測は §9 に記録。
   6. メッシュ品質 `MESH_QUALITY.txt` PASS (継承)、IC は同一メッシュ index コピー、`check_quasisteady.py pmax,machmax` も併記。
 - **観測項目 (合否にしない)**: 結合 run の onset [mm] とその序列、壁 p/p₀ の実験偏差 (平均・21/42/52 mm)、$g_{exit}$、σ ±3 % の onset 移動 (符号・量)、cell/node の一致。
 
@@ -155,6 +157,7 @@ Tolman 補正を今回入れないのは、対象温度・臨界核サイズで�
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result | `2026-09-13` | 2 回目 [`notes/reviews/2026-09-13-condensation-kantrowitz-carrier-result.md`](../../notes/reviews/2026-09-13-condensation-kantrowitz-carrier-result.md) | GO-with-changes, C0/M3/m1 | **全件採用** (2026-09-13, §9)。M1 (推奨設定の既定値 1 は誤り、8.2 mm は実験差ではない、診断名) → `procedures/recommended-settings.md` を省略時既定 0・Wysłouzil 参照は 1 明示・モデル間差・`condTheta_0`/`condLim_0` に訂正。M2 (σ 0.97 の完了扱い) → §5.1 #3 を「合否基準未達の準定常参考結果」に戻し、h0 偏差は平均 1.200 ± 0.015 kJ/kg (半範囲) で記載、`compare_kantrowitz_carrier.txt` を run_0354 res_96000 で再生成、エネルギー変動は #7 へ。受理範囲は補正式の実装・検証に限定 (§8)。M3 (差分係数の検査未達・読込試験の証拠なし) → (b3) 非零モーメント + 蒸気状態再評価の試験と run_0034 の起動ログ (3d)。m4 (`verify_theta` の許容記述) → §6 5 を統一し run 別実測を §9 に記録、スクリプトのコメントを実判定 (絶対 1e-3) に合わせた |
 | result | `2026-09-12` | 1 回目 [`notes/reviews/2026-09-12-condensation-kantrowitz-carrier-result.md`](../../notes/reviews/2026-09-12-condensation-kantrowitz-carrier-result.md) | NO-GO, C0/M4/m2 | **全件採用**。M1 (J 過大の解釈は Wölk–Strey の温度依存の逆読み・8 mm はモデル間差) → §9/§10/methods/README を撤回・訂正、J 較正の必須化を取り下げ、dr/dt との縮退を #5b に。M2 (`verify_theta` の気体定数 461.5 vs Ru/M、θ>0 側だけ比較) → 定数を合わせ (mode 1 一致 6e-8)、期待側 coverage、許容を明文化 (mode 1 1e-5, mode 2/3 は S 再構成誤差 ×5)。M3 (σ 0.97 未収束を完了扱い) → #3 に戻し延長/cfl 低減、確定値から除外。M4 (単体の範囲超過) → #3b。m1 (cell 1.2 倍は過小報告) → 2.4–3.0 倍 FAIL に訂正。m2 (旧記述の残存) → §2/§3 と methods/index.md を統一 |
 | plan | `2026-09-12` | [`notes/reviews/2026-09-12-condensation-kantrowitz-carrier-plan.md`](../../notes/reviews/2026-09-12-condensation-kantrowitz-carrier-plan.md) | GO-with-changes, C0/M6/m3 | **全件採用**。M1 (混合 cp からの引き算は純蒸気極限で破綻) → 種 DB から種別和、$a_v$ 形で Yv→0 有限 (§4.1)。M2 (src_jac 経路) → `cond_source_vector` と全呼び出しに同一モデル、T 凍結 (§4.1, §5)。M3 (Vinš 2020 の誤読・Tolman 引用) → methods/ノート訂正、Tolman 見送りの根拠を「検証不足」に (§4.2)。M4 (onset 序列) → 局所 J 序列を合否、結合 onset は観測 (§6)。M5 (σ 感度の基準) → mode 3 基準 (§6)。M6 (検証不足) → 掃引・CUDA 照合・cell・凝縮 OFF・律速診断・品質/IC/定常 (§5, §6)。m1 (mode の位置づけ, q<0) → §1/§4.1。m2 (既定 0) → §1。m3 (1 nm=139 分子, 障壁 +17–23 kT) → ノート §2 訂正 |
 
@@ -169,19 +172,21 @@ Tolman 補正を今回入れないのは、対象温度・臨界核サイズで�
 - [x] 実装・単体・run (§6; 2026-09-12)
 - [ ] codex レビュー plan / result
 - [ ] `status: done`、accepted へ移動、README 同期
+- **受理範囲** (codex result ② M2): 本 plan が accepted にするのは Feder carrier 形の実装 (`condKantrowitz 2/3`, 種別和, src_jac 伝播, σ 倍率) と Wysłouzil node での mode 0–3 比較・σ 1.03 感度。σ 0.97 は未収束の準定常参考値、後続 (#5 分圧スイープ, #5b α 感度, #6 既定値, #7 h0 変動) は [condensation-followups.md](condensation-followups.md) に引き継ぐ。
 
 ## 9. 変更ログ
 
 - `2026-09-12` — 初稿。文献調査 (ノート) に基づき Feder carrier 形 (mode 2/3) と σ 感度キーを設計。
 - `2026-09-13` — codex result 1 回目 NO-GO (M4/m2) を全件採用 (§6.1): 解釈の撤回 (J 過大の露出は文献の逆読み)、`verify_theta.py` の定数/coverage/許容修正
   (mode 1 が host 式と 6e-8 で一致)、σ 0.97 の未収束を残作業に戻す、cell 場差 FAIL の明記、単体試験の拡充を残作業に。再レビューは拡充後。
+- `2026-09-13` ② — codex result 2 回目 GO-with-changes (M3/m1, §6.1) を全件採用。単体 (b3) 非零モーメント・差分係数 (ALL PASS)、`cond_vapor_state` を header へ、起動ログにキー実効値、読込試験 run_0034。σ 0.97 は「合否未達の準定常参考結果」に戻し (残差 plateau、報告量頭打ち、h0 偏差 平均 1.200 ± 0.015 kJ/kg・上昇傾向)、`compare_kantrowitz_carrier.txt`/`.png` を res_96000 で再生成 (@21 +21.2 %)。`verify_theta.py` run 別実測 (相対 θ>0.1 / 絶対 / 許容): run_0350 mode 1 6.0e-8 / 7.6e-6 / 1e-5; run_0352 mode 2 2.3e-5 / 3.2e-6 / 3.4e-4; run_0353 mode 3 2.6e-5 / 2.9e-6 / 3.3e-4; run_0355 mode 3 2.2e-5 / 3.0e-6 / 3.6e-4; run_0354 (res_96000) mode 3 2.6e-4 / 2.8e-4 / 1.4e-3 — 全 PASS (S 再構成誤差 6–7e-5, run_0354 は 2.7e-4)。推奨設定の誤記 (既定 0、モデル間差、診断名) を訂正。後続を [condensation-followups.md](condensation-followups.md) に起票。
 - `2026-09-12` — **実装・node 検証完了** (case/16 README「carrier 中の非等温核生成補正」節、図 `compare_kantrowitz_carrier.png`, 表 `compare_kantrowitz_carrier.txt`):
   - 実装: `cond_kantrowitz_theta` (mode 1 = 旧演算順でビット不変, 2/3 = Feder $a_v$ 形)、`CondNucCarrier` を種 DB から kernel 内で集計し本体・src_jac 摂動の全呼び出しに同一値、
     `CondSpeciesProps.sigmaScale` → `cond_sigma`、診断 `condTheta_<s>`/`condLim_<s>`、キー `condKantrowitz` 0–3 (範囲検査)・`condSigmaScale`。
   - 単体 `tests/unit/test_cond_kantrowitz_carrier.cu` ALL PASS: 純蒸気極限の解析値 1e-12、Wysłouzil 条件 θ1/θ2/θ3 = 167.4/4.03/2.97 (codex 再計算 167.4/4.05/2.98 と 0.5 %)、
     掃引 400 状態で θ 有限・局所序列 $J_0\ge J_3\ge J_2\ge J_1$・$\hat q>0$ (最小 14.6)・Yv→0 で θ→0・Yc→0 で純蒸気形、mode 0/1 と σ 1.0 は旧関数とビット同一、device==host 1e-12。
   - 回帰: run_0350 (mode 1) は main 側 run_0335 と 29 変数 `diff_res --tolfile noise_node_48000.json --factor 2` PASS; 凝縮 OFF run_0356 は旧バイナリ run_0339 と反復ノイズ以内。
-  - 実カーネル照合: `verify_theta.py` で res の `condTheta_0` が host 式と 1.2e-4 (θ>0.1) / 絶対 4e-4 以内 (float 保存) → PASS (mode 1/2/3)。律速係数 `condLim_0` は核生成域で 1.000。
+  - 実カーネル照合: `verify_theta.py` で res の `condTheta_0` が host 式と一致 → 全 run PASS (run 別の実測と許容は 2026-09-13 ② の項)。律速係数 `condLim_0` は核生成域で 1.000。
   - **結果 (node 48000 step, 全 run PASS+STEADY; σ 0.97 のみ未収束)**:
 
     | run | mode / σ | onset [mm] | 壁 p/p₀ 偏差 @21 / 42 / 52 mm [%] |
@@ -190,7 +195,7 @@ Tolman 補正を今回入れないのは、対象温度・臨界核サイズで�
     | run_0351 | 0 (等温) | 12.28 | +21.6 / +2.6 / +2.1 |
     | run_0352 | 2 (Feder carrier) | 14.75 | +15.0 / +3.7 / +3.0 |
     | run_0353 | 3 (Feder carrier + 表面仕事) | 14.28 | +17.5 / +3.5 / +2.9 |
-    | run_0354 | 3, σ×0.97 (96000 step 延長: 残差 plateau、報告量は頭打ち、h0err のみ振幅 0.03 kJ/kg の OSCILLATING) | 12.09 | +21.2 / +2.5 / +2.1 |
+    | run_0354 | 3, σ×0.97 (**参考値・合否未達**: 96000 step でも残差 plateau、報告量は頭打ち、中心線 h0 偏差 平均 1.200 ± 0.015 kJ/kg 半範囲・上昇傾向で `--series` OSCILLATING) | 12.09 | +21.2 / +2.5 / +2.1 |
     | run_0355 | 3, σ×1.03 | 16.81 | +6.2 / +4.4 / +3.7 |
 
     cell 対照 (run_0357/0358, dry 場から 48000, 既知の床で plateau=未収束準定常比較, 非ゲート): mode 1 の報告量は main run_0341 と同一 (onset 22.49, 壁偏差同一) だが

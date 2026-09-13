@@ -142,11 +142,15 @@ forge の $\dot P$ (≈1.8×10⁴ /s) に対応する理論線 ($\dot P$=20000) 
 | 3 | ~~ツール・メッシュ (§5 8–9)~~ | 決着 (2026-09-13): `--series` (壁セル列・config dry・出口 u_n/c)、node 平面メッシュ QC PASS |
 | 4 | ~~回帰 (§6 R)~~ | 決着 (2026-09-13, §9): slip 変更は dry で cell 1e-3 / node 9e-6 (ノイズ水準)、旧物性再現 onset 同一 |
 | 5 | ~~空気 (§6 E)~~ | 決着 (2026-09-13, §9): 空気 onset は理論線 +1.7 K、N2 との差 0.7 K |
-| 6 | codex result レビュー | 1 回目 NO-GO (2026-09-13, §6.1) → M1–M5/m1–m2 全件採用・反映済 (§9 2026-09-13)。**再レビュー待ち** → GO で `status: done` |
+| 6 | codex result レビュー | 1 回目 NO-GO (§6.1) → 全件採用。2 回目 NO-GO (2026-09-13, M3/m2, §6.1) → 全件採用・反映済 (§9 2026-09-13 ②)。**3 回目待ち** → GO で `status: done` |
+| 6b | 境界試験を実装経由で・流束収支 (result ① 要求, 未実施) | `test_cond_air` (e) の slip 試験はテスト内の代数式比較のまま。slip ghost/bvar を実装 (boundaryCond_d の kernel) 経由で通す試験と、node/cell の質量・エネルギー流束収支 (入口−出口, 凝縮 run で h0 保存) を追加する (codex result ② m5) |
+| 6c | `check_quasisteady.py` 統合 (後続) | onset/壁圧比の判定を `--quantity` に追加 (dry 参照場を要する case 固有量; 保存時刻での判定であることを明記)。現状は `onset_analysis.py --series` が代替 (codex result ② m5) |
 | 7 | (後続) CPG 二相音速 | γ_2φ + 実 Ht + 一般 EOS 固有系を CPG 二相へ、N2/空気で流束 FD 照合 (double/float32) |
 | 8 | (後続) 混合液モデル | O2/N2 理想溶液露点線、2 成分凝縮 |
 | 9 | (後続) 条件の拡張 | Longshot 級 (M 10–14, $\dot P$ 小) と Daum の複数条件で理論線・実験点との比較を増やす |
-| 10 | (後続) Arthur 3–4 in の ~9 % 過大の**原因切り分け** | 物性修正の前後で差が変わらないので物性ではない。候補: 核生成 $J$ (CNT×Iland)、成長 $\dot r$ (Goodheart, $\alpha$)、壁圧の抽出位置 (壁セル列 vs 実験の壁静圧孔)、Arthur 記号の読み取り。切り分けは $J$/$\dot r$ 各 ×0.5/×2 の感度と Fig.2 の再デジタイズから (codex 2026-09-13 m1: 「レート側」と断定しない) |
+| 10 | (後続) Arthur 3–4 in の ~9 % 過大の**原因切り分け** | 今回の物性変更 (潜熱/飽和圧の低温整合, c_l ±500) では偏差を解消しなかった (物性一般の除外までは立証していない; codex result ② m5)。候補: 核生成 $J$ (CNT×Iland)、成長 $\dot r$ (Goodheart, $\alpha$)、壁圧の抽出位置 (壁セル列 vs 実験の壁静圧孔)、Arthur 記号の読み取り。切り分けは $J$/$\dot r$ 各 ×0.5/×2 の感度と Fig.2 の再デジタイズから (codex 2026-09-13 m1: 「レート側」と断定しない) |
+
+後続 (#6b, #6c, #7–#10) の正本は [condensation-followups.md](condensation-followups.md) §5.1 (codex result ② の要求)。
 
 ## 6. 検証
 
@@ -165,9 +169,13 @@ forge の $\dot P$ (≈1.8×10⁴ /s) に対応する理論線 ($\dot P$=20000) 
   | E1 | `run_0024_air_cpgcarrier` / `run_0026_air_cpgcarrier_node` | cell / node | 空気 CPG carrier 形 (新物性) |
   | E1' / R3' | `run_0027_air_cpgcarrier_v2` (+反復 `run_0030`) / `run_0028_air_cpgcarrier_node_v2`, `run_0029_n2_new_v2` / `run_0032_n2_new_node_v2` | cell / node | result レビュー①反映後バイナリでの再取得 + 同一バイナリ反復 (ノイズ床) |
   | N1 | `run_0031_dry_slip_cell_oldbin_rep` | cell | 旧バイナリ dry の同一バイナリ反復 (R1 判定のノイズ床) |
+  | N2 | `run_0033_air_cpgcarrier_v2_rep2` | cell | E1 v2 の 3 回目反復 (床を 3 run の全ペア最大で定義; codex result ② M2) |
+  | E1'' | `run_0035_air_cpgcarrier_final` | cell | result ② 反映後 (反転の非有限入力拒否・面 R_eff 床撤去) の最終バイナリ; 標準空気では両変更は不活性 → run_0027 と床内 |
+  | C1 | `run_0034_cfg_default_check` | cell (20 step) | 凝縮セクション有効で `condKantrowitz`/`condKantrowitzGammaMode` を省略 → 起動ログの実効値 0/0 を確認 (読込試験) |
 
 - **判定基準 (合否)**:
   1. 単体 PASS。
+  0. **場差の判定方法** (codex result ② M2): 同一バイナリ・同一 config の反復を 3 run 以上取り、変数別に全ペアの max|Δ|/max|ref| の最大をノイズ床 JSON にする (`diff_res.py --dump` → 変数別 max)。判定は `diff_res.py REF NEW --tolfile 床.json --factor 2` の **exit code** (表示丸めで判断しない)。床に無い変数は判定しない。
   2. R1: slip 変更で凝縮 OFF の場差が同一バイナリ反復ノイズ (case/34 は ~1e-3 [README]) 以内。R0 が旧結果 (run_0006: cond/dry 1.21/1.33/1.43 vs Lin 曲線) を再現。
   3. 全 run NaN 0、`--series` STEADY (未達なら延長; plateau は「未収束の準定常比較」と明記)。出口面 $u_n/c>1$ を全スナップショットで確認。
   4. R3/E1: onset $T$ が $\dot P$ 対応理論線から **±3 K** (モデル間比較の基準)。R3 と E1 の onset 差 ≲2 K (「空気 ≈ N2」の再現)。
@@ -179,6 +187,7 @@ forge の $\dot P$ (≈1.8×10⁴ /s) に対応する理論線 ($\dot P$=20000) 
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result | `2026-09-13` | 2 回目 [`notes/reviews/2026-09-13-condensation-air-result-2.md`](../../notes/reviews/2026-09-13-condensation-air-result-2.md) | NO-GO, C0/M3/m2 | **全件採用** (2026-09-13 ②, §9)。M1 (e=±Inf が tol=Inf で反転成功に化ける) → 入口で非有限 e/g/T_guess・非正熱容量を拒否し、成功条件にも T,G の有限性を要求。`test_cond_air` (i) に ±Inf/NaN/到達不能 e の 7 例 (全て ok=false・有限 T)。M2 (U_x 1.684e-4 > 1 ペア床×2=1.665e-4 で diff_res FAIL、「ちょうど ok」は誤記) → 判定未達を §9 に明記し、3 回目反復 run_0033 で床を 3 反復の全ペア最大に再定義 (U_x 床 1.34e-4) → exit 0 で PASS。方法を §6 に明記。M3 (面エンタルピーの R_eff<1 床が受付範囲 (γ1.4, cp 1038.67, Y_w=g=0.999 → R_eff 0.297) で EOS と食い違う) → 床を撤去し正で有限な R_eff をそのまま使う、非正/非有限は乾き面へ退避。`test_cond_air` (j) に R_eff<1 の 6 状態 (h_f=e+p/ρ 2e-16)。m4 (文書) → methods の CPG 音速を $\sqrt{\gamma R_{air}T}$ に、README run_0023 の入口 325.12/6.137、c_l 感度は同符号 (+0.58/−0.72 K)、`condKantrowitz` の省略時既定 0 (Wysłouzil 参照設定は 1 明示) と診断名 `condTheta_0`/`condLim_0` に訂正。m5 (§5.1 の抜け) → 6b 境界試験の実装経由化・流束収支、6c `check_quasisteady` 統合を残作業表に戻し、#10 を「今回の物性変更では解消しなかった」に限定 |
 | result | `2026-09-13` | 1 回目 [`notes/reviews/2026-09-13-condensation-air-result.md`](../../notes/reviews/2026-09-13-condensation-air-result.md) | NO-GO, C0/M5/m2 | **全件採用** (2026-09-13, §9)。M1 (T 反転失敗でも T/P/sonic を更新) → 失敗セルは原始量・roe とも前ステップ値を保持し `g_condTinvFail` を集計して警告 (再取得 run は全て 0 件)。M2 (消滅判定が全圧) → `cond_clamp_vapor_pressure` で source と同じ N2 分圧に統一、全圧/分圧で判定が分かれる状態を `test_cond_air` (h) に追加。M3 (境界種別の受付未実装・Yw NaN) → `main.cpp` で inlet_uniformVelocity/outlet_statPress/slip 以外を拒否、`isfinite` 検査。M4 (node 中心線・壁抽出) → 中心線 |y|<1e-9 ノード、壁は x ビン毎の y 最大ノード (全 slip の node メッシュは wall_dist が無い) で再計算 (onset 表は変わらず)。M5 (cell ノイズ根拠・float32 試験) → 同一バイナリ反復 run_0027/0030 (凝縮) と run_0015o/0031 (旧 dry) で床を実測し `--tolfile` 2 倍で判定、SLAU 面エンタルピーを `cond_face_h_cpg` に抽出して float 入力の試験 (g) を追加。m1 (「レート側」断定) → §5.1 #10 を原因切り分けに書き換え。m2 (文書の古い値) → methods「計画中」/0.59、README 旧注記、入口 325.12 m/s・6.137 kg/m³、c_l 符号の条件 (L'>c_pv)、procedures の新キーを同期 |
 | plan | `2026-09-12` | 2 回目 (v2) [`notes/reviews/2026-09-12-condensation-air-plan-2.md`](../../notes/reviews/2026-09-12-condensation-air-plan-2.md) | GO-with-changes, C0/M5/m2 | **全件採用 → v3**。M1 (接続の微分連続は成立しない・0.59 倍は誤値) → C0 接続に改め 0.518 倍に訂正、片側微分と単調性を検査 (§4.2)。M2 (Newton が非収束のまま T を返し roe を上書き) → 括弧付き Newton+二分法・成功フラグ・失敗時は保存量不変 (§4.1)。M3 (SLAU の面温度混在) → 面状態で $T_f$, $h_f$ を一貫構成 (§4.1)。M4 (受付範囲) → SLAU/CPG/N2/単一種/Kantrowitz≤1 に限定し他は拒否、近似 Jacobian と明記、$Y_w$ 範囲検査 (§4.1)。M5 (`--series` の壁圧が中心線・dry 推定・出口判定) → 壁セル抽出・config で dry・$u_n/c$ を独立合否・閾値固定 (§5 8)。m1 (slip bvar の運動エネルギー) → $\rho E_b=\rho E_i-\tfrac12\rho U_n^2$ (§4.3)。m2 (R2/R4 の設定経路・kgas 伝播) → `condN2PsatLowT`, `condN2LiquidCp`, `cond_kgas` ディスパッチ (§4.1, §4.2) |
 | plan | `2026-09-12` | 1 回目 [`notes/reviews/2026-09-12-condensation-air-plan.md`](../../notes/reviews/2026-09-12-condensation-air-plan.md) | NO-GO, C1/M8/m1 | **全件採用 → v2**。C1 (pure 擬似種は N2 選択凝縮と EOS が両立しない) → CPG carrier 形 ($Y_w$ 定数, 全経路で同じ $g$) に置換、露点線は後続 (§1, §4.1)。M2 (潜熱修正は飽和圧も変える) → 新 $L$ の積分で C–C を再構成、2 段 A/B と $c_l$ 感度 (§4.2)。M3 (CPG `sonic` のみは Jacobian と不整合) → CPG 二相音速を本 plan から外し後続 #7 (§2)。M4 (slip ghost の二相不整合) → 状態保持に修正、出口は $u_n/c$ 監視 (§4.3)。M5 (理論線 CSV と本文の食い違い) → 300 dpi 再読みで CSV 差し替え (1 kPa: 38.5 K)、±3 K はモデル間比較基準に限定 (§3, §4.4)。M6 (Lin 曲線との比較を実験一致と呼んでいた) → 実験記号と直接比較、Lin 曲線は別報告 (§3, §6)。M7 (準定常判定不能) → 1000 step 毎保存 + `onset_analysis.py --series` (§5 8, §6)。M8 (空気 dry の入口速度未換算) → 324.48 m/s に修正して取り直し (§3, §6 E2)。M9 (cell のみ・掃引不足) → node/cell 両方、単体掃引 g≤0.99·Y_w / T 25–125 K、EOS 往復 (§5 7, §6)。m1 (露点 78.8 K・空気定数) → 82.2 K に訂正、二成分定数に統一 (§4.1) |
@@ -221,14 +230,16 @@ forge の $\dot P$ (≈1.8×10⁴ /s) に対応する理論線 ($\dot P$=20000) 
     (空気は $S=y_{N_2}p/p_{sat}$ で S が小さい分だけ遅い = Daum & Gyarmathy の「空気 ≈ N2」); node/cell: onset ΔT ≤0.08 K, Δx ≤0.03 in, cond/dry ≤0.6 % ✓。
     Arthur 実験記号 (1.133/1.250/1.500) との差: 旧 +9.5/+8.6/−3.2 %、新 +9.6/+9.7/−1.6 %、空気 +7.1/+8.1/−3.0 % (観測; Lin 計算曲線との差は旧 +3.4/+3.8/+0.3 %)。
     **潜熱整合の効果**: 潜熱だけ新では onset 不変で g_exit 0.081→0.059 (放出熱 +25 % で凝縮量減; 3 in の cond/dry 1.241→1.158 と実験 1.133 に近づく)、飽和圧も新にすると
-    S が 1/0.52 倍で onset が 0.25 in 上流 (+1.8 K) に移り 3 in は 1.242 に戻る。$c_l$ ±500 J/kg/K で onset ∓0.7 K。3–4 in の実験に対する ~9 % 過大は物性修正前後で同程度で、
+    S が 1/0.52 倍で onset が 0.25 in 上流 (+1.8 K) に移り 3 in は 1.242 に戻る。$c_l$ 1500 / 2000 / 2500 J/kg/K で onset 38.95 / 39.67 / 40.25 K (**同符号**: $c_l$ +500 で +0.58 K, −500 で −0.72 K; $c_l$ 大 → 低温側の $L$ が大きく $p_{sat}$ が下がり S 増)。3–4 in の実験に対する ~9 % 過大は物性修正前後で同程度で、
     N2 モデル (CNT×Iland, Goodheart) の較正問題として残る (§5.1 後続)。
+- `2026-09-13` ② — codex result 2 回目 NO-GO (M3/m2, §6.1) を全件採用。コード: `cond_T_from_e_cpg` の非有限入力拒否と有限性を含む成功条件、`cond_face_h_cpg` の R_eff 床撤去 (正で有限ならそのまま、非正/非有限は乾き面)、起動ログに凝縮キーの実効値を出力。単体 `test_cond_air` (i)(j) 追加 ALL PASS (test_kwc/sonic/evap/eq も PASS)。**M2 の訂正**: E1 の場差判定は 1 ペア床で FAIL していた → 3 反復 (run_0027/0030/0033) の全ペア最大を床にして PASS (方法は §6)。最終バイナリ `run_0035_air_cpgcarrier_final` は run_0027 と 2 倍床内 (exit 0)、onset 表同一 (2.207 in / 38.94 K)、警告 0 件。読込試験 `run_0034_cfg_default_check`: 凝縮有効・キー省略で `condKantrowitz=0 condKantrowitzGammaMode=0` をログで確認。文書同期 (m4) と §5.1 6b/6c/#10 (m5)。
 - `2026-09-13` — codex result 1 回目 NO-GO (M5/m2, §6.1) を全件採用。コード: T 反転失敗セルの原始量凍結 + `g_condTinvFail` 警告、消滅判定の N2 分圧化 (`cond_clamp_vapor_pressure`)、
   `cond_face_h_cpg` 抽出、境界種別・Yw 有限性の受付検査。ツール: node の中心線/壁抽出 (y=0 ノード / x ビン毎 y 最大)。単体 `test_cond_air` に (g) float32 面エンタルピー・(h) 分圧判定を追加 ALL PASS。
   **再取得 (最終バイナリ)**: E1 cell `run_0027_air_cpgcarrier_v2` は onset 2.207 in / 38.94 K・cond/dry 1.2134/1.3514/1.4547 で run_0024 と同一、node `run_0028` も run_0026 と同一 (場差 ≤1e-5);
   R3 `run_0029_n2_new_v2` は onset 2.131 in / 39.52 K (run_0017 2.112 / 39.67; 1 % 閾値交差が 1 セル動く = cell の onset ノイズ ±0.02 in / ±0.15 K)、壁比・g_exit は同一。
   **ノイズ床の実測** (codex M5): 同一バイナリ反復 `run_0027` vs `run_0030` (凝縮空気) ρ 4.2e-4 / U_y 2.0e-3 / g 7.6e-4 / Q0 9e-3 (`noise_cell_air_12000.json`)、`run_0015o` vs `run_0031` (旧バイナリ dry)
-  ρ 2.7e-4 / U_y 2.8e-3 (`noise_cell_dry_oldbin_12000.json`)。この 2 倍に対し slip 変更 (dry) と レビュー反映 (E1/R3) の場差は全変数 ok (E1 の U_x 1.68e-4 だけ 2 倍床 1.7e-4 と同値)。
+  ρ 2.7e-4 / U_y 2.8e-3 (`noise_cell_dry_oldbin_12000.json`)。この 2 倍に対し slip 変更 (dry) は全変数 ok。E1 (run_0024 vs run_0027) は 1 ペア床では U_x 1.684e-4 > 2×8.33e-5=1.665e-4 で `diff_res.py` **FAIL (exit 1)** だった (この時点の「ちょうど ok」は表示丸めの誤記; codex result ② M2)。
+  → 3 回目反復 run_0033 を追加し、床を **3 反復の全ペア最大 (変数別)** に定義し直した (U_x 8.3e-5 / 1.34e-4 / 1.26e-4 → 床 1.34e-4): 2 倍床 2.7e-4 に対し run_0024 vs run_0027 は全変数 ok (exit 0)、run_0017 vs run_0029 も exit 0 (§9 2026-09-13 ②)。
   T 反転失敗の警告は全 run 0 件。§3 の理論線比較・§9 の結論 (+2.1 / +1.7 K, N2–空気 0.7 K) は変わらない。
 - `2026-09-12` — codex plan 2 回目 GO-with-changes (M5/m2) を全件採用して v3 (§6.1): C0 接続と 0.518 倍、括弧付き反転、SLAU 面状態の一貫構成、受付範囲の限定、
   `--series` 改修、slip bvar、診断キー。`status: in_progress`。node 平面メッシュ (`mesh_node/`, 24000 双対 CV, cell 版 QC PASS AR 21.9 / skew 0.07) と
