@@ -29,11 +29,13 @@ inline CondPropOpts cond_prop_opts(const solverConfig& cfg)
     CondPropOpts o;
     o.latentLowT = cfg.condN2LatentLowT; o.psatLowT = cfg.condN2PsatLowT; o.liquidCp = cfg.condN2LiquidCp;
     o.gasKgasModel = (cfg.condVaporMassFraction > 0.0) ? 1 : 0;   // CPG carrier (空気) は空気 Sutherland
-    // 蒸気 c_p,v は **凝縮する種の値** でなければならない (Kirchhoff の L' = c_p,v − c_l)。
-    // pure-condensible CPG (気相 = 凝縮種) に限り physProp.cp がそれなので config から取る。
-    // CPG carrier (空気) / TP の physProp.cp は混合気の値なので使わず、N2 の 1038.8 を使う。
-    const bool pureCpgCondensible = (cfg.thermalMethod == 0) && (cfg.condGasSpecies < 0) && !(cfg.condVaporMassFraction > 0.0);
-    o.gasCp = (pureCpgCondensible && cfg.cp > 0.0) ? (double)cfg.cp : COND_N2_CPV;
+    // 蒸気の定圧比熱 c_p,v (Kirchhoff の傾き L' = c_p,v − c_l と Kantrowitz の γ_v に使う)。
+    // **CPG (thermalMethod 0) では config の physProp.cp をそのまま使う**。CPG はそもそも「気相の比熱は
+    // この 1 つの定数」というモデルなので、物性相関だけ別の定数を持つと同じ run の中で 2 つの c_p が
+    // 並ぶことになる。空気キャリア (physProp.cp = 1008.7) では窒素蒸気の 1038.8 とは 2.9 % 違い、
+    // 70 K 未満の L が 0.45 % 動く (methods/condensation.md §8b)。
+    // TP (thermalMethod 2) には「気相の c_p 定数」が無いので、内蔵の種固有値 (N2 1038.8 / H2O 1855) を使う。
+    o.gasCp = (cfg.thermalMethod == 0 && cfg.cp > 0.0) ? (double)cfg.cp : 0.0;
     o.sigmaScale = cfg.condSigmaScale; o.Yw = cfg.condVaporMassFraction;
     return o;
 }

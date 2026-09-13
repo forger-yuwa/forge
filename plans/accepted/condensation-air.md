@@ -209,6 +209,13 @@ forge の $\dot P$ (≈1.8×10⁴ /s) に対応する理論線 ($\dot P$=20000) 
 
 ## 9. 変更ログ
 
+- `2026-09-14` (**本計画の外からの改訂**): 蒸気 c_p,v の出どころを「N2 内蔵値 1038.8 固定」から
+  「CPG では config の `physProp.cp`」に変更した (`plans/active/condensation-followups.md` F-cf9)。
+  空気キャリアの `physProp.cp` は 1008.7 なので 70 K 未満の L が +0.40 %、50 K 未満の p_sat が ×0.983 動く。
+  **検証している onset は 2.20 in / 2.10 in で変化なし**、g_exit は 0.0583 → 0.0581 (−0.3 %)、
+  液滴モーメントは最大 2.4 % 変化 (ノイズ床超)。本計画の onset ゲート (±0.02 in) は引き続き満たす。
+  A/B は `case/34.arthur_n2_nozzle/run_0105_gascp_air_node_{base,new,new_r2,new_r3,dry}`。
+
 - `2026-09-12` — 初稿。ユーザ要望「空気そのものの凝縮の検証 (case/34 + 文献)」。文献調査 (ノート §3) に基づき設計。
 - `2026-09-13` — **実装・検証完了** (case/34 README「空気凝縮 (CPG carrier 形) と N2 低温物性の整合」節、図 `compare_air_n2_wall.png`):
   - 実装: `CondSpeciesProps` に `latentLowT/psatLowT/liquidCp/gasKgasModel`、`n2_latent_ex`/`n2_psat_ex` (C0 接続, 閉形式 C–C)、`cond_kgas` ディスパッチ、

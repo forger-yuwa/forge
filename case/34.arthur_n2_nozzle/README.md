@@ -38,6 +38,9 @@ P.D. Arthur の博士論文 (Caltech/GALCIT, 1952) で用いられた **2 次元
 
 | run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
 | --- | --- | --- | --- |
+| `run_0105_gascp_air_node_{base,new,new_r2,new_r3}` | 蒸気 c_p,v を N2 内蔵 1038.8 から config `physProp.cp` (空気 1008.7) へ変えた A/B (node, 空気キャリア, 12000 step) | **onset 2.20 in / 2.10 in で変化なし**、g_exit 0.0583→0.0581、液滴モーメント最大 2.4 % 変化 (ノイズ床超)。`onset_analysis.py --series` は両者 STEADY。`diff_vs_base.txt`, `noise_floor_3reps.json` | ref (物性決定の根拠) |
+| `run_0105_gascp_air_node_dry` | 上の onset 解析用 dry 参照場 (同 config, `condensation: 0`) | `restart_dry.h5` の供給元 | ref |
+| `run_0106_gascp_n2_node_{base,new,new_r2,new_r3}` | 同 A/B を純 N2 (`cp: 1038.8`) で | ノイズ床以内で不変 (`diff_res.py --tolfile --factor 2` exit 0) | ref |
 | `run_0001_slau_dry` | 直線壁(スロート鋭頂点) + cfl_pseudo=5 | step 467 で発散 (スロート上端の凸コーナー膨張特異点; Ux~1.5e8)。`res_nan_467.h5` | 破棄 (コーナー特異点の記録) |
 | `run_0002_slau_dry_cfl1` | 双曲線スロート(滑らか) + cfl_pseudo=1 + **1次精度** (convMethod 0) | **収束** (rms 6.7–6.9 桁低下)。出口 **M=6.75** (等エントロピー 6.93)、A/A*=99.6、P/P0=2.79e-4 (理論 2.58e-4)。`postproc_arthur.png`, `residual_history.png` | active (1次基準) |
 | `run_0003_slau_2nd` | run_0002 の収束場を引き継ぎ **2次精度** (convMethod 1, limiter 2 Venkatakrishnan) | 出口 **M=6.87** (等エントロピー 6.93、誤差 2.5%→**0.8%**)、P/P0=2.71e-4。Mach が A/A*=100 まで等エントロピー線にほぼ完全一致。残差は **~3e-4 でプラトー** (リミタ起因のリミットサイクル; 場は準定常)。`postproc_arthur.png`, `residual_history.png` | active (高精度) |
