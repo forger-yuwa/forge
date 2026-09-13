@@ -857,7 +857,7 @@ $\mu_n=Q_n/(N_{ref}r_{ref}^n)$ ($N_{ref}=10^{18}$/kg, $r_{ref}=1$ nm) を導入�
 double 化 (混合精度 cond storage、`flow_float` とは別の `cond_float=double`) をフォールバックとして
 導入する。
 
-### 9. 混合精度実装 — 凝縮経路の float 化 (2026-09-13, plan [condensation-float-speedup](../plans/active/condensation-float-speedup.md))
+### 9. 混合精度実装 — 凝縮経路の float 化 (2026-09-13, plan [condensation-float-speedup](../plans/accepted/condensation-float-speedup.md))
 
 実装 §8 の「まず全 float」はモーメントの**格納**についての方針で、相変化ソース (`condensation_source_d`)・二相 EOS の温度反転・
 SLAU の二相面エンタルピー補正の**演算**は double で書かれていた (`condensationProperties_d.cuh` 冒頭「物性評価は exp/log で桁が飛ぶため
