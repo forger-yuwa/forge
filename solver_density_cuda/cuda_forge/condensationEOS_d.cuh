@@ -66,29 +66,75 @@ __host__ __device__ inline double cond_T_from_e_carrier(
 //   e = (1-g)e_v + g e_l = (c_v + g R_v) T - g L(T)   (e_v=c_v T)
 //   ⇒ T = (e_in + g L(T))/(c_v + g R_v)  (= Eq.18, Cv0=Cvv=c_v)
 // **L の温度依存は入れる** (n2_latent(T))。g=0 で T=e_in/cv (従来 CPG と一致)。cv=cp/γ, R=(γ-1)cv。
+// SLAU の CPG 二相 面全エンタルピー (面状態で一貫; plans/accepted/condensation-air.md §4.1, codex 2026-09-12 M3)。
+//   g_f はセル値 (1 次)。R_eff = R_gas − g_f R_w (pure: R_w=R_gas → (1−g)R)。T_f = p_f/(ρ_f R_eff), h_f = c_p T_f − g_f L(T_f) + e_k。
+//   float 保存量からの復元を単体で検査できるように関数化 (tests/unit/test_cond_air.cpp)。
+__host__ __device__ inline double cond_face_h_cpg(const CondSpeciesProps& cp, double cp_gas, double R_gas, double R_w,
+                                                  double g_f, double p_f, double rho_f, double ek)
+{
+    // R_eff は正で有限ならそのまま使う (受付条件 R_air−Y_w R_w>0 の範囲では常に正; 旧 1.0 床は枯渇近傍 R_eff<1 で面温度を EOS と食い違わせた,
+    // codex 2026-09-13 result-2 M3)。非正・非有限 (g_f が Y_w を超えた異常値) は乾き面 (g_f=0, R_gas) に退避する。
+    double Reff = R_gas - g_f*R_w;
+    if (!(Reff > 0.0) || !isfinite(Reff)) { Reff = R_gas; g_f = 0.0; }
+    const double Tf = p_f/(rho_f*Reff);
+    return cp_gas*Tf - g_f*cond_latent(cp, Tf) + ek;
+}
+
+// 実現可能性クランプ (cond_realizability_clamp_d) の蒸発塵判定に使う蒸気分圧。source kernel (cond_vapor_state) と同じ定義に揃える
+// (codex 2026-09-13 M2: 旧は全圧 P で判定しており CPG carrier で S を Y_w^-1 倍過大評価していた)。
+//   Yw_transport: TP carrier の Y_w (= roY_w/ρ; 無効時は負), Yw_const: CPG carrier の定数 Y_w (無効時は ≤0), pure は全圧 P。
+__host__ __device__ inline double cond_clamp_vapor_pressure(double rod, double g, double Yw_transport, double Yw_const,
+                                                            double Rw, double T, double P)
+{
+    if (Yw_transport >= 0.0) { double yv = Yw_transport - g; if (yv < 0.0) yv = 0.0; return rod*yv*Rw*T; }
+    if (Yw_const > 0.0)      { double yv = Yw_const - g;     if (yv < 0.0) yv = 0.0; return rod*yv*Rw*T; }
+    return P;
+}
+
+// 括弧付き Newton + 二分法退避 (plans/accepted/condensation-air.md §4.1, codex 2026-09-12 M2)。
+//   旧 30 回 Newton は物性クランプ (45 K 床 / 臨界直下) をまたいで往復すると未収束のまま T を返し (g=0.75, T=122 K で 99 K, e −28 kJ/kg)、
+//   呼び出し側がその T で roe を上書きして保存量を壊した。G(T)=aT−gL(T)−e_in は L'<0 (整合物性) なら単調増なので [T_lo,T_hi] で括弧を作り、
+//   Newton 反復が括弧外に出たら二分法。成功条件 |G|<=1e-9|e_in|+0.05 J/kg を *ok に返す (失敗時は呼び出し側で保存量を上書きしない)。
+//   R は凝縮種の気体定数 (pure: 気相 R, CPG carrier: R_w)。
 __host__ __device__ inline double cond_T_from_e_cpg(
     double e_in, double g_tot, double cv, double R, double T_guess,
-    const CondSpeciesProps& cprops)
+    const CondSpeciesProps& cprops, bool* ok = nullptr)
 {
     const double a = cv + g_tot*R;   // 実効熱容量 (T に対し一定)
-    double T = T_guess;
-    if (!(T > 1.0)) T = 1.0;
-    #pragma unroll 1
-    for (int it = 0; it < 30; ++it) {
-        const double L  = cond_latent(cprops, T);
-        const double dL = (cond_latent(cprops, T + 0.1) - cond_latent(cprops, T - 0.1)) / 0.2;
-        const double G  = a*T - g_tot*L - e_in;
-        const double Gp = a - g_tot*dL;
-        const double Gpf = (Gp > 1.0e-2*a) ? Gp : 1.0e-2*a;
-        double dT = G / Gpf;
-        if (dT >  0.5*T) dT =  0.5*T;
-        if (dT < -0.5*T) dT = -0.5*T;
-        T -= dT;
-        if (T < 1.0)    T = 1.0;
-        if (T > 6000.0) T = 6000.0;
-        if (dT < 0.0) dT = -dT;
-        if (dT < 1.0e-3 + 1.0e-6*T) break;
+    // 非有限入力 (e=±Inf/NaN, g NaN) と非正の熱容量は反転不能として即 ok=false (codex 2026-09-13 result-2 M1: ±Inf は tol=Inf で「成功」に化けていた)。
+    if (!isfinite(e_in) || !isfinite(g_tot) || !isfinite(T_guess) || !(a > 0.0)) {
+        if (ok) *ok = false;
+        return (isfinite(T_guess) && T_guess > 1.0) ? T_guess : 1.0;
     }
+    const double tol = 1.0e-9*fabs(e_in) + 0.05;   // [J/kg] (Newton は 2 次収束なので厳しくしてもコストは増えない)
+    double lo = 1.0, hi = 6000.0;
+    double Glo = a*lo - g_tot*cond_latent(cprops, lo) - e_in;
+    double Ghi = a*hi - g_tot*cond_latent(cprops, hi) - e_in;
+    double T = T_guess;
+    if (!(T > lo)) T = lo;
+    if (T > hi) T = hi;
+    bool bracketed = (Glo < 0.0 && Ghi > 0.0);
+    double G = 0.0;
+    #pragma unroll 1
+    for (int it = 0; it < 80; ++it) {
+        const double L  = cond_latent(cprops, T);
+        G = a*T - g_tot*L - e_in;
+        if (fabs(G) <= tol && isfinite(T) && isfinite(G)) { if (ok) *ok = true; return T; }
+        if (bracketed) { if (G < 0.0) lo = T; else hi = T; }
+        const double dL = (cond_latent(cprops, T + 0.1) - cond_latent(cprops, T - 0.1)) / 0.2;
+        const double Gp = a - g_tot*dL;
+        double Tn = (Gp > 1.0e-2*a) ? (T - G/Gp) : T;
+        if (bracketed) {
+            if (!(Tn > lo && Tn < hi)) Tn = 0.5*(lo + hi);          // 括弧外 → 二分法
+            if (hi - lo < 1.0e-9*hi) { T = 0.5*(lo + hi); break; }
+        } else {
+            double dT = T - Tn; if (dT > 0.5*T) dT = 0.5*T; if (dT < -0.5*T) dT = -0.5*T; Tn = T - dT;   // 旧 Newton の保護
+            if (Tn < 1.0) Tn = 1.0; if (Tn > 6000.0) Tn = 6000.0;
+        }
+        T = Tn;
+    }
+    G = a*T - g_tot*cond_latent(cprops, T) - e_in;
+    if (ok) *ok = (fabs(G) <= 10.0*tol) && isfinite(T) && isfinite(G);
     return T;
 }
 

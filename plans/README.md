@@ -24,6 +24,7 @@
 | Plan | area | 概要 |
 | --- | --- | --- |
 | [tooling-nozzle-isothermal-wall-chain.md](active/tooling-nozzle-isothermal-wall-chain.md) | `tooling / boundary layer` | **ノズル設計チェーンの等温壁化** (2026-09-12 起票): `spec.wall_thermal` を単一ソースに bcond/積分法初期壁/帳簿を駆動、超音速冷却壁平板 (case/48, M4.19, $T_w/T_{aw}$ 0.26, y₁⁺ 掃引) で低 Re SST を van Driest II / RAF / CONTUR / SU2 と照合 → ノズル CPG × SU2 等温 → 生産 TP (case/44) の等温 δ\* 反復と壁温感度台帳。壁関数と CHT は対象外 (弱 CHT ループの方針のみ §4.6) |
+| [condensation-followups.md](active/condensation-followups.md) | `condensation` | **凝縮モデルの後続課題の正本** (2026-09-13 起票, draft): α 感度 / 分圧スイープ / 既定値 / σ0.97 h0 変動 / Arthur 壁圧過大の切り分け / CPG 二相音速 / 露点線 / Longshot 条件 / 境界試験・流束収支 / check_quasisteady 統合 |
 | [condensation-kantrowitz-gamma-twophase-sonic.md](active/condensation-kantrowitz-gamma-twophase-sonic.md) | `condensation` | **Kantrowitz 補正の γ を蒸気 γ_v に修正 + 凝縮セルの二相 frozen 音速** (2026-09-10 起票): 旧実装はセル気相混合 γ (H2O–N2 で 1.40) と g を無視した全蒸気音速。A/B キー `condKantrowitzGammaMode` / `condSonicModel`、Wyslouzil 2D (case/16) で変化量を定量化 |
 | [chemistry-finite-rate-h2.md](active/chemistry-finite-rate-h2.md) | `thermophysics / chemistry` | **有限速度化学 (H₂ 燃焼・ノズル化学非平衡)** (2026-09-04 起票): 種ブロック point-implicit + sensible datum 反応熱陽注入。Phase 0 (CEA スクリーニング・熱力学 DB ツール・Jachimowski YAML) 完了、Phase 1 ソース項から実装 |
 | [boundary-node-inlet-corner-wall.md](active/boundary-node-inlet-corner-wall.md) | `boundary / discretization` | node の入口∩壁コーナーで質量が溜まり P 暴走する問題の根治: 変換時に入口側半割面を壁へ帰属 (`mesh.nodeInletCornerWall`)。Burrows–Kurkov (case/47) で発覚 (2026-09-04) |
@@ -54,6 +55,8 @@
 ## accepted (現役の設計判断)
 
 | Plan | area | 概要 |
+| [condensation-kantrowitz-carrier.md](accepted/condensation-kantrowitz-carrier.md) | `condensation` | **[done 2026-09-13]** **carrier 中の非等温核生成補正 (Feder 形 `condKantrowitz 2/3`) と H2O 表面張力の小半径妥当性** (2026-09-12 起票, branch feature/condensation-air): H2O–N2 では N2 衝突がクラスタを冷やし θ が純蒸気形の 1/40; Wysłouzil 2D で 0/1/2/3 と σ ±3 % 感度 |
+| [condensation-air.md](accepted/condensation-air.md) | `condensation` | **[done 2026-09-13]** **空気そのものの凝縮** (2026-09-12 起票, codex plan 2 回 → 実装・検証 2026-09-13): CPG carrier 形 (N2 選択凝縮 + O2 キャリア, `condVaporMassFraction`)、`n2_latent`/飽和圧の低温整合 (C0, 閉形式 C–C)、括弧付き EOS 反転、SLAU 面状態一貫化、slip 状態保持。case/34 Arthur (node/cell): N2 新 +2.1 K / 空気 +1.7 K で $\dot P$ 対応理論線 ±3 K 以内、空気−N2 0.7 K |
 | --- | --- | --- |
 | [output-level-and-h0.md](accepted/output-level-and-h0.md) | `architecture / output` | `res_*.h5` の出力量を `output.level` (既定 1 = 保存量 + 原始量 + `h0`, 2.08M で 681→290 MB) で絞る。全エンタルピー `h0` (sstEnergyIncludesK なら +k, 属性 `h0_includes_k`) をソルバが書き、全温・全圧の後処理はそこから作る (2026-09-08) |
 | [turbulence-sst-energy-includes-k.md](accepted/turbulence-sst-energy-includes-k.md) | `turbulence / thermophysics / convection` | **全エネルギーに ρk を含める** (`sstEnergyIncludesK`, 分割保持形: roe は E_m のまま、E_t の流束 H*/p*/k 拡散 + k 更新後 roe−=Δ(ρk)、dual-time は BDF に ρk)。周期箱減衰で E_t 保存 1e-7、2D/平板回帰 ≤0.1 %。**既定 0 で確定 (E_m 形が安全, ユーザ決定 2026-09-08)、opt-in** |

@@ -1,0 +1,9 @@
+# Daum & Gyarmathy (1968) minimum experimental onset curve for N2, read from Grossir & Rambaud 2014 Fig.4a (dashed). +-1.5 K reading error
+p_Pa,T_onset_K
+0.3,11
+1,14
+10,21
+100,32
+1000,43
+10000,53
+100000,70

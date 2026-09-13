@@ -14,6 +14,7 @@
 | ノート | area | 概要 |
 | --- | --- | --- |
 | [chemistry-finite-rate-h2-survey.md](investigations/chemistry-finite-rate-h2-survey.md) | `thermophysics / chemistry` | 有限速度化学 (H₂ 燃焼・ノズル上流の化学非平衡) 導入の文献調査と方針: 機構選定 (Jachimowski→Burke)、剛性処理 (decoupled point-implicit 種ブロック)、sensible datum + 反応熱陽注入、Phase 0–4 計画と検証 (Cantera/CEA/Burrows–Kurkov) (2026-09-04) |
+| [condensation-carrier-kantrowitz-air-survey.md](investigations/condensation-carrier-kantrowitz-air-survey.md) | `condensation` | carrier 中の非等温核生成補正 (Feder 一般形と Wysłouzil 条件の θ 見積り)、過冷却水 σ の実測状況と Tolman 長、空気/N2 凝縮 onset データ (Daum & Gyarmathy 最小 onset 曲線の読み取り値) |
 | [condensation-droplet-hypersonic-survey.md](investigations/condensation-droplet-hypersonic-survey.md) | `condensation / multiphase` | 極超音速燃焼風洞・飛翔体における凝縮液滴/雨滴の挙動 (風洞凝縮の蒸発vs成長・燃焼器到達 end-to-end・迎角依存) |
 | [node-slip-tangential-density-spurious-flow.md](investigations/node-slip-tangential-density-spurious-flow.md) | `boundary / discretization` | node slip 境界 + 接線密度勾配で市松状スプリアス接線流が定在する未修正バグの切り分け記録 (case/24 純伝導検証の副産物) |
 | [condensation-nitrogen-nozzle-flows-summary.md](investigations/condensation-nitrogen-nozzle-flows-summary.md) | `condensation` | "On Nitrogen Condensation in Hypersonic Nozzle Flows" 論文精読まとめ + Arthur 1952 形状の forge dry 再現 (PDF: [papers/condensation/](../papers/condensation/)) |

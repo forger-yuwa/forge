@@ -1,0 +1,192 @@
+// =============================================================================
+// test_cond_kantrowitz_carrier.cu  (host + device 単体検証; nvcc)
+//   plans/accepted/condensation-kantrowitz-carrier.md §5(5)/§6:
+//   (a) 純蒸気極限の解析値: mode 2 = (b−½)²/(c̃+½), mode 3 = 同 + 表面項 (1e-12)
+//   (b) Wysłouzil 条件 (230 K, ln S 3.4, Y_w 0.01095, N2 carrier): θ1=167.4 / θ2=4.05 / θ3=2.98 (±1 %)
+//   (c) 掃引 T 200–260 K × ln S 2–6 × Y_w 0.005–0.05 × g/Y_w 0–0.99: θ 有限・非負、Yv→0 で θ→0、Yc→0 で純蒸気形、
+//       局所 J 序列 J0 >= J3 >= J2 >= J1、q̂>0 (適用域)
+//   (d) mode 0/1 と sigmaScale 1.0 で旧関数値とビット同一 (mode 1 の旧式を再実装して比較)
+//   (e) 同じ入力を device で評価し host double と一致 (1e-12)
+//   build: nvcc --expt-relaxed-constexpr -I. -o test_kwc tests/unit/test_cond_kantrowitz_carrier.cu
+// =============================================================================
+#include <cstdio>
+#include <cmath>
+#include <vector>
+#include "../../cuda_forge/condensationSource_d.cuh"
+#include "../../cuda_forge/thermo_d.cuh"
+
+static int nfail = 0;
+static void check(const char* name, double a, double b, double tol) {
+    const double rel = std::fabs(a - b)/std::max(1e-300, std::fabs(a) + std::fabs(b))*2.0;
+    const bool ok = rel < tol; if (!ok) ++nfail;
+    printf("  [%s] %-46s a=% .8e b=% .8e rel=%.2e\n", ok ? "PASS" : "FAIL", name, a, b, rel);
+}
+static void checkb(const char* name, bool ok) { if (!ok) ++nfail; printf("  [%s] %s\n", ok ? "PASS" : "FAIL", name); }
+static SpeciesThermo makeSp(double MW, const double lo[9], const double hi[9]) {
+    SpeciesThermo s{}; s.MW = MW; s.sigma_LJ = 3.6; s.eps_kB = 97.0; s.Tlo = 200.0; s.Tmid = 1000.0; s.Thi = 6000.0;
+    for (int i = 0; i < 9; ++i) { s.low[i] = lo[i]; s.high[i] = hi[i]; } return s;
+}
+static const double N2_lo[9] = {2.210371497e4,-3.818461820e2,6.082738360,-8.530914410e-3,1.384646189e-5,-9.625793620e-9,2.519705809e-12,7.108460860e2,-1.076003744e1};
+static const double N2_hi[9] = {5.877124060e5,-2.239249073e3,6.066949220,-6.139685500e-4,1.491806679e-7,-1.923105485e-11,1.061954386e-15,1.283210415e4,-1.586640027e1};
+static const double H2O_lo[9] = {-3.947960830e4,5.755731020e2,9.317826530e-1,7.222712860e-3,-7.342557370e-6,4.955043490e-9,-1.336933246e-12,-3.303974310e4,1.724205775e1};
+static const double H2O_hi[9] = {1.034972096e6,-2.412698562e3,4.646110780,2.291998307e-3,-6.836830480e-7,9.426468930e-11,-4.821580530e-15,-1.384286509e4,-7.978148510e0};
+
+// kernel 側と同じ集計 (condensationSource_d.cu の car 構築を host で再現)
+static CondNucCarrier build_car(const SpeciesThermo* sp, int n, int iv, const double* Y, double g, double T) {
+    CondNucCarrier c; const double Mv = sp[iv].MW;
+    c.cvv_tilde = (thermo_cp_mass(sp[iv], T) - thermo_R_species(sp[iv]))*Mv/COND_RU;
+    c.a_v = std::max(Y[iv] - g, 0.0)/Mv; double sum = 0.0;
+    for (int i = 0; i < n; ++i) { if (i == iv || !(Y[i] > 0.0)) continue;
+        const double Mi = sp[i].MW, cvi = (thermo_cp_mass(sp[i], T) - thermo_R_species(sp[i]))*Mi/COND_RU;
+        sum += (Y[i]/Mi)*std::sqrt(Mv/Mi)*(cvi + 0.5); }
+    c.carrierSum = sum; return c;
+}
+// 旧 mode 1 (2026-09-10 版) の再実装
+static double theta1_old(const CondSpeciesProps& cp, double T, double gamma_gas) {
+    const double b = cond_latent(cp, T)/(cp.R*T); const double th = (2.0*(gamma_gas-1.0)/(gamma_gas+1.0))*b*(b-0.5); return th > 0.0 ? th : 0.0;
+}
+// 実 kernel (condensation_source_d) と同じ手順で float 保存量 (ro, roY[]) から衝突項を device 上で組む
+__global__ void car_dev(const SpeciesThermo* sp, int n, int iv, const float* ro, const float* const* roY, float g, double T, double* out) {
+    const double rod = (double)ro[0]; const double Yw = (double)roY[iv][0]/rod;
+    const SpeciesThermo& sv = sp[iv]; const double Mv = sv.MW;
+    out[2] = (thermo_cp_mass(sv, T) - thermo_R_species(sv))*Mv/COND_RU;          // cvv_tilde
+    out[0] = ((Yw - g) > 0.0 ? (Yw - g) : 0.0)/Mv;                                // a_v
+    double sum = 0.0;
+    for (int i = 0; i < n; ++i) { if (i == iv) continue; const double Yi = (double)roY[i][0]/rod; if (!(Yi > 0.0)) continue;
+        const double Mi = sp[i].MW, cvi = (thermo_cp_mass(sp[i], T) - thermo_R_species(sp[i]))*Mi/COND_RU; sum += (Yi/Mi)*sqrt(Mv/Mi)*(cvi + 0.5); }
+    out[1] = sum;
+}
+__global__ void theta_dev(CondSpeciesProps cp, double T, double lnS, int mode, double gam, CondNucCarrier car, double p_v, double rho_v, double* out) {
+    out[0] = cond_kantrowitz_theta(cp, T, lnS, mode, gam, &car);
+    double J, r; cond_nucleation(cp, T, p_v, rho_v, &J, &r, mode, gam, &car); out[1] = J; out[2] = r;
+}
+
+int main() {
+    const CondSpeciesProps h2o = condProps_H2O();
+    SpeciesThermo sp[2] = { makeSp(0.0280134, N2_lo, N2_hi), makeSp(0.0180153, H2O_lo, H2O_hi) };
+    const double gv = h2o.cp/h2o.cv;
+    printf("== (a) pure-vapor limits ==\n");
+    { const double T = 230.0, lnS = 3.4; const double b = cond_latent(h2o, T)/(h2o.R*T);
+      CondNucCarrier pure; pure.a_v = 1.0; pure.carrierSum = 0.0; pure.cvv_tilde = h2o.cv*h2o.M/COND_RU;
+      check("mode2 pure = (b-1/2)^2/(c+1/2)", cond_kantrowitz_theta(h2o, T, lnS, 2, gv, &pure), (b-0.5)*(b-0.5)/(pure.cvv_tilde+0.5), 1e-12);
+      check("mode3 pure = (b-1/2-lnS)^2/(c+1/2)", cond_kantrowitz_theta(h2o, T, lnS, 3, gv, &pure), (b-0.5-lnS)*(b-0.5-lnS)/(pure.cvv_tilde+0.5), 1e-12);
+      check("mode2 nullptr == pure struct", cond_kantrowitz_theta(h2o, T, lnS, 2, gv, nullptr), cond_kantrowitz_theta(h2o, T, lnS, 2, gv, &pure), 1e-15);
+      printf("      b=%.3f c~v,v=%.3f  theta1=%.3f theta2(pure)=%.3f theta3(pure)=%.3f\n", b, pure.cvv_tilde,
+             cond_kantrowitz_theta(h2o, T, lnS, 1, gv, nullptr), cond_kantrowitz_theta(h2o, T, lnS, 2, gv, &pure), cond_kantrowitz_theta(h2o, T, lnS, 3, gv, &pure)); }
+    printf("== (b) Wyslouzil condition ==\n");
+    { const double T = 230.0, lnS = 3.4, Y[2] = {0.98905, 0.01095}; const CondNucCarrier car = build_car(sp, 2, 1, Y, 0.0, T);
+      const double t1 = cond_kantrowitz_theta(h2o, T, lnS, 1, gv, &car), t2 = cond_kantrowitz_theta(h2o, T, lnS, 2, gv, &car), t3 = cond_kantrowitz_theta(h2o, T, lnS, 3, gv, &car);
+      printf("      a_v=%.4e carrierSum=%.4e cvv~=%.3f  theta1=%.3f theta2=%.4f theta3=%.4f  J/Jiso: %.4f %.4f %.4f\n", car.a_v, car.carrierSum, car.cvv_tilde, t1, t2, t3, 1/(1+t1), 1/(1+t2), 1/(1+t3));
+      check("theta1 = 167.4 (codex recomputation)", t1, 167.404, 1e-2); check("theta2 = 4.05", t2, 4.046, 1e-2); check("theta3 = 2.98", t3, 2.982, 1e-2);
+      // (e) device
+      double *d; cudaMalloc(&d, 3*sizeof(double)); double h[3];
+      const double pv = std::exp(lnS)*cond_psat(h2o, T), rv = pv/(h2o.R*T);
+      for (int m = 1; m <= 3; ++m) { theta_dev<<<1,1>>>(h2o, T, lnS, m, gv, car, pv, rv, d); cudaMemcpy(h, d, 3*sizeof(double), cudaMemcpyDeviceToHost);
+        double J, r; cond_nucleation(h2o, T, pv, rv, &J, &r, m, gv, &car);
+        char nm[64]; snprintf(nm, 64, "device theta mode %d == host", m); check(nm, h[0], cond_kantrowitz_theta(h2o, T, lnS, m, gv, &car), 1e-12);
+        snprintf(nm, 64, "device J mode %d == host", m); check(nm, h[1], J, 1e-12); }
+      cudaFree(d); }
+    printf("== (b2) float-input device species sum / source & perturbation consistency / pure N2 ==\n");
+    {
+        // float 保存量 (ro, roY0, roY1) → device で衝突項 → host double 参照 (float 丸めの影響を含めて 1e-6)
+        const float rof = 0.15f; const float Y0f = 0.98905f, Y1f = 0.01095f; const float roY0f = rof*Y0f, roY1f = rof*Y1f; const double g = 0.002; const double T = 213.8;
+        SpeciesThermo* dsp; cudaMalloc(&dsp, 2*sizeof(SpeciesThermo)); cudaMemcpy(dsp, sp, 2*sizeof(SpeciesThermo), cudaMemcpyHostToDevice);
+        float *dro, *dY0, *dY1; cudaMalloc(&dro, 4); cudaMalloc(&dY0, 4); cudaMalloc(&dY1, 4);
+        cudaMemcpy(dro, &rof, 4, cudaMemcpyHostToDevice); cudaMemcpy(dY0, &roY0f, 4, cudaMemcpyHostToDevice); cudaMemcpy(dY1, &roY1f, 4, cudaMemcpyHostToDevice);
+        float* hptr[2] = {dY0, dY1}; float** dptr; cudaMalloc(&dptr, 2*sizeof(float*)); cudaMemcpy(dptr, hptr, 2*sizeof(float*), cudaMemcpyHostToDevice);
+        double* dout; cudaMalloc(&dout, 3*sizeof(double)); car_dev<<<1,1>>>(dsp, 2, 1, dro, dptr, (float)g, T, dout);
+        double h[3]; cudaMemcpy(h, dout, 3*sizeof(double), cudaMemcpyDeviceToHost);
+        const double Yd[2] = {(double)roY0f/(double)rof, (double)roY1f/(double)rof}; const CondNucCarrier ref = build_car(sp, 2, 1, Yd, g, T);
+        check("device a_v (float inputs) == host", h[0], ref.a_v, 1e-6); check("device carrierSum == host", h[1], ref.carrierSum, 1e-6); check("device cvv~ == host", h[2], ref.cvv_tilde, 1e-12);
+        const double Yexact[2] = {0.98905, 0.01095}; const CondNucCarrier refx = build_car(sp, 2, 1, Yexact, g, T);
+        printf("      float-rounding effect on theta3: %.2e (rel)\n", std::fabs(cond_kantrowitz_theta(h2o, T, 3.4, 3, gv, &ref) - cond_kantrowitz_theta(h2o, T, 3.4, 3, gv, &refx))/cond_kantrowitz_theta(h2o, T, 3.4, 3, gv, &refx));
+        // 本体 (cond_nucleation) と摂動側 (cond_source_vector) が同じ carrier 項を使うと J は同一、渡し忘れ (nullptr) だと純蒸気形の J になる
+        const double lnS = 5.0, pv = std::exp(lnS)*cond_psat(h2o, T), rv = pv/(h2o.R*T); double Jm, rm, S0, S1, S2, Sg;
+        cond_nucleation(h2o, T, pv, rv, &Jm, &rm, 3, gv, &ref);
+        cond_source_vector(h2o, T, pv, rv, 0.0, 0.0, 0.0, &S0, &S1, &S2, &Sg, 3, 0, gv, 1.0e4, 3.18, 0, &ref);
+        check("source_vector J (Q0 source, q0=0) == nucleation J with same car", S0, Jm, 1e-14);
+        cond_source_vector(h2o, T, pv, rv, 0.0, 0.0, 0.0, &S0, &S1, &S2, &Sg, 3, 0, gv, 1.0e4, 3.18, 0, nullptr);
+        checkb("dropping car in the perturbation path would change J (guards against the src_jac mismatch)", std::fabs(S0 - Jm) > 1e-3*Jm);
+        // 温度摂動 (T+0.1, car 凍結) と Q1 摂動でも同じ car → J は T 依存のみ
+        double a0,a1,a2,ag; cond_source_vector(h2o, T + 0.1, pv, rv, 0.0, 0.0, 0.0, &a0,&a1,&a2,&ag, 3, 0, gv, 1.0e4, 3.18, 0, &ref);
+        double Jt, rt; cond_nucleation(h2o, T + 0.1, pv, rv, &Jt, &rt, 3, gv, &ref); check("T-perturbed source J == nucleation J(T+dT) with frozen car", a0, Jt, 1e-14);
+        // pure N2 (CPG: 種 DB 無し → carrierSum=0, cvv~ から) は Feder 純蒸気形
+        const CondSpeciesProps n2 = condProps_N2(); const double Tn = 45.0; const double bn = cond_latent(n2, Tn)/(n2.R*Tn);
+        CondNucCarrier pn; pn.a_v = 1.0; pn.carrierSum = 0.0; pn.cvv_tilde = n2.cv*n2.M/COND_RU;
+        check("pure N2 mode 2 = Feder pure form", cond_kantrowitz_theta(n2, Tn, 3.0, 2, 1.4, &pn), (bn-0.5)*(bn-0.5)/(pn.cvv_tilde+0.5), 1e-12);
+        check("pure N2 mode 1 (Kantrowitz, gamma 1.4) ~ mode 2 within 3 %", cond_kantrowitz_theta(n2, Tn, 3.0, 1, 1.4, &pn), cond_kantrowitz_theta(n2, Tn, 3.0, 2, 1.4, &pn), 3e-2);
+        cudaFree(dsp); cudaFree(dro); cudaFree(dY0); cudaFree(dY1); cudaFree(dptr); cudaFree(dout);
+    }
+    printf("== (b3) source vector with non-zero moments + kernel-mirrored jacobian (codex 2026-09-13 result M3) ==\n");
+    {
+        // 状態: Wysłouzil 230 K, ln S 3.4, TP carrier (N2 98.9 %), 液相あり (g=2e-3, Q0/Q1/Q2 は r̄=20 nm の単分散相当)
+        const double T = 230.0, lnS = 3.4, Y[2] = {0.98905, 0.01095}, Yw = Y[1], g = 2.0e-3, rho = 0.05;
+        const double psat = cond_psat(h2o, T), pv0 = std::exp(lnS)*psat, P = pv0/(Yw - g)*1.0;   // p_v = ρ(Y_w−g)R_w T ⇔ 全圧 P から逆算 (下で cond_vapor_state に渡す)
+        const double Rw = h2o.R; const double rod = pv0/((Yw - g)*Rw*T);   // ρ を p_v 整合に取る
+        const double rbar = 20.0e-9, rho_l = cond_rho_cond(h2o, T);
+        // cond_source_vector の入力は体積当たりの保存量 ρQn (codex 2026-09-13 result ② m2): 単分散 r̄ の N=ρg/(4/3 π ρ_l r̄³) [1/m³]
+        const double q0 = rod*g/((4.0/3.0)*COND_PI*rho_l*rbar*rbar*rbar), q1 = q0*rbar, q2 = q0*rbar*rbar;   // [1/m³, m/m³, m²/m³]
+        const CondNucCarrier car = build_car(sp, 2, 1, Y, g, T);
+        double pv, rv; cond_vapor_state(1, rod, P, T, g, Yw, Rw, &pv, &rv);
+        check("cond_vapor_state (carrier) p_v == rho (Yw-g) Rw T", pv, rod*(Yw - g)*Rw*T, 1e-12);
+        // (1) 非零モーメントの Sg/SQ1/SQ2 が核生成 + 成長の合成に一致 (kernel の式をそのまま)
+        double J, rs; cond_nucleation(h2o, T, pv, rv, &J, &rs, 3, gv, &car);
+        const double drdt = cond_growth(h2o, T, pv, q1/q0, rs, 0, 1.0e4, 3.18, 0), rn = COND_RNUC_FAC*rs;
+        double S0, S1, S2, Sg; cond_source_vector(h2o, T, pv, rv, q0, q1, q2, &S0, &S1, &S2, &Sg, 3, 0, gv, 1.0e4, 3.18, 0, &car);
+        checkb("growth active (drdt > 0, r_bar > r*)", drdt > 0.0 && q1/q0 > rs);
+        check("SQ0 = J", S0, J, 1e-12); check("SQ1 = J r_nuc + q0 drdt", S1, J*rn + q0*drdt, 1e-12);
+        check("SQ2 = J r_nuc^2 + 2 q1 drdt", S2, J*rn*rn + 2.0*q1*drdt, 1e-12);
+        check("Sg = 4/3 pi rho_l (J r_nuc^3 + 3 q2 drdt)", Sg, (4.0/3.0)*COND_PI*rho_l*(J*rn*rn*rn + 3.0*q2*drdt), 1e-12);
+        checkb("growth term dominates Sg at these moments (test is not degenerate to J only)", 3.0*q2*drdt > 10.0*J*rn*rn*rn);
+        // (2) kernel の src_jac ブロックと同じ手順: T+dT で蒸気状態を再評価して前進差分 dSg/dT → 中心差分と 1 % 以内、符号は負 (潜熱自己抑制)
+        const double dTp = 0.1; double pvp, rvp, pvm, rvm, a0,a1,a2,ag, m0,m1,m2,mg;
+        cond_vapor_state(1, rod, P, T + dTp, g, Yw, Rw, &pvp, &rvp); cond_source_vector(h2o, T + dTp, pvp, rvp, q0, q1, q2, &a0,&a1,&a2,&ag, 3, 0, gv, 1.0e4, 3.18, 0, &car);
+        cond_vapor_state(1, rod, P, T - dTp, g, Yw, Rw, &pvm, &rvm); cond_source_vector(h2o, T - dTp, pvm, rvm, q0, q1, q2, &m0,&m1,&m2,&mg, 3, 0, gv, 1.0e4, 3.18, 0, &car);
+        check("vapor state re-evaluated: p_v(T+dT) = rho (Yw-g) Rw (T+dT)", pvp, rod*(Yw - g)*Rw*(T + dTp), 1e-12);
+        const double dSg_fwd = (ag - Sg)/dTp, dSg_ctr = (ag - mg)/(2.0*dTp);
+        printf("      dSg/dT forward %.4e, central %.4e (1/(m3 s K)); Sg=%.4e\n", dSg_fwd, dSg_ctr, Sg);
+        checkb("dSg/dT < 0 (latent-heat self-limitation has the right sign)", dSg_fwd < 0.0);
+        check("forward vs central difference of Sg(T) within 2 %", dSg_fwd, dSg_ctr, 2e-2);
+        const double cvg = 718.0, L = cond_latent(h2o, T), dTdrog = (L - Rw*T)/(rod*cvg), sjg = -dSg_fwd*dTdrog;
+        checkb("sj_g = -dSg/dT dT/d(rho g) > 0 (diagonal damping, theta=1)", sjg > 0.0 && std::isfinite(sjg));
+        // (3) Q1 摂動 (kernel: dq1=0.01 q1, 他固定) → d(SQ1)/dq1 = q0 d(drdt)/dr̄ / q0 = d(drdt)/dr̄ の前進差分と一致、sj_Q1 = −(b1−SQ1)/dq1
+        const double dq1 = 0.01*q1; double b0,b1,b2,bg; cond_source_vector(h2o, T, pv, rv, q0, q1 + dq1, q2, &b0,&b1,&b2,&bg, 3, 0, gv, 1.0e4, 3.18, 0, &car);
+        const double drdt_p = cond_growth(h2o, T, pv, (q1 + dq1)/q0, rs, 0, 1.0e4, 3.18, 0);
+        check("SQ1 perturbation = q0 (drdt(r_bar+dr) - drdt(r_bar))", b1 - S1, q0*(drdt_p - drdt), 1e-10);
+        check("SQ0 unchanged by Q1 perturbation (J independent of moments)", b0, S0, 1e-15);
+        const double sjq1 = -(b1 - S1)/dq1; printf("      d(SQ1)/dq1 = %.4e (1/s), sj_Q1 = %.4e\n", (b1 - S1)/dq1, sjq1);
+        checkb("Q1 branch reached (q0>0) and sj_Q1 finite", std::isfinite(sjq1));
+        // Kelvin 効果で r̄ 増 → 成長率増 (1−r*/r̄ 因子) なので d(SQ1)/dq1 > 0 → kernel は sj_Q1<0 を 0 にクランプ (陰的減衰は入れない)。この符号を記録
+        printf("      note: d(drdt)/dr_bar %s 0 -> kernel sj_Q1 = %s\n", (drdt_p > drdt) ? ">" : "<=", (sjq1 < 0.0) ? "0 (clamped)" : "positive");
+    }
+    printf("== (c) sweep ==\n");
+    { int bad = 0, ntot = 0; double qmin = 1e300, tmax = 0;
+      for (double T : {200.0, 215.0, 230.0, 245.0, 260.0}) for (double lnS : {2.0, 3.0, 4.0, 5.0, 6.0}) for (double Yw : {0.005, 0.011, 0.02, 0.05}) for (double f : {0.0, 0.5, 0.9, 0.99}) {
+        const double Y[2] = {1.0 - Yw, Yw}; const double g = f*Yw; const CondNucCarrier car = build_car(sp, 2, 1, Y, g, T);
+        const double pv = std::exp(lnS)*cond_psat(h2o, T), rv = pv/(h2o.R*T);
+        double th[4], J[4], r;
+        for (int m = 0; m < 4; ++m) { th[m] = cond_kantrowitz_theta(h2o, T, lnS, m, gv, &car); cond_nucleation(h2o, T, pv, rv, &J[m], &r, m, gv, &car); }
+        const double b = cond_latent(h2o, T)/(h2o.R*T); qmin = std::min(qmin, b - 0.5 - lnS); tmax = std::max(tmax, th[1]);
+        bool ok = std::isfinite(th[2]) && std::isfinite(th[3]) && th[2] >= 0 && th[3] >= 0 && th[3] <= th[2] && th[2] <= th[1] && J[0] >= J[3] && J[3] >= J[2] && J[2] >= J[1];
+        // Yv → 0 で θ → 0 (単調減少)
+        const CondNucCarrier car99 = build_car(sp, 2, 1, Y, 0.999*Yw, T); if (!(cond_kantrowitz_theta(h2o, T, lnS, 3, gv, &car99) <= th[3])) ok = false;
+        ++ntot; if (!ok) { ++bad; printf("      FAIL T=%g lnS=%g Yw=%g g/Yw=%g th=%g %g %g %g\n", T, lnS, Yw, f, th[0], th[1], th[2], th[3]); }
+      }
+      // Yc → 0 で純蒸気形に一致
+      { const double T = 230.0, lnS = 3.4, Y[2] = {0.0, 1.0}; const CondNucCarrier car = build_car(sp, 2, 1, Y, 0.0, T); const double b = cond_latent(h2o, T)/(h2o.R*T);
+        check("Yc->0: mode2 = pure Feder", cond_kantrowitz_theta(h2o, T, lnS, 2, gv, &car), (b-0.5)*(b-0.5)/(car.cvv_tilde+0.5), 1e-12); }
+      { const double T = 230.0, lnS = 3.4, Y[2] = {0.98905, 0.01095}; const CondNucCarrier car = build_car(sp, 2, 1, Y, 0.01095, T);
+        check("Yv->0: theta3 -> 0", cond_kantrowitz_theta(h2o, T, lnS, 3, gv, &car) + 1.0, 1.0, 1e-15); }
+      printf("      %d/%d states ok; min q^ = %.2f (>0: Feder 形の適用域内), max theta1 = %.1f\n", ntot - bad, ntot, qmin, tmax);
+      check("sweep all ok", bad == 0 ? 1.0 : 0.0, 1.0, 1e-12); check("q^ > 0 over sweep", qmin > 0 ? 1.0 : 0.0, 1.0, 1e-12); }
+    printf("== (d) legacy paths bit-identical ==\n");
+    { int nb = 0; for (double T : {200.0, 230.0, 260.0}) for (double lnS : {2.0, 4.0, 6.0}) {
+        const double pv = std::exp(lnS)*cond_psat(h2o, T), rv = pv/(h2o.R*T); double J1, r1, J0, r0, Jn, rn;
+        cond_nucleation(h2o, T, pv, rv, &J1, &r1, 1, 1.40, nullptr); const double th_old = theta1_old(h2o, T, 1.40);
+        cond_nucleation(h2o, T, pv, rv, &J0, &r0, 0, 1.40, nullptr); (void)Jn; (void)rn;
+        if (J1 != J0*(1.0/(1.0+th_old))) ++nb;   // 旧式: corr=1; corr/=(1+θ); J=K e^x corr → J0*(1/(1+θ)) と厳密一致
+        if (cond_sigma(h2o, T) != h2o.sigmaScale*h2o_sigma(T)) ++nb; }
+      check("mode1 == old formula (bitwise) and sigmaScale 1.0 identity", nb == 0 ? 1.0 : 0.0, 1.0, 1e-12);
+      CondSpeciesProps hs = h2o; hs.sigmaScale = 1.03; check("sigmaScale 1.03 scales sigma", cond_sigma(hs, 230.0), 1.03*h2o_sigma(230.0), 1e-15); }
+    printf("%s (%d failures)\n", nfail ? "FAILED" : "ALL PASS", nfail); return nfail ? 1 : 0;
+}
