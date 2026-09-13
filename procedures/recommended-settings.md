@@ -32,7 +32,7 @@ time:
   last: {control: 0, nStepOuter: N}
   deltaT: {control: 1, dt: 1.0e-5, cfl: C, cfl_pseudo: C, implicitRelax: 0.7, blockDPLUR: 1, dt_min: 1.0e-8, dt_max: 1.0, detectNaN: 1}
   timeIntegration: 11
-  nStepInner: 5
+  nStepInner: 4                                          # 2026-09-12: 5→4 (3D node SST の 12000 step 継続で 3 と 5 の残差経路が一致、余裕で 4)
 output: {level: 1}                                      # 保存量 + 原始量 + h0 (2026-09-08〜)
 ```
 
@@ -41,7 +41,12 @@ output: {level: 1}                                      # 保存量 + 原始量 
   **平面メッシュ** (押し出し 2 ノード spanwise は 2 次 MUSCL の散逸が消えて発散)。
 - 対流は SLAU。`convMethod: 1, limiter: 2` が本段の標準、`limiter: 0` は使わない、**`mesh.bndFirstOrder` は禁止**。
 - 定常は陰解法 `timeIntegration: 11` + `blockDPLUR: 1`。実効 CFL は `cfl_pseudo` (§solver-settings「CFL の定義」)。
-  `cfl` は表示用なので同じ値を入れておく。`nStepInner` は 5 (node NS の soft/mid 段は 10)。
+  `cfl` は表示用なので同じ値を入れておく。**`nStepInner` は 4** (node NS の soft/mid 段は 10)。
+  根拠 (2026-09-12, 3D node SST TP case/16 run_0410–0412): 本段の `nStepInner: 3` は 5 と残差経路が全列一致
+  (到達 step も同じ) で 1 step が 11 % 速く、2 は発散 → 余裕を見て 4 をユーザ決定 (旧レシピ 5 は過剰反復)。
+- **TP の温度反転は `physProp.thermoFloat: 1` が既定** (2026-09-12 ユーザ決定): float Newton + double 研磨 (収束まで最大 3 段, 通常 1 段) で
+  基準バイナリと同じ (未収束プラトーの) 状態に留まり、12000 step 後の壁圧差 ≤1e-4・温度反転誤差 ≤4e-10·T、1 step −13 %。`thermoHrefTemp: 298.15` が前提で、datum 無し config では
+  自動で 0 (double Newton) に落ちて警告が出る (plan performance-3d-node-sst-speedup)。
 - **`cfl_pseudo` の目安**: node NS ノズル 4〜6 + `implicitRelax: 0.7` (上限は EOS 圧力床の洗浄で決まり、
   relax のみ有効: cfl 8 + relax 0.7 ≈ 3〜4 倍速 [implicit-cfl-ceiling-eos-floor])、Euler 設計評価 4、
   bump など易しい流れは 50 まで。TP 多成分の陰解法は 0.5〜2 から (§3)。

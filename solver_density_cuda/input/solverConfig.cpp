@@ -216,6 +216,8 @@ void solverConfig::read(std::string fname)
                 std::exit(1);
             }
         }
+        if (config["mesh"]["primPack"]) this->primPack = config["mesh"]["primPack"].as<int>();
+        if (config["mesh"]["renumber"]) { this->meshRenumber = config["mesh"]["renumber"].as<std::string>(); std::cout << "'renumber' in 'mesh': " << this->meshRenumber << std::endl; }
         if (config["mesh"]["gradLSQ"]) {
             this->gradLSQ = config["mesh"]["gradLSQ"].as<int>();
             if (this->gradLSQ < 0 || this->gradLSQ > 2) {
@@ -326,6 +328,8 @@ void solverConfig::read(std::string fname)
         this->implicitRelax = getOptionalValidatedValue<double>(deltaT, "implicitRelax", 1.0, "time.deltaT");
         this->updateGuardAlpha = getOptionalValidatedValue<double>(deltaT, "updateGuardAlpha", 0.0, "time.deltaT");
         this->lineImplicit = getOptionalValidatedValue<int>(deltaT, "lineImplicit", 0, "time.deltaT");
+        this->blockDPLURDiagCache = getOptionalValidatedValue<int>(deltaT, "blockDPLURDiagCache", 0, "time.deltaT");
+        this->blockDPLURDqPack = getOptionalValidatedValue<int>(deltaT, "blockDPLURDqPack", 0, "time.deltaT");
         // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md):
         //   lineKFreeze: dual-time のサブ反復間で K/diag/LU 分解を凍結 (subiter 0 のみ抽出・分解)。
         //   lineViscCoupling: line 面にスカラー粘性結合 (K += α·I, 対角は 2α→α で真の [−α,2α,−α] 化)。
@@ -648,6 +652,16 @@ void solverConfig::read(std::string fname)
         if (physProp["speciesDBFile"])          this->speciesDBFile = physProp["speciesDBFile"].as<std::string>();
         if (physProp["speciesDiffusionMethod"]) this->speciesDiffusionMethod = physProp["speciesDiffusionMethod"].as<int>();
         if (physProp["thermoHrefTemp"])         this->thermoHrefTemp = physProp["thermoHrefTemp"].as<double>();
+        const bool thermoFloatExplicit = static_cast<bool>(physProp["thermoFloat"]);
+        if (thermoFloatExplicit)                this->thermoFloat = physProp["thermoFloat"].as<int>();
+        if (this->thermoFloat != 0 && this->thermalMethod == 2 && !(this->thermoHrefTemp > 0.0)) {
+            if (thermoFloatExplicit) {
+                throw std::runtime_error("physProp.thermoFloat=1 requires physProp.thermoHrefTemp > 0 (sensible-enthalpy datum; the float Newton stage does not converge with absolute NASA enthalpies).");
+            }
+            this->thermoFloat = 0;
+            std::cout << "[config] physProp.thermoFloat: default 1 disabled because thermoHrefTemp is not set (absolute NASA enthalpy datum); set thermoHrefTemp: 298.15 to enable the hybrid inversion." << std::endl;
+        }
+        if (this->thermalMethod == 2) std::cout << "'thermoFloat' in 'physProp': " << this->thermoFloat << (this->thermoFloat ? " (hybrid float Newton + double polish)" : " (double Newton)") << std::endl;
         if (physProp["chemistry"]) {
             const YAML::Node ch = physProp["chemistry"];
             this->chemEnabled       = getOptionalValidatedValue<int>(ch, "enabled", 0, "physProp.chemistry");

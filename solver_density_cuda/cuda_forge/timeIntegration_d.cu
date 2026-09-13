@@ -647,58 +647,63 @@ __global__ void implicit_defect_correction_d
 // 5×5 行列を複数保持しレジスタ消費が大きいため、block 上限を超えないよう __launch_bounds__ で
 // 1 block あたりスレッド数を 128 に制限する（起動時の "too many resources" を回避）。
 #define BLOCK_DPLUR_THREADS 128
+// 占有率実験用: __launch_bounds__ の最小常駐ブロック数 (既定 1 = 従来どおり制限なし, 128 regs → 占有率 ~28 %)。
+// -DBLOCK_DPLUR_MINBLOCKS=n でビルドすると regs ≤ 65536/(128 n) に制限され (spill と引き換えに) 占有率が上がる。
+#ifndef BLOCK_DPLUR_MINBLOCKS
+#define BLOCK_DPLUR_MINBLOCKS 1
+#endif
 // block-DPLUR の閉形式 FVS 版。線形 solve の内部精度を ST (float 既定 / double で軸対称近軸を根治) で
 // テンプレート化。残差/状態 (flow_float=float) を ST へキャストして取り込み、R/L を作らず閉形式で
 // diag/nbr を畳み、ST で in-place 5×5 solve、補正を float dq_new へ書戻す (混合精度 iterative refinement)。
 // 詳細: plans/archived/precision-mixed-axisym.md。
 template<typename ST>
-__global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correction_block_d
+__global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) implicit_defect_correction_block_d
 (
  int loop,
  flow_float dt,
- flow_float* dt_local,
+ const flow_float* __restrict__ dt_local,
  flow_float implicit_relax,
- flow_float* gamma_arr,   // per-cell γ (TP: γ_mix(T), CPG: cfg.gamma)。frozen-coefficient Jacobian 用
+ const flow_float* __restrict__ gamma_arr,   // per-cell γ (TP: γ_mix(T), CPG: cfg.gamma)。frozen-coefficient Jacobian 用
  int thermallyPerfect,    // 1: TP 固有系 (実 Ht・χ_eos=c²−κh, κ=γ−1), 0: CPG 閉形式 (従来・ビット不変)
 
  geom_int nCells_all , geom_int nCells,
- geom_float* vol,
- geom_int* plane_cells,
- geom_int* cell_planes_index,
- geom_int* cell_planes,
- geom_float* ccx,
- geom_float* ccy,
- geom_float* ccz,
- geom_float* sx,
- geom_float* sy,
- geom_float* sz,
- geom_float* ss,
+ const geom_float* __restrict__ vol,
+ const geom_int* __restrict__ plane_cells,
+ const geom_int* __restrict__ cell_planes_index,
+ const geom_int* __restrict__ cell_planes,
+ const geom_float* __restrict__ ccx,
+ const geom_float* __restrict__ ccy,
+ const geom_float* __restrict__ ccz,
+ const geom_float* __restrict__ sx,
+ const geom_float* __restrict__ sy,
+ const geom_float* __restrict__ sz,
+ const geom_float* __restrict__ ss,
 
- flow_float* ro,
- flow_float* roUx,
- flow_float* roUy,
- flow_float* roUz,
- flow_float* roe,
+ const flow_float* __restrict__ ro,
+ const flow_float* __restrict__ roUx,
+ const flow_float* __restrict__ roUy,
+ const flow_float* __restrict__ roUz,
+ const flow_float* __restrict__ roe,
 
  flow_float laminar_visc,
- flow_float* vis_turb,
- flow_float* sonic,
- flow_float* Ux,
- flow_float* Uy,
- flow_float* Uz,
- flow_float* Ht,
+ const flow_float* __restrict__ vis_turb,
+ const flow_float* __restrict__ sonic,
+ const flow_float* __restrict__ Ux,
+ const flow_float* __restrict__ Uy,
+ const flow_float* __restrict__ Uz,
+ const flow_float* __restrict__ Ht,
 
- flow_float* res_ro,
- flow_float* res_roUx,
- flow_float* res_roUy,
- flow_float* res_roUz,
- flow_float* res_roe,
+ const flow_float* __restrict__ res_ro,
+ const flow_float* __restrict__ res_roUx,
+ const flow_float* __restrict__ res_roUy,
+ const flow_float* __restrict__ res_roUz,
+ const flow_float* __restrict__ res_roe,
 
- flow_float* dq_old_0,
- flow_float* dq_old_1,
- flow_float* dq_old_2,
- flow_float* dq_old_3,
- flow_float* dq_old_4,
+ const flow_float* __restrict__ dq_old_0,
+ const flow_float* __restrict__ dq_old_1,
+ const flow_float* __restrict__ dq_old_2,
+ const flow_float* __restrict__ dq_old_3,
+ const flow_float* __restrict__ dq_old_4,
 
  flow_float* dq_new_0,
  flow_float* dq_new_1,
@@ -720,7 +725,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
 
  // 軸対称ソースヤコビアン用（isAxisymmetric==1 のときのみ使用）
  int isAxisymmetric,
- flow_float* A_planar,
+ const flow_float* __restrict__ A_planar,
 
  // 軸対称 r 床 (axisymMethod==0): ccy < axisRFloor の帯は hoop ソース不課につき Jacobian も課さない。
  flow_float axisRFloor,
@@ -730,23 +735,23 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
 
  // node-centered 軸対称: 軸上 CV で半径方向運動量 (roUy, index2) 行を decouple する (nullptr 可)。
  // SU2 流の対称面を Jacobian 内で課す = solve の外で状態を手術せず一貫して dq_roUy=0 を得る。
- geom_int* axis_flag,     // (未使用: 旧 nodeAxisDirichlet の全 5 行 decouple。常に nullptr)
+ const geom_int* __restrict__ axis_flag,     // (未使用: 旧 nodeAxisDirichlet の全 5 行 decouple。常に nullptr)
  // node × 軸対称: 軸ノードで roUy 行 (index 2) のみ単位行化 (nullptr で無効)。
- geom_int* axis_ur_flag,
+ const geom_int* __restrict__ axis_ur_flag,
 
  // axisymMethod==1 (isAxisymmetric enc==2) の軸ソース Jacobian ガード: 軸上ノード (==1) はソース 0 なので
  // Jacobian も加えない。decouple 用 axis_flag (nodeAxisDirichlet ゲート) とは独立に渡す (nullptr 可)。
- geom_int* axis_flag_src,
+ const geom_int* __restrict__ axis_flag_src,
 
  // node-centered 壁 no-slip: 壁ノードで運動量3行 (index1=roUx,2=roUy,3=roUz) を decouple する (nullptr 可)。
  // SU2 `DeleteValsRowi` 相当。残差射影だけでは block-DPLUR が壁運動量を連成したまま dq≠0 を返し速度 drift
  // するのを防ぐ。連続(行0)・エネルギー(行4)は保持。methods/discretization.md §7.2.1。
- geom_int* wall_flag,
+ const geom_int* __restrict__ wall_flag,
 
  // node-centered 等温壁: 壁ノードでエネルギー行 (index4=roe) を decouple する (nullptr 可)。
  // 壁ノード T ピン (applyNodeIsothermalWallPin / WMLES 等温 pin) と対。ピンで状態を上書きしながら
  // エネルギー行を連成したまま解くと Jacobian 不整合で発散する (2026-07-20 純伝導検証で実測)。
- geom_int* iso_wall_flag,
+ const geom_int* __restrict__ iso_wall_flag,
 
  // node-centered 弱形式 (Phase 2, 5e): node モードはゴーストセルを使わない。境界半割面 (has_nbr=false=ゴースト
  // 側) をこの node-to-node Jacobian ループから完全に除外する (continue)。境界ノードは物理境界上に乗るため
@@ -763,7 +768,18 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
  flow_float* Kprev,
  flow_float* Knext,
  int storeLU,
- int lineViscCoupling
+ int lineViscCoupling,
+ // 対角キャッシュ (plans/active/performance-3d-node-sst-speedup.md §4.2-4): 1 のとき loop==0 で組んだ対角 5×5
+ // (拘束行の単位行化込み) を diag_** に保存し、loop>0 は対角組立・粘性対角・軸対称 Jacobian・近傍幾何読みを省略して
+ // 保存値を読む。状態は sweep 中凍結なので結果はビット同一。線形 solve・rhs 拘束・近傍積は毎 sweep 従来どおり。
+ // 呼び出し側で float・point 経路 (line_prev==nullptr) に限定する。
+ int useDiagCache,
+ // 近傍 dq の AoS 版 (stride 8 floats = 32 B セクタ整列, [0..4] を使用)。非 nullptr のとき近傍 gather は
+ // dq_pack_old から float4+float の 2 ロード (SoA 5 配列の 5 ロード = 5 セクタから 1 セクタへ)。dq_pack_new には
+ // dq_new と同じ値を書く。SoA の dq_new_* も従来どおり書く (commit・周期ミラー・診断が読む)。
+ // line-implicit / node 周期 (SoA だけを書き換える経路) では呼び出し側が nullptr を渡す。
+ const flow_float* __restrict__ dq_pack_old,
+ flow_float* dq_pack_new
 )
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
@@ -779,12 +795,14 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
         const ST velocity_z = static_cast<ST>(Uz[ic]);
         const ST local_sonic = max(static_cast<ST>(sonic[ic]), static_cast<ST>(1.0e-8));
         const ST local_Ht = static_cast<ST>(Ht[ic]);   // 一般EOS固有系のエネルギー成分 (TP)
-        const ST nu_eff = (static_cast<ST>(laminar_visc) + max(static_cast<ST>(vis_turb[ic]), static_cast<ST>(0.0))) / density;
-
         // line-implicit: 自 CV の役割 (ラインに載るか) と decouple 行マスク (保存 K の行ゼロ化用)
         const geom_int lp = (line_prev != nullptr) ? line_prev[ic] : (geom_int)(-1);
         const geom_int ln_ = (line_next != nullptr) ? line_next[ic] : (geom_int)(-1);
         const bool onLine = (lp >= 0) || (ln_ >= 0);
+        // 対角キャッシュを読む sweep か (loop>0 かつ line に載らない CV)。
+        const bool cached = (useDiagCache != 0) && (loop > 0) && !onLine;
+        ST nu_eff = static_cast<ST>(0.0);
+        if (!cached) nu_eff = (static_cast<ST>(laminar_visc) + max(static_cast<ST>(vis_turb[ic]), static_cast<ST>(0.0))) / density;
         bool rowDec[5] = {false, false, false, false, false};
         if (onLine) {
             if (axis_ur_flag != nullptr && axis_ur_flag[ic] == 1) rowDec[2] = true;
@@ -792,15 +810,16 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
             if (iso_wall_flag != nullptr && iso_wall_flag[ic] == 1) rowDec[4] = true;
         }
 
-        if (loop == 0) {
-            dq_old_0[ic] = 0.0; dq_old_1[ic] = 0.0; dq_old_2[ic] = 0.0; dq_old_3[ic] = 0.0; dq_old_4[ic] = 0.0;
-        }
+        // (loop==0 の dq_old ゼロ化は blockDPLURSolve の cudaMemset が担う。dq_old は本カーネルでは読み取り専用
+        //  (const __restrict__) にして read-only キャッシュ経路を許す。dq_new とは別バッファ = 別名無し。)
 
         ST diag_block[5][5];
         block_dplur::zero5x5(diag_block);
-        block_dplur::add_identity_scaled(diag_block, static_cast<ST>(v / max(dt_l, static_cast<ST>(1.0e-30))));
-        // dual-time: 物理時間項 a·V/Δt を対角へ（定常は unsteady_diag==0）。
-        block_dplur::add_identity_scaled(diag_block, v * static_cast<ST>(unsteady_diag));
+        if (!cached) {
+            block_dplur::add_identity_scaled(diag_block, static_cast<ST>(v / max(dt_l, static_cast<ST>(1.0e-30))));
+            // dual-time: 物理時間項 a·V/Δt を対角へ（定常は unsteady_diag==0）。
+            block_dplur::add_identity_scaled(diag_block, v * static_cast<ST>(unsteady_diag));
+        }
 
         ST rhs[5] = {
             static_cast<ST>(res_ro[ic]),
@@ -835,18 +854,37 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
             // ライン面: dq_old の lag 参照をスキップ (Thomas が厳密連成) — sdq=0 で対角 A⁺ だけ積む
             const bool isLineFace = onLine && has_nbr && (other_ic == lp || other_ic == ln_);
             ST sdq[5] = {static_cast<ST>(0.0), static_cast<ST>(0.0), static_cast<ST>(0.0), static_cast<ST>(0.0), static_cast<ST>(0.0)};
-            if (has_nbr && !isLineFace) {
-                sdq[0] = face_area * static_cast<ST>(dq_old_0[other_ic]);
-                sdq[1] = face_area * static_cast<ST>(dq_old_1[other_ic]);
-                sdq[2] = face_area * static_cast<ST>(dq_old_2[other_ic]);
-                sdq[3] = face_area * static_cast<ST>(dq_old_3[other_ic]);
-                sdq[4] = face_area * static_cast<ST>(dq_old_4[other_ic]);
+            // loop==0 は dq_old≡0 (blockDPLURSolve の memset) なので gather を省く (寄与は厳密に 0 = ビット同一)。
+            if (has_nbr && !isLineFace && loop > 0) {
+                if (dq_pack_old != nullptr) {
+                    const float4 q4 = *reinterpret_cast<const float4*>(dq_pack_old + (size_t)other_ic * 8);
+                    const flow_float q5 = dq_pack_old[(size_t)other_ic * 8 + 4];
+                    sdq[0] = face_area * static_cast<ST>(q4.x);
+                    sdq[1] = face_area * static_cast<ST>(q4.y);
+                    sdq[2] = face_area * static_cast<ST>(q4.z);
+                    sdq[3] = face_area * static_cast<ST>(q4.w);
+                    sdq[4] = face_area * static_cast<ST>(q5);
+                } else {
+                    sdq[0] = face_area * static_cast<ST>(dq_old_0[other_ic]);
+                    sdq[1] = face_area * static_cast<ST>(dq_old_1[other_ic]);
+                    sdq[2] = face_area * static_cast<ST>(dq_old_2[other_ic]);
+                    sdq[3] = face_area * static_cast<ST>(dq_old_3[other_ic]);
+                    sdq[4] = face_area * static_cast<ST>(dq_old_4[other_ic]);
+                }
             }
-            block_dplur::accumulate_split_jacobian_cf<ST>(
-                gamma, nx, ny, nz, velocity_x, velocity_y, velocity_z,
-                local_sonic, local_Ht, thermallyPerfect != 0,
-                face_area, has_nbr, sdq, diag_block, neighbor_accum
-            );
+            if (cached) {
+                block_dplur::accumulate_split_jacobian_cf<ST, false>(
+                    gamma, nx, ny, nz, velocity_x, velocity_y, velocity_z,
+                    local_sonic, local_Ht, thermallyPerfect != 0,
+                    face_area, has_nbr, sdq, diag_block, neighbor_accum
+                );
+            } else {
+                block_dplur::accumulate_split_jacobian_cf<ST>(
+                    gamma, nx, ny, nz, velocity_x, velocity_y, velocity_z,
+                    local_sonic, local_Ht, thermallyPerfect != 0,
+                    face_area, has_nbr, sdq, diag_block, neighbor_accum
+                );
+            }
             // K 行列の列抽出 (状態凍結ゆえ storeLU=loop0 のみ): nbr 寄与は sdq に線形なので
             // 単位ベクトル×face_area で列が得られる (対角へは dummy に捨てる)。decouple 行は 0。
             if (isLineFace && storeLU != 0) {
@@ -876,7 +914,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
             // 退化 (dcc≈0) し 2ν·delta/dcc が爆発→対角巨大→dq≈0 で境界ノードが凍結する (出口 BL 崩壊・残差
             // プラトーの真因)。境界粘性は弱形式カーネルが残差側で担う。内部 node-to-node 面のみ粘性対角を課す。
             // cell モード (isNode=0) は境界ゴーストが法線方向に正しく置かれ非退化なので従来どおり境界面も課す。
-            if (!(isNode != 0 && !has_nbr)) {
+            if (!cached && !(isNode != 0 && !has_nbr)) {
                 const ST dcc_x = static_cast<ST>(ccx[other_ic]) - static_cast<ST>(ccx[ic]);
                 const ST dcc_y = static_cast<ST>(ccy[other_ic]) - static_cast<ST>(ccy[ic]);
                 const ST dcc_z = static_cast<ST>(ccz[other_ic]) - static_cast<ST>(ccz[ic]);
@@ -914,7 +952,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
 
         // 軸対称ソース項のヤコビアンを対角ブロックに加える（roUy 行 = index 2）。詳細は実装ドキュメント参照。
         // axisRFloor 帯 (r 床, ソース不課) は Jacobian も課さない。
-        if (isAxisymmetric == 1 &&
+        if (!cached && isAxisymmetric == 1 &&
             !(static_cast<ST>(axisRFloor) > static_cast<ST>(0.0) && static_cast<ST>(ccy[ic]) < static_cast<ST>(axisRFloor))) {
             const ST A_pl = static_cast<ST>(A_planar[ic]);
             const ST r_eff = max(v / max(A_pl, static_cast<ST>(1.0e-30)), static_cast<ST>(1.0e-30));
@@ -929,7 +967,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
             diag_block[2][4] += -A_pl * g1;
             // 診断: 近軸半径音響スペクトル半径 α·A_pl·c を roUy 対角に補う (FORGE_AXIS_DIAG_ALPHA>0 のみ)。
             diag_block[2][2] += static_cast<ST>(g_axisDiagAlpha) * A_pl * local_sonic;
-        } else if (isAxisymmetric == 2) {
+        } else if (!cached && isAxisymmetric == 2) {
             // SU2 流 (axisymMethod==1) 非粘性軸対称ソースの解析 Jacobian (CSourceAxisymmetric_Flow 移植,
             // 行/列 = [ro, roUx, roUy, roe] → forge [0,1,2,4])。forge 対角は -∂S/∂U = +SU2 jacobian。
             // 軸ノード (axis_flag_src==1) と y≤eps はソース 0 のためスキップ。γ は frozen (gamma_arr)。
@@ -961,8 +999,10 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
 
         // node × 軸対称: 軸ノードの半径運動量行のみ decouple (dq_roUy=0)。状態は enforceAxisSymmetry がピン。
         if (axis_ur_flag != nullptr && axis_ur_flag[ic] == 1) {
-            for (int jj = 0; jj < 5; ++jj) diag_block[2][jj] = static_cast<ST>(0.0);
-            diag_block[2][2] = static_cast<ST>(1.0);
+            if (!cached) {
+                for (int jj = 0; jj < 5; ++jj) diag_block[2][jj] = static_cast<ST>(0.0);
+                diag_block[2][2] = static_cast<ST>(1.0);
+            }
             rhs[2] = static_cast<ST>(0.0);
         }
 
@@ -972,8 +1012,10 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
         // 壁運動量を連成し dq≠0 を返して壁速度が drift する問題を Jacobian 整合で根治する。
         if (wall_flag != nullptr && wall_flag[ic] == 1) {
             for (int row = 1; row <= 3; ++row) {
-                for (int jj = 0; jj < 5; ++jj) diag_block[row][jj] = static_cast<ST>(0.0);
-                diag_block[row][row] = static_cast<ST>(1.0);
+                if (!cached) {
+                    for (int jj = 0; jj < 5; ++jj) diag_block[row][jj] = static_cast<ST>(0.0);
+                    diag_block[row][row] = static_cast<ST>(1.0);
+                }
                 rhs[row] = static_cast<ST>(0.0);
             }
         }
@@ -981,9 +1023,27 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
         // 等温壁ノード: エネルギー行 (4) も単位行に置換し dq_roe=0 → 壁ノード T は pin (applyBconds 位相) が
         // 一意に決める。連続 (0) 行は保持 (ρ は保存式で発展し P=ρRTw が追従)。
         if (iso_wall_flag != nullptr && iso_wall_flag[ic] == 1) {
-            for (int jj = 0; jj < 5; ++jj) diag_block[4][jj] = static_cast<ST>(0.0);
-            diag_block[4][4] = static_cast<ST>(1.0);
+            if (!cached) {
+                for (int jj = 0; jj < 5; ++jj) diag_block[4][jj] = static_cast<ST>(0.0);
+                diag_block[4][4] = static_cast<ST>(1.0);
+            }
             rhs[4] = static_cast<ST>(0.0);
+        }
+
+        // 対角キャッシュ: loop>0 は保存値を読む / loop==0 (useDiagCache かつ line 外) は組んだ対角を保存する。
+        // ST=float・point 経路に限定して呼ばれる (呼び出し側ゲート) ので、保存/読込で丸めは発生しない (ビット同一)。
+        if (cached) {
+            diag_block[0][0]=static_cast<ST>(diag_00[ic]); diag_block[0][1]=static_cast<ST>(diag_01[ic]); diag_block[0][2]=static_cast<ST>(diag_02[ic]); diag_block[0][3]=static_cast<ST>(diag_03[ic]); diag_block[0][4]=static_cast<ST>(diag_04[ic]);
+            diag_block[1][0]=static_cast<ST>(diag_10[ic]); diag_block[1][1]=static_cast<ST>(diag_11[ic]); diag_block[1][2]=static_cast<ST>(diag_12[ic]); diag_block[1][3]=static_cast<ST>(diag_13[ic]); diag_block[1][4]=static_cast<ST>(diag_14[ic]);
+            diag_block[2][0]=static_cast<ST>(diag_20[ic]); diag_block[2][1]=static_cast<ST>(diag_21[ic]); diag_block[2][2]=static_cast<ST>(diag_22[ic]); diag_block[2][3]=static_cast<ST>(diag_23[ic]); diag_block[2][4]=static_cast<ST>(diag_24[ic]);
+            diag_block[3][0]=static_cast<ST>(diag_30[ic]); diag_block[3][1]=static_cast<ST>(diag_31[ic]); diag_block[3][2]=static_cast<ST>(diag_32[ic]); diag_block[3][3]=static_cast<ST>(diag_33[ic]); diag_block[3][4]=static_cast<ST>(diag_34[ic]);
+            diag_block[4][0]=static_cast<ST>(diag_40[ic]); diag_block[4][1]=static_cast<ST>(diag_41[ic]); diag_block[4][2]=static_cast<ST>(diag_42[ic]); diag_block[4][3]=static_cast<ST>(diag_43[ic]); diag_block[4][4]=static_cast<ST>(diag_44[ic]);
+        } else if (useDiagCache != 0 && !onLine) {
+            diag_00[ic]=static_cast<flow_float>(diag_block[0][0]); diag_01[ic]=static_cast<flow_float>(diag_block[0][1]); diag_02[ic]=static_cast<flow_float>(diag_block[0][2]); diag_03[ic]=static_cast<flow_float>(diag_block[0][3]); diag_04[ic]=static_cast<flow_float>(diag_block[0][4]);
+            diag_10[ic]=static_cast<flow_float>(diag_block[1][0]); diag_11[ic]=static_cast<flow_float>(diag_block[1][1]); diag_12[ic]=static_cast<flow_float>(diag_block[1][2]); diag_13[ic]=static_cast<flow_float>(diag_block[1][3]); diag_14[ic]=static_cast<flow_float>(diag_block[1][4]);
+            diag_20[ic]=static_cast<flow_float>(diag_block[2][0]); diag_21[ic]=static_cast<flow_float>(diag_block[2][1]); diag_22[ic]=static_cast<flow_float>(diag_block[2][2]); diag_23[ic]=static_cast<flow_float>(diag_block[2][3]); diag_24[ic]=static_cast<flow_float>(diag_block[2][4]);
+            diag_30[ic]=static_cast<flow_float>(diag_block[3][0]); diag_31[ic]=static_cast<flow_float>(diag_block[3][1]); diag_32[ic]=static_cast<flow_float>(diag_block[3][2]); diag_33[ic]=static_cast<flow_float>(diag_block[3][3]); diag_34[ic]=static_cast<flow_float>(diag_block[3][4]);
+            diag_40[ic]=static_cast<flow_float>(diag_block[4][0]); diag_41[ic]=static_cast<flow_float>(diag_block[4][1]); diag_42[ic]=static_cast<flow_float>(diag_block[4][2]); diag_43[ic]=static_cast<flow_float>(diag_block[4][3]); diag_44[ic]=static_cast<flow_float>(diag_block[4][4]);
         }
 
         if (onLine) {
@@ -1027,12 +1087,14 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
         dq_new_2[ic] = static_cast<flow_float>(correction[2]);
         dq_new_3[ic] = static_cast<flow_float>(correction[3]);
         dq_new_4[ic] = static_cast<flow_float>(correction[4]);
-        // rhs_** は読者が無いが従来通り残置（診断用）。
-        rhs_0[ic] = static_cast<flow_float>(rhs[0]);
-        rhs_1[ic] = static_cast<flow_float>(rhs[1]);
-        rhs_2[ic] = static_cast<flow_float>(rhs[2]);
-        rhs_3[ic] = static_cast<flow_float>(rhs[3]);
-        rhs_4[ic] = static_cast<flow_float>(rhs[4]);
+        if (dq_pack_new != nullptr) {
+            *reinterpret_cast<float4*>(dq_pack_new + (size_t)ic * 8) =
+                make_float4(static_cast<flow_float>(correction[0]), static_cast<flow_float>(correction[1]),
+                            static_cast<flow_float>(correction[2]), static_cast<flow_float>(correction[3]));
+            dq_pack_new[(size_t)ic * 8 + 4] = static_cast<flow_float>(correction[4]);
+        }
+        // rhs_** の診断書き出しは撤去 (読者なし。5 配列×sweep の書込 ≈240 MB/step を節約, 2026-09-12)。
+        // line 経路 (上の onLine 分岐) は Thomas カーネルが rhs を読むので従来どおり書く。
         }
     }
 }
@@ -1225,8 +1287,14 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
 
 // block DPLUR の sweep 間バッファ入れ替え。ドライバ側から各 sweep 後に明示的に呼ぶ
 // （旧実装は wrapper 内部で暗黙に swap していたが、古典 DPLUR では制御フローを明示化する）。
+// 近傍 dq の AoS バッファ (stride 8)。wrapper で nCells_all に合わせて確保し、swap で old/new を入れ替える。
+static flow_float* g_dqPackOld = nullptr;
+static flow_float* g_dqPackNew = nullptr;
+static geom_int    g_dqPackN   = 0;
+
 void swapBlockImplicitCorrectionBuffers(variables& var)
 {
+    std::swap(g_dqPackOld, g_dqPackNew);
     std::swap(var.c_d["dq_block_old_0"], var.c_d["dq_block_new_0"]);
     std::swap(var.c_d["dq_block_old_1"], var.c_d["dq_block_new_1"]);
     std::swap(var.c_d["dq_block_old_2"], var.c_d["dq_block_new_2"]);
@@ -1415,7 +1483,19 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 ((cfg.discretization == "node") ? 1 : 0),  /* isNode: 5e 境界半割面の粘性対角スキップ */ \
                 ((cfg.lineImplicit == 1) ? msh.line_prev_d : nullptr), \
                 ((cfg.lineImplicit == 1) ? msh.line_next_d : nullptr), \
-                msh.line_Kprev_d, msh.line_Knext_d, (((loop == 0) && (lineStoreK != 0)) ? 1 : 0), cfg.lineViscCoupling  /* line-implicit */
+                msh.line_Kprev_d, msh.line_Knext_d, (((loop == 0) && (lineStoreK != 0)) ? 1 : 0), cfg.lineViscCoupling,  /* line-implicit */ \
+                ((cfg.implicitSolvePrecision == 0 && cfg.lineImplicit == 0 && cfg.blockDPLURDiagCache != 0) ? 1 : 0),  /* useDiagCache: float・point 経路のみ */ \
+                (usePack ? (const flow_float*)g_dqPackOld : nullptr), (usePack ? g_dqPackNew : nullptr)  /* 近傍 dq の AoS 版 */
+            // 近傍 dq の AoS 経路: line-implicit と node 周期 (SoA だけを直接書き換える) では使わない。
+            const bool usePack = (cfg.lineImplicit == 0) && (cfg.blockDPLURDqPack != 0) &&
+                                 !(cfg.discretization == "node" && msh.periodicRoot_d != nullptr && msh.nPeriodicMembers > 0);
+            if (usePack && (g_dqPackOld == nullptr || g_dqPackN != msh.nCells_all)) {
+                if (g_dqPackOld) { cudaFree(g_dqPackOld); cudaFree(g_dqPackNew); }
+                const size_t nb = (size_t)msh.nCells_all * 8 * sizeof(flow_float);
+                gpuErrchk(cudaMalloc((void**)&g_dqPackOld, nb)); gpuErrchk(cudaMalloc((void**)&g_dqPackNew, nb));
+                gpuErrchk(cudaMemset(g_dqPackOld, 0, nb)); gpuErrchk(cudaMemset(g_dqPackNew, 0, nb));
+                g_dqPackN = msh.nCells_all;
+            }
             if (cfg.implicitSolvePrecision == 1)
                 implicit_defect_correction_block_d<double><<<block_grid , block_threads>>>(FORGE_BDPLUR_ARGS);
             else

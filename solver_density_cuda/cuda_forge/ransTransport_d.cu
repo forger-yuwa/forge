@@ -45,8 +45,8 @@ __global__ void calc_scalar_gradient_face_d(
         kf = k[ic0];
         wf = omega[ic0];
     } else {
-        kf = f * k[ic0]     + (1.0 - f) * k[ic1];
-        wf = f * omega[ic0] + (1.0 - f) * omega[ic1];
+        kf = f * k[ic0]     + (1.0f - f) * k[ic1];
+        wf = f * omega[ic0] + (1.0f - f) * omega[ic1];
     }
     const geom_float sxx = sx[ip];
     const geom_float syy = sy[ip];
@@ -123,11 +123,11 @@ std::array<ScalarTransportDesc, 2> buildScalarDescs(variables& var, const solver
 
 void ransTransport_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
 {
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["res_roK"], 0.0, msh.nCells * sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["res_roOmega"], 0.0, msh.nCells * sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["res_roK"], 0.0f, msh.nCells * sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["res_roOmega"], 0.0f, msh.nCells * sizeof(flow_float)));
     // 輸送ヤコビアン対角を毎 assembleResidual でゼロ初期化（advection/diffusion kernel で面ごと加算）。
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["transport_diag_k"], 0.0, msh.nCells * sizeof(flow_float)));
-    CHECK_CUDA_ERROR(cudaMemset(var.c_d["transport_diag_omega"], 0.0, msh.nCells * sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["transport_diag_k"], 0.0f, msh.nCells * sizeof(flow_float)));
+    CHECK_CUDA_ERROR(cudaMemset(var.c_d["transport_diag_omega"], 0.0f, msh.nCells * sizeof(flow_float)));
 
     if (!ransTransportEnabled(cfg)) {
         gpuErrchk( cudaPeekAtLastError() );
@@ -137,9 +137,8 @@ void ransTransport_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& ms
 
     const auto scalar_descs = buildScalarDescs(var, cfg, cuda_cfg, msh.nCells);
 
-    for (const auto& desc : scalar_descs) {
-        scalarTransportResidual_d(cfg, cuda_cfg, msh, var, desc);
-    }
+    // k/ω を 1 面ループで融合 (面幾何・massflux・μ の読みを共有)。面ごとの式は単一版と同一。
+    scalarTransportResidualMulti_d(cfg, cuda_cfg, msh, var, scalar_descs.data(), 2);
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

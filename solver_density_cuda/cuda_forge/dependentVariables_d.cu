@@ -21,6 +21,8 @@ __global__ void dependentVariables_d
 
  // thermally-perfect (thermalMethod==2) 用化学種データ
  const SpeciesThermo* sp , int nSpecies , flow_float** roY ,
+ // ハイブリッド温度反転 (thermoFloat==1): float ミラー係数。0 のとき未使用。
+ const SpeciesThermoF* spf , int thermoFloat ,
 
  // 非平衡凝縮 (一温度 二相 EOS)。condensation==0 のとき従来経路 (ビット不変)。
  int condensation , int nCondSpecies , flow_float** rog ,
@@ -76,20 +78,32 @@ __global__ void dependentVariables_d
         Uy[ic] = roUy[ic]/ro_temp;
         Uz[ic] = roUz[ic]/ro_temp;
 
-        ek = 0.5*(Ux[ic]*Ux[ic] +Uy[ic]*Uy[ic] +Uz[ic]*Uz[ic]);
+        ek = 0.5f*(Ux[ic]*Ux[ic] +Uy[ic]*Uy[ic] +Uz[ic]*Uz[ic]);
         intE =(roe[ic]/ro_temp -ek);
 
         if (thermalMethod == 2) {
             // ---- 多成分 thermally-perfect gas (NASA-9) ----
             // 内部計算は全て double。組成 Y を構築 (nSpecies==1 は Y={1})。
             double Y[THERMO_MAX_SPECIES];
+            float  Yf[THERMO_MAX_SPECIES];   // thermoFloat 用 (float で組んで double へ昇格: DP 除算を避ける)
+            const bool useHybrid = (thermoFloat != 0 && spf != nullptr && condensation == 0);
             if (nSpecies <= 1 || roY == nullptr) {
-                Y[0] = 1.0;
+                Y[0] = 1.0; Yf[0] = 1.0f;
+            } else if (useHybrid) {
+                const float inv_ro = 1.0f/ro_temp;
+                float ysum = 0.0f;
+                for (int s=0;s<nSpecies;s++){
+                    float y = roY[s][ic]*inv_ro;
+                    if (y < 0.0f) y = 0.0f;
+                    Yf[s] = y; ysum += y;
+                }
+                const float inv = 1.0f/(ysum > 1.0e-30f ? ysum : 1.0e-30f);
+                for (int s=0;s<nSpecies;s++) { Yf[s] *= inv; Y[s] = (double)Yf[s]; }
             } else {
                 double ysum = 0.0;
                 for (int s=0;s<nSpecies;s++){
                     double y = (double)roY[s][ic]/(double)ro_temp;
-                    if (y < 0.0) y = 0.0;
+                    if (y < 0.0f) y = 0.0f;
                     Y[s] = y; ysum += y;
                 }
                 double inv = 1.0/(ysum > 1.0e-30 ? ysum : 1.0e-30);
@@ -105,14 +119,14 @@ __global__ void dependentVariables_d
             if (condensation == 1 && rog != nullptr) {
                 for (int s = 0; s < nCondSpecies; ++s) {
                     double gs = (double)rog[s][ic] / (double)ro_temp;
-                    if (gs > 0.0) g_liq += gs;
+                    if (gs > 0.0f) g_liq += gs;
                 }
                 // realizability: carrier は g≤Y_凝縮種 (蒸気以上は凝縮しない)、pure は g≤0.99。
                 if (carrier && roY != nullptr) {
                     double Yw = (double)roY[condGasSpecies][ic]/(double)ro_temp;
-                    if (g_liq > Yw) g_liq = (Yw > 0.0 ? Yw : 0.0);
-                } else if (g_liq > 0.99) g_liq = 0.99;
-                if (g_liq < 0.0) g_liq = 0.0;
+                    if (g_liq > Yw) g_liq = (Yw > 0.0f ? Yw : 0.0f);
+                } else if (g_liq > 0.99f) g_liq = 0.99f;
+                if (g_liq < 0.0f) g_liq = 0.0f;
             }
 
             const CondSpeciesProps cprops = condProps_make(condModel, condOpts);
@@ -120,6 +134,7 @@ __global__ void dependentVariables_d
 
             // 温度反転。g≈0 は従来 thermo_T_from_e で厳密縮約。
             double Tnew;
+            bool hybrid = false; double hybrid_cp = 0.0, hybrid_h = 0.0;
             if (condensation == 1 && condEquilibrium == 2 && rog != nullptr) {
                 // EOS 拘束形平衡: g を状態量として (T,g) を同時反転し、rog[0] に射影する
                 // (plans/accepted/condensation-equilibrium-eos.md)。輸送値 g_liq は初期値にだけ使う。
@@ -134,19 +149,30 @@ __global__ void dependentVariables_d
                 }
                 g_liq = g_eq;
                 rog[0][ic] = (flow_float)((double)ro_temp*g_eq);
-            } else if (g_liq > 1.0e-12 && carrier) {
+            } else if (g_liq > 1.0e-12f && carrier) {
                 Tnew = cond_T_from_e_carrier(sp, nSpecies, Y, e_in, g_liq, Rw, cprops, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
-            } else if (g_liq > 1.0e-12) {
+            } else if (g_liq > 1.0e-12f) {
                 Tnew = cond_T_from_e_onetemp(sp, nSpecies, Y, e_in, g_liq, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
+            } else if (useHybrid) {
+                // ハイブリッド: float Newton + double 1 段研磨。cp/h は研磨点 T_f の double 値から Taylor で組む
+                // (double 評価 1 回で従来の反復数+1 回分を置換)。凝縮 off のときのみ (二相 EOS は従来経路)。
+                double cpTf, hTf, Tf;
+                Tnew = thermo_T_from_e_hybrid(sp, spf, nSpecies, Y, Yf, e_in, Tg, DEPVAR_TMIN, DEPVAR_TMAX, &cpTf, &hTf, &Tf, 12);
+                hybrid_cp = cpTf; hybrid_h = hTf + cpTf*(Tnew - Tf); hybrid = true;
             } else {
                 Tnew = thermo_T_from_e(sp, nSpecies, Y, e_in, Tg, DEPVAR_TMIN, DEPVAR_TMAX);
             }
 
-            const double Rmix  = thermo_R_mix (sp, nSpecies, Y);
+            double Rmix;
+            if (hybrid && sp[0].invMW > 0.0) { double s_ = 0.0; for (int s=0;s<nSpecies;s++) s_ += Y[s]*sp[s].invMW; Rmix = THERMO_RU * s_; }
+            else Rmix = thermo_R_mix (sp, nSpecies, Y);
             double cpmix, hmix;
-            thermo_cph_mix(sp, nSpecies, Y, Tnew, &cpmix, &hmix);  // cp,h を 1 スイープ (全蒸気混合)
+            if (hybrid) { cpmix = hybrid_cp; hmix = hybrid_h; }
+            else thermo_cph_mix(sp, nSpecies, Y, Tnew, &cpmix, &hmix);  // cp,h を 1 スイープ (全蒸気混合)
             const double cvmix = cpmix - Rmix;
-            const double gmix  = cpmix / (cvmix > 1.0e-6 ? cvmix : 1.0e-6);
+            // γ は出力 float なので、ハイブリッド経路は float の除算で十分 (double 除算を避ける)。
+            const double gmix  = hybrid ? (double)((float)cpmix / (float)(cvmix > 1.0e-6 ? cvmix : 1.0e-6))
+                                        : cpmix / (cvmix > 1.0e-6 ? cvmix : 1.0e-6);
 
             const double e_v   = hmix - Rmix*Tnew;
             const double Lcond = (g_liq > 1.0e-12) ? cond_latent(cprops, Tnew) : 0.0;
@@ -155,11 +181,11 @@ __global__ void dependentVariables_d
                 // carrier+condensible: e_mix=e_全蒸気+g(R_w T-L)、p=ρT(R_mix-g R_w)(凝縮で蒸気モル減)。
                 e_mix = e_v + g_liq*(Rw*Tnew - Lcond);
                 Pnew  = (double)ro_temp * Tnew * (Rmix - g_liq*Rw);
-                oneMg = 1.0;  // 気相質量は別途、p で表現済
+                oneMg = 1.0f;  // 気相質量は別途、p で表現済
             } else {
                 // pure-condensible (気相=凝縮種): e_l=e_v+R_vT-L、p=(1-g)ρR T。
                 e_mix = e_v + g_liq*Rmix*Tnew - g_liq*Lcond;
-                oneMg = 1.0 - g_liq;
+                oneMg = 1.0f - g_liq;
                 Pnew  = (double)ro_temp * oneMg * Rmix * Tnew;
             }
             if (Pnew < (double)pMin) Pnew = (double)pMin;
@@ -175,13 +201,13 @@ __global__ void dependentVariables_d
             // 一温度二相 EOS と整合する固定 g,Y の frozen 音速 c²=γ_2φ R_eff T (cond_twophase_sonic)。γ_2φ は block-DPLUR の
             // κ=γ−1 (固定 g,Y の frozen 近似) と TP 出口 BC が読む。g<1e-12 は式順序も従来と同一 (dry セル bit 同一)。
             double sonic2 = gmix * Rmix * Tnew, gam_out = gmix;
-            if (condSonicModel == 1 && g_liq > 1.0e-12) {
+            if (condSonicModel == 1 && g_liq > 1.0e-12f) {
                 const double dL   = (cond_latent(cprops, Tnew + 0.1) - cond_latent(cprops, Tnew - 0.1)) / 0.2;
                 const double Reff = carrier ? (Rmix - g_liq*Rw) : ((1.0 - g_liq)*Rmix);
                 double g2, c2;
                 if (cond_twophase_sonic(cpmix, Reff, g_liq, dL, Tnew, &g2, &c2)) { sonic2 = c2; gam_out = g2; }
             }
-            sonic[ic]     = (flow_float)sqrt(sonic2);
+            sonic[ic]     = hybrid ? sqrtf((flow_float)sonic2) : (flow_float)sqrt(sonic2);
             gam_array[ic] = (flow_float)gam_out;
             cp_array[ic]  = (flow_float)cpmix;
             Rmix_array[ic]= (flow_float)Rmix;
@@ -194,7 +220,7 @@ __global__ void dependentVariables_d
             if (condensation == 1 && rog != nullptr) {
                 for (int s = 0; s < nCondSpecies; ++s) {
                     double gs = (double)rog[s][ic] / (double)ro_temp;
-                    if (gs > 0.0) g_liq += gs;
+                    if (gs > 0.0f) g_liq += gs;
                 }
                 const double gcap = carrierCpg ? condOpts.Yw : 0.99;
                 if (g_liq > gcap) g_liq = gcap;   // realizability
@@ -247,19 +273,19 @@ __global__ void dependentVariables_d
             } else {
                 // 単相 CPG (従来経路, フロア未指定ならビット不変)
                 T_temp = max(intE/(cp/gamma), tMin);
-                P_temp = max((gamma-1.0)*(roe[ic]-ro_temp*ek), pMin);
+                P_temp = max((gamma-1.0f)*(roe[ic]-ro_temp*ek), pMin);
 
                 T[ic] = T_temp;
                 P[ic] = P_temp;
 
                 ro[ic] = ro_temp;
-                roe[ic] = P_temp/(gamma-1.0) + ro_temp*ek;
+                roe[ic] = P_temp/(gamma-1.0f) + ro_temp*ek;
 
                 Ht[ic] = roe[ic]/ro_temp + P_temp/ro_temp;
 
                 sonic[ic] = sqrt(gamma*P_temp/ro_temp);
                 // CPG の混合比気体定数 R = cp - cv = (γ-1)cp/γ (定数。SLAU 単成分経路は未使用だが整合のため埋める)
-                Rmix_array[ic] = (gamma-1.0)*cp/gamma;
+                Rmix_array[ic] = (gamma-1.0f)*cp/gamma;
             }
         }
 
@@ -282,6 +308,7 @@ void dependentVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
         // thermally-perfect 用化学種データ。多成分 (M2, nSpecies>=2) では device roY 配列を渡し、
         // 単成分のときは nullptr (混合則は Y={1} に縮退)。
         thermo_species_device_ptr() , cfg.nSpecies , species_roY_device_ptr() ,
+        thermo_species_device_ptr_f() , cfg.thermoFloat ,
 
         // 非平衡凝縮 (二相 EOS)。condensation==0 で rog=nullptr/g=0 → 従来経路ビット不変。
         cfg.condensation , var.nCondSpeciesRegistered , cond_rog_device_ptr() ,

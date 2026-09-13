@@ -172,3 +172,4 @@ WALE 比 −25% になるものの圧縮性 TG の早期 3 次元化でゼロ性
 散逸が勝って **−5.5% (WALE より悪い)・ピーク 7.84**。**64³ TGV 級では静的 SGS はどちらも逆効果、
 ILES+ES (σ=0.02, jump=2) が最良のまま**。σ-model の本領 (壁乱流・回転流・未解像高 Re) の検証は今後
 ([plan](../../plans/accepted/turbulence-sigma-model.md))。成果物 `dissipation_rate_L3_64_sigma.png`。
+| `run_0052_perf_regress_node_periodic_dualtime` (ローカル, 2026-09-12) | 高速化ブランチ `feature/perf-3d-speedup` の回帰: run_0049 (node 周期, dual-time 陰解法, SST, sstEnergyIncludesK=1) の res_400 から 100 step 継続、基準バイナリ ×2 vs 最終 (`tools/perf_regress.py`) | P/T/k/ω/ρK/ρΩ/μt の差 ≤4.3e-7 で base×base と同等。速度 Ux/Uy は base×base 自体が 0.32 (減衰乱流の run 間ばらつき) で比較不能 | active (回帰) |
