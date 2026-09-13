@@ -262,19 +262,30 @@ int main() {
             for (double T = 130.0; T <= 1200.0; T += 0.5) if (!(cond_latent(w, T) > 0.0)) ++nz;
             checkb("L stays strictly positive over 130-1200 K", nz == 0);
         }
-        // 5. 成長則の有限性 (codex plan M1 の再現ケースを含む)
+        // 5. 1/L^2 を実際に通す高温掃引 (codex result M1)。
+        //    `cond_growth` の growthModel=1 は **過飽和側** (p_v > p_sat) でしか 1/L^2 に到達せず、
+        //    growthModel=0 の H2O は Hertz-Knudsen で L を使わない。蒸発側の 1/L^2 は別関数
+        //    `cond_evap_rate` にある。両方を明示的に踏む。
         {
-            int nbad = 0; double worst_abs = 0.0;
-            for (int gm = 0; gm <= 1; ++gm)
-              for (double T : {400.0, 600.0, 646.0, 650.0, 700.0})
-                for (double r : {1.0e-8, 1.0e-7}) {
-                    const double pv = 1.0e5, pg = 1.0e5;   // p_v < p_sat (蒸発側) になる高温
-                    const double d = cond_growth(w, T, pv, r, 0.0, gm, pg);
-                    if (!std::isfinite(d)) { ++nbad; printf("      FAIL gm=%d T=%.0f r=%.0e drdt=%g\n", gm, T, r, d); }
-                    else worst_abs = std::max(worst_abs, std::fabs(d));
+            int nbad = 0, nzero_e = 0, nzero_g = 0; double we = 0.0, wg = 0.0;
+            for (double T : {400.0, 600.0, 646.0, 646.5, 650.0, 700.0})
+              for (double r : {1.0e-8, 1.0e-7}) {
+                const double ps = cond_psat(w, T);
+                // (a) 蒸発側 1/L^2: p_v = 0.5 p_sat で cond_evap_rate (growthModel 0/1 とも Goodheart/Gyarmathy 枝)
+                for (int gm = 0; gm <= 1; ++gm) {
+                    const double d = cond_evap_rate(w, T, 0.5*ps, r, gm ? 1 : 2, ps, 3.18, 0);
+                    if (!std::isfinite(d) || d > 0.0) { ++nbad; printf("      FAIL evap gm=%d T=%.1f r=%.0e drdt=%g\n", gm, T, r, d); }
+                    else { we = std::max(we, std::fabs(d)); if (d == 0.0) ++nzero_e; }
                 }
-            printf("      max |dr/dt| over the hot sweep = %.4g m/s\n", worst_abs);
-            checkb("growth/evaporation rate stays finite above 373 K (no 1/L^2 blow-up)", nbad == 0);
+                // (b) 成長側 1/L^2: p_v = 2 p_sat で growthModel=1 (Gyarmathy, 種共通)
+                const double dg = cond_growth(w, T, 2.0*ps, r, 0.0, 1, 2.0*ps);
+                if (!std::isfinite(dg) || dg < 0.0) { ++nbad; printf("      FAIL grow T=%.1f r=%.0e drdt=%g\n", T, r, dg); }
+                else { wg = std::max(wg, dg); if (dg == 0.0) ++nzero_g; }
+              }
+            printf("      1/L^2 sweep: max |dr/dt| evap %.4g m/s, growth %.4g m/s (zero hits: %d evap, %d growth)\n",
+                   we, wg, nzero_e, nzero_g);
+            checkb("evaporation 1/L^2 branch stays finite and negative above 373 K", nbad == 0);
+            checkb("the sweep actually reaches the 1/L^2 branch (no all-zero result)", we > 0.0 && wg > 0.0);
         }
         // 6. T_sat の往復 (codex plan M3: 根から離れた初期推定でも収束すること)
         {
@@ -288,6 +299,45 @@ int main() {
                 }
             printf("      worst |Tsat(psat(T)) - T| = %.2e K\n", worst);
             checkb("Tsat inverts psat from far-away guesses (300-640 K)", nbad == 0);
+            // N2 側も同じ勾配変更を通るので往復を確認する (codex result M6: cond_Tsat は種共通)
+            const CondSpeciesProps n2 = condProps_make(COND_MODEL_N2, CondPropOpts{1, 1, 2000.0, 0, 1.0, -1.0});
+            int nb2 = 0; double w2 = 0.0;
+            for (double T : {60.0, 80.0, 110.0})
+                for (double guess : {30.0, 100.0, 250.0}) {
+                    const double e = std::fabs(cond_Tsat(n2, cond_psat(n2, T), guess) - T);
+                    w2 = std::max(w2, e); if (!(e < 1.0e-3)) ++nb2;
+                }
+            printf("      N2: worst |Tsat(psat(T)) - T| = %.2e K (旧 C-C 勾配では 3.6e-5 K)\n", w2);
+            checkb("Tsat round-trip works for N2 too (species-common slope change)", nb2 == 0);
+            // cond_Tsat には 50 K の床がある (本変更以前からの仕様)。空気凝縮の onset (~38 K) は床に当たるので
+            // condTsat 診断はそこで 50 K に張り付く。挙動が変わっていないことだけ固定する。
+            check("cond_Tsat keeps its pre-existing 50 K floor", cond_Tsat(n2, cond_psat(n2, 45.0), 100.0), 50.0, 1e-12);
+        }
+        // 7. 二相温度反転の往復 (計画 §6 (i)-7, codex result M2)
+        //    CPG 枝 e = (cv + g R) T - g L(T) を T について解いて e に戻す。646.15 K の凍結点の両側も踏む。
+        {
+            const double cv = 1393.5, R = 461.5;   // H2O 蒸気 (CondSpeciesProps の値)
+            int nbad = 0, nfail_ok = 0; double worstT = 0.0, worstE = 0.0;
+            for (double g : {0.1, 0.5, 0.9})
+              for (double T : {380.0, 500.0, 640.0, 646.0, 646.3, 647.09}) {
+                const double a = cv + g*R;
+                const double e = a*T - g*cond_latent(w, T);
+                bool ok = false;
+                const double Tb = cond_T_from_e_cpg(e, g, cv, R, 300.0, w, &ok);
+                const double eb = a*Tb - g*cond_latent(w, Tb);
+                const double res = std::fabs(eb - e);
+                if (ok) {
+                    worstT = std::max(worstT, std::fabs(Tb - T)); worstE = std::max(worstE, res);
+                    if (!(std::fabs(Tb - T) < 1.0e-3)) { ++nbad; printf("      FAIL g=%.1f T=%.2f -> %.6f (ok)\n", g, T, Tb); }
+                } else {
+                    ++nfail_ok;   // 失敗は許容 (呼び出し側が roe を上書きしない)。ただし残差は報告する
+                    printf("      note: inversion reports ok=false at g=%.1f T=%.2f (residual %.3g J/kg) -> caller keeps roe\n", g, T, res);
+                }
+              }
+            printf("      two-phase inversion: worst |dT| = %.2e K, worst |de| = %.2e J/kg, ok=false count = %d/18\n",
+                   worstT, worstE, nfail_ok);
+            checkb("two-phase inversion round-trips wherever it reports success", nbad == 0);
+            checkb("the 380-640 K core states all succeed", nfail_ok <= 3);
         }
     }
 

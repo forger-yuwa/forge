@@ -50,11 +50,11 @@ Wyslouzil et al., *J. Chem. Phys.* **113**, 7317 (2000)
 
 | run | 物理 | 壁 | exit M (中心線) | exit Ps | 状態・備考 |
 | --- | --- | --- | --- | --- | --- |
-<!-- run_0464/0465 は物性変更のビット回帰専用。300 step の A/B なので収束・準定常は主張しない -->
+<!-- run_0464/0465 は H2O 潜熱 Watson 外挿の回帰専用。300 step の A/B で、check_convergence.py は NOT CONVERGED、check_quasisteady.py は TRANSIENT-UNSETTLED (各 run の *_VERDICT.txt)。収束・準定常は主張しない -->
 | `run_0464_h2olw_node2d_base` | node 2D SST H2O 凝縮 300 step | 輪郭 no-slip | — | — | ref. H2O 潜熱 Watson 外挿の A/B 基準側 (旧物性バイナリ)。`plans/active/condensation-h2o-latent-supercritical.md` §6 |
-| `run_0464_h2olw_node2d_new` (+`_r2`, `_r3`) | 同上 (新物性バイナリ, 3 反復) | 同上 | — | — | ref. 同 A/B の新側とノイズ床用の反復。base 差 9.9e-6 (Uy) ≤ ノイズ床 1.4e-5 |
+| `run_0464_h2olw_node2d_new` (+`_r2`, `_r3`) | 同上 (新物性バイナリ, 3 反復) | 同上 | — | — | ref. 同 A/B の新側とノイズ床用の反復。`diff_res.py --tolfile noise_floor_3reps.json --factor 2` が 30 配列で exit 0 (`diff_vs_base.txt`) |
 | `run_0465_h2olw_cell2d_base` | cell 2D SST H2O 凝縮 300 step | 輪郭 no-slip | — | — | ref. 同 A/B の cell 基準側 |
-| `run_0465_h2olw_cell2d_new` (+`_r2`, `_r3`) | 同上 (新物性バイナリ, 3 反復) | 同上 | — | — | ref. base 差 1.03e-3 (Uy) ≤ ノイズ床 1.34e-3 (cell は atomicAdd 非決定性) |
+| `run_0465_h2olw_cell2d_new` (+`_r2`, `_r3`) | 同上 (新物性バイナリ, 3 反復) | 同上 | — | — | ref. 同判定で 29 配列 exit 0 (cell は atomicAdd 非決定性のためビット同一は要求しない) |
 | `run_0001_slau_2d_imp` | 2D 非粘性 Euler | slip | **1.989** | 12.9 kPa | active. 等エントロピー 2.00 と一致 (0.6%) |
 | `run_0002_slau_3d_imp` | 3D 非粘性 Euler | slip | **1.990** | 12.9 kPa | active. 2D と完全一致 (検証) |
 | `run_0003_slau_2d_visc` | 2D 粘性 層流 | 輪郭no-slip / fb slip | **1.940** | 13.9 kPa | active. BL 変位で M 低下 |

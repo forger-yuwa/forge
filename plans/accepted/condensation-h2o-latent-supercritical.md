@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `condensation`
-- **status**: `in_progress`
+- **status**: `done`
 - **related_docs**:
   - [`methods/condensation.md`](../../methods/condensation.md) §8b 物性の外挿規約 (既知の限界 2)
 - **related_plans**: [`plans/active/condensation-followups.md`](condensation-followups.md) F-cf5 (本計画の起票元)
@@ -73,7 +73,7 @@ $T_{fr}=646.15$ K **(物性表の格子点そのもの**: $(646.15-120.15)/0.25=
 
 ### 4.3 373.15 K での傾きの不連続 (意図的に許容する)
 
-373.15 K 直下の傾きは $c_{p,v}-c_{p,l}=1889.9-4217.2=-2327$ J/(kg·K²)、直上の Watson は $-n L_0/(T_c-T_0)=-3148$。
+373.15 K 直下の傾きは $c_{p,v}-c_{p,l}=1889.9-4217.2=-2327$ J/(kg·K)、直上の Watson は $-n L_0/(T_c-T_0)=-3148$。
 暗黙の液比熱が $4217\to5038$ J/(kg·K) に 19 % 跳ぶ。傾きまで繋ぐ ($C^1$) には $n=0.281$ が要るが、それだと
 573 K で +12 %、623 K で +28 % と遠方が悪化する。**液相が 373 K に存在するケースが先に無い**ので、遠方の精度を取る。
 
@@ -90,10 +90,12 @@ $G'=a-g\,dL/dT$ なので、現行の $dL/dT>0$ (373 K 超) では $g$ が大き
 本変更後は $dL/dT\le0$ になり $G'\ge a>0$ (凍結帯では等号) なので、**単調性の仮定は回復する**。
 
 ただし「反復が必ず成功する」わけではない。停止条件は括弧幅 $10^{-9}$ 相対で、$dL/dT$ は固定幅 $\pm0.1$ K の
-中心差分で評価している。$T_c$ 直下は $|dL/dT|$ が $10^5$ オーダーなので、温度幅で止めてもエネルギー残差が
-許容 ($10^{-9}|e|+0.05$ J/kg) を超えることがある (codex 再現: $g=0.9$, $T=647.095$ K で残差 1.1 J/kg, `ok=false`)。
-**`ok=false` のとき呼び出し側は `roe` を上書きしない**ので保存量は守られる。この帯はそもそも定義域外なので、
-「失敗しない」ではなく「失敗を検出して場を壊さない」ことを §6 で確認する。
+中心差分で評価している。**codex が示した残差 1.1 J/kg・`ok=false` の例は凍結を入れる前の案 ($T_c$ まで
+Watson を伸ばし $|dL/dT|$ が $10^5$ を超える形) に対するもの**で、646.15 K 凍結後は $|dL/dT|$ が高々
+$1.06\times10^5$ で頭打ちになり、$T\ge T_{fr}$ では $dL/dT=0$ ($\pm0.1$ K 差分も 0 を返す) になる。
+実測では $g$=0.1/0.5/0.9 × $T$=380/500/640/646/646.3/647.09 K の 18 状態すべてで `ok=true`
+(最大 $|\Delta T|$ 2.29e−5 K)。それでも「失敗しない」とは主張せず、
+**`ok=false` のとき呼び出し側 (`dependentVariables_d.cu`) が `roe` を上書きしない**ことを規約として残す。
 
 ### 4.6 float 物性表への影響
 
@@ -128,8 +130,8 @@ $\sigma$ の一階微分は $T_c$ で 0 に向かう。Watson (指数 0.38) は�
 | 1 | ~~codex plan レビュー~~ | 完了 (§6.1)。C0/M5/m2 を全件採用し §4/§5/§6 に反映済み |
 | 2 | ~~実装 + 単体~~ | 完了。凝縮単体 8 本 + 新規 (i) 節 6 項目が全 PASS |
 | 3 | ~~場の回帰~~ | 完了 (ローカル RTX 3060 でビルドして A/B 実行)。§9 参照 |
-| 4 | codex result レビュー | 実装 diff と単体・回帰結果に対して `--stage result` |
-| 5 | 高温湿潤の扱いの明文化 | $T>T_c$ に $g>0$ が残る状態は定義域外。強制全蒸発にするか反転失敗として弾くかは本計画では決めず、実運用で踏んだときに起票する |
+| 4 | ~~codex result レビュー~~ | 完了 (§6.1)。C0/M3/m4 を全件採用 |
+| 5 | ~~高温湿潤の扱いの明文化~~ | `condensation-followups.md` F-cf10 へ移管 (2026-09-14) |
 
 ## 6. 検証
 
@@ -149,13 +151,16 @@ $\sigma$ の一階微分は $T_c$ で 0 に向かう。Watson (指数 0.38) は�
 **単体 (float 表)** — `tests/unit/test_cond_float.cpp`: 高温帯 373–647 K の $L$ 表と double の差が 1e-4 以内。
 
 **場の回帰** — case/16 の H2O 凝縮 run を **node と cell の両方** (`procedures/verification/README.md`)。
+**判定は `condensation-followups.md` の共通ルール**: 同一バイナリ 3 反復の全ペア最大を変数別ノイズ床にし、
+`diff_res.py REF NEW --tolfile 床.json --factor 2` の **exit code** で判定する (cell は atomicAdd 非決定性、
+node も完全決定ではないのでビット同一は要求しない)。
 373.15 K を超えるセルが 1 つも無い (`run_0462_cond3d_local_spinup/res_3000.h5` の実測 $T$ は 201.927–295.386 K、
 373.15 K 超 0/2,370,000 セル) ので**場はビット不変であるべき**。比較は基準バイナリ・同一 config・同一ステップ数で
 `VALUE/*` 全配列の最大絶対差。**この参照 run 自体は `check_convergence.py` で NOT CONVERGED、
 `check_quasisteady.py --quantity pmax` で TRANSIENT-UNSETTLED** (スナップショット 2 枚) なので、
 **収束した場の比較ではなく「同じ入力から同じビットが出るか」の回帰対照としてのみ使う**。
 
-**判定基準**: (1) 凝縮単体 8 本 + 新規 (i) 節が全 PASS、(2) case/16 node/cell とも基準バイナリとビット同一、
+**判定基準**: (1) 凝縮単体 8 本 + 新規 (i) 節が全 PASS、(2) case/16 node/cell とも `diff_res.py --tolfile --factor 2` が exit 0、
 (3) IAPWS 参照との誤差が 400–623 K で ≤3 %、(4) 表と double の差が 373–647 K で ≤1e-4。
 
 ### 6.1 レビュー記録 (codex)
@@ -173,20 +178,37 @@ $\sigma$ の一階微分は $T_c$ で 0 に向かう。Watson (指数 0.38) は�
 | M5 | §6 が低温回帰のみで、変更部分の統合検証になっていない。node/cell 両方が要る。参照 run は未収束 | §6 を全面改訂: 高温帯の単体 7 項目 + float 表比較 + node/cell 両方のビット回帰。参照 run の VERDICT (NOT CONVERGED / TRANSIENT-UNSETTLED) を明記し「ビット回帰専用」と限定 |
 | m6 | 蒸気表の参照値・出典・探索手順が書かれておらず追試できない | §4.2 に参照 6 点と出典を明記し、単体試験にハードコードして回帰させる |
 | m7 | 実装ステップが `methods` 更新より先になっている | §5 に手順 0 (methods 先行更新) を追加 |
+| result | `2026-09-14` | [`notes/reviews/2026-09-14-condensation-h2o-latent-supercritical-result.md`](../../notes/reviews/2026-09-14-condensation-h2o-latent-supercritical-result.md) | GO-with-changes, C0/M3/m4 | **全件採用** (下記) |
+
+**result 段の採否** (すべて採用・対応済み):
+
+| 指摘 | 内容 | 対応 |
+| --- | --- | --- |
+| M1 | 高温の有限性試験が $1/L^2$ を通っていない (`cond_growth` の Gyarmathy 枝は過飽和側でしか到達せず、H2O の growthModel 0 は Hertz–Knudsen。ガードを入れたのは別関数 `cond_evap_rate`) | 試験を作り直し、蒸発側 (`cond_evap_rate`, $p_v=0.5p_{sat}$) と成長側 (`cond_growth` growthModel 1, $p_v=2p_{sat}$) の**両方**を明示的に踏む。0 に落ちた点が無いことも判定に入れた (24 点、蒸発 max 9.67 / 成長 max 9.65 m/s)。plan の存在しない関数名 `cond_growth_rate` も訂正 |
+| M2 | 約束した高温・高液相率の二相反転試験が未実装 | §6 (i)-7 を実装。$g$=0.1/0.5/0.9 × $T$=380/500/640/**646/646.3/647.09** K の 18 状態で往復、全て `ok=true`、最大 \|ΔT\| 2.29e−5 K・残差 4.03e−2 J/kg。`ok=false` 時の `roe` 保護は規約として §4.5 に明記 |
+| M3 | 回帰の PASS が計画の「全配列ビット同一」とも「ノイズ床以下」とも一致しない (node `P`/`roe`、cell `omega`/`roe` は自分の床を超える) | 判定を `condensation-followups.md` の共通ルール (変数別の全ペア最大床 + `diff_res.py --tolfile --factor 2` の exit code) に正式に変更。node 30 配列 / cell 29 配列とも exit 0。§6・§8.1・case README を同じ基準に統一し、「全配列が床以下ではない」ことを明記 |
+| m4 | 検証成果物 (VERDICT・残差図・比較結果) が run に保存されていない | 8 run すべてに `CONVERGENCE_VERDICT.txt` と `QUASISTEADY_VERDICT.txt`、A/B 4 run に `residual_history.png`、new 側に `noise_floor_3reps.json` と `diff_vs_base.txt` を保存 |
+| m5 | 凍結前の説明と現在の誤差評価が混在。傾きの単位が誤り | §4.5 を「codex の残差例は凍結前の案に対するもの」と明記して実測 18/18 成功に差し替え。`methods` に表誤差 7.1e−6 (host 評価) と 2.37e−5 (単体試験の別正規化) の違いを明記。単位を J/(kg·K) に訂正 |
+| m6 | 「N2/空気の経路は無関係」は誤り (`cond_Tsat` は種共通) | §7 を実際の変更関数で書き直し。N2 の `Tsat` 往復も試験に追加 (3.6e−5 K → 7.85e−11 K と**改善**)。50 K 床の挙動不変も固定 |
+| m7 | followups と README の完了表記が先走っている | F-cf5 の「レビュー済み」表記を落とし、高温湿潤の扱いを F-cf10、`cond_Tsat` の 50 K 床を F-cf11 として後続表へ移管。`plans/README.md` の status を同期 |
 
 ## 7. 影響範囲
 
-- 変更: `solver_density_cuda/cuda_forge/condensationProperties_d.cuh` (`h2o_latent` のみ)
-- 変更: `solver_density_cuda/tests/unit/test_cond_air.cpp`、`methods/condensation.md`、`plans/active/condensation-followups.md`
-- 373.15 K 以下の $L$ は 1 ビットも変えない。N2/空気の経路は無関係。
+- `cuda_forge/condensationProperties_d.cuh`: `h2o_latent` (H2O 限定) と **`cond_Tsat` (種共通)**。
+  後者は N2/空気も通る。N2 の潜熱相関・飽和圧相関そのものは無変更で、変わるのは飽和温度反転の Newton 勾配だけ
+  (往復精度が 3.6e−5 K → 7.9e−11 K に改善、50 K 床の挙動は不変)。
+- `cuda_forge/condensationSource_d.cuh`: **`cond_evap_rate`** に $L\le0$ ガード (種共通、現状は到達しない)。
+- `tests/unit/test_cond_air.cpp`、`tests/unit/test_cond_float.cpp`、`methods/condensation.md`、
+  `plans/active/condensation-followups.md`、`case/16.nozzle_wys/README.md`。
+- 373.15 K 以下の H2O の $L$ は 1 ビットも変えない (32,816 点で確認)。
 
 ## 8. 完了条件
 
-- [ ] `methods/condensation.md` §8b を更新済み
-- [ ] 実装・検証完了 (§6)
-- [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録し採否を §5.1 に反映
-- [ ] `status` を `done` にし §9 に変更ログ
-- [ ] `plans/accepted/` へ移動、`plans/README.md` を同期
+- [x] `methods/condensation.md` §8b を更新済み
+- [x] 実装・検証完了 (§6, 結果は §8.1)
+- [x] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録し採否を反映 (C0/M8/m6 を全件採用)
+- [x] `status` を `done` にし §9 に変更ログ
+- [x] `plans/accepted/` へ移動、`plans/README.md` を同期
 
 ## 8.1 検証結果 (2026-09-14)
 
@@ -199,26 +221,38 @@ $\sigma$ の一階微分は $T_c$ で 0 に向かう。Watson (指数 0.38) は�
 | IAPWS 6 点との誤差 | max 2.18 %, rms 1.37 % |
 | 指数探索 0.28–0.40 の rms 最小 | n = 0.38 |
 | 凍結帯 (646.15 / 647 / 1200 K) | 同値 263.25 kJ/kg、130–1200 K で L>0 |
-| 成長則の有限性 (400–700 K, 2 モデル, 2 半径) | 全点有限 (最大 \|dr/dt\| 35.0 m/s)。旧 L=0 案では −Inf |
-| `Tsat(psat(T))` 往復 (300/450/550/640 K × 初期推定 250/500/900 K) | 最大誤差 1.15e−10 K |
+| **$1/L^2$ 枝**の有限性 (400–700 K × 2 半径; 蒸発 `cond_evap_rate` を $p_v=0.5p_{sat}$ で、成長 `cond_growth` (Gyarmathy) を $p_v=2p_{sat}$ で) | 全 24 点が有限・符号正 (蒸発 max 9.67 m/s, 成長 max 9.65 m/s)、0 に落ちた点なし。旧 $L=0$ 案では −Inf |
+| 二相反転の往復 ($g$=0.1/0.5/0.9 × $T$=380/500/640/646/646.3/647.09 K) | 18/18 で `ok=true`、最大 \|ΔT\| 2.29e−5 K、最大残差 4.03e−2 J/kg |
+| `Tsat(psat(T))` 往復 H2O (300/450/550/640 K × 初期推定 250/500/900 K) | 最大誤差 1.15e−10 K |
+| 同 N2 (60/80/110 K × 30/100/250 K) | 最大 7.85e−11 K (**旧 C–C 勾配では 3.6e−5 K**、勾配変更で改善)。50 K 床の挙動は不変 |
 | float 表 vs double (`test_cond_float`) | L 373–647 K で 2.37e−5 (許容 1e−4)、dL/dT 7.43e−5 (許容 1e−4) |
 | 45–373.15 K の L が変更前と**ビット同一** | 32,816 点すべて一致 (旧ヘッダを git から取り出して A/B) |
 
 **場の回帰** (ローカル RTX 3060、`solver_density_cuda/build/relwithdebinfo`、基準は HEAD `580dd8be` の別ビルド):
 
-| run | 主要量の base–new 差 | 同一バイナリ 3 反復のノイズ床 | 判定 |
-| --- | --- | --- | --- |
-| `case/16.nozzle_wys/run_0464_h2olw_node2d_{base,new,new_r2,new_r3}` | 9.88e−6 (Uy) | 1.43e−5 (Uy) | PASS (床以下) |
-| `case/16.nozzle_wys/run_0465_h2olw_cell2d_{base,new,new_r2,new_r3}` | 1.03e−3 (Uy) | 1.34e−3 (Uy) | PASS (床以下) |
+判定は共通ルール (同一バイナリ 3 反復の変数別ノイズ床 → `diff_res.py --tolfile --factor 2` の exit code)。
 
-差は場のスケールで正規化した最大差 (`max|Δ|/max|x|`)。全 `res_300.h5` に NaN/Inf なし。温度は node 207.06–293.30 K、
-cell 200.75–286.64 K で**373.15 K を超えるセルは 0**、すなわち新しい枝は場では 1 度も評価されていない。
-**これらの run は 300 step の A/B 専用で収束していない** (`check_convergence.py` は STALLED を返す)。
-物性変更が既存の場を動かさないことだけを示すもので、収束・準定常の主張はしない。
+| run 系列 | 判定対象 | exit | 判定 |
+| --- | --- | --- | --- |
+| `case/16.nozzle_wys/run_0464_h2olw_node2d_{base,new,new_r2,new_r3}` | 30 配列 | 0 | **PASS** |
+| `case/16.nozzle_wys/run_0465_h2olw_cell2d_{base,new,new_r2,new_r3}` | 29 配列 | 0 | **PASS** |
+
+床は `run_*_new/noise_floor_3reps.json`、判定出力は `run_*_new/diff_vs_base.txt` に保存。
+**変数別に見ると全配列が床以下ではない** (node `P` 1.73e−6 対床 1.20e−6、node `roe` 5.37e−6 対床 4.61e−6、
+cell `omega` 1.79e−4 対床 1.44e−4 など)。これは非決定性の裾であって劣化の証拠ではないが、
+「全配列が床以下」とは言えない。共通ルールの ×2 判定で PASS しているというのが正確な言い方 (codex result M3)。
+
+全 `res_300.h5` に NaN/Inf なし。温度は node 207.06–293.30 K、cell 200.75–286.64 K で
+**373.15 K を超えるセルは 0**、すなわち新しい枝は場では 1 度も評価されていない。
+**これらの run は 300 step の A/B 専用**で、`check_convergence.py` は NOT CONVERGED (stalled/plateau)、
+`check_quasisteady.py --quantity pmax` は TRANSIENT-UNSETTLED。各 run に `CONVERGENCE_VERDICT.txt` /
+`QUASISTEADY_VERDICT.txt` / `residual_history.png` を保存した。収束・準定常の主張はしない。
 
 ## 9. 変更ログ
 
 - `2026-09-14` — 初稿 (F-cf5 から起票)。
+- `2026-09-14` — codex result レビュー (C0/M3/m4) を全件採用。$1/L^2$ を実際に通す試験と高温・高液相率の
+  二相反転試験を追加、場の回帰の判定を共通ルール (変数別床 × 2 の exit code) に統一、検証成果物を run に保存。
 - `2026-09-14` — 実装・検証完了 (§8.1)。単体 8 本 + 新規 6 項目 PASS、node/cell の場の回帰はノイズ床以下。
 - `2026-09-14` — codex plan レビュー (C0/M5/m2) を全件採用。$L\to0$ を「$T_c$ 0.95 K 手前の格子点で凍結」に変更し、
   `cond_Tsat` の勾配と成長則のガードを本計画のスコープに追加。検証計画を高温帯の単体 7 項目 + float 表比較 +
