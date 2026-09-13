@@ -174,12 +174,24 @@ int main() {
     printf("== (g) vapour c_p source for the Kirchhoff slope (below 70 K) ==\n");
     {
         CondPropOpts o{1, 1, 2000.0, 0, 1.0, -1.0};          // gasCp 未指定 = 内蔵 1038.8
-        CondPropOpts og = o; og.gasCp = 1050.0;               // config 由来で上書き
+        CondPropOpts og = o; og.gasCp = 1008.7;               // CPG 空気の physProp.cp
         const CondSpeciesProps a = condProps_make(COND_MODEL_N2, o), b = condProps_make(COND_MODEL_N2, og);
-        check("gasCp unset keeps the built-in N2 vapour cp", a.cp, 1038.8, 1e-12);
-        check("gasCp set overrides the vapour cp", b.cp, 1050.0, 1e-12);
+        check("gasCp unset keeps the built-in N2 vapour cp", a.kirchhoffCpv, 1038.8, 1e-12);
+        check("gasCp set overrides the Kirchhoff vapour cp", b.kirchhoffCpv, 1008.7, 1e-12);
+        // **cp/cv/R は触らない**: Kantrowitz の γ_v=cp/cv が壊れると非等温補正の係数が動く (codex result M1)
+        check("cp is left alone (gamma_v stays coherent)", b.cp, a.cp, 1e-14);
+        check("cv is left alone", b.cv, a.cv, 1e-14);
+        check("gamma_v = cp/cv stays 1.4 for N2", b.cp/b.cv, 1.4, 1e-3);
+        check("cp - cv == R for N2", b.cp - b.cv, b.R, 2e-3);
+        {   // H2O (TP) 側は種固有の値のまま (gasCp が渡されても無視される)
+            const CondSpeciesProps w2 = condProps_make(COND_MODEL_H2O, og);
+            check("H2O keeps its own vapour cp", w2.cp, 1855.0, 1e-12);
+            check("H2O gamma_v stays 1.331", w2.cp/w2.cv, 1.331, 2e-3);
+            checkb("H2O Kantrowitz theta (mode 1) stays positive",
+                   cond_kantrowitz_theta(w2, 250.0, 1.0, 1, w2.cp/w2.cv, nullptr) > 0.0);
+        }
         for (double T : {80.0, 100.0}) check("T>=70 K is the polynomial (cp_v irrelevant)", cond_latent(a, T), cond_latent(b, T), 1e-14);
-        const double T1 = 45.0, dcp = 1050.0 - 1038.8;
+        const double T1 = 45.0, dcp = 1008.7 - 1038.8;
         check("below 70 K the slope moves by (cp_v_new - cp_v_old)", cond_latent(b, T1) - cond_latent(a, T1), dcp*(T1 - 70.0), 1e-10);
         // 液比熱は全域で正 (c_l = c_p,v - L' > 0)
         int nneg = 0;

@@ -22,6 +22,8 @@
 
 // 液相フィットの有効下限 (これ未満は外挿破綻するためクランプ)。
 #define COND_T_PROP_FLOOR 45.0
+#define COND_N2_LATENT_TA 70.0   // 線形外挿の接続温度 [K] (C0 接続; L'(70) は多項式 −1072 vs 線形 c_p,v−c_l で不連続)
+#define COND_N2_CPV 1038.8       // N2 蒸気 c_p [J/(kg K)] (CPG)。Kirchhoff の傾き既定値と condProps_N2 の cp
 
 enum CondPropModel {
     COND_MODEL_N2  = 0,
@@ -42,6 +44,11 @@ struct CondSpeciesProps {
     int    latentLowT;   // 1: 70 K 未満の潜熱を c_l 一定の線形外挿 (既定), 0: 旧 4 次多項式 (60 K 未満で L'>0)
     int    psatLowT;     // 1: 50 K 未満の飽和圧 C–C 外挿を新 L(T) の積分で再構成 (既定), 0: 旧 (L_poly(50) 一定の C–C; 診断用)
     double liquidCp;     // 液 N2 の比熱 c_l [J/(kg K)] (線形外挿の傾き c_p,v − c_l に使う; 既定 2000)
+    // Kirchhoff の傾き L' = c_p,v − c_l **専用** の蒸気比熱 [J/(kg K)]。CPG では config の physProp.cp。
+    // **cp/cv/R は種固有の整合した組のまま触らない** (Kantrowitz の γ_v=cp/cv が壊れるため。
+    // 2026-09-14 codex result M1: cp だけ 1008.7 に差し替えると cp-cv=266.7≠R, γ_v=1.359 になり
+    // 非等温補正の係数 2(γ-1)/(γ+1) が 0.3333→0.3047 に動いていた)。
+    double kirchhoffCpv;
     int    gasKgasModel; // 成長則の気相熱伝導率: 0=N2 (n2_kgas), 1=空気 Sutherland (CPG carrier 空気)
 };
 
@@ -72,7 +79,7 @@ __host__ __device__ inline CondSpeciesProps condProps_N2()
     s.Tc = 126.192;
     s.M  = 0.0280134;
     s.sigmaScale = 1.0;
-    s.latentLowT = 1; s.psatLowT = 1; s.liquidCp = 2000.0; s.gasKgasModel = 0;
+    s.latentLowT = 1; s.psatLowT = 1; s.liquidCp = 2000.0; s.kirchhoffCpv = COND_N2_CPV; s.gasKgasModel = 0;
     return s;
 }
 
@@ -99,8 +106,6 @@ __host__ __device__ inline double n2_latent_poly(double T)
 }
 __host__ __device__ inline double n2_latent(double T) { return n2_latent_poly(T); }   // 旧 (A/B 用)
 
-#define COND_N2_LATENT_TA 70.0   // 線形外挿の接続温度 [K] (C0 接続; L'(70) は多項式 −1072 vs 線形 c_p,v−c_l で不連続)
-#define COND_N2_CPV 1038.8       // N2 蒸気 c_p [J/(kg K)] (CPG)
 // 低温整合版: T>=Ta は多項式、T<Ta は L(T)=L(Ta)+(c_p,v−c_l)(T−Ta) (c_l>0 なら L'<0 が保証される)。lowT=0 で旧多項式。
 __host__ __device__ inline double n2_latent_ex(double T, int lowT, double cl, double cpv = COND_N2_CPV)
 {
@@ -332,7 +337,7 @@ __host__ __device__ inline double h2o_sigma(double T)
 // --- 種ディスパッチ (model で N2 / H2O を切替) ---
 __host__ __device__ inline double cond_psat(const CondSpeciesProps& s, double T)
 {
-    return (s.model == COND_MODEL_H2O) ? h2o_psat(T) : n2_psat_ex(T, s.psatLowT, s.latentLowT, s.liquidCp, s.cp);
+    return (s.model == COND_MODEL_H2O) ? h2o_psat(T) : n2_psat_ex(T, s.psatLowT, s.latentLowT, s.liquidCp, s.kirchhoffCpv);
 }
 // 空気 (CPG carrier) の気相熱伝導率 [W/(m K)]: Sutherland μ (μ0=1.716e-5 @273 K, C=111) × c_p/Pr (c_p 1008.7, Pr 0.72)。低温外挿 (近似)。
 __host__ __device__ inline double air_kgas(double T)
@@ -352,7 +357,7 @@ __host__ __device__ inline double cond_rho_cond(const CondSpeciesProps& s, doubl
 }
 __host__ __device__ inline double cond_latent(const CondSpeciesProps& s, double T)
 {
-    return (s.model == COND_MODEL_H2O) ? h2o_latent(T) : n2_latent_ex(T, s.latentLowT, s.liquidCp, s.cp);
+    return (s.model == COND_MODEL_H2O) ? h2o_latent(T) : n2_latent_ex(T, s.latentLowT, s.liquidCp, s.kirchhoffCpv);
 }
 __host__ __device__ inline double cond_sigma(const CondSpeciesProps& s, double T)
 {
@@ -407,7 +412,7 @@ __host__ __device__ inline CondSpeciesProps condProps_H2O()
     s.Tc = 647.096;
     s.M  = 0.0180153;
     s.sigmaScale = 1.0;
-    s.latentLowT = 1; s.psatLowT = 1; s.liquidCp = 2000.0; s.gasKgasModel = 0;   // H2O では未使用
+    s.latentLowT = 1; s.psatLowT = 1; s.liquidCp = 2000.0; s.kirchhoffCpv = COND_N2_CPV; s.gasKgasModel = 0;   // H2O では未使用
     return s;
 }
 
@@ -417,6 +422,7 @@ __host__ __device__ inline CondSpeciesProps condProps_make(int model, const Cond
     CondSpeciesProps s = (model == COND_MODEL_H2O) ? condProps_H2O() : condProps_N2();
     s.sigmaScale = o.sigmaScale; s.latentLowT = o.latentLowT; s.psatLowT = o.psatLowT; s.liquidCp = o.liquidCp;
     s.gasKgasModel = o.gasKgasModel;
-    if (o.gasCp > 0.0) s.cp = o.gasCp;   // 蒸気 c_p,v を config 由来で上書き (pure-condensible CPG のみ渡される)
+    // Kirchhoff の傾き専用。cp/cv/R (Kantrowitz の γ_v) は種固有のまま触らない。
+    s.kirchhoffCpv = (o.gasCp > 0.0) ? o.gasCp : COND_N2_CPV;
     return s;
 }

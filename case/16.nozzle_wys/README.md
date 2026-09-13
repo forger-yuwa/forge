@@ -51,6 +51,8 @@ Wyslouzil et al., *J. Chem. Phys.* **113**, 7317 (2000)
 | run | 物理 | 壁 | exit M (中心線) | exit Ps | 状態・備考 |
 | --- | --- | --- | --- | --- | --- |
 <!-- run_0464/0465 は H2O 潜熱 Watson 外挿の回帰専用。300 step の A/B で、check_convergence.py は NOT CONVERGED、check_quasisteady.py は TRANSIENT-UNSETTLED (各 run の *_VERDICT.txt)。収束・準定常は主張しない -->
+| `run_0466_h2ocp_node2d_{pre,cur,cur_r2,cur_r3}` | H2O の蒸気 c_p が一時 1038.8 に上書きされていた不具合 (580dd8be〜e0ffca34) の解消確認。`483de03b` のバイナリと現行の A/B (node 2D, 300 step) | `diff_res.py --tolfile --factor 2` exit 0 (床以内)。[plan](../../plans/active/condensation-vapour-cp-source.md) §4.2 | ref |
+| `run_0467_h2ocp_cell2d_{pre,pre_r2,pre_r3,cur,cur_r2..r5}` | 同上 cell | 3 反復床では exit 1、**5+3 反復の合成床では exit 0**。cell の atomicAdd 非決定性に 3 反復は不足 | ref |
 | `run_0464_h2olw_node2d_base` | node 2D SST H2O 凝縮 300 step | 輪郭 no-slip | — | — | ref. H2O 潜熱 Watson 外挿の A/B 基準側 (旧物性バイナリ)。`plans/active/condensation-h2o-latent-supercritical.md` §6 |
 | `run_0464_h2olw_node2d_new` (+`_r2`, `_r3`) | 同上 (新物性バイナリ, 3 反復) | 同上 | — | — | ref. 同 A/B の新側とノイズ床用の反復。`diff_res.py --tolfile noise_floor_3reps.json --factor 2` が 30 配列で exit 0 (`diff_vs_base.txt`) |
 | `run_0465_h2olw_cell2d_base` | cell 2D SST H2O 凝縮 300 step | 輪郭 no-slip | — | — | ref. 同 A/B の cell 基準側 |

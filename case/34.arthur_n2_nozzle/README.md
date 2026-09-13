@@ -38,7 +38,8 @@ P.D. Arthur の博士論文 (Caltech/GALCIT, 1952) で用いられた **2 次元
 
 | run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
 | --- | --- | --- | --- |
-| `run_0105_gascp_air_node_{base,new,new_r2,new_r3}` | 蒸気 c_p,v を N2 内蔵 1038.8 から config `physProp.cp` (空気 1008.7) へ変えた A/B (node, 空気キャリア, 12000 step) | **onset 2.20 in / 2.10 in で変化なし**、g_exit 0.0583→0.0581、液滴モーメント最大 2.4 % 変化 (ノイズ床超)。`onset_analysis.py --series` は両者 STEADY。`diff_vs_base.txt`, `noise_floor_3reps.json` | ref (物性決定の根拠) |
+| `run_0105_gascp_air_node_{base,new,new_r2,new_r3}` | 蒸気 c_p,v を N2 内蔵 1038.8 から config `physProp.cp` (空気 1008.7) へ変えた A/B (node, 空気キャリア, 12000 step) | **onset 2.20 in / 2.10 in で変化なし**、g_exit 0.0583→0.0581、ρQ0 の最大差/基準最大値 2.43 % (ノイズ床超)。`onset_analysis.py --series` は両者 STEADY。`diff_vs_base.txt`, `noise_floor_3reps.json`。[plan](../../plans/active/condensation-vapour-cp-source.md) | ref (物性決定の根拠) |
+| `run_0107_gascp_air_cell_{base,new,new_r2,new_r3}` | 同 A/B を cell で (codex result M2) | **onset 2.21 in / 2.13 in で変化なし**、g_exit 0.0590→0.0589、ρQ0 2.92 %。`--series` STEADY | ref |
 | `run_0105_gascp_air_node_dry` | 上の onset 解析用 dry 参照場 (同 config, `condensation: 0`) | `restart_dry.h5` の供給元 | ref |
 | `run_0106_gascp_n2_node_{base,new,new_r2,new_r3}` | 同 A/B を純 N2 (`cp: 1038.8`) で | ノイズ床以内で不変 (`diff_res.py --tolfile --factor 2` exit 0) | ref |
 | `run_0001_slau_dry` | 直線壁(スロート鋭頂点) + cfl_pseudo=5 | step 467 で発散 (スロート上端の凸コーナー膨張特異点; Ux~1.5e8)。`res_nan_467.h5` | 破棄 (コーナー特異点の記録) |

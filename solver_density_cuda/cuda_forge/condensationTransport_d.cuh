@@ -29,7 +29,8 @@ inline CondPropOpts cond_prop_opts(const solverConfig& cfg)
     CondPropOpts o;
     o.latentLowT = cfg.condN2LatentLowT; o.psatLowT = cfg.condN2PsatLowT; o.liquidCp = cfg.condN2LiquidCp;
     o.gasKgasModel = (cfg.condVaporMassFraction > 0.0) ? 1 : 0;   // CPG carrier (空気) は空気 Sutherland
-    // 蒸気の定圧比熱 c_p,v (Kirchhoff の傾き L' = c_p,v − c_l と Kantrowitz の γ_v に使う)。
+    // Kirchhoff の傾き L' = c_p,v − c_l に使う蒸気比熱。**Kantrowitz の γ_v には使わない**
+    // (γ_v は種固有の cp/cv のまま。混ぜると cp−cv≠R になる)。
     // **CPG (thermalMethod 0) では config の physProp.cp をそのまま使う**。CPG はそもそも「気相の比熱は
     // この 1 つの定数」というモデルなので、物性相関だけ別の定数を持つと同じ run の中で 2 つの c_p が
     // 並ぶことになる。空気キャリア (physProp.cp = 1008.7) では窒素蒸気の 1038.8 とは 2.9 % 違い、
