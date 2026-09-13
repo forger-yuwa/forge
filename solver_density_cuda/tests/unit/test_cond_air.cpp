@@ -169,5 +169,46 @@ int main() {
         checkb("R_eff <= 0 falls back to the dry face (finite, = cp T_dry)", std::isfinite(hbad) && std::fabs(hbad - cp_air*(800.0/(0.1*R_air))) < 1e-9*hbad);
         checkb("non-finite g_f falls back to the dry face", std::isfinite(cond_face_h_cpg(n2n, cp_air, R_air, RN2, std::numeric_limits<double>::quiet_NaN(), 800.0, 0.1, 0.0)));
     }
+    // (g) 蒸気 c_p,v の出どころ (2026-09-14): Kirchhoff の傾き L' = c_p,v − c_l は **凝縮する蒸気** の c_p を使う。
+    //     pure-condensible CPG だけ config の physProp.cp を渡す (CondPropOpts::gasCp)。carrier では渡さない。
+    printf("== (g) vapour c_p source for the Kirchhoff slope (below 70 K) ==\n");
+    {
+        CondPropOpts o{1, 1, 2000.0, 0, 1.0, -1.0};          // gasCp 未指定 = 内蔵 1038.8
+        CondPropOpts og = o; og.gasCp = 1050.0;               // config 由来で上書き
+        const CondSpeciesProps a = condProps_make(COND_MODEL_N2, o), b = condProps_make(COND_MODEL_N2, og);
+        check("gasCp unset keeps the built-in N2 vapour cp", a.cp, 1038.8, 1e-12);
+        check("gasCp set overrides the vapour cp", b.cp, 1050.0, 1e-12);
+        for (double T : {80.0, 100.0}) check("T>=70 K is the polynomial (cp_v irrelevant)", cond_latent(a, T), cond_latent(b, T), 1e-14);
+        const double T1 = 45.0, dcp = 1050.0 - 1038.8;
+        check("below 70 K the slope moves by (cp_v_new - cp_v_old)", cond_latent(b, T1) - cond_latent(a, T1), dcp*(T1 - 70.0), 1e-10);
+        // 液比熱は全域で正 (c_l = c_p,v - L' > 0)
+        int nneg = 0;
+        for (double T = 25.0; T <= 125.0; T += 0.25) {
+            const double dL = (cond_latent(a, T + 0.05) - cond_latent(a, T - 0.05))/0.1;
+            if (a.cp - dL <= 0.0) ++nneg;
+        }
+        checkb("implied liquid cp = cp_v - dL/dT stays positive over 25-125 K", nneg == 0);
+    }
+
+    // (h) H2O: 気相 h の有効域外は種 DB と同じ「端点 cp 一定の線形外挿」(2026-09-14)。
+    //     生の多項式評価だと dL/dT が 200 K 未満で温度依存になり、含意される液比熱が 4228 からずれる。
+    printf("== (h) H2O latent heat below the gas fit range (200 K) ==\n");
+    {
+        const CondSpeciesProps w = condProps_H2O();
+        const double cpl_ref = 4228.268;   // CEA H2O(L) の 273.15 K 解析 cp
+        double worst = 0.0;
+        for (double T = 130.0; T <= 265.0; T += 5.0) {
+            const double dL = (cond_latent(w, T + 0.05) - cond_latent(w, T - 0.05))/0.1;
+            const double cpv = 1851.2;     // NASA-9 H2O(g) の 200 K 値 (200 K 未満は定 cp)
+            if (T < 199.0) worst = std::max(worst, std::fabs((cpv - dL) - cpl_ref)/cpl_ref);
+        }
+        printf("      max |c_l,implied - 4228.27|/4228.27 over 130-199 K = %.2e\n", worst);
+        checkb("implied liquid cp is the constant 4228 below 200 K (gas h is linear there)", worst < 2e-4);
+        // 200 K の接続: 片側微分が一致する (定 cp 外挿は c_p(200) で接続するので C1)
+        const double dm = (cond_latent(w, 199.9) - cond_latent(w, 199.8))/0.1;
+        const double dp = (cond_latent(w, 200.2) - cond_latent(w, 200.1))/0.1;
+        check("dL/dT is continuous across the 200 K join", dm, dp, 5e-5);
+    }
+
     printf("%s (%d failures)\n", nfail ? "FAILED" : "ALL PASS", nfail); return nfail ? 1 : 0;
 }

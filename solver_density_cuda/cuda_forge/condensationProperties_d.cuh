@@ -53,7 +53,13 @@ struct CondPropOpts {
     int    gasKgasModel;
     double sigmaScale;
     double Yw;           // CPG carrier 形の凝縮種質量分率 (condVaporMassFraction; <=0 で pure)
-};
+    // **凝縮する蒸気** の c_p,v [J/(kg K)]。Kirchhoff の傾き L' = c_p,v − c_l と Kantrowitz の γ_v に使う
+    // (CondSpeciesProps::cp を上書きする)。0 以下で内蔵値 (N2 1038.8 / H2O 1855)。
+    // pure-condensible CPG (気相 = 凝縮種) では physProp.cp がまさにこれなので config から入れる。
+    // CPG carrier (空気) の physProp.cp は**混合気**の値 (1008.7) で N2 蒸気の値ではないので入れてはいけない
+    // (70 K 未満で L が 0.5 % 変わり onset が動く)。
+    double gasCp = 0.0;
+};   // ↑ gasCp は既存の位置指定初期化 ({1,1,2000.0,0,1.0,-1.0}) を壊さないよう末尾に置く
 
 // N2 既定パラメータ。R=296.8, γ=1.4 → cv=R/(γ-1)=742, cp=γcv=1038.8。
 __host__ __device__ inline CondSpeciesProps condProps_N2()
@@ -97,10 +103,10 @@ __host__ __device__ inline double n2_latent(double T) { return n2_latent_poly(T)
 #define COND_N2_LATENT_TA 70.0   // 線形外挿の接続温度 [K] (C0 接続; L'(70) は多項式 −1072 vs 線形 c_p,v−c_l で不連続)
 #define COND_N2_CPV 1038.8       // N2 蒸気 c_p [J/(kg K)] (CPG)
 // 低温整合版: T>=Ta は多項式、T<Ta は L(T)=L(Ta)+(c_p,v−c_l)(T−Ta) (c_l>0 なら L'<0 が保証される)。lowT=0 で旧多項式。
-__host__ __device__ inline double n2_latent_ex(double T, int lowT, double cl)
+__host__ __device__ inline double n2_latent_ex(double T, int lowT, double cl, double cpv = COND_N2_CPV)
 {
     if (!lowT || T >= COND_N2_LATENT_TA) return n2_latent_poly(T);
-    return n2_latent_poly(COND_N2_LATENT_TA) + (COND_N2_CPV - cl)*(T - COND_N2_LATENT_TA);
+    return n2_latent_poly(COND_N2_LATENT_TA) + (cpv - cl)*(T - COND_N2_LATENT_TA);
 }
 
 // Jacobsen 液飽和圧 (式22, atm→Pa)。有効域内の生評価。
@@ -127,7 +133,7 @@ __host__ __device__ inline double n2_psat_jacobsen(double Tcl)
 //   ln(p/p_s) = (1/R)[(L_a − c' T_a)(1/T_s − 1/T) + c' ln(T/T_s)],  c' = c_p,v − c_l。接続 (50 K) は C0 (微分は不連続)。
 //   38 K で旧 (L_poly(50)=204 kJ/kg 一定の C–C) の 0.518 倍 (plans/accepted/condensation-air.md §4.2)。
 // psatLowT=0: 旧 C–C (診断「潜熱だけ新」の A/B 用)。latentLowT=0 のときは閉形式の L も多項式側では定義できないので旧 C–C に落とす。
-__host__ __device__ inline double n2_psat_ex(double T, int psatLowT, int latentLowT, double cl)
+__host__ __device__ inline double n2_psat_ex(double T, int psatLowT, int latentLowT, double cl, double cpv = COND_N2_CPV)
 {
     const double Tc = 126.192;
     if (T >= COND_PSAT_TSWITCH) {
@@ -139,7 +145,7 @@ __host__ __device__ inline double n2_psat_ex(double T, int psatLowT, int latentL
     const double Rv   = 296.8;
     double Tlo = (T > 5.0) ? T : 5.0;     // 0 割回避
     if (psatLowT && latentLowT) {
-        const double Ta = COND_N2_LATENT_TA, La = n2_latent_poly(Ta), cpr = COND_N2_CPV - cl;
+        const double Ta = COND_N2_LATENT_TA, La = n2_latent_poly(Ta), cpr = cpv - cl;
         const double lnr = ((La - cpr*Ta)*(1.0/Tsw - 1.0/Tlo) + cpr*log(Tlo/Tsw))/Rv;
         return psw * exp(lnr);
     }
@@ -222,7 +228,9 @@ __host__ __device__ inline double h2o_rho_cond(double T)
 
 // 水 蒸発潜熱 L(T) [J/kg] = h_v(T) − h_l(T) を **CEA (NASA-9) の気相 H2O と液相 H2O(L) の全エンタルピー差**で作る
 // (2026-08-18, ユーザ指示「CEA 式で L を逆算」)。
-//   h_v: forge 種 DB と同じ CEA McBride–Gordon 2002 の H2O 200–1000 K 係数 (thermo_d.cu)。
+//   h_v: forge 種 DB と同じ CEA McBride–Gordon 2002 の H2O 200–1000 K 係数 (thermo_d.cu)。**有効域外 (200 K 未満 /
+//        1000 K 超) は種 DB と同じ「端点の cp 一定で線形外挿」**にする (h2o_gas_h_mass)。生の多項式評価だと
+//        同じ温度に対し h_v が種 DB と 2 通りになる (2026-09-14 修正; 150 K で L の 0.017 %)。
 //   h_l: CEA thermo.inp の H2O(L) 273.15–373.15 K 係数 (Cox 1989 / Haar 1984)。**273.15 K 未満は CEA に液相フィットが無く
 //        (CEA は氷 H2O(cr))、多項式外挿は 250 K 以下で発散 (cp_l 230 K で 10 kJ/kgK, 200 K で 50 kJ/kgK) するので、
 //        h_l を 273.15 K の値と勾配 cp_l(273.15)=4228 J/kgK で線形外挿**する (過冷却水の標準的な扱い、cp_l 一定)。
@@ -236,6 +244,30 @@ __host__ __device__ inline double h2o_nasa9_h_mass(const double* a, double T)
                      + a[5]*T*T*T/4.0 + a[6]*T*T*T*T/5.0 + a[7]/T;
     return hRT*Rw*T;
 }
+// NASA-9: cp/R = a1/T² + a2/T + a3 + a4 T + a5 T² + a6 T³ + a7 T⁴
+__host__ __device__ inline double h2o_nasa9_cp_mass(const double* a, double T)
+{
+    const double Rw = 8.314462618/0.0180153;
+    return (a[0]/(T*T) + a[1]/T + a[2] + a[3]*T + a[4]*T*T + a[5]*T*T*T + a[6]*T*T*T*T)*Rw;
+}
+// 気相 H2O の h を **種 DB (thermo_d.cuh の thermo_h_molar) と同じ規約**で評価する。
+//   CEA の気相係数は 200–1000 K が有効域。域外を生の多項式で評価すると種 DB 側 (下限で cp 一定の線形外挿) と
+//   食い違い、同じ温度で h_v が 2 通りになる (L = h_v − h_l は EOS の h_v と対でなければ h_l が定義できない)。
+//   食い違い自体は小さい (150 K で L の 0.017 %) が、規約を 1 つにしておく (2026-09-14)。
+#define COND_H2O_GAS_TLO 200.0
+#define COND_H2O_GAS_THI 1000.0
+__host__ __device__ inline double h2o_gas_h_mass(const double* a, double T)
+{
+    if (T < COND_H2O_GAS_TLO) {
+        return h2o_nasa9_h_mass(a, COND_H2O_GAS_TLO)
+             + h2o_nasa9_cp_mass(a, COND_H2O_GAS_TLO)*(T - COND_H2O_GAS_TLO);
+    }
+    if (T > COND_H2O_GAS_THI) {
+        return h2o_nasa9_h_mass(a, COND_H2O_GAS_THI)
+             + h2o_nasa9_cp_mass(a, COND_H2O_GAS_THI)*(T - COND_H2O_GAS_THI);
+    }
+    return h2o_nasa9_h_mass(a, T);
+}
 __host__ __device__ inline double h2o_latent(double T)
 {
     // 気相 H2O (CEA, 200–1000 K 区間; 1000 K 超は本用途で不要だが単調に外挿される)
@@ -246,8 +278,7 @@ __host__ __device__ inline double h2o_latent(double T)
                            1.761556813e+00,-2.151167128e-03, 1.092570813e-06, 1.101760476e+08};
     const double Tf = 273.15;
     double Tg = (T > COND_T_PROP_FLOOR) ? T : COND_T_PROP_FLOOR;
-    if (Tg > 1000.0) Tg = 1000.0;
-    const double hv = h2o_nasa9_h_mass(ag, Tg);
+    const double hv = h2o_gas_h_mass(ag, Tg);   // 200 K 未満 / 1000 K 超は cp 一定の線形外挿 (種 DB と同規約)
     double hl;
     if (Tg >= Tf) {
         const double Tl = (Tg < 373.15) ? Tg : 373.15;
@@ -255,7 +286,8 @@ __host__ __device__ inline double h2o_latent(double T)
     } else {
         // 273.15 K 未満: cp_l(273.15) 一定で線形外挿 (過冷却水)
         const double h0  = h2o_nasa9_h_mass(al, Tf);
-        const double cpl = (h2o_nasa9_h_mass(al, Tf + 0.5) - h2o_nasa9_h_mass(al, Tf - 0.5 + 1.0e-9))/1.0;  // ≈4228 J/kgK
+        const double cpl = h2o_nasa9_cp_mass(al, Tf);   // 4228.27 J/kgK (解析形。旧 ±0.5 K 差分は液相フィットの
+                                                        // 有効域 273.15 K の外を踏んでいた; 差は 0.05 J/kgK)
         hl = h0 - cpl*(Tf - Tg);
     }
     double L = hv - hl;
@@ -278,7 +310,7 @@ __host__ __device__ inline double h2o_sigma(double T)
 // --- 種ディスパッチ (model で N2 / H2O を切替) ---
 __host__ __device__ inline double cond_psat(const CondSpeciesProps& s, double T)
 {
-    return (s.model == COND_MODEL_H2O) ? h2o_psat(T) : n2_psat_ex(T, s.psatLowT, s.latentLowT, s.liquidCp);
+    return (s.model == COND_MODEL_H2O) ? h2o_psat(T) : n2_psat_ex(T, s.psatLowT, s.latentLowT, s.liquidCp, s.cp);
 }
 // 空気 (CPG carrier) の気相熱伝導率 [W/(m K)]: Sutherland μ (μ0=1.716e-5 @273 K, C=111) × c_p/Pr (c_p 1008.7, Pr 0.72)。低温外挿 (近似)。
 __host__ __device__ inline double air_kgas(double T)
@@ -298,7 +330,7 @@ __host__ __device__ inline double cond_rho_cond(const CondSpeciesProps& s, doubl
 }
 __host__ __device__ inline double cond_latent(const CondSpeciesProps& s, double T)
 {
-    return (s.model == COND_MODEL_H2O) ? h2o_latent(T) : n2_latent_ex(T, s.latentLowT, s.liquidCp);
+    return (s.model == COND_MODEL_H2O) ? h2o_latent(T) : n2_latent_ex(T, s.latentLowT, s.liquidCp, s.cp);
 }
 __host__ __device__ inline double cond_sigma(const CondSpeciesProps& s, double T)
 {
@@ -354,6 +386,8 @@ __host__ __device__ inline CondSpeciesProps condProps_H2O()
 __host__ __device__ inline CondSpeciesProps condProps_make(int model, const CondPropOpts& o)
 {
     CondSpeciesProps s = (model == COND_MODEL_H2O) ? condProps_H2O() : condProps_N2();
-    s.sigmaScale = o.sigmaScale; s.latentLowT = o.latentLowT; s.psatLowT = o.psatLowT; s.liquidCp = o.liquidCp; s.gasKgasModel = o.gasKgasModel;
+    s.sigmaScale = o.sigmaScale; s.latentLowT = o.latentLowT; s.psatLowT = o.psatLowT; s.liquidCp = o.liquidCp;
+    s.gasKgasModel = o.gasKgasModel;
+    if (o.gasCp > 0.0) s.cp = o.gasCp;   // 蒸気 c_p,v を config 由来で上書き (pure-condensible CPG のみ渡される)
     return s;
 }

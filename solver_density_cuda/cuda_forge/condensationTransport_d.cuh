@@ -29,6 +29,11 @@ inline CondPropOpts cond_prop_opts(const solverConfig& cfg)
     CondPropOpts o;
     o.latentLowT = cfg.condN2LatentLowT; o.psatLowT = cfg.condN2PsatLowT; o.liquidCp = cfg.condN2LiquidCp;
     o.gasKgasModel = (cfg.condVaporMassFraction > 0.0) ? 1 : 0;   // CPG carrier (空気) は空気 Sutherland
+    // 蒸気 c_p,v は **凝縮する種の値** でなければならない (Kirchhoff の L' = c_p,v − c_l)。
+    // pure-condensible CPG (気相 = 凝縮種) に限り physProp.cp がそれなので config から取る。
+    // CPG carrier (空気) / TP の physProp.cp は混合気の値なので使わず、N2 の 1038.8 を使う。
+    const bool pureCpgCondensible = (cfg.thermalMethod == 0) && (cfg.condGasSpecies < 0) && !(cfg.condVaporMassFraction > 0.0);
+    o.gasCp = (pureCpgCondensible && cfg.cp > 0.0) ? (double)cfg.cp : COND_N2_CPV;
     o.sigmaScale = cfg.condSigmaScale; o.Yw = cfg.condVaporMassFraction;
     return o;
 }
