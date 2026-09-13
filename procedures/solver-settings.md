@@ -6,6 +6,56 @@
 
 この文書は `solverConfig.yaml` の主要な数値設定について、正しい使い方と注意点をまとめたものです。解析設定を変更するときは、**必ずこのファイルを参照してから**変更を行うこと。
 
+## config を読む・点検する — `tools/config_doc.py` (2026-09-13)
+
+`solverConfig.yaml` にはコメントを**書かない**。run ディレクトリは複製で増えるので、手書きの注釈は複製に運ばれ、
+既定値や意味が変わっても更新されない (廃止キー `LESorRANS` が複製で生き残った前例)。意味・既定値の正本はコード
+(`solver_density_cuda/input/solverConfig.{cpp,hpp}`) に置いたまま、必要なときに生成する。
+
+```
+python3 solver_density_cuda/tools/config_doc.py check    <run_dir|yaml> [...]  # 点検 (問題があれば exit 1)
+python3 solver_density_cuda/tools/config_doc.py annotate <run_dir|yaml>        # 注釈つきの写しを別ファイルに出す
+python3 solver_density_cuda/tools/config_doc.py template [--section time]      # 全キー入りの注釈つき雛形
+python3 solver_density_cuda/tools/config_doc.py list     [--missing-desc]      # キー一覧 (Markdown 表)
+```
+
+- `check` が出すのは 5 種類。**`[未知]` と `[廃止]` と `[必須欠落]` は必ず直す**。
+  - `[未知]` … ソルバがどこでも読まないキー。綴り間違いか旧キーで、**黙って無視される** (実測で
+    `turbulence.kInf` / `turbulence.omegaInf` / `time.last.time` / `time.implicit.nLoop` が生産 config に残っていた。
+    乱流の初期値は `turbulence.kInit` / `omegaInit` が正しい綴り)。
+  - `[廃止]` … コードが起動時に拒否するキー、またはルールで禁止されたキー (`mesh.bndFirstOrder`)。
+  - `[節違い]` … キー名は正しいが節が違う (`time.implicit.cfl_pseudo` → 正しくは `time.deltaT.cfl_pseudo`)。効かない。
+  - `[必須欠落]` … 現ソルバでは必須のキーが無い (古い run の config を複製すると起きる)。
+  - `[非既定]` … 既定値から外れている設定の一覧。異常ではなく「この run で何を変えたか」の要約として読む。
+- `annotate` は元の `solverConfig.yaml` を書き換えず、同じディレクトリに `solverConfig.annotated.yaml` を作る
+  (注釈つきの写し。**実行には使わない**)。意味を知りたいときだけ生成し、コミットはしない。
+- `list` / `template` が出す既定値は**コード上の既定値**であって推奨値ではない。推奨レシピの正本は
+  [`recommended-settings.md`](recommended-settings.md)。`template` は廃止・使用禁止キーを出さない。
+- `coverage` は「コードのどの読み出しを解析できなかったか」を行番号で出す。**0 件でないかぎり一覧は不完全**
+  なので、`solverConfig.cpp` に新しい読み方を足したらここを確認する。
+- 条件付きの必須 (`physProp.chemistry.mechanismFile` は `enabled: 1` のときだけ要る 等) はツールでは見ない。
+  ソルバが起動時に理由付きで弾くので、同じ条件をツールに写すと二重の正本になって腐るため。
+
+### 起動ログで「実際に効いた設定」を確認する
+
+省略したキーも `[default]` 行として起動ログに出る (2026-09-13)。明示したキーは従来どおりの行なので、
+`forge_run.log` の先頭を見れば「書いた設定」と「既定のまま動いた設定」が並んで残る。
+
+```
+'cfl_pseudo' in 'time.deltaT': 2        ← config に書いたもの
+[default] 'implicitRelax' in 'time.deltaT': 1   ← 省略して既定になったもの
+```
+
+うるさいときは `FORGE_CONFIG_LOG_DEFAULTS=0` で `[default]` 行だけ止められる。
+
+**`[default]` は「ヘルパーを通った省略」の記録であって、最終的な実効値ではない**。次はここに出ない。
+
+- `mesh.discretization` のようにヘルパーを通さず `if (config[...]) ... else ...` で既定を決めている経路
+- `time.deltaT.detectNaN` を出したあとトップレベルの同名キーが上書きする経路 (最終値は後続行で確認する)
+- node で `gradLSQ` を強制するような、読み込み後にコードが書き換える経路
+
+最終値は `'<key>' in '<section>':` の行と、`[config]` で始まる個別の通知行を合わせて読むこと。
+
 ## convMethod — 対流スキームの次数
 
 | 値 | スキーム | 説明 |

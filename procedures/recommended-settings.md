@@ -89,8 +89,14 @@ output: {level: 1}                                      # 保存量 + 原始量 
 
 ```yaml
 turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1,
-             wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInf: 1.0, omegaInf: 1000.0}
+             wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInit: 1.0, omegaInit: 1000.0}
 ```
+
+- **`kInf` / `omegaInf` は存在しないキー** (2026-09-13 訂正)。ソルバが読むのは `kInit` / `omegaInit` で、
+  これは**初期場 HDF5 に `roK`/`roOmega` が無いときだけ** `roK = ro·kInit` として使われる
+  ([`variables.cpp`](../solver_density_cuda/variables.cpp) `readValueHDF5`)。既に SST 場を持つ h5 から
+  引き継ぐ run では効かない。旧綴りを書いた config は黙って無視されていた
+  (`config_doc.py check` が `[未知]` として検出する)。
 
 - 既定で ON (キー省略時): `sstNodeWallKPin: 1`, `sstOmegaProdFromPk: 1`, `sstSigmaBlend: 1` (2026-09-08〜)。
   旧挙動を再現するときだけ 0 を明記。`sstIsotropicStress` / `sstEnergyKSource` は 0 のまま (分離型、非推奨)。

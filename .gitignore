@@ -68,3 +68,6 @@ case/**/run_*/
 *.pptm
 *.swp
 case/02.airfoil/run_cuda/identity_system.mtx*
+
+# config_doc.py annotate が生成する注釈つきの写し (実行には使わない)
+solverConfig.annotated.yaml

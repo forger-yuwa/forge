@@ -205,6 +205,16 @@
 - 出力間隔
 
 `getValidatedValue()` を通して読み込んでいるため、キーの欠落や型不整合は比較的早い段階で検出される。
+一方 **`read()` が触らないキーは黙って無視される** (綴り間違い・旧キーが config に残り続ける原因)。
+検出には `python3 solver_density_cuda/tools/config_doc.py check <run_dir>` を使う。同ツールはキー・型・既定値を
+`solverConfig.{cpp,hpp}` から抽出して一覧・注釈・雛形も出す (使い方は
+[`procedures/solver-settings.md`](../../procedures/solver-settings.md) の「config を読む・点検する」)。
+
+省略されたキーは `getOptionalValidatedValue()` が `[default] 'key' in 'section': value` として起動ログに出す
+(2026-09-13〜、`FORGE_CONFIG_LOG_DEFAULTS=0` で抑止)。ただしこれは**ヘルパーを通った省略の記録**であって
+最終的な実効値ではない。`if (config["mesh"]["discretization"])` のようにヘルパーを通らない経路や、
+`time.deltaT.detectNaN` をトップレベルの同名キーが上書きする経路、node で `gradLSQ` を強制する経路は
+ここに出ない (最終値はその後の `'<key>' in '<section>':` 行や個別の `[config]` 行で確認する)。
 
 ### 7.2 `bcondConfig.yaml`
 

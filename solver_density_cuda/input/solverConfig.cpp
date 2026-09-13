@@ -1,5 +1,7 @@
 #include "input/solverConfig.hpp"
 
+#include <cstdlib>
+
 
 solverConfig::solverConfig(){};
 
@@ -18,9 +20,24 @@ T getValidatedValue(const YAML::Node& node, const std::string& key, const std::s
     }
 }
 
+// 省略されたキーを既定値のまま使ったことを起動ログに残すか。
+// 既定は残す (config に書かれていない設定が「何で動いたか」がログだけで追えるようにする)。
+// うるさいときは環境変数 FORGE_CONFIG_LOG_DEFAULTS=0 で止める。
+static bool configLogDefaults() {
+    static const bool on = [] {
+        const char* e = std::getenv("FORGE_CONFIG_LOG_DEFAULTS");
+        return !(e && std::string(e) == "0");
+    }();
+    return on;
+}
+
 template <typename T>
 T getOptionalValidatedValue(const YAML::Node& node, const std::string& key, const T& default_value, const std::string& parent = "") {
     if (!node[key].IsDefined()) {
+        if (configLogDefaults()) {
+            std::cout << "[default] '" << key << "'" << (parent.empty() ? "" : " in '" + parent + "'")
+                      << ": " << default_value << std::endl;
+        }
         return default_value;
     }
 

@@ -47,7 +47,9 @@ k/ω を持つ収束場から restart する場合は不要 (IC の roK/roOmega 
 `solverConfig` の turbulence 設定は、現在の `LESorRANS` と `LESmodel` に加えて、
 RANS 用モデル選択と自由流乱流量入力を持てるよう拡張する。
 
-初期実装で想定する入力項目:
+初期実装で想定する入力項目 (**当時の想定であり現行のキーではない**。現行は `turbulence.model` と
+`turbulence.kInit` / `omegaInit`。`LESorRANS` / `RANSmodel` / `LESmodel` は起動エラー、`kInf` / `omegaInf` は
+存在しない。現行キーの一覧は `python3 solver_density_cuda/tools/config_doc.py list --section turbulence`):
 
 - `LESorRANS`: `0=no model`, `1=LES`, `2=RANS`
 - `LESmodel`: 既存 WALE 用

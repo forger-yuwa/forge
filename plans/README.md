@@ -23,6 +23,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [tooling-config-self-documentation.md](active/tooling-config-self-documentation.md) | `architecture / tooling` | **solverConfig.yaml を読めるようにする** (2026-09-13 起票, in_progress): 意味・既定値・廃止をコードから抽出して注釈生成/点検する `tools/config_doc.py` と、省略キーを `[default]` として残す起動ログ。config にコメントは書かない (複製で腐るため) |
 | [condensation-followups.md](active/condensation-followups.md) | `condensation` | **凝縮モデルの後続課題の正本** (2026-09-13 起票, draft): α 感度 / 分圧スイープ / 既定値 / σ0.97 h0 変動 / Arthur 壁圧過大の切り分け / CPG 二相音速 / 露点線 / Longshot 条件 / 境界試験・流束収支 / check_quasisteady 統合 |
 | [condensation-kantrowitz-gamma-twophase-sonic.md](active/condensation-kantrowitz-gamma-twophase-sonic.md) | `condensation` | **Kantrowitz 補正の γ を蒸気 γ_v に修正 + 凝縮セルの二相 frozen 音速** (2026-09-10 起票): 旧実装はセル気相混合 γ (H2O–N2 で 1.40) と g を無視した全蒸気音速。A/B キー `condKantrowitzGammaMode` / `condSonicModel`、Wyslouzil 2D (case/16) で変化量を定量化 |
 | [chemistry-finite-rate-h2.md](active/chemistry-finite-rate-h2.md) | `thermophysics / chemistry` | **有限速度化学 (H₂ 燃焼・ノズル化学非平衡)** (2026-09-04 起票): 種ブロック point-implicit + sensible datum 反応熱陽注入。Phase 0 (CEA スクリーニング・熱力学 DB ツール・Jachimowski YAML) 完了、Phase 1 ソース項から実装 |

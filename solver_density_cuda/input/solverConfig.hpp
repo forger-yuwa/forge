@@ -17,19 +17,19 @@ private:
     std::string solConfigFileName;
 
 public:
-    std::string meshFormat; 
-    std::string meshFileName; 
-    std::string valueFileName; 
+    std::string meshFormat;   // メッシュ入力の形式。変換済み "hdf5" のみ運用中
+    std::string meshFileName;   // メッシュ (座標・接続・境界) を読む HDF5。node モードは discretization=node で変換したものを使う
+    std::string valueFileName;   // 初期場を読む HDF5。新規は meshFileName と同じで可、引き継ぎは前 run の res_*.h5
 
-    int gpu;
+    int gpu;   // GPU を使うか (1: 使う, 0: CPU 経路)。**GPU 番号の指定ではない** (1 以外は boundaryCond.cpp でエラー)
 
-    std::string solver;
+    std::string solver;   // 対流流束スキーム名 ("SLAU"/"ROE"/"KEEP" 等)。選び方は procedures/solver-settings.md が正本
 
     //Time
-    int endTimeControl; // 0: use dt , 1: cfl
-    int nStepOuter;
-    int outStepInterval;
-    int outStepStart;
+    int endTimeControl; // time.last.control。**現在どこからも参照されていない** (終了条件は nStepOuter のみ)
+    int nStepOuter;   // 外側ループのステップ数 (定常では擬似時間ステップ数)。実行回数は mainLoopCount()=max(1,これ)
+    int outStepInterval;   // res_*.h5 を書く間隔 [step]
+    int outStepStart;   // 出力を始める step 番号 (助走を書き出さない用)
     // 出力する場の量の絞り込み (config `output:` ブロック, 2026-09-08)。
     //   level 0: リスタート最小 (保存量 ro/roU/roe/roK/roOmega/roY*/凝縮モーメント) のみ
     //   level 1 (既定): 0 + 原始量 P/T/U/k/omega/sonic/Y*, vis_lam/vis_turb, wall_dist, h0 (全エンタルピー; sstEnergyIncludesK なら +k)
@@ -40,11 +40,11 @@ public:
 
     int dtControl; // 0: use dt , 1: cfl
     flow_float totalTime=0.0;
-    flow_float dt;
+    flow_float dt;   // 固定時間刻み [s] (time.deltaT.control=0)。control=1 では dt_min/dt_max の範囲で適応更新される
     flow_float dt_pseudo;
-    flow_float cfl;
-    flow_float cfl_pseudo;
-    flow_float implicitRelax = 1.0;
+    flow_float cfl;   // 非定常 (unsteady=1, dualTime=0) の物理時間刻みを決める CFL。定常・dual-time では効かない
+    flow_float cfl_pseudo;   // 擬似時間 (内側反復) の CFL 数。定常・陰解法ではこれが実効 CFL
+    flow_float implicitRelax = 1.0;   // 陰的更新の緩和係数 (0<r<=1)。実効的な安定度は cfl_pseudo×implicitRelax で決まる
     flow_float implicitRelaxSST = -1.0; // -1: implicitRelax に倒置 (既定動作不変)
     // 陰的更新の正値性ガード (commit 時の局所 under-relax)。0=OFF (既定・ビット同一迂回)。
     // >0 で「1 step で ro・内部エネルギーが alpha 倍未満に落ちる」セルの Δq を半減列で縮小。
@@ -64,7 +64,7 @@ public:
     // 軸対称 near-axis 安定化: 擬似時間スペクトル半径に軸項 λ_axis=β·(|u_r|+c)·A_planar を加える。
     // 近軸 (r→0) で Δτ∝CFL·r/(|u_r|+c) を自然に与え半径運動量不安定を抑える。0=不変 (既定)。
     flow_float axisTimestepBeta = 0.0;
-    int blockDPLUR = 0;
+    int blockDPLUR = 0;   // 陰解法の線形緩和: 0=スカラー対角 DPLUR, 1=5×5 ブロック DPLUR (定常陰解法は 1 推奨)
     // 多成分 face 整合再構成: 0 (既定・ビット不変, 組成は owner セル 1 次=mixed-order)、
     // 1: Y_s を ρ と同じ勾配+limiter で face へ 2 次再構成し thermo/species 流束で同一 face 組成を使う。
     int speciesFaceReconstruction = 0;
@@ -152,7 +152,7 @@ public:
     // f_d 駆動 σ ブレンド (turbulence-iddes-sst §4.8, 既定 0=ビット不変)。1 で ES 散逸の σ を
     // face ごと σ_f=max(keepDissCoeff, (1-f̃_d)·keepDissCoeffMax) に置換 (DESmode>0 必須)。
     int keepDissFdBlend = 0;
-    flow_float keepDissCoeffMax = 1.0;
+    flow_float keepDissCoeffMax = 1.0;   // DES シールド外で使う σ_f の上限 (DESmode>0 のとき有効)
     // 高周波圧力欠陥駆動 mass-flux 補正 (Rhie–Chow 型市松キラー, matrix CPG 枝のみ)。
     // δṁ=−½C_cb·S·δp^HF/Ur を [1,ū,H̄t] で全保存量へ整合配布 (sign gate で面ごと ES 保証)。
     // keepDissJump>=1 必須。plans/active/convection-keep-cb-pressure-correction.md
@@ -171,8 +171,8 @@ public:
                                    // 同等 Pareto 点 (市松 3.9e-8/KE 1.10% ≈ c'+σ0.05 の 7.1e-8/1.36%) に届く。
                                    // 1 (既定): マッハ混在流 (チャンバー低M+プルーム超音速) でグローバル σ が
                                    //   両立できないケース向け。0: フル c — 単一領域で σ を手動較正する運用。
-    flow_float dt_max;
-    flow_float dt_min;
+    flow_float dt_max;   // 適応時間刻み (time.deltaT.control=1) の上限 [s]   // 可変刻みの上限 [s]
+    flow_float dt_min;   // 適応時間刻み (time.deltaT.control=1) の下限 [s]   // 可変刻みの下限 [s]
 
     int unsteady; // steady , unsteady
     int dualTime; // 0: off , 1: on
@@ -182,7 +182,7 @@ public:
 
     // for inner loop
     int nStage;
-    int nStepInner;
+    int nStepInner;   // 陰解法 (isImplicit=1) の 1 外側ステップあたりの内側反復数。陽解法では nStage が使われる
     int nSubIterDualTime = 20; // dual-time: 物理ステップあたりの擬似時間サブ反復数
     int bdfOrder = 2;          // dual-time: 物理時間 BDF 次数 (1 or 2、初回ステップは BDF1)
     flow_float unsteadyDiagCoef = 0.0; // dual-time: 陰解法対角へ加える物理時間項係数 a/Δt（定常は 0）。driver が毎ステップ設定
@@ -193,7 +193,7 @@ public:
     std::vector<flow_float> coef_DT_4thRunge;
     std::vector<flow_float> coef_Res_4thRunge;
 
-    flow_float  convMethod;
+    flow_float  convMethod;   // 対流項の空間次数: 0=1 次風上, 1=2 次風上, 2=3 次 MUSCL (procedures/solver-settings.md)
     int limiter;    // 0: off, 1: Barth-Jespersen, 2: Venkata, -1: legacy
 
     // free-stream 保存: 対流流束の圧力項を (p_tilde - pRef)*s で組み、非直交メッシュで
@@ -283,10 +283,10 @@ public:
     // DES グリッドスケール係数 C_DES (l_LES = C_DES·Δmax)。SST は k-ω/k-ε ブレンドで
     //   C_DES = F1·C_DES_kw + (1-F1)·C_DES_ke (Strelets 2001)。
     flow_float C_DES_kw = 0.78;
-    flow_float C_DES_ke = 0.61;
+    flow_float C_DES_ke = 0.61;   // DES グリッドスケール係数の k-ε 側 (SST は F1 で C_DES_kw とブレンド)
 
-    int isCompressible;
-    int isAxisymmetric = 0;
+    int isCompressible;   // 1: 圧縮性 (通常), 0: 非圧縮扱い
+    int isAxisymmetric = 0;   // 軸対称計算 (1) / 平面 2D・3D (0)。mesh.isAxisymmetric が正、physProp.isAxisymmetric は旧キー
 
     // 軸対称の定式化: 0 = r 重み幾何 (B 流儀, 従来・既定・ビット不変) / 1 = SU2 流
     // (planar 幾何 + 1/y ソース項。軸ノードは通常 DOF として解く。plan
@@ -325,7 +325,7 @@ public:
     // discretization-node-wall-implicit-dirichlet)。これが無いと壁速度が再循環域でドリフトする。
     // 非 node (cell) / explicit では no-op。0 で旧挙動 (弱形式半割面のみ)。
     int nodeWallDirichlet = 1;
-    int nodeInletCornerWall = 0;
+    int nodeInletCornerWall = 0;   // node: 入口∩壁の角ノードを壁として扱う (1)。角の P 暴走対策 (変換時に指定)
     std::vector<int> wallDistExtraPhysIDs;   // 壁距離の壁点集合に加える非 wall bcond の physID (例: 出口バッファの slip 壁)。SST の F1/F2 用   // 1: 変換時に入口∩壁コーナーの入口側半割面を壁へ帰属 (node)。methods/discretization.md §7.2 (D)
 
     // (撤去 2026-08-16) nodeAxisDirichlet: 軸ノードを第一内点コピーで置換する対症。保存を破り軸を 1 次化するため
@@ -366,11 +366,11 @@ public:
     int thermalMethod;   // 0: calorically perfect (定数 cp/γ), 2: 多成分 thermally-perfect (NASA-9)
     int viscMethod;      // 0: 定数, 1: Sutherland, 2: kinetic theory (Chapman-Enskog)
 
-    flow_float ro;
-    flow_float visc;
-    flow_float thermCond;
-    flow_float cp;
-    flow_float gamma;
+    flow_float ro;   // 密度 [kg/m³] (isCompressible=0 のときの一定値)
+    flow_float visc;   // 粘性係数 [Pa·s] (viscMethod=0 のときの一定値)
+    flow_float thermCond;   // 熱伝導率 [W/(m·K)] (thermCondMethod=0 のときの一定値)
+    flow_float cp;   // 定圧比熱 [J/(kg·K)] (thermalMethod=0 の CPG で使用)
+    flow_float gamma;   // 比熱比 (thermalMethod=0 の CPG で使用)
 
     // EOS 正値化フロア (dependentVariables で適用)。膨張領域の ro→0,P→0 による速度爆発を防ぐ
     // 安全弁だが、無次元・低圧ケース (例: Taylor-Green は P0=1/γ≈0.71 Pa) では既定 1.0 Pa が
@@ -445,7 +445,7 @@ public:
       //          flow_float thermCond = physProp["thermCond"].as<flow_float>();
       //          flow_float cp = physProp["cp"].as<flow_float>();
 
-    std::string initial;
+    std::string initial;   // **メッシュ変換時** (convertGmshToForge) に書き込む初期場のプリセット名 (sod / Taylor-Green / nozzle_wys …, input/setInitial.hpp)。未知の名前は変換が異常終了。ソルバ実行では valueFileName の場を使うので効かない
 
     flow_float Pref = 1.0/1.4;
     flow_float Tref = 1.0;
