@@ -88,5 +88,42 @@ int main() {
       CondPropOpts oa = newo; oa.gasKgasModel = 1; const CondSpeciesProps na = condProps_make(COND_MODEL_N2, oa);
       check("cond_kgas model 0 == n2_kgas", cond_kgas(n2n, 60.0), n2_kgas(60.0), 1e-15); check("cond_kgas model 1 == air_kgas", cond_kgas(na, 60.0), air_kgas(60.0), 1e-15);
       printf("      k_gas(60 K): N2 %.4e, air %.4e W/m/K\n", n2_kgas(60.0), air_kgas(60.0)); }
+    printf("== (g) SLAU CPG two-phase face enthalpy in float32 (kernel inputs are flow_float) ==\n");
+    {
+        // 実カーネル (convectiveFlux_slau_d.inc.cuh) と同じ経路: P_L, ro_L, g, velocity2 は float に丸めてから double で cond_face_h_cpg。
+        // 判定: float 入力による誤差は入力丸めの伝播 (~1e-7 相対) に収まり、旧 (セル温度混在) の ~1 kJ/kg ずれは出ない。
+        int nb = 0, nt = 0; double worst = 0.0;
+        for (double T = 30.0; T <= 120.0; T += 10.0) for (double f : {0.0, 0.3, 0.9}) for (double P : {200.0, 2.0e3, 5.0e5}) {
+            const double g = f*Yw, Reff = R_air - g*RN2, rho = P/(Reff*T), u2 = 2.0*250.0*250.0;
+            const double h_ref = cp_air*T - g*cond_latent(n2n, T) + 0.5*u2;                          // 面状態から解析的に
+            const float Pf = (float)P, rf = (float)rho, gf = (float)g, u2f = (float)u2;
+            const double h_f32 = cond_face_h_cpg(n2n, cp_air, R_air, RN2, (double)gf, (double)Pf, (double)rf, 0.5*(double)u2f);
+            const double tolh = 4.0e-6*std::fabs(h_ref) + 1.0e-6*(cp_air*T + g*cond_latent(n2n, T));   // float 入力 (T_f=p/(ρR) の ~2 ulp) の伝播
+            ++nt; const double d = std::fabs(h_f32 - h_ref); if (d > worst) worst = d;
+            if (d > tolh) { ++nb; if (nb <= 5) printf("      FAIL T=%.0f g=%.3f P=%.0f: h32=%.4f href=%.4f (d=%.3e J/kg)\n", T, g, P, h_f32, h_ref, d); }
+        }
+        printf("      %d/%d states within float-input tolerance (worst |dh| = %.3e J/kg)\n", nt - nb, nt, worst);
+        checkb("face enthalpy float32 inputs == analytic face state (no ~1 kJ/kg cell-T mixing error)", nb == 0);
+        // pure 極限 (R_w=R_gas, g=0): 単相 γp/((γ−1)ρ)+ek と一致
+        const double P = 800.0, rho = P/(R_air*40.0);
+        check("g=0 pure limit == gamma p/((gamma-1) rho) + ek", cond_face_h_cpg(n2n, cp_air, R_air, R_air, 0.0, P, rho, 100.0), gam*P/((gam - 1.0)*rho) + 100.0, 1e-12);
+        // Y_w 定数キャリアで g=Y_w (全 N2 凝縮) でも R_eff = R_O2 分が残り有限
+        const double hfull = cond_face_h_cpg(n2n, cp_air, R_air, RN2, Yw, P, P/((R_air - Yw*RN2)*40.0), 0.0);
+        checkb("g=Y_w: finite and equals cp T - Yw L(T)", std::isfinite(hfull) && std::fabs(hfull - (cp_air*40.0 - Yw*cond_latent(n2n, 40.0))) < 1e-6*std::fabs(hfull));
+    }
+    printf("== (h) realizability clamp: dust check uses vapor partial pressure (codex 2026-09-13 M2) ==\n");
+    {
+        // 状態: 空気 CPG carrier, T=40 K, ρ で p=1.2 p_sat(N2) だが p_v = (Y_w−g) ρ R_N2 T < p_sat → 「未飽和」で塵を掃除できるべき。
+        const double T = 40.0, ps = cond_psat(n2n, T), g = 0.5*Yw, Reff = R_air - g*RN2, rod = 1.2*ps/(Reff*T), P = rod*Reff*T;
+        const double pv_cpg  = cond_clamp_vapor_pressure(rod, g, -1.0, Yw, RN2, T, P);
+        const double pv_pure = cond_clamp_vapor_pressure(rod, g, -1.0, -1.0, RN2, T, P);
+        const double pv_tp   = cond_clamp_vapor_pressure(rod, g, Yw, -1.0, RN2, T, P);
+        printf("      P/psat=%.3f  pv_cpg/psat=%.3f  pv_tp/psat=%.3f\n", P/ps, pv_cpg/ps, pv_tp/ps);
+        check("CPG carrier pv = rho (Yw-g) Rw T", pv_cpg, rod*(Yw - g)*RN2*T, 1e-14);
+        check("TP carrier (roY_w) gives the same pv", pv_tp, pv_cpg, 1e-14);
+        check("pure: pv = total P", pv_pure, P, 1e-14);
+        checkb("CPG carrier: P > psat (old rule keeps dust) but pv < psat (new rule removes it)", P > ps && pv_cpg < ps);
+        check("g -> Yw: pv -> 0 (clamped, not negative)", cond_clamp_vapor_pressure(rod, Yw*1.01, -1.0, Yw, RN2, T, P), 0.0, 1e-300);
+    }
     printf("%s (%d failures)\n", nfail ? "FAILED" : "ALL PASS", nfail); return nfail ? 1 : 0;
 }

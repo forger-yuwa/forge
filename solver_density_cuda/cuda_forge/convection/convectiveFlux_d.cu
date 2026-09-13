@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include "../condensationTransport_d.cuh"   // cond_prop_opts() (凝縮物性オプション → CondArgs)
+#include "../condensationEOS_d.cuh"         // cond_face_h_cpg (SLAU CPG 二相の面エンタルピー)
 #include "convectiveFlux_d.cuh"
 #include "lowMachPrecond_d.cuh"
 #include "speciesTransport_d.cuh"  // species_roY_device_ptr()

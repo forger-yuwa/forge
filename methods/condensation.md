@@ -492,11 +492,11 @@ N2 は従来どおり Lin 2014 のフィット (`n2_latent`)。
 
 #### 潜熱 $L(T)$ と飽和圧の低温整合 (`condN2LatentLowT`, 計画 [condensation-air](../plans/active/condensation-air.md))
 
-式 26 の 4 次多項式は 60 K 未満で $dL/dT>0$ となり液の比熱 $c_l=c_{p,v}-L'$ が負 (45 K で −3100 J/kg/K) になる (熱力学的に不整合;
-二相 frozen 音速の $c_{v,2\phi}$ が負になる原因、2026-09-10 codex 指摘)。`condN2LatentLowT: 1` (既定, 計画中) では 70 K 未満を
+式 26 の 4 次多項式は ≈61 K で $dL/dT$ が正に転じ、55 K 未満で $L'>c_{p,v}$ となって液の比熱 $c_l=c_{p,v}-L'$ が負 (45 K で −3100 J/kg/K) になる (熱力学的に不整合;
+二相 frozen 音速の $c_{v,2\phi}$ が負になる原因、2026-09-10 codex 指摘)。`condN2LatentLowT: 1` (既定) では 70 K 未満を
 $L(T)=L(70)+(c_{p,v}-c_l)(T-70)$、$c_l$=2000 J/kg/K (液 N2 63–77 K の実測 $c_{p,l}$≈2.0 kJ/kg/K; 30–60 K は実測が無く「正の熱容量を保証する閉包」)
 の線形外挿に置き換える (45 K で 233 kJ/kg, 旧 188)。**飽和圧の 50 K 未満 Clausius–Clapeyron 外挿も同じ $L(T)$ の積分で再構成する**
-(旧は $L_{old}(50)$=204 kJ/kg 一定; 潜熱だけ変えると 38 K で $p_{sat}$ が 0.59 倍動くので連動させる, codex 指摘 2026-09-12)。
+(旧は $L_{old}(50)$=204 kJ/kg 一定; 潜熱を変えると 38 K で $p_{sat}$ が 0.518 倍動く (`condN2PsatLowT: 1`, 閉形式 C–C; 単体 `test_cond_air` で確認) ので連動させる, codex 指摘 2026-09-12)。
 旧一式 (潜熱・飽和圧とも) は `condN2LatentLowT: 0` (A/B 用)。
 
 #### 表面張力 $\sigma(T)$
@@ -652,7 +652,7 @@ $$
 $\dot P$=20000 /s: 1 kPa で 38.5 K; `case/34.arthur_n2_nozzle/daum_gyarmathy_theory_onset_Pdot20000_n2.csv`) と比較。N2 旧物性 678 Pa / 37.85 K (+1.0 K)、
 **N2 新物性 800 Pa / 39.67 K (+2.1 K)、空気 CPG carrier 750 Pa / 38.94 K (+1.7 K)** — いずれも ±3 K 以内で、空気は N2 より 0.7 K 低温 ($S=y_{N_2}p/p_{sat}$)。
 node/cell の onset は 0.1 K 以内で一致。Arthur 実験の壁 cond/dry (3/4/5 in: 1.133/1.250/1.500) に対しては N2 新 +9.6/+9.7/−1.6 %、空気 +7.1/+8.1/−3.0 % で、
-3–4 in の過大は物性修正の前後で同程度 (レート側の較正課題)。実装: `condProps_make`/`CondPropOpts`, `n2_latent_ex`/`n2_psat_ex`, `cond_T_from_e_cpg` (括弧付き),
+3–4 in の過大は物性修正の前後で同程度で、原因 (核生成 $J$ / 成長 $\dot r$ / 壁圧抽出) は未切り分け。実装: `condProps_make`/`CondPropOpts`, `n2_latent_ex`/`n2_psat_ex`, `cond_T_from_e_cpg` (括弧付き),
 SLAU CPG 二相の面状態一貫化, `slip_d` の状態保持。単体 `tests/unit/test_cond_air.cpp`。
 
 #### モデル切替 (config フラグ)

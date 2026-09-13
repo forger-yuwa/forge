@@ -6,9 +6,10 @@ P.D. Arthur の博士論文 (Caltech/GALCIT, 1952) で用いられた **2 次元
 [`papers/on nitrogen condensation in hypersonic nozzle flows_summary.md`](../../papers/on%20nitrogen%20condensation%20in%20hypersonic%20nozzle%20flows_summary.md)
 の検証ノズル (Arthur 1952) に対応する。
 
-> **注意**: forge には核生成・液滴成長など**相変化 (凝縮) モデルは無い**。本ケースが
-> 再現するのは「凝縮なし」の等エントロピー的膨張 (Arthur Fig.4/11 の dry 1D 理論線) まで。
-> 凝縮による静圧上昇そのものは対象外。
+> **注記 (履歴)**: run_0001–0005 の時点では forge に相変化モデルが無く、対象は「凝縮なし」の等エントロピー膨張
+> (Arthur Fig.4/11 の dry 1D 理論線) だけだった。run_0006 以降は非平衡凝縮 (CNT×Iland 核生成 + Goodheart 成長, 4 モーメント) で
+> 凝縮による壁静圧上昇を扱い、2026-09-13 からは空気 (CPG carrier 形: N2 選択凝縮 + O2 キャリア) も対象
+> ([methods/condensation.md](../../methods/condensation.md) §8, plan [condensation-air](../../plans/active/condensation-air.md))。
 
 ## ノズル形状 (出典: Arthur 1952, II.A Apparatus)
 
@@ -58,10 +59,15 @@ P.D. Arthur の博士論文 (Caltech/GALCIT, 1952) で用いられた **2 次元
 | **`run_0017_n2_new`** | 潜熱+飽和圧 新 (既定, c_l 2000) | N2 新物性 | **onset 2.112 in / 800 Pa / 39.67 K** (飽和圧 0.52 倍→S 増で 0.25 in 上流), Ṗ 1.9e4, cond/dry 1.242/1.371/1.476, g_exit 0.065。理論 onset 線 (Ṗ=20000, 800 Pa: 37.5 K) に対し **+2.1 K** (旧 +1.0 K) | **active (R3, N2 新既定)** |
 | `run_0018_n2_cl15` / `run_0019_n2_cl25` | c_l 1500 / 2500 J/kg/K 感度 | N2 | onset 38.95 / 40.25 K (2000: 39.67) → c_l ±500 で ∓0.7 K; cond/dry @3 in 1.2375 / 1.246 | active (R4) |
 | `run_0023_air_dry` | 空気 dry 基準 (二成分 0.79/0.21: R 288.19, cp 1008.7; IC = N2 dry を ρ×R_N2/R_air, u×√(R_air/R_N2); 入口 ρ 6.161, U 324.48) | dry (空気) | 12 スナップショット STEADY (壁圧比 1.000 ±0.1 %) | active (E2) |
-| **`run_0024_air_cpgcarrier`** | **空気 CPG carrier 形** (`condVaporMassFraction 0.7671`: N2 選択凝縮 + O2 キャリア, 新物性) | 空気 | **onset 2.207 in / 750 Pa / 38.94 K**, Ṗ 1.8e4 → 理論線 (37.3 K) +1.7 K。N2 新物性 (39.67 K) より 0.7 K 低温 (S=y_N2 p/p_sat が小さい分; Daum & Gyarmathy の「空気 ≈ N2」と整合)。cond/dry 1.214/1.351/1.455, g_exit 0.059 (≤Y_w), T_min 39.2 K | **active (E1, 空気凝縮の代表)** |
+| **`run_0024_air_cpgcarrier`** | **空気 CPG carrier 形** (`condVaporMassFraction 0.7671`: N2 選択凝縮 + O2 キャリア, 新物性) | 空気 | **onset 2.207 in / 750 Pa / 38.94 K**, Ṗ 1.8e4 → 理論線 (37.3 K) +1.7 K。N2 新物性 (39.67 K) より 0.7 K 低温 (S=y_N2 p/p_sat が小さい分; Daum & Gyarmathy の「空気 ≈ N2」と整合)。cond/dry 1.214/1.351/1.455, g_exit 0.059 (≤Y_w), T_min 39.2 K | active (E1 初回; 代表は run_0027) |
 | `run_0021_dry_slip_node` / `run_0021b_dry_slip_node` | node 平面メッシュ dry N2 (IC = cell dry を interp_field) 旧バイナリ / 新バイナリ | dry | 旧: PASS (出口 M 6.93 = 等エントロピー)。新 vs 旧の場差 ≤8.6e-6 (node ノイズ水準) → slip 変更は dry に影響なし | active (node dry 参照 / 回帰) |
 | `run_0020_n2_ref_node` / **`run_0022_n2_new_node`** | node: 旧物性 / 新物性 (IC = run_0021 res_12000) | N2 | onset 37.89 K@680 Pa / **39.59 K@793 Pa** (cell 37.85 / 39.67 と 0.1 K 以内), cond/dry 1.245/1.364/1.456 / 1.248/1.379/1.481 (cell と ≤0.6 %) | active (node R0/R3) |
 | `run_0025_air_dry_node` / **`run_0026_air_cpgcarrier_node`** | node: 空気 dry / 空気 CPG carrier | 空気 | onset **38.88 K@744 Pa** (cell 38.94@750), cond/dry 1.218/1.357/1.459 (cell と ≤0.4 %) → node/cell 一致 | active (node E2/E1) |
+| **codex result レビュー ② (2026-09-13, NO-GO M5/m2) 反映後の再取得**: T 反転失敗時の原始量凍結 (`g_condTinvFail` 警告, 全 run 0 件)・消滅判定を N2 分圧に・SLAU 面エンタルピー関数化 (`cond_face_h_cpg`)・境界種別の受付検査。同一バイナリの反復でノイズ床を実測し `diff_res.py --tolfile` (2 倍) で判定 | | | | |
+| **`run_0027_air_cpgcarrier_v2`** / `run_0030_air_cpgcarrier_v2_rep` | E1 cell (run_0024 と同 config) と**その完全反復** (同一バイナリ・同一 config の 2 回目 = 凝縮 run のノイズ床 `noise_cell_air_12000.json`: ρ 4.2e-4, U_y 2.0e-3, g 7.6e-4, Q0 9e-3) | 空気 | onset **2.207 in / 750 Pa / 38.94 K** (run_0024 と 4 桁同一), cond/dry 1.2134/1.3514/1.4547, g_exit 0.0590; 反復も同一表。run_0024 との場差は ρ 3.3e-4 / U_y 2.8e-3 で 2 倍床内 (U_x 1.68e-4 は 2 倍床 1.7e-4 ちょうど) → レビュー②の修正は E1 の場を変えない | **active (E1 cell 代表, 最終バイナリ)** |
+| `run_0029_n2_new_v2` | R3 cell (run_0017 と同 config, 最終バイナリ) | N2 新物性 | onset 2.131 in / 789 Pa / 39.52 K (run_0017: 2.112 / 800 / 39.67; 閾値 1 % 交差が 1 セル動いた = onset の cell ノイズ ±0.02 in / ±0.15 K)、cond/dry 1.2422/1.3715/1.4758 (同一), g_exit 0.0650; 場差は全変数 2 倍床内 | active (R3 cell 最終) |
+| `run_0028_air_cpgcarrier_node_v2` / `run_0032_n2_new_node_v2` | E1 / R3 node (run_0026 / run_0022 と同 config, 最終バイナリ) | 空気 / N2 | onset 表は run_0026 / run_0022 と同一 (38.88 K@744 Pa / 39.59 K@793 Pa)、場差 原始量 ≤1e-5・モーメント ≤3e-4 | active (node E1/R3 最終) |
+| `run_0031_dry_slip_cell_oldbin_rep` | run_0015o (旧バイナリ dry) の完全反復 → 旧バイナリ dry のノイズ床 `noise_cell_dry_oldbin_12000.json` (ρ 2.7e-4, U_y 2.8e-3, roe 2.9e-4) | dry | この床の 2 倍に対し slip 変更 (run_0015o vs run_0015: ρ 3.0e-4, U_y 2.0e-3) は全変数 ok → 「slip 変更は dry に影響なし」の判定基準を同一バイナリ反復で裏付け | 破棄予定 (ノイズ床記録; json は保持) |
 
 **Arthur 実験との比較 (壁 cond/dry @3/4/5 in; 実験 1.133/1.250/1.500, Lin 2014 計算曲線 1.200/1.308/1.447)**: 旧物性 +9.5/+8.6/−3.2 %、新物性 +9.6/+9.7/−1.6 %、潜熱のみ新 +2.2/+7.6/−3.6 %、空気 +7.1/+8.1/−3.0 % (いずれも実験比)。
 **従来「1–2 % 一致」と書いていたのは Lin の計算曲線との差** (旧 +3.4/+3.8/+0.3 %) で、Arthur 実験記号とは 3–4 in で ~9 % 過大 (codex 指摘 2026-09-12)。

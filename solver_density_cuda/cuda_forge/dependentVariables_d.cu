@@ -6,6 +6,8 @@
 
 // 温度反転のクランプ範囲 (NASA-9 の有効域より広めに取り, 範囲外は外挿)
 #define DEPVAR_TMIN 50.0
+// CPG 二相の温度反転が収束しなかったセル数 (診断; plans/active/condensation-air.md §4.1)。wrapper が毎ステップ読み出して警告する。
+__device__ unsigned int g_condTinvFail = 0u;
 #define DEPVAR_TMAX 6000.0
 
 __global__ void dependentVariables_d
@@ -221,8 +223,15 @@ __global__ void dependentVariables_d
                 const double Tguess = ((double)T[ic] > 1.0) ? (double)T[ic] : (double)max(intE/(cp/gamma), tMin);
                 bool ok = true;
                 const double Tn = eq2 ? Tn_eq : cond_T_from_e_cpg(e_in, g_liq, cv, Rw, Tguess, cpropsCpg, &ok);
+                if (!ok) {
+                    // 反転が収束しなかったセル: 原始量 (T,P,sonic,Ht) も保存量 (roe) も更新せず前ステップ値を保持し、診断カウンタに数える
+                    // (codex 2026-09-12 M2 / 2026-09-13 M1: 失敗した温度で流束・核生成を評価しない)。密度床だけ反映。
+                    atomicAdd(&g_condTinvFail, 1u);
+                    ro[ic] = ro_temp;
+                    Rmix_array[ic] = (flow_float)Rgas;
+                } else {
                 const double L = cond_latent(cpropsCpg, Tn);
-                const double e_mix = (cv + g_liq*Rw)*Tn - g_liq*L;   // = e_in (反転成功時)
+                const double e_mix = (cv + g_liq*Rw)*Tn - g_liq*L;   // = e_in
                 const double Reff = carrierCpg ? (Rgas - g_liq*Rw) : ((1.0 - g_liq)*Rgas);
                 double Pn = (double)ro_temp*Reff*Tn;
                 if (Pn < (double)pMin) Pn = (double)pMin;
@@ -230,11 +239,11 @@ __global__ void dependentVariables_d
                 T[ic]   = (flow_float)Tn;
                 P[ic]   = (flow_float)Pn;
                 ro[ic]  = ro_temp;
-                // 反転が収束しなかったセルは保存量 roe を上書きしない (codex 2026-09-12 M2: 未収束 T で roe を書き換えると保存量が壊れる)
-                if (ok) roe[ic] = (flow_float)((double)ro_temp*(e_mix + (double)ek));
-                Ht[ic]  = (flow_float)((double)roe[ic]/(double)ro_temp + Pn/(double)ro_temp);
+                roe[ic] = (flow_float)((double)ro_temp*(e_mix + (double)ek));
+                Ht[ic]  = (flow_float)(e_mix + Pn/(double)ro_temp + (double)ek);
                 sonic[ic] = (flow_float)sqrt((double)gamma*Rgas*Tn); // 気相 frozen 音速 (loose coupling; CPG は旧式のまま)
                 Rmix_array[ic] = (flow_float)Rgas;
+                }
             } else {
                 // 単相 CPG (従来経路, フロア未指定ならビット不変)
                 T_temp = max(intE/(cp/gamma), tMin);
@@ -294,6 +303,15 @@ void dependentVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
     ) ;
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+    // CPG 二相の温度反転失敗セル数 (診断)。0 でなければ警告 (前ステップ値を保持したセルがある)。
+    if (cfg.condensation == 1 && cfg.thermalMethod == 0) {
+        unsigned int nfail = 0u;
+        gpuErrchk( cudaMemcpyFromSymbol(&nfail, g_condTinvFail, sizeof(unsigned int)) );
+        if (nfail > 0u) {
+            std::cerr << "[condensation] WARNING: CPG two-phase temperature inversion failed in " << nfail << " cells (primitives/roe kept from previous step)\n";
+            const unsigned int zero = 0u; gpuErrchk( cudaMemcpyToSymbol(g_condTinvFail, &zero, sizeof(unsigned int)) );
+        }
+    }
     // EOS 拘束形平衡 (condEquilibrium==2): kernel が rog[0] を g_eq に射影したので、SLAU 面温度・潜熱補正・出力が
     // 読む原始量 g_<s>=rog/ρ を同期する (realizability クランプも通る)。他モードでは呼ばない (従来経路不変)。
     if (cfg.condensation == 1 && cfg.condEquilibrium == 2 && var.nCondSpeciesRegistered >= 1) {

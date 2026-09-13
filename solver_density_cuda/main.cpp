@@ -985,6 +985,18 @@ cudaConfig initializeSimulation(
             if (!warn.empty()) cout << "[condensation] WARNING: " << warn << "\n";
         }
         cfg.condSonicModel = resolved;
+        // CPG carrier 形 (空気の N2 選択凝縮) の境界受付範囲 (plans/active/condensation-air.md §4.1; codex 2026-09-13 M3):
+        //   ghost/ピンを単相 EOS で再構成する境界 (wall, wall_isothermal, inlet_Pressure, outflow, periodic 等) は未対応。
+        //   出口 outlet_statPress は超音速全量外挿のときだけ整合 (実行時条件) → 後処理 onset_analysis.py --series の u_n/c>1 で確認する。
+        if (cfg.condensation == 1 && cfg.condVaporMassFraction > 0.0) {
+            for (const auto& k : kinds) {
+                if (!(k == "inlet_uniformVelocity" || k == "outlet_statPress" || k == "slip")) {
+                    std::cerr << "Configuration Error: condVaporMassFraction (CPG carrier) supports boundary kinds inlet_uniformVelocity / outlet_statPress (supersonic) / slip only; found '" << k << "'.\n";
+                    std::exit(EXIT_FAILURE);
+                }
+            }
+            cout << "[condensation] CPG carrier (air): Y_w=" << cfg.condVaporMassFraction << ", boundaries verified kinds only; outlet must stay supersonic (checked in post-processing)\n";
+        }
     }
 
     // 入口分布プロファイル (ints:{inletProfile:1} の inlet): per-face bvar を CSV から face 重心で補間。

@@ -17,9 +17,11 @@ import yaml as _yaml
 _meshname = _yaml.safe_load(open(os.path.join(a.run, "solverConfig.yaml")))["mesh"]["meshFileName"]
 mesh = h5py.File(os.path.join(a.run, _meshname), "r")
 d = h5py.File(os.path.join(a.run, a.dry), "r")["VALUE"]
+f_res_coord = None
 def analyze(res, quiet=False):
+    global f_res_coord
     f = h5py.File(res, "r"); V = f["VALUE"]
-    coord = np.array(f["MESH/COORD"]).reshape(-1, 3)
+    coord = np.array(f["MESH/COORD"]).reshape(-1, 3); f_res_coord = coord
     # node (median-dual): 値の位置はノード座標 (MESH/COORD)。cell: 入力メッシュの CELLS/centCoords。
     c = coord[:len(V["P"])] if len(V["P"]) == len(coord) else np.array(mesh["CELLS/centCoords"]).reshape(-1, 3)[:len(V["P"])]
     return _analyze(res, V, c, quiet)
@@ -30,9 +32,15 @@ def _analyze(res, V, c, quiet):
     # 中心線: source-flow メッシュはセル中心 x が列ごとに揺れるので x をビン分け (~400 列) し、各ビンで |y| 最小のセルを取る
     nb = 400; edges = np.linspace(c[:, 0].min(), c[:, 0].max() + 1e-9, nb + 1); ib = np.clip(np.digitize(c[:, 0], edges) - 1, 0, nb - 1)
     bins = [np.where(ib == k)[0] for k in range(nb)]; bins = [b for b in bins if len(b)]
-    C = np.array([b[np.argmin(np.abs(c[b, 1]))] for b in bins])   # 中心線 (|y| 最小)
-    W = np.array([b[np.argmax(c[b, 1])] for b in bins])           # 壁セル列 (y 最大 = 輪郭壁の第一セル; Arthur は上半分メッシュ)
-    order = np.argsort(c[C, 0]); C = C[order]; W = W[order]
+    is_node = (len(V["P"]) == len(np.array(f_res_coord)))
+    if is_node:
+        # node (値=ノード): 中心線は y=0 のノード列、壁は wall_dist=0 かつ y>0 のノード列 (中心線外の内部点を拾わない; codex 2026-09-13 M4)
+        C = np.where(np.abs(c[:, 1]) < 1e-9)[0]                      # 中心線ノード (y=0)
+        W = np.array([b[np.argmax(c[b, 1])] for b in bins])            # 壁ノード列 (各 x ビンで y 最大 = 輪郭壁上のノード; 全 slip なので wall_dist は使えない)
+    else:
+        C = np.array([b[np.argmin(np.abs(c[b, 1]))] for b in bins])   # cell: 各 x ビンで |y| 最小 (第一セル列)
+        W = np.array([b[np.argmax(c[b, 1])] for b in bins])           # 壁セル列 (y 最大 = 輪郭壁の第一セル; Arthur は上半分メッシュ)
+    C = C[np.argsort(c[C, 0])]; W = W[np.argsort(c[W, 0])]
     x = c[C, 0]; pd = p_dry[C]; Td = T_dry[C]; ud = u[C]; ratio = P[C]/pd - 1.0; gc = g[C]
     xw = c[W, 0]; ratio_w = P[W]/p_dry[W]        # 壁 p/p_dry (Arthur が測ったのは壁面静圧)
     Pdot = -ud/pd*np.gradient(pd, x)   # [1/s] (膨張で正)

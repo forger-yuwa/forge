@@ -1,5 +1,6 @@
 #include "condensationTransport_d.cuh"
 #include "condensationSource_d.cuh"   // COND_PI, 物性 (消滅クランプ)
+#include "condensationEOS_d.cuh"      // cond_clamp_vapor_pressure (蒸発塵判定の蒸気分圧)
 
 #include "scalarTransport_d.cuh"
 
@@ -87,13 +88,8 @@ __global__ void cond_realizability_clamp_d(
     if (r <= (flow_float)0.0 && !dust) return;
     const CondSpeciesProps cprops = condProps_make(condModel, opts);
     const double Td = (double)T[ic];
-    double pv;
-    if (roY_w != nullptr) {
-        double yv = (double)roY_w[ic]/rod - g; if (yv < 0.0) yv = 0.0;
-        pv = rod*yv*Rw*Td;
-    } else {
-        pv = (double)P[ic];
-    }
+    // 蒸気分圧は source kernel (cond_vapor_state) と同じ定義: TP carrier=ρ(Y_w−g)R_wT, CPG carrier=ρ(Y_w,const−g)R_wT, pure=全圧 (codex 2026-09-13 M2)
+    const double pv = cond_clamp_vapor_pressure(rod, g, (roY_w != nullptr) ? (double)roY_w[ic]/rod : -1.0, opts.Yw, Rw, Td, (double)P[ic]);
     if (pv > cond_psat(cprops, Td)) return;              // 過飽和: 消滅させない
     const double q0 = (double)roQ0[ic];
     bool remove = dust || (q0 <= 1.0e-30);

@@ -347,12 +347,8 @@ __global__ void SLAU_d
                 const CondSpeciesProps& cprC = cnd.cprops;
                 const double Rgas = ((double)ga - 1.0)*(double)cp_cpg/(double)ga;
                 const double Rw   = (cnd.Yw > 0.0) ? cprC.R : Rgas;          // CPG carrier (空気の N2) / pure
-                const double gL0 = (double)g_total[ic0], gR0 = (double)g_total[ic1];
-                double ReL = Rgas - gL0*Rw; if (ReL < 1.0) ReL = 1.0;
-                double ReR = Rgas - gR0*Rw; if (ReR < 1.0) ReR = 1.0;
-                const double TL = (double)P_L/((double)ro_L*ReL), TR = (double)P_R/((double)ro_R*ReR);
-                h_p = (flow_float)((double)cp_cpg*TL - gL0*cond_latent(cprC, TL) + 0.5*(double)velocity2_L);
-                h_m = (flow_float)((double)cp_cpg*TR - gR0*cond_latent(cprC, TR) + 0.5*(double)velocity2_R);
+                h_p = (flow_float)cond_face_h_cpg(cprC, (double)cp_cpg, Rgas, Rw, (double)g_total[ic0], (double)P_L, (double)ro_L, 0.5*(double)velocity2_L);
+                h_m = (flow_float)cond_face_h_cpg(cprC, (double)cp_cpg, Rgas, Rw, (double)g_total[ic1], (double)P_R, (double)ro_R, 0.5*(double)velocity2_R);
             }
         }
 

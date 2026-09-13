@@ -22,7 +22,7 @@
    気相は空気 (CPG, $R_{air}$, $c_{p,air}$)、凝縮するのは N2 だけ (質量分率 $Y_w=Y_{N_2}$ 固定)、O2 (+Ar) は凝縮しないキャリアとする。
    $g$ は**総混合物に対する液 N2 の質量分率**で、EOS・核生成・成長・蒸発・枯渇上限・流束・実現可能性の全てで同じ定義を使う (codex C1)。
    O2/N2 理想溶液の露点線 (混合液モデル) は本 plan から外し後続に置く。
-2. **N2 潜熱と飽和圧の低温整合**: `n2_latent` (Lin 式 26) は 60 K 未満で $L'>0$ (液比熱が負)。70 K 未満を $c_l$ 一定の線形外挿にし、
+2. **N2 潜熱と飽和圧の低温整合**: `n2_latent` (Lin 式 26) は ≈61 K で $L'>0$ となり、55 K 未満で $L'>c_{p,v}$ となって液比熱 $c_l=c_{p,v}-L'$ が負になる。70 K 未満を $c_l$ 一定の線形外挿にし、
    **同じ $L(T)$ で飽和圧の低温 Clausius–Clapeyron 外挿も再構成**する (現在の `n2_psat` は `n2_latent(50)` を C–C に直接使うので、潜熱だけ変えると飽和圧が動く; codex M2)。
    旧物性一式は `condN2LatentLowT: 0` で回帰用に保持。
 3. **slip 境界の二相整合**: `slip` の ghost は $T=p/(\rho R)$, $\rho e=p/(\gamma-1)+\rho e_k$ で再構成しており、二相 ($p=\rho R_{eff}T$) では内部と矛盾する。
@@ -62,7 +62,7 @@
   再読み後の理論線 ($\dot P$=20000, 678 Pa) は 36.8 K → **forge は +1.1 K (理論線よりやや浅い過冷却)**、最小実験曲線 (~41 K) より 3 K 深い。
   ただしこの run は 0/4000/8000 の 3 スナップショットしか無く定常性未確認 (codex M7) → 本 plan の run は 1000 step 毎に保存し `--series` で判定する。
 - Arthur 実験記号 (`arthur_fig2_digitized.csv` の `exp` 列): cond/dry = 1.133 (3 in) / 1.250 (4 in) / 1.500 (5 in)。Lin 計算曲線は 1.200 / 1.308 / 1.447 (別物; codex M6)。
-- 空気 dry (`run_0013_air_dry`) は密度だけ換算し入口速度を N2 のままにしていたので $M_{in}$=1.068, $P_0$=862 kPa になっていた (codex M8) → 速度も $\sqrt{R_{air}/R_{N_2}}$ 倍 (324.48 m/s) にして取り直す。
+- 空気 dry (`run_0013_air_dry`) は密度だけ換算し入口速度を N2 のままにしていたので $M_{in}$=1.068, $P_0$=862 kPa になっていた (codex M8) → 速度も $\sqrt{R_{air}/R_{N_2}}$ 倍にして取り直す (実 config: $u$ 325.12 m/s, $\rho$ 6.137 kg/m³ = M 1.05 スロート条件を空気で再計算)。
 
 ## 4. 設計方針
 
@@ -142,11 +142,11 @@ forge の $\dot P$ (≈1.8×10⁴ /s) に対応する理論線 ($\dot P$=20000) 
 | 3 | ~~ツール・メッシュ (§5 8–9)~~ | 決着 (2026-09-13): `--series` (壁セル列・config dry・出口 u_n/c)、node 平面メッシュ QC PASS |
 | 4 | ~~回帰 (§6 R)~~ | 決着 (2026-09-13, §9): slip 変更は dry で cell 1e-3 / node 9e-6 (ノイズ水準)、旧物性再現 onset 同一 |
 | 5 | ~~空気 (§6 E)~~ | 決着 (2026-09-13, §9): 空気 onset は理論線 +1.7 K、N2 との差 0.7 K |
-| 6 | codex result レビュー | → `status: done` |
+| 6 | codex result レビュー | 1 回目 NO-GO (2026-09-13, §6.1) → M1–M5/m1–m2 全件採用・反映済 (§9 2026-09-13)。**再レビュー待ち** → GO で `status: done` |
 | 7 | (後続) CPG 二相音速 | γ_2φ + 実 Ht + 一般 EOS 固有系を CPG 二相へ、N2/空気で流束 FD 照合 (double/float32) |
 | 8 | (後続) 混合液モデル | O2/N2 理想溶液露点線、2 成分凝縮 |
 | 9 | (後続) 条件の拡張 | Longshot 級 (M 10–14, $\dot P$ 小) と Daum の複数条件で理論線・実験点との比較を増やす |
-| 10 | (後続) Arthur 3–4 in の ~9 % 過大 | N2 核生成 (CNT×Iland) / 成長 (Goodheart) の較正: 物性修正の前後で差が変わらないので物性ではなくレート側 |
+| 10 | (後続) Arthur 3–4 in の ~9 % 過大の**原因切り分け** | 物性修正の前後で差が変わらないので物性ではない。候補: 核生成 $J$ (CNT×Iland)、成長 $\dot r$ (Goodheart, $\alpha$)、壁圧の抽出位置 (壁セル列 vs 実験の壁静圧孔)、Arthur 記号の読み取り。切り分けは $J$/$\dot r$ 各 ×0.5/×2 の感度と Fig.2 の再デジタイズから (codex 2026-09-13 m1: 「レート側」と断定しない) |
 
 ## 6. 検証
 
@@ -161,8 +161,10 @@ forge の $\dot P$ (≈1.8×10⁴ /s) に対応する理論線 ($\dot P$=20000) 
   | R2 | `run_0016_n2_latent_only` | cell | 潜熱だけ新・飽和圧旧 (診断) |
   | R3 | `run_0017_n2_new` / `run_0022_n2_new_node` | cell / node | 潜熱+飽和圧新 (最終形) |
   | R4 | `run_0018_n2_cl15` / `run_0019_n2_cl25` | cell | $c_l$ 1.5 / 2.5 kJ/kg/K 感度 |
-  | E2 | `run_0023_air_dry` (cell) / `run_0025_air_dry_node` | cell / node | 空気 dry (入口 $u$ 324.48 m/s, $\rho$ 6.161, $P_0$=844 kPa, $T_0$=290 K) |
+  | E2 | `run_0023_air_dry` (cell) / `run_0025_air_dry_node` | cell / node | 空気 dry (入口 $u$ 325.12 m/s, $\rho$ 6.137 kg/m³ = `bcondConfig.yaml` 実値, $P_0$=844 kPa, $T_0$=290 K) |
   | E1 | `run_0024_air_cpgcarrier` / `run_0026_air_cpgcarrier_node` | cell / node | 空気 CPG carrier 形 (新物性) |
+  | E1' / R3' | `run_0027_air_cpgcarrier_v2` (+反復 `run_0030`) / `run_0028_air_cpgcarrier_node_v2`, `run_0029_n2_new_v2` / `run_0032_n2_new_node_v2` | cell / node | result レビュー①反映後バイナリでの再取得 + 同一バイナリ反復 (ノイズ床) |
+  | N1 | `run_0031_dry_slip_cell_oldbin_rep` | cell | 旧バイナリ dry の同一バイナリ反復 (R1 判定のノイズ床) |
 
 - **判定基準 (合否)**:
   1. 単体 PASS。
@@ -177,6 +179,7 @@ forge の $\dot P$ (≈1.8×10⁴ /s) に対応する理論線 ($\dot P$=20000) 
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result | `2026-09-13` | 1 回目 [`notes/reviews/2026-09-13-condensation-air-result.md`](../../notes/reviews/2026-09-13-condensation-air-result.md) | NO-GO, C0/M5/m2 | **全件採用** (2026-09-13, §9)。M1 (T 反転失敗でも T/P/sonic を更新) → 失敗セルは原始量・roe とも前ステップ値を保持し `g_condTinvFail` を集計して警告 (再取得 run は全て 0 件)。M2 (消滅判定が全圧) → `cond_clamp_vapor_pressure` で source と同じ N2 分圧に統一、全圧/分圧で判定が分かれる状態を `test_cond_air` (h) に追加。M3 (境界種別の受付未実装・Yw NaN) → `main.cpp` で inlet_uniformVelocity/outlet_statPress/slip 以外を拒否、`isfinite` 検査。M4 (node 中心線・壁抽出) → 中心線 |y|<1e-9 ノード、壁は x ビン毎の y 最大ノード (全 slip の node メッシュは wall_dist が無い) で再計算 (onset 表は変わらず)。M5 (cell ノイズ根拠・float32 試験) → 同一バイナリ反復 run_0027/0030 (凝縮) と run_0015o/0031 (旧 dry) で床を実測し `--tolfile` 2 倍で判定、SLAU 面エンタルピーを `cond_face_h_cpg` に抽出して float 入力の試験 (g) を追加。m1 (「レート側」断定) → §5.1 #10 を原因切り分けに書き換え。m2 (文書の古い値) → methods「計画中」/0.59、README 旧注記、入口 325.12 m/s・6.137 kg/m³、c_l 符号の条件 (L'>c_pv)、procedures の新キーを同期 |
 | plan | `2026-09-12` | 2 回目 (v2) [`notes/reviews/2026-09-12-condensation-air-plan-2.md`](../../notes/reviews/2026-09-12-condensation-air-plan-2.md) | GO-with-changes, C0/M5/m2 | **全件採用 → v3**。M1 (接続の微分連続は成立しない・0.59 倍は誤値) → C0 接続に改め 0.518 倍に訂正、片側微分と単調性を検査 (§4.2)。M2 (Newton が非収束のまま T を返し roe を上書き) → 括弧付き Newton+二分法・成功フラグ・失敗時は保存量不変 (§4.1)。M3 (SLAU の面温度混在) → 面状態で $T_f$, $h_f$ を一貫構成 (§4.1)。M4 (受付範囲) → SLAU/CPG/N2/単一種/Kantrowitz≤1 に限定し他は拒否、近似 Jacobian と明記、$Y_w$ 範囲検査 (§4.1)。M5 (`--series` の壁圧が中心線・dry 推定・出口判定) → 壁セル抽出・config で dry・$u_n/c$ を独立合否・閾値固定 (§5 8)。m1 (slip bvar の運動エネルギー) → $\rho E_b=\rho E_i-\tfrac12\rho U_n^2$ (§4.3)。m2 (R2/R4 の設定経路・kgas 伝播) → `condN2PsatLowT`, `condN2LiquidCp`, `cond_kgas` ディスパッチ (§4.1, §4.2) |
 | plan | `2026-09-12` | 1 回目 [`notes/reviews/2026-09-12-condensation-air-plan.md`](../../notes/reviews/2026-09-12-condensation-air-plan.md) | NO-GO, C1/M8/m1 | **全件採用 → v2**。C1 (pure 擬似種は N2 選択凝縮と EOS が両立しない) → CPG carrier 形 ($Y_w$ 定数, 全経路で同じ $g$) に置換、露点線は後続 (§1, §4.1)。M2 (潜熱修正は飽和圧も変える) → 新 $L$ の積分で C–C を再構成、2 段 A/B と $c_l$ 感度 (§4.2)。M3 (CPG `sonic` のみは Jacobian と不整合) → CPG 二相音速を本 plan から外し後続 #7 (§2)。M4 (slip ghost の二相不整合) → 状態保持に修正、出口は $u_n/c$ 監視 (§4.3)。M5 (理論線 CSV と本文の食い違い) → 300 dpi 再読みで CSV 差し替え (1 kPa: 38.5 K)、±3 K はモデル間比較基準に限定 (§3, §4.4)。M6 (Lin 曲線との比較を実験一致と呼んでいた) → 実験記号と直接比較、Lin 曲線は別報告 (§3, §6)。M7 (準定常判定不能) → 1000 step 毎保存 + `onset_analysis.py --series` (§5 8, §6)。M8 (空気 dry の入口速度未換算) → 324.48 m/s に修正して取り直し (§3, §6 E2)。M9 (cell のみ・掃引不足) → node/cell 両方、単体掃引 g≤0.99·Y_w / T 25–125 K、EOS 往復 (§5 7, §6)。m1 (露点 78.8 K・空気定数) → 82.2 K に訂正、二成分定数に統一 (§4.1) |
 
@@ -220,15 +223,22 @@ forge の $\dot P$ (≈1.8×10⁴ /s) に対応する理論線 ($\dot P$=20000) 
     **潜熱整合の効果**: 潜熱だけ新では onset 不変で g_exit 0.081→0.059 (放出熱 +25 % で凝縮量減; 3 in の cond/dry 1.241→1.158 と実験 1.133 に近づく)、飽和圧も新にすると
     S が 1/0.52 倍で onset が 0.25 in 上流 (+1.8 K) に移り 3 in は 1.242 に戻る。$c_l$ ±500 J/kg/K で onset ∓0.7 K。3–4 in の実験に対する ~9 % 過大は物性修正前後で同程度で、
     N2 モデル (CNT×Iland, Goodheart) の較正問題として残る (§5.1 後続)。
+- `2026-09-13` — codex result 1 回目 NO-GO (M5/m2, §6.1) を全件採用。コード: T 反転失敗セルの原始量凍結 + `g_condTinvFail` 警告、消滅判定の N2 分圧化 (`cond_clamp_vapor_pressure`)、
+  `cond_face_h_cpg` 抽出、境界種別・Yw 有限性の受付検査。ツール: node の中心線/壁抽出 (y=0 ノード / x ビン毎 y 最大)。単体 `test_cond_air` に (g) float32 面エンタルピー・(h) 分圧判定を追加 ALL PASS。
+  **再取得 (最終バイナリ)**: E1 cell `run_0027_air_cpgcarrier_v2` は onset 2.207 in / 38.94 K・cond/dry 1.2134/1.3514/1.4547 で run_0024 と同一、node `run_0028` も run_0026 と同一 (場差 ≤1e-5);
+  R3 `run_0029_n2_new_v2` は onset 2.131 in / 39.52 K (run_0017 2.112 / 39.67; 1 % 閾値交差が 1 セル動く = cell の onset ノイズ ±0.02 in / ±0.15 K)、壁比・g_exit は同一。
+  **ノイズ床の実測** (codex M5): 同一バイナリ反復 `run_0027` vs `run_0030` (凝縮空気) ρ 4.2e-4 / U_y 2.0e-3 / g 7.6e-4 / Q0 9e-3 (`noise_cell_air_12000.json`)、`run_0015o` vs `run_0031` (旧バイナリ dry)
+  ρ 2.7e-4 / U_y 2.8e-3 (`noise_cell_dry_oldbin_12000.json`)。この 2 倍に対し slip 変更 (dry) と レビュー反映 (E1/R3) の場差は全変数 ok (E1 の U_x 1.68e-4 だけ 2 倍床 1.7e-4 と同値)。
+  T 反転失敗の警告は全 run 0 件。§3 の理論線比較・§9 の結論 (+2.1 / +1.7 K, N2–空気 0.7 K) は変わらない。
 - `2026-09-12` — codex plan 2 回目 GO-with-changes (M5/m2) を全件採用して v3 (§6.1): C0 接続と 0.518 倍、括弧付き反転、SLAU 面状態の一貫構成、受付範囲の限定、
   `--series` 改修、slip bvar、診断キー。`status: in_progress`。node 平面メッシュ (`mesh_node/`, 24000 双対 CV, cell 版 QC PASS AR 21.9 / skew 0.07) と
-  node dry 参照 `run_0021_dry_slip_node` (PASS, 出口 M 6.93) と空気 dry 修正版 `run_0023_air_dry` (入口 324.48 m/s) を取得済み。
+  node dry 参照 `run_0021_dry_slip_node` (PASS, 出口 M 6.93) と空気 dry 修正版 `run_0023_air_dry` (入口 325.12 m/s, ρ 6.137) を取得済み。
 - `2026-09-12` — codex plan 1 回目 NO-GO (C1/M8/m1) を全件採用して v2 (§6.1)。空気を pure 擬似種 → CPG carrier 形 (N2 選択凝縮 + O2 キャリア) に変更、
   潜熱と飽和圧の低温外挿を連動、slip の状態保持、CPG 二相音速を後続へ、理論線 CSV を再読みで差し替え (forge N2 参照は $\dot P$=20000 線に対し +1.1 K)、
   Arthur は実験記号と直接比較、空気 dry の入口速度換算、node/cell 両方、`--series` 判定ツール。2 回目レビューは codex 使用上限 (2026-09-13 01:24 解除) 待ち。
 
 ## 10. 未確定事項
 
-- 空気の核生成に N2 の Iland 補正をそのまま使うか (Daum & Gyarmathy の「空気≈N2」に依拠)。
+- ~~空気の核生成に N2 の Iland 補正をそのまま使うか (Daum & Gyarmathy の「空気≈N2」に依拠)。~~ 決着 (2026-09-13, §4.1/§9): 初版は N2 の Iland 補正をそのまま使う (空気向け較正データが無く、E1 の onset が理論線 +1.7 K・N2 との差 0.7 K で「空気 ≈ N2」と整合)。空気固有の再較正は Longshot 級条件の比較 (#9) で判断。
 - ~~過飽和度の基準 (N2 分圧 vs 露点線)~~ 決着 (2026-09-12, codex C1): 初版は N2 分圧基準 (CPG carrier 形)。露点線 (混合液) は後続 #8。
 - 低温 (30–60 K) の液 N2 比熱 $c_l$: 実測が無く 2.0 kJ/kg/K は閉包。感度 R4 で幅を出す。

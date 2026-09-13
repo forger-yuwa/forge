@@ -66,6 +66,28 @@ __host__ __device__ inline double cond_T_from_e_carrier(
 //   e = (1-g)e_v + g e_l = (c_v + g R_v) T - g L(T)   (e_v=c_v T)
 //   ⇒ T = (e_in + g L(T))/(c_v + g R_v)  (= Eq.18, Cv0=Cvv=c_v)
 // **L の温度依存は入れる** (n2_latent(T))。g=0 で T=e_in/cv (従来 CPG と一致)。cv=cp/γ, R=(γ-1)cv。
+// SLAU の CPG 二相 面全エンタルピー (面状態で一貫; plans/active/condensation-air.md §4.1, codex 2026-09-12 M3)。
+//   g_f はセル値 (1 次)。R_eff = R_gas − g_f R_w (pure: R_w=R_gas → (1−g)R)。T_f = p_f/(ρ_f R_eff), h_f = c_p T_f − g_f L(T_f) + e_k。
+//   float 保存量からの復元を単体で検査できるように関数化 (tests/unit/test_cond_air.cpp)。
+__host__ __device__ inline double cond_face_h_cpg(const CondSpeciesProps& cp, double cp_gas, double R_gas, double R_w,
+                                                  double g_f, double p_f, double rho_f, double ek)
+{
+    double Reff = R_gas - g_f*R_w; if (Reff < 1.0) Reff = 1.0;
+    const double Tf = p_f/(rho_f*Reff);
+    return cp_gas*Tf - g_f*cond_latent(cp, Tf) + ek;
+}
+
+// 実現可能性クランプ (cond_realizability_clamp_d) の蒸発塵判定に使う蒸気分圧。source kernel (cond_vapor_state) と同じ定義に揃える
+// (codex 2026-09-13 M2: 旧は全圧 P で判定しており CPG carrier で S を Y_w^-1 倍過大評価していた)。
+//   Yw_transport: TP carrier の Y_w (= roY_w/ρ; 無効時は負), Yw_const: CPG carrier の定数 Y_w (無効時は ≤0), pure は全圧 P。
+__host__ __device__ inline double cond_clamp_vapor_pressure(double rod, double g, double Yw_transport, double Yw_const,
+                                                            double Rw, double T, double P)
+{
+    if (Yw_transport >= 0.0) { double yv = Yw_transport - g; if (yv < 0.0) yv = 0.0; return rod*yv*Rw*T; }
+    if (Yw_const > 0.0)      { double yv = Yw_const - g;     if (yv < 0.0) yv = 0.0; return rod*yv*Rw*T; }
+    return P;
+}
+
 // 括弧付き Newton + 二分法退避 (plans/active/condensation-air.md §4.1, codex 2026-09-12 M2)。
 //   旧 30 回 Newton は物性クランプ (45 K 床 / 臨界直下) をまたいで往復すると未収束のまま T を返し (g=0.75, T=122 K で 99 K, e −28 kJ/kg)、
 //   呼び出し側がその T で roe を上書きして保存量を壊した。G(T)=aT−gL(T)−e_in は L'<0 (整合物性) なら単調増なので [T_lo,T_hi] で括弧を作り、

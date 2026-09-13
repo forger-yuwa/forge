@@ -119,7 +119,7 @@ Tolman 補正を今回入れないのは、対象温度・臨界核サイズで�
 | --- | --- | --- |
 | 1 | ~~codex plan レビュー~~ | 決着 (2026-09-12, §6.1): GO-with-changes M6/m3 全件採用 |
 | 2 | ~~実装 (§5 1–5)~~ | 決着 (2026-09-12, §9): 実装・単体 ALL PASS |
-| 3 | Wysłouzil run (§6) | node 5 run (mode 0/1/2/3, σ 1.03) + 凝縮 OFF + cell 対照 完了 (§9)。**σ 0.97 (run_0354) は未収束 (rms_roe 1.2 桁 plateau, h0 drift 0.16 kJ/kg) → 延長 (96000 step) と cfl 低減で解消を試みる** (codex result M3) |
+| 3 | Wysłouzil run (§6) | node 5 run (mode 0/1/2/3, σ 1.03) + 凝縮 OFF + cell 対照 完了 (§9)。σ 0.97 (run_0354) は 48000 step で未収束 (rms_roe 1.2 桁 plateau, h0 drift) → **96000 step・cfl_pseudo 1.0 に延長した結果 (2026-09-13)**: 残差は plateau のまま (`check_convergence` NOT CONVERGED; ro 2.1 / roUx 2.0 / roe 1.1 桁)、報告量は 60000–96000 の窓で onset 振幅 4e-5 mm・壁偏差 1e-3 %pt・g_exit 3e-8 と頭打ち、`--series` は **h0err のみ OSCILLATING (振幅 0.03 kJ/kg ≈ 1e-4 h0)** → リミットサイクル準定常として onset 12.09 mm を報告 (平均±振幅は報告量では 0)。cfl 低減は plateau を解消しない (codex result M3 の残作業はここで閉じる) |
 | 3b | ~~単体試験の拡充 (codex result M4)~~ | 決着 (2026-09-13): `test_cond_kantrowitz_carrier.cu` (b2) に float 保存量→device 種別和 (host と 1e-6, θ への丸め影響 6e-8)、本体と `cond_source_vector` (T 摂動含む) の J 一致、car 渡し忘れの検出、pure N2 の Feder 純蒸気形を追加。キー省略時の既定 (0 / 1.0) は `solverConfig` の in-class 既定値で保証 (yaml 依存のため単体では読まず、run_0356 dry の起動ログで確認) |
 | 3c | 記述の訂正 (codex result M1/m1/m2) | 「CNT の J 過大の露出」を撤回 (Wölk–Strey 補正 $\exp(-27.56+6500/T)$ は 230 K で ×2.0、213.8 K で ×17 = 低温で CNT を**増幅**する側)、8 mm は**モデル間差**、cell 場差は床の 2.4–3.0 倍で FAIL、methods/index.md の凝縮フェーズ表記 |
 | 4 | codex result レビュー | → `status: done` |
@@ -190,7 +190,7 @@ Tolman 補正を今回入れないのは、対象温度・臨界核サイズで�
     | run_0351 | 0 (等温) | 12.28 | +21.6 / +2.6 / +2.1 |
     | run_0352 | 2 (Feder carrier) | 14.75 | +15.0 / +3.7 / +3.0 |
     | run_0353 | 3 (Feder carrier + 表面仕事) | 14.28 | +17.5 / +3.5 / +2.9 |
-    | run_0354 | 3, σ×0.97 (未収束・過渡) | 12.09 | +21.4 / +2.5 / +2.1 |
+    | run_0354 | 3, σ×0.97 (96000 step 延長: 残差 plateau、報告量は頭打ち、h0err のみ振幅 0.03 kJ/kg の OSCILLATING) | 12.09 | +21.2 / +2.5 / +2.1 |
     | run_0355 | 3, σ×1.03 | 16.81 | +6.2 / +4.4 / +3.7 |
 
     cell 対照 (run_0357/0358, dry 場から 48000, 既知の床で plateau=未収束準定常比較, 非ゲート): mode 1 の報告量は main run_0341 と同一 (onset 22.49, 壁偏差同一) だが
