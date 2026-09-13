@@ -313,7 +313,7 @@ __global__ void SLAU_d
                 // なり、凝縮帯で全エンタルピーが +0.6 % 増える非保存が出た (case/44 va2 M4.75: 軸 h0
                 // 836→841 kJ/kg、出口ノードだけ境界流束 [Ht 直読] で整合し T が 5 K 低い「跳ね」)。
                 if (g_total != nullptr) {
-                    const CondSpeciesProps cprR = (condModel == 1) ? condProps_H2O() : condProps_N2();
+                    const CondSpeciesProps& cprR = cnd.cprops;
                     RgL -= g_total[ic0]*(flow_float)cprR.R; if (RgL < 1.0f) RgL = 1.0f;
                     RgR -= g_total[ic1]*(flow_float)cprR.R; if (RgR < 1.0f) RgR = 1.0f;
                 }
@@ -336,23 +336,23 @@ __global__ void SLAU_d
             // carrier+condensible (H2O in N2) 二相補正: 凝縮した水の潜熱を引く
             //   h_2phase = h_gas^全蒸気 - g L_w + ek。気相混合 h は全蒸気なので -g L_w を足すだけ。
             if (g_total != nullptr) {
-                const CondSpeciesProps cprL = (condModel == 1) ? condProps_H2O() : condProps_N2();
+                const CondSpeciesProps& cprL = cnd.cprops;
                 h_p -= (flow_float)((double)g_total[ic0]*cond_latent(cprL, (double)T_cell[ic0]));
                 h_m -= (flow_float)((double)g_total[ic1]*cond_latent(cprL, (double)T_cell[ic1]));
             }
         } else {
             h_p = ga*P_L/((ga-1.0f)*ro_L) + 0.5f*velocity2_L;
             h_m = ga*P_R/((ga-1.0f)*ro_R) + 0.5f*velocity2_R;
-            // 非平衡凝縮 (二相): 単相 h=cp(1-g)T+ek を二相全エンタルピー h=cpT-gL+ek に補正。
-            //   差 = g(cpT - L)。これを落とすとエネルギー流束が潜熱分を運ばず全エンタルピー非保存になる。
-            //   c_hat (音速) は気相近似で単相のまま。g・T はセル値(1次, g は元来1次風上移流で整合)。
-            //   g_total==nullptr (凝縮 off) で従来 (ビット不変)。
+            // 非平衡凝縮 (二相, CPG): 面エンタルピーを面状態で一貫して構成する (plans/accepted/condensation-air.md §4.1, codex 2026-09-12 M3)。
+            //   旧: 単相 γp/((γ−1)ρ) にセル温度の補正 g(cpT_cell−L(T_cell)) を足す混在 (面二相温度とセル温度の差で ~1 kJ/kg ずれた)。
+            //   新: g_f=セル値 (1 次), R_eff=R_air−g_f R_w (pure: R_w=R_air → (1−g)R), T_f=p_f/(ρ_f R_eff), h_f=c_p T_f − g_f L(T_f) + ek。
+            //   c_hat (音速) は気相近似で単相のまま。g_total==nullptr (凝縮 off) で従来 (ビット不変)。
             if (g_total != nullptr) {
-                const CondSpeciesProps cprC = (condModel == 1) ? condProps_H2O() : condProps_N2();
-                const flow_float gL0 = g_total[ic0], gR0 = g_total[ic1];
-                const flow_float TL0 = T_cell[ic0],  TR0 = T_cell[ic1];
-                h_p += gL0*(cp_cpg*TL0 - (flow_float)cond_latent(cprC, (double)TL0));
-                h_m += gR0*(cp_cpg*TR0 - (flow_float)cond_latent(cprC, (double)TR0));
+                const CondSpeciesProps& cprC = cnd.cprops;
+                const double Rgas = ((double)ga - 1.0)*(double)cp_cpg/(double)ga;
+                const double Rw   = (cnd.Yw > 0.0) ? cprC.R : Rgas;          // CPG carrier (空気の N2) / pure
+                h_p = (flow_float)cond_face_h_cpg(cprC, (double)cp_cpg, Rgas, Rw, (double)g_total[ic0], (double)P_L, (double)ro_L, 0.5*(double)velocity2_L);
+                h_m = (flow_float)cond_face_h_cpg(cprC, (double)cp_cpg, Rgas, Rw, (double)g_total[ic1], (double)P_R, (double)ro_R, 0.5*(double)velocity2_R);
             }
         }
 

@@ -6,6 +6,8 @@
 
 // 温度反転のクランプ範囲 (NASA-9 の有効域より広めに取り, 範囲外は外挿)
 #define DEPVAR_TMIN 50.0
+// CPG 二相の温度反転が収束しなかったセル数 (診断; plans/accepted/condensation-air.md §4.1)。wrapper が毎ステップ読み出して警告する。
+__device__ unsigned int g_condTinvFail = 0u;
 #define DEPVAR_TMAX 6000.0
 
 __global__ void dependentVariables_d
@@ -27,6 +29,7 @@ __global__ void dependentVariables_d
  int condGasSpecies , int condModel ,   // carrier+condensible: 凝縮気相種 index / モデル(0:N2,1:H2O)
  int condEquilibrium ,                  // 2: EOS 拘束形平衡 ((T,g) 同時反転 → rog 射影)。0/1 は従来経路
  int condSonicModel ,                   // 1: 二相 frozen 音速/γ (TP 分岐, g>0 セル)。0: 旧 (全蒸気 √(γ_mix R_mix T))
+ CondPropOpts condOpts ,                 // σ 倍率・N2 低温物性・CPG carrier の Y_w (plans/accepted/condensation-air.md)
 
  // mesh structure
  geom_int nCells_all , geom_int nCells,
@@ -126,7 +129,7 @@ __global__ void dependentVariables_d
                 if (g_liq < 0.0f) g_liq = 0.0f;
             }
 
-            const CondSpeciesProps cprops = (condModel == 1) ? condProps_H2O() : condProps_N2();
+            const CondSpeciesProps cprops = condProps_make(condModel, condOpts);
             const double Rw = cprops.R;   // 凝縮種の比気体定数 (carrier: 蒸気分圧/EOS に使用)
 
             // 温度反転。g≈0 は従来 thermo_T_from_e で厳密縮約。
@@ -211,39 +214,52 @@ __global__ void dependentVariables_d
         } else {
             // ---- calorically perfect gas ----
             // 非平衡凝縮 (一温度 二相 EOS, CPG): 総液相質量分率 g を集計。condensation==0 で g=0 (従来経路)。
+            // CPG carrier (空気の N2 選択凝縮, condOpts.Yw>0): g<=Y_w、p=ρT(R_air−gR_w)、e=(c_v+gR_w)T−gL (plans/accepted/condensation-air.md §4.1)。
+            const bool carrierCpg = (condensation == 1 && condOpts.Yw > 0.0);
             double g_liq = 0.0;
             if (condensation == 1 && rog != nullptr) {
                 for (int s = 0; s < nCondSpecies; ++s) {
                     double gs = (double)rog[s][ic] / (double)ro_temp;
                     if (gs > 0.0f) g_liq += gs;
                 }
-                if (g_liq > 0.99f) g_liq = 0.99f;   // realizability
-                if (g_liq < 0.0f)  g_liq = 0.0f;
+                const double gcap = carrierCpg ? condOpts.Yw : 0.99;
+                if (g_liq > gcap) g_liq = gcap;   // realizability
+                if (g_liq < 0.0)  g_liq = 0.0;
             }
 
             const double cv = (double)cp/(double)gamma;            // cv = cp/γ
-            const double Rgas = ((double)gamma - 1.0)*cv;          // R = cp - cv = (γ-1)cv
+            const double Rgas = ((double)gamma - 1.0)*cv;          // R = cp - cv = (γ-1)cv (CPG carrier では空気の R)
 
             // EOS 拘束形平衡 (pure CPG): (T,g) 同時反転 → rog[0] 射影。g_eq>0 なら下の二相分岐へ流す。
             double Tn_eq = 0.0;
             const bool eq2 = (condensation == 1 && condEquilibrium == 2 && rog != nullptr);
             if (eq2) {
-                const CondSpeciesProps cpropsEq = (condModel == 1) ? condProps_H2O() : condProps_N2();
+                const CondSpeciesProps cpropsEq = condProps_make(condModel, condOpts);
                 const double Tguess = ((double)T[ic] > 1.0) ? (double)T[ic] : (double)max(intE/(cp/gamma), tMin);
                 g_liq = cond_equilibrium_Tg_pure_cpg((double)intE, (double)ro_temp, cv, Rgas, cpropsEq, Tguess, g_liq, &Tn_eq);
                 rog[0][ic] = (flow_float)((double)ro_temp*g_liq);
             }
 
-            if (g_liq > 1.0e-12f) {
-                // 二相: e = cv T - g L(T) = intE を Newton で反転、p=(1-g)ρRT。
+            if (g_liq > 1.0e-12) {
+                // 二相: e = (cv + g R_w) T - g L(T) = intE を括弧付き Newton で反転、p=ρ T R_eff (pure: R_w=R, R_eff=(1-g)R; carrier: R_eff=R_air−gR_w)。
                 const double e_in = (double)intE;
-                const double Tguess = (double)max(intE/(cp/gamma), tMin);
-                const CondSpeciesProps cpropsCpg = (condModel == 1) ? condProps_H2O() : condProps_N2();
-                const double Tn = eq2 ? Tn_eq : cond_T_from_e_cpg(e_in, g_liq, cv, Rgas, Tguess, cpropsCpg);
+                const CondSpeciesProps cpropsCpg = condProps_make(condModel, condOpts);
+                const double Rw = carrierCpg ? cpropsCpg.R : Rgas;
+                // 初期推定は前ステップの T (warm start; 無ければ単相値)
+                const double Tguess = ((double)T[ic] > 1.0) ? (double)T[ic] : (double)max(intE/(cp/gamma), tMin);
+                bool ok = true;
+                const double Tn = eq2 ? Tn_eq : cond_T_from_e_cpg(e_in, g_liq, cv, Rw, Tguess, cpropsCpg, &ok);
+                if (!ok) {
+                    // 反転が収束しなかったセル: T,P,sonic,Ht は前ステップ値のまま残し、roe を反転結果で上書きしない (密度床・速度は上で更新済み)。診断カウンタに数える
+                    // (codex 2026-09-12 M2 / 2026-09-13 M1: 失敗した温度で流束・核生成を評価しない)。密度床だけ反映。
+                    atomicAdd(&g_condTinvFail, 1u);
+                    ro[ic] = ro_temp;
+                    Rmix_array[ic] = (flow_float)Rgas;
+                } else {
                 const double L = cond_latent(cpropsCpg, Tn);
-                const double e_mix = (cv + g_liq*Rgas)*Tn - g_liq*L;   // = e_in
-                const double oneMg = 1.0 - g_liq;
-                double Pn = oneMg*(double)ro_temp*Rgas*Tn;
+                const double e_mix = (cv + g_liq*Rw)*Tn - g_liq*L;   // = e_in
+                const double Reff = carrierCpg ? (Rgas - g_liq*Rw) : ((1.0 - g_liq)*Rgas);
+                double Pn = (double)ro_temp*Reff*Tn;
                 if (Pn < (double)pMin) Pn = (double)pMin;
 
                 T[ic]   = (flow_float)Tn;
@@ -251,8 +267,9 @@ __global__ void dependentVariables_d
                 ro[ic]  = ro_temp;
                 roe[ic] = (flow_float)((double)ro_temp*(e_mix + (double)ek));
                 Ht[ic]  = (flow_float)(e_mix + Pn/(double)ro_temp + (double)ek);
-                sonic[ic] = (flow_float)sqrt((double)gamma*Rgas*Tn); // 気相 frozen 音速 (loose coupling)
+                sonic[ic] = (flow_float)sqrt((double)gamma*Rgas*Tn); // 気相 frozen 音速 (loose coupling; CPG は旧式のまま)
                 Rmix_array[ic] = (flow_float)Rgas;
+                }
             } else {
                 // 単相 CPG (従来経路, フロア未指定ならビット不変)
                 T_temp = max(intE/(cp/gamma), tMin);
@@ -298,6 +315,7 @@ void dependentVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
         cfg.condGasSpecies , cfg.condModel ,
         cfg.condEquilibrium ,
         cfg.condSonicModel ,
+        cond_prop_opts(cfg) ,
 
         // mesh structure
         msh.nCells_all , msh.nCells ,
@@ -312,6 +330,15 @@ void dependentVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
     ) ;
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+    // CPG 二相の温度反転失敗セル数 (診断)。0 でなければ警告 (前ステップ値を保持したセルがある)。
+    if (cfg.condensation == 1 && cfg.thermalMethod == 0) {
+        unsigned int nfail = 0u;
+        gpuErrchk( cudaMemcpyFromSymbol(&nfail, g_condTinvFail, sizeof(unsigned int)) );
+        if (nfail > 0u) {
+            std::cerr << "[condensation] WARNING: CPG two-phase temperature inversion failed in " << nfail << " cells (primitives/roe kept from previous step)\n";
+            const unsigned int zero = 0u; gpuErrchk( cudaMemcpyToSymbol(g_condTinvFail, &zero, sizeof(unsigned int)) );
+        }
+    }
     // EOS 拘束形平衡 (condEquilibrium==2): kernel が rog[0] を g_eq に射影したので、SLAU 面温度・潜熱補正・出力が
     // 読む原始量 g_<s>=rog/ρ を同期する (realizability クランプも通る)。他モードでは呼ばない (従来経路不変)。
     if (cfg.condensation == 1 && cfg.condEquilibrium == 2 && var.nCondSpeciesRegistered >= 1) {

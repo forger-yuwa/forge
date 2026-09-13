@@ -1,0 +1,8 @@
+# Theoretical onset lines for N2 (Daum & Gyarmathy 1968), read from Grossir & Rambaud 2014 Fig.4b at 300 dpi (2026-09-12 re-read; the earlier reading was wrong by ~7 K). Reading error about +-1 K.
+# columns: p [Pa], T_onset for Pdot=20000 1/s, Pdot=1000 1/s, Pdot=50 1/s, and the N2 saturation line as drawn
+p_Pa,T_Pdot20000_K,T_Pdot1000_K,T_Pdot50_K,T_sat_K
+30,21.0,25.5,29.5,40.5
+100,28.5,32.0,35.5,44.5
+1000,38.5,42.0,45.0,52.0
+10000,49.0,52.0,55.0,61.5
+30000,57.0,59.5,61.5,67.0
