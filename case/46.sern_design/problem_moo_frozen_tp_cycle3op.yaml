@@ -16,6 +16,8 @@ gas:                       # R3 (2026-09-13): 排気 = CEA 凍結組成の擬似
   gamma: 1.2470
   cp: 1718.5
 spec:
+  wall_thermal: {mode: isothermal, Tw: 1000.0}   # R4b(ii) 2026-09-13: 断熱だと M∞10 板下面が回復温度 4600 K (非物理) で残差プラトー 5e-5;
+                                                 # 等温 1000 K で残差 3.5 桁低下 (run_0103)。Tw は暫定 (冷却構造の代表値) — plan §8-11
   H_m: 0.1
   inflow:                  # 設計点 = 燃焼器出口 (TM X-71972 station 3, M∞6 φ=1)
     mode: supersonic

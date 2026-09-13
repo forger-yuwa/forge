@@ -836,6 +836,10 @@ $$\text{燃焼器出口 starting line} \rightarrow \text{平面最大推力理�
   IC の内部エネルギー・理想推力 (`gas/frozen.py` の等エントロピー膨張) を同じ物性で計算し、逆設計 kernel だけ設計点の凍結 γ の CPG
   (形状パラメータ化)。作動点 YAML は `cea/tmx_operating_points.py` が凍結音速の M_in と組成 (`'NO'` はクォート) を出力する。
   旧 `cpg` は外気にも排気の (γ, R) を使い外部動圧が −15 % ずれていた (codex C2)。
+- **3D メッシュの外部領域 (R4, 2026-09-13)**: `mesh_sern3d` は 2D と同じ `mesh.ext_top` (機体上面テーパ + 自由流バンド、タグ `vehicle_top`) と
+  `ramp_fillet` を持ち、機体幅外の下面 `underside_far` (帳簿外) を分ける。領域独立性は `case/46/r4_domain_study.py` (Z_ext / x_out / bot_depth / top_depth / 格子)。
+- **壁の熱境界 (2026-09-13)**: 生産 YAML は等温壁 $T_w$ = 1000 K (`spec.wall_thermal`)。断熱だと M∞10 の外気側で回復温度 4600 K になり残差がプラトーする
+  (plan §8-11)。
 - **3D の帳簿 (R2, 2026-09-13)**: メッシャは幅外の機体下面を `vehicle` タグ (W/2 < z ≤ W_vehicle/2) に分け、`forces3d` の $C_T,C_L,C_M$ は
   ノズル面 (ramp z ≤ W/2 + cowl + 側壁) だけ。機体力は `C_T_vehicle` 等の別枠。`metrics/sern_momentum.py` が BCONDS 全面の運動量収支で
   帳簿を検算する (閉じ残差 ~1–2 % of $F_{\rm ideal}$ が離散化差の目安)。

@@ -197,6 +197,10 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     disc = p.mesh.get("discretization", "cell")
     model = p.evaluate.get("model", "euler")
     node_keys = ", nodeWallDirichlet: 1" if (disc == "node" and model != "euler") else ""
+    # R4b(i) (2026-09-13): 入口∩壁の角ノードの半割面所有を壁側に (converter が変換時に読む)。既定 0 = 旧 run とビット一致。
+    # 生産 YAML は mesh.node_inlet_corner_wall: 1 (角ノードの壁圧 1.75 p_in 対策; plans/active/boundary-node-inlet-corner-wall.md)
+    if disc == "node" and int(p.mesh.get("node_inlet_corner_wall", 0)):
+        node_keys += ", nodeInletCornerWall: 1"
     # R3 (frozen_tp): 排気 EXH / 空気 AIR の 2 擬似種 TP。thermoHrefTemp (sensible datum) は陰解法の χ_eos 桁違い対策で必須
     # ([[isobutane-wt-semiperfect]] / runner_axismach と同じ)。IC の roe も同じ基準で組む (paste_region_ic)
     if p.is_frozen_tp:
@@ -371,7 +375,8 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     write_species_db(p, run_dir, frozen_gases(p))     # R3: 擬似種 EXH / AIR の NASA-9 (cpg なら何も書かない)
     disc = p.mesh.get("discretization", "cell")
     # 品質ゲートは primal (cell) 変換で
-    (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"').replace(", nodeWallDirichlet: 1", ""))
+    (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"')
+                                               .replace(", nodeWallDirichlet: 1", "").replace(", nodeInletCornerWall: 1", ""))
     convert_mesh(run_dir, "sern.msh", "sern_qc.h5")
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"), "sern_qc.h5", "--mode", "2d"], cwd=run_dir, env=_ENV, capture_output=True, text=True)
     (run_dir / "MESH_QUALITY.txt").write_text(q.stdout + q.stderr)

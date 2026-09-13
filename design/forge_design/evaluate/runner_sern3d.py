@@ -50,7 +50,15 @@ def _bcond_config(p, st):
             + f"side_far: {{physID: {P['side_far']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
             + wall("sidewall_in") + wall("sidewall_out")
             # R2: 幅外の機体下面 (vehicle) は ramp と同じ壁種・壁出力だが帳簿は別枠 (forces3d)
-            + (wall("vehicle") if int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0 else ""))
+            + (wall("vehicle") if int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0 else "")
+            + (f"underside_far: {{physID: {P['underside_far']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
+               if p.raw.get("mesh3d", {}).get("W_vehicle") is not None else "")
+            # R4: 機体上面 (ext_top)。2D の vehicle と同じく slip・壁出力 (帳簿外、診断)
+            + (f"vehicle_top: {{physID: {P['vehicle_top']}, kind: slip, outputHDFflg: 1, ints: , floats: }}\n" if int(m2_ext(p)) else ""))
+
+
+def m2_ext(p) -> int:
+    return int(p.mesh.get("ext_top", 0))
 
 
 def paste_region_ic3d(h5path, y_mid, scale, half_W_m, st, gamma, minfo=None):
@@ -86,6 +94,10 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
                            x_out_extra=float(m2.get("x_out_extra", 2.0)), bot_depth=float(m2.get("bot_depth", 3.0)),
                            first_wall_frac=float(m.get("first_wall_frac", m2.get("first_wall_frac", 4e-3))), first_z_frac=float(m.get("first_z_frac", 4e-3)),
                            cowl_thickness=float(m.get("cowl_thickness", m2.get("cowl_thickness", 0.0))),
+                           ext_top=bool(int(m2.get("ext_top", 0))), top_depth=float(m2.get("top_depth", 2.0)), nj_ext_top=int(m2.get("nj_ext_top", 41)),
+                           vehicle_clearance=float(m2.get("vehicle_clearance", 0.02)), first_top_frac=float(m2.get("first_top_frac", 0.02)),
+                           vehicle_taper=float(m2.get("vehicle_taper", 0.0)), vehicle_wedge_deg=float(m2.get("vehicle_wedge_deg", 3.0)),
+                           ramp_fillet=float(m2.get("ramp_fillet", 0.0)),
                            interface_angle=float(m2.get("interface_angle_rad", theta_b)),
                            top_ext_angle=float(np.deg2rad(m2.get("top_ext_angle_deg", np.rad2deg(design.info["theta_e"])))), scale=H)
     coords, hexes, B, minfo, y_mid = generate_sern_mesh3d(design, prm)
@@ -97,7 +109,8 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     (run_dir / "bcondConfig.yaml").write_text(_bcond_config(p, st)); (run_dir / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
     R2.write_species_db(p, run_dir, R2.frozen_gases(p))     # R3
     disc = p.mesh.get("discretization", "node")
-    (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"').replace(", nodeWallDirichlet: 1", ""))
+    (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"')
+                                               .replace(", nodeWallDirichlet: 1", "").replace(", nodeInletCornerWall: 1", ""))
     R2.convert_mesh(run_dir, "sern.msh", "sern_qc.h5")
     q = subprocess.run([sys.executable, str(R2.FORGE_TOOLS / "check_mesh_quality.py"), "sern_qc.h5", "--mode", "3d"], cwd=run_dir, env=R2._ENV, capture_output=True, text=True)
     (run_dir / "MESH_QUALITY.txt").write_text(q.stdout + q.stderr)
@@ -199,7 +212,8 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
     P = PHYS_SERN3D; run_dir = Path(run_dir)
     spec = {"ramp": (P["ramp"], (0, 1, 0)), "cowl_in": (P["cowl_in"], (0, -1, 0)), "cowl_out": (P["cowl_out"], (0, 1, 0)),
             "sidewall_in": (P["sidewall_in"], (0, 0, 1)), "sidewall_out": (P["sidewall_out"], (0, 0, -1)),
-            "vehicle": (P["vehicle"], (0, 1, 0))}      # R2: 幅外機体下面 (メッシャが分離したタグ。旧 run は ramp の z 分割で代替)
+            "vehicle": (P["vehicle"], (0, 1, 0)),      # R2: 幅外機体下面 (メッシャが分離したタグ。旧 run は ramp の z 分割で代替)
+            "vehicle_top": (P["vehicle_top"], (0, -1, 0))}   # R4: 機体上面 (帳簿外・診断のみ: C_T_vehicle_top)
     parts = {}
     for name, (pid, d) in spec.items():
         c = list(run_dir.glob(f"res_{name}_{pid}_{step}.h5"))
@@ -213,6 +227,8 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
                 tot += v["inside"][key] if sel == "nozzle" else (v["outside"][key] if sel == "vehicle" else 0.0)
             elif name == "vehicle":
                 tot += v[key] if sel == "vehicle" else 0.0
+            elif name == "vehicle_top":
+                tot += v[key] if sel == "vehicle_top" else 0.0
             elif sel == "nozzle":
                 tot += v[key]
         return tot
@@ -224,7 +240,8 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
            "bookkeeping": "nozzle_only (R2): ramp z<=W/2 + cowl + sidewalls; vehicle underside separate",
            "C_T_vehicle": -Fx_v / F_ideal, "C_L_vehicle": Fy_v / F_ideal, "C_M_vehicle": Mn_v / (F_ideal * H),
            "C_T_total_with_vehicle": (inlet - Fx - Fx_v) / F_ideal, "C_L_total_with_vehicle": (Fy + Fy_v) / F_ideal,
-           "half_W_vehicle": half_W_vehicle}
+           "half_W_vehicle": half_W_vehicle,
+           "C_T_vehicle_top": -_sum("Fx_p", "vehicle_top") / F_ideal, "C_L_vehicle_top": _sum("Fy_p", "vehicle_top") / F_ideal}
     if "ramp" in parts and "inside" in parts["ramp"]:
         ri, ro = parts["ramp"]["inside"], parts["ramp"]["outside"]
         out["C_L_ramp_inside"] = ri["Fy_p"] / F_ideal; out["C_L_ramp_outside"] = ro["Fy_p"] / F_ideal
@@ -233,7 +250,7 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
     if any("Fx_tau" in v for v in parts.values()):
         # 摩擦: vehicle タグがあればノズル面 (vehicle 以外) だけを足す。旧 run (ramp が幅外を含む) では全面の値になる
         sgn = 1.0 if twall_on_fluid else -1.0
-        Fx_t = sgn * sum(v.get("Fx_tau", 0.0) for name, v in parts.items() if name != "vehicle")
+        Fx_t = sgn * sum(v.get("Fx_tau", 0.0) for name, v in parts.items() if name not in ("vehicle", "vehicle_top"))
         Fx_tv = sgn * parts.get("vehicle", {}).get("Fx_tau", 0.0)
         out["C_T_with_shear"] = (inlet - Fx + Fx_t) / F_ideal; out["C_T_friction"] = Fx_t / F_ideal
         out["C_T_friction_vehicle"] = Fx_tv / F_ideal

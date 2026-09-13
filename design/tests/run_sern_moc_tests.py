@@ -132,6 +132,32 @@ rows = np.array(rows)
 print("     f     M_c    L_ramp   C_T     θ_c[°]  θ_c−θ_lip[°]")
 for r in rows[np.argsort(rows[:, 2])]:
     print("     " + "  ".join(f"{v:7.3f}" for v in r))
+# --- 6b. 拘束付き最適性 (R6(c), codex M7 採用 2026-09-13; assert 付き) ------------------------------------------
+# 同一ガス・同一作動点 (kernel = test 4, p_a = p_ext) で、縁条件残差 θ_c − θ_lip = 0 になる (M_c*, f0) を求め、
+# **等長拘束 L_ramp = L*** の下で f を ±δ 動かした候補 (M_c を等長になるよう解く) より C_T が大きいことを検算する。
+# = Rao の乗数条件 (Shyne 式 11–15 の平面版: 縁条件が制御面終端で成り立つ点が固定長最大推力) の数値検証。
+from scipy.optimize import brentq as _brentq
+def _design(Mc, f):
+    return k1.design_ramp(M_c=Mc, f=f)
+def _lip(dd):
+    fr = wall_forces(dd, 2.5, g); pc = float(p_over_pt(dd.key_point[2], g) / p_over_pt(2.5, g))
+    return float(lip_residual(dd.key_point[2], dd.key_point[3], pc / fr["pa_over_pin"], g)), fr["C_T"]
+f0 = 0.55
+Mc_star = _brentq(lambda Mc: _lip(_design(Mc, f0))[0], 3.2, 4.4, xtol=1e-6)
+d_star = _design(Mc_star, f0); res_star, ct_star = _lip(d_star); L_star = d_star.L_ramp
+check("6b: 縁条件残差 0 の M_c* が箱内に存在", 3.2 < Mc_star < 4.4, f"M_c*={Mc_star:.4f} L*={L_star:.4f} C_T*={ct_star:.5f}")
+worse = []
+for df in (-0.06, -0.03, 0.03, 0.06):
+    f = f0 + df
+    try:
+        Mc_f = _brentq(lambda Mc: _design(Mc, f).L_ramp - L_star, 2.9, 4.8, xtol=1e-6)
+    except ValueError as e:
+        print(f"     6b: f={f:.2f} で等長解なし ({str(e)[:50]})"); continue
+    dd = _design(Mc_f, f); res_f, ct_f = _lip(dd)
+    worse.append(ct_f <= ct_star + 1e-6)
+    print(f"     6b: f={f:.2f} M_c={Mc_f:.4f} L={dd.L_ramp:.4f} C_T={ct_f:.5f} (Δ={ct_f - ct_star:+.2e}) lip_res={np.rad2deg(res_f):+.3f}°")
+check("6b: 等長拘束の下で縁条件残差 0 の点が C_T 最大 (±3 %, ±6 % の f 摂動より大きい)", len(worse) >= 2 and all(worse))
+
 np.savetxt(Path(__file__).with_name("sern_optimality_sweep.csv"), rows, delimiter=",",
            header="f,M_c,L_ramp,C_T,theta_c_deg,lip_residual_deg", comments="")
 

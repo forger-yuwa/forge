@@ -24,7 +24,7 @@ from .mesh2d import _radial_fracs
 from .mesh_sern import _cluster_stations, _tanh_two_sided
 
 PHYS_SERN3D = {"inlet_nozzle": 1, "inlet_ext": 2, "outlet": 3, "ramp": 4, "cowl_in": 5, "cowl_out": 6, "bottom": 7,
-               "top_out": 8, "sym": 9, "side_far": 10, "sidewall_in": 11, "sidewall_out": 12, "fluid": 13, "vehicle": 14}
+               "top_out": 8, "sym": 9, "side_far": 10, "sidewall_in": 11, "sidewall_out": 12, "fluid": 13, "vehicle": 14, "vehicle_top": 15, "underside_far": 16}
 
 
 @dataclass
@@ -40,6 +40,16 @@ class SernMesh3DParams:
     Z_ext: float = 1.5       # 側壁外側の空間 / H
     L_sw: float | None = None  # 側壁の x 範囲 (None → L_cowl)
     W_vehicle: float | None = None  # 機体の物理幅 / H (全幅)。None = 遠方境界まで機体下面 (旧挙動)。W/2 < z ≤ W_vehicle/2 が vehicle タグ
+    # R4 (codex M6, 2026-09-13): ランプ側外部流ブロック (2D の ext_top を z 一様に押し出し)。機体上面 (vehicle_top, 後端テーパ) +
+    # 自由流バンド top_depth。ランプ後縁より下流はプルーム上線とノード共有 (2D と同じ)。vehicle_taper > 0 必須 (鉛直 base は node で発散)
+    ext_top: bool = False
+    top_depth: float = 2.0
+    nj_ext_top: int = 41
+    vehicle_clearance: float = 0.02
+    first_top_frac: float = 0.02
+    vehicle_taper: float = 0.0
+    vehicle_wedge_deg: float = 3.0
+    ramp_fillet: float = 0.0     # ランプ膨張角部 (x=0, y=1) の丸め半径 /H (2D mesh_sern と同じ; §4.12 の SST 起動対策)。0 = 鋭角
     L_up: float = 0.5
     x_out_extra: float = 2.0
     bot_depth: float = 3.0
@@ -60,19 +70,37 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
     L_ramp = float(design.L_ramp); y_e = float(design.ramp_xy[-1, 1])
     L_sw = L_cowl if prm.L_sw is None else float(prm.L_sw)
     x_out = L_ramp + prm.x_out_extra
-    xs = np.concatenate([
-        _cluster_stations(-prm.L_up, 0.0, prm.ni_up, (False, True), prm.x_cluster_w, prm.x_cluster_a),
-        _cluster_stations(0.0, L_cowl, prm.ni_noz, (True, True), prm.x_cluster_w, prm.x_cluster_a)[1:],
-        _cluster_stations(L_cowl, x_out, prm.ni_plume, (True, False), prm.x_cluster_w, prm.x_cluster_a)[1:],
-    ])
+    rx, ry = design.ramp_xy[:, 0], design.ramp_xy[:, 1]
+    # ランプ角部の丸め (2D mesh_sern と同じ式): 接点 x1 = −t, x2 = t cosθ, t = R tan(θ/2)。丸め区間はブロック境界にする
+    R_f = float(prm.ramp_fillet)
+    if R_f > 0.0 and len(rx) > 1:
+        th_r0 = float(np.arctan2(ry[1] - ry[0], rx[1] - rx[0])); t_f = R_f * np.tan(0.5 * th_r0)
+        xf1, xf2, nf = -t_f, t_f * np.cos(th_r0), 7
+        xs = np.concatenate([
+            _cluster_stations(-prm.L_up, xf1, max(prm.ni_up - 6, 4), (False, True), prm.x_cluster_w, prm.x_cluster_a),
+            np.linspace(xf1, 0.0, nf)[1:], np.linspace(0.0, xf2, nf)[1:],
+            _cluster_stations(xf2, L_cowl, prm.ni_noz, (True, True), prm.x_cluster_w, prm.x_cluster_a)[1:],
+            _cluster_stations(L_cowl, x_out, prm.ni_plume, (True, False), prm.x_cluster_w, prm.x_cluster_a)[1:],
+        ])
+    else:
+        R_f = 0.0; t_f = xf1 = xf2 = 0.0
+        xs = np.concatenate([
+            _cluster_stations(-prm.L_up, 0.0, prm.ni_up, (False, True), prm.x_cluster_w, prm.x_cluster_a),
+            _cluster_stations(0.0, L_cowl, prm.ni_noz, (True, True), prm.x_cluster_w, prm.x_cluster_a)[1:],
+            _cluster_stations(L_cowl, x_out, prm.ni_plume, (True, False), prm.x_cluster_w, prm.x_cluster_a)[1:],
+        ])
     xs[int(np.argmin(np.abs(xs - L_ramp)))] = L_ramp
     i_te = int(np.argmin(np.abs(xs - L_cowl))); assert abs(xs[i_te] - L_cowl) < 1e-12
     i_sw = int(np.argmin(np.abs(xs - L_sw)))
-    rx, ry = design.ramp_xy[:, 0], design.ramp_xy[:, 1]
 
     def y_top(x):
         x = np.asarray(x, dtype=float)
-        return np.where(x < 0.0, 1.0, np.where(x <= L_ramp, np.interp(x, rx, ry), y_e + (x - L_ramp) * np.tan(prm.top_ext_angle)))
+        y = np.where(x < 0.0, 1.0, np.where(x <= L_ramp, np.interp(x, rx, ry), y_e + (x - L_ramp) * np.tan(prm.top_ext_angle)))
+        if R_f > 0.0:
+            u = x + t_f
+            arc = 1.0 + R_f - np.sqrt(np.clip(R_f * R_f - u * u, 0.0, None))
+            y = np.where((x >= xf1) & (x <= xf2), np.maximum(y, arc), y)
+        return y
 
     def y_mid(x):
         x = np.asarray(x, dtype=float)
@@ -193,13 +221,14 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
             xm = 0.5 * (xs[i] + xs[i + 1]); zm = 0.5 * (zs[k] + zs[k + 1])
             top = (node(i, NJ - 1, k, sdk), node(i, NJ - 1, k + 1, sdk1), node(i + 1, NJ - 1, k + 1, sdk1), node(i + 1, NJ - 1, k, sdk))
             if xm > L_ramp:
-                B["top_out"].append(top)
+                if not prm.ext_top:
+                    B["top_out"].append(top)      # ext_top ではプルーム上線は top バンドとの内部面
             elif k < k_sw:                       # ノズル幅内 (z ≤ W/2) = ramp
                 B["ramp"].append(top)
             elif prm.W_vehicle is None or zm <= 0.5 * float(prm.W_vehicle):
                 B["vehicle"].append(top)         # 幅外の機体下面 (R2)
             else:
-                B["top_out"].append(top)         # 機体幅の外 = 遠方境界の産物
+                B["underside_far"].append(top)   # 機体幅の外 (z > W_vehicle/2) = 遠方境界の産物。slip 壁・帳簿外 (2026-09-13: top_out から分離)
             if i + 1 <= i_te and k + 1 <= k_sw:
                 B["cowl_in"].append((node(i, jm, k, "up_in"), node(i + 1, jm, k, "up_in"), node(i + 1, jm, k + 1, "up_in"), node(i, jm, k + 1, "up_in")))
                 B["cowl_out"].append((base(i, jm, k), base(i, jm, k + 1), base(i + 1, jm, k + 1), base(i + 1, jm, k)))
@@ -215,12 +244,85 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
             if (not no_outer) and i + 1 <= i_sw and j >= jm:
                 B["sidewall_in"].append((node(i, j, k_sw, "up_in"), node(i + 1, j, k_sw, "up_in"), node(i + 1, j + 1, k_sw, "up_in"), node(i, j + 1, k_sw, "up_in")))
                 B["sidewall_out"].append((node(i, j, k_sw, "up_out"), node(i, j + 1, k_sw, "up_out"), node(i + 1, j + 1, k_sw, "up_out"), node(i + 1, j, k_sw, "up_out")))
+    ext = {"ext_top": bool(prm.ext_top)}
+    if prm.ext_top:
+        coords, hexes = _add_ext_top3d(coords, hexes, B, xs, yt, zs, L_ramp, y_e, node, NJ, prm, ext)
     coords *= prm.scale
     info = {"ni": ni, "NJ": NJ, "nz": nz, "jm": jm, "k_sw": k_sw, "i_te": i_te, "i_sw": i_sw, "cells": int(hexes.shape[0]),
             "nodes": int(coords.shape[0]), "W": prm.W, "Z_far": float(zs[-1]), "L_sw": L_sw, "cowl_thickness": t_c, "x_out": x_out, "y_bot": y_bot,
             "L_cowl": L_cowl, "L_ramp": L_ramp, "n_dup_cowl": len(dup1), "n_dup_side": len(dup2),
-            "W_vehicle": prm.W_vehicle, "n_vehicle_faces": len(B["vehicle"])}
+            "W_vehicle": prm.W_vehicle, "n_vehicle_faces": len(B["vehicle"]), "ramp_fillet": R_f, **ext}
     return coords, hexes, B, info, y_mid
+
+
+def _add_ext_top3d(coords, hexes, B, xs, yt, zs, L_ramp, y_e, node, NJ, prm, ext):
+    """ランプ側外部流ブロック (R4): 2D `_add_ext_top` (テーパ版, h_base = 0) を z 一様に押し出す。
+    上面線 y3(x): x ≤ x0 = y_veh (ランプ最大 y + クリアランス)、テーパ区間は 3 次エルミートで後縁 (y_e) に θ_e で着地、
+    x > L_ramp はプルーム上線 (共有ノード)。境界: vehicle_top (x ≤ L_ramp の下面), top_out (上面), inlet_ext / outlet / sym / side_far。"""
+    from .mesh2d import _radial_fracs  # noqa: F401  (既存 import と同じ経路)
+    ni, nz, njT = len(xs), len(zs), int(prm.nj_ext_top)
+    if not prm.vehicle_taper > 0.0:
+        raise ValueError("mesh_sern3d ext_top は vehicle_taper > 0 (テーパ版) のみ (鉛直 base + wake は node で発散するので未実装)")
+    k_r = int(np.argmin(np.abs(xs - L_ramp))); assert abs(xs[k_r] - L_ramp) < 1e-12
+    clr = max(float(prm.vehicle_clearance), 3.0 * float(prm.first_top_frac))
+    y_veh = float(yt[:k_r + 1].max()) + clr
+    taper_len = float(prm.vehicle_taper) * L_ramp
+    x0 = L_ramp - taper_len
+    m_e = (yt[k_r] - yt[k_r - 1]) / max(xs[k_r] - xs[k_r - 1], 1e-12)
+    m1 = min(m_e, 0.0) - np.tan(np.radians(float(prm.vehicle_wedge_deg)))
+    _s = np.clip((xs - x0) / taper_len, 0.0, 1.0)
+    y3 = ((2.0 * _s ** 3 - 3.0 * _s ** 2 + 1.0) * y_veh + (-2.0 * _s ** 3 + 3.0 * _s ** 2) * y_e + (_s ** 3 - _s ** 2) * taper_len * m1)
+    y3 = np.where(xs < x0, y_veh, y3)
+    y3 = np.maximum(y3, yt + np.clip(np.tan(np.radians(float(prm.vehicle_wedge_deg))) * (L_ramp - xs), 0.0, clr))
+    y3[k_r] = y_e
+    y3 = np.where(np.arange(ni) <= k_r, y3, yt)          # 後縁より下流はプルーム上線 (共有)
+    N0 = coords.shape[0]
+    n_own0 = k_r * nz                                     # j=0 を自前で持つ (i < k_r) × z
+    N_topj = ni * (njT - 1) * nz
+
+    def top(i, j, k):
+        if j == 0:
+            return N0 + i * nz + k if i < k_r else node(i, NJ - 1, k, "up_out")
+        return N0 + n_own0 + ((i * (njT - 1)) + (j - 1)) * nz + k
+    new = np.zeros((n_own0 + N_topj, 3))
+    s_t = _geom_start3(njT, min(prm.first_top_frac / prm.top_depth, 0.5))
+    for i in range(ni):
+        yy = y3[i] + s_t * prm.top_depth
+        for k in range(nz):
+            if i < k_r:
+                new[top(i, 0, k) - N0] = (xs[i], y3[i], zs[k])
+            for j in range(1, njT):
+                new[top(i, j, k) - N0] = (xs[i], yy[j], zs[k])
+    coords = np.vstack([coords, new])
+    extra = []
+    for i in range(ni - 1):
+        for k in range(nz - 1):
+            for j in range(njT - 1):
+                extra.append((top(i, j, k), top(i + 1, j, k), top(i + 1, j + 1, k), top(i, j + 1, k),
+                              top(i, j, k + 1), top(i + 1, j, k + 1), top(i + 1, j + 1, k + 1), top(i, j + 1, k + 1)))
+    hexes = np.vstack([hexes, np.asarray(extra, dtype=np.int64)])
+    B.setdefault("vehicle_top", [])
+    for i in range(ni - 1):
+        for k in range(nz - 1):
+            if i + 1 <= k_r:                              # 機体上面 (x ≤ L_ramp)
+                B["vehicle_top"].append((top(i, 0, k), top(i, 0, k + 1), top(i + 1, 0, k + 1), top(i + 1, 0, k)))
+            B["top_out"].append((top(i, njT - 1, k), top(i + 1, njT - 1, k), top(i + 1, njT - 1, k + 1), top(i, njT - 1, k + 1)))
+        for j in range(njT - 1):
+            B["sym"].append((top(i, j, 0), top(i, j + 1, 0), top(i + 1, j + 1, 0), top(i + 1, j, 0)))
+            B["side_far"].append((top(i, j, nz - 1), top(i + 1, j, nz - 1), top(i + 1, j + 1, nz - 1), top(i, j + 1, nz - 1)))
+    for k in range(nz - 1):
+        for j in range(njT - 1):
+            B["inlet_ext"].append((top(0, j, k), top(0, j + 1, k), top(0, j + 1, k + 1), top(0, j, k + 1)))
+            B["outlet"].append((top(ni - 1, j, k), top(ni - 1, j, k + 1), top(ni - 1, j + 1, k + 1), top(ni - 1, j + 1, k)))
+    ext.update({"nj_ext_top": njT, "y_veh": y_veh, "i_ramp_te": int(k_r), "vehicle_taper": float(prm.vehicle_taper),
+                "vehicle_wedge_deg": float(prm.vehicle_wedge_deg), "top_depth": float(prm.top_depth), "n_top_nodes": int(n_own0 + N_topj)})
+    return coords, hexes
+
+
+def _geom_start3(n, first):
+    """[0,1] を n 点で、最初の間隔が first になる等比分布 (mesh_sern._geom_start と同じ)。"""
+    from .mesh_sern import _geom_start
+    return _geom_start(n, first)
 
 
 def write_msh41_3d(path, coords, hexes, bquads: dict, phys: dict) -> None:
