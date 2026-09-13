@@ -56,6 +56,7 @@
 | F-cf4 | N2/空気の σ・ρ_l が 45 K で凍結しており、生産域に入っている (2026-09-14, methods/condensation.md §8b 既知の限界 1): case/34 の onset は T=39.7 K。相関を延長すると σ +9 % (39.2 K)、onset 点で J が 1.2e-6 倍 → onset が数 mm 下流へ動く見込み。`condSigmaScale` と同形の opt-in にして onset 感度と同時に測る | 未着手 |
 | F-cf5 | H2O の潜熱が 373.15 K 超で増加する (§8b 既知の限界 2): h_l のクランプで実質 c_p,l=0 となり dL/dT の符号が反転。L(400)=2.320 MJ/kg (真値 2.183)、L(600)=2.711 (本来は T_c=647 K で 0)。凝縮しない温度域だが g>0 のセルが高温へ飛ぶと潜熱が過大。h_l を臨界点まで伸びる相関へ差し替える | 未着手 |
 | F-cf6 | H2O の h_v が二重ソース (§8b 既知の限界 3): EOS は種 DB (定 cp 外挿)、`h2o_latent` は生の多項式。200 K 未満で暗黙の h_l が 150 K で 0.47、120 K で 2.39 kJ/kg ずれる (L の 9e-4)。運転域 200–240 K では実質ゼロ。種 DB 経由に統一するか、差を許容と明記するか決める | 未着手 |
+| F-cf7 | **CPG × `condGasSpecies` が未ガードで、ソース項と EOS が食い違う** (2026-09-14 発見): ソース kernel の carrier 判定は `condGasSpecies>=0 || condVaporMassFraction>0` なので p_v=ρ(Y_w−g)R_wT を使うが、CPG の二相 EOS (`dependentVariables_d.cu` の else 枝) は `condVaporMassFraction>0` しか見ないため pure 扱い (p=(1−g)ρR_mixT, e=e_v+gR_mixT−gL) になる。`solverConfig.cpp` の検証も `condGasSpecies>=0` に thermalMethod 2 を要求していない。case/16 の旧 fig3 run (run_0049–0052, 幾何が不一致で使用停止) だけが該当し、生産 run は全て TP。Y_H2O=0.011 で p が最大 0.6 %、e が 0.24 % (T にして 0.5 K) ずれる。対処案: `condGasSpecies >= 0` なら `thermalMethod == 2` を要求する検証を足す (1 行)。または CPG 枝でも `condGasSpecies` を見て carrier 形にする | 未着手 |
 
 ## 6. 検証
 
