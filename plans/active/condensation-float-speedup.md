@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `architecture / performance` (condensation)
-- **status**: `in_progress`  <!-- codex plan 1 回目 GO-with-changes (M7/m2) 全件採用 → v2 で実装 -->
+- **status**: `in_progress`  <!-- codex plan GO-with-changes 全件採用 → 実装 → codex result 1 回目 NO-GO (M6/m2) 全件採用 (#8–#14) -->
 - **related_docs**:
   - [`methods/condensation.md`](../../methods/condensation.md) (実装 §9 混合精度実装)
   - [`methods/architecture/performance.md`](../../methods/architecture/performance.md) (数値精度方針・判定基準)
@@ -105,7 +105,7 @@ float だと相対 **9.2e-3**、N2 の Jacobsen 飽和圧は **2.9e-4**、係数
    書き換える) で評価時点がずれるため**採用しない**。面カーネル内で現行どおり $L(T_{cell})$ を評価するが、float 経路は表 (4 読み + 3 FMA) を使い、
    **$g_L=g_R=0$ の面は評価しない** ($g=0$ で補正は恒等 0)。CPG 二相 `cond_face_h_cpg` の $L(T_f)$ も表で。`condFloat: 0` は現行 double 関数。
 5. **温度反転** (`dependentVariables_d.cu`, `condensationEOS_d.cuh`; codex M3)
-   - `useHybrid` の `condensation == 0` 条件を `condFloat == 0 || condensation == 0` に変える (組成 $Y$ の float 構築も同じ条件で切り替わる; M5)。
+   - `useHybrid` の `condensation == 0` 条件を `condensation == 0 || condFloat != 0` に変える (組成 $Y$ の float 構築も同じ条件で切り替わる; M5。v2 初稿の `condFloat == 0` は誤記 [codex result m7])。
      $g_{liq}\le10^{-12}$ のセルは dry と同じハイブリッド反転。
    - $g>0$ の一温度二相反転 (`cond_T_from_e_carrier` / `_onetemp`): float Newton (`SpeciesThermoF` の cp/h + 表の $L, dL/dT$、最大 12 回) →
      double 研磨 (現行 double 関数を 1 反復ずつ、最大 3 段) → **成功条件 $|G(T)|=|e_{mix}(T)-e_{in}|\le10^{-9}|e_{in}|+0.05$ J/kg かつ有限** を
@@ -123,7 +123,7 @@ float だと相対 **9.2e-3**、N2 の Jacobsen 飽和圧は **2.9e-4**、係数
    | SLAU 面潜熱 (TP carrier / CPG 二相) | 表 + g=0 面スキップ | 現行 double 関数 (全面評価) |
    | 温度反転 (g≈0 セル) | ハイブリッド (thermoFloat 経路) | 現行 (凝縮 ON では全 double) |
    | 温度反転 (g>0 セル) | float Newton + double 研磨 + 成功判定 | 現行 double Newton + 成功判定 (新規; 失敗時のみ挙動差) |
-   | 平衡形 / CPG 二相反転 / 二相音速 / 二温度 | double (共通) | double |
+   | 平衡形 (`condEquilibrium`≠0) / 二温度のソース kernel と EOS 反転、CPG 二相反転 `cond_T_from_e_cpg`、二相音速 | double (共通; ただし平衡形でも面潜熱・clamp・g≈0 セルの組成/反転は上の float 経路) | double |
    | モーメント移流 4 起動 → `scalar_advection_multi_d<4>` | 共通 (精度でなく起動数の変更) | 共通 |
 
    **ビット一致の要求は決定的な単体・凍結状態評価にだけ掛ける** (反復 run は atomicAdd で同一バイナリでも `ro` が 2.9 万要素不一致 [codex]):
@@ -182,9 +182,16 @@ float だと相対 **9.2e-3**、N2 の Jacobsen 飽和圧は **2.9e-4**、係数
 | 2 | ② 反転の成功判定・`roe` 保護・`condFloat` 分岐表 (§4.2-5,6; codex M3/M5) | **済** (8629f569, b021bca1): 研磨は残差 1e-3 J/kg まで → |ΔT|/T ≤ 7.5e-12、10 往復ドリフト = double 反転と同値、失敗 0/360; 失敗セルは roe 不変 + `g_condTinvFail`。分岐表どおり `condFloat: 0` で source/clamp 診断が変更前とビット一致 (run_0458 凍結 1 step) |
 | 3 | ①③ ソース kernel・clamp・SLAU 面潜熱 (表, g=0 スキップ)・移流融合 (§4.2-3,4,7) | **済** (8b32f3f1, 8629f569, 0449725a): float 実体は template でなく別関数 (double はビット不変)。蒸発は δ=λ−1 で組む (float で λ=1 に丸まる問題を device 試験で検出)。移流 4 起動→1、原始量 8→1 |
 | 4 | ③ device 単体試験 + `condFloat: 0` のビット一致 + FP64 命令監査 (§4.3; codex M7/m9) | **済**: `test_cond_float_device.cu` (H2O carrier 7426 状態 × Kw1/HK・Kw3/Gyar、N2 CPG 3744 状態 × Kw1/Goodheart・Kw0/Gyar) ALL PASS; `cuobjdump -sass`: `condensation_source_f_d` FP64 0/6432 命令, `cond_realizability_clamp_f_d` 0/360 (double 実体 16802/40016, 617/1552) |
-| 5 | ④ 短期回帰 (静かな case) + 物理検証 (onset / h0 / 定常性; codex M6) | **ローカル予備** (RTX 3060, 2026-09-13): case/16 run_0456 (node 2D H2O) PASS 32/32 (T 9e-7 ≤ ノイズ 2e-6), case/44 run_0201 PASS 30/30, `cond_axis_h0.py` run_0456: 軸 h0 の非保存 271.8 J/kg (9.1e-4 of 3e5) で新旧差 −0.04 J/kg PASS。case/34 (12000 step, 床 = 同一バイナリ反復): cell 空気 PASS 28/28 (T ノイズ ×1.1, ρg ×1.2 = マージ後バイナリと同等), node 空気 PASS 28/28 (T 1.7e-6 ≤ ノイズ 1.8e-6), cell dry PASS 20/20; 反転失敗 0。**pure N2** (新設 `run_0103_condf_regress_n2_cell` [床 run_0045/0046], `run_0104_condf_regress_n2_node` [床 = マージ後バイナリ反復 2 本]): cell PASS 28/28 (T ノイズ ×0.7, ρg ×0.6), node PASS 28/28 (T 1.4e-6 ≤ 床 1.5e-6, ρg 4.7e-5 ≤ 4.2e-5×2)。**onset** (`onset_analysis.py --series`, 全 run STEADY): cell は float 版が 2.112/2.131 in を交互 (1 セル = 0.019 in) するが、基準の反復 run_0045 も同じ 2 値を取る (再現幅内)、T_on 39.52–39.67 K・p/p_dry @3/4/5 in は 4 桁一致; node は 2.102 in / 39.59 K で float・マージ後・基準が同一。 **2D node H2O 12000 step 物理検証** (`case/16.nozzle_wys/run_0460_condf_phys_node2d_cond`, run_0213/res_24000 IC, ラベル merged/merged_r2/condf): `check_convergence` は両方 NOT CONVERGED (plateau; rms_roe 6.0e-4 vs 6.2e-4, rms_rog 2.2e-11 vs 2.3e-11 で同区分), `check_quasisteady` 両方 ALL STEADY, `cond_axis_h0.py`: 軸 h0 の非保存 271.9 J/kg (9.1e-4 of 3e5) で新−基準 +0.07 J/kg (許容 100) PASS・末尾変化 0.1 J/kg STEADY, 12000 step 後の場の差は `cmp --noise merged_r2` で PASS 32/32 (T 5.6e-6, Y1 ノイズ ×0.7, ρg 1.3e-5 ≤ 2×5.7e-6)。**AWS での正式取得 (pure N2 cell/node 新設・12000 step 物理検証・反復床) はインスタンス停止中 (44.211.54.88 応答なし) で未了** |
+| 5 | ④ 短期回帰 (静かな case) + 物理検証 (onset / h0 / 定常性; codex M6) | **ローカル予備** (RTX 3060, 2026-09-13): case/16 run_0456 (node 2D H2O) PASS 32/32 (T 9e-7 ≤ ノイズ 2e-6), case/44 run_0201 PASS 30/30, `cond_axis_h0.py` run_0456: 軸 h0 の非保存 271.8 J/kg (9.1e-4 of 3e5) で新旧差 −0.04 J/kg PASS。case/34 (12000 step, 床 = 同一バイナリ反復): cell 空気 PASS 28/28 (T ノイズ ×1.1, ρg ×1.2 = マージ後バイナリと同等), node 空気 PASS 28/28 (T 1.7e-6 ≤ ノイズ 1.8e-6), cell dry PASS 20/20; 反転失敗 0。**pure N2** (新設 `run_0103_condf_regress_n2_cell` [床 run_0045/0046], `run_0104_condf_regress_n2_node` [床 = マージ後バイナリ反復 2 本]): cell PASS 28/28 (T ノイズ ×0.7, ρg ×0.6), node PASS 28/28 (T 1.4e-6 ≤ 床 1.5e-6, ρg 4.7e-5 ≤ 4.2e-5×2)。**onset** (`onset_analysis.py --series`, 全 run STEADY): cell は float 版が 2.112/2.131 in を交互 (1 セル = 0.019 in) するが、基準の反復 run_0045 も同じ 2 値を取る (再現幅内)、T_on 39.52–39.67 K・p/p_dry @3/4/5 in は 4 桁一致; node は 2.102 in / 39.59 K で float・マージ後・基準が同一。 **2D node H2O 12000 step 物理検証** (`case/16.nozzle_wys/run_0460_condf_phys_node2d_cond`, run_0213/res_24000 IC, ラベル merged/merged_r2/condf): `check_convergence` は両方 NOT CONVERGED (plateau; rms_roe 6.0e-4 vs 6.2e-4, rms_rog 2.2e-11 vs 2.3e-11 で同区分), `check_quasisteady` 両方 ALL STEADY, `cond_axis_h0.py`: 軸 h0 の非保存 271.9 J/kg (9.1e-4 of 3e5) で新−基準 +0.07 J/kg (許容 100) PASS・末尾変化 0.1 J/kg STEADY, 12000 step 後の場の差は `cmp --noise merged_r2` で PASS 32/32 (T 5.6e-6 は絶対基準 A、Y1 1.2e-5 はノイズ ×0.7、ρg 1.3e-5 は**絶対基準 B 1e-4 で合格** [ノイズ床 5.7e-6 の 2 倍は超える; codex result m8 で訂正])。**AWS での正式取得 (pure N2 cell/node 新設・12000 step 物理検証・反復床) はインスタンス停止中 (44.211.54.88 応答なし) で未了** |
 | 6 | ⑤ 発達場・起動区間の速度 + 証拠回収 (codex m8) | **ローカル RTX 3060 (AWS はキャパ不足で起動不可, 2026-09-13)**: 3D 2.37M `run_0459_perf_cond3d_local` (run_0455 dry テンプレート + 凝縮 H2O carrier, 起動区間 100 step, warm-up 後 3 反復): **凝縮 ON 197.3/197.2/198.1 → 83.9/84.0/84.1 ms/step** (2.35 倍), dry `run_0455` 62.8 → 63.3 (不変)。凝縮固有の超過 135 → 21 ms/step (−84 %)。A10G 換算 (帯域比 ≈0.53): 凝縮 ON ≈ 34 + 11 ≈ 45 ms/step の見込み → AWS 起動後に run_0420/0421/0400 で確定。証拠: `run_0459_perf_cond3d_local_bench/{m,f}_14*_r*_n100/bench_*.log` |
-| 7 | codex result レビュー → accepted | |
+| 7 | codex result レビュー (1 回目) | **済**: NO-GO (M6/m2, 2026-09-13) → 全件採用、#8–#13 に展開。再レビューは #8–#13 完了後 |
+| 8 | 表の範囲外は double 関数へ退避 (codex result M1) | 表の端クランプは旧モデルを変える (N2 126 K で L +1.8 %, σ +39 %, p_sat −0.45 %; μ_gas は旧式に上限が無く 300 K で −53 %)。float 実体は表範囲内のセルだけ表を使い、範囲外の**湿潤**セルは double のセル関数 (旧 kernel 本体を `__device__` 化した共通関数) へ委譲、面潜熱・clamp も範囲外は旧 double 関数。dry セル (S≤1, g=0, Q0=0) の診断は表で可 (S≪1 で判定に影響しない)。単体試験は参照温度をクランプせず実温度で比較 |
+| 9 | 二相反転の成功条件を全経路で統一 (codex result M2) | 退避 (旧 double Newton) 後も同じ残差条件 tol=1e-9|e|+0.05 J/kg まで double Newton を継続 (最大 10 段) し、満たさなければ失敗 (roe 不変・カウンタ)。`condFloat: 0` 経路も同じ研磨+判定 (T は ≤1e-3 K 変わり得る = 旧停止条件との差; 診断・ソースはビット不変のまま)。失敗を意図的に作る単体試験 (e_in が T_max 6000 K の外) で ok=false と roe 不変を検証 |
+| 10 | `cond_axis_h0.py` の cell 対応と参照側の定常性 (codex result M3) | cell 場は `CELLS/centCoords` を使う (node は節点座標)。新旧とも ≥3 枚・有限・末尾定常を要求、比較 step が無ければ FAIL。case/34 (cell 空気 run_0100 / N2 run_0103) の h0 ゲートを再取得 |
+| 11 | 単体試験の有限性検査と蒸発端の陰的更新差 (codex result M4) | device 試験は除外判定の前に全出力の有限性を検査 (NaN/Inf は FAIL)。0.99<S<1 の帯は除外せず |Δsj|·dt ≤ 1e-6 を実測して判定。蒸発 λ の許容 5e-4 (S=0.999 の (p_v−p_d) 相殺) と超過数を §4.3 に明記 |
+| 12 | 互換性・保存性・cell H2O 回帰 (codex result M5) | (a) `condFloat: 0` の double kernel は SASS を変更前バイナリと比較して同一であることを確認 (残差・Jacobian は HDF5 に無いため命令列で担保), (b) 周期箱 (case/09 run_0052 config + 凝縮 N2 CPG, 蒸発 off, 一様 ρg/ρQ の IC) 20 step で 4 モーメントの全セル和が相対 1e-6 以内, (c) 2D cell H2O `run_0457` (run_0196 IC + 凝縮, 基準 3 本) |
+| 13 | 発達場の速度・湿潤統計・A10G (codex result M6) | ローカル: run_0459 の 3000 step スピンアップから 100 step ×3 (旧/新交互) + 湿潤セル数・反転失敗数。A10G の ≤50/≤45 ms/step は**未達成のまま**残し、帯域比の 45 ms は見積りとしてのみ記載 |
+| 14 | 文書同期と記録の修正 (codex result m7/m8) | performance.md の「double のまま」、plans/README の「セル配列化」、solver-settings.md の `condFloat`、plan §4.2-5 の `condFloat == 0` 表記、平衡形で変わる処理 (面潜熱・clamp・組成構築は float) の明示; run_0460 の ρg は絶対基準 1e-4 で PASS (ノイズ 2 倍内ではない) と訂正、VERDICT を run に保存 |
 
 ## 6. 検証
 
@@ -204,6 +211,7 @@ float だと相対 **9.2e-3**、N2 の Jacobsen 飽和圧は **2.9e-4**、係数
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result | `2026-09-13` | [`notes/reviews/2026-09-13-condensation-float-speedup-result.md`](../../notes/reviews/2026-09-13-condensation-float-speedup-result.md) | **NO-GO**, C0/M6/m2 | **全件採用** → §5.1 #8 (表範囲外の double 退避) / #9 (反転成功条件の統一) / #10 (h0 ツールの cell 対応・参照定常性) / #11 (単体の有限性・蒸発端) / #12 (SASS 同一・周期保存・cell H2O) / #13 (発達場速度・A10G 未達成の明記) / #14 (文書同期・記録訂正)。短期回帰 PASS と run_0460 の h0 は codex 側で再現 |
 | plan | `2026-09-13` | [`notes/reviews/2026-09-13-condensation-float-speedup-plan.md`](../../notes/reviews/2026-09-13-condensation-float-speedup-plan.md) | **GO-with-changes**, C0/M7/m2 | **全件採用**: M1 (物性の float 直接評価は L 9e-3・psat 3e-4 の誤差 → 区分 3 次表方式に変更, §4.2-1) / M2 (CNT の対数上限を本体・摂動の両方に, 連鎖誤差の単体評価, §4.2-2) / M3 (二相ハイブリッド反転に成功判定・double 継続・roe 保護・カウンタ・ドリフト試験, §4.2-5) / M4 (condL キャッシュ不採用: 境界処理で T が変わる; 面内で表評価 + g=0 スキップ, §4.2-4) / M5 (`condFloat` の分岐表とビット一致は凍結状態評価のみ, §4.2-6) / M6 (短期回帰と物理検証の分離: onset・h0 の VERDICT と絶対許容 [J/kg], `cond_axis_h0.py`, §4.3) / M7 (試験範囲を実測 [N2 39 K, g 0.06, S 171] まで拡張, pure N2 cell/node 回帰を新設, device 試験, 移流融合の保存性, §4.3/§6) / m8 (発達場の速度 108 ms/step と非決定性 1e-2 を計測し §4.1 に記録, 証拠回収先を明記) / m9 (`condTheta/condLim` を除外リストへ, FP64 命令監査を DFMA 以外に拡張, §4.2-8)。実装順は codex 推奨 (①物性・CNT → ②反転 → ③device 試験 → ④定常性 → ⑤性能) に揃えた |
 
 ## 7. 影響範囲
@@ -230,3 +238,4 @@ float だと相対 **9.2e-3**、N2 の Jacobsen 飽和圧は **2.9e-4**、係数
   単体許容の最終形) は methods/condensation.md 実装 §9 に記載。ローカル予備回帰 PASS (run_0456 / run_0201 / h0 保存)。AWS (速度・正式回帰・物理検証) はインスタンス停止で未了。
 - `2026-09-13` — AWS がキャパ不足で起動できないため速度と物理検証をローカル RTX 3060 で実施: 3D 凝縮 ON 197 → 84 ms/step (dry 63 不変)。pure N2 cell/node 回帰 (`run_0103/0104`) と 2D node H2O 12000 step 物理検証 (`run_0460`) を取得中。
 - `2026-09-13` — ローカル検証完了: pure N2 cell/node 回帰 PASS、onset STEADY (1 セル交互は基準反復と同じ)、2D node H2O 12000 step で同 verdict 区分・ALL STEADY・h0 新旧差 +0.07 J/kg・場はノイズ床内。codex result レビューへ。
+- `2026-09-13` — codex result レビュー 1 回目 NO-GO (M6/m2) 全件採用: 表範囲外の double 退避、反転成功条件の統一、h0 ツールの cell 対応、単体の有限性、SASS/周期保存/cell H2O、発達場速度、文書同期 (§5.1 #8–#14)。

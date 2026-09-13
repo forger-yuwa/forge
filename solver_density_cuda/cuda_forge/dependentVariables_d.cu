@@ -344,12 +344,12 @@ void dependentVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
     ) ;
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
-    // CPG 二相の温度反転失敗セル数 (診断)。0 でなければ警告 (前ステップ値を保持したセルがある)。
-    if (cfg.condensation == 1 && cfg.thermalMethod == 0) {
+    // 二相の温度反転失敗セル数 (診断; CPG と TP 一温度二相の両方)。0 でなければ警告 (roe を保持したセルがある; plan condensation-float-speedup §5.1 #9)。
+    if (cfg.condensation == 1) {
         unsigned int nfail = 0u;
         gpuErrchk( cudaMemcpyFromSymbol(&nfail, g_condTinvFail, sizeof(unsigned int)) );
         if (nfail > 0u) {
-            std::cerr << "[condensation] WARNING: CPG two-phase temperature inversion failed in " << nfail << " cells (primitives/roe kept from previous step)\n";
+            std::cerr << "[condensation] WARNING: two-phase temperature inversion failed in " << nfail << " cells (roe kept; " << (cfg.thermalMethod == 0 ? "CPG: primitives kept from previous step" : "TP: T/P from the unconverged inversion") << ")\n";
             const unsigned int zero = 0u; gpuErrchk( cudaMemcpyToSymbol(g_condTinvFail, &zero, sizeof(unsigned int)) );
         }
     }
