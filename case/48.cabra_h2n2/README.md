@@ -80,6 +80,7 @@ Cabra et al. (UC Berkeley; NASA/CR-2004-212887 Table 6.1, [`papers/combustion/`]
 | `run_0127_dt_c7_cont0125` | run_0125 の続き 3000 step (柱モードが減衰するか) | 減衰せず (断面質量流量 −31〜+106 g/s)。基部 x/d 9〜10 | ref (失敗記録) |
 | `run_0126_dt_c7_from0101` (結果) | | ΣY=1、基部 x/d 6.2〜7.8、半径 T 差 +83/+90/+116/+32 K、質量流量 24〜49 g/s で振動 (減衰せず) | ref |
 | `run_0128_dt_c7_sub60` / `run_0129_dt_c7_cfl2` / `run_0130_dt_c7_cfl4` | dual-time サブ反復収束の試験 (run_0126 の状態から 200 step): サブ反復 60 / 擬似 CFL 2 / 4 | 残差は 1 step 内に 25 % しか落ちない (物理 CFL ≈ 7000)、CFL 2 は基部が 4.4〜5.7 に動く、CFL 4 は NaN → **dual-time は時間精度無し** (plan §9 (21)) | 破棄予定 |
+| `run_0131_st_c7_from0101` | 定常反復 + couple 7 + ξ 整合修正の基準 (run_0101 の場から 20000 step 予定) | **ユーザ指示で step 1562 で中断** (2026-09-13; 遅いので一旦停止)。再開時は同設定で再投入 | 中断 |
 | `run_0099_cmc_c5_fp32_cont` | run_0098 の step 4000 (場 + `cmc_Q_4000.bin`) から fp32 化学 (`cmc.fp32: 1`, 最適化後バイナリ) で 16000 step 継続。Q(η) restart 経路の初使用と fp32 の長期 A/B | (実行中) | active |
 | `run_0087_cmc_sc0` | run_0086 から CMC couple 3 (α 0.05), sdm 0, Li, 6000 step | **step 322 NaN**: 未着火のままリップ (x 0.4 mm r 2.7 mm, ξ 0.31) の T が 1034→400 K, P 95 MPa。管壁伝導・Le≠1 で T は混合線 T(ξ) と一致しない → **h のブレンドは非物理 (couple 3 不採用)** | 破棄予定 (根拠) |
 | `run_0088_cmc_c4_diag` | **couple 4** (組成のみ α=0.05 ブレンド + その反応熱 −Σc_sΔρY_s をエネルギーへ), sdm 0, 400 step (100 毎出力) | NaN なし、P 100–102 kPa、rms_roe 横ばい (~1.2)、T_Q max 1356 K (条件付き空間で着火開始)。リップ付近で max|ΔT| 349 K (受動対照 run_0090 と比較) | ref (couple 4 診断) |
