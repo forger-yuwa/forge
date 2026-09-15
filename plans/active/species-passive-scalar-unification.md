@@ -169,9 +169,9 @@
 | 3 | ~~docs 先行更新~~ | 済 (2026-09-17, a8745508): thermophysics §5b/§5, condensation §4, convection/theory, time_integration/theory |
 | 4 | ~~原因確認 (node)~~ | 済 (2026-09-17): S3 発散は coupling 0 固有 (case/28 node `run_0064`–`0078`)、1.8e-4 は再正規化が全て (case/46 `run_0107`/`0108`) → §4.0/§4.2 に反映。副産物: node TP-SST の case/28 baseline 自体が上境界/軸で ~1500–3000 step 後に発散する別問題 (§10) |
 | 5 | ~~受動種基盤 (ステップ 3) + S3 安定化キー (ステップ 4)~~ | 済 (2026-09-17, Phase A; §9): `passiveTransport_d.cuh`/`passiveKernels_d.cuh`/`passiveLimiter_d.cuh` (受動種ポインタ配列、化学種カーネル共用、無次元化 Venkat、`passive_bounds_d` 収支、`passive_diffusion_d`)、SLAU S3 分岐の受動種面値、周期 (勾配除外・`transport_diag` gather・DPLUR dq mirror・coupling 2 クロス項の独立バッファ)、キー `passiveScalarScheme`/`passiveImplicitRelax`/`speciesImplicitRelax`/`scalarCflMax`/`passiveImplicitCoupling`、単体 `test_passive_scalar.cu` ALL PASS。**残**: `speciesImplicitRelax`/`scalarCflMax` の効果 run、S3 長時間 run での上限クランプ無作用の確認 |
-| 6 | S3 本番化 (ステップ 4) | 増分緩和、`scalarCflMax`、固定点不変 |
-| 7 | dual-time 移植 + 受動種 BDF (ステップ 5) | 処理順・履歴・restart |
-| 8 | 検証 (§6 1–8, node のみ) と codex result レビュー | 完了条件 §8 |
+| 6 | S3 本番化 (ステップ 4) | キーは Phase A で実装済; 固定点不変 (非一様組成 PASS ケース `case/16 run_0476` 系の交差 restart)・`speciesImplicitRelax`/`scalarCflMax` の効果は検証エージェントが実施中 (2026-09-17, スナップショット binary `forge-bin-passive-A`) |
+| 7 | dual-time 移植 + 受動種 BDF (ステップ 5) | 実装中 (2026-09-17, Phase B: chem e296f0d0 移植、受動種 P/PP + BDF、共有履歴契約と checkpoint、処理順 §4.4、時間精度 3 水準) |
+| 8 | 検証 (§6 1–8, node のみ) と codex result レビュー | §6-1/2/7 (短 run) は Phase A で済; §6-3 拡散・§6-4 固定点・§6-5 凝縮回帰・§6-7 24000 step は検証エージェント実施中; §6-6 dual-time は Phase B |
 
 ## 6. 検証 (node のみ; cell はユーザ指示で対象外)
 
