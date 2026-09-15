@@ -799,7 +799,7 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
   cfl_pseudo 2/1/0.5 で θ 0.25/0.5/1、出口 g 平均 0.437/0.574/0.584 % (`case/44 run_0127/0130/0131`, 図 `figs/va3_inletTt_cfl_ab.png`)。
   onset (核生成) は律速されないので Wilson 点は不変。Wysłouzil (case/16, mm ノズル) は $\Delta T$/step ≤ 0.86 K で θ≡1 → 過去検証は無影響。
 
-**修正 (`condLimiterMode: 1`, 既定; plan [condensation-source-limiter-steady](../plans/active/condensation-source-limiter-steady.md))**:
+**修正 (`condLimiterMode: 1`, 既定; plan [condensation-source-limiter-steady](../plans/accepted/condensation-source-limiter-steady.md))**:
 「答えを決める残差」から $\Delta\tau$ を消し、「1 歩の大きさ」の制限は更新側に置く。
 
 1. **残差は瞬間速度**: 核生成・成長ソースはそのまま加算 (θ 倍なし)。蒸気枯渇 ($Y_w-g\le0$ → $S=0$) と $J$ 上限だけ残す (どちらも $\Delta\tau$ を含まない)。
