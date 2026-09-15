@@ -75,35 +75,47 @@ __global__ void cond_realizability_clamp_d(
     flow_float* ro, flow_float* roY_w,   // roY_w: carrier の総水保存量 (pure では nullptr)
     flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
     int evap, int condModel, double Rw, double rmin, double g_rm,
-    flow_float* T, flow_float* P, CondPropOpts opts)
+    flow_float* T, flow_float* P, CondPropOpts opts,
+    flow_float* diagCorrG, flow_float* diagCorrQ)   // 補正量の記録 (nullptr 可): |Δρg|/ρ [質量分率] の累積, Q の最大相対補正 (codex result M2)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     // 実現可能性 g<=Y_w: TP carrier は roY_w (輸送), CPG carrier (空気) は定数 opts.Yw, pure は 0.99
     const flow_float gmax = (roY_w != nullptr) ? roY_w[ic] : ((opts.Yw > 0.0) ? (flow_float)opts.Yw*ro[ic] : (flow_float)0.99*ro[ic]);
-    flow_float r = rog[ic];
+    const flow_float r_in = rog[ic], q0_in = roQ0[ic], q1_in = roQ1[ic], q2_in = roQ2[ic];
+    flow_float r = r_in;
     if (r < (flow_float)0.0) r = (flow_float)0.0;
     if (r > gmax)            r = gmax;
     rog[ic] = r;
     if (roQ0[ic] < (flow_float)0.0) roQ0[ic] = (flow_float)0.0;
     if (roQ1[ic] < (flow_float)0.0) roQ1[ic] = (flow_float)0.0;
     if (roQ2[ic] < (flow_float)0.0) roQ2[ic] = (flow_float)0.0;
+    auto record = [&]() {
+        if (diagCorrG == nullptr) return;
+        const double rod0 = (double)ro[ic] > 1.0e-20 ? (double)ro[ic] : 1.0e-20;
+        diagCorrG[ic] += (flow_float)(fabs((double)rog[ic] - (double)r_in)/rod0);
+        double rq = 0.0;
+        const flow_float qin[3] = {q0_in, q1_in, q2_in}; const flow_float qout[3] = {roQ0[ic], roQ1[ic], roQ2[ic]};
+        for (int k = 0; k < 3; ++k) { const double den = fabs((double)qin[k]) > 1.0e-30 ? fabs((double)qin[k]) : 1.0e-30;
+            const double rel = fabs((double)qout[k] - (double)qin[k])/den; if (qout[k] != qin[k] && rel > rq) rq = rel; }
+        if ((flow_float)rq > diagCorrQ[ic]) diagCorrQ[ic] = (flow_float)rq;
+    };
 
-    if (!evap) return;
+    if (!evap) { record(); return; }
     const double rod = (double)ro[ic];
-    if (rod <= 1.0e-20) return;
+    if (rod <= 1.0e-20) { record(); return; }
     const double g  = (double)r/rod;
-    if (g > g_rm) return;
+    if (g > g_rm) { record(); return; }
     // g==0 で Q0/Q1/Q2 だけ残る「モーメント塵」(float アンダーフロー) も S<=1 では掃除する
     // (核生成域 S>1 は触らない: 新核の g がアンダーフローしていても Q0 は生かす)。
     const bool dust = (r <= (flow_float)0.0) &&
         (roQ0[ic] > (flow_float)0.0 || roQ1[ic] > (flow_float)0.0 || roQ2[ic] > (flow_float)0.0);
-    if (r <= (flow_float)0.0 && !dust) return;
+    if (r <= (flow_float)0.0 && !dust) { record(); return; }
     const CondSpeciesProps cprops = condProps_make(condModel, opts);
     const double Td = (double)T[ic];
     // 蒸気分圧は source kernel (cond_vapor_state) と同じ定義: TP carrier=ρ(Y_w−g)R_wT, CPG carrier=ρ(Y_w,const−g)R_wT, pure=全圧 (codex 2026-09-13 M2)
     const double pv = cond_clamp_vapor_pressure(rod, g, (roY_w != nullptr) ? (double)roY_w[ic]/rod : -1.0, opts.Yw, Rw, Td, (double)P[ic]);
-    if (pv > cond_psat(cprops, Td)) return;              // 過飽和: 消滅させない
+    if (pv > cond_psat(cprops, Td)) { record(); return; }   // 過飽和: 消滅させない
     const double q0 = (double)roQ0[ic];
     bool remove = dust || (q0 <= 1.0e-30);
     if (!remove) {
@@ -115,6 +127,7 @@ __global__ void cond_realizability_clamp_d(
         rog[ic] = (flow_float)0.0; roQ0[ic] = (flow_float)0.0;
         roQ1[ic] = (flow_float)0.0; roQ2[ic] = (flow_float)0.0;
     }
+    record();
 }
 
 
@@ -124,25 +137,37 @@ __global__ void cond_realizability_clamp_f_d(
     flow_float* ro, flow_float* roY_w,
     flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
     int evap, float Rw, float rmin, float g_rm, float Yw_const,
-    flow_float* T, flow_float* P, CondTablesF tb, CondSpeciesProps cpd)
+    flow_float* T, flow_float* P, CondTablesF tb, CondSpeciesProps cpd,
+    flow_float* diagCorrG, flow_float* diagCorrQ)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     const flow_float gmax = (roY_w != nullptr) ? roY_w[ic] : ((Yw_const > 0.0f) ? Yw_const*ro[ic] : 0.99f*ro[ic]);
-    flow_float r = rog[ic];
+    const flow_float r_in = rog[ic], q0_in = roQ0[ic], q1_in = roQ1[ic], q2_in = roQ2[ic];
+    flow_float r = r_in;
     if (r < 0.0f) r = 0.0f;
     if (r > gmax) r = gmax;
     rog[ic] = r;
     if (roQ0[ic] < 0.0f) roQ0[ic] = 0.0f;
     if (roQ1[ic] < 0.0f) roQ1[ic] = 0.0f;
     if (roQ2[ic] < 0.0f) roQ2[ic] = 0.0f;
-    if (!evap) return;
+    auto record = [&]() {
+        if (diagCorrG == nullptr) return;
+        const float rod0 = ro[ic] > 1.0e-20f ? ro[ic] : 1.0e-20f;
+        diagCorrG[ic] += fabsf(rog[ic] - r_in)/rod0;
+        float rq = 0.0f;
+        const flow_float qin[3] = {q0_in, q1_in, q2_in}; const flow_float qout[3] = {roQ0[ic], roQ1[ic], roQ2[ic]};
+        for (int k = 0; k < 3; ++k) { const float den = fabsf(qin[k]) > 1.0e-30f ? fabsf(qin[k]) : 1.0e-30f;
+            const float rel = fabsf(qout[k] - qin[k])/den; if (qout[k] != qin[k] && rel > rq) rq = rel; }
+        if (rq > diagCorrQ[ic]) diagCorrQ[ic] = rq;
+    };
+    if (!evap) { record(); return; }
     const float rod = ro[ic];
-    if (rod <= 1.0e-20f) return;
+    if (rod <= 1.0e-20f) { record(); return; }
     const float g = r/rod;
-    if (g > g_rm) return;
+    if (g > g_rm) { record(); return; }
     const bool dust = (r <= 0.0f) && (roQ0[ic] > 0.0f || roQ1[ic] > 0.0f || roQ2[ic] > 0.0f);
-    if (r <= 0.0f && !dust) return;
+    if (r <= 0.0f && !dust) { record(); return; }
     const float Td = T[ic];
     // 蒸気分圧 (source kernel と同じ定義): TP carrier=ρ(Y_w−g)R_wT, CPG carrier=ρ(Y_w,const−g)R_wT, pure=全圧
     float pv;
@@ -151,7 +176,7 @@ __global__ void cond_realizability_clamp_f_d(
     else                         pv = P[ic];
     const bool inTab = cond_tab_wet_ok(tb, Td);   // 表範囲外は旧 double 関数 (plan §5.1 #8)
     const float lnps = inTab ? cond_tab_lnpsat_f(tb, Td) : (float)log(cond_psat(cpd, (double)Td) > 1.0e-300 ? cond_psat(cpd, (double)Td) : 1.0e-300);
-    if (pv > 0.0f && logf(pv) > lnps) return;   // 過飽和: 消滅させない
+    if (pv > 0.0f && logf(pv) > lnps) { record(); return; }   // 過飽和: 消滅させない
     const float q0 = roQ0[ic];
     bool remove = dust || (q0 <= 1.0e-30f);
     if (!remove) {
@@ -160,6 +185,7 @@ __global__ void cond_realizability_clamp_f_d(
         remove = (r30 < 2.0f*rmin);
     }
     if (remove) { rog[ic] = 0.0f; roQ0[ic] = 0.0f; roQ1[ic] = 0.0f; roQ2[ic] = 0.0f; }
+    record();
 }
 
 // Neumann (zero-gradient) ghost 充填: rophi[ig]=rophi[ic], phi[ig]=phi[ic]。
@@ -251,13 +277,15 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
                 msh.nCells, var.c_d["ro"], roY_w,
                 var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
                 cfg.condEvaporation, (float)cprops.R, (float)cfg.condEvapRmin, (float)g_rm, (float)opts.Yw,
-                var.c_d["T"], var.c_d["P"], g_condTables, cprops);
+                var.c_d["T"], var.c_d["P"], g_condTables, cprops,
+                var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i]);
         } else
         cond_realizability_clamp_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells, var.c_d["ro"], roY_w,
             var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
             cfg.condEvaporation, cfg.condModel, cprops.R, cfg.condEvapRmin, g_rm,
-            var.c_d["T"], var.c_d["P"], opts);
+            var.c_d["T"], var.c_d["P"], opts,
+            var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i]);
     }
 
     {
@@ -339,7 +367,7 @@ void condensationTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConf
 {
     if (!condensationEnabled(var)) return;
 
-    if (cfg.timeIntegration == 11 && cfg.condLimiterMode == 1) {
+    if (cfg.timeIntegration == 11 && cfg.condLimiterMode == 1 && cfg.condEquilibrium == 0) {   // 平衡形 (1/2) は従来更新のまま (codex result M5)
         // 更新クランプ経路 (plans/active/condensation-source-limiter-steady.md): 種ごとに 4 モーメントをまとめて更新。
         // condMomentConsNames の順序は registerCondensation の bases = {g, Q2, Q1, Q0} (種ごとに 4 本連続)。
         const int carrier = (cfg.condGasSpecies >= 0 || cfg.condVaporMassFraction > 0.0) ? 1 : 0;
@@ -360,7 +388,7 @@ void condensationTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConf
                 var.c_d["src_jac_g_"+i], var.c_d["src_jac_Q2_"+i], var.c_d["src_jac_Q1_"+i], var.c_d["src_jac_Q0_"+i],
                 var.c_d["transport_diag_g_"+i], var.c_d["transport_diag_Q2_"+i], var.c_d["transport_diag_Q1_"+i], var.c_d["transport_diag_Q0_"+i],
                 var.c_d[g], var.c_d[Q2], var.c_d[Q1], var.c_d[Q0],
-                var.c_d["condLim_"+i], var.c_d["condClampCorr_"+i]);
+                var.c_d["condLim_"+i], var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i]);
         }
         gpuErrchk( cudaPeekAtLastError() );
         gpuErrchkKernelSync();

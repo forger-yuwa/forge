@@ -55,22 +55,28 @@ $\theta(\Delta\tau)$ を掛けると $R$ 自体が Δτ の関数になり、固
 1. **凝縮側の残差**: $S_{Q_0..Q_2}, S_g$ をそのまま `res_*` に加える (θ 倍を削除)。蒸気枯渇 ($Y_w-g\le0$ → $S=0$) と $J$ 上限 (`Jmax`) は
    Δτ を含まない物理条件なので残差側に残す。
 2. **蒸発側の残差** (codex M2): 現行 `cond_evap_source` は $\lambda=1+\dot r\,\Delta\tau/r_{30}$, $S_g=\rho g(\lambda^3-1)/\Delta\tau$ で、
-   制限が非作動でも $S_g=\rho g(3a+3a^2\Delta\tau+a^3\Delta\tau^2)$, $a=\dot r/r_{30}$ と Δτ が残る。これを**瞬間速度形**
-   $S_g=4\pi\rho_l Q_2\,\dot r$ ($\dot r<0$), $S_{Q_1}=Q_0\dot r$, $S_{Q_2}=2Q_1\dot r$ ($S_{Q_0}=0$; 完全蒸発による数密度の消滅は更新クランプ側の
-   「$r_{30}\le r_{min}$ でモーメントを 0 に落とす」処理に移す) に書き換える。半径半減 ($\lambda\ge\tfrac12$)・Δg・ΔT の制限も更新クランプに移す。
+   制限が非作動でも $S_g=\rho g(3a+3a^2\Delta\tau+a^3\Delta\tau^2)$, $a=\dot r/r_{30}$ と Δτ が残る。これを**瞬間速度形** (成長側と同じ一様 $\dot r$ のモーメント形;
+   $\dot r<0$ を $r_{30}$ で評価) $S_g=4\pi\rho_l Q_2\,\dot r$, $S_{Q_1}=Q_0\dot r$, $S_{Q_2}=2Q_1\dot r$, $S_{Q_0}=0$ に書き換える (実装 `cond_evap_source_rate{,_f}`;
+   初回実装の自己相似形 $aq_1,2aq_2,3a\rho g$ は monodisperse でのみ一致するので codex result M4 で本式に揃えた。多分散の値検証は単体 (g))。
+   完全蒸発による数密度の消滅は従来どおり実現可能性クランプ ($r_{30}<2r_{min}$, $Q_0=0$) が確定する。半径半減 ($\lambda\ge\tfrac12$)・Δg・ΔT の制限は更新クランプに移す。
+   **ソース積分の体積は `volumePartial_d`** (node 周期 seam の合併体積二重計上の既存欠陥; codex result M6。case/09 1 step 試験で旧 2.0/8.0 → 1.000)。
+   **新経路は `condEquilibrium 0` のみ** (平衡形は従来更新; codex result M5)。
 3. **ヤコビアン**: `sj_g`, `sj_Q1` の θ 倍を外す (負帰還はそのまま point-implicit の対角へ)。蒸発側も瞬間速度形の $\partial S/\partial(\rho\phi)$ に合わせる。
 4. **更新クランプ** (新設 `condensation_update_limiter_d`, codex M1/M6 反映):
    - 位置: 凝縮モーメントは NS の block-DPLUR sweep 内ではなく**流れ・化学種更新後の独立した point-implicit 更新** (`main.cpp` の `condensationTransport`→
      `condensationSource`→ scalar 更新)。その更新で **floor/硬クランプを掛ける前の候補増分** $\delta_\phi=\Delta(\rho\phi)$ (4 本) を取り出し、
      クランプ後に確定 → primitive 同期、の順に固定する。
-   - 評価状態: 「更新済みの流れ ($\rho^{new},T^{new}$) を固定したモーメント修正」と定義し、$\Delta g = \big(\delta_g - g^{old}\Delta\rho\big)/\rho^{new}$、
-     潜熱 ΔT は EOS と同じ有効比熱 $c_{v,\rm eff}=c_v+g(R_w-dL/dT)$ で $\Delta T=\Delta g\,L/c_{v,\rm eff}$ (現行 `L/c_v` は近似)。
+   - 評価状態 (codex result M3 で確定): $\Delta g=\delta_g/\rho^{new}$ = **更新済みの流れ $\rho^{new}$ を固定したモーメント修正 (相変化分)**。
+     移流による密度変化分 $g^{old}\Delta\rho/\rho$ は潜熱を伴わず流れの CFL が抑えるので数えない (初稿の $(\delta_g-g^{old}\Delta\rho)/\rho^{new}$ は撤回)。
+     $T$, $c_p$ は前回の従属変数評価 (流れ更新前) を使う: 安全弁の見積りであり固定点 ($\delta\to0$) には影響しない。潜熱 ΔT は EOS と同じ有効比熱
+     $c_{v,\rm eff}=c_v+g(R_w-dL/dT)$ で $\Delta T=\Delta g\,L/c_{v,\rm eff}$。密度が変わっても $\delta_g=0$ なら無作用 (単体 (i))。
    - 係数: $\Delta g>0$ のとき $\theta_u=\min(1,\ dg_{max}/\Delta g,\ dT_{max}/\Delta T,\ \mathrm{avail}/\Delta g)$、$\Delta g<0$ (蒸発) のとき
      $\theta_u=\min(1,\ dg_{max}/|\Delta g|,\ dT_{max}/|\Delta T|,\ (1-\lambda_{min}^3)\,g^{old}/|\Delta g|)$。**$\theta_u$ は常に $>0$** (停止穴を作らない:
      `avail=0` は残差側で $S=0$ なので候補増分が 0)。4 本の増分を同じ $\theta_u$ で縮め、その後に既存の非負 floor / $\rho g\le\rho Y_w$ / $0.99\rho$ を
      「補正量を計測しながら」適用する (補正量の総和を診断に残し、収束時 0 を確認)。
    - 消滅: クランプ後 $r_{30}<r_{min}$ かつ $g<g_{min}$ のセルは 4 モーメントを 0 (現行の消滅処理を移設)。
-5. **診断**: `condLim_<s>` = $\theta_u$ (凝縮・蒸発とも書く)、`condClampCorr_<s>` = 硬クランプ補正量 (level 2)。従来の θ は消える。
+5. **診断**: `condLim_<s>` = $\theta_u$ (更新クランプ)、`condClampCorr_<s>` = このステップの**全**硬クランプ (更新 floor + 実現可能性 $g\le Y_w$/$0.99$ + 液滴消滅) による
+   $|\Delta\rho g|/\rho$ の累積、`condClampCorrQ_<s>` = $Q_0..Q_2$ の最大相対補正 (codex result M2)。従来の θ (残差律速) は消える。
 6. **設定**: `condDgMaxStep` / `condDTmaxStep` (既定 5e-3 / 1 K), `condLimiterMode: 0` (旧: 残差に θ) / `1` (新)。**既定は定常 point-implicit 経路で 1、
    RK 陽解法・dual-time では 0 のまま** (§2)。回帰後に旧経路を削除する時期は followups で決める。
 
@@ -91,7 +97,7 @@ $S_g=\alpha\rho(g_{eq}-g)/\Delta\tau_{loc}$ は輸送残差と釣り合うので
 ### 4.4 安定性の見立て
 
 θ を外した残差は onset 直後に大きくなるが、(i) implicit の対角に `sj_g` (潜熱負帰還) が入る、(ii) 更新クランプで 1 step の
-Δg / ΔT は従来と同じ上限に抑えられる、ので**起動時の安定性は従来と同等**のはず。陽解法 (RK3, unsteady) でも更新クランプが段ごとに効く。
+Δg / ΔT は従来と同じ上限に抑えられる、ので**起動時の安定性は従来と同等**のはず。RK 陽解法・dual-time は本 plan の対象外で旧経路に自動降格する (§4.3b)。
 懸念は「クランプが常時効くセル (θ_u≪1 が収束後も残る)」= 残差が消えないのに更新が止まる状態。$\theta_u>0$ を保証しても収束が
 遅くなるだけで固定点は変わらないが、§6 では **未加工残差** (`res_rog` 等の RMS) と `condClampCorr` の収束時ゼロ化を合否に含め、`condLim≈1` だけを固定点の証拠にしない。
 
@@ -119,7 +125,7 @@ $S_g=\alpha\rho(g_{eq}-g)/\Delta\tau_{loc}$ は輸送残差と釣り合うので
 | 3b | followups F-cf8 登録 | 凝縮モーメントの dual-time 物理時間項 (BDF 残差・対角・時間レベルシフト) — 本 plan の外 |
 | 4 | ~~単体テスト~~ | 済: `tests/unit/test_cond_limiter_steady.cu` (Δτ 不変性 double/float ビット一致 + 更新クランプ 8 ケース ALL PASS)、`test_cond_float_device.cu` 両モード PASS |
 | 5 | ~~回帰 run~~ | 済 (2026-09-15): case/44 cfl 0.5/2/4 × condFloat 0/1 一致 (`run_0132`–`0136`); Arthur N2 cell/node・空気 cell (`case/34 run_0105`–`0107`) 参照とノイズ床内 PASS・onset 同一; Wysłouzil (`case/16 run_0470`) 報告量同一・場の差 ≤1e-4 |
-| 6 | codex result レビュー → accepted | `condLimiterMode 0` 削除を followups に登録。**未実施の検証**: cell 離散化での case/44 (Arthur cell で代替)、dual-time/RK の同一性確認 (自動降格のため mode 0 のまま = 定義上同一) |
+| 6 | codex result レビュー (2 回目) → accepted | 1 回目 NO-GO の M1–M7/m1 は反映済み (§6.1)。残: cell cfl 0.5 の収束 (`run_0146` 継続)、Wys の mode 1/0 の step 時間差 (7.4 vs 4.4 ms/step; 他 run と同時実行だったので単独計測で再確認)、F-cf9 (旧 mode 0 削除) は followups |
 
 ## 6. 検証
 
@@ -146,12 +152,13 @@ $S_g=\alpha\rho(g_{eq}-g)/\Delta\tau_{loc}$ は輸送残差と釣り合うので
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result (1 回目) | `2026-09-15` | [2026-09-15-condensation-source-limiter-steady-result.md](../../notes/reviews/2026-09-15-condensation-source-limiter-steady-result.md) | **NO-GO**, C0/M7/m1 | **全採用 (2026-09-16 反映)**: M1 (収束/定常ゲート未達・Wys 出力 2 枚・Arthur 反復基準) → 凝縮固有量の時系列 CSV (`cond_series_csv.py`) + `check_quasisteady --series-csv` 0.2 % を全 run に、Wys は outStepInterval 4000 で再実行し `--series` STEADY、Arthur は新バイナリ反復 3 本の広がりを床に; M2 (補正記録が ρg 負値のみ) → 実現可能性クランプ (g≤Y_w/0.99・負値・消滅) も `condClampCorr`/`condClampCorrQ` に記録; M3 (Δg 評価状態) → §4.2-4 を「更新済み密度固定の相変化分」と確定 (密度変化分は数えない理由を記載, 単体 (i)); M4 (蒸発式) → plan の一様 ṙ 形に実装を揃え多分散の値検証 (単体 (g)); M5 (eq=1 に新クランプ) → `condEquilibrium 0` に限定し eq=1 の lim1/lim0 回帰 (`run_0143`–`0145`); M6 (周期 seam 二重計上) → `volumePartial_d` に修正し case/09 1 step 試験で旧 2.0/8.0 → 1.000; M7 (単体欠落) → 1 セル固定点 (h)・密度変化 (i)・cell 離散化 (`run_0141`/`0142`)・condFloat 0 cfl 0.5 (`run_0140`); m1 (文書同期) → §4.4/§7/README/recommended-settings 修正, F-cf9 登録 |
 | plan | `2026-09-15` | [2026-09-15-condensation-source-limiter-steady-plan.md](../../notes/reviews/2026-09-15-condensation-source-limiter-steady-plan.md) | GO-with-changes, C0/M6/m1 | **全採用**: M1 (停止穴・未クリップ候補増分・補正量計測) → §4.2-4; M2 (蒸発の Δτ 依存 → 瞬間速度形) → §4.2-2, §5.1 #3; M3 (eq=1 の理由訂正) → §4.3; M4 (dual-time 物理時間項無し → スコープ外, F-cf8) → §4.3b, §5.1 #3b; M5 (収束 PASS/series ゲート・ノルム定義・run_0131 は参考) → §6; M6 (更新位置・評価状態・RK/node/cell/condFloat) → §4.2-4, §6; m1 (eq 既定 0) → §4.3 |
 
 ## 7. 影響範囲
 
 - `cuda_forge/condensationSourceKernels_d.cuh`, `condensationSource_d.cu`, `main.cpp`, `input/solverConfig.{hpp,cpp}`, `tests/unit/`
-- 凝縮 ON の定常 run は成長が速くなる (大型ノズルで顕著)。case/44 va3 の入口 Tt 分布 run は `run_0131` (cfl 0.5) が既に新固定点。
+- 凝縮 ON の定常 run は成長が速くなる (大型ノズルで顕著)。case/44 va3 の入口 Tt 分布 run の旧 `run_0131` (cfl 0.5, θ≡1) は比較参考 (正本は新バイナリの `run_0137` 系)。
   Wysłouzil / Arthur は無影響 (θ≡1)。
 - docs: `methods/condensation.md` §4 (安定化の記述を更新クランプに書き換え), `methods/index.md` は変更なし、`procedures/recommended-settings.md` 凝縮節に
   「`condLim` が全域 ≈1 を確認」を追記。
@@ -168,7 +175,8 @@ $S_g=\alpha\rho(g_{eq}-g)/\Delta\tau_{loc}$ は輸送残差と釣り合うので
 
 - `2026-09-15` — 初稿 (followups F-cf7 から独立 plan 化)。case/44 cfl A/B (run_0127/0130/0131) で dt 依存を確定。
 - `2026-09-15` — **実装** (commit 後述): 残差から θ を撤去 (蒸気枯渇→0 のみ残す)、蒸発を瞬間速度形 `cond_evap_source_rate{,_f}` に、更新クランプ kernel `cond_moment_update_limited_d` (未クリップ 4 本候補増分を同率縮小、θ_u≥1e-12、c_v,eff で ΔT)、config 3 キー、RK/dual-time 自動降格、診断 `condClampCorr`。単体: Δτ 1e-7/1e-3 で double/float ともビット一致 (H2O 962 状態・N2 300 状態; 旧 mode 0 は 525/169 セルで差)、更新クランプ 8 ケース、float/double 一致テスト両モード PASS。CFD (case/44 入口 Tt 分布, node Euler TP, 24000 step from 一様 IC): **mode 1 cfl 2 (`run_0132`) は旧 θ≡1 の cfl 0.5 (`run_0131`) と g L1 1.6e-5 / |ΔT| 0.007 K / |ΔM| 6e-5 で一致**、cfl 4 (`run_0134`) も cfl 2 と g L1 3.9e-5 / |ΔT| 0.010 K で一致・起動 NaN 0; 収束時 `condLim` は凝縮域で 1.000 (θ<1 が残る 62 セルは g≤2e-23 の数値塵, S 0.2–0.35, 総液相の 7e-25)、`condClampCorr` 0。旧 mode 0 cfl 2 (`run_0127`) との差は g L1 50 % (絞られていた分)。
-- `2026-09-15` — **検証完了**: (§6-1) case/44 cfl 0.5 (`run_0133`+`0136`, 72000 step) vs cfl 2 (`run_0132`): g L1 2.1e-3 / |ΔT| 0.23 K / |ΔM| 2.2e-3 (ゲート 1 % / 0.5 K / 5e-3 内、なお緩やかに接近中)、cfl 4 (`run_0134`) 3.9e-5、condFloat 0 (`run_0135`) 1.8e-5; 報告量 (onset 15.92 r_t, 出口 g 0.584 %, M 4.050) は全て同一。(§6-2) Arthur N2 node (`case/34 run_0106`) lim1/lim0 28/28 PASS; N2 cell (`run_0105`) lim1 27/28 (ro 6.2e-4 = 床 2.1 倍) だが同一バイナリ反復 `lim1_r2` が同じセルで 5.6e-4 差 = cell atomicAdd 反復ノイズ (`lim1_r2` 28/28 PASS), onset 2.13 in = 参照; 空気 cell (`run_0107`, 蒸発分岐あり) lim1/lim0 28/28 PASS, onset 2.21 in = 参照。Wysłouzil (`case/16 run_0470`) lim1/lim0 とも報告量すべて run_0335 と同一 (onset 22.51 mm, 壁偏差 +2.46/−4.5/+5.1/+5.4 %); **lim1 vs lim0 は ro 1.9e-6 / g 9.9e-6** (バイナリ世代差 lim0 vs run_0335 の g 9.7e-5 より小) = 蒸発の瞬間速度形化を含め無影響。(§6-3) cfl 4 起動 NaN 0。(§6-4) RK/dual-time は自動降格で旧経路のまま。
+- `2026-09-16` — **codex result レビュー (NO-GO, M7/m1) を全採用した 2 巡目**: 蒸発を一様 ṙ 形に (`cond_evap_source_rate{,_f}`: $q_0\dot r, 2q_1\dot r, 4\pi\rho_l q_2\dot r$; 多分散で自己相似形と 8 % 差), 新経路を `condEquilibrium 0` に限定, ソース積分を `volumePartial_d` に (node 周期 seam の二重計上を修正: case/09 `run_0060`/`0061` 1 step 試験 旧 2.0 (面)/8.0 (角) → 新 1.000), 補正診断を全クランプに拡張 (`condClampCorr`=|Δρg|/ρ 累積, `condClampCorrQ`=Q の最大相対補正)。単体: (g) 多分散蒸発の値 (float 差 7e-7), (h) 1 セル輸送+ソース固定点が dt 1e-6/1e-5/1e-4 で 3.8e-5 一致, (i) 密度半減で δ=0 なら無作用; 全 PASS。CFD (全て新バイナリ, 凝縮固有量 series 0.2 % で STEADY): node cfl 2 (`run_0137`) vs cfl 4 (`0138`) g L1 4.2e-5 / |ΔT| 0.007 K, vs cfl 0.5 warm (`0139`) 1.9e-3 / 0.21 K / |ΔM| 2.0e-3, 1 巡目 (`0132`) との差 2.1e-5 (蒸発形の効果は小)、`condLim` 凝縮域 1.000、`condClampCorr`/`Q` 凝縮域 0 (Q の floor は g≤6e-24 の乾き塵 222 セルのみ)。cell (`run_0141` cfl 2 STEADY; `0142` cfl 0.5 24000 step は未収束 → `0146` 継続中)。eq=1 (`run_0143` lim1 / `0144` lim0 / `0145` lim1 反復): lim1−lim0 (ro 1.4e-6, g 5.7e-5) = 反復ノイズ (1.8e-6, 6.2e-5) 以内。Arthur (`lim1b`): N2 cell 3 反復とも 28/28 PASS (反復広がり ro 2.4–4.6e-4)・N2 node 28/28・空気 cell 28/28・onset 同一。Wysłouzil (`lim1b`/`lim0b`, 26 枚): 報告量同一, `--series` STEADY, rms_rog 5.1 桁, lim1b−lim0b g 1.2e-5, `condClampCorr` 凝縮域 0。
+- `2026-09-15` — **検証完了 (1 巡目; codex result で不足指摘)**: (§6-1) case/44 cfl 0.5 (`run_0133`+`0136`, 72000 step) vs cfl 2 (`run_0132`): g L1 2.1e-3 / |ΔT| 0.23 K / |ΔM| 2.2e-3 (ゲート 1 % / 0.5 K / 5e-3 内、なお緩やかに接近中)、cfl 4 (`run_0134`) 3.9e-5、condFloat 0 (`run_0135`) 1.8e-5; 報告量 (onset 15.92 r_t, 出口 g 0.584 %, M 4.050) は全て同一。(§6-2) Arthur N2 node (`case/34 run_0106`) lim1/lim0 28/28 PASS; N2 cell (`run_0105`) lim1 27/28 (ro 6.2e-4 = 床 2.1 倍) だが同一バイナリ反復 `lim1_r2` が同じセルで 5.6e-4 差 = cell atomicAdd 反復ノイズ (`lim1_r2` 28/28 PASS), onset 2.13 in = 参照; 空気 cell (`run_0107`, 蒸発分岐あり) lim1/lim0 28/28 PASS, onset 2.21 in = 参照。Wysłouzil (`case/16 run_0470`) lim1/lim0 とも報告量すべて run_0335 と同一 (onset 22.51 mm, 壁偏差 +2.46/−4.5/+5.1/+5.4 %); **lim1 vs lim0 は ro 1.9e-6 / g 9.9e-6** (バイナリ世代差 lim0 vs run_0335 の g 9.7e-5 より小) = 蒸発の瞬間速度形化を含め無影響。(§6-3) cfl 4 起動 NaN 0。(§6-4) RK/dual-time は自動降格で旧経路のまま。
 - `2026-09-15` — codex plan レビュー (GO-with-changes, M6/m1) を全採用: 蒸発ソースも瞬間速度形へ、更新クランプは未クリップ候補増分に、dual-time/RK はスコープ外 (F-cf8)、検証ゲートを収束 PASS/series STEADY + ノルム定義に強化。
 
 ## 10. 未確定事項

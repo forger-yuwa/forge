@@ -11,7 +11,7 @@
 //   を作って **4 本の増分を同率で縮めてから** floor (≥0) を掛けて確定する。θ_u > 0 (更新を止める穴を作らない:
 //   avail≤0 は残差側で S=0 なので候補増分は輸送分のみ)。収束時は δ→0 で θ_u→1・無作用 = 固定点は残差だけで決まる。
 //   潜熱 ΔT は二相 EOS と同じ有効比熱 c_v,eff = c_v + g (R_w − dL/dT) で評価する。
-//   診断: diagLim = θ_u、diagCorr = floor による ρg の補正量 [質量分率] (収束時 0 を確認する)。
+//   診断: diagLim = θ_u、diagCorrG = floor による ρg の補正量 [質量分率]、diagCorrQ = Q0..Q2 の相対補正 (収束時 0 を確認する)。
 __global__ void cond_moment_update_limited_d(
     geom_int nCells, flow_float* dt_local, geom_float* vol, flow_float* ro,
     flow_float* roY_w, double Yw_const, flow_float* T, flow_float* cp_cell, flow_float* Rmix_cell, flow_float cp_cpg, flow_float gamma_cpg,
@@ -21,7 +21,7 @@ __global__ void cond_moment_update_limited_d(
     flow_float* sj_g, flow_float* sj_Q2, flow_float* sj_Q1, flow_float* sj_Q0,
     flow_float* td_g, flow_float* td_Q2, flow_float* td_Q1, flow_float* td_Q0,
     flow_float* out_g, flow_float* out_Q2, flow_float* out_Q1, flow_float* out_Q0,
-    flow_float* diagLim, flow_float* diagCorr)
+    flow_float* diagLim, flow_float* diagCorrG, flow_float* diagCorrQ)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -75,6 +75,11 @@ __global__ void cond_moment_update_limited_d(
     out_Q1[ic] = (flow_float)fmax(nQ1, 0.0);
     out_Q0[ic] = (flow_float)fmax(nQ0, 0.0);
     diagLim[ic]  = (flow_float)theta;
-    diagCorr[ic] = (flow_float)((ng < 0.0 && rod > 1.0e-20) ? (-ng/rod) : 0.0);
+    // 補正量の記録 (このステップの全補正の起点なのでリセット): G = floor による |Δρg|/ρ [質量分率], Q = Q0..Q2 の最大相対補正。
+    // 後段の実現可能性クランプ (g≤Y_w / 0.99ρ, 負値, 液滴消滅) は cond_realizability_clamp_{,f_}d が同じ配列へ累積する (codex result M2)。
+    diagCorrG[ic] = (flow_float)((ng < 0.0 && rod > 1.0e-20) ? (-ng/rod) : 0.0);
+    double rq = 0.0;
+    if (nQ2 < 0.0) rq = fmax(rq, 1.0); if (nQ1 < 0.0) rq = fmax(rq, 1.0); if (nQ0 < 0.0) rq = fmax(rq, 1.0);   // 負値 floor は 100 % 補正
+    diagCorrQ[ic] = (flow_float)rq;
 }
 

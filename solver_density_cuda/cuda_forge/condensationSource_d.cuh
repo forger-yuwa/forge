@@ -310,10 +310,10 @@ __host__ __device__ inline double cond_evap_source(
 }
 
 // 蒸発の瞬間速度形 (condLimiterMode 1; plans/active/condensation-source-limiter-steady.md §4.2-2)。
-//   上の λ スケール (Q1→λQ1, Q2→λ²Q2, g→λ³g) の Δτ→0 極限: a = ṙ/r30 (≤0) として
-//   S_Q1 = a q1, S_Q2 = 2a q2, S_g = 3a ρg, S_Q0 = 0 (数密度は消滅まで保存。消滅 r30<2 r_min と Q0=0 の不整合は
-//   実現可能性クランプ cond_realizability_clamp_d が確定する)。monodisperse (q1=q0 r30, q2=q0 r30²) では成長側の
-//   S_Q1=q0 ṙ, S_Q2=2 q1 ṙ, S_g=4πρ_l q2 ṙ と一致する。**Δτ を含まない** ので定常固定点は歩幅に依存しない。
+//   成長側と同じ一様 ṙ のモーメント形 (ṙ<0, r30 で評価): S_Q1 = q0 ṙ, S_Q2 = 2 q1 ṙ, S_g = 4πρ_l q2 ṙ, S_Q0 = 0
+//   (数密度は消滅まで保存。消滅 r30<2 r_min と Q0=0 の不整合は実現可能性クランプ cond_realizability_clamp_d が確定する)。
+//   旧 λ スケール (Q1→λQ1, Q2→λ²Q2, g→λ³g) の Δτ→0 極限 (a=ṙ/r30: a q1, 2a q2, 3aρg) は monodisperse でのみこれと一致し、
+//   多分散では差が出る (codex result M4) ので plan の一様 ṙ 形に揃える。**Δτ を含まない** ので定常固定点は歩幅に依存しない。
 //   Δg/潜熱 ΔT/半径半減の 1 step 上限は更新クランプ (cond_moment_update_limited_d) が掛ける。
 __host__ __device__ inline void cond_evap_source_rate(
     const CondSpeciesProps& cp, double T, double p_v, double rod, double g,
@@ -332,8 +332,7 @@ __host__ __device__ inline void cond_evap_source_rate(
     if (!(r30 > 0.0)) return;
     const double drdt = cond_evap_rate(cp, T, p_v, r30, growthModel, p_gas, gyarC, kelvin);
     *drdt_out = drdt;
-    const double a = drdt/r30;                           // ≤ 0 [1/s]
-    *SQ1 = a*q1;
-    *SQ2 = 2.0*a*q2;
-    *Sg  = 3.0*a*rod*g;
+    *SQ1 = q0*drdt;
+    *SQ2 = 2.0*q1*drdt;
+    *Sg  = 4.0*COND_PI*rho_l*q2*drdt;                    // ≤ 0 [kg/m³/s]
 }

@@ -226,7 +226,7 @@ __host__ __device__ inline float cond_evap_source_f(
     return lam;
 }
 
-// 蒸発の瞬間速度形 (condLimiterMode 1) の float 版。cond_evap_source_rate と同式 (a=ṙ/r30 を直接作るので λ≈1 の丸め問題は無い)。
+// 蒸発の瞬間速度形 (condLimiterMode 1) の float 版。cond_evap_source_rate と同式 (一様 ṙ のモーメント形; λ≈1 の丸め問題は無い)。
 __host__ __device__ inline void cond_evap_source_rate_f(
     const CondSpeciesPropsF& cp, const CondTablesF& tb, float T, float p_v, float rod, float g,
     float q0, float q1, float q2,
@@ -244,10 +244,9 @@ __host__ __device__ inline void cond_evap_source_rate_f(
     if (!(r30 > 0.0f)) return;
     const float drdt = cond_evap_rate_f(cp, tb, T, p_v, r30, growthModel, p_gas, gyarC, kelvin);
     *drdt_out = drdt;
-    const float a = drdt/r30;
-    *SQ1 = a*q1;
-    *SQ2 = 2.0f*a*q2;
-    *Sg  = 3.0f*a*rod*g;
+    *SQ1 = q0*drdt;
+    *SQ2 = 2.0f*q1*drdt;
+    *Sg  = 4.0f*COND_PI_F*rho_l*q2*drdt;
 }
 
 // 飽和温度 T_sat(p_v): 表の ln p_sat とその解析微分で Newton (前 step の値を warm start に)。

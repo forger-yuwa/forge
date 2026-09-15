@@ -58,6 +58,7 @@
 | F-cf6 | H2O の h_v が二重ソース (§8b 既知の限界 3): EOS は種 DB (定 cp 外挿)、`h2o_latent` は生の多項式。200 K 未満で暗黙の h_l が 150 K で 0.47、120 K で 2.39 kJ/kg ずれる (L の 9e-4)。運転域 200–240 K では実質ゼロ。種 DB 経由に統一するか、差を許容と明記するか決める | 未着手 |
 | **F-cf7** | **非平衡ソースの θ 律速 (`dT_max` 1 K/step, `dg_max` 5e-3/step) が `dt_local` に比例するため、定常局所時間刻みの収束解が擬似 CFL に依存する** (2026-09-15, case/44 va3 M4.19 入口 Tt 分布 Euler): 大型ノズル (dt_local 2.6e-5 s) では潜熱 ΔT/step ≈3.4 K > 1 K で θ≈0.25 (内側) / 0.55 (壁 2 ノードは dt_local 半分) となり、成長が内側で 4 倍絞られ「壁第一層だけ液相が速く増える」偽の壁異常と凝縮完了の 3–4 r_t 遅れを生む。A/B: cfl 2 → 1 → 0.5 で θ 0.25 → 0.5 → 1、出口 g 平均 0.437 → 0.574 → 0.584 %、出口 M 4.089 → 4.052 → 4.050 (`run_0127`/`0130`/`0131`, 図 `figs/va3_inletTt_cfl_ab.png`)。Wysłouzil (case/16 run_0335, dt_local 小) は ΔT/step 最大 0.86 K で無影響。**修正方針 (未実装)**: θ を残差に掛けない (定常解を dt 非依存にする)。θ は更新量 Δ(ρg) の安全クランプ (負・枯渇防止) に限定し、剛性は既存の src_jac (潜熱負帰還) と implicit で受ける。暫定運用: 凝縮 ON の定常 run は `condLim_<s>` (level 2) が全域 ≈1 になる cfl_pseudo を選ぶ (case/44 は 0.5)。core 側の `condEqDTmax`/`condEqDgMax` (平衡緩和形) も同じ構造なので同時に見直す | 未着手 (次の実装候補) |
 | F-cf8 | **凝縮モーメント (rog, roQ0..2) に dual-time の物理時間項が無い** (2026-09-15, codex plan レビュー M4 of condensation-source-limiter-steady): BDF 残差・対角・時間レベルシフトは平均流 5 変数と roK/roOmega のみで、モーメントはサブ反復ごとに N/M を現在値へコピーし定常と同じ point-implicit 更新。物理 Δt を小さくしてもモーメントがその物理時間で積分される保証がない。物理履歴・BDF 残差・対角を整備し、物理 Δt 半減とサブ反復数変更で検証する | 未着手 |
+| F-cf9 | 旧経路 `condLimiterMode 0` (残差に θ を掛ける・λ スケール蒸発) の削除時期 (2026-09-16, plan condensation-source-limiter-steady §4.2-6): 回帰 (Arthur/Wysłouzil/case/44) が新既定で揃った後、A/B 用途が無ければ削除。RK 陽解法・dual-time は自動降格で旧経路に依存しているので、F-cf8 (物理時間項) と RK の更新クランプ試験を先に済ませる | 未着手 |
 
 ## 6. 検証
 
@@ -81,6 +82,7 @@
 ## 9. 変更ログ
 
 - `2026-09-13` — 起票 (codex result レビュー ② の要求: carrier / air の後続を active plan にリンク)。
+- `2026-09-16` — F-cf9 追加 (旧 condLimiterMode 0 の削除時期)。
 - `2026-09-15` — F-cf8 追加 (凝縮モーメントの dual-time 物理時間項, codex M4)。
 - `2026-09-15` — F-cf7 追加: θ 律速の dt_local 依存 (定常解が擬似 CFL に依存) を case/44 入口 Tt 分布 run の CFL A/B で確定。修正方針を記載、実装は未着手。
 

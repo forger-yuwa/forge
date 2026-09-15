@@ -139,7 +139,7 @@ void variables::registerCondensation(int nCondSpecies)
         // condTheta_: 非等温核生成補正 θ (condKantrowitz 1–3; S>1 のセル), condLim_: 更新クランプ係数 θ_u (condLimiterMode 1; 収束時 ≈1)
         //   [旧 mode 0 では残差ソース律速係数], condClampCorr_: 更新後の硬クランプ (ρg<0 → 0) 補正量 [質量分率] (収束時 0)。
         for (const auto& d : {std::string("condS_"), std::string("condDrdt_"), std::string("condR30_"), std::string("condTsat_"),
-                              std::string("condTheta_"), std::string("condLim_"), std::string("condClampCorr_")}) {
+                              std::string("condTheta_"), std::string("condLim_"), std::string("condClampCorr_"), std::string("condClampCorrQ_")}) {
             const std::string name = d + std::to_string(s);
             this->cellValNames.push_back(name);
             this->c.emplace(name, std::vector<flow_float>{});
@@ -149,7 +149,7 @@ void variables::registerCondensation(int nCondSpecies)
     }
 
     std::cout << "registerCondensation: nCondSpecies=" << nCondSpecies
-              << " -> registered " << nCondSpecies*(4*8+7) << " cell variables\n";
+              << " -> registered " << nCondSpecies*(4*8+8) << " cell variables\n";
 }
 
 variables::~variables() {

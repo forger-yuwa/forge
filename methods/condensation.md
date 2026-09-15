@@ -803,19 +803,26 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
 「答えを決める残差」から $\Delta\tau$ を消し、「1 歩の大きさ」の制限は更新側に置く。
 
 1. **残差は瞬間速度**: 核生成・成長ソースはそのまま加算 (θ 倍なし)。蒸気枯渇 ($Y_w-g\le0$ → $S=0$) と $J$ 上限だけ残す (どちらも $\Delta\tau$ を含まない)。
-   蒸発は瞬間速度形 `cond_evap_source_rate{,_f}`: $a=\dot r/r_{30}\le0$ として $S_{Q_1}=a\,q_1$, $S_{Q_2}=2a\,q_2$, $S_g=3a\,\rho g$, $S_{Q_0}=0$
-   (λ スケールの $\Delta\tau\to0$ 極限。monodisperse では成長側の $q_0\dot r,\ 2q_1\dot r,\ 4\pi\rho_l q_2\dot r$ と一致)。消滅 ($r_{30}<2r_{min}$, $Q_0=0$ の不整合) は
-   実現可能性クランプ `cond_realizability_clamp_d` が確定する (従来どおり)。ヤコビアン `sj_g`/`sj_Q1` も θ 倍なし。
+   蒸発は瞬間速度形 `cond_evap_source_rate{,_f}`: 成長側と同じ一様 $\dot r$ のモーメント形 ($\dot r<0$ を $r_{30}$ で評価)
+   $S_{Q_1}=q_0\dot r$, $S_{Q_2}=2q_1\dot r$, $S_g=4\pi\rho_l q_2\dot r$, $S_{Q_0}=0$。旧 λ スケール (Q1→λQ1, Q2→λ²Q2, g→λ³g) の $\Delta\tau\to0$ 極限
+   ($a=\dot r/r_{30}$: $aq_1, 2aq_2, 3a\rho g$) は monodisperse でのみこれと一致し、多分散 (半径 $r$ と $2r$ 同数) では $S_g$ が 8 % 違う (codex result M4)。
+   消滅 ($r_{30}<2r_{min}$, $Q_0=0$ の不整合) は実現可能性クランプ `cond_realizability_clamp_d` が確定する (従来どおり)。ヤコビアン `sj_g`/`sj_Q1` も θ 倍なし。
+   **ソース積分の体積は node 周期 seam で部分体積 `volumePartial_d`** (合併体積だと gather 後に member 数倍に二重計上: 面 2 / 辺 4 / 角 8 倍。
+   case/09 一様過飽和 N2 の 1 step 試験で旧 2.0/8.0 → 新 1.000; codex result M6)。
 2. **更新クランプ** `cond_moment_update_limited_d` ([condensationUpdateLimiter_d.cuh](../solver_density_cuda/cuda_forge/condensationUpdateLimiter_d.cuh)):
    定常 point-implicit 更新 (`timeIntegration 11`) で 4 モーメントの **floor 前の候補増分** $\delta_k=(R_k\Delta\tau/V)/(1+\Delta\tau(\mathrm{sj}_k+\mathrm{td}_k/V))$ を取り出し、
    $\Delta g=\delta_g/\rho$ (更新済みの流れ $\rho$ を固定したモーメント修正量) から
+   ($\Delta g$ は**更新済みの流れ $\rho^{new}$ を固定した相変化分**。移流による密度変化 $g^{old}\Delta\rho/\rho$ は流れの CFL が抑える別物で、潜熱を伴わないので
+   ここでは数えない。$T$, $c_p$ は前回の従属変数評価 [流れ更新前] を使う安全弁であり、固定点には影響しない)
    $$\theta_u=\min\Big(1,\ \frac{dg_{max}}{|\Delta g|},\ \frac{dT_{max}}{|\Delta T|},\ \underbrace{\frac{\mathrm{avail}}{\Delta g}}_{\Delta g>0},\ \underbrace{\frac{(1-\lambda_{min}^3)\,g^{old}}{|\Delta g|}}_{\Delta g<0}\Big),\qquad
    \Delta T=\frac{\Delta g\,L}{c_v+g(R_w-dL/dT)}$$
    を作り、**4 本の増分を同じ $\theta_u$ で縮めてから** floor ($\rho\phi\ge0$) を掛けて確定する。$\theta_u\ge10^{-12}$ (更新を止める穴を作らない)。
    収束時は $\delta\to0$ で $\theta_u\to1$・無作用なので、固定点は残差だけで決まる。潜熱 $\Delta T$ は二相 EOS と同じ有効比熱で評価する。
-3. **診断**: `condLim_<s>` = $\theta_u$ (収束時 ≈1 を確認する)、`condClampCorr_<s>` = floor による $\rho g$ の補正量 [質量分率] (収束時 0)。
+3. **診断**: `condLim_<s>` = $\theta_u$ (収束時 ≈1 を確認する)、`condClampCorr_<s>` = このステップの**全**硬クランプによる $|\Delta\rho g|/\rho$ の累積
+   [質量分率] (更新 floor + 実現可能性クランプ $g\le Y_w$ / $0.99$ + 液滴消滅)、`condClampCorrQ_<s>` = $Q_0..Q_2$ の最大相対補正 (負値 floor は 1)。収束時に
+   凝縮域で 0 であること (乾きセルの数値塵 $Q\to0^-$ の floor は $g=0$ なら無害) を確認する。
 4. **設定**: `condDgMaxStep` (既定 5e-3) / `condDTmaxStep` (既定 1 K) / `condLimiterMode` (1: 更新クランプ [既定], 0: 旧・残差 θ [A/B 用])。
-   **RK 陽解法 (`timeIntegration` 1/3/4) と dual-time では起動時に自動で 0 に降格**する (RK は未制限残差の累積バッファを持ち、dual-time は凝縮
+   **新経路は `condEquilibrium 0` (非平衡) のみ** (平衡形 1/2 は従来の更新のまま)。**RK 陽解法 (`timeIntegration` 1/3/4) と dual-time では起動時に自動で 0 に降格**する (RK は未制限残差の累積バッファを持ち、dual-time は凝縮
    モーメントに物理時間項が無い [followups F-cf8] ため未検証)。
 5. **平衡緩和形 (`condEquilibrium 1`)** は据え置き。定常条件 $R_{transport}+V\alpha\theta\rho(g_{eq}-g)/\Delta\tau=0$ は輸送との釣り合いが
    $\Delta\tau$ 依存 (「θ は接近速度だけ」は輸送の無い局所緩和にしか成り立たない) — 旧モデル互換の既知の制約。平衡凝縮の推奨は EOS 拘束形

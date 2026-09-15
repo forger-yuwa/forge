@@ -110,10 +110,10 @@ static void run_limiter(const std::vector<Cell>& cs, int carrier, std::vector<do
     flow_float *drg=up(rg),*drQ2=up(rQ2),*drQ1=up(rQ1),*drQ0=up(rQ0);
     auto zeros=[&](){ return up(z); };
     flow_float *sjg=zeros(),*sj2=zeros(),*sj1=zeros(),*sj0=zeros(),*tdg=zeros(),*td2=zeros(),*td1=zeros(),*td0=zeros();
-    flow_float *og=zeros(),*o2=zeros(),*o1=zeros(),*o0=zeros(),*lim=zeros(),*cor=zeros();
+    flow_float *og=zeros(),*o2=zeros(),*o1=zeros(),*o0=zeros(),*lim=zeros(),*cor=zeros(),*corQ=zeros();
     CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
     cond_moment_update_limited_d<<<(n+127)/128,128>>>(n, ddt, dvol, dro, carrier ? dYw : nullptr, 0.0, dT, nullptr, nullptr, 1220.7f, 1.315f,
-        COND_MODEL_H2O, o, 5.0e-3, 1.0, 0.5, dNg, dNQ2, dNQ1, dNQ0, drg, drQ2, drQ1, drQ0, sjg, sj2, sj1, sj0, tdg, td2, td1, td0, og, o2, o1, o0, lim, cor);
+        COND_MODEL_H2O, o, 5.0e-3, 1.0, 0.5, dNg, dNQ2, dNQ1, dNQ0, drg, drQ2, drQ1, drQ0, sjg, sj2, sj1, sj0, tdg, td2, td1, td0, og, o2, o1, o0, lim, cor, corQ);
     cudaError_t e = cudaDeviceSynchronize(); if (e != cudaSuccess) { printf("CUDA error %s\n", cudaGetErrorString(e)); ++g_fail; }
     auto L=down(lim,n), C=down(cor,n), G=down(og,n), Q2=down(o2,n), Q1=down(o1,n), Q0=down(o0,n);
     theta.resize(n); corr.resize(n); outv.resize(n); delta.resize(n);
@@ -139,6 +139,8 @@ static void test_update_limiter()
     cs.push_back({dt,vol,ro,ro*Yw,T, ro*1e-4, 1e-2, 1e2, 1e12,  -ro*9.5e-5*vol/dt, -1e-3*vol/dt, -1e1*vol/dt, 0});
     // (f4) g_old = 0 への負増分 (輸送の負流入): θ=1 (dg 1e-5 は上限内)、floor で 0、補正量 = 1e-5
     cs.push_back({dt,vol,ro,ro*Yw,T, 0.0, 0.0, 0.0, 0.0,  -ro*1e-5*vol/dt, 0,0,0});
+    // (i) 密度が半分になった後の更新 (ρ_new=0.05, N は ρ_old=0.1 の保存量): δ_g=0 → Δg=0 → θ=1 (Δg は更新済み密度で測る相変化分のみ; plan §4.2-4)
+    cs.push_back({dt,vol,0.05,0.05*Yw,T, ro*1e-3, 1e-2, 1e2, 1e12,  0,0,0,0});
     // (f5) float 極小増分
     cs.push_back({dt,vol,ro,ro*Yw,T, ro*1e-3, 1e-2, 1e2, 1e12,  ro*1e-30*vol/dt, 1e-30, 1e-30, 1e-30});
     std::vector<double> th, corr; std::vector<std::array<double,4>> out, del;
@@ -168,9 +170,118 @@ static void test_update_limiter()
     // (f4)
     printf("  (f4) theta=%.4f out_g=%.3g corr=%.3g (expected 1e-5)\n", th[6], out[6][0], corr[6]);
     CHECK(near(th[6],1.0,1e-6) && out[6][0] == 0.0 && near(corr[6], 1e-5, 1e-2), "(f4) floor/correction wrong");
+    // (i)
+    printf("  (i) density halved, zero increment: theta=%.4f out_g=%.6g (N_g %.6g)\n", th[7], out[7][0], cs[7].Ng);
+    CHECK(near(th[7],1.0,1e-6) && near(out[7][0], (double)(flow_float)cs[7].Ng, 1e-7), "(i) density change with zero increment must be a no-op (theta 1)");
     // (f5)
-    printf("  (f5) theta=%.4f out finite=%d\n", th[7], std::isfinite(out[7][0]) && std::isfinite(out[7][3]));
-    CHECK(near(th[7],1.0,1e-6) && std::isfinite(out[7][0]) && std::isfinite(out[7][3]), "(f5) tiny increment not finite / theta != 1");
+    printf("  (f5) theta=%.4f out finite=%d\n", th[8], std::isfinite(out[8][0]) && std::isfinite(out[8][3]));
+    CHECK(near(th[8],1.0,1e-6) && std::isfinite(out[8][0]) && std::isfinite(out[8][3]), "(f5) tiny increment not finite / theta != 1");
+}
+
+
+__global__ void evap_rate_f_kernel(CondSpeciesPropsF cp, CondTablesF tb, float T, float pv, float rod, float g, float q0, float q1, float q2, float* out)
+{
+    float S0,S1,S2,Sg,r30,drdt;
+    cond_evap_source_rate_f(cp, tb, T, pv, rod, g, q0, q1, q2, 0, pv, 3.18f, 0, &S0,&S1,&S2,&Sg,&r30,&drdt);
+    out[0]=S0; out[1]=S1; out[2]=S2; out[3]=Sg; out[4]=r30; out[5]=drdt;
+}
+// ---- (g) 蒸発ソース (一様 ṙ 形) の値そのものを多分散モーメントで検証 (codex result M4) ----
+static void test_evap_source_values()
+{
+    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o);
+    const double T = 250.0, rod = 0.1, Yw = 0.0377, S = 0.5;
+    const double pv = S*cond_psat(cp, T), rho_l = cond_rho_cond(cp, T);
+    // 半径 r と 2r を同数 (N/2 ずつ): Q0=N, Q1=N·1.5r, Q2=N·2.5r², g = (4/3)πρ_l N (r³+8r³)/2 /ρ
+    const double N = 1.0e15, r = 3.0e-8;
+    const double q0 = N, q1 = N*1.5*r, q2 = N*2.5*r*r;
+    const double g  = (4.0/3.0)*COND_PI*rho_l*N*4.5*r*r*r/rod;
+    double S0,S1,S2,Sg,r30,drdt;
+    cond_evap_source_rate(cp, T, pv, rod, g, q0, q1, q2, 0, pv, 3.18, 0, &S0,&S1,&S2,&Sg,&r30,&drdt);
+    const double r30_exp = cbrt(4.5)*r;
+    const double drdt_exp = cond_evap_rate(cp, T, pv, r30_exp, 0, pv, 3.18, 0);
+    auto near = [](double a, double b, double rtol){ return std::fabs(a-b) <= rtol*std::max(std::fabs(a), std::fabs(b)); };
+    printf("  (g) r30 %.4e (exp %.4e) drdt %.4e  S_Q1/(q0 drdt) %.6f  S_Q2/(2 q1 drdt) %.6f  S_g/(4πρl q2 drdt) %.6f  S_Q0 %g\n",
+           r30, r30_exp, drdt, S1/(q0*drdt), S2/(2.0*q1*drdt), Sg/(4.0*COND_PI*rho_l*q2*drdt), S0);
+    CHECK(near(r30, r30_exp, 1e-12) && drdt < 0.0 && near(drdt, drdt_exp, 1e-12), "(g) r30/drdt mismatch");
+    CHECK(near(S1, q0*drdt, 1e-12) && near(S2, 2.0*q1*drdt, 1e-12) && near(Sg, 4.0*COND_PI*rho_l*q2*drdt, 1e-12) && S0 == 0.0, "(g) evaporation source is not the uniform-rdot moment form");
+    // 旧 λ スケール極限 (a=ṙ/r30: 3aρg) との差が多分散では 0 でないことを記録 (monodisperse では一致)
+    const double a = drdt/r30; printf("  (g) polydisperse: S_g(uniform rdot)/S_g(self-similar) = %.4f (monodisperse would be 1)\n", Sg/(3.0*a*rod*g));
+    // float 版も同式 (物性表は device メモリなので 1 スレッド kernel で評価する)
+    CondTablesHost ht; cond_tables_build_host(cp, ht); const CondTablesF tb = cond_tables_upload(ht);
+    float* dout = up(std::vector<float>(6, 0.0f));
+    evap_rate_f_kernel<<<1,1>>>(condProps_to_f(cp), tb, (float)T, (float)pv, (float)rod, (float)g, (float)q0, (float)q1, (float)q2, dout);
+    cudaDeviceSynchronize();
+    auto fo = down(dout, 6); const float f1 = fo[1], f2 = fo[2], fg = fo[3];
+    printf("  (g) float: S_Q1 rel %.2e S_Q2 rel %.2e S_g rel %.2e\n", std::fabs(f1-S1)/std::fabs(S1), std::fabs(f2-S2)/std::fabs(S2), std::fabs(fg-Sg)/std::fabs(Sg));
+    CHECK(std::fabs(f1-S1)/std::fabs(S1) < 2e-3 && std::fabs(fg-Sg)/std::fabs(Sg) < 2e-3, "(g) float evaporation source differs from double");
+}
+
+// ---- (h) 輸送とソースが非ゼロで釣り合う 1 セル固定点: Δτ を変えても固定点が同じ (codex result M7) ----
+// 1 セル: 残差 = 流入 β(ρφ_in − ρφ)·V + 実ソース kernel (condensation_source_d, mode 1) → 更新クランプで反復。
+// 上流は dry (φ_in=0) なので凝縮域では流入希釈と成長が釣り合う非自明な固定点になる。
+static void test_one_cell_fixed_point()
+{
+    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o);
+    CondTablesHost ht; cond_tables_build_host(cp, ht); const CondTablesF tb = cond_tables_upload(ht); (void)tb;
+    const double N2lo[9]={2.210371497e+04,-3.818461820e+02,6.082738360e+00,-8.530914410e-03,1.384646189e-05,-9.625793620e-09,2.519705809e-12,7.108460860e+02,-1.076003744e+01};
+    const double N2hi[9]={5.877124060e+05,-2.239249073e+03,6.066949220e+00,-6.139685500e-04,1.491806679e-07,-1.923105485e-11,1.061954386e-15,1.283210415e+04,-1.586640027e+01};
+    const double H2Olo[9]={-3.947960830e+04,5.755731020e+02,9.317826530e-01,7.222712860e-03,-7.342557370e-06,4.955043490e-09,-1.336933246e-12,-3.303974310e+04,1.724205775e+01};
+    const double H2Ohi[9]={1.034972096e+06,-2.412698562e+03,4.646110780e+00,2.291998307e-03,-6.836830480e-07,9.426468930e-11,-4.822380530e-15,-1.384286509e+04,-7.978148510e+00};
+    std::vector<SpeciesThermo> sp = { mk(0.0280134,3.621,97.53,N2lo,N2hi), mk(0.0180153,2.605,572.4,H2Olo,H2Ohi) };
+    for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); s.low[7] += -hr/THERMO_RU; s.high[7] += -hr/THERMO_RU; }
+    SpeciesThermo* dsp = up(sp);
+    printf("  (h) setup ok\n"); fflush(stdout);
+    const double T = 232.0, Yw = 0.0377, S = 20.0, Rw = cp.R, Rmix = 285.0;
+    const double pv = S*cond_psat(cp, T), rod = pv/(Yw*Rw*T);
+    double Y[2]={1.0-Yw, Yw}; double cpc,h; thermo_cph_mix(sp.data(),2,Y,T,&cpc,&h); const double Rm = thermo_R_mix(sp.data(),2,Y);
+    const double V = 1.0e-6, beta = 2000.0;   // 流入率 [1/s] (滞留時間 0.5 ms)
+    // dt は 1e-6 / 1e-5 / 1e-4 (100 倍): flow_float=float の反復は増分が値の ~1e-7 倍を割ると停滞するので、極端に小さい dt (1e-7) は
+    // 残差が残ったまま止まる (相対 ~3e-4)。固定点の Δτ 非依存はこの停滞床より大きい範囲で見る。
+    const double dts[3] = {1.0e-6, 1.0e-5, 1.0e-4};
+    std::vector<double> fixed[3]; double thetas[3];
+    for (int k = 0; k < 3; ++k) {
+        const double dt = dts[k];
+        std::vector<flow_float> one(1);
+        auto arr = [&](double v){ return up(std::vector<flow_float>(1,(flow_float)v)); };
+        flow_float *dT=arr(T),*dP=arr(rod*Rm*T),*dro=arr(rod),*dcp=arr(cpc),*dRm=arr(Rm),*dY0=arr(rod*(1-Yw)),*dY1=arr(rod*Yw),*dvol=arr(V),*ddt=arr(dt);
+        std::vector<flow_float*> hY={dY0,dY1}; flow_float** dYall=up(hY);
+        flow_float *rog=arr(0),*q0=arr(0),*q1=arr(0),*q2=arr(0),*Ng=arr(0),*NQ0=arr(0),*NQ1=arr(0),*NQ2=arr(0);
+        flow_float *rr=arr(0),*r0=arr(0),*r1=arr(0),*r2=arr(0),*sg=arr(0),*s0=arr(0),*s1=arr(0),*s2=arr(0),*td=arr(0);
+        flow_float *dS=arr(0),*dD=arr(0),*dR=arr(0),*dTs=arr(0),*dTh=arr(0),*dLm=arr(0),*cG=arr(0),*cQ=arr(0);
+        printf("  (h) dt %.0e arrays allocated\n", dt); fflush(stdout);
+        double prev[4]={0,0,0,0}; int it=0; double chg=1.0;
+        for (it = 0; it < 400000 && chg > 1e-13; ++it) {
+            // 残差: 流入 (dry 上流) β(0 − ρφ)V + ソース
+            std::vector<flow_float> cur(4); cudaMemcpy(&cur[0], rog, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&cur[1], q0, sizeof(flow_float), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&cur[2], q1, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&cur[3], q2, sizeof(flow_float), cudaMemcpyDeviceToHost);
+            flow_float rt[4]; for (int m=0;m<4;m++) rt[m] = (flow_float)(-beta*(double)cur[m]*V);
+            cudaMemcpy(rr, &rt[0], sizeof(flow_float), cudaMemcpyHostToDevice); cudaMemcpy(r0, &rt[1], sizeof(flow_float), cudaMemcpyHostToDevice);
+            cudaMemcpy(r1, &rt[2], sizeof(flow_float), cudaMemcpyHostToDevice); cudaMemcpy(r2, &rt[3], sizeof(flow_float), cudaMemcpyHostToDevice);
+            flow_float tdv = (flow_float)(beta*V); cudaMemcpy(td, &tdv, sizeof(flow_float), cudaMemcpyHostToDevice);   // transport_diag = βV (陰的流出)
+            cudaMemcpy(Ng, rog, sizeof(flow_float), cudaMemcpyDeviceToDevice); cudaMemcpy(NQ0, q0, sizeof(flow_float), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(NQ1, q1, sizeof(flow_float), cudaMemcpyDeviceToDevice); cudaMemcpy(NQ2, q2, sizeof(flow_float), cudaMemcpyDeviceToDevice);
+            condensation_source_d<<<1,1>>>(1, COND_MODEL_H2O, 1, Rw, cp.M, 1, 0, o, dsp, 2, dYall, 1,
+                0, 3.18, 0, 1, 1.0e-9, 0, 0.5, 0, 1.0, 5.0e-3, 10.0, (float)cpc, 1.315f, 1.0e35, 5.0e-3, 1.0, 1,
+                dvol, ddt, dT, dP, dro, dcp, dRm, dY1, rog, q0, q1, q2, rr, r0, r1, r2, sg, s0, s1, s2, dS, dD, dR, dTs, dTh, dLm);
+            cond_moment_update_limited_d<<<1,1>>>(1, ddt, dvol, dro, dY1, 0.0, dT, dcp, dRm, (float)cpc, 1.315f, COND_MODEL_H2O, o, 5.0e-3, 1.0, 0.5,
+                Ng, NQ2, NQ1, NQ0, rr, r2, r1, r0, sg, s2, s1, s0, td, td, td, td, rog, q2, q1, q0, dLm, cG, cQ);
+            { cudaError_t e = cudaDeviceSynchronize(); if (e != cudaSuccess) { printf("  (h) CUDA error at it %d: %s\n", it, cudaGetErrorString(e)); fflush(stdout); ++g_fail; break; } }
+            std::vector<flow_float> nw(4); cudaMemcpy(&nw[0], rog, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&nw[1], q0, sizeof(flow_float), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&nw[2], q1, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&nw[3], q2, sizeof(flow_float), cudaMemcpyDeviceToHost);
+            chg = 0.0; for (int m=0;m<4;m++){ const double d = std::fabs((double)nw[m]-prev[m])/std::max(std::fabs((double)nw[m]),1e-30); chg = std::max(chg,d); prev[m]=nw[m]; }
+            if (it % 50000 == 0 || it < 3) { float th; cudaMemcpy(&th, dLm, sizeof(float), cudaMemcpyDeviceToHost); thetas[k]=th; }
+        }
+        fixed[k].assign(prev, prev+4);
+        float th; cudaMemcpy(&th, dLm, sizeof(float), cudaMemcpyDeviceToHost);
+        printf("  (h) dt %.0e: %d iterations, fixed point g=%.6e Q0=%.6e Q1=%.6e Q2=%.6e, final theta %.4f\n", dt, it, prev[0]/rod, prev[1], prev[2], prev[3], th);
+        CHECK(prev[0] > 0.0 && prev[1] > 0.0, "(h) trivial fixed point (no condensation) — test state not condensing");
+        CHECK(th > 0.999f, "(h) theta_u not 1 at the fixed point");
+    }
+    double worst = 0.0; for (int a=0;a<3;a++) for (int b=a+1;b<3;b++) for (int m=0;m<4;m++) worst = std::max(worst, std::fabs(fixed[a][m]-fixed[b][m])/std::max(std::fabs(fixed[b][m]),1e-30));
+    printf("  (h) fixed-point max pairwise relative difference over dt 1e-6/1e-5/1e-4: %.3e\n", worst);
+    CHECK(worst < 2e-4, "(h) fixed point depends on dt (%.3e)", worst);
 }
 
 int main()
@@ -199,6 +310,10 @@ int main()
       test_dt_invariance("N2", COND_MODEL_N2, 0, st); }
     printf("== (b)-(f) update limiter kernel ==\n");
     test_update_limiter();
+    printf("== (g) evaporation source values (polydisperse) ==\n");
+    test_evap_source_values();
+    printf("== (h) one-cell transport+source fixed point vs dt ==\n");
+    test_one_cell_fixed_point();
     printf("%s (%d failures)\n", g_fail ? "FAILED" : "ALL PASS", g_fail);
     return g_fail ? 1 : 0;
 }

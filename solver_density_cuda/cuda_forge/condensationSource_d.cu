@@ -61,7 +61,7 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
                 cfg.condEvaporation, (float)cfg.condEvapRmin, cfg.condEvapKelvin, (float)evapLamMin,
                 cfg.cp, cfg.gamma,
                 (float)dg_max, (float)dT_max, limiterMode,
-                var.c_d["volume"], var.c_d["dt_local"],
+                (msh.volumePartial_d != nullptr) ? msh.volumePartial_d : var.c_d["volume"], var.c_d["dt_local"],   // node 周期 seam は部分体積 (合併体積だと member 数倍に二重計上)
                 var.c_d["T"], var.c_d["P"], var.c_d["ro"], cp_cell, Rmix_cell,
                 roY_w,
                 var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
@@ -82,7 +82,7 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
             cfg.condEquilibrium, cfg.condEqRelax, cfg.condEqDgMax, cfg.condEqDTmax,
             cfg.cp, cfg.gamma,
             Jmax, dg_max, dT_max, limiterMode,
-            var.c_d["volume"], var.c_d["dt_local"],
+            (msh.volumePartial_d != nullptr) ? msh.volumePartial_d : var.c_d["volume"], var.c_d["dt_local"],
             var.c_d["T"], var.c_d["P"], var.c_d["ro"], cp_cell, Rmix_cell,
             roY_w,
             var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
