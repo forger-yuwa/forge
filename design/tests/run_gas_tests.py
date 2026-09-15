@@ -176,5 +176,52 @@ _chk("SERN full: 輸送種 = 排気 ∪ 外気 (11 種), トレーサ有り, 各
 Z = C.element_mass_fractions(Y6, db)
 _chk("元素質量分率: Σ_e Z_e = 1", abs(sum(Z.values()) - 1.0) < 1e-6, f"{sum(Z.values()):.8f}")
 
+
+# --- 設計側 NASA-9 の範囲外処理 = ソルバ (thermo_d.cuh) (codex result-4 M2): 外部 DB で H2O の Tlo=300 K にし、
+#     FrozenGas.e_sens / GasSemiPerfect.h_mass を **独立に移植したソルバ式** (下の ref_*) と比較する
+import math
+def _poly_cp(a, T): return a[0] / T**2 + a[1] / T + a[2] + a[3] * T + a[4] * T**2 + a[5] * T**3 + a[6] * T**4
+def _poly_hRT(a, T): return -a[0] / T**2 + a[1] * math.log(T) / T + a[2] + a[3] * T / 2 + a[4] * T**2 / 3 + a[5] * T**3 / 4 + a[6] * T**4 / 5 + a[7] / T
+RU_S = 8.314462618
+def ref_cp_molar(e, T):              # thermo_cp_molar: クランプ
+    Tc = min(max(T, e.Tlo), e.Thi); a = e.low if Tc < e.Tmid else e.high
+    return RU_S * _poly_cp(a, Tc)
+def ref_h_molar(e, T):               # thermo_h_molar: 範囲外は線形外挿
+    if T < e.Tlo or T > e.Thi:
+        Tb = e.Tlo if T < e.Tlo else e.Thi; a = e.low if Tb < e.Tmid else e.high
+        return RU_S * Tb * _poly_hRT(a, Tb) + RU_S * _poly_cp(a, Tb) * (T - Tb)
+    a = e.low if T < e.Tmid else e.high
+    return RU_S * T * _poly_hRT(a, T)
+with tempfile.TemporaryDirectory() as td:
+    f = pathlib.Path(td) / "db_h2o_tlo300.yaml"
+    h2o = db["H2O"]
+    f.write_text('"H2O":\n  MW: %r\n  Tlo: 300.0\n  Tmid: 1000.0\n  Thi: 6000.0\n  nasa9_low: %r\n  nasa9_high: %r\n' % (h2o.MW, list(h2o.low), list(h2o.high)))
+    db3 = C.ResolvedSpeciesDB.from_file(f)
+    from forge_design.gas.frozen import FrozenGas
+    Ym = {"N2": 0.8, "H2O": 0.2}; href = 298.15
+    fg = FrozenGas(Ym, "MIXT", href, db=db3)
+    def ref_e_sens(T):
+        h = sum(y * (ref_h_molar(db3[k], T) - ref_h_molar(db3[k], href)) / db3[k].MW for k, y in Ym.items())
+        R = sum(y * RU_S / db3[k].MW for k, y in Ym.items()); return h - R * T
+    worst = 0.0
+    for T in (100.0, 150.0, 250.0, 299.0, 301.0, 1500.0, 7000.0):
+        e_d = float(fg.e_sens(T)[0]); e_r = ref_e_sens(T); worst = max(worst, abs(e_d - e_r) / max(abs(e_r), 1.0))
+        cp_d = float(fg.cp_mass(T)[0]); cp_r = sum(y * ref_cp_molar(db3[k], T) / db3[k].MW for k, y in Ym.items()); worst = max(worst, abs(cp_d / cp_r - 1))
+    _chk("範囲外処理: FrozenGas (H2O Tlo=300 K) の e_sens/cp がソルバ式の独立移植と一致 (100–7000 K, rtol 1e-12)", worst < 1e-12, f"worst rel {worst:.1e}")
+    # 温度反転: e_sens(T) をソルバ式で反転して T に戻る (codex の反例: 旧実装は 100 K → 100.498 K)
+    def invert(e_t):
+        lo, hi = 50.0, 8000.0
+        for _ in range(200):
+            m = 0.5 * (lo + hi); (lo, hi) = (m, hi) if ref_e_sens(m) < e_t else (lo, m)
+        return 0.5 * (lo + hi)
+    dTmax = max(abs(invert(float(fg.e_sens(T)[0])) - T) for T in (100.0, 150.0, 250.0))
+    _chk("範囲外処理: e_sens をソルバ式で反転した T の差 < 1e-9 K (100/150/250 K)", dTmax < 1e-9, f"max |ΔT| {dTmax:.1e} K")
+    gs = spm.GasSemiPerfect(Ym, Tt=1000.0, db=db3)
+    worst2 = max(abs(float(gs.h_mass(T)[0]) - sum(y * ref_h_molar(db3[k], T) / db3[k].MW for k, y in Ym.items())) / 1e6 for T in (100.0, 250.0, 7000.0))
+    _chk("範囲外処理: GasSemiPerfect.h_mass も同じ (MOC 側も外部 DB の Tlo/Thi に従う)", worst2 < 1e-12, f"{worst2:.1e}")
+    # 内蔵 DB (Tlo 200) では旧 T_FLOOR 凍結と同じ値
+    fg0 = FrozenGas(Ym, "MIXT", href); e_old = float(fg0.e_sens(150.0)[0]); e_new = float(FrozenGas(Ym, "MIXT", href, db=db).e_sens(150.0)[0])
+    _chk("範囲外処理: 内蔵 DB (Tlo 200 K) の値は従来の T_FLOOR 凍結と同一", abs(e_old - e_new) < 1e-9, f"{e_old:.6f} vs {e_new:.6f}")
+
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILURES'}")
 sys.exit(1 if FAIL else 0)

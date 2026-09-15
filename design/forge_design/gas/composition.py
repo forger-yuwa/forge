@@ -142,24 +142,58 @@ class ResolvedSpeciesDB:
         e = self[name]
         return np.asarray(e.low if T < e.Tmid else e.high, dtype=float)
 
+    # --- 種ごとの NASA-9 評価: ソルバ (`cuda_forge/thermo_d.cuh` thermo_cp_molar / thermo_h_molar / thermo_s0) と同じ範囲外処理
+    #     (T<Tlo / T>Thi は cp を端で固定、h は線形外挿、s° は対数外挿; 区間の切替は Tmid)。codex result-4 M2。
+    @staticmethod
+    def _coef_at(e: SpeciesEntry, Tc):
+        Tc = np.asarray(Tc, dtype=float)
+        lo, hi = np.asarray(e.low, float), np.asarray(e.high, float)
+        return np.where((Tc < e.Tmid)[..., None], lo, hi)
+
+    @classmethod
+    def species_cp_R(cls, e: SpeciesEntry, T):
+        from .semiperfect import _cp_R_raw
+        T = np.atleast_1d(np.asarray(T, dtype=float)); Tc = np.clip(T, e.Tlo, e.Thi)
+        a = cls._coef_at(e, Tc)
+        return _cp_R_raw(np.moveaxis(a, -1, 0), Tc)
+
+    @classmethod
+    def species_h_RT(cls, e: SpeciesEntry, T):
+        """h/(R T): 範囲内は多項式、範囲外は h(Tb) + cp(Tb)(T−Tb) を R T で割ったもの。"""
+        from .semiperfect import _cp_R_raw, _h_RT_raw
+        T = np.atleast_1d(np.asarray(T, dtype=float)); Tc = np.clip(T, e.Tlo, e.Thi)
+        a = np.moveaxis(cls._coef_at(e, Tc), -1, 0)
+        h_R = _h_RT_raw(a, Tc) * Tc + _cp_R_raw(a, Tc) * (T - Tc)     # h/R [K]; 範囲内は第 2 項 0
+        return h_R / np.maximum(T, 1e-30)
+
+    @classmethod
+    def species_s0_R(cls, e: SpeciesEntry, T):
+        """s°/R (1 bar): 範囲外は s°(Tb) + cp(Tb) ln(T/Tb)。"""
+        from .semiperfect import _cp_R_raw
+        from .frozen import _s0_R_raw
+        T = np.atleast_1d(np.asarray(T, dtype=float)); Tc = np.clip(T, e.Tlo, e.Thi)
+        a = np.moveaxis(cls._coef_at(e, Tc), -1, 0)
+        return _s0_R_raw(a, Tc) + _cp_R_raw(a, Tc) * np.log(np.maximum(T, 1e-30) / Tc)
+
     def cp_mass(self, Y: dict, T):
-        """混合 cp [J/kg/K] (質量分率 Y, T_FLOOR 凍結は semiperfect と同じ)。"""
-        from .semiperfect import _cp_R
+        """混合 cp [J/kg/K] (質量分率 Y)。"""
         T = np.atleast_1d(np.asarray(T, dtype=float)); out = np.zeros_like(T)
         for k, y in Y.items():
-            e = self[k]
-            cpR = np.where(T < e.Tmid, _cp_R(np.asarray(e.low), T), _cp_R(np.asarray(e.high), T))
-            out += y * cpR * RU / e.MW
+            e = self[k]; out += y * self.species_cp_R(e, T) * RU / e.MW
         return out
 
     def h_mass(self, Y: dict, T):
         """混合 h [J/kg] (絶対基準)。"""
-        from .semiperfect import _h_RT
         T = np.atleast_1d(np.asarray(T, dtype=float)); out = np.zeros_like(T)
         for k, y in Y.items():
-            e = self[k]
-            hRT = np.where(T < e.Tmid, _h_RT(np.asarray(e.low), T), _h_RT(np.asarray(e.high), T))
-            out += y * hRT * RU * T / e.MW
+            e = self[k]; out += y * self.species_h_RT(e, T) * RU * T / e.MW
+        return out
+
+    def s0_mass(self, Y: dict, T):
+        """混合 s° [J/kg/K] (1 bar; 混合エントロピー項は含まない = FrozenGas.s0_mass と同じ約束)。"""
+        T = np.atleast_1d(np.asarray(T, dtype=float)); out = np.zeros_like(T)
+        for k, y in Y.items():
+            e = self[k]; out += y * self.species_s0_R(e, T) * RU / e.MW
         return out
 
 
