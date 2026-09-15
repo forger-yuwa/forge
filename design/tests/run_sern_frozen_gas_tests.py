@@ -78,7 +78,7 @@ if yml.exists():
     check("region_ic_arrays (frozen): roe = ρ(h_sens − RT) + ½ρu², roY0 = ρ (排気側)", abs(ic["roe"][0] - st["exhaust"]["ro"] * (gx.e_sens(st["exhaust"]["T"])[0] + 0.5 * st["exhaust"]["u"] ** 2)) < 1e-6 * abs(ic["roe"][0])
           and ic["roY0"][0] == st["exhaust"]["ro"] and ic["roY1"][0] == 0.0 and ic["roY0"][1] == 0.0 and ic["roY1"][1] == st["ext"]["ro"])
     cfg = R._solver_config(p, 100, 10, 0.5, 1000.0)
-    check("solverConfig (frozen): thermalMethod 2 + species [EXH, AIR] + thermoHrefTemp", "thermalMethod: 2" in cfg and "species: [EXH, AIR]" in cfg and "thermoHrefTemp: 298.15" in cfg)
+    check("solverConfig (frozen): thermalMethod 2 + species [\"EXH\", \"AIR\"] (引用符付き) + thermoHrefTemp", "thermalMethod: 2" in cfg and 'species: ["EXH", "AIR"]' in cfg and "thermoHrefTemp: 298.15" in cfg)
     bc = R._bcond_config(p, st)
     check("bcondConfig (frozen): 入口 Y0/Y1 が排気 (1,0)・外気 (0,1)", "Y0: 1, Y1: 0" in bc.split("inlet_nozzle")[1].split("\n")[0] and "Y0: 0, Y1: 1" in bc.split("inlet_ext")[1].split("\n")[0])
     # cpg 側は無変更 (回帰)
@@ -97,7 +97,10 @@ if yml.exists():
     check("full m6_on: 輸送種 11 種 (排気 ∪ 外気), tracer, 入口 Y 和 1, Xi 1/0", len(st["species"]) == 11 and st["tracer"] and abs(sum(st["exhaust"]["Y"]) - 1) < 1e-12
           and abs(sum(st["ext"]["Y"]) - 1) < 1e-12 and st["exhaust"]["Xi"] == 1.0 and st["ext"]["Xi"] == 0.0)
     cfg = R._solver_config(p, 100, 10, 0.5, 1000.0)
-    check("full m6_on: solverConfig に 11 種と tracer: exhaust", f"species: [{', '.join(st['species'])}]" in cfg and "tracer: exhaust" in cfg)
+    check("full m6_on: solverConfig に 11 種 (引用符付き) と tracer: exhaust", f"species: [{', '.join(chr(34)+k+chr(34) for k in st['species'])}]" in cfg and "tracer: exhaust" in cfg)
+    import yaml as _yaml
+    _cfg = _yaml.safe_load(cfg.replace('"{', '{'))
+    check("full m6_on: 生成 config を yaml.safe_load しても NO/N/... が文字列のまま (codex result M1)", [str(x) for x in _cfg["physProp"]["species"]] == st["species"] and all(isinstance(x, str) for x in _cfg["physProp"]["species"]))
     ic = R.region_ic_arrays(np.array([True, False]), st, p.gamma)
     check("full m6_on: IC に roY0..roY10 と roXi (排気側 ρ, 外気側 0)", all(f"roY{i}" in ic for i in range(11)) and ic["roXi"][0] == st["exhaust"]["ro"] and ic["roXi"][1] == 0.0
           and abs(sum(ic[f"roY{i}"][0] for i in range(11)) - st["exhaust"]["ro"]) < 1e-9 * st["exhaust"]["ro"])
@@ -110,7 +113,12 @@ if yml.exists():
     # lumped + keep [H2O]: EXH = 1 − Y_H2O、m4_off (H2O 無し) でも配置が同じ
     tp = {"mode": "lumped", "lumps": {"EXH": {"from": "stream", "stream": "inflow"}, "AIR": {"from": "stream", "stream": "external"}}, "keep": ["H2O"]}
     p = load_problem(yml); p.evaluate["tp_species"] = tp; R.select_operating_point(p, "m6_on"); st = R.gas_states(p)
-    check("lumped+keep m6_on: [EXH, AIR, H2O], 排気 [0.7589, 0, 0.2411], tracer 無し", st["species"] == ["EXH", "AIR", "H2O"] and abs(st["exhaust"]["Y"][2] - 0.2411091186) < 1e-9 and not st["tracer"])
+    check("lumped+keep m6_on: [EXH, AIR, H2O], 排気 [0.7589, 0, 0.2411], **tracer 有り** (Y_EXH<1 で流入元ラベルにならない; codex result M8)", st["species"] == ["EXH", "AIR", "H2O"] and abs(st["exhaust"]["Y"][2] - 0.2411091186) < 1e-9 and st["tracer"] and st["exhaust"]["Xi"] == 1.0)
+    from forge_design.gas.composition import species_meta as _smeta, _exhaust_fraction_spec
+    g2 = R.frozen_gases(p)
+    check("lumped+keep: species_meta.exhaust_fraction = tracer Xi", _smeta(g2["layout"])["exhaust_fraction"] == {"kind": "tracer", "array": "Xi", "conserved": "roXi"})
+    p_al = load_problem(yml); R.select_operating_point(p_al, "m6_on"); g_al = R.frozen_gases(p_al)
+    check("別名 [EXH, AIR]: exhaust_fraction = species Y0 (EXH), tracer 無し", _exhaust_fraction_spec(g_al["layout"]) == {"kind": "species", "array": "Y0", "conserved": "roY0", "species": "EXH"} and not g_al["layout"].tracer)
     p = load_problem(yml); p.evaluate["tp_species"] = tp; R.select_operating_point(p, "m4_off"); st4 = R.gas_states(p)
     check("lumped+keep m4_off: 同じ配置 [EXH, AIR, H2O] で Y_H2O = 0", st4["species"] == ["EXH", "AIR", "H2O"] and st4["exhaust"]["Y"] == [1.0, 0.0, 0.0])
     # restart_by_index / warm_from_same_mesh: 全 roY + roXi を引き継ぐ (codex M4 の既存バグ修正)

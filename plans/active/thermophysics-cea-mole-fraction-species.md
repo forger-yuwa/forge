@@ -184,17 +184,17 @@ evaluate:
 | 6 | ~~後処理・ParaView 配列解決~~ | 済 (2026-09-16): `tools/forge_species.py` (run dir → 種名/index/MW/凝縮種/vapor_array/tracer)、ParaView `Forge Saturation` に `Run Config` プロパティ (未指定時は `Y1` を自動採用しない)、`gen_inlet_profile.py --X`、`case/44 axis_csv_va.py` は名前解決 |
 | 7 | 回帰 run と codex result レビュー | §6 (node のみ; **cell は対象外**, 2026-09-16 ユーザ指示)。case/44: 新バイナリ A/B `run_0195`、`full` 5 種 `run_0196` (0170 の収束場を種変換 restart)、モル分率入力 lumped `run_0197`、CEA DB `run_0198` (prepare)、SERN case/46: node Euler m6_on `run_0100` (別名 [EXH, AIR]) / `run_0101` (full 11 種 + roXi) |
 | 8 | F-sp1: トレーサ `roXi` の拡散 (SST の SERN で必要なら混合平均 Sc) | 未着手 (Euler では不要; 粘性二流体試験 [§6] も未実施でこれに依存) |
-| 9 | (result-1 M1) 種名の YAML 引用 (`NO`/`N`/`Y`) + 生成 config の再読込試験 | 設計側 |
+| 9 | ~~(result-1 M1) 種名の YAML 引用 + 生成 config の再読込試験~~ | 済 (2026-09-16): runner_axismach / runner_sern の `species:` を引用符付きに、`run_sern_frozen_gas_tests` で safe_load 再読込 (全て str) を確認 |
 | 10 | (M2) `convert_species_field.py` の二相 EOS 反転・書込前の保存検査・総水量 ρY_H2O | forge ツール |
-| 11 | (M3) restart 照合: `species_meta.yaml`/DB/datum の共通照合を interp_field・restart_by_index・warm_from_same_mesh・warm_from_run に | 両側 |
+| 11 | (M3) restart 照合 | 設計側済 (2026-09-16): `runner_sern.check_species_compatible` (species_meta の順序・MW rel 1e-9・thermoHrefTemp・トレーサ有無; 照合不能はエラー, 両方 CPG は通す) を restart_by_index / warm_from_same_mesh / warm_from_run に適用。forge ツール側 (`interp_field.py` の署名照合) は実装中 |
 | 12 | (M4) 変換器: stream lump の保存的展開 + 作動点変更の再初期化 (別操作) + `lumped→full` の roXi 生成 | forge ツール + 設計メタ |
 | 13 | (M5) roXi の周期 node 残差合算・同期 + 周期移流試験 | forge |
 | 14 | (M6) tracer × dual-time を入力で拒否 (solver-settings の「対応」撤回) | forge |
 | 15 | (M7) `condensationSpecies` ↔ `condModel` の対応検査 + config 読込単体 | forge |
-| 16 | (M8) `lumped+keep` 等でもトレーサ有効化、`exhaust_fraction(run)` 共通アクセサ | 設計側 (+forge は既存 tracer 経路) |
-| 17 | (M9) `forge_species.vapor_array` を凝縮の有無と独立に (H2O 名前解決) | forge ツール + axis_csv |
+| 16 | ~~(M8) `lumped+keep` 等でもトレーサ有効化、`exhaust_fraction(run)` 共通アクセサ~~ | 済 (2026-09-16): トレーサは「inflow で 1・external で 0 の輸送種 (純粋な流入元ラベル) が無いとき」有効 (full と lumped+keep は有効, [EXH, AIR] は Y0)。`composition.exhaust_fraction(run_dir)` / `exhaust_fraction_field` が `species_meta.exhaust_fraction` ({kind, array, conserved}) を返す。単体追加 |
+| 17 | (M9) `forge_species.vapor_array` を凝縮の有無と独立に | `axis_csv_va.py` は species 名リストから H2O を直接解決 (済); `forge_species.py` 側は実装中 |
 | 18 | (M10) 小型 5 種 node TP の `check_convergence` PASS ケース; トレーサ誤差 (1.7e-4) の切り分け; 作動点変更 (m6_on→m10_on) と湿潤 restart の試験; README「同じ固定点」→「ゲート内で一致」 | 検証 |
-| 19 | (m1) docs 同期 (`loadSpeciesDB` 記述、plans/README の status、condensation §7b) | docs |
+| 19 | ~~(m1) docs 同期~~ | 済 (2026-09-16): methods/thermophysics §5 (speciesDB_resolve/init, 上書き), plans/README (in_progress), condensation §7b |
 
 ## 6. 検証
 

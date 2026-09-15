@@ -247,8 +247,10 @@ L/R 状態の `roe_L/Ht_L/ca_L` (および R 側) を NASA で再構成。Roe �
   (両方あれば後者を優先。`turbulence.turbulentPrandtl` と同じブロックで揃えられる)。既定 0.7。
 - `nSpecies` は `species` の要素数。未指定で `thermalMethod==2` なら既定 N2 単成分。
 - **組成のモル分率入力と種名の正本化 (2026-09-16 実装, plan [thermophysics-cea-mole-fraction-species](../plans/active/thermophysics-cea-mole-fraction-species.md))**:
-  - **host 側 DB 解決**: `speciesDBFile` を GPU 初期化に依存しない host 関数 (`input/speciesDB.{hpp,cpp}`: `loadSpeciesDB(path, names) → {name, MW, ...}`) で
-    `solverConfig::read()` 直後と `convertGmshToForge` の境界読込前に読み、名前→MW を得る (内蔵 DB は空パス時のみ)。
+  - **host 側 DB 解決**: `input/speciesDB.{hpp,cpp}` の `speciesDB_resolve(names, dbFile)` / `speciesDB_init(cfg)` (GPU 非依存) が、内蔵 DB (旧 `thermo_d.cu` の
+    `builtinDB`: N2/O2/AR/CO2/HE/H2O/AIR) に `speciesDBFile` の内容を**上書き**した解決済み DB を作り、`solverConfig::read()` 直後 (`main.cpp`) と
+    `convertGmshToForge` の境界読込前で `speciesDB_printTable` (species 表) を出す。`thermo_init_db` は同じ DB を再利用して datum offset と GPU 転送だけ行う。
+    未知の種名はエラー終了。
   - **`bcondConfig` の `X{s}`**: `floats: {X0: .., X1: ..}` を double で検証し $Y_k = X_k M_k/\sum_j X_j M_j$ に換算して既存の `Y{s}` 経路 (`flow_float`) へ。同一境界での
     `X`/`Y` 混在、負値・非有限・総和 0・未知 index はエラー。`Y` 省略時の補完 (`Y0=1` 他 0) は **X 指定時には行わず全種必須**。`initial` は文字列のまま
     (組成付き IC は IC 生成ツールが `VALUE/roY{s}` に書く)。`inletProfile` CSV は従来どおり `Y{s}` 列 (X→Y は `gen_inlet_profile.py --X` が換算)。

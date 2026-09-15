@@ -220,7 +220,8 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     # ([[isobutane-wt-semiperfect]] / runner_axismach と同じ)。IC の roe も同じ基準で組む (paste_region_ic)
     if p.is_frozen_tp:
         gases = frozen_gases(p); L = gases["layout"]
-        _tp = f", species: [{', '.join(L.species)}], speciesDBFile: \"species_db.yaml\", thermoHrefTemp: {gases['href_T']}"
+        _sp = ", ".join(f'"{k}"' for k in L.species)   # 引用符付き (NO/N/Y の真偽値化を防ぐ; codex result M1)
+        _tp = f", species: [{_sp}], speciesDBFile: \"species_db.yaml\", thermoHrefTemp: {gases['href_T']}"
         if L.tracer:
             _tp += ", tracer: exhaust"
         _tm = 2
@@ -432,10 +433,43 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     return info
 
 
+def _species_signature(run_dir) -> dict | None:
+    """run dir の輸送種の署名 (species_meta.yaml の順序・MW + solverConfig の thermoHrefTemp)。無ければ None。"""
+    from ..gas.composition import load_species_meta
+    rd = Path(run_dir); meta = load_species_meta(rd)
+    if meta is None:
+        return None
+    cfg = (rd / "solverConfig_main.yaml") if (rd / "solverConfig_main.yaml").exists() else (rd / "solverConfig.yaml")
+    m = re.search(r"thermoHrefTemp:\s*([0-9.eE+-]+)", cfg.read_text()) if cfg.exists() else None
+    return {"species": list(meta["species"]), "MW": {k: float(v) for k, v in meta["MW"].items()},
+            "href": float(m.group(1)) if m else None, "tracer": bool(meta.get("tracer", {}).get("enabled", False))}
+
+
+def check_species_compatible(src_run_dir, dst_run_dir, what: str = "restart") -> None:
+    """restart 経路の共通照合 (codex result M3): 種の順序・MW (rel 1e-9)・datum が一致しないと拒否。
+    片方に species_meta.yaml が無ければ (旧 run) 照合不能としてエラー (両方無い CPG run は通す)。"""
+    a, b = _species_signature(src_run_dir), _species_signature(dst_run_dir)
+    if a is None and b is None:
+        return
+    if a is None or b is None:
+        raise ValueError(f"{what}: species_meta.yaml が {'元' if a is None else '先'} run に無く種配置を照合できない ({src_run_dir} → {dst_run_dir}); "
+                         "旧 run は tools/convert_species_field.py で移す")
+    if a["species"] != b["species"]:
+        raise ValueError(f"{what}: 輸送種の順序が違う (元 {a['species']} / 先 {b['species']}); tools/convert_species_field.py を使う")
+    for k in a["species"]:
+        if abs(a["MW"][k] / b["MW"][k] - 1.0) > 1e-9:
+            raise ValueError(f"{what}: 種 {k} の MW が違う ({a['MW'][k]} / {b['MW'][k]}) — DB が異なる")
+    if a["href"] is not None and b["href"] is not None and abs(a["href"] - b["href"]) > 1e-9:
+        raise ValueError(f"{what}: thermoHrefTemp が違う ({a['href']} / {b['href']})")
+    if a["tracer"] != b["tracer"]:
+        raise ValueError(f"{what}: トレーサの有無が違う (元 {a['tracer']} / 先 {b['tracer']})")
+
+
 def restart_by_index(res_h5, mesh_h5) -> None:
     """同一メッシュの stage 間移植: VALUE を index でコピーする (座標最近傍の `interp_field.py` は使わない)。
     理由 (2026-09-04, case/46 run_0009): スリットカウルの上下壁ノードは座標が一致し、最近傍補間が双子を同じ元
     ノードに写す → 排気側の壁ノードが外部流の圧力を持ち 2 次で発散した (interp_field の全 134 station で誤写像を確認)。"""
+    check_species_compatible(Path(res_h5).parent, Path(mesh_h5).parent, "restart_by_index")
     with h5py.File(res_h5, "r") as src, h5py.File(mesh_h5, "r+") as dst:
         n = len(dst["VALUE/ro"])
         keys = ["ro", "roUx", "roUy", "roUz", "roe", "roK", "roOmega"]        # 状態量のみ (wall_dist は触らない)
@@ -475,6 +509,7 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
         raise RuntimeError(f"warm_from_run: {src_run_dir} に res_*.h5 が無い")
     gases_d = None
     if di.get("gas_model") == "frozen_tp":
+        check_species_compatible(src_run_dir, dst_run_dir, "warm_from_run")   # 順序・MW・datum・トレーサ (codex result M3)
         # 作動点適用後の組成で擬似種を作る (prepare_info の problem は作動点未適用の YAML なので op を再選択)
         pd_ = load_problem(di["problem"]); select_operating_point(pd_, di["operating_point"]["name"]); gases_d = frozen_gases(pd_)
     with h5py.File(res[-1], "r") as src, h5py.File(dst_run_dir / MESH, "r+") as dst:

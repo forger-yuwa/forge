@@ -640,7 +640,7 @@ IC は `run_0170` の収束場 (`full` は `tools/convert_species_field.py` で 
 | `run_0193_…_full_prep` / `run_0198_…_dry_full_cea_prep` | prepare のみ (入力生成の確認): 5 種 config・入口 `Y0..Y4`・IC roY0–4 (ΣρY/ρ 誤差 1.2e-7)・`species_meta.yaml`; CEA 直読み DB は設計 (R 285.2704, γ* 1.315255) と CFD の `species_db.yaml` (`# source: species_db file …`) の両方の正本になる | — | — | — | — |
 | `run_0202_…_dry_runner` / `run_0203_…_dry_full_dry_runner` | dry (凝縮 OFF) を runner の段階起動 (12000 step) で lumped / full (§6-1: 軸 M 差 ≤1e-4, ṁ ≤1e-4) | 両方 NaN 0, `check_convergence` は runner 段階起動の既知 plateau (NOT CONVERGED, 両 run 同じ); `rms_roY` 2 列 / 5 列 | full − lumped: ro 2.6e-6 / T 2.0e-6 / P 1.8e-6 / \|ΔM\| 2.3e-5 (凝縮なし) | **ṁ 完全一致 (0.0)** / 軸 M 1.5e-5 | — (dry) |
 
-所見: **`full` (5 種) と `lumped` は同じ固定点** — 報告量は 5 桁一致、ṁ 3e-6、軸 M 1.5e-5 (ゲート 1e-4)、onset 差 4e-4 r_t (ゲート 0.1)、出口 g 相対 +8e-5 (ゲート 2 %)。
+所見: **`full` (5 種) と `lumped` は plan §6 のゲート内で一致** (残差は両方 plateau [NOT CONVERGED] なので固定点への収束の証明ではない; codex result M10) — 報告量は 5 桁一致、ṁ 3e-6、軸 M 1.5e-5 (ゲート 1e-4)、onset 差 4e-4 r_t (ゲート 0.1)、出口 g 相対 +8e-5 (ゲート 2 %)。
 場の差 (ro 3e-5, g L1 1.1e-4) は新バイナリの反復ノイズ (ro 4.6e-6, g L1 1.6e-5; `0199`−`0195`) の 6–7 倍で、モル分率入力の lumped (`run_0197`, 熱力学が MW 1e-8 だけ違う) も同程度の差を示す。
 dry では full − lumped が 2e-6 (ノイズ床) なので、凝縮 run の差は 5 種輸送 + 凝縮ソースの丸め (凝縮域は onset に指数感度) によるもので、固定点の差ではない。新旧バイナリの差 (`0199`/`0195` vs `0170`: ro 1.0e-5) は床の 2 倍 (thermo DB 解決の経路変更に伴う丸め)。step 時間は 2 種 2.45 ms → 5 種 3.01 ms (+23 %)。
 

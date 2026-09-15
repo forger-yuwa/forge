@@ -121,7 +121,7 @@ def _apply_gas_to_config(cfg: str, p: Problem, run_dir) -> str:
     # (case/42 run_0020–0025 で切り分け: 一定 cp 種/陽解法は完走、実 NASA-9 + 陰解法だけ発散、
     #  thermoHrefTemp 298.15 で完走)。IC の roe も同じ datum で作る (paste_isentropic_ic の h_ref)。
     href = float(p.evaluate.get("thermo_href_temp", 298.15))
-    sp_txt = "[" + ", ".join(species_list) + "]"
+    sp_txt = "[" + ", ".join(f'"{k}"' for k in species_list) + "]"   # 引用符付き: NO/N/Y は無引用だと YAML 1.1 で真偽値になる (codex result M1)
     cfg = cfg.replace("cp: %s, gamma: %s}" % (p.cp, p.gamma),
                       "cp: %s, gamma: %s,\n           species: %s, speciesDBFile: \"species_db.yaml\", thermoHrefTemp: %s}"
                       % (p.cp, p.gamma, sp_txt, href), 1)

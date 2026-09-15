@@ -476,7 +476,13 @@ def resolve_species_layout(tp: dict, streams: dict, db: ResolvedSpeciesDB,
             raise ValueError(f"流れ {st} の輸送種ベクトルの和 {tot:.12f} != 1 (配分漏れ)")
         streams_out[st] = {"Y": dict(Y), "X": mass_to_mole(Y, db), "Y_transport": [float(v) for v in vec],
                            "sum_input": float(sum(streams[st].values()))}
-    tracer = (mode == "full" and len(Ys) >= 2)
+    # 排気率 ξ の担い手 (codex result M8): 複数流れで「inflow で 1・external で 0 になる輸送種」(純粋な流入元ラベル) が無ければ
+    # 受動スカラ roXi を輸送する (full は常に、lumped でも keep で純排気の Y_EXH<1 になる配置は該当)
+    tracer = False
+    if len(Ys) >= 2 and "inflow" in streams_out and "external" in streams_out:
+        yi, ye = streams_out["inflow"]["Y_transport"], streams_out["external"]["Y_transport"]
+        label = [s for s, a, b in zip(species, yi, ye) if abs(a - 1.0) < 1e-12 and abs(b) < 1e-12]
+        tracer = not label
     return SpeciesLayout(mode, species, list(keep_eff if mode == "lumped" else []), lumps, streams_out, entries, db,
                          condensing_species=cond, tracer=tracer)
 
@@ -517,6 +523,7 @@ def species_meta(layout: SpeciesLayout) -> dict:
         "condensing_index": layout.cond_index,
         "tracer": {"enabled": bool(layout.tracer), "name": "roXi" if layout.tracer else None,
                    "definition": "exhaust fraction: 1 at stream inflow, 0 at stream external" if layout.tracer else None},
+        "exhaust_fraction": _exhaust_fraction_spec(layout),
         "lumps": {n: {"from": l["from"], "stream": l["stream"], "mole_fractions": dict(l["members"]), "mass_fractions": dict(l["mass"])}
                   for n, l in layout.lumps.items()},
         "expansion": layout.expansion_matrix(),
@@ -533,6 +540,39 @@ def write_species_files(layout: SpeciesLayout, run_dir) -> None:
     rd = Path(run_dir)
     (rd / "species_db.yaml").write_text(species_db_yaml(layout))
     (rd / "species_meta.yaml").write_text(yaml.safe_dump(species_meta(layout), sort_keys=False, allow_unicode=True))
+
+
+def _exhaust_fraction_spec(layout: SpeciesLayout) -> dict | None:
+    """排気率 ξ の取り方 (メタに保存): tracer なら `Xi` (primitive) / `roXi`、無ければ純粋な流入元ラベルの輸送種 `Y{i}`。"""
+    if "inflow" not in layout.streams or "external" not in layout.streams:
+        return None
+    if layout.tracer:
+        return {"kind": "tracer", "array": "Xi", "conserved": "roXi"}
+    yi, ye = layout.streams["inflow"]["Y_transport"], layout.streams["external"]["Y_transport"]
+    for i, (a, b) in enumerate(zip(yi, ye)):
+        if abs(a - 1.0) < 1e-12 and abs(b) < 1e-12:
+            return {"kind": "species", "array": f"Y{i}", "conserved": f"roY{i}", "species": layout.species[i]}
+    return None
+
+
+def exhaust_fraction(run_dir) -> dict:
+    """共通アクセサ (codex 再レビュー M1/M2, result M8): run dir の `species_meta.yaml` から排気率 ξ の配列名を返す
+    ({"kind": "tracer"|"species", "array": "Xi"|"Y{i}", "conserved": ...})。lumped [EXH, AIR] なら Y0、full や lumped+keep なら Xi。"""
+    meta = load_species_meta(run_dir)
+    if meta is None:
+        raise FileNotFoundError(f"{run_dir}: species_meta.yaml が無い (旧 run)")
+    spec = meta.get("exhaust_fraction")
+    if not spec:
+        raise ValueError(f"{run_dir}: 排気率 ξ の定義が無い (単一流れの run)")
+    return dict(spec)
+
+
+def exhaust_fraction_field(run_dir, res_h5) -> "np.ndarray":
+    """ξ の場 (primitive)。tracer は `Xi`、種ラベルは `Y{i}`。"""
+    import h5py
+    spec = exhaust_fraction(run_dir)
+    with h5py.File(res_h5, "r") as f:
+        return np.clip(f["VALUE/" + spec["array"]][:].astype(float), 0.0, 1.0)
 
 
 def load_species_meta(run_dir) -> dict | None:
