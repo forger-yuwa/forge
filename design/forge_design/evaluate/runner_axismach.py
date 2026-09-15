@@ -102,17 +102,12 @@ def _apply_gas_to_config(cfg: str, p: Problem, run_dir) -> str:
         # cfd_gas: cpg = 設計は semi-perfect のまま CFD だけ CPG(γ*, cp 参照値) で回す
         # (TP × node 軸対称の forge 側発散 [case/42 run_0001] の回避。相対比較には十分)
         return cfg
-    import yaml as _yaml
-    from ..gas.semiperfect import mixture_pseudo_species, mixture_pseudo_species_split
-    Y = dict(p.raw["gas"]["species"])
-    species_list = _tp_species_list(p)
-    if species_list == ["MIX"]:
-        db = mixture_pseudo_species(Y, "MIX")
-    else:
-        # split_h2o (plans/accepted/tooling-nozzle-tp-split-h2o-condensation.md): H₂O 以外を擬似種
-        # MIXDRY、H₂O を独立種にした 2 種 TP。凝縮 (condGasSpecies=1) が指せる。
-        db, _, _ = mixture_pseudo_species_split(Y, keep=(str(p.evaluate.get("tp_keep_species", "H2O")),))
-    (Path(run_dir) / "species_db.yaml").write_text(_yaml.safe_dump(db, sort_keys=False))
+    from ..gas.composition import write_species_files
+    # 統一スキーマ (plan thermophysics-cea-mole-fraction-species §4.5): evaluate.tp_species {mode: full|lumped, lumps, keep}
+    # (旧 pseudo / split_h2o は別名) を解決済み DB で輸送種配置に解決し、species_db.yaml (由来コメント付き) + species_meta.yaml を書く
+    layout = p.species_layout()
+    species_list = list(layout.species)
+    write_species_files(layout, run_dir)
     # thermalMethod 0 → 2、species/speciesDBFile を physProp に追加 (cp/gamma は参照値のまま
     # 残すが TP では NASA-9 が優先される)
     cfg = cfg.replace("thermalMethod: 0", "thermalMethod: 2", 1)
@@ -136,32 +131,45 @@ def _apply_gas_to_config(cfg: str, p: Problem, run_dir) -> str:
     cond = p.evaluate.get("condensation")
     if cond:
         cond = dict(cond)
-        if len(species_list) >= 2 and "condGasSpecies" not in cond:
-            cond["condGasSpecies"] = species_list.index(str(p.evaluate.get("tp_keep_species", "H2O")).upper())
+        # 凝縮種は名前が正本 (gas.condensing_species): index は生成値。手書き condGasSpecies があれば一致検査
+        idx = layout.cond_index
+        if idx is None:
+            raise ValueError(f"凝縮 ON だが凝縮種 {layout.condensing_species} が輸送種 {species_list} に無い (tp_species.keep に入れる)")
+        if "condGasSpecies" in cond and int(cond["condGasSpecies"]) != idx:
+            raise ValueError(f"evaluate.condensation.condGasSpecies {cond['condGasSpecies']} が凝縮種 {layout.condensing_species} の index {idx} と不一致")
+        cond["condGasSpecies"] = idx
+        cond["condensationSpecies"] = layout.condensing_species
         cfg = cfg.rstrip("\n") + "\ncondensation: {" + ", ".join(f"{k}: {v}" for k, v in cond.items()) + "}\n"
     return cfg
 
 
 def _tp_species_list(p: Problem) -> list:
-    """TP の species リスト。`evaluate.tp_species`: 'pseudo' (既定, [MIX]) / 'split_h2o'
-    ([MIXDRY, H2O]; `tp_keep_species` で残す種を変えられる)。"""
-    mode = str(p.evaluate.get("tp_species", "pseudo"))
-    if mode == "pseudo":
-        return ["MIX"]
-    if mode == "split_h2o":
-        return ["MIXDRY", str(p.evaluate.get("tp_keep_species", "H2O")).upper()]
-    raise ValueError("evaluate.tp_species は 'pseudo' か 'split_h2o'")
+    """TP の species リスト (統一スキーマ `evaluate.tp_species` を解決した輸送種順序)。"""
+    return list(p.species_layout().species)
 
 
 def _tp_species_Y(p: Problem):
-    """IC/BC 用の組成 [Y_s] (species リスト順)。pseudo なら None (roY 不要)。"""
-    if _tp_species_list(p) == ["MIX"] or not p.is_semiperfect \
-            or str(p.evaluate.get("cfd_gas", "same")) == "cpg":
+    """IC/BC 用の組成 [Y_s] (species リスト順)。単一輸送種 (旧 pseudo = MIX) や CPG なら None (roY 不要)。"""
+    if not p.is_semiperfect or str(p.evaluate.get("cfd_gas", "same")) == "cpg":
         return None
-    from ..gas.semiperfect import mixture_pseudo_species_split
-    _, Ys, order = mixture_pseudo_species_split(dict(p.raw["gas"]["species"]),
-                                                keep=(str(p.evaluate.get("tp_keep_species", "H2O")),))
-    return [Ys[k] for k in order]
+    layout = p.species_layout()
+    if layout.n == 1:
+        return None
+    return layout.Y_transport("inflow")
+
+
+def _species_info(p: Problem) -> dict | None:
+    """prepare_info.json 用: 組成 (X / Y / 入力総和 / DB の出典) と輸送種配置の要約 (plan §4.1)。"""
+    if not p.is_semiperfect:
+        return None
+    Y, X, tot = p.gas_composition
+    out = {"composition_basis": p.composition_basis, "Y": Y, "X": X, "input_sum": tot,
+           "species_db": p.raw.get("gas", {}).get("species_db"), "condensing_species": p.condensing_species}
+    if str(p.evaluate.get("cfd_gas", "same")) != "cpg":
+        L = p.species_layout()
+        out.update({"mode": L.mode, "transported": list(L.species), "keep": list(L.keep), "condensing_index": L.cond_index,
+                    "Y_transport": L.Y_transport("inflow"), "db_source": {s: L.entries[s].source for s in L.species}})
+    return out
 
 
 def _bcond_with_species(txt: str, Ys) -> str:
@@ -493,7 +501,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
             "wall_mode": d["wall_mode"], "wall_repr": d["wall_repr"],
             "axis_law": d["axis_law"], "M_knot": d["M_knot"], "x_K": d["x_K"],
             "L_U": float(p.geometry.get("L_U", 3.5)),
-            "gas": d["gas"], "gamma_hall": d["gamma_hall"],
+            "gas": d["gas"], "species": _species_info(p), "gamma_hall": d["gamma_hall"],
             "wall_fit": d["wall_fit"],
             "Md": d["Md"], "R": d["R"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},

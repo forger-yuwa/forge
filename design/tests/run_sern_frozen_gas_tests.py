@@ -88,5 +88,52 @@ if yml.exists():
 else:
     print("skip: problem_moo_frozen_tp_cycle3op.yaml が無い")
 
+
+# --- 統一 tp_species スキーマ (plan thermophysics-cea-mole-fraction-species §4.5 / §6 SERN, 2026-09-16) ---
+if yml.exists():
+    import h5py, tempfile
+    # full: 輸送種 = 排気 ∪ 外気、トレーサ roXi、IC に roY0..N-1 + roXi、bcond に Xi
+    p = load_problem(yml); p.evaluate["tp_species"] = {"mode": "full"}; R.select_operating_point(p, "m6_on"); st = R.gas_states(p)
+    check("full m6_on: 輸送種 11 種 (排気 ∪ 外気), tracer, 入口 Y 和 1, Xi 1/0", len(st["species"]) == 11 and st["tracer"] and abs(sum(st["exhaust"]["Y"]) - 1) < 1e-12
+          and abs(sum(st["ext"]["Y"]) - 1) < 1e-12 and st["exhaust"]["Xi"] == 1.0 and st["ext"]["Xi"] == 0.0)
+    cfg = R._solver_config(p, 100, 10, 0.5, 1000.0)
+    check("full m6_on: solverConfig に 11 種と tracer: exhaust", f"species: [{', '.join(st['species'])}]" in cfg and "tracer: exhaust" in cfg)
+    ic = R.region_ic_arrays(np.array([True, False]), st, p.gamma)
+    check("full m6_on: IC に roY0..roY10 と roXi (排気側 ρ, 外気側 0)", all(f"roY{i}" in ic for i in range(11)) and ic["roXi"][0] == st["exhaust"]["ro"] and ic["roXi"][1] == 0.0
+          and abs(sum(ic[f"roY{i}"][0] for i in range(11)) - st["exhaust"]["ro"]) < 1e-9 * st["exhaust"]["ro"])
+    bc = R._bcond_config(p, st)
+    check("full m6_on: bcond の排気入口に Y0..Y10 と Xi: 1", "Y10:" in bc.split("inlet_nozzle")[1].split("\n")[0] and "Xi: 1" in bc.split("inlet_nozzle")[1].split("\n")[0] and "Xi: 0" in bc.split("inlet_ext")[1].split("\n")[0])
+    # 輸送種ごとの FrozenGas の和 = 排気ガスの熱力学 (lump 線形混合の厳密性)
+    g = R.frozen_gases(p); Tq = 2000.0
+    e_sum = sum(y * gg.e_sens(Tq)[0] for y, gg in zip(st["exhaust"]["Y"], g["transported"])); e_ref = g["exhaust"].e_sens(Tq)[0]
+    check("full m6_on: Σ Y_s e_sens,s(T) = 排気 e_sens(T)", abs(e_sum / e_ref - 1) < 1e-12, f"{e_sum:.6e} vs {e_ref:.6e}")
+    # lumped + keep [H2O]: EXH = 1 − Y_H2O、m4_off (H2O 無し) でも配置が同じ
+    tp = {"mode": "lumped", "lumps": {"EXH": {"from": "stream", "stream": "inflow"}, "AIR": {"from": "stream", "stream": "external"}}, "keep": ["H2O"]}
+    p = load_problem(yml); p.evaluate["tp_species"] = tp; R.select_operating_point(p, "m6_on"); st = R.gas_states(p)
+    check("lumped+keep m6_on: [EXH, AIR, H2O], 排気 [0.7589, 0, 0.2411], tracer 無し", st["species"] == ["EXH", "AIR", "H2O"] and abs(st["exhaust"]["Y"][2] - 0.2411091186) < 1e-9 and not st["tracer"])
+    p = load_problem(yml); p.evaluate["tp_species"] = tp; R.select_operating_point(p, "m4_off"); st4 = R.gas_states(p)
+    check("lumped+keep m4_off: 同じ配置 [EXH, AIR, H2O] で Y_H2O = 0", st4["species"] == ["EXH", "AIR", "H2O"] and st4["exhaust"]["Y"] == [1.0, 0.0, 0.0])
+    # restart_by_index / warm_from_same_mesh: 全 roY + roXi を引き継ぐ (codex M4 の既存バグ修正)
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "res.h5"; dst = Path(td) / "sern.h5"
+        with h5py.File(src, "w") as f:
+            v = f.create_group("VALUE"); v["ro"] = np.array([2.0, 2.0]); v["roUx"] = np.array([1.0, 1.0]); v["roUy"] = np.zeros(2); v["roUz"] = np.zeros(2); v["roe"] = np.array([5.0, 5.0])
+            v["roY0"] = np.array([0.8, 0.8]); v["roY1"] = np.array([1.2, 1.2]); v["roXi"] = np.array([0.4, 0.4]); v["wall_dist"] = np.array([9.0, 9.0])
+        with h5py.File(dst, "w") as f:
+            v = f.create_group("VALUE"); v["ro"] = np.array([1.0, 1.0]); v["roUx"] = np.zeros(2); v["roUy"] = np.zeros(2); v["roUz"] = np.zeros(2); v["roe"] = np.ones(2)
+            v["roY0"] = np.array([1.0, 1.0]); v["roY1"] = np.zeros(2); v["wall_dist"] = np.array([1.0, 1.0])
+        R.restart_by_index(src, dst)
+        with h5py.File(dst) as f:
+            ok = (f["VALUE/roY0"][0] == 0.8 and f["VALUE/roY1"][0] == 1.2 and "roXi" in f["VALUE"] and abs(f["VALUE/roXi"][0] - 0.4) < 1e-7
+                  and f["VALUE/wall_dist"][0] == 1.0 and abs((f["VALUE/roY0"][0] + f["VALUE/roY1"][0]) / f["VALUE/ro"][0] - 1.0) < 1e-12)
+        check("restart_by_index: roY0/roY1/roXi を引き継ぎ ΣρY = ρ、wall_dist は触らない", bool(ok))
+        from forge_design.evaluate import runner_sern3d as R3
+        run3 = Path(td) / "run3"; run3.mkdir(); (run3 / R3.MESH).write_bytes(Path(dst).read_bytes())
+        with h5py.File(run3 / R3.MESH, "r+") as f:
+            f["VALUE/roY0"][:] = 1.0; f["VALUE/roY1"][:] = 0.0
+        R3.warm_from_same_mesh(run3, src)
+        with h5py.File(run3 / R3.MESH) as f:
+            check("warm_from_same_mesh (3D): roY/roXi を引き継ぐ", f["VALUE/roY1"][0] == 1.2 and "roXi" in f["VALUE"])
+
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)

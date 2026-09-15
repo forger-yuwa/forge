@@ -84,32 +84,44 @@ def select_operating_point(p: Problem, op: str | None) -> dict:
 
 
 # --- R3: 凍結組成 TP (排気 = CEA 凍結組成の擬似種 EXH, 外気 = 空気 AIR) ------------------------------------
-SPECIES_ORDER = ("EXH", "AIR")     # forge `species:` の順序 = Y0 (排気), Y1 (空気)
+SPECIES_ORDER = ("EXH", "AIR")     # 旧既定 (evaluate.tp_species 省略時の別名 = lumps {EXH: stream inflow, AIR: stream external})
 
 
 def frozen_gases(p: Problem) -> dict | None:
-    """gas.model: frozen_tp のとき {"exhaust": FrozenGas, "ext": FrozenGas, "href_T": float}。cpg なら None。
-    排気組成は作動点 `gas.composition` (select_operating_point が `gas.exhaust_composition` に写す) のモル分率。
-    外気は `spec.external.composition` (モル分率) があればそれ、無ければ乾燥空気 (φ=0 の power-off は排気も空気)。"""
+    """gas.model: frozen_tp のとき {"exhaust": FrozenGas, "ext": FrozenGas, "href_T", "layout": SpeciesLayout, "db",
+    "transported": [FrozenGas (輸送種ごと)]}。cpg なら None。
+    排気組成は作動点 `gas.composition` (select_operating_point が `gas.exhaust_composition` に写す) のモル分率、
+    外気は `spec.external.composition` (モル分率) があればそれ、無ければ乾燥空気。
+    輸送種の配置は統一スキーマ `evaluate.tp_species` (省略時 = 旧 `[EXH, AIR]` = 流れごとの lump; `{mode: full}` で実種の和集合、
+    このとき排気率は受動スカラ `roXi` で輸送) を流れ {inflow, external} で解決する (plan cea-mole-fraction §4.5)。"""
     if not p.is_frozen_tp:
         return None
+    from ..gas.composition import parse_tp_species, resolve_species_layout
     href = float(p.raw["gas"].get("thermo_href_temp", 298.15))
     comp = p.raw["gas"].get("exhaust_composition")
     if not comp:
         raise ValueError("gas.model: frozen_tp には gas.exhaust_composition か operating_points[].gas.composition (モル分率) が要る")
+    db = p.species_db
     ext_comp = p.spec["external"].get("composition")
-    return {"exhaust": FrozenGas.from_mole(comp, SPECIES_ORDER[0], href),
-            "ext": FrozenGas.from_mole(ext_comp, SPECIES_ORDER[1], href) if ext_comp else FrozenGas.air(href), "href_T": href}
+    exh = FrozenGas.from_mole(comp, "EXH", href, db)
+    ext = FrozenGas.from_mole(ext_comp, "AIR", href, db) if ext_comp else FrozenGas.air(href, db)
+    ev = dict(p.evaluate)
+    ev.setdefault("tp_species", ["EXH", "AIR"])
+    layout = resolve_species_layout(parse_tp_species(ev), {"inflow": exh.Y, "external": ext.Y}, db,
+                                    condensing_species=None, condensation=False)
+    transported = []
+    for sname in layout.species:
+        e = layout.entries[sname]
+        transported.append(FrozenGas(e.lump_mass if e.lump_mass else {sname: 1.0}, sname, href, db))
+    return {"exhaust": exh, "ext": ext, "href_T": href, "layout": layout, "db": db, "transported": transported}
 
 
 def write_species_db(p: Problem, run_dir, gases: dict | None) -> None:
+    """輸送種の `species_db.yaml` (由来コメント付き) と `species_meta.yaml` を run dir に書く (cpg なら何も書かない)。"""
     if gases is None:
         return
-    import yaml as _yaml
-    db = {}
-    for key in ("exhaust", "ext"):
-        db.update(gases[key].pseudo_species_db())
-    (Path(run_dir) / "species_db.yaml").write_text(_yaml.safe_dump(db, sort_keys=False))
+    from ..gas.composition import write_species_files
+    write_species_files(gases["layout"], run_dir)
 
 
 def gas_states(p: Problem) -> dict:
@@ -139,8 +151,11 @@ def gas_states(p: Problem) -> dict:
     out = {"exhaust": st_ex, "ext": st_en, "R": R, "gas_model": "frozen_tp" if gases else "cpg",
            "q_inf": 0.5 * st_en["ro"] * st_en["u"] ** 2}
     if gases:
-        out["species"] = list(SPECIES_ORDER); out["href_T"] = gases["href_T"]
-        out["exhaust"]["Y"] = [1.0, 0.0]; out["ext"]["Y"] = [0.0, 1.0]
+        L = gases["layout"]
+        out["species"] = list(L.species); out["href_T"] = gases["href_T"]; out["tp_mode"] = L.mode; out["tracer"] = bool(L.tracer)
+        out["exhaust"]["Y"] = L.Y_transport("inflow"); out["ext"]["Y"] = L.Y_transport("external")
+        if L.tracer:                     # full: 排気率 ξ (排気入口 1 / 外気入口 0) を受動スカラ roXi で輸送
+            out["exhaust"]["Xi"] = 1.0; out["ext"]["Xi"] = 0.0
         out["gas_summary"] = {"exhaust": gases["exhaust"].summary(), "ext": gases["ext"].summary()}
     return out
 
@@ -204,8 +219,10 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     # R3 (frozen_tp): 排気 EXH / 空気 AIR の 2 擬似種 TP。thermoHrefTemp (sensible datum) は陰解法の χ_eos 桁違い対策で必須
     # ([[isobutane-wt-semiperfect]] / runner_axismach と同じ)。IC の roe も同じ基準で組む (paste_region_ic)
     if p.is_frozen_tp:
-        href = float(p.raw["gas"].get("thermo_href_temp", 298.15))
-        _tp = f", species: [{', '.join(SPECIES_ORDER)}], speciesDBFile: \"species_db.yaml\", thermoHrefTemp: {href}"
+        gases = frozen_gases(p); L = gases["layout"]
+        _tp = f", species: [{', '.join(L.species)}], speciesDBFile: \"species_db.yaml\", thermoHrefTemp: {gases['href_T']}"
+        if L.tracer:
+            _tp += ", tracer: exhaust"
         _tm = 2
     else:
         _tp = ""; _tm = 0
@@ -265,7 +282,12 @@ def _bcond_config(p: Problem, st: dict) -> str:
 def inlet_species_floats(s: dict) -> str:
     """frozen_tp の入口組成 (Y0 = 排気, Y1 = 空気)。cpg (Y 無し) は空文字。"""
     Y = s.get("Y")
-    return "" if Y is None else "".join(f", Y{i}: {float(y):.6g}" for i, y in enumerate(Y))
+    if Y is None:
+        return ""
+    txt = "".join(f", Y{i}: {float(y):.6g}" for i, y in enumerate(Y))
+    if "Xi" in s:
+        txt += f", Xi: {float(s['Xi']):.6g}"
+    return txt
 
 
 def region_ic_arrays(upper, st: dict, gamma: float) -> dict:
@@ -278,7 +300,10 @@ def region_ic_arrays(upper, st: dict, gamma: float) -> dict:
     if st.get("gas_model") == "frozen_tp":
         e_ex = ex["h_sens"] - ex["R"] * ex["T"]; e_en = en["h_sens"] - en["R"] * en["T"]
         out["roe"] = ro * (np.where(upper, e_ex, e_en) + 0.5 * u * u)
-        out["roY0"] = np.where(upper, ro, 0.0); out["roY1"] = np.where(upper, 0.0, ro)
+        for i, (ye, ya) in enumerate(zip(ex["Y"], en["Y"])):      # 輸送種ごとの領域組成 (lumped: [1,0]/[0,1], full: 実種ベクトル)
+            out[f"roY{i}"] = ro * np.where(upper, float(ye), float(ya))
+        if st.get("tracer"):
+            out["roXi"] = np.where(upper, ro, 0.0)
     else:
         out["roe"] = P / (gamma - 1.0) + 0.5 * ro * u * u
     return out
@@ -413,8 +438,14 @@ def restart_by_index(res_h5, mesh_h5) -> None:
     ノードに写す → 排気側の壁ノードが外部流の圧力を持ち 2 次で発散した (interp_field の全 134 station で誤写像を確認)。"""
     with h5py.File(res_h5, "r") as src, h5py.File(mesh_h5, "r+") as dst:
         n = len(dst["VALUE/ro"])
-        for k in ("ro", "roUx", "roUy", "roUz", "roe", "roK", "roOmega"):   # 状態量のみ (wall_dist は触らない)
-            if k in src["VALUE"] and k in dst["VALUE"] and len(src["VALUE"][k]) == n:
+        keys = ["ro", "roUx", "roUy", "roUz", "roe", "roK", "roOmega"]        # 状態量のみ (wall_dist は触らない)
+        keys += sorted(k for k in src["VALUE"] if re.fullmatch(r"roY\d+", k)) + ["roXi"]   # 化学種・トレーサも引き継ぐ (旧: 7 変数のみで ΣY が壊れた; codex M4)
+        for k in keys:
+            if k in src["VALUE"] and len(src["VALUE"][k]) == n:
+                if k not in dst["VALUE"]:
+                    if k.startswith("roY") or k == "roXi":
+                        dst["VALUE"].create_dataset(k, data=np.asarray(src["VALUE"][k][:], dtype=np.float32))
+                    continue
                 dst["VALUE"][k][:] = src["VALUE"][k][:]
 
 
@@ -461,16 +492,31 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
         else:
             # frozen_tp (R3): 圧力は出力の P を相似スケール、組成 (Y_EXH, Y_AIR) は場のまま持ち越し、
             # T' = P'/(ρ' R_mix(Y)) と目標作動点の擬似種 (排気組成が違う) で roe' = ρ'(Σ Y_s e_sens,s(T') + ½|u'|²) を組み直す
-            if "P" not in src["VALUE"] or "roY0" not in src["VALUE"]:
-                raise ValueError("warm_from_run (frozen_tp): 元 run の出力に P / roY0 が無い")
+            # 輸送種は名前で照合 (元 run の species_meta.yaml / prepare_info と目標の配置が同じ順序であること)
+            tg = gases_d["transported"]; names = list(gases_d["layout"].species)
+            src_names = list(si["states"].get("species") or [])
+            if src_names and src_names != names:
+                raise ValueError(f"warm_from_run: 輸送種の順序が違う (元 {src_names} / 先 {names}); 作動点変更で配置が変わるときは convert_species_field.py を使う")
+            if "P" not in src["VALUE"] or any(f"roY{i}" not in src["VALUE"] for i in range(len(names))):
+                raise ValueError(f"warm_from_run (frozen_tp): 元 run の出力に P / roY0..roY{len(names)-1} が無い")
             P = src["VALUE/P"][:].astype(np.float64) * s_P
-            Y0 = np.clip(src["VALUE/roY0"][:].astype(np.float64) / np.maximum(ro, 1e-30), 0.0, 1.0); Y1 = 1.0 - Y0
-            gx, ga = gases_d["exhaust"], gases_d["ext"]
-            R_mix = Y0 * gx.R + Y1 * ga.R
+            Ys = [np.clip(src[f"VALUE/roY{i}"][:].astype(np.float64) / np.maximum(ro, 1e-30), 0.0, 1.0) for i in range(len(names))]
+            tot = np.maximum(sum(Ys), 1e-30); Ys = [y / tot for y in Ys]
+            R_mix = sum(y * g.R for y, g in zip(Ys, tg))
             T_n = P / np.maximum(ro_n * R_mix, 1e-30)
-            e_n = Y0 * gx.e_sens(T_n) + Y1 * ga.e_sens(T_n)
+            e_n = sum(y * g.e_sens(T_n) for y, g in zip(Ys, tg))
             roe_n = ro_n * e_n + 0.5 * sum(m * m for m in mom_n) / np.maximum(ro_n, 1e-30)
-            dst["VALUE/roY0"][:] = ro_n * Y0; dst["VALUE/roY1"][:] = ro_n * Y1
+            for i, y in enumerate(Ys):
+                if f"roY{i}" in dst["VALUE"]:
+                    dst[f"VALUE/roY{i}"][:] = ro_n * y
+                else:
+                    dst["VALUE"].create_dataset(f"roY{i}", data=(ro_n * y).astype(np.float32))
+            if "roXi" in src["VALUE"]:
+                Xi = np.clip(src["VALUE/roXi"][:].astype(np.float64) / np.maximum(ro, 1e-30), 0.0, 1.0)
+                if "roXi" in dst["VALUE"]:
+                    dst["VALUE/roXi"][:] = ro_n * Xi
+                else:
+                    dst["VALUE"].create_dataset("roXi", data=(ro_n * Xi).astype(np.float32))
         dst["VALUE/ro"][:] = ro_n
         for k, m in zip(("roUx", "roUy", "roUz"), mom_n):
             dst["VALUE"][k][:] = m

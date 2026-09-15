@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `thermophysics / tooling (design chain)`
-- **status**: `draft`
+- **status**: `in_progress`
 - **related_docs**:
   - `methods/thermophysics.md` (多成分 TP 熱物性: 実装 §5 設定)
   - `methods/design/overview.md` (設計チェーンの species 分割 `evaluate.tp_species`)
@@ -174,10 +174,10 @@ evaluate:
 | # | 項目 | 内容 |
 | --- | --- | --- |
 | 1 | ~~codex plan レビュー~~ | 2026-09-15 実施 (§6.1)。M1–M8/m1–m2 を全て採用し §2/§3/§4/§6 に反映済み。**実装着手可** (ユーザ確認後; 順序は limiter plan の後) |
-| 2 | docs 先行更新 | ステップ 1 |
-| 3 | 共通基盤 (解決済み DB・換算・凝縮種名正本) | ステップ 2–3 + 単体試験を **CFD 回帰より前に** |
-| 4 | 設計チェーン統一スキーマ (ノズル) | ステップ 4 |
-| 4b | SERN の統一 (`SPECIES_ORDER` 撤去, 流れごとの質量配分, 領域 IC, restart 経路の全種化) | ステップ 4b。既存 case/46 run との後方互換 (`[EXH,AIR]` 別名) を回帰で確認 |
+| 2 | ~~docs 先行更新~~ | 済 (2026-09-16): `methods/thermophysics.md` §5、`methods/design/overview.md` (統一スキーマ)、`design/CAPABILITIES.md`、skill design-intake |
+| 3 | ~~共通基盤 (解決済み DB・換算・凝縮種名正本)~~ | 済 (2026-09-16): `gas/composition.py` (`ResolvedSpeciesDB`, `mole_to_mass`/`mass_to_mole`, `parse_tp_species`, `resolve_species_layout`, `species_db_yaml`/`species_meta`), `semiperfect`/`frozen` は DB 注入、`probdef` に `composition_basis`/`condensing_species`/`species_db` と検証。単体 (a)–(e) + 外部 DB + SERN 配分を `run_gas_tests.py` に追加 (ALL PASS) |
+| 4 | ~~設計チェーン統一スキーマ (ノズル)~~ | 済 (2026-09-16): `runner_axismach` は `p.species_layout()` で species / `species_db.yaml` (由来コメント) / `species_meta.yaml` / `condGasSpecies` (名前から生成、手書きは一致検査) / `condensationSpecies` / prepare_info `species` を出す |
+| 4b | SERN の統一 (`SPECIES_ORDER` 撤去, 流れごとの質量配分, 領域 IC, restart 経路の全種化) | コード済 (2026-09-16): `frozen_gases` が layout (省略時 `[EXH, AIR]` 別名) と輸送種ごとの `FrozenGas` を返す、`gas_states`/`_solver_config`/IC/BC は N 種 + `Xi`、`restart_by_index`/`warm_from_same_mesh` は全 roY + roXi、`warm_from_run` は N 種 (順序不一致は拒否)。単体 (`run_sern_frozen_gas_tests.py`: full 11 種・lumped+keep・m4_off 配置一致・restart) ALL PASS。**残**: case/46 の 2D node Euler 回帰 (別名 = 旧 run とノイズ床内; full vs lumped) |
 | 4c | 排気トレーサ `roXi` (forge) と `species_meta.yaml` | ステップ 4c + §4.5 メタデータ。元素混合分率は診断のみ |
 | 5 | forge 入力 `X{s}`・種名検査・`rms_roY`・restart 照合 | ステップ 5 |
 | 5b | 種変換 restart ツールと CEA `--check` 修正 | ステップ 5b (case/44 の旧 2 種場を 5 種へ移すのに必須) |
@@ -233,6 +233,7 @@ evaluate:
 
 ## 9. 変更ログ
 
+- `2026-09-16` — **実装着手** (ユーザ指示: plan レビュー済みなので追加レビュー無しで着手可): docs 先行更新、`gas/composition.py` (解決済み DB・換算・統一スキーマ解決・DB/メタ出力)、gas パッケージの DB 注入、`probdef` の gas 検証、`runner_axismach` / `runner_sern{,3d}` の統一スキーマ化と restart 全種化、単体試験追加 (ALL PASS)。forge 本体側 (host DB 解決・`X{s}`・`condensationSpecies`・`rms_roY`・`roXi`・ツール) は並行実装中。
 - `2026-09-15` — 初稿 (ユーザ要望: MIXDRY の中身を明示・ユーザ指定可能に、CEA ベースでモル分率指定)。
 - `2026-09-15` — ユーザ決定: SERN もノズル設計も `full | lumped` を run ごとに選べる統一スキーマにする (§4.5)。
 - `2026-09-15` — codex 再レビュー (§4.5, GO-with-changes M6/m1) を全採用: 排気率は元素混合分率でなく独立トレーサ `roXi` (元素は診断のみ)、流れごとの質量配分正本、`species_meta.yaml`、SERN restart 経路の全種化、SERN 検証ゲート強化、スキーマ一本化。

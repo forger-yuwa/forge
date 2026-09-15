@@ -51,7 +51,7 @@ ledger) であり、ループの中に対話を持ち込まない。
   - **b. 制約化**: 「飽和線を越えない (S<1、余裕温度 ΔT を指定)」を評価ゲートに
     追加する。dry CFD + `Tsat_post` 後処理で判定できるため 1 評価のコストは
     ほぼ増えない。凝縮回避が要求仕様のときはこちら。
-  - **c. ループ内凝縮 CFD**: 全評価点で凝縮 ON (`tp_species: split_h2o` +
+  - **c. ループ内凝縮 CFD**: 全評価点で凝縮 ON (`tp_species: split_h2o` [= `{mode: lumped, lumps: {MIXDRY: {from: composition, exclude: [H2O]}}, keep: [H2O]}`; `full` で全種独立も可] +
     `condensation`, condEquilibrium: 2 推奨, axismach のみ)。凝縮量・潜熱の影響
     そのものが目的量に効く場合に限る。コスト増を明示して承認を取る。
   - 注意: `condTsat` 診断は凝縮 ON run のみ出力。dry run は後処理 `Tsat_post` を使う。

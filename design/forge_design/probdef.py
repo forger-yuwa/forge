@@ -27,6 +27,7 @@ class Problem:
     mesh: dict
     evaluate: dict
     raw: dict = field(repr=False, default_factory=dict)
+    path: str | None = field(repr=False, default=None)   # 問題 YAML の所在 (gas.species_db の相対パス基準)
 
     @property
     def R_gas(self) -> float:
@@ -44,7 +45,8 @@ class Problem:
             return GasCPG(self.gamma, self.cp)
         if kind == "semiperfect":
             from .gas import GasSemiPerfect
-            return GasSemiPerfect(dict(gs["species"]), Tt=float(self.spec["Tt"]))
+            Y, _, _ = self.gas_composition
+            return GasSemiPerfect(Y, Tt=float(self.spec["Tt"]), db=self.species_db)
         if kind == "frozen_tp":
             # SERN ⑤ R3: 逆設計 (平面 MOC) は設計点 γ の CPG のまま (形状パラメータ化)。CFD・入口状態・正規化は
             # runner 側で FrozenGas (排気 = CEA 凍結組成, 外気 = 空気) を使う
@@ -86,6 +88,57 @@ class Problem:
                     f"floats: {{Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: {wt['Tw']}}}}}")
         return f"{{physID: {phys_id}, kind: wall,             outputHDFflg: {output}, ints: , floats: }}"
 
+    # --- 組成の単一ソース (2026-09-16, plan thermophysics-cea-mole-fraction-species §4.1) ---
+    @property
+    def species_db(self):
+        """解決済み種 DB: 内蔵 SPECIES_NASA9 に `gas.species_db` (問題 YAML の所在基準の相対パス可) を上書きしたもの。
+        設計 (MOC)・擬似種・IC・`species_db.yaml` 出力の全経路がこれを使う。"""
+        from .gas.composition import ResolvedSpeciesDB
+        path = self.raw.get("gas", {}).get("species_db")
+        if not path:
+            return ResolvedSpeciesDB.builtin()
+        from pathlib import Path
+        pth = Path(str(path))
+        if not pth.is_absolute() and self.path:
+            pth = Path(self.path).resolve().parent / pth
+        if not pth.exists():
+            raise FileNotFoundError(f"gas.species_db '{path}' が無い (解決: {pth})")
+        return ResolvedSpeciesDB.from_file(pth)
+
+    @property
+    def composition_basis(self) -> str:
+        return str(self.raw.get("gas", {}).get("composition_basis", "mass")).lower()
+
+    @property
+    def gas_composition(self) -> tuple:
+        """(Y 正規化, X 正規化, 入力の総和) — `gas.species` を `gas.composition_basis` (mass | mole) で解釈。"""
+        from .gas.composition import composition_to_mass
+        gs = self.raw.get("gas", {})
+        if "species" not in gs:
+            raise ValueError("gas.species が無い")
+        return composition_to_mass(dict(gs["species"]), self.composition_basis, self.species_db)
+
+    @property
+    def condensing_species(self) -> str | None:
+        """凝縮種の名前 (正本)。`gas.condensing_species`、無ければ旧 `evaluate.tp_keep_species`、それも無ければ組成に H2O があれば H2O。"""
+        gs = self.raw.get("gas", {})
+        name = gs.get("condensing_species") or self.evaluate.get("tp_keep_species")
+        if name:
+            return str(name).upper()
+        if "species" in gs and any(str(k).upper() == "H2O" for k in gs["species"]):
+            return "H2O"
+        return None
+
+    def species_layout(self, streams: dict | None = None):
+        """統一 `tp_species` スキーマを解決した輸送種配置 (ノズル: 単一流れ `inflow`)。SERN は runner が流れ辞書を渡す。"""
+        from .gas.composition import parse_tp_species, resolve_species_layout
+        if streams is None:
+            Y, _, _ = self.gas_composition
+            streams = {"inflow": Y}
+        cond_on = bool(self.evaluate.get("condensation"))
+        return resolve_species_layout(parse_tp_species(self.evaluate), streams, self.species_db,
+                                      self.condensing_species, condensation=cond_on)
+
     @property
     def is_semiperfect(self) -> bool:
         return str(self.raw.get("gas", {}).get("model", "cpg")) == "semiperfect"
@@ -119,6 +172,7 @@ def load_problem(path) -> Problem:
         mesh=raw["mesh"],
         evaluate=raw["evaluate"],
         raw=raw,
+        path=str(path),
     )
     _validate(prob)
     return prob
@@ -149,6 +203,20 @@ def _validate(p: Problem) -> None:
             errs.append("spec.M_design が必要 (現実装は M_design + r_throat の組を要求)")
         if "r_throat" not in p.spec:
             errs.append("spec.r_throat が必要 (D_e 従属モードは未実装 — 閉ループ派生で追加予定)")
+    # gas (2026-09-16): 組成の基準・種名・凝縮種・tp_species スキーマを入力段階で検査 (plan cea-mole-fraction §4.1–4.2)
+    gs = p.raw.get("gas", {})
+    if str(gs.get("model", "cpg")) == "semiperfect":
+        try:
+            if p.composition_basis not in ("mass", "mole"):
+                errs.append(f"gas.composition_basis '{p.composition_basis}' は未知 (mass | mole)")
+            p.gas_composition
+            if p.evaluate.get("cfd_gas", "same") != "cpg":
+                p.species_layout()
+        except (ValueError, KeyError, FileNotFoundError) as ex:
+            errs.append(f"gas: {ex}")
+    elif "composition_basis" in gs or "species_db" in gs or "condensing_species" in gs:
+        if str(gs.get("model", "cpg")) not in ("semiperfect", "frozen_tp"):
+            errs.append("gas.composition_basis / species_db / condensing_species は gas.model semiperfect | frozen_tp でのみ有効")
     # dv の bound 検査
     for name, d in p.dv.items():
         if isinstance(d, dict) and not d.get("fixed", False):

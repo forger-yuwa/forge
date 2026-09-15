@@ -750,12 +750,41 @@ CFD 側の差は多成分輸送の離散化誤差だけ (検証: M4.2 で軸 M �
 IC は `paste_isentropic_ic(species_Y=)` が `roY{s}` を書き、入口 BC は `Y0/Y1` を bcond に書く。
 低温側は forge の `Tlo`=200 K クランプ (cp 凍結・h 線形接続) と設計側 `T_FLOOR` が一致する。
 
-**(計画, 2026-09-15) 組成入力と species 分割の 3 モード** ([plan](../../plans/active/thermophysics-cea-mole-fraction-species.md)):
-`gas.composition_basis: mole | mass` (既定 mass) で `gas.species` をモル分率でも書けるようにし、`evaluate.tp_species` を
-`pseudo` (全部 1 擬似種 `MIX`) / `lumped` (`tp_lump: {name, keep}` で畳む種と名前をユーザ指定; `split_h2o` はその別名) /
-`full` (各種を CEA NASA-9 の係数で独立種、`condGasSpecies` は `gas.condensing_species` から自動) の 3 択にする。`species_db.yaml` の
-各エントリに由来 (CEA 種名 / 擬似種の構成種とモル分率) をコメントで残す。`gas.species_db` で `cea_thermo_to_species_db.py` が
-`thermo.inp` から作った DB を直接使える。dry では 3 モードは同一解 (線形混合が厳密)。
+**組成入力と species 分割の統一スキーマ (2026-09-16 実装, plan [thermophysics-cea-mole-fraction-species](../../plans/active/thermophysics-cea-mole-fraction-species.md))**:
+
+```yaml
+gas:
+  model: semiperfect            # ノズル (SERN は frozen_tp)
+  composition_basis: mole       # mole | mass (既定 mass = 後方互換)
+  species: {H2O: 6.09135e-2, N2: 6.64860e-1, O2: 2.16072e-1, AR: 7.97588e-3, CO2: 4.90034e-2}   # Σ≠1 は正規化してログ
+  condensing_species: H2O       # 凝縮種は名前が正本 (condGasSpecies は生成値)
+  species_db: null              # パスを書けば cea_thermo_to_species_db.py が thermo.inp から作った CEA 直読み DB を正本にする
+evaluate:
+  tp_species:
+    mode: full | lumped         # full = 各種を CEA NASA-9 の係数で独立種; lumped = 下の lumps に畳む
+    lumps:                      # lumped のみ。畳む対象 (組成の部分集合 or 流れ)
+      MIXDRY: {from: composition, exclude: [H2O]}    # ノズル: 旧 split_h2o
+      EXH:    {from: stream, stream: inflow}         # SERN: 作動点の排気組成
+      AIR:    {from: stream, stream: external}       # SERN: 外気 (spec.external.composition / 乾燥空気)
+    keep: [H2O]                 # 独立種のまま残す種 (凝縮種は必ずここ)
+```
+
+- **解決済み DB を 1 つ構築して全経路へ渡す** (`gas/composition.py` の `ResolvedSpeciesDB`): 内蔵 `SPECIES_NASA9` に `gas.species_db` を上書きしたものを、
+  モル→質量換算 (`mole_to_mass`; SERN の `frozen.mole_to_mass` はここへ委譲)・`GasSemiPerfect` (MOC)・擬似種生成・IC・`species_db.yaml` 出力のすべてが使う。
+  実種の原子組成 (CEA の元素欄) も持つ。
+- **旧形式は入力時の別名**: `tp_species: pseudo` = 全部を 1 lump `MIX`、`split_h2o` = `{lumps: {MIXDRY: composition exclude [H2O]}, keep: [H2O]}`、SERN の
+  `[EXH, AIR]` = `{lumps: {EXH: stream inflow, AIR: stream external}}`。競合指定 (文字列と mapping の両方) は拒否。
+- **流れごとの質量配分が正本**: 各流れ (ノズルは 1 流れ、SERN は排気/外気) で `keep` の種を先に取り出し、残りをその流れの lump に配分する
+  (純排気でも `keep: [H2O]` なら $Y_{EXH}=1-Y_{H2O}$)。未配分・二重配分・空 lump・擬似種名と実種名の衝突・凝縮種が `keep` に無い・`pseudo` 相当で凝縮 ON は入力段階で拒否。
+- **`species_db.yaml` の各エントリに由来をコメント**で残す (`# source: CEA thermo.inp ...` / `# lumped: {N2: 0.7089, ...} (mole fractions within the lump)`)。
+  **`species_meta.yaml`** (run dir) に実種の原子組成、lump の展開行列、各流れの正規化済み組成 (X と Y)、輸送種順序、トレーサの有無を機械可読で保存し、
+  後処理・restart は問題 YAML を再解釈せずこれを使う。`prepare_info.json` にも `gas.X` / `gas.Y` / DB の出典。
+- **`full` の SERN**: 輸送種 = 排気組成 ∪ 外気組成。IC は領域ごと (排気側 / 外気側) にその流れの Y ベクトル、BC も流れごと。排気率 ξ は受動スカラ `roXi` (forge `physProp.tracer: exhaust`)
+  で輸送し、`lumped` では ξ = $Y_{EXH}$ を同じアクセサ `exhaust_fraction(run)` が返す。段階 restart (`restart_by_index` / `warm_from_same_mesh`) は全種とトレーサを引き継ぐ
+  (従来は 7 変数のみで ΣY が壊れていた)。作動点変更時の組成再構成は `convert_species_field.py` (情報を落とす初期化操作)。
+- **熱力学の等価性**: `full` ≡ `lumped` は「同じ解決済み DB・同じ温度域処理・同じ datum・非粘性 frozen・各 lump の内部比が空間的に一定」のときのみ厳密
+  (質量分率線形混合)。粘性 run は種ごとの拡散係数と種エンタルピー拡散で一般に異なる (仕様として記録)。SERN 3D SST の `full` は輸送式 2 → 11–13 本で
+  step 時間 +50–100 % の見込みなので、MOO 探索は `lumped`、最終評価や凝縮・化学の前段は `full` と run ごとに選ぶ (既定は変えない)。
 
 ## メッシュ (構造化・トポロジ固定)
 

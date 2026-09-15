@@ -26,7 +26,8 @@
 | --- | --- | --- | --- | --- |
 | CPG (定比熱) | `gas.model: cpg` (既定) | 全 | ✅ | |
 | semi-perfect TP (NASA-9) | `gas.model: semiperfect`, `evaluate.cfd_gas` | axismach | ✅ | CEA 凍結流と 0.04% 一致 (case/44)。**`thermo_href_temp: 298.15` 必須** (絶対基準 h だと χ_eos 桁違い→発散) |
-| TP 擬似種の分割 | `evaluate.tp_species: pseudo\|split_h2o`, `tp_keep_species` | axismach | ✅ | split_h2o で H₂O を独立種化し凝縮が指せる |
+| TP 擬似種の分割 | `evaluate.tp_species: {mode: full\|lumped, lumps, keep}` (旧 `pseudo` / `split_h2o` / SERN `[EXH, AIR]` は別名) | axismach / sern | ✅ | `full` = 各種を CEA NASA-9 の独立種、`lumped` = ユーザ指定の lump に畳む (plan thermophysics-cea-mole-fraction-species) |
+| 組成のモル分率入力 | `gas.composition_basis: mole\|mass`, `gas.condensing_species`, `gas.species_db` (CEA 直読み DB) | axismach / sern | ✅ | 換算は `gas/composition.py` に一元化、`species_db.yaml` に由来コメント、`species_meta.yaml` に機械可読メタ |
 | 凝縮 (非平衡/平衡) | `evaluate.condensation: {…}` → forge `condensation` ブロック素通し | axismach | ✅ | `condEquilibrium: 2` (EOS 拘束形) を既定推奨。蒸発は既定 ON。h0 保存を確認する |
 | 乱流 SST | `evaluate.turbulence: sst\|none` | runner.py (bell) | ✅ | axismach は Euler/NS 系が主 |
 | 化学反応 — 凍結流 | (= TP semi-perfect) | axismach | ✅ | 組成固定 |
