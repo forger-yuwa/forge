@@ -237,8 +237,13 @@ __host__ __device__ inline void cond_evap_source_rate_f(
     if (g <= 0.0f) return;
     const float lnps = cond_tab_lnpsat_f(tb, T);
     if (p_v > 0.0f && logf(p_v) > lnps) return;
-    if (q0 <= 1.0e-30f) return;
     const float rho_l = cond_tab_rhol_f(tb, T);
+    if (q0 <= 1.0e-30f) {   // 液滴数 0 の液相: 質量だけを r_min の自己相似縮小率で減衰 (double 実体と同じ)
+        const float drdt = cond_evap_rate_f(cp, tb, T, p_v, rmin, growthModel, p_gas, gyarC, kelvin);
+        *drdt_out = drdt; *r30_out = 0.0f;
+        *Sg = 3.0f*rod*g*drdt/rmin;
+        return;
+    }
     const float r30 = cbrtf(g/((4.0f/3.0f)*COND_PI_F*rho_l*q0/rod));
     *r30_out = r30;
     if (!(r30 > 0.0f)) return;

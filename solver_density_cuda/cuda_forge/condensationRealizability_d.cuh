@@ -5,6 +5,7 @@
 #include "cuda_forge/condensationProperties_d.cuh"
 #include "cuda_forge/condensationSource_d.cuh"   // COND_PI
 #include "cuda_forge/condensationEOS_d.cuh"      // cond_clamp_vapor_pressure
+#include "cuda_forge/condensationSourceF_d.cuh"  // float 実体の表評価 (cond_tab_*)
 
 // 実現可能性クランプ: 液相保存量 rog と モーメント roQ0/1/2 を物理範囲に戻す。
 //   0 ≤ rog ≤ roY_w (carrier: 利用可能な総水量) または ≤ 0.99 ρ (pure)。roQn ≥ 0。
@@ -74,4 +75,60 @@ __global__ void cond_realizability_clamp_d(
     record();
 }
 
+// float 実体 (condFloat=1): 判定は閾値比較 (p_v<=p_sat, r30<2 r_min) なので ULP 差で消滅 step が 1 つずれ得る (plan §4.2-4)。
+__global__ void cond_realizability_clamp_f_d(
+    geom_int nCells,
+    flow_float* ro, flow_float* roY_w,
+    flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
+    int evap, float Rw, float rmin, float g_rm, float Yw_const,
+    flow_float* T, flow_float* P, CondTablesF tb, CondSpeciesProps cpd,
+    flow_float* diagCorrG, flow_float* diagCorrQ)
+{
+    geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    const flow_float gmax = (roY_w != nullptr) ? roY_w[ic] : ((Yw_const > 0.0f) ? Yw_const*ro[ic] : 0.99f*ro[ic]);
+    const flow_float r_in = rog[ic], q0_in = roQ0[ic], q1_in = roQ1[ic], q2_in = roQ2[ic];
+    flow_float r = r_in;
+    if (r < 0.0f) r = 0.0f;
+    if (r > gmax) r = gmax;
+    rog[ic] = r;
+    if (roQ0[ic] < 0.0f) roQ0[ic] = 0.0f;
+    if (roQ1[ic] < 0.0f) roQ1[ic] = 0.0f;
+    if (roQ2[ic] < 0.0f) roQ2[ic] = 0.0f;
+    auto record = [&]() {
+        if (diagCorrG == nullptr) return;
+        const float rod0 = ro[ic] > 1.0e-20f ? ro[ic] : 1.0e-20f;
+        diagCorrG[ic] += fabsf(rog[ic] - r_in)/rod0;
+        float rq = 0.0f;
+        const flow_float qin[3] = {q0_in, q1_in, q2_in}; const flow_float qout[3] = {roQ0[ic], roQ1[ic], roQ2[ic]};
+        for (int k = 0; k < 3; ++k) { const float den = fabsf(qin[k]) > 1.0e-30f ? fabsf(qin[k]) : 1.0e-30f;
+            const float rel = fabsf(qout[k] - qin[k])/den; if (qout[k] != qin[k] && rel > rq) rq = rel; }
+        if (rq > diagCorrQ[ic]) diagCorrQ[ic] = rq;
+    };
+    if (!evap) { record(); return; }
+    const float rod = ro[ic];
+    if (rod <= 1.0e-20f) { record(); return; }
+    const float g = r/rod;
+    if (g > g_rm) { record(); return; }
+    const bool dust = (r <= 0.0f) && (roQ0[ic] > 0.0f || roQ1[ic] > 0.0f || roQ2[ic] > 0.0f);
+    if (r <= 0.0f && !dust) { record(); return; }
+    const float Td = T[ic];
+    // 蒸気分圧 (source kernel と同じ定義): TP carrier=ρ(Y_w−g)R_wT, CPG carrier=ρ(Y_w,const−g)R_wT, pure=全圧
+    float pv;
+    if (roY_w != nullptr)      { float yv = roY_w[ic]/rod - g; if (yv < 0.0f) yv = 0.0f; pv = rod*yv*Rw*Td; }
+    else if (Yw_const > 0.0f)  { float yv = Yw_const - g;     if (yv < 0.0f) yv = 0.0f; pv = rod*yv*Rw*Td; }
+    else                         pv = P[ic];
+    const bool inTab = cond_tab_wet_ok(tb, Td);   // 表範囲外は旧 double 関数 (plan §5.1 #8)
+    const float lnps = inTab ? cond_tab_lnpsat_f(tb, Td) : (float)log(cond_psat(cpd, (double)Td) > 1.0e-300 ? cond_psat(cpd, (double)Td) : 1.0e-300);
+    if (pv > 0.0f && logf(pv) > lnps) { record(); return; }   // 過飽和: 消滅させない
+    const float q0 = roQ0[ic];
+    bool remove = dust || (q0 <= 1.0e-30f);
+    if (!remove) {
+        const float rho_l = inTab ? cond_tab_rhol_f(tb, Td) : (float)cond_rho_cond(cpd, (double)Td);
+        const float r30 = cbrtf(g/((4.0f/3.0f)*COND_PI_F*rho_l*q0/rod));
+        remove = (r30 < 2.0f*rmin);
+    }
+    if (remove) { rog[ic] = 0.0f; roQ0[ic] = 0.0f; roQ1[ic] = 0.0f; roQ2[ic] = 0.0f; }
+    record();
+}
 

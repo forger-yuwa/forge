@@ -330,8 +330,15 @@ __host__ __device__ inline void cond_evap_source_rate(
     if (g <= 0.0) return;
     const double psat = cond_psat(cp, T);
     if (p_v > psat) return;                              // 過飽和: 蒸発分岐ではない
-    if (q0 <= 1.0e-30) return;                           // 液滴数 0 (不整合) → クランプで消滅
     const double rho_l = cond_rho_cond(cp, T);
+    if (q0 <= 1.0e-30) {
+        // 液滴数 0 なのに液相がある不整合 (輸送の丸め・平衡形からの restart 等)。消滅クランプは g≤g_rm でしか効かないので、
+        // 質量だけを r_min の自己相似縮小率 3ṙ(r_min)/r_min で Δτ 非依存に減衰させ、g≤g_rm でクランプに渡す (codex 2026-09-16 result-4 M1)。
+        const double drdt = cond_evap_rate(cp, T, p_v, rmin, growthModel, p_gas, gyarC, kelvin);
+        *drdt_out = drdt; *r30_out = 0.0;
+        *Sg = 3.0*rod*g*drdt/rmin;
+        return;
+    }
     const double r30 = cbrt(g/((4.0/3.0)*COND_PI*rho_l*q0/rod));  // q0/rod = Q0 [1/kg]
     *r30_out = r30;
     if (!(r30 > 0.0)) return;

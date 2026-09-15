@@ -29,8 +29,14 @@ for p in res:
     f=h5py.File(p)["VALUE"]; step=int(os.path.basename(p)[4:-3])
     g=f["g_0"][:]; ro=f["ro"][:]; ux=f["Ux"][:]; M=np.hypot(ux,f["Uy"][:])/f["sonic"][:]
     w=(ro*ux*rr)[ex]; o=np.argsort(rr[ex]); ga=np.trapz((w*g[ex])[o],rr[ex][o])/np.trapz(w[o],rr[ex][o]); Ma=np.trapz((w*M[ex])[o],rr[ex][o])/np.trapz(w[o],rr[ex][o])
-    i=np.where(g[wall]>1e-3*a.Yw)[0]; xo=xl[i[0]] if len(i) else np.nan
-    k=np.where(g[j4]>0.3*a.Yw)[0]; x30=xl[k[0]] if len(k) else np.nan
+    # 閾値交差は格子単位の飛びを避けるため線形補間する (codex 2026-09-16 result-4 M2)
+    def cross(line, thr):
+        gv=g[line]; i=np.where(gv>thr)[0]
+        if not len(i): return np.nan
+        k=i[0]
+        if k==0 or gv[k]==gv[k-1]: return xl[k]
+        return xl[k-1]+(thr-gv[k-1])/(gv[k]-gv[k-1])*(xl[k]-xl[k-1])
+    xo=cross(wall, 1e-3*a.Yw); x30=cross(j4, 0.3*a.Yw)
     rows.append((step, g.max(), ga, xo, x30, M[wall][-1], Ma))
 arr=np.array(rows)
 # onset 前のスナップショットは onset 列が NaN になるので、全列が有限になった最初の行以降だけを出す (末尾窓の判定には影響しない)

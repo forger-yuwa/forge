@@ -306,45 +306,62 @@ static void test_small_droplet_evaporates()
 {
     CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
     const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o);
+    CondTablesHost ht; cond_tables_build_host(cp, ht); const CondTablesF tb = cond_tables_upload(ht);
     const double N2lo[9]={2.210371497e+04,-3.818461820e+02,6.082738360e+00,-8.530914410e-03,1.384646189e-05,-9.625793620e-09,2.519705809e-12,7.108460860e+02,-1.076003744e+01};
     const double N2hi[9]={5.877124060e+05,-2.239249073e+03,6.066949220e+00,-6.139685500e-04,1.491806679e-07,-1.923105485e-11,1.061954386e-15,1.283210415e+04,-1.586640027e+01};
     const double H2Olo[9]={-3.947960830e+04,5.755731020e+02,9.317826530e-01,7.222712860e-03,-7.342557370e-06,4.955043490e-09,-1.336933246e-12,-3.303974310e+04,1.724205775e+01};
     const double H2Ohi[9]={1.034972096e+06,-2.412698562e+03,4.646110780e+00,2.291998307e-03,-6.836830480e-07,9.426468930e-11,-4.822380530e-15,-1.384286509e+04,-7.978148510e+00};
     std::vector<SpeciesThermo> sp = { mk(0.0280134,3.621,97.53,N2lo,N2hi), mk(0.0180153,2.605,572.4,H2Olo,H2Ohi) };
     for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); s.low[7] += -hr/THERMO_RU; s.high[7] += -hr/THERMO_RU; }
-    SpeciesThermo* dsp = up(sp);
-    const double T = 250.0, Yw = 0.0377, S = 0.5, Rw = cp.R, g0 = 1.0e-5, r30 = 1.5e-9;
+    std::vector<SpeciesThermoF> spf = { toF(sp[0]), toF(sp[1]) };
+    SpeciesThermo* dsp = up(sp); SpeciesThermoF* dspf = up(spf);
+    const double T = 250.0, Yw = 0.0377, S = 0.5, Rw = cp.R, g0 = 1.0e-5;
     const double pv = S*cond_psat(cp, T), rho_l = cond_rho_cond(cp, T);
     const double rod = pv/((Yw - g0)*Rw*T);   // kernel は p_v=ρ(Y_w−g)R_wT で蒸気状態を作るので、S=0.5 になる ρ を選ぶ
-    double Y[2]={1.0-Yw, Yw}; double cpc,h; thermo_cph_mix(sp.data(),2,Y,T,&cpc,&h); const double Rm = thermo_R_mix(sp.data(),2,Y); const double q0 = g0*rod/((4.0/3.0)*COND_PI*rho_l*r30*r30*r30), q1 = q0*r30, q2 = q0*r30*r30;
+    double Y[2]={1.0-Yw, Yw}; double cpc,h; thermo_cph_mix(sp.data(),2,Y,T,&cpc,&h); const double Rm = thermo_R_mix(sp.data(),2,Y);
     const double V = 1.0e-6, dt = 1.0e-6;
-    auto arr = [&](double v){ return up(std::vector<flow_float>(1,(flow_float)v)); };
-    flow_float *dT=arr(T),*dP=arr(rod*Rm*T),*dro=arr(rod),*dcp=arr(cpc),*dRm=arr(Rm),*dY0=arr(rod*(1-Yw)),*dY1=arr(rod*Yw),*dvol=arr(V),*ddt=arr(dt);
-    std::vector<flow_float*> hY={dY0,dY1}; flow_float** dYall=up(hY);
-    flow_float *rog=arr(rod*g0),*Q0=arr(q0),*Q1=arr(q1),*Q2=arr(q2),*Ng=arr(0),*NQ0=arr(0),*NQ1=arr(0),*NQ2=arr(0);
-    flow_float *rr=arr(0),*r0=arr(0),*r1=arr(0),*r2=arr(0),*sg=arr(0),*s0=arr(0),*s1=arr(0),*s2=arr(0),*td=arr(0);
-    flow_float *dS=arr(0),*dD=arr(0),*dR=arr(0),*dTs=arr(0),*dTh=arr(0),*dLm=arr(0),*cG=arr(0),*cQ=arr(0);
-    float gprev = (float)g0; int it = 0; float g = gprev, sgv = 0.0f, drdt0 = 0.0f;
-    for (it = 0; it < 200000; ++it) {
-        flow_float z = 0.0f; for (flow_float* p : {rr,r0,r1,r2}) cudaMemcpy(p, &z, sizeof(flow_float), cudaMemcpyHostToDevice);
-        cudaMemcpy(Ng, rog, sizeof(flow_float), cudaMemcpyDeviceToDevice); cudaMemcpy(NQ0, Q0, sizeof(flow_float), cudaMemcpyDeviceToDevice);
-        cudaMemcpy(NQ1, Q1, sizeof(flow_float), cudaMemcpyDeviceToDevice); cudaMemcpy(NQ2, Q2, sizeof(flow_float), cudaMemcpyDeviceToDevice);
-        condensation_source_d<<<1,1>>>(1, COND_MODEL_H2O, 1, Rw, cp.M, 1, 0, o, dsp, 2, dYall, 1,
-            0, 3.18, 0, 1, 1.0e-9, 0, 0.5, 0, 1.0, 5.0e-3, 10.0, (float)cpc, 1.315f, 1.0e35, 5.0e-3, 1.0, 1,
-            dvol, ddt, dT, dP, dro, dcp, dRm, dY1, rog, Q0, Q1, Q2, rr, r0, r1, r2, sg, s0, s1, s2, dS, dD, dR, dTs, dTh, dLm);
-        cond_moment_update_limited_d<<<1,1>>>(1, ddt, dvol, dro, dY1, 0.0, dT, dcp, dRm, (float)cpc, 1.315f, COND_MODEL_H2O, o, 5.0e-3, 1.0, 0.5,
-            Ng, NQ2, NQ1, NQ0, rr, r2, r1, r0, sg, s2, s1, s0, td, td, td, td, rog, Q2, Q1, Q0, dLm, cG, cQ);
-        cond_realizability_clamp_d<<<1,1>>>(1, dro, dY1, rog, Q0, Q1, Q2, 1, COND_MODEL_H2O, Rw, 1.0e-9, 5.0e-7, dT, dP, o, cG, cQ);
-        cudaDeviceSynchronize();
-        cudaMemcpy(&g, rog, sizeof(flow_float), cudaMemcpyDeviceToHost); g /= (float)rod;
-        if (it == 0) { cudaMemcpy(&sgv, rr, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&drdt0, dD, sizeof(flow_float), cudaMemcpyDeviceToHost); }
-        if (g <= 0.0f) break;
+    // 反例 2 種: (A) 整合した単分散 r30=1.5e-9 (< 2 r_min, g>g_rm)、(B) Q0=Q1=Q2=0 で g=1e-5 (不整合; codex result-4 M1)
+    struct Case { const char* name; double r30; };
+    for (const Case cs : { Case{"r30=1.5e-9 (consistent)", 1.5e-9}, Case{"Q0=Q1=Q2=0 (inconsistent)", 0.0} })
+    for (int useFloat : {0, 1}) {
+        const double q0 = (cs.r30 > 0.0) ? g0*rod/((4.0/3.0)*COND_PI*rho_l*cs.r30*cs.r30*cs.r30) : 0.0, q1 = q0*cs.r30, q2 = q0*cs.r30*cs.r30;
+        auto arr = [&](double v){ return up(std::vector<flow_float>(1,(flow_float)v)); };
+        flow_float *dT=arr(T),*dP=arr(rod*Rm*T),*dro=arr(rod),*dcp=arr(cpc),*dRm=arr(Rm),*dY0=arr(rod*(1-Yw)),*dY1=arr(rod*Yw),*dvol=arr(V),*ddt=arr(dt);
+        std::vector<flow_float*> hY={dY0,dY1}; flow_float** dYall=up(hY);
+        flow_float *rog=arr(rod*g0),*Q0=arr(q0),*Q1=arr(q1),*Q2=arr(q2),*Ng=arr(0),*NQ0=arr(0),*NQ1=arr(0),*NQ2=arr(0);
+        flow_float *rr=arr(0),*r0=arr(0),*r1=arr(0),*r2=arr(0),*sg=arr(0),*s0=arr(0),*s1=arr(0),*s2=arr(0),*td=arr(0);
+        flow_float *dS=arr(0),*dD=arr(0),*dR=arr(0),*dTs=arr(0),*dTh=arr(0),*dLm=arr(0),*cG=arr(0),*cQ=arr(0);
+        CondDoubleArgs dbl; dbl.opts = o; dbl.sp = dsp; dbl.condModel = COND_MODEL_H2O; dbl.Rw = Rw; dbl.M = cp.M; dbl.twoTemp = 0;
+        dbl.gyarC = 3.18; dbl.evapRmin = 1.0e-9; dbl.evapLamMin = 0.5; dbl.Jmax = 1.0e35; dbl.dg_max = 5.0e-3; dbl.dT_max = 1.0; dbl.cprops = cp;
+        int it = 0; float g = (float)g0, sgv = 0.0f, drdt0 = 0.0f, qs[3] = {1,1,1};
+        for (it = 0; it < 200000; ++it) {
+            flow_float z = 0.0f; for (flow_float* p : {rr,r0,r1,r2}) cudaMemcpy(p, &z, sizeof(flow_float), cudaMemcpyHostToDevice);
+            cudaMemcpy(Ng, rog, sizeof(flow_float), cudaMemcpyDeviceToDevice); cudaMemcpy(NQ0, Q0, sizeof(flow_float), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(NQ1, Q1, sizeof(flow_float), cudaMemcpyDeviceToDevice); cudaMemcpy(NQ2, Q2, sizeof(flow_float), cudaMemcpyDeviceToDevice);
+            if (useFloat)
+                condensation_source_f_d<<<1,1>>>(1, 1, (float)Rw, 1, 0, condProps_to_f(cp), tb, 0.0f, dbl, dspf, 2, dYall, 1,
+                    0, 3.18f, 1, 1.0e-9f, 0, 0.5f, (float)cpc, 1.315f, 5.0e-3f, 1.0f, 1,
+                    dvol, ddt, dT, dP, dro, dcp, dRm, dY1, rog, Q0, Q1, Q2, rr, r0, r1, r2, sg, s0, s1, s2, dS, dD, dR, dTs, dTh, dLm);
+            else
+                condensation_source_d<<<1,1>>>(1, COND_MODEL_H2O, 1, Rw, cp.M, 1, 0, o, dsp, 2, dYall, 1,
+                    0, 3.18, 0, 1, 1.0e-9, 0, 0.5, 0, 1.0, 5.0e-3, 10.0, (float)cpc, 1.315f, 1.0e35, 5.0e-3, 1.0, 1,
+                    dvol, ddt, dT, dP, dro, dcp, dRm, dY1, rog, Q0, Q1, Q2, rr, r0, r1, r2, sg, s0, s1, s2, dS, dD, dR, dTs, dTh, dLm);
+            cond_moment_update_limited_d<<<1,1>>>(1, ddt, dvol, dro, dY1, 0.0, dT, dcp, dRm, (float)cpc, 1.315f, COND_MODEL_H2O, o, 5.0e-3, 1.0, 0.5,
+                Ng, NQ2, NQ1, NQ0, rr, r2, r1, r0, sg, s2, s1, s0, td, td, td, td, rog, Q2, Q1, Q0, dLm, cG, cQ);
+            if (useFloat)
+                cond_realizability_clamp_f_d<<<1,1>>>(1, dro, dY1, rog, Q0, Q1, Q2, 1, (float)Rw, 1.0e-9f, 5.0e-7f, 0.0f, dT, dP, tb, cp, cG, cQ);
+            else
+                cond_realizability_clamp_d<<<1,1>>>(1, dro, dY1, rog, Q0, Q1, Q2, 1, COND_MODEL_H2O, Rw, 1.0e-9, 5.0e-7, dT, dP, o, cG, cQ);
+            cudaDeviceSynchronize();
+            cudaMemcpy(&g, rog, sizeof(flow_float), cudaMemcpyDeviceToHost); g /= (float)rod;
+            if (it == 0) { cudaMemcpy(&sgv, rr, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&drdt0, dD, sizeof(flow_float), cudaMemcpyDeviceToHost); }
+            if (g <= 0.0f) { cudaMemcpy(&qs[0], Q0, sizeof(float), cudaMemcpyDeviceToHost); cudaMemcpy(&qs[1], Q1, sizeof(float), cudaMemcpyDeviceToHost); cudaMemcpy(&qs[2], Q2, sizeof(float), cudaMemcpyDeviceToHost); break; }
+        }
+        printf("  (k) %s %s: step-0 S_g/V=%.3e (drdt %.3e), liquid gone after %d steps (g=%.2e, Q0/Q1/Q2 after removal %g/%g/%g)\n", cs.name, useFloat ? "float " : "double", sgv/V, drdt0, it+1, g, qs[0], qs[1], qs[2]);
+        CHECK(sgv < 0.0f && drdt0 < 0.0f, "(k) %s %s: liquid does not evaporate (source %g, drdt %g)", cs.name, useFloat ? "float" : "double", sgv, drdt0);
+        CHECK(g <= 0.0f && it < 200000 && qs[0] == 0.0f && qs[1] == 0.0f && qs[2] == 0.0f, "(k) %s %s: liquid/moments never removed (g=%g after %d steps)", cs.name, useFloat ? "float" : "double", g, it);
     }
-    printf("  (k) small droplet g=1e-5 r30=1.5e-9: step-0 S_g/V=%.3e kg/m3/s (drdt %.3e m/s), liquid gone after %d steps (g=%.2e)\n", sgv/V, drdt0, it+1, g);
-    CHECK(sgv < 0.0f && drdt0 < 0.0f, "(k) small droplet does not evaporate (source %g, drdt %g)", sgv, drdt0);
-    CHECK(g <= 0.0f && it < 200000, "(k) liquid never removed (g=%g after %d steps)", g, it);
 }
-
 int main()
 {
     // (a) Δτ 不変性: H2O carrier (T × S × Q0 × g) と N2 pure
