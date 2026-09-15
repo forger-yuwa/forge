@@ -33,11 +33,22 @@ CFD に渡せ (`tp_species: full`)、(3) 擬似種に畳む経路は**名前と�
     擬似種エントリには構成種とモル/質量分率をコメントで書く。
   - 凝縮種 index (`condGasSpecies`) は species 順序から自動決定 (`tp_keep_species` → `gas.condensing_species`, 既定 H2O)。
   - IC (`paste_isentropic_ic`)・BC (`bcondConfig` の `Y{s}`)・`gen_inlet_profile.py` (`--X NAME=EXPR` を追加) を N 種対応に。
-- **やる** (forge 本体, 小):
-  - `bcondConfig` / `initial` の組成を `X{s}` (モル分率) でも受け付ける (`solverConfig`/`boundaryCond` の読み込みで `Y{s}` に換算。`Y` と `X` の混在はエラー)。
-  - 起動ログに species 表 (名前, MW, 入口 Y と X) を出す。
-- **やる** (後処理): `axis_csv_va.py` / `total_quantities.py` / ParaView `Forge Saturation` の H₂O index を `physProp.species` から引く (現状 `Y1` 決め打ち)。
-- **やらない**: 化学反応 (frozen 組成のまま)、輸送係数の kinetic 混合則の変更、3 温度域 NASA-9、`thermo_d.cu` 内蔵 DB の変更。
+- **やる** (forge 本体):
+  - **host 側の DB 解決** (GPU 初期化に依存しない host 関数で `speciesDBFile` を読み名前→MW/係数を返す) を `cfg.read()` 直後と変換器 (`convertGmshToForge`) の両方で使う。
+  - `bcondConfig` の `floats` に `X{s}` を受け付け、double で検証 (負値・非有限・総和 0・未知 index・X/Y 混在 → エラー、X 指定時は全種必須) → `Y{s}` に換算して `flow_float` 化。
+    `initial` は文字列のまま維持し、組成 IC は IC 生成ツール側で扱う。
+  - 起動ログに species 表 (名前, MW, 入口 Y と X, 凝縮種名)。**凝縮種は名前 (`condensationSpecies: H2O`) を正本**にし、数値 `condGasSpecies` は生成値・明示時は一致検査
+    (不一致・範囲外・`condModel` と種名の不一致・単一種での `roY` 未登録はエラー)。
+  - 残差 CSV に `rms_roY{s}` 列を追加 (現状 species 残差は出ていない)。
+  - `interp_field.py` / restart: 種順序・DB (名前・MW) が一致しない restart を黙って受け付けない (名前照合)。
+  - **種変換 restart ツール** `tools/convert_species_field.py`: 旧 `[MIXDRY,H2O]` の場を新順序へ (擬似種の保存量を構成種へ分配、H2O と凝縮モーメントを名前で移す、
+    DB/エンタルピー基準が変わる場合は元の T から `roe` を再構成)、`ΣρY=ρ`・総水量・T の保存を検査。
+- **やる** (後処理): 共通関数 `tools/forge_species.py` (run dir の `solverConfig.yaml` + `species_db.yaml` から種名→index/MW)。`axis_csv_va.py` と ParaView
+  `Forge Saturation` はこれで H₂O 配列を**名前で解決** (フィルタに `Run Config` パスのプロパティを追加。設定が無ければ配列選択を必須にし `Y1` を自動採用しない)。
+  `total_quantities.py` は既に全種を読むので変更なし (初稿の「Y1 決め打ち」は誤り)。
+- **やらない**: 化学反応 (frozen 組成のまま)、輸送係数の kinetic 混合則の変更、3 温度域 NASA-9、`thermo_d.cu` 内蔵 DB の変更、
+  forge が `inletProfile` CSV の `X` 列を直接補間すること (生成器が Y に換算して書く)、**SERN (`gas.model: frozen_tp`, `[EXH,AIR]` 固定) の `full` 化** (別仕様)。
+  対象は `gas.model: semiperfect` の設計経路のみ。
 
 ## 3. 関連 docs と前提
 
@@ -46,9 +57,14 @@ CFD に渡せ (`tp_species: full`)、(3) 擬似種に畳む経路は**名前と�
   したがって forge 側の変更は入力の便宜 (`X{s}`) とログだけで、物理・カーネルは触らない。
 - `SPECIES_NASA9` (`design/forge_design/gas/semiperfect.py`) は CEA2 `thermo.inp` (McBride–Gordon 2002) からの転記: N2 O2 CO2 H2O AR H2 OH H NO O CO。
   他の種は `cea_thermo_to_species_db.py` で `thermo.inp` (ローカル `.venv-cea/nasa_cea/` にビルド済 CEA2 の同梱ファイル) から生成する。
-- 熱力学は質量分率線形混合が厳密なので、`full` と `lumped`/`pseudo` は **dry では同一解** (split_h2o 導入時に軸 M 差 ≤1e-4 を確認済)。
-  差は輸送方程式の本数 (2D で +3 本, step 時間 +10–20 % 見込み) と、凝縮 carrier 衝突項が構成種ごとに評価される点 (擬似種では
-  MW_mix で代表していた: [condensation-kantrowitz-carrier.md](../accepted/condensation-kantrowitz-carrier.md) §4 の「多成分擬似種の厳密扱い」が `full` で自動的に満たされる)。
+- 熱力学 (cp/h の質量分率線形混合) の等価性は**擬似種内部の組成比が空間的に一定**なら厳密。したがって `full` ≡ `lumped` が成り立つのは
+  「同じ解決済み DB・同じ温度域処理・同じエンタルピー基準・非粘性 frozen・擬似種内部比が一定」の条件下に限る (codex M6)。粘性 run では種ごとの拡散係数と
+  種エンタルピー拡散 (`speciesTransport_d.cu`) が効くので一般には同一解でない。`pseudo` 1 種は組成輸送自体を持たない。凝縮 carrier 衝突項 (`condKantrowitz 2/3`) は
+  構成種ごとの評価になるので等価性を要求せず、種別和を独立計算と照合する試験にする。
+- CEA `thermo.inp` 直読みと `SPECIES_NASA9` 転記は**完全一致しない** (codex M7 実測: H2O MW 0.0180153 vs 0.01801528、AR 高温域 a0 0 vs 20.105)。外部 DB を使う経路では
+  その DB を設計・CFD 双方の正本にし、内蔵転記との差は物性値の許容差で評価する。`cea_thermo_to_species_db.py --check` は N2 low のみ・不一致でも rc 0 なので、
+  全使用種の MW・両温度域を照合し不一致で失敗終了するよう直す。
+- 既存の `frozen.mole_to_mass()` (SERN 用) を共通換算関数に委譲する (重複実装しない, codex m1)。
 
 ## 4. 設計方針
 
@@ -66,68 +82,85 @@ evaluate:
   tp_species: full                 # pseudo | lumped | full (split_h2o は lumped {name: MIXDRY, keep: [H2O]} の別名)
   tp_lump: {name: MIXDRY, keep: [H2O]}
 ```
-換算 $Y_k = X_k M_k / \sum_j X_j M_j$ は `semiperfect.mole_to_mass(X, MW)` に集約し、`GasSemiPerfect` は従来どおり質量分率で動く
-(設計 MOC 側の熱力学は不変)。`prepare_info.json` に `gas.X` と `gas.Y` の両方を残す。
+換算 $Y_k = X_k M_k / \sum_j X_j M_j$ は `gas/composition.py` の 1 関数 (既存 `frozen.mole_to_mass` はここへ委譲) に集約する。
+**解決済み DB を 1 つ構築して全経路へ渡す** (codex M1): 問題読込時に内蔵 `SPECIES_NASA9` に `gas.species_db` (問題 YAML の所在基準で解決) を上書きした
+`ResolvedSpeciesDB` (名前, MW, 2 温度域係数, 出典) を作り、換算・`GasSemiPerfect` (設計 MOC)・擬似種生成・IC (`paste_isentropic_ic`)・`species_db.yaml` 出力の
+**すべて**がこれを使う (外部 DB だけにある種を設計側で失敗させない、既存種の係数上書きで MOC と CFD が食い違わない)。検証: MW>0、両温度域の係数個数、
+温度区切りが 200/1000/6000 K と異なる種は `lumped` に混ぜることを拒否。`prepare_info.json` に `gas.X`・`gas.Y`・解決済み DB の出典を残す。
 
 ### 4.2 species_db.yaml の生成
 
-- `full`: `species:` = YAML の順序 (凝縮種は `condensing_species` の index を `condGasSpecies` に)。各エントリは `SPECIES_NASA9[k]` か `gas.species_db` の同名エントリ。
+- `full`: `species:` = YAML の順序。**凝縮種は `gas.condensing_species` (名前) が正本**で `condGasSpecies` は生成値。手書き index があれば一致検査、不一致はエラー。
+  `lumped` で凝縮種が `keep` に無い、`pseudo` (MIX) で凝縮 ON、擬似種名と実種名の衝突、重複種、`condModel` と種名の不一致は入力段階で拒否。各エントリは `SPECIES_NASA9[k]` か `gas.species_db` の同名エントリ。
   `# source: CEA thermo.inp (McBride-Gordon 2002), transcribed in forge_design.gas.semiperfect` のコメント。
 - `lumped`: `tp_lump.keep` 以外を `tp_lump.name` に畳む (現行 `mixture_pseudo_species_split` を一般化)。エントリに
   `# lumped: {N2: 0.7089, O2: 0.2304, AR: 0.0085, CO2: 0.0522} (mole fractions within the lump)` を書く。
 - `pseudo`: 現行のまま (`MIX`) + 同様のコメント。
 
-### 4.3 forge 側のモル分率入力
+### 4.3 forge 側のモル分率入力 — 入力契約 (codex M4 で具体化)
 
-`bcondConfig.yaml` の `floats: {X0: .., X1: ..}` と `solverConfig.initial` / IC 生成側で `X{s}` を受けたら、`speciesDBFile` の MW で
-`Y{s}` に換算して既存経路に流す (`solverConfig.cpp` の species 読み込み直後)。`Y` と `X` が同じ境界に混在したらエラー。
-`inletProfile` CSV の列名も `X_H2O` を許す (`gen_inlet_profile.py` が Y に換算して書く; カーネルは Y のまま)。
+- **DB 解決は host で**: `speciesDBFile` を読む host 関数 (GPU 非依存) を `solverConfig::read()` の直後と `convertGmshToForge` の境界読込の前に呼び、名前→MW を得る。
+- **bcond**: `floats: {X0:.., X1:.., ...}` を double で検証 → $Y_k = X_kM_k/\sum X_jM_j$ → `flow_float` の `Y{s}` に入れて既存経路へ。同一境界での `X`/`Y` 混在、負値・非有限・総和 0・
+  未知 index はエラー。**省略種の補完 (`Y0=1` 他 0) は X 指定時には行わず全種必須**。
+- **initial**: 既存の文字列形式は維持。組成付き IC は IC 生成ツール (`paste_isentropic_ic(species_X=...)` / `gen_tp_ic*.py --X`) が HDF5 `VALUE/roY{s}` に書く。
+- **inletProfile CSV**: forge が読む列は従来どおり `Y{s}`。`gen_inlet_profile.py` が `--X NAME=EXPR` / 測定表の `X_NAME` 列を受けて Y に換算して書く (X 指定時は全種必須)。
+  forge 側の直接 X 補間は範囲外。
 
-### 4.4 後処理の species index
+### 4.4 後処理の species index (codex M5)
 
-`Y1` 決め打ちのスクリプト (`axis_csv_va.py`, `total_quantities.py` の凝縮警告, ParaView `Forge Saturation` の既定配列名) は
-`solverConfig.yaml` の `physProp.species` から凝縮種 index を引く共通関数 (`solver_density_cuda/tools/forge_species.py`) を使う。
-ParaView フィルタは配列名をユーザが選べるので既定値のヘルプ文だけ更新する。
+`tools/forge_species.py`: run dir の `solverConfig.yaml` (`physProp.species`, `condensation`) と `species_db.yaml` から `{name: index, MW}` と凝縮種名を返す。
+`axis_csv_va.py` はこれで H₂O 列を引く。ParaView `Forge Saturation` には `Run Config (solverConfig.yaml)` 文字列プロパティを追加し、指定時は種名から配列 (`Y{s}`) を
+解決、未指定時は `Vapor Mass Fraction Array` の明示を必須にして **`Y1` を自動採用しない** (5 種順序では `Y1`=N2 を水蒸気として計算してしまう)。
+H₂O を先頭・中間・末尾に置いた順序入替試験を単体に入れる。
 
 ## 5. 実装ステップ
 
 1. `methods/thermophysics.md` 実装 §5 に `X{s}` 入力と species ログ、`methods/design/overview.md` に `tp_species` 3 モードと `composition_basis` を追記。
-2. `design/forge_design/gas/semiperfect.py`: `mole_to_mass` / `mass_to_mole`、`mixture_pseudo_species_split` の一般化 (`name`, `keep` 任意)、DB コメント。
-3. `design/forge_design/probdef.py`: `composition_basis`, `condensing_species`, `species_db` の読み込みと検証。
+2. `design/forge_design/gas/composition.py` (新: `mole_to_mass`/`mass_to_mole`、`ResolvedSpeciesDB`)、`semiperfect.py` を解決済み DB 経由に、`mixture_pseudo_species_split` の一般化 (`name`, `keep` 任意)、DB コメント。`frozen.mole_to_mass` は委譲。
+3. `design/forge_design/probdef.py`: `composition_basis`, `condensing_species`, `species_db` (YAML 所在基準) の読み込みと検証 (§4.1–4.2 の拒否条件)。
 4. `design/forge_design/evaluate/runner_axismach.py` (+ `runner.py`, `runner_sern.py` の共通部): `_tp_species_list` / `_tp_species_Y` / `_apply_gas_to_config` を 3 モード対応に。
-5. `solver_density_cuda/input/solverConfig.cpp`, `boundaryCond.cpp`: `X{s}` → `Y{s}` 換算、species 表ログ。
+5. forge: host DB 解決、`boundaryCond.cpp` の `X{s}` → `Y{s}` 換算と検証、species 表ログ、凝縮種名と index の一致検査、残差 CSV の `rms_roY{s}` 列、`interp_field.py` の種名照合。
+5b. `tools/convert_species_field.py` (種変換 restart, §2) と `cea_thermo_to_species_db.py --check` の全種照合・失敗終了化。
 6. `solver_density_cuda/tools/gen_inlet_profile.py` `--X`、`tools/forge_species.py`、`axis_csv_va.py` / `total_quantities.py` の index 参照。
-7. 回帰 (§6)、docs 同期、`design/tests/run_gas_tests.py` に換算と `full`≡`lumped` の等価性テストを追加。
+7. 単体 (§6) → 小型 TP 収束ケース (node/cell) → case/44 回帰 → docs 同期。**コード世代は [condensation-source-limiter-steady](condensation-source-limiter-steady.md) の実装後に固定** (凝縮 run の比較は両経路の `condLim≈1` を確認してから)。
 
 ### 5.1 残作業 (優先順)
 
 | # | 項目 | 内容 |
 | --- | --- | --- |
-| 1 | codex plan レビュー | §4 の入力仕様 (YAML キー名, X/Y の扱い) と §6 の等価性ゲート。**実装はレビュー採否を反映してから** |
+| 1 | ~~codex plan レビュー~~ | 2026-09-15 実施 (§6.1)。M1–M8/m1–m2 を全て採用し §2/§3/§4/§6 に反映済み。**実装着手可** (ユーザ確認後; 順序は limiter plan の後) |
 | 2 | docs 先行更新 | ステップ 1 |
-| 3 | 設計チェーン実装 | ステップ 2–4 |
-| 4 | forge 入力 `X{s}` | ステップ 5 |
-| 5 | 後処理・ツール | ステップ 6 |
-| 6 | 回帰 run と codex result レビュー | §6 |
+| 3 | 共通基盤 (解決済み DB・換算・凝縮種名正本) | ステップ 2–3 + 単体試験を **CFD 回帰より前に** |
+| 4 | 設計チェーン 3 モード | ステップ 4 |
+| 5 | forge 入力 `X{s}`・種名検査・`rms_roY`・restart 照合 | ステップ 5 |
+| 5b | 種変換 restart ツールと CEA `--check` 修正 | ステップ 5b (case/44 の旧 2 種場を 5 種へ移すのに必須) |
+| 6 | 後処理・ParaView 配列解決 | ステップ 6 |
+| 7 | 回帰 run と codex result レビュー | §6 (小型収束ケース node/cell → case/44) |
 
 ## 6. 検証
 
-- **単体**: `design/tests/run_gas_tests.py` に (a) mole↔mass 往復 1e-12、(b) va3 の指定モル分率 → 質量分率が README 記載値 (H2O 0.0376954 …) と 1e-6 で一致、
-  (c) `full` と `lumped` の混合 cp(T)/h(T) が 200–3000 K で 1e-10 以内 (線形混合の厳密性)。
-- **検証ケース** (case/44 va3 M4.19, node Euler TP):
-  1. **dry 等価性**: `run_0126` (MIXDRY+H2O, 一様 Tt) を `full` (5 種) で再実行 → 軸 M 差 ≤ 1e-4、ṁ 差 ≤ 1e-4 (split_h2o 導入時と同じゲート)。
-  2. **凝縮 (carrier 5 種)**: `run_0131` プロトコル (入口 Tt 分布, cfl 0.5) を `full` で再実行 → onset x 差 ≤ 0.1 r_t、出口 g 平均差 ≤ 2 %
-     (Feder 衝突項が構成種ごとになる分の差は `condKantrowitz 1` では出ないはず; `condKantrowitz 2` でも別途記録)。
-  3. **モル分率入力**: 同じ run を `composition_basis: mole` の指定で作り、`species_db.yaml`/`bcondConfig.yaml` がビット同一。
-  4. **forge `X{s}`**: bcond を `X0..X4` で書いた run が `Y` 版と `res_*.h5` で同一 (ノイズ床以内)。
-  5. **CEA 直読み DB**: `cea_thermo_to_species_db.py` で生成した DB を `gas.species_db` に渡し、内蔵転記と係数が一致 (`--check`) → run 同一。
-- **判定基準**: 上のゲート。step 時間の増分 (+3 輸送式) を記録 (合否には含めない)。
+- **単体** (`design/tests/run_gas_tests.py`, CFD 回帰より前): (a) mole↔mass 往復 `rtol 1e-12`; (b) va3 の指定モル分率 (Σ 0.998825) → $Y_{H2O}$ = 0.03769539643 (`rtol 1e-9`);
+  (c) `full` と `lumped` の混合 cp(T)/h(T) を 200–3000 K で比較: **`rtol 1e-12` + 量別 atol (cp 1e-9 J/kg/K, h 1e-6 J/kg)**、$h(T_{ref})=0$ 近傍も検査
+  (既存 split の実測差は cp 1.6e-12 / h 2.3e-9 なので絶対 1e-10 は不適; codex m2); (d) `species_db.yaml` は解析後の値を比較し、ビット同一は同じ正規化済み入力の再出力に限る;
+  (e) 拒否条件 (§4.1–4.3) がそれぞれエラーになる; (f) `forge_species.py` と ParaView の H₂O 順序入替 (先頭/中間/末尾); (g) 種変換 restart の `ΣρY=ρ`・総水量・T 保存;
+  (h) CEA 直読み DB vs 内蔵転記の全使用種 MW・両温度域係数の差を表にし、物性値 (cp, h) の差を許容差 (rtol 1e-6) で判定。
+- **収束済み小型 TP ケース (node / cell 両方, codex M8)**: 5 種 frozen の 2D 亜音速ノズル (case/13 系の小メッシュ) で `check_convergence.py` **PASS** (`rms_roY{s}` 列込み)、
+  `ΣY=1±1e-6`・負値なし。ここで X/Y 入力・種順序・旧入力 (`split_h2o`) の回帰を行い、`res_*.h5` がノイズ床以内で一致。
+- **case/44 va3 M4.19 (node Euler TP)** — 未収束 (warm 床 plateau) の既存 run は**回帰参考**で、収束解一致の根拠にはしない:
+  1. dry: `run_0126` 相当を `full` で再実行 → 軸 M 差 ≤ 1e-4、ṁ 差 ≤ 1e-4 (非粘性 frozen・内部比一定の条件下, §3)。
+  2. 凝縮 (carrier 5 種, `condKantrowitz 1`): `run_0131` プロトコル (limiter plan 実装後は同 CFL で `condLim≈1` を確認) を `full` で再実行 → onset x (壁流線, $g>10^{-3}Y_w$) 差 ≤ 0.1 r_t、
+     出口 g 平均 (質量流束重み, $x=x_{max}-2r_t$) 相対差 ≤ 2 %、ṁ 相対差 ≤ 1e-4。凝縮固有量の時系列は `check_quasisteady.py --series-csv` で STEADY (0.2 %)。
+     `condKantrowitz 2/3` は等価性でなく衝突項の種別和を独立計算と照合。
+  3. モル分率入力: `composition_basis: mole` で作った run の `species_db.yaml`/`bcondConfig.yaml` が解析後の値で一致。
+  4. forge `X{s}`: bcond を `X0..X4` で書いた run が `Y` 版と `res_*.h5` でノイズ床以内。
+  5. CEA 直読み DB: `gas.species_db` を渡した run は**その DB を正本**として設計・CFD が同じ係数を使うこと (prepare_info と species_db.yaml の出典で確認)。内蔵転記との「同一 run」は要求しない。
+- **判定基準**: 上のゲート + `check_convergence.py` / `check_quasisteady.py` VERDICT 添付。step 時間の増分 (+3 輸送式) は記録のみ。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
-| plan | `2026-09-15` | (実行中: `notes/reviews/2026-09-15-thermophysics-cea-mole-fraction-species-plan.md`) | — | — |
+| plan | `2026-09-15` | [2026-09-15-thermophysics-cea-mole-fraction-species-plan.md](../../notes/reviews/2026-09-15-thermophysics-cea-mole-fraction-species-plan.md) | GO-with-changes, C0/M8/m2 | **全採用**: M1 (解決済み DB を全経路へ) → §4.1; M2 (凝縮種は名前正本・拒否条件) → §4.2, §2; M3 (種変換 restart・照合) → §2, §5.1 #5b; M4 (X 入力契約) → §4.3; M5 (ParaView 配列を名前解決) → §4.4; M6 (等価性の適用条件) → §3, §6; M7 (CEA と転記の差, --check 修正) → §3, §5.1 #5b; M8 (収束小型ケース node/cell, rms_roY 列, series ゲート, 世代固定) → §6; m1 (frozen.mole_to_mass 委譲, SERN 対象外) → §2, §4.1; m2 (rtol/atol) → §6 |
 
 ## 7. 影響範囲
 
@@ -147,8 +180,9 @@ ParaView フィルタは配列名をユーザが選べるので既定値のヘ�
 ## 9. 変更ログ
 
 - `2026-09-15` — 初稿 (ユーザ要望: MIXDRY の中身を明示・ユーザ指定可能に、CEA ベースでモル分率指定)。
+- `2026-09-15` — codex plan レビュー (GO-with-changes, M8/m2) を全採用: 解決済み DB の一元化、凝縮種の名前正本化と拒否条件、種変換 restart、X 入力契約、ParaView 配列解決、等価性条件の限定、CEA/転記差の扱い、収束ゲート。
 
 ## 10. 未確定事項
 
-- forge 側 `X{s}` を bcond だけでなく `inletProfile` CSV でも受けるか (§4.3 は受ける前提)。
+- ~~forge 側 `X{s}` を bcond だけでなく `inletProfile` CSV でも受けるか~~ 決着 (2026-09-15, §4.3): forge は Y 列のみ、生成器が X→Y 換算。
 - `pseudo` (MIX 1 種) を残すか。設計スイープの速度用途があるので残す前提。
