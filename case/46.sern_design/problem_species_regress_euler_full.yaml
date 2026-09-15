@@ -106,7 +106,7 @@ mesh:
   ramp_fillet: 0.1        # ランプ膨張角部 (x=0) の丸め半径 /H。鋭角だと SST が θ_r0 ≳ 18° で roOmega 発散 (run_0055-0057)。
                           # 曲率ジャンプ 1010 → 12.5、壁の持ち上げは最大 0.0019 H。NASA TM X-71972 も小半径で接続している
 evaluate:
-  tp_species: {mode: full}     # 排気 11 種 ∪ 外気 3 種 = 11 種 TP + 排気トレーサ roXi
+  tp_species: {mode: full, species: [N2, H2O, H2, AR, OH, O2, "NO", H, O, CO2, CO]}   # 排気 11 種 ∪ 外気 = 11 種 TP + 排気トレーサ roXi; 順序を明示して作動点間で配置を固定 (warm start 可)
   model: euler
   nStepOuter: 6000          # 2026-09-16 species 回帰 (node Euler, plan thermophysics-cea-mole-fraction-species §6 SERN)
                            #  RESIDUAL_RISING、12000 まで回すと 5–7e-5 で飽和して PASS。力係数は 6000 時点で既に 5 桁一致)

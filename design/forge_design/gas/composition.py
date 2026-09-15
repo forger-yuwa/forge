@@ -562,6 +562,15 @@ def exhaust_fraction(run_dir) -> dict:
     if meta is None:
         raise FileNotFoundError(f"{run_dir}: species_meta.yaml が無い (旧 run)")
     spec = meta.get("exhaust_fraction")
+    if not spec and "streams" in meta and {"inflow", "external"} <= set(meta["streams"]):
+        # 旧 meta (exhaust_fraction キー無し): streams / tracer から同じ規則で導く
+        if meta.get("tracer", {}).get("enabled"):
+            spec = {"kind": "tracer", "array": "Xi", "conserved": "roXi"}
+        else:
+            yi, ye = meta["streams"]["inflow"]["Y_transport"], meta["streams"]["external"]["Y_transport"]
+            for i, (a, b) in enumerate(zip(yi, ye)):
+                if abs(a - 1.0) < 1e-12 and abs(b) < 1e-12:
+                    spec = {"kind": "species", "array": f"Y{i}", "conserved": f"roY{i}", "species": meta["species"][i]}; break
     if not spec:
         raise ValueError(f"{run_dir}: 排気率 ξ の定義が無い (単一流れの run)")
     return dict(spec)
