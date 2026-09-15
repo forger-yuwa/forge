@@ -317,7 +317,9 @@ __host__ __device__ inline double cond_evap_source(
 //   Δg/潜熱 ΔT/半径半減の 1 step 上限は更新クランプ (cond_moment_update_limited_d) が掛ける。
 //   モーメントの実現可能性: 非負分布では べき平均不等式 q1/q0 ≤ r30, q2/q0 ≤ r30² が成り立つ。輸送の丸め・floor で
 //   これを破った塵状態 (g≈0 なのに Q2 が大) では一様 ṙ 形の S_g=4πρ_l q2 ṙ が液相の 1e6 倍/s まで発散するので、
-//   q1,q2 を上限で整合させ (q1e=min(q1,q0 r30), q2e=min(q2,q0 r30²))、r30<2 r_min は消滅待ち (S=0, クランプが確定) とする。
+//   q1,q2 を上限で整合させる (q1e=min(q1,q0 r30), q2e=min(q2,q0 r30²))。小液滴 (r30<r_min) は ṙ を r_min で評価して蒸発を続け
+//   (ソースを 0 にすると g>g_rm の液滴は消滅クランプの対象外で止まってしまう: codex 2026-09-16 result-3 M1)、消滅 (g≤g_rm かつ
+//   r30<2 r_min) は実現可能性クランプが確定する。
 __host__ __device__ inline void cond_evap_source_rate(
     const CondSpeciesProps& cp, double T, double p_v, double rod, double g,
     double q0, double q1, double q2, double rmin,
@@ -332,8 +334,9 @@ __host__ __device__ inline void cond_evap_source_rate(
     const double rho_l = cond_rho_cond(cp, T);
     const double r30 = cbrt(g/((4.0/3.0)*COND_PI*rho_l*q0/rod));  // q0/rod = Q0 [1/kg]
     *r30_out = r30;
-    if (!(r30 > 0.0) || r30 < 2.0*rmin) return;          // 消滅待ち: 実現可能性クランプが 4 モーメントを 0 にする
-    const double drdt = cond_evap_rate(cp, T, p_v, r30, growthModel, p_gas, gyarC, kelvin);
+    if (!(r30 > 0.0)) return;
+    const double r_eval = (r30 > rmin) ? r30 : rmin;     // ṙ の評価半径を r_min で下から抑える (Gyarmathy の 1/r 発散を防ぐ; 蒸発は続く)
+    const double drdt = cond_evap_rate(cp, T, p_v, r_eval, growthModel, p_gas, gyarC, kelvin);
     *drdt_out = drdt;
     const double q1e = fmin(q1, q0*r30), q2e = fmin(q2, q0*r30*r30);
     *SQ1 = q0*drdt;

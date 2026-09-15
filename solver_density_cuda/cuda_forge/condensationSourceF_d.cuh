@@ -241,8 +241,9 @@ __host__ __device__ inline void cond_evap_source_rate_f(
     const float rho_l = cond_tab_rhol_f(tb, T);
     const float r30 = cbrtf(g/((4.0f/3.0f)*COND_PI_F*rho_l*q0/rod));
     *r30_out = r30;
-    if (!(r30 > 0.0f) || r30 < 2.0f*rmin) return;
-    const float drdt = cond_evap_rate_f(cp, tb, T, p_v, r30, growthModel, p_gas, gyarC, kelvin);
+    if (!(r30 > 0.0f)) return;
+    const float r_eval = (r30 > rmin) ? r30 : rmin;
+    const float drdt = cond_evap_rate_f(cp, tb, T, p_v, r_eval, growthModel, p_gas, gyarC, kelvin);
     *drdt_out = drdt;
     const float q1e = fminf(q1, q0*r30), q2e = fminf(q2, q0*r30*r30);
     *SQ1 = q0*drdt;

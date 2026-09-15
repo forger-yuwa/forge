@@ -808,8 +808,8 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
    ($a=\dot r/r_{30}$: $aq_1, 2aq_2, 3a\rho g$) は monodisperse でのみこれと一致し、多分散 (半径 $r$ と $2r$ 同数) では $S_g$ が 8 % 違う (codex result M4)。
    モーメントの実現可能性: 非負分布では べき平均不等式 $q_1/q_0\le r_{30}$, $q_2/q_0\le r_{30}^2$ が成り立つので、輸送の丸めでこれを破った塵状態
    ($g\approx0$ なのに $Q_2$ が大) では $q_{1e}=\min(q_1,q_0r_{30})$, $q_{2e}=\min(q_2,q_0r_{30}^2)$ で整合させる (でないと $S_g$ が液相の $10^6$ 倍/s に発散し
-   ヤコビアンが $10^{15}$ になる)。$r_{30}<2r_{min}$ は消滅待ち ($S=0$) とし、消滅 ($Q_0=0$ の不整合を含む) は実現可能性クランプ `cond_realizability_clamp_d` が
-   確定する (従来どおり)。ヤコビアン `sj_g`/`sj_Q1` も θ 倍なし (mode 1 の g 摂動幅は $10^{-3}\max(g,10^{-9})$ で条件を整える)。
+   ヤコビアンが $10^{15}$ になる)。小液滴 ($r_{30}<r_{min}$) は $\dot r$ を $r_{min}$ で評価して蒸発を続け (ソースを 0 にすると $g>g_{rm}$ の液滴が消滅クランプの対象外で止まる),
+   消滅 ($g\le g_{rm}$ かつ $r_{30}<2r_{min}$, $Q_0=0$ の不整合を含む) は実現可能性クランプ `cond_realizability_clamp_d` が確定する (従来どおり)。ヤコビアン `sj_g`/`sj_Q1` も θ 倍なし (mode 1 の g 摂動幅は $10^{-3}\max(g,10^{-9})$ で条件を整える)。
    **ソース積分の体積は node 周期 seam で部分体積 `volumePartial_d`** (合併体積だと gather 後に member 数倍に二重計上: 面 2 / 辺 4 / 角 8 倍。
    case/09 一様過飽和 N2 の 1 step 試験で旧 2.0/8.0 → 新 1.000; codex result M6)。
 2. **更新クランプ** `cond_moment_update_limited_d` ([condensationUpdateLimiter_d.cuh](../solver_density_cuda/cuda_forge/condensationUpdateLimiter_d.cuh)):
@@ -836,7 +836,7 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
 輸送+ソース+全クランプを通す 1 セル固定点が $\Delta\tau$ 1e-6〜1e-4 で 3.8e-5 一致。`test_cond_float_device.cu` は両モードで double/float 一致 PASS。
 CFD (修正後バイナリ): case/44 入口 Tt 分布 run で node cfl 2 (`run_0137`) / 4 (`0138`) / 0.5 (`0139`)・condFloat 0 (`0140`)、cell cfl 2 (`0141`) / 0.5 (`0146`)
 の凝縮固有量 (出口 g・onset・M) が一致し `check_quasisteady --series-csv` 0.2 % で STEADY。ただし case/44 の残差は入口 Tt 分布 run 固有の床
-(rms_roe 0.4 = dry 一様 run と同値, roQ0 2.7 桁) で `check_convergence` は plateau → 「定常解の一致」は series STEADY + 補正 0 + 床到達で判定する (plan §6)。
+(node: rms_roe 0.4 = dry 一様 run と同値, roQ0 2.7 桁; cell: atomicAdd の床 rms_roe ≈25) で `check_convergence` は plateau → 報告は「プラトー上の最終場一致 + 凝縮固有量 series STEADY + 補正 0」であり「定常解の一致」ではない (plan §6)。
 
 ### 5. 一温度 二相 EOS の温度逆算 (Phase 2)
 

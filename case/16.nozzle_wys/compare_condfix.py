@@ -10,6 +10,7 @@ plt.rcParams["font.family"] = "Noto Sans CJK JP"
 ap = argparse.ArgumentParser(); ap.add_argument("runs", nargs="+"); ap.add_argument("--step", type=int, default=None)
 ap.add_argument("--out", default="compare_condfix"); ap.add_argument("--p0", type=float, default=59070.0)
 ap.add_argument("--series", action="store_true", help="各 run の全 res_*.h5 で報告量の時系列を出し、末尾 2 点の変化で STEADY 判定")
+ap.add_argument("--series-csv", action="store_true", help="各 run の全 res_*.h5 で報告量 (metrics) を <run>/cond_series.csv に書く (check_quasisteady.py --series-csv 用; 報告と同じ抽出関数)")
 a = ap.parse_args()
 exp = np.genfromtxt("wyslouzil_fig3_pp0.csv", delimiter=",", skip_header=1)[:, :3]
 xe, iso, cond = exp[:, 0]*10, exp[:, 1], exp[:, 2]
@@ -72,6 +73,18 @@ def metrics(d):
                 dev52=np.interp(52.0, xe, dev), g_exit=gc[np.argmax(xc)], M_exit=M,
                 c_exit=(d["sonic"][je] if d["sonic"] is not None else np.nan), h0err=h0err)
 
+if a.series_csv:
+    # 報告 (metrics) と同じ抽出関数で時系列 CSV を書く (codex 2026-09-16 result-3 m3: 独自抽出で出口を取り違えない)
+    for run in a.runs:
+        fs = sorted(glob.glob(os.path.join(run, "res_[0-9]*.h5")), key=lambda f: int(os.path.basename(f)[4:-3]))
+        rows = []
+        for fn in fs:
+            m = metrics(load(run, fn)); rows.append([int(os.path.basename(fn)[4:-3])] + [m[k] for k in ("onset","dev","dev21","dev42","dev52","g_exit","M_exit","c_exit","h0err")])
+        arr = np.array(rows, dtype=float); fin = np.isfinite(arr[:, :8]).all(axis=1); first = int(np.argmax(fin)) if fin.any() else 0
+        out = os.path.join(run, "cond_series.csv")
+        np.savetxt(out, arr[first:], delimiter=",", header="step,onset_mm,dev_pct,dev21_pct,dev42_pct,dev52_pct,g_exit,M_exit,c_exit,h0err_kJkg", comments="", fmt="%.8g")
+        print(out)
+    sys.exit(0)
 if a.series:
     # 末尾窓 (最大 4 枚, 最低 3 枚) で各報告量の振幅 (max−min) と単調性を見る (codex M3)。
     #   全量が許容内 → STEADY / 単調で超過 → DRIFTING / 非単調で超過 → OSCILLATING / 枚数不足 → TRANSIENT-UNSETTLED。
