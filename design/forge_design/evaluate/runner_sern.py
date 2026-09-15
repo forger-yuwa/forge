@@ -445,7 +445,7 @@ def _species_signature(run_dir) -> dict | None:
             "href": float(m.group(1)) if m else None, "tracer": bool(meta.get("tracer", {}).get("enabled", False))}
 
 
-def check_species_compatible(src_run_dir, dst_run_dir, what: str = "restart") -> None:
+def check_species_compatible(src_run_dir, dst_run_dir, what: str = "restart", allow_db_change: bool = False) -> None:
     """restart 経路の共通照合 (codex result M3): 種の順序・MW (rel 1e-9)・datum が一致しないと拒否。
     片方に species_meta.yaml が無ければ (旧 run) 照合不能としてエラー (両方無い CPG run は通す)。"""
     a, b = _species_signature(src_run_dir), _species_signature(dst_run_dir)
@@ -457,7 +457,7 @@ def check_species_compatible(src_run_dir, dst_run_dir, what: str = "restart") ->
     if a["species"] != b["species"]:
         raise ValueError(f"{what}: 輸送種の順序が違う (元 {a['species']} / 先 {b['species']}); tools/convert_species_field.py を使う")
     for k in a["species"]:
-        if abs(a["MW"][k] / b["MW"][k] - 1.0) > 1e-9:
+        if not allow_db_change and abs(a["MW"][k] / b["MW"][k] - 1.0) > 1e-9:
             raise ValueError(f"{what}: 種 {k} の MW が違う ({a['MW'][k]} / {b['MW'][k]}) — DB が異なる")
     if a["href"] is not None and b["href"] is not None and abs(a["href"] - b["href"]) > 1e-9:
         raise ValueError(f"{what}: thermoHrefTemp が違う ({a['href']} / {b['href']})")
@@ -509,7 +509,8 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
         raise RuntimeError(f"warm_from_run: {src_run_dir} に res_*.h5 が無い")
     gases_d = None
     if di.get("gas_model") == "frozen_tp":
-        check_species_compatible(src_run_dir, dst_run_dir, "warm_from_run")   # 順序・MW・datum・トレーサ (codex result M3)
+        # 順序・datum・トレーサは一致必須。MW (lump の組成 = 作動点の排気組成) は違ってよい: roe は目標作動点の DB で T から組み直す
+        check_species_compatible(src_run_dir, dst_run_dir, "warm_from_run", allow_db_change=True)   # codex result M3
         # 作動点適用後の組成で擬似種を作る (prepare_info の problem は作動点未適用の YAML なので op を再選択)
         pd_ = load_problem(di["problem"]); select_operating_point(pd_, di["operating_point"]["name"]); gases_d = frozen_gases(pd_)
     with h5py.File(res[-1], "r") as src, h5py.File(dst_run_dir / MESH, "r+") as dst:
