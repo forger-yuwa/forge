@@ -600,6 +600,28 @@ cfl 0.5 系 (`0139`→…→`0171`, `0156`→…→`0175`) は 2 巡目の cfl 2
 交差 restart の入力は `cp nozzle.h5` + `VALUE/{ro,roUx,roUy,roUz,roe,roY0,roY1,rog_0,roQ0_0..roQ2_0}` を `res_24000.h5` から上書き (同一メッシュの index コピー)。
 seam `case/09 run_0064` 1.000000、Arthur `lim1e` (N2 cell 3 反復・node・空気 cell) 全 28/28 PASS・onset 2.13 / 2.21 in、Wys `lim1e`/`lim0e` 報告量 run_0335 と同一・ALL STEADY・lim1e−lim0e g 8.2e-6。
 
+### cfl_pseudo スイープ — 推奨設定 (cfl 4〜6 + implicitRelax 0.7) での挙動 (2026-09-16, `run_0181`–`0189`)
+
+ユーザ確認依頼: 正本セットは cfl 2 (TP 多成分の推奨レンジ 0.5〜2) だが、超音速ノズルの推奨レシピは cfl 4〜6 + `implicitRelax 0.7` (procedures/recommended-settings.md)。
+全 run 24000 step、node は `run_0170` の収束場 (field) または `run_0170` と同じ初期状態 (startup = 乾き一様場からの起動) から、cell は `run_0172` の場から。
+
+| run | 離散化 / cfl / relax / 初期 | 結果 | 最終場 vs cfl 2 正本 (g_0 max / g L1 / \|ΔT\|) | 残差床 (末尾 20 %) 対 cfl 2 | 報告量 (出口 g %, onset, x30, M) |
+| --- | --- | --- | --- | --- | --- |
+| `run_0181_…_cfl4_from0170` | node / 4 / — / field | 完走 NaN 0, ALL STEADY, condLim 1.0000, 補正 0 | 3.1e-4 / 5.1e-5 / 0.012 K (反復床 2.0e-4 / 1.95e-5) | 流れ 1.8×, roe 1.9×, **rog 10.8×**, roQ0 1.8× (限界サイクル増) | 0.58444, 15.840, 18.645, 4.0499 (正本と同一) |
+| `run_0186_…_cfl4_startup` | node / 4 / — / startup | 完走 NaN 0, ALL STEADY | 2.9e-4 / 4.2e-5 / 0.011 K | 同上 (1.8 / 1.9 / 10.7 / 1.8) | 同一 |
+| `run_0182_…_cfl6_from0170` | node / 6 / — / field | **発散** (step 219 detectNaN; 軸列 y=0, x/r_t 4.7–6.3 で T が床 50 K → EOS 床型; g=0 域で凝縮とは無関係) | — | — | — |
+| `run_0184_…_cfl6_startup` | node / 6 / — / startup | **発散** (step 148, 同じ軸列 x/r_t 4.7–5.9) | — | — | — |
+| **`run_0183_…_cfl6_relax07_from0170`** | node / 6 / 0.7 / field | 完走 NaN 0, ALL STEADY, condLim 1.0000, 補正 0 | 3.8e-4 / 4.3e-5 / 0.015 K | **1.00 / 1.00 / 1.39 / 1.50** (cfl 2 と同じ床) | 同一 |
+| **`run_0187_…_cfl6_relax07_startup`** | node / 6 / 0.7 / startup | 完走 NaN 0, ALL STEADY (起動最大 rms_ro 3.3e-3 at step 7) | 3.0e-4 / 4.8e-5 / 0.011 K | 1.00 / 1.01 / 1.39 / 1.50 | 同一 |
+| **`run_0188_…_cfl8_relax07_from0170`** | node / 8 / 0.7 / field | 完走 NaN 0, ALL STEADY, condLim 1.0000, 補正 0 | 3.3e-4 / 4.9e-5 / 0.013 K | 1.02 / 1.03 / 1.56 / 1.66 | 同一 |
+| `run_0185_…_cell_cfl6_from0172` | cell / 6 / — / field | **発散** (step 94, 軸近傍セル x/r_t 3.7–6.9, y/r_t ≤0.13 で T 床) | — | — | — |
+| `run_0189_…_cell_cfl4_from0172` | cell / 4 / — / field | 完走 NaN 0, ALL STEADY, condLim 1.0000 | 6.5e-4 / 1.9e-4 / 0.038 K (cell 反復床 4.4–5.8e-4 / 1.1–1.3e-4 → 2 倍内) | 1.35 / 1.34 / rog 10.3× / 2.3× | 0.57762, 15.940, 18.639, 4.0509 (正本と同一) |
+
+**結論**: この TP 2 種 + 非平衡凝縮の node Euler 軸対称では (i) **cfl 6〜8 は `implicitRelax 0.7` 付きなら起動からでも安定**で、場・報告量・残差床とも cfl 2 と同じ (差は反復床の 2 倍以内);
+(ii) relax 無しの cfl 6 は軸列の EOS 床洗浄で発散 (既知の TP 陰解法上限 [implicit-cfl-ceiling-eos-floor] と同じ機構、凝縮は無関係);
+(iii) relax 無しの cfl 4 は完走するが残差床が流れ 1.8×・凝縮モーメント 10× 高い (限界サイクルが強まる)。
+以後の case/44 凝縮 run は **cfl 6 + implicitRelax 0.7** (step 時間は cfl 2 と同じ 2.5 ms なので擬似時間あたり 3 倍速) を推奨し、正本の再取得は行わない (差が反復床内)。
+
 ## 問題定義
 
 | ファイル | R | L_U | L_c | 備考 |
@@ -663,4 +685,5 @@ seam `case/09 run_0064` 1.000000、Arthur `lim1e` (N2 cell 3 反復・node・空
 | **`run_0162`–`run_0167`** (`lim1d`: node cfl 2/0.5 + condFloat 0, cell cfl 2/0.5 + condFloat 0) | **最終確定バイナリ (4 巡目, 小液滴の蒸発継続を追加) の検証** (上の「4 巡目」段落) | 3 巡目と 1e-5〜7e-5 で一致、cfl/精度で一致、series ALL STEADY | 履歴 (4 巡目バイナリ; 正本は 5 巡目 `run_0170`–`0176`) |
 | **`run_0170_va3_M4.19_Lc8_noneq_inletTt_lim1e_cfl2`** / `run_0171_…_lim1e_cfl05` (warm from `0163`) / `run_0176_…_lim1e_cfl2_rep1` / `run_0172_…_cell_lim1e_cfl2` / `run_0173_…_cell_lim1e_cfl2_rep1` / `run_0174_…_cell_lim1e_cfl2_rep2` / `run_0175_…_cell_lim1e_cfl05` (warm from `0165`) | **5 巡目 = 正本バイナリ (355f4e40, Q0=0 減衰・0.2 % 閾値・補間交差) の検証セット** (上の「5 巡目」表; plan condensation-source-limiter-steady §6 (a)–(c)): node cfl 2/0.5 + 反復、cell cfl 2 ×3 反復 + cfl 0.5 | 全 NaN 0・ALL STEADY・condLim 1.0000・補正 0。node: 反復 1.95e-5, cfl 0.5−2 = 1.55e-3 / 0.18 K (縮小中); cell: 反復床 g_0 4.4–5.8e-4, cfl 0.5−2 = ro/P/T 床内, **g_0 2.17e-3 (床の 4 倍, 頭打ち)**, gL1 7.85e-4 | **active (正本)** |
 | **`run_0177_…_cell_lim1e_xr_cfl05_from0172`** / **`run_0178_…_cell_lim1e_xr_cfl2_from0175`** / **`run_0179_…_lim1e_xr_cfl05_from0170`** / **`run_0180_…_lim1e_xr_cfl2_from0171`** | **交差 restart** (codex result-5 M1): 同一保存場から cfl を入れ替えて 24000 step (2000 step 毎保存); cell cfl 0.5 ← `0172` / cfl 2 ← `0175`, node cfl 0.5 ← `0170` / cfl 2 ← `0171` | 上の「交差 restart」表。cfl 2 の場は cfl 0.5 でも床内 (cell 6.2e-4, node 反復床)、cfl 0.5 系の場は cfl 2 で床内へ (cell 6000 step 以降, node 最終 1.3e-4) → **§6 (b) 成立 (共通の最終場を指定精度内で維持・再現)**; 履歴差が残る機構は F-cf10; 全 NaN 0・ALL STEADY | **active (正本; §6 (b) の根拠)** |
+| `run_0181_…_lim1e_cfl4_from0170` / `run_0182_…_cfl6_from0170` / `run_0183_…_cfl6_relax07_from0170` / `run_0184_…_cfl6_startup` / `run_0185_…_cell_lim1e_cfl6_from0172` / `run_0186_…_cfl4_startup` / `run_0187_…_cfl6_relax07_startup` / `run_0188_…_cfl8_relax07_from0170` / `run_0189_…_cell_lim1e_cfl4_from0172` | **cfl_pseudo スイープ** (推奨レシピ cfl 4〜6 + implicitRelax 0.7 での挙動; 上の「cfl_pseudo スイープ」表) | cfl 4 完走 (床 rog 10×), cfl 6 relax なしは軸 EOS 床で発散 (node/cell, field/startup とも), **cfl 6/8 + relax 0.7 は起動からでも安定・場と床が cfl 2 と同じ** → 推奨 cfl 6 + relax 0.7 | active (発散 run `0182`/`0184`/`0185` は `res_nan_*.h5` の証拠として保持) |
 | `run_0200_perf_regress_node_axisym_sst_tp` / `run_0201_perf_regress_node_axisym_euler_cond` (ローカル RTX 3060, 2026-09-12) | 高速化ブランチ `feature/perf-3d-speedup` の node 軸対称回帰: run_0117 (node 軸対称 SST TP NS 等温壁) の res_24000 / run_0104 (node 軸対称 Euler + 平衡凝縮) の res_12000 から 300 step、基準 ×2 vs 最終 (+ `blockDPLURDiagCache: 1`) (`tools/perf_regress.py`) | 0201: 30/30 PASS。0200: 絶対・ノイズ判定では T 3.8e-5 (0.03 K, 燃焼室壁 BL 帯) が EXCEED → SLAU 行単位二分で運動量流束組み立ての丸め順 (旧コードの `p̃·S` 先行丸め) と特定、double ビルド (高精度参照) との距離は 新 3.14e-5 < 基準 3.58e-5 で `cmp --noise --truth` **PASS 18/18** (final / +対角キャッシュ / thermoFloat 0)。詳細 plan §5.1 #13、証拠 `bisect_slau_summary.txt` / `cmp_final_truth.txt` (run 内)。ラベル: base_r1/r2, base_dbl_r1/r2 (double), base_nofmad, base_momexact_r1/r2, S1〜S5c (二分), lit2_local, final, final_dcache, final_tf0, merged (main 凝縮マージ後 3b77cc4b: 0200 `--truth` PASS 18/18, 0201 PASS 30/30) | active (回帰) |
