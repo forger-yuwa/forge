@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `convection / diffusion / condensation / time_integration`
-- **status**: `draft`
+- **status**: `in_progress`
 - **related_docs**:
   - `methods/thermophysics.md` (実装 §5b 多成分化学種輸送, §5d 拡散, §5 tracer)
   - `methods/condensation.md` (実装 §4 モーメント輸送・§4c 更新クランプ)
@@ -72,7 +72,10 @@
 - **熱力学は `cfg.nSpecies` 本のまま**。受動種は `nSpecies==1` (CPG + トレーサ) でも動く (`speciesEnabled` ゲートとは独立)。
 - **移流**: `SpeciesArgs` に受動種の再構成入力 (`nPassive, Pd_recon, dPdx/y/z_recon, limiterP_recon, Pface_out`) を足し、SLAU の S3 分岐と同じ `interp_dispatch` で面値を作る。
   **リミッタは受動種ごとの Venkat ψ_P** (`limiter_r1_d` を流用; 化学種の ψ_ρ 流用は「ρ と同次数」の整合が理由だが、受動種は熱力学に入らず ρ との整合は不要で、
-  スカラ自身の単調性の方が重要)。正規化はせず、面値を下限 0 (トレーサは [0,1]) でクリップ。**面クリップは保存性を壊さない** (同一面の 1 つの流束を両 CV に逆符号で
+  スカラ自身の単調性の方が重要)。**スケーリング (codex plan-2 M1)**: 現行 `limiter_r1_d` は $\Delta_+^2\Delta_-$ 等の 3 次積を float32 で組むため、モーメント
+  ($Q_0 \sim 10^{15}$) では Inf/NaN になる。受動種のリミッタは差分をセル局所スケール $\phi_{ref} = \max(|\phi_c|, \max_{nb}|\phi|, \phi_{floor})$ で無次元化し
+  ($\tilde\Delta = \Delta/\phi_{ref}$, $\epsilon^2$ も無次元) Venkat 関数は同じ式で評価する (スケール不変なので ψ は変わらない)。単体で g/Q2/Q1/Q0 の実測スケール・
+  ゼロ近傍・極値でクリップ前の係数が有限であることを検査する。正規化はせず、面値を下限 0 (トレーサは [0,1]) でクリップ。**面クリップは保存性を壊さない** (同一面の 1 つの流束を両 CV に逆符号で
   加える; codex M3 訂正)。upwind 側を `Pface_out[ip*nPassive+q]` に書き、`species_advection_faceY_d` を受動種ポインタで呼ぶ (`res_<cons>`, 1 次風上 `transport_diag_<prim>`)。
   SLAU 以外、または `speciesFaceReconstruction < 2` のときは受動種も化学種と同じ 1 次経路 (`scalarTransportResidualMulti_d`) に落ちる (常に化学種と同じ次数)。
 - **有界性**: 面値の非負・[0,1] クリップは更新後の有界性を保証しない (codex M3 の反例: ステップ状分布で流出面値 > 流入面値 → 負の増分)。有界性は
@@ -88,19 +91,31 @@
   2. 空間残差 `res_*` と **`transport_diag_*`** を gather (ソース Jacobian `src_jac_*` は体積比で整合);
   3. dual-time では gather 後に合併体積で BDF 項を**一度だけ**追加;
   4. 受動種の更新後に状態 mirror (`periodicMirrorScalarState` に受動種を登録; 平均流更新時の mirror では不十分)。
-  試験: 周期 node 箱の移流・拡散 (継ぎ目・辺・角で保存量 ∫ρφ dV と更新速度が内部と一致) と一様過飽和の凝縮ソース (case/09 `run_0064` プロトコル)。
+  5. **化学種の coupling 1/2 も周期整合させる (codex plan-2 M3)**: coupling 2 の予測・EOS クロス項注入は「擬似刻み確定後、BDF 込み・ピン除去済み残差」で行い、
+     クロス項は**独立バッファ**に組んでその追加分だけを周期 gather してから流れの RHS に加える (gather 済み残差への直接加算は部分 CV 分、再 gather は重複)。
+     coupling 1 (scalar-DPLUR) の近傍補正と各 sweep の `dq` は周期グループで整合させ (流れ側 `main.cpp` の周期補正同期に相当)、化学種の更新後状態も mirror する。
+  試験: 周期 node 箱の移流・拡散 (継ぎ目・辺・角で保存量 ∫ρφ dV と更新速度が内部と一致) を受動種だけでなく**非一様組成の化学種 (coupling 0/1/2)** で行い、
+  一様過飽和の凝縮ソース (case/09 `run_0064` プロトコル) も再確認する。
 - **更新**: 受動種は現行どおり segregated point-implicit (`scalarTimeIntegration_d` / `cond_moment_update_limited_d`)。化学種の結合予測/commit には入れない。
-  トレーサは化学種と同じく更新後に非負化のみ (再正規化は無し); primitive 段で保存量を書き換えるクランプは撤廃。
+  **上下限 (codex plan-2 M2)**: 更新確定時に**更新済み密度**で $0 \le \rho\xi \le \rho$ (トレーサ)、$\rho\phi \ge 0$ (モーメント) を適用する (流れ更新で ρ が減ると
+  非負化だけでは ξ>1 になる)。primitive 段で保存量を書き換えるクランプは撤廃。**補正収支**: 上限・下限それぞれの符号付き補正 $\int \Delta(\rho\phi)\,dV$ と絶対補正
+  $\int |\Delta(\rho\phi)|\,dV$ を物理 step 内 (擬似反復の和) と全期間の積算で記録し (`passiveFloorCorr_<name>` は更新ごとの正規化量でなく積算; `condClampCorr` とは
+  規約が違うことを明記)、保存誤差は $|\Delta \int\rho\phi\,dV| / \int\rho\phi\,dV$ の相対値で定義、補正量にも合否閾値 (全期間の相対積算 ≤ 1e-4) を置く。
 - 切替 `passiveScalarScheme` (0 = 旧汎用スカラ経路 [ビット不変], 1 = 化学種経路)。既定は検証完了後に 1。
 
 ### 4.2 S3 の本番化 — 完全な 2 次残差 + 増分緩和 (codex plan C1/M2 反映)
 
 - **残差は常に完全な $R_2$** (面再構成した流束の総和)。残差のブレンドや deferred-correction 係数は使わない (固定点が変わる)。
-- 安定化は**増分と擬似 Δτ に限定**: (i) 化学種・受動種の segregated 更新に `implicitRelax` (コード既定 1.0; 推奨レシピ 0.7) を掛ける (**新経路 `passiveScalarScheme 1` のみ**;
-  旧経路 0 は緩和なしのまま = ビット不変); (ii) 保険として化学種/受動種だけ擬似 Δτ を絞る `scalarCflMax` (既定なし; 物理時間項は変えない)。
+- 安定化は**増分と擬似 Δτ に限定**: (i) 受動種の segregated 更新に `passiveImplicitRelax` (既定 = `implicitRelax`) を掛ける (`passiveScalarScheme 1` のみ; 旧経路 0 は緩和なし
+  = ビット不変); **化学種の segregated 更新の緩和は独立キー `speciesImplicitRelax` (既定 1.0 = 現行と同じ写像)** とし、受動種の切替とは分離する (codex plan-2 M5)。
+  無影響試験には `implicitRelax 0.7` の run を含める。(ii) 保険として化学種/受動種だけ擬似 Δτ を絞る `scalarCflMax` (既定なし; 物理時間項は変えない)。
 - **実装前の原因確認 (node)**: case/28 の S3 発散は cell・`speciesImplicitCoupling 1`・relax 0.7 の条件だった。node の同一 IC/BC で S2/S3 × coupling 0/1 の 4 組を cfl 4 で回し、
   発散の有無・最初の NaN の位置・更新方式との対応を記録してから設計を確定する (発散が coupling 1 [scalar-DPLUR] 固有なら受動種 [coupling 0 相当] は無関係)。
-- 固定点不変の検証: 小型 PASS ケース (case/16 `run_0471` プロトコル + S3) で `implicitRelax` 0.7 / 1.0、`scalarCflMax` 有/無、cfl 2 / 6 の収束解が反復ノイズ内で一致。
+- 固定点不変の検証 (codex plan-2 M4): `run_0471` は組成がほぼ一様 (max−min 3e-8〜7e-7) で組成再構成の寄与が丸め程度なので**無影響回帰にのみ使う**。固定点ゲートには
+  **定常でも非ゼロ勾配が残る**ケースを新設する: case/16 `run_0471` プロトコルに `inletProfile` CSV で半径方向に変わる $Y_{H2O}$ (例 0.02→0.06) とトレーサ $\xi$ (0→1) を与えた
+  node Euler run (`run_0473` 系; PASS が取れる 12000 step)。$R_2 - R_1$ が反復ノイズより十分大きいことを確認し、`speciesImplicitRelax`/`passiveImplicitRelax` 0.7/1.0、
+  `scalarCflMax` 有/無、cfl 2/6 の**交差 restart** で全残差 PASS・収束解が反復ノイズ内・補正無作用 (floor 補正 0) を要求する。固定点不変は「正の緩和率・非特異な更新作用素・
+  制約補正が無作用」の条件付きなので、補正無作用を必ず併記する。
 
 ### 4.3 凝縮モーメントの移流
 
@@ -117,7 +132,9 @@
   (BDF がピン行に残差を戻すため) → 流れ block 更新 → 化学種更新 (coupling 0: point-implicit / 1: scalar-DPLUR [移植元に無い分岐を本ブランチの定常経路から流用] /
   2: EOS 結合 commit) → 再正規化・primitive → 入口 Dirichlet の再適用 → 受動種更新 (BDF 込みの `res`/`transport_diag` で `cond_moment_update_limited_d` /
   `scalarTimeIntegration_d`) → 状態 mirror。
-- 履歴初期化: 起動時 `P = PP = 現在値`; restart は `res_*.h5` に `roY{s}P` 等が無ければ同様に初期化 (BDF1 から)。
+- **履歴契約 (codex plan-2 M6)**: BDF の履歴有効数と係数は流れ・化学種・受動種で**共有する 1 つの状態** (`cfg`/StepContext の `nHistoryValid` と `iStep`; 移植元の
+  プロセス内カウンタ `g_speciesLevelShifts` は使わない)。checkpoint は流れ・化学種・受動種の履歴 (`*N/NN`, `*P/PP`)・物理時刻・刻み・履歴有効数をまとめて書き、
+  restart は全部揃っているときだけ復元し、1 つでも欠ければ**全系を揃えて BDF1 から**再開する (旧形式 `res_*.h5` はこの経路)。起動時は `P = PP = 現在値`。
 - `condLimiterMode 1` の dual-time 自動降格と `tracer × dualTime` 拒否を解除 (検証後)。`scalarCflMax` は物理時間項に触れない。
 
 ### 4.5 k/ω
@@ -140,7 +157,7 @@
 | # | 項目 | 内容 |
 | --- | --- | --- |
 | 1 | ~~調査 (コード地図) と §4 の具体化~~ | 済 (2026-09-17): §4.0–4.5 |
-| 2 | codex plan レビュー | 1 回目 NO-GO (C1/M7/m1) を全採用して §4/§6/§8 を改訂 (2026-09-17)。**2 回目を実装前に回す** |
+| 2 | ~~codex plan レビュー~~ | 1 回目 NO-GO (C1/M7/m1)、2 回目 **GO-with-changes (M6)** を全採用 (§6.1)。実装着手可 (2026-09-17) |
 | 3 | docs 先行更新 | ステップ 1 |
 | 4 | 原因確認 (node): S3 発散再現 (S2/S3 × coupling 0/1, cfl 4) と `run_0104` 差の段階比較 | ステップ 2 |
 | 5 | 受動種基盤 (ステップ 3) | トレーサ・モーメント、周期・ピン・floor 診断 |
@@ -153,23 +170,27 @@
 全比較で `speciesFaceReconstruction`・`speciesImplicitCoupling`・`implicitRelax`・実効スカラ CFL (`scalarCflMax`) を明記して固定する。
 
 1. **差の原因の段階比較** (`run_0104` プロトコル, lumped [EXH, AIR] + tracer, node Euler): 凍結流れ (`FORGE_FREEZE_*` 相当または収束場から 1 step) で
-   残差 → 更新前後 → 再正規化前後 → クランプ前後の各段で |ξ − Y_EXH| を記録し、差の由来を確定。`passiveScalarScheme 1` (同じ更新写像・再正規化なし・クランプなし) では
-   同一 run 内 |roXi/ρ − roY0/ρ| が float 精度 (max ≤ 1e-6) になることをゲートとする (等拡散・同じ更新方式の制御試験に限定)。
+   残差 → 更新前後 → 再正規化前後 → クランプ前後の各段で |ξ − Y_EXH| を記録し、差の由来を確定。**厳密一致ゲート (max ≤ 1e-6) は全離散作用素と更新写像を揃えた
+   制御試験に限定** (1 次移流 [`speciesFaceReconstruction 0`]・拡散なし・再正規化なし・同じ緩和・同じ floor; codex plan-2 M5)。S3 では化学種 (ψ_ρ + 面正規化) と
+   受動種 (ψ_P + 独立クリップ) のリミッタが違うので一致は要求せず差を記録する。
 2. **保存・有界**: 一様流中のステップ状 ξ の移流 (node 箱 + 周期, 1 次/S3): ∫ρξ dV の保存 1e-6、floor 補正量の記録、0 ≤ roXi/ρ ≤ 1 (floor 後)、
    S3 が 1 次より鋭いこと。モーメントは一様過飽和の凝縮ソース試験で非負・実現可能性・継ぎ目/辺/角の更新速度が内部と一致 (case/09 `run_0064` プロトコル)。
 3. **拡散 (F-sp1 を閉じる)**: 解析解付き node 拡散試験 (1 次元ガウス核の拡散; 層流 `Sc`、乱流 `Sc_t` [`vis_turb` を人為的に与える]、無流束壁、入口、周期) で
    誤差が 2 次収束; `nSpecies==1` + トレーサでも動作; モーメントに拡散が入らない; 等拡散係数条件で化学種と一致、混合平均拡散では非一致 (記録のみ)。
-4. **S3 本番化 (安定性・固定点)**: node で S2/S3 × coupling 0/1 を cfl 4 (原因確認, ステップ 2); case/16 `run_0471` プロトコル (5 種 node Euler, PASS ケース) + S3 で
-   `implicitRelax` 0.7/1.0、`scalarCflMax` 有/無、cfl 2/6 が全て **PASS** で収束解が反復ノイズ内で一致 (固定点不変); case/44 `run_0170` プロトコルを S3 + cfl 6 +
-   relax 0.7 で完走 (NaN 0, series STEADY) — こちらは準定常回帰 (固定点の証拠ではない)。
+4. **S3 本番化 (安定性・固定点)**: node で S2/S3 × coupling 0/1 を cfl 4 (原因確認, ステップ 2); **非一様組成 + トレーサの PASS ケース** (§4.2: `run_0471` プロトコル +
+   半径方向 $Y_{H2O}$/ξ 分布, `run_0473` 系) + S3 で `speciesImplicitRelax`/`passiveImplicitRelax` 0.7/1.0、`scalarCflMax` 有/無、cfl 2/6 の交差 restart が全て **PASS**、
+   収束解が反復ノイズ内、floor 補正 0 (固定点不変); `run_0471` は無影響回帰; case/44 `run_0170` プロトコルを S3 + cfl 6 + relax 0.7 で完走 (NaN 0, series STEADY) —
+   こちらは準定常回帰 (固定点の証拠ではない)。
 5. **凝縮回帰 (準定常, 差の記録)**: case/44 `run_0170` プロトコルで `passiveScalarScheme` 0/1 × `speciesFaceReconstruction` 0/2 の onset・出口 g・g max・series STEADY・
    condLim 1・補正 0・floor 補正量; case/16 `run_0335` プロトコル (Wysłouzil) で onset と実験の差の変化; Arthur N2 node (`case/34 run_0106` プロトコル) の onset。
    同一バイナリ反復ノイズ床を併記。
-6. **dual-time**: (i) 多成分 dual-time で ΣY=1 と化学種の時間発展 (main のバグ修正; case/16 TP dual-time の短い run で `roY` が動く); (ii) 時間精度: 滑らかな解
-   (ガウス状 ξ とモーメントの移流 + ソース作動時の凝縮) を同一最終時刻で Δt, Δt/2, Δt/4 の 3 水準で比較し BDF2 の 2 次収束、サブ反復数倍増で結果不変、各物理 step の
-   サブ反復で全化学種・受動種の BDF 込み残差が下がること (物理 step の `outer_end` だけで判定しない); (iii) coupling 0/1/2 の各分岐で ピン行の残差が 0、入口値が保たれる。
-7. **無影響**: `passiveScalarScheme 0` + `speciesFaceReconstruction 0` で現行とビット一致 (case/44 `run_0170`, case/46 `run_0100`)、化学種のみの run (case/16 `run_0471`) は
-   `passiveScalarScheme` に依らず不変。
+6. **dual-time**: (i) 多成分 dual-time で ΣY=1 と化学種の時間発展 — 「`roY` が動く」だけでは不十分で、**非一様組成の化学種を含めて** 3 水準の時間次数で判定する;
+   (ii) 時間精度: 滑らかな解 (ガウス状 ξ・モーメント・組成の移流 + ソース作動時の凝縮) を同一最終時刻で Δt, Δt/2, Δt/4 の 3 水準で比較し、3 水準の差から求めた次数が
+   BDF2 で 2.0±0.3 (BDF1 では 1.0±0.3)、サブ反復数倍増で結果の差 ≤ 3 水準最小差の 1/10、各物理 step のサブ反復で全化学種・受動種の BDF 込み残差が ≥2 桁下がること
+   (物理 step の `outer_end` だけで判定しない); (iii) coupling 0/1/2 の各分岐でピン行の残差が 0、入口値が保たれる; (iv) **restart**: 連続実行 vs 途中 checkpoint からの
+   restart が反復ノイズ内で一致、旧形式入力 (履歴なし) は BDF1 再開で完走、`nSpecies==1` + 受動種でも同じ (codex plan-2 M6)。
+7. **無影響**: `passiveScalarScheme 0` + `speciesFaceReconstruction 0` で現行とビット一致 (case/44 `run_0170`, case/46 `run_0100`, **`implicitRelax 0.7` の run** [case/44
+   `run_0183`])、化学種のみの run (case/16 `run_0471`) は `passiveScalarScheme` に依らず不変、`speciesImplicitRelax` 省略時 (1.0) は化学種の更新写像が現行と同一。
 8. **判定基準**: 上のゲート + `check_convergence.py` / `check_quasisteady.py` VERDICT、NaN 0、step 時間の増分を記録。既定変更 (`passiveScalarScheme 1`,
    `speciesFaceReconstruction 2` の推奨) は 1–7 を全て通した後。
 
@@ -177,6 +198,7 @@
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan (2 回目) | `2026-09-17` | [2026-09-16-species-passive-scalar-unification-plan-2.md](../../notes/reviews/2026-09-16-species-passive-scalar-unification-plan-2.md) | **GO-with-changes**, C0/M6/m0 | **全採用 (2026-09-17 反映)**: M1 (Venkat の float32 3 次積がモーメント 1e15 で Inf/NaN) → 受動種のリミッタはセル局所スケールで無次元化した差分で評価 + 有限性単体 (§4.1); M2 (非負化だけでは ξ≤1 を保証しない、`condClampCorr` は積算でない) → 更新確定時に更新済み ρ で 0≤ρξ≤ρ、符号付き/絶対補正の体積積分を step 内・全期間で積算、相対保存誤差と補正閾値 (§4.1); M3 (周期で coupling 1/2 の予測・EOS クロス項・dq 同期が未定義) → クロス項は独立バッファで gather、DPLUR dq と更新後状態の周期整合、非一様組成 coupling 0/1/2 の周期試験 (§4.1-5); M4 (`run_0471` は組成ほぼ一様で固定点ゲートが空振り) → 非一様 Y_H2O/ξ 分布の PASS ケース `run_0473` 系を新設し交差 restart + 補正無作用 (§4.2, §6-4); M5 (化学種の緩和を受動種の切替に紐付けると無影響ゲートと矛盾、S3 のリミッタ差で 1e-6 一致は不成立) → `speciesImplicitRelax` (既定 1.0) を独立キーに、無影響試験に relax 0.7 を含め、厳密一致は全作用素を揃えた制御試験に限定 (§4.2, §6-1, §6-7); M6 (BDF 履歴の共有・checkpoint・restart 契約と時間次数の数値基準が無い) → 履歴有効数と係数を全系で共有、checkpoint 一括復元/欠落時 BDF1、連続 vs restart・旧形式・nSpecies==1 の試験、次数 2.0±0.3 等の数値基準 (§4.4, §6-6)。**実装着手可** (原因確認は並行) |
 | plan | `2026-09-17` | [2026-09-16-species-passive-scalar-unification-plan.md](../../notes/reviews/2026-09-16-species-passive-scalar-unification-plan.md) | **NO-GO**, C1/M7/m1 | **全採用 (2026-09-17 反映)**: C1 (残差ブレンド deferred-correction は固定点を変える) → 撤回、残差は常に完全な $R_2$、緩和は増分と擬似 Δτ のみ (§4.2); M2 (case/28 の発散例は cell・relax 0.7・coupling 1 で「未緩和 point-implicit」ではない) → node で S2/S3 × coupling 0/1 の原因確認を実装前に (§4.2, §6-4); M3 (面クリップは保存的、有界性は面値では保証されない、`Xi` は輸送に読む原始量) → 保存性の記述を訂正、ψ_P リミッタ + 更新後 floor + floor 補正量の診断、生の roXi/ρ・総量・実現可能性で判定 (§4.1, §6-2); M4 (node 周期は名前ベース gather では不足) → 勾配の周期除外と gather、`transport_diag` gather、更新後 mirror、BDF は gather 後に一度、周期試験必須 (§4.1); M5 (1.8e-4 の原因は未確定) → 仮説に戻し段階比較で確定、一致ゲートは同じ更新方式の制御試験に限定 (§4.0, §6-1); M6 (dual-time の処理順・ピン・coupling 分岐・時間精度ゲート) → §4.4 の処理順、3 水準の時間精度、サブ反復残差、ソース作動試験 (§6-6); M7 (完了条件から S3 安定性・原因切り分けが抜け、`passiveScalarScheme 1` だけでは 1 次のまま) → 検証 1–7 を完了条件に、A/B は SFR/coupling/relax/scalar CFL を固定、固定点不変は PASS ケースで (§6, §8); M8 (F-sp1 を閉じる拡散検証が無い) → 解析解付き拡散試験 (§6-3); m1 (§1/§3 の「2 次」「limiter_Y」記述、`implicitRelax` 既定 1.0、BDF1 は最初の 1 step、緩和は新経路のみ) → 本文修正 |
 
 ## 7. 影響範囲
@@ -201,6 +223,7 @@
 
 - `2026-09-17` — 初稿 (ユーザ決定 2026-09-16: トレーサを化学種カーネルの受動種に、凝縮モーメントも化学種経路、dual-time の化学種修正移植と受動種の BDF 項を一括で)。
 - `2026-09-17` — 調査で前提を訂正 (§4.0): 本番の化学種移流も 1 次 (S3 は experimental)。本 plan の 2 次化 = S3 の node 本番化を含む。
+- `2026-09-17` — codex plan レビュー 2 回目 **GO-with-changes (M6)** を全採用: リミッタの無次元化、上下限と補正収支、周期の coupling 1/2 整合、非一様組成の固定点ケース、`speciesImplicitRelax` の分離、BDF 履歴契約と時間次数の数値基準。
 - `2026-09-17` — codex plan レビュー 1 回目 **NO-GO (C1/M7/m1)** を全採用して改訂: 残差ブレンドを撤回 (完全な $R_2$ + 増分緩和)、S3 発散の原因確認を実装前に、
   面クリップの保存性訂正と有界性の診断、周期 node の処理順、1.8e-4 は仮説に、dual-time の処理順と 3 水準時間精度、拡散の解析解試験、完了条件 1–7。
 
