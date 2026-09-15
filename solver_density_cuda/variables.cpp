@@ -76,6 +76,22 @@ void variables::registerSpecies(int nSpecies, int chemistry)
         this->output_cellValNames.push_back("Y"+std::to_string(s));
     }
 
+    // 診断 (FORGE_SPECIES_RAW_DIAG=1): 再正規化前の生更新値 roYraw{s} を出力する (plan species-passive-scalar-unification §6-1 の
+    // 制御試験: 受動トレーサは ΣρY=ρ 再正規化を受けないので比較対象は生更新値)。既定では登録しない。
+    {
+        const char* e = std::getenv("FORGE_SPECIES_RAW_DIAG");
+        if (e && std::atoi(e) != 0) {
+            for (int s = 0; s < nSpecies; s++) {
+                const std::string name = "roYraw"+std::to_string(s);
+                this->cellValNames.push_back(name);
+                this->c.emplace(name, std::vector<flow_float>{});
+                this->c_d.emplace(name, nullptr);
+                this->output_cellValNames.push_back(name);
+            }
+            std::cout << "registerSpecies: FORGE_SPECIES_RAW_DIAG=1 -> roYraw{s} (pre-renormalization update) registered\n";
+        }
+    }
+
     // 有限速度化学 (chemistry.enabled): 反応熱 Q̇ [W/m3] と化学時間 τ_c [s] の診断出力。
     if (chemistry != 0) {
         for (const auto& name : {std::string("chemQdot"), std::string("chemTau")}) {
@@ -107,7 +123,15 @@ void variables::registerTracer(int enabled)
     }
     this->output_cellValNames.push_back("roXi");
     this->output_cellValNames.push_back("Xi");
-    std::cout << "registerTracer: exhaust tracer roXi registered (8 cell variables)\n";
+    // 受動種経路 (passiveScalarScheme 1; plan species-passive-scalar-unification §4.1): 勾配 ∇ξ・リミッタ ψ_ξ (S3 面再構成)、
+    // scalar-DPLUR 増分 dq、floor 補正の累積 |Δ(ρξ)| (passiveFloorCorr_Xi; 確保時 0 初期化)。勾配/リミッタ/補正は level 2 出力のみ。
+    for (const auto& name : {"dXidx", "dXidy", "dXidz", "limiter_Xi", "passiveFloorCorr_Xi", "dq_roXi", "dq_roXi_old"}) {
+        this->cellValNames.push_back(name);
+        this->c.emplace(name, std::vector<flow_float>{});
+        this->c_d.emplace(name, nullptr);
+    }
+    for (const auto& name : {"dXidx", "dXidy", "dXidz", "limiter_Xi", "passiveFloorCorr_Xi"}) this->output_cellValNames.push_back(name);
+    std::cout << "registerTracer: exhaust tracer roXi registered (15 cell variables)\n";
 }
 
 // 非平衡凝縮 (Phase 1): 1 モーメント (保存量名 consName 例 "rog_0") ごとに必要なセル変数名を生成する。
@@ -123,7 +147,10 @@ static std::list<std::string> condMomentCellVarNames(const std::string& consName
     return {
         consName, prim, consName+"N", consName+"M",
         "res_"+consName, "res_"+consName+"_m",
-        "src_jac_"+prim, "transport_diag_"+prim
+        "src_jac_"+prim, "transport_diag_"+prim,
+        // 受動種経路 (passiveScalarScheme 1): 勾配・リミッタ (S3)、scalar-DPLUR 増分、floor 補正の累積 |Δ(ρφ)|
+        "d"+prim+"dx", "d"+prim+"dy", "d"+prim+"dz", "limiter_"+prim, "passiveFloorCorr_"+prim,
+        "dq_"+consName, "dq_"+consName+"_old"
     };
 }
 
@@ -152,6 +179,11 @@ void variables::registerCondensation(int nCondSpecies)
             // 原始量・保存量を HDF5 出力対象に加える (可視化)。
             this->output_cellValNames.push_back(consName);
             this->output_cellValNames.push_back(consName.substr(2));
+            // 受動種経路の診断 (level 2 のみ): 勾配・リミッタ・floor 補正の累積。
+            const std::string prim = consName.substr(2);
+            for (const auto& name : {"d"+prim+"dx", "d"+prim+"dy", "d"+prim+"dz", "limiter_"+prim, "passiveFloorCorr_"+prim}) {
+                this->output_cellValNames.push_back(name);
+            }
         }
         // 診断 (source kernel が毎ステップ書く): 過飽和 S=p_v/p_sat, 成長率 dr/dt [m/s] (負=蒸発),
         // 体積平均半径 r30 [m] (蒸発分岐で評価; 0=未評価)。確保時に 0 初期化 (prefix "cond")。
@@ -169,7 +201,7 @@ void variables::registerCondensation(int nCondSpecies)
     }
 
     std::cout << "registerCondensation: nCondSpecies=" << nCondSpecies
-              << " -> registered " << nCondSpecies*(4*8+8) << " cell variables\n";
+              << " -> registered " << nCondSpecies*(4*15+8) << " cell variables\n";
 }
 
 variables::~variables() {
@@ -257,6 +289,7 @@ void variables::allocVariables(const int &useGPU , mesh& msh)
             // (未初期化 device メモリを出力しないため)。
             if (cellValName.rfind("wi_", 0) == 0 || cellValName.rfind("omg_", 0) == 0
                 || cellValName.rfind("rep_", 0) == 0 || cellValName.rfind("cond", 0) == 0
+                || cellValName.rfind("passiveFloorCorr_", 0) == 0 || cellValName.rfind("roYraw", 0) == 0
                 || cellValName == "wf_irep_flag" || cellValName == "wf_sprod"
                 || cellValName == "wf_g") {
                 gpuErrchk( cudaMemset(this->c_d.at(cellValName), 0, (msh.nCells_all)*sizeof(flow_float)) );

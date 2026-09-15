@@ -35,6 +35,10 @@ add_library(cuda_forge STATIC
     ransTransport_d.cuh
     speciesTransport_d.cu
     speciesTransport_d.cuh
+    passiveTransport_d.cuh
+    passiveKernels_d.cuh
+    passiveLimiter_d.cuh
+    limiterFunctions_d.cuh
     chemistry_d.cu
     chemistry_d.cuh
     chemistry_mech_io.hpp

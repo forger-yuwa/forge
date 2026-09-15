@@ -348,6 +348,37 @@ void solverConfig::read(std::string fname)
         // 多成分 TP 陰解法の化学種更新方式: 既定 0 (従来 segregated 点陰的・ビット不変)。
         // 1 で緩和整合 scalar-DPLUR (流れ block と同一緩和。plan thermophysics-species-implicit-coupling.md)。
         this->speciesImplicitCoupling = getOptionalValidatedValue<int>(deltaT, "speciesImplicitCoupling", 0, "time.deltaT");
+        // 受動スカラ経路の切替と緩和 (plans/active/species-passive-scalar-unification.md §4.1/§4.2)。既定は旧経路 (ビット不変)。
+        this->speciesFaceReconstruction = getOptionalValidatedValue<int>(deltaT, "speciesFaceReconstruction", 0, "time.deltaT");   // (下でも同じ値を再読込)
+        this->passiveScalarScheme = getOptionalValidatedValue<int>(deltaT, "passiveScalarScheme", 0, "time.deltaT");
+        if (this->passiveScalarScheme != 0 && this->passiveScalarScheme != 1) {
+            throw std::runtime_error("Key 'passiveScalarScheme' in 'time.deltaT' must be 0 (legacy generic scalar path) or 1 (species path).");
+        }
+        {
+            double raw = getOptionalValidatedValue<double>(deltaT, "passiveImplicitRelax", -1.0, "time.deltaT");
+            this->passiveImplicitRelax = (raw < 0.0) ? this->implicitRelax : (flow_float)raw;
+            if (this->passiveImplicitRelax <= 0.0 || this->passiveImplicitRelax > 1.0) {
+                throw std::runtime_error("Key 'passiveImplicitRelax' in 'time.deltaT' must be in (0, 1].");
+            }
+        }
+        this->speciesImplicitRelax = getOptionalValidatedValue<double>(deltaT, "speciesImplicitRelax", 1.0, "time.deltaT");
+        if (this->speciesImplicitRelax <= 0.0 || this->speciesImplicitRelax > 1.0) {
+            throw std::runtime_error("Key 'speciesImplicitRelax' in 'time.deltaT' must be in (0, 1].");
+        }
+        this->scalarCflMax = getOptionalValidatedValue<double>(deltaT, "scalarCflMax", -1.0, "time.deltaT");
+        this->passiveImplicitCoupling = getOptionalValidatedValue<int>(deltaT, "passiveImplicitCoupling", -1, "time.deltaT");
+        if (this->passiveImplicitCoupling < 0) {
+            this->passiveImplicitCoupling = (this->passiveScalarScheme == 1 && this->speciesFaceReconstruction >= 2) ? 1 : 0;
+        } else if (this->passiveImplicitCoupling != 0 && this->passiveImplicitCoupling != 1) {
+            throw std::runtime_error("Key 'passiveImplicitCoupling' in 'time.deltaT' must be 0 (segregated point-implicit) or 1 (scalar-DPLUR sweep).");
+        }
+        if (this->passiveScalarScheme == 1 || this->speciesImplicitRelax != 1.0 || this->scalarCflMax > 0.0) {
+            std::cout << "'passiveScalarScheme' in 'time.deltaT': " << this->passiveScalarScheme
+                      << " (passiveImplicitRelax=" << this->passiveImplicitRelax
+                      << ", speciesImplicitRelax=" << this->speciesImplicitRelax
+                      << ", scalarCflMax=" << this->scalarCflMax
+                      << ", passiveImplicitCoupling=" << this->passiveImplicitCoupling << ")" << std::endl;
+        }
         // 多成分 face 整合再構成: 既定 0 (mixed-order・ビット不変)。1 で Y を ρ と同じ再構成し thermo/species 流束整合。
         this->speciesFaceReconstruction = getOptionalValidatedValue<int>(deltaT, "speciesFaceReconstruction", 0, "time.deltaT");
         // multispeciesRhoYCommonLimiter: opt-in 診断 (既定 0・ビット不変)。1 で ρ と全 species に共通 min リミタ。

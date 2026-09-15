@@ -17,49 +17,9 @@ __global__ void fill_limiter5_d(flow_float* a, flow_float* b, flow_float* c, flo
     if (index < nValues) { a[index] = value; b[index] = value; c[index] = value; d[index] = value; e[index] = value; }
 }
 
-// Limiters for Unstructured Higher-Order Accurate Solutions of the Euler Equations
-// Krzysztof Michalak
-
-__device__ flow_float venkata_limiter(flow_float delta_p_max, flow_float delta_p_min, 
-                                      flow_float delta_m, flow_float volume) {
-
-    flow_float K = 1.f;
-    flow_float eps2 = K*K*K*volume;
-    //return (x*x + 2.0*x + eps*eps)/(x*x + x + 2.0 + eps*eps);
-    flow_float res;
-
-    // K11: 元は /(...)/delta_m と除算2回。/(denom*delta_m) に統合して除算1回に（compute律速の limiter 向け）。
-    if (delta_m > 1e-20f) {
-        flow_float delta_p = delta_p_max;
-        res = ((delta_p*delta_p+eps2)*delta_m +2*delta_m*delta_m*delta_p)
-              /((delta_p*delta_p +2.0f*delta_m*delta_m +delta_p*delta_m +eps2)*delta_m);
-    } else if (delta_m < -1e-20f) {
-        flow_float delta_p = delta_p_min;
-        res = ((delta_p*delta_p+eps2)*delta_m +2*delta_m*delta_m*delta_p)
-              /((delta_p*delta_p +2.0f*delta_m*delta_m +delta_p*delta_m +eps2)*delta_m);
-    } else {
-        res = 1.0f;
-    }
-
-    return res;
-}
-
-__device__ flow_float barth_Jespersen_limiter(flow_float delta_p_max, flow_float delta_p_min, 
-                                              flow_float delta_m, flow_float volume) {
-
-    flow_float res;
-
-    if (delta_m > 1e-20f) {
-        res = min(1.0f, delta_p_max/delta_m);
-    } else if (delta_m < -1e-20f) {
-        res = min(1.0f, delta_p_min/delta_m);
-    } else {
-        res = 1.0f;
-    }
-
-    return min(res, 1.0f);
-}
-
+#include "limiterFunctions_d.cuh"
+#include "passiveLimiter_d.cuh"
+#include "passiveTransport_d.cuh"
 
 //__device__ flow_float nishikawa_r1_limiter(deltas delta_dash) {
 //    flow_float res;
@@ -299,6 +259,7 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
     // 分岐 (venkata_limiter, limiter_scheme==2 と同一コスト) に落ちて全 cell の全変数を計算していた
     // = KEEP 系 run の実測 ~22% の GPU 時間が丸ごと無駄だった)。fill 済みの 1.0 がそのまま「無制限」を表す。
     if (cfg.limiter <= 0) {
+        passiveLimiter_d_wrapper(cfg, cuda_cfg, msh, var);   // 受動種 ψ_P (limiter<=0 では 1.0 充填)
         gpuErrchk( cudaPeekAtLastError() );
         gpuErrchkKernelSync();
         return;
@@ -343,7 +304,32 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         }
     }
 
+    // 受動種 (passiveScalarScheme 1, speciesFaceReconstruction>=1): 受動種ごとの無次元化 Venkat ψ_P。
+    passiveLimiter_d_wrapper(cfg, cuda_cfg, msh, var);
+
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+}
 
+// 受動種の無次元化 Venkat リミッタ ψ_P (passiveLimiter_d.cuh)。limiter<=0 または speciesFaceReconstruction<1 では 1.0 充填のみ。
+void passiveLimiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
+{
+    if (!passiveSchemeEnabled(cfg)) return;
+    const int n = passive_count();
+    const auto& prims = passive_prim_names();
+    for (int q = 0; q < n; ++q) {
+        fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_"+prims[q]], msh.nCells_all, 1.0f);
+    }
+    if (cfg.limiter <= 0 || cfg.speciesFaceReconstruction < 1) return;
+    for (int q = 0; q < n; ++q) {
+        const std::string& pn = prims[q];
+        limiter_r1_scaled_d<<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (
+            cfg.limiter, msh.nCells, msh.nNormalPlanes, msh.map_plane_cells_d,
+            msh.map_cell_planes_index_d, msh.map_cell_planes_d,
+            var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
+            var.p_d["pcx"], var.p_d["pcy"], var.p_d["pcz"],
+            static_cast<flow_float>(1.0e-30),
+            var.c_d[pn], var.c_d["limiter_"+pn],
+            var.c_d["d"+pn+"dx"], var.c_d["d"+pn+"dy"], var.c_d["d"+pn+"dz"]);
+    }
 }

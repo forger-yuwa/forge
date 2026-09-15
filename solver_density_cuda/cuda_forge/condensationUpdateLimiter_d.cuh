@@ -12,20 +12,27 @@
 //   avail≤0 は残差側で S=0 なので候補増分は輸送分のみ)。収束時は δ→0 で θ_u→1・無作用 = 固定点は残差だけで決まる。
 //   潜熱 ΔT は二相 EOS と同じ有効比熱 c_v,eff = c_v + g (R_w − dL/dT) で評価する。
 //   診断: diagLim = θ_u、diagCorrG = floor による ρg の補正量 [質量分率]、diagCorrQ = Q0..Q2 の相対補正 (収束時 0 を確認する)。
-__global__ void cond_moment_update_limited_d(
-    geom_int nCells, flow_float* dt_local, geom_float* vol, flow_float* ro,
+// 実体 (__device__)。既存カーネル cond_moment_update_limited_d は (relax=1, dtScale=1, applyFloor=1, dq=nullptr) で呼び、
+// 式・評価順は不変 (1.0 の乗算は厳密なのでビット不変)。受動種経路 (passiveScalarScheme 1) は
+//   relax   : 候補増分の緩和 (passiveImplicitRelax; θ_u の評価前に掛ける = 緩和後の増分に対してクランプ)
+//   dtScale : dt_local の倍率 (scalarCflMax)
+//   applyFloor 0: floor (≥0) を掛けず候補値をそのまま書く (後段 passive_bounds_d が floor と補正収支を担う。診断 diagCorrG/Q は不変)
+//   dq_*    : 非 nullptr なら候補増分を point-implicit で組まず、scalar-DPLUR sweep が作った増分 (緩和済み) をそのまま使う
+//             (passiveImplicitCoupling 1)。θ_u クランプ・floor・診断は同じ。
+__device__ __forceinline__ void cond_moment_update_limited_body(
+    geom_int ic, flow_float* dt_local, geom_float* vol, flow_float* ro,
     flow_float* roY_w, double Yw_const, flow_float* T, flow_float* cp_cell, flow_float* Rmix_cell, flow_float cp_cpg, flow_float gamma_cpg,
-    int condModel, CondPropOpts opts, double dg_max, double dT_max, double lam_min,
+    int condModel, const CondPropOpts& opts, double dg_max, double dT_max, double lam_min,
     flow_float* N_g, flow_float* N_Q2, flow_float* N_Q1, flow_float* N_Q0,
     flow_float* res_g, flow_float* res_Q2, flow_float* res_Q1, flow_float* res_Q0,
     flow_float* sj_g, flow_float* sj_Q2, flow_float* sj_Q1, flow_float* sj_Q0,
     flow_float* td_g, flow_float* td_Q2, flow_float* td_Q1, flow_float* td_Q0,
     flow_float* out_g, flow_float* out_Q2, flow_float* out_Q1, flow_float* out_Q0,
-    flow_float* diagLim, flow_float* diagCorrG, flow_float* diagCorrQ)
+    flow_float* diagLim, flow_float* diagCorrG, flow_float* diagCorrQ,
+    double relax, flow_float dtScale, int applyFloor,
+    flow_float* dq_g, flow_float* dq_Q2, flow_float* dq_Q1, flow_float* dq_Q0)
 {
-    geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
-    if (ic >= nCells) return;
-    const double dt = (double)dt_local[ic];
+    const double dt = (double)(dt_local[ic] * dtScale);
     const double v  = (double)vol[ic];
     const double rod = (double)ro[ic];
     // 候補増分 (floor 前) — runge_kutta_exp_scalar_d (coef 1/0/1) と同じ式
@@ -33,10 +40,15 @@ __global__ void cond_moment_update_limited_d(
         const double fac = 1.0 + dt*((double)sj[ic] + (double)td[ic]/v);
         return ((double)res[ic]*dt/v)/fac;
     };
-    const double d_g  = cand(res_g,  sj_g,  td_g);
-    const double d_Q2 = cand(res_Q2, sj_Q2, td_Q2);
-    const double d_Q1 = cand(res_Q1, sj_Q1, td_Q1);
-    const double d_Q0 = cand(res_Q0, sj_Q0, td_Q0);
+    double d_g, d_Q2, d_Q1, d_Q0;
+    if (dq_g != nullptr) {
+        d_g = (double)dq_g[ic]; d_Q2 = (double)dq_Q2[ic]; d_Q1 = (double)dq_Q1[ic]; d_Q0 = (double)dq_Q0[ic];
+    } else {
+        d_g  = cand(res_g,  sj_g,  td_g)  * relax;
+        d_Q2 = cand(res_Q2, sj_Q2, td_Q2) * relax;
+        d_Q1 = cand(res_Q1, sj_Q1, td_Q1) * relax;
+        d_Q0 = cand(res_Q0, sj_Q0, td_Q0) * relax;
+    }
 
     double theta = 1.0;
     if (rod > 1.0e-20 && dt > 0.0) {
@@ -70,10 +82,17 @@ __global__ void cond_moment_update_limited_d(
     const double nQ2 = (double)N_Q2[ic] + theta*d_Q2;
     const double nQ1 = (double)N_Q1[ic] + theta*d_Q1;
     const double nQ0 = (double)N_Q0[ic] + theta*d_Q0;
-    out_g[ic]  = (flow_float)fmax(ng,  0.0);
-    out_Q2[ic] = (flow_float)fmax(nQ2, 0.0);
-    out_Q1[ic] = (flow_float)fmax(nQ1, 0.0);
-    out_Q0[ic] = (flow_float)fmax(nQ0, 0.0);
+    if (applyFloor != 0) {
+        out_g[ic]  = (flow_float)fmax(ng,  0.0);
+        out_Q2[ic] = (flow_float)fmax(nQ2, 0.0);
+        out_Q1[ic] = (flow_float)fmax(nQ1, 0.0);
+        out_Q0[ic] = (flow_float)fmax(nQ0, 0.0);
+    } else {
+        out_g[ic]  = (flow_float)ng;
+        out_Q2[ic] = (flow_float)nQ2;
+        out_Q1[ic] = (flow_float)nQ1;
+        out_Q0[ic] = (flow_float)nQ0;
+    }
     diagLim[ic]  = (flow_float)theta;
     // 補正量の記録 (このステップの全補正の起点なのでリセット): G = floor による |Δρg|/ρ [質量分率], Q = Q0..Q2 の最大相対補正。
     // 後段の実現可能性クランプ (g≤Y_w / 0.99ρ, 負値, 液滴消滅) は cond_realizability_clamp_{,f_}d が同じ配列へ累積する (codex result M2)。
@@ -83,3 +102,43 @@ __global__ void cond_moment_update_limited_d(
     diagCorrQ[ic] = (flow_float)rq;
 }
 
+__global__ void cond_moment_update_limited_d(
+    geom_int nCells, flow_float* dt_local, geom_float* vol, flow_float* ro,
+    flow_float* roY_w, double Yw_const, flow_float* T, flow_float* cp_cell, flow_float* Rmix_cell, flow_float cp_cpg, flow_float gamma_cpg,
+    int condModel, CondPropOpts opts, double dg_max, double dT_max, double lam_min,
+    flow_float* N_g, flow_float* N_Q2, flow_float* N_Q1, flow_float* N_Q0,
+    flow_float* res_g, flow_float* res_Q2, flow_float* res_Q1, flow_float* res_Q0,
+    flow_float* sj_g, flow_float* sj_Q2, flow_float* sj_Q1, flow_float* sj_Q0,
+    flow_float* td_g, flow_float* td_Q2, flow_float* td_Q1, flow_float* td_Q0,
+    flow_float* out_g, flow_float* out_Q2, flow_float* out_Q1, flow_float* out_Q0,
+    flow_float* diagLim, flow_float* diagCorrG, flow_float* diagCorrQ)
+{
+    geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    cond_moment_update_limited_body(ic, dt_local, vol, ro, roY_w, Yw_const, T, cp_cell, Rmix_cell, cp_cpg, gamma_cpg,
+        condModel, opts, dg_max, dT_max, lam_min, N_g, N_Q2, N_Q1, N_Q0, res_g, res_Q2, res_Q1, res_Q0,
+        sj_g, sj_Q2, sj_Q1, sj_Q0, td_g, td_Q2, td_Q1, td_Q0, out_g, out_Q2, out_Q1, out_Q0, diagLim, diagCorrG, diagCorrQ,
+        1.0, (flow_float)1.0, 1, nullptr, nullptr, nullptr, nullptr);
+}
+
+// 受動種経路 (passiveScalarScheme 1) 用: 緩和・dt 倍率・floor 省略・DPLUR 増分入力を持つ変種 (本文は同じ)。
+__global__ void cond_moment_update_limited_passive_d(
+    geom_int nCells, flow_float* dt_local, geom_float* vol, flow_float* ro,
+    flow_float* roY_w, double Yw_const, flow_float* T, flow_float* cp_cell, flow_float* Rmix_cell, flow_float cp_cpg, flow_float gamma_cpg,
+    int condModel, CondPropOpts opts, double dg_max, double dT_max, double lam_min,
+    flow_float* N_g, flow_float* N_Q2, flow_float* N_Q1, flow_float* N_Q0,
+    flow_float* res_g, flow_float* res_Q2, flow_float* res_Q1, flow_float* res_Q0,
+    flow_float* sj_g, flow_float* sj_Q2, flow_float* sj_Q1, flow_float* sj_Q0,
+    flow_float* td_g, flow_float* td_Q2, flow_float* td_Q1, flow_float* td_Q0,
+    flow_float* out_g, flow_float* out_Q2, flow_float* out_Q1, flow_float* out_Q0,
+    flow_float* diagLim, flow_float* diagCorrG, flow_float* diagCorrQ,
+    double relax, flow_float dtScale, int applyFloor,
+    flow_float* dq_g, flow_float* dq_Q2, flow_float* dq_Q1, flow_float* dq_Q0)
+{
+    geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    cond_moment_update_limited_body(ic, dt_local, vol, ro, roY_w, Yw_const, T, cp_cell, Rmix_cell, cp_cpg, gamma_cpg,
+        condModel, opts, dg_max, dT_max, lam_min, N_g, N_Q2, N_Q1, N_Q0, res_g, res_Q2, res_Q1, res_Q0,
+        sj_g, sj_Q2, sj_Q1, sj_Q0, td_g, td_Q2, td_Q1, td_Q0, out_g, out_Q2, out_Q1, out_Q0, diagLim, diagCorrG, diagCorrQ,
+        relax, dtScale, applyFloor, dq_g, dq_Q2, dq_Q1, dq_Q0);
+}

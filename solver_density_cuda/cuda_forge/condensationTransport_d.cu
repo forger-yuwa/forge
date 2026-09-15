@@ -6,6 +6,7 @@
 #include "condensationSourceF_d.cuh"   // float 実体 (clamp の表評価)      // cond_clamp_vapor_pressure (蒸発塵判定の蒸気分圧)
 
 #include "scalarTransport_d.cuh"
+#include "passiveTransport_d.cuh"   // passiveScalarScheme 1: 化学種経路の受動種として移流・更新
 
 #include <string>
 #include <vector>
@@ -187,6 +188,15 @@ void condensationBoundary_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, bco
     // 入口は dry (液相モーメント=0) の Dirichlet。他種別 (outlet/slip/wall/axis) は zero-gradient。
     const bool isInlet = bc.bcondKind.rfind("inlet_", 0) == 0;
 
+    if (passiveSchemeEnabled(cfg)) {
+        // 受動種経路: 化学種の Dirichlet (ゼロ; node は境界ノードをピン) / Neumann カーネルを受動種ポインタで。
+        const int q0 = passive_moment_index0();
+        for (size_t k = 0; k < var.condMomentConsNames.size(); ++k) {
+            passiveBoundary_d_wrapper(cfg, cuda_cfg, bc, msh, var, q0 + (int)k, nullptr);
+        }
+        return;
+    }
+
     for (const auto& consName : var.condMomentConsNames) {
         const std::string prim = consName.substr(2);
         if (isInlet) {
@@ -220,6 +230,11 @@ void applyCondensationBoundaries(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
 void condensationTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     if (!condensationEnabled(var)) return;
+    if (passiveSchemeEnabled(cfg)) {
+        // 受動種経路 (§4.3): S3 面値 (SLAU) または 1 次風上。res_/transport_diag/src_jac のゼロ初期化と順序 (移流→ソース→更新) は同じ。
+        passiveAdvection_d_wrapper(cfg, cuda_cfg, msh, var, passive_moment_index0(), (int)var.condMomentConsNames.size());
+        return;
+    }
 
     for (const auto& consName : var.condMomentConsNames) {
         const std::string prim = consName.substr(2);
@@ -241,6 +256,67 @@ void condensationTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
 void condensationTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     if (!condensationEnabled(var)) return;
+
+    if (passiveSchemeEnabled(cfg)) {
+        // 受動種経路 (§4.3): 更新クランプ (θ_u) は不変。増分は passiveImplicitCoupling 1 なら scalar-DPLUR sweep (dq_*_old)、
+        // 0 なら point-implicit × passiveImplicitRelax。floor は更新カーネルで掛けず passive_bounds_d が担い補正収支を記録する。
+        // 後段の実現可能性クランプ (condensationPrimitive_d_wrapper) は現行のまま。
+        const int q0 = passive_moment_index0();
+        const int nq = (int)var.condMomentConsNames.size();
+        const bool useLimited = (cfg.timeIntegration == 11 && cfg.condLimiterMode == 1 && cfg.condEquilibrium == 0);
+        const bool haveDq = passiveDPLURIncrement_d_wrapper(cfg, cuda_cfg, msh, var, q0, nq);
+        const flow_float relax = (cfg.timeIntegration == 11) ? static_cast<flow_float>(cfg.passiveImplicitRelax) : static_cast<flow_float>(1.0);
+        const flow_float dts   = scalarDtScale(cfg);
+        if (useLimited) {
+            const int carrier = (cfg.condGasSpecies >= 0 || cfg.condVaporMassFraction > 0.0) ? 1 : 0;
+            const CondPropOpts opts = cond_prop_opts(cfg);
+            flow_float* roY_w = (carrier && cfg.condGasSpecies >= 0) ? var.c_d["roY" + std::to_string(cfg.condGasSpecies)] : nullptr;
+            flow_float* cp_cell   = (cfg.thermalMethod == 2) ? var.c_d["cp"]   : nullptr;
+            flow_float* Rmix_cell = (cfg.thermalMethod == 2) ? var.c_d["Rmix"] : nullptr;
+            const double lam_min = 0.5;
+            for (int s = 0; s < var.nCondSpeciesRegistered; ++s) {
+                const std::string i = std::to_string(s);
+                const std::string g = "rog_"+i, Q2 = "roQ2_"+i, Q1 = "roQ1_"+i, Q0 = "roQ0_"+i;
+                cond_moment_update_limited_passive_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
+                    msh.nCells, var.c_d["dt_local"], var.c_d["volume"], var.c_d["ro"],
+                    roY_w, cfg.condVaporMassFraction, var.c_d["T"], cp_cell, Rmix_cell, cfg.cp, cfg.gamma,
+                    cfg.condModel, opts, cfg.condDgMaxStep, cfg.condDTmaxStep, lam_min,
+                    var.c_d[g+"N"], var.c_d[Q2+"N"], var.c_d[Q1+"N"], var.c_d[Q0+"N"],
+                    var.c_d["res_"+g], var.c_d["res_"+Q2], var.c_d["res_"+Q1], var.c_d["res_"+Q0],
+                    var.c_d["src_jac_g_"+i], var.c_d["src_jac_Q2_"+i], var.c_d["src_jac_Q1_"+i], var.c_d["src_jac_Q0_"+i],
+                    var.c_d["transport_diag_g_"+i], var.c_d["transport_diag_Q2_"+i], var.c_d["transport_diag_Q1_"+i], var.c_d["transport_diag_Q0_"+i],
+                    var.c_d[g], var.c_d[Q2], var.c_d[Q1], var.c_d[Q0],
+                    var.c_d["condLim_"+i], var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i],
+                    (double)relax, dts, /*applyFloor=*/0,
+                    haveDq ? var.c_d["dq_"+g+"_old"]  : nullptr, haveDq ? var.c_d["dq_"+Q2+"_old"] : nullptr,
+                    haveDq ? var.c_d["dq_"+Q1+"_old"] : nullptr, haveDq ? var.c_d["dq_"+Q0+"_old"] : nullptr);
+            }
+        } else {
+            if (loop == 0) {
+                for (int s = 0; s < var.nCondSpeciesRegistered; ++s) {
+                    const std::string i = std::to_string(s);
+                    CHECK_CUDA_ERROR(cudaMemset(var.c_d["condClampCorr_"+i], 0, msh.nCells * sizeof(flow_float)));
+                    CHECK_CUDA_ERROR(cudaMemset(var.c_d["condClampCorrQ_"+i], 0, msh.nCells * sizeof(flow_float)));
+                }
+            }
+            for (size_t k = 0; k < var.condMomentConsNames.size(); ++k) {
+                const std::string& consName = var.condMomentConsNames[k];
+                if (haveDq) {
+                    // DPLUR 増分の commit ρφ = ρφ_N + δ (floor なし)。
+                    passiveCommitIncrement_d_wrapper(cfg, cuda_cfg, msh, var, q0 + (int)k);
+                } else {
+                    ScalarTransportDesc desc = buildCondMomentDesc(var, consName);
+                    desc.floor = static_cast<flow_float>(-1.0e30);   // floor は passive_bounds_d
+                    scalarTimeIntegration_d(loop, cfg, cuda_cfg, msh, var, desc, relax, dts);
+                }
+            }
+        }
+        gpuErrchk( cudaPeekAtLastError() );
+        gpuErrchkKernelSync();
+        passiveBounds_d_wrapper(cfg, cuda_cfg, msh, var, q0, nq);   // ρφ >= 0 と補正収支
+        passiveMirrorPeriodic_d_wrapper(cfg, cuda_cfg, msh, var);
+        return;
+    }
 
     if (cfg.timeIntegration == 11 && cfg.condLimiterMode == 1 && cfg.condEquilibrium == 0) {   // 平衡形 (1/2) は従来更新のまま (codex result M5)
         // 更新クランプ経路 (plans/active/condensation-source-limiter-steady.md): 種ごとに 4 モーメントをまとめて更新。

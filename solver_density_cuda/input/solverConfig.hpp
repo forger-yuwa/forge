@@ -78,6 +78,23 @@ public:
                                      //    sweep で ρY_s を緩和し、要因2 の擬似時間緩和ミスマッチを解消)。
                                      // 詳細: plans/accepted/thermophysics-species-implicit-coupling.md。
     int implicitSolvePrecision = 0; // block-DPLUR 線形 solve の内部精度。0: float (既定・高速), 1: double。
+    // 受動スカラ (排気トレーサ roXi・凝縮モーメント) の輸送経路 (plans/active/species-passive-scalar-unification.md §4.1)。
+    //   0: 旧汎用スカラ経路 (scalarTransport_d 1 次風上・拡散なし・緩和なし; 既定・ビット不変)
+    //   1: 化学種経路 (species カーネルの受動種: S3 面再構成 [speciesFaceReconstruction>=2, SLAU]・トレーサ Fick 拡散・
+    //      入口ピン・周期 gather/mirror・更新緩和 passiveImplicitRelax・更新確定時の上下限 0<=ρξ<=ρ / ρφ>=0 と補正収支診断)
+    int passiveScalarScheme = 0;
+    // 受動種 segregated point-implicit 更新の増分緩和 (passiveScalarScheme 1 のみ)。<0 で implicitRelax に倒置 (既定)。
+    flow_float passiveImplicitRelax = -1.0;
+    // 化学種 segregated point-implicit 更新 (speciesImplicitCoupling 0, timeIntegration 11) の増分緩和。既定 1.0 = 現行と同じ写像。
+    flow_float speciesImplicitRelax = 1.0;
+    // 化学種・受動種の更新だけに使う擬似 CFL の上限 (≤0 で無効・既定)。dt_local を min(1, scalarCflMax/cfl_pseudo) 倍して渡す。
+    // 物理時間項 (dual-time BDF) には触れない。
+    flow_float scalarCflMax = -1.0;
+    // 受動種の陰解法更新方式 (passiveScalarScheme 1, timeIntegration 11): 0 = segregated point-implicit (増分 × passiveImplicitRelax),
+    // 1 = 化学種と同じ scalar-DPLUR sweep (species_dplur_sweep_d を受動種ポインタで; 緩和 passiveImplicitRelax, ピン行, 周期 dq 整合)。
+    // 凝縮モーメントは sweep で作った増分 δ を更新クランプ (cond_moment_update_limited) に渡す (θ_u と floor は不変)。
+    // 既定 -1 = 自動 (speciesFaceReconstruction >= 2 なら 1、それ以外 0; §4.2 原因確認: S3 の発散は segregated 更新固有)。
+    int passiveImplicitCoupling = -1;
     // block-DPLUR 対角キャッシュ: sweep 0 で組んだ 5×5 対角 (状態凍結で不変) を diag_block_** に保存し、sweep≥1 は
     // 近傍積 + solve だけにする (ビット同一)。float・point 経路 (implicitSolvePrecision 0, lineImplicit 0) のみ有効。
     // **既定 0**: A10G 3D 2.37 M 節点で 44.0→46.5 ms/step と逆に遅化した (対角 25 floats/cell の保存+4 回読込 ≈1.2 GB/step の

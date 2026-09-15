@@ -1,4 +1,5 @@
 #include <vector>
+#include <iterator>
 #include <string>
 #include "periodicNode_d.cuh"
 #include "cuda_forge/cudaWrapper.cuh"
@@ -89,6 +90,14 @@ void periodicNodeGather_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
     for (const auto& nm : var.speciesVarNames)     extra.push_back("res_" + nm);
     for (const auto& nm : var.condMomentConsNames) extra.push_back("res_" + nm);
     if (var.tracerRegistered != 0)                 extra.push_back("res_roXi");   // 受動トレーサ (codex 2026-09-16 M5)
+    // 輸送対角 transport_diag_* も合併する (plan species-passive-scalar-unification §4.1-5, codex M4): 対角
+    // D = V/Δτ + V·src_jac + transport_diag の V は合併体積なので、部分 CV の transport_diag のままでは seam の
+    // 点陰的/DPLUR 更新が内部と不整合になる。化学種は常に、受動種は passiveScalarScheme 1 のとき (旧経路はビット不変)。
+    for (int s = 0; s < var.nSpeciesRegistered; ++s) extra.push_back("transport_diag_Y" + std::to_string(s));
+    if (cfg.passiveScalarScheme == 1) {
+        for (const auto& nm : var.condMomentConsNames) extra.push_back("transport_diag_" + nm.substr(2));
+        if (var.tracerRegistered != 0)                 extra.push_back("transport_diag_Xi");
+    }
     for (const auto& k : extra) {
         auto it = var.c_d.find(k);
         if (it == var.c_d.end() || it->second == nullptr) continue;
@@ -155,13 +164,60 @@ void periodicGradientGather_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg ,
         // RANS SST 勾配 (未割当ならスキップ): k/ω の seam 拡散・生産の片側勾配を合併
         "dKdx","dKdy","dKdz", "dOmegadx","dOmegady","dOmegadz"
     };
-    for (const char* k : keys) {
+    std::vector<std::string> names(std::begin(keys), std::end(keys));
+    // 化学種・受動種の勾配 (speciesFaceReconstruction>=1 で計算; 周期半割面を除外して積算済み) も合併する
+    // (plan species-passive-scalar-unification §4.1-5-1)。受動種は passiveScalarScheme 1 のときだけ計算される。
+    if (cfg.speciesFaceReconstruction >= 1) {
+        for (int s = 0; s < var.nSpeciesRegistered; ++s) {
+            const std::string i = std::to_string(s);
+            names.push_back("dY"+i+"dx"); names.push_back("dY"+i+"dy"); names.push_back("dY"+i+"dz");
+        }
+        if (cfg.passiveScalarScheme == 1) {
+            std::vector<std::string> prims;
+            if (var.tracerRegistered != 0) prims.push_back("Xi");
+            for (const auto& nm : var.condMomentConsNames) prims.push_back(nm.substr(2));
+            for (const auto& pnm : prims) { names.push_back("d"+pnm+"dx"); names.push_back("d"+pnm+"dy"); names.push_back("d"+pnm+"dz"); }
+        }
+    }
+    for (const auto& k : names) {
         auto it = var.c_d.find(k);
         if (it == var.c_d.end() || it->second == nullptr) continue;
         flow_float* a = it->second;
         periodicGather1ToRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, a);
         gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
         periodicBroadcast1FromRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, a);
+        gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+    }
+}
+
+bool periodicNodeActive(const solverConfig& cfg, const mesh& msh)
+{
+    return cfg.discretization == "node" && msh.periodicRoot_d != nullptr && msh.nPeriodicMembers != 0;
+}
+
+void periodicGatherArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a)
+{
+    if (!periodicNodeActive(cfg, msh) || a == nullptr) return;
+    periodicGather1ToRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, a);
+    gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+    periodicBroadcast1FromRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, a);
+    gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+}
+
+void periodicBroadcastArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a)
+{
+    if (!periodicNodeActive(cfg, msh) || a == nullptr) return;
+    periodicBroadcast1FromRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, a);
+    gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+}
+
+void periodicMirrorSpeciesState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
+{
+    if (!periodicNodeActive(cfg, msh)) return;
+    for (const auto& nm : var.speciesVarNames) {
+        auto it = var.c_d.find(nm);
+        if (it == var.c_d.end() || it->second == nullptr) continue;
+        periodicBroadcast1FromRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, it->second);
         gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
     }
 }

@@ -53,6 +53,7 @@
 #include "cuda_forge/chemistrySource_d.cuh"
 #include "cuda_forge/condensationTransport_d.cuh"
 #include "cuda_forge/tracerTransport_d.cuh"
+#include "cuda_forge/passiveTransport_d.cuh"
 #include "input/speciesDB.hpp"
 #include "cuda_forge/viscousFlux_d.cuh"
 #include "cuda_forge/updateCenterVelocity_d.cuh"
@@ -1062,6 +1063,8 @@ cudaConfig initializeSimulation(
 
     // device rog[] ポインタ配列を構築 (二相 EOS が液相質量分率を読む)。condensation==0 で no-op。
     condensationInit_d(cfg , var);
+    // 受動種 (トレーサ + 凝縮モーメント) の device ポインタ配列 (passiveScalarScheme 1 の化学種経路用; 0 では表だけ)。
+    passiveInit_d(cfg , var);
 
     cout << "Read Initial Values \n";
     var.readValueHDF5(cfg.valueFileName , msh, cfg.kInit, cfg.omegaInit);
@@ -1215,6 +1218,7 @@ void assembleResidual(StepContext& s, int stage_index)
         // 3D 2.37 M 節点で毎ステップ 1.2 ms の無駄だった (plan performance-3d-node-sst-speedup)。
         if (s.cfg.speciesFaceReconstruction >= 1) {
             speciesGradient_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            passiveGradient_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 受動種 ∇φ (passiveScalarScheme 1 のみ)
         }
         // node 周期境界 DOF 同一視 (§4.5 拡張): boundary periodic node の Green-Gauss 勾配を「和→broadcast」で
         // 厳密合併に直す (calcGradient_b_d で periodic 半割面は除外済み)。2次再構成・粘性の seam 精度向上。
@@ -1252,6 +1256,7 @@ void assembleResidual(StepContext& s, int stage_index)
         condensationTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);  // 液相モーメント移流残差 (Phase 1)
         condensationSource_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 核生成+成長ソース (Phase 2)
         tracerTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);        // 受動トレーサ移流残差 (node 入口ピン込み)
+        passivePinResidual_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 受動種経路: node 入口ピンノードの残差除外 (ソース集計の後)
     });
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         ransSource_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // k/ω 勾配は上 (ransTransport の前) で評価済み
@@ -1437,6 +1442,7 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
                 }
             }
             speciesRenormalize_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            periodicMirrorSpeciesState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // node 周期: 化学種状態を root→member (§4.1-5)
             speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // Y=roY/ρ (出力/次残差用に同期)
         });
     }
@@ -1481,6 +1487,7 @@ void advanceExplicitRK(StepContext& s)
             sstEnergyKCorrection_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, 1);   // E_t 保存: roe -= (roK − roKN) (RK stage は N から組み直す)
             speciesTimeIntegration_d_wrapper(iloop, s.cfg , s.cuda_cfg , s.msh , s.var);
             speciesRenormalize_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // ρY_s>=0, ΣρY_s=ρ
+            periodicMirrorSpeciesState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // node 周期: 化学種状態ミラー (§4.1-5)
             condensationTimeIntegration_d_wrapper(iloop, s.cfg , s.cuda_cfg , s.msh , s.var);  // 液相モーメント (Phase 1 ソース=0)
             tracerTimeIntegration_d_wrapper(iloop, s.cfg , s.cuda_cfg , s.msh , s.var);  // 受動トレーサ
         });
@@ -1799,6 +1806,8 @@ int main(void) {
     for (int iStep = 0 ; iStep < cfg.mainLoopCount() ; iStep++) {
         advanceOneStep(cfg , cuda_cfg , msh , mat_ns , var , fluct , pprobes , profiler , residual_logger , implicit_diag_logger , iStep);
         monitor.report(iStep);
+        // 受動種経路の補正収支 (floor による保存量補正の体積積分; monitorInterval ごと)。scheme 0 / 受動種なしでは no-op。
+        if (iStep % cfg.monitorInterval == 0) passiveFloorCorrLog_d_wrapper(cfg, iStep);
     }
 
     // 壁時計 (旧実装は clock() = CPU 時間で、GPU 待ちを含まなかった)。書式 "Time = %.3f s" は grep 互換のため維持。

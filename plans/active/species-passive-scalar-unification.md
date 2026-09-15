@@ -168,7 +168,7 @@
 | 2 | ~~codex plan レビュー~~ | 1 回目 NO-GO (C1/M7/m1)、2 回目 **GO-with-changes (M6)** を全採用 (§6.1)。実装着手可 (2026-09-17) |
 | 3 | ~~docs 先行更新~~ | 済 (2026-09-17, a8745508): thermophysics §5b/§5, condensation §4, convection/theory, time_integration/theory |
 | 4 | ~~原因確認 (node)~~ | 済 (2026-09-17): S3 発散は coupling 0 固有 (case/28 node `run_0064`–`0078`)、1.8e-4 は再正規化が全て (case/46 `run_0107`/`0108`) → §4.0/§4.2 に反映。副産物: node TP-SST の case/28 baseline 自体が上境界/軸で ~1500–3000 step 後に発散する別問題 (§10) |
-| 5 | 受動種基盤 (ステップ 3) + S3 安定化キー (ステップ 4) | 実装中 (2026-09-17, Phase A: 別 build dir `build-passive`; 既定 build は原因確認に使用中) |
+| 5 | ~~受動種基盤 (ステップ 3) + S3 安定化キー (ステップ 4)~~ | 済 (2026-09-17, Phase A; §9): `passiveTransport_d.cuh`/`passiveKernels_d.cuh`/`passiveLimiter_d.cuh` (受動種ポインタ配列、化学種カーネル共用、無次元化 Venkat、`passive_bounds_d` 収支、`passive_diffusion_d`)、SLAU S3 分岐の受動種面値、周期 (勾配除外・`transport_diag` gather・DPLUR dq mirror・coupling 2 クロス項の独立バッファ)、キー `passiveScalarScheme`/`passiveImplicitRelax`/`speciesImplicitRelax`/`scalarCflMax`/`passiveImplicitCoupling`、単体 `test_passive_scalar.cu` ALL PASS。**残**: `speciesImplicitRelax`/`scalarCflMax` の効果 run、S3 長時間 run での上限クランプ無作用の確認 |
 | 6 | S3 本番化 (ステップ 4) | 増分緩和、`scalarCflMax`、固定点不変 |
 | 7 | dual-time 移植 + 受動種 BDF (ステップ 5) | 処理順・履歴・restart |
 | 8 | 検証 (§6 1–8, node のみ) と codex result レビュー | 完了条件 §8 |
@@ -178,7 +178,9 @@
 全比較で `speciesFaceReconstruction`・`speciesImplicitCoupling`・`implicitRelax`・実効スカラ CFL (`scalarCflMax`) を明記して固定する。
 
 1. **差の原因の段階比較** (`run_0104` プロトコル, lumped [EXH, AIR] + tracer, node Euler): 凍結流れ (`FORGE_FREEZE_*` 相当または収束場から 1 step) で
-   残差 → 更新前後 → 再正規化前後 → クランプ前後の各段で |ξ − Y_EXH| を記録し、差の由来を確定。**厳密一致ゲート (max ≤ 1e-6) は全離散作用素と更新写像を揃えた
+   残差 → 更新前後 → 再正規化前後 → クランプ前後の各段で |ξ − Y_EXH| を記録し、差の由来を確定 (**済 2026-09-17**: 再正規化が全て, §9)。**改定ゲート (Phase A 実測)**:
+   残差・対角・生更新は float 精度で同一; ξ と再正規化前の化学種 raw 更新の差は「上限クランプ (raw>ρ) が無作用のノード」で平均 ≤1e-6 (max はクランプ履歴の伝播で
+   1e-5 級を許容)、クランプ作用ノードは補正収支で説明できること。**厳密一致ゲート (max ≤ 1e-6) は全離散作用素と更新写像を揃えた
    制御試験に限定** (1 次移流 [`speciesFaceReconstruction 0`]・拡散なし・再正規化なし・同じ緩和・同じ floor; codex plan-2 M5)。S3 では化学種 (ψ_ρ + 面正規化) と
    受動種 (ψ_P + 独立クリップ) のリミッタが違うので一致は要求せず差を記録する。
 2. **保存・有界**: 一様流中のステップ状 ξ の移流 (node 箱 + 周期, 1 次/S3): ∫ρξ dV の保存 1e-6、floor 補正量の記録、0 ≤ roXi/ρ ≤ 1 (floor 後)、
@@ -229,6 +231,7 @@
 
 ## 9. 変更ログ
 
+- `2026-09-17` — **Phase A 実装 (受動種の化学種経路化 + S3 安定化キー)**: 新規 `passiveTransport_d.cuh` / `passiveKernels_d.cuh` / `passiveLimiter_d.cuh` / `limiterFunctions_d.cuh`、化学種カーネル (Dirichlet/Neumann/ピン/勾配 [周期半割面除外引数]/DPLUR sweep) を受動種ポインタで共用、SLAU S3 分岐で受動種を ψ_P (セル局所スケールで無次元化した Venkat) 再構成・下限 0/[0,1] クリップ、`passive_bounds_d` (更新済み ρ で上下限 + 符号付き/絶対補正の体積積分を step 内/全期間で積算 `passiveFloorCorr_<prim>`)、`passive_diffusion_d` (トレーサ Fick)、`cond_moment_update_limited_passive_d` (relax / dtScale / DPLUR 増分入力; θ_u と診断は同じ)、周期 gather (`transport_diag_*`, 受動種・化学種勾配)・DPLUR dq mirror・coupling 2 クロス項の独立バッファ。キー: `passiveScalarScheme` (既定 0 = 旧経路ビット不変), `passiveImplicitRelax` (= implicitRelax), `speciesImplicitRelax` (1.0), `scalarCflMax`, `passiveImplicitCoupling` (自動: scheme 1 + SFR≥2 で 1)。単体 `tests/unit/test_passive_scalar.cu` ALL PASS (無次元化 Venkat は Q0 8.7e14 で有限 [旧式は NaN]; 1-D ステップ移流 S3 は L1 が 1 次の 0.155 倍・遷移幅 20→4 セル、S3 + Venkat + 前進 Euler は plateau 端で ξ>1 を 2 % 作り上限クランプで確定 [収支に記録])。**CFD (node, 短 run)**: 無影響 = HEAD 反復ノイズ内 (case/46 `run_0109`–`0112`, case/44 `run_0204`–`0209` [relax 0.7 含む], case/16 `run_0473`–`0475`); 制御試験 case/46 `run_0113` (scheme 1, SFR 0, relax 1.0): 残差・対角・生更新は同一、ξ と Y_EXH の差は再正規化 1.05e-4 + raw>ρ ノード (3053) のクランプで、クランプ無作用域では平均 4.6e-7・max 4.0e-5 (クランプ履歴の伝播) → **≤1e-6 は全域では不成立** (設計どおりの差; §6-1 ゲートを「再正規化・クランプ無作用域で平均 ≤1e-6」に改定); 周期 case/09 `run_0067`/`0068` (トレーサ 1 次/S3): 周期対 ΔXi = 0, ∫ρξ 3.7e-8 / 3.1e-7, S3 解析解誤差 8.9e-3 (1 次 4.0e-2); `run_0069`/`0070` 凝縮ソース seam 比 1.000000; 1 次経路 scheme 1 vs 0 (case/44 `run_0214`/`0215`): g 6.8e-5, onset 同一, floor 補正 0。**S3 smoke (case/44 `run_0170` 入力 2000 step)**: 化学種 `speciesImplicitCoupling 0` では S3 が不健全 (`run_0210`–`0213`: rms_ro 3–4e-2, condLim 0, モーメント floor 補正 1e-2 級; cfl 6 + pc1 は step 1098 で軸上 ρ<0 → NaN); **`speciesImplicitCoupling 1` では 4 本 (`run_0216`–`0219`: cfl 2/6 × pc 0/1) 完走**、流れ残差 1 次と同水準、pc1 が優位 (floor 補正 3e-6〜1e-5 vs pc0 1e-2, rms_rog 3e-6 vs 4e-5)。推奨 = S3 + `speciesImplicitCoupling 1` + `passiveImplicitCoupling 1` (自動既定)。step 時間 2.4→2.8 ms。
 - `2026-09-17` — **原因確認 (実装前, node)**: (A) case/28 He/空気 coaxial を node 変換し `run_0065` (cfl 2) の場から S2/S3 × coupling 0/1 × cfl 2/4/6 (`run_0066`–`0078`, relax 0.7): S3 + coupling 0 は組成せん断層で化学種残差が先に成長し cfl 4 step 402 / cfl 6 step 165 で NaN、cfl 2 は緩やか (onset 334); S3 + coupling 1 は cfl 2/4/6 とも S3 固有の発散なし (化学種残差 ×0.7)。全 run は baseline の別問題 (node TP-SST の上境界 `outlet_statPress`/軸で rms_roe 主導、restart 後 ~1500–3000 step で発散; `run_0076` で同一設定の継続でも再現) で終わる。(B) case/46 `run_0104` の res_6000 を roXi:=roY0 で restart し 1/10/100 step を診断出力 (`run_0107`/`0108`, 診断は scratch build の env ゲート出力のみ): 残差・対角・生更新は float 精度で同一、差は化学種の再正規化 1.40e-4 (全体) + トレーサのクランプ 3.9e-5、発生点はカウル後縁の純排気ノード。
 - `2026-09-17` — 初稿 (ユーザ決定 2026-09-16: トレーサを化学種カーネルの受動種に、凝縮モーメントも化学種経路、dual-time の化学種修正移植と受動種の BDF 項を一括で)。
 - `2026-09-17` — 調査で前提を訂正 (§4.0): 本番の化学種移流も 1 次 (S3 は experimental)。本 plan の 2 次化 = S3 の node 本番化を含む。

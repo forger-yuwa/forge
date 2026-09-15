@@ -499,6 +499,26 @@ __global__ void SLAU_d
             const bool up0 = (mdot >= (flow_float)0.0);
             for (int s = 0; s < nSpecies; ++s) Yface_out[(size_t)ip*nSpecies + s] = (flow_float)(up0 ? YLf_s3[s] : YRf_s3[s]);
         }
+        // 受動種 S3 (passiveScalarScheme 1; plan species-passive-scalar-unification §4.1): 化学種と同じ interp_dispatch で
+        // 受動種ごとの ψ_P により L/R 面値を再構成し、下限 0 (トレーサは [0,1]) でクリップして upwind 側を Pface_out へ書く。
+        // 正規化はしない (受動種は熱力学・ΣY に入らない)。面クリップは同一面の 1 流束を両 CV に逆符号で加えるので保存的。
+        // ghost 面 (ic1>=nCells) は上で conv_scheme=-1 になっており面値 = セル/ghost 値 (1 次) になる。
+        if (g_speciesFaceRecon >= 2 && spA.Pface_out != nullptr && spA.nPassive > 0) {
+            const bool up0 = (mdot >= (flow_float)0.0);
+            for (int q = 0; q < spA.nPassive; ++q) {
+                flow_float pl = interp_dispatch(conv_scheme, limit_scheme, spA.P_recon[q][ic0], spA.P_recon[q][ic1],
+                    spA.dPdx_recon[q][ic0], spA.dPdy_recon[q][ic0], spA.dPdz_recon[q][ic0],
+                    spA.dPdx_recon[q][ic1], spA.dPdy_recon[q][ic1], spA.dPdz_recon[q][ic1],
+                    dcc_x, dcc_y, dcc_z, dc0p_x, dc0p_y, dc0p_z, f, spA.limiterP_recon[q][ic0]);
+                flow_float pr = interp_dispatch(conv_scheme, limit_scheme, spA.P_recon[q][ic1], spA.P_recon[q][ic0],
+                    spA.dPdx_recon[q][ic1], spA.dPdy_recon[q][ic1], spA.dPdz_recon[q][ic1],
+                    spA.dPdx_recon[q][ic0], spA.dPdy_recon[q][ic0], spA.dPdz_recon[q][ic0],
+                    -dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, spA.limiterP_recon[q][ic1]);
+                pl = max(pl, (flow_float)0.0); pr = max(pr, (flow_float)0.0);
+                if (q < spA.nPassiveUnit) { pl = min(pl, (flow_float)1.0); pr = min(pr, (flow_float)1.0); }
+                spA.Pface_out[(size_t)ip*spA.nPassive + q] = up0 ? pl : pr;
+            }
+        }
 
         flow_float res_ro_temp   = mdot;
         flow_float p_tilde_r = p_tilde - d_pRef;   // free-stream 保存: 基準静圧を差し引いて float32 桁落ちを抑制

@@ -45,5 +45,10 @@ void scalarTransportResidual_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
                                const ScalarTransportDesc& desc);
 
 // 1 変数ぶんの時間積分 (RK4 / point-implicit RK)。同期は行わない。
+//   relax  : timeIntegration 11 (point-implicit forward-Euler) の増分緩和 ρφ = ρφ_N + relax·δ (既定 1.0 = 現行と同じ写像。
+//            1.0 は乗算が厳密なのでビット不変)。RK 経路では使わない。
+//   dtScale: 同じく timeIntegration 11 で dt_local に掛ける係数 (scalarCflMax; 既定 1.0 = 不変)。
 void scalarTimeIntegration_d(int loop, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
-                             const ScalarTransportDesc& desc);
+                             const ScalarTransportDesc& desc,
+                             flow_float relax = static_cast<flow_float>(1.0),
+                             flow_float dtScale = static_cast<flow_float>(1.0));

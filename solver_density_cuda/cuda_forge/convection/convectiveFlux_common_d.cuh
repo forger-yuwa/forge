@@ -303,4 +303,16 @@ struct SpeciesArgs {
     flow_float**         limiterY_recon;
     flow_float*          Yface_out;
     flow_float*          Rmix_cell;
+    // 受動種 (passiveScalarScheme 1; plan species-passive-scalar-unification §4.1): S3 の面再構成入力。
+    //   nPassive 本の原始量 P / 勾配 / 受動種ごとの ψ_P、upwind 面値の出力 Pface_out[ip*nPassive+q]。
+    //   nPassiveUnit: 先頭から何本が上限 1 (トレーサ ξ∈[0,1]) を持つか (残りは下限 0 のみ)。
+    //   構築後に代入する (brace 初期化の位置引数順を壊さない)。
+    int                  nPassive = 0;
+    int                  nPassiveUnit = 0;
+    flow_float**         P_recon = nullptr;
+    flow_float**         dPdx_recon = nullptr;
+    flow_float**         dPdy_recon = nullptr;
+    flow_float**         dPdz_recon = nullptr;
+    flow_float**         limiterP_recon = nullptr;
+    flow_float*          Pface_out = nullptr;
 };

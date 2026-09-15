@@ -35,3 +35,13 @@ void periodicMirrorScalarState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cf
 // 継ぎ目隣接面が master/slave で別 state を読んでフラックス不整合 (seam 圧力欠陥) を生む。各 RK stage の保存量
 // 更新直後・初期化時に呼んで slave=master を強制し DOF を真に 1 個にする。cell/非周期では no-op。
 void periodicMirrorNSState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);
+
+// 汎用 1 配列版 (化学種・受動種の gather/mirror 用; plans/active/species-passive-scalar-unification.md §4.1-5)。
+// node 周期 DOF 同一視が有効か (cell / 非周期では false)。
+bool periodicNodeActive(const solverConfig& cfg, const mesh& msh);
+// a を周期 group で「和→broadcast」(残差・輸送対角・勾配の合併)。非有効なら no-op。
+void periodicGatherArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a);
+// a を root→member でミラー (状態・dq の同一視)。非有効なら no-op。
+void periodicBroadcastArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a);
+// 化学種の保存量 roY{s} を root→member でミラー (化学種更新の直後に呼ぶ; §4.1-5)。
+void periodicMirrorSpeciesState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);

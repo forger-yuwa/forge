@@ -271,12 +271,14 @@ __global__ void runge_kutta_exp_scalar_d(
     flow_float* res_rho_phi,
     flow_float* src_jac,
     flow_float* transport_diag,
-    flow_float floor)
+    flow_float floor,
+    flow_float relax,      // 増分緩和 (point-implicit 経路; 1.0 で厳密に不変)
+    flow_float dtScale)    // dt_local の倍率 (scalarCflMax; 1.0 で厳密に不変)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (ic < nCells) {
-        const flow_float dt_l = dt_local[ic];
+        const flow_float dt_l = dt_local[ic] * dtScale;
         const geom_float v = vol[ic];
         // 源項（消散）+ 輸送項（移流+拡散）の stiff 性を point-implicit で減衰。
         //   src_jac=∂D/∂(ρφ)≥0、transport_diag=Σ_f[max(±ṁ,0)+μ_face|δ|/dcc]/ρ≥0 [m³/s]（/v で 1/s 化）。
@@ -285,7 +287,7 @@ __global__ void runge_kutta_exp_scalar_d(
         const flow_float fac = static_cast<flow_float>(1.0)
             + coef_Res * dt_l * (src_jac[ic] + transport_diag[ic] / v);
         const flow_float updated = coef_N * rho_phi_N[ic] + coef_M * rho_phi_M[ic]
-                    + (coef_Res * res_rho_phi[ic] * dt_l / v) / fac;
+                    + relax * ((coef_Res * res_rho_phi[ic] * dt_l / v) / fac);
         // realizability 下限。source 側 point-implicit と整合。下限に達しない範囲では無影響。
         rho_phi[ic] = max(updated, floor);
     }
@@ -384,7 +386,7 @@ void scalarTransportResidualMulti_d(solverConfig& cfg, cudaConfig& cuda_cfg, mes
 }
 
 void scalarTimeIntegration_d(int loop, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
-                             const ScalarTransportDesc& desc)
+                             const ScalarTransportDesc& desc, flow_float relax, flow_float dtScale)
 {
     if (cfg.timeIntegration == 4) {
         runge_kutta_exp_scalar_4th_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(
@@ -413,7 +415,9 @@ void scalarTimeIntegration_d(int loop, solverConfig& cfg, cudaConfig& cuda_cfg, 
             desc.res_rho_phi,
             desc.src_jac,
             desc.transport_diag,
-            desc.floor);
+            desc.floor,
+            static_cast<flow_float>(1.0),
+            static_cast<flow_float>(1.0));
     } else if (cfg.timeIntegration == 11) {
         // 陰解法 (block-DPLUR) ステップでの化学種更新。1 回の point-implicit forward-Euler:
         //   ρφ = ρφ_N + (res·Δτ/V) / (1 + Δτ(src_jac + transport_diag/V))。
@@ -432,6 +436,8 @@ void scalarTimeIntegration_d(int loop, solverConfig& cfg, cudaConfig& cuda_cfg, 
             desc.res_rho_phi,
             desc.src_jac,
             desc.transport_diag,
-            desc.floor);
+            desc.floor,
+            relax,
+            dtScale);
     }
 }
