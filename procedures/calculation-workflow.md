@@ -190,11 +190,11 @@ cd /home/sano/work/forge/solver_density_cuda
 - WSL2 では WSLg を前提に GUI 転送する。
 - ParaView のアイコン表示が崩れる場合は `solver_density_cuda/tools/docker_build.sh dev` で Docker イメージを再ビルドする。
 
-## ParaView プラグイン (マッハ数 / シュリーレン / Q 値 / ヘリシティ)
+## ParaView プラグイン (マッハ数 / シュリーレン / Q 値 / ヘリシティ / 飽和量)
 
 `res_*.xmf` には保存量と原始変数しか入っていないため、可視化用の派生量は
 `solver_density_cuda/tools/paraview/forge_filters.py` の Python プラグインで計算する。
-フィルタ名は **Forge Derived Quantities** (Filters > Alphabetical)。
+フィルタ名は **Forge Derived Quantities** と **Forge Saturation** (Filters > Alphabetical)。飽和量の方は下の小節。
 
 読み込みは Tools > Manage Plugins > Load New... で `forge_filters.py` を選ぶ
 ("Auto Load" を有効にすれば次回起動から自動で入る)。
@@ -251,6 +251,39 @@ Docker 経由 (`./tools/run_paraview_gui.sh`) の ParaView は Python 3.10 な�
 - **Q 値の等値面**は `Q` (次元 1/s²) に閾値を決めにくいので、まず `Q_norm > 0.1` 程度で当たりを付けるとよい。
 - 検算: ABC (Beltrami) 流 $\omega=U$ の解析場で `vorticity`・`grad_ro`・`Q` が 2 次精度で一致し、
   `helicity_norm`=1.000000 になることを確認済み。
+
+### Forge Saturation (飽和温度 / 飽和圧 / 過冷却度 / 過飽和度)
+
+同じプラグインの **Forge Saturation** フィルタ (Filters > Alphabetical) は、凝縮種 (H2O / N2) の蒸気分圧・飽和蒸気圧・
+飽和温度・過冷却度・過飽和度を **ソルバの `condS_0` / `condTsat_0` と同じ式**で後処理する。凝縮 OFF の run (dry) や
+`output.level 1` で診断量を落とした run でも、`T` / `ro` / 蒸気質量分率だけから評価できる。
+
+| 配列 | 定義 |
+| --- | --- |
+| `p_vapor` | 蒸気分圧 $p_v=\rho\,(Y_v-g)\,R_v T$ (carrier 形、forge `cond_vapor_state` と同一)。蒸気配列が無く定数も 0 なら純蒸気 $p_v=P$ |
+| `p_sat` | 飽和蒸気圧 $p_{sat}(T)$。H2O = Murphy & Koop (2005) 過冷却液 (forge `h2o_psat`)、N2 = Jacobsen 液 + 50 K 未満 Clausius–Clapeyron 外挿 (forge `n2_psat_ex`) |
+| `supersaturation`, `log10_S` | 過飽和度 $S=p_v/p_{sat}(T)$ と $\log_{10}S$ |
+| `T_sat` | 飽和温度: $p_{sat}(T_{sat})=p_v$ の Newton 反転 (forge `cond_Tsat` と同じ初期値・クリップ)。$p_v\le 10^{-6}$ Pa は 0 |
+| `subcooling` | 過冷却度 $T_{sat}-T$ [K] (正 = 過冷却、負 = 過熱) |
+| `p_sat_ice`, `S_ice`, `T_sat_ice`, `subcooling_ice` | `Compute Ice (H2O)` ON のとき、氷基準 (Murphy & Koop ice 式) の同量 |
+
+プロパティ: `Species` (H2O / N2)、`Vapor Mass Fraction Array` (既定 `Y1` = TP `split_h2o` の H2O)、
+`Liquid Mass Fraction Array` (既定 `g_0`、無ければ 0)、`Vapor Mass Fraction Constant` (蒸気配列が無い run 用。
+空気凝縮 CPG carrier は `condVaporMassFraction` の 0.7671 を入れる)、N2 の低温整合オプション (`condN2PsatLowT` /
+`condN2LatentLowT` / `condN2LiquidCp` に対応)。
+
+検算: case/44 `run_0123_va3_M4.19_Lc8_noneq_inletTt_cont/res_12000.xmf` (node TP split_h2o, 非平衡凝縮 ON) で
+`supersaturation` は forge の `condS_0` と相対 2e-6、`T_sat` は `condTsat_0` と 3e-5 K で一致 (pvpython 検証、2026-09-15)。
+
+pvpython からの使い方:
+
+```python
+from paraview.simple import *
+LoadPlugin("<repo>/solver_density_cuda/tools/paraview/forge_filters.py", remote=False, ns=globals())
+src = XDMFReader(FileNames=["res_12000.xmf"])
+sat = ForgeSaturation(Input=src)          # プロパティ名は Species / VaporMassFractionArray / ComputeIceH2O ...
+sat.UpdatePipeline()
+```
 
 ## ケースごとの注意
 
@@ -335,7 +368,8 @@ python3 solver_density_cuda/tools/check_mesh_quality.py <run_dir>/mesh.h5
 - **アスペクト比 (AR) ≤ 1000 を目標**。最長辺/最短辺。境界層クラスタリングで薄いセルを作るときに監視する。
 - **スキューネス (equiangle skew) ≤ 0.9 を目標**。四角形の内角の直交からのずれ (0=直交, 1=退化)。
 - ツールは AR・skew の max / p99 / 違反セル数を出し `VERDICT: PASS / SOFT-PASS / FAIL` を返す。**FAIL なら計算を投入しない**。`SOFT-PASS` (違反<0.1%) は局所外れ値として許容しうるが、場所を確認する。
-- 近壁を細分化 (wall-resolved, 第一セル数μm) すると AR が増えやすい。**接線方向セルを細かくしすぎず、AR が 1000 を超えないよう第一セル厚と接線長のバランスを取る** (高 Re では y+~1 と AR≤1000 は両立しないことがあり、その場合は y+~30-80 + `wallTreatmentSST=1` を選ぶ)。
+- 近壁を細分化 (wall-resolved, 第一セル数μm) すると AR が増えやすい。**接線方向セルを細かくしすぎず、AR が 1000 を超えないよう第一セル厚と接線長のバランスを取る**。
+- **AR 緩和 (2026-09-12 ユーザ決定)**: 壁法線に沿った構造格子の境界層層 (スキュー無し) に限り **AR ≤ 5000** まで可。`check_mesh_quality.py mesh.h5 --ar-max 5000` で判定し (設計チェーンは問題 YAML `mesh.ar_max: 5000`)、README/台帳に「AR 緩和 (≤5000)」と明記する。冷却壁 (T_w 300 K) は同じ第一セルで y⁺ が ×5〜6 に上がり、AR ≤ 1000 のままではスロート y⁺≈1 が取れない (case/44: ni 2 万級が要る) ことが動機。裏付けは plan `tooling-nozzle-isothermal-wall-chain` §8-3 の A/B (AR 846 vs 4140)。
 - 「メッシュできた」「収束した」と報告する応答には、本ツールの品質 VERDICT も根拠として併記する。
 - なお `check_mesh_quality.py` は **primal (cell) 変換の h5 専用**で、median-dual (node) 変換した
   h5 を渡すと `CONNE が NumberOfElements より短い` で落ちる (ツール側の制約)。node メッシュの

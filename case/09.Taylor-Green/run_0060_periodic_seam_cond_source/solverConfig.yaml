@@ -1,0 +1,22 @@
+mesh:
+  meshFormat: "hdf5"
+  meshFileName: "Taylor-Green.h5"
+  valueFileName: "Taylor-Green.h5"
+  discretization: "node"
+gpu: 1
+solver: "SLAU"
+physProp: {isCompressible: 1, thermalMethod: 0, viscMethod: 0, ro: 1.0, visc: 0.0, thermCond: 0.0, cp: 1038.8, gamma: 1.4}
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {control: 0, nStepOuter: 1}
+  deltaT: {control: 1, dt: 1e-9, cfl: 0.01, cfl_pseudo: 0.01, blockDPLUR: 1, dt_min: 1e-12, dt_max: 1e-7, detectNaN: 1}
+  outStepStart: 0
+  outStepInterval: 1
+  timeIntegration: 11
+  nStepInner: 5
+space: {convMethod: 0, limiter: 0}
+turbulence: {model: "none"}
+initial: "uniform_p101325_u10"
+condensation: {condensation: 1, nCondSpecies: 1, condModel: 0, condKantrowitz: 1, condLimiterMode: 1}
+output: {level: 2, extraFields: [dt_local, volume]}

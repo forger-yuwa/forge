@@ -750,6 +750,13 @@ CFD 側の差は多成分輸送の離散化誤差だけ (検証: M4.2 で軸 M �
 IC は `paste_isentropic_ic(species_Y=)` が `roY{s}` を書き、入口 BC は `Y0/Y1` を bcond に書く。
 低温側は forge の `Tlo`=200 K クランプ (cp 凍結・h 線形接続) と設計側 `T_FLOOR` が一致する。
 
+**(計画, 2026-09-15) 組成入力と species 分割の 3 モード** ([plan](../../plans/active/thermophysics-cea-mole-fraction-species.md)):
+`gas.composition_basis: mole | mass` (既定 mass) で `gas.species` をモル分率でも書けるようにし、`evaluate.tp_species` を
+`pseudo` (全部 1 擬似種 `MIX`) / `lumped` (`tp_lump: {name, keep}` で畳む種と名前をユーザ指定; `split_h2o` はその別名) /
+`full` (各種を CEA NASA-9 の係数で独立種、`condGasSpecies` は `gas.condensing_species` から自動) の 3 択にする。`species_db.yaml` の
+各エントリに由来 (CEA 種名 / 擬似種の構成種とモル分率) をコメントで残す。`gas.species_db` で `cea_thermo_to_species_db.py` が
+`thermo.inp` から作った DB を直接使える。dry では 3 モードは同一解 (線形混合が厳密)。
+
 ## メッシュ (構造化・トポロジ固定)
 
 構造化 (i,j) quad メッシュを壁曲線から代数生成し (x: スロート細分の間隔関数逆積分 /
@@ -758,6 +765,37 @@ r: 壁側幾何級数クラスタリング)、**gmsh msh4.1 テキストを直�
 変換器が計算)。物理タグは inlet=1 / outlet=2 / wall=3 / axis=4 / fluid=5 固定。
 同一トポロジで再生成するため、帰還パス間の場移植は同 index コピーで済む (補間ノイズなし)。
 生成のたび `check_mesh_quality.py` ゲート (AR≤1000 / skew≤0.9) を通す。
+
+### 壁の熱境界条件 (断熱 / 等温) と壁温影響の評価 (2026-09-12 起票、検証中)
+
+計画: [`plans/active/tooling-nozzle-isothermal-wall-chain.md`](../../plans/active/tooling-nozzle-isothermal-wall-chain.md)。
+
+NS 評価の壁は既定で断熱 (`wall`) だが、問題定義 `spec.wall_thermal: {mode: isothermal, Tw: <K>}` で
+**等温壁** (`wall_isothermal`, floats `Ts`) に切り替える。同じ値が (i) bcond 生成 (`runner_wt._bcond`、SERN の runner も共通)、
+(ii) 積分法初期壁 (`feedback/deltastar_integral.py` の `thermal_bc = prescribed_temperature`)、(iii) 帳簿 (`prepare_info.json` /
+metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (ρu 質量収支) は熱境界条件に依らない定義なので変更なし。
+壁処理は **low-Re SST (`wallTreatmentSST: 0`) のみ** — 壁関数 × 等温壁の Kader 熱流束は圧縮性冷却壁で過大 (+87 %,
+[`plans/active/turbulence-sst-thermal-flux-model.md`](../../plans/active/turbulence-sst-thermal-flux-model.md) §7) のため設計チェーンでは使わない。
+
+**冷却壁とメッシュ**: 壁単位の $y^+ = y_1\sqrt{\rho_w\tau_w}/\mu_w$ は同じ $y_1$ でも冷却で上がる ($\rho_w$ 増・$\mu_w$ 減・$\tau_w$ 増)。
+ノズル出口相当 (M 4.2, $T_w/T_{aw}$≈0.26) で ×4〜5 の見積り。断熱で y⁺1 のメッシュは冷却壁で y⁺4〜5 になるので、
+`wall_first_frac` は冷却壁の実測 y₁⁺ で決め、AR ゲートと競合するときは `ni` を増やす (許容 y₁⁺ は平板の掃引で確定、plan §4.2)。
+
+**実装 (2026-09-12)**: `Problem.wall_thermal` / `wall_bcond_line` / `wall_thermal_bc_integral` (`probdef.py`)、`runner_wt._bcond`・`runner_sern` の壁行、
+`prepare_ns` (thermal_bc を spec から強制、`prepare_info.wall_thermal`)。**符号付き δ\***: `metrics/deltastar.py::_negative_delta_r`
+(参照 ρu を壁値で外へ延長し $r_{eff}^2 = r_w^2 - D/(\pi q_w)$; `negative_deficit` は soft)、P-spline の `positive` は断熱のみ True。
+**x 依存の第一セル**: `mesh2d.Mesh2DParams.wall_first_frac_throat` (+ `wall_first_blend_x0/x1`, `wall_first_up_x0/x1`) でスロート近傍だけ
+第一セルを詰める (問題 YAML の `mesh:` に同名キー)。case/44 冷却壁の実例: ni 4001 / nj 113 / 1.8e-5 / 2.5e-6 / throat_refine 30 で AR max 846。
+平板の実測 (case/48): 冷却で y₁⁺ は ×5.7、δ\*/θ は y₁⁺ ≤ 3.6 で 2 % 内、$q_w$ は y₁⁺ ≤ 1 で 1.5 % 内。
+
+**検証の物差し** (plan §4.3): 摩擦は van Driest II ($C_f(Re_\theta; M_e, T_w/T_{aw})$、非圧縮基準 Kármán–Schoenherr)、
+熱流束は Reynolds アナロジー係数 $2St/C_f$ 1.0–1.2、積分厚さは CONTUR 積分法 (同じ $T_w$) と Crocco–Busemann 温度–速度関係、
+コード間は同一メッシュ SU2 (素 SST)。
+
+**壁温影響の評価方針** (plan §4.6): $T_w$ は dv ではなく作動点と同じ**環境シナリオ**。公称形状で断熱と $T_w^{\rm nom}$ の
+2 run から目的量の感度ブラケットを取り、設計公差より小さければ断熱設計 + ロバスト性記録、大きければ公称 $T_w$ で設計
+(等温 δ\* 反復)、壁温不確かさが支配するならシナリオを作動点として束ねたロバスト MOO。$T_w(x)$ 未知の連成は
+フル CHT の前に「弱 CHT ループ」(NS の $q_w$ → 1D 壁伝導 + 冷却剤モデル → $T_w(x)$ → `wallProfile`) を使う。
 
 ## 評価と目的関数
 
@@ -769,7 +807,7 @@ $\varepsilon_M$ (コア質量流束重み RMS)、$\varepsilon_\theta$、$\eta=C_
 $L/r_t$、$q_{peak}$ (条件付き) 等。抽出は `res_*.h5` を形状相対の固定サンプリング格子へ
 補間してから行う (メッシュ解像度非依存)。
 
-## SERN チェーン (⑤ — 2026-09-04 起票、S0–S1 [逆設計] 実装済み・評価/MOO 未)
+## SERN チェーン (⑤ — 2026-09-04 起票。S0–S7 実装済み、評価ゲート R1 完了 2026-09-13、MOO 再取得は plan §5.1 R7)
 
 計画: [`plans/active/tooling-nozzle-sern-chain.md`](../../plans/active/tooling-nozzle-sern-chain.md)。
 出典調査: [`notes/investigations/sern-design-method-survey.md`](../../notes/investigations/sern-design-method-survey.md)。
@@ -791,15 +829,33 @@ $$\text{燃焼器出口 starting line} \rightarrow \text{平面最大推力理�
   $(M_c,\theta_c)$ と $c$–$e$ 間の質量流量比を dv として与え、kernel (入口一様流 + 両角部の扇 +
   カウル壁) の中に $c$ を探し、目標 C⁻ を張って壁流線を抽出する。設計 $p_e/p_a$ は縁条件から従属。
   DOE では推力 ← $M_c,\theta_c$、揚力と長さ ← $M_c$ と質量流量比、と役割が分離する (Yu 2020)。
-- **dv** ($d=6$): $M_c$, $\theta_c$, $\dot m_c/\dot m$, $\theta_{r0}$, $\theta_{c0}$, $L_{\rm cowl}$。
-  壁座標・壁圧は dv にしない。
+- **dv** ($d=5$, `driver_sern.DV_ORDER`): $M_c$, $f=\dot m_c/\dot m$, $\theta_{r0}$, $\theta_{c0}$, $L_{\rm cowl}$ ($\theta_c$ は kernel の場から決まる従属量)。
+  壁座標・壁圧は dv にしない。目的は 2 個 ($-\sum_k w_k C_T^{(k)}$ と $L_{\rm ramp}/H$)、$C_M$ は制約 (加重平均窓 + 作動点別窓)。
 - **評価**: forge 2D 平面 RANS (SST, node) を 4 ブロック (ノズル+プルーム / カウル下外部流 / **ランプ側外部流 = 機体上面・base・後流**、`mesh.ext_top`; ランプ側に外気が無いと過膨張でも剥離が起きないため) 構造メッシュで
   作動点セット (設計 NPR + オフデザイン) について回し、ランプ・カウル内外面の $p,\tau_w$ 積分から
-  $C_T, C_L, C_M$ (基準点指定) と剥離位置を取る。低 NPR の RSS/FSS は `OSCILLATING` 統計で報告。
+  $C_T, C_L, C_M$ (基準点指定) と剥離位置を取る。
+- **受理ゲート** (`metrics/sern_gates.py`, plan §4.7/§4.13): 1 作動点 run は forge `rc == 0`・最終場の有限/正値・全残差に NaN/rising 無し・
+  実目的量 (`C_T_with_shear`) と $C_T,C_L,C_M$ の `STEADY` (正式ツール `check_quasisteady.classify_series`) を**全て**満たしたときだけ
+  サロゲート学習と Pareto に入る。発散 run の力係数採用はしない。`force_history.csv` を `check_quasisteady.py --series-csv` で再判定でき、
+  既存キャンペーンは `driver_sern --rejudge` で判定し直せる。定常擬似時間の `OSCILLATING` は物理的振動と解釈しない (振動を扱うなら dual-time)。
+- **ガス (R3, 2026-09-13)**: `gas.model: frozen_tp` で排気 = CEA (tp, 燃焼器出口) の平衡組成を**凍結**した NASA-9 擬似種 `EXH`、
+  外気 = 空気 `AIR` の 2 種 thermally-perfect (`thermalMethod: 2`, `thermoHrefTemp: 298.15`)。入口状態 (ρ = p/RT, u = M a(T))・
+  IC の内部エネルギー・理想推力 (`gas/frozen.py` の等エントロピー膨張) を同じ物性で計算し、逆設計 kernel だけ設計点の凍結 γ の CPG
+  (形状パラメータ化)。作動点 YAML は `cea/tmx_operating_points.py` が凍結音速の M_in と組成 (`'NO'` はクォート) を出力する。
+  旧 `cpg` は外気にも排気の (γ, R) を使い外部動圧が −15 % ずれていた (codex C2)。
+- **3D メッシュの外部領域 (R4, 2026-09-13)**: `mesh_sern3d` は 2D と同じ `mesh.ext_top` (機体上面テーパ + 自由流バンド、タグ `vehicle_top`) と
+  `ramp_fillet` を持ち、機体幅外の下面 `underside_far` (帳簿外) を分ける。領域独立性は `case/46/r4_domain_study.py` (Z_ext / x_out / bot_depth / top_depth / 格子)。
+- **壁の熱境界 (2026-09-13)**: 生産 YAML は等温壁 $T_w$ = 1000 K (`spec.wall_thermal`)。断熱だと M∞10 の外気側で回復温度 4600 K になり残差がプラトーする
+  (plan §8-11)。
+- **3D の帳簿 (R2, 2026-09-13)**: メッシャは幅外の機体下面を `vehicle` タグ (W/2 < z ≤ W_vehicle/2) に分け、`forces3d` の $C_T,C_L,C_M$ は
+  ノズル面 (ramp z ≤ W/2 + cowl + 側壁) だけ。機体力は `C_T_vehicle` 等の別枠。`metrics/sern_momentum.py` が BCONDS 全面の運動量収支で
+  帳簿を検算する (閉じ残差 ~1–2 % of $F_{\rm ideal}$ が離散化差の目安)。
 - **粘性**: NS 帰還ループは持たない。設計点の RANS 場から `metrics/deltastar.py` で $\delta^*(x)$ を
   抽出し法線オフセットする**一発補正**のみ。
 - **壁圧規定の位置づけ**: 剥離制約 ($\tau_w$ 符号 / $p_w/p_a$) の判定量と、二段膨張オプション
   (基部の壁圧プラトーで衝撃位置を固定、④延長部と共通機構) に限定。
 - **3D**: 2D パレート数点を側壁・隅 R 付きで 3D RANS 確認。3D MOC の文献値 (推力 +0.45%、揚力 +8%)
   から推力は 2D で決まる前提。乖離時のみ流線追跡 / FFD を別 plan で検討。
+  実測 (Euler, 加速点, case/46 run_0092 vs run_0093): ノズル $C_T$ は 3D −1.9 % (旧 −4.5 % は幅外機体面の混入)、$C_L$ は 3D −0.10 vs 2D 0.00、
+  $C_M$ +0.72 vs 0.00 で揚力・モーメントは 3D 効果が支配的。SST での再判定は plan §5.1 R5 の後。
 - **問題タイプ**: `sern_2d` (📋 — [`design/CAPABILITIES.md`](../../design/CAPABILITIES.md))。

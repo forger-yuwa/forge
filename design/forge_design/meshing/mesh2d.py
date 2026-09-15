@@ -29,6 +29,16 @@ class Mesh2DParams:
     local_center: float = 0.0        # 細分中心 [r*] (0 で無効)
     local_refine: float = 1.0        # 中心での間隔比 (1.0 で無効)
     local_width: float = 0.75        # 細分の e^-x^2 幅 [r*]
+    # --- 冷却壁用: 第一セル厚の x 依存 (2026-09-12, plan tooling-nozzle-isothermal-wall-chain §4.2) ---
+    # 冷却壁の y+ はスロート近傍 (T_e 高・ρ_w/ρ_e 大) で最も高いので、そこだけ第一セルを詰める。
+    # None なら従来どおり一様 wall_first_frac。x <= blend_x0 で wall_first_frac_throat、blend_x1 以降で wall_first_frac、
+    # 間は smoothstep で繋ぐ (r* 単位)。
+    wall_first_frac_throat: float | None = None
+    wall_first_blend_x0: float = 0.5
+    wall_first_blend_x1: float = 6.0
+    # 上流側 (収縮部) も同様に戻す: x <= up_x0 で wall_first_frac、up_x1 以上で wall_first_frac_throat (None = 上流は全域 throat 値)
+    wall_first_up_x0: float | None = None
+    wall_first_up_x1: float | None = None
 
 
 def _x_stations(x0: float, x1: float, ni: int, refine: float, width: float,
@@ -75,10 +85,23 @@ def generate_axisym_mesh(wall, prm: Mesh2DParams):
     xs = _x_stations(wall.x_in, wall.x_e, prm.ni, prm.throat_refine, prm.throat_width,
                      prm.local_center, prm.local_refine, prm.local_width)
     rw = wall.r(xs)
-    s = _radial_fracs(prm.nj, prm.wall_first_frac)
     ni, nj = prm.ni, prm.nj
     X = np.repeat(xs[:, None], nj, axis=1)
-    R = rw[:, None] * s[None, :]
+    if prm.wall_first_frac_throat is None:
+        s = _radial_fracs(nj, prm.wall_first_frac)
+        R = rw[:, None] * s[None, :]
+    else:
+        # station ごとに第一セル比を変える (構造は同じ nj、壁側クラスタリングだけ x で滑らかに変化)
+        t = np.clip((xs - prm.wall_first_blend_x0) / max(prm.wall_first_blend_x1 - prm.wall_first_blend_x0, 1e-9), 0.0, 1.0)
+        t = t * t * (3.0 - 2.0 * t)
+        if prm.wall_first_up_x0 is not None and prm.wall_first_up_x1 is not None:
+            tu = np.clip((prm.wall_first_up_x1 - xs) / max(prm.wall_first_up_x1 - prm.wall_first_up_x0, 1e-9), 0.0, 1.0)
+            tu = tu * tu * (3.0 - 2.0 * tu)
+            t = np.maximum(t, tu)
+        fr = prm.wall_first_frac_throat + (prm.wall_first_frac - prm.wall_first_frac_throat) * t
+        R = np.empty((ni, nj))
+        for i in range(ni):
+            R[i, :] = rw[i] * _radial_fracs(nj, float(fr[i]))
     coords = np.zeros((ni * nj, 3))
     coords[:, 0] = X.ravel() * prm.scale
     coords[:, 1] = R.ravel() * prm.scale

@@ -7,10 +7,27 @@ plan §4.7。壁面出力 (outputHDFflg: 1) は MESH/COORD (n,3) と VALUE/Ps (n
 """
 from __future__ import annotations
 
+import csv
+import os
+import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
+
+# 正式ツール (solver_density_cuda/tools/check_quasisteady.py) の classify を **そのまま** 使う (plan §5.1 R6(b): 判定器の一本化)。
+# 以前の自前実装は NaN 系列 ([1,1,1,NaN]) を STEADY と返す欠陥があった (codex C1, 2026-09-09)。
+_FORGE_ROOT = Path(os.environ.get("FORGE_ROOT", Path(__file__).resolve().parents[3]))
+_TOOLS = str(_FORGE_ROOT / "solver_density_cuda" / "tools")
+if _TOOLS not in sys.path:
+    sys.path.insert(0, _TOOLS)
+from check_quasisteady import classify_series  # noqa: E402
+
+# 力係数履歴 CSV (force_history.csv) の列。正式ツールで再判定する入口:
+#   python3 solver_density_cuda/tools/check_quasisteady.py --series-csv <run>/force_history.csv --series-cols C_T_with_shear,C_L,C_M --drift 0.02 --osc 0.05
+FORCE_COLS = ("C_T", "C_T_wall", "C_T_with_shear", "C_T_friction", "C_L", "C_L_with_shear", "C_M", "sep_frac_ramp")
+# SERN の既定閾値 (check_quasisteady の既定 0.05/0.10 より厳しい。力係数は 1e-5 台で頭打ちするので余裕がある)
+STEADY_TAIL, STEADY_DRIFT, STEADY_OSC, STEADY_MIN_SNAPS = 0.4, 0.02, 0.05, 4
 
 
 def polyline_forces(h5file, fluid_below: bool, p_a: float, x_ref: float, y_ref: float) -> dict:
@@ -105,19 +122,26 @@ def force_history(run_dir, **kw) -> list:
     return [sern_forces(run_dir, s, **kw) for s in steps]
 
 
-def steadiness(values, tail: float = 0.4, drift: float = 0.02, osc: float = 0.05) -> dict:
-    """末尾 tail 割合の時系列で頭打ち判定 (check_quasisteady と同じ語彙)。"""
+def steadiness(values, steps=None, tail: float = STEADY_TAIL, drift: float = STEADY_DRIFT, osc: float = STEADY_OSC,
+               min_snaps: int = STEADY_MIN_SNAPS) -> dict:
+    """力係数などの時系列の頭打ち判定。**正式ツール `check_quasisteady.classify_series` に委譲**する
+    (語彙 STEADY / OSCILLATING / TRANSIENT-UNSETTLED / DRIFTING / NONFINITE)。非有限値を含む系列は
+    NONFINITE (STEADY にしない)。steps 省略時は等間隔とみなす。"""
     v = np.asarray(values, dtype=float)
-    if len(v) < 4:
-        return {"verdict": "TRANSIENT-UNSETTLED", "reason": "snapshots < 4"}
-    n = max(3, int(np.ceil(len(v) * tail)))
-    t = v[-n:]
-    ref = max(abs(np.mean(t)), 1e-12)
-    slope = np.polyfit(np.arange(n), t, 1)[0] * (n - 1) / ref
-    fluct = (t.max() - t.min()) / ref
-    if abs(slope) > drift:
-        return {"verdict": "DRIFTING", "trend_frac": float(slope), "fluct_frac": float(fluct), "mean": float(t.mean())}
-    if fluct > osc:
-        return {"verdict": "OSCILLATING", "trend_frac": float(slope), "fluct_frac": float(fluct),
-                "mean": float(t.mean()), "amp": float(0.5 * (t.max() - t.min()))}
-    return {"verdict": "STEADY", "trend_frac": float(slope), "fluct_frac": float(fluct), "mean": float(t.mean())}
+    st = np.arange(len(v), dtype=float) if steps is None else np.asarray(steps, dtype=float)
+    verdict, detail, ma = classify_series(st, v, tail, drift, osc, min_snaps)
+    out = {"verdict": verdict, "detail": detail, "n": int(len(v)), "n_nonfinite": int(np.count_nonzero(~np.isfinite(v)))}
+    if ma is not None:
+        out["mean"] = float(ma[0]); out["amp"] = float(ma[1])
+    return out
+
+
+def write_force_history_csv(path, hist) -> Path:
+    """force_history() の結果を `step` + FORCE_COLS の CSV に書く (check_quasisteady --series-csv 用)。"""
+    path = Path(path)
+    cols = [c for c in FORCE_COLS if any(c in h for h in hist)]
+    with open(path, "w", newline="") as fh:
+        w = csv.writer(fh); w.writerow(["step"] + cols)
+        for h in hist:
+            w.writerow([h["step"]] + [("" if h.get(c) is None else repr(float(h[c]))) for c in cols])
+    return path

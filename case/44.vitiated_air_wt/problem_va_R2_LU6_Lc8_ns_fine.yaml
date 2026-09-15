@@ -1,0 +1,57 @@
+# 等温壁チェーン (plan tooling-nozzle-isothermal-wall-chain §4.5): run_0107 (断熱 V4 pass 0) と同じ設計・同じ物理壁を、
+# 冷却壁 (Tw 300 K, y+ ×5–6) に耐える壁法線細分メッシュ (AR PASS: max 846) で回す。断熱基準 (S4a-A)。
+# 加熱空気 M4.19 — 推奨点 R2/L_U6/L_c8 の NS 本計算 (node 壁解像 y+~1, 低 Re SST, wallTreatmentSST 0)。
+# 壁 = inviscid + δ* (v1 = 相関 / v2 = CFD 抽出 --dstar-csv)。IC = coarse 中継の cross-mesh (ω 底層フロア付き)。
+# 手順: plans/accepted/tooling-nozzle-axismach-viscous-deltastar.md, methods/design/overview.md「粘性 δ* 補正」「物理スロート (A13)」
+name: vitair_wt_m419_R2_LU6_Lc8_ns_fine
+type: wind_tunnel_axisym_axismach
+gas:
+  model: semiperfect
+  species:
+    H2O: 0.0286647
+    N2: 0.6732631
+    O2: 0.2301686
+    AR: 0.0114568
+    CO2: 0.0564467
+  gamma: 1.32752
+  cp: 1190.2
+spec:
+  Pt: 1140000.0
+  Tt: 1060.0
+  p_ambient: 5235.0
+  r_throat: 0.210505
+  M_design: 4.19
+dv:
+  L_c:
+    value: 8.0
+    min: 6.5
+    max: 11.0
+geometry:
+  R: 2.0
+  r_inlet: 3.8
+  L_U: 6.0
+  L_pipe: 0.5
+  start_line: throat_char
+  n_start: 41
+  n_axis_inv: 500
+  x_end_margin: 2.3
+  wall_mode: cplus
+  exit_mode: characteristic
+  Lc_mode: explicit
+mesh:
+  discretization: node
+  ni: 4001
+  nj: 113
+  wall_first_frac: 1.8e-5        # 冷却壁 (Tw 300 K) で下流 y1+ ≈ 2.2–4.5 (mesh_probe_iso.py 見積)
+  wall_first_frac_throat: 2.5e-6 # スロート近傍 (x∈[-1.5,1.5]) の第一セル: y1+_cold ≈ 1.5–3.3
+  wall_first_blend_x0: 1.5
+  wall_first_blend_x1: 8.0
+  wall_first_up_x0: -4.0
+  wall_first_up_x1: -1.5
+  throat_refine: 30.0
+  throat_width: 3.0
+evaluate:
+  nStepOuter: 24000
+  outStepInterval: 4000
+  cfl_main: 2.0
+  implicit_relax: 0.7             # A12 レシピ (y+1.5 本段は cfl1)

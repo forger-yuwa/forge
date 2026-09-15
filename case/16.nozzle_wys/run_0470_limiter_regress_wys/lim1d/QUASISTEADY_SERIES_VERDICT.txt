@@ -1,0 +1,12 @@
+
+=== run_0470_limiter_regress_wys/lim1d/cond_series.csv  [12 rows, steps 4000..48000]  -> STEADY ===
+  onset_mm        : tail mean=22.51  drift=0.0%/tail  fluct=0.0%            STEADY
+  dev_pct         : tail mean=2.459  drift=0.0%/tail  fluct=0.0%            STEADY
+  dev21_pct       : tail mean=-4.516  drift=0.0%/tail  fluct=0.0%           STEADY
+  dev42_pct       : tail mean=5.068  drift=0.0%/tail  fluct=0.0%            STEADY
+  dev52_pct       : tail mean=5.396  drift=0.0%/tail  fluct=0.0%            STEADY
+  g_exit          : tail mean=0.01085  drift=0.0%/tail  fluct=0.0%          STEADY
+  M_exit          : tail mean=1.633  drift=0.0%/tail  fluct=0.0%            STEADY
+  c_exit          : tail mean=289.6  drift=0.0%/tail  fluct=0.0%            STEADY
+
+OVERALL: ALL STEADY

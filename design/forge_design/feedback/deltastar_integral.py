@@ -149,13 +149,15 @@ def closure_contur(theta_m: float, e: dict, Tw: float, a: float = 1.0) -> dict:
         N = N_of_Redelta(rho_e * ue * delta / mu_e)
         return _profile_integrals(delta, N, Tw, Taw, Te, rw_m, cos_phi, a)[0] - theta_m
 
-    lo, hi = 1e-12 * rw_m, 0.9 * rw_m
+    # 探索区間は壁半径と 1 m の小さい方で切る (平面入口 flat_plate_integral は rw_m=1e30 を渡す)
+    L = min(rw_m, 1.0)
+    lo, hi = 1e-12 * L, 0.9 * L
     if theta_of_delta(hi) < 0.0:            # θ が壁半径に対して大きすぎる (非物理) → 上限で打ち切り
         delta = hi
     elif theta_of_delta(lo) >= 0.0:         # θ が実質ゼロ → 下限
         delta = lo
     else:
-        delta = brentq(theta_of_delta, lo, hi, xtol=1e-12 * rw_m, maxiter=200)
+        delta = brentq(theta_of_delta, lo, hi, xtol=1e-12 * L, maxiter=200)
     N = N_of_Redelta(rho_e * ue * delta / mu_e)
     th, ds, th_c, Fc = _profile_integrals(delta, N, Tw, Taw, Te, rw_m, cos_phi, a)
     Re_theta_c = rho_e * ue * th_c / mu_e
@@ -231,3 +233,41 @@ def delta_r_function(res: dict):
     """integral_bl の結果から PhysicalNozzleWall(delta_r_x=...) に渡す callable (r_t 単位)。"""
     x, d = res["x"], res["delta_r"]
     return lambda xq, _x=x, _d=d: np.interp(xq, _x, _d)
+
+
+def flat_plate_integral(x_m, Me: float, Te: float, Pe: float, gam: float, cp: float, theta0_m: float,
+                        Tw=None, a_crocco: float = 1.0, r_rec: float | None = None) -> dict:
+    r"""平板 (一定外縁条件・平面) 用の入口: $d\theta/dx = C_f/2$ を CONTUR 閉包で積分する
+    (plan tooling-nozzle-isothermal-wall-chain §4.3-3: 巨大 $r_w$ の流用でなく明示の平面入口)。
+
+    x_m: 積分する x [m] (昇順、x_m[0] で θ = theta0_m)。Tw: None = 断熱 / float / callable(x)。
+    r_rec: 回復係数 (None = Pr^{1/3} = 0.896)。戻り: dict(x, theta, dstar, H, delta, N, Cf, Tw, Taw) 全て [m]/無次元。
+    """
+    R = cp * (gam - 1.0) / gam
+    r_rec = float(0.72 ** (1.0 / 3.0)) if r_rec is None else float(r_rec)
+    Taw = Te * (1.0 + r_rec * 0.5 * (gam - 1.0) * Me ** 2)
+    rho_e = Pe / (R * Te); ue = Me * np.sqrt(gam * R * Te); mu_e = float(_sutherland(Te))
+    e = dict(rw_m=1e30, Te=Te, Taw=Taw, cos_phi=1.0, rho_e=rho_e, ue=ue, mu_e=mu_e)
+
+    def Tw_at(x):
+        if Tw is None: return Taw
+        return float(Tw(x)) if callable(Tw) else float(Tw)
+
+    def rhs(x, y):
+        c = closure_contur(max(float(y[0]), 1e-12), e, Tw_at(x), a=a_crocco)
+        return [0.5 * c["Cf"]]
+
+    xs = np.asarray(x_m, dtype=float)
+    sol = solve_ivp(rhs, (xs[0], xs[-1]), [theta0_m], method="RK45", rtol=1e-7, atol=1e-14,
+                    dense_output=True, max_step=(xs[-1] - xs[0]) / 200.0)
+    if not sol.success:
+        raise RuntimeError(f"flat_plate_integral: 積分失敗 ({sol.message})")
+    th = np.maximum(sol.sol(xs)[0], 1e-12)
+    rows = {k: [] for k in ("dstar", "H", "delta", "N", "Cf", "Tw")}
+    for x, t in zip(xs, th):
+        c = closure_contur(float(t), e, Tw_at(float(x)), a=a_crocco)
+        rows["dstar"].append(c["dstar"]); rows["H"].append(c["H"]); rows["delta"].append(c["delta"])
+        rows["N"].append(c["N"]); rows["Cf"].append(c["Cf"]); rows["Tw"].append(Tw_at(float(x)))
+    out = {k: np.asarray(v) for k, v in rows.items()}
+    out.update(x=xs, theta=th, Taw=Taw, rho_e=rho_e, ue=ue, mu_e=mu_e)
+    return out

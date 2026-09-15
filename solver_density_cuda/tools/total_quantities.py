@@ -79,7 +79,10 @@ def total_state(run_dir, res_path=None):
         if tm == 2:
             names = pp.get("species", None)
             if names:
-                Y = [f[f"VALUE/Y{i}"][:].astype(np.float64) for i in range(len(names))]
+                if len(names) == 1 and "VALUE/Y0" not in f:      # 単一擬似種は Y を書かない → Y=1
+                    Y = [np.ones(n)]
+                else:
+                    Y = [f[f"VALUE/Y{i}"][:].astype(np.float64) for i in range(len(names))]
             else:
                 names = None
         g = f["VALUE/g_0"][:].astype(np.float64) if "VALUE/g_0" in f else None

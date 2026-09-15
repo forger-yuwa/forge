@@ -1,0 +1,20 @@
+mesh: {meshFormat: "hdf5", discretization: "node", isAxisymmetric: 1, axisCentroidShift: 1, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}
+gpu: 1
+solver: "SLAU"
+physProp: {isCompressible: 1, thermalMethod: 2, viscMethod: 0,
+           ro: 1.2, visc: 0.0, thermCond: 0.0, cp: 1220.7, gamma: 1.31526,
+           species: [MIXDRY, H2O], speciesDBFile: "species_db.yaml", thermoHrefTemp: 298.15}
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {control: 0, nStepOuter: 12000}
+  deltaT: {control: 1, dt: 1e-8, cfl: 2.0, cfl_pseudo: 2.0,
+           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}
+  outStepStart: 0
+  outStepInterval: 4000
+  timeIntegration: 11
+  nStepInner: 5
+space: {convMethod: 1, limiter: 2}
+turbulence: {model: "none"}
+initial: "uniform_p101325_u10"
+condensation: {condensation: 1, nCondSpecies: 1, condModel: 1, condKantrowitz: 1, condGrowthModel: 0, condGasSpecies: 1}

@@ -45,11 +45,55 @@ class Problem:
         if kind == "semiperfect":
             from .gas import GasSemiPerfect
             return GasSemiPerfect(dict(gs["species"]), Tt=float(self.spec["Tt"]))
-        raise ValueError(f"gas.model '{kind}' は未知 (cpg | semiperfect)")
+        if kind == "frozen_tp":
+            # SERN ⑤ R3: 逆設計 (平面 MOC) は設計点 γ の CPG のまま (形状パラメータ化)。CFD・入口状態・正規化は
+            # runner 側で FrozenGas (排気 = CEA 凍結組成, 外気 = 空気) を使う
+            from .gas import GasCPG
+            return GasCPG(self.gamma, self.cp)
+        raise ValueError(f"gas.model '{kind}' は未知 (cpg | semiperfect | frozen_tp)")
+
+    # --- 壁の熱境界条件 (2026-09-12, plan tooling-nozzle-isothermal-wall-chain §4.1) ---
+    # spec.wall_thermal: {mode: adiabatic} (既定) | {mode: isothermal, Tw: <K>}。
+    # bcond (wall / wall_isothermal+Ts)・積分法初期壁 (thermal_bc)・帳簿の 3 箇所が全てここを読む (単一ソース)。
+    @property
+    def wall_thermal(self) -> dict:
+        wt = self.spec.get("wall_thermal") or {"mode": "adiabatic"}
+        mode = str(wt.get("mode", "adiabatic"))
+        if mode == "adiabatic":
+            return {"mode": "adiabatic"}
+        if mode == "isothermal":
+            Tw = float(wt["Tw"])
+            if not Tw > 0.0:
+                raise ValueError("spec.wall_thermal.Tw は正の温度 [K]")
+            return {"mode": "isothermal", "Tw": Tw}
+        raise ValueError(f"spec.wall_thermal.mode '{mode}' は未知 (adiabatic | isothermal)")
+
+    @property
+    def wall_thermal_bc_integral(self) -> dict:
+        """積分法初期壁 (`feedback/deltastar_integral.integral_bl`) に渡す thermal_bc。"""
+        wt = self.wall_thermal
+        if wt["mode"] == "isothermal":
+            return {"mode": "prescribed_temperature", "Tw": wt["Tw"]}
+        return {"mode": "adiabatic"}
+
+    def wall_bcond_line(self, euler: bool, phys_id: int = 3, output: int = 1) -> str:
+        """forge bcondConfig の壁 1 行。Euler は slip、NS は wall_thermal に従い wall / wall_isothermal (Ts)。"""
+        if euler:
+            return f"{{physID: {phys_id}, kind: slip,             outputHDFflg: {output}, ints: , floats: }}"
+        wt = self.wall_thermal
+        if wt["mode"] == "isothermal":
+            return (f"{{physID: {phys_id}, kind: wall_isothermal,  outputHDFflg: {output}, ints: , "
+                    f"floats: {{Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: {wt['Tw']}}}}}")
+        return f"{{physID: {phys_id}, kind: wall,             outputHDFflg: {output}, ints: , floats: }}"
 
     @property
     def is_semiperfect(self) -> bool:
         return str(self.raw.get("gas", {}).get("model", "cpg")) == "semiperfect"
+
+    @property
+    def is_frozen_tp(self) -> bool:
+        """SERN ⑤ R3: 排気 = 凍結組成 TP 擬似種 (`gas.exhaust_composition` [モル分率] / 作動点 `gas.composition`)、外気 = 空気。"""
+        return str(self.raw.get("gas", {}).get("model", "cpg")) == "frozen_tp"
 
 
 def load_problem(path) -> Problem:

@@ -277,10 +277,10 @@ initial: "uniform_p101325_u10"
 def _bcond(p: Problem, euler: bool) -> str:
     Pt, Tt = float(p.spec["Pt"]), float(p.spec["Tt"])
     pa = float(p.spec.get("p_ambient", 1000.0))
-    wall_kind = "slip" if euler else "wall"
+    # 壁行は Problem.wall_bcond_line (spec.wall_thermal が単一ソース: 断熱 wall / 等温 wall_isothermal+Ts)
     return f"""inlet:  {{physID: 1, kind: inlet_Pressure,   outputHDFflg: 0, ints: , floats: {{Pt: {Pt}, Tt: {Tt}, k: 1.0, omega: 18000.0}}}}
 outlet: {{physID: 2, kind: outlet_statPress, outputHDFflg: 1, ints: , floats: {{Ps: {pa}, Pt: {pa}, Tt: 300.0}}}}
-wall:   {{physID: 3, kind: {wall_kind},             outputHDFflg: 1, ints: , floats: }}
+wall:   {p.wall_bcond_line(euler, phys_id=3, output=1)}
 axis:   {{physID: 4, kind: axis,             outputHDFflg: 0, ints: , floats: }}
 """
 
@@ -333,7 +333,7 @@ def prepare(problem_path, run_dir, euler: bool = True, nsteps=None,
         subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"],
                        cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
         q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
-                            "nozzle_qc.h5"], cwd=run_dir, env=_ENV,
+                            "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
                            capture_output=True, text=True)
         (run_dir / "MESH_QUALITY.txt").write_text("# cell 変換コピーで検査 (品質は primal の性質)\n"
                                                   + q.stdout + q.stderr)
@@ -345,7 +345,7 @@ def prepare(problem_path, run_dir, euler: bool = True, nsteps=None,
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     if euler:
         q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
-                            "nozzle.h5"], cwd=run_dir, env=_ENV, capture_output=True, text=True)
+                            "nozzle.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV, capture_output=True, text=True)
         (run_dir / "MESH_QUALITY.txt").write_text(q.stdout + q.stderr)
         if q.returncode != 0:
             raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")

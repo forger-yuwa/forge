@@ -1,0 +1,154 @@
+name: sern_moo_frozen_tp_cycle3op
+type: sern_2d
+gas:
+  model: frozen_tp
+  thermo_href_temp: 298.15
+  gamma: 1.247
+  cp: 1718.5
+spec:
+  wall_thermal: {mode: isothermal, Tw: 1000.0}   # R4b(ii) A/B: 断熱 (回復温度 4600 K) → 等温 1000 K
+  H_m: 0.1
+  inflow:
+    mode: supersonic
+    M_in: 1.6308
+    p_in: 101027.0
+    T_in: 2328.0
+  external:
+    M_inf: 6.0
+    p_inf: 2851.0
+    T_inf: 220.8
+  operating_points:
+  - name: m6_on
+    weight: 0.5
+    external:
+      M_inf: 6.0
+      p_inf: 2851.0
+      T_inf: 220.8
+    inflow:
+      M_in: 1.6308
+      p_in: 101027.0
+      T_in: 2328.0
+    gas:
+      gamma: 1.247
+      cp: 1718.5
+      composition:
+        N2: 0.6389
+        H2O: 0.32695
+        H2: 0.01251
+        Ar: 0.00767
+        OH: 0.00604
+        O2: 0.00398
+        'NO': 0.00206
+        H: 0.00125
+        O: 0.00037
+        CO2: 0.00021
+        CO: 5.0e-05
+  - name: m10_on
+    weight: 0.3
+    warm_from: m6_on
+    external:
+      M_inf: 10.0
+      p_inf: 1026.0
+      T_inf: 227.5
+    inflow:
+      M_in: 2.7171
+      p_in: 57935.0
+      T_in: 2222.0
+    gas:
+      gamma: 1.2549
+      cp: 1925.0
+      composition:
+        N2: 0.54922
+        H2O: 0.2937
+        H2: 0.14592
+        Ar: 0.00659
+        H: 0.0032
+        OH: 0.00104
+        CO: 0.00016
+        'NO': 8.0e-05
+        CO2: 6.0e-05
+        O: 1.0e-05
+        O2: 1.0e-05
+  - name: m4_off
+    weight: 0.2
+    external:
+      M_inf: 4.0
+      p_inf: 6415.0
+      T_inf: 216.7
+    inflow:
+      M_in: 2.9101
+      p_in: 17888.0
+      T_in: 338.0
+    gas:
+      gamma: 1.3986
+      cp: 1007.2
+      composition:
+        N2: 0.78084
+        O2: 0.20948
+        Ar: 0.00936
+        CO2: 0.00032
+  moment_ref:
+  - -20.0
+  - 0.0
+dv:
+  M_c:
+    min: 2.4
+    max: 3.4
+    value: 2.9432012203823206
+  f:
+    min: 0.35
+    max: 0.6
+    value: 0.45416096145797885
+  theta_r0_deg:
+    min: 10.0
+    max: 22.0
+    value: 20.21425957234124
+  theta_c0_deg:
+    min: 2.0
+    max: 8.0
+    value: 6.948320721234727
+  L_cowl:
+    min: 0.6
+    max: 4.5
+    value: 1.601780455431526
+geometry:
+  x_max_kernel: 20.0
+  nj_moc: 301
+  dx_moc: 0.002
+  nj_moc_probe: 151
+  dx_moc_probe: 0.004
+  L_ramp_max: 20.0
+mesh:
+  discretization: node
+  cowl_thickness: 0.005
+  ni_up: 16
+  ni_noz: 160
+  ni_plume: 180
+  nj_top: 81
+  nj_bot: 51
+  L_up: 0.5
+  x_out_extra: 2.0
+  bot_depth: 3.0
+  first_wall_frac: 0.004
+  ext_top: 1
+  top_depth: 2.0
+  nj_ext_top: 41
+  nj_wake: 9
+  vehicle_clearance: 0.02
+  first_top_frac: 0.02
+  vehicle_taper: 0.35
+  ramp_fillet: 0.1
+evaluate:
+  model: sst
+  nStepOuter: 12000
+  p_min: 20.0
+  cfl_main: 0.5
+  outStepInterval: 500
+opt:
+  soft_steps: 4000
+  soft_cfl: 0.1
+  warm_lam_steps: 4000
+  warm_lam_cfl: 0.1
+  mid_steps: 4000
+  warm_adapt_steps: 500
+  cm_min: -7.0

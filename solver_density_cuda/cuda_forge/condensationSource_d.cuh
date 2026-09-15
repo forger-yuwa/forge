@@ -308,3 +308,45 @@ __host__ __device__ inline double cond_evap_source(
     *Sg  = (lam3 - 1.0)*rod*g/dt;
     return lam;
 }
+
+// 蒸発の瞬間速度形 (condLimiterMode 1; plans/active/condensation-source-limiter-steady.md §4.2-2)。
+//   成長側と同じ一様 ṙ のモーメント形 (ṙ<0, r30 で評価): S_Q1 = q0 ṙ, S_Q2 = 2 q1 ṙ, S_g = 4πρ_l q2 ṙ, S_Q0 = 0
+//   (数密度は消滅まで保存。消滅 r30<2 r_min と Q0=0 の不整合は実現可能性クランプ cond_realizability_clamp_d が確定する)。
+//   旧 λ スケール (Q1→λQ1, Q2→λ²Q2, g→λ³g) の Δτ→0 極限 (a=ṙ/r30: a q1, 2a q2, 3aρg) は monodisperse でのみこれと一致し、
+//   多分散では差が出る (codex result M4) ので plan の一様 ṙ 形に揃える。**Δτ を含まない** ので定常固定点は歩幅に依存しない。
+//   Δg/潜熱 ΔT/半径半減の 1 step 上限は更新クランプ (cond_moment_update_limited_d) が掛ける。
+//   モーメントの実現可能性: 非負分布では べき平均不等式 q1/q0 ≤ r30, q2/q0 ≤ r30² が成り立つ。輸送の丸め・floor で
+//   これを破った塵状態 (g≈0 なのに Q2 が大) では一様 ṙ 形の S_g=4πρ_l q2 ṙ が液相の 1e6 倍/s まで発散するので、
+//   q1,q2 を上限で整合させる (q1e=min(q1,q0 r30), q2e=min(q2,q0 r30²))。小液滴 (r30<r_min) は ṙ を r_min で評価して蒸発を続け
+//   (ソースを 0 にすると g>g_rm の液滴は消滅クランプの対象外で止まってしまう: codex 2026-09-16 result-3 M1)、消滅 (g≤g_rm かつ
+//   r30<2 r_min) は実現可能性クランプが確定する。
+__host__ __device__ inline void cond_evap_source_rate(
+    const CondSpeciesProps& cp, double T, double p_v, double rod, double g,
+    double q0, double q1, double q2, double rmin,
+    int growthModel, double p_gas, double gyarC, int kelvin,
+    double* SQ0, double* SQ1, double* SQ2, double* Sg, double* r30_out, double* drdt_out)
+{
+    *SQ0 = 0.0; *SQ1 = 0.0; *SQ2 = 0.0; *Sg = 0.0; *r30_out = 0.0; *drdt_out = 0.0;
+    if (g <= 0.0) return;
+    const double psat = cond_psat(cp, T);
+    if (p_v > psat) return;                              // 過飽和: 蒸発分岐ではない
+    const double rho_l = cond_rho_cond(cp, T);
+    if (q0 <= 1.0e-30) {
+        // 液滴数 0 なのに液相がある不整合 (輸送の丸め・平衡形からの restart 等)。消滅クランプは g≤g_rm でしか効かないので、
+        // 質量だけを r_min の自己相似縮小率 3ṙ(r_min)/r_min で Δτ 非依存に減衰させ、g≤g_rm でクランプに渡す (codex 2026-09-16 result-4 M1)。
+        const double drdt = cond_evap_rate(cp, T, p_v, rmin, growthModel, p_gas, gyarC, kelvin);
+        *drdt_out = drdt; *r30_out = 0.0;
+        *Sg = 3.0*rod*g*drdt/rmin;
+        return;
+    }
+    const double r30 = cbrt(g/((4.0/3.0)*COND_PI*rho_l*q0/rod));  // q0/rod = Q0 [1/kg]
+    *r30_out = r30;
+    if (!(r30 > 0.0)) return;
+    const double r_eval = (r30 > rmin) ? r30 : rmin;     // ṙ の評価半径を r_min で下から抑える (Gyarmathy の 1/r 発散を防ぐ; 蒸発は続く)
+    const double drdt = cond_evap_rate(cp, T, p_v, r_eval, growthModel, p_gas, gyarC, kelvin);
+    *drdt_out = drdt;
+    const double q1e = fmin(q1, q0*r30), q2e = fmin(q2, q0*r30*r30);
+    *SQ1 = q0*drdt;
+    *SQ2 = 2.0*q1e*drdt;
+    *Sg  = 4.0*COND_PI*rho_l*q2e*drdt;                   // ≤ 0 [kg/m³/s]
+}

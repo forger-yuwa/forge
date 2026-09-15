@@ -1,0 +1,4 @@
+inlet:  {physID: 1, kind: inlet_Pressure,   outputHDFflg: 0, ints: , floats: {Y0: 0.96230460, Y1: 0.03769540, Pt: 1139000.0, Tt: 1161.0, k: 1.0, omega: 18000.0}}
+outlet: {physID: 2, kind: outlet_statPress, outputHDFflg: 1, ints: , floats: {Ps: 5037.4, Pt: 5037.4, Tt: 300.0}}
+wall:   {physID: 3, kind: slip,             outputHDFflg: 1, ints: , floats: }
+axis:   {physID: 4, kind: axis,             outputHDFflg: 0, ints: , floats: }

@@ -17,10 +17,12 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from ..gas.frozen import FrozenGas, ideal_gross_thrust_frozen
 from ..geometry.moc_sern import PlanarMOC, SernKernelSpec, wall_forces
 from ..geometry.rao_planar import ideal_gross_thrust
 from ..meshing.mesh_sern import PHYS_SERN, SernMeshParams, generate_sern_mesh, write_msh41_named
-from ..metrics.sern_forces import force_history, steadiness
+from ..metrics.sern_forces import force_history, write_force_history_csv
+from ..metrics.sern_gates import evaluate_gates, forge_rc_from_log
 from ..probdef import Problem, dv_value, load_problem
 
 # リポジトリ位置から導く (AWS など別マシンでも動くように。FORGE_ROOT で上書き可)
@@ -40,7 +42,7 @@ def design_snapshot(p: Problem) -> dict:
     """作動点で上書きされる**前**の設計点 (入口・外部流・ガス) を控える。逆設計はこれで固定する
     (plan §4.10: 形状は設計点で 1 つに決まる。作動点は CFD の BC/IC だけを変える)。"""
     return {"inflow": dict(p.spec["inflow"]), "external": dict(p.spec["external"]),
-            "gamma": float(p.gamma), "cp": float(p.cp)}
+            "gamma": float(p.gamma), "cp": float(p.cp), "composition": p.raw.get("gas", {}).get("exhaust_composition")}
 
 
 def select_operating_point(p: Problem, op: str | None) -> dict:
@@ -65,34 +67,92 @@ def select_operating_point(p: Problem, op: str | None) -> dict:
     p.spec["external"] = dict(o["external"])
     if "inflow" in o:
         p.spec["inflow"] = {**p.spec["inflow"], **o["inflow"]}
-    if "gas" in o:                      # 作動点ごとの γ / cp (powered 1.18 vs power-off 1.39)
-        gas = {k: float(v) for k, v in o["gas"].items()}
-        unknown = set(gas) - {"gamma", "cp"}
+    if "gas" in o:                      # 作動点ごとの γ / cp (powered 1.18 vs power-off 1.39) と排気組成 (R3, frozen_tp)
+        unknown = set(o["gas"]) - {"gamma", "cp", "composition"}
         if unknown:
-            raise ValueError(f"operating_points[{op}].gas の未知キー: {sorted(unknown)} (gamma | cp のみ)")
+            raise ValueError(f"operating_points[{op}].gas の未知キー: {sorted(unknown)} (gamma | cp | composition)")
+        gas = {k: float(v) for k, v in o["gas"].items() if k in ("gamma", "cp")}
         p.gamma = gas.get("gamma", p.gamma)
         p.cp = gas.get("cp", p.cp)
         p.raw.setdefault("gas", {}).update(gas)
+        if "composition" in o["gas"]:   # モル分率 (CEA 凍結組成)。frozen_tp のときだけ効く
+            if any(isinstance(k, bool) for k in o["gas"]["composition"]):
+                raise ValueError(f"operating_points[{op}].gas.composition のキーに真偽値: 'NO' をクォートすること")
+            p.raw["gas"]["exhaust_composition"] = {str(k): float(v) for k, v in o["gas"]["composition"].items()}
     return {"name": op, "weight": float(o.get("weight", 1.0)), "external": dict(p.spec["external"]),
-            "inflow": dict(p.spec["inflow"]), "gas": {"gamma": p.gamma, "cp": p.cp}}
+            "inflow": dict(p.spec["inflow"]), "gas": {"gamma": p.gamma, "cp": p.cp, "composition": p.raw.get("gas", {}).get("exhaust_composition")}}
+
+
+# --- R3: 凍結組成 TP (排気 = CEA 凍結組成の擬似種 EXH, 外気 = 空気 AIR) ------------------------------------
+SPECIES_ORDER = ("EXH", "AIR")     # forge `species:` の順序 = Y0 (排気), Y1 (空気)
+
+
+def frozen_gases(p: Problem) -> dict | None:
+    """gas.model: frozen_tp のとき {"exhaust": FrozenGas, "ext": FrozenGas, "href_T": float}。cpg なら None。
+    排気組成は作動点 `gas.composition` (select_operating_point が `gas.exhaust_composition` に写す) のモル分率。
+    外気は `spec.external.composition` (モル分率) があればそれ、無ければ乾燥空気 (φ=0 の power-off は排気も空気)。"""
+    if not p.is_frozen_tp:
+        return None
+    href = float(p.raw["gas"].get("thermo_href_temp", 298.15))
+    comp = p.raw["gas"].get("exhaust_composition")
+    if not comp:
+        raise ValueError("gas.model: frozen_tp には gas.exhaust_composition か operating_points[].gas.composition (モル分率) が要る")
+    ext_comp = p.spec["external"].get("composition")
+    return {"exhaust": FrozenGas.from_mole(comp, SPECIES_ORDER[0], href),
+            "ext": FrozenGas.from_mole(ext_comp, SPECIES_ORDER[1], href) if ext_comp else FrozenGas.air(href), "href_T": href}
+
+
+def write_species_db(p: Problem, run_dir, gases: dict | None) -> None:
+    if gases is None:
+        return
+    import yaml as _yaml
+    db = {}
+    for key in ("exhaust", "ext"):
+        db.update(gases[key].pseudo_species_db())
+    (Path(run_dir) / "species_db.yaml").write_text(_yaml.safe_dump(db, sort_keys=False))
 
 
 def gas_states(p: Problem) -> dict:
+    """入口 (燃焼器出口) と外気の一様状態。cpg: 単一 (γ, R) を両方に使う (旧; codex C2 が指摘した外部動圧 −15 % の原因)。
+    frozen_tp (R3): 排気は CEA 凍結組成の擬似種、外気は空気で、ρ = P/(R T)・u = M a(T) をそれぞれの NASA-9 物性で計算する。"""
     g, cp = p.gamma, p.cp
     R = cp * (g - 1.0) / g
     fi, ex = p.spec["inflow"], p.spec["external"]
     if fi.get("mode", "supersonic") != "supersonic":
         raise ValueError("inflow.mode は現状 supersonic のみ (sonic_throat は S1 接続が未実装)")
+    gases = frozen_gases(p)
 
-    def st(M, P, T):
-        ro = P / (R * T)
-        u = M * np.sqrt(g * R * T)
+    def turb(ro, u):
         k = 1.5 * (0.01 * u) ** 2
-        omega = ro * k / (1.8e-5 * 10.0)
-        return {"M": float(M), "P": float(P), "T": float(T), "ro": float(ro), "u": float(u),
-                "k": float(k), "omega": float(omega)}
-    return {"exhaust": st(fi["M_in"], fi["p_in"], fi["T_in"]),
-            "ext": st(ex["M_inf"], ex["p_inf"], ex["T_inf"]), "R": R}
+        return {"k": float(k), "omega": float(ro * k / (1.8e-5 * 10.0))}
+
+    def st(M, P, T, gas: FrozenGas | None):
+        if gas is None:
+            ro = P / (R * T); u = M * np.sqrt(g * R * T)
+            out = {"M": float(M), "P": float(P), "T": float(T), "ro": float(ro), "u": float(u), "R": R, "gamma_T": g, "gas": "cpg"}
+        else:
+            out = gas.state(M, P, T)
+        out.update(turb(out["ro"], out["u"]))
+        return out
+    st_ex = st(fi["M_in"], fi["p_in"], fi["T_in"], gases["exhaust"] if gases else None)
+    st_en = st(ex["M_inf"], ex["p_inf"], ex["T_inf"], gases["ext"] if gases else None)
+    out = {"exhaust": st_ex, "ext": st_en, "R": R, "gas_model": "frozen_tp" if gases else "cpg",
+           "q_inf": 0.5 * st_en["ro"] * st_en["u"] ** 2}
+    if gases:
+        out["species"] = list(SPECIES_ORDER); out["href_T"] = gases["href_T"]
+        out["exhaust"]["Y"] = [1.0, 0.0]; out["ext"]["Y"] = [0.0, 1.0]
+        out["gas_summary"] = {"exhaust": gases["exhaust"].summary(), "ext": gases["ext"].summary()}
+    return out
+
+
+def ideal_thrust(p: Problem, st: dict) -> tuple:
+    """理想総推力 F/(p_in H) と出口 M。frozen_tp は同じ NASA-9 物性の等エントロピー膨張 (R3)、cpg は解析式。"""
+    ex, en = st["exhaust"], st["ext"]
+    gases = frozen_gases(p)
+    if gases:
+        F_nd, M_e, _ = ideal_gross_thrust_frozen(gases["exhaust"], ex["M"], ex["T"], ex["P"], en["P"])
+        return F_nd, M_e
+    return ideal_gross_thrust(ex["M"], en["P"] / ex["P"], p.gamma)
 
 
 def design_from_problem(p: Problem, design: dict | None = None):
@@ -137,12 +197,24 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     disc = p.mesh.get("discretization", "cell")
     model = p.evaluate.get("model", "euler")
     node_keys = ", nodeWallDirichlet: 1" if (disc == "node" and model != "euler") else ""
+    # R4b(i) (2026-09-13): 入口∩壁の角ノードの半割面所有を壁側に (converter が変換時に読む)。既定 0 = 旧 run とビット一致。
+    # 生産 YAML は mesh.node_inlet_corner_wall: 1 (角ノードの壁圧 1.75 p_in 対策; plans/active/boundary-node-inlet-corner-wall.md)
+    if disc == "node" and int(p.mesh.get("node_inlet_corner_wall", 0)):
+        node_keys += ", nodeInletCornerWall: 1"
+    # R3 (frozen_tp): 排気 EXH / 空気 AIR の 2 擬似種 TP。thermoHrefTemp (sensible datum) は陰解法の χ_eos 桁違い対策で必須
+    # ([[isobutane-wt-semiperfect]] / runner_axismach と同じ)。IC の roe も同じ基準で組む (paste_region_ic)
+    if p.is_frozen_tp:
+        href = float(p.raw["gas"].get("thermo_href_temp", 298.15))
+        _tp = f", species: [{', '.join(SPECIES_ORDER)}], speciesDBFile: \"species_db.yaml\", thermoHrefTemp: {href}"
+        _tm = 2
+    else:
+        _tp = ""; _tm = 0
     if model == "euler":
-        phys = f"physProp: {{isCompressible: 1, thermalMethod: 0, viscMethod: 0, ro: 1.2, visc: 0.0, thermCond: 0.0, cp: {p.cp}, gamma: {p.gamma}{_pmin}}}"
+        phys = f"physProp: {{isCompressible: 1, thermalMethod: {_tm}, viscMethod: 0, ro: 1.2, visc: 0.0, thermCond: 0.0, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}}}"
         turb = 'turbulence: {model: "none"}'
     else:
-        phys = (f"physProp: {{isCompressible: 1, thermalMethod: 0, viscMethod: 1, ro: 1.2, visc: 1.8e-5, thermCond: 0.0257, "
-                f"thermCondMethod: 1, prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}{_pmin}}}")
+        phys = (f"physProp: {{isCompressible: 1, thermalMethod: {_tm}, viscMethod: 1, ro: 1.2, visc: 1.8e-5, thermCond: 0.0257, "
+                f"thermCondMethod: 1, prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}}}")
         turb = 'turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 1}'
     return f"""mesh: {{meshFormat: "hdf5", discretization: "{disc}", isAxisymmetric: 0{node_keys}, meshFileName: "{MESH}", valueFileName: "{MESH}"}}
 gpu: 1
@@ -166,19 +238,19 @@ initial: "uniform_p101325_u10"
 
 def _bcond_config(p: Problem, st: dict) -> str:
     model = p.evaluate.get("model", "euler")
-    wall_kind = "slip" if model == "euler" else "wall"
     ex, en = st["exhaust"], st["ext"]
 
     def inlet(name, pid, s):
         return (f"{name}: {{physID: {pid}, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , "
-                f"floats: {{ro: {s['ro']:.6g}, Ux: {s['u']:.6g}, Uy: 0.0, Uz: 0.0, Ps: {s['P']:.6g}, k: {s['k']:.6g}, omega: {s['omega']:.6g}}}}}\n")
+                f"floats: {{ro: {s['ro']:.6g}, Ux: {s['u']:.6g}, Uy: 0.0, Uz: 0.0, Ps: {s['P']:.6g}, k: {s['k']:.6g}, omega: {s['omega']:.6g}{inlet_species_floats(s)}}}}}\n")
 
     def outlet(name, pid):
         return (f"{name}: {{physID: {pid}, kind: outlet_statPress, outputHDFflg: 0, ints: , "
                 f"floats: {{Ps: {en['P']:.6g}, Pt: {en['P']:.6g}, Tt: {en['T']:.6g}}}}}\n")
 
     def wall(name, pid):
-        return f"{name}: {{physID: {pid}, kind: {wall_kind}, outputHDFflg: 1, ints: , floats: }}\n"
+        # 壁行は spec.wall_thermal が単一ソース (断熱 wall / 等温 wall_isothermal+Ts)。Euler は slip
+        return f"{name}: {p.wall_bcond_line(model == 'euler', phys_id=pid, output=1)}\n"
     P = PHYS_SERN
     return (inlet("inlet_nozzle", P["inlet_nozzle"], ex) + inlet("inlet_ext", P["inlet_ext"], en)
             + outlet("outlet", P["outlet"]) + wall("ramp", P["ramp"]) + wall("cowl_in", P["cowl_in"])
@@ -188,6 +260,39 @@ def _bcond_config(p: Problem, st: dict) -> str:
             # 機体上面 + base (§4.11): 機体の力なので帳簿外だが base 圧の診断のため壁出力する。Euler/SST とも slip
             + (f"vehicle: {{physID: {P['vehicle']}, kind: slip, outputHDFflg: 1, ints: , floats: }}\n"
                if int(p.mesh.get("ext_top", 0)) else ""))
+
+
+def inlet_species_floats(s: dict) -> str:
+    """frozen_tp の入口組成 (Y0 = 排気, Y1 = 空気)。cpg (Y 無し) は空文字。"""
+    Y = s.get("Y")
+    return "" if Y is None else "".join(f", Y{i}: {float(y):.6g}" for i, y in enumerate(Y))
+
+
+def region_ic_arrays(upper, st: dict, gamma: float) -> dict:
+    """領域マスク upper (排気側) から保存量 IC を作る。cpg: roe = P/(γ−1) + ½ρu²。
+    frozen_tp: roe = ρ (h_sens(T) − R T) + ½ρu² を各領域のガスで (forge の thermoHrefTemp 基準と同一)、roY0/roY1 = 領域組成。"""
+    ex, en = st["exhaust"], st["ext"]
+    ro = np.where(upper, ex["ro"], en["ro"]); u = np.where(upper, ex["u"], en["u"]); P = np.where(upper, ex["P"], en["P"])
+    out = {"ro": ro, "roUx": ro * u, "roUy": np.zeros_like(ro), "roUz": np.zeros_like(ro),
+           "roK": ro * np.where(upper, ex["k"], en["k"]), "roOmega": ro * np.where(upper, ex["omega"], en["omega"])}
+    if st.get("gas_model") == "frozen_tp":
+        e_ex = ex["h_sens"] - ex["R"] * ex["T"]; e_en = en["h_sens"] - en["R"] * en["T"]
+        out["roe"] = ro * (np.where(upper, e_ex, e_en) + 0.5 * u * u)
+        out["roY0"] = np.where(upper, ro, 0.0); out["roY1"] = np.where(upper, 0.0, ro)
+    else:
+        out["roe"] = P / (gamma - 1.0) + 0.5 * ro * u * u
+    return out
+
+
+def write_ic_arrays(v, arrays: dict) -> None:
+    """VALUE グループへ IC を書く。roY{s} は無ければ作る (converter は化学種を知らない; forge は VALUE/roY を優先して読む)。"""
+    for k, a in arrays.items():
+        if k in ("roK", "roOmega") and k not in v:
+            continue
+        if k in v:
+            v[k][:] = a
+        else:
+            v.create_dataset(k, data=np.asarray(a, dtype=np.float32))
 
 
 def apply_wall_offset(design, wall_offset: dict, H: float):
@@ -209,17 +314,11 @@ def apply_wall_offset(design, wall_offset: dict, H: float):
 
 def paste_region_ic(h5path, y_mid, y_top, scale: float, st: dict, gamma: float) -> None:
     """領域別一様 IC: 中間線とランプ/プルーム上線の間 = 燃焼器出口状態、それ以外 (カウル下・ランプ側外部流) = 外部流。"""
-    ex, en = st["exhaust"], st["ext"]
     with h5py.File(h5path, "r+") as f:
         cc = f["/CELLS/centCoords"][:].reshape(-1, 3)
         xn, yn = cc[:, 0] / scale, cc[:, 1] / scale
         upper = (yn > y_mid(xn)) & (yn < y_top(xn))
-        ro = np.where(upper, ex["ro"], en["ro"]); u = np.where(upper, ex["u"], en["u"]); P = np.where(upper, ex["P"], en["P"])
-        v = f["/VALUE"]
-        v["ro"][:] = ro; v["roUx"][:] = ro * u; v["roUy"][:] = 0.0; v["roUz"][:] = 0.0
-        v["roe"][:] = P / (gamma - 1.0) + 0.5 * ro * u * u
-        if "roK" in v:
-            v["roK"][:] = ro * np.where(upper, ex["k"], en["k"]); v["roOmega"][:] = ro * np.where(upper, ex["omega"], en["omega"])
+        write_ic_arrays(f["/VALUE"], region_ic_arrays(upper, st, gamma))
 
 
 def convert_mesh(run_dir, msh: str, out: str) -> None:
@@ -273,9 +372,11 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     cfg = _solver_config(p, n, out_int, cfl, st["ext"]["P"])
     (run_dir / "bcondConfig.yaml").write_text(_bcond_config(p, st))
     (run_dir / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
+    write_species_db(p, run_dir, frozen_gases(p))     # R3: 擬似種 EXH / AIR の NASA-9 (cpg なら何も書かない)
     disc = p.mesh.get("discretization", "cell")
     # 品質ゲートは primal (cell) 変換で
-    (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"').replace(", nodeWallDirichlet: 1", ""))
+    (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"')
+                                               .replace(", nodeWallDirichlet: 1", "").replace(", nodeInletCornerWall: 1", ""))
     convert_mesh(run_dir, "sern.msh", "sern_qc.h5")
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"), "sern_qc.h5", "--mode", "2d"], cwd=run_dir, env=_ENV, capture_output=True, text=True)
     (run_dir / "MESH_QUALITY.txt").write_text(q.stdout + q.stderr)
@@ -292,8 +393,8 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     (run_dir / "solverConfig.yaml").write_text(cfg)
     paste_region_ic(run_dir / MESH, y_mid, y_top, H, st, p.gamma)
     ex = st["exhaust"]
-    F_ideal_nd, M_e_id = ideal_gross_thrust(ex["M"], st["ext"]["P"] / ex["P"], p.gamma)
-    info = {"problem": str(problem_path), "run_dir": str(run_dir), "nsteps": n, "H_m": H, "states": st,
+    F_ideal_nd, M_e_id = ideal_thrust(p, st)
+    info = {"problem": str(problem_path), "run_dir": str(run_dir), "nsteps": n, "H_m": H, "states": st, "gas_model": st["gas_model"],
             "operating_point": opinfo, "wall_offset": bool(wall_offset), "design_point": d0,
             "design": {"key_point": list(design.key_point), "foot_a": list(design.foot_a), "lip_e": list(design.lip_e),
                        "L_ramp": design.L_ramp, "mass_fraction_check": design.mass_fraction_check,
@@ -341,6 +442,10 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
     res = sorted(src_run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
     if not res:
         raise RuntimeError(f"warm_from_run: {src_run_dir} に res_*.h5 が無い")
+    gases_d = None
+    if di.get("gas_model") == "frozen_tp":
+        # 作動点適用後の組成で擬似種を作る (prepare_info の problem は作動点未適用の YAML なので op を再選択)
+        pd_ = load_problem(di["problem"]); select_operating_point(pd_, di["operating_point"]["name"]); gases_d = frozen_gases(pd_)
     with h5py.File(res[-1], "r") as src, h5py.File(dst_run_dir / MESH, "r+") as dst:
         n = len(dst["VALUE/ro"])
         if len(src["VALUE/ro"]) != n:
@@ -348,10 +453,24 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
         ro = src["VALUE/ro"][:].astype(np.float64)
         mom = [src[f"VALUE/{k}"][:].astype(np.float64) for k in ("roUx", "roUy", "roUz")]
         roe = src["VALUE/roe"][:].astype(np.float64)
-        P = (g_s - 1.0) * (roe - 0.5 * sum(m * m for m in mom) / np.maximum(ro, 1e-30))
         ro_n = ro * s_ro
         mom_n = [m * (s_ro * s_u) for m in mom]
-        roe_n = P * s_P / (g_d - 1.0) + 0.5 * sum(m * m for m in mom_n) / np.maximum(ro_n, 1e-30)
+        if gases_d is None:
+            P = (g_s - 1.0) * (roe - 0.5 * sum(m * m for m in mom) / np.maximum(ro, 1e-30))
+            roe_n = P * s_P / (g_d - 1.0) + 0.5 * sum(m * m for m in mom_n) / np.maximum(ro_n, 1e-30)
+        else:
+            # frozen_tp (R3): 圧力は出力の P を相似スケール、組成 (Y_EXH, Y_AIR) は場のまま持ち越し、
+            # T' = P'/(ρ' R_mix(Y)) と目標作動点の擬似種 (排気組成が違う) で roe' = ρ'(Σ Y_s e_sens,s(T') + ½|u'|²) を組み直す
+            if "P" not in src["VALUE"] or "roY0" not in src["VALUE"]:
+                raise ValueError("warm_from_run (frozen_tp): 元 run の出力に P / roY0 が無い")
+            P = src["VALUE/P"][:].astype(np.float64) * s_P
+            Y0 = np.clip(src["VALUE/roY0"][:].astype(np.float64) / np.maximum(ro, 1e-30), 0.0, 1.0); Y1 = 1.0 - Y0
+            gx, ga = gases_d["exhaust"], gases_d["ext"]
+            R_mix = Y0 * gx.R + Y1 * ga.R
+            T_n = P / np.maximum(ro_n * R_mix, 1e-30)
+            e_n = Y0 * gx.e_sens(T_n) + Y1 * ga.e_sens(T_n)
+            roe_n = ro_n * e_n + 0.5 * sum(m * m for m in mom_n) / np.maximum(ro_n, 1e-30)
+            dst["VALUE/roY0"][:] = ro_n * Y0; dst["VALUE/roY1"][:] = ro_n * Y1
         dst["VALUE/ro"][:] = ro_n
         for k, m in zip(("roUx", "roUy", "roUz"), mom_n):
             dst["VALUE"][k][:] = m
@@ -464,25 +583,30 @@ def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int) -
     return run_forge(run_dir)
 
 
-def collect(problem_path, run_dir) -> dict:
+def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass: bool = False) -> dict:
+    """力係数履歴 + 受理ゲート (plan §5.1 R1)。metrics.json / force_history.csv は out_dir (既定 run_dir) に書く
+    (再判定で元 run を汚さない)。rc は forge の終了コード (None なら run_case_stdout.log から読む)。"""
     p = load_problem(problem_path)
-    run_dir = Path(run_dir)
+    run_dir = Path(run_dir); out_dir = Path(out_dir) if out_dir else run_dir; out_dir.mkdir(parents=True, exist_ok=True)
     info = json.loads((run_dir / "prepare_info.json").read_text())
     st = info["states"]; ex, en = st["exhaust"], st["ext"]; H = info["H_m"]
     xr, yr = p.spec.get("moment_ref", [0.0, 0.0])
     hist = force_history(run_dir, p_a=en["P"], F_ideal=info["F_ideal_N_per_m"], H=H, x_ref=float(xr) * H, y_ref=float(yr) * H,
                          mdot_u_in=ex["ro"] * ex["u"] ** 2 * H, p_in=ex["P"],
                          twall_on_fluid=(info.get("discretization", "cell") == "cell"))
+    if rc is None:
+        rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
-    out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist,
-           "operating_point": info.get("operating_point"), "L_ramp": info["design"]["L_ramp"]}
+    gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass)
+    out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "forge_rc": rc,
+           "operating_point": info.get("operating_point"), "L_ramp": info["design"]["L_ramp"],
+           "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"]}
     if hist:
         last = hist[-1]
         out.update({k: last[k] for k in ("step", "C_T", "C_T_wall", "C_L", "C_M", "T_wall", "L", "M_noseup")})
         for k in ("C_T_with_shear", "C_T_friction", "sep_frac_ramp", "sep_x_min_ramp"):
             if k in last:
                 out[k] = last[k]
-        out["steadiness"] = {k: steadiness([h[k] for h in hist]) for k in ("C_T", "C_L", "C_M")}
         out["moc_forces"] = info["moc_forces"]
         # MOC は**設計点**の値なので、作動点が設計点と一致するときだけ差を出す (2026-09-05, plan §4.10:
         # 作動点は inflow/gas も動かすので、オフデザイン run で差を取ると意味の無い数になる)。
@@ -492,7 +616,8 @@ def collect(problem_path, run_dir) -> dict:
         out["on_design_point"] = on_design
         if on_design:
             out["cfd_vs_moc"] = {k: (last[k] - info["moc_forces"][k]) for k in ("C_T", "C_L", "C_M")}
-    (run_dir / "metrics.json").write_text(json.dumps(out, indent=1))
+        write_force_history_csv(out_dir / "force_history.csv", hist)
+    (out_dir / "metrics.json").write_text(json.dumps(out, indent=1))
     return out
 
 
@@ -519,8 +644,9 @@ def main(argv=None):
                     warm_lam_steps=int(o.get("warm_lam_steps", 0)), warm_lam_cfl=float(o.get("warm_lam_cfl", 0.2)),
                     mid_steps=int(o.get("mid_steps", 0)),
                     warm_adapt_steps=int(o.get("warm_adapt_steps", 500)))
-    out = collect(a.problem, a.run_dir)
-    print(json.dumps({k: v for k, v in out.items() if k != "history"}, indent=1))
+    out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))
+    print(json.dumps({k: v for k, v in out.items() if k not in ("history", "gates")}, indent=1))
+    g = out["gates"]; print(f"GATES: {g['verdict']} fail_class={g['fail_class']} objective={g['objective']} reasons={g['reasons']}")
     return rc
 
 

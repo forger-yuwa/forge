@@ -44,16 +44,22 @@ def extract_and_merge(prev_run, euler_run, omega: float = 0.5, smooth_lam: float
     # 平滑化 (2026-09-04 ユーザ指摘: 3 次平滑化では壁曲率が凸凹): 抽出 raw を 5 次 P-spline (3 階差分ペナルティ,
     # ノット 2 r_t, λ=1) で「曲率が滑らか」な δ_ext(x) にしてから緩和する。hard 不合格の点は重み 0。
     from ..metrics.deltastar import smooth_delta_quintic
+    # 符号付き δ_r (2026-09-12): 等温壁 (prepare_info.json の wall_thermal) では負値を許す。断熱は従来どおり ≥0 に丸める
+    try:
+        _wt = json.loads((prev_run / "prepare_info.json").read_text()).get("wall_thermal", {"mode": "adiabatic"})
+    except Exception:
+        _wt = {"mode": "adiabatic"}
+    positive = (str(_wt.get("mode", "adiabatic")) == "adiabatic")
     x = d["x"]; r_inv = d["r_wall_euler"]
     raw = d["delta_r_raw"]; wts = d["hard_ok"].astype(float) & np.isfinite(raw) if False else (d["hard_ok"] & np.isfinite(raw)).astype(float)
     lam_used = None; diag = None
     for lam in (smooth_lam, smooth_lam * 10, smooth_lam * 100, smooth_lam * 1000):
-        f_s, diag = smooth_delta_quintic(x, raw, weights=wts, knot_spacing=knot_spacing, lam=lam)
+        f_s, diag = smooth_delta_quintic(x, raw, weights=wts, knot_spacing=knot_spacing, lam=lam, positive=positive)
         d_ext = f_s(x)
         d_next = (1.0 - omega) * d_in + omega * d_ext
         if omega < 1.0:
             # 前回入力 δ_in (旧方式の壁など) の凸凹を引き継がないよう、緩和後も同じ P-spline を通す
-            f_b, _ = smooth_delta_quintic(x, d_next, knot_spacing=knot_spacing, lam=lam)
+            f_b, _ = smooth_delta_quintic(x, d_next, knot_spacing=knot_spacing, lam=lam, positive=positive)
             d_next = f_b(x)
         # 単調性ガード: 新しい物理壁 r_inv + δ_next がスロート下流で非単調なら λ を 10 倍して再平滑化
         r_new = r_inv + d_next
@@ -170,7 +176,8 @@ def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, p
     from ..evaluate.runner_axismach import prepare_ns, run_staged_ns, collect
     from ..evaluate.runner import FORGE_TOOLS
     run_dir = Path(run_dir)
-    init = initializer if initializer is not None else {"model": "contur", "thermal_bc": {"mode": "adiabatic"}}
+    # thermal_bc は prepare_ns 側で spec.wall_thermal から決める (ここでは model のみ)
+    init = initializer if initializer is not None else {"model": "contur"}
     info = prepare_ns(problem, run_dir, nsteps=nsteps, ic_from=ic_from, initializer=init,
                       euler_ref=euler_ref, omega=omega, cfl_main=cfl_main, implicit_relax=implicit_relax)
     info["stages"] = {"stages": stages, "ramp": (list(ramp) if ramp else None), "ramp_steps": ramp_steps}
@@ -209,7 +216,7 @@ def main(argv=None) -> int:
     ap.add_argument("--extract-only", action="store_true", help="抽出と delta_r_next.csv だけ作る")
     ap.add_argument("--init-integral", action="store_true",
                     help="pass 0: 積分法 (CONTUR) 初期壁で NS を立てる (YAML の deltastar_initializer を使う)")
-    ap.add_argument("--init-thermal", default=None, help="--init-integral の熱境界条件 JSON (例 '{\"mode\":\"adiabatic\"}')")
+    ap.add_argument("--init-thermal", default=None, help="廃止 (2026-09-12): 壁温は problem YAML の spec.wall_thermal が単一ソース")
     ap.add_argument("--cfl", type=float, default=None, help="本段 cfl (YAML evaluate.cfl_main を上書き)")
     ap.add_argument("--implicit-relax", type=float, default=None, help="implicitRelax (YAML evaluate.implicit_relax を上書き)")
     ap.add_argument("--stages", default="full", choices=("full", "none", "ramp"), help="起動: full=soft/mid/本段, none=本段のみ, ramp=cfl を段階的に上げて本段")
@@ -229,7 +236,7 @@ def main(argv=None) -> int:
     if a.init_integral:
         init = None
         if a.init_thermal:
-            init = {"model": "contur", "thermal_bc": json.loads(a.init_thermal)}
+            ap.error("--init-thermal は廃止。spec.wall_thermal (problem YAML) で指定する")
         ramp = tuple(float(v) for v in a.ramp.split(",")) if a.ramp else None
         run_pass0_integral(a.problem, a.euler_ref, a.run_dir, a.ic_from, initializer=init,
                            prepare_only=a.prepare_only, nsteps=a.steps, omega=a.omega, cfl_main=a.cfl,

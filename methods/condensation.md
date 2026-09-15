@@ -690,7 +690,7 @@ $r_*$ を僅かに割ると $dr/dt<0$ → roQ1 が負帰還で 0 へ暴走崩壊
 **本体 kernel とヤコビアン (`cond_source_vector`) の両方で同一の成長ガード ($\bar r>r_*$ のみ成長・$dr/dt\ge0$) と
 $r_{\rm nuc}$ を使う** (ヤコビアンだけガード無しだと亜臨界で過大な $\partial S/\partial Q_1$ が出て roQ1 を 0 に潰す)。
 
-`res_ro<φ> += S_φ·V` で advection 残差へ加算。物性は [condensationProperties_d.cuh](../solver_density_cuda/cuda_forge/condensationProperties_d.cuh)。
+`res_ro<φ> += S_φ·V` で advection 残差へ加算 (`condLimiterMode 0` [旧] は θ 倍して加算 — その Δτ 依存と現行の更新クランプは §4c)。物性は [condensationProperties_d.cuh](../solver_density_cuda/cuda_forge/condensationProperties_d.cuh)。
 
 #### 安定化 (初期実装の主眼)
 
@@ -785,6 +785,63 @@ $kRT^2\ln S/(\rho_lL^2)$ を共有し Knudsen 内挿のみ $1/(1+3.18Kn)$ に差
 平均自由行程に全圧 $p$ を用いる (希薄蒸気で $p_v$ を使うと Kn 過大になるのを回避)。
 
 ---
+
+### 4c. θ 律速の擬似時間刻み依存 (2026-09-15 発見) と更新クランプ化 (`condLimiterMode`, 実装済)
+
+**問題**: 旧実装の θ 律速 (1 step の $\Delta g\le$ `dg_max`=5e-3、潜熱 $\Delta T=\Delta g\,L/c_v\le$ `dT_max`=1 K、蒸気枯渇) は
+$\Delta g = S_g\,\Delta\tau_{loc}/\rho$ で評価され、**その θ を定常残差のソース $S_{Q_0..Q_2},S_g$ とヤコビアン `sj_g` に掛けていた**。
+$\Delta\tau_{loc}$ に比例するため、定常局所時間刻み (`unsteady 0`) の収束解が `cfl_pseudo` とセル体積に依存した (残差 $R$ 自体が
+$\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ スケール $S_g=\rho g(\lambda^3-1)/\Delta\tau$, $\lambda=1+\dot r\Delta\tau/r_{30}$ は
+律速が非作動でも $O(\Delta\tau)$ の項を残す。
+
+- **実測** (case/44 va3 M4.19, 6 m ノズル, node Euler TP, 入口 Tt 分布): $\Delta\tau_{loc}$ 2.6e-5 s で $\Delta T$/step ≈3.4 K → θ 0.25 (内側) /
+  0.55 (壁 2 ノードは $\Delta\tau_{loc}$ が半分)。成長が内側で 1/4 に絞られ「壁第一層だけ液相が速く増える」偽の壁異常と凝縮完了の 3–4 $r_t$ 遅れになった。
+  cfl_pseudo 2/1/0.5 で θ 0.25/0.5/1、出口 g 平均 0.437/0.574/0.584 % (`case/44 run_0127/0130/0131`, 図 `figs/va3_inletTt_cfl_ab.png`)。
+  onset (核生成) は律速されないので Wilson 点は不変。Wysłouzil (case/16, mm ノズル) は $\Delta T$/step ≤ 0.86 K で θ≡1 → 過去検証は無影響。
+
+**修正 (`condLimiterMode: 1`, 既定; plan [condensation-source-limiter-steady](../plans/accepted/condensation-source-limiter-steady.md))**:
+「答えを決める残差」から $\Delta\tau$ を消し、「1 歩の大きさ」の制限は更新側に置く。
+
+1. **残差は瞬間速度**: 核生成・成長ソースはそのまま加算 (θ 倍なし)。蒸気枯渇 ($Y_w-g\le0$ → $S=0$) と $J$ 上限だけ残す (どちらも $\Delta\tau$ を含まない)。
+   蒸発は瞬間速度形 `cond_evap_source_rate{,_f}`: 成長側と同じ一様 $\dot r$ のモーメント形 ($\dot r<0$ を $r_{30}$ で評価)
+   $S_{Q_1}=q_0\dot r$, $S_{Q_2}=2q_1\dot r$, $S_g=4\pi\rho_l q_2\dot r$, $S_{Q_0}=0$。旧 λ スケール (Q1→λQ1, Q2→λ²Q2, g→λ³g) の $\Delta\tau\to0$ 極限
+   ($a=\dot r/r_{30}$: $aq_1, 2aq_2, 3a\rho g$) は monodisperse でのみこれと一致し、多分散 (半径 $r$ と $2r$ 同数) では $S_g$ が 8 % 違う (codex result M4)。
+   モーメントの実現可能性: 非負分布では べき平均不等式 $q_1/q_0\le r_{30}$, $q_2/q_0\le r_{30}^2$ が成り立つので、輸送の丸めでこれを破った塵状態
+   ($g\approx0$ なのに $Q_2$ が大) では $q_{1e}=\min(q_1,q_0r_{30})$, $q_{2e}=\min(q_2,q_0r_{30}^2)$ で整合させる (でないと $S_g$ が液相の $10^6$ 倍/s に発散し
+   ヤコビアンが $10^{15}$ になる)。小液滴 ($r_{30}<r_{min}$) は $\dot r$ を $r_{min}$ で評価して蒸発を続け (ソースを 0 にすると $g>g_{rm}$ の液滴が消滅クランプの対象外で止まる),
+   消滅 ($g\le g_{rm}$ かつ $r_{30}<2r_{min}$, $Q_0=0$ の不整合を含む) は実現可能性クランプ `cond_realizability_clamp_d` が確定する (従来どおり)。
+   **$Q_0=0$ の復旧規則** (codex result-4 M1 / result-5 m1): $q_0\le10^{-30}$ なのに $g>0$ の不整合状態 (輸送の丸め・クランプで数密度だけ消えた液相) は
+   モーメント形では $S_g=4\pi\rho_l q_{2e}\dot r=0$ となり、$g>g_{rm}$ なら消滅クランプの対象外で永久に残る。そこで $S<1$ のときだけ質量を
+   $S_g=3\rho g\,\dot r(r_{min})/r_{min}$ ($\dot r<0$; 半径 $r_{min}$ の液滴が自己相似に縮む率, $\Delta\tau$ を含まない) で減衰させ、$g\le g_{rm}$ になった時点で消滅クランプに渡す
+   ($S_{Q_0..Q_2}=0$)。これは液滴分布から導いた蒸発速度ではなく**不整合状態からの復旧規則**で、通常の整合状態 ($q_0>0$) には触れない。単体 `test_cond_limiter_steady` (k) が
+   double/float × {整合 $r_{30}=1.5$ nm, $Q_0=Q_1=Q_2=0$} でソース→更新→消滅 (17/20 step) を確認する。ヤコビアン `sj_g`/`sj_Q1` も θ 倍なし (mode 1 の g 摂動幅は $10^{-3}\max(g,10^{-9})$ で条件を整える)。
+   **ソース積分の体積は node 周期 seam で部分体積 `volumePartial_d`** (合併体積だと gather 後に member 数倍に二重計上: 面 2 / 辺 4 / 角 8 倍。
+   case/09 一様過飽和 N2 の 1 step 試験で旧 2.0/8.0 → 新 1.000; codex result M6)。
+2. **更新クランプ** `cond_moment_update_limited_d` ([condensationUpdateLimiter_d.cuh](../solver_density_cuda/cuda_forge/condensationUpdateLimiter_d.cuh)):
+   定常 point-implicit 更新 (`timeIntegration 11`) で 4 モーメントの **floor 前の候補増分** $\delta_k=(R_k\Delta\tau/V)/(1+\Delta\tau(\mathrm{sj}_k+\mathrm{td}_k/V))$ を取り出し、
+   $\Delta g=\delta_g/\rho$ (更新済みの流れ $\rho$ を固定したモーメント修正量) から
+   ($\Delta g$ は**更新済みの流れ $\rho^{new}$ を固定した相変化分**。移流による密度変化 $g^{old}\Delta\rho/\rho$ は流れの CFL が抑える別物で、潜熱を伴わないので
+   ここでは数えない。$T$, $c_p$ は前回の従属変数評価 [流れ更新前] を使う安全弁であり、固定点には影響しない)
+   $$\theta_u=\min\Big(1,\ \frac{dg_{max}}{|\Delta g|},\ \frac{dT_{max}}{|\Delta T|},\ \underbrace{\frac{\mathrm{avail}}{\Delta g}}_{\Delta g>0},\ \underbrace{\frac{(1-\lambda_{min}^3)\,g^{old}}{|\Delta g|}}_{\Delta g<0}\Big),\qquad
+   \Delta T=\frac{\Delta g\,L}{c_v+g(R_w-dL/dT)}$$
+   を作り、**4 本の増分を同じ $\theta_u$ で縮めてから** floor ($\rho\phi\ge0$) を掛けて確定する。$\theta_u\ge10^{-12}$ (更新を止める穴を作らない)。
+   収束時は $\delta\to0$ で $\theta_u\to1$・無作用なので、固定点は残差だけで決まる。潜熱 $\Delta T$ は二相 EOS と同じ有効比熱で評価する。
+3. **診断**: `condLim_<s>` = $\theta_u$ (収束時 ≈1 を確認する)、`condClampCorr_<s>` = このステップの**全**硬クランプによる $|\Delta\rho g|/\rho$ の累積
+   [質量分率] (更新 floor + 実現可能性クランプ $g\le Y_w$ / $0.99$ + 液滴消滅)、`condClampCorrQ_<s>` = $Q_0..Q_2$ の最大相対補正 (負値 floor は 1)。収束時に
+   凝縮域で 0 であること (乾きセルの数値塵 $Q\to0^-$ の floor は $g=0$ なら無害) を確認する。
+4. **設定**: `condDgMaxStep` (既定 5e-3) / `condDTmaxStep` (既定 1 K) / `condLimiterMode` (1: 更新クランプ [既定], 0: 旧・残差 θ [A/B 用])。
+   **新経路は `condEquilibrium 0` (非平衡) のみ** (平衡形 1/2 は従来の更新のまま)。**RK 陽解法 (`timeIntegration` 1/3/4) と dual-time では起動時に自動で 0 に降格**する (RK は未制限残差の累積バッファを持ち、dual-time は凝縮
+   モーメントに物理時間項が無い [followups F-cf8] ため未検証)。
+5. **平衡緩和形 (`condEquilibrium 1`)** は据え置き。定常条件 $R_{transport}+V\alpha\theta\rho(g_{eq}-g)/\Delta\tau=0$ は輸送との釣り合いが
+   $\Delta\tau$ 依存 (「θ は接近速度だけ」は輸送の無い局所緩和にしか成り立たない) — 旧モデル互換の既知の制約。平衡凝縮の推奨は EOS 拘束形
+   `condEquilibrium 2` (代数拘束、$\Delta\tau$ 非依存。設定既定値は 0=非平衡)。
+
+**検証** (2026-09-15/16, plan §9): 単体 `tests/unit/test_cond_limiter_steady.cu` — 状態固定で $\Delta\tau$ を 1e-7/1e-3 に振っても double/float 両実体の
+残差・ヤコビアンがビット一致 (H2O carrier 962 状態・N2 pure 300 状態; 旧 mode 0 は 525/169 セルで差)、更新クランプ 10 ケース、多分散蒸発の値、
+輸送+ソース+全クランプを通す 1 セル固定点が $\Delta\tau$ 1e-6〜1e-4 で 3.8e-5 一致。`test_cond_float_device.cu` は両モードで double/float 一致 PASS。
+CFD (修正後バイナリ): case/44 入口 Tt 分布 run で node cfl 2 (`run_0137`) / 4 (`0138`) / 0.5 (`0139`)・condFloat 0 (`0140`)、cell cfl 2 (`0141`) / 0.5 (`0146`)
+の凝縮固有量 (出口 g・onset・M) が一致し `check_quasisteady --series-csv` 0.2 % で STEADY。ただし case/44 の残差は入口 Tt 分布 run 固有の床
+(node: rms_roe 0.4 = dry 一様 run と同値, roQ0 2.7 桁; cell: atomicAdd の床 rms_roe ≈25) で `check_convergence` は plateau → 報告は「プラトー上の最終場一致 + 凝縮固有量 series STEADY + 補正 0」であり「定常解の一致」ではない (plan §6)。
 
 ### 5. 一温度 二相 EOS の温度逆算 (Phase 2)
 
@@ -928,6 +985,10 @@ Phase 2 の二相 EOS による気相逆結合 ($p$ が $g$ 依存) は密結合
 ---
 
 ### 7b. 多成分燃焼ガス中の H₂O 凝縮 — carrier を擬似種に畳む運用 (2026-08-17)
+
+> 2026-09-15: 擬似種に畳むのは設計チェーンの選択肢の 1 つ (`tp_species: lumped`, 名前と中身をユーザ指定) にし、各種を CEA (NASA-9) の係数で
+> 独立種として渡す `tp_species: full` とモル分率入力を追加する計画 → [thermophysics-cea-mole-fraction-species](../plans/active/thermophysics-cea-mole-fraction-species.md)。
+
 
 燃焼ガス (N₂/CO₂/O₂/H₂O) の H₂O 凝縮では、carrier 全種を独立種にする必要はない (多成分 TP × 陰解法の
 結合不安定・種数分の輸送コスト)。**H₂O 以外を NASA-9 の質量分率線形混合で 1 つの擬似種 `MIXDRY` に

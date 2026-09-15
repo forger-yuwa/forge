@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `tooling / optimization`
-- **status**: `in_progress`  <!-- 2026-09-04 起票 (branch feature/sern-design)。S0–S6 完了 (同日、S6 は Euler)。node+SST は解決 (真因 = stage 間 interp 移植)。残 = §5.1 の残作業表 (最優先 = 作動点のサイクル値化、外部流ブロック、3D SST の後縁 3 重点) -->
+- **status**: `in_progress`  <!-- 2026-09-04 起票 (branch feature/sern-design)。S0–S6 完了 (同日、S6 は Euler)。node+SST は解決 (真因 = stage 間 interp 移植)。残 = §5.1 の残作業表 R1–R7 (2026-09-09 codex 採用)。**R1 評価ゲート修復・R2 集計分離・R3 凍結 TP 化 = 完了 (2026-09-13)**、次 = R4 (3D 外部領域・領域独立性) → R5 (3D SST 再現) -->
 - **related_docs**:
   - [`methods/design/overview.md`](../../methods/design/overview.md) 「SERN チェーン」節 (現在仕様。本計画と同時に起草)
   - [`design/CAPABILITIES.md`](../../design/CAPABILITIES.md) (問題タイプ `sern_2d` を 📋 で登録)
@@ -74,9 +74,9 @@ $x=L_{\rm cowl}$ 以降は外部流とのせん断層 (等圧自由境界 $p=p_{
 | --- | --- |
 | spec | 入口: `inflow.mode: supersonic` ($M_{\rm in}$, $p_{\rm in}$, $T_t$, 組成 — 既定) または `sonic_throat` ($P_t,T_t$, スロート諸元 → 内部対称ノズルで $M_{\rm hand}$ まで)。作動点リスト `operating_points[]` = {名前, $M_\infty$, $p_\infty$, $T_\infty$, 入口状態の上書き, 重み $w_k$}。幾何包絡、モーメント基準点、$\delta^*_{\rm in}$ (入口境界層排除厚、既定 0) |
 | derived | 設計点の $p_e/p_a$、出口高さ $H_e$ (逆設計の結果)、$C_{T,\rm ideal}$ (入口状態から $p_a$ まで等エントロピー膨張の推力 = 正規化基準) |
-| dv ($d=6$) | **key point** $M_c$、$\theta_c$、質量流量比 $\dot m_c/\dot m$ / ランプ初期角 $\theta_{r0}$ / カウル初期角 $\theta_{c0}$ / カウル長 $L_{\rm cowl}$。任意固定可 |
-| 目的 | $f_1=-C_T^{\rm design}$、$f_2=-\sum_k w_k C_T^{(k)}$ (オフデザイン束ね)、$f_3=C_M$ (または目標値との差)、$f_4=L_{\rm ramp}$ |
-| 制約 | 幾何包絡 (逆設計結果が超えたら INFEASIBLE)、最低 NPR 作動点で剥離位置 $x_{\rm sep}/L_{\rm ramp}\ge$ 許容値、$C_L$ 符号 (任意) |
+| dv ($d=5$) | **key point** $M_c$、質量流量比 $f=\dot m_c/\dot m$ / ランプ初期角 $\theta_{r0}$ / カウル初期角 $\theta_{c0}$ / カウル長 $L_{\rm cowl}$ (`driver_sern.DV_ORDER`)。$\theta_c$ は dv でなく kernel の場から決まる従属量 (`moc_sern.py` `design_ramp`)。任意固定可。**2026-09-13 (R6(d), codex M8 採用)**: 旧記述の 6 変数を実装に合わせて訂正 |
+| 目的 (2 個) | $f_1=-\sum_k w_k C_T^{(k)}$ (作動点束ねの推力効率。RANS では摩擦込み `C_T_with_shear`)、$f_2=L_{\rm ramp}/H$。**2026-09-13 (R6(d))**: 旧記述の 4 目的 ($-C_T^{\rm design}$ / $C_M$ を目的に含む) は実装 (`driver_sern`) と不一致だったので 2 目的に訂正。$C_M$ は目的でなく制約 (下行) |
+| 制約 | 幾何包絡 (`L_ramp_max` は probe でなく**最終輪郭**で再検査、超えたら INFEASIBLE/`L_RAMP_MAX`)、$C_M$ 窓 = 加重平均 `opt.cm_min/cm_max` と**作動点別** `opt.cm_window: {op: [lo, hi]}` (R6(d): 1 作動点のトリム不能を別作動点で相殺させない)、剥離は §8-6 で制約から外し `sep_frac_ramp` を台帳記録のみ |
 
 ### 4.3 平面最大推力理論と key point 逆設計 (S1 で導出・検証)
 
@@ -141,7 +141,10 @@ Argrow & Emanuel 1988, *J. Fluids Eng.* 110 283–288。
 
 既定は一様燃焼器出口。非一様入口 (`inflow.profile:` CSV) は S5 オプションで、初版は質量平均した
 一様状態を使い、非一様の影響は forge の入口分布 BC ([`boundary-inlet-profile.md`](../accepted/boundary-inlet-profile.md))
-で評価側だけに入れる。ガスは semi-perfect 凍結 (`gas.model: semiperfect`, `thermo_href_temp: 298.15` 必須)。
+で評価側だけに入れる。ガスは **`gas.model: frozen_tp`** (R3, 2026-09-13): 排気 = CEA (tp, station 3) の平衡組成を凍結した NASA-9 擬似種 `EXH`、
+外気 = 空気 `AIR` の 2 種 TP (`thermalMethod: 2`, `thermoHrefTemp: 298.15` 必須)。実体は `gas/frozen.py` (`FrozenGas`: cp/h/s, 等エントロピー膨張の
+理想推力) と `runner_sern.frozen_gases / gas_states / region_ic_arrays / ideal_thrust`。逆設計 kernel は設計点の凍結 γ(T3) の CPG (形状パラメータ化)。
+作動点 YAML は `cea/tmx_operating_points.py` が凍結音速の $M_{\rm in}$ と組成を出す (`'NO'` はクォート: YAML が bool に読む)。
 
 ### 4.6 δ\* 一発補正
 
@@ -173,8 +176,14 @@ C_T 0.9685 → 0.9685 (不変)、動くのは C_L 0.154 → 0.146 (Euler 0.143) 
 - 段階起動 (**3 段、2026-09-05 確定**): **層流暖機** (`turbulence: none` + 粘性あり、1 次、cfl 0.2、2000) →
   **SST soft** (1 次、cfl 0.2、2000) → **SST 本段** (2 次、cfl 0.5、6000)。`run_staged(warm_lam_steps=, warm_lam_cfl=, soft_cfl=)`、
   YAML は `opt.warm_lam_steps / warm_lam_cfl / soft_cfl` と `evaluate.cfl_main`。作動点間は warm restart (同一メッシュ = index コピー)。
-- ゲート: `check_convergence.py` PASS、`check_quasisteady.py --quantity` (力係数・剥離位置)。低 NPR の
-  RSS/FSS は `OSCILLATING` 前提 → 平均±振幅で報告し、振幅が閾値超なら `SUSPECT`。
+- ゲート (**R1, 2026-09-13 実装** `metrics/sern_gates.py`、§4.13): 互いに独立な必須ゲート = (1) forge `rc == 0`、(2) 最終 `res_*.h5` の
+  ro/roU/roe/P/T が有限かつ ro,P,T > 0・`res_nan_*.h5` 無し、(3) `check_convergence.analyze` で全残差列に NaN/Inf も末尾 rising も無い
+  (3 桁低下 PASS は `opt.require_residual_pass: 1` のときだけ必須 — 本ケースは 1–2.5 桁でプラトーする性格、その verdict は台帳に残す)、
+  (4) **実際に最適化する量** (RANS は `C_T_with_shear`) と $C_T, C_L, C_M$ が `check_quasisteady.classify_series` で `STEADY`
+  (`NONFINITE`/`DRIFTING`/`TRANSIENT-UNSETTLED`/`OSCILLATING` は不合格)。判定は正式ツールと同じ classify に一本化し、
+  `force_history.csv` を `check_quasisteady.py --series-csv <run>/force_history.csv --series-cols C_T_with_shear,C_L,C_M --drift 0.02 --osc 0.05`
+  で再判定できる (R6(b))。低 NPR の RSS/FSS 振動を採用するなら dual-time で時間刻み・統計窓の独立性を確認してから (R6(a)); 定常擬似時間の
+  `OSCILLATING` は「物理的振動」と解釈しない。
 - メトリクス: $C_T=F_x/(p_{\rm in}A_{\rm in}\gamma M_{\rm in}^2)$ 系の無次元 (実装時に $C_{T,\rm ideal}$ 正規化を選ぶ)、
   $C_L$、$C_M$ (基準点)、剥離位置。NASA 流の帳簿: ランプ + カウル内面 + カウル外面 (外部流側) を含め、
   制御体積を明示する。
@@ -239,6 +248,32 @@ $\gamma$ は CEA の平衡 GAMMAs。凍結 $\gamma$ にすると $M_3$ は 1〜3
 
 **生産構成 (既定)**: 設計点 = $M_\infty 6$ powered。作動点 = M6 powered ($w$ 0.5) / M10 powered (0.3) / M4 power-off (0.2)。
 `external` は自由流のまま。NPR 35.4 / 56.4 / 2.8 で設計点をまたぐ (過膨張〜不足膨張)。
+
+**R3 (2026-09-13, codex C2 採用) — 凍結組成 TP 版** (`problem_moo_frozen_tp_cycle3op.yaml`): 上表の $\gamma$ (平衡 GAMMAs) と CPG $c_p$ は
+音速合わせの代用だった。排気を CEA tp の平衡組成で**凍結**した擬似種にすると (`FrozenGas`, NASA-9):
+
+| 作動点 | 平衡 $\gamma$ / $c_p$ | 凍結 $\gamma(T_3)$ / $c_p(T_3)$ | $M_3$ (平衡 $a$) → (凍結 $a$) | 外部動圧 (旧 CPG → R3) |
+| --- | --- | --- | --- | --- |
+| m6_on | 1.1828 / 2202 | **1.2470 / 1719** | 1.6745 → **1.6308** | 60.7 kPa (−15.5 %) → **71.9 kPa** |
+| m10_on | 1.2263 / 2119 | **1.2549 / 1925** | 2.7486 → **2.7171** | 62.9 kPa (−12.4 %) → **71.9 kPa** |
+| m4_off | 1.3986 / 1007 | 1.3986 / 1007 (空気) | 2.9101 | 71.8 kPa → 71.9 kPa |
+
+凍結 $c_p$ は平衡値より 20–30 % 低い (反応寄与なし)。$V_3$ は TABLE 1 の値を保ち $M_3$ を凍結音速で取り直す (−2.6 %/−1.1 %)。
+設計点 γ が変わるので**同じ dv でも形状が変わる** (doe_001: $L_{\rm ramp}$ 11.89 → 10.64 H)。外気の動圧は 3 作動点とも 71.9 kPa (±0.1 %)。
+**起動の固さ**: frozen_tp は CPG 生産レシピ (暖機 cfl 0.2) だとランプ後縁ノード (EXH ∩ AIR 接触) で暖機 step 568 に T が Newton 床 50 K → NaN
+(run_0094)。暖機 cfl 0.1 × 4000 step を frozen の標準にする (`opt.warm_lam_cfl`)。本段 cfl 0.5 は通る (retry 実測)。多成分 implicit の roe/roY
+緩和ミスマッチ ([[wys-tp-divergence-is-cold-not-multispecies]]) の一形態で、ソルバ側の恒久対策は別 plan。
+**本段の長さ**: frozen の m10_on は本段 6000 では残差が step ~2300 の最小から末尾で 3–4 倍にリバウンド中 (R1 ゲートは正しく RESIDUAL_RISING、
+力係数は 5 桁で既に定常) で、12000 まで回すと 5–7e-5 で飽和して PASS (run_0096/0097)。**frozen 生産 YAML は `evaluate.nStepOuter: 12000`**。
+warm (m6_on から) / cold 標準 / cold 緩レシピの 3 経路で摩擦込み $C_T$ 0.93528 が 5 桁一致 = 状態は一意。
+**soft/mid 段も cfl 0.1**: run_0098 (本段 12000) では m10_on の warm 標準が mid 段 (2 次, cfl 0.2) step 1386 にランプ後縁 EXH∩AIR 接触で NaN
+(run_0095 は同レシピで通った = 限界状態)。frozen 生産 YAML は soft/mid/暖機とも cfl 0.1 × 4000 step (緩レシピは 3 回とも完走) + 本段 12000。
+1 評価 ≈ 8 分 (CPG 3 分)。
+**近壁の観察 (R3 固有でない、要フォロー = §5.1 R4b)**: (i) 上流区間 $x/H=-0.48$ のカウル板下面 (外気 M∞10 側) は壁 T 4570 K (断熱回復温度) の
+4–5 ノード外側に T が Newton 床 50 K・P 0.16 $p_\infty$ の冷点 (CPG も 116 K / 0.39 $p_\infty$)、排気側の板上面壁 T 4600 K も回復温度
+(~3000 K) を超える = node 壁列の T 市松 ([[node-wall-entropy-checkerboard]]) の極端例。(ii) 入口∩壁の角ノードで壁圧が 1.75 $p_{\rm in}$
+(ramp / cowl_in の $x=-0.5$)。`mesh.nodeInletCornerWall: 1` は SERN の変換に未適用 ([[node-inlet-wall-corner-conflict]])。どちらも $C_T$ には
+効かない (水平壁) が $C_L, C_M$ と近壁の乱流量に効く。
 
 **サイクル計算の位置づけ**: 表は 3 飛行点しかないので、$\bar q_\infty$ や $\phi$ を変える・$M_\infty$ を刻むには
 1D サイクル (定動圧経路 → インレット全圧回復 → Rayleigh 加熱 → station 3) が要る。ただし
@@ -359,7 +394,7 @@ S0→S1 は CFD 不要で先行できる。S2–S3 は S1 と並行可 (固定�
   | `p_min` 20 → 60 Pa (run_0084) | **同じ step 48・同じ 22 ノード** → 圧力床は無関係 (2D の m10_on とは別機構) |
   | リミッタ Venkatakrishnan → Barth (run_0085) | step 34 に**悪化** → リミッタでもない |
   | カウル板厚 0.005 (run_0087) | step 48 → 57。z 一様に効かせた版 (run_0086) は側壁スリットの内外ずれで暖機段 step 4 発散 |
-  | mid 段 CFL 0.2 → 0.1 (run_0088) | step 57 → 109 = **ほぼ倍 = 同じ物理時刻** → CFL はつまみでない |
+  | mid 段 CFL 0.2 → 0.1 (run_0088) | step 57 → 109 = ほぼ倍 ~~= 同じ物理時刻~~ → CFL はつまみでない。**撤回 (2026-09-13, R6(a), codex M4)**: 定常局所時間刻み (`unsteady: 0`) の step 数は物理時刻でない。「破綻までの擬似時間積分量が同じ」と読み替える |
   残る手は幾何: 板厚法則は TE で 0 に絞るので刃先の半角が **0.6°** しかない。2D では同じ刃先が持つので、
   効いているのは**側端との近接**。→ **カウル後縁を有限ベース (鈍頭) にする** (2D のランプ角部丸めと同じ、
   特異点を幾何で消す手当て)。base 面の追加が要るのでメッシャ側の作業。
@@ -371,12 +406,13 @@ S0→S1 は CFD 不要で先行できる。S2–S3 は S1 と並行可 (固定�
 
 | # | 項目 | 内容 |
 | --- | --- | --- |
-| R1 | **評価ゲート修復** (codex C1 採用): 発散評価の採用を撤回 (§4.13-3 廃止)、`steadiness` の NaN→`STEADY` バグ修正、保存場の有限値・全残差・**実際に最適化する量 (`C_T_with_shear`)** の定常性を独立した必須ゲートに、`degraded` を `pareto.json` にも残す、数値失敗を物理的 `INFEASIBLE` と混同しない | `design/forge_design/metrics/sern_forces.py` (`steadiness` L108: `[1,1,1,NaN]` が STEADY を返す = 再現済)、`opt/driver_sern.py` (採用条件 L118 / 書き出し L139, L204)。accepted `tooling-nozzle-moo-loop.md` L33 (ゲート不合格は学習対象外) と揃える |
-| R2 | **力の集計範囲の分離** (codex M5 採用): ノズル力と機体力をタグ・積分とも分離、幅外の機体下面を `Z_ext` (遠方境界位置) から独立させ物理的な機体幅で定義、閉じた制御体積の運動量収支で検算 | `evaluate/runner_sern3d.py` L197 (幅外機体下面を総推力に加算)、`meshing/mesh_sern3d.py` L186 (`ramp` を領域端まで生成)。run_0027 vs 0029 の $C_T$ −4.5 % は幅外寄与 (−0.0253) を除くと −1.9 % (codex 検算、両 run とも NOT CONVERGED なので要再計算) |
-| R3 | **作動点の凍結 TP 化 + 外気 = 空気** (codex C2 採用 = §8-7 の (c)): `runner_sern.py` L80 の `gas_states` を排気 (CEA 凍結組成の多成分 TP) と外気 (空気) に分離し、入口状態・エネルギー・理想推力の正規化も同じ物性で計算 | 既存 accepted `thermophysics-multicomponent-tpgas.md` を再利用 (有限速度化学は不要)。現行 CPG は外部動圧が m6_on −15.5 % / m10_on −12.4 % (§8-7 の「M6 は 0.1 %」は音速だけの話で密度は −15.7 %)。`case/46/cea/tmx_operating_points.py` L60 の平衡 `GAMMAs`→CPG `cp` (2202 vs CEA 平衡 2551 J/kg/K) は音速合わせの代用と明記 |
-| R4 | **2D/3D 外部領域と格子・領域独立性** (codex M6 採用): 3D メッシャにランプ後縁以降の上側外部領域 (2D の `ext_top` 相当) を追加、固定した機体形状で遠方境界・出口距離・格子の感度を確認、メッシュ品質 PASS と領域独立性を別ゲートに | `meshing/mesh_sern3d.py` L192 (`top_out` で閉じている)。§4.11 の「作動点の性質なので形状によらず剥離しない」は 2 形状の一般化なので「設計箱全域」の根拠には使わない (剥離制約を外す判断 §8-6 は維持) |
+| R1 | ~~**評価ゲート修復**~~ **完了 (2026-09-13, §4.7/§4.13, case/46 run_0090 再判定・run_0091 実機スモーク)** (codex C1 採用): 発散評価の採用を撤回 (§4.13-3 廃止)、`steadiness` の NaN→`STEADY` バグ修正、保存場の有限値・全残差・**実際に最適化する量 (`C_T_with_shear`)** の定常性を独立した必須ゲートに、`degraded` を `pareto.json` にも残す、数値失敗を物理的 `INFEASIBLE` と混同しない | `design/forge_design/metrics/sern_forces.py` (`steadiness` L108: `[1,1,1,NaN]` が STEADY を返す = 再現済)、`opt/driver_sern.py` (採用条件 L118 / 書き出し L139, L204)。accepted `tooling-nozzle-moo-loop.md` L33 (ゲート不合格は学習対象外) と揃える |
+| R2 | ~~**力の集計範囲の分離**~~ **完了 (2026-09-13)** (codex M5 採用): メッシャ `vehicle` タグ (W/2 < z ≤ W_vehicle/2、外は top_out)、`forces3d` の $C_T,C_L,C_M$ はノズル面のみ・機体力は別枠 (`mesh3d.W_vehicle` で `Z_ext` から独立)、`metrics/sern_momentum.py` で BCONDS 全面の運動量収支を検算 (2D 閉じ残差 0.1–1 %, 3D 1.6 % of $F_{\rm ideal}$; 壁力は帳簿と 1e-5 [no-slip] / 0.1 % [slip 弱 BC] 一致)。再計算 run_0092 (3D, 6000 step) / run_0093 (2D, 8000 step): **ノズル $C_T$ 3D/2D = −1.9 %** (run_0027 再集計と同値 = タグ分離は帳簿だけを変える)、$C_L$ −0.10 vs 0.00、$C_M$ +0.72 vs 0.00 (§6)。3D の frozen_tp 配管 (bcond Y・IC・species_db) は書いたが未実走 | `mesh_sern3d.py` / `runner_sern3d.py` / `tests/run_sern_mesh3d_tests.py` (閉性・タグ分割 20 項目) |
+| R3 | ~~**作動点の凍結 TP 化 + 外気 = 空気**~~ **完了 (2026-09-13, §4.5/§4.10)** (codex C2 採用 = §8-7 の (c)): `gas.model: frozen_tp` (排気 EXH = CEA 凍結組成の擬似種, 外気 AIR, thermalMethod 2)、`gas/frozen.py` (NASA-9 に H2/OH/H/NO/O/CO 追加, `FrozenGas`, 等エントロピー理想推力)、`gas_states` を排気/外気で分離、IC/BC/理想推力を同一物性で。外部動圧 3 作動点とも 71.9 kPa。検証: 単体 `run_sern_frozen_gas_tests.py` 40 項目 (NIST N2, 空気 R/γ/a, Ar で CPG 一致, MW = CEA 24.430, IC の T 反転厳密, q∞) + 実機 run_0094/0095 (§10)。**残**: 3D 実走、暖機 cfl 0.1 が全 dv 箱で足りるかは MOO 再取得 (R7) で確認、ソルバ側の多成分 implicit 安定化は別 plan | `case/46/problem_moo_frozen_tp_cycle3op.yaml` (生産), `cea/tmx_operating_points.py` |
+| R4 | **2D/3D 外部領域と格子・領域独立性** (codex M6 採用) — **実装済 (2026-09-13)**: `mesh_sern3d` に `ext_top` (2D の機体上面テーパ + 自由流バンドを z 一様に押し出し, タグ `vehicle_top`)、`ramp_fillet`、`underside_far` を追加 (閉性・タグのテスト 30 項目)。領域独立性は `r4_domain_study.py` (case/46 run_0102: base / Z_ext 3 / x_out 4 / bot_depth 1.5 / top_depth 4 / 格子 1.25 倍, 3D Euler 加速点) — 結果は §10: 3D メッシャにランプ後縁以降の上側外部領域 (2D の `ext_top` 相当) を追加、固定した機体形状で遠方境界・出口距離・格子の感度を確認、メッシュ品質 PASS と領域独立性を別ゲートに | `meshing/mesh_sern3d.py` L192 (`top_out` で閉じている)。§4.11 の「作動点の性質なので形状によらず剥離しない」は 2 形状の一般化なので「設計箱全域」の根拠には使わない (剥離制約を外す判断 §8-6 は維持) |
+| R4b | **近壁の 2 点を片付ける** (2026-09-13 起票, R3 の実機で顕在化): (i) ~~入口∩壁角の壁圧 1.75 $p_{\rm in}$ → SERN の変換で `mesh.nodeInletCornerWall: 1` を有効にし $C_L/C_M$ の差を測る~~ **測定済・却下 (2026-09-13, run_0100/0101)**: 角ノードは 1.39 → 0.91 $p_{\rm in}$ になるが上流ダクト壁全体が 0.88–0.96 $p_{\rm in}$ に沈む (無しは 1.005)、$C_T$ −0.3 %、m10_on は暖機で NaN。既定 0 のまま (`mesh.node_inlet_corner_wall` は配管だけ残す)。角 1 ノードの 1.39 $p_{\rm in}$ は水平壁なので $C_T$ に効かず、$C_L/C_M$ への寄与は 1 ノード分 (<0.1 %)、(ii) ~~M∞10 外気側カウル板下面の冷点 (T 床 50 K) と壁 T の回復温度超え → 壁の熱境界 (`spec.wall_thermal` 等温) か node 壁列の処方を決める~~ **決着 (2026-09-13, run_0103): 等温壁 1000 K を生産既定に** (残差 3.5 桁低下 = 断熱の 100 倍改善、T max 2320 K、冷点 143 K に緩和; 摩擦込み $C_T$ −0.4 %, $C_M$ +0.11)。残る冷点はカウル板 LE が入口面に露出する上流延長の産物 (水平壁で $C_T$ 不変)。Tw の値は §8-11 でユーザ確認 | §4.10 末尾の観察。`nodeInletCornerWall` は converter オプション |
 | R5 | **3D SST を現行バイナリで再現** (codex M3 採用): 「解決済 (run_0082)」を**撤回**し状態を「加速点で完走、生産点は未成立」に戻す。バイナリ・実効設定を固定して生産 3 作動点を同一幾何で再試験、`L_sw` 分離・鈍頭化はその後の比較対象。通らなければソルバ修正を別 plan 化 | run_0082 NOT CONVERGED (stalled, 終端 `rms_roOmega` 7.6e16 = 完走の証拠であって収束ではない)、run_0083/0084/0087/0088 DIVERGED (`check_convergence.py` 再確認済)。9/8 の SST 既定 (`solverConfig.hpp` L202) と `scalarTransport_d.cu` L104 の相対ガード変更後なので 9/6 の結果から現行の限界は言えない |
-| R6 | **検証・問題定義の整合** (codex M4/M7/M8/M9 採用): (a) 定常擬似時間の履歴を物理時間と解釈しない (§4.11 の「CFL 半減で破綻 step 倍 = 同じ物理時刻」と §4.7 の RSS/FSS 統計は撤回。振動を採用するなら dual-time で時間刻み・内部反復・統計窓の独立性を確認、P 床到達は診断指標)、(b) `check_quasisteady.py --quantity C_T,C_L,C_M` を接続し `steadiness` と判定器を一本化、(c) Rao 検証は同一ガス・作動点・長さ拘束で独立に行い Shyne 式 11–15 との対応を assert 付きで (`run_sern_moc_tests.py` L117 の掃引は assert なし)、§4.3 の「Pareto 端点に Rao 点が出なければ実装誤り」は撤回、格子・領域誤差の許容 (例 $\|\Delta C_T\| < 0.002$) を明記、(d) 問題定義を **5 変数・推力効率と長さの 2 目的**と明文化 (§4.2 の 6 変数・4 目的は `driver_sern.py` L33 と不一致、`theta_c` は `moc_sern.py` L387 で場から決まる)、$C_M$ は加重平均でなく作動点別の許容窓、`L_ramp_max` を最終輪郭で再検査 (§5.1-8b と統合)、(e) 「3D 最適化には MOC への帰還が必須」(§8-10-4) は撤回: MOC は形状パラメータ化として維持し、3D 評価器の成立後に `L_sw` を足した小規模探索で改善を測る。帰還は既存族の不足を実測してから別 plan | `methods/design/overview.md` L799 (無帰還・3D 確認) と本 plan を一致させる |
+| R6 | **検証・問題定義の整合** (codex M4/M7/M8/M9 採用) — **(a) 完了** (§4.11 の「同じ物理時刻」を撤回・§4.7 で擬似時間の OSCILLATING を物理振動と解釈しないと明記; 2026-09-13)、**(c) 完了** (`run_sern_moc_tests.py` 6b: 縁条件残差 0 の点が等長拘束の下で C_T 最大であることを assert 付きで検算)、**(e) 完了** (§8-10 で帰還必須論を撤回済、§5.1-4 は L_sw を足した小規模探索を先にする記述)、**(b) 完了** (`check_quasisteady.py --series-csv` + `force_history.csv`、判定器一本化)、**(d) 一部完了** (§4.2 を 5 変数・2 目的に訂正、作動点別 C_M 窓 `opt.cm_window`、`L_ramp_max` 最終輪郭再検査 = §5.1-8b 決着)。残 = (a)(c)(e) と (d) の許容値明記: (a) 定常擬似時間の履歴を物理時間と解釈しない (§4.11 の「CFL 半減で破綻 step 倍 = 同じ物理時刻」と §4.7 の RSS/FSS 統計は撤回。振動を採用するなら dual-time で時間刻み・内部反復・統計窓の独立性を確認、P 床到達は診断指標)、(b) `check_quasisteady.py --quantity C_T,C_L,C_M` を接続し `steadiness` と判定器を一本化、(c) Rao 検証は同一ガス・作動点・長さ拘束で独立に行い Shyne 式 11–15 との対応を assert 付きで (`run_sern_moc_tests.py` L117 の掃引は assert なし)、§4.3 の「Pareto 端点に Rao 点が出なければ実装誤り」は撤回、格子・領域誤差の許容 (例 $\|\Delta C_T\| < 0.002$) を明記、(d) 問題定義を **5 変数・推力効率と長さの 2 目的**と明文化 (§4.2 の 6 変数・4 目的は `driver_sern.py` L33 と不一致、`theta_c` は `moc_sern.py` L387 で場から決まる)、$C_M$ は加重平均でなく作動点別の許容窓、`L_ramp_max` を最終輪郭で再検査 (§5.1-8b と統合)、(e) 「3D 最適化には MOC への帰還が必須」(§8-10-4) は撤回: MOC は形状パラメータ化として維持し、3D 評価器の成立後に `L_sw` を足した小規模探索で改善を測る。帰還は既存族の不足を実測してから別 plan | `methods/design/overview.md` L799 (無帰還・3D 確認) と本 plan を一致させる |
 | R7 | **小規模探索で判別能力を確認してから MOO 再取得** | R1–R6 の後。#1 の run_0054 系は R1 のゲートで再判定 (発散評価を含む Pareto は使わない)。早期停止 (#1c) は R7 の後 |
 | 1 | ~~作動点のサイクル値化~~ **実装・検証済 (2026-09-05, §10)**。残 = **MOO の再取得** (第 1 回 run_0040 は起動不安定で破棄、確定レシピ §4.12 で run_0054 を投入済)。**2026-09-09: R7 に従属 (R1–R6 が先)** | `problem_moo_sst_node_cycle3op.yaml` (ext_top・板厚 2e-3・cm_min −7.0)。前提の §4.11 / 1b / §8-6 は全て決着。run_0019 の結論は非物理な作動点が駆動したので破棄 |
 | 1c | ~~warm start が plan と実装で食い違っている~~ **実装・検証済 (2026-09-06)**。残 = 本段の早期停止 | §4.7 は「作動点間は warm restart (同一メッシュ = index コピー)」と書いているが、`driver_sern._eval_op` は **3 作動点それぞれを一様 IC から 4 段梯子で立ち上げている**。1 評価 = 3 × 12000 step。案: (A) op 間 warm start (同一メッシュなので `restart_by_index` が使える。ただし NPR が 35.4 ↔ 2.8 と 12 倍違うので相似スケーリングが要る、順序は NPR の近い順)、(B) 本段 CFL を固定 0.5 から風洞チェーン (`runner_axismach.run_staged_ns` の `stages="ramp"`) 方式の段階昇圧へ (風洞は cfl_main 2.0–3.5 に到達している)、(C) 候補間 seeding は `interp_field` の座標一致ノード問題があるので後回し。**codex レビュー反映済**: (A) は素の index コピーが熱力学的に非互換 (同じ roe を別 γ で読むと圧力が (γ_dst−1)/(γ_src−1) 倍ずれる。m6→m10 で 1.24 倍、→m4_off で 2.18 倍) → **相似リマップ + 適応段**の A′ に変更し `warm_from_run` として実装。m10_on のみ m6_on から (NPR 35.4→56.4)、m4_off (2.8) は cold のまま。2 形状で cold と C_T が 5 桁一致・**27–28 % 短縮** (run_0072/0073)。(B) の CFL ランプは**撤回** — 風洞の ramp は「収束済み場から同条件へ restart」の文脈で効くもので、case/45 run_0027 の A/B で **warm start では利得なし**と実測されている。短縮の残りは**本段 (6000 step) を力係数の定常判定で早期停止**するほうが効く |
@@ -388,7 +424,7 @@ S0→S1 は CFD 不要で先行できる。S2–S3 は S1 と並行可 (固定�
 | 6 | カウル輪郭の設計 | 今は直線固定 (Lv & Xu 2021 はカウルにも最適化理論) |
 | 7 | 音速給気のスロート接続 (`sonic_throat`) | §4.10-3 より**対象は $M_\infty 4$ powered のみ**。Hall + kernel MOC で $M$ 1.3–1.5 まで対称内部ノズル |
 | 8 | 非一様入口 (回転流 MOC)・凍結 $\gamma$ → 有限速度化学 | 入口分布 BC は評価側に既にある |
-| 8b | `L_ramp_max` が probe と設計で不一致 | 成立性判定 (`_design_probe`) は粗い kernel (`nj_moc_probe` 151, `dx` 4e-3)、実際の設計は細かい kernel (301, 2e-3) を使うため、probe が 19.9 と判定した点が設計で 20.14 になる (run_0071 doe_014)。上限を ~1 % 超える点が通る。probe を細かくするか判定に余裕を持たせる |
+| 8b | ~~`L_ramp_max` が probe と設計で不一致~~ **決着 (2026-09-13, R6(d))**: 最終輪郭で再検査 (`driver_sern._check_design`, 許容 `opt.l_ramp_tol`) | 成立性判定 (`_design_probe`) は粗い kernel (`nj_moc_probe` 151, `dx` 4e-3)、実際の設計は細かい kernel (301, 2e-3) を使うため、probe が 19.9 と判定した点が設計で 20.14 になる (run_0071 doe_014)。上限を ~1 % 超える点が通る。probe を細かくするか判定に余裕を持たせる |
 | 2b | **m10_on の発散を止める (最優先の技術課題)**。上面線は **後縁接線 Hermite + くさび 3°** に作り替える (§4.11、曲率 1.02 → 0.16)。テーパ開始 0.65 L に根拠が無い件も同時に解消 | §4.11 の真因 (P 床 → 負密度 → ω) に対し `implicitRelax` は無効と判明。次に試す順: (a) `pMin` を p∞ の数 % (50 Pa) へ — **未測定**、(b) リミッタを Barth に / mid 段を 1 次に留める、(c) 機体上面の第一セル細分化、(d) 後端を**丸めた肩 + 有限ベース**に作り替える (ナイフエッジと 90° 角の両方を避ける)。`evaluate.implicit_relax` / `evaluate.p_min` は配管済み (commit 9a53bb9a) |
 | 9 | CFD 領域の縮小 | `mesh.bot_depth` 3H → 超音速外部流なら 1H 程度 |
 | 10 | **Shyne の式 11–15 と突き合わせ、厳密 Rao 最適の位置を確かめる** | まず NASA TM-100955 / TM-103175 (§4.3) の平面版乗数条件と `rao_planar` を照合する。次に `rao_planar.lip_residual` ($\theta_c-\theta_{\rm lip}$、0 が Rao 最適) は今は診断値で、dv には課していない。残差 0 になる $(M_c,f)$ を箱の中で求め、**MOO のパレートがその点を含むか**を見る。理論の最適点は推力側の端点として出てくるはずで、出てこなければ平面縮約か実装のどこかが違うという判定になる (§4.3 の依拠箇所の検算) |
@@ -411,6 +447,9 @@ S0→S1 は CFD 不要で先行できる。S2–S3 は S1 と並行可 (固定�
   したがって「2D 設計 + 3D 確認」では閉じず、§5.1-4 の手当てが要る。
   → **2026-09-09 (codex M5 採用)**: この −4.5 % には幅外の機体下面の集計が混入している (除くと −1.9 %)。
   両 run とも NOT CONVERGED なので 2 % 判定は §5.1 R2 (集計分離) と R5 の後に再計算する。
+  → **2026-09-13 (R2 完了後の再計算, Euler)**: run_0092 (3D, `vehicle` タグ, 6000 step) vs run_0093 (2D, 8000 step)、両 run とも力係数 STEADY・
+  残差 2.4–3.2 桁でプラトー (NOT CONVERGED stalled)。**ノズル $C_T$ 0.9578 vs 0.9762 = −1.9 %** (2 % 内)、$C_L$ −0.100 vs +0.004、$C_M$ +0.72 vs −0.00。
+  推力は「2D 設計 + 3D 確認」で足りるが揚力・モーメントは 3D 効果が支配的 = 3D 補正表が要る。SST での判定は R5 の後。
 
 ### 6.1 レビュー記録 (codex)
 
@@ -461,15 +500,20 @@ dv 箱を動かすと**作動点 × 形状の組み合わせごとに固い場�
 発散・物性誤差が設計性能として取り込まれていた。発散・非有限値を含む評価はサロゲート学習と Pareto から除外し、
 保存場の有限値・全残差・実目的量 (`C_T_with_shear`) の定常性を独立ゲートにする。以下の `degraded` の記述は R1 で置換される。
 
-**`degraded` の扱い (旧)**: パレート上の点が `degraded` なら、その点は**採用前に単独で回し直して確認する**。
-台帳と `pareto.json` に必ず残すこと (「収束した」とは呼ばない)。残差は元々このケースでプラトーなので、
-収束判定は力係数の `steadiness` が正本 (§4.7)。
+**R1 実装 (2026-09-13)**: 採用条件は **`rc == 0` かつ §4.7 の 4 ゲート全 PASS** のみ (`driver_sern._eval_op`)。標準レシピがゲート不合格なら
+緩レシピで 1 回再試行し、それで通れば `degraded: true` (= 再試行で通った評価) を**台帳と `pareto.json` の両方**に残す。
+分類: `INFEASIBLE` (物理: `DESIGN` 逆設計不成立 / `L_RAMP_MAX` 最終輪郭超過 / `CM_WINDOW`) と `FAIL` (数値: `DIVERGED` / `RESIDUAL_RISING` /
+`NOT_CONVERGED` / `UNSTEADY` / `NO_FORCES` / `ERROR`) を分け、いずれもサロゲート学習・Pareto から外す。既存キャンペーンは
+`driver_sern --rejudge <out>` で CFD を回さず再判定できる (元 run は読むだけ)。**旧 `steadiness` の NaN→STEADY は再現・修正済**
+(`[1,1,1,NaN]` → `NONFINITE`、テスト `design/tests/run_sern_gates_tests.py`)。なお handover の「node の `rms_roOmega` が本段で 3e18 一定
+(壁ノードピン留めの診断値)」は現行バイナリでは解消している (`nodeWallDirichlet_d.cu` が Dirichlet ノード残差を除外; run_0069 の m4_off は
+1e1 台で推移)。run_0069 doe_014 m4_off の 5.3e18 は step 5461 からの**本物の ω 発散**で、力係数が STEADY のまま起きた = 旧ゲートの穴。
 
 ## 8. 未確定事項 (ユーザ確認)
 
 1. ~~**入口の既定**~~ **決着 (2026-09-05, §4.10-3)**: 超音速給気 (燃焼器出口 $M_{\rm in}$ 指定) を既定で続ける。TM X-71972 の作動点では音速スロートが要るのは $M_\infty 4$ powered ($M_3 = 1.12$、ラムジェット) の 1 点だけで、残り 5 点は $M_3 \ge 1.67$ の超音速。`sonic_throat` は §5.1-7 に後回しでよい。
 2. ~~**作動点セット**~~ **決着 (2026-09-05, §4.10)**: NASA TM X-71972 TABLE 1 (定動圧 1500 psf 経路) をアンカーにサイクル値で定義する。既定 = 設計点 $M_\infty 6$ powered、作動点 M6 powered ($w$ 0.5) / M10 powered (0.3) / M4 power-off (0.2)。低 NPR は「低速飛行」ではなく「燃料遮断」で作る。
-3. **モーメント基準点と目標**: $C_M$ を最小化するのか目標値に合わせるのか。
+3. **モーメント基準点と目標**: $C_M$ を最小化するのか目標値に合わせるのか。**部分決着 (2026-09-13, R6(d))**: 目的には入れず制約 (加重平均窓 + 作動点別窓 `opt.cm_window`) とする。許容値の根拠 (トリム能力) は案件で決める。
 4. **隅 R・側壁**: S7 で spec として評価するだけ。設計変数にするかは S7 の結果で判断。
 5. **外部流を設計段階に入れるか**: 入れない (NASA 流) を既定。
 6. ~~**剥離が出る作動点をセットに入れるか**~~ **決着 (2026-09-05, ユーザ判断): (b) 入れない**。TM X-71972 の 3 作動点で
@@ -531,6 +575,11 @@ dv 箱を動かすと**作動点 × 形状の組み合わせごとに固い場�
     **決着 (2026-09-09, codex レビュー採用 → §5.1 R1–R7)**: 順序は「評価器の成立確認 (ゲート・集計・物性・領域・3D SST 再現)
     → 小規模探索 → MOO 再取得」に組み替えた。上の 4. (MOC への帰還必須) は撤回 (R6(e))。
 
+11. **壁の熱境界 (2026-09-13 決定・要ユーザ確認)**: 生産 YAML (`problem_moo_frozen_tp_cycle3op.yaml`) の既定を **等温壁 $T_w$ = 1000 K** にした。根拠: 断熱だと M∞10 の外気側カウル板下面が
+    回復温度 4600 K (実機では成立しない) になり、node 壁列の T 市松で隣接ノードが T 床 50 K に落ちて残差が 5e-5 でプラトーする (run_0095–0099)。
+    等温 1000 K では残差が 3.5 桁落ち (run_0103)、摩擦込み $C_T$ は −0.4 % (摩擦 +30 %)、$C_M$ +0.11。$T_w$ = 1000 K は冷却構造の代表値として置いた暫定値で、
+    案件の壁温 (材料・冷却) が決まれば差し替える。作動点ごとに $T_w$ を変える必要があれば `operating_points[].wall_thermal` を追加する (未実装)。
+
 ## 9. 完了条件
 
 - [ ] `methods/design/overview.md` の SERN 節を実装と同期
@@ -539,6 +588,34 @@ dv 箱を動かすと**作動点 × 形状の組み合わせごとに固い場�
 - [ ] `status: done` にして §10 に変更ログ、`plans/accepted/` へ移動、`plans/README.md` 同期
 
 ## 10. 変更ログ
+
+- `2026-09-13` — **R2 完了・R3 実装** (§4.5/§4.10/§5.1)。R2: `mesh_sern3d` に `vehicle` タグ + `W_vehicle`、`forces3d` はノズル面のみ (vehicle 別枠)、
+  `metrics/sern_momentum.py` (BCONDS の運動量収支; 2D 閉じ残差 0.1 % [Euler] / 1.1 % [SST], 3D 1.6 %; 壁力の帳簿一致)、run_0092/0093 で
+  3D/2D ノズル $C_T$ −1.9 % (§6)。R3: `gas/frozen.py` + `runner_sern` の frozen_tp 配管 (擬似種 EXH/AIR, thermoHrefTemp 298.15, IC の roe を同じ datum で、
+  理想推力は凍結等エントロピー膨張)、`tmx_operating_points.py` が組成と凍結 $M_3$ を出力、生産 YAML `problem_moo_frozen_tp_cycle3op.yaml`。
+  単体 40 項目 ALL PASS (Ar で CPG 一致・MW = CEA・q∞ 71.9 kPa)。実機 run_0094 (doe_001 dv): m6_on は CPG 生産レシピ (暖機 cfl 0.2) で
+  ランプ後縁ノードの EXH∩AIR 接触で暖機 step 568 に NaN → 緩レシピで完走 GATES PASS ($C_T(p)$ 0.9520 = MOC 0.9470 +0.5 %, 摩擦込み 0.9447,
+  $C_M$ −5.11)。m10_on は `warm_from_run` frozen 経路のバグ (作動点未適用の YAML から組成) → 修正。frozen の標準レシピは暖機 cfl 0.1 × 4000
+  (run_0095 で 3 作動点を再実行、結果は下)。
+- `2026-09-13` — **R3 の実機確認 (run_0095–0099)**: m6_on は暖機 cfl 0.1 で標準レシピ PASS (摩擦込み $C_T$ 0.9447, $C_M$ −5.11)。m10_on は本段 6000 では
+  RESIDUAL_RISING (残差が最小から 3–4 倍にリバウンド中、力係数は定常) → 12000 で飽和して PASS (run_0097, 0.93528; warm/cold/緩の 3 経路で 5 桁一致)。
+  run_0098 (本段 12000, 3 作動点): PASS (degraded) $C_{T,w}$ 0.9415 / $C_{M,w}$ −3.00; m10_on warm 標準は mid 段 cfl 0.2 で NaN (限界状態) →
+  frozen 生産レシピを soft/mid/暖機 cfl 0.1 × 4000 + 本段 12000 に確定 (**run_0099: retry 無しで 3 作動点 PASS**, $C_{T,w}$ 0.94152, 463 s/評価)。m4_off 0.9430 / $C_M$ +2.96。近壁の 2 観察 (入口∩壁角 1.75 $p_{\rm in}$、
+  M∞10 板下面の冷点) は §5.1 R4b に起票。R3 の**設計への影響**: 凍結 γ 1.247 / $M_{\rm in}$ 1.631 で同じ dv の形状が変わる (doe_001: $L_{\rm ramp}$ 11.89 → 10.64 H)
+  ので、run_0069 系の CPG 台帳と frozen 台帳は形状も違う = 比較不可、MOO は frozen YAML で再取得 (R7)。
+
+- `2026-09-13` — **R1 評価ゲート修復を実装・検証** (§4.7/§4.13, codex C1 採用): `metrics/sern_gates.py` (rc / 保存場有限・正値 / 全残差 NaN・rising /
+  実目的量 + $C_T,C_L,C_M$ の STEADY を独立ゲート化)、`sern_forces.steadiness` を正式ツール `check_quasisteady.classify_series` に委譲
+  (NaN→STEADY バグ修正、`NONFINITE` 語彙を追加)、`check_quasisteady.py --series-csv/--series-cols` (CSV 系列モード) と `force_history.csv`
+  (R6(b))、`driver_sern` は発散評価の採用 (旧 §4.13-3) を撤回し PASS/INFEASIBLE/FAIL + fail_class に分類、`degraded` を `pareto.json` にも保存、
+  `--rejudge` で既存キャンペーンを CFD 無しで再判定、`L_ramp_max` を最終輪郭で再検査、作動点別 C_M 窓 `opt.cm_window` (R6(d))。
+  R2 の集計側: `forces3d` をノズル力 / 機体力に分離 (`mesh3d.W_vehicle`)。単体テスト `design/tests/run_sern_gates_tests.py` 62 項目 ALL PASS、
+  既存 `run_sern_moc_tests` 19 / `run_sern_mesh_tests` 29 ALL PASS。**再判定** (`case/46/run_0090_rejudge_r1_gates/`): run_0069 は
+  PASS 14 → **10** (HV 2.6835 → 2.6450): 除外 4 件 = 残差 rising 3 (doe_004/015 m6_on は本段末尾で $\rho,\rho u,\rho e$ 残差が 2 倍リバウンド、
+  doe_014 m4_off は step 5461 から $\rho\omega$ 残差 1e1 → 5e18 の**本物の発散**、いずれも力係数は STEADY だった) + $C_M$ TRANSIENT-UNSETTLED 1 (doe_016);
+  run_0054 は変わらず 1/1 DIVERGED。3D run_0027 再集計はノズル 0.9578 / 機体 −0.0253 / 総計 0.9325 で codex 検算と一致 (2D 0.9762 比 −1.9 %、両 run とも
+  NOT CONVERGED のまま = 2 % 判定は R5 の後)。実機スモーク run_0091 (run_0069 doe_001 の再評価、現行 driver): 結果は case README。
+  **未実施**: R2 のメッシャタグ分離・運動量収支、R3–R5、R6(a)(c)(e)。
 
 - `2026-09-09` — codex plan 段レビュー (NO-GO, C2/M7) を §6.1 に記録し、**全件採用 (ユーザ決定)**: §5.1 を R1–R7 (評価ゲート修復 / 力の集計分離 / 凍結 TP 化 + 外気空気 / 外部領域と領域独立性 / 3D SST 再現 / 検証・問題定義の整合 / 小規模探索後に MOO) に組み替え、§4.13-3 (発散評価の採用) 撤回、§5.1-3 「3D SST 解決」撤回、§8-7 は (c)、§8-10 は帰還必須論を撤回して決着。
 

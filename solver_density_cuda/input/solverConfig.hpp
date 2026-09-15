@@ -432,6 +432,11 @@ public:
     int    condEvaporation = 1;   // 1: S<=1 で蒸発 (既定, 2026-08-18 検証後に既定化), 0: 蒸発なし (旧挙動, dr/dt<0 を 0 クランプ)
     double condEvapRmin    = 1.0e-9; // 完全蒸発 (4 モーメント 0 化) とみなす体積平均半径 r30 [m]。r30<2*rmin で消滅
     int    condEvapKelvin  = 0;   // 蒸発駆動力に Kelvin 項 p_d=p_sat exp(K_e/r) を含める (0: 平面 p_sat, 既定; 正帰還回避)
+    // ソース律速 (plans/active/condensation-source-limiter-steady.md): 旧実装は 1 擬似ステップの Δg/潜熱 ΔT 上限から作る θ を
+    // 定常残差のソースに掛けていたため、収束解が Δτ_loc (cfl_pseudo・セル体積) に依存した (case/44 で成長 1/4)。
+    int    condLimiterMode = 1;      // 1: θ は更新量 Δ(ρφ) のクランプのみ (残差は Δτ 非依存の瞬間速度; 既定), 0: 旧 (残差に θ; A/B 用)
+    double condDgMaxStep   = 5.0e-3; // 1 更新あたりの |Δg| 上限 (質量分率)
+    double condDTmaxStep   = 1.0;    // 1 更新あたりの潜熱 |ΔT| 上限 [K]
     // 平衡凝縮 (plans/accepted/condensation-equilibrium.md): 核生成・成長を経ず各セルで p_v=p_sat(T) の g_eq へ緩和。
     int    condEquilibrium = 0;   // 0: 非平衡 (既定) / 1: 平衡凝縮・緩和形 (ソース S_g=αρΔ/dt, モーメント Q0-Q2 ソース 0)
                                   // / 2: 平衡凝縮・EOS 拘束形 (dependentVariables で (T,g) 同時反転し rog へ射影、rog 輸送は凍結;

@@ -115,7 +115,11 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 - 種 DB は `forge_design.gas.semiperfect.mixture_pseudo_species_split` (乾き空気を擬似種 MIXDRY にまとめ H2O を残す)。
 - TP 陰解法の `cfl_pseudo` は 0.5〜2 から上げる (H2O 生成エンタルピーの増幅で上限が低い)。
   定常 precond × 多成分は `speciesPrecondDt: 1` (既定)。TP 亜音速 `outlet_statPress` の γ 混用は修正済。
-- 凝縮: `condensation: 1, condEquilibrium: 2` (EOS 拘束形、厳密 S=1) が既定。蒸発は既定 ON。
+- 凝縮: 平衡凝縮を選ぶなら `condensation: 1, condEquilibrium: 2` (EOS 拘束形、厳密 S=1) を推奨 (設定既定値は 0 = 非平衡)。蒸発は既定 ON。
+- 凝縮 (2026-09-15, plan [condensation-source-limiter-steady](../plans/accepted/condensation-source-limiter-steady.md)): 非平衡の θ 律速は
+  **`condLimiterMode: 1` (既定) で更新クランプ**になり、ソース残差の明示的な Δτ 依存 (θ×Δτ_loc) を除去した (旧 0 は残差に θ を掛け、大型ノズルで成長を 1/4 に絞っていた; case/44 で cfl 2 の解が旧 cfl 0.5 と一致)。cfl 間の固定点一致の検証状況は plan condensation-source-limiter-steady §9。
+  凝縮 ON の定常 run は `output.level 2` の `condLim_<s>` が収束時に全域 ≈1、`condClampCorr_<s>` が 0 であることを確認する。
+  RK 陽解法・dual-time では自動で 0 に降格 (起動ログ `[condensation] condLimiterMode=`)。上限は `condDgMaxStep` 5e-3 / `condDTmaxStep` 1 K。
   凝縮 run は h0 保存を確認する (面温度修正済み)。onset は実験より ~5 mm 下流 (case/16 2026-09-08 比較)。
 - 凝縮 (2026-09-10, plan [condensation-kantrowitz-gamma-twophase-sonic](../plans/active/condensation-kantrowitz-gamma-twophase-sonic.md)):
   Kantrowitz 補正 (`condKantrowitz: 1`) の γ は凝縮種 (蒸気) の γ_v が既定 (`condKantrowitzGammaMode: 0`; 旧=1)。
@@ -167,7 +171,7 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 
 ## 8. メッシュ — 現行 (2026-09)
 
-- AR ≤ 1000, skew ≤ 0.9 (`check_mesh_quality.py`)、y⁺≈1 が要るときは第一層と接線長のバランスで AR を守る。
+- AR ≤ 1000, skew ≤ 0.9 (`check_mesh_quality.py`)、y⁺≈1 が要るときは第一層と接線長のバランスで AR を守る。**壁法線の構造層に限り AR ≤ 5000 まで緩和可** (2026-09-12; `--ar-max 5000` / 問題 YAML `mesh.ar_max`, 台帳に明記)。冷却壁では y⁺ が ×5〜6 に上がるので `mesh.wall_first_frac_throat` (スロートだけ第一セルを詰める) と併用する。
 - node 2D は平面メッシュ、3D は六面体押し出し可。3D の角線ノード (2 壁交線) は内部隣接ゼロだが受動で問題なし
   (2026-09-07 検証)。y₁ 0.6 µm × z₁ 2 µm の極端な異方角セルは旧バイナリで角部加熱を起こした (相対ガードで解消)。
 - SST メッシュは壁 bcond を no-slip `wall` で変換 (wall_dist)。slip 延長壁は `wallDistExtraPhysIDs`。

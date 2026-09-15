@@ -17,7 +17,8 @@ import numpy as np
 
 from ..geometry.rao_planar import ideal_gross_thrust
 from ..meshing.mesh_sern3d import PHYS_SERN3D, SernMesh3DParams, generate_sern_mesh3d, write_msh41_3d
-from ..metrics.sern_forces import steadiness
+from ..metrics.sern_forces import write_force_history_csv
+from ..metrics.sern_gates import evaluate_gates, forge_rc_from_log
 from ..probdef import load_problem
 from . import runner_sern as R2
 
@@ -35,7 +36,7 @@ def _bcond_config(p, st):
 
     def inlet(name, s):
         return (f"{name}: {{physID: {P[name]}, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , "
-                f"floats: {{ro: {s['ro']:.6g}, Ux: {s['u']:.6g}, Uy: 0.0, Uz: 0.0, Ps: {s['P']:.6g}, k: {s['k']:.6g}, omega: {s['omega']:.6g}}}}}\n")
+                f"floats: {{ro: {s['ro']:.6g}, Ux: {s['u']:.6g}, Uy: 0.0, Uz: 0.0, Ps: {s['P']:.6g}, k: {s['k']:.6g}, omega: {s['omega']:.6g}{R2.inlet_species_floats(s)}}}}}\n")
 
     def outlet(name):
         return f"{name}: {{physID: {P[name]}, kind: outlet_statPress, outputHDFflg: 0, ints: , floats: {{Ps: {en['P']:.6g}, Pt: {en['P']:.6g}, Tt: {en['T']:.6g}}}}}\n"
@@ -47,7 +48,17 @@ def _bcond_config(p, st):
                                   else f"top_out: {{physID: {P['top_out']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n")
             + f"sym: {{physID: {P['sym']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
             + f"side_far: {{physID: {P['side_far']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
-            + wall("sidewall_in") + wall("sidewall_out"))
+            + wall("sidewall_in") + wall("sidewall_out")
+            # R2: 幅外の機体下面 (vehicle) は ramp と同じ壁種・壁出力だが帳簿は別枠 (forces3d)
+            + (wall("vehicle") if int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0 else "")
+            + (f"underside_far: {{physID: {P['underside_far']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
+               if p.raw.get("mesh3d", {}).get("W_vehicle") is not None else "")
+            # R4: 機体上面 (ext_top)。2D の vehicle と同じく slip・壁出力 (帳簿外、診断)
+            + (f"vehicle_top: {{physID: {P['vehicle_top']}, kind: slip, outputHDFflg: 1, ints: , floats: }}\n" if int(m2_ext(p)) else ""))
+
+
+def m2_ext(p) -> int:
+    return int(p.mesh.get("ext_top", 0))
 
 
 def paste_region_ic3d(h5path, y_mid, scale, half_W_m, st, gamma, minfo=None):
@@ -68,12 +79,7 @@ def paste_region_ic3d(h5path, y_mid, scale, half_W_m, st, gamma, minfo=None):
             upper |= (ids >= N_base) & (ids < N_base + minfo["n_dup_cowl"])
         else:
             upper = (yn > y_mid(xn)) & (cc[:, 2] <= half_W_m * (1 + 1e-9))
-        ro = np.where(upper, ex["ro"], en["ro"]); u = np.where(upper, ex["u"], en["u"]); P = np.where(upper, ex["P"], en["P"])
-        v = f["/VALUE"]
-        v["ro"][:] = ro; v["roUx"][:] = ro * u; v["roUy"][:] = 0.0; v["roUz"][:] = 0.0
-        v["roe"][:] = P / (gamma - 1.0) + 0.5 * ro * u * u
-        if "roK" in v:
-            v["roK"][:] = ro * np.where(upper, ex["k"], en["k"]); v["roOmega"][:] = ro * np.where(upper, ex["omega"], en["omega"])
+        R2.write_ic_arrays(f["/VALUE"], R2.region_ic_arrays(upper, st, gamma))   # cpg / frozen_tp (R3) 共通
 
 
 def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
@@ -84,10 +90,14 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     H = float(p.spec["H_m"]); m = p.raw.get("mesh3d", {}); m2 = p.mesh
     prm = SernMesh3DParams(ni_up=int(m.get("ni_up", 10)), ni_noz=int(m.get("ni_noz", 60)), ni_plume=int(m.get("ni_plume", 110)),
                            nj_top=int(m.get("nj_top", 49)), nj_bot=int(m.get("nj_bot", 31)), nz_in=int(m.get("nz_in", 25)), nz_out=int(m.get("nz_out", 17)),
-                           W=float(m.get("W", 2.0)), Z_ext=float(m.get("Z_ext", 1.5)), L_sw=m.get("L_sw"), L_up=float(m2.get("L_up", 0.5)),
+                           W=float(m.get("W", 2.0)), Z_ext=float(m.get("Z_ext", 1.5)), L_sw=m.get("L_sw"), W_vehicle=m.get("W_vehicle"), L_up=float(m2.get("L_up", 0.5)),
                            x_out_extra=float(m2.get("x_out_extra", 2.0)), bot_depth=float(m2.get("bot_depth", 3.0)),
                            first_wall_frac=float(m.get("first_wall_frac", m2.get("first_wall_frac", 4e-3))), first_z_frac=float(m.get("first_z_frac", 4e-3)),
                            cowl_thickness=float(m.get("cowl_thickness", m2.get("cowl_thickness", 0.0))),
+                           ext_top=bool(int(m2.get("ext_top", 0))), top_depth=float(m2.get("top_depth", 2.0)), nj_ext_top=int(m2.get("nj_ext_top", 41)),
+                           vehicle_clearance=float(m2.get("vehicle_clearance", 0.02)), first_top_frac=float(m2.get("first_top_frac", 0.02)),
+                           vehicle_taper=float(m2.get("vehicle_taper", 0.0)), vehicle_wedge_deg=float(m2.get("vehicle_wedge_deg", 3.0)),
+                           ramp_fillet=float(m2.get("ramp_fillet", 0.0)),
                            interface_angle=float(m2.get("interface_angle_rad", theta_b)),
                            top_ext_angle=float(np.deg2rad(m2.get("top_ext_angle_deg", np.rad2deg(design.info["theta_e"])))), scale=H)
     coords, hexes, B, minfo, y_mid = generate_sern_mesh3d(design, prm)
@@ -97,8 +107,10 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     n = int(nsteps or p.evaluate.get("nStepOuter", 4000)); out_int = int(p.evaluate.get("outStepInterval", max(n // 6, 1)))
     cfl = float(p.evaluate.get("cfl_main", 1.0)); cfg = _solver_config(p, n, out_int, cfl, st["ext"]["P"])
     (run_dir / "bcondConfig.yaml").write_text(_bcond_config(p, st)); (run_dir / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
+    R2.write_species_db(p, run_dir, R2.frozen_gases(p))     # R3
     disc = p.mesh.get("discretization", "node")
-    (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"').replace(", nodeWallDirichlet: 1", ""))
+    (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"')
+                                               .replace(", nodeWallDirichlet: 1", "").replace(", nodeInletCornerWall: 1", ""))
     R2.convert_mesh(run_dir, "sern.msh", "sern_qc.h5")
     q = subprocess.run([sys.executable, str(R2.FORGE_TOOLS / "check_mesh_quality.py"), "sern_qc.h5", "--mode", "3d"], cwd=run_dir, env=R2._ENV, capture_output=True, text=True)
     (run_dir / "MESH_QUALITY.txt").write_text(q.stdout + q.stderr)
@@ -113,12 +125,15 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
         f.unlink()
     (run_dir / "solverConfig.yaml").write_text(cfg); (run_dir / "solverConfig_main.yaml").write_text(cfg)
     paste_region_ic3d(run_dir / MESH, y_mid, H, 0.5 * prm.W * H, st, p.gamma, minfo=minfo if disc == "node" else None)
-    ex = st["exhaust"]; F_ideal_nd, M_e_id = ideal_gross_thrust(ex["M"], st["ext"]["P"] / ex["P"], p.gamma)
-    info = {"problem": str(problem_path), "run_dir": str(run_dir), "nsteps": n, "H_m": H, "states": st, "operating_point": opinfo,
+    ex = st["exhaust"]; F_ideal_nd, M_e_id = R2.ideal_thrust(p, st)
+    info = {"problem": str(problem_path), "run_dir": str(run_dir), "nsteps": n, "H_m": H, "states": st, "operating_point": opinfo, "gas_model": st["gas_model"],
             "design_point": d0, "design": {"key_point": list(design.key_point), "L_ramp": design.L_ramp, "theta_e_deg": float(np.rad2deg(design.info["theta_e"])),
             "theta_b_deg": float(np.rad2deg(theta_b)), "warnings": design.info["warnings"]}, "moc_forces": fr_moc,
             "F_ideal_N_per_m": F_ideal_nd * ex["P"] * H, "mesh": minfo, "discretization": disc, "model": p.evaluate.get("model", "euler"), "dim": 3,
-            "half_W_m": 0.5 * prm.W * H}
+            "half_W_m": 0.5 * prm.W * H,
+            # R2 (codex M5): 幅外の機体下面 (ramp タグの z > W/2) は **物理的な機体幅 W_vehicle** までを機体力として
+            # 集計し、遠方境界 Z_ext に依存させない (None = 上限なし = 旧挙動)。総推力 C_T にはどちらも入れない
+            "half_W_vehicle_m": (0.5 * float(m["W_vehicle"]) * H) if m.get("W_vehicle") is not None else None}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 
@@ -157,7 +172,7 @@ def _parse_conne(flat):
     return out
 
 
-def surface_forces(h5file, expect_dir, p_a, x_ref, y_ref, z_split=None):
+def surface_forces(h5file, expect_dir, p_a, x_ref, y_ref, z_split=None, z_vehicle_max=None):
     """quad ごとに (p − p_a)·n·A。n は流体から壁へ向く向きに expect_dir (概ねの向きベクトル) で揃える。
     戻り: 全体と (z_split があれば) z ≤ z_split / z > z_split の分割。"""
     with h5py.File(h5file, "r") as f:
@@ -177,51 +192,92 @@ def surface_forces(h5file, expect_dir, p_a, x_ref, y_ref, z_split=None):
     out = {"Fx_p": float(F[:, 0].sum()), "Fy_p": float(F[:, 1].sum()), "Fz_p": float(F[:, 2].sum()), "M_noseup_p": float(-Mz.sum()), "area": float(area.sum()), "n_faces": nf}
     if z_split is not None:
         m = cen[:, 2] <= z_split * (1 + 1e-9)
-        out["inside"] = {"Fx_p": float(F[m, 0].sum()), "Fy_p": float(F[m, 1].sum()), "M_noseup_p": float(-Mz[m].sum()), "area": float(area[m].sum())}
-        out["outside"] = {"Fx_p": float(F[~m, 0].sum()), "Fy_p": float(F[~m, 1].sum()), "M_noseup_p": float(-Mz[~m].sum()), "area": float(area[~m].sum())}
+        mv = (~m) if z_vehicle_max is None else ((~m) & (cen[:, 2] <= z_vehicle_max * (1 + 1e-9)))
+        mb = (~m) & (~mv)          # 機体幅の外 (集計対象外。遠方境界 Z_ext の産物)
+        part = lambda k: {"Fx_p": float(F[k, 0].sum()), "Fy_p": float(F[k, 1].sum()), "M_noseup_p": float(-Mz[k].sum()), "area": float(area[k].sum())}
+        out["inside"] = part(m); out["outside"] = part(mv); out["beyond_vehicle"] = part(mb)
     if tw is not None:
         tf = np.array([tw[fc].mean(0) if per_node else tw[k] for k, fc in enumerate(faces)]) * area[:, None]
         out["Fx_tau"] = float(tf[:, 0].sum()); out["Fy_tau"] = float(tf[:, 1].sum())
     return out
 
 
-def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0, mdot_u_in=0.0, p_in=0.0, twall_on_fluid=False):
+def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0, mdot_u_in=0.0, p_in=0.0, twall_on_fluid=False,
+             half_W_vehicle=None):
+    """3D の力係数。**帳簿 (R2, codex M5 採用 2026-09-09)**: C_T / C_L / C_M は**ノズル力**
+    (ramp の z ≤ W/2 + cowl_in + cowl_out + sidewall_in/out) だけで、2D の集計範囲と同じ対象面にする。
+    幅外の機体下面 (ramp の W/2 < z ≤ W_vehicle/2) は C_T_vehicle / C_L_vehicle / C_M_vehicle に**別枠**で出し、
+    W_vehicle の外 (遠方境界までのランプ延長) は集計しない (`beyond_vehicle` に残すだけ)。
+    旧定義 (幅外を総推力に加算) は C_T_total_with_vehicle として残す (run_0027 との突き合わせ用)。"""
     P = PHYS_SERN3D; run_dir = Path(run_dir)
     spec = {"ramp": (P["ramp"], (0, 1, 0)), "cowl_in": (P["cowl_in"], (0, -1, 0)), "cowl_out": (P["cowl_out"], (0, 1, 0)),
-            "sidewall_in": (P["sidewall_in"], (0, 0, 1)), "sidewall_out": (P["sidewall_out"], (0, 0, -1))}
+            "sidewall_in": (P["sidewall_in"], (0, 0, 1)), "sidewall_out": (P["sidewall_out"], (0, 0, -1)),
+            "vehicle": (P["vehicle"], (0, 1, 0)),      # R2: 幅外機体下面 (メッシャが分離したタグ。旧 run は ramp の z 分割で代替)
+            "vehicle_top": (P["vehicle_top"], (0, -1, 0))}   # R4: 機体上面 (帳簿外・診断のみ: C_T_vehicle_top)
     parts = {}
     for name, (pid, d) in spec.items():
         c = list(run_dir.glob(f"res_{name}_{pid}_{step}.h5"))
         if c:
-            parts[name] = surface_forces(c[0], np.array(d, float), p_a, x_ref, y_ref, z_split=half_W if name == "ramp" else None)
-    Fx = sum(v["Fx_p"] for v in parts.values()); Fy = sum(v["Fy_p"] for v in parts.values()); Mn = sum(v["M_noseup_p"] for v in parts.values())
+            parts[name] = surface_forces(c[0], np.array(d, float), p_a, x_ref, y_ref, z_split=half_W if name == "ramp" else None,
+                                         z_vehicle_max=half_W_vehicle if name == "ramp" else None)
+    def _sum(key, sel):
+        tot = 0.0
+        for name, v in parts.items():
+            if name == "ramp" and "inside" in v:
+                tot += v["inside"][key] if sel == "nozzle" else (v["outside"][key] if sel == "vehicle" else 0.0)
+            elif name == "vehicle":
+                tot += v[key] if sel == "vehicle" else 0.0
+            elif name == "vehicle_top":
+                tot += v[key] if sel == "vehicle_top" else 0.0
+            elif sel == "nozzle":
+                tot += v[key]
+        return tot
+    Fx, Fy, Mn = _sum("Fx_p", "nozzle"), _sum("Fy_p", "nozzle"), _sum("M_noseup_p", "nozzle")
+    Fx_v, Fy_v, Mn_v = _sum("Fx_p", "vehicle"), _sum("Fy_p", "vehicle"), _sum("M_noseup_p", "vehicle")
     F_ideal = F_ideal_per_m * half_W; inlet = (mdot_u_in + (p_in - p_a) * H) * half_W
     out = {"step": step, "T_wall": -Fx, "L": Fy, "M_noseup": Mn, "F_gross": inlet - Fx, "F_ideal": F_ideal, "C_T": (inlet - Fx) / F_ideal,
-           "C_T_wall": -Fx / F_ideal, "C_L": Fy / F_ideal, "C_M": Mn / (F_ideal * H), "parts": parts}
+           "C_T_wall": -Fx / F_ideal, "C_L": Fy / F_ideal, "C_M": Mn / (F_ideal * H), "parts": parts,
+           "bookkeeping": "nozzle_only (R2): ramp z<=W/2 + cowl + sidewalls; vehicle underside separate",
+           "C_T_vehicle": -Fx_v / F_ideal, "C_L_vehicle": Fy_v / F_ideal, "C_M_vehicle": Mn_v / (F_ideal * H),
+           "C_T_total_with_vehicle": (inlet - Fx - Fx_v) / F_ideal, "C_L_total_with_vehicle": (Fy + Fy_v) / F_ideal,
+           "half_W_vehicle": half_W_vehicle,
+           "C_T_vehicle_top": -_sum("Fx_p", "vehicle_top") / F_ideal, "C_L_vehicle_top": _sum("Fy_p", "vehicle_top") / F_ideal}
     if "ramp" in parts and "inside" in parts["ramp"]:
         ri, ro = parts["ramp"]["inside"], parts["ramp"]["outside"]
         out["C_L_ramp_inside"] = ri["Fy_p"] / F_ideal; out["C_L_ramp_outside"] = ro["Fy_p"] / F_ideal
         out["C_T_ramp_inside"] = -ri["Fx_p"] / F_ideal; out["C_T_ramp_outside"] = -ro["Fx_p"] / F_ideal
+        out["area_beyond_vehicle"] = parts["ramp"]["beyond_vehicle"]["area"]
     if any("Fx_tau" in v for v in parts.values()):
+        # 摩擦: vehicle タグがあればノズル面 (vehicle 以外) だけを足す。旧 run (ramp が幅外を含む) では全面の値になる
         sgn = 1.0 if twall_on_fluid else -1.0
-        Fx_t = sgn * sum(v.get("Fx_tau", 0.0) for v in parts.values())
+        Fx_t = sgn * sum(v.get("Fx_tau", 0.0) for name, v in parts.items() if name not in ("vehicle", "vehicle_top"))
+        Fx_tv = sgn * parts.get("vehicle", {}).get("Fx_tau", 0.0)
         out["C_T_with_shear"] = (inlet - Fx + Fx_t) / F_ideal; out["C_T_friction"] = Fx_t / F_ideal
+        out["C_T_friction_vehicle"] = Fx_tv / F_ideal
+        out["friction_note"] = ("nozzle faces only (vehicle tag separate)" if "vehicle" in parts
+                                else "twall summed over whole tagged faces (old mesh: ramp incl. outside width)")
     return out
 
 
-def collect(problem_path, run_dir) -> dict:
-    p = load_problem(problem_path); run_dir = Path(run_dir); info = json.loads((run_dir / "prepare_info.json").read_text())
+def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass: bool = False) -> dict:
+    p = load_problem(problem_path); run_dir = Path(run_dir); out_dir = Path(out_dir) if out_dir else run_dir; out_dir.mkdir(parents=True, exist_ok=True)
+    info = json.loads((run_dir / "prepare_info.json").read_text())
     st = info["states"]; ex, en = st["exhaust"], st["ext"]; H = info["H_m"]; xr, yr = p.spec.get("moment_ref", [0.0, 0.0])
     steps = sorted({int(f.stem.split("_")[-1]) for f in run_dir.glob("res_ramp_*_[0-9]*.h5")})
     hist = [forces3d(run_dir, s, en["P"], info["F_ideal_N_per_m"], info["half_W_m"], H, float(xr) * H, float(yr) * H,
-                     ex["ro"] * ex["u"] ** 2 * H, ex["P"], twall_on_fluid=(info["discretization"] == "cell")) for s in steps]
+                     ex["ro"] * ex["u"] ** 2 * H, ex["P"], twall_on_fluid=(info["discretization"] == "cell"),
+                     half_W_vehicle=info.get("half_W_vehicle_m")) for s in steps]
+    if rc is None:
+        rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
-    out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "dim": 3, "moc_forces": info["moc_forces"]}
+    gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass)
+    out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "dim": 3, "moc_forces": info["moc_forces"], "forge_rc": rc,
+           "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"]}
     if hist:
         last = hist[-1]
         out.update({k: last[k] for k in last if k != "parts"})
-        out["steadiness"] = {k: steadiness([h[k] for h in hist]) for k in ("C_T", "C_L", "C_M")}
-    (run_dir / "metrics.json").write_text(json.dumps(out, indent=1))
+        write_force_history_csv(out_dir / "force_history.csv", hist)
+    (out_dir / "metrics.json").write_text(json.dumps(out, indent=1))
     return out
 
 
@@ -241,8 +297,9 @@ def main(argv=None):
                     soft_cfl=float(o.get("soft_cfl", 0.5)), soft_conv=int(o.get("soft_conv", 0)),
                     warm_lam_steps=int(o.get("warm_lam_steps", 0)), warm_lam_cfl=float(o.get("warm_lam_cfl", 0.2)),
                     mid_steps=int(o.get("mid_steps", 0)))
-    out = collect(a.problem, a.run_dir)
-    print(json.dumps({k: v for k, v in out.items() if k != "history"}, indent=1)); return rc
+    out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))
+    print(json.dumps({k: v for k, v in out.items() if k not in ("history", "gates")}, indent=1))
+    g = out["gates"]; print(f"GATES: {g['verdict']} fail_class={g['fail_class']} objective={g['objective']} reasons={g['reasons']}"); return rc
 
 
 if __name__ == "__main__":

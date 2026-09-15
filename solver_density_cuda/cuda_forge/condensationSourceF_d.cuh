@@ -226,6 +226,36 @@ __host__ __device__ inline float cond_evap_source_f(
     return lam;
 }
 
+// 蒸発の瞬間速度形 (condLimiterMode 1) の float 版。cond_evap_source_rate と同式 (一様 ṙ のモーメント形; λ≈1 の丸め問題は無い)。
+__host__ __device__ inline void cond_evap_source_rate_f(
+    const CondSpeciesPropsF& cp, const CondTablesF& tb, float T, float p_v, float rod, float g,
+    float q0, float q1, float q2, float rmin,
+    int growthModel, float p_gas, float gyarC, int kelvin,
+    float* SQ0, float* SQ1, float* SQ2, float* Sg, float* r30_out, float* drdt_out)
+{
+    *SQ0 = 0.0f; *SQ1 = 0.0f; *SQ2 = 0.0f; *Sg = 0.0f; *r30_out = 0.0f; *drdt_out = 0.0f;
+    if (g <= 0.0f) return;
+    const float lnps = cond_tab_lnpsat_f(tb, T);
+    if (p_v > 0.0f && logf(p_v) > lnps) return;
+    const float rho_l = cond_tab_rhol_f(tb, T);
+    if (q0 <= 1.0e-30f) {   // 液滴数 0 の液相: 質量だけを r_min の自己相似縮小率で減衰 (double 実体と同じ)
+        const float drdt = cond_evap_rate_f(cp, tb, T, p_v, rmin, growthModel, p_gas, gyarC, kelvin);
+        *drdt_out = drdt; *r30_out = 0.0f;
+        *Sg = 3.0f*rod*g*drdt/rmin;
+        return;
+    }
+    const float r30 = cbrtf(g/((4.0f/3.0f)*COND_PI_F*rho_l*q0/rod));
+    *r30_out = r30;
+    if (!(r30 > 0.0f)) return;
+    const float r_eval = (r30 > rmin) ? r30 : rmin;
+    const float drdt = cond_evap_rate_f(cp, tb, T, p_v, r_eval, growthModel, p_gas, gyarC, kelvin);
+    *drdt_out = drdt;
+    const float q1e = fminf(q1, q0*r30), q2e = fminf(q2, q0*r30*r30);
+    *SQ1 = q0*drdt;
+    *SQ2 = 2.0f*q1e*drdt;
+    *Sg  = 4.0f*COND_PI_F*rho_l*q2e*drdt;
+}
+
 // 飽和温度 T_sat(p_v): 表の ln p_sat とその解析微分で Newton (前 step の値を warm start に)。
 __host__ __device__ inline float cond_Tsat_f(const CondTablesF& tb, float pv, float T_guess)
 {

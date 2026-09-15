@@ -3,7 +3,7 @@
 使い方:
   ParaView GUI で Macros > Add new macro... から本ファイルを登録する。
   以後ツールバーの `macro_load_forge_filters` を押すと
-  Filters > Alphabetical > "Forge Derived Quantities" が使えるようになる。
+  Filters > Alphabetical > "Forge Derived Quantities" と "Forge Saturation" が使えるようになる。
 
 Ubuntu の ParaView 5.11 + Python 3.12 では paraview.detail.pythonalgorithm が
 Python 3.11 で削除された inspect.getargspec を import するため、

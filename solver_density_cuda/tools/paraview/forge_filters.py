@@ -3,6 +3,8 @@
 提供フィルタ:
   Forge Derived Quantities  … マッハ数 / シュリーレン (無次元密度勾配) /
                               Q 値 / ヘリシティ を一括で計算して出力に追加する。
+  Forge Saturation          … 凝縮種 (H2O / N2) の蒸気分圧・飽和蒸気圧・飽和温度・
+                              過冷却度・過飽和度を計算する (forge の condS/condTsat と同じ式)。
 
 読み込み方法 (ParaView GUI):
   Tools > Manage Plugins > Load New... で本ファイルを選び、
@@ -30,6 +32,16 @@ pvpython / pvbatch から使う場合:
   grad_ro, schlieren_mag, schlieren_dir, schlieren
   vorticity, vorticity_mag, Q, Q_norm, (lambda2)
   helicity, helicity_norm
+
+Forge Saturation (凝縮 ON/OFF どちらの run にも使える後処理):
+  入力: T (必須), ro, P, 蒸気質量分率配列 (既定 Y1 = TP split_h2o の H2O), 液相質量分率配列 (既定 g_0, 無ければ 0)
+  蒸気分圧 p_v = ro (Y_v − g) R_v T (carrier 形, forge cond_vapor_state と同一)。蒸気配列が無く定数も 0 なら
+  純蒸気 (p_v = P)。空気凝縮 (CPG carrier) は Vapor Mass Fraction Constant に condVaporMassFraction (0.7671) を入れる。
+  出力: p_vapor, p_sat, T_sat, subcooling (= T_sat − T; 正が過冷却), supersaturation (S = p_v / p_sat(T)), log10_S
+        (+ Compute Ice で氷基準 p_sat_ice, S_ice, T_sat_ice, subcooling_ice; H2O のみ)
+  p_sat: H2O = Murphy & Koop (2005) 過冷却液 (forge h2o_psat)、氷 = 同 ice 式。
+         N2 = Jacobsen 液 + 50 K 未満の Clausius–Clapeyron 外挿 (forge n2_psat_ex; 低温整合オプション付き)。
+  T_sat: p_sat(T_sat) = p_v の Newton 反転 (forge cond_Tsat と同じ初期値・クリップ)。p_v ≤ 1e-6 Pa は 0。
 """
 
 import inspect
@@ -394,3 +406,232 @@ class ForgeDerivedQuantities(VTKPythonAlgorithmBase):
                 arrays["helicity_norm"] = np.where(denom > 0.0, hel / np.maximum(denom, 1e-30), 0.0)
 
         return res
+
+
+# ---------------------------------------------------------------- 飽和量 (凝縮後処理)
+#
+# forge の condensationProperties_d.cuh / condensationSource_d.cuh と同じ式を numpy で写したもの。
+# 凝縮 OFF の run (condS_0 / condTsat_0 が無い) でも、T / ro / Y から過飽和・過冷却を評価できる。
+
+H2O_RV = 461.5          # J/(kg K)  (forge condProps_H2O().R)
+N2_RV = 296.8           # J/(kg K)  (forge condProps_N2().R)
+N2_TC = 126.192
+N2_PSAT_TSWITCH = 50.0  # COND_PSAT_TSWITCH
+N2_LATENT_TA = 70.0     # COND_N2_LATENT_TA
+N2_CPV = 1038.8         # COND_N2_CPV
+COND_T_PROP_FLOOR = 45.0
+
+
+def _h2o_psat_liquid(T):
+    """Murphy & Koop (2005) 過冷却液の飽和蒸気圧 [Pa] (forge h2o_psat と同一, 120 K 下限クランプ)。"""
+    Tc = np.maximum(T, 120.0)
+    lnp = (54.842763 - 6763.22 / Tc - 4.210 * np.log(Tc) + 0.000367 * Tc
+           + np.tanh(0.0415 * (Tc - 218.8)) * (53.878 - 1331.22 / Tc - 9.44523 * np.log(Tc) + 0.014025 * Tc))
+    return np.exp(lnp)
+
+
+def _h2o_psat_ice(T):
+    """Murphy & Koop (2005) 氷の飽和蒸気圧 [Pa] (T > 110 K)。"""
+    Tc = np.maximum(T, 110.0)
+    return np.exp(9.550426 - 5723.265 / Tc + 3.53068 * np.log(Tc) - 0.00728332 * Tc)
+
+
+def _n2_latent_poly(T):
+    Tcl = np.clip(T, COND_T_PROP_FLOOR, N2_TC - 0.5)
+    L = (-2.137e-8 * Tcl ** 4 + 7.18e-6 * Tcl ** 3 - 9.142e-4 * Tcl ** 2 + 0.05069 * Tcl - 0.809) * 1.0e6
+    return np.maximum(L, 0.0)
+
+
+def _n2_psat_jacobsen(Tcl):
+    n1, n2, n3 = 8394.409444, -1890.045259, -7.282229165
+    n4, n5, n6 = 0.01022850966, 5.556063825e-4, -5.944544662e-6
+    n7, n8, n9 = 2.715433932e-8, -4.879535904e-11, 509.5360824
+    dTc = N2_TC - Tcl
+    lnP = (n1 / Tcl + n2 + n3 * Tcl + n4 * np.power(np.maximum(dTc, 0.0), 1.95)
+           + n5 * Tcl ** 3 + n6 * Tcl ** 4 + n7 * Tcl ** 5 + n8 * Tcl ** 6 + n9 * np.log(Tcl))
+    return np.exp(lnP) * 101325.0
+
+
+def _n2_psat(T, psat_lowT=1, latent_lowT=1, cl=2000.0):
+    """N2 過冷却液の飽和蒸気圧 [Pa] (forge n2_psat_ex と同一)。50 K 未満は Clausius–Clapeyron 外挿。"""
+    T = np.asarray(T, dtype=np.float64)
+    Tcl = np.minimum(np.maximum(T, N2_PSAT_TSWITCH), N2_TC - 0.5)
+    hi = _n2_psat_jacobsen(Tcl)
+    Tsw = N2_PSAT_TSWITCH
+    psw = _n2_psat_jacobsen(np.array(Tsw))
+    Tlo = np.maximum(T, 5.0)
+    if psat_lowT and latent_lowT:
+        Ta = N2_LATENT_TA; La = float(_n2_latent_poly(np.array(Ta))); cpr = N2_CPV - cl
+        lnr = ((La - cpr * Ta) * (1.0 / Tsw - 1.0 / Tlo) + cpr * np.log(Tlo / Tsw)) / N2_RV
+        lo = psw * np.exp(lnr)
+    else:
+        Lref = float(_n2_latent_poly(np.array(Tsw)))
+        lo = psw * np.exp(-(Lref / N2_RV) * (1.0 / Tlo - 1.0 / Tsw))
+    return np.where(T >= Tsw, hi, lo)
+
+
+def _tsat_newton(psat_fn, pv, T_guess):
+    """p_sat(T_sat) = p_v を Newton で解く (forge cond_Tsat と同じ初期値・クリップ・反復数)。
+    導関数は同じ p_sat の数値微分 d ln p_sat/dT (forge は L/(R T²) = Clausius–Clapeyron; 根は同じ)。"""
+    pv = np.asarray(pv, dtype=np.float64)
+    valid = pv > 1.0e-6
+    lnpv = np.log(np.where(valid, pv, 1.0))
+    T = np.where((T_guess > 50.0) & (T_guess < 1000.0), T_guess, 250.0).astype(np.float64)
+    h = 0.01
+    for _ in range(25):
+        ps = psat_fn(T)
+        f = np.log(np.maximum(ps, 1.0e-300)) - lnpv
+        dfdT = (np.log(np.maximum(psat_fn(T + h), 1.0e-300)) - np.log(np.maximum(psat_fn(T - h), 1.0e-300))) / (2 * h)
+        dfdT = np.maximum(dfdT, 1.0e-6)
+        dT = np.clip(f / dfdT, -0.3 * T, 0.3 * T)
+        T = np.clip(T - dT, 50.0, 1000.0)
+    return np.where(valid, T, 0.0)
+
+
+@smproxy.filter(label="Forge Saturation")
+@smproperty.input(name="Input", port_index=0)
+@smdomain.datatype(dataTypes=["vtkDataSet", "vtkCompositeDataSet"], composite_data_supported=True)
+class ForgeSaturation(VTKPythonAlgorithmBase):
+    """凝縮種の蒸気分圧・飽和蒸気圧・飽和温度・過冷却度・過飽和度を計算する。"""
+
+    def __init__(self):
+        VTKPythonAlgorithmBase.__init__(
+            self, nInputPorts=1, nOutputPorts=1,
+            inputType="vtkDataObject", outputType="vtkDataObject")
+        self._species = 0
+        self._yv_array = "Y1"
+        self._g_array = "g_0"
+        self._yv_const = 0.0
+        self._ice = False
+        self._n2_psat_lowT = 1
+        self._n2_latent_lowT = 1
+        self._n2_liquid_cp = 2000.0
+
+    # -- properties -------------------------------------------------
+
+    @smproperty.intvector(name="Species", default_values=0)
+    @smdomain.xml('<EnumerationDomain name="enum">'
+                  '<Entry text="H2O" value="0"/>'
+                  '<Entry text="N2" value="1"/>'
+                  '</EnumerationDomain>')
+    def SetSpecies(self, value):
+        """凝縮種。H2O = Murphy & Koop 過冷却液 (R_v 461.5)、N2 = Jacobsen + C–C 外挿 (R_v 296.8)。"""
+        self._species = int(value)
+        self.Modified()
+
+    @smproperty.stringvector(name="VaporMassFractionArray", label="Vapor Mass Fraction Array", default_values="Y1")
+    def SetVaporMassFractionArray(self, value):
+        """蒸気 (凝縮種) の質量分率配列名。TP split_h2o なら Y1。空 or 無い場合は定数 (Vapor Mass Fraction Constant) を使う。"""
+        self._yv_array = str(value).strip()
+        self.Modified()
+
+    @smproperty.stringvector(name="LiquidMassFractionArray", label="Liquid Mass Fraction Array", default_values="g_0")
+    def SetLiquidMassFractionArray(self, value):
+        """液相質量分率配列名 (凝縮 ON の run の g_0)。無ければ 0 として扱う。"""
+        self._g_array = str(value).strip()
+        self.Modified()
+
+    @smproperty.doublevector(name="VaporMassFractionConstant", label="Vapor Mass Fraction Constant", default_values=0.0)
+    @smdomain.doublerange(min=0.0, max=1.0)
+    def SetVaporMassFractionConstant(self, value):
+        """蒸気配列が無いときの一様質量分率 (空気凝縮 CPG carrier は condVaporMassFraction = 0.7671)。
+        0 なら純蒸気 (p_v = P) として扱う。"""
+        self._yv_const = float(value)
+        self.Modified()
+
+    @smproperty.intvector(name="ComputeIce", label="Compute Ice (H2O)", default_values=0)
+    @smdomain.xml('<BooleanDomain name="bool"/>')
+    def SetComputeIce(self, value):
+        """H2O で氷基準の p_sat_ice / S_ice / T_sat_ice / subcooling_ice も出す。"""
+        self._ice = bool(value)
+        self.Modified()
+
+    @smproperty.intvector(name="N2PsatLowT", label="N2 psat low-T consistent", default_values=1)
+    @smdomain.xml('<BooleanDomain name="bool"/>')
+    def SetN2PsatLowT(self, value):
+        """N2: 50 K 未満の外挿を低温整合潜熱で行う (forge condN2PsatLowT)。"""
+        self._n2_psat_lowT = int(bool(value))
+        self.Modified()
+
+    @smproperty.intvector(name="N2LatentLowT", label="N2 latent low-T consistent", default_values=1)
+    @smdomain.xml('<BooleanDomain name="bool"/>')
+    def SetN2LatentLowT(self, value):
+        """N2: 潜熱の低温整合 (forge condN2LatentLowT)。"""
+        self._n2_latent_lowT = int(bool(value))
+        self.Modified()
+
+    @smproperty.doublevector(name="N2LiquidCp", label="N2 liquid cp [J/kg/K]", default_values=2000.0)
+    def SetN2LiquidCp(self, value):
+        """N2 液比熱 (forge condN2LiquidCp)。"""
+        self._n2_liquid_cp = float(value)
+        self.Modified()
+
+    # -- pipeline ---------------------------------------------------
+
+    def RequestDataObject(self, request, inInfo, outInfo):
+        inp = vtkDataObject.GetData(inInfo[0])
+        if inp is None:
+            return 0
+        out = vtkDataObject.GetData(outInfo)
+        if out is None or not out.IsA(inp.GetClassName()):
+            out = inp.NewInstance()
+            outInfo.GetInformationObject(0).Set(vtkDataObject.DATA_OBJECT(), out)
+        return 1
+
+    def RequestData(self, request, inInfo, outInfo):
+        inp = vtkDataObject.GetData(inInfo[0])
+        out = vtkDataObject.GetData(outInfo)
+        for _, leaf in _leaf_pairs(inp, out):
+            if leaf.IsA("vtkDataSet"):
+                self._compute_leaf(leaf)
+        return 1
+
+    def _psat_fn(self):
+        if self._species == 1:
+            return lambda T: _n2_psat(T, self._n2_psat_lowT, self._n2_latent_lowT, self._n2_liquid_cp)
+        return _h2o_psat_liquid
+
+    def _compute_leaf(self, ds):
+        if ds.GetNumberOfPoints() == 0:
+            return
+        assoc = _detect_assoc(ds)
+        if not _has(ds, assoc, "T"):
+            assoc = POINTS if _has(ds, POINTS, "T") else CELLS
+        T = _get(ds, assoc, "T")
+        if T is None:
+            return
+        ro = _get(ds, assoc, "ro")
+        P = _get(ds, assoc, "P")
+        Rv = N2_RV if self._species == 1 else H2O_RV
+
+        g = _get(ds, assoc, self._g_array) if self._g_array else None
+        g = np.zeros_like(T) if g is None else np.maximum(g, 0.0)
+        yv = _get(ds, assoc, self._yv_array) if self._yv_array else None
+        if yv is None and self._yv_const > 0.0:
+            yv = np.full_like(T, self._yv_const)
+
+        # 蒸気分圧 (forge cond_vapor_state と同一)
+        if yv is not None and ro is not None:
+            pv = ro * np.maximum(yv - g, 0.0) * Rv * T
+        elif P is not None:
+            pv = P.copy()   # 純蒸気
+        else:
+            return
+
+        psat = self._psat_fn()
+        ps = psat(T)
+        S = pv / np.maximum(ps, 1.0e-300)
+        Tsat = _tsat_newton(psat, pv, T)
+        _add(ds, assoc, "p_vapor", pv)
+        _add(ds, assoc, "p_sat", ps)
+        _add(ds, assoc, "supersaturation", S)
+        _add(ds, assoc, "log10_S", np.log10(np.maximum(S, 1.0e-300)))
+        _add(ds, assoc, "T_sat", Tsat)
+        _add(ds, assoc, "subcooling", np.where(Tsat > 0.0, Tsat - T, 0.0))
+        if self._ice and self._species == 0:
+            psi = _h2o_psat_ice(T)
+            Tsi = _tsat_newton(_h2o_psat_ice, pv, T)
+            _add(ds, assoc, "p_sat_ice", psi)
+            _add(ds, assoc, "S_ice", pv / np.maximum(psi, 1.0e-300))
+            _add(ds, assoc, "T_sat_ice", Tsi)
+            _add(ds, assoc, "subcooling_ice", np.where(Tsi > 0.0, Tsi - T, 0.0))
