@@ -1,4 +1,5 @@
 #include "condensationTransport_d.cuh"
+#include "condensationUpdateLimiter_d.cuh"   // cond_moment_update_limited_d (単体試験と共用)
 #include "condensationSource_d.cuh"   // COND_PI, 物性 (消滅クランプ)
 #include "condensationEOS_d.cuh"
 #include "condensationSourceF_d.cuh"   // float 実体 (clamp の表評価)      // cond_clamp_vapor_pressure (蒸発塵判定の蒸気分圧)
@@ -337,6 +338,34 @@ void condensationTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
 void condensationTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     if (!condensationEnabled(var)) return;
+
+    if (cfg.timeIntegration == 11 && cfg.condLimiterMode == 1) {
+        // 更新クランプ経路 (plans/active/condensation-source-limiter-steady.md): 種ごとに 4 モーメントをまとめて更新。
+        // condMomentConsNames の順序は registerCondensation の bases = {g, Q2, Q1, Q0} (種ごとに 4 本連続)。
+        const int carrier = (cfg.condGasSpecies >= 0 || cfg.condVaporMassFraction > 0.0) ? 1 : 0;
+        const CondPropOpts opts = cond_prop_opts(cfg);
+        flow_float* roY_w = (carrier && cfg.condGasSpecies >= 0) ? var.c_d["roY" + std::to_string(cfg.condGasSpecies)] : nullptr;
+        flow_float* cp_cell   = (cfg.thermalMethod == 2) ? var.c_d["cp"]   : nullptr;
+        flow_float* Rmix_cell = (cfg.thermalMethod == 2) ? var.c_d["Rmix"] : nullptr;
+        const double lam_min = 0.5;
+        for (int s = 0; s < var.nCondSpeciesRegistered; ++s) {
+            const std::string i = std::to_string(s);
+            const std::string g = "rog_"+i, Q2 = "roQ2_"+i, Q1 = "roQ1_"+i, Q0 = "roQ0_"+i;
+            cond_moment_update_limited_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
+                msh.nCells, var.c_d["dt_local"], var.c_d["volume"], var.c_d["ro"],
+                roY_w, cfg.condVaporMassFraction, var.c_d["T"], cp_cell, Rmix_cell, cfg.cp, cfg.gamma,
+                cfg.condModel, opts, cfg.condDgMaxStep, cfg.condDTmaxStep, lam_min,
+                var.c_d[g+"N"], var.c_d[Q2+"N"], var.c_d[Q1+"N"], var.c_d[Q0+"N"],
+                var.c_d["res_"+g], var.c_d["res_"+Q2], var.c_d["res_"+Q1], var.c_d["res_"+Q0],
+                var.c_d["src_jac_g_"+i], var.c_d["src_jac_Q2_"+i], var.c_d["src_jac_Q1_"+i], var.c_d["src_jac_Q0_"+i],
+                var.c_d["transport_diag_g_"+i], var.c_d["transport_diag_Q2_"+i], var.c_d["transport_diag_Q1_"+i], var.c_d["transport_diag_Q0_"+i],
+                var.c_d[g], var.c_d[Q2], var.c_d[Q1], var.c_d[Q0],
+                var.c_d["condLim_"+i], var.c_d["condClampCorr_"+i]);
+        }
+        gpuErrchk( cudaPeekAtLastError() );
+        gpuErrchkKernelSync();
+        return;
+    }
 
     for (const auto& consName : var.condMomentConsNames) {
         const ScalarTransportDesc desc = buildCondMomentDesc(var, consName);

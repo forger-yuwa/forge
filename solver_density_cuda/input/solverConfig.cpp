@@ -718,6 +718,11 @@ void solverConfig::read(std::string fname)
             this->condEvaporation = getOptionalValidatedValue<int>(cond, "condEvaporation", 1, "condensation");
             this->condEvapRmin    = getOptionalValidatedValue<double>(cond, "condEvapRmin", 1.0e-9, "condensation");
             this->condEvapKelvin  = getOptionalValidatedValue<int>(cond, "condEvapKelvin", 0, "condensation");
+            this->condLimiterMode = getOptionalValidatedValue<int>(cond, "condLimiterMode", 1, "condensation");
+            if (this->condLimiterMode != 0 && this->condLimiterMode != 1) throw std::runtime_error("Key 'condLimiterMode' in 'condensation' must be 0 (legacy residual theta) or 1 (update clamp).");
+            this->condDgMaxStep   = getOptionalValidatedValue<double>(cond, "condDgMaxStep", 5.0e-3, "condensation");
+            this->condDTmaxStep   = getOptionalValidatedValue<double>(cond, "condDTmaxStep", 1.0, "condensation");
+            if (!(this->condDgMaxStep > 0.0) || !(this->condDTmaxStep > 0.0)) throw std::runtime_error("condDgMaxStep and condDTmaxStep must be > 0.");
             this->condEquilibrium = getOptionalValidatedValue<int>(cond, "condEquilibrium", 0, "condensation");
             this->condFloat = getOptionalValidatedValue<int>(cond, "condFloat", 1, "condensation");
             if (this->condFloat != 0 && this->condFloat != 1) throw std::runtime_error("Key 'condFloat' in 'condensation' must be 0 or 1.");

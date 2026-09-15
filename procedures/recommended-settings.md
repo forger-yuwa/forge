@@ -116,6 +116,10 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 - TP 陰解法の `cfl_pseudo` は 0.5〜2 から上げる (H2O 生成エンタルピーの増幅で上限が低い)。
   定常 precond × 多成分は `speciesPrecondDt: 1` (既定)。TP 亜音速 `outlet_statPress` の γ 混用は修正済。
 - 凝縮: `condensation: 1, condEquilibrium: 2` (EOS 拘束形、厳密 S=1) が既定。蒸発は既定 ON。
+- 凝縮 (2026-09-15, plan [condensation-source-limiter-steady](../plans/active/condensation-source-limiter-steady.md)): 非平衡の θ 律速は
+  **`condLimiterMode: 1` (既定) で更新クランプ**になり、定常解が `cfl_pseudo` に依存しなくなった (旧 0 は残差に θ を掛け、大型ノズルで成長を 1/4 に絞っていた)。
+  凝縮 ON の定常 run は `output.level 2` の `condLim_<s>` が収束時に全域 ≈1、`condClampCorr_<s>` が 0 であることを確認する。
+  RK 陽解法・dual-time では自動で 0 に降格 (起動ログ `[condensation] condLimiterMode=`)。上限は `condDgMaxStep` 5e-3 / `condDTmaxStep` 1 K。
   凝縮 run は h0 保存を確認する (面温度修正済み)。onset は実験より ~5 mm 下流 (case/16 2026-09-08 比較)。
 - 凝縮 (2026-09-10, plan [condensation-kantrowitz-gamma-twophase-sonic](../plans/active/condensation-kantrowitz-gamma-twophase-sonic.md)):
   Kantrowitz 補正 (`condKantrowitz: 1`) の γ は凝縮種 (蒸気) の γ_v が既定 (`condKantrowitzGammaMode: 0`; 旧=1)。

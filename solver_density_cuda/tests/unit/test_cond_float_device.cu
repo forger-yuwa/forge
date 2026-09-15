@@ -16,6 +16,7 @@ namespace {
 }
 
 static int g_fail = 0;
+static int g_limiterMode = 0;   // 0: 旧 (残差 θ), 1: 更新クランプ (main が両方回す)
 template <class T> static T* up(const std::vector<T>& v) { T* d = nullptr; cudaMalloc((void**)&d, v.size()*sizeof(T)); cudaMemcpy(d, v.data(), v.size()*sizeof(T), cudaMemcpyHostToDevice); return d; }
 template <class T> static std::vector<T> down(const T* d, size_t n) { std::vector<T> v(n); cudaMemcpy(v.data(), d, n*sizeof(T), cudaMemcpyDeviceToHost); return v; }
 static SpeciesThermo mk(double MW,double sig,double eps,const double lo[9],const double hi[9]){
@@ -60,13 +61,13 @@ static void run_case(const char* name, int model, int carrier, const std::vector
     const int blk = 128, grd = (n + blk - 1)/blk;
     const double Rw = cp.R, M = cp.M; const float cp_cpg = 1038.8f, gamma_cpg = 1.4f;
     condensation_source_d<<<grd,blk>>>(n, model, carrier, Rw, M, kantrowitz, 0, o, carrier ? dsp : nullptr, nSp, carrier ? dYall : nullptr, carrier ? cgs : -1,
-        growthModel, 3.18, 0, evap, 1.0e-9, 0, 0.5, 0, 1.0, 5.0e-3, 10.0, cp_cpg, gamma_cpg, 1.0e35, 5.0e-3, 1.0,
+        growthModel, 3.18, 0, evap, 1.0e-9, 0, 0.5, 0, 1.0, 5.0e-3, 10.0, cp_cpg, gamma_cpg, 1.0e35, 5.0e-3, 1.0, g_limiterMode,
         dvol, ddt, dT, dP, dro, carrier ? dcp : nullptr, carrier ? dRm : nullptr, carrier ? dY1 : nullptr,
         A.rog, A.q0, A.q1, A.q2, A.rr, A.r0, A.r1, A.r2, A.sg, A.s0, A.s1, A.s2, A.dS, A.dD, A.dR, A.dT, A.dTh, A.dL);
     CondDoubleArgs dbl; dbl.opts = o; dbl.sp = carrier ? dsp : nullptr; dbl.condModel = model; dbl.Rw = Rw; dbl.M = M; dbl.twoTemp = 0;
     dbl.gyarC = 3.18; dbl.evapRmin = 1.0e-9; dbl.evapLamMin = 0.5; dbl.Jmax = 1.0e35; dbl.dg_max = 5.0e-3; dbl.dT_max = 1.0; dbl.cprops = cp;
     condensation_source_f_d<<<grd,blk>>>(n, carrier, (float)Rw, kantrowitz, 0, condProps_to_f(cp), tb, 0.0f, dbl, carrier ? dspf : nullptr, nSp, carrier ? dYall : nullptr, carrier ? cgs : -1,
-        growthModel, 3.18f, evap, 1.0e-9f, 0, 0.5f, cp_cpg, gamma_cpg, 5.0e-3f, 1.0f,
+        growthModel, 3.18f, evap, 1.0e-9f, 0, 0.5f, cp_cpg, gamma_cpg, 5.0e-3f, 1.0f, g_limiterMode,
         dvol, ddt, dT, dP, dro, carrier ? dcp : nullptr, carrier ? dRm : nullptr, carrier ? dY1 : nullptr,
         B.rog, B.q0, B.q1, B.q2, B.rr, B.r0, B.r1, B.r2, B.sg, B.s0, B.s1, B.s2, B.dS, B.dD, B.dR, B.dT, B.dTh, B.dL);
     cudaError_t e = cudaDeviceSynchronize(); if (e != cudaSuccess) { printf("CUDA error %s\n", cudaGetErrorString(e)); ++g_fail; return; }
@@ -148,7 +149,18 @@ static void run_case(const char* name, int model, int carrier, const std::vector
     rep("condTheta rel", wTh, 1.0e-5); rep("condLim abs", wL, 1.0e-4); rep("condDrdt (norm)", wD, 1.0); rep("evap-edge |dsj|dt", wEvapSj, 1.0e-4);   // 蒸発端 0.99<S<1: Δg/ΔT 律速の境界で分岐が ULP で変わる (double 摂動でも cvg の float 差で) → 1 step の陰的更新差 ≤1e-4 を実測基準に
 }
 
+static int run_all();
 int main()
+{
+    int rc = 0;
+    for (int mode : {0, 1}) {   // 0: 旧 (残差 θ), 1: 更新クランプ (残差は瞬間速度) — double/float の一致は両モードで成り立つ
+        g_limiterMode = mode; g_fail = 0;
+        printf("======== condLimiterMode %d ========\n", mode);
+        rc |= run_all();
+    }
+    return rc;
+}
+static int run_all()
 {
     // ---- H2O TP carrier (case/16 相当 Y_w=0.0113): T × S × Q0 × g、S<1 の蒸発、実 run のセル
     std::vector<State> st;

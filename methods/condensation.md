@@ -690,7 +690,7 @@ $r_*$ を僅かに割ると $dr/dt<0$ → roQ1 が負帰還で 0 へ暴走崩壊
 **本体 kernel とヤコビアン (`cond_source_vector`) の両方で同一の成長ガード ($\bar r>r_*$ のみ成長・$dr/dt\ge0$) と
 $r_{\rm nuc}$ を使う** (ヤコビアンだけガード無しだと亜臨界で過大な $\partial S/\partial Q_1$ が出て roQ1 を 0 に潰す)。
 
-`res_ro<φ> += S_φ·V` で advection 残差へ加算 (**現行は θ 倍して加算 — その Δτ 依存は §4c**)。物性は [condensationProperties_d.cuh](../solver_density_cuda/cuda_forge/condensationProperties_d.cuh)。
+`res_ro<φ> += S_φ·V` で advection 残差へ加算 (`condLimiterMode 0` [旧] は θ 倍して加算 — その Δτ 依存と現行の更新クランプは §4c)。物性は [condensationProperties_d.cuh](../solver_density_cuda/cuda_forge/condensationProperties_d.cuh)。
 
 #### 安定化 (初期実装の主眼)
 
@@ -786,22 +786,45 @@ $kRT^2\ln S/(\rho_lL^2)$ を共有し Knudsen 内挿のみ $1/(1+3.18Kn)$ に差
 
 ---
 
-### 4c. θ 律速の擬似時間刻み依存 (2026-09-15 発見) と更新クランプ化 (計画)
+### 4c. θ 律速の擬似時間刻み依存 (2026-09-15 発見) と更新クランプ化 (`condLimiterMode`, 実装済)
 
-上の θ 律速 (1 step の $\Delta g\le$ `dg_max`=5e-3、潜熱 $\Delta T=\Delta g\,L/c_v\le$ `dT_max`=1 K、蒸気枯渇) は
-$\Delta g = S_g\,\Delta\tau_{loc}/\rho$ で評価され、**その θ を定常残差のソース $S_{Q_0..Q_2},S_g$ とヤコビアン `sj_g` に掛けている**
-(`condensationSourceKernels_d.cuh`)。$\Delta\tau_{loc}$ に比例するため、定常局所時間刻み (`unsteady 0`) の収束解が `cfl_pseudo` と
-セル体積に依存する (残差 $R$ 自体が $\Delta\tau$ の関数になり固定点が動く)。
+**問題**: 旧実装の θ 律速 (1 step の $\Delta g\le$ `dg_max`=5e-3、潜熱 $\Delta T=\Delta g\,L/c_v\le$ `dT_max`=1 K、蒸気枯渇) は
+$\Delta g = S_g\,\Delta\tau_{loc}/\rho$ で評価され、**その θ を定常残差のソース $S_{Q_0..Q_2},S_g$ とヤコビアン `sj_g` に掛けていた**。
+$\Delta\tau_{loc}$ に比例するため、定常局所時間刻み (`unsteady 0`) の収束解が `cfl_pseudo` とセル体積に依存した (残差 $R$ 自体が
+$\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ スケール $S_g=\rho g(\lambda^3-1)/\Delta\tau$, $\lambda=1+\dot r\Delta\tau/r_{30}$ は
+律速が非作動でも $O(\Delta\tau)$ の項を残す。
 
 - **実測** (case/44 va3 M4.19, 6 m ノズル, node Euler TP, 入口 Tt 分布): $\Delta\tau_{loc}$ 2.6e-5 s で $\Delta T$/step ≈3.4 K → θ 0.25 (内側) /
   0.55 (壁 2 ノードは $\Delta\tau_{loc}$ が半分)。成長が内側で 1/4 に絞られ「壁第一層だけ液相が速く増える」偽の壁異常と凝縮完了の 3–4 $r_t$ 遅れになった。
   cfl_pseudo 2/1/0.5 で θ 0.25/0.5/1、出口 g 平均 0.437/0.574/0.584 % (`case/44 run_0127/0130/0131`, 図 `figs/va3_inletTt_cfl_ab.png`)。
   onset (核生成) は律速されないので Wilson 点は不変。Wysłouzil (case/16, mm ノズル) は $\Delta T$/step ≤ 0.86 K で θ≡1 → 過去検証は無影響。
-- **暫定運用**: 凝縮 ON の定常 run は `output.level 2` の `condLim_<s>` が全域 ≈1 になる `cfl_pseudo` を選ぶ (case/44 は 0.5)。
-- **修正方針** (plan [condensation-source-limiter-steady](../plans/active/condensation-source-limiter-steady.md), 未実装): θ を残差に掛けず、
-  **更新量 $\Delta(\rho\phi)$ のクランプ**に限定する (4 モーメントの増分を同率で縮める; 収束時は $\Delta\to0$ で無作用)。蒸気枯渇 ($Y_w-g\le0$ → $S=0$)
-  と $J$ 上限は $\Delta\tau$ を含まない物理条件なので残差側に残す。剛性は既存の `sj_g` (潜熱負帰還) と implicit で受ける。
-  平衡緩和形 (`condEquilibrium 1`) は固定点 $g=g_{eq}$ が $\Delta\tau$ 非依存なので構造は変えない (正本は EOS 拘束形 `condEquilibrium 2`)。
+
+**修正 (`condLimiterMode: 1`, 既定; plan [condensation-source-limiter-steady](../plans/active/condensation-source-limiter-steady.md))**:
+「答えを決める残差」から $\Delta\tau$ を消し、「1 歩の大きさ」の制限は更新側に置く。
+
+1. **残差は瞬間速度**: 核生成・成長ソースはそのまま加算 (θ 倍なし)。蒸気枯渇 ($Y_w-g\le0$ → $S=0$) と $J$ 上限だけ残す (どちらも $\Delta\tau$ を含まない)。
+   蒸発は瞬間速度形 `cond_evap_source_rate{,_f}`: $a=\dot r/r_{30}\le0$ として $S_{Q_1}=a\,q_1$, $S_{Q_2}=2a\,q_2$, $S_g=3a\,\rho g$, $S_{Q_0}=0$
+   (λ スケールの $\Delta\tau\to0$ 極限。monodisperse では成長側の $q_0\dot r,\ 2q_1\dot r,\ 4\pi\rho_l q_2\dot r$ と一致)。消滅 ($r_{30}<2r_{min}$, $Q_0=0$ の不整合) は
+   実現可能性クランプ `cond_realizability_clamp_d` が確定する (従来どおり)。ヤコビアン `sj_g`/`sj_Q1` も θ 倍なし。
+2. **更新クランプ** `cond_moment_update_limited_d` ([condensationUpdateLimiter_d.cuh](../solver_density_cuda/cuda_forge/condensationUpdateLimiter_d.cuh)):
+   定常 point-implicit 更新 (`timeIntegration 11`) で 4 モーメントの **floor 前の候補増分** $\delta_k=(R_k\Delta\tau/V)/(1+\Delta\tau(\mathrm{sj}_k+\mathrm{td}_k/V))$ を取り出し、
+   $\Delta g=\delta_g/\rho$ (更新済みの流れ $\rho$ を固定したモーメント修正量) から
+   $$\theta_u=\min\Big(1,\ \frac{dg_{max}}{|\Delta g|},\ \frac{dT_{max}}{|\Delta T|},\ \underbrace{\frac{\mathrm{avail}}{\Delta g}}_{\Delta g>0},\ \underbrace{\frac{(1-\lambda_{min}^3)\,g^{old}}{|\Delta g|}}_{\Delta g<0}\Big),\qquad
+   \Delta T=\frac{\Delta g\,L}{c_v+g(R_w-dL/dT)}$$
+   を作り、**4 本の増分を同じ $\theta_u$ で縮めてから** floor ($\rho\phi\ge0$) を掛けて確定する。$\theta_u\ge10^{-12}$ (更新を止める穴を作らない)。
+   収束時は $\delta\to0$ で $\theta_u\to1$・無作用なので、固定点は残差だけで決まる。潜熱 $\Delta T$ は二相 EOS と同じ有効比熱で評価する。
+3. **診断**: `condLim_<s>` = $\theta_u$ (収束時 ≈1 を確認する)、`condClampCorr_<s>` = floor による $\rho g$ の補正量 [質量分率] (収束時 0)。
+4. **設定**: `condDgMaxStep` (既定 5e-3) / `condDTmaxStep` (既定 1 K) / `condLimiterMode` (1: 更新クランプ [既定], 0: 旧・残差 θ [A/B 用])。
+   **RK 陽解法 (`timeIntegration` 1/3/4) と dual-time では起動時に自動で 0 に降格**する (RK は未制限残差の累積バッファを持ち、dual-time は凝縮
+   モーメントに物理時間項が無い [followups F-cf8] ため未検証)。
+5. **平衡緩和形 (`condEquilibrium 1`)** は据え置き。定常条件 $R_{transport}+V\alpha\theta\rho(g_{eq}-g)/\Delta\tau=0$ は輸送との釣り合いが
+   $\Delta\tau$ 依存 (「θ は接近速度だけ」は輸送の無い局所緩和にしか成り立たない) — 旧モデル互換の既知の制約。平衡凝縮の推奨は EOS 拘束形
+   `condEquilibrium 2` (代数拘束、$\Delta\tau$ 非依存。設定既定値は 0=非平衡)。
+
+**検証** (2026-09-15): 単体 `tests/unit/test_cond_limiter_steady.cu` — 状態固定で $\Delta\tau$ を 1e-7/1e-3 に振っても double/float 両実体の
+残差・ヤコビアンがビット一致 (H2O carrier 962 状態・N2 pure 300 状態; mode 0 は 525/169 セルで差)、更新クランプの 8 ケース。
+`test_cond_float_device.cu` は両モードで double/float 一致 PASS。CFD: case/44 入口 Tt 分布 run で mode 1 cfl 2 (`run_0132`) が旧 θ≡1 の cfl 0.5 (`run_0131`)
+と一致 (結果は plan §9 と case README)。
 
 ### 5. 一温度 二相 EOS の温度逆算 (Phase 2)
 

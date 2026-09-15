@@ -1,0 +1,80 @@
+#pragma once
+// 凝縮モーメントの更新クランプ kernel (condLimiterMode 1)。condensationTransport_d.cu と単体試験 tests/unit/test_cond_limiter_steady.cu が include する。
+#include "flowFormat.hpp"
+#include "cuda_forge/condensationProperties_d.cuh"   // CondPropOpts / condProps_make / cond_latent
+
+// 更新クランプ (condLimiterMode 1; plans/active/condensation-source-limiter-steady.md §4.2-4)。
+//   定常 point-implicit 更新 (timeIntegration 11) の 4 モーメントについて、floor 前の候補増分
+//     δ_k = (res_k Δτ/V) / (1 + Δτ (src_jac_k + transport_diag_k/V))
+//   を取り出し、Δg = δ_g/ρ (更新済みの流れ ρ を固定したモーメント修正量) から
+//     θ_u = min(1, dg_max/|Δg|, dT_max/|ΔT|, avail/Δg [Δg>0], (1−λ_min³) g_old/|Δg| [Δg<0])
+//   を作って **4 本の増分を同率で縮めてから** floor (≥0) を掛けて確定する。θ_u > 0 (更新を止める穴を作らない:
+//   avail≤0 は残差側で S=0 なので候補増分は輸送分のみ)。収束時は δ→0 で θ_u→1・無作用 = 固定点は残差だけで決まる。
+//   潜熱 ΔT は二相 EOS と同じ有効比熱 c_v,eff = c_v + g (R_w − dL/dT) で評価する。
+//   診断: diagLim = θ_u、diagCorr = floor による ρg の補正量 [質量分率] (収束時 0 を確認する)。
+__global__ void cond_moment_update_limited_d(
+    geom_int nCells, flow_float* dt_local, geom_float* vol, flow_float* ro,
+    flow_float* roY_w, double Yw_const, flow_float* T, flow_float* cp_cell, flow_float* Rmix_cell, flow_float cp_cpg, flow_float gamma_cpg,
+    int condModel, CondPropOpts opts, double dg_max, double dT_max, double lam_min,
+    flow_float* N_g, flow_float* N_Q2, flow_float* N_Q1, flow_float* N_Q0,
+    flow_float* res_g, flow_float* res_Q2, flow_float* res_Q1, flow_float* res_Q0,
+    flow_float* sj_g, flow_float* sj_Q2, flow_float* sj_Q1, flow_float* sj_Q0,
+    flow_float* td_g, flow_float* td_Q2, flow_float* td_Q1, flow_float* td_Q0,
+    flow_float* out_g, flow_float* out_Q2, flow_float* out_Q1, flow_float* out_Q0,
+    flow_float* diagLim, flow_float* diagCorr)
+{
+    geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    const double dt = (double)dt_local[ic];
+    const double v  = (double)vol[ic];
+    const double rod = (double)ro[ic];
+    // 候補増分 (floor 前) — runge_kutta_exp_scalar_d (coef 1/0/1) と同じ式
+    auto cand = [&](flow_float* res, flow_float* sj, flow_float* td) -> double {
+        const double fac = 1.0 + dt*((double)sj[ic] + (double)td[ic]/v);
+        return ((double)res[ic]*dt/v)/fac;
+    };
+    const double d_g  = cand(res_g,  sj_g,  td_g);
+    const double d_Q2 = cand(res_Q2, sj_Q2, td_Q2);
+    const double d_Q1 = cand(res_Q1, sj_Q1, td_Q1);
+    const double d_Q0 = cand(res_Q0, sj_Q0, td_Q0);
+
+    double theta = 1.0;
+    if (rod > 1.0e-20 && dt > 0.0) {
+        const double g_old = fmax((double)N_g[ic]/rod, 0.0);
+        const double dg = d_g/rod;
+        if (dg != 0.0) {
+            const CondSpeciesProps cprops = condProps_make(condModel, opts);
+            const double Td = (double)T[ic];
+            const double cpg = (cp_cell != nullptr) ? (double)cp_cell[ic] : (double)cp_cpg;
+            const double Rg  = (Rmix_cell != nullptr) ? (double)Rmix_cell[ic] : ((double)gamma_cpg-1.0)*(double)cp_cpg/(double)gamma_cpg;
+            const double cvg = fmax(cpg - Rg, 1.0e-3);
+            const double L   = cond_latent(cprops, Td);
+            const double dL  = (cond_latent(cprops, Td + 0.1) - cond_latent(cprops, Td - 0.1))/0.2;
+            const double cveff = fmax(cvg + g_old*(cprops.R - dL), 1.0e-2*cvg);
+            const double adg = fabs(dg);
+            const double adT = adg*L/cveff;
+            if (adg > dg_max) theta = fmin(theta, dg_max/adg);
+            if (adT > dT_max) theta = fmin(theta, dT_max/adT);
+            if (dg > 0.0) {
+                const double Yw = (roY_w != nullptr) ? (double)roY_w[ic]/rod : ((Yw_const > 0.0) ? Yw_const : 1.0);
+                const double avail = (roY_w != nullptr || Yw_const > 0.0) ? (Yw - g_old) : (0.99 - g_old);
+                if (avail > 0.0 && dg > avail) theta = fmin(theta, avail/dg);
+            } else if (g_old > 0.0) {
+                const double gmaxdrop = (1.0 - lam_min*lam_min*lam_min)*g_old;   // 蒸発: 半径半減/step 相当
+                if (adg > gmaxdrop) theta = fmin(theta, gmaxdrop/adg);
+            }
+            if (!(theta > 1.0e-12)) theta = 1.0e-12;   // 常に正 (停止穴なし)
+        }
+    }
+    const double ng  = (double)N_g[ic]  + theta*d_g;
+    const double nQ2 = (double)N_Q2[ic] + theta*d_Q2;
+    const double nQ1 = (double)N_Q1[ic] + theta*d_Q1;
+    const double nQ0 = (double)N_Q0[ic] + theta*d_Q0;
+    out_g[ic]  = (flow_float)fmax(ng,  0.0);
+    out_Q2[ic] = (flow_float)fmax(nQ2, 0.0);
+    out_Q1[ic] = (flow_float)fmax(nQ1, 0.0);
+    out_Q0[ic] = (flow_float)fmax(nQ0, 0.0);
+    diagLim[ic]  = (flow_float)theta;
+    diagCorr[ic] = (flow_float)((ng < 0.0 && rod > 1.0e-20) ? (-ng/rod) : 0.0);
+}
+

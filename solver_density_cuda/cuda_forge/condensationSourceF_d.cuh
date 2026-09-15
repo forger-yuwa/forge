@@ -226,6 +226,30 @@ __host__ __device__ inline float cond_evap_source_f(
     return lam;
 }
 
+// 蒸発の瞬間速度形 (condLimiterMode 1) の float 版。cond_evap_source_rate と同式 (a=ṙ/r30 を直接作るので λ≈1 の丸め問題は無い)。
+__host__ __device__ inline void cond_evap_source_rate_f(
+    const CondSpeciesPropsF& cp, const CondTablesF& tb, float T, float p_v, float rod, float g,
+    float q0, float q1, float q2,
+    int growthModel, float p_gas, float gyarC, int kelvin,
+    float* SQ0, float* SQ1, float* SQ2, float* Sg, float* r30_out, float* drdt_out)
+{
+    *SQ0 = 0.0f; *SQ1 = 0.0f; *SQ2 = 0.0f; *Sg = 0.0f; *r30_out = 0.0f; *drdt_out = 0.0f;
+    if (g <= 0.0f) return;
+    const float lnps = cond_tab_lnpsat_f(tb, T);
+    if (p_v > 0.0f && logf(p_v) > lnps) return;
+    if (q0 <= 1.0e-30f) return;
+    const float rho_l = cond_tab_rhol_f(tb, T);
+    const float r30 = cbrtf(g/((4.0f/3.0f)*COND_PI_F*rho_l*q0/rod));
+    *r30_out = r30;
+    if (!(r30 > 0.0f)) return;
+    const float drdt = cond_evap_rate_f(cp, tb, T, p_v, r30, growthModel, p_gas, gyarC, kelvin);
+    *drdt_out = drdt;
+    const float a = drdt/r30;
+    *SQ1 = a*q1;
+    *SQ2 = 2.0f*a*q2;
+    *Sg  = 3.0f*a*rod*g;
+}
+
 // 飽和温度 T_sat(p_v): 表の ln p_sat とその解析微分で Newton (前 step の値を warm start に)。
 __host__ __device__ inline float cond_Tsat_f(const CondTablesF& tb, float pv, float T_guess)
 {

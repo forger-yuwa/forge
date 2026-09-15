@@ -134,12 +134,23 @@ evaluate:
 - `full`: species = 使う全流れの組成の**和集合** (SERN なら排気 11 種 ∪ 空気 4 種 = 11–13 種)。IC は領域ごと (排気側 / 外気側) にその流れの Y ベクトルを貼り、
   BC も流れごとの `Y{s}` (または `X{s}`)。ノズルは流れが 1 つなので従来の `full` と同じ。
 - `lumped`: 各 lump が 1 擬似種。SERN の現行 `[EXH, AIR]` は `lumps: {EXH: stream inflow, AIR: stream external}` と等価 (後方互換の別名にする)。
+  内部表現は mapping (`tp_species: {mode, lumps, keep}`) に一本化し、旧文字列形式 (`pseudo` / `split_h2o` / `[EXH,AIR]`) は入力時の別名変換で受ける (競合指定は拒否; m1)。
   ノズルの `split_h2o` は `lumps: {MIXDRY: composition exclude [H2O]}, keep: [H2O]`。
-- **排気率アクセサ** `exhaust_fraction(fields, species_meta)` (`forge_design/gas/composition.py`):
-  `lumped` → $\xi = Y_{EXH}$。`full` → 元素質量分率 $Z_e=\sum_s Y_s\,w_{e,s}$ (frozen なので厳密に保存・線形) から
-  $\xi=(Z_e-Z_{e,air})/(Z_{e,exh}-Z_{e,air})$。元素 $e$ は排気と外気で差が最大のもの (H₂ 燃焼排気なら H、`|Z_{e,exh}-Z_{e,air}|` が最大の元素を自動選択;
-  power-off φ=0 で排気=空気なら $\xi$ は定義不能 → 帳簿は「排気なし」として扱う)。SERN runner の IC・warm restart (`roY0` 持ち越し)・帳簿は
-  すべてこのアクセサ経由にし、`Y0`/`SPECIES_ORDER` の直接参照を消す。
+- **流入元ラベルは独立トレーサ** (codex 再レビュー M1/M2 で元素混合分率案を撤回): `full` では排気率 ξ を **受動スカラ `roXi` (排気 1 / 外気 0) として輸送**する
+  (既存の汎用スカラ輸送コア `ScalarTransportDesc` を流用: 登録・入口 Dirichlet (排気入口 1, 外気入口 0)・point-implicit 更新・残差列・restart まで含める。拡散は
+  化学種と同じ混合平均 `Sc`)。`lumped` では ξ = Y_EXH で同じアクセサ `exhaust_fraction(run)` が返す。元素混合分率 $Z_e$ は**診断のみ**
+  (二流体線形混合からのずれの指標; 差動拡散があると元素ごとに ξ が異なり、`Y=ξY_{exh}+(1-ξ)Y_{air}` は復元できない。power-off φ=0 でも入口流は
+  あるので「排気なし」に置換せず、トレーサはそのまま入口由来率を保つ。元素診断は $|Z_{e,exh}-Z_{e,air}|$ が小さい近退化では「定義不能」を返し、float32 の
+  保存だけで ξ 誤差が 7e-5 になる増幅 (1/|ΔZ| ≈ 2500, m4_off の N) を上限で拒否)。
+- **流れごとの質量配分が正本** (M3): 各流れ (排気 / 外気 / ノズルなら単一流れ) について `keep` の種を先に取り出し、残りをその流れの lump に配分する。
+  純排気でも `keep: [H2O]` があれば $Y_{EXH}=1-Y_{H2O}$ (m6_on: $Y_{H2O}$ 0.2411, lump 0.7589) なので ξ を擬似種名に依存させない (上のトレーサ)。
+  未配分・二重配分・空 lump は入力段階で拒否。**lump→実種の展開行列** と **流れ→輸送種の入口ベクトル** を run に保存する。
+- **機械可読メタデータ** (M5): `species_meta.yaml` (run dir) に 実種の原子組成 (CEA `thermo.inp` の元素欄から取得、別名解決後も保持)、lump の構成比、各流れの
+  正規化済み組成、輸送種順序、トレーサの有無を書く。後処理・restart は問題 YAML を再解釈せず、この保存情報を使う。`ResolvedSpeciesDB` に原子組成を持たせ、
+  `cea_thermo_to_species_db.py` が元素欄を出力する。
+- **restart 経路** (M4): `runner_sern.py` の `restart_by_index()` (7 変数のみコピー) と `runner_sern3d.py` の `warm_from_same_mesh()` は種保存量を落としている
+  (ΣY が壊れる既存バグ)。両関数を全種・トレーサ込みにし、§6 に「段階切替直前・直後の全 `roY{s}`・ΣρY/ρ・T の保持」試験を追加する。作動点変更時
+  (m6_on→m10_on) の組成再構成は**情報を落とす初期化操作**として別契約 (`convert_species_field.py`) にする。
 - **コスト**: SERN 3D SST で `full` は輸送方程式 2 → 11–13 本。step 時間は +50–100 % の見込み (chem ブランチの 13 種実績から)。MOO の探索は `lumped`、
   最終評価や凝縮・化学の前段は `full`、と run ごとに選べるのが目的なので既定は変えない (SERN 既定 `lumped`、ノズル既定は従来 `pseudo` 相当)。
 - **熱力学の等価性**: `full` と `lumped` は「各 lump の内部比が空間的に一定」のとき厳密に同じ (§3)。SERN では排気と外気が混合する層で
@@ -151,7 +162,8 @@ evaluate:
 2. `design/forge_design/gas/composition.py` (新: `mole_to_mass`/`mass_to_mole`、`ResolvedSpeciesDB`)、`semiperfect.py` を解決済み DB 経由に、`mixture_pseudo_species_split` の一般化 (`name`, `keep` 任意)、DB コメント。`frozen.mole_to_mass` は委譲。
 3. `design/forge_design/probdef.py`: `composition_basis`, `condensing_species`, `species_db` (YAML 所在基準) の読み込みと検証 (§4.1–4.2 の拒否条件)。
 4. `design/forge_design/evaluate/runner_axismach.py` (+ `runner.py`): `_tp_species_list` / `_tp_species_Y` / `_apply_gas_to_config` を統一スキーマ (`full | lumped`, `lumps`, `keep`) に。
-4b. `design/forge_design/evaluate/runner_sern.py`: `SPECIES_ORDER` 固定を撤去し統一スキーマへ (`frozen_gases` は流れごとの `FrozenGas` + 解決済み DB、`paste_region_ic` / BC / `warm_from_run` は `exhaust_fraction` アクセサと流れごとの Y ベクトルで)。`[EXH, AIR]` は `lumps` の別名で後方互換。
+4b. `design/forge_design/evaluate/runner_sern.py` / `runner_sern3d.py`: `SPECIES_ORDER` 固定を撤去し統一スキーマへ (`frozen_gases` は流れごとの `FrozenGas` + 解決済み DB、`paste_region_ic` / BC / `warm_from_run` は流れ→輸送種の入口ベクトルとトレーサで)。`restart_by_index` / `warm_from_same_mesh` を全種・トレーサ込みに修正。`[EXH, AIR]` は別名で後方互換。
+4c. forge: 排気トレーサ `roXi` (`physProp.tracer: exhaust` で有効化; 汎用スカラ輸送コアで登録・入口 Dirichlet・point-implicit 更新・残差列 `rms_roXi`・出力・restart)。`full` の SERN 評価器はこれを排気率に使う。
 5. forge: host DB 解決、`boundaryCond.cpp` の `X{s}` → `Y{s}` 換算と検証、species 表ログ、凝縮種名と index の一致検査、残差 CSV の `rms_roY{s}` 列、`interp_field.py` の種名照合。
 5b. `tools/convert_species_field.py` (種変換 restart, §2) と `cea_thermo_to_species_db.py --check` の全種照合・失敗終了化。
 6. `solver_density_cuda/tools/gen_inlet_profile.py` `--X`、`tools/forge_species.py`、`axis_csv_va.py` / `total_quantities.py` の index 参照。
@@ -165,7 +177,8 @@ evaluate:
 | 2 | docs 先行更新 | ステップ 1 |
 | 3 | 共通基盤 (解決済み DB・換算・凝縮種名正本) | ステップ 2–3 + 単体試験を **CFD 回帰より前に** |
 | 4 | 設計チェーン統一スキーマ (ノズル) | ステップ 4 |
-| 4b | SERN の統一 (`SPECIES_ORDER` 撤去, 排気率アクセサ, 領域 IC) | ステップ 4b。既存 case/46 run との後方互換 (`[EXH,AIR]` 別名) を回帰で確認 |
+| 4b | SERN の統一 (`SPECIES_ORDER` 撤去, 流れごとの質量配分, 領域 IC, restart 経路の全種化) | ステップ 4b。既存 case/46 run との後方互換 (`[EXH,AIR]` 別名) を回帰で確認 |
+| 4c | 排気トレーサ `roXi` (forge) と `species_meta.yaml` | ステップ 4c + §4.5 メタデータ。元素混合分率は診断のみ |
 | 5 | forge 入力 `X{s}`・種名検査・`rms_roY`・restart 照合 | ステップ 5 |
 | 5b | 種変換 restart ツールと CEA `--check` 修正 | ステップ 5b (case/44 の旧 2 種場を 5 種へ移すのに必須) |
 | 6 | 後処理・ParaView 配列解決 | ステップ 6 |
@@ -188,15 +201,19 @@ evaluate:
   3. モル分率入力: `composition_basis: mole` で作った run の `species_db.yaml`/`bcondConfig.yaml` が解析後の値で一致。
   4. forge `X{s}`: bcond を `X0..X4` で書いた run が `Y` 版と `res_*.h5` でノイズ床以内。
   5. CEA 直読み DB: `gas.species_db` を渡した run は**その DB を正本**として設計・CFD が同じ係数を使うこと (prepare_info と species_db.yaml の出典で確認)。内蔵転記との「同一 run」は要求しない。
-- **SERN (case/46, 2D 小メッシュの frozen_tp 作動点 1 点, node)**: (i) `lumps: {EXH, AIR}` 指定が現行 `[EXH, AIR]` run と `res_*.h5` でノイズ床以内 (後方互換);
-  (ii) `full` (11–13 種) と `lumped` の非粘性 frozen 比較で、ノズル力・機体力・出口運動量が相対 1e-3 以内、排気率 $\xi$ (元素混合分率) と $Y_{EXH}$ の場が 1e-6 以内;
-  (iii) `rms_roY{s}` 込みで `check_convergence` PASS、`ΣY=1±1e-6`; (iv) step 時間の比 (記録のみ)。
+- **SERN (case/46)** (codex 再レビュー M6 を反映):
+  - 単体: powered / power-off (m4_off: 燃料なしでも入口流あり) / 微小組成差 (既定外気 `AIR_MOLE` と作動点の空気) / `keep` 併用 / 種順序変更 で、流れごとの質量配分・展開行列・入口ベクトル・トレーサ BC が意図どおり。元素診断は近退化で「定義不能」を返す。
+  - restart: 同一条件 restart (段階切替直前・直後) で全 `roY{s}`・トレーサ・ΣρY/ρ・T が保持される; 作動点変更 (m6_on→m10_on) は `convert_species_field.py` 経由で ΣρY=ρ・T 保存を検査。既存 `restart_by_index` の欠落修正による差は後方互換比較から分離して記録。
+  - 2D node Euler 作動点 1 点: (i) `lumps: {EXH, AIR}` 指定が現行 `[EXH, AIR]` run とノイズ床以内; (ii) `full` と `lumped` の非粘性 frozen 比較でノズル力・機体力・出口運動量が相対 1e-3 以内 (ゼロ近傍の力は $F_{ideal}$ 基準の絶対許容差)、トレーサ ξ と $Y_{EXH}$ の場が 1e-6 以内; 比較する両 run は全種残差込み `check_convergence` PASS (`require_residual_pass=True`)、全種の有限性・非負性、力の時系列 STEADY を**比較許容差より十分小さい変動幅** (drift/fluct 0.1 %; 既存 sern_forces の 2 %/5 % は不可) で要求。
+  - 小型粘性二流体ケース (差動拡散あり): トレーサ ξ と元素混合分率が乖離することを確認し、`full`≠`lumped` の差を記録 (等価性は要求しない)。
+  - 3D 経路: `runner_sern3d.warm_from_same_mesh` の全種保持を 1 段で確認。step 時間の比は記録のみ。
 - **判定基準**: 上のゲート + `check_convergence.py` / `check_quasisteady.py` VERDICT 添付。step 時間の増分 (+3 輸送式) は記録のみ。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan (再: §4.5 SERN) | `2026-09-15` | [2026-09-15-thermophysics-cea-mole-fraction-species-plan-2.md](../../notes/reviews/2026-09-15-thermophysics-cea-mole-fraction-species-plan-2.md) | GO-with-changes, C0/M6/m1 | **全採用**: M1/M2 (元素混合分率では流入元を復元できない・power-off 退化) → 排気率は独立トレーサ `roXi`、元素は診断のみ (§4.5, §5-4c); M3 (stream lump と keep の質量配分) → 流れごとの配分正本 (§4.5); M4 (`restart_by_index`/`warm_from_same_mesh` が roY を落とす) → §4.5, §5-4b, §6; M5 (元素メタデータ) → `species_meta.yaml` (§4.5); M6 (SERN 検証ゲート) → §6; m1 (スキーマ一本化・完了条件) → §4.5, §8 |
 | plan | `2026-09-15` | [2026-09-15-thermophysics-cea-mole-fraction-species-plan.md](../../notes/reviews/2026-09-15-thermophysics-cea-mole-fraction-species-plan.md) | GO-with-changes, C0/M8/m2 | **全採用**: M1 (解決済み DB を全経路へ) → §4.1; M2 (凝縮種は名前正本・拒否条件) → §4.2, §2; M3 (種変換 restart・照合) → §2, §5.1 #5b; M4 (X 入力契約) → §4.3; M5 (ParaView 配列を名前解決) → §4.4; M6 (等価性の適用条件) → §3, §6; M7 (CEA と転記の差, --check 修正) → §3, §5.1 #5b; M8 (収束小型ケース node/cell, rms_roY 列, series ゲート, 世代固定) → §6; m1 (frozen.mole_to_mass 委譲, SERN 対象外) → §2, §4.1; m2 (rtol/atol) → §6 |
 
 ## 7. 影響範囲
@@ -209,7 +226,7 @@ evaluate:
 ## 8. 完了条件
 
 - [ ] 関連 methods を更新済み
-- [ ] 実装・§6 の検証 1–5 を満たす
+- [ ] 実装・§6 の検証 (単体 / 小型収束ケース / case/44 1–5 / SERN 一式) を満たす
 - [ ] codex レビュー 2 回を §6.1 に記録し、Critical / Major の採否を §5.1 に反映済み
 - [ ] `status: done`、§9 に変更ログ
 - [ ] `plans/active/` → `plans/accepted/`、`plans/README.md` 同期
@@ -217,7 +234,8 @@ evaluate:
 ## 9. 変更ログ
 
 - `2026-09-15` — 初稿 (ユーザ要望: MIXDRY の中身を明示・ユーザ指定可能に、CEA ベースでモル分率指定)。
-- `2026-09-15` — ユーザ決定: SERN もノズル設計も `full | lumped` を run ごとに選べる統一スキーマにする (§4.5)。排気率は `lumped` で $Y_{EXH}$、`full` で元素混合分率。§4.5 は codex に再レビュー依頼。
+- `2026-09-15` — ユーザ決定: SERN もノズル設計も `full | lumped` を run ごとに選べる統一スキーマにする (§4.5)。
+- `2026-09-15` — codex 再レビュー (§4.5, GO-with-changes M6/m1) を全採用: 排気率は元素混合分率でなく独立トレーサ `roXi` (元素は診断のみ)、流れごとの質量配分正本、`species_meta.yaml`、SERN restart 経路の全種化、SERN 検証ゲート強化、スキーマ一本化。
 - `2026-09-15` — codex plan レビュー (GO-with-changes, M8/m2) を全採用: 解決済み DB の一元化、凝縮種の名前正本化と拒否条件、種変換 restart、X 入力契約、ParaView 配列解決、等価性条件の限定、CEA/転記差の扱い、収束ゲート。
 
 ## 10. 未確定事項

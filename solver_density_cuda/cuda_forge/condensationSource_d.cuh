@@ -308,3 +308,32 @@ __host__ __device__ inline double cond_evap_source(
     *Sg  = (lam3 - 1.0)*rod*g/dt;
     return lam;
 }
+
+// 蒸発の瞬間速度形 (condLimiterMode 1; plans/active/condensation-source-limiter-steady.md §4.2-2)。
+//   上の λ スケール (Q1→λQ1, Q2→λ²Q2, g→λ³g) の Δτ→0 極限: a = ṙ/r30 (≤0) として
+//   S_Q1 = a q1, S_Q2 = 2a q2, S_g = 3a ρg, S_Q0 = 0 (数密度は消滅まで保存。消滅 r30<2 r_min と Q0=0 の不整合は
+//   実現可能性クランプ cond_realizability_clamp_d が確定する)。monodisperse (q1=q0 r30, q2=q0 r30²) では成長側の
+//   S_Q1=q0 ṙ, S_Q2=2 q1 ṙ, S_g=4πρ_l q2 ṙ と一致する。**Δτ を含まない** ので定常固定点は歩幅に依存しない。
+//   Δg/潜熱 ΔT/半径半減の 1 step 上限は更新クランプ (cond_moment_update_limited_d) が掛ける。
+__host__ __device__ inline void cond_evap_source_rate(
+    const CondSpeciesProps& cp, double T, double p_v, double rod, double g,
+    double q0, double q1, double q2,
+    int growthModel, double p_gas, double gyarC, int kelvin,
+    double* SQ0, double* SQ1, double* SQ2, double* Sg, double* r30_out, double* drdt_out)
+{
+    *SQ0 = 0.0; *SQ1 = 0.0; *SQ2 = 0.0; *Sg = 0.0; *r30_out = 0.0; *drdt_out = 0.0;
+    if (g <= 0.0) return;
+    const double psat = cond_psat(cp, T);
+    if (p_v > psat) return;                              // 過飽和: 蒸発分岐ではない
+    if (q0 <= 1.0e-30) return;                           // 液滴数 0 (不整合) → クランプで消滅
+    const double rho_l = cond_rho_cond(cp, T);
+    const double r30 = cbrt(g/((4.0/3.0)*COND_PI*rho_l*q0/rod));  // q0/rod = Q0 [1/kg]
+    *r30_out = r30;
+    if (!(r30 > 0.0)) return;
+    const double drdt = cond_evap_rate(cp, T, p_v, r30, growthModel, p_gas, gyarC, kelvin);
+    *drdt_out = drdt;
+    const double a = drdt/r30;                           // ≤ 0 [1/s]
+    *SQ1 = a*q1;
+    *SQ2 = 2.0*a*q2;
+    *Sg  = 3.0*a*rod*g;
+}

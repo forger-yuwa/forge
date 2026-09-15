@@ -984,6 +984,15 @@ cudaConfig initializeSimulation(
             cout << "[condensation] condSonicModel=" << resolved << " (" << reason << ")\n";
             if (!warn.empty()) cout << "[condensation] WARNING: " << warn << "\n";
             // 読込後の実効値 (省略時既定の確認用; codex 2026-09-13 carrier result M3): condKantrowitz 0=補正なし/1=Kantrowitz/2,3=Feder carrier
+            if (cfg.condLimiterMode == 1 && (cfg.timeIntegration != 11 || cfg.dualTime != 0)) {
+                // 更新クランプ経路は定常 point-implicit (timeIntegration 11, dual-time なし) だけで検証済み。RK 陽解法は未制限残差の
+                // 累積バッファを持ち、dual-time は凝縮モーメントに物理時間項が無い (followups F-cf8) ので旧経路に降格する。
+                cout << "[condensation] condLimiterMode 1 is verified for steady timeIntegration 11 only; falling back to 0 (legacy residual theta) for this run\n";
+                cfg.condLimiterMode = 0;
+            }
+            cout << "[condensation] condLimiterMode=" << cfg.condLimiterMode
+                 << (cfg.condLimiterMode == 1 ? " (theta clamps the moment update; residual source is pseudo-time-step independent)" : " (legacy: theta multiplies the residual source)")
+                 << " condDgMaxStep=" << cfg.condDgMaxStep << " condDTmaxStep=" << cfg.condDTmaxStep << "\n";
             cout << "[condensation] condKantrowitz=" << cfg.condKantrowitz << " condKantrowitzGammaMode=" << cfg.condKantrowitzGammaMode
                  << " condSigmaScale=" << cfg.condSigmaScale << " condVaporMassFraction=" << cfg.condVaporMassFraction
                  << " condN2LatentLowT=" << cfg.condN2LatentLowT << " condN2PsatLowT=" << cfg.condN2PsatLowT << " condN2LiquidCp=" << cfg.condN2LiquidCp << "\n";

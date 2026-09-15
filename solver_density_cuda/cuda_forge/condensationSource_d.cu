@@ -31,8 +31,9 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
     const double M  = cprops.M;
     const double Rw = cprops.R;
     const double Jmax   = 1.0e35;
-    const double dg_max = 5.0e-3;
-    const double dT_max = 1.0;
+    const double dg_max = cfg.condDgMaxStep;   // 1 更新あたりの上限 (mode 1 では更新クランプ、mode 0 では残差 θ)
+    const double dT_max = cfg.condDTmaxStep;
+    const int limiterMode = cfg.condLimiterMode;
     const double evapLamMin = 0.5;   // 蒸発: 1 step の半径縮小比の下限 (半減)。§5.1-3
 
     for (int s = 0; s < var.nCondSpeciesRegistered; ++s) {
@@ -59,7 +60,7 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
                 cfg.condGrowthModel, (float)cfg.condGyarmathyC,
                 cfg.condEvaporation, (float)cfg.condEvapRmin, cfg.condEvapKelvin, (float)evapLamMin,
                 cfg.cp, cfg.gamma,
-                (float)dg_max, (float)dT_max,
+                (float)dg_max, (float)dT_max, limiterMode,
                 var.c_d["volume"], var.c_d["dt_local"],
                 var.c_d["T"], var.c_d["P"], var.c_d["ro"], cp_cell, Rmix_cell,
                 roY_w,
@@ -80,7 +81,7 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
             cfg.condEvaporation, cfg.condEvapRmin, cfg.condEvapKelvin, evapLamMin,
             cfg.condEquilibrium, cfg.condEqRelax, cfg.condEqDgMax, cfg.condEqDTmax,
             cfg.cp, cfg.gamma,
-            Jmax, dg_max, dT_max,
+            Jmax, dg_max, dT_max, limiterMode,
             var.c_d["volume"], var.c_d["dt_local"],
             var.c_d["T"], var.c_d["P"], var.c_d["ro"], cp_cell, Rmix_cell,
             roY_w,
