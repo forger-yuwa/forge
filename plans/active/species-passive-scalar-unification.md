@@ -158,9 +158,9 @@
 | --- | --- | --- |
 | 1 | ~~調査 (コード地図) と §4 の具体化~~ | 済 (2026-09-17): §4.0–4.5 |
 | 2 | ~~codex plan レビュー~~ | 1 回目 NO-GO (C1/M7/m1)、2 回目 **GO-with-changes (M6)** を全採用 (§6.1)。実装着手可 (2026-09-17) |
-| 3 | docs 先行更新 | ステップ 1 |
-| 4 | 原因確認 (node): S3 発散再現 (S2/S3 × coupling 0/1, cfl 4) と `run_0104` 差の段階比較 | ステップ 2 |
-| 5 | 受動種基盤 (ステップ 3) | トレーサ・モーメント、周期・ピン・floor 診断 |
+| 3 | ~~docs 先行更新~~ | 済 (2026-09-17, a8745508): thermophysics §5b/§5, condensation §4, convection/theory, time_integration/theory |
+| 4 | 原因確認 (node): S3 発散再現 (S2/S3 × coupling 0/1, cfl 4) と `run_0104` 差の段階比較 | 進行中 (2026-09-17, 調査エージェント; 実装 Phase A と並行) |
+| 5 | 受動種基盤 (ステップ 3) + S3 安定化キー (ステップ 4) | 実装中 (2026-09-17, Phase A: 別 build dir `build-passive`; 既定 build は原因確認に使用中) |
 | 6 | S3 本番化 (ステップ 4) | 増分緩和、`scalarCflMax`、固定点不変 |
 | 7 | dual-time 移植 + 受動種 BDF (ステップ 5) | 処理順・履歴・restart |
 | 8 | 検証 (§6 1–8, node のみ) と codex result レビュー | 完了条件 §8 |
