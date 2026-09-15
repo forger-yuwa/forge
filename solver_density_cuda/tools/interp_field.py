@@ -138,6 +138,8 @@ def main():
                 # 凝縮モーメント (原始 g_<s>,Q0_<s>.. → 保存 rog_<s>,roQ0_<s>..)。2026-08-17
                 if key.startswith(("g_", "Q0_", "Q1_", "Q2_")):
                     fields["ro"+key] = ro*np.array(V[key])
+            if "roXi" not in fields and "Xi" in V:   # 原始量 Xi しか無い res: ρ·Xi で転送 (codex result-5 M1)
+                fields["roXi"] = ro*np.clip(np.array(V["Xi"], dtype=np.float64), 0.0, 1.0)
         else:                                  # input (conserved)
             fields = {n: np.array(V[n]) for n in
                       ["ro","roUx","roUy","roUz","roe","roK","roOmega"] if n in V}
@@ -146,6 +148,13 @@ def main():
                     fields[key] = np.array(V[key])
                 if key.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")) or key == "roXi":
                     fields[key] = np.array(V[key])
+
+    # 検査で要求した保存量が転送配列に揃っているか (書込み前; codex result-5 M1)
+    if src_sig is not None:
+        from forge_species import required_conserved
+        lack = [n for n in required_conserved(src_sig) if n not in fields]
+        if lack:
+            raise SystemExit(f"[interp_field] REFUSED: 転送配列に必須の保存量が無い: {lack}")
 
     tree = cKDTree(cs)
     with h5py.File(a.dst, "r+") as d:
