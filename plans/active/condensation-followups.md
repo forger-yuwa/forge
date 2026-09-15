@@ -60,6 +60,7 @@
 | F-cf8 | **凝縮モーメント (rog, roQ0..2) に dual-time の物理時間項が無い** (2026-09-15, codex plan レビュー M4 of condensation-source-limiter-steady): BDF 残差・対角・時間レベルシフトは平均流 5 変数と roK/roOmega のみで、モーメントはサブ反復ごとに N/M を現在値へコピーし定常と同じ point-implicit 更新。物理 Δt を小さくしてもモーメントがその物理時間で積分される保証がない。物理履歴・BDF 残差・対角を整備し、物理 Δt 半減とサブ反復数変更で検証する | **plan [species-passive-scalar-unification](species-passive-scalar-unification.md) §4.3 で対応中 (2026-09-17)** |
 | F-cf9 | 旧経路 `condLimiterMode 0` (残差に θ を掛ける・λ スケール蒸発) の削除時期 (2026-09-16, plan condensation-source-limiter-steady §4.2-6): 回帰 (Arthur/Wysłouzil/case/44) が新既定で揃った後、A/B 用途が無ければ削除。RK 陽解法・dual-time は自動降格で旧経路に依存しているので、F-cf8 (物理時間項) と RK の更新クランプ試験を先に済ませる | 未着手 |
 | F-cf10 | **低 cfl_pseudo での凝縮 onset 域の過渡減衰が擬似時間比より大きく遅い** (2026-09-16, plan condensation-source-limiter-steady §9 交差 restart `case/44 run_0177`–`0180`): cfl 0.5 系の成長遅れ (g L1 ~1.5e-3) は cfl 2 の restart では 8000 step までに大部分が減衰し 24000 step で反復床内になるが、cfl 0.5 では 1 世代 24000 step あたり ~1e-4 しか減衰しない (擬似時間比 4 倍を大きく超える差)。交差 restart では共通の最終場を指定ノイズ床内で維持・再現できた (cfl 2 の場は cfl 0.5 でも床内) ので実用上は「凝縮 run は cfl 2 で回す」で足りるが、**低 cfl 系列に履歴差が残る機構は未同定** (codex result-6 m1): (i) 点陰解法 (block-DPLUR + point-implicit モーメント) の低 cfl 側の減衰率 (モーメントの src_jac/transport_diag と流れの結合、壁ノードの半 dt)、(ii) `cond_moment_update_limited_d` が増分加算後に `flow_float` へ丸めるため θ_u>0 でも保存値が変わらない停滞 — **更新前増分 (δ_k θ_u) と丸め後の変化量を凝縮域で比較する計測**を先に行い、丸め停滞なら double 累積 (または Kahan) を検討する | 未着手 |
+| F-cf11 | **node TP-SST の case/28 (He/空気 coaxial) baseline が restart 後 ~1500–3000 step で上境界 `outlet_statPress`/軸から発散** (2026-09-17, plan species-passive-scalar-unification §9 `run_0064`–`0078`): 化学種オプションに依らず rms_roe 主導で NaN。候補は `thermoHrefTemp` 無し (絶対基準 h で χ_eos 桁違い; [[isobutane-wt-semiperfect]] と同じ指紋) と上境界の `outlet_statPress`。S3 の定量 A/B をこの case で行う前に datum 298.15 K と出口 BC で再試行する | 未着手 |
 
 ## 6. 検証
 
@@ -86,6 +87,7 @@
 - `2026-09-16` — F-cf9 追加 (旧 condLimiterMode 0 の削除時期)。
 - `2026-09-16` — F-cf10 追加 (低 cfl での onset 域過渡の遅い減衰; 固定点は非依存)。
 - `2026-09-17` — F-cf8 は plan species-passive-scalar-unification (受動スカラの化学種経路化 + dual-time BDF) で実施。
+- `2026-09-17` — F-cf11 追加 (case/28 node TP-SST baseline の発散)。
 - `2026-09-15` — F-cf8 追加 (凝縮モーメントの dual-time 物理時間項, codex M4)。
 - `2026-09-15` — F-cf7 追加: θ 律速の dt_local 依存 (定常解が擬似 CFL に依存) を case/44 入口 Tt 分布 run の CFL A/B で確定。修正方針を記載、実装は未着手。
 

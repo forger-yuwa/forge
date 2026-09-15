@@ -59,9 +59,11 @@
 ### 4.0 前提と仮説 (調査 2026-09-17, codex plan レビュー反映)
 
 - 本番の化学種移流は 1 次 (§3)。本 plan の「2 次化」= S3 を化学種・受動種の両方で node 本番化すること。
-- case/46 `run_0104` の同一 run 内 |ξ − Y_EXH| (最大 1.8e-4, 平均 4.6e-7; 最大点は Xi 0.99982 vs Y0 1.0) の原因は**未確定の仮説**: 化学種だけの更新後
-  非負化 + ΣρY=ρ 再正規化 (`species_renormalize_d`)、トレーサだけの primitive 段クランプ (0≤roXi≤ρ を保存量に書き戻す)、fused/single カーネルの加算順。
-  §6-1 の段階比較 (凍結流れ・同一 IC/BC で残差 → 更新前後 → 再正規化前後 → クランプ前後) で切り分け、共通化で一致する条件 (同じ更新写像・同じ拡散係数) を確定する。
+- case/46 `run_0104` の同一 run 内 |ξ − Y_EXH| (最大 1.8e-4, 平均 4.6e-7) の原因は**段階比較で確定 (2026-09-17, `run_0107`/`0108`; §9)**: 移流残差
+  (差 1.2e-7 / スケール 2.2e-5)・`transport_diag`・入口ピン・point-implicit の生更新 (差 4.3e-8) は float 精度で同一で、差は**化学種だけの ΣρY=ρ 再正規化
+  (`species_renormalize_d`) が全て** (1.40e-4 = 全体; 副次的にトレーサだけの primitive クランプ 3.9e-5)。発生点はカウル後縁の純排気ノード (raw Y_AIR = 0, Σraw/ρ − 1 = 1.4e-4
+  → Y_EXH を 1.0 に押し上げる) で、正体は block-DPLUR の δρ と 1 次 point-implicit の δ(ρY) の不整合 (限界サイクル上で残差 ≠ 0 の間は消えない)。
+  よって統一経路では受動種を再正規化から除外するのが正しく、lumped の Y_EXH は残差が消えるまでこの不整合を持ち続ける (§6-1 の一致ゲートは再正規化を受けない比較種に限る)。
   `full` と `lumped` は別の流れを解くので機械精度一致は要求しない。
 
 ### 4.1 受動種の表現 (化学種経路の再利用)
@@ -106,9 +108,15 @@
 ### 4.2 S3 の本番化 — 完全な 2 次残差 + 増分緩和 (codex plan C1/M2 反映)
 
 - **残差は常に完全な $R_2$** (面再構成した流束の総和)。残差のブレンドや deferred-correction 係数は使わない (固定点が変わる)。
-- 安定化は**増分と擬似 Δτ に限定**: (i) 受動種の segregated 更新に `passiveImplicitRelax` (既定 = `implicitRelax`) を掛ける (`passiveScalarScheme 1` のみ; 旧経路 0 は緩和なし
-  = ビット不変); **化学種の segregated 更新の緩和は独立キー `speciesImplicitRelax` (既定 1.0 = 現行と同じ写像)** とし、受動種の切替とは分離する (codex plan-2 M5)。
-  無影響試験には `implicitRelax 0.7` の run を含める。(ii) 保険として化学種/受動種だけ擬似 Δτ を絞る `scalarCflMax` (既定なし; 物理時間項は変えない)。
+- **原因確認の結果 (2026-09-17, node case/28 `run_0064`–`0078`; §9)**: S3 の発散は **`speciesImplicitCoupling 0` (segregated point-implicit, LHS = 1 次風上 `transport_diag`,
+  緩和なし) に固有**で、組成せん断層で化学種残差が 50–80 step で成長し cfl 4 で step 402 / cfl 6 で step 165 に NaN。**S3 + coupling 1 (scalar-DPLUR [近傍結合の陰解法
+  sweep], relax 0.7) は cfl 2/4/6 で S3 固有の発散が無く** (化学種残差は ×0.7 に減少)、baseline の別問題 (下記) で死ぬまで走る。cell の `run_0052` (S3+c1 で発散) とは逆で、
+  §10 の contingency は反転する: **脆弱なのは受動種が使う予定だった segregated 更新の方**。
+- したがって安定化は次の順で入れる: (i) **受動種も化学種の scalar-DPLUR sweep (`species_dplur_sweep_d`) に乗せる** (`passiveImplicitCoupling 1`, S3 時の既定;
+  受動種ポインタ配列でそのまま呼べる。coupling 2 の EOS 結合には入れない); (ii) segregated 更新 (`passiveImplicitCoupling 0`) は `passiveImplicitRelax`
+  (既定 = `implicitRelax`) で増分を緩和 (`passiveScalarScheme 1` のみ; 旧経路 0 は緩和なし = ビット不変); **化学種の segregated 更新の緩和は独立キー `speciesImplicitRelax`
+  (既定 1.0 = 現行と同じ写像)** (codex plan-2 M5)。無影響試験には `implicitRelax 0.7` の run を含める。(iii) 保険として化学種/受動種だけ擬似 Δτ を絞る `scalarCflMax`
+  (既定なし; 物理時間項は変えない)。S3 の本番推奨は「coupling 1 + relax 0.7」を基本にし、coupling 0 + S3 は緩和/上限付きでのみ許す。
 - **実装前の原因確認 (node)**: case/28 の S3 発散は cell・`speciesImplicitCoupling 1`・relax 0.7 の条件だった。node の同一 IC/BC で S2/S3 × coupling 0/1 の 4 組を cfl 4 で回し、
   発散の有無・最初の NaN の位置・更新方式との対応を記録してから設計を確定する (発散が coupling 1 [scalar-DPLUR] 固有なら受動種 [coupling 0 相当] は無関係)。
 - 固定点不変の検証 (codex plan-2 M4): `run_0471` は組成がほぼ一様 (max−min 3e-8〜7e-7) で組成再構成の寄与が丸め程度なので**無影響回帰にのみ使う**。固定点ゲートには
@@ -159,7 +167,7 @@
 | 1 | ~~調査 (コード地図) と §4 の具体化~~ | 済 (2026-09-17): §4.0–4.5 |
 | 2 | ~~codex plan レビュー~~ | 1 回目 NO-GO (C1/M7/m1)、2 回目 **GO-with-changes (M6)** を全採用 (§6.1)。実装着手可 (2026-09-17) |
 | 3 | ~~docs 先行更新~~ | 済 (2026-09-17, a8745508): thermophysics §5b/§5, condensation §4, convection/theory, time_integration/theory |
-| 4 | 原因確認 (node): S3 発散再現 (S2/S3 × coupling 0/1, cfl 4) と `run_0104` 差の段階比較 | 進行中 (2026-09-17, 調査エージェント; 実装 Phase A と並行) |
+| 4 | ~~原因確認 (node)~~ | 済 (2026-09-17): S3 発散は coupling 0 固有 (case/28 node `run_0064`–`0078`)、1.8e-4 は再正規化が全て (case/46 `run_0107`/`0108`) → §4.0/§4.2 に反映。副産物: node TP-SST の case/28 baseline 自体が上境界/軸で ~1500–3000 step 後に発散する別問題 (§10) |
 | 5 | 受動種基盤 (ステップ 3) + S3 安定化キー (ステップ 4) | 実装中 (2026-09-17, Phase A: 別 build dir `build-passive`; 既定 build は原因確認に使用中) |
 | 6 | S3 本番化 (ステップ 4) | 増分緩和、`scalarCflMax`、固定点不変 |
 | 7 | dual-time 移植 + 受動種 BDF (ステップ 5) | 処理順・履歴・restart |
@@ -221,6 +229,7 @@
 
 ## 9. 変更ログ
 
+- `2026-09-17` — **原因確認 (実装前, node)**: (A) case/28 He/空気 coaxial を node 変換し `run_0065` (cfl 2) の場から S2/S3 × coupling 0/1 × cfl 2/4/6 (`run_0066`–`0078`, relax 0.7): S3 + coupling 0 は組成せん断層で化学種残差が先に成長し cfl 4 step 402 / cfl 6 step 165 で NaN、cfl 2 は緩やか (onset 334); S3 + coupling 1 は cfl 2/4/6 とも S3 固有の発散なし (化学種残差 ×0.7)。全 run は baseline の別問題 (node TP-SST の上境界 `outlet_statPress`/軸で rms_roe 主導、restart 後 ~1500–3000 step で発散; `run_0076` で同一設定の継続でも再現) で終わる。(B) case/46 `run_0104` の res_6000 を roXi:=roY0 で restart し 1/10/100 step を診断出力 (`run_0107`/`0108`, 診断は scratch build の env ゲート出力のみ): 残差・対角・生更新は float 精度で同一、差は化学種の再正規化 1.40e-4 (全体) + トレーサのクランプ 3.9e-5、発生点はカウル後縁の純排気ノード。
 - `2026-09-17` — 初稿 (ユーザ決定 2026-09-16: トレーサを化学種カーネルの受動種に、凝縮モーメントも化学種経路、dual-time の化学種修正移植と受動種の BDF 項を一括で)。
 - `2026-09-17` — 調査で前提を訂正 (§4.0): 本番の化学種移流も 1 次 (S3 は experimental)。本 plan の 2 次化 = S3 の node 本番化を含む。
 - `2026-09-17` — codex plan レビュー 2 回目 **GO-with-changes (M6)** を全採用: リミッタの無次元化、上下限と補正収支、周期の coupling 1/2 整合、非一様組成の固定点ケース、`speciesImplicitRelax` の分離、BDF 履歴契約と時間次数の数値基準。
@@ -231,4 +240,5 @@
 
 - k/ω も化学種経路 (2 次) に乗せるか: ユーザは「全部化学種の経路」と述べたが、SST の生産項・壁関数との結合の検証が別途要るので本 plan では見送り、後続とする (要確認)。
 - ψ_P (受動種ごとの Venkat) と ψ_ρ のどちらが有界性と安定性で優れるかは §6-2/6-4 で実測して決める (両方を切替可能に実装)。
-- S3 の node 発散が coupling 1 (scalar-DPLUR) 固有だった場合、化学種の S3 本番化は coupling 0/2 に限定するか、DPLUR の近傍補正を 2 次流束と整合させるかを §9 で決める。
+- ~~S3 の node 発散が coupling 1 (scalar-DPLUR) 固有だった場合の contingency~~ 決着 (2026-09-17, §9): 逆で coupling 0 固有。受動種も DPLUR sweep に乗せる (§4.2)。
+- node TP-SST の case/28 baseline 発散 (上境界 `outlet_statPress`/軸, rms_roe 主導, restart 後 ~1500–3000 step; `thermoHrefTemp` 無し・絶対基準 h が候補) は本 plan の外 → followups へ登録 (S3 の定量 A/B をこの case でやる前に要解決)。
