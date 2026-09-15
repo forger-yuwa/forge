@@ -809,7 +809,12 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
    モーメントの実現可能性: 非負分布では べき平均不等式 $q_1/q_0\le r_{30}$, $q_2/q_0\le r_{30}^2$ が成り立つので、輸送の丸めでこれを破った塵状態
    ($g\approx0$ なのに $Q_2$ が大) では $q_{1e}=\min(q_1,q_0r_{30})$, $q_{2e}=\min(q_2,q_0r_{30}^2)$ で整合させる (でないと $S_g$ が液相の $10^6$ 倍/s に発散し
    ヤコビアンが $10^{15}$ になる)。小液滴 ($r_{30}<r_{min}$) は $\dot r$ を $r_{min}$ で評価して蒸発を続け (ソースを 0 にすると $g>g_{rm}$ の液滴が消滅クランプの対象外で止まる),
-   消滅 ($g\le g_{rm}$ かつ $r_{30}<2r_{min}$, $Q_0=0$ の不整合を含む) は実現可能性クランプ `cond_realizability_clamp_d` が確定する (従来どおり)。ヤコビアン `sj_g`/`sj_Q1` も θ 倍なし (mode 1 の g 摂動幅は $10^{-3}\max(g,10^{-9})$ で条件を整える)。
+   消滅 ($g\le g_{rm}$ かつ $r_{30}<2r_{min}$, $Q_0=0$ の不整合を含む) は実現可能性クランプ `cond_realizability_clamp_d` が確定する (従来どおり)。
+   **$Q_0=0$ の復旧規則** (codex result-4 M1 / result-5 m1): $q_0\le10^{-30}$ なのに $g>0$ の不整合状態 (輸送の丸め・クランプで数密度だけ消えた液相) は
+   モーメント形では $S_g=4\pi\rho_l q_{2e}\dot r=0$ となり、$g>g_{rm}$ なら消滅クランプの対象外で永久に残る。そこで $S<1$ のときだけ質量を
+   $S_g=3\rho g\,\dot r(r_{min})/r_{min}$ ($\dot r<0$; 半径 $r_{min}$ の液滴が自己相似に縮む率, $\Delta\tau$ を含まない) で減衰させ、$g\le g_{rm}$ になった時点で消滅クランプに渡す
+   ($S_{Q_0..Q_2}=0$)。これは液滴分布から導いた蒸発速度ではなく**不整合状態からの復旧規則**で、通常の整合状態 ($q_0>0$) には触れない。単体 `test_cond_limiter_steady` (k) が
+   double/float × {整合 $r_{30}=1.5$ nm, $Q_0=Q_1=Q_2=0$} でソース→更新→消滅 (17/20 step) を確認する。ヤコビアン `sj_g`/`sj_Q1` も θ 倍なし (mode 1 の g 摂動幅は $10^{-3}\max(g,10^{-9})$ で条件を整える)。
    **ソース積分の体積は node 周期 seam で部分体積 `volumePartial_d`** (合併体積だと gather 後に member 数倍に二重計上: 面 2 / 辺 4 / 角 8 倍。
    case/09 一様過飽和 N2 の 1 step 試験で旧 2.0/8.0 → 新 1.000; codex result M6)。
 2. **更新クランプ** `cond_moment_update_limited_d` ([condensationUpdateLimiter_d.cuh](../solver_density_cuda/cuda_forge/condensationUpdateLimiter_d.cuh)):

@@ -578,6 +578,26 @@ plan §6 の改定ゲート (a) node 床の時間定常性 + Δτ/精度非依�
 cell の g_0 max 差 2.17e-3 は §6 (b) の「2 倍以内」を超える (3.7–4.9 倍)。3 世代の warm 継続で頭打ちなので収束不足ではなく、**壁側液相帯で cfl 0.5 の g が系統的に 0.4 % 低い** という Δτ 依存の残りである (§6 ノルム g L1 1 % / |ΔT| 0.5 K / |ΔM| 5e-3 の内側だが、反復ノイズ基準 (b) では検出される)。
 node でも同じ符号 (差 >1e-3 の 727 ノードのうち 697 が cfl 0.5 で g 小、壁側帯 y 2.9–3.87 r_t、max 5.4e-3) だが、node の cfl 0.5 系は 4 世代で cfl 2 へ単調接近中 (世代間差 1.5→1.2→0.9e-4 と縮小) で、node の反復ノイズは 1.95e-5 と決定的なので (a) は成立。
 候補の解釈は (i) cell の atomicAdd 限界サイクルの時間平均が Δτ でわずかに動く、(ii) cfl 0.5 系 (warm 継続) が壁側帯で cfl 2 系と異なる準定常枝に留まっている (node の単調接近はこれを示唆: cfl 0.5 は 1 step 当たりの擬似時間が 1/4 で、壁ノードはさらに半分)、のいずれかで、plan §6.1 (result 5 回目) で採否を判断する。
+
+**交差 restart による切り分け (codex result-5 M1, `run_0177`–`0180`; 同一保存場 `res_24000` から cfl を入れ替えて 24000 step, 2000 step 毎に保存)**: 
+**(ii) 履歴依存 (cfl 0.5 系の緩やかな過渡) と確定**。cfl 2 の収束場は cfl 0.5 でも動かず、cfl 0.5 系の場は cfl 2 で cfl 2 の場に収束する。
+差 >1e-3 の帯は onset 域 (x 15–16 r_t で −1.4 % cell / −2.7 % node) で最大で下流ほど減衰し、Q0 (数密度) は同じで Q1/Q2/g が低く S が高い = 成長の遅れが残った過渡。
+
+| run | 内容 | 壁側帯 ⟨g⟩ (×1e-3) 0 → 24000 step | 最終場 vs cfl 2 正本 (g_0 max / g L1) | 最終場 vs cfl 0.5 系 (g_0 max / g L1) | 判定 |
+| --- | --- | --- | --- | --- | --- |
+| cell `run_0172` (cfl 2 正本) / `run_0175` (cfl 0.5 系) | 参照 | 6.809 / 6.788 | — / 2.17e-3 / 7.85e-4 | — | 反復床 g_0 4.4–5.8e-4, g L1 1.1–1.3e-4 |
+| **`run_0177`** cell **cfl 0.5 ← `0172` の場** | cfl 2 の固定点を cfl 0.5 で保持するか | 6.809 → 6.810 (全 12 枚 6.8096–6.8115) | **6.2e-4 / 1.4e-4** (最大でも 9.7e-4 / 1.9e-4; 床の 2 倍 1.15e-3 / 2.6e-4 内) | 2.3–2.7e-3 / 8.2–8.7e-4 (近づかない) | **cfl 2 の場は cfl 0.5 でも固定点** |
+| **`run_0178`** cell **cfl 2 ← `0175` の場** | cfl 0.5 系の場が cfl 2 でどこへ行くか | 6.788 → 6.807 (4000 step) → 6.810 | 2.17e-3 → 1.41e-3 (4000) → **4.7e-4 (6000) → 6.0e-4 (24000) / 1.5e-4** | 1.68e-3 / 7.1e-4 (離れる) | **~6000 step で cfl 2 の場へ収束** |
+| node `run_0170` (cfl 2 正本) / `run_0171` (cfl 0.5 系) | 参照 | 6.877 / 6.839 | — / 5.39e-3 / 1.55e-3 | — | 反復床 g_0 2.0e-4, g L1 1.95e-5 |
+| **`run_0179`** node **cfl 0.5 ← `0170` の場** | 同上 (決定的) | 6.8772 → 6.8772 (全枚 6.87697–6.87718) | **0.7–1.7e-4 / 1.4–2.0e-5 = 反復床** | 5.3–5.5e-3 / 1.55e-3 (不変) | **cfl 2 の場は cfl 0.5 でも固定点** |
+| **`run_0180`** node **cfl 2 ← `0171` の場** | 同上 | 6.839 → 6.864 (2000) → 6.875 (4000) → 6.877 | 5.39e-3 → 1.29e-3 (6000) → **4.6e-4 (8000) → 1.3e-4 (24000) / 1.7e-5 = 反復床**; ro 5.3e-6, T 4.7e-6, |ΔT| 0.005 K | 5.3e-3 / 1.56e-3 | **~8000 step で cfl 2 の場へ収束** |
+
+全 4 run NaN 0・`cond_series.csv` ALL STEADY (0.2 %)・残差は正本と同じ plateau (末尾 20 % 平均の比 0.77–1.03; `check_convergence` は `NOT CONVERGED (stalled/plateau)` = 正本と同じ床)・`residual_history.png` あり。
+報告量: cell `0177`/`0178` 出口 g 0.57765/0.57764 %, onset 15.9403/15.9404, x30 18.639/18.641; node `0179`/`0180` 0.58443/0.58443 %, 15.8409/15.8405, 18.6453/18.6454 (正本 `0172`/`0170` と 5 桁一致)。
+結論: **§6 (b) は交差 restart 対 (`0177`−`0172`, `0178`−`0172`) で成立** (cell g_0 max ≤ 9.7e-4 < 床 2 倍 1.15e-3)。cfl 0.5 系 (`0139`→…→`0171`, `0156`→…→`0175`) は
+2 巡目の cfl 2 場から warm した後、onset 域の成長遅れが cfl 0.5 では 1 世代 (24000 step) あたり g L1 ~1e-4 しか減衰しない過渡であり、cfl 2 なら 6000–8000 step で消える
+(減衰が擬似時間比 4 倍を大きく超えて速い理由は未同定; 点陰解法の低 cfl 側の減衰率の問題で、固定点の Δτ 依存ではない)。
+交差 restart の入力は `cp nozzle.h5` + `VALUE/{ro,roUx,roUy,roUz,roe,roY0,roY1,rog_0,roQ0_0..roQ2_0}` を `res_24000.h5` から上書き (同一メッシュの index コピー)。
 seam `case/09 run_0064` 1.000000、Arthur `lim1e` (N2 cell 3 反復・node・空気 cell) 全 28/28 PASS・onset 2.13 / 2.21 in、Wys `lim1e`/`lim0e` 報告量 run_0335 と同一・ALL STEADY・lim1e−lim0e g 8.2e-6。
 
 ## 問題定義
@@ -642,4 +662,5 @@ seam `case/09 run_0064` 1.000000、Arthur `lim1e` (N2 cell 3 反復・node・空
 | **`run_0151`–`run_0161`** (`lim1c`: node cfl 2/4/0.5, condFloat 0; cell cfl 2/0.5 × condFloat 0/1; cell mode 0 `run_0159`; eq=1 `run_0160`/`0161`) | **最終バイナリ (3 巡目) の検証セット** (上の「3 巡目」表; plan condensation-source-limiter-steady §6) | node/cell × cfl × 精度で一致 (g L1 ≤1.8e-3)、mode 0 cell は絞られる (g L1 36 %)、残差床は mode 0 と同一、eq=1 は反復ノイズ内 | 履歴 (3 巡目バイナリ; 正本は最新セット) |
 | **`run_0162`–`run_0167`** (`lim1d`: node cfl 2/0.5 + condFloat 0, cell cfl 2/0.5 + condFloat 0) | **最終確定バイナリ (4 巡目, 小液滴の蒸発継続を追加) の検証** (上の「4 巡目」段落) | 3 巡目と 1e-5〜7e-5 で一致、cfl/精度で一致、series ALL STEADY | 履歴 (4 巡目バイナリ; 正本は 5 巡目 `run_0170`–`0176`) |
 | **`run_0170_va3_M4.19_Lc8_noneq_inletTt_lim1e_cfl2`** / `run_0171_…_lim1e_cfl05` (warm from `0163`) / `run_0176_…_lim1e_cfl2_rep1` / `run_0172_…_cell_lim1e_cfl2` / `run_0173_…_cell_lim1e_cfl2_rep1` / `run_0174_…_cell_lim1e_cfl2_rep2` / `run_0175_…_cell_lim1e_cfl05` (warm from `0165`) | **5 巡目 = 正本バイナリ (355f4e40, Q0=0 減衰・0.2 % 閾値・補間交差) の検証セット** (上の「5 巡目」表; plan condensation-source-limiter-steady §6 (a)–(c)): node cfl 2/0.5 + 反復、cell cfl 2 ×3 反復 + cfl 0.5 | 全 NaN 0・ALL STEADY・condLim 1.0000・補正 0。node: 反復 1.95e-5, cfl 0.5−2 = 1.55e-3 / 0.18 K (縮小中); cell: 反復床 g_0 4.4–5.8e-4, cfl 0.5−2 = ro/P/T 床内, **g_0 2.17e-3 (床の 4 倍, 頭打ち)**, gL1 7.85e-4 | **active (正本)** |
+| **`run_0177_…_cell_lim1e_xr_cfl05_from0172`** / **`run_0178_…_cell_lim1e_xr_cfl2_from0175`** / **`run_0179_…_lim1e_xr_cfl05_from0170`** / **`run_0180_…_lim1e_xr_cfl2_from0171`** | **交差 restart** (codex result-5 M1): 同一保存場から cfl を入れ替えて 24000 step (2000 step 毎保存); cell cfl 0.5 ← `0172` / cfl 2 ← `0175`, node cfl 0.5 ← `0170` / cfl 2 ← `0171` | 上の「交差 restart」表。cfl 2 の場は cfl 0.5 でも動かず (cell 6.2e-4 = 床内, node 反復床)、cfl 0.5 系の場は cfl 2 で 6000–8000 step で cfl 2 の場へ収束 → **cfl 0.5 系の差は過渡 (履歴)、固定点は Δτ 非依存**; 全 NaN 0・ALL STEADY | **active (正本; §6 (b) の根拠)** |
 | `run_0200_perf_regress_node_axisym_sst_tp` / `run_0201_perf_regress_node_axisym_euler_cond` (ローカル RTX 3060, 2026-09-12) | 高速化ブランチ `feature/perf-3d-speedup` の node 軸対称回帰: run_0117 (node 軸対称 SST TP NS 等温壁) の res_24000 / run_0104 (node 軸対称 Euler + 平衡凝縮) の res_12000 から 300 step、基準 ×2 vs 最終 (+ `blockDPLURDiagCache: 1`) (`tools/perf_regress.py`) | 0201: 30/30 PASS。0200: 絶対・ノイズ判定では T 3.8e-5 (0.03 K, 燃焼室壁 BL 帯) が EXCEED → SLAU 行単位二分で運動量流束組み立ての丸め順 (旧コードの `p̃·S` 先行丸め) と特定、double ビルド (高精度参照) との距離は 新 3.14e-5 < 基準 3.58e-5 で `cmp --noise --truth` **PASS 18/18** (final / +対角キャッシュ / thermoFloat 0)。詳細 plan §5.1 #13、証拠 `bisect_slau_summary.txt` / `cmp_final_truth.txt` (run 内)。ラベル: base_r1/r2, base_dbl_r1/r2 (double), base_nofmad, base_momexact_r1/r2, S1〜S5c (二分), lit2_local, final, final_dcache, final_tf0, merged (main 凝縮マージ後 3b77cc4b: 0200 `--truth` PASS 18/18, 0201 PASS 30/30) | active (回帰) |
