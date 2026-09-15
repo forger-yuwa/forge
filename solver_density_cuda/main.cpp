@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <iostream>
 #include <vector>
 #include <array>
@@ -1439,6 +1440,69 @@ static bool freezeTurbEnabled() {
     return v;
 }
 
+
+// 診断 (FORGE_PIN_DIAG=1, plan species-passive-scalar-unification §6-6-iii): dual-time の各サブ反復で
+//   (a) BDF 追加 + ピン再除去の直後に、入口ピンノード (scalarDirichletPin==1) の化学種/受動種残差の max|res| (厳密 0 を期待)
+//   (b) 更新 + 入口 Dirichlet 再適用の直後に、入口 bcond の境界ノード値と bvar 入口値の差 max|Y−Y_in| / |Xi−Xi_in| / |φ_moment|
+// を host 読み戻しで印字する。既定 off (性能・出力に影響なし)。
+static bool pinDiagEnabled() {
+    static const bool v = [](){ const char* e = getenv("FORGE_PIN_DIAG"); return e && atoi(e) != 0; }();
+    return v;
+}
+static void pinRowDiagnosticResidual(StepContext& s, int m)
+{
+    if (!pinDiagEnabled() || s.cfg.discretization != "node") return;
+    std::list<std::string> names = {"scalarDirichletPin"};
+    for (int k = 0; k < s.var.nSpeciesRegistered; ++k) names.push_back("res_roY" + std::to_string(k));
+    if (s.var.tracerRegistered != 0) names.push_back("res_roXi");
+    for (const auto& nm : s.var.condMomentConsNames) names.push_back("res_" + nm);
+    s.var.copyVariables_cell_D2H(names);
+    const auto& pin = s.var.c.at("scalarDirichletPin");
+    geom_int nPin = 0; for (geom_int ic = 0; ic < s.msh.nCells; ++ic) if (pin[ic] == (flow_float)1.0) ++nPin;
+    std::ostringstream os; os << "[pin-diag] step " << s.iStep + 1 << " subiter " << m << " pinned nodes " << nPin << " max|res| on pinned:";
+    for (const auto& nm : names) {
+        if (nm == "scalarDirichletPin") continue;
+        const auto& r = s.var.c.at(nm); double mx = 0.0;
+        for (geom_int ic = 0; ic < s.msh.nCells; ++ic) if (pin[ic] == (flow_float)1.0) mx = std::max(mx, (double)std::abs(r[ic]));
+        os << " " << nm << " " << std::scientific << std::setprecision(2) << mx;
+    }
+    std::cout << os.str() << "\n";
+}
+static void pinRowDiagnosticState(StepContext& s, int m)
+{
+    if (!pinDiagEnabled() || s.cfg.discretization != "node") return;
+    std::list<std::string> names;
+    for (int k = 0; k < s.var.nSpeciesRegistered; ++k) names.push_back("Y" + std::to_string(k));
+    if (s.var.tracerRegistered != 0) names.push_back("Xi");
+    for (const auto& nm : s.var.condMomentConsNames) names.push_back(nm.substr(2));
+    if (names.empty()) return;
+    s.var.copyVariables_cell_D2H(names);
+    std::ostringstream os; os << "[pin-diag] step " << s.iStep + 1 << " subiter " << m << " inlet-node values vs bvar:";
+    for (auto& bc : s.msh.bconds) {
+        if (bc.bcondKind.rfind("inlet_", 0) != 0 || bc.iPlanes.empty()) continue;
+        const geom_int nb = (geom_int)bc.iPlanes.size();
+        std::vector<geom_int> cell(nb);
+        gpuErrchk( cudaMemcpy(cell.data(), bc.map_bplane_cell_d, nb*sizeof(geom_int), cudaMemcpyDeviceToHost) );
+        for (const auto& nm : names) {
+            const auto& v = s.var.c.at(nm);
+            std::vector<flow_float> bv;
+            const bool isMoment = std::find(s.var.condMomentConsNames.begin(), s.var.condMomentConsNames.end(), "ro" + nm) != s.var.condMomentConsNames.end();
+            if (!isMoment) {
+                auto it = bc.bvar_d.find(nm);
+                if (it == bc.bvar_d.end() || it->second == nullptr) continue;
+                bv.resize(nb); gpuErrchk( cudaMemcpy(bv.data(), it->second, nb*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+            }
+            double mx = 0.0;
+            for (geom_int ib = 0; ib < nb; ++ib) {
+                const double ref = isMoment ? 0.0 : (double)std::max(bv[ib], (flow_float)0.0);
+                mx = std::max(mx, std::abs((double)v[cell[ib]] - ref));
+            }
+            os << " " << bc.bcondKind << "/" << nm << " " << std::scientific << std::setprecision(2) << mx;
+        }
+    }
+    std::cout << os.str() << "\n";
+}
+
 // 残差 1 回構築 → 局所擬似時間 dτ → 古典 DPLUR 線形解 → Q への commit。
 void implicitNonlinearUpdate(StepContext& s, int inner_index)
 {
@@ -1663,6 +1727,7 @@ void advanceImplicitDualTime(StepContext& s)
         passiveAddUnsteadyTimeTerm_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, a, b, c);
         speciesPinResidual_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         passivePinResidual_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        pinRowDiagnosticResidual(s, m);   // FORGE_PIN_DIAG=1: ピン行の残差が 0 か
         logResidualSnapshot(s, m);   // BDF 込みのサブ反復残差 (inner_iter 行; 化学種・受動種列を含む)
         // dual-time は dtControl==0 を強制している (上の検査) ので adaptDt=true でも cfg.dt は変わらない
         // (host 読みは printCflDt のときだけ発生)。max cfl (物理 CFL) の格納は monitorInterval で間引く (モニタ行が表示)。
@@ -1739,6 +1804,7 @@ void advanceImplicitDualTime(StepContext& s)
             applyCondensationBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);   // 入口 Dirichlet の再適用 (dry=0 / Xi)
             applyTracerBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
         });
+        pinRowDiagnosticState(s, m);   // FORGE_PIN_DIAG=1: 入口ノード値が bvar 入口値のままか
     }
 
     s.cfg.unsteadyDiagCoef = 0.0; // 定常側へ影響しないようリセット
