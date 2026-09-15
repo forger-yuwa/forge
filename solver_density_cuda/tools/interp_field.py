@@ -89,9 +89,10 @@ def main():
             ds = "VALUE/"+name
             if ds in d and name != "wall_dist":
                 d[ds][...] = arr[idx].astype(d[ds].dtype); moved.append(name)
-            elif name.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")):
-                # 凝縮モーメントは convert 直後の入力 h5 に無い (dry) ので新規作成する。
-                # forge は VALUE/<consName> が存在すれば読む (無ければ 0 = dry restart)。2026-08-18
+            elif name.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")) or (name.startswith("roY") and name[3:].isdigit()):
+                # 凝縮モーメントと化学種は convert 直後の入力 h5 に無いので新規作成する (無ければ forge は第 1 種以外を 0 に
+                # 初期化し、carrier では rog<=roY_w のクランプで液相が消える: codex 2026-09-16 result M2)。
+                # forge は VALUE/<consName> が存在すれば読む (無ければ 0 = dry restart)。2026-08-18 / 2026-09-16
                 d.create_dataset(ds, data=arr[idx].astype(d["VALUE/ro"].dtype)); moved.append(name+"(new)")
         print(f"interp {a.src} -> {a.dst}: {len(cd)} dst cells, moved {moved} (wall_dist kept)")
 

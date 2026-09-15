@@ -15,6 +15,7 @@ namespace {
 #include "cuda_forge/condensationSourceKernels_d.cuh"
 }
 #include "cuda_forge/condensationUpdateLimiter_d.cuh"
+#include "cuda_forge/condensationRealizability_d.cuh"
 
 static int g_fail = 0;
 #define CHECK(cond, ...) do { if (!(cond)) { ++g_fail; printf("  FAIL: " __VA_ARGS__); printf("\n"); } } while (0)
@@ -101,7 +102,7 @@ static void test_dt_invariance(const char* name, int model, int carrier, const s
 
 // ---- (b)-(f) 更新クランプ kernel ----
 struct Cell { double dt, vol, ro, roYw, T, Ng, NQ2, NQ1, NQ0, rg, rQ2, rQ1, rQ0; };
-static void run_limiter(const std::vector<Cell>& cs, int carrier, std::vector<double>& theta, std::vector<double>& corr, std::vector<std::array<double,4>>& outv, std::vector<std::array<double,4>>& delta)
+static void run_limiter(const std::vector<Cell>& cs, int carrier, std::vector<double>& theta, std::vector<double>& corr, std::vector<double>& corrQ_out, std::vector<std::array<double,4>>& outv, std::vector<std::array<double,4>>& delta)
 {
     const int n = (int)cs.size();
     std::vector<flow_float> dt(n),vol(n),ro(n),roYw(n),T(n),Ng(n),NQ2(n),NQ1(n),NQ0(n),rg(n),rQ2(n),rQ1(n),rQ0(n),z(n,0.0f);
@@ -115,9 +116,9 @@ static void run_limiter(const std::vector<Cell>& cs, int carrier, std::vector<do
     cond_moment_update_limited_d<<<(n+127)/128,128>>>(n, ddt, dvol, dro, carrier ? dYw : nullptr, 0.0, dT, nullptr, nullptr, 1220.7f, 1.315f,
         COND_MODEL_H2O, o, 5.0e-3, 1.0, 0.5, dNg, dNQ2, dNQ1, dNQ0, drg, drQ2, drQ1, drQ0, sjg, sj2, sj1, sj0, tdg, td2, td1, td0, og, o2, o1, o0, lim, cor, corQ);
     cudaError_t e = cudaDeviceSynchronize(); if (e != cudaSuccess) { printf("CUDA error %s\n", cudaGetErrorString(e)); ++g_fail; }
-    auto L=down(lim,n), C=down(cor,n), G=down(og,n), Q2=down(o2,n), Q1=down(o1,n), Q0=down(o0,n);
-    theta.resize(n); corr.resize(n); outv.resize(n); delta.resize(n);
-    for (int i=0;i<n;i++){ theta[i]=L[i]; corr[i]=C[i]; outv[i]={G[i],Q2[i],Q1[i],Q0[i]};
+    auto L=down(lim,n), C=down(cor,n), CQ=down(corQ,n), G=down(og,n), Q2=down(o2,n), Q1=down(o1,n), Q0=down(o0,n);
+    theta.resize(n); corr.resize(n); corrQ_out.resize(n); outv.resize(n); delta.resize(n);
+    for (int i=0;i<n;i++){ theta[i]=L[i]; corr[i]=C[i]; corrQ_out[i]=CQ[i]; outv[i]={G[i],Q2[i],Q1[i],Q0[i]};
         const Cell& c=cs[i]; const double f=c.dt/c.vol; delta[i]={c.rg*f, c.rQ2*f, c.rQ1*f, c.rQ0*f}; }   // sj=td=0 → δ = res dt/V
 }
 static void test_update_limiter()
@@ -143,9 +144,14 @@ static void test_update_limiter()
     cs.push_back({dt,vol,0.05,0.05*Yw,T, ro*1e-3, 1e-2, 1e2, 1e12,  0,0,0,0});
     // (f5) float 極小増分
     cs.push_back({dt,vol,ro,ro*Yw,T, ro*1e-3, 1e-2, 1e2, 1e12,  ro*1e-30*vol/dt, 1e-30, 1e-30, 1e-30});
-    std::vector<double> th, corr; std::vector<std::array<double,4>> out, del;
-    run_limiter(cs, 1, th, corr, out, del);
     auto near = [](double a, double b, double rtol){ return std::fabs(a-b) <= rtol*std::max(std::fabs(a), std::fabs(b)) + 1e-30; };
+    // (j) Q の負値 floor: Q1 に −大 の増分 → out_Q1=0, corrQ=1 (100 % 補正)。g は上限内で θ=1
+    cs.push_back({dt,vol,ro,ro*Yw,T, ro*1e-3, 1e-2, 1e2, 1e12,  0, 0, -2e2*vol/dt, 0});
+    std::vector<double> th, corr, corrQ; std::vector<std::array<double,4>> out, del;
+    run_limiter(cs, 1, th, corr, corrQ, out, del);
+    for (int i = 0; i < 9; ++i) CHECK(corrQ[i] == 0.0, "case %d: corrQ should be 0 (no Q floor), got %g", i, corrQ[i]);
+    printf("  (j) negative Q1 increment: theta=%.4f out_Q1=%.3g corrQ=%.3g (expected 1)\n", th[9], out[9][2], corrQ[9]);
+    CHECK(near(th[9],1.0,1e-6) && out[9][2] == 0.0 && corrQ[9] == 1.0, "(j) Q floor not recorded as 100 %% correction");
     // (b)
     printf("  (b) theta=%.6f corr=%.3g\n", th[0], corr[0]);
     CHECK(near(th[0],1.0,1e-6), "(b) theta != 1");
@@ -182,7 +188,7 @@ static void test_update_limiter()
 __global__ void evap_rate_f_kernel(CondSpeciesPropsF cp, CondTablesF tb, float T, float pv, float rod, float g, float q0, float q1, float q2, float* out)
 {
     float S0,S1,S2,Sg,r30,drdt;
-    cond_evap_source_rate_f(cp, tb, T, pv, rod, g, q0, q1, q2, 0, pv, 3.18f, 0, &S0,&S1,&S2,&Sg,&r30,&drdt);
+    cond_evap_source_rate_f(cp, tb, T, pv, rod, g, q0, q1, q2, 1.0e-9f, 0, pv, 3.18f, 0, &S0,&S1,&S2,&Sg,&r30,&drdt);
     out[0]=S0; out[1]=S1; out[2]=S2; out[3]=Sg; out[4]=r30; out[5]=drdt;
 }
 // ---- (g) 蒸発ソース (一様 ṙ 形) の値そのものを多分散モーメントで検証 (codex result M4) ----
@@ -197,7 +203,7 @@ static void test_evap_source_values()
     const double q0 = N, q1 = N*1.5*r, q2 = N*2.5*r*r;
     const double g  = (4.0/3.0)*COND_PI*rho_l*N*4.5*r*r*r/rod;
     double S0,S1,S2,Sg,r30,drdt;
-    cond_evap_source_rate(cp, T, pv, rod, g, q0, q1, q2, 0, pv, 3.18, 0, &S0,&S1,&S2,&Sg,&r30,&drdt);
+    cond_evap_source_rate(cp, T, pv, rod, g, q0, q1, q2, 1.0e-9, 0, pv, 3.18, 0, &S0,&S1,&S2,&Sg,&r30,&drdt);
     const double r30_exp = cbrt(4.5)*r;
     const double drdt_exp = cond_evap_rate(cp, T, pv, r30_exp, 0, pv, 3.18, 0);
     auto near = [](double a, double b, double rtol){ return std::fabs(a-b) <= rtol*std::max(std::fabs(a), std::fabs(b)); };
@@ -250,6 +256,8 @@ static void test_one_cell_fixed_point()
         flow_float *rog=arr(0),*q0=arr(0),*q1=arr(0),*q2=arr(0),*Ng=arr(0),*NQ0=arr(0),*NQ1=arr(0),*NQ2=arr(0);
         flow_float *rr=arr(0),*r0=arr(0),*r1=arr(0),*r2=arr(0),*sg=arr(0),*s0=arr(0),*s1=arr(0),*s2=arr(0),*td=arr(0);
         flow_float *dS=arr(0),*dD=arr(0),*dR=arr(0),*dTs=arr(0),*dTh=arr(0),*dLm=arr(0),*cG=arr(0),*cQ=arr(0);
+        const double rawres_tol = 1e-6;   // 固定点判定: |res_k Δτ/V| / |ρφ_k| (無次元の相対更新量)
+        double rawres_last = 0.0;
         printf("  (h) dt %.0e arrays allocated\n", dt); fflush(stdout);
         double prev[4]={0,0,0,0}; int it=0; double chg=1.0;
         for (it = 0; it < 400000 && chg > 1e-13; ++it) {
@@ -267,15 +275,22 @@ static void test_one_cell_fixed_point()
                 dvol, ddt, dT, dP, dro, dcp, dRm, dY1, rog, q0, q1, q2, rr, r0, r1, r2, sg, s0, s1, s2, dS, dD, dR, dTs, dTh, dLm);
             cond_moment_update_limited_d<<<1,1>>>(1, ddt, dvol, dro, dY1, 0.0, dT, dcp, dRm, (float)cpc, 1.315f, COND_MODEL_H2O, o, 5.0e-3, 1.0, 0.5,
                 Ng, NQ2, NQ1, NQ0, rr, r2, r1, r0, sg, s2, s1, s0, td, td, td, td, rog, q2, q1, q0, dLm, cG, cQ);
+            // 実際の更新全経路: 更新クランプ → 実現可能性クランプ (g<=Y_w, 負値, 消滅) → 次の残差
+            cond_realizability_clamp_d<<<1,1>>>(1, dro, dY1, rog, q0, q1, q2, 1, COND_MODEL_H2O, Rw, 1.0e-9, 5.0e-7, dT, dP, o, cG, cQ);
             { cudaError_t e = cudaDeviceSynchronize(); if (e != cudaSuccess) { printf("  (h) CUDA error at it %d: %s\n", it, cudaGetErrorString(e)); fflush(stdout); ++g_fail; break; } }
+            { std::vector<flow_float> rs(4); cudaMemcpy(&rs[0], rr, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&rs[1], r0, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&rs[2], r1, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&rs[3], r2, sizeof(flow_float), cudaMemcpyDeviceToHost);
+              std::vector<flow_float> st(4); cudaMemcpy(&st[0], rog, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&st[1], q0, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&st[2], q1, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&st[3], q2, sizeof(flow_float), cudaMemcpyDeviceToHost);
+              rawres_last = 0.0; for (int m=0;m<4;m++) rawres_last = std::max(rawres_last, std::fabs((double)rs[m])*dt/V/std::max(std::fabs((double)st[m]),1e-30)); }
             std::vector<flow_float> nw(4); cudaMemcpy(&nw[0], rog, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&nw[1], q0, sizeof(flow_float), cudaMemcpyDeviceToHost);
             cudaMemcpy(&nw[2], q1, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&nw[3], q2, sizeof(flow_float), cudaMemcpyDeviceToHost);
             chg = 0.0; for (int m=0;m<4;m++){ const double d = std::fabs((double)nw[m]-prev[m])/std::max(std::fabs((double)nw[m]),1e-30); chg = std::max(chg,d); prev[m]=nw[m]; }
             if (it % 50000 == 0 || it < 3) { float th; cudaMemcpy(&th, dLm, sizeof(float), cudaMemcpyDeviceToHost); thetas[k]=th; }
         }
         fixed[k].assign(prev, prev+4);
-        float th; cudaMemcpy(&th, dLm, sizeof(float), cudaMemcpyDeviceToHost);
-        printf("  (h) dt %.0e: %d iterations, fixed point g=%.6e Q0=%.6e Q1=%.6e Q2=%.6e, final theta %.4f\n", dt, it, prev[0]/rod, prev[1], prev[2], prev[3], th);
+        float th, cg, cq; cudaMemcpy(&th, dLm, sizeof(float), cudaMemcpyDeviceToHost); cudaMemcpy(&cg, cG, sizeof(float), cudaMemcpyDeviceToHost); cudaMemcpy(&cq, cQ, sizeof(float), cudaMemcpyDeviceToHost);
+        printf("  (h) dt %.0e: %d iterations, fixed point g=%.6e Q0=%.6e Q1=%.6e Q2=%.6e, theta %.4f, raw residual (rel update/step) %.2e, clamp corr G %.2e Q %.2e\n", dt, it, prev[0]/rod, prev[1], prev[2], prev[3], th, rawres_last, cg, cq);
+        CHECK(rawres_last < rawres_tol, "(h) raw residual not at the fixed point (%.2e)", rawres_last);
+        CHECK(cg == 0.0f && cq == 0.0f, "(h) hard clamps active at the fixed point (G %g Q %g)", cg, cq);
         CHECK(prev[0] > 0.0 && prev[1] > 0.0, "(h) trivial fixed point (no condensation) — test state not condensing");
         CHECK(th > 0.999f, "(h) theta_u not 1 at the fixed point");
     }

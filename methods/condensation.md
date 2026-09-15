@@ -806,7 +806,10 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
    蒸発は瞬間速度形 `cond_evap_source_rate{,_f}`: 成長側と同じ一様 $\dot r$ のモーメント形 ($\dot r<0$ を $r_{30}$ で評価)
    $S_{Q_1}=q_0\dot r$, $S_{Q_2}=2q_1\dot r$, $S_g=4\pi\rho_l q_2\dot r$, $S_{Q_0}=0$。旧 λ スケール (Q1→λQ1, Q2→λ²Q2, g→λ³g) の $\Delta\tau\to0$ 極限
    ($a=\dot r/r_{30}$: $aq_1, 2aq_2, 3a\rho g$) は monodisperse でのみこれと一致し、多分散 (半径 $r$ と $2r$ 同数) では $S_g$ が 8 % 違う (codex result M4)。
-   消滅 ($r_{30}<2r_{min}$, $Q_0=0$ の不整合) は実現可能性クランプ `cond_realizability_clamp_d` が確定する (従来どおり)。ヤコビアン `sj_g`/`sj_Q1` も θ 倍なし。
+   モーメントの実現可能性: 非負分布では べき平均不等式 $q_1/q_0\le r_{30}$, $q_2/q_0\le r_{30}^2$ が成り立つので、輸送の丸めでこれを破った塵状態
+   ($g\approx0$ なのに $Q_2$ が大) では $q_{1e}=\min(q_1,q_0r_{30})$, $q_{2e}=\min(q_2,q_0r_{30}^2)$ で整合させる (でないと $S_g$ が液相の $10^6$ 倍/s に発散し
+   ヤコビアンが $10^{15}$ になる)。$r_{30}<2r_{min}$ は消滅待ち ($S=0$) とし、消滅 ($Q_0=0$ の不整合を含む) は実現可能性クランプ `cond_realizability_clamp_d` が
+   確定する (従来どおり)。ヤコビアン `sj_g`/`sj_Q1` も θ 倍なし (mode 1 の g 摂動幅は $10^{-3}\max(g,10^{-9})$ で条件を整える)。
    **ソース積分の体積は node 周期 seam で部分体積 `volumePartial_d`** (合併体積だと gather 後に member 数倍に二重計上: 面 2 / 辺 4 / 角 8 倍。
    case/09 一様過飽和 N2 の 1 step 試験で旧 2.0/8.0 → 新 1.000; codex result M6)。
 2. **更新クランプ** `cond_moment_update_limited_d` ([condensationUpdateLimiter_d.cuh](../solver_density_cuda/cuda_forge/condensationUpdateLimiter_d.cuh)):
@@ -828,10 +831,12 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
    $\Delta\tau$ 依存 (「θ は接近速度だけ」は輸送の無い局所緩和にしか成り立たない) — 旧モデル互換の既知の制約。平衡凝縮の推奨は EOS 拘束形
    `condEquilibrium 2` (代数拘束、$\Delta\tau$ 非依存。設定既定値は 0=非平衡)。
 
-**検証** (2026-09-15): 単体 `tests/unit/test_cond_limiter_steady.cu` — 状態固定で $\Delta\tau$ を 1e-7/1e-3 に振っても double/float 両実体の
-残差・ヤコビアンがビット一致 (H2O carrier 962 状態・N2 pure 300 状態; mode 0 は 525/169 セルで差)、更新クランプの 8 ケース。
-`test_cond_float_device.cu` は両モードで double/float 一致 PASS。CFD: case/44 入口 Tt 分布 run で mode 1 cfl 2 (`run_0132`) が旧 θ≡1 の cfl 0.5 (`run_0131`)
-と一致 (結果は plan §9 と case README)。
+**検証** (2026-09-15/16, plan §9): 単体 `tests/unit/test_cond_limiter_steady.cu` — 状態固定で $\Delta\tau$ を 1e-7/1e-3 に振っても double/float 両実体の
+残差・ヤコビアンがビット一致 (H2O carrier 962 状態・N2 pure 300 状態; 旧 mode 0 は 525/169 セルで差)、更新クランプ 10 ケース、多分散蒸発の値、
+輸送+ソース+全クランプを通す 1 セル固定点が $\Delta\tau$ 1e-6〜1e-4 で 3.8e-5 一致。`test_cond_float_device.cu` は両モードで double/float 一致 PASS。
+CFD (修正後バイナリ): case/44 入口 Tt 分布 run で node cfl 2 (`run_0137`) / 4 (`0138`) / 0.5 (`0139`)・condFloat 0 (`0140`)、cell cfl 2 (`0141`) / 0.5 (`0146`)
+の凝縮固有量 (出口 g・onset・M) が一致し `check_quasisteady --series-csv` 0.2 % で STEADY。ただし case/44 の残差は入口 Tt 分布 run 固有の床
+(rms_roe 0.4 = dry 一様 run と同値, roQ0 2.7 桁) で `check_convergence` は plateau → 「定常解の一致」は series STEADY + 補正 0 + 床到達で判定する (plan §6)。
 
 ### 5. 一温度 二相 EOS の温度逆算 (Phase 2)
 

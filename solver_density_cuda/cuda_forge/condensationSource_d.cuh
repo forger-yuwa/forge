@@ -315,9 +315,12 @@ __host__ __device__ inline double cond_evap_source(
 //   旧 λ スケール (Q1→λQ1, Q2→λ²Q2, g→λ³g) の Δτ→0 極限 (a=ṙ/r30: a q1, 2a q2, 3aρg) は monodisperse でのみこれと一致し、
 //   多分散では差が出る (codex result M4) ので plan の一様 ṙ 形に揃える。**Δτ を含まない** ので定常固定点は歩幅に依存しない。
 //   Δg/潜熱 ΔT/半径半減の 1 step 上限は更新クランプ (cond_moment_update_limited_d) が掛ける。
+//   モーメントの実現可能性: 非負分布では べき平均不等式 q1/q0 ≤ r30, q2/q0 ≤ r30² が成り立つ。輸送の丸め・floor で
+//   これを破った塵状態 (g≈0 なのに Q2 が大) では一様 ṙ 形の S_g=4πρ_l q2 ṙ が液相の 1e6 倍/s まで発散するので、
+//   q1,q2 を上限で整合させ (q1e=min(q1,q0 r30), q2e=min(q2,q0 r30²))、r30<2 r_min は消滅待ち (S=0, クランプが確定) とする。
 __host__ __device__ inline void cond_evap_source_rate(
     const CondSpeciesProps& cp, double T, double p_v, double rod, double g,
-    double q0, double q1, double q2,
+    double q0, double q1, double q2, double rmin,
     int growthModel, double p_gas, double gyarC, int kelvin,
     double* SQ0, double* SQ1, double* SQ2, double* Sg, double* r30_out, double* drdt_out)
 {
@@ -329,10 +332,11 @@ __host__ __device__ inline void cond_evap_source_rate(
     const double rho_l = cond_rho_cond(cp, T);
     const double r30 = cbrt(g/((4.0/3.0)*COND_PI*rho_l*q0/rod));  // q0/rod = Q0 [1/kg]
     *r30_out = r30;
-    if (!(r30 > 0.0)) return;
+    if (!(r30 > 0.0) || r30 < 2.0*rmin) return;          // 消滅待ち: 実現可能性クランプが 4 モーメントを 0 にする
     const double drdt = cond_evap_rate(cp, T, p_v, r30, growthModel, p_gas, gyarC, kelvin);
     *drdt_out = drdt;
+    const double q1e = fmin(q1, q0*r30), q2e = fmin(q2, q0*r30*r30);
     *SQ1 = q0*drdt;
-    *SQ2 = 2.0*q1*drdt;
-    *Sg  = 4.0*COND_PI*rho_l*q2*drdt;                    // ≤ 0 [kg/m³/s]
+    *SQ2 = 2.0*q1e*drdt;
+    *Sg  = 4.0*COND_PI*rho_l*q2e*drdt;                   // ≤ 0 [kg/m³/s]
 }

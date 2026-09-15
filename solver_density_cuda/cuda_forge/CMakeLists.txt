@@ -42,6 +42,7 @@ add_library(cuda_forge STATIC
     condensationTransport_d.cu
     condensationTransport_d.cuh
     condensationUpdateLimiter_d.cuh
+    condensationRealizability_d.cuh
     condensationProperties_d.cuh
     condensationEOS_d.cuh
     condensationSource_d.cu

@@ -135,7 +135,7 @@ __device__ __forceinline__ void condensation_source_cell_d(
         const double dt = (double)dt_local[ic];
         double SQ0, SQ1, SQ2, Sg, r30, drdt;
         if (limiterMode == 1)   // 瞬間速度形 (Δτ 非依存; 1 step 上限は更新クランプ側)
-            cond_evap_source_rate(cprops, Td, pv, rod, g, q0, q1, q2,
+            cond_evap_source_rate(cprops, Td, pv, rod, g, q0, q1, q2, evapRmin,
                                   growthModel, p_gas, gyarC, evapKelvin,
                                   &SQ0, &SQ1, &SQ2, &Sg, &r30, &drdt);
         else
@@ -150,11 +150,12 @@ __device__ __forceinline__ void condensation_source_cell_d(
         if (Sg < 0.0) {
             const double L  = cond_latent(cprops, Td);
             double a0,a1,a2,ag,rr,dd;
-            // (a) g 摂動 (蒸気状態も更新)
-            const double dg = 1.0e-3*g;
+            // (a) g 摂動 (蒸気状態も更新)。瞬間速度形 (mode 1) は S_g が g に (pv, r30 経由で) 弱くしか依存しないので、
+            // g≈0 の塵セルで dg=1e-3 g とすると差分商が丸めで爆発する (float/double で 7e6 1/s の差)。下限 1e-9 で条件を整える。
+            const double dg = (limiterMode == 1) ? 1.0e-3*fmax(g, 1.0e-9) : 1.0e-3*g;
             double pvg, rvg; cond_vapor_state(carrier, rod, Pd, Td, g - dg, Yw, Rw, &pvg, &rvg);
             if (limiterMode == 1)
-                cond_evap_source_rate(cprops, Td, pvg, rod, g - dg, q0, q1, q2,
+                cond_evap_source_rate(cprops, Td, pvg, rod, g - dg, q0, q1, q2, evapRmin,
                                       growthModel, p_gas, gyarC, evapKelvin, &a0,&a1,&a2,&ag,&rr,&dd);
             else
                 cond_evap_source(cprops, Td, pvg, rod, g - dg, q0, q1, q2, dt,
@@ -165,7 +166,7 @@ __device__ __forceinline__ void condensation_source_cell_d(
             const double dTp = 0.1;
             double pvT, rvT; cond_vapor_state(carrier, rod, Pd, Td+dTp, g, Yw, Rw, &pvT, &rvT);
             if (limiterMode == 1)
-                cond_evap_source_rate(cprops, Td+dTp, pvT, rod, g, q0, q1, q2,
+                cond_evap_source_rate(cprops, Td+dTp, pvT, rod, g, q0, q1, q2, evapRmin,
                                       growthModel, p_gas, gyarC, evapKelvin, &a0,&a1,&a2,&ag,&rr,&dd);
             else
                 cond_evap_source(cprops, Td+dTp, pvT, rod, g, q0, q1, q2, dt,
@@ -392,7 +393,7 @@ __global__ void condensation_source_f_d(
         const float dt = dt_local[ic];
         float SQ0, SQ1, SQ2, Sg, r30, drdt;
         if (limiterMode == 1)
-            cond_evap_source_rate_f(cpf, tb, Td, pv, rod, g, q0, q1, q2,
+            cond_evap_source_rate_f(cpf, tb, Td, pv, rod, g, q0, q1, q2, evapRmin,
                                     growthModel, p_gas, gyarC, evapKelvin,
                                     &SQ0, &SQ1, &SQ2, &Sg, &r30, &drdt);
         else
@@ -410,15 +411,15 @@ __global__ void condensation_source_f_d(
             double a0,a1,a2,ag,rr,dd;
             double pv0, rv0; cond_vapor_state(carrier, rodd, (double)Pd, Tdd, gd, (double)Yw, dbl.Rw, &pv0, &rv0);
             double S0,S1,S2,Sg0;
-            const double dg = 1.0e-3*gd;
+            const double dg = (limiterMode == 1) ? 1.0e-3*fmax(gd, 1.0e-9) : 1.0e-3*gd;   // mode 1: 塵セルの差分商爆発を避ける (double 実体と同じ)
             double pvg, rvg; cond_vapor_state(carrier, rodd, (double)Pd, Tdd, gd - dg, (double)Yw, dbl.Rw, &pvg, &rvg);
             const double dTp = 0.1;
             double pvT, rvT; cond_vapor_state(carrier, rodd, (double)Pd, Tdd+dTp, gd, (double)Yw, dbl.Rw, &pvT, &rvT);
             double ag_g, ag_T;   // g 摂動 / T 摂動後の S_g
             if (limiterMode == 1) {
-                cond_evap_source_rate(cpd, Tdd, pv0, rodd, gd, q0d, q1d, q2d, growthModel, (double)p_gas, dbl.gyarC, evapKelvin, &S0,&S1,&S2,&Sg0,&rr,&dd);
-                cond_evap_source_rate(cpd, Tdd, pvg, rodd, gd - dg, q0d, q1d, q2d, growthModel, (double)p_gas, dbl.gyarC, evapKelvin, &a0,&a1,&a2,&ag_g,&rr,&dd);
-                cond_evap_source_rate(cpd, Tdd+dTp, pvT, rodd, gd, q0d, q1d, q2d, growthModel, (double)p_gas, dbl.gyarC, evapKelvin, &a0,&a1,&a2,&ag_T,&rr,&dd);
+                cond_evap_source_rate(cpd, Tdd, pv0, rodd, gd, q0d, q1d, q2d, dbl.evapRmin, growthModel, (double)p_gas, dbl.gyarC, evapKelvin, &S0,&S1,&S2,&Sg0,&rr,&dd);
+                cond_evap_source_rate(cpd, Tdd, pvg, rodd, gd - dg, q0d, q1d, q2d, dbl.evapRmin, growthModel, (double)p_gas, dbl.gyarC, evapKelvin, &a0,&a1,&a2,&ag_g,&rr,&dd);
+                cond_evap_source_rate(cpd, Tdd+dTp, pvT, rodd, gd, q0d, q1d, q2d, dbl.evapRmin, growthModel, (double)p_gas, dbl.gyarC, evapKelvin, &a0,&a1,&a2,&ag_T,&rr,&dd);
             } else {
                 cond_evap_source(cpd, Tdd, pv0, rodd, gd, q0d, q1d, q2d, dtd, dbl.evapRmin, dbl.evapLamMin, dbl.dg_max, dbl.dT_max, (double)cvg,
                                  growthModel, (double)p_gas, dbl.gyarC, evapKelvin, &S0,&S1,&S2,&Sg0,&rr,&dd);
