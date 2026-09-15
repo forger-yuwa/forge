@@ -88,6 +88,7 @@ void periodicNodeGather_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
     if (cfg.LESorRANS == 2 && cfg.RANSmodel == 1) { extra.push_back("res_roK"); extra.push_back("res_roOmega"); }
     for (const auto& nm : var.speciesVarNames)     extra.push_back("res_" + nm);
     for (const auto& nm : var.condMomentConsNames) extra.push_back("res_" + nm);
+    if (var.tracerRegistered != 0)                 extra.push_back("res_roXi");   // 受動トレーサ (codex 2026-09-16 M5)
     for (const auto& k : extra) {
         auto it = var.c_d.find(k);
         if (it == var.c_d.end() || it->second == nullptr) continue;
@@ -114,6 +115,7 @@ void periodicMirrorNSState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , 
     std::vector<std::string> extra;
     for (const auto& nm : var.speciesVarNames)     extra.push_back(nm);
     for (const auto& nm : var.condMomentConsNames) extra.push_back(nm);
+    if (var.tracerRegistered != 0)                 extra.push_back("roXi");   // 受動トレーサ保存量の root→member ミラー
     for (const auto& k : extra) {
         auto it = var.c_d.find(k);
         if (it == var.c_d.end() || it->second == nullptr) continue;

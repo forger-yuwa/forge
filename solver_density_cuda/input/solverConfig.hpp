@@ -401,6 +401,10 @@ public:
     double chemFreezeBelowT = 0.0;             // この温度未満で反応を凍結 (ω=0) [K]
     int chemJacobianMode = 1;                  // 0: 陽ソースのみ, 1: 対角 point-implicit (src_jac_Y), 2: 全ブロック (Phase 2)
     flow_float Sc = 0.7;                       // 定数 Schmidt 数 (speciesDiffusionMethod==0)
+    // 受動トレーサ (physProp.tracer: exhaust)。排気率 ξ を保存量 roXi として輸送する (SERN full モードの
+    // 排気/外気ラベル; plans/active/thermophysics-cea-mole-fraction-species.md §4.5)。"" / none で無効 (既定; 従来経路ビット不変)。
+    std::string tracer = "";
+    bool tracerEnabled() const { return tracer == "exhaust"; }
     flow_float Sc_t = 0.7;                     // 乱流 Schmidt 数 (D_t=mu_t/(ro*Sc_t))。
                                                // turbulence.turbulentSchmidt でも設定可 (physProp.Sc_t は後方互換、turbulence 優先)
 
@@ -413,6 +417,11 @@ public:
                              //   1: H2O (Murphy-Koop, CNT+Kantrowitz+Hertz-Knudsen, carrier+TP)
     int condGasSpecies = -1; // carrier+condensible: 凝縮する気相化学種の index (roY{s})。
                              //   -1: pure-condensible (気相=凝縮種, N2 Arthur)。>=0: H2O 等の希薄凝縮 (Wyslouzil)
+    // 凝縮種を名前で指定 (condensation.condensationSpecies: H2O)。指定時は physProp.species から index を解決して
+    // condGasSpecies に入れる (数値も併記されて食い違えばエラー)。数値だけの場合は範囲検査のみ。
+    // plans/active/thermophysics-cea-mole-fraction-species.md §2 (凝縮種は名前が正本)。
+    std::string condensationSpecies = "";
+    std::string condGasSpeciesName  = "";  // 解決済みの凝縮種名 (ログ用; 名前指定でも index 指定でも埋まる)
     int condKantrowitz = 0;  // 核生成の非等温補正。0: off (等温 CNT, 既定), 1: Kantrowitz 純蒸気形 (旧結果再現),
                              //   2: Feder carrier 形 (キャリア衝突による冷却を含む, q は潜熱項のみ), 3: Feder carrier 形 + 表面仕事項 (物理モデル)
     double condSigmaScale = 1.0; // 表面張力の一定倍率 (感度試験専用; 核生成・Kelvin・蒸発に一貫)。1.0 でビット不変

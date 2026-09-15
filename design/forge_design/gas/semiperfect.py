@@ -173,17 +173,18 @@ class GasSemiPerfect:
     `gas.gamma_throat()`, `gas.T_of_M(M)`。
     """
 
-    def __init__(self, Y: dict, Tt: float, T_min: float | None = None, n_tab: int = 6000):
+    def __init__(self, Y: dict, Tt: float, T_min: float | None = None, n_tab: int = 6000, db=None):
+        # db: ResolvedSpeciesDB (省略時は呼び出し時点の内蔵 SPECIES_NASA9)。設計 (MOC)・擬似種・IC・CFD が同じ DB を使う (plan cea-mole-fraction M1)
+        from .composition import ResolvedSpeciesDB
+        self._db = db if db is not None else ResolvedSpeciesDB.builtin()
         Y = {k.upper(): float(v) for k, v in Y.items()}
         tot = sum(Y.values())
         self.Y = {k: v / tot for k, v in Y.items()}
-        for k in self.Y:
-            if k not in SPECIES_NASA9:
-                raise KeyError(f"species {k} は DB に無い ({list(SPECIES_NASA9)})")
+        self._db.require(self.Y)
         self.Tt = float(Tt)
         self.kind = "semiperfect"
         # 混合の R (質量基準)
-        self.R = RU * sum(y / SPECIES_NASA9[k]["MW"] for k, y in self.Y.items())
+        self.R = RU * sum(y / self._db.MW(k) for k, y in self.Y.items())
         # T テーブル (Tt から T_min まで単調減 = 等エントロピー膨張)。
         # T_min は M~8 相当まで届く比 (CPG γ=1.4 で T/Tt=1/13.8) を既定に。NASA-9 の
         # 下限 200 K より下は forge 本体と同じ「係数クランプ」の外挿になる点に注意。
@@ -244,16 +245,12 @@ class GasSemiPerfect:
 
     # --- 混合熱力学 (質量基準) ---
     def cp_mass(self, T):
-        T = np.atleast_1d(np.asarray(T, dtype=float))
-        out = np.zeros_like(T)
-        for k, y in self.Y.items():
-            sp = SPECIES_NASA9[k]
-            cpR = np.where(T < T_MID, _cp_R(np.asarray(sp["low"]), T),
-                           _cp_R(np.asarray(sp["high"]), T))
-            out += y * cpR * RU / sp["MW"]
-        return out
+        return self._db.cp_mass(self.Y, T)
 
     def h_mass(self, T):
+        return self._db.h_mass(self.Y, T)
+
+    def _h_mass_legacy(self, T):   # (旧実装; ResolvedSpeciesDB.h_mass と同式。参照用に残す)
         T = np.atleast_1d(np.asarray(T, dtype=float))
         out = np.zeros_like(T)
         for k, y in self.Y.items():
@@ -299,7 +296,7 @@ class GasSemiPerfect:
                 "AR_M4": float(self.area_ratio(4.0)) if self._M[-1] > 4 else None}
 
 
-def mixture_pseudo_species(Y: dict, name: str = "MIX", freeze_low_T: bool = False) -> dict:
+def mixture_pseudo_species(Y: dict, name: str = "MIX", freeze_low_T: bool = False, db=None) -> dict:
     r"""frozen 組成の混合物を **単一の擬似種** (NASA-9) にまとめる (forge の
     `physProp.speciesDBFile` 用)。
 
@@ -313,18 +310,20 @@ def mixture_pseudo_species(Y: dict, name: str = "MIX", freeze_low_T: bool = Fals
     forge を回すための道具。組成が凍結している設計 (膨張ノズル) ではこれで正確。
     戻り: forge の `speciesDBFile` yaml にそのまま書ける dict。
     """
+    from .composition import ResolvedSpeciesDB
+    db = db if db is not None else ResolvedSpeciesDB.builtin()
     Y = {k.upper(): float(v) for k, v in Y.items()}
     tot = sum(Y.values()); Y = {k: v / tot for k, v in Y.items()}
-    MW_mix = 1.0 / sum(y / SPECIES_NASA9[k]["MW"] for k, y in Y.items())
+    db.require(Y)
+    MW_mix = 1.0 / sum(y / db.MW(k) for k, y in Y.items())
     low = np.zeros(9); high = np.zeros(9)
     for k, y in Y.items():
-        w = y * MW_mix / SPECIES_NASA9[k]["MW"]
-        low += w * np.asarray(SPECIES_NASA9[k]["low"], dtype=float)
-        high += w * np.asarray(SPECIES_NASA9[k]["high"], dtype=float)
+        e = db[k]; w = y * MW_mix / e.MW
+        low += w * np.asarray(e.low, dtype=float)
+        high += w * np.asarray(e.high, dtype=float)
     # LJ は質量分率加重 (輸送は粗い近似で十分 — 粘性は Sutherland 側で扱う)
-    LJ = LJ_PARAMS
-    sig = sum(y * LJ[k][0] for k, y in Y.items())
-    eps = sum(y * LJ[k][1] for k, y in Y.items())
+    sig = sum(y * db[k].LJ_sigma for k, y in Y.items())
+    eps = sum(y * db[k].LJ_eps_kB for k, y in Y.items())
     # forge DB は 2 区間しか持てない。freeze_low_T=True なら設計側の T_FLOOR 凍結と揃えて
     #   Tmid = T_FLOOR: 下 = 定数 cp(T_FLOOR) (h を連続接続), 上 = 元 low 係数 (200–1000 K)
     # とするが、これは元 high (>1000 K) を捨てるので **Tt ≤ 1000 K 専用**。既定 (False) は
@@ -343,7 +342,7 @@ def mixture_pseudo_species(Y: dict, name: str = "MIX", freeze_low_T: bool = Fals
                    "nasa9_high": [float(v) for v in high]}}
 
 
-def mixture_pseudo_species_split(Y: dict, keep=("H2O",), name_dry: str = "MIXDRY") -> tuple:
+def mixture_pseudo_species_split(Y: dict, keep=("H2O",), name_dry: str = "MIXDRY", db=None) -> tuple:
     r"""**凝縮向け分割**: `keep` の種 (既定 H₂O) を独立種のまま残し、**それ以外を 1 つの擬似種**
     `name_dry` に畳む (計画 plans/accepted/tooling-nozzle-tp-split-h2o-condensation.md)。
 
@@ -362,13 +361,10 @@ def mixture_pseudo_species_split(Y: dict, keep=("H2O",), name_dry: str = "MIXDRY
     y_dry_tot = sum(Y_dry.values())
     if y_dry_tot <= 0.0:
         raise ValueError("mixture_pseudo_species_split: 乾き成分が無い")
-    db = mixture_pseudo_species({k: v / y_dry_tot for k, v in Y_dry.items()}, name_dry)
-    LJ = LJ_PARAMS
+    from .composition import ResolvedSpeciesDB
+    rdb = db if db is not None else ResolvedSpeciesDB.builtin()
+    db = mixture_pseudo_species({k: v / y_dry_tot for k, v in Y_dry.items()}, name_dry, db=rdb)
     for k in keep:
-        sp = SPECIES_NASA9[k]
-        db[k] = {"MW": float(sp["MW"]), "LJ_sigma": float(LJ[k][0]), "LJ_eps_kB": float(LJ[k][1]),
-                 "Tlo": 200.0, "Tmid": 1000.0, "Thi": 6000.0,
-                 "nasa9_low": [float(v) for v in sp["low"]],
-                 "nasa9_high": [float(v) for v in sp["high"]]}
+        db[k] = rdb[k].to_db_dict()
     Y_split = {name_dry: y_dry_tot, **{k: Y[k] for k in keep}}
     return db, Y_split, [name_dry, *keep]

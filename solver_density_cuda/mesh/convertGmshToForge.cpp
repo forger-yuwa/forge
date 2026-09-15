@@ -3,6 +3,7 @@
 
 #include "input/solverConfig.hpp"
 #include "input/setInitial.hpp"
+#include "input/speciesDB.hpp"
 
 #include "mesh/mesh.hpp"
 #include "mesh/gmshReader.hpp"
@@ -23,6 +24,8 @@ int main(int argc , char *argv[])
     solverConfig cfg = solverConfig();
     string fname = "solverConfig.yaml";
     cfg.read(fname);
+    // 化学種 DB の host 側解決 (GPU 無し)。bcond の X{s}→Y{s} 換算が MW を使う。未知種名はここで exit。
+    speciesDB_printTable(cfg, speciesDB_init(cfg));
 
     cout << "----------------- \n";
     cout << "*** Read Mesh *** \n";

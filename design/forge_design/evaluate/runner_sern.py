@@ -84,32 +84,44 @@ def select_operating_point(p: Problem, op: str | None) -> dict:
 
 
 # --- R3: 凍結組成 TP (排気 = CEA 凍結組成の擬似種 EXH, 外気 = 空気 AIR) ------------------------------------
-SPECIES_ORDER = ("EXH", "AIR")     # forge `species:` の順序 = Y0 (排気), Y1 (空気)
+SPECIES_ORDER = ("EXH", "AIR")     # 旧既定 (evaluate.tp_species 省略時の別名 = lumps {EXH: stream inflow, AIR: stream external})
 
 
 def frozen_gases(p: Problem) -> dict | None:
-    """gas.model: frozen_tp のとき {"exhaust": FrozenGas, "ext": FrozenGas, "href_T": float}。cpg なら None。
-    排気組成は作動点 `gas.composition` (select_operating_point が `gas.exhaust_composition` に写す) のモル分率。
-    外気は `spec.external.composition` (モル分率) があればそれ、無ければ乾燥空気 (φ=0 の power-off は排気も空気)。"""
+    """gas.model: frozen_tp のとき {"exhaust": FrozenGas, "ext": FrozenGas, "href_T", "layout": SpeciesLayout, "db",
+    "transported": [FrozenGas (輸送種ごと)]}。cpg なら None。
+    排気組成は作動点 `gas.composition` (select_operating_point が `gas.exhaust_composition` に写す) のモル分率、
+    外気は `spec.external.composition` (モル分率) があればそれ、無ければ乾燥空気。
+    輸送種の配置は統一スキーマ `evaluate.tp_species` (省略時 = 旧 `[EXH, AIR]` = 流れごとの lump; `{mode: full}` で実種の和集合、
+    このとき排気率は受動スカラ `roXi` で輸送) を流れ {inflow, external} で解決する (plan cea-mole-fraction §4.5)。"""
     if not p.is_frozen_tp:
         return None
+    from ..gas.composition import parse_tp_species, resolve_species_layout
     href = float(p.raw["gas"].get("thermo_href_temp", 298.15))
     comp = p.raw["gas"].get("exhaust_composition")
     if not comp:
         raise ValueError("gas.model: frozen_tp には gas.exhaust_composition か operating_points[].gas.composition (モル分率) が要る")
+    db = p.species_db
     ext_comp = p.spec["external"].get("composition")
-    return {"exhaust": FrozenGas.from_mole(comp, SPECIES_ORDER[0], href),
-            "ext": FrozenGas.from_mole(ext_comp, SPECIES_ORDER[1], href) if ext_comp else FrozenGas.air(href), "href_T": href}
+    exh = FrozenGas.from_mole(comp, "EXH", href, db)
+    ext = FrozenGas.from_mole(ext_comp, "AIR", href, db) if ext_comp else FrozenGas.air(href, db)
+    ev = dict(p.evaluate)
+    ev.setdefault("tp_species", ["EXH", "AIR"])
+    layout = resolve_species_layout(parse_tp_species(ev), {"inflow": exh.Y, "external": ext.Y}, db,
+                                    condensing_species=None, condensation=False)
+    transported = []
+    for sname in layout.species:
+        e = layout.entries[sname]
+        transported.append(FrozenGas(e.lump_mass if e.lump_mass else {sname: 1.0}, sname, href, db))
+    return {"exhaust": exh, "ext": ext, "href_T": href, "layout": layout, "db": db, "transported": transported}
 
 
 def write_species_db(p: Problem, run_dir, gases: dict | None) -> None:
+    """輸送種の `species_db.yaml` (由来コメント付き) と `species_meta.yaml` を run dir に書く (cpg なら何も書かない)。"""
     if gases is None:
         return
-    import yaml as _yaml
-    db = {}
-    for key in ("exhaust", "ext"):
-        db.update(gases[key].pseudo_species_db())
-    (Path(run_dir) / "species_db.yaml").write_text(_yaml.safe_dump(db, sort_keys=False))
+    from ..gas.composition import write_species_files
+    write_species_files(gases["layout"], run_dir)
 
 
 def gas_states(p: Problem) -> dict:
@@ -139,8 +151,11 @@ def gas_states(p: Problem) -> dict:
     out = {"exhaust": st_ex, "ext": st_en, "R": R, "gas_model": "frozen_tp" if gases else "cpg",
            "q_inf": 0.5 * st_en["ro"] * st_en["u"] ** 2}
     if gases:
-        out["species"] = list(SPECIES_ORDER); out["href_T"] = gases["href_T"]
-        out["exhaust"]["Y"] = [1.0, 0.0]; out["ext"]["Y"] = [0.0, 1.0]
+        L = gases["layout"]
+        out["species"] = list(L.species); out["href_T"] = gases["href_T"]; out["tp_mode"] = L.mode; out["tracer"] = bool(L.tracer)
+        out["exhaust"]["Y"] = L.Y_transport("inflow"); out["ext"]["Y"] = L.Y_transport("external")
+        if L.tracer:                     # full: 排気率 ξ (排気入口 1 / 外気入口 0) を受動スカラ roXi で輸送
+            out["exhaust"]["Xi"] = 1.0; out["ext"]["Xi"] = 0.0
         out["gas_summary"] = {"exhaust": gases["exhaust"].summary(), "ext": gases["ext"].summary()}
     return out
 
@@ -204,8 +219,11 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     # R3 (frozen_tp): 排気 EXH / 空気 AIR の 2 擬似種 TP。thermoHrefTemp (sensible datum) は陰解法の χ_eos 桁違い対策で必須
     # ([[isobutane-wt-semiperfect]] / runner_axismach と同じ)。IC の roe も同じ基準で組む (paste_region_ic)
     if p.is_frozen_tp:
-        href = float(p.raw["gas"].get("thermo_href_temp", 298.15))
-        _tp = f", species: [{', '.join(SPECIES_ORDER)}], speciesDBFile: \"species_db.yaml\", thermoHrefTemp: {href}"
+        gases = frozen_gases(p); L = gases["layout"]
+        _sp = ", ".join(f'"{k}"' for k in L.species)   # 引用符付き (NO/N/Y の真偽値化を防ぐ; codex result M1)
+        _tp = f", species: [{_sp}], speciesDBFile: \"species_db.yaml\", thermoHrefTemp: {gases['href_T']}"
+        if L.tracer:
+            _tp += ", tracer: exhaust"
         _tm = 2
     else:
         _tp = ""; _tm = 0
@@ -265,7 +283,12 @@ def _bcond_config(p: Problem, st: dict) -> str:
 def inlet_species_floats(s: dict) -> str:
     """frozen_tp の入口組成 (Y0 = 排気, Y1 = 空気)。cpg (Y 無し) は空文字。"""
     Y = s.get("Y")
-    return "" if Y is None else "".join(f", Y{i}: {float(y):.6g}" for i, y in enumerate(Y))
+    if Y is None:
+        return ""
+    txt = "".join(f", Y{i}: {float(y):.6g}" for i, y in enumerate(Y))
+    if "Xi" in s:
+        txt += f", Xi: {float(s['Xi']):.6g}"
+    return txt
 
 
 def region_ic_arrays(upper, st: dict, gamma: float) -> dict:
@@ -278,7 +301,10 @@ def region_ic_arrays(upper, st: dict, gamma: float) -> dict:
     if st.get("gas_model") == "frozen_tp":
         e_ex = ex["h_sens"] - ex["R"] * ex["T"]; e_en = en["h_sens"] - en["R"] * en["T"]
         out["roe"] = ro * (np.where(upper, e_ex, e_en) + 0.5 * u * u)
-        out["roY0"] = np.where(upper, ro, 0.0); out["roY1"] = np.where(upper, 0.0, ro)
+        for i, (ye, ya) in enumerate(zip(ex["Y"], en["Y"])):      # 輸送種ごとの領域組成 (lumped: [1,0]/[0,1], full: 実種ベクトル)
+            out[f"roY{i}"] = ro * np.where(upper, float(ye), float(ya))
+        if st.get("tracer"):
+            out["roXi"] = np.where(upper, ro, 0.0)
     else:
         out["roe"] = P / (gamma - 1.0) + 0.5 * ro * u * u
     return out
@@ -407,14 +433,91 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     return info
 
 
+def _species_signature(run_dir) -> dict | None:
+    """run dir の輸送種の署名を**実 config + 解決済み DB** から作る (codex result-2 M2): 種順序・MW・両区間 NASA-9 係数・
+    温度区切り・thermoHrefTemp・tracer 設定。`species_meta.yaml` があれば順序の矛盾を拒否。CPG (thermalMethod≠2) は None。
+    TP なのに config/DB が読めなければ ValueError (照合不能)。"""
+    from ..gas.composition import load_species_meta, load_yaml_str
+    rd = Path(run_dir)
+    cfgp = (rd / "solverConfig_main.yaml") if (rd / "solverConfig_main.yaml").exists() else (rd / "solverConfig.yaml")
+    if not cfgp.exists():
+        raise ValueError(f"{rd}: solverConfig.yaml が無く種配置を照合できない")
+    cfg = load_yaml_str(cfgp.read_text()); pp = cfg.get("physProp", {})
+    if int(pp.get("thermalMethod", 0)) != 2:
+        return None
+    names = [str(k).upper() for k in (pp.get("species") or ["N2"])]
+    dbp = rd / str(pp.get("speciesDBFile") or "species_db.yaml")
+    if not dbp.exists():
+        raise ValueError(f"{rd}: speciesDBFile {dbp.name} が無く種配置を照合できない")
+    db = load_yaml_str(dbp.read_text()) or {}
+    dbu = {str(k).upper(): v for k, v in db.items()}
+    ents = {}
+    for k in names:
+        if k not in dbu:
+            raise ValueError(f"{rd}: 種 {k} が {dbp.name} に無い")
+        e = dbu[k]
+        ents[k] = {"MW": float(e["MW"]), "low": [float(v) for v in e["nasa9_low"]], "high": [float(v) for v in e["nasa9_high"]],
+                   "ranges": [float(e.get("Tlo", 200.0)), float(e.get("Tmid", 1000.0)), float(e.get("Thi", 6000.0))]}
+    meta = load_species_meta(rd)
+    if meta is not None and [str(k).upper() for k in meta["species"]] != names:
+        raise ValueError(f"{rd}: species_meta.yaml の種順序 {meta['species']} が solverConfig の {names} と矛盾")
+    tracer = str(pp.get("tracer", "none")).lower() not in ("none", "", "0")
+    if meta is not None and bool(meta.get("tracer", {}).get("enabled", False)) != tracer:
+        raise ValueError(f"{rd}: species_meta.yaml のトレーサ設定が solverConfig (tracer: {pp.get('tracer', 'none')}) と矛盾")
+    return {"species": names, "entries": ents, "href": float(pp.get("thermoHrefTemp", 0.0)), "tracer": tracer}
+
+
+def check_species_compatible(src_run_dir, dst_run_dir, what: str = "restart", allow_db_change: bool = False) -> None:
+    """restart 経路の共通照合 (codex result M3 / result-2 M2): 実 config + DB の署名で種順序・MW・NASA-9 係数・温度区切り・
+    datum・トレーサを照合し、一致しないと拒否。allow_db_change (作動点変更の warm start) は lump の MW/係数の変化だけ許す。
+    両方 CPG なら通す。片方だけ TP は拒否。"""
+    a, b = _species_signature(src_run_dir), _species_signature(dst_run_dir)
+    if a is None and b is None:
+        return
+    if a is None or b is None:
+        raise ValueError(f"{what}: 片方だけ TP (thermalMethod 2) で種配置を照合できない ({src_run_dir} → {dst_run_dir})")
+    if a["species"] != b["species"]:
+        raise ValueError(f"{what}: 輸送種の順序が違う (元 {a['species']} / 先 {b['species']}); tools/convert_species_field.py を使う")
+    if not allow_db_change:
+        for k in a["species"]:
+            ea, eb = a["entries"][k], b["entries"][k]
+            if abs(ea["MW"] / eb["MW"] - 1.0) > 1e-9:
+                raise ValueError(f"{what}: 種 {k} の MW が違う ({ea['MW']} / {eb['MW']}) — DB が異なる")
+            for rng in ("low", "high"):
+                if any(abs(x - y) > 1e-12 * max(abs(x), abs(y), 1.0) for x, y in zip(ea[rng], eb[rng])):
+                    raise ValueError(f"{what}: 種 {k} の NASA-9 係数 ({rng}) が違う — DB が異なる")
+            if ea["ranges"] != eb["ranges"]:
+                raise ValueError(f"{what}: 種 {k} の温度区切りが違う ({ea['ranges']} / {eb['ranges']})")
+    if abs(a["href"] - b["href"]) > 1e-9:
+        raise ValueError(f"{what}: thermoHrefTemp が違う ({a['href']} / {b['href']})")
+    if a["tracer"] != b["tracer"]:
+        raise ValueError(f"{what}: トレーサの有無が違う (元 {a['tracer']} / 先 {b['tracer']})")
+
+
+def _require_datasets(h5, names, what: str) -> None:
+    missing = [k for k in names if k not in h5["VALUE"]]
+    if missing:
+        raise ValueError(f"{what}: 元の VALUE に {missing} が無い")
+
+
 def restart_by_index(res_h5, mesh_h5) -> None:
     """同一メッシュの stage 間移植: VALUE を index でコピーする (座標最近傍の `interp_field.py` は使わない)。
     理由 (2026-09-04, case/46 run_0009): スリットカウルの上下壁ノードは座標が一致し、最近傍補間が双子を同じ元
     ノードに写す → 排気側の壁ノードが外部流の圧力を持ち 2 次で発散した (interp_field の全 134 station で誤写像を確認)。"""
+    check_species_compatible(Path(res_h5).parent, Path(mesh_h5).parent, "restart_by_index")
+    sig = _species_signature(Path(mesh_h5).parent)
     with h5py.File(res_h5, "r") as src, h5py.File(mesh_h5, "r+") as dst:
         n = len(dst["VALUE/ro"])
-        for k in ("ro", "roUx", "roUy", "roUz", "roe", "roK", "roOmega"):   # 状態量のみ (wall_dist は触らない)
-            if k in src["VALUE"] and k in dst["VALUE"] and len(src["VALUE"][k]) == n:
+        if sig is not None:
+            _require_datasets(src, ["ro", "roUx", "roUy", "roUz", "roe"] + [f"roY{i}" for i in range(len(sig["species"]))] + (["roXi"] if sig["tracer"] else []), "restart_by_index")
+        keys = ["ro", "roUx", "roUy", "roUz", "roe", "roK", "roOmega"]        # 状態量のみ (wall_dist は触らない)
+        keys += sorted(k for k in src["VALUE"] if re.fullmatch(r"roY\d+", k)) + ["roXi"]   # 化学種・トレーサも引き継ぐ (旧: 7 変数のみで ΣY が壊れた; codex M4)
+        for k in keys:
+            if k in src["VALUE"] and len(src["VALUE"][k]) == n:
+                if k not in dst["VALUE"]:
+                    if k.startswith("roY") or k == "roXi":
+                        dst["VALUE"].create_dataset(k, data=np.asarray(src["VALUE"][k][:], dtype=np.float32))
+                    continue
                 dst["VALUE"][k][:] = src["VALUE"][k][:]
 
 
@@ -444,6 +547,8 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
         raise RuntimeError(f"warm_from_run: {src_run_dir} に res_*.h5 が無い")
     gases_d = None
     if di.get("gas_model") == "frozen_tp":
+        # 順序・datum・トレーサは一致必須。MW (lump の組成 = 作動点の排気組成) は違ってよい: roe は目標作動点の DB で T から組み直す
+        check_species_compatible(src_run_dir, dst_run_dir, "warm_from_run", allow_db_change=True)   # codex result M3
         # 作動点適用後の組成で擬似種を作る (prepare_info の problem は作動点未適用の YAML なので op を再選択)
         pd_ = load_problem(di["problem"]); select_operating_point(pd_, di["operating_point"]["name"]); gases_d = frozen_gases(pd_)
     with h5py.File(res[-1], "r") as src, h5py.File(dst_run_dir / MESH, "r+") as dst:
@@ -461,16 +566,32 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
         else:
             # frozen_tp (R3): 圧力は出力の P を相似スケール、組成 (Y_EXH, Y_AIR) は場のまま持ち越し、
             # T' = P'/(ρ' R_mix(Y)) と目標作動点の擬似種 (排気組成が違う) で roe' = ρ'(Σ Y_s e_sens,s(T') + ½|u'|²) を組み直す
-            if "P" not in src["VALUE"] or "roY0" not in src["VALUE"]:
-                raise ValueError("warm_from_run (frozen_tp): 元 run の出力に P / roY0 が無い")
+            # 組成の再初期化 (codex result-2 M1): 元の組成は排気率 ξ 以外捨て、**目標作動点**の入口ベクトルから
+            # Y_t = ξ Y_in^dst + (1−ξ) Y_ext^dst を組む (lumped [EXH, AIR] では Y_EXH の持ち越しと同値、full / lumped+keep では
+            # 実種分率が新作動点の排気組成に変わる)。ξ は元 run の exhaust_fraction (tracer なら roXi/ρ、無ければ流入元ラベル種)
+            from ..gas.composition import exhaust_fraction, reinit_transport_vector
+            tg = gases_d["transported"]; Ld = gases_d["layout"]; names = list(Ld.species)
+            spec = exhaust_fraction(src_run_dir)
+            _require_datasets(src, ["P", spec["conserved"]], "warm_from_run (frozen_tp)")
+            xi = np.clip(src["VALUE/" + spec["conserved"]][:].astype(np.float64) / np.maximum(ro, 1e-30), 0.0, 1.0)
+            Ys = reinit_transport_vector(xi, Ld)
             P = src["VALUE/P"][:].astype(np.float64) * s_P
-            Y0 = np.clip(src["VALUE/roY0"][:].astype(np.float64) / np.maximum(ro, 1e-30), 0.0, 1.0); Y1 = 1.0 - Y0
-            gx, ga = gases_d["exhaust"], gases_d["ext"]
-            R_mix = Y0 * gx.R + Y1 * ga.R
+            R_mix = sum(y * g.R for y, g in zip(Ys, tg))
             T_n = P / np.maximum(ro_n * R_mix, 1e-30)
-            e_n = Y0 * gx.e_sens(T_n) + Y1 * ga.e_sens(T_n)
+            e_n = sum(y * g.e_sens(T_n) for y, g in zip(Ys, tg))
             roe_n = ro_n * e_n + 0.5 * sum(m * m for m in mom_n) / np.maximum(ro_n, 1e-30)
-            dst["VALUE/roY0"][:] = ro_n * Y0; dst["VALUE/roY1"][:] = ro_n * Y1
+            if not (np.all(np.isfinite(roe_n)) and np.all(np.isfinite(T_n)) and np.all(ro_n > 0)):
+                raise ValueError("warm_from_run: 非有限または非正の状態 (書込み前に中止)")
+            for i_, y in enumerate(Ys):
+                if f"roY{i_}" in dst["VALUE"]:
+                    dst[f"VALUE/roY{i_}"][:] = ro_n * y
+                else:
+                    dst["VALUE"].create_dataset(f"roY{i_}", data=(ro_n * y).astype(np.float32))
+            if Ld.tracer:
+                if "roXi" in dst["VALUE"]:
+                    dst["VALUE/roXi"][:] = ro_n * xi
+                else:
+                    dst["VALUE"].create_dataset("roXi", data=(ro_n * xi).astype(np.float32))
         dst["VALUE/ro"][:] = ro_n
         for k, m in zip(("roUx", "roUy", "roUz"), mom_n):
             dst["VALUE"][k][:] = m

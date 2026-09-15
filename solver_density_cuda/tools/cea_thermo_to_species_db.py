@@ -8,10 +8,16 @@
 - Lennard-Jones パラメータ (σ [Å], ε/kB [K]) は内蔵表 (Cantera h2o2.yaml / gri30.yaml の transport 値) から与える。
   表に無い種は N2 相当 (3.621, 97.53) を入れて警告する。
 - 種名キーは引用符付きで書く (`"NO"`, `"N"`: PyYAML など YAML 1.1 実装で真偽値に化けるため)。
-- 生成される値は `thermo_d.cu` 内蔵 DB (N2/O2/AR/CO2/HE/H2O) と同一ソース (CEA) なので、既存種を指定しても値は一致する
-  (`--check` で内蔵 N2 と突き合わせる自己検証を行う)。
+- ヘッダ 2 行目の元素欄 (5 組 × 8 文字: 元素記号 2 文字 + 原子数 6 文字) を `atoms: {H: 2.0, O: 1.0}` として出力する
+  (species_meta.yaml の原子組成・元素混合分率診断が使う)。
+- `--check`: 要求した種のうち設計側の転記表 `design/forge_design/gas/semiperfect.py` `SPECIES_NASA9` にある種**すべて**について
+  MW と両温度域の係数を照合し、最大相対差の表を出す。係数の相対差 > `--check-tol` (既定 1e-6) か MW の相対差 > 1e-5 が
+  1 つでもあれば**非ゼロ終了**する。**既知の不一致** (CEA `thermo.inp` と転記が違う; codex M7 実測): H2O の MW
+  (thermo.inp 18.01528 vs 転記 0.0180153, 相対差 1.1e-6 = 既定 MW 許容 1e-5 の内側なので ok 表示) と AR の高温域 a0
+  (thermo.inp 20.10538 vs 転記 0, 相対差 1 → **AR を含む `--check` は失敗するのが期待動作**)。許容するなら
+  `--check-tol` を上げる (MW は `--check-mw-tol`)。
 """
-import argparse, re, sys
+import argparse, importlib.util, os, re, sys
 
 LJ = {  # (sigma [A], eps/kB [K]) — Cantera h2o2.yaml / gri30.yaml transport データ
     "H2": (2.920, 38.00), "H": (2.050, 145.00), "O": (2.750, 80.00), "O2": (3.458, 107.40),
@@ -56,6 +62,7 @@ def parse_thermo_inp(path):
         n_int = int(hdr[0:2])
         MW = float(hdr[52:65])
         Hf = float(hdr[65:80])
+        atoms = parse_atoms(hdr)
         i += 2
         intervals = []
         if n_int == 0:  # 反応物専用 (係数無し): 1 行だけ
@@ -72,8 +79,27 @@ def parse_thermo_inp(path):
             a = [v if v is not None else 0.0 for v in a] + [b1 or 0.0, b2 or 0.0]
             intervals.append((Tlo, Thi, a))
             i += 3
-        db[name] = {"MW": MW, "Hf298": Hf, "intervals": intervals}
+        db[name] = {"MW": MW, "Hf298": Hf, "intervals": intervals, "atoms": atoms}
     return db
+
+
+def parse_atoms(hdr):
+    """ヘッダ 2 行目 hdr[10:50] = 5 組 × (元素記号 2 文字 + 原子数 6 文字)。例 'H   2.00O   1.00' → {'H': 2.0, 'O': 1.0}。"""
+    atoms = {}
+    for k in range(5):
+        fld = hdr[10 + 8 * k: 18 + 8 * k]
+        sym = fld[:2].strip()
+        cnt = fld[2:].strip()
+        if not sym:
+            continue
+        try:
+            n = float(cnt) if cnt else 0.0
+        except ValueError:
+            continue
+        if n != 0.0:
+            atoms[sym.upper() if len(sym) == 1 else sym[0].upper() + sym[1:].lower()] = n
+    # CEA は 'AR', 'HE' のように 2 文字を大文字で書く種があるので、単原子希ガスは記号をそのまま大文字で保つ
+    return {(k.upper() if k.upper() in ("AR", "HE", "NE", "KR", "XE") else k): v for k, v in atoms.items()}
 
 
 def to_entry(name, rec):
@@ -92,6 +118,7 @@ def to_entry(name, rec):
         "LJ_sigma": sig, "LJ_eps_kB": eps,
         "Tlo": lo[0], "Tmid": lo[1], "Thi": hi[1],
         "nasa9_low": lo[2], "nasa9_high": hi[2],
+        "atoms": rec.get("atoms", {}),      # 元素組成 (forge は読まない; species_meta / 元素診断用)
         "_Hf298_J_per_mol": rec["Hf298"],  # 参考 (forge は読まない)
     }
 
@@ -106,25 +133,73 @@ def dump_yaml(entries, out):
             w(f"  {k}:\n")
             for v in e[k]:
                 w(f"  - {v!r}\n")
+        if e.get("atoms"):
+            w("  atoms: {" + ", ".join(f"{a}: {float(n)!r}" for a, n in e["atoms"].items()) + "}\n")
         w(f"  # Hf(298.15) = {e['_Hf298_J_per_mol']} J/mol (CEA thermo.inp)\n")
 
 
-BUILTIN_N2_LOW = [2.210371497e+04, -3.818461820e+02, 6.082738360e+00, -8.530914410e-03, 1.384646189e-05,
-                  -9.625793620e-09, 2.519705809e-12, 7.108460860e+02, -1.076003744e+01]
+DESIGN_SEMIPERFECT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                   "..", "..", "design", "forge_design", "gas", "semiperfect.py"))
+
+
+def load_builtin_table(path=DESIGN_SEMIPERFECT):
+    """設計側の転記表 SPECIES_NASA9 (name -> dict(MW, low, high)) をパスで import する (パッケージ import に依存しない)。"""
+    spec = importlib.util.spec_from_file_location("forge_semiperfect_for_check", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.SPECIES_NASA9
+
+
+def rel(a, b):
+    return abs(a - b) / max(abs(a), abs(b), 1e-30)
+
+
+def check_against_builtin(entries, tol, mw_tol, table_path=DESIGN_SEMIPERFECT):
+    """要求種のうち SPECIES_NASA9 にある種すべてを照合。表を出し、許容超えがあれば False。"""
+    try:
+        table = load_builtin_table(table_path)
+    except Exception as e:  # noqa: BLE001
+        print(f"[check] SPECIES_NASA9 を読めない ({table_path}): {e}", file=sys.stderr)
+        return False
+    ok = True
+    print(f"[check] CEA thermo.inp vs SPECIES_NASA9 ({table_path}); tol coeff {tol:.1e}, MW {mw_tol:.1e}")
+    print(f"[check] {'species':8s} {'MW rel':>10s} {'low max':>10s} {'high max':>10s}  worst")
+    for name, e in entries.items():
+        key = name if name in table else name.upper()
+        if key not in table:
+            print(f"[check] {name:8s} {'-':>10s} {'-':>10s} {'-':>10s}  (not in SPECIES_NASA9; skipped)")
+            continue
+        ref = table[key]
+        dmw = rel(e["MW"], float(ref["MW"]))
+        dlo = [rel(x, float(y)) for x, y in zip(e["nasa9_low"], ref["low"])]
+        dhi = [rel(x, float(y)) for x, y in zip(e["nasa9_high"], ref["high"])]
+        worst = ""
+        if max(dlo) > tol:
+            k = max(range(9), key=lambda i: dlo[i]); worst = f"low a{k}: {e['nasa9_low'][k]!r} vs {ref['low'][k]!r}"
+        if max(dhi) > tol and (not worst or max(dhi) > max(dlo)):
+            k = max(range(9), key=lambda i: dhi[i]); worst = f"high a{k}: {e['nasa9_high'][k]!r} vs {ref['high'][k]!r}"
+        if dmw > mw_tol:
+            worst = f"MW: {e['MW']!r} vs {ref['MW']!r}" + (f"; {worst}" if worst else "")
+        bad = dmw > mw_tol or max(dlo) > tol or max(dhi) > tol
+        ok = ok and not bad
+        print(f"[check] {name:8s} {dmw:10.2e} {max(dlo):10.2e} {max(dhi):10.2e}  {'FAIL ' if bad else 'ok   '}{worst}")
+    print(f"[check] {'PASS' if ok else 'FAIL'} (known transcription differences: H2O MW, AR high-range a0)")
+    return ok
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("thermo_inp")
     ap.add_argument("--species", nargs="+", required=True)
     ap.add_argument("--out", default="species_db.yaml")
-    ap.add_argument("--check", action="store_true", help="内蔵 N2 係数と照合する")
+    ap.add_argument("--check", action="store_true",
+                    help="要求種のうち SPECIES_NASA9 (design/forge_design/gas/semiperfect.py) にある種すべての MW・両温度域係数を照合し、"
+                         "許容超えがあれば非ゼロ終了")
+    ap.add_argument("--check-tol", type=float, default=1e-6, help="係数の相対差の許容 (既定 1e-6)")
+    ap.add_argument("--check-mw-tol", type=float, default=1e-5, help="MW の相対差の許容 (既定 1e-5)")
+    ap.add_argument("--check-table", default=DESIGN_SEMIPERFECT, help="照合する SPECIES_NASA9 を持つ .py (既定: design 側)")
     a = ap.parse_args()
     db = parse_thermo_inp(a.thermo_inp)
-    if a.check:
-        n2 = db["N2"]["intervals"][0][2]
-        err = max(abs(x - y) / max(abs(y), 1e-30) for x, y in zip(n2, BUILTIN_N2_LOW))
-        print(f"[check] N2 low-range coeffs vs thermo_d.cu builtin: max rel diff = {err:.2e}")
     entries = {}
     for s in a.species:
         key = s if s in db else {"AR": "Ar", "HE": "He"}.get(s, s)
@@ -134,6 +209,9 @@ def main():
     with open(a.out, "w") as f:
         dump_yaml(entries, f)
     print(f"wrote {a.out}: {', '.join(entries)}")
+    if a.check:
+        if not check_against_builtin(entries, a.check_tol, a.check_mw_tol, a.check_table):
+            sys.exit(1)
 
 
 if __name__ == "__main__":

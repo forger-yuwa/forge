@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .semiperfect import LJ_PARAMS, RU, SPECIES_NASA9, T_FLOOR, T_MID, _cp_R_raw, _h_RT_raw, mixture_pseudo_species
+from .semiperfect import LJ_PARAMS, RU, SPECIES_NASA9, T_FLOOR, T_MID, _cp_R_raw, _h_RT_raw, mixture_pseudo_species  # noqa: F401
 
 # 乾燥空気 (モル分率; CO2 は微量なので N2 に含める)
 AIR_MOLE = {"N2": 0.78084, "O2": 0.20946, "AR": 0.00934}
@@ -21,14 +21,10 @@ AIR_MOLE = {"N2": 0.78084, "O2": 0.20946, "AR": 0.00934}
 P_STD = 1.0e5
 
 
-def mole_to_mass(x: dict) -> dict:
-    if any(isinstance(k, bool) for k in x):
-        raise ValueError("組成のキーに真偽値がある: YAML で NO/ON/OFF 等がクォート無しだと bool に読まれる ('NO': ... と書く)")
-    x = {k.upper(): float(v) for k, v in x.items()}
-    tot = sum(x.values()); x = {k: v / tot for k, v in x.items()}
-    m = {k: v * SPECIES_NASA9[k]["MW"] for k, v in x.items()}
-    mt = sum(m.values())
-    return {k: v / mt for k, v in m.items()}
+def mole_to_mass(x: dict, db=None) -> dict:
+    """モル分率 → 質量分率 (`gas.composition.mole_to_mass` へ委譲; 単一ソース)。"""
+    from .composition import mole_to_mass as _m2m
+    return _m2m(x, db)
 
 
 def _s0_R_raw(a, T):
@@ -40,48 +36,33 @@ def _s0_R_raw(a, T):
 class FrozenGas:
     """凍結組成の TP 混合気体 (質量分率 Y)。`name` は forge 擬似種名。"""
 
-    def __init__(self, Y_mass: dict, name: str = "MIX", href_T: float = 298.15):
+    def __init__(self, Y_mass: dict, name: str = "MIX", href_T: float = 298.15, db=None):
+        # db: ResolvedSpeciesDB (省略時は内蔵)。輸送種 (lump) の熱力学は lump 内質量分率でこのクラスを作れば厳密に同じ
+        from .composition import ResolvedSpeciesDB
+        self._db = db if db is not None else ResolvedSpeciesDB.builtin()
         Y = {k.upper(): float(v) for k, v in Y_mass.items()}
         tot = sum(Y.values())
         self.Y = {k: v / tot for k, v in Y.items() if v > 0.0}
-        for k in self.Y:
-            if k not in SPECIES_NASA9:
-                raise KeyError(f"species {k} は DB に無い ({sorted(SPECIES_NASA9)})")
+        self._db.require(self.Y)
         self.name = name; self.href_T = float(href_T)
-        self.MW = 1.0 / sum(y / SPECIES_NASA9[k]["MW"] for k, y in self.Y.items())
+        self.MW = 1.0 / sum(y / self._db.MW(k) for k, y in self.Y.items())
         self.R = RU / self.MW
         self._h_ref = float(self._h_abs(np.array([self.href_T]))[0]) if self.href_T > 0 else 0.0
 
     @classmethod
-    def from_mole(cls, x_mole: dict, name: str = "MIX", href_T: float = 298.15) -> "FrozenGas":
-        return cls(mole_to_mass(x_mole), name, href_T)
+    def from_mole(cls, x_mole: dict, name: str = "MIX", href_T: float = 298.15, db=None) -> "FrozenGas":
+        return cls(mole_to_mass(x_mole, db), name, href_T, db)
 
     @classmethod
-    def air(cls, href_T: float = 298.15) -> "FrozenGas":
-        return cls.from_mole(AIR_MOLE, "AIR", href_T)
+    def air(cls, href_T: float = 298.15, db=None) -> "FrozenGas":
+        return cls.from_mole(AIR_MOLE, "AIR", href_T, db)
 
-    # --- 種ごとの多項式評価 (T_FLOOR 未満は cp 凍結 = semiperfect.py と同じ約束) ---
-    def _per_species(self, T, fn_raw, fn_floor):
-        T = np.atleast_1d(np.asarray(T, dtype=float)); out = np.zeros_like(T)
-        for k, y in self.Y.items():
-            sp = SPECIES_NASA9[k]; w = y * RU / sp["MW"]
-            lo, hi = np.asarray(sp["low"], float), np.asarray(sp["high"], float)
-            v = np.where(T < T_MID, fn_raw(lo, np.maximum(T, T_FLOOR)), fn_raw(hi, T))
-            if fn_floor is not None:
-                v = np.where(T < T_FLOOR, fn_floor(lo, T), v)
-            out += w * v
-        return out
-
+    # --- 熱力学は解決済み DB の種別評価 (ソルバと同じ範囲外処理: 種ごとの Tlo/Thi で cp 固定・h 線形・s° 対数; codex result-4 M2) ---
     def cp_mass(self, T):
-        return self._per_species(T, _cp_R_raw, lambda a, T: _cp_R_raw(a, T_FLOOR) * np.ones_like(T))
+        return self._db.cp_mass(self.Y, T)
 
     def _h_abs(self, T):
-        # h = R T (h/RT); T<T_FLOOR: h(TF) − cp_F (TF − T)
-        def raw(a, T):
-            return _h_RT_raw(a, T) * T
-        def floor(a, T):
-            return _h_RT_raw(a, T_FLOOR) * T_FLOOR - _cp_R_raw(a, T_FLOOR) * (T_FLOOR - T)
-        return self._per_species(T, raw, floor)
+        return self._db.h_mass(self.Y, T)
 
     def h_mass(self, T):
         """絶対エンタルピー (生成込み) [J/kg]。"""
@@ -95,8 +76,8 @@ class FrozenGas:
         return self.h_sens(T) - self.R * np.atleast_1d(np.asarray(T, float))
 
     def s0_mass(self, T):
-        """標準エントロピー (1 bar) [J/kg/K]。T<T_FLOOR は s(TF) − cp_F ln(TF/T)。"""
-        return self._per_species(T, _s0_R_raw, lambda a, T: _s0_R_raw(a, T_FLOOR) - _cp_R_raw(a, T_FLOOR) * np.log(T_FLOOR / np.maximum(T, 1.0)))
+        """標準エントロピー (1 bar) [J/kg/K]。"""
+        return self._db.s0_mass(self.Y, T)
 
     def entropy(self, T, P):
         return self.s0_mass(T) - self.R * np.log(np.asarray(P, float) / P_STD)
@@ -114,11 +95,7 @@ class FrozenGas:
                 "gas": self.name}
 
     def pseudo_species_db(self) -> dict:
-        db = mixture_pseudo_species(self.Y, self.name)
-        # LJ: 全種に値を持つ (semiperfect.LJ_PARAMS)
-        sig = sum(y * LJ_PARAMS[k][0] for k, y in self.Y.items()); eps = sum(y * LJ_PARAMS[k][1] for k, y in self.Y.items())
-        db[self.name]["LJ_sigma"] = float(sig); db[self.name]["LJ_eps_kB"] = float(eps)
-        return db
+        return mixture_pseudo_species(self.Y, self.name, db=self._db)
 
     def summary(self) -> dict:
         return {"name": self.name, "Y": self.Y, "MW": self.MW, "R": self.R, "href_T": self.href_T}

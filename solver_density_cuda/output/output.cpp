@@ -38,7 +38,9 @@ static std::list<std::string> effectiveOutputNames(const solverConfig& cfg, cons
     std::vector<std::string> base = {"ro","roUx","roUy","roUz","roe","roK","roOmega"};
     for (const auto& n : var.speciesVarNames) base.push_back(n);            // roY{s}
     for (const auto& n : var.condMomentConsNames) base.push_back(n);        // 凝縮モーメント保存量
+    if (var.tracerRegistered != 0) base.push_back("roXi");                  // 受動トレーサ保存量 (restart 用)
     if (cfg.outputLevel >= 1) {
+        if (var.tracerRegistered != 0) base.push_back("Xi");
         for (const char* n : {"P","T","Ux","Uy","Uz","k","omega","sonic","vis_lam","vis_turb","wall_dist"}) base.push_back(n);
         for (const auto& n : var.speciesVarNames) base.push_back(n.substr(2));   // Y{s}
         for (const auto& n : var.condMomentConsNames) base.push_back(n.substr(2));

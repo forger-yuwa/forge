@@ -246,10 +246,24 @@ L/R 状態の `roe_L/Ht_L/ca_L` (および R 側) を NASA で再構成。Roe �
   乱流シュミット数 `Sc_t` は `physProp.Sc_t` または `turbulence.turbulentSchmidt` で設定する
   (両方あれば後者を優先。`turbulence.turbulentPrandtl` と同じブロックで揃えられる)。既定 0.7。
 - `nSpecies` は `species` の要素数。未指定で `thermalMethod==2` なら既定 N2 単成分。
-- **(計画, 2026-09-15)** 組成のモル分率入力: `bcondConfig` の `floats: {X0: .., X1: ..}` と IC 生成・`inletProfile` CSV の `X_<name>` を
-  `speciesDBFile` の MW で $Y_k = X_k M_k/\sum_j X_j M_j$ に換算して既存の `Y{s}` 経路へ流す (`Y` と `X` の混在はエラー)。起動ログに species 表
-  (名前, MW, 入口 Y/X) を出す。設計チェーン側 (`composition_basis: mole`, `tp_species: full | lumped | pseudo`) と合わせて
-  plan [thermophysics-cea-mole-fraction-species](../plans/active/thermophysics-cea-mole-fraction-species.md)。
+- **組成のモル分率入力と種名の正本化 (2026-09-16 実装, plan [thermophysics-cea-mole-fraction-species](../plans/accepted/thermophysics-cea-mole-fraction-species.md))**:
+  - **host 側 DB 解決**: `input/speciesDB.{hpp,cpp}` の `speciesDB_resolve(names, dbFile)` / `speciesDB_init(cfg)` (GPU 非依存) が、内蔵 DB (旧 `thermo_d.cu` の
+    `builtinDB`: N2/O2/AR/CO2/HE/H2O/AIR) に `speciesDBFile` の内容を**上書き**した解決済み DB を作り、`solverConfig::read()` 直後 (`main.cpp`) と
+    `convertGmshToForge` の境界読込前で `speciesDB_printTable` (species 表) を出す。`thermo_init_db` は同じ DB を再利用して datum offset と GPU 転送だけ行う。
+    未知の種名はエラー終了。
+  - **`bcondConfig` の `X{s}`**: `floats: {X0: .., X1: ..}` を double で検証し $Y_k = X_k M_k/\sum_j X_j M_j$ に換算して既存の `Y{s}` 経路 (`flow_float`) へ。同一境界での
+    `X`/`Y` 混在、負値・非有限・総和 0・未知 index はエラー。`Y` 省略時の補完 (`Y0=1` 他 0) は **X 指定時には行わず全種必須**。`initial` は文字列のまま
+    (組成付き IC は IC 生成ツールが `VALUE/roY{s}` に書く)。`inletProfile` CSV は従来どおり `Y{s}` 列 (X→Y は `gen_inlet_profile.py --X` が換算)。
+  - **凝縮種は名前が正本**: `condensation.condensationSpecies: H2O` (名前) から `condGasSpecies` (index) を生成する。数値も書いてあれば一致検査
+    (不一致・範囲外・単一種で `roY` 未登録はエラー)。
+  - **起動ログの species 表**: 名前 / MW / 出典 (DB ファイル or 内蔵) / 入口境界ごとの Y と X / 凝縮種名。
+  - **残差 CSV に `rms_roY{s}` 列** (従来は化学種の残差列が無かった)。`check_convergence.py` は列を自動で拾う。
+  - **restart の照合**: `interp_field.py` / 同一メッシュ restart は `physProp.species` の順序と DB の名前・MW を照合し、不一致を黙って受け付けない。
+    種順序が変わる restart は `tools/convert_species_field.py` (擬似種の保存量を構成種へ分配、名前で移送、`roe` を T から再構成、ΣρY=ρ・総水量・T の保存を検査) で行う。
+  - **排気トレーサ `roXi`** (`physProp.tracer: exhaust`): SERN の `full` モードで排気率 ξ (排気入口 1 / 外気入口 0) を受動スカラとして輸送する
+    (`cuda_forge/tracerTransport_d.{cu,cuh}`: 汎用スカラ輸送コア `ScalarTransportDesc` で登録・入口 `floats.Xi` Dirichlet [node はピン]・他は Neumann・point-implicit/RK 更新・残差列 `rms_roXi`・出力 (level 0 から)・restart `VALUE/roXi`)。
+    **拡散は 0 (移流のみ)**: 汎用スカラ拡散は Sc を持たない μ ベース、化学種の Fick 拡散は多成分専用カーネルのため、混合平均 Sc の拡散は未実装 (Euler の SERN では無関係; SST では followup F-sp1)。
+    輸送種の中に**純粋な流入元ラベル** (排気入口で 1・外気入口で 0 になる種; 旧 `[EXH, AIR]` の $Y_{EXH}$) があればそれを ξ に使い、無ければ (full、lumped+keep で $Y_{EXH}<1$ になる配置) トレーサを輸送する。どちらを使うかは `species_meta.yaml` の `exhaust_fraction` に保存し、`forge_design.gas.composition.exhaust_fraction(run_dir)` が返す。元素質量分率から作る混合分率は診断のみ (差動拡散があると元素ごとに ξ が異なる)。
 
 ### 5b. 多成分化学種輸送 (M2) `cuda_forge/speciesTransport_d.{cuh,cu}`
 

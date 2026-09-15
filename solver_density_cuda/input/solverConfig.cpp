@@ -1,4 +1,5 @@
 #include "input/solverConfig.hpp"
+#include <cctype>
 
 
 solverConfig::solverConfig(){};
@@ -691,6 +692,20 @@ void solverConfig::read(std::string fname)
             this->speciesNames.push_back("N2");
             this->nSpecies = 1;
         }
+        // 受動トレーサ (排気率 roXi)。文字列: none (既定) | exhaust。
+        if (physProp["tracer"]) {
+            this->tracer = physProp["tracer"].as<std::string>();
+            if (this->tracer == "none" || this->tracer == "0") this->tracer = "";
+            if (!this->tracer.empty() && this->tracer != "exhaust") {
+                throw std::runtime_error("Key 'tracer' in 'physProp' must be 'none' or 'exhaust' (got '" + this->tracer + "').");
+            }
+            if (this->tracerEnabled() && this->dualTime != 0) {
+                // dual-time では roXi に物理時間項 (BDF 履歴・対角) が無く、擬似時間反復ごとに前進してしまう
+                // (codex 2026-09-16 result M6)。物理時間積分を実装するまで併用を拒否する (followups F-cf8 と同種)。
+                throw std::runtime_error("'physProp.tracer: exhaust' is not supported with time.dualTime != 0 (the tracer has no physical-time terms yet; use steady or explicit RK).");
+            }
+            if (this->tracerEnabled()) std::cout << "'tracer' in 'physProp': exhaust (passive scalar roXi, inlet floats Xi)" << std::endl;
+        }
 
         // 非平衡凝縮 (任意セクション)。methods/condensation/ 参照。
         // Phase 1 は受動スカラー輸送のみ (核生成/成長係数はまだ読まない)。
@@ -700,6 +715,64 @@ void solverConfig::read(std::string fname)
             this->nCondSpecies = getOptionalValidatedValue<int>(cond, "nCondSpecies", 0, "condensation");
             this->condModel = getOptionalValidatedValue<int>(cond, "condModel", 0, "condensation");
             this->condGasSpecies = getOptionalValidatedValue<int>(cond, "condGasSpecies", -1, "condensation");
+            // 凝縮種は名前 (condensationSpecies) が正本。physProp.species から大文字小文字無視で index を解決し、
+            // 数値 condGasSpecies が併記されていれば一致を検査する。数値だけなら範囲検査。
+            if (cond["condensationSpecies"]) {
+                this->condensationSpecies = cond["condensationSpecies"].as<std::string>();
+                auto upper = [](std::string t){ for (auto& ch : t) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch))); return t; };
+                int found = -1;
+                for (int s = 0; s < this->nSpecies; ++s) {
+                    if (upper(this->speciesNames[s]) == upper(this->condensationSpecies)) { found = s; break; }
+                }
+                if (found < 0) {
+                    std::string avail;
+                    for (const auto& nm : this->speciesNames) avail += (avail.empty() ? "" : ", ") + nm;
+                    throw std::runtime_error("condensation.condensationSpecies '" + this->condensationSpecies
+                                             + "' is not in physProp.species [" + avail + "].");
+                }
+                if (cond["condGasSpecies"] && this->condGasSpecies != found) {
+                    throw std::runtime_error("condensation.condGasSpecies=" + std::to_string(this->condGasSpecies)
+                                             + " disagrees with condensationSpecies '" + this->condensationSpecies
+                                             + "' (index " + std::to_string(found) + " in physProp.species); remove one of them.");
+                }
+                this->condGasSpecies = found;
+            }
+            if (this->condGasSpecies >= 0) {
+                if (this->nSpecies < 2) {
+                    throw std::runtime_error("condensation.condGasSpecies=" + std::to_string(this->condGasSpecies)
+                                             + " (carrier form) requires >=2 species in physProp.species (roY{s} is not transported for a single species).");
+                }
+                if (this->condGasSpecies >= this->nSpecies) {
+                    throw std::runtime_error("condensation.condGasSpecies=" + std::to_string(this->condGasSpecies)
+                                             + " is out of range for physProp.species (nSpecies=" + std::to_string(this->nSpecies) + ").");
+                }
+                this->condGasSpeciesName = this->speciesNames[this->condGasSpecies];
+            }
+            // 凝縮種 (物質) と condModel (物性セット) の対応検査 (codex 2026-09-16 result M7)。
+            // condensationProperties_d.cuh: COND_MODEL_N2=0 (N2 物性), COND_MODEL_H2O=1 (H2O 物性)。
+            // carrier 形 (condGasSpecies>=0) は名前解決済み種、pure 形 (index -1) の TP 単成分は species[0] が凝縮種。
+            if (this->condensation == 1) {
+                if (this->condModel != 0 && this->condModel != 1) {
+                    throw std::runtime_error("condensation.condModel=" + std::to_string(this->condModel) + " is not supported (0: N2, 1: H2O).");
+                }
+                std::string subst;
+                if (this->condGasSpecies >= 0) subst = this->speciesNames[this->condGasSpecies];
+                else if (this->thermalMethod == 2 && this->nSpecies == 1) subst = this->speciesNames[0];
+                if (!subst.empty()) {
+                    std::string up = subst;
+                    for (auto& ch : up) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+                    const bool isH2O = (up == "H2O" || up == "WATER");
+                    const bool isN2  = (up == "N2");
+                    if (!isH2O && !isN2) {
+                        throw std::runtime_error("condensing species '" + subst + "' has no condensation property model (supported: H2O -> condModel 1, N2 -> condModel 0).");
+                    }
+                    if ((this->condModel == 1 && !isH2O) || (this->condModel == 0 && !isN2)) {
+                        throw std::runtime_error("condensing species '" + subst + "' does not match condModel " + std::to_string(this->condModel)
+                                                 + " (condModel 0 = N2 properties, 1 = H2O properties).");
+                    }
+                    this->condGasSpeciesName = subst;
+                }
+            }
             this->condKantrowitz = getOptionalValidatedValue<int>(cond, "condKantrowitz", 0, "condensation");
             if (this->condKantrowitz < 0 || this->condKantrowitz > 3)
                 throw std::runtime_error("Key 'condKantrowitz' in 'condensation' must be 0 (isothermal), 1 (Kantrowitz pure-vapor), 2 or 3 (Feder carrier form).");

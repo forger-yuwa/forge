@@ -147,13 +147,24 @@ def run_staged(run_dir, stages="full", soft_steps=2000, soft_cfl=0.5, soft_conv=
 def warm_from_same_mesh(run_dir, res_h5, keep_turb: bool = True) -> None:
     """同一メッシュの別 run (例: Euler) の場を index コピーして暖機起動にする。keep_turb=True なら roK/roOmega は
     現在の IC を保つ (Euler 場には無い)。座標一致ノードがあるので最近傍補間は使わない。"""
+    R2.check_species_compatible(Path(res_h5).parent, run_dir, "warm_from_same_mesh")   # codex result M3
     keys = ["ro", "roUx", "roUy", "roUz", "roe"] + ([] if keep_turb else ["roK", "roOmega"])
+    import re as _re
+    with h5py.File(res_h5, "r") as src:   # 化学種・トレーサも引き継ぐ (旧: 5 変数のみで ΣY が壊れた; codex M4)
+        keys += sorted(k for k in src["VALUE"] if _re.fullmatch(r"roY\d+", k)) + ["roXi"]
     # 状態量だけをコピーする。res には wall_dist も入っており、Euler run (slip 壁) の wall_dist は番兵値なので
     # 丸ごとコピーすると SST の壁距離が全滅する (run_0026 で実害、2026-09-05)
+    sig = R2._species_signature(run_dir)
     with h5py.File(res_h5, "r") as src, h5py.File(Path(run_dir) / MESH, "r+") as dst:
         n = len(dst["VALUE/ro"])
+        if sig is not None:
+            R2._require_datasets(src, ["ro", "roUx", "roUy", "roUz", "roe"] + [f"roY{i}" for i in range(len(sig["species"]))] + (["roXi"] if sig["tracer"] else []), "warm_from_same_mesh")
         for k in keys:
-            if k in src["VALUE"] and k in dst["VALUE"] and len(src["VALUE"][k]) == n:
+            if k in src["VALUE"] and len(src["VALUE"][k]) == n:
+                if k not in dst["VALUE"]:
+                    if k.startswith("roY") or k == "roXi":
+                        dst["VALUE"].create_dataset(k, data=np.asarray(src["VALUE"][k][:], dtype=np.float32))
+                    continue
                 dst["VALUE"][k][:] = src["VALUE"][k][:]
 
 

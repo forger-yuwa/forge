@@ -34,7 +34,13 @@ pvpython / pvbatch から使う場合:
   helicity, helicity_norm
 
 Forge Saturation (凝縮 ON/OFF どちらの run にも使える後処理):
-  入力: T (必須), ro, P, 蒸気質量分率配列 (既定 Y1 = TP split_h2o の H2O), 液相質量分率配列 (既定 g_0, 無ければ 0)
+  入力: T (必須), ro, P, 蒸気質量分率配列, 液相質量分率配列 (既定 g_0, 無ければ 0)
+  蒸気配列の決め方 (Y1 を既定採用しない: 5 種順序では Y1=N2 を水蒸気と誤計算するため):
+    - `Run Config (solverConfig.yaml path)` に run の solverConfig.yaml を指定すると、`physProp.species` と
+      `condensation.condensationSpecies` / `condGasSpecies` (無ければ H2O) から `Y{index}` を名前で解決する
+      (tools/forge_species.py)。
+    - 指定しないときは `Vapor Mass Fraction Array` を明示する (空ならエラー)。空気凝縮 (CPG carrier, 配列なし) は
+      Vapor Mass Fraction Array を "none" にして Vapor Mass Fraction Constant を使う。
   蒸気分圧 p_v = ro (Y_v − g) R_v T (carrier 形, forge cond_vapor_state と同一)。蒸気配列が無く定数も 0 なら
   純蒸気 (p_v = P)。空気凝縮 (CPG carrier) は Vapor Mass Fraction Constant に condVaporMassFraction (0.7671) を入れる。
   出力: p_vapor, p_sat, T_sat, subcooling (= T_sat − T; 正が過冷却), supersaturation (S = p_v / p_sat(T)), log10_S
@@ -499,7 +505,8 @@ class ForgeSaturation(VTKPythonAlgorithmBase):
             self, nInputPorts=1, nOutputPorts=1,
             inputType="vtkDataObject", outputType="vtkDataObject")
         self._species = 0
-        self._yv_array = "Y1"
+        self._yv_array = ""          # 既定は空: Run Config か明示指定が必須 (Y1 を自動採用しない)
+        self._run_config = ""
         self._g_array = "g_0"
         self._yv_const = 0.0
         self._ice = False
@@ -519,9 +526,17 @@ class ForgeSaturation(VTKPythonAlgorithmBase):
         self._species = int(value)
         self.Modified()
 
-    @smproperty.stringvector(name="VaporMassFractionArray", label="Vapor Mass Fraction Array", default_values="Y1")
+    @smproperty.stringvector(name="RunConfig", label="Run Config (solverConfig.yaml path)", default_values="")
+    def SetRunConfig(self, value):
+        """run の solverConfig.yaml のパス。指定すると凝縮種の配列 Y{index} を physProp.species / condensation から
+        名前で解決する (Vapor Mass Fraction Array より優先)。"""
+        self._run_config = str(value).strip()
+        self.Modified()
+
+    @smproperty.stringvector(name="VaporMassFractionArray", label="Vapor Mass Fraction Array", default_values="")
     def SetVaporMassFractionArray(self, value):
-        """蒸気 (凝縮種) の質量分率配列名。TP split_h2o なら Y1。空 or 無い場合は定数 (Vapor Mass Fraction Constant) を使う。"""
+        """蒸気 (凝縮種) の質量分率配列名 (例 Y1)。Run Config 未指定なら必須 (空はエラー; Y1 を自動採用しない)。
+        "none" で配列を使わず定数 (Vapor Mass Fraction Constant) を使う。"""
         self._yv_array = str(value).strip()
         self.Modified()
 
@@ -586,6 +601,33 @@ class ForgeSaturation(VTKPythonAlgorithmBase):
                 self._compute_leaf(leaf)
         return 1
 
+    def _resolve_vapor_array(self):
+        """蒸気配列名を決める: Run Config があれば名前解決、無ければ明示配列 (空はエラー)。"none" は配列なし。"""
+        if self._run_config:
+            import os, sys
+            run_dir = self._run_config
+            if os.path.isfile(run_dir):
+                run_dir = os.path.dirname(os.path.abspath(run_dir))
+            tools_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if tools_dir not in sys.path:
+                sys.path.insert(0, tools_dir)
+            from forge_species import species_info
+            info = species_info(run_dir)
+            if info["vapor_array"] is not None:
+                return info["vapor_array"]
+            # 凝縮 OFF の run: H2O があればそれ、無ければ明示配列へ
+            for cand in ("H2O", "WATER"):
+                if cand in info["index"]:
+                    return f"Y{info['index'][cand]}"
+            if self._yv_array:
+                return None if self._yv_array.lower() == "none" else self._yv_array
+            raise RuntimeError(f"Forge Saturation: {run_dir} に凝縮種/H2O が無い。Vapor Mass Fraction Array を明示すること")
+        if not self._yv_array:
+            raise RuntimeError("Forge Saturation: Vapor Mass Fraction Array が空。Run Config (solverConfig.yaml) を指定するか、"
+                               "配列名 (例 Y1) を明示する (Y1 を既定採用しない: 種順序で H2O の index は変わる)。"
+                               " 配列を使わない (純蒸気/定数) なら \"none\"")
+        return None if self._yv_array.lower() == "none" else self._yv_array
+
     def _psat_fn(self):
         if self._species == 1:
             return lambda T: _n2_psat(T, self._n2_psat_lowT, self._n2_latent_lowT, self._n2_liquid_cp)
@@ -606,7 +648,10 @@ class ForgeSaturation(VTKPythonAlgorithmBase):
 
         g = _get(ds, assoc, self._g_array) if self._g_array else None
         g = np.zeros_like(T) if g is None else np.maximum(g, 0.0)
-        yv = _get(ds, assoc, self._yv_array) if self._yv_array else None
+        yv_name = self._resolve_vapor_array()
+        yv = _get(ds, assoc, yv_name) if yv_name else None
+        if yv_name and yv is None:
+            raise RuntimeError(f"Forge Saturation: 蒸気配列 '{yv_name}' が入力に無い")
         if yv is None and self._yv_const > 0.0:
             yv = np.full_like(T, self._yv_const)
 

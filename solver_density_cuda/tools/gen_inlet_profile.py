@@ -14,6 +14,8 @@ forge の入口分布機能 (bcondConfig の対象 inlet に `ints: {inletProfil
     - 式の変数: 座標 x,y,z (使わない軸は 0), r=sqrt(y²+z²), numpy 関数 (exp, tanh, where, ...),
       bcond 一様値 cfg_Tt, cfg_Pt, cfg_k, cfg_omega, cfg_Y_<name>。
     - 化学種は名前指定 (`--Y H2O=...`)。指定しなかった種が残り (1−ΣY指定) を bcond 比率で受け持つ。
+    - モル分率で与えるなら `--X NAME=EXPR` (表の列は `X_<NAME>`)。**X を 1 つでも使うと全種必須**で、点ごとに
+      Y_k = X_k M_k / Σ X_j M_j (MW は species_db.yaml) に換算して Y{s} 列を書く。`--X` と `--Y` の混在はエラー。
     - inlet_Pressure (亜音速): 列 Tt Pt (+Y_s, k, omega)。Pt の代わりに --Ps と --M でも可 (等エントロピーで Pt に換算)。
     - inlet_uniformVelocity / inlet_fluctVelocity (超音速・全量固定): --Tt と --M と (--Ps | --Pt) から
       ρ, |U|, Ps を換算して列 ro Ux Uy Uz Ps を書く (方向は --dir、既定は bcond の速度方向)。
@@ -197,7 +199,7 @@ def cmd_gen(a):
     k = get("k", a.k); om = get("omega", a.omega)
     direct = {n: evaluate(e, ns, npts) for n, e in parse_kv(a.set).items()}
     for n in list(table.keys()):
-        if n not in ("Tt", "Pt", "Ps", "M", "k", "omega") and not n.startswith("Y_") and n not in direct:
+        if n not in ("Tt", "Pt", "Ps", "M", "k", "omega") and not n.startswith(("Y_", "X_")) and n not in direct:
             direct[n] = table[n]
 
     # ---- species ----
@@ -206,6 +208,34 @@ def cmd_gen(a):
     for n in table:
         if n.startswith("Y_") and n[2:] not in yspec:
             yspec[n[2:]] = None
+    # モル分率 (--X / 表の X_<NAME>): 全種必須、点ごとに MW で Y へ換算。Y との混在は拒否。
+    xspec = parse_kv(a.X)
+    for n in table:
+        if n.startswith("X_") and n[2:] not in xspec:
+            xspec[n[2:]] = None
+    if xspec and yspec:
+        raise SystemExit("--X (モル分率) と --Y (質量分率) は同じ入口で混在できない")
+    if xspec:
+        if not names or gas.tm != 2:
+            raise SystemExit("--X は thermalMethod 2 (physProp.species + species_db.yaml) のときだけ使える")
+        for nm in xspec:
+            if nm not in names:
+                raise SystemExit(f"化学種 {nm} は physProp.species {names} に無い")
+        missing = [nm for nm in names if nm not in xspec]
+        if missing:
+            raise SystemExit(f"--X は全種必須: {missing} が無い (X 指定時は既定補完しない)")
+        Xcols = [evaluate(xspec[nm], ns, npts) if xspec[nm] is not None else table["X_" + nm] for nm in names]
+        for nm, c in zip(names, Xcols):
+            if not np.all(np.isfinite(c)) or np.any(c < -1e-12):
+                raise SystemExit(f"X_{nm} が負か非有限: min {np.nanmin(c):.4g}")
+        MW = np.array([float(sp["MW"]) for sp in gas.tp.sp])
+        XM = np.array([np.maximum(c, 0.0) * m for c, m in zip(Xcols, MW)])
+        denom = XM.sum(axis=0)
+        if np.any(denom <= 0.0):
+            raise SystemExit("Σ X_j M_j が 0 の点がある")
+        Ycols = [row / denom for row in XM]
+        xs = np.array(Xcols).sum(axis=0)
+        print(f"[gen] --X: モル分率を MW で質量分率に換算 (ΣX min {xs.min():.6g} max {xs.max():.6g} → 正規化)")
     if yspec:
         if not names:
             raise SystemExit("--Y は thermalMethod 2 (physProp.species) のときだけ使える")
@@ -416,6 +446,7 @@ def main():
     g.add_argument("--n", type=int, nargs="+", default=[201]); g.add_argument("--table", help="測定表 CSV (空白区切り, ヘッダ先頭に座標列)")
     g.add_argument("--Tt"); g.add_argument("--Pt"); g.add_argument("--Ps"); g.add_argument("--M")
     g.add_argument("--Y", action="append", help="NAME=EXPR (例 H2O=0.01+0.005*exp(-(y/0.004)**2))")
+    g.add_argument("--X", action="append", help="NAME=EXPR モル分率 (全種必須; species_db.yaml の MW で Y に換算。--Y と混在不可)")
     g.add_argument("--k"); g.add_argument("--omega"); g.add_argument("--set", action="append", help="NAME=EXPR (任意 bvar 列)")
     g.add_argument("--dir", type=float, nargs=3, help="超音速入口の速度方向 (既定: bcond の Ux,Uy,Uz)")
     g.add_argument("--out"); g.add_argument("--plot", action="store_true")

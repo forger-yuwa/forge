@@ -21,8 +21,13 @@ for rd in map(Path, sys.argv[1:]):
         Tc=np.maximum(T,120.0)
         return np.exp(54.842763-6763.22/Tc-4.210*np.log(Tc)+0.000367*Tc+np.tanh(0.0415*(Tc-218.8))*(53.878-1331.22/Tc-9.44523*np.log(Tc)+0.014025*Tc))
     P=cols["P"]; T=cols["T"]
-    if "Y1" in cols and "g_0" in cols: pv=cols["ro"]*(cols["Y1"]-cols["g_0"])*461.5*T   # carrier 式 (forge と同一)
-    elif "Y1" in cols: pv=cols["ro"]*cols["Y1"]*461.5*T
+    # H2O の配列は種名で解決する (tools/forge_species.py; 5 種 full では Y0、split_h2o では Y1)。Y1 決め打ちはしない (plan cea-mole-fraction §4.4)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "solver_density_cuda" / "tools"))
+    from forge_species import species_info
+    _si = species_info(rd); _names = [str(n).upper() for n in _si.get("names", [])]
+    yv = f"Y{_names.index('H2O')}" if "H2O" in _names else _si.get("vapor_array")   # 凝縮 ON/OFF に依らず H2O を名前で (codex result M9)
+    if yv and yv in cols and "g_0" in cols: pv=cols["ro"]*(cols[yv]-cols["g_0"])*461.5*T   # carrier 式 (forge と同一)
+    elif yv and yv in cols: pv=cols["ro"]*cols[yv]*461.5*T
     else: pv=0.0462711*P
     Ts=np.full_like(T,250.0)
     for _ in range(40):

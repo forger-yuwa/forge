@@ -78,7 +78,7 @@ if yml.exists():
     check("region_ic_arrays (frozen): roe = ρ(h_sens − RT) + ½ρu², roY0 = ρ (排気側)", abs(ic["roe"][0] - st["exhaust"]["ro"] * (gx.e_sens(st["exhaust"]["T"])[0] + 0.5 * st["exhaust"]["u"] ** 2)) < 1e-6 * abs(ic["roe"][0])
           and ic["roY0"][0] == st["exhaust"]["ro"] and ic["roY1"][0] == 0.0 and ic["roY0"][1] == 0.0 and ic["roY1"][1] == st["ext"]["ro"])
     cfg = R._solver_config(p, 100, 10, 0.5, 1000.0)
-    check("solverConfig (frozen): thermalMethod 2 + species [EXH, AIR] + thermoHrefTemp", "thermalMethod: 2" in cfg and "species: [EXH, AIR]" in cfg and "thermoHrefTemp: 298.15" in cfg)
+    check("solverConfig (frozen): thermalMethod 2 + species [\"EXH\", \"AIR\"] (引用符付き) + thermoHrefTemp", "thermalMethod: 2" in cfg and 'species: ["EXH", "AIR"]' in cfg and "thermoHrefTemp: 298.15" in cfg)
     bc = R._bcond_config(p, st)
     check("bcondConfig (frozen): 入口 Y0/Y1 が排気 (1,0)・外気 (0,1)", "Y0: 1, Y1: 0" in bc.split("inlet_nozzle")[1].split("\n")[0] and "Y0: 0, Y1: 1" in bc.split("inlet_ext")[1].split("\n")[0])
     # cpg 側は無変更 (回帰)
@@ -87,6 +87,100 @@ if yml.exists():
     check("cpg 回帰: 外部動圧が −15 % ずれる (codex C2 の再現; m6_on)", abs(st0["q_inf"] / 71850.0 - 0.845) < 0.01, f"{st0['q_inf']:.0f} Pa")
 else:
     print("skip: problem_moo_frozen_tp_cycle3op.yaml が無い")
+
+
+# --- 作動点変更の組成再初期化 (codex result-2 M1): ξ と目標入口ベクトルから Y_t = ξ Y_in + (1−ξ) Y_ext
+if yml.exists():
+    from forge_design.gas.composition import reinit_transport_vector
+    p10 = load_problem(yml); p10.evaluate["tp_species"] = {"mode": "full", "species": ["N2", "H2O", "H2", "AR", "OH", "O2", "NO", "H", "O", "CO2", "CO"]}
+    R.select_operating_point(p10, "m10_on"); L10 = R.frozen_gases(p10)["layout"]
+    Yt = reinit_transport_vector(np.array([1.0, 0.0, 0.5]), L10)
+    iH2O, iH2 = L10.index("H2O"), L10.index("H2")
+    check("reinit (full m10_on): ξ=1 で目標排気組成 H2O 0.24881767 / H2 0.01383296", abs(Yt[iH2O][0] - 0.24881767) < 1e-7 and abs(Yt[iH2][0] - 0.01383296) < 1e-7, f"{Yt[iH2O][0]:.8f} / {Yt[iH2][0]:.8f}")
+    check("reinit: ξ=0 で外気組成 (H2O 0), ξ=0.5 で中間, 各点 ΣY=1", abs(Yt[iH2O][1]) < 1e-12 and abs(Yt[iH2O][2] - 0.5 * 0.24881767) < 1e-7 and all(abs(sum(v[k] for v in Yt) - 1) < 1e-12 for k in range(3)))
+
+# --- 統一 tp_species スキーマ (plan thermophysics-cea-mole-fraction-species §4.5 / §6 SERN, 2026-09-16) ---
+if yml.exists():
+    import h5py, tempfile
+    # full: 輸送種 = 排気 ∪ 外気、トレーサ roXi、IC に roY0..N-1 + roXi、bcond に Xi
+    p = load_problem(yml); p.evaluate["tp_species"] = {"mode": "full"}; R.select_operating_point(p, "m6_on"); st = R.gas_states(p)
+    check("full m6_on: 輸送種 11 種 (排気 ∪ 外気), tracer, 入口 Y 和 1, Xi 1/0", len(st["species"]) == 11 and st["tracer"] and abs(sum(st["exhaust"]["Y"]) - 1) < 1e-12
+          and abs(sum(st["ext"]["Y"]) - 1) < 1e-12 and st["exhaust"]["Xi"] == 1.0 and st["ext"]["Xi"] == 0.0)
+    cfg = R._solver_config(p, 100, 10, 0.5, 1000.0)
+    check("full m6_on: solverConfig に 11 種 (引用符付き) と tracer: exhaust", f"species: [{', '.join(chr(34)+k+chr(34) for k in st['species'])}]" in cfg and "tracer: exhaust" in cfg)
+    import yaml as _yaml
+    _cfg = _yaml.safe_load(cfg.replace('"{', '{'))
+    check("full m6_on: 生成 config を yaml.safe_load しても NO/N/... が文字列のまま (codex result M1)", [str(x) for x in _cfg["physProp"]["species"]] == st["species"] and all(isinstance(x, str) for x in _cfg["physProp"]["species"]))
+    ic = R.region_ic_arrays(np.array([True, False]), st, p.gamma)
+    check("full m6_on: IC に roY0..roY10 と roXi (排気側 ρ, 外気側 0)", all(f"roY{i}" in ic for i in range(11)) and ic["roXi"][0] == st["exhaust"]["ro"] and ic["roXi"][1] == 0.0
+          and abs(sum(ic[f"roY{i}"][0] for i in range(11)) - st["exhaust"]["ro"]) < 1e-9 * st["exhaust"]["ro"])
+    bc = R._bcond_config(p, st)
+    check("full m6_on: bcond の排気入口に Y0..Y10 と Xi: 1", "Y10:" in bc.split("inlet_nozzle")[1].split("\n")[0] and "Xi: 1" in bc.split("inlet_nozzle")[1].split("\n")[0] and "Xi: 0" in bc.split("inlet_ext")[1].split("\n")[0])
+    # 輸送種ごとの FrozenGas の和 = 排気ガスの熱力学 (lump 線形混合の厳密性)
+    g = R.frozen_gases(p); Tq = 2000.0
+    e_sum = sum(y * gg.e_sens(Tq)[0] for y, gg in zip(st["exhaust"]["Y"], g["transported"])); e_ref = g["exhaust"].e_sens(Tq)[0]
+    check("full m6_on: Σ Y_s e_sens,s(T) = 排気 e_sens(T)", abs(e_sum / e_ref - 1) < 1e-12, f"{e_sum:.6e} vs {e_ref:.6e}")
+    # lumped + keep [H2O]: EXH = 1 − Y_H2O、m4_off (H2O 無し) でも配置が同じ
+    tp = {"mode": "lumped", "lumps": {"EXH": {"from": "stream", "stream": "inflow"}, "AIR": {"from": "stream", "stream": "external"}}, "keep": ["H2O"]}
+    p = load_problem(yml); p.evaluate["tp_species"] = tp; R.select_operating_point(p, "m6_on"); st = R.gas_states(p)
+    check("lumped+keep m6_on: [EXH, AIR, H2O], 排気 [0.7589, 0, 0.2411], **tracer 有り** (Y_EXH<1 で流入元ラベルにならない; codex result M8)", st["species"] == ["EXH", "AIR", "H2O"] and abs(st["exhaust"]["Y"][2] - 0.2411091186) < 1e-9 and st["tracer"] and st["exhaust"]["Xi"] == 1.0)
+    from forge_design.gas.composition import species_meta as _smeta, _exhaust_fraction_spec
+    g2 = R.frozen_gases(p)
+    check("lumped+keep: species_meta.exhaust_fraction = tracer Xi", _smeta(g2["layout"])["exhaust_fraction"] == {"kind": "tracer", "array": "Xi", "conserved": "roXi"})
+    p_al = load_problem(yml); R.select_operating_point(p_al, "m6_on"); g_al = R.frozen_gases(p_al)
+    check("別名 [EXH, AIR]: exhaust_fraction = species Y0 (EXH), tracer 無し", _exhaust_fraction_spec(g_al["layout"]) == {"kind": "species", "array": "Y0", "conserved": "roY0", "species": "EXH"} and not g_al["layout"].tracer)
+    p = load_problem(yml); p.evaluate["tp_species"] = tp; R.select_operating_point(p, "m4_off"); st4 = R.gas_states(p)
+    check("lumped+keep m4_off: 同じ配置 [EXH, AIR, H2O] で Y_H2O = 0", st4["species"] == ["EXH", "AIR", "H2O"] and st4["exhaust"]["Y"] == [1.0, 0.0, 0.0])
+    # restart_by_index / warm_from_same_mesh: 全 roY + roXi を引き継ぐ (codex M4 の既存バグ修正)
+    with tempfile.TemporaryDirectory() as td:
+        # restart 照合は実 config + DB の署名 (codex result-2 M2): 元/先とも TP 2 種 + tracer の config を置く
+        _db = ('"EXH":\n  MW: 0.0244\n  nasa9_low: [0,0,3.5,0,0,0,0,-1000,5]\n  nasa9_high: [0,0,3.5,0,0,0,0,-1000,5]\n'
+               '"AIR":\n  MW: 0.0289\n  nasa9_low: [0,0,3.5,0,0,0,0,-1000,5]\n  nasa9_high: [0,0,3.5,0,0,0,0,-1000,5]\n')
+        _cfg = 'physProp: {thermalMethod: 2, species: ["EXH", "AIR"], speciesDBFile: "species_db.yaml", thermoHrefTemp: 298.15, tracer: exhaust}\n'
+        for sub in ("src", "dst"):
+            (Path(td) / sub).mkdir(); (Path(td) / sub / "solverConfig.yaml").write_text(_cfg); (Path(td) / sub / "species_db.yaml").write_text(_db)
+        src = Path(td) / "src" / "res.h5"; dst = Path(td) / "dst" / "sern.h5"
+        with h5py.File(src, "w") as f:
+            v = f.create_group("VALUE"); v["ro"] = np.array([2.0, 2.0]); v["roUx"] = np.array([1.0, 1.0]); v["roUy"] = np.zeros(2); v["roUz"] = np.zeros(2); v["roe"] = np.array([5.0, 5.0])
+            v["roY0"] = np.array([0.8, 0.8]); v["roY1"] = np.array([1.2, 1.2]); v["roXi"] = np.array([0.4, 0.4]); v["wall_dist"] = np.array([9.0, 9.0])
+        with h5py.File(dst, "w") as f:
+            v = f.create_group("VALUE"); v["ro"] = np.array([1.0, 1.0]); v["roUx"] = np.zeros(2); v["roUy"] = np.zeros(2); v["roUz"] = np.zeros(2); v["roe"] = np.ones(2)
+            v["roY0"] = np.array([1.0, 1.0]); v["roY1"] = np.zeros(2); v["wall_dist"] = np.array([1.0, 1.0])
+        R.restart_by_index(src, dst)
+        with h5py.File(dst) as f:
+            ok = (f["VALUE/roY0"][0] == 0.8 and f["VALUE/roY1"][0] == 1.2 and "roXi" in f["VALUE"] and abs(f["VALUE/roXi"][0] - 0.4) < 1e-7
+                  and f["VALUE/wall_dist"][0] == 1.0 and abs((f["VALUE/roY0"][0] + f["VALUE/roY1"][0]) / f["VALUE/ro"][0] - 1.0) < 1e-12)
+        check("restart_by_index: roY0/roY1/roXi を引き継ぎ ΣρY = ρ、wall_dist は触らない", bool(ok))
+        # 署名照合: 係数の摂動・トレーサ設定の違い・種順序の矛盾を検出する (codex result-2 M2)
+        bad = Path(td) / "bad"; bad.mkdir(); (bad / "solverConfig.yaml").write_text(_cfg)
+        (bad / "species_db.yaml").write_text(_db.replace("3.5,0,0,0,0,-1000,5]\n  nasa9_high", "4.5,0,0,0,0,-1000,5]\n  nasa9_high", 1))
+        try:
+            R.check_species_compatible(Path(td) / "src", bad); check("署名: NASA-9 係数の摂動を検出", False)
+        except ValueError as ex:
+            check("署名: NASA-9 係数の摂動を検出", "NASA-9" in str(ex), str(ex)[:50])
+        notr = Path(td) / "notr"; notr.mkdir(); (notr / "solverConfig.yaml").write_text(_cfg.replace(", tracer: exhaust", "")); (notr / "species_db.yaml").write_text(_db)
+        try:
+            R.check_species_compatible(Path(td) / "src", notr); check("署名: トレーサ設定の違いを検出", False)
+        except ValueError as ex:
+            check("署名: トレーサ設定の違いを検出", "トレーサ" in str(ex))
+        (notr / "species_meta.yaml").write_text("species: [AIR, EXH]\n")
+        try:
+            R._species_signature(notr); check("署名: species_meta と config の順序矛盾を拒否", False)
+        except ValueError as ex:
+            check("署名: species_meta と config の順序矛盾を拒否", "矛盾" in str(ex))
+        nocfg = Path(td) / "nocfg"; nocfg.mkdir()
+        try:
+            R._species_signature(nocfg); check("署名: config 無しは照合不能としてエラー", False)
+        except ValueError:
+            check("署名: config 無しは照合不能としてエラー", True)
+        from forge_design.evaluate import runner_sern3d as R3
+        run3 = Path(td) / "run3"; run3.mkdir(); (run3 / R3.MESH).write_bytes(Path(dst).read_bytes())
+        (run3 / "solverConfig.yaml").write_text(_cfg); (run3 / "species_db.yaml").write_text(_db)
+        with h5py.File(run3 / R3.MESH, "r+") as f:
+            f["VALUE/roY0"][:] = 1.0; f["VALUE/roY1"][:] = 0.0
+        R3.warm_from_same_mesh(run3, src)
+        with h5py.File(run3 / R3.MESH) as f:
+            check("warm_from_same_mesh (3D): roY/roXi を引き継ぐ", f["VALUE/roY1"][0] == 1.2 and "roXi" in f["VALUE"])
 
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)

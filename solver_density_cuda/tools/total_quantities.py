@@ -18,7 +18,7 @@ Python API: total_state(run_dir, res_path) -> dict(T0, P0, includes_k, method)
 import argparse, glob, os, sys
 import numpy as np, h5py, yaml
 
-RU = 8.31446261815324
+RU = 8.314462618   # ソルバの THERMO_RU (cuda_forge/thermo_d.cuh) と同じ値にする (CODATA 8.31446261815324 との差 1.8e-11 が h の 1e-6 J/kg 差になる)
 
 
 def _nasa9(a, T):
@@ -33,22 +33,44 @@ def _nasa9(a, T):
 
 
 class _TPGas:
-    """species_db.yaml (NASA-9) の凍結組成混合。質量基準の h, cp, s° (datum: thermoHrefTemp)。"""
+    """species_db.yaml (NASA-9) の凍結組成混合。質量基準の h, cp, s° (datum: thermoHrefTemp)。
+    範囲外の扱いはソルバ (cuda_forge/thermo_d.cuh thermo_cp_molar / thermo_h_molar / thermo_s0_mass) と同じ:
+    種ごとの Tlo/Thi の外では cp を端の値で固定し、h は線形外挿 h(T)=h(Tb)+cp(Tb)(T−Tb)、s° は s°(Tb)+cp(Tb) ln(T/Tb)。
+    係数は T<Tmid で low、それ以外 high (thermo_pick_coeffs)。codex 2026-09-16 result-3 M2。"""
     def __init__(self, db, names, Tref):
         self.sp = [db[n] for n in names]; self.R = [RU / s["MW"] for s in self.sp]; self.Tref = Tref
         self.href = [self._h1(s, np.array([Tref]))[0] if Tref > 0 else 0.0 for s in self.sp]
 
+    @staticmethod
+    def _bounds(s):
+        return float(s.get("Tlo", 200.0)), float(s.get("Tmid", 1000.0)), float(s.get("Thi", 6000.0))
+
     def _coef(self, s, T):
         lo, hi = np.asarray(s["nasa9_low"], float), np.asarray(s["nasa9_high"], float)
-        return np.where((T < s["Tmid"])[:, None], lo, hi)
+        Tmid = self._bounds(s)[1]
+        return np.where((T < Tmid)[:, None], lo, hi)
 
-    def _h1(self, s, T):
-        a = self._coef(s, T); R = RU / s["MW"]
-        _, h_RT, _ = _nasa9(a.T, T); return h_RT * R * T
+    def _raw(self, s, Tc):
+        """クランプ済み温度での (cp, h, s°) [質量基準] (thermo_*_clamped)。"""
+        a = self._coef(s, Tc); R = RU / s["MW"]
+        cp_R, h_RT, s_R = _nasa9(a.T, Tc)
+        return cp_R * R, h_RT * R * Tc, s_R * R
 
     def _props(self, s, T):
-        a = self._coef(s, T); R = RU / s["MW"]
-        cp_R, h_RT, s_R = _nasa9(a.T, T); return cp_R * R, h_RT * R * T, s_R * R
+        """範囲クランプ + 外挿込みの (cp, h, s°) [質量基準] (thermo_cp_molar / thermo_h_molar / thermo_s0_mass と同式)。"""
+        T = np.asarray(T, dtype=np.float64)
+        Tlo, _, Thi = self._bounds(s)
+        Tc = np.clip(T, Tlo, Thi)
+        cp, h, s0 = self._raw(s, Tc)
+        out = (T < Tlo) | (T > Thi)
+        if np.any(out):
+            # 端の値 cp(Tb), h(Tb), s°(Tb) から線形 (h) / 対数 (s°) 外挿。cp は端の値で一定。
+            h = np.where(out, h + cp * (T - Tc), h)
+            s0 = np.where(out, s0 + cp * np.log(np.maximum(T, 1e-300) / Tc), s0)
+        return cp, h, s0
+
+    def _h1(self, s, T):
+        return self._props(s, T)[1]
 
     def h(self, Y, T):
         return sum(Y[i] * (self._props(s, T)[1] - self.href[i]) for i, s in enumerate(self.sp))

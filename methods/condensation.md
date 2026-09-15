@@ -986,8 +986,9 @@ Phase 2 の二相 EOS による気相逆結合 ($p$ が $g$ 依存) は密結合
 
 ### 7b. 多成分燃焼ガス中の H₂O 凝縮 — carrier を擬似種に畳む運用 (2026-08-17)
 
-> 2026-09-15: 擬似種に畳むのは設計チェーンの選択肢の 1 つ (`tp_species: lumped`, 名前と中身をユーザ指定) にし、各種を CEA (NASA-9) の係数で
-> 独立種として渡す `tp_species: full` とモル分率入力を追加する計画 → [thermophysics-cea-mole-fraction-species](../plans/active/thermophysics-cea-mole-fraction-species.md)。
+> 2026-09-16: 擬似種に畳むのは設計チェーンの選択肢の 1 つ (`tp_species: {mode: lumped, lumps: {MIXDRY: {from: composition, exclude: [H2O]}}, keep: [H2O]}` = 旧 `split_h2o`) になり、
+> 各種を CEA (NASA-9) の係数で独立種として渡す `{mode: full}` とモル分率入力 (`gas.composition_basis: mole`)、凝縮種の名前指定 (`gas.condensing_species` → forge `condensationSpecies`) を実装済
+> (case/44 で full 5 種と lumped は onset/出口 g/ṁ がゲート内で一致) → [thermophysics-cea-mole-fraction-species](../plans/accepted/thermophysics-cea-mole-fraction-species.md)。
 
 
 燃焼ガス (N₂/CO₂/O₂/H₂O) の H₂O 凝縮では、carrier 全種を独立種にする必要はない (多成分 TP × 陰解法の
