@@ -20,8 +20,10 @@ Python:
   info["h2o_array"]        # 'Y{h2o_index}' | None
   info["vapor_array"]      # 凝縮 ON なら凝縮種の配列、OFF でも H2O が種にあればその配列 (後処理の分圧は常に名前で解決; codex M9)
   info["tracer"]           # 'exhaust' | None
-  species_signature(run_dir)   # restart 照合用 {names, MW (list), thermoHrefTemp, meta_sha256, db_file}
-  compare_signatures(a, b)     # 不一致の説明 list (空なら一致)
+  species_signature(run_dir)   # restart 照合用: config + 解決済み DB (名前/順序, MW, NASA-9 両域係数, Tlo/Tmid/Thi, datum, tracer)。
+                               # species_meta.yaml の species が config と矛盾すれば例外
+  compare_signatures(a, b)     # 不一致の説明 list (空なら一致; 係数は rel 1e-12)
+  required_conserved(sig)      # restart に必須の VALUE/ データセット名
 
 YAML の注意: 種名 `NO` / `N` / `Y` は PyYAML の既定では真偽値になる (design チェーンの古い config は無引用)。
 本モジュールの `load_yaml_str` は真偽値の暗黙解決を外した SafeLoader で読むので `NO` は文字列のまま。
@@ -153,31 +155,82 @@ def species_info(run_dir):
 
 
 def species_signature(run_dir):
-    """restart 照合用の署名: 種名 (順序込み), 種ごとの MW (species_db.yaml / 内蔵), thermoHrefTemp, species_meta.yaml の sha256。
-    解決できなければ例外 (呼び手が既定でエラーにする; codex 2026-09-16 M3)。CPG (thermalMethod≠2) は names=[]。"""
+    """restart 照合用の署名 (codex 2026-09-16 result-2 M2): 実際の solverConfig.yaml と解決済み species_db.yaml から作る。
+    {thermalMethod, names (順序込み), tracer, thermoHrefTemp, species: {name: {MW, Tlo, Tmid, Thi, nasa9_low, nasa9_high, source}}}。
+    speciesDBFile に無い種 (内蔵 DB) は係数を持たないので source="builtin" (MW は内蔵表) とし、両側 builtin なら同一とみなす。
+    species_meta.yaml があれば species の名前/順序が config と一致することを要求し、矛盾は例外 (refuse)。
+    解決できなければ例外 (呼び手が既定でエラーにする)。CPG (thermalMethod≠2) は names=[]。"""
     info = species_info(run_dir)
-    meta_path = os.path.join(info["run_dir"], "species_meta.yaml")
-    meta_sha = hashlib.sha256(open(meta_path, "rb").read()).hexdigest() if os.path.exists(meta_path) else None
-    return {"run_dir": info["run_dir"], "thermalMethod": info["thermalMethod"], "names": list(info["names"]),
+    run_dir = info["run_dir"]
+    meta = info["meta"]
+    if meta is not None and meta.get("species") is not None:
+        mnames = [str(x) for x in meta["species"]]
+        if mnames != info["names"]:
+            raise ValueError(f"{run_dir}: species_meta.yaml の species {mnames} と solverConfig.yaml の physProp.species {info['names']} が矛盾する")
+        mt = (meta.get("tracer") or {}).get("enabled")
+        if mt is not None and bool(mt) != bool(info["tracer"]):
+            print(f"[forge_species] warning: {run_dir}: species_meta.yaml tracer.enabled={mt} と physProp.tracer={info['tracer']} が違う (config を正とする)",
+                  file=sys.stderr)
+    db = {}
+    if info["speciesDBFile"]:
+        p = info["speciesDBFile"] if os.path.isabs(info["speciesDBFile"]) else os.path.join(run_dir, info["speciesDBFile"])
+        db = {str(k): v for k, v in (load_yaml_str(p) or {}).items()}
+    species = {}
+    for n in info["names"]:
+        e = _find_ci(db, n)
+        if e is not None and "nasa9_low" in e and "nasa9_high" in e:
+            lo, hi = [float(x) for x in e["nasa9_low"]], [float(x) for x in e["nasa9_high"]]
+            if len(lo) != 9 or len(hi) != 9:
+                raise ValueError(f"{run_dir}: species_db.yaml {n} の nasa9 係数が 9 個でない")
+            species[n] = {"MW": float(e["MW"]), "Tlo": float(e.get("Tlo", 200.0)), "Tmid": float(e.get("Tmid", 1000.0)),
+                          "Thi": float(e.get("Thi", 6000.0)), "nasa9_low": lo, "nasa9_high": hi, "source": "file"}
+        else:
+            species[n] = {"MW": info["MW"][n], "Tlo": None, "Tmid": None, "Thi": None, "nasa9_low": None, "nasa9_high": None, "source": "builtin"}
+    return {"run_dir": run_dir, "thermalMethod": info["thermalMethod"], "names": list(info["names"]),
             "MW": [info["MW"][n] for n in info["names"]], "thermoHrefTemp": info["thermoHrefTemp"],
-            "meta_sha256": meta_sha, "speciesDBFile": info["speciesDBFile"]}
+            "tracer": info["tracer"], "species": species, "speciesDBFile": info["speciesDBFile"]}
 
 
-def compare_signatures(a, b, mw_rtol=1e-9):
-    """2 つの署名の不一致を説明文字列の list で返す (空 = 一致)。species_meta の hash は両方にあるときだけ比較。"""
+def required_conserved(sig):
+    """署名から restart に必須の保存量データセット名 (VALUE/ 以下) を返す。"""
+    req = ["ro", "roUx", "roUy", "roUz", "roe"]
+    if sig["thermalMethod"] == 2 and len(sig["names"]) >= 2:
+        req += [f"roY{s}" for s in range(len(sig["names"]))]
+    if sig["tracer"]:
+        req.append("roXi")
+    return req
+
+
+def compare_signatures(a, b, mw_rtol=1e-9, coef_rtol=1e-12):
+    """2 つの署名の不一致を説明文字列の list で返す (空 = 一致)。種名・順序、MW、NASA-9 両温度域の全係数 (rel 1e-12)、
+    Tlo/Tmid/Thi、thermoHrefTemp、tracer を比較する。"""
     bad = []
     if a["thermalMethod"] != b["thermalMethod"]:
         bad.append(f"thermalMethod {a['thermalMethod']} vs {b['thermalMethod']}")
     if a["names"] != b["names"]:
         bad.append(f"physProp.species {a['names']} vs {b['names']}")
     else:
-        for n, ma, mb in zip(a["names"], a["MW"], b["MW"]):
-            if abs(ma - mb) > mw_rtol * max(abs(ma), abs(mb), 1e-300):
-                bad.append(f"MW[{n}] {ma!r} vs {mb!r}")
+        for n in a["names"]:
+            sa, sb = a["species"][n], b["species"][n]
+            if abs(sa["MW"] - sb["MW"]) > mw_rtol * max(abs(sa["MW"]), abs(sb["MW"]), 1e-300):
+                bad.append(f"MW[{n}] {sa['MW']!r} vs {sb['MW']!r}")
+            if sa["source"] != sb["source"]:
+                bad.append(f"{n}: DB source {sa['source']} vs {sb['source']}")
+                continue
+            if sa["source"] == "builtin":
+                continue
+            for k in ("Tlo", "Tmid", "Thi"):
+                if sa[k] != sb[k]:
+                    bad.append(f"{n}.{k} {sa[k]} vs {sb[k]}")
+            for k in ("nasa9_low", "nasa9_high"):
+                for i, (x, y) in enumerate(zip(sa[k], sb[k])):
+                    if abs(x - y) > coef_rtol * max(abs(x), abs(y), 1e-300):
+                        bad.append(f"{n}.{k}[{i}] {x!r} vs {y!r}")
+                        break
     if a["thermoHrefTemp"] != b["thermoHrefTemp"]:
         bad.append(f"thermoHrefTemp {a['thermoHrefTemp']} vs {b['thermoHrefTemp']}")
-    if a["meta_sha256"] and b["meta_sha256"] and a["meta_sha256"] != b["meta_sha256"]:
-        bad.append("species_meta.yaml differs (sha256)")
+    if (a["tracer"] or None) != (b["tracer"] or None):
+        bad.append(f"physProp.tracer {a['tracer']} vs {b['tracer']}")
     return bad
 
 

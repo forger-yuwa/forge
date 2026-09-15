@@ -50,7 +50,8 @@ def centroids(f):
 
 
 def check_species_signatures(src_h5, dst_h5, force):
-    """SRC/DST の隣の run 設定から化学種署名を作って照合する。不一致・解決不能は拒否 (force で警告に降格)。"""
+    """SRC/DST の隣の run 設定から化学種署名を作って照合する。不一致・解決不能は拒否 (force で警告に降格)。
+    照合できたときは SRC 署名を返す (必須データセットの存在検査に使う)。"""
     from forge_species import species_signature, compare_signatures
     sig = {}
     for tag, h5 in (("SRC", src_h5), ("DST", dst_h5)):
@@ -62,7 +63,7 @@ def check_species_signatures(src_h5, dst_h5, force):
             if not force:
                 raise SystemExit("[interp_field] REFUSED: " + msg + "  (solverConfig.yaml / species_db.yaml を隣に置くか --force-species)")
             print("[interp_field] WARNING (--force-species): " + msg)
-            return
+            return None
     bad = compare_signatures(sig["SRC"], sig["DST"])
     if bad:
         msg = ("化学種署名が違う: " + "; ".join(bad) + ". 種の順序/集合/DB が違う場は index コピーできない。"
@@ -73,6 +74,31 @@ def check_species_signatures(src_h5, dst_h5, force):
         print("[interp_field] WARNING (--force-species): " + msg)
     else:
         print(f"[interp_field] species signature OK: {sig['SRC']['names'] or 'CPG (no species)'}")
+    return sig["SRC"]
+
+
+def check_required_datasets(h5path, sig):
+    """署名が要求する保存量が SRC にあるか (res は原始量で代替可: Y{s}, Xi, k/omega)。無ければ拒否。"""
+    from forge_species import required_conserved
+    if sig is None:
+        return
+    with h5py.File(h5path, "r") as f:
+        V = f["VALUE"]
+        is_res = "P" in V and "Ux" in V
+        missing = []
+        for name in required_conserved(sig):
+            if name in V:
+                continue
+            alt = {"roUx": "Ux", "roUy": "Uy", "roUz": "Uz", "roXi": "Xi"}.get(name)
+            if name.startswith("roY"):
+                alt = name[2:]
+            if is_res and alt is not None and alt in V:
+                continue
+            if is_res and name == "roe":
+                continue   # 旧 res は CPG 式で再構成 (下の警告付き経路)
+            missing.append(name)
+    if missing:
+        raise SystemExit(f"[interp_field] REFUSED: SRC {h5path} に必須の保存量が無い: {missing} (種数 {len(sig['names'])}, tracer {sig['tracer']})")
 
 
 def main():
@@ -83,8 +109,10 @@ def main():
                     help="SRC/DST の physProp.species が違っても index で貼る (通常は convert_species_field.py を使う)")
     a = ap.parse_args(); g = a.gamma
 
-    # 化学種署名の照合 (名前・順序・MW・datum・species_meta)。解決不能も既定でエラー (codex 2026-09-16 M3)。
-    check_species_signatures(a.src, a.dst, a.force_species)
+    # 化学種署名の照合 (名前・順序・MW・NASA-9 係数・温度区切り・datum・tracer)。解決不能も既定でエラー (codex 2026-09-16 M3 / result-2 M2)。
+    src_sig = check_species_signatures(a.src, a.dst, a.force_species)
+
+    check_required_datasets(a.src, src_sig)
 
     with h5py.File(a.src, "r") as s:
         cs = centroids(s); V = s["VALUE"]

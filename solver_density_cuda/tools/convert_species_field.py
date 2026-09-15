@@ -13,11 +13,12 @@ plans/active/thermophysics-cea-mole-fraction-species.md §2 (forge 本体) / §4
   conserve (既定) — **保存的な展開/縮約**。source の各輸送種を `expansion` (lump 内質量分率) で実種に展開し実種ごとに合算、
       destination の輸送種へ「実種の行き先が一意」なときだけ縮約する (同名・同 expansion の輸送種は 1:1 コピー)。
       実種が複数の destination lump に属し得る (SERN の EXH/AIR はともに N2 を含む) 場合は拒否し、`--mode reinit` を要求する。
-  reinit — **流れによる再初期化**。source の流入元分率 ξ (source の `roXi` があればそれ、無ければ source meta で純流入ラベルに
-      なっている輸送種、例 Y_EXH) を使い、実種ごとの質量を destination の流れ lump へ `streams[...].Y_transport` の重み
-      w_j(r) = (ξ Yt_in[j] + (1−ξ) Yt_ext[j]) · expansion_j[r] で分配する (ΣY=1)。**lump の内部組成は固定なので、source の
-      組成が二流線形部分空間 ξY_in+(1−ξ)Y_ext から外れている分 (差動拡散・full/lumped の輸送差) は実種ごとの質量に射影損失が
-      出る = 情報を落とす操作** (plan §4.5 M4)。損失は実種ごとに報告し `--reinit-tol` (既定 1e-3·max ρ) を超えたら失敗。
+  reinit — **組成の再初期化 (作動点変更)**。source から持ち越すのは各セルの流入元分率 ξ **だけ** (source の `roXi/ρ`、無ければ
+      source meta の `exhaust_fraction` が指す種ラベル配列 (例 Y_EXH)、それも無ければ streams.Y_transport の純流入ラベル種) で、
+      **source の組成そのものは捨てる**。destination meta の流れ組成 (`streams.inflow.Y` / `streams.external.Y` = 実種質量分率、
+      輸送種では `Y_transport`) から各セルの輸送種を Y_t[j] = ξ·Yt_in^dst[j] + (1−ξ)·Yt_ext^dst[j] と作る (実種でも
+      Y_real(r) = ξ·Y_in^dst(r) + (1−ξ)·Y_ext^dst(r) と厳密に同じ)。**情報を落とす操作** (plan §4.5 M4, codex result-2 M1):
+      新作動点の入口組成に置き換わるので実種の質量・総水量は保存しない (変化量は情報として表示)。ΣY=1・T 保存・有限性は検査する。
   どちらでも destination が `tracer.enabled` で source に `roXi` が無ければ **roXi = ρ ξ を生成**する (ξ が導けなければ拒否)。
 
 エネルギーと温度:
@@ -26,9 +27,13 @@ plans/active/thermophysics-cea-mole-fraction-species.md §2 (forge 本体) / §4
     e = e_v(T) + g R_mix T − g L(T) (`cond_T_from_e_onetemp`)。L(T) は condensationProperties_d.cuh の `h2o_latent` / `n2_latent` を移植。
   - DB (`species_db.yaml`) / datum (`thermoHrefTemp`) / 種集合が変わるときは `roe += ρ [e_gas,dst(Y_dst,T) − e_gas,src(Y_src,T)]`
     (差分形; 液相項 g(R_w T−L) は不変なので湿潤セルでも正しい)。
-検査 (**1 つでも破れば書き込まず失敗終了**): 各セル ΣY_dst=1 (1e-6)、実種ごとの ρY 保存 (conserve: 1e-6·max ρ / reinit: 射影損失を
-  `--reinit-tol`)、総水量 ρ·Y_w (Y_w は液相込みの総水分率なので ρ(Y_w+g) ではない) の保存 (conserve: rel 1e-9 / reinit: `--reinit-tol` 相対)、destination DB + 二相 EOS で `roe` を反転した T と source T の差
-  (乾き・湿潤の全セル, `--T-tol` 既定 0.05 K)、roXi/ρ ∈ [0,1]。
+検査 (**1 つでも破れば書き込まず失敗終了**; NaN は必ず失敗になるよう有限性を先に見る, codex result-2 M3):
+  source の必須データセット (ro, roUx/Ux, roUy, roUz, roe, roY{s}/Y{s} 全種, tracer なら roXi/Xi) の存在、ρ>0 と全保存量・組成・
+  T (source/destination) の有限性、組成の非負 (Y < −1e-9 は拒否、|Y| < 1e-9 は 0 にクリップして件数を報告)、|ΣY_src−1| ≤ 1e-4、
+  EOS 反転の残差 (|e(T)−e| ≤ 1e-6|e| + 1 J/kg) と括弧端 (T_min=50 K / T_max=6000 K に張り付いたら拒否)、各セル ΣY_dst=1 (1e-6)、
+  conserve では実種ごとの ρY 保存 (1e-6·max ρ) と総水量 ρ·Y_w (Y_w は液相込みの総水分率なので ρ(Y_w+g) ではない) の保存 (rel 1e-9)、
+  destination DB + 二相 EOS で `roe` を反転した T と source T の差 (乾き・湿潤の全セル, `--T-tol` 既定 0.05 K)、roXi/ρ ∈ [0,1]。
+失敗系の試験: tests/unit/test_convert_species_field_fail.py。
 
 - SRC: res_*.h5 (原始量 P,T,Ux,.. + Y{s}) か input h5 (保存量 roY{s})。DST: 同一メッシュ・同一 CV 数の input h5。
   ro/roU/roe/roK/roOmega・凝縮モーメント `rog_*/roQ*_*` (凝縮種が同名のとき) も index コピーする。
@@ -112,20 +117,63 @@ class CondEOS:
         return g * (R * T - self.latent(T))
 
 
-def T_from_e(gas, Y, e, T0, g=None, eos=None, Tmin=50.0, Tmax=6000.0):
-    """e = e_gas(T) [+ 液相項] を Newton で反転 (ベクトル)。g=None/eos=None なら乾き気相。"""
+T_MIN, T_MAX = 50.0, 6000.0   # dependentVariables_d.cu DEPVAR_TMIN/TMAX
+
+
+def T_from_e(gas, Y, e, T0, g=None, eos=None, Tmin=T_MIN, Tmax=T_MAX, diag=None):
+    """e = e_gas(T) [+ 液相項] を Newton で反転 (ベクトル)。g=None/eos=None なら乾き気相。
+    diag (dict) を渡すと残差 |e(T)−e| と括弧端張り付きの情報を入れる (呼び手が拒否判定に使う)。NaN 入力は NaN を返す。"""
+    e = np.asarray(e, float)
     T = np.clip(np.asarray(T0, float).copy(), Tmin, Tmax); R = gas.Rmix(Y)
     g = np.zeros_like(T) if g is None else np.asarray(g, float)
-    for _ in range(80):
+
+    def resid(T):
         f = gas.h(Y, T) - R * T - e
+        return f + (eos.e_liquid_term(T, g, R) if eos is not None else 0.0)
+
+    for _ in range(80):
+        f = resid(T)
         dfdT = gas.cp(Y, T) - R
         if eos is not None:
-            f = f + eos.e_liquid_term(T, g, R)
             dfdT = dfdT + (eos.e_liquid_term(T + 0.1, g, R) - eos.e_liquid_term(T - 0.1, g, R)) / 0.2
         dT = np.clip(f / np.maximum(dfdT, 1.0e-2 * np.maximum(R, 1.0)), -0.5 * T, 0.5 * T)
         T = np.clip(T - dT, Tmin, Tmax)
-        if np.max(np.abs(dT)) < 1e-10 * np.max(T):
+        fin = np.isfinite(dT)
+        if not fin.any() or np.max(np.abs(dT[fin])) < 1e-10 * np.max(T[fin]):
             break
+    if diag is not None:
+        f = resid(T)
+        tol = 1e-6 * np.abs(e) + 1.0
+        bad_res = ~(np.abs(f) <= tol)                      # NaN も True
+        at_end = (T <= Tmin * (1 + 1e-9)) | (T >= Tmax * (1 - 1e-9)) | ~np.isfinite(T)
+        diag.update({"resid_max": float(np.max(np.abs(f))) if np.isfinite(f).all() else float("inf"),
+                     "n_bad_resid": int(bad_res.sum()), "n_at_bracket": int(at_end.sum()),
+                     "i_bad": int(np.argmax(bad_res | at_end)) if (bad_res | at_end).any() else -1})
+    return T
+
+
+def _amax(x):
+    """NaN/Inf が 1 つでもあれば inf (比較で必ず失敗させる)。"""
+    x = np.asarray(x, float)
+    return float(np.max(np.abs(x))) if np.isfinite(x).all() else float("inf")
+
+
+def _check_finite(fails, name, arr):
+    arr = np.asarray(arr, float)
+    n = int((~np.isfinite(arr)).sum())
+    if n:
+        fails.append(f"{name}: 非有限値が {n} 個 (最初 index {int(np.argmax(~np.isfinite(arr)))})")
+    return n == 0
+
+
+def _invert_checked(fails, label, gas, Y, e, T0, g, eos):
+    """反転 + 残差/括弧端の検査 (失敗は fails に積む)。"""
+    d = {}
+    T = T_from_e(gas, Y, e, T0, g=g, eos=eos, diag=d)
+    if d["n_bad_resid"] or d["n_at_bracket"]:
+        i = d["i_bad"]
+        fails.append(f"{label}: EOS 反転が収束しないか括弧端に張り付く (残差超過 {d['n_bad_resid']} セル, 端 {d['n_at_bracket']} セル; "
+                     f"例 cell {i}: T {T[i]:.3f} K, e {float(np.asarray(e)[i]):.6g} J/kg, g {float(np.asarray(g)[i]) if g is not None else 0:.3e})")
     return T
 
 
@@ -139,7 +187,7 @@ def load_layout(meta_path, run_dir, label):
         raise SystemExit(f"{label}: species_meta.yaml も solverConfig.yaml も無い (--meta / --src-meta / --src-run / --dst-run)")
     names = [_up(s) for s in (meta["species"] if meta else info["names"])]
     if info and [_up(s) for s in info["names"]] != names:
-        raise SystemExit(f"{label}: species_meta.yaml の species {names} と solverConfig の {info['names']} が違う")
+        raise SystemExit(f"{label}: species_meta.yaml の species {names} と solverConfig.yaml の physProp.species {info['names']} が矛盾する (REFUSED)")
     exp = {}
     for s in names:
         row = (meta or {}).get("expansion", {}).get(s) if meta else None
@@ -149,12 +197,16 @@ def load_layout(meta_path, run_dir, label):
         tot = sum(exp[s].values())
         if abs(tot - 1.0) > 1e-9:
             raise SystemExit(f"{label}: expansion[{s}] の重み和 {tot} が 1 でない")
-    streams = {}
+    streams = {}; stream_Y = {}
     for st, v in ((meta or {}).get("streams") or {}).items():
         yt = [float(x) for x in v.get("Y_transport", [])]
         if len(yt) != len(names):
             raise SystemExit(f"{label}: streams[{st}].Y_transport の長さ {len(yt)} が species {len(names)} と違う")
+        if not np.isfinite(yt).all() or abs(sum(yt) - 1.0) > 1e-6 or min(yt) < 0.0:
+            raise SystemExit(f"{label}: streams[{st}].Y_transport が非有限/負/和≠1 ({sum(yt)!r})")
         streams[str(st)] = np.array(yt)
+        stream_Y[str(st)] = {_up(k): float(x) for k, x in (v.get("Y") or {}).items()}
+    xi_spec = (meta or {}).get("exhaust_fraction") if meta else None
     cond = None
     if meta and meta.get("condensing_species"):
         cond = _up(meta["condensing_species"])
@@ -174,7 +226,8 @@ def load_layout(meta_path, run_dir, label):
                 db = {_up(k): v for k, v in (load_yaml_str(p) or {}).items()}
         condensation = bool(info["condensation"]); condModel = int(info["condModel"])
         condGasIndex = info["condensing_index"]
-    return {"names": names, "expansion": exp, "streams": streams, "condensing": cond, "tracer": tracer, "MW": MW,
+    return {"names": names, "expansion": exp, "streams": streams, "stream_Y": stream_Y, "xi_spec": xi_spec,
+            "condensing": cond, "tracer": tracer, "MW": MW,
             "db": db, "Tref": Tref, "run_dir": run_dir, "condModel": condModel, "condGasIndex": condGasIndex,
             "condensation": condensation, "has_cfg": has_cfg}
 
@@ -247,36 +300,33 @@ def transfer_conserve(src, dst):
 
 
 def stream_fraction(src, Ysrc, roXi_src, ro):
-    """流入元分率 ξ [n]: source roXi があればそれ、無ければ純流入ラベル種の Y。導けなければ None。"""
+    """流入元分率 ξ [n]: source roXi/ρ → source meta の exhaust_fraction (kind species の Y{i}) → 純流入ラベル種の Y。導けなければ None。"""
     if roXi_src is not None:
-        return np.clip(roXi_src / ro, 0.0, 1.0), "source roXi"
+        return np.clip(roXi_src / ro, 0.0, 1.0), "source roXi/ρ"
+    spec = src.get("xi_spec")
+    if spec and spec.get("kind") == "species":
+        nm = _up(spec.get("species", ""))
+        if nm in src["names"]:
+            j = src["names"].index(nm)
+            return np.clip(Ysrc[j], 0.0, 1.0), f"Y_{nm} (source species_meta exhaust_fraction)"
     j = inflow_label_index(src)
     if j is not None:
         return np.clip(Ysrc[j], 0.0, 1.0), f"Y_{src['names'][j]} (pure inflow label in source species_meta)"
     return None, None
 
 
-def transfer_reinit(src, dst, Ysrc, xi):
-    """流れによる再初期化: 実種質量 m_r を w_j(r) = (ξ Yt_in[j] + (1−ξ) Yt_ext[j]) exp_j[r] で destination へ分配。返り値 Y_dst[nd, n]。"""
-    if "inflow" not in dst["streams"] or "external" not in dst["streams"]:
-        raise SystemExit("REFUSED (--mode reinit): destination species_meta.yaml に streams.inflow/external の Y_transport が無い")
-    yin, yext = dst["streams"]["inflow"], dst["streams"]["external"]
-    n = Ysrc.shape[1]; nd = len(dst["names"])
-    m = real_masses(src, Ysrc)
-    Yd = np.zeros((nd, n))
-    for r, mr in m.items():
-        w = np.zeros((nd, n))
-        for j, dj in enumerate(dst["names"]):
-            e = dst["expansion"][dj].get(r)
-            if e is None:
-                continue
-            w[j] = (xi * yin[j] + (1.0 - xi) * yext[j]) * e
-        wsum = w.sum(axis=0)
-        bad = (wsum <= 0.0) & (mr > 1e-12)
-        if np.any(bad):
-            raise SystemExit(f"REFUSED (--mode reinit): 実種 {r} の質量があるのに、その ξ で重みが 0 の destination 種しか無いセルが {int(bad.sum())} 個")
-        Yd += mr * np.where(wsum > 0.0, w / np.maximum(wsum, 1e-300), 0.0)
-    return Yd
+def transfer_reinit(dst, xi):
+    """組成の再初期化: Y_t[j] = ξ·Yt_in^dst[j] + (1−ξ)·Yt_ext^dst[j] (destination meta の流れ組成; source の組成は捨てる)。
+    Y_transport は実種組成 streams.<st>.Y を destination の輸送種 (lump 込み) に縮約した既定ベクトルなので、実種で
+    Y_real(r) = ξ·Y_in(r) + (1−ξ)·Y_ext(r) を作ってから縮約するのと厳密に同じ。返り値 Y_dst[nd, n]。"""
+    if "inflow" not in dst["streams"]:
+        raise SystemExit("REFUSED (--mode reinit): destination species_meta.yaml に streams.inflow の Y_transport が無い")
+    yin = dst["streams"]["inflow"]
+    yext = dst["streams"].get("external")
+    if yext is None:
+        yext = yin
+        print("[convert]   note: destination has no external stream; ξ<1 cells also get the inflow composition")
+    return np.outer(yin, xi) + np.outer(yext, 1.0 - xi)
 
 
 # ----------------------------------------------------------------------------- main
@@ -292,7 +342,7 @@ def main():
     ap.add_argument("--reconstruct-roe", choices=["auto", "always", "never"], default="auto",
                     help="roe の差分再構成 (auto: DB/datum/種集合が変わるときだけ)")
     ap.add_argument("--T-tol", type=float, default=0.05, help="T 保存検査の許容 [K] (全セル)")
-    ap.add_argument("--reinit-tol", type=float, default=1e-3, help="reinit の射影損失の許容 (実種 ρY は ×max ρ [kg/m³], 総水量は相対)")
+    ap.add_argument("--src-sum-tol", type=float, default=1e-4, help="source の |ΣY−1| の許容 (これを超える source は壊れているとみなす)")
     ap.add_argument("--drop-moments", action="store_true", help="destination が凝縮 OFF のとき source の液相モーメントを捨てる (既定は拒否)")
     ap.add_argument("--dry-run", action="store_true", help="書き込まず検査だけ")
     a = ap.parse_args()
@@ -305,11 +355,19 @@ def main():
     gs, gd = gas_for(src), gas_for(dst)
     eos_s, eos_d = eos_for(src), eos_for(dst)
 
-    # ---- source 読込 ----
+    # ---- source 読込 (必須データセットの存在を先に検査; codex result-2 M2) ----
+    ns = len(src["names"])
     with h5py.File(a.src, "r") as f:
-        V = f["VALUE"]; ro = np.array(V["ro"], np.float64); n = ro.shape[0]
+        V = f["VALUE"]
         is_res = "P" in V and "Ux" in V
-        ns = len(src["names"])
+        need = ["ro"] + (["Ux", "Uy", "Uz", "roe"] if is_res else ["roUx", "roUy", "roUz", "roe"])
+        need += [(f"Y{s}" if is_res and f"roY{s}" not in V else f"roY{s}") for s in range(ns)] if ns >= 2 else []
+        if src["tracer"]:
+            need.append("Xi" if (is_res and "roXi" not in V) else "roXi")
+        missing = [k for k in need if k not in V]
+        if missing:
+            raise SystemExit(f"REFUSED: source {a.src} に必須データセットが無い: {missing} (species {src['names']}, tracer {src['tracer']})")
+        ro = np.array(V["ro"], np.float64); n = ro.shape[0]
         if is_res:
             Ux, Uy, Uz = (np.array(V[k], np.float64) for k in ("Ux", "Uy", "Uz"))
             Tsrc = np.array(V["T"], np.float64)
@@ -336,17 +394,56 @@ def main():
         if y is None:
             raise SystemExit(f"source に Y{s}/roY{s} ({src['names'][s]}) が無い")
     Ysrc = np.array(Ysrc)
+
+    # ---- 検査 0: 有限性・ρ>0・組成の非負 (書き込み前 hard fail; codex result-2 M3) ----
+    fails = []
+    _check_finite(fails, "ro", ro)
+    if not (np.isfinite(ro).all() and (ro > 0.0).all()):
+        fails.append(f"ρ>0 が破れる (min ρ {np.nanmin(ro):.6g}, ρ<=0 が {int((~(ro > 0.0)).sum())} セル)")
+    for nm, arr in (("Ux", Ux), ("Uy", Uy), ("Uz", Uz)):
+        _check_finite(fails, nm, arr)
+    if roe is not None:
+        _check_finite(fails, "roe", roe)
+    for s in range(ns):
+        _check_finite(fails, f"Y{s} ({src['names'][s]})", Ysrc[s])
+    for k, v in moments.items():
+        _check_finite(fails, k, v)
+        if np.isfinite(v).all() and (v < -1e-9 * np.max(ro)).any():
+            fails.append(f"{k}: 負の液相モーメントがある (min {v.min():.3e})")
+    if roXi is not None:
+        _check_finite(fails, "roXi", roXi)
+    if Tsrc is not None:
+        _check_finite(fails, "T (source res)", Tsrc)
+    if fails:
+        print("[convert] FAILED (書き込みなし; 入力の有限性/正値):"); [print("   - " + m) for m in fails]
+        sys.exit(1)
+    neg = Ysrc < -1e-9
+    if neg.any():
+        i = np.argwhere(neg)[0]
+        raise SystemExit(f"REFUSED: source の組成に負値 (Y{i[0]}[{i[1]}] = {Ysrc[i[0], i[1]]:.3e} < -1e-9)")
+    tiny = (np.abs(Ysrc) < 1e-9) & (Ysrc != 0.0)
+    if tiny.any():
+        print(f"[convert] |Y| < 1e-9 の {int(tiny.sum())} 値を 0 にクリップ")
+        Ysrc = np.where(tiny, 0.0, Ysrc)
+    Ysrc = np.maximum(Ysrc, 0.0)
     ssum = Ysrc.sum(axis=0)
-    print(f"[convert] source ΣY: min {ssum.min():.9f} max {ssum.max():.9f} (正規化して使う)")
-    Ysrc = Ysrc / np.maximum(ssum, 1e-30)
+    print(f"[convert] source ΣY: min {ssum.min():.9f} max {ssum.max():.9f} (正規化して使う; tol {a.src_sum_tol:.0e})")
+    if _amax(ssum - 1.0) > a.src_sum_tol:
+        raise SystemExit(f"REFUSED: source の |ΣY−1| が {_amax(ssum - 1.0):.3e} > {a.src_sum_tol:.0e} (組成が壊れている)")
+    Ysrc = Ysrc / ssum
     ke = 0.5 * (Ux ** 2 + Uy ** 2 + Uz ** 2)
     g_src = sum(v for k, v in moments.items() if k.startswith("rog_")) / ro if moments else np.zeros(n)
+    g_src = np.maximum(g_src, 0.0)
 
     # source T: source DB + 二相 EOS で roe から反転する (codex M2)。res の T はソルバが陰解法更新の前に評価した値で
     # 保存量 roe より 1 更新ぶん遅れる (未収束の過渡では ~1 K 違う) ので、参照は必ず roe と整合する反転値にし、
     # res の T との差は情報として出す。DB が無いときだけ res の T を使う。
     if gs is not None and roe is not None:
-        Tinv = T_from_e(gs, list(Ysrc), roe / ro - ke, (Tsrc if Tsrc is not None else np.full(n, 300.0)), g=g_src, eos=eos_s)
+        Tinv = _invert_checked(fails, "source roe の反転", gs, list(Ysrc), roe / ro - ke,
+                               (Tsrc if Tsrc is not None else np.full(n, 300.0)), g_src, eos_s)
+        if fails:
+            print("[convert] FAILED (書き込みなし):"); [print("   - " + m) for m in fails]
+            sys.exit(1)
         if Tsrc is not None:
             print(f"[convert] source T (res) と source roe の反転値の差: max {np.max(np.abs(Tinv - Tsrc)):.3e} K (情報; 未収束の過渡では非零)")
         Tsrc = Tinv
@@ -365,9 +462,15 @@ def main():
         Ydst = T @ Ysrc
     else:
         if xi is None:
-            raise SystemExit("REFUSED (--mode reinit): 流入元分率 ξ が導けない (source に roXi も純流入ラベル種も無い)")
+            raise SystemExit("REFUSED (--mode reinit): 流入元分率 ξ が導けない (source に roXi も exhaust_fraction も純流入ラベル種も無い)")
+        _check_finite(fails, "ξ", xi)
+        if fails:
+            print("[convert] FAILED (書き込みなし):"); [print("   - " + m) for m in fails]; sys.exit(1)
         print(f"[convert]   ξ = {xi_how}: min {xi.min():.6g} max {xi.max():.6g} mean {xi.mean():.6g}")
-        Ydst = transfer_reinit(src, dst, Ysrc, xi)
+        print(f"[convert]   composition re-initialized from destination streams (source composition dropped): "
+              f"inflow Y_t {np.round(dst['streams']['inflow'], 6).tolist()}, external Y_t "
+              f"{np.round(dst['streams']['external'], 6).tolist() if 'external' in dst['streams'] else 'n/a'}")
+        Ydst = transfer_reinit(dst, xi)
     nd = len(dst["names"])
 
     # ---- トレーサ ----
@@ -394,36 +497,44 @@ def main():
             raise SystemExit(f"REFUSED: 凝縮種が違う (source {src['condensing']} / destination {dst['condensing']}); 凝縮モーメントを移せない")
         moments_out = dict(moments); g_dst = g_src
 
-    # ---- 検査 1: ΣY, 実種保存, 総水量 ----
-    fails = []
+    # ---- 検査 1: 有限性, ΣY, (conserve) 実種保存・総水量, roXi ----
+    _check_finite(fails, "Y_dst", Ydst)
     dsum = Ydst.sum(axis=0)
-    err_sum = float(np.max(np.abs(dsum - 1.0)))
+    err_sum = _amax(dsum - 1.0)
     print(f"[convert] check ΣY_dst−1: max |{err_sum:.3e}| (tol 1e-6)")
-    if err_sum > 1e-6:
+    if not (err_sum <= 1e-6):
         fails.append(f"ΣρY=ρ が破れる (max |ΣY−1| {err_sum:.3e})")
+    if (Ydst < 0.0).any():
+        fails.append(f"destination の組成に負値 (min {Ydst.min():.3e})")
     ms, md = real_masses(src, Ysrc), real_masses(dst, Ydst)
     worst = 0.0
     for r in set(ms) | set(md):
-        worst = max(worst, float(np.max(np.abs(ms.get(r, 0.0) - md.get(r, 0.0)) * ro)))
+        worst = max(worst, _amax((ms.get(r, 0.0) - md.get(r, 0.0)) * ro))
     lossy = (a.mode == "reinit")
-    tol_m = (a.reinit_tol if lossy else 1e-6) * float(np.max(ro))
-    print(f"[convert] check 実種ごとの ρY {'射影損失 (reinit は lump 内組成固定のため非保存)' if lossy else '保存'}: max |Δ| {worst:.3e} kg/m³ (tol {tol_m:.1e})")
-    if worst > tol_m:
-        fails.append(f"実種の質量{'の射影損失が大きい' if lossy else 'が保存されない'} (max |Δ ρY| {worst:.3e})")
+    if lossy:
+        print(f"[convert] info 実種ごとの ρY の変化 (reinit は組成を destination の流れ組成に置き換えるので保存しない): max |Δ| {worst:.3e} kg/m³")
+    else:
+        tol_m = 1e-6 * float(np.max(ro))
+        print(f"[convert] check 実種ごとの ρY 保存: max |Δ| {worst:.3e} kg/m³ (tol {tol_m:.1e})")
+        if not (worst <= tol_m):
+            fails.append(f"実種の質量が保存されない (max |Δ ρY| {worst:.3e})")
     cond_name = dst["condensing"] or src["condensing"]
     if cond_name and cond_name in ms and cond_name in md:
         wt = vol if vol is not None else np.ones(n)
         tot_s = float(np.sum(ms[cond_name] * ro * wt)); tot_d = float(np.sum(md[cond_name] * ro * wt))
-        rel = abs(tot_d - tot_s) / max(abs(tot_s), 1e-300)
-        tol_w = a.reinit_tol if lossy else 1e-9
-        print(f"[convert] check 総水量 ρ·Y_{cond_name} (液相込みの総水分率; {'体積重み' if vol is not None else 'CV 単純和'}): "
-              f"source {tot_s:.9e} destination {tot_d:.9e} rel diff {rel:.3e} (tol {tol_w:.0e})")
-        if rel > tol_w:
-            fails.append(f"総水量が保存されない (rel {rel:.3e})")
+        rel = abs(tot_d - tot_s) / max(abs(tot_s), 1e-300) if np.isfinite(tot_s) and np.isfinite(tot_d) else float("inf")
+        if lossy:
+            print(f"[convert] info 総水量 ρ·Y_{cond_name}: source {tot_s:.9e} destination {tot_d:.9e} rel diff {rel:.3e} (reinit では保存しない)")
+        else:
+            print(f"[convert] check 総水量 ρ·Y_{cond_name} (液相込みの総水分率; {'体積重み' if vol is not None else 'CV 単純和'}): "
+                  f"source {tot_s:.9e} destination {tot_d:.9e} rel diff {rel:.3e} (tol 1e-09)")
+            if not (rel <= 1e-9):
+                fails.append(f"総水量が保存されない (rel {rel:.3e})")
     if roXi_out is not None:
+        _check_finite(fails, "roXi", roXi_out)
         xr = roXi_out / ro
-        print(f"[convert] check roXi/ρ ∈ [0,1]: min {xr.min():.6g} max {xr.max():.6g}")
-        if xr.min() < -1e-6 or xr.max() > 1.0 + 1e-6:
+        print(f"[convert] check roXi/ρ ∈ [0,1]: min {np.nanmin(xr):.6g} max {np.nanmax(xr):.6g}")
+        if not ((xr >= -1e-6).all() and (xr <= 1.0 + 1e-6).all()):
             fails.append("roXi/ρ が [0,1] を外れる")
         roXi_out = np.clip(roXi_out, 0.0, ro)
 
@@ -441,8 +552,8 @@ def main():
         else:
             liq = eos_d.e_liquid_term(Tsrc, g_dst, Rd) if eos_d is not None else 0.0
             roe_new = ro * (e_dst + liq + ke); how = "完全再構成 ρ(e_gas,dst(T) + 液相項 + u²/2)"
-        de = (roe_new - roe) / ro if roe is not None else np.full(n, np.nan)
-        print(f"[convert] roe 再構成 ({why}; {how}): Δe max {np.nanmax(np.abs(de)):.3e} J/kg, mean {np.nanmean(np.abs(de)):.3e} J/kg")
+        de = (roe_new - roe) / ro if roe is not None else np.zeros(n)
+        print(f"[convert] roe 再構成 ({why}; {how}): Δe max {_amax(de):.3e} J/kg, mean {np.mean(np.abs(de)) if np.isfinite(de).all() else float('nan'):.3e} J/kg")
         roe_out = roe_new
     else:
         if roe is None:
@@ -450,24 +561,27 @@ def main():
         roe_out = roe
         print(f"[convert] roe はそのまま ({why})")
 
-    # ---- 検査 2: T 保存 (destination DB + 二相 EOS で反転, 全セル) ----
+    # ---- 検査 2: 有限性と T 保存 (destination DB + 二相 EOS で反転, 全セル; NaN は必ず失敗) ----
+    _check_finite(fails, "roe_out", roe_out)
+    _check_finite(fails, "T (source)", Tsrc)
     if gd is None:
         fails.append("destination の species_db.yaml が読めず T 保存を検査できない")
-    else:
-        Tchk = T_from_e(gd, list(Ydst), roe_out / ro - ke, Tsrc, g=g_dst, eos=eos_d)
+    elif not fails:
+        Tchk = _invert_checked(fails, "destination roe の反転", gd, list(Ydst), roe_out / ro - ke, Tsrc, g_dst, eos_d)
+        _check_finite(fails, "T (destination)", Tchk)
         dT = np.abs(Tchk - Tsrc); wet = g_dst > 0
         print(f"[convert] check T 保存 (destination DB{' + 二相 EOS' if eos_d is not None else ''} で roe を反転): "
-              f"max |ΔT| 全セル {dT.max():.3e} K, 乾き {dT[~wet].max() if (~wet).any() else 0:.3e} K, "
-              f"湿潤 {dT[wet].max() if wet.any() else 0:.3e} K ({int(wet.sum())} セル) (tol {a.T_tol} K)")
-        if dT.max() > a.T_tol:
-            i = int(np.argmax(dT))
-            fails.append(f"T が保存されない (max |ΔT| {dT.max():.3e} K at cell {i}: T_src {Tsrc[i]:.3f}, T_chk {Tchk[i]:.3f}, g {g_dst[i]:.3e})")
+              f"max |ΔT| 全セル {_amax(dT):.3e} K, 乾き {_amax(dT[~wet]) if (~wet).any() else 0:.3e} K, "
+              f"湿潤 {_amax(dT[wet]) if wet.any() else 0:.3e} K ({int(wet.sum())} セル) (tol {a.T_tol} K)")
+        if not (_amax(dT) <= a.T_tol):
+            i = int(np.nanargmax(dT)) if np.isfinite(dT).any() else 0
+            fails.append(f"T が保存されない (max |ΔT| {_amax(dT):.3e} K at cell {i}: T_src {Tsrc[i]:.3f}, T_chk {Tchk[i]:.3f}, g {g_dst[i]:.3e})")
 
     if fails:
         print("[convert] FAILED (書き込みなし):"); [print("   - " + m) for m in fails]
         sys.exit(1)
     if a.dry_run:
-        print("[convert] --dry-run: 検査 OK, 書き込みなし"); return
+        print("[convert] --dry-run: all checks passed (書き込みなし)" + ("; reinit: composition re-initialized" if lossy else "")); return
 
     # ---- 書き込み (同一メッシュ index コピー) ----
     with h5py.File(a.dst, "r+") as d:
@@ -498,7 +612,7 @@ def main():
         moved = ["ro", "roUx", "roUy", "roUz", "roe"] + [f"roY{j}" for j in range(nd)] + list(moments_out) \
             + (["roK", "roOmega"] if roK is not None else []) + (["roXi"] if roXi_out is not None else [])
     print(f"[convert] wrote {a.dst}: {moved}")
-    print("[convert] SUMMARY: all checks passed (ΣY, real-species mass, total water, T, roXi range)")
+    print("[convert] SUMMARY: all checks passed (finite, ρ>0, ΣY, " + ("T, roXi range; reinit: composition re-initialized)" if lossy else "real-species mass, total water, T, roXi range)"))
 
 
 def _db_differs(src, dst):
