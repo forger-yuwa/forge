@@ -246,7 +246,7 @@ L/R 状態の `roe_L/Ht_L/ca_L` (および R 側) を NASA で再構成。Roe �
   乱流シュミット数 `Sc_t` は `physProp.Sc_t` または `turbulence.turbulentSchmidt` で設定する
   (両方あれば後者を優先。`turbulence.turbulentPrandtl` と同じブロックで揃えられる)。既定 0.7。
 - `nSpecies` は `species` の要素数。未指定で `thermalMethod==2` なら既定 N2 単成分。
-- **組成のモル分率入力と種名の正本化 (2026-09-16 実装, plan [thermophysics-cea-mole-fraction-species](../plans/active/thermophysics-cea-mole-fraction-species.md))**:
+- **組成のモル分率入力と種名の正本化 (2026-09-16 実装, plan [thermophysics-cea-mole-fraction-species](../plans/accepted/thermophysics-cea-mole-fraction-species.md))**:
   - **host 側 DB 解決**: `input/speciesDB.{hpp,cpp}` の `speciesDB_resolve(names, dbFile)` / `speciesDB_init(cfg)` (GPU 非依存) が、内蔵 DB (旧 `thermo_d.cu` の
     `builtinDB`: N2/O2/AR/CO2/HE/H2O/AIR) に `speciesDBFile` の内容を**上書き**した解決済み DB を作り、`solverConfig::read()` 直後 (`main.cpp`) と
     `convertGmshToForge` の境界読込前で `speciesDB_printTable` (species 表) を出す。`thermo_init_db` は同じ DB を再利用して datum offset と GPU 転送だけ行う。

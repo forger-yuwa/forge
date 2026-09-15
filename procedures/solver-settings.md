@@ -176,7 +176,7 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
   (`condensationSpecies: H2O`)。`physProp.species` から大文字小文字無視で index を解決して `condGasSpecies` に入れる。数値
   `condGasSpecies` を併記して食い違えばエラー、数値だけなら範囲検査 (`nSpecies` 超え・単一種で carrier 形はエラー)。起動ログの
   `[species]` 表に `condensing species: H2O (condGasSpecies=1)` と出る。種順序を変えても config を書き直さずに済むので名前を正本にする
-  ([plan cea-mole-fraction §2](../plans/active/thermophysics-cea-mole-fraction-species.md))。
+  ([plan cea-mole-fraction §2](../plans/accepted/thermophysics-cea-mole-fraction-species.md))。
 - **`physProp.tracer: exhaust`** (physProp, 既定 `none`, 2026-09-16): 受動トレーサ `roXi` (排気率 ξ∈[0,1]) を汎用スカラ輸送コアで
   移流する (拡散なし・ソースなし)。**定常 point-implicit (`timeIntegration 11`, `dualTime 0`) と陽解法 RK のみ**。`time.dualTime != 0`
   との併用は config 読込でエラー (トレーサに物理時間項 BDF 履歴・対角が無く、擬似時間反復ごとに前進してしまう; 凝縮モーメントの

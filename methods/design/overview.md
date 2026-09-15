@@ -750,7 +750,7 @@ CFD 側の差は多成分輸送の離散化誤差だけ (検証: M4.2 で軸 M �
 IC は `paste_isentropic_ic(species_Y=)` が `roY{s}` を書き、入口 BC は `Y0/Y1` を bcond に書く。
 低温側は forge の `Tlo`=200 K クランプ (cp 凍結・h 線形接続) と設計側 `T_FLOOR` が一致する。
 
-**組成入力と species 分割の統一スキーマ (2026-09-16 実装, plan [thermophysics-cea-mole-fraction-species](../../plans/active/thermophysics-cea-mole-fraction-species.md))**:
+**組成入力と species 分割の統一スキーマ (2026-09-16 実装, plan [thermophysics-cea-mole-fraction-species](../../plans/accepted/thermophysics-cea-mole-fraction-species.md))**:
 
 ```yaml
 gas:
