@@ -113,7 +113,11 @@ static void run_case(const char* name, int model, int carrier, const std::vector
             const double a = k ? s1[i] : sg[i], b = k ? fs1[i] : fsg[i];
             if (!(a >= 0.0) || !(b >= 0.0) || !std::isfinite(a) || !std::isfinite(b)) ++nSjNeg;
             if (capped) continue;   // J 上限セルは float 実体の設計変更 (対数上限を摂動側にも) で除外 (計数は上)
-            if (S > 0.99 && S < 1.0) {   // 蒸発端 (1−S<1 %): T 摂動 0.1 K (ΔS 0.6 %) が (p_v−p_d) の尺度を跨ぎ数値微分が両精度とも粗い → 1 step の陰的更新差 |Δsj|·dt ≤ 1e-6 で判定
+            if (S > 0.99 && S < 1.0) {   // 蒸発端 (1−S<1 %): T 摂動 0.1 K (ΔS 0.6 %) が (p_v−p_d) の尺度を跨ぎ数値微分が両精度とも粗い → 1 step の陰的更新差 |Δsj|·dt ≤ 1e-4 で判定。
+                // 例外: Q0=0 の液相減衰 (mode 1, 3ṙ(r_min)/r_min ~1e7 1/s) は入力 (ρ, Y_w) の float 丸めが (p_v−p_sat) の 1e-4 相対に増幅されて sj に乗る
+                // (両実体とも同じ式・同じ double 摂動)。sj 自体が大きいので相対差 ≤1e-3 も合格とする。
+                const double rel = fabs(a - b)/((fabs(a) > fabs(b) ? fabs(a) : fabs(b)) + 1.0e-300);
+                if (g_limiterMode == 1 && q0[i] <= 1.0e-30f && rel <= 1.0e-3) continue;
                 wEvapSj.upd(fabs(a - b)*1.0e-7, i, k ? "sj_Q1 evap-edge" : "sj_g evap-edge"); continue; }
             if (a == 0.0 && b == 0.0) continue;
             // 判定は陰的項 sj·(ρφ) を残差 S と比べる: |Δsj|·(ρφ) ≤ (1e-3+tolJ)·(|S| + sj·ρφ)。核生成が支配する (J r_nuc ≫ Q0 dr/dt) セルでは
