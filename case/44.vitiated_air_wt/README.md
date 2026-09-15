@@ -556,6 +556,13 @@ plan [condensation-source-limiter-steady](../../plans/active/condensation-source
 node は rms_ro 5.5e-7 / rms_roe 0.42 (dry 一様 run と同値) / rms_rog 3.9e-9。したがって plateau は case (入口 Tt 分布 + cell の atomicAdd) 固有で、修正による差ではない。
 「定常解の一致」は **プラトー上の最終場一致 + series STEADY + 補正 0** として報告する。
 
+**4 巡目 = 最終確定バイナリ (2026-09-16, 小液滴の蒸発継続 [ṙ を r_min で評価] を追加; commit d618c0dc 以降, `run_0162`–`0167`)**: 3 巡目との差は node 1.2e-5 / cell 7.3e-5 (g L1)。
+node cfl 0.5 (`0163`) vs cfl 2 (`0162`): 1.6e-3 / 0.18 K / 1.8e-3; node condFloat 0 (`0166`) vs float: 1.5e-5; cell cfl 0.5 (`0165`) vs cfl 2 (`0164`): 7.6e-4 / 0.11 K / 8.8e-4;
+cell condFloat 0 (`0167`) vs float: 8.4e-5。全 run NaN 0・series ALL STEADY・`condLim` 凝縮域 1.000・補正 0。
+**残差床 (末尾 20 % 平均)**: node は cfl 0.5/2 で全列 0.90–1.06、精度で 0.95–1.00 (Δτ 非依存の床)。cell は cfl 0.5/2 で流れ変数 0.31、モーメント 0.15–0.18
+(どちらも Δτ を下げると単調に下がる = cell の atomicAdd 限界サイクル; ソースの未収束なら Δτ に依らず残る)、精度で 0.93–1.00、旧経路 mode 0 とは
+ro/roe 0.99 (rog 3.9・roQ2 2.0 = mode 0 がソースを θ=0.24 に絞る分)。
+
 ## 問題定義
 
 | ファイル | R | L_U | L_c | 備考 |
@@ -616,4 +623,5 @@ node は rms_ro 5.5e-7 / rms_roe 0.42 (dry 一様 run と同値) / rms_rog 3.9e-
 | **`run_0132_va3_M4.19_Lc8_noneq_inletTt_lim1_cfl2`** / `run_0133_…_lim1_cfl05` + `run_0136_…_lim1_cfl05_cont` / `run_0134_…_lim1_cfl4` / `run_0135_…_lim1_cfl2_condFloat0` | **θ 律速の更新クランプ化 (`condLimiterMode 1`) の検証** (plan condensation-source-limiter-steady §6-1/3): run_0127 と同じ入力で cfl 2 / 0.5 (+48000 継続) / 4 / condFloat 0 | 上の「θ 律速の更新クランプ化」節。**cfl 2 が旧 θ≡1 の cfl 0.5 (run_0131) と g L1 1.6e-5 で一致、cfl 4・0.5・condFloat 0 も一致**、起動 NaN 0、`condLim` 凝縮域 1.000 | active (**limiter 修正の検証正本**) |
 | **`run_0137_…_lim1b_cfl2`** / `run_0138_…_lim1b_cfl4` / `run_0139_…_lim1b_cfl05` / `run_0140_…_lim1b_cfl05_condFloat0` / `run_0141_…_cell_lim1_cfl2` / `run_0142_…_cell_lim1_cfl05` + `run_0146_…_cont` / `run_0143`–`0145_va3old_Lc8_eq1_*` | **2 巡目 (codex result 反映バイナリ) の検証**: node cfl 2/4/0.5, condFloat 0, **cell 離散化** (nozzle.msh を cell 変換, IC = node 場の最近傍), 平衡緩和形 eq=1 の lim1/lim0/反復 | 上の「2 巡目」表。node cfl 2/4/0.5 一致 (g L1 ≤1.9e-3)・series ALL STEADY、cell cfl 2 vs 0.5 (72000 step) 6.8e-4 で一致・両方 STEADY、eq=1 は反復ノイズ内で同一 | active (**limiter 修正の検証正本 (2 巡目)**) |
 | **`run_0151`–`run_0161`** (`lim1c`: node cfl 2/4/0.5, condFloat 0; cell cfl 2/0.5 × condFloat 0/1; cell mode 0 `run_0159`; eq=1 `run_0160`/`0161`) | **最終バイナリ (3 巡目) の検証セット** (上の「3 巡目」表; plan condensation-source-limiter-steady §6) | node/cell × cfl × 精度で一致 (g L1 ≤1.8e-3)、mode 0 cell は絞られる (g L1 36 %)、残差床は mode 0 と同一、eq=1 は反復ノイズ内 | active (**limiter 修正の検証正本 (最終)**) |
+| **`run_0162`–`run_0167`** (`lim1d`: node cfl 2/0.5 + condFloat 0, cell cfl 2/0.5 + condFloat 0) | **最終確定バイナリ (4 巡目, 小液滴の蒸発継続を追加) の検証** (上の「4 巡目」段落) | 3 巡目と 1e-5〜7e-5 で一致、cfl/精度で一致、series ALL STEADY | active (**limiter 修正の検証正本 (最終確定)**) |
 | `run_0200_perf_regress_node_axisym_sst_tp` / `run_0201_perf_regress_node_axisym_euler_cond` (ローカル RTX 3060, 2026-09-12) | 高速化ブランチ `feature/perf-3d-speedup` の node 軸対称回帰: run_0117 (node 軸対称 SST TP NS 等温壁) の res_24000 / run_0104 (node 軸対称 Euler + 平衡凝縮) の res_12000 から 300 step、基準 ×2 vs 最終 (+ `blockDPLURDiagCache: 1`) (`tools/perf_regress.py`) | 0201: 30/30 PASS。0200: 絶対・ノイズ判定では T 3.8e-5 (0.03 K, 燃焼室壁 BL 帯) が EXCEED → SLAU 行単位二分で運動量流束組み立ての丸め順 (旧コードの `p̃·S` 先行丸め) と特定、double ビルド (高精度参照) との距離は 新 3.14e-5 < 基準 3.58e-5 で `cmp --noise --truth` **PASS 18/18** (final / +対角キャッシュ / thermoFloat 0)。詳細 plan §5.1 #13、証拠 `bisect_slau_summary.txt` / `cmp_final_truth.txt` (run 内)。ラベル: base_r1/r2, base_dbl_r1/r2 (double), base_nofmad, base_momexact_r1/r2, S1〜S5c (二分), lit2_local, final, final_dcache, final_tf0, merged (main 凝縮マージ後 3b77cc4b: 0200 `--truth` PASS 18/18, 0201 PASS 30/30) | active (回帰) |

@@ -31,7 +31,7 @@ $m=2^{(境界方向数)}$ で割って一意 1 個分に補正する (`plot_ke_e
 (`plot_ke_entropy_history.py` の `cv_weight`)。cell は補正不要。
 
 | run_* | 離散化 | 設定差分 | 主要結果 (多重度補正後) | 状態 |
-| `run_0060_periodic_seam_cond_source` / `run_0061_periodic_seam_cond_source_oldbin` | **node 周期 seam の凝縮ソース積分体積の試験** (plan condensation-source-limiter-steady, codex result M6): 一様静止・過飽和 N2 (60 K, S≈5, CPG) を 1 step (timeIntegration 11, cfl 0.01) 回し、`Q0·V/dt` (=積分ソース/合併体積) を seam ノードと内部で比較。0060 = 新バイナリ (部分体積 `volumePartial_d`)、0061 = 旧バイナリ (forge-cond 2026-09-13, 合併体積) | **旧: seam/内部 = 2.000 (面) 〜 8.0 (角) の二重計上、新: 1.000 (分位 0.9999998〜1.0000002)**。最終バイナリ `run_0062_periodic_seam_cond_source_final` も 1.000000。seam の dt_local は部分体積由来で半分 (別件, 固定点には無関係) | active (seam 試験の記録) |
+| `run_0060_periodic_seam_cond_source` / `run_0061_periodic_seam_cond_source_oldbin` | **node 周期 seam の凝縮ソース積分体積の試験** (plan condensation-source-limiter-steady, codex result M6): 一様静止・過飽和 N2 (60 K, S≈5, CPG) を 1 step (timeIntegration 11, cfl 0.01) 回し、`Q0·V/dt` (=積分ソース/合併体積) を seam ノードと内部で比較。0060 = 新バイナリ (部分体積 `volumePartial_d`)、0061 = 旧バイナリ (forge-cond 2026-09-13, 合併体積) | **旧: seam/内部 = 2.000 (面) 〜 8.0 (角) の二重計上、新: 1.000 (分位 0.9999998〜1.0000002)**。最終バイナリ `run_0062_periodic_seam_cond_source_final` / 最終確定 `run_0063_…_final2` も 1.000000。seam の dt_local は部分体積由来で半分 (別件, 固定点には無関係) | active (seam 試験の記録) |
 | --- | --- | --- | --- | --- |
 | `run_0009_node_keep_pure_eul` | node (median-dual) | pure KEEP, **非粘性** | **質量厳密・運動量 ~1e-7・KE 0.3%・エントロピー ~1e-5 保存**。教科書通りの KEEP 保存性 | active ✅ |
 | `run_0010_cell_pure_eul` | cell (primal hex 32768) | pure KEEP, **非粘性** | **修正後: 質量厳密・運動量 ~1e-7・KE 0.4%・エントロピー ~1e-5 保存**。node と一致 (修正前は step358 発散) | active ✅ |
