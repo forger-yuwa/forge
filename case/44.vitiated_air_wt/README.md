@@ -502,6 +502,13 @@ verify: 入口 T0 は目標と max 0.11 K 差。IC は `run_0092` の一様条�
   遅れの主因は補正でなく CNT+HK の核生成率そのもの (過冷却 30–40 K は高速膨張の水蒸気 Wilson 点の常識的範囲)。出口 g 平均は +13 % (11.6 → 13.1 %)。
 - 質量流量は Tt 分布で +6.0 % (壁側の低 Tt で密度増)。設計比較では ṁ を併記する。
 
+**訂正 (2026-09-15 同日, `run_0130`/`0131`)**: 上の run_0127 は**非平衡ソースの θ 律速 (潜熱 ΔT ≤ 1 K/step, `dt_local` 比例) が効いた状態**で、
+内側で成長が 1/4 に絞られていた (`condLim_0` 0.25、壁 2 ノードは dt_local が半分で 0.55)。「壁第一層だけ g の増え方が激しい」のはこの偽の差で、
+`cfl_pseudo` 0.5 (`run_0131`) では `condLim` が全域 1 になり壁と内側が一致する。定常解が擬似 CFL に依存する構造 (plan
+[condensation-followups](../../plans/active/condensation-followups.md) F-cf7) で、**この条件の正本は `run_0131` (cfl 0.5)**:
+onset は不変 (x 15.9 r_t)、g=30 % Y_H2O 到達が x 22.5 → 18.7 r_t (内側)、出口 g 平均 0.584 % (15.5 % of H2O、run_0127 比 +34 %)、出口 M 4.050、g max 1.63 %。
+図 `figs/va3_inletTt_cfl_ab.png`。onset (核生成) 自体は律速されていないので Wilson 点の議論は不変。
+
 ## 問題定義
 
 | ファイル | R | L_U | L_c | 備考 |
@@ -558,4 +565,5 @@ verify: 入口 T0 は目標と max 0.11 K 差。IC は `run_0092` の一様条�
 | `run_0120_va3_M4.19_Lc8_noneq_rerun` / `run_0121_…_noneq_inletTt` / `run_0122_…_dry_inletTt` / `run_0123_…_noneq_inletTt_cont` / `run_0124_…_dry_inletTt_cont` / `run_0125_…_noneq_inletTt_kw2` | **バイナリ 3ba1cbcb (main 取り込み前) での Euler 非平衡凝縮 再計算と入口 Tt 分布** (0120 = run_0092 の再現、0121/0122 = Tt 分布 noneq/dry 12000 step、0123/0124 = その継続 +12000、0125 = Kantrowitz mode 2、IC は 0121 の res_12000) | 0126–0129 (merged binary) と M 2e-5 / T 0.01 K / g 1e-6 で一致。全 run NaN 0・品質 PASS | 記録 (binary A/B。正本は 0126–0129) |
 | **`run_0126_va3_M4.19_Lc8_noneq_rerun_merged`** | **一様 Tt 1161 K の非平衡凝縮 Euler 再計算 (origin/main 取り込み後 7e4fa6ed, `condFloat 1`)**: run_0092 と同じ入力 (IC = run_0092 `nozzle.h5` の mid 段場, 本段 cfl 2 12000 step) | run_0092 と軸 M 差 1e-5、‖ΔM‖∞ 0.061 %、g≡0 (S max 0.27)。NaN 0・品質 PASS・machmax/pmax STEADY・`check_convergence` warm 床 NOT CONVERGED (0092 と同じ) | active (**v3 一様条件 noneq の現行正本**) |
 | **`run_0127_va3_M4.19_Lc8_noneq_inletTt_merged`** / `run_0128_va3_M4.19_Lc8_dry_inletTt_merged` / `run_0129_va3_M4.19_Lc8_noneq_inletTt_kw2_merged` | **入口 Tt 分布 (925–1180 K, ユーザ表 → `inlet_Tt_table.csv` / `inlet_profile_1.csv`, `inletProfile: 1`) × noneq (0127, Kw mode 1) / dry (0128) / noneq Kantrowitz mode 2 (0129)**, node Euler TP, IC = run_0092 一様収束場, 本段 cfl 2 24000 step, `output.level 2` | 上の「入口全温分布」節の表。**0127: 壁流線 onset x 15.9 r_t (231 K, S 27)、g 壁最大 1.56 % (蒸気の 41 %)、出口 g 平均 11.6 %、出口 M 4.089 (3.87–4.20)、ṁ +6.0 %**; 0128: 壁 S 131 (215 K); 0129: onset −0.5 r_t, 出口 g 13.1 %。全 run NaN 0・品質 PASS・12000 step 以降全量不変 (STEADY)・`check_convergence` warm 床 plateau。図 `figs/va3_inletTt_{lines,contours}.png`, `study_va3_inletTt.json`, `analyze_inletTt_va3.py` | active (**入口分布 × 凝縮の正本**) |
+| `run_0130_va3_M4.19_Lc8_noneq_inletTt_cfl1` / **`run_0131_va3_M4.19_Lc8_noneq_inletTt_cfl05`** | **θ 律速の擬似 CFL 依存 A/B** (run_0127 の res_24000 から warm start, cfl_pseudo 1.0 / 0.5, 12000 step) | `condLim_0` min 0.50 / **1.00**; 出口 g 平均 0.574 / **0.584 %**, 出口 M 4.052 / **4.050**, g=30 % 到達 (内側) 19.6 / **18.7 r_t**; 壁と内側の差が消える。NaN 0・warm 床 plateau。**0131 が入口 Tt 分布 noneq の正本** (plan condensation-followups F-cf7) | active (**正本 = 0131**) |
 | `run_0200_perf_regress_node_axisym_sst_tp` / `run_0201_perf_regress_node_axisym_euler_cond` (ローカル RTX 3060, 2026-09-12) | 高速化ブランチ `feature/perf-3d-speedup` の node 軸対称回帰: run_0117 (node 軸対称 SST TP NS 等温壁) の res_24000 / run_0104 (node 軸対称 Euler + 平衡凝縮) の res_12000 から 300 step、基準 ×2 vs 最終 (+ `blockDPLURDiagCache: 1`) (`tools/perf_regress.py`) | 0201: 30/30 PASS。0200: 絶対・ノイズ判定では T 3.8e-5 (0.03 K, 燃焼室壁 BL 帯) が EXCEED → SLAU 行単位二分で運動量流束組み立ての丸め順 (旧コードの `p̃·S` 先行丸め) と特定、double ビルド (高精度参照) との距離は 新 3.14e-5 < 基準 3.58e-5 で `cmp --noise --truth` **PASS 18/18** (final / +対角キャッシュ / thermoFloat 0)。詳細 plan §5.1 #13、証拠 `bisect_slau_summary.txt` / `cmp_final_truth.txt` (run 内)。ラベル: base_r1/r2, base_dbl_r1/r2 (double), base_nofmad, base_momexact_r1/r2, S1〜S5c (二分), lit2_local, final, final_dcache, final_tf0, merged (main 凝縮マージ後 3b77cc4b: 0200 `--truth` PASS 18/18, 0201 PASS 30/30) | active (回帰) |
