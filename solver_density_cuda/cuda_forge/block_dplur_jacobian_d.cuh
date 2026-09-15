@@ -27,7 +27,8 @@ BLKDPLUR_HD T blkdplur_max(T a, T b) { return a > b ? a : b; }
 //   CPG (χ_eos=0, Htot=ek+c²/κ) に厳密に還元。**注意**: κ=γ−1 を仮定 (TP ideal gas 専用。多成分 TP は
 //   κ=γ_mix−1 で成立)、任意の実在気体 EOS では κ を熱力学ルーチンから受け取る必要がある。
 // 命名注意: ローカル `kappa_over_c=(γ−1)/c` は **EOS の χ ではない**。EOS の χ_eos=c²−κh は `chi_eos`。
-template<typename T>
+// DoDiag=false: diag への A⁺S 蓄積を省く (block-DPLUR 対角キャッシュの sweep≥1 用。nbr 側のみ計算)。
+template<typename T, bool DoDiag = true>
 BLKDPLUR_HD void accumulate_split_jacobian_cf(
     T gamma, T nx, T ny, T nz, T u, T v, T w, T c, T Htot, bool thermallyPerfect,
     T face_area, bool has_nbr, const T sdq[5], T diag[5][5], T nbr[5])
@@ -65,6 +66,7 @@ BLKDPLUR_HD void accumulate_split_jacobian_cf(
     const T lam1=V+sonic, lam2=V, lam5=V-sonic;
     const T zero=static_cast<T>(0.0);
     const T p2=blkdplur_max(lam2,zero), pa1=blkdplur_max(lam1,zero)-p2, pa5=blkdplur_max(lam5,zero)-p2;
+    if (DoDiag) {
     #pragma unroll
     for (int i=0;i<5;++i){
         const T c1=pa1*r1[i], c5=pa5*r5[i];
@@ -74,6 +76,7 @@ BLKDPLUR_HD void accumulate_split_jacobian_cf(
             if (i==j) m += p2;
             diag[i][j] += face_area * m;
         }
+    }
     }
     if (has_nbr){
         const T n2=blkdplur_max(-lam2,zero), na1=blkdplur_max(-lam1,zero)-n2, na5=blkdplur_max(-lam5,zero)-n2;

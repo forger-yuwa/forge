@@ -1,6 +1,7 @@
 #include "condensationTransport_d.cuh"
 #include "condensationSource_d.cuh"   // COND_PI, 物性 (消滅クランプ)
-#include "condensationEOS_d.cuh"      // cond_clamp_vapor_pressure (蒸発塵判定の蒸気分圧)
+#include "condensationEOS_d.cuh"
+#include "condensationSourceF_d.cuh"   // float 実体 (clamp の表評価)      // cond_clamp_vapor_pressure (蒸発塵判定の蒸気分圧)
 
 #include "scalarTransport_d.cuh"
 
@@ -9,6 +10,7 @@
 
 // device rog (液相質量分率の保存量) ポインタ配列。二相 EOS が読む。condensationInit_d で構築。
 static flow_float** g_rog_dev = nullptr;
+static CondTablesF g_condTables;   // float 経路の物性表 (condensationInit_d で構築)
 static int          g_nCond   = 0;
 
 namespace {
@@ -36,6 +38,16 @@ ScalarTransportDesc buildCondMomentDesc(variables& var, const std::string& consN
     };
 }
 
+// 原始量 φ = ρφ/ρ を最大 4 モーメント同時に (起動数削減; plan condensation-float-speedup §4.2-7)。
+struct CondPrimPtrs { flow_float* rophi[4]; flow_float* phi[4]; int n; };
+__global__ void cond_primitive_multi_d(geom_int nCells_all, flow_float* ro, CondPrimPtrs P)
+{
+    geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic < nCells_all) {
+        const flow_float inv = static_cast<flow_float>(1.0) / max(ro[ic], kSmall);
+        for (int k = 0; k < P.n; ++k) P.phi[k][ic] = P.rophi[k][ic] * inv;
+    }
+}
 // 原始量 φ = ρφ/ρ (全セル, ghost 含む)。
 __global__ void cond_primitive_d(
     geom_int nCells_all,
@@ -104,6 +116,51 @@ __global__ void cond_realizability_clamp_d(
     }
 }
 
+
+// float 実体 (condFloat=1): 判定は閾値比較 (p_v<=p_sat, r30<2 r_min) なので ULP 差で消滅 step が 1 つずれ得る (plan §4.2-4)。
+__global__ void cond_realizability_clamp_f_d(
+    geom_int nCells,
+    flow_float* ro, flow_float* roY_w,
+    flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
+    int evap, float Rw, float rmin, float g_rm, float Yw_const,
+    flow_float* T, flow_float* P, CondTablesF tb, CondSpeciesProps cpd)
+{
+    geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    const flow_float gmax = (roY_w != nullptr) ? roY_w[ic] : ((Yw_const > 0.0f) ? Yw_const*ro[ic] : 0.99f*ro[ic]);
+    flow_float r = rog[ic];
+    if (r < 0.0f) r = 0.0f;
+    if (r > gmax) r = gmax;
+    rog[ic] = r;
+    if (roQ0[ic] < 0.0f) roQ0[ic] = 0.0f;
+    if (roQ1[ic] < 0.0f) roQ1[ic] = 0.0f;
+    if (roQ2[ic] < 0.0f) roQ2[ic] = 0.0f;
+    if (!evap) return;
+    const float rod = ro[ic];
+    if (rod <= 1.0e-20f) return;
+    const float g = r/rod;
+    if (g > g_rm) return;
+    const bool dust = (r <= 0.0f) && (roQ0[ic] > 0.0f || roQ1[ic] > 0.0f || roQ2[ic] > 0.0f);
+    if (r <= 0.0f && !dust) return;
+    const float Td = T[ic];
+    // 蒸気分圧 (source kernel と同じ定義): TP carrier=ρ(Y_w−g)R_wT, CPG carrier=ρ(Y_w,const−g)R_wT, pure=全圧
+    float pv;
+    if (roY_w != nullptr)      { float yv = roY_w[ic]/rod - g; if (yv < 0.0f) yv = 0.0f; pv = rod*yv*Rw*Td; }
+    else if (Yw_const > 0.0f)  { float yv = Yw_const - g;     if (yv < 0.0f) yv = 0.0f; pv = rod*yv*Rw*Td; }
+    else                         pv = P[ic];
+    const bool inTab = cond_tab_wet_ok(tb, Td);   // 表範囲外は旧 double 関数 (plan §5.1 #8)
+    const float lnps = inTab ? cond_tab_lnpsat_f(tb, Td) : (float)log(cond_psat(cpd, (double)Td) > 1.0e-300 ? cond_psat(cpd, (double)Td) : 1.0e-300);
+    if (pv > 0.0f && logf(pv) > lnps) return;   // 過飽和: 消滅させない
+    const float q0 = roQ0[ic];
+    bool remove = dust || (q0 <= 1.0e-30f);
+    if (!remove) {
+        const float rho_l = inTab ? cond_tab_rhol_f(tb, Td) : (float)cond_rho_cond(cpd, (double)Td);
+        const float r30 = cbrtf(g/((4.0f/3.0f)*COND_PI_F*rho_l*q0/rod));
+        remove = (r30 < 2.0f*rmin);
+    }
+    if (remove) { rog[ic] = 0.0f; roQ0[ic] = 0.0f; roQ1[ic] = 0.0f; roQ2[ic] = 0.0f; }
+}
+
 // Neumann (zero-gradient) ghost 充填: rophi[ig]=rophi[ic], phi[ig]=phi[ic]。
 __global__ void cond_neumann_boundary_d(
     geom_int nb,
@@ -158,7 +215,19 @@ void condensationInit_d(solverConfig& cfg, variables& var)
     gpuErrchk( cudaMemcpy(g_rog_dev, hrog.data(), pbytes, cudaMemcpyHostToDevice) );
 
     std::cout << "condensationInit_d: built device rog[] for nCondSpecies=" << g_nCond << "\n";
+    // float 経路の物性表 (plans/active/condensation-float-speedup.md §4.2-1): 現行 double 関数から区分 3 次表を作り device へ。
+    if (cfg.condFloat != 0) {
+        CondTablesHost ht;
+        cond_tables_build_host(condProps_make(cfg.condModel, cond_prop_opts(cfg)), ht);
+        g_condTables = cond_tables_upload(ht);
+        std::cout << "condensationInit_d: property tables for condFloat (model " << cfg.condModel << ", T0=" << ht.T0
+                  << " h=" << ht.h << " n=" << ht.n << ", " << (6*ht.n*sizeof(float4))/1024 << " KB)\n";
+    } else {
+        g_condTables = CondTablesF();
+        std::cout << "condensationInit_d: condFloat=0 (double condensation path)\n";
+    }
 }
+const CondTablesF& cond_tables_device() { return g_condTables; }
 
 flow_float** cond_rog_device_ptr() { return g_rog_dev; }
 int          cond_num_species()    { return g_nCond; }
@@ -176,6 +245,13 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
         const CondPropOpts opts = cond_prop_opts(cfg);
         const CondSpeciesProps cprops = condProps_make(cfg.condModel, opts);
         const double g_rm = 5.0e-7;   // 消滅硬クランプを許す g 上限 (潜熱飛び ΔT=gL/cv ≲ 1.5 K)
+        if (cfg.condFloat != 0 && g_condTables.valid) {
+            cond_realizability_clamp_f_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
+                msh.nCells, var.c_d["ro"], roY_w,
+                var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
+                cfg.condEvaporation, (float)cprops.R, (float)cfg.condEvapRmin, (float)g_rm, (float)opts.Yw,
+                var.c_d["T"], var.c_d["P"], g_condTables, cprops);
+        } else
         cond_realizability_clamp_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells, var.c_d["ro"], roY_w,
             var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
@@ -183,13 +259,15 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
             var.c_d["T"], var.c_d["P"], opts);
     }
 
-    for (const auto& consName : var.condMomentConsNames) {
-        const std::string prim = consName.substr(2);
-        cond_primitive_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
-            msh.nCells_all,
-            var.c_d["ro"],
-            var.c_d[consName],
-            var.c_d[prim]);
+    {
+        // 4 モーメントずつ 1 起動 (φ=ρφ/ρ は除算 1 回を逆数乗算に; 値は 1 ulp 以内)
+        CondPrimPtrs P{}; P.n = 0;
+        for (const auto& consName : var.condMomentConsNames) {
+            const std::string prim = consName.substr(2);
+            P.rophi[P.n] = var.c_d[consName]; P.phi[P.n] = var.c_d[prim]; ++P.n;
+            if (P.n == 4) { cond_primitive_multi_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(msh.nCells_all, var.c_d["ro"], P); P.n = 0; }
+        }
+        if (P.n > 0) cond_primitive_multi_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(msh.nCells_all, var.c_d["ro"], P);
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
@@ -246,10 +324,11 @@ void condensationTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
         CHECK_CUDA_ERROR(cudaMemset(var.c_d["src_jac_"+prim], 0, msh.nCells * sizeof(flow_float)));
     }
 
-    for (const auto& consName : var.condMomentConsNames) {
-        const ScalarTransportDesc desc = buildCondMomentDesc(var, consName);
-        scalarTransportResidual_d(cfg, cuda_cfg, msh, var, desc);
-    }
+    // 4 モーメント (ρg, ρQ0, ρQ1, ρQ2) の 1 次風上移流を 1 面ループに融合 (k/ω と同じ MultiScalarPtrs; 拡散なし)。
+    // 面ごとの流束の算術は単独版と同一 (起動数 4→1; plan condensation-float-speedup §4.2-7)。
+    std::vector<ScalarTransportDesc> descs;
+    for (const auto& consName : var.condMomentConsNames) descs.push_back(buildCondMomentDesc(var, consName));
+    scalarTransportResidualMulti_d(cfg, cuda_cfg, msh, var, descs.data(), (int)descs.size());
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

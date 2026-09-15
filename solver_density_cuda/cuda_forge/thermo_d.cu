@@ -33,7 +33,8 @@ namespace {
     } while (0)
 
 std::vector<SpeciesThermo> g_host;   // host 側化学種データ (length = g_n)
-SpeciesThermo*             g_dev = nullptr; // device 側コピー
+SpeciesThermo*             g_dev = nullptr;
+SpeciesThermoF* g_dev_f = nullptr; // device 側コピー
 int                        g_n   = 0;
 
 // ---- 内蔵 DB --------------------------------------------------------------
@@ -50,6 +51,7 @@ SpeciesThermo makeSpecies(double MW, double sigma, double eps_kB,
     s.Tlo = Tlo; s.Tmid = Tmid; s.Thi = Thi;
     for (int i=0;i<9;i++){ s.low[i]=low[i]; s.high[i]=high[i]; }
     s.h_datum = 0.0;
+    s.invMW = 1.0/MW;
     return s;
 }
 
@@ -195,6 +197,7 @@ void thermo_init_db(solverConfig& cfg)
         g_host.push_back(it->second);
     }
     g_n = static_cast<int>(g_host.size());
+    for (auto& s : g_host) s.invMW = 1.0/s.MW;   // 研磨段の乗算用 (yaml 由来の種も含め全種)
 
     // -------------------------------------------------------------------------
     // エンタルピー基準オフセット (sensible-enthalpy datum, thermoHrefTemp>0)
@@ -225,6 +228,21 @@ void thermo_init_db(solverConfig& cfg)
     THERMO_CUDA_CHECK(cudaMalloc((void**)&g_dev, g_n*sizeof(SpeciesThermo)));
     THERMO_CUDA_CHECK(cudaMemcpy(g_dev, g_host.data(), g_n*sizeof(SpeciesThermo),
                                  cudaMemcpyHostToDevice));
+    // float32 ミラー (面ループ用)。datum オフセット焼き込み後の係数をそのまま float へ。
+    {
+        std::vector<SpeciesThermoF> hf(g_n);
+        for (int i=0;i<g_n;i++) {
+            const SpeciesThermo& s = g_host[i];
+            SpeciesThermoF& f = hf[i];
+            f.MW = (float)s.MW; f.invMW = (float)(1.0/s.MW); f.R = (float)(THERMO_RU/s.MW);
+            f.sigma_LJ = (float)s.sigma_LJ; f.eps_kB = (float)s.eps_kB;
+            f.Tlo = (float)s.Tlo; f.Tmid = (float)s.Tmid; f.Thi = (float)s.Thi;
+            for (int k=0;k<9;k++) { f.low[k] = (float)s.low[k]; f.high[k] = (float)s.high[k]; }
+        }
+        if (g_dev_f) { cudaFree(g_dev_f); g_dev_f = nullptr; }
+        THERMO_CUDA_CHECK(cudaMalloc((void**)&g_dev_f, g_n*sizeof(SpeciesThermoF)));
+        THERMO_CUDA_CHECK(cudaMemcpy(g_dev_f, hf.data(), g_n*sizeof(SpeciesThermoF), cudaMemcpyHostToDevice));
+    }
 
     std::cout << "[thermo_d] initialized " << g_n << " species:";
     for (const auto& nm : names) std::cout << " " << nm;
@@ -242,5 +260,6 @@ void thermo_init_db(solverConfig& cfg)
 }
 
 const SpeciesThermo* thermo_species_device_ptr() { return g_dev; }
+const SpeciesThermoF* thermo_species_device_ptr_f() { return g_dev_f; }
 int                  thermo_num_species()        { return g_n; }
 const SpeciesThermo* thermo_species_host()        { return g_host.data(); }

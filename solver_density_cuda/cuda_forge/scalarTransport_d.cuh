@@ -32,6 +32,13 @@ struct ScalarTransportDesc {
     flow_float* F1 = nullptr;                             // ブレンド関数 (nullptr なら sigma 定数)
 };
 
+// 複数スカラーの移流 (+汎用拡散) を 1 回の面ループで積む (plan performance-3d-node-sst-speedup: k/ω・化学種の
+// 面ループ融合)。面幾何・massflux・ρ・μ を 1 度だけ読み、各スカラーは φ の gather と atomicAdd だけ増える。
+// 面ごとの演算は単一版 (scalar_advection_first_order_d / scalar_diffusion_first_order_d) と同一順序。
+#define SCALAR_MULTI_MAX 4
+void scalarTransportResidualMulti_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
+                                    const ScalarTransportDesc* descs, int n);
+
 // 1 変数ぶんの移流 + (任意) 拡散残差を組み立てる。
 // res_rho_phi / transport_diag は呼び出し側でゼロ初期化済みであること。同期は行わない。
 void scalarTransportResidual_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,

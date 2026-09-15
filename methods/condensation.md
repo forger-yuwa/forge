@@ -509,6 +509,97 @@ $L(T)=L(70)+(c_{p,v}-c_l)(T-70)$、$c_l$=2000 J/kg/K (液 N2 63–77 K の実測
 液滴表面蒸気圧 (式32): $p_d=p_\infty(T_d)\exp\{2\sigma/(\rho_l RT_d r)\}$。$T_d$ の Hill 陰的式は
 [4 節](#4-液滴温度-t_d--hill-のエネルギーバランス純蒸気簡約) 参照。$R_{N_2}=296.8$ J/(kg·K)。
 
+### 8b. 物性の外挿規約 — 有効域の外で何を返すか
+
+非平衡凝縮は原理的に**フィットの有効域の外**で使う。相関は実験できる領域 (気液共存線、三重点〜臨界点) で作られているが、
+ノズルの凝縮は三重点以下の過冷却液で起きるからである (§8「相の方針」: 全域で液相フィットを使い固相へ切り替えない)。
+したがって「有効域外で何を返すか」がモデルの一部になる。規約は**熱力学的に繋がる相手がいるかどうか**で 3 通りに分かれる。
+
+| 型 | 対象 | 外挿の根拠 |
+| --- | --- | --- |
+| **関係式で伸ばす** | N2 の $L$、N2 の $p_{sat}$ | Kirchhoff / Clausius–Clapeyron。互いに整合する |
+| **定 $c_p$ で伸ばす** | 気相 NASA-9 の $c_p, h, s^\circ$、H2O の $h_l$ | 端で $c_p$ を凍結し、$h$ と $s^\circ$ をそれと整合する形で積分 |
+| **端で凍結する** | N2 の $\sigma, \rho_l$ | 拘束する相手が無い。安全側に倒す設計判断 |
+
+#### 気相 (NASA-9, `thermo_d.cuh`) — 定 $c_p$ 外挿で 3 量を揃える
+
+多項式そのものは外挿しない (低温で発散する)。$T\notin[T_{lo},T_{hi}]$ では端の温度 $T_b$ で $c_p$ を凍結し、
+
+$$c_p(T)=c_p(T_b),\qquad h(T)=h(T_b)+c_p(T_b)(T-T_b),\qquad s^\circ(T)=s^\circ(T_b)+c_p(T_b)\ln\frac{T}{T_b}$$
+
+とする。$s^\circ$ を一定にクランプしていた旧実装は $h$ の定 $c_p$ 外挿と熱力学的に非整合で、200 K 未満の等エントロピー関係を
+壊していた (TP の低温不安定の一因)。float ミラー (`SpeciesThermoF`) も分岐を同一にしてある。
+NASA-9 は多くの種で $T_{lo}=200$ K なので、出口が 200 K を割るノズルでは全域が定 $c_p$ 外挿になり実質 CPG と変わらない
+(冷間ケースで CPG を勧める理由)。
+
+#### 凝縮物性 (`condensationProperties_d.cuh`)
+
+| 量 | 低温側 | 高温側 |
+| --- | --- | --- |
+| N2 $L$ | 70 K 未満は Kirchhoff の線形 $L(70)+(c_{p,v}-c_l)(T-70)$、$c_{p,v}=1038.8$、$c_l$=`condN2LiquidCp` (既定 2000) | $T_c-0.5=125.69$ K でクランプ |
+| N2 $p_{sat}$ | 50 K 未満は上の $L(T)$ を積分した Clausius–Clapeyron ($T$ は 5 K まで追随) | 同上 |
+| N2 $\sigma,\rho_l$ | **45 K で凍結** (`COND_T_PROP_FLOOR`) | 同上 |
+| H2O $p_{sat}$ | Murphy–Koop、120 K でクランプ | — |
+| H2O $h_l$ | 273.15 K 未満は $c_{p,l}=4228$ J/(kg·K) 一定の線形外挿 (過冷却水) | **373.15 K でクランプ** |
+| H2O $h_v$ | 45 K まで多項式をそのまま外挿 (気相 NASA-9 とは規約が違う) | 1000 K でクランプ |
+| H2O $L$ | 上の差。$[1.5,\,3.5]$ MJ/kg でクランプ (1000 K で上限に当たる) | |
+| H2O $\rho_l$ | $1000-0.12(277-T)$、920 kg/m³ で床 | |
+
+**N2 の潜熱 (70 K 未満)**: Kirchhoff の関係 $dL/dT=c_{p,v}-c_l$ を定数係数で積分した直線。傾きは $-961.2$ J/(kg·K²) で、
+1 K 冷えるごとに $L$ が 961 J/kg 増える (低温ほど蒸発に要るエネルギーが大きい、という正しい向き)。
+70 K で切るのは物理ではなくフィットの都合で、元の 4 次多項式は 70–126 K のフィットなので 60 K 未満で $dL/dT>0$ に符号反転する。
+値だけ繋ぐ C0 接続で、傾きは不連続 (下記の暗黙 $c_l$ が 2110 → 2000 に 5.2 % 跳ぶ)。
+
+**N2 の飽和圧 (50 K 未満)**: 上の $L(T)$ をそのまま Clausius–Clapeyron $d\ln p/dT=L/(R_vT^2)$ に入れて解析積分したもの。
+$L=L_a+c_{pr}(T-T_a)$、$c_{pr}=c_{p,v}-c_l$ とすると
+
+$$\ln\frac{p}{p_{50}}=\frac{1}{R_v}\Big[(L_a-c_{pr}T_a)\Big(\frac{1}{50}-\frac{1}{T}\Big)+c_{pr}\ln\frac{T}{50}\Big]$$
+
+となり、コードの式に一致する。**潜熱の外挿と飽和圧の外挿が同じ $L$ を共有している**のが要点。
+50 K で切るのは Jacobsen 相関が三重点 63.15 K 付近までのフィットで、低温外挿すると 33 K 付近で $dp/dT<0$ (非単調) になるため。
+
+**$\sigma$ と $\rho_l$ の凍結**: この 2 つには $L$–$p_{sat}$ のような熱力学的拘束が無い ($\sigma$ は表面過剰量、$\rho_l$ は状態方程式)。
+整合させる相手がいないので、液相フィットの有効域の下端 45 K で止める。3 つの中で唯一、物理ではなく安全側の設計判断。
+
+#### $L(T)$ が液相の熱力学を決めている (CPG 経路)
+
+CPG の二相 EOS は $e=(c_v+gR)T-gL(T)$ で、液相の物性を独立に与えていない。液のエンタルピーは
+$h_l\equiv h_v-L=c_{p,v}T-L(T)$ として**暗黙に定義**され、液の比熱も $c_l=c_{p,v}-dL/dT$ として $L$ の傾きから決まる。
+
+| $T$ [K] | 45–70 | 70 | 90 | 110 | 125 |
+| --- | --- | --- | --- | --- | --- |
+| 暗黙の $c_l$ [J/(kg·K)] | 2000 (定数) | 2110 | 2746 | 4613 | 9289 |
+
+臨界点に近づくと発散する形になっており、液体として正しい振る舞い。実測の液体 N2 は 63 K で 2010、77 K で 2040 J/(kg·K) なので
+70 K 近傍も妥当。**$L(T)$ のフィットを差し替えると液相の比熱まで変わる**ことに注意する。
+
+#### 既知の限界
+
+1. **N2 の 45 K 凍結は生産域に入っている。** case/34 の空気凝縮は $T_{on}=39.7$ K で onset するので、
+   $\sigma$ と $\rho_l$ が 45 K の値で止まったまま核生成している。凍結を外して相関を延長すると $\sigma$ が
+   39.2 K で $+9\%$ (16.75 → 18.26 mN/m)、$\Delta G^*\propto\sigma^3$ が指数に乗るので onset 点で $J$ が $1.2\times10^{-6}$ 倍になる。
+   onset は数 mm 下流へ動く見込みで、現在の実験一致 (対応理論線と 1.7 K) と同オーダー。延長するなら
+   `condSigmaScale` と同じ形の opt-in にして onset 感度とセットで測ること (σ×1.03 で onset ∓2.3 mm の既存データあり)。
+2. **H2O の $L$ は 373 K 以上で増えてしまう。** $h_l$ がクランプするので実質 $c_{p,l}=0$ となり、
+   $dL/dT=c_{p,v}-c_{p,l}$ が $+1896$ J/(kg·K) に化けて符号が反転する。$L(400)=2.320$ MJ/kg (真値 2.183, $+6\%$)、
+   $L(600)=2.711$ MJ/kg (本来は $T_c=647$ K で 0 に向かう)。凝縮が起きない温度域なので場には効かないが、
+   $g>0$ のセルが高温へ飛ぶと潜熱が過大になる。直すなら $h_l$ を臨界点まで伸びる相関に差し替える。
+3. **H2O の $h_v$ が二重ソースになっている。** EOS が使う $e_v$ は種 DB (定 $c_p$ 外挿)、`h2o_latent` 内の $h_v$ は生の多項式で、
+   係数は同一だが 200 K 未満で外挿規約が違う。差は暗黙の $h_l$ の誤差になり、180 K で 0.04、150 K で 0.47、120 K で 2.39 kJ/kg
+   ($L\approx2700$ kJ/kg に対し最大 $9\times10^{-4}$)。運転域 200–240 K では実質ゼロ。
+   H2O 凝縮は常に TP (種 DB に H2O が居る) なので種 DB 経由に差し替えれば消えるが、`cond_latent` を種 DB ポインタの無い
+   場所 (面カーネル・clamp カーネル) からも呼んでいるため実装が重くなる。N2/空気は $L$ が直接フィットなのでこの問題は無い。
+4. **液の $pv$ 項を落としている。** $e_l\approx h_l$ とする近似で、無視量は $p/(\rho_l L)$。
+   N2 の onset 実測点 (800 Pa) で $3.5\times10^{-6}$、case/16 の凝縮域 (20 kPa) で $7.7\times10^{-6}$。
+   $10^{-3}$ を超えるのは N2 で 1.4 bar、水で 26 bar から。臨界直下は $L\to0$ のため最悪で N2 125 K では 15 %。
+   超音速ノズルの凝縮は必ず膨張後の低圧側で起きるので用途とは整合しているが、高圧凝縮 (蒸気タービン等) には使えない。
+
+#### float 経路との関係
+
+物性表 (実装 §9) は**この外挿規約を含めて** double 関数からサンプルするので、表を引く限り float 経路と double 経路の
+外挿挙動は同一になる。表の範囲外 (N2 20–125.6 K、H2O 120.15–647 K の外) は表を使わず旧 double 関数を呼ぶので、
+そこでも規約は変わらない。判定は数値ヤコビアンの摂動点 $T+0.1$ K を含めて行う。
+
 ## 実装
 
 ### 1. 段階実装 (Phase 分け)
@@ -667,6 +758,7 @@ SLAU CPG 二相の面状態一貫化, `slip_d` の状態保持。単体 `tests/u
 | `condKantrowitz` | 0 | 1 で核生成に **Kantrowitz 非等温補正** $J\to J/(1+\theta)$, $\theta=\frac{2(\gamma_v-1)}{\gamma_v+1}b(b-\tfrac12)$, $b=L/(R_vT)$ ($\gamma_v$=**凝縮種 (蒸気) の比熱比**: H2O 1.331 / N2 1.4, `CondSpeciesProps.cp/cv`)。0 は等温 CNT。|
 | `condKantrowitz` 2 / 3 | — | **Feder carrier 形** (キャリア衝突による冷却を $b^2$ に含める)。2=$q$ は潜熱項のみ、3=表面仕事 $k_BT\ln S$ も差し引く。pure では Feder 純蒸気形。計画 condensation-kantrowitz-carrier |
 | `condSigmaScale` | 1.0 | 表面張力の倍率 (感度試験専用; 核生成・Kelvin・蒸発に一貫して掛かる) |
+| `condFloat` | 1 | 凝縮経路の **float 実体** (物性の区分 3 次表・対数空間 CNT・dry セル早期退出・二相ハイブリッド反転・面潜熱の表評価; 実装 §9)。0 で従来の double 経路 (平衡形 `condEquilibrium`≠0 と二温度 `condTwoTemp`=1 は常に double) |
 | `condN2LatentLowT` | 1 | N2 潜熱の 70 K 未満を $c_l$=2 kJ/kg/K の線形外挿に (旧多項式は 0) |
 | `condKantrowitzGammaMode` | 0 | Kantrowitz の $\gamma$ の取り方。0=蒸気 $\gamma_v$ (既定, 2026-09-10)、1=**旧挙動** (セル気相混合 $c_p/c_v$; H2O–N2 では ≈1.40 で $\theta$ が 17 % 過大)。A/B 用。|
 | `condSonicModel` | 自動 | 凝縮セルの音速と $\gamma$。1=**二相 frozen** $c^2=\gamma_{2\phi}\,p/\rho$ (§5「二相 frozen 音速」)、0=旧挙動 (全蒸気気相 $\sqrt{\gamma_{mix}R_{mix}T}$、$g$ を無視)。未指定時は `input/condSonicResolve.hpp` が bcond 読込後に解決: **TP carrier H2O (`thermalMethod 2`, `condGasSpecies>=0`, `condModel 1`) かつ `condEquilibrium 0` かつ全 bcond が `inlet_Pressure`/`outflow`/`wall`/`slip`/`periodic` のとき 1、それ以外 0** (pure / CPG / `condEquilibrium 1,2` / `outlet_statPress`・`wall_isothermal` 等の ghost 再構築が全蒸気 EOS の境界は未検証のため旧式; 2026-09-10)。明示 1 は未検証構成でも従うが起動ログに警告。CPG 分岐 (`thermalMethod 0`) にはキーを 1 にしても効かない。|
@@ -855,3 +947,57 @@ $\mu_n=Q_n/(N_{ref}r_{ref}^n)$ ($N_{ref}=10^{18}$/kg, $r_{ref}=1$ nm) を導入�
 モーメント間比も無次元量どうしで安定。float で桁落ちが顕在化したら、その時点でモーメントの
 double 化 (混合精度 cond storage、`flow_float` とは別の `cond_float=double`) をフォールバックとして
 導入する。
+
+### 9. 混合精度実装 — 凝縮経路の float 化 (2026-09-13, plan [condensation-float-speedup](../plans/accepted/condensation-float-speedup.md))
+
+実装 §8 の「まず全 float」はモーメントの**格納**についての方針で、相変化ソース (`condensation_source_d`)・二相 EOS の温度反転・
+SLAU の二相面エンタルピー補正の**演算**は double で書かれていた (`condensationProperties_d.cuh` 冒頭「物性評価は exp/log で桁が飛ぶため
+内部は double」)。CC 8.6 (A10G / RTX 3060) では FP64 が FP32 の 1/64 のため、3D node SST TP (2.37 M 節点) で凝縮 ON が dry の 2.6 倍
+(33.8 → 89.5 ms/step, 発達した凝縮場では 108 ms/step) になっていた。以下の方式で float 化する (モデル式・評価点・律速規約は不変。
+`condensation.condFloat: 0` で従来の double 経路)。
+
+- **物性は区分 3 次 Hermite 表** (`condensationTables_d.cuh`): $\ln p_{sat}(T)$, $L(T)$, $\sigma(T)$, $\rho_l(T)$, $k_{gas}(T)$, $\mu_{gas}(T)$ を
+  現行の double 関数 (クランプ・低温外挿込み) からホストで double で作り、区間ごとの 4 係数を float で持つ。物性式を直接 float で評価する案は
+  棄却した: H2O の潜熱 $L=h_v-h_l$ は液相 NASA-9 (係数 $10^9/T^2$ 級) の相殺で float だと相対 9e-3、N2 の Jacobsen 飽和圧は 3e-4 ずれる
+  (codex plan レビュー 2026-09-13 M1)。一様格子 (N2: $T_0$=20 K, $h$=0.1 K, 上端 125.6 K; H2O: $T_0$=120.15 K, $h$=0.25 K, 上端 1200.15 K) で、
+  接続点 (N2 45/50/70 K、H2O 273.15 K) は格子点に置き、区間の両端で**片側**微分を使って区間をまたぐ漏れを無くす。3 次の打切りは
+  $h^4 f^{(4)}/384$ で無視でき、誤差は float 丸め (6e-8) が支配 → 単体試験で 0.01 K 刻みの全域で double と比較 (許容: $\ln p_{sat}$ 絶対 2e-6、
+  他は相対 2e-6)。**表範囲外** (N2 20–125.6 K、H2O 120.15–647 K の外) は端クランプせず旧 double 関数へ退避する: 範囲判定は現在温度だけでなく src_jac の摂動点 T+0.1 K が表範囲内であることを要求し、ソース kernel は範囲外セルの dry 判定 (S≤1, g=0, Q0=0) を旧 double 飽和圧で行い、dry なら診断だけ書いて退出、それ以外は旧 kernel 本体 (`condensation_source_cell_d`) に丸ごと委譲する (旧式の物性ごとのクランプや μ_gas の上限なしと一致させるため; codex result 1/2 回目 M1)。面潜熱・clamp も範囲外は旧 double 関数。$\ln p_{sat}$ の dry 診断 (S, T_sat) だけは表範囲 (H2O は 1200 K まで) で表を使う。
+- **核生成率は float では対数空間で組み、指数化前に上限を掛ける**: $m=M/N_A\approx3\times10^{-26}$ kg の $m^3$ が float の範囲を割るため
+  $$\ln J=\tfrac12\ln\frac{2\sigma}{\pi}-\tfrac32\ln m+2\ln\rho_v-\ln\rho_l-\frac{\Delta G^*}{k_BT}+\ln(\mathrm{corr}),\qquad
+    \ln J\leftarrow\min(\ln J,\ln J_{max}),\quad J=e^{\ln J}\ (\ln J<-80\Rightarrow0).$$
+  $\ln J_{max}=80.6$ は float の $\ln(\mathrm{FLT\_MAX})=88.7$ より小さい (N2 60 K・S=100 で $\ln J=93$ になる例がある)。上限は本体と src_jac の
+  摂動評価の両方に掛かるので、上限に張り付いたセルの src_jac は 0 になる (double 経路は摂動側が無制限で線形化が不整合だった; float 経路の
+  意図的な変更)。誤差は連鎖で評価する: $\delta\ln J\approx2(\Delta G^*/k_BT)\,\delta\ln S$ なので表の $\delta\ln p_{sat}\le2\times10^{-6}$ で
+  $\Delta G^*/k_BT\le200$ なら $\delta\ln J\le10^{-3}$。
+- **dry セルの早期退出**: $S\le1$, $g=0$, $\rho Q_0=0$ のセルは核生成・成長・蒸発・数値ヤコビアンが恒等的に 0 なので、sj_*/診断の初期化だけ行い
+  輸送残差に触れずに return する。$T_{sat}$ 診断は前 step の値から warm start した float Newton (表の $\ln p_{sat}$ と解析微分)。
+- **面の潜熱**: TP carrier の補正 $h\mathrel{-}=g\,L(T_{cell})$ と CPG 二相の $L(T_f)$ は面カーネル内で表から引く (セル配列にキャッシュする案は、
+  dependentVariables 後の境界処理 [`nodeWallDirichlet_d`] が壁ノードの $T$ を書き換えて評価時点がずれるため不採用)。$g_L=g_R=0$ の面は
+  補正を評価しない。
+- **温度反転**: 凝縮 ON でも $g\le10^{-12}$ のセルはハイブリッド反転 ([thermophysics.md](thermophysics.md) `thermoFloat`) を使う。$g>0$ の
+  一温度二相反転は float Newton (`SpeciesThermoF` + 表の $L, dL/dT$) → double 研磨 (最大 3 段) → 二相エネルギー残差 $|e_{mix}(T)-e_{in}|\le
+  10^{-9}|e_{in}|+0.05$ J/kg で成功判定。不成立なら現行 double Newton を続行、それでも失敗したセルは `roe` を上書きしない (保存量保護,
+  `g_condTinvFail` に計上)。平衡形 (`condEquilibrium`)、CPG 二相の括弧付き Newton、二相音速、二温度は double のまま。
+- `condFloat` の分岐表・ビット一致の範囲・FP64 命令監査・判定基準は plan §4.2-6〜8 / §4.3。
+
+**実装の補足 (2026-09-13, 実装後)**:
+
+- float 実体は template ではなく **別関数** (`condensationSourceF_d.cuh`: `cond_nucleation_f` 等、kernel は `condensationSourceKernels_d.cuh` の
+  `condensation_source_f_d`) にした。double 関数・kernel は字面を変えず (`condFloat: 0` の source 診断は変更前バイナリとビット一致を確認)。
+- 蒸発の 1 step 縮小比 $\lambda=r_{new}/r_{30}$ は 1 に極めて近い ($|\lambda-1|\sim dr/dt\cdot dt/r_{30}\sim10^{-8}$) ので float では
+  $\delta=\lambda-1$ で組む ($\lambda^3-1=\delta(3+3\delta+\delta^2)$; λ を作ると 1.0f に丸まりソースが 0 になる)。律速 $\lambda^3\ge1-x$ は
+  $\delta\ge\mathrm{expm1}(\mathrm{log1p}(-x)/3)$。
+- 二相ハイブリッド反転は float 推定 (残差 ~0.05 J/kg = float の T 分解能) のまま返さず、double 研磨を残差 $10^{-9}|e|+10^{-3}$ J/kg (~1e-6 K)
+  まで回してから成功判定 ($10^{-9}|e|+0.05$ J/kg) する: 厳密参照に対し $|\Delta T|/T\le10^{-11}$、float 格納 roe の 10 往復ドリフトは double 反転と同値 (9e-8·T)。
+- 単体試験 (`tests/unit/test_cond_float.cpp` host, `test_cond_float_device.cu` device) の許容は float の表現限界に合わせて次のように定めた:
+  $\ln p_{sat}$ 絶対 $\le2\times10^{-6}(1+0.15|\ln p|)$ (|ln p|~20–50 の float 表現 5 ulp)、σ は $T_c$ 直下 ($\sigma<10^{-3}$) で絶対 $10^{-5}$、
+  $dL/dT$ は $2\times10^{-4}|L'|+0.1$ J/kg/K (Newton の傾き専用)、$r^*$ 相対 $10^{-5}+2\times10^{-6}/\ln S$ と $\ln J$ 絶対
+  $2(\Delta G^*/k_BT)\,(3\times10^{-6}/\ln S)+10^{-4}$ ($S\to1$ で CNT 自体が $\delta\ln S/\ln S$ に発散的に敏感; そこでは $J\approx0$)、
+  $dr/dt$ と ソースベクトルは相対に加えて成長流束尺度 $(p_v/\rho_l)/\sqrt{2\pi RT}$ の $10^{-4}$〜$10^{-5}$ の絶対許容 ($\bar r\approx r^*$ や $S\approx1$ の
+  相殺で相対は意味を失う; 物理的に $dr/dt\approx0$)、src_jac は相対 $3\times10^{-3}$ (θ 律速下) で、$J$ 上限セル (float は摂動側も上限) と蒸発端
+  $0.99<S<1$ (T 摂動 0.1 K が $(p_v-p_d)$ の尺度を跨ぎ両精度とも粗い) は 1 step の陰的更新差 $|\Delta sj|\,dt\le10^{-4}$ (実測 3.4e-5) で判定し、有限・非負も検査する。
+- 判定の境界 ($S=1$、消滅閾値 $r_{30}=2r_{min}$) に乗ったセルは ULP 差で分岐が変わる (IC が同じ規則で作られた液滴は閾値上にある):
+  離散的な差として許容し、場の回帰 (ノイズ床) で影響を見る。
+- FP64 命令の監査 (`cuobjdump -sass`): 表範囲外の double 退避と蒸発 Jacobian の double 摂動を含む最終形では float kernel にも FP64 命令が残る (分岐先; 表範囲内の通常セルは通らない)。監査値は plan §5.1 #4/#8 にコミット付きで記録。
+- `condEquilibrium: 1` (緩和形) の湿潤 TP セルは非平衡と同じくハイブリッド反転へ進む (ソース kernel だけ double); `condEquilibrium: 2` (EOS 拘束形) は反転もソースも double。

@@ -78,6 +78,23 @@ public:
                                      //    sweep で ρY_s を緩和し、要因2 の擬似時間緩和ミスマッチを解消)。
                                      // 詳細: plans/accepted/thermophysics-species-implicit-coupling.md。
     int implicitSolvePrecision = 0; // block-DPLUR 線形 solve の内部精度。0: float (既定・高速), 1: double。
+    // block-DPLUR 対角キャッシュ: sweep 0 で組んだ 5×5 対角 (状態凍結で不変) を diag_block_** に保存し、sweep≥1 は
+    // 近傍積 + solve だけにする (ビット同一)。float・point 経路 (implicitSolvePrecision 0, lineImplicit 0) のみ有効。
+    // **既定 0**: A10G 3D 2.37 M 節点で 44.0→46.5 ms/step と逆に遅化した (対角 25 floats/cell の保存+4 回読込 ≈1.2 GB/step の
+    // 帯域が、省ける近傍幾何読み・組立より高い。sweep はレイテンシ律速で gather 数の削減が効かない)。opt-in 記録用に残す。
+    // plans/active/performance-3d-node-sst-speedup.md §4.2-4 / §9。
+    int blockDPLURDiagCache = 0;
+    // block-DPLUR sweep の近傍 dq gather を stride-8 AoS バッファから読む (5 セクタ→1 セクタ)。0 で SoA 5 配列 (従来)。
+    // 結果はビット同一 (同じ値を別レイアウトで読むだけ)。line-implicit / node 周期では自動で off。
+    // **既定 0**: RTX 3060 の 3D 257k 節点で差なし (22.8 vs 22.9 ms/step, 2026-09-12)。gather は L2 に乗っており
+    // セクタ数削減が効かない。opt-in 記録用。
+    int blockDPLURDqPack = 0;
+    // 原始量 (ro,Ux,Uy,Uz,P,T) の AoS パックを applyBconds 後に組み、LSQ 勾配 (gradLSQ==2) とリミッタの近傍 gather が
+    // 1 セクタで読む (mesh.primPack, 0 で従来の 6 配列 gather)。値は同じなのでビット同一。
+    // **既定 0**: 3D 257k 節点 (RTX 3060) で差なし (パック構築の書込が相殺)。opt-in 記録用。
+    int primPack = 0;
+    // 変換時の節点再番号付け: "none" (既定) / "rcm" (Reverse Cuthill–McKee; node では CV 順 = gather の局所性)。
+    std::string meshRenumber = "none";
                                     // 残差/状態は float のまま、Jacobian 構築+5×5 solve のみ double 化する混合精度
                                     // (iterative refinement)。軸対称 近軸の float 陰解固着 (Uy が −15 でなく
                                     // −0.6 固着) を根治するが double は遅い (RTX で ~×2.6)。詳細:
@@ -368,6 +385,10 @@ public:
     std::vector<std::string> speciesNames;     // 混合を構成する化学種名。順序が index s を定義
     std::string speciesDBFile = "";            // 任意: NASA-9/LJ 係数の外部 DB (yaml)。空なら内蔵 DB
     int speciesDiffusionMethod = 1;            // 0: 定数 Schmidt, 1: kinetic theory 混合平均拡散
+    // TP の温度反転をハイブリッド (float Newton + double 1 段研磨, thermo_T_from_e_hybrid) にする。0: 従来 double Newton。
+    // **既定 1** (ユーザ決定 2026-09-12)。thermoHrefTemp>0 が前提: 明示 1 で datum 無しはエラー、既定のまま datum 無しなら 0 に落として警告。
+    // 凝縮 (二相 EOS) セルは常に従来経路。plan performance-3d-node-sst-speedup §4.2-3。
+    int thermoFloat = 1;
     double thermoHrefTemp = 0.0;               // >0: 各化学種のエンタルピー基準を h_s(thermoHrefTemp)=0 へ
                                                // オフセット (sensible-enthalpy datum)。非反応流では物理不変
                                                // だが、種ごとに桁違いの生成エンタルピー (H2O≈-13.4MJ/kg) を
@@ -387,6 +408,7 @@ public:
     // Phase 1 はモーメントを受動スカラー (ソース=0) として輸送するのみ。既定 off で従来経路ビット不変。
     int condensation = 0;    // 0: off (既定), 1: on
     int nCondSpecies = 0;    // 凝縮種数。condensation==1 のとき >=1。当面 1 (N2)
+    int condFloat = 1;       // 凝縮経路の float 実体 (物性表・対数 CNT・早期退出・二相ハイブリッド反転; plans/active/condensation-float-speedup.md)。0: 従来 double 経路
     int condModel = 0;       // 凝縮種の物性/核生成/成長モデル。0: N2 (CNT_Iland+Goodheart, CPG),
                              //   1: H2O (Murphy-Koop, CNT+Kantrowitz+Hertz-Knudsen, carrier+TP)
     int condGasSpecies = -1; // carrier+condensible: 凝縮する気相化学種の index (roY{s})。

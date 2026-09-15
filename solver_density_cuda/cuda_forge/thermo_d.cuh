@@ -50,7 +50,93 @@ struct SpeciesThermo {
     double high[9];   // Tmid <= T <= Thi  の係数
     double h_datum;   // sensible datum で係数から除いた絶対エンタルピー h_abs(Tref) [J/mol] (既定 0)。
                       // 反応流の反応熱 Q̇=−Σ(h_datum/W)ω と平衡定数 (H_abs=h+h_datum) が使う。
+    double invMW;     // 1/MW (ハイブリッド温度反転の研磨段で除算を避ける。thermo_init_db が設定、既定 0=未設定)
 };
+
+// -----------------------------------------------------------------------------
+// float32 ミラー (面ごとの熱力学評価用, plan performance-3d-node-sst-speedup §4.2-2)。
+//   面ループ (SLAU の h_mix(Y_f,T_f), 化学種拡散の h_s(T_f)・D_s(T_f,P_f,X_f)) で double 版を呼ぶと
+//   CC 8.6 では FP64 パイプ (FP32 の 1/64) が律速になる。係数は double の SpeciesThermo から
+//   1 度だけ float へ焼き込み (datum オフセット込み)、クランプ・外挿の分岐は double 版と同一にする。
+//   セルごとの Newton 反転 (thermo_T_from_e) や初期条件は引き続き double 版を使う。
+// -----------------------------------------------------------------------------
+#define THERMO_RU_F 8.314462618f
+struct SpeciesThermoF {
+    float MW;         // [kg/mol]
+    float invMW;      // 1/MW
+    float R;          // Ru/MW [J/(kg K)]
+    float sigma_LJ;   // [Angstrom]
+    float eps_kB;     // [K]
+    float Tlo, Tmid, Thi;
+    float low[9];
+    float high[9];
+};
+
+THERMO_HD const float* thermo_pick_coeffs_f(const SpeciesThermoF& sp, float Tc)
+{
+    return (Tc < sp.Tmid) ? sp.low : sp.high;
+}
+THERMO_HD float thermo_cp_molar_clamped_f(const SpeciesThermoF& sp, float Tc)
+{
+    const float* a = thermo_pick_coeffs_f(sp, Tc);
+    const float Ti  = 1.0f/Tc;
+    const float Ti2 = Ti*Ti;
+    return THERMO_RU_F * ( a[0]*Ti2 + a[1]*Ti + a[2]
+                         + a[3]*Tc + a[4]*Tc*Tc + a[5]*Tc*Tc*Tc + a[6]*Tc*Tc*Tc*Tc );
+}
+THERMO_HD float thermo_h_molar_clamped_f(const SpeciesThermoF& sp, float Tc)
+{
+    const float* a = thermo_pick_coeffs_f(sp, Tc);
+    const float Ti  = 1.0f/Tc;
+    const float Ti2 = Ti*Ti;
+    const float lnT = logf(Tc);
+    const float hRT = -a[0]*Ti2 + a[1]*lnT*Ti + a[2]
+                    + a[3]*Tc/2.0f + a[4]*Tc*Tc/3.0f + a[5]*Tc*Tc*Tc/4.0f
+                    + a[6]*Tc*Tc*Tc*Tc/5.0f + a[7]*Ti;
+    return THERMO_RU_F * Tc * hRT;
+}
+THERMO_HD float thermo_cp_molar_f(const SpeciesThermoF& sp, float T)
+{
+    float Tc = T;
+    if (Tc < sp.Tlo) Tc = sp.Tlo;
+    if (Tc > sp.Thi) Tc = sp.Thi;
+    return thermo_cp_molar_clamped_f(sp, Tc);
+}
+THERMO_HD float thermo_h_molar_f(const SpeciesThermoF& sp, float T)
+{
+    if (T < sp.Tlo) {
+        const float h0  = thermo_h_molar_clamped_f(sp, sp.Tlo);
+        const float cp0 = thermo_cp_molar_clamped_f(sp, sp.Tlo);
+        return h0 + cp0*(T - sp.Tlo);
+    }
+    if (T > sp.Thi) {
+        const float h1  = thermo_h_molar_clamped_f(sp, sp.Thi);
+        const float cp1 = thermo_cp_molar_clamped_f(sp, sp.Thi);
+        return h1 + cp1*(T - sp.Thi);
+    }
+    return thermo_h_molar_clamped_f(sp, T);
+}
+THERMO_HD float thermo_cp_mass_f(const SpeciesThermoF& sp, float T) { return thermo_cp_molar_f(sp, T) * sp.invMW; }
+THERMO_HD float thermo_h_mass_f (const SpeciesThermoF& sp, float T) { return thermo_h_molar_f (sp, T) * sp.invMW; }
+THERMO_HD float thermo_R_mix_f(const SpeciesThermoF* sp, int n, const float* Y)
+{
+    float s = 0.0f;
+    for (int i=0;i<n;i++) s += Y[i]*sp[i].invMW;
+    return THERMO_RU_F * s;
+}
+THERMO_HD float thermo_h_mix_f(const SpeciesThermoF* sp, int n, const float* Y, float T)
+{
+    float h = 0.0f;
+    for (int i=0;i<n;i++) h += Y[i]*thermo_h_mass_f(sp[i], T);
+    return h;
+}
+THERMO_HD void thermo_X_from_Y_f(const SpeciesThermoF* sp, int n, const float* Y, float* X)
+{
+    float s = 0.0f;
+    for (int i=0;i<n;i++) { X[i] = Y[i]*sp[i].invMW; s += X[i]; }
+    const float inv = 1.0f/(s > 1.0e-30f ? s : 1.0e-30f);
+    for (int i=0;i<n;i++) X[i] *= inv;
+}
 
 // -----------------------------------------------------------------------------
 // 単一化学種の NASA-9 評価 (全て double)。範囲外は端でクランプし、
@@ -397,6 +483,159 @@ THERMO_HD float thermo_Dmix_species(const SpeciesThermo* sp, int n, const double
     return (1.0f - (float)X[i])/denom;
 }
 
+// float32 の cp+h 融合評価と Newton 温度反転 (plan performance-3d-node-sst-speedup §4.2-3)。
+//   数式・クランプ・収束判定 (|dT| < 1e-3 + 1e-6 T [K]) は double 版 thermo_cph_mix / thermo_T_from_e と同一。
+//   float の解像度: e≈2e5 J/kg で ulp 0.016 J/kg → ΔT≈1e-5 K (判定 1e-3 K より十分細かい)。datum オフセット
+//   (thermoHrefTemp) 無しの H2O (h≈-13.4 MJ/kg) では ulp≈1 J/kg → ΔT≈5e-4 K 程度で判定と同程度になるため、
+//   採否は tools/test_thermo_float.cpp の double 参照との比較で決める (§6)。
+THERMO_HD void thermo_cph_molar_f(const SpeciesThermoF& sp, float T, float* cp_out, float* h_out)
+{
+    if (T >= sp.Tlo && T <= sp.Thi) {
+        const float* a = thermo_pick_coeffs_f(sp, T);
+        const float Ti  = 1.0f/T;
+        const float Ti2 = Ti*Ti;
+        const float lnT = logf(T);
+        const float T2 = T*T, T3 = T2*T, T4 = T3*T;
+        *cp_out = THERMO_RU_F * ( a[0]*Ti2 + a[1]*Ti + a[2]
+                                + a[3]*T + a[4]*T2 + a[5]*T3 + a[6]*T4 );
+        const float hRT = -a[0]*Ti2 + a[1]*lnT*Ti + a[2]
+                        + a[3]*T/2.0f + a[4]*T2/3.0f + a[5]*T3/4.0f
+                        + a[6]*T4/5.0f + a[7]*Ti;
+        *h_out = THERMO_RU_F * T * hRT;
+    } else {
+        *cp_out = thermo_cp_molar_f(sp, T);
+        *h_out  = thermo_h_molar_f(sp, T);
+    }
+}
+THERMO_HD void thermo_cph_mix_f(const SpeciesThermoF* sp, int n, const float* Y, float T, float* cp_out, float* h_out)
+{
+    float cp = 0.0f, h = 0.0f;
+    for (int i=0;i<n;i++) {
+        float cpi, hi;
+        thermo_cph_molar_f(sp[i], T, &cpi, &hi);
+        cp += Y[i]*(cpi*sp[i].invMW);
+        h  += Y[i]*(hi*sp[i].invMW);
+    }
+    *cp_out = cp; *h_out = h;
+}
+THERMO_HD float thermo_T_from_e_f(const SpeciesThermoF* sp, int n, const float* Y,
+                                  float e, float T_guess, float T_min, float T_max, int* iters = nullptr,
+                                  int maxIter = 20)
+{
+    const float R = thermo_R_mix_f(sp, n, Y);
+    float T = T_guess;
+    if (!(T > T_min)) T = T_min;
+    if (T > T_max) T = T_max;
+    int it = 0;
+    #pragma unroll 1
+    for (; it<maxIter; ++it) {
+        float h_T, cp_T;
+        thermo_cph_mix_f(sp, n, Y, T, &cp_T, &h_T);
+        const float e_T = h_T - R*T;
+        const float cv  = cp_T - R;
+        const float cvf = (cv > 1.0e-2f*R ? cv : 1.0e-2f*R);
+        float dT = (e_T - e)/cvf;
+        if (dT >  0.5f*T) dT =  0.5f*T;
+        if (dT < -0.5f*T) dT = -0.5f*T;
+        T -= dT;
+        if (T < T_min) T = T_min;
+        if (T > T_max) T = T_max;
+        if (dT < 0.0f) dT = -dT;
+        // 収束判定は float の分解能に合わせる: 高温では NASA 多項式和の桁落ち (項 ~8 の和が ~4) で
+        // e(T) の float ノイズが ±4 ulp(T) 程度になり、double 版の 1e-3+1e-6T では 6000 K 付近で
+        // 判定を満たせず 20 反復に張り付く (tools/test_thermo_float.cpp で実測)。4e-6·T (≈8 ulp) にする。
+        if (dT < 1.0e-3f + 4.0e-6f*T) { ++it; break; }
+    }
+    if (iters) *iters = it;
+    return T;
+}
+
+// 二元/混合平均拡散係数の float 版 (SpeciesThermoF)。式は thermo_Dbinary / thermo_Dmix_species と同一。
+THERMO_HD float thermo_Dbinary_f(const SpeciesThermoF& a, const SpeciesThermoF& b, float T, float P)
+{
+    const float Mi   = a.MW*1000.0f, Mj = b.MW*1000.0f;      // g/mol
+    const float sig  = 0.5f*(a.sigma_LJ + b.sigma_LJ);       // Å
+    const float epsp = a.eps_kB * b.eps_kB;
+    const float eps  = sqrtf(epsp > 1.0e-30f ? epsp : 1.0e-30f);
+    const float Tstar = T / eps;
+    const float om   = thermo_omega11(Tstar);
+    const float Patm = P / 101325.0f;
+    const float Dcm2 = 1.8583e-3f * sqrtf(T*T*T*(1.0f/Mi + 1.0f/Mj)) / (Patm * sig*sig * om);
+    return Dcm2 * 1.0e-4f;
+}
+THERMO_HD float thermo_Dmix_species_f(const SpeciesThermoF* sp, int n, const float* X, int i, float T, float P)
+{
+    if (n == 1) return 0.0f;
+    float denom = 0.0f;
+    for (int j=0;j<n;j++) {
+        if (j==i) continue;
+        const float Dij = thermo_Dbinary_f(sp[i], sp[j], T, P);
+        denom += X[j]/(Dij > 1.0e-30f ? Dij : 1.0e-30f);
+    }
+    if (denom < 1.0e-30f) return thermo_Dbinary_f(sp[i], sp[i], T, P);
+    return (1.0f - X[i])/denom;
+}
+
+// -----------------------------------------------------------------------------
+// ハイブリッド温度反転 (plan performance-3d-node-sst-speedup §4.2-3, physProp.thermoFloat=1):
+//   float Newton (最大 maxIterF 反復, 前ステップ T からの warm start で通常 1〜2 反復) で T を ~1e-6·T まで寄せ、
+//   double の Newton 1 段で研磨する (二次収束なので誤差は ~1e-12·T = 従来 double 版と同等)。
+//   double 評価は cph_mix 1 回だけ (従来は反復数+1 回)。研磨点 T_f での cp/h を返し、呼び出し側は
+//   h(T)=h(T_f)+cp·(T−T_f) (Taylor, 誤差 ~cp'·dT²) で最終 h を組む。cp は cp(T_f) (相対誤差 ~1e-6)。
+//   datum オフセット無し (h_abs≈-13 MJ/kg の H2O) では float 段が収束せず張り付くことがあるので
+//   thermoFloat は thermoHrefTemp>0 を必須にする (config で検査)。検証: tools/test_thermo_float.cpp。
+// -----------------------------------------------------------------------------
+// 研磨段用: cp/h の混合を invMW 乗算で (除算 2n 回を回避)。値は thermo_cph_mix と最終 bit まで同一ではないが
+// double 精度 (相対 1e-16) で同じ。invMW 未設定 (0) の DB では従来の除算版へ。
+THERMO_HD void thermo_cph_mix_polish(const SpeciesThermo* sp, int n, const double* Y, double T, double* cp_out, double* h_out)
+{
+    if (!(sp[0].invMW > 0.0)) { thermo_cph_mix(sp, n, Y, T, cp_out, h_out); return; }
+    double cp = 0.0, h = 0.0;
+    for (int i=0;i<n;i++) {
+        double cpi, hi;
+        thermo_cph_molar(sp[i], T, &cpi, &hi);
+        const double w = Y[i]*sp[i].invMW;
+        cp += w*cpi; h += w*hi;
+    }
+    *cp_out = cp; *h_out = h;
+}
+
+THERMO_HD double thermo_T_from_e_hybrid(const SpeciesThermo* sp, const SpeciesThermoF* spf, int n,
+                                        const double* Y, const float* Yf,
+                                        double e, double T_guess, double T_min, double T_max,
+                                        double* cp_at_Tf, double* h_at_Tf, double* Tf_out, int maxIterF = 8)
+{
+    const float Tf = thermo_T_from_e_f(spf, n, Yf, (float)e, (float)T_guess, (float)T_min, (float)T_max, nullptr, maxIterF);
+    // R_mix は double で (float だと 6e-8·R·T の残差誤差が dT≈2.4e-8·T に化け、格納分解能と同程度になる)。
+    // 除算は invMW 乗算で回避 (invMW 未設定 DB は従来の除算版)。
+    double R;
+    if (sp[0].invMW > 0.0) { double s = 0.0; for (int i=0;i<n;i++) s += Y[i]*sp[i].invMW; R = THERMO_RU * s; }
+    else R = thermo_R_mix(sp, n, Y);
+    double cp_T, h_T;
+    thermo_cph_mix_polish(sp, n, Y, (double)Tf, &cp_T, &h_T);
+    // 研磨は「収束するまで」(最大 3 段)。float 段が未収束 (冷間開始で maxIterF に達した等) でも 1 段で打ち切ると
+    // 二次収束にならず誤差が残る (codex result レビュー M2: 5900 K 目標・50 K 開始で 3e-6·T)。各段の |dT| が
+    // 1e-3+1e-6·T [K] (double 版と同じ判定) 未満になったら終了。通常 (warm start) は 1 段で終わる。
+    double Tp = (double)Tf;
+    double T  = Tp;
+    for (int k = 0; k < 3; ++k) {
+        const double cv  = cp_T - R;
+        const double cvf = (cv > 1.0e-2*R ? cv : 1.0e-2*R);
+        double dT = ((h_T - R*Tp) - e)/cvf;
+        if (dT >  0.5*Tp) dT =  0.5*Tp;
+        if (dT < -0.5*Tp) dT = -0.5*Tp;
+        T = Tp - dT;
+        if (T < T_min) T = T_min;
+        if (T > T_max) T = T_max;
+        if (fabs(dT) < 1.0e-3 + 1.0e-6*T) break;
+        // 未収束: 研磨点を更新して再評価 (double cph をもう 1 回)
+        Tp = T;
+        thermo_cph_mix_polish(sp, n, Y, Tp, &cp_T, &h_T);
+    }
+    *cp_at_Tf = cp_T; *h_at_Tf = h_T; *Tf_out = Tp;
+    return T;
+}
+
 // -----------------------------------------------------------------------------
 // 温度反転: 比内部エネルギー e [J/kg] と組成 Y から T を Newton 反転で求める。
 //   f(T) = e_mix(T) - e = 0, f'(T) = cv_mix(T) = cp_mix(T) - R_mix (厳密微分)
@@ -636,6 +875,7 @@ class solverConfig;
 
 void                 thermo_init_db(solverConfig& cfg);
 const SpeciesThermo* thermo_species_device_ptr();   // device global memory
+const SpeciesThermoF* thermo_species_device_ptr_f(); // float32 ミラー (面ループ用, 同じ datum)
 int                  thermo_num_species();
 const SpeciesThermo* thermo_species_host();          // host array (length = thermo_num_species)
 
