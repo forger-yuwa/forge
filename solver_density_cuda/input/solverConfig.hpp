@@ -95,6 +95,10 @@ public:
     // 凝縮モーメントは sweep で作った増分 δ を更新クランプ (cond_moment_update_limited) に渡す (θ_u と floor は不変)。
     // 既定 -1 = 自動 (speciesFaceReconstruction >= 2 なら 1、それ以外 0; §4.2 原因確認: S3 の発散は segregated 更新固有)。
     int passiveImplicitCoupling = -1;
+    // dual-time の BDF 履歴の有効数 (実行時状態; 流れ・化学種・受動種で共有, plan species-passive-scalar-unification §4.4 / codex M6)。
+    //   0: 過去レベルなし (fresh start / 旧形式 restart) → 最初の物理 step は BDF1。1 以上: Q^{n-1} が有効 → bdfOrder に従い BDF2。
+    //   checkpoint (res_*.h5 の /CHECKPOINT) から復元されるか、物理 step 完了ごとに +1 (上限 2)。
+    int nHistoryValid = 0;
     // block-DPLUR 対角キャッシュ: sweep 0 で組んだ 5×5 対角 (状態凍結で不変) を diag_block_** に保存し、sweep≥1 は
     // 近傍積 + solve だけにする (ビット同一)。float・point 経路 (implicitSolvePrecision 0, lineImplicit 0) のみ有効。
     // **既定 0**: A10G 3D 2.37 M 節点で 44.0→46.5 ms/step と逆に遅化した (対角 25 floats/cell の保存+4 回読込 ≈1.2 GB/step の

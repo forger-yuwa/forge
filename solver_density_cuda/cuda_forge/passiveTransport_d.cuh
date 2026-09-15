@@ -79,3 +79,9 @@ std::vector<double> passiveFloorCorrTotals();
 
 // node 周期: 受動種の状態を root→member でミラー (更新の直後に呼ぶ)。
 void passiveMirrorPeriodic_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+
+// ===== dual-time (§4.4): 受動種の物理時間レベル <cons>P/PP と BDF 項 (passiveScalarScheme 1 のみ; 旧経路 0 は不変) =====
+void passiveInitDualTimeLevels_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+void passiveShiftDualTimeLevels_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+void passiveAddUnsteadyTimeTerm_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
+                                          flow_float a, flow_float b, flow_float c);

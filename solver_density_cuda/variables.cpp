@@ -47,7 +47,9 @@ static std::list<std::string> speciesCellVarNames(int s)
         // 既定経路 (=0) では未使用だが確保コストは僅少。
         "dq_roY"+i, "dq_roY"+i+"_old",
         // 質量分率セル勾配 + Venkat リミタ (speciesFaceReconstruction==1 の face 整合再構成用)。
-        "dY"+i+"dx", "dY"+i+"dy", "dY"+i+"dz", "limiter_Y"+i
+        "dY"+i+"dx", "dY"+i+"dy", "dY"+i+"dz", "limiter_Y"+i,
+        // dual-time の物理時間レベル Q^n, Q^{n-1} (BDF 項用; N/M は擬似時間の始点。plan species-passive-scalar-unification §4.4)
+        "roY"+i+"P", "roY"+i+"PP"
     };
 }
 
@@ -125,13 +127,13 @@ void variables::registerTracer(int enabled)
     this->output_cellValNames.push_back("Xi");
     // 受動種経路 (passiveScalarScheme 1; plan species-passive-scalar-unification §4.1): 勾配 ∇ξ・リミッタ ψ_ξ (S3 面再構成)、
     // scalar-DPLUR 増分 dq、floor 補正の累積 |Δ(ρξ)| (passiveFloorCorr_Xi; 確保時 0 初期化)。勾配/リミッタ/補正は level 2 出力のみ。
-    for (const auto& name : {"dXidx", "dXidy", "dXidz", "limiter_Xi", "passiveFloorCorr_Xi", "dq_roXi", "dq_roXi_old"}) {
+    for (const auto& name : {"dXidx", "dXidy", "dXidz", "limiter_Xi", "passiveFloorCorr_Xi", "dq_roXi", "dq_roXi_old", "roXiP", "roXiPP"}) {
         this->cellValNames.push_back(name);
         this->c.emplace(name, std::vector<flow_float>{});
         this->c_d.emplace(name, nullptr);
     }
     for (const auto& name : {"dXidx", "dXidy", "dXidz", "limiter_Xi", "passiveFloorCorr_Xi"}) this->output_cellValNames.push_back(name);
-    std::cout << "registerTracer: exhaust tracer roXi registered (15 cell variables)\n";
+    std::cout << "registerTracer: exhaust tracer roXi registered (17 cell variables)\n";
 }
 
 // 非平衡凝縮 (Phase 1): 1 モーメント (保存量名 consName 例 "rog_0") ごとに必要なセル変数名を生成する。
@@ -150,7 +152,8 @@ static std::list<std::string> condMomentCellVarNames(const std::string& consName
         "src_jac_"+prim, "transport_diag_"+prim,
         // 受動種経路 (passiveScalarScheme 1): 勾配・リミッタ (S3)、scalar-DPLUR 増分、floor 補正の累積 |Δ(ρφ)|
         "d"+prim+"dx", "d"+prim+"dy", "d"+prim+"dz", "limiter_"+prim, "passiveFloorCorr_"+prim,
-        "dq_"+consName, "dq_"+consName+"_old"
+        "dq_"+consName, "dq_"+consName+"_old",
+        consName+"P", consName+"PP"   // dual-time の物理時間レベル (受動種 BDF 項用)
     };
 }
 
@@ -201,7 +204,7 @@ void variables::registerCondensation(int nCondSpecies)
     }
 
     std::cout << "registerCondensation: nCondSpecies=" << nCondSpecies
-              << " -> registered " << nCondSpecies*(4*15+8) << " cell variables\n";
+              << " -> registered " << nCondSpecies*(4*17+8) << " cell variables\n";
 }
 
 variables::~variables() {

@@ -86,3 +86,13 @@ void speciesRenormalize_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
 // RK ステップ/ステージ始点の保存 (roY{s}N / roY{s}M)。NS の updateVariablesOuter/Inner に対応。
 void speciesUpdateOuter_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 void speciesUpdateInner_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+
+// ===== dual-time (plan species-passive-scalar-unification §4.4; chem e296f0d0 の移植) =====
+// 物理時間レベルの初期化 P = PP = 現在値 (起動時・旧形式 restart)。
+void speciesInitDualTimeLevels_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+// 物理 step 冒頭のレベルシフト roY_PP ← roY_P ← roY (流れの shiftDualTimeLevels と同時)。
+void speciesShiftDualTimeLevels_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+// 化学種残差に BDF 項 −(V/Δt)(a ρY − b ρY^P + c ρY^PP) を加え、輸送対角に V a/Δt を足す。
+// 周期 gather の後に合併体積で一度だけ呼ぶ (係数 a,b,c は呼び出し側 = 全系共有の履歴契約から決める)。
+void speciesAddUnsteadyTimeTerm_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
+                                          flow_float a, flow_float b, flow_float c);

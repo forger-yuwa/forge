@@ -54,6 +54,7 @@
 #include "cuda_forge/condensationTransport_d.cuh"
 #include "cuda_forge/tracerTransport_d.cuh"
 #include "cuda_forge/passiveTransport_d.cuh"
+#include <highfive/H5File.hpp>
 #include "input/speciesDB.hpp"
 #include "cuda_forge/viscousFlux_d.cuh"
 #include "cuda_forge/updateCenterVelocity_d.cuh"
@@ -969,6 +970,72 @@ private:
     std::array<ProfileStat, kProfileSectionCount> stats_{};
 };
 
+
+// dual-time の履歴契約 (plan species-passive-scalar-unification §4.4, codex plan-2 M6): valueFileName の /CHECKPOINT が
+// 流れ・化学種・受動種の前物理レベル (流れ *N, 化学種 roY{s}P, 受動種 <cons>P) と totalTime/dt/nHistoryValid/layout を
+// 全部持ち layout が一致するときだけ復元して BDF2 を継続する。1 つでも欠ければ (旧形式 res_*.h5 を含む) 全系を
+// P = PP = 現在値に揃え nHistoryValid=0 (最初の物理 step は BDF1) で再開する。updateVariablesOuter (roN=ro) の後に呼ぶ。
+static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    if (!(cfg.unsteady == 1 && cfg.dualTime == 1)) return;
+    // まず全系を P = PP = 現在値に (復元に失敗しても一貫した状態)。
+    speciesInitDualTimeLevels_d_wrapper(cfg, cuda_cfg, msh, var);
+    passiveInitDualTimeLevels_d_wrapper(cfg, cuda_cfg, msh, var);
+    cfg.nHistoryValid = 0;
+
+    std::list<std::string> hist = {"roN", "roUxN", "roUyN", "roUzN", "roeN", "roKN", "roOmegaN"};
+    for (const auto& nm : var.speciesVarNames) hist.push_back(nm + "P");
+    if (var.tracerRegistered != 0) hist.push_back("roXiP");
+    for (const auto& nm : var.condMomentConsNames) hist.push_back(nm + "P");
+    const std::string layout = "nSpecies=" + std::to_string(var.nSpeciesRegistered) + ";tracer=" + std::to_string(var.tracerRegistered)
+                             + ";nCond=" + std::to_string(var.nCondSpeciesRegistered);
+    std::string why;
+    try {
+        HighFive::File file(cfg.valueFileName, HighFive::File::ReadOnly);
+        if (!file.exist("/CHECKPOINT")) {
+            why = "no /CHECKPOINT group (old-format input)";
+        } else {
+            HighFive::Group ck = file.getGroup("/CHECKPOINT");
+            std::string lay; double tt = 0.0, dtp = 0.0; int nh = 0;
+            if (!ck.hasAttribute("layout") || !ck.hasAttribute("totalTime") || !ck.hasAttribute("dt") || !ck.hasAttribute("nHistoryValid")) {
+                why = "missing checkpoint attributes";
+            } else {
+                ck.getAttribute("layout").read(lay); ck.getAttribute("totalTime").read(tt);
+                ck.getAttribute("dt").read(dtp);     ck.getAttribute("nHistoryValid").read(nh);
+                if (lay != layout) why = "layout mismatch (file '" + lay + "' vs run '" + layout + "')";
+                else if (nh < 1) why = "checkpoint has no valid history (nHistoryValid=0)";
+                else {
+                    for (const auto& nm : hist) if (!file.exist("/CHECKPOINT/" + nm)) { why = "missing dataset /CHECKPOINT/" + nm; break; }
+                }
+            }
+            if (why.empty()) {
+                std::list<std::string> names;
+                for (const auto& nm : hist) {
+                    std::vector<geom_float> in; file.getDataSet("/CHECKPOINT/" + nm).read(in);
+                    if ((geom_int)in.size() < msh.nCells) { why = "dataset /CHECKPOINT/" + nm + " too short"; break; }
+                    std::vector<flow_float>& v = var.c.at(nm);
+                    for (geom_int i = 0; i < msh.nCells; ++i) v[i] = static_cast<flow_float>(in[i]);
+                    names.push_back(nm);
+                }
+                if (why.empty()) {
+                    var.copyVariables_cell_H2D(names);
+                    // 受動種 P は host 名で H2D 済み; 化学種 roY{s}P も同様。PP はシフトで上書きされるので不要。
+                    cfg.totalTime = static_cast<flow_float>(tt);
+                    cfg.nHistoryValid = std::min(nh, 2);
+                    std::cout << "[dual-time] history restored from " << cfg.valueFileName << " (/CHECKPOINT: " << names.size()
+                              << " levels, totalTime=" << tt << ", dt_file=" << dtp << ", nHistoryValid=" << cfg.nHistoryValid
+                              << (std::abs(dtp - (double)cfg.dt) > 1e-12 * std::max(1.0, std::abs(dtp)) ? "; WARNING dt differs from the checkpoint (BDF2 assumes uniform dt)" : "")
+                              << ")\n";
+                    return;
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        why = std::string("read error: ") + e.what();
+    }
+    std::cout << "[dual-time] history NOT restored (" << why << "): all systems start from P=PP=current, first physical step is BDF1\n";
+}
+
 cudaConfig initializeSimulation(
     solverConfig& cfg,
     mesh& msh,
@@ -1015,7 +1082,9 @@ cudaConfig initializeSimulation(
             cout << "[condensation] condSonicModel=" << resolved << " (" << reason << ")\n";
             if (!warn.empty()) cout << "[condensation] WARNING: " << warn << "\n";
             // 読込後の実効値 (省略時既定の確認用; codex 2026-09-13 carrier result M3): condKantrowitz 0=補正なし/1=Kantrowitz/2,3=Feder carrier
-            if (cfg.condLimiterMode == 1 && (cfg.timeIntegration != 11 || cfg.dualTime != 0)) {
+            // dual-time は受動種経路 (passiveScalarScheme 1) ならモーメントに BDF 物理時間項が入る (plan species-passive-scalar-unification §4.4)
+            // ので降格しない。旧経路 0 は従来どおり降格 (物理時間項なし)。
+            if (cfg.condLimiterMode == 1 && (cfg.timeIntegration != 11 || (cfg.dualTime != 0 && cfg.passiveScalarScheme == 0))) {
                 // 更新クランプ経路は定常 point-implicit (timeIntegration 11, dual-time なし) だけで検証済み。RK 陽解法は未制限残差の
                 // 累積バッファを持ち、dual-time は凝縮モーメントに物理時間項が無い (followups F-cf8) ので旧経路に降格する。
                 cout << "[condensation] condLimiterMode 1 is verified for steady timeIntegration 11 only; falling back to 0 (legacy residual theta) for this run\n";
@@ -1125,6 +1194,7 @@ cudaConfig initializeSimulation(
     speciesUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // roY{s}N/M ベースライン
     condensationUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // 液相モーメント N/M ベースライン
     tracerUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // トレーサ N/M ベースライン
+    initDualTimeHistory(cfg , cuda_cfg , msh , var);   // dual-time: 前物理レベルの復元 (checkpoint) または BDF1 再開 (§4.4)
     setDT_d_wrapper(cfg , cuda_cfg , msh , var);
 
     pprobes.init(cfg , cuda_cfg , msh);
@@ -1558,13 +1628,17 @@ void advanceImplicitDualTime(StepContext& s)
             "Dual-time implicit requires time.deltaT.control=0 (fixed physical dt).");
     }
 
-    // 物理時間レベルシフト: roNN ← roN, roN ← ro（現在の ro = Q^n）。
+    // 物理時間レベルシフト: roNN ← roN, roN ← ro（現在の ro = Q^n）。化学種 roY_PP ← roY_P ← roY、受動種 (scheme 1) も同時に
+    // (plan species-passive-scalar-unification §4.4: 履歴は流れ・化学種・受動種で 1 つの状態)。
     s.profiler.measureWall(ProfileSection::UpdateOuter, [&]() {
         shiftDualTimeLevels_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        speciesShiftDualTimeLevels_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        passiveShiftDualTimeLevels_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     });
 
-    // BDF 係数: 初回ステップ or bdfOrder==1 は BDF1 (1,1,0)、以降 BDF2 (3/2,2,1/2)。
-    const bool useBDF2 = (s.cfg.bdfOrder >= 2) && (s.iStep > 0);
+    // BDF 係数: 履歴が無い (fresh start / 旧形式 restart) 最初の物理 step または bdfOrder==1 は BDF1 (1,1,0)、以降 BDF2 (3/2,2,1/2)。
+    // 履歴有効数 cfg.nHistoryValid は全系共有 (checkpoint から復元、物理 step 完了ごとに +1)。
+    const bool useBDF2 = (s.cfg.bdfOrder >= 2) && (s.cfg.nHistoryValid >= 1);
     const flow_float a = useBDF2 ? static_cast<flow_float>(1.5) : static_cast<flow_float>(1.0);
     const flow_float b = useBDF2 ? static_cast<flow_float>(2.0) : static_cast<flow_float>(1.0);
     const flow_float c = useBDF2 ? static_cast<flow_float>(0.5) : static_cast<flow_float>(0.0);
@@ -1572,18 +1646,38 @@ void advanceImplicitDualTime(StepContext& s)
     // 対角へ加える物理時間項係数 a/Δt（block/scalar/SST カーネルが cfg 経由で参照）。
     s.cfg.unsteadyDiagCoef = a / std::max(s.cfg.dt, static_cast<flow_float>(1.0e-30));
 
+    // 化学種 (多成分): 2026-09-13 まで dual-time は化学種を一切更新していなかった (ρY_s が初期場のまま凍結、ρ だけ動いて
+    // ΣY_s=ρ⁰/ρ になる; chem e296f0d0 で修正)。定常陰解法と同じ更新 (coupling 0 point-implicit / 1 scalar-DPLUR / 2 案C 予測→block→commit)
+    // を各サブ反復で回し、残差には BDF 項を入れる。案C の commit の δρ 基準は予測時点の ρ (speciesEOSCrossPredictInject が保存)。
+    const bool freezeSpecies = freezeSpeciesEnabled();
+    const bool eosCoupled = speciesEOSCoupled(s.cfg, s.var) && !freezeSpecies;
+    const bool haveSpecies = (s.var.nSpeciesRegistered > 1) && !freezeSpecies;
+
     const int nSub = std::max(1, s.cfg.nSubIterDualTime);
     for (int m = 0; m < nSub; ++m) {
+        // (1) 空間残差 (+ 化学種/受動種のピン残差除去 + 周期 gather) → (2) BDF 項 (合併体積で一度だけ; 流れ・k/ω・化学種・受動種)
+        //  → (3) ピン残差の再除去 (BDF がピン行に残差を戻すため)。
         assembleResidual(s, 1);
-        // 残差に物理時間 BDF 項を加える: res* = res - (V/Δt)(a Q - b Q^n + c Q^{n-1})。
         addUnsteadyTimeTerm_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, a, b, c, include_scalar);
-        logResidualSnapshot(s, m);
+        speciesAddUnsteadyTimeTerm_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, a, b, c);
+        passiveAddUnsteadyTimeTerm_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, a, b, c);
+        speciesPinResidual_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        passivePinResidual_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        logResidualSnapshot(s, m);   // BDF 込みのサブ反復残差 (inner_iter 行; 化学種・受動種列を含む)
         // dual-time は dtControl==0 を強制している (上の検査) ので adaptDt=true でも cfg.dt は変わらない
         // (host 読みは printCflDt のときだけ発生)。max cfl (物理 CFL) の格納は monitorInterval で間引く (モニタ行が表示)。
         const bool printCflDt = (s.iStep % s.cfg.monitorInterval == 0);
         s.profiler.measureCuda(ProfileSection::SetDt, [&]() {
             setDT_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, /*adaptDt=*/true, /*printCfl=*/printCflDt);
         });
+        // (4) 案C (coupling 2): 擬似刻み確定後、BDF 込み・ピン除去済み残差で予測し EOS クロス項を流れ RHS へ (周期は独立バッファで gather)。
+        if (eosCoupled) {
+            s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
+                speciesUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 擬似時間の始点 roY_N = 現在の反復値
+                speciesEOSCrossPredictInject_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            });
+        }
+        // (5) 流れ block 解 → in-place commit（roN=Q^n は BDF 基準で固定のため roN+dq は使えない）。
         blockDPLURSolve(s, m);
         // 診断 (FORGE_RESID_SNAP=1): subiter 0 の res (BDF 込み R*) と最終 dq を退避 (局所収縮率 g の分母)。
         {
@@ -1599,7 +1693,6 @@ void advanceImplicitDualTime(StepContext& s)
                     gpuErrchk(cudaMemcpy(s.var.c_d[dst[q]], s.var.c_d[src[q]], nb, cudaMemcpyDeviceToDevice));
             }
         }
-        // dual-time の commit は in-place（roN=Q^n は BDF 基準で固定のため roN+dq は使えない）。
         s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
             applyBlockImplicitCorrectionInPlace_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         });
@@ -1615,20 +1708,42 @@ void advanceImplicitDualTime(StepContext& s)
             static bool logged = false;
             if (!logged) { printf("[FREEZE_TURB] dual-time: SST state update frozen\n"); logged = true; }
         }
-        // 液相モーメント (非平衡凝縮) を segregated point-implicit で更新。condensation==0 で no-op。
+        // (6) 化学種更新 (BDF 込み res/transport_diag) → 再正規化 → 周期ミラー → primitive → 入口 Dirichlet の再適用。
+        if (haveSpecies) {
+            s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
+                if (eosCoupled) {
+                    speciesEOSFinalCommit_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // ρY = ρY_N + z + Y_N (ρ − ρ_pred)
+                } else {
+                    speciesUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);      // roY_N = 現在の反復値
+                    if (speciesImplicitCoupled(s.cfg, s.var)) {
+                        speciesImplicitDPLURSolve_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // coupling 1 (定常経路と同じ sweep)
+                    } else {
+                        speciesTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);   // coupling 0 (speciesImplicitRelax)
+                    }
+                }
+                speciesRenormalize_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);            // ΣρY_s = ρ
+                periodicMirrorSpeciesState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+                speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);              // Y = ρY/ρ (次の残差・出力用)
+                applySpeciesBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);                  // 入口 Dirichlet (node ピン値) の再適用
+            });
+        }
+        // (7) 受動種 (凝縮モーメント・トレーサ): scheme 1 は BDF 込みの res/transport_diag で更新クランプ / point-implicit / DPLUR
+        //     → 上下限と補正収支 → 周期ミラー (各 wrapper 内)。scheme 0 (旧経路) は従来どおり物理時間項なし。
         s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
             condensationUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
             condensationTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
             condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
-            // 受動トレーサ (凝縮モーメントと同じ segregated point-implicit; 物理時間項は無し)。
             tracerUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
             tracerTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
             tracerPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            applyCondensationBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);   // 入口 Dirichlet の再適用 (dry=0 / Xi)
+            applyTracerBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
         });
     }
 
     s.cfg.unsteadyDiagCoef = 0.0; // 定常側へ影響しないようリセット
     s.cfg.totalTime += s.cfg.dt;
+    s.cfg.nHistoryValid = std::min(s.cfg.nHistoryValid + 1, 2);   // 物理 step 完了: 次 step から Q^{n-1} が有効 (全系共有)
 
     s.profiler.measureWall(ProfileSection::WriteOutputs, [&]() {
         writeStepOutputs(s.cfg , s.cuda_cfg , s.msh , s.var , s.pprobes , s.iStep+1);

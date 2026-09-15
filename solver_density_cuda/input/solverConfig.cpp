@@ -730,10 +730,11 @@ void solverConfig::read(std::string fname)
             if (!this->tracer.empty() && this->tracer != "exhaust") {
                 throw std::runtime_error("Key 'tracer' in 'physProp' must be 'none' or 'exhaust' (got '" + this->tracer + "').");
             }
-            if (this->tracerEnabled() && this->dualTime != 0) {
+            // dual-time: 受動種経路 (passiveScalarScheme 1) はトレーサに BDF 物理時間項を持つ (§4.4)。旧経路 0 は従来どおり拒否。
+            if (this->tracerEnabled() && this->dualTime != 0 && this->passiveScalarScheme == 0) {
                 // dual-time では roXi に物理時間項 (BDF 履歴・対角) が無く、擬似時間反復ごとに前進してしまう
                 // (codex 2026-09-16 result M6)。物理時間積分を実装するまで併用を拒否する (followups F-cf8 と同種)。
-                throw std::runtime_error("'physProp.tracer: exhaust' is not supported with time.dualTime != 0 (the tracer has no physical-time terms yet; use steady or explicit RK).");
+                throw std::runtime_error("'physProp.tracer: exhaust' with time.dualTime != 0 requires passiveScalarScheme 1 (the legacy scalar path has no physical-time terms; use steady/explicit RK or passiveScalarScheme 1).");
             }
             if (this->tracerEnabled()) std::cout << "'tracer' in 'physProp': exhaust (passive scalar roXi, inlet floats Xi)" << std::endl;
         }

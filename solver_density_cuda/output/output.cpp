@@ -157,6 +157,31 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
     }
     // h0: 全エンタルピー (単位質量) = Ht = e + p/ρ + u²/2 (+ k は sstEnergyIncludesK のときだけ)。
     // 全温・全圧の後処理はこれを逆算して作る (自前で T + u²/2c_p を組まない: plan output-level-and-h0)。
+    // dual-time checkpoint (plan species-passive-scalar-unification §4.4, codex plan-2 M6): 流れ・化学種・受動種の
+    // 前物理レベル Q^{n-1} (流れ *N, 化学種 roY{s}P, 受動種 <cons>P; 出力時点は物理 step 末尾なので ro=Q^n, roN=Q^{n-1})
+    // と物理時刻・刻み・履歴有効数を /CHECKPOINT にまとめて書く。restart はこれが全部揃い layout が一致するときだけ復元する。
+    if (cfg.unsteady == 1 && cfg.dualTime == 1) {
+        std::list<std::string> hist = {"roN", "roUxN", "roUyN", "roUzN", "roeN", "roKN", "roOmegaN"};
+        for (const auto& nm : var.speciesVarNames) hist.push_back(nm + "P");
+        if (var.tracerRegistered != 0) hist.push_back("roXiP");
+        for (const auto& nm : var.condMomentConsNames) hist.push_back(nm + "P");
+        std::list<std::string> have;
+        for (const auto& nm : hist) if (var.c.count(nm)) have.push_back(nm);
+        if (cfg.gpu == 1) var.copyVariables_cell_D2H(have);
+        HighFive::Group ck = file.createGroup("/CHECKPOINT");
+        for (const auto& nm : have) {
+            std::vector<flow_float> vtemp(var.c.at(nm).begin(), var.c.at(nm).begin() + msh.nCells);
+            ck.createDataSet("/CHECKPOINT/" + nm, vtemp);
+        }
+        const double tt = static_cast<double>(cfg.totalTime), dtp = static_cast<double>(cfg.dt);
+        const int nh = cfg.nHistoryValid;
+        const std::string layout = "nSpecies=" + std::to_string(var.nSpeciesRegistered) + ";tracer=" + std::to_string(var.tracerRegistered)
+                                 + ";nCond=" + std::to_string(var.nCondSpeciesRegistered);
+        ck.createAttribute<double>("totalTime", HighFive::DataSpace::From(tt)).write(tt);
+        ck.createAttribute<double>("dt", HighFive::DataSpace::From(dtp)).write(dtp);
+        ck.createAttribute<int>("nHistoryValid", HighFive::DataSpace::From(nh)).write(nh);
+        ck.createAttribute<std::string>("layout", HighFive::DataSpace::From(layout)).write(layout);
+    }
     if (writeH0) {
         std::vector<flow_float> h0(msh.nCells);
         const auto& Ht = var.c.at("Ht"); const auto& kk = var.c.at("k");
