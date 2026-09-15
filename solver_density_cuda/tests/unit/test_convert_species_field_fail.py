@@ -5,7 +5,7 @@
   - 正常入力は通る (exit 0, "all checks passed")
   - roe=NaN セル / 負の ρ / ΣY≠1 / 負の Y / T が括弧端 (異常に低い e) / roY データセット欠落 /
     species_meta と solverConfig の矛盾 (species 順序, tracer.enabled; source 側・destination 側) / reinit で destination の
-    Y_transport の和≠1 / roK=NaN / roOmega=Inf / 負の roK / tracer 必須なのに ξ が導けない
+    Y_transport の和≠1 / roK=NaN / roOmega=Inf / 負の roK / roOmega=1e39 (float32 への変換で overflow) / tracer 必須なのに ξ が導けない
   がそれぞれ**書き込み前に**明確なメッセージで拒否され非ゼロ終了することを確認する。
 usage: python3 tests/unit/test_convert_species_field_fail.py     ([PASS]/[FAIL], 失敗があれば非ゼロ終了)
 """
@@ -78,7 +78,8 @@ def write_h5(path, ro, Y, T, u=100.0, roXi=None, drop=None, roK=None, roOmega=No
             V["roOmega"] = roOmega
         for k, v in V.items():
             if k != drop:
-                f.create_dataset("VALUE/" + k, data=np.asarray(v, np.float32))
+                # 乱流量だけ float64 で書く (float64 では有限だが float32 で overflow する値の試験用; 宛先 in.h5 は float32)
+                f.create_dataset("VALUE/" + k, data=np.asarray(v, np.float64 if k in ("roK", "roOmega") else np.float32))
 
 
 def run_tool(src, dst, extra=()):
@@ -139,6 +140,9 @@ def main():
     case("roOmega-inf", False, "非有限", roK=np.full(N, 0.5), roOmega=np.where(np.arange(N) == 6, np.inf, 100.0))
     case("roK-negative", False, "負値", roK=np.where(np.arange(N) == 4, -1.0, 0.5), roOmega=np.full(N, 100.0))
     case("good-turb", True, "all checks passed", roK=np.full(N, 0.5), roOmega=np.full(N, 100.0))
+    # cast overflow: finite float64 1e39 becomes Inf in the float32 destination -> refused (result-4 M1); 1e30 stays finite -> pass
+    case("roOmega-cast-overflow-1e39", False, "overflow", roK=np.full(N, 0.5), roOmega=np.full(N, 1.0e39))
+    case("roOmega-near-limit-1e30", True, "all checks passed", roK=np.full(N, 0.5), roOmega=np.full(N, 1.0e30))
     # species_meta tracer.enabled contradicts solverConfig physProp.tracer (source side, and destination side) -> refused (result-3 M1)
     case("meta-tracer-contradiction-src", False, "矛盾", src_tracer=True, roXi=ro0 * 0.3, meta_tracer=False)
     dst_ct = os.path.join(root, "dst_tracer_contra"); make_run(dst_ct, tracer=True, meta_tracer=False); write_h5(os.path.join(dst_ct, "in.h5"), ro0, Y0, T0)

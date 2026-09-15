@@ -202,7 +202,7 @@ evaluate:
 | 25 | ~~(M2) `_TPGas` の低温処理をソルバと一致~~ | 済 (2026-09-16): 種ごとの Tlo/Tmid/Thi、範囲外は cp 固定・h 線形・s° 対数 (`thermo_d.cuh` と同式)、RU をソルバ値 8.314462618 に; `tests/unit/test_tpgas_lowT.py` (`.cuh` 式の独立移植と比較, 100–6500 K で 2.7e-15、codex 反例 [0.95,0.05]→[0.8,0.2] @100/150 K の T 差 4e-13 K [旧 1.38/0.10 K]) 5/5 PASS; 範囲内の total_quantities は T0 1.5e-8 K (RU 整合分のみ) |
 | 26 | ~~(M3) 変換器の全書込配列の有限性検査~~ | 済 (2026-09-16): 書込配列を 1 つの dict で管理し全配列の形状・有限性・ρ>0・roK/roOmega/モーメント非負を検査; 失敗系 19/19 PASS (+roK NaN / roOmega Inf / roK 負 / 正常 turb) |
 | 27 | ~~(m1) docs~~ | 済 (2026-09-16) |
-| 28 | (result-4 M1) 変換器: 宛先 dtype に変換後に全検査 (overflow → Inf を拒否), dry-run 同一検査, 削除は全検査後 | forge ツール (実装中) |
+| 28 | ~~(result-4 M1) 変換器: 宛先 dtype に変換後に全検査~~ | 済 (2026-09-16): 宛先を読み取り専用で開いて各データセットの最終 dtype (既存 or `VALUE/ro` の flow_float) を取り、全配列を変換してから有限性/ρ>0/非負/必須完備を検査 (overflow は明示報告)、dry-run も同一検査、削除・書込は全検査後。失敗系 21/21 PASS (+1e39 overflow 拒否 / 1e30 通過); 既存回帰 (run_0100↔0101, 0196, 0102→m10, 0104) 再確認 |
 | 29 | ~~(M2) 設計側 NASA-9 の範囲外処理を種ごとの Tlo/Thi でソルバと一致~~ | 済 (2026-09-16): `ResolvedSpeciesDB.species_cp_R/h_RT/s0_R` (クランプ・線形 h・対数 s°) を `cp_mass/h_mass/s0_mass` と `FrozenGas`・`GasSemiPerfect` が使う; 単体: 外部 DB (H2O Tlo 300 K) で独立移植のソルバ式と 6e-15、e_sens 反転 T 差 3e-13 K、内蔵 DB は従来値と同一 |
 | 19 | ~~(m1) docs 同期~~ | 済 (2026-09-16): methods/thermophysics §5 (speciesDB_resolve/init, 上書き), plans/README (in_progress), condensation §7b |
 
@@ -259,7 +259,7 @@ evaluate:
 
 ## 9. 変更ログ
 
-- `2026-09-16` — codex result 4 回目 **NO-GO (M2/m1)** を全採用 (§6.1, §5.1 #28–#29)。M2 (設計側の範囲外 EOS) は修正・単体済、M1 (変換器の dtype 変換後検査) は修正中。
+- `2026-09-16` — codex result 4 回目 **NO-GO (M2/m1)** を全採用 (§6.1, §5.1 #28–#29)。M2 (設計側の範囲外 EOS) は修正・単体済、M1 (変換器の dtype 変換後検査) も修正・失敗系 21 件済。**codex result 5 回目へ**。
 - `2026-09-16` — result-3 の M1–M3/m1 を修正・検証 (§5.1 #24–#27 済): 変換器は config 駆動 (トレーサ矛盾拒否・roXi 保持)、Python NASA-9 の範囲外処理をソルバと一致 (低温反例 T 差 4e-13 K)、全書込配列の有限性 (失敗系 19 件)。既存回帰 (run_0196 湿潤反転 1.9e-4 K, run_0100↔0101, run_0102→m10) 再確認。**codex result 4 回目へ**。
 - `2026-09-16` — codex result 3 回目 **NO-GO (M3/m1, 全て変換器と docs)** を全採用 (§6.1, §5.1 #24–#27)。
 - `2026-09-16` — result-2 の M1–M3/m1 を修正・検証 (§5.1 #20–#23 済): 組成再初期化 Y_t = ξ Y_in^dst + (1−ξ) Y_ext^dst (warm_from_run + 変換器 reinit; case/46 `run_0105`/`0106`, 単体で目標組成一致)、実 config + DB の署名照合 (係数摂動・tracer 差・順序矛盾を検出)、変換器の NaN 安全な事前検査と失敗系 12 件。**codex result 3 回目へ**。

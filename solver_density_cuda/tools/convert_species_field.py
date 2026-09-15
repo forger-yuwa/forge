@@ -605,50 +605,63 @@ def main():
             i = int(np.nanargmax(dT)) if np.isfinite(dT).any() else 0
             fails.append(f"T が保存されない (max |ΔT| {_amax(dT):.3e} K at cell {i}: T_src {Tsrc[i]:.3f}, T_chk {Tchk[i]:.3f}, g {g_dst[i]:.3e})")
 
-    # ---- 書き込む配列を 1 つの dict にまとめ、全配列の有限性・正値性を最後に検査 (codex result-3 M3) ----
-    out = {"ro": ro, "roUx": ro * Ux, "roUy": ro * Uy, "roUz": ro * Uz, "roe": roe_out}
+    # ---- 書き込む配列を 1 つの dict にまとめ、宛先 dtype に変換してから全配列の有限性・正値性を検査 (codex result-3 M3 / result-4 M1) ----
+    # 宛先 dtype (既存データセットはその dtype、新規は VALUE/ro の dtype = run の flow_float, 通常 float32) を先に読む。
+    # float64 で有限でも float32 へ落とすと Inf になり得る (例 roOmega=1e39) ので、変換後の配列で検査する。
+    # ここは読み取りだけ (既存データセットの削除・再作成は全検査を通った後の書き込み段でしか行わない)。--dry-run も同じ検査を通る。
+    out64 = {"ro": ro, "roUx": ro * Ux, "roUy": ro * Uy, "roUz": ro * Uz, "roe": roe_out}
     for j in range(nd):
-        out[f"roY{j}"] = ro * Ydst[j]
-    out.update(moments_out)
-    if roK is not None: out["roK"] = roK
-    if roOm is not None: out["roOmega"] = roOm
-    if roXi_out is not None: out["roXi"] = roXi_out
-    for k, v in out.items():
+        out64[f"roY{j}"] = ro * Ydst[j]
+    out64.update(moments_out)
+    if roK is not None: out64["roK"] = roK
+    if roOm is not None: out64["roOmega"] = roOm
+    if roXi_out is not None: out64["roXi"] = roXi_out
+    with h5py.File(a.dst, "r") as d:
+        nd_ = d["VALUE/ro"].shape[0]
+        if nd_ != n:
+            raise SystemExit(f"REFUSED: CV 数が違う (source {n}, destination {nd_}); 同一メッシュの input h5 を指定する")
+        dt_default = d["VALUE/ro"].dtype
+        dtypes = {k: (d["VALUE/" + k].dtype if ("VALUE/" + k) in d else dt_default) for k in out64}
+    out = {}
+    for k, v in out64.items():
         v = np.asarray(v, float)
         if v.shape != (n,):
             fails.append(f"{k}: 長さ {v.shape} が CV 数 {n} と違う")
             continue
-        _check_finite(fails, "write:" + k, v)
-        if k == "ro" and not (np.isfinite(v).all() and (v > 0.0).all()):
+        with np.errstate(over="ignore", invalid="ignore"):
+            vc = v.astype(dtypes[k])                      # 最終 dtype (通常 float32) へ変換してから検査
+        out[k] = vc
+        vchk = vc.astype(np.float64)
+        if not _check_finite(fails, f"write:{k} ({np.dtype(dtypes[k]).name})", vchk):
+            if np.isfinite(v).all():
+                fails.append(f"write:{k}: float64 では有限だが {np.dtype(dtypes[k]).name} への変換で overflow (max |v| {np.max(np.abs(v)):.3e})")
+            continue
+        if k == "ro" and not (vchk > 0.0).all():
             fails.append("write:ro に ρ<=0 がある")
-        if (k in ("roK", "roOmega") or k.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_"))) and np.isfinite(v).all() \
-                and (v < -1e-9 * max(float(np.max(np.abs(v))), 1e-300)).any():
-            fails.append(f"write:{k} に負値がある (min {v.min():.3e})")
-    missing_req = [k for k in dst["required"] if k not in out]
+        if (k in ("roK", "roOmega") or k.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_"))) \
+                and (vchk < -1e-9 * max(float(np.max(np.abs(vchk))), 1e-300)).any():
+            fails.append(f"write:{k} に負値がある (min {vchk.min():.3e})")
+    missing_req = [k for k in dst["required"] if k not in out64]
     if missing_req:
         fails.append(f"destination config が要求する保存量が揃っていない: {missing_req}")
     if fails:
         print("[convert] FAILED (書き込みなし):"); [print("   - " + m) for m in fails]
         sys.exit(1)
-    print(f"[convert] arrays to write ({len(out)}): {list(out)} (all finite; ρ>0; roK/roOmega/moments >= 0)")
+    print(f"[convert] arrays to write ({len(out)}, dtype {np.dtype(dt_default).name}): {list(out)} (checked after cast: all finite; ρ>0; roK/roOmega/moments >= 0)")
     if a.dry_run:
         print("[convert] --dry-run: all checks passed (書き込みなし)" + ("; reinit: composition re-initialized" if lossy else "")); return
 
-    # ---- 書き込み (同一メッシュ index コピー) ----
+    # ---- 書き込み (同一メッシュ index コピー; 全検査通過後にだけ既存データセットを削除/再作成) ----
     with h5py.File(a.dst, "r+") as d:
-        nd_ = d["VALUE/ro"].shape[0]
-        if nd_ != n:
-            raise SystemExit(f"REFUSED: CV 数が違う (source {n}, destination {nd_}); 同一メッシュの input h5 を指定する")
-        dt = d["VALUE/ro"].dtype
         for k in list(d["VALUE"].keys()):
             if (k.startswith("roY") and k[3:].isdigit()) or k.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")) or k == "roXi":
                 del d["VALUE/" + k]
         for k, v in out.items():
             ds = "VALUE/" + k
             if ds in d:
-                d[ds][...] = np.asarray(v).astype(dt)
+                d[ds][...] = v
             else:
-                d.create_dataset(ds, data=np.asarray(v).astype(dt))
+                d.create_dataset(ds, data=v)
         moved = list(out)
     print(f"[convert] wrote {a.dst}: {moved}")
     print("[convert] SUMMARY: all checks passed (finite, ρ>0, ΣY, " + ("T, roXi range; reinit: composition re-initialized)" if lossy else "real-species mass, total water, T, roXi range)"))
