@@ -47,8 +47,10 @@ CFD に渡せ (`tp_species: full`)、(3) 擬似種に畳む経路は**名前と�
   `Forge Saturation` はこれで H₂O 配列を**名前で解決** (フィルタに `Run Config` パスのプロパティを追加。設定が無ければ配列選択を必須にし `Y1` を自動採用しない)。
   `total_quantities.py` は既に全種を読むので変更なし (初稿の「Y1 決め打ち」は誤り)。
 - **やらない**: 化学反応 (frozen 組成のまま)、輸送係数の kinetic 混合則の変更、3 温度域 NASA-9、`thermo_d.cu` 内蔵 DB の変更、
-  forge が `inletProfile` CSV の `X` 列を直接補間すること (生成器が Y に換算して書く)、**SERN (`gas.model: frozen_tp`, `[EXH,AIR]` 固定) の `full` 化** (別仕様)。
-  対象は `gas.model: semiperfect` の設計経路のみ。
+  forge が `inletProfile` CSV の `X` 列を直接補間すること (生成器が Y に換算して書く)。
+- **やる (2026-09-15 ユーザ決定で追加)**: **SERN (`gas.model: frozen_tp`) も同じ `full | lumped` の選択にする** (§4.5)。SERN の `[EXH, AIR]` は
+  「流れごとに畳んだ 2 擬似種」= `lumped` の一形態として統一スキーマで表し、`full` では排気・外気の種集合の和で輸送する。排気/外気の見分け
+  (IC・warm restart・帳簿) は `lumped` なら $Y_{EXH}$、`full` なら**元素質量分率から作る混合分率** (frozen なら厳密に線形) を共通アクセサで返す。
 
 ## 3. 関連 docs と前提
 
@@ -113,12 +115,43 @@ evaluate:
 解決、未指定時は `Vapor Mass Fraction Array` の明示を必須にして **`Y1` を自動採用しない** (5 種順序では `Y1`=N2 を水蒸気として計算してしまう)。
 H₂O を先頭・中間・末尾に置いた順序入替試験を単体に入れる。
 
+### 4.5 SERN とノズル設計を同じ選択肢にする — 畳みは「流れ種別」でなく「run の選択」(2026-09-15 ユーザ決定)
+
+**統一スキーマ**: 擬似種 (lump) は「内部組成が固定された NASA-9 の線形混合」であり、由来が「組成の部分集合」(ノズル: MIXDRY) でも
+「流れ (作動点組成 / 外気)」(SERN: EXH / AIR) でも同じ物である。したがって
+
+```yaml
+evaluate:
+  tp_species:
+    mode: full | lumped          # (旧 pseudo = lumped で全部を 1 lump; split_h2o = 下の例)
+    lumps:                       # lumped のみ。値は「畳む対象」
+      MIXDRY: {from: composition, exclude: [H2O]}     # ノズル: 組成の部分集合を畳む
+      EXH:    {from: stream, stream: inflow}          # SERN: 流れの組成 (作動点 gas.composition) を畳む
+      AIR:    {from: stream, stream: external}        #       外気 (spec.external.composition / 乾燥空気)
+    keep: [H2O]                  # 独立種のまま残す種 (凝縮種は必ずここ)
+```
+
+- `full`: species = 使う全流れの組成の**和集合** (SERN なら排気 11 種 ∪ 空気 4 種 = 11–13 種)。IC は領域ごと (排気側 / 外気側) にその流れの Y ベクトルを貼り、
+  BC も流れごとの `Y{s}` (または `X{s}`)。ノズルは流れが 1 つなので従来の `full` と同じ。
+- `lumped`: 各 lump が 1 擬似種。SERN の現行 `[EXH, AIR]` は `lumps: {EXH: stream inflow, AIR: stream external}` と等価 (後方互換の別名にする)。
+  ノズルの `split_h2o` は `lumps: {MIXDRY: composition exclude [H2O]}, keep: [H2O]`。
+- **排気率アクセサ** `exhaust_fraction(fields, species_meta)` (`forge_design/gas/composition.py`):
+  `lumped` → $\xi = Y_{EXH}$。`full` → 元素質量分率 $Z_e=\sum_s Y_s\,w_{e,s}$ (frozen なので厳密に保存・線形) から
+  $\xi=(Z_e-Z_{e,air})/(Z_{e,exh}-Z_{e,air})$。元素 $e$ は排気と外気で差が最大のもの (H₂ 燃焼排気なら H、`|Z_{e,exh}-Z_{e,air}|` が最大の元素を自動選択;
+  power-off φ=0 で排気=空気なら $\xi$ は定義不能 → 帳簿は「排気なし」として扱う)。SERN runner の IC・warm restart (`roY0` 持ち越し)・帳簿は
+  すべてこのアクセサ経由にし、`Y0`/`SPECIES_ORDER` の直接参照を消す。
+- **コスト**: SERN 3D SST で `full` は輸送方程式 2 → 11–13 本。step 時間は +50–100 % の見込み (chem ブランチの 13 種実績から)。MOO の探索は `lumped`、
+  最終評価や凝縮・化学の前段は `full`、と run ごとに選べるのが目的なので既定は変えない (SERN 既定 `lumped`、ノズル既定は従来 `pseudo` 相当)。
+- **熱力学の等価性**: `full` と `lumped` は「各 lump の内部比が空間的に一定」のとき厳密に同じ (§3)。SERN では排気と外気が混合する層で
+  内部比は一定 (lump は流れ単位なので混合は lump 間の線形混合) → 非粘性 frozen なら同一解。粘性では差動拡散の分だけ異なる (仕様として記録)。
+
 ## 5. 実装ステップ
 
 1. `methods/thermophysics.md` 実装 §5 に `X{s}` 入力と species ログ、`methods/design/overview.md` に `tp_species` 3 モードと `composition_basis` を追記。
 2. `design/forge_design/gas/composition.py` (新: `mole_to_mass`/`mass_to_mole`、`ResolvedSpeciesDB`)、`semiperfect.py` を解決済み DB 経由に、`mixture_pseudo_species_split` の一般化 (`name`, `keep` 任意)、DB コメント。`frozen.mole_to_mass` は委譲。
 3. `design/forge_design/probdef.py`: `composition_basis`, `condensing_species`, `species_db` (YAML 所在基準) の読み込みと検証 (§4.1–4.2 の拒否条件)。
-4. `design/forge_design/evaluate/runner_axismach.py` (+ `runner.py`, `runner_sern.py` の共通部): `_tp_species_list` / `_tp_species_Y` / `_apply_gas_to_config` を 3 モード対応に。
+4. `design/forge_design/evaluate/runner_axismach.py` (+ `runner.py`): `_tp_species_list` / `_tp_species_Y` / `_apply_gas_to_config` を統一スキーマ (`full | lumped`, `lumps`, `keep`) に。
+4b. `design/forge_design/evaluate/runner_sern.py`: `SPECIES_ORDER` 固定を撤去し統一スキーマへ (`frozen_gases` は流れごとの `FrozenGas` + 解決済み DB、`paste_region_ic` / BC / `warm_from_run` は `exhaust_fraction` アクセサと流れごとの Y ベクトルで)。`[EXH, AIR]` は `lumps` の別名で後方互換。
 5. forge: host DB 解決、`boundaryCond.cpp` の `X{s}` → `Y{s}` 換算と検証、species 表ログ、凝縮種名と index の一致検査、残差 CSV の `rms_roY{s}` 列、`interp_field.py` の種名照合。
 5b. `tools/convert_species_field.py` (種変換 restart, §2) と `cea_thermo_to_species_db.py --check` の全種照合・失敗終了化。
 6. `solver_density_cuda/tools/gen_inlet_profile.py` `--X`、`tools/forge_species.py`、`axis_csv_va.py` / `total_quantities.py` の index 参照。
@@ -131,7 +164,8 @@ H₂O を先頭・中間・末尾に置いた順序入替試験を単体に入�
 | 1 | ~~codex plan レビュー~~ | 2026-09-15 実施 (§6.1)。M1–M8/m1–m2 を全て採用し §2/§3/§4/§6 に反映済み。**実装着手可** (ユーザ確認後; 順序は limiter plan の後) |
 | 2 | docs 先行更新 | ステップ 1 |
 | 3 | 共通基盤 (解決済み DB・換算・凝縮種名正本) | ステップ 2–3 + 単体試験を **CFD 回帰より前に** |
-| 4 | 設計チェーン 3 モード | ステップ 4 |
+| 4 | 設計チェーン統一スキーマ (ノズル) | ステップ 4 |
+| 4b | SERN の統一 (`SPECIES_ORDER` 撤去, 排気率アクセサ, 領域 IC) | ステップ 4b。既存 case/46 run との後方互換 (`[EXH,AIR]` 別名) を回帰で確認 |
 | 5 | forge 入力 `X{s}`・種名検査・`rms_roY`・restart 照合 | ステップ 5 |
 | 5b | 種変換 restart ツールと CEA `--check` 修正 | ステップ 5b (case/44 の旧 2 種場を 5 種へ移すのに必須) |
 | 6 | 後処理・ParaView 配列解決 | ステップ 6 |
@@ -154,6 +188,9 @@ H₂O を先頭・中間・末尾に置いた順序入替試験を単体に入�
   3. モル分率入力: `composition_basis: mole` で作った run の `species_db.yaml`/`bcondConfig.yaml` が解析後の値で一致。
   4. forge `X{s}`: bcond を `X0..X4` で書いた run が `Y` 版と `res_*.h5` でノイズ床以内。
   5. CEA 直読み DB: `gas.species_db` を渡した run は**その DB を正本**として設計・CFD が同じ係数を使うこと (prepare_info と species_db.yaml の出典で確認)。内蔵転記との「同一 run」は要求しない。
+- **SERN (case/46, 2D 小メッシュの frozen_tp 作動点 1 点, node)**: (i) `lumps: {EXH, AIR}` 指定が現行 `[EXH, AIR]` run と `res_*.h5` でノイズ床以内 (後方互換);
+  (ii) `full` (11–13 種) と `lumped` の非粘性 frozen 比較で、ノズル力・機体力・出口運動量が相対 1e-3 以内、排気率 $\xi$ (元素混合分率) と $Y_{EXH}$ の場が 1e-6 以内;
+  (iii) `rms_roY{s}` 込みで `check_convergence` PASS、`ΣY=1±1e-6`; (iv) step 時間の比 (記録のみ)。
 - **判定基準**: 上のゲート + `check_convergence.py` / `check_quasisteady.py` VERDICT 添付。step 時間の増分 (+3 輸送式) は記録のみ。
 
 ### 6.1 レビュー記録 (codex)
@@ -180,6 +217,7 @@ H₂O を先頭・中間・末尾に置いた順序入替試験を単体に入�
 ## 9. 変更ログ
 
 - `2026-09-15` — 初稿 (ユーザ要望: MIXDRY の中身を明示・ユーザ指定可能に、CEA ベースでモル分率指定)。
+- `2026-09-15` — ユーザ決定: SERN もノズル設計も `full | lumped` を run ごとに選べる統一スキーマにする (§4.5)。排気率は `lumped` で $Y_{EXH}$、`full` で元素混合分率。§4.5 は codex に再レビュー依頼。
 - `2026-09-15` — codex plan レビュー (GO-with-changes, M8/m2) を全採用: 解決済み DB の一元化、凝縮種の名前正本化と拒否条件、種変換 restart、X 入力契約、ParaView 配列解決、等価性条件の限定、CEA/転記差の扱い、収束ゲート。
 
 ## 10. 未確定事項
