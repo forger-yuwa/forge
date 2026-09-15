@@ -193,7 +193,7 @@ evaluate:
 | 15 | (M7) `condensationSpecies` ↔ `condModel` の対応検査 + config 読込単体 | forge |
 | 16 | ~~(M8) `lumped+keep` 等でもトレーサ有効化、`exhaust_fraction(run)` 共通アクセサ~~ | 済 (2026-09-16): トレーサは「inflow で 1・external で 0 の輸送種 (純粋な流入元ラベル) が無いとき」有効 (full と lumped+keep は有効, [EXH, AIR] は Y0)。`composition.exhaust_fraction(run_dir)` / `exhaust_fraction_field` が `species_meta.exhaust_fraction` ({kind, array, conserved}) を返す。単体追加 |
 | 17 | (M9) `forge_species.vapor_array` を凝縮の有無と独立に | `axis_csv_va.py` は species 名リストから H2O を直接解決 (済); `forge_species.py` 側は実装中 |
-| 18 | (M10) 小型 5 種 node TP の `check_convergence` PASS ケース; トレーサ誤差 (1.7e-4) の切り分け; 作動点変更 (m6_on→m10_on) と湿潤 restart の試験; README「同じ固定点」→「ゲート内で一致」 | 検証 |
+| 18 | (M10) 小型 5 種 node TP の `check_convergence` PASS ケース; 作動点変更 (m6_on→m10_on) と湿潤 restart の試験 | 検証中 (別エージェント: case/13 系で PASS ケース構築)。**トレーサ誤差は切り分け済** (2026-09-16, case/46 `run_0104`: lumped run に tracer を併用すると同一 run 内で `\|Xi−Y_EXH\|` 最大 1.8e-4 / 平均 4.6e-7 → 汎用スカラ輸送カーネルと化学種輸送カーネルの再構成差であり配置差ではない; §6 の「ξ と Y_EXH 1e-6」は同一カーネルでないと成立しないので **「平均 1e-6 以内 + 最大はカーネル差 (同一 run 実測) 以内」に改定**)。README「同じ固定点」→「ゲート内で一致」は済 |
 | 19 | ~~(m1) docs 同期~~ | 済 (2026-09-16): methods/thermophysics §5 (speciesDB_resolve/init, 上書き), plans/README (in_progress), condensation §7b |
 
 ## 6. 検証
@@ -216,7 +216,7 @@ evaluate:
 - **SERN (case/46)** (codex 再レビュー M6 を反映):
   - 単体: powered / power-off (m4_off: 燃料なしでも入口流あり) / 微小組成差 (既定外気 `AIR_MOLE` と作動点の空気) / `keep` 併用 / 種順序変更 で、流れごとの質量配分・展開行列・入口ベクトル・トレーサ BC が意図どおり。元素診断は近退化で「定義不能」を返す。
   - restart: 同一条件 restart (段階切替直前・直後) で全 `roY{s}`・トレーサ・ΣρY/ρ・T が保持される; 作動点変更 (m6_on→m10_on) は `convert_species_field.py` 経由で ΣρY=ρ・T 保存を検査。既存 `restart_by_index` の欠落修正による差は後方互換比較から分離して記録。
-  - 2D node Euler 作動点 1 点: (i) `lumps: {EXH, AIR}` 指定が現行 `[EXH, AIR]` run とノイズ床以内; (ii) `full` と `lumped` の非粘性 frozen 比較でノズル力・機体力・出口運動量が相対 1e-3 以内 (ゼロ近傍の力は $F_{ideal}$ 基準の絶対許容差)、トレーサ ξ と $Y_{EXH}$ の場が 1e-6 以内; 比較する両 run は全種残差込み `check_convergence` PASS (`require_residual_pass=True`)、全種の有限性・非負性、力の時系列 STEADY を**比較許容差より十分小さい変動幅** (drift/fluct 0.1 %; 既存 sern_forces の 2 %/5 % は不可) で要求。**実測 (2026-09-16)**: node Euler SERN は 24000 step でも残差 plateau (2.4 桁) で PASS が取れない (限界サイクル) ため、PASS の代わりに「同じ plateau (両 run の床が同じ) + 力 0.1 % STEADY + 力の一致」で判定した (§9)。
+  - 2D node Euler 作動点 1 点: (i) `lumps: {EXH, AIR}` 指定が現行 `[EXH, AIR]` run とノイズ床以内; (ii) `full` と `lumped` の非粘性 frozen 比較でノズル力・機体力・出口運動量が相対 1e-3 以内 (ゼロ近傍の力は $F_{ideal}$ 基準の絶対許容差)、トレーサ ξ と $Y_{EXH}$ の場が平均 1e-6 以内・最大は同一 run 内のカーネル差 (lumped+tracer 併用 run で実測, 2026-09-16: 1.8e-4) 以内 [改定: 汎用スカラと化学種のカーネルが違うため点ごとの 1e-6 は成立しない]; 比較する両 run は全種残差込み `check_convergence` PASS (`require_residual_pass=True`)、全種の有限性・非負性、力の時系列 STEADY を**比較許容差より十分小さい変動幅** (drift/fluct 0.1 %; 既存 sern_forces の 2 %/5 % は不可) で要求。**実測 (2026-09-16)**: node Euler SERN は 24000 step でも残差 plateau (2.4 桁) で PASS が取れない (限界サイクル) ため、PASS の代わりに「同じ plateau (両 run の床が同じ) + 力 0.1 % STEADY + 力の一致」で判定した (§9)。
   - 小型粘性二流体ケース (差動拡散あり): トレーサ ξ と元素混合分率が乖離することを確認し、`full`≠`lumped` の差を記録 (等価性は要求しない)。
   - 3D 経路: `runner_sern3d.warm_from_same_mesh` の全種保持を 1 段で確認。step 時間の比は記録のみ。
 - **判定基準**: 上のゲート + `check_convergence.py` / `check_quasisteady.py` VERDICT 添付。step 時間の増分 (+3 輸送式) は記録のみ。
