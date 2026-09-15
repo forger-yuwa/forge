@@ -158,7 +158,7 @@ def species_signature(run_dir):
     """restart 照合用の署名 (codex 2026-09-16 result-2 M2): 実際の solverConfig.yaml と解決済み species_db.yaml から作る。
     {thermalMethod, names (順序込み), tracer, thermoHrefTemp, species: {name: {MW, Tlo, Tmid, Thi, nasa9_low, nasa9_high, source}}}。
     speciesDBFile に無い種 (内蔵 DB) は係数を持たないので source="builtin" (MW は内蔵表) とし、両側 builtin なら同一とみなす。
-    species_meta.yaml があれば species の名前/順序が config と一致することを要求し、矛盾は例外 (refuse)。
+    species_meta.yaml があれば species の名前/順序と tracer.enabled が config と一致することを要求し、矛盾は例外 (refuse)。
     解決できなければ例外 (呼び手が既定でエラーにする)。CPG (thermalMethod≠2) は names=[]。"""
     info = species_info(run_dir)
     run_dir = info["run_dir"]
@@ -169,8 +169,9 @@ def species_signature(run_dir):
             raise ValueError(f"{run_dir}: species_meta.yaml の species {mnames} と solverConfig.yaml の physProp.species {info['names']} が矛盾する")
         mt = (meta.get("tracer") or {}).get("enabled")
         if mt is not None and bool(mt) != bool(info["tracer"]):
-            print(f"[forge_species] warning: {run_dir}: species_meta.yaml tracer.enabled={mt} と physProp.tracer={info['tracer']} が違う (config を正とする)",
-                  file=sys.stderr)
+            # トレーサの有無は保存量 roXi の要否を決めるので、meta と config の矛盾は拒否する (codex 2026-09-16 result-3 M1)。
+            raise ValueError(f"{run_dir}: species_meta.yaml tracer.enabled={mt} と solverConfig.yaml physProp.tracer={info['tracer']} が矛盾する"
+                             " (species_meta.yaml を config に合わせて直すこと)")
     db = {}
     if info["speciesDBFile"]:
         p = info["speciesDBFile"] if os.path.isabs(info["speciesDBFile"]) else os.path.join(run_dir, info["speciesDBFile"])

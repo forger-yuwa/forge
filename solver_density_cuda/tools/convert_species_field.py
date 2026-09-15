@@ -37,9 +37,11 @@ plans/active/thermophysics-cea-mole-fraction-species.md §2 (forge 本体) / §4
 
 - SRC: res_*.h5 (原始量 P,T,Ux,.. + Y{s}) か input h5 (保存量 roY{s})。DST: 同一メッシュ・同一 CV 数の input h5。
   ro/roU/roe/roK/roOmega・凝縮モーメント `rog_*/roQ*_*` (凝縮種が同名のとき) も index コピーする。
-- 種名は `species_meta.yaml` (`species`, `expansion`, `streams`, `condensing_species`, `tracer`, `MW`) を正とし、無ければ run dir の
-  `solverConfig.yaml` から取る (`--src-run/--dst-run` 省略時は h5 の隣)。condModel / condGasSpecies / thermoHrefTemp / species_db.yaml は
-  run dir の solverConfig.yaml から読む。
+- 両 run dir (`--src-run/--dst-run` 省略時は h5 の隣) の `solverConfig.yaml` + `species_db.yaml` が必須: **トレーサの有無と必須保存量
+  (`forge_species.required_conserved`) は config から決める**。`species_meta.yaml` は lump の展開・流れ組成・exhaust_fraction に使い、
+  config と species の名前/順序または tracer.enabled が矛盾すれば書き込み前に拒否する (codex result-3 M1)。destination config が
+  `tracer: exhaust` なら source の `roXi` を必ず持ち越す (conserve) か ρ·ξ で再生成する (reinit)。書き込む配列は 1 つの dict にまとめ、
+  全配列 (roK/roOmega/roXi/凝縮モーメント込み) の有限性・ρ>0・非負を最後に検査する (result-3 M3)。
 """
 import argparse, os, sys
 import numpy as np, h5py
@@ -47,7 +49,7 @@ import numpy as np, h5py
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from total_quantities import _TPGas  # noqa: E402
-from forge_species import species_info, load_yaml_str  # noqa: E402
+from forge_species import species_info, load_yaml_str, species_signature, required_conserved  # noqa: E402
 
 
 def _up(s):
@@ -182,9 +184,20 @@ def load_layout(meta_path, run_dir, label):
     """{names, expansion, streams, condensing, tracer, MW, db, Tref, condModel, condGasIndex, condensation, has_cfg}。"""
     meta = load_yaml_str(meta_path) if meta_path else None
     has_cfg = bool(run_dir) and os.path.exists(os.path.join(run_dir, "solverConfig.yaml"))
-    info = species_info(run_dir) if has_cfg else None
-    if meta is None and info is None:
-        raise SystemExit(f"{label}: species_meta.yaml も solverConfig.yaml も無い (--meta / --src-meta / --src-run / --dst-run)")
+    if not has_cfg:
+        raise SystemExit(f"{label}: solverConfig.yaml が無い ({run_dir}); 必須保存量・トレーサ・DB は config から決めるので run dir が要る (--src-run / --dst-run)")
+    info = species_info(run_dir)
+    # 署名 (config + 解決済み DB): tracer の有無と必須保存量はここから決める。species_meta.yaml との矛盾 (名前/順序/tracer) は拒否
+    # (codex 2026-09-16 result-3 M1)。
+    try:
+        sig = species_signature(run_dir)
+    except Exception as e:  # noqa: BLE001
+        raise SystemExit(f"{label}: 化学種署名が解決できない ({run_dir}): {e}")
+    if meta is not None and meta.get("species") is not None and [_up(x) for x in meta["species"]] != [_up(x) for x in sig["names"]]:
+        raise SystemExit(f"{label}: species_meta.yaml ({meta_path}) の species {meta['species']} と solverConfig.yaml の physProp.species {sig['names']} が矛盾する (REFUSED)")
+    if meta is not None and (meta.get("tracer") or {}).get("enabled") is not None \
+            and bool((meta.get("tracer") or {}).get("enabled")) != bool(sig["tracer"]):
+        raise SystemExit(f"{label}: species_meta.yaml ({meta_path}) の tracer.enabled={(meta.get('tracer') or {}).get('enabled')} と solverConfig.yaml の physProp.tracer={sig['tracer']} が矛盾する (REFUSED)")
     names = [_up(s) for s in (meta["species"] if meta else info["names"])]
     if info and [_up(s) for s in info["names"]] != names:
         raise SystemExit(f"{label}: species_meta.yaml の species {names} と solverConfig.yaml の physProp.species {info['names']} が矛盾する (REFUSED)")
@@ -212,7 +225,7 @@ def load_layout(meta_path, run_dir, label):
         cond = _up(meta["condensing_species"])
     elif info and (info["condensing"] or info["h2o_index"] is not None):
         cond = _up(info["condensing"] or info["names"][info["h2o_index"]])
-    tracer = bool(((meta or {}).get("tracer") or {}).get("enabled")) if meta else bool(info and info["tracer"])
+    tracer = bool(sig["tracer"])   # config が正 (meta との矛盾は上で拒否済み)
     MW = {_up(k): float(v) for k, v in ((meta or {}).get("MW") or (info["MW"] if info else {})).items()}
     db = None; Tref = 0.0; condModel = 1; condGasIndex = None; condensation = False
     if has_cfg:
@@ -227,7 +240,7 @@ def load_layout(meta_path, run_dir, label):
         condensation = bool(info["condensation"]); condModel = int(info["condModel"])
         condGasIndex = info["condensing_index"]
     return {"names": names, "expansion": exp, "streams": streams, "stream_Y": stream_Y, "xi_spec": xi_spec,
-            "condensing": cond, "tracer": tracer, "MW": MW,
+            "condensing": cond, "tracer": tracer, "MW": MW, "sig": sig, "required": required_conserved(sig),
             "db": db, "Tref": Tref, "run_dir": run_dir, "condModel": condModel, "condGasIndex": condGasIndex,
             "condensation": condensation, "has_cfg": has_cfg}
 
@@ -360,10 +373,16 @@ def main():
     with h5py.File(a.src, "r") as f:
         V = f["VALUE"]
         is_res = "P" in V and "Ux" in V
-        need = ["ro"] + (["Ux", "Uy", "Uz", "roe"] if is_res else ["roUx", "roUy", "roUz", "roe"])
-        need += [(f"Y{s}" if is_res and f"roY{s}" not in V else f"roY{s}") for s in range(ns)] if ns >= 2 else []
-        if src["tracer"]:
-            need.append("Xi" if (is_res and "roXi" not in V) else "roXi")
+        # 必須データセットは source の config 署名 (required_conserved) から決める。res では原始量 (Ux, Y{s}, Xi) で代替可。
+        alt = {"roUx": "Ux", "roUy": "Uy", "roUz": "Uz", "roXi": "Xi"}
+        need = []
+        for k in src["required"]:
+            if k in V:
+                need.append(k)
+            elif is_res and (alt.get(k) or (k[2:] if k.startswith("roY") else None)) in V:
+                need.append(alt.get(k) or k[2:])
+            else:
+                need.append(k)
         missing = [k for k in need if k not in V]
         if missing:
             raise SystemExit(f"REFUSED: source {a.src} に必須データセットが無い: {missing} (species {src['names']}, tracer {src['tracer']})")
@@ -412,6 +431,11 @@ def main():
             fails.append(f"{k}: 負の液相モーメントがある (min {v.min():.3e})")
     if roXi is not None:
         _check_finite(fails, "roXi", roXi)
+    for nm, arr in (("roK", roK), ("roOmega", roOm)):
+        if arr is not None:
+            _check_finite(fails, nm, arr)
+            if np.isfinite(arr).all() and (arr < -1e-9 * max(float(np.max(np.abs(arr))), 1e-300)).any():
+                fails.append(f"{nm}: 負値がある (min {arr.min():.3e})")
     if Tsrc is not None:
         _check_finite(fails, "T (source res)", Tsrc)
     if fails:
@@ -473,18 +497,22 @@ def main():
         Ydst = transfer_reinit(dst, xi)
     nd = len(dst["names"])
 
-    # ---- トレーサ ----
+    # ---- トレーサ (destination config が tracer: exhaust なら roXi を必ず書く: 持ち越し (conserve) か再生成 (reinit)) ----
     roXi_out = None
     if dst["tracer"]:
-        if roXi is not None:
-            roXi_out = roXi.copy(); how = "copied from source roXi"
+        if a.mode == "reinit":
+            if xi is None:
+                raise SystemExit("REFUSED: destination は tracer (roXi) を要るが ξ が導けない")
+            roXi_out = ro * xi; how = f"regenerated roXi = ρ·ξ with ξ = {xi_how}"
+        elif roXi is not None:
+            roXi_out = roXi.copy(); how = "carried from source roXi"
         elif xi is not None:
             roXi_out = ro * xi; how = f"generated roXi = ρ·ξ with ξ = {xi_how}"
         else:
-            raise SystemExit("REFUSED: destination は tracer (roXi) を要るが source に roXi も純流入ラベル種も無い")
+            raise SystemExit("REFUSED: destination は tracer (roXi) を要るが source に roXi も exhaust_fraction も純流入ラベル種も無い")
         print(f"[convert]   tracer: {how}")
     elif roXi is not None:
-        print("[convert]   note: source roXi is dropped (destination has no tracer)")
+        print("[convert]   note: source roXi is dropped (destination config has no physProp.tracer)")
 
     # ---- 凝縮モーメント ----
     if moments and not dst["condensation"]:
@@ -577,9 +605,32 @@ def main():
             i = int(np.nanargmax(dT)) if np.isfinite(dT).any() else 0
             fails.append(f"T が保存されない (max |ΔT| {_amax(dT):.3e} K at cell {i}: T_src {Tsrc[i]:.3f}, T_chk {Tchk[i]:.3f}, g {g_dst[i]:.3e})")
 
+    # ---- 書き込む配列を 1 つの dict にまとめ、全配列の有限性・正値性を最後に検査 (codex result-3 M3) ----
+    out = {"ro": ro, "roUx": ro * Ux, "roUy": ro * Uy, "roUz": ro * Uz, "roe": roe_out}
+    for j in range(nd):
+        out[f"roY{j}"] = ro * Ydst[j]
+    out.update(moments_out)
+    if roK is not None: out["roK"] = roK
+    if roOm is not None: out["roOmega"] = roOm
+    if roXi_out is not None: out["roXi"] = roXi_out
+    for k, v in out.items():
+        v = np.asarray(v, float)
+        if v.shape != (n,):
+            fails.append(f"{k}: 長さ {v.shape} が CV 数 {n} と違う")
+            continue
+        _check_finite(fails, "write:" + k, v)
+        if k == "ro" and not (np.isfinite(v).all() and (v > 0.0).all()):
+            fails.append("write:ro に ρ<=0 がある")
+        if (k in ("roK", "roOmega") or k.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_"))) and np.isfinite(v).all() \
+                and (v < -1e-9 * max(float(np.max(np.abs(v))), 1e-300)).any():
+            fails.append(f"write:{k} に負値がある (min {v.min():.3e})")
+    missing_req = [k for k in dst["required"] if k not in out]
+    if missing_req:
+        fails.append(f"destination config が要求する保存量が揃っていない: {missing_req}")
     if fails:
         print("[convert] FAILED (書き込みなし):"); [print("   - " + m) for m in fails]
         sys.exit(1)
+    print(f"[convert] arrays to write ({len(out)}): {list(out)} (all finite; ρ>0; roK/roOmega/moments >= 0)")
     if a.dry_run:
         print("[convert] --dry-run: all checks passed (書き込みなし)" + ("; reinit: composition re-initialized" if lossy else "")); return
 
@@ -589,28 +640,16 @@ def main():
         if nd_ != n:
             raise SystemExit(f"REFUSED: CV 数が違う (source {n}, destination {nd_}); 同一メッシュの input h5 を指定する")
         dt = d["VALUE/ro"].dtype
-
-        def put(name, arr):
-            ds = "VALUE/" + name
-            if ds in d:
-                d[ds][...] = arr.astype(dt)
-            else:
-                d.create_dataset(ds, data=arr.astype(dt))
-
-        put("ro", ro); put("roUx", ro * Ux); put("roUy", ro * Uy); put("roUz", ro * Uz); put("roe", roe_out)
-        if roK is not None: put("roK", roK)
-        if roOm is not None: put("roOmega", roOm)
         for k in list(d["VALUE"].keys()):
             if (k.startswith("roY") and k[3:].isdigit()) or k.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")) or k == "roXi":
                 del d["VALUE/" + k]
-        for j in range(nd):
-            put(f"roY{j}", ro * Ydst[j])
-        for k, v in moments_out.items():
-            put(k, v)
-        if roXi_out is not None:
-            put("roXi", roXi_out)
-        moved = ["ro", "roUx", "roUy", "roUz", "roe"] + [f"roY{j}" for j in range(nd)] + list(moments_out) \
-            + (["roK", "roOmega"] if roK is not None else []) + (["roXi"] if roXi_out is not None else [])
+        for k, v in out.items():
+            ds = "VALUE/" + k
+            if ds in d:
+                d[ds][...] = np.asarray(v).astype(dt)
+            else:
+                d.create_dataset(ds, data=np.asarray(v).astype(dt))
+        moved = list(out)
     print(f"[convert] wrote {a.dst}: {moved}")
     print("[convert] SUMMARY: all checks passed (finite, ρ>0, ΣY, " + ("T, roXi range; reinit: composition re-initialized)" if lossy else "real-species mass, total water, T, roXi range)"))
 

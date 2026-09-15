@@ -198,10 +198,10 @@ evaluate:
 | 21 | (M2) restart 署名 | 設計側済 (2026-09-16): `_species_signature` は solverConfig + species_db (順序・MW・両区間係数・区切り・datum・tracer)、meta との矛盾・TP の照合不能・必要保存量の欠落を拒否 (単体: 係数摂動/トレーサ差/順序矛盾/config 無し)。forge ツール側も済: `forge_species.species_signature` (config + DB: 順序・MW・両区間係数・区切り・datum・tracer; meta の順序矛盾は拒否)、`compare_signatures`、`required_conserved`; `interp_field.py` / 変換器は署名不一致・照合不能・必須保存量欠落を拒否 (run_0100 vs 0104 → tracer 差, 係数 +1 → 検出, roY1 削除 → 拒否) |
 | 22 | ~~(M3) 変換器の有限性・非負・EOS 残差検査 + 失敗系試験~~ | 済 (2026-09-16): 有限性 (ρ/U/roe/Y/モーメント/roXi/T)・ρ>0・Y<−1e-9 拒否・ΣY・EOS 反転残差 (1e-6|e|+1 J/kg)・括弧端・NaN は常に不合格 (`_amax`/`not (x<=tol)`); `tests/unit/test_convert_species_field_fail.py` 12/12 PASS (NaN roe / 負 ρ / ΣY 1.5 / 負 Y / 括弧端 / roY1 欠落 / meta 矛盾 / 目標 Y_transport 和 1.1 / ξ 導出不能 / roXi 欠落 + 正常 2 件) |
 | 23 | ~~(m1) docs の ξ 説明統一、§6 旧ゲートの履歴化、粘性試験の延期明記、M10 の桁数訂正~~ | 済 (2026-09-16) |
-| 24 | (result-3 M1) 変換器: 必須保存量とトレーサの有無を config (`required_conserved`) で決め、meta との矛盾は書込み前に拒否 (`roXi` を落とさない) | forge ツール |
-| 25 | (M2) `_TPGas` (total_quantities/変換器) の低温処理をソルバと一致 (Tlo/Thi 外は cp 固定・h 線形外挿) + 独立参照の低温試験 | forge ツール |
-| 26 | (M3) 変換器の全書込配列 (roK/roOmega 含む) の有限性検査 + 失敗系 | forge ツール |
-| 27 | (m1) solver-settings の ξ 説明、§9 の桁数訂正、plans/README の段階 | docs |
+| 24 | ~~(result-3 M1) 変換器: 必須保存量とトレーサの有無を config で決め、meta との矛盾は書込み前に拒否~~ | 済 (2026-09-16): `species_signature` は meta/config のトレーサ矛盾も ValueError; 変換器は元/先とも config の `required_conserved` で必須保存量を決め、矛盾は読込前に拒否、先 config に tracer があれば roXi を持ち越し/生成 (run_0104 → 自身: roXi 差 0; meta enabled false の複製 → 拒否)。失敗系 +3 |
+| 25 | ~~(M2) `_TPGas` の低温処理をソルバと一致~~ | 済 (2026-09-16): 種ごとの Tlo/Tmid/Thi、範囲外は cp 固定・h 線形・s° 対数 (`thermo_d.cuh` と同式)、RU をソルバ値 8.314462618 に; `tests/unit/test_tpgas_lowT.py` (`.cuh` 式の独立移植と比較, 100–6500 K で 2.7e-15、codex 反例 [0.95,0.05]→[0.8,0.2] @100/150 K の T 差 4e-13 K [旧 1.38/0.10 K]) 5/5 PASS; 範囲内の total_quantities は T0 1.5e-8 K (RU 整合分のみ) |
+| 26 | ~~(M3) 変換器の全書込配列の有限性検査~~ | 済 (2026-09-16): 書込配列を 1 つの dict で管理し全配列の形状・有限性・ρ>0・roK/roOmega/モーメント非負を検査; 失敗系 19/19 PASS (+roK NaN / roOmega Inf / roK 負 / 正常 turb) |
+| 27 | ~~(m1) docs~~ | 済 (2026-09-16) |
 | 19 | ~~(m1) docs 同期~~ | 済 (2026-09-16): methods/thermophysics §5 (speciesDB_resolve/init, 上書き), plans/README (in_progress), condensation §7b |
 
 ## 6. 検証
@@ -256,6 +256,7 @@ evaluate:
 
 ## 9. 変更ログ
 
+- `2026-09-16` — result-3 の M1–M3/m1 を修正・検証 (§5.1 #24–#27 済): 変換器は config 駆動 (トレーサ矛盾拒否・roXi 保持)、Python NASA-9 の範囲外処理をソルバと一致 (低温反例 T 差 4e-13 K)、全書込配列の有限性 (失敗系 19 件)。既存回帰 (run_0196 湿潤反転 1.9e-4 K, run_0100↔0101, run_0102→m10) 再確認。**codex result 4 回目へ**。
 - `2026-09-16` — codex result 3 回目 **NO-GO (M3/m1, 全て変換器と docs)** を全採用 (§6.1, §5.1 #24–#27)。
 - `2026-09-16` — result-2 の M1–M3/m1 を修正・検証 (§5.1 #20–#23 済): 組成再初期化 Y_t = ξ Y_in^dst + (1−ξ) Y_ext^dst (warm_from_run + 変換器 reinit; case/46 `run_0105`/`0106`, 単体で目標組成一致)、実 config + DB の署名照合 (係数摂動・tracer 差・順序矛盾を検出)、変換器の NaN 安全な事前検査と失敗系 12 件。**codex result 3 回目へ**。
 - `2026-09-16` — result-1 の M2–M7/M9 (forge 側) と M1/M3/M8/M9/m1 (設計側) を修正・検証 (§5.1 #9–#19 済); 作動点変更 warm start (`run_0105`) と湿潤 restart の変換器検査を追加。トレーサ差はカーネル差と切り分け (§6 改定)。**codex result 2 回目へ**。

@@ -4,7 +4,8 @@
 合成の 2 種 (N2, H2O; 内蔵 DB と同じ NASA-9 係数) の run を一時ディレクトリに作り、変換器を子プロセスで呼んで
   - 正常入力は通る (exit 0, "all checks passed")
   - roe=NaN セル / 負の ρ / ΣY≠1 / 負の Y / T が括弧端 (異常に低い e) / roY データセット欠落 /
-    species_meta と solverConfig の矛盾 / reinit で destination の Y_transport の和≠1
+    species_meta と solverConfig の矛盾 (species 順序, tracer.enabled; source 側・destination 側) / reinit で destination の
+    Y_transport の和≠1 / roK=NaN / roOmega=Inf / 負の roK / tracer 必須なのに ξ が導けない
   がそれぞれ**書き込み前に**明確なメッセージで拒否され非ゼロ終了することを確認する。
 usage: python3 tests/unit/test_convert_species_field_fail.py     ([PASS]/[FAIL], 失敗があれば非ゼロ終了)
 """
@@ -41,7 +42,7 @@ def check(ok, what):
         g_fail += 1
 
 
-def make_run(d, tracer=False):
+def make_run(d, tracer=False, meta_tracer=None):
     os.makedirs(d, exist_ok=True)
     cfg = ("mesh: {meshFormat: \"hdf5\", discretization: \"node\", meshFileName: \"in.h5\", valueFileName: \"in.h5\"}\ngpu: 1\nsolver: \"SLAU\"\n"
            "physProp: {isCompressible: 1, thermalMethod: 2, viscMethod: 0, ro: 1.2, visc: 0.0, thermCond: 0.0, cp: 1000.0, gamma: 1.4,\n"
@@ -52,7 +53,7 @@ def make_run(d, tracer=False):
     open(os.path.join(d, "solverConfig.yaml"), "w").write(cfg)
     yaml.safe_dump(DB, open(os.path.join(d, "species_db.yaml"), "w"), sort_keys=False)
     meta = {"mode": "full", "species": NAMES, "keep": [], "condensing_species": None, "condensing_index": None,
-            "tracer": {"enabled": tracer, "name": "roXi" if tracer else None, "definition": None},
+            "tracer": {"enabled": (tracer if meta_tracer is None else meta_tracer), "name": "roXi" if tracer else None, "definition": None},
             "lumps": {}, "expansion": {s: {s: 1.0} for s in NAMES},
             "streams": {"inflow": {"X": {}, "Y": {"N2": 0.9, "H2O": 0.1}, "Y_transport": [0.9, 0.1], "sum_input": 1.0},
                         "external": {"X": {}, "Y": {"N2": 1.0}, "Y_transport": [1.0, 0.0], "sum_input": 1.0}},
@@ -61,7 +62,7 @@ def make_run(d, tracer=False):
     return meta
 
 
-def write_h5(path, ro, Y, T, u=100.0, roXi=None, drop=None):
+def write_h5(path, ro, Y, T, u=100.0, roXi=None, drop=None, roK=None, roOmega=None):
     gas = _TPGas(DB, NAMES, 298.15)
     Yl = [Y[0], Y[1]]
     e = gas.h(Yl, T) - gas.Rmix(Yl) * T
@@ -71,6 +72,10 @@ def write_h5(path, ro, Y, T, u=100.0, roXi=None, drop=None):
              "roY0": ro * Y[0], "roY1": ro * Y[1]}
         if roXi is not None:
             V["roXi"] = roXi
+        if roK is not None:
+            V["roK"] = roK
+        if roOmega is not None:
+            V["roOmega"] = roOmega
         for k, v in V.items():
             if k != drop:
                 f.create_dataset("VALUE/" + k, data=np.asarray(v, np.float32))
@@ -88,9 +93,10 @@ def main():
     ro0 = np.full(N, 0.8); Y0 = np.array([np.full(N, 0.95), np.full(N, 0.05)]); T0 = np.linspace(300.0, 1500.0, N)
     dst = os.path.join(root, "dst"); make_run(dst); write_h5(os.path.join(dst, "in.h5"), ro0, Y0, T0)
 
-    def case(name, expect_ok, keyword, ro=ro0, Y=Y0, T=T0, drop=None, roXi=None, dst_dir=dst, extra=(), src_tracer=False, patch=None):
-        src = os.path.join(root, "src_" + name); make_run(src, tracer=src_tracer)
-        write_h5(os.path.join(src, "in.h5"), ro, Y, T, roXi=roXi, drop=drop)
+    def case(name, expect_ok, keyword, ro=ro0, Y=Y0, T=T0, drop=None, roXi=None, dst_dir=dst, extra=(), src_tracer=False, patch=None,
+             roK=None, roOmega=None, meta_tracer=None):
+        src = os.path.join(root, "src_" + name); make_run(src, tracer=src_tracer, meta_tracer=meta_tracer)
+        write_h5(os.path.join(src, "in.h5"), ro, Y, T, roXi=roXi, drop=drop, roK=roK, roOmega=roOmega)
         if patch:
             patch(src)
         rc, out = run_tool(src, dst_dir, extra)
@@ -128,6 +134,18 @@ def main():
     case("tracer-underivable", False, "roXi", dst_dir=dst_tr)
     # source tracer declared but roXi dataset missing
     case("missing-roXi", False, "必須データセット", src_tracer=True)
+    # turbulence conserved variables: NaN / Inf must be refused (result-3 M3); finite roK/roOmega pass through
+    case("roK-nan", False, "非有限", roK=np.where(np.arange(N) == 1, np.nan, 0.5), roOmega=np.full(N, 100.0))
+    case("roOmega-inf", False, "非有限", roK=np.full(N, 0.5), roOmega=np.where(np.arange(N) == 6, np.inf, 100.0))
+    case("roK-negative", False, "負値", roK=np.where(np.arange(N) == 4, -1.0, 0.5), roOmega=np.full(N, 100.0))
+    case("good-turb", True, "all checks passed", roK=np.full(N, 0.5), roOmega=np.full(N, 100.0))
+    # species_meta tracer.enabled contradicts solverConfig physProp.tracer (source side, and destination side) -> refused (result-3 M1)
+    case("meta-tracer-contradiction-src", False, "矛盾", src_tracer=True, roXi=ro0 * 0.3, meta_tracer=False)
+    dst_ct = os.path.join(root, "dst_tracer_contra"); make_run(dst_ct, tracer=True, meta_tracer=False); write_h5(os.path.join(dst_ct, "in.h5"), ro0, Y0, T0)
+    case("meta-tracer-contradiction-dst", False, "矛盾", dst_dir=dst_ct, src_tracer=True, roXi=ro0 * 0.3)
+    # destination config has tracer: source roXi is carried (same layout), never dropped
+    dst_tr2 = os.path.join(root, "dst_tracer_ok"); make_run(dst_tr2, tracer=True); write_h5(os.path.join(dst_tr2, "in.h5"), ro0, Y0, T0)
+    case("tracer-carried", True, "carried from source roXi", dst_dir=dst_tr2, src_tracer=True, roXi=ro0 * 0.3)
 
     print(("ALL PASS" if g_fail == 0 else "FAILED") + f" ({g_fail} failures); tmp {root}")
     shutil.rmtree(root, ignore_errors=True)
