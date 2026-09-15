@@ -23,6 +23,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [species-passive-scalar-unification.md](active/species-passive-scalar-unification.md) | `convection / diffusion / condensation / time_integration` | **受動スカラ (排気トレーサ `roXi`・凝縮モーメント) を化学種カーネルの受動種として 2 次 MUSCL + リミッタ + 拡散で輸送し、dual-time の化学種修正 (chem e296f0d0) を移植して受動種にも BDF 項** (2026-09-17 起票, draft; ユーザ決定 2026-09-16「全部化学種の経路を通す」)。followups F-cf8 / F-sp1 の実体 |
 | [tooling-nozzle-isothermal-wall-chain.md](active/tooling-nozzle-isothermal-wall-chain.md) | `tooling / boundary layer` | **ノズル設計チェーンの等温壁化** (2026-09-12 起票): `spec.wall_thermal` を単一ソースに bcond/積分法初期壁/帳簿を駆動、超音速冷却壁平板 (case/48, M4.19, $T_w/T_{aw}$ 0.26, y₁⁺ 掃引) で低 Re SST を van Driest II / RAF / CONTUR / SU2 と照合 → ノズル CPG × SU2 等温 → 生産 TP (case/44) の等温 δ\* 反復と壁温感度台帳。壁関数と CHT は対象外 (弱 CHT ループの方針のみ §4.6) |
 | [condensation-followups.md](active/condensation-followups.md) | `condensation` | **凝縮モデルの後続課題の正本** (2026-09-13 起票, draft): α 感度 / 分圧スイープ / 既定値 / σ0.97 h0 変動 / Arthur 壁圧過大の切り分け / CPG 二相音速 / 露点線 / Longshot 条件 / 境界試験・流束収支 / check_quasisteady 統合 |
 | [condensation-kantrowitz-gamma-twophase-sonic.md](active/condensation-kantrowitz-gamma-twophase-sonic.md) | `condensation` | **Kantrowitz 補正の γ を蒸気 γ_v に修正 + 凝縮セルの二相 frozen 音速** (2026-09-10 起票): 旧実装はセル気相混合 γ (H2O–N2 で 1.40) と g を無視した全蒸気音速。A/B キー `condKantrowitzGammaMode` / `condSonicModel`、Wyslouzil 2D (case/16) で変化量を定量化 |
