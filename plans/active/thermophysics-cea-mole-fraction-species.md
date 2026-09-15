@@ -202,7 +202,7 @@ evaluate:
   (c) `full` と `lumped` の混合 cp(T)/h(T) を 200–3000 K で比較: **`rtol 1e-12` + 量別 atol (cp 1e-9 J/kg/K, h 1e-6 J/kg)**、$h(T_{ref})=0$ 近傍も検査
   (既存 split の実測差は cp 1.6e-12 / h 2.3e-9 なので絶対 1e-10 は不適; codex m2); (d) `species_db.yaml` は解析後の値を比較し、ビット同一は同じ正規化済み入力の再出力に限る;
   (e) 拒否条件 (§4.1–4.3) がそれぞれエラーになる; (f) `forge_species.py` と ParaView の H₂O 順序入替 (先頭/中間/末尾); (g) 種変換 restart の `ΣρY=ρ`・総水量・T 保存;
-  (h) CEA 直読み DB vs 内蔵転記の全使用種 MW・両温度域係数の差を表にし、物性値 (cp, h) の差を許容差 (rtol 1e-6) で判定。
+  (h) CEA 直読み DB vs 内蔵転記の全使用種 MW・両温度域係数の差を表にし、物性値 (cp, h) の差を許容差で判定。**実測 (2026-09-16, `cea_thermo_to_species_db.py --check`, va3 5 種)**: 係数は N2/O2/CO2/H2O が両区間 0、AR は high a0 (20.105 vs 0; 内蔵転記の既知差)、MW は H2O 1.11e-6 (0.01801528 vs 転記 0.0180153) → cp/h の相対差も 1.11e-6 で、当初の rtol 1e-6 をわずかに超える。許容差を **rtol 5e-6** に改定 (根拠: 転記 MW の 6 桁丸め; 設計 R 285.27044 vs 285.27043, γ* 5e-12 で実用上無差)。外部 DB を使う run はその DB が設計・CFD 双方の正本なので内蔵との差は結果に混入しない (§3)。
 - **収束済み小型 TP ケース (node のみ; 2026-09-16 ユーザ指示で cell は対象外, codex M8 の「両方」を改定)**: 5 種 frozen の 2D 亜音速ノズル (case/13 系の小メッシュ) で `check_convergence.py` **PASS** (`rms_roY{s}` 列込み)、
   `ΣY=1±1e-6`・負値なし。ここで X/Y 入力・種順序・旧入力 (`split_h2o`) の回帰を行い、`res_*.h5` がノイズ床以内で一致。
 - **case/44 va3 M4.19 (node Euler TP)** — 未収束 (warm 床 plateau) の既存 run は**回帰参考**で、収束解一致の根拠にはしない:
