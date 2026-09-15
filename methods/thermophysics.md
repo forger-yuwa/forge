@@ -246,6 +246,10 @@ L/R 状態の `roe_L/Ht_L/ca_L` (および R 側) を NASA で再構成。Roe �
   乱流シュミット数 `Sc_t` は `physProp.Sc_t` または `turbulence.turbulentSchmidt` で設定する
   (両方あれば後者を優先。`turbulence.turbulentPrandtl` と同じブロックで揃えられる)。既定 0.7。
 - `nSpecies` は `species` の要素数。未指定で `thermalMethod==2` なら既定 N2 単成分。
+- **(計画, 2026-09-15)** 組成のモル分率入力: `bcondConfig` の `floats: {X0: .., X1: ..}` と IC 生成・`inletProfile` CSV の `X_<name>` を
+  `speciesDBFile` の MW で $Y_k = X_k M_k/\sum_j X_j M_j$ に換算して既存の `Y{s}` 経路へ流す (`Y` と `X` の混在はエラー)。起動ログに species 表
+  (名前, MW, 入口 Y/X) を出す。設計チェーン側 (`composition_basis: mole`, `tp_species: full | lumped | pseudo`) と合わせて
+  plan [thermophysics-cea-mole-fraction-species](../plans/active/thermophysics-cea-mole-fraction-species.md)。
 
 ### 5b. 多成分化学種輸送 (M2) `cuda_forge/speciesTransport_d.{cuh,cu}`
 

@@ -750,6 +750,13 @@ CFD 側の差は多成分輸送の離散化誤差だけ (検証: M4.2 で軸 M �
 IC は `paste_isentropic_ic(species_Y=)` が `roY{s}` を書き、入口 BC は `Y0/Y1` を bcond に書く。
 低温側は forge の `Tlo`=200 K クランプ (cp 凍結・h 線形接続) と設計側 `T_FLOOR` が一致する。
 
+**(計画, 2026-09-15) 組成入力と species 分割の 3 モード** ([plan](../../plans/active/thermophysics-cea-mole-fraction-species.md)):
+`gas.composition_basis: mole | mass` (既定 mass) で `gas.species` をモル分率でも書けるようにし、`evaluate.tp_species` を
+`pseudo` (全部 1 擬似種 `MIX`) / `lumped` (`tp_lump: {name, keep}` で畳む種と名前をユーザ指定; `split_h2o` はその別名) /
+`full` (各種を CEA NASA-9 の係数で独立種、`condGasSpecies` は `gas.condensing_species` から自動) の 3 択にする。`species_db.yaml` の
+各エントリに由来 (CEA 種名 / 擬似種の構成種とモル分率) をコメントで残す。`gas.species_db` で `cea_thermo_to_species_db.py` が
+`thermo.inp` から作った DB を直接使える。dry では 3 モードは同一解 (線形混合が厳密)。
+
 ## メッシュ (構造化・トポロジ固定)
 
 構造化 (i,j) quad メッシュを壁曲線から代数生成し (x: スロート細分の間隔関数逆積分 /

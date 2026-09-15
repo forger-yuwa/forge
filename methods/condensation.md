@@ -690,7 +690,7 @@ $r_*$ を僅かに割ると $dr/dt<0$ → roQ1 が負帰還で 0 へ暴走崩壊
 **本体 kernel とヤコビアン (`cond_source_vector`) の両方で同一の成長ガード ($\bar r>r_*$ のみ成長・$dr/dt\ge0$) と
 $r_{\rm nuc}$ を使う** (ヤコビアンだけガード無しだと亜臨界で過大な $\partial S/\partial Q_1$ が出て roQ1 を 0 に潰す)。
 
-`res_ro<φ> += S_φ·V` で advection 残差へ加算。物性は [condensationProperties_d.cuh](../solver_density_cuda/cuda_forge/condensationProperties_d.cuh)。
+`res_ro<φ> += S_φ·V` で advection 残差へ加算 (**現行は θ 倍して加算 — その Δτ 依存は §4c**)。物性は [condensationProperties_d.cuh](../solver_density_cuda/cuda_forge/condensationProperties_d.cuh)。
 
 #### 安定化 (初期実装の主眼)
 
@@ -785,6 +785,23 @@ $kRT^2\ln S/(\rho_lL^2)$ を共有し Knudsen 内挿のみ $1/(1+3.18Kn)$ に差
 平均自由行程に全圧 $p$ を用いる (希薄蒸気で $p_v$ を使うと Kn 過大になるのを回避)。
 
 ---
+
+### 4c. θ 律速の擬似時間刻み依存 (2026-09-15 発見) と更新クランプ化 (計画)
+
+上の θ 律速 (1 step の $\Delta g\le$ `dg_max`=5e-3、潜熱 $\Delta T=\Delta g\,L/c_v\le$ `dT_max`=1 K、蒸気枯渇) は
+$\Delta g = S_g\,\Delta\tau_{loc}/\rho$ で評価され、**その θ を定常残差のソース $S_{Q_0..Q_2},S_g$ とヤコビアン `sj_g` に掛けている**
+(`condensationSourceKernels_d.cuh`)。$\Delta\tau_{loc}$ に比例するため、定常局所時間刻み (`unsteady 0`) の収束解が `cfl_pseudo` と
+セル体積に依存する (残差 $R$ 自体が $\Delta\tau$ の関数になり固定点が動く)。
+
+- **実測** (case/44 va3 M4.19, 6 m ノズル, node Euler TP, 入口 Tt 分布): $\Delta\tau_{loc}$ 2.6e-5 s で $\Delta T$/step ≈3.4 K → θ 0.25 (内側) /
+  0.55 (壁 2 ノードは $\Delta\tau_{loc}$ が半分)。成長が内側で 1/4 に絞られ「壁第一層だけ液相が速く増える」偽の壁異常と凝縮完了の 3–4 $r_t$ 遅れになった。
+  cfl_pseudo 2/1/0.5 で θ 0.25/0.5/1、出口 g 平均 0.437/0.574/0.584 % (`case/44 run_0127/0130/0131`, 図 `figs/va3_inletTt_cfl_ab.png`)。
+  onset (核生成) は律速されないので Wilson 点は不変。Wysłouzil (case/16, mm ノズル) は $\Delta T$/step ≤ 0.86 K で θ≡1 → 過去検証は無影響。
+- **暫定運用**: 凝縮 ON の定常 run は `output.level 2` の `condLim_<s>` が全域 ≈1 になる `cfl_pseudo` を選ぶ (case/44 は 0.5)。
+- **修正方針** (plan [condensation-source-limiter-steady](../plans/active/condensation-source-limiter-steady.md), 未実装): θ を残差に掛けず、
+  **更新量 $\Delta(\rho\phi)$ のクランプ**に限定する (4 モーメントの増分を同率で縮める; 収束時は $\Delta\to0$ で無作用)。蒸気枯渇 ($Y_w-g\le0$ → $S=0$)
+  と $J$ 上限は $\Delta\tau$ を含まない物理条件なので残差側に残す。剛性は既存の `sj_g` (潜熱負帰還) と implicit で受ける。
+  平衡緩和形 (`condEquilibrium 1`) は固定点 $g=g_{eq}$ が $\Delta\tau$ 非依存なので構造は変えない (正本は EOS 拘束形 `condEquilibrium 2`)。
 
 ### 5. 一温度 二相 EOS の温度逆算 (Phase 2)
 
@@ -928,6 +945,10 @@ Phase 2 の二相 EOS による気相逆結合 ($p$ が $g$ 依存) は密結合
 ---
 
 ### 7b. 多成分燃焼ガス中の H₂O 凝縮 — carrier を擬似種に畳む運用 (2026-08-17)
+
+> 2026-09-15: 擬似種に畳むのは設計チェーンの選択肢の 1 つ (`tp_species: lumped`, 名前と中身をユーザ指定) にし、各種を CEA (NASA-9) の係数で
+> 独立種として渡す `tp_species: full` とモル分率入力を追加する計画 → [thermophysics-cea-mole-fraction-species](../plans/active/thermophysics-cea-mole-fraction-species.md)。
+
 
 燃焼ガス (N₂/CO₂/O₂/H₂O) の H₂O 凝縮では、carrier 全種を独立種にする必要はない (多成分 TP × 陰解法の
 結合不安定・種数分の輸送コスト)。**H₂O 以外を NASA-9 の質量分率線形混合で 1 つの擬似種 `MIXDRY` に
