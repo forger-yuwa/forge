@@ -280,6 +280,13 @@ $$
 | `nStepInner` | 各サブ反復内の DPLUR sweep 回数（定常と同義） |
 
 使用条件: `unsteady=1, dualTime=1, timeIntegration=11, blockDPLUR=1, time.deltaT.control=0`（物理 $\Delta t$ 固定）。
+
+> **化学種・受動種の物理時間項 (2026-09-17 実装中, plan [species-passive-scalar-unification](../../plans/active/species-passive-scalar-unification.md) §4.4)**: 2026-09-16 までの
+> main は dual-time で化学種を更新しておらず (ρ が動くと ΣY=ρ⁰/ρ になる; [[dualtime-species-frozen-bug]])、凝縮モーメント・トレーサは物理時間項なしの擬似時間更新だった。
+> chem ブランチ (e296f0d0) の修正を移植し、化学種 $\rho Y_s$ と受動種 ($\rho\xi$, モーメント) に時間レベル `*P/*PP` と BDF 残差 $-(V/\Delta t)(a\,\rho\phi - b\,\rho\phi^P + c\,\rho\phi^{PP})$・
+> 対角 $Va/\Delta t$ を付ける。履歴有効数と BDF 係数は流れ・化学種・受動種で共有する 1 つの状態 (最初の 1 物理 step は BDF1)。サブ反復の処理順: 空間残差 (+ピン除去) →
+> 周期 gather → BDF 項 (合併体積で一度) → ピン再除去 → 流れ block 更新 → 化学種更新 (coupling 0/1/2) → 再正規化・primitive → 入口再適用 → 受動種更新 → 状態 mirror。
+> checkpoint は流れ・化学種・受動種の履歴・時刻・刻み・履歴有効数を一括で書き、1 つでも欠ければ全系を BDF1 から再開する。
 擬似時間 $\Delta\tau$ は `cfl_pseudo` から決まり（物理 $\Delta t$ とは独立）、物理 $\Delta t$ は固定。
 commit は in-place（$\mathbf Q \leftarrow \mathbf Q + \delta\mathbf Q$。`roN`=$\mathbf Q^n$ は BDF 基準で固定のため）。
 

@@ -673,6 +673,12 @@ $\kappa,\chi,\xi_g$ で変わるため一般 EOS Roe (Vinokur–Montagné 流) �
 
 ### 4. ソース項 (Phase 2 — 初期実装済, 安定性優先)
 
+> **モーメントの移流 (2026-09-17 実装中, plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md))**: 従来は汎用スカラコアの
+> 1 次風上 (`scalarTransportResidualMulti_d`)。`passiveScalarScheme: 1` では化学種の輸送経路 (`speciesFaceReconstruction 2` なら SLAU の 2 次面再構成 + 受動種ごとの
+> スケール不変 Venkat ψ_P、そうでなければ化学種と同じ 1 次経路) で $\rho g, \rho Q_2, \rho Q_1, \rho Q_0$ を移流し、`res_*` / `transport_diag_*` の名前と
+> 「移流 → ソース → 更新クランプ (§4c) → 実現可能性クランプ」の順序は不変。面値は非負にクリップ (保存的)、拡散なし。2 次化は onset の数値拡散を減らすので
+> 定常固定点が変わる (回帰は再取得)。dual-time では物理時間 BDF 項をモーメントにも付ける (F-cf8; plan §4.4)。
+
 [condensationSource_d.{cu,cuh}](../solver_density_cuda/cuda_forge/condensationSource_d.cu) に実装。
 device 側で核生成 $J$ (CNT × Iland)・臨界半径 $r_*$・成長 $dr/dt$ (Goodheart) を**現在セル状態から一度だけ
 評価して freeze** (一温度 $T_v=T_d=T$)、相変化ソースを各モーメント残差へ加算する:
