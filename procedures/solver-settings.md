@@ -182,7 +182,7 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
   との併用は config 読込でエラー (トレーサに物理時間項 BDF 履歴・対角が無く、擬似時間反復ごとに前進してしまう; 凝縮モーメントの
   followups F-cf8 と同じ未対応項目)。node 周期境界では `res_roXi` の合算と `roXi` の root→member ミラーを行う。入口 `inlet_*` は `bcondConfig` の `floats: {Xi: 1.0}`
   (既定 0) の Dirichlet (node は入口ノードをピン)、他境界は zero-gradient。出力 `roXi` (level 0) / `Xi` (level 1)、残差列
-  `rms_roXi`、restart は `VALUE/roXi` (無ければ 0)。`full` 種モードの SERN で排気/外気の見分けに使う (`lumped` では ξ=Y_EXH)。
+  `rms_roXi`、restart は `VALUE/roXi` (無ければ 0)。SERN で排気/外気の見分けに使う: 輸送種に純粋な流入元ラベル (排気入口 1・外気入口 0 の種, 旧 `[EXH, AIR]` の Y_EXH) があればそれを ξ に使い、無ければ (`full`、`lumped`+`keep`) このトレーサを輸送する (`species_meta.yaml` の `exhaust_fraction` が正本, `methods/thermophysics.md` §5)。
   未指定なら変数を登録せず従来経路ビット不変。
 - **bcond `floats: {X0:.., X1:.., ...}`** (多成分 TP の入口, 2026-09-16): 入口組成を**モル分率**で与える。forge が double で検証し
   $Y_k = X_k M_k / \sum_j X_j M_j$ (MW は `speciesDBFile`/内蔵 DB) に換算して従来の `Y{s}` 経路へ流す。**X を 1 つでも書いたら全種必須**
