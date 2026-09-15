@@ -11,9 +11,11 @@
 - 移植する /VALUE/: 保存量 ro,roUx,roUy,roUz,roe・乱流 roK,roOmega・スカラー輸送 roY*・凝縮モーメント rog_*/roQ*_* (あれば)。
 - **wall_dist は移植しない** (新メッシュで convert 時に計算済みの値を使う)。
 
-- **化学種の照合**: SRC/DST の隣に `solverConfig.yaml` があれば `physProp.species` (名前と順序) を比較し、
-  違えば拒否する (別順序・別種集合の場を黙って index で貼ると組成が入れ替わる)。種を変える restart は
-  `tools/convert_species_field.py` (擬似種の展開・名前で移す) を使う。`--force-species` で照合を無視できる。
+- **化学種の照合 (既定で必須)**: SRC/DST それぞれの隣の `solverConfig.yaml` + `species_db.yaml` (+ `species_meta.yaml`) から
+  署名 (`forge_species.species_signature`: 種名と順序・種ごとの MW (rtol 1e-9)・`thermoHrefTemp`・meta の sha256) を作って比較し、
+  不一致なら拒否する (別順序・別種集合・別 DB の場を黙って index で貼ると組成や T が壊れる)。**どちらかの署名が解決できない
+  (solverConfig/species_db が無い・種名が DB に無い) ときも既定でエラー**。種を変える restart は `tools/convert_species_field.py`
+  (擬似種の展開・名前で移す) を使う。`--force-species` で照合を無視できる (自己責任)。
 
 usage: interp_field.py SRC.h5 DST_input.h5 [--gamma 1.4] [--force-species]
 """
@@ -47,18 +49,30 @@ def centroids(f):
     return c
 
 
-def _species_names_near(h5path):
-    """h5 と同じディレクトリの solverConfig.yaml から physProp.species を返す (無ければ None)。"""
-    try:
-        from forge_species import species_info
-        d = os.path.dirname(os.path.abspath(h5path))
-        if not os.path.exists(os.path.join(d, "solverConfig.yaml")):
-            return None
-        info = species_info(d)
-        return list(info["names"]) if info["thermalMethod"] == 2 else None
-    except Exception as e:   # noqa: BLE001 — 照合は補助なので読めなければ無視
-        print(f"[interp_field] species check skipped for {h5path}: {e}")
-        return None
+def check_species_signatures(src_h5, dst_h5, force):
+    """SRC/DST の隣の run 設定から化学種署名を作って照合する。不一致・解決不能は拒否 (force で警告に降格)。"""
+    from forge_species import species_signature, compare_signatures
+    sig = {}
+    for tag, h5 in (("SRC", src_h5), ("DST", dst_h5)):
+        d = os.path.dirname(os.path.abspath(h5))
+        try:
+            sig[tag] = species_signature(d)
+        except Exception as e:   # noqa: BLE001
+            msg = f"{tag} の化学種署名が解決できない ({d}): {e}"
+            if not force:
+                raise SystemExit("[interp_field] REFUSED: " + msg + "  (solverConfig.yaml / species_db.yaml を隣に置くか --force-species)")
+            print("[interp_field] WARNING (--force-species): " + msg)
+            return
+    bad = compare_signatures(sig["SRC"], sig["DST"])
+    if bad:
+        msg = ("化学種署名が違う: " + "; ".join(bad) + ". 種の順序/集合/DB が違う場は index コピーできない。"
+               " tools/convert_species_field.py SRC_res.h5 DST_input.h5 --meta DST/species_meta.yaml で名前により移す"
+               " (どうしても index で貼るなら --force-species)。")
+        if not force:
+            raise SystemExit("[interp_field] REFUSED: " + msg)
+        print("[interp_field] WARNING (--force-species): " + msg)
+    else:
+        print(f"[interp_field] species signature OK: {sig['SRC']['names'] or 'CPG (no species)'}")
 
 
 def main():
@@ -69,15 +83,8 @@ def main():
                     help="SRC/DST の physProp.species が違っても index で貼る (通常は convert_species_field.py を使う)")
     a = ap.parse_args(); g = a.gamma
 
-    # 化学種の名前照合 (両側に solverConfig.yaml があるときだけ)。
-    src_sp = _species_names_near(a.src); dst_sp = _species_names_near(a.dst)
-    if src_sp is not None and dst_sp is not None and src_sp != dst_sp:
-        msg = (f"physProp.species が違う: SRC {src_sp} vs DST {dst_sp}. 種の順序/集合が違う場は index コピーできない。"
-               f" tools/convert_species_field.py SRC_res.h5 DST_input.h5 --meta DST/species_meta.yaml で名前により移す"
-               f" (どうしても index で貼るなら --force-species)。")
-        if not a.force_species:
-            raise SystemExit("[interp_field] REFUSED: " + msg)
-        print("[interp_field] WARNING (--force-species): " + msg)
+    # 化学種署名の照合 (名前・順序・MW・datum・species_meta)。解決不能も既定でエラー (codex 2026-09-16 M3)。
+    check_species_signatures(a.src, a.dst, a.force_species)
 
     with h5py.File(a.src, "r") as s:
         cs = centroids(s); V = s["VALUE"]

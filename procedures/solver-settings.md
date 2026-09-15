@@ -178,7 +178,9 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
   `[species]` 表に `condensing species: H2O (condGasSpecies=1)` と出る。種順序を変えても config を書き直さずに済むので名前を正本にする
   ([plan cea-mole-fraction §2](../plans/active/thermophysics-cea-mole-fraction-species.md))。
 - **`physProp.tracer: exhaust`** (physProp, 既定 `none`, 2026-09-16): 受動トレーサ `roXi` (排気率 ξ∈[0,1]) を汎用スカラ輸送コアで
-  移流する (拡散なし・ソースなし、point-implicit / RK / dual-time 対応)。入口 `inlet_*` は `bcondConfig` の `floats: {Xi: 1.0}`
+  移流する (拡散なし・ソースなし)。**定常 point-implicit (`timeIntegration 11`, `dualTime 0`) と陽解法 RK のみ**。`time.dualTime != 0`
+  との併用は config 読込でエラー (トレーサに物理時間項 BDF 履歴・対角が無く、擬似時間反復ごとに前進してしまう; 凝縮モーメントの
+  followups F-cf8 と同じ未対応項目)。node 周期境界では `res_roXi` の合算と `roXi` の root→member ミラーを行う。入口 `inlet_*` は `bcondConfig` の `floats: {Xi: 1.0}`
   (既定 0) の Dirichlet (node は入口ノードをピン)、他境界は zero-gradient。出力 `roXi` (level 0) / `Xi` (level 1)、残差列
   `rms_roXi`、restart は `VALUE/roXi` (無ければ 0)。`full` 種モードの SERN で排気/外気の見分けに使う (`lumped` では ξ=Y_EXH)。
   未指定なら変数を登録せず従来経路ビット不変。

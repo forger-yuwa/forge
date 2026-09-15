@@ -699,6 +699,11 @@ void solverConfig::read(std::string fname)
             if (!this->tracer.empty() && this->tracer != "exhaust") {
                 throw std::runtime_error("Key 'tracer' in 'physProp' must be 'none' or 'exhaust' (got '" + this->tracer + "').");
             }
+            if (this->tracerEnabled() && this->dualTime != 0) {
+                // dual-time では roXi に物理時間項 (BDF 履歴・対角) が無く、擬似時間反復ごとに前進してしまう
+                // (codex 2026-09-16 result M6)。物理時間積分を実装するまで併用を拒否する (followups F-cf8 と同種)。
+                throw std::runtime_error("'physProp.tracer: exhaust' is not supported with time.dualTime != 0 (the tracer has no physical-time terms yet; use steady or explicit RK).");
+            }
             if (this->tracerEnabled()) std::cout << "'tracer' in 'physProp': exhaust (passive scalar roXi, inlet floats Xi)" << std::endl;
         }
 
@@ -742,6 +747,31 @@ void solverConfig::read(std::string fname)
                                              + " is out of range for physProp.species (nSpecies=" + std::to_string(this->nSpecies) + ").");
                 }
                 this->condGasSpeciesName = this->speciesNames[this->condGasSpecies];
+            }
+            // 凝縮種 (物質) と condModel (物性セット) の対応検査 (codex 2026-09-16 result M7)。
+            // condensationProperties_d.cuh: COND_MODEL_N2=0 (N2 物性), COND_MODEL_H2O=1 (H2O 物性)。
+            // carrier 形 (condGasSpecies>=0) は名前解決済み種、pure 形 (index -1) の TP 単成分は species[0] が凝縮種。
+            if (this->condensation == 1) {
+                if (this->condModel != 0 && this->condModel != 1) {
+                    throw std::runtime_error("condensation.condModel=" + std::to_string(this->condModel) + " is not supported (0: N2, 1: H2O).");
+                }
+                std::string subst;
+                if (this->condGasSpecies >= 0) subst = this->speciesNames[this->condGasSpecies];
+                else if (this->thermalMethod == 2 && this->nSpecies == 1) subst = this->speciesNames[0];
+                if (!subst.empty()) {
+                    std::string up = subst;
+                    for (auto& ch : up) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+                    const bool isH2O = (up == "H2O" || up == "WATER");
+                    const bool isN2  = (up == "N2");
+                    if (!isH2O && !isN2) {
+                        throw std::runtime_error("condensing species '" + subst + "' has no condensation property model (supported: H2O -> condModel 1, N2 -> condModel 0).");
+                    }
+                    if ((this->condModel == 1 && !isH2O) || (this->condModel == 0 && !isN2)) {
+                        throw std::runtime_error("condensing species '" + subst + "' does not match condModel " + std::to_string(this->condModel)
+                                                 + " (condModel 0 = N2 properties, 1 = H2O properties).");
+                    }
+                    this->condGasSpeciesName = subst;
+                }
             }
             this->condKantrowitz = getOptionalValidatedValue<int>(cond, "condKantrowitz", 0, "condensation");
             if (this->condKantrowitz < 0 || this->condKantrowitz > 3)
