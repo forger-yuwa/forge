@@ -90,6 +90,26 @@ void variables::registerSpecies(int nSpecies, int chemistry)
               << " -> registered " << nSpecies*10 << " cell variables" << (chemistry ? " (+chemistry diagnostics)" : "") << "\n";
 }
 
+// 受動トレーサ (排気率 ξ; physProp.tracer: exhaust)。凝縮モーメントと同じ 8 本構成。
+//   roXi : 保存量 ρξ, Xi : 原始量 ξ=ρξ/ρ, roXiN/roXiM : RK ステップ/ステージ始点,
+//   res_roXi, res_roXi_m : 残差 / 4thRunge 累積, src_jac_Xi : 源項ヤコビアン (0), transport_diag_Xi : 輸送対角 [m³/s]
+void variables::registerTracer(int enabled)
+{
+    if (enabled == 0) {
+        this->tracerRegistered = 0;
+        return;
+    }
+    this->tracerRegistered = 1;
+    for (const auto& name : {"roXi", "Xi", "roXiN", "roXiM", "res_roXi", "res_roXi_m", "src_jac_Xi", "transport_diag_Xi"}) {
+        this->cellValNames.push_back(name);
+        this->c.emplace(name, std::vector<flow_float>{});
+        this->c_d.emplace(name, nullptr);
+    }
+    this->output_cellValNames.push_back("roXi");
+    this->output_cellValNames.push_back("Xi");
+    std::cout << "registerTracer: exhaust tracer roXi registered (8 cell variables)\n";
+}
+
 // 非平衡凝縮 (Phase 1): 1 モーメント (保存量名 consName 例 "rog_0") ごとに必要なセル変数名を生成する。
 //   <consName>        : 保存量 ρφ (例 rog_0, roQ0_0)
 //   <prim>            : 原始量 φ = ρφ/ρ。consName の先頭 "ro" を外した名前 (g_0, Q0_0)
@@ -707,6 +727,33 @@ void variables::readValueHDF5(std::string fname , mesh& msh,
             sp_names.push_back(Yname);
         }
         this->copyVariables_cell_H2D(sp_names);
+    }
+
+    // --- 受動トレーサ: ρξ を読み込む (VALUE/roXi → VALUE/Xi×ρ → 0 の優先順) ---
+    if (this->tracerRegistered != 0) {
+        std::vector<flow_float>& v_roXi = this->c.at("roXi");
+        std::vector<flow_float>& v_Xi   = this->c.at("Xi");
+        std::vector<geom_float> in;
+        bool has = false;
+        if (file.exist("/VALUE/roXi")) {
+            file.getDataSet("/VALUE/roXi").read(in); has = true;
+        } else if (file.exist("/VALUE/Xi")) {
+            std::vector<geom_float> xi_in;
+            file.getDataSet("/VALUE/Xi").read(xi_in);
+            in.resize(xi_in.size());
+            for (std::size_t k = 0; k < xi_in.size(); k++) in[k] = static_cast<geom_float>(this->c.at("ro")[k]) * xi_in[k];
+            has = true;
+        }
+        for (geom_int i=0; i<msh.nCells; i++) {
+            const flow_float roi = this->c.at("ro")[i];
+            flow_float v = has ? static_cast<flow_float>(in[i]) : static_cast<flow_float>(0.0);
+            if (v < 0.0) v = 0.0;
+            if (v > roi) v = roi;
+            v_roXi[i] = v;
+            v_Xi[i]   = v / std::max(roi, static_cast<flow_float>(1.0e-30));
+        }
+        std::cout << "[variables] tracer roXi " << (has ? "read from input" : "not in input: initialized to 0") << "\n";
+        this->copyVariables_cell_H2D({"roXi", "Xi"});
     }
 
     // --- 非平衡凝縮 (Phase 1): 液相モーメント ρφ を読み込む ---

@@ -167,7 +167,7 @@ evaluate:
 5. forge: host DB 解決、`boundaryCond.cpp` の `X{s}` → `Y{s}` 換算と検証、species 表ログ、凝縮種名と index の一致検査、残差 CSV の `rms_roY{s}` 列、`interp_field.py` の種名照合。
 5b. `tools/convert_species_field.py` (種変換 restart, §2) と `cea_thermo_to_species_db.py --check` の全種照合・失敗終了化。
 6. `solver_density_cuda/tools/gen_inlet_profile.py` `--X`、`tools/forge_species.py`、`axis_csv_va.py` / `total_quantities.py` の index 参照。
-7. 単体 (§6) → 小型 TP 収束ケース (node/cell) → case/44 回帰 → docs 同期。**コード世代は [condensation-source-limiter-steady](condensation-source-limiter-steady.md) の実装後に固定** (凝縮 run の比較は両経路の `condLim≈1` を確認してから)。
+7. 単体 (§6) → 小型 TP 収束ケース (node のみ) → case/44 回帰 → docs 同期。**コード世代は [condensation-source-limiter-steady](condensation-source-limiter-steady.md) の実装後に固定** (凝縮 run の比較は両経路の `condLim≈1` を確認してから)。
 
 ### 5.1 残作業 (優先順)
 
@@ -178,11 +178,12 @@ evaluate:
 | 3 | ~~共通基盤 (解決済み DB・換算・凝縮種名正本)~~ | 済 (2026-09-16): `gas/composition.py` (`ResolvedSpeciesDB`, `mole_to_mass`/`mass_to_mole`, `parse_tp_species`, `resolve_species_layout`, `species_db_yaml`/`species_meta`), `semiperfect`/`frozen` は DB 注入、`probdef` に `composition_basis`/`condensing_species`/`species_db` と検証。単体 (a)–(e) + 外部 DB + SERN 配分を `run_gas_tests.py` に追加 (ALL PASS) |
 | 4 | ~~設計チェーン統一スキーマ (ノズル)~~ | 済 (2026-09-16): `runner_axismach` は `p.species_layout()` で species / `species_db.yaml` (由来コメント) / `species_meta.yaml` / `condGasSpecies` (名前から生成、手書きは一致検査) / `condensationSpecies` / prepare_info `species` を出す |
 | 4b | SERN の統一 (`SPECIES_ORDER` 撤去, 流れごとの質量配分, 領域 IC, restart 経路の全種化) | コード済 (2026-09-16): `frozen_gases` が layout (省略時 `[EXH, AIR]` 別名) と輸送種ごとの `FrozenGas` を返す、`gas_states`/`_solver_config`/IC/BC は N 種 + `Xi`、`restart_by_index`/`warm_from_same_mesh` は全 roY + roXi、`warm_from_run` は N 種 (順序不一致は拒否)。単体 (`run_sern_frozen_gas_tests.py`: full 11 種・lumped+keep・m4_off 配置一致・restart) ALL PASS。**残**: case/46 の 2D node Euler 回帰 (別名 = 旧 run とノイズ床内; full vs lumped) |
-| 4c | 排気トレーサ `roXi` (forge) と `species_meta.yaml` | ステップ 4c + §4.5 メタデータ。元素混合分率は診断のみ |
-| 5 | forge 入力 `X{s}`・種名検査・`rms_roY`・restart 照合 | ステップ 5 |
-| 5b | 種変換 restart ツールと CEA `--check` 修正 | ステップ 5b (case/44 の旧 2 種場を 5 種へ移すのに必須) |
-| 6 | 後処理・ParaView 配列解決 | ステップ 6 |
-| 7 | 回帰 run と codex result レビュー | §6 (小型収束ケース node/cell → case/44) |
+| 4c | ~~排気トレーサ `roXi` (forge) と `species_meta.yaml`~~ | 済 (2026-09-16): `cuda_forge/tracerTransport_d.{cu,cuh}` (`physProp.tracer: exhaust`; 入口 `floats.Xi` Dirichlet + node ピン、Neumann、汎用スカラ輸送、point-implicit/RK、`rms_roXi`、出力 level 0、restart `VALUE/roXi`)。**制限**: 拡散は 0 (汎用スカラ拡散は Sc 無しの μ ベース、化学種 Fick は多成分専用のため; Euler の SERN では無関係、SST では要フォロー [F-sp1])。`species_meta.yaml` は設計側 `write_species_files` |
+| 5 | ~~forge 入力 `X{s}`・種名検査・`rms_roY`・restart 照合~~ | 済 (2026-09-16): `input/speciesDB.{hpp,cpp}` (host 側 DB 解決; `thermo_init_db` と `convertGmshToForge` が共用), `boundaryCond.cpp` の `X{s}`/`Y{s}` double 検証→換算 (X/Y 混在・欠落・ΣY≠1 拒否), `condensation.condensationSpecies` (名前→index、不一致/範囲外エラー), 起動 species 表 + 入口 Y/X ログ, `rms_roY{s}` 列, `interp_field.py` の種名照合 (`--force-species`)。単体 `tests/unit/test_species_db_host.cpp` 31 PASS。500 step 検証 `case/44 run_0190`–`0192`/`0194` (X 入力・トレーサとも同一設定反復ノイズ内 ≤7e-6) |
+| 5b | ~~種変換 restart ツールと CEA `--check` 修正~~ | 済 (2026-09-16): `tools/convert_species_field.py` (`species_meta.yaml` の展開行列で lump→実種、名前で H2O/モーメント/roXi 移送、ΣρY=ρ・総水量・T 保存検査; `roe` は差分形 ρ[e_dst−e_src] で液相エネルギーを保つ)、`cea_thermo_to_species_db.py` は元素欄 → `atoms`、`--check` は全指定種の MW/両区間を照合し閾値超で非零終了 (既知差: H2O MW 1.1e-6, AR high a0) |
+| 6 | ~~後処理・ParaView 配列解決~~ | 済 (2026-09-16): `tools/forge_species.py` (run dir → 種名/index/MW/凝縮種/vapor_array/tracer)、ParaView `Forge Saturation` に `Run Config` プロパティ (未指定時は `Y1` を自動採用しない)、`gen_inlet_profile.py --X`、`case/44 axis_csv_va.py` は名前解決 |
+| 7 | 回帰 run と codex result レビュー | §6 (node のみ; **cell は対象外**, 2026-09-16 ユーザ指示)。case/44: 新バイナリ A/B `run_0195`、`full` 5 種 `run_0196` (0170 の収束場を種変換 restart)、モル分率入力 lumped `run_0197`、CEA DB `run_0198` (prepare)、SERN case/46: node Euler m6_on `run_0100` (別名 [EXH, AIR]) / `run_0101` (full 11 種 + roXi) |
+| 8 | F-sp1: トレーサ `roXi` の拡散 (SST の SERN で必要なら混合平均 Sc) | 未着手 (Euler では不要) |
 
 ## 6. 検証
 
@@ -191,7 +192,7 @@ evaluate:
   (既存 split の実測差は cp 1.6e-12 / h 2.3e-9 なので絶対 1e-10 は不適; codex m2); (d) `species_db.yaml` は解析後の値を比較し、ビット同一は同じ正規化済み入力の再出力に限る;
   (e) 拒否条件 (§4.1–4.3) がそれぞれエラーになる; (f) `forge_species.py` と ParaView の H₂O 順序入替 (先頭/中間/末尾); (g) 種変換 restart の `ΣρY=ρ`・総水量・T 保存;
   (h) CEA 直読み DB vs 内蔵転記の全使用種 MW・両温度域係数の差を表にし、物性値 (cp, h) の差を許容差 (rtol 1e-6) で判定。
-- **収束済み小型 TP ケース (node / cell 両方, codex M8)**: 5 種 frozen の 2D 亜音速ノズル (case/13 系の小メッシュ) で `check_convergence.py` **PASS** (`rms_roY{s}` 列込み)、
+- **収束済み小型 TP ケース (node のみ; 2026-09-16 ユーザ指示で cell は対象外, codex M8 の「両方」を改定)**: 5 種 frozen の 2D 亜音速ノズル (case/13 系の小メッシュ) で `check_convergence.py` **PASS** (`rms_roY{s}` 列込み)、
   `ΣY=1±1e-6`・負値なし。ここで X/Y 入力・種順序・旧入力 (`split_h2o`) の回帰を行い、`res_*.h5` がノイズ床以内で一致。
 - **case/44 va3 M4.19 (node Euler TP)** — 未収束 (warm 床 plateau) の既存 run は**回帰参考**で、収束解一致の根拠にはしない:
   1. dry: `run_0126` 相当を `full` で再実行 → 軸 M 差 ≤ 1e-4、ṁ 差 ≤ 1e-4 (非粘性 frozen・内部比一定の条件下, §3)。

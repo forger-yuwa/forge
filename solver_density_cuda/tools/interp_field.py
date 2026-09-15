@@ -11,7 +11,11 @@
 - 移植する /VALUE/: 保存量 ro,roUx,roUy,roUz,roe・乱流 roK,roOmega・スカラー輸送 roY*・凝縮モーメント rog_*/roQ*_* (あれば)。
 - **wall_dist は移植しない** (新メッシュで convert 時に計算済みの値を使う)。
 
-usage: interp_field.py SRC.h5 DST_input.h5 [--gamma 1.4]
+- **化学種の照合**: SRC/DST の隣に `solverConfig.yaml` があれば `physProp.species` (名前と順序) を比較し、
+  違えば拒否する (別順序・別種集合の場を黙って index で貼ると組成が入れ替わる)。種を変える restart は
+  `tools/convert_species_field.py` (擬似種の展開・名前で移す) を使う。`--force-species` で照合を無視できる。
+
+usage: interp_field.py SRC.h5 DST_input.h5 [--gamma 1.4] [--force-species]
 """
 import argparse, sys, os
 import numpy as np, h5py
@@ -43,11 +47,37 @@ def centroids(f):
     return c
 
 
+def _species_names_near(h5path):
+    """h5 と同じディレクトリの solverConfig.yaml から physProp.species を返す (無ければ None)。"""
+    try:
+        from forge_species import species_info
+        d = os.path.dirname(os.path.abspath(h5path))
+        if not os.path.exists(os.path.join(d, "solverConfig.yaml")):
+            return None
+        info = species_info(d)
+        return list(info["names"]) if info["thermalMethod"] == 2 else None
+    except Exception as e:   # noqa: BLE001 — 照合は補助なので読めなければ無視
+        print(f"[interp_field] species check skipped for {h5path}: {e}")
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src"); ap.add_argument("dst")
     ap.add_argument("--gamma", type=float, default=1.4)
+    ap.add_argument("--force-species", action="store_true",
+                    help="SRC/DST の physProp.species が違っても index で貼る (通常は convert_species_field.py を使う)")
     a = ap.parse_args(); g = a.gamma
+
+    # 化学種の名前照合 (両側に solverConfig.yaml があるときだけ)。
+    src_sp = _species_names_near(a.src); dst_sp = _species_names_near(a.dst)
+    if src_sp is not None and dst_sp is not None and src_sp != dst_sp:
+        msg = (f"physProp.species が違う: SRC {src_sp} vs DST {dst_sp}. 種の順序/集合が違う場は index コピーできない。"
+               f" tools/convert_species_field.py SRC_res.h5 DST_input.h5 --meta DST/species_meta.yaml で名前により移す"
+               f" (どうしても index で貼るなら --force-species)。")
+        if not a.force_species:
+            raise SystemExit("[interp_field] REFUSED: " + msg)
+        print("[interp_field] WARNING (--force-species): " + msg)
 
     with h5py.File(a.src, "r") as s:
         cs = centroids(s); V = s["VALUE"]
@@ -68,6 +98,8 @@ def main():
             for key in V:                      # scalar transport Y* -> roY*
                 if key.startswith("Y") and key[1:].isdigit():
                     fields["ro"+key] = ro*np.array(V[key])
+                if key == "roXi":              # 受動トレーサ (physProp.tracer)
+                    fields["roXi"] = np.array(V[key])
                 # 凝縮モーメント (原始 g_<s>,Q0_<s>.. → 保存 rog_<s>,roQ0_<s>..)。2026-08-17
                 if key.startswith(("g_", "Q0_", "Q1_", "Q2_")):
                     fields["ro"+key] = ro*np.array(V[key])
@@ -77,7 +109,7 @@ def main():
             for key in V:
                 if key.startswith("roY") and key[3:].isdigit():
                     fields[key] = np.array(V[key])
-                if key.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")):
+                if key.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")) or key == "roXi":
                     fields[key] = np.array(V[key])
 
     tree = cKDTree(cs)
@@ -89,7 +121,7 @@ def main():
             ds = "VALUE/"+name
             if ds in d and name != "wall_dist":
                 d[ds][...] = arr[idx].astype(d[ds].dtype); moved.append(name)
-            elif name.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")) or (name.startswith("roY") and name[3:].isdigit()):
+            elif name.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")) or (name.startswith("roY") and name[3:].isdigit()) or name == "roXi":
                 # 凝縮モーメントと化学種は convert 直後の入力 h5 に無いので新規作成する (無ければ forge は第 1 種以外を 0 に
                 # 初期化し、carrier では rog<=roY_w のクランプで液相が消える: codex 2026-09-16 result M2)。
                 # forge は VALUE/<consName> が存在すれば読む (無ければ 0 = dry restart)。2026-08-18 / 2026-09-16

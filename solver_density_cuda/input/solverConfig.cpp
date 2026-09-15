@@ -1,4 +1,5 @@
 #include "input/solverConfig.hpp"
+#include <cctype>
 
 
 solverConfig::solverConfig(){};
@@ -691,6 +692,15 @@ void solverConfig::read(std::string fname)
             this->speciesNames.push_back("N2");
             this->nSpecies = 1;
         }
+        // 受動トレーサ (排気率 roXi)。文字列: none (既定) | exhaust。
+        if (physProp["tracer"]) {
+            this->tracer = physProp["tracer"].as<std::string>();
+            if (this->tracer == "none" || this->tracer == "0") this->tracer = "";
+            if (!this->tracer.empty() && this->tracer != "exhaust") {
+                throw std::runtime_error("Key 'tracer' in 'physProp' must be 'none' or 'exhaust' (got '" + this->tracer + "').");
+            }
+            if (this->tracerEnabled()) std::cout << "'tracer' in 'physProp': exhaust (passive scalar roXi, inlet floats Xi)" << std::endl;
+        }
 
         // 非平衡凝縮 (任意セクション)。methods/condensation/ 参照。
         // Phase 1 は受動スカラー輸送のみ (核生成/成長係数はまだ読まない)。
@@ -700,6 +710,39 @@ void solverConfig::read(std::string fname)
             this->nCondSpecies = getOptionalValidatedValue<int>(cond, "nCondSpecies", 0, "condensation");
             this->condModel = getOptionalValidatedValue<int>(cond, "condModel", 0, "condensation");
             this->condGasSpecies = getOptionalValidatedValue<int>(cond, "condGasSpecies", -1, "condensation");
+            // 凝縮種は名前 (condensationSpecies) が正本。physProp.species から大文字小文字無視で index を解決し、
+            // 数値 condGasSpecies が併記されていれば一致を検査する。数値だけなら範囲検査。
+            if (cond["condensationSpecies"]) {
+                this->condensationSpecies = cond["condensationSpecies"].as<std::string>();
+                auto upper = [](std::string t){ for (auto& ch : t) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch))); return t; };
+                int found = -1;
+                for (int s = 0; s < this->nSpecies; ++s) {
+                    if (upper(this->speciesNames[s]) == upper(this->condensationSpecies)) { found = s; break; }
+                }
+                if (found < 0) {
+                    std::string avail;
+                    for (const auto& nm : this->speciesNames) avail += (avail.empty() ? "" : ", ") + nm;
+                    throw std::runtime_error("condensation.condensationSpecies '" + this->condensationSpecies
+                                             + "' is not in physProp.species [" + avail + "].");
+                }
+                if (cond["condGasSpecies"] && this->condGasSpecies != found) {
+                    throw std::runtime_error("condensation.condGasSpecies=" + std::to_string(this->condGasSpecies)
+                                             + " disagrees with condensationSpecies '" + this->condensationSpecies
+                                             + "' (index " + std::to_string(found) + " in physProp.species); remove one of them.");
+                }
+                this->condGasSpecies = found;
+            }
+            if (this->condGasSpecies >= 0) {
+                if (this->nSpecies < 2) {
+                    throw std::runtime_error("condensation.condGasSpecies=" + std::to_string(this->condGasSpecies)
+                                             + " (carrier form) requires >=2 species in physProp.species (roY{s} is not transported for a single species).");
+                }
+                if (this->condGasSpecies >= this->nSpecies) {
+                    throw std::runtime_error("condensation.condGasSpecies=" + std::to_string(this->condGasSpecies)
+                                             + " is out of range for physProp.species (nSpecies=" + std::to_string(this->nSpecies) + ").");
+                }
+                this->condGasSpeciesName = this->speciesNames[this->condGasSpecies];
+            }
             this->condKantrowitz = getOptionalValidatedValue<int>(cond, "condKantrowitz", 0, "condensation");
             if (this->condKantrowitz < 0 || this->condKantrowitz > 3)
                 throw std::runtime_error("Key 'condKantrowitz' in 'condensation' must be 0 (isothermal), 1 (Kantrowitz pure-vapor), 2 or 3 (Feder carrier form).");

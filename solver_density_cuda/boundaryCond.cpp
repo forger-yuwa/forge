@@ -6,8 +6,12 @@
 #include "cuda_forge/ransBoundary_d.cuh"
 #include "cuda_forge/ransWallFunction_d.cuh"
 #include "cuda_forge/fluct_variables_d.cuh"
+#include "input/speciesDB.hpp"
 
 #include <fstream>
+#include <iomanip>
+#include <cctype>
+#include <iterator>
 #include <cmath>
 #include <sstream>
 #include <algorithm>
@@ -62,6 +66,34 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
             }
 
             std::string kind = bcInYaml.second["kind"].as<std::string>();
+
+            // 多成分 TP の入口組成: floats の X{s} (モル分率) / Y{s} (質量分率) を double で検証し、
+            // Y{s} に換算して inputFloats (flow_float) へ入れる。X/Y 混在・負値・非有限・総和 0・未知 index・
+            // X 指定時の種欠落・|ΣY−1|>1e-3 はエラー (plans/active/thermophysics-cea-mole-fraction-species.md §4.3)。
+            // どちらも無ければ空 (後段で既定補完 Y0=1)。X{s} キーは bvar に流さず消す。
+            if (cfg.nSpecies >= 2 && isInletKind(kind)) {
+                const ResolvedSpeciesDB* db = speciesDB_current();
+                if (db == nullptr) db = &speciesDB_init(cfg);
+                if (db->size() != cfg.nSpecies) {
+                    cerr << "Error: species DB resolved " << db->size() << " species but physProp.species has " << cfg.nSpecies << endl;
+                    exit(EXIT_FAILURE);
+                }
+                std::vector<double> Yin;
+                try {
+                    Yin = bcondSpeciesMassFractions(bcInYaml.second["floats"], *db, bname);
+                } catch (const std::exception& e) {
+                    cerr << "Error: " << e.what() << endl;
+                    exit(EXIT_FAILURE);
+                }
+                for (auto it = inputFloats_temp.begin(); it != inputFloats_temp.end(); ) {
+                    const std::string& k = it->first;
+                    const bool isX = (k.size() >= 2 && k[0] == 'X' && std::all_of(k.begin()+1, k.end(), [](unsigned char ch){ return std::isdigit(ch) != 0; }));
+                    it = isX ? inputFloats_temp.erase(it) : std::next(it);
+                }
+                for (int s = 0; s < static_cast<int>(Yin.size()); ++s) {
+                    inputFloats_temp["Y" + std::to_string(s)] = static_cast<flow_float>(Yin[s]);
+                }
+            }
 
             int outputHDFflg_temp = bcInYaml.second["outputHDFflg"].as<int>();
 
@@ -147,7 +179,43 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
             }
         }
 
+        // 受動トレーサ (physProp.tracer: exhaust): 入口の ξ を floats.Xi (既定 0) の一様 Dirichlet として登録。
+        if (cfg.tracerEnabled() && isInletKind(bcf.kind)) {
+            bc.valueTypes["Xi"] = 1;
+            bc.bplaneValNames.push_back("Xi");
+            if (bc.inputFloats.find("Xi") == bc.inputFloats.end()) bc.inputFloats["Xi"] = 0.0;
+            const double xi = bc.inputFloats["Xi"];
+            if (!(xi >= 0.0 && xi <= 1.0)) {
+                cerr << "Error: inlet boundary '" << bcf.physName << "': floats.Xi=" << xi << " must be in [0,1]." << endl;
+                exit(EXIT_FAILURE);
+            }
+        }
+
         bc.bcondInitVariables(cfg.gpu); // allocate and set boundary variables
+    }
+
+    // 起動ログ: 入口組成 (Y と、MW から戻した X) とトレーサ入口値。多成分でなければ出さない。
+    if (cfg.nSpecies >= 2 || cfg.tracerEnabled()) {
+        const ResolvedSpeciesDB* db = speciesDB_current();
+        for (const bcond& bc : bconds) {
+            if (!isInletKind(bc.bcondKind)) continue;
+            if (cfg.nSpecies >= 2 && db != nullptr && db->size() == cfg.nSpecies) {
+                std::vector<double> Y(cfg.nSpecies), MW(cfg.nSpecies);
+                for (int s = 0; s < cfg.nSpecies; ++s) {
+                    Y[s] = bc.inputFloats.at("Y" + std::to_string(s)); MW[s] = db->MW(s);
+                }
+                std::vector<double> X;
+                try { X = speciesMassToMole(Y, MW); } catch (const std::exception&) { X.assign(cfg.nSpecies, 0.0); }
+                cout << "[species] inlet '" << bc.physName << "' (physID " << bc.physID << ", " << bc.bcondKind << ") composition:\n";
+                for (int s = 0; s < cfg.nSpecies; ++s) {
+                    cout << "[species]   " << std::setw(2) << s << "  " << std::setw(8) << std::left << db->names[s] << std::right
+                         << "  Y=" << std::setprecision(10) << Y[s] << "  X=" << X[s] << "\n";
+                }
+            }
+            if (cfg.tracerEnabled()) {
+                cout << "[species] inlet '" << bc.physName << "' tracer Xi=" << bc.inputFloats.at("Xi") << "\n";
+            }
+        }
     }
 };
 

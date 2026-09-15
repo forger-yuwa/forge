@@ -49,6 +49,11 @@ forge の入口カーネルは **面ごとの境界値 `bvar`** を読む。`inl
    出力は `run/inlet_profile_<physID>.csv` (`--plot` で `inlet_profile_<physID>.png`)。gen は各列の min/max と
    bcond 一様値を表示するので、**ここで桁と符号を確認**する (Tt が K か、Y が 0〜1 か)。
    `--Ps` と `--M` を与えると等エントロピーで `Pt` に換算する (TP は NASA-9 の h/s° で解く)。
+   組成を**モル分率**で持っているなら `--X NAME=EXPR` (表の列は `X_<NAME>`) で与える: 点ごとに
+   $Y_k = X_k M_k/\sum_j X_j M_j$ (MW は `species_db.yaml`) に換算して CSV には従来どおり `Y{s}` 列を書く
+   (forge は X 列を読まない)。**`--X` は全種必須** (指定しない種を bcond 比率で補完しない) で、`--Y` との混在はエラー。
+   例: `--X MIXDRY=0.9390148 --X "H2O=0.0609852 + 0.01*y"`。一様値を bcond 側で X で書くときは `floats: {X0:.., X1:..}`
+   ([solver-settings.md](solver-settings.md) の bcond `X{s}`)。
 4. **起動ログで確認**: `forge_run.log` に
    `[applyInletProfiles] physID=1 kind=inlet_Pressure: set 3 quantities from inlet_profile_1.csv (1D interp, 101 rows, 118 faces). applied: Tt Y0 Y1`
    が出ること。`set N` は CSV ヘッダの量列数、**`applied:` が実際に境界値に反映された列**で、その種別に無い列名は

@@ -1,0 +1,54 @@
+# 新条件 v3 (2026-08-19 ユーザ指定): Pt 1,139,000 Pa / Tt 1161 K、組成 (モル) H2O 6.09135e-2 / N2 6.64860e-1 / O2 2.16072e-1 / Ar 7.97588e-3 / CO2 4.90034e-2
+# (Σ=0.998825 → 正規化して質量分率へ; MW 29.1459 g/mol, R 285.270 J/kgK)。出口 φ1600 は同じ、入口配管も φ1600 (r_inlet 3.889 r_t)。M_d 4.19、R2/L_U6/L_c 8。
+# 導出: γ* 1.31526 (T* 1004.7 K), cp(Tt) 1220.7, A/A* 15.1239, r_t 0.205711 m (φ411.42 mm), 出口 T 282.8 K / P 5037 Pa。
+# 変種: dry (2 種 TP, 凝縮 off) / noneq (Kw+HK 非平衡, 蒸発込み)。node Euler 段階起動 12000 step。
+name: va3_M4.19_R2_LU6_Lc8_dry_full_cea
+type: wind_tunnel_axisym_axismach
+gas:
+  model: semiperfect
+  composition_basis: mole          # 2026-09-16: ユーザ指定のモル分率をそのまま書く (Σ 0.998825 は runner が正規化して質量分率へ; 旧 YAML の質量分率と同値)
+  species:
+    H2O: 6.09135e-2
+    N2: 6.64860e-1
+    O2: 2.16072e-1
+    AR: 7.97588e-3
+    CO2: 4.90034e-2
+  condensing_species: H2O
+  species_db: species_db_cea_va3.yaml   # CEA thermo.inp 直読み DB (cea_thermo_to_species_db.py); 設計・CFD ともこれを正本にする
+  gamma: 1.31526
+  cp: 1220.7
+spec:
+  Pt: 1139000.0
+  Tt: 1161.0
+  p_ambient: 5037.4
+  r_throat: 0.205711
+  M_design: 4.19
+dv:
+  L_c:
+    value: 8.0
+    min: 6.5
+    max: 14.0
+geometry:
+  R: 2.0
+  r_inlet: 3.889
+  L_U: 6.0
+  L_pipe: 0.5
+  start_line: throat_char
+  n_start: 41
+  n_axis_inv: 500
+  x_end_margin: 2.3
+  wall_mode: cplus
+  exit_mode: characteristic
+  Lc_mode: explicit
+mesh:
+  discretization: node
+  ni: 365
+  nj: 65
+  wall_first_frac: 0.005
+  throat_refine: 3.0
+evaluate:
+  nStepOuter: 12000
+  outStepInterval: 4000
+  cfl_main: 2.0
+  mid_stage: true
+  tp_species: {mode: full}

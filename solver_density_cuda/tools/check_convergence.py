@@ -38,13 +38,13 @@ def load_series(path):
     for c in CONSERVED:
         if rows and c in rows[0]:
             cols[c] = [float(r[c]) for r in rows]
-    # 化学種 (rms_roY*) と凝縮 (rms_rog_*, rms_roQ{0,1,2}_*) の保存量残差も検査する (存在時)。
+    # 化学種 (rms_roY*)・受動トレーサ (rms_roXi) と凝縮 (rms_rog_*, rms_roQ{0,1,2}_*) の保存量残差も検査する (存在時)。
     # 凝縮 run で NS 5 本 + SST 2 本だけ見て「収束」と判定していた穴 (codex 指摘 2026-09-10) を塞ぐ。
     if rows:
         for c in rows[0].keys():
             if c in cols or not c.startswith('rms_') or c.startswith('rms_dq_'):
                 continue
-            if c.startswith('rms_roY') or c.startswith('rms_rog_') or c.startswith('rms_roQ'):
+            if c.startswith('rms_roY') or c.startswith('rms_rog_') or c.startswith('rms_roQ') or c == 'rms_roXi':
                 cols[c] = [float(r[c]) for r in rows]
     return rows, cols
 

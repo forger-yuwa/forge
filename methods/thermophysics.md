@@ -259,7 +259,8 @@ L/R 状態の `roe_L/Ht_L/ca_L` (および R 側) を NASA で再構成。Roe �
   - **restart の照合**: `interp_field.py` / 同一メッシュ restart は `physProp.species` の順序と DB の名前・MW を照合し、不一致を黙って受け付けない。
     種順序が変わる restart は `tools/convert_species_field.py` (擬似種の保存量を構成種へ分配、名前で移送、`roe` を T から再構成、ΣρY=ρ・総水量・T の保存を検査) で行う。
   - **排気トレーサ `roXi`** (`physProp.tracer: exhaust`): SERN の `full` モードで排気率 ξ (排気入口 1 / 外気入口 0) を受動スカラとして輸送する
-    (汎用スカラ輸送コア `ScalarTransportDesc` で登録・入口 Dirichlet・point-implicit 更新・残差列 `rms_roXi`・出力・restart)。拡散は化学種と同じ混合平均 `Sc`。
+    (`cuda_forge/tracerTransport_d.{cu,cuh}`: 汎用スカラ輸送コア `ScalarTransportDesc` で登録・入口 `floats.Xi` Dirichlet [node はピン]・他は Neumann・point-implicit/RK 更新・残差列 `rms_roXi`・出力 (level 0 から)・restart `VALUE/roXi`)。
+    **拡散は 0 (移流のみ)**: 汎用スカラ拡散は Sc を持たない μ ベース、化学種の Fick 拡散は多成分専用カーネルのため、混合平均 Sc の拡散は未実装 (Euler の SERN では無関係; SST では followup F-sp1)。
     `lumped` では ξ = $Y_{EXH}$ なので不要。元素質量分率から作る混合分率は診断のみ (差動拡散があると元素ごとに ξ が異なる)。
 
 ### 5b. 多成分化学種輸送 (M2) `cuda_forge/speciesTransport_d.{cuh,cu}`

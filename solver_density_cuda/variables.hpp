@@ -287,6 +287,10 @@ public:
     // (condensationTransport_d.cu / update_d.cu / main.cpp が参照)。
     std::vector<std::string> condMomentConsNames;
 
+    // 受動トレーサ (physProp.tracer: exhaust)。registerTracer() で 1 なら roXi 系変数が登録済み。
+    // 0 のときは何も登録せず従来経路を保つ (tracerTransport_d.cu の wrapper は全て no-op)。
+    int tracerRegistered = 0;
+
     variables();
 
     //variables(const int& ,  mesh&);
@@ -301,6 +305,11 @@ public:
     // 残差・point-implicit 対角を cellValNames / c / c_d へ追加する。allocVariables より前に
     // 1 度だけ呼ぶ。nCondSpecies <= 0 のときは何もしない (従来経路)。
     void registerCondensation(int nCondSpecies);
+
+    // 受動トレーサ: roXi / Xi / roXiN / roXiM / res_roXi / res_roXi_m / src_jac_Xi / transport_diag_Xi を
+    // cellValNames / c / c_d へ追加し roXi, Xi を出力対象にする。allocVariables より前に 1 度だけ呼ぶ。
+    // enabled == 0 のときは何もしない。
+    void registerTracer(int enabled);
 
     void allocVariables(const int &useGPU , mesh& msh);
 

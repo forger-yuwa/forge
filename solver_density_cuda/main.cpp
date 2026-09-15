@@ -52,6 +52,8 @@
 #include "cuda_forge/speciesTransport_d.cuh"
 #include "cuda_forge/chemistrySource_d.cuh"
 #include "cuda_forge/condensationTransport_d.cuh"
+#include "cuda_forge/tracerTransport_d.cuh"
+#include "input/speciesDB.hpp"
 #include "cuda_forge/viscousFlux_d.cuh"
 #include "cuda_forge/updateCenterVelocity_d.cuh"
 #include "cuda_forge/interpVelocity_c2p_d.cuh"
@@ -155,6 +157,16 @@ std::vector<std::string> condMomentConsNames(const solverConfig& cfg)
     return names;
 }
 
+// 化学種の保存量名 (nSpecies>=2 のとき roY0..roY{n-1}; variables::registerSpecies と同じ命名規約)。
+// 残差配列は res_roY{s} (speciesTransport_d.cu)。単成分では空。
+std::vector<std::string> speciesResidualNames(const solverConfig& cfg)
+{
+    std::vector<std::string> names;
+    if (cfg.nSpecies < 2) return names;
+    for (int s = 0; s < cfg.nSpecies; ++s) names.emplace_back("roY" + std::to_string(s));
+    return names;
+}
+
 std::vector<std::string> residualEquationNames(const solverConfig& cfg)
 {
     std::vector<std::string> names;
@@ -168,6 +180,14 @@ std::vector<std::string> residualEquationNames(const solverConfig& cfg)
         for (const auto* name : kScalarResidualEquationNames) {
             names.emplace_back(name);
         }
+    }
+
+    // 化学種 rms_roY{s} (流れ/RANS の後、凝縮モーメントの前)。受動トレーサ rms_roXi はその次。
+    for (const auto& name : speciesResidualNames(cfg)) {
+        names.emplace_back(name);
+    }
+    if (cfg.tracerEnabled()) {
+        names.emplace_back("roXi");
     }
 
     if (condensationEnabled(cfg)) {
@@ -628,6 +648,12 @@ ResidualSnapshot gatherResidualSnapshot(solverConfig& cfg, mesh& msh, variables&
         variable_names.emplace_back("res_roK");
         variable_names.emplace_back("res_roOmega");
     }
+    for (const auto& name : speciesResidualNames(cfg)) {
+        variable_names.emplace_back("res_" + name);
+    }
+    if (cfg.tracerEnabled()) {
+        variable_names.emplace_back("res_roXi");
+    }
     if (condensationEnabled(cfg)) {
         for (const auto& name : condMomentConsNames(cfg)) {
             variable_names.emplace_back("res_" + name);
@@ -953,6 +979,10 @@ cudaConfig initializeSimulation(
     cout << "Read Solver Config \n";
     cfg.read("solverConfig.yaml");
 
+    // 化学種 DB の host 側解決 (GPU 非依存; 未知種名はここで exit)。bcond の X{s}→Y{s} 換算と
+    // 起動ログ (種表) が使う。thermo_init_db は同じ結果を device へ上げる。
+    speciesDB_printTable(cfg, speciesDB_init(cfg));
+
     cout << "Init Thermo DB \n";
     thermo_init_db(cfg);   // NASA-9/LJ 化学種 DB を構築し device へアップロード (thermalMethod==2 用)
     chemistry_init(cfg);   // 有限速度化学: 反応機構を読み device へ (chemistry.enabled==1 のみ)
@@ -1022,6 +1052,9 @@ cudaConfig initializeSimulation(
     // 非平衡凝縮モーメント変数を登録 (allocVariables より前)。condensation==0 では no-op。
     var.registerCondensation(cfg.nCondSpecies);
 
+    // 受動トレーサ roXi を登録 (allocVariables より前)。physProp.tracer 未指定では no-op。
+    var.registerTracer(cfg.tracerEnabled() ? 1 : 0);
+
     var.allocVariables(cfg.gpu , msh);
 
     // device roY[] ポインタ配列を構築 (c_d 確保後, dependentVariables より前)。
@@ -1063,6 +1096,7 @@ cudaConfig initializeSimulation(
     periodicMirrorNSState_d_wrapper(cfg , cuda_cfg , msh , var);
     speciesPrimitive_d_wrapper(cfg , cuda_cfg , msh , var);  // Y_s = ρY_s/ρ (roY を読込済)
     condensationPrimitive_d_wrapper(cfg , cuda_cfg , msh , var);  // φ = ρφ/ρ (液相モーメント読込済)
+    tracerPrimitive_d_wrapper(cfg , cuda_cfg , msh , var);  // ξ = ρξ/ρ (トレーサ読込済)
     dependentVariables(cfg , cuda_cfg , msh , var, mat_ns);
     // node-centered 壁 Dirichlet: IC の壁ノード速度を厳密 0 に初期化 (KE を roe から除去)。
     // この後 gasProperties が補正 roe から P/T を再計算する。cell/非 node では no-op。
@@ -1079,6 +1113,7 @@ cudaConfig initializeSimulation(
     applySstThermalWallFunction(cfg , cuda_cfg , msh , var);  // SST 熱的壁関数: 断熱壁 T_aw (§6.5(f))
     applySpeciesBoundaries(cfg , cuda_cfg , msh , var);
     applyCondensationBoundaries(cfg , cuda_cfg , msh , var);
+    applyTracerBoundaries(cfg , cuda_cfg , msh , var);
     calcGradient_d_wrapper(cfg , cuda_cfg , msh , var);
     // 初期 setup でも周期勾配 gather を適用 (assembleResidual と整合; res_0 出力と初期診断を正しい合併勾配にする)。
     periodicGradientGather_d_wrapper(cfg , cuda_cfg , msh , var);
@@ -1086,6 +1121,7 @@ cudaConfig initializeSimulation(
     updateVariablesOuter(cfg , cuda_cfg , msh , var , mat_ns);
     speciesUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // roY{s}N/M ベースライン
     condensationUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // 液相モーメント N/M ベースライン
+    tracerUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // トレーサ N/M ベースライン
     setDT_d_wrapper(cfg , cuda_cfg , msh , var);
 
     pprobes.init(cfg , cuda_cfg , msh);
@@ -1149,6 +1185,7 @@ void assembleResidual(StepContext& s, int stage_index)
     s.profiler.measureCuda(ProfileSection::DependentVariables, [&]() {
         speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // Y_s = ρY_s/ρ (混合則 thermo の前)
         condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // φ = ρφ/ρ (スカラ移流の上流値)
+        tracerPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // ξ = ρξ/ρ (スカラ移流の上流値)
     });
     s.profiler.measureWall(ProfileSection::DependentVariables, [&]() {
         dependentVariables(s.cfg , s.cuda_cfg , s.msh , s.var, s.mat_ns);
@@ -1166,6 +1203,7 @@ void assembleResidual(StepContext& s, int stage_index)
         applySstThermalWallFunction(s.cfg , s.cuda_cfg , s.msh , s.var);  // SST 熱的壁関数: 断熱壁 T_aw (§6.5(f))
         applySpeciesBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
         applyCondensationBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
+        applyTracerBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
     });
     s.profiler.measureCuda(ProfileSection::CalcGradient, [&]() {
         calcGradient_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
@@ -1213,6 +1251,7 @@ void assembleResidual(StepContext& s, int stage_index)
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         condensationTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);  // 液相モーメント移流残差 (Phase 1)
         condensationSource_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 核生成+成長ソース (Phase 2)
+        tracerTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);        // 受動トレーサ移流残差 (node 入口ピン込み)
     });
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         ransSource_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // k/ω 勾配は上 (ransTransport の前) で評価済み
@@ -1409,6 +1448,10 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
         condensationUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // ro*_N = ro*_M = ro*
         condensationTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
         condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // φ=ρφ/ρ (出力/次残差用に同期)
+        // 受動トレーサ (segregated point-implicit)。tracer 無効で no-op。
+        tracerUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        tracerTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
+        tracerPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     });
 }
 
@@ -1423,6 +1466,7 @@ void advanceExplicitRK(StepContext& s)
             updateVariablesInner(s.cfg , s.cuda_cfg , s.msh , s.var , s.mat_ns);
             speciesUpdateInner_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // roY{s}M ステージ始点
             condensationUpdateInner_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // 液相モーメント M ステージ始点
+            tracerUpdateInner_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // トレーサ M ステージ始点
         });
 
         (void)iteration_label;   // 旧 "Stage : n" 行は廃止 (console モニタ行に集約)
@@ -1438,6 +1482,7 @@ void advanceExplicitRK(StepContext& s)
             speciesTimeIntegration_d_wrapper(iloop, s.cfg , s.cuda_cfg , s.msh , s.var);
             speciesRenormalize_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // ρY_s>=0, ΣρY_s=ρ
             condensationTimeIntegration_d_wrapper(iloop, s.cfg , s.cuda_cfg , s.msh , s.var);  // 液相モーメント (Phase 1 ソース=0)
+            tracerTimeIntegration_d_wrapper(iloop, s.cfg , s.cuda_cfg , s.msh , s.var);  // 受動トレーサ
         });
         // 注: explicit 軸対称は軸 CV が step1 で発散するため (recipe 併用でも不変)、enforce は呼んでも
         // 検証できない。explicit の near-axis 安定化は別途要 (open issue)。暫定で無効。
@@ -1450,6 +1495,8 @@ void advanceExplicitRK(StepContext& s)
         speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);    // 出力 Y_s を最終 roY_s と同期
         condensationUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // 液相モーメント N/M 次ステップ用
         condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);    // 出力 φ を最終 ρφ と同期
+        tracerUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // トレーサ N/M 次ステップ用
+        tracerPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);    // 出力 ξ を最終 ρξ と同期
     });
     s.profiler.measureWall(ProfileSection::WriteOutputs, [&]() {
         writeStepOutputs(s.cfg , s.cuda_cfg , s.msh , s.var , s.pprobes , s.iStep+1);
@@ -1566,6 +1613,10 @@ void advanceImplicitDualTime(StepContext& s)
             condensationUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
             condensationTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
             condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            // 受動トレーサ (凝縮モーメントと同じ segregated point-implicit; 物理時間項は無し)。
+            tracerUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            tracerTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
+            tracerPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         });
     }
 

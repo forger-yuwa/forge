@@ -172,6 +172,22 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
 - **`mesh.renumber`** (変換時, 既定 `none`, 2026-09-12): `rcm` で `convertGmshToForge` が節点を Reverse Cuthill–McKee で再番号付けする (node では CV 順 = gather の局所性)。A10G 3D 2.37 M 節点で 1 step −3.3 %。順列は `/MESH/RENUMBER_PERM` (new→old) に入り、旧番号の `res_*.h5` は `tools/permute_res_h5.py SRC_res.h5 DST_mesh.h5` で移植する (index コピー不可)。
 - **`thermoFloat`** (physProp, 既定 1, 2026-09-12): thermally-perfect の温度反転を float Newton + double 研磨 (収束まで最大 3 段, 通常 1 段) のハイブリッドにする (厳密参照との誤差 ≤1e-8·T, 3D 2.37 M 節点で 1 step −13 %)。`thermoHrefTemp>0` が前提で、datum 無しなら自動で 0 (従来 double Newton) に落ちる。`0` で従来経路。plan performance-3d-node-sst-speedup §4.2-3。
 - **`condFloat`** (condensation, 既定 1, 2026-09-13): 凝縮経路の float 実体。相変化ソース (物性は double で作った区分 3 次表を float で評価、範囲外の湿潤セルは旧 double 実体へ退避、核生成は対数空間で ln J ≤ ln 1e35 の上限を本体・摂動の両方に)、面潜熱 (表, g=0 の面はスキップ)、実現可能性 clamp、二相の温度反転 (float Newton + double 研磨、残差 1e-9|e|+0.05 J/kg で成功判定、失敗セルは roe 不変)。平衡形と二温度: ソース kernel は `condEquilibrium`≠0 または `condTwoTemp`=1 で常に double、EOS 反転は `condEquilibrium: 2` (拘束形) だけ double で `condEquilibrium: 1` の湿潤 TP セルは非平衡と同じハイブリッド反転 (面潜熱・clamp・組成構築は常に float 経路)。`0` で従来 double 経路 (ソース診断は変更前とビット一致、二相反転の T は成功判定の統一で ≤1e-3 K 変わり得る)。plan condensation-float-speedup §4.2-6、methods/condensation.md 実装 §9。
+- **`condensation.condensationSpecies`** (condensation, 既定なし, 2026-09-16): 凝縮する気相化学種を**名前**で指定する
+  (`condensationSpecies: H2O`)。`physProp.species` から大文字小文字無視で index を解決して `condGasSpecies` に入れる。数値
+  `condGasSpecies` を併記して食い違えばエラー、数値だけなら範囲検査 (`nSpecies` 超え・単一種で carrier 形はエラー)。起動ログの
+  `[species]` 表に `condensing species: H2O (condGasSpecies=1)` と出る。種順序を変えても config を書き直さずに済むので名前を正本にする
+  ([plan cea-mole-fraction §2](../plans/active/thermophysics-cea-mole-fraction-species.md))。
+- **`physProp.tracer: exhaust`** (physProp, 既定 `none`, 2026-09-16): 受動トレーサ `roXi` (排気率 ξ∈[0,1]) を汎用スカラ輸送コアで
+  移流する (拡散なし・ソースなし、point-implicit / RK / dual-time 対応)。入口 `inlet_*` は `bcondConfig` の `floats: {Xi: 1.0}`
+  (既定 0) の Dirichlet (node は入口ノードをピン)、他境界は zero-gradient。出力 `roXi` (level 0) / `Xi` (level 1)、残差列
+  `rms_roXi`、restart は `VALUE/roXi` (無ければ 0)。`full` 種モードの SERN で排気/外気の見分けに使う (`lumped` では ξ=Y_EXH)。
+  未指定なら変数を登録せず従来経路ビット不変。
+- **bcond `floats: {X0:.., X1:.., ...}`** (多成分 TP の入口, 2026-09-16): 入口組成を**モル分率**で与える。forge が double で検証し
+  $Y_k = X_k M_k / \sum_j X_j M_j$ (MW は `speciesDBFile`/内蔵 DB) に換算して従来の `Y{s}` 経路へ流す。**X を 1 つでも書いたら全種必須**
+  (既定補完しない)、同じ境界での `X`/`Y` 混在・負値・非有限・総和 0・範囲外 index はエラー終了。`Y{s}` を明示した場合も負値と
+  |ΣY−1|>1e-3 はエラー (以前は黙って通した; 未指定種は従来どおり `Y0=1`, 他 0)。起動ログに入口ごとの Y と X (MW から逆算) が出るので
+  ここで桁を確認する。`initial` (IC) は文字列のまま; 組成付き IC と `inletProfile` CSV は生成ツール側で Y に換算する
+  (`gen_inlet_profile.py --X`, [procedures/inlet-profile.md](inlet-profile.md))。
 - **`thermoHrefTemp: 298.15` を必ず指定する** (反応熱は sensible datum の残差項 $\dot Q=-\sum_s h^{abs}_s(T_{ref})\dot\omega_s$ として入る。絶対 datum (0) でも動くが陰解法は不安定)。
 - 機構に現れる種は `species` に全て含めること (無ければ起動時エラー)。`species` にだけある種は不活性として扱う。
 - 熱力学 DB は `tools/cea_thermo_to_species_db.py thermo.inp --species ...` で CEA から生成する (ラジカルは内蔵 DB に無い)。
