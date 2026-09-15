@@ -183,7 +183,18 @@ evaluate:
 | 5b | ~~種変換 restart ツールと CEA `--check` 修正~~ | 済 (2026-09-16): `tools/convert_species_field.py` (`species_meta.yaml` の展開行列で lump→実種、名前で H2O/モーメント/roXi 移送、ΣρY=ρ・総水量・T 保存検査; `roe` は差分形 ρ[e_dst−e_src] で液相エネルギーを保つ)、`cea_thermo_to_species_db.py` は元素欄 → `atoms`、`--check` は全指定種の MW/両区間を照合し閾値超で非零終了 (既知差: H2O MW 1.1e-6, AR high a0) |
 | 6 | ~~後処理・ParaView 配列解決~~ | 済 (2026-09-16): `tools/forge_species.py` (run dir → 種名/index/MW/凝縮種/vapor_array/tracer)、ParaView `Forge Saturation` に `Run Config` プロパティ (未指定時は `Y1` を自動採用しない)、`gen_inlet_profile.py --X`、`case/44 axis_csv_va.py` は名前解決 |
 | 7 | 回帰 run と codex result レビュー | §6 (node のみ; **cell は対象外**, 2026-09-16 ユーザ指示)。case/44: 新バイナリ A/B `run_0195`、`full` 5 種 `run_0196` (0170 の収束場を種変換 restart)、モル分率入力 lumped `run_0197`、CEA DB `run_0198` (prepare)、SERN case/46: node Euler m6_on `run_0100` (別名 [EXH, AIR]) / `run_0101` (full 11 種 + roXi) |
-| 8 | F-sp1: トレーサ `roXi` の拡散 (SST の SERN で必要なら混合平均 Sc) | 未着手 (Euler では不要) |
+| 8 | F-sp1: トレーサ `roXi` の拡散 (SST の SERN で必要なら混合平均 Sc) | 未着手 (Euler では不要; 粘性二流体試験 [§6] も未実施でこれに依存) |
+| 9 | (result-1 M1) 種名の YAML 引用 (`NO`/`N`/`Y`) + 生成 config の再読込試験 | 設計側 |
+| 10 | (M2) `convert_species_field.py` の二相 EOS 反転・書込前の保存検査・総水量 ρY_H2O | forge ツール |
+| 11 | (M3) restart 照合: `species_meta.yaml`/DB/datum の共通照合を interp_field・restart_by_index・warm_from_same_mesh・warm_from_run に | 両側 |
+| 12 | (M4) 変換器: stream lump の保存的展開 + 作動点変更の再初期化 (別操作) + `lumped→full` の roXi 生成 | forge ツール + 設計メタ |
+| 13 | (M5) roXi の周期 node 残差合算・同期 + 周期移流試験 | forge |
+| 14 | (M6) tracer × dual-time を入力で拒否 (solver-settings の「対応」撤回) | forge |
+| 15 | (M7) `condensationSpecies` ↔ `condModel` の対応検査 + config 読込単体 | forge |
+| 16 | (M8) `lumped+keep` 等でもトレーサ有効化、`exhaust_fraction(run)` 共通アクセサ | 設計側 (+forge は既存 tracer 経路) |
+| 17 | (M9) `forge_species.vapor_array` を凝縮の有無と独立に (H2O 名前解決) | forge ツール + axis_csv |
+| 18 | (M10) 小型 5 種 node TP の `check_convergence` PASS ケース; トレーサ誤差 (1.7e-4) の切り分け; 作動点変更 (m6_on→m10_on) と湿潤 restart の試験; README「同じ固定点」→「ゲート内で一致」 | 検証 |
+| 19 | (m1) docs 同期 (`loadSpeciesDB` 記述、plans/README の status、condensation §7b) | docs |
 
 ## 6. 検証
 
@@ -214,6 +225,7 @@ evaluate:
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result (1 回目) | `2026-09-16` | [2026-09-16-thermophysics-cea-mole-fraction-species-result.md](../../notes/reviews/2026-09-16-thermophysics-cea-mole-fraction-species-result.md) | **NO-GO**, C0/M10/m1 | **全採用 (2026-09-16 反映中, §5.1 #9–#19)**: M1 (`NO` が YAML で False) → 種名を引用符付きで出力し、生成 config の Python 再読込試験; M2 (湿潤 input の T 反転が二相 EOS を無視・総水量二重計上) → 変換器に二相 EOS 反転と書込前の保存検査、総水量は ρY_H2O; M3 (restart の名前/DB/datum 照合が未実装) → `species_meta.yaml` + DB + datum の共通照合を interp_field / restart_by_index / warm_from_same_mesh / warm_from_run に適用 (照合不能はエラー); M4 (変換器が stream lump とトレーサ新設を扱えない) → 保存的展開と作動点変更の再初期化を分離、`lumped→full` の roXi 生成; M5 (roXi が周期 node の残差合算・同期から漏れ) → periodicNode に登録 + 周期移流試験; M6 (dual-time の roXi は物理時間項なし) → 入力時に tracer × dual-time を拒否 (対応は F-cf8 と同じ扱い); M7 (`condensationSpecies` と `condModel` の不一致を拒否しない) → host 入力段階で物質↔物性モデルの対応検査 + config 読込までの単体; M8 (`lumped+keep` で ξ=Y_EXH が成立しない, `exhaust_fraction(run)` 不在) → 単一種分率が流入元ラベルにならない配置でもトレーサ有効化 + 共通アクセサ実装; M9 (凝縮 OFF で vapor_array が None → 固定組成 24 % 誤り) → H2O を名前で解決し凝縮の有無と独立に分圧; M10 (未達ゲート: 小型 5 種 node PASS ケース無し、トレーサ場 1e-6 超 (最大 1.7e-4, 4.6k ノード)、CEA 物性差 rtol 1.11e-6、「同じ固定点」の断定) → §5.1 に戻し、小型 node PASS ケース・トレーサ誤差の切り分け・作動点変更/湿潤 restart 試験を実施、README の断定を「ゲート内で一致」に修正; m1 (docs 不整合) → methods/plans README/condensation §7b を同期 |
 | plan (再: §4.5 SERN) | `2026-09-15` | [2026-09-15-thermophysics-cea-mole-fraction-species-plan-2.md](../../notes/reviews/2026-09-15-thermophysics-cea-mole-fraction-species-plan-2.md) | GO-with-changes, C0/M6/m1 | **全採用**: M1/M2 (元素混合分率では流入元を復元できない・power-off 退化) → 排気率は独立トレーサ `roXi`、元素は診断のみ (§4.5, §5-4c); M3 (stream lump と keep の質量配分) → 流れごとの配分正本 (§4.5); M4 (`restart_by_index`/`warm_from_same_mesh` が roY を落とす) → §4.5, §5-4b, §6; M5 (元素メタデータ) → `species_meta.yaml` (§4.5); M6 (SERN 検証ゲート) → §6; m1 (スキーマ一本化・完了条件) → §4.5, §8 |
 | plan | `2026-09-15` | [2026-09-15-thermophysics-cea-mole-fraction-species-plan.md](../../notes/reviews/2026-09-15-thermophysics-cea-mole-fraction-species-plan.md) | GO-with-changes, C0/M8/m2 | **全採用**: M1 (解決済み DB を全経路へ) → §4.1; M2 (凝縮種は名前正本・拒否条件) → §4.2, §2; M3 (種変換 restart・照合) → §2, §5.1 #5b; M4 (X 入力契約) → §4.3; M5 (ParaView 配列を名前解決) → §4.4; M6 (等価性の適用条件) → §3, §6; M7 (CEA と転記の差, --check 修正) → §3, §5.1 #5b; M8 (収束小型ケース node/cell, rms_roY 列, series ゲート, 世代固定) → §6; m1 (frozen.mole_to_mass 委譲, SERN 対象外) → §2, §4.1; m2 (rtol/atol) → §6 |
 
@@ -234,6 +246,7 @@ evaluate:
 
 ## 9. 変更ログ
 
+- `2026-09-16` — codex result レビュー 1 回目 **NO-GO (M10/m1)** を全採用 (§6.1, §5.1 #9–#19)。修正は forge 側 (M2/M4/M5/M6/M7/M9 ツール) と設計側 (M1/M3/M8/M9/m1) で並行。
 - `2026-09-16` — **回帰 (node のみ; case/44 README「species 統一スキーマ」表, case/46 README run 表)**: (1) 新バイナリ A/B `run_0195`/反復 `0199` vs 旧 `0170`: 報告量 5 桁一致, 場 ro 1.0e-5 (新バイナリ反復床 4.6e-6 の 2 倍), ṁ 1e-7; (2) **`full` 5 種 `run_0196`** (IC = `convert_species_field.py` で 0170 の収束場を展開): onset 15.8404 vs 15.8400 r_t, 出口 g 0.58448 vs 0.58443 % (+8e-5), ṁ +2.9e-6, 軸 M 1.5e-5, g L1 1.1e-4 (床 1.6e-5 の 7 倍; ゲートは全て内側), series ALL STEADY, condLim 1, `rms_roY0..4` 列; (3) モル分率入力 lumped `run_0197`: `species_db.yaml` は解析後 MW 1e-8 相対で一致 (旧 YAML の 7 桁丸め分), 場は full と同程度の差 (ro 3.0e-5); (4) forge `X{s}`/`condensationSpecies`/トレーサ 500 step `run_0190`–`0192`/`0194`: 同一設定反復ノイズ内 (≤7e-6); (5) CEA 直読み DB `run_0198` (prepare): 設計 R/γ* と CFD `species_db.yaml` の出典がともに DB ファイル; (6) **dry `run_0202` (lumped) / `0203` (full)**: ṁ 完全一致, 軸 M 1.5e-5, 場 2e-6 (§6-1 ゲート 1e-4)。**SERN** case/46 `run_0100` (別名 [EXH, AIR]) / `0101` (full 11 種 + roXi), node Euler m6_on 6000 step: C_T/C_L/C_M 相対 1e-8/5e-7/4e-7 (ゲート 1e-3), 力の時系列 0.1 % で ALL STEADY, 場 P/T 2.5e-5, ξ (Xi vs Y_EXH) 平均 4.7e-7・最大 1.7e-4 (カウル後縁 200 ノード), ΣY 2e-7, GATES PASS; `check_convergence` は plateau (NOT CONVERGED); 24000 step 版 `run_0102`/`0103` も plateau (2.4 桁; node Euler SERN の限界サイクルで PASS は取れず、**§6 の「両 run PASS」は「力の時系列 0.1 % STEADY + 力の一致 + ΣY/有限性」に読み替え** [limiter plan と同じ扱い]) で C_T/C_L/C_M 相対 3e-8/1.2e-6/1.0e-6、場 P/T 3.5e-4/5.7e-4 (限界サイクルの位相差)。step 時間: 5 種 +23 %, SERN 11 種 2.33→4.77 ms。
 - `2026-09-16` — **実装着手** (ユーザ指示: plan レビュー済みなので追加レビュー無しで着手可): docs 先行更新、`gas/composition.py` (解決済み DB・換算・統一スキーマ解決・DB/メタ出力)、gas パッケージの DB 注入、`probdef` の gas 検証、`runner_axismach` / `runner_sern{,3d}` の統一スキーマ化と restart 全種化、単体試験追加 (ALL PASS)。forge 本体側 (host DB 解決・`X{s}`・`condensationSpecies`・`rms_roY`・`roXi`・ツール) は並行実装中。
 - `2026-09-15` — 初稿 (ユーザ要望: MIXDRY の中身を明示・ユーザ指定可能に、CEA ベースでモル分率指定)。
