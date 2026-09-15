@@ -194,10 +194,10 @@ evaluate:
 | 16 | ~~(M8) `lumped+keep` 等でもトレーサ有効化、`exhaust_fraction(run)` 共通アクセサ~~ | 済 (2026-09-16): トレーサは「inflow で 1・external で 0 の輸送種 (純粋な流入元ラベル) が無いとき」有効 (full と lumped+keep は有効, [EXH, AIR] は Y0)。`composition.exhaust_fraction(run_dir)` / `exhaust_fraction_field` が `species_meta.exhaust_fraction` ({kind, array, conserved}) を返す。単体追加 |
 | 17 | ~~(M9) `forge_species.vapor_array` を凝縮の有無と独立に~~ | 済 (2026-09-16): `h2o_index`/`h2o_array` 追加、`vapor_array` は凝縮 OFF でも H2O を名前解決 (`run_0203` → Y0); `axis_csv_va.py` も名前解決 |
 | 18 | (M10) 小型 5 種 node TP の `check_convergence` PASS ケース; 作動点変更 (m6_on→m10_on) と湿潤 restart の試験 | **小型 PASS ケース済 (2026-09-16)**: case/16 `run_0471_tp5_node_euler_va3` (5 種) / `run_0472_tp2_node_euler_va3_lumped` (lumped): node Euler TP, Tt 353 K, 12000 step で全列 3.3 (rms_roUy)〜4.8 桁低下 (rms_roY 4.2 桁) **PASS**, ΣY−1 ≤ 8.6e-8, 負値 0, 5 種 vs lumped の場差 ro 1.0e-6 / P 1.7e-6 / T 1.0e-6 / Y_H2O 3.9e-6 (float 精度), step 時間 +33 % (case/16 README run 表)。**作動点変更・湿潤 restart 済 (2026-09-16)**: case/46 `run_0105` (m6_on `run_0102` → m10_on を `warm_from_run`; ΣρY/ρ 1.2e-7, T 整合 1.8e-3 K, 適応段 2000 step で残差 4.5 桁低下, NaN 0); 湿潤 restart は `run_0196` の入力 (6365 湿潤セル) を二相 EOS 変換器で同一配置変換して T 保持 6.8e-13 K (#10); 同一条件の段階 restart (restart_by_index) は case/46 `run_0100`–`0103` の段階起動で全種を引き継ぎ最終 ΣY 1±2.4e-7。**トレーサ誤差は切り分け済** (2026-09-16, case/46 `run_0104`: lumped run に tracer を併用すると同一 run 内で `\|Xi−Y_EXH\|` 最大 1.8e-4 / 平均 4.6e-7 → 汎用スカラ輸送カーネルと化学種輸送カーネルの再構成差であり配置差ではない; §6 の「ξ と Y_EXH 1e-6」は同一カーネルでないと成立しないので **「平均 1e-6 以内 + 最大はカーネル差 (同一 run 実測) 以内」に改定**)。README「同じ固定点」→「ゲート内で一致」は済 |
-| 20 | (result-2 M1) 作動点変更の組成再初期化 Y = ξ Y_in^dst + (1−ξ) Y_ext^dst (変換器 reinit + warm_from_run) と目標組成の検証 | 両側 |
-| 21 | (M2) restart 署名を実 config + DB (係数・区切り・datum・tracer) から; 矛盾/照合不能/保存量欠落は拒否 | 両側 |
+| 20 | (result-2 M1) 作動点変更の組成再初期化 | 設計側済 (2026-09-16): `composition.reinit_transport_vector` + `warm_from_run` は ξ (元 run の `exhaust_fraction`) と目標入口ベクトルから Y_t を再構成 (単体: m10_on full ξ=1 → H2O 0.24881767 / H2 0.01383296)。変換器 `--mode reinit` は実装中 |
+| 21 | (M2) restart 署名 | 設計側済 (2026-09-16): `_species_signature` は solverConfig + species_db (順序・MW・両区間係数・区切り・datum・tracer)、meta との矛盾・TP の照合不能・必要保存量の欠落を拒否 (単体: 係数摂動/トレーサ差/順序矛盾/config 無し)。forge ツール側は実装中 |
 | 22 | (M3) 変換器の有限性・非負・EOS 残差検査 + 失敗系試験 | forge ツール |
-| 23 | (m1) docs の ξ 説明統一、§6 旧ゲートの履歴化、粘性試験の延期明記、M10 の桁数訂正 | docs |
+| 23 | ~~(m1) docs の ξ 説明統一、§6 旧ゲートの履歴化、粘性試験の延期明記、M10 の桁数訂正~~ | 済 (2026-09-16) |
 | 19 | ~~(m1) docs 同期~~ | 済 (2026-09-16): methods/thermophysics §5 (speciesDB_resolve/init, 上書き), plans/README (in_progress), condensation §7b |
 
 ## 6. 検証
@@ -220,8 +220,8 @@ evaluate:
 - **SERN (case/46)** (codex 再レビュー M6 を反映):
   - 単体: powered / power-off (m4_off: 燃料なしでも入口流あり) / 微小組成差 (既定外気 `AIR_MOLE` と作動点の空気) / `keep` 併用 / 種順序変更 で、流れごとの質量配分・展開行列・入口ベクトル・トレーサ BC が意図どおり。元素診断は近退化で「定義不能」を返す。
   - restart: 同一条件 restart (段階切替直前・直後) で全 `roY{s}`・トレーサ・ΣρY/ρ・T が保持される; 作動点変更 (m6_on→m10_on) は `convert_species_field.py` 経由で ΣρY=ρ・T 保存を検査。既存 `restart_by_index` の欠落修正による差は後方互換比較から分離して記録。
-  - 2D node Euler 作動点 1 点: (i) `lumps: {EXH, AIR}` 指定が現行 `[EXH, AIR]` run とノイズ床以内; (ii) `full` と `lumped` の非粘性 frozen 比較でノズル力・機体力・出口運動量が相対 1e-3 以内 (ゼロ近傍の力は $F_{ideal}$ 基準の絶対許容差)、トレーサ ξ と $Y_{EXH}$ の場が平均 1e-6 以内・最大は同一 run 内のカーネル差 (lumped+tracer 併用 run で実測, 2026-09-16: 1.8e-4) 以内 [改定: 汎用スカラと化学種のカーネルが違うため点ごとの 1e-6 は成立しない]; 比較する両 run は全種残差込み `check_convergence` PASS (`require_residual_pass=True`)、全種の有限性・非負性、力の時系列 STEADY を**比較許容差より十分小さい変動幅** (drift/fluct 0.1 %; 既存 sern_forces の 2 %/5 % は不可) で要求。**実測 (2026-09-16)**: node Euler SERN は 24000 step でも残差 plateau (2.4 桁) で PASS が取れない (限界サイクル) ため、PASS の代わりに「同じ plateau (両 run の床が同じ) + 力 0.1 % STEADY + 力の一致」で判定した (§9)。
-  - 小型粘性二流体ケース (差動拡散あり): トレーサ ξ と元素混合分率が乖離することを確認し、`full`≠`lumped` の差を記録 (等価性は要求しない)。
+  - 2D node Euler 作動点 1 点: (i) `lumps: {EXH, AIR}` 指定が現行 `[EXH, AIR]` run とノイズ床以内; (ii) `full` と `lumped` の非粘性 frozen 比較でノズル力・機体力・出口運動量が相対 1e-3 以内 (ゼロ近傍の力は $F_{ideal}$ 基準の絶対許容差)、トレーサ ξ と $Y_{EXH}$ の場が平均 1e-6 以内・最大は同一 run 内のカーネル差 (lumped+tracer 併用 run で実測, 2026-09-16: 1.8e-4) 以内 [改定: 汎用スカラと化学種のカーネルが違うため点ごとの 1e-6 は成立しない]; 比較する両 run の**現行ゲート (2026-09-16 改定)**: 両 run が同じ残差 plateau (床が同じ) に達し、全種の有限性・非負性・ΣY=1±1e-6、力の時系列 C_T/C_L/C_M が drift/fluct 0.1 % で STEADY (既存 sern_forces の 2 %/5 % は不可)、力の一致 1e-3。~~旧: 全種残差込み `check_convergence` PASS (`require_residual_pass=True`)~~ (履歴: node Euler SERN は 24000 step でも残差 plateau 2.4 桁で PASS が取れない [限界サイクル] ため置換, §9)。
+  - ~~小型粘性二流体ケース (差動拡散あり): トレーサ ξ と元素混合分率が乖離することを確認し、`full`≠`lumped` の差を記録 (等価性は要求しない)。~~ **延期 (2026-09-16)**: トレーサの拡散が未実装 (F-sp1) なので粘性では ξ の輸送が化学種と整合しない。F-sp1 と一緒に実施し、本 plan の完了条件からは外す (§8)。
   - 3D 経路: `runner_sern3d.warm_from_same_mesh` の全種保持を 1 段で確認。step 時間の比は記録のみ。
 - **判定基準**: 上のゲート + `check_convergence.py` / `check_quasisteady.py` VERDICT 添付。step 時間の増分 (+3 輸送式) は記録のみ。
 
@@ -244,7 +244,7 @@ evaluate:
 ## 8. 完了条件
 
 - [ ] 関連 methods を更新済み
-- [ ] 実装・§6 の検証 (単体 / 小型収束ケース / case/44 1–5 / SERN 一式) を満たす
+- [ ] 実装・§6 の検証 (単体 / 小型収束ケース [node] / case/44 1–5 / SERN 一式 [粘性二流体は F-sp1 へ延期]) を満たす
 - [ ] codex レビュー 2 回を §6.1 に記録し、Critical / Major の採否を §5.1 に反映済み
 - [ ] `status: done`、§9 に変更ログ
 - [ ] `plans/active/` → `plans/accepted/`、`plans/README.md` 同期

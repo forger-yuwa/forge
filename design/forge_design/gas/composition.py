@@ -575,6 +575,26 @@ def exhaust_fraction_field(run_dir, res_h5) -> "np.ndarray":
         return np.clip(f["VALUE/" + spec["array"]][:].astype(float), 0.0, 1.0)
 
 
+def load_yaml_str(text: str):
+    """YAML 1.1 の暗黙 bool (NO/N/Y/yes/no/on/off) を文字列のまま読む SafeLoader (true/false だけ bool)。種名 `NO` 対策 (codex result M1)。"""
+    import yaml
+    class _L(yaml.SafeLoader):
+        pass
+    _L.yaml_implicit_resolvers = {k: [(t, r) for t, r in v if t != "tag:yaml.org,2002:bool"]
+                                  for k, v in yaml.SafeLoader.yaml_implicit_resolvers.items()}
+    import re as _re
+    _L.add_implicit_resolver("tag:yaml.org,2002:bool", _re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF"))
+    return yaml.load(text, Loader=_L)
+
+
+def reinit_transport_vector(xi, layout: "SpeciesLayout"):
+    """作動点変更の組成再初期化 (codex result-2 M1): 排気率 ξ と**目標**配置の入口ベクトルから
+    Y_t = ξ Y_in + (1−ξ) Y_ext (輸送種ベクトル) を返す (元の組成は ξ 以外捨てる = 情報を落とす操作)。"""
+    xi = np.clip(np.asarray(xi, dtype=float), 0.0, 1.0)
+    yi = np.asarray(layout.Y_transport("inflow")); ye = np.asarray(layout.Y_transport("external"))
+    return [xi * a + (1.0 - xi) * b for a, b in zip(yi, ye)]
+
+
 def load_species_meta(run_dir) -> dict | None:
     import yaml
     p = Path(run_dir) / "species_meta.yaml"

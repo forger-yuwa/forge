@@ -89,6 +89,16 @@ else:
     print("skip: problem_moo_frozen_tp_cycle3op.yaml が無い")
 
 
+# --- 作動点変更の組成再初期化 (codex result-2 M1): ξ と目標入口ベクトルから Y_t = ξ Y_in + (1−ξ) Y_ext
+if yml.exists():
+    from forge_design.gas.composition import reinit_transport_vector
+    p10 = load_problem(yml); p10.evaluate["tp_species"] = {"mode": "full", "species": ["N2", "H2O", "H2", "AR", "OH", "O2", "NO", "H", "O", "CO2", "CO"]}
+    R.select_operating_point(p10, "m10_on"); L10 = R.frozen_gases(p10)["layout"]
+    Yt = reinit_transport_vector(np.array([1.0, 0.0, 0.5]), L10)
+    iH2O, iH2 = L10.index("H2O"), L10.index("H2")
+    check("reinit (full m10_on): ξ=1 で目標排気組成 H2O 0.24881767 / H2 0.01383296", abs(Yt[iH2O][0] - 0.24881767) < 1e-7 and abs(Yt[iH2][0] - 0.01383296) < 1e-7, f"{Yt[iH2O][0]:.8f} / {Yt[iH2][0]:.8f}")
+    check("reinit: ξ=0 で外気組成 (H2O 0), ξ=0.5 で中間, 各点 ΣY=1", abs(Yt[iH2O][1]) < 1e-12 and abs(Yt[iH2O][2] - 0.5 * 0.24881767) < 1e-7 and all(abs(sum(v[k] for v in Yt) - 1) < 1e-12 for k in range(3)))
+
 # --- 統一 tp_species スキーマ (plan thermophysics-cea-mole-fraction-species §4.5 / §6 SERN, 2026-09-16) ---
 if yml.exists():
     import h5py, tempfile
@@ -123,7 +133,13 @@ if yml.exists():
     check("lumped+keep m4_off: 同じ配置 [EXH, AIR, H2O] で Y_H2O = 0", st4["species"] == ["EXH", "AIR", "H2O"] and st4["exhaust"]["Y"] == [1.0, 0.0, 0.0])
     # restart_by_index / warm_from_same_mesh: 全 roY + roXi を引き継ぐ (codex M4 の既存バグ修正)
     with tempfile.TemporaryDirectory() as td:
-        src = Path(td) / "res.h5"; dst = Path(td) / "sern.h5"
+        # restart 照合は実 config + DB の署名 (codex result-2 M2): 元/先とも TP 2 種 + tracer の config を置く
+        _db = ('"EXH":\n  MW: 0.0244\n  nasa9_low: [0,0,3.5,0,0,0,0,-1000,5]\n  nasa9_high: [0,0,3.5,0,0,0,0,-1000,5]\n'
+               '"AIR":\n  MW: 0.0289\n  nasa9_low: [0,0,3.5,0,0,0,0,-1000,5]\n  nasa9_high: [0,0,3.5,0,0,0,0,-1000,5]\n')
+        _cfg = 'physProp: {thermalMethod: 2, species: ["EXH", "AIR"], speciesDBFile: "species_db.yaml", thermoHrefTemp: 298.15, tracer: exhaust}\n'
+        for sub in ("src", "dst"):
+            (Path(td) / sub).mkdir(); (Path(td) / sub / "solverConfig.yaml").write_text(_cfg); (Path(td) / sub / "species_db.yaml").write_text(_db)
+        src = Path(td) / "src" / "res.h5"; dst = Path(td) / "dst" / "sern.h5"
         with h5py.File(src, "w") as f:
             v = f.create_group("VALUE"); v["ro"] = np.array([2.0, 2.0]); v["roUx"] = np.array([1.0, 1.0]); v["roUy"] = np.zeros(2); v["roUz"] = np.zeros(2); v["roe"] = np.array([5.0, 5.0])
             v["roY0"] = np.array([0.8, 0.8]); v["roY1"] = np.array([1.2, 1.2]); v["roXi"] = np.array([0.4, 0.4]); v["wall_dist"] = np.array([9.0, 9.0])
@@ -135,8 +151,31 @@ if yml.exists():
             ok = (f["VALUE/roY0"][0] == 0.8 and f["VALUE/roY1"][0] == 1.2 and "roXi" in f["VALUE"] and abs(f["VALUE/roXi"][0] - 0.4) < 1e-7
                   and f["VALUE/wall_dist"][0] == 1.0 and abs((f["VALUE/roY0"][0] + f["VALUE/roY1"][0]) / f["VALUE/ro"][0] - 1.0) < 1e-12)
         check("restart_by_index: roY0/roY1/roXi を引き継ぎ ΣρY = ρ、wall_dist は触らない", bool(ok))
+        # 署名照合: 係数の摂動・トレーサ設定の違い・種順序の矛盾を検出する (codex result-2 M2)
+        bad = Path(td) / "bad"; bad.mkdir(); (bad / "solverConfig.yaml").write_text(_cfg)
+        (bad / "species_db.yaml").write_text(_db.replace("3.5,0,0,0,0,-1000,5]\n  nasa9_high", "4.5,0,0,0,0,-1000,5]\n  nasa9_high", 1))
+        try:
+            R.check_species_compatible(Path(td) / "src", bad); check("署名: NASA-9 係数の摂動を検出", False)
+        except ValueError as ex:
+            check("署名: NASA-9 係数の摂動を検出", "NASA-9" in str(ex), str(ex)[:50])
+        notr = Path(td) / "notr"; notr.mkdir(); (notr / "solverConfig.yaml").write_text(_cfg.replace(", tracer: exhaust", "")); (notr / "species_db.yaml").write_text(_db)
+        try:
+            R.check_species_compatible(Path(td) / "src", notr); check("署名: トレーサ設定の違いを検出", False)
+        except ValueError as ex:
+            check("署名: トレーサ設定の違いを検出", "トレーサ" in str(ex))
+        (notr / "species_meta.yaml").write_text("species: [AIR, EXH]\n")
+        try:
+            R._species_signature(notr); check("署名: species_meta と config の順序矛盾を拒否", False)
+        except ValueError as ex:
+            check("署名: species_meta と config の順序矛盾を拒否", "矛盾" in str(ex))
+        nocfg = Path(td) / "nocfg"; nocfg.mkdir()
+        try:
+            R._species_signature(nocfg); check("署名: config 無しは照合不能としてエラー", False)
+        except ValueError:
+            check("署名: config 無しは照合不能としてエラー", True)
         from forge_design.evaluate import runner_sern3d as R3
         run3 = Path(td) / "run3"; run3.mkdir(); (run3 / R3.MESH).write_bytes(Path(dst).read_bytes())
+        (run3 / "solverConfig.yaml").write_text(_cfg); (run3 / "species_db.yaml").write_text(_db)
         with h5py.File(run3 / R3.MESH, "r+") as f:
             f["VALUE/roY0"][:] = 1.0; f["VALUE/roY1"][:] = 0.0
         R3.warm_from_same_mesh(run3, src)

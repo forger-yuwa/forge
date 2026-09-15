@@ -779,8 +779,9 @@ evaluate:
 - **`species_db.yaml` の各エントリに由来をコメント**で残す (`# source: CEA thermo.inp ...` / `# lumped: {N2: 0.7089, ...} (mole fractions within the lump)`)。
   **`species_meta.yaml`** (run dir) に実種の原子組成、lump の展開行列、各流れの正規化済み組成 (X と Y)、輸送種順序、トレーサの有無を機械可読で保存し、
   後処理・restart は問題 YAML を再解釈せずこれを使う。`prepare_info.json` にも `gas.X` / `gas.Y` / DB の出典。
-- **`full` の SERN**: 輸送種 = 排気組成 ∪ 外気組成。IC は領域ごと (排気側 / 外気側) にその流れの Y ベクトル、BC も流れごと。排気率 ξ は受動スカラ `roXi` (forge `physProp.tracer: exhaust`)
-  で輸送し、`lumped` では ξ = $Y_{EXH}$ を同じアクセサ `exhaust_fraction(run)` が返す。段階 restart (`restart_by_index` / `warm_from_same_mesh`) は全種とトレーサを引き継ぐ
+- **`full` の SERN**: 輸送種 = 排気組成 ∪ 外気組成。IC は領域ごと (排気側 / 外気側) にその流れの Y ベクトル、BC も流れごと。排気率 ξ は、輸送種に純粋な流入元ラベル (排気入口 1・外気入口 0 の種; 旧 `[EXH, AIR]` の $Y_{EXH}$) があればそれ、無ければ
+  (full、lumped+keep) 受動スカラ `roXi` (forge `physProp.tracer: exhaust`) で輸送し、`species_meta.yaml` の `exhaust_fraction` に保存した定義を `gas.composition.exhaust_fraction(run_dir)` が返す。
+  作動点変更の warm start は ξ 以外の組成を捨て、目標作動点の入口ベクトルから $Y_t = \xi Y_{in} + (1-\xi) Y_{ext}$ を再構成する (`warm_from_run` / `convert_species_field.py --mode reinit`)。段階 restart (`restart_by_index` / `warm_from_same_mesh`) は全種とトレーサを引き継ぐ
   (従来は 7 変数のみで ΣY が壊れていた)。作動点変更時の組成再構成は `convert_species_field.py` (情報を落とす初期化操作)。
 - **熱力学の等価性**: `full` ≡ `lumped` は「同じ解決済み DB・同じ温度域処理・同じ datum・非粘性 frozen・各 lump の内部比が空間的に一定」のときのみ厳密
   (質量分率線形混合)。粘性 run は種ごとの拡散係数と種エンタルピー拡散で一般に異なる (仕様として記録)。SERN 3D SST の `full` は輸送式 2 → 11–13 本で

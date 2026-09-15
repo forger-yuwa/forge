@@ -434,35 +434,70 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
 
 
 def _species_signature(run_dir) -> dict | None:
-    """run dir の輸送種の署名 (species_meta.yaml の順序・MW + solverConfig の thermoHrefTemp)。無ければ None。"""
-    from ..gas.composition import load_species_meta
-    rd = Path(run_dir); meta = load_species_meta(rd)
-    if meta is None:
+    """run dir の輸送種の署名を**実 config + 解決済み DB** から作る (codex result-2 M2): 種順序・MW・両区間 NASA-9 係数・
+    温度区切り・thermoHrefTemp・tracer 設定。`species_meta.yaml` があれば順序の矛盾を拒否。CPG (thermalMethod≠2) は None。
+    TP なのに config/DB が読めなければ ValueError (照合不能)。"""
+    from ..gas.composition import load_species_meta, load_yaml_str
+    rd = Path(run_dir)
+    cfgp = (rd / "solverConfig_main.yaml") if (rd / "solverConfig_main.yaml").exists() else (rd / "solverConfig.yaml")
+    if not cfgp.exists():
+        raise ValueError(f"{rd}: solverConfig.yaml が無く種配置を照合できない")
+    cfg = load_yaml_str(cfgp.read_text()); pp = cfg.get("physProp", {})
+    if int(pp.get("thermalMethod", 0)) != 2:
         return None
-    cfg = (rd / "solverConfig_main.yaml") if (rd / "solverConfig_main.yaml").exists() else (rd / "solverConfig.yaml")
-    m = re.search(r"thermoHrefTemp:\s*([0-9.eE+-]+)", cfg.read_text()) if cfg.exists() else None
-    return {"species": list(meta["species"]), "MW": {k: float(v) for k, v in meta["MW"].items()},
-            "href": float(m.group(1)) if m else None, "tracer": bool(meta.get("tracer", {}).get("enabled", False))}
+    names = [str(k).upper() for k in (pp.get("species") or ["N2"])]
+    dbp = rd / str(pp.get("speciesDBFile") or "species_db.yaml")
+    if not dbp.exists():
+        raise ValueError(f"{rd}: speciesDBFile {dbp.name} が無く種配置を照合できない")
+    db = load_yaml_str(dbp.read_text()) or {}
+    dbu = {str(k).upper(): v for k, v in db.items()}
+    ents = {}
+    for k in names:
+        if k not in dbu:
+            raise ValueError(f"{rd}: 種 {k} が {dbp.name} に無い")
+        e = dbu[k]
+        ents[k] = {"MW": float(e["MW"]), "low": [float(v) for v in e["nasa9_low"]], "high": [float(v) for v in e["nasa9_high"]],
+                   "ranges": [float(e.get("Tlo", 200.0)), float(e.get("Tmid", 1000.0)), float(e.get("Thi", 6000.0))]}
+    meta = load_species_meta(rd)
+    if meta is not None and [str(k).upper() for k in meta["species"]] != names:
+        raise ValueError(f"{rd}: species_meta.yaml の種順序 {meta['species']} が solverConfig の {names} と矛盾")
+    tracer = str(pp.get("tracer", "none")).lower() not in ("none", "", "0")
+    if meta is not None and bool(meta.get("tracer", {}).get("enabled", False)) != tracer:
+        raise ValueError(f"{rd}: species_meta.yaml のトレーサ設定が solverConfig (tracer: {pp.get('tracer', 'none')}) と矛盾")
+    return {"species": names, "entries": ents, "href": float(pp.get("thermoHrefTemp", 0.0)), "tracer": tracer}
 
 
 def check_species_compatible(src_run_dir, dst_run_dir, what: str = "restart", allow_db_change: bool = False) -> None:
-    """restart 経路の共通照合 (codex result M3): 種の順序・MW (rel 1e-9)・datum が一致しないと拒否。
-    片方に species_meta.yaml が無ければ (旧 run) 照合不能としてエラー (両方無い CPG run は通す)。"""
+    """restart 経路の共通照合 (codex result M3 / result-2 M2): 実 config + DB の署名で種順序・MW・NASA-9 係数・温度区切り・
+    datum・トレーサを照合し、一致しないと拒否。allow_db_change (作動点変更の warm start) は lump の MW/係数の変化だけ許す。
+    両方 CPG なら通す。片方だけ TP は拒否。"""
     a, b = _species_signature(src_run_dir), _species_signature(dst_run_dir)
     if a is None and b is None:
         return
     if a is None or b is None:
-        raise ValueError(f"{what}: species_meta.yaml が {'元' if a is None else '先'} run に無く種配置を照合できない ({src_run_dir} → {dst_run_dir}); "
-                         "旧 run は tools/convert_species_field.py で移す")
+        raise ValueError(f"{what}: 片方だけ TP (thermalMethod 2) で種配置を照合できない ({src_run_dir} → {dst_run_dir})")
     if a["species"] != b["species"]:
         raise ValueError(f"{what}: 輸送種の順序が違う (元 {a['species']} / 先 {b['species']}); tools/convert_species_field.py を使う")
-    for k in a["species"]:
-        if not allow_db_change and abs(a["MW"][k] / b["MW"][k] - 1.0) > 1e-9:
-            raise ValueError(f"{what}: 種 {k} の MW が違う ({a['MW'][k]} / {b['MW'][k]}) — DB が異なる")
-    if a["href"] is not None and b["href"] is not None and abs(a["href"] - b["href"]) > 1e-9:
+    if not allow_db_change:
+        for k in a["species"]:
+            ea, eb = a["entries"][k], b["entries"][k]
+            if abs(ea["MW"] / eb["MW"] - 1.0) > 1e-9:
+                raise ValueError(f"{what}: 種 {k} の MW が違う ({ea['MW']} / {eb['MW']}) — DB が異なる")
+            for rng in ("low", "high"):
+                if any(abs(x - y) > 1e-12 * max(abs(x), abs(y), 1.0) for x, y in zip(ea[rng], eb[rng])):
+                    raise ValueError(f"{what}: 種 {k} の NASA-9 係数 ({rng}) が違う — DB が異なる")
+            if ea["ranges"] != eb["ranges"]:
+                raise ValueError(f"{what}: 種 {k} の温度区切りが違う ({ea['ranges']} / {eb['ranges']})")
+    if abs(a["href"] - b["href"]) > 1e-9:
         raise ValueError(f"{what}: thermoHrefTemp が違う ({a['href']} / {b['href']})")
     if a["tracer"] != b["tracer"]:
         raise ValueError(f"{what}: トレーサの有無が違う (元 {a['tracer']} / 先 {b['tracer']})")
+
+
+def _require_datasets(h5, names, what: str) -> None:
+    missing = [k for k in names if k not in h5["VALUE"]]
+    if missing:
+        raise ValueError(f"{what}: 元の VALUE に {missing} が無い")
 
 
 def restart_by_index(res_h5, mesh_h5) -> None:
@@ -470,8 +505,11 @@ def restart_by_index(res_h5, mesh_h5) -> None:
     理由 (2026-09-04, case/46 run_0009): スリットカウルの上下壁ノードは座標が一致し、最近傍補間が双子を同じ元
     ノードに写す → 排気側の壁ノードが外部流の圧力を持ち 2 次で発散した (interp_field の全 134 station で誤写像を確認)。"""
     check_species_compatible(Path(res_h5).parent, Path(mesh_h5).parent, "restart_by_index")
+    sig = _species_signature(Path(mesh_h5).parent)
     with h5py.File(res_h5, "r") as src, h5py.File(mesh_h5, "r+") as dst:
         n = len(dst["VALUE/ro"])
+        if sig is not None:
+            _require_datasets(src, ["ro", "roUx", "roUy", "roUz", "roe"] + [f"roY{i}" for i in range(len(sig["species"]))] + (["roXi"] if sig["tracer"] else []), "restart_by_index")
         keys = ["ro", "roUx", "roUy", "roUz", "roe", "roK", "roOmega"]        # 状態量のみ (wall_dist は触らない)
         keys += sorted(k for k in src["VALUE"] if re.fullmatch(r"roY\d+", k)) + ["roXi"]   # 化学種・トレーサも引き継ぐ (旧: 7 変数のみで ΣY が壊れた; codex M4)
         for k in keys:
@@ -528,31 +566,32 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
         else:
             # frozen_tp (R3): 圧力は出力の P を相似スケール、組成 (Y_EXH, Y_AIR) は場のまま持ち越し、
             # T' = P'/(ρ' R_mix(Y)) と目標作動点の擬似種 (排気組成が違う) で roe' = ρ'(Σ Y_s e_sens,s(T') + ½|u'|²) を組み直す
-            # 輸送種は名前で照合 (元 run の species_meta.yaml / prepare_info と目標の配置が同じ順序であること)
-            tg = gases_d["transported"]; names = list(gases_d["layout"].species)
-            src_names = list(si["states"].get("species") or [])
-            if src_names and src_names != names:
-                raise ValueError(f"warm_from_run: 輸送種の順序が違う (元 {src_names} / 先 {names}); 作動点変更で配置が変わるときは convert_species_field.py を使う")
-            if "P" not in src["VALUE"] or any(f"roY{i}" not in src["VALUE"] for i in range(len(names))):
-                raise ValueError(f"warm_from_run (frozen_tp): 元 run の出力に P / roY0..roY{len(names)-1} が無い")
+            # 組成の再初期化 (codex result-2 M1): 元の組成は排気率 ξ 以外捨て、**目標作動点**の入口ベクトルから
+            # Y_t = ξ Y_in^dst + (1−ξ) Y_ext^dst を組む (lumped [EXH, AIR] では Y_EXH の持ち越しと同値、full / lumped+keep では
+            # 実種分率が新作動点の排気組成に変わる)。ξ は元 run の exhaust_fraction (tracer なら roXi/ρ、無ければ流入元ラベル種)
+            from ..gas.composition import exhaust_fraction, reinit_transport_vector
+            tg = gases_d["transported"]; Ld = gases_d["layout"]; names = list(Ld.species)
+            spec = exhaust_fraction(src_run_dir)
+            _require_datasets(src, ["P", spec["conserved"]], "warm_from_run (frozen_tp)")
+            xi = np.clip(src["VALUE/" + spec["conserved"]][:].astype(np.float64) / np.maximum(ro, 1e-30), 0.0, 1.0)
+            Ys = reinit_transport_vector(xi, Ld)
             P = src["VALUE/P"][:].astype(np.float64) * s_P
-            Ys = [np.clip(src[f"VALUE/roY{i}"][:].astype(np.float64) / np.maximum(ro, 1e-30), 0.0, 1.0) for i in range(len(names))]
-            tot = np.maximum(sum(Ys), 1e-30); Ys = [y / tot for y in Ys]
             R_mix = sum(y * g.R for y, g in zip(Ys, tg))
             T_n = P / np.maximum(ro_n * R_mix, 1e-30)
             e_n = sum(y * g.e_sens(T_n) for y, g in zip(Ys, tg))
             roe_n = ro_n * e_n + 0.5 * sum(m * m for m in mom_n) / np.maximum(ro_n, 1e-30)
-            for i, y in enumerate(Ys):
-                if f"roY{i}" in dst["VALUE"]:
-                    dst[f"VALUE/roY{i}"][:] = ro_n * y
+            if not (np.all(np.isfinite(roe_n)) and np.all(np.isfinite(T_n)) and np.all(ro_n > 0)):
+                raise ValueError("warm_from_run: 非有限または非正の状態 (書込み前に中止)")
+            for i_, y in enumerate(Ys):
+                if f"roY{i_}" in dst["VALUE"]:
+                    dst[f"VALUE/roY{i_}"][:] = ro_n * y
                 else:
-                    dst["VALUE"].create_dataset(f"roY{i}", data=(ro_n * y).astype(np.float32))
-            if "roXi" in src["VALUE"]:
-                Xi = np.clip(src["VALUE/roXi"][:].astype(np.float64) / np.maximum(ro, 1e-30), 0.0, 1.0)
+                    dst["VALUE"].create_dataset(f"roY{i_}", data=(ro_n * y).astype(np.float32))
+            if Ld.tracer:
                 if "roXi" in dst["VALUE"]:
-                    dst["VALUE/roXi"][:] = ro_n * Xi
+                    dst["VALUE/roXi"][:] = ro_n * xi
                 else:
-                    dst["VALUE"].create_dataset("roXi", data=(ro_n * Xi).astype(np.float32))
+                    dst["VALUE"].create_dataset("roXi", data=(ro_n * xi).astype(np.float32))
         dst["VALUE/ro"][:] = ro_n
         for k, m in zip(("roUx", "roUy", "roUz"), mom_n):
             dst["VALUE"][k][:] = m

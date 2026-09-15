@@ -263,7 +263,7 @@ L/R 状態の `roe_L/Ht_L/ca_L` (および R 側) を NASA で再構成。Roe �
   - **排気トレーサ `roXi`** (`physProp.tracer: exhaust`): SERN の `full` モードで排気率 ξ (排気入口 1 / 外気入口 0) を受動スカラとして輸送する
     (`cuda_forge/tracerTransport_d.{cu,cuh}`: 汎用スカラ輸送コア `ScalarTransportDesc` で登録・入口 `floats.Xi` Dirichlet [node はピン]・他は Neumann・point-implicit/RK 更新・残差列 `rms_roXi`・出力 (level 0 から)・restart `VALUE/roXi`)。
     **拡散は 0 (移流のみ)**: 汎用スカラ拡散は Sc を持たない μ ベース、化学種の Fick 拡散は多成分専用カーネルのため、混合平均 Sc の拡散は未実装 (Euler の SERN では無関係; SST では followup F-sp1)。
-    `lumped` では ξ = $Y_{EXH}$ なので不要。元素質量分率から作る混合分率は診断のみ (差動拡散があると元素ごとに ξ が異なる)。
+    輸送種の中に**純粋な流入元ラベル** (排気入口で 1・外気入口で 0 になる種; 旧 `[EXH, AIR]` の $Y_{EXH}$) があればそれを ξ に使い、無ければ (full、lumped+keep で $Y_{EXH}<1$ になる配置) トレーサを輸送する。どちらを使うかは `species_meta.yaml` の `exhaust_fraction` に保存し、`forge_design.gas.composition.exhaust_fraction(run_dir)` が返す。元素質量分率から作る混合分率は診断のみ (差動拡散があると元素ごとに ξ が異なる)。
 
 ### 5b. 多成分化学種輸送 (M2) `cuda_forge/speciesTransport_d.{cuh,cu}`
 
