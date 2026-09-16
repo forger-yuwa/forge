@@ -12,6 +12,7 @@ forge_run.log の最後の `[passive]` 行群 (monitor 区間ごと + 終了時�
   - 低次陰解の受入 (全期間の最大相対線形残差) と HO 残差の全期間最大 → tol_lin (既定 1e-4) を超えたら FAIL
   - 総量 0 で補正が非ゼロ (log 側が rel=1) → FAIL
 使い方: check_passive_budget.py RUN_DIR [--tol 1e-6] [--tol-lin 1e-4] [--mode auto|fct|conservative|unsteady|steady] [--no-field]
+終了コード: 0 PASS / 1 FAIL / 2 対象外・入力不備 / 3 INDETERMINATE (unsteady モード: 保存を検証できる記録が無い。§6-2 の合格には使えない)
 全 [passive] 行の全数値トークンを読込時点で有限性検査し (per-step 部分も)、一度でも非有限・解析不能なら FAIL を保持する。終了場は res_<nStepOuter>.h5 に固定、CSV は必須。
 必須成分・FCT 作動条件・終了 step は solverConfig.yaml から確定する (passive_gate_common)。確定場の有界性・実現可能性 (check_passive_field) も併せて判定する。
 """
@@ -22,10 +23,13 @@ def finite(*xs):
     return all(isinstance(x, (int, float)) and math.isfinite(x) for x in xs)
 
 
-RE_FLOOR = re.compile(r'\[passive\] step (\d+) floorCorr (\S+)\s+.*cumulative: lo (\S+) hi (\S+) abs (\S+) \| total (\S+) rel\(abs/total\) (\S+) \| limCorr per-step \S+ cumulative abs (\S+) signed (\S+) rel (\S+) cells (\S+) thetaMin\(interval\) (\S+) initialTotal (\S+)')
-RE_FCT = re.compile(r'\[passive\]\s+fctCorr (\S+)\s+cumulative: dropped antidiffusion (\S+) \(rel (\S+)\) faces (\S+) prelimited (\S+) pinCorr (\S+) \(rel (\S+)\) baseViol (\S+) \(rel (\S+)\) bndFluxSigned (\S+) bndDropped (\S+) upperViol (\S+) \(rel (\S+)\) \| budget: srcHist (\S+) remSigned (\S+) remAbs (\S+) \(rel (\S+)\) increment (\S+) \| qL rel-residual interval-max (\S+) run-max (\S+) \(sweeps last (\d+)\) HO residual rel interval-max (\S+) run-max (\S+)(?: nonfinite (\d))?')
-RE_CLAMP = re.compile(r'\[passive\]\s+clampBudget species (\d+) cumulative .*: g (\S+)/(\S+) \((\S+)\) Q0 (\S+)/(\S+) \((\S+)\) Q1 (\S+)/(\S+) \((\S+)\) Q2 (\S+)/(\S+) \((\S+)\)')
-RE_REALIZ = re.compile(r'\[passive\] step (\d+) moment realizability corrections since last log: nearest-point (\d+), degenerate->monodisperse (\d+)')
+NUMF = r'[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?'   # 数値欄は数値としてだけ受理 (nan/inf/BROKEN は不一致 → 解析失敗として保持; codex plan-12 M2)
+RE_FLOOR = re.compile(r'\[passive\] step (\d+) floorCorr (\S+)\s+per-step\(avg (\d+)\): lo (N) hi (N) abs (N) \| cumulative: lo (N) hi (N) abs (N) \| total (N) rel\(abs/total\) (N) \| limCorr per-step (N) cumulative abs (N) signed (N) rel (N) cells (\d+) thetaMin\(interval\) (N) initialTotal (N)\s*$'.replace('N', NUMF))
+RE_FCT = re.compile(r'\[passive\]\s+fctCorr (\S+)\s+cumulative: dropped antidiffusion (N) \(rel (N)\) faces (\d+) prelimited (N) pinCorr (N) \(rel (N)\) baseViol (N) \(rel (N)\) bndFluxSigned (N) bndDropped (N) upperViol (N) \(rel (N)\) \| budget: srcHist (N) remSigned (N) remAbs (N) \(rel (N)\) increment (N) \| qL rel-residual interval-max (N) run-max (N) \(sweeps last (\d+)\) HO residual rel interval-max (N) run-max (N)(?: nonfinite (\d))?\s*$'.replace('N', NUMF))
+RE_CLAMP = re.compile(r'\[passive\]\s+clampBudget species (\d+) cumulative \(signed/abs, rel to total\): g (N)/(N) \((N)\) Q0 (N)/(N) \((N)\) Q1 (N)/(N) \((N)\) Q2 (N)/(N) \((N)\)\s*$'.replace('N', NUMF))
+RE_REALIZ = re.compile(r'\[passive\] step (\d+) moment realizability corrections since last log: nearest-point (\d+), degenerate->monodisperse (\d+)\s*$')
+RE_DENS = re.compile(r'\[passive\]\s+fctDensity: max rel E_rho \(BE-form continuity remainder\) (N) \| tracer upper-bound margin violation cumulative (N) \(cells (\d+)\)\s*$'.replace('N', NUMF))
+RE_INIT = re.compile(r'\[passive\] initial total (\S+)\s+(N) \(root-only, before the first physical step\)\s*$'.replace('N', NUMF))
 
 
 def fnum(x):
@@ -35,52 +39,60 @@ def fnum(x):
         return float('nan')
 
 
-NUM_RE = re.compile(r'(?<![A-Za-z_])[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?(?![A-Za-z_])')
-RE_INIT = re.compile(r'\[passive\] initial total (\S+)\s+(\S+)')
-
-
 def parse_lines(lines):
     """[passive] 行を全部読む。戻り (last, fct, clamp, nproj, ndeg, fct_active, last_step, problems)。
-    全 [passive] 行の全数値トークンの有限性 (per-step 部分も) を読込時点で検査し、一度でも非有限・解析不能があれば problems に残す (最後まで失敗)。"""
-    last, fct, clamp = {}, {}, {}
+    各書式の数値欄を全文解析 (数値以外 = nan/inf/BROKEN 等は書式不一致 → 解析失敗) し、非有限フラグ・解析失敗は最新値の上書きと独立に problems に残す (最後まで失敗; codex plan-11 M3, plan-12 M2)。"""
+    last, fct, clamp, init = {}, {}, {}, {}
     nproj = ndeg = 0; fct_active = False; last_step = None; problems = []
     for ln, line in enumerate(lines, 1):
         if line.startswith('[passiveFct] active'):
             fct_active = True; continue
         if not line.startswith('[passive]'):
             continue
-        for tok in re.findall(r'\b(?:nan|inf|-nan|-inf|NaN|Inf|-Inf)\b', line):
-            problems.append(f'line {ln}: non-finite token {tok!r}')
-        for tok in NUM_RE.findall(line):
-            try:
-                if not math.isfinite(float(tok)): problems.append(f'line {ln}: non-finite number {tok}')
-            except ValueError:
-                problems.append(f'line {ln}: unparsable number {tok!r}')
-        m = RE_FLOOR.search(line)
-        if m:
-            last[m.group(2)] = dict(step=int(m.group(1)), floor_lo=fnum(m.group(3)), floor_hi=fnum(m.group(4)), floor_abs=fnum(m.group(5)), total=fnum(m.group(6)), floor_rel=fnum(m.group(7)),
-                                    lim_abs=fnum(m.group(8)), lim_signed=fnum(m.group(9)), lim_rel=fnum(m.group(10)), cells=fnum(m.group(11)), thetamin=fnum(m.group(12)), initial=fnum(m.group(13)))
-            last_step = int(m.group(1)); continue
-        m = RE_FCT.search(line)
+        m = RE_FLOOR.match(line)
         if m:
             g = m.groups()
-            fct[g[0]] = dict(dropped=fnum(g[1]), dropped_rel=fnum(g[2]), faces=fnum(g[3]), prelim=fnum(g[4]), pin=fnum(g[5]), pin_rel=fnum(g[6]),
-                             base=fnum(g[7]), base_rel=fnum(g[8]), bnd_signed=fnum(g[9]), bnd_dropped=fnum(g[10]), upper=fnum(g[11]), upper_rel=fnum(g[12]),
-                             src=fnum(g[13]), rem_signed=fnum(g[14]), rem_abs=fnum(g[15]), rem_rel=fnum(g[16]), increment=fnum(g[17]),
-                             relres_int=fnum(g[18]), relres_run=fnum(g[19]), sweeps=int(g[20]), rh_int=fnum(g[21]), rh_run=fnum(g[22]), nonfinite=int(g[23]) if g[23] is not None else -1, step=last_step)
-            continue
-        m = RE_CLAMP.search(line)
+            vals = [float(x) for x in g[3:]]
+            if not all(math.isfinite(v) for v in vals): problems.append(f'line {ln}: non-finite value in floorCorr {g[1]}')
+            last[g[1]] = dict(step=int(g[0]), floor_lo=float(g[6]), floor_hi=float(g[7]), floor_abs=float(g[8]), total=float(g[9]), floor_rel=float(g[10]),
+                              lim_abs=float(g[12]), lim_signed=float(g[13]), lim_rel=float(g[14]), cells=float(g[15]), thetamin=float(g[16]), initial=float(g[17]))
+            last_step = int(g[0]); continue
+        m = RE_FCT.match(line)
         if m:
             g = m.groups()
-            clamp[int(g[0])] = dict(g_abs=fnum(g[2]), g=fnum(g[3]), Q0_abs=fnum(g[5]), Q0=fnum(g[6]), Q1_abs=fnum(g[8]), Q1=fnum(g[9]), Q2_abs=fnum(g[11]), Q2=fnum(g[12]),
-                                    g_signed=fnum(g[1]), Q0_signed=fnum(g[4]), Q1_signed=fnum(g[7]), Q2_signed=fnum(g[10]), step=last_step)
+            vals = [float(x) for x in g[1:23]]
+            if not all(math.isfinite(v) for v in vals): problems.append(f'line {ln}: non-finite value in fctCorr {g[0]}')
+            nf = int(g[23]) if g[23] is not None else -1
+            if nf > 0: problems.append(f'line {ln}: solver nonfinite flag {nf} in fctCorr {g[0]}')
+            fct[g[0]] = dict(dropped=float(g[1]), dropped_rel=float(g[2]), faces=float(g[3]), prelim=float(g[4]), pin=float(g[5]), pin_rel=float(g[6]),
+                             base=float(g[7]), base_rel=float(g[8]), bnd_signed=float(g[9]), bnd_dropped=float(g[10]), upper=float(g[11]), upper_rel=float(g[12]),
+                             src=float(g[13]), rem_signed=float(g[14]), rem_abs=float(g[15]), rem_rel=float(g[16]), increment=float(g[17]),
+                             relres_int=float(g[18]), relres_run=float(g[19]), sweeps=int(g[20]), rh_int=float(g[21]), rh_run=float(g[22]), nonfinite=nf, step=last_step)
             continue
-        m = RE_REALIZ.search(line)
+        m = RE_CLAMP.match(line)
+        if m:
+            g = m.groups()
+            vals = [float(x) for x in g[1:]]
+            if not all(math.isfinite(v) for v in vals): problems.append(f'line {ln}: non-finite value in clampBudget species {g[0]}')
+            clamp[int(g[0])] = dict(g_abs=float(g[2]), g=float(g[3]), Q0_abs=float(g[5]), Q0=float(g[6]), Q1_abs=float(g[8]), Q1=float(g[9]), Q2_abs=float(g[11]), Q2=float(g[12]),
+                                    g_signed=float(g[1]), Q0_signed=float(g[4]), Q1_signed=float(g[7]), Q2_signed=float(g[10]), step=last_step)
+            continue
+        m = RE_REALIZ.match(line)
         if m:
             nproj += int(m.group(2)); ndeg += int(m.group(3)); continue
-        if RE_INIT.search(line) or 'fctDensity' in line or 'per-step' in line:
+        m = RE_DENS.match(line)
+        if m:
+            if not all(math.isfinite(float(x)) for x in m.groups()): problems.append(f'line {ln}: non-finite value in fctDensity')
             continue
-        problems.append(f'line {ln}: unrecognised [passive] line: {line.strip()[:80]}')
+        m = RE_INIT.match(line)
+        if m:
+            v = float(m.group(2))
+            if not math.isfinite(v): problems.append(f'line {ln}: non-finite initial total {m.group(1)}')
+            init[m.group(1)] = v; continue
+        problems.append(f'line {ln}: unparsable [passive] line (format mismatch or non-numeric field): {line.strip()[:100]}')
+    for nm, v in last.items():
+        if nm not in init: problems.append(f'no [passive] initial total record for {nm}')
+        elif v['initial'] != init[nm]: problems.append(f'{nm}: initialTotal in the budget line ({v["initial"]:.12e}) != [passive] initial total ({init[nm]:.12e})')
     return last, fct, clamp, nproj, ndeg, fct_active, last_step, problems
 
 
@@ -89,7 +101,9 @@ def clamp_component(nm):
     return (int(m.group(2)), m.group(1)) if m else None
 
 
-def evaluate(last, fct, clamp, tol, tol_lin, mode, required, expect_fct, fct_active, final_step, out=print):
+def evaluate(last, fct, clamp, tol, tol_lin, mode, required, expect_fct, fct_active, final_step, out=print, tol_float=None, tol_abs=None):
+    tol_float = tol if tol_float is None else max(tol, tol_float)   # float32 集計の丸め床 (符号付き: step 数 × 1e-8) を保存・符号付き残りに許容
+    tol_abs = tol_float if tol_abs is None else max(tol_float, tol_abs)   # |H_rem| の絶対値積算の床 (step 数 × 6e-8)
     """mode: 'fct' (FCT 作動 run: 閉合・独立照合・残差), 'conservative' (非 FCT の非定常保存試験: 総量の変化 ≤ tol), 'steady' (定常: lim は許容し floor だけ)。
     required: config から確定した必須成分名の集合。欠落・解析失敗は FAIL。"""
     ok = True
@@ -131,19 +145,22 @@ def evaluate(last, fct, clamp, tol, tol_lin, mode, required, expect_fct, fct_act
                 if fe.get('nonfinite', -1) < 0: fl.append('NONFINITE_FLAG_MISSING')
                 elif fe['nonfinite'] != 0: fl.append('SOLVER_NONFINITE')
                 if fe['step'] != v['step']: fl.append('FCT_RECORD_STEP_MISMATCH')
-                total += fe['base_rel'] + fe['pin_rel'] + fe['rem_rel'] + fe['upper_rel']
+                total += fe['base_rel'] + fe['pin_rel'] + fe['upper_rel']
+                # |H_rem| は毎 step の float 丸め (符号がランダム) を絶対値で積算するので float 床を許容; 符号付き残りは閉合で検査
+                if not (fe['rem_rel'] <= tol_abs): fl.append(f"REMAINDER_ABS({fe['rem_rel']:.1e}>{tol_abs:.1e})")
+                if not (abs(fe['rem_signed'])/scale <= tol_float): fl.append(f"REMAINDER_SIGNED({fe['rem_signed']/scale:.1e}>{tol_float:.1e})")
                 if not (fe['relres_run'] <= tol_lin): fl.append(f"LOWORDER_RESIDUAL({fe['relres_run']:.1e})")
                 if not (fe['rh_run'] <= tol_lin): fl.append(f"HO_RESIDUAL({fe['rh_run']:.1e})")
                 closure = fe['increment'] + fe['bnd_signed'] - fe['src'] - fe['rem_signed']
                 if not (abs(closure) <= tol*scale): fl.append(f"CLOSURE({closure/scale:.1e})")
                 indep = (v['total'] - v['initial']) - fe['increment']
-                if not (abs(indep) <= tol*scale): fl.append(f"TOTAL_VS_INCREMENT({indep/scale:.1e})")
+                if not (abs(indep) <= tol_float*scale): fl.append(f"TOTAL_VS_INCREMENT({indep/scale:.1e})")
                 fdesc = (f" | fct: dropped rel {fe['dropped_rel']:.2e} base {fe['base_rel']:.2e} pin {fe['pin_rel']:.2e} upper {fe['upper_rel']:.2e} remainder {fe['rem_rel']:.2e}"
                          f" boundary flux {fe['bnd_signed']:.3e} closure {closure/scale:.1e} total-vs-increment {indep/scale:.1e} qL res(run max) {fe['relres_run']:.1e} HO res(run max) {fe['rh_run']:.1e}")
         elif mode == 'conservative':
             drift = (v['total'] - v['initial'])/scale
             fdesc = f" | conservation: (final - initial)/scale {drift:.2e}"
-            if not (abs(drift) <= tol): fl.append(f"NOT_CONSERVED({drift:.1e})")
+            if not (abs(drift) <= tol_float): fl.append(f"NOT_CONSERVED({drift:.1e}>{tol_float:.1e})")
         elif mode == 'unsteady':
             fdesc = f" | (final - initial)/scale {(v['total'] - v['initial'])/scale:.2e} (境界流束・ソース込みの収支記録が無いので保存は判定不能; floor/lim と場だけ判定)"
         if not (math.isfinite(total) and total <= tol): fl.append(f'SUM>tol({total:.1e})')
@@ -219,12 +236,17 @@ def main():
         print(f'  FAIL: run did not complete (config nStepOuter {final_cfg} vs csv last step+1 {final_csv})'); ok = False
     if final_res(a.run_dir, cfg) is None:
         print(f'  FAIL: final field res_{final_cfg}.h5 missing'); ok = False
-    ok = evaluate(last, fct, clamp, a.tol, a.tol_lin, mode, cfg['passives'], cfg['fct_configured'], fct_active, final_cfg) and ok
+    from passive_gate_common import float_floor_allowance
+    ok = evaluate(last, fct, clamp, a.tol, a.tol_lin, mode, cfg['passives'], cfg['fct_configured'], fct_active, final_cfg, tol_float=float_floor_allowance(final_cfg or 0), tol_abs=float_floor_allowance(final_cfg or 0, 'abs')) and ok
     print(f'  realizability corrections: nearest-point {nproj}, degenerate->monodisperse {ndeg}')
     if not a.no_field:
         fok, probs = check_field(a.run_dir, cfg)
         for pr in probs: print('  FAIL(field):', pr)
         ok = ok and fok
+    if ok and mode == 'unsteady':
+        # 保存 (境界流束・ソース込みの収支) を検証する記録が無い run: 合格ではなく判定不能 (codex plan-12 M5)。§6-2 の合格には fct / conservative モードの PASS が要る
+        print('VERDICT: INDETERMINATE (conservation not verifiable in mode unsteady: no boundary-flux/source budget record; floor/lim/field checks passed)')
+        sys.exit(3)
     print('VERDICT:', 'PASS' if ok else 'FAIL')
     sys.exit(0 if ok else 1)
 

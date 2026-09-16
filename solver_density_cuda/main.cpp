@@ -1014,7 +1014,9 @@ static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
                 ck.getAttribute("dt").read(dtp);     ck.getAttribute("nHistoryValid").read(nh);
                 if (std::abs(dtp - (double)cfg.dt) > 1.0e-12 * std::max(std::abs(dtp), std::abs((double)cfg.dt)))
                     why = "physical dt differs from the checkpoint (file " + std::to_string(dtp) + " vs run " + std::to_string((double)cfg.dt) + ")";
-                else if (lay != layout) why = "layout mismatch (file '" + lay + "' vs run '" + layout + "')";
+                else if (lay != layout) why = (lay.find("passiveFct=0") != std::string::npos && layout.find("passiveFct=1") != std::string::npos)
+                                            ? "passive FCT flux-form history missing (checkpoint written without FCT: layout '" + lay + "')"
+                                            : "layout mismatch (file '" + lay + "' vs run '" + layout + "')";
                 else if (nh < 1) why = "checkpoint has no valid history (nHistoryValid=0)";
                 else {
                     for (const auto& nm : hist) if (!file.exist("/CHECKPOINT/" + nm)) { why = "missing dataset /CHECKPOINT/" + nm; break; }

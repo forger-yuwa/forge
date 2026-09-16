@@ -11,11 +11,17 @@ FLOOR = ("[passive] step {step} floorCorr {nm:<8s} per-step(avg 10): lo {pslo} h
 FCT = ("[passive]   fctCorr {nm:<8s} cumulative: dropped antidiffusion 1.000000e-03 (rel 1.000000e-03) faces 12 prelimited 0.000000e+00 pinCorr 0.000000e+00 (rel 0.000000e+00) "
        "baseViol 0.000000e+00 (rel {base}) bndFluxSigned {bnd} bndDropped 0.000000e+00 upperViol 0.000000e+00 (rel 0.000000e+00) | budget: srcHist {src} remSigned {rem} remAbs 0.000000e+00 (rel {remrel}) increment {inc} "
        "| qL rel-residual interval-max 1.00e-07 run-max {relres} (sweeps last 3) HO residual rel interval-max 1.00e-07 run-max 1.00e-07{nonf}")
+INIT = "[passive] initial total {nm:<8s} {init} (root-only, before the first physical step)"
 CLAMP = "[passive]   clampBudget species 0 cumulative (signed/abs, rel to total): g 0.000000e+00/0.000000e+00 (0.000000e+00) Q0 0.000000e+00/0.000000e+00 (0.000000e+00) Q1 0.000000e+00/0.000000e+00 ({q1}) Q2 0.000000e+00/0.000000e+00 (0.000000e+00)"
 
 def log(nm='roXi', step=100, tot='1.000000e+00', init='1.000000e+00', frel='0.000000e+00', lrel='0.000000e+00', fabs='0.000000e+00', fct=True, pslo='0.000e+00', old_nan=False,
-        base='0.000000e+00', bnd='0.000000e+00', src='0.000000e+00', rem='0.000000e+00', remrel='0.000000e+00', inc='0.000000e+00', relres='1.00e-07', clamp=None, active=True, nonf='0', fct_step=None, clamp_step=None):
+        base='0.000000e+00', bnd='0.000000e+00', src='0.000000e+00', rem='0.000000e+00', remrel='0.000000e+00', inc='0.000000e+00', relres='1.00e-07', clamp=None, active=True, nonf='0', fct_step=None, clamp_step=None,
+        old_nonf=False, init_line=True):
     lines = []
+    if init_line: lines.append(INIT.format(nm=nm, init=init))
+    if old_nonf:   # step 50 の FCT 記録に nonfinite 1、最終記録は正常
+        lines.append(FLOOR.format(step=50, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs, pslo='0.000e+00'))
+        lines.append(FCT.format(nm=nm, base=base, bnd=bnd, src=src, rem=rem, remrel=remrel, inc=inc, relres=relres, nonf=' nonfinite 1'))
     if old_nan:   # step 50 の記録に nan、最終記録は有限
         lines.append(FLOOR.format(step=50, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs='nan', pslo='0.000e+00'))
     if active: lines.append('[passiveFct] active: post-step conservative FCT for 1 passive scalars (prelimit 0, sweeps 100, tol 1.0e-06)')
@@ -74,5 +80,10 @@ check(run(log(nm='roQ1_0', clamp='2.000000e-06')) is False, 'clamp budget above 
 check(run(log(tot='1.000010e+00', init='1.000000e+00', inc='1.000000e-05', src='1.000000e-05')) is True, 'consistent source-driven increase must PASS')
 check(run(log(tot='1.100000e+00', init='1.000000e+00', inc='1.000000e-05', src='1.000000e-05')) is False, 'total change not matching the increment must FAIL')
 check(run(log(init='-1.000000e+00')) is False, 'missing initial total (negative sentinel) must FAIL')
+check(run(log(pslo='BROKEN')) is False, 'non-numeric field BROKEN in the per-step part must FAIL (strict format parse)')
+check(run(log(fabs='BROKEN')) is False, 'non-numeric cumulative field must FAIL')
+check(run(log(old_nonf=True)) is False, 'nonfinite 1 at an earlier record must FAIL even if the last record is clean (sticky)')
+check(run(log(init_line=False)) is False, 'missing [passive] initial total line must FAIL')
+check(run(log(init='2.000000e+00') + [INIT.format(nm='roXi', init='1.000000e+00')]) is False, 'initialTotal in the budget line != [passive] initial total must FAIL')
 print('ALL PASS' if fails == 0 else f'FAILED ({fails})')
 sys.exit(1 if fails else 0)

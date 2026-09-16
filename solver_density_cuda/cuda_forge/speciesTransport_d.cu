@@ -1921,7 +1921,8 @@ bool passiveFctHistoryToHost(const mesh& msh, std::vector<std::vector<flow_float
 
 bool passiveFctHistoryFromHost(solverConfig& cfg, mesh& msh, variables& var, const std::vector<std::vector<flow_float>>& G, const std::vector<std::vector<flow_float>>& H, const std::vector<flow_float>& mEff, const std::vector<std::vector<flow_float>>& Hsrc)
 {
-    if (!passiveFctActive(cfg)) return false;
+    // restart 時点では Pface が未確保なので実行時判定 (passiveFctActive) は使えない (検証 2 巡目 B: 履歴が一度も復元されなかった真因)。設定だけで判定する。
+    if (!passiveFctConfigured(cfg)) return false;
     fctAlloc(msh, var);
     if ((int)G.size() != g_fct.nq || (int)H.size() != g_fct.nq || (int)Hsrc.size() != g_fct.nq || (geom_int)mEff.size() < msh.nPlanes) return false;
     for (int q = 0; q < g_fct.nq; ++q) { if ((geom_int)Hsrc[(size_t)q].size() < msh.nCells) return false; gpuErrchk( cudaMemcpy(g_fct.h_Hsrc[(size_t)q], Hsrc[(size_t)q].data(), (size_t)msh.nCells*sizeof(flow_float), cudaMemcpyHostToDevice) ); }

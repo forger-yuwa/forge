@@ -8,11 +8,13 @@
     以外の solverConfig が同一で、bcondConfig・メッシュ・IC (md5) も同一。bdfOrder == --bdf。刻み比 2 (float32 実効 dt)、nSub run は nSub が 2 倍で dt/nStepOuter は同一
   - 名目終了時刻 nStepOuter × dt_eff (dt_eff = float32(dt): solver は dt を float32 で持つ) が一致; checkpoint の totalTime/dt がそれと一致 (1e-9 / 1e-12)
   - --expect-fct: config で FCT が有効かつ各 run の forge_run.log に `[passiveFct] active`
-  - 必要成分が揃い全て有限; 次数: BDF2 [1.7, 2.3] / BDF1 [0.7, 1.3]; sub-iter 比 ≤ --subiter-ratio (0.1)
-  - residual_history.csv: 全物理 step に outer_begin/outer_end と inner_iter 1..nSub−1、config 由来の必須列 (流れ・SST・化学種・受動種) の存在、全行の全数値が有限、
-    初回 0 の列は step 内の全 inner 行が 0 のときだけ受理、各 step の低下 (初回/最終 inner) の最小値 ≥ --subiter-decades (2.0) を**全列**で
+  - 評価量は config の全保存量 (ro,roUx,roUy,roUz,roe,roY*,受動種) が既定・必須; --fields で必須集合を覆わなければ PARTIAL (exit 3)
+  - 必要成分が揃い全て有限; 次数: BDF2 [1.7, 2.3] / BDF1 [0.7, 1.3]; sub-iter 比 ≤ --subiter-ratio (0.1); dt 非依存の非ゼロ量は「次数未実証」で FAIL (恒等 0 だけ情報なしで通す)
+  - residual_history.csv: 全物理 step に outer_begin/inner_begin(0)/inner_iter 1..nSub−1/outer_end (outer_end = 最終 inner)、config 由来の必須列 (流れ・SST・化学種・受動種) の存在、全行の全数値が有限、
+    初回 0 の列は step 内の全 inner 行が 0 のときだけ受理、各 step の低下 (反復 0/最終反復) の最小値 ≥ --subiter-decades (2.0) を**全列**で
   - 確定場ゲート (0 ≤ roXi/ro ≤ 1、モーメント非負、solver と同じ実現可能性) を全 run で
 使い方: analyze_moment_order.py --levels RUN_2dt RUN_dt RUN_dt/2 --nsub RUN_dt_nsubx2 [--bdf 2] [--expect-fct] [--fields ...]
+終了コード: 0 PASS / 1 FAIL / 3 PARTIAL (--fields が必須集合を覆わない)
 """
 import argparse, math, os, sys
 import numpy as np
@@ -40,7 +42,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--levels', nargs=3, required=True, help='dt 2dt, dt, dt/2 の run (同一物理時刻)')
     ap.add_argument('--nsub', required=True, help='dt 水準で nSub を倍にした run (必須)')
-    ap.add_argument('--fields', default='g_0,Q0_0,Q1_0,Q2_0,T,ro,P')
+    ap.add_argument('--fields', default=None, help='評価量 (省略時は config から全保存量: ro,roUx,roUy,roUz,roe,roY*,受動種)。必須集合を覆わない指定は PARTIAL (exit 3) で正式 PASS にしない')
     ap.add_argument('--bdf', type=int, default=2)
     ap.add_argument('--expect-fct', action='store_true', help='FCT 有効試験: config で FCT が有効で log に [passiveFct] active があること')
     ap.add_argument('--order-lo', type=float, default=None); ap.add_argument('--order-hi', type=float, default=None)
@@ -49,13 +51,17 @@ def main():
     a = ap.parse_args()
     lo = a.order_lo if a.order_lo is not None else (1.7 if a.bdf == 2 else 0.7)
     hi = a.order_hi if a.order_hi is not None else (2.3 if a.bdf == 2 else 1.3)
-    fields = a.fields.split(',')
     runs = list(a.levels) + [a.nsub]
     bad = []
     cfgs = []
     for r in runs:
         try: cfgs.append(load_config(r))
         except Exception as e: print('VERDICT: FAIL'); print(f'  - {r}: config error: {e}'); sys.exit(1)
+    # 必須評価量 = config の全保存量 (流れ + 化学種 + 受動種; codex plan-12 M4)。--fields はその部分集合/追加を許すが、必須集合を覆わなければ PARTIAL
+    c0 = cfgs[0]
+    required_fields = ['ro', 'roUx', 'roUy', 'roUz', 'roe'] + ([f'roY{s}' for s in range(c0['nSpecies'])] if c0['nSpecies'] > 1 else []) + list(c0['passives'])
+    fields = a.fields.split(',') if a.fields else list(required_fields)
+    partial = sorted(set(required_fields) - set(fields))
     for r, c in zip(runs, cfgs):
         for k in ('dt', 'nStepOuter', 'nsub', 'bdfOrder', 'unsteady', 'dualTime', 'timeIntegration', 'outStepInterval'):
             v = c.get(k)
@@ -89,7 +95,11 @@ def main():
             print(f'{k:8s} non-finite or shape mismatch'); bad.append(f'{k}: non-finite or shape mismatch'); continue
         e0 = np.linalg.norm(q0 - q1); e1 = np.linalg.norm(q1 - q2); es = np.linalg.norm(q3 - q1)
         if e0 == 0.0 and e1 == 0.0 and es == 0.0:
-            print(f'{k:8s} {e0:11.4e} {e1:11.4e} {"exact":>7s} {es:11.4e} {"-":>7s}  {np.abs(q1).max():.3e}  ok (no dt dependence)'); continue
+            # dt 非依存 (全水準で同一) は時間次数を実証しない: 全水準で恒等的に 0 の量 (2D の roUz 等) だけ情報なしとして通す (codex plan-12 M4)
+            if all(not np.any(q) for q in (q0, q1, q2, q3)):
+                print(f'{k:8s} {e0:11.4e} {e1:11.4e} {"zero":>7s} {es:11.4e} {"-":>7s}  {np.abs(q1).max():.3e}  ok (identically zero on all levels: no order information)'); continue
+            print(f'{k:8s} {e0:11.4e} {e1:11.4e} {"exact":>7s} {es:11.4e} {"-":>7s}  {np.abs(q1).max():.3e}  FAIL: nonzero field identical on all levels (order not demonstrated)')
+            bad.append(f'{k}: dt-independent nonzero field, order not demonstrated'); continue
         order = math.log2(e0/e1) if e1 > 0 and e0 > 0 else float('nan')
         ratio = es/e1 if e1 > 0 else float('inf')
         v = []
@@ -108,6 +118,8 @@ def main():
         bad.extend(f'{r}: {x}' for x in probs)
     if bad:
         print('VERDICT: FAIL'); [print('  -', b) for b in bad]; sys.exit(1)
+    if partial:
+        print(f'VERDICT: PARTIAL (fields {fields} do not cover the config-derived required set; missing {partial})'); sys.exit(3)
     print('VERDICT: PASS'); sys.exit(0)
 
 
