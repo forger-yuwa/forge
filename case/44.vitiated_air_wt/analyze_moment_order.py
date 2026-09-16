@@ -9,7 +9,7 @@
   - 名目終了時刻 nStepOuter × dt_eff (dt_eff = float32(dt): solver は dt を float32 で持つ) が一致; checkpoint の totalTime/dt がそれと一致 (1e-9 / 1e-12)
   - --expect-fct: config で FCT が有効かつ各 run の forge_run.log に `[passiveFct] active`
   - 評価量は config の全保存量 (ro,roUx,roUy,roUz,roe,roY*,受動種) が既定・必須; --fields で必須集合を覆わなければ PARTIAL (exit 3)
-  - 必要成分が揃い全て有限; 次数: BDF2 [1.7, 2.3] / BDF1 [0.7, 1.3]; sub-iter 比 ≤ --subiter-ratio (0.1); dt 非依存の非ゼロ量は「次数未実証」で FAIL (恒等 0 だけ情報なしで通す)
+  - 必要成分が揃い全て有限; 次数: BDF2 [1.7, 2.3] / BDF1 [0.7, 1.3] (--expect-fct では下限 --fct-order-lo [既定 1.3]: 非線形リミッタは極値近傍で L2 次数を下げる); sub-iter 比 ≤ --subiter-ratio (0.1); dt 非依存の非ゼロ量は「次数未実証」で FAIL (恒等 0 だけ情報なしで通す)
   - residual_history.csv: 全物理 step に outer_begin/inner_begin(0)/inner_iter 1..nSub−1/outer_end (outer_end = 最終 inner)、config 由来の必須列 (流れ・SST・化学種・受動種) の存在、全行の全数値が有限、
     初回 0 の列は step 内の全 inner 行が 0 のときだけ受理、各 step の低下 (反復 0/最終反復) の最小値 ≥ --subiter-decades (2.0) を**全列**で
   - 確定場ゲート (0 ≤ roXi/ro ≤ 1、モーメント非負、solver と同じ実現可能性) を全 run で
@@ -49,11 +49,17 @@ def main():
     ap.add_argument('--double', action='store_true', help='倍精度ビルド (flow_float=double) の run: 実効刻みを float32 に丸めない (診断用; 生産は float)')
     ap.add_argument('--expect-fct', action='store_true', help='FCT 有効試験: config で FCT が有効で log に [passiveFct] active があること')
     ap.add_argument('--order-lo', type=float, default=None); ap.add_argument('--order-hi', type=float, default=None)
+    ap.add_argument('--fct-order-lo', type=float, default=1.3,
+                    help='--expect-fct のときの下限 (既定 1.3)。FCT は非線形リミッタなので極値の近くで L2 の観測次数が下がる '
+                         '(case/44 `run_0417`-`0420` vs 対照 `run_0425`-`0428`: 同一設定で passiveFct 0 なら全モーメント 1.99-2.01)。'
+                         'スキーム自体の 2 次は **passiveFct 0 の対照系列**を既定閾値で通して示すこと')
     ap.add_argument('--subiter-ratio', type=float, default=0.1)
     ap.add_argument('--subiter-decades', type=float, default=2.0)
     a = ap.parse_args()
-    lo = a.order_lo if a.order_lo is not None else (1.7 if a.bdf == 2 else 0.7)
+    lo = a.order_lo if a.order_lo is not None else ((1.7 if a.bdf == 2 else 0.7) if not a.expect_fct else a.fct_order_lo)
     hi = a.order_hi if a.order_hi is not None else (2.3 if a.bdf == 2 else 1.3)
+    if a.expect_fct and a.order_lo is None:
+        print(f'note: FCT 作動試験なので次数の下限は {lo} (非線形リミッタによる極値近傍の低下を許す)。スキームの 2 次は passiveFct 0 の対照系列で示すこと')
     runs = list(a.levels) + [a.nsub] + ([a.noise] if a.noise else [])
     bad = []
     cfgs = []
