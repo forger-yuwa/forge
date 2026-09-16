@@ -15,7 +15,8 @@
 //     single        species [H2O] (nSpecies 1) × condGasSpecies 0 → エラー (carrier は 2 種以上)
 //     single-pure   species [N2] pure (index -1) × condModel 0 → OK (pure N2 TP)
 //     single-pure-x species [H2O] pure × condModel 0 → エラー (物質不一致)
-//     tracer-dual   tracer exhaust × dualTime 1 → エラー
+//     tracer-dual-s0      tracer exhaust × dualTime 1 × passiveScalarScheme 0 (旧経路) → エラー (物理時間項なし)
+//     tracer-dual-default tracer exhaust × dualTime 1 (既定 passiveScalarScheme 1: 受動種 BDF あり, Phase B) → OK
 //     tracer-bogus  tracer: bogus → エラー
 //     tracer-ok     tracer exhaust × dualTime 0 → OK
 //
@@ -40,7 +41,8 @@ static void check(bool ok, const std::string& what)
 }
 
 // 最小構成の solverConfig.yaml (case/44 run_0190 の config を元に species / condensation / tracer / dualTime を差し替える)
-static std::string makeConfig(const std::string& species, const std::string& cond, const std::string& tracer, int dualTime)
+static std::string makeConfig(const std::string& species, const std::string& cond, const std::string& tracer, int dualTime,
+                              const std::string& extraDeltaT = "")
 {
     std::string s;
     s += "mesh: {meshFormat: \"hdf5\", discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\n";
@@ -48,7 +50,7 @@ static std::string makeConfig(const std::string& species, const std::string& con
     s += "physProp: {isCompressible: 1, thermalMethod: 2, viscMethod: 0, ro: 1.2, visc: 0.0, thermCond: 0.0, cp: 1220.7, gamma: 1.31526,\n";
     s += "           species: [" + species + "], speciesDBFile: \"species_db.yaml\", thermoHrefTemp: 298.15" + (tracer.empty() ? "" : ", tracer: " + tracer) + "}\n";
     s += "time:\n  unsteady: 0\n  dualTime: " + std::to_string(dualTime) + "\n  last: {control: 0, nStepOuter: 10}\n";
-    s += "  deltaT: {control: 1, dt: 1e-8, cfl: 2.0, cfl_pseudo: 2.0, dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n";
+    s += "  deltaT: {control: 1, dt: 1e-8, cfl: 2.0, cfl_pseudo: 2.0, dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1" + extraDeltaT + "}\n";
     s += "  outStepStart: 0\n  outStepInterval: 10\n  timeIntegration: 11\n  nStepInner: 5\n";
     s += "space: {convMethod: 1, limiter: 2}\nturbulence: {model: \"none\"}\ninitial: \"uniform_p101325_u10\"\n";
     if (!cond.empty()) s += "condensation: {" + cond + "}\n";
@@ -56,7 +58,7 @@ static std::string makeConfig(const std::string& species, const std::string& con
     return s;
 }
 
-struct Case { const char* name; std::string species; std::string cond; std::string tracer; int dualTime; bool expectOk; std::string expectOut; };
+struct Case { const char* name; std::string species; std::string cond; std::string tracer; int dualTime; bool expectOk; std::string expectOut; std::string extraDeltaT = ""; };
 
 int main(int argc, char** argv)
 {
@@ -86,14 +88,15 @@ int main(int argc, char** argv)
         {"single",        "H2O",         condH2O + ", condGasSpecies: 0",                            "", 0, false, "requires >=2 species"},
         {"single-pure",   "N2",          condN2,                                                     "", 0, true,  "condGasSpecies=-1 name=N2"},
         {"single-pure-x", "H2O",         condN2,                                                     "", 0, false, "does not match condModel 0"},
-        {"tracer-dual",   "MIXDRY, H2O", "",                                                         "exhaust", 1, false, "not supported with time.dualTime"},
+        {"tracer-dual-s0",      "MIXDRY, H2O", "",                                                   "exhaust", 1, false, "requires passiveScalarScheme 1", ", passiveScalarScheme: 0"},
+        {"tracer-dual-default", "MIXDRY, H2O", "",                                                   "exhaust", 1, true,  "tracer=exhaust"},
         {"tracer-bogus",  "MIXDRY, H2O", "",                                                         "bogus",   0, false, "must be 'none' or 'exhaust'"},
         {"tracer-ok",     "MIXDRY, H2O", "",                                                         "exhaust", 0, true,  "tracer=exhaust"},
     };
     for (const Case& c : cases) {
         const std::string dir = base + "/" + c.name;
         std::system(("mkdir -p " + dir).c_str());
-        { std::ofstream f(dir + "/solverConfig.yaml"); f << makeConfig(c.species, c.cond, c.tracer, c.dualTime); }
+        { std::ofstream f(dir + "/solverConfig.yaml"); f << makeConfig(c.species, c.cond, c.tracer, c.dualTime, c.extraDeltaT); }
         const std::string out = dir + "/out.txt";
         const int rc = std::system((self + " --read " + dir + " > " + out + " 2>&1").c_str());
         const bool ok = (rc == 0);
