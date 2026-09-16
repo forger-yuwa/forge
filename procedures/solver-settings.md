@@ -195,13 +195,11 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
   `condGasSpecies` を併記して食い違えばエラー、数値だけなら範囲検査 (`nSpecies` 超え・単一種で carrier 形はエラー)。起動ログの
   `[species]` 表に `condensing species: H2O (condGasSpecies=1)` と出る。種順序を変えても config を書き直さずに済むので名前を正本にする
   ([plan cea-mole-fraction §2](../plans/accepted/thermophysics-cea-mole-fraction-species.md))。
-- **`physProp.tracer: exhaust`** (physProp, 既定 `none`, 2026-09-16): 受動トレーサ `roXi` (排気率 ξ∈[0,1]) を汎用スカラ輸送コアで
-  移流する (拡散なし・ソースなし)。**定常 point-implicit (`timeIntegration 11`, `dualTime 0`) と陽解法 RK のみ**。`time.dualTime != 0`
-  との併用は config 読込でエラー (トレーサに物理時間項 BDF 履歴・対角が無く、擬似時間反復ごとに前進してしまう; 凝縮モーメントの
-  followups F-cf8 と同じ未対応項目)。node 周期境界では `res_roXi` の合算と `roXi` の root→member ミラーを行う。入口 `inlet_*` は `bcondConfig` の `floats: {Xi: 1.0}`
-  (既定 0) の Dirichlet (node は入口ノードをピン)、他境界は zero-gradient。出力 `roXi` (level 0) / `Xi` (level 1)、残差列
-  `rms_roXi`、restart は `VALUE/roXi` (無ければ 0)。SERN で排気/外気の見分けに使う: 輸送種に純粋な流入元ラベル (排気入口 1・外気入口 0 の種, 旧 `[EXH, AIR]` の Y_EXH) があればそれを ξ に使い、無ければ (`full`、`lumped`+`keep`) このトレーサを輸送する (`species_meta.yaml` の `exhaust_fraction` が正本, `methods/thermophysics.md` §5)。
-  未指定なら変数を登録せず従来経路ビット不変。
+- **`physProp.tracer: exhaust`** (physProp, 既定 `none`, 2026-09-16; 2026-09-17 改定): 受動トレーサ `roXi` (排気率 ξ∈[0,1])。既定 `passiveScalarScheme 1` では
+  **化学種の輸送経路の受動種**として移流 (`speciesFaceReconstruction 2` なら 2 次面再構成)・Fick 拡散 ($D=\mu/(\rho Sc)+\mu_t/(\rho Sc_t)$, 粘性 run のみ)・
+  陰解法更新 (`passiveImplicitCoupling` 0 = point-implicit × `passiveImplicitRelax` / 1 = scalar-DPLUR)・**dual-time の BDF 物理時間項** (履歴 `roXiP/PP`) を持つ。
+  `passiveScalarScheme 0` (旧経路) では汎用スカラの 1 次風上・拡散なしで、`time.dualTime != 0` との併用は config でエラー (物理時間項なし)。
+  SERN で排気/外気の見分けに使う: 輸送種に純粋な流入元ラベル (排気入口 1・外気入口 0 の種, 旧 `[EXH, AIR]` の Y_EXH) があればそれを ξ に使い、無ければ (`full`、`lumped`+`keep`) このトレーサを輸送する (`species_meta.yaml` の `exhaust_fraction` が正本, `methods/thermophysics.md` §5)。
 - **bcond `floats: {X0:.., X1:.., ...}`** (多成分 TP の入口, 2026-09-16): 入口組成を**モル分率**で与える。forge が double で検証し
   $Y_k = X_k M_k / \sum_j X_j M_j$ (MW は `speciesDBFile`/内蔵 DB) に換算して従来の `Y{s}` 経路へ流す。**X を 1 つでも書いたら全種必須**
   (既定補完しない)、同じ境界での `X`/`Y` 混在・負値・非有限・総和 0・範囲外 index はエラー終了。`Y{s}` を明示した場合も負値と

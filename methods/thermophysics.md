@@ -275,7 +275,8 @@ L/R 状態の `roe_L/Ht_L/ca_L` (および R 側) を NASA で再構成。Roe �
 > `speciesImplicitCoupling` の予測/commit・入口 X/Y 検証・`condGasSpecies` には入らない** (nSpecies は熱力学の種数のまま; 受動種は `nSpecies==1` でも動く)。
 > 面再構成 (S3) のリミッタは受動種ごとの Venkat ψ_P で、差分をセル局所スケール ($\phi_{ref}=\max(|\phi_c|,\max_{nb}|\phi|,\phi_{floor})$) で無次元化して評価する
 > (モーメント $Q_0\sim10^{15}$ の float32 3 次積が溢れないため)。面値は正規化せず下限 0 (トレーサは [0,1]) でクリップ (同一面の 1 つの流束を両 CV に逆符号で加えるので
-> 保存性は保たれる)。更新は現行の segregated point-implicit のまま (`passiveImplicitRelax` で増分を緩和)、確定時に**更新済み密度**で $0\le\rho\xi\le\rho$ /
+> 保存性は保たれる)。更新は `passiveImplicitCoupling` 0 = segregated point-implicit (`passiveImplicitRelax` で増分を緩和) / 1 = 化学種と同じ scalar-DPLUR sweep
+> (`speciesFaceReconstruction ≥ 2` のときの自動既定; モーメントは sweep の増分を更新クランプ θ_u に渡す)。dual-time では BDF 物理時間項 (`*P/*PP`) が付く (§time_integration)。確定時に**更新済み密度**で $0\le\rho\xi\le\rho$ /
 > モーメント ≥0 を適用し、符号付き・絶対補正の体積積分を step 内と全期間で積算する (`passiveFloorCorr_<name>`; `condClampCorr` [更新ごとの正規化量] とは規約が違う)。
 > `passiveScalarScheme: 0` は旧汎用スカラ経路 (1 次風上・拡散なし・トレーサは primitive 段でクランプ) でビット不変。化学種の segregated 更新の緩和は独立キー
 > `speciesImplicitRelax` (既定 1.0 = 現行の写像)。
