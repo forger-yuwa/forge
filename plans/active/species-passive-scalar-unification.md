@@ -222,7 +222,14 @@
 - **合否**: 非定常 (dual-time) は「総量保存 ≤1e-6 (float; 周期箱は root-only 総量、非周期は境界流束 [`fctBndCorr` 込み]・ソース込みの収支)」+
   「`floorCorr + limCorr + fctPinCorr + 基点逸脱 + 実現可能性の成分別 |Δ|` の総量比 ≤1e-6」+「$0\le\xi\le1$, モーメント ≥0, 許容領域内」。1e-12 は double 参照実装の
   代数試験 (補正前後の総量) のみ。定常は起動時の limCorr を許し固定点で 0。
-- キー `passiveFct` (1 = 上の条件で有効 [既定], 0 = 無効), `passiveFctPrelimit` (0), `passiveFctSweeps` (100), `passiveFctTol` (1e-6), `passiveFctTolAbs` (1e-30)。
+- **sub-iter 内の制限との関係 (検証 1 巡目, case/09 `run_0134`/`0135`)**: FCT 有効時は sub-iter 内の増分スケーリング $\theta_b$ を**使わない** (非保存で、Venkat のステップでは
+  毎 step 作動して −0.7 % を落とし、末尾の FCT では戻せない)。トレーサの sub-iter 内 floor も掛けない (熱力学に入らないので中間逸脱は無害; 末尾の floor だけ収支に載る)。
+  モーメントは $g<0$ が EOS を壊すので sub-iter 内 floor を残す (記録)。実現可能性射影 (Q1/Q2) も dual-time では sub-iter 内で作動させず物理 step 末尾 (EOS 更新後) の
+  1 回だけ (sub-iter 内で毎回射影すると反復値を揺らす; `run_0263`–`0269` で数百万回作動していた)。`condRealizProject 0` で射影を切れる (A/B)。
+- **有効化の判定**: `passiveFctConfigured(cfg)` (設定だけ: scheme 1・`passiveFct 1`・dual-time・SFR≥2・SLAU) を checkpoint の layout と restart 契約に使う
+  (実行時の Pface 確保に依存させると読み側で 0 に評価され履歴が一度も復元されない: `run_0131` の不具合)。SFR≥2 なのに solver が SLAU でない run は起動時に
+  WARNING (受動種 S3 と FCT は非作動 = 1 次風上; `run_0068`/`0115`–`0118` の「S3」は実は KEEP で 1 次だった)。
+- キー `passiveFct` (1 = 上の条件で有効 [既定], 0 = 無効), `passiveFctPrelimit` (0), `passiveFctSweeps` (100), `passiveFctTol` (1e-6), `passiveFctTolAbs` (1e-30), `condRealizProject` (1)。
 - **合否の実体化**: `tools/check_passive_budget.py <run>` が monitor の積算を読み、受動種ごとに floor + lim + 基点逸脱 + ピン + $|H_{rem}|$ の**総量比の合計** ≤ tol (1e-6)、
   クランプの成分別 |Δ| の合計 ≤ tol、全値が有限、`[passiveFct] active` の run に FCT 記録があること、総量 0 で補正が非ゼロ (log は rel=1) でないことを検査して **PASS/FAIL** を返す
   (失敗系は `tests/unit/test_check_passive_budget.py`; plan-7 M1)。
@@ -374,6 +381,8 @@
   面クリップの保存性訂正と有界性の診断、周期 node の処理順、1.8e-4 は仮説に、dual-time の処理順と 3 水準時間精度、拡散の解析解試験、完了条件 1–7。
 
 ## 10. 未確定事項
+
+- **SLAU + `convMethod 1/2` (または `limiter 0`) + node 周期 + dual-time BDF2 の一様流が丸め由来の不安定で t≈0.22 s に NaN** (case/09 検証 1 巡目, 流れだけで再現; `convMethod 0` と Barth `limiter 1` は安定; RK4 の `run_0098` は 0.085 s しか回していなかった)。流れ側の別件として followups へ (F-cf12 候補)。受動種の周期試験は Barth で行う。
 
 - ~~S3 を既定にするか~~ 決着 (2026-09-17, §9): 既定は SFR 0 のまま。S3 は onset を 0.2 r_t / 0.7 mm 下流に動かす (前線の数値拡散減) が Wysłouzil では実験からさらに遠ざかる。onset の実験差 (~5 mm) の主因は移流次数ではなく核生成モデル側 (plan condensation-followups)。
 - k/ω も化学種経路 (2 次) に乗せるか: ユーザは「全部化学種の経路」と述べたが、SST の生産項・壁関数との結合の検証が別途要るので本 plan では見送り、後続とする (要確認)。

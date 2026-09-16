@@ -15,26 +15,36 @@
 // 戻り値: 0 = 変更なし, 1 = 最近点射影, 2 = 退化の単分散再初期化。
 __host__ __device__ inline int cond_realizability_project(double& x, double& y, double eps)
 {
+    if (!(x == x) || !(y == y) || fabs(x) > 1.0e300 || fabs(y) > 1.0e300) return 0;   // 非有限 (r=0 由来の ∞ など) は触らない (2026-09-17 の NaN 退行の再発防止)
     // 特異不整合 (plan-7 M3): Q3>0 なのに Q1 または Q2 が厳密 0 / アンダーフロー (x, y ≤ 1e-30) → 非負半径分布では Q1=0 ⇒ Q3=0 なので実現不能。
     // 不等式検査より先に扱い、(Q0, g) 保存の単分散 (1,1) へ再初期化 (明示した修復方針; 数を別に log)。
     if (x <= 1.0e-30 || y <= 1.0e-30) { x = 1.0; y = 1.0; return 2; }
     const bool viol = (x > 1.0 + eps) || (y < x*x*(1.0 - eps)) || (y*y > x*(1.0 + eps));
     if (!viol) return 0;
-    // 候補 1: 上境界 y = √t (t ∈ [0,1]) への最近点 (黄金分割)
-    auto nearest = [&](int branch, double& bx, double& by) {
-        double lo = 0.0, hi = 1.0; const double gr = 0.6180339887498949;
-        auto dist2 = [&](double t) { const double yy = (branch == 0) ? sqrt(t) : t*t; return (t-x)*(t-x) + (yy-y)*(yy-y); };
-        double a = hi - gr*(hi-lo), b = lo + gr*(hi-lo), fa = dist2(a), fb = dist2(b);
-        for (int it = 0; it < 60; ++it) { if (fa < fb) { hi = b; b = a; fb = fa; a = hi - gr*(hi-lo); fa = dist2(a); } else { lo = a; a = b; fa = fb; b = lo + gr*(hi-lo); fb = dist2(b); } }
-        bx = 0.5*(lo+hi); by = (branch == 0) ? sqrt(bx) : bx*bx;
+    // 最近点の候補 (plan-8 M4: 小さい正の状態でも連続・最小): 単純クランプ候補 (x, clamp(y)), (clamp(x), y) を上界として持ち、
+    // 境界 y=√t / y=t² 上の最近点を局所スケールの区間 [0, hi] で相対停止の黄金分割で探し、最小距離の候補を採る。
+    const double x0 = x, y0 = y;
+    double bx = x0, by = y0, bd = 1.0e300;
+    auto consider = [&](double cx, double cy) {
+        cx = fmin(fmax(cx, 0.0), 1.0); cy = fmin(fmax(cy, cx*cx), sqrt(cx));
+        const double d = (cx-x0)*(cx-x0) + (cy-y0)*(cy-y0);
+        if (d < bd) { bd = d; bx = cx; by = cy; }
     };
-    double x1, y1, x2, y2; nearest(0, x1, y1); nearest(1, x2, y2);
-    const double d1 = (x1-x)*(x1-x) + (y1-y)*(y1-y), d2 = (x2-x)*(x2-x) + (y2-y)*(y2-y), dc = (1.0-x)*(1.0-x) + (1.0-y)*(1.0-y);
-    if (dc <= d1 && dc <= d2) { x = 1.0; y = 1.0; }
-    else if (d1 <= d2) { x = x1; y = y1; }
-    else { x = x2; y = y2; }
-    // 数値誤差で領域を僅かに外れたら境界へ寄せる
-    x = fmin(fmax(x, 0.0), 1.0); y = fmin(fmax(y, x*x), sqrt(x));
+    consider(x0, y0);                       // y をクランプ (x は保持)
+    consider(fmin(fmax(y0*y0, 0.0), 1.0), y0);   // y=√x の枝で x を合わせる
+    consider(sqrt(fmax(y0, 0.0)), y0);           // y=x² の枝で x を合わせる
+    consider(1.0, 1.0);
+    auto nearest = [&](int branch) {
+        const double scale = fmax(fmax(x0, y0*y0), fmax(sqrt(fmax(y0, 0.0)), 1.0e-300));
+        double lo = 0.0, hi = fmin(1.0, 8.0*scale + 1.0e-300); const double gr = 0.6180339887498949;
+        auto dist2 = [&](double t) { const double yy = (branch == 0) ? sqrt(t) : t*t; return (t-x0)*(t-x0) + (yy-y0)*(yy-y0); };
+        double a = hi - gr*(hi-lo), b = lo + gr*(hi-lo), fa = dist2(a), fb = dist2(b);
+        for (int it = 0; it < 200 && (hi - lo) > 1.0e-14*hi; ++it) { if (fa < fb) { hi = b; b = a; fb = fa; a = hi - gr*(hi-lo); fa = dist2(a); } else { lo = a; a = b; fa = fb; b = lo + gr*(hi-lo); fb = dist2(b); } }
+        const double t = 0.5*(lo+hi);
+        consider(t, (branch == 0) ? sqrt(t) : t*t);
+    };
+    nearest(0); nearest(1);
+    x = bx; y = by;
     return 1;
 }
 
@@ -54,7 +64,8 @@ __global__ void cond_realizability_clamp_d(
     flow_float* T, flow_float* P, CondPropOpts opts,
     flow_float* diagCorrG, flow_float* diagCorrQ,   // 補正量の記録 (nullptr 可): |Δρg|/ρ [質量分率] の累積, Q の最大相対補正 (codex result M2)
     int* realizViol,                                // [0] 最近点射影の作動数, [1] 退化の単分散再初期化数 (nullptr 可; plan species-passive-scalar-unification §4.7 v5)
-    double* budget, const geom_int* root, const geom_float* vol)   // 成分別収支 [g,Q0,Q1,Q2]×(符号付き, 絶対)·V (root のみ; nullptr 可)
+    double* budget, const geom_int* root, const geom_float* vol,   // 成分別収支 [g,Q0,Q1,Q2]×(符号付き, 絶対)·V (root のみ; nullptr 可)
+    int doProject)                                  // 1: 実現可能性射影も行う (定常/RK の各 step; dual-time は sub-iter 内 0 で step 末尾に project_only を呼ぶ)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -78,7 +89,7 @@ __global__ void cond_realizability_clamp_d(
             const double q3 = rg / ((4.0/3.0)*COND_PI*rho_l);
             const double rr = cbrt(q3/q0);
             double x = (double)roQ1[ic]/(q0*rr), y = (double)roQ2[ic]/(q0*rr*rr);
-            const int kind = cond_realizability_project(x, y, 1.0e-6);
+            const int kind = (doProject != 0 && rr > 0.0 && rr < 1.0e300) ? cond_realizability_project(x, y, 1.0e-6) : 0;
             if (kind != 0) {
                 roQ1[ic] = (flow_float)(q0*rr*x); roQ2[ic] = (flow_float)(q0*rr*rr*y);
                 if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
@@ -138,7 +149,7 @@ __global__ void cond_realizability_clamp_f_d(
     int evap, float Rw, float rmin, float g_rm, float Yw_const,
     flow_float* T, flow_float* P, CondTablesF tb, CondSpeciesProps cpd,
     flow_float* diagCorrG, flow_float* diagCorrQ, int* realizViol,
-    double* budget, const geom_int* root, const geom_float* vol)
+    double* budget, const geom_int* root, const geom_float* vol, int doProject)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -159,7 +170,7 @@ __global__ void cond_realizability_clamp_f_d(
             const float q3 = r / ((4.0f/3.0f)*COND_PI_F*rho_l);
             const float rr = cbrtf(q3/q0);
             double x = (double)roQ1[ic]/((double)q0*(double)rr), y = (double)roQ2[ic]/((double)q0*(double)rr*(double)rr);
-            const int kind = cond_realizability_project(x, y, 1.0e-6);
+            const int kind = (doProject != 0 && rr > 0.0f && rr < 1.0e30f) ? cond_realizability_project(x, y, 1.0e-6) : 0;
             if (kind != 0) {
                 roQ1[ic] = (float)((double)q0*(double)rr*x); roQ2[ic] = (float)((double)q0*(double)rr*(double)rr*y);
                 if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
@@ -224,6 +235,7 @@ __global__ void cond_realizability_project_only_d(
     const double rho_l = (useTab != 0 && cond_tab_wet_ok(tb, Tq)) ? (double)cond_tab_rhol_f(tb, Tq) : cond_rho_cond(cp0, (double)Tq);
     const double q3 = rg / ((4.0/3.0)*COND_PI*rho_l);
     const double rr = cbrt(q3/q0);
+    if (!(rr > 0.0 && rr < 1.0e300)) return;
     double x = (double)roQ1[ic]/(q0*rr), y = (double)roQ2[ic]/(q0*rr*rr);
     const int kind = cond_realizability_project(x, y, 1.0e-6);
     if (kind == 0) return;

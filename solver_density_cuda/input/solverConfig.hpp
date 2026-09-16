@@ -98,6 +98,7 @@ public:
     // dual-time の受動種 S3 に対する物理 step 末尾の保存的 FCT 補正 (plan species-passive-scalar-unification §4.7; scheme 1 かつ SLAU S3 かつ
     // timeIntegration 11 + unsteady 1 + dualTime 1 のときだけ作動)。1 = 有効 (既定), 0 = 無効 (A/B)。定常・RK では常に無効。
     int passiveFct = 1;
+    int condRealizProject = 1;           // 凝縮モーメントの実現可能性射影 (Q1/Q2; 1 = 有効 [既定], 0 = 無効 [A/B 診断])
     int passiveFctPrelimit = 0;          // Zalesak の前制限 (A^raw (φ_B(j) − φ_B(i)) < 0 → 0)。既定 0 (滑らかな極値でも作動するので A/B 用)
     int passiveFctSweeps = 100;          // 低次陰解 q_L の Jacobi sweep 上限
     flow_float passiveFctTol = 1.0e-6;   // q_L の線形残差 ||f − L q_L|| / (||f|| + passiveFctTolAbs) の受入閾値

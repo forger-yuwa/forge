@@ -375,6 +375,7 @@ void solverConfig::read(std::string fname)
         this->passiveFct = getOptionalValidatedValue<int>(deltaT, "passiveFct", 1, "time.deltaT");
         if (this->passiveFct != 0 && this->passiveFct != 1) throw std::runtime_error("Key 'passiveFct' in 'time.deltaT' must be 0 or 1.");
         this->passiveFctPrelimit = getOptionalValidatedValue<int>(deltaT, "passiveFctPrelimit", 0, "time.deltaT");
+        this->condRealizProject = getOptionalValidatedValue<int>(deltaT, "condRealizProject", 1, "time.deltaT");
         this->passiveFctSweeps = getOptionalValidatedValue<int>(deltaT, "passiveFctSweeps", 100, "time.deltaT");
         if (this->passiveFctSweeps < 1) throw std::runtime_error("Key 'passiveFctSweeps' in 'time.deltaT' must be >= 1.");
         this->passiveFctTol = getOptionalValidatedValue<double>(deltaT, "passiveFctTol", 1.0e-6, "time.deltaT");

@@ -1087,7 +1087,8 @@ flow_float*  g_zero_bvar = nullptr;   geom_int g_zero_cap = 0;
 constexpr flow_float kNoFloor = static_cast<flow_float>(-1.0e30);
 std::vector<double> g_fct_stats_total;   // FCT 補正の全期間積算 (log 用; 実体は下の FCT 節)
 double g_fct_last_lin_res = 0.0; int g_fct_last_sweeps = 0;
-std::vector<double> g_fct_budget_total, g_fct_max_relres, g_fct_max_rh, g_fct_closure_total;   // 全期間積算 / monitor 区間の最大 / 密度整合 (E_ρ rel 最大, 上限逸脱量, 個数)   // 更新カーネルの floor を無効化 (floor は passive_bounds_d が担う)
+std::vector<double> g_fct_budget_total, g_fct_max_relres, g_fct_max_rh, g_fct_closure_total;   // 全期間積算 / monitor 区間の最大 / 密度整合 (E_ρ rel 最大, 上限逸脱量, 個数)
+std::vector<double> g_fct_run_max_relres, g_fct_run_max_rh, g_p_initial_total;   // 全期間の最大 / 最初の monitor 時点の総量 (収支の独立照合用)   // 更新カーネルの floor を無効化 (floor は passive_bounds_d が担う)
 
 flow_float** uploadPtrs(const std::vector<flow_float*>& h)
 {
@@ -1183,6 +1184,9 @@ void passiveInit_d(solverConfig& cfg, variables& var)
     gpuErrchk( cudaMalloc((void**)&g_p_thetaMin_dev, (size_t)g_nPassive*sizeof(int)) );
     { std::vector<int> one((size_t)g_nPassive, 1000000000); gpuErrchk( cudaMemcpy(g_p_thetaMin_dev, one.data(), one.size()*sizeof(int), cudaMemcpyHostToDevice) ); }
     g_p_stats_last_step = 0;
+    if (cfg.passiveScalarScheme == 1 && cfg.speciesFaceReconstruction >= 2 && !(cfg.solver == "SLAU" || cfg.solver == "SLAU2"))
+        std::cout << "passiveInit_d: WARNING speciesFaceReconstruction=" << cfg.speciesFaceReconstruction << " but solver=" << cfg.solver
+                  << " is not SLAU/SLAU2: passive S3 face reconstruction and passiveFct are INACTIVE (passives use 1st-order upwind)\n";
     std::cout << "passiveInit_d: nPassive=" << g_nPassive << " (tracer q=" << g_qTracer << ", moments q0=" << g_qMom0
               << ") passiveScalarScheme=" << cfg.passiveScalarScheme
               << (cfg.passiveScalarScheme == 1 ? (std::string(" passiveImplicitCoupling=") + std::to_string(cfg.passiveImplicitCoupling)
@@ -1374,6 +1378,9 @@ bool passiveRecordStage(const solverConfig& cfg, int loop)
 
 void passiveLimitIncrement_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int q0, int nq, bool record)
 {
+    // FCT 有効 (dual-time S3) では sub-iter 内の増分スケーリング θ_b は使わない: 非保存で、step 末尾の FCT が落とした分を戻せない
+    // (Venkat のステップで −0.7 %; 2026-09-17 run_0134/0135)。有界化は FCT 補正 + 最後の floor が担う。
+    if (passiveFctActive(cfg)) return;
     const geom_int* root = passive_periodic_root(cfg, msh);
     static double* s_scratch = nullptr; static int* s_scratchI = nullptr;
     if (!s_scratch) { gpuErrchk( cudaMalloc((void**)&s_scratch, 8*sizeof(double)) ); gpuErrchk( cudaMalloc((void**)&s_scratchI, sizeof(int)) ); }
@@ -1394,6 +1401,10 @@ void passiveBounds_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh,
     static double* s_scratch = nullptr;
     if (!s_scratch) gpuErrchk( cudaMalloc((void**)&s_scratch, 8*sizeof(double)) );
     for (int q = q0; q < q0+nq; ++q) {
+        // FCT 有効時、sub-iter 内 (record=true でも物理 step 末尾以外) のトレーサ floor は掛けない (熱力学に入らないので中間の逸脱は無害;
+        // 掛けると FCT 前に非保存で切ってしまう)。モーメントは g<0 が EOS を壊すので floor を残す (収支に記録)。物理 step 末尾の floor は
+        // main が passiveBounds_d_wrapper(..., record=true) で呼ぶ (cfg.dualTimeSubIter = -1 で区別)。
+        if (passiveFctActive(cfg) && q == g_qTracer && cfg.dualTimeSubIter >= 0) continue;
         if (record) gpuErrchk( cudaMemset(g_p_stats_dev + (size_t)q*8 + 3, 0, sizeof(double)) );   // 総量は最新値
         passive_bounds_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
             msh.nCells, h_p_rophi[q], (q == g_qTracer) ? 1 : 0, var.c_d["ro"], var.c_d["volume"],
@@ -1448,23 +1459,26 @@ void passiveFloorCorrLog_d_wrapper(solverConfig& cfg, int iStep)
         const double* c = h.data() + (size_t)q*8;
         const double* l = g_p_stats_last.data() + (size_t)q*8;
         const double tot = c[3];
+        if (g_p_initial_total.size() != (size_t)g_nPassive) g_p_initial_total.assign((size_t)g_nPassive, -1.0);
+        if (g_p_initial_total[(size_t)q] < 0.0) g_p_initial_total[(size_t)q] = tot;   // 最初の monitor 時点の総量 (収支の独立照合用)
         const double rel = (tot > 0.0) ? c[2]/tot : (c[2] > 0.0 ? 1.0 : 0.0);    // 総量 0 で補正が非ゼロなら 1 (= FAIL; plan-7 M1)
         const double rell = (tot > 0.0) ? c[4]/tot : (c[4] > 0.0 ? 1.0 : 0.0);
         // floorCorr = 硬い floor (最後の砦) の収支、limCorr = 増分スケーリング θ_b の縮小量 (M5)。総量・収支は周期 root のみ (M2)。
         printf("[passive] step %d floorCorr %-8s per-step(avg %d): lo %.3e hi %.3e abs %.3e | cumulative: lo %.6e hi %.6e abs %.6e | total %.6e rel(abs/total) %.6e"
-               " | limCorr per-step %.3e cumulative abs %.6e signed %.6e rel %.6e cells %.0f thetaMin(interval) %.4f\n",
+               " | limCorr per-step %.3e cumulative abs %.6e signed %.6e rel %.6e cells %.0f thetaMin(interval) %.4f initialTotal %.6e\n",
                iStep + 1, g_pCons[q].c_str(), nstep,
                (c[0]-l[0])/nstep, (c[1]-l[1])/nstep, (c[2]-l[2])/nstep, c[0], c[1], c[2], tot, rel,
-               (c[4]-l[4])/nstep, c[4], c[6], rell, c[5]-l[5], thmin[(size_t)q]*1.0e-9);
+               (c[4]-l[4])/nstep, c[4], c[6], rell, c[5]-l[5], thmin[(size_t)q]*1.0e-9, g_p_initial_total[(size_t)q]);
         if (passiveFctActive(cfg) && (size_t)g_nPassive*8 == g_fct_stats_total.size()) {
             const double* f = g_fct_stats_total.data() + (size_t)q*8;
             const double* bg = g_fct_budget_total.data() + (size_t)q*4;
             printf("[passive]   fctCorr %-8s cumulative: dropped antidiffusion %.6e (rel %.6e) faces %.0f prelimited %.6e pinCorr %.6e (rel %.6e) baseViol %.6e (rel %.6e)"
-                   " bndFluxSigned %.6e bndDropped %.6e | budget: srcHist %.6e remSigned %.6e remAbs %.6e (rel %.6e) increment %.6e"
-                   " | interval max: qL rel-residual %.2e (sweeps last %d) HO residual rel %.2e\n",
+                   " bndFluxSigned %.6e bndDropped %.6e upperViol %.6e (rel %.6e) | budget: srcHist %.6e remSigned %.6e remAbs %.6e (rel %.6e) increment %.6e"
+                   " | qL rel-residual interval-max %.2e run-max %.2e (sweeps last %d) HO residual rel interval-max %.2e run-max %.2e\n",
                    g_pCons[q].c_str(), f[0], (tot > 0.0) ? f[0]/tot : (f[0] > 0.0 ? 1.0 : 0.0), f[1], f[2], f[3], (tot > 0.0) ? f[3]/tot : (f[3] > 0.0 ? 1.0 : 0.0),
-                   f[4], (tot > 0.0) ? f[4]/tot : (f[4] > 0.0 ? 1.0 : 0.0), f[5], f[6], bg[0], bg[1], bg[2], (tot > 0.0) ? bg[2]/tot : (bg[2] > 0.0 ? 1.0 : 0.0), bg[3],
-                   g_fct_max_relres[(size_t)q], g_fct_last_sweeps, g_fct_max_rh[(size_t)q]);
+                   f[4], (tot > 0.0) ? f[4]/tot : (f[4] > 0.0 ? 1.0 : 0.0), f[5], f[6], f[7], (tot > 0.0) ? f[7]/tot : (f[7] > 0.0 ? 1.0 : 0.0),
+                   bg[0], bg[1], bg[2], (tot > 0.0) ? bg[2]/tot : (bg[2] > 0.0 ? 1.0 : 0.0), bg[3],
+                   g_fct_max_relres[(size_t)q], g_fct_run_max_relres[(size_t)q], g_fct_last_sweeps, g_fct_max_rh[(size_t)q], g_fct_run_max_rh[(size_t)q]);
             g_fct_max_relres[(size_t)q] = 0.0; g_fct_max_rh[(size_t)q] = 0.0;
         }
     }
@@ -1482,8 +1496,9 @@ void passiveFloorCorrLog_d_wrapper(solverConfig& cfg, int iStep)
             const double* bq = cb.data() + (size_t)sp*8;
             const double* totg = h.data() + (size_t)(g_qMom0 + 4*sp)*8;   // 総量 [g,Q2,Q1,Q0] は受動種の stats[3]
             const double tg = totg[0*8+3], tQ2 = totg[1*8+3], tQ1 = totg[2*8+3], tQ0 = totg[3*8+3];
-            printf("[passive]   clampBudget species %d cumulative (signed/abs, rel to total): g %.3e/%.3e (%.2e) Q0 %.3e/%.3e (%.2e) Q1 %.3e/%.3e (%.2e) Q2 %.3e/%.3e (%.2e)\n", sp,
-                   bq[0], bq[1], tg > 0 ? bq[1]/tg : 0.0, bq[2], bq[3], tQ0 > 0 ? bq[3]/tQ0 : 0.0, bq[4], bq[5], tQ1 > 0 ? bq[5]/tQ1 : 0.0, bq[6], bq[7], tQ2 > 0 ? bq[7]/tQ2 : 0.0);
+            auto relz = [](double ab, double t) { return (t > 0.0) ? ab/t : (ab > 0.0 ? 1.0 : 0.0); };   // 総量 0 で補正が非ゼロなら 1 (= FAIL)
+            printf("[passive]   clampBudget species %d cumulative (signed/abs, rel to total): g %.6e/%.6e (%.6e) Q0 %.6e/%.6e (%.6e) Q1 %.6e/%.6e (%.6e) Q2 %.6e/%.6e (%.6e)\n", sp,
+                   bq[0], bq[1], relz(bq[1], tg), bq[2], bq[3], relz(bq[3], tQ0), bq[4], bq[5], relz(bq[5], tQ1), bq[6], bq[7], relz(bq[7], tQ2));
         }
     }
     { std::vector<int> one((size_t)g_nPassive, 1000000000); gpuErrchk( cudaMemcpy(g_p_thetaMin_dev, one.data(), one.size()*sizeof(int), cudaMemcpyHostToDevice) ); }
@@ -1603,7 +1618,8 @@ struct FctScratch {
     flow_float **d_qL = nullptr, **d_rhs = nullptr, **d_nb = nullptr, **d_Pp = nullptr, **d_Pm = nullptr, **d_mx = nullptr, **d_mn = nullptr,
                **d_Rp = nullptr, **d_Rm = nullptr, **d_corr = nullptr, **d_base = nullptr, **d_qB = nullptr, **d_H = nullptr, **d_Hsrc = nullptr, **d_qP = nullptr, **d_qPP = nullptr;
     flow_float** d_roPtr = nullptr; flow_float** d_roNPtr = nullptr;   // 上限条件 Lρ − f の診断用 ({ro}, {roN})
-    flow_float* divMeff = nullptr; flow_float* nbRho = nullptr; flow_float** d_nbRho = nullptr;
+    flow_float* divMeff = nullptr; flow_float* nbRho = nullptr; flow_float** d_nbRho = nullptr; flow_float* nbBnd = nullptr; flow_float** d_nbBnd = nullptr;
+    flow_float** d_qLtr = nullptr; flow_float** d_qPtr = nullptr;   // トレーサの qL / q^n (単一エントリの pointer 配列)
     flow_float *diagAdv = nullptr, *diagDiff = nullptr, *cdiff = nullptr, *Aface = nullptr, *Apre = nullptr, *G = nullptr, *Gnew = nullptr, *mEff = nullptr;
     double* stats = nullptr;    // [nq*8]: 0 Σ|A^raw−αA^pre| (·Δt), 1 作動面数, 2 前制限量 (·Δt), 3 ピン行交換量, 4 基点の物理限界逸脱量 (·V), 5 境界の実現流束 (符号付き·Δt), 6 境界で落とした量 (·Δt), 7 予備
     double* acc = nullptr;      // [4*nq + 4]: [q] Jacobi 残差², [nq+q] rhs², [2nq+2q] r_H², [2nq+2q+1] (V a/Δt q)², 末尾 4: E_ρ², (V/Δt ρ)², 上限逸脱量, 個数
@@ -1625,6 +1641,8 @@ void fctAlloc(mesh& msh, variables& var)
     g_fct.d_base = mk(g_fct.h_base); g_fct.d_qB = mk(g_fct.h_qB); g_fct.d_H = mk(g_fct.h_H); g_fct.d_Hsrc = mk(g_fct.h_Hsrc);
     { std::vector<flow_float*> r{var.c_d.at("ro")}, rn{var.c_d.at("roN")}; g_fct.d_roPtr = uploadPtrs(r); g_fct.d_roNPtr = uploadPtrs(rn); }
     g_fct.divMeff = allocCells(n); g_fct.nbRho = allocCells(n); { std::vector<flow_float*> nb{g_fct.nbRho}; g_fct.d_nbRho = uploadPtrs(nb); }
+    g_fct.nbBnd = allocCells(n); { std::vector<flow_float*> nb{g_fct.nbBnd}; g_fct.d_nbBnd = uploadPtrs(nb); }
+    if (g_qTracer >= 0) { std::vector<flow_float*> a{g_fct.h_qL[(size_t)g_qTracer]}, b{var.c_d.at(g_pCons[(size_t)g_qTracer]+"P")}; g_fct.d_qLtr = uploadPtrs(a); g_fct.d_qPtr = uploadPtrs(b); }
     g_fct.h_qP.clear(); g_fct.h_qPP.clear();
     for (int q = 0; q < g_nPassive; ++q) { g_fct.h_qP.push_back(var.c_d.at(g_pCons[q]+"P")); g_fct.h_qPP.push_back(var.c_d.at(g_pCons[q]+"PP")); }
     g_fct.d_qP = uploadPtrs(g_fct.h_qP); g_fct.d_qPP = uploadPtrs(g_fct.h_qPP);
@@ -1642,16 +1660,22 @@ void fctAlloc(mesh& msh, variables& var)
     gpuErrchk( cudaMalloc((void**)&g_fct.budget, (size_t)g_nPassive*4*sizeof(double)) ); gpuErrchk( cudaMemset(g_fct.budget, 0, (size_t)g_nPassive*4*sizeof(double)) );
     g_fct_stats_total.assign((size_t)g_nPassive*8, 0.0);
     g_fct_budget_total.assign((size_t)g_nPassive*4, 0.0); g_fct_max_relres.assign((size_t)g_nPassive, 0.0); g_fct_max_rh.assign((size_t)g_nPassive, 0.0);
+    g_fct_run_max_relres.assign((size_t)g_nPassive, 0.0); g_fct_run_max_rh.assign((size_t)g_nPassive, 0.0);
     g_fct_closure_total.assign(4, 0.0);
     g_fct.nq = g_nPassive; g_fct.nCells = msh.nCells_all; g_fct.nPlanes = msh.nPlanes;
 }
 }  // namespace
 
-bool passiveFctActive(const solverConfig& cfg)
+// 設定だけで決まる判定 (checkpoint の layout と restart 契約に使う; 実行時の Pface 確保には依存しない — 2026-09-17 run_0131 の layout 不一致の修正)
+bool passiveFctConfigured(const solverConfig& cfg)
 {
     if (!passiveSchemeEnabled(cfg) || cfg.passiveFct == 0) return false;
     if (!(cfg.timeIntegration == 11 && cfg.unsteady == 1 && cfg.dualTime == 1)) return false;
-    return cfg.speciesFaceReconstruction >= 2 && g_Pface_dev != nullptr && (cfg.solver == "SLAU" || cfg.solver == "SLAU2");
+    return cfg.speciesFaceReconstruction >= 2 && (cfg.solver == "SLAU" || cfg.solver == "SLAU2");
+}
+bool passiveFctActive(const solverConfig& cfg)
+{
+    return passiveFctConfigured(cfg) && g_Pface_dev != nullptr;
 }
 
 void passiveFctCorrect_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, flow_float a, flow_float b, flow_float c)
@@ -1731,14 +1755,14 @@ void passiveFctCorrect_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
         rhsNorm[(size_t)q] = std::sqrt(hacc[(size_t)nq + q]) + (double)cfg.passiveFctTolAbs;
         const double rh = (hacc[(size_t)2*nq + 2*q + 1] > 0.0) ? std::sqrt(hacc[(size_t)2*nq + 2*q] / hacc[(size_t)2*nq + 2*q + 1]) : 0.0;
         g_fct_last_rh_rel = std::max(g_fct_last_rh_rel, rh);
-        g_fct_max_rh[(size_t)q] = std::max(g_fct_max_rh[(size_t)q], rh);
+        g_fct_max_rh[(size_t)q] = std::max(g_fct_max_rh[(size_t)q], rh); g_fct_run_max_rh[(size_t)q] = std::max(g_fct_run_max_rh[(size_t)q], rh);
     }
     int sweeps = 0; double relmax = 0.0;
     for (sweeps = 1; sweeps <= cfg.passiveFctSweeps; ++sweeps) {
         zeroAll(g_fct.h_nb);
         passive_fct_lo_nb_d<<<dimGrid_nh, cuda_cfg.dimBlock>>>(
             nC, msh.nNormalPlanes, msh.nNormal_halo_Planes, msh.normal_halo_planes_d, msh.map_plane_cells_d,
-            var.c_d["ro"], var.c_d["roN"], meff, isNode ? 1 : 0, nq, qDiff, g_fct.cdiff, g_fct.d_qL, g_p_rophi_dev, g_fct.d_qP, g_fct.d_nb);
+            var.c_d["ro"], var.c_d["roN"], meff, isNode ? 1 : 0, nq, qDiff, g_fct.cdiff, g_fct.d_qL, g_p_rophi_dev, g_fct.d_qP, g_fct.d_nb, 0);
         gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
         gatherAll(g_fct.h_nb);
         gpuErrchk( cudaMemset(g_fct.acc, 0, (size_t)nq*sizeof(double)) );
@@ -1754,7 +1778,7 @@ void passiveFctCorrect_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
     }
     g_fct_last_sweeps = std::min(sweeps, cfg.passiveFctSweeps);
     g_fct_last_lin_res = relmax;
-    for (int q = 0; q < nq; ++q) g_fct_max_relres[(size_t)q] = std::max(g_fct_max_relres[(size_t)q], relres[(size_t)q]);
+    for (int q = 0; q < nq; ++q) { g_fct_max_relres[(size_t)q] = std::max(g_fct_max_relres[(size_t)q], relres[(size_t)q]); g_fct_run_max_relres[(size_t)q] = std::max(g_fct_run_max_relres[(size_t)q], relres[(size_t)q]); }
     if (relmax > cfg.passiveFctTol) {
         static int warned = 0;
         if (warned < 5) { printf("[passiveFct] WARNING: low-order solve did not reach tol %.1e after %d sweeps (max component rel residual %.2e)\n", cfg.passiveFctTol, cfg.passiveFctSweeps, relmax); ++warned; }
@@ -1767,19 +1791,24 @@ void passiveFctCorrect_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
         periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, g_fct.divMeff);
         passive_fct_density_closure_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(nC, var.c_d["volume"], dt, var.c_d["ro"], var.c_d["roN"], g_fct.divMeff, root, g_fct.acc + 4*nq);
         if (g_qTracer >= 0) {
-            gpuErrchk( cudaMemset(g_fct.nbRho, 0, cb) );
+            // Lρ の非対角: 内部近傍のみ (bndMode 1) を ρ で; f_full の境界定数項: bndMode 2 をトレーサ q で (plan-8 M3)
+            gpuErrchk( cudaMemset(g_fct.nbRho, 0, cb) ); gpuErrchk( cudaMemset(g_fct.nbBnd, 0, cb) );
             passive_fct_lo_nb_d<<<dimGrid_nh, cuda_cfg.dimBlock>>>(
                 nC, msh.nNormalPlanes, msh.nNormal_halo_Planes, msh.normal_halo_planes_d, msh.map_plane_cells_d,
-                var.c_d["ro"], var.c_d["roN"], meff, isNode ? 1 : 0, 1, (qDiff >= 0) ? 0 : -1, g_fct.cdiff, g_fct.d_roPtr, g_fct.d_roPtr, g_fct.d_roNPtr, g_fct.d_nbRho);
+                var.c_d["ro"], var.c_d["roN"], meff, isNode ? 1 : 0, 1, (qDiff >= 0) ? 0 : -1, g_fct.cdiff, g_fct.d_roPtr, g_fct.d_roPtr, g_fct.d_roNPtr, g_fct.d_nbRho, 1);
+            passive_fct_lo_nb_d<<<dimGrid_nh, cuda_cfg.dimBlock>>>(
+                nC, msh.nNormalPlanes, msh.nNormal_halo_Planes, msh.normal_halo_planes_d, msh.map_plane_cells_d,
+                var.c_d["ro"], var.c_d["roN"], meff, isNode ? 1 : 0, 1, -1, nullptr, g_fct.d_qLtr, g_p_rophi_dev + g_qTracer, g_fct.d_qPtr, g_fct.d_nbBnd, 2);
             gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
-            periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, g_fct.nbRho);
+            periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, g_fct.nbRho); periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, g_fct.nbBnd);
             passive_fct_upper_margin_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(nC, var.c_d["volume"], oneOverDt, var.c_d["ro"], g_fct.diagAdv, (qDiff >= 0) ? g_fct.diagDiff : nullptr,
-                g_qTracer, g_fct.nbRho, g_fct.d_rhs, pin, root, g_fct.acc + 4*nq + 2);
+                g_qTracer, g_fct.nbRho, g_fct.nbBnd, g_fct.d_rhs, pin, root, g_fct.acc + 4*nq + 2);
             gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
         }
         double hc[4] = {0.0, 0.0, 0.0, 0.0}; gpuErrchk( cudaMemcpy(hc, g_fct.acc + 4*nq, 4*sizeof(double), cudaMemcpyDeviceToHost) );
         const double erel = (hc[1] > 0.0) ? std::sqrt(hc[0]/hc[1]) : 0.0;
         g_fct_closure_total[0] = std::max(g_fct_closure_total[0], erel); g_fct_closure_total[1] += hc[2]*(double)dt; g_fct_closure_total[2] += hc[3];
+        if (g_qTracer >= 0) g_fct_stats_total[(size_t)g_qTracer*8 + 7] += hc[2]*(double)dt;   // 上限条件の逸脱量 (·Δt) を FAIL 判定へ (plan-8 M3)
     }
     // (d) A^raw (全輸送面) と基点 q_B
     zeroAll(g_fct.h_base); zeroAll(g_fct.h_Pp); zeroAll(g_fct.h_Pm); zeroAll(g_fct.h_corr);

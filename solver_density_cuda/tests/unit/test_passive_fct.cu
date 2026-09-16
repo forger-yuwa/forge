@@ -97,7 +97,7 @@ struct FctDev {
         double rhs2; cudaMemcpy(&rhs2, drhs2, sizeof(double), cudaMemcpyDeviceToHost);
         for (int sw = 0; sw < maxSweep; ++sw) {
             cudaMemset(dnb, 0, n*sizeof(float)); cudaMemset(dch, 0, sizeof(double));
-            passive_fct_lo_nb_d<<<(nHalo+127)/128,128>>>(n, nNormal, nHalo, dnhp, dpc, dro, droN, dmeff, isNode, 1, -1, dcd, pqL, pq, pqP, pnb);
+            passive_fct_lo_nb_d<<<(nHalo+127)/128,128>>>(n, nNormal, nHalo, dnhp, dpc, dro, droN, dmeff, isNode, 1, -1, dcd, pqL, pq, pqP, pnb, 0);
             passive_fct_lo_solve_d<<<(n+127)/128,128>>>(n, dvol, 1.f/dt, 1, -1, ddA, ddD, prhs, pnb, pq, pin, nullptr, pqL, dch);
             double r2; cudaMemcpy(&r2, dch, sizeof(double), cudaMemcpyDeviceToHost);
             if (std::sqrt(r2) <= tol*(std::sqrt(rhs2) + 1e-30)) break;
@@ -308,6 +308,38 @@ int main()
         printf("   local-form history: q_C %.6f (unchanged), clipped base %.6f, recorded base violation %.6f (expected 1/30=0.0333)\n", qC[0], qB[0], st[4]);
         CHECK(std::fabs(st[4] - 1.0/30) < 1e-4, "no-flux BDF2: base violation not recorded (%g)", st[4]);
         CHECK(std::fabs(qC[0] - 31.f/30) < 1e-6f, "no-flux BDF2: FCT must not change a fluxless cell (floor handles it)");
+    }
+    printf("[f] upper-bound margin diagnostic (plan-8 M3): 1 CV node, inflow 1 (own value), outflow 1, V/dt=1, rho=1, phi^n=0.5, effective local history 0.75\n");
+    {
+        // planes: 0:(0,ghostL=1) mdot -1 (inflow), 1:(0,ghostR=2) mdot +1 (outflow); no internal planes
+        std::vector<geom_int> pc{0,1, 0,2}, cpi{0,2}, cp{0,1}, nhp{0,1}; std::vector<geom_float> vol(1, 1.f), ccx{0.5f,-0.5f,1.5f}; std::vector<float> ro(3, 1.f);
+        FctDev D(1, 2, 0, pc, cpi, cp, nhp, vol, ccx, ro, 2);
+        std::vector<float> qP{0.5f}, H{0.75f*3.f}, mf{-1.f, 1.f};   // H^n so that (c/a)H = 0.75 with a=1.5,c=0.5 → H = 2.25
+        cudaMemcpy(D.dqP, qP.data(), sizeof(float), cudaMemcpyHostToDevice); cudaMemcpy(D.dH, H.data(), sizeof(float), cudaMemcpyHostToDevice);
+        float *dmf=up(mf); float* dm=up(mf);
+        // low-order operator: diag = 1 + 1 (outflow), rhs = 0.5 + 0.75 + boundary inflow 0.5 → qL = 1.75/2 = 0.875; margin L·rho − f_full = 2 − 1.75 = +0.25 (admissible)
+        std::vector<float> meffh{-1.f, 1.f}; cudaMemcpy(D.dmeff, meffh.data(), 2*sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemset(D.ddA, 0, sizeof(float)); cudaMemset(D.ddD, 0, sizeof(float)); cudaMemset(D.drhs2, 0, sizeof(double));
+        passive_fct_lo_diag_d<<<1,32>>>(1, 0, 2, D.dnhp, D.dpc, D.dro, D.dmeff, 1, 0, D.dccx, D.dccx, D.dccx, D.dfx, D.dccx, D.dccx, D.dccx, D.dccx, D.dro, D.dro, 1.f, 1.f, D.ddA, D.ddD, D.dcd);
+        passive_fct_lo_rhs_d<<<1,32>>>(1, D.dvol, 1.f, 1.f/1.5f, 0.5f/1.5f, 1, D.pqP, D.pqPP, nullptr, D.pH, nullptr, D.prhs, D.drhs2);
+        float *dnbI=up(std::vector<float>(1,0.f)), *dnbB=up(std::vector<float>(1,0.f)); std::vector<float*> vI{dnbI}, vB{dnbB}; float **pnbI=up(vI), **pnbB=up(vB);
+        std::vector<float*> vro{D.dro}, vroN{D.droN}; float **pro=up(vro), **proN=up(vroN);
+        passive_fct_lo_nb_d<<<1,32>>>(1, 0, 2, D.dnhp, D.dpc, D.dro, D.droN, D.dmeff, 1, 1, -1, nullptr, pro, pro, proN, pnbI, 1);
+        passive_fct_lo_nb_d<<<1,32>>>(1, 0, 2, D.dnhp, D.dpc, D.dro, D.droN, D.dmeff, 1, 1, -1, nullptr, D.pqL, D.pq, D.pqP, pnbB, 2);
+        double* dout=up(std::vector<double>(2,0.0));
+        passive_fct_upper_margin_d<<<1,32>>>(1, D.dvol, 1.f, D.dro, D.ddA, nullptr, 0, dnbI, dnbB, D.prhs, nullptr, nullptr, dout);
+        cudaDeviceSynchronize();
+        auto o = down(dout, 2); auto rhs = down(D.drhs, 1); auto nbB = down(dnbB, 1);
+        printf("   rhs %.4f boundary RHS %.4f -> violation amount %.4f count %.0f (expected 0: margin +0.25)\n", rhs[0], nbB[0], o[0], o[1]);
+        CHECK(o[1] == 0.0, "admissible case flagged as violation (amount %g)", o[0]);
+        // 不許容例: c/a·H = 1.2 (H = 3.6) にすると rhs = 0.5+1.2 = 1.7, f_full = 2.2 > Lρ = 2 → 逸脱 0.2
+        std::vector<float> H2{3.6f}; cudaMemcpy(D.dH, H2.data(), sizeof(float), cudaMemcpyHostToDevice);
+        passive_fct_lo_rhs_d<<<1,32>>>(1, D.dvol, 1.f, 1.f/1.5f, 0.5f/1.5f, 1, D.pqP, D.pqPP, nullptr, D.pH, nullptr, D.prhs, D.drhs2);
+        cudaMemset(dout, 0, 2*sizeof(double));
+        passive_fct_upper_margin_d<<<1,32>>>(1, D.dvol, 1.f, D.dro, D.ddA, nullptr, 0, dnbI, dnbB, D.prhs, nullptr, nullptr, dout);
+        cudaDeviceSynchronize(); o = down(dout, 2);
+        printf("   inadmissible case: violation amount %.4f count %.0f (expected 0.2, 1)\n", o[0], o[1]);
+        CHECK(o[1] == 1.0 && std::fabs(o[0] - 0.2) < 1e-5, "inadmissible case not flagged (amount %g count %g)", o[0], o[1]);
     }
     printf(g_fail ? "FAILED (%d)\n" : "ALL PASS\n", g_fail);
     return g_fail ? 1 : 0;

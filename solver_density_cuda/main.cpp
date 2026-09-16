@@ -998,7 +998,7 @@ static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
                              + ";dt=" + std::string(dtbuf) + ";bdfOrder=" + std::to_string(cfg.bdfOrder)
                              + ";passiveScalarScheme=" + std::to_string(cfg.passiveScalarScheme)
                              + ";speciesImplicitCoupling=" + std::to_string(cfg.speciesImplicitCoupling)
-                             + ";passiveFct=" + std::to_string(passiveFctActive(cfg) ? 1 : 0);
+                             + ";passiveFct=" + std::to_string(passiveFctConfigured(cfg) ? 1 : 0);
     std::string why;
     try {
         HighFive::File file(cfg.valueFileName, HighFive::File::ReadOnly);
@@ -1035,7 +1035,7 @@ static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
                     cfg.totalTime = static_cast<flow_float>(tt);
                     cfg.nHistoryValid = std::min(nh, 2);
                     // 受動種 FCT の流束形履歴 G/H/ṁ^eff (§4.7 v4, plan-6 M5): FCT 有効なら**必須** (無ければ全系を BDF1 に揃えて再開)。
-                    if (passiveFctActive(cfg)) {
+                    if (passiveFctConfigured(cfg)) {
                         std::vector<std::vector<flow_float>> G, H, Hs; std::vector<flow_float> mEff; std::string miss;
                         const auto& cons = passive_cons_names();
                         for (const auto& cn : cons) {
@@ -1847,19 +1847,22 @@ void advanceImplicitDualTime(StepContext& s)
     if (passiveFctActive(s.cfg)) {
         // 終了状態で残差を再評価 (ṁ, P_face, ソース, 依存変数を q_H で固定; 受動種の res_* = 空間 HO 残差 → r_H 診断) してから補正。
         assembleResidual(s, 1);
+        s.cfg.dualTimeSubIter = -1;   // 物理 step 末尾の印 (トレーサ floor は sub-iter 内では掛けない)
         s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
             passiveFctCorrect_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, a, b, c);
             applyCondensationBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
             applyTracerBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
             passiveBounds_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, 0, passive_count(), true);
             passiveMirrorPeriodic_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
-            condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // g の上限・消滅・非負 (+ 射影は旧 T)
+            condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // g の上限・消滅・非負 (射影は下で EOS 更新後)
             tracerPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         });
-        // g の補正後に二相 EOS (T, P) を更新 (plan-4 M6) → その T で実現可能性の射影 (Q1, Q2 のみ; plan-6 M4) → 確定状態から流束形履歴 G^{n+1}/H^{n+1} (§4.7 v4)。
+    }
+    // 物理 step 末尾: 二相 EOS (T, P) を更新 → その T で Q1/Q2 の実現可能性射影 (dual-time では sub-iter 内で射影しない; plan §4.7 v7) → FCT の流束形履歴。
+    if (passiveFctActive(s.cfg) || (condensationEnabled(s.cfg) && s.cfg.condRealizProject != 0)) {
         s.profiler.measureWall(ProfileSection::DependentVariables, [&]() {
             dependentVariables(s.cfg , s.cuda_cfg , s.msh , s.var, s.mat_ns);
-            condensationRealizabilityProject_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 更新後の T で Q1/Q2 だけ射影 (g・消滅判定は触らない; plan-7 M4)
+            condensationRealizabilityProject_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         });
         passiveFctFinishHistory_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, a, b, c);
     }
@@ -2046,6 +2049,8 @@ int main(void) {
         // 受動種経路の補正収支 (floor による保存量補正の体積積分; monitorInterval ごと)。scheme 0 / 受動種なしでは no-op。
         if (iStep % cfg.monitorInterval == 0) passiveFloorCorrLog_d_wrapper(cfg, iStep);
     }
+    // 終了時に受動種の収支を必ず出す (最終 step が monitorInterval に乗らないと末尾の補正が記録されない; plan-8 M1)
+    if (cfg.mainLoopCount() > 0 && ((cfg.mainLoopCount() - 1) % cfg.monitorInterval) != 0) passiveFloorCorrLog_d_wrapper(cfg, cfg.mainLoopCount() - 1);
 
     // 壁時計 (旧実装は clock() = CPU 時間で、GPU 待ちを含まなかった)。書式 "Time = %.3f s" は grep 互換のため維持。
     printf("Time = %.3f s (wall, %d steps, %.2f ms/step)\n", monitor.elapsedSeconds(), cfg.mainLoopCount(),

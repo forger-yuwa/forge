@@ -200,7 +200,7 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
                                  + ";dt=" + std::string(dtbuf) + ";bdfOrder=" + std::to_string(cfg.bdfOrder)
                                  + ";passiveScalarScheme=" + std::to_string(cfg.passiveScalarScheme)
                                  + ";speciesImplicitCoupling=" + std::to_string(cfg.speciesImplicitCoupling)
-                                 + ";passiveFct=" + std::to_string(passiveFctActive(cfg) ? 1 : 0);
+                                 + ";passiveFct=" + std::to_string(passiveFctConfigured(cfg) ? 1 : 0);
         ck.createAttribute<double>("totalTime", HighFive::DataSpace::From(tt)).write(tt);
         ck.createAttribute<double>("dt", HighFive::DataSpace::From(dtp)).write(dtp);
         ck.createAttribute<int>("nHistoryValid", HighFive::DataSpace::From(nh)).write(nh);

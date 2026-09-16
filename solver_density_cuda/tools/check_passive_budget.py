@@ -1,98 +1,143 @@
 #!/usr/bin/env python3
-"""受動種 (トレーサ・凝縮モーメント) の補正収支ゲート (plans/active/species-passive-scalar-unification.md §4.7 v5 / §6-2 / §6-6; codex plan-7 M1)。
+"""受動種 (トレーサ・凝縮モーメント) の補正収支ゲート (plans/active/species-passive-scalar-unification.md §4.7 v6 / §6-2 / §6-6; codex plan-7 M1, plan-8 M1/M2)。
 
-forge_run.log の最後の `[passive]` 行群 (monitor 区間ごとに出る全期間積算) から、受動種ごとに
-  floorCorr, limCorr, FCT の基点逸脱 (baseViol), ピン交換 (pinCorr), 履歴の非物理局所残り (remAbs), 実現可能性クランプの成分別 |Δ|
-の**総量比の合計**が閾値 (既定 1e-6) 以下であることを判定する。FAIL 条件: 合計 > tol、いずれかが NaN/Inf、
-FCT 記録が期待されるのに無い (`--expect-fct`; 既定は log の `[passiveFct] active` 行から自動判定)、最終 monitor 行が欠ける、総量 0 で補正が非ゼロ (log 側が rel=1 を出す)。
-使い方: check_passive_budget.py RUN_DIR [--tol 1e-6] [--allow-lim] [--expect-fct {auto,yes,no}]
+forge_run.log の最後の `[passive]` 行群 (monitor 区間ごと + 終了時の全期間積算) から、受動種ごとに
+  floorCorr + limCorr + FCT の基点逸脱 (baseViol) + ピン交換 (pinCorr) + 上限条件の逸脱 (upperViol) + 履歴の非物理局所残り (remAbs)
+  + 実現可能性クランプの成分別 |Δ| (同じ成分に合算)
+の**総量比の合計**が閾値 (既定 1e-6) 以下であることを判定する。さらに
+  - 全生値が有限、FCT 記録が期待されるのに無い (`[passiveFct] active` 行がある run) → FAIL
+  - 最後の収支記録の step が run の最終 step (residual_history.csv の最終 outer step + 1) に一致しない → FAIL (不完全な記録)
+  - 収支の閉合: 総増分 = −境界流束 + ソース履歴 + 残り (log の生値) の残差が総量比 tol を超える → FAIL
+  - 独立照合: (最終総量 − 最初の総量) と 総増分 の差が総量比 1e-5 を超える → FAIL
+  - 低次陰解の受入 (全期間の最大相対線形残差) と HO 残差の全期間最大 → tol_lin (既定 1e-4) を超えたら FAIL
+  - 総量 0 で補正が非ゼロ (log 側が rel=1) → FAIL
+使い方: check_passive_budget.py RUN_DIR [--tol 1e-6] [--tol-lin 1e-4] [--allow-lim] [--expect-fct {auto,yes,no}]
 """
-import argparse, math, os, re, sys
+import argparse, csv, math, os, re, sys
 
 
 def finite(*xs):
-    return all(math.isfinite(x) for x in xs)
+    return all(isinstance(x, (int, float)) and math.isfinite(x) for x in xs)
 
 
-def parse(log):
+RE_FLOOR = re.compile(r'\[passive\] step (\d+) floorCorr (\S+)\s+.*cumulative: lo (\S+) hi (\S+) abs (\S+) \| total (\S+) rel\(abs/total\) (\S+) \| limCorr per-step \S+ cumulative abs (\S+) signed (\S+) rel (\S+) cells (\S+) thetaMin\(interval\) (\S+) initialTotal (\S+)')
+RE_FCT = re.compile(r'\[passive\]\s+fctCorr (\S+)\s+cumulative: dropped antidiffusion (\S+) \(rel (\S+)\) faces (\S+) prelimited (\S+) pinCorr (\S+) \(rel (\S+)\) baseViol (\S+) \(rel (\S+)\) bndFluxSigned (\S+) bndDropped (\S+) upperViol (\S+) \(rel (\S+)\) \| budget: srcHist (\S+) remSigned (\S+) remAbs (\S+) \(rel (\S+)\) increment (\S+) \| qL rel-residual interval-max (\S+) run-max (\S+) \(sweeps last (\d+)\) HO residual rel interval-max (\S+) run-max (\S+)')
+RE_CLAMP = re.compile(r'\[passive\]\s+clampBudget species (\d+) cumulative .*: g (\S+)/(\S+) \((\S+)\) Q0 (\S+)/(\S+) \((\S+)\) Q1 (\S+)/(\S+) \((\S+)\) Q2 (\S+)/(\S+) \((\S+)\)')
+RE_REALIZ = re.compile(r'\[passive\] step (\d+) moment realizability corrections since last log: nearest-point (\d+), degenerate->monodisperse (\d+)')
+
+
+def fnum(x):
+    try:
+        return float(x)
+    except ValueError:
+        return float('nan')
+
+
+def parse_lines(lines):
     last, fct, clamp = {}, {}, {}
-    nproj = ndeg = 0; realiz = None; cfg_fct = None; dual = None; last_step = None
-    re_floor = re.compile(r'\[passive\] step (\d+) floorCorr (\S+) .*cumulative: lo (\S+) hi (\S+) abs (\S+) \| total (\S+) rel\(abs/total\) (\S+) \| limCorr per-step \S+ cumulative abs (\S+) signed (\S+) rel (\S+)')
-    re_fct = re.compile(r'\[passive\]\s+fctCorr (\S+) cumulative: dropped antidiffusion (\S+) \(rel (\S+)\) faces (\S+) prelimited (\S+) pinCorr (\S+) \(rel (\S+)\) baseViol (\S+) \(rel (\S+)\) bndFluxSigned (\S+) bndDropped (\S+) \| budget: srcHist (\S+) remSigned (\S+) remAbs (\S+) \(rel (\S+)\) increment (\S+) \| interval max: qL rel-residual (\S+) \(sweeps last (\d+)\) HO residual rel (\S+)')
-    re_clamp = re.compile(r'\[passive\]\s+clampBudget species (\d+) cumulative .*: g (\S+)/(\S+) \((\S+)\) Q0 (\S+)/(\S+) \((\S+)\) Q1 (\S+)/(\S+) \((\S+)\) Q2 (\S+)/(\S+) \((\S+)\)')
-    re_realiz = re.compile(r'\[passive\] step (\d+) moment realizability corrections since last log: nearest-point (\d+), degenerate->monodisperse (\d+)')
-    f = lambda x: float(x)
-    with open(log, errors='replace') as fh:
-        for line in fh:
-            if line.startswith('[passiveFct] active'): cfg_fct = 1; dual = True   # FCT が実際に作動した印 (wrapper が最初の補正で出す)
-            m = re_floor.search(line)
-            if m:
-                last[m.group(2)] = dict(step=int(m.group(1)), floor_abs=f(m.group(5)), total=f(m.group(6)), floor_rel=f(m.group(7)),
-                                        lim_abs=f(m.group(8)), lim_signed=f(m.group(9)), lim_rel=f(m.group(10)))
-                last_step = int(m.group(1)); continue
-            m = re_fct.search(line)
-            if m:
-                fct[m.group(1)] = dict(dropped=f(m.group(2)), dropped_rel=f(m.group(3)), pin=f(m.group(6)), pin_rel=f(m.group(7)), base=f(m.group(8)), base_rel=f(m.group(9)),
-                                       bnd_signed=f(m.group(10)), bnd_dropped=f(m.group(11)), src=f(m.group(12)), rem_signed=f(m.group(13)), rem_abs=f(m.group(14)),
-                                       rem_rel=f(m.group(15)), increment=f(m.group(16)), max_relres=f(m.group(17)), sweeps=int(m.group(18)), max_rh=f(m.group(19)))
-                continue
-            m = re_clamp.search(line)
-            if m:
-                clamp[int(m.group(1))] = dict(g=f(m.group(4)), Q0=f(m.group(7)), Q1=f(m.group(10)), Q2=f(m.group(13))); continue
-            m = re_realiz.search(line)
-            if m: nproj += int(m.group(2)); ndeg += int(m.group(3)); realiz = int(m.group(1))
-    return last, fct, clamp, nproj, ndeg, realiz, cfg_fct, dual, last_step
+    nproj = ndeg = 0; fct_active = False; last_step = None
+    for line in lines:
+        if line.startswith('[passiveFct] active'):
+            fct_active = True
+        m = RE_FLOOR.search(line)
+        if m:
+            last[m.group(2)] = dict(step=int(m.group(1)), floor_abs=fnum(m.group(5)), total=fnum(m.group(6)), floor_rel=fnum(m.group(7)),
+                                    lim_abs=fnum(m.group(8)), lim_signed=fnum(m.group(9)), lim_rel=fnum(m.group(10)), initial=fnum(m.group(13)))
+            last_step = int(m.group(1)); continue
+        m = RE_FCT.search(line)
+        if m:
+            g = m.groups()
+            fct[g[0]] = dict(dropped=fnum(g[1]), dropped_rel=fnum(g[2]), faces=fnum(g[3]), prelim=fnum(g[4]), pin=fnum(g[5]), pin_rel=fnum(g[6]),
+                             base=fnum(g[7]), base_rel=fnum(g[8]), bnd_signed=fnum(g[9]), bnd_dropped=fnum(g[10]), upper=fnum(g[11]), upper_rel=fnum(g[12]),
+                             src=fnum(g[13]), rem_signed=fnum(g[14]), rem_abs=fnum(g[15]), rem_rel=fnum(g[16]), increment=fnum(g[17]),
+                             relres_int=fnum(g[18]), relres_run=fnum(g[19]), sweeps=int(g[20]), rh_int=fnum(g[21]), rh_run=fnum(g[22]))
+            continue
+        m = RE_CLAMP.search(line)
+        if m:
+            g = m.groups()
+            clamp[int(g[0])] = dict(g_abs=fnum(g[2]), g=fnum(g[3]), Q0_abs=fnum(g[5]), Q0=fnum(g[6]), Q1_abs=fnum(g[8]), Q1=fnum(g[9]), Q2_abs=fnum(g[11]), Q2=fnum(g[12]))
+            continue
+        m = RE_REALIZ.search(line)
+        if m:
+            nproj += int(m.group(2)); ndeg += int(m.group(3))
+    return last, fct, clamp, nproj, ndeg, fct_active, last_step
 
 
-def evaluate(last, fct, clamp, tol, allow_lim, expect_fct, nproj, ndeg, out=print):
+def clamp_component(nm):
+    m = re.match(r'ro(g|Q0|Q1|Q2)_(\d+)$', nm)
+    return (int(m.group(2)), m.group(1)) if m else None
+
+
+def evaluate(last, fct, clamp, tol, tol_lin, allow_lim, expect_fct, final_step, out=print):
     ok = True
     if not last:
         out('no [passive] budget lines'); return False
     for nm, v in last.items():
-        vals = [v['floor_rel'], v['lim_rel'], v['total']]
-        fl = [] if finite(*vals) else ['NONFINITE']
+        fl = []
+        if not finite(v['floor_rel'], v['lim_rel'], v['total'], v['initial']): fl.append('NONFINITE')
+        if final_step is not None and v['step'] != final_step: fl.append(f"INCOMPLETE(last record step {v['step']} != final {final_step})")
         total = v['floor_rel'] + (0.0 if allow_lim else v['lim_rel'])
+        cc = clamp_component(nm)
+        if cc is not None and cc[0] in clamp:
+            crel = clamp[cc[0]][cc[1]]
+            if not finite(crel): fl.append('NONFINITE')
+            total += crel
         fdesc = ''
-        if expect_fct:
-            fe = fct.get(nm)
-            if fe is None: fl.append('NO_FCT_RECORD')
-            else:
-                fv = [fe['base_rel'], fe['pin_rel'], fe['rem_rel'], fe['max_relres'], fe['max_rh']]
-                if not finite(*fv): fl.append('NONFINITE')
-                total += fe['base_rel'] + fe['pin_rel'] + fe['rem_rel']
-                fdesc = (f" | fct: dropped rel {fe['dropped_rel']:.2e} base rel {fe['base_rel']:.2e} pin rel {fe['pin_rel']:.2e} remainder rel {fe['rem_rel']:.2e}"
-                         f" boundary flux(signed) {fe['bnd_signed']:.3e} qL max rel-res {fe['max_relres']:.2e} HO res {fe['max_rh']:.2e}")
-        if math.isfinite(total) and total > tol: fl.append('SUM>tol')
+        fe = fct.get(nm)
+        if expect_fct and fe is None:
+            fl.append('NO_FCT_RECORD')
+        if fe is not None:
+            if not finite(*fe.values()): fl.append('NONFINITE')
+            total += fe['base_rel'] + fe['pin_rel'] + fe['rem_rel'] + fe['upper_rel']
+            if not (fe['relres_run'] <= tol_lin): fl.append(f"LOWORDER_RESIDUAL({fe['relres_run']:.1e})")
+            if not (fe['rh_run'] <= tol_lin): fl.append(f"HO_RESIDUAL({fe['rh_run']:.1e})")
+            scale = max(abs(v['total']), abs(v['initial']), 1e-300)
+            closure = fe['increment'] + fe['bnd_signed'] - fe['src'] - fe['rem_signed']
+            if not (abs(closure) <= tol*scale + 1e-12*scale): fl.append(f"CLOSURE({closure/scale:.1e})")
+            indep = (v['total'] - v['initial']) - fe['increment']
+            if not (abs(indep) <= 1e-5*scale): fl.append(f"TOTAL_VS_INCREMENT({indep/scale:.1e})")
+            fdesc = (f" | fct: dropped rel {fe['dropped_rel']:.2e} base {fe['base_rel']:.2e} pin {fe['pin_rel']:.2e} upper {fe['upper_rel']:.2e} remainder {fe['rem_rel']:.2e}"
+                     f" boundary flux {fe['bnd_signed']:.3e} closure {closure/scale:.1e} total-vs-increment {indep/scale:.1e} qL res(run max) {fe['relres_run']:.1e} HO res(run max) {fe['rh_run']:.1e}")
+        if not (math.isfinite(total) and total <= tol): fl.append(f'SUM>tol({total:.1e})')
         st = 'FAIL(' + ','.join(fl) + ')' if fl else 'ok'
         ok = ok and not fl
-        out(f"  {nm:8s}: total {v['total']:.6e} floor rel {v['floor_rel']:.2e} lim rel {v['lim_rel']:.2e}{fdesc} | sum {total:.2e} -> {st}")
-    for sp, c in clamp.items():
-        vals = [c[k] for k in ('g', 'Q0', 'Q1', 'Q2')]
-        fl = [] if finite(*vals) else ['NONFINITE']
-        ssum = sum(vals)
-        if math.isfinite(ssum) and ssum > tol: fl.append('SUM>tol')
-        ok = ok and not fl
-        out(f"  clamp species {sp}: |Δ| rel g {c['g']:.2e} Q0 {c['Q0']:.2e} Q1 {c['Q1']:.2e} Q2 {c['Q2']:.2e} | sum {ssum:.2e} -> {'FAIL(' + ','.join(fl) + ')' if fl else 'ok'}")
-    out(f'  realizability corrections: nearest-point {nproj}, degenerate->monodisperse {ndeg}')
+        out(f"  {nm:8s}: total {v['total']:.6e} (initial {v['initial']:.6e}) floor {v['floor_rel']:.2e} lim {v['lim_rel']:.2e}{fdesc} | sum {total:.2e} -> {st}")
     return ok
+
+
+def final_step_of(run_dir):
+    p = os.path.join(run_dir, 'residual_history.csv')
+    if not os.path.exists(p):
+        return None
+    last = None
+    with open(p) as f:
+        for row in csv.DictReader(f):
+            if row.get('phase', 'outer_begin').startswith('outer'):
+                try: last = int(row['step'])
+                except (KeyError, ValueError): pass
+    return (last + 1) if last is not None else None
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('run_dir')
     ap.add_argument('--tol', type=float, default=1.0e-6)
+    ap.add_argument('--tol-lin', type=float, default=1.0e-4, help='低次陰解・HO 残差の全期間最大相対値の許容')
     ap.add_argument('--allow-lim', action='store_true', help='limCorr (定常の起動緩和) を合否に含めない')
     ap.add_argument('--expect-fct', choices=['auto', 'yes', 'no'], default='auto')
     a = ap.parse_args()
     log = os.path.join(a.run_dir, 'forge_run.log')
     if not os.path.exists(log):
         print(f'[{a.run_dir}] NO forge_run.log'); sys.exit(2)
-    last, fct, clamp, nproj, ndeg, realiz, cfg_fct, dual, last_step = parse(log)
+    with open(log, errors='replace') as f:
+        last, fct, clamp, nproj, ndeg, fct_active, last_step = parse_lines(f)
     if not last:
         print(f'[{a.run_dir}] no [passive] budget lines (passiveScalarScheme 1 の run のみ対象)'); sys.exit(2)
-    expect = (a.expect_fct == 'yes') or (a.expect_fct == 'auto' and cfg_fct == 1 and bool(dual))
-    print(f'passive budget gate for {a.run_dir} (tol {a.tol:g}, last monitor step {last_step}, FCT record expected: {expect})')
-    ok = evaluate(last, fct, clamp, a.tol, a.allow_lim, expect, nproj, ndeg)
+    expect = (a.expect_fct == 'yes') or (a.expect_fct == 'auto' and fct_active)
+    final_step = final_step_of(a.run_dir)
+    print(f'passive budget gate for {a.run_dir} (tol {a.tol:g}, tol_lin {a.tol_lin:g}, last record step {last_step}, final step {final_step}, FCT expected: {expect})')
+    ok = evaluate(last, fct, clamp, a.tol, a.tol_lin, a.allow_lim, expect, final_step)
+    print(f'  realizability corrections: nearest-point {nproj}, degenerate->monodisperse {ndeg}')
     print('VERDICT:', 'PASS' if ok else 'FAIL')
     sys.exit(0 if ok else 1)
 

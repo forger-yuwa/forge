@@ -169,7 +169,7 @@ int condRealizViolReadReset(int* degenerate)
 // Q1/Q2 だけの実現可能性射影 (EOS 更新後の T; g は不変) + primitive の再同期 (plan §4.7 v5, plan-7 M4)。
 void condensationRealizabilityProject_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
-    if (!condensationEnabled(var)) return;
+    if (!condensationEnabled(var) || cfg.condRealizProject == 0) return;
     const CondPropOpts opts = cond_prop_opts(cfg);
     const int useTab = (cfg.condFloat != 0 && g_condTables.valid) ? 1 : 0;
     for (int s = 0; s < var.nCondSpeciesRegistered; ++s) {
@@ -199,6 +199,9 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
     if (!condensationEnabled(var)) return;
 
     // 実現可能性クランプ (種ごと): 0 ≤ rog ≤ roY_w (carrier) / 0.99ρ (pure)、roQn ≥ 0。
+    // 実現可能性射影 (Q1/Q2) は定常・RK では各 step ここで、dual-time では sub-iter 内で作動させず物理 step 末尾 (EOS 更新後) の
+    // condensationRealizabilityProject_d_wrapper で 1 回だけ (sub-iter 内で毎回射影すると反復値を揺らして収束床を作る; 2026-09-17 run_0263–0269)。
+    const int doProject = (cfg.condRealizProject != 0 && !(cfg.unsteady == 1 && cfg.dualTime == 1)) ? 1 : 0;
     const bool carrier = (cfg.condGasSpecies >= 0);
     for (int s = 0; s < var.nCondSpeciesRegistered; ++s) {
         const std::string i = std::to_string(s);
@@ -213,7 +216,7 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
                 cfg.condEvaporation, (float)cprops.R, (float)cfg.condEvapRmin, (float)g_rm, (float)opts.Yw,
                 var.c_d["T"], var.c_d["P"], g_condTables, cprops,
                 var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i], condRealizViolCounter(),
-                condClampBudget(s), periodicNodeActive(cfg, msh) ? msh.periodicRoot_d : nullptr, var.c_d["volume"]);
+                condClampBudget(s), periodicNodeActive(cfg, msh) ? msh.periodicRoot_d : nullptr, var.c_d["volume"], doProject);
         } else
         cond_realizability_clamp_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells, var.c_d["ro"], roY_w,
@@ -221,7 +224,7 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
             cfg.condEvaporation, cfg.condModel, cprops.R, cfg.condEvapRmin, g_rm,
             var.c_d["T"], var.c_d["P"], opts,
             var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i], condRealizViolCounter(),
-            condClampBudget(s), periodicNodeActive(cfg, msh) ? msh.periodicRoot_d : nullptr, var.c_d["volume"]);
+            condClampBudget(s), periodicNodeActive(cfg, msh) ? msh.periodicRoot_d : nullptr, var.c_d["volume"], doProject);
     }
 
     {

@@ -10,7 +10,7 @@
 //     G^n, H^n = 前 step の増分率 I^n = (V/Δt)(q^n − q^{n−1}) の面流束/局所への厳密分解 (確定状態から作る)。BDF1 は a=1, c=0。
 //   q_H : sub-iter 終了状態 (終了状態で残差を再評価して ṁ, P_face, ソースを固定)
 //   q_L : 低次 BE 陰解  (V/Δt)(q_L − q^n) = Σ s F_L(q_L) + S^eff V  (Jacobi; 受入は線形残差)
-//   A^raw_f = F^eff_H,f − F_L,f(q_L)  (全輸送面)、基点 q_B = q_H − (Δt/V) Σ s A^raw = q_L + M^{-1}(r_L − r_H)
+//   A^raw_f = F^eff_H,f − F_L,f(q_L)  (全輸送面)、基点 q_B = q_H − (Δt/V) Σ s A^raw = q_L + M^{-1}(r_L − r_H/a)
 //   Zalesak (全輸送面; 境界は外部側 R=1): 前制限 A^pre → P± → 局所極値 {φ^n, φ_B} → Q±, R± → α_f
 //   補正 q_C = q_H − (Δt/V) Σ s (A^raw − α A^pre);  実現流束 G^{n+1}_f = F_L,f(q_L) + α_f A^pre_f、H^{n+1} = (V/Δt)(q_final − q^n) − Σ s G^{n+1}
 // 周期 node の gather (diag/nb/P±/base/corr/ΣsG は和, 極値は max/min) は呼び出し側 (wrapper) が行う。
@@ -115,7 +115,8 @@ __global__ void passive_fct_lo_diag_d(
 __global__ void passive_fct_lo_nb_d(
     geom_int nCells, geom_int nNormalPlanes, geom_int nNormalHaloPlanes, const geom_int* normal_halo_planes, const geom_int* plane_cells,
     const flow_float* ro, const flow_float* roN, const flow_float* meffFace, int isNode,
-    int nq, int qDiff, const flow_float* cdiff, flow_float** qL, flow_float** rophi, flow_float** qP, flow_float** nb)
+    int nq, int qDiff, const flow_float* cdiff, flow_float** qL, flow_float** rophi, flow_float** qP, flow_float** nb,
+    int bndMode)   // 0: 内部近傍 + 境界の定数 RHS (通常), 1: 内部近傍のみ (作用素 L の非対角), 2: 境界の定数 RHS のみ (plan-8 M3 の上限診断用)
 {
     const geom_int ih = blockDim.x*blockIdx.x + threadIdx.x;
     if (ih >= nNormalHaloPlanes) return;
@@ -124,6 +125,7 @@ __global__ void passive_fct_lo_nb_d(
     const geom_int ic1 = plane_cells[2*ip+1];
     const flow_float mdot = meffFace[ip];
     if (ic1 < nCells && ic0 < nCells) {
+        if (bndMode == 2) return;
         const geom_int up = (mdot >= 0.0f) ? ic0 : ic1, dn = (mdot >= 0.0f) ? ic1 : ic0;
         const flow_float w = fabsf(mdot) / max(ro[up], (flow_float)1.0e-30);
         for (int q = 0; q < nq; ++q) atomicAdd(&nb[q][dn], w * qL[q][up]);
@@ -135,6 +137,7 @@ __global__ void passive_fct_lo_nb_d(
             }
         }
     } else if (ic0 < nCells && mdot < 0.0f) {
+        if (bndMode == 1) return;
         if (isNode != 0) { const flow_float w = -mdot / max(roN[ic0], (flow_float)1.0e-30); for (int q = 0; q < nq; ++q) atomicAdd(&nb[q][ic0], w * qP[q][ic0]); }   // 許容な外部状態 φ^n_own
         else             { const flow_float w = -mdot / max(ro[ic1], (flow_float)1.0e-30);  for (int q = 0; q < nq; ++q) atomicAdd(&nb[q][ic0], w * rophi[q][ic1]); }
     }
@@ -426,16 +429,17 @@ __global__ void passive_fct_density_closure_d(geom_int nCells, const geom_float*
     if (e != 0.0) atomicAdd(&out2[0], e*e);
     if (sc != 0.0) atomicAdd(&out2[1], sc*sc);
 }
+//   Lρ = D ρ − nbInt(ρ) (内部近傍のみ), f_full = rhs + nbBnd (境界の定数 RHS |ṁ^eff| φ^n_own; トレーサ q の実値)。逸脱 (Lρ − f_full < 0) の量 (·Δt は呼び出し側) と個数。
 __global__ void passive_fct_upper_margin_d(geom_int nCells, const geom_float* vol, flow_float oneOverDt, const flow_float* ro,
-                                           const flow_float* diagAdv, const flow_float* diagDiff, int q, const flow_float* nbRho, flow_float** rhs,
+                                           const flow_float* diagAdv, const flow_float* diagDiff, int q, const flow_float* nbIntRho, const flow_float* nbBndQ, flow_float** rhs,
                                            const flow_float* pin, const geom_int* root, double* out)
 {
     const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     if (root != nullptr && root[ic] != ic) return;
     if (pin != nullptr && pin[ic] == (flow_float)1.0) return;
-    const double Lrho = ((double)oneOverDt*(double)vol[ic] + (double)diagAdv[ic] + (diagDiff != nullptr ? (double)diagDiff[ic] : 0.0))*(double)ro[ic] - (double)nbRho[ic];
-    const double m = Lrho - (double)rhs[q][ic];
+    const double Lrho = ((double)oneOverDt*(double)vol[ic] + (double)diagAdv[ic] + (diagDiff != nullptr ? (double)diagDiff[ic] : 0.0))*(double)ro[ic] - (double)nbIntRho[ic];
+    const double m = Lrho - ((double)rhs[q][ic] + (nbBndQ != nullptr ? (double)nbBndQ[ic] : 0.0));
     if (m < 0.0) { atomicAdd(&out[0], -m); atomicAdd(&out[1], 1.0); }
 }
 __global__ void passive_fct_div_meff_d(geom_int nCells, geom_int nNormalHaloPlanes, const geom_int* normal_halo_planes, const geom_int* plane_cells,

@@ -102,6 +102,7 @@ void passiveAddUnsteadyTimeTerm_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cf
 // ===== dual-time の物理 step 末尾の保存的 FCT 補正 (§4.7; passiveFct) =====
 // 有効判定: scheme 1 かつ passiveFct 1 かつ SLAU S3 かつ timeIntegration 11 + unsteady 1 + dualTime 1。
 bool passiveFctActive(const solverConfig& cfg);
+bool passiveFctConfigured(const solverConfig& cfg);   // 設定だけの判定 (checkpoint layout / restart 契約用)
 // sub-iter 終了後、終了状態で assembleResidual を再評価してから 1 回呼ぶ (a,b,c は BDF 係数)。res_*/src_jac_* を上書きする (凍結ソースの再評価)。補正後の ρφ は周期 mirror 済み。
 // 呼び出し側は続けて入口 Dirichlet の再適用 → floor (passiveBounds) → 実現可能性クランプ → primitive を行う。
 void passiveFctCorrect_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, flow_float a, flow_float b, flow_float c);
