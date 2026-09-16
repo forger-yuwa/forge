@@ -79,10 +79,10 @@ public:
                                      // 詳細: plans/accepted/thermophysics-species-implicit-coupling.md。
     int implicitSolvePrecision = 0; // block-DPLUR 線形 solve の内部精度。0: float (既定・高速), 1: double。
     // 受動スカラ (排気トレーサ roXi・凝縮モーメント) の輸送経路 (plans/active/species-passive-scalar-unification.md §4.1)。
-    //   0: 旧汎用スカラ経路 (scalarTransport_d 1 次風上・拡散なし・緩和なし; 既定・ビット不変)
+    //   0: 旧汎用スカラ経路 (scalarTransport_d 1 次風上・拡散なし・緩和なし; A/B 用・旧挙動とビット不変)
     //   1: 化学種経路 (species カーネルの受動種: S3 面再構成 [speciesFaceReconstruction>=2, SLAU]・トレーサ Fick 拡散・
     //      入口ピン・周期 gather/mirror・更新緩和 passiveImplicitRelax・更新確定時の上下限 0<=ρξ<=ρ / ρφ>=0 と補正収支診断)
-    int passiveScalarScheme = 1;
+    int passiveScalarScheme = 1;   // 既定 1 (2026-09-17, 検証 §6 完了後に変更)
     // 受動種 segregated point-implicit 更新の増分緩和 (passiveScalarScheme 1 のみ)。<0 で implicitRelax に倒置 (既定)。
     flow_float passiveImplicitRelax = -1.0;
     // 化学種 segregated point-implicit 更新 (speciesImplicitCoupling 0, timeIntegration 11) の増分緩和。既定 1.0 = 現行と同じ写像。
