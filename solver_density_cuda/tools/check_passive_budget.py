@@ -2,7 +2,7 @@
 """受動種 (トレーサ・凝縮モーメント) の補正収支ゲート (plans/active/species-passive-scalar-unification.md §4.7 v6 / §6-2 / §6-6; codex plan-7 M1, plan-8 M1/M2)。
 
 forge_run.log の最後の `[passive]` 行群 (monitor 区間ごと + 終了時の全期間積算) から、受動種ごとに
-  floorCorr + limCorr + FCT の基点逸脱 (baseViol) + ピン交換 (pinCorr) + 上限条件の逸脱 (upperViol) + 履歴の非物理局所残り (remAbs)
+  floorCorr + limCorr + FCT の基点逸脱 (baseViol) + ピン交換 (pinCorr) + 上限条件の逸脱 (upperViol) + 履歴の非物理局所残り (remAbs; float32 では step 比例の丸め床を引いた分)
   + 実現可能性クランプの成分別 |Δ| (同じ成分に合算)
 の**総量比の合計**が閾値 (既定 1e-6) 以下であることを判定する。さらに
   - 全生値が有限 (solver 側の非有限フラグも)、FCT 記録・モーメントのクランプ記録が同じ step に無い → FAIL
@@ -145,8 +145,11 @@ def evaluate(last, fct, clamp, tol, tol_lin, mode, required, expect_fct, fct_act
                 if fe.get('nonfinite', -1) < 0: fl.append('NONFINITE_FLAG_MISSING')
                 elif fe['nonfinite'] != 0: fl.append('SOLVER_NONFINITE')
                 if fe['step'] != v['step']: fl.append('FCT_RECORD_STEP_MISMATCH')
-                total += fe['base_rel'] + fe['pin_rel'] + fe['upper_rel']
-                # |H_rem| は毎 step の float 丸め (符号がランダム) を絶対値で積算するので float 床を許容; 符号付き残りは閉合で検査
+                # plan §4.6/§6-2: 補正の**総量比の合計**に |H_rem| も入れる (codex result-6 M1: 別枠比較だけだと
+                # floor 6e-7 + |H_rem| 6e-7 = 1.2e-6 が合格していた)。float32 の step 比例の丸め床は **|H_rem| だけ**に
+                # 適用し (状態更新の丸めがそこに積算されるため)、他の補正項は緩めない。
+                rem_eff = max(0.0, fe['rem_rel'] - max(0.0, tol_abs - tol))
+                total += fe['base_rel'] + fe['pin_rel'] + fe['upper_rel'] + rem_eff
                 if not (fe['rem_rel'] <= tol_abs): fl.append(f"REMAINDER_ABS({fe['rem_rel']:.1e}>{tol_abs:.1e})")
                 if not (abs(fe['rem_signed'])/scale <= tol_float): fl.append(f"REMAINDER_SIGNED({fe['rem_signed']/scale:.1e}>{tol_float:.1e})")
                 if not (fe['relres_run'] <= tol_lin): fl.append(f"LOWORDER_RESIDUAL({fe['relres_run']:.1e})")
@@ -157,7 +160,7 @@ def evaluate(last, fct, clamp, tol, tol_lin, mode, required, expect_fct, fct_act
                 # 独立照合は plan §6-2 の固定 tol (1e-6)。step 比例の丸め許容は float32 の状態更新に由来する項 (|H_rem| と
                 # 符号付き H_rem・保存) に限る (codex result-3 M4: 拡大した許容をここに使うと総量ずれを見逃す)
                 if not (abs(indep) <= tol*scale): fl.append(f"TOTAL_VS_INCREMENT({indep/scale:.1e}>{tol:.1e})")
-                fdesc = (f" | fct: dropped rel {fe['dropped_rel']:.2e} base {fe['base_rel']:.2e} pin {fe['pin_rel']:.2e} upper {fe['upper_rel']:.2e} remainder {fe['rem_rel']:.2e}"
+                fdesc = (f" | fct: dropped rel {fe['dropped_rel']:.2e} base {fe['base_rel']:.2e} pin {fe['pin_rel']:.2e} upper {fe['upper_rel']:.2e} remainder {fe['rem_rel']:.2e} (in sum {rem_eff:.2e})"
                          f" boundary flux {fe['bnd_signed']:.3e} closure {closure/scale:.1e} total-vs-increment {indep/scale:.1e} qL res(run max) {fe['relres_run']:.1e} HO res(run max) {fe['rh_run']:.1e}")
         elif mode == 'conservative':
             drift = (v['total'] - v['initial'])/scale

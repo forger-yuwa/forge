@@ -75,6 +75,9 @@ check(run(log(fct_step=91)) is False, 'FCT record only at step 91 with floor at 
 check(run(log(nm='roQ1_0', clamp='0.000000e+00', clamp_step=91)) is False, 'clamp record at an older step must FAIL')
 check(run(log(tot='1.000005e+00', init='1.000000e+00')) is False, 'total drift 5e-6 with zero increment must FAIL (1e-6 gate)')
 check(run(log(remrel='2.000000e-06')) is False, 'history remainder above tol must FAIL')
+# codex result-6 M1: |H_rem| は合計に入る (floor 6e-7 + remainder 6e-7 = 1.2e-6 > 1e-6)
+check(run(log(frel='6.000000e-07', fabs='6.000000e-07', remrel='6.000000e-07')) is False,
+      'floor 6e-7 plus history remainder 6e-7 must FAIL (the remainder belongs in the correction sum)')
 check(run(log(nm='roQ1_0', clamp='2.000000e-06')) is False, 'clamp budget above tol must FAIL')
 # 閉合は成立するが総量が増分と合わない
 check(run(log(tot='1.000010e+00', init='1.000000e+00', inc='1.000000e-05', src='1.000000e-05')) is True, 'consistent source-driven increase must PASS')
