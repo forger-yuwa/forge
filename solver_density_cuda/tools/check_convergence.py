@@ -22,6 +22,13 @@ forge の run ディレクトリの residual_history.csv を読み、**全保存
      成分があり [node の準1D IC は Uy≈0]、初期比だと誤って停滞判定になる)。
   - 末尾 (--tail, 既定 20%) が rising でない (flat/falling)。
 "all-zero" 列 (例: 2D の rms_roUz) は判定から除外する。
+
+収束場からの restart (交差 restart など) 用: --from-floor REF_RUN (別名 --reference-floor)
+  ピークからの低下桁数は収束場から再開した run では原理的に 0 なので、代わりに **参照 run の末尾床**
+  (REF_RUN の residual_history.csv の末尾 --tail 平均) を基準に、各残差列が run の全期間で床の
+  --floor-factor 倍 (既定 1.5) 以内に留まり (ピーク ≤ factor×床)、末尾平均も factor×床 以内なら PASS。
+  列ごとの床比 (末尾平均/床, ピーク/床) を表示する。NaN/Inf は DIVERGED、超過は NOT CONVERGED。
+  例: python3 tools/check_convergence.py --from-floor run_0476 run_0478 run_0479
 """
 import csv, math, sys, argparse, os
 
@@ -110,18 +117,87 @@ def analyze(path, min_drop, tail_frac):
     return laststep, report, ok, any_nan, any_stalled, any_converging
 
 
+def reference_floor(path, tail_frac):
+    """参照 run の各残差列の末尾床 (末尾 tail_frac の |値| 平均)。all-zero 列は含めない。"""
+    rows, cols = load_series(path)
+    floor = {}
+    for c, ser in cols.items():
+        if not any(v != 0.0 for v in ser):
+            continue
+        a = ser[int(len(ser) * (1 - tail_frac)):]
+        floor[c] = sum(abs(x) for x in a) / len(a)
+    return floor
+
+
+def analyze_from_floor(path, floor, factor, tail_frac):
+    """収束場からの restart 判定: 全期間ピークと末尾平均が参照床の factor 倍以内なら列 PASS。"""
+    rows, cols = load_series(path)
+    if not rows:
+        return None
+    laststep = rows[-1].get('step', '?')
+    report = {}
+    ok = True
+    any_nan = False
+    for c, ser in cols.items():
+        if not any(v != 0.0 for v in ser):
+            report[c] = ('all-zero (inactive, skip)', True)
+            continue
+        if any(math.isnan(v) or math.isinf(v) for v in ser):
+            report[c] = ('NaN/Inf present  <-- DIVERGED', False)
+            ok = False; any_nan = True
+            continue
+        if c not in floor:
+            report[c] = ('no reference floor for this column (skip)', True)
+            continue
+        peak = max(abs(x) for x in ser)
+        a = ser[int(len(ser) * (1 - tail_frac)):]
+        tail_mean = sum(abs(x) for x in a) / len(a)
+        r_tail = tail_mean / floor[c] if floor[c] > 0 else float('inf')
+        r_peak = peak / floor[c] if floor[c] > 0 else float('inf')
+        col_ok = (r_tail <= factor) and (r_peak <= factor)
+        ok = ok and col_ok
+        status = '' if col_ok else ('  <-- ABOVE FLOOR (peak)' if r_peak > factor else '  <-- ABOVE FLOOR (tail)')
+        report[c] = (f"ref_floor={floor[c]:.2e} tail={tail_mean:.2e} (x{r_tail:.2f}) peak={peak:.2e} (x{r_peak:.2f}) "
+                     f"fin={ser[-1]:.2e}{status}", col_ok)
+    return laststep, report, ok, any_nan
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('run_dirs', nargs='+')
     ap.add_argument('--drop', type=float, default=3.0, help='required orders-of-magnitude drop')
     ap.add_argument('--tail', type=float, default=0.2, help='tail fraction for trend check')
+    ap.add_argument('--from-floor', '--reference-floor', dest='from_floor', default=None, metavar='REF_RUN',
+                    help='収束場からの restart 判定: REF_RUN の末尾床 (tail 平均) の --floor-factor 倍以内に全期間留まれば PASS')
+    ap.add_argument('--floor-factor', type=float, default=1.5, help='--from-floor の許容倍率 (既定 1.5)')
     args = ap.parse_args()
+
+    floor = None
+    if args.from_floor:
+        ref_path = args.from_floor if args.from_floor.endswith('.csv') else os.path.join(args.from_floor, 'residual_history.csv')
+        if not os.path.exists(ref_path):
+            print(f"[{args.from_floor}] NO residual_history.csv (reference)"); sys.exit(1)
+        floor = reference_floor(ref_path, args.tail)
+        print(f"reference floor from {args.from_floor} (tail {args.tail:.0%} mean), factor {args.floor_factor}")
 
     all_pass = True
     for rd in args.run_dirs:
         path = rd if rd.endswith('.csv') else os.path.join(rd, 'residual_history.csv')
         if not os.path.exists(path):
             print(f"[{rd}] NO residual_history.csv"); all_pass = False; continue
+        if floor is not None:
+            res = analyze_from_floor(path, floor, args.floor_factor, args.tail)
+            if res is None:
+                print(f"[{rd}] empty residual file"); all_pass = False; continue
+            laststep, report, ok, any_nan = res
+            verdict = ('PASS (within %.1fx of reference floor %s)' % (args.floor_factor, args.from_floor) if ok
+                       else 'DIVERGED (NaN/Inf)' if any_nan
+                       else 'NOT CONVERGED (residual left the reference floor)')
+            print(f"\n=== {rd}  [last step {laststep}]  -> {verdict} ===")
+            for c, (msg, _) in report.items():
+                print(f"  {c:12s}: {msg}")
+            all_pass = all_pass and ok
+            continue
         res = analyze(path, args.drop, args.tail)
         if res is None:
             print(f"[{rd}] empty residual file"); all_pass = False; continue

@@ -176,9 +176,9 @@
 | 11 | (M3) checkpoint: dt・生成方式 (scheme) を layout に入れ整合しなければ全系 BDF1; 非定常 restart 試験 5 種 | forge + 検証 |
 | 12 | (M4) 凝縮 dual-time: sub-iter 収束の改善 (擬似 CFL / モーメント DPLUR) → 全列 ≥2 桁、モーメント込み 3 水準次数、sub-iter 誤差の分離 | forge + 検証 (必須) |
 | 13 | (M5) 受動種の上下限を増分スケーリング (θ_u 型) で守る; 累積 floor 補正 ≤1e-4 を再検証 (`run_0476`/`0494`/Arthur S3) | forge + 検証 |
-| 14 | (M6) `implicitRelax` 0.7/1.0 の交差 restart (coupling 1 に効く緩和)、収束場 restart の判定ツール (`check_convergence --from-floor`)、case/44 README の表現 | 検証エージェント実施中 (2026-09-17; #16 も) |
+| 14 | ~~(M6) `implicitRelax` 0.7/1.0 の交差 restart、収束場 restart の判定ツール、case/44 README の表現~~ | 済 (2026-09-17): 緩和キーの実効経路を確認 (coupling 0 → `speciesImplicitRelax`, coupling 1 → `implicitRelax`, 受動 point-implicit/DPLUR → `passiveImplicitRelax`); case/16 `run_0497` (`implicitRelax 1.0` + `passiveImplicitRelax 1.0` の交差 restart) は `run_0476` と反復ノイズ内 (Y0 1.9e-7, ξ 1.5e-5, ro 1.3e-6, floor 補正 0); `check_convergence.py --from-floor REF` (参照 run の末尾 20 % 床に対し peak/tail ≤1.5×) を追加し `run_0478`/`0479`/`0480`/`0497` は **PASS (within 1.5x of reference floor)**; case/44 README の表現を準定常量の比較に限定 |
 | 15 | ~~(m1) solver-settings / recommended-settings / thermophysics の旧記述を統一~~ | 済 (2026-09-17, a6892e13) |
-| 16 | (m2) §5.1・§10 (ψ 切替)・case/09/16 README の番号同期 | docs |
+| 16 | ~~(m2) §5.1・§10 (ψ 切替)・case/09/16 README の番号同期~~ | 済 (2026-09-17): README の改番前番号を修正 (case/09 時間次数 run_0080–0086, case/16 dual-time run_0486–0490)、全引用 run の実在を確認; ψ_P vs ψ_ρ は §10 で「ψ_P を採用 (無次元化 Venkat; 固定点ケースで補正 0)」として決着 |
 | 8 | 検証 (§6 1–8, node のみ) と codex result レビュー | §6-1/2/7 (短 run) Phase A; §6-3 拡散 (解析解 0.23 %, 2 次収束; 等拡散一致 [コア 2.7e-6] / 混合平均非一致 [3.7e-3 一定] 済), §6-4 固定点, §6-5 凝縮回帰 (S3 は固定点を動かす), §6-7 24000 step は済 (§9); §6-6 dual-time は Phase B 済。**既定 `passiveScalarScheme` を 1 に変更 (2026-09-17)**。次: codex result レビュー |
 
 ## 6. 検証 (node のみ; cell はユーザ指示で対象外)
@@ -240,6 +240,7 @@
 
 ## 9. 変更ログ
 
+- `2026-09-17` — result-1 M6/m2 対応: 実効緩和の交差 restart `run_0497` (反復ノイズ内)、`check_convergence.py --from-floor` (収束場 restart の判定; `run_0478`/`0479`/`0480`/`0497` PASS)、README 番号・表現の同期。
 - `2026-09-17` — codex result レビュー 1 回目 **NO-GO (M6/m2)** を全採用 (§6.1, §5.1 #9–#16)。
 - `2026-09-17` — 既定 `passiveScalarScheme 1` で `build-passive` と既定 `build/` をフルリビルド (HEAD 33dc6588 のソルバソースと一致)。単体: `test_passive_scalar` / `test_cond_limiter_steady` / `test_cond_float_device` / `test_species_db_host` (31) / `test_solver_config_species` (15; `tracer × dualTime` は scheme 0 明示時のみエラーに試験を更新) / `test_convert_species_field_fail` (21) / `test_tpgas_lowT` (5) / `test_interp_field_tracer` (3) 全 PASS。既定キー確認 case/44 `run_0231` (キー無し) vs `run_0232` (明示 1): 差は node 反復ノイズ内 (ro 2.7e-6, g 9.6e-5)。**codex result レビューへ**。
 - `2026-09-17` — §6-3 等拡散一致/混合平均非一致 (case/16 `run_0494`/`0495`/`0496`, node NS 層流 [MIXDRY, H2O] + トレーサ, 入口ステップ Y_H2O 0.05 ↔ ξ 1, 定数 Sc 0.7 共有, SFR 0, coupling 0, relax 1.0): 定数 Sc では |Y_H2O/0.05 − ξ| が残差とともに単調減少 (24000 step: max 4.8e-4 / 平均 4.8e-5 / コア 2.3e-5 → 72000 step: max 4.6e-5 [入口角の壁列] / 平均 4.7e-6 / **コア 2.7e-6**)、両スカラの残差はスケール後 0.4 % で一致 (rms_roXi/20 = rms_roY1) = 移流・拡散・更新写像が同一で、残る差は化学種だけの再正規化の過渡分; `run_0494` PASS (全列 3.2–4.0 桁)。混合平均拡散 (`speciesDiffusionMethod 1`, `run_0495`): 差は界面で 3.66e-3 に**一定** (減衰しない) = 差動拡散による正しい非一致。
@@ -259,7 +260,7 @@
 
 - ~~S3 を既定にするか~~ 決着 (2026-09-17, §9): 既定は SFR 0 のまま。S3 は onset を 0.2 r_t / 0.7 mm 下流に動かす (前線の数値拡散減) が Wysłouzil では実験からさらに遠ざかる。onset の実験差 (~5 mm) の主因は移流次数ではなく核生成モデル側 (plan condensation-followups)。
 - k/ω も化学種経路 (2 次) に乗せるか: ユーザは「全部化学種の経路」と述べたが、SST の生産項・壁関数との結合の検証が別途要るので本 plan では見送り、後続とする (要確認)。
-- ψ_P (受動種ごとの Venkat) と ψ_ρ のどちらが有界性と安定性で優れるかは §6-2/6-4 で実測して決める (両方を切替可能に実装)。
+- ~~ψ_P (受動種ごとの Venkat) と ψ_ρ のどちらが有界性と安定性で優れるか~~ 決着 (2026-09-17): 受動種は ψ_P (セル局所スケールで無次元化した Venkat) を採用。非一様組成の固定点ケース (case/16 `run_0476` 系) で floor 補正 0・交差 restart が反復ノイズ内、S3 の 1-D ステップで遷移幅 4 セル。ψ_ρ 版は実装していない (化学種との整合は不要)。
 - ~~S3 の node 発散が coupling 1 (scalar-DPLUR) 固有だった場合の contingency~~ 決着 (2026-09-17, §9): 逆で coupling 0 固有。受動種も DPLUR sweep に乗せる (§4.2)。
 - 発達中の凝縮 dual-time で sub-iter 残差が 2 桁落ちない列 (Q0, 流れ, 化学種; case/44 `run_0229`/`0230`) は擬似時間反復の床 (cfl_pseudo 2 + θ_u クランプ) で、nSub では解消しない。cfl_pseudo 上げ・`passiveImplicitCoupling 1`・更新クランプの dual-time 挙動の切り分けは後続 (時間精度の判定は nSub ≥20 で行う)。
 - node TP-SST の case/28 baseline 発散 (上境界 `outlet_statPress`/軸, rms_roe 主導, restart 後 ~1500–3000 step; `thermoHrefTemp` 無し・絶対基準 h が候補) は本 plan の外 → followups へ登録 (S3 の定量 A/B をこの case でやる前に要解決)。
