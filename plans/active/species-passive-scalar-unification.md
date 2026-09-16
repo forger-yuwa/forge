@@ -171,13 +171,13 @@
 | 5 | ~~受動種基盤 (ステップ 3) + S3 安定化キー (ステップ 4)~~ | 済 (2026-09-17, Phase A; §9): `passiveTransport_d.cuh`/`passiveKernels_d.cuh`/`passiveLimiter_d.cuh` (受動種ポインタ配列、化学種カーネル共用、無次元化 Venkat、`passive_bounds_d` 収支、`passive_diffusion_d`)、SLAU S3 分岐の受動種面値、周期 (勾配除外・`transport_diag` gather・DPLUR dq mirror・coupling 2 クロス項の独立バッファ)、キー `passiveScalarScheme`/`passiveImplicitRelax`/`speciesImplicitRelax`/`scalarCflMax`/`passiveImplicitCoupling`、単体 `test_passive_scalar.cu` ALL PASS。**残**: `speciesImplicitRelax`/`scalarCflMax` の効果 run、S3 長時間 run での上限クランプ無作用の確認 |
 | 6 | ~~S3 本番化 (ステップ 4)~~ | 済 (2026-09-17; §9 検証): 非一様組成 PASS ケース case/16 `run_0476` (S3, PASS 全列 3.3–4.7 桁, Y_H2O 0.020–0.060, ξ 1e-4–1.0 の勾配を保持, R2−R1 はノイズの 1850 倍) からの交差 restart (cfl 6 + relax 0.7 `run_0478`, relax 1.0 `run_0479`, scalarCflMax 2 `run_0480`) が反復ノイズ内・floor 補正 0。S3 の本番推奨組合せ = SFR 2 + `speciesImplicitCoupling 1` + pc1 + relax 0.7 (solver-settings に記載)。**既定は SFR 0 のまま** (S3 は凝縮の固定点を動かす; §10) |
 | 7 | ~~dual-time 移植 + 受動種 BDF (ステップ 5)~~ | 済 (2026-09-17, Phase B; §9)。残件 3 点も済: coupling 1/2 (case/16 `run_0491`/`0492`: ΣY 7e-8、sub-iter 2.4 桁、coupling 0 との差 1e-5 級 = 反復ノイズ)、ピン行 (case/16 `run_0493`, case/44 `run_0228`: BDF + 再ピン後の res = 0.0、入口値差 0.0)、過渡 IC 凝縮 dual-time (case/44 `run_0226`/`0227`: g/Q2/Q1 ≥2 桁、**Q0 1.4–1.8 桁・流れ/化学種 0.95–1.9 桁は nSub 10 では未達** → nSub 20 の再 run は §6-6 の残)。|
-| 9 | (result-1 M1) 周期 DPLUR の近傍寄与を独立バッファで周期群合算 + seam/辺/角を横切る非一様組成/トレーサの陰解法試験 | forge |
+| 9 | (result-1 M1) 周期 DPLUR の近傍寄与を独立バッファで周期群合算 + seam/辺/角を横切る非一様組成/トレーサの陰解法試験 | forge (実装中 2026-09-17; #10–#13 と同じエージェント) |
 | 10 | (M2) 保存量・補正収支の積分を周期 root のみ合併体積で + seam 局在補正の収支試験、既存判定の再集計 | forge + 検証 |
 | 11 | (M3) checkpoint: dt・生成方式 (scheme) を layout に入れ整合しなければ全系 BDF1; 非定常 restart 試験 5 種 | forge + 検証 |
 | 12 | (M4) 凝縮 dual-time: sub-iter 収束の改善 (擬似 CFL / モーメント DPLUR) → 全列 ≥2 桁、モーメント込み 3 水準次数、sub-iter 誤差の分離 | forge + 検証 (必須) |
 | 13 | (M5) 受動種の上下限を増分スケーリング (θ_u 型) で守る; 累積 floor 補正 ≤1e-4 を再検証 (`run_0476`/`0494`/Arthur S3) | forge + 検証 |
-| 14 | (M6) `implicitRelax` 0.7/1.0 の交差 restart (coupling 1 に効く緩和)、収束場 restart の判定ツール (`check_convergence --from-floor`)、case/44 README の表現 | 検証 + tools |
-| 15 | (m1) solver-settings / recommended-settings / thermophysics の旧記述を統一 | docs |
+| 14 | (M6) `implicitRelax` 0.7/1.0 の交差 restart (coupling 1 に効く緩和)、収束場 restart の判定ツール (`check_convergence --from-floor`)、case/44 README の表現 | 検証エージェント実施中 (2026-09-17; #16 も) |
+| 15 | ~~(m1) solver-settings / recommended-settings / thermophysics の旧記述を統一~~ | 済 (2026-09-17, a6892e13) |
 | 16 | (m2) §5.1・§10 (ψ 切替)・case/09/16 README の番号同期 | docs |
 | 8 | 検証 (§6 1–8, node のみ) と codex result レビュー | §6-1/2/7 (短 run) Phase A; §6-3 拡散 (解析解 0.23 %, 2 次収束; 等拡散一致 [コア 2.7e-6] / 混合平均非一致 [3.7e-3 一定] 済), §6-4 固定点, §6-5 凝縮回帰 (S3 は固定点を動かす), §6-7 24000 step は済 (§9); §6-6 dual-time は Phase B 済。**既定 `passiveScalarScheme` を 1 に変更 (2026-09-17)**。次: codex result レビュー |
 
