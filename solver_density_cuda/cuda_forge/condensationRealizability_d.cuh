@@ -24,7 +24,13 @@ __host__ __device__ inline int cond_realizability_project(double& x, double& y, 
     // 最近点の候補 (plan-8 M4: 小さい正の状態でも連続・最小): 単純クランプ候補 (x, clamp(y)), (clamp(x), y) を上界として持ち、
     // 境界 y=√t / y=t² 上の最近点を局所スケールの区間 [0, hi] で相対停止の黄金分割で探し、最小距離の候補を採る。
     const double x0 = x, y0 = y;
-    double bx = x0, by = y0, bd = 1.0e300;
+    // 初期候補は**必ず許容領域内の点** (単純クランプ) にする (codex result-3 の追跡で見つけた欠陥: x, y が極端に大きいと
+    // すべての候補で距離が inf に overflow し、どれも採用されずに違反状態のまま「射影した」と返っていた。
+    // 例: x=1.7e155, y=1.7e116 の塵セル [rog 1e-193] が case/44 run_0415 の確定場に残った)。
+    double bx = x0, by = y0;
+    bx = fmin(fmax(bx, 0.0), 1.0); by = fmin(fmax(by, bx*bx), sqrt(bx));
+    double bd = (bx-x0)*(bx-x0) + (by-y0)*(by-y0);
+    if (!(bd == bd) || bd > 1.0e300) bd = 1.0e300;   // 距離が overflow しても後続候補と比較できるようにする
     auto consider = [&](double cx, double cy) {
         cx = fmin(fmax(cx, 0.0), 1.0); cy = fmin(fmax(cy, cx*cx), sqrt(cx));
         const double d = (cx-x0)*(cx-x0) + (cy-y0)*(cy-y0);

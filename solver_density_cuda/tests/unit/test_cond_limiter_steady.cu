@@ -406,6 +406,19 @@ static void test_realizability_projection()
         if (c.x > 0.0 && c.expectChange && c.expectRelCorr < 1.0) CHECK(hv[1] == 0, "(l) %s: small positive state must not be reinitialised", c.name);
         CHECK(xn <= 1.0 + 1e-6 && yn >= xn*xn*(1 - 1e-6) && yn*yn <= xn*(1 + 1e-6), "(l) %s: result outside admissible region", c.name);
     }
+    // 極端な (x, y): 候補距離が overflow しても必ず許容領域内へ戻ること (codex result-3 の追跡で見つけた欠陥;
+    // case/44 run_0415 の確定場に x=1.7e155 の塵セルが残っていた)
+    {
+        const double ex[][2] = {{1.68e155, 1.68e116}, {5.2e152, 4.2e86}, {1.0e100, 1.0e-5}, {1.0e200, 1.0e200}};
+        for (const auto& e : ex) {
+            double x = e[0], y = e[1];
+            const int rc = cond_realizability_project(x, y, 1.0e-6);
+            printf("   extreme (%.2e,%.2e) -> (%.6f,%.6f) code %d\n", e[0], e[1], x, y, rc);
+            CHECK(rc != 0, "(l) extreme (%g,%g): must be corrected", e[0], e[1]);
+            CHECK(x >= 0.0 && x <= 1.0 + 1e-12 && y >= x*x*(1.0 - 1e-12) && y*y <= x*(1.0 + 1e-12),
+                  "(l) extreme (%g,%g) -> (%g,%g) outside admissible region", e[0], e[1], x, y);
+        }
+    }
     // Q0=0, g>0 (核生成域の g アンダーフロー相当): 触らない
     { std::vector<flow_float> h_ro{1.0f}, h_g{1.0e-12f}, h_q0{0.0f}, h_q1{0.0f}, h_q2{0.0f}, h_T{250.0f}, h_P{101325.0f}, z{0.0f};
       flow_float *dro=up(h_ro),*dg=up(h_g),*d0=up(h_q0),*d1=up(h_q1),*d2=up(h_q2),*dT=up(h_T),*dP=up(h_P),*cG=up(z),*cQ=up(z);
