@@ -1541,6 +1541,7 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
         });
     }
 
+    passiveSaveRhoPre_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 受動種の φ_N δρ 項用に更新前 ρ を退避 (#19)
     blockDPLURSolve(s);
     s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
         if (s.cfg.blockDPLUR == 1) {
@@ -1752,6 +1753,8 @@ void advanceImplicitDualTime(StepContext& s)
             });
         }
         // (5) 流れ block 解 → in-place commit（roN=Q^n は BDF 基準で固定のため roN+dq は使えない）。
+        s.cfg.dualTimeSubIter = m;
+        passiveSaveRhoPre_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 受動種の φ_N δρ 項用 (#19)
         blockDPLURSolve(s, m);
         // 診断 (FORGE_RESID_SNAP=1): subiter 0 の res (BDF 込み R*) と最終 dq を退避 (局所収縮率 g の分母)。
         {

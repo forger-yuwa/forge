@@ -34,7 +34,8 @@ __device__ __forceinline__ void cond_moment_update_limited_body(
     // codex result M5 (受動種経路のみ; boundByTheta 0 で従来と同一): 4 モーメントの非負を **共通 θ** で保証する増分縮小
     // θ_neg = min_k N_k/|d_k| (d_k<0 かつ N_k+d_k<0)。縮小量 (θ_u − θ)|d_k| を limCorr_k (セル累積) と limStats[8k] (Σ·V, root のみ; 受動種収支の stride 8) に記録。
     int boundByTheta, flow_float* limCorr_g, flow_float* limCorr_Q2, flow_float* limCorr_Q1, flow_float* limCorr_Q0,
-    double* limStats, const geom_int* root)
+    double* limStats, const geom_int* root,
+    int clampThresholds)   // 0: dg_max/dT_max の閾値クランプを掛けない (dual-time の 2 回目以降の sub-iter; plan §5.1 #18)。実現可能性 (avail, 蒸発上限, 非負) は常に
 {
     const double dt = (double)(dt_local[ic] * dtScale);
     const double v  = (double)vol[ic];
@@ -69,8 +70,10 @@ __device__ __forceinline__ void cond_moment_update_limited_body(
             const double cveff = fmax(cvg + g_old*(cprops.R - dL), 1.0e-2*cvg);
             const double adg = fabs(dg);
             const double adT = adg*L/cveff;
-            if (adg > dg_max) theta = fmin(theta, dg_max/adg);
-            if (adT > dT_max) theta = fmin(theta, dT_max/adT);
+            if (clampThresholds != 0) {
+                if (adg > dg_max) theta = fmin(theta, dg_max/adg);
+                if (adT > dT_max) theta = fmin(theta, dT_max/adT);
+            }
             if (dg > 0.0) {
                 const double Yw = (roY_w != nullptr) ? (double)roY_w[ic]/rod : ((Yw_const > 0.0) ? Yw_const : 1.0);
                 const double avail = (roY_w != nullptr || Yw_const > 0.0) ? (Yw - g_old) : (0.99 - g_old);
@@ -147,7 +150,7 @@ __global__ void cond_moment_update_limited_d(
         condModel, opts, dg_max, dT_max, lam_min, N_g, N_Q2, N_Q1, N_Q0, res_g, res_Q2, res_Q1, res_Q0,
         sj_g, sj_Q2, sj_Q1, sj_Q0, td_g, td_Q2, td_Q1, td_Q0, out_g, out_Q2, out_Q1, out_Q0, diagLim, diagCorrG, diagCorrQ,
         1.0, (flow_float)1.0, 1, nullptr, nullptr, nullptr, nullptr,
-        0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+        0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 1);
 }
 
 // 受動種経路 (passiveScalarScheme 1) 用: 緩和・dt 倍率・floor 省略・DPLUR 増分入力を持つ変種 (本文は同じ)。
@@ -164,7 +167,7 @@ __global__ void cond_moment_update_limited_passive_d(
     double relax, flow_float dtScale, int applyFloor,
     flow_float* dq_g, flow_float* dq_Q2, flow_float* dq_Q1, flow_float* dq_Q0,
     int boundByTheta, flow_float* limCorr_g, flow_float* limCorr_Q2, flow_float* limCorr_Q1, flow_float* limCorr_Q0,
-    double* limStats, const geom_int* root)
+    double* limStats, const geom_int* root, int clampThresholds)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -172,5 +175,5 @@ __global__ void cond_moment_update_limited_passive_d(
         condModel, opts, dg_max, dT_max, lam_min, N_g, N_Q2, N_Q1, N_Q0, res_g, res_Q2, res_Q1, res_Q0,
         sj_g, sj_Q2, sj_Q1, sj_Q0, td_g, td_Q2, td_Q1, td_Q0, out_g, out_Q2, out_Q1, out_Q0, diagLim, diagCorrG, diagCorrQ,
         relax, dtScale, applyFloor, dq_g, dq_Q2, dq_Q1, dq_Q0,
-        boundByTheta, limCorr_g, limCorr_Q2, limCorr_Q1, limCorr_Q0, limStats, root);
+        boundByTheta, limCorr_g, limCorr_Q2, limCorr_Q1, limCorr_Q0, limStats, root, clampThresholds);
 }

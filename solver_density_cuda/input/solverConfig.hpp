@@ -206,6 +206,7 @@ public:
     int nStepInner;
     int nSubIterDualTime = 20; // dual-time: 物理ステップあたりの擬似時間サブ反復数
     int bdfOrder = 2;          // dual-time: 物理時間 BDF 次数 (1 or 2、初回ステップは BDF1)
+    int dualTimeSubIter = 0;   // dual-time: 現在のサブ反復番号 (driver が設定; 凝縮の更新クランプ θ_u の物理 step 単位化 [plan §5.1 #18] が参照)
     flow_float unsteadyDiagCoef = 0.0; // dual-time: 陰解法対角へ加える物理時間項係数 a/Δt（定常は 0）。driver が毎ステップ設定
     std::vector<flow_float> coef_N;
     std::vector<flow_float> coef_M; 

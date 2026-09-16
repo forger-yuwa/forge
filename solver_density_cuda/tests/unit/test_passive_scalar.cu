@@ -247,11 +247,38 @@ static void test_bounds_budget()
     cudaFree(dro); cudaFree(dv); cudaFree(dcorr); cudaFree(dvol); cudaFree(dst);
 }
 
+// (d) 流れの密度更新と整合した増分 (plan §5.1 #19): z=0 のとき ρφ = φ_N ρ_new で φ は不変、増分制限は基点 φ_N ρ_new に対して掛かる。
+static void test_rho_term()
+{
+    printf("[d] passive_add_rho_term_d: z=0 keeps phi, limiter base is phi_N*rho_new\n");
+    const int n = 256; std::vector<float> roPre(n), ro(n), N(n), cand(n), vol(n, 1.f), lim(n, 0.f);
+    for (int i = 0; i < n; ++i) { roPre[i] = 1.0f + 0.3f*sinf(0.1f*i); ro[i] = roPre[i]*(1.0f + 0.2f*cosf(0.05f*i)); N[i] = roPre[i]*(0.1f + 0.8f*(i%7)/6.0f); cand[i] = N[i]; }
+    float *dpre=up(roPre),*dro=up(ro),*dN=up(N),*dc=up(cand),*dlim=up(lim); geom_float* dvol=up(vol); std::vector<double> st(8,0.0); double* dst=up(st); int one=1000000000; int* dth=nullptr; cudaMalloc((void**)&dth,sizeof(int)); cudaMemcpy(dth,&one,sizeof(int),cudaMemcpyHostToDevice);
+    passive_add_rho_term_d<<<(n+127)/128,128>>>(n, dc, dN, dpre, dro); cudaDeviceSynchronize();
+    auto out = down(dc, (size_t)n); float worst = 0.f;
+    for (int i = 0; i < n; ++i) worst = fmaxf(worst, fabsf(out[i]/ro[i] - N[i]/roPre[i]));
+    CHECK(worst < 2e-7f, "z=0: phi changed by %g", worst);
+    printf("   z=0: max|phi_new - phi_N| = %.2e\n", worst);
+    // z=0 の候補に対する増分制限 (基点 φ_N ρ_new) は無作用
+    passive_limit_increment_d<<<(n+127)/128,128>>>(n, dc, dN, 1, dro, dvol, dlim, dst, dth, nullptr, dpre); cudaDeviceSynchronize();
+    auto s2 = down(dst, (size_t)8); auto out2 = down(dc, (size_t)n); float dd = 0.f; for (int i = 0; i < n; ++i) dd = fmaxf(dd, fabsf(out2[i]-out[i]));
+    CHECK(s2[0] == 0.0 && s2[1] == 0.0 && dd == 0.f, "limiter acted on z=0 candidate (amount %g cells %g maxΔ %g)", s2[0], s2[1], dd);
+    // z>0 で上限超過: 基点 φ_N ρ_new から ρ_new までが allowed
+    for (int i = 0; i < n; ++i) cand[i] = N[i]/roPre[i]*ro[i] + 0.5f*ro[i];   // z = 0.5 ρ_new (多くのセルで超過)
+    cudaMemcpy(dc, cand.data(), n*sizeof(float), cudaMemcpyHostToDevice); cudaMemset(dst, 0, 8*sizeof(double));
+    passive_limit_increment_d<<<(n+127)/128,128>>>(n, dc, dN, 1, dro, dvol, dlim, dst, dth, nullptr, dpre); cudaDeviceSynchronize();
+    out2 = down(dc, (size_t)n); int bad = 0; for (int i = 0; i < n; ++i) if (out2[i] > ro[i]*(1.f+1e-6f) || out2[i] < 0.f) ++bad;
+    CHECK(bad == 0, "%d cells out of [0,rho] after limiting with rho term", bad);
+    printf("   z=0.5rho: all cells within [0,rho] after theta_b (limited cells %.0f)\n", down(dst,(size_t)8)[1]);
+    cudaFree(dpre); cudaFree(dro); cudaFree(dN); cudaFree(dc); cudaFree(dlim); cudaFree(dvol); cudaFree(dst); cudaFree(dth);
+}
+
 int main()
 {
     test_limiter();
     test_advection();
     test_bounds_budget();
+    test_rho_term();
     printf(g_fail ? "FAILED (%d)\n" : "ALL PASS\n", g_fail);
     return g_fail ? 1 : 0;
 }

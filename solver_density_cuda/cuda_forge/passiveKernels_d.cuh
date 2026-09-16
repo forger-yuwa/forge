@@ -96,13 +96,27 @@ __global__ void passive_bounds_d(
 // で増分全体を縮め、確定状態を [0, ρ] (トレーサ) / ≥0 (モーメント) に保つ。ρφ_N 自体が範囲外 (流れ更新で ρ が減った等) なら
 // θ_b=0 で N に留め、その後の硬い floor (passive_bounds_d, 最後の砦) が処理する。
 //   limCell[ic] += (1−θ_b)|δ| (セル累積), stats[0] += Σ(1−θ_b)|δ|·V, stats[1] += 作動セル数, stats[2] += Σ(θ_b−1)δ·V (符号付き) (root のみ), thetaMinInt = min(θ_b·1e9)。
-__global__ void passive_limit_increment_d(
-    geom_int nCells, flow_float* rophi, const flow_float* rophiN, int upperIsRho, const flow_float* ro, const geom_float* vol,
-    flow_float* limCell, double* stats, int* thetaMinInt, const geom_int* root)
+// 流れの密度更新と整合した受動種の増分 (plan §5.1 #19, 案C の ρY_N + z + Y_N δρ と同形): 候補 ρφ = ρφ_N + z に
+//   φ_N·δρ = (ρφ_N/ρ_pre)·(ρ_new − ρ_pre)
+// を加える (ρ_pre = 同じ (サブ) 反復の残差組み立て時の ρ, ρ_new = 流れ block 更新後の ρ)。z=0 なら ρφ = φ_N ρ_new で φ は不変。
+__global__ void passive_add_rho_term_d(geom_int nCells, flow_float* rophi, const flow_float* rophiN, const flow_float* roPre, const flow_float* ro)
 {
     const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
-    const double N = (double)rophiN[ic];
+    const double rp = (double)roPre[ic];
+    if (rp <= 0.0) return;
+    rophi[ic] = (flow_float)((double)rophi[ic] + ((double)rophiN[ic]/rp)*((double)ro[ic] - rp));
+}
+
+// roPre != nullptr のとき増分の基点は φ_N ρ_new (= ρφ_N + φ_N δρ) で、制限するのは輸送増分 z だけ (基点自体は [0,ρ_new] 内)。
+__global__ void passive_limit_increment_d(
+    geom_int nCells, flow_float* rophi, const flow_float* rophiN, int upperIsRho, const flow_float* ro, const geom_float* vol,
+    flow_float* limCell, double* stats, int* thetaMinInt, const geom_int* root, const flow_float* roPre)
+{
+    const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    double N = (double)rophiN[ic];
+    if (roPre != nullptr && roPre[ic] > (flow_float)0.0) N = N / (double)roPre[ic] * (double)ro[ic];
     const double d = (double)rophi[ic] - N;
     if (d == 0.0) return;
     double allowed;

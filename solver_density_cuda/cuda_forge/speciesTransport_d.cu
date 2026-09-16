@@ -1073,6 +1073,7 @@ flow_float** g_p_sj_dev = nullptr;    flow_float** g_p_prim_dev = nullptr;
 flow_float** g_p_gx_dev = nullptr;    flow_float** g_p_gy_dev = nullptr;  flow_float** g_p_gz_dev = nullptr;
 flow_float** g_p_lim_dev = nullptr;
 flow_float*  g_Pface_dev = nullptr;   int g_Pface_nPlanes = 0;
+flow_float*  g_p_roPre_dev = nullptr; bool g_p_roPre_valid = false;   // ρ_pre (流れ更新前の ρ; §5.1 #19)
 double*      g_p_stats_dev = nullptr; // [nPassive*8]: 0 lo, 1 hi, 2 abs (floor; 全期間積算), 3 total (最新), 4 lim 量 Σ(1−θ)|δ|V (積算), 5 lim 作動セル数 (積算)
 int*         g_p_thetaMin_dev = nullptr; // [nPassive]: θ_b の最小 (×1e9, atomicMin; ログ時にリセット)
 
@@ -1340,6 +1341,25 @@ const geom_int* passive_periodic_root(solverConfig& cfg, mesh& msh)
 flow_float* passive_limCorr_cell_ptr(int q) { return (q >= 0 && q < g_nPassive) ? h_p_limc[q] : nullptr; }
 double*     passive_lim_stats_ptr(int q)    { return (q >= 0 && q < g_nPassive) ? g_p_stats_dev + (size_t)q*8 + 4 : nullptr; }
 
+void passiveSaveRhoPre_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    (void)cuda_cfg;
+    if (!passiveSchemeEnabled(cfg) || cfg.timeIntegration != 11) { g_p_roPre_valid = false; return; }
+    const size_t bytes = (size_t)msh.nCells_all*sizeof(flow_float);
+    if (g_p_roPre_dev == nullptr) gpuErrchk( cudaMalloc((void**)&g_p_roPre_dev, bytes) );
+    gpuErrchk( cudaMemcpy(g_p_roPre_dev, var.c_d["ro"], bytes, cudaMemcpyDeviceToDevice) );
+    g_p_roPre_valid = true;
+}
+
+void passiveAddRhoTerm_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int q0, int nq)
+{
+    if (!passiveSchemeEnabled(cfg) || cfg.timeIntegration != 11 || !g_p_roPre_valid) return;
+    for (int q = q0; q < q0+nq; ++q) {
+        passive_add_rho_term_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(msh.nCells, h_p_rophi[q], h_p_rophiN[q], g_p_roPre_dev, var.c_d["ro"]);
+    }
+    gpuErrchk( cudaPeekAtLastError() );
+}
+
 bool passiveRecordStage(const solverConfig& cfg, int loop)
 {
     if (cfg.timeIntegration == 11) return true;
@@ -1354,7 +1374,8 @@ void passiveLimitIncrement_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
     for (int q = q0; q < q0+nq; ++q) {
         passive_limit_increment_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
             msh.nCells, h_p_rophi[q], h_p_rophiN[q], (q == g_qTracer) ? 1 : 0, var.c_d["ro"], var.c_d["volume"],
-            record ? h_p_limc[q] : nullptr, record ? g_p_stats_dev + (size_t)q*8 + 4 : s_scratch, record ? g_p_thetaMin_dev + q : s_scratchI, root);
+            record ? h_p_limc[q] : nullptr, record ? g_p_stats_dev + (size_t)q*8 + 4 : s_scratch, record ? g_p_thetaMin_dev + q : s_scratchI, root,
+            (cfg.timeIntegration == 11 && g_p_roPre_valid) ? g_p_roPre_dev : nullptr);
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
@@ -1398,7 +1419,8 @@ void passiveTracerUpdate_d_wrapper(int loop, solverConfig& cfg, cudaConfig& cuda
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
     const bool rec = passiveRecordStage(cfg, loop);
-    passiveLimitIncrement_d_wrapper(cfg, cuda_cfg, msh, var, q, 1, rec);   // θ_b で増分を縮め [0,ρ] を保つ (M5)
+    passiveAddRhoTerm_d_wrapper(cfg, cuda_cfg, msh, var, q, 1);           // + φ_N δρ (流れの密度更新と整合; #19)
+    passiveLimitIncrement_d_wrapper(cfg, cuda_cfg, msh, var, q, 1, rec);   // θ_b で輸送増分 z を縮め [0,ρ] を保つ (M5)
     passiveBounds_d_wrapper(cfg, cuda_cfg, msh, var, q, 1, rec);           // 最後の砦 (通常は無作用)
 }
 

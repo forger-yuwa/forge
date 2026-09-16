@@ -71,6 +71,10 @@ void passiveCommitIncrement_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, m
 // トレーサの更新 (scheme 1): point-implicit (relax) または DPLUR 増分の commit → 上下限 0<=ρξ<=ρ (更新済み ρ) と補正収支。
 void passiveTracerUpdate_d_wrapper(int loop, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 // 増分スケーリング (codex result M5): 候補 ρφ (= ρφ_N + δ) の δ を θ_b で縮めて [0,ρ]/≥0 を保つ。passiveBounds の前に呼ぶ。
+// 流れ block 更新の直前に呼び、残差組み立て時の ρ (ρ_pre) を退避する (plan §5.1 #19; timeIntegration 11 のみ)。
+void passiveSaveRhoPre_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+// 候補 ρφ = ρφ_N + z に φ_N·δρ (δρ = ρ_new − ρ_pre) を加える (timeIntegration 11 かつ ρ_pre 退避済みのとき; 他は no-op)。
+void passiveAddRhoTerm_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int q0, int nq);
 // record=false (RK の中間ステージ) では状態は制限するが収支 (セル累積・積算) には載せない: 収支は確定ステージの増分だけで Δ∫ρφ を説明する。
 void passiveLimitIncrement_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int q0, int nq, bool record = true);
 // モーメントの更新クランプ (cond_moment_update_limited_passive_d) が使う受動種 q の limCorr セル配列 / 収支スロット / 周期 root。

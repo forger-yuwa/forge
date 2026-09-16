@@ -179,9 +179,9 @@
 | 14 | ~~(M6) `implicitRelax` 0.7/1.0 の交差 restart、収束場 restart の判定ツール、case/44 README の表現~~ | 済 (2026-09-17): 緩和キーの実効経路を確認 (coupling 0 → `speciesImplicitRelax`, coupling 1 → `implicitRelax`, 受動 point-implicit/DPLUR → `passiveImplicitRelax`); case/16 `run_0497` (`implicitRelax 1.0` + `passiveImplicitRelax 1.0` の交差 restart) は `run_0476` と反復ノイズ内 (Y0 1.9e-7, ξ 1.5e-5, ro 1.3e-6, floor 補正 0); `check_convergence.py --from-floor REF` (参照 run の末尾 20 % 床に対し peak/tail ≤1.5×) を追加し `run_0478`/`0479`/`0480`/`0497` は **PASS (within 1.5x of reference floor)**; case/44 README の表現を準定常量の比較に限定 |
 | 15 | ~~(m1) solver-settings / recommended-settings / thermophysics の旧記述を統一~~ | 済 (2026-09-17, a6892e13) |
 | 16 | ~~(m2) §5.1・§10 (ψ 切替)・case/09/16 README の番号同期~~ | 済 (2026-09-17): README の改番前番号を修正 (case/09 時間次数 run_0080–0086, case/16 dual-time run_0486–0490)、全引用 run の実在を確認; ψ_P vs ψ_ρ は §10 で「ψ_P を採用 (無次元化 Venkat; 固定点ケースで補正 0)」として決着 |
-| 17 | coupling 2 の周期試験を TP 静止周期箱 (thermalMethod 2, u=0, 組成ガウス, 層流拡散, dual-time) で | forge |
-| 18 | dual-time の θ_u を物理 step あたり (初回 sub-iter のみ) に; 凝縮の 3 水準次数 (g/Q0) 再試験 | forge |
-| 19 | 受動種更新の ξ_N·δρ 項; トレーサ floor 積算 ≤1e-4 の再検証 (`run_0498`/`0499` 型) | forge |
+| 17 | ~~coupling 2 の周期試験を TP 周期箱で~~ | 済 (2026-09-17): TP [N2, H2O] 周期箱 (組成ガウス + ξ, SLAU 1 次, dual-time, `nStepInner 4` [1 sweep は周期箱で NaN], pc1) **u=10 で coupling 2** (`run_0109` 内部 / `0110` seam): 周期対 Δ=0、π シフト等価 Y1 6.1e-7 / ρ 8.3e-7 / ξ 9.7e-6 (float 床)、∫ρY 6e-7、sub-iter 3–4.8 桁。u=0 では EOS クロス項が作動しない (mdot=0) ので u=10 系列を根拠にする (u=0 系列 `run_0105`–`0108`/`0111`–`0114` は記録のみ) |
+| 18 | dual-time の θ_u を物理 step あたりに; 凝縮の 3 水準次数 (g/Q0) | 実装済・**次数は未達** (2026-09-17, case/44 `run_0256`–`0262`; convMethod 0, nSub 40/80, dt 1.6e-5/8e-6/4e-6): sub-iter 低下は流れ・化学種 ≥2.1 桁、rog/Q2/Q1 ≥2.4 桁だが **roQ0 min 1.64** (nSub 80 でも同値; condLim min 0 = 実現可能性クランプ [avail/非負] が常時作動するセルで増分 0); 観測次数 BDF2 g 1.30 / Q0 1.36 / T 1.27 / ro 2.29、BDF1 g 0.95 / Q0 0.70 / T 1.31 / ro 1.93; nSub 倍増差/最小水準差 g 0.43 / Q0 0.37 / T 0.07。**結論**: 流れ・トレーサ・化学種の BDF2 (2.0–2.3) は成立、モーメントは硬い実現可能性制約が作動するセルで時間 1 次相当 (制約整合の時間離散が要る = 本 plan の範囲外; §10) |
+| 19 | ~~受動種更新の φ_N·δρ 項; floor ≤1e-4~~ | 済 (2026-09-17): `passive_add_rho_term_d` (ρφ += φ_N δρ, 制限は輸送増分のみ; 単体 z=0 で φ 不変 6e-8)。floor 積算: case/16 `run_0500` (run_0476 型) **3.4e-26** (旧 1.76e-4), `run_0501` (run_0494 型) **0** (旧 4.84e-4), Arthur S3 `run_0109` ≤4e-21 (limCorr は起動過渡のみ 7.2e-3 で per-step 0); 固定点 `0500` vs `run_0476` は反復ノイズ内 (ξ 1.9e-5); scheme 0 無影響 (case/44 `run_0254`/`0255` ノイズ床) |
 | 8 | 検証 (§6 1–8, node のみ) と codex result レビュー | §6-1/2/7 (短 run) Phase A; §6-3 拡散 (解析解 0.23 %, 2 次収束; 等拡散一致 [コア 2.7e-6] / 混合平均非一致 [3.7e-3 一定] 済), §6-4 固定点, §6-5 凝縮回帰 (S3 は固定点を動かす), §6-7 24000 step は済 (§9); §6-6 dual-time は Phase B 済。**既定 `passiveScalarScheme` を 1 に変更 (2026-09-17)**。次: codex result レビュー |
 
 ## 6. 検証 (node のみ; cell はユーザ指示で対象外)
@@ -243,6 +243,7 @@
 
 ## 9. 変更ログ
 
+- `2026-09-17` — #17–#19: φ_N·δρ 項で受動種の更新を流れの密度更新と整合 (floor 補正が 3 case とも ≤1e-4、固定点不変)、TP 周期箱 u=10 で coupling 2 の周期整合を float 床まで確認、dual-time の θ_u を物理 step 初回 sub-iter のみに。**モーメントの BDF2 次数は未達 (1.3)**: 残る sub-iter 床 (roQ0 1.64 桁) は実現可能性クランプが常時作動するセル (condLim 0) 由来で nSub に依らず、流れ・化学種・トレーサ (2.0–2.3) と切り分けた。§6-6 のモーメント次数ゲートは本 plan では満たせない → §10 に理由と後続 (制約整合の時間離散) を記載し、codex result 2 回目で採否を諮る。
 - `2026-09-17` — result-1 M1/M2/M3/M5 の solver 修正と M4 調査 (§5.1 #9–#13): 周期 DPLUR の近傍寄与を周期群で合算 (π シフト等価 6.5e-7)、収支の root 化、checkpoint の dt/方式整合 (不一致は全系 BDF1)、増分スケーリング θ_b (Arthur S3 の floor 5.6e-3 → ≤1e-20)。未達 2 件に設計決定: (M5) トレーサの上限側 floor (1.8e-4/4.8e-4) は分離更新の δρ 不整合 → ξ_N·δρ 項を導入; (M4) モーメントの BDF2 次数は θ_u が sub-iter 収束を止めるため → dual-time では θ_u を物理 step の初回 sub-iter のみに。sub-iter 床の主因は流れの 2 次 MUSCL (convMethod 0 で全列 ≥2.2 桁)。
 - `2026-09-17` — result-1 M6/m2 対応: 実効緩和の交差 restart `run_0497` (反復ノイズ内)、`check_convergence.py --from-floor` (収束場 restart の判定; `run_0478`/`0479`/`0480`/`0497` PASS)、README 番号・表現の同期。
 - `2026-09-17` — codex result レビュー 1 回目 **NO-GO (M6/m2)** を全採用 (§6.1, §5.1 #9–#16)。
@@ -266,5 +267,6 @@
 - k/ω も化学種経路 (2 次) に乗せるか: ユーザは「全部化学種の経路」と述べたが、SST の生産項・壁関数との結合の検証が別途要るので本 plan では見送り、後続とする (要確認)。
 - ~~ψ_P (受動種ごとの Venkat) と ψ_ρ のどちらが有界性と安定性で優れるか~~ 決着 (2026-09-17): 受動種は ψ_P (セル局所スケールで無次元化した Venkat) を採用。非一様組成の固定点ケース (case/16 `run_0476` 系) で floor 補正 0・交差 restart が反復ノイズ内、S3 の 1-D ステップで遷移幅 4 セル。ψ_ρ 版は実装していない (化学種との整合は不要)。
 - ~~S3 の node 発散が coupling 1 (scalar-DPLUR) 固有だった場合の contingency~~ 決着 (2026-09-17, §9): 逆で coupling 0 固有。受動種も DPLUR sweep に乗せる (§4.2)。
+- **モーメントの dual-time 時間次数 (§6-6) は未達**: 実現可能性クランプ (蒸気枯渇 avail・非負) が作動するセルでは増分が 0 に切られ、sub-iter 残差床 (roQ0 1.6 桁) と時間 1 次相当 (BDF2 で g 1.3 / Q0 1.4) が残る。流れ・化学種・トレーサは BDF2 2.0–2.3 を満たす。制約を時間離散に整合させる (射影を BDF の内側で解く、または制約セルの残差を除外して判定) のは後続課題。dual-time 凝縮は「制約が作動しないセルでは 2 次、作動セルでは 1 次」として運用する。
 - 発達中の凝縮 dual-time で sub-iter 残差が 2 桁落ちない列 (Q0, 流れ, 化学種; case/44 `run_0229`/`0230`) は擬似時間反復の床 (cfl_pseudo 2 + θ_u クランプ) で、nSub では解消しない。cfl_pseudo 上げ・`passiveImplicitCoupling 1`・更新クランプの dual-time 挙動の切り分けは後続 (時間精度の判定は nSub ≥20 で行う)。
 - node TP-SST の case/28 baseline 発散 (上境界 `outlet_statPress`/軸, rms_roe 主導, restart 後 ~1500–3000 step; `thermoHrefTemp` 無し・絶対基準 h が候補) は本 plan の外 → followups へ登録 (S3 の定量 A/B をこの case でやる前に要解決)。
