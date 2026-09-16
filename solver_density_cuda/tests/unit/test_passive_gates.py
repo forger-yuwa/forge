@@ -36,7 +36,7 @@ def cfg_dict(dt, nstep, nsub, fct=1, sfr=2, solver='SLAU', bdf=2, tracer=True, n
 
 def make_run(root, name, dt, nstep, nsub, *, fct=1, sfr=2, solver='SLAU', bdf=2, tracer=True, ncond=0, extra=None, res_step=None, csv_ok=True,
              drop_cols=(), zero_bump=False, inner_short=False, nan_token=False, field=None, fct_log=True, bad_field=False, pert=0.0,
-             restart_t0=None, broken=False, old_nonf=False, no_mesh=False, bcond='periodic', inlet_profile=None, outer_end_bad=False, omit_bdf=False, dust_field=False, tinyg_field=False, underflow_field=False):
+             restart_t0=None, broken=False, old_nonf=False, no_mesh=False, bcond='periodic', inlet_profile=None, outer_end_bad=False, omit_bdf=False, dust_field=False, tinyg_field=False, underflow_field=False, subnormal_field=False):
     d = os.path.join(root, name); os.makedirs(d, exist_ok=True)
     c = cfg_dict(dt, nstep, nsub, fct, sfr, solver, bdf, tracer, ncond, extra)
     if omit_bdf: del c['time']['bdfOrder']   # 省略 = solver 既定 2 (実効設定で同一視されること)
@@ -110,6 +110,13 @@ def make_run(root, name, dt, nstep, nsub, *, fct=1, sfr=2, solver='SLAU', bdf=2,
         for s in range(ncond):
             g = np.full(n, 1e-3); Q0 = np.full(n, 1e14); rl = 1000.0 - 0.12*(277.0 - 250.0)
             r = np.cbrt(g/((4/3)*np.pi*rl)/Q0)
+            if subnormal_field:
+                # codex result-5 M1: rog が float32 の非正規化数でも、rog を含まない不等式 (Q1^2 <= Q0 Q2) は
+                # その丸めで緩めてはならない (Q1^2/(Q0 Q2) = 250 の破れ)
+                for nm, v in ((f'rog_{s}', np.full(n, 1.401298464324817e-45)), (f'roQ0_{s}', np.ones(n)),
+                              (f'roQ1_{s}', np.full(n, 3.4747253568784376e-17)), (f'roQ2_{s}', np.full(n, 4.8294863261832316e-36))):
+                    V[nm] = v.astype(np.float32); V[nm[2:] if not nm.startswith('rog') else f'g_{s}'] = v.astype(np.float32)
+                continue
             if tinyg_field or underflow_field:
                 # codex result-4 M1: 倍精度でも判定すること / 半径が underflow するセルを「判定不能」で見逃さないこと
                 import math as _m
@@ -153,6 +160,7 @@ with tempfile.TemporaryDirectory() as td:
     rc, out = run_tool([F, make_run(td, 'dustfield', 8e-6, 20, 40, ncond=1, dust_field=True)]); check(rc != 0, 'field: tiny rog with huge Q1/Q2 must FAIL (no absolute exclusion)')
     rc, out = run_tool([F, make_run(td, 'tinyg', 8e-6, 20, 40, ncond=1, tinyg_field=True), '--double']); check(rc != 0, 'field: rog 1e-60 with x=2 (violating) must FAIL in double as well')
     rc, out = run_tool([F, make_run(td, 'uflow', 8e-6, 20, 40, ncond=1, underflow_field=True), '--double']); check(rc != 0, 'field: cells whose radius underflows must FAIL (realizability cannot be established)')
+    rc, out = run_tool([F, make_run(td, 'subn', 8e-6, 20, 40, ncond=1, subnormal_field=True)]); check(rc != 0, 'field: subnormal rog must not relax the Q1^2 <= Q0 Q2 inequality (violated 250x)')
     rc, out = run_tool([B, make_run(td, 'xi2', 8e-6, 20, 40, field=np.full(50, 1.5))]); check(rc != 0, 'budget: roXi/ro = 1.5 must FAIL (field gate)')
     rc, out = run_tool([B, make_run(td, 'keep', 8e-6, 20, 40, solver='KEEP')]); check(rc == 0, f'budget: KEEP (FCT not configured, closed periodic, no source) -> conservative mode PASS\n{out}')
     # order gate: normal series

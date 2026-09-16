@@ -259,30 +259,51 @@ def check_field(run_dir, cfg=None, out=print):
             wet = (Q0 > 0) & (g > 0)
             rl = rho_l(T, model); Q3 = g/((4.0/3.0)*math.pi*rl)
             with np.errstate(all='ignore'):
-                # x, y は**指数を分離**して作る (codex result-4 M1: ρg が極小だと Q3 が underflow して r=0 になり、
-                # 素直に割ると x,y が ∞/NaN になって「判定不能」として見逃してしまう。solver 側も同じ式に揃えた)
+                # 判定は**保存量の不等式**で行い、許容は**その不等式に入る量の丸めだけ**から作る (codex result-5 M1:
+                # 共通の eps を rog の丸めから作ると、rog が非正規化数のセルで eps>1 になり x²≤y が無効化されていた)。
+                #   (1) x ≤ 1      ⟺ Q1³ ≤ Q0² Q3        (Q1, Q0, g)
+                #   (2) x² ≤ y     ⟺ Q1² ≤ Q0 Q2         (Q1, Q0, Q2; g と r を含まない)
+                #   (3) y² ≤ x     ⟺ Q2² ≤ Q1 Q3         (Q2, Q1, g)
+                # 表示用の x, y は指数分離で作る (半径が underflow しても有限)。
                 pos = wet & (Q3 > 0)
                 lq3 = np.where(pos, np.log(np.where(pos, Q3, 1.0)), 0.0); lq0 = np.where(pos, np.log(np.where(pos, Q0, 1.0)), 0.0)
                 lr = (lq3 - lq0)/3.0
                 x = np.where(pos & (Q1 > 0), np.exp(np.log(np.where(Q1 > 0, Q1, 1.0)) - lq0 - lr), 0.0)
                 y = np.where(pos & (Q2 > 0), np.exp(np.log(np.where(Q2 > 0, Q2, 1.0)) - lq0 - 2.0*lr), 0.0)
-                undef = wet & (~pos | ~np.isfinite(x) | ~np.isfinite(y))   # 半径も x,y も作れない = 実現可能性を主張できない
+                undef = wet & (~pos | ~np.isfinite(x) | ~np.isfinite(y))
                 okr = wet & ~undef
-                # 許容はファイルの精度 (float32 なら 2^-23, float64 なら 2^-52) の丸めから作る
+
                 def relround(a, dt):
-                    eps = float(np.finfo(dt).eps); tiny = float(np.finfo(dt).tiny); sub = float(np.finfo(dt).smallest_subnormal)
+                    eps0 = float(np.finfo(dt).eps); tiny = float(np.finfo(dt).tiny); sub = float(np.finfo(dt).smallest_subnormal)
                     aa = np.abs(a)
-                    return np.where(aa >= tiny, eps, np.where(aa > 0, sub/np.maximum(aa, sub), 1.0))
+                    return np.where(aa >= tiny, eps0, np.where(aa > 0, sub/np.maximum(aa, sub), 1.0))
                 dts = {k: V[f'{k}_{s}'].dtype for k in ('rog', 'roQ0', 'roQ1', 'roQ2')}
-                relx = relround(Q1, dts['roQ1']) + relround(Q0, dts['roQ0'])*(4.0/3.0) + relround(g, dts['rog'])/3.0
-                rely = relround(Q2, dts['roQ2']) + relround(Q0, dts['roQ0'])*(5.0/3.0) + relround(g, dts['rog'])*(2.0/3.0)
-                eps = np.maximum(1e-6, 4.0*np.maximum(relx, rely))
+                rg_, r0_, r1_, r2_ = (relround(g, dts['rog']), relround(Q0, dts['roQ0']), relround(Q1, dts['roQ1']), relround(Q2, dts['roQ2']))
+                tol1 = np.maximum(1e-6, 4.0*(3.0*r1_ + 2.0*r0_ + rg_))
+                tol2 = np.maximum(1e-6, 4.0*(2.0*r1_ + r0_ + r2_))
+                tol3 = np.maximum(1e-6, 4.0*(2.0*r2_ + r1_ + rg_))
+                TOLMAX = 1e-2   # これを超える許容では不等式を保証できない → 判定不能 (合格にしない)
+                lQ0 = np.where(okr, np.log(np.where(okr, Q0, 1.0)), 0.0)
+                lQ1 = np.where(okr & (Q1 > 0), np.log(np.where(Q1 > 0, Q1, 1.0)), -np.inf)
+                lQ2 = np.where(okr & (Q2 > 0), np.log(np.where(Q2 > 0, Q2, 1.0)), -np.inf)
+                lQ3 = np.where(okr, np.log(np.where(okr, Q3, 1.0)), 0.0)
+                # 破れの相対量 (excess) と、確実に説明できる許容 acc = clamp(tol, 1e-6, TOLMAX) を比べる:
+                #   excess ≤ acc          → 合格 (丸めで説明できる)
+                #   excess > acc, tol 大  → 判定不能 (その許容では保証できない)
+                #   excess > acc, tol 小  → 違反
+                e1 = 3.0*lQ1 - (2.0*lQ0 + lQ3); e2 = 2.0*lQ1 - (lQ0 + lQ2); e3 = 2.0*lQ2 - (lQ1 + lQ3)
+                acc1 = np.log1p(np.clip(tol1, 1e-6, TOLMAX)); acc2 = np.log1p(np.clip(tol2, 1e-6, TOLMAX)); acc3 = np.log1p(np.clip(tol3, 1e-6, TOLMAX))
+                b1 = okr & (e1 > acc1); b2 = okr & (e2 > acc2); b3 = okr & (e3 > acc3)
+                u1 = b1 & (tol1 > TOLMAX); u2 = b2 & (tol2 > TOLMAX); u3 = b3 & (tol3 > TOLMAX)
+                v1, v2, v3 = b1 & ~u1, b2 & ~u2, b3 & ~u3
                 sing = okr & ((x <= 1e-30) | (y <= 1e-30))
-                viol = okr & ~sing & ((x > 1 + eps) | (y < x*x*(1 - eps)) | (y*y > x*(1 + eps)))
-                dust = okr & (np.maximum(relx, rely) > 1e-6)
-            nv, ns, nu = int(viol.sum()), int(sing.sum()), int(undef.sum())
-            out(f'  field {os.path.basename(f)} species {s} ({model}, conserved, solver condition g > 0 and Q0 > 0): wet {int(wet.sum())} (of which rounding-limited {int(dust.sum())}), inequality violations {nv}, singular (x or y <= 1e-30) {ns}, radius/ratios not representable {nu}, negative {neg}')
+                viol = okr & ~sing & (v1 | v2 | v3)
+                unverif = okr & ~sing & ~viol & (u1 | u2 | u3)
+                dust = okr & ((e1 > 0) | (e2 > 0) | (e3 > 0)) & ~viol & ~unverif   # 丸めで説明したセル
+            nv, ns, nu, nq = int(viol.sum()), int(sing.sum()), int(undef.sum()), int(unverif.sum())
+            out(f'  field {os.path.basename(f)} species {s} ({model}, conserved, solver condition g > 0 and Q0 > 0): wet {int(wet.sum())} (of which rounding-limited {int(dust.sum())}), inequality violations {nv} (x<=1 {int(v1.sum())}, x^2<=y {int(v2.sum())}, y^2<=x {int(v3.sum())}), singular (x or y <= 1e-30) {ns}, radius/ratios not representable {nu}, not verifiable (rounding > {TOLMAX:g}) {nq}, negative {neg}')
             if nu: probs.append(f'species {s}: {nu} cells where the radius or (x, y) cannot be formed (realizability cannot be established)')
+            if nq: probs.append(f'species {s}: {nq} cells whose stored rounding exceeds {TOLMAX:g} (realizability cannot be verified)')
             if nv or ns or neg: probs.append(f'species {s}: realizability viol {nv} singular {ns} negative {neg}')
     return (not probs), probs
 

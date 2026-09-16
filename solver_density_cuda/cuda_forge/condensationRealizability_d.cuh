@@ -26,6 +26,23 @@ __host__ __device__ inline bool cond_moment_xy(double q3, double q0, double q1, 
     return true;
 }
 
+
+// 射影後の (x, y) を保存量 Q1, Q2 へ書き戻す (codex result-5 M2)。q3/q0 が非正規化数に丸められると
+// rr = cbrt(q3/q0) は桁が落ちて (x, y) を復元できない (射影直後なのに x が 14 % も 1 を超える例がある) ので、
+// 直接の掛け算は q3/q0 が正規化数のときだけ使い、それ以外は対数で戻す。
+__host__ __device__ inline void cond_moment_writeback(double q3, double q0, double x, double y, double& q1_out, double& q2_out)
+{
+    const double ratio = q3/q0;
+    const double rr = cbrt(ratio);
+    if (ratio >= 2.2250738585072014e-308 && rr > 0.0 && rr < 1.0e300) {
+        q1_out = q0*rr*x; q2_out = q0*rr*rr*y;
+    } else {
+        const double lq0 = log(q0), lr = (log(q3) - lq0)/3.0;
+        q1_out = (x > 0.0) ? exp(log(x) + lq0 + lr)       : 0.0;
+        q2_out = (y > 0.0) ? exp(log(y) + lq0 + 2.0*lr)   : 0.0;
+    }
+}
+
 // 許容領域 A = {0 ≤ x ≤ 1, x² ≤ y ≤ √x} (Hankel H1, H2 ⪰ 0)。判定は相対許容 eps (境界上の整合状態 [単分散 (1,1)] は触らない)。
 //   特異不整合 (x または y が厳密 0 / アンダーフロー なのに Q3 > 0) は (Q0, g) 保存の単分散 (1,1) へ再初期化 (閾値なし: 小さい正の x は領域内部でもあり得る)。
 //   それ以外の違反は A への最近点 (ユークリッド距離; x, y 両方を動かす) — 境界 y=√x / y=x² / 角 (1,1) の候補から最小距離を選ぶ (連続)。
@@ -122,10 +139,8 @@ __global__ void cond_realizability_clamp_d(
             }
             const int kind = (doProject != 0 && haveXY) ? cond_realizability_project(x, y, 1.0e-6) : 0;
             if (kind != 0) {
-                if (rr > 0.0 && rr < 1.0e300) { roQ1[ic] = (flow_float)(q0*rr*x); roQ2[ic] = (flow_float)(q0*rr*rr*y); }
-                else { const double lr = (log(q3) - log(q0))/3.0;
-                       roQ1[ic] = (flow_float)((x > 0.0) ? exp(log(x) + log(q0) + lr) : 0.0);
-                       roQ2[ic] = (flow_float)((y > 0.0) ? exp(log(y) + log(q0) + 2.0*lr) : 0.0); }
+                double q1n = 0.0, q2n = 0.0; cond_moment_writeback(q3, q0, x, y, q1n, q2n);
+                roQ1[ic] = (flow_float)q1n; roQ2[ic] = (flow_float)q2n;
                 if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
             }
         }
@@ -213,10 +228,8 @@ __global__ void cond_realizability_clamp_f_d(
             }
             const int kind = (doProject != 0 && haveXY) ? cond_realizability_project(x, y, 1.0e-6) : 0;
             if (kind != 0) {
-                if (rr > 0.0 && rr < 1.0e300) { roQ1[ic] = (float)((double)q0*rr*x); roQ2[ic] = (float)((double)q0*rr*rr*y); }
-                else { const double lr = (log(q3) - log((double)q0))/3.0;
-                       roQ1[ic] = (float)((x > 0.0) ? exp(log(x) + log((double)q0) + lr) : 0.0);
-                       roQ2[ic] = (float)((y > 0.0) ? exp(log(y) + log((double)q0) + 2.0*lr) : 0.0); }
+                double q1n = 0.0, q2n = 0.0; cond_moment_writeback(q3, (double)q0, x, y, q1n, q2n);
+                roQ1[ic] = (float)q1n; roQ2[ic] = (float)q2n;
                 if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
             }
         }
@@ -281,21 +294,16 @@ __global__ void cond_realizability_project_only_d(
     const double rr = cbrt(q3/q0);
     double x = 0.0, y = 0.0;
     const flow_float q1_in = roQ1[ic], q2_in = roQ2[ic];
+    int kind = 0;
     if (!cond_moment_xy(q3, q0, (double)q1_in, (double)q2_in, x, y)) {
         // Q3 が表現できない (underflow) / x,y が作れない: 液滴半径 0 の塵 → 実現可能な唯一の状態は Q1=Q2=0
-        if (!(q1_in == (flow_float)0.0 && q2_in == (flow_float)0.0)) {
-            roQ1[ic] = (flow_float)0.0; roQ2[ic] = (flow_float)0.0;
-            if (realizViol != nullptr) atomicAdd(realizViol + 1, 1);
-        }
-        return;
-    }
-    const int kind = cond_realizability_project(x, y, 1.0e-6);
-    if (kind == 0) return;
-    if (rr > 0.0 && rr < 1.0e300) { roQ1[ic] = (flow_float)(q0*rr*x); roQ2[ic] = (flow_float)(q0*rr*rr*y); }
-    else {                              // r が表現できない: 対数空間で戻す (x,y は有限)
-        const double lr = (log(q3) - log(q0))/3.0;
-        roQ1[ic] = (flow_float)((x > 0.0) ? exp(log(x) + log(q0) + lr) : 0.0);
-        roQ2[ic] = (flow_float)((y > 0.0) ? exp(log(y) + log(q0) + 2.0*lr) : 0.0);
+        if (q1_in == (flow_float)0.0 && q2_in == (flow_float)0.0) return;
+        roQ1[ic] = (flow_float)0.0; roQ2[ic] = (flow_float)0.0; kind = 2;   // 収支・診断は下の共通経路で記録する
+    } else {
+        kind = cond_realizability_project(x, y, 1.0e-6);
+        if (kind == 0) return;
+        double q1n = 0.0, q2n = 0.0; cond_moment_writeback(q3, q0, x, y, q1n, q2n);
+        roQ1[ic] = (flow_float)q1n; roQ2[ic] = (flow_float)q2n;
     }
     if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
     if (diagCorrQ != nullptr) {

@@ -436,6 +436,29 @@ static void test_realizability_projection()
                   "(l) q3=%g: projected state outside admissible region (code %d, x %g y %g)", c[0], rc, x, y);
         }
     }
+    // 射影 → 保存量への書き戻し → 再判定 の往復 (codex result-5 M2): q3/q0 が非正規化数に丸められるケースでも
+    // 書き戻した保存量から作り直した (x, y) が許容領域に入ること
+    {
+        const double cases[][4] = {   // q3, q0, q1, q2
+            {1.0e-310, 3.0e13, 0.0, 0.0},
+            {1.0e-320, 1.0, 1.0e-100, 1.0e-200},
+            {1.0e-200, 1.0e5, 2.0e-70, 1.0e-140},
+            {1.0e-30,  1.0e14, 1.0e-32, 1.0e-50},
+        };
+        for (const auto& c : cases) {
+            double x = 0.0, y = 0.0;
+            const bool okxy = cond_moment_xy(c[0], c[1], c[2], c[3], x, y);
+            double q1n = 0.0, q2n = 0.0;
+            if (okxy) { cond_realizability_project(x, y, 1.0e-6); cond_moment_writeback(c[0], c[1], x, y, q1n, q2n); }
+            else { q1n = 0.0; q2n = 0.0; }
+            double x2 = 0.0, y2 = 0.0;
+            const bool ok2 = cond_moment_xy(c[0], c[1], q1n, q2n, x2, y2);
+            printf("   round trip: q3 %.1e q0 %.1e -> (x,y) %.6f,%.6f -> Q1 %.3e Q2 %.3e -> (x,y) %.6f,%.6f\n", c[0], c[1], x, y, q1n, q2n, x2, y2);
+            if (ok2 && (q1n > 0.0 || q2n > 0.0))
+                CHECK(x2 <= 1.0 + 1e-6 && y2 >= x2*x2*(1.0 - 1e-6) && y2*y2 <= x2*(1.0 + 1e-6),
+                      "(l) round trip q3=%g q0=%g: rebuilt (x,y)=(%g,%g) outside admissible region", c[0], c[1], x2, y2);
+        }
+    }
     // Q0=0, g>0 (核生成域の g アンダーフロー相当): 触らない
     { std::vector<flow_float> h_ro{1.0f}, h_g{1.0e-12f}, h_q0{0.0f}, h_q1{0.0f}, h_q2{0.0f}, h_T{250.0f}, h_P{101325.0f}, z{0.0f};
       flow_float *dro=up(h_ro),*dg=up(h_g),*d0=up(h_q0),*d1=up(h_q1),*d2=up(h_q2),*dT=up(h_T),*dP=up(h_P),*cG=up(z),*cQ=up(z);
