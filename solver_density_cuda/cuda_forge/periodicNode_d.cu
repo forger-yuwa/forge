@@ -2,6 +2,7 @@
 #include <iterator>
 #include <string>
 #include "periodicNode_d.cuh"
+#include "periodicAtomic_d.cuh"
 #include "cuda_forge/cudaWrapper.cuh"
 
 // node-centered 周期境界 DOF 同一視 (median-dual M4, §4.5)。
@@ -207,6 +208,24 @@ void periodicGatherArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , me
 void periodicBroadcastArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a)
 {
     if (!periodicNodeActive(cfg, msh) || a == nullptr) return;
+    periodicBroadcast1FromRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, a);
+    gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+}
+
+// リミッタ用の max / min gather (§4.8)。root←member を atomic max/min で集約し、root→member へ broadcast する。
+void periodicGatherMaxArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a)
+{
+    if (!periodicNodeActive(cfg, msh) || a == nullptr) return;
+    periodicGatherMax1ToRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, a);
+    gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+    periodicBroadcast1FromRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, a);
+    gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+}
+void periodicGatherMinArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a)
+{
+    if (!periodicNodeActive(cfg, msh) || a == nullptr) return;
+    periodicGatherMin1ToRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, a);
+    gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
     periodicBroadcast1FromRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, a);
     gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
 }

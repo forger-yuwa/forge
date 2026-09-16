@@ -31,8 +31,8 @@ __device__ __forceinline__ void cond_moment_update_limited_body(
     flow_float* diagLim, flow_float* diagCorrG, flow_float* diagCorrQ,
     double relax, flow_float dtScale, int applyFloor,
     flow_float* dq_g, flow_float* dq_Q2, flow_float* dq_Q1, flow_float* dq_Q0,
-    // codex result M5 (受動種経路のみ; boundByTheta 0 で従来と同一): 4 モーメントの非負を **共通 θ** で保証する増分縮小
-    // θ_neg = min_k N_k/|d_k| (d_k<0 かつ N_k+d_k<0)。縮小量 (θ_u − θ)|d_k| を limCorr_k (セル累積) と limStats[8k] (Σ·V, root のみ; 受動種収支の stride 8) に記録。
+    // codex result-1 M5 → result-2 M1 (受動種経路のみ; boundByTheta 0 で従来と同一): 成分ごとの非負化 (N_k + θ d_k < 0 の成分だけ増分を −N_k に切る;
+    // 共通 θ は変えない)。切った量を limCorr_k (セル累積) と limStats[8k] (Σ·V, root のみ; 受動種収支の stride 8) に記録。
     int boundByTheta, flow_float* limCorr_g, flow_float* limCorr_Q2, flow_float* limCorr_Q1, flow_float* limCorr_Q0,
     double* limStats, const geom_int* root,
     int clampThresholds)   // 0: dg_max/dT_max の閾値クランプを掛けない (dual-time の 2 回目以降の sub-iter; plan §5.1 #18)。実現可能性 (avail, 蒸発上限, 非負) は常に
@@ -85,34 +85,32 @@ __device__ __forceinline__ void cond_moment_update_limited_body(
             if (!(theta > 1.0e-12)) theta = 1.0e-12;   // 常に正 (停止穴なし)
         }
     }
+    double ng  = (double)N_g[ic]  + theta*d_g;
+    double nQ2 = (double)N_Q2[ic] + theta*d_Q2;
+    double nQ1 = (double)N_Q1[ic] + theta*d_Q1;
+    double nQ0 = (double)N_Q0[ic] + theta*d_Q0;
     if (boundByTheta != 0) {
-        const double theta_u = theta;
-        const double Nk[4] = {(double)N_g[ic], (double)N_Q2[ic], (double)N_Q1[ic], (double)N_Q0[ic]};
+        // codex result-2 M1 (plan §4.6): 非負化は**成分ごと**。共通 θ (= θ_u ≥ 1e-12) は変えず、N_k + θ d_k < 0 となる成分 k だけ
+        // 増分を −N_k に切って確定値 0 にする (他の成分は θ d_k のまま)。旧 (result-1 M5) の「共通 θ で全成分停止」は、いずれかの
+        // 成分が N_k=0 かつ d_k<0 なら θ=0 で g/Q0 の更新まで止め、モーメントの sub-iter 床と時間 1 次相当の誤差を作っていた (run_0257: 663 ノード)。
+        // 切った量 (θ|d_k| − N_k = −候補値) を limCorr_k (セル累積) と limStats[8k] (Σ·V, 作動数, 符号付き; root のみ) に記録する。
+        const bool count = (root == nullptr) || (root[ic] == ic);
+        double* nk[4] = {&ng, &nQ2, &nQ1, &nQ0};
         const double dk[4] = {d_g, d_Q2, d_Q1, d_Q0};
+        flow_float* lc[4] = {limCorr_g, limCorr_Q2, limCorr_Q1, limCorr_Q0};
         for (int k = 0; k < 4; ++k) {
-            if (dk[k] < 0.0 && Nk[k] + theta*dk[k] < 0.0) {
-                const double th = (Nk[k] > 0.0) ? Nk[k] / (-dk[k]) : 0.0;
-                if (th < theta) theta = th;
-            }
-        }
-        if (theta < theta_u) {
-            const bool count = (root == nullptr) || (root[ic] == ic);
-            flow_float* lc[4] = {limCorr_g, limCorr_Q2, limCorr_Q1, limCorr_Q0};
-            for (int k = 0; k < 4; ++k) {
-                const double amt = (theta_u - theta)*fabs(dk[k]);
+            if (dk[k] < 0.0 && *nk[k] < 0.0) {
+                const double amt = -(*nk[k]);
+                *nk[k] = 0.0;
                 if (lc[k] != nullptr && count) lc[k][ic] += (flow_float)amt;
                 if (limStats != nullptr && count) {
-                    atomicAdd(&limStats[(size_t)k*8], amt*v);                              // 絶対量 (受動種 q=g..Q0 の収支スロット, stride 8)
-                    atomicAdd(&limStats[(size_t)k*8 + 1], 1.0);                            // 作動セル数
-                    atomicAdd(&limStats[(size_t)k*8 + 2], (theta - theta_u)*dk[k]*v);       // 符号付き (確定 − 候補)
+                    atomicAdd(&limStats[(size_t)k*8], amt*v);          // 絶対量 (受動種 q=g..Q0 の収支スロット, stride 8)
+                    atomicAdd(&limStats[(size_t)k*8 + 1], 1.0);        // 作動セル数
+                    atomicAdd(&limStats[(size_t)k*8 + 2], amt*v);      // 符号付き (確定 − 候補) = +amt·V
                 }
             }
         }
     }
-    const double ng  = (double)N_g[ic]  + theta*d_g;
-    const double nQ2 = (double)N_Q2[ic] + theta*d_Q2;
-    const double nQ1 = (double)N_Q1[ic] + theta*d_Q1;
-    const double nQ0 = (double)N_Q0[ic] + theta*d_Q0;
     if (applyFloor != 0) {
         out_g[ic]  = (flow_float)fmax(ng,  0.0);
         out_Q2[ic] = (flow_float)fmax(nQ2, 0.0);

@@ -43,5 +43,9 @@ bool periodicNodeActive(const solverConfig& cfg, const mesh& msh);
 void periodicGatherArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a);
 // a を root→member でミラー (状態・dq の同一視)。非有効なら no-op。
 void periodicBroadcastArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a);
+// a を周期 group で「max→broadcast」/「min→broadcast」(リミッタの極値 Q_max/Q_min と ψ の合併;
+// plans/active/species-passive-scalar-unification.md §4.8)。全符号で正しい (periodicAtomic_d.cuh の CAS 版 atomic)。非有効なら no-op。
+void periodicGatherMaxArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a);
+void periodicGatherMinArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a);
 // 化学種の保存量 roY{s} を root→member でミラー (化学種更新の直後に呼ぶ; §4.1-5)。
 void periodicMirrorSpeciesState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);

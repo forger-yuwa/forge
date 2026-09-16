@@ -677,7 +677,8 @@ $\kappa,\chi,\xi_g$ で変わるため一般 EOS Roe (Vinokur–Montagné 流) �
 > 1 次風上 (`scalarTransportResidualMulti_d`)。`passiveScalarScheme: 1` では化学種の輸送経路 (`speciesFaceReconstruction 2` なら SLAU の 2 次面再構成 + 受動種ごとの
 > スケール不変 Venkat ψ_P、そうでなければ化学種と同じ 1 次経路) で $\rho g, \rho Q_2, \rho Q_1, \rho Q_0$ を移流し、`res_*` / `transport_diag_*` の名前と
 > 「移流 → ソース → 更新クランプ (§4c) → 実現可能性クランプ」の順序は不変。面値は非負にクリップ (保存的)、拡散なし。2 次化は onset の数値拡散を減らすので
-> 定常固定点が変わる (回帰は再取得)。dual-time では物理時間 BDF 項をモーメントにも付ける (F-cf8; plan §4.4)。
+> 定常固定点が変わる (回帰は再取得)。dual-time では物理時間 BDF 項をモーメントにも付け (F-cf8; plan §4.4)、S3 の 2 次補正流束は面で共有する
+> Zalesak 型 FCT で有界化する (plan §4.7; 定常には掛けない)。更新側の受動種経路 (成分ごとの非負化・$\phi_N\delta\rho$ 項・収支) は §4c。
 
 [condensationSource_d.{cu,cuh}](../solver_density_cuda/cuda_forge/condensationSource_d.cu) に実装。
 device 側で核生成 $J$ (CNT × Iland)・臨界半径 $r_*$・成長 $dr/dt$ (Goodheart) を**現在セル状態から一度だけ
@@ -832,12 +833,22 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
    \Delta T=\frac{\Delta g\,L}{c_v+g(R_w-dL/dT)}$$
    を作り、**4 本の増分を同じ $\theta_u$ で縮めてから** floor ($\rho\phi\ge0$) を掛けて確定する。$\theta_u\ge10^{-12}$ (更新を止める穴を作らない)。
    収束時は $\delta\to0$ で $\theta_u\to1$・無作用なので、固定点は残差だけで決まる。潜熱 $\Delta T$ は二相 EOS と同じ有効比熱で評価する。
+   **受動種経路 (`passiveScalarScheme 1`, 2026-09-17; plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md) §4.3/§4.6)** は同じ本文
+   `cond_moment_update_limited_body` を `cond_moment_update_limited_passive_d` で呼ぶ: 候補増分は scalar-DPLUR の増分 (`passiveImplicitCoupling 1`) または
+   point-implicit × `passiveImplicitRelax`、$\Delta\tau$ 倍率 `scalarCflMax`、floor はここで掛けず後段が担う。**非負化は成分ごと** (codex result-2 M1):
+   $\theta_u$ は共通のまま、$N_k+\theta_u d_k<0$ となる成分 $k$ だけ増分を $-N_k$ に切って 0 にし、切った量を `passiveLimCorr_<k>` (セル累積) と monitor の
+   受動種収支 (絶対量・作動数・符号付き; 周期 node は root のみ) に記録する (旧 result-1 M5 の「共通 θ で全成分停止」は $Q_1=0$ のノードで g/Q0 まで止めて
+   モーメントの sub-iter 床と時間 1 次相当の誤差を作ったので撤回)。更新後に流れの密度更新と整合する $\phi_N\,\delta\rho$ 項 (`passive_add_rho_term_d`:
+   $\rho\phi=\rho\phi_N+z+(\rho\phi_N/\rho_{pre})(\rho_{new}-\rho_{pre})$, 輸送増分 $z$ だけを制限対象にする)、$\theta_b$ 増分スケーリング
+   (`passive_limit_increment_d`: 定常の起動緩和。非保存なので固定点で無作用 [limCorr 0] を要求)、最後の砦の floor (`passive_bounds_d`; `passiveFloorCorr_<k>`) の順。
+   **dual-time**: 閾値クランプ $dg_{max}/dT_{max}$ は各物理 step の**初回 sub-iter だけ**掛け (以後の sub-iter は実現可能性 [avail, 蒸発上限, 非負] のみ)、
+   累積増分に対する「物理 step あたりの上限」は保証しない (収束した sub-iter では $\theta_u\to1$ で物理時間離散が固定点を決める)。
 3. **診断**: `condLim_<s>` = $\theta_u$ (収束時 ≈1 を確認する)、`condClampCorr_<s>` = このステップの**全**硬クランプによる $|\Delta\rho g|/\rho$ の累積
    [質量分率] (更新 floor + 実現可能性クランプ $g\le Y_w$ / $0.99$ + 液滴消滅)、`condClampCorrQ_<s>` = $Q_0..Q_2$ の最大相対補正 (負値 floor は 1)。収束時に
    凝縮域で 0 であること (乾きセルの数値塵 $Q\to0^-$ の floor は $g=0$ なら無害) を確認する。
 4. **設定**: `condDgMaxStep` (既定 5e-3) / `condDTmaxStep` (既定 1 K) / `condLimiterMode` (1: 更新クランプ [既定], 0: 旧・残差 θ [A/B 用])。
-   **新経路は `condEquilibrium 0` (非平衡) のみ** (平衡形 1/2 は従来の更新のまま)。**RK 陽解法 (`timeIntegration` 1/3/4) と dual-time では起動時に自動で 0 に降格**する (RK は未制限残差の累積バッファを持ち、dual-time は凝縮
-   モーメントに物理時間項が無い [followups F-cf8] ため未検証)。
+   **新経路は `condEquilibrium 0` (非平衡) のみ** (平衡形 1/2 は従来の更新のまま)。**RK 陽解法 (`timeIntegration` 1/3/4) では起動時に自動で 0 に降格**する (未制限残差の累積バッファを持つため)。dual-time は `passiveScalarScheme 1`
+   (モーメントに BDF 物理時間項; F-cf8 → plan species-passive-scalar-unification §4.4) で有効 (旧経路 0 では従来どおり降格)。
 5. **平衡緩和形 (`condEquilibrium 1`)** は据え置き。定常条件 $R_{transport}+V\alpha\theta\rho(g_{eq}-g)/\Delta\tau=0$ は輸送との釣り合いが
    $\Delta\tau$ 依存 (「θ は接近速度だけ」は輸送の無い局所緩和にしか成り立たない) — 旧モデル互換の既知の制約。平衡凝縮の推奨は EOS 拘束形
    `condEquilibrium 2` (代数拘束、$\Delta\tau$ 非依存。設定既定値は 0=非平衡)。

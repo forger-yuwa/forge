@@ -149,6 +149,65 @@
 
 対象外 (§10)。
 
+### 4.6 モーメント更新クランプの非負化は成分ごと (codex result-2 M1; 2026-09-17)
+
+- #13 で入れた「共通 θ による非負化」(いずれかの成分で $N_k=0$ かつ $d_k<0$ なら $\theta=0$ で **4 本全部の増分を停止**) は**撤回**する。
+  `run_0257` では 663 ノード (全て $Q_1=0$、蒸気枯渇ではない) で g/Q0 の更新まで止まり、θ≥1e-12 の保証を壊してモーメントの sub-iter 残差床と 1 次相当の
+  誤差 (BDF2 で 1.3 次) を作っていた。
+- 新しい規則: 共通 θ は $\theta_u$ (閾値 [初回 sub-iter のみ] + 実現可能性 [avail, 蒸発上限]; ≥1e-12) のまま。非負化は**成分ごと**に、
+  $N_k+\theta_u d_k<0$ となる成分 $k$ だけ増分を $-N_k$ に切って確定値 0 にする (他の成分は $\theta_u d_k$ のまま)。切った量 $\theta_u|d_k|-N_k$ を
+  `passiveLimCorr_<k>` (セル累積) と limStats (絶対量・作動数・符号付き; root のみ) に記録する。`condLim` は $\theta_u$。
+- 「停止セルの寄与」の記録: 非負化の作動数と絶対量は monitor の受動種収支行 (成分ごと) に出る。時間次数試験 (§6-6) では floor+lim の収支が総量比 ≤1e-6
+  であることを次数評価の前提にする (作動していれば次数の言い訳にせず原因を潰す)。
+- 期待: $Q_1=0$ のノードで g/Q0 の更新が止まらなくなり、モーメントの sub-iter 床が流れと同水準 (≥2 桁) に下がる。次数は #12/#18 の 3 水準 × nSub 倍増で再評価し、
+  BDF2 2.0±0.3・nSub 倍増差/最小水準差 ≤0.1 を全量 (g, Q0, T, ro) で要求する。
+
+### 4.7 非定常 (dual-time) の受動種の有界化 — 物理 step 末尾の保存的 FCT 補正 (Zalesak 型; codex result-2 M2, plan-3 M1/M2/m2 反映; 2026-09-17)
+
+- **問題**: CV ごとの増分スケーリング $\theta_b$ (#14) は非保存 (縮めた分を隣へ戻さない)。seam ステップ試験 `run_0098` で総量 0.54 % 損失。
+- **plan-3 で棄却した案**: sub-iter 内の残差レベルで「陽的低次予測 $\rho\phi^k+\Delta t R_{low}/(aV)$」に Zalesak を掛ける形は、予測が CFL>1 で有界でなく
+  (BDF1 初回反復で $[1,0,0,0]\to[-1,2,0,0]$)、収束時も遷移域で $Q^\pm$ が退化して制約が無意味になる。
+- **適用範囲**: `passiveScalarScheme 1` かつ S3 (SLAU, `speciesFaceReconstruction ≥ 2`) かつ **dual-time (`timeIntegration 11`, `unsteady 1`, `dualTime 1`)**。
+  定常 (局所 Δτ) には掛けない (Δτ 依存の固定点を作る; F-cf7 と同じ罠)。定常は現行の ψ_P 再構成 + 起動時の $\theta_b$ 増分緩和のまま。ただし
+  「固定点で無作用」は保証でなく**検証条件**: limCorr の停止と未制限残差 (θ_b が縮めた候補増分の総量) の消滅を別々に確認する。陽的 RK は対象外
+  (Chaplin–Colella の RK4 積分流束制限のような先行例はあるが受動種の非定常本番は dual-time; §10)。
+- **定式化** (物理 step 末尾、sub-iter 収束後に 1 回。面 $f=(i,j)$、$\dot m>0$ は $i\to j$、$a$ は BDF 係数 [BDF1 1, BDF2 3/2]、hist $=(b\,q^n-c\,q^{n-1})/a$):
+  1. **HO 解** $q_H$ = sub-iter が収束した現行の完全陰的 2 次スキームの状態 ($\rho\phi^{n+1}$; 変更なし)。
+  2. **低次陰解** $q_L$: 同じ BDF 履歴・同じ質量流束 (最終 sub-iter の `massflux`)・同じソース (最終 sub-iter の $S(q^k)V$ を凍結)・同じ拡散で、移流だけ 1 次風上にした線形系
+     $$\Big[\tfrac{aV}{\Delta t}+\textstyle\sum_{out}\tfrac{\dot m}{\rho_i}+D_{ii}\Big]q_{L,i}-\sum_{in}\tfrac{\dot m}{\rho_j}q_{L,j}-\sum_j D_{ij}q_{L,j}=\tfrac{V}{\Delta t}(b\,q^n_i-c\,q^{n-1}_i)+S_iV$$
+     を Jacobi sweep で解く (M 行列: 反復ごとに有界 [RHS ≥ 0 なら $q_L\ge0$、上限は流入側の凸結合]; 周期 group は近傍和を gather; ピン行は $q_L=q_H$;
+     `passiveFctSweeps` 上限 [既定 100] と相対変化 `passiveFctTol` [既定 1e-6] で停止し、最終の線形残差ノルムを診断に出す)。BE (初回 step) では厳密に有界。
+     BDF2 の履歴項 ($-c\,q^{n-1}$) は負の係数なので $q_L$ が僅かに負になり得る (plan-3 の反例: CFL 4 のステップで $-1.8\times10^{-2}$) — これは「保証の穴」として
+     残し、最後の floor の収支に記録して試験で定量化する (§6-2)。ソースが負 (蒸発) のときも同様。
+  3. **反拡散流束** (面): $A'_f=\dot m_f\,(P_{face,f}-\phi_{L,up})+[J_f(q_H)-J_f(q_L)]$ ($P_{face}$ は最終 sub-iter の ψ_P 再構成面値、$J_f$ はトレーサ Fick 拡散流束)。
+     2 つの離散式の差から厳密に $\tfrac{aV}{\Delta t}(q_H-q_L)=\sum_f A'_f$ (ソース・履歴は相殺; 最終 sub-iter の状態と収束状態の差 = sub-iter 誤差だけ残る)。
+     内部面 (ip < nNormalPlanes) 以外は $A'_f=0$ (node 境界半割面は自セル値、周期半割面は移流ループに無い)。
+  4. **Zalesak**: 前制限 ($A'_f(\phi_L(j)-\phi_L(i))<0\Rightarrow A'_f=0$; `passiveFctPrelimit` 既定 1) → $P^+_i=\sum\max(0,\text{流入})$, $P^-_i=\sum\max(0,\text{流出})$ →
+     限界 $\phi_{max/min}$ = {自身, 面隣接} の {$\phi^n=\rho\phi^n/\rho^n$, $\phi_L=q_L/\rho^{n+1}$} の max/min (トレーサはさらに $[0,1]$、モーメントは下限 0) →
+     $Q^\pm_i=(\rho^{n+1}_i\phi_{max}-q_{L,i},\ q_{L,i}-\rho^{n+1}_i\phi_{min})\,aV/\Delta t$, $R^\pm=\min(1,Q^\pm/P^\pm)$ ($P=0$ で 1、$Q<0$ で 0) →
+     $\alpha_f=\min(R^+_{受け側},R^-_{出し側})$ (受け側は $A'_f$ の符号で決める)。周期 node: $P^\pm$ は和 gather、極値は max/min gather (§4.8 の wrapper)。
+  5. **補正**: $q^{n+1}:=q_H-\tfrac{\Delta t}{aV}\sum_f(1-\alpha_f)A'_f$ ($=q_L+\tfrac{\Delta t}{aV}\sum_f\alpha_fA'_f$ を $q_L$ の解誤差に依らず $q_H$ 側から書いた形)。
+     面ごとに 1 つの $\alpha_f$ を両 CV に逆符号で加えるので**保存**、$\alpha_f=1$ の面では $q_H$ のまま (時間 2 次の完全陰的スキームは不変)、
+     制限が作動した所だけ有界な $q_L$ 側へ寄る。周期 node は補正を独立バッファに組んで gather (和 → broadcast) してから加える。
+  6. **後処理の契約**: 入口 Dirichlet の再適用 (ピンへの交換量は境界収支として `passiveFctPinCorr` に記録) → floor (`passive_bounds_d`; `floorCorr` に記録) →
+     モーメントの実現可能性クランプ (`condClampCorr`) → primitive → 周期 mirror。$\phi_N\delta\rho$ 項は sub-iter 内の話で、ここでは密度は確定済み。
+     `passiveImplicitCoupling` 0/1 のどちらでも同じ補正 (sub-iter の解法に依らない)。
+- **診断**: `fctCorr` = $\sum_f(1-\alpha_f)|A'_f|\Delta t/a$ (落とした反拡散の絶対量; 保存量の損失ではない)、作動面数、$q_L$ の線形残差、
+  $q^{n+1}$ の限界逸脱量 (= floor が処理した量) を monitor の受動種収支行に併記する。
+- **合否は用途で分ける**: 非定常 (dual-time) は「総量保存 ≤1e-6 (float; 周期箱は root-only 総量、非周期は境界流束・ソース込みの収支)」+「`floorCorr + limCorr + fctPinCorr`
+  の総量比 ≤1e-6」+「$0\le\xi\le1$, モーメント ≥0」を要求 (1e-12 は double 参照実装の代数試験のみ)。定常は起動時の limCorr を許し固定点で 0。
+- キー `passiveFct` (`time.deltaT`; 1 = 上の条件で有効 [既定], 0 = 無効 [A/B]), `passiveFctPrelimit`, `passiveFctSweeps`, `passiveFctTol`。
+
+### 4.8 周期 node のリミッタは group で統合 (codex result-2 M3; 2026-09-17)
+
+- `limiter_r1_scaled_d` (受動種 ψ_P) と `limiter_r1_d` (流れ・化学種 ψ) は各 member の**部分 CV** の内部面だけで極値・スケール・ψ を作るため、周期対で ψ が
+  一致しない (`run_0089` の 4532/2982: 0.985 vs 1.0)。状態 mirror が一致しても再構成の作用素が合併 CV と違う。
+- 修正: 2 段に分ける。(1) 極値 $Q_{max}/Q_{min}$ (自身 + 内部面隣接) を配列へ → 周期 group で max/min gather (broadcast); (2) 合併極値 (受動種は φ_ref も合併極値から)
+  で各 member の面の ψ を評価 → group で min gather (broadcast)。非周期 (root なし) では従来の 1 段 kernel のまま (ビット不変)。流れ・化学種の `limiter_r1_d` も同じ
+  2 段化を周期 node で行う (受動種だけ直しても組成で ρ が変わる試験では流れ側の ψ_ρ の不一致が残る)。
+- 試験: SLAU + `convMethod 1` + `limiter 2` + `speciesFaceReconstruction 2` (受動種 S3) で `run_0090`/`0091` プロトコル (dual-time coupling 1, ガウス ξ + ガウス組成 [N2,O2])
+  の π シフト等価 (内部 vs seam 中心) を追加: max|Δ| が float 床、周期対の `limiter_Xi`/`limiter_ro` の差 = 0。
+
 ## 5. 実装ステップ
 
 1. `methods/thermophysics.md` §5b/§5d (受動種、拡散の適用条件)、`methods/condensation.md` 実装 §4 (モーメント移流)、`methods/convection/theory.md` (S3 本番化の安定化)、
@@ -182,9 +241,9 @@
 | 17 | ~~coupling 2 の周期試験を TP 周期箱で~~ | 済 (2026-09-17): TP [N2, H2O] 周期箱 (組成ガウス + ξ, SLAU 1 次, dual-time, `nStepInner 4` [1 sweep は周期箱で NaN], pc1) **u=10 で coupling 2** (`run_0109` 内部 / `0110` seam): 周期対 Δ=0、π シフト等価 Y1 6.1e-7 / ρ 8.3e-7 / ξ 9.7e-6 (float 床)、∫ρY 6e-7、sub-iter 3–4.8 桁。u=0 では EOS クロス項が作動しない (mdot=0) ので u=10 系列を根拠にする (u=0 系列 `run_0105`–`0108`/`0111`–`0114` は記録のみ) |
 | 18 | dual-time の θ_u を物理 step あたりに; 凝縮の 3 水準次数 (g/Q0) | 実装済・**次数は未達** (2026-09-17, case/44 `run_0256`–`0262`; convMethod 0, nSub 40/80, dt 1.6e-5/8e-6/4e-6): sub-iter 低下は流れ・化学種 ≥2.1 桁、rog/Q2/Q1 ≥2.4 桁だが **roQ0 min 1.64** (nSub 80 でも同値; condLim min 0 = 実現可能性クランプ [avail/非負] が常時作動するセルで増分 0); 観測次数 BDF2 g 1.30 / Q0 1.36 / T 1.27 / ro 2.29、BDF1 g 0.95 / Q0 0.70 / T 1.31 / ro 1.93; nSub 倍増差/最小水準差 g 0.43 / Q0 0.37 / T 0.07。**結論**: 流れ・トレーサ・化学種の BDF2 (2.0–2.3) は成立、モーメントは硬い実現可能性制約が作動するセルで時間 1 次相当 (制約整合の時間離散が要る = 本 plan の範囲外; §10) |
 | 19 | ~~受動種更新の φ_N·δρ 項; floor ≤1e-4~~ | 済 (2026-09-17): `passive_add_rho_term_d` (ρφ += φ_N δρ, 制限は輸送増分のみ; 単体 z=0 で φ 不変 6e-8)。floor 積算: case/16 `run_0500` (run_0476 型) **3.4e-26** (旧 1.76e-4), `run_0501` (run_0494 型) **0** (旧 4.84e-4), Arthur S3 `run_0109` ≤4e-21 (limCorr は起動過渡のみ 7.2e-3 で per-step 0); 固定点 `0500` vs `run_0476` は反復ノイズ内 (ξ 1.9e-5); scheme 0 無影響 (case/44 `run_0254`/`0255` ノイズ床) |
-| 20 | (result-2 M1) モーメントの共通 θ 停止を撤回 (成分ごとの非負化, θ≥1e-12)、停止セルの残差寄与の記録、次数の再評価 (#12/#18 の実体) | forge (必須) |
-| 21 | (M2) 非定常の受動種は面流束の共有制限 (Zalesak 型) で有界化; 周期 seam ステップ試験で総量保存 1e-6; floor/lim 併記の判定 | forge (必須) |
-| 22 | (M3) ψ_P の周期群での極値・スケール統合と係数共有; SLAU + SFR 2 の seam/内部平行移動試験 | forge (必須) |
+| 20 | (result-2 M1) モーメントの共通 θ 停止を撤回 (成分ごとの非負化, θ≥1e-12)、停止セルの残差寄与の記録、次数の再評価 (#12/#18 の実体) | forge (必須): 非負化のコードは済 (`cond_moment_update_limited_body`; 切った量 = その成分の未適用残差を limStats に記録)、次数の再評価は #21 の後に S3 でも (§6-6) |
+| 21 | (M2 → plan-3 で再設計 §4.7) 物理 step 末尾の保存的 FCT 補正 (低次陰解 $q_L$ を限界に $q_H$ から落とす); dual-time seam ステップで総量保存 1e-6; floor/lim/fct 併記 | forge (必須; 単体 `test_passive_fct.cu` + case/09 dual-time seam + §6-6 の S3 次数) |
+| 22 | ~~(M3) ψ_P の周期群での極値・スケール統合と係数共有; SLAU + SFR 2 の seam/内部平行移動試験~~ | 済 (2026-09-17): `limiterPeriodic_d.cuh` (極値 → max/min gather → ψ → min gather; fused5 [流れ] / `limiter_r1_d` [Y] / `limiter_r1_scaled_d` [受動種] の全呼出し), `periodicAtomic_d.cuh` (CAS 比較の float atomicMax/Min, NaN member は no-op), 単体 `test_periodic_limiter.cu` PASS (群 2/4/8 混合符号; 分割鎖と内部鎖でビット一致); case/09 `run_0115`/`0116` (SLAU convMethod 1 + limiter 2 + SFR 2, dual-time coupling 1): 周期対 `limiter_Xi` 差 2.5e-2/1.07e-1 → **0**, π シフト等価 limiter_Xi 1.04e-1 → 7.4e-6, ξ 6.3e-7 (不変); u=−10 (`run_0119`/`0120`) も全 ψ の周期対差 0。非周期 (case/46 `run_0114`–`0116`) は同一バイナリ反復ノイズ内 |
 | 23 | (m1) `--from-floor`: 参照の通常 PASS・列対応・ゼロ参照列の非ゼロ化を検査 | tools |
 | 24 | (m2) methods/condensation.md §4c (θ, φ_N·δρ, limCorr, dual-time の初回 sub-iter 限定 = 物理 step 上限ではない)、§4/§10/#8、plans/README の同期 | docs |
 | 8 | 検証 (§6 1–8, node のみ) と codex result レビュー | §6-1/2/7 (短 run) Phase A; §6-3 拡散 (解析解 0.23 %, 2 次収束; 等拡散一致 [コア 2.7e-6] / 混合平均非一致 [3.7e-3 一定] 済), §6-4 固定点, §6-5 凝縮回帰 (S3 は固定点を動かす), §6-7 24000 step は済 (§9)。**§6-6 のモーメント時間次数と §6-2 の非定常保存は未達** (#20–#22 が必須残作業)。既定 `passiveScalarScheme 1` (2026-09-17)。codex result 2 回 NO-GO |
@@ -201,6 +260,7 @@
    受動種 (ψ_P + 独立クリップ) のリミッタが違うので一致は要求せず差を記録する。
 2. **保存・有界**: 一様流中のステップ状 ξ の移流 (node 箱 + 周期, 1 次/S3): ∫ρξ dV の保存 1e-6、floor 補正量の記録、0 ≤ roXi/ρ ≤ 1 (floor 後)、
    S3 が 1 次より鋭いこと。モーメントは一様過飽和の凝縮ソース試験で非負・実現可能性・継ぎ目/辺/角の更新速度が内部と一致 (case/09 `run_0064` プロトコル)。
+   **追加 (plan-3 M4/m1, 2026-09-17)**: 非定常の保存は float32 で 1e-6 (double 集計の 1e-12 は `test_passive_fct.cu` の double 参照実装のみ)。dual-time の seam ステップ (`run_0091` プロトコル + `run_0098` のステップ ξ, SLAU S3, FCT 有効) で root-only 総量保存 ≤1e-6、`floorCorr+limCorr+fctPinCorr` の総量比 ≤1e-6、$0\le\xi\le1$; 非周期入口 (case/16 のトレーサ分布 run を dual-time で短時間) は境界流束・ソース込みの収支; 周期の辺・角 (33³ 箱の角を跨ぐガウス) でも同じ収支。定常の θ_b は「limCorr の停止」と「未制限残差 (縮めた候補増分の総量) の消滅」を別々に確認する。
 3. **拡散 (F-sp1 を閉じる)**: 解析解付き node 拡散試験 (1 次元ガウス核の拡散; 層流 `Sc`、乱流 `Sc_t` [`vis_turb` を人為的に与える]、無流束壁、入口、周期) で
    誤差が 2 次収束; `nSpecies==1` + トレーサでも動作; モーメントに拡散が入らない; 等拡散係数条件で化学種と一致、混合平均拡散では非一致 (記録のみ)。
 4. **S3 本番化 (安定性・固定点)**: node で S2/S3 × coupling 0/1 を cfl 4 (原因確認, ステップ 2); **非一様組成 + トレーサの PASS ケース** (§4.2: `run_0471` プロトコル +
@@ -219,6 +279,7 @@
    `run_0183`])、化学種のみの run (case/16 `run_0471`) は `passiveScalarScheme` に依らず不変、`speciesImplicitRelax` 省略時 (1.0) は化学種の更新写像が現行と同一。
 8. **判定基準**: 上のゲート + `check_convergence.py` / `check_quasisteady.py` VERDICT、NaN 0、step 時間の増分を記録。既定変更 (`passiveScalarScheme 1`,
    `speciesFaceReconstruction 2` の推奨) は 1–7 を全て通した後。
+   **追加 (plan-3 M4, 2026-09-17)**: 時間次数試験は **FCT が作動する SLAU + `speciesFaceReconstruction 2`** でも行う (case/44 `run_0256` プロトコルを S3 で; BDF1/BDF2 × `passiveImplicitCoupling` 0/1, 3 水準 + nSub 倍増)。評価量に g, Q0 に加え **Q1, Q2**、T, ρ; 制限作動集合 (α<1, 非負化作動, floor 作動) の未制限残差を記録し、作動集合を除いた次数と全域の次数を併記。実現可能性不等式 $Q_1^2\le Q_0Q_2$, $Q_2^2\le Q_1Q_3$ ($Q_3\propto g$) の違反ノード数を最終場で数える (後処理 `analyze_moment_order.py`)。保存は最終 BDF 残差の積分から見積もる誤差 ≤1e-6。
 
 ### 6.1 レビュー記録 (codex)
 
@@ -226,6 +287,7 @@
 | --- | --- | --- | --- | --- |
 | result (2 回目) | `2026-09-17` | [2026-09-16-species-passive-scalar-unification-result-2.md](../../notes/reviews/2026-09-16-species-passive-scalar-unification-result-2.md) | **NO-GO**, C0/M3/m2 | **全採用 (2026-09-17 反映中, §5.1 #20–#24)**: M1 (モーメント次数未達の真因は #13 で入れた共通 θ 非負化: いずれかのモーメントが N_k=0 かつ d_k<0 なら **全モーメントの増分を θ=0 で停止** [`run_0257` で 663 ノード, Q1=0, 蒸気枯渇ではない, θ≥1e-12 の保証を無効化]; T の次数 1.27・ro の sub-iter 比 0.17・最小刻みの rms_roY1 1.9 桁も未達) → 共通停止を撤回し成分ごとに負値だけを非負化 (θ≥1e-12 維持)、停止セルの残差寄与を記録してから次数を再評価 (#12/#18 は必須のまま); M2 (CV ごとの増分制限は非保存: seam ステップ試験で総量 0.54 % 損失、limCorr が floor から移っただけ) → 非定常の受動種は**面流束の共有制限** (Zalesak 型: 2 次補正流束を両 CV で同じ係数で縮小) で有界化し総量保存 1e-6 を満たす; 定常の起動緩和と非定常の保存を分けて判定、floor と lim を併記; M3 (S3 受動種リミッタ ψ_P が member の部分 CV ステンシルで計算され周期点で不一致 [0.985 vs 1.0]) → 周期群で極値・スケールを統合し係数の最小値を共有; SLAU + SFR 2 の seam/内部平行移動試験を追加; m1 (`--from-floor` が参照の通常 PASS・列対応・ゼロ参照列の非ゼロ化を検査しない) → 検査を追加し不成立は拒否; m2 (condensation.md の θ≥1e-12 記述、φ_N·δρ / limCorr / 初回 sub-iter 限定の未反映、「物理 step あたりの上限」と実装の差、#8 の完了状態、plans/README の draft) → 同期 |
 | result (1 回目) | `2026-09-17` | [2026-09-16-species-passive-scalar-unification-result.md](../../notes/reviews/2026-09-16-species-passive-scalar-unification-result.md) | **NO-GO**, C0/M6/m2 | **全採用 (2026-09-17 反映中, §5.1 #9–#16)**: M1 (周期 DPLUR が合併 CV の近傍補正を解かず root の dq をコピーするだけ) → sweep の近傍寄与を独立バッファに作り周期群で合算してから解く + 非一様組成/トレーサが seam・辺・角を横切る陰解法試験 (#9); M2 (周期で補正収支・総量が全メンバーで積分され重複; `run_0067` 総量 166.2 vs root のみ 148.8) → 積分は周期 root のみ合併体積で; seam 局在補正の収支試験 (#10); M3 (checkpoint の履歴有効判定不足: dt 変更で警告のみ、layout に scheme 無し) → dt・生成方式の整合を復元条件に、不一致は全系 BDF1; 非定常の組成/トレーサ/モーメントで連続・通常 restart・刻み変更・方式変更・履歴欠落を試験 (#11); M4 (凝縮 dual-time の sub-iter 桁低下 <2 [Q0 1.58, roY0 1.92, roY1 1.77]、sub-iter 依存 g 3.7e-5 が刻み半減差 9.5e-5 に対し小さくない、モーメントの 3 水準無し) → sub-iter の収束を改善 (擬似 CFL・モーメントの DPLUR 更新) しモーメント込み 3 水準の次数試験; §10 送りにせず §5.1 必須へ (#12); M5 (累積 floor 補正が上限 1e-4 超: `run_0476` ξ 2.2e-4、`run_0494` 5.0e-4、Arthur S3 Q0 5.6e-3) → 上下限を事後クリップでなく増分スケーリング (θ_u 型) で守り floor は最後の保険にする; 再検証 (#13); M6 (緩和比較が実効でない: coupling 1 は `implicitRelax` を使う; 収束場 restart の判定ツール無し; case/44 の「固定点は同一」表現) → `implicitRelax` 0.7/1.0 の交差 restart、収束場 restart の判定 (基準 PASS の床と量の変動幅) をツール化、case/44 は準定常量の比較に表現限定 (#14); m1 (solver-settings/recommended-settings/thermophysics の旧仕様) → 同期 (#15); m2 (§5.1 の済/未達併記、§10 ψ 切替未決、case/09/16 README の改番前番号) → 同期 (#16) |
+| plan (3 回目) | `2026-09-17` | [2026-09-16-species-passive-scalar-unification-plan-3.md](../../notes/reviews/2026-09-16-species-passive-scalar-unification-plan-3.md) | **NO-GO**, C0/M4/m2 (§4.6–4.8 の設計) | **全採用 (2026-09-17 反映)**: M1 (sub-iter 内の陽的低次予測は CFL>1 で有界でない; BDF2 の負係数と負ソースで低次厳密解も負になり得る) → §4.7 を「物理 step 末尾の保存的 FCT 補正: 実際に解いた低次陰解 $q_L$ を限界に、$q^{n+1}=q_H-\frac{\Delta t}{aV}\sum(1-\alpha)A'$」に再設計、BDF2/負ソースの穴は floor 収支で定量化; M2 (処理順: ピン復活・境界半割面の stale Pface・φ_N δρ との順序・coupling 0/1) → §4.7-3/6 の契約 (内部面のみ A'、補正後に再ピンと境界収支、密度確定後なので δρ 項なし、両 coupling 共通); M3 (流れ側は `limiter_r1_fused5_d`、順序保存 int 化は負値に使えない) → §4.8 に fused5 を明記、CAS 比較の float atomicMax/Min (全符号・±0・NaN 規約) + 単体試験 (群 2/4/8, 負速度 run); M4 (試験が FCT の失敗を検出しない) → §6-6 に FCT 有効 (SLAU+SFR2) の 3 水準 × nSub 倍増 (BDF1/2, coupling 0/1)、Q1/Q2 の誤差、実現可能性不等式 $Q_1^2\le Q_0Q_2$、圧縮流・非周期入口・周期辺角の収支、BDF 残差積分の保存誤差 ≤1e-6 を追加; m1 (float32 に 1e-12 は無理) → 1e-6 + 丸め測定、1e-12 は double 参照のみ; m2 (前制限は P± の前、受け側は A の符号) → 反映 |
 | plan (2 回目) | `2026-09-17` | [2026-09-16-species-passive-scalar-unification-plan-2.md](../../notes/reviews/2026-09-16-species-passive-scalar-unification-plan-2.md) | **GO-with-changes**, C0/M6/m0 | **全採用 (2026-09-17 反映)**: M1 (Venkat の float32 3 次積がモーメント 1e15 で Inf/NaN) → 受動種のリミッタはセル局所スケールで無次元化した差分で評価 + 有限性単体 (§4.1); M2 (非負化だけでは ξ≤1 を保証しない、`condClampCorr` は積算でない) → 更新確定時に更新済み ρ で 0≤ρξ≤ρ、符号付き/絶対補正の体積積分を step 内・全期間で積算、相対保存誤差と補正閾値 (§4.1); M3 (周期で coupling 1/2 の予測・EOS クロス項・dq 同期が未定義) → クロス項は独立バッファで gather、DPLUR dq と更新後状態の周期整合、非一様組成 coupling 0/1/2 の周期試験 (§4.1-5); M4 (`run_0471` は組成ほぼ一様で固定点ゲートが空振り) → 非一様 Y_H2O/ξ 分布の PASS ケース `run_0473` 系を新設し交差 restart + 補正無作用 (§4.2, §6-4); M5 (化学種の緩和を受動種の切替に紐付けると無影響ゲートと矛盾、S3 のリミッタ差で 1e-6 一致は不成立) → `speciesImplicitRelax` (既定 1.0) を独立キーに、無影響試験に relax 0.7 を含め、厳密一致は全作用素を揃えた制御試験に限定 (§4.2, §6-1, §6-7); M6 (BDF 履歴の共有・checkpoint・restart 契約と時間次数の数値基準が無い) → 履歴有効数と係数を全系で共有、checkpoint 一括復元/欠落時 BDF1、連続 vs restart・旧形式・nSpecies==1 の試験、次数 2.0±0.3 等の数値基準 (§4.4, §6-6)。**実装着手可** (原因確認は並行) |
 | plan | `2026-09-17` | [2026-09-16-species-passive-scalar-unification-plan.md](../../notes/reviews/2026-09-16-species-passive-scalar-unification-plan.md) | **NO-GO**, C1/M7/m1 | **全採用 (2026-09-17 反映)**: C1 (残差ブレンド deferred-correction は固定点を変える) → 撤回、残差は常に完全な $R_2$、緩和は増分と擬似 Δτ のみ (§4.2); M2 (case/28 の発散例は cell・relax 0.7・coupling 1 で「未緩和 point-implicit」ではない) → node で S2/S3 × coupling 0/1 の原因確認を実装前に (§4.2, §6-4); M3 (面クリップは保存的、有界性は面値では保証されない、`Xi` は輸送に読む原始量) → 保存性の記述を訂正、ψ_P リミッタ + 更新後 floor + floor 補正量の診断、生の roXi/ρ・総量・実現可能性で判定 (§4.1, §6-2); M4 (node 周期は名前ベース gather では不足) → 勾配の周期除外と gather、`transport_diag` gather、更新後 mirror、BDF は gather 後に一度、周期試験必須 (§4.1); M5 (1.8e-4 の原因は未確定) → 仮説に戻し段階比較で確定、一致ゲートは同じ更新方式の制御試験に限定 (§4.0, §6-1); M6 (dual-time の処理順・ピン・coupling 分岐・時間精度ゲート) → §4.4 の処理順、3 水準の時間精度、サブ反復残差、ソース作動試験 (§6-6); M7 (完了条件から S3 安定性・原因切り分けが抜け、`passiveScalarScheme 1` だけでは 1 次のまま) → 検証 1–7 を完了条件に、A/B は SFR/coupling/relax/scalar CFL を固定、固定点不変は PASS ケースで (§6, §8); M8 (F-sp1 を閉じる拡散検証が無い) → 解析解付き拡散試験 (§6-3); m1 (§1/§3 の「2 次」「limiter_Y」記述、`implicitRelax` 既定 1.0、BDF1 は最初の 1 step、緩和は新経路のみ) → 本文修正 |
 
@@ -249,6 +311,7 @@
 
 ## 9. 変更ログ
 
+- `2026-09-17` — codex plan レビュー 3 回目 **NO-GO (M4/m2)**: §4.7 (sub-iter 内 FCT) を物理 step 末尾の保存的補正に再設計 (§6.1)。§4.8 (周期リミッタの 2 段化) は実装済 (#22)。#20 の成分ごと非負化を実装。
 - `2026-09-17` — codex result レビュー 2 回目 **NO-GO (M3/m2)** を全採用 (§6.1, §5.1 #20–#24): モーメント次数未達の真因は #13 の共通 θ 停止 (バグ)、増分制限の非保存、ψ_P の周期不整合。
 - `2026-09-17` — #17–#19: φ_N·δρ 項で受動種の更新を流れの密度更新と整合 (floor 補正が 3 case とも ≤1e-4、固定点不変)、TP 周期箱 u=10 で coupling 2 の周期整合を float 床まで確認、dual-time の θ_u を物理 step 初回 sub-iter のみに。**モーメントの BDF2 次数は未達 (1.3)**: 残る sub-iter 床 (roQ0 1.64 桁) は実現可能性クランプが常時作動するセル (condLim 0) 由来で nSub に依らず、流れ・化学種・トレーサ (2.0–2.3) と切り分けた。§6-6 のモーメント次数ゲートは本 plan では満たせない → §10 に理由と後続 (制約整合の時間離散) を記載し、codex result 2 回目で採否を諮る。
 - `2026-09-17` — result-1 M1/M2/M3/M5 の solver 修正と M4 調査 (§5.1 #9–#13): 周期 DPLUR の近傍寄与を周期群で合算 (π シフト等価 6.5e-7)、収支の root 化、checkpoint の dt/方式整合 (不一致は全系 BDF1)、増分スケーリング θ_b (Arthur S3 の floor 5.6e-3 → ≤1e-20)。未達 2 件に設計決定: (M5) トレーサの上限側 floor (1.8e-4/4.8e-4) は分離更新の δρ 不整合 → ξ_N·δρ 項を導入; (M4) モーメントの BDF2 次数は θ_u が sub-iter 収束を止めるため → dual-time では θ_u を物理 step の初回 sub-iter のみに。sub-iter 床の主因は流れの 2 次 MUSCL (convMethod 0 で全列 ≥2.2 桁)。
