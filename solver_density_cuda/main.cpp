@@ -2042,15 +2042,16 @@ int main(void) {
 
     StepMonitor monitor(cfg, residual_logger);
     monitor.printHeader();
+    passiveRecordInitialTotals_d_wrapper(cfg, cuda_cfg, msh, var);   // 収支の独立照合の始点 (計算開始前の総量)
     cout << "Start Calculation \n";
     for (int iStep = 0 ; iStep < cfg.mainLoopCount() ; iStep++) {
         advanceOneStep(cfg , cuda_cfg , msh , mat_ns , var , fluct , pprobes , profiler , residual_logger , implicit_diag_logger , iStep);
         monitor.report(iStep);
         // 受動種経路の補正収支 (floor による保存量補正の体積積分; monitorInterval ごと)。scheme 0 / 受動種なしでは no-op。
-        if (iStep % cfg.monitorInterval == 0) passiveFloorCorrLog_d_wrapper(cfg, iStep);
+        if (iStep % cfg.monitorInterval == 0) passiveFloorCorrLog_d_wrapper(cfg, cuda_cfg, msh, var, iStep);
     }
     // 終了時に受動種の収支を必ず出す (最終 step が monitorInterval に乗らないと末尾の補正が記録されない; plan-8 M1)
-    if (cfg.mainLoopCount() > 0 && ((cfg.mainLoopCount() - 1) % cfg.monitorInterval) != 0) passiveFloorCorrLog_d_wrapper(cfg, cfg.mainLoopCount() - 1);
+    if (cfg.mainLoopCount() > 0 && ((cfg.mainLoopCount() - 1) % cfg.monitorInterval) != 0) passiveFloorCorrLog_d_wrapper(cfg, cuda_cfg, msh, var, cfg.mainLoopCount() - 1);
 
     // 壁時計 (旧実装は clock() = CPU 時間で、GPU 待ちを含まなかった)。書式 "Time = %.3f s" は grep 互換のため維持。
     printf("Time = %.3f s (wall, %d steps, %.2f ms/step)\n", monitor.elapsedSeconds(), cfg.mainLoopCount(),

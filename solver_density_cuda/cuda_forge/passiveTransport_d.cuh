@@ -86,7 +86,9 @@ void passiveBounds_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh,
 // 時間積分ステージ loop が収支を記録する確定ステージか (timeIntegration 11 は常に true; RK は最終ステージのみ)。
 bool passiveRecordStage(const solverConfig& cfg, int loop);
 // 補正収支の要約を stdout に出す (monitorInterval ごと): 前回出力からの平均/step と全期間積算、相対量 (積算|Δ|/∫ρφ dV)。
-void passiveFloorCorrLog_d_wrapper(solverConfig& cfg, int iStep);
+void passiveFloorCorrLog_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int iStep);
+// 計算開始前 (IC/restart 後) の受動種総量を root のみで記録 (収支の独立照合の始点)。
+void passiveRecordInitialTotals_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 // 単体試験・後処理用: 積算 (lo, hi, abs, total) を host へ (nPassive×4)。
 std::vector<double> passiveFloorCorrTotals();
 

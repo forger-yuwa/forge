@@ -10,16 +10,22 @@ FLOOR = ("[passive] step {step} floorCorr {nm:<8s} per-step(avg 10): lo 0.000e+0
          "| total {tot} rel(abs/total) {frel} | limCorr per-step 0.000e+00 cumulative abs 0.000000e+00 signed 0.000000e+00 rel {lrel} cells 0 thetaMin(interval) 1.0000 initialTotal {init}")
 FCT = ("[passive]   fctCorr {nm:<8s} cumulative: dropped antidiffusion 1.000000e-03 (rel 1.000000e-03) faces 12 prelimited 0.000000e+00 pinCorr 0.000000e+00 (rel 0.000000e+00) "
        "baseViol 0.000000e+00 (rel {base}) bndFluxSigned {bnd} bndDropped 0.000000e+00 upperViol 0.000000e+00 (rel 0.000000e+00) | budget: srcHist {src} remSigned {rem} remAbs 0.000000e+00 (rel {remrel}) increment {inc} "
-       "| qL rel-residual interval-max 1.00e-07 run-max {relres} (sweeps last 3) HO residual rel interval-max 1.00e-07 run-max 1.00e-07")
+       "| qL rel-residual interval-max 1.00e-07 run-max {relres} (sweeps last 3) HO residual rel interval-max 1.00e-07 run-max 1.00e-07 nonfinite {nonf}")
 CLAMP = "[passive]   clampBudget species 0 cumulative (signed/abs, rel to total): g 0.000000e+00/0.000000e+00 (0.000000e+00) Q0 0.000000e+00/0.000000e+00 (0.000000e+00) Q1 0.000000e+00/0.000000e+00 ({q1}) Q2 0.000000e+00/0.000000e+00 (0.000000e+00)"
 
 def log(nm='roXi', step=100, tot='1.000000e+00', init='1.000000e+00', frel='0.000000e+00', lrel='0.000000e+00', fabs='0.000000e+00', fct=True,
-        base='0.000000e+00', bnd='0.000000e+00', src='0.000000e+00', rem='0.000000e+00', remrel='0.000000e+00', inc='0.000000e+00', relres='1.00e-07', clamp=None, active=True):
+        base='0.000000e+00', bnd='0.000000e+00', src='0.000000e+00', rem='0.000000e+00', remrel='0.000000e+00', inc='0.000000e+00', relres='1.00e-07', clamp=None, active=True, nonf='0', fct_step=None, clamp_step=None):
     lines = []
     if active: lines.append('[passiveFct] active: post-step conservative FCT for 1 passive scalars (prelimit 0, sweeps 100, tol 1.0e-06)')
+    if fct_step is not None:   # FCT 行が別の (古い) step にだけある
+        lines.append(FLOOR.format(step=fct_step, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs))
+        lines.append(FCT.format(nm=nm, base=base, bnd=bnd, src=src, rem=rem, remrel=remrel, inc=inc, relres=relres, nonf=nonf))
+    if clamp_step is not None:
+        lines.append(FLOOR.format(step=clamp_step, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs))
+        lines.append(CLAMP.format(q1=clamp if clamp is not None else '0.000000e+00'))
     lines.append(FLOOR.format(step=step, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs))
-    if fct: lines.append(FCT.format(nm=nm, base=base, bnd=bnd, src=src, rem=rem, remrel=remrel, inc=inc, relres=relres))
-    if clamp is not None: lines.append(CLAMP.format(q1=clamp))
+    if fct and fct_step is None: lines.append(FCT.format(nm=nm, base=base, bnd=bnd, src=src, rem=rem, remrel=remrel, inc=inc, relres=relres, nonf=nonf))
+    if clamp is not None and clamp_step is None: lines.append(CLAMP.format(q1=clamp))
     return lines
 
 def run(lines, final=100, expect='auto'):
@@ -42,10 +48,18 @@ check(run(log(inc='1.000000e+00')) is False, 'increment 1 with zero boundary/sou
 check(run(log(bnd='nan')) is False, 'NaN boundary flux must FAIL')
 check(run(log(relres='1.00e+00')) is False, 'low-order residual 1 must FAIL')
 check(run(log(base='6.000000e-07', nm='roQ1_0', clamp='6.000000e-07')) is False, 'base 6e-7 + clamp 6e-7 on the same component must FAIL')
+check(run(log(nm='roQ1_0', clamp='0.000000e+00')) is True, 'moment component with clamp record must PASS')
+check(run(log(nm='roQ1_0')) is False, 'moment component without clamp record must FAIL')
+check(run(log(fabs='nan')) is False, 'NaN floor absolute value must FAIL even if rel is 0')
+check(run(log(nonf='1')) is False, 'solver nonfinite flag must FAIL')
+check(run(log(fct_step=91)) is False, 'FCT record only at step 91 with floor at 100 must FAIL (mismatch/missing)')
+check(run(log(nm='roQ1_0', clamp='0.000000e+00', clamp_step=91)) is False, 'clamp record at an older step must FAIL')
+check(run(log(tot='1.000005e+00', init='1.000000e+00')) is False, 'total drift 5e-6 with zero increment must FAIL (1e-6 gate)')
 check(run(log(remrel='2.000000e-06')) is False, 'history remainder above tol must FAIL')
 check(run(log(nm='roQ1_0', clamp='2.000000e-06')) is False, 'clamp budget above tol must FAIL')
 # 閉合は成立するが総量が増分と合わない
 check(run(log(tot='1.000010e+00', init='1.000000e+00', inc='1.000000e-05', src='1.000000e-05')) is True, 'consistent source-driven increase must PASS')
 check(run(log(tot='1.100000e+00', init='1.000000e+00', inc='1.000000e-05', src='1.000000e-05')) is False, 'total change not matching the increment must FAIL')
+check(run(log(init='-1.000000e+00')) is False, 'missing initial total (negative sentinel) must FAIL')
 print('ALL PASS' if fails == 0 else f'FAILED ({fails})')
 sys.exit(1 if fails else 0)

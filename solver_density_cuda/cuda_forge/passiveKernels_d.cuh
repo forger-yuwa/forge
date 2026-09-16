@@ -186,3 +186,17 @@ __global__ void passive_axpy1_d(geom_int n, flow_float* a, const flow_float* b)
     const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     if (ic < n) a[ic] += b[ic];
 }
+
+// 受動種の総量 Σ ρφ V (周期 root のみ; double) — 収支の独立照合 (開始前 / 全後処理後の確定状態) 用。
+__global__ void passive_total_d(geom_int nCells, const flow_float* rophi, const geom_float* vol, const geom_int* root, double* out)
+{
+    const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
+    double v = 0.0;
+    if (ic < nCells && (root == nullptr || root[ic] == ic)) v = (double)rophi[ic]*(double)vol[ic];
+    __shared__ double sh[32];
+    const int lane = threadIdx.x & 31, wid = threadIdx.x >> 5;
+    for (int off = 16; off > 0; off >>= 1) v += __shfl_down_sync(0xffffffffu, v, off);
+    if (lane == 0) sh[wid] = v;
+    __syncthreads();
+    if (threadIdx.x == 0) { const int nw = (blockDim.x + 31) >> 5; double a = 0.0; for (int w = 0; w < nw; ++w) a += sh[w]; if (a != 0.0) atomicAdd(out, a); }
+}
