@@ -262,10 +262,26 @@ L/R 状態の `roe_L/Ht_L/ca_L` (および R 側) を NASA で再構成。Roe �
     種順序が変わる restart は `tools/convert_species_field.py` (擬似種の保存量を構成種へ分配、名前で移送、`roe` を T から再構成、ΣρY=ρ・総水量・T の保存を検査) で行う。
   - **排気トレーサ `roXi`** (`physProp.tracer: exhaust`): SERN の `full` モードで排気率 ξ (排気入口 1 / 外気入口 0) を受動スカラとして輸送する
     (`cuda_forge/tracerTransport_d.{cu,cuh}`: 汎用スカラ輸送コア `ScalarTransportDesc` で登録・入口 `floats.Xi` Dirichlet [node はピン]・他は Neumann・point-implicit/RK 更新・残差列 `rms_roXi`・出力 (level 0 から)・restart `VALUE/roXi`)。
-    **拡散は 0 (移流のみ)**: 汎用スカラ拡散は Sc を持たない μ ベース、化学種の Fick 拡散は多成分専用カーネルのため、混合平均 Sc の拡散は未実装 (Euler の SERN では無関係; SST では followup F-sp1)。
+    **拡散**: `passiveScalarScheme: 0` (旧経路) では 0 (移流のみ)。`passiveScalarScheme: 1` (化学種経路, 2026-09-17〜) では化学種と同じ Fick 形
+    $D=\mu/(\rho Sc)+\mu_t/(\rho Sc_t)$ (定数 Sc; 粘性 run のみ; ΣJ=0 補正・エンタルピー項なし) を `passive_diffusion_d` で加える。化学種との一致は等拡散係数
+    (`speciesDiffusionMethod 0`) の条件でのみ成立し、混合平均 (差動) 拡散では一致しないのが正しい (plan species-passive-scalar-unification §4.1)。
     輸送種の中に**純粋な流入元ラベル** (排気入口で 1・外気入口で 0 になる種; 旧 `[EXH, AIR]` の $Y_{EXH}$) があればそれを ξ に使い、無ければ (full、lumped+keep で $Y_{EXH}<1$ になる配置) トレーサを輸送する。どちらを使うかは `species_meta.yaml` の `exhaust_fraction` に保存し、`forge_design.gas.composition.exhaust_fraction(run_dir)` が返す。元素質量分率から作る混合分率は診断のみ (差動拡散があると元素ごとに ξ が異なる)。
 
 ### 5b. 多成分化学種輸送 (M2) `cuda_forge/speciesTransport_d.{cuh,cu}`
+
+> **受動種 (2026-09-17 実装中, plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md))**: 排気トレーサ `roXi` と
+> 凝縮モーメント `rog_s, roQ2_s, roQ1_s, roQ0_s` は、`passiveScalarScheme: 1` のとき化学種と同じ輸送経路 (勾配・面再構成・移流残差・拡散 [トレーサのみ]・境界/ピン・周期・
+> 陰解法対角) を通る**受動種**として扱う。受動種は**熱力学 (MW/cp/h/R, EOS, 面組成 R_mix/γ, 粘性混合)・ΣρY=ρ 再正規化・ΣJ=0 補正・エンタルピー拡散・
+> `speciesImplicitCoupling` の予測/commit・入口 X/Y 検証・`condGasSpecies` には入らない** (nSpecies は熱力学の種数のまま; 受動種は `nSpecies==1` でも動く)。
+> 面再構成 (S3) のリミッタは受動種ごとの Venkat ψ_P で、差分をセル局所スケール ($\phi_{ref}=\max(|\phi_c|,\max_{nb}|\phi|,\phi_{floor})$) で無次元化して評価する
+> (モーメント $Q_0\sim10^{15}$ の float32 3 次積が溢れないため)。面値は正規化せず下限 0 (トレーサは [0,1]) でクリップ (同一面の 1 つの流束を両 CV に逆符号で加えるので
+> 保存性は保たれる)。更新は `passiveImplicitCoupling` 0 = segregated point-implicit (`passiveImplicitRelax` で増分を緩和) / 1 = 化学種と同じ scalar-DPLUR sweep
+> (`speciesFaceReconstruction ≥ 2` のときの自動既定; モーメントは sweep の増分を更新クランプ θ_u に渡す)。dual-time では BDF 物理時間項 (`*P/*PP`) が付く (§time_integration)。確定時に**更新済み密度**で $0\le\rho\xi\le\rho$ /
+> モーメント ≥0 を適用し、符号付き・絶対補正の体積積分を step 内と全期間で積算する (`passiveFloorCorr_<name>`; `condClampCorr` [更新ごとの正規化量] とは規約が違う)。
+> **dual-time の有界化 (plan §4.7 v5, 2026-09-17)**: 物理 step 末尾に保存的 FCT 補正 (`passiveFct`, [time_integration/theory.md](time_integration/theory.md) 参照) を掛け、
+> $0\le\xi\le1$ / モーメント $\ge0$ を面共有の α で保証する (定常には掛けない: 起動時の増分緩和 θ_b は非保存で固定点では無作用)。
+> `passiveScalarScheme: 0` は旧汎用スカラ経路 (1 次風上・拡散なし・トレーサは primitive 段でクランプ) でビット不変。化学種の segregated 更新の緩和は独立キー
+> `speciesImplicitRelax` (既定 1.0 = 現行の写像)。
 
 化学種は NS の 5 元ブロックには結合させず、RANS k/ω と同じ汎用スカラ輸送コア
 `scalarTransport_d` (`ScalarTransportDesc`) を化学種ごとに再利用して **segregated** に解く。

@@ -1,6 +1,7 @@
 #include "tracerTransport_d.cuh"
 
 #include "scalarTransport_d.cuh"
+#include "passiveTransport_d.cuh"   // passiveScalarScheme 1: 化学種経路の受動種として処理
 
 #include <string>
 
@@ -110,8 +111,12 @@ __global__ void tracer_pin_residual_d(
 
 void tracerPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
-    (void)cfg;
     if (!tracerEnabled(var)) return;
+    if (passiveSchemeEnabled(cfg)) {
+        // 受動種経路: primitive 段で保存量を書き換えるクランプは撤廃 (上下限は更新確定時の passive_bounds_d)。
+        passivePrimitive_d_wrapper(cfg, cuda_cfg, msh, var, passive_tracer_index(), 1);
+        return;
+    }
     tracer_primitive_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells_all, var.c_d["ro"], var.c_d["roXi"], var.c_d["Xi"]);
     gpuErrchk( cudaPeekAtLastError() );
@@ -127,6 +132,12 @@ void tracerBoundary_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, bcond& bc
     const geom_int nb = static_cast<geom_int>(bc.iPlanes.size());
     const bool isInlet = bc.bcondKind.rfind("inlet_", 0) == 0;
     const auto xbIt = bc.bvar_d.find("Xi");   // readBcondConfig が inlet_* に登録 (既定 0)
+    if (passiveSchemeEnabled(cfg)) {
+        // 受動種経路: 化学種の Dirichlet/Neumann カーネルを受動種ポインタで (入口は bvar Xi; node は境界ノードをピン)。
+        passiveBoundary_d_wrapper(cfg, cuda_cfg, bc, msh, var, passive_tracer_index(),
+                                  (isInlet && xbIt != bc.bvar_d.end()) ? xbIt->second : nullptr);
+        return;
+    }
     if (isInlet && xbIt != bc.bvar_d.end()) {
         tracer_dirichlet_boundary_d<<<cuda_cfg.dimGrid_bplane, cuda_cfg.dimBlock>>>(
             nb, bc.map_bplane_cell_d, bc.map_bplane_cell_ghst_d,
@@ -158,6 +169,13 @@ void tracerPinResidual_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
 void tracerTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     if (!tracerEnabled(var)) return;
+    if (passiveSchemeEnabled(cfg)) {
+        // 受動種経路: S3 面値 (SLAU) または 1 次風上 + トレーサ Fick 拡散 (粘性 run)。入口ピンは passivePinResidual (main) で全受動種一括。
+        const int q = passive_tracer_index();
+        passiveAdvection_d_wrapper(cfg, cuda_cfg, msh, var, q, 1);
+        passiveDiffusion_d_wrapper(cfg, cuda_cfg, msh, var, q);
+        return;
+    }
 
     CHECK_CUDA_ERROR(cudaMemset(var.c_d["res_roXi"], 0, msh.nCells * sizeof(flow_float)));
     CHECK_CUDA_ERROR(cudaMemset(var.c_d["transport_diag_Xi"], 0, msh.nCells * sizeof(flow_float)));
@@ -174,6 +192,12 @@ void tracerTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
 void tracerTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     if (!tracerEnabled(var)) return;
+    if (passiveSchemeEnabled(cfg)) {
+        // 受動種経路: point-implicit (passiveImplicitRelax) / scalar-DPLUR 増分 → 上下限 0<=ρξ<=ρ (更新済み ρ) と補正収支。
+        passiveTracerUpdate_d_wrapper(loop, cfg, cuda_cfg, msh, var);
+        passiveMirrorPeriodic_d_wrapper(cfg, cuda_cfg, msh, var);
+        return;
+    }
     const ScalarTransportDesc desc = buildTracerDesc(var);
     scalarTimeIntegration_d(loop, cfg, cuda_cfg, msh, var, desc);
     gpuErrchk( cudaPeekAtLastError() );

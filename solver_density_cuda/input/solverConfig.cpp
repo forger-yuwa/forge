@@ -348,6 +348,48 @@ void solverConfig::read(std::string fname)
         // 多成分 TP 陰解法の化学種更新方式: 既定 0 (従来 segregated 点陰的・ビット不変)。
         // 1 で緩和整合 scalar-DPLUR (流れ block と同一緩和。plan thermophysics-species-implicit-coupling.md)。
         this->speciesImplicitCoupling = getOptionalValidatedValue<int>(deltaT, "speciesImplicitCoupling", 0, "time.deltaT");
+        // 受動スカラ経路の切替と緩和 (plans/active/species-passive-scalar-unification.md §4.1/§4.2)。既定は旧経路 (ビット不変)。
+        this->speciesFaceReconstruction = getOptionalValidatedValue<int>(deltaT, "speciesFaceReconstruction", 0, "time.deltaT");   // (下でも同じ値を再読込)
+        this->passiveScalarScheme = getOptionalValidatedValue<int>(deltaT, "passiveScalarScheme", 1, "time.deltaT");
+        if (this->passiveScalarScheme != 0 && this->passiveScalarScheme != 1) {
+            throw std::runtime_error("Key 'passiveScalarScheme' in 'time.deltaT' must be 0 (legacy generic scalar path) or 1 (species path).");
+        }
+        {
+            double raw = getOptionalValidatedValue<double>(deltaT, "passiveImplicitRelax", -1.0, "time.deltaT");
+            this->passiveImplicitRelax = (raw < 0.0) ? this->implicitRelax : (flow_float)raw;
+            if (this->passiveImplicitRelax <= 0.0 || this->passiveImplicitRelax > 1.0) {
+                throw std::runtime_error("Key 'passiveImplicitRelax' in 'time.deltaT' must be in (0, 1].");
+            }
+        }
+        this->speciesImplicitRelax = getOptionalValidatedValue<double>(deltaT, "speciesImplicitRelax", 1.0, "time.deltaT");
+        if (this->speciesImplicitRelax <= 0.0 || this->speciesImplicitRelax > 1.0) {
+            throw std::runtime_error("Key 'speciesImplicitRelax' in 'time.deltaT' must be in (0, 1].");
+        }
+        this->scalarCflMax = getOptionalValidatedValue<double>(deltaT, "scalarCflMax", -1.0, "time.deltaT");
+        this->passiveImplicitCoupling = getOptionalValidatedValue<int>(deltaT, "passiveImplicitCoupling", -1, "time.deltaT");
+        if (this->passiveImplicitCoupling < 0) {
+            this->passiveImplicitCoupling = (this->passiveScalarScheme == 1 && this->speciesFaceReconstruction >= 2) ? 1 : 0;
+        } else if (this->passiveImplicitCoupling != 0 && this->passiveImplicitCoupling != 1) {
+            throw std::runtime_error("Key 'passiveImplicitCoupling' in 'time.deltaT' must be 0 (segregated point-implicit) or 1 (scalar-DPLUR sweep).");
+        }
+        this->passiveFct = getOptionalValidatedValue<int>(deltaT, "passiveFct", 1, "time.deltaT");
+        if (this->passiveFct != 0 && this->passiveFct != 1) throw std::runtime_error("Key 'passiveFct' in 'time.deltaT' must be 0 or 1.");
+        this->passiveFctPrelimit = getOptionalValidatedValue<int>(deltaT, "passiveFctPrelimit", 0, "time.deltaT");
+        this->condRealizProject = getOptionalValidatedValue<int>(deltaT, "condRealizProject", 1, "time.deltaT");
+        this->passiveFctSweeps = getOptionalValidatedValue<int>(deltaT, "passiveFctSweeps", 100, "time.deltaT");
+        if (this->passiveFctSweeps < 1) throw std::runtime_error("Key 'passiveFctSweeps' in 'time.deltaT' must be >= 1.");
+        this->passiveFctTol = getOptionalValidatedValue<double>(deltaT, "passiveFctTol", 1.0e-6, "time.deltaT");
+        if (this->passiveFctTol <= 0.0) throw std::runtime_error("Key 'passiveFctTol' in 'time.deltaT' must be > 0.");
+        this->passiveFctTolAbs = getOptionalValidatedValue<double>(deltaT, "passiveFctTolAbs", 1.0e-30, "time.deltaT");
+        if (this->passiveScalarScheme == 1 || this->speciesImplicitRelax != 1.0 || this->scalarCflMax > 0.0) {
+            std::cout << "'passiveScalarScheme' in 'time.deltaT': " << this->passiveScalarScheme
+                      << " (passiveImplicitRelax=" << this->passiveImplicitRelax
+                      << ", speciesImplicitRelax=" << this->speciesImplicitRelax
+                      << ", scalarCflMax=" << this->scalarCflMax
+                      << ", passiveImplicitCoupling=" << this->passiveImplicitCoupling
+                      << ", passiveFct=" << this->passiveFct << " [prelimit " << this->passiveFctPrelimit << ", sweeps " << this->passiveFctSweeps
+                      << ", tol " << this->passiveFctTol << "])" << std::endl;
+        }
         // 多成分 face 整合再構成: 既定 0 (mixed-order・ビット不変)。1 で Y を ρ と同じ再構成し thermo/species 流束整合。
         this->speciesFaceReconstruction = getOptionalValidatedValue<int>(deltaT, "speciesFaceReconstruction", 0, "time.deltaT");
         // multispeciesRhoYCommonLimiter: opt-in 診断 (既定 0・ビット不変)。1 で ρ と全 species に共通 min リミタ。
@@ -699,10 +741,11 @@ void solverConfig::read(std::string fname)
             if (!this->tracer.empty() && this->tracer != "exhaust") {
                 throw std::runtime_error("Key 'tracer' in 'physProp' must be 'none' or 'exhaust' (got '" + this->tracer + "').");
             }
-            if (this->tracerEnabled() && this->dualTime != 0) {
+            // dual-time: 受動種経路 (passiveScalarScheme 1) はトレーサに BDF 物理時間項を持つ (§4.4)。旧経路 0 は従来どおり拒否。
+            if (this->tracerEnabled() && this->dualTime != 0 && this->passiveScalarScheme == 0) {
                 // dual-time では roXi に物理時間項 (BDF 履歴・対角) が無く、擬似時間反復ごとに前進してしまう
                 // (codex 2026-09-16 result M6)。物理時間積分を実装するまで併用を拒否する (followups F-cf8 と同種)。
-                throw std::runtime_error("'physProp.tracer: exhaust' is not supported with time.dualTime != 0 (the tracer has no physical-time terms yet; use steady or explicit RK).");
+                throw std::runtime_error("'physProp.tracer: exhaust' with time.dualTime != 0 requires passiveScalarScheme 1 (the legacy scalar path has no physical-time terms; use steady/explicit RK or passiveScalarScheme 1).");
             }
             if (this->tracerEnabled()) std::cout << "'tracer' in 'physProp': exhaust (passive scalar roXi, inlet floats Xi)" << std::endl;
         }

@@ -337,6 +337,8 @@ python3 solver_density_cuda/tools/fluent_h5_to_forge.py convert mesh.cas.h5 mesh
 
 forge を直接 `build/forge` で起動せず、**`solver_density_cuda/tools/run_case.sh <run_dir>`** 経由で実行する。ラッパーが実行後に必ず `check_convergence.py` を走らせ、VERDICT を `<run_dir>/CONVERGENCE_VERDICT.txt` に残し残差プロットも生成する。長時間 run は `nohup solver_density_cuda/tools/run_case.sh <run_dir> &`。
 
+**収束場からの restart (交差 restart・cfl/緩和の入れ替え) の判定は `check_convergence.py --from-floor <参照 run>`** を使う。既定判定は「ピークからの低下桁数 ≥3」なので、収束場から再開した run は init=fin=床で必ず `NOT CONVERGED (stalled/plateau)` になる (2026-09-17 case/16 run_0478–0480 で実害)。`--from-floor REF_RUN` (別名 `--reference-floor`) は参照 run の末尾床 (`--tail` 20 % の平均) を列ごとに取り、対象 run の**全期間ピークと末尾平均がともに床の `--floor-factor` 倍 (既定 1.5) 以内**なら `PASS (within 1.5x of reference floor …)`、超えれば `NOT CONVERGED (residual left the reference floor)`、NaN は `DIVERGED` を返し、列ごとの床比 (末尾/床, ピーク/床) を印字する。参照 run 自体は通常判定で PASS していること (床が収束床であること) が前提。`run_case.sh` は既定判定しか走らせないので、restart run では手動で回して VERDICT を README に貼る。
+
 `.claude/settings.json` のフックでこれを強制する: **PreToolUse** が直接 `build/forge` 実行を deny、**Stop** が「最近 forge を回したのに収束チェックしていない run」があるとターン終了を block する (実行方法に依らずファイル状態で検査)。これにより「衝撃波位置の安定や `rms_ro` 単独で収束と判断する」近道を構造的に防ぐ。**収束/一致を主張する応答では VERDICT 行を引用する**。
 
 ## メッシュ変更後の restart (cross-mesh interpolation)

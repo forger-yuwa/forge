@@ -1,3 +1,5 @@
+#include "cuda_forge/passiveTransport_d.cuh"
+#include <cstdio>
 #include "output.hpp"
 
 #include <iostream>
@@ -157,6 +159,53 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
     }
     // h0: 全エンタルピー (単位質量) = Ht = e + p/ρ + u²/2 (+ k は sstEnergyIncludesK のときだけ)。
     // 全温・全圧の後処理はこれを逆算して作る (自前で T + u²/2c_p を組まない: plan output-level-and-h0)。
+    // dual-time checkpoint (plan species-passive-scalar-unification §4.4, codex plan-2 M6): 流れ・化学種・受動種の
+    // 前物理レベル Q^{n-1} (流れ *N, 化学種 roY{s}P, 受動種 <cons>P; 出力時点は物理 step 末尾なので ro=Q^n, roN=Q^{n-1})
+    // と物理時刻・刻み・履歴有効数を /CHECKPOINT にまとめて書く。restart はこれが全部揃い layout が一致するときだけ復元する。
+    if (cfg.unsteady == 1 && cfg.dualTime == 1) {
+        std::list<std::string> hist = {"roN", "roUxN", "roUyN", "roUzN", "roeN", "roKN", "roOmegaN"};
+        for (const auto& nm : var.speciesVarNames) hist.push_back(nm + "P");
+        // 受動種の履歴は scheme 1 (BDF あり) のときだけ書く (scheme 0 はシフトしない = 無効な履歴; codex result M3)。
+        if (cfg.passiveScalarScheme == 1) {
+            if (var.tracerRegistered != 0) hist.push_back("roXiP");
+            for (const auto& nm : var.condMomentConsNames) hist.push_back(nm + "P");
+        }
+        std::list<std::string> have;
+        for (const auto& nm : hist) if (var.c.count(nm)) have.push_back(nm);
+        if (cfg.gpu == 1) var.copyVariables_cell_D2H(have);
+        HighFive::Group ck = file.createGroup("/CHECKPOINT");
+        for (const auto& nm : have) {
+            std::vector<flow_float> vtemp(var.c.at(nm).begin(), var.c.at(nm).begin() + msh.nCells);
+            ck.createDataSet("/CHECKPOINT/" + nm, vtemp);
+        }
+        // 受動種 FCT の流束形履歴 (§4.7 v4): G (面, 受動種ごと) と H (セル)。無ければ restart は局所形で代替する。
+        {
+            std::vector<std::vector<flow_float>> G, H, Hs; std::vector<flow_float> mEff;
+            if (passiveFctHistoryToHost(msh, G, H, mEff, Hs)) {
+                const auto& cons = passive_cons_names();
+                for (size_t q = 0; q < cons.size() && q < G.size(); ++q) {
+                    ck.createDataSet("/CHECKPOINT/" + cons[q] + "_fctG", G[q]);
+                    ck.createDataSet("/CHECKPOINT/" + cons[q] + "_fctH", H[q]);
+                    ck.createDataSet("/CHECKPOINT/" + cons[q] + "_fctHsrc", Hs[q]);
+                }
+                ck.createDataSet("/CHECKPOINT/passive_fctMeff", mEff);
+            }
+        }
+        const double tt = cfg.totalTimeD, dtp = static_cast<double>(cfg.dt);
+        const int nh = cfg.nHistoryValid;
+        // layout: 配列構成に加え、履歴の意味を決める設定 (物理 dt, bdfOrder, passiveScalarScheme, speciesImplicitCoupling) を含める (M3)。
+        char dtbuf[64]; std::snprintf(dtbuf, sizeof(dtbuf), "%.17g", dtp);
+        const std::string layout = "nSpecies=" + std::to_string(var.nSpeciesRegistered) + ";tracer=" + std::to_string(var.tracerRegistered)
+                                 + ";nCond=" + std::to_string(var.nCondSpeciesRegistered)
+                                 + ";dt=" + std::string(dtbuf) + ";bdfOrder=" + std::to_string(cfg.bdfOrder)
+                                 + ";passiveScalarScheme=" + std::to_string(cfg.passiveScalarScheme)
+                                 + ";speciesImplicitCoupling=" + std::to_string(cfg.speciesImplicitCoupling)
+                                 + ";passiveFct=" + std::to_string(passiveFctConfigured(cfg) ? 1 : 0);
+        ck.createAttribute<double>("totalTime", HighFive::DataSpace::From(tt)).write(tt);
+        ck.createAttribute<double>("dt", HighFive::DataSpace::From(dtp)).write(dtp);
+        ck.createAttribute<int>("nHistoryValid", HighFive::DataSpace::From(nh)).write(nh);
+        ck.createAttribute<std::string>("layout", HighFive::DataSpace::From(layout)).write(layout);
+    }
     if (writeH0) {
         std::vector<flow_float> h0(msh.nCells);
         const auto& Ht = var.c.at("Ht"); const auto& kk = var.c.at("k");

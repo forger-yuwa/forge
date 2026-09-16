@@ -40,6 +40,7 @@ public:
 
     int dtControl; // 0: use dt , 1: cfl
     flow_float totalTime=0.0;
+    double totalTimeD=0.0;   // 物理時刻の double 積算 (float の毎 step 加算は 3 水準比較で 1e-6 相対の差を作る; checkpoint と次数ゲートはこちら)
     flow_float dt;
     flow_float dt_pseudo;
     flow_float cfl;
@@ -78,6 +79,35 @@ public:
                                      //    sweep で ρY_s を緩和し、要因2 の擬似時間緩和ミスマッチを解消)。
                                      // 詳細: plans/accepted/thermophysics-species-implicit-coupling.md。
     int implicitSolvePrecision = 0; // block-DPLUR 線形 solve の内部精度。0: float (既定・高速), 1: double。
+    // 受動スカラ (排気トレーサ roXi・凝縮モーメント) の輸送経路 (plans/active/species-passive-scalar-unification.md §4.1)。
+    //   0: 旧汎用スカラ経路 (scalarTransport_d 1 次風上・拡散なし・緩和なし; A/B 用・旧挙動とビット不変)
+    //   1: 化学種経路 (species カーネルの受動種: S3 面再構成 [speciesFaceReconstruction>=2, SLAU]・トレーサ Fick 拡散・
+    //      入口ピン・周期 gather/mirror・更新緩和 passiveImplicitRelax・更新確定時の上下限 0<=ρξ<=ρ / ρφ>=0 と補正収支診断)
+    int passiveScalarScheme = 1;   // 既定 1 (2026-09-17, 検証 §6 完了後に変更)
+    // 受動種 segregated point-implicit 更新の増分緩和 (passiveScalarScheme 1 のみ)。<0 で implicitRelax に倒置 (既定)。
+    flow_float passiveImplicitRelax = -1.0;
+    // 化学種 segregated point-implicit 更新 (speciesImplicitCoupling 0, timeIntegration 11) の増分緩和。既定 1.0 = 現行と同じ写像。
+    flow_float speciesImplicitRelax = 1.0;
+    // 化学種・受動種の更新だけに使う擬似 CFL の上限 (≤0 で無効・既定)。dt_local を min(1, scalarCflMax/cfl_pseudo) 倍して渡す。
+    // 物理時間項 (dual-time BDF) には触れない。
+    flow_float scalarCflMax = -1.0;
+    // 受動種の陰解法更新方式 (passiveScalarScheme 1, timeIntegration 11): 0 = segregated point-implicit (増分 × passiveImplicitRelax),
+    // 1 = 化学種と同じ scalar-DPLUR sweep (species_dplur_sweep_d を受動種ポインタで; 緩和 passiveImplicitRelax, ピン行, 周期 dq 整合)。
+    // 凝縮モーメントは sweep で作った増分 δ を更新クランプ (cond_moment_update_limited) に渡す (θ_u と floor は不変)。
+    // 既定 -1 = 自動 (speciesFaceReconstruction >= 2 なら 1、それ以外 0; §4.2 原因確認: S3 の発散は segregated 更新固有)。
+    int passiveImplicitCoupling = -1;
+    // dual-time の受動種 S3 に対する物理 step 末尾の保存的 FCT 補正 (plan species-passive-scalar-unification §4.7; scheme 1 かつ SLAU S3 かつ
+    // timeIntegration 11 + unsteady 1 + dualTime 1 のときだけ作動)。1 = 有効 (既定), 0 = 無効 (A/B)。定常・RK では常に無効。
+    int passiveFct = 1;
+    int condRealizProject = 1;           // 凝縮モーメントの実現可能性射影 (Q1/Q2; 1 = 有効 [既定], 0 = 無効 [A/B 診断])
+    int passiveFctPrelimit = 0;          // Zalesak の前制限 (A^raw (φ_B(j) − φ_B(i)) < 0 → 0)。既定 0 (滑らかな極値でも作動するので A/B 用)
+    int passiveFctSweeps = 100;          // 低次陰解 q_L の Jacobi sweep 上限
+    flow_float passiveFctTol = 1.0e-6;   // q_L の線形残差 ||f − L q_L|| / (||f|| + passiveFctTolAbs) の受入閾値
+    flow_float passiveFctTolAbs = 1.0e-30;
+    // dual-time の BDF 履歴の有効数 (実行時状態; 流れ・化学種・受動種で共有, plan species-passive-scalar-unification §4.4 / codex M6)。
+    //   0: 過去レベルなし (fresh start / 旧形式 restart) → 最初の物理 step は BDF1。1 以上: Q^{n-1} が有効 → bdfOrder に従い BDF2。
+    //   checkpoint (res_*.h5 の /CHECKPOINT) から復元されるか、物理 step 完了ごとに +1 (上限 2)。
+    int nHistoryValid = 0;
     // block-DPLUR 対角キャッシュ: sweep 0 で組んだ 5×5 対角 (状態凍結で不変) を diag_block_** に保存し、sweep≥1 は
     // 近傍積 + solve だけにする (ビット同一)。float・point 経路 (implicitSolvePrecision 0, lineImplicit 0) のみ有効。
     // **既定 0**: A10G 3D 2.37 M 節点で 44.0→46.5 ms/step と逆に遅化した (対角 25 floats/cell の保存+4 回読込 ≈1.2 GB/step の
@@ -185,6 +215,7 @@ public:
     int nStepInner;
     int nSubIterDualTime = 20; // dual-time: 物理ステップあたりの擬似時間サブ反復数
     int bdfOrder = 2;          // dual-time: 物理時間 BDF 次数 (1 or 2、初回ステップは BDF1)
+    int dualTimeSubIter = 0;   // dual-time: 現在のサブ反復番号 (driver が設定; 凝縮の更新クランプ θ_u の物理 step 単位化 [plan §5.1 #18] が参照)
     flow_float unsteadyDiagCoef = 0.0; // dual-time: 陰解法対角へ加える物理時間項係数 a/Δt（定常は 0）。driver が毎ステップ設定
     std::vector<flow_float> coef_N;
     std::vector<flow_float> coef_M; 

@@ -280,6 +280,23 @@ $$
 | `nStepInner` | 各サブ反復内の DPLUR sweep 回数（定常と同義） |
 
 使用条件: `unsteady=1, dualTime=1, timeIntegration=11, blockDPLUR=1, time.deltaT.control=0`（物理 $\Delta t$ 固定）。
+
+> **化学種・受動種の物理時間項 (2026-09-17 実装中, plan [species-passive-scalar-unification](../../plans/active/species-passive-scalar-unification.md) §4.4)**: 2026-09-16 までの
+> main は dual-time で化学種を更新しておらず (ρ が動くと ΣY=ρ⁰/ρ になる; [[dualtime-species-frozen-bug]])、凝縮モーメント・トレーサは物理時間項なしの擬似時間更新だった。
+> chem ブランチ (e296f0d0) の修正を移植し、化学種 $\rho Y_s$ と受動種 ($\rho\xi$, モーメント) に時間レベル `*P/*PP` と BDF 残差 $-(V/\Delta t)(a\,\rho\phi - b\,\rho\phi^P + c\,\rho\phi^{PP})$・
+> 対角 $Va/\Delta t$ を付ける。履歴有効数と BDF 係数は流れ・化学種・受動種で共有する 1 つの状態 (最初の 1 物理 step は BDF1)。サブ反復の処理順: 空間残差 (+ピン除去) →
+> 周期 gather → BDF 項 (合併体積で一度) → ピン再除去 → 流れ block 更新 → 化学種更新 (coupling 0/1/2) → 再正規化・primitive → 入口再適用 → 受動種更新 → 状態 mirror。
+> checkpoint は流れ・化学種・受動種の履歴・時刻・刻み・履歴有効数を一括で書き、1 つでも欠ければ全系を BDF1 から再開する。
+>
+> **受動種の物理 step 末尾の保存的 FCT 補正 (`passiveFct`, plan §4.7 v5, 2026-09-17)**: BDF2 は $b=a+c$ から
+> $\tfrac{V}{\Delta t}(q^{n+1}-q^n)=\tfrac1a[\sum_f s_fF_f(q^{n+1})+SV]+\tfrac ca\tfrac{V}{\Delta t}(q^n-q^{n-1})$ と書け、前 step の増分率を面流束 $G^n$ と局所残り $H^n$ に
+> 厳密分解 (確定状態から $G^{n+1}_f=F_{L,f}(q_L)+\alpha_fA^{pre}_f$, $H^{n+1}=\tfrac{V}{\Delta t}(q^{n+1}-q^n)-\sum s_fG^{n+1}$) すると「BE + 有効面流束 $F^{eff}=\tfrac1aF+\tfrac caG^n$」になる。
+> sub-iter 終了後に (1) 終了状態で残差を再評価、(2) 同じ履歴・凍結ソース・拡散で移流だけ 1 次風上、質量流束を流れの BE 形連続式と整合する $\dot m^{eff}=\tfrac1a\dot m+\tfrac ca\dot m^{eff,n}$
+> にした低次 BE 陰解 $q_L$ (M 行列; node 逆流境界は $\phi^n_{own}$ の定数 RHS) を Jacobi で解き、(3) 生の反拡散流束 $A^{raw}_f=F^{eff}_{H,f}-F_{L,f}(q_L)$ (全輸送面)、
+> 基点 $q_B=q_H-M^{-1}BA^{raw}$、(4) Zalesak ($P^\pm$, 局所極値 $\{\phi^n,\phi_B\}$ ∩ 物理限界, $R^\pm$, 面共有 $\alpha_f$; 境界は外部側 $R=1$)、
+> (5) $q_C=q_H-M^{-1}B(A^{raw}-\alpha A^{pre})$ (保存; $\alpha=1$ の面は $q_H$ のまま = 時間 2 次の完全陰的スキーム不変)。後処理は入口再適用 → floor → $g$ クランプ →
+> 二相 EOS 更新 → その $T$ でモーメント実現可能性射影 → $G/H/\dot m^{eff}$ (checkpoint 必須履歴)。定常 (局所 Δτ) と RK には掛けない。有界性の穴 (負の有効ソース、
+> 前 step の局所残り、反復残差) は逸脱量として積算し、`tools/check_passive_budget.py` が総量比 1e-6 で FAIL にする。
 擬似時間 $\Delta\tau$ は `cfl_pseudo` から決まり（物理 $\Delta t$ とは独立）、物理 $\Delta t$ は固定。
 commit は in-place（$\mathbf Q \leftarrow \mathbf Q + \delta\mathbf Q$。`roN`=$\mathbf Q^n$ は BDF 基準で固定のため）。
 

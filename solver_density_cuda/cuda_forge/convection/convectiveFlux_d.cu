@@ -5,6 +5,7 @@
 #include "convectiveFlux_d.cuh"
 #include "lowMachPrecond_d.cuh"
 #include "speciesTransport_d.cuh"  // species_roY_device_ptr()
+#include "passiveTransport_d.cuh"  // 受動種 S3 (passiveScalarScheme 1)
 #include "condensationProperties_d.cuh"  // n2_latent (二相エネルギー流束の潜熱補正)
 #include "convectiveFlux_common_d.cuh"
 
@@ -201,6 +202,17 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             species_limiterY_device_ptr(),
             (cfg.speciesFaceReconstruction >= 2) ? species_Yface_alloc(msh.nPlanes) : nullptr,
             var.c_d["Rmix"] };
+        // 受動種 S3 (passiveScalarScheme 1 かつ speciesFaceReconstruction>=2): ψ_P で再構成した upwind 面値を Pface へ。
+        if (passiveSchemeEnabled(cfg) && cfg.speciesFaceReconstruction >= 2) {
+            spA.nPassive       = passive_count();
+            spA.nPassiveUnit   = (passive_tracer_index() == 0) ? 1 : 0;
+            spA.P_recon        = passive_P_device_ptr();
+            spA.dPdx_recon     = passive_dPdx_device_ptr();
+            spA.dPdy_recon     = passive_dPdy_device_ptr();
+            spA.dPdz_recon     = passive_dPdz_device_ptr();
+            spA.limiterP_recon = passive_limiter_device_ptr();
+            spA.Pface_out      = passive_Pface_alloc(msh.nPlanes);
+        }
 
         SLAU_d<<<dimGrid_normal_halo , cuda_cfg.dimBlock>>> (
             cfg.convMethod, cfg.limiter, slauVariant,

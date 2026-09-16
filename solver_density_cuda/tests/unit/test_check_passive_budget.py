@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""check_passive_budget.py の失敗系試験 (codex plan-7 M1, plan-8 M1/M2): **実際の log 書式**を parse → evaluate まで通し、
+NaN, 合計超過, FCT 記録欠落, 総量 0 の補正, 不完全な記録, 閉合不成立, 総量と増分の不一致, 低次残差超過 が FAIL になること。"""
+import importlib.util, os, sys
+here = os.path.dirname(os.path.abspath(__file__))
+spec = importlib.util.spec_from_file_location('cpb', os.path.join(here, '..', '..', 'tools', 'check_passive_budget.py'))
+cpb = importlib.util.module_from_spec(spec); spec.loader.exec_module(cpb)
+
+FLOOR = ("[passive] step {step} floorCorr {nm:<8s} per-step(avg 10): lo {pslo} hi 0.000e+00 abs 0.000e+00 | cumulative: lo 0.000000e+00 hi 0.000000e+00 abs {fabs} "
+         "| total {tot} rel(abs/total) {frel} | limCorr per-step 0.000e+00 cumulative abs 0.000000e+00 signed 0.000000e+00 rel {lrel} cells 0 thetaMin(interval) 1.0000 initialTotal {init}")
+FCT = ("[passive]   fctCorr {nm:<8s} cumulative: dropped antidiffusion 1.000000e-03 (rel 1.000000e-03) faces 12 prelimited 0.000000e+00 pinCorr 0.000000e+00 (rel 0.000000e+00) "
+       "baseViol 0.000000e+00 (rel {base}) bndFluxSigned {bnd} bndDropped 0.000000e+00 upperViol 0.000000e+00 (rel 0.000000e+00) | budget: srcHist {src} remSigned {rem} remAbs 0.000000e+00 (rel {remrel}) increment {inc} "
+       "| qL rel-residual interval-max 1.00e-07 run-max {relres} (sweeps last 3) HO residual rel interval-max 1.00e-07 run-max 1.00e-07{nonf}")
+INIT = "[passive] initial total {nm:<8s} {init} (root-only, before the first physical step)"
+CLAMP = "[passive]   clampBudget species 0 cumulative (signed/abs, rel to total): g 0.000000e+00/0.000000e+00 (0.000000e+00) Q0 0.000000e+00/0.000000e+00 (0.000000e+00) Q1 0.000000e+00/0.000000e+00 ({q1}) Q2 0.000000e+00/0.000000e+00 (0.000000e+00)"
+
+def log(nm='roXi', step=100, tot='1.000000e+00', init='1.000000e+00', frel='0.000000e+00', lrel='0.000000e+00', fabs='0.000000e+00', fct=True, pslo='0.000e+00', old_nan=False,
+        base='0.000000e+00', bnd='0.000000e+00', src='0.000000e+00', rem='0.000000e+00', remrel='0.000000e+00', inc='0.000000e+00', relres='1.00e-07', clamp=None, active=True, nonf='0', fct_step=None, clamp_step=None,
+        old_nonf=False, init_line=True):
+    lines = []
+    if init_line: lines.append(INIT.format(nm=nm, init=init))
+    if old_nonf:   # step 50 の FCT 記録に nonfinite 1、最終記録は正常
+        lines.append(FLOOR.format(step=50, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs, pslo='0.000e+00'))
+        lines.append(FCT.format(nm=nm, base=base, bnd=bnd, src=src, rem=rem, remrel=remrel, inc=inc, relres=relres, nonf=' nonfinite 1'))
+    if old_nan:   # step 50 の記録に nan、最終記録は有限
+        lines.append(FLOOR.format(step=50, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs='nan', pslo='0.000e+00'))
+    if active: lines.append('[passiveFct] active: post-step conservative FCT for 1 passive scalars (prelimit 0, sweeps 100, tol 1.0e-06)')
+    if fct_step is not None:   # FCT 行が別の (古い) step にだけある
+        lines.append(FLOOR.format(step=fct_step, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs, pslo=pslo))
+        lines.append(FCT.format(nm=nm, base=base, bnd=bnd, src=src, rem=rem, remrel=remrel, inc=inc, relres=relres, nonf=(' nonfinite ' + nonf) if nonf != '' else ''))
+    if clamp_step is not None:
+        lines.append(FLOOR.format(step=clamp_step, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs, pslo=pslo))
+        lines.append(CLAMP.format(q1=clamp if clamp is not None else '0.000000e+00'))
+    lines.append(FLOOR.format(step=step, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs, pslo=pslo))
+    if fct and fct_step is None: lines.append(FCT.format(nm=nm, base=base, bnd=bnd, src=src, rem=rem, remrel=remrel, inc=inc, relres=relres, nonf=(' nonfinite ' + nonf) if nonf != '' else ''))
+    if clamp is not None and clamp_step is None: lines.append(CLAMP.format(q1=clamp))
+    return lines
+
+def run(lines, final=100, expect='auto', required=None, mode=None):
+    last, fct, clamp, nproj, ndeg, act, ls, problems = cpb.parse_lines(lines)
+    if problems: return False
+    e = (expect == 'yes') or (expect == 'auto' and act)
+    req = required if required is not None else sorted(last)
+    m = mode or ('fct' if e else 'conservative')
+    return cpb.evaluate(last, fct, clamp, 1e-6, 1e-4, m, req, e, act, final, out=lambda *_: None)
+
+fails = 0
+def check(cond, msg):
+    global fails
+    if not cond: fails += 1; print('  FAIL:', msg)
+check(run(log()) is True, 'clean case (real format, %-8s name padding) must PASS')
+check(run(log(frel='nan')) is False, 'NaN must FAIL')
+check(run(log(frel='6.000000e-07', lrel='6.000000e-07')) is False, 'sum 1.2e-6 must FAIL')
+check(run(log(fct=False)) is False, 'missing FCT record must FAIL when [passiveFct] active')
+check(run(log(fct=False, active=False)) is True, 'missing FCT record is fine when FCT never activated (conservative mode, no drift)')
+check(run(log(fct=False, active=False, tot='2.000000e+00')) is False, 'non-FCT run with total 1 -> 2 must FAIL (conservative mode)')
+check(run(log(), required=['roXi', 'rog_0', 'roQ2_0', 'roQ1_0', 'roQ0_0']) is False, 'FCT declared for 5 components but only roXi recorded must FAIL')
+check(run(log(), required=['roXi'], expect='yes') is True, 'required set satisfied must PASS')
+check(run(log(step=1), final=None) is False, 'unknown final step must FAIL')
+check(run(log(), final=None) is False, 'unknown final step must FAIL even at the last record')
+check(run(log(tot='0.000000e+00', init='0.000000e+00', frel='1.000000e+00')) is False, 'zero total with correction (rel=1) must FAIL')
+check(run(log(step=91), final=100) is False, 'record at step 91 of a 100-step run must FAIL (incomplete)')
+check(run(log(inc='1.000000e+00')) is False, 'increment 1 with zero boundary/source/remainder must FAIL (closure and total-vs-increment)')
+check(run(log(bnd='nan')) is False, 'NaN boundary flux must FAIL')
+check(run(log(relres='1.00e+00')) is False, 'low-order residual 1 must FAIL')
+check(run(log(base='6.000000e-07', nm='roQ1_0', clamp='6.000000e-07')) is False, 'base 6e-7 + clamp 6e-7 on the same component must FAIL')
+check(run(log(nm='roQ1_0', clamp='0.000000e+00')) is True, 'moment component with clamp record must PASS')
+check(run(log(nm='roQ1_0')) is False, 'moment component without clamp record must FAIL')
+check(run(log(fabs='nan')) is False, 'NaN floor absolute value must FAIL even if rel is 0')
+check(run(log(nonf='')) is False, 'missing nonfinite flag must FAIL')
+check(run(log(pslo='nan')) is False, 'nan in the per-step part must FAIL (token-level check)')
+check(run(log(old_nan=True)) is False, 'nan at an earlier record (step 50) must FAIL even if the last record is finite')
+check(run(log(nonf='1')) is False, 'solver nonfinite flag must FAIL')
+check(run(log(fct_step=91)) is False, 'FCT record only at step 91 with floor at 100 must FAIL (mismatch/missing)')
+check(run(log(nm='roQ1_0', clamp='0.000000e+00', clamp_step=91)) is False, 'clamp record at an older step must FAIL')
+check(run(log(tot='1.000005e+00', init='1.000000e+00')) is False, 'total drift 5e-6 with zero increment must FAIL (1e-6 gate)')
+check(run(log(remrel='2.000000e-06')) is False, 'history remainder above tol must FAIL')
+# codex result-6 M1: |H_rem| は合計に入る (floor 6e-7 + remainder 6e-7 = 1.2e-6 > 1e-6)
+check(run(log(frel='6.000000e-07', fabs='6.000000e-07', remrel='6.000000e-07')) is False,
+      'floor 6e-7 plus history remainder 6e-7 must FAIL (the remainder belongs in the correction sum)')
+check(run(log(nm='roQ1_0', clamp='2.000000e-06')) is False, 'clamp budget above tol must FAIL')
+# 閉合は成立するが総量が増分と合わない
+check(run(log(tot='1.000010e+00', init='1.000000e+00', inc='1.000000e-05', src='1.000000e-05')) is True, 'consistent source-driven increase must PASS')
+check(run(log(tot='1.100000e+00', init='1.000000e+00', inc='1.000000e-05', src='1.000000e-05')) is False, 'total change not matching the increment must FAIL')
+check(run(log(init='-1.000000e+00')) is False, 'missing initial total (negative sentinel) must FAIL')
+# codex result-3 M4: 独立照合 (総量差 vs 増分) は step 比例の float 許容ではなく固定 tol で判定する
+check(cpb.evaluate(*cpb.parse_lines(log(step=100, tot='1.000002e+00', init='1.000000e+00'))[:3], 1e-6, 1e-4, 'fct', ['roXi'], True, True, 100,
+                   out=lambda *_: None, tol_float=2.0e-6, tol_abs=6.0e-6) is False,
+      'total 1 -> 1.000002 with zero increment must FAIL even when the float floor allowance is 2e-6 (independent check uses tol)')
+check(run(log(pslo='BROKEN')) is False, 'non-numeric field BROKEN in the per-step part must FAIL (strict format parse)')
+check(run(log(fabs='BROKEN')) is False, 'non-numeric cumulative field must FAIL')
+check(run(log(old_nonf=True)) is False, 'nonfinite 1 at an earlier record must FAIL even if the last record is clean (sticky)')
+check(run(log(init_line=False)) is False, 'missing [passive] initial total line must FAIL')
+check(run(log(init='2.000000e+00') + [INIT.format(nm='roXi', init='1.000000e+00')]) is False, 'initialTotal in the budget line != [passive] initial total must FAIL')
+print('ALL PASS' if fails == 0 else f'FAILED ({fails})')
+sys.exit(1 if fails else 0)

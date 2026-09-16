@@ -150,6 +150,32 @@ time:
 無効果 (組成を thermo に使わないため)。詳細は [`../methods/convection/theory.md`](../methods/convection/theory.md)
 の「多成分 TP の face 組成整合」節。
 
+## passiveScalarScheme ほか — 受動スカラ (排気トレーサ・凝縮モーメント) の輸送経路 (2026-09-17)
+
+plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md)。`time.deltaT` 配下。
+
+| キー | 既定 | 意味 |
+|---|---|---|
+| `passiveScalarScheme` | **1** | 1 = トレーサ `roXi`・凝縮モーメント `rog_s, roQ2_s, roQ1_s, roQ0_s` を化学種の輸送経路 (化学種と同じ勾配・面再構成・移流残差・境界/ピン・周期・拡散 [トレーサのみ Fick]・dual-time BDF) で受動種として解く。熱力学・ΣY 再正規化・ΣJ=0 補正・`speciesImplicitCoupling` 予測/commit には入らない。0 = 旧汎用スカラ経路 (1 次風上・拡散なし・トレーサは primitive 段クランプ; dual-time では物理時間項なし・`condLimiterMode 1` 降格・`tracer` 拒否) — A/B 用でビット不変 |
+| `passiveImplicitCoupling` | −1 (自動) | 受動種の陰解法更新: 0 = segregated point-implicit (増分 × `passiveImplicitRelax`), 1 = 化学種と同じ scalar-DPLUR sweep で増分を作り、モーメントは更新クランプ (θ_u) に渡す。自動 = `passiveScalarScheme 1` かつ `speciesFaceReconstruction ≥ 2` で 1、他は 0 |
+| `passiveImplicitRelax` | = `implicitRelax` | 受動種 point-implicit 更新の増分緩和 (scheme 1 のみ) |
+| `speciesImplicitRelax` | 1.0 | 化学種の segregated (coupling 0) 更新の増分緩和。1.0 で現行と同じ写像 |
+| `scalarCflMax` | 無効 | 化学種/受動種の更新だけ擬似 CFL をこの値で頭打ち (物理時間項は変えない)。保険用 |
+| `passiveFct` | 1 | **dual-time の受動種 S3 に対する物理 step 末尾の保存的 FCT 補正** (plan §4.7 v5): `passiveScalarScheme 1` + SLAU + `speciesFaceReconstruction ≥ 2` + `timeIntegration 11` + `unsteady 1` + `dualTime 1` のときだけ作動。BDF2 を流束形の BE (前 step の増分を面流束 G/局所 H に分解) として扱い、低次 BE 陰解 (有効質量流束 ṁ^eff) を限界に Zalesak で反拡散流束を面共有の α で制限する (保存; α=1 の面では収束した完全陰的解のまま)。0 = 無効 (A/B; CV ごとの増分制限 θ_b だけになり非保存)。定常・RK では常に無効 |
+| `passiveFctPrelimit` | 0 | Zalesak の前制限 (滑らかな極値でも作動するので既定 off; A/B 用) |
+| `passiveFctSweeps` / `passiveFctTol` / `passiveFctTolAbs` | 100 / 1e-6 / 1e-30 | 低次 BE 陰解の Jacobi sweep 上限と線形残差の受入 (未達は `[passiveFct] WARNING` と log) |
+
+**S3 (`speciesFaceReconstruction: 2`, 化学種・受動種の 2 次面移流) を使うときの組合せ** (node で検証済, case/28 `run_0064`–`0078`, case/44 `run_0216`–`0223`):
+`speciesImplicitCoupling: 1` + `passiveImplicitCoupling` 自動 (=1) + `implicitRelax 0.7` で cfl 6 まで安定。**`speciesImplicitCoupling 0` + S3 は組成せん断層で発散する** (cfl 4 で step ~400)。
+**`implicitRelax 0.7` は定常 (擬似時間) 限定**: dual-time の非定常計算では sub-iter の残差は下がるのに遅いモードが収束せず、同じ物理時刻の解が sub-iter 数に依存する
+(case/44 `run_0399`–`0404`: nSub 40→80 の ρ 差が緩和なしの 1.3e-5 に対し 6.3e-4)。非定常で安定化が要るときは `cfl_pseudo` を下げるか nSub を増やす (2026-09-17, plan species-passive-scalar-unification §5.1 #26)。
+S3 は凝縮の固定点を動かす (onset が case/44 で +0.18 r_t、Wysłouzil で +0.72 mm 下流; 前線が鋭くなる) ので、既存の凝縮回帰と直接比較しないこと。既定は `speciesFaceReconstruction 0` のまま。
+更新確定時の上下限補正 (0≤ρξ≤ρ, モーメント ≥0) は `passiveFloorCorr_<name>` (level 2) と monitor ログに符号付き/絶対の体積積分 (step 内・累積) で出る。収束時は 0 であること。
+**非定常 (dual-time) の合否**は `python3 solver_density_cuda/tools/check_passive_budget.py <run_dir>` (monitor の `[passive]` 積算 [floor / limCorr / FCT の基点逸脱・ピン交換 / 実現可能性クランプの成分別 |Δ|] を総量比 1e-6 で PASS/FAIL) で判定する。
+checkpoint には受動種の流束形履歴 (`/CHECKPOINT/<cons>_fctG`, `_fctH`, `passive_fctMeff`) が入り、FCT 有効時の restart はこれが揃わないと全系 BDF1 から再開する。
+凝縮モーメントの実現可能性 (許容領域 $x\le1,\ x^2\le y\le\sqrt x$; $x=Q_1/(Q_0r)$, $y=Q_2/(Q_0r^2)$) は更新後に最近点射影 (退化は単分散再初期化) で保証し、作動数と成分別収支を monitor に出す。
+注意: 受動種/化学種の拡散は `viscMethod != 0` のときだけ加わる (viscMethod 0 は定数粘性ではなく「拡散なし」扱い; 化学種と同じ規約)。
+
 ## physProp.chemistry — 有限速度化学 (H₂ 燃焼・ノズル化学非平衡)
 
 多成分 TP (`thermalMethod: 2`, `species` ≥2 種) に化学反応ソース項を加える。理論・実装は
@@ -177,13 +203,11 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
   `condGasSpecies` を併記して食い違えばエラー、数値だけなら範囲検査 (`nSpecies` 超え・単一種で carrier 形はエラー)。起動ログの
   `[species]` 表に `condensing species: H2O (condGasSpecies=1)` と出る。種順序を変えても config を書き直さずに済むので名前を正本にする
   ([plan cea-mole-fraction §2](../plans/accepted/thermophysics-cea-mole-fraction-species.md))。
-- **`physProp.tracer: exhaust`** (physProp, 既定 `none`, 2026-09-16): 受動トレーサ `roXi` (排気率 ξ∈[0,1]) を汎用スカラ輸送コアで
-  移流する (拡散なし・ソースなし)。**定常 point-implicit (`timeIntegration 11`, `dualTime 0`) と陽解法 RK のみ**。`time.dualTime != 0`
-  との併用は config 読込でエラー (トレーサに物理時間項 BDF 履歴・対角が無く、擬似時間反復ごとに前進してしまう; 凝縮モーメントの
-  followups F-cf8 と同じ未対応項目)。node 周期境界では `res_roXi` の合算と `roXi` の root→member ミラーを行う。入口 `inlet_*` は `bcondConfig` の `floats: {Xi: 1.0}`
-  (既定 0) の Dirichlet (node は入口ノードをピン)、他境界は zero-gradient。出力 `roXi` (level 0) / `Xi` (level 1)、残差列
-  `rms_roXi`、restart は `VALUE/roXi` (無ければ 0)。SERN で排気/外気の見分けに使う: 輸送種に純粋な流入元ラベル (排気入口 1・外気入口 0 の種, 旧 `[EXH, AIR]` の Y_EXH) があればそれを ξ に使い、無ければ (`full`、`lumped`+`keep`) このトレーサを輸送する (`species_meta.yaml` の `exhaust_fraction` が正本, `methods/thermophysics.md` §5)。
-  未指定なら変数を登録せず従来経路ビット不変。
+- **`physProp.tracer: exhaust`** (physProp, 既定 `none`, 2026-09-16; 2026-09-17 改定): 受動トレーサ `roXi` (排気率 ξ∈[0,1])。既定 `passiveScalarScheme 1` では
+  **化学種の輸送経路の受動種**として移流 (`speciesFaceReconstruction 2` なら 2 次面再構成)・Fick 拡散 ($D=\mu/(\rho Sc)+\mu_t/(\rho Sc_t)$, 粘性 run のみ)・
+  陰解法更新 (`passiveImplicitCoupling` 0 = point-implicit × `passiveImplicitRelax` / 1 = scalar-DPLUR)・**dual-time の BDF 物理時間項** (履歴 `roXiP/PP`) を持つ。
+  `passiveScalarScheme 0` (旧経路) では汎用スカラの 1 次風上・拡散なしで、`time.dualTime != 0` との併用は config でエラー (物理時間項なし)。
+  SERN で排気/外気の見分けに使う: 輸送種に純粋な流入元ラベル (排気入口 1・外気入口 0 の種, 旧 `[EXH, AIR]` の Y_EXH) があればそれを ξ に使い、無ければ (`full`、`lumped`+`keep`) このトレーサを輸送する (`species_meta.yaml` の `exhaust_fraction` が正本, `methods/thermophysics.md` §5)。
 - **bcond `floats: {X0:.., X1:.., ...}`** (多成分 TP の入口, 2026-09-16): 入口組成を**モル分率**で与える。forge が double で検証し
   $Y_k = X_k M_k / \sum_j X_j M_j$ (MW は `speciesDBFile`/内蔵 DB) に換算して従来の `Y{s}` 経路へ流す。**X を 1 つでも書いたら全種必須**
   (既定補完しない)、同じ境界での `X`/`Y` 混在・負値・非有限・総和 0・範囲外 index はエラー終了。`Y{s}` を明示した場合も負値と

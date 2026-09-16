@@ -76,7 +76,11 @@ $\rho$ と**同一リミッタ $\psi_\rho$** で face へ 2 次再構成し (cla
   リミッタ・中心補間 $Y_f$ (S2c)・移流だけ 2 次化 (S3) はいずれも $\rho$–$Y$ 不整合を再生産し、
   高 CFL で発散または振動悪化する。sharp face で $\psi_\rho \to 0$ のとき $\rho$ と $Y$ が
   **揃って** 1 次化することが安定性の要。
-- **species 移流の 2 次化 (S3, `:2`) は棄却**: 1 次移流の散逸が limit-cycle を減衰させており、
+- **S3 の node 本番化 (2026-09-17〜, plan [species-passive-scalar-unification](../../plans/active/species-passive-scalar-unification.md))**: cell cfl 4 の発散例
+  (`case/28 run_0052`, `speciesImplicitCoupling 1`, relax 0.7) を node で S2/S3 × coupling 0/1 で再現して原因を確定し、残差は常に完全な 2 次 $R_2$ のまま
+  (残差ブレンド型 deferred-correction は固定点を変えるので採らない)、安定化は増分緩和 (`speciesImplicitRelax` / `passiveImplicitRelax`) と擬似 Δτ の上限
+  (`scalarCflMax`) に限定する。受動種 (トレーサ・凝縮モーメント) も同じ S3 分岐で面値を作る (ψ_P; §5b 受動種)。
+- **species 移流の 2 次化 (S3, `:2`) は棄却** (2026-08 時点の判断; 上の本番化で再評価中): 1 次移流の散逸が limit-cycle を減衰させており、
   2 次化 (+1 次 LHS 対角) は defect-correction 不整合で振動を ~10 倍悪化させる。cfl≤2 専用の
   experimental 扱い。
 - 効果 (case/28 He/空気 contact): S2 で圧力振動振幅が cfl2 で −77%、cfl4 で −48%、残差も低下。
