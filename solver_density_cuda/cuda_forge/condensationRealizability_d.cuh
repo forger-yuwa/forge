@@ -165,14 +165,14 @@ __global__ void cond_realizability_clamp_f_d(
     {   // 実現可能性の射影 (double 実体と同じ規則; ρ_l は表 [範囲外は double 関数]; 射影は double で評価)
         const float q0 = roQ0[ic];
         if (q0 > 0.0f && r > 0.0f) {
-            const float Tq = T[ic];
-            const float rho_l = cond_tab_wet_ok(tb, Tq) ? cond_tab_rhol_f(tb, Tq) : (float)cond_rho_cond(cpd, (double)Tq);
-            const float q3 = r / ((4.0f/3.0f)*COND_PI_F*rho_l);
-            const float rr = cbrtf(q3/q0);
-            double x = (double)roQ1[ic]/((double)q0*(double)rr), y = (double)roQ2[ic]/((double)q0*(double)rr*(double)rr);
-            const int kind = (doProject != 0 && rr > 0.0f && rr < 1.0e30f) ? cond_realizability_project(x, y, 1.0e-6) : 0;
+            // 射影の物性は double の式 (表との差 ~1e-4 がゲートの許容 1e-6 を超えないように; 判定は同じ式のゲートと一致させる)
+            const double rho_l = cond_rho_cond(cpd, (double)T[ic]);
+            const double q3 = (double)r / ((4.0/3.0)*COND_PI*rho_l);
+            const double rr = cbrt(q3/(double)q0);
+            double x = (double)roQ1[ic]/((double)q0*rr), y = (double)roQ2[ic]/((double)q0*rr*rr);
+            const int kind = (doProject != 0 && rr > 0.0 && rr < 1.0e300) ? cond_realizability_project(x, y, 1.0e-6) : 0;
             if (kind != 0) {
-                roQ1[ic] = (float)((double)q0*(double)rr*x); roQ2[ic] = (float)((double)q0*(double)rr*(double)rr*y);
+                roQ1[ic] = (float)((double)q0*rr*x); roQ2[ic] = (float)((double)q0*rr*rr*y);
                 if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
             }
         }

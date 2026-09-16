@@ -171,7 +171,7 @@ void condensationRealizabilityProject_d_wrapper(solverConfig& cfg, cudaConfig& c
 {
     if (!condensationEnabled(var) || cfg.condRealizProject == 0) return;
     const CondPropOpts opts = cond_prop_opts(cfg);
-    const int useTab = (cfg.condFloat != 0 && g_condTables.valid) ? 1 : 0;
+    const int useTab = 0;   // 射影は step 末尾の 1 回なので物性は double の式で (float 表との差 [~1e-4] がゲートの許容 1e-6 を超えないように; plan-10 M4)
     for (int s = 0; s < var.nCondSpeciesRegistered; ++s) {
         const std::string i = std::to_string(s);
         cond_realizability_project_only_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(

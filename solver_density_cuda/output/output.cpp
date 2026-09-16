@@ -191,7 +191,7 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
                 ck.createDataSet("/CHECKPOINT/passive_fctMeff", mEff);
             }
         }
-        const double tt = static_cast<double>(cfg.totalTime), dtp = static_cast<double>(cfg.dt);
+        const double tt = cfg.totalTimeD, dtp = static_cast<double>(cfg.dt);
         const int nh = cfg.nHistoryValid;
         // layout: 配列構成に加え、履歴の意味を決める設定 (物理 dt, bdfOrder, passiveScalarScheme, speciesImplicitCoupling) を含める (M3)。
         char dtbuf[64]; std::snprintf(dtbuf, sizeof(dtbuf), "%.17g", dtp);

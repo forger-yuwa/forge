@@ -11,7 +11,8 @@ forge_run.log の最後の `[passive]` 行群 (monitor 区間ごと + 終了時�
   - 独立照合: (全後処理後の最終総量 − 計算開始前の総量; root のみ) と 総増分 の差が総量比 tol を超える → FAIL
   - 低次陰解の受入 (全期間の最大相対線形残差) と HO 残差の全期間最大 → tol_lin (既定 1e-4) を超えたら FAIL
   - 総量 0 で補正が非ゼロ (log 側が rel=1) → FAIL
-使い方: check_passive_budget.py RUN_DIR [--tol 1e-6] [--tol-lin 1e-4] [--allow-lim] [--expect-fct {auto,yes,no}]
+使い方: check_passive_budget.py RUN_DIR [--tol 1e-6] [--tol-lin 1e-4] [--mode auto|fct|conservative|steady] [--no-field]
+必須成分・FCT 作動条件・終了 step は solverConfig.yaml から確定する (passive_gate_common)。確定場の有界性・実現可能性 (check_passive_field) も併せて判定する。
 """
 import argparse, csv, math, os, re, sys
 
@@ -41,8 +42,8 @@ def parse_lines(lines):
             fct_active = True
         m = RE_FLOOR.search(line)
         if m:
-            last[m.group(2)] = dict(step=int(m.group(1)), floor_abs=fnum(m.group(5)), total=fnum(m.group(6)), floor_rel=fnum(m.group(7)),
-                                    lim_abs=fnum(m.group(8)), lim_signed=fnum(m.group(9)), lim_rel=fnum(m.group(10)), initial=fnum(m.group(13)))
+            last[m.group(2)] = dict(step=int(m.group(1)), floor_lo=fnum(m.group(3)), floor_hi=fnum(m.group(4)), floor_abs=fnum(m.group(5)), total=fnum(m.group(6)), floor_rel=fnum(m.group(7)),
+                                    lim_abs=fnum(m.group(8)), lim_signed=fnum(m.group(9)), lim_rel=fnum(m.group(10)), cells=fnum(m.group(11)), thetamin=fnum(m.group(12)), initial=fnum(m.group(13)))
             last_step = int(m.group(1)); continue
         m = RE_FCT.search(line)
         if m:
@@ -50,7 +51,7 @@ def parse_lines(lines):
             fct[g[0]] = dict(dropped=fnum(g[1]), dropped_rel=fnum(g[2]), faces=fnum(g[3]), prelim=fnum(g[4]), pin=fnum(g[5]), pin_rel=fnum(g[6]),
                              base=fnum(g[7]), base_rel=fnum(g[8]), bnd_signed=fnum(g[9]), bnd_dropped=fnum(g[10]), upper=fnum(g[11]), upper_rel=fnum(g[12]),
                              src=fnum(g[13]), rem_signed=fnum(g[14]), rem_abs=fnum(g[15]), rem_rel=fnum(g[16]), increment=fnum(g[17]),
-                             relres_int=fnum(g[18]), relres_run=fnum(g[19]), sweeps=int(g[20]), rh_int=fnum(g[21]), rh_run=fnum(g[22]), nonfinite=int(g[23]) if g[23] is not None else 0, step=last_step)
+                             relres_int=fnum(g[18]), relres_run=fnum(g[19]), sweeps=int(g[20]), rh_int=fnum(g[21]), rh_run=fnum(g[22]), nonfinite=int(g[23]) if g[23] is not None else -1, step=last_step)
             continue
         m = RE_CLAMP.search(line)
         if m:
@@ -69,16 +70,29 @@ def clamp_component(nm):
     return (int(m.group(2)), m.group(1)) if m else None
 
 
-def evaluate(last, fct, clamp, tol, tol_lin, allow_lim, expect_fct, final_step, out=print):
+def evaluate(last, fct, clamp, tol, tol_lin, mode, required, expect_fct, fct_active, final_step, out=print):
+    """mode: 'fct' (FCT 作動 run: 閉合・独立照合・残差), 'conservative' (非 FCT の非定常保存試験: 総量の変化 ≤ tol), 'steady' (定常: lim は許容し floor だけ)。
+    required: config から確定した必須成分名の集合。欠落・解析失敗は FAIL。"""
     ok = True
     if not last:
         out('no [passive] budget lines'); return False
-    for nm, v in last.items():
+    if expect_fct and not fct_active:
+        out('  FAIL: FCT is configured (scheme 1, passiveFct 1, dual-time, SFR>=2, SLAU) but the log has no [passiveFct] active line'); ok = False
+    missing = sorted(set(required) - set(last))
+    if missing:
+        out(f"  FAIL: budget records missing for required components {missing}"); ok = False
+    for nm in sorted(set(last) - set(required)):
+        out(f"  FAIL: unexpected component {nm} (not in the config-derived set)"); ok = False
+    if final_step is None:
+        out('  FAIL: final step unknown (config nStepOuter missing)'); ok = False
+    for nm in sorted(required):
+        v = last.get(nm)
+        if v is None: continue
         fl = []
         if not finite(*v.values()): fl.append('NONFINITE')
         if final_step is not None and v['step'] != final_step: fl.append(f"INCOMPLETE(last record step {v['step']} != final {final_step})")
         if not (v['initial'] >= 0.0): fl.append('NO_INITIAL_TOTAL')
-        total = v['floor_rel'] + (0.0 if allow_lim else v['lim_rel'])
+        total = v['floor_rel'] + (0.0 if mode == 'steady' else v['lim_rel'])
         cc = clamp_component(nm)
         if cc is not None:
             cl = clamp.get(cc[0])
@@ -89,22 +103,28 @@ def evaluate(last, fct, clamp, tol, tol_lin, allow_lim, expect_fct, final_step, 
                 total += cl[cc[1]]
         fdesc = ''
         fe = fct.get(nm)
-        if expect_fct and fe is None:
-            fl.append('NO_FCT_RECORD')
-        if fe is not None:
-            if not finite(*fe.values()): fl.append('NONFINITE')
-            if fe.get('nonfinite', 0) != 0: fl.append('SOLVER_NONFINITE')
-            if fe['step'] != v['step']: fl.append('FCT_RECORD_STEP_MISMATCH')
-            total += fe['base_rel'] + fe['pin_rel'] + fe['rem_rel'] + fe['upper_rel']
-            if not (fe['relres_run'] <= tol_lin): fl.append(f"LOWORDER_RESIDUAL({fe['relres_run']:.1e})")
-            if not (fe['rh_run'] <= tol_lin): fl.append(f"HO_RESIDUAL({fe['rh_run']:.1e})")
-            scale = max(abs(v['total']), abs(v['initial']), 1e-300)
-            closure = fe['increment'] + fe['bnd_signed'] - fe['src'] - fe['rem_signed']
-            if not (abs(closure) <= tol*scale): fl.append(f"CLOSURE({closure/scale:.1e})")
-            indep = (v['total'] - v['initial']) - fe['increment']
-            if not (abs(indep) <= tol*scale): fl.append(f"TOTAL_VS_INCREMENT({indep/scale:.1e})")
-            fdesc = (f" | fct: dropped rel {fe['dropped_rel']:.2e} base {fe['base_rel']:.2e} pin {fe['pin_rel']:.2e} upper {fe['upper_rel']:.2e} remainder {fe['rem_rel']:.2e}"
-                     f" boundary flux {fe['bnd_signed']:.3e} closure {closure/scale:.1e} total-vs-increment {indep/scale:.1e} qL res(run max) {fe['relres_run']:.1e} HO res(run max) {fe['rh_run']:.1e}")
+        scale = max(abs(v['total']), abs(v['initial']), 1e-300)
+        if mode == 'fct':
+            if fe is None:
+                fl.append('NO_FCT_RECORD')
+            else:
+                if not finite(*fe.values()): fl.append('NONFINITE')
+                if fe.get('nonfinite', -1) < 0: fl.append('NONFINITE_FLAG_MISSING')
+                elif fe['nonfinite'] != 0: fl.append('SOLVER_NONFINITE')
+                if fe['step'] != v['step']: fl.append('FCT_RECORD_STEP_MISMATCH')
+                total += fe['base_rel'] + fe['pin_rel'] + fe['rem_rel'] + fe['upper_rel']
+                if not (fe['relres_run'] <= tol_lin): fl.append(f"LOWORDER_RESIDUAL({fe['relres_run']:.1e})")
+                if not (fe['rh_run'] <= tol_lin): fl.append(f"HO_RESIDUAL({fe['rh_run']:.1e})")
+                closure = fe['increment'] + fe['bnd_signed'] - fe['src'] - fe['rem_signed']
+                if not (abs(closure) <= tol*scale): fl.append(f"CLOSURE({closure/scale:.1e})")
+                indep = (v['total'] - v['initial']) - fe['increment']
+                if not (abs(indep) <= tol*scale): fl.append(f"TOTAL_VS_INCREMENT({indep/scale:.1e})")
+                fdesc = (f" | fct: dropped rel {fe['dropped_rel']:.2e} base {fe['base_rel']:.2e} pin {fe['pin_rel']:.2e} upper {fe['upper_rel']:.2e} remainder {fe['rem_rel']:.2e}"
+                         f" boundary flux {fe['bnd_signed']:.3e} closure {closure/scale:.1e} total-vs-increment {indep/scale:.1e} qL res(run max) {fe['relres_run']:.1e} HO res(run max) {fe['rh_run']:.1e}")
+        elif mode == 'conservative':
+            drift = (v['total'] - v['initial'])/scale
+            fdesc = f" | conservation: (final - initial)/scale {drift:.2e}"
+            if not (abs(drift) <= tol): fl.append(f"NOT_CONSERVED({drift:.1e})")
         if not (math.isfinite(total) and total <= tol): fl.append(f'SUM>tol({total:.1e})')
         st = 'FAIL(' + ','.join(fl) + ')' if fl else 'ok'
         ok = ok and not fl
@@ -126,25 +146,43 @@ def final_step_of(run_dir):
 
 
 def main():
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from passive_gate_common import load_config, check_field
     ap = argparse.ArgumentParser()
     ap.add_argument('run_dir')
     ap.add_argument('--tol', type=float, default=1.0e-6)
     ap.add_argument('--tol-lin', type=float, default=1.0e-4, help='低次陰解・HO 残差の全期間最大相対値の許容')
-    ap.add_argument('--allow-lim', action='store_true', help='limCorr (定常の起動緩和) を合否に含めない')
-    ap.add_argument('--expect-fct', choices=['auto', 'yes', 'no'], default='auto')
+    ap.add_argument('--mode', choices=['auto', 'fct', 'conservative', 'steady'], default='auto',
+                    help='auto: FCT が設定されていれば fct、dual-time なら conservative、それ以外 steady')
+    ap.add_argument('--no-field', action='store_true', help='確定場の有界性・実現可能性検査を省く')
     a = ap.parse_args()
     log = os.path.join(a.run_dir, 'forge_run.log')
     if not os.path.exists(log):
         print(f'[{a.run_dir}] NO forge_run.log'); sys.exit(2)
+    try:
+        cfg = load_config(a.run_dir)
+    except Exception as e:
+        print(f'[{a.run_dir}] cannot read solverConfig.yaml: {e}'); sys.exit(2)
+    if cfg['passiveScalarScheme'] != 1 or not cfg['passives']:
+        print(f'[{a.run_dir}] no passive scalars on the species path (scheme {cfg["passiveScalarScheme"]}, passives {cfg["passives"]}): not a gate target'); sys.exit(2)
     with open(log, errors='replace') as f:
         last, fct, clamp, nproj, ndeg, fct_active, last_step = parse_lines(f)
-    if not last:
-        print(f'[{a.run_dir}] no [passive] budget lines (passiveScalarScheme 1 の run のみ対象)'); sys.exit(2)
-    expect = (a.expect_fct == 'yes') or (a.expect_fct == 'auto' and fct_active)
-    final_step = final_step_of(a.run_dir)
-    print(f'passive budget gate for {a.run_dir} (tol {a.tol:g}, tol_lin {a.tol_lin:g}, last record step {last_step}, final step {final_step}, FCT expected: {expect})')
-    ok = evaluate(last, fct, clamp, a.tol, a.tol_lin, a.allow_lim, expect, final_step)
+    mode = a.mode
+    if mode == 'auto':
+        mode = 'fct' if cfg['fct_configured'] else ('conservative' if (cfg['unsteady'] == 1 and cfg['dualTime'] == 1) else 'steady')
+    final_cfg = int(cfg['nStepOuter']) if cfg['nStepOuter'] is not None else None
+    final_csv = final_step_of(a.run_dir)
+    print(f'passive budget gate for {a.run_dir} (mode {mode}, tol {a.tol:g}, tol_lin {a.tol_lin:g}, required {cfg["passives"]}, last record step {last_step}, '
+          f'final step config {final_cfg} csv {final_csv}, FCT configured {cfg["fct_configured"]} active {fct_active})')
+    ok = True
+    if final_cfg is not None and final_csv is not None and final_cfg != final_csv:
+        print(f'  FAIL: run did not complete (config nStepOuter {final_cfg} vs csv last step+1 {final_csv})'); ok = False
+    ok = evaluate(last, fct, clamp, a.tol, a.tol_lin, mode, cfg['passives'], cfg['fct_configured'], fct_active, final_cfg) and ok
     print(f'  realizability corrections: nearest-point {nproj}, degenerate->monodisperse {ndeg}')
+    if not a.no_field:
+        fok, probs = check_field(a.run_dir, cfg)
+        for pr in probs: print('  FAIL(field):', pr)
+        ok = ok and fok
     print('VERDICT:', 'PASS' if ok else 'FAIL')
     sys.exit(0 if ok else 1)
 

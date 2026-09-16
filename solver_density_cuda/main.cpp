@@ -1032,7 +1032,7 @@ static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
                 if (why.empty()) {
                     var.copyVariables_cell_H2D(names);
                     // 受動種 P は host 名で H2D 済み; 化学種 roY{s}P も同様。PP はシフトで上書きされるので不要。
-                    cfg.totalTime = static_cast<flow_float>(tt);
+                    cfg.totalTime = static_cast<flow_float>(tt); cfg.totalTimeD = tt;
                     cfg.nHistoryValid = std::min(nh, 2);
                     // 受動種 FCT の流束形履歴 G/H/ṁ^eff (§4.7 v4, plan-6 M5): FCT 有効なら**必須** (無ければ全系を BDF1 に揃えて再開)。
                     if (passiveFctConfigured(cfg)) {
@@ -1681,7 +1681,7 @@ void advanceExplicitRK(StepContext& s)
     // 物理時間はこの step の前進に使った dt で進める。setDT (dtControl==1 の適応) の後に足すと次 step 用の dt が
     // 加算され t がずれる (旧実装のバグ。適応 sod で step 1 の t=1.087e-6 ≠ 使用 dt 1.097e-6 として露見, 2026-09-09)。
     if (s.cfg.unsteady == 1) {
-        s.cfg.totalTime += s.cfg.dt;
+        s.cfg.totalTimeD += (double)s.cfg.dt; s.cfg.totalTime = static_cast<flow_float>(s.cfg.totalTimeD);
     }
     s.profiler.measureCuda(ProfileSection::SetDt, [&]() {
         setDT_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, /*adaptDt=*/true, /*printCfl=*/printCflExp);
@@ -1867,7 +1867,7 @@ void advanceImplicitDualTime(StepContext& s)
         passiveFctFinishHistory_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, a, b, c);
     }
     s.cfg.unsteadyDiagCoef = 0.0; // 定常側へ影響しないようリセット
-    s.cfg.totalTime += s.cfg.dt;
+    s.cfg.totalTimeD += (double)s.cfg.dt; s.cfg.totalTime = static_cast<flow_float>(s.cfg.totalTimeD);
     s.cfg.nHistoryValid = std::min(s.cfg.nHistoryValid + 1, 2);   // 物理 step 完了: 次 step から Q^{n-1} が有効 (全系共有)
 
     s.profiler.measureWall(ProfileSection::WriteOutputs, [&]() {

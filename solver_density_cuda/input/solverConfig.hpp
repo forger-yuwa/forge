@@ -40,6 +40,7 @@ public:
 
     int dtControl; // 0: use dt , 1: cfl
     flow_float totalTime=0.0;
+    double totalTimeD=0.0;   // 物理時刻の double 積算 (float の毎 step 加算は 3 水準比較で 1e-6 相対の差を作る; checkpoint と次数ゲートはこちら)
     flow_float dt;
     flow_float dt_pseudo;
     flow_float cfl;
