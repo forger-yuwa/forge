@@ -185,6 +185,13 @@ def float_floor_allowance(nstep, kind='signed'):
     return max(1.0e-6, (2.0e-8 if kind == 'signed' else 6.0e-8)*float(nstep))
 
 
+def use_double_dt(cfg):
+    """倍精度ビルド (flow_float=double) の run: 実効刻みを float32 に丸めない (診断用の検証 run; 生産は float)。"""
+    cfg['dt_eff'] = float(cfg['dt']) if cfg['dt'] is not None else None
+    cfg['nominal_time'] = (cfg['dt_eff']*int(cfg['nStepOuter'])) if (cfg['dt_eff'] is not None and cfg['nStepOuter'] is not None) else None
+    return cfg
+
+
 def final_res(run_dir, cfg=None):
     """終了 step の場 res_<nStepOuter>.h5 (無ければ None)。"""
     cfg = cfg or load_config(run_dir)

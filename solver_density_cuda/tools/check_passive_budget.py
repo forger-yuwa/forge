@@ -197,13 +197,14 @@ def closed_and_sourceless(run_dir, cfg):
 
 def main():
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from passive_gate_common import load_config, check_field, final_res
+    from passive_gate_common import load_config, check_field, final_res, use_double_dt
     ap = argparse.ArgumentParser()
     ap.add_argument('run_dir')
     ap.add_argument('--tol', type=float, default=1.0e-6)
     ap.add_argument('--tol-lin', type=float, default=1.0e-4, help='低次陰解・HO 残差の全期間最大相対値の許容')
     ap.add_argument('--mode', choices=['auto', 'fct', 'conservative', 'unsteady', 'steady'], default='auto',
                     help='auto: FCT 設定なら fct; 非 FCT の dual-time は閉境界・無ソースなら conservative (総量不変) さもなくば unsteady (保存は判定不能); 定常は steady')
+    ap.add_argument('--double', action='store_true', help='倍精度ビルドの run: 実効刻みを float32 に丸めない (診断用)')
     ap.add_argument('--no-field', action='store_true', help='確定場の有界性・実現可能性検査を省く')
     a = ap.parse_args()
     log = os.path.join(a.run_dir, 'forge_run.log')
@@ -213,6 +214,7 @@ def main():
         cfg = load_config(a.run_dir)
     except Exception as e:
         print(f'[{a.run_dir}] cannot read solverConfig.yaml: {e}'); sys.exit(2)
+    if a.double: use_double_dt(cfg)
     if cfg['passiveScalarScheme'] != 1 or not cfg['passives']:
         print(f'[{a.run_dir}] no passive scalars on the species path (scheme {cfg["passiveScalarScheme"]}, passives {cfg["passives"]}): not a gate target'); sys.exit(2)
     with open(log, errors='replace') as f:

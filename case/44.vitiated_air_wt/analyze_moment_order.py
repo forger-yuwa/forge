@@ -14,7 +14,7 @@
     初回 0 の列は step 内の全 inner 行が 0 のときだけ受理、各 step の低下 (反復 0/最終反復) の最小値 ≥ --subiter-decades (2.0) を**全列**で
   - 確定場ゲート (0 ≤ roXi/ro ≤ 1、モーメント非負、solver と同じ実現可能性) を全 run で
 使い方: analyze_moment_order.py --levels RUN_2dt RUN_dt RUN_dt/2 --nsub RUN_dt_nsubx2 [--bdf 2] [--expect-fct] [--fields ...]
-終了コード: 0 PASS / 1 FAIL / 3 PARTIAL (--fields が必須集合を覆わない)
+終了コード: 0 PASS / 1 FAIL / 3 PARTIAL (--fields が必須集合を覆わない、または --noise 比較でノイズ律速の量がある)
 """
 import argparse, math, os, sys
 import numpy as np
@@ -42,8 +42,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--levels', nargs=3, required=True, help='dt 2dt, dt, dt/2 の run (同一物理時刻)')
     ap.add_argument('--nsub', required=True, help='dt 水準で nSub を倍にした run (必須)')
+    ap.add_argument('--noise', default=None, help='dt 水準で nSub を +1 した run (同一バイナリのノイズ床; float32 では凝縮モーメントが ulp の数百倍のノイズを持つ [plan §9 2026-09-17])。'
+                    '与えると nSub 倍増差は max(--subiter-ratio × e(dt), 2 × ノイズ) で判定し、e(dt) < 5 × ノイズ の量は次数を判定せず NOISE-LIMITED (PARTIAL 扱い) にする')
     ap.add_argument('--fields', default=None, help='評価量 (省略時は config から全保存量: ro,roUx,roUy,roUz,roe,roY*,受動種)。必須集合を覆わない指定は PARTIAL (exit 3) で正式 PASS にしない')
     ap.add_argument('--bdf', type=int, default=2)
+    ap.add_argument('--double', action='store_true', help='倍精度ビルド (flow_float=double) の run: 実効刻みを float32 に丸めない (診断用; 生産は float)')
     ap.add_argument('--expect-fct', action='store_true', help='FCT 有効試験: config で FCT が有効で log に [passiveFct] active があること')
     ap.add_argument('--order-lo', type=float, default=None); ap.add_argument('--order-hi', type=float, default=None)
     ap.add_argument('--subiter-ratio', type=float, default=0.1)
@@ -51,7 +54,7 @@ def main():
     a = ap.parse_args()
     lo = a.order_lo if a.order_lo is not None else (1.7 if a.bdf == 2 else 0.7)
     hi = a.order_hi if a.order_hi is not None else (2.3 if a.bdf == 2 else 1.3)
-    runs = list(a.levels) + [a.nsub]
+    runs = list(a.levels) + [a.nsub] + ([a.noise] if a.noise else [])
     bad = []
     cfgs = []
     for r in runs:
@@ -62,6 +65,9 @@ def main():
     required_fields = ['ro', 'roUx', 'roUy', 'roUz', 'roe'] + ([f'roY{s}' for s in range(c0['nSpecies'])] if c0['nSpecies'] > 1 else []) + list(c0['passives'])
     fields = a.fields.split(',') if a.fields else list(required_fields)
     partial = sorted(set(required_fields) - set(fields))
+    if a.double:
+        for c in cfgs:
+            c['dt_eff'] = float(c['dt']); c['nominal_time'] = c['dt_eff']*int(c['nStepOuter'])
     for r, c in zip(runs, cfgs):
         for k in ('dt', 'nStepOuter', 'nsub', 'bdfOrder', 'unsteady', 'dualTime', 'timeIntegration', 'outStepInterval'):
             v = c.get(k)
@@ -83,17 +89,24 @@ def main():
     if abs(dts[0]/dts[1] - 2.0) > 1e-12 or abs(dts[1]/dts[2] - 2.0) > 1e-12: bad.append(f'effective dt ratios not 2: {dts}')
     if dts[3] != dts[1] or nst[3] != nst[1]: bad.append('nsub run must have the same dt and nStepOuter as the middle level')
     if nsb[3] != 2*nsb[1] or len({nsb[0], nsb[1], nsb[2]}) != 1: bad.append(f'nSubIterDualTime must be equal on the 3 levels and doubled on the nsub run: {nsb}')
+    if a.noise and (dts[4] != dts[1] or nst[4] != nst[1] or nsb[4] != nsb[1] + 1): bad.append(f'--noise run must have the same dt/nStepOuter as the middle level and nSub+1 (got dt {dts[4]} nStepOuter {nst[4]} nSub {nsb[4]})')
     tnom = [c['nominal_time'] for c in cfgs]
     if any(abs(t - tnom[0]) > 1e-12*abs(tnom[0]) for t in tnom): bad.append(f'nominal end times differ: {tnom}')
     data = [load(r, c, fields) for r, c in zip(runs, cfgs)]
     for r, (f, _, ck), c, t in zip(runs, data, cfgs, tnom):
         print(f'  {r}: {os.path.basename(f)} totalTime={ck.get("totalTime")} dt={ck.get("dt")} nominal {t:.12e} cfg bdf={c["bdfOrder"]} nSub={c["nsub"]} fct={c["passiveFct"]} sfr={c["sfr"]}')
-    print(f"{'field':8s} {'e(2dt)':>11s} {'e(dt)':>11s} {'order':>7s} {'nSub diff':>11s} {'ratio':>7s}  max|q|   verdict")
+    vol = None
+    with h5py.File(data[1][0], 'r') as h:
+        if 'volume' in h['VALUE']: vol = np.asarray(h['VALUE']['volume'], dtype=np.float64)
+    noise_limited = []
+    print(f"{'field':8s} {'e(2dt)':>11s} {'e(dt)':>11s} {'order':>7s} {'nSub diff':>11s} {'ratio':>7s} {'noise':>9s}  max|q|   verdict")
     for k in fields:
         q0, q1, q2, q3 = data[0][1][k], data[1][1][k], data[2][1][k], data[3][1][k]
-        if not all(np.isfinite(q).all() for q in (q0, q1, q2, q3)) or not all(q.shape == q0.shape for q in (q1, q2, q3)):
+        qn = data[4][1][k] if a.noise else None
+        if not all(np.isfinite(q).all() for q in (q0, q1, q2, q3)) or not all(q.shape == q0.shape for q in (q1, q2, q3)) or (qn is not None and (not np.isfinite(qn).all() or qn.shape != q0.shape)):
             print(f'{k:8s} non-finite or shape mismatch'); bad.append(f'{k}: non-finite or shape mismatch'); continue
         e0 = np.linalg.norm(q0 - q1); e1 = np.linalg.norm(q1 - q2); es = np.linalg.norm(q3 - q1)
+        en = np.linalg.norm(qn - q1) if qn is not None else 0.0
         if e0 == 0.0 and e1 == 0.0 and es == 0.0:
             # dt 非依存 (全水準で同一) は時間次数を実証しない: 全水準で恒等的に 0 の量 (2D の roUz 等) だけ情報なしとして通す (codex plan-12 M4)
             if all(not np.any(q) for q in (q0, q1, q2, q3)):
@@ -103,10 +116,26 @@ def main():
         order = math.log2(e0/e1) if e1 > 0 and e0 > 0 else float('nan')
         ratio = es/e1 if e1 > 0 else float('inf')
         v = []
-        if not (lo <= order <= hi): v.append(f'order outside [{lo},{hi}]')
-        if not (ratio <= a.subiter_ratio): v.append(f'sub-iter ratio {ratio:.3f} > {a.subiter_ratio}')
-        print(f'{k:8s} {e0:11.4e} {e1:11.4e} {order:7.3f} {es:11.4e} {ratio:7.3f}  {np.abs(q1).max():.3e}  ' + ('ok' if not v else 'FAIL: ' + '; '.join(v)))
+        if qn is not None and e1 < 5.0*en:
+            # 同一バイナリの nSub+1 差 (ノイズ床) に対して e(dt) が 5 倍未満: 次数も nSub 比も判定不能 (float32 のモーメント; 倍精度で再判定する)
+            noise_limited.append(k)
+            print(f'{k:8s} {e0:11.4e} {e1:11.4e} {order:7.3f} {es:11.4e} {ratio:7.3f} {en:9.2e}  {np.abs(q1).max():.3e}  NOISE-LIMITED (e(dt) < 5 x noise floor): not judged'); 
+        else:
+            if not (lo <= order <= hi): v.append(f'order outside [{lo},{hi}]')
+            if not (ratio <= a.subiter_ratio or (qn is not None and es <= 2.0*en)): v.append(f'sub-iter ratio {ratio:.3f} > {a.subiter_ratio}' + (f' and nSub diff > 2 x noise {en:.2e}' if qn is not None else ''))
+            print(f'{k:8s} {e0:11.4e} {e1:11.4e} {order:7.3f} {es:11.4e} {ratio:7.3f} {en:9.2e}  {np.abs(q1).max():.3e}  ' + ('ok' if not v else 'FAIL: ' + '; '.join(v)))
         bad.extend(f'{k}: {x}' for x in v)
+        # 診断 (判定には使わない): 体積重み総量の次数、e(dt)² の上位 1 % セルへの集中率とその補集合の L2 次数 (前線 [核生成 onset] の非平滑性の指標)
+        d0, d1 = q0 - q1, q1 - q2
+        if vol is not None and vol.shape == q1.shape:
+            t0, t1, t2 = float((q0*vol).sum()), float((q1*vol).sum()), float((q2*vol).sum())
+            otot = math.log2(abs(t0 - t1)/abs(t1 - t2)) if (t1 != t2 and t0 != t1) else float('nan')
+        else:
+            otot = float('nan')
+        n1 = max(1, len(d1)//100); idx = np.argsort(np.abs(d1))[::-1]; m = np.ones(len(d1), bool); m[idx[:n1]] = False
+        share = float((d1[~m]**2).sum()/max((d1**2).sum(), 1e-300)); oc = math.log2(np.linalg.norm(d0[m])/np.linalg.norm(d1[m])) if np.linalg.norm(d1[m]) > 0 and np.linalg.norm(d0[m]) > 0 else float('nan')
+        ol1 = math.log2(np.abs(d0).sum()/np.abs(d1).sum()) if np.abs(d1).sum() > 0 and np.abs(d0).sum() > 0 else float('nan')
+        print(f'{"":8s} diag: L1 order {ol1:.2f}, volume-weighted total order {otot:.2f}, top-1% cells hold {100*share:.0f}% of e(dt)^2, L2 order on the other 99% {oc:.2f}')
     for r, c in zip(runs, cfgs):
         mins, probs = residual_history_check(r, c, a.subiter_decades)
         if mins:
@@ -118,8 +147,8 @@ def main():
         bad.extend(f'{r}: {x}' for x in probs)
     if bad:
         print('VERDICT: FAIL'); [print('  -', b) for b in bad]; sys.exit(1)
-    if partial:
-        print(f'VERDICT: PARTIAL (fields {fields} do not cover the config-derived required set; missing {partial})'); sys.exit(3)
+    if partial or noise_limited:
+        print(f'VERDICT: PARTIAL (' + ('; '.join(x for x in [f'fields {fields} do not cover the config-derived required set; missing {partial}' if partial else '', f'noise-limited (not judged): {noise_limited}' if noise_limited else ''] if x)) + ')'); sys.exit(3)
     print('VERDICT: PASS'); sys.exit(0)
 
 
