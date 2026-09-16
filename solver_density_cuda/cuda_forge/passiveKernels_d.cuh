@@ -43,13 +43,16 @@ __global__ void species_advection_faceY_d(
 //   stats[3] += Σ (ρφ)_after·V (現在の総量; 呼び出し側が毎回 0 にしてから呼ぶ)。
 // 面クリップ (S3) は保存的なので保存量の補正はここだけ (更新 floor)。周期 node では合併体積 V が両側で
 // 二重計上されるが、相対量 (補正/総量) は不変。
+// root (node 周期の periodicRoot; 非周期は nullptr): 収支・総量は **周期 root だけを合併体積で** 数える (codex result M2;
+// member を数えると合併 CV が二重計上される)。クランプ自体は全ノードに掛ける (member は後段のミラーで root に揃う)。
 __global__ void passive_bounds_d(
     geom_int nCells, flow_float* rophi, int upperIsRho, flow_float* ro, geom_float* vol,
-    flow_float* corrCell, double* stats)
+    flow_float* corrCell, double* stats, const geom_int* root)
 {
     const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     double lo = 0.0, hi = 0.0, ab = 0.0, tot = 0.0;
     if (ic < nCells) {
+        const bool count = (root == nullptr) || (root[ic] == ic);
         const flow_float v0 = rophi[ic];
         flow_float v = v0;
         if (v < (flow_float)0.0) v = (flow_float)0.0;
@@ -58,11 +61,13 @@ __global__ void passive_bounds_d(
         const double V = (double)vol[ic];
         if (d != 0.0) {
             rophi[ic] = v;
-            corrCell[ic] += (flow_float)fabs(d);
-            if (d > 0.0) lo = d*V; else hi = d*V;
-            ab = fabs(d)*V;
+            if (count && corrCell != nullptr) {   // corrCell==nullptr: 収支を記録しない (RK の中間ステージ)
+                corrCell[ic] += (flow_float)fabs(d);
+                if (d > 0.0) lo = d*V; else hi = d*V;
+                ab = fabs(d)*V;
+            }
         }
-        tot = (double)v*V;
+        if (count) tot = (double)v*V;
     }
     // block 縮約 → 1 block 1 回の atomicAdd (double)。
     __shared__ double sh[4][32];
@@ -83,6 +88,38 @@ __global__ void passive_bounds_d(
         if (a1 != 0.0) atomicAdd(&stats[1], a1);
         if (a2 != 0.0) atomicAdd(&stats[2], a2);
         if (a3 != 0.0) atomicAdd(&stats[3], a3);
+    }
+}
+
+// 受動種の増分スケーリング (codex result M5; 凝縮の θ_u と同じ概念): 更新後の候補 ρφ = ρφ_N + δ に対し
+//   θ_b = min(1, allowed/|δ|),  allowed = (δ>0: 上限 [ρ, upperIsRho] − ρφ_N ; δ<0: ρφ_N − 0)
+// で増分全体を縮め、確定状態を [0, ρ] (トレーサ) / ≥0 (モーメント) に保つ。ρφ_N 自体が範囲外 (流れ更新で ρ が減った等) なら
+// θ_b=0 で N に留め、その後の硬い floor (passive_bounds_d, 最後の砦) が処理する。
+//   limCell[ic] += (1−θ_b)|δ| (セル累積), stats[0] += Σ(1−θ_b)|δ|·V, stats[1] += 作動セル数, stats[2] += Σ(θ_b−1)δ·V (符号付き) (root のみ), thetaMinInt = min(θ_b·1e9)。
+__global__ void passive_limit_increment_d(
+    geom_int nCells, flow_float* rophi, const flow_float* rophiN, int upperIsRho, const flow_float* ro, const geom_float* vol,
+    flow_float* limCell, double* stats, int* thetaMinInt, const geom_int* root)
+{
+    const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    const double N = (double)rophiN[ic];
+    const double d = (double)rophi[ic] - N;
+    if (d == 0.0) return;
+    double allowed;
+    if (d > 0.0) allowed = (upperIsRho != 0) ? ((double)ro[ic] - N) : 1.0e300;
+    else         allowed = N;
+    if (allowed < 0.0) allowed = 0.0;
+    double th = allowed / fabs(d);
+    if (th >= 1.0) return;
+    rophi[ic] = (flow_float)(N + th*d);
+    const bool count = (root == nullptr) || (root[ic] == ic);
+    if (count && limCell != nullptr) {   // limCell==nullptr: 収支を記録しない (RK の中間ステージ)
+        const double amt = (1.0 - th)*fabs(d);
+        limCell[ic] += (flow_float)amt;
+        atomicAdd(&stats[0], amt*(double)vol[ic]);          // 絶対量 Σ(1−θ)|δ|V
+        atomicAdd(&stats[1], 1.0);                          // 作動セル数
+        atomicAdd(&stats[2], (th - 1.0)*d*(double)vol[ic]); // 符号付き (確定 − 候補) Σ(θ−1)δV: 保存収支の説明に使う
+        atomicMin(thetaMinInt, (int)(th*1.0e9));
     }
 }
 

@@ -289,7 +289,10 @@ void condensationTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConf
                     var.c_d["condLim_"+i], var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i],
                     (double)relax, dts, /*applyFloor=*/0,
                     haveDq ? var.c_d["dq_"+g+"_old"]  : nullptr, haveDq ? var.c_d["dq_"+Q2+"_old"] : nullptr,
-                    haveDq ? var.c_d["dq_"+Q1+"_old"] : nullptr, haveDq ? var.c_d["dq_"+Q0+"_old"] : nullptr);
+                    haveDq ? var.c_d["dq_"+Q1+"_old"] : nullptr, haveDq ? var.c_d["dq_"+Q0+"_old"] : nullptr,
+                    /*boundByTheta=*/1,
+                    passive_limCorr_cell_ptr(q0+4*s+0), passive_limCorr_cell_ptr(q0+4*s+1), passive_limCorr_cell_ptr(q0+4*s+2), passive_limCorr_cell_ptr(q0+4*s+3),
+                    passive_lim_stats_ptr(q0+4*s+0) /* 連続 4 スロットではないので kernel 側は stride 8 で書く */, passive_periodic_root(cfg, msh));
             }
         } else {
             if (loop == 0) {
@@ -313,7 +316,9 @@ void condensationTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConf
         }
         gpuErrchk( cudaPeekAtLastError() );
         gpuErrchkKernelSync();
-        passiveBounds_d_wrapper(cfg, cuda_cfg, msh, var, q0, nq);   // ρφ >= 0 と補正収支
+        const bool rec = passiveRecordStage(cfg, loop);
+        passiveLimitIncrement_d_wrapper(cfg, cuda_cfg, msh, var, q0, nq, rec);   // θ_b 増分スケーリング (M5; 更新クランプ経路では通常無作用)
+        passiveBounds_d_wrapper(cfg, cuda_cfg, msh, var, q0, nq, rec);           // ρφ >= 0 と補正収支 (最後の砦)
         passiveMirrorPeriodic_d_wrapper(cfg, cuda_cfg, msh, var);
         return;
     }

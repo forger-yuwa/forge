@@ -1,3 +1,4 @@
+#include <cstdio>
 #include "output.hpp"
 
 #include <iostream>
@@ -163,8 +164,11 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
     if (cfg.unsteady == 1 && cfg.dualTime == 1) {
         std::list<std::string> hist = {"roN", "roUxN", "roUyN", "roUzN", "roeN", "roKN", "roOmegaN"};
         for (const auto& nm : var.speciesVarNames) hist.push_back(nm + "P");
-        if (var.tracerRegistered != 0) hist.push_back("roXiP");
-        for (const auto& nm : var.condMomentConsNames) hist.push_back(nm + "P");
+        // 受動種の履歴は scheme 1 (BDF あり) のときだけ書く (scheme 0 はシフトしない = 無効な履歴; codex result M3)。
+        if (cfg.passiveScalarScheme == 1) {
+            if (var.tracerRegistered != 0) hist.push_back("roXiP");
+            for (const auto& nm : var.condMomentConsNames) hist.push_back(nm + "P");
+        }
         std::list<std::string> have;
         for (const auto& nm : hist) if (var.c.count(nm)) have.push_back(nm);
         if (cfg.gpu == 1) var.copyVariables_cell_D2H(have);
@@ -175,8 +179,13 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
         }
         const double tt = static_cast<double>(cfg.totalTime), dtp = static_cast<double>(cfg.dt);
         const int nh = cfg.nHistoryValid;
+        // layout: 配列構成に加え、履歴の意味を決める設定 (物理 dt, bdfOrder, passiveScalarScheme, speciesImplicitCoupling) を含める (M3)。
+        char dtbuf[64]; std::snprintf(dtbuf, sizeof(dtbuf), "%.17g", dtp);
         const std::string layout = "nSpecies=" + std::to_string(var.nSpeciesRegistered) + ";tracer=" + std::to_string(var.tracerRegistered)
-                                 + ";nCond=" + std::to_string(var.nCondSpeciesRegistered);
+                                 + ";nCond=" + std::to_string(var.nCondSpeciesRegistered)
+                                 + ";dt=" + std::string(dtbuf) + ";bdfOrder=" + std::to_string(cfg.bdfOrder)
+                                 + ";passiveScalarScheme=" + std::to_string(cfg.passiveScalarScheme)
+                                 + ";speciesImplicitCoupling=" + std::to_string(cfg.speciesImplicitCoupling);
         ck.createAttribute<double>("totalTime", HighFive::DataSpace::From(tt)).write(tt);
         ck.createAttribute<double>("dt", HighFive::DataSpace::From(dtp)).write(dtp);
         ck.createAttribute<int>("nHistoryValid", HighFive::DataSpace::From(nh)).write(nh);

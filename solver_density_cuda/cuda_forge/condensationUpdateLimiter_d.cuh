@@ -30,7 +30,11 @@ __device__ __forceinline__ void cond_moment_update_limited_body(
     flow_float* out_g, flow_float* out_Q2, flow_float* out_Q1, flow_float* out_Q0,
     flow_float* diagLim, flow_float* diagCorrG, flow_float* diagCorrQ,
     double relax, flow_float dtScale, int applyFloor,
-    flow_float* dq_g, flow_float* dq_Q2, flow_float* dq_Q1, flow_float* dq_Q0)
+    flow_float* dq_g, flow_float* dq_Q2, flow_float* dq_Q1, flow_float* dq_Q0,
+    // codex result M5 (受動種経路のみ; boundByTheta 0 で従来と同一): 4 モーメントの非負を **共通 θ** で保証する増分縮小
+    // θ_neg = min_k N_k/|d_k| (d_k<0 かつ N_k+d_k<0)。縮小量 (θ_u − θ)|d_k| を limCorr_k (セル累積) と limStats[8k] (Σ·V, root のみ; 受動種収支の stride 8) に記録。
+    int boundByTheta, flow_float* limCorr_g, flow_float* limCorr_Q2, flow_float* limCorr_Q1, flow_float* limCorr_Q0,
+    double* limStats, const geom_int* root)
 {
     const double dt = (double)(dt_local[ic] * dtScale);
     const double v  = (double)vol[ic];
@@ -78,6 +82,30 @@ __device__ __forceinline__ void cond_moment_update_limited_body(
             if (!(theta > 1.0e-12)) theta = 1.0e-12;   // 常に正 (停止穴なし)
         }
     }
+    if (boundByTheta != 0) {
+        const double theta_u = theta;
+        const double Nk[4] = {(double)N_g[ic], (double)N_Q2[ic], (double)N_Q1[ic], (double)N_Q0[ic]};
+        const double dk[4] = {d_g, d_Q2, d_Q1, d_Q0};
+        for (int k = 0; k < 4; ++k) {
+            if (dk[k] < 0.0 && Nk[k] + theta*dk[k] < 0.0) {
+                const double th = (Nk[k] > 0.0) ? Nk[k] / (-dk[k]) : 0.0;
+                if (th < theta) theta = th;
+            }
+        }
+        if (theta < theta_u) {
+            const bool count = (root == nullptr) || (root[ic] == ic);
+            flow_float* lc[4] = {limCorr_g, limCorr_Q2, limCorr_Q1, limCorr_Q0};
+            for (int k = 0; k < 4; ++k) {
+                const double amt = (theta_u - theta)*fabs(dk[k]);
+                if (lc[k] != nullptr && count) lc[k][ic] += (flow_float)amt;
+                if (limStats != nullptr && count) {
+                    atomicAdd(&limStats[(size_t)k*8], amt*v);                              // 絶対量 (受動種 q=g..Q0 の収支スロット, stride 8)
+                    atomicAdd(&limStats[(size_t)k*8 + 1], 1.0);                            // 作動セル数
+                    atomicAdd(&limStats[(size_t)k*8 + 2], (theta - theta_u)*dk[k]*v);       // 符号付き (確定 − 候補)
+                }
+            }
+        }
+    }
     const double ng  = (double)N_g[ic]  + theta*d_g;
     const double nQ2 = (double)N_Q2[ic] + theta*d_Q2;
     const double nQ1 = (double)N_Q1[ic] + theta*d_Q1;
@@ -118,7 +146,8 @@ __global__ void cond_moment_update_limited_d(
     cond_moment_update_limited_body(ic, dt_local, vol, ro, roY_w, Yw_const, T, cp_cell, Rmix_cell, cp_cpg, gamma_cpg,
         condModel, opts, dg_max, dT_max, lam_min, N_g, N_Q2, N_Q1, N_Q0, res_g, res_Q2, res_Q1, res_Q0,
         sj_g, sj_Q2, sj_Q1, sj_Q0, td_g, td_Q2, td_Q1, td_Q0, out_g, out_Q2, out_Q1, out_Q0, diagLim, diagCorrG, diagCorrQ,
-        1.0, (flow_float)1.0, 1, nullptr, nullptr, nullptr, nullptr);
+        1.0, (flow_float)1.0, 1, nullptr, nullptr, nullptr, nullptr,
+        0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
 }
 
 // 受動種経路 (passiveScalarScheme 1) 用: 緩和・dt 倍率・floor 省略・DPLUR 増分入力を持つ変種 (本文は同じ)。
@@ -133,12 +162,15 @@ __global__ void cond_moment_update_limited_passive_d(
     flow_float* out_g, flow_float* out_Q2, flow_float* out_Q1, flow_float* out_Q0,
     flow_float* diagLim, flow_float* diagCorrG, flow_float* diagCorrQ,
     double relax, flow_float dtScale, int applyFloor,
-    flow_float* dq_g, flow_float* dq_Q2, flow_float* dq_Q1, flow_float* dq_Q0)
+    flow_float* dq_g, flow_float* dq_Q2, flow_float* dq_Q1, flow_float* dq_Q0,
+    int boundByTheta, flow_float* limCorr_g, flow_float* limCorr_Q2, flow_float* limCorr_Q1, flow_float* limCorr_Q0,
+    double* limStats, const geom_int* root)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     cond_moment_update_limited_body(ic, dt_local, vol, ro, roY_w, Yw_const, T, cp_cell, Rmix_cell, cp_cpg, gamma_cpg,
         condModel, opts, dg_max, dT_max, lam_min, N_g, N_Q2, N_Q1, N_Q0, res_g, res_Q2, res_Q1, res_Q0,
         sj_g, sj_Q2, sj_Q1, sj_Q0, td_g, td_Q2, td_Q1, td_Q0, out_g, out_Q2, out_Q1, out_Q0, diagLim, diagCorrG, diagCorrQ,
-        relax, dtScale, applyFloor, dq_g, dq_Q2, dq_Q1, dq_Q0);
+        relax, dtScale, applyFloor, dq_g, dq_Q2, dq_Q1, dq_Q0,
+        boundByTheta, limCorr_g, limCorr_Q2, limCorr_Q1, limCorr_Q0, limStats, root);
 }

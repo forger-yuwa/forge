@@ -986,10 +986,18 @@ static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
 
     std::list<std::string> hist = {"roN", "roUxN", "roUyN", "roUzN", "roeN", "roKN", "roOmegaN"};
     for (const auto& nm : var.speciesVarNames) hist.push_back(nm + "P");
-    if (var.tracerRegistered != 0) hist.push_back("roXiP");
-    for (const auto& nm : var.condMomentConsNames) hist.push_back(nm + "P");
+    if (cfg.passiveScalarScheme == 1) {   // scheme 0 の受動種は物理時間項を持たないので履歴は要らない (書きもしない)
+        if (var.tracerRegistered != 0) hist.push_back("roXiP");
+        for (const auto& nm : var.condMomentConsNames) hist.push_back(nm + "P");
+    }
+    // 復元条件 (codex result M3): 配列構成に加え、履歴を生成した物理 dt (相対 1e-12)・bdfOrder・passiveScalarScheme・
+    // speciesImplicitCoupling が一致すること。1 つでも違えば全系を BDF1 から再開する (刻み変更 restart は最初の step の時間微分が狂う)。
+    char dtbuf[64]; std::snprintf(dtbuf, sizeof(dtbuf), "%.17g", (double)cfg.dt);
     const std::string layout = "nSpecies=" + std::to_string(var.nSpeciesRegistered) + ";tracer=" + std::to_string(var.tracerRegistered)
-                             + ";nCond=" + std::to_string(var.nCondSpeciesRegistered);
+                             + ";nCond=" + std::to_string(var.nCondSpeciesRegistered)
+                             + ";dt=" + std::string(dtbuf) + ";bdfOrder=" + std::to_string(cfg.bdfOrder)
+                             + ";passiveScalarScheme=" + std::to_string(cfg.passiveScalarScheme)
+                             + ";speciesImplicitCoupling=" + std::to_string(cfg.speciesImplicitCoupling);
     std::string why;
     try {
         HighFive::File file(cfg.valueFileName, HighFive::File::ReadOnly);
@@ -1003,7 +1011,9 @@ static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
             } else {
                 ck.getAttribute("layout").read(lay); ck.getAttribute("totalTime").read(tt);
                 ck.getAttribute("dt").read(dtp);     ck.getAttribute("nHistoryValid").read(nh);
-                if (lay != layout) why = "layout mismatch (file '" + lay + "' vs run '" + layout + "')";
+                if (std::abs(dtp - (double)cfg.dt) > 1.0e-12 * std::max(std::abs(dtp), std::abs((double)cfg.dt)))
+                    why = "physical dt differs from the checkpoint (file " + std::to_string(dtp) + " vs run " + std::to_string((double)cfg.dt) + ")";
+                else if (lay != layout) why = "layout mismatch (file '" + lay + "' vs run '" + layout + "')";
                 else if (nh < 1) why = "checkpoint has no valid history (nHistoryValid=0)";
                 else {
                     for (const auto& nm : hist) if (!file.exist("/CHECKPOINT/" + nm)) { why = "missing dataset /CHECKPOINT/" + nm; break; }
@@ -1025,7 +1035,6 @@ static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
                     cfg.nHistoryValid = std::min(nh, 2);
                     std::cout << "[dual-time] history restored from " << cfg.valueFileName << " (/CHECKPOINT: " << names.size()
                               << " levels, totalTime=" << tt << ", dt_file=" << dtp << ", nHistoryValid=" << cfg.nHistoryValid
-                              << (std::abs(dtp - (double)cfg.dt) > 1e-12 * std::max(1.0, std::abs(dtp)) ? "; WARNING dt differs from the checkpoint (BDF2 assumes uniform dt)" : "")
                               << ")\n";
                     return;
                 }

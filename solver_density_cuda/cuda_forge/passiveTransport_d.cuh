@@ -70,8 +70,17 @@ bool passiveDPLURIncrement_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
 void passiveCommitIncrement_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int q);
 // トレーサの更新 (scheme 1): point-implicit (relax) または DPLUR 増分の commit → 上下限 0<=ρξ<=ρ (更新済み ρ) と補正収支。
 void passiveTracerUpdate_d_wrapper(int loop, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+// 増分スケーリング (codex result M5): 候補 ρφ (= ρφ_N + δ) の δ を θ_b で縮めて [0,ρ]/≥0 を保つ。passiveBounds の前に呼ぶ。
+// record=false (RK の中間ステージ) では状態は制限するが収支 (セル累積・積算) には載せない: 収支は確定ステージの増分だけで Δ∫ρφ を説明する。
+void passiveLimitIncrement_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int q0, int nq, bool record = true);
+// モーメントの更新クランプ (cond_moment_update_limited_passive_d) が使う受動種 q の limCorr セル配列 / 収支スロット / 周期 root。
+flow_float* passive_limCorr_cell_ptr(int q);
+double*     passive_lim_stats_ptr(int q);      // Σ(1−θ)|δ|·V の積算スロット (受動種 q)
+const geom_int* passive_periodic_root(solverConfig& cfg, mesh& msh);   // node 周期なら periodicRoot_d、他は nullptr
 // 更新確定時の上下限と補正収支 [q0, q0+nq) (トレーサは上限 ρ、モーメントは下限 0 のみ)。
-void passiveBounds_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int q0, int nq);
+void passiveBounds_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int q0, int nq, bool record = true);
+// 時間積分ステージ loop が収支を記録する確定ステージか (timeIntegration 11 は常に true; RK は最終ステージのみ)。
+bool passiveRecordStage(const solverConfig& cfg, int loop);
 // 補正収支の要約を stdout に出す (monitorInterval ごと): 前回出力からの平均/step と全期間積算、相対量 (積算|Δ|/∫ρφ dV)。
 void passiveFloorCorrLog_d_wrapper(solverConfig& cfg, int iStep);
 // 単体試験・後処理用: 積算 (lo, hi, abs, total) を host へ (nPassive×4)。

@@ -127,12 +127,12 @@ void variables::registerTracer(int enabled)
     this->output_cellValNames.push_back("Xi");
     // 受動種経路 (passiveScalarScheme 1; plan species-passive-scalar-unification §4.1): 勾配 ∇ξ・リミッタ ψ_ξ (S3 面再構成)、
     // scalar-DPLUR 増分 dq、floor 補正の累積 |Δ(ρξ)| (passiveFloorCorr_Xi; 確保時 0 初期化)。勾配/リミッタ/補正は level 2 出力のみ。
-    for (const auto& name : {"dXidx", "dXidy", "dXidz", "limiter_Xi", "passiveFloorCorr_Xi", "dq_roXi", "dq_roXi_old", "roXiP", "roXiPP"}) {
+    for (const auto& name : {"dXidx", "dXidy", "dXidz", "limiter_Xi", "passiveFloorCorr_Xi", "passiveLimCorr_Xi", "dq_roXi", "dq_roXi_old", "roXiP", "roXiPP"}) {
         this->cellValNames.push_back(name);
         this->c.emplace(name, std::vector<flow_float>{});
         this->c_d.emplace(name, nullptr);
     }
-    for (const auto& name : {"dXidx", "dXidy", "dXidz", "limiter_Xi", "passiveFloorCorr_Xi"}) this->output_cellValNames.push_back(name);
+    for (const auto& name : {"dXidx", "dXidy", "dXidz", "limiter_Xi", "passiveFloorCorr_Xi", "passiveLimCorr_Xi"}) this->output_cellValNames.push_back(name);
     std::cout << "registerTracer: exhaust tracer roXi registered (17 cell variables)\n";
 }
 
@@ -151,7 +151,7 @@ static std::list<std::string> condMomentCellVarNames(const std::string& consName
         "res_"+consName, "res_"+consName+"_m",
         "src_jac_"+prim, "transport_diag_"+prim,
         // 受動種経路 (passiveScalarScheme 1): 勾配・リミッタ (S3)、scalar-DPLUR 増分、floor 補正の累積 |Δ(ρφ)|
-        "d"+prim+"dx", "d"+prim+"dy", "d"+prim+"dz", "limiter_"+prim, "passiveFloorCorr_"+prim,
+        "d"+prim+"dx", "d"+prim+"dy", "d"+prim+"dz", "limiter_"+prim, "passiveFloorCorr_"+prim, "passiveLimCorr_"+prim,
         "dq_"+consName, "dq_"+consName+"_old",
         consName+"P", consName+"PP"   // dual-time の物理時間レベル (受動種 BDF 項用)
     };
@@ -184,7 +184,7 @@ void variables::registerCondensation(int nCondSpecies)
             this->output_cellValNames.push_back(consName.substr(2));
             // 受動種経路の診断 (level 2 のみ): 勾配・リミッタ・floor 補正の累積。
             const std::string prim = consName.substr(2);
-            for (const auto& name : {"d"+prim+"dx", "d"+prim+"dy", "d"+prim+"dz", "limiter_"+prim, "passiveFloorCorr_"+prim}) {
+            for (const auto& name : {"d"+prim+"dx", "d"+prim+"dy", "d"+prim+"dz", "limiter_"+prim, "passiveFloorCorr_"+prim, "passiveLimCorr_"+prim}) {
                 this->output_cellValNames.push_back(name);
             }
         }
@@ -292,7 +292,7 @@ void variables::allocVariables(const int &useGPU , mesh& msh)
             // (未初期化 device メモリを出力しないため)。
             if (cellValName.rfind("wi_", 0) == 0 || cellValName.rfind("omg_", 0) == 0
                 || cellValName.rfind("rep_", 0) == 0 || cellValName.rfind("cond", 0) == 0
-                || cellValName.rfind("passiveFloorCorr_", 0) == 0 || cellValName.rfind("roYraw", 0) == 0
+                || cellValName.rfind("passiveFloorCorr_", 0) == 0 || cellValName.rfind("passiveLimCorr_", 0) == 0 || cellValName.rfind("roYraw", 0) == 0
                 || cellValName == "wf_irep_flag" || cellValName == "wf_sprod"
                 || cellValName == "wf_g") {
                 gpuErrchk( cudaMemset(this->c_d.at(cellValName), 0, (msh.nCells_all)*sizeof(flow_float)) );

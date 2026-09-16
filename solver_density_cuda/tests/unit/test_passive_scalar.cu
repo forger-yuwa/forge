@@ -179,7 +179,7 @@ static AdvResult run_advection(const Chain& m, int order, int nStep, float cfl)
         cudaDeviceSynchronize();
         { auto r = down(drophi, (size_t)n); double s = 0.0; for (int i = 0; i < n; ++i) s += r[i]*m.vol[i]; massRaw = s; }   // 補正前の総量 (最終 step のみ使う)
         cudaMemset(dstats+3, 0, sizeof(double));
-        passive_bounds_d<<<(n+127)/128,128>>>(n, drophi, 1, dro, dvol, dcorr, dstats);
+        passive_bounds_d<<<(n+127)/128,128>>>(n, drophi, 1, dro, dvol, dcorr, dstats, nullptr);
         cudaDeviceSynchronize();
     }
     cudaError_t e = cudaDeviceSynchronize(); if (e != cudaSuccess) { printf("CUDA error %s\n", cudaGetErrorString(e)); ++g_fail; }
@@ -229,7 +229,7 @@ static void test_bounds_budget()
     const int n = 300; std::vector<float> ro(n, 2.f), v(n), corr(n, 0.f); std::vector<geom_float> vol(n, 0.5f);
     for (int i = 0; i < n; ++i) v[i] = (i % 3 == 0) ? -0.25f : ((i % 3 == 1) ? 2.5f : 1.0f);   // 100 個ずつ: 負 / ρ 超過 / 正常
     float *dro=up(ro),*dv=up(v),*dcorr=up(corr); geom_float* dvol=up(vol); std::vector<double> st(4,0.0); double* dst=up(st);
-    passive_bounds_d<<<(n+127)/128,128>>>(n, dv, 1, dro, dvol, dcorr, dst); cudaDeviceSynchronize();
+    passive_bounds_d<<<(n+127)/128,128>>>(n, dv, 1, dro, dvol, dcorr, dst, nullptr); cudaDeviceSynchronize();
     auto s = down(dst, (size_t)4); auto out = down(dv, (size_t)n); auto c = down(dcorr, (size_t)n);
     const double lo = 100*0.25*0.5, hi = -100*0.5*0.5, ab = lo - hi, tot = (100*0.0 + 100*2.0 + 100*1.0)*0.5;
     CHECK(fabs(s[0]-lo) < 1e-9 && fabs(s[1]-hi) < 1e-9 && fabs(s[2]-ab) < 1e-9 && fabs(s[3]-tot) < 1e-9, "stats lo %g hi %g abs %g tot %g (expected %g %g %g %g)", s[0], s[1], s[2], s[3], lo, hi, ab, tot);
@@ -239,7 +239,7 @@ static void test_bounds_budget()
     }
     // モーメント (上限なし): 超過値はそのまま
     cudaMemcpy(dv, v.data(), n*sizeof(float), cudaMemcpyHostToDevice); cudaMemset(dst, 0, 4*sizeof(double)); cudaMemset(dcorr, 0, n*sizeof(float));
-    passive_bounds_d<<<(n+127)/128,128>>>(n, dv, 0, dro, dvol, dcorr, dst); cudaDeviceSynchronize();
+    passive_bounds_d<<<(n+127)/128,128>>>(n, dv, 0, dro, dvol, dcorr, dst, nullptr); cudaDeviceSynchronize();
     s = down(dst, (size_t)4); out = down(dv, (size_t)n);
     CHECK(fabs(s[0]-lo) < 1e-9 && s[1] == 0.0 && fabs(s[2]-lo) < 1e-9, "moment stats lo %g hi %g abs %g", s[0], s[1], s[2]);
     CHECK(out[1] == 2.5f, "moment upper bound must not apply (out %g)", out[1]);
