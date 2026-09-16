@@ -9,6 +9,23 @@
 
 
 // モーメント実現可能性の射影 (plan §4.7 v5, codex plan-5 M3/M4, plan-6 M3): 無次元 x = Q1/(Q0 r), y = Q2/(Q0 r²), r = (Q3/Q0)^{1/3}。
+
+// 半径 r=(Q3/Q0)^{1/3} と無次元モーメント x=Q1/(Q0 r), y=Q2/(Q0 r²) を**指数を分離して**作る (codex result-4 M1)。
+//   ρg が極小だと q3 = ρg/(4/3 π ρ_l) が underflow して r=0 になり、素直に割ると x,y が ∞/NaN になって
+//   「修復できないので触らない」= 実現不能状態が残る。log 空間で組めば r が表現できない領域でも x,y は有限に出る。
+// 戻り値 false: Q1, Q2 がともに 0 以下 (= 液滴なし; 呼び出し側で退化として扱う)。
+__host__ __device__ inline bool cond_moment_xy(double q3, double q0, double q1, double q2, double& x, double& y)
+{
+    if (!(q3 > 0.0) || !(q0 > 0.0)) return false;
+    const double lr = (log(q3) - log(q0))/3.0;                 // ln r
+    x = (q1 > 0.0) ? exp(log(q1) - log(q0) - lr)       : 0.0;
+    y = (q2 > 0.0) ? exp(log(q2) - log(q0) - 2.0*lr)   : 0.0;
+    if (!(x == x) || !(y == y)) return false;
+    if (x > 1.0e300) x = 1.0e300;
+    if (y > 1.0e300) y = 1.0e300;
+    return true;
+}
+
 // 許容領域 A = {0 ≤ x ≤ 1, x² ≤ y ≤ √x} (Hankel H1, H2 ⪰ 0)。判定は相対許容 eps (境界上の整合状態 [単分散 (1,1)] は触らない)。
 //   特異不整合 (x または y が厳密 0 / アンダーフロー なのに Q3 > 0) は (Q0, g) 保存の単分散 (1,1) へ再初期化 (閾値なし: 小さい正の x は領域内部でもあり得る)。
 //   それ以外の違反は A への最近点 (ユークリッド距離; x, y 両方を動かす) — 境界 y=√x / y=x² / 角 (1,1) の候補から最小距離を選ぶ (連続)。
@@ -94,10 +111,21 @@ __global__ void cond_realizability_clamp_d(
             const double rho_l = cond_rho_cond(cp0, (double)T[ic]);
             const double q3 = rg / ((4.0/3.0)*COND_PI*rho_l);
             const double rr = cbrt(q3/q0);
-            double x = (double)roQ1[ic]/(q0*rr), y = (double)roQ2[ic]/(q0*rr*rr);
-            const int kind = (doProject != 0 && rr > 0.0 && rr < 1.0e300) ? cond_realizability_project(x, y, 1.0e-6) : 0;
+            double x = 0.0, y = 0.0;
+            const bool haveXY = cond_moment_xy(q3, q0, (double)roQ1[ic], (double)roQ2[ic], x, y);   // 指数分離 (codex result-4 M1)
+            if (doProject != 0 && !haveXY) {
+                // Q3 が表現できない塵 (r=0): 実現可能な唯一の状態は Q1=Q2=0
+                if (!(roQ1[ic] == (flow_float)0.0 && roQ2[ic] == (flow_float)0.0)) {
+                    roQ1[ic] = (flow_float)0.0; roQ2[ic] = (flow_float)0.0;
+                    if (realizViol != nullptr) atomicAdd(realizViol + 1, 1);
+                }
+            }
+            const int kind = (doProject != 0 && haveXY) ? cond_realizability_project(x, y, 1.0e-6) : 0;
             if (kind != 0) {
-                roQ1[ic] = (flow_float)(q0*rr*x); roQ2[ic] = (flow_float)(q0*rr*rr*y);
+                if (rr > 0.0 && rr < 1.0e300) { roQ1[ic] = (flow_float)(q0*rr*x); roQ2[ic] = (flow_float)(q0*rr*rr*y); }
+                else { const double lr = (log(q3) - log(q0))/3.0;
+                       roQ1[ic] = (flow_float)((x > 0.0) ? exp(log(x) + log(q0) + lr) : 0.0);
+                       roQ2[ic] = (flow_float)((y > 0.0) ? exp(log(y) + log(q0) + 2.0*lr) : 0.0); }
                 if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
             }
         }
@@ -175,10 +203,20 @@ __global__ void cond_realizability_clamp_f_d(
             const double rho_l = cond_rho_cond(cpd, (double)T[ic]);
             const double q3 = (double)r / ((4.0/3.0)*COND_PI*rho_l);
             const double rr = cbrt(q3/(double)q0);
-            double x = (double)roQ1[ic]/((double)q0*rr), y = (double)roQ2[ic]/((double)q0*rr*rr);
-            const int kind = (doProject != 0 && rr > 0.0 && rr < 1.0e300) ? cond_realizability_project(x, y, 1.0e-6) : 0;
+            double x = 0.0, y = 0.0;
+            const bool haveXY = cond_moment_xy(q3, (double)q0, (double)roQ1[ic], (double)roQ2[ic], x, y);   // 指数分離 (codex result-4 M1)
+            if (doProject != 0 && !haveXY) {
+                if (!(roQ1[ic] == 0.0f && roQ2[ic] == 0.0f)) {
+                    roQ1[ic] = 0.0f; roQ2[ic] = 0.0f;
+                    if (realizViol != nullptr) atomicAdd(realizViol + 1, 1);
+                }
+            }
+            const int kind = (doProject != 0 && haveXY) ? cond_realizability_project(x, y, 1.0e-6) : 0;
             if (kind != 0) {
-                roQ1[ic] = (float)((double)q0*rr*x); roQ2[ic] = (float)((double)q0*rr*rr*y);
+                if (rr > 0.0 && rr < 1.0e300) { roQ1[ic] = (float)((double)q0*rr*x); roQ2[ic] = (float)((double)q0*rr*rr*y); }
+                else { const double lr = (log(q3) - log((double)q0))/3.0;
+                       roQ1[ic] = (float)((x > 0.0) ? exp(log(x) + log((double)q0) + lr) : 0.0);
+                       roQ2[ic] = (float)((y > 0.0) ? exp(log(y) + log((double)q0) + 2.0*lr) : 0.0); }
                 if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
             }
         }
@@ -241,12 +279,24 @@ __global__ void cond_realizability_project_only_d(
     const double rho_l = (useTab != 0 && cond_tab_wet_ok(tb, Tq)) ? (double)cond_tab_rhol_f(tb, Tq) : cond_rho_cond(cp0, (double)Tq);
     const double q3 = rg / ((4.0/3.0)*COND_PI*rho_l);
     const double rr = cbrt(q3/q0);
-    if (!(rr > 0.0 && rr < 1.0e300)) return;
-    double x = (double)roQ1[ic]/(q0*rr), y = (double)roQ2[ic]/(q0*rr*rr);
+    double x = 0.0, y = 0.0;
+    const flow_float q1_in = roQ1[ic], q2_in = roQ2[ic];
+    if (!cond_moment_xy(q3, q0, (double)q1_in, (double)q2_in, x, y)) {
+        // Q3 が表現できない (underflow) / x,y が作れない: 液滴半径 0 の塵 → 実現可能な唯一の状態は Q1=Q2=0
+        if (!(q1_in == (flow_float)0.0 && q2_in == (flow_float)0.0)) {
+            roQ1[ic] = (flow_float)0.0; roQ2[ic] = (flow_float)0.0;
+            if (realizViol != nullptr) atomicAdd(realizViol + 1, 1);
+        }
+        return;
+    }
     const int kind = cond_realizability_project(x, y, 1.0e-6);
     if (kind == 0) return;
-    const flow_float q1_in = roQ1[ic], q2_in = roQ2[ic];
-    roQ1[ic] = (flow_float)(q0*rr*x); roQ2[ic] = (flow_float)(q0*rr*rr*y);
+    if (rr > 0.0 && rr < 1.0e300) { roQ1[ic] = (flow_float)(q0*rr*x); roQ2[ic] = (flow_float)(q0*rr*rr*y); }
+    else {                              // r が表現できない: 対数空間で戻す (x,y は有限)
+        const double lr = (log(q3) - log(q0))/3.0;
+        roQ1[ic] = (flow_float)((x > 0.0) ? exp(log(x) + log(q0) + lr) : 0.0);
+        roQ2[ic] = (flow_float)((y > 0.0) ? exp(log(y) + log(q0) + 2.0*lr) : 0.0);
+    }
     if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
     if (diagCorrQ != nullptr) {
         double rq = 0.0;

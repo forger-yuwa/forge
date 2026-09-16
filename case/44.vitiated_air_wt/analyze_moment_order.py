@@ -56,10 +56,8 @@ def main():
     ap.add_argument('--subiter-ratio', type=float, default=0.1)
     ap.add_argument('--subiter-decades', type=float, default=2.0)
     a = ap.parse_args()
-    lo = a.order_lo if a.order_lo is not None else ((1.7 if a.bdf == 2 else 0.7) if not a.expect_fct else a.fct_order_lo)
+    lo_def = a.order_lo if a.order_lo is not None else (1.7 if a.bdf == 2 else 0.7)
     hi = a.order_hi if a.order_hi is not None else (2.3 if a.bdf == 2 else 1.3)
-    if a.expect_fct and a.order_lo is None:
-        print(f'note: FCT 作動試験なので次数の下限は {lo} (非線形リミッタによる極値近傍の低下を許す)。スキームの 2 次は passiveFct 0 の対照系列で示すこと')
     runs = list(a.levels) + [a.nsub] + ([a.noise] if a.noise else [])
     bad = []
     cfgs = []
@@ -69,6 +67,13 @@ def main():
     # 必須評価量 = config の全保存量 (流れ + 化学種 + 受動種; codex plan-12 M4)。--fields はその部分集合/追加を許すが、必須集合を覆わなければ PARTIAL
     c0 = cfgs[0]
     required_fields = ['ro', 'roUx', 'roUy', 'roUz', 'roe'] + ([f'roY{s}' for s in range(c0['nSpecies'])] if c0['nSpecies'] > 1 else []) + list(c0['passives'])
+    # FCT 作動試験の下限緩和は **BDF2 の受動種だけ** (codex result-4 M2: 流れ・化学種や BDF1 まで緩めない)
+    relaxed = set(c0['passives']) if (a.expect_fct and a.bdf == 2 and a.order_lo is None) else set()
+    def bounds(k):
+        return (a.fct_order_lo if k in relaxed else lo_def), hi
+    if relaxed:
+        print(f'note: FCT 作動試験: 受動種 {sorted(relaxed)} の下限のみ {a.fct_order_lo} (非線形リミッタによる極値近傍の低下を許す; 流れ・化学種は [{lo_def}, {hi}])。'
+              f'スキームの 2 次は passiveFct 0 の対照系列を既定閾値で通して示すこと')
     fields = a.fields.split(',') if a.fields else list(required_fields)
     partial = sorted(set(required_fields) - set(fields))
     if a.double:
@@ -127,7 +132,8 @@ def main():
             noise_limited.append(k)
             print(f'{k:8s} {e0:11.4e} {e1:11.4e} {order:7.3f} {es:11.4e} {ratio:7.3f} {en:9.2e}  {np.abs(q1).max():.3e}  NOISE-LIMITED (e(dt) < 5 x noise floor): not judged'); 
         else:
-            if not (lo <= order <= hi): v.append(f'order outside [{lo},{hi}]')
+            klo, khi = bounds(k)
+            if not (klo <= order <= khi): v.append(f'order outside [{klo},{khi}]')
             if not (ratio <= a.subiter_ratio or (qn is not None and es <= 2.0*en)): v.append(f'sub-iter ratio {ratio:.3f} > {a.subiter_ratio}' + (f' and nSub diff > 2 x noise {en:.2e}' if qn is not None else ''))
             print(f'{k:8s} {e0:11.4e} {e1:11.4e} {order:7.3f} {es:11.4e} {ratio:7.3f} {en:9.2e}  {np.abs(q1).max():.3e}  ' + ('ok' if not v else 'FAIL: ' + '; '.join(v)))
         bad.extend(f'{k}: {x}' for x in v)

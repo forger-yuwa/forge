@@ -125,7 +125,10 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
   更新クランプ (mode 1) のまま有効 (2026-09-17, plan species-passive-scalar-unification); `passiveScalarScheme 0` のときだけ 0 に降格。上限は `condDgMaxStep` 5e-3 / `condDTmaxStep` 1 K。
   凝縮 run は h0 保存を確認する (面温度修正済み)。onset は実験より ~5 mm 下流 (case/16 2026-09-08 比較)。
 - 受動スカラ (2026-09-17, plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md)): トレーサ・凝縮モーメントは既定で化学種経路
-  (`passiveScalarScheme 1`)。2 次面移流 (S3) を使うなら `speciesFaceReconstruction 2` + `speciesImplicitCoupling 1` + `implicitRelax 0.7` の組で (coupling 0 + S3 は発散)。
+  (`passiveScalarScheme 1`)。2 次面移流 (S3) を使うなら `speciesFaceReconstruction 2` + `speciesImplicitCoupling 1` の組で (coupling 0 + S3 は定常で発散)。
+  **`implicitRelax 0.7` は定常 (擬似時間) の安定化として推奨**で、**dual-time の非定常計算には使わない**: sub-iter の残差ノルムは下がるのに遅いモードが
+  収束せず、同じ物理時刻の解が sub-iter 数に依存する (case/44 `run_0399`–`0404`: nSub 40→80 の ρ 差が緩和なしの 1.3e-5 に対し 6.3e-4; 2026-09-17,
+  plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md) §5.1 #26)。dual-time で安定化が要るときは `cfl_pseudo` を下げるか nSub を増やす。
   S3 は凝縮 onset を 0.2 r_t 程度下流に動かす (数値拡散減) ので、実験比較の基準を変えるときは明記する。
 - 凝縮 (2026-09-10, plan [condensation-kantrowitz-gamma-twophase-sonic](../plans/active/condensation-kantrowitz-gamma-twophase-sonic.md)):
   Kantrowitz 補正 (`condKantrowitz: 1`) の γ は凝縮種 (蒸気) の γ_v が既定 (`condKantrowitzGammaMode: 0`; 旧=1)。

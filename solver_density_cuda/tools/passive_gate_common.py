@@ -259,22 +259,30 @@ def check_field(run_dir, cfg=None, out=print):
             wet = (Q0 > 0) & (g > 0)
             rl = rho_l(T, model); Q3 = g/((4.0/3.0)*math.pi*rl)
             with np.errstate(all='ignore'):
-                rr = np.where(wet, np.cbrt(np.where(wet, Q3/np.where(wet, Q0, 1.0), 0.0)), 0.0)
-                okr = wet & np.isfinite(rr) & (rr > 0) & (rr < 1e300)
-                x = np.where(okr, Q1/(Q0*rr), 0.0); y = np.where(okr, Q2/(Q0*rr*rr), 0.0)
-                tiny = np.finfo(np.float32).tiny; denorm = np.finfo(np.float32).smallest_subnormal
-                def relround(a):
+                # x, y は**指数を分離**して作る (codex result-4 M1: ρg が極小だと Q3 が underflow して r=0 になり、
+                # 素直に割ると x,y が ∞/NaN になって「判定不能」として見逃してしまう。solver 側も同じ式に揃えた)
+                pos = wet & (Q3 > 0)
+                lq3 = np.where(pos, np.log(np.where(pos, Q3, 1.0)), 0.0); lq0 = np.where(pos, np.log(np.where(pos, Q0, 1.0)), 0.0)
+                lr = (lq3 - lq0)/3.0
+                x = np.where(pos & (Q1 > 0), np.exp(np.log(np.where(Q1 > 0, Q1, 1.0)) - lq0 - lr), 0.0)
+                y = np.where(pos & (Q2 > 0), np.exp(np.log(np.where(Q2 > 0, Q2, 1.0)) - lq0 - 2.0*lr), 0.0)
+                undef = wet & (~pos | ~np.isfinite(x) | ~np.isfinite(y))   # 半径も x,y も作れない = 実現可能性を主張できない
+                okr = wet & ~undef
+                # 許容はファイルの精度 (float32 なら 2^-23, float64 なら 2^-52) の丸めから作る
+                def relround(a, dt):
+                    eps = float(np.finfo(dt).eps); tiny = float(np.finfo(dt).tiny); sub = float(np.finfo(dt).smallest_subnormal)
                     aa = np.abs(a)
-                    return np.where(aa >= tiny, 2.0**-23, np.where(aa > 0, denorm/np.maximum(aa, denorm), 1.0))
-                # x, y は Q1/(Q0 r), Q2/(Q0 r²), r = (g/(cρ_l Q0))^{1/3} → 相対誤差は各成分の丸めの和 (r で 1/3, 2/3 倍)
-                relx = relround(Q1) + relround(Q0)*(4.0/3.0) + relround(g)/3.0
-                rely = relround(Q2) + relround(Q0)*(5.0/3.0) + relround(g)*(2.0/3.0)
+                    return np.where(aa >= tiny, eps, np.where(aa > 0, sub/np.maximum(aa, sub), 1.0))
+                dts = {k: V[f'{k}_{s}'].dtype for k in ('rog', 'roQ0', 'roQ1', 'roQ2')}
+                relx = relround(Q1, dts['roQ1']) + relround(Q0, dts['roQ0'])*(4.0/3.0) + relround(g, dts['rog'])/3.0
+                rely = relround(Q2, dts['roQ2']) + relround(Q0, dts['roQ0'])*(5.0/3.0) + relround(g, dts['rog'])*(2.0/3.0)
                 eps = np.maximum(1e-6, 4.0*np.maximum(relx, rely))
                 sing = okr & ((x <= 1e-30) | (y <= 1e-30))
                 viol = okr & ~sing & ((x > 1 + eps) | (y < x*x*(1 - eps)) | (y*y > x*(1 + eps)))
-                dust = okr & (np.maximum(relx, rely) > 1e-6)   # float32 の丸めが 1e-6 を超えるセル (参考表示)
-            nv, ns = int(viol.sum()), int(sing.sum())
-            out(f'  field {os.path.basename(f)} species {s} ({model}, conserved, solver condition g > 0 and Q0 > 0): wet {int(wet.sum())} (of which float32-rounding-limited {int(dust.sum())}), inequality violations {nv}, singular (x or y <= 1e-30) {ns}, negative {neg}')
+                dust = okr & (np.maximum(relx, rely) > 1e-6)
+            nv, ns, nu = int(viol.sum()), int(sing.sum()), int(undef.sum())
+            out(f'  field {os.path.basename(f)} species {s} ({model}, conserved, solver condition g > 0 and Q0 > 0): wet {int(wet.sum())} (of which rounding-limited {int(dust.sum())}), inequality violations {nv}, singular (x or y <= 1e-30) {ns}, radius/ratios not representable {nu}, negative {neg}')
+            if nu: probs.append(f'species {s}: {nu} cells where the radius or (x, y) cannot be formed (realizability cannot be established)')
             if nv or ns or neg: probs.append(f'species {s}: realizability viol {nv} singular {ns} negative {neg}')
     return (not probs), probs
 
