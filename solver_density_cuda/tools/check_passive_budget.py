@@ -154,13 +154,15 @@ def evaluate(last, fct, clamp, tol, tol_lin, mode, required, expect_fct, fct_act
                 closure = fe['increment'] + fe['bnd_signed'] - fe['src'] - fe['rem_signed']
                 if not (abs(closure) <= tol*scale): fl.append(f"CLOSURE({closure/scale:.1e})")
                 indep = (v['total'] - v['initial']) - fe['increment']
-                if not (abs(indep) <= tol_float*scale): fl.append(f"TOTAL_VS_INCREMENT({indep/scale:.1e})")
+                # 独立照合は plan §6-2 の固定 tol (1e-6)。step 比例の丸め許容は float32 の状態更新に由来する項 (|H_rem| と
+                # 符号付き H_rem・保存) に限る (codex result-3 M4: 拡大した許容をここに使うと総量ずれを見逃す)
+                if not (abs(indep) <= tol*scale): fl.append(f"TOTAL_VS_INCREMENT({indep/scale:.1e}>{tol:.1e})")
                 fdesc = (f" | fct: dropped rel {fe['dropped_rel']:.2e} base {fe['base_rel']:.2e} pin {fe['pin_rel']:.2e} upper {fe['upper_rel']:.2e} remainder {fe['rem_rel']:.2e}"
                          f" boundary flux {fe['bnd_signed']:.3e} closure {closure/scale:.1e} total-vs-increment {indep/scale:.1e} qL res(run max) {fe['relres_run']:.1e} HO res(run max) {fe['rh_run']:.1e}")
         elif mode == 'conservative':
             drift = (v['total'] - v['initial'])/scale
             fdesc = f" | conservation: (final - initial)/scale {drift:.2e}"
-            if not (abs(drift) <= tol_float): fl.append(f"NOT_CONSERVED({drift:.1e}>{tol_float:.1e})")
+            if not (abs(drift) <= tol_float): fl.append(f"NOT_CONSERVED({drift:.1e}>{tol_float:.1e})")   # float32 の状態更新の丸め床 (倍精度 run では tol)
         elif mode == 'unsteady':
             fdesc = f" | (final - initial)/scale {(v['total'] - v['initial'])/scale:.2e} (境界流束・ソース込みの収支記録が無いので保存は判定不能; floor/lim と場だけ判定)"
         if not (math.isfinite(total) and total <= tol): fl.append(f'SUM>tol({total:.1e})')
@@ -239,7 +241,10 @@ def main():
     if final_res(a.run_dir, cfg) is None:
         print(f'  FAIL: final field res_{final_cfg}.h5 missing'); ok = False
     from passive_gate_common import float_floor_allowance
-    ok = evaluate(last, fct, clamp, a.tol, a.tol_lin, mode, cfg['passives'], cfg['fct_configured'], fct_active, final_cfg, tol_float=float_floor_allowance(final_cfg or 0), tol_abs=float_floor_allowance(final_cfg or 0, 'abs')) and ok
+    # 倍精度ビルドの run には float32 の step 比例許容を与えない (codex result-3 M4)
+    tf = a.tol if a.double else float_floor_allowance(final_cfg or 0)
+    ta = a.tol if a.double else float_floor_allowance(final_cfg or 0, 'abs')
+    ok = evaluate(last, fct, clamp, a.tol, a.tol_lin, mode, cfg['passives'], cfg['fct_configured'], fct_active, final_cfg, tol_float=tf, tol_abs=ta) and ok
     print(f'  realizability corrections: nearest-point {nproj}, degenerate->monodisperse {ndeg}')
     if not a.no_field:
         fok, probs = check_field(a.run_dir, cfg)

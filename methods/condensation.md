@@ -837,17 +837,21 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
    `cond_moment_update_limited_body` を `cond_moment_update_limited_passive_d` で呼ぶ: 候補増分は scalar-DPLUR の増分 (`passiveImplicitCoupling 1`) または
    point-implicit × `passiveImplicitRelax`、$\Delta\tau$ 倍率 `scalarCflMax`、floor はここで掛けず後段が担う。**非負化は成分ごと** (codex result-2 M1):
    $\theta_u$ は共通のまま、$N_k+\theta_u d_k<0$ となる成分 $k$ だけ増分を $-N_k$ に切って 0 にし、切った量を `passiveLimCorr_<k>` (セル累積) と monitor の
-   受動種収支 (絶対量・作動数・符号付き; 周期 node は root のみ) に記録する (旧 result-1 M5 の「共通 θ で全成分停止」は $Q_1=0$ のノードで g/Q0 まで止めて
-   モーメントの sub-iter 床と時間 1 次相当の誤差を作ったので撤回)。更新後に流れの密度更新と整合する $\phi_N\,\delta\rho$ 項 (`passive_add_rho_term_d`:
+   受動種収支 (絶対量・作動数・符号付き; 周期 node は root のみ) に記録する (旧 result-1 M5 の「共通 θ で全成分停止」は $Q_1=0$ のノードで g/Q0 まで止めるので撤回した。
+   **なお「これがモーメントの sub-iter 床と時間 1 次相当の誤差の原因」という当時の説明は誤りで、撤回済み** — 実測した原因は
+   (a) float32 の丸め床が核生成率の温度感度で増幅されること (sub-iter 残差床 = 状態の ulp ノルム) と (b) 核生成 onset 前線の非平滑性で、
+   核生成を抑えた滑らかな液滴場 + 倍精度では BDF2 が出る; plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md) §5.1 #12/#18)。更新後に流れの密度更新と整合する $\phi_N\,\delta\rho$ 項 (`passive_add_rho_term_d`:
    $\rho\phi=\rho\phi_N+z+(\rho\phi_N/\rho_{pre})(\rho_{new}-\rho_{pre})$, 輸送増分 $z$ だけを制限対象にする)、$\theta_b$ 増分スケーリング
    (`passive_limit_increment_d`: 定常の起動緩和。非保存なので固定点で無作用 [limCorr 0] を要求)、最後の砦の floor (`passive_bounds_d`; `passiveFloorCorr_<k>`) の順。
    **dual-time**: 閾値クランプ $dg_{max}/dT_{max}$ は各物理 step の**初回 sub-iter だけ**掛け (以後の sub-iter は実現可能性 [avail, 蒸発上限, 非負] のみ)、
    累積増分に対する「物理 step あたりの上限」は保証しない (収束した sub-iter では $\theta_u\to1$ で物理時間離散が固定点を決める)。
    **モーメント実現可能性の射影 (2026-09-17, plan §4.7 v5)**: 実現可能性クランプ (`cond_realizability_clamp_{,f_}d`) は非負化・$g\le Y_w$・消滅に加え、
    $Q_0>0,g>0$ で $x=Q_1/(Q_0r)$, $y=Q_2/(Q_0r^2)$ ($r=(Q_3/Q_0)^{1/3}$, $\rho Q_3=\rho g/(\tfrac43\pi\rho_l(T))$) を許容領域 $\{0\le x\le1,\ x^2\le y\le\sqrt x\}$ (Hankel $H_1,H_2\succeq0$)
-   へ戻す: 相対許容 $10^{-6}$ を超える違反は領域へのユークリッド最近点 ($Q_0,g$ 保存; 退化 $x\le10^{-3}$ / $y\le10^{-6}$ は単分散 $(1,1)$ に再初期化)。作動数と
+   へ戻す: 相対許容 $10^{-6}$ を超える違反は領域へのユークリッド最近点 ($Q_0,g$ 保存; 退化 $x\le10^{-30}$ または $y\le10^{-30}$ [実装の `cond_realizability_project`; 非負半径分布では $Q_1=0\Rightarrow Q_3=0$ なので実現不能] は単分散 $(1,1)$ に再初期化)。作動数と
    $g,Q_0,Q_1,Q_2$ の成分別収支 ($\int\Delta q\,dV$, $\int|\Delta q|\,dV$; 周期 root のみ) を monitor の `[passive]` 行に出す。dual-time の FCT 補正の後は
-   二相 EOS を更新してからその $T$ で射影する (順序: $g$ クランプ → EOS → 射影)。
+   二相 EOS を更新してからその $T$ で射影する (順序: $g$ クランプ → EOS → 射影)。**この射影と物理 step 末尾の EOS 再更新は
+   `passiveScalarScheme 1` 限定** (codex result-3 M3): 旧経路 (0) では射影も後処理ブロックも回さず、状態を変えない
+   (`condRealizProject` 1/0 の差が同一設定の反復ノイズと同じであることを case/44 `run_0382`/`0383`/`0393` で確認)。
 3. **診断**: `condLim_<s>` = $\theta_u$ (収束時 ≈1 を確認する)、`condClampCorr_<s>` = このステップの**全**硬クランプによる $|\Delta\rho g|/\rho$ の累積
    [質量分率] (更新 floor + 実現可能性クランプ $g\le Y_w$ / $0.99$ + 液滴消滅)、`condClampCorrQ_<s>` = $Q_0..Q_2$ の最大相対補正 (負値 floor は 1)。収束時に
    凝縮域で 0 であること (乾きセルの数値塵 $Q\to0^-$ の floor は $g=0$ なら無害) を確認する。

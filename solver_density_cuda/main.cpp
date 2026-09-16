@@ -1861,7 +1861,9 @@ void advanceImplicitDualTime(StepContext& s)
         });
     }
     // 物理 step 末尾: 二相 EOS (T, P) を更新 → その T で Q1/Q2 の実現可能性射影 (dual-time では sub-iter 内で射影しない; plan §4.7 v7) → FCT の流束形履歴。
-    if (passiveFctActive(s.cfg) || (condensationEnabled(s.cfg) && s.cfg.condRealizProject != 0)) {
+    // 受動種経路 (passiveScalarScheme 1) 限定 (codex result-3 M3): 旧経路では**この後処理ブロック自体を回さない**
+    // (射影だけでなく、ここで追加で呼ぶ dependentVariables [EOS 再更新] も step 末の状態を変えてしまうため)。
+    if (passiveFctActive(s.cfg) || (condensationEnabled(s.cfg) && s.cfg.condRealizProject != 0 && s.cfg.passiveScalarScheme == 1)) {
         s.profiler.measureWall(ProfileSection::DependentVariables, [&]() {
             dependentVariables(s.cfg , s.cuda_cfg , s.msh , s.var, s.mat_ns);
             condensationRealizabilityProject_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);

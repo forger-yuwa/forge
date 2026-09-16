@@ -36,7 +36,7 @@ def cfg_dict(dt, nstep, nsub, fct=1, sfr=2, solver='SLAU', bdf=2, tracer=True, n
 
 def make_run(root, name, dt, nstep, nsub, *, fct=1, sfr=2, solver='SLAU', bdf=2, tracer=True, ncond=0, extra=None, res_step=None, csv_ok=True,
              drop_cols=(), zero_bump=False, inner_short=False, nan_token=False, field=None, fct_log=True, bad_field=False, pert=0.0,
-             restart_t0=None, broken=False, old_nonf=False, no_mesh=False, bcond='periodic', inlet_profile=None, outer_end_bad=False, omit_bdf=False):
+             restart_t0=None, broken=False, old_nonf=False, no_mesh=False, bcond='periodic', inlet_profile=None, outer_end_bad=False, omit_bdf=False, dust_field=False):
     d = os.path.join(root, name); os.makedirs(d, exist_ok=True)
     c = cfg_dict(dt, nstep, nsub, fct, sfr, solver, bdf, tracer, ncond, extra)
     if omit_bdf: del c['time']['bdfOrder']   # 省略 = solver 既定 2 (実効設定で同一視されること)
@@ -110,6 +110,11 @@ def make_run(root, name, dt, nstep, nsub, *, fct=1, sfr=2, solver='SLAU', bdf=2,
         for s in range(ncond):
             g = np.full(n, 1e-3); Q0 = np.full(n, 1e14); rl = 1000.0 - 0.12*(277.0 - 250.0)
             r = np.cbrt(g/((4/3)*np.pi*rl)/Q0)
+            if dust_field:   # codex result-3 M5: 微小な rog に桁違いの Q1/Q2 (絶対閾値で除外してはならない)
+                g = np.full(n, 1e-31); Q0 = np.ones(n); Q1 = np.full(n, 1e8)
+                V[f'rog_{s}'] = g; V[f'roQ0_{s}'] = Q0; V[f'roQ1_{s}'] = Q1; V[f'roQ2_{s}'] = np.full(n, 1e8)
+                V[f'g_{s}'] = g; V[f'Q0_{s}'] = Q0; V[f'Q1_{s}'] = Q1; V[f'Q2_{s}'] = np.full(n, 1e8)
+                continue
             if bad_field: Q1 = np.zeros(n)   # 特異不整合 (Q1=0, Q3>0)
             else: Q1 = Q0*r*0.9
             V[f'rog_{s}'] = g; V[f'roQ0_{s}'] = Q0; V[f'roQ1_{s}'] = Q1; V[f'roQ2_{s}'] = Q0*r*r*0.9   # x=0.9,y=0.9: 内部
@@ -133,6 +138,7 @@ with tempfile.TemporaryDirectory() as td:
     rc, out = run_tool([B, make_run(td, 'nantok', 8e-6, 20, 40, nan_token=True)]); check(rc != 0, 'budget: nan per-step token must FAIL')
     rc, out = run_tool([B, make_run(td, 'nofctlog', 8e-6, 20, 40, fct_log=False)]); check(rc != 0, 'budget: FCT configured but no active line / record must FAIL')
     rc, out = run_tool([B, make_run(td, 'badfield', 8e-6, 20, 40, ncond=1, bad_field=True)]); check(rc != 0, 'budget: singular moment state must FAIL (field gate)')
+    rc, out = run_tool([F, make_run(td, 'dustfield', 8e-6, 20, 40, ncond=1, dust_field=True)]); check(rc != 0, 'field: tiny rog with huge Q1/Q2 must FAIL (no absolute exclusion)')
     rc, out = run_tool([B, make_run(td, 'xi2', 8e-6, 20, 40, field=np.full(50, 1.5))]); check(rc != 0, 'budget: roXi/ro = 1.5 must FAIL (field gate)')
     rc, out = run_tool([B, make_run(td, 'keep', 8e-6, 20, 40, solver='KEEP')]); check(rc == 0, f'budget: KEEP (FCT not configured, closed periodic, no source) -> conservative mode PASS\n{out}')
     # order gate: normal series

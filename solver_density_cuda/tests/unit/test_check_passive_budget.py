@@ -80,6 +80,10 @@ check(run(log(nm='roQ1_0', clamp='2.000000e-06')) is False, 'clamp budget above 
 check(run(log(tot='1.000010e+00', init='1.000000e+00', inc='1.000000e-05', src='1.000000e-05')) is True, 'consistent source-driven increase must PASS')
 check(run(log(tot='1.100000e+00', init='1.000000e+00', inc='1.000000e-05', src='1.000000e-05')) is False, 'total change not matching the increment must FAIL')
 check(run(log(init='-1.000000e+00')) is False, 'missing initial total (negative sentinel) must FAIL')
+# codex result-3 M4: 独立照合 (総量差 vs 増分) は step 比例の float 許容ではなく固定 tol で判定する
+check(cpb.evaluate(*cpb.parse_lines(log(step=100, tot='1.000002e+00', init='1.000000e+00'))[:3], 1e-6, 1e-4, 'fct', ['roXi'], True, True, 100,
+                   out=lambda *_: None, tol_float=2.0e-6, tol_abs=6.0e-6) is False,
+      'total 1 -> 1.000002 with zero increment must FAIL even when the float floor allowance is 2e-6 (independent check uses tol)')
 check(run(log(pslo='BROKEN')) is False, 'non-numeric field BROKEN in the per-step part must FAIL (strict format parse)')
 check(run(log(fabs='BROKEN')) is False, 'non-numeric cumulative field must FAIL')
 check(run(log(old_nonf=True)) is False, 'nonfinite 1 at an earlier record must FAIL even if the last record is clean (sticky)')

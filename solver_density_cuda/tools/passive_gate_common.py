@@ -4,7 +4,7 @@
     実効刻み (float32 に丸めた dt) と名目終了時刻 nStepOuter×dt_eff を確定する
   - 次数試験の run 同士は「dt / nStepOuter / nSubIterDualTime / outStepInterval / monitorInterval 以外の config が同一、bcond・メッシュ・IC が同一 (md5)」を要求する
   - 終了場は res_<nStepOuter>.h5 に固定 (最大番号のファイルを黙って使わない)
-  - 確定場 (保存量) の有界性 (0 ≤ roXi/ro ≤ 1)・モーメント非負・実現可能性 (solver と同じ ρ_l(T), 無次元 (x,y), 退化条件) を判定する
+  - 確定場 (保存量) の有界性 (0 ≤ roXi/ro ≤ 1)・モーメント非負・実現可能性 (solver と同じ ρ_l(T), 無次元 (x,y), 退化条件, 判定対象は solver の射影条件 g>0 かつ Q0>0 の全セル; 許容はセルごとの float32 丸めから) を判定する
 check_passive_budget.py / check_passive_field.py / case/44 analyze_moment_order.py が import する。"""
 import hashlib, math, os
 import numpy as np
@@ -252,18 +252,29 @@ def check_field(run_dir, cfg=None, out=print):
             g, Q2, Q1, Q0 = (np.asarray(V[f'{k}_{s}'], dtype=np.float64) for k in ('rog', 'roQ2', 'roQ1', 'roQ0'))
             if not all(np.isfinite(a).all() for a in (g, Q0, Q1, Q2)): probs.append(f'species {s}: moments non-finite'); continue
             neg = int((g < 0).sum() + (Q0 < 0).sum() + (Q1 < 0).sum() + (Q2 < 0).sum())
-            # float32 の正規化数の下限 (1.2e-38) 付近の「塵」は相対 1e-6 の判定ができない (書き戻しで桁が無い) → ρg > 1e-30 の湿りセルだけ判定 (solver の射影対象と同じ意味の状態)
-            wet = (Q0 > 0) & (g > 1.0e-30)
+            # solver の射影対象と同じ条件 (g > 0 かつ Q0 > 0) を**全部**判定する (codex result-3 M5: 絶対閾値で
+            # 除外すると rog 1e-31・roQ1 1e8 のような桁違いの不整合まで無視してしまう)。float32 で書き戻した値の
+            # 丸めが不等式に効くので、許容はセルごとに「保存量の float32 相対丸め」から作る (非正規化数では緩く、
+            # 正規化数では 1e-6)。
+            wet = (Q0 > 0) & (g > 0)
             rl = rho_l(T, model); Q3 = g/((4.0/3.0)*math.pi*rl)
             with np.errstate(all='ignore'):
                 rr = np.where(wet, np.cbrt(np.where(wet, Q3/np.where(wet, Q0, 1.0), 0.0)), 0.0)
                 okr = wet & np.isfinite(rr) & (rr > 0) & (rr < 1e300)
                 x = np.where(okr, Q1/(Q0*rr), 0.0); y = np.where(okr, Q2/(Q0*rr*rr), 0.0)
-                eps = 1e-6
+                tiny = np.finfo(np.float32).tiny; denorm = np.finfo(np.float32).smallest_subnormal
+                def relround(a):
+                    aa = np.abs(a)
+                    return np.where(aa >= tiny, 2.0**-23, np.where(aa > 0, denorm/np.maximum(aa, denorm), 1.0))
+                # x, y は Q1/(Q0 r), Q2/(Q0 r²), r = (g/(cρ_l Q0))^{1/3} → 相対誤差は各成分の丸めの和 (r で 1/3, 2/3 倍)
+                relx = relround(Q1) + relround(Q0)*(4.0/3.0) + relround(g)/3.0
+                rely = relround(Q2) + relround(Q0)*(5.0/3.0) + relround(g)*(2.0/3.0)
+                eps = np.maximum(1e-6, 4.0*np.maximum(relx, rely))
                 sing = okr & ((x <= 1e-30) | (y <= 1e-30))
                 viol = okr & ~sing & ((x > 1 + eps) | (y < x*x*(1 - eps)) | (y*y > x*(1 + eps)))
+                dust = okr & (np.maximum(relx, rely) > 1e-6)   # float32 の丸めが 1e-6 を超えるセル (参考表示)
             nv, ns = int(viol.sum()), int(sing.sum())
-            out(f'  field {os.path.basename(f)} species {s} ({model}, conserved, rho*g > 1e-30): wet {int(wet.sum())}, inequality violations {nv}, singular (x or y <= 1e-30) {ns}, negative {neg}')
+            out(f'  field {os.path.basename(f)} species {s} ({model}, conserved, solver condition g > 0 and Q0 > 0): wet {int(wet.sum())} (of which float32-rounding-limited {int(dust.sum())}), inequality violations {nv}, singular (x or y <= 1e-30) {ns}, negative {neg}')
             if nv or ns or neg: probs.append(f'species {s}: realizability viol {nv} singular {ns} negative {neg}')
     return (not probs), probs
 
