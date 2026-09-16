@@ -11,7 +11,8 @@ forge_run.log の最後の `[passive]` 行群 (monitor 区間ごと + 終了時�
   - 独立照合: (全後処理後の最終総量 − 計算開始前の総量; root のみ) と 総増分 の差が総量比 tol を超える → FAIL
   - 低次陰解の受入 (全期間の最大相対線形残差) と HO 残差の全期間最大 → tol_lin (既定 1e-4) を超えたら FAIL
   - 総量 0 で補正が非ゼロ (log 側が rel=1) → FAIL
-使い方: check_passive_budget.py RUN_DIR [--tol 1e-6] [--tol-lin 1e-4] [--mode auto|fct|conservative|steady] [--no-field]
+使い方: check_passive_budget.py RUN_DIR [--tol 1e-6] [--tol-lin 1e-4] [--mode auto|fct|conservative|unsteady|steady] [--no-field]
+全 [passive] 行の全数値トークンを読込時点で有限性検査し (per-step 部分も)、一度でも非有限・解析不能なら FAIL を保持する。終了場は res_<nStepOuter>.h5 に固定、CSV は必須。
 必須成分・FCT 作動条件・終了 step は solverConfig.yaml から確定する (passive_gate_common)。確定場の有界性・実現可能性 (check_passive_field) も併せて判定する。
 """
 import argparse, csv, math, os, re, sys
@@ -34,12 +35,27 @@ def fnum(x):
         return float('nan')
 
 
+NUM_RE = re.compile(r'(?<![A-Za-z_])[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?(?![A-Za-z_])')
+RE_INIT = re.compile(r'\[passive\] initial total (\S+)\s+(\S+)')
+
+
 def parse_lines(lines):
+    """[passive] 行を全部読む。戻り (last, fct, clamp, nproj, ndeg, fct_active, last_step, problems)。
+    全 [passive] 行の全数値トークンの有限性 (per-step 部分も) を読込時点で検査し、一度でも非有限・解析不能があれば problems に残す (最後まで失敗)。"""
     last, fct, clamp = {}, {}, {}
-    nproj = ndeg = 0; fct_active = False; last_step = None
-    for line in lines:
+    nproj = ndeg = 0; fct_active = False; last_step = None; problems = []
+    for ln, line in enumerate(lines, 1):
         if line.startswith('[passiveFct] active'):
-            fct_active = True
+            fct_active = True; continue
+        if not line.startswith('[passive]'):
+            continue
+        for tok in re.findall(r'\b(?:nan|inf|-nan|-inf|NaN|Inf|-Inf)\b', line):
+            problems.append(f'line {ln}: non-finite token {tok!r}')
+        for tok in NUM_RE.findall(line):
+            try:
+                if not math.isfinite(float(tok)): problems.append(f'line {ln}: non-finite number {tok}')
+            except ValueError:
+                problems.append(f'line {ln}: unparsable number {tok!r}')
         m = RE_FLOOR.search(line)
         if m:
             last[m.group(2)] = dict(step=int(m.group(1)), floor_lo=fnum(m.group(3)), floor_hi=fnum(m.group(4)), floor_abs=fnum(m.group(5)), total=fnum(m.group(6)), floor_rel=fnum(m.group(7)),
@@ -61,8 +77,11 @@ def parse_lines(lines):
             continue
         m = RE_REALIZ.search(line)
         if m:
-            nproj += int(m.group(2)); ndeg += int(m.group(3))
-    return last, fct, clamp, nproj, ndeg, fct_active, last_step
+            nproj += int(m.group(2)); ndeg += int(m.group(3)); continue
+        if RE_INIT.search(line) or 'fctDensity' in line or 'per-step' in line:
+            continue
+        problems.append(f'line {ln}: unrecognised [passive] line: {line.strip()[:80]}')
+    return last, fct, clamp, nproj, ndeg, fct_active, last_step, problems
 
 
 def clamp_component(nm):
@@ -125,6 +144,8 @@ def evaluate(last, fct, clamp, tol, tol_lin, mode, required, expect_fct, fct_act
             drift = (v['total'] - v['initial'])/scale
             fdesc = f" | conservation: (final - initial)/scale {drift:.2e}"
             if not (abs(drift) <= tol): fl.append(f"NOT_CONSERVED({drift:.1e})")
+        elif mode == 'unsteady':
+            fdesc = f" | (final - initial)/scale {(v['total'] - v['initial'])/scale:.2e} (境界流束・ソース込みの収支記録が無いので保存は判定不能; floor/lim と場だけ判定)"
         if not (math.isfinite(total) and total <= tol): fl.append(f'SUM>tol({total:.1e})')
         st = 'FAIL(' + ','.join(fl) + ')' if fl else 'ok'
         ok = ok and not fl
@@ -145,15 +166,27 @@ def final_step_of(run_dir):
     return (last + 1) if last is not None else None
 
 
+def closed_and_sourceless(run_dir, cfg):
+    """全 bcond が periodic かつ凝縮ソースなし (conservative モードの自動判定)。"""
+    import yaml
+    p = os.path.join(run_dir, 'bcondConfig.yaml')
+    if not os.path.exists(p) or cfg['nCond'] > 0:
+        return False
+    with open(p) as fh:
+        b = yaml.safe_load(fh) or {}
+    kinds = [str((v or {}).get('kind', '')) for v in b.values() if isinstance(v, dict)]
+    return bool(kinds) and all(k == 'periodic' for k in kinds)
+
+
 def main():
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from passive_gate_common import load_config, check_field
+    from passive_gate_common import load_config, check_field, final_res
     ap = argparse.ArgumentParser()
     ap.add_argument('run_dir')
     ap.add_argument('--tol', type=float, default=1.0e-6)
     ap.add_argument('--tol-lin', type=float, default=1.0e-4, help='低次陰解・HO 残差の全期間最大相対値の許容')
-    ap.add_argument('--mode', choices=['auto', 'fct', 'conservative', 'steady'], default='auto',
-                    help='auto: FCT が設定されていれば fct、dual-time なら conservative、それ以外 steady')
+    ap.add_argument('--mode', choices=['auto', 'fct', 'conservative', 'unsteady', 'steady'], default='auto',
+                    help='auto: FCT 設定なら fct; 非 FCT の dual-time は閉境界・無ソースなら conservative (総量不変) さもなくば unsteady (保存は判定不能); 定常は steady')
     ap.add_argument('--no-field', action='store_true', help='確定場の有界性・実現可能性検査を省く')
     a = ap.parse_args()
     log = os.path.join(a.run_dir, 'forge_run.log')
@@ -166,17 +199,26 @@ def main():
     if cfg['passiveScalarScheme'] != 1 or not cfg['passives']:
         print(f'[{a.run_dir}] no passive scalars on the species path (scheme {cfg["passiveScalarScheme"]}, passives {cfg["passives"]}): not a gate target'); sys.exit(2)
     with open(log, errors='replace') as f:
-        last, fct, clamp, nproj, ndeg, fct_active, last_step = parse_lines(f)
+        last, fct, clamp, nproj, ndeg, fct_active, last_step, problems = parse_lines(f)
     mode = a.mode
     if mode == 'auto':
-        mode = 'fct' if cfg['fct_configured'] else ('conservative' if (cfg['unsteady'] == 1 and cfg['dualTime'] == 1) else 'steady')
+        if cfg['fct_configured']: mode = 'fct'
+        elif cfg['unsteady'] == 1 and cfg['dualTime'] == 1: mode = 'conservative' if closed_and_sourceless(a.run_dir, cfg) else 'unsteady'
+        else: mode = 'steady'
     final_cfg = int(cfg['nStepOuter']) if cfg['nStepOuter'] is not None else None
     final_csv = final_step_of(a.run_dir)
     print(f'passive budget gate for {a.run_dir} (mode {mode}, tol {a.tol:g}, tol_lin {a.tol_lin:g}, required {cfg["passives"]}, last record step {last_step}, '
           f'final step config {final_cfg} csv {final_csv}, FCT configured {cfg["fct_configured"]} active {fct_active})')
     ok = True
-    if final_cfg is not None and final_csv is not None and final_cfg != final_csv:
+    for pr in problems[:20]:
+        print('  FAIL(log):', pr)
+    if problems: ok = False
+    if final_csv is None:
+        print('  FAIL: residual_history.csv missing or without outer rows'); ok = False
+    elif final_cfg is not None and final_cfg != final_csv:
         print(f'  FAIL: run did not complete (config nStepOuter {final_cfg} vs csv last step+1 {final_csv})'); ok = False
+    if final_res(a.run_dir, cfg) is None:
+        print(f'  FAIL: final field res_{final_cfg}.h5 missing'); ok = False
     ok = evaluate(last, fct, clamp, a.tol, a.tol_lin, mode, cfg['passives'], cfg['fct_configured'], fct_active, final_cfg) and ok
     print(f'  realizability corrections: nearest-point {nproj}, degenerate->monodisperse {ndeg}')
     if not a.no_field:

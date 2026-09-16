@@ -6,30 +6,33 @@ here = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location('cpb', os.path.join(here, '..', '..', 'tools', 'check_passive_budget.py'))
 cpb = importlib.util.module_from_spec(spec); spec.loader.exec_module(cpb)
 
-FLOOR = ("[passive] step {step} floorCorr {nm:<8s} per-step(avg 10): lo 0.000e+00 hi 0.000e+00 abs 0.000e+00 | cumulative: lo 0.000000e+00 hi 0.000000e+00 abs {fabs} "
+FLOOR = ("[passive] step {step} floorCorr {nm:<8s} per-step(avg 10): lo {pslo} hi 0.000e+00 abs 0.000e+00 | cumulative: lo 0.000000e+00 hi 0.000000e+00 abs {fabs} "
          "| total {tot} rel(abs/total) {frel} | limCorr per-step 0.000e+00 cumulative abs 0.000000e+00 signed 0.000000e+00 rel {lrel} cells 0 thetaMin(interval) 1.0000 initialTotal {init}")
 FCT = ("[passive]   fctCorr {nm:<8s} cumulative: dropped antidiffusion 1.000000e-03 (rel 1.000000e-03) faces 12 prelimited 0.000000e+00 pinCorr 0.000000e+00 (rel 0.000000e+00) "
        "baseViol 0.000000e+00 (rel {base}) bndFluxSigned {bnd} bndDropped 0.000000e+00 upperViol 0.000000e+00 (rel 0.000000e+00) | budget: srcHist {src} remSigned {rem} remAbs 0.000000e+00 (rel {remrel}) increment {inc} "
        "| qL rel-residual interval-max 1.00e-07 run-max {relres} (sweeps last 3) HO residual rel interval-max 1.00e-07 run-max 1.00e-07{nonf}")
 CLAMP = "[passive]   clampBudget species 0 cumulative (signed/abs, rel to total): g 0.000000e+00/0.000000e+00 (0.000000e+00) Q0 0.000000e+00/0.000000e+00 (0.000000e+00) Q1 0.000000e+00/0.000000e+00 ({q1}) Q2 0.000000e+00/0.000000e+00 (0.000000e+00)"
 
-def log(nm='roXi', step=100, tot='1.000000e+00', init='1.000000e+00', frel='0.000000e+00', lrel='0.000000e+00', fabs='0.000000e+00', fct=True,
+def log(nm='roXi', step=100, tot='1.000000e+00', init='1.000000e+00', frel='0.000000e+00', lrel='0.000000e+00', fabs='0.000000e+00', fct=True, pslo='0.000e+00', old_nan=False,
         base='0.000000e+00', bnd='0.000000e+00', src='0.000000e+00', rem='0.000000e+00', remrel='0.000000e+00', inc='0.000000e+00', relres='1.00e-07', clamp=None, active=True, nonf='0', fct_step=None, clamp_step=None):
     lines = []
+    if old_nan:   # step 50 の記録に nan、最終記録は有限
+        lines.append(FLOOR.format(step=50, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs='nan', pslo='0.000e+00'))
     if active: lines.append('[passiveFct] active: post-step conservative FCT for 1 passive scalars (prelimit 0, sweeps 100, tol 1.0e-06)')
     if fct_step is not None:   # FCT 行が別の (古い) step にだけある
-        lines.append(FLOOR.format(step=fct_step, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs))
+        lines.append(FLOOR.format(step=fct_step, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs, pslo=pslo))
         lines.append(FCT.format(nm=nm, base=base, bnd=bnd, src=src, rem=rem, remrel=remrel, inc=inc, relres=relres, nonf=(' nonfinite ' + nonf) if nonf != '' else ''))
     if clamp_step is not None:
-        lines.append(FLOOR.format(step=clamp_step, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs))
+        lines.append(FLOOR.format(step=clamp_step, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs, pslo=pslo))
         lines.append(CLAMP.format(q1=clamp if clamp is not None else '0.000000e+00'))
-    lines.append(FLOOR.format(step=step, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs))
+    lines.append(FLOOR.format(step=step, nm=nm, tot=tot, init=init, frel=frel, lrel=lrel, fabs=fabs, pslo=pslo))
     if fct and fct_step is None: lines.append(FCT.format(nm=nm, base=base, bnd=bnd, src=src, rem=rem, remrel=remrel, inc=inc, relres=relres, nonf=(' nonfinite ' + nonf) if nonf != '' else ''))
     if clamp is not None and clamp_step is None: lines.append(CLAMP.format(q1=clamp))
     return lines
 
 def run(lines, final=100, expect='auto', required=None, mode=None):
-    last, fct, clamp, nproj, ndeg, act, ls = cpb.parse_lines(lines)
+    last, fct, clamp, nproj, ndeg, act, ls, problems = cpb.parse_lines(lines)
+    if problems: return False
     e = (expect == 'yes') or (expect == 'auto' and act)
     req = required if required is not None else sorted(last)
     m = mode or ('fct' if e else 'conservative')
@@ -59,6 +62,8 @@ check(run(log(nm='roQ1_0', clamp='0.000000e+00')) is True, 'moment component wit
 check(run(log(nm='roQ1_0')) is False, 'moment component without clamp record must FAIL')
 check(run(log(fabs='nan')) is False, 'NaN floor absolute value must FAIL even if rel is 0')
 check(run(log(nonf='')) is False, 'missing nonfinite flag must FAIL')
+check(run(log(pslo='nan')) is False, 'nan in the per-step part must FAIL (token-level check)')
+check(run(log(old_nan=True)) is False, 'nan at an earlier record (step 50) must FAIL even if the last record is finite')
 check(run(log(nonf='1')) is False, 'solver nonfinite flag must FAIL')
 check(run(log(fct_step=91)) is False, 'FCT record only at step 91 with floor at 100 must FAIL (mismatch/missing)')
 check(run(log(nm='roQ1_0', clamp='0.000000e+00', clamp_step=91)) is False, 'clamp record at an older step must FAIL')
