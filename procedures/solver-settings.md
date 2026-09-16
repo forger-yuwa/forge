@@ -150,6 +150,24 @@ time:
 無効果 (組成を thermo に使わないため)。詳細は [`../methods/convection/theory.md`](../methods/convection/theory.md)
 の「多成分 TP の face 組成整合」節。
 
+## passiveScalarScheme ほか — 受動スカラ (排気トレーサ・凝縮モーメント) の輸送経路 (2026-09-17)
+
+plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md)。`time.deltaT` 配下。
+
+| キー | 既定 | 意味 |
+|---|---|---|
+| `passiveScalarScheme` | **1** | 1 = トレーサ `roXi`・凝縮モーメント `rog_s, roQ2_s, roQ1_s, roQ0_s` を化学種の輸送経路 (化学種と同じ勾配・面再構成・移流残差・境界/ピン・周期・拡散 [トレーサのみ Fick]・dual-time BDF) で受動種として解く。熱力学・ΣY 再正規化・ΣJ=0 補正・`speciesImplicitCoupling` 予測/commit には入らない。0 = 旧汎用スカラ経路 (1 次風上・拡散なし・トレーサは primitive 段クランプ; dual-time では物理時間項なし・`condLimiterMode 1` 降格・`tracer` 拒否) — A/B 用でビット不変 |
+| `passiveImplicitCoupling` | −1 (自動) | 受動種の陰解法更新: 0 = segregated point-implicit (増分 × `passiveImplicitRelax`), 1 = 化学種と同じ scalar-DPLUR sweep で増分を作り、モーメントは更新クランプ (θ_u) に渡す。自動 = `passiveScalarScheme 1` かつ `speciesFaceReconstruction ≥ 2` で 1、他は 0 |
+| `passiveImplicitRelax` | = `implicitRelax` | 受動種 point-implicit 更新の増分緩和 (scheme 1 のみ) |
+| `speciesImplicitRelax` | 1.0 | 化学種の segregated (coupling 0) 更新の増分緩和。1.0 で現行と同じ写像 |
+| `scalarCflMax` | 無効 | 化学種/受動種の更新だけ擬似 CFL をこの値で頭打ち (物理時間項は変えない)。保険用 |
+
+**S3 (`speciesFaceReconstruction: 2`, 化学種・受動種の 2 次面移流) を使うときの組合せ** (node で検証済, case/28 `run_0064`–`0078`, case/44 `run_0216`–`0223`):
+`speciesImplicitCoupling: 1` + `passiveImplicitCoupling` 自動 (=1) + `implicitRelax 0.7` で cfl 6 まで安定。**`speciesImplicitCoupling 0` + S3 は組成せん断層で発散する** (cfl 4 で step ~400)。
+S3 は凝縮の固定点を動かす (onset が case/44 で +0.18 r_t、Wysłouzil で +0.72 mm 下流; 前線が鋭くなる) ので、既存の凝縮回帰と直接比較しないこと。既定は `speciesFaceReconstruction 0` のまま。
+更新確定時の上下限補正 (0≤ρξ≤ρ, モーメント ≥0) は `passiveFloorCorr_<name>` (level 2) と monitor ログに符号付き/絶対の体積積分 (step 内・累積) で出る。収束時は 0 であること。
+注意: 受動種/化学種の拡散は `viscMethod != 0` のときだけ加わる (viscMethod 0 は定数粘性ではなく「拡散なし」扱い; 化学種と同じ規約)。
+
 ## physProp.chemistry — 有限速度化学 (H₂ 燃焼・ノズル化学非平衡)
 
 多成分 TP (`thermalMethod: 2`, `species` ≥2 種) に化学反応ソース項を加える。理論・実装は

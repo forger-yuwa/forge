@@ -123,6 +123,9 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
   凝縮 ON の定常 run は `output.level 2` の `condLim_<s>` が収束時に全域 ≈1、`condClampCorr_<s>` が 0 であることを確認する。
   RK 陽解法・dual-time では自動で 0 に降格 (起動ログ `[condensation] condLimiterMode=`)。上限は `condDgMaxStep` 5e-3 / `condDTmaxStep` 1 K。
   凝縮 run は h0 保存を確認する (面温度修正済み)。onset は実験より ~5 mm 下流 (case/16 2026-09-08 比較)。
+- 受動スカラ (2026-09-17, plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md)): トレーサ・凝縮モーメントは既定で化学種経路
+  (`passiveScalarScheme 1`)。2 次面移流 (S3) を使うなら `speciesFaceReconstruction 2` + `speciesImplicitCoupling 1` + `implicitRelax 0.7` の組で (coupling 0 + S3 は発散)。
+  S3 は凝縮 onset を 0.2 r_t 程度下流に動かす (数値拡散減) ので、実験比較の基準を変えるときは明記する。
 - 凝縮 (2026-09-10, plan [condensation-kantrowitz-gamma-twophase-sonic](../plans/active/condensation-kantrowitz-gamma-twophase-sonic.md)):
   Kantrowitz 補正 (`condKantrowitz: 1`) の γ は凝縮種 (蒸気) の γ_v が既定 (`condKantrowitzGammaMode: 0`; 旧=1)。
   凝縮セルの音速は `condSonicModel` (未指定=自動): **TP carrier H2O・`condEquilibrium 0`・境界が

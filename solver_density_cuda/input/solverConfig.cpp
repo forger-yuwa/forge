@@ -350,7 +350,7 @@ void solverConfig::read(std::string fname)
         this->speciesImplicitCoupling = getOptionalValidatedValue<int>(deltaT, "speciesImplicitCoupling", 0, "time.deltaT");
         // 受動スカラ経路の切替と緩和 (plans/active/species-passive-scalar-unification.md §4.1/§4.2)。既定は旧経路 (ビット不変)。
         this->speciesFaceReconstruction = getOptionalValidatedValue<int>(deltaT, "speciesFaceReconstruction", 0, "time.deltaT");   // (下でも同じ値を再読込)
-        this->passiveScalarScheme = getOptionalValidatedValue<int>(deltaT, "passiveScalarScheme", 0, "time.deltaT");
+        this->passiveScalarScheme = getOptionalValidatedValue<int>(deltaT, "passiveScalarScheme", 1, "time.deltaT");
         if (this->passiveScalarScheme != 0 && this->passiveScalarScheme != 1) {
             throw std::runtime_error("Key 'passiveScalarScheme' in 'time.deltaT' must be 0 (legacy generic scalar path) or 1 (species path).");
         }

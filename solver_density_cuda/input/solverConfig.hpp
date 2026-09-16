@@ -82,7 +82,7 @@ public:
     //   0: 旧汎用スカラ経路 (scalarTransport_d 1 次風上・拡散なし・緩和なし; 既定・ビット不変)
     //   1: 化学種経路 (species カーネルの受動種: S3 面再構成 [speciesFaceReconstruction>=2, SLAU]・トレーサ Fick 拡散・
     //      入口ピン・周期 gather/mirror・更新緩和 passiveImplicitRelax・更新確定時の上下限 0<=ρξ<=ρ / ρφ>=0 と補正収支診断)
-    int passiveScalarScheme = 0;
+    int passiveScalarScheme = 1;
     // 受動種 segregated point-implicit 更新の増分緩和 (passiveScalarScheme 1 のみ)。<0 で implicitRelax に倒置 (既定)。
     flow_float passiveImplicitRelax = -1.0;
     // 化学種 segregated point-implicit 更新 (speciesImplicitCoupling 0, timeIntegration 11) の増分緩和。既定 1.0 = 現行と同じ写像。
