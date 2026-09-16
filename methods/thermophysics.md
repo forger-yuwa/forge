@@ -278,6 +278,8 @@ L/R 状態の `roe_L/Ht_L/ca_L` (および R 側) を NASA で再構成。Roe �
 > 保存性は保たれる)。更新は `passiveImplicitCoupling` 0 = segregated point-implicit (`passiveImplicitRelax` で増分を緩和) / 1 = 化学種と同じ scalar-DPLUR sweep
 > (`speciesFaceReconstruction ≥ 2` のときの自動既定; モーメントは sweep の増分を更新クランプ θ_u に渡す)。dual-time では BDF 物理時間項 (`*P/*PP`) が付く (§time_integration)。確定時に**更新済み密度**で $0\le\rho\xi\le\rho$ /
 > モーメント ≥0 を適用し、符号付き・絶対補正の体積積分を step 内と全期間で積算する (`passiveFloorCorr_<name>`; `condClampCorr` [更新ごとの正規化量] とは規約が違う)。
+> **dual-time の有界化 (plan §4.7 v5, 2026-09-17)**: 物理 step 末尾に保存的 FCT 補正 (`passiveFct`, [time_integration/theory.md](time_integration/theory.md) 参照) を掛け、
+> $0\le\xi\le1$ / モーメント $\ge0$ を面共有の α で保証する (定常には掛けない: 起動時の増分緩和 θ_b は非保存で固定点では無作用)。
 > `passiveScalarScheme: 0` は旧汎用スカラ経路 (1 次風上・拡散なし・トレーサは primitive 段でクランプ) でビット不変。化学種の segregated 更新の緩和は独立キー
 > `speciesImplicitRelax` (既定 1.0 = 現行の写像)。
 

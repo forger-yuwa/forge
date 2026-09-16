@@ -276,7 +276,7 @@ static void test_one_cell_fixed_point()
             cond_moment_update_limited_d<<<1,1>>>(1, ddt, dvol, dro, dY1, 0.0, dT, dcp, dRm, (float)cpc, 1.315f, COND_MODEL_H2O, o, 5.0e-3, 1.0, 0.5,
                 Ng, NQ2, NQ1, NQ0, rr, r2, r1, r0, sg, s2, s1, s0, td, td, td, td, rog, q2, q1, q0, dLm, cG, cQ);
             // 実際の更新全経路: 更新クランプ → 実現可能性クランプ (g<=Y_w, 負値, 消滅) → 次の残差
-            cond_realizability_clamp_d<<<1,1>>>(1, dro, dY1, rog, q0, q1, q2, 1, COND_MODEL_H2O, Rw, 1.0e-9, 5.0e-7, dT, dP, o, cG, cQ);
+            cond_realizability_clamp_d<<<1,1>>>(1, dro, dY1, rog, q0, q1, q2, 1, COND_MODEL_H2O, Rw, 1.0e-9, 5.0e-7, dT, dP, o, cG, cQ, nullptr, nullptr, nullptr, nullptr);
             { cudaError_t e = cudaDeviceSynchronize(); if (e != cudaSuccess) { printf("  (h) CUDA error at it %d: %s\n", it, cudaGetErrorString(e)); fflush(stdout); ++g_fail; break; } }
             { std::vector<flow_float> rs(4); cudaMemcpy(&rs[0], rr, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&rs[1], r0, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&rs[2], r1, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&rs[3], r2, sizeof(flow_float), cudaMemcpyDeviceToHost);
               std::vector<flow_float> st(4); cudaMemcpy(&st[0], rog, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&st[1], q0, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&st[2], q1, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&st[3], q2, sizeof(flow_float), cudaMemcpyDeviceToHost);
@@ -349,9 +349,9 @@ static void test_small_droplet_evaporates()
             cond_moment_update_limited_d<<<1,1>>>(1, ddt, dvol, dro, dY1, 0.0, dT, dcp, dRm, (float)cpc, 1.315f, COND_MODEL_H2O, o, 5.0e-3, 1.0, 0.5,
                 Ng, NQ2, NQ1, NQ0, rr, r2, r1, r0, sg, s2, s1, s0, td, td, td, td, rog, Q2, Q1, Q0, dLm, cG, cQ);
             if (useFloat)
-                cond_realizability_clamp_f_d<<<1,1>>>(1, dro, dY1, rog, Q0, Q1, Q2, 1, (float)Rw, 1.0e-9f, 5.0e-7f, 0.0f, dT, dP, tb, cp, cG, cQ);
+                cond_realizability_clamp_f_d<<<1,1>>>(1, dro, dY1, rog, Q0, Q1, Q2, 1, (float)Rw, 1.0e-9f, 5.0e-7f, 0.0f, dT, dP, tb, cp, cG, cQ, nullptr, nullptr, nullptr, nullptr);
             else
-                cond_realizability_clamp_d<<<1,1>>>(1, dro, dY1, rog, Q0, Q1, Q2, 1, COND_MODEL_H2O, Rw, 1.0e-9, 5.0e-7, dT, dP, o, cG, cQ);
+                cond_realizability_clamp_d<<<1,1>>>(1, dro, dY1, rog, Q0, Q1, Q2, 1, COND_MODEL_H2O, Rw, 1.0e-9, 5.0e-7, dT, dP, o, cG, cQ, nullptr, nullptr, nullptr, nullptr);
             cudaDeviceSynchronize();
             cudaMemcpy(&g, rog, sizeof(flow_float), cudaMemcpyDeviceToHost); g /= (float)rod;
             if (it == 0) { cudaMemcpy(&sgv, rr, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&drdt0, dD, sizeof(flow_float), cudaMemcpyDeviceToHost); }
@@ -362,8 +362,58 @@ static void test_small_droplet_evaporates()
         CHECK(g <= 0.0f && it < 200000 && qs[0] == 0.0f && qs[1] == 0.0f && qs[2] == 0.0f, "(k) %s %s: liquid/moments never removed (g=%g after %d steps)", cs.name, useFloat ? "float" : "double", g, it);
     }
 }
+// ---- (l) 実現可能性の最小補正 (plan species-passive-scalar-unification §4.7 v4, codex plan-5 M3/M4): 許容領域 x≤1, x²≤y≤√x への境界クランプ。
+static void test_realizability_projection()
+{
+    printf("[l] moment realizability minimal correction (x=Q1/(Q0 r), y=Q2/(Q0 r^2), r=(Q3/Q0)^(1/3))\n");
+    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o);
+    const double T = 250.0, rho_l = cond_rho_cond(cp, T), ro = 1.0;
+    const double Q0 = 1.0e14, r = 5.0e-8;
+    const double g = (4.0/3.0)*COND_PI*rho_l*Q0*r*r*r;   // Q3 = Q0 r^3 → 単分散半径 r
+    struct S { const char* name; double x, y; bool expectChange; double expectRelCorr; };
+    const S cases[] = {
+        {"monodisperse (1,1)", 1.0, 1.0, false, 0.0},
+        {"polydisperse interior (0.8,0.7)", 0.8, 0.7, false, 0.0},
+        {"violation y=x^2(1-1e-3)", 0.8, 0.64*(1.0-1.0e-3), true, 1.0e-3},
+        {"violation y=x^2(1-1e-7) (within tol)", 0.8, 0.64*(1.0-1.0e-7), false, 0.0},
+        {"violation y^2=x(1+1e-3)", 0.5, std::sqrt(0.5*(1.0+1.0e-3)), true, 5.0e-4},
+        {"x>1 (1.01)", 1.01, 1.0, true, 1.0e-2},
+        {"near-monodisperse (1-1e-4, 1+1e-4)", 1.0-1.0e-4, 1.0+1.0e-4, true, 3.0e-4},
+        {"singular boundary (1,1,1,8)-type x=0.5,y=x^2", 0.5, 0.25, false, 0.0},
+        {"degenerate x=0 (Q1=0, Q2>0, Q3>0)", 0.0, 0.3, true, 1.0e30},
+    };
+    for (const S& c : cases) {
+        std::vector<flow_float> h_ro{(flow_float)ro}, h_g{(flow_float)(ro*g)}, h_q0{(flow_float)(ro*Q0)}, h_q1{(flow_float)(ro*Q0*r*c.x)}, h_q2{(flow_float)(ro*Q0*r*r*c.y)};
+        std::vector<flow_float> h_T{(flow_float)T}, h_P{101325.0f}, z{0.0f};
+        flow_float *dro=up(h_ro),*dg=up(h_g),*d0=up(h_q0),*d1=up(h_q1),*d2=up(h_q2),*dT=up(h_T),*dP=up(h_P),*cG=up(z),*cQ=up(z);
+        int hv[2] = {0, 0}; int* dv = nullptr; cudaMalloc((void**)&dv, 2*sizeof(int)); cudaMemcpy(dv, hv, 2*sizeof(int), cudaMemcpyHostToDevice);
+        cond_realizability_clamp_d<<<1,1>>>(1, dro, nullptr, dg, d0, d1, d2, 0, COND_MODEL_H2O, cp.R, 1.0e-9, 5.0e-7, dT, dP, o, cG, cQ, dv, nullptr, nullptr, nullptr);
+        cudaDeviceSynchronize();
+        flow_float q1n, q2n; cudaMemcpy(&q1n, d1, sizeof(flow_float), cudaMemcpyDeviceToHost); cudaMemcpy(&q2n, d2, sizeof(flow_float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(hv, dv, 2*sizeof(int), cudaMemcpyDeviceToHost); const int changed = hv[0] + hv[1];
+        const double xn = q1n/(ro*Q0*r), yn = q2n/(ro*Q0*r*r);
+        const double rel = std::max(std::fabs(xn - c.x)/std::max(c.x, 1e-30), std::fabs(yn - c.y)/std::max(c.y, 1e-30));
+        printf("   %-45s (x,y) %.7f,%.7f -> %.7f,%.7f  corrected=%d (degenerate %d) rel change %.2e\n", c.name, c.x, c.y, xn, yn, hv[0], hv[1], rel);
+        CHECK((changed != 0) == c.expectChange, "(l) %s: corrected flag %d (expected %d)", c.name, changed, (int)c.expectChange);
+        if (!c.expectChange) CHECK(q1n == h_q1[0] && q2n == h_q2[0], "(l) %s: state changed although admissible", c.name);
+        else if (c.expectRelCorr < 1.0) CHECK(rel <= 3.0*c.expectRelCorr, "(l) %s: correction %.2e larger than the violation scale %.2e", c.name, rel, c.expectRelCorr);
+        if (c.x == 0.0) CHECK(hv[1] == 1 && xn == 1.0 && yn == 1.0, "(l) %s: degenerate state must reinit to monodisperse", c.name);
+        CHECK(xn <= 1.0 + 1e-6 && yn >= xn*xn*(1 - 1e-6) && yn*yn <= xn*(1 + 1e-6), "(l) %s: result outside admissible region", c.name);
+    }
+    // Q0=0, g>0 (核生成域の g アンダーフロー相当): 触らない
+    { std::vector<flow_float> h_ro{1.0f}, h_g{1.0e-12f}, h_q0{0.0f}, h_q1{0.0f}, h_q2{0.0f}, h_T{250.0f}, h_P{101325.0f}, z{0.0f};
+      flow_float *dro=up(h_ro),*dg=up(h_g),*d0=up(h_q0),*d1=up(h_q1),*d2=up(h_q2),*dT=up(h_T),*dP=up(h_P),*cG=up(z),*cQ=up(z);
+      int hv[2] = {0, 0}; int* dv = nullptr; cudaMalloc((void**)&dv, 2*sizeof(int)); cudaMemcpy(dv, hv, 2*sizeof(int), cudaMemcpyHostToDevice);
+      cond_realizability_clamp_d<<<1,1>>>(1, dro, nullptr, dg, d0, d1, d2, 0, COND_MODEL_H2O, cp.R, 1.0e-9, 5.0e-7, dT, dP, o, cG, cQ, dv, nullptr, nullptr, nullptr);
+      cudaDeviceSynchronize(); cudaMemcpy(hv, dv, 2*sizeof(int), cudaMemcpyDeviceToHost);
+      flow_float gn; cudaMemcpy(&gn, dg, sizeof(flow_float), cudaMemcpyDeviceToHost);
+      CHECK(hv[0] == 0 && hv[1] == 0 && gn == 1.0e-12f, "(l) Q0=0,g>0 dust must not be projected (count %d/%d, g %g)", hv[0], hv[1], gn); printf("   Q0=0,g>0: untouched (count %d)\n", hv[0]+hv[1]); }
+}
+
 int main()
 {
+    test_realizability_projection();
     // (a) Δτ 不変性: H2O carrier (T × S × Q0 × g) と N2 pure
     { std::vector<State> st; CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
       const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o); const double Yw = 0.0377, Rw = cp.R, Rmix = 285.0;

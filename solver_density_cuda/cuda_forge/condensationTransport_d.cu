@@ -1,6 +1,8 @@
 #include "condensationTransport_d.cuh"
 #include "condensationUpdateLimiter_d.cuh"   // cond_moment_update_limited_d (単体試験と共用)
-#include "condensationRealizability_d.cuh"   // cond_realizability_clamp_d (double; 単体試験と共用)
+#include "condensationRealizability_d.cuh"
+#include "periodicNode_d.cuh"   // periodicNodeActive (実現可能性収支の root)
+#include <algorithm>   // cond_realizability_clamp_d (double; 単体試験と共用)
 #include "condensationSource_d.cuh"   // COND_PI, 物性 (消滅クランプ)
 #include "condensationEOS_d.cuh"
 #include "condensationSourceF_d.cuh"   // float 実体 (clamp の表評価)      // cond_clamp_vapor_pressure (蒸発塵判定の蒸気分圧)
@@ -135,6 +137,35 @@ const CondTablesF& cond_tables_device() { return g_condTables; }
 flow_float** cond_rog_device_ptr() { return g_rog_dev; }
 int          cond_num_species()    { return g_nCond; }
 
+// モーメント不等式の違反数 (実現可能性射影の作動数; device カウンタ)。monitor ログが読んで 0 に戻す。
+static int* g_realizViol_dev = nullptr;
+int* condRealizViolCounter()
+{
+    if (g_realizViol_dev == nullptr) { gpuErrchk( cudaMalloc((void**)&g_realizViol_dev, 2*sizeof(int)) ); gpuErrchk( cudaMemset(g_realizViol_dev, 0, 2*sizeof(int)) ); }
+    return g_realizViol_dev;
+}
+// 実現可能性クランプ (射影 + 非負化 + 液相上限 + 消滅) の成分別収支 [種 s][g,Q0,Q1,Q2]×(符号付き, 絶対)·V (root のみ; 全期間積算)。
+static double* g_clampBudget_dev = nullptr; static int g_clampBudget_n = 0;
+double* condClampBudget(int s)
+{
+    if (g_clampBudget_dev == nullptr) { g_clampBudget_n = 8; gpuErrchk( cudaMalloc((void**)&g_clampBudget_dev, (size_t)g_clampBudget_n*8*sizeof(double)) ); gpuErrchk( cudaMemset(g_clampBudget_dev, 0, (size_t)g_clampBudget_n*8*sizeof(double)) ); }
+    return (s < g_clampBudget_n) ? g_clampBudget_dev + (size_t)s*8 : nullptr;
+}
+std::vector<double> condClampBudgetTotals(int nSpecies)
+{
+    std::vector<double> h((size_t)std::max(0, std::min(nSpecies, g_clampBudget_n))*8, 0.0);
+    if (g_clampBudget_dev != nullptr && !h.empty()) gpuErrchk( cudaMemcpy(h.data(), g_clampBudget_dev, h.size()*sizeof(double), cudaMemcpyDeviceToHost) );
+    return h;
+}
+int condRealizViolReadReset(int* degenerate)
+{
+    if (g_realizViol_dev == nullptr) { if (degenerate) *degenerate = 0; return 0; }
+    int h[2] = {0, 0}; gpuErrchk( cudaMemcpy(h, g_realizViol_dev, 2*sizeof(int), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemset(g_realizViol_dev, 0, 2*sizeof(int)) );
+    if (degenerate) *degenerate = h[1];
+    return h[0];
+}
+
 void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     (void)cfg;
@@ -154,14 +185,16 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
                 var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
                 cfg.condEvaporation, (float)cprops.R, (float)cfg.condEvapRmin, (float)g_rm, (float)opts.Yw,
                 var.c_d["T"], var.c_d["P"], g_condTables, cprops,
-                var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i]);
+                var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i], condRealizViolCounter(),
+                condClampBudget(s), periodicNodeActive(cfg, msh) ? msh.periodicRoot_d : nullptr, var.c_d["volume"]);
         } else
         cond_realizability_clamp_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells, var.c_d["ro"], roY_w,
             var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
             cfg.condEvaporation, cfg.condModel, cprops.R, cfg.condEvapRmin, g_rm,
             var.c_d["T"], var.c_d["P"], opts,
-            var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i]);
+            var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i], condRealizViolCounter(),
+            condClampBudget(s), periodicNodeActive(cfg, msh) ? msh.periodicRoot_d : nullptr, var.c_d["volume"]);
     }
 
     {

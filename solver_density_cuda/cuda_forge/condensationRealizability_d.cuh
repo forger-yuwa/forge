@@ -7,6 +7,35 @@
 #include "cuda_forge/condensationEOS_d.cuh"      // cond_clamp_vapor_pressure
 #include "cuda_forge/condensationSourceF_d.cuh"  // float 実体の表評価 (cond_tab_*)
 
+
+// モーメント実現可能性の射影 (plan §4.7 v5, codex plan-5 M3/M4, plan-6 M3): 無次元 x = Q1/(Q0 r), y = Q2/(Q0 r²), r = (Q3/Q0)^{1/3}。
+// 許容領域 A = {0 ≤ x ≤ 1, x² ≤ y ≤ √x} (Hankel H1, H2 ⪰ 0)。判定は相対許容 eps (境界上の整合状態 [単分散 (1,1)] は触らない)。
+//   退化 (x ≤ δ または y ≤ δ²: Q1 または Q2 がほぼ 0 なのに Q3 > 0 → 特異整合が成立し得ない) は (Q0, g) 保存の単分散 (1,1) へ再初期化。
+//   それ以外の違反は A への最近点 (ユークリッド距離; x, y 両方を動かす) — 境界 y=√x / y=x² / 角 (1,1) の候補から最小距離を選ぶ。
+// 戻り値: 0 = 変更なし, 1 = 最近点射影, 2 = 退化の単分散再初期化。
+__host__ __device__ inline int cond_realizability_project(double& x, double& y, double eps, double delta)
+{
+    const bool viol = (x > 1.0 + eps) || (y < x*x*(1.0 - eps)) || (y*y > x*(1.0 + eps)) || (x < 0.0) || (y < 0.0);
+    if (!viol) return 0;
+    if (x <= delta || y <= delta*delta) { x = 1.0; y = 1.0; return 2; }
+    // 候補 1: 上境界 y = √t (t ∈ [0,1]) への最近点 (黄金分割)
+    auto nearest = [&](int branch, double& bx, double& by) {
+        double lo = 0.0, hi = 1.0; const double gr = 0.6180339887498949;
+        auto dist2 = [&](double t) { const double yy = (branch == 0) ? sqrt(t) : t*t; return (t-x)*(t-x) + (yy-y)*(yy-y); };
+        double a = hi - gr*(hi-lo), b = lo + gr*(hi-lo), fa = dist2(a), fb = dist2(b);
+        for (int it = 0; it < 60; ++it) { if (fa < fb) { hi = b; b = a; fb = fa; a = hi - gr*(hi-lo); fa = dist2(a); } else { lo = a; a = b; fa = fb; b = lo + gr*(hi-lo); fb = dist2(b); } }
+        bx = 0.5*(lo+hi); by = (branch == 0) ? sqrt(bx) : bx*bx;
+    };
+    double x1, y1, x2, y2; nearest(0, x1, y1); nearest(1, x2, y2);
+    const double d1 = (x1-x)*(x1-x) + (y1-y)*(y1-y), d2 = (x2-x)*(x2-x) + (y2-y)*(y2-y), dc = (1.0-x)*(1.0-x) + (1.0-y)*(1.0-y);
+    if (dc <= d1 && dc <= d2) { x = 1.0; y = 1.0; }
+    else if (d1 <= d2) { x = x1; y = y1; }
+    else { x = x2; y = y2; }
+    // 数値誤差で領域を僅かに外れたら境界へ寄せる
+    x = fmin(fmax(x, 0.0), 1.0); y = fmin(fmax(y, x*x), sqrt(x));
+    return 1;
+}
+
 // 実現可能性クランプ: 液相保存量 rog と モーメント roQ0/1/2 を物理範囲に戻す。
 //   0 ≤ rog ≤ roY_w (carrier: 利用可能な総水量) または ≤ 0.99 ρ (pure)。roQn ≥ 0。
 // θ 律速は瞬間 Sg を抑えるが、陰解法の実効 Δt と dt_local の差で僅かに過凝縮しうるため
@@ -21,7 +50,9 @@ __global__ void cond_realizability_clamp_d(
     flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
     int evap, int condModel, double Rw, double rmin, double g_rm,
     flow_float* T, flow_float* P, CondPropOpts opts,
-    flow_float* diagCorrG, flow_float* diagCorrQ)   // 補正量の記録 (nullptr 可): |Δρg|/ρ [質量分率] の累積, Q の最大相対補正 (codex result M2)
+    flow_float* diagCorrG, flow_float* diagCorrQ,   // 補正量の記録 (nullptr 可): |Δρg|/ρ [質量分率] の累積, Q の最大相対補正 (codex result M2)
+    int* realizViol,                                // [0] 最近点射影の作動数, [1] 退化の単分散再初期化数 (nullptr 可; plan species-passive-scalar-unification §4.7 v5)
+    double* budget, const geom_int* root, const geom_float* vol)   // 成分別収支 [g,Q0,Q1,Q2]×(符号付き, 絶対)·V (root のみ; nullptr 可)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -35,6 +66,23 @@ __global__ void cond_realizability_clamp_d(
     if (roQ0[ic] < (flow_float)0.0) roQ0[ic] = (flow_float)0.0;
     if (roQ1[ic] < (flow_float)0.0) roQ1[ic] = (flow_float)0.0;
     if (roQ2[ic] < (flow_float)0.0) roQ2[ic] = (flow_float)0.0;
+    // 実現可能性の射影 (cond_realizability_project; plan §4.7 v5)。Q0>0, g>0 のみ。(Q0, g) は保存し Q1, Q2 だけ動かす。
+    // Q0=0 または g=0 で他が正の「塵」は下の消滅規則 (S≤1) に任せる (核生成域は触らない)。
+    {
+        const double q0 = (double)roQ0[ic], rg = (double)r;
+        if (q0 > 0.0 && rg > 0.0) {
+            const CondSpeciesProps cp0 = condProps_make(condModel, opts);
+            const double rho_l = cond_rho_cond(cp0, (double)T[ic]);
+            const double q3 = rg / ((4.0/3.0)*COND_PI*rho_l);
+            const double rr = cbrt(q3/q0);
+            double x = (double)roQ1[ic]/(q0*rr), y = (double)roQ2[ic]/(q0*rr*rr);
+            const int kind = cond_realizability_project(x, y, 1.0e-6, 1.0e-3);
+            if (kind != 0) {
+                roQ1[ic] = (flow_float)(q0*rr*x); roQ2[ic] = (flow_float)(q0*rr*rr*y);
+                if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
+            }
+        }
+    }
     auto record = [&]() {
         if (diagCorrG == nullptr) return;
         const double rod0 = (double)ro[ic] > 1.0e-20 ? (double)ro[ic] : 1.0e-20;
@@ -44,6 +92,11 @@ __global__ void cond_realizability_clamp_d(
         for (int k = 0; k < 3; ++k) { const double den = fabs((double)qin[k]) > 1.0e-30 ? fabs((double)qin[k]) : 1.0e-30;
             const double rel = fabs((double)qout[k] - (double)qin[k])/den; if (qout[k] != qin[k] && rel > rq) rq = rel; }
         if ((flow_float)rq > diagCorrQ[ic]) diagCorrQ[ic] = (flow_float)rq;
+        if (budget != nullptr && (root == nullptr || root[ic] == ic)) {
+            const double V = (vol != nullptr) ? (double)vol[ic] : 1.0;
+            const double d[4] = {(double)rog[ic] - (double)r_in, (double)roQ0[ic] - (double)q0_in, (double)roQ1[ic] - (double)q1_in, (double)roQ2[ic] - (double)q2_in};
+            for (int k = 0; k < 4; ++k) if (d[k] != 0.0) { atomicAdd(&budget[2*k], d[k]*V); atomicAdd(&budget[2*k+1], fabs(d[k])*V); }
+        }
     };
 
     if (!evap) { record(); return; }
@@ -82,7 +135,8 @@ __global__ void cond_realizability_clamp_f_d(
     flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
     int evap, float Rw, float rmin, float g_rm, float Yw_const,
     flow_float* T, flow_float* P, CondTablesF tb, CondSpeciesProps cpd,
-    flow_float* diagCorrG, flow_float* diagCorrQ)
+    flow_float* diagCorrG, flow_float* diagCorrQ, int* realizViol,
+    double* budget, const geom_int* root, const geom_float* vol)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -95,6 +149,21 @@ __global__ void cond_realizability_clamp_f_d(
     if (roQ0[ic] < 0.0f) roQ0[ic] = 0.0f;
     if (roQ1[ic] < 0.0f) roQ1[ic] = 0.0f;
     if (roQ2[ic] < 0.0f) roQ2[ic] = 0.0f;
+    {   // 実現可能性の射影 (double 実体と同じ規則; ρ_l は表 [範囲外は double 関数]; 射影は double で評価)
+        const float q0 = roQ0[ic];
+        if (q0 > 0.0f && r > 0.0f) {
+            const float Tq = T[ic];
+            const float rho_l = cond_tab_wet_ok(tb, Tq) ? cond_tab_rhol_f(tb, Tq) : (float)cond_rho_cond(cpd, (double)Tq);
+            const float q3 = r / ((4.0f/3.0f)*COND_PI_F*rho_l);
+            const float rr = cbrtf(q3/q0);
+            double x = (double)roQ1[ic]/((double)q0*(double)rr), y = (double)roQ2[ic]/((double)q0*(double)rr*(double)rr);
+            const int kind = cond_realizability_project(x, y, 1.0e-6, 1.0e-3);
+            if (kind != 0) {
+                roQ1[ic] = (float)((double)q0*(double)rr*x); roQ2[ic] = (float)((double)q0*(double)rr*(double)rr*y);
+                if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
+            }
+        }
+    }
     auto record = [&]() {
         if (diagCorrG == nullptr) return;
         const float rod0 = ro[ic] > 1.0e-20f ? ro[ic] : 1.0e-20f;
@@ -104,6 +173,11 @@ __global__ void cond_realizability_clamp_f_d(
         for (int k = 0; k < 3; ++k) { const float den = fabsf(qin[k]) > 1.0e-30f ? fabsf(qin[k]) : 1.0e-30f;
             const float rel = fabsf(qout[k] - qin[k])/den; if (qout[k] != qin[k] && rel > rq) rq = rel; }
         if (rq > diagCorrQ[ic]) diagCorrQ[ic] = rq;
+        if (budget != nullptr && (root == nullptr || root[ic] == ic)) {
+            const double V = (vol != nullptr) ? (double)vol[ic] : 1.0;
+            const double d[4] = {(double)rog[ic] - (double)r_in, (double)roQ0[ic] - (double)q0_in, (double)roQ1[ic] - (double)q1_in, (double)roQ2[ic] - (double)q2_in};
+            for (int k = 0; k < 4; ++k) if (d[k] != 0.0) { atomicAdd(&budget[2*k], d[k]*V); atomicAdd(&budget[2*k+1], fabs(d[k])*V); }
+        }
     };
     if (!evap) { record(); return; }
     const float rod = ro[ic];

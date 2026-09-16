@@ -372,12 +372,22 @@ void solverConfig::read(std::string fname)
         } else if (this->passiveImplicitCoupling != 0 && this->passiveImplicitCoupling != 1) {
             throw std::runtime_error("Key 'passiveImplicitCoupling' in 'time.deltaT' must be 0 (segregated point-implicit) or 1 (scalar-DPLUR sweep).");
         }
+        this->passiveFct = getOptionalValidatedValue<int>(deltaT, "passiveFct", 1, "time.deltaT");
+        if (this->passiveFct != 0 && this->passiveFct != 1) throw std::runtime_error("Key 'passiveFct' in 'time.deltaT' must be 0 or 1.");
+        this->passiveFctPrelimit = getOptionalValidatedValue<int>(deltaT, "passiveFctPrelimit", 0, "time.deltaT");
+        this->passiveFctSweeps = getOptionalValidatedValue<int>(deltaT, "passiveFctSweeps", 100, "time.deltaT");
+        if (this->passiveFctSweeps < 1) throw std::runtime_error("Key 'passiveFctSweeps' in 'time.deltaT' must be >= 1.");
+        this->passiveFctTol = getOptionalValidatedValue<double>(deltaT, "passiveFctTol", 1.0e-6, "time.deltaT");
+        if (this->passiveFctTol <= 0.0) throw std::runtime_error("Key 'passiveFctTol' in 'time.deltaT' must be > 0.");
+        this->passiveFctTolAbs = getOptionalValidatedValue<double>(deltaT, "passiveFctTolAbs", 1.0e-30, "time.deltaT");
         if (this->passiveScalarScheme == 1 || this->speciesImplicitRelax != 1.0 || this->scalarCflMax > 0.0) {
             std::cout << "'passiveScalarScheme' in 'time.deltaT': " << this->passiveScalarScheme
                       << " (passiveImplicitRelax=" << this->passiveImplicitRelax
                       << ", speciesImplicitRelax=" << this->speciesImplicitRelax
                       << ", scalarCflMax=" << this->scalarCflMax
-                      << ", passiveImplicitCoupling=" << this->passiveImplicitCoupling << ")" << std::endl;
+                      << ", passiveImplicitCoupling=" << this->passiveImplicitCoupling
+                      << ", passiveFct=" << this->passiveFct << " [prelimit " << this->passiveFctPrelimit << ", sweeps " << this->passiveFctSweeps
+                      << ", tol " << this->passiveFctTol << "])" << std::endl;
         }
         // 多成分 face 整合再構成: 既定 0 (mixed-order・ビット不変)。1 で Y を ρ と同じ再構成し thermo/species 流束整合。
         this->speciesFaceReconstruction = getOptionalValidatedValue<int>(deltaT, "speciesFaceReconstruction", 0, "time.deltaT");

@@ -161,11 +161,17 @@ plan [species-passive-scalar-unification](../plans/active/species-passive-scalar
 | `passiveImplicitRelax` | = `implicitRelax` | 受動種 point-implicit 更新の増分緩和 (scheme 1 のみ) |
 | `speciesImplicitRelax` | 1.0 | 化学種の segregated (coupling 0) 更新の増分緩和。1.0 で現行と同じ写像 |
 | `scalarCflMax` | 無効 | 化学種/受動種の更新だけ擬似 CFL をこの値で頭打ち (物理時間項は変えない)。保険用 |
+| `passiveFct` | 1 | **dual-time の受動種 S3 に対する物理 step 末尾の保存的 FCT 補正** (plan §4.7 v5): `passiveScalarScheme 1` + SLAU + `speciesFaceReconstruction ≥ 2` + `timeIntegration 11` + `unsteady 1` + `dualTime 1` のときだけ作動。BDF2 を流束形の BE (前 step の増分を面流束 G/局所 H に分解) として扱い、低次 BE 陰解 (有効質量流束 ṁ^eff) を限界に Zalesak で反拡散流束を面共有の α で制限する (保存; α=1 の面では収束した完全陰的解のまま)。0 = 無効 (A/B; CV ごとの増分制限 θ_b だけになり非保存)。定常・RK では常に無効 |
+| `passiveFctPrelimit` | 0 | Zalesak の前制限 (滑らかな極値でも作動するので既定 off; A/B 用) |
+| `passiveFctSweeps` / `passiveFctTol` / `passiveFctTolAbs` | 100 / 1e-6 / 1e-30 | 低次 BE 陰解の Jacobi sweep 上限と線形残差の受入 (未達は `[passiveFct] WARNING` と log) |
 
 **S3 (`speciesFaceReconstruction: 2`, 化学種・受動種の 2 次面移流) を使うときの組合せ** (node で検証済, case/28 `run_0064`–`0078`, case/44 `run_0216`–`0223`):
 `speciesImplicitCoupling: 1` + `passiveImplicitCoupling` 自動 (=1) + `implicitRelax 0.7` で cfl 6 まで安定。**`speciesImplicitCoupling 0` + S3 は組成せん断層で発散する** (cfl 4 で step ~400)。
 S3 は凝縮の固定点を動かす (onset が case/44 で +0.18 r_t、Wysłouzil で +0.72 mm 下流; 前線が鋭くなる) ので、既存の凝縮回帰と直接比較しないこと。既定は `speciesFaceReconstruction 0` のまま。
 更新確定時の上下限補正 (0≤ρξ≤ρ, モーメント ≥0) は `passiveFloorCorr_<name>` (level 2) と monitor ログに符号付き/絶対の体積積分 (step 内・累積) で出る。収束時は 0 であること。
+**非定常 (dual-time) の合否**は `python3 solver_density_cuda/tools/check_passive_budget.py <run_dir>` (monitor の `[passive]` 積算 [floor / limCorr / FCT の基点逸脱・ピン交換 / 実現可能性クランプの成分別 |Δ|] を総量比 1e-6 で PASS/FAIL) で判定する。
+checkpoint には受動種の流束形履歴 (`/CHECKPOINT/<cons>_fctG`, `_fctH`, `passive_fctMeff`) が入り、FCT 有効時の restart はこれが揃わないと全系 BDF1 から再開する。
+凝縮モーメントの実現可能性 (許容領域 $x\le1,\ x^2\le y\le\sqrt x$; $x=Q_1/(Q_0r)$, $y=Q_2/(Q_0r^2)$) は更新後に最近点射影 (退化は単分散再初期化) で保証し、作動数と成分別収支を monitor に出す。
 注意: 受動種/化学種の拡散は `viscMethod != 0` のときだけ加わる (viscMethod 0 は定数粘性ではなく「拡散なし」扱い; 化学種と同じ規約)。
 
 ## physProp.chemistry — 有限速度化学 (H₂ 燃焼・ノズル化学非平衡)

@@ -997,7 +997,8 @@ static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
                              + ";nCond=" + std::to_string(var.nCondSpeciesRegistered)
                              + ";dt=" + std::string(dtbuf) + ";bdfOrder=" + std::to_string(cfg.bdfOrder)
                              + ";passiveScalarScheme=" + std::to_string(cfg.passiveScalarScheme)
-                             + ";speciesImplicitCoupling=" + std::to_string(cfg.speciesImplicitCoupling);
+                             + ";speciesImplicitCoupling=" + std::to_string(cfg.speciesImplicitCoupling)
+                             + ";passiveFct=" + std::to_string(passiveFctActive(cfg) ? 1 : 0);
     std::string why;
     try {
         HighFive::File file(cfg.valueFileName, HighFive::File::ReadOnly);
@@ -1033,6 +1034,27 @@ static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
                     // 受動種 P は host 名で H2D 済み; 化学種 roY{s}P も同様。PP はシフトで上書きされるので不要。
                     cfg.totalTime = static_cast<flow_float>(tt);
                     cfg.nHistoryValid = std::min(nh, 2);
+                    // 受動種 FCT の流束形履歴 G/H/ṁ^eff (§4.7 v4, plan-6 M5): FCT 有効なら**必須** (無ければ全系を BDF1 に揃えて再開)。
+                    if (passiveFctActive(cfg)) {
+                        std::vector<std::vector<flow_float>> G, H; std::vector<flow_float> mEff; std::string miss;
+                        const auto& cons = passive_cons_names();
+                        for (const auto& cn : cons) {
+                            if (!file.exist("/CHECKPOINT/" + cn + "_fctG")) { miss = cn + "_fctG"; break; }
+                            if (!file.exist("/CHECKPOINT/" + cn + "_fctH")) { miss = cn + "_fctH"; break; }
+                            std::vector<geom_float> g, h; file.getDataSet("/CHECKPOINT/" + cn + "_fctG").read(g); file.getDataSet("/CHECKPOINT/" + cn + "_fctH").read(h);
+                            G.emplace_back(g.begin(), g.end()); H.emplace_back(h.begin(), h.end());
+                        }
+                        if (miss.empty() && !file.exist("/CHECKPOINT/passive_fctMeff")) miss = "passive_fctMeff";
+                        if (miss.empty()) { std::vector<geom_float> m; file.getDataSet("/CHECKPOINT/passive_fctMeff").read(m); mEff.assign(m.begin(), m.end()); }
+                        if (!miss.empty() || !passiveFctHistoryFromHost(cfg, msh, var, G, H, mEff)) {
+                            cfg.nHistoryValid = 0;
+                            std::cout << "[dual-time] passive FCT flux-form history missing or inconsistent (" << (miss.empty() ? std::string("size mismatch") : miss)
+                                      << "): all systems start from P=PP=current, first physical step is BDF1\n";
+                            passiveInitDualTimeLevels_d_wrapper(cfg, cuda_cfg, msh, var);
+                            return;
+                        }
+                        std::cout << "[dual-time] passive FCT flux-form history (G/H/mEff) restored\n";
+                    }
                     std::cout << "[dual-time] history restored from " << cfg.valueFileName << " (/CHECKPOINT: " << names.size()
                               << " levels, totalTime=" << tt << ", dt_file=" << dtp << ", nHistoryValid=" << cfg.nHistoryValid
                               << ")\n";
@@ -1819,6 +1841,27 @@ void advanceImplicitDualTime(StepContext& s)
         pinRowDiagnosticState(s, m);   // FORGE_PIN_DIAG=1: 入口ノード値が bvar 入口値のままか
     }
 
+    // (8) 受動種の物理 step 末尾の保存的 FCT 補正 (plan species-passive-scalar-unification §4.7; SLAU S3 のみ作動):
+    //     低次陰解 q_L を限界に、収束した HO 解から制限した反拡散を面共有 α で落とす → 入口 Dirichlet 再適用 → floor (収支) → 実現可能性 → primitive。
+    if (passiveFctActive(s.cfg)) {
+        // 終了状態で残差を再評価 (ṁ, P_face, ソース, 依存変数を q_H で固定; 受動種の res_* = 空間 HO 残差 → r_H 診断) してから補正。
+        assembleResidual(s, 1);
+        s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
+            passiveFctCorrect_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, a, b, c);
+            applyCondensationBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
+            applyTracerBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
+            passiveBounds_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, 0, passive_count(), true);
+            passiveMirrorPeriodic_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // g の上限・消滅・非負 (+ 射影は旧 T)
+            tracerPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        });
+        // g の補正後に二相 EOS (T, P) を更新 (plan-4 M6) → その T で実現可能性の射影 (Q1, Q2 のみ; plan-6 M4) → 確定状態から流束形履歴 G^{n+1}/H^{n+1} (§4.7 v4)。
+        s.profiler.measureWall(ProfileSection::DependentVariables, [&]() {
+            dependentVariables(s.cfg , s.cuda_cfg , s.msh , s.var, s.mat_ns);
+            condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 2 回目: 更新後の T で射影 (g は変わらない)
+        });
+        passiveFctFinishHistory_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+    }
     s.cfg.unsteadyDiagCoef = 0.0; // 定常側へ影響しないようリセット
     s.cfg.totalTime += s.cfg.dt;
     s.cfg.nHistoryValid = std::min(s.cfg.nHistoryValid + 1, 2);   // 物理 step 完了: 次 step から Q^{n-1} が有効 (全系共有)

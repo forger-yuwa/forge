@@ -1,3 +1,4 @@
+#include "cuda_forge/passiveTransport_d.cuh"
 #include <cstdio>
 #include "output.hpp"
 
@@ -177,6 +178,18 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
             std::vector<flow_float> vtemp(var.c.at(nm).begin(), var.c.at(nm).begin() + msh.nCells);
             ck.createDataSet("/CHECKPOINT/" + nm, vtemp);
         }
+        // 受動種 FCT の流束形履歴 (§4.7 v4): G (面, 受動種ごと) と H (セル)。無ければ restart は局所形で代替する。
+        {
+            std::vector<std::vector<flow_float>> G, H; std::vector<flow_float> mEff;
+            if (passiveFctHistoryToHost(msh, G, H, mEff)) {
+                const auto& cons = passive_cons_names();
+                for (size_t q = 0; q < cons.size() && q < G.size(); ++q) {
+                    ck.createDataSet("/CHECKPOINT/" + cons[q] + "_fctG", G[q]);
+                    ck.createDataSet("/CHECKPOINT/" + cons[q] + "_fctH", H[q]);
+                }
+                ck.createDataSet("/CHECKPOINT/passive_fctMeff", mEff);
+            }
+        }
         const double tt = static_cast<double>(cfg.totalTime), dtp = static_cast<double>(cfg.dt);
         const int nh = cfg.nHistoryValid;
         // layout: 配列構成に加え、履歴の意味を決める設定 (物理 dt, bdfOrder, passiveScalarScheme, speciesImplicitCoupling) を含める (M3)。
@@ -185,7 +198,8 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
                                  + ";nCond=" + std::to_string(var.nCondSpeciesRegistered)
                                  + ";dt=" + std::string(dtbuf) + ";bdfOrder=" + std::to_string(cfg.bdfOrder)
                                  + ";passiveScalarScheme=" + std::to_string(cfg.passiveScalarScheme)
-                                 + ";speciesImplicitCoupling=" + std::to_string(cfg.speciesImplicitCoupling);
+                                 + ";speciesImplicitCoupling=" + std::to_string(cfg.speciesImplicitCoupling)
+                                 + ";passiveFct=" + std::to_string(passiveFctActive(cfg) ? 1 : 0);
         ck.createAttribute<double>("totalTime", HighFive::DataSpace::From(tt)).write(tt);
         ck.createAttribute<double>("dt", HighFive::DataSpace::From(dtp)).write(dtp);
         ck.createAttribute<int>("nHistoryValid", HighFive::DataSpace::From(nh)).write(nh);

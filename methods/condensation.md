@@ -843,6 +843,11 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
    (`passive_limit_increment_d`: 定常の起動緩和。非保存なので固定点で無作用 [limCorr 0] を要求)、最後の砦の floor (`passive_bounds_d`; `passiveFloorCorr_<k>`) の順。
    **dual-time**: 閾値クランプ $dg_{max}/dT_{max}$ は各物理 step の**初回 sub-iter だけ**掛け (以後の sub-iter は実現可能性 [avail, 蒸発上限, 非負] のみ)、
    累積増分に対する「物理 step あたりの上限」は保証しない (収束した sub-iter では $\theta_u\to1$ で物理時間離散が固定点を決める)。
+   **モーメント実現可能性の射影 (2026-09-17, plan §4.7 v5)**: 実現可能性クランプ (`cond_realizability_clamp_{,f_}d`) は非負化・$g\le Y_w$・消滅に加え、
+   $Q_0>0,g>0$ で $x=Q_1/(Q_0r)$, $y=Q_2/(Q_0r^2)$ ($r=(Q_3/Q_0)^{1/3}$, $\rho Q_3=\rho g/(\tfrac43\pi\rho_l(T))$) を許容領域 $\{0\le x\le1,\ x^2\le y\le\sqrt x\}$ (Hankel $H_1,H_2\succeq0$)
+   へ戻す: 相対許容 $10^{-6}$ を超える違反は領域へのユークリッド最近点 ($Q_0,g$ 保存; 退化 $x\le10^{-3}$ / $y\le10^{-6}$ は単分散 $(1,1)$ に再初期化)。作動数と
+   $g,Q_0,Q_1,Q_2$ の成分別収支 ($\int\Delta q\,dV$, $\int|\Delta q|\,dV$; 周期 root のみ) を monitor の `[passive]` 行に出す。dual-time の FCT 補正の後は
+   二相 EOS を更新してからその $T$ で射影する (順序: $g$ クランプ → EOS → 射影)。
 3. **診断**: `condLim_<s>` = $\theta_u$ (収束時 ≈1 を確認する)、`condClampCorr_<s>` = このステップの**全**硬クランプによる $|\Delta\rho g|/\rho$ の累積
    [質量分率] (更新 floor + 実現可能性クランプ $g\le Y_w$ / $0.99$ + 液滴消滅)、`condClampCorrQ_<s>` = $Q_0..Q_2$ の最大相対補正 (負値 floor は 1)。収束時に
    凝縮域で 0 であること (乾きセルの数値塵 $Q\to0^-$ の floor は $g=0$ なら無害) を確認する。

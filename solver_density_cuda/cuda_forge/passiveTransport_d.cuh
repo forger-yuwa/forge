@@ -98,3 +98,21 @@ void passiveInitDualTimeLevels_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg
 void passiveShiftDualTimeLevels_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 void passiveAddUnsteadyTimeTerm_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
                                           flow_float a, flow_float b, flow_float c);
+
+// ===== dual-time の物理 step 末尾の保存的 FCT 補正 (§4.7; passiveFct) =====
+// 有効判定: scheme 1 かつ passiveFct 1 かつ SLAU S3 かつ timeIntegration 11 + unsteady 1 + dualTime 1。
+bool passiveFctActive(const solverConfig& cfg);
+// sub-iter 終了後、終了状態で assembleResidual を再評価してから 1 回呼ぶ (a,b,c は BDF 係数)。res_*/src_jac_* を上書きする (凍結ソースの再評価)。補正後の ρφ は周期 mirror 済み。
+// 呼び出し側は続けて入口 Dirichlet の再適用 → floor (passiveBounds) → 実現可能性クランプ → primitive を行う。
+void passiveFctCorrect_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, flow_float a, flow_float b, flow_float c);
+// 診断: 全期間積算 (stride 8) [0] Σ|A^raw−αA^pre|Δt/a (落とした反拡散), [1] 作動面数, [2] 前制限量 (Δt/a 込み), [3] ピン行の交換量 (境界収支),
+//       [4] 基点 q_B の物理限界逸脱量 (·V)。
+std::vector<double> passiveFctStatsTotals();
+double passiveFctLastLinRes();   // 最後の物理 step の q_L Jacobi の相対線形残差 (停止時)
+int    passiveFctLastSweeps();
+double passiveFctLastRhRel();    // 最後の物理 step の HO 残差 ||r_H||/||M q_H|| (sub-iter の反復誤差)
+// 後処理 (ピン・floor・実現可能性・EOS) の後、確定状態から流束形履歴 G^{n+1} (面) / H^{n+1} (セル) を作る (次 step の BDF2 用)。
+void passiveFctFinishHistory_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+// checkpoint: G (受動種ごと nPlanes) / H (受動種ごと nCells) の host 転送。有効な履歴が無ければ false。
+bool passiveFctHistoryToHost(const mesh& msh, std::vector<std::vector<flow_float>>& G, std::vector<std::vector<flow_float>>& H, std::vector<flow_float>& mEff);
+bool passiveFctHistoryFromHost(solverConfig& cfg, mesh& msh, variables& var, const std::vector<std::vector<flow_float>>& G, const std::vector<std::vector<flow_float>>& H, const std::vector<flow_float>& mEff);
