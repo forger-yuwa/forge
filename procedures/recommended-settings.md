@@ -126,7 +126,7 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
   凝縮 run は h0 保存を確認する (面温度修正済み)。onset は実験より ~5 mm 下流 (case/16 2026-09-08 比較)。
 - 受動スカラ (2026-09-17, plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md)): トレーサ・凝縮モーメントは既定で化学種経路
   (`passiveScalarScheme 1`)。2 次面移流 (S3) を使うなら `speciesFaceReconstruction 2` + `speciesImplicitCoupling 1` の組で (coupling 0 + S3 は定常で発散)。
-  **`implicitRelax 0.7` は定常 (擬似時間) の安定化として推奨**で、**dual-time の非定常計算には使わない**: sub-iter の残差ノルムは下がるのに遅いモードが
+  **`implicitRelax 0.7` は定常 (擬似時間) の安定化として推奨**で、**dual-time の非定常計算には使わない** (§6 の dual-time 節): sub-iter の残差ノルムは下がるのに遅いモードが
   収束せず、同じ物理時刻の解が sub-iter 数に依存する (case/44 `run_0399`–`0404`: nSub 40→80 の ρ 差が緩和なしの 1.3e-5 に対し 6.3e-4; 2026-09-17,
   plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md) §5.1 #26)。dual-time で安定化が要るときは `cfl_pseudo` を下げるか nSub を増やす。
   S3 は凝縮 onset を 0.2 r_t 程度下流に動かす (数値拡散減) ので、実験比較の基準を変えるときは明記する。
@@ -162,11 +162,24 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 - node の軸ノードは通常 DOF + u_r=0 ピン (固定、キー不要。旧 `nodeAxisDirichlet` 等は起動時エラー)。
 - 近軸の block-DPLUR 粘性対角は幾何修正済み (float で解ける)。
 
-## 6. 非定常・LES/DES・周期箱 — 現行 (2026-08)
+## 6. 非定常・LES/DES・周期箱 — 現行 (2026-09-17)
 
 - 過渡 (音響) を含む閉じた系は **`unsteady: 1` 必須** (定常局所 dt は数 step で発散 [steady-localdt-acoustic-transient-instability])。
   陽解法は `timeIntegration: 4` (RK4) か 3 (RK3) を `unsteady: 1` で。dual-time は `timeIntegration 11 + dualTime 1`、
   物理 CFL ≲ 12 ([dualtime-subiter-divergence-fingerprint])。
+- **dual-time の内部反復 — 現行 (2026-09-17)**: `cfl_pseudo: 12`〜`20`、`nSubIterDualTime: 10`〜`20`、**`implicitRelax` は書かない** (既定 1.0 = 緩和なし)。
+  - 擬似時間の CFL に安定限界が見当たらない (物理時間項が対角に $V/(a\Delta t)$ を足すため)。case/44 で `cfl_pseudo` 2〜**160** を緩和なしで完走、NaN 0。
+  - 収束解は `cfl_pseudo` に依存しない (nSub 80 同士で ρ 差 3.1e-4 = 同一 cfl の nSub 40 vs 80 差 2.3e-4 と同水準)。
+    一方**必要な nSub は `cfl_pseudo` で決まる**: nSub 80 との ρ 差は `cfl_pseudo` 2 で nSub 10 → 1.2e-1 / 20 → 4.5e-3 / 40 → 2.3e-4 なのに対し、
+    **`cfl_pseudo` 12 以上なら nSub 10 で既に 2.2e-4** (float のノイズ床)。壁時間は nSub 10 が 0.045 s/step、40 が 0.14、80 が 0.265 →
+    **同じ解が 1.8〜3 倍速い**。根拠は case/44 `run_0459`–`0480` (生産 float, 湿り核生成場, convMethod 1 + S3 + FCT)。
+  - **`implicitRelax` (定常の推奨 0.7) を dual-time に持ち込まない**: 安定性は物理時間項が担うので緩和の効果は無く、遅いモードの収束だけ遅らせる。
+    しかも残差ノルムには出ない (2.8〜3.5 桁下がって見える) ので、同じ物理時刻の解が nSub 依存になる
+    (case/44 `run_0399`–`0404`: nSub 40→80 の ρ 差が緩和なし 1.3e-5 に対し 0.7 で 6.3e-4)。
+  - **sub-iteration が足りているかは残差の桁数でなく `nSub` を倍にして解が動かないかで見る** (float では残差床がノイズ床に当たるため)。
+    安定化が要るときは緩和ではなく `cfl_pseudo` を下げるか nSub を増やす。
+  - 確認は `python3 solver_density_cuda/tools/check_solver_config.py <run_dir>` (投入前) と、上の nSub 倍増比較 (精度が要る run)。
+  - 限定: 検証は case/44 の 1 形状・物理 CFL 2・dt 8e-6 の範囲。物理刻みを大きく取ると対角が痩せるので擬似 CFL の余裕も減るはず。
 - 解像 LES/DNS は `solver: "KEEP"` + `keepDissType/Coeff` (**トップレベル**キー; `space` 配下は無視される) で
   σ=0.05 (市松抑制) / 0.02 (解像 LES)、`WALE` は off + ES 散逸 ([keep-es-dissipation-status], [wale-inactive-fix])。
   一様流 U∞≠0 は `space.roRef/uRef` (KEEP, CPG) で機械精度保存。fdblend は音響モード成長のため opblend (増分フル c) を使う。
@@ -203,5 +216,7 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 | `wall_dist` を双対重心から測る変換 | バグ (2026-09-08 修正) | ノード座標 (コード側) |
 
 ## 変更ログ
+
+- `2026-09-17` — §6 に dual-time の内部反復レシピを追加 (`cfl_pseudo` 12–20 + `nSubIterDualTime` 10–20 + 緩和なし; 擬似 CFL に安定限界が見つからず、必要な nSub は `cfl_pseudo` で決まる)。定常の `implicitRelax 0.7` は据え置き。投入前チェック `check_solver_config.py` を追加。
 
 - `2026-09-08` — 初稿 (散在していた推奨値を集約。ユーザ要請「既定の解析設定を 1 か所に、最新/旧を明記」)。

@@ -167,7 +167,7 @@ plan [species-passive-scalar-unification](../plans/active/species-passive-scalar
 
 **S3 (`speciesFaceReconstruction: 2`, 化学種・受動種の 2 次面移流) を使うときの組合せ** (node で検証済, case/28 `run_0064`–`0078`, case/44 `run_0216`–`0223`):
 `speciesImplicitCoupling: 1` + `passiveImplicitCoupling` 自動 (=1) + `implicitRelax 0.7` で cfl 6 まで安定。**`speciesImplicitCoupling 0` + S3 は組成せん断層で発散する** (cfl 4 で step ~400)。
-**`implicitRelax 0.7` は定常 (擬似時間) 限定**: dual-time の非定常計算では sub-iter の残差は下がるのに遅いモードが収束せず、同じ物理時刻の解が sub-iter 数に依存する
+**`implicitRelax 0.7` は定常 (擬似時間) 限定** (投入前に `check_solver_config.py` で検査できる): dual-time の非定常計算では sub-iter の残差は下がるのに遅いモードが収束せず、同じ物理時刻の解が sub-iter 数に依存する
 (case/44 `run_0399`–`0404`: nSub 40→80 の ρ 差が緩和なしの 1.3e-5 に対し 6.3e-4)。非定常で安定化が要るときは `cfl_pseudo` を下げるか nSub を増やす (2026-09-17, plan species-passive-scalar-unification §5.1 #26)。
 S3 は凝縮の固定点を動かす (onset が case/44 で +0.18 r_t、Wysłouzil で +0.72 mm 下流; 前線が鋭くなる) ので、既存の凝縮回帰と直接比較しないこと。既定は `speciesFaceReconstruction 0` のまま。
 更新確定時の上下限補正 (0≤ρξ≤ρ, モーメント ≥0) は `passiveFloorCorr_<name>` (level 2) と monitor ログに符号付き/絶対の体積積分 (step 内・累積) で出る。収束時は 0 であること。

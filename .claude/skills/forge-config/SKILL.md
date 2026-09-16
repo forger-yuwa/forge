@@ -15,9 +15,22 @@ description: forge の solverConfig.yaml / bcondConfig.yaml を新規に組む�
    node の `nodeInletCornerWall`。
 4. **段階起動** (§1.2): soft → mid → 本段。同一メッシュは index コピー、cross-mesh は `interp_field.py`。
    一様 IC から超音速/SST を直接始めない。初期 k/ω は非ゼロ。
-5. **投入前チェック**: `check_mesh_quality.py` の VERDICT、バイナリ鮮度 (`find ... -newer build/forge`)、
+5. **投入前チェック**: `python3 solver_density_cuda/tools/check_solver_config.py <run_dir>` の VERDICT (残差では気づけない
+   設定ミスを止める: 禁止キー、dual-time の `implicitRelax`、S3 が `convMethod 0` で不活性、FCT が作動しない組合せ、
+   凝縮 dual-time の `passiveScalarScheme 0`)、`check_mesh_quality.py` の VERDICT、バイナリ鮮度 (`find ... -newer build/forge`)、
    `output.level` (既定 1; 診断が要るときだけ 2)、新しい `run_NNNN_<slug>` ディレクトリ。
 6. **報告**: run パス、`check_convergence` / `check_quasisteady` の VERDICT、case README の run 一覧。
+
+**定常と非定常で分かれる設定** (間違えても残差には出ないので注意):
+
+| | 定常 (擬似時間) | dual-time (非定常) |
+| --- | --- | --- |
+| `implicitRelax` | **0.7** (S3 + coupling 1 を cfl 6–8 で回すための安定化) | **書かない** (既定 1.0)。安定性は物理時間項が担うので効果が無く、遅いモードの収束だけ遅らせる |
+| `cfl_pseudo` | ケース律速 (ノズルで 4–8) | **12–20** (安定限界が見当たらない; 大きいほど内部反復が速く収束する) |
+| `nSubIterDualTime` | 不使用 | **10–20** (必要数は `cfl_pseudo` で決まる。`cfl_pseudo` 2 だと 40 でも足りない) |
+| 収束の見方 | 残差の低下桁数 | **`nSub` を倍にして解が動かないか** (float では残差床がノイズ床に当たる) |
+
+根拠と数値は [`recommended-settings.md`](../../../procedures/recommended-settings.md) §6 の dual-time 節。
 
 既存 config の点検を頼まれたら、§9 の表と突き合わせて「廃止キー / 旧既定 / 非推奨の組み合わせ」を列挙し、
 現行値への置換案を出す (勝手に書き換えない)。
