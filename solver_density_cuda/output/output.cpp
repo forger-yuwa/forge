@@ -180,12 +180,13 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
         }
         // 受動種 FCT の流束形履歴 (§4.7 v4): G (面, 受動種ごと) と H (セル)。無ければ restart は局所形で代替する。
         {
-            std::vector<std::vector<flow_float>> G, H; std::vector<flow_float> mEff;
-            if (passiveFctHistoryToHost(msh, G, H, mEff)) {
+            std::vector<std::vector<flow_float>> G, H, Hs; std::vector<flow_float> mEff;
+            if (passiveFctHistoryToHost(msh, G, H, mEff, Hs)) {
                 const auto& cons = passive_cons_names();
                 for (size_t q = 0; q < cons.size() && q < G.size(); ++q) {
                     ck.createDataSet("/CHECKPOINT/" + cons[q] + "_fctG", G[q]);
                     ck.createDataSet("/CHECKPOINT/" + cons[q] + "_fctH", H[q]);
+                    ck.createDataSet("/CHECKPOINT/" + cons[q] + "_fctHsrc", Hs[q]);
                 }
                 ck.createDataSet("/CHECKPOINT/passive_fctMeff", mEff);
             }

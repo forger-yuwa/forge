@@ -112,7 +112,7 @@ double passiveFctLastLinRes();   // 最後の物理 step の q_L Jacobi の相�
 int    passiveFctLastSweeps();
 double passiveFctLastRhRel();    // 最後の物理 step の HO 残差 ||r_H||/||M q_H|| (sub-iter の反復誤差)
 // 後処理 (ピン・floor・実現可能性・EOS) の後、確定状態から流束形履歴 G^{n+1} (面) / H^{n+1} (セル) を作る (次 step の BDF2 用)。
-void passiveFctFinishHistory_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+void passiveFctFinishHistory_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, flow_float a, flow_float b, flow_float c);
 // checkpoint: G (受動種ごと nPlanes) / H (受動種ごと nCells) の host 転送。有効な履歴が無ければ false。
-bool passiveFctHistoryToHost(const mesh& msh, std::vector<std::vector<flow_float>>& G, std::vector<std::vector<flow_float>>& H, std::vector<flow_float>& mEff);
-bool passiveFctHistoryFromHost(solverConfig& cfg, mesh& msh, variables& var, const std::vector<std::vector<flow_float>>& G, const std::vector<std::vector<flow_float>>& H, const std::vector<flow_float>& mEff);
+bool passiveFctHistoryToHost(const mesh& msh, std::vector<std::vector<flow_float>>& G, std::vector<std::vector<flow_float>>& H, std::vector<flow_float>& mEff, std::vector<std::vector<flow_float>>& Hsrc);
+bool passiveFctHistoryFromHost(solverConfig& cfg, mesh& msh, variables& var, const std::vector<std::vector<flow_float>>& G, const std::vector<std::vector<flow_float>>& H, const std::vector<flow_float>& mEff, const std::vector<std::vector<flow_float>>& Hsrc);

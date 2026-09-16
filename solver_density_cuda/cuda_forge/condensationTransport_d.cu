@@ -166,6 +166,33 @@ int condRealizViolReadReset(int* degenerate)
     return h[0];
 }
 
+// Q1/Q2 だけの実現可能性射影 (EOS 更新後の T; g は不変) + primitive の再同期 (plan §4.7 v5, plan-7 M4)。
+void condensationRealizabilityProject_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    if (!condensationEnabled(var)) return;
+    const CondPropOpts opts = cond_prop_opts(cfg);
+    const int useTab = (cfg.condFloat != 0 && g_condTables.valid) ? 1 : 0;
+    for (int s = 0; s < var.nCondSpeciesRegistered; ++s) {
+        const std::string i = std::to_string(s);
+        cond_realizability_project_only_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
+            msh.nCells, var.c_d["ro"], var.c_d["rog_"+i], var.c_d["roQ0_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i],
+            cfg.condModel, var.c_d["T"], opts, useTab, g_condTables,
+            var.c_d["condClampCorrQ_"+i], condRealizViolCounter(), condClampBudget(s), periodicNodeActive(cfg, msh) ? msh.periodicRoot_d : nullptr, var.c_d["volume"]);
+    }
+    gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+    // primitive を再同期 (Q1, Q2)
+    {
+        CondPrimPtrs P{}; P.n = 0;
+        for (const auto& consName : var.condMomentConsNames) {
+            const std::string prim = consName.substr(2);
+            P.rophi[P.n] = var.c_d[consName]; P.phi[P.n] = var.c_d[prim]; ++P.n;
+            if (P.n == 4) { cond_primitive_multi_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(msh.nCells_all, var.c_d["ro"], P); P.n = 0; }
+        }
+        if (P.n > 0) cond_primitive_multi_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(msh.nCells_all, var.c_d["ro"], P);
+    }
+    gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+}
+
 void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     (void)cfg;

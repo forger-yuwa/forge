@@ -65,7 +65,7 @@ __device__ __forceinline__ flow_float passive_fct_lowflux(
     return meff * qL[q][up] / max(ro[up], (flow_float)1.0e-30);
 }
 
-// (0) 診断: HO の BDF 残差 r_H = res^sp − (V/Δt)(a q − b qP + c qPP) の Σ r² (root のみ) と Σ (V a/Δt q)²。
+// (0) 診断: HO の BDF 残差 r_H = res^sp − (V/Δt)(a q − b qP + c qPP) の Σ r² と Σ (V a/Δt q)² を**成分ごと** (out2[2q], out2[2q+1]; root のみ)。
 __global__ void passive_fct_rh_norm_d(
     geom_int nCells, const geom_float* vol, flow_float dt, flow_float a, flow_float b, flow_float c, int nq,
     flow_float** res, flow_float** q, flow_float** qP, flow_float** qPP, const geom_int* root, double* out2)
@@ -74,14 +74,12 @@ __global__ void passive_fct_rh_norm_d(
     if (ic >= nCells) return;
     if (root != nullptr && root[ic] != ic) return;
     const flow_float V = (flow_float)vol[ic];
-    double r2 = 0.0, s2 = 0.0;
     for (int qq = 0; qq < nq; ++qq) {
         const double r = (double)res[qq][ic] - (double)(V/dt)*((double)a*q[qq][ic] - (double)b*qP[qq][ic] + (double)c*qPP[qq][ic]);
-        const double s = (double)(V*a/dt)*(double)q[qq][ic];
-        r2 += r*r; s2 += s*s;
+        const double sc = (double)(V*a/dt)*(double)q[qq][ic];
+        if (r != 0.0) atomicAdd(&out2[2*qq], r*r);
+        if (sc != 0.0) atomicAdd(&out2[2*qq+1], sc*sc);
     }
-    if (r2 != 0.0) atomicAdd(&out2[0], r2);
-    if (s2 != 0.0) atomicAdd(&out2[1], s2);
 }
 
 // (1) 低次作用素の対角 (移流: 全輸送面; 拡散: トレーサのみ内部面) と拡散面係数。
@@ -151,13 +149,13 @@ __global__ void passive_fct_lo_rhs_d(
     const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     const flow_float V = (flow_float)vol[ic];
-    double s2 = 0.0;
+    const bool count = (root == nullptr) || (root[ic] == ic);
     for (int q = 0; q < nq; ++q) {
         const flow_float Hn = (H != nullptr) ? H[q][ic] : (V/dt)*(qP[q][ic] - qPP[q][ic]);
         const flow_float r = (V/dt)*qP[q][ic] + invA*(resS != nullptr ? resS[q][ic] : 0.0f) + cOverA*Hn;
-        rhs[q][ic] = r; s2 += (double)r*(double)r;
+        rhs[q][ic] = r;
+        if (rhs2 != nullptr && count && r != 0.0f) atomicAdd(&rhs2[q], (double)r*(double)r);   // 成分ごと (plan-7 M5)
     }
-    if (rhs2 != nullptr && (root == nullptr || root[ic] == ic) && s2 != 0.0) atomicAdd(rhs2, s2);
 }
 
 // (4) 初期値: q_L = q_H を物理限界 ([0, ρ] / ≥0) にクリップ。
@@ -184,15 +182,13 @@ __global__ void passive_fct_lo_solve_d(
     const bool pinned = (pin != nullptr) && (pin[ic] == (flow_float)1.0);
     const bool count = (root == nullptr) || (root[ic] == ic);
     const flow_float base = oneOverDt*(flow_float)vol[ic] + diagAdv[ic];
-    double r2 = 0.0;
     for (int q = 0; q < nq; ++q) {
         if (pinned) { qL[q][ic] = qH[q][ic]; continue; }
         const flow_float d = max(base + ((q == qDiff && diagDiff != nullptr) ? diagDiff[ic] : 0.0f), (flow_float)1.0e-30);
         const flow_float rl = rhs[q][ic] + nb[q][ic] - d*qL[q][ic];
-        if (count) r2 += (double)rl*(double)rl;
+        if (res2 != nullptr && count && rl != 0.0f) atomicAdd(&res2[q], (double)rl*(double)rl);   // 成分ごと (plan-7 M5)
         qL[q][ic] = (rhs[q][ic] + nb[q][ic]) / d;
     }
-    if (res2 != nullptr && r2 != 0.0) atomicAdd(res2, r2);
 }
 
 // (6) 生の反拡散流束 A^raw = F^eff_H − F_L(q_L) (全輸送面; F^eff_H = invA·F_H + cOverA·G^n, F_H = ṁ P_face − J_H [内部] / ṁ φ_H,own [node 境界]) と
@@ -321,7 +317,7 @@ __global__ void passive_fct_ratio_d(
 }
 
 // (11) α_f, 補正の集計, 実現流束 G^{n+1} (全輸送面): corr[ic0] −= (A^raw − α A^pre), corr[ic1] += (…)。境界面は外部側 R=1 (ノード側だけ制約)。
-//   Gout[ip*stride+q] = F_L(q_L) + α A^pre。stats[q*8+0] += Σ|A^raw − α A^pre|, [1] += 作動面数, [5] += 境界面の |α A^pre| (外部交換)。forceAlpha0 は単体試験用。
+//   Gout[ip*stride+q] = F_L(q_L) + α A^pre。stats[q*8+0] += Σ|A^raw − α A^pre|, [1] += 作動面数, [5] += 境界面の実現流束 G (符号付き, 流出正), [6] += 境界面で落とした |A^raw − α A^pre|。forceAlpha0 は単体試験用。
 __global__ void passive_fct_apply_d(
     geom_int nCells, geom_int nNormalPlanes, geom_int nNormalHaloPlanes, const geom_int* normal_halo_planes, const geom_int* plane_cells,
     const flow_float* ro, const flow_float* roN, const flow_float* meffFace, int isNode,
@@ -346,14 +342,15 @@ __global__ void passive_fct_apply_d(
         else                alpha = 0.0f;
         if (forceAlpha0 != 0) alpha = 0.0f;
         const flow_float aA = alpha*Ap;
-        if (Gout != nullptr) Gout[(size_t)ip*stride + q] = passive_fct_lowflux(nCells, ip, ic0, ic1, meff, ro, roN, q, qDiff, cdiff, nNormalPlanes, isNode, qL, qP) + aA;
+        const flow_float Gf = passive_fct_lowflux(nCells, ip, ic0, ic1, meff, ro, roN, q, qDiff, cdiff, nNormalPlanes, isNode, qL, qP) + aA;
+        if (Gout != nullptr) Gout[(size_t)ip*stride + q] = Gf;
+        if (!interior && stats != nullptr) { atomicAdd(&stats[(size_t)q*8 + 5], (double)Gf); atomicAdd(&stats[(size_t)q*8 + 6], (double)fabsf(Ar - aA)); }   // 境界: 実現流束 (符号付き, 流出正) と落とした量
         const flow_float rA = Ar - aA;
         if (rA != 0.0f) {
             atomicAdd(&corr[q][ic0], -rA);
             if (interior) atomicAdd(&corr[q][ic1], rA);
             if (stats != nullptr) { atomicAdd(&stats[(size_t)q*8 + 0], (double)fabsf(rA)); atomicAdd(&stats[(size_t)q*8 + 1], 1.0); }
         }
-        if (!interior && stats != nullptr && aA != 0.0f) atomicAdd(&stats[(size_t)q*8 + 5], (double)fabsf(aA));
     }
 }
 
@@ -391,13 +388,66 @@ __global__ void passive_fct_divG_d(
         if (ic1 < nCells) atomicAdd(&divG[q][ic1],  g);
     }
 }
-__global__ void passive_fct_hist_local_d(geom_int nCells, const geom_float* vol, flow_float dt, int nq,
-                                         flow_float** qfinal, flow_float** qP, flow_float** divG, flow_float** H)
+//   H = H_src + H_rem: H_src = invA·S V + cOverA·H_src^n (物理ソースの流束形履歴), H_rem = H − H_src (残差・クランプ・ピン由来の局所残り; 収支の「非物理」項)。
+//   budget[q*4+0] += Σ H_src·Δt·(root), [1] += Σ H_rem·Δt (符号付き), [2] += Σ|H_rem|·Δt, [3] += Σ (V/Δt)(q_final − q^n)·Δt (総増分)。
+__global__ void passive_fct_hist_local_d(geom_int nCells, const geom_float* vol, flow_float dt, flow_float invA, flow_float cOverA, int nq,
+                                         flow_float** qfinal, flow_float** qP, flow_float** divG, flow_float** resS, flow_float** Hsrc, flow_float** H,
+                                         const geom_int* root, double* budget)
 {
     const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     const flow_float V = (flow_float)vol[ic];
-    for (int q = 0; q < nq; ++q) H[q][ic] = (V/dt)*(qfinal[q][ic] - qP[q][ic]) - divG[q][ic];
+    const bool count = (root == nullptr) || (root[ic] == ic);
+    for (int q = 0; q < nq; ++q) {
+        const flow_float inc = (V/dt)*(qfinal[q][ic] - qP[q][ic]);
+        const flow_float Hn = inc - divG[q][ic];
+        const flow_float Hs = invA*(resS != nullptr ? resS[q][ic] : 0.0f) + cOverA*Hsrc[q][ic];
+        H[q][ic] = Hn; Hsrc[q][ic] = Hs;
+        if (budget != nullptr && count) {
+            const double rem = (double)(Hn - Hs)*(double)dt;
+            if (Hs != 0.0f) atomicAdd(&budget[(size_t)q*4 + 0], (double)Hs*(double)dt);
+            if (rem != 0.0) { atomicAdd(&budget[(size_t)q*4 + 1], rem); atomicAdd(&budget[(size_t)q*4 + 2], fabs(rem)); }
+            if (inc != 0.0f) atomicAdd(&budget[(size_t)q*4 + 3], (double)inc*(double)dt);
+        }
+    }
+}
+
+// (15) 密度整合の診断 (plan-7 M6): E_ρ = (V/Δt)(ρ^{n+1} − ρ^n) − Σ s ṁ^eff (root のみ; Σ E_ρ² と Σ ((V/Δt)ρ)²)、
+//      トレーサ上限条件 Lρ − f ≥ 0 の逸脱 (負の量の Σ·Δt と個数)。Lρ = (V/Δt + diagAdv + diagDiff)ρ − nb(ρ) は呼び出し側が nb を ρ で組んで渡す。
+__global__ void passive_fct_density_closure_d(geom_int nCells, const geom_float* vol, flow_float dt, const flow_float* ro, const flow_float* roN,
+                                              const flow_float* divMeff, const geom_int* root, double* out2)
+{
+    const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    if (root != nullptr && root[ic] != ic) return;
+    const double V = (double)vol[ic];
+    const double e = (V/dt)*((double)ro[ic] - (double)roN[ic]) - (double)divMeff[ic];
+    const double sc = (V/dt)*(double)ro[ic];
+    if (e != 0.0) atomicAdd(&out2[0], e*e);
+    if (sc != 0.0) atomicAdd(&out2[1], sc*sc);
+}
+__global__ void passive_fct_upper_margin_d(geom_int nCells, const geom_float* vol, flow_float oneOverDt, const flow_float* ro,
+                                           const flow_float* diagAdv, const flow_float* diagDiff, int q, const flow_float* nbRho, flow_float** rhs,
+                                           const flow_float* pin, const geom_int* root, double* out)
+{
+    const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    if (root != nullptr && root[ic] != ic) return;
+    if (pin != nullptr && pin[ic] == (flow_float)1.0) return;
+    const double Lrho = ((double)oneOverDt*(double)vol[ic] + (double)diagAdv[ic] + (diagDiff != nullptr ? (double)diagDiff[ic] : 0.0))*(double)ro[ic] - (double)nbRho[ic];
+    const double m = Lrho - (double)rhs[q][ic];
+    if (m < 0.0) { atomicAdd(&out[0], -m); atomicAdd(&out[1], 1.0); }
+}
+__global__ void passive_fct_div_meff_d(geom_int nCells, geom_int nNormalHaloPlanes, const geom_int* normal_halo_planes, const geom_int* plane_cells,
+                                       const flow_float* meff, flow_float* divMeff)
+{
+    const geom_int ih = blockDim.x*blockIdx.x + threadIdx.x;
+    if (ih >= nNormalHaloPlanes) return;
+    const geom_int ip = normal_halo_planes[ih];
+    const geom_int ic0 = plane_cells[2*ip+0], ic1 = plane_cells[2*ip+1];
+    const flow_float m = meff[ip];
+    if (ic0 < nCells) atomicAdd(&divMeff[ic0], -m);
+    if (ic1 < nCells) atomicAdd(&divMeff[ic1],  m);
 }
 
 // (14) 有効質量流束 ṁ^eff,{n+1} = invA·ṁ^{n+1} + cOverA·ṁ^eff,n (流れの BDF2 連続式の流束形; BDF1 は ṁ そのもの)。

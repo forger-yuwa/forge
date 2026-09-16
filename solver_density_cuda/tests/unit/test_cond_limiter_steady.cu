@@ -382,6 +382,9 @@ static void test_realizability_projection()
         {"near-monodisperse (1-1e-4, 1+1e-4)", 1.0-1.0e-4, 1.0+1.0e-4, true, 3.0e-4},
         {"singular boundary (1,1,1,8)-type x=0.5,y=x^2", 0.5, 0.25, false, 0.0},
         {"degenerate x=0 (Q1=0, Q2>0, Q3>0)", 0.0, 0.3, true, 1.0e30},
+        {"degenerate (0,0) (Q1=Q2=0, Q3>0)", 0.0, 0.0, true, 1.0e30},
+        {"small positive x=1e-3, y=x^2(1-2e-6) (tiny violation -> nearest point, continuous)", 1.0e-3, 1.0e-6*(1.0-2.0e-6), true, 1.0e-5},
+        {"small positive interior x=5e-4, y=1e-4", 5.0e-4, 1.0e-4, false, 0.0},
     };
     for (const S& c : cases) {
         std::vector<flow_float> h_ro{(flow_float)ro}, h_g{(flow_float)(ro*g)}, h_q0{(flow_float)(ro*Q0)}, h_q1{(flow_float)(ro*Q0*r*c.x)}, h_q2{(flow_float)(ro*Q0*r*r*c.y)};
@@ -399,6 +402,7 @@ static void test_realizability_projection()
         if (!c.expectChange) CHECK(q1n == h_q1[0] && q2n == h_q2[0], "(l) %s: state changed although admissible", c.name);
         else if (c.expectRelCorr < 1.0) CHECK(rel <= 3.0*c.expectRelCorr, "(l) %s: correction %.2e larger than the violation scale %.2e", c.name, rel, c.expectRelCorr);
         if (c.x == 0.0) CHECK(hv[1] == 1 && xn == 1.0 && yn == 1.0, "(l) %s: degenerate state must reinit to monodisperse", c.name);
+        if (c.x > 0.0 && c.expectChange && c.expectRelCorr < 1.0) CHECK(hv[1] == 0, "(l) %s: small positive state must not be reinitialised", c.name);
         CHECK(xn <= 1.0 + 1e-6 && yn >= xn*xn*(1 - 1e-6) && yn*yn <= xn*(1 + 1e-6), "(l) %s: result outside admissible region", c.name);
     }
     // Q0=0, g>0 (核生成域の g アンダーフロー相当): 触らない

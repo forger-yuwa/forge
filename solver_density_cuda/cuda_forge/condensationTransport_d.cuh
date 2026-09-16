@@ -46,6 +46,7 @@ void applyCondensationBoundaries(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
 // モーメント実現可能性射影 (Q1²≤Q0Q2, Q2²≤Q1Q3) の作動数: device カウンタと、読み出して 0 に戻す host 関数 (monitor ログ用)。
 int* condRealizViolCounter();
 int  condRealizViolReadReset(int* degenerate = nullptr);   // 戻り値: 最近点射影の作動数, *degenerate: 退化の単分散再初期化数
+void condensationRealizabilityProject_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);   // Q1/Q2 だけの射影 (EOS 後)
 double* condClampBudget(int s);                    // 種 s の成分別収支スロット (device, 8 doubles)
 std::vector<double> condClampBudgetTotals(int nSpecies);   // [s*8 + 2k(+1)]: g,Q0,Q1,Q2 の符号付き/絶対 ∫Δq dV (全期間)
 

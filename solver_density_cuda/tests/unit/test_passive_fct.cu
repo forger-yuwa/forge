@@ -69,8 +69,8 @@ __global__ void dual_update_d(int n, float V, float dt, float dtau, float a, flo
 // FCT 1 step を実行する汎用 device ハーネス (任意の面リスト; 周期 gather なし)。入力: q_H (dq), q^n (dqP), G^n/H^n (nullptr 可), Pface, massflux, meff。
 struct FctDev {
     int n, nPlanes, nNormal, nHalo; geom_int *dpc,*dcpi,*dcp,*dnhp; geom_float *dvol,*dccx,*dfx; float *dro,*droN;
-    float *dqL,*drhs,*dnb,*dPp,*dPm,*dmx,*dmn,*dRp,*dRm,*dcorr,*dbase,*dqB,*dH,*dqP,*dqPP,*dq,*ddA,*ddD,*dcd,*dAf,*dAp,*dG,*dGn,*dmeff;
-    float **pq,**pqP,**pqPP,**pqL,**prhs,**pnb,**pPp,**pPm,**pmx,**pmn,**pRp,**pRm,**pcorr,**pbase,**pqB,**pH;
+    float *dqL,*drhs,*dnb,*dPp,*dPm,*dmx,*dmn,*dRp,*dRm,*dcorr,*dbase,*dqB,*dH,*dHs,*dqP,*dqPP,*dq,*ddA,*ddD,*dcd,*dAf,*dAp,*dG,*dGn,*dmeff;
+    float **pq,**pqP,**pqPP,**pqL,**prhs,**pnb,**pPp,**pPm,**pmx,**pmn,**pRp,**pRm,**pcorr,**pbase,**pqB,**pH,**pHs;
     double *dst,*dch,*drhs2; float* pin;
     FctDev(int n_, int nPlanes_, int nNormal_, const std::vector<geom_int>& pc, const std::vector<geom_int>& cpi, const std::vector<geom_int>& cp, const std::vector<geom_int>& nhp,
            const std::vector<geom_float>& vol, const std::vector<geom_float>& ccx, const std::vector<float>& ro, int nGhost)
@@ -78,10 +78,10 @@ struct FctDev {
         dpc=up(pc); dcpi=up(cpi); dcp=up(cp); dnhp=up(nhp); dvol=up(vol); dccx=up(ccx); dfx=up(std::vector<geom_float>(nPlanes_,0.5f));
         dro=up(ro); droN=up(ro);
         std::vector<float> z((size_t)n_+nGhost, 0.f), zp((size_t)nPlanes_, 0.f);
-        dqL=up(z);drhs=up(z);dnb=up(z);dPp=up(z);dPm=up(z);dmx=up(z);dmn=up(z);dRp=up(z);dRm=up(z);dcorr=up(z);dbase=up(z);dqB=up(z);dH=up(z);dqP=up(z);dqPP=up(z);dq=up(z);ddA=up(z);ddD=up(z);
+        dqL=up(z);drhs=up(z);dnb=up(z);dPp=up(z);dPm=up(z);dmx=up(z);dmn=up(z);dRp=up(z);dRm=up(z);dcorr=up(z);dbase=up(z);dqB=up(z);dH=up(z);dHs=up(z);dqP=up(z);dqPP=up(z);dq=up(z);ddA=up(z);ddD=up(z);
         dcd=up(zp);dAf=up(zp);dAp=up(zp);dG=up(zp);dGn=up(zp);dmeff=up(zp);
         auto P=[&](float* a){ std::vector<float*> v={a}; return up(v); };
-        pq=P(dq);pqP=P(dqP);pqPP=P(dqPP);pqL=P(dqL);prhs=P(drhs);pnb=P(dnb);pPp=P(dPp);pPm=P(dPm);pmx=P(dmx);pmn=P(dmn);pRp=P(dRp);pRm=P(dRm);pcorr=P(dcorr);pbase=P(dbase);pqB=P(dqB);pH=P(dH);
+        pq=P(dq);pqP=P(dqP);pqPP=P(dqPP);pqL=P(dqL);prhs=P(drhs);pnb=P(dnb);pPp=P(dPp);pPm=P(dPm);pmx=P(dmx);pmn=P(dmn);pRp=P(dRp);pRm=P(dRm);pcorr=P(dcorr);pbase=P(dbase);pqB=P(dqB);pH=P(dH);pHs=P(dHs);
         dst=up(std::vector<double>(8,0.0)); dch=up(std::vector<double>(1,0.0)); drhs2=up(std::vector<double>(1,0.0)); pin=nullptr;
     }
     // a,c: BDF 係数; useHist: G/H (device 配列 dG/dH) を使う; massflux/meff は dmeff/mf に入れて渡す。戻り: q_C を dq に書く。
@@ -113,11 +113,11 @@ struct FctDev {
         cudaDeviceSynchronize();
     }
     // 確定状態から G^{n+1}, H^{n+1}
-    void finish(float dt) {
+    void finish(float dt, float invA = 1.f, float cOverA = 0.f) {
         std::swap(dG, dGn);
         cudaMemset(dbase, 0, n*sizeof(float));
         passive_fct_divG_d<<<(nHalo+127)/128,128>>>(n, nHalo, dnhp, dpc, 1, 1, dG, pbase);
-        passive_fct_hist_local_d<<<(n+127)/128,128>>>(n, dvol, dt, 1, pq, pqP, pbase, pH);
+        passive_fct_hist_local_d<<<(n+127)/128,128>>>(n, dvol, dt, invA, cOverA, 1, pq, pqP, pbase, nullptr, pHs, pH, nullptr, nullptr);
         cudaDeviceSynchronize();
     }
 };

@@ -10,14 +10,16 @@
 
 // モーメント実現可能性の射影 (plan §4.7 v5, codex plan-5 M3/M4, plan-6 M3): 無次元 x = Q1/(Q0 r), y = Q2/(Q0 r²), r = (Q3/Q0)^{1/3}。
 // 許容領域 A = {0 ≤ x ≤ 1, x² ≤ y ≤ √x} (Hankel H1, H2 ⪰ 0)。判定は相対許容 eps (境界上の整合状態 [単分散 (1,1)] は触らない)。
-//   退化 (x ≤ δ または y ≤ δ²: Q1 または Q2 がほぼ 0 なのに Q3 > 0 → 特異整合が成立し得ない) は (Q0, g) 保存の単分散 (1,1) へ再初期化。
-//   それ以外の違反は A への最近点 (ユークリッド距離; x, y 両方を動かす) — 境界 y=√x / y=x² / 角 (1,1) の候補から最小距離を選ぶ。
+//   特異不整合 (x または y が厳密 0 / アンダーフロー なのに Q3 > 0) は (Q0, g) 保存の単分散 (1,1) へ再初期化 (閾値なし: 小さい正の x は領域内部でもあり得る)。
+//   それ以外の違反は A への最近点 (ユークリッド距離; x, y 両方を動かす) — 境界 y=√x / y=x² / 角 (1,1) の候補から最小距離を選ぶ (連続)。
 // 戻り値: 0 = 変更なし, 1 = 最近点射影, 2 = 退化の単分散再初期化。
-__host__ __device__ inline int cond_realizability_project(double& x, double& y, double eps, double delta)
+__host__ __device__ inline int cond_realizability_project(double& x, double& y, double eps)
 {
-    const bool viol = (x > 1.0 + eps) || (y < x*x*(1.0 - eps)) || (y*y > x*(1.0 + eps)) || (x < 0.0) || (y < 0.0);
+    // 特異不整合 (plan-7 M3): Q3>0 なのに Q1 または Q2 が厳密 0 / アンダーフロー (x, y ≤ 1e-30) → 非負半径分布では Q1=0 ⇒ Q3=0 なので実現不能。
+    // 不等式検査より先に扱い、(Q0, g) 保存の単分散 (1,1) へ再初期化 (明示した修復方針; 数を別に log)。
+    if (x <= 1.0e-30 || y <= 1.0e-30) { x = 1.0; y = 1.0; return 2; }
+    const bool viol = (x > 1.0 + eps) || (y < x*x*(1.0 - eps)) || (y*y > x*(1.0 + eps));
     if (!viol) return 0;
-    if (x <= delta || y <= delta*delta) { x = 1.0; y = 1.0; return 2; }
     // 候補 1: 上境界 y = √t (t ∈ [0,1]) への最近点 (黄金分割)
     auto nearest = [&](int branch, double& bx, double& by) {
         double lo = 0.0, hi = 1.0; const double gr = 0.6180339887498949;
@@ -76,7 +78,7 @@ __global__ void cond_realizability_clamp_d(
             const double q3 = rg / ((4.0/3.0)*COND_PI*rho_l);
             const double rr = cbrt(q3/q0);
             double x = (double)roQ1[ic]/(q0*rr), y = (double)roQ2[ic]/(q0*rr*rr);
-            const int kind = cond_realizability_project(x, y, 1.0e-6, 1.0e-3);
+            const int kind = cond_realizability_project(x, y, 1.0e-6);
             if (kind != 0) {
                 roQ1[ic] = (flow_float)(q0*rr*x); roQ2[ic] = (flow_float)(q0*rr*rr*y);
                 if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
@@ -157,7 +159,7 @@ __global__ void cond_realizability_clamp_f_d(
             const float q3 = r / ((4.0f/3.0f)*COND_PI_F*rho_l);
             const float rr = cbrtf(q3/q0);
             double x = (double)roQ1[ic]/((double)q0*(double)rr), y = (double)roQ2[ic]/((double)q0*(double)rr*(double)rr);
-            const int kind = cond_realizability_project(x, y, 1.0e-6, 1.0e-3);
+            const int kind = cond_realizability_project(x, y, 1.0e-6);
             if (kind != 0) {
                 roQ1[ic] = (float)((double)q0*(double)rr*x); roQ2[ic] = (float)((double)q0*(double)rr*(double)rr*y);
                 if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
@@ -206,3 +208,36 @@ __global__ void cond_realizability_clamp_f_d(
     record();
 }
 
+
+// Q1/Q2 だけの実現可能性射影 (g・Q0 は不変; dual-time FCT の後処理で EOS 更新後の T を使って呼ぶ; plan-7 M4)。budget は [g,Q0,Q1,Q2]×(符号付き,絶対)·V。
+__global__ void cond_realizability_project_only_d(
+    geom_int nCells, flow_float* ro, flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
+    int condModel, flow_float* T, CondPropOpts opts, int useTab, CondTablesF tb,
+    flow_float* diagCorrQ, int* realizViol, double* budget, const geom_int* root, const geom_float* vol)
+{
+    const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    const double q0 = (double)roQ0[ic], rg = (double)rog[ic];
+    if (!(q0 > 0.0 && rg > 0.0)) return;
+    const CondSpeciesProps cp0 = condProps_make(condModel, opts);
+    const flow_float Tq = T[ic];
+    const double rho_l = (useTab != 0 && cond_tab_wet_ok(tb, Tq)) ? (double)cond_tab_rhol_f(tb, Tq) : cond_rho_cond(cp0, (double)Tq);
+    const double q3 = rg / ((4.0/3.0)*COND_PI*rho_l);
+    const double rr = cbrt(q3/q0);
+    double x = (double)roQ1[ic]/(q0*rr), y = (double)roQ2[ic]/(q0*rr*rr);
+    const int kind = cond_realizability_project(x, y, 1.0e-6);
+    if (kind == 0) return;
+    const flow_float q1_in = roQ1[ic], q2_in = roQ2[ic];
+    roQ1[ic] = (flow_float)(q0*rr*x); roQ2[ic] = (flow_float)(q0*rr*rr*y);
+    if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
+    if (diagCorrQ != nullptr) {
+        double rq = 0.0;
+        const double d1 = fabs((double)roQ1[ic] - (double)q1_in)/fmax(fabs((double)q1_in), 1.0e-30), d2 = fabs((double)roQ2[ic] - (double)q2_in)/fmax(fabs((double)q2_in), 1.0e-30);
+        rq = fmax(d1, d2); if ((flow_float)rq > diagCorrQ[ic]) diagCorrQ[ic] = (flow_float)rq;
+    }
+    if (budget != nullptr && (root == nullptr || root[ic] == ic)) {
+        const double V = (vol != nullptr) ? (double)vol[ic] : 1.0;
+        const double d[2] = {(double)roQ1[ic] - (double)q1_in, (double)roQ2[ic] - (double)q2_in};
+        for (int k = 0; k < 2; ++k) if (d[k] != 0.0) { atomicAdd(&budget[2*(2+k)], d[k]*V); atomicAdd(&budget[2*(2+k)+1], fabs(d[k])*V); }
+    }
+}

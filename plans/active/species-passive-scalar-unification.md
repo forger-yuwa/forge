@@ -162,7 +162,7 @@
 - 期待: $Q_1=0$ のノードで g/Q0 の更新が止まらなくなり、モーメントの sub-iter 床が流れと同水準 (≥2 桁) に下がる。次数は #12/#18 の 3 水準 × nSub 倍増で再評価し、
   BDF2 2.0±0.3・nSub 倍増差/最小水準差 ≤0.1 を全量 (g, Q0, T, ro) で要求する。
 
-### 4.7 非定常 (dual-time) の受動種の有界化 — 物理 step 末尾の保存的 FCT 補正 (Zalesak 型; v5: codex result-2 M2, plan-3〜6 反映; 2026-09-17)
+### 4.7 非定常 (dual-time) の受動種の有界化 — 物理 step 末尾の保存的 FCT 補正 (Zalesak 型; v6: codex result-2 M2, plan-3〜7 反映; 2026-09-17)
 
 - **問題**: CV ごとの増分スケーリング $\theta_b$ (#14) は非保存 (縮めた分を隣へ戻さない)。seam ステップ試験 `run_0098` で総量 0.54 % 損失。
 - **棄却した案**: (plan-3) sub-iter 内の陽的低次予測への Zalesak (CFL>1 で予測が有界でない)。(plan-4/5) BDF2 の低次陰解を限界にする形 (履歴の負係数で
@@ -189,11 +189,12 @@
      **許容な外部状態 $\phi^n_{own}=q^n/\rho^n$ の定数 RHS** $|\dot m^{eff}|\phi^n_{own}$ (HO の「自セル値」を対角に入れると M 行列でなくなる: plan-6 M2 の反例 $q_L=-23/35$)。
      初期値は $q_H$ の物理限界クリップ、受入は線形残差 $\|f-Lq_L\|/(\|f\|+$`passiveFctTolAbs`$)\le$ `passiveFctTol` (上限 `passiveFctSweeps`; 未達は警告と log)。
      周期 group は対角・近傍和を和で gather、$V$ は合併体積で 1 度、ピン行は $q_L=q_H$。**有界性**: M 行列 (非負係数、正の対角) + 初期値許容 + $f\ge0\Rightarrow q_L\ge0$;
-     トレーサ上限 $q_L\le\rho^{n+1}$ は $L\rho^{n+1}=\tfrac{V}{\Delta t}\rho^n+H_\rho$ ($\phi\equiv1$ が $\dot m^{eff}$ の BE 形連続式の解; $H_\rho$ は流れの sub-iter 残差の局所残り) から
-     $\phi^n\le1$ かつ $H_\rho\ge0$ で成立 (plan-6 M1 の反例 [$\dot m^{n+1}$ で組むと $21/20$] は $\dot m^{eff}$ で解消)。**穴** = 負の $S^{eff}$ (蒸発、前 step の局所残り $H^n$)、
-     流れの反復残差 — 逸脱量を記録し事後の合否で拒否。
-  3. **生の反拡散流束** (全輸送面): $A^{raw}_f=\tfrac1a\dot m_f(P_{face,f}-\phi_{L,up})-\tfrac1a[J_f(q_H)-J_f(q_L)]+\tfrac caG^n_f-(1-\tfrac1a)F_{L,f}(q_L)$
-     ($=F^{eff}_{H,f}-F_{L,f}(q_L)$; node 境界半割面は $\phi_{own}$ 形)。2 つの離散式の差から厳密に $M(q_H-q_L)=BA^{raw}+(r_L-r_H)$。
+     トレーサ上限 $q_L\le\rho^{n+1}$ の十分条件は境界 RHS も含めた $f\le L\rho^{n+1}$。$E_\rho^{n+1}:=M(\rho^{n+1}-\rho^n)-B\dot m^{eff,n+1}$ は $E_\rho^{n+1}=\tfrac caE_\rho^n-\tfrac1ar_\rho^{n+1}$
+     で過去の流れ残差が残る (plan-7 M6) ので、$L\rho^{n+1}-f=\tfrac{V}{\Delta t}\rho^n(1-\phi^n)+E_\rho-S^{eff}V-(\text{境界流入差})$ を**実際の作用素で評価**し、負の量 (逸脱) と個数を
+     `fctDensity` として log に出す (E_ρ の相対ノルムも)。正の局所履歴 $H^n$・負の $E_\rho$ による上限逸脱は保証の穴 = 基点逸脱として積算し事後の合否で拒否 (有界性保証とは区別)。
+  3. **生の反拡散流束** (全輸送面; 正本は展開式でなくこの直接差分): $A^{raw}_f=\tfrac1aF_{H,f}+\tfrac caG^n_f-F_{L,f}(\dot m^{eff},q_L)$、
+     $F_H=\dot m P_{face}-J(q_H)$ (node 境界半割面は $\dot m\,\phi_{H,own}$)、$F_L=\dot m^{eff}\phi_{L,up}-J(q_L)$ (境界: 流出 $\dot m^{eff}\phi_{L,own}$、流入 $\dot m^{eff}\phi^n_{own}$;
+     HO と LO の upwind 側は各自の質量流束の符号で決める)。2 つの離散式の差から厳密に $M(q_H-q_L)=BA^{raw}+r_L-r_H/a$ ($r_L$ は Jacobi の線形残差、$r_H$ は元の BDF 残差)。
   4. **基点** $q_B:=q_H-M^{-1}BA^{raw}$ (全面; $=q_L+M^{-1}(r_L-r_H)$)。$q_B$ の物理限界逸脱量 (反復誤差と負の $S^{eff}$ に由来) を計測・記録し、限界計算にはクリップ値を使う
      (実際に加算する基点は $q_H$ 側から書くのでクリップしない; 逸脱は最後の floor が処理して収支に載る)。局所限界は {自身, 面隣接} の {$\phi^n$, $\phi_B$} なので $q_B$ は局所限界内。
   5. **Zalesak (全輸送面)**: 前制限 (`passiveFctPrelimit`; 既定 0 = 無効: 滑らかな極値でも作動し時間精度を落とすため A/B 用) → $P^\pm$ ($A^{pre}$) → 局所極値 → $Q^\pm$ →
@@ -208,19 +209,23 @@
 - **モーメントの実現可能性 (plan-5 M3/M4, plan-6 M3)**: $Q_0>0,g>0$ で $r=(Q_3/Q_0)^{1/3}$ ($\rho Q_3=\rho g/(\tfrac43\pi\rho_l(T))$)、$x=Q_1/(Q_0r)$, $y=Q_2/(Q_0r^2)$。許容領域
   $A=\{0\le x\le1,\ x^2\le y\le\sqrt x\}$ (Hankel $H_1,H_2\succeq0$)。判定は相対許容 $\varepsilon=10^{-6}$ (境界上の整合状態 [単分散 $(1,1)$] は触らない; 特異境界の
   Curto–Fialkow 整合条件は float では判定できないので $\varepsilon$ 内の境界点 [$(1,1,1,8)$ 型 $x=0.5,y=x^2$] は近傍の実現可能状態と区別しない — 明記した限界)。
-  **射影** (`cond_realizability_project`): (a) 退化 ($x\le\delta=10^{-3}$ または $y\le\delta^2$: $Q_1$ か $Q_2$ がほぼ 0 なのに $Q_3>0$ → 特異整合が成立し得ない [$Q_1=0\Rightarrow Q_3=0$];
-  `run_0257` の 661 ノード) は $(Q_0,g)$ 保存の単分散 $(1,1)$ に再初期化 (数を別に log); (b) それ以外の違反は $A$ への**ユークリッド最近点** ($x,y$ 両方を動かす; 境界 $y=\sqrt x$ /
+  **射影** (`cond_realizability_project`; plan-7 M3): (a) **特異不整合を不等式検査より先に**: $x$ または $y$ が厳密 0 / アンダーフロー ($\le10^{-30}$) なのに $Q_3>0$
+  ($Q_1=0\Rightarrow Q_3=0$ なので実現不能; `run_0257` の 661 ノード, $(0,0)$ も) は $(Q_0,g)$ 保存の単分散 $(1,1)$ に再初期化 (明示した修復方針; 数を別に log; 閾値 δ は置かない
+  = 小さい正の $x$ は領域内部でもあり得るので通常の最近点); (b) それ以外の違反は $A$ への**ユークリッド最近点** ($x,y$ 両方を動かす; 境界 $y=\sqrt x$ /
   $y=x^2$ / 角 $(1,1)$ の候補から最小距離)。違反 $10^{-3}$ で補正 $\sim10^{-3}$、多分散内部点は不変、単分散近傍も最近点 (単体 (l) で確認)。$Q_0=0$ または $g=0$ で他が正の「塵」は
   従来の消滅規則 (S≤1) + 核生成域 (S>1) の $g=0,Q_0>0$ 許容 (保存する射影が無いことを明記)。
   **成分別収支** (plan-5 M5): 射影と全クランプについて $g,Q_0,Q_1,Q_2$ ごとに $\int\Delta q\,dV$ と $\int|\Delta q|\,dV$ (周期 root のみ; 総量で正規化) を全期間積算し monitor に出す
   (`clampBudget`); `condClampCorr/Q` の既存の相対記録は残す。
-- **診断**: `fctCorr` ($\sum_f|A^{raw}-A^{lim}|\Delta t$)、作動面数、前制限量、境界交換 `fctBndCorr`、ピン交換 `fctPinCorr`、基点の物理限界逸脱量、$q_L$ 線形残差と sweep 数、
-  $r_H$、floor 量、実現可能性の違反数と成分別収支。
+- **診断**: `fctCorr` ($\sum_f|A^{raw}-A^{lim}|\Delta t$)、作動面数、前制限量、**境界の実現流束 $\sum_{\partial}G\Delta t$ (符号付き) と境界で落とした量**、ピン交換 `pinCorr`、
+  基点の物理限界逸脱量、$H_{src}$ / $H_{rem}$ (符号付き・絶対) / 総増分の収支 (非周期は $\Delta(\text{総量})=-\sum_\partial G\Delta t+\sum H_{src}\Delta t+\sum H_{rem}\Delta t$ が閉じる)、
+  成分ごとの $q_L$ 線形残差と $r_H$ の区間最大、`fctDensity` ($E_\rho$, 上限逸脱)、floor 量、実現可能性の作動数 (最近点 / 退化再初期化) と成分別収支。
 - **合否**: 非定常 (dual-time) は「総量保存 ≤1e-6 (float; 周期箱は root-only 総量、非周期は境界流束 [`fctBndCorr` 込み]・ソース込みの収支)」+
   「`floorCorr + limCorr + fctPinCorr + 基点逸脱 + 実現可能性の成分別 |Δ|` の総量比 ≤1e-6」+「$0\le\xi\le1$, モーメント ≥0, 許容領域内」。1e-12 は double 参照実装の
   代数試験 (補正前後の総量) のみ。定常は起動時の limCorr を許し固定点で 0。
 - キー `passiveFct` (1 = 上の条件で有効 [既定], 0 = 無効), `passiveFctPrelimit` (0), `passiveFctSweeps` (100), `passiveFctTol` (1e-6), `passiveFctTolAbs` (1e-30)。
-- **合否の実体化**: `tools/check_passive_budget.py <run>` が monitor の積算 (floor/lim/基点逸脱/ピン/成分別クランプ) を読み tol 1e-6 で **PASS/FAIL** を返す (plan-6: 逸脱・予算超過は必須の FAIL)。
+- **合否の実体化**: `tools/check_passive_budget.py <run>` が monitor の積算を読み、受動種ごとに floor + lim + 基点逸脱 + ピン + $|H_{rem}|$ の**総量比の合計** ≤ tol (1e-6)、
+  クランプの成分別 |Δ| の合計 ≤ tol、全値が有限、`[passiveFct] active` の run に FCT 記録があること、総量 0 で補正が非ゼロ (log は rel=1) でないことを検査して **PASS/FAIL** を返す
+  (失敗系は `tests/unit/test_check_passive_budget.py`; plan-7 M1)。
 - 単体 `tests/unit/test_passive_fct.cu` (2026-09-17 ALL PASS): (i) ガウス (CFL 0.5, BDF2, 前制限なし): 変更 (>1e-6) は極値近傍 2 セル・2.6e-3 (FCT の極値クリップ)、他はビット不変;
   (ii) ステップ (CFL 2, BDF1/BDF2 [流束形履歴]) で補正前後の総量が float 1e-6 / double 1e-12 で一致、$0\le\phi\le1$、局所限界内、device と double 参照の一致;
   (iii) $\alpha\equiv0$ で $q_C=q_B$、$q_B-q_L$ が線形残差の範囲; (iv) plan-4 M1 の 3 CV 反例 (負値なし); (v) plan-5 M2 の非周期 3 CV 反例 (逆流境界, 外部側 $R=1$) で上限内;
@@ -271,10 +276,10 @@
 | 18 | dual-time の θ_u を物理 step あたりに; 凝縮の 3 水準次数 (g/Q0) | 実装済・**次数は未達** (2026-09-17, case/44 `run_0256`–`0262`; convMethod 0, nSub 40/80, dt 1.6e-5/8e-6/4e-6): sub-iter 低下は流れ・化学種 ≥2.1 桁、rog/Q2/Q1 ≥2.4 桁だが **roQ0 min 1.64** (nSub 80 でも同値; condLim min 0 = 実現可能性クランプ [avail/非負] が常時作動するセルで増分 0); 観測次数 BDF2 g 1.30 / Q0 1.36 / T 1.27 / ro 2.29、BDF1 g 0.95 / Q0 0.70 / T 1.31 / ro 1.93; nSub 倍増差/最小水準差 g 0.43 / Q0 0.37 / T 0.07。**結論**: 流れ・トレーサ・化学種の BDF2 (2.0–2.3) は成立、モーメントは硬い実現可能性制約が作動するセルで時間 1 次相当 (制約整合の時間離散が要る = 本 plan の範囲外; §10) |
 | 19 | ~~受動種更新の φ_N·δρ 項; floor ≤1e-4~~ | 済 (2026-09-17): `passive_add_rho_term_d` (ρφ += φ_N δρ, 制限は輸送増分のみ; 単体 z=0 で φ 不変 6e-8)。floor 積算: case/16 `run_0500` (run_0476 型) **3.4e-26** (旧 1.76e-4), `run_0501` (run_0494 型) **0** (旧 4.84e-4), Arthur S3 `run_0109` ≤4e-21 (limCorr は起動過渡のみ 7.2e-3 で per-step 0); 固定点 `0500` vs `run_0476` は反復ノイズ内 (ξ 1.9e-5); scheme 0 無影響 (case/44 `run_0254`/`0255` ノイズ床) |
 | 20 | (result-2 M1) モーメントの共通 θ 停止を撤回 (成分ごとの非負化, θ≥1e-12)、停止セルの残差寄与の記録、次数の再評価 (#12/#18 の実体) | forge (必須): 非負化のコードは済 (`cond_moment_update_limited_body`; 切った量 = その成分の未適用残差を limStats に記録)、次数の再評価は #21 の後に S3 でも (§6-6) |
-| 21 | (M2 → plan-3 で再設計 §4.7) 物理 step 末尾の保存的 FCT 補正 (低次陰解 $q_L$ を限界に $q_H$ から落とす); dual-time seam ステップで総量保存 1e-6; floor/lim/fct 併記 | forge (必須; 単体 `test_passive_fct.cu` + case/09 dual-time seam + §6-6 の S3 次数) |
+| 21 | (M2 → §4.7 v5) 物理 step 末尾の保存的 FCT 補正 (流束形 BDF2 履歴, 有効質量流束, 全面 Zalesak) | **実装済 (2026-09-17, commit 7544ca36)**: 単体 `test_passive_fct.cu` (i)–(vi) ALL PASS。CFD (§6-2 dual-time seam ステップ 1e-6, restart G/H, §6-6 の 1 次流れ + S3 次数) は検証中 (case/09 `run_0127`–, case/44 `run_0263`–) |
 | 22 | ~~(M3) ψ_P の周期群での極値・スケール統合と係数共有; SLAU + SFR 2 の seam/内部平行移動試験~~ | 済 (2026-09-17): `limiterPeriodic_d.cuh` (極値 → max/min gather → ψ → min gather; fused5 [流れ] / `limiter_r1_d` [Y] / `limiter_r1_scaled_d` [受動種] の全呼出し), `periodicAtomic_d.cuh` (CAS 比較の float atomicMax/Min, NaN member は no-op), 単体 `test_periodic_limiter.cu` PASS (群 2/4/8 混合符号; 分割鎖と内部鎖でビット一致); case/09 `run_0115`/`0116` (SLAU convMethod 1 + limiter 2 + SFR 2, dual-time coupling 1): 周期対 `limiter_Xi` 差 2.5e-2/1.07e-1 → **0**, π シフト等価 limiter_Xi 1.04e-1 → 7.4e-6, ξ 6.3e-7 (不変); u=−10 (`run_0119`/`0120`) も全 ψ の周期対差 0。非周期 (case/46 `run_0114`–`0116`) は同一バイナリ反復ノイズ内 |
-| 23 | (m1) `--from-floor`: 参照の通常 PASS・列対応・ゼロ参照列の非ゼロ化を検査 | tools |
-| 24 | (m2) methods/condensation.md §4c (θ, φ_N·δρ, limCorr, dual-time の初回 sub-iter 限定 = 物理 step 上限ではない)、§4/§10/#8、plans/README の同期 | docs |
+| 23 | ~~(m1) `--from-floor`: 参照の通常 PASS・列対応・ゼロ参照列の非ゼロ化を検査~~ | 済 (2026-09-17): 参照が通常 PASS でなければ exit 2 で拒否 (`run_0088` を参照にすると REFUSED)、列不一致・参照ゼロ列の非ゼロ化は FAIL; `run_0478/0479/0480/0497` は `run_0476` 参照で PASS のまま |
+| 24 | ~~(m2) methods/condensation.md §4c (θ, φ_N·δρ, limCorr, dual-time の初回 sub-iter 限定 = 物理 step 上限ではない)、§4/§10/#8、plans/README の同期~~ | 済 (2026-09-17): condensation.md §4c (受動種経路の契約・成分別非負化・射影)、thermophysics.md、time_integration/theory.md (FCT)、solver-settings.md (`passiveFct*`, 収支ゲート)、recommended-settings.md、§10 の撤回、#8、plans/README |
 | 8 | 検証 (§6 1–8, node のみ) と codex result レビュー | §6-1/2/7 (短 run) Phase A; §6-3 拡散 (解析解 0.23 %, 2 次収束; 等拡散一致 [コア 2.7e-6] / 混合平均非一致 [3.7e-3 一定] 済), §6-4 固定点, §6-5 凝縮回帰 (S3 は固定点を動かす), §6-7 24000 step は済 (§9)。**§6-6 のモーメント時間次数と §6-2 の非定常保存は未達** (#20–#22 が必須残作業)。既定 `passiveScalarScheme 1` (2026-09-17)。codex result 2 回 NO-GO |
 
 ## 6. 検証 (node のみ; cell はユーザ指示で対象外)
@@ -316,6 +321,7 @@
 | --- | --- | --- | --- | --- |
 | result (2 回目) | `2026-09-17` | [2026-09-16-species-passive-scalar-unification-result-2.md](../../notes/reviews/2026-09-16-species-passive-scalar-unification-result-2.md) | **NO-GO**, C0/M3/m2 | **全採用 (2026-09-17 反映中, §5.1 #20–#24)**: M1 (モーメント次数未達の真因は #13 で入れた共通 θ 非負化: いずれかのモーメントが N_k=0 かつ d_k<0 なら **全モーメントの増分を θ=0 で停止** [`run_0257` で 663 ノード, Q1=0, 蒸気枯渇ではない, θ≥1e-12 の保証を無効化]; T の次数 1.27・ro の sub-iter 比 0.17・最小刻みの rms_roY1 1.9 桁も未達) → 共通停止を撤回し成分ごとに負値だけを非負化 (θ≥1e-12 維持)、停止セルの残差寄与を記録してから次数を再評価 (#12/#18 は必須のまま); M2 (CV ごとの増分制限は非保存: seam ステップ試験で総量 0.54 % 損失、limCorr が floor から移っただけ) → 非定常の受動種は**面流束の共有制限** (Zalesak 型: 2 次補正流束を両 CV で同じ係数で縮小) で有界化し総量保存 1e-6 を満たす; 定常の起動緩和と非定常の保存を分けて判定、floor と lim を併記; M3 (S3 受動種リミッタ ψ_P が member の部分 CV ステンシルで計算され周期点で不一致 [0.985 vs 1.0]) → 周期群で極値・スケールを統合し係数の最小値を共有; SLAU + SFR 2 の seam/内部平行移動試験を追加; m1 (`--from-floor` が参照の通常 PASS・列対応・ゼロ参照列の非ゼロ化を検査しない) → 検査を追加し不成立は拒否; m2 (condensation.md の θ≥1e-12 記述、φ_N·δρ / limCorr / 初回 sub-iter 限定の未反映、「物理 step あたりの上限」と実装の差、#8 の完了状態、plans/README の draft) → 同期 |
 | result (1 回目) | `2026-09-17` | [2026-09-16-species-passive-scalar-unification-result.md](../../notes/reviews/2026-09-16-species-passive-scalar-unification-result.md) | **NO-GO**, C0/M6/m2 | **全採用 (2026-09-17 反映中, §5.1 #9–#16)**: M1 (周期 DPLUR が合併 CV の近傍補正を解かず root の dq をコピーするだけ) → sweep の近傍寄与を独立バッファに作り周期群で合算してから解く + 非一様組成/トレーサが seam・辺・角を横切る陰解法試験 (#9); M2 (周期で補正収支・総量が全メンバーで積分され重複; `run_0067` 総量 166.2 vs root のみ 148.8) → 積分は周期 root のみ合併体積で; seam 局在補正の収支試験 (#10); M3 (checkpoint の履歴有効判定不足: dt 変更で警告のみ、layout に scheme 無し) → dt・生成方式の整合を復元条件に、不一致は全系 BDF1; 非定常の組成/トレーサ/モーメントで連続・通常 restart・刻み変更・方式変更・履歴欠落を試験 (#11); M4 (凝縮 dual-time の sub-iter 桁低下 <2 [Q0 1.58, roY0 1.92, roY1 1.77]、sub-iter 依存 g 3.7e-5 が刻み半減差 9.5e-5 に対し小さくない、モーメントの 3 水準無し) → sub-iter の収束を改善 (擬似 CFL・モーメントの DPLUR 更新) しモーメント込み 3 水準の次数試験; §10 送りにせず §5.1 必須へ (#12); M5 (累積 floor 補正が上限 1e-4 超: `run_0476` ξ 2.2e-4、`run_0494` 5.0e-4、Arthur S3 Q0 5.6e-3) → 上下限を事後クリップでなく増分スケーリング (θ_u 型) で守り floor は最後の保険にする; 再検証 (#13); M6 (緩和比較が実効でない: coupling 1 は `implicitRelax` を使う; 収束場 restart の判定ツール無し; case/44 の「固定点は同一」表現) → `implicitRelax` 0.7/1.0 の交差 restart、収束場 restart の判定 (基準 PASS の床と量の変動幅) をツール化、case/44 は準定常量の比較に表現限定 (#14); m1 (solver-settings/recommended-settings/thermophysics の旧仕様) → 同期 (#15); m2 (§5.1 の済/未達併記、§10 ψ 切替未決、case/09/16 README の改番前番号) → 同期 (#16) |
+| plan (7 回目) | `2026-09-17` | [2026-09-16-species-passive-scalar-unification-plan-7.md](../../notes/reviews/2026-09-16-species-passive-scalar-unification-plan-7.md) | **NO-GO**, C0/M6/m1 (§4.7 v5) | **全採用 (2026-09-17 反映, §4.7 v6, 実装済)**: M1 (収支ツールの偽 PASS: 個別比較・NaN 無検査・記録欠落無視・総量 0) → 総量比の**合計** ≤ tol、有限性、`[passiveFct] active` の run は FCT 記録必須、総量 0 の補正は rel=1 で FAIL、失敗系試験 `test_check_passive_budget.py`; M2 (境界診断が |αA^pre| だけで収支が閉じない、H が反復誤差まで吸収) → 境界の実現流束 $\sum_\partial G\Delta t$ (符号付き) と落とした量、$H=H_{src}+H_{rem}$ の分離積算 (物理ソースの履歴 vs 残差・クランプ由来) で収支を閉じる; M3 (退化判定が (0,0) を見逃し δ=1e-3 は不連続) → 厳密 0/アンダーフローの特異不整合を先に単分散再初期化、δ は撤廃し小さい正の状態は最近点; M4 (EOS 後の 2 回目クランプが g を変え得る) → Q1/Q2 だけの射影カーネルを分離 (g・消滅は触らない); M5 (合成ノルムがトレーサの未収束を隠す) → 成分ごとの線形残差・r_H で全成分の条件、区間最大を log; M6 (上限成立条件が不十分: $E_\rho$ の再帰、$f\le L\rho$) → $E_\rho$ と $L\rho-f$ を実作用素で評価し `fctDensity` に出す、逸脱は基点逸脱として FAIL に接続; m1 (展開式の不整合) → 直接差分 $A^{raw}=\frac1aF_H+\frac caG^n-F_L(\dot m^{eff},q_L)$、$M(q_H-q_L)=BA^{raw}+r_L-r_H/a$ を正本に |
 | plan (6 回目) | `2026-09-17` | [2026-09-16-species-passive-scalar-unification-plan-6.md](../../notes/reviews/2026-09-16-species-passive-scalar-unification-plan-6.md) | **NO-GO**, C0/M5/m1 (§4.7 v4) | **全採用 (2026-09-17 反映, §4.7 v5, 実装済)**: M1 (流れ BDF2 と低次 BE の質量流束不整合で一様 φ=1 が上限 21/20 を破る) → 低次作用素を有効流束 $\dot m^{eff}=\frac1a\dot m+\frac ca\dot m^{eff,n}$ で組み $\phi\equiv1$ を厳密解に; M2 (node 逆流境界の自セル値対角で M 行列が破れ $q_L=-23/35$) → 流入は許容な外部状態 $\phi^n_{own}$ の定数 RHS、流出のみ対角、差は境界反拡散へ; M3 (ε 内側射影は区間が空、$x=0$ の非実現可能状態が残る) → 相対許容で判定し境界へ、退化 ($x\le\delta$) は単分散再初期化、他は $A$ への最近点; M4 (射影と EOS 更新の順序) → $g$ のクランプ → EOS → その $T$ で $Q_1,Q_2$ 射影 → $G/H$; M5 (G/H 欠落の「全部 H」は制限不能を 1 step に限定できない) → G/H/ṁ^eff を必須履歴にし欠落は全系 BDF1; m1 ($r_H/a$) → 式と単体を修正 |
 | plan (5 回目) | `2026-09-17` | [2026-09-16-species-passive-scalar-unification-plan-5.md](../../notes/reviews/2026-09-16-species-passive-scalar-unification-plan-5.md) | **NO-GO**, C0/M5/m1 (§4.7 v3) | **全採用 (2026-09-17 反映, §4.7 v4)**: M1 (限界計算だけの基点クリップでは有界性と保存が両立しない; BDF2 の履歴で低次厳密解が $31/30$; 受入拒否条件が無い) → BDF2 を**流束形の BE** ($F^{eff}=\frac1aF+\frac caG^n$, 前 step 増分の厳密分解 $G$/$H$) に書き換え履歴の負係数を面流束として Zalesak の制限対象にする; 残る穴 (負ソース・局所 $H$) は逸脱量を積算し事後の合否 (≤1e-6) で拒否 (物理 step の再試行は枠組みに無い); M2 (境界面 α=1 固定は基点 $q_*$ と不整合 [3 CV 逆流境界の反例 1.3]) → 境界面も Zalesak に入れ外部側 $R=1$、基点は全面; M3 (単分散射影は微小違反に過大) → 無次元 $(x,y)$ 上の最小補正 (εクランプ, $Q_0,g$ 保存); M4 (2 不等式だけでは実現可能性でない [$(1,1,1,8)$]) → 許容領域 $x\le1,\ x^2\le y\le\sqrt x$ に ε の内側余裕 (特異整合を回避)、$\rho_l$ は EOS 更新後の $T$; M5 (`condClampCorr` は Q1/Q2 の収支でない) → 成分別 $\int\Delta q$, $\int|\Delta q|$ を root のみで各 step・全期間積算; m1 (単体 (i) と double 1e-12 が性質より強い) → (i) は全 α=1 の入力でビット一致、1e-12 は補正前後の代数保存 |
 | plan (4 回目) | `2026-09-17` | [2026-09-16-species-passive-scalar-unification-plan-4.md](../../notes/reviews/2026-09-16-species-passive-scalar-unification-plan-4.md) | **NO-GO**, C0/M6/m1 (§4.7 post-step FCT) | **全採用 (2026-09-17 反映, §4.7 v3)**: M1 (前制限で $A'$ を上書きすると $q_H-q_L$ の恒等式が壊れる [3 CV 反例 $-3/14$]) → $A^{raw}$ を保持し $q_C=q_H-M^{-1}B(A^{raw}-A^{lim})$; M2 ($q_L$ の解誤差・sub-iter 誤差は基点の限界逸脱に直接残る、固定回数反復の受入判定なし) → 終了状態で残差を再評価し $r_H$ を診断、基点 $q_B=q_H-M^{-1}BA^{raw}$ の物理限界逸脱を計測・クリップ; M3 (境界半割面の $A'=0$ は低次解と両立しない、拡散の符号規約) → 境界面差 $\dot m(\phi_H-\phi_L)$ を恒等式に含め $lpha=1$ 固定、全流束 $\dot m\phi-J$ の規約を明記、$lpha\equiv0$ で $q_L$ を回復する単体; M4 (M 行列だけでは上限・Jacobi 各反復の有界性を保証しない、相対変化は残差の保証でない) → 条件 ($f\ge0$, $f\le L\rho^{n+1}$ [BE は離散連続式から], 初期値クリップ, BDF2 の破れ) を明記し線形残差で受入; M5 (成分別 FCT はモーメント不等式を保証しない [$[1,2,1,8]$]) → 実現可能性クランプに単分散射影と違反数の log、合否式に `condClampCorr`; M6 ($g$ 補正後の二相 EOS 更新が無い) → 依存変数の再評価を契約に; m1 (局所限界逸脱を floor で代用できない) → 逸脱量を基点/局所/物理/補正後で分離計測 |
@@ -343,6 +349,7 @@
 
 ## 9. 変更ログ
 
+- `2026-09-17` — codex plan レビュー 7 回目 **NO-GO (M6/m1)**: §4.7 v6 (収支ツールの合計判定・境界/履歴分離収支・射影の特異ケース・Q1/Q2 専用射影・成分別残差・密度整合診断)。
 - `2026-09-17` — codex plan レビュー 6 回目 **NO-GO (M5/m1)**: §4.7 v5 (有効質量流束、逆流境界の RHS、最近点射影 + 退化再初期化、EOS→射影の順、必須履歴)。**FCT を実装** (`passiveFct_d.cuh`, wrapper, checkpoint G/H/ṁ^eff, `check_passive_budget.py`, 単体 `test_passive_fct` ALL PASS, `test_cond_limiter_steady` (l) ALL PASS)。
 - `2026-09-17` — codex plan レビュー 5 回目 **NO-GO (M5/m1)**: §4.7 を v4 (BDF2 の流束形 BE 化 = 履歴も制限対象、境界面も Zalesak、最小実現可能性射影、成分別収支) に改訂。
 - `2026-09-17` — codex plan レビュー 4 回目 **NO-GO (M6/m1)**: §4.7 を v3 (生流束の恒等式・終了状態の再評価・基点の逸脱計測・境界面・実現可能性射影・EOS 再評価) に改訂 (§6.1)。
