@@ -166,7 +166,7 @@ coupling 1 なら cfl 6 まで安定 (case/28 `run_0064`–`0078`)。使うと�
 
 ## passiveScalarScheme ほか — 受動スカラ (排気トレーサ・凝縮モーメント) の輸送経路 (2026-09-17)
 
-plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md)。`time.deltaT` 配下。
+plan [species-passive-scalar-unification](../plans/accepted/species-passive-scalar-unification.md)。`time.deltaT` 配下。
 
 | キー | 既定 | 意味 |
 |---|---|---|

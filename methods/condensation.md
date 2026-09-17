@@ -673,7 +673,7 @@ $\kappa,\chi,\xi_g$ で変わるため一般 EOS Roe (Vinokur–Montagné 流) �
 
 ### 4. ソース項 (Phase 2 — 初期実装済, 安定性優先)
 
-> **モーメントの移流 (2026-09-17 実装中, plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md))**: 従来は汎用スカラコアの
+> **モーメントの移流 (2026-09-17 実装中, plan [species-passive-scalar-unification](../plans/accepted/species-passive-scalar-unification.md))**: 従来は汎用スカラコアの
 > 1 次風上 (`scalarTransportResidualMulti_d`)。`passiveScalarScheme: 1` では化学種の輸送経路 (`speciesFaceReconstruction 2` なら SLAU の 2 次面再構成 + 受動種ごとの
 > スケール不変 Venkat ψ_P、そうでなければ化学種と同じ 1 次経路) で $\rho g, \rho Q_2, \rho Q_1, \rho Q_0$ を移流し、`res_*` / `transport_diag_*` の名前と
 > 「移流 → ソース → 更新クランプ (§4c) → 実現可能性クランプ」の順序は不変。面値は非負にクリップ (保存的)、拡散なし。2 次化は onset の数値拡散を減らすので
@@ -833,14 +833,14 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
    \Delta T=\frac{\Delta g\,L}{c_v+g(R_w-dL/dT)}$$
    を作り、**4 本の増分を同じ $\theta_u$ で縮めてから** floor ($\rho\phi\ge0$) を掛けて確定する。$\theta_u\ge10^{-12}$ (更新を止める穴を作らない)。
    収束時は $\delta\to0$ で $\theta_u\to1$・無作用なので、固定点は残差だけで決まる。潜熱 $\Delta T$ は二相 EOS と同じ有効比熱で評価する。
-   **受動種経路 (`passiveScalarScheme 1`, 2026-09-17; plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md) §4.3/§4.6)** は同じ本文
+   **受動種経路 (`passiveScalarScheme 1`, 2026-09-17; plan [species-passive-scalar-unification](../plans/accepted/species-passive-scalar-unification.md) §4.3/§4.6)** は同じ本文
    `cond_moment_update_limited_body` を `cond_moment_update_limited_passive_d` で呼ぶ: 候補増分は scalar-DPLUR の増分 (`passiveImplicitCoupling 1`) または
    point-implicit × `passiveImplicitRelax`、$\Delta\tau$ 倍率 `scalarCflMax`、floor はここで掛けず後段が担う。**非負化は成分ごと** (codex result-2 M1):
    $\theta_u$ は共通のまま、$N_k+\theta_u d_k<0$ となる成分 $k$ だけ増分を $-N_k$ に切って 0 にし、切った量を `passiveLimCorr_<k>` (セル累積) と monitor の
    受動種収支 (絶対量・作動数・符号付き; 周期 node は root のみ) に記録する (旧 result-1 M5 の「共通 θ で全成分停止」は $Q_1=0$ のノードで g/Q0 まで止めるので撤回した。
    **なお「これがモーメントの sub-iter 床と時間 1 次相当の誤差の原因」という当時の説明は誤りで、撤回済み** — 実測した原因は
    (a) float32 の丸め床が核生成率の温度感度で増幅されること (sub-iter 残差床 = 状態の ulp ノルム) と (b) 核生成 onset 前線の非平滑性で、
-   核生成を抑えた滑らかな液滴場 + 倍精度では BDF2 が出る; plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md) §5.1 #12/#18)。更新後に流れの密度更新と整合する $\phi_N\,\delta\rho$ 項 (`passive_add_rho_term_d`:
+   核生成を抑えた滑らかな液滴場 + 倍精度では BDF2 が出る; plan [species-passive-scalar-unification](../plans/accepted/species-passive-scalar-unification.md) §5.1 #12/#18)。更新後に流れの密度更新と整合する $\phi_N\,\delta\rho$ 項 (`passive_add_rho_term_d`:
    $\rho\phi=\rho\phi_N+z+(\rho\phi_N/\rho_{pre})(\rho_{new}-\rho_{pre})$, 輸送増分 $z$ だけを制限対象にする)、$\theta_b$ 増分スケーリング
    (`passive_limit_increment_d`: 定常の起動緩和。非保存なので固定点で無作用 [limCorr 0] を要求)、最後の砦の floor (`passive_bounds_d`; `passiveFloorCorr_<k>`) の順。
    **dual-time**: 閾値クランプ $dg_{max}/dT_{max}$ は各物理 step の**初回 sub-iter だけ**掛け (以後の sub-iter は実現可能性 [avail, 蒸発上限, 非負] のみ)、

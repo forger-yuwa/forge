@@ -269,7 +269,7 @@ L/R 状態の `roe_L/Ht_L/ca_L` (および R 側) を NASA で再構成。Roe �
 
 ### 5b. 多成分化学種輸送 (M2) `cuda_forge/speciesTransport_d.{cuh,cu}`
 
-> **受動種 (2026-09-17 実装中, plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md))**: 排気トレーサ `roXi` と
+> **受動種 (2026-09-17 実装中, plan [species-passive-scalar-unification](../plans/accepted/species-passive-scalar-unification.md))**: 排気トレーサ `roXi` と
 > 凝縮モーメント `rog_s, roQ2_s, roQ1_s, roQ0_s` は、`passiveScalarScheme: 1` のとき化学種と同じ輸送経路 (勾配・面再構成・移流残差・拡散 [トレーサのみ]・境界/ピン・周期・
 > 陰解法対角) を通る**受動種**として扱う。受動種は**熱力学 (MW/cp/h/R, EOS, 面組成 R_mix/γ, 粘性混合)・ΣρY=ρ 再正規化・ΣJ=0 補正・エンタルピー拡散・
 > `speciesImplicitCoupling` の予測/commit・入口 X/Y 検証・`condGasSpecies` には入らない** (nSpecies は熱力学の種数のまま; 受動種は `nSpecies==1` でも動く)。
