@@ -89,7 +89,10 @@ output: {level: 1}                                      # 保存量 + 原始量 
 
 ```yaml
 turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1,
-             wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInf: 1.0, omegaInf: 1000.0}
+             wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInit: 1.0, omegaInit: 1000.0}
+
+  > **訂正 (2026-09-17)**: 旧記述の `kInf` / `omegaInf` は**存在しないキー**で、書いても黙って無視され k=ω=0 の初期値になる
+  > (node SST が step 0 で壊れる既知の原因 [node-sst-init-and-ghostless-fixes])。実キーは `turbulence.kInit` / `omegaInit`。
 ```
 
 - 既定で ON (キー省略時): `sstNodeWallKPin: 1`, `sstOmegaProdFromPk: 1`, `sstSigmaBlend: 1` (2026-09-08〜)。
@@ -116,7 +119,7 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 - TP 陰解法の `cfl_pseudo` は 0.5〜2 から上げる (H2O 生成エンタルピーの増幅で上限が低い)。**`implicitRelax: 0.7` を付ければ 6〜8 まで可**
   (2026-09-16 case/44 va3 M4.19 node Euler 軸対称 TP 2 種 + 非平衡凝縮 `run_0181`–`0189`: cfl 6/8 + relax 0.7 は乾き一様場からの起動でも安定で場・残差床が cfl 2 と同じ;
   relax 無しの cfl 6 は軸列の EOS 床洗浄で発散 [implicit-cfl-ceiling-eos-floor と同じ機構]、relax 無しの cfl 4 は完走するが残差床が 2〜10 倍高い)。
-  定常 precond × 多成分は `speciesPrecondDt: 1` (既定)。TP 亜音速 `outlet_statPress` の γ 混用は修正済。
+  定常 precond × 多成分は `speciesPrecondDt: 1` (既定) — **ただしこのキーは化学ブランチ `feature/chemistry-finite-rate` 限定で、main / sern には未マージ** (2026-09-17 確認)。TP 亜音速 `outlet_statPress` の γ 混用は修正済。
 - 凝縮: 平衡凝縮を選ぶなら `condensation: 1, condEquilibrium: 2` (EOS 拘束形、厳密 S=1) を推奨 (設定既定値は 0 = 非平衡)。蒸発は既定 ON。
 - 凝縮 (2026-09-15, plan [condensation-source-limiter-steady](../plans/accepted/condensation-source-limiter-steady.md)): 非平衡の θ 律速は
   **`condLimiterMode: 1` (既定) で更新クランプ**になり、ソース残差の明示的な Δτ 依存 (θ×Δτ_loc) を除去した (旧 0 は残差に θ を掛け、大型ノズルで成長を 1/4 に絞っていた; case/44 で cfl 2 の解が旧 cfl 0.5 と一致)。cfl 間の固定点一致の検証状況は plan condensation-source-limiter-steady §9。
