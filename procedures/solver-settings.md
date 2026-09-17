@@ -138,7 +138,7 @@ mesh:
 |---|---|---|
 | `0` | face thermo はセル値 Y (1次, mixed-order) | 既定・ビット不変 |
 | `1` | **S2**: Y を ρ と同一リミッタで face へ 2 次再構成し thermo に使用 | **多成分 TP で contact/混合層の圧力振動・残差床を下げたいとき (production 推奨)** |
-| `2` | S2+S3: species 移流も同一 face 組成 | **使用しない** (cfl≤2 限定の experimental。高 CFL で発散) |
+| `2` | **S3**: S2 に加えて**化学種と受動種 (トレーサ `roXi`・凝縮モーメント) の移流そのもの**を同じ face 値で 2 次に | 2 次風上のスカラ移流が要るとき。**`convMethod ≥ 1` と `speciesImplicitCoupling: 1` が必須** (下記) |
 
 ```yaml
 time:
@@ -148,6 +148,20 @@ time:
 
 効果の実測 (case/28 He/空気 coaxial): 圧力振動振幅 cfl2 で −77% / cfl4 で −48%。単成分・CPG では
 無効果 (組成を thermo に使わないため)。詳細は [`../methods/convection/theory.md`](../methods/convection/theory.md)
+
+**`2` (S3) の本番化 — 現行 (2026-09-17, plan [species-passive-scalar-unification](../plans/accepted/species-passive-scalar-unification.md))**:
+旧記述の「cfl≤2 限定の experimental、高 CFL で発散」は**撤回**した。発散は S3 固有ではなく `speciesImplicitCoupling 0` 固有で、
+coupling 1 なら cfl 6 まで安定 (case/28 `run_0064`–`0078`)。使うときの条件は次の 3 つ。
+
+- **`space.convMethod ≥ 1`**: 面値は流れと同じ `interp_dispatch` を通るので、`convMethod 0` では**黙って 1 次に落ちて S3 が不活性**になる。
+  `check_solver_config.py` がこの組合せを FAIL にする。
+- **`speciesImplicitCoupling: 1`** (受動種の `passiveImplicitCoupling` は自動で 1)。定常は `implicitRelax 0.7` 併用、dual-time は緩和なし。
+- **有界性**: 化学種は面正規化 + リミッタ ψ_ρ、受動種はセル局所で無次元化した Venkatakrishnan ψ_P と独立クリップ。
+  dual-time ではさらに物理 step 末尾の保存的 FCT (`passiveFct 1`, 既定) が保存と有界性を担う。合否は `check_passive_budget.py` / `check_passive_field.py`。
+
+検証: 時間次数は BDF2/BDF1 × coupling 0/1 の 4 組で次数・収支とも PASS (case/44 `run_0429`–`0456`)、FCT 無効の対照は全モーメント 1.99–2.01。
+**既定は `0` のまま** (ユーザ決定 2026-09-17): S3 は凝縮 onset を 0.2 r_t / 0.7 mm 下流に動かし、Wysłouzil では実験からむしろ遠ざかるため、
+既存の凝縮回帰と直接比較できない。使うときは run の README にその旨を書く。
 の「多成分 TP の face 組成整合」節。
 
 ## passiveScalarScheme ほか — 受動スカラ (排気トレーサ・凝縮モーメント) の輸送経路 (2026-09-17)
