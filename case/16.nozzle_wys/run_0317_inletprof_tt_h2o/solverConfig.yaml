@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: hdf5
   discretization: node
   isAxisymmetric: 0
   nodeWallDirichlet: 1
@@ -9,14 +8,12 @@ mesh:
 gpu: 1
 solver: SLAU
 physProp:
-  isCompressible: 1
   thermalMethod: 2
   viscMethod: 1
   visc: 1.75e-05
   thermCond: 0.0241
   thermCondMethod: 1
   prandtlLam: 0.72
-  ro: 1.2
   cp: 1039.0
   gamma: 1.4
   species:
@@ -28,7 +25,6 @@ time:
   unsteady: 0
   dualTime: 0
   last:
-    control: 0
     nStepOuter: 1000
   deltaT:
     control: 1

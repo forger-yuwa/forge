@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5"
   meshFileName: "axi_nozzle.h5"
   valueFileName: "input.h5"
 
@@ -7,11 +6,9 @@ gpu: 1
 solver: "SLAU"
 
 physProp:
-  isCompressible: 1
   isAxisymmetric: 1
   thermalMethod: 2
   viscMethod: 2
-  ro : 1.2
   visc : 1.8e-5
   thermCond: 0.0257
   cp : 1038.8
@@ -22,7 +19,6 @@ time:
   unsteady: 0
   dualTime: 0
   last:
-    control: 0
     nStepOuter: 4000
   deltaT:
     control: 1

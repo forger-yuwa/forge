@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5"
   meshFileName: "1D_shock_tube.h5"
   valueFileName: "input.h5"
 
@@ -8,10 +7,8 @@ gpu: 1
 solver: "SLAU"
 
 physProp:
-  isCompressible: 1
   thermalMethod: 2   # thermally-perfect N2 (NASA-9)
   viscMethod: 2      # inviscid (Euler)
-  ro : 1.2
   visc : 0.0
   thermCond: 0.0
   cp : 1038.8
@@ -22,7 +19,6 @@ time:
   unsteady: 1
   dualTime: 0
   last:
-    control: 0        # step-based stop (fixed dt -> exact final time)
     nStepOuter: 1000  # 1000 * 2.5e-7 = 2.5e-4 s
     time: 0.00025
   deltaT:

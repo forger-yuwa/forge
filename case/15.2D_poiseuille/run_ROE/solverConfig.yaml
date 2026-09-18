@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5" 
   meshFileName: "2D_poiseuille.h5"
   valueFileName: "2D_poiseuille.h5"
   #meshFileName: "laval_nozzle3.h5"
@@ -10,8 +9,6 @@ gpu: 1 # 0:off , 1:on
 solver: "ROE" # SLAU, ROE
 
 physProp:
-  isCompressible: 1 # 0:incomp, 1:compressible
-  ro : 1.2 # [kg/m3] ignored for compressible flow
   visc : 0.001 #[Pa*s]
   thermCond: 0.0241 # [W/(mK)]
   cp : 1004.5 # [J/(kgK)]
@@ -19,7 +16,6 @@ physProp:
 
 time: 
   last: 
-    control: 0 # 0:nStep , 1:time base
     nStepOuter: 100000
     time: 1.00 # [second]
   deltaT:  

@@ -1,11 +1,11 @@
-mesh: {meshFormat: "hdf5", meshFileName: "mixer.h5", valueFileName: "mixer.h5"}
+mesh: {meshFileName: "mixer.h5", valueFileName: "mixer.h5"}
 gpu: 1
 solver: "SLAU"
-physProp: {isCompressible: 1, thermalMethod: 0, viscMethod: 0, ro: 1.2, visc: 0.001, thermCond: 0.0241, cp: 1004.5, gamma: 1.4}
+physProp: {thermalMethod: 0, viscMethod: 0,visc: 0.001, thermCond: 0.0241, cp: 1004.5, gamma: 1.4}
 time:
   unsteady: 0
   dualTime: 0
-  last: {control: 0, nStepOuter: 3000, time: 1.0}
+  last: {nStepOuter: 3000, time: 1.0}
   deltaT: {control: 1, dt: 1.0e-8, cfl: 0.8, cfl_pseudo: 1.0, dt_min: 1.0e-9, dt_max: 1.0, blockDPLUR: 1, implicitRelax: 1.0, lowMachPrecond: 0, detectNaN: 1}
   outStepStart: 0
   outStepInterval: 500

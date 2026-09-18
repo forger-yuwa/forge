@@ -1,12 +1,12 @@
-mesh: {meshFormat: "hdf5", discretization: "node", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, nodeAxisDirichlet: 0, nodeValueAtNode: 1, hoopAreaFromClosure: 1, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}
+mesh: {discretization: "node", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, nodeAxisDirichlet: 0, nodeValueAtNode: 1, hoopAreaFromClosure: 1, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}
 gpu: 1
 solver: "SLAU"
-physProp: {isCompressible: 1, thermalMethod: 0, viscMethod: 1,
-           ro: 1.2, visc: 1.8e-5, thermCond: 0.0257, thermCondMethod: 1, prandtlLam: 0.72, cp: 1004.5, gamma: 1.4}
+physProp: {thermalMethod: 0, viscMethod: 1,
+visc: 1.8e-5, thermCond: 0.0257, thermCondMethod: 1, prandtlLam: 0.72, cp: 1004.5, gamma: 1.4}
 time:
   unsteady: 0
   dualTime: 0
-  last: {control: 0, nStepOuter: 2000}
+  last: {nStepOuter: 2000}
   deltaT: {control: 1, dt: 1e-8, cfl: 1.0, cfl_pseudo: 1.0,
            dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}
   outStepStart: 0

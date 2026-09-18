@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5" 
   meshFileName: "3D_shock_tube.h5"
 
 gpu: 0 # 0:off , 1:on
@@ -7,9 +6,7 @@ gpu: 0 # 0:off , 1:on
 solver: "smac" # smac , simple , simplec , fractionalStep
 
 physProp:
-  isCompressible: 1 # 0:incomp, 1:compressible
   #ro : 997 # [kg/m3]
-  ro : 1.0 # [kg/m3]
   visc : 0.0025 #[Pa*s]
   thermCond: 0.0241 # [W/(mK)]
   cp : 1006.0 # [J/(kgK)]
@@ -17,7 +14,6 @@ physProp:
 
 time: 
   last: 
-    control: 0 # 0:nStep , 1:time base
     nStepOuter: 6000
     time: 1.00 # [second]
   deltaT:  

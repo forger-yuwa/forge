@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5"
   meshFileName: "test.h5"
 
 
@@ -8,16 +7,13 @@ gpu: 1 # 0:off , 1:on , -1:gpu check
 solver: "smac" # smac , simple , simplec , fractionalStep
 
 physProp:
-  isCompressible: 0 # 0:incomp, 1:compressible
   #ro : 997 # [kg/m3]
-  ro : 1 # [kg/m3]
   visc : 0.0025 #[Pa*s]
   thermCond: 0.0241 # [W/(mK)]
   cp : 1006.0 # [J/(kgK)]
 
 time: 
   last: 
-    control: 0 # 0:nStep , 1:time base
     nStepOuter: 1000
     time: 1.00 # [second]
   deltaT:  

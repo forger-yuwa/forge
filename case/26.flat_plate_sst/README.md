@@ -96,6 +96,9 @@ python3 tools/postprocess_wall_law.py run_0006_slau_muscl 0.3 0.6 0.89
 | `run_0087_s1_keytest` | 第 2 陣 S1 の受入試験 (plan [config-key-pruning](../../plans/active/config-key-pruning.md) §6.5'/§6.6')。旧入力・個別省略・一括省略・`meshFormat` の不正値・`detectNaNInterval` の解決順序 5 水準・残置キーの巻き込み (20 step × 16 本)。ログは `logs/` | **全 PASS**。警告は記載したキーだけ 1 回ずつ、`cgns` は既定へ置換されず拒否、別名の実効値は 1/7/9/9/1 で期待どおり | ref (キー試験) |
 | `run_0088_s1_old_bin_old_input` / `run_0089_s1_new_bin_old_input` / `run_0090_s1_new_bin_omitted` (各 `_rep1`/`_rep2`) | S1 の数値回帰 (300 step, 同一 IC)。旧バイナリ + 旧入力 / 新バイナリ + 旧入力 / 新バイナリ + **省略入力** | `check_field_regress.py --boundary` で 24 量とも **PASS** (最大比 1.14)。旧→新も、旧入力→省略入力も反復ノイズ床の範囲 | ref (回帰) |
 | `run_0091_s1_chain_e2e` | S1 の通し確認: S1 キーを外した config で `convertGmshToForge` → その h5 で forge を 20 step | 変換 exit 0・警告 0、solver 完走・NaN なし。**`convertGmshToForge` は引数 2 つ (`入力.msh 出力.h5`) が要る** (1 つだと `argv[2]` が null で abort。S1 前も同じ) | ref (通し) |
+| `run_0092_s2_keytest` | 第 2 陣 S2 の受入試験 (plan [config-key-pruning](../../plans/active/config-key-pruning.md) §6.7'/§6.8')。5 キーの拒否・移送後の受理・残置キー・`detectNaNInterval` の実効値と下限補正・変換器の拒否 (20 step × 12 本)。ログは `logs/` | **全 PASS**。solver と変換器のどちらも `no longer supported` で非ゼロ終了、移送済み config は警告もエラーも無し | ref (キー試験) |
+| `run_0093_s2_migrated` (+`_rep1`/`_rep2`) / `run_0094_s2_premigration` | S2 の数値回帰 (300 step, 同一 IC)。移送後 config を S2 バイナリで 3 本 (ノイズ床) vs 移送前 config を S1 バイナリ (`fbf305cc`) で 1 本 | `check_field_regress.py --boundary` で 24 量とも **PASS** (最大比 1.15) | ref (回帰) |
+| `run_0095_s2_chain_e2e` | S2 の通し確認: 移送済み config で `convertGmshToForge` → その h5 で forge を 20 step | 変換 rc=0、solver 完走・NaN なし | ref (通し) |
 
 ### node-centered (median-dual) 検証 run
 

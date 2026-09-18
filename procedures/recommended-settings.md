@@ -24,18 +24,20 @@
 ## 1. 共通の基本設定 — 現行 (2026-09-08)
 
 ```yaml
-mesh: {meshFormat: "hdf5", discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: X.h5, valueFileName: X.h5}
+mesh: {discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: X.h5, valueFileName: X.h5}
 solver: "SLAU"
 space: {convMethod: 1, limiter: 2}                      # 本段。起動は convMethod 0 (§1.2)
 time:
   unsteady: 0
-  last: {control: 0, nStepOuter: N}
+  last: {nStepOuter: N}
   deltaT: {control: 1, dt: 1.0e-5, cfl: C, cfl_pseudo: C, implicitRelax: 0.7, blockDPLUR: 1, dt_min: 1.0e-8, dt_max: 1.0, detectNaN: 1}
   timeIntegration: 11
   nStepInner: 4                                          # 2026-09-12: 5→4 (3D node SST の 12000 step 継続で 3 と 5 の残差経路が一致、余裕で 4)
 output: {level: 1}                                      # 保存量 + 原始量 + h0 (2026-09-08〜)
 ```
 
+- **`physProp` に `isCompressible` と `ro` は書かない**、`mesh.meshFormat` と `time.last.control` も書かない
+  (§9.2 の段階移行キー。`time.deltaT.control` は別物で必要)。
 - **離散化は node (median-dual) が生産**、cell は回帰対照 ([user-prefers-node-base])。node のメッシュは
   **node 用に変換した h5** (`discretization: node` を書いた config で `convertGmshToForge`) を使い、2D は
   **平面メッシュ** (押し出し 2 ノード spanwise は 2 次 MUSCL の散逸が消えて発散)。
@@ -214,20 +216,33 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 | `turbulence.C_DES_kw` / `C_DES_ke` / `wmlesNewtonTol` / `wmlesNewtonMaxIt` / `mesh.gradLSQDegenThresh` | 一度も使われず掃引の実測も無い内部定数 → コードに固定 | (固定値。変えたいときはコードを直す) |
 | `turbulence.wmlesPrt` | Kader 原式への修正で壁法則が Pr_t を使わなくなり、**読む側が消えた**引数だった | (移行先なし。乱流 Prandtl 数は `turbulentPrandtl`、壁法則とは別物) |
 
-### 9.2 段階移行中のキー (S1, 2026-09-18)
+### 9.2 第 2 陣で削除したキー (2026-09-18)
 
-**まだ受理されるが、いずれ起動時エラーになる**。書いてあると起動時に 1 行警告が出る。新規 config には書かないこと。
-全 run が書いている必須キーだったので、一足飛びに拒否すると既存 run の再実行が全部落ちる — 段階を分けている。
+**書くと起動時エラーになる** (solver・変換器の両方)。2026-09-18 に S1 (任意化 + 警告) を経て S2 (拒否) へ移した。
 
-| キー | 理由 | どうするか |
+| 削除したキー | 理由 | 移行先 |
 | --- | --- | --- |
-| `physProp.isCompressible` | solver はこの値をどこでも読まない (圧縮性は常に有効) | 行ごと消す |
+| `physProp.isCompressible` | solver はこの値をどこでも読まない (圧縮性は常に有効。非圧縮 SMAC 経路は現在のコードから到達できない) | 行ごと消す |
 | `physProp.ro` | solver はこの値をどこでも読まない (密度は EOS で決まる) | 行ごと消す |
-| `time.last.control` | solver はこの値をどこでも読まない (終了条件は `nStepOuter` のみ) | 行ごと消す。**`time.deltaT.control` とは別物で、そちらは生きている** |
-| `mesh.meshFormat` | solver が受け付ける形式は `hdf5` だけで、**省略すると `hdf5`** になる。不正値はこれまでどおり拒否 | 行ごと消す |
-| `time.deltaT.detectNaNInterval` | トップレベルの `detectNaNInterval` と同じものを読む 2 つ目の綴り。**両方あるとトップレベルが優先**、片方だけなら**そちらが効く** (無効キーではない) | トップレベルへ移す |
+| `time.last.control` | solver はこの値をどこでも読まない (終了条件は `nStepOuter` のみ) | 行ごと消す。**`time.deltaT.control` は別物で、そちらは必須のまま** |
+| `mesh.meshFormat` | 受け付ける形式が `hdf5` 1 つだけだった | 行ごと消す |
+| `time.deltaT.detectNaNInterval` | トップレベル `detectNaNInterval` と同じものを読む 2 つ目の綴り | **トップレベルへ移す** (値は同じ意味) |
 
-**削除していないもの (opt-in のまま残置)**: 過去に「不採用」と判定したスイッチでも、元 plan が「opt-in で残す」と
+**互換の打ち切りと移行手順**: 2026-09-18 より前に作った run config は、そのままでは**再実行できない**。
+移送は 1 コマンドで済む。
+
+```bash
+python3 solver_density_cuda/tools/migrate_solver_config.py [--dry-run] [PATH ...]
+```
+
+既定はこのツリーの `case/` 配下。**他の worktree は明示したパスでしか触らない** (各ブランチの作業物なので、
+必要になったそのブランチで回すこと)。ツールは節を特定してから編集し、書き戻す前に
+「元 − 消したキー」と厳密一致することを確かめる。**自動移送しない入力**は理由つきで報告する:
+anchor / alias / merge key を含むもの (節どうしが同じ実体を共有しうる)、重複キーを含むもの
+(solver の yaml-cpp は先勝ち、PyYAML は後勝ちで照合できない)、`meshFormat` が `hdf5` 以外のもの
+(現行 solver では動かない旧入力で、キーを消すだけでは移送にならない)。
+
+**削除していないもの (opt-in のまま残置)****削除していないもの (opt-in のまま残置)**: 過去に「不採用」と判定したスイッチでも、元 plan が「opt-in で残す」と
 決めているものは残っている。`blockDPLURDiagCache` / `blockDPLURDqPack` / `mesh.primPack` (性能の再現用)、
 `updateGuardAlpha`、`lowMachThornber`、`multispeciesRhoYCommonLimiter`、`passiveFctTolAbs`、
 `turbulence.turbulentSchmidt` (`physProp.Sc_t` の別名)、`physProp.isAxisymmetric` / `axisymMethod` (deprecated 読み)。

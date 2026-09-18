@@ -1,15 +1,12 @@
 mesh:
-  meshFormat: "hdf5"
   meshFileName: "coaxial.h5"
   valueFileName: "restart.h5"        # run_0009 非粘性場 + roY + 乱流量シード
 gpu: 1
 solver: "SLAU"
 physProp:
-  isCompressible: 1
   isAxisymmetric: 1
   thermalMethod: 2                   # 多成分 TP
   viscMethod: 2                      # kinetic theory 混合輸送 (mu_mix, lambda_mix)
-  ro : 1.2
   visc : 1.8e-5
   thermCond: 0.0257
   cp : 1004.5
@@ -22,7 +19,6 @@ time:
   unsteady: 0
   dualTime: 0
   last:
-    control: 0
     nStepOuter: 4000
   deltaT:
     control: 1

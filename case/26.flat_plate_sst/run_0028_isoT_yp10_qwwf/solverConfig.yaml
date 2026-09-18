@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5"
   meshFileName: "flat_plate.h5"
   valueFileName: "flat_plate.h5"
 
@@ -9,10 +8,8 @@ gpu: 1 # 0:off , 1:on
 solver: "SLAU" # SLAU, ROE, AUSM+, AUSM+UP, KEEP_SLAU
 
 physProp:
-  isCompressible: 1 # 0:incomp, 1:compressible
   thermalMethod: 0 # 0:calorically perfect
   viscMethod: 0 # 0:use visc , 1:sutherland
-  ro : 1.2 # [kg/m3] ignored for compressible flow
   visc : 1.8e-5  # [Pa*s] 空気 (Re/m ~ 2.3e6, M=0.1 で乱流平板)
   thermCond: 0.0251 # [W/(mK)] Pr=0.72 相当
   cp : 1004.5 # [J/(kgK)]
@@ -22,7 +19,6 @@ time:
   unsteady: 0 # 0:steady , 1:unsteady
   dualTime: 0 # 1:use pseudo time for unsteady
   last:
-    control: 0 # 0:nStep , 1:time base
     nStepOuter: 20000
     time: 1.00 # [second]
   deltaT:

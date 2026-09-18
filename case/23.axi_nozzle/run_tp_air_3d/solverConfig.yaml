@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5"
   meshFileName: "axi_nozzle.h5"
   valueFileName: "input_tp.h5"
 
@@ -9,11 +8,9 @@ gpu: 1 # 0:off , 1:on
 solver: "SLAU" # SLAU, ROE, AUSM+, AUSM+UP, KEEP_SLAU
 
 physProp:
-  isCompressible: 1 # 0:incomp, 1:compressible
   isAxisymmetric: 0 # 3D mesh
   thermalMethod: 2 # 0:calorically perfect
   viscMethod: 0 # 0:use visc , 1:sutherland
-  ro : 1.2          # [kg/m3] ignored for compressible flow
   visc : 0.0        # [Pa*s] inviscid
   thermCond: 0.0257 # [W/(mK)]
   cp : 1004.5       # [J/(kgK)]
@@ -24,7 +21,6 @@ time:
   unsteady: 0 # 0:steady , 1:unsteady
   dualTime: 0 # 1:use pseudo time for unsteady
   last:
-    control: 0 # 0:nStep , 1:time base
     nStepOuter: 5000
     time: 1.00 # [second]
   deltaT:

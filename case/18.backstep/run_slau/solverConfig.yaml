@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5" 
   meshFileName: "backstep.h5"
   valueFileName: "input.h5"
 
@@ -11,10 +10,8 @@ solver: "SLAU" # SLAU, ROE, AUSM+, AUSM+UP, KEEP_SLAU
 #solver: "ROE" # SLAU, ROE, AUSM+, AUSM+UP, KEEP_SLAU
 
 physProp:
-  isCompressible: 1 # 0:incomp, 1:compressible
   thermalMethod: 0 # 0:calorically perfect
   viscMethod: 0 # 0:use visc , 1:sutherland
-  ro : 1.2 # [kg/m3] ignored for compressible flow
   visc : 0.001  #[Pa*s]
   #visc : 0.000  #[Pa*s]
   thermCond: 0.0241 # [W/(mK)]
@@ -25,7 +22,6 @@ time:
   unsteady: 0 # 0:steady , 1:unsteady
   dualTime: 0 # 1:use pseudo time for unsteady
   last: 
-    control: 0 # 0:nStep , 1:time base
     #nStep: 10000
     nStepOuter: 500
     #nStep: 200
