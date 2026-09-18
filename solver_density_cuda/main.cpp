@@ -2021,22 +2021,8 @@ int main(void) {
             exit(1);
         }
         msh.buildImplicitLines(var.c.at("ccx").data(), var.c.at("ccy").data(), var.c.at("ccz").data());
-        // lineDtWallRelief 診断用: wall 種 bcond の境界面フラグ (kind に "wall" を含む bcond のみ。
-        // inlet/outlet/periodic は除外しない — 壁境界 Λ の律速仮説の切り分け専用)。
-        if (cfg.lineDtWallRelief == 1) {
-            std::vector<unsigned char> pw(msh.nPlanes, 0);
-            geom_int nw = 0;
-            for (auto& bc : msh.bconds) {
-                if (bc.bcondKind.find("wall") == std::string::npos) continue;
-                for (auto ip : bc.iPlanes) { pw[ip] = 1; ++nw; }
-            }
-            gpuErrchk(cudaMalloc((void**)&msh.plane_wall_flag_d, sizeof(unsigned char)*msh.nPlanes));
-            gpuErrchk(cudaMemcpy(msh.plane_wall_flag_d, pw.data(), sizeof(unsigned char)*msh.nPlanes, cudaMemcpyHostToDevice));
-            printf("[lineDtWallRelief] wall boundary planes flagged: %d\n", (int)nw);
-        }
     } else if (cfg.lineKFreeze != 0 || cfg.lineViscCoupling != 0 ||
-               cfg.lineViscousDtRelief != (flow_float)0.0 || cfg.lineDtDirectional != 0 ||
-               cfg.lineDtWallRelief != 0) {
+               cfg.lineViscousDtRelief != (flow_float)0.0 || cfg.lineDtDirectional != 0) {
         fprintf(stderr, "[lineImplicit] lineKFreeze/lineViscCoupling/lineViscousDtRelief require lineImplicit=1\n");
         exit(1);
     }

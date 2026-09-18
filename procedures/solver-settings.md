@@ -71,6 +71,7 @@ time:
 
 - **`lineImplicit: 1`**: 本体。v2 (factor/solve 分離) 込みでコスト +32%/subiter (ny160 DDES 実測)。
 - **`lineKFreeze: 1`**: dual-time サブ反復間で K/LU を凍結 (収束軌道不変・コスト削減)。dual-time では常用推奨。
+- (削除済 2026-09-18) `lineDtWallRelief`: 壁境界半割面の λ も CFL max から除外する診断スイッチ。発散したので削除した (plan config-key-pruning §5.2)。
 - **`lineDtDirectional: 1`**: 方向別 dt — 内部 line 面の λ (音響込み) を擬似 dt の CFL max から除外。
   壁ノードの境界半割面は除外されない (壁 CV 自身の Δτ は境界面律速のまま) 点に注意。
 - `lineViscCoupling` / `lineViscousDtRelief`: line 面のスカラー粘性結合と粘性 CFL 割引。

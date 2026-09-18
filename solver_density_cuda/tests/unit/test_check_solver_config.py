@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""check_solver_config.py の試験: 残差では気づけない設定ミスを FAIL/WARN で止めること。"""
+"""check_solver_config.py の試験: 残差では気づけない設定ミス (dual-time の緩和・不活性な S3・作動しない FCT・存在しないキー) を FAIL/WARN で止めること。"""
 import importlib.util, os, sys
 here = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location('csc', os.path.join(here, '..', '..', 'tools', 'check_solver_config.py'))
@@ -53,6 +53,14 @@ check('time.deltaT.passiveFct' in keys(w), 'passiveFct 1 with speciesFaceReconst
 
 f, w = csc.check(cfg(speciesImplicitCoupling=0))
 check('time.deltaT.speciesImplicitCoupling' in keys(w), 'S3 with coupling 0 must WARN')
+
+y = cfg(); y['turbulence'] = {'model': 'SST', 'kInf': 1.0, 'omegaInf': 1000.0}
+f, w = csc.check(y)
+check('turbulence.kInf' in keys(w) and 'turbulence.omegaInf' in keys(w), 'keys the solver never reads must WARN (kInf/omegaInf are not real keys)')
+
+y = cfg(); y['turbulence'] = {'model': 'SST', 'kInit': 1.0, 'omegaInit': 1000.0}
+f, w = csc.check(y)
+check('turbulence.kInit' not in keys(w), 'the real initial-value keys must not be flagged')
 
 y = cfg(); y['mesh']['bndFirstOrder'] = 1
 f, w = csc.check(y)

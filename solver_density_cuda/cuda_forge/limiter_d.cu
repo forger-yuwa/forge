@@ -325,7 +325,7 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         var.c_d["dUydx"], var.c_d["dUydy"], var.c_d["dUydz"], \
         var.c_d["dUzdx"], var.c_d["dUzdy"], var.c_d["dUzdz"], \
         var.c_d["dPdx"] , var.c_d["dPdy"] , var.c_d["dPdz"], \
-        ((cfg.primPack != 0 && cfg.gradLSQ == 2) ? prim_pack_device_ptr() : nullptr)
+        (const flow_float*)nullptr   /* 原始量パックは不採用 (実測で利得なし) */
     // 周期 node (合併 CV) は 2 段 (極値の group max/min → ψ の group min) で周期対の ψ を一致させる (§4.8)。
     const bool perNode = periodicNodeActive(cfg, msh);
     if (perNode) {

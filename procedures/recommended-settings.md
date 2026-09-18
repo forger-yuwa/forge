@@ -203,6 +203,25 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 
 ## 9. 旧設定 (superseded) — 新規 config に使わない
 
+### 9.1 削除したキー (2026-09-18, plan [config-key-pruning](../plans/active/config-key-pruning.md))
+
+**書くと起動時エラーになる**。黙って無視されないので、古い config を再実行すると気づける。
+
+| 削除したキー | 理由 | 移行先 |
+| --- | --- | --- |
+| `time.deltaT.blockDPLURDiagCache` / `blockDPLURDqPack` | 実測で遅化 (44.0→46.5 ms/step、+0.7〜2.7 ms/step) し不採用確定 | 既定経路 (何も書かない) |
+| `mesh.primPack` | 実測で利得なし〜微増、不採用確定 | 同上 |
+| `time.deltaT.updateGuardAlpha` | 正値性ガードは全 CFL で発散 (負の結果) | 同上 |
+| `time.deltaT.lineDtWallRelief` | 壁半割面の λ 除外は発散した診断スイッチ | 同上 |
+| `time.deltaT.implicitRelaxSST` | 独立 3 件の A/B で効果なし | `implicitRelax` (SST も同じ値に従う) |
+| `time.deltaT.lowMachThornber` | Thornber 型再構成補正は検証結果が負 | `lowMachPrecond` |
+| `time.deltaT.multispeciesRhoYCommonLimiter` | S2 より明確に悪く、`speciesFaceReconstruction 2` (S3) の生産化で目的が消滅 | `speciesFaceReconstruction` |
+| `turbulence.turbulentSchmidt` | `physProp.Sc_t` の同義キー (使用ゼロ) | `physProp.Sc_t` |
+| `physProp.isAxisymmetric` / `physProp.axisymMethod` | 正本は `mesh` ブロック (deprecated 読みだった) | `mesh.isAxisymmetric` / `mesh.axisymMethod` |
+| `turbulence.C_DES_kw` / `C_DES_ke` / `wmlesNewtonTol` / `wmlesNewtonMaxIt` / `wmlesPrt` / `mesh.gradLSQDegenThresh` / `time.deltaT.passiveFctTolAbs` | 一度も使われず掃引の実測も無い内部定数 → コードに固定 | (固定値。変えたいときはコードを直す) |
+
+存在しないキーを書いても solver は黙って無視するので、**投入前に `check_solver_config.py` を通す** (未知キーを WARN で拾う)。
+
 | 旧設定 | 状態 | 代替 |
 |---|---|---|
 | `mesh.bndFirstOrder: 1` | **禁止** (粘性応力破壊・疑似 2D で全域に効く) | 段階起動 (§1.2) |

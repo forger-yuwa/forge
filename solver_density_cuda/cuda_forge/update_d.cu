@@ -281,7 +281,7 @@ void applyBlockImplicitCorrection_d_wrapper(solverConfig& cfg , cudaConfig& cuda
         // (Mach~1000)。SU2 流の対称面は Jacobian を整合的に修正する必要がある (block-DPLUR の row 修正)。
         // 暫定で無効 (nullptr=baseline)。near-axis corner は open issue (docs §7.1)。
         nullptr,
-        cfg.updateGuardAlpha
+        (flow_float)0.0   /* 正値性ガードは不採用 (全 CFL で発散); 常に無効 */
     );
 
     gpuErrchk( cudaPeekAtLastError() );
@@ -353,7 +353,7 @@ void applySSTPointImplicit_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , 
         msh.nCells,
         var.c_d["volume"],
         var.c_d["dt_local"],
-        cfg.implicitRelaxSST,
+        (flow_float)cfg.implicitRelax,   /* SST も implicitRelax に従う (独立キーは削除) */
         var.c_d["roK"],
         var.c_d["roOmega"],
         var.c_d["roKN"],
@@ -476,7 +476,7 @@ void applyBlockImplicitCorrectionInPlace_d_wrapper(solverConfig& cfg , cudaConfi
         var.c_d["ro"], var.c_d["roUx"], var.c_d["roUy"], var.c_d["roUz"], var.c_d["roe"],
         var.c_d["dq_block_old_0"], var.c_d["dq_block_old_1"], var.c_d["dq_block_old_2"],
         var.c_d["dq_block_old_3"], var.c_d["dq_block_old_4"],
-        cfg.updateGuardAlpha
+        (flow_float)0.0   /* 正値性ガードは不採用 (全 CFL で発散); 常に無効 */
     );
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

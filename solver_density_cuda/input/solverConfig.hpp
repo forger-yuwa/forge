@@ -46,11 +46,9 @@ public:
     flow_float cfl;
     flow_float cfl_pseudo;
     flow_float implicitRelax = 1.0;
-    flow_float implicitRelaxSST = -1.0; // -1: implicitRelax に倒置 (既定動作不変)
     // 陰的更新の正値性ガード (commit 時の局所 under-relax)。0=OFF (既定・ビット同一迂回)。
     // >0 で「1 step で ro・内部エネルギーが alpha 倍未満に落ちる」セルの Δq を半減列で縮小。
     // plans/active/time_integration-update-positivity-guard.md
-    flow_float updateGuardAlpha = 0.0;
     // line-implicit (壁法線ライン block-Thomas を DPLUR に埋め込む)。0=OFF (既定)。
     // 1 で高 AR 積層方向の結合を直接解に昇格し cfl_pseudo 上限を引き上げる。
     // blockDPLUR==1 専用・lowMachPrecond>=2 とは併用不可 (config 検証で拒否)。
@@ -61,7 +59,6 @@ public:
     int lineViscCoupling = 0;         // 1: line 面にスカラー粘性結合 K+=α·I (対角 2α→α)
     flow_float lineViscousDtRelief = 0.0;  // θ: on-line セルの擬似 dt 粘性項を (1−θ) 倍
     int lineDtDirectional = 0;        // 1: 方向別 dt — line 面の λ (音響込み) を CFL の max から除外
-    int lineDtWallRelief = 0;         // 1: (診断) wall 種境界半割面の λ も on-line セルの CFL max から除外
     // 軸対称 near-axis 安定化: 擬似時間スペクトル半径に軸項 λ_axis=β·(|u_r|+c)·A_planar を加える。
     // 近軸 (r→0) で Δτ∝CFL·r/(|u_r|+c) を自然に与え半径運動量不安定を抑える。0=不変 (既定)。
     flow_float axisTimestepBeta = 0.0;
@@ -72,7 +69,6 @@ public:
     // multispeciesRhoYCommonLimiter: opt-in 診断。0 (既定・ビット不変)、
     // 1: ρ と全 species に共通リミタ ψ_ρY=min(ψ_ρ, min_s ψ_Y_s) を適用し ρ_f=ρ(Y_f) 整合だけを切り分ける
     //    (p・速度は各自のリミタのまま)。nSpecies>1 かつ speciesFaceReconstruction>=1 で有効。
-    int multispeciesRhoYCommonLimiter = 0;
     int speciesImplicitCoupling = 0; // 多成分 TP 陰解法 (timeIntegration==11, nSpecies>=2) の化学種更新方式。
                                      // 0: 従来 segregated 点陰的 forward-Euler (既定・ビット不変)。
                                      // 1: 緩和整合 scalar-DPLUR (流れ block と同一 dt_local/implicitRelax/nStepInner
@@ -113,16 +109,13 @@ public:
     // **既定 0**: A10G 3D 2.37 M 節点で 44.0→46.5 ms/step と逆に遅化した (対角 25 floats/cell の保存+4 回読込 ≈1.2 GB/step の
     // 帯域が、省ける近傍幾何読み・組立より高い。sweep はレイテンシ律速で gather 数の削減が効かない)。opt-in 記録用に残す。
     // plans/active/performance-3d-node-sst-speedup.md §4.2-4 / §9。
-    int blockDPLURDiagCache = 0;
     // block-DPLUR sweep の近傍 dq gather を stride-8 AoS バッファから読む (5 セクタ→1 セクタ)。0 で SoA 5 配列 (従来)。
     // 結果はビット同一 (同じ値を別レイアウトで読むだけ)。line-implicit / node 周期では自動で off。
     // **既定 0**: RTX 3060 の 3D 257k 節点で差なし (22.8 vs 22.9 ms/step, 2026-09-12)。gather は L2 に乗っており
     // セクタ数削減が効かない。opt-in 記録用。
-    int blockDPLURDqPack = 0;
     // 原始量 (ro,Ux,Uy,Uz,P,T) の AoS パックを applyBconds 後に組み、LSQ 勾配 (gradLSQ==2) とリミッタの近傍 gather が
     // 1 セクタで読む (mesh.primPack, 0 で従来の 6 配列 gather)。値は同じなのでビット同一。
     // **既定 0**: 3D 257k 節点 (RTX 3060) で差なし (パック構築の書込が相殺)。opt-in 記録用。
-    int primPack = 0;
     // 変換時の節点再番号付け: "none" (既定) / "rcm" (Reverse Cuthill–McKee; node では CV 順 = gather の局所性)。
     std::string meshRenumber = "none";
                                     // 残差/状態は float のまま、Jacobian 構築+5×5 solve のみ double 化する混合精度
@@ -165,7 +158,6 @@ public:
     flow_float precondEps = 0.15;  // 低マッハ前処理の停留点フロア ε (Ur=min(c,max(|u|,ε·c)))。
                                    // ε 小ほど低マッハ振動を強く減衰するが ε≲0.1 は発散 (ε=0.05 で NaN)。
                                    // ε=0.15: M4 ノズルで limit-cycle 振幅 −32% (検証済), ε=0.3: −17%。
-    int lowMachThornber = 0;       // 0: off (従来), 1: Thornber 型再構成補正 (SLAU の L/R 速度ジャンプを
                                    // z=min(M,1) で縮約)。lowMachPrecond と直交・併用可。SLAU 経路のみ。
     // (旧 keepDissipation は廃止。以下 keepDissType は別設計: KEEP 中心流束は不変のまま独立な散逸レイヤを加算する)
     int keepDissType = 0;          // KEEP 用 opt-in 散逸レイヤ (plans/accepted/convection-keep-es-dissipation.md)。
@@ -437,7 +429,6 @@ public:
     std::string tracer = "";
     bool tracerEnabled() const { return tracer == "exhaust"; }
     flow_float Sc_t = 0.7;                     // 乱流 Schmidt 数 (D_t=mu_t/(ro*Sc_t))。
-                                               // turbulence.turbulentSchmidt でも設定可 (physProp.Sc_t は後方互換、turbulence 優先)
 
     // 非平衡凝縮 (4 モーメント方程式 ρg,ρQ2,ρQ1,ρQ0)。methods/condensation/ 参照。
     // Phase 1 はモーメントを受動スカラー (ソース=0) として輸送するのみ。既定 off で従来経路ビット不変。

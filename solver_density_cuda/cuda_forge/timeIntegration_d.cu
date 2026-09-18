@@ -1484,18 +1484,8 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 ((cfg.lineImplicit == 1) ? msh.line_prev_d : nullptr), \
                 ((cfg.lineImplicit == 1) ? msh.line_next_d : nullptr), \
                 msh.line_Kprev_d, msh.line_Knext_d, (((loop == 0) && (lineStoreK != 0)) ? 1 : 0), cfg.lineViscCoupling,  /* line-implicit */ \
-                ((cfg.implicitSolvePrecision == 0 && cfg.lineImplicit == 0 && cfg.blockDPLURDiagCache != 0) ? 1 : 0),  /* useDiagCache: float・point 経路のみ */ \
-                (usePack ? (const flow_float*)g_dqPackOld : nullptr), (usePack ? g_dqPackNew : nullptr)  /* 近傍 dq の AoS 版 */
-            // 近傍 dq の AoS 経路: line-implicit と node 周期 (SoA だけを直接書き換える) では使わない。
-            const bool usePack = (cfg.lineImplicit == 0) && (cfg.blockDPLURDqPack != 0) &&
-                                 !(cfg.discretization == "node" && msh.periodicRoot_d != nullptr && msh.nPeriodicMembers > 0);
-            if (usePack && (g_dqPackOld == nullptr || g_dqPackN != msh.nCells_all)) {
-                if (g_dqPackOld) { cudaFree(g_dqPackOld); cudaFree(g_dqPackNew); }
-                const size_t nb = (size_t)msh.nCells_all * 8 * sizeof(flow_float);
-                gpuErrchk(cudaMalloc((void**)&g_dqPackOld, nb)); gpuErrchk(cudaMalloc((void**)&g_dqPackNew, nb));
-                gpuErrchk(cudaMemset(g_dqPackOld, 0, nb)); gpuErrchk(cudaMemset(g_dqPackNew, 0, nb));
-                g_dqPackN = msh.nCells_all;
-            }
+                0,  /* useDiagCache: 対角キャッシュは不採用 (実測で遅化) のため常に無効 */ \
+                (const flow_float*)nullptr, (flow_float*)nullptr  /* 近傍 dq の AoS パックは不採用 (実測で遅化) */
             if (cfg.implicitSolvePrecision == 1)
                 implicit_defect_correction_block_d<double><<<block_grid , block_threads>>>(FORGE_BDPLUR_ARGS);
             else

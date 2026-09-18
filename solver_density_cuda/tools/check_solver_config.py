@@ -25,6 +25,30 @@ def load(path):
         return p, (yaml.safe_load(f) or {})
 
 
+def unknown_keys(y):
+    """solverConfig.cpp のソースに**キー名の文字列が一度も現れない**キーを拾う (plan config-key-pruning §5.3 e)。
+    読み取り側に文字列が無ければ solver は絶対に読めないので、偽陽性が無い。逆に「現れるが読まれない」は拾えない
+    (抽出の完全性に依存しないための保守的な判定; codex plan-1 M3)。"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    src_path = os.path.join(here, '..', 'input', 'solverConfig.cpp')
+    try:
+        src = open(src_path, errors='replace').read() + open(os.path.join(here, '..', 'input', 'solverConfig.hpp'), errors='replace').read()
+    except Exception:
+        return []
+    out = []
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                ks = str(k)
+                if f'"{ks}"' not in src:
+                    out.append(('.'.join(path + [ks]), 'solverConfig のソースにこのキー名が現れない = 読まれない (綴り違い・旧キー・別ブランチのキー)'))
+                else:
+                    walk(v, path + [ks])
+    walk(y, [])
+    return out
+
+
 def check(y):
     """戻り (fails, warns): それぞれ (キー, 説明) のリスト。"""
     fails, warns = [], []
@@ -46,6 +70,9 @@ def check(y):
     fct = int(dT.get('passiveFct', 1) or 0)
     conv = sp.get('convMethod')
     coupling = dT.get('speciesImplicitCoupling')
+
+    for path, why in unknown_keys(y):
+        warns.append((path, why))
 
     if mesh.get('bndFirstOrder') is not None:
         fails.append(('mesh.bndFirstOrder', '使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md)'))

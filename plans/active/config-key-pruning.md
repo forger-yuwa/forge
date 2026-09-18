@@ -73,9 +73,9 @@ updated: 2026-09-17
 | 1 | 棚卸しツールの恒久化 | `config_key_inventory.py` (キー定義・既定値・run での使用実績・文書での言及を突き合わせ、分類表の素を出す) |
 | 2 | 全キーの分類表 (完全修飾パス 188 件) | 初版 (155 名称) は素案。**codex plan M3 で抽出の取りこぼしと内訳の不一致が出たので再オープン** (2026-09-18)。確定した削除は §5.2 の 10 パス + 定数化 7 件のみ。残りは分類をやり直す |
 | 3 | codex plan レビュー | 分類表ができた時点で `--stage plan` |
-| 4 | 削除の実装 | まとまり単位。旧キーは起動時エラーにする |
+| 4 | 削除の実装 (第 1 陣) | ~~確定 10 パス + 定数化 7 件~~ **済 (2026-09-18)**: config 読みとメンバを削除し、呼び出し側は既定値を直接渡す。旧キーは**起動時エラー** (どこへ移ったかを言う)。`check_solver_config.py` に未知キー検出を追加。第 2 陣は分類やり直し後 |
 | 5 | 回帰検証 | §6 (経路別の最小回帰表 + 反復幅基準)。生成器・変換器の移行を先に |
-| 6 | 文書・skill の同期 | `solver-settings.md` の節削除、`recommended-settings.md` §9 への 1 行、`check_solver_config.py` に旧キー検出を追加 |
+| 6 | 文書・skill の同期 | ~~第 1 陣ぶん~~ **済 (2026-09-18)**: `recommended-settings.md` §9.1 に削除キーの表 (理由と移行先)、`solver-settings.md` の該当記述を削除。第 2 陣は分類後 |
 
 ### 5.2 分類 (2026-09-18 改訂, codex plan レビュー反映)
 
@@ -205,6 +205,7 @@ solver の config 読込と分岐、`procedures/` の設定文書、skill `forge
 
 ## 9. 変更ログ
 
+- `2026-09-18` — **第 1 陣の削除を実装**: 確定 10 パス (`blockDPLURDiagCache`, `blockDPLURDqPack`, `primPack`, `updateGuardAlpha`, `lineDtWallRelief`, `implicitRelaxSST`, `lowMachThornber`, `multispeciesRhoYCommonLimiter`, `turbulentSchmidt`, `physProp.isAxisymmetric`/`axisymMethod`) と定数化 7 件 (`C_DES_kw`, `C_DES_ke`, `wmlesNewtonTol`, `wmlesNewtonMaxIt`, `wmlesPrt`, `gradLSQDegenThresh`, `passiveFctTolAbs`)。旧キーは起動時エラー (移行先つき) にした。**検証**: (a) `lowMachThornber: 1` を書いた config が起動時に落ちることを実 run で確認 (case/44 `run_0481`)、(b) 既定挙動の非退行 — 削除前 `run_0467` と削除後 `run_0482` の差が同一設定の反復ノイズ `run_0483` 以下 (ρ 1.19e-5 vs 1.29e-5、roe 6.1 vs 9.7、roQ0 6.6e10 vs 1.28e11)、(c) 単体試験 6 本 ALL PASS。`check_solver_config.py` に**未知キー検出**を追加 (solverConfig のソースにキー名が現れなければ WARN; `kInf`/`omegaInf` を実際に検出)。
 - `2026-09-18` — codex plan レビュー 1 回目 **GO-with-changes (M9)** を全採用 (§6.1): 誤分類 4 件 (`timeIntegration: 1` は 1 段 Euler で 3 の別名ではない、SST 分離型 2 キーは引用先の最終決定と逆、`condEquilibrium 1→2` の固定点は Δτ 依存、`mesh.axisymMethod: 1` は再評価待ち) を保留へ移し、限定的な実測から飛躍していた 4 群 (`lineVisc*`, `condTwoTemp`, 化学 2 キー, 感度係数 2 件) も保留に。棚卸しを**完全修飾パス**で再抽出 (155 名称 → 188 パス) し分類を再オープン。スコープに変換器と設計チェーンの生成器を追加。§6 を経路別の最小回帰表と反復幅基準に作り替え。**今回確定した削除は 10 パス + 定数化 7 件**。
 - `2026-09-17` — 起票 (ユーザ指示)。棚卸し (155 キー / 未使用 22 / 既定のみ 3 / recommended 未記載 78; 全 9 worktree の run config 5163 本を対象)。
 - `2026-09-17` — 全キーの分類を根拠つきで作成 (§5.2)。付随して `recommended-settings.md` の存在しないキー 2 件を修正・注記 (§5.3 a/b)。
