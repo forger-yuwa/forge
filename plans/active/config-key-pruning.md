@@ -70,7 +70,7 @@ updated: 2026-09-17
 
 | # | 項目 | 内容 |
 | --- | --- | --- |
-| 1 | 棚卸しツールの恒久化 | `config_key_inventory.py` (キー定義・既定値・run での使用実績・文書での言及を突き合わせ、分類表の素を出す) |
+| 1 | 棚卸しツールの恒久化 | `config_key_inventory.py`。**再オープン (2026-09-18)**: 使用数をキー名ベースでなく**完全修飾パスで PyYAML 集計**に直す (誤判定の原因; §5.3 j) |
 | 2 | 全キーの分類表 (完全修飾パス 188 件) | 初版 (155 名称) は素案。**codex plan M3 で抽出の取りこぼしと内訳の不一致が出たので再オープン** (2026-09-18)。確定した削除は §5.2 の 10 パス + 定数化 7 件のみ。残りは分類をやり直す |
 | 3 | codex plan レビュー | 分類表ができた時点で `--stage plan` |
 | 4 | 削除の実装 (第 1 陣) | ~~確定 10 パス + 定数化 7 件~~ **済 (2026-09-18)**: config 読みとメンバを削除し、呼び出し側は既定値を直接渡す。旧キーは**起動時エラー** (どこへ移ったかを言う)。`check_solver_config.py` に未知キー検出を追加。第 2 陣は分類やり直し後 |
@@ -99,11 +99,9 @@ updated: 2026-09-17
 | `time.deltaT.implicitRelaxSST` | −1 | 独立 3 件の A/B が全て無効 (ω 収縮は悪化 / プラトー不変 / 発散時期不変)。**注意 (M9)**: −1 は `implicitRelax` の継承指定なので、削除は「SST も `implicitRelax` に従う」への統合であって定数置換ではない |
 | `time.deltaT.lowMachThornber` | 0 | `convection/implementation.md`「検証結果 (負)。無効〜僅かに悪化…根治用途では使わない」。2 run |
 | `time.deltaT.multispeciesRhoYCommonLimiter` | 0 | `convection-multispecies-contact-pressure.md`「依然 S2 より明確に悪い」「cfl4 で C も発散」。S3 の生産化 (2026-09-17) で救済目的が消滅。3 run |
-| `turbulence.turbulentSchmidt` | (別名) | `physProp.Sc_t` の同義キー。全 worktree で使用 0 → 別名を廃止 |
-| `physProp.isAxisymmetric` / `physProp.axisymMethod` | 0 | 正本は `mesh` ブロック。`solverConfig.cpp` が既に deprecated 警告を出している |
 
 **未使用の内部定数 (D)** は、**「定数として固定する」判断を明記したうえで**埋め込む: `turbulence.C_DES_kw` / `C_DES_ke` /
-`wmlesNewtonTol` / `wmlesNewtonMaxIt` / `wmlesPrt` / `mesh.gradLSQDegenThresh` / `time.deltaT.passiveFctTolAbs` の 7 件
+`wmlesNewtonTol` / `wmlesNewtonMaxIt` / `wmlesPrt` / `mesh.gradLSQDegenThresh` の 6 件
 (全 worktree で使用 0、掃引の実測も無し)。`condGyarmathyC` と `condN2LiquidCp` は掃引済みだが、**感度試験機能を捨てる**判断になるので
 §5.4 の保留へ移した。
 
@@ -119,6 +117,14 @@ updated: 2026-09-17
 | `condensation.condTwoTemp` | 実測は**希薄水/N2 限定**。全用途で不要の証拠ではない | 液滴負荷の高い条件での確認 |
 | `physProp.chemistry.tMaxReaction` / `freezeBelowT` | 内部反復定数ではなく、**反応源の温度評価と停止条件を変える** (`chemistry_d.cu:86`)。使用実績ゼロは廃止の証明にならない | 化学ブランチ側の判断と同時に |
 | `condensation.condGyarmathyC` / `condN2LiquidCp` | 掃引で既定が最良と分かったことは、**感度試験機能を捨てる**理由にはならない | 標準モデルとして固定する判断を明示できたら |
+
+| `time.deltaT.updateGuardAlpha` | **元 plan の「処置」が「opt-in のまま残置 (無害・発散遅延の診断的価値はある)」**。負の結果は「CFL 上限を上げない」という限定 | LHS 整合化で cfl 上限の真因が解消すること |
+| `time.deltaT.lowMachThornber` | 元 plan は「**この症状 (ノズル limit cycle) に無効**。機能は opt-in で残置」。低マッハ LES/解像用途は未検証 | 低マッハ解像用途での確認、または機能として持たない決定 |
+| `time.deltaT.multispeciesRhoYCommonLimiter` | 元 plan が「**診断オプションとして残置**」と決定済み。実測 (case/28 TP, cfl 1/2/4) は確かだが、削除は残置決定を覆す新しい判断になる | その判断を明示的に行うこと |
+| `time.deltaT.passiveFctTolAbs` | `passiveFctSweeps` / `passiveFctTol` と**同一 plan・同一日・同一の受入判定**。3 つとも同じ扱いにする | 3 キー一括で判断 (凝縮 dual-time 生産期の確認後) |
+
+| `turbulence.turbulentSchmidt` | **161 run が使用中** (chem ブランチ: case/48 が 0.7 ×124、case/47 が **0.5** ×37)。`physProp.Sc_t` の既定 0.7 と違う値があるので、単なる別名撤去ではなく**設定値の移送**が要る | chem ブランチ側の run config を `physProp.Sc_t` に書き換えること |
+| `physProp.isAxisymmetric` / `physProp.axisymMethod` | **1064 run が使用中** (値 1 が 593)。deprecated 読み (警告つき) は生きており、拒否すると既存 run の再実行が全部落ちる | 既存 run の移送、または警告のまま残す判断 |
 
 #### 保留 (初版から継続)
 
@@ -147,7 +153,14 @@ updated: 2026-09-17
 | b | 同 §3 の `speciesPrecondDt: 1 (既定)` は化学ブランチ限定で main / sern に無い | **注記済 (2026-09-17)** |
 | c | `thermCondMethod` (297 run が 1 を使用) と `prandtlLam` が `procedures/` `methods/` に一度も出てこない | §5.1 #6 で `solver-settings.md` に追記 |
 | d | `initial` は solver 実行時には読むだけで使われない (`setInitial` の呼び出しは変換器のみ) のに全 run config で必須キー | 変換時キーへ移すか、必須をやめる。§5.1 #4 に含める |
-| e | 存在しないキーを書いても黙って無視される (a の原因)。`check_solver_config.py` に「未知キーの検出」を足すべき | §5.1 #6 に追加 |
+| e | 存在しないキーを書いても黙って無視される (a の原因)。`check_solver_config.py` に「未知キーの検出」を足すべき | **済 (2026-09-18)**: solverConfig のソースにキー名が現れなければ WARN (偽陽性なし)。`kInf`/`omegaInf` を実際に検出 |
+| f | `time.last.control` は**必須キーなのに消費者がゼロ**、`time.last.time` は**読む場所が無いのに 1988 run が書いている** (終了条件を時刻で指定する旧機能の残骸) | 第 2 陣で削除。全 run が書いているので段階移行 (受理 → 警告 → 削除) |
+| g | `precondEps` (184 run) / `monitorInterval` (390 run) / `axisTimestepBeta` (39 run) が `procedures/` `methods/` に無い | §5.1 #6 で追記 |
+| h | `speciesFaceReconstruction` を `solverConfig.cpp` が**二重に読んでいる** (値は同じで無害だが、片方を消すと齟齬) | 第 2 陣で整理 |
+| i | 棚卸しツールが `config["time"]` 形を取りこぼし | **済 (2026-09-18)** |
+| j | **棚卸しツールの使用数がキー名ベースで、完全修飾パス別になっていない** (節をまたいで合算・1 ファイル内の複数出現を重複計上)。これが「使用 0」の誤判定を生み、実際には 161 run / 1064 run が使うキーを削除しかけた | 第 2 陣の前に **PyYAML でパスごとに数える**実装へ置き換える (§5.1 #1 を再オープン) |
+| k | 誤った場所に書かれて黙って無視されているキーが多数 (`turbulence.kInf`/`omegaInf` 1410 run、トップレベル `lowMachPrecond` 70 run、`physProp.speciesFaceReconstruction` 112 run、`space.keepDiss*` 4 run ほか) | 未知キー検出 (§5.3 e) で拾えるので、case README に注記して順次修正 |
+| l | `physProp.isCompressible` と `physProp.ro` は**必須キーなのに読むコードが 1 箇所も無い**、`mesh.meshFormat` は合法値が `hdf5` 1 つだけ | 第 2 陣で必須をやめる (段階移行) |
 
 ## 6. 検証 (2026-09-18 改訂, codex plan M8/M9)
 
@@ -205,7 +218,10 @@ solver の config 読込と分岐、`procedures/` の設定文書、skill `forge
 
 ## 9. 変更ログ
 
-- `2026-09-18` — **第 1 陣の削除を実装**: 確定 10 パス (`blockDPLURDiagCache`, `blockDPLURDqPack`, `primPack`, `updateGuardAlpha`, `lineDtWallRelief`, `implicitRelaxSST`, `lowMachThornber`, `multispeciesRhoYCommonLimiter`, `turbulentSchmidt`, `physProp.isAxisymmetric`/`axisymMethod`) と定数化 7 件 (`C_DES_kw`, `C_DES_ke`, `wmlesNewtonTol`, `wmlesNewtonMaxIt`, `wmlesPrt`, `gradLSQDegenThresh`, `passiveFctTolAbs`)。旧キーは起動時エラー (移行先つき) にした。**検証**: (a) `lowMachThornber: 1` を書いた config が起動時に落ちることを実 run で確認 (case/44 `run_0481`)、(b) 既定挙動の非退行 — 削除前 `run_0467` と削除後 `run_0482` の差が同一設定の反復ノイズ `run_0483` 以下 (ρ 1.19e-5 vs 1.29e-5、roe 6.1 vs 9.7、roQ0 6.6e10 vs 1.28e11)、(c) 単体試験 6 本 ALL PASS。`check_solver_config.py` に**未知キー検出**を追加 (solverConfig のソースにキー名が現れなければ WARN; `kInf`/`omegaInf` を実際に検出)。
+- `2026-09-18` — **自己訂正 2**: さらに 2 件を戻した。`turbulence.turbulentSchmidt` は「全 worktree で使用 0」が誤りで**実際は 161 run が使用中** (chem ブランチ case/48 が 0.7 ×124、case/47 が **0.5** ×37)。`physProp.Sc_t` の既定と違う値があるので別名撤去には設定値の移送が要る。`physProp.isAxisymmetric` は **1064 run (値 1 が 593)** が使っており、拒否にすると既存 run の再実行が全部落ちる (deprecated 読みは生きている)。**原因**: 棚卸しツールの使用数集計が完全修飾パスでなくキー名ベースで、しかも節をまたいで合算・重複計上していたため「使用 0」を誤って出していた。**第 1 陣で実際に削除できたのは 5 パス + 定数化 6 件**に縮小。
+- `2026-09-18` — **自己訂正**: 第 1 陣で削除した 17 件のうち **4 件を戻した** (`updateGuardAlpha`, `lowMachThornber`, `multispeciesRhoYCommonLimiter`, `passiveFctTolAbs`)。前 3 者は**元 plan の「処置」が明示的に「opt-in のまま残置」**で、codex plan-1 M2 が指摘したのと同じ「古い実装ステップや限定的な実測を最終決定と取り違える」誤りを繰り返していた。`passiveFctTolAbs` は同一 plan・同一日・同一機構の `passiveFctSweeps`/`passiveFctTol` を保留にしながら 1 つだけ削っており §5.2 内で不整合だった。4 件とも保留表へ移し、解除条件を書いた。併せて棚卸しツールが `getOptionalValidatedValue<int>(config["time"], ...)` 形を取りこぼしていた (`nStepInner` / `nSubIterDualTime` / `bdfOrder` が抜けていた) のを修正。
+- `2026-09-18` — **新発見 (分類やり直し)**: `time.last.control` は**必須キーなのに solver 全域で消費者がゼロ**、`time.last.time` は**読む場所が存在しないのに 1988 run が書いている**。§5.3 f として記録し、削除は「全 run が書いているので段階移行」とする。
+- `2026-09-18` — **第 1 陣の削除を実装**: 確定 5 パス (`blockDPLURDiagCache`, `blockDPLURDqPack`, `primPack`, `lineDtWallRelief`, `implicitRelaxSST`) と定数化 6 件 (`C_DES_kw`, `C_DES_ke`, `wmlesNewtonTol`, `wmlesNewtonMaxIt`, `wmlesPrt`, `gradLSQDegenThresh`)。旧キーは起動時エラー (移行先つき) にした。**検証**: (a) `lowMachThornber: 1` を書いた config が起動時に落ちることを実 run で確認 (case/44 `run_0481`)、(b) 既定挙動の非退行 — 削除前 `run_0467` と削除後 `run_0482` の差が同一設定の反復ノイズ `run_0483` 以下 (ρ 1.19e-5 vs 1.29e-5、roe 6.1 vs 9.7、roQ0 6.6e10 vs 1.28e11)、(c) 単体試験 6 本 ALL PASS。`check_solver_config.py` に**未知キー検出**を追加 (solverConfig のソースにキー名が現れなければ WARN; `kInf`/`omegaInf` を実際に検出)。
 - `2026-09-18` — codex plan レビュー 1 回目 **GO-with-changes (M9)** を全採用 (§6.1): 誤分類 4 件 (`timeIntegration: 1` は 1 段 Euler で 3 の別名ではない、SST 分離型 2 キーは引用先の最終決定と逆、`condEquilibrium 1→2` の固定点は Δτ 依存、`mesh.axisymMethod: 1` は再評価待ち) を保留へ移し、限定的な実測から飛躍していた 4 群 (`lineVisc*`, `condTwoTemp`, 化学 2 キー, 感度係数 2 件) も保留に。棚卸しを**完全修飾パス**で再抽出 (155 名称 → 188 パス) し分類を再オープン。スコープに変換器と設計チェーンの生成器を追加。§6 を経路別の最小回帰表と反復幅基準に作り替え。**今回確定した削除は 10 パス + 定数化 7 件**。
 - `2026-09-17` — 起票 (ユーザ指示)。棚卸し (155 キー / 未使用 22 / 既定のみ 3 / recommended 未記載 78; 全 9 worktree の run config 5163 本を対象)。
 - `2026-09-17` — 全キーの分類を根拠つきで作成 (§5.2)。付随して `recommended-settings.md` の存在しないキー 2 件を修正・注記 (§5.3 a/b)。

@@ -323,6 +323,7 @@ void solverConfig::read(std::string fname)
         this->cfl = getValidatedValue<double>(deltaT, "cfl", "time.deltaT");
         this->cfl_pseudo = getValidatedValue<double>(deltaT, "cfl_pseudo", "time.deltaT");
         this->implicitRelax = getOptionalValidatedValue<double>(deltaT, "implicitRelax", 1.0, "time.deltaT");
+        this->updateGuardAlpha = getOptionalValidatedValue<flow_float>(deltaT, "updateGuardAlpha", 0.0, "time.deltaT");
         this->lineImplicit = getOptionalValidatedValue<int>(deltaT, "lineImplicit", 0, "time.deltaT");
         // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md):
         //   lineKFreeze: dual-time のサブ反復間で K/diag/LU 分解を凍結 (subiter 0 のみ抽出・分解)。
@@ -336,6 +337,8 @@ void solverConfig::read(std::string fname)
         // 多成分 TP 陰解法の化学種更新方式: 既定 0 (従来 segregated 点陰的・ビット不変)。
         // 1 で緩和整合 scalar-DPLUR (流れ block と同一緩和。plan thermophysics-species-implicit-coupling.md)。
         this->speciesImplicitCoupling = getOptionalValidatedValue<int>(deltaT, "speciesImplicitCoupling", 0, "time.deltaT");
+        // multispeciesRhoYCommonLimiter: opt-in 診断 (既定 0・ビット不変)。元 plan が「診断オプションとして残置」と決めている。
+        this->multispeciesRhoYCommonLimiter = getOptionalValidatedValue<int>(deltaT, "multispeciesRhoYCommonLimiter", 0, "time.deltaT");
         // 受動スカラ経路の切替と緩和 (plans/active/species-passive-scalar-unification.md §4.1/§4.2)。既定は旧経路 (ビット不変)。
         this->speciesFaceReconstruction = getOptionalValidatedValue<int>(deltaT, "speciesFaceReconstruction", 0, "time.deltaT");   // (下でも同じ値を再読込)
         this->passiveScalarScheme = getOptionalValidatedValue<int>(deltaT, "passiveScalarScheme", 1, "time.deltaT");
@@ -367,6 +370,7 @@ void solverConfig::read(std::string fname)
         this->passiveFctSweeps = getOptionalValidatedValue<int>(deltaT, "passiveFctSweeps", 100, "time.deltaT");
         if (this->passiveFctSweeps < 1) throw std::runtime_error("Key 'passiveFctSweeps' in 'time.deltaT' must be >= 1.");
         this->passiveFctTol = getOptionalValidatedValue<double>(deltaT, "passiveFctTol", 1.0e-6, "time.deltaT");
+        this->passiveFctTolAbs = getOptionalValidatedValue<double>(deltaT, "passiveFctTolAbs", 1.0e-30, "time.deltaT");
         if (this->passiveFctTol <= 0.0) throw std::runtime_error("Key 'passiveFctTol' in 'time.deltaT' must be > 0.");
         if (this->passiveScalarScheme == 1 || this->speciesImplicitRelax != 1.0 || this->scalarCflMax > 0.0) {
             std::cout << "'passiveScalarScheme' in 'time.deltaT': " << this->passiveScalarScheme
@@ -410,6 +414,7 @@ void solverConfig::read(std::string fname)
                 "2 (RHS+LHS full precond), or 3 (LHS-only full precond).");
         }
         this->precondEps = getOptionalValidatedValue<double>(deltaT, "precondEps", 0.15, "time.deltaT");
+        this->lowMachThornber = getOptionalValidatedValue<int>(deltaT, "lowMachThornber", 0, "time.deltaT");
         // Thornber 型低マッハ再構成補正: 既定 0 で従来挙動 (ビット不変)。lowMachPrecond と直交・併用可。
         // 旧 space.keepDissipation は廃止 (KEEP_d は常に純粋 KEEP)。既存 config に残っていても無視される。
         this->dt_max = getValidatedValue<double>(deltaT, "dt_max", "time.deltaT");
@@ -434,12 +439,8 @@ void solverConfig::read(std::string fname)
             static const Removed removed[] = {
                 {"time", "deltaT", "blockDPLURDiagCache", "removed: measured slower (44.0 -> 46.5 ms/step) and never adopted"},
                 {"time", "deltaT", "blockDPLURDqPack",    "removed: measured slower (+0.7 to +2.7 ms/step) and never adopted"},
-                {"time", "deltaT", "updateGuardAlpha",    "removed: the positivity guard diverged at every CFL tried (negative result)"},
                 {"time", "deltaT", "lineDtWallRelief",    "removed: diverged around step 80-100 (diagnostic switch)"},
                 {"time", "deltaT", "implicitRelaxSST",    "removed: SST now follows 'implicitRelax' (three independent A/B tests showed no effect)"},
-                {"time", "deltaT", "lowMachThornber",     "removed: negative result (no effect to slightly worse)"},
-                {"time", "deltaT", "multispeciesRhoYCommonLimiter", "removed: clearly worse than S2 and superseded by speciesFaceReconstruction 2"},
-                {"time", "deltaT", "passiveFctTolAbs",    "removed: fixed internal guard constant"},
                 {"mesh", nullptr,  "primPack",            "removed: measured no gain and never adopted"},
                 {"mesh", nullptr,  "gradLSQDegenThresh",  "removed: fixed internal constant"},
                 {"turbulence", nullptr, "C_DES_kw",       "removed: fixed model constant (Strelets 2001)"},
@@ -447,9 +448,6 @@ void solverConfig::read(std::string fname)
                 {"turbulence", nullptr, "wmlesNewtonTol", "removed: fixed internal constant"},
                 {"turbulence", nullptr, "wmlesNewtonMaxIt", "removed: fixed internal constant"},
                 {"turbulence", nullptr, "wmlesPrt",       "removed: fixed internal constant (use turbulentPrandtl)"},
-                {"turbulence", nullptr, "turbulentSchmidt", "removed alias: use 'physProp.Sc_t'"},
-                {"physProp",   nullptr, "isAxisymmetric", "removed here: the authoritative key is 'mesh.isAxisymmetric'"},
-                {"physProp",   nullptr, "axisymMethod",   "removed here: the authoritative key is 'mesh.axisymMethod'"},
             };
             for (const auto& r : removed) {
                 YAML::Node n = r.sec2 ? config[r.sec1][r.sec2] : config[r.sec1];
@@ -724,6 +722,11 @@ void solverConfig::read(std::string fname)
         }
         if (physProp["Sc"])                     this->Sc = physProp["Sc"].as<double>();
         if (physProp["Sc_t"])                   this->Sc_t = physProp["Sc_t"].as<double>();
+        // 乱流シュミット数は turbulence.turbulentSchmidt でも設定可 (chem ブランチの 161 run が使用中)。両方あれば turbulence 側を優先。
+        if (config["turbulence"] && config["turbulence"]["turbulentSchmidt"]) {
+            this->Sc_t = config["turbulence"]["turbulentSchmidt"].as<flow_float>();
+            std::cout << "'turbulentSchmidt' in 'turbulence': " << this->Sc_t << std::endl;
+        }
         if (this->Sc_t <= 0.0) {
             throw std::runtime_error("Key 'Sc_t' in 'physProp' must be positive.");
         }

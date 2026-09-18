@@ -49,6 +49,10 @@ public:
     // 陰的更新の正値性ガード (commit 時の局所 under-relax)。0=OFF (既定・ビット同一迂回)。
     // >0 で「1 step で ro・内部エネルギーが alpha 倍未満に落ちる」セルの Δq を半減列で縮小。
     // plans/active/time_integration-update-positivity-guard.md
+    flow_float updateGuardAlpha = 0.0;
+    // 陰的更新の正値性ガード (commit 時の局所 under-relax)。0=OFF (既定・ビット同一迂回)。
+    // >0 で「1 step で ro・内部エネルギーが alpha 倍未満に落ちる」セルの Δq を半減列で縮小。
+    // plans/active/time_integration-update-positivity-guard.md
     // line-implicit (壁法線ライン block-Thomas を DPLUR に埋め込む)。0=OFF (既定)。
     // 1 で高 AR 積層方向の結合を直接解に昇格し cfl_pseudo 上限を引き上げる。
     // blockDPLUR==1 専用・lowMachPrecond>=2 とは併用不可 (config 検証で拒否)。
@@ -66,6 +70,11 @@ public:
     // 多成分 face 整合再構成: 0 (既定・ビット不変, 組成は owner セル 1 次=mixed-order)、
     // 1: Y_s を ρ と同じ勾配+limiter で face へ 2 次再構成し thermo/species 流束で同一 face 組成を使う。
     int speciesFaceReconstruction = 0;
+    // multispeciesRhoYCommonLimiter: opt-in 診断。0 (既定・ビット不変)、
+    // 1: ρ と全 species に共通リミタ ψ_ρY=min(ψ_ρ, min_s ψ_Y_s) を適用し ρ_f=ρ(Y_f) 整合だけを切り分ける
+    //    (p・速度は各自のリミタのまま)。nSpecies>1 かつ speciesFaceReconstruction>=1 で有効。
+    int multispeciesRhoYCommonLimiter = 0;
+    // (以下は元のコメント)
     // multispeciesRhoYCommonLimiter: opt-in 診断。0 (既定・ビット不変)、
     // 1: ρ と全 species に共通リミタ ψ_ρY=min(ψ_ρ, min_s ψ_Y_s) を適用し ρ_f=ρ(Y_f) 整合だけを切り分ける
     //    (p・速度は各自のリミタのまま)。nSpecies>1 かつ speciesFaceReconstruction>=1 で有効。
@@ -156,6 +165,9 @@ public:
                                    //    収束解ビット一致・保存性不変。純粋に収束加速だけを狙う LHS 操作)。
                                    // 2/3 は timeIntegration==11 && blockDPLUR==1 必須。
     flow_float precondEps = 0.15;  // 低マッハ前処理の停留点フロア ε (Ur=min(c,max(|u|,ε·c)))。
+                                   // ε 小ほど低マッハ振動を強く減衰するが ε≲0.1 は発散 (ε=0.05 で NaN)。
+                                   // ε=0.15: M4 ノズルで limit-cycle 振幅 −32% (検証済), ε=0.3: −17%。
+    int lowMachThornber = 0;       // 0: off (従来), 1: Thornber 型再構成補正 (SLAU の L/R 速度ジャンプを
                                    // ε 小ほど低マッハ振動を強く減衰するが ε≲0.1 は発散 (ε=0.05 で NaN)。
                                    // ε=0.15: M4 ノズルで limit-cycle 振幅 −32% (検証済), ε=0.3: −17%。
                                    // z=min(M,1) で縮約)。lowMachPrecond と直交・併用可。SLAU 経路のみ。

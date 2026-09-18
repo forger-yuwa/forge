@@ -70,7 +70,7 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_reconEdgeMid,     &rem,  sizeof(int)));
             const int sfr = cfg.speciesFaceReconstruction;   // config 由来 (env でない)
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_speciesFaceRecon, &sfr,  sizeof(int)));
-            const int rycl = 0;   // ρ-Y 共通リミッタは不採用 (S2 より明確に悪い; S3 で置換されたため常に無効)
+            const int rycl = cfg.multispeciesRhoYCommonLimiter;   // config 由来 (opt-in 診断)
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_rhoYCommonLim,    &rycl, sizeof(int)));
             const unsigned long long zero = 0ULL;
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_speciesOvershoot, &zero, sizeof(unsigned long long)));
@@ -83,6 +83,39 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         }
     }
 
+    // rho-Y 共通リミタ診断: 一定間隔で device カウンタを読み出して 1 行印字しリセット (opt-in 時のみ)。
+    if (cfg.multispeciesRhoYCommonLimiter == 1) {
+        static int s_rycl_call = 0;
+        const int interval = 200;
+        if ((s_rycl_call % interval) == 0) {
+            int psimin=0, ymin=0, ymax=0;
+            unsigned long long lt001=0, lt01=0, byrho=0, bysp=0, fb=0, ovs=0;
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&psimin, g_psiRhoY_min_scaled, sizeof(int)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&lt001,  g_psiRhoY_lt001, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&lt01,   g_psiRhoY_lt01,  sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&byrho,  g_rhoYMinByRho,  sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&bysp,   g_rhoYMinBySpecies, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&fb,     g_rhoYFallback,  sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&ovs,    g_speciesOvershoot, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&ymin,   g_Yface_min_scaled, sizeof(int)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&ymax,   g_Yface_max_scaled, sizeof(int)));
+            printf("RHOYLIM call=%d minPsiRhoY=%.4f lt0.01=%llu lt0.1=%llu minBy[rho=%llu sp=%llu] overshoot=%llu fallback=%llu Yface=[%.5f,%.5f]\n",
+                   s_rycl_call, (double)psimin*1e-6, lt001, lt01, byrho, bysp, ovs, fb,
+                   (double)ymin*1e-6, (double)ymax*1e-6);
+            // 次区間用にリセット (min/max は両端へ)。
+            const int big=2000000, nbig=-2000000; const unsigned long long z=0ULL;
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_psiRhoY_min_scaled, &big, sizeof(int)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_Yface_min_scaled,   &big, sizeof(int)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_Yface_max_scaled,   &nbig, sizeof(int)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_psiRhoY_lt001, &z, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_psiRhoY_lt01,  &z, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_rhoYMinByRho,  &z, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_rhoYMinBySpecies, &z, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_rhoYFallback,  &z, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_speciesOvershoot, &z, sizeof(unsigned long long)));
+        }
+        s_rycl_call++;
+    }
 
     // initialize
     CHECK_CUDA_ERROR(cudaMemset(var.c_d["res_ro"]  , 0.0, msh.nCells*sizeof(flow_float)));
@@ -184,7 +217,7 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         SLAU_d<<<dimGrid_normal_halo , cuda_cfg.dimBlock>>> (
             cfg.convMethod, cfg.limiter, slauVariant,
             cfg.lowMachPrecond, cfg.precondEps,
-            0,   /* Thornber 型再構成補正は不採用 (検証結果が負) */
+            cfg.lowMachThornber,
             cfg.gamma,
             spA, cnd, geom, st, reso, lim, grd
         ) ;

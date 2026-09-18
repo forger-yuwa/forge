@@ -17,9 +17,15 @@ def add(path, typ, dflt, required):
 #    最後の引数が YAML 上の節パス (例 "time.deltaT")。無いものは変数名から引く。
 VAR2PATH={'deltaT':'time.deltaT','last':'time.last','turb':'turbulence','cond':'condensation','ch':'physProp.chemistry',
           'physProp':'physProp','space':'space','out':'output','config':'(top)','time':'time','mesh':'mesh'}
-for m in re.finditer(r'get(Optional)?ValidatedValue<([^>]+)>\(\s*(\w+)\s*,\s*"([A-Za-z0-9_]+)"\s*(?:,\s*([^,\)]+))?\s*(?:,\s*"([^"]*)")?', src):
+# 第 1 引数は変数名 (deltaT) でも config["time"] 形でもありうる (2026-09-18: 後者を取りこぼして
+# nStepInner / nSubIterDualTime / bdfOrder が抜けていた)
+for m in re.finditer(r'get(Optional)?ValidatedValue<([^>]+)>\(\s*(\w+(?:\[\s*"[A-Za-z0-9_]+"\s*\])*)\s*,\s*"([A-Za-z0-9_]+)"\s*(?:,\s*([^,\)]+))?\s*(?:,\s*"([^"]*)")?', src):
     opt, typ, var, key, dflt, secstr = m.groups()
-    sec = (secstr or VAR2PATH.get(var, var)).strip()
+    if '[' in var:
+        inner = re.findall(r'"([A-Za-z0-9_]+)"', var)
+        sec = '.'.join(inner) if var.startswith('config') else VAR2PATH.get(var.split('[')[0], var.split('[')[0]) + '.' + '.'.join(inner)
+    else:
+        sec = (secstr or VAR2PATH.get(var, var)).strip()
     path = key if sec in ('(top)', '') else f'{sec}.{key}'
     add(path, typ.strip(), dflt, not opt)['how'].add('helper')
 # 2) 直接参照: config["a"]["b"]... / sec["key"]
