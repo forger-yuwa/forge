@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5" 
   meshFileName: "supercritical.h5"
   valueFileName: "input.h5"
 
@@ -10,8 +9,6 @@ solver: "KEEP_AUSM"
 #solver: "ROE"
 
 physProp:
-  isCompressible: 1 # 0:incomp, 1:compressible
-  ro : 1.2 # [kg/m3] ignored for compressible flow
   visc : 0.0025 #[Pa*s]
   thermCond: 0.0241 # [W/(mK)]
   cp : 1004.5 # [J/(kgK)]
@@ -19,7 +16,6 @@ physProp:
 
 time: 
   last: 
-    control: 0 # 0:nStep , 1:time base
     nStepOuter: 80000
     #nStep: 3
     time: 1.00 # [second]

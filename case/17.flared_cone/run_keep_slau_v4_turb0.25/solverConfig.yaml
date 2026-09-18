@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5" 
   meshFileName:  "flared_cone.v4.short.h5"
   #valueFileName:  "flared_cone.v4.short.h5"
   valueFileName:  "input.h5"
@@ -11,10 +10,8 @@ solver: "KEEP_SLAU" # SLAU, ROE, AUSM+, AUSM+UP
 #solver: "SLAU" # SLAU, ROE, AUSM+, AUSM+UP
 
 physProp:
-  isCompressible: 1 # 0:incomp, 1:compressible
   thermalMethod: 0 # 0:calorically perfect
   viscMethod: 1 # 0:use visc , 1:sutherland
-  ro : 1.2 # [kg/m3] ignored for compressible flow
   visc : 0.000018 #[Pa*s]
   thermCond: 0.0241 # [W/(mK)]
   cp : 1004.5 # [J/(kgK)]
@@ -22,7 +19,6 @@ physProp:
 
 time:
   last:
-    control: 0 # 0:nStep , 1:time base
     nStepOuter: 1000000
     #nStep: 120
     time: 1.00 # [second]

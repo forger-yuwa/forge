@@ -1,14 +1,11 @@
 mesh:
-  meshFormat: "hdf5"
   meshFileName: "nozzle_2d.h5"
   valueFileName: "nozzle_2d.h5"
 gpu: 1
 solver: "SLAU"
 physProp:
-  isCompressible: 1
   thermalMethod: 0
   viscMethod: 0          # 0: inviscid (Euler) — slip 壁で起動を安定化
-  ro : 1.2              # ignored for compressible
   visc : 0.0000175      # N2 ~ (Euler では未使用)
   thermCond: 0.0241
   cp : 1039.0           # N2: gamma*R/(gamma-1), R_N2=296.8
@@ -17,7 +14,6 @@ time:
   unsteady: 0
   dualTime: 0
   last:
-    control: 0
     nStepOuter: 12000
     time: 1.00
   deltaT:

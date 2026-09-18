@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5"
   discretization: "node"
   meshFileName: "hill_des_160x100x60.h5"
   valueFileName: "hill_des_160x100x60.h5" # run_diag_dt2e6_nsub10 res_500 (最発達場) を移植
@@ -20,11 +19,9 @@ bodyForceCtrlTarget: 44.1248  # <ρu_x>_V = ρ0·Ub·A_crest·Lx/V (Ub=52)
 bodyForceCtrlRelax: 0.02
 
 physProp:
-  isCompressible: 1
   isAxisymmetric: 0
   thermalMethod: 0    # CPG
   viscMethod: 0       # 定数粘性
-  ro : 1.177
   visc : 1.617e-4     # nu=1.374e-4 → Re=Ub*h/nu=10595
   thermCond: 0.2256   # Pr=0.72
   cp : 1004.5
@@ -35,7 +32,6 @@ time:
   dualTime: 1         # 音響 CFL (y1=2.8e-5m, dt_ac~7e-8) を回避し物理精度 dt で回す
   nSubIterDualTime: 20
   last:
-    control: 0
     nStepOuter: 150000 # 本番 baseline: 62 FT (spin-up ~15 FT + 統計 ~47 FT), ~35h
     time: 1.00
   deltaT:

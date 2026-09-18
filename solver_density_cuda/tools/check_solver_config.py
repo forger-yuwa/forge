@@ -11,7 +11,6 @@
   - 凝縮 dual-time で `passiveScalarScheme 0` (モーメントに BDF 物理時間項が付かない)
   - `speciesFaceReconstruction` ≥ 2 と `speciesImplicitCoupling 0` の組 (定常で発散)
   - solver が読まないキー・**誤った節に書かれたキー** (WARN) と、起動時に拒否されるキー (FAIL)
-  - 段階移行 (S1) 中のキー: まだ受理されるが、いずれ起動時エラーになるもの (WARN)
 
 使い方: check_solver_config.py RUN_DIR|solverConfig.yaml [...]   (VERDICT PASS/WARN/FAIL, exit 0/0/1)
 WARN は「意図的ならよい」もの、FAIL は「まず直すべき」もの。
@@ -26,16 +25,6 @@ def load(path):
     with open(p) as f:
         return p, (yaml.safe_load(f) or {})
 
-
-# 段階移行 S1 のキー (plan config-key-pruning §4.1)。**まだ受理される**ので `values` にも入っており、
-# 完全修飾パスの照合では素通りしてしまう。投入前に気づけるよう、ここで明示的に WARN にする。
-STAGED_KEYS = {
-    'physProp.isCompressible': 'solver はこの値をどこでも読まない (圧縮性は常に有効)',
-    'physProp.ro': 'solver はこの値をどこでも読まない (密度は EOS で決まる)',
-    'time.last.control': 'solver はこの値をどこでも読まない (終了条件は nStepOuter のみ)',
-    'mesh.meshFormat': 'solver が受け付ける形式は hdf5 だけで、省略すると hdf5 になる',
-    'time.deltaT.detectNaNInterval': 'トップレベルの detectNaNInterval に書くこと (両方あるとトップレベルが優先される)',
-}
 
 _SPEC = None
 
@@ -87,9 +76,7 @@ def unknown_keys(y):
         for k, v in node.items():
             ks = str(k)
             p = '.'.join(path + [ks])
-            if p in STAGED_KEYS:         # まだ受理されるが、いずれ起動時エラーになるキー (読みを外したものも含む)
-                warns.append((p, STAGED_KEYS[p] + '。今は受理するが config から外すこと (段階移行 S1)'))
-            elif p in rejected:
+            if p in rejected:
                 fails.append((p, 'solver が起動時に拒否するキー (削除済み・改名済み)。recommended-settings.md §9.1 の移行先を見ること'))
             elif p in values:
                 continue                     # 値キー: 中身 (リスト・マップ) には立ち入らない

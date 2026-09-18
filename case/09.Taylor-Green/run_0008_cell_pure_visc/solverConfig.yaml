@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5"
   meshFileName: "Taylor-Green.h5"
   valueFileName: "Taylor-Green.h5"
   discretization: "cell"   # cell-centered FVM (従来)
@@ -9,10 +8,8 @@ gpu: 1 # 0:off , 1:on
 solver: "KEEP"   # flux スキーム = KEEP (convMethod は無関係)
 
 physProp:
-  isCompressible: 1   # 0:incomp, 1:compressible
   thermalMethod: 0    # 0: calorically perfect
   viscMethod: 0       # 0: 定数粘性 (= visc を使用)
-  ro: 1.4             # ignored for compressible
   visc: 0.0025        # [Pa*s] 定数粘性
   thermCond: 0.0241   # [W/(mK)]
   cp: 0.4
@@ -25,7 +22,6 @@ time:
   unsteady: 1   # 時間精度 (uniform global dt)
   dualTime: 0
   last:
-    control: 0          # 0:nStep , 1:time base
     nStepOuter: 2000
     time: 1.00
   deltaT:

@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5" 
   meshFileName: "half_sphere.h5"
 
 gpu: 0 # 0:off , 1:on
@@ -7,8 +6,6 @@ gpu: 0 # 0:off , 1:on
 solver: "smac" # smac , simple , simplec , fractionalStep
 
 physProp:
-  isCompressible: 1 # 0:incomp, 1:compressible
-  ro : 1.4 # [kg/m3] ignored for compressible flow
   visc : 0.0025 #[Pa*s]
   thermCond: 0.0241 # [W/(mK)]
   cp : 1004.5 # [J/(kgK)]
@@ -16,7 +13,6 @@ physProp:
 
 time: 
   last: 
-    control: 0 # 0:nStep , 1:time base
     nStepOuter: 100
     time: 1.00 # [second]
   deltaT:  

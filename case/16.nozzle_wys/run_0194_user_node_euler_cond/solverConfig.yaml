@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5"
   discretization: "node"
   isAxisymmetric: 0
   nodeWallDirichlet: 1
@@ -8,12 +7,10 @@ mesh:
 gpu: 1
 solver: "SLAU"
 physProp:
-  isCompressible: 1
   thermalMethod: 2
   viscMethod: 0
   visc: 0.0
   thermCond: 0.0
-  ro: 1.2
   cp: 1039.0
   gamma: 1.4
   species: ["MIXDRY", "H2O"]
@@ -22,7 +19,7 @@ physProp:
 time:
   unsteady: 0
   dualTime: 0
-  last: {control: 0, nStepOuter: 12000}
+  last: {nStepOuter: 12000}
   deltaT: {control: 1, dt: 0.00001, cfl: 2.0, cfl_pseudo: 2.0, implicitRelax: 1.0, blockDPLUR: 1,
            dt_min: 0.00000001, dt_max: 1.0, detectNaN: 1}
   outStepInterval: 3000

@@ -4,7 +4,6 @@
 #   気体: 論文物性 gamma=1.274, R=370 J/kgK (cp = gamma*R/(gamma-1) = 1720.4)
 #   procedures/divergence-and-startup.md の段階起動 第1段に準拠
 mesh:
-  meshFormat: "hdf5"
   discretization: "node"
   bndFirstOrder: 1
   nodeWallViscGradFlux: 1
@@ -16,11 +15,9 @@ gpu: 1
 solver: "SLAU"
 
 physProp:
-  isCompressible: 1
   isAxisymmetric: 0
   thermalMethod: 0
   viscMethod: 0
-  ro: 2.8065
   visc: 0.0          # Euler (第1段)。粘性は第2段以降で入れる
   thermCond: 0.0
   cp: 1720.4
@@ -30,7 +27,6 @@ time:
   unsteady: 0
   dualTime: 0
   last:
-    control: 0
     nStepOuter: 10000
   deltaT:
     control: 1

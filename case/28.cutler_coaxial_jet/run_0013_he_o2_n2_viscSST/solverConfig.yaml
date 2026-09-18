@@ -1,15 +1,12 @@
 mesh:
-  meshFormat: "hdf5"
   meshFileName: "coaxial.h5"
   valueFileName: "restart.h5"
 gpu: 1
 solver: "SLAU"
 physProp:
-  isCompressible: 1
   isAxisymmetric: 1
   thermalMethod: 2
   viscMethod: 2                      # まず非粘性で 3 成分 BC + 組成移流を確認
-  ro : 1.2
   visc : 1.8e-5
   thermCond: 0.0257
   cp : 1004.5
@@ -22,7 +19,6 @@ time:
   unsteady: 0
   dualTime: 0
   last:
-    control: 0
     nStepOuter: 120000
   deltaT:
     control: 1

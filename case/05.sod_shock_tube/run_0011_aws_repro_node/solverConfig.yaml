@@ -1,6 +1,5 @@
 mesh:
   discretization: "node"
-  meshFormat: "hdf5"
   meshFileName: "sod3d.h5"
   valueFileName: "sod3d.h5"
 
@@ -9,10 +8,8 @@ gpu: 1
 solver: "SLAU"
 
 physProp:
-  isCompressible: 1
   thermalMethod: 0   # calorically perfect (reference, gamma=1.4 const)
   viscMethod: 0      # inviscid (Euler)
-  ro : 1.2
   visc : 0.0
   thermCond: 0.0
   cp : 1038.8        # N2 cp at ~300K (R=296.8, gamma=1.4)
@@ -22,7 +19,6 @@ time:
   unsteady: 1
   dualTime: 0
   last:
-    control: 0        # step-based stop (fixed dt -> exact final time)
     nStepOuter: 200  # 1000 * 2.5e-7 = 2.5e-4 s
     time: 0.00025
   deltaT:

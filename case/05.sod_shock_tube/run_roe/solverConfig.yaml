@@ -1,5 +1,4 @@
 mesh:
-  meshFormat: "hdf5" 
   meshFileName: "1D_shock_tube.h5"
   valueFileName: "1D_shock_tube.h5"
   #meshFormat: "hdf5" 
@@ -14,8 +13,6 @@ solver: "ROE" # smac , simple , simplec , fractionalStep
 #solver: "SLAU" # smac , simple , simplec , fractionalStep
 
 physProp:
-  isCompressible: 1 # 0:incomp, 1:compressible
-  ro : 1.4 # [kg/m3] ignored for compressible flow
   visc : 0.0000 #[Pa*s]
   thermCond: 0.0000 # [W/(mK)]
   cp : 1005.0 # [J/(kgK)]
@@ -23,7 +20,6 @@ physProp:
 
 time: 
   last: 
-    control: 0 # 0:nStep , 1:time base
     nStepOuter: 1000 
     #nStep: 1
     #nStep: 2

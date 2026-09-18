@@ -1,15 +1,12 @@
 mesh:
-  meshFormat: "hdf5"
   meshFileName: "coaxial.h5"
   valueFileName: "coaxial.h5"
 gpu: 1
 solver: "SLAU"
 physProp:
-  isCompressible: 1
   isAxisymmetric: 1
   thermalMethod: 0
   viscMethod: 0
-  ro : 1.2
   visc : 1.8e-5
   thermCond: 0.0257
   cp : 1004.5
@@ -18,7 +15,6 @@ time:
   unsteady: 0
   dualTime: 0
   last:
-    control: 0
     nStepOuter: 100
   deltaT:
     control: 1
