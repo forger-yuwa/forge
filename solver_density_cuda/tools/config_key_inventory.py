@@ -249,8 +249,9 @@ def main():
                      'kind': 'removed' if path in gone else d['kind'],
                      'default': ('(required)' if d['required'] else d['default']),
                      'required': d['required'], 'how': sorted(d['how']), 'member': d['member'],
-                     'removed': path in gone, 'written_runs': written[path], 'nondefault_runs': used[path],
-                     'default_known': not d['required'] and d['default'] not in (None, '?', ''),
+                     'removed': path in gone, 'written_runs': written[path],
+                     'nondefault_runs': (used[path] if ((not d['required']) and d['default'] not in (None, '?', '')) else None),
+                     'default_known': (not d['required']) and d['default'] not in (None, '?', ''),
                      'values': sorted(vals[path])[:8], 'in_docs': key in docs, 'in_recommended': key in rec})
 
     out = {'nconf': nconf, 'ntrees': len(trees), 'nread_fail': len(nfail), 'ndup_conflict': dup_conflict, 'rows': rows}
@@ -267,9 +268,11 @@ def main():
     print(f'run config {nconf} 本 ({len(trees)} worktree, 内容違いの同名 {dup_conflict} 本を別設定として計上)')
     if nfail:
         print(f'**読み取り失敗 {len(nfail)} 本 (集計は不完全)**: ' + ', '.join(p for p, _ in nfail[:5]))
-    print(f"どの run にも書かれていない: {len([r for r in live if r['written_runs'] == 0])}")
-    print(f"書かれているが既定値のみ: {len([r for r in live if r['written_runs'] and r['nondefault_runs'] == 0])}")
-    print(f"既定値が解決できず非既定を判定できない: {len([r for r in live if not r['default_known']])}")
+    known = [r for r in live if r['default_known']]
+    print(f"必須キー (既定値なし): {len([r for r in live if r['required']])}")
+    print(f"既定値が解決できず非既定を判定できない: {len([r for r in live if not r['default_known'] and not r['required']])}")
+    print(f"どの run にも書かれていない (既定値が分かるもの): {len([r for r in known if r['written_runs'] == 0])}")
+    print(f"書かれているが既定値のみ (既定値が分かるもの): {len([r for r in known if r['written_runs'] and r['nondefault_runs'] == 0])}")
     print(f"procedures・methods に一度も出てこない: {len([r for r in live if not r['in_docs']])}")
     if jpath:
         print(f'詳細: {jpath}')
@@ -280,7 +283,8 @@ def main():
     if '--all' in sys.argv:
         print('\n-- 全パス --')
         for r in rows:
-            print(f"  {r['kind']:8s} {r['path']:46s} default {str(r['default']):20s} 記載 {r['written_runs']:5d} 非既定 {r['nondefault_runs']:5d}")
+            nd = '  不明' if r['nondefault_runs'] is None else f"{r['nondefault_runs']:6d}"
+            print(f"  {r['kind']:8s} {r['path']:46s} default {str(r['default']):20s} 記載 {r['written_runs']:5d} 非既定 {nd}")
 
 
 if __name__ == '__main__':

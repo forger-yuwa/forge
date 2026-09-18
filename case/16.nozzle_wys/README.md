@@ -56,6 +56,7 @@ Wyslouzil et al., *J. Chem. Phys.* **113**, 7317 (2000)
 | `run_0005_slau_3d_visc` | 3D 粘性 層流 | 全壁 no-slip | **1.937** | 14.0 kPa | active. 2D 層流とほぼ同等 |
 | `run_0004_slau_2d_sst` | 2D 乱流 SST | 輪郭no-slip / fb slip | **1.883** | 15.3 kPa | active. 乱流 BL でさらに M 低下。**乱流熱伝導修正後 T≤Tt** |
 | `run_0006_slau_3d_sst` | 3D 乱流 SST | 全壁 no-slip | **1.534** | 25.4 kPa | active. 4壁 no-slip の閉塞で M 大幅低下。T≤Tt |
+| `run_0502_reach_sct_default` / `run_0503_reach_sct_turbkey` / `run_0504_reach_sct_physprop` | `turbulence.turbulentSchmidt` が**実際に消費先へ届くか**の到達確認 (plan [config-key-pruning](../../plans/active/config-key-pruning.md) §6.4', codex plan-3 M4)。`run_0484` (SST + `viscMethod 1` + トレーサ) を 500 step にし、Sc_t 既定 0.7 / `turbulence.turbulentSchmidt: 0.2` / `physProp.Sc_t: 0.2` の 3 本 | 0.2 にするとトレーサ `roXi` が既定から**相対 L2 1.41e-1** 動き、2 つの綴りどうしの差は **5.6e-6**。**別名として等価で、値は届いている** | ref (到達確認) |
 
 exit Mach の単調序列 (非粘性 1.99 > 層流 1.94 > 2D乱流 1.88 > 3D乱流 1.53) は
 境界層変位による有効面積減少として物理的に整合。中心線静温はいずれも全温 293 K 以下。
