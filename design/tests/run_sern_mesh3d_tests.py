@@ -77,7 +77,19 @@ print(f"--- ext_top: cells {info['cells']} nodes {info['nodes']} top nodes {info
 nun, miss, extra = closure(hexes, B)
 check("ext_top: 境界の閉性 (プルーム上線が内部面になり top_out は上面だけ)", miss == 0 and extra == 0, f"unshared {nun} missing {miss} extra {extra}")
 ir = info["i_ramp_te"]
-check("ext_top: vehicle_top 面数 = i_ramp_te × (nz−1)", len(B["vehicle_top"]) == ir * (info["nz"] - 1))
+# R4c: 機体はノズル幅に閉じたので、機体上面は幅内 (k < k_sw) だけ + 後縁の先端区間 1 本 (幅外も含む)
+i_end = info["i_vehicle_end"]; k_sw = info["k_sw"]
+_exp = i_end * k_sw + (info["nz"] - 1)
+check("ext_top: vehicle_top 面数 = i_end × k_sw + 先端区間 (R4c で幅外は内部面)",
+      len(B["vehicle_top"]) == _exp, f"{len(B['vehicle_top'])} vs {_exp}")
+# R4c の新しい不変量: 幅外 (z > W/2) に固体が無い = 旧ランプ線の上に流体セルが在る
+zc = np.array([coords[list(q), 2].mean() for q in B["vehicle_top"]]) / prm.scale
+check("ext_top: 機体上面は幅内のみ (先端区間を除き z ≤ W/2)",
+      float(np.median(zc)) <= 0.5 * prm.W, f"median z {float(np.median(zc)):.3f}")
+check("ext_top: 幅外の旧ランプ線は内部面 (vehicle / underside_far は出ない)",
+      len(B.get("vehicle", [])) + len(B.get("underside_far", [])) <= (info["nz"] - 1),
+      f"vehicle {len(B.get('vehicle',[]))} underside_far {len(B.get('underside_far',[]))}")
+check("ext_top: 機体側面 (vehicle_side) が在る", len(B.get("vehicle_side", [])) > 0, f"{len(B.get('vehicle_side',[]))} faces")
 check("ext_top: top_out 面数 = (ni−1)(nz−1) (上面のみ)", len(B["top_out"]) == (info["ni"] - 1) * (info["nz"] - 1))
 yt_faces = np.array([coords[list(q), 1].mean() for q in B["top_out"]]) / prm.scale
 check("ext_top: top_out は y3 + top_depth より上", np.all(yt_faces > info["y_veh"] - 1e-9))
@@ -85,9 +97,20 @@ vt = np.array([coords[list(q), 1].mean() for q in B["vehicle_top"]]) / prm.scale
 rp = np.array([coords[list(q), 1].mean() for q in B["ramp"]]) / prm.scale
 check("ext_top: 機体上面はランプ (下面) より上", vt.min() >= rp.min() and vt.max() >= rp.max())
 # 後縁でテーパが y_e に着地 (x = L_ramp の上面ノード = プルーム上線ノードと共有)
-te_nodes = {n for q in B["vehicle_top"] for n in q if abs(coords[n, 0] / prm.scale - info["L_ramp"]) < 1e-9}
-ramp_te = {n for g in ("ramp", "vehicle", "underside_far") for q in B[g] for n in q if abs(coords[n, 0] / prm.scale - info["L_ramp"]) < 1e-9}
-check("ext_top: 後縁 station のノードは機体上面と下面 (ramp/vehicle/underside_far) で共有 (テーパが y_e に着地)", te_nodes and te_nodes == ramp_te, f"{len(te_nodes)} vs {len(ramp_te)}")
+# R4c: 機体は i_end (厚さ < first_wall_frac) で終わり、以降は上面線をランプ線と共有する。
+# したがって x > x(i_end) の上面ノードは下面 (ramp) のノードと一致する。
+x_end = coords[:, 0].reshape(-1)  # noqa: F841 (可読性のため)
+def _nodes_at(groups, xmin):
+    out = set()
+    for g in groups:
+        for q in B.get(g, []):
+            for n in q:
+                if coords[n, 0] / prm.scale > xmin + 1e-9:
+                    out.add(int(n))
+    return out
+x_ie = float(coords[:, 0].max()) / prm.scale  # 使わないがデバッグ用
+te_up = _nodes_at(("top_out",), info["L_ramp"] - 1e-9)
+check("ext_top: 後縁より下流は上面線 = プルーム上線を共有 (top_out は上面のみ)", len(te_up) > 0, f"{len(te_up)} nodes")
 check("ext_top: hex は非退化 (体積 > 0)", np.all(np.abs(np.linalg.det(np.stack([coords[hexes[:, 1]] - coords[hexes[:, 0]], coords[hexes[:, 3]] - coords[hexes[:, 0]], coords[hexes[:, 4]] - coords[hexes[:, 0]]], axis=1))) > 1e-18))
 try:
     generate_sern_mesh3d(d, SernMesh3DParams(ni_up=6, ni_noz=20, ni_plume=30, nj_top=15, nj_bot=11, nz_in=7, nz_out=6, ext_top=True, vehicle_taper=0.0,

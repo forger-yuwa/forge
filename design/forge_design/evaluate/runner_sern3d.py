@@ -54,10 +54,16 @@ def _bcond_config(p, st):
             + f"sym: {{physID: {P['sym']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
             + f"side_far: {{physID: {P['side_far']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
             + wall("sidewall_in") + wall("sidewall_out")
-            # R2: 幅外の機体下面 (vehicle) は ramp と同じ壁種・壁出力だが帳簿は別枠 (forces3d)
-            + (wall("vehicle") if int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0 else "")
+            # R4c: 機体側面 (z = W/2, x ≤ L_ramp)。ダクト側壁とは別タグ・別帳簿
+            + (wall("vehicle_side") if (int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0
+                                        and p.raw.get("mesh3d", {}).get("vehicle_side", True)
+                                        and p.raw.get("mesh3d", {}).get("ext_top", p.raw.get("mesh", {}).get("ext_top", 0))) else "")
+            # R2: 幅外の機体下面 (vehicle、旧トポロジのみ) は ramp と同じ壁種だが帳簿は別枠 (forces3d)
+            + (wall("vehicle") if (int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0
+                                   and not p.raw.get("mesh3d", {}).get("vehicle_side", True)) else "")
             + (f"underside_far: {{physID: {P['underside_far']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
-               if p.raw.get("mesh3d", {}).get("W_vehicle") is not None else "")
+               if (p.raw.get("mesh3d", {}).get("W_vehicle") is not None
+                   and not p.raw.get("mesh3d", {}).get("vehicle_side", True)) else "")
             # R4: 機体上面 (ext_top)。2D の vehicle と同じく slip・壁出力 (帳簿外、診断)
             + (f"vehicle_top: {{physID: {P['vehicle_top']}, kind: slip, outputHDFflg: 1, ints: , floats: }}\n" if int(m2_ext(p)) else ""))
 
@@ -99,7 +105,8 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
                            x_out_extra=float(m2.get("x_out_extra", 2.0)), bot_depth=float(m2.get("bot_depth", 3.0)),
                            first_wall_frac=float(m.get("first_wall_frac", m2.get("first_wall_frac", 4e-3))), first_z_frac=float(m.get("first_z_frac", 4e-3)),
                            cowl_thickness=float(m.get("cowl_thickness", m2.get("cowl_thickness", 0.0))),
-                           ext_top=bool(int(m2.get("ext_top", 0))), top_depth=float(m2.get("top_depth", 2.0)), nj_ext_top=int(m2.get("nj_ext_top", 41)),
+                           ext_top=bool(int(m2.get("ext_top", 0))),
+                           vehicle_side=bool(m.get("vehicle_side", True)), nj_vside=int(m.get("nj_vside", 17)), top_depth=float(m2.get("top_depth", 2.0)), nj_ext_top=int(m2.get("nj_ext_top", 41)),
                            vehicle_clearance=float(m2.get("vehicle_clearance", 0.02)), first_top_frac=float(m2.get("first_top_frac", 0.02)),
                            vehicle_taper=float(m2.get("vehicle_taper", 0.0)), vehicle_wedge_deg=float(m2.get("vehicle_wedge_deg", 3.0)),
                            ramp_fillet=float(m2.get("ramp_fillet", 0.0)),

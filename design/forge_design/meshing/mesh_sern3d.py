@@ -24,7 +24,7 @@ from .mesh2d import _radial_fracs
 from .mesh_sern import _cluster_stations, _tanh_two_sided
 
 PHYS_SERN3D = {"inlet_nozzle": 1, "inlet_ext": 2, "outlet": 3, "ramp": 4, "cowl_in": 5, "cowl_out": 6, "bottom": 7,
-               "top_out": 8, "sym": 9, "side_far": 10, "sidewall_in": 11, "sidewall_out": 12, "fluid": 13, "vehicle": 14, "vehicle_top": 15, "underside_far": 16}
+               "top_out": 8, "sym": 9, "side_far": 10, "sidewall_in": 11, "sidewall_out": 12, "fluid": 13, "vehicle": 14, "vehicle_top": 15, "underside_far": 16, "vehicle_side": 17}
 
 
 @dataclass
@@ -45,6 +45,10 @@ class SernMesh3DParams:
     ext_top: bool = False
     top_depth: float = 2.0
     nj_ext_top: int = 41
+    vehicle_side: bool = True    # True (R4c, 2026-09-19): z > W/2 の旧ランプ線〜旧機体上面線を**流体で埋め**、
+                                 # z = W/2 を機体側面 (vehicle_side, no-slip) にする。False = 旧挙動 (幅外にも
+                                 # ノズル形状の固体が残る = 自由流の中に架空の物体。codex plan レビュー C1)
+    nj_vside: int = 17           # 機体側面バンドの y 方向点数
     vehicle_clearance: float = 0.02
     first_top_frac: float = 0.02
     vehicle_taper: float = 0.0
@@ -214,6 +218,8 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
             nm = "inlet_ext" if (j < jm or k >= k_sw) else "inlet_nozzle"
             B[nm].append((node(0, j, k, sd), node(0, j + 1, k, sd), node(0, j + 1, k + 1, sd1), node(0, j, k + 1, sd1)))
             B["outlet"].append((node(ni - 1, j, k, sd), node(ni - 1, j, k + 1, sd1), node(ni - 1, j + 1, k + 1, sd1), node(ni - 1, j + 1, k, sd)))
+    vs_on = bool(prm.ext_top and prm.vehicle_side and not no_outer)
+    i_end_tag = _vehicle_top_line(xs, yt, L_ramp, y_e, prm)[3] if vs_on else 0
     for i in range(ni - 1):
         for k in range(nz - 1):
             sdk = "up_in" if k < k_sw else "up_out"; sdk1 = "up_in" if k + 1 < k_sw or k + 1 == k_sw and k < k_sw else "up_out"
@@ -225,10 +231,12 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
                     B["top_out"].append(top)      # ext_top ではプルーム上線は top バンドとの内部面
             elif k < k_sw:                       # ノズル幅内 (z ≤ W/2) = ramp
                 B["ramp"].append(top)
+            elif vs_on and i + 1 <= i_end_tag:
+                pass                             # R4c: 幅外は機体を置かないので、この面は vehicle_side バンドとの**内部面**
             elif prm.W_vehicle is None or zm <= 0.5 * float(prm.W_vehicle):
-                B["vehicle"].append(top)         # 幅外の機体下面 (R2)
+                B["vehicle"].append(top)         # 幅外の機体下面 (R2、旧挙動)
             else:
-                B["underside_far"].append(top)   # 機体幅の外 (z > W_vehicle/2) = 遠方境界の産物。slip 壁・帳簿外 (2026-09-13: top_out から分離)
+                B["underside_far"].append(top)   # 機体幅の外 (z > W_vehicle/2) = 遠方境界の産物。slip 壁・帳簿外
             if i + 1 <= i_te and k + 1 <= k_sw:
                 B["cowl_in"].append((node(i, jm, k, "up_in"), node(i + 1, jm, k, "up_in"), node(i + 1, jm, k + 1, "up_in"), node(i, jm, k + 1, "up_in")))
                 B["cowl_out"].append((base(i, jm, k), base(i, jm, k + 1), base(i + 1, jm, k + 1), base(i + 1, jm, k)))
@@ -246,7 +254,10 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
                 B["sidewall_out"].append((node(i, j, k_sw, "up_out"), node(i, j + 1, k_sw, "up_out"), node(i + 1, j + 1, k_sw, "up_out"), node(i + 1, j, k_sw, "up_out")))
     ext = {"ext_top": bool(prm.ext_top)}
     if prm.ext_top:
-        coords, hexes = _add_ext_top3d(coords, hexes, B, xs, yt, zs, L_ramp, y_e, node, NJ, prm, ext)
+        coords, hexes, top_fn = _add_ext_top3d(coords, hexes, B, xs, yt, zs, L_ramp, y_e, node, NJ, prm, ext,
+                                               k_sw=k_sw, vs_on=bool(prm.vehicle_side and not no_outer))
+        if prm.vehicle_side and not no_outer:
+            coords, hexes = _add_vehicle_side3d(coords, hexes, B, xs, yt, zs, k_sw, node, top_fn, NJ, prm, ext)
     coords *= prm.scale
     info = {"ni": ni, "NJ": NJ, "nz": nz, "jm": jm, "k_sw": k_sw, "i_te": i_te, "i_sw": i_sw, "cells": int(hexes.shape[0]),
             "nodes": int(coords.shape[0]), "W": prm.W, "Z_far": float(zs[-1]), "L_sw": L_sw, "cowl_thickness": t_c, "x_out": x_out, "y_bot": y_bot,
@@ -255,15 +266,11 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
     return coords, hexes, B, info, y_mid
 
 
-def _add_ext_top3d(coords, hexes, B, xs, yt, zs, L_ramp, y_e, node, NJ, prm, ext):
-    """ランプ側外部流ブロック (R4): 2D `_add_ext_top` (テーパ版, h_base = 0) を z 一様に押し出す。
-    上面線 y3(x): x ≤ x0 = y_veh (ランプ最大 y + クリアランス)、テーパ区間は 3 次エルミートで後縁 (y_e) に θ_e で着地、
-    x > L_ramp はプルーム上線 (共有ノード)。境界: vehicle_top (x ≤ L_ramp の下面), top_out (上面), inlet_ext / outlet / sym / side_far。"""
-    from .mesh2d import _radial_fracs  # noqa: F401  (既存 import と同じ経路)
-    ni, nz, njT = len(xs), len(zs), int(prm.nj_ext_top)
-    if not prm.vehicle_taper > 0.0:
-        raise ValueError("mesh_sern3d ext_top は vehicle_taper > 0 (テーパ版) のみ (鉛直 base + wake は node で発散するので未実装)")
-    k_r = int(np.argmin(np.abs(xs - L_ramp))); assert abs(xs[k_r] - L_ramp) < 1e-12
+def _vehicle_top_line(xs, yt, L_ramp, y_e, prm):
+    """機体上面線 y3(x) と、後縁 (k_r)・側面バンドの打ち切り station (i_end) を返す。
+    タグ付けが `_add_ext_top3d` より前に走るので、両者で同じ値を使えるよう切り出してある (R4c)。"""
+    ni = len(xs)
+    k_r = int(np.argmin(np.abs(xs - L_ramp)))
     clr = max(float(prm.vehicle_clearance), 3.0 * float(prm.first_top_frac))
     y_veh = float(yt[:k_r + 1].max()) + clr
     taper_len = float(prm.vehicle_taper) * L_ramp
@@ -271,25 +278,46 @@ def _add_ext_top3d(coords, hexes, B, xs, yt, zs, L_ramp, y_e, node, NJ, prm, ext
     m_e = (yt[k_r] - yt[k_r - 1]) / max(xs[k_r] - xs[k_r - 1], 1e-12)
     m1 = min(m_e, 0.0) - np.tan(np.radians(float(prm.vehicle_wedge_deg)))
     _s = np.clip((xs - x0) / taper_len, 0.0, 1.0)
-    y3 = ((2.0 * _s ** 3 - 3.0 * _s ** 2 + 1.0) * y_veh + (-2.0 * _s ** 3 + 3.0 * _s ** 2) * y_e + (_s ** 3 - _s ** 2) * taper_len * m1)
+    y3 = ((2.0 * _s ** 3 - 3.0 * _s ** 2 + 1.0) * y_veh + (-2.0 * _s ** 3 + 3.0 * _s ** 2) * y_e
+          + (_s ** 3 - _s ** 2) * taper_len * m1)
     y3 = np.where(xs < x0, y_veh, y3)
     y3 = np.maximum(y3, yt + np.clip(np.tan(np.radians(float(prm.vehicle_wedge_deg))) * (L_ramp - xs), 0.0, clr))
     y3[k_r] = y_e
-    y3 = np.where(np.arange(ni) <= k_r, y3, yt)          # 後縁より下流はプルーム上線 (共有)
+    y3 = np.where(np.arange(ni) <= k_r, y3, yt)
+    thk = np.where(np.arange(ni) <= k_r, y3 - yt, -1.0)
+    ok = np.where(thk > float(prm.first_wall_frac))[0]
+    i_end = int(ok[-1]) if len(ok) else 0
+    # i_end より下流は厚さ 0 のスリットになり、座標一致ノードとゼロ面積の退化面を生む
+    # (2D が `cowl_thickness` で避けているのと同じ病)。機体後縁を i_end の鈍頭 (厚さ first_wall_frac)
+    # で終わらせ、以降は上面線をランプ線と**共有**する (R4c)
+    y3 = np.where(np.arange(ni) <= i_end, y3, yt)
+    return y3, y_veh, k_r, i_end
+
+
+def _add_ext_top3d(coords, hexes, B, xs, yt, zs, L_ramp, y_e, node, NJ, prm, ext, k_sw=None, vs_on=False):
+    """ランプ側外部流ブロック (R4): 2D `_add_ext_top` (テーパ版, h_base = 0) を z 一様に押し出す。
+    上面線 y3(x): x ≤ x0 = y_veh (ランプ最大 y + クリアランス)、テーパ区間は 3 次エルミートで後縁 (y_e) に θ_e で着地、
+    x > L_ramp はプルーム上線 (共有ノード)。境界: vehicle_top (x ≤ L_ramp の下面), top_out (上面), inlet_ext / outlet / sym / side_far。"""
+    from .mesh2d import _radial_fracs  # noqa: F401  (既存 import と同じ経路)
+    ni, nz, njT = len(xs), len(zs), int(prm.nj_ext_top)
+    if not prm.vehicle_taper > 0.0:
+        raise ValueError("mesh_sern3d ext_top は vehicle_taper > 0 (テーパ版) のみ (鉛直 base + wake は node で発散するので未実装)")
+    y3, y_veh, k_r, i_end = _vehicle_top_line(xs, yt, L_ramp, y_e, prm)
+    assert abs(xs[k_r] - L_ramp) < 1e-12
     N0 = coords.shape[0]
-    n_own0 = k_r * nz                                     # j=0 を自前で持つ (i < k_r) × z
+    n_own0 = (i_end + 1) * nz                             # j=0 を自前で持つ (i ≤ i_end) × z
     N_topj = ni * (njT - 1) * nz
 
     def top(i, j, k):
-        if j == 0:
-            return N0 + i * nz + k if i < k_r else node(i, NJ - 1, k, "up_out")
+        if j == 0:                                   # i > i_end は機体が尽きているのでランプ線と共有
+            return N0 + i * nz + k if i <= i_end else node(i, NJ - 1, k, "up_out")
         return N0 + n_own0 + ((i * (njT - 1)) + (j - 1)) * nz + k
     new = np.zeros((n_own0 + N_topj, 3))
     s_t = _geom_start3(njT, min(prm.first_top_frac / prm.top_depth, 0.5))
     for i in range(ni):
         yy = y3[i] + s_t * prm.top_depth
         for k in range(nz):
-            if i < k_r:
+            if i <= i_end:
                 new[top(i, 0, k) - N0] = (xs[i], y3[i], zs[k])
             for j in range(1, njT):
                 new[top(i, j, k) - N0] = (xs[i], yy[j], zs[k])
@@ -304,7 +332,9 @@ def _add_ext_top3d(coords, hexes, B, xs, yt, zs, L_ramp, y_e, node, NJ, prm, ext
     B.setdefault("vehicle_top", [])
     for i in range(ni - 1):
         for k in range(nz - 1):
-            if i + 1 <= k_r:                              # 機体上面 (x ≤ L_ramp)
+            # 機体上面 (x ≤ L_ramp)。R4c で機体をノズル幅に閉じたので、幅外 (k ≥ k_sw) は
+            # vehicle_side バンドとの**内部面**になる (壁ではない)
+            if i <= i_end and not (vs_on and k >= k_sw and i + 1 <= i_end):
                 B["vehicle_top"].append((top(i, 0, k), top(i, 0, k + 1), top(i + 1, 0, k + 1), top(i + 1, 0, k)))
             B["top_out"].append((top(i, njT - 1, k), top(i + 1, njT - 1, k), top(i + 1, njT - 1, k + 1), top(i, njT - 1, k + 1)))
         for j in range(njT - 1):
@@ -314,8 +344,79 @@ def _add_ext_top3d(coords, hexes, B, xs, yt, zs, L_ramp, y_e, node, NJ, prm, ext
         for j in range(njT - 1):
             B["inlet_ext"].append((top(0, j, k), top(0, j + 1, k), top(0, j + 1, k + 1), top(0, j, k + 1)))
             B["outlet"].append((top(ni - 1, j, k), top(ni - 1, j, k + 1), top(ni - 1, j + 1, k + 1), top(ni - 1, j + 1, k)))
-    ext.update({"nj_ext_top": njT, "y_veh": y_veh, "i_ramp_te": int(k_r), "vehicle_taper": float(prm.vehicle_taper),
+    ext.update({"nj_ext_top": njT, "y_veh": y_veh, "_y3": y3, "_k_r": int(k_r), "_i_end": i_end, "i_vehicle_end": int(i_end), "i_ramp_te": int(k_r), "vehicle_taper": float(prm.vehicle_taper),
                 "vehicle_wedge_deg": float(prm.vehicle_wedge_deg), "top_depth": float(prm.top_depth), "n_top_nodes": int(n_own0 + N_topj)})
+    return coords, hexes, top
+
+
+def _add_vehicle_side3d(coords, hexes, B, xs, yt, zs, k_sw, node, top_fn, NJ, prm, ext):
+    """R4c (codex plan レビュー C1, 2026-09-19): 機体をノズル幅 (z ≤ W/2) に閉じる。
+
+    旧実装は 2D 断面を z 一様に押し出していたので、**ノズル幅の外にもランプ形状の固体が残り**、
+    自由流の中に架空の物体が浮いていた (機体幅の外 z > W_vehicle/2 にまで)。そこの旧ランプ線は
+    20.2° の凸角を持つ壁で、M∞6 の自由流がこれを回って 50 Pa (床 20 Pa) まで膨張していた。
+
+    ここでは `z > W/2` の **旧ランプ線 yt(x) 〜 旧機体上面線 y3(x) を流体バンドで埋め**、
+    上は top バンド (j=0 = y3)、下は noz バンド (j=NJ-1 = yt) とノードを共有して連結する。
+    `z = W/2` のこの区間が**機体側面** (`vehicle_side`, no-slip)。ダクト側壁 (`sidewall_in/out`,
+    x ≤ L_sw) とは別のタグで、x ≤ L_ramp まで及ぶ (帳簿も別枠)。
+    これにより幅外の旧ランプ線は**内部面**になり、`vehicle` / `underside_far` タグは出なくなる。
+    """
+    y3 = ext["_y3"]; k_r = int(ext["_k_r"]); i_end = int(ext["_i_end"]); nz = len(zs); njv = int(prm.nj_vside)
+    if njv < 3:
+        raise ValueError("nj_vside は 3 以上")
+    ks = list(range(k_sw, nz))                      # z ≥ W/2 (k_sw を含む = 側面の壁ノード列)
+    nk = len(ks)
+    N0 = coords.shape[0]
+    n_int = (i_end + 1) * nk * (njv - 2)            # 内部行 (j=0 と j=njv-1 は共有ノード)
+
+    def vs(i, j, k):
+        """i: station (0..k_r), j: 0 = yt (noz バンド上端と共有), njv-1 = y3 (top バンド j=0 と共有), k: 絶対 z index"""
+        if j == 0:
+            return node(i, NJ - 1, k, "up_out")
+        if j == njv - 1:
+            return top_fn(i, 0, k)
+        return N0 + ((i * nk + (k - k_sw)) * (njv - 2)) + (j - 1)
+
+    new = np.zeros((n_int, 3))
+    # y 分布: 下端 (noz バンド上端) のセル厚に合わせて下側から幾何伸長。両端とも内部面なので壁クラスタは不要
+    for i in range(i_end + 1):
+        h = y3[i] - yt[i]
+        if h <= 0.0:
+            h = 0.0
+        frac = _geom_start3(njv, min(prm.first_wall_frac / max(h, 1e-12), 0.5)) if h > 1e-12 else np.linspace(0.0, 1.0, njv)
+        yy = yt[i] + frac * h
+        for k in ks:
+            for j in range(1, njv - 1):
+                new[vs(i, j, k) - N0] = (xs[i], yy[j], zs[k])
+    coords = np.vstack([coords, new])
+
+    extra = []
+    for i in range(i_end):
+        for kk in range(nk - 1):
+            k = ks[kk]
+            for j in range(njv - 1):
+                extra.append((vs(i, j, k), vs(i + 1, j, k), vs(i + 1, j + 1, k), vs(i, j + 1, k),
+                              vs(i, j, k + 1), vs(i + 1, j, k + 1), vs(i + 1, j + 1, k + 1), vs(i, j + 1, k + 1)))
+    if extra:
+        hexes = np.vstack([hexes, np.asarray(extra, dtype=np.int64)])
+
+    B.setdefault("vehicle_side", [])
+    for j in range(njv - 1):        # 後縁を閉じる面 (鈍頭、高さ < first_wall_frac)
+        for kk in range(nk - 1):
+            k = ks[kk]
+            B["vehicle_side"].append((vs(i_end, j, k), vs(i_end, j + 1, k), vs(i_end, j + 1, k + 1), vs(i_end, j, k + 1)))
+    for i in range(i_end):
+        for j in range(njv - 1):
+            # z = W/2 の面 = 機体側面 (外向きは +z 側の流体から見て -z)
+            B["vehicle_side"].append((vs(i, j, k_sw), vs(i, j + 1, k_sw), vs(i + 1, j + 1, k_sw), vs(i + 1, j, k_sw)))
+            # z = Z_far の面
+            B["side_far"].append((vs(i, j, nz - 1), vs(i + 1, j, nz - 1), vs(i + 1, j + 1, nz - 1), vs(i, j + 1, nz - 1)))
+    for kk in range(nk - 1):
+        k = ks[kk]
+        for j in range(njv - 1):
+            B["inlet_ext"].append((vs(0, j, k), vs(0, j + 1, k), vs(0, j + 1, k + 1), vs(0, j, k + 1)))
+    ext.update({"nj_vside": njv, "n_vside_nodes": int(n_int), "n_vside_faces": len(B["vehicle_side"]), "i_vehicle_end": int(i_end)})
     return coords, hexes
 
 
