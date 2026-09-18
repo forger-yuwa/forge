@@ -31,7 +31,7 @@ def _solver_config(p, nsteps, out_int, cfl, p_ref):
 
 
 def _bcond_config(p, st):
-    model = p.evaluate.get("model", "euler"); wall_kind = "slip" if model == "euler" else "wall"
+    model = p.evaluate.get("model", "euler")
     ex, en = st["exhaust"], st["ext"]; P = PHYS_SERN3D
 
     def inlet(name, s):
@@ -42,7 +42,12 @@ def _bcond_config(p, st):
         return f"{name}: {{physID: {P[name]}, kind: outlet_statPress, outputHDFflg: 0, ints: , floats: {{Ps: {en['P']:.6g}, Pt: {en['P']:.6g}, Tt: {en['T']:.6g}}}}}\n"
 
     def wall(name, kind=None):
-        return f"{name}: {{physID: {P[name]}, kind: {kind or wall_kind}, outputHDFflg: 1, ints: , floats: }}\n"
+        # 物理壁は 2D と同じく `spec.wall_thermal` を単一ソースにする (断熱 wall / 等温 wall_isothermal+Ts)。
+        # ここを直書きしていたため、生産 YAML が等温 1000 K を指定しても 3D は断熱で回っていた
+        # (run_0118、codex plan レビュー 2026-09-19 M3)。kind を明示指定した呼び出し (slip など) はそのまま。
+        if kind is not None:
+            return f"{name}: {{physID: {P[name]}, kind: {kind}, outputHDFflg: 1, ints: , floats: }}\n"
+        return f"{name}: {p.wall_bcond_line(model == 'euler', phys_id=P[name], output=1)}\n"
     return (inlet("inlet_nozzle", ex) + inlet("inlet_ext", en) + outlet("outlet") + wall("ramp") + wall("cowl_in") + wall("cowl_out")
             + outlet("bottom") + (outlet("top_out") if p.evaluate.get("top_out_kind", "outlet") == "outlet"
                                   else f"top_out: {{physID: {P['top_out']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n")
