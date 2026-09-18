@@ -214,6 +214,19 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 | `turbulence.C_DES_kw` / `C_DES_ke` / `wmlesNewtonTol` / `wmlesNewtonMaxIt` / `mesh.gradLSQDegenThresh` | 一度も使われず掃引の実測も無い内部定数 → コードに固定 | (固定値。変えたいときはコードを直す) |
 | `turbulence.wmlesPrt` | Kader 原式への修正で壁法則が Pr_t を使わなくなり、**読む側が消えた**引数だった | (移行先なし。乱流 Prandtl 数は `turbulentPrandtl`、壁法則とは別物) |
 
+### 9.2 段階移行中のキー (S1, 2026-09-18)
+
+**まだ受理されるが、いずれ起動時エラーになる**。書いてあると起動時に 1 行警告が出る。新規 config には書かないこと。
+全 run が書いている必須キーだったので、一足飛びに拒否すると既存 run の再実行が全部落ちる — 段階を分けている。
+
+| キー | 理由 | どうするか |
+| --- | --- | --- |
+| `physProp.isCompressible` | solver はこの値をどこでも読まない (圧縮性は常に有効) | 行ごと消す |
+| `physProp.ro` | solver はこの値をどこでも読まない (密度は EOS で決まる) | 行ごと消す |
+| `time.last.control` | solver はこの値をどこでも読まない (終了条件は `nStepOuter` のみ) | 行ごと消す。**`time.deltaT.control` とは別物で、そちらは生きている** |
+| `mesh.meshFormat` | solver が受け付ける形式は `hdf5` だけで、**省略すると `hdf5`** になる。不正値はこれまでどおり拒否 | 行ごと消す |
+| `time.deltaT.detectNaNInterval` | トップレベルの `detectNaNInterval` と同じものを読む 2 つ目の綴り。**両方あるとトップレベルが優先**、片方だけなら**そちらが効く** (無効キーではない) | トップレベルへ移す |
+
 **削除していないもの (opt-in のまま残置)**: 過去に「不採用」と判定したスイッチでも、元 plan が「opt-in で残す」と
 決めているものは残っている。`blockDPLURDiagCache` / `blockDPLURDqPack` / `mesh.primPack` (性能の再現用)、
 `updateGuardAlpha`、`lowMachThornber`、`multispeciesRhoYCommonLimiter`、`passiveFctTolAbs`、

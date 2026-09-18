@@ -228,20 +228,20 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     else:
         _tp = ""; _tm = 0
     if model == "euler":
-        phys = f"physProp: {{isCompressible: 1, thermalMethod: {_tm}, viscMethod: 0, ro: 1.2, visc: 0.0, thermCond: 0.0, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}}}"
+        phys = f"physProp: {{thermalMethod: {_tm}, viscMethod: 0, visc: 0.0, thermCond: 0.0, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}}}"
         turb = 'turbulence: {model: "none"}'
     else:
-        phys = (f"physProp: {{isCompressible: 1, thermalMethod: {_tm}, viscMethod: 1, ro: 1.2, visc: 1.8e-5, thermCond: 0.0257, "
+        phys = (f"physProp: {{thermalMethod: {_tm}, viscMethod: 1, visc: 1.8e-5, thermCond: 0.0257, "
                 f"thermCondMethod: 1, prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}}}")
         turb = 'turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 1}'
-    return f"""mesh: {{meshFormat: "hdf5", discretization: "{disc}", isAxisymmetric: 0{node_keys}, meshFileName: "{MESH}", valueFileName: "{MESH}"}}
+    return f"""mesh: {{discretization: "{disc}", isAxisymmetric: 0{node_keys}, meshFileName: "{MESH}", valueFileName: "{MESH}"}}
 gpu: 1
 solver: "SLAU"
 {phys}
 time:
   unsteady: 0
   dualTime: 0
-  last: {{control: 0, nStepOuter: {nsteps}}}
+  last: {{nStepOuter: {nsteps}}}
   deltaT: {{control: 1, dt: 1e-8, cfl: {cfl}, cfl_pseudo: {cfl},
            dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1{_relax}, lowMachPrecond: 0, detectNaN: 1}}
   outStepStart: 0

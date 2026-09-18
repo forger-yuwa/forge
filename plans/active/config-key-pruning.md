@@ -57,6 +57,46 @@ updated: 2026-09-17
 **削除の手順** (キーごと): コード分岐を削除 → 既定側の挙動だけを残す → 旧キーが config にあったら**起動時エラー**で気づかせる
 (黙って無視しない) → `solver-settings.md` の該当節を削除し `recommended-settings.md` §9 (旧設定) に 1 行残す。
 
+### 4.1 必須キーの段階移行 (第 2 陣, 2026-09-18)
+
+第 1 陣は「使用ゼロの opt-in スイッチ」だったので、いきなり起動時エラーにしてよかった。**第 2 陣は全 run が書いている
+必須キー**なので同じ手は使えない — 一足飛びに拒否すると 4000 本超の既存 run が再実行できなくなる。段階を分ける。
+
+| 段階 | 挙動 | いつ次へ進むか |
+| --- | --- | --- |
+| **S1 任意化 + 警告** (今回やる) | キーが無くても起動する。**書いてあると 1 行警告**を出す (「このキーは読まれていない / 合法値が 1 つしかない」と理由つき)。値は無視するか、これまでと同じ既定を使う | 生産チェーン (`design/forge_design/evaluate/runner*.py`) と `procedures/` の雛型から外し、新規 run に混入しなくなってから |
+| **S2 起動時エラー** (次回以降) | 第 1 陣と同じ `removed[]` 行に移す | S1 の警告が実運用のログから消えてから |
+
+**S1 で守ること** (codex plan-4 M2/M3/M4 反映):
+
+- **既定の挙動を変えない**。
+  - `mesh.meshFormat`: 省略時 `hdf5`。**不正値の拒否は維持する** (`main.cpp:1094` の分岐を残す)。
+    「合法値は 1 つ」は**現在の solver 側の制約**であって変換器の制約ではない (変換器は Gmsh を直接読み、この分岐を通らない)。
+  - 消費者のない 3 件 (`physProp.isCompressible` / `physProp.ro` / `time.last.control`): 読むのをやめて**メンバごと撤去**する。
+    どこからも読まれていないことは grep で確認済み (§5.2 第 2 陣の表)。**架空の既定値を置く必要はない**。
+  - `time.deltaT.detectNaNInterval`: **読みを維持する**。この別名は無効ではなく、下位だけに書けば検査間隔が実際に変わる
+    (`solverConfig.cpp:402`, `main.cpp:1900`)。解決順序は **トップレベル → 旧別名 → 既定 1**、最後に**下限 1 への補正**
+    (従来どおり)。S1 は「トップレベルへ移してください」の警告だけ。拒否は S2。`detectNaN` の両綴りは触らない。
+- **警告は「キーごと・1 プロセスの設定読込みにつき 1 回」**。毎 step 出さない。変換器と solver が同じ run でそれぞれ
+  読むときは、それぞれ 1 回ずつ出る (定義をこう置くと曖昧さが無い)。
+- `check_solver_config.py` が同じキーを **WARN** で拾えるようにする。**既知の値キーは無条件に通る実装**なので、
+  パーサ側に警告を足すだけでは足りない — S1 対象の明示リストを検査器に持たせる。
+- `recommended-settings.md` §9.1 に「S1 段階のキー」の表を作り、削除済み (起動時エラー) と**区別して**書く。
+
+**S1 の作業順序** (codex plan-4 M3。第 1 陣とは逆向き):
+
+1. パーサを任意化する (solver 側)。
+2. **実際に使う `forge` と `convertGmshToForge` を両方リビルドして確認**する。生産チェーンの runner は
+   `solver_density_cuda/build/` を見る (`design/forge_design/evaluate/runner.py:31`) ので、`build-native` だけ更新しても
+   チェーンの確認にはならない。
+3. そのあとで生成器 (`runner.py` / `runner_wt.py` / `runner_sern3d.py`) と `procedures/` の雛型から旧キーを外す。
+
+**先に生成器を直すと起動できなくなる** (旧パーサはまだ必須にしている)。§6.3' の「生成器を直してから起動時拒否」は
+**S2 向けの順序**であって S1 には当てはまらない。今回対象外の `gpu`・`initial` の必須性は**混ぜない**。
+
+**S2 へ進む条件** (m5): 「新規生成から警告が消えた」だけでは足りない。**保持している再実行対象 run の移送確認**か、
+**互換性を打ち切る対象・時期・移行手順の明示**のどちらかを済ませること。S1 完了から自動で S2 へ進めない。**別マイルストーンとする**。
+
 ## 5. 実装ステップ
 
 1. 棚卸しツールを `solver_density_cuda/tools/config_key_inventory.py` として恒久化 (再実行できる形に)。
@@ -72,7 +112,8 @@ updated: 2026-09-17
 | --- | --- | --- |
 | 1 | 棚卸しツールの恒久化 | `config_key_inventory.py`。**再オープン (2026-09-18)**: 使用数をキー名ベースでなく**完全修飾パスで PyYAML 集計**に直す (誤判定の原因; §5.3 j) |
 | 2 | 全キーの分類表 (live な値キー 167 パス) | **済 (2026-09-18)**: 修正後の棚卸し (値キー 167 / 節 10 / 拒否専用 12 / 起動時拒否 8、run config 4063 本) で分類を完了。素データは [notes/investigations/config-key-inventory-2026-09-18.md](../../notes/investigations/config-key-inventory-2026-09-18.md)、結論は §5.2「分類の結論」。**消してよいと言えるのは第 2 陣の候補 6 件だけ** |
-| 9 | 第 2 陣の削除 | **保留 (codex plan-3 の推奨)**。候補 6 件は §5.2 に確定済み。着手前に 4 回目の plan レビュー |
+| 9 | 第 2 陣 S1 (任意化 + 警告) | **済 (2026-09-18)**。対象 5 件を任意化し 1 回だけ警告。消費者のない 3 件はメンバごと撤去、`meshFormat` は省略時 `hdf5`、`detectNaNInterval` の別名は読みを維持。受入は §6.6' で全 PASS |
+| 10 | 第 2 陣 S2 (起動時エラー) | **別マイルストーン**。S1 完了では進めない — 保持する再実行対象の移送確認、または互換打ち切りの対象・時期・手順の明示が条件 (m5) |
 | 3 | codex plan レビュー | 分類表ができた時点で `--stage plan` |
 | 4 | 削除の実装 (第 1 陣) | ~~確定 10 パス + 定数化 7 件~~ **済 (2026-09-18)**: config 読みとメンバを削除し、呼び出し側は既定値を直接渡す。旧キーは**起動時エラー** (どこへ移ったかを言う)。`check_solver_config.py` に未知キー検出を追加。第 2 陣は分類やり直し後 |
 | 5 | 回帰検証 | **済 (2026-09-18 やり直し)**: §6.2' の事前確定基準で 4 経路 (SST 定常陰解法 / DDES / line-implicit + DES 診断 / WMLES) + 拒否 8 件 + 受理 9 件 + opt-in 3 件。**全 PASS** (§6.4')。初回の 3 run は全量が反復幅以内でなく (`P` 2.125 vs 2.0) 収束も準定常も未達だったので破棄 |
@@ -165,7 +206,7 @@ Kader 原式への修正 (`wallLaw_d.cuh:130`) で壁法則が Pr_t を使わな
 
 **分類は完了**。「消してよい」と言えるのは、上の 167 のうち**第 2 陣の候補 6 件だけ**である。
 
-#### 第 2 陣の候補 (実装は保留 — codex plan-3 の推奨)
+#### 第 2 陣の候補 (5 件, 2026-09-18 に codex plan-4 で確定)
 
 | パス | 実績 | 根拠 | 処置案 |
 | --- | ---: | --- | --- |
@@ -173,8 +214,15 @@ Kader 原式への修正 (`wallLaw_d.cuh:130`) で壁法則が Pr_t を使わな
 | `physProp.ro` | 必須・4052 run | 同上 (`solverConfig.cpp:646`)。圧縮性では密度は EOS で決まる | 同上 |
 | `time.last.control` | 必須・4052 run | メンバ `endTimeControl` を読む場所がゼロ (`solverConfig.cpp:313`)。終了条件を時刻で指定する旧機能の残骸 | 同上 |
 | `mesh.meshFormat` | 必須・4052 run | 合法値が `hdf5` 1 つだけ (`main.cpp:1094`) | **省略時 `hdf5`** とし、不正値の拒否は維持する |
-| `time.deltaT.detectNaNInterval` | **0 run** | トップレベル `detectNaNInterval` (182 run) と同じものを読む 2 つ目の綴り (`solverConfig.cpp:402-403`)。使用ゼロなので移送不要。**`detectNaN` の方は 2781 run が使っているので触らない** (§5.3 m) | この綴りだけ落とす |
-| `time.deltaT.speciesImplicitRelax` | 10 run・全て既定 1.0 | 多成分陰解法の緩和。掃引の実測が無い | **要判断**: 削除でなく「掃引してから決める」が妥当か |
+| `time.deltaT.detectNaNInterval` | **0 run** | トップレベル `detectNaNInterval` (182 run) と同じものを読む 2 つ目の綴り (`solverConfig.cpp:402-403`)。使用ゼロなので移送は要らない。**`detectNaN` の方は 2781 run が使っているので触らない** (§5.3 m) | **S1 では読みを維持**し「トップレベルへ移せ」と警告するだけ (codex plan-4 M2: この別名は無効ではなく、下位だけに書けば実際に間隔が変わる)。拒否は S2 |
+
+**対象から外したもの (codex plan-4 M1)**: `time.deltaT.speciesImplicitRelax` は「10 run すべて既定 1.0」だが、
+**無効キーではない** — `speciesTransport_d.cu:835` が読み、`scalarTransport_d.cu:290` で化学種更新の増分に掛かる
+(`relax * (res·dt/V)/fac`)。非既定値を無視すれば `speciesImplicitCoupling: 0` の反復写像が変わる。
+accepted plan [species-passive-scalar-unification](../accepted/species-passive-scalar-unification.md) が独立キーとして設計し、
+効果確認が残件として残っている。**現状維持**とし、今回の段階移行から外す (掃引を新たにやる必要も無い)。
+「使用実績が既定値だけ」は**不要性の実測ではない** — これは §4 の D 基準 (一度も使われず、既定から動かす根拠も無い
+内部チューニング定数) を、消費者の有無を見ずに適用しかけた誤り。
 
 **いずれも段階移行**にする (受理 → 無効である旨の警告 → 削除)。全 run が書いている必須キーを一足飛びに拒否すると、
 既存 run の再実行が全部落ちる。`time.last.time` は**そもそも live キーでない** (1292 run が書いているが solver は読まない)
@@ -325,6 +373,56 @@ Kader 原式への修正 (`wallLaw_d.cuh:130`) で壁法則が Pr_t を使わな
   dual-time なので FAIL を出す)。1.0 にすると旧実装の `implicitRelaxSST: -1 → implicitRelax` の継承が
   恒等になり、継承統合の誤りを検出できないため。生産設定としては §6 の dual-time レシピに従うこと。
 
+### 6.5' 第 2 陣 (S1) の受入表 (2026-09-18, codex plan-4 M4)
+
+第 1 陣の合否基準 (§6.2') は「削除キーが**起動時に落ちる**こと」を要求するが、S1 で要るのは逆で
+「**旧入力を受理し、省略した入力も同じように動く**」こと。第 2 陣専用に置く。
+
+| 対象 | 必須の判定 |
+| --- | --- |
+| 消費者のない 3 件 (`physProp.isCompressible` / `physProp.ro` / `time.last.control`) | 個別省略・一括省略・旧値記載のいずれも**受理**。残る設定値が旧実装と同じ。**旧キーを書いたときだけ**警告が出る |
+| `mesh.meshFormat` | 省略と `hdf5` で実効値が同じ。**不正文字列は既定値へ置換せず拒否**。共有パーサで検証し、変換器でも同じ契約 |
+| `detectNaNInterval` の別名 | 両方省略 → 1 / 旧別名のみ → 旧値 / トップのみ → トップ値 / 併記 → **トップ優先** / 0 以下 → 1 |
+| 残置キー (巻き込み事故の検出) | `time.deltaT.control`、**両方の** `detectNaN`、`speciesImplicitRelax: 0.7` の実効値が変わっていないこと |
+| 検査ツール | S1 対象**だけ** WARN。省略時はその WARN が出ない。S1 キーを削除済み (FAIL) に混入させない |
+| 生成器・実行経路 | runner 3 本のテンプレートとそれを再利用する経路から旧キーが消えていること。**生成 → 変換 → node solver 起動**を通す |
+
+**数値回帰** (M4): 実効設定の厳密比較に加え、**標準 node ケース 1 件の短い固定 step 比較**で足りる。
+同一 IC で「変更前 + 旧入力」「変更後 + 旧入力」「変更後 + 省略入力」を比べ、§6.2' の非有限検査と反復ノイズ基準を当てる。
+**第 1 陣の SST / DDES / WMLES 一式を再実行する理由は無い** (今回の変更は分岐を通らない)。
+短時間回帰を収束の証明にはしない。定常量を主張するときだけ §6.2' の収束・準定常 VERDICT を別途要求する。
+
+### 6.6' 第 2 陣 S1 の実施結果 (2026-09-18)
+
+基準バイナリは S1 前の `d1501dc7` (worktree `forge-s1-base`)、候補は S1 後。**生産チェーンが使う
+`solver_density_cuda/build/` の `forge` と `convertGmshToForge` を両方リビルドして確認**した (plan-4 M3)。
+
+| 受入項目 | 結果 | 根拠 |
+| --- | --- | --- |
+| 旧入力 (5 件記載) を受理、記載したキーだけ警告、警告は 1 回ずつ | **PASS** (11 項目) | `case/26.flat_plate_sst/run_0087_s1_keytest/logs/old_input.log` |
+| 個別省略 5 件・一括省略とも受理、省略したキーの警告は出ない | **PASS** (12 項目) | 同 `logs/drop_*.log`, `logs/drop_all.log` |
+| `mesh.meshFormat`: 省略と `hdf5` が同じ、不正値 `cgns` は**既定へ置換せず拒否** | **PASS** | 同 `logs/mf_*.log` (`unknown mesh format` で非ゼロ終了) |
+| `detectNaNInterval` の解決順序: 両省略 1 / 旧別名のみ 7 / トップのみ 9 / 併記 9 / 0 以下 1 | **PASS** (5 水準とも実効値一致) | 同 `logs/dni_*.log`。起動ログに `[config] detectNaNInterval effective: N` を 1 行足して観測点にした |
+| 残置キーの巻き込み無し (`time.deltaT.control` / 両方の `detectNaN` / `speciesImplicitRelax: 0.7`) | **PASS** | 同 `logs/retained.log` (3 件とも読み取りログに出る、S1 警告は出ない) |
+| 検査ツールが S1 対象**だけ** WARN、省略時は出ない、削除済み FAIL に混ぜない | **PASS** | `check_solver_config.py` の `STAGED_KEYS`、単体試験 `test_check_solver_config.py` |
+| 生成器 3 本から旧キーが消えている | **PASS** | `runner.py` / `runner_wt.py` / `runner_sern.py`。生成した config を PyYAML で読み S1 キー 4 種が無いことを確認 |
+| 生成 → 変換 → node solver 起動を通す | **PASS** | `case/26.flat_plate_sst/run_0091_s1_chain_e2e` (S1 キーを外した config で `convertGmshToForge` が exit 0・警告 0、その h5 で forge が 20 step 完走・NaN なし) |
+
+**数値回帰** (§6.5'、同一 IC・300 step・`--boundary` 込み 24 量):
+
+| 比較 | ノイズ床の測り方 | 最大比 | VERDICT |
+| --- | --- | ---: | --- |
+| 旧バイナリ + 旧入力 → 新バイナリ + 旧入力 | 両側 3 反復 | **1.14** | **PASS** |
+| 新バイナリ + 旧入力 → 新バイナリ + **省略入力** | 基準側 3 反復 | **1.14** | **PASS** |
+
+run は `case/26.flat_plate_sst/run_0088`–`0090` (と各 `_rep1`/`_rep2`)。
+第 1 陣の SST / DDES / WMLES 一式は再実行していない (今回の変更はそれらの分岐を通らない — plan-4 M4)。
+短時間回帰なので収束の証明としては使わない。
+
+**変換器の注意 (この作業中に踏んだ)**: `convertGmshToForge` は引数 2 つ (`入力.msh 出力.h5`) を要る。
+1 つしか渡さないと `argv[2]` が null で `basic_string: construction from null is not valid` と abort する。
+S1 前のバイナリでも同じなので S1 とは無関係。
+
 ### 6.3' 生成器・変換器 (M4)
 
 - `design/forge_design/evaluate/runner*.py` の 3 本が生成する `solverConfig.yaml` から削除キーを外し、**生成器を直してから**起動時拒否を入れる。
@@ -338,6 +436,7 @@ Kader 原式への修正 (`wallLaw_d.cuh:130`) で壁法則が Pr_t を使わな
 | plan | `2026-09-17` | [2026-09-17-config-key-pruning-plan.md](../../notes/reviews/2026-09-17-config-key-pruning-plan.md) | **GO-with-changes**, C0/M9/m0 | **全採用 (2026-09-18, §5.2 を改訂)**: M1 `timeIntegration: 1` は 1 段 Euler で 3 (3 段 TVD RK) の別名ではない (`solverConfig.cpp:907/919` で段数・係数が別) → 削除対象から除外; M2 `sstIsotropicStress`/`sstEnergyKSource` の引用先は最終決定と逆 (accepted plan §4.0 は既定 0 + 個別利用可、残作業表も「撤去せず現状維持」) → 保留; M3 「全 155 キー分類済み」が不成立 (棚卸しが `config["mesh"][...]` 形を取りこぼし、同名末端キーを統合していた; 分類表の内訳も 31 と合わない) → **完全修飾パスで再抽出 (188 パス)** し分類をやり直す; M4 共有パーサ・生成器が影響範囲から漏れ (`convertGmshToForge` が同じ `solverConfig::read()` を使い `cfg.gpu` を確保に渡す、design の runner 3 本が `gpu`/`nodeWallDirichlet` を生成) → スコープに追加; M5 `condEquilibrium 1→2` の「固定点同一」は一般には誤り (新しい accepted plan が緩和形の固定点は Δτ 依存と明記、mode 2 は単一凝縮種限定) → 保留; M6 `mesh.axisymMethod: 1` は不採用決定ではなく opt-in 保持で再評価待ち → 保留; M7 A/D/V が限定的な実測から機能廃止へ飛躍 (`lineVisc*` は「このケースでは僅差」、`condTwoTemp` は希薄水/N2 限定、化学 2 キーは反応源の温度評価・停止条件を変える) → 保留に移し、A は「検証した適用範囲」と「廃止する対応範囲」を対応づける; M8 §6 の回帰 3 run が全て node/SLAU/`model: none`/`viscMethod 0` で、SST・粘性壁・line-implicit・cell・陽解法・KEEP の経路を通せない → 経路別の最小回帰表に作り替え; M9 「長時間 run のビット一致」は非退行判定として実行不能 (残差が float atomicAdd で集積、出力専用経路は保存量に出ない、`implicitRelaxSST=-1` は継承指定で定数置換と別物) → 決定的な局所試験はビット一致、CFD は同一バイナリ反復幅 + 事前に定めた物理量許容。保留方針 (`ducrosLimiter`/`condLimiterMode`/`nodeOmegaWfDirichlet`) は同意を得た |
 | plan | `2026-09-18` | [2026-09-18-config-key-pruning-plan.md](../../notes/reviews/2026-09-18-config-key-pruning-plan.md) | **GO-with-changes**, C0/M7/m1 | **全採用 (2026-09-18)**: M1 性能スイッチ 3 件 (`blockDPLURDiagCache`/`blockDPLURDqPack`/`primPack`) は元 plan が「不採用で確定、**opt-in 残置**」と決めており、残置決定の読み違いが 3 度目 → **コードごと復元** (§5.2)。M2 棚卸しが入れ子の run config を探索せず「使用 0」を再び誤判定 (826 config が対象外、`forge-perf` が実際に 3 件とも 1 を書いている) → `case/**` を再帰探索し、`<case>/<相対パス>` を識別子に、内容違いの同名は別設定、読み取り失敗は報告 (2796 → **4030 本**)。M3 「live 181 パス」が受理キー一覧になっていない (コメントを走査、節・拒否専用参照を live に混入、必須キーの既定値に節名が入る) → コメント除去 + 節/拒否専用/必須の分離で **値キー 167 / 節 10 / 拒否専用 12 / 起動時拒否 8**。M4 既定値比較の絶対許容差 1e-12 が 10 桁の変更を「既定と同じ」にする + 別名 (`mesh.renumber`→`meshRenumber` 等) を解決できない → 正規化した厳密比較へ、既定値は**代入先メンバ名**で引き、解決できないものは「不明」とし、記載 run 数と非既定 run 数を分離。M5 未知キー検出が末端名照合で誤配置を拾えない → **完全修飾パス**照合に置換 (誤配置は WARN、起動時拒否は FAIL)。実例 (トップレベル `lowMachPrecond` 22 run、`physProp.lowMachPrecond` 10、`condensation.condRealizProject` 5、`space.keepDiss*` 各 4、`physProp.speciesImplicitCoupling` 2) を検出、回帰試験にも追加。M6 正本文書が復元済みキーを「起動時エラー」と案内 → `recommended-settings.md` §9.1 を最終対象に同期し残置 9 件を明記、plan の確定表・残作業表・検証表も同期。M7 非退行の主張が全量では成立せず受入試験も不足 → §6.1'/§6.2' を**事前確定の基準**に書き換え検証を再オープン (§5.1 #5)。m8 `wmlesPrt` は定数化でなく**消費者のない引数の撤去**で、`turbulentPrandtl` への移送案内も誤り → メンバ・カーネル引数ごと削除し案内を撤回。C の段階移行方針は妥当との評価。`isCompressible`/`ro`/`time.last.control` は「読まれない」でなく「パーサは読むが下流の消費者が無い」、`mesh.meshFormat` は省略時 `hdf5` + 不正値拒否を維持、という助言も採用 (§5.3 l) |
 | plan | `2026-09-18` | [2026-09-18-config-key-pruning-plan-2.md](../../notes/reviews/2026-09-18-config-key-pruning-plan-2.md) | **GO-with-changes**, C0/M5/m1 | **M1–M4・m6 を採用、M5 は棄却 (2026-09-18)**: M1 §5.3 m が `time.deltaT.detectNaN` を「0 run」としたのは**2 パスの取り違え**で、実際は記載 2879 / 非既定 2781 run (0 run なのは `detectNaNInterval` の方) → 削除決定を撤回し互換読みを維持 (§5.3 m)。M2 `check_field_regress.py` が NaN 入りの候補を PASS にしていた (`max(0.0, NaN)` が `0.0`) → 必須量の欠落・形状不一致・非有限値を**数値判定の前**に検査して終了コード 2、反例を単体試験に追加。M3 §6.2' が必須とした壁量 `Tau_Wall`/`Qw_Wall` が §6.4' の比較から脱落していた (これらは `res_<step>.h5` に出ず、境界出力ファイルにある) → `--boundary` を足して `twall_*`/`qwall`/`utau`/`ypls` を全経路で判定し、4 経路とも再判定して PASS。M4 受理 9 件は分岐到達を証明していない (単成分・`viscMethod 0`・定常) → 「パーサ受理」と明記し、`multispeciesRhoYCommonLimiter` (診断印字)・`passiveFctTolAbs` (残差 4.3e-8→9.7e-22)・`turbulentSchmidt` (トレーサ rel L2 1.4e-1, `Sc_t` との差 5.6e-6) の**到達確認**を追加。m6 棚卸しの「既定のみ」に既定不明・必須が混入 → 必須 30 / 既定不明 5 / 未記載 10 / 既定のみ 3 に分離し、既定不明の非既定数は `null` に。**M5 (cell 回帰が無い) は棄却**: 2026-09-16 のユーザ決定「cell はもう使わない」により検証・回帰は node のみとする。指摘自体は正しい (SST 緩和と WMLES は共有コード) ので、`procedures/verification/README.md` の「node/cell 両方」規則を決定に合わせて書き換え、未検証のまま残る risk を §10 に記載した。**なお M3 の対応中に、ノイズ床を新バイナリ 3 反復だけで測るとカオス的 DDES で 15 倍の過小評価になり偽の不合格を出すことが分かり**、床を両側 (基準側・候補側) の全ペアから測る形に直した |
+| plan | `2026-09-18` | [2026-09-18-config-key-pruning-plan-3.md](../../notes/reviews/2026-09-18-config-key-pruning-plan-3.md) | **GO-with-changes**, C0/M4/m1 | **全採用 (2026-09-18)**: M1 `speciesImplicitRelax` は無効キーではない (`speciesTransport_d.cu:835` が読み `scalarTransport_d.cu:290` で化学種更新の増分に掛かる。`relax * (res·dt/V)/fac`) → **第 2 陣から除外**し現状維持。「使用実績が既定値だけ」を「不要」と読んだのが誤りで、**消費者の有無を見ずに D 基準を当てかけた**。M2 `time.deltaT.detectNaNInterval` の別名も無効ではない (`solverConfig.cpp:402` が読み `main.cpp:1900` が検査 step を変える。下位だけに 100 を書いた入力を無視すると間隔が 100 → 1 になり、「読まれていない」という警告文も事実と違う) → S1 では**読みを維持**し「トップレベルへ移せ」と警告するだけ、解決順序 (トップ → 旧別名 → 既定 1) と下限 1 補正を明記、拒否は S2。M3 S1 の作業順序は第 1 陣と**逆** (先に生成器を直すと旧パーサの必須キーが無くて起動できない) → 任意化 → `forge` と `convertGmshToForge` を両方リビルド確認 → 生成器から除去、の順に確定。runner は `solver_density_cuda/build/` を見るので `build-native` だけでは生産チェーンの確認にならない点も明記。`gpu`/`initial` は混ぜない。M4 §6 が第 1 陣用 (起動時拒否) のままで S1 の合格条件が無い + `check_solver_config.py` は既知の値キーを無条件に通すのでパーサ側の警告だけでは WARN 検出を保証できない → **§6.5' に S1 専用の受入表**を新設 (旧入力の受理・省略入力・不正値拒否・別名の解決順序・残置キーの巻き込み検出・検査ツール・生成〜変換〜起動の通し) と、短い固定 step の数値回帰で足りる旨。m5 S2 の条件「実運用ログから警告が消えた」では旧 run の再実行が救えない → **S2 は別マイルストーン**とし、移送確認か互換打ち切りの明示を条件に追加。**第 2 陣は 6 件 → 5 件**に確定 |
 
 ## 7. 影響範囲
 
@@ -353,6 +452,8 @@ solver の config 読込と分岐、`procedures/` の設定文書、skill `forge
 - [ ] 第 2 陣 (候補 6 件) の段階移行 — 着手前に 4 回目の plan レビュー
 
 ## 9. 変更ログ
+
+- `2026-09-18` — **第 2 陣 S1 を実装** (§4.1, §6.6')。codex plan レビュー 4 回目 **GO-with-changes (C0/M4/m1)** を全採用したうえで、対象を **5 件**に絞って着手: `physProp.isCompressible` / `physProp.ro` / `time.last.control` はメンバごと撤去 (読む場所がゼロ)、`mesh.meshFormat` は省略時 `hdf5` (不正値の拒否は維持)、`time.deltaT.detectNaNInterval` は**読みを維持**して「トップレベルへ移せ」と警告するだけ。**`speciesImplicitRelax` は除外** (M1: 化学種更新の増分に掛かる実効キーで、無効ではない)。作業順序は第 1 陣と逆にし、任意化 → `build/` の `forge` と `convertGmshToForge` を両方リビルド確認 → 生成器 3 本から除去、とした (先に生成器を直すと旧パーサの必須キーが無くて起動できない)。`check_solver_config.py` に `STAGED_KEYS` を持たせ (既知の値キーは無条件に通るのでパーサ側の警告だけでは足りない)、起動ログに `[config] detectNaNInterval effective: N` を足して解決順序の観測点にした。**受入 8 項目 + 数値回帰 2 本が全 PASS**。S2 (起動時エラー化) は別マイルストーンで、移送確認か互換打ち切りの明示が条件。
 
 - `2026-09-18` — **167 パスの分類を完了** (§5.1 #2、§5.2「分類の結論」)。素データは [notes/investigations/config-key-inventory-2026-09-18.md](../../notes/investigations/config-key-inventory-2026-09-18.md) (4063 config)。内訳は 非既定の使用あり 119 / 必須 30 / 既定不明 (リスト・マップ値) 5 / 未記載 10 / 既定のみ 3。**「消してよい」と言えるのは第 2 陣の候補 6 件だけ**で、残りは残すか保留。候補は `physProp.isCompressible`・`physProp.ro`・`time.last.control` (いずれもパーサ外に消費者ゼロ。`endTimeControl`/`isCompressible`/`ro` を grep して確認、対照の `dtControl` は `main.cpp:510` ほかで読む)、`mesh.meshFormat` (合法値 1 つ)、`time.deltaT.detectNaNInterval` (0 run の 2 つ目の綴り)、`time.deltaT.speciesImplicitRelax` (10 run 全て既定, 要判断)。**実装は保留** (codex plan-3 の推奨)、着手前に 4 回目の plan レビュー。
 

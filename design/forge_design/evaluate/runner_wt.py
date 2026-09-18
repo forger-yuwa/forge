@@ -175,15 +175,15 @@ def design_chain(p: Problem, viscous: bool) -> dict:
 
 
 def _config_euler(p: Problem, nsteps: int, out_int: int, cfl: float, conv: int) -> str:
-    return f"""mesh: {{meshFormat: "hdf5", discretization: "cell", isAxisymmetric: 1, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}}
+    return f"""mesh: {{discretization: "cell", isAxisymmetric: 1, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}}
 gpu: 1
 solver: "SLAU"
-physProp: {{isCompressible: 1, thermalMethod: 0, viscMethod: 0,
-           ro: 1.2, visc: 0.0, thermCond: 0.0, cp: {p.cp}, gamma: {p.gamma}}}
+physProp: {{thermalMethod: 0, viscMethod: 0,
+           visc: 0.0, thermCond: 0.0, cp: {p.cp}, gamma: {p.gamma}}}
 time:
   unsteady: 0
   dualTime: 0
-  last: {{control: 0, nStepOuter: {nsteps}}}
+  last: {{nStepOuter: {nsteps}}}
   deltaT: {{control: 1, dt: 1e-8, cfl: {cfl}, cfl_pseudo: {cfl},
            dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}}
   outStepStart: 0
@@ -223,15 +223,15 @@ def _config_euler_node(p: Problem, nsteps: int, out_int: int, cfl: float,
       ([[node-slip-spurious-flow]])。本ケースは slip 壁なので、同じ市松診断で
       cell と比較して確認すること。
     """
-    return f"""mesh: {{meshFormat: "hdf5", discretization: "node", isAxisymmetric: 1, axisCentroidShift: 1, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}}
+    return f"""mesh: {{discretization: "node", isAxisymmetric: 1, axisCentroidShift: 1, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}}
 gpu: 1
 solver: "SLAU"
-physProp: {{isCompressible: 1, thermalMethod: 0, viscMethod: 0,
-           ro: 1.2, visc: 0.0, thermCond: 0.0, cp: {p.cp}, gamma: {p.gamma}}}
+physProp: {{thermalMethod: 0, viscMethod: 0,
+           visc: 0.0, thermCond: 0.0, cp: {p.cp}, gamma: {p.gamma}}}
 time:
   unsteady: 0
   dualTime: 0
-  last: {{control: 0, nStepOuter: {nsteps}}}
+  last: {{nStepOuter: {nsteps}}}
   deltaT: {{control: 1, dt: 1e-8, cfl: {cfl}, cfl_pseudo: {cfl},
            dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}}
   outStepStart: 0
@@ -253,15 +253,15 @@ def _config_sst_node(p: Problem, nsteps: int, out_int: int, cfl: float) -> str:
     `axisCentroidShift` + 低 Re SST (`wallTreatmentSST: 0` — **壁関数は使わない**。
     node 壁関数経路には既知の Cf 欠損 [[node-wallfunction-pk-convention-deficit]]、
     ユーザ指示 2026-08-16)。粘性は Sutherland (viscMethod 1)。"""
-    return f"""mesh: {{meshFormat: "hdf5", discretization: "node", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}}
+    return f"""mesh: {{discretization: "node", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}}
 gpu: 1
 solver: "SLAU"
-physProp: {{isCompressible: 1, thermalMethod: 0, viscMethod: 1,
-           ro: 1.2, visc: 1.8e-5, thermCond: 0.0257, thermCondMethod: 1, prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}}}
+physProp: {{thermalMethod: 0, viscMethod: 1,
+           visc: 1.8e-5, thermCond: 0.0257, thermCondMethod: 1, prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}}}
 time:
   unsteady: 0
   dualTime: 0
-  last: {{control: 0, nStepOuter: {nsteps}}}
+  last: {{nStepOuter: {nsteps}}}
   deltaT: {{control: 1, dt: 1e-8, cfl: {cfl}, cfl_pseudo: {cfl},
            dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}}
   outStepStart: 0

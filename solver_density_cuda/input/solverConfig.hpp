@@ -26,7 +26,7 @@ public:
     std::string solver;
 
     //Time
-    int endTimeControl; // 0: use dt , 1: cfl
+    // (撤去 2026-09-18) endTimeControl: time.last.control を格納していたが読む場所がゼロだった (plan config-key-pruning §5.2)
     int nStepOuter;
     int outStepInterval;
     int outStepStart;
@@ -322,7 +322,7 @@ public:
     flow_float C_DES_kw = 0.78;
     flow_float C_DES_ke = 0.61;
 
-    int isCompressible;
+    // (撤去 2026-09-18) isCompressible: physProp.isCompressible を格納していたが読む場所がゼロだった (同上)
     int isAxisymmetric = 0;
 
     // 軸対称の定式化: 0 = r 重み幾何 (B 流儀, 従来・既定・ビット不変) / 1 = SU2 流
@@ -403,7 +403,7 @@ public:
     int thermalMethod;   // 0: calorically perfect (定数 cp/γ), 2: 多成分 thermally-perfect (NASA-9)
     int viscMethod;      // 0: 定数, 1: Sutherland, 2: kinetic theory (Chapman-Enskog)
 
-    flow_float ro;
+    // (撤去 2026-09-18) ro: physProp.ro を格納していたが読む場所がゼロだった (密度は EOS で決まる; 同上)
     flow_float visc;
     flow_float thermCond;
     flow_float cp;
