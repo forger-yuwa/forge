@@ -130,7 +130,7 @@ updated: 2026-09-17
 
 | # | 項目 | 内容 |
 | --- | --- | --- |
-| 1 | 棚卸しツールの恒久化 | `config_key_inventory.py`。**再オープン (2026-09-18)**: 使用数をキー名ベースでなく**完全修飾パスで PyYAML 集計**に直す (誤判定の原因; §5.3 j) |
+| 1 | 棚卸しツールの恒久化 | **済 (2026-09-18)**: `config_key_inventory.py` を完全修飾パス・PyYAML 集計・入れ子探索・コメント除去・節/拒否専用/必須の分離に作り替えた (§6.1 の plan-2 M2/M3/M4、plan-3 m6) |
 | 2 | 全キーの分類表 (live な値キー 167 パス) | **済 (2026-09-18)**: 修正後の棚卸し (値キー 167 / 節 10 / 拒否専用 12 / 起動時拒否 8、run config 4063 本) で分類を完了。素データは [notes/investigations/config-key-inventory-2026-09-18.md](../../notes/investigations/config-key-inventory-2026-09-18.md)、結論は §5.2「分類の結論」。**消してよいと言えるのは第 2 陣の候補 6 件だけ** |
 | 9 | 第 2 陣 S1 (任意化 + 警告) | **済 (2026-09-18)**。対象 5 件を任意化し 1 回だけ警告。消費者のない 3 件はメンバごと撤去、`meshFormat` は省略時 `hdf5`、`detectNaNInterval` の別名は読みを維持。受入は §6.6' で全 PASS |
 | 10 | 第 2 陣 S2 (起動時エラー) | **別マイルストーン**。S1 完了では進めない — 保持する再実行対象の移送確認、または互換打ち切りの対象・時期・手順の明示が条件 (m5) |
@@ -146,8 +146,8 @@ updated: 2026-09-17
 初版 (2026-09-17) は 3 領域を分担して根拠づけたが、codex plan レビューで **4 件の誤分類と抽出の取りこぼし**が出たので改訂した。
 改訂の方針は「**根拠が確定したものだけ削除し、限定的な実測から機能廃止へ飛躍しない**」。
 
-**分類のやり直し (§5.1 #2 を再オープン)**: 完全修飾パス 188 件を単位に、各項目へ
-`実効既定値 / 読む場所 / 分類 / 根拠 / 移行先 / 検証` を持たせて作り直す。初版の 155 名称ベースの表は下の「確定分」以外は素案として扱う。
+~~**分類のやり直し (§5.1 #2 を再オープン)**~~ **決着 (2026-09-18, 「分類の結論」節)**: 修正した棚卸しの
+**値キー 167 パス**を単位にやり直し、完了した。初版の 155 名称ベースの表は破棄。
 
 #### 確定: 今回削除するもの
 
@@ -265,9 +265,9 @@ accepted plan [species-passive-scalar-unification](../accepted/species-passive-s
 | e | 存在しないキーを書いても黙って無視される (a の原因)。`check_solver_config.py` に「未知キーの検出」を足すべき | **済 (2026-09-18)**: solverConfig のソースにキー名が現れなければ WARN (偽陽性なし)。`kInf`/`omegaInf` を実際に検出 |
 | f | `time.last.control` は**必須キーなのに消費者がゼロ**、`time.last.time` は**読む場所が無いのに 1988 run が書いている** (終了条件を時刻で指定する旧機能の残骸) | 第 2 陣で削除。全 run が書いているので段階移行 (受理 → 警告 → 削除) |
 | g | `precondEps` (184 run) / `monitorInterval` (390 run) / `axisTimestepBeta` (39 run) が `procedures/` `methods/` に無い | §5.1 #6 で追記 |
-| h | `speciesFaceReconstruction` を `solverConfig.cpp` が**二重に読んでいる** (値は同じで無害だが、片方を消すと齟齬) | 第 2 陣で整理 |
+| h | `speciesFaceReconstruction` を `solverConfig.cpp` が**二重に読んでいる** (値は同じで無害だが、片方を消すと齟齬) | **済 (2026-09-18, codex result m7)**: 1 回読みに統一。起動ログに `'speciesFaceReconstruction' in 'time.deltaT'` が 1 行だけ出ることを確認 (`case/26.flat_plate_sst/run_0092_s2_keytest/logs/sfr_single_read.log`) |
 | i | 棚卸しツールが `config["time"]` 形を取りこぼし | **済 (2026-09-18)** |
-| j | **棚卸しツールの使用数がキー名ベースで、完全修飾パス別になっていない** (節をまたいで合算・1 ファイル内の複数出現を重複計上)。これが「使用 0」の誤判定を生み、実際には 161 run / 1064 run が使うキーを削除しかけた | 第 2 陣の前に **PyYAML でパスごとに数える**実装へ置き換える (§5.1 #1 を再オープン) |
+| j | **棚卸しツールの使用数がキー名ベースで、完全修飾パス別になっていない** (節をまたいで合算・1 ファイル内の複数出現を重複計上)。これが「使用 0」の誤判定を生み、実際には 161 run / 1064 run が使うキーを削除しかけた | **済 (2026-09-18)**: PyYAML で完全修飾パスごとに数える実装へ置き換え、入れ子探索・コメント除去・節/拒否専用/必須の分離も入れた (§5.1 #1) |
 | k | 誤った場所に書かれて黙って無視されているキーが多数 | **検出は済 (2026-09-18)**: `check_solver_config.py` を完全修飾パス化し、本ツリーの 3455 config を掃いた結果が下表。修正は case README に注記して順次 |
 | l | `physProp.isCompressible` と `physProp.ro`、`time.last.control` は**必須キーだが下流に消費者が無い** (パーサは読む; `solverConfig.cpp:312/615/646`)、`mesh.meshFormat` は合法値が `hdf5` 1 つだけ | 第 2 陣で**任意化 + 無効である旨の警告**から始める (codex plan-2 の助言)。`meshFormat` は省略時 `hdf5`・不正値は拒否のまま (`main.cpp:1094`) |
 | m | `detectNaN` / `detectNaNInterval` が**トップレベルと `time.deltaT` の 2 か所**から読める (`solverConfig.cpp:399-403`, トップレベルが後勝ち) | **訂正 (2026-09-18, codex plan-3 M1)**: 当初「`time.deltaT` 側は 0 run」と書いたが、**2 パスを取り違えていた**。`time.deltaT.detectNaN` は**記載 2879 / 非既定 2781 run** (例: `case/44.vitiated_air_wt/run_0117_va_ns_ar5k_iso300_samewall/solverConfig.yaml:12`)、0 run なのは `time.deltaT.detectNaNInterval` の方。**削除決定は撤回**し、`detectNaN` は互換読み (トップレベル優先) を維持する。統合するなら入力の移送が要る |
@@ -348,9 +348,14 @@ accepted plan [species-passive-scalar-unification](../accepted/species-passive-s
 | 経路 (通す削除項目) | run | 比較量 | 最大比 (ノイズ床比) | VERDICT |
 | --- | --- | ---: | ---: | --- |
 | SST 定常陰解法 (`implicitRelaxSST`, `gradLSQDegenThresh`) | `case/26.flat_plate_sst/run_0081`–`0084` (新 3 + 旧 1) | 24 | **1.27** | **PASS** |
-| DDES (`C_DES_kw`, `C_DES_ke`) | `case/39.periodic_hills/run_0024`–`0027`, `0032`–`0035` (新 5 + 旧 3) | 28 | **1.27** | **PASS** |
-| line-implicit + DDES 診断 (`lineDtWallRelief`, `C_DES_*`) | `case/39.periodic_hills/run_0028`–`0031` (新 3 + 旧 1) | 33 | **1.25** | **PASS** |
-| WMLES 壁モデル (`wmlesNewtonTol`, `wmlesNewtonMaxIt`, `wmlesPrt` 撤去) | `case/38.channel_wmles/run_0024`–`0027` (新 3 + 旧 1) | 26 | **1.42** | **PASS** |
+| DDES (`C_DES_kw`, `C_DES_ke`) | `case/39.periodic_hills/run_0024`–`0027`, `0032`–`0035` (新 5 + 旧 3) | 28 | **1.32** | **PASS** |
+| line-implicit + DDES 診断 (`lineDtWallRelief`, `C_DES_*`) | `case/39.periodic_hills/run_0028`–`0031` + `0031_*_rep2/rep3` (新 3 + 旧 3) | 33 | **1.38** | **PASS** |
+| WMLES 壁モデル (`wmlesNewtonTol`, `wmlesNewtonMaxIt`, `wmlesPrt` 撤去) | `case/38.channel_wmles/run_0024`–`0027` + `0027_*_rep2/rep3` (新 3 + 旧 3) | 26 | **1.19** | **PASS** |
+
+**数値は 2026-09-18 に再集計した** (codex result m4/M2): 当初の表は L2 側だけを拾っており L∞ の最大比を反映していなかった。
+また line-implicit と WMLES が**旧側 1 本**で、§6.2' が LES/DES に課した「両側 3 本以上」を自分で満たしていなかった。
+旧バイナリの反復を各 2 本足し、判定器を直してから全系列を取り直した結果が上表。判定出力は
+`/tmp` でなく各 run から再現できる (コマンドは §6.2' の `check_field_regress.py --boundary`)。
 
 **壁量は境界出力から採る (codex plan-3 M3)**: `Tau_Wall` / `Qw_Wall` は `output_cellValNames` に無いので `res_<step>.h5`
 には出ない。実体は `outputHDFflg: 1` の bcond が書く `res_<名前>_<physID>_<step>.h5` の `twall_x/y/z`・`qwall`・`utau`・`ypls`
@@ -380,7 +385,7 @@ accepted plan [species-passive-scalar-unification](../accepted/species-passive-s
   | `passiveFctTolAbs` | FCT 低次解の相対残差が **4.32e-8 → 9.73e-22** (14 桁) 変わる。この値は分母の加算項なので、読まれなければ動かない | `run_0488_reach_fcttolabs_zero` (0) と `run_0489_reach_fcttolabs_big` (1e30)、いずれも dual-time + SLAU + SFR 2 |
   | `turbulence.turbulentSchmidt` | `0.2` にするとトレーサ `roXi` が既定 (0.7) から**相対 L2 で 1.41e-1** 動く。`physProp.Sc_t: 0.2` との差は **5.6e-6** = 別名として等価 | `case/16.nozzle_wys/run_0502`–`0504` (SST + `viscMethod 1` + トレーサ) |
 - **opt-in 受理 3/3 PASS**: `case/26.flat_plate_sst/run_0086_optin_*`。復元した性能スイッチ 3 件が既定経路と同じ場を出す
-  (全量 0.96〜1.02 倍)。**この run は反復間でもビット一致しない** ので、plan が言う「ビット同一」は
+  (最大比 `primPack` 1.43 / `blockDPLURDqPack` 1.56 / `blockDPLURDiagCache` 1.43、いずれも許容 2 以内)。**この run は反復間でもビット一致しない** ので、plan が言う「ビット同一」は
   `atomicAdd` 経由の残差集積がある run では検証できず、ノイズ比で判定した。
 - **VERDICT の但し書き**: SST 回帰は収束済みの場からの継続なので `check_convergence` は旧新とも
   `NOT CONVERGED (plateau)` (残差が初手から床)。`check_quasisteady` は旧新とも `ALL STEADY`。
@@ -432,8 +437,8 @@ accepted plan [species-passive-scalar-unification](../accepted/species-passive-s
 
 | 比較 | ノイズ床の測り方 | 最大比 | VERDICT |
 | --- | --- | ---: | --- |
-| 旧バイナリ + 旧入力 → 新バイナリ + 旧入力 | 両側 3 反復 | **1.14** | **PASS** |
-| 新バイナリ + 旧入力 → 新バイナリ + **省略入力** | 基準側 3 反復 | **1.14** | **PASS** |
+| 旧バイナリ + 旧入力 → 新バイナリ + 旧入力 | 両側 3 反復 | **1.29** | **PASS** |
+| 新バイナリ + 旧入力 → 新バイナリ + **省略入力** | 基準側 3 反復 | **1.46** | **PASS** |
 
 run は `case/26.flat_plate_sst/run_0088`–`0090` (と各 `_rep1`/`_rep2`)。
 第 1 陣の SST / DDES / WMLES 一式は再実行していない (今回の変更はそれらの分岐を通らない — plan-4 M4)。
@@ -472,7 +477,7 @@ S1 前のバイナリでも同じなので S1 とは無関係。
 | 移送の実施と冪等性 | **PASS** | このツリー 3497 本中 **3491 本を移送**、既に清潔 3 本、**手動対応 2 本** (`case/01.cavity/run_heat`, `case/02.airfoil` は `meshFormat: gmsh` の旧 smac 入力)、失敗 0 本。2 回目は変更ゼロ |
 | 雛型と生成器に対象キーが残っていない | **PASS** | `recommended-settings.md` §1 の雛型から除去、runner 3 本は S1 で除去済み |
 | 生成 → 変換 → node 起動の通し | **PASS** | `case/26.flat_plate_sst/run_0095_s2_chain_e2e` (変換 rc=0、solver 20 step 完走、NaN なし) |
-| 数値回帰 (基準側 3 反復、許容 = ノイズ床 × 2、`--boundary` 込み 24 量) | **PASS** (最大比 **1.15**) | 移送後 config (S2 バイナリ) × 3 vs 移送前 config (S1 バイナリ `fbf305cc`)。`run_0093_s2_migrated`(+`_rep1`/`_rep2`) と `run_0094_s2_premigration` |
+| 数値回帰 (基準側 3 反復、許容 = ノイズ床 × 2、`--boundary` 込み 24 量) | **PASS** (最大比 **1.34**) | 移送後 config (S2 バイナリ) × 3 vs 移送前 config (S1 バイナリ `fbf305cc`)。`run_0093_s2_migrated`(+`_rep1`/`_rep2`) と `run_0094_s2_premigration` |
 
 **副産物の確認**: 非圧縮 SMAC 経路は `main.cpp` に呼び出しが無く (`solvePoisson*` の include はコメントアウト)、
 `"smac"` の文字列も solver のソースに存在しない。§5.2 保留表の `physProp.isCompressible: 0 (SMAC 非圧縮)` の
@@ -494,6 +499,7 @@ S1 前のバイナリでも同じなので S1 とは無関係。
 | plan | `2026-09-18` | [2026-09-18-config-key-pruning-plan-2.md](../../notes/reviews/2026-09-18-config-key-pruning-plan-2.md) | **GO-with-changes**, C0/M5/m1 | **M1–M4・m6 を採用、M5 は棄却 (2026-09-18)**: M1 §5.3 m が `time.deltaT.detectNaN` を「0 run」としたのは**2 パスの取り違え**で、実際は記載 2879 / 非既定 2781 run (0 run なのは `detectNaNInterval` の方) → 削除決定を撤回し互換読みを維持 (§5.3 m)。M2 `check_field_regress.py` が NaN 入りの候補を PASS にしていた (`max(0.0, NaN)` が `0.0`) → 必須量の欠落・形状不一致・非有限値を**数値判定の前**に検査して終了コード 2、反例を単体試験に追加。M3 §6.2' が必須とした壁量 `Tau_Wall`/`Qw_Wall` が §6.4' の比較から脱落していた (これらは `res_<step>.h5` に出ず、境界出力ファイルにある) → `--boundary` を足して `twall_*`/`qwall`/`utau`/`ypls` を全経路で判定し、4 経路とも再判定して PASS。M4 受理 9 件は分岐到達を証明していない (単成分・`viscMethod 0`・定常) → 「パーサ受理」と明記し、`multispeciesRhoYCommonLimiter` (診断印字)・`passiveFctTolAbs` (残差 4.3e-8→9.7e-22)・`turbulentSchmidt` (トレーサ rel L2 1.4e-1, `Sc_t` との差 5.6e-6) の**到達確認**を追加。m6 棚卸しの「既定のみ」に既定不明・必須が混入 → 必須 30 / 既定不明 5 / 未記載 10 / 既定のみ 3 に分離し、既定不明の非既定数は `null` に。**M5 (cell 回帰が無い) は棄却**: 2026-09-16 のユーザ決定「cell はもう使わない」により検証・回帰は node のみとする。指摘自体は正しい (SST 緩和と WMLES は共有コード) ので、`procedures/verification/README.md` の「node/cell 両方」規則を決定に合わせて書き換え、未検証のまま残る risk を §10 に記載した。**なお M3 の対応中に、ノイズ床を新バイナリ 3 反復だけで測るとカオス的 DDES で 15 倍の過小評価になり偽の不合格を出すことが分かり**、床を両側 (基準側・候補側) の全ペアから測る形に直した |
 | plan | `2026-09-18` | [2026-09-18-config-key-pruning-plan-3.md](../../notes/reviews/2026-09-18-config-key-pruning-plan-3.md) | **GO-with-changes**, C0/M4/m1 | **全採用 (2026-09-18)**: M1 `speciesImplicitRelax` は無効キーではない (`speciesTransport_d.cu:835` が読み `scalarTransport_d.cu:290` で化学種更新の増分に掛かる。`relax * (res·dt/V)/fac`) → **第 2 陣から除外**し現状維持。「使用実績が既定値だけ」を「不要」と読んだのが誤りで、**消費者の有無を見ずに D 基準を当てかけた**。M2 `time.deltaT.detectNaNInterval` の別名も無効ではない (`solverConfig.cpp:402` が読み `main.cpp:1900` が検査 step を変える。下位だけに 100 を書いた入力を無視すると間隔が 100 → 1 になり、「読まれていない」という警告文も事実と違う) → S1 では**読みを維持**し「トップレベルへ移せ」と警告するだけ、解決順序 (トップ → 旧別名 → 既定 1) と下限 1 補正を明記、拒否は S2。M3 S1 の作業順序は第 1 陣と**逆** (先に生成器を直すと旧パーサの必須キーが無くて起動できない) → 任意化 → `forge` と `convertGmshToForge` を両方リビルド確認 → 生成器から除去、の順に確定。runner は `solver_density_cuda/build/` を見るので `build-native` だけでは生産チェーンの確認にならない点も明記。`gpu`/`initial` は混ぜない。M4 §6 が第 1 陣用 (起動時拒否) のままで S1 の合格条件が無い + `check_solver_config.py` は既知の値キーを無条件に通すのでパーサ側の警告だけでは WARN 検出を保証できない → **§6.5' に S1 専用の受入表**を新設 (旧入力の受理・省略入力・不正値拒否・別名の解決順序・残置キーの巻き込み検出・検査ツール・生成〜変換〜起動の通し) と、短い固定 step の数値回帰で足りる旨。m5 S2 の条件「実運用ログから警告が消えた」では旧 run の再実行が救えない → **S2 は別マイルストーン**とし、移送確認か互換打ち切りの明示を条件に追加。**第 2 陣は 6 件 → 5 件**に確定 |
 | plan | `2026-09-18` | [2026-09-18-config-key-pruning-plan-4.md](../../notes/reviews/2026-09-18-config-key-pruning-plan-4.md) | **GO-with-changes**, C0/M5/m1 | **全採用 (2026-09-18)**: M1 移送ツールが **anchor/alias を共有する入力で残すべき `time.deltaT.control` まで消して照合を通過**していた (`deepcopy` が共有参照を保つので期待値側も一緒に消える) → anchor / alias / merge key を含む入力は**書き換えず手動対応として報告**。M2 **重複キー**を含む入力で照合が solver の実効設定を表さない (PyYAML は後勝ち、yaml-cpp は**先勝ち**。実例 `forge-chem/.../run_0022_dbg_rk3` に `cfl` が 2 つ) → 全階層の重複キーを検出して拒否。M3 引数なしの実行が plan で禁じた**他 worktree まで書き換えて**いた + 手書きの引数処理で `--dry-run` の誤記が書き込みになる → 既定をこのツリーに限定し `argparse` で未知オプションを拒否。M4 `recommended-settings.md` §1 の**現行雛型に対象キーが残って**おり、正本に従う新規 config が S2 で起動できない → 雛型から除去し、これを切替条件にした。M5 §6.7' が実在せず、`--dry-run` が編集・照合の前に終了するので移送不能な入力を見つけられない → **§6.7' を実際に追加**し、dry-run も編集・照合まで同じことをするように直し、許容を §6.2' と同じ「ノイズ床 × 2」に統一。m6 非 `hdf5` の `meshFormat` (このツリーに 2 本) を意味を見ずに削除していた → 自動移送せず手動対応として報告。実施結果は §6.8' |
+| result | `2026-09-18` | [2026-09-18-config-key-pruning-result.md](../../notes/reviews/2026-09-18-config-key-pruning-result.md) | **GO-with-changes**, C0/M3/m4 | **全採用 (2026-09-18)**。削除範囲と旧既定値の保持には撤回を要する誤りなし、との評価。M1 判定器が**任意量 (`roK` 等) の NaN・欠落を PASS にしていた** (事前検査が保存量・原始量だけで、欠落は比較から消え NaN は `max` で消える) → 検査を**比較する全量**に掛け、片側だけ欠けるのも異常として扱う。反例は `main()` を通す形で単体試験に追加。M2 **LES/DES の「両側 3 本以上」を自分で満たしていなかった** (line-DDES と WMLES が新 3 + 旧 1) → 旧バイナリの反復を各 2 本追加し (`case/39` `run_0031_*_rep2/rep3`、`case/38` `run_0027_*_rep2/rep3`)、直した判定器で全系列を再判定 (全 PASS)。M3 推奨 SST 雛型の YAML フェンス内に Markdown 引用が入っており**コピーすると構文エラー**になる → フェンス外へ出し、`recommended-settings.md` の全 YAML フェンスが `yaml.safe_load` を通ることを確認。m4 報告した最大比が L∞ を反映していなかった (DDES 1.27→**1.32**、S1 1.14→**1.29**/**1.46**、S2 1.15→**1.34**。合否は不変) → L2/L∞ の両方から集計し直し plan と case README を訂正。m5 変換器の拒否試験の証跡が保存先に無かった → 5 キー + 移送済み config の 6 本をコマンド・終了コード・メッセージつきで `run_0092_s2_keytest/logs/_conv/` に保存 (5 件とも rc=1、移送済みは rc=0)。m6 `methods/discretization.md` が `gradLSQDegenThresh` を設定可能と案内、`recommended-settings.md` が「cell は回帰対照」のまま → 内部固定値と明記し、node 限定方針に合わせた。m7 §5.1 の残作業表が最新でない + `speciesFaceReconstruction` の二重読みが残る → 表を閉じ、**二重読みを 1 回読みに統一**して起動ログで確認 (`logs/sfr_single_read.log`)。収束については「固定 step の回帰であって収束解の一致ではない」という評価に同意 (§6.4' の但し書きのとおり) |
 
 ## 7. 影響範囲
 
@@ -510,6 +516,8 @@ solver の config 読込と分岐、`procedures/` の設定文書、skill `forge
 - [x] 第 2 陣 S2 (起動時エラー化) — 移送 (このツリー 3491 本) と互換打ち切りの明示の両方で条件を満たし、§6.8' で全 PASS
 
 ## 9. 変更ログ
+
+- `2026-09-18` — codex **result レビュー GO-with-changes (C0/M3/m4) を全採用**。削除範囲そのものに撤回を要する誤りは無かったが、検証の穴が 3 つ残っていた: (a) 判定器が**任意量の NaN・欠落を PASS にしていた** (事前検査が保存量・原始量だけだった) → 比較する全量に検査を掛け、`main()` を通す反例を単体試験に追加。(b) **LES/DES の「両側 3 本以上」という自分で決めた条件を line-DDES と WMLES で満たしていなかった** (旧側 1 本) → 旧バイナリの反復を各 2 本追加して全系列を再判定、全 PASS。(c) 推奨 SST 雛型の YAML フェンスに Markdown 引用が混ざり**コピーすると構文エラー**になっていた → 修正し、全フェンスが `yaml.safe_load` を通ることを確認。併せて、報告していた最大比が L∞ を反映していなかったので L2/L∞ 両方から集計し直し (DDES 1.32 / S1 1.29・1.46 / S2 1.34、合否は不変)、変換器の拒否試験の証跡を保存し、`gradLSQDegenThresh` と cell 回帰対照の古い記述を直し、`speciesFaceReconstruction` の二重読みを解消した。
 
 - `2026-09-18` — **第 2 陣 S2 を実装** (§4.2, §6.7', §6.8')。codex plan レビュー 5 回目 **GO-with-changes (C0/M5/m1)** を全採用してから着手。**移送ツールに実際に壊す欠陥が 2 つ**あった: (a) anchor/alias を共有する入力で、残すべき `time.deltaT.control` まで消えるのに照合を通過する (`deepcopy` が共有参照を保つため期待値側も一緒に消える)、(b) 重複キーを含む入力で PyYAML (後勝ち) の照合が solver の yaml-cpp (先勝ち) の実効設定を表さない。どちらも**書き換えず手動対応として報告**するようにし、反例を単体試験に入れた。併せて既定の対象範囲をこのツリーに限定 (引数なしで他 worktree を書き換えていた)、`argparse` で未知オプションを拒否、`--dry-run` も編集・照合まで同じ処理を行うよう修正、非 `hdf5` の `meshFormat` は自動移送しない扱いに。`recommended-settings.md` §1 の雛型からも対象キーを除去した (正本に従う新規 config が起動できなくなるため)。**移送はこのツリー 3497 本中 3491 本、手動対応 2 本 (旧 smac 入力)、失敗 0**、2 回目は変更ゼロ。受入 11 項目 + 数値回帰 (最大比 1.15) が全 PASS。
 

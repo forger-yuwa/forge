@@ -16,9 +16,10 @@ float の `atomicAdd` で集積するので、無変更でもビット一致し�
     あるので、両側 3 本以上にすること (実例: 周期丘 DDES 400 step の壁せん断 `twall_x` は、新側 3 本の床
     1.81e-3 に対し 5 本にすると 2.70e-2 と 15 倍になり、3 本での判定は偽の不合格を出した)。
   - ノイズ床が厳密に 0 (ビット一致) の量は、候補にもビット一致を要求する。
-  - **数値判定の前にデータ不備を検査する**: 必須量の欠落・形状不一致・非有限値 (NaN/Inf) はどの run のものでも
+  - **数値判定の前にデータ不備を検査する**: 欠落・形状不一致・非有限値 (NaN/Inf) はどの run のどの量でも
     その場で終了コード 2 とし、数値判定に進まない (`perf_regress.py` と同じ作法; `max(0.0, NaN)` が `0.0` になって
-    異常が消えるため、比較の中で検出することはできない)。
+    異常が消えるため、比較の中で検出することはできない)。**検査は比較する全量に掛ける** — 任意量 (`roK` など) も、
+    **どれか 1 本の run にあれば全 run に要る**ものとして扱う (片側だけ欠けるのは異常であって「比較しない」理由にならない)。
   - **数値的にゼロの量** (最大絶対値 < `--zero-scale`, 既定 1e-20) は相対ノルムが意味を持たないので `zero` と表示して
     判定から外す (例: 平面 2D の `roUz` は 1e-36 の非正規化数で、相対差は幾らでも大きくなる)。判定から外したことは
     表に残す。候補側も同じ閾値を下回ることを確認する。
@@ -83,15 +84,21 @@ def load(run, step, quantities):
 def data_check(data, runs, required):
     """数値判定の**前**の不備検査。戻り: 問題の一覧 (空なら健全)。
 
-    NaN は比較の中では検出できない (`max(0.0, NaN)` が `0.0` になり異常が消える) ので、ここで落とす。"""
+    NaN は比較の中では検出できない (`max(0.0, NaN)` が `0.0` になり異常が消える) ので、ここで落とす。
+    検査対象は `required` に加えて、**どれか 1 本の run に出ている量すべて**。片側だけ欠けるのは異常であって
+    「比較から外す」理由にならない (codex result M1)。"""
     import numpy as np
     problems = []
     ref = runs[0]
     shapes = {}
+    seen = set(required)
     for r in runs:
-        for q in required:
+        seen |= set(data[r])
+    for r in runs:
+        for q in sorted(seen):
             if q not in data[r]:
-                problems.append(f'{r}: 必須の比較量 {q} が出力に無い')
+                problems.append(f'{r}: 比較量 {q} が出力に無い'
+                                + ('' if q in required else ' (他の run には出ている)'))
                 continue
             v = data[r][q]
             shapes.setdefault(q, (ref, v.shape))
@@ -158,7 +165,8 @@ def main():
         for q in problems:
             print('  ' + q)
         sys.exit(2)
-    common = [q for q in quantities if all(q in data[r] for r in runs)]
+    common = sorted(set().union(*[set(data[r]) for r in runs]),
+                    key=lambda q: (quantities.index(q) if q in quantities else len(quantities), q))
 
     print(f'step {step} / 基準側 {len(a.repeat)} 本・候補側 {len(cands)} 本 / 許容 = ノイズ床 × {a.factor:g}')
     if len(cands) == 1:

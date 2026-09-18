@@ -344,7 +344,7 @@ void solverConfig::read(std::string fname)
         // multispeciesRhoYCommonLimiter: opt-in 診断 (既定 0・ビット不変)。元 plan が「診断オプションとして残置」と決めている。
         this->multispeciesRhoYCommonLimiter = getOptionalValidatedValue<int>(deltaT, "multispeciesRhoYCommonLimiter", 0, "time.deltaT");
         // 受動スカラ経路の切替と緩和 (plans/active/species-passive-scalar-unification.md §4.1/§4.2)。既定は旧経路 (ビット不変)。
-        this->speciesFaceReconstruction = getOptionalValidatedValue<int>(deltaT, "speciesFaceReconstruction", 0, "time.deltaT");   // (下でも同じ値を再読込)
+        this->speciesFaceReconstruction = getOptionalValidatedValue<int>(deltaT, "speciesFaceReconstruction", 0, "time.deltaT");
         this->passiveScalarScheme = getOptionalValidatedValue<int>(deltaT, "passiveScalarScheme", 1, "time.deltaT");
         if (this->passiveScalarScheme != 0 && this->passiveScalarScheme != 1) {
             throw std::runtime_error("Key 'passiveScalarScheme' in 'time.deltaT' must be 0 (legacy generic scalar path) or 1 (species path).");
@@ -385,8 +385,9 @@ void solverConfig::read(std::string fname)
                       << ", passiveFct=" << this->passiveFct << " [prelimit " << this->passiveFctPrelimit << ", sweeps " << this->passiveFctSweeps
                       << ", tol " << this->passiveFctTol << "])" << std::endl;
         }
-        // 多成分 face 整合再構成: 既定 0 (mixed-order・ビット不変)。1 で Y を ρ と同じ再構成し thermo/species 流束整合。
-        this->speciesFaceReconstruction = getOptionalValidatedValue<int>(deltaT, "speciesFaceReconstruction", 0, "time.deltaT");
+        // (speciesFaceReconstruction は上で読む。2026-09-18 に二重読みを解消した — 値は同じで無害だったが、
+        //  片方を消したときに齟齬が出る。多成分 face 整合再構成: 既定 0 = mixed-order でビット不変、
+        //  1 で Y を ρ と同じ再構成にして thermo/species 流束を整合させる。)
         // 軸対称 near-axis 安定化係数 β_axis: 既定 0 (不変)。擬似時間スペクトル半径に λ_axis=β(|u_r|+c)A_planar を加える。
         this->axisTimestepBeta = getOptionalValidatedValue<flow_float>(deltaT, "axisTimestepBeta", 0.0, "time.deltaT");
         // block-DPLUR 線形 solve の内部精度: 既定 0 (float・従来高速)。1 で double 化 (軸対称近軸の根治用)。
