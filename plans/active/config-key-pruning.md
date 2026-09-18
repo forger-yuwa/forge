@@ -449,7 +449,8 @@ solver の config 読込と分岐、`procedures/` の設定文書、skill `forge
 - [x] 第 1 陣の削除 (2 パス + 定数化 5 件 + 撤去 1 件) と旧キーの起動時エラー化
 - [x] §6.2' の事前確定基準で §6.4' の検証が全 PASS (4 経路 + 拒否 8 + 受理 9 + 到達 3 + opt-in 3)
 - [x] `solver-settings.md` / `recommended-settings.md` / `methods/turbulence` / `procedures/verification` の同期
-- [ ] 第 2 陣 (候補 6 件) の段階移行 — 着手前に 4 回目の plan レビュー
+- [x] 第 2 陣 S1 (対象 5 件の任意化 + 1 回警告) — codex plan レビュー 4 回目を通し、§6.6' で受入 8 項目 + 数値回帰 2 本が全 PASS
+- [ ] 第 2 陣 S2 (起動時エラー化) — **別マイルストーン**。保持する再実行対象の移送確認、または互換打ち切りの対象・時期・手順の明示が条件
 
 ## 9. 変更ログ
 
