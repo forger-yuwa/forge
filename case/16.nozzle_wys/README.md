@@ -416,6 +416,7 @@ VERDICT: run_0213/0221/0224/0228 は `check_quasisteady` pmax/machmax STEADY、r
 
 | run | 変更点 | 結果 (初 NaN) | 判定 |
 | --- | --- | --- | --- |
+| `run_0063_tp_2sp_relax_sst` | 2D TP 2 種 + SST の緩和 A/B (旧) | **注記 (2026-09-18)**: config が削除済みキー `implicitRelaxSST` を書いているため、現行バイナリでは起動時エラーになる (plan [config-key-pruning](../../plans/active/config-key-pruning.md) §5.2)。再実行するときはキーを外すこと (`implicitRelax` に統合済み) | 破棄予定 (旧 A/B) |
 | `run_0069_ver_min2sp_float` | 2sp, inviscid+explicit+laminar (最小化) | step4。ro<0・sonic→0 が最冷出口で発生 | 発散機構を特定 |
 | `run_0070_ver_min2sp_double` | =0069 を **double** ビルド | step4、残差軌跡が float と6桁一致 | **①float精度 棄却** |
 | `run_0071_ver_min_n2o2` | =0069 で H2O→O2 (IC不整合, 参考) | step3 | 参考 (IC不整合) |
