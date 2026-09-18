@@ -165,8 +165,23 @@ Kader 原式への修正 (`wallLaw_d.cuh:130`) で壁法則が Pr_t を使わな
 | h | `speciesFaceReconstruction` を `solverConfig.cpp` が**二重に読んでいる** (値は同じで無害だが、片方を消すと齟齬) | 第 2 陣で整理 |
 | i | 棚卸しツールが `config["time"]` 形を取りこぼし | **済 (2026-09-18)** |
 | j | **棚卸しツールの使用数がキー名ベースで、完全修飾パス別になっていない** (節をまたいで合算・1 ファイル内の複数出現を重複計上)。これが「使用 0」の誤判定を生み、実際には 161 run / 1064 run が使うキーを削除しかけた | 第 2 陣の前に **PyYAML でパスごとに数える**実装へ置き換える (§5.1 #1 を再オープン) |
-| k | 誤った場所に書かれて黙って無視されているキーが多数 (`turbulence.kInf`/`omegaInf` 1410 run、トップレベル `lowMachPrecond` 70 run、`physProp.speciesFaceReconstruction` 112 run、`space.keepDiss*` 4 run ほか) | 未知キー検出 (§5.3 e) で拾えるので、case README に注記して順次修正 |
-| l | `physProp.isCompressible` と `physProp.ro` は**必須キーなのに読むコードが 1 箇所も無い**、`mesh.meshFormat` は合法値が `hdf5` 1 つだけ | 第 2 陣で必須をやめる (段階移行) |
+| k | 誤った場所に書かれて黙って無視されているキーが多数 | **検出は済 (2026-09-18)**: `check_solver_config.py` を完全修飾パス化し、本ツリーの 3455 config を掃いた結果が下表。修正は case README に注記して順次 |
+| l | `physProp.isCompressible` と `physProp.ro`、`time.last.control` は**必須キーだが下流に消費者が無い** (パーサは読む; `solverConfig.cpp:312/615/646`)、`mesh.meshFormat` は合法値が `hdf5` 1 つだけ | 第 2 陣で**任意化 + 無効である旨の警告**から始める (codex plan-2 の助言)。`meshFormat` は省略時 `hdf5`・不正値は拒否のまま (`main.cpp:1094`) |
+| m | `detectNaN` / `detectNaNInterval` が**トップレベルと `time.deltaT` の 2 か所**から読める (`solverConfig.cpp:399-403`, トップレベルが後勝ち)。実績はトップレベル 182 run / `time.deltaT` **0 run** | 第 2 陣で `time.deltaT` 側の綴りを落とす (使用ゼロなので移送不要) |
+| n | `physProp.prandtlLam` は 797 run が書いているが**全て既定値 0.72**、しかも `procedures/` `methods/` に一度も出てこない | §5.1 #6 で `solver-settings.md` に追記 (削除でなく文書化。既定を変えたい用途は実在しうる) |
+
+**§5.3 k の実測 (本ツリー `case/**/solverConfig.yaml` 3455 本, 2026-09-18)**
+
+| 起動時に拒否される (FAIL) | run 数 | | 節の位置が違う (WARN) | run 数 | | どこにも無い (WARN) | run 数 |
+| --- | ---: | --- | --- | ---: | --- | --- | ---: |
+| `turbulence.LESorRANS` / `LESmodel` | 1259 | | トップレベル `lowMachPrecond` | 22 | | `time.last.time` | 1292 |
+| `turbulence.RANSmodel` | 904 | | `physProp.lowMachPrecond` | 10 | | `turbulence.kInf` / `omegaInf` | 889 |
+| `mesh.nodeAxisDirichlet` | 387 | | `condensation.condRealizProject` | 5 | | `space.keepDissipation` | 163 |
+| `turbulence.DESmode` | 63 | | `space.keepDissType` ほか 3 件 | 各 4 | | `mesh.nodeWallViscGradFlux` | 104 |
+| `mesh.nodeValueAtNode` ほか 3 件 | 9–48 | | `physProp.speciesImplicitCoupling` | 2 | | `time.implicit` | 48 |
+
+拒否される側は**再実行すると落ちる**ので実害がすぐ出る。WARN 側は**黙って無視される**ので、
+`lowMachPrecond` を書いたつもりの 32 run は前処理が効いていない。これが本 plan を起票した動機そのもの。
 
 ## 6. 検証 (2026-09-18 改訂, codex plan M8/M9)
 
