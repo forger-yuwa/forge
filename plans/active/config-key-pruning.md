@@ -71,7 +71,8 @@ updated: 2026-09-17
 | # | 項目 | 内容 |
 | --- | --- | --- |
 | 1 | 棚卸しツールの恒久化 | `config_key_inventory.py`。**再オープン (2026-09-18)**: 使用数をキー名ベースでなく**完全修飾パスで PyYAML 集計**に直す (誤判定の原因; §5.3 j) |
-| 2 | 全キーの分類表 (live な値キー 167 パス) | 初版 (155 名称) は素案。**codex plan M3 / plan-2 M3 で抽出の取りこぼしと誤抽出が出たので再オープン**。修正後の棚卸しは **値キー 167 / 節 10 / 拒否専用 12 / 起動時拒否 8**、run config 4030 本。確定した削除は §5.2 の 2 パス + 定数化 5 件 + 撤去 1 件のみ。残りは**この一覧で**分類をやり直す |
+| 2 | 全キーの分類表 (live な値キー 167 パス) | **済 (2026-09-18)**: 修正後の棚卸し (値キー 167 / 節 10 / 拒否専用 12 / 起動時拒否 8、run config 4063 本) で分類を完了。素データは [notes/investigations/config-key-inventory-2026-09-18.md](../../notes/investigations/config-key-inventory-2026-09-18.md)、結論は §5.2「分類の結論」。**消してよいと言えるのは第 2 陣の候補 6 件だけ** |
+| 9 | 第 2 陣の削除 | **保留 (codex plan-3 の推奨)**。候補 6 件は §5.2 に確定済み。着手前に 4 回目の plan レビュー |
 | 3 | codex plan レビュー | 分類表ができた時点で `--stage plan` |
 | 4 | 削除の実装 (第 1 陣) | ~~確定 10 パス + 定数化 7 件~~ **済 (2026-09-18)**: config 読みとメンバを削除し、呼び出し側は既定値を直接渡す。旧キーは**起動時エラー** (どこへ移ったかを言う)。`check_solver_config.py` に未知キー検出を追加。第 2 陣は分類やり直し後 |
 | 5 | 回帰検証 | **済 (2026-09-18 やり直し)**: §6.2' の事前確定基準で 4 経路 (SST 定常陰解法 / DDES / line-implicit + DES 診断 / WMLES) + 拒否 8 件 + 受理 9 件 + opt-in 3 件。**全 PASS** (§6.4')。初回の 3 run は全量が反復幅以内でなく (`P` 2.125 vs 2.0) 収束も準定常も未達だったので破棄 |
@@ -144,6 +145,40 @@ Kader 原式への修正 (`wallLaw_d.cuh:130`) で壁法則が Pr_t を使わな
 | `physProp.isCompressible: 0` (SMAC 非圧縮) | `methods/poisson.md`「コードベースに残っており利用できる」 | 経路ごと廃止するかのユーザ判断 |
 | `time.deltaT.passiveFctSweeps` / `passiveFctTol` | 2026-09-16 新設で「使用 0」は年齢の反映 | 凝縮 dual-time の生産期に `[passiveFct] WARNING` が出ないことの確認 |
 | `mesh.bndFirstOrder` | 使用禁止キー。削除は既存の [architecture-bndfirstorder-removal](architecture-bndfirstorder-removal.md) の責務 | (本 plan の対象外) |
+
+#### 分類の結論 (2026-09-18, 修正後の棚卸しで完了 — §5.1 #2)
+
+素データは [notes/investigations/config-key-inventory-2026-09-18.md](../../notes/investigations/config-key-inventory-2026-09-18.md)
+(全 worktree の `case/**/solverConfig.yaml` **4063 本**)。内訳:
+
+| 区分 | 件数 | 処置 |
+| --- | ---: | --- |
+| live な値キー | **167** | 下の 5 行に分解される |
+| ├ 非既定の使用がある | 119 | **残す** (P/V)。生産で選ばれているか、A/B の実績がある |
+| ├ 必須キー (既定なし) | 30 | うち 4 件が第 2 陣の候補 (下表)、他は残す |
+| ├ 既定値が解決できない (リスト・マップ値) | 5 | `bodyForce` `mesh.wallDistExtraPhysIDs` `output.extraFields` `physProp.species` `space.uRef`。いずれも実使用があり**残す** (「既定と同じか」を機械判定できないだけ) |
+| ├ どの run にも書かれていない | 10 | 9 件は保留表に載っているもの。残り 1 件が第 2 陣の候補 |
+| └ 書かれているが既定値のみ | 3 | `keepDissCbEps` (保留)、`physProp.prandtlLam` (**残す**: 文書化した。壁関数の回復係数でも読む)、`time.deltaT.speciesImplicitRelax` (第 2 陣で要判断) |
+| 拒否専用の参照 | 12 | 起動時に落ちる旧キー。**現状維持** (`nodeAxisDirichlet` 系 5・旧乱流 4 キー・`nInnerLoop` 系 3) |
+| 起動時拒否テーブル `removed[]` | 8 | 第 1 陣で削除したもの |
+| 節そのもの | 10 | キーではない |
+
+**分類は完了**。「消してよい」と言えるのは、上の 167 のうち**第 2 陣の候補 6 件だけ**である。
+
+#### 第 2 陣の候補 (実装は保留 — codex plan-3 の推奨)
+
+| パス | 実績 | 根拠 | 処置案 |
+| --- | ---: | --- | --- |
+| `physProp.isCompressible` | 必須・4052 run | メンバ `isCompressible` を**パーサ外で読む場所がゼロ** (`solverConfig.cpp:615` で格納するだけ。対照の `dtControl` は `main.cpp:510` ほかで読む) | **任意化 + 無効である旨の警告**。SMAC 非圧縮経路を廃止するかの判断は別 |
+| `physProp.ro` | 必須・4052 run | 同上 (`solverConfig.cpp:646`)。圧縮性では密度は EOS で決まる | 同上 |
+| `time.last.control` | 必須・4052 run | メンバ `endTimeControl` を読む場所がゼロ (`solverConfig.cpp:313`)。終了条件を時刻で指定する旧機能の残骸 | 同上 |
+| `mesh.meshFormat` | 必須・4052 run | 合法値が `hdf5` 1 つだけ (`main.cpp:1094`) | **省略時 `hdf5`** とし、不正値の拒否は維持する |
+| `time.deltaT.detectNaNInterval` | **0 run** | トップレベル `detectNaNInterval` (182 run) と同じものを読む 2 つ目の綴り (`solverConfig.cpp:402-403`)。使用ゼロなので移送不要。**`detectNaN` の方は 2781 run が使っているので触らない** (§5.3 m) | この綴りだけ落とす |
+| `time.deltaT.speciesImplicitRelax` | 10 run・全て既定 1.0 | 多成分陰解法の緩和。掃引の実測が無い | **要判断**: 削除でなく「掃引してから決める」が妥当か |
+
+**いずれも段階移行**にする (受理 → 無効である旨の警告 → 削除)。全 run が書いている必須キーを一足飛びに拒否すると、
+既存 run の再実行が全部落ちる。`time.last.time` は**そもそも live キーでない** (1292 run が書いているが solver は読まない)
+ので削除対象が無い。`check_solver_config.py` が WARN で拾うので、順次 config から外す。
 
 #### 残すキー (P: 生産で選ぶ / V: 診断・A/B で要る)
 
@@ -311,12 +346,15 @@ solver の config 読込と分岐、`procedures/` の設定文書、skill `forge
 
 ## 8. 完了条件
 
-- [ ] 分類表 (§5.1 #2) が完全修飾パス 188 件を覆い、codex plan レビュー 2 回目を通っている
-- [ ] A–D の削除と旧キーの起動時エラー化
-- [ ] §6 の 1–4 を満たす
-- [ ] `solver-settings.md` / `recommended-settings.md` / skill の同期
+- [x] 分類表 (§5.1 #2) が live な値キー 167 パスを覆い、codex plan レビュー 3 回を通っている
+- [x] 第 1 陣の削除 (2 パス + 定数化 5 件 + 撤去 1 件) と旧キーの起動時エラー化
+- [x] §6.2' の事前確定基準で §6.4' の検証が全 PASS (4 経路 + 拒否 8 + 受理 9 + 到達 3 + opt-in 3)
+- [x] `solver-settings.md` / `recommended-settings.md` / `methods/turbulence` / `procedures/verification` の同期
+- [ ] 第 2 陣 (候補 6 件) の段階移行 — 着手前に 4 回目の plan レビュー
 
 ## 9. 変更ログ
+
+- `2026-09-18` — **167 パスの分類を完了** (§5.1 #2、§5.2「分類の結論」)。素データは [notes/investigations/config-key-inventory-2026-09-18.md](../../notes/investigations/config-key-inventory-2026-09-18.md) (4063 config)。内訳は 非既定の使用あり 119 / 必須 30 / 既定不明 (リスト・マップ値) 5 / 未記載 10 / 既定のみ 3。**「消してよい」と言えるのは第 2 陣の候補 6 件だけ**で、残りは残すか保留。候補は `physProp.isCompressible`・`physProp.ro`・`time.last.control` (いずれもパーサ外に消費者ゼロ。`endTimeControl`/`isCompressible`/`ro` を grep して確認、対照の `dtControl` は `main.cpp:510` ほかで読む)、`mesh.meshFormat` (合法値 1 つ)、`time.deltaT.detectNaNInterval` (0 run の 2 つ目の綴り)、`time.deltaT.speciesImplicitRelax` (10 run 全て既定, 要判断)。**実装は保留** (codex plan-3 の推奨)、着手前に 4 回目の plan レビュー。
 
 - `2026-09-18` — codex plan レビュー **3 回目 GO-with-changes (C0/M5/m1)**。M1–M4・m6 を採用、M5 を棄却 (§6.1)。主なもの: (a) §5.3 m で `time.deltaT.detectNaN` を「0 run」と書いたのは**2 パスの取り違え**で実際は 2781 run が非既定 → 削除決定を撤回。(b) 判定器が **NaN 入りの候補を PASS にしていた** → 不備検査を数値判定の前に入れ、反例を単体試験に追加。(c) §6.2' が必須とした**壁量が比較から脱落**していた (境界出力ファイルにしか無い) → `--boundary` を足して 4 経路を再判定、全 PASS。(d) 受理 9 件は**パーサ受理**であり分岐到達ではない → 3 件に到達確認を追加 (診断印字・残差 14 桁変化・トレーサ場 14% 変化)。(e) この過程で、**ノイズ床を片側 3 反復で測るとカオス的 DDES で 15 倍の過小評価**になり偽の不合格を出すことが判明 → 床を両側の全ペアから測る形に直し、LES/DES は両側 3 本以上を要求することにした。
 

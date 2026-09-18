@@ -13,6 +13,7 @@
 
 | ノート | area | 概要 |
 | --- | --- | --- |
+| [config-key-inventory-2026-09-18.md](investigations/config-key-inventory-2026-09-18.md) | `config / tooling` | solverConfig の全キーを完全修飾パスで棚卸しした表 (live な値キー 167 / 拒否専用 12 / 起動時拒否 8 / 節 10)。全 worktree の run config 4063 本での記載数・非既定数と、文書での言及先。判断は plan [config-key-pruning](../plans/active/config-key-pruning.md) 側 (2026-09-18) |
 | [chemistry-finite-rate-h2-survey.md](investigations/chemistry-finite-rate-h2-survey.md) | `thermophysics / chemistry` | 有限速度化学 (H₂ 燃焼・ノズル上流の化学非平衡) 導入の文献調査と方針: 機構選定 (Jachimowski→Burke)、剛性処理 (decoupled point-implicit 種ブロック)、sensible datum + 反応熱陽注入、Phase 0–4 計画と検証 (Cantera/CEA/Burrows–Kurkov) (2026-09-04) |
 | [condensation-carrier-kantrowitz-air-survey.md](investigations/condensation-carrier-kantrowitz-air-survey.md) | `condensation` | carrier 中の非等温核生成補正 (Feder 一般形と Wysłouzil 条件の θ 見積り)、過冷却水 σ の実測状況と Tolman 長、空気/N2 凝縮 onset データ (Daum & Gyarmathy 最小 onset 曲線の読み取り値) |
 | [condensation-droplet-hypersonic-survey.md](investigations/condensation-droplet-hypersonic-survey.md) | `condensation / multiphase` | 極超音速燃焼風洞・飛翔体における凝縮液滴/雨滴の挙動 (風洞凝縮の蒸発vs成長・燃焼器到達 end-to-end・迎角依存) |
