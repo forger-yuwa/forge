@@ -38,7 +38,7 @@ output: {level: 1}                                      # 保存量 + 原始量 
 
 - **`physProp` に `isCompressible` と `ro` は書かない**、`mesh.meshFormat` と `time.last.control` も書かない
   (§9.2 の段階移行キー。`time.deltaT.control` は別物で必要)。
-- **離散化は node (median-dual) が生産**、cell は回帰対照 ([user-prefers-node-base])。node のメッシュは
+- **離散化は node (median-dual) のみ** ([user-prefers-node-base]、2026-09-16 ユーザ決定)。cell の回帰対照も組まない。node のメッシュは
   **node 用に変換した h5** (`discretization: node` を書いた config で `convertGmshToForge`) を使い、2D は
   **平面メッシュ** (押し出し 2 ノード spanwise は 2 次 MUSCL の散逸が消えて発散)。
 - 対流は SLAU。`convMethod: 1, limiter: 2` が本段の標準、`limiter: 0` は使わない、**`mesh.bndFirstOrder` は禁止**。
@@ -92,10 +92,10 @@ output: {level: 1}                                      # 保存量 + 原始量 
 ```yaml
 turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1,
              wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInit: 1.0, omegaInit: 1000.0}
-
-  > **訂正 (2026-09-17)**: 旧記述の `kInf` / `omegaInf` は**存在しないキー**で、書いても黙って無視され k=ω=0 の初期値になる
-  > (node SST が step 0 で壊れる既知の原因 [node-sst-init-and-ghostless-fixes])。実キーは `turbulence.kInit` / `omegaInit`。
 ```
+
+> **訂正 (2026-09-17)**: 旧記述の `kInf` / `omegaInf` は**存在しないキー**で、書いても黙って無視され k=ω=0 の初期値になる
+> (node SST が step 0 で壊れる既知の原因 [node-sst-init-and-ghostless-fixes])。実キーは `turbulence.kInit` / `omegaInit`。
 
 - 既定で ON (キー省略時): `sstNodeWallKPin: 1`, `sstOmegaProdFromPk: 1`, `sstSigmaBlend: 1` (2026-09-08〜)。
   旧挙動を再現するときだけ 0 を明記。`sstIsotropicStress` / `sstEnergyKSource` は 0 のまま (分離型、非推奨)。
@@ -205,7 +205,7 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 
 ## 9. 旧設定 (superseded) — 新規 config に使わない
 
-### 9.1 削除したキー (2026-09-18, plan [config-key-pruning](../plans/active/config-key-pruning.md))
+### 9.1 削除したキー (2026-09-18, plan [config-key-pruning](../plans/accepted/config-key-pruning.md))
 
 **書くと起動時エラーになる**。黙って無視されないので、古い config を再実行すると気づける。
 

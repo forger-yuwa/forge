@@ -56,7 +56,7 @@ Wyslouzil et al., *J. Chem. Phys.* **113**, 7317 (2000)
 | `run_0005_slau_3d_visc` | 3D 粘性 層流 | 全壁 no-slip | **1.937** | 14.0 kPa | active. 2D 層流とほぼ同等 |
 | `run_0004_slau_2d_sst` | 2D 乱流 SST | 輪郭no-slip / fb slip | **1.883** | 15.3 kPa | active. 乱流 BL でさらに M 低下。**乱流熱伝導修正後 T≤Tt** |
 | `run_0006_slau_3d_sst` | 3D 乱流 SST | 全壁 no-slip | **1.534** | 25.4 kPa | active. 4壁 no-slip の閉塞で M 大幅低下。T≤Tt |
-| `run_0502_reach_sct_default` / `run_0503_reach_sct_turbkey` / `run_0504_reach_sct_physprop` | `turbulence.turbulentSchmidt` が**実際に消費先へ届くか**の到達確認 (plan [config-key-pruning](../../plans/active/config-key-pruning.md) §6.4', codex plan-3 M4)。`run_0484` (SST + `viscMethod 1` + トレーサ) を 500 step にし、Sc_t 既定 0.7 / `turbulence.turbulentSchmidt: 0.2` / `physProp.Sc_t: 0.2` の 3 本 | 0.2 にするとトレーサ `roXi` が既定から**相対 L2 1.41e-1** 動き、2 つの綴りどうしの差は **5.6e-6**。**別名として等価で、値は届いている** | ref (到達確認) |
+| `run_0502_reach_sct_default` / `run_0503_reach_sct_turbkey` / `run_0504_reach_sct_physprop` | `turbulence.turbulentSchmidt` が**実際に消費先へ届くか**の到達確認 (plan [config-key-pruning](../../plans/accepted/config-key-pruning.md) §6.4', codex plan-3 M4)。`run_0484` (SST + `viscMethod 1` + トレーサ) を 500 step にし、Sc_t 既定 0.7 / `turbulence.turbulentSchmidt: 0.2` / `physProp.Sc_t: 0.2` の 3 本 | 0.2 にするとトレーサ `roXi` が既定から**相対 L2 1.41e-1** 動き、2 つの綴りどうしの差は **5.6e-6**。**別名として等価で、値は届いている** | ref (到達確認) |
 
 exit Mach の単調序列 (非粘性 1.99 > 層流 1.94 > 2D乱流 1.88 > 3D乱流 1.53) は
 境界層変位による有効面積減少として物理的に整合。中心線静温はいずれも全温 293 K 以下。
@@ -417,7 +417,7 @@ VERDICT: run_0213/0221/0224/0228 は `check_quasisteady` pmax/machmax STEADY、r
 
 | run | 変更点 | 結果 (初 NaN) | 判定 |
 | --- | --- | --- | --- |
-| `run_0063_tp_2sp_relax_sst` | 2D TP 2 種 + SST の緩和 A/B (旧) | **注記 (2026-09-18)**: config が削除済みキー `implicitRelaxSST` を書いているため、現行バイナリでは起動時エラーになる (plan [config-key-pruning](../../plans/active/config-key-pruning.md) §5.2)。再実行するときはキーを外すこと (`implicitRelax` に統合済み) | 破棄予定 (旧 A/B) |
+| `run_0063_tp_2sp_relax_sst` | 2D TP 2 種 + SST の緩和 A/B (旧) | **注記 (2026-09-18)**: config が削除済みキー `implicitRelaxSST` を書いているため、現行バイナリでは起動時エラーになる (plan [config-key-pruning](../../plans/accepted/config-key-pruning.md) §5.2)。再実行するときはキーを外すこと (`implicitRelax` に統合済み) | 破棄予定 (旧 A/B) |
 | `run_0069_ver_min2sp_float` | 2sp, inviscid+explicit+laminar (最小化) | step4。ro<0・sonic→0 が最冷出口で発生 | 発散機構を特定 |
 | `run_0070_ver_min2sp_double` | =0069 を **double** ビルド | step4、残差軌跡が float と6桁一致 | **①float精度 棄却** |
 | `run_0071_ver_min_n2o2` | =0069 で H2O→O2 (IC不整合, 参考) | step3 | 参考 (IC不整合) |

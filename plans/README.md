@@ -29,7 +29,6 @@
 | [chemistry-finite-rate-h2.md](active/chemistry-finite-rate-h2.md) | `thermophysics / chemistry` | **有限速度化学 (H₂ 燃焼・ノズル化学非平衡)** (2026-09-04 起票): 種ブロック point-implicit + sensible datum 反応熱陽注入。Phase 0 (CEA スクリーニング・熱力学 DB ツール・Jachimowski YAML) 完了、Phase 1 ソース項から実装 |
 | [boundary-node-inlet-corner-wall.md](active/boundary-node-inlet-corner-wall.md) | `boundary / discretization` | node の入口∩壁コーナーで質量が溜まり P 暴走する問題の根治: 変換時に入口側半割面を壁へ帰属 (`mesh.nodeInletCornerWall`)。Burrows–Kurkov (case/47) で発覚 (2026-09-04) |
 | [turbulence-sst-consistency-options.md](active/turbulence-sst-consistency-options.md) | `turbulence` | codex 副次指摘の SST 整合オプション 5 件 (node 壁 k ピン既定 ON / P_ω from P_k / σ F1 ブレンド / 等方応力 / E–k 源) + 相似メッシュ試験ツール。P_ω from P_k / σ F1 ブレンドは整理後 既定 ON (2026-09-08, §2.1/§3.6)。等方応力 / E–k 源は R3 で置換予定 |
-| [config-key-pruning.md](active/config-key-pruning.md) | `tooling / 設定` | **solverConfig キーの整理 (採用があり得ないパラメータの削除)** (2026-09-17 起票, ユーザ指示): 155 キーのうち未使用 25・既定のみ 3・`recommended-settings.md` 未記載 78。実測で効果なし / 後継に置換された旧経路 / 決定で不採用 / 使われない内部定数 を削除し、残すキーは「生産で選ぶ」「診断・A/B で要る」に分類して位置づけを文書化する。旧キーは黙って無視せず起動時エラーに |
 | [architecture-bndfirstorder-removal.md](active/architecture-bndfirstorder-removal.md) | `architecture / boundary` | **`mesh.bndFirstOrder` の廃止**。使用禁止をルール化済 (粘性応力を破壊 + 疑似 2D で全域に効く)、コード削除が残タスク |
 | [axisymmetric-freestream-hoop-gauge.md](active/axisymmetric-freestream-hoop-gauge.md) | `axisymmetric` | 軸対称 hoop ソースの自由流保持 (pRef ゲージ整合 + 離散閉性面積、倍精度不要) |
 | [architecture-node-option-consolidation.md](active/architecture-node-option-consolidation.md) | `architecture` | node の `node*` オプション削減 — 整合セットを既定化し旧規約系フラグを撤去する手順 |
@@ -56,6 +55,7 @@
 ## accepted (現役の設計判断)
 
 | Plan | area | 概要 |
+| [config-key-pruning.md](accepted/config-key-pruning.md) | `tooling / 設定` | **[done 2026-09-18]** **solverConfig キーの整理** (2026-09-17 起票, ユーザ指示; codex plan 5 回 + result 1 回): 値キー 167 パスを分類し、**第 1 陣**で 2 パス削除 + 定数化 5 件 + 引数撤去 1 件、**第 2 陣**で消費者のない 5 パスを段階移行 (任意化 + 警告 → 起動時エラー、既存 config 3491 本を移送ツールで移送)。残置決定のあるキーは復元。棚卸し `config_key_inventory.py`・投入前検査の完全修飾パス化・回帰判定器 `check_field_regress.py`・移送ツール `migrate_solver_config.py` を整備 |
 | [condensation-kantrowitz-carrier.md](accepted/condensation-kantrowitz-carrier.md) | `condensation` | **[done 2026-09-13]** **carrier 中の非等温核生成補正 (Feder 形 `condKantrowitz 2/3`) と H2O 表面張力の小半径妥当性** (2026-09-12 起票, branch feature/condensation-air): H2O–N2 では N2 衝突がクラスタを冷やし θ が純蒸気形の 1/40; Wysłouzil 2D で 0/1/2/3 と σ ±3 % 感度 |
 | [condensation-air.md](accepted/condensation-air.md) | `condensation` | **[done 2026-09-13]** **空気そのものの凝縮** (2026-09-12 起票, codex plan 2 回 → 実装・検証 2026-09-13): CPG carrier 形 (N2 選択凝縮 + O2 キャリア, `condVaporMassFraction`)、`n2_latent`/飽和圧の低温整合 (C0, 閉形式 C–C)、括弧付き EOS 反転、SLAU 面状態一貫化、slip 状態保持。case/34 Arthur (node/cell): N2 新 +2.1 K / 空気 +1.7 K で $\dot P$ 対応理論線 ±3 K 以内、空気−N2 0.7 K |
 | --- | --- | --- |
