@@ -74,7 +74,7 @@ updated: 2026-09-17
 | 2 | 全キーの分類表 (live な値キー 167 パス) | 初版 (155 名称) は素案。**codex plan M3 / plan-2 M3 で抽出の取りこぼしと誤抽出が出たので再オープン**。修正後の棚卸しは **値キー 167 / 節 10 / 拒否専用 12 / 起動時拒否 8**、run config 4030 本。確定した削除は §5.2 の 2 パス + 定数化 5 件 + 撤去 1 件のみ。残りは**この一覧で**分類をやり直す |
 | 3 | codex plan レビュー | 分類表ができた時点で `--stage plan` |
 | 4 | 削除の実装 (第 1 陣) | ~~確定 10 パス + 定数化 7 件~~ **済 (2026-09-18)**: config 読みとメンバを削除し、呼び出し側は既定値を直接渡す。旧キーは**起動時エラー** (どこへ移ったかを言う)。`check_solver_config.py` に未知キー検出を追加。第 2 陣は分類やり直し後 |
-| 5 | 回帰検証 | §6 (経路別の最小回帰表 + §6.2' の事前確定基準)。**再オープン (2026-09-18, codex plan-2 M7)**: 初回の 3 run は全量が反復幅以内でなく (`P` 2.125 vs 2.0、`roUy` 3.84e-3 vs 3.38e-3)、収束も準定常も未達、SST / DES / WMLES 経路を通していない |
+| 5 | 回帰検証 | **済 (2026-09-18 やり直し)**: §6.2' の事前確定基準で 4 経路 (SST 定常陰解法 / DDES / line-implicit + DES 診断 / WMLES) + 拒否 8 件 + 受理 9 件 + opt-in 3 件。**全 PASS** (§6.4')。初回の 3 run は全量が反復幅以内でなく (`P` 2.125 vs 2.0) 収束も準定常も未達だったので破棄 |
 | 7 | 棚卸し・検査ツールの修正 | **済 (2026-09-18, codex plan-2 M2/M3/M4/M5)**: 入れ子 config の探索、コメント除去、節・拒否専用参照の分離、必須キーの既定値なし、別名解決 (代入先メンバ名で引く)、絶対許容差の撤去、記載/非既定の分離、読み取り失敗の報告。`check_solver_config.py` の未知キー検出を**完全修飾パス**に置換 (誤配置を WARN、起動時拒否を FAIL) |
 | 8 | 文書の同期 | **済 (2026-09-18, codex plan-2 M6)**: `recommended-settings.md` §9.1 を最終対象に合わせ、残置した 9 件を明記 |
 | 6 | 文書・skill の同期 | ~~第 1 陣ぶん~~ **済 (2026-09-18)**: `recommended-settings.md` §9.1 に削除キーの表 (理由と移行先)、`solver-settings.md` の該当記述を削除。第 2 陣は分類後 |
@@ -221,6 +221,34 @@ Kader 原式への修正 (`wallLaw_d.cuh:130`) で壁法則が Pr_t を使わな
 `run_0481_prune_reject_test` は**いま残置する** `lowMachThornber` を拒否した旧実装の記録なので、拒否試験としても使えない。
 上の基準でやり直す。
 
+### 6.4' 実施結果 (2026-09-18 やり直し)
+
+基準バイナリは削除前の `f8bdec3d` を worktree `/home/sano/work/forge-prune-base` でビルドしたもの。
+候補は HEAD (`build-native`)。判定は `solver_density_cuda/tools/check_field_regress.py` (本 §6.2' の実体化;
+反復 3 本の全ペア最大をノイズ床、許容はその 2 倍、**数値的にゼロの量** (平面 2D の `roUz` 等) は `zero` として判定外)。
+
+| 経路 (通す削除項目) | run (3 反復 + 基準) | 比較量 | 最大比 (ノイズ床比) | VERDICT |
+| --- | --- | ---: | ---: | --- |
+| SST 定常陰解法 (`implicitRelaxSST`, `gradLSQDegenThresh`) | `case/26.flat_plate_sst/run_0081`–`0084` | 15 | **1.17** | **PASS** |
+| DDES (`C_DES_kw`, `C_DES_ke`) | `case/39.periodic_hills/run_0024`–`0027` | 10 | **1.50** | **PASS** |
+| line-implicit + DDES 診断 (`lineDtWallRelief`, `C_DES_*`) | `case/39.periodic_hills/run_0028`–`0031` | 15 | **1.23** | **PASS** |
+| WMLES 壁モデル (`wmlesNewtonTol`, `wmlesNewtonMaxIt`, `wmlesPrt` 撤去) | `case/38.channel_wmles/run_0024`–`0027` | 8 | **1.08** | **PASS** |
+
+- **出力専用経路も判定に入れた**: SST は `wf_pk` (壁関数生産) と `vis_turb`、DES は `delta_les` / `l_des` / `rd_des` /
+  `fd_shield`。`delta_les` と `wall_dist` は旧新でビット一致。
+- **拒否試験 8/8 PASS**: `case/26.flat_plate_sst/run_0085_prune_keytest` (`logs/reject_*.log`)。削除した各パスを書いた
+  config が `no longer supported` を出して非ゼロ終了する。
+- **受理試験 9/9 PASS**: 同 run (`logs/accept_*.log`)。残置した 9 件をそれぞれ書いた config が起動して完走する。
+- **opt-in 受理 3/3 PASS**: `case/26.flat_plate_sst/run_0086_optin_*`。復元した性能スイッチ 3 件が既定経路と同じ場を出す
+  (全量 0.96〜1.02 倍)。**この run は反復間でもビット一致しない** ので、plan が言う「ビット同一」は
+  `atomicAdd` 経由の残差集積がある run では検証できず、ノイズ比で判定した。
+- **VERDICT の但し書き**: SST 回帰は収束済みの場からの継続なので `check_convergence` は旧新とも
+  `NOT CONVERGED (plateau)` (残差が初手から床)。`check_quasisteady` は旧新とも `ALL STEADY`。
+  したがって**同一 IC・同一 step の場の一致**として読むこと。定常解の収束を主張する試験ではない。
+- **意図的な逸脱**: DDES の回帰 config は `implicitRelax: 0.5` のまま回した (`check_solver_config` は
+  dual-time なので FAIL を出す)。1.0 にすると旧実装の `implicitRelaxSST: -1 → implicitRelax` の継承が
+  恒等になり、継承統合の誤りを検出できないため。生産設定としては §6 の dual-time レシピに従うこと。
+
 ### 6.3' 生成器・変換器 (M4)
 
 - `design/forge_design/evaluate/runner*.py` の 3 本が生成する `solverConfig.yaml` から削除キーを外し、**生成器を直してから**起動時拒否を入れる。
@@ -247,6 +275,8 @@ solver の config 読込と分岐、`procedures/` の設定文書、skill `forge
 - [ ] `solver-settings.md` / `recommended-settings.md` / skill の同期
 
 ## 9. 変更ログ
+
+- `2026-09-18` — **検証をやり直して全 PASS** (§6.4', codex plan-2 M7)。削除前バイナリ `f8bdec3d` を worktree `forge-prune-base` でビルドし、4 経路 (SST 定常陰解法 / DDES / line-implicit + DES 診断 / WMLES 壁モデル) で「同一バイナリ 3 反復のノイズ床 × 2」を事前に基準として判定。全量が 0.70〜1.50 倍で **4 経路とも PASS**、出力専用の `wf_pk` / `l_des` / `rd_des` / `fd_shield` も含む。削除キーの拒否 8/8、残置キーの受理 9/9、復元した opt-in スイッチ 3/3 も PASS。判定は恒久ツール `solver_density_cuda/tools/check_field_regress.py` に実体化した。
 - `2026-09-18` — codex plan レビュー **2 回目 GO-with-changes (C0/M7/m1)** を全採用 (§6.1)。**M1 で 3 度目の残置決定の読み違い**が出た: `blockDPLURDiagCache` / `blockDPLURDqPack` / `mesh.primPack` は元 plan が「不採用で確定、**opt-in 残置**」と決めたキーで、「既定に採用しない」を「機能を廃止する」と取り違えていた → コード (config 読み・メンバ・`calcGradient_d.cu` / `limiter_d.cu` / `timeIntegration_d.cu` の分岐) ごと復元し、削除前のファイルと diff ゼロを確認。**棚卸しも 2 度目の「使用 0」誤判定**で、`case/*/run_*/solverConfig.yaml` に限定していた探索を `case/**` の再帰に直すと 2796 → 4030 本になり、`forge-perf` の nested run が 3 件とも実際に 1 を書いていた。ツールはさらに、コメント除去・節/拒否専用参照/必須キーの分離 (181 → **値キー 167**)・別名を代入先メンバ名で解決・絶対許容差 1e-12 の撤去 (1e-20 と 1e-30 を同一視していた)・記載/非既定の分離・読み取り失敗の報告を入れた。`check_solver_config.py` の未知キー検出は**完全修飾パス**照合に置き換え、誤配置 (`lowMachPrecond` を トップレベルに 22 run 等) を WARN、起動時拒否を FAIL で拾うようにして実例を回帰試験に追加。`wmlesPrt` は定数化でなく**消費者のない引数の撤去**に分類し直し (Kader 原式で Pr_t が不要)、メンバ・カーネル引数ごと削除。`recommended-settings.md` §9.1 を最終対象に同期し、**残置した 9 件**を明記。**最終的な削除は 2 パス (`lineDtWallRelief`, `implicitRelaxSST`) + 定数化 5 件 + 撤去 1 件**。検証は §6.2' の事前確定基準でやり直す (再オープン)。
 
 - `2026-09-18` — **自己訂正 2**: さらに 2 件を戻した。`turbulence.turbulentSchmidt` は「全 worktree で使用 0」が誤りで**実際は 161 run が使用中** (chem ブランチ case/48 が 0.7 ×124、case/47 が **0.5** ×37)。`physProp.Sc_t` の既定と違う値があるので別名撤去には設定値の移送が要る。`physProp.isAxisymmetric` は **1064 run (値 1 が 593)** が使っており、拒否にすると既存 run の再実行が全部落ちる (deprecated 読みは生きている)。**原因**: 棚卸しツールの使用数集計が完全修飾パスでなくキー名ベースで、しかも節をまたいで合算・重複計上していたため「使用 0」を誤って出していた。**第 1 陣で実際に削除できたのは 5 パス + 定数化 6 件**に縮小。

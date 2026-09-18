@@ -89,6 +89,10 @@ python3 tools/postprocess_wall_law.py run_0006_slau_muscl 0.3 0.6 0.89
 | `run_0020_des_mode1` | **SST-DES T1-A シールド (wall-resolved y+1)**: 同場から `DESmode:1` 1000 step | mode1 vs mode0 `roUx` relL2 **5.7e-7**≪Cf 0.1%, `roK` 1.8e-5。付着 BL シールド (DES 発火は外縁 3%)、NaN なし | active |
 | `run_0021_des_ewt_yp30_mode0` | SST-DES T1-A: y+30 wall-modeled 場 (run_0011) から `DESmode:0` 1000 step (mode1 比較基準) | NaN なし | ref |
 | `run_0022_des_ewt_yp30_mode1` | **SST-DES T1-A シールド (wall-modeled y+30)**: 同場 `DESmode:1` 1000 step | mode1 vs mode0 `roUx` relL2 4.7e-5, `roK` 9.3e-4、付着 BL シールド (frac f_d<0.05=0.92)、NaN なし | active |
+| `run_0081_prune_regress_sst_new_r1` / `run_0082_..._r2` / `run_0083_..._r3` | 設定キー削除の非退行 (plan [config-key-pruning](../../plans/active/config-key-pruning.md) §6.2')。`run_0080` と同一 IC・同一設定で 10000 step、**新バイナリの 3 反復 = ノイズ床** | 反復間の相対 L2/L∞ 差が全量 1e-6〜2e-4 台。`check_quasisteady: ALL STEADY`、`check_convergence: NOT CONVERGED` (収束済み場からの継続で残差は初手から床) | ref (ノイズ床) |
+| `run_0084_prune_regress_sst_base` | 同設定を**削除前のバイナリ** (`f8bdec3d`, worktree `forge-prune-base`) で実行 | **`check_field_regress.py` VERDICT: PASS** — 15 量 (保存量・原始量・`roK`/`roOmega`・`vis_turb`・出力専用の `wf_pk`・`wall_dist`) すべて反復ノイズ床の 0.89〜1.17 倍。`implicitRelaxSST` の継承統合と `gradLSQDegenThresh` の定数化に退行なし | ref (回帰基準) |
+| `run_0085_prune_keytest` | 削除キーの**拒否試験 8 件**と残置キーの**受理試験 9 件** (20 step)。ログは `logs/` に保存 | 拒否 8/8 PASS (`no longer supported` + 非ゼロ終了)、受理 9/9 PASS | ref (キー試験) |
+| `run_0086_optin_{base,base_rep,base_rep2,primpack,dqpack,diagcache}` | 復元した opt-in 性能スイッチ (`mesh.primPack` / `blockDPLURDqPack` / `blockDPLURDiagCache`) が受理され、既定経路と同じ場を出すか (200 step, base 3 反復がノイズ床) | 3 件とも **PASS** (全量 0.96〜1.02 倍)。この run は反復間でもビット一致しない (`atomicAdd`) ので、ビット同一ではなくノイズ比で判定した | ref (opt-in 受理) |
 
 ### node-centered (median-dual) 検証 run
 
