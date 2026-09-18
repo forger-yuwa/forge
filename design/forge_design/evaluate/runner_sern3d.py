@@ -38,7 +38,15 @@ def _bcond_config(p, st):
         return (f"{name}: {{physID: {P[name]}, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , "
                 f"floats: {{ro: {s['ro']:.6g}, Ux: {s['u']:.6g}, Uy: 0.0, Uz: 0.0, Ps: {s['P']:.6g}, k: {s['k']:.6g}, omega: {s['omega']:.6g}{R2.inlet_species_floats(s)}}}}}\n")
 
+    # `evaluate.outlet_kind`: statPress (既定) / outflow (全量外挿)。
+    # node は壁列が常に亜音速なので、実出口圧より桁違いに低い Ps を課すとその列から unstart する
+    # (case/16 run_0212/0213 で確定)。SERN 3D の出口はプルーム実圧 ~7.5 kPa に対し Ps 2851 Pa で、
+    # run_0121 は出口面の圧力が 7.5 → 128 kPa に積み上がり Ux が 1714 → 153 m/s に落ちて発散した。
+    _okind = str(p.evaluate.get("outlet_kind", "statPress"))
+
     def outlet(name):
+        if _okind == "outflow":
+            return f"{name}: {{physID: {P[name]}, kind: outflow, outputHDFflg: 0, ints: , floats: }}\n"
         return f"{name}: {{physID: {P[name]}, kind: outlet_statPress, outputHDFflg: 0, ints: , floats: {{Ps: {en['P']:.6g}, Pt: {en['P']:.6g}, Tt: {en['T']:.6g}}}}}\n"
 
     def wall(name, kind=None):
@@ -58,12 +66,11 @@ def _bcond_config(p, st):
             + (wall("vehicle_side") if (int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0
                                         and p.raw.get("mesh3d", {}).get("vehicle_side", True)
                                         and p.raw.get("mesh3d", {}).get("ext_top", p.raw.get("mesh", {}).get("ext_top", 0))) else "")
-            # R2: 幅外の機体下面 (vehicle、旧トポロジのみ) は ramp と同じ壁種だが帳簿は別枠 (forces3d)
-            + (wall("vehicle") if (int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0
-                                   and not p.raw.get("mesh3d", {}).get("vehicle_side", True)) else "")
+            # R2: 幅外の機体下面 (vehicle)。R4c 後は機体後縁の先端区間だけが残る (数面) が、
+            # メッシュがその面を出す以上 bcond 行は必ず要る (無いと forge が physID 14 で止まる)
+            + (wall("vehicle") if int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0 else "")
             + (f"underside_far: {{physID: {P['underside_far']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
-               if (p.raw.get("mesh3d", {}).get("W_vehicle") is not None
-                   and not p.raw.get("mesh3d", {}).get("vehicle_side", True)) else "")
+               if p.raw.get("mesh3d", {}).get("W_vehicle") is not None else "")
             # R4: 機体上面 (ext_top)。2D の vehicle と同じく slip・壁出力 (帳簿外、診断)
             + (f"vehicle_top: {{physID: {P['vehicle_top']}, kind: slip, outputHDFflg: 1, ints: , floats: }}\n" if int(m2_ext(p)) else ""))
 

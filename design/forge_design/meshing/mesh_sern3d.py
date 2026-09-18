@@ -257,7 +257,7 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
         coords, hexes, top_fn = _add_ext_top3d(coords, hexes, B, xs, yt, zs, L_ramp, y_e, node, NJ, prm, ext,
                                                k_sw=k_sw, vs_on=bool(prm.vehicle_side and not no_outer))
         if prm.vehicle_side and not no_outer:
-            coords, hexes = _add_vehicle_side3d(coords, hexes, B, xs, yt, zs, k_sw, node, top_fn, NJ, prm, ext)
+            coords, hexes = _add_vehicle_side3d(coords, hexes, B, xs, yt, zs, k_sw, node, top_fn, NJ, prm, ext, L_ramp, y_e)
     coords *= prm.scale
     info = {"ni": ni, "NJ": NJ, "nz": nz, "jm": jm, "k_sw": k_sw, "i_te": i_te, "i_sw": i_sw, "cells": int(hexes.shape[0]),
             "nodes": int(coords.shape[0]), "W": prm.W, "Z_far": float(zs[-1]), "L_sw": L_sw, "cowl_thickness": t_c, "x_out": x_out, "y_bot": y_bot,
@@ -289,7 +289,9 @@ def _vehicle_top_line(xs, yt, L_ramp, y_e, prm):
     i_end = int(ok[-1]) if len(ok) else 0
     # i_end より下流は厚さ 0 のスリットになり、座標一致ノードとゼロ面積の退化面を生む
     # (2D が `cowl_thickness` で避けているのと同じ病)。機体後縁を i_end の鈍頭 (厚さ first_wall_frac)
-    # で終わらせ、以降は上面線をランプ線と**共有**する (R4c)
+    # で終わらせ、以降は上面線をランプ線と**共有**する (R4c)。
+    # 【既知の残渣】i_end と k_r の間の 1 区間だけ幅外にも機体が残る (14 面、0.1 H × 0.011 H)。
+    # 鈍頭化 (厚さを下限で止めて k_r まで一様に存在させる) を試したが後縁直後に 11 面のタグ漏れが出たので保留
     y3 = np.where(np.arange(ni) <= i_end, y3, yt)
     return y3, y_veh, k_r, i_end
 
@@ -344,12 +346,12 @@ def _add_ext_top3d(coords, hexes, B, xs, yt, zs, L_ramp, y_e, node, NJ, prm, ext
         for j in range(njT - 1):
             B["inlet_ext"].append((top(0, j, k), top(0, j + 1, k), top(0, j + 1, k + 1), top(0, j, k + 1)))
             B["outlet"].append((top(ni - 1, j, k), top(ni - 1, j, k + 1), top(ni - 1, j + 1, k + 1), top(ni - 1, j + 1, k)))
-    ext.update({"nj_ext_top": njT, "y_veh": y_veh, "_y3": y3, "_k_r": int(k_r), "_i_end": i_end, "i_vehicle_end": int(i_end), "i_ramp_te": int(k_r), "vehicle_taper": float(prm.vehicle_taper),
+    ext.update({"nj_ext_top": njT, "y_veh": y_veh, "i_vehicle_end": int(i_end), "i_ramp_te": int(k_r), "vehicle_taper": float(prm.vehicle_taper),
                 "vehicle_wedge_deg": float(prm.vehicle_wedge_deg), "top_depth": float(prm.top_depth), "n_top_nodes": int(n_own0 + N_topj)})
     return coords, hexes, top
 
 
-def _add_vehicle_side3d(coords, hexes, B, xs, yt, zs, k_sw, node, top_fn, NJ, prm, ext):
+def _add_vehicle_side3d(coords, hexes, B, xs, yt, zs, k_sw, node, top_fn, NJ, prm, ext, L_ramp, y_e):
     """R4c (codex plan レビュー C1, 2026-09-19): 機体をノズル幅 (z ≤ W/2) に閉じる。
 
     旧実装は 2D 断面を z 一様に押し出していたので、**ノズル幅の外にもランプ形状の固体が残り**、
@@ -362,7 +364,8 @@ def _add_vehicle_side3d(coords, hexes, B, xs, yt, zs, k_sw, node, top_fn, NJ, pr
     x ≤ L_sw) とは別のタグで、x ≤ L_ramp まで及ぶ (帳簿も別枠)。
     これにより幅外の旧ランプ線は**内部面**になり、`vehicle` / `underside_far` タグは出なくなる。
     """
-    y3 = ext["_y3"]; k_r = int(ext["_k_r"]); i_end = int(ext["_i_end"]); nz = len(zs); njv = int(prm.nj_vside)
+    y3, _yv, k_r, i_end = _vehicle_top_line(xs, yt, L_ramp, y_e, prm)
+    nz = len(zs); njv = int(prm.nj_vside)
     if njv < 3:
         raise ValueError("nj_vside は 3 以上")
     ks = list(range(k_sw, nz))                      # z ≥ W/2 (k_sw を含む = 側面の壁ノード列)
@@ -371,7 +374,12 @@ def _add_vehicle_side3d(coords, hexes, B, xs, yt, zs, k_sw, node, top_fn, NJ, pr
     n_int = (i_end + 1) * nk * (njv - 2)            # 内部行 (j=0 と j=njv-1 は共有ノード)
 
     def vs(i, j, k):
-        """i: station (0..k_r), j: 0 = yt (noz バンド上端と共有), njv-1 = y3 (top バンド j=0 と共有), k: 絶対 z index"""
+        """i: station, j: 0 = yt (noz バンド上端と共有), njv-1 = y3 (top バンド j=0 と共有), k: 絶対 z index。
+        【既知の欠陥 (codex plan レビュー 2 C2, 2026-09-19)】i_end の末端を `vehicle_side` の壁で閉じており、
+        その壁は z = W/2 に限らず遠方境界 (z/H 2.5) まで延びる 224 面。幅外の流体が下流へ抜けられず、
+        `side_far` との交線で最大 **5.72 MPa** (外気 2851 Pa) まで溜まる。run_0122 の結果はこの影響下にある。
+        正しくは上バンドの下端を z 依存にして、幅外では直線 y_veh のまま出口まで通す (末端の壁が不要になる)。
+        楔で縮退させる案は閉性が壊れた (漏れ 32・余り 10) ので不採用。"""
         if j == 0:
             return node(i, NJ - 1, k, "up_out")
         if j == njv - 1:
@@ -402,7 +410,7 @@ def _add_vehicle_side3d(coords, hexes, B, xs, yt, zs, k_sw, node, top_fn, NJ, pr
         hexes = np.vstack([hexes, np.asarray(extra, dtype=np.int64)])
 
     B.setdefault("vehicle_side", [])
-    for j in range(njv - 1):        # 後縁を閉じる面 (鈍頭、高さ < first_wall_frac)
+    for j in range(njv - 1):        # 末端を閉じる面 (★ C2: 本来これは要らない。上記 docstring 参照)
         for kk in range(nk - 1):
             k = ks[kk]
             B["vehicle_side"].append((vs(i_end, j, k), vs(i_end, j + 1, k), vs(i_end, j + 1, k + 1), vs(i_end, j, k + 1)))
