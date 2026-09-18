@@ -121,12 +121,88 @@ def steadiness_gate(hist, obj: str | None = None) -> dict:
             "reasons": [f"{k}: {series[k]['verdict']} ({series[k]['detail']})" for k in unsteady]}
 
 
-def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: str | None = None) -> dict:
+
+# --- 床・下限への張り付き (codex plan レビュー 2 の C1, 2026-09-19) ------------------------------
+# 有限で非上昇なら通る、というだけのゲートは**床に張り付いた解**を受理してしまう。
+# run_0122 では `sym` 上の 1 ノードで k=0・roOmega=1e-20 に張り付き、交差拡散が ω の下限 1e-12 で
+# 割られて、その 1 点だけで rms_roOmega = 8.95e15 を作っていた (保存場は有限・力係数は ALL STEADY)。
+FLOORS = {"P": ("pMin", 1.0), "T": ("tMin", 50.0), "ro": ("roMin", 1.0e-4)}
+OMEGA_FLOOR = 1.0e-20          # update_d.cu の roOmega 下限
+K_FLOOR = 0.0                  # k=0 は F1=0 を招き交差拡散が発散する
+
+
+def floor_gate(run_dir, p_min: float | None = None, tol: float = 1.0e-6) -> dict:
+    """最終保存場で EOS 床・乱流下限に張り付いたノードを数える。1 個でも在れば NG。"""
+    import glob
+    import os
+    run_dir = Path(run_dir)
+    fs = sorted((q for q in glob.glob(str(run_dir / "res_[0-9]*.h5"))
+                 if os.path.basename(q)[4:-3].isdigit()),      # 鏡像 (_full) など派生物を除く
+                key=lambda q: int(os.path.basename(q)[4:-3]))
+    if not fs:
+        return {"ok": True, "skipped": "no res_*.h5", "counts": {}}
+    counts = {}
+    try:
+        import h5py
+        with h5py.File(fs[-1], "r") as f:
+            V = f["VALUE"]
+            for name, (key, dflt) in FLOORS.items():
+                if name not in V:
+                    continue
+                lo = float(p_min) if (name == "P" and p_min is not None) else dflt
+                a = np.asarray(V[name][:])
+                counts[f"{name}<={lo:g}"] = int(np.sum(np.isfinite(a) & (a <= lo * (1.0 + tol))))
+            if "roOmega" in V:
+                a = np.asarray(V["roOmega"][:])
+                counts[f"roOmega<={OMEGA_FLOOR:g}"] = int(np.sum(np.isfinite(a) & (a <= OMEGA_FLOOR * (1.0 + tol))))
+            if "k" in V:
+                a = np.asarray(V["k"][:])
+                counts["k<=0"] = int(np.sum(np.isfinite(a) & (a <= K_FLOOR)))
+    except Exception as e:                                 # 読めないときは落とさず報告だけ
+        return {"ok": True, "skipped": f"{type(e).__name__}: {e}", "counts": {}}
+    bad = {k: v for k, v in counts.items() if v > 0}
+    return {"ok": not bad, "counts": counts, "file": os.path.basename(fs[-1]),
+            "reasons": [] if not bad else ["床/下限に張り付き: " + ", ".join(f"{k} {v} ノード" for k, v in bad.items())]}
+
+
+def residual_scale_gate(run_dir, ratio: float = 1.0e6) -> dict:
+    """残差列の**桁の揃い**を見る。1 列だけ他より ratio 倍以上大きいのは、
+    平坦でも局所的に閉じていない (run_0122 の rms_roOmega 8.95e15 / 他は 1e-4〜1e-1)。"""
+    import csv
+    path = Path(run_dir) / "residual_history.csv"
+    if not path.exists():
+        return {"ok": True, "skipped": "no residual_history.csv"}
+    rows = [r for r in csv.DictReader(path.open()) if r.get("phase") == "outer_end"]
+    if not rows:
+        return {"ok": True, "skipped": "no outer_end rows"}
+    last = {}
+    for k, v in rows[-1].items():
+        if not k.startswith("rms_"):
+            continue
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(fv) and fv > 0.0:
+            last[k] = fv
+    if len(last) < 2:
+        return {"ok": True, "skipped": "columns < 2"}
+    med = float(np.median(list(last.values())))
+    bad = {k: v for k, v in last.items() if v > med * ratio}
+    return {"ok": not bad, "median": med, "outliers": bad,
+            "reasons": [] if not bad else [f"残差の桁が揃わない (中央値 {med:.2e}): "
+                                           + ", ".join(f"{k} {v:.2e}" for k, v in bad.items())]}
+
+
+def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: str | None = None,
+                   p_min: float | None = None) -> dict:
     """全ゲートを評価して verdict / fail_class を返す。fail_class は数値失敗の種別:
     DIVERGED (rc≠0 / 発散ダンプ / 非有限・非正の場 / 残差 NaN), RESIDUAL_RISING, NOT_CONVERGED (require 時のみ),
     NO_FORCES (壁出力が無い), UNSTEADY (目的量・力係数が頭打ちしていない)。物理的 INFEASIBLE はここでは出さない。"""
     field = field_health(run_dir)
     resid = residual_health(run_dir)
+    floors = floor_gate(run_dir, p_min)
+    rscale = residual_scale_gate(run_dir)
     stead = steadiness_gate(hist, obj) if hist else {"ok": False, "objective": obj or objective_key(hist), "series": {}, "unsteady": [],
                                                     "reasons": ["no force history (no wall output)"]}
     reasons = []; fail = None
@@ -140,12 +216,17 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: 
         reasons += resid.get("reasons", []); fail = fail or ("DIVERGED" if resid["nan"] else "RESIDUAL_RISING")
     elif require_residual_pass and not resid["converged"]:
         reasons.append(f"residual {resid['verdict']} (require_residual_pass)"); fail = fail or "NOT_CONVERGED"
+    if not floors["ok"]:
+        reasons += floors["reasons"]; fail = fail or "FLOOR_STUCK"
+    if not rscale["ok"]:
+        reasons += rscale["reasons"]; fail = fail or "RESIDUAL_UNBALANCED"
     if not hist:
         reasons += stead["reasons"]; fail = fail or "NO_FORCES"
     elif not stead["ok"]:
         reasons += stead["reasons"]; fail = fail or "UNSTEADY"
     return {"verdict": "PASS" if fail is None else "FAIL", "fail_class": fail, "reasons": reasons, "rc": rc,
             "objective": stead["objective"], "field": field, "residual": resid, "steadiness": stead,
+            "floors": floors, "residual_scale": rscale,
             "require_residual_pass": bool(require_residual_pass)}
 
 

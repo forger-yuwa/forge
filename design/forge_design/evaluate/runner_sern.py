@@ -718,7 +718,8 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     if rc is None:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
-    gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass)
+    gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass,
+                           p_min=float(p.evaluate.get("p_min", 1.0)))
     out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "forge_rc": rc,
            "operating_point": info.get("operating_point"), "L_ramp": info["design"]["L_ramp"],
            "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"]}

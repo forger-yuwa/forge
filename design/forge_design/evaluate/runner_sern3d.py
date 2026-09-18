@@ -72,7 +72,12 @@ def _bcond_config(p, st):
             + (f"underside_far: {{physID: {P['underside_far']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
                if p.raw.get("mesh3d", {}).get("W_vehicle") is not None else "")
             # R4: 機体上面 (ext_top)。2D の vehicle と同じく slip・壁出力 (帳簿外、診断)
-            + (f"vehicle_top: {{physID: {P['vehicle_top']}, kind: slip, outputHDFflg: 1, ints: , floats: }}\n" if int(m2_ext(p)) else ""))
+            # R4f (codex plan レビュー 2 の M3, 2026-09-19): 機体上面も機体側面と同じ**等温粘性壁**を既定にする。
+            # 「帳簿外だから力に効かない」は誤りで、上面の境界層・熱伝達・後縁流れが変わればランプ/カウルの圧力も変わる。
+            # 旧既定の slip は `evaluate.vehicle_top_kind: slip` で比較用に残す (§4.11 の 2D 中立モデルの流用だった)
+            + ((wall("vehicle_top") if str(p.evaluate.get("vehicle_top_kind", "wall")) != "slip"
+                else f"vehicle_top: {{physID: {P['vehicle_top']}, kind: slip, outputHDFflg: 1, ints: , floats: }}\n")
+               if int(m2_ext(p)) else ""))
 
 
 def m2_ext(p) -> int:
@@ -300,7 +305,8 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     if rc is None:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
-    gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass)
+    gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass,
+                           p_min=float(p.evaluate.get("p_min", 1.0)))
     out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "dim": 3, "moc_forces": info["moc_forces"], "forge_rc": rc,
            "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"]}
     if hist:
