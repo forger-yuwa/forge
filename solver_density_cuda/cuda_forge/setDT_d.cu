@@ -355,7 +355,7 @@ void setDT_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , vari
         (cfg.lineImplicit == 1) ? msh.line_next_d : nullptr,
         (cfg.lineImplicit == 1) ? cfg.lineDtDirectional : 0,
         (cfg.lineImplicit == 1) ? msh.plane_wall_flag_d : nullptr,
-        (cfg.lineImplicit == 1) ? cfg.lineDtWallRelief : 0
+        0   /* 壁境界半割面の λ 除外は不採用 (発散した診断スイッチ) */
     ) ;
     gpuErrchk( cudaPeekAtLastError() );
 

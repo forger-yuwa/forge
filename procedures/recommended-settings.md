@@ -89,7 +89,10 @@ output: {level: 1}                                      # 保存量 + 原始量 
 
 ```yaml
 turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1,
-             wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInf: 1.0, omegaInf: 1000.0}
+             wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInit: 1.0, omegaInit: 1000.0}
+
+  > **訂正 (2026-09-17)**: 旧記述の `kInf` / `omegaInf` は**存在しないキー**で、書いても黙って無視され k=ω=0 の初期値になる
+  > (node SST が step 0 で壊れる既知の原因 [node-sst-init-and-ghostless-fixes])。実キーは `turbulence.kInit` / `omegaInit`。
 ```
 
 - 既定で ON (キー省略時): `sstNodeWallKPin: 1`, `sstOmegaProdFromPk: 1`, `sstSigmaBlend: 1` (2026-09-08〜)。
@@ -116,7 +119,7 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 - TP 陰解法の `cfl_pseudo` は 0.5〜2 から上げる (H2O 生成エンタルピーの増幅で上限が低い)。**`implicitRelax: 0.7` を付ければ 6〜8 まで可**
   (2026-09-16 case/44 va3 M4.19 node Euler 軸対称 TP 2 種 + 非平衡凝縮 `run_0181`–`0189`: cfl 6/8 + relax 0.7 は乾き一様場からの起動でも安定で場・残差床が cfl 2 と同じ;
   relax 無しの cfl 6 は軸列の EOS 床洗浄で発散 [implicit-cfl-ceiling-eos-floor と同じ機構]、relax 無しの cfl 4 は完走するが残差床が 2〜10 倍高い)。
-  定常 precond × 多成分は `speciesPrecondDt: 1` (既定)。TP 亜音速 `outlet_statPress` の γ 混用は修正済。
+  定常 precond × 多成分は `speciesPrecondDt: 1` (既定) — **ただしこのキーは化学ブランチ `feature/chemistry-finite-rate` 限定で、main / sern には未マージ** (2026-09-17 確認)。TP 亜音速 `outlet_statPress` の γ 混用は修正済。
 - 凝縮: 平衡凝縮を選ぶなら `condensation: 1, condEquilibrium: 2` (EOS 拘束形、厳密 S=1) を推奨 (設定既定値は 0 = 非平衡)。蒸発は既定 ON。
 - 凝縮 (2026-09-15, plan [condensation-source-limiter-steady](../plans/accepted/condensation-source-limiter-steady.md)): 非平衡の θ 律速は
   **`condLimiterMode: 1` (既定) で更新クランプ**になり、ソース残差の明示的な Δτ 依存 (θ×Δτ_loc) を除去した (旧 0 は残差に θ を掛け、大型ノズルで成長を 1/4 に絞っていた; case/44 で cfl 2 の解が旧 cfl 0.5 と一致)。cfl 間の固定点一致の検証状況は plan condensation-source-limiter-steady §9。
@@ -124,11 +127,11 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
   RK 陽解法では自動で 0 に降格 (起動ログ `[condensation] condLimiterMode=`)。dual-time + S3 (`speciesFaceReconstruction 2`) では既定 `passiveFct 1` の保存的 FCT 補正が受動種の有界性を担う (`check_passive_budget.py` で収支 PASS を確認)。dual-time は既定 `passiveScalarScheme 1` ならモーメントに BDF 物理時間項が付き
   更新クランプ (mode 1) のまま有効 (2026-09-17, plan species-passive-scalar-unification); `passiveScalarScheme 0` のときだけ 0 に降格。上限は `condDgMaxStep` 5e-3 / `condDTmaxStep` 1 K。
   凝縮 run は h0 保存を確認する (面温度修正済み)。onset は実験より ~5 mm 下流 (case/16 2026-09-08 比較)。
-- 受動スカラ (2026-09-17, plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md)): トレーサ・凝縮モーメントは既定で化学種経路
+- 受動スカラ (2026-09-17, plan [species-passive-scalar-unification](../plans/accepted/species-passive-scalar-unification.md)): トレーサ・凝縮モーメントは既定で化学種経路
   (`passiveScalarScheme 1`)。2 次面移流 (S3) を使うなら `speciesFaceReconstruction 2` + `speciesImplicitCoupling 1` の組で (coupling 0 + S3 は定常で発散)。
   **`implicitRelax 0.7` は定常 (擬似時間) の安定化として推奨**で、**dual-time の非定常計算には使わない** (§6 の dual-time 節): sub-iter の残差ノルムは下がるのに遅いモードが
   収束せず、同じ物理時刻の解が sub-iter 数に依存する (case/44 `run_0399`–`0404`: nSub 40→80 の ρ 差が緩和なしの 1.3e-5 に対し 6.3e-4; 2026-09-17,
-  plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md) §5.1 #26)。dual-time で安定化が要るときは `cfl_pseudo` を下げるか nSub を増やす。
+  plan [species-passive-scalar-unification](../plans/accepted/species-passive-scalar-unification.md) §5.1 #26)。dual-time で安定化が要るときは `cfl_pseudo` を下げるか nSub を増やす。
   S3 は凝縮 onset を 0.2 r_t 程度下流に動かす (数値拡散減) ので、実験比較の基準を変えるときは明記する。
 - 凝縮 (2026-09-10, plan [condensation-kantrowitz-gamma-twophase-sonic](../plans/active/condensation-kantrowitz-gamma-twophase-sonic.md)):
   Kantrowitz 補正 (`condKantrowitz: 1`) の γ は凝縮種 (蒸気) の γ_v が既定 (`condKantrowitzGammaMode: 0`; 旧=1)。
@@ -199,6 +202,28 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 - SST メッシュは壁 bcond を no-slip `wall` で変換 (wall_dist)。slip 延長壁は `wallDistExtraPhysIDs`。
 
 ## 9. 旧設定 (superseded) — 新規 config に使わない
+
+### 9.1 削除したキー (2026-09-18, plan [config-key-pruning](../plans/active/config-key-pruning.md))
+
+**書くと起動時エラーになる**。黙って無視されないので、古い config を再実行すると気づける。
+
+| 削除したキー | 理由 | 移行先 |
+| --- | --- | --- |
+| `time.deltaT.lineDtWallRelief` | 壁半割面の λ 除外は発散した診断スイッチ | 既定経路 (何も書かない) |
+| `time.deltaT.implicitRelaxSST` | 独立 3 件の A/B で効果なし | `implicitRelax` (SST も同じ値に従う) |
+| `turbulence.C_DES_kw` / `C_DES_ke` / `wmlesNewtonTol` / `wmlesNewtonMaxIt` / `mesh.gradLSQDegenThresh` | 一度も使われず掃引の実測も無い内部定数 → コードに固定 | (固定値。変えたいときはコードを直す) |
+| `turbulence.wmlesPrt` | Kader 原式への修正で壁法則が Pr_t を使わなくなり、**読む側が消えた**引数だった | (移行先なし。乱流 Prandtl 数は `turbulentPrandtl`、壁法則とは別物) |
+
+**削除していないもの (opt-in のまま残置)**: 過去に「不採用」と判定したスイッチでも、元 plan が「opt-in で残す」と
+決めているものは残っている。`blockDPLURDiagCache` / `blockDPLURDqPack` / `mesh.primPack` (性能の再現用)、
+`updateGuardAlpha`、`lowMachThornber`、`multispeciesRhoYCommonLimiter`、`passiveFctTolAbs`、
+`turbulence.turbulentSchmidt` (`physProp.Sc_t` の別名)、`physProp.isAxisymmetric` / `axisymMethod` (deprecated 読み)。
+**既定に採用しないことと、設定機能を廃止することは別の決定**であり、後者には残置決定を置き換える判断が要る。
+
+存在しないキーを書いても solver は黙って無視するので、**投入前に `check_solver_config.py` を通す**。完全修飾パスで
+照合し、**節の位置が違うキー** (トップレベルの `lowMachPrecond`、`physProp.speciesFaceReconstruction`、
+`space.keepDissType` など。書いた場所が違うと黙って無視される) とどこにも無いキーを WARN、solver が起動時に拒否する
+キーを FAIL で拾う。
 
 | 旧設定 | 状態 | 代替 |
 |---|---|---|

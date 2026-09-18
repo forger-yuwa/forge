@@ -233,9 +233,6 @@ void solverConfig::read(std::string fname)
             }
             this->gradLSQ = 2;
         }
-        if (config["mesh"]["gradLSQDegenThresh"]) {
-            this->gradLSQDegenThresh = config["mesh"]["gradLSQDegenThresh"].as<double>();
-        }
         if (config["mesh"]["nodeWallStressEdgeKernel"]) {
             this->nodeWallStressEdgeKernel = config["mesh"]["nodeWallStressEdgeKernel"].as<int>();
         }
@@ -327,7 +324,7 @@ void solverConfig::read(std::string fname)
         this->cfl = getValidatedValue<double>(deltaT, "cfl", "time.deltaT");
         this->cfl_pseudo = getValidatedValue<double>(deltaT, "cfl_pseudo", "time.deltaT");
         this->implicitRelax = getOptionalValidatedValue<double>(deltaT, "implicitRelax", 1.0, "time.deltaT");
-        this->updateGuardAlpha = getOptionalValidatedValue<double>(deltaT, "updateGuardAlpha", 0.0, "time.deltaT");
+        this->updateGuardAlpha = getOptionalValidatedValue<flow_float>(deltaT, "updateGuardAlpha", 0.0, "time.deltaT");
         this->lineImplicit = getOptionalValidatedValue<int>(deltaT, "lineImplicit", 0, "time.deltaT");
         this->blockDPLURDiagCache = getOptionalValidatedValue<int>(deltaT, "blockDPLURDiagCache", 0, "time.deltaT");
         this->blockDPLURDqPack = getOptionalValidatedValue<int>(deltaT, "blockDPLURDqPack", 0, "time.deltaT");
@@ -339,15 +336,12 @@ void solverConfig::read(std::string fname)
         this->lineViscCoupling = getOptionalValidatedValue<int>(deltaT, "lineViscCoupling", 0, "time.deltaT");
         this->lineViscousDtRelief = getOptionalValidatedValue<double>(deltaT, "lineViscousDtRelief", 0.0, "time.deltaT");
         this->lineDtDirectional = getOptionalValidatedValue<int>(deltaT, "lineDtDirectional", 0, "time.deltaT");
-        this->lineDtWallRelief = getOptionalValidatedValue<int>(deltaT, "lineDtWallRelief", 0, "time.deltaT");
-        {
-            double raw = getOptionalValidatedValue<double>(deltaT, "implicitRelaxSST", -1.0, "time.deltaT");
-            this->implicitRelaxSST = (raw < 0.0) ? this->implicitRelax : (flow_float)raw;
-        }
         this->blockDPLUR = getOptionalValidatedValue<int>(deltaT, "blockDPLUR", 0, "time.deltaT");
         // 多成分 TP 陰解法の化学種更新方式: 既定 0 (従来 segregated 点陰的・ビット不変)。
         // 1 で緩和整合 scalar-DPLUR (流れ block と同一緩和。plan thermophysics-species-implicit-coupling.md)。
         this->speciesImplicitCoupling = getOptionalValidatedValue<int>(deltaT, "speciesImplicitCoupling", 0, "time.deltaT");
+        // multispeciesRhoYCommonLimiter: opt-in 診断 (既定 0・ビット不変)。元 plan が「診断オプションとして残置」と決めている。
+        this->multispeciesRhoYCommonLimiter = getOptionalValidatedValue<int>(deltaT, "multispeciesRhoYCommonLimiter", 0, "time.deltaT");
         // 受動スカラ経路の切替と緩和 (plans/active/species-passive-scalar-unification.md §4.1/§4.2)。既定は旧経路 (ビット不変)。
         this->speciesFaceReconstruction = getOptionalValidatedValue<int>(deltaT, "speciesFaceReconstruction", 0, "time.deltaT");   // (下でも同じ値を再読込)
         this->passiveScalarScheme = getOptionalValidatedValue<int>(deltaT, "passiveScalarScheme", 1, "time.deltaT");
@@ -379,8 +373,8 @@ void solverConfig::read(std::string fname)
         this->passiveFctSweeps = getOptionalValidatedValue<int>(deltaT, "passiveFctSweeps", 100, "time.deltaT");
         if (this->passiveFctSweeps < 1) throw std::runtime_error("Key 'passiveFctSweeps' in 'time.deltaT' must be >= 1.");
         this->passiveFctTol = getOptionalValidatedValue<double>(deltaT, "passiveFctTol", 1.0e-6, "time.deltaT");
-        if (this->passiveFctTol <= 0.0) throw std::runtime_error("Key 'passiveFctTol' in 'time.deltaT' must be > 0.");
         this->passiveFctTolAbs = getOptionalValidatedValue<double>(deltaT, "passiveFctTolAbs", 1.0e-30, "time.deltaT");
+        if (this->passiveFctTol <= 0.0) throw std::runtime_error("Key 'passiveFctTol' in 'time.deltaT' must be > 0.");
         if (this->passiveScalarScheme == 1 || this->speciesImplicitRelax != 1.0 || this->scalarCflMax > 0.0) {
             std::cout << "'passiveScalarScheme' in 'time.deltaT': " << this->passiveScalarScheme
                       << " (passiveImplicitRelax=" << this->passiveImplicitRelax
@@ -392,8 +386,6 @@ void solverConfig::read(std::string fname)
         }
         // 多成分 face 整合再構成: 既定 0 (mixed-order・ビット不変)。1 で Y を ρ と同じ再構成し thermo/species 流束整合。
         this->speciesFaceReconstruction = getOptionalValidatedValue<int>(deltaT, "speciesFaceReconstruction", 0, "time.deltaT");
-        // multispeciesRhoYCommonLimiter: opt-in 診断 (既定 0・ビット不変)。1 で ρ と全 species に共通 min リミタ。
-        this->multispeciesRhoYCommonLimiter = getOptionalValidatedValue<int>(deltaT, "multispeciesRhoYCommonLimiter", 0, "time.deltaT");
         // 軸対称 near-axis 安定化係数 β_axis: 既定 0 (不変)。擬似時間スペクトル半径に λ_axis=β(|u_r|+c)A_planar を加える。
         this->axisTimestepBeta = getOptionalValidatedValue<flow_float>(deltaT, "axisTimestepBeta", 0.0, "time.deltaT");
         // block-DPLUR 線形 solve の内部精度: 既定 0 (float・従来高速)。1 で double 化 (軸対称近軸の根治用)。
@@ -425,8 +417,8 @@ void solverConfig::read(std::string fname)
                 "2 (RHS+LHS full precond), or 3 (LHS-only full precond).");
         }
         this->precondEps = getOptionalValidatedValue<double>(deltaT, "precondEps", 0.15, "time.deltaT");
-        // Thornber 型低マッハ再構成補正: 既定 0 で従来挙動 (ビット不変)。lowMachPrecond と直交・併用可。
         this->lowMachThornber = getOptionalValidatedValue<int>(deltaT, "lowMachThornber", 0, "time.deltaT");
+        // Thornber 型低マッハ再構成補正: 既定 0 で従来挙動 (ビット不変)。lowMachPrecond と直交・併用可。
         // 旧 space.keepDissipation は廃止 (KEEP_d は常に純粋 KEEP)。既存 config に残っていても無視される。
         this->dt_max = getValidatedValue<double>(deltaT, "dt_max", "time.deltaT");
         this->dt_min = getValidatedValue<double>(deltaT, "dt_min", "time.deltaT");
@@ -443,6 +435,27 @@ void solverConfig::read(std::string fname)
             throw std::runtime_error(
                 "Key 'dualTime_InnerLoop' in 'time' is no longer supported. Rename it to 'nStepInner'."
             );
+        }
+        // 削除したキー (plan config-key-pruning §5.2): 黙って無視せず、どこに移ったかを言って落とす。
+        {
+            struct Removed { const char* sec1; const char* sec2; const char* key; const char* note; };
+            static const Removed removed[] = {
+                {"time", "deltaT", "lineDtWallRelief",    "removed: diverged around step 80-100 (diagnostic switch)"},
+                {"time", "deltaT", "implicitRelaxSST",    "removed: SST now follows 'implicitRelax' (three independent A/B tests showed no effect)"},
+                {"mesh", nullptr,  "gradLSQDegenThresh",  "removed: fixed internal constant"},
+                {"turbulence", nullptr, "C_DES_kw",       "removed: fixed model constant (Strelets 2001)"},
+                {"turbulence", nullptr, "C_DES_ke",       "removed: fixed model constant (Strelets 2001)"},
+                {"turbulence", nullptr, "wmlesNewtonTol", "removed: fixed internal constant"},
+                {"turbulence", nullptr, "wmlesNewtonMaxIt", "removed: fixed internal constant"},
+                {"turbulence", nullptr, "wmlesPrt",       "removed: the Kader wall law no longer uses a turbulent Prandtl number (no replacement)"},
+            };
+            for (const auto& r : removed) {
+                YAML::Node n = r.sec2 ? config[r.sec1][r.sec2] : config[r.sec1];
+                if (n && n[r.key].IsDefined()) {
+                    const std::string where = std::string(r.sec1) + (r.sec2 ? std::string(".") + r.sec2 : std::string(""));
+                    throw std::runtime_error("Key '" + std::string(r.key) + "' in '" + where + "' is no longer supported (" + r.note + ").");
+                }
+            }
         }
         this->nStepInner = getOptionalValidatedValue<int>(config["time"], "nStepInner", 1, "time");
         // dual-time (非定常陰解法): 1 物理ステップあたりの擬似時間サブ反復数と BDF 次数。
@@ -575,11 +588,6 @@ void solverConfig::read(std::string fname)
 
         // SST-DES length scale 修正 (methods/turbulence §8): DESmode は turbulence.model
         // (sst-ddes/sst-iddes) から設定済み。旧 'DESmode' キーは上のガードで拒否される。
-        this->C_DES_kw = getOptionalValidatedValue<flow_float>(turb, "C_DES_kw", 0.78, "turbulence");
-        this->C_DES_ke = getOptionalValidatedValue<flow_float>(turb, "C_DES_ke", 0.61, "turbulence");
-        if (this->C_DES_kw <= 0.0 || this->C_DES_ke <= 0.0) {
-            throw std::runtime_error("Keys 'C_DES_kw'/'C_DES_ke' in 'turbulence' must be positive.");
-        }
 
         // 乱流プラントル数 Pr_t (乱流熱伝導 k_t = cp*mu_t/Pr_t)。既定 0.9。
         this->turbulentPrandtl = getOptionalValidatedValue<flow_float>(turb, "turbulentPrandtl", 0.85, "turbulence");
@@ -588,12 +596,6 @@ void solverConfig::read(std::string fname)
         }
 
         // WMLES 代数壁応力モデル (methods/turbulence §10)。有効化は bcondConfig の壁単位 wallModelLES。
-        this->wmlesNewtonTol   = getOptionalValidatedValue<flow_float>(turb, "wmlesNewtonTol", 1.0e-6, "turbulence");
-        this->wmlesNewtonMaxIt = getOptionalValidatedValue<int>(turb, "wmlesNewtonMaxIt", 20, "turbulence");
-        this->wmlesPrt         = getOptionalValidatedValue<flow_float>(turb, "wmlesPrt", 0.9, "turbulence");
-        if (this->wmlesNewtonTol <= 0.0 || this->wmlesNewtonMaxIt < 1 || this->wmlesPrt <= 0.0) {
-            throw std::runtime_error("Keys 'wmlesNewtonTol'/'wmlesNewtonMaxIt'/'wmlesPrt' in 'turbulence' must be positive.");
-        }
 
         if (this->LESorRANS < 0 || this->LESorRANS > 2) {
             throw std::runtime_error("Key 'LESorRANS' in 'turbulence' must be one of 0, 1, or 2.");
@@ -720,14 +722,13 @@ void solverConfig::read(std::string fname)
         }
         if (physProp["Sc"])                     this->Sc = physProp["Sc"].as<double>();
         if (physProp["Sc_t"])                   this->Sc_t = physProp["Sc_t"].as<double>();
-        // 乱流シュミット数は turbulence.turbulentSchmidt でも設定可 (turbulentPrandtl と同じ場所)。
-        // 後方互換: physProp.Sc_t も有効。両方あれば turbulence 側を優先する。
+        // 乱流シュミット数は turbulence.turbulentSchmidt でも設定可 (chem ブランチの 161 run が使用中)。両方あれば turbulence 側を優先。
         if (config["turbulence"] && config["turbulence"]["turbulentSchmidt"]) {
             this->Sc_t = config["turbulence"]["turbulentSchmidt"].as<flow_float>();
             std::cout << "'turbulentSchmidt' in 'turbulence': " << this->Sc_t << std::endl;
         }
         if (this->Sc_t <= 0.0) {
-            throw std::runtime_error("Turbulent Schmidt number (Sc_t / turbulentSchmidt) must be positive.");
+            throw std::runtime_error("Key 'Sc_t' in 'physProp' must be positive.");
         }
         if (this->thermalMethod == 2 && this->speciesNames.empty()) {
             // 既定: 単成分 N2 (CEA 検証用)

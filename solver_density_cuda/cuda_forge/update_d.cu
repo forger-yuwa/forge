@@ -353,7 +353,7 @@ void applySSTPointImplicit_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , 
         msh.nCells,
         var.c_d["volume"],
         var.c_d["dt_local"],
-        cfg.implicitRelaxSST,
+        (flow_float)cfg.implicitRelax,   /* SST も implicitRelax に従う (独立キーは削除) */
         var.c_d["roK"],
         var.c_d["roOmega"],
         var.c_d["roKN"],

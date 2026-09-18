@@ -46,11 +46,13 @@ public:
     flow_float cfl;
     flow_float cfl_pseudo;
     flow_float implicitRelax = 1.0;
-    flow_float implicitRelaxSST = -1.0; // -1: implicitRelax に倒置 (既定動作不変)
     // 陰的更新の正値性ガード (commit 時の局所 under-relax)。0=OFF (既定・ビット同一迂回)。
     // >0 で「1 step で ro・内部エネルギーが alpha 倍未満に落ちる」セルの Δq を半減列で縮小。
     // plans/active/time_integration-update-positivity-guard.md
     flow_float updateGuardAlpha = 0.0;
+    // 陰的更新の正値性ガード (commit 時の局所 under-relax)。0=OFF (既定・ビット同一迂回)。
+    // >0 で「1 step で ro・内部エネルギーが alpha 倍未満に落ちる」セルの Δq を半減列で縮小。
+    // plans/active/time_integration-update-positivity-guard.md
     // line-implicit (壁法線ライン block-Thomas を DPLUR に埋め込む)。0=OFF (既定)。
     // 1 で高 AR 積層方向の結合を直接解に昇格し cfl_pseudo 上限を引き上げる。
     // blockDPLUR==1 専用・lowMachPrecond>=2 とは併用不可 (config 検証で拒否)。
@@ -61,7 +63,6 @@ public:
     int lineViscCoupling = 0;         // 1: line 面にスカラー粘性結合 K+=α·I (対角 2α→α)
     flow_float lineViscousDtRelief = 0.0;  // θ: on-line セルの擬似 dt 粘性項を (1−θ) 倍
     int lineDtDirectional = 0;        // 1: 方向別 dt — line 面の λ (音響込み) を CFL の max から除外
-    int lineDtWallRelief = 0;         // 1: (診断) wall 種境界半割面の λ も on-line セルの CFL max から除外
     // 軸対称 near-axis 安定化: 擬似時間スペクトル半径に軸項 λ_axis=β·(|u_r|+c)·A_planar を加える。
     // 近軸 (r→0) で Δτ∝CFL·r/(|u_r|+c) を自然に与え半径運動量不安定を抑える。0=不変 (既定)。
     flow_float axisTimestepBeta = 0.0;
@@ -73,6 +74,10 @@ public:
     // 1: ρ と全 species に共通リミタ ψ_ρY=min(ψ_ρ, min_s ψ_Y_s) を適用し ρ_f=ρ(Y_f) 整合だけを切り分ける
     //    (p・速度は各自のリミタのまま)。nSpecies>1 かつ speciesFaceReconstruction>=1 で有効。
     int multispeciesRhoYCommonLimiter = 0;
+    // (以下は元のコメント)
+    // multispeciesRhoYCommonLimiter: opt-in 診断。0 (既定・ビット不変)、
+    // 1: ρ と全 species に共通リミタ ψ_ρY=min(ψ_ρ, min_s ψ_Y_s) を適用し ρ_f=ρ(Y_f) 整合だけを切り分ける
+    //    (p・速度は各自のリミタのまま)。nSpecies>1 かつ speciesFaceReconstruction>=1 で有効。
     int speciesImplicitCoupling = 0; // 多成分 TP 陰解法 (timeIntegration==11, nSpecies>=2) の化学種更新方式。
                                      // 0: 従来 segregated 点陰的 forward-Euler (既定・ビット不変)。
                                      // 1: 緩和整合 scalar-DPLUR (流れ block と同一 dt_local/implicitRelax/nStepInner
@@ -166,6 +171,8 @@ public:
                                    // ε 小ほど低マッハ振動を強く減衰するが ε≲0.1 は発散 (ε=0.05 で NaN)。
                                    // ε=0.15: M4 ノズルで limit-cycle 振幅 −32% (検証済), ε=0.3: −17%。
     int lowMachThornber = 0;       // 0: off (従来), 1: Thornber 型再構成補正 (SLAU の L/R 速度ジャンプを
+                                   // ε 小ほど低マッハ振動を強く減衰するが ε≲0.1 は発散 (ε=0.05 で NaN)。
+                                   // ε=0.15: M4 ノズルで limit-cycle 振幅 −32% (検証済), ε=0.3: −17%。
                                    // z=min(M,1) で縮約)。lowMachPrecond と直交・併用可。SLAU 経路のみ。
     // (旧 keepDissipation は廃止。以下 keepDissType は別設計: KEEP 中心流束は不変のまま独立な散逸レイヤを加算する)
     int keepDissType = 0;          // KEEP 用 opt-in 散逸レイヤ (plans/accepted/convection-keep-es-dissipation.md)。
@@ -287,7 +294,6 @@ public:
     // 壁単位 ints: wallModelLES=1 (LESorRANS!=2 のみ)。以下はモデルパラメータ (turbulence セクション)。
     flow_float wmlesNewtonTol = 1.0e-6; // u_τ Newton の相対許容誤差
     int        wmlesNewtonMaxIt = 20;   // u_τ Newton の最大反復 (warm start 時は 1-3 回で収束想定)
-    flow_float wmlesPrt = 0.9;          // Kader 温度壁法則の乱流プラントル数 (SGS 側 turbulentPrandtl とは独立)
 
     // 一様体積力 [N/m³] (周期チャネル駆動等, wmles plan §5-7 / methods/time_integration)。
     // 運動量に f_i·V、エネルギーに (f·u)·V を residual へ加算する。既定 0 = off (ビット不変)。
@@ -437,7 +443,6 @@ public:
     std::string tracer = "";
     bool tracerEnabled() const { return tracer == "exhaust"; }
     flow_float Sc_t = 0.7;                     // 乱流 Schmidt 数 (D_t=mu_t/(ro*Sc_t))。
-                                               // turbulence.turbulentSchmidt でも設定可 (physProp.Sc_t は後方互換、turbulence 優先)
 
     // 非平衡凝縮 (4 モーメント方程式 ρg,ρQ2,ρQ1,ρQ0)。methods/condensation/ 参照。
     // Phase 1 はモーメントを受動スカラー (ソース=0) として輸送するのみ。既定 off で従来経路ビット不変。

@@ -10,6 +10,7 @@
   - FCT (`passiveFct 1`) が作動しない組み合わせ (SLAU 以外 / SFR < 2 / dual-time でない)
   - 凝縮 dual-time で `passiveScalarScheme 0` (モーメントに BDF 物理時間項が付かない)
   - `speciesFaceReconstruction` ≥ 2 と `speciesImplicitCoupling 0` の組 (定常で発散)
+  - solver が読まないキー・**誤った節に書かれたキー** (WARN) と、起動時に拒否されるキー (FAIL)
 
 使い方: check_solver_config.py RUN_DIR|solverConfig.yaml [...]   (VERDICT PASS/WARN/FAIL, exit 0/0/1)
 WARN は「意図的ならよい」もの、FAIL は「まず直すべき」もの。
@@ -23,6 +24,71 @@ def load(path):
     p = os.path.join(path, 'solverConfig.yaml') if os.path.isdir(path) else path
     with open(p) as f:
         return p, (yaml.safe_load(f) or {})
+
+
+_SPEC = None
+
+
+def _spec():
+    """solverConfig が受理する**完全修飾パス**の一覧を config_key_inventory から借りる。
+
+    戻り (values, sections, rejected): `values` は値を読むパス、`sections` は節、`rejected` は
+    起動時に落とすパス (削除済みキー・改名済みキー)。抽出に失敗したら None を返し、検査を飛ばす。"""
+    global _SPEC
+    if _SPEC is not None:
+        return _SPEC
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('cki', os.path.join(here, 'config_key_inventory.py'))
+        cki = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cki)
+        raw = open(cki.SRC_CPP, errors='replace').read() + '\n' + open(cki.SRC_HPP, errors='replace').read()
+        src = cki.strip_comments(raw)
+        keys = cki.extract_keys(src)
+        gone = cki.removed_keys(src)
+        allp = set(keys)
+        sections = {p for p in allp if any(q != p and q.startswith(p + '.') for q in allp)}
+        rejected = set(gone) | {p for p, d in keys.items() if d['kind'] == 'rejected'}
+        values = (allp - sections - rejected)
+        _SPEC = (values, sections, rejected)
+    except Exception:
+        _SPEC = (None, None, None)
+    return _SPEC
+
+
+def unknown_keys(y):
+    """config に書かれた**完全修飾パス**を solverConfig の受理パスと突き合わせる (plan config-key-pruning §5.3 e)。
+
+    戻り (fails, warns)。`fails` は solver が起動時に拒否するパス、`warns` は綴り違い・**誤配置** (正しい節が
+    別にあるもの)・どこにも無いキー。末端名だけの照合では誤配置を拾えなかった (codex plan-2 M5)。"""
+    values, sections, rejected = _spec()
+    if values is None:
+        return [], []
+    by_leaf = {}
+    for p in values:
+        by_leaf.setdefault(p.split('.')[-1], []).append(p)
+    fails, warns = [], []
+
+    def walk(node, path):
+        if not isinstance(node, dict):
+            return
+        for k, v in node.items():
+            ks = str(k)
+            p = '.'.join(path + [ks])
+            if p in rejected:
+                fails.append((p, 'solver が起動時に拒否するキー (削除済み・改名済み)。recommended-settings.md §9.1 の移行先を見ること'))
+            elif p in values:
+                continue                     # 値キー: 中身 (リスト・マップ) には立ち入らない
+            elif p in sections:
+                walk(v, path + [ks])
+            elif ks in by_leaf:
+                warns.append((p, '節の位置が違う (黙って無視される)。正しくは ' + ' / '.join(sorted(by_leaf[ks]))))
+            else:
+                warns.append((p, 'solverConfig が読まないキー (綴り違い・旧キー・別ブランチのキー)。黙って無視される'))
+
+    walk(y, [])
+    return fails, warns
 
 
 def check(y):
@@ -46,6 +112,10 @@ def check(y):
     fct = int(dT.get('passiveFct', 1) or 0)
     conv = sp.get('convMethod')
     coupling = dT.get('speciesImplicitCoupling')
+
+    ukf, ukw = unknown_keys(y)
+    fails.extend(ukf)
+    warns.extend(ukw)
 
     if mesh.get('bndFirstOrder') is not None:
         fails.append(('mesh.bndFirstOrder', '使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md)'))

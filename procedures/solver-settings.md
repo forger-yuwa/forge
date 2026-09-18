@@ -71,6 +71,7 @@ time:
 
 - **`lineImplicit: 1`**: 本体。v2 (factor/solve 分離) 込みでコスト +32%/subiter (ny160 DDES 実測)。
 - **`lineKFreeze: 1`**: dual-time サブ反復間で K/LU を凍結 (収束軌道不変・コスト削減)。dual-time では常用推奨。
+- (削除済 2026-09-18) `lineDtWallRelief`: 壁境界半割面の λ も CFL max から除外する診断スイッチ。発散したので削除した (plan config-key-pruning §5.2)。
 - **`lineDtDirectional: 1`**: 方向別 dt — 内部 line 面の λ (音響込み) を擬似 dt の CFL max から除外。
   壁ノードの境界半割面は除外されない (壁 CV 自身の Δτ は境界面律速のまま) 点に注意。
 - `lineViscCoupling` / `lineViscousDtRelief`: line 面のスカラー粘性結合と粘性 CFL 割引。
@@ -166,7 +167,7 @@ coupling 1 なら cfl 6 まで安定 (case/28 `run_0064`–`0078`)。使うと�
 
 ## passiveScalarScheme ほか — 受動スカラ (排気トレーサ・凝縮モーメント) の輸送経路 (2026-09-17)
 
-plan [species-passive-scalar-unification](../plans/active/species-passive-scalar-unification.md)。`time.deltaT` 配下。
+plan [species-passive-scalar-unification](../plans/accepted/species-passive-scalar-unification.md)。`time.deltaT` 配下。
 
 | キー | 既定 | 意味 |
 |---|---|---|
@@ -342,3 +343,18 @@ mesh:
 
 根拠と検証は [case/43.node_axis_dof](../case/43.node_axis_dof/README.md) と
 [plans/active/architecture-node-option-consolidation.md](../plans/active/architecture-node-option-consolidation.md)。
+
+## 文書に無かった設定キー (2026-09-18, plan [config-key-pruning](../plans/active/config-key-pruning.md) §5.3 c/g/n)
+
+棚卸しで「使われているのに `procedures/` `methods/` に一度も出てこない」ことが分かったキー。位置づけを 1 行ずつ残す。
+
+| キー | 既定 | 何をするか | 実績 |
+| --- | --- | --- | --- |
+| `physProp.thermCondMethod` | 0 | 熱伝導率の与え方。0 = `thermCond` の定数、1 = 層流 Prandtl 数 `prandtlLam` から $\lambda=\mu c_p/Pr$ で作る | 797 run が 1 |
+| `physProp.prandtlLam` | 0.72 | 上の 1 で使う層流 Prandtl 数。**壁関数の回復係数 $r=Pr^{1/3}$ (断熱壁温) でも読む**ので、`thermCondMethod: 0` でも効く | 797 run が書いているが**全て既定値** |
+| `time.deltaT.precondEps` | 0.15 | 低マッハ前処理の停留点フロア $\varepsilon$ ($U_r=\min(c,\max(|u|,\varepsilon c))$)。小さいほど低マッハ振動を減衰するが $\varepsilon\lesssim0.1$ は発散 ($0.05$ で NaN) | 184 run 中 24 run が非既定 |
+| `time.deltaT.monitorInterval` | 1 | 残差モニタ行を出す間隔 [step]。長時間 run でログを絞る用途 | 427 run |
+| `time.deltaT.axisTimestepBeta` | 0.0 | 軸対称 near-axis 安定化。擬似時間のスペクトル半径に軸項 $\lambda_{axis}=\beta(|u_r|+c)A_{planar}$ を足し、$r\to0$ で $\Delta\tau\propto \mathrm{CFL}\, r/(|u_r|+c)$ を自然に与える | 39 run |
+| `time.deltaT.ducrosLimiter` | 0 | KEEP の blend に Ducros センサを掛ける opt-in。**SLAU では効果が場に出ない** (SLAU 自身の散逸が支配) | 56 run 中 1 run が非既定 |
+| `turbulence.sstCrossDiffJac` | 0 | SST $\omega$ の交差拡散を point-implicit 対角に入れる。$CD_\omega>0$ のとき対角へ $+CD_\omega/(\rho\omega)$。**収束解は不変**でサブ反復の収束だけ良くなる | 68 run |
+| `bodyForceCtrl` / `bodyForceCtrlTarget` / `bodyForceCtrlRelax` | 0 / 0.0 / 1.0 | 質量流量一定制御。体積平均 $\langle\rho u_x\rangle_V$ を `bodyForceCtrlTarget` [kg/m²/s] に保つよう体積力を緩和で追従させる。既定 0 = `bodyForce` の固定値駆動 | 70 run |
