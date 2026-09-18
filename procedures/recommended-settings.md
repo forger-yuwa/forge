@@ -205,7 +205,7 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 
 ## 9. 旧設定 (superseded) — 新規 config に使わない
 
-### 9.1 削除したキー (2026-09-18, plan [config-key-pruning](../plans/active/config-key-pruning.md))
+### 9.1 削除したキー (2026-09-18, plan [config-key-pruning](../plans/accepted/config-key-pruning.md))
 
 **書くと起動時エラーになる**。黙って無視されないので、古い config を再実行すると気づける。
 

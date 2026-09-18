@@ -344,7 +344,7 @@ mesh:
 根拠と検証は [case/43.node_axis_dof](../case/43.node_axis_dof/README.md) と
 [plans/active/architecture-node-option-consolidation.md](../plans/active/architecture-node-option-consolidation.md)。
 
-## 文書に無かった設定キー (2026-09-18, plan [config-key-pruning](../plans/active/config-key-pruning.md) §5.3 c/g/n)
+## 文書に無かった設定キー (2026-09-18, plan [config-key-pruning](../plans/accepted/config-key-pruning.md) §5.3 c/g/n)
 
 棚卸しで「使われているのに `procedures/` `methods/` に一度も出てこない」ことが分かったキー。位置づけを 1 行ずつ残す。
 

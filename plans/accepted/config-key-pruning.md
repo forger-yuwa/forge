@@ -3,7 +3,7 @@ title: solverConfig キーの整理 (採用があり得ないパラメータの�
 related_docs:
   - procedures/recommended-settings.md
   - procedures/solver-settings.md
-status: in_progress
+status: done
 updated: 2026-09-17
 ---
 
@@ -131,7 +131,7 @@ updated: 2026-09-17
 | # | 項目 | 内容 |
 | --- | --- | --- |
 | 1 | 棚卸しツールの恒久化 | **済 (2026-09-18)**: `config_key_inventory.py` を完全修飾パス・PyYAML 集計・入れ子探索・コメント除去・節/拒否専用/必須の分離に作り替えた (§6.1 の plan-2 M2/M3/M4、plan-3 m6) |
-| 2 | 全キーの分類表 (live な値キー 167 パス) | **済 (2026-09-18)**: 修正後の棚卸し (値キー 167 / 節 10 / 拒否専用 12 / 起動時拒否 8、run config 4063 本) で分類を完了。素データは [notes/investigations/config-key-inventory-2026-09-18.md](../../notes/investigations/config-key-inventory-2026-09-18.md)、結論は §5.2「分類の結論」。**消してよいと言えるのは第 2 陣の候補 6 件だけ** |
+| 2 | 全キーの分類表 (live な値キー 167 パス) | **済 (2026-09-18)**: 修正後の棚卸し (値キー 167 / 節 10 / 拒否専用 12 / 起動時拒否 8、run config 4063 本) で分類を完了。素データは [notes/investigations/config-key-inventory-2026-09-18.md](../../notes/investigations/config-key-inventory-2026-09-18.md)、結論は §5.2「分類の結論」。**消してよいと言えるのは第 2 陣の候補 5 件だけ** (`speciesImplicitRelax` は codex plan-4 M1 で除外) |
 | 9 | 第 2 陣 S1 (任意化 + 警告) | **済 (2026-09-18)**。対象 5 件を任意化し 1 回だけ警告。消費者のない 3 件はメンバごと撤去、`meshFormat` は省略時 `hdf5`、`detectNaNInterval` の別名は読みを維持。受入は §6.6' で全 PASS |
 | 10 | 第 2 陣 S2 (起動時エラー) | **別マイルストーン**。S1 完了では進めない — 保持する再実行対象の移送確認、または互換打ち切りの対象・時期・手順の明示が条件 (m5) |
 | 3 | codex plan レビュー | 分類表ができた時点で `--stage plan` |
@@ -160,7 +160,7 @@ updated: 2026-09-17
 
 **削除から戻したもの (codex plan-2 M1, 2026-09-18)**: `time.deltaT.blockDPLURDiagCache` /
 `time.deltaT.blockDPLURDqPack` / `mesh.primPack` の 3 件。いずれも元 plan
-([performance-3d-node-sst-speedup](../accepted/performance-3d-node-sst-speedup.md):160, `solverConfig.hpp`) の処置が
+([performance-3d-node-sst-speedup](performance-3d-node-sst-speedup.md):160, `solverConfig.hpp`) の処置が
 「**不採用で確定、opt-in 残置**」であり、「既定に採用しない」と「設定機能を廃止する」を取り違えていた
 (`updateGuardAlpha` 等で 2 度自己訂正したのと同じ誤り。**これで 3 度目**)。さらに棚卸しの「使用 0」も誤りで、
 入れ子探索を入れると `forge-perf` の nested run が実際に 1 を書いている (それぞれ 1 / 4 / 4 run が非既定)。
@@ -198,14 +198,14 @@ Kader 原式への修正 (`wallLaw_d.cuh:130`) で壁法則が Pr_t を使わな
 
 | キー | 保留の理由 | 保留解除の条件 |
 | --- | --- | --- |
-| `ducrosLimiter` | `enable==0` で `ducros` 場を 0 に潰すため、KEEP の blend `max(ducros, 1−ψ)` から項が永久に消える | [turbulence-iddes-sst](turbulence-iddes-sst.md)「中期で改良 Ducros を別途復活」の方針が決着すること |
+| `ducrosLimiter` | `enable==0` で `ducros` 場を 0 に潰すため、KEEP の blend `max(ducros, 1−ψ)` から項が永久に消える | [turbulence-iddes-sst](../active/turbulence-iddes-sst.md)「中期で改良 Ducros を別途復活」の方針が決着すること |
 | `condensation.condLimiterMode` | 旧経路 0 に RK 陽解法・`passiveScalarScheme 0` の dual-time が**自動降格で依存**している | followups F-cf9 の前提 (RK の更新クランプ試験) が済むこと |
 | `turbulence.nodeOmegaWfDirichlet` | accepted plan が「剛性対策オプションとして残置」と**明示的に決定済み** | その決定を見直すこと |
 | `turbulence.sstOmegaProdFromPk` / `sstSigmaBlend` | case/44 の active な SU2 クロスチェック run が 0 を使用中 = A/B 期間が終わっていない | 当該 run の役割が終わること |
 | `keepDissCbCoeff` / `keepDissCbEps` | 「本番格子で off と同一 or NaN」「動機だった鋸歯は抽出アーチファクトで撤回」だが、plan が `draft` | 当該 plan の決着 |
 | `physProp.isCompressible: 0` (SMAC 非圧縮) | `methods/poisson.md`「コードベースに残っており利用できる」 | 経路ごと廃止するかのユーザ判断 |
 | `time.deltaT.passiveFctSweeps` / `passiveFctTol` | 2026-09-16 新設で「使用 0」は年齢の反映 | 凝縮 dual-time の生産期に `[passiveFct] WARNING` が出ないことの確認 |
-| `mesh.bndFirstOrder` | 使用禁止キー。削除は既存の [architecture-bndfirstorder-removal](architecture-bndfirstorder-removal.md) の責務 | (本 plan の対象外) |
+| `mesh.bndFirstOrder` | 使用禁止キー。削除は既存の [architecture-bndfirstorder-removal](../active/architecture-bndfirstorder-removal.md) の責務 | (本 plan の対象外) |
 
 #### 分類の結論 (2026-09-18, 修正後の棚卸しで完了 — §5.1 #2)
 
@@ -224,7 +224,7 @@ Kader 原式への修正 (`wallLaw_d.cuh:130`) で壁法則が Pr_t を使わな
 | 起動時拒否テーブル `removed[]` | 8 | 第 1 陣で削除したもの |
 | 節そのもの | 10 | キーではない |
 
-**分類は完了**。「消してよい」と言えるのは、上の 167 のうち**第 2 陣の候補 6 件だけ**である。
+**分類は完了**。「消してよい」と言えるのは、上の 167 のうち**第 2 陣の候補 5 件だけ**である (`speciesImplicitRelax` は codex plan-4 M1 で除外)。
 
 #### 第 2 陣の候補 (5 件, 2026-09-18 に codex plan-4 で確定)
 
@@ -239,7 +239,7 @@ Kader 原式への修正 (`wallLaw_d.cuh:130`) で壁法則が Pr_t を使わな
 **対象から外したもの (codex plan-4 M1)**: `time.deltaT.speciesImplicitRelax` は「10 run すべて既定 1.0」だが、
 **無効キーではない** — `speciesTransport_d.cu:835` が読み、`scalarTransport_d.cu:290` で化学種更新の増分に掛かる
 (`relax * (res·dt/V)/fac`)。非既定値を無視すれば `speciesImplicitCoupling: 0` の反復写像が変わる。
-accepted plan [species-passive-scalar-unification](../accepted/species-passive-scalar-unification.md) が独立キーとして設計し、
+accepted plan [species-passive-scalar-unification](species-passive-scalar-unification.md) が独立キーとして設計し、
 効果確認が残件として残っている。**現状維持**とし、今回の段階移行から外す (掃引を新たにやる必要も無い)。
 「使用実績が既定値だけ」は**不要性の実測ではない** — これは §4 の D 基準 (一度も使われず、既定から動かす根拠も無い
 内部チューニング定数) を、消費者の有無を見ずに適用しかけた誤り。

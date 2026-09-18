@@ -507,7 +507,7 @@ strain-based 生産の stagnation/加速アノマリー (theory.md §7.5) を抑
 ### 8.2 設定
 
 - bcondConfig: `wall` / `wall_isothermal` の `ints:` に `wallModelLES: 1` (壁単位・既定 0)。
-- solverConfig の設定キーは無い (2026-09-18, plan [config-key-pruning](../../plans/active/config-key-pruning.md)):
+- solverConfig の設定キーは無い (2026-09-18, plan [config-key-pruning](../../plans/accepted/config-key-pruning.md)):
   $u_\tau$ Newton の許容誤差 1e-6 と最大反復 20 はコードに固定した (旧 `wmlesNewtonTol` / `wmlesNewtonMaxIt`、
   掃引の実測が無く使用実績もゼロ)。旧 `wmlesPrt` は**撤去**した — Kader 原式への修正 (§8.1) で温度壁法則が
   $Pr_t$ を使わなくなっており、カーネル引数を誰も読んでいなかった。いずれも書くと起動時エラーになる。

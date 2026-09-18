@@ -1,6 +1,6 @@
 # solverConfig キーの棚卸し (2026-09-18)
 
-plan [config-key-pruning](../../plans/active/config-key-pruning.md) §5.1 #2 の分類表の素。
+plan [config-key-pruning](../../plans/accepted/config-key-pruning.md) §5.1 #2 の分類表の素。
 `solver_density_cuda/tools/config_key_inventory.py` の出力に、文書での言及先を足したもの。**判断は plan 側に書く**。
 
 対象: 全 worktree の `case/**/solverConfig.yaml` **4063 本** (10 worktree, 内容が違う同名 0 本を別設定として計上)。
