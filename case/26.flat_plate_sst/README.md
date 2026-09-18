@@ -93,6 +93,9 @@ python3 tools/postprocess_wall_law.py run_0006_slau_muscl 0.3 0.6 0.89
 | `run_0084_prune_regress_sst_base` | 同設定を**削除前のバイナリ** (`f8bdec3d`, worktree `forge-prune-base`) で実行 | **`check_field_regress.py --boundary` VERDICT: PASS** — 24 量 (保存量・原始量・`roK`/`roOmega`・`vis_turb`・出力専用の `wf_pk`・`wall_dist`・境界出力の `twall_*`/`utau`/`ypls`/`qwall`) すべて反復ノイズ床の 0.78〜1.27 倍。`implicitRelaxSST` の継承統合と `gradLSQDegenThresh` の定数化に退行なし | ref (回帰基準) |
 | `run_0085_prune_keytest` | 削除キーの**拒否試験 8 件**と残置キーの**受理試験 9 件** (20 step)。ログは `logs/` に保存 | 拒否 8/8 PASS (`no longer supported` + 非ゼロ終了)、受理 9/9 PASS。**受理は「パーサが受け取る」までで、分岐到達ではない** (この run は単成分・`viscMethod 0`・定常)。3 件の到達確認は `case/44` `run_0487`–`0489` と `case/16` `run_0502`–`0504` | ref (キー試験) |
 | `run_0086_optin_{base,base_rep,base_rep2,primpack,dqpack,diagcache}` | 復元した opt-in 性能スイッチ (`mesh.primPack` / `blockDPLURDqPack` / `blockDPLURDiagCache`) が受理され、既定経路と同じ場を出すか (200 step, base 3 反復がノイズ床) | 3 件とも **PASS** (全量 0.96〜1.02 倍)。この run は反復間でもビット一致しない (`atomicAdd`) ので、ビット同一ではなくノイズ比で判定した | ref (opt-in 受理) |
+| `run_0087_s1_keytest` | 第 2 陣 S1 の受入試験 (plan [config-key-pruning](../../plans/active/config-key-pruning.md) §6.5'/§6.6')。旧入力・個別省略・一括省略・`meshFormat` の不正値・`detectNaNInterval` の解決順序 5 水準・残置キーの巻き込み (20 step × 16 本)。ログは `logs/` | **全 PASS**。警告は記載したキーだけ 1 回ずつ、`cgns` は既定へ置換されず拒否、別名の実効値は 1/7/9/9/1 で期待どおり | ref (キー試験) |
+| `run_0088_s1_old_bin_old_input` / `run_0089_s1_new_bin_old_input` / `run_0090_s1_new_bin_omitted` (各 `_rep1`/`_rep2`) | S1 の数値回帰 (300 step, 同一 IC)。旧バイナリ + 旧入力 / 新バイナリ + 旧入力 / 新バイナリ + **省略入力** | `check_field_regress.py --boundary` で 24 量とも **PASS** (最大比 1.14)。旧→新も、旧入力→省略入力も反復ノイズ床の範囲 | ref (回帰) |
+| `run_0091_s1_chain_e2e` | S1 の通し確認: S1 キーを外した config で `convertGmshToForge` → その h5 で forge を 20 step | 変換 exit 0・警告 0、solver 完走・NaN なし。**`convertGmshToForge` は引数 2 つ (`入力.msh 出力.h5`) が要る** (1 つだと `argv[2]` が null で abort。S1 前も同じ) | ref (通し) |
 
 ### node-centered (median-dual) 検証 run
 

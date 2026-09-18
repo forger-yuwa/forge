@@ -35,6 +35,16 @@ T getOptionalValidatedValue(const YAML::Node& node, const std::string& key, cons
 }
 
 
+
+// 第 2 陣 S1 (plan config-key-pruning §4.1): 任意化したキーが書かれていたら**1 プロセス 1 回**だけ警告する。
+// まだ拒否はしない (全 run が書いている必須キーだったので、一足飛びに落とすと既存 run の再実行が全部止まる)。
+static void warnStagedKey(const YAML::Node& sec, const char* where, const char* key, const char* why)
+{
+    if (!sec || !sec[key] || !sec[key].IsDefined()) return;
+    std::cerr << "[config] deprecated: " << where << "." << key << " — " << why
+              << " (今は受理するが、いずれ起動時エラーにする。config から外すこと)" << std::endl;
+}
+
 void solverConfig::read(std::string fname)
 {
 //    try {
@@ -176,7 +186,10 @@ void solverConfig::read(std::string fname)
         YAML::Node config = YAML::LoadFile(this->solConfigFileName);
 
         // mesh関連
-        this->meshFormat = getValidatedValue<std::string>(config["mesh"], "meshFormat", "mesh");
+        // 省略時は "hdf5" (合法値は solver 側ではこれ 1 つ。不正値の拒否は main.cpp の分岐が行う)。
+        warnStagedKey(config["mesh"], "mesh", "meshFormat",
+                      "solver が受け付ける形式は hdf5 だけで、省略すると hdf5 になる");
+        this->meshFormat = getOptionalValidatedValue<std::string>(config["mesh"], "meshFormat", std::string("hdf5"), "mesh");
         this->meshFileName = getValidatedValue<std::string>(config["mesh"], "meshFileName", "mesh");
         this->valueFileName = getValidatedValue<std::string>(config["mesh"], "valueFileName", "mesh");
 
@@ -310,7 +323,8 @@ void solverConfig::read(std::string fname)
         this->dualTime = getValidatedValue<int>(config["time"], "dualTime", "time");
 
         auto last = config["time"]["last"];
-        this->endTimeControl = getValidatedValue<int>(last, "control", "time.last");
+        warnStagedKey(last, "time.last", "control",
+                      "solver はこの値をどこでも読まない (終了条件は nStepOuter のみ)");
         if (last["nStep"].IsDefined()) {
             throw std::runtime_error(
                 "Key 'nStep' in 'time.last' is no longer supported. Rename it to 'nStepOuter'."
@@ -399,9 +413,17 @@ void solverConfig::read(std::string fname)
         this->detectNaN = getOptionalValidatedValue<int>(deltaT, "detectNaN", 0, "time.deltaT");
         if (config["detectNaN"]) this->detectNaN = config["detectNaN"].as<int>();
         // detectNaN フラグの host 読み出し間隔 [step]: 既定 1 (毎ステップ)。大で per-step 同期を間引く。
+        // 解決順序: トップレベル → time.deltaT の旧別名 → 既定 1。最後に下限 1 へ補正する (従来どおり)。
+        // 旧別名も**実際に読む** (無効キーではない; 下位だけに書けば検査間隔が変わる)。S1 は移動の案内だけ。
+        warnStagedKey(deltaT, "time.deltaT", "detectNaNInterval",
+                      "トップレベルの detectNaNInterval に書くこと (両方あるとトップレベルが優先される)");
         this->detectNaNInterval = getOptionalValidatedValue<int>(deltaT, "detectNaNInterval", 1, "time.deltaT");
         if (config["detectNaNInterval"]) this->detectNaNInterval = config["detectNaNInterval"].as<int>();
         if (this->detectNaNInterval < 1) this->detectNaNInterval = 1;
+        // どちらの綴りが勝ったかは残差ログに出ないので、解決後の実効値を 1 行だけ出す (S1 の受入試験の観測点)。
+        if ((deltaT && deltaT["detectNaNInterval"]) || config["detectNaNInterval"] || this->detectNaNInterval != 1) {
+            std::cout << "[config] detectNaNInterval effective: " << this->detectNaNInterval << std::endl;
+        }
         // 残差 RMS の device バッファ flush 間隔 [step]: 既定 1 (毎ステップ書き出し=従来挙動)。
         // モニタリング出力 (残差 CSV flush + max cfl/dt console 出力) の共通間隔 [step]: 既定 1 (毎ステップ=従来)。
         // 大で per-step の host 同期 (残差 D2H・max cfl 読み出し) をまとめて間引く。dt 適応とは独立。
@@ -612,7 +634,8 @@ void solverConfig::read(std::string fname)
 
         // 物理プロパティ
         auto physProp = config["physProp"];
-        this->isCompressible = getValidatedValue<int>(physProp, "isCompressible", "physProp");
+        warnStagedKey(physProp, "physProp", "isCompressible",
+                      "solver はこの値をどこでも読まない (圧縮性は常に有効)");
         // 軸対称スイッチの正本は mesh ブロック (幾何/離散化の設定であり物性ではない)。
         // physProp 配下は後方互換の deprecated 読み (既存 case config 用, 警告のみ)。
         this->isAxisymmetric = 0;
@@ -643,7 +666,8 @@ void solverConfig::read(std::string fname)
         }
         this->thermalMethod = getValidatedValue<int>(physProp, "thermalMethod", "physProp");
         this->viscMethod = getValidatedValue<int>(physProp, "viscMethod", "physProp");
-        this->ro = getValidatedValue<double>(physProp, "ro", "physProp");
+        warnStagedKey(physProp, "physProp", "ro",
+                      "solver はこの値をどこでも読まない (密度は EOS で決まる)");
         this->visc = getValidatedValue<double>(physProp, "visc", "physProp");
         this->thermCond = getValidatedValue<double>(physProp, "thermCond", "physProp");
         this->thermCondMethod = getOptionalValidatedValue<int>(physProp, "thermCondMethod", 0, "physProp");

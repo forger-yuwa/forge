@@ -84,15 +84,15 @@ def _solver_config(p: Problem, nsteps: int, out_interval: int) -> str:
         tint, cfl, conv, dplur, kato = 11, 4.0, 1, 1, ""
     turb = (f'turbulence: {{model: "sst", scalarDiffusion: 1, dilatationCorrection: 2{kato}}}'
             if sst else 'turbulence: {model: "none"}')
-    return f"""mesh: {{meshFormat: "hdf5", discretization: "{disc}"{node_keys}, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}}
+    return f"""mesh: {{discretization: "{disc}"{node_keys}, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}}
 gpu: 1
 solver: "SLAU"
-physProp: {{isCompressible: 1, thermalMethod: 0, viscMethod: 1,
-           ro: 1.2, visc: 1.8e-5, thermCond: 0.0257, cp: {p.cp}, gamma: {p.gamma}}}
+physProp: {{thermalMethod: 0, viscMethod: 1,
+           visc: 1.8e-5, thermCond: 0.0257, cp: {p.cp}, gamma: {p.gamma}}}
 time:
   unsteady: 0
   dualTime: 0
-  last: {{control: 0, nStepOuter: {nsteps}}}
+  last: {{nStepOuter: {nsteps}}}
   deltaT: {{control: 1, dt: 1e-8, cfl: {cfl}, cfl_pseudo: {cfl},
            dt_min: 1e-9, dt_max: 0.001, blockDPLUR: {dplur}, lowMachPrecond: 0, detectNaN: 1}}
   outStepStart: 0
