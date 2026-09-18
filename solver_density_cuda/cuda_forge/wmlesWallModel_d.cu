@@ -86,7 +86,7 @@ __global__ void wmles_wall_model_d(
     const SpeciesThermo* sp, flow_float* const* roY, int nSpecies,
     int viscMethod, flow_float visc_const, flow_float thermCond_const,
     // モデルパラメータ
-    flow_float tol, int maxIt, flow_float Prt,
+    flow_float tol, int maxIt,
     // 熱条件: 0=断熱 (q_w=0) / 1=等温 (Tsb=指定壁温)
     int isothermal, flow_float* Tsb,
     // 出力 (bvar)。utau_b は warm start を兼ねる (前 step 値を初期値に使う)
@@ -320,7 +320,7 @@ void applyWmlesWallModel(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , 
             cfg.thermalMethod, cfg.gamma, cfg.cp,
             thermo_species_device_ptr(), species_roY_device_ptr(), cfg.nSpecies,
             cfg.viscMethod, cfg.visc, cfg.thermCond,
-            cfg.wmlesNewtonTol, cfg.wmlesNewtonMaxIt, cfg.wmlesPrt,
+            cfg.wmlesNewtonTol, cfg.wmlesNewtonMaxIt,
             isothermal, bc.bvar_d["Ts"],
             bc.bvar_d["utau"], bc.bvar_d["ypls"],
             bc.bvar_d["twall_x"], bc.bvar_d["twall_y"], bc.bvar_d["twall_z"],

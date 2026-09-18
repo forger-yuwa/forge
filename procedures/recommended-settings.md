@@ -209,18 +209,21 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 
 | 削除したキー | 理由 | 移行先 |
 | --- | --- | --- |
-| `time.deltaT.blockDPLURDiagCache` / `blockDPLURDqPack` | 実測で遅化 (44.0→46.5 ms/step、+0.7〜2.7 ms/step) し不採用確定 | 既定経路 (何も書かない) |
-| `mesh.primPack` | 実測で利得なし〜微増、不採用確定 | 同上 |
-| `time.deltaT.updateGuardAlpha` | 正値性ガードは全 CFL で発散 (負の結果) | 同上 |
-| `time.deltaT.lineDtWallRelief` | 壁半割面の λ 除外は発散した診断スイッチ | 同上 |
+| `time.deltaT.lineDtWallRelief` | 壁半割面の λ 除外は発散した診断スイッチ | 既定経路 (何も書かない) |
 | `time.deltaT.implicitRelaxSST` | 独立 3 件の A/B で効果なし | `implicitRelax` (SST も同じ値に従う) |
-| `time.deltaT.lowMachThornber` | Thornber 型再構成補正は検証結果が負 | `lowMachPrecond` |
-| `time.deltaT.multispeciesRhoYCommonLimiter` | S2 より明確に悪く、`speciesFaceReconstruction 2` (S3) の生産化で目的が消滅 | `speciesFaceReconstruction` |
-| `turbulence.turbulentSchmidt` | `physProp.Sc_t` の同義キー (使用ゼロ) | `physProp.Sc_t` |
-| `physProp.isAxisymmetric` / `physProp.axisymMethod` | 正本は `mesh` ブロック (deprecated 読みだった) | `mesh.isAxisymmetric` / `mesh.axisymMethod` |
-| `turbulence.C_DES_kw` / `C_DES_ke` / `wmlesNewtonTol` / `wmlesNewtonMaxIt` / `wmlesPrt` / `mesh.gradLSQDegenThresh` / `time.deltaT.passiveFctTolAbs` | 一度も使われず掃引の実測も無い内部定数 → コードに固定 | (固定値。変えたいときはコードを直す) |
+| `turbulence.C_DES_kw` / `C_DES_ke` / `wmlesNewtonTol` / `wmlesNewtonMaxIt` / `mesh.gradLSQDegenThresh` | 一度も使われず掃引の実測も無い内部定数 → コードに固定 | (固定値。変えたいときはコードを直す) |
+| `turbulence.wmlesPrt` | Kader 原式への修正で壁法則が Pr_t を使わなくなり、**読む側が消えた**引数だった | (移行先なし。乱流 Prandtl 数は `turbulentPrandtl`、壁法則とは別物) |
 
-存在しないキーを書いても solver は黙って無視するので、**投入前に `check_solver_config.py` を通す** (未知キーを WARN で拾う)。
+**削除していないもの (opt-in のまま残置)**: 過去に「不採用」と判定したスイッチでも、元 plan が「opt-in で残す」と
+決めているものは残っている。`blockDPLURDiagCache` / `blockDPLURDqPack` / `mesh.primPack` (性能の再現用)、
+`updateGuardAlpha`、`lowMachThornber`、`multispeciesRhoYCommonLimiter`、`passiveFctTolAbs`、
+`turbulence.turbulentSchmidt` (`physProp.Sc_t` の別名)、`physProp.isAxisymmetric` / `axisymMethod` (deprecated 読み)。
+**既定に採用しないことと、設定機能を廃止することは別の決定**であり、後者には残置決定を置き換える判断が要る。
+
+存在しないキーを書いても solver は黙って無視するので、**投入前に `check_solver_config.py` を通す**。完全修飾パスで
+照合し、**節の位置が違うキー** (トップレベルの `lowMachPrecond`、`physProp.speciesFaceReconstruction`、
+`space.keepDissType` など。書いた場所が違うと黙って無視される) とどこにも無いキーを WARN、solver が起動時に拒否する
+キーを FAIL で拾う。
 
 | 旧設定 | 状態 | 代替 |
 |---|---|---|

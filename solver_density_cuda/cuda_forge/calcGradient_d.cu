@@ -891,12 +891,21 @@ void calcGradient_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh
             cudaFree(Minv6); cudaFree(degD);
             pre_n = msh.nCells;
         }
-        // 原始量 AoS パックは不採用 (実測で利得なし; plan config-key-pruning) のため組まない。
+        // 原始量 AoS パックを組む (applyBconds 後 = 壁ノードのピン込みの最新値)。LSQ 勾配とリミッタが読む。
+        if (cfg.primPack != 0) {
+            if (g_primPack == nullptr || g_primPackN != msh.nCells_all) {
+                if (g_primPack) cudaFree(g_primPack);
+                gpuErrchk(cudaMalloc(&g_primPack, sizeof(flow_float)*8*(size_t)msh.nCells_all));
+                g_primPackN = msh.nCells_all;
+            }
+            buildPrimPack_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells_all,
+                var.c_d["ro"],var.c_d["Ux"],var.c_d["Uy"],var.c_d["Uz"],var.c_d["P"],var.c_d["T"], g_primPack);
+        }
         lsqPreGrad_internal_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
             msh.nCells, msh.map_plane_cells_d,
             msh.map_cell_planes_index_d, msh.map_cell_planes_d, msh.nNormalPlanes, cInt,
             var.c_d["ro"],var.c_d["Ux"],var.c_d["Uy"],var.c_d["Uz"],var.c_d["P"],var.c_d["T"],
-            (const flow_float*)nullptr,   /* 原始量パックは不採用 (実測で利得なし) */
+            (cfg.primPack != 0) ? (const flow_float*)g_primPack : nullptr,
             var.c_d["drodx"],var.c_d["drody"],var.c_d["drodz"],
             var.c_d["dUxdx"],var.c_d["dUxdy"],var.c_d["dUxdz"],
             var.c_d["dUydx"],var.c_d["dUydy"],var.c_d["dUydz"],

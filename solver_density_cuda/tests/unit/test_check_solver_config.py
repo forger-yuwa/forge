@@ -62,6 +62,30 @@ y = cfg(); y['turbulence'] = {'model': 'SST', 'kInit': 1.0, 'omegaInit': 1000.0}
 f, w = csc.check(y)
 check('turbulence.kInit' not in keys(w), 'the real initial-value keys must not be flagged')
 
+# 誤配置の検出 (codex plan-2 M5 の実例)。末端名だけの照合では全部素通りしていた。
+for path, val in [('lowMachPrecond', 2), ('physProp.speciesFaceReconstruction', 2), ('space.keepDissType', 1)]:
+    y = cfg(); node = y
+    parts = path.split('.')
+    for seg in parts[:-1]: node = node.setdefault(seg, {})
+    node[parts[-1]] = val
+    f, w = csc.check(y)
+    check(path in keys(w), f'misplaced key {path} must WARN (silently ignored where it is written)')
+
+# 起動時に拒否されるキーは WARN でなく FAIL
+y = cfg(); y['mesh']['gradLSQDegenThresh'] = 1e-6
+f, w = csc.check(y)
+check('mesh.gradLSQDegenThresh' in keys(f), 'a key the solver rejects at startup must FAIL')
+
+# 読まれないが必須として全 run が書いているキーは、誤検出しない
+y = cfg(); y['time']['last']['time'] = 1.0
+f, w = csc.check(y)
+check('time.last.time' in keys(w), 'time.last.time is not read by the solver and must WARN')
+
+# 正しい位置のキーは素通りする (偽陽性の回帰)
+y = cfg(); y['mesh']['primPack'] = 1; y['time']['deltaT']['blockDPLURDqPack'] = 1
+f, w = csc.check(y)
+check(not keys(f) and 'mesh.primPack' not in keys(w), 'the restored opt-in performance switches must be accepted')
+
 y = cfg(); y['mesh']['bndFirstOrder'] = 1
 f, w = csc.check(y)
 check('mesh.bndFirstOrder' in keys(f), 'bndFirstOrder must FAIL (banned)')

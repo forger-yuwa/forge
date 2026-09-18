@@ -217,6 +217,7 @@ void solverConfig::read(std::string fname)
                 std::exit(1);
             }
         }
+        if (config["mesh"]["primPack"]) this->primPack = config["mesh"]["primPack"].as<int>();
         if (config["mesh"]["renumber"]) { this->meshRenumber = config["mesh"]["renumber"].as<std::string>(); std::cout << "'renumber' in 'mesh': " << this->meshRenumber << std::endl; }
         if (config["mesh"]["gradLSQ"]) {
             this->gradLSQ = config["mesh"]["gradLSQ"].as<int>();
@@ -325,6 +326,8 @@ void solverConfig::read(std::string fname)
         this->implicitRelax = getOptionalValidatedValue<double>(deltaT, "implicitRelax", 1.0, "time.deltaT");
         this->updateGuardAlpha = getOptionalValidatedValue<flow_float>(deltaT, "updateGuardAlpha", 0.0, "time.deltaT");
         this->lineImplicit = getOptionalValidatedValue<int>(deltaT, "lineImplicit", 0, "time.deltaT");
+        this->blockDPLURDiagCache = getOptionalValidatedValue<int>(deltaT, "blockDPLURDiagCache", 0, "time.deltaT");
+        this->blockDPLURDqPack = getOptionalValidatedValue<int>(deltaT, "blockDPLURDqPack", 0, "time.deltaT");
         // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md):
         //   lineKFreeze: dual-time のサブ反復間で K/diag/LU 分解を凍結 (subiter 0 のみ抽出・分解)。
         //   lineViscCoupling: line 面にスカラー粘性結合 (K += α·I, 対角は 2α→α で真の [−α,2α,−α] 化)。
@@ -437,17 +440,14 @@ void solverConfig::read(std::string fname)
         {
             struct Removed { const char* sec1; const char* sec2; const char* key; const char* note; };
             static const Removed removed[] = {
-                {"time", "deltaT", "blockDPLURDiagCache", "removed: measured slower (44.0 -> 46.5 ms/step) and never adopted"},
-                {"time", "deltaT", "blockDPLURDqPack",    "removed: measured slower (+0.7 to +2.7 ms/step) and never adopted"},
                 {"time", "deltaT", "lineDtWallRelief",    "removed: diverged around step 80-100 (diagnostic switch)"},
                 {"time", "deltaT", "implicitRelaxSST",    "removed: SST now follows 'implicitRelax' (three independent A/B tests showed no effect)"},
-                {"mesh", nullptr,  "primPack",            "removed: measured no gain and never adopted"},
                 {"mesh", nullptr,  "gradLSQDegenThresh",  "removed: fixed internal constant"},
                 {"turbulence", nullptr, "C_DES_kw",       "removed: fixed model constant (Strelets 2001)"},
                 {"turbulence", nullptr, "C_DES_ke",       "removed: fixed model constant (Strelets 2001)"},
                 {"turbulence", nullptr, "wmlesNewtonTol", "removed: fixed internal constant"},
                 {"turbulence", nullptr, "wmlesNewtonMaxIt", "removed: fixed internal constant"},
-                {"turbulence", nullptr, "wmlesPrt",       "removed: fixed internal constant (use turbulentPrandtl)"},
+                {"turbulence", nullptr, "wmlesPrt",       "removed: the Kader wall law no longer uses a turbulent Prandtl number (no replacement)"},
             };
             for (const auto& r : removed) {
                 YAML::Node n = r.sec2 ? config[r.sec1][r.sec2] : config[r.sec1];

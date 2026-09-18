@@ -118,13 +118,16 @@ public:
     // **既定 0**: A10G 3D 2.37 M 節点で 44.0→46.5 ms/step と逆に遅化した (対角 25 floats/cell の保存+4 回読込 ≈1.2 GB/step の
     // 帯域が、省ける近傍幾何読み・組立より高い。sweep はレイテンシ律速で gather 数の削減が効かない)。opt-in 記録用に残す。
     // plans/active/performance-3d-node-sst-speedup.md §4.2-4 / §9。
+    int blockDPLURDiagCache = 0;
     // block-DPLUR sweep の近傍 dq gather を stride-8 AoS バッファから読む (5 セクタ→1 セクタ)。0 で SoA 5 配列 (従来)。
     // 結果はビット同一 (同じ値を別レイアウトで読むだけ)。line-implicit / node 周期では自動で off。
     // **既定 0**: RTX 3060 の 3D 257k 節点で差なし (22.8 vs 22.9 ms/step, 2026-09-12)。gather は L2 に乗っており
     // セクタ数削減が効かない。opt-in 記録用。
+    int blockDPLURDqPack = 0;
     // 原始量 (ro,Ux,Uy,Uz,P,T) の AoS パックを applyBconds 後に組み、LSQ 勾配 (gradLSQ==2) とリミッタの近傍 gather が
     // 1 セクタで読む (mesh.primPack, 0 で従来の 6 配列 gather)。値は同じなのでビット同一。
     // **既定 0**: 3D 257k 節点 (RTX 3060) で差なし (パック構築の書込が相殺)。opt-in 記録用。
+    int primPack = 0;
     // 変換時の節点再番号付け: "none" (既定) / "rcm" (Reverse Cuthill–McKee; node では CV 順 = gather の局所性)。
     std::string meshRenumber = "none";
                                     // 残差/状態は float のまま、Jacobian 構築+5×5 solve のみ double 化する混合精度
@@ -291,7 +294,6 @@ public:
     // 壁単位 ints: wallModelLES=1 (LESorRANS!=2 のみ)。以下はモデルパラメータ (turbulence セクション)。
     flow_float wmlesNewtonTol = 1.0e-6; // u_τ Newton の相対許容誤差
     int        wmlesNewtonMaxIt = 20;   // u_τ Newton の最大反復 (warm start 時は 1-3 回で収束想定)
-    flow_float wmlesPrt = 0.9;          // Kader 温度壁法則の乱流プラントル数 (SGS 側 turbulentPrandtl とは独立)
 
     // 一様体積力 [N/m³] (周期チャネル駆動等, wmles plan §5-7 / methods/time_integration)。
     // 運動量に f_i·V、エネルギーに (f·u)·V を residual へ加算する。既定 0 = off (ビット不変)。
