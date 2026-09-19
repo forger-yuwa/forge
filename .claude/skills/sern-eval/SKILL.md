@@ -12,11 +12,13 @@ description: ⑤ SERN (case/46) の評価 run を組む・回す・判定する�
 
 ## 1. 起動レシピ (2D)
 
-> **⚠ 2026-09-19 時点で確定していない。** codex plan レビュー (NO-GO, M6) で、下表の
-> 「梯子 1500×3 + 本段 500」は**一度も回していない組み合わせ**と判明し撤回した。
-> 500 step 時点では `vis_turb` が未発達 (局所 DRIFTING)。**受理基準 (`require_residual_plateau`) にも
-> 実装バグ**があり、3 桁低下してなお下降中の列が素通りする。再検証まで下表は**暫定値**として扱い、
-> 生産採用しない。改訂後の残作業は [`plans/active/tooling-nozzle-sern-startup.md`](../../../plans/active/tooling-nozzle-sern-startup.md) §5.1。
+> **検証済み (2026-09-19, R-b)。** 「梯子 1500×3 + 本段 500 = 5000 step」を 3 設計 (`L_cowl` 1.2 / 3.0 /
+> θ_r0 21°) で長時間参照 (4000×3 + 本段 12000 = 24000 step) と直接比較し、**全比較量が事前宣言した許容内**:
+> `C_T_with_shear` 相対 3e-6、壁圧 L2 ≤ 1e-3、`vis_turb` L2 ≤ 9e-4、剥離なし、質量不均衡 ≤ 0.002 %。
+> run は `case/46.sern_design/run_0194`–`run_0199`、詳細は
+> [`plans/active/tooling-nozzle-sern-startup.md`](../../../plans/active/tooling-nozzle-sern-startup.md) §5.1 R-b。
+> **注意**: `vis_turb` の「500 step で DRIFTING」は準定常判定の話で、参照との**差**は 1e-3 以下 (上表の比較)。
+> 単一 run の `check_quasisteady` は別途必ず見ること。
 
 | 項目 | 生産値 | 根拠 |
 | --- | --- | --- |
@@ -38,9 +40,13 @@ description: ⑤ SERN (case/46) の評価 run を組む・回す・判定する�
 `metrics/sern_gates.py` の `evaluate_gates` が返す `verdict` を**必ず貼る**。
 
 1. 保存場に NaN/Inf 無し・正値
-2. ~~**全残差列がプラトー**~~ **実装バグあり (2026-09-19)**: `check_convergence.py:108` は 3 桁低下した列に
-   状態文字列を付けないので、**3 桁落ちてなお下降中の列が素通りする**。プラトーは収束の十分条件でもない
-   (残差の大きさを問わないので float32 の更新消失やクランプで止まった状態と区別できない)
+2. **rising な残差列が無い** (プラトーまたは低下中)。旧「全列プラトー」は実装バグ (3 桁低下列が素通り) を
+   修正したうえで `require_residual_plateau` を**既定 OFF に降格**し、`gates["plateau"]` として診断のみ報告する。
+   プラトーは収束の十分条件ではない (残差の大きさを問わないので float32 の更新消失やクランプで止まった状態と
+   区別できない) ため、4. の床検査と 5. の量の定常性で補う。<br>
+   **rising 判定はジッタとの比較込み (2026-09-19, R-h)**: 末尾窓の上昇桁数がその列自身の散らばり σ を超えた
+   ときだけ rising。これが無いと、プラトーが数倍の幅で揺れる列 (SERN の `rms_roY1` が典型) で判定が
+   **同一設定の run 同士でも PASS/FAIL に割れる**
 3. 残差列の桁が揃う (1 列だけ中央値の 1e6 倍以上でない)
 4. 床・下限への張り付き 0 ノード (`pMin`/`tMin` 50 K/`roMin`/`roOmega` 1e-20/`k`≤0)
 5. `C_T_with_shear` ほか力係数が STEADY

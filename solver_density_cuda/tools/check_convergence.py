@@ -56,6 +56,27 @@ def load_series(path):
     return rows, cols
 
 
+def _tail_rise(ser, tail_frac):
+    """末尾 2*tail_frac 窓で log10|値| を直線に当て、(窓全体の上昇桁数 D, 残差の標準偏差 sigma)
+    を返す。D はその窓のトレンド、sigma はその列自身のジッタの大きさ。点数が足りない・
+    分散が無い場合は **None** を返す (ジッタが測れないので、判定は既存の 2 窓平均比だけに
+    委ねる。数 step で落ちた run の系列がこれに当たる)。"""
+    w = [abs(x) for x in ser[int(len(ser) * (1 - 2 * tail_frac)):] if x > 0.0]
+    m = len(w)
+    if m < 8:
+        return None
+    y = [math.log10(v) for v in w]
+    xb = (m - 1) / 2.0
+    yb = sum(y) / m
+    sxx = sum((i - xb) ** 2 for i in range(m))
+    if sxx <= 0.0:
+        return None
+    slope = sum((i - xb) * (yi - yb) for i, yi in enumerate(y)) / sxx
+    resid = [yi - (yb + slope * (i - xb)) for i, yi in enumerate(y)]
+    sigma = math.sqrt(sum(r * r for r in resid) / m)
+    return slope * (m - 1), sigma
+
+
 def analyze(path, min_drop, tail_frac):
     rows, cols = load_series(path)
     if not rows:
@@ -88,7 +109,18 @@ def analyze(path, min_drop, tail_frac):
         # 2026-08-15)。本物のリバウンド発散は最小値の 2 倍を速やかに超えるので
         # 検出力は保たれる。
         smin = min(abs(x) for x in ser if x != 0.0) if any(x != 0.0 for x in ser) else 0.0
-        trend = ('rising' if (ma > mb * 1.05 and ma > 2.0 * smin)
+        # rising の 3 条件目: **上昇がその列自身のジッタを超えていること**。これが無いと、
+        # プラトー自体が数倍の幅で揺れている列では 2 窓平均の大小がジッタの位相だけで決まり、
+        # 判定が再現しない。実証 (2026-09-19): case/46 の run_0193 と run_0195 は設定重複で
+        # 同一形状・同一レシピになっており rms_roY1 の分布も同一 (後半中央値 1.37e-6 / 1.33e-6、
+        # p5-p95 一致、帯 8.5 倍) だったのに、ma/mb が 0.961 と 1.053 に割れて flat / rising に
+        # 分かれ、ゲートが PASS / FAIL に反転した。窓全体の上昇桁数 D が 1σ を超えることを課す。
+        # σ が大きい (元から荒れている) 列で本物の発散を見逃さないよう、閾値は 1 桁で頭打ちに
+        # する (D > 1 dec なら σ によらず rising)。
+        rise = _tail_rise(ser, tail_frac)
+        over_jitter = True if rise is None else (
+            rise[0] > max(math.log10(1.10), min(rise[1], 1.0)))
+        trend = ('rising' if (ma > mb * 1.05 and ma > 2.0 * smin and over_jitter)
                  else ('flat' if ma > mb * 0.9 else 'falling'))
 
         # init==0 (例: アライン格子で Uy が初期厳密 0) も下のピーク基準で判定する。旧特例 (rising でなければ

@@ -168,6 +168,88 @@ PYTHONPATH=. .venv-opt/bin/python -m forge_design.evaluate.runner_sern \
 | `run_0121_r5_vehicleside_lsw08` | 上に加えて `L_sw` 0.8 で三重点を分離 | **soft 段も完走**、mid 段 (2 次) step 1758 で発散。NaN は **x/H 10.80–11.68, y/H 5.38–5.89, z/H 1.23–2.50** = 自由流バンド天井 (`top_out`, slip) 付近。圧力床 0、温度床 58。→ codex M4 (slip 境界の反射) の領域 | 診断 (ref) |
 | `run_0122_r5_outflow` | 上に加えて `evaluate.outlet_kind: outflow` (出口・下方境界とも全量外挿) | **3D SST が初めて全段完走** (12000 step, DIVERGED でない)。出口の詰まりは解消 (出口プルーム P 6.38→6.52 kPa で静定・Ux 1975→1881・逆流 全 10 スナップショットで 0)。力係数は `check_quasisteady.py` で **ALL STEADY**。**ただし評価には使えない**: ① `rms_roOmega` 8.95e+15 (`sym` 上 1 ノードの `k=0` + 交差拡散、codex C1) ② 側面バンド末端の壁が幅外の流体を塞ぎ最大 **5.72 MPa** (codex C2) | 診断 (ref・評価には使わない) |
 
+### 起動レシピ実測シリーズ (run_0123–0191, 2026-09-19)
+
+CFL・梯子 step 数・MOC 初期値・収束判定の実測。**個々の結論は
+[`plans/active/tooling-nozzle-sern-startup.md`](../../plans/active/tooling-nozzle-sern-startup.md) を正本とする**
+(このセクションは所在の索引)。対象は **2D 平面 node・`frozen_tp`・作動点 m6_on・設計 A/B/C の 3 形状**に限る。
+
+| run | 目的 | 結果 | 状態 |
+| --- | --- | --- | --- |
+| `run_0120_r5_vehicleside_m6on` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | — | ref |
+| `run_0121_r5_vehicleside_lsw08` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (DIVERGED), C_T_ws 0.891364 | ref |
+| `run_0122_r5_outflow` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.891363 | ref |
+| `run_0123_cfl_A_base` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.915378 | ref |
+| `run_0124_cfl_B_2` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.915378 | ref |
+| `run_0125_cfl_C_6r07` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.914916 | ref |
+| `run_0126_cfl_D_6` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.915378 | ref |
+| `run_0127_cfl_E_05r07` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.914916 | ref |
+| `run_0128_cflR1_0p5` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.916193 | ref |
+| `run_0129_cflR1_2p0` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.916193 | ref |
+| `run_0130_cflR1_6p0` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.916192 | ref |
+| `run_0131_cflR1_12p0` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (DIVERGED) | ref |
+| `run_0132_cflR1_24p0` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (DIVERGED) | ref |
+| `run_0133_lad_0p1` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.916193 | ref |
+| `run_0134_lad_0p5` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | — | ref |
+| `run_0135_lad_2p0` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | — | ref |
+| `run_0136_lad_6p0` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | — | ref |
+| `run_0140_noladder_0p5` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (DIVERGED) | ref |
+| `run_0141_noladder_2p0` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (DIVERGED) | ref |
+| `run_0142_ladN_2000` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.916192 | ref |
+| `run_0143_ladN_1000` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (DIVERGED) | ref |
+| `run_0144_ladN_500` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (DIVERGED) | ref |
+| `run_0145_ladN_250` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (DIVERGED) | ref |
+| `run_0150_mocic_2000` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (DIVERGED) | ref |
+| `run_0151_mocic_1000` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (DIVERGED) | ref |
+| `run_0152_mocic_500` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (DIVERGED) | ref |
+| `run_0153_mocic_250` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (DIVERGED) | ref |
+| `run_0154_warmonly` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (NO_FORCES) | ref |
+| `run_0155_mocic2_2000` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.914418 | ref |
+| `run_0156_mocic2_1000` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.913489 | ref |
+| `run_0157_mocic2_500` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.911256 | ref |
+| `run_0158_mocic2_250` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.909417 | ref |
+| `run_0159_mocladcfl_0p5` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | — | ref |
+| `run_0160_mocladcfl_2p0` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | — | ref |
+| `run_0161_mocladcfl_6p0` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | — | ref |
+| `run_0162_rankB_250` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.938470 | ref |
+| `run_0163_rankB_2000` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (RESIDUAL_RISING), C_T_ws 0.943941 | ref |
+| `run_0164_rankC_250` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (DIVERGED) | ref |
+| `run_0165_rankC_2000` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.922014 | ref |
+| `run_0166_lad1k_A` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.913489 | ref |
+| `run_0167_lad1k_B` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.943903 | ref |
+| `run_0168_lad1k_C` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.920893 | ref |
+| `run_0169_c5_1000_A` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.913489 | ref |
+| `run_0170_c5_1000_B` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (RESIDUAL_RISING), C_T_ws 0.943903 | ref |
+| `run_0171_c5_1000_C` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.920893 | ref |
+| `run_0172_c5_1500_A` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.914270 | ref |
+| `run_0173_c5_1500_B` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.943851 | ref |
+| `run_0174_c5_1500_C` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.922221 | ref |
+| `run_0175_c5_2000_A` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.914418 | ref |
+| `run_0176_c5_2000_B` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.943941 | ref |
+| `run_0177_c5_2000_C` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.922014 | ref |
+| `run_0178_ramp_A` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.915168 | ref |
+| `run_0179_ramp_B` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.944723 | ref |
+| `run_0180_ramp_C` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.922841 | ref |
+| `run_0181_sm1_A` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.915407 | ref |
+| `run_0182_sm1_B` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (RESIDUAL_RISING), C_T_ws 0.945759 | ref |
+| `run_0183_sm1_C` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.922895 | ref |
+| `run_0184_sr_A` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.915480 | ref |
+| `run_0185_sr_B` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | FAIL (RESIDUAL_RISING), C_T_ws 0.945809 | ref |
+| `run_0186_sr_C` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.922983 | ref |
+| `run_0187_stageB_diag` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.945759 | ref |
+| `run_0188_mainB_0p5` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.945760 | ref |
+| `run_0189_mainB_1p0` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.945759 | ref |
+| `run_0190_mainB_2p0` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.945759 | ref |
+| `run_0191_mainB_5p0` | (起動レシピ実測シリーズ, plan `tooling-nozzle-sern-startup.md`) | PASS, C_T_ws 0.945759 | ref |
+| `run_0192_rb_prop_A` | R-b 第1次: 提案レシピ (梯子 1500×3 + 本段 500)。**設定ミスで dv が設計 B と同一** (`L_cowl` 3.0) | PASS, C_T_ws 0.945762 | 破棄 (run_0198 で置換) |
+| `run_0193_rb_ref_A` | R-b 第1次: 長時間参照 (4000×3 + 本段 12000)。**同上の設定ミス** | PASS, C_T_ws 0.945759 | 破棄 (run_0199 で置換)。run_0195 との重複ペアが R-h の証拠 |
+| `run_0194_rb_prop_B` | R-b: 提案レシピ、設計 B (`L_cowl` 3.0) | PASS, C_T_ws 0.945762 | active (R-b 正本) |
+| `run_0195_rb_ref_B` | R-b: 長時間参照、設計 B | **旧判定 FAIL (RESIDUAL_RISING) → R-h 修正後 PASS**, C_T_ws 0.945759 | active (R-b 正本) |
+| `run_0196_rb_prop_C` | R-b: 提案レシピ、設計 C (θ_r0 21°, `L_cowl` 1.0) | PASS, C_T_ws 0.922897 | active (R-b 正本) |
+| `run_0197_rb_ref_C` | R-b: 長時間参照、設計 C | PASS, C_T_ws 0.922894 | active (R-b 正本) |
+| `run_0198_rb_prop_A` | R-b 取り直し: 提案レシピ、**正しい設計 A** (`L_cowl` 1.2, L_ramp 10.77) | PASS, C_T_ws 0.915409 | active (R-b 正本) |
+| `run_0199_rb_ref_A` | R-b 取り直し: 長時間参照、正しい設計 A | PASS, C_T_ws 0.915407 | active (R-b 正本) |
+
 ### S7 3D の現状 (2026-09-05)
 
 - **外側空間なし** (側壁 = 境界壁、横方向膨張なし) は node SST で完走し、2D と力係数が 1 % 以内で一致 (run_0023)。

@@ -707,6 +707,19 @@ def run_forge(run_dir) -> int:
     return r.returncode
 
 
+
+def _archive_stage(run_dir, tag: str) -> None:
+    """段の `residual_history.csv` を `residual_<tag>.csv` に退避する (2026-09-19, codex plan レビュー M5)。
+    forge は段ごとに上書きするので、退避しないと**どの段で残差が上がったかを後から追えない**。
+    設計 B の `rms_roY1` 上昇を「soft/mid で起きた」と断じた根拠が無かったのはこれが理由。"""
+    src = Path(run_dir) / "residual_history.csv"
+    if src.exists():
+        try:
+            (Path(run_dir) / f"residual_{tag}.csv").write_bytes(src.read_bytes())
+        except OSError:
+            pass
+
+
 def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: float = 0.5, soft_conv: int = 0,
                warm_lam_steps: int = 0, warm_lam_cfl: float = 0.2, mid_steps: int = 0,
                warm_lam_ramp=None, soft_ramp=None,
@@ -773,6 +786,7 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
             res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
             if rc != 0 or not res:
                 raise RuntimeError(f"層流暖機段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
+            _archive_stage(run_dir, f"warm_cfl{c:g}")
             restart_by_index(res[-1], run_dir / MESH)
             for f in run_dir.glob("res_*"):
                 f.unlink()
@@ -793,6 +807,7 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res:
             raise RuntimeError(f"soft 段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
+        _archive_stage(run_dir, f"soft_cfl{c:g}")
         restart_by_index(res[-1], run_dir / MESH)
         for f in run_dir.glob("res_*"):
             f.unlink()
@@ -810,6 +825,7 @@ def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, s
             mid = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", mid)
             (run_dir / "solverConfig.yaml").write_text(mid)
             rc = run_forge(run_dir)
+            _archive_stage(run_dir, f"mid_cfl{c:g}")
             if _ci < len(legs) - 1:
                 _r = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(ch for ch in f.stem if ch.isdigit())))
                 if rc != 0 or not _r:

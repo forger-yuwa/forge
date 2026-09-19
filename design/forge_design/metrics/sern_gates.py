@@ -144,8 +144,27 @@ OMEGA_FLOOR = 1.0e-20          # update_d.cu の roOmega 下限
 # その壁ピンを拾っていた可能性が高い。壁ピンを除いた領域で評価する仕組みが要る (残作業 R-f)。
 
 
+def _solver_floors(run_dir) -> dict:
+    """run の `solverConfig.yaml` から実効の床を読む (2026-09-19, codex plan レビュー M6)。
+    書かれていなければソルバ既定 (`solverConfig.hpp`: pMin 1.0 / roMin 1e-4 / tMin 1e-4) を使う。
+    ただし温度は `dependentVariables_d.cu` の反転クランプ `DEPVAR_TMIN` 50 K が実効下限。"""
+    out = {"P": 1.0, "ro": 1.0e-4, "T": 50.0}
+    f = Path(run_dir) / "solverConfig.yaml"
+    if f.exists():
+        txt = f.read_text()
+        for key, name in (("pMin", "P"), ("roMin", "ro"), ("tMin", "T")):
+            m = re.search(rf"{key}\s*:\s*([-\d.eE+]+)", txt)
+            if m:
+                v = float(m.group(1))
+                out[name] = max(v, out[name]) if name == "T" else v
+    return out
+
+
 def floor_gate(run_dir, p_min: float | None = None, tol: float = 1.0e-6) -> dict:
-    """最終保存場で EOS 床・乱流下限に張り付いたノードを数える。1 個でも在れば NG。"""
+    """最終保存場で EOS 床・乱流下限に張り付いたノードを数える。1 個でも在れば NG。
+    床は run の `solverConfig.yaml` から読む。**読み取れない・保存場が無いときは判定不能で不合格**
+    (旧実装は例外を握り潰して ok=True を返していた: codex M6)。
+    `k <= 0` は見ない — node 低 Re 壁は `sstNodeWallKPin` (既定 1) が正当に k=0 をピンする。"""
     import glob
     import os
     run_dir = Path(run_dir)
@@ -153,32 +172,51 @@ def floor_gate(run_dir, p_min: float | None = None, tol: float = 1.0e-6) -> dict
                  if os.path.basename(q)[4:-3].isdigit()),      # 鏡像 (_full) など派生物を除く
                 key=lambda q: int(os.path.basename(q)[4:-3]))
     if not fs:
-        return {"ok": True, "skipped": "no res_*.h5", "counts": {}}
+        return {"ok": False, "counts": {}, "reasons": ["判定不能: res_*.h5 が無い"]}
+    fl = _solver_floors(run_dir)
+    if p_min is not None:
+        fl["P"] = float(p_min)
     counts = {}
     try:
         import h5py
         with h5py.File(fs[-1], "r") as f:
             V = f["VALUE"]
-            for name, (key, dflt) in FLOORS.items():
+            for name, lo in fl.items():
                 if name not in V:
+                    counts[f"{name} 不在"] = -1
                     continue
-                lo = float(p_min) if (name == "P" and p_min is not None) else dflt
                 a = np.asarray(V[name][:])
                 counts[f"{name}<={lo:g}"] = int(np.sum(np.isfinite(a) & (a <= lo * (1.0 + tol))))
+            # 化学種: 非負性と ΣρY = ρ (codex M6)
+            ys = sorted(k for k in V.keys() if re.fullmatch(r"roY\d+", k))
+            if ys and "ro" in V:
+                roa = np.asarray(V["ro"][:]); tot = np.zeros_like(roa)
+                neg = 0
+                for k in ys:
+                    a = np.asarray(V[k][:]); tot += a
+                    neg += int(np.sum(np.isfinite(a) & (a < -tol * np.maximum(roa, 1e-30))))
+                counts["roY<0"] = neg
+                good = np.isfinite(tot) & np.isfinite(roa) & (roa > 0)
+                counts["|sum(roY)/ro-1| max"] = float(np.max(np.abs(tot[good] / roa[good] - 1.0))) if good.any() else -1.0
             if "roOmega" in V:
                 a = np.asarray(V["roOmega"][:])
                 counts[f"roOmega<={OMEGA_FLOOR:g}"] = int(np.sum(np.isfinite(a) & (a <= OMEGA_FLOOR * (1.0 + tol))))
             # k の床判定は壁ピン (正当) と区別できないので**当面外す** (R-f)
-    except Exception as e:                                 # 読めないときは落とさず報告だけ
-        return {"ok": True, "skipped": f"{type(e).__name__}: {e}", "counts": {}}
-    bad = {k: v for k, v in counts.items() if v > 0}
+    except Exception as e:                                 # **読めないときは判定不能で不合格**
+        return {"ok": False, "counts": {}, "reasons": [f"判定不能: {type(e).__name__}: {e}"]}
+    bad = {k: v for k, v in counts.items()
+           if (k.startswith("|sum") and v > 1.0e-4) or (not k.startswith("|sum") and v != 0)}
     return {"ok": not bad, "counts": counts, "file": os.path.basename(fs[-1]),
             "reasons": [] if not bad else ["床/下限に張り付き: " + ", ".join(f"{k} {v} ノード" for k, v in bad.items())]}
 
 
-def residual_scale_gate(run_dir, ratio: float = 1.0e6) -> dict:
-    """残差列の**桁の揃い**を見る。1 列だけ他より ratio 倍以上大きいのは、
-    平坦でも局所的に閉じていない (run_0122 の rms_roOmega 8.95e15 / 他は 1e-4〜1e-1)。"""
+def residual_scale_gate(run_dir, ratio: float = 1.0e6, gate: bool = False) -> dict:
+    """残差列の**桁の揃い**を見る **補助警報** (2026-09-19, codex plan レビュー M3 で受理条件から降格)。
+
+    次元の違う量 (質量・運動量・エネルギー・乱流・化学種) を同じ集合に入れて中央値と比べているので、
+    **収束や方程式間の釣り合いを意味しない** (`residualMonitor_d.cu` の RMS に方程式間の正規化は無い)。
+    極端な異常 (run_0122 の `rms_roOmega` 8.95e15 / 他は 1e-4〜1e-1) の検知には有効なので、
+    `gate=True` のときだけ不合格にする。既定は警告のみ。"""
     import csv
     path = Path(run_dir) / "residual_history.csv"
     if not path.exists():
@@ -200,9 +238,11 @@ def residual_scale_gate(run_dir, ratio: float = 1.0e6) -> dict:
         return {"ok": True, "skipped": "columns < 2"}
     med = float(np.median(list(last.values())))
     bad = {k: v for k, v in last.items() if v > med * ratio}
-    return {"ok": not bad, "median": med, "outliers": bad,
-            "reasons": [] if not bad else [f"残差の桁が揃わない (中央値 {med:.2e}): "
-                                           + ", ".join(f"{k} {v:.2e}" for k, v in bad.items())]}
+    return {"ok": (not bad) or (not gate), "gate": bool(gate), "median": med, "outliers": bad,
+            "warnings": [] if not bad else [f"残差の桁が揃わない (中央値 {med:.2e}): "
+                                            + ", ".join(f"{k} {v:.2e}" for k, v in bad.items())],
+            "reasons": [] if (not bad or not gate) else
+            [f"残差の桁が揃わない (中央値 {med:.2e}): " + ", ".join(f"{k} {v:.2e}" for k, v in bad.items())]}
 
 
 def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: str | None = None,
