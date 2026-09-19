@@ -323,7 +323,8 @@ def wall_heat(run, step, man, D, prof_n=40):
 
 SERIES_COLS = ["dT_floor", "dT_mid", "dT_mouth", "dT_up", "dT_dn",
                "zpen_25", "mdot_in", "mdot_out", "mdot_imbalance",
-               "q_outer", "q_cylside", "q_floor"]   # q_* は wall_heat で埋める
+               "q_outer", "q_cylside", "q_floor",   # q_* は wall_heat で埋める
+               "q_wall_sum", "h_ref"]               # 準定常判定 (check_cavity_steady.py) の対象量
 
 
 def main():
@@ -356,6 +357,11 @@ def main():
             for nm, g in (("q_outer", "cav_outer"), ("q_cylside", "cyl_side"), ("q_floor", "cav_floor")):
                 q[nm] = wq[g]["Q_W"] if g in wq else float("nan")
             q["q_wall_sum"] = q["q_outer"] + q["q_cylside"] + q["q_floor"]
+            # 3 壁をまとめた h_ref (面積重み)。**判定量は run 間で同じ定義**にする
+            aw = [(wq[g].get("area_m2", float("nan")), wq[g].get("h_ref", float("nan")))
+                  for g in ("cav_outer", "cyl_side", "cav_floor") if g in wq]
+            aw = [(A, h) for A, h in aw if A == A and h == h]
+            q["h_ref"] = (sum(A * h for A, h in aw) / sum(A for A, h in aw)) if aw else float("nan")
             rows.append((st, q))
             print("  step %6d  dT_mid %8.2f  dT_mouth %8.2f  zpen25 %6.2f mm  q_sum %9.3f W"
                   % (rows[-1][0], q["dT_mid"], q["dT_mouth"], q["zpen_25"] * 1e3, q["q_wall_sum"]),
