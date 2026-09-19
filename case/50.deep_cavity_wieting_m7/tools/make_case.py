@@ -115,6 +115,9 @@ def main():
     ap.add_argument("--main-steps", type=int, default=8000)
     ap.add_argument("--soft-steps", type=int, default=1500)
     ap.add_argument("--mid-steps", type=int, default=1500)
+    ap.add_argument("--soft-cfl", type=float, default=0.5)
+    ap.add_argument("--mid-cfl", type=float, default=1.0)
+    ap.add_argument("--ic-delta", type=float, default=2.0e-4, help="IC の壁近傍ランプ幅 [m]")
     ap.add_argument("--cfl", type=float, default=2.0)
     ap.add_argument("--ramp", default="0.5,1,2", help="2 次移行の cfl ランプ (空文字で無し)")
     ap.add_argument("--ramp-steps", type=int, default=1000)
@@ -140,6 +143,8 @@ def main():
     shutil.copy(CASE / "mesh" / f"{a.mesh}.h5", rd / "mesh.h5")
     write_species_db(rd)
     (rd / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
+    global IC_DELTA0
+    IC_DELTA0 = a.ic_delta
     patch_ic(rd / "mesh.h5", st, gas, Tw)
     ys = "".join(f", Y{i}: {gas.Y[sp]:.8f}" for i, sp in enumerate(SPECIES))
     (rd / "bcondConfig.yaml").write_text(BC.format(ro=rho, u=U, p=p, t=T, tw=Tw, ys=ys))
@@ -150,9 +155,9 @@ def main():
 
     common = dict(mu_inf=mu, lam_inf=gas.lam(T), cp_ref=gas.cp(T), gam_ref=gas.gamma(T), relax=1.0)
     stages = [
-        ("soft", dict(conv=0, lim=0, cfl=0.5, inner=10, nsteps=a.soft_steps,
+        ("soft", dict(conv=0, lim=0, cfl=a.soft_cfl, inner=10, nsteps=a.soft_steps,
                       out_int=a.soft_steps, **common)),
-        ("mid",  dict(conv=0, lim=0, cfl=1.0, inner=10, nsteps=a.mid_steps,
+        ("mid",  dict(conv=0, lim=0, cfl=a.mid_cfl, inner=10, nsteps=a.mid_steps,
                       out_int=a.mid_steps, **common)),
     ]
     for i, c in enumerate([float(x) for x in a.ramp.split(",") if x.strip()]):

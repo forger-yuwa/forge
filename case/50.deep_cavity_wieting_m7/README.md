@@ -76,6 +76,15 @@ $$q_s/q_{fp} = 0.6\,Q(X) = \frac{0.21}{\sqrt{1+d/w}}\left[\zeta\!\left(\tfrac12,
   この「$q$ 比」正規化自体が定義できない** → case/49 側は $h$ 比 (TN D-8233 形式) を使う。
   実装は [`tools/burggraf.py`](tools/burggraf.py)。
 
+### 圧力比 (G3) — 分母問題の影響を受けない検証点
+
+| 量 | forge (run_0006) | 実験 (W70 Fig 4) |
+| --- | --- | --- |
+| $p_c/p_m$ (床+1.27 mm ÷ 前縁 88.9 mm の面圧) | **0.979** | 1.0 ± 0.1 (Re・スパン長に依らず) |
+| $p_m/p_\infty$ | 1.050 | — (前縁の粘性干渉で僅かに高いのは妥当) |
+
+**G3 PASS**。キャビティ内部がほぼ模型面圧に等しいという開口キャビティの基本挙動は再現できている。
+
 ### 収束状態 (この数字の扱い)
 
 - `check_quasisteady` = **TRANSIENT-UNSETTLED** (drift 4.2 %/tail)。$Q_c$ は 47.0 → 21.6 W/m と単調減で、
@@ -91,7 +100,8 @@ $$q_s/q_{fp} = 0.6\,Q(X) = \frac{0.21}{\sqrt{1+d/w}}\left[\zeta\!\left(\tfrac12,
    $\sqrt{\alpha_s t}$ = **1.74 mm = 1.4 すきま幅 = $x/d$ 0.086** — **実験が理論を上回り始める深さ帯と一致**。
    横方向伝導が作る見かけ熱流束は ΔT 5–22 K で $0.08$–$0.7\,q_{fp}$ と、実測の超過と同じ桁。
    W70 本文も「表面伝導・放射の補正はしていない」と明記。
-2. **非定常**: せん断層振動によるポンピング (run_0007 で検証中)。
+2. **非定常**: **否定された** (run_0007)。URANS (dual-time BDF2, dt 5e-8 s, 物理 195 µs = せん断層 115 周期) で
+   $Q_c$ = 21.54 W/m — 定常 21.60 W/m と **0.3 % 差**。せん断層振動による深部輸送の増強は無い。
 3. **未検証**: 低マッハ前処理、すきま方向の格子細分。
 
 ## 計算 run 一覧
@@ -104,7 +114,8 @@ $$q_s/q_{fp} = 0.6\,Q(X) = \frac{0.21}{\sqrt{1+d/w}}\left[\zeta\!\left(\tfrac12,
 | `run_0004_T1_wd0063_A1` | T1 = 深キャビティ $w/d$=0.063 ($d/w$=16), 同一条件・同一ブロック構成 (`t1_wd0063_v2`), 段階起動 + 本段 10000 step | 完走 (発散なし)。最終場は `mesh.h5` | active (run_0005 の IC) |
 | `run_0005_T1_wd0063_main` | 本段継続 10000 step (res 1000 step 毎) = 最初の評価 | `check_quasisteady` **DRIFTING** ($Q_c$ 47.0→31.7 W/m, −12.8 %/tail)。暫定比較は上表。`cavity_eval.json` / `cavity_rear.csv` / `compare_rear.png` | active (**未収束**) |
 | `run_0006_T1_wd0063_long` | run_0005 から 80000 step (res 5000 step 毎) — 内部の緩和を追い込む | $Q_c$ 21.6 W/m (漸近 ≈21.5)、平均比 **0.580** (文献分母)。`check_quasisteady` TRANSIENT-UNSETTLED (4.2 %/tail)。残差はリミットサイクル。三者比較表は上。`compare_rear.png` | active (**T1 主結果**) |
-| `run_0007_T1_urans` | URANS (dual-time BDF2, dt 5e-8 s = 物理 CFL 4.4, 20 subiter, 4000 step = 200 µs) — 定常のリミットサイクルが物理的非定常かを見る | 計算中 | 投入中 |
+| `run_0007_T1_urans` | URANS (dual-time BDF2, dt 5e-8 s = 物理 CFL 4.4, 20 subiter, 4000 step = 195 µs) — 定常のリミットサイクルが物理的非定常かを見る | $Q_c$ = **21.54 W/m** (定常 21.60 と **0.3 % 差**)。**非定常による増強は無い** | active (**非定常の否定**) |
+| `run_0008_T1_wd0211` (+`_long`) / `run_0009_T1_wd0383` (+`_long`) | **w/d 掃引** (0.211 / 0.383)。W70 で理論と実験が一致する広い側で forge を検証する | 計算中 | 投入中 |
 
 ## 既知の注意
 
