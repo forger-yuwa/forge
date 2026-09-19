@@ -255,6 +255,11 @@ CFL・梯子 step 数・MOC 初期値・収束判定の実測。**個々の結�
 | `run_0204_r4e_2d_base_t005` | 同上、`t_base` 0.005 (厚み依存の切り分け) | **soft step 20 NaN** 同じ 42 節点 → 薄くしても消えない | ref (診断) |
 | `run_0205_r4e_2d_base_wall` | ベースを**等温粘性壁**に (`evaluate.vehicle_kind: wall`) | **soft 1500 step 完走** (rms_ro 2.9e-5→1.0e-5) → **mid (2 次) step 28 NaN**、P 最小 0 | ref (R4e の主要根拠) |
 | `run_0206_r4e_2d_base_wall_barth` | 同上 + `limiter: 1` (Barth) | **mid step 27 NaN** → リミッタでは直らない | ref (診断) |
+| `run_0207_r4e_diag_1st` | R4e ① 共通初期場 (`run_0205/res_0.h5`) から **1 次**継続、毎 step + `level: 2` | **40 step 完走・場は不動** (P min 1064.85→1066.58) | ref (対照) |
+| `run_0208_r4e_diag_2nd` | 同上 **2 次** | **step 28 NaN**。P 最小は step 1 から `vehicle_base` の壁節点 (x/H 10.77321)、ρ 120 倍減 | ref (R4e ① の正本) |
+| `run_0209_r4e_diag_nobase` | **ベース無し**生産形状 (`run_0198` から) を同条件 2 次 | **40 step 完走・不動**。カウル後縁の負圧再構成 (−13747 Pa) は同じく毎 step 出る → 不整合は原因でない | ref (対照) |
+| `run_0210_r4e_diag_2nd_nowd` | 2 次 + **`nodeWallDirichlet: 0`** | **40 step 完走**、ベース節点 P は上昇。ただし壁節点が 1500 m/s = 壁でない (診断) | ref (診断) |
+| `run_0211_r4e_diag_2nd_cfl01` | 2 次 + **cfl 0.1** | **step 184 NaN** (cfl 1/10 で step 6.6 倍 = 同じ擬似時間) → CFL 律速でない | ref (診断) |
 
 ### S7 3D の現状 (2026-09-05)
 
