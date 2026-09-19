@@ -16,6 +16,7 @@
 | [`procedures/solver-settings.md`](procedures/solver-settings.md) | `convMethod` / `limiter` などの数値設定リファレンス |
 | [`procedures/su2-cross-check.md`](procedures/su2-cross-check.md) | 同一メッシュ・同一 BC で SU2 と比較し forge 固有の問題を切り分ける手順 |
 | [`procedures/codex-review.md`](procedures/codex-review.md) | 計画立案時・検証結果時の **codex 外部レビュー**の手順 (`codex_review.py`、記録の残し方、指摘の採否ルール) |
+| [`plans/active/tooling-nozzle-sern-chain.md`](plans/active/tooling-nozzle-sern-chain.md) | ⑤ SERN の設計チェーン。起動レシピ (§4.12/§4.16)・収束判定 (§4.16.1)・残作業 (§5.1)。Claude は skill `sern-eval` |
 | [`procedures/inlet-profile.md`](procedures/inlet-profile.md) | 入口に分布 (全温・全圧・組成・k/ω・超音速入口の ρ,U,Ps) を与える手順 (`inletProfile` CSV + `gen_inlet_profile.py`)。Claude は skill `forge-inlet-profile` |
 | [`procedures/development-environment.md`](procedures/development-environment.md) | 開発環境とビルド (Docker / WSL native) の方針 |
 | [`procedures/coding-conventions.md`](procedures/coding-conventions.md) | ソース構成・C++/CUDA 命名規約・ビルド/テスト実行手順 |
