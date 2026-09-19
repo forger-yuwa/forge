@@ -355,9 +355,6 @@ def moc_ic_arrays(kern, xn, yn, upper, st: dict, gamma: float, gas=None) -> tupl
     g = float(gamma); gm = g - 1.0
     R = float(ex.get("R", ex["P"] / (ex["ro"] * ex["T"])))
     M_in = float(ex.get("M", 0.0))
-    # 入口状態からよどみ量 (等エントロピー)
-    T0 = ex["T"] * (1.0 + 0.5 * gm * M_in * M_in)
-    P0 = ex["P"] * (1.0 + 0.5 * gm * M_in * M_in) ** (g / gm)
     X = np.asarray(kern.X)
     M = np.full(len(xn), np.nan); TH = np.full(len(xn), np.nan)
     # **被覆外は外挿する** (2026-09-19)。x を kernel 範囲に、y を各 station の範囲にクランプして端の値を伸ばす。
@@ -377,9 +374,40 @@ def moc_ic_arrays(kern, xn, yn, upper, st: dict, gamma: float, gas=None) -> tupl
     base = region_ic_arrays(upper, st, gamma)
     if not ok.any():
         return base, 0
-    f = 1.0 + 0.5 * gm * M[ok] ** 2
-    T = T0 / f; P = P0 / f ** (g / gm); ro = P / (R * T)
-    q = M[ok] * np.sqrt(g * R * T)
+    # **NASA-9 に整合な等エントロピー展開** (2026-09-19, codex plan レビュー M4)。
+    # 旧実装は一定 γ の式で T/P/q を作り `roe` だけ NASA-9 に置換していたため、入口に対して
+    # 全エンタルピーが +1.20 %・エントロピーが +30.7 J/(kg·K) ずれていた。
+    # ここでは同じ NASA-9 物性で次の 2 式を解く:
+    #   h_sens(T) + ½ M² γ(T) R T = h0_in     (全エンタルピー保存)
+    #   p = p_in · exp[(s°(T) − s°(T_in)) / R]  (等エントロピー)
+    # 速度は q = M · a(T)。cpg のときは従来どおり一定 γ の式。
+    Mo = M[ok]
+    if st.get("gas_model") == "frozen_tp":
+        if gas is None:
+            raise ValueError("frozen_tp の MOC IC には FrozenGas が要る")
+        T_in = float(ex["T"]); P_in = float(ex["P"])
+        h0_in = float(np.ravel(gas.h_sens(T_in))[0]) + 0.5 * float(ex["u"]) ** 2
+        T = np.full_like(Mo, T_in)
+        for _ in range(40):                      # h0 一定から T を Newton で解く (γ(T) も更新)
+            gT = np.asarray(gas.gamma(T)); hT = np.asarray(gas.h_sens(T))
+            F = hT + 0.5 * Mo ** 2 * gT * R * T - h0_in
+            cpT = np.asarray(gas.cp_mass(T))
+            dF = cpT + 0.5 * Mo ** 2 * gT * R      # γ の T 依存は 2 次なので無視 (収束には十分)
+            step = F / np.maximum(dF, 1e-30)
+            step = np.clip(step, -0.3 * T, 0.3 * T)
+            T = np.maximum(T - step, 1.0)
+            if np.max(np.abs(step)) < 1e-8 * np.max(T):
+                break
+        s0 = np.asarray(gas.s0_mass(T)); s0_in = float(np.ravel(gas.s0_mass(T_in))[0])
+        P = P_in * np.exp((s0 - s0_in) / R)
+        ro = P / (R * T)
+        q = Mo * np.asarray(gas.a(T))
+    else:
+        T0 = float(ex["T"]) * (1.0 + 0.5 * gm * M_in * M_in)
+        P0 = float(ex["P"]) * (1.0 + 0.5 * gm * M_in * M_in) ** (g / gm)
+        f = 1.0 + 0.5 * gm * Mo ** 2
+        T = T0 / f; P = P0 / f ** (g / gm); ro = P / (R * T)
+        q = Mo * np.sqrt(g * R * T)
     base["ro"][ok] = ro
     base["roUx"][ok] = ro * q * np.cos(TH[ok])
     base["roUy"][ok] = ro * q * np.sin(TH[ok])
