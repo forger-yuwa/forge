@@ -165,6 +165,74 @@ forge は局所 `volume` 依存で、勾配の作り方も未比較。
 言えるのは**構造上の一致に限る**: 速度 Dirichlet / 連続の式を解く / 内部辺を再構成する / 再構成の目標点は辺中点。
 **同一メッシュ・対応 BC で実際に走らせるまで SU2 の成否は予測しない。**
 
+### 4.8 W1 の設計: 再構成増分の列挙と共通化 (2026-09-19, codex Major 5 対応)
+
+**ずれは 2 成分ある。** 「座標を揃える」だけでは足りない。
+
+**(1) 流束側が実際に適用する増分** (`convectiveFlux_common_d.cuh` の `interp_dispatch`)。
+`phi_face = phiC + psi * Δ` の Δ は `convMethod` で違う:
+
+| `convMethod` | 関数 | 増分 Δ |
+| --- | --- | --- |
+| 0 / −1 | `interp_1stUp` | **0** (`return phiC`。ψ は無関係) |
+| 1 | `interp_MUSCL_2nd` | `g · cpd` |
+| **2** | `interp_MUSCL_3rd` | `0.5·k·(phiD − phiC) + (1−k)·(g · cpd)`, k = 1/3 ← **隣接値差を含む** |
+| その他 | `interp_MINMOD` | 別式 (`f`・`dcc` を使う) |
+
+`cpd` は目標点までのオフセットで、**node では常に `±0.5·dcc` (エッジ中点)**
+(`convectiveFlux_d.cu` の `rem = (discretization=="node") ? 1 : 0`)、cell では `pc[ip] − cc[ic]` (双対面重心)。
+
+**(2) リミッタ側が評価する増分**:
+
+| 経路 | 評価点 | 増分 |
+| --- | --- | --- |
+| 通常 (`limiter_d.cu` の `limiter_r1_fused5_d` pass2) | `pc[ip] − cc[ic0]` (**双対面重心**) | `g · dcp` のみ |
+| 周期 node (`limiterPeriodic_d.cuh`) | 同じく `pc[ip] − cc[ic0]` | `g · dcp` のみ (`SCALED` 版は `× inv_ref`) |
+
+**したがって node では、点が違う (重心 vs 中点) うえに、`convMethod: 2` では形も違う**
+(リミッタは隣接値差の項を**一度も見ない**)。SU2 はリミッタ側でも `umusclProjection` を適用して形まで揃えている
+(`computeLimiters_impl.hpp`)。
+
+**設計**: 増分を作る関数を 1 つにし、流束とリミッタが**同じ関数・同じ引数**で呼ぶ。
+
+```
+__device__ flow_float recon_increment(int scheme, flow_float phiC, flow_float phiD,
+                                      flow_float gx, flow_float gy, flow_float gz,
+                                      flow_float cpdx, flow_float cpdy, flow_float cpdz, ...);
+// 流束:     phi_face = phiC + psi * recon_increment(...)
+// リミッタ: delta_m  = recon_increment(...)   ← psi を求める材料
+```
+
+**必要な入力はすべて揃っている**: リミッタ pass2 で partner は pass1 と同じ一行
+`ic1 = plane_cells[2*ip+0] + plane_cells[2*ip+1] - ic0` で取れる。`phiD = Q[k][ic1]` も pass1 で既読。
+エッジ中点オフセットは `0.5*(cc[ic1] − cc[ic0])`。
+
+**float32 の桁落ちも同時に直す** (codex Major 5): 現行は `Qt = qc + g·dcp` を作ってから `Qt − qc` を渡しており、
+**足して引く往復で桁を落としている**。共通関数は Δ を直接返すのでこの往復が消える。
+変更前後で `Δ` の相対差を float32/float64 で測って記録する。
+
+**周期経路も同じ関数を通す** (`limiterPeriodic_d.cuh`)。`SCALED` 版のスケーリングは Δ を作った後に掛ける。
+**cell は対象外** (cell の目標点は双対面重心のままで整合しているので、分岐を維持する)。
+
+### 4.9 W1 の合否ゲート (実装前に固定, codex Major 6/7 対応)
+
+**Barth と Venkatakrishnan で要求を分ける。**
+
+| ゲート | 対象 | 要求 |
+| --- | --- | --- |
+| G1 厳密有界性 | `limiter: 1` (Barth) | 再構成した面値が**近傍の min/max を外れる面が 0** |
+| G2 平滑化込みの逸脱 | `limiter: 2` (Venkatakrishnan) | 逸脱は許すが**逸脱量が改修前より減る**こと。`eps2 = volume` が正なので厳密有界は保証されない (例: `δmin=0, δm=−1, volume=1` で ψ=1/3) |
+| G3 正値性 | 両方 | `check_face_reconstruction.py` の VERDICT。**W1 単独で 0 になることは要求しない** (それは W2 の役割) |
+| G4 解の非退行 | 両方 | `check_field_regress.py --boundary` をノイズ床基準で。**リミッタが強く効くので解は動きうる** — 動いたら SU2 クロスチェック (`procedures/su2-cross-check.md`) で是非を決める |
+
+**共通 IC と設定差分を固定する**: `run_0205/res_0.h5` を共通初期場に、`output.level: 2`・`outStepInterval: 1`。
+差分は `space.limiter` と新キーのみ。メッシュ品質 VERDICT・全残差・`check_quasisteady.py` を毎回貼る。
+
+**標準ケース回帰** (`procedures/verification/README.md` から具体名で指定):
+`case/05.sod_shock_tube` (衝撃波)、`case/36.passive_pseudoshock_control` (擬似衝撃波・node 壁)、
+`case/09.Taylor-Green` (周期 = W1 の周期経路)、`case/23.axi_nozzle` (軸対称)、
+`case/44.vitiated_air_wt` (TP・凝縮)。変更範囲に応じて増やす。
+
 ## 5. 実装ステップ
 
 1. 設計確定 (§4.5 の未決を codex レビューで決める)
@@ -177,7 +245,7 @@ forge は局所 `volume` 依存で、勾配の作り方も未比較。
 | # | 項目 | 内容 |
 | --- | --- | --- |
 | W0 | ~~測定器の座標~~ **完了 (2026-09-19)**: `check_wall_cv_drain.py` を削除し `check_face_reconstruction.py` に置換 (ノード座標・再構成状態の物理性のみ)。§4.5/§4.6 の結論を訂正 |
-| W1 | **リミッタ評価点を再構成点に揃える**。ただし**通常経路・周期経路・次数ごとに増分が違う**ので、まず**列挙して共通化を設計する**: 通常は `limiter_d.cu` の融合カーネル (双対面重心)、周期 node は `limiterPeriodic_d.cuh` で別経路 (同じく面重心)、3 次 MUSCL の増分は勾配射影だけでなく**隣接値差を含む** (`convectiveFlux_common_d.cuh` の `interp_MUSCL_3rd`)。SU2 はリミッタ側でも `umusclProjection` を適用している。float32 での `Qt-Qc` の桁落ちも見る。cell は対象外 |
+| W1 | ~~リミッタ評価点を再構成点に揃える~~ **設計完了 (2026-09-19) → §4.8 / 合否ゲート §4.9**。ずれは **点** (双対面重心 vs エッジ中点) と **形** (`convMethod: 2` の隣接値差の項をリミッタが見ていない) の 2 成分。増分を作る共通関数を 1 つにし、流束とリミッタが同じ引数で呼ぶ。必要な入力は揃っている (partner は pass1 と同じ一行、`phiD` も既読)。`Qt − qc` の往復も同時に解消 (float32 の桁落ち)。周期経路も同じ関数、cell は分岐維持。**次は実装と A/B** |
 | W2 | **面単位の非物理フォールバック** (SU2 の `bad_recon` 相当) を**導入候補として独立検証**。§4.5 のとおりベース run でのみ発火し対照では発火しないので**本件の直接候補**。組成・エンタルピーも整合して再計算すること |
 | W3 | **更新率制限と点ロールバックは別 plan へ**。forge には既に `update_d.cu` の `updateGuardScale` があり、[`accepted/time_integration-update-positivity-geard.md`](../accepted/time_integration-update-positivity-guard.md) に「試験した CFL 上限を改善しなかった」実測がある。SU2 の `MAX_UPDATE_FLOW` をそのまま移植する設計では、流れ 5 変数の後に別途更新される SST・化学種・凝縮との整合 (ΣρY=ρ、組成依存 EOS、周期共有 DOF、TP のエネルギー基準) を失う。**3 件一括の既定 on は推奨されない** |
 | W4 | ~~壁ノードからの速度再構成を制限する~~ **撤回 (§4.5)**。再構成は片側勾配の理論値に厳密一致しており異常でない |
