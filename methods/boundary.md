@@ -217,9 +217,13 @@ SST automatic wall treatment (`wallTreatmentSST`) とはコードパスが分離
 
 ### 共役熱伝達 (CHT) — 壁温を固体と連立して解く
 
-> **状態 (2026-09-19)**: 契約は下記のとおり確定。**実装済み = 界面診断の出力 (`output.interfaceDiag`)・
-> 壁温分布の入力 (`wallProfile`)・共有 CV の壁温競合の起動時拒否**。
-> **未実装 = 固体モデル・連成反復・`conjugate` 属性** (外部ループとソルバ内連成)。
+> **状態 (2026-09-19)**: 契約は下記のとおり確定。
+> **実装済み**: 界面診断の出力 (`output.interfaceDiag`)、壁温分布の入力 (`wallProfile`)、
+> 共有 CV の壁温競合の起動時拒否、**固体側モデル** ([`tools/solid_shell.py`](../solver_density_cuda/tools/solid_shell.py))、
+> **外部弱連成ループ** ([`tools/cht_loop.py`](../solver_density_cuda/tools/cht_loop.py))。
+> **未実装**: ソルバ内連成 (`conjugate` 属性)、`fem2d` 固体、拘束反力込みの $q_{\rm eff}$。
+> 検証: 1 次元純伝導の共役解を解析解と照合 (`case/52.conjugate_slab`) — $T_w$ 誤差 0.025 %、
+> 両側 $q$ の不一致 0.0053 % で **PASS**。
 > 設計判断と検証計画は [`plans/active/boundary-conjugate-heat-transfer.md`](../plans/active/boundary-conjugate-heat-transfer.md)
 > (codex plan レビュー 3 巡: NO-GO → NO-GO → GO-with-changes、全件採用)。実装時は本節と実装の整合を確認する。
 

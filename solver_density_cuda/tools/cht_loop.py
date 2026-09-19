@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+r"""CHT 外部弱連成ループ (Phase 1): forge の壁熱流束 → 固体シェル → `wallProfile` → forge、を反復する。
+
+仕様は methods/boundary.md「共役熱伝達 (CHT)」、設計判断は
+plans/active/boundary-conjugate-heat-transfer.md。固体側は `solid_shell.py`。
+
+1 反復 = **forge 1 回** (CFD 評価は高価なので line search はしない)。
+更新は固定点を保存する形 $(A_s+D_f)T^{k+1}=b_s+Q_f(T^k)+D_fT^k$ + Anderson 加速で、
+受理は固定重みのメリット関数 $\Phi$、棄却したら最後に良かった状態へ退避して $D_f$ を倍にする。
+
+ディレクトリ構成 (1 ループ = 1 run ディレクトリ):
+    <run_dir>/it_000/ … 各反復の完全な forge run (mesh.h5, config, res_*, 壁ダンプ)
+    <run_dir>/cht_history.csv … 反復ごとの T_w 統計・残差・Q 合計 (収束判定の一次情報)
+
+usage:
+  python3 solver_density_cuda/tools/cht_loop.py <run_dir> \
+      --template <template_dir> --forge <forge binary> --solid solid.json \
+      --phys-id 4 [--phys-name wall] [--steps 2000] [--max-iter 20] [--flux q_compact]
+
+<template_dir> には mesh.h5 / solverConfig.yaml / bcondConfig.yaml (+ probe.yaml) を置く。
+対象壁の bcond には `ints: {wallProfile: 1}` が要る (無ければ本スクリプトが落とす)。
+solverConfig の `output` には `interfaceDiag: 1` が要る。
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import h5py
+import numpy as np
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from solid_shell import ShellOperator, SolidModel   # noqa: E402
+
+XDMF_NNODE = {2: 2, 4: 3, 5: 4}     # Polyline / Triangle / Quadrilateral
+
+
+# ------------------------------------------------------------------ wall dump
+def read_wall_dump(path: Path):
+    """壁ダンプから (coords, faces, values) を読む。node 可視化 (Center='Node') 前提。"""
+    with h5py.File(path, "r") as f:
+        coords = np.array(f["MESH/COORD"]).reshape(-1, 3)
+        conne = np.array(f["MESH/CONNE"]).astype(np.int64)
+        vals = {k: np.array(f["VALUE/" + k]) for k in f["VALUE"].keys()}
+    faces, i = [], 0
+    while i < conne.size:
+        et = int(conne[i]); i += 1
+        if et == 2:                      # Polyline: 次に節点数が来る
+            nn = int(conne[i]); i += 1
+        elif et in XDMF_NNODE:
+            nn = XDMF_NNODE[et]
+        elif et == 1:                    # Polyvertex
+            nn = int(conne[i]); i += 1
+        else:
+            raise ValueError(f"unsupported XDMF element type {et} in {path}")
+        faces.append([int(x) for x in conne[i:i + nn]]); i += nn
+    return coords, faces, vals
+
+
+def latest_wall_dump(run: Path, phys_name: str, phys_id: int) -> Path:
+    pat = re.compile(rf"^res_{re.escape(phys_name)}_{phys_id}_(\d+)\.h5$")
+    best, best_step = None, -1
+    for p in run.glob(f"res_{phys_name}_{phys_id}_*.h5"):
+        m = pat.match(p.name)
+        if m and int(m.group(1)) > best_step:
+            best, best_step = p, int(m.group(1))
+    if best is None:
+        raise FileNotFoundError(f"no wall dump res_{phys_name}_{phys_id}_*.h5 in {run}")
+    return best
+
+
+def latest_field(run: Path) -> Path:
+    best, best_step = None, -1
+    for p in run.glob("res_*.h5"):
+        m = re.match(r"^res_(\d+)\.h5$", p.name)
+        if m and int(m.group(1)) > best_step:
+            best, best_step = p, int(m.group(1))
+    if best is None:
+        raise FileNotFoundError(f"no res_<step>.h5 in {run}")
+    return best
+
+
+# ------------------------------------------------------------------ loop
+def write_wall_profile(path: Path, coords: np.ndarray, Tw: np.ndarray):
+    with open(path, "w") as f:
+        f.write("x y z Ts\n")
+        for (x, y, z), T in zip(coords, Tw):
+            f.write(f"{x:.10e} {y:.10e} {z:.10e} {T:.10e}\n")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("run_dir")
+    ap.add_argument("--template", required=True, help="mesh.h5 と config を置いたディレクトリ")
+    ap.add_argument("--forge", required=True)
+    ap.add_argument("--solid", required=True, help="固体モデル JSON (solid_shell.SolidModel)")
+    ap.add_argument("--phys-id", type=int, required=True)
+    ap.add_argument("--phys-name", default="wall")
+    ap.add_argument("--max-iter", type=int, default=20)
+    ap.add_argument("--flux", default="q_compact", choices=["q_compact", "q_recon", "q_2nd", "q_eff"],
+                    help="界面に渡す熱流束の定義 (既定 q_compact。**どれを使ったか履歴に残す**)")
+    ap.add_argument("--tol-K", type=float, default=1.0e-3, help="max|dTw| の収束許容 [K]")
+    ap.add_argument("--tol-rel", type=float, default=1.0e-3, help="max|r|/スケール の収束許容")
+    ap.add_argument("--n-consec", type=int, default=2, help="収束と見なす連続回数")
+    ap.add_argument("--anderson", type=int, default=5)
+    ap.add_argument("--Tw-init", type=float, default=None, help="初期壁温 [K] (既定 = 固体の背面温度)")
+    ap.add_argument("--axisym", action="store_true")
+    a = ap.parse_args()
+
+    run = Path(a.run_dir).resolve()
+    tpl = Path(a.template).resolve()
+    run.mkdir(parents=True, exist_ok=True)
+    model = SolidModel.from_json(a.solid)
+    shutil.copy(a.solid, run / "solid.json")
+
+    env = dict(os.environ)
+    env.setdefault("LD_LIBRARY_PATH", "/usr/lib/x86_64-linux-gnu/hdf5/serial")
+
+    # --- 前提の検査 (黙って効かない設定で回さない) ---
+    bcond = (tpl / "bcondConfig.yaml").read_text()
+    if "wallProfile" not in bcond:
+        sys.exit(f"[cht_loop] {tpl}/bcondConfig.yaml: 対象壁に ints: {{wallProfile: 1}} が無い")
+    solver_cfg = (tpl / "solverConfig.yaml").read_text()
+    if "interfaceDiag" not in solver_cfg:
+        sys.exit(f"[cht_loop] {tpl}/solverConfig.yaml: output に interfaceDiag: 1 が無い")
+
+    hist_path = run / "cht_history.csv"
+    hist = open(hist_path, "w", newline="")
+    wr = csv.writer(hist)
+    wr.writerow(["iter", "flux", "Tw_min", "Tw_max", "Tw_mean", "dTw_max", "res_rel",
+                 "Q_total_W", "Df_mean", "used", "rejected", "converged"])
+    hist.flush()
+
+    op = drv = None
+    Tw = None
+    prev = None
+    for it in range(a.max_iter):
+        itd = run / f"it_{it:03d}"
+        itd.mkdir(exist_ok=True)
+        for f in ("mesh.h5", "solverConfig.yaml", "bcondConfig.yaml", "probe.yaml"):
+            if (tpl / f).exists():
+                shutil.copy(tpl / f, itd / f)
+        if prev is not None:      # warm start (同一メッシュなので index コピー)
+            subprocess.run([sys.executable, str(HERE / "interp_field.py"),
+                            str(latest_field(prev)), str(itd / "mesh.h5")],
+                           check=True, env=env, stdout=subprocess.DEVNULL)
+        prof = itd / f"wall_profile_{a.phys_id}.csv"
+        if Tw is not None:
+            write_wall_profile(prof, op.coords, Tw)
+        elif (tpl / f"wall_profile_{a.phys_id}.csv").exists():
+            shutil.copy(tpl / f"wall_profile_{a.phys_id}.csv", prof)
+        else:
+            # 初回は壁の節点座標をまだ知らない (壁ダンプを読んで初めて分かる) ので、
+            # **1 行だけの CSV** で一様な初期壁温を与える (3D 最近傍なので全面が同じ値になる)。
+            T_init = a.Tw_init if a.Tw_init is not None else model.T_b
+            write_wall_profile(prof, np.zeros((1, 3)), np.array([T_init]))
+
+        print(f"[cht_loop] iter {it}: forge in {itd.relative_to(run.parent)}")
+        with open(itd / "forge_run.log", "w") as log:
+            rc = subprocess.run([a.forge], cwd=itd, stdout=log, stderr=subprocess.STDOUT, env=env)
+        if rc.returncode != 0:
+            sys.exit(f"[cht_loop] forge failed in {itd} (exit {rc.returncode}); see forge_run.log")
+
+        coords, faces, vals = read_wall_dump(latest_wall_dump(itd, a.phys_name, a.phys_id))
+        key = "iface_" + a.flux
+        if key not in vals:
+            sys.exit(f"[cht_loop] wall dump has no {key} (output.interfaceDiag: 1 が要る)")
+        if "iface_ok" in vals and np.any(vals["iface_ok"] < 0.5):
+            n_bad = int(np.sum(vals["iface_ok"] < 0.5))
+            sys.exit(f"[cht_loop] {n_bad} wall nodes have no first interior point (iface_ok=0). "
+                     "角・斜交で評価不能。幾何を見直すか --align-min を検討すること。")
+
+        if op is None:
+            op = ShellOperator(coords, faces, model, axisym=a.axisym)
+            T0 = np.full(op.n, a.Tw_init if a.Tw_init is not None else model.T_b)
+            # D_f の初期推定 = k_eff A / d1 (**上界ではない**。受理判定と退避で守る)
+            Df0 = np.maximum(vals["iface_keff"] * op.area / np.maximum(vals["iface_d1"], 1e-12), 1e-12)
+            drv = op.driver(T0, Df0=Df0, anderson=a.anderson)
+            Tw = drv.T.copy()
+            # 初回は壁温が config の一様値なので、そのまま 1 回目の Q_f を使う
+        q = np.asarray(vals[key], float)                 # [W/m2] 固体向き正
+        Qf = q * op.area                                 # 節点荷重 [W] (平面 2D は W/m)
+        Tw_new, info = drv.advance(Qf, tol_K=a.tol_K, tol_rel=a.tol_rel, n_consec=a.n_consec)
+        wr.writerow([it, a.flux, f"{Tw.min():.6f}", f"{Tw.max():.6f}", f"{Tw.mean():.6f}",
+                     f"{info['dT']:.6e}", f"{info['res_rel']:.6e}", f"{np.sum(Qf):.6e}",
+                     f"{info['Df_mean']:.6e}", info["used"], int(info["rejected"]), int(info["converged"])])
+        hist.flush()
+        print(f"[cht_loop]   Tw {Tw.min():.3f}..{Tw.max():.3f} K | dTw {info['dT']:.3e} K | "
+              f"res_rel {info['res_rel']:.3e} | Q {np.sum(Qf):.4g} | {info['used']}"
+              + (" REJECTED" if info["rejected"] else ""))
+        prev, Tw = itd, Tw_new
+        if info["converged"]:
+            print(f"[cht_loop] CONVERGED at iter {it} (dTw < {a.tol_K} K, res_rel < {a.tol_rel}, "
+                  f"{a.n_consec} 回連続)")
+            np.savetxt(run / "Tw_final.csv",
+                       np.column_stack([op.coords, Tw]), delimiter=",",
+                       header="x,y,z,Tw", comments="")
+            hist.close()
+            return 0
+    hist.close()
+    print(f"[cht_loop] NOT CONVERGED in {a.max_iter} iterations (see {hist_path})")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

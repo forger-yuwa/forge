@@ -1,0 +1,5 @@
+# V1 共役スラブ: 下壁 (physID 3) が共役壁、上壁 (physID 4) は 350 K 固定、側面 slip。
+side_left:  {physID: 1, kind: slip, outputHDFflg: 0, ints: , floats: }
+side_right: {physID: 2, kind: slip, outputHDFflg: 0, ints: , floats: }
+wall_bot:   {physID: 3, kind: wall_isothermal, outputHDFflg: 1, ints: {wallProfile: 1}, floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 300.0}}
+wall_top:   {physID: 4, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 350.0}}

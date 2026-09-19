@@ -140,6 +140,8 @@ def _faces_to_tris(faces):
     """
     for f in faces:
         f = list(f)
+        if len(f) == 2:
+            continue                      # 線要素は stiffness/_lumped_area が直接扱う
         if len(f) == 3:
             yield f, 1.0
         elif len(f) == 4:
@@ -180,6 +182,14 @@ class ShellOperator:
 
     def _lumped_area(self):
         a = np.zeros(self.n)
+        # 線要素 (2 節点) = 2D 平面ケースの壁。単位奥行きあたりで扱う (荷重は W/m)。
+        for f in self.faces:
+            if len(f) != 2:
+                continue
+            p = self.coords[f]
+            Le = float(np.linalg.norm(p[1] - p[0]))
+            a[f[0]] += 0.5 * Le * self._rw(f)
+            a[f[1]] += 0.5 * Le * self._rw(f)
         for tri, wgt in _faces_to_tris(self.faces):
             p = self.coords[tri]
             ar = 0.5 * np.linalg.norm(np.cross(p[1] - p[0], p[2] - p[0]))
@@ -193,6 +203,17 @@ class ShellOperator:
         k = self.model.k_of(T)
         t = self.model.t_of(self.n)
         rows, cols, vals = [], [], []
+        for f in self.faces:
+            if len(f) != 2:
+                continue
+            p = self.coords[f]
+            Le = float(np.linalg.norm(p[1] - p[0]))
+            if not Le > 0:
+                continue
+            kt = float(np.mean(k[f] * t[f])) * self._rw(f) / Le
+            for a_ in range(2):
+                for b_ in range(2):
+                    rows.append(f[a_]); cols.append(f[b_]); vals.append(kt * (1.0 if a_ == b_ else -1.0))
         for tri, wgt in _faces_to_tris(self.faces):
             kt = float(np.mean(k[tri] * t[tri])) * self._rw(tri)
             K, _ = _tri_stiffness(*self.coords[tri], kt)
@@ -337,7 +358,101 @@ class ShellOperator:
             return None
         return Gs[-1] - dG @ gamma
 
+    def driver(self, T0, Df0=None, anderson=5, Df_cap=1e12):
+        """`FixedPointDriver` を作る (CFD のように $Q_f$ の評価が高価な場合)。
+
+        `couple()` は候補ごとに $Q_f$ を評価する (安い場合向け)。CFD 連成では 1 反復に CFD 1 回しか
+        使えないので、**棄却は「最後に良かった状態へ退避して $D_f$ を上げる」形**で行う。
+        """
+        return FixedPointDriver(self, T0, Df0, anderson, Df_cap)
+
     @staticmethod
     def _merit_M(M, r):
         """メリット関数 Φ = r^T M^{-1} r。**比較の間は M (= A_s + D_f) を固定する**。"""
         return float(r @ spla.spsolve(M.tocsc(), r))
+
+
+    def driver(self, T0, Df0=None, anderson=5, Df_cap=1e12):
+        """`FixedPointDriver` を作る。CFD のように $Q_f$ の評価が高価な場合はこちらを使う。
+
+        `couple()` は候補ごとに $Q_f$ を評価する (安い場合向け)。CFD 連成では 1 反復に CFD 1 回しか
+        使えないので、**棄却は「次の候補を素の反復に戻して $D_f$ を上げる」形**で行う。
+        """
+        return FixedPointDriver(self, T0, Df0, anderson, Df_cap)
+
+
+class FixedPointDriver:
+    r"""外部連成ループ用の固定点ドライバ (CFD 1 回/反復)。
+
+    使い方:
+        drv = op.driver(T0, Df0=...)
+        Tw = drv.T
+        while True:
+            Qf = run_cfd_and_extract(Tw)        # 節点熱荷重 [W] (固体向き正)
+            Tw, info = drv.advance(Qf)
+            if info["converged"]: break
+
+    受理: 固定重み $M=A_s+D_f$ での $\Phi=r^\mathsf{T}M^{-1}r$ が増えたら、その反復を**退避**して
+    (最後に良かった $T$ に戻し) $D_f$ を倍にし、Anderson 履歴を捨てる。
+    収束: max|ΔT| < tol_K かつ max|r| < tol_rel * スケール が `n_consec` 回連続。
+    """
+
+    def __init__(self, op: ShellOperator, T0, Df0=None, anderson=5, Df_cap=1e12):
+        self.op = op
+        self.T = np.asarray(T0, float).copy()
+        self.Df = np.full(op.n, 1.0) if Df0 is None else np.asarray(Df0, float).copy()
+        self.anderson = int(anderson)
+        self.Df_cap = float(Df_cap)
+        self.Ts, self.Gs = [], []
+        self.best = None            # (phi, T)
+        self.history = []
+        self.it = 0
+        self._ok_streak = 0
+
+    def advance(self, Qf, tol_K=1e-6, tol_rel=1e-6, n_consec=2):
+        """最新の $Q_f(T_k)$ を受け取り、次の $T_{k+1}$ を返す。"""
+        Qf = np.asarray(Qf, float)
+        A, b = self.op.assemble(self.T)
+        M = (A + sp.diags(self.Df)).tocsr()
+        r = A @ self.T - b - Qf
+        phi = ShellOperator._merit_M(M, r)
+        scale = max(float(np.max(np.abs(Qf))), float(np.max(np.abs(b))), 1e-30)
+        res_rel = float(np.max(np.abs(r))) / scale
+
+        rejected = False
+        if self.best is not None and phi > self.best[0]:
+            # 退避: 最後に良かった状態へ戻し、D_f を上げて履歴を捨てる
+            self.T = self.best[1].copy()
+            self.Df = np.minimum(self.Df * 2.0, self.Df_cap)
+            self.Ts.clear(); self.Gs.clear()
+            self._ok_streak = 0
+            rejected = True
+            A, b = self.op.assemble(self.T)
+            M = (A + sp.diags(self.Df)).tocsr()
+        else:
+            self.best = (phi, self.T.copy())
+
+        G = ShellOperator._linsolve(M, b + Qf + self.Df * self.T, self.T)
+        Tn = G
+        used = "plain"
+        if self.anderson > 0 and not rejected and len(self.Ts) >= 1:
+            acc = ShellOperator._anderson(self.Ts + [self.T], self.Gs + [G], self.anderson)
+            if acc is not None and np.all(np.isfinite(acc)):
+                Tn, used = acc, "anderson"
+        if not rejected:
+            self.Ts.append(self.T.copy()); self.Gs.append(G.copy())
+            if len(self.Ts) > self.anderson + 1:
+                self.Ts.pop(0); self.Gs.pop(0)
+
+        dT = float(np.max(np.abs(Tn - self.T)))
+        conv_now = (dT < tol_K) and (res_rel < tol_rel) and not rejected
+        self._ok_streak = self._ok_streak + 1 if conv_now else 0
+        info = {"iter": self.it, "phi": phi, "res_rel": res_rel, "dT": dT, "used": used,
+                "rejected": rejected, "Df_mean": float(np.mean(self.Df)),
+                "converged": self._ok_streak >= n_consec}
+        self.history.append(info)
+        self.T = Tn
+        self.it += 1
+        return self.T, info
+
+
