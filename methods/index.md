@@ -19,7 +19,7 @@ forge の理論的背景と実装解説の索引。運用方針は [README.md](R
 | 対流フラックス | [convection/theory.md](convection/theory.md) ・ [implementation.md](convection/implementation.md) | 整備済み (分割) |
 | 粘性・熱伝導 | [diffusion.md](diffusion.md) | 整備済み |
 | 時間積分 | [time_integration/theory.md](time_integration/theory.md) ・ [implementation.md](time_integration/implementation.md) | 整備済み (分割) |
-| 境界条件 | [boundary.md](boundary.md) | 整備済み |
+| 境界条件 | [boundary.md](boundary.md) | 整備済み (共役熱伝達 (CHT) は**仕様のみ確定・未実装**: 界面契約・固体モデル・拒否条件を 2026-09-19 に追記) |
 | Poisson 求解 | [poisson.md](poisson.md) | 整備済み |
 | 軸対称 | [axisymmetric/theory.md](axisymmetric/theory.md) ・ [implementation.md](axisymmetric/implementation.md) | 整備済み (分割) |
 | 乱流モデル | [turbulence/theory.md](turbulence/theory.md) ・ [implementation.md](turbulence/implementation.md) | 整備済み (分割) |

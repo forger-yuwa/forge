@@ -321,7 +321,12 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 
 **docs を先に更新する** (codex m12、[`AGENTS.md`](../../AGENTS.md) 開発フロー)。
 
-1. **S0 docs 先行 + 索引の同期**: [`methods/boundary.md`](../../methods/boundary.md) に「共役熱伝達」節 —
+1. ~~**S0 docs 先行 + 索引の同期**~~ — **完了 (2026-09-19)**。
+   [`methods/boundary.md`](../../methods/boundary.md) に「共役熱伝達 (CHT)」節を追加
+   (対応範囲 / 界面量の定義と符号 / 固体モデルと `fem2d` 契約 / 反復と受理判定 / `wallProfile` /
+   **起動時に拒否する構成 4 件** / 診断出力とゲート)。冒頭に「仕様確定・未実装」を明示。
+   [`methods/index.md`](../../methods/index.md) の境界条件行に状態を追記。
+   [`plans/README.md`](../README.md) と親 plan の旧方針も同期済み。以下は元の記述: [`methods/boundary.md`](../../methods/boundary.md) に「共役熱伝達」節 —
    界面契約 (§4.3)・固体式 (§4.4)・対応範囲 (node 限定・拒否条件) を**実装前に**書き、
    [`methods/index.md`](../../methods/index.md) を同期。
    **撤回済みの旧方針が索引・親 plan に残っているので同時に直す** (codex 2 巡目 #7):
@@ -347,6 +352,11 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 ### 5.1 残作業 (優先順)
 
 **順序 (codex 推奨)**: ①実効壁熱量と符号 → ②固体抵抗と固定点保存の更新式 → ③等温壁経路・座標・接合の配管 → ④V1/V2 とゲート。
+
+**S0 完了 (2026-09-19)**: #20 (受理判定)・#22 (ゲートの式)・#23 (共有角の拒否)・#24 (`fem2d` 契約)・
+#26 (陰解法フックの対応範囲) の**仕様は [`methods/boundary.md`](../../methods/boundary.md) に反映済み**。
+#21 は提供側 [`tooling-energy-balance-diagnostics`](tooling-energy-balance-diagnostics.md) §5.1 #7・#8 に登録済み。
+#27 は完了。**以下の表に残るのは実装・検証の作業**である。
 
 | # | 項目 | 内容 |
 | --- | --- | --- |
@@ -463,3 +473,6 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
   **非連成等温壁との共有角競合の拒否**と global CV ID による所有 (§4.4b)、
   準定常は **drift と osc の両方**・G-if の数式化 (§6)、**V5 (a)(b) の入力と合格条件・不確かさ合成規則** (§6 V5)。
   → **実装着手は §5.1 #20–#27 を確定させてから** (Phase 2 は V1–V3 合格後)。
+- `2026-09-19` — **S0 完了**: [`methods/boundary.md`](../../methods/boundary.md) に「共役熱伝達 (CHT)」節を追加し、
+  界面契約・固体モデル・受理判定・`wallProfile`・**起動時拒否条件**・ゲートを実装前の契約として固定。
+  `methods/index.md` の状態欄と、提供側 plan への解除マイルストーン登録も完了。

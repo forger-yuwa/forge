@@ -215,6 +215,118 @@ SST automatic wall treatment (`wallTreatmentSST`) とはコードパスが分離
   なるよう二分法)。設計判断は
   [`boundary-inlet-profile.md`](../plans/accepted/boundary-inlet-profile.md)。
 
+### 共役熱伝達 (CHT) — 壁温を固体と連立して解く
+
+> **状態: 仕様確定・未実装 (2026-09-19)**。本節は実装前に固定した**契約**であり、コードはまだ無い。
+> 設計判断と検証計画は [`plans/active/boundary-conjugate-heat-transfer.md`](../plans/active/boundary-conjugate-heat-transfer.md)
+> (codex plan レビュー 3 巡: NO-GO → NO-GO → GO-with-changes、全件採用)。実装時は本節と実装の整合を確認する。
+
+等温壁は $T_w$ を**与件**とするが、すきま・深いキャビティ・冷却壁では $T_w(x)$ は解の一部である。
+CHT は流体の壁熱流束と固体の伝導を連立して $T_w(x)$ を決める。
+
+#### 対応範囲 (初版)
+
+| 項目 | 対応 |
+| --- | --- |
+| 離散化 | **node のみ**。cell は `wallProfile` ($T_w$ 分布の入力) までで、連成は起動時に拒否する (cell は `vizBfaceNodes` が空でシェルと 1 対 1 に対応づけられない) |
+| 時間積分 | **定常陰解法** (`advanceImplicitSteady` → `implicitNonlinearUpdate`)。**dual-time 連成は対象外** (物理時間ステップ境界でのみ更新する別契約として後続) |
+| 固体 | 薄肉シェル (`local1d` / `shell2d`) と一般 2D 領域 (`fem2d`) |
+| 壁種別 | `wall_isothermal` + `ints: {conjugate: 1}`。**新種別を作らない** (種別名は `iso_wall_flag`・温度ピン・粘性壁・壁距離・block-DPLUR のエネルギー行切離しの 5 経路で直書き判定されており、新種別はそこから漏れる) |
+| 対象外 | 表面間放射、非定常 (thin-skin 過渡)、軸対称の面内伝導、壁関数 (`wallTreatmentSST: 1` / `sstEnergyWallFunction: 1`) 併用、接触熱抵抗の同定 |
+
+#### 界面量の定義と符号
+
+面流束 $F^E$ は**流体 CV から外向きを正**、拘束反力 $C$ は**流体への供給を正**とする
+([`plans/active/tooling-energy-balance-diagnostics.md`](../plans/active/tooling-energy-balance-diagnostics.md) と同一規約)。
+壁 CV $i$ について**流体から固体へ入る熱量**は
+
+$$Q_{f,i} \;=\; \sum_{f\in\partial_w} F^{E}_{if} \;-\; C_i \qquad [\mathrm{W}]\;(\text{平面 2D は } \mathrm{W/m})$$
+
+- 定常の Dirichlet 行では $C_i=-R_i^{raw}$。**過渡では $C_i = D_t(V_iE_i) - R_i^{raw}$** で、定常式を瞬時入熱に使えない。
+- 検算: $\sum F^E=80$, $C=-20$ なら $Q_f=100$。
+- **これが連成の正本**である。node 等温壁は温度ピン後に `res_roe` を 0 化するため、
+  壁 CV に実際に入った熱は「壁面の物理境界流束 + 拘束反力」であり、
+  次の 2 つは**診断**として併記するだけで界面には渡さない。
+  - **コンパクト差分形** $k_{\rm eff}(T_1-T_w)/d_1$ (固体向き正) — $D_f$ の推定と精度診断に使う。SU2 CHT の界面転送と同じ形。
+  - **再構成勾配形** $k_{\rm eff}\nabla T\cdot\mathbf S$ — `viscousFlux_d.cu` が `qwall` に保存している値。
+  - 実測差の例: case/48 `run_0011` の $x\approx0.5$ m で コンパクト 96.184 / 2 次片側 98.820 kW/m² (2.67 %)。
+- 界面の積分 (面積重み、軸対称の $r$ 重み) は **host・double** で行う。
+- 幾何は **primal facet 単位** (`bc.vizBfaceNodes`) を正本にする。node の合成半割面ベクトルは
+  $|\sum_f\mathbf S_f|\ne\sum_f|\mathbf S_f|$ なので**面積として使わない**。
+
+#### 固体モデル
+
+未知数は**ガス側表面温度** $T_w$。背面環境 $T_b$ までの**全抵抗**は
+
+$$R_{\rm tot}=\frac{t}{k_s}+R_{\rm back},\qquad
+R_{\rm back}=\begin{cases}0&\text{背面等温}\\ 1/h_c&\text{冷却剤}\\ \sum_i t_i/k_i&\text{多層}\\ \infty&\text{断熱}\end{cases}$$
+
+で、**背面等温でも $t/k_s$ を落とさない** (落とすと $T_w=T_b$ に退化する)。シェル方程式は
+
+$$\nabla_{\!s}\!\cdot\!\left(k_s t\,\nabla_{\!s}T_w\right)+q_{\rm gas}-\frac{T_w-T_b}{R_{\rm tot}}=0 .$$
+
+- **断熱・孤立系** ($R_{\rm tot}=\infty$ かつ端部断熱) は定数零空間を持ち、正味入熱が非零なら定常解が無い →
+  起動時に拒否するか、適合条件と零空間の固定を明示する。**「SPD なので CG」は Robin 項がある構成に限る**。
+- `fem2d` では未知数が固体全節点 $u$ になる。界面抽出を $E$、固体剛性を $K_s$ として
+
+  $$\left(K_s+E^{\mathsf T}D_fE\right)u^{k+1}=b_s+E^{\mathsf T}\!\left[Q_f(Eu^{k})+D_f\,Eu^{k}\right]$$
+
+  とし、流体と固体の外周節点を一致させる (補間を挟まない)。$Q_f$ は**積分済み節点荷重**なので
+  $E^{\mathsf T}$ で載せるときに**面積を再乗算しない**。共有角の反力は**一度だけ**計上する。
+
+#### 反復と受理判定
+
+共役定常解は $A_sT^{*}=b_s+Q_f(T^{*})$。反復は**固定点を保存する**形で書く:
+
+$$\left(A_s+D_f\right)T^{k+1}=b_s+Q_f(T^{k})+D_f\,T^{k}$$
+
+- $D_f$ は収束速度だけを決め、**固定点は $D_f$ に依らない**。初期推定は $D_f^{(0)}=k_{\rm eff}A/d_1$ だが、
+  これは**上界ではない** (実効応答 $H=-\partial Q_f/\partial T_w$ は非対角を持ち、発散する反例がある)。
+- **受理はメリット関数の降下で判定する**。未緩和残差 $r^k=A_sT^k-b_s-Q_f(T^k)$ に対し、
+  比較の間は重みを固定した $\Phi(r)=r^{\mathsf T}(A_s+D_f)^{-1}r$ を使い、降下しなければ line search → $D_f$ 増加 →
+  再試行上限で失敗を報告する。**残差最大ノルムの単調減少を受理条件にしない** (収束する反復を棄却する反例がある)。
+  **$\Delta\Phi$ が丸め以下の停滞を合格にしない**。局所最大ノルムは最終ゲート (下記 G-if) に使う。
+
+#### 壁温分布の入力 (`wallProfile`)
+
+`Ts` は `valueTypes==1` の **per-face bvar** で、起動時に YAML の一様値で 1 度埋めた後は
+カーネルが書き換えない。したがって面ごとに違う $T_w$ を入れればそのまま効く
+(cell ゴースト `wall_isothermal_d`、node 温度ピン `pin_wall_node_temperature_d` とも `Tsb[ib]` を読む)。
+`ints: {wallProfile: 1}` で `wall_profile_<physID>.csv` から埋める (入口分布 `applyInletProfiles` の一般化)。
+
+- **補間位置**: node は**ノード座標**、cell は面重心。
+  face 重心をそのまま node に使うと位置がずれる (case/48 `run_0011` で実測 0.679 mm)。
+- **verify は `bvar` の再出力では不十分**。壁ダンプの `Ts` は入力の再表示なので、
+  場に入ったことは `VALUE/T` と EOS 整合まで見て確認する。
+- CHT 内部の転送は座標補間でなく**安定なノード ID** を正本にする。
+
+#### 起動時に拒否する構成
+
+契約を散文で守らず、次はいずれも**起動時にエラーで落とす**。
+
+1. `cell` 離散化で `conjugate: 1`。
+2. **温度を拘束する壁どうしが CV を共有**していて、片方が連成・片方が非連成 `wall_isothermal` の場合
+   (温度ピンは bcond 順に適用され、角ノードは複数 bcond に重複するので**後勝ち**になる)。
+   異なる `conjugateGroup` 間の共有も同じく拒否。
+3. 断熱・孤立固体で正味入熱が非零 (定常解が無い)。
+4. 未定義の構成: 周期同一視・軸対称の面内伝導・壁関数併用・dual-time 連成。
+
+#### 診断出力とゲート
+
+壁ダンプ (`res_wall_<physID>_*.h5`) に opt-in で $T_1$, $d_1$, $k_{\rm eff}$, `q_compact`, `q_recon`, `q_eff` を出す。
+
+- **G-cons (熱収支)**: $\varepsilon=\big|\sum_i Q_{f,i}-(\text{固体正味入熱})\big|$ を
+  $\max(\sum_i|Q_{f,i}|,\,Q_{\rm floor})$ で規格化する (正味量で割ると符号相殺で分母が消える)。
+- **G-if (界面収束)**: ① 局所面積で規格化した残差 $\max_i|r_i|/A_i$ [W/m²] の絶対条件、
+  ② 相対条件 $\max_i|r_i|/\max_i|Q_{f,i}|$、③ 必要連続反復数、の 3 つを**別々に**満たすこと。
+  欠損・非有限・量子化停滞は不合格 (float32 では 1000 K 付近の 1 ULP が $6.1\times10^{-5}$ K)。
+- 派生量の準定常判定は **drift と振動幅の両方**を比較許容の 1/5 以下にする
+  (`check_quasisteady.py` の既定 5 % / 10 % では 0.2–0.5 % の比較を支えられない)。
+
+拘束反力 $C_i$ の採取は [`tooling-energy-balance-diagnostics`](../plans/active/tooling-energy-balance-diagnostics.md) が提供する。
+同診断は初版で dual-time・周期・軸対称を対象外としているため、**dual-time は 1 次元検証の前、周期は翼列検証の前**に
+解除するマイルストーンを同 plan の残作業に登録済み。
+
 ### ディスパッチ
 
 [`applyBconds`](../solver_density_cuda/boundaryCond.cpp#L116) が
