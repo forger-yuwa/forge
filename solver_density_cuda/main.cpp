@@ -1239,7 +1239,9 @@ cudaConfig initializeSimulation(
     // 初期場から体積加重平均で ro_ref / p_ref (絶対圧) / a_ref (音速) を取り、
     // 基準長は未指定ならメッシュ境界箱の対角 (格子細分で変わらない長さ)。
     // h_i は 2D / 軸対称では半径重み前の面積の平方根、3D では体積の立方根 (ieleType で判別)。
-    if (cfg.limiterScaled == 1) {
+    // limiterDiag>0 のときも基準値を計算する: G1 の許容幅に**構成によらない絶対床**を与えるため
+    // (Uy/Uz が恒等 0 の場では近傍レンジも 0 になり、float ノイズを逸脱と数えてしまう)。
+    if (cfg.limiterScaled == 1 || cfg.limiterDiag > 0) {
         std::vector<flow_float> h_ro(msh.nCells), h_P(msh.nCells), h_a(msh.nCells);
         gpuErrchk( cudaMemcpy(h_ro.data(), var.c_d["ro"],    msh.nCells*sizeof(flow_float), cudaMemcpyDeviceToHost) );
         gpuErrchk( cudaMemcpy(h_P.data(),  var.c_d["P"],     msh.nCells*sizeof(flow_float), cudaMemcpyDeviceToHost) );

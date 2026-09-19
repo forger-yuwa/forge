@@ -41,6 +41,13 @@ static void periodicLimiterScratch(const mesh& msh)
 // 周期 node の 1 変数 2 段リミッタ: 極値 → group max/min gather → 合併極値で自分の面の ψ → group min gather。
 // SCALED=true は受動種の無次元化版 (limiter_r1_scaled_d 相当)、false は limiter_r1_d 相当。
 // 非周期・cell では呼ばない (従来の 1 段 kernel がビット不変で残る)。
+// 有界性診断 (§4.20 / W1h) の device カウンタ。周期経路の検査カーネルからも使うので前方に置く。
+__device__ int g_limDiag = 0;
+__device__ unsigned long long g_limG1[5] = {0,0,0,0,0};   // ro, Ux, Uy, Uz, P
+__device__ unsigned long long g_limSides = 0;
+__device__ unsigned long long g_limNonFinite[5] = {0,0,0,0,0};   // 非有限を「逸脱なし」にしない (codex C2)
+__device__ unsigned long long g_limMaxExcess[5] = {0,0,0,0,0};   // 許容幅に対する最大逸脱倍率 x1e3
+
 template<bool SCALED>
 static void limiter_periodic_merged
 (
@@ -50,7 +57,9 @@ static void limiter_periodic_merged
  flow_float* dQdx, flow_float* dQdy, flow_float* dQdz,
  // 無次元化 Venkatakrishnan (codex plan-3 Critical 1)。既定 limScaled=0 で式は変更前と同一。
  // 化学種・受動スカラーは対象外なので 0 を渡すこと。
- int limScaled = 0, flow_float qRef = (flow_float)1.0
+ int limScaled = 0, flow_float qRef = (flow_float)1.0,
+ // W1h: G1 検査の変数番号 (0..4 = ro/Ux/Uy/Uz/P)。-1 = 検査しない (化学種・受動スカラー)。
+ int kVar = -1
 )
 {
     periodicLimiterScratch(msh);
@@ -75,6 +84,27 @@ static void limiter_periodic_merged
         (var.c_d.count("A_planar") ? var.c_d["A_planar"] : var.c_d["volume"]));
     gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
     periodicGatherMinArray_d_wrapper(cfg, cuda_cfg, msh, limiter_Q);
+    // W1h: ψ は gather の**後**に確定するので、G1 検査はここで別カーネルにする (plan §5.1 W1h)。
+    // 流れ 5 変数のみ (kVar 0..4)。化学種・受動スカラーは kVar<0 で呼ばれないこと。
+    if (cfg.limiterDiag > 0 && kVar >= 0) {
+        // 許容幅の絶対床に使う基準 (limiterScaled に依らず main.cpp で計算済み)
+        const flow_float qRefDiag = (kVar == 0) ? (flow_float)cfg.limiterRoRef
+                                  : ((kVar == 4) ? (flow_float)cfg.limiterPRef : (flow_float)cfg.limiterARef);
+        unsigned long long *g1_d=nullptr, *nf_d=nullptr, *mx_d=nullptr, *sd_d=nullptr;
+        CHECK_CUDA_ERROR(cudaGetSymbolAddress((void**)&g1_d, g_limG1));
+        CHECK_CUDA_ERROR(cudaGetSymbolAddress((void**)&nf_d, g_limNonFinite));
+        CHECK_CUDA_ERROR(cudaGetSymbolAddress((void**)&mx_d, g_limMaxExcess));
+        CHECK_CUDA_ERROR(cudaGetSymbolAddress((void**)&sd_d, g_limSides));
+        limiter_g1_check_periodic_d<<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>>(
+            msh.nCells, msh.nNormalPlanes, msh.map_plane_cells_d,
+            msh.map_cell_planes_index_d, msh.map_cell_planes_d,
+            var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
+            var.p_d["pcx"], var.p_d["pcy"], var.p_d["pcz"],
+            Q, s_lim_qmax, s_lim_qmin, limiter_Q, dQdx, dQdy, dQdz,
+            (cfg.discretization == "node" ? 1 : 0), cfg.convMethod, kVar, qRefDiag,
+            g1_d, nf_d, mx_d, sd_d);
+        gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+    }
 }
 
 //__device__ flow_float nishikawa_r1_limiter(deltas delta_dash) {
@@ -226,11 +256,6 @@ __global__ void limiter_r1_d
 // (実測: Uy の逸脱 1.3 万〜1.9 万が全構成で出て、厳密有界のはずの Barth でも消えない = 判定不能だった)。
 // ここでは psi 確定後に**流束と同じ増分**で再構成値を作り、そのノードの近傍 min/max を外れた
 // face-side を変数ごとに数える。既定 off (g_limDiag=0) で atomicAdd は一切走らない。
-__device__ int g_limDiag = 0;
-__device__ unsigned long long g_limG1[5] = {0,0,0,0,0};   // ro, Ux, Uy, Uz, P
-__device__ unsigned long long g_limSides = 0;
-__device__ unsigned long long g_limNonFinite[5] = {0,0,0,0,0};   // 非有限を「逸脱なし」にしない (codex C2)
-__device__ unsigned long long g_limMaxExcess[5] = {0,0,0,0,0};   // 許容幅に対する最大逸脱倍率 x1e3
 
 template<int SCHEME>
 __global__ void limiter_r1_fused5_d
@@ -396,8 +421,12 @@ __global__ void limiter_r1_fused5_d
                     continue;
                 }
                 // 丸め許容は「近傍レンジ」と「値の大きさ」の大きい方 (自由流でレンジ 0・0 を跨ぐ速度の両方に耐える)
+                // 許容幅には**構成によらない絶対床** (1e-6·q_ref) を敷く。恒等 0 の変数 (疑似 2D の Uy/Uz 等)
+                // では近傍レンジも値の大きさも 0 になり、float ノイズが全部「逸脱」に化けるため。
                 const flow_float mag = max(fabsf(qmax[k]), fabsf(qmin[k]));
-                const flow_float sc  = max(qmax[k]-qmin[k], mag) * (flow_float)1.0e-5;
+                const flow_float qrk = (k == 0) ? qr0 : ((k == 4) ? qr4 : qr1);
+                const flow_float sc  = max(max(qmax[k]-qmin[k], mag) * (flow_float)1.0e-5,
+                                           qrk * (flow_float)1.0e-6);
                 if (qf > qmax[k] + sc || qf < qmin[k] - sc) {
                     atomicAdd(&g_limG1[k], 1ULL);
                     // 逸脱量そのものも残す (件数 0 でも「どれだけ外れたか」を言えるように)
@@ -430,7 +459,7 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
 
     // 有界性診断 (§4.20)。既定 off。on のとき一定間隔でカウンタを 1 行印字してリセットする。
     {
-        const int diag = cfg.limiterDiag;
+        const int diag = (cfg.limiterDiag > 0) ? 1 : 0;
         CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limDiag, &diag, sizeof(int)));
     }
 
@@ -471,16 +500,16 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         for (int k = 0; k < 5; ++k)
             limiter_periodic_merged<false>(cfg, cuda_cfg, msh, var, 0.0f, cfg.limiterMatchRecon,
                 var.c_d[qn[k]], var.c_d[ln[k]], var.c_d[gxn[k]], var.c_d[gyn[k]], var.c_d[gzn[k]],
-                cfg.limiterScaled, qref5[k]);
+                cfg.limiterScaled, qref5[k], k);
     } else if (cfg.limiter == 1)
         limiter_r1_fused5_d<1><<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (FORGE_LIMITER_FUSED5_ARGS);
     else
         limiter_r1_fused5_d<2><<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (FORGE_LIMITER_FUSED5_ARGS);
     #undef FORGE_LIMITER_FUSED5_ARGS
 
-    if (cfg.limiterDiag == 1) {
+    if (cfg.limiterDiag > 0) {
         static int s_lim_call = 0;
-        const int interval = 200;
+        const int interval = cfg.limiterDiag;
         if ((s_lim_call % interval) == 0) {
             gpuErrchkKernelSync();
             unsigned long long g1[5] = {0,0,0,0,0}, sides = 0;
