@@ -71,7 +71,9 @@ tools/cavity_eval.py --> 温度/熱流束/侵入深さ/開口流束 + 時系列 
    -> check_convergence.py (全列) + check_quasisteady.py --series-csv
 ```
 
-- **メッシュ生成はローカル** (Salome は AWS 未導入)、**計算は AWS g5.xlarge (A10G 23 GB)**。
+- **計算は AWS g5.xlarge (A10G 23 GB)**。ローカル (RAM 11 GB) は **2.7M 節点の変換で OOM**。
+  **全ヘキサは gmsh API だけで作れるので AWS 上で生成できる** (`pip install gmsh` + `libglu1-mesa`)。
+  tet+prism の Salome 経路だけはローカル専用 (AWS 未導入)。
 - 変換は**最終形の壁タグ**で行う (SST の `wall_dist` のため)。段階起動 S0 の全面 slip は
   実行時に `bcondConfig.yaml` を差し替えて実現する。
 - **3D の cross-mesh restart は使わない** — `interp_field.py` は 2 次元最近傍で、深さ 50 mm の
@@ -86,8 +88,15 @@ tools/cavity_eval.py --> 温度/熱流束/侵入深さ/開口流束 + 時系列 
 | `run_0001_stageA_cpg` | Stage A (69k 節点) の疎通・段階起動レシピ確立。CPG, 旧バイナリ | 全段 NaN 0 完走 (6.24 ms/step)。`qwall` は全点 0 (診断未実装) | ref (レシピ確立) |
 | `run_0002_stageA_qwall` | 同上を **qwall 診断入りバイナリ**で再実行 | **壁熱流束が取得可能に**。断熱 `plate` は厳密 0、等温壁 q'' 平均 8.3–8.5 kW/m²、**壁温 (断熱平板) 最大 1185.4 K = CPG T_aw の −0.18 %**。y⁺ 0.66–0.73 (mean) | active (**Stage A 基準**) |
 | `run_0003_stageB_cpg` | **Stage B** (330k 節点, y₁=10 µm, VL 11 層) | 全段 NaN 0 (21 ms/step)。**キャビティ 3 壁 総入熱 74.8 W (全周)**、q'' 平均 4.89 kW/m²・最大 242 kW/m²、**h_ref 93 W/m²K** (基準温度基準)。開口ガス 696 K / 中央 515 K / 底 535 K。侵入 (25 K) 49.5 mm。**報告量は全て STEADY** (drift ≤0.6 %)。y⁺ 0.12–0.13。図 `cavity_fields.png` / `cavity_profile.png` | active (**現行の主結果**) |
-| `run_0004_stageC_cpg` | **Stage C 格子収束 3 点目** (589k 節点, y₁=15 µm, VL 7 層, 内面 0.6 mm) | 計算中 | active |
-| `run_0005_stageD_cpg` | **Stage D** (741k 節点, 内面 0.45 mm, 継ぎ目比 0.239, growth 0.15) — ユーザ要望 (内面細分・継ぎ目の段差解消・全体細分) を反映 | 待機中 | active |
+| `run_0004_stageC_cpg` | Stage C (589k 節点, y₁=15 µm, VL 7 層, 内面 0.6 mm) | 全段 NaN 0 (27 ms/step)。Q 21.1 W / h_ref 55.1 / 開口ガス 622 K | active |
+| `run_0005_stageD_cpg` | Stage D (741k 節点, 内面 0.45 mm, 継ぎ目比 0.239, growth 0.15) | 全段 NaN 0 (39 ms/step)。Q 26.6 W / h_ref 55.2 / 開口ガス 659 K | active |
+| `run_0006_hex_cpg` | **全ヘキサ初回** (1.00M 節点) — ローカル。**24.9 ms/step** と tet 版より節点あたり約 2 倍速 | セッション中断で S3 まで。AWS 側の系統列 (run_010x) に引き継ぎ | 破棄 |
+| `run_0101_hex_s07` / `run_0102_hex_s10` / `run_0103_hex_s14` | **全ヘキサ 系統細分列** (scale 0.7 / 1.0 / 1.4 = 340k / 1.00M / 2.74M 節点)。**AWS A10G** (4.7 ms/step @340k) | 計算中 | active (**格子収束の正本**) |
+
+> **格子収束の状況 (2026-09-19)**: Stage A–D の 4 点は **系統列になっていない** (tet+prism では VL 総厚と
+> 接線サイズが結合し独立に振れないため、y₁・層数・面サイズ・成長率を同時に変えてしまった)。
+> 最細 2 点 (C↔D) で総入熱が 20.6 % 違う一方、**基準温度基準の熱伝達率 `h_ref` は 0.16 % 一致**しており
+> 格子に頑健。収束判定は**全ヘキサの系統列 (run_010x)** でやり直す。
 
 > メッシュ本体 (`cad/*.med`, `cad/*.msh`, `mesh/*.h5`) と run 成果物は git に入れない。
 > run を作成・破棄したらこの表を必ず同期する (命名 `run_NNNN_<slug>`)。
@@ -100,6 +109,11 @@ tools/cavity_eval.py --> 温度/熱流束/侵入深さ/開口流束 + 時系列 
 | `mesh/stageB.h5` | 329,868 / tet 367,755 + prism 501,017 | AR 382.0 / skew 0.881 **PASS** | VL 11 層・第一層 10 µm・リップ 0.45 mm。dual 体積 relErr 5.4e-11, 閉性 1.2e-6 |
 | `mesh/stageC.h5` | 589,437 / tet 862,563 + prism 814,282 | AR 206.8 / skew 0.874 **PASS** | VL 7 層・第一層 15 µm・内面 0.6 mm |
 | `mesh/stageD.h5` | 740,763 / tet 1,514,642 + prism 878,730 | AR **127.6** / skew 0.849 **PASS** (平均 AR 6.1) | VL 6 層・第一層 20 µm・**内面 0.45 mm**・継ぎ目比 0.239・growth 0.15 |
+| `mesh/hex_s0.7.h5` | 339,830 / **hex 320,712 (100 %)** | AR 301 / skew **0.500** **PASS** | 全ヘキサ・系統細分列 (scale 0.7) |
+| `mesh/hex.h5` (s1.0) | 1,000,428 / **hex 961,200 (100 %)** | AR 302 / skew **0.500** (平均 0.050) **PASS** | すきま横断 24 セル (両壁 20 µm)・深さ 100 (開口 20 µm / 床 80 µm)・周方向 120/半周・平板 BL 55 層 |
+| `mesh/hex_s1.4.h5` | 2,739,491 / **hex 2,662,464 (100 %)** | (AWS で生成・変換) | 系統細分列 (scale 1.4)。**ローカルは変換で OOM** |
+| `mesh/full.h5` | 125,185 / tet 276,289 + prism 140,210 | **PASS** | **全周 360°** (半割仮定の URANS 検証用) |
+| `mesh/plug.h5` | 410,190 / tet 1,125,118 + prism 394,092 | **PASS** | キャビティを塞いだ形状 (流入 BL 移送の検証用) |
 
 **メッシュ生成の要点 (実測 2026-09-19, 4 例)**: **凸角 (開口リップ) まわりの接線セルサイズが VL 総厚を
 下回ると、層が自己交差して NETGEN の tet 充填が無言で失敗する** (`Compute: True` なのに tet 0 で
