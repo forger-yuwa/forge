@@ -63,6 +63,21 @@ def mu_of(T, cfg):
     return None            # 多成分 (Chapman-Enskog/Wilke) は組成が要る -> 判定不能
 
 
+def face_centroids(xyz, conne):
+    """XDMF Mixed の CONNE から面重心を作る (セルごとの壁ダンプ用)。"""
+    nn = {2: 2, 4: 3, 5: 4, 6: 4, 16: 6, 9: 8}
+    out, i = [], 0
+    while i < len(conne):
+        code = int(conne[i])
+        k = nn.get(code)
+        if k is None:
+            return None
+        idx = conne[i + 1:i + 1 + k]
+        i += 1 + k
+        out.append(xyz[idx].mean(axis=0))
+    return np.array(out) if out else None
+
+
 def dof_neighbors(mesh):
     """PLANES/STRUCT から DOF -> 隣接 DOF のリストを作る。"""
     with h5py.File(mesh, "r") as f:
@@ -129,13 +144,14 @@ def main():
     ap.add_argument("--step", type=int, default=None, help="既定は最後の壁ダンプ")
     ap.add_argument("--groups", default=None, help="壁群名をカンマ区切り (既定は壁ダンプ全部)")
     ap.add_argument("--target", type=float, default=1.0, help="低 Re の局所 y1+ 目標 (既定 1)")
+    ap.add_argument("--over-frac", type=float, default=2.0,
+                    help="目標超過を許す面積割合 [%] (既定 2)。**判定はここで行う**: "
+                         "前縁や鋭角エッジなど幾何的特異点では traction が発散し最大値は"
+                         "格子収束しないので、最大値では判定しない")
     ap.add_argument("--align-min", type=float, default=0.5,
                     help="第一内部点として認める法線との沿い方 (既定 0.5)")
     a = ap.parse_args()
 
-    mesh = a.mesh or os.path.join(a.run, "mesh.h5")
-    if not os.path.exists(mesh):
-        print("mesh h5 が無い: %s" % mesh); return 2
     cfg = None
     cpath = os.path.join(a.run, "solverConfig.yaml")
     if os.path.exists(cpath):
@@ -144,6 +160,17 @@ def main():
             cfg = yaml.safe_load(open(cpath))
         except Exception as e:                      # noqa: BLE001
             print("  WARNING: solverConfig.yaml を読めない (%s)" % e)
+    # メッシュ名は **run の config から取る** (`mesh.h5` 決め打ちにしない)
+    mesh = a.mesh
+    if mesh is None:
+        mf = ((cfg or {}).get("mesh", {}) or {}).get("meshFileName")
+        for cand in ([os.path.join(a.run, mf)] if mf else []) + [os.path.join(a.run, "mesh.h5")]:
+            if os.path.exists(cand):
+                mesh = cand
+                break
+    if mesh is None or not os.path.exists(mesh):
+        print("mesh h5 が無い (config の mesh.meshFileName も見た): %s" % (mesh or a.run))
+        return 2
     wt = int(((cfg or {}).get("turbulence", {}) or {}).get("wallTreatmentSST", 0))
 
     dumps = sorted(glob.glob(os.path.join(a.run, "res_*_*_*.h5")))
@@ -160,6 +187,7 @@ def main():
     print("=== %s  (wallTreatmentSST=%d) ===" % (a.run, wt))
     nb = dof_neighbors(mesh)
     worst = 0.0
+    worst_over = 0.0
     any_eval = False
     fails = []
     for (name, pid), lst in sorted(found.items()):
@@ -185,27 +213,54 @@ def main():
                 cand["MESH/COORD"] = nod          # node 方式では DOF index = 節点 index
         with h5py.File(path, "r") as f:
             wxyz = np.array(f["MESH/COORD"]).reshape(-1, 3)
+            wconn = np.array(f["MESH/CONNE"]) if "MESH/CONNE" in f else None
+        per_face = False
         if len(wxyz) != len(V["ro"]):
-            print("  %-12s 壁ダンプの座標数と値数が合わない -> 判定不能" % name)
-            fails.append(name); continue
+            # **セル (面) ごとの壁ダンプ**: 値は境界面ごと、座標は面の頂点。
+            # 面重心を作って境界面の重心 (`PLANES/centCoords`) に対応づける。
+            wc = face_centroids(wxyz, wconn) if wconn is not None else None
+            if wc is None or len(wc) != len(V["ro"]):
+                print("  %-12s 壁ダンプの座標数 %d と値数 %d が対応しない -> 判定不能"
+                      % (name, len(wxyz), len(V["ro"])))
+                fails.append(name); continue
+            wxyz, per_face = wc, True
         # **順序を仮定しない**。壁ダンプのノード座標を DOF の座標に**厳密一致で対応づける**。
         # 順序を仮定すると値が入れ替わって y1+ が桁で変わる (2026-09-19 実測で 8 倍ずれた)。
         # node 方式では壁ダンプの座標は**節点座標**、`CELLS/centCoords` は**双対 CV 重心**で
         # 別物なので、両方を試して一致する方を使う。
         from scipy.spatial import cKDTree
-        pick, best = None, None
-        for src, arr in cand.items():
-            d, j = cKDTree(arr[icells]).query(wxyz)
-            if best is None or d.max() < best[0]:
-                best = (float(d.max()), src, j, arr)
-        dmax, src, jmap, dof_xyz = best
-        scale = float(np.median(np.linalg.norm(np.diff(wxyz[:min(len(wxyz), 200)], axis=0), axis=1)))
-        if dmax > 1e-6 * max(scale, 1e-12) + 1e-12:
-            print("  %-12s 壁ダンプ節点を DOF に対応づけられない (最良 %s で最大 %.3e m) -> 判定不能"
-                  % (name, src, dmax))
-            fails.append(name); continue
-        uniq = icells[jmap]              # 壁ダンプの各点に対応する DOF
-        wd = wall_first_distance(mesh, pid, nb, a.align_min, coords=dof_xyz)
+        if per_face:
+            # 面ごとのダンプ: 境界面の重心に対応づけ、その面が属する DOF を引く
+            with h5py.File(mesh, "r") as f:
+                ipl = np.array(f["BCONDS/%d/iPlanes" % pid])
+                icl = np.array(f["BCONDS/%d/iCells" % pid])
+                pcc = np.array(f["PLANES/centCoords"]).reshape(-1, 3)
+            d, j = cKDTree(pcc[ipl]).query(wxyz)
+            scale = float(np.median(np.linalg.norm(np.diff(wxyz[:min(len(wxyz), 200)], axis=0),
+                                                   axis=1)))
+            if float(d.max()) > 1e-3 * max(scale, 1e-12):
+                print("  %-12s 面重心を境界面に対応づけられない (最大 %.3e m) -> 判定不能"
+                      % (name, float(d.max())))
+                fails.append(name); continue
+            uniq = icl[j]
+            with h5py.File(mesh, "r") as f:
+                dof_xyz = np.array(f["CELLS/centCoords"]).reshape(-1, 3)
+            wd = wall_first_distance(mesh, pid, nb, a.align_min, coords=dof_xyz)
+        else:
+            pick, best = None, None
+            for src, arr in cand.items():
+                d, j = cKDTree(arr[icells]).query(wxyz)
+                if best is None or d.max() < best[0]:
+                    best = (float(d.max()), src, j, arr)
+            dmax, src, jmap, dof_xyz = best
+            scale = float(np.median(np.linalg.norm(np.diff(wxyz[:min(len(wxyz), 200)], axis=0),
+                                                   axis=1)))
+            if dmax > 1e-6 * max(scale, 1e-12) + 1e-12:
+                print("  %-12s 壁ダンプ節点を DOF に対応づけられない (最良 %s で最大 %.3e m) -> 判定不能"
+                      % (name, src, dmax))
+                fails.append(name); continue
+            uniq = icells[jmap]          # 壁ダンプの各点に対応する DOF
+            wd = wall_first_distance(mesh, pid, nb, a.align_min, coords=dof_xyz)
         if wd is None:
             print("  %-12s BCONDS/%d がメッシュに無い -> 判定不能" % (name, pid))
             fails.append(name); continue
@@ -238,6 +293,7 @@ def main():
               % (frac, a.target, over, imax,
                  ("  ; ソルバ ypls 平均 %.4g" % float(np.mean(sol)) if sol is not None else "")))
         worst = max(worst, float(np.nanmax(yp[good])))
+        worst_over = max(worst_over, over)
         if frac < 90.0:
             fails.append("%s (評価できた面積 %.1f %%)" % (name, frac))
 
@@ -246,12 +302,15 @@ def main():
     if fails:
         print("\nVERDICT: INDETERMINATE (判定不能: %s)" % ", ".join(fails)); return 2
     if wt == 0:
-        ok = worst <= a.target
-        print("\n最大 y1+ = %.3f  (目標 <= %.3g)" % (worst, a.target))
+        ok = worst_over <= a.over_frac
+        print("\n最大 y1+ = %.3f (幾何的特異点では収束しないので判定には使わない) ; "
+              "**目標 %.3g を超える面積 最大 %.1f %% (許容 %.3g %%)**"
+              % (worst, a.target, worst_over, a.over_frac))
         print("VERDICT: %s" % ("PASS (壁解像)" if ok else
-                               "FAIL (局所 y1+ が目標超過 — 超過面積と位置を上に示した)"))
+                               "FAIL (目標超過の面積が許容を上回る — 位置を上に示した)"))
         return 0 if ok else 1
-    print("\n最大 y1+ = %.3f  (壁関数 automatic なので対数層配置は必須条件にしない)" % worst)
+    print("\n最大 y1+ = %.3f ; 目標超過の面積 最大 %.1f %% "
+          "(壁関数 automatic なので対数層配置は必須条件にしない)" % (worst, worst_over))
     print("VERDICT: PASS (壁関数 automatic; 低層/buffer/log の分布は上の統計を参照)")
     return 0
 
