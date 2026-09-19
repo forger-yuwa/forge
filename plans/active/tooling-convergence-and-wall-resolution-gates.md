@@ -145,10 +145,10 @@ codex が現行コードで再現した**誤合格**を先に塞ぐ。いずれ�
 | 5 | 呼び出し側: 検証を `analyze()` 内に置いたので `sern_gates.py` は自動継承。`run_case.sh` は判定 rc を `CONVERGENCE_EXIT:` として記録し `FORGE_STRICT_CONVERGENCE=1` で伝播 | ✅ |
 | 6 | 段情報 `stage_manifest.json` の生成と `check_convergence.py` の同一性検査 | ⏳ |
 | 7 | `check_wall_resolution.py`: 壁面ごとの局所 $y_1$ (PLANES/STRUCT の接続から法線方向の第一内部点)・接線 traction からの $u_\tau$・run の `viscMethod` に応じた $\mu$・壁ダンプ節点と DOF の**厳密一致による対応づけ**。自己検査: $y_1$ が第一層厚と一致 | ✅ |
-| 8 | 壁解像の小規模テスト (解析的に距離が分かる非一様・斜交・複数壁・角・軸対称・周期) | ⏳ |
+| 8 | 壁解像の小規模テスト `test_wall_resolution.py` (一様直交 / 非一様 = 壁ごとに別 y1 / 斜交 75° = 評価不能 / 角 = 2 面共有) ✅。⏳ 軸対称・周期の配置は未追加 |
 | 9 | 実ケース展開: `case/26`、**`case/48` (冷却平板。手順 `procedures/verification/48-flat-plate-cooled.md`)**、TP ケース | ⏳ |
 | 10 | AGENTS.md に「壁解像確認 (必須)」節 + 収束節に判定区間と判定不能の 2 項目 ✅ / `methods/turbulence/implementation.md` §3.7.x に `ypls`/`utau` の mode 別定義と node での退化を記載 ✅ / `viscousFlux_d.cu` に同趣旨のコメント ✅ (コード変更なし=解はビット不変) |
-| 11 | `case/49` のケース内ツール (`stack_residuals.py` / `check_cavity_steady.py` / `wall_y1plus`) を共通ツールへ寄せる | ⏳ |
+| 11 | `check_cavity_steady.py` を `classify_series` 経由に ✅ / `cavity_eval` の y1+ は参考値と明記し正式判定は共通ツールへ ✅ / ⏳ `stack_residuals.py` は #6 の段情報が入ってから統合 |
 
 ## 6. 検証
 
