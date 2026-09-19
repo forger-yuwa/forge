@@ -1285,9 +1285,12 @@ cudaConfig initializeSimulation(
                   << " K=" << cfg.venkatK << " h_i=" << (cfg.limiterLengthFromArea ? "sqrt(A_planar)" : "cbrt(volume)")
                   << std::endl;
         if (roAuto || pAuto || aAuto) {
-            std::cout << "[limiter] 警告: 基準値が自動決定なので、この run は**開始場に依存する作用素**である。"
-                      << " 分割実行を連続実行に一致させるには space に limiterRoRef/limiterPRef/limiterARef を"
-                      << " 上の値で固定すること (plan convection-node-wall-reconstruction §4.25)。" << std::endl;
+            std::cout << "[limiter] 警告: 基準値が自動決定なので、この run は**開始場に依存する作用素**である"
+                      << " (分割実行が連続実行と一致しない)。固定するには solverConfig.yaml の space へ次をそのまま貼ること"
+                      << " (plan convection-node-wall-reconstruction §4.25):" << std::endl;
+            std::cout << "[limiter]   limiterRoRef: " << std::setprecision(10) << cfg.limiterRoRef
+                      << ", limiterPRef: " << cfg.limiterPRef
+                      << ", limiterARef: " << cfg.limiterARef << std::endl;
         }
     }
 
