@@ -377,12 +377,58 @@ SERIES_COLS = ["dT_floor", "dT_mid", "dT_mouth", "dT_up", "dT_dn",
                "q_wall_sum", "h_ref"]               # 準定常判定 (check_cavity_steady.py) の対象量
 
 
+def lip_scan(wh, eps):
+    r"""開口リップ帯の幅 ε を振って Q(ε) を出し、√ε 外挿で総入熱を押さえる。
+
+    鋭角凸エッジの $q''\sim s^{-1/2}$ が正しければ、リップから距離 ε までの寄与は
+    $\int_0^\varepsilon q''ds \sim 2C\sqrt{\varepsilon}$ なので
+        Q(ε) = Q_tot - A√ε        (Q(ε) = 上端 ε を除いた入熱)
+    になる。**この直線性が成り立つこと自体が特異性の確認**であり、切片が総入熱の推定値。
+    格子を変えても切片が一致すれば、総入熱は格子に依らず決まっている。
+    """
+    cav = [g for g in ("cav_outer", "cyl_side", "cav_floor") if g in wh]
+    if not cav:
+        return
+    print("  --- リップ帯スキャン: Q(ε) = 開口から ε を除いた入熱 (全周) ---")
+    xs, ys = [], []
+    for e in sorted(eps):
+        q = 0.0
+        for g in cav:
+            zn, qin, w = wh[g]["_z_node"], wh[g]["_qin_node"], wh[g]["_w_node"]
+            m = zn < -e
+            q += float(np.sum(qin[m] * w[m])) if m.any() else 0.0
+        print("    ε = %6.3f mm   Q = %8.4g W" % (e * 1e3, 2 * q))
+        xs.append(np.sqrt(e)); ys.append(2 * q)
+    def fit(xs, ys, tag):
+        A = np.polyfit(xs, ys, 1)
+        f = np.polyval(A, xs)
+        r2 = 1.0 - np.sum((np.asarray(ys) - f) ** 2) / max(np.var(ys) * len(ys), 1e-30)
+        print("    %s: Q(ε) = %.4g - %.4g*√ε   (R² = %.5f)  -> ε→0 外挿 **%.4g W**"
+              % (tag, A[1], -A[0], r2, A[1]))
+        return A[1]
+    if len(xs) >= 3:
+        small = [(x, y) for x, y in zip(xs, ys) if x * x <= 0.5e-3]
+        if len(small) >= 3:
+            fit([x for x, _ in small], [y for _, y in small], "小 ε 域 (≤0.5 mm) のみ")
+        A = np.polyfit(xs, ys, 1)
+        fit = np.polyval(A, xs)
+        r2 = 1.0 - np.sum((np.asarray(ys) - fit) ** 2) / max(np.var(ys) * len(ys), 1e-30)
+        Qtot = sum(wh[g]["Q_W"] for g in cav) * 2
+        print("    √ε 直線あてはめ: Q(ε) = %.4g - %.4g*√ε   (R² = %.5f)" % (A[1], -A[0], r2))
+        print("    -> ε→0 外挿 **Q_tot = %.4g W**   (格子上の実測 総 Q = %.4g W, 差 %+.2f %%)"
+              % (A[1], Qtot, 100 * (Qtot / A[1] - 1)))
+        print("    R² が 1 に近いほど q'' ~ s^-1/2 の仮定が効いている。")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run")
     ap.add_argument("--series", action="store_true")
     ap.add_argument("--plot", action="store_true")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--lip-scan", default=None,
+                    help="リップ帯幅 [mm] をカンマ区切りで与え、Q(ε) と √ε 外挿を出す。"
+                         "例 --lip-scan 0.1,0.2,0.5,1,2,5")
     ap.add_argument("--flux-depth", type=float, default=None,
                     help="開口流束の評価深さ [mm] (既定は manifest の flux_depth_frac)")
     a = ap.parse_args()
@@ -491,6 +537,8 @@ def main():
                   "ただし ∫q'' ds ~ 2√ε なので **総 Q 自体は有限で収束する** (収束が遅いだけ)。"
                   "実測の観測次数 0.24 は『総 Q の格子不確かさが大きく精度を確定できない』であって"
                   "『発散する』ではない。リップ帯を除いた Q は限定領域の別指標 **")
+    if a.lip_scan and wh:
+        lip_scan(wh, [float(x) * 1e-3 for x in a.lip_scan.split(",") if x])
     print("  Tw = %.1f K,  Taw(CPG/TP) = %.1f / %.1f K" % (Tw, D["Taw_cpg"], D.get("Taw_tp", float("nan"))))
     for k in ("dT_mouth", "dT_mid", "dT_floor", "dT_up", "dT_dn"):
         print("  %-10s %9.2f K   (T = %8.2f K)" % (k, q[k], Tw + q[k]))
