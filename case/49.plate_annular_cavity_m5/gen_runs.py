@@ -364,6 +364,18 @@ def cmd_run(a):
         (rd / "solverConfig.yaml").write_text(solver_cfg(a.main_steps, a.cfl, gas=gas))
         (rd / "bcondConfig.yaml").write_text(bcond("isothermal", inlet_profile=True))
         return
+    if a.main_only:
+        # **本段だけを回す** (収束済みの場を引き継いで伸ばす用)。`--ic-from` だけでは
+        # 段階起動をやり直してしまい、**S0 の全 slip が解を壊す**ので専用の入口を用意する。
+        if not a.ic_from:
+            raise SystemExit("--main-only は --ic-from と併用する (引き継ぐ場が要る)")
+        (rd / "solverConfig.yaml").write_text(solver_cfg(a.main_steps, a.cfl, outint=a.out_int,
+                                                         gas=gas))
+        (rd / "bcondConfig.yaml").write_text(bcond("isothermal", inlet_profile=True))
+        rc = run_forge(rd)
+        print("main-only rc", rc)
+        print((rd / "CONVERGENCE_VERDICT.txt").read_text()[-600:])
+        return
     ip = dict(inlet_profile=True)
     # S0: 全壁 slip・層流・1 次 (キャビティ内圧の平衡化)
     stage(rd, "S0_slip", solver_cfg(2000, 0.5, conv=0, lim=0, ninner=10, outint=2000, model="none", gas=gas),
@@ -409,6 +421,8 @@ def main():
     r.add_argument("--cfl-pseudo", type=float, default=12.0)
     r.add_argument("--ic-from", default=None, help="定常場の run (mesh.h5 を index コピーで引き継ぐ)")
     r.add_argument("--perturb", type=float, default=0.01, help="URANS の左右非対称擾乱 (相対)")
+    r.add_argument("--main-only", action="store_true",
+                   help="段階起動を飛ばして本段だけ回す (--ic-from 必須。収束済みの場を伸ばす用)")
     r.add_argument("--dry", action="store_true")
     a = ap.parse_args()
     (cmd_convert if a.cmd == "convert" else cmd_run)(a)
