@@ -22,6 +22,8 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 
 MU0, T0_SUTH, S_SUTH = 1.716e-5, 273.0, 111.0   # forge 実装値
+_MW = {"N2": 0.0280134, "O2": 0.0319988, "AR": 0.039948, "CO2": 0.0440095,
+       "H2O": 0.01801528, "CO": 0.0280104, "NO": 0.0300061}   # kg/mol
 R_ISA, G0 = 287.05, 9.80665
 
 
@@ -128,6 +130,16 @@ def load(cfg_path=None):
         d["cp_rise_pct"] = 100.0 * (d["cp_tp_at_Tt"] / d["cp_tp_298"] - 1.0)
         d["Taw_cpg_minus_tp"] = d["Taw_cpg"] - d["Taw_tp"]
     d["Tw_over_Taw"] = d["wall_T"] / d.get("Taw_tp", d["Taw_cpg"])
+    # TP (semi-perfect 1 擬似種) の気体定数と、それに整合する自由流密度。
+    # gas == "TP" のときは BC/IC をこちらで組む (CPG の R 287.0 と 0.017 % 違う)。
+    MW_mix = 1.0 / sum(y / _MW[k] for k, y in C["dry_air_Y"].items())
+    d["R_tp"] = 8.314462618 / MW_mix
+    d["MW_tp"] = MW_mix
+    if C["gas"].upper() == "TP":
+        d["ro_inf"] = P_inf / (d["R_tp"] * T_inf)
+        d["Re_per_m"] = d["ro_inf"] * U / mu
+        d["k_inf"] = 1.5 * (TI * U) ** 2
+        d["omega_inf"] = d["ro_inf"] * d["k_inf"] / (mu * C["mut_over_mu"])
     return d
 
 

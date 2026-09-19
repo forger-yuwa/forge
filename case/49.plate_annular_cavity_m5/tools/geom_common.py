@@ -8,8 +8,9 @@ plan §4.8 / §4.11 (codex 2026-09-19 plan-2 M5):
 (Ro=25, Ri=22.5, x_off=1 で) 真の半環断面の 12 % を取りこぼし、同量の固体側を誤って含む。
 CV マスク・すきま中央線・周方向平均の重みは必ずここを経由する。
 
-方位 θ は**外筒軸まわり**で測り、θ=0 が +x (下流)、θ=180° が −x (上流)、θ=±90° が ±y (左右)。
-半割 (y>=0) では θ∈[0, 180°]。
+方位 θ は**外筒軸まわり・上流基準**で測る (2026-09-19 ユーザ指定):
+  **θ=0° が −x (上流よどみ側)**、θ=180° が +x (下流側)、θ=90° が +y (横)。
+  すなわち方位 θ の向きは d(θ) = (−cosθ, sinθ)。半割 (y>=0) では θ∈[0, 180°]。
 """
 import json
 from pathlib import Path
@@ -46,16 +47,23 @@ def in_domain_plate(x, y, z, man, tol=1e-9):
 
 
 # ---------------------------------------------------------------- すきま形状
+def ray_dir(theta):
+    """方位 θ の単位ベクトル (x, y)。**θ=0 が上流 (−x)**。"""
+    return -np.cos(theta), np.sin(theta)
+
+
 def inner_radius_at(theta, man):
     """外筒軸から見た方位 θ [rad] のレイが内円柱と交わる半径 r_i(θ) [m]。
-    偏心 2 円: r_i = x_off cosθ + sqrt(Ri^2 - x_off^2 sin^2 θ)."""
+    偏心 2 円 (内円中心 (x_off,0)) とレイ d=(−cosθ, sinθ) の交点:
+      r_i = −x_off cosθ + sqrt(Ri^2 − x_off^2 sin^2 θ)
+    (θ=0 が上流基準なので、下流ずらし x_off>0 では θ=0 側のすきまが**広く**なる)。"""
     g = geom(man)
     off, Ri = g["x_off"], g["Ri"]
     c, s = np.cos(theta), np.sin(theta)
     disc = Ri ** 2 - (off * s) ** 2
     if np.any(disc < 0):
         raise SystemExit("|x_off| が Ri を超えている (レイが内円柱と交わらない)")
-    return off * c + np.sqrt(disc)
+    return -off * c + np.sqrt(disc)
 
 
 def gap_at(theta, man):
@@ -71,7 +79,8 @@ def gap_center_radius(theta, man):
 def gap_center_points(theta, z, man):
     """すきま中央・深さ z の (x, y, z) 点列。theta, z はブロードキャスト可能。"""
     rc = gap_center_radius(theta, man)
-    return rc * np.cos(theta), rc * np.sin(theta), np.broadcast_to(z, np.shape(rc) * 1 or (1,))
+    dx, dy = ray_dir(theta)
+    return rc * dx, rc * dy, np.broadcast_to(z, np.shape(rc) * 1 or (1,))
 
 
 def azimuth_weights(theta, man):
@@ -84,8 +93,8 @@ def azimuth_weights(theta, man):
 
 
 def azimuth_of(x, y, man):
-    """点の方位 θ [rad] (外筒軸まわり, 0..π が半割の範囲)。"""
-    return np.arctan2(y, x)
+    """点の方位 θ [rad] (外筒軸まわり・**上流基準**, 0..π が半割の範囲)。"""
+    return np.arctan2(y, -x)
 
 
 # ---------------------------------------------------------------- 測点
@@ -97,7 +106,8 @@ def probe_points(man, depth_frac, n_theta=None, theta=None):
         theta = np.linspace(0.0, np.pi, n)
     z = -depth_frac * g["depth"]
     rc = gap_center_radius(theta, man)
-    return np.stack([rc * np.cos(theta), rc * np.sin(theta), np.full_like(rc, z)], axis=1), theta
+    dx, dy = ray_dir(theta)
+    return np.stack([rc * dx, rc * dy, np.full_like(rc, z)], axis=1), theta
 
 
 def opening_area(man, half=True):
@@ -131,7 +141,7 @@ def self_test(man):
     print("cavity 断面 MC %.6e / 解析 %.6e (差 %.3f %%)" % (a_mc, a_ex, 100 * abs(a_mc / a_ex - 1)))
     print("同心マスクの取りこぼし %.6e m^2 = %.2f %%" % (miss, 100 * miss / a_ex))
     th = np.linspace(0, np.pi, 5)
-    print("gap(θ=0,45,90,135,180deg) [mm]:", np.round(gap_at(th, man) * 1e3, 4))
+    print("gap(θ=0,45,90,135,180deg) [mm]  (θ=0 が上流):", np.round(gap_at(th, man) * 1e3, 4))
 
 
 if __name__ == "__main__":

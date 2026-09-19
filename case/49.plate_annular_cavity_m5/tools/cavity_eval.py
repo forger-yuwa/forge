@@ -8,7 +8,7 @@ usage:
 
 出す量 (plan §4.7 の定義):
   dT_floor / dT_mid / dT_mouth   すきま中央・指定深さ・周方向平均の T - Tw
-  dT_up / dT_dn                  流れ方向 上流(θ=180°)/下流(θ=0°) の dT_mid  (偏心の指標)
+  dT_up / dT_dn                  流れ方向 上流(θ=0°)/下流(θ=180°) の dT_mid  (偏心の指標)
   dT_left / dT_right             θ=±90°  (**全周計算でのみ意味**。半割では恒等)
   zpen(eps)                      T-Tw > eps を満たす最深点 [m] (eps は 10/25/50 K)
   mdot_in / mdot_out             開口面の ro*uz の負側/正側 絶対積分 [kg/s]
@@ -140,7 +140,8 @@ def eval_snapshot(c, v, man, D):
     # 方位別 (深さは mid)
     pts_mid, _ = gc.probe_points(man, E["probe_depth_frac"]["mid"], theta=th)
     T_mid = fg.at(pts_mid, "T") - Tw
-    for nm, ang in (("up", np.pi), ("dn", 0.0), ("left", 0.5 * np.pi), ("right", 0.5 * np.pi)):
+    # θ=0 が上流、θ=180° が下流 (2026-09-19 ユーザ指定の向き)
+    for nm, ang in (("up", 0.0), ("dn", np.pi), ("left", 0.5 * np.pi), ("right", 0.5 * np.pi)):
         i = int(np.argmin(np.abs(th - ang)))
         out["dT_" + nm] = float(T_mid[i])
     # 侵入深さ: 深さ方向に細かく取り、周方向平均 dT がしきい値を超える最深点

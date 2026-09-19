@@ -112,6 +112,26 @@ tools/cavity_eval.py --> 温度/熱流束/侵入深さ/開口流束 + 時系列 
 (中央面の底は「すきま幅の半分」で切り取り) を主とする (ユーザ指定 2026-09-19)。深部では回復温度基準の
 `h_aw` が見かけ上 0 に落ちるため。総温は `VALUE/h0` から `total_quantities.py` で逆算。
 
+## EOS (CPG / TP)
+
+`case.json` の `conditions.gas` で切替 (`gen_runs.py run --gas TP` でも上書き可)。
+
+- **CPG** — パイプライン疎通と段階起動レシピ確立用。速い。$T_{aw}$ を +61 K 過大に出す。
+- **TP (semi-perfect, 生産)** — 乾燥空気を **1 擬似種 MIXDRY** にまとめた NASA-9
+  (`species_db.yaml`, `forge_design.gas.semiperfect.mixture_pseudo_species` で生成, R=287.048)。
+  `thermalMethod: 2` + `thermoHrefTemp: 298.15`。多成分 TP の implicit 不安定を避けるため 1 種に畳む。
+  **IC の内部エネルギーは TP の datum で組み直す** (CPG の $p/(\gamma-1)$ は datum が違う)。
+  自由流密度も TP の R で引き直す。
+
+## 偏心スイープ
+
+```bash
+python3 sweep_offset.py --offsets 0 0.5 1.0 1.5 --stage D
+```
+
+CAD → メッシュ → 変換 → 段階起動 → 評価を各偏心量で通す。VL 層数は最小すきまから自動で引き直される
+(例: すきま 2.5/2.0/1.5 mm → 6/6/5 層)。`--dry` で設定だけ確認できる。
+
 ## ソルバ側の変更 (本ケースで入れたもの)
 
 - **低 Re 壁の `qwall` / `utau` 診断出力** (`solver_density_cuda/cuda_forge/viscousFlux_d.cu`):

@@ -42,10 +42,13 @@ MAN = json.loads((HERE / "manifest.json").read_text())
 PID, G = MAN["phys_id"], MAN["geometry"]
 D = load_conditions()
 
-WALLS_ISO = ["cav_outer", "cav_floor", "cyl_side"] + (
+# 群は manifest に**実在するものだけ**にする (塞ぎ形状 plug_cavity ではキャビティ壁が無い)
+_iso = ["cav_outer", "cav_floor", "cyl_side"] + (
     ["cyl_top"] if D["cyl_top_thermal"] == "isothermal" else [])
-WALLS_AD = ["plate", "plate_in"] + ([] if D["cyl_top_thermal"] == "isothermal" else ["cyl_top"])
-SLIPS = ["top", "side", "sym"] + (["runup"] if G["has_runup"] else [])
+_ad = ["plate", "plate_in"] + ([] if D["cyl_top_thermal"] == "isothermal" else ["cyl_top"])
+WALLS_ISO = [g for g in _iso if g in PID]
+WALLS_AD = [g for g in _ad if g in PID]
+SLIPS = [g for g in (["top", "side", "sym"] + (["runup"] if G["has_runup"] else [])) if g in PID]
 
 
 # ---------------------------------------------------------------- config
@@ -76,8 +79,20 @@ def bcond(stage, inlet_profile=False):
 
 
 def solver_cfg(nsteps, cfl, *, conv=1, lim=2, ninner=4, relax=0.7, outint=2000,
-               model="sst", mesh_file="mesh.h5"):
+               model="sst", mesh_file="mesh.h5", gas=None):
+    gas = (gas or D["gas"]).upper()
     kc = D["mu_inf"] * D["cp"] / D["prandtl_lam"]
+    if gas == "TP":
+        # semi-perfect 乾燥空気 1 擬似種 (plan §4.10)。`thermoHrefTemp` は必須
+        # (絶対基準 h だと chi_eos が桁違いになる)。cp/gamma も parser が要求するので残す。
+        phys = ('physProp: {thermalMethod: 2, species: ["MIXDRY"], speciesDBFile: "species_db.yaml", '
+                'thermoHrefTemp: 298.15, viscMethod: 1, visc: %.8g, thermCond: %.8g, thermCondMethod: 1, '
+                'prandtlLam: %s, cp: %s, gamma: %s}'
+                % (D["mu_inf"], kc, D["prandtl_lam"], D["cp"], D["gamma"]))
+    else:
+        phys = ('physProp: {thermalMethod: 0, viscMethod: 1, visc: %.8g, thermCond: %.8g, '
+                'thermCondMethod: 1, prandtlLam: %s, cp: %s, gamma: %s}'
+                % (D["mu_inf"], kc, D["prandtl_lam"], D["cp"], D["gamma"]))
     turb = ('turbulence: {model: "none"}' if model == "none" else
             'turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 0, '
             'wallTreatmentSST: 0, turbulentPrandtl: %.4g, kInit: %.8g, omegaInit: %.8g}'
@@ -85,7 +100,7 @@ def solver_cfg(nsteps, cfl, *, conv=1, lim=2, ninner=4, relax=0.7, outint=2000,
     return f"""mesh: {{discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: "{mesh_file}", valueFileName: "{mesh_file}"}}
 gpu: 1
 solver: "SLAU"
-physProp: {{thermalMethod: 0, viscMethod: 1, visc: {D['mu_inf']:.8g}, thermCond: {kc:.8g}, thermCondMethod: 1, prandtlLam: {D['prandtl_lam']}, cp: {D['cp']}, gamma: {D['gamma']}}}
+{phys}
 time:
   unsteady: 0
   dualTime: 0
@@ -106,8 +121,9 @@ initial: "uniform_p101325_u10"
 def cmd_convert(a):
     conv = HERE / "mesh" / "_conv"
     conv.mkdir(parents=True, exist_ok=True)
+    # 変換は幾何と wall_dist だけなので EOS に依らない -> CPG で通す (species DB 不要)
     (conv / "solverConfig.yaml").write_text(solver_cfg(10, 0.5, conv=0, lim=0, ninner=5,
-                                                       outint=10, mesh_file="m.h5"))
+                                                       outint=10, mesh_file="m.h5", gas="CPG"))
     (conv / "bcondConfig.yaml").write_text(bcond("convert"))
     r = subprocess.run([str(BUILD / "convertGmshToForge"), str(Path(a.msh).resolve()), "m.h5"],
                        cwd=conv, env=ENV, capture_output=True, text=True)
@@ -131,7 +147,19 @@ def cmd_convert(a):
 
 
 # ---------------------------------------------------------------- IC
-def patch_ic(h5, inlet_csv):
+def _tp_energy(T, ro, u2):
+    """TP (semi-perfect 1 擬似種) の roe。datum は thermoHrefTemp=298.15
+    (h(298.15)=0 の基準)。e = h(T) - h(Tref) - R T。"""
+    sys.path.insert(0, str(ROOT / "design"))
+    from forge_design.gas.semiperfect import GasSemiPerfect
+    g = GasSemiPerfect(D["dry_air_Y"], Tt=2000.0)
+    href = float(g.h_mass(298.15))
+    h = np.array([float(g.h_mass(t)) for t in np.atleast_1d(T)]) - href
+    e = h - D["R_tp"] * np.atleast_1d(T)
+    return ro * (e + 0.5 * u2)
+
+
+def patch_ic(h5, inlet_csv, gas="CPG"):
     """外部流は入口 BL 分布を z で写す。キャビティ内 (z<0) は静止・壁温・P_inf。"""
     prof = np.genfromtxt(inlet_csv, names=True)
     zc = np.asarray(prof["z"], float)
@@ -157,7 +185,22 @@ def patch_ic(h5, inlet_csv):
         wd = np.array(f["/VALUE/wall_dist"]) if "/VALUE/wall_dist" in f else np.ones(n)
         wall = wd <= 0.0
         ux[wall] = 0.0; uy[wall] = 0.0; uz[wall] = 0.0
-        roe = ps / (D["gamma"] - 1.0) + 0.5 * ro * (ux ** 2 + uy ** 2 + uz ** 2)
+        u2 = ux ** 2 + uy ** 2 + uz ** 2
+        if gas.upper() == "TP":
+            # T を (ps, ro) から作り直して TP の e で roe を組む (CPG の ps/(γ-1) は datum が違う)
+            Tfield = ps / np.maximum(ro * D["R_tp"], 1e-30)
+            # 一意な温度だけ評価して展開 (NASA-9 の評価は node 数ぶん回すと遅い)
+            Tq = np.round(Tfield, 2)
+            uniq, inv = np.unique(Tq, return_inverse=True)
+            sys.path.insert(0, str(ROOT / "design"))
+            from forge_design.gas.semiperfect import GasSemiPerfect
+            g = GasSemiPerfect(D["dry_air_Y"], Tt=2000.0)
+            href = float(g.h_mass(298.15))
+            e_u = np.array([float(g.h_mass(t)) - href - D["R_tp"] * t for t in uniq])
+            roe = ro * (e_u[inv] + 0.5 * u2)
+            print("  IC(TP): T %.1f..%.1f K, 一意温度 %d 点" % (Tfield.min(), Tfield.max(), len(uniq)))
+        else:
+            roe = ps / (D["gamma"] - 1.0) + 0.5 * ro * u2
         f["/VALUE/ro"][:] = ro.astype(np.float32)
         f["/VALUE/roUx"][:] = (ro * ux).astype(np.float32)
         f["/VALUE/roUy"][:] = (ro * uy).astype(np.float32)
@@ -228,31 +271,38 @@ def cmd_run(a):
     rd.mkdir()
     shutil.copy(HERE / a.mesh if not os.path.isabs(a.mesh) else a.mesh, rd / "mesh.h5")
     shutil.copy(a.inlet_csv, rd / ("inlet_profile_%d.csv" % PID["inlet"]))
+    gas = (a.gas or D["gas"]).upper()
+    if gas == "TP":
+        sdb = HERE / "species_db.yaml"
+        if not sdb.exists():
+            raise SystemExit("species_db.yaml が無い (setup で生成: mixture_pseudo_species)")
+        shutil.copy(sdb, rd / "species_db.yaml")
+    print("  gas =", gas)
     (rd / "GEN_ARGS").write_text(" ".join(sys.argv[1:]) + "\n")
     (rd / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
-    patch_ic(rd / "mesh.h5", a.inlet_csv)
+    patch_ic(rd / "mesh.h5", a.inlet_csv, gas=gas)
     if a.dry:
-        (rd / "solverConfig.yaml").write_text(solver_cfg(a.main_steps, a.cfl))
+        (rd / "solverConfig.yaml").write_text(solver_cfg(a.main_steps, a.cfl, gas=gas))
         (rd / "bcondConfig.yaml").write_text(bcond("isothermal", inlet_profile=True))
         return
     ip = dict(inlet_profile=True)
     # S0: 全壁 slip・層流・1 次 (キャビティ内圧の平衡化)
-    stage(rd, "S0_slip", solver_cfg(2000, 0.5, conv=0, lim=0, ninner=10, outint=2000, model="none"),
+    stage(rd, "S0_slip", solver_cfg(2000, 0.5, conv=0, lim=0, ninner=10, outint=2000, model="none", gas=gas),
           bcond("slip", **ip), 2000)
     # S1: no-slip 断熱 (層流)
-    stage(rd, "S1_lam", solver_cfg(2000, 0.3, conv=0, lim=0, ninner=10, outint=2000, model="none"),
+    stage(rd, "S1_lam", solver_cfg(2000, 0.3, conv=0, lim=0, ninner=10, outint=2000, model="none", gas=gas),
           bcond("adiabatic", **ip), 2000)
     # S2: キャビティ等温壁 (層流)
-    stage(rd, "S2_iso", solver_cfg(2000, 0.5, conv=0, lim=0, ninner=10, outint=2000, model="none"),
+    stage(rd, "S2_iso", solver_cfg(2000, 0.5, conv=0, lim=0, ninner=10, outint=2000, model="none", gas=gas),
           bcond("isothermal", **ip), 2000)
     # S3/S4: SST soft -> mid (1 次)
-    stage(rd, "S3_sst_soft", solver_cfg(3000, 0.3, conv=0, lim=0, ninner=10, outint=3000), bcond("isothermal", **ip), 3000)
-    stage(rd, "S4_sst_mid", solver_cfg(3000, 1.0, conv=0, lim=0, ninner=10, outint=3000), bcond("isothermal", **ip), 3000)
+    stage(rd, "S3_sst_soft", solver_cfg(3000, 0.3, conv=0, lim=0, ninner=10, outint=3000, gas=gas), bcond("isothermal", **ip), 3000)
+    stage(rd, "S4_sst_mid", solver_cfg(3000, 1.0, conv=0, lim=0, ninner=10, outint=3000, gas=gas), bcond("isothermal", **ip), 3000)
     # S5: 2 次ランプ
     for i, cv in enumerate([float(v) for v in a.ramp.split(",") if v]):
-        stage(rd, "S5_ramp%d_cfl%g" % (i, cv), solver_cfg(2000, cv, outint=2000), bcond("isothermal", **ip), 2000)
+        stage(rd, "S5_ramp%d_cfl%g" % (i, cv), solver_cfg(2000, cv, outint=2000, gas=gas), bcond("isothermal", **ip), 2000)
     # S6: 本段
-    (rd / "solverConfig.yaml").write_text(solver_cfg(a.main_steps, a.cfl, outint=a.out_int))
+    (rd / "solverConfig.yaml").write_text(solver_cfg(a.main_steps, a.cfl, outint=a.out_int, gas=gas))
     (rd / "bcondConfig.yaml").write_text(bcond("isothermal", **ip))
     rc = run_forge(rd)
     print("main rc", rc)
@@ -273,6 +323,7 @@ def main():
     r.add_argument("--cfl", type=float, default=2.0)
     r.add_argument("--out-int", type=int, default=2000)
     r.add_argument("--ramp", default="0.5,1,2")
+    r.add_argument("--gas", default=None, choices=["CPG", "TP"], help="既定は case.json の gas")
     r.add_argument("--dry", action="store_true")
     a = ap.parse_args()
     (cmd_convert if a.cmd == "convert" else cmd_run)(a)
