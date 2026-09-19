@@ -249,9 +249,22 @@ def make_q_asym(cc):
     return f
 
 
-def classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps):
+def classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps, allow_nonfinite=False):
+    """**非有限値を黙って落とさない**。既定では 1 つでもあれば NONFINITE を返す。
+
+    旧実装は `np.isfinite` で落としてから判定していたため、`[1,1,1,1,1,NaN]` が `STEADY` に
+    なった (2026-09-19 codex)。落として判定したい呼び出し側だけ `allow_nonfinite=True` にする。
+    時刻 `steps` の非有限も同様に拒否する (step が全点 NaN でも値が一定なら STEADY になっていた)。
+    """
     s = np.array(steps, float); v = np.array(vals, float)
-    good = np.isfinite(v)
+    if not allow_nonfinite:
+        nb_v = int(np.count_nonzero(~np.isfinite(v)))
+        nb_s = int(np.count_nonzero(~np.isfinite(s)))
+        if nb_v or nb_s:
+            return ('NONFINITE',
+                    f"{nb_v}/{len(v)} non-finite value(s), {nb_s}/{len(s)} non-finite step(s)",
+                    None)
+    good = np.isfinite(v) & np.isfinite(s)
     s, v = s[good], v[good]
     n = len(v)
     if n < min_snaps:
@@ -292,6 +305,7 @@ def classify_series(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps):
     bad = int(np.count_nonzero(~np.isfinite(v)))
     if bad:
         return 'NONFINITE', f"{bad}/{len(v)} non-finite value(s) in series", None
+    # classify 側でも step の非有限を拒否する (2026-09-19: step 全点 NaN で STEADY になっていた)
     return classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps)
 
 
@@ -441,11 +455,11 @@ def analyze(run_dir, want, tail_frac, drift_tol, osc_tol, min_snaps, mesh_arg, c
                          f"-> TRANSIENT-UNSETTLED")
             worst = max(worst, 2)
         else:
-            v, d, _ = classify(wsteps, wvals, tail_frac, drift_tol, osc_tol, min_snaps)
+            v, d, _ = classify_series(wsteps, wvals, tail_frac, drift_tol, osc_tol, min_snaps)
             worst = max(worst, SEV[v])
             lines.append(f"  {'wall_model_tau':14s}: {d:50s} {v}")
     for q in quantities:
-        verdict, detail, _ = classify(steps, series[q], tail_frac, drift_tol, osc_tol, min_snaps)
+        verdict, detail, _ = classify_series(steps, series[q], tail_frac, drift_tol, osc_tol, min_snaps)
         worst = max(worst, SEV[verdict])
         lines.append(f"  {q:9s}: {detail:55s} {verdict}")
     overall = [k for k, vv in SEV.items() if vv == worst][0]

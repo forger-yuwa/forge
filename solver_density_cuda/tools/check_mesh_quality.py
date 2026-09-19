@@ -67,6 +67,37 @@ def cell_metrics(pts):
     return ar, poly_skew(pts)
 
 
+# VTK セル型ごとの四面体分割 (符号付き体積の合計を取るため)
+TETRA_OF = {
+    10: [(0, 1, 2, 3)],                                              # tetra
+    12: [(0, 1, 3, 4), (1, 2, 3, 6), (1, 3, 4, 6), (1, 4, 5, 6), (3, 4, 6, 7)],  # hexa
+    13: [(0, 1, 2, 3), (1, 2, 3, 4), (2, 3, 4, 5)],                  # wedge (prism)
+    14: [(0, 1, 2, 4), (0, 2, 3, 4)],                                # pyramid
+}
+
+
+def cell_volumes(coord3, conn, offs, types):
+    """セルの符号付き体積 (四面体分割の和)。型が未知なら NaN。**成立性検査専用**。"""
+    vols = np.full(len(offs), np.nan)
+    s = 0
+    for i, o in enumerate(offs):
+        idx = conn[s:o]; s = o
+        tets = TETRA_OF.get(int(types[i]))
+        if tets is None or len(idx) < 4:
+            continue
+        pts = coord3[idx]
+        v = 0.0
+        okc = True
+        for t in tets:
+            if max(t) >= len(pts):
+                okc = False
+                break
+            p0, p1, p2, p3 = pts[t[0]], pts[t[1]], pts[t[2]], pts[t[3]]
+            v += np.dot(np.cross(p1 - p0, p2 - p0), p3 - p0) / 6.0
+        vols[i] = v if okc else np.nan
+    return vols
+
+
 def cell_metrics_3d(pts, vtk):
     """pts: (m,3) セル節点。面ごとの equiangle skew の最大と、全辺の 最長/最短 を返す。"""
     faces = FACES_3D[vtk]
@@ -177,6 +208,36 @@ def main():
             ars[i], skews[i] = (cell_metrics_3d(pts, types[i]) if is3d else cell_metrics(pts))
     else:
         ars, skews = metrics_vectorized(coord, np.asarray(conn), np.asarray(offs), np.asarray(types), is3d)
+
+    # --- メッシュの**成立性**を、形状品質の外れ値許容より前に無条件で検査する ---
+    # (2026-09-19 codex: NaN 座標が 1 セルあっても `SOFT-PASS` exit 0、体積ゼロの四面体は
+    #  AR 1.732 / skew 0.500 で通常合格していた。形状の良し悪し以前の問題は許容しない。)
+    fatal = []
+    nonfinite = int(np.count_nonzero(~np.isfinite(coord3)))
+    if nonfinite:
+        bad_nodes = int(np.count_nonzero(~np.isfinite(coord3).all(axis=1)))
+        fatal.append("非有限座標: 成分 %d 個 / 節点 %d 個" % (nonfinite, bad_nodes))
+    if is3d:
+        vols = cell_volumes(coord3, np.asarray(conn), np.asarray(offs), np.asarray(types))
+        nv_bad = int(np.count_nonzero(~np.isfinite(vols)))
+        nz_bad = int(np.count_nonzero(np.abs(vols) <= 0.0))
+        neg = int(np.count_nonzero(vols < 0.0))
+        pos = int(np.count_nonzero(vols > 0.0))
+        if nv_bad:
+            fatal.append("体積が非有限のセル %d 個" % nv_bad)
+        if nz_bad:
+            fatal.append("体積ゼロのセル %d 個" % nz_bad)
+        if neg and pos:
+            fatal.append("体積の符号が混在 (正 %d / 負 %d) = 向きの不整合" % (pos, neg))
+        good = vols[np.isfinite(vols) & (vols != 0.0)]
+        if good.size:
+            print("cell volume  : |V| min=%.3e  median=%.3e  max=%.3e  (0 or 非有限: %d)"
+                  % (np.abs(good).min(), np.median(np.abs(good)), np.abs(good).max(),
+                     nv_bad + nz_bad))
+    if fatal:
+        print("FATAL: " + " / ".join(fatal))
+        print("VERDICT: FAIL (メッシュとして成立していない。形状品質の外れ値許容は適用しない)")
+        sys.exit(1)
 
     ar_bad = int((ars > a.ar_max).sum())
     sk_bad = int((skews > a.skew_max).sum())

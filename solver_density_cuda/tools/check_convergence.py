@@ -95,6 +95,11 @@ def _tail_rise(ser, tail_frac):
     return spike, slow
 
 
+# **必須の保存量残差列**。これが 1 つも無い / 欠けている CSV を合格にしてはいけない
+# (2026-09-19 codex: `step,phase` だけの CSV や `rms_ro` だけの CSV が ok=True になっていた)。
+REQUIRED_COLS = ('rms_ro', 'rms_roUx', 'rms_roUy', 'rms_roUz', 'rms_roe')
+
+
 def analyze(path, min_drop, tail_frac):
     rows, cols = load_series(path)
     if not rows:
@@ -102,6 +107,14 @@ def analyze(path, min_drop, tail_frac):
     laststep = rows[-1].get('step', '?')
     report = {}
     ok = True
+    # --- 入力の完全性検査 (合格の前提。欠けていたら「判定不能」= ok=False) ---
+    if not cols:
+        report['(入力)'] = ('残差列が 1 つも無い  <-- 判定不能', False)
+        return laststep, report, False, False, False, False
+    missing = [c for c in REQUIRED_COLS if c not in cols]
+    if missing:
+        report['(入力)'] = ('必須の保存量残差列が無い: %s  <-- 判定不能' % ', '.join(missing), False)
+        ok = False
     any_nan = False
     any_stalled = False
     any_converging = False
@@ -150,7 +163,17 @@ def analyze(path, min_drop, tail_frac):
         # 「その成分が実際にどこから落ちたか」なので物理的にも正しい尺度。
         # step 0 がピークの通常ケースでは値は変わらない (後方互換)。
         peak = max(abs(x) for x in ser)
-        drop = math.log10(peak / abs(fin)) if fin != 0 else float('inf')
+        # 低下桁数は **末尾窓の代表値**で測る。最終 1 点だけを使うと、[1]*19+[0] のように
+        # 末尾が 1 点だけ 0 の系列で drop=inf になり合格してしまう (2026-09-19 codex)。
+        # 代表値は末尾窓の |値| の中央値。窓に 0 が混じっても中央値は 0 になりにくく、
+        # 本当に全体が 0 まで落ちた列は下の all-zero か「窓中央値 0」で判定不能にする。
+        tail_abs = sorted(abs(x) for x in a)
+        fin_rep = tail_abs[len(tail_abs) // 2]
+        if fin_rep == 0.0:
+            report[c] = ('末尾窓の代表値が 0 (残差が数値的にゼロ)  <-- 判定不能', False)
+            ok = False
+            continue
+        drop = math.log10(peak / fin_rep)
         col_ok = drop >= min_drop and trend != 'rising'
         ok = ok and col_ok
         # 未達の理由を区別: falling=収束途中(あと steps)、flat=停滞、rising=発散傾向
