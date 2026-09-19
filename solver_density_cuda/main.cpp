@@ -1257,9 +1257,12 @@ cudaConfig initializeSimulation(
             ymin=std::min(ymin,(double)nd.coords[1]); ymax=std::max(ymax,(double)nd.coords[1]);
             zmin=std::min(zmin,(double)nd.coords[2]); zmax=std::max(zmax,(double)nd.coords[2]);
         }
-        cfg.limiterRoRef = (wv>0.0 && wro>0.0) ? wro/wv : 1.0;
-        cfg.limiterPRef  = (wv>0.0 && wP >0.0) ? wP /wv : 1.0;
-        cfg.limiterARef  = (wv>0.0 && wa >0.0) ? wa /wv : 1.0;
+        // 明示指定 (>0) は上書きしない。自動だと restart ごとに値が変わり、分割実行が
+        // 連続実行と同じ数値作用素にならない (codex plan-3 Major 6)。
+        const bool roAuto = !(cfg.limiterRoRef > 0.0), pAuto = !(cfg.limiterPRef > 0.0), aAuto = !(cfg.limiterARef > 0.0);
+        if (roAuto) cfg.limiterRoRef = (wv>0.0 && wro>0.0) ? wro/wv : 1.0;
+        if (pAuto)  cfg.limiterPRef  = (wv>0.0 && wP >0.0) ? wP /wv : 1.0;
+        if (aAuto)  cfg.limiterARef  = (wv>0.0 && wa >0.0) ? wa /wv : 1.0;
         if (!(cfg.limiterRefLength > 0.0)) {
             const double dx=xmax-xmin, dy=ymax-ymin, dz=zmax-zmin;
             const double diag = std::sqrt(dx*dx+dy*dy+dz*dz);
@@ -1273,10 +1276,17 @@ cudaConfig initializeSimulation(
             all2D = (dmax > 0.0) && (std::min(dx,std::min(dy,dz)) < 1.0e-6*dmax);
         }
         cfg.limiterLengthFromArea = (all2D || cfg.isAxisymmetric == 1) ? 1 : 0;
-        std::cout << "[limiter] scaled: ro_ref=" << cfg.limiterRoRef << " p_ref=" << cfg.limiterPRef
-                  << " a_ref=" << cfg.limiterARef << " L_ref=" << cfg.limiterRefLength
+        std::cout << "[limiter] scaled: ro_ref=" << cfg.limiterRoRef << (roAuto ? "(auto)" : "(fixed)")
+                  << " p_ref=" << cfg.limiterPRef << (pAuto ? "(auto)" : "(fixed)")
+                  << " a_ref=" << cfg.limiterARef << (aAuto ? "(auto)" : "(fixed)")
+                  << " L_ref=" << cfg.limiterRefLength
                   << " K=" << cfg.venkatK << " h_i=" << (cfg.limiterLengthFromArea ? "sqrt(A_planar)" : "cbrt(volume)")
                   << std::endl;
+        if (roAuto || pAuto || aAuto) {
+            std::cout << "[limiter] 警告: 基準値が自動決定なので、この run は**開始場に依存する作用素**である。"
+                      << " 分割実行を連続実行に一致させるには space に limiterRoRef/limiterPRef/limiterARef を"
+                      << " 上の値で固定すること (plan convection-node-wall-reconstruction §4.25)。" << std::endl;
+        }
     }
 
     return cuda_cfg;

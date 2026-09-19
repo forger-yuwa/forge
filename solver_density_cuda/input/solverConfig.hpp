@@ -249,7 +249,9 @@ public:
     int limiterScaled = 0;
     double venkatK = 1.0;             // Venkatakrishnan の K (SU2 の VENKAT_LIMITER_COEFF 相当。既定は現行の 1.0)
     double limiterRefLength = 0.0;    // 無次元化の基準長 [m]。0 = メッシュ境界箱の対角から自動
-    // 以下は起動時に場から決める (config では書かない)
+    // 無次元化の基準。**明示指定 (>0) が最優先**、0 のときだけ起動時に初期場から決める。
+    // 自動のままだと restart のたびに値が変わり「同じ設定の分割実行」が同じ作用素にならない
+    // (codex plan-3 Major 6)。分割実行を連続実行に一致させたいときは run config に固定値を書く。
     double limiterRoRef = 0.0, limiterPRef = 0.0, limiterARef = 0.0;
     int limiterLengthFromArea = 0;
     // 有界性診断 (§4.20): psi 確定後にカーネル内で「近傍 min/max を外れた面側」を数える。既定 0 = off

@@ -57,7 +57,9 @@ __global__ void limiter_psi_merged_d
  flow_float* limiter_Q,
  flow_float* dQdx, flow_float* dQdy, flow_float* dQdz,
  // 通常経路と同じ「流束一致」オプション (plan convection-node-wall-reconstruction §4.8)。既定 0 で式は変更前と同一。
- int matchRecon, int edgeMid, int convM
+ int matchRecon, int edgeMid, int convM,
+ // 無次元化 Venkatakrishnan (plan §4.13 / codex plan-3 Critical 1)。既定 limScaled=0 で式は変更前と同一。
+ int limScaled, flow_float qRef, flow_float eps2Coef, int lenArea, geom_float* A_planar
 )
 {
     const geom_int ic0 = blockDim.x*blockIdx.x + threadIdx.x;
@@ -113,8 +115,21 @@ __global__ void limiter_psi_merged_d
             delta_m = Qt - Qc;
         }
         flow_float l;
-        if (limiter_scheme == 1) l = barth_Jespersen_limiter(dp_max, dp_min, delta_m, volume);
-        else                     l = venkata_limiter(dp_max, dp_min, delta_m, volume);
+        if (limScaled == 2 && limiter_scheme != 1) {
+            // 比の形 (基準値も長さも不要)
+            l = (fabsf(delta_m) > (flow_float)1.0e-20)
+              ? venkata_limiter_ratio(dp_max, dp_min, delta_m, eps2Coef) : (flow_float)1.0;
+        } else if (limScaled == 1 && limiter_scheme != 1) {
+            // 変数ごとの固定参照で無次元化してから Venkatakrishnan (通常経路 limiter_r1_fused5_d と同式)
+            const flow_float inv = (flow_float)1.0/qRef;
+            const flow_float hi  = (lenArea != 0) ? sqrtf(A_planar[ic0]) : cbrtf(volume);
+            const flow_float e2  = eps2Coef * hi*hi*hi;
+            l = venkata_limiter_scaled(dp_max*inv, dp_min*inv, delta_m*inv, e2);
+        } else if (limiter_scheme == 1) {
+            l = barth_Jespersen_limiter(dp_max, dp_min, delta_m, volume);
+        } else {
+            l = venkata_limiter(dp_max, dp_min, delta_m, volume);
+        }
         lim = min(lim, l);
     }
     limiter_Q[ic0] = min(max(lim, 0.0f), 1.0f);

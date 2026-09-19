@@ -507,6 +507,13 @@ void solverConfig::read(std::string fname)
             throw std::runtime_error("Key 'venkatK' in 'space' must be > 0.");
         }
         this->limiterRefLength = getOptionalValidatedValue<double>(space, "limiterRefLength", 0.0, "space");
+        // 基準値の明示指定 (codex plan-3 Major 6)。0 = 起動時に初期場から自動決定。
+        this->limiterRoRef = getOptionalValidatedValue<double>(space, "limiterRoRef", 0.0, "space");
+        this->limiterPRef  = getOptionalValidatedValue<double>(space, "limiterPRef",  0.0, "space");
+        this->limiterARef  = getOptionalValidatedValue<double>(space, "limiterARef",  0.0, "space");
+        if (this->limiterRoRef < 0.0 || this->limiterPRef < 0.0 || this->limiterARef < 0.0) {
+            throw std::runtime_error("Keys 'limiterRoRef'/'limiterPRef'/'limiterARef' in 'space' must be >= 0 (0 = auto).");
+        }
         this->limiterDiag = getOptionalValidatedValue<int>(space, "limiterDiag", 0, "space");
         // W2 V1 (plan convection-node-wall-reconstruction §4.23/§6.4): 非物理な再構成の発火計測。既定 0。
         this->badReconDiag = getOptionalValidatedValue<int>(space, "badReconDiag", 0, "space");

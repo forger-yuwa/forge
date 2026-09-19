@@ -47,7 +47,10 @@ static void limiter_periodic_merged
  solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
  // matchRecon: 対象は**流れ 5 変数・node のみ** (plan §4.14)。化学種・受動スカラーは 0 を渡すこと
  flow_float phi_floor, int matchRecon, flow_float* Q, flow_float* limiter_Q,
- flow_float* dQdx, flow_float* dQdy, flow_float* dQdz
+ flow_float* dQdx, flow_float* dQdy, flow_float* dQdz,
+ // 無次元化 Venkatakrishnan (codex plan-3 Critical 1)。既定 limScaled=0 で式は変更前と同一。
+ // 化学種・受動スカラーは対象外なので 0 を渡すこと。
+ int limScaled = 0, flow_float qRef = (flow_float)1.0
 )
 {
     periodicLimiterScratch(msh);
@@ -64,7 +67,12 @@ static void limiter_periodic_merged
         var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
         var.p_d["pcx"], var.p_d["pcy"], var.p_d["pcz"],
         phi_floor, Q, s_lim_qmax, s_lim_qmin, limiter_Q, dQdx, dQdy, dQdz,
-        matchRecon, (cfg.discretization == "node" ? 1 : 0), cfg.convMethod);
+        matchRecon, (cfg.discretization == "node" ? 1 : 0), cfg.convMethod,
+        limScaled, qRef,
+        (limScaled == 2 ? (flow_float)cfg.venkatK
+            : (flow_float)(cfg.venkatK*cfg.venkatK*cfg.venkatK/(cfg.limiterRefLength*cfg.limiterRefLength*cfg.limiterRefLength))),
+        cfg.limiterLengthFromArea,
+        (var.c_d.count("A_planar") ? var.c_d["A_planar"] : var.c_d["volume"]));
     gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
     periodicGatherMinArray_d_wrapper(cfg, cuda_cfg, msh, limiter_Q);
 }
@@ -220,7 +228,9 @@ __global__ void limiter_r1_d
 // face-side を変数ごとに数える。既定 off (g_limDiag=0) で atomicAdd は一切走らない。
 __device__ int g_limDiag = 0;
 __device__ unsigned long long g_limG1[5] = {0,0,0,0,0};   // ro, Ux, Uy, Uz, P
-__device__ unsigned long long g_limSides = 0;             // 数えた face-side 総数 (分母)
+__device__ unsigned long long g_limSides = 0;
+__device__ unsigned long long g_limNonFinite[5] = {0,0,0,0,0};   // 非有限を「逸脱なし」にしない (codex C2)
+__device__ unsigned long long g_limMaxExcess[5] = {0,0,0,0,0};   // 許容幅に対する最大逸脱倍率 x1e3
 
 template<int SCHEME>
 __global__ void limiter_r1_fused5_d
@@ -363,8 +373,13 @@ __global__ void limiter_r1_fused5_d
             geom_int ip = cell_planes[ilp];
             if (ip >= nNormalPlanes) continue;
             const geom_int ic1 = plane_cells[2*ip+0] + plane_cells[2*ip+1] - ic0;
+            // 評価点は**流束側の規則だけ**で決める (codex plan-3 Critical 2)。node 流束は
+            // `g_reconEdgeMid`=1 で `matchRecon` に依らず常にエッジ中点 (`convectiveFlux_d.cu:69`,
+            // `convectiveFlux_slau_d.inc.cuh:134`)。診断を `matchRecon` で分岐させると
+            // `mr0` の構成だけ双対面重心を測ることになり、A/B が別々の点の比較になる。
+            // 増分の形 (convM) も流束と同じにする。
             flow_float dx, dy, dz;
-            if (matchRecon != 0 && edgeMid != 0) {
+            if (edgeMid != 0) {
                 dx = (flow_float)0.5*(ccx[ic1]-cx0); dy = (flow_float)0.5*(ccy[ic1]-cy0); dz = (flow_float)0.5*(ccz[ic1]-cz0);
             } else {
                 dx = pcx[ip]-cx0; dy = pcy[ip]-cy0; dz = pcz[ip]-cz0;
@@ -374,10 +389,21 @@ __global__ void limiter_r1_fused5_d
             for (int k=0;k<5;k++) {
                 const flow_float d = recon_increment(convM, qc[k], Q[k][ic1], gx[k], gy[k], gz[k], dx, dy, dz);
                 const flow_float qf = qc[k] + psi[k]*d;
+                // 非有限は「逸脱なし」ではない (codex plan-3 Critical 2)。NaN は大小比較が両方 false に
+                // なるので明示的に数える。入力 (qc/ψ/増分) の非有限も同じ枠で拾う。
+                if (!isfinite(qf) || !isfinite(d) || !isfinite(psi[k]) || !isfinite(qc[k])) {
+                    atomicAdd(&g_limNonFinite[k], 1ULL);
+                    continue;
+                }
                 // 丸め許容は「近傍レンジ」と「値の大きさ」の大きい方 (自由流でレンジ 0・0 を跨ぐ速度の両方に耐える)
                 const flow_float mag = max(fabsf(qmax[k]), fabsf(qmin[k]));
                 const flow_float sc  = max(qmax[k]-qmin[k], mag) * (flow_float)1.0e-5;
-                if (qf > qmax[k] + sc || qf < qmin[k] - sc) atomicAdd(&g_limG1[k], 1ULL);
+                if (qf > qmax[k] + sc || qf < qmin[k] - sc) {
+                    atomicAdd(&g_limG1[k], 1ULL);
+                    // 逸脱量そのものも残す (件数 0 でも「どれだけ外れたか」を言えるように)
+                    const flow_float ex = max(qf - qmax[k], qmin[k] - qf) / max(sc, (flow_float)1.0e-30);
+                    atomicMax(&g_limMaxExcess[k], (unsigned long long)(ex * 1.0e3));
+                }
             }
         }
     }
@@ -438,9 +464,14 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         const char* gxn[5] = {"drodx","dUxdx","dUydx","dUzdx","dPdx"};
         const char* gyn[5] = {"drody","dUxdy","dUydy","dUzdy","dPdy"};
         const char* gzn[5] = {"drodz","dUxdz","dUydz","dUzdz","dPdz"};
+        // 無次元化の基準は通常経路 (limiter_r1_fused5_d) と同じ割り当て: k=0→ρ, k=4→P, 速度→音速
+        const flow_float qref5[5] = {(flow_float)cfg.limiterRoRef, (flow_float)cfg.limiterARef,
+                                     (flow_float)cfg.limiterARef,  (flow_float)cfg.limiterARef,
+                                     (flow_float)cfg.limiterPRef};
         for (int k = 0; k < 5; ++k)
             limiter_periodic_merged<false>(cfg, cuda_cfg, msh, var, 0.0f, cfg.limiterMatchRecon,
-                var.c_d[qn[k]], var.c_d[ln[k]], var.c_d[gxn[k]], var.c_d[gyn[k]], var.c_d[gzn[k]]);
+                var.c_d[qn[k]], var.c_d[ln[k]], var.c_d[gxn[k]], var.c_d[gyn[k]], var.c_d[gzn[k]],
+                cfg.limiterScaled, qref5[k]);
     } else if (cfg.limiter == 1)
         limiter_r1_fused5_d<1><<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (FORGE_LIMITER_FUSED5_ARGS);
     else
@@ -455,8 +486,19 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
             unsigned long long g1[5] = {0,0,0,0,0}, sides = 0;
             CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(g1,    g_limG1,    5*sizeof(unsigned long long)));
             CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&sides, g_limSides, sizeof(unsigned long long)));
-            printf("LIMG1 call=%d sides=%llu out[ro=%llu Ux=%llu Uy=%llu Uz=%llu P=%llu]\n",
-                   s_lim_call, sides, g1[0], g1[1], g1[2], g1[3], g1[4]);
+            unsigned long long nf[5] = {0,0,0,0,0}, ex[5] = {0,0,0,0,0};
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(nf, g_limNonFinite, 5*sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(ex, g_limMaxExcess, 5*sizeof(unsigned long long)));
+            // 検査件数 0 は「逸脱なし」ではない (周期 node には pass3 が無い等)。明示的に FAIL と印字する。
+            const char* verdict = (sides == 0ULL) ? " VERDICT=NO-CHECKS(FAIL)"
+                : ((g1[0]|g1[1]|g1[2]|g1[3]|g1[4]|nf[0]|nf[1]|nf[2]|nf[3]|nf[4]) ? " VERDICT=VIOLATIONS" : " VERDICT=CLEAN");
+            printf("LIMG1 call=%d sides=%llu out[ro=%llu Ux=%llu Uy=%llu Uz=%llu P=%llu]"
+                   " nonfinite[%llu %llu %llu %llu %llu] maxexcess_x1e3[%llu %llu %llu %llu %llu]%s\n",
+                   s_lim_call, sides, g1[0], g1[1], g1[2], g1[3], g1[4],
+                   nf[0], nf[1], nf[2], nf[3], nf[4], ex[0], ex[1], ex[2], ex[3], ex[4], verdict);
+            const unsigned long long z5b[5] = {0,0,0,0,0};
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limNonFinite, z5b, 5*sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limMaxExcess, z5b, 5*sizeof(unsigned long long)));
             const unsigned long long z5[5] = {0,0,0,0,0}, z = 0ULL;
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limG1,    z5, 5*sizeof(unsigned long long)));
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limSides, &z, sizeof(unsigned long long)));
