@@ -90,10 +90,16 @@ def richardson(rows):
             pp = 0.5 * pp + 0.5 * pn
         fext = (r21 ** pp * f1 - f2) / (r21 ** pp - 1.0)
         gci = 100.0 * 1.25 * abs((f1 - f2) / f1) / (r21 ** pp - 1.0)
-        note = "OK" if (0.5 <= pp <= 4.0 and sgn > 0) else ("振動" if sgn < 0 else "次数外")
-        print("  %-16s %12.5g %12.5g %12.5g %8.2f %14.5g %10.2f %9s"
-              % (lab, f3, f2, f1, pp, fext, gci, note))
-    print("  注: 単調 (sgn>0) かつ 0.5<=p<=4 でないものは外挿値を信じない。GCI は最細格子の数値不確かさ。")
+        ok = (0.5 <= pp <= 4.0) and sgn > 0
+        note = "OK" if ok else ("振動" if sgn < 0 else "次数外")
+        # **適用条件を満たさない系列は GCI を数値で出さない** (2026-09-19 codex Major:
+        # 振動系列や異常次数でも GCI が計算・表示され、`0.00 %` が収束の証拠として読まれた)。
+        gs = "%10.2f" % gci if ok else "   推定不可"
+        fs = "%14.5g" % fext if ok else "          ----"
+        print("  %-16s %12.5g %12.5g %12.5g %8.2f %s %s %9s"
+              % (lab, f3, f2, f1, pp, fs, gs, note))
+    print("  注: 単調 (sgn>0) かつ 0.5<=p<=4 の系列のみ外挿値と GCI を出す。それ以外は **推定不可**")
+    print("      (振動系列や異常次数の GCI は意味を持たない。3 格子は必要条件で、漸近域の確認も要る)。")
 
 
 def main():

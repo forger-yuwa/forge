@@ -10,9 +10,16 @@ step をずらして連結し、それに対して正本ツール `check_converg
 usage:
   python3 tools/stack_residuals.py <run_dir> [...] [--keep] [--plot]
 
-出力: <run_dir>/residual_history_all.csv と、正本ツールの VERDICT。
-**段ごとに数値設定 (次数・CFL・乱流) が違うので、連結履歴は「起動全体の低下」を見るためのもので、
-定常反復としての単調性を主張するものではない**。本段だけの平坦さ (= 床に達している) と併せて読む。
+出力:
+  <run_dir>/residual_history_all.csv    全段連結 (**起動診断用**)
+  <run_dir>/residual_history_turb.csv   乱流を解いた段以降
+  <run_dir>/residual_history_same.csv   **同じ方程式・BC・空間離散化の区間だけ** (判定用)
+
+**判定に使うのは `_same` (既定 S5 ランプ以降 = 2 次・SST・等温で固定) である** (2026-09-19
+codex Major)。全段連結は slip / 層流 / 断熱 / 1 次 の大きな過渡を含み、`check_convergence.py` が
+系列全体の最大値を低下桁数の基準に取るため、**別の境界条件の過渡を本段の基準にしてしまう**。
+CFL だけが違う区間の連結は可、残差の定義と正規化が同じことを前提にする。
+収束済み場からの継続は `check_convergence.py --from-floor <参照 run>` を使う。
 """
 import argparse
 import csv
@@ -46,6 +53,8 @@ def main():
     ap.add_argument("runs", nargs="+")
     ap.add_argument("--keep", action="store_true", help="連結 csv を消さない (既定でも残す)")
     ap.add_argument("--plot", action="store_true")
+    ap.add_argument("--same-from", default="S5",
+                    help="判定区間の開始段プレフィックス (既定 S5 = 2 次ランプ以降)")
     a = ap.parse_args()
     rc = 0
     for run in a.runs:
@@ -94,11 +103,20 @@ def main():
         common = [c for c in hdr if all(c in h for _, h, _, _, _, _ in staged)]
         write(rd / "residual_history_all.csv", common, staged)
         turb = [st for st in staged if "rms_roK" in st[1]]
-        outs = [("起動全体 (共通列)", rd / "residual_history_all.csv")]
+        outs = [("起動全体 (共通列) — **起動診断用。合否判定に使わない**",
+                 rd / "residual_history_all.csv")]
         if turb and len(turb) < len(staged):
             tcols = [c for c in hdr if all(c in h for _, h, _, _, _, _ in turb)]
             write(rd / "residual_history_turb.csv", tcols, turb)
-            outs.append(("乱流を解いた段以降 (%s 〜)" % turb[0][0], rd / "residual_history_turb.csv"))
+            outs.append(("乱流を解いた段以降 (%s 〜) — 参考" % turb[0][0],
+                         rd / "residual_history_turb.csv"))
+        # **判定区間**: 数値設定が最終形で固定されている段だけ (既定 S5 ランプ以降)
+        same = [st for st in staged if st[0].startswith(a.same_from) or st[0] == "S6_main"]
+        if same:
+            scols = [c for c in hdr if all(c in h for _, h, _, _, _, _ in same)]
+            write(rd / "residual_history_same.csv", scols, same)
+            outs.append(("**判定区間** (%s 〜 = 同じ方程式・BC・空間離散化)" % same[0][0],
+                         rd / "residual_history_same.csv"))
         for label, path in outs:
             print("  --- %s ---" % label)
             cmd = [sys.executable, str(CHECK), str(path)]

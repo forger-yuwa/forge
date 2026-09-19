@@ -196,7 +196,8 @@ def eval_snapshot(c, v, man, D):
     TH = np.repeat(tg[:, None], nr, axis=1)
     RR = ri[:, None] + frac_r[None, :] * (G["Ro"] - ri[:, None])
     dA = (G["Ro"] - ri[:, None]) / nr * RR * (np.pi / (nth - 1))
-    pts = np.stack([RR * np.cos(TH), RR * np.sin(TH), np.full_like(RR, -zf)], axis=-1).reshape(-1, 3)
+    DXo, DYo = gc.ray_dir(TH)          # **θ=0 が上流**。中央面と同じ符号規約にする
+    pts = np.stack([RR * DXo, RR * DYo, np.full_like(RR, -zf)], axis=-1).reshape(-1, 3)
     def samp(nm):
         if nm in lin:
             val = lin[nm](pts[:, :2])             # 2D 補間 (x, y)
@@ -236,7 +237,11 @@ def mid_surface(man, n_th=181, n_z=200):
     z = -(G["depth"] - 0.5 * gap)[:, None] * fr[None, :]    # (n_th, n_z)
     R = np.repeat(rc[:, None], n_z, axis=1)
     TH = np.repeat(th[:, None], n_z, axis=1)
-    return np.stack([R * np.cos(TH), R * np.sin(TH), z], axis=-1).reshape(-1, 3)
+    # **θ=0 は上流 (-x)**。`gc.ray_dir` と符号を揃える。+cos で組むと偏心時に面が x 鏡映され、
+    # 固体内に入る (2026-09-19 codex Critical: x_off=1.5 mm で 181 方位中 56 方位が固体内、
+    # 底の切り取りも下流 0.5 mm 必要なところ 2.0 mm と逆になっていた)。
+    DX, DY = gc.ray_dir(TH)
+    return np.stack([R * DX, R * DY, z], axis=-1).reshape(-1, 3)
 
 
 def wall_href(wh, man, D, c, v, T0):
@@ -256,15 +261,31 @@ def wall_href(wh, man, D, c, v, T0):
         xyz = np.stack([d["_x_node"], d["_y_node"], d["_z_node"]], axis=1)
         _, j = tree.query(xyz)
         Tref = T0_mid[j]
-        dT = np.maximum(Tref - Tw, 1.0)
         qn = d["_qin_node"]
         w = d["_w_node"]
+        # **分母を切り上げない** (旧実装は max(dT, 1 K) で、負の温度差まで +1 K に置換していた。
+        # 2026-09-19 codex Major: 壁面積の 21 % がこの補正に掛かっており、ゼロ割ガードの域を
+        # 越えて値を作っていた)。代わりに **係数を定義できない面積割合**を報告する。
+        dT = Tref - Tw
+        dT_min = man["eval"].get("href_dT_min_K", 1.0)     # これ以下は「定義不能」
+        ok = dT > dT_min
+        d["href_undef_area_frac"] = float(np.sum(w[~ok]) / max(np.sum(w), 1e-30))
+        d["href_dT_min_K"] = dT_min
         d["Tref_mean"] = float(np.sum(Tref * w) / max(np.sum(w), 1e-30))
+        d["dTref_mean"] = d["Tref_mean"] - Tw              # **分母は温度差**。絶対温度で語らない
         d["Tref_min"] = float(Tref.min())
         d["Tref_max"] = float(Tref.max())
-        d["h_ref"] = float(np.sum((qn / dT) * w) / max(np.sum(w), 1e-30))
-        d["_href_node"] = qn / dT
+        # (1) 局所係数の面積平均 <q''/dT>_A  (ユーザ指定の定義。定義可能な面積のみで平均)
+        d["h_ref"] = (float(np.sum((qn[ok] / dT[ok]) * w[ok]) / max(np.sum(w[ok]), 1e-30))
+                      if ok.any() else float("nan"))
+        # (2) 総入熱を再現する係数 h_eff = Q / ∫dT dA  (別物なので別名で出す)
+        den = float(np.sum(dT * w))
+        d["h_eff"] = float(np.sum(qn * w) / den) if abs(den) > 1e-30 else float("nan")
+        hn = np.full_like(qn, np.nan, dtype=float)
+        hn[ok] = qn[ok] / dT[ok]
+        d["_href_node"] = hn
         d["_Tref_node"] = Tref
+        d["_dT_node"] = dT
         if "_z" in d:                        # 深さ分布 (面積重み付き)
             zb = d["_z"]
             edges = np.linspace(d["_z_node"].min(), d["_z_node"].max(), len(zb) + 1)
@@ -435,16 +456,24 @@ def main():
     if wh:
         print("  --- 壁面 (ソルバ出力 q_w, 壁に入る側が正。半割) ---")
         print("  %-10s %9s %10s %10s %8s %9s %9s %8s" %
-              ("group", "Q[W]", "q''[W/m2]", "q''max", "h_aw", "T_ref[K]", "h_ref", "y+ mean"))
+              ("group", "Q[W]", "q''[W/m2]", "q''max", "h_aw", "dT_ref[K]", "h_ref", "y+ mean"))
         for g, d in wh.items():
             flag = ("  (断熱壁なので 0 が正しい)" if d["all_zero"] and g in ("plate", "plate_in")
                     else ("  (全点 0: qwall 診断の無いバイナリ)" if d["all_zero"] else ""))
             print("  %-10s %9.4g %10.4g %10.4g %8.4g %9.4g %9.4g %8.3g%s" %
                   (g, d["Q_W"], d["qpp_mean"], d["qpp_max"], d["h_aw"],
-                   d.get("Tref_mean", float("nan")), d.get("h_ref", float("nan")),
+                   d.get("dTref_mean", float("nan")), d.get("h_ref", float("nan")),
                    d["ypls_mean"], flag))
+        for g, d in wh.items():
+            if "h_eff" in d:
+                print("    %-10s h_eff = Q/∫dT dA = %8.4g W/m2K   (定義不能 面積 %.1f %%; "
+                      "dT_ref 平均 %.2f K)"
+                      % (g, d["h_eff"], 100 * d.get("href_undef_area_frac", 0.0),
+                         d.get("dTref_mean", float("nan"))))
         print("    h_aw  = q''/(T_aw - T_w)       … 外部流の回復温度基準")
-        print("    h_ref = q''/(T0_ref - T_w)     … **基準温度** = すきま中央面の最近傍点の総温"
+        print("    h_ref = <q''/(T0_ref - T_w)>_A … 局所係数の面積平均。**分母は温度差 dT_ref**"
+              " (絶対温度ではない)。h_eff = Q/∫dT dA は総入熱を再現する別の係数。")
+        print("    h_ref の元定義 = q''/(T0_ref - T_w)  … **基準温度** = すきま中央面の最近傍点の総温"
               " (底面はすきま幅の半分で切取り)")
         cav = [g for g in ("cav_outer", "cyl_side", "cav_floor") if g in wh]
         if cav:
@@ -458,8 +487,10 @@ def main():
             print("    うち開口リップ帯 (上端 %.1f mm) を除く Q = %.4g W (半割) = %.4g W (全周)"
                   "   [リップ帯 %.4g W = %.1f %%]"
                   % (lipb * 1e3, Qn, 2 * Qn, Qc - Qn, 100 * (Qc - Qn) / max(Qc, 1e-30)))
-            print("    ** リップは 90 度の鋭角 = 幾何的特異点で q'' が h^-1/2 で発散するため、"
-                  "総 Q と q''max は格子収束しない。収束を見るのはリップ帯を除いた Q **")
+            print("    ** リップは 90 度の鋭角 = 幾何的特異点で局所 q'' が h^-1/2 で発散する。"
+                  "ただし ∫q'' ds ~ 2√ε なので **総 Q 自体は有限で収束する** (収束が遅いだけ)。"
+                  "実測の観測次数 0.24 は『総 Q の格子不確かさが大きく精度を確定できない』であって"
+                  "『発散する』ではない。リップ帯を除いた Q は限定領域の別指標 **")
     print("  Tw = %.1f K,  Taw(CPG/TP) = %.1f / %.1f K" % (Tw, D["Taw_cpg"], D.get("Taw_tp", float("nan"))))
     for k in ("dT_mouth", "dT_mid", "dT_floor", "dT_up", "dT_dn"):
         print("  %-10s %9.2f K   (T = %8.2f K)" % (k, q[k], Tw + q[k]))

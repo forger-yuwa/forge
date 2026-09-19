@@ -44,6 +44,14 @@ def geom(man):
 
 
 # ---------------------------------------------------------------- マスク
+def in_gap(x, y, man, tol=0.0):
+    """点 (x,y) が環状すきま内 (内円の外・外円の内) にあるか。中央面などの自己検査用。"""
+    G = man["geometry"]
+    ro = np.hypot(x, y)
+    ri = np.hypot(x - G["x_off"], y)
+    return (ro < G["Ro"] - tol) & (ri > G["Ri"] + tol)
+
+
 def cavity_mask(x, y, z, man, shrink=0.0):
     """キャビティ流体 (環状スリット) の中か。shrink>0 で両壁から shrink [m] 内側に絞る
     (壁ピン値を避けて「ガスの」温度を採るときに使う)。"""
