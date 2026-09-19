@@ -39,7 +39,18 @@ for _f in Path.home().joinpath(".fonts").glob("NotoSansCJKjp-Regular.otf"):
 
 
 def grid_mean(u, v, val, w, nu=120, nv=48, ulim=None, vlim=None):
-    """散布値を (u,v) の規則格子に面積重み平均する (tricontourf の縞アーチファクト回避)。"""
+    r"""散布値を (u,v) の規則格子に面積重み平均する (tricontourf の縞アーチファクト回避)。
+
+    **2 種類の「値が無い」を区別する** (2026-09-19, 外とう壁の h_ref が階段状に見えた件):
+
+    - **面が無いビン** (細い面の端で、そのビンに節点が 1 つも落ちない) → 近傍で埋めてよい。
+    - **値が定義できないビン** (節点はあるが値が NaN。h_ref は $\Delta T\le$ 閾値の領域で
+      定義できない) → **埋めてはいけない**。埋めると「定義できない領域」が近傍の値で
+      塗られ、閾値の等高線がそのまま**階段状の不連続**として現れる。空白のまま返す。
+
+    旧実装は `val * w` に NaN が 1 つでも入ったビンを NaN にし、両者をまとめて近傍で
+    埋めていたため、$\Delta T=1$ K の等高線が段々の境界として描かれていた。
+    """
     ulo, uhi = ulim if ulim else (np.min(u), np.max(u))
     vlo, vhi = vlim if vlim else (np.min(v), np.max(v))
     ue = np.linspace(ulo, uhi, nu + 1)
@@ -47,14 +58,20 @@ def grid_mean(u, v, val, w, nu=120, nv=48, ulim=None, vlim=None):
     iu = np.clip(np.digitize(u, ue) - 1, 0, nu - 1)
     iv = np.clip(np.digitize(v, ve) - 1, 0, nv - 1)
     k = iv * nu + iu
-    num = np.bincount(k, weights=val * w, minlength=nu * nv).reshape(nv, nu)
-    den = np.bincount(k, weights=w, minlength=nu * nv).reshape(nv, nu)
+    val = np.asarray(val, float)
+    fin = np.isfinite(val)
+    num = np.bincount(k[fin], weights=(val[fin] * w[fin]), minlength=nu * nv).reshape(nv, nu)
+    den = np.bincount(k[fin], weights=w[fin], minlength=nu * nv).reshape(nv, nu)
+    cov = np.bincount(k, weights=w, minlength=nu * nv).reshape(nv, nu)   # 面が有るか
     g = np.where(den > 0, num / np.maximum(den, 1e-30), np.nan)
-    # 空セルは近傍で埋める (細い面の端)
-    if np.isnan(g).any():
+    empty = (cov <= 0)                       # 面が無い = 埋めてよい
+    if empty.any() and np.isfinite(g).any():
         from scipy.ndimage import distance_transform_edt
-        idx = distance_transform_edt(np.isnan(g), return_distances=False, return_indices=True)
-        g = g[tuple(idx)]
+        src = np.where(np.isfinite(g), g, np.nan)
+        idx = distance_transform_edt(~np.isfinite(src), return_distances=False,
+                                     return_indices=True)
+        filled = src[tuple(idx)]
+        g = np.where(empty, filled, g)       # **未定義ビン (cov>0, den=0) は NaN のまま**
     UC = 0.5 * (ue[1:] + ue[:-1]); VC = 0.5 * (ve[1:] + ve[:-1])
     # numpy 2 系では meshgrid が tuple を返すので list 化してから連結する
     return list(np.meshgrid(UC, VC)) + [g]
@@ -89,10 +106,31 @@ def plot_htc(run, step, man, D, wh, out):
         for r, (val, lab, cmap) in enumerate(((d["_href_node"], "h_ref [W/m²K]", "viridis"),
                                               (d["_Tref_node"], "基準温度 T0_ref [K]", "coolwarm"))):
             U, V, Z = grid_mean(u, v, val, d["_w_node"], ulim=(0, 180))
-            lo = np.nanpercentile(Z, 0.5) if r else 0.0
-            hi = np.nanpercentile(Z, 99.5)
-            cf = ax[r][i].contourf(U, V, np.clip(Z, lo, hi), levels=np.linspace(lo, hi, 21), cmap=cmap)
+            # **上限はリップ帯を除いた領域から決める** (熱流束の図と同じ理由)。リップは
+            # 幾何的特異点で q'' が発散するので、そこを含めて正規化すると深部が真っ黒になる。
+            lipmm = man["eval"].get("lip_band_m", 1.0e-3) * 1e3
+            deep = np.isfinite(Z)
+            if g in ("cav_outer", "cyl_side"):
+                deep = deep & (V < -lipmm)
+            lo = np.nanpercentile(Z[np.isfinite(Z)], 0.5) if r else 0.0
+            hi = (np.nanpercentile(Z[deep], 99.0) if deep.any()
+                  else np.nanpercentile(Z[np.isfinite(Z)], 99.5))
+            zmax = float(np.nanmax(Z[np.isfinite(Z)])) if np.isfinite(Z).any() else float("nan")
+            # **未定義ビンは塗らない** (灰色のハッチで示す)。h_ref は dT_ref <= 閾値の領域で
+            # 定義できず、そこを近傍で埋めると閾値の等高線が階段状の不連続として現れる。
+            und = ~np.isfinite(Z)
+            ax[r][i].set_facecolor("0.82")
+            cf = ax[r][i].contourf(U, V, np.clip(Z, lo, hi), levels=np.linspace(lo, hi, 21),
+                                   cmap=cmap)
             fig.colorbar(cf, ax=ax[r][i], label=lab)
+            if r == 0:
+                frac = 100.0 * und.sum() / und.size
+                note = "上限 %.4g で飽和 (最大 %.4g)" % (hi, zmax)
+                if und.any():
+                    note += "\n灰色 = 係数が定義できない領域 (dT_ref ≤ %.3g K) %.0f %%" % (
+                        d.get("href_dT_min_K", 0.05), frac)
+                ax[r][i].text(0.985, 0.02, note, transform=ax[r][i].transAxes,
+                              fontsize=8.5, color="w", ha="right", va="bottom")
             ax[r][i].set_xlabel("周方向 θ [deg]  (0=上流, 180=下流)")
             ax[r][i].set_ylabel(vlab)
             ax[r][i].set_title("(%s) %s の %s" % ("abcdef"[r * len(grps) + i], names[g],

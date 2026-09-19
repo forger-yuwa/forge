@@ -167,7 +167,8 @@
     "tol_budget_frac": 0.05,
     "_flux_depth_frac": "開口流束を評価する深さ (深さの割合)。開口直下は壁ピンを拾うので 0.02 (=1mm) 既定",
     "flux_depth_frac": 0.02,
-    "_lip_band_m": "開口リップ帯の幅 [m]。リップは 90 度の鋭角 = 幾何的特異点で q'' が h^-1/2 で発散するため、総入熱と q''max は格子収束しない (plan §4.4.2)。収束を見るのはこの帯を除いた Q_nolip_W",
-    "lip_band_m": 0.001
+    "lip_band_m": 0.001,
+    "_href_threshold": "h_ref = q''/dT_ref の分母が T0 の数値ノイズに埋もれる点を平均から外すための閾値。既定は **測って決める**: dT_min = href_noise_factor * ulp(h0)/cp (実測 1.24e-4 K)。href_dT_min_K を書くと手動固定になる (根拠のない大きな値は h_ref を下げ、図に階段状の境界を作る)。閾値に依存しない指標は h_eff = Q/∫dT dA",
+    "href_noise_factor": 10.0
   }
 }

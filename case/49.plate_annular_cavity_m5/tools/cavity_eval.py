@@ -248,7 +248,7 @@ def eval_snapshot(c, v, man, D):
     return out
 
 
-def mid_surface(man, n_th=181, n_z=200):
+def mid_surface(man, n_th=181, n_z=200, with_axes=False):
     """すきま中央面の点群 [m]。**底面は「すきま幅の半分」だけ切り取る** (ユーザ指定 2026-09-19):
     z は 0 から -(depth - gap_local(θ)/2) まで。こうすると床の壁点に対する最近傍点が
     床から gap/2 上になり、側壁の壁点が中央面まで gap/2 なのと整合する。"""
@@ -264,7 +264,8 @@ def mid_surface(man, n_th=181, n_z=200):
     # 固体内に入る (2026-09-19 codex Critical: x_off=1.5 mm で 181 方位中 56 方位が固体内、
     # 底の切り取りも下流 0.5 mm 必要なところ 2.0 mm と逆になっていた)。
     DX, DY = gc.ray_dir(TH)
-    return np.stack([R * DX, R * DY, z], axis=-1).reshape(-1, 3)
+    pts = np.stack([R * DX, R * DY, z], axis=-1).reshape(-1, 3)
+    return (pts, th, fr) if with_axes else pts
 
 
 def wall_y1plus(wh, man, c, v):
@@ -307,26 +308,57 @@ def wall_href(wh, man, D, c, v, T0):
     T0 は `tools/total_quantities.py` の `total_state` (h0 の逆算) で作った node 値を使う
     (スクリプトで T + u^2/2cp を組まない: AGENTS.md「出力と後処理の原則」)。"""
     Tw = D["wall_T"]
-    mid = mid_surface(man)
+    n_th, n_z = 181, 200
+    mid, th_ax, fr_ax = mid_surface(man, n_th, n_z, with_axes=True)
     m_gas = gc.cavity_mask(c[:, 0], c[:, 1], c[:, 2], man, shrink=man["eval"]["shrink_m"])
     f = Field(c, {"T0": T0}, mask=m_gas)
-    T0_mid = f.at(mid, "T0")
-    tree = cKDTree(mid)
+    T0_mid = f.at(mid, "T0").reshape(n_th, n_z)
+    # **最近傍でなく双線形補間で引く**。最近傍だと基準温度が中央面の離散点に量子化され、
+    # 壁に沿って階段状になる (2026-09-19 実測: 1 列 564 点でユニーク値 364)。
+    # 中央面は (θ, 深さ比 fr) の規則格子なので、壁点をその 2 座標に写して補間する。
+    from scipy.interpolate import RegularGridInterpolator
+    rgi = RegularGridInterpolator((th_ax, fr_ax), T0_mid, bounds_error=False, fill_value=None)
+    G = man["geometry"]
     for g, d in wh.items():
         if "_z_node" not in d:
             continue
-        xyz = np.stack([d["_x_node"], d["_y_node"], d["_z_node"]], axis=1)
-        _, j = tree.query(xyz)
-        Tref = T0_mid[j]
+        xw, yw, zw = d["_x_node"], d["_y_node"], d["_z_node"]
+        thw = np.arctan2(np.abs(yw), -xw)                 # θ=0 が上流、0..pi
+        gapw = gc.gap_at(np.clip(thw, 0.0, np.pi), man)
+        zmax = np.maximum(G["depth"] - 0.5 * gapw, 1e-12)
+        frw = np.clip(-zw / zmax, 0.0, 1.0)
+        Tref = rgi(np.stack([np.clip(thw, th_ax[0], th_ax[-1]), frw], axis=1))
         qn = d["_qin_node"]
         w = d["_w_node"]
         # **分母を切り上げない** (旧実装は max(dT, 1 K) で、負の温度差まで +1 K に置換していた。
         # 2026-09-19 codex Major: 壁面積の 21 % がこの補正に掛かっており、ゼロ割ガードの域を
         # 越えて値を作っていた)。代わりに **係数を定義できない面積割合**を報告する。
         dT = Tref - Tw
-        dT_min = man["eval"].get("href_dT_min_K", 1.0)     # これ以下は「定義不能」
+        # **閾値は手で置かず、T0 の数値ノイズから決める** (2026-09-19)。
+        #
+        # h = q''/ΔT は ΔT→0 でも破綻しない: 深部では q'' も一緒に小さくなり、比は 30 W/m2K
+        # 前後の妥当な値に落ち着く (実測 θ=140°: z=-8.1 mm で ΔT 0.35 K / q'' 11 W/m2 -> h 32)。
+        # 実測では **ΔT が負になる面積は 0.00 %** なので、符号の問題も無い。
+        # 閾値が要る唯一の理由は「T0 の数値ノイズに埋もれる点を平均に入れない」ことだけ。
+        #
+        # T0 は h0/cp を float32 の h0 から作るので、分解能は ulp(h0)/cp
+        # (実測 h0 ~ 1.25e6 J/kg -> ulp 0.125 -> 1.24e-4 K)。その `href_noise_factor` 倍を閾値にする。
+        # 旧既定 1.0 K は側壁面積の 23 %、0.05 K でも 3.2 % を切り落としていた
+        # (ノイズ基準なら 0.16 %)。閾値を大きく取ると図に**階段状の境界**が出る。
+        cp = float(D.get("cp", 1004.5))
+        # 分解能は**実際に使った h0 の大きさ**から測る (T0 = h0/cp、h0 は float32 出力)
+        h0f = np.asarray(v.get("h0", np.array([1.25e6])), float)
+        h0rep = float(np.median(np.abs(h0f[np.isfinite(h0f)]))) if h0f.size else 1.25e6
+        t0_noise = float(np.spacing(np.float32(h0rep))) / max(cp, 1e-30)
+        nf = float(man["eval"].get("href_noise_factor", 10.0))
+        dT_min = man["eval"].get("href_dT_min_K", None)
+        if dT_min is None:
+            dT_min = nf * t0_noise                        # 既定は**測って決める**
+        d["href_dT_min_basis"] = ("T0 ノイズ %.3e K × %.3g" % (t0_noise, nf)
+                                  if man["eval"].get("href_dT_min_K") is None else "手動指定")
         ok = dT > dT_min
         d["href_undef_area_frac"] = float(np.sum(w[~ok]) / max(np.sum(w), 1e-30))
+        d["href_neg_area_frac"] = float(np.sum(w[dT <= 0.0]) / max(np.sum(w), 1e-30))
         d["href_dT_min_K"] = dT_min
         d["Tref_mean"] = float(np.sum(Tref * w) / max(np.sum(w), 1e-30))
         d["dTref_mean"] = d["Tref_mean"] - Tw              # **分母は温度差**。絶対温度で語らない
@@ -578,10 +610,13 @@ def main():
                    d["ypls_mean"], flag))
         for g, d in wh.items():
             if "h_eff" in d:
-                print("    %-10s h_eff = Q/∫dT dA = %8.4g W/m2K   (定義不能 面積 %.1f %%; "
-                      "dT_ref 平均 %.2f K)"
-                      % (g, d["h_eff"], 100 * d.get("href_undef_area_frac", 0.0),
-                         d.get("dTref_mean", float("nan"))))
+                print("    %-10s h_eff = Q/∫dT dA = %8.4g W/m2K   (dT_ref 平均 %.2f K; "
+                      "dT<=%.3g K = %.2f %% [%s]; dT<0 = %.2f %%)"
+                      % (g, d["h_eff"], d.get("dTref_mean", float("nan")),
+                         d.get("href_dT_min_K", 0.0),
+                         100 * d.get("href_undef_area_frac", 0.0),
+                         d.get("href_dT_min_basis", "-"),
+                         100 * d.get("href_neg_area_frac", 0.0)))
         y1 = next((d["y1"] for d in wh.values() if "y1" in d), None)
         if y1 is not None:
             print("    --- 壁解像 (**参考値**。正式判定は "
