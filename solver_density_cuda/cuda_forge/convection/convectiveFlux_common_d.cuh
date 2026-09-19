@@ -58,6 +58,20 @@ __device__ unsigned long long g_psiRhoY_lt01  = 0;      // ψ_ρY<0.1  の face-
 __device__ unsigned long long g_rhoYMinByRho     = 0;   // min を ρ が決めた face-side 数
 __device__ unsigned long long g_rhoYMinBySpecies = 0;   // min を species が決めた face-side 数
 __device__ unsigned long long g_rhoYFallback = 0;       // 非実現可能で cell 値へ fallback した face-side 数
+// W2 (plan convection-node-wall-reconstruction §4.23 / §6.4 V1): 面単位の非物理な再構成の**発火計測**。
+// 既定 0 で atomicAdd は一切走らない。フォールバック本体は V1 で発火の実在を確かめてから入れる。
+__device__ int   g_badReconDiag  = 0;      // 1 で計測 ON (space.badReconDiag)
+__device__ flow_float g_badReconRoMin = 0.0f;   // ρ の床 (physProp.roMin)
+__device__ flow_float g_badReconPMin  = 0.0f;   // P の床 (physProp.pMin)
+__device__ unsigned long long g_badReconFaces = 0;   // ρ か P が床以下になった面の数
+__device__ unsigned long long g_badReconRo    = 0;   // うち ρ が床以下
+__device__ unsigned long long g_badReconP     = 0;   // うち P が床以下
+__device__ unsigned long long g_badReconTotal = 0;   // 判定した面の総数 (分母)
+// フォールバック本体 (§4.23): 発火した面を N 回の訪問だけ 1 次に落とす。SU2 `UpdateNonPhysicalEdgeCounter` と同一。
+__device__ int g_badReconHyst = 0;                   // 0 = OFF、N = 1 次に落とす訪問回数 (SU2 は 20)
+__device__ signed char* g_badReconCnt = nullptr;     // 面ごとのカウンタ (size = nPlanes)
+__device__ unsigned long long g_badReconActive = 0;  // カウンタが生きていて 1 次化した面の数
+
 __device__ int g_Yface_min_scaled =  2000000;           // min(Y_face)·1e6 (atomicMin)
 __device__ int g_Yface_max_scaled = -2000000;           // max(Y_face)·1e6 (atomicMax)
 

@@ -79,8 +79,49 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_contactLog,       &clog, sizeof(int)));
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_contactLogThresh, &lth,  sizeof(flow_float)));
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_contactBlend,     &blend,sizeof(flow_float)));
+            const int brd = ((cfg.badReconDiag > 0) ? 1 : 0);
+            const flow_float brro = (flow_float)cfg.roMin, brp = (flow_float)cfg.pMin;
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconDiag,  &brd,  sizeof(int)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconRoMin, &brro, sizeof(flow_float)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconPMin,  &brp,  sizeof(flow_float)));
+            // W2 フォールバックの面カウンタ (§4.23)。opt-in のときだけ確保する。
+            const int brf = cfg.badReconFallback;
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconHyst, &brf, sizeof(int)));
+            if (brf > 0) {
+                signed char* cnt_d = nullptr;
+                CHECK_CUDA_ERROR(cudaMalloc(&cnt_d, sizeof(signed char)*msh.nPlanes));
+                CHECK_CUDA_ERROR(cudaMemset(cnt_d, 0, sizeof(signed char)*msh.nPlanes));
+                CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconCnt, &cnt_d, sizeof(signed char*)));
+                std::cout << "[convectiveFlux] badReconFallback: " << brf
+                          << " 回の訪問だけ 1 次化する面カウンタを " << msh.nPlanes << " 面ぶん確保した" << std::endl;
+            }
             s_init = true;
         }
+    }
+
+    // W2 V1 (plan convection-node-wall-reconstruction §6.4): 非物理な再構成の発火を一定間隔で 1 行印字しリセット。
+    if (cfg.badReconDiag > 0) {
+        static int s_br_call = 0;
+        const int interval = cfg.badReconDiag;
+        if ((s_br_call % interval) == 0) {
+            unsigned long long faces=0, nro=0, np=0, tot=0;
+            gpuErrchkKernelSync();
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&faces, g_badReconFaces, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&nro,   g_badReconRo,    sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&np,    g_badReconP,     sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&tot,   g_badReconTotal, sizeof(unsigned long long)));
+            unsigned long long act=0;
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&act, g_badReconActive, sizeof(unsigned long long)));
+            printf("BADRECON call=%d faces=%llu/%llu [ro=%llu P=%llu] active1st=%llu\n",
+                   s_br_call, faces, tot, nro, np, act);
+            const unsigned long long z = 0ULL;
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconFaces, &z, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconRo,    &z, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconP,     &z, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconTotal, &z, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconActive, &z, sizeof(unsigned long long)));
+        }
+        s_br_call++;
     }
 
     // rho-Y 共通リミタ診断: 一定間隔で device カウンタを読み出して 1 行印字しリセット (opt-in 時のみ)。

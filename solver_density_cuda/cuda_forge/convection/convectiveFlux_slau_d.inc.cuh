@@ -202,6 +202,39 @@ __global__ void SLAU_d
             um = 0.5f*(Uy_L+Uy_R); du = 0.5f*(Uy_L-Uy_R); Uy_L = um + z_th*du; Uy_R = um - z_th*du;
             um = 0.5f*(Uz_L+Uz_R); du = 0.5f*(Uz_L-Uz_R); Uz_L = um + z_th*du; Uz_R = um - z_th*du;
         }
+        // W2 V1 (plan §4.23/§6.4): 非物理な再構成の**発火計測のみ** (フォールバックはしない)。
+        // 判定点は SU2 と同じく「流束が実際に消費する L/R 状態」= contactBlend / Thornber の後。
+        if (g_badReconDiag != 0) {
+            const bool badRo = (ro_L <= g_badReconRoMin) || (ro_R <= g_badReconRoMin)
+                            || !isfinite(ro_L) || !isfinite(ro_R);
+            const bool badP  = (P_L  <= g_badReconPMin)  || (P_R  <= g_badReconPMin)
+                            || !isfinite(P_L)  || !isfinite(P_R);
+            atomicAdd(&g_badReconTotal, 1ULL);
+            if (badRo) atomicAdd(&g_badReconRo, 1ULL);
+            if (badP)  atomicAdd(&g_badReconP,  1ULL);
+            if (badRo || badP) atomicAdd(&g_badReconFaces, 1ULL);
+        }
+
+        // W2 フォールバック本体 (§4.23): 非物理なら**その面だけ**両側ともセル値 (1 次) に戻す。
+        // SU2 と同じく blend / Thornber の補正も一緒に捨てる (`SetPrimitive(bad ? V_i : Primitive_i, ...)`)。
+        // `conv_scheme = -1` にするので、この後の化学種・受動スカラー・凝縮モーメントも同じ面で 1 次になり、
+        // 組成 (ΣY=1) と面エンタルピーが自動で整合する。1 スレッド = 1 面なのでカウンタ更新に競合は無い。
+        if (g_badReconHyst > 0 && g_badReconCnt != nullptr) {
+            const bool bad = (ro_L <= g_badReconRoMin) || (ro_R <= g_badReconRoMin)
+                          || (P_L  <= g_badReconPMin)  || (P_R  <= g_badReconPMin)
+                          || !isfinite(ro_L) || !isfinite(ro_R) || !isfinite(P_L) || !isfinite(P_R);
+            int c = (int)g_badReconCnt[ip];
+            if (bad) c = min(127, g_badReconHyst + 1);
+            c = max(0, c - 1);
+            g_badReconCnt[ip] = (signed char)c;
+            if (c > 0) {
+                ro_L = ro[ic0]; Ux_L = Ux[ic0]; Uy_L = Uy[ic0]; Uz_L = Uz[ic0]; P_L = Ps[ic0];
+                ro_R = ro[ic1]; Ux_R = Ux[ic1]; Uy_R = Uy[ic1]; Uz_R = Uz[ic1]; P_R = Ps[ic1];
+                conv_scheme = -1;
+                if (g_badReconDiag != 0) atomicAdd(&g_badReconActive, 1ULL);
+            }
+        }
+
         // velocity2_L / h_p はブレンド後に算出 (L 再構成直後から移動)。
         flow_float velocity2_L = Ux_L*Ux_L + Uy_L*Uy_L + Uz_L*Uz_L;
         flow_float velocity2_R = Ux_R*Ux_R + Uy_R*Uy_R + Uz_R*Uz_R;

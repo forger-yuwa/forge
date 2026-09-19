@@ -253,7 +253,11 @@ public:
     double limiterRoRef = 0.0, limiterPRef = 0.0, limiterARef = 0.0;
     int limiterLengthFromArea = 0;
     // 有界性診断 (§4.20): psi 確定後にカーネル内で「近傍 min/max を外れた面側」を数える。既定 0 = off
-    int limiterDiag = 0;    // 1 = h_i に sqrt(A_planar) を使う (2D / 軸対称)
+    int limiterDiag = 0;
+    // W2 (plan convection-node-wall-reconstruction §4.23/§6.4 V1): 非物理な再構成の発火計測。既定 0 = OFF。
+    int badReconDiag = 0;
+    // W2 フォールバック (§4.23): 0 = OFF、N = 非物理な面を N 回の訪問だけ 1 次に落とす (SU2 相当は 20)。
+    int badReconFallback = 0;
 
     // free-stream 保存: 対流流束の圧力項を (p_tilde - pRef)*s で組み、非直交メッシュで
     // 大きな p*s を float32 加算する際の桁落ち(metric closure 由来の偽運動量源)を抑える。

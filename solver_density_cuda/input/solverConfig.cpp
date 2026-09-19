@@ -508,6 +508,16 @@ void solverConfig::read(std::string fname)
         }
         this->limiterRefLength = getOptionalValidatedValue<double>(space, "limiterRefLength", 0.0, "space");
         this->limiterDiag = getOptionalValidatedValue<int>(space, "limiterDiag", 0, "space");
+        // W2 V1 (plan convection-node-wall-reconstruction §4.23/§6.4): 非物理な再構成の発火計測。既定 0。
+        this->badReconDiag = getOptionalValidatedValue<int>(space, "badReconDiag", 0, "space");
+        if (this->badReconDiag < 0) {
+            throw std::runtime_error("Key 'badReconDiag' in 'space' must be >= 0 (0 = off, N = print every N flux calls).");
+        }
+        // W2 面単位フォールバック (plan convection-node-wall-reconstruction §4.23)。既定 0 = OFF (既定パス不変)。
+        this->badReconFallback = getOptionalValidatedValue<int>(space, "badReconFallback", 0, "space");
+        if (this->badReconFallback < 0 || this->badReconFallback > 100) {
+            throw std::runtime_error("Key 'badReconFallback' in 'space' must be 0 (off) or 1..100 (hysteresis visits; SU2 uses 20).");
+        }
         if (this->limiterScaled == 1 && this->discretization != "node") {
             std::cout << "[config] limiterScaled: 1 は discretization 'node' 専用のため無効化した" << std::endl;
             this->limiterScaled = 0;
