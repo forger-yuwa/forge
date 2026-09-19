@@ -117,6 +117,10 @@ def main():
     else:
         q_cfd = float("nan")
 
+    nan = sorted(rd.glob("res_nan_*.h5"))
+    if nan:
+        raise SystemExit(f"REFUSED: {rd.name} は発散している ({[f.name for f in nan]})。"
+                         " 評価しない (初期場を読んで『結果』にしないため)")
     files = sorted(rd.glob("res_[0-9]*.h5"), key=lambda f: int(f.stem.split("_")[1]))
     res = rd / a.res if a.res else (files[-1] if files else rd / "mesh.h5")
     ev = evaluate(res, xf, xr, d)

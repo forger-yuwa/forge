@@ -1,0 +1,54 @@
+{
+  "_source": "NASA TN D-8233 (Throckmorton 1976) — 本文・Appendix・Fig 4 / Fig 8(a) を 200-260 dpi 描画から目視で読み取り (2026-09-19)",
+  "_status": "T2-G0 (試験再構成) の入力台帳。計算はまだ実施していない",
+  "facility": "Langley continuous-flow hypersonic tunnel (78.74 cm 角試験部)、試験気体 空気",
+  "M": 10.3,
+  "model": {
+    "kind": "flat plate + single transverse gap (配列ではない)",
+    "gap_width_cm": 0.229, "gap_depth_cm": 4.572, "depth_over_width": 19.97,
+    "skin": {"material": "304 SS", "thickness_cm": 0.0406, "n_thermocouples": 21, "location": "midspan"},
+    "upstream_plate": {"material": "brass", "thickness_cm": 0.3175, "heaters_W": [350, 400, 400, 400]},
+    "downstream_plate": {"material": "17-4 PH SS", "heated": false, "instrumented": false},
+    "thermal_isolation": "すきまは断熱材 + 水冷通路で加熱板から熱的に絶縁",
+    "sweep_angle_deg": [0, 22.5, 45, 60]
+  },
+  "reference": {
+    "h_definition": "h = q / (T_aw - T_w)",
+    "T_aw": "T_inf + 0.89 (T_t - T_inf)   (乱流 r = 0.89)",
+    "h_fp_correlation": "h_fp = C * Re_inf^0.69   [W/(m^2 K)], Re_inf [1/m]  (Appendix (A2); 元は N_St Re_{w,theta}^0.07 = const)",
+    "C_digitized": 7.95e-5,
+    "_C_note": "Appendix 図の 4 点 (1.5e6→1.45, 3.3e6→2.50, 6.1e6→3.75, 7.8e6→4.6 W/m2K) から。式との差は ±2 %",
+    "_warning": "test ごとの smooth 実測ではなく**相関値**。CFD 側も同じ演算で h/h_fp を作る"
+  },
+  "boundary_layer": {
+    "_source": "Fig 4 (目視読み取り、対数軸のため ±5 %)",
+    "_note": "トンネル側壁の厚い乱流 BL。すきま幅の 46-56 倍という巨大なスケール分離",
+    "series": [
+      {"Re_m": 1.47e6, "dstar_cm": 12.8, "theta_cm": 1.42, "dstar_over_w": 56, "theta_over_w": 6.2},
+      {"Re_m": 3.32e6, "dstar_cm": 11.5, "theta_cm": 1.19, "dstar_over_w": 50, "theta_over_w": 5.2},
+      {"Re_m": 6.10e6, "dstar_cm": 10.8, "theta_cm": 1.08, "dstar_over_w": 47, "theta_over_w": 4.7},
+      {"Re_m": 7.82e6, "dstar_cm": 10.5, "theta_cm": 1.03, "dstar_over_w": 46, "theta_over_w": 4.5}
+    ]
+  },
+  "temperature_ratio_series": {
+    "_source": "Fig 8(a) (掃引角 0°)。**公称 1.0/1.2/1.4/1.6 ではなく Re 系列ごとに実測値が違う**",
+    "1.47e6": [1.00, 1.19, 1.37, 1.61],
+    "3.32e6": [1.00, 1.18, 1.34, 1.52],
+    "7.82e6": [1.00, 1.17, 1.38, 1.59]
+  },
+  "measured_range": {
+    "basic_distributions": "Fig 5-7 は主に z/W <= 6",
+    "solid_symbols": "極端に低く精度に疑義のあるデータ (本文明記) → 精度検証から除外する",
+    "key_observations": [
+      "後壁 > 前壁 は z/W < 4。z/W > 5 では両壁ほぼ等しい",
+      "T_surf/T_gap 増で上端の h 増・深部の h 減、反転は 2 < z/W < 3",
+      "Re 増で上端の無次元 h 減・深部増"
+    ]
+  },
+  "open_items": [
+    "T_t, T_inf, T_gap の実値 (本文から未抽出)",
+    "加熱板の長さと温度分布",
+    "Fig 5-8 の h/h_fp 分布の digitize",
+    "2D 中央断面近似の妥当性 (TH75 は横方向の BL 分布変化・壁圧と自由流静圧の差を明記)"
+  ]
+}

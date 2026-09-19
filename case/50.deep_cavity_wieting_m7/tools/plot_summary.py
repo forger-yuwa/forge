@@ -8,7 +8,8 @@ from burggraf import qs_over_qfp
 from compare_ref import jp_font
 
 CASE = Path(__file__).resolve().parents[1]
-RUNS = {"0.063": "run_0006_T1_wd0063_long", "0.211": "run_0008_T1_wd0211_long", "0.383": "run_0009_T1_wd0383_long"}
+RUNS = {"0.063": "run_0006_T1_wd0063_long", "0.211": "run_0008_T1_wd0211_long",
+        "0.383": "run_0009_T1_wd0383_long", "0.524": "run_0011_T1_wd0524_long"}
 EXP = {"0.063": 1.07, "0.211": 0.73, "0.383": 0.58, "0.524": 0.49}
 d = 20.32e-3
 W = json.loads((CASE / "geometry.json").read_text())["cavity"]["widths"]

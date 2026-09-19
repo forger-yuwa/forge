@@ -89,6 +89,8 @@ def main():
     T0, U0, rho0, p0, mu0 = solve_state(gas, s["M"], s["Re_m"], s["Tt_K"])
     ana = q_flat_plate(gas, T0, U0, p0, x_ref, setup["Tw"])
 
+    if list(rd.glob("res_nan_*.h5")):
+        raise SystemExit(f"REFUSED: {rd.name} は発散している。評価しない")
     files = sorted(rd.glob("res_[0-9]*.h5"), key=lambda f: int(f.stem.split("_")[1]))
     res = rd / a.res if a.res else (files[-1] if files else rd / "mesh.h5")
     x, q, Tw, lam, Pw = evaluate(res, setup)
