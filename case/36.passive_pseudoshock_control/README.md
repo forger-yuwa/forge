@@ -356,6 +356,7 @@ restart: cell←run_0049/res_80000、node←run_0072/res_40000。
 |---|---|---|---|
 | `run_0052_solid_ducrosON_bp1p84` | 1 (1次化あり) | ducros 計算正常: max 0.9996, duc>0.8 発火 1.79% (x169-260mm=衝撃波フロントに局在)。中心軸 ripple std 8.76kPa | active (比較基準) |
 | `run_0053_solid_ducrosOFF_bp1p84` | 0 (1次化なし) | ducros 一様 0。**ON とほぼ完全一致** (中心軸 ripple std 8.76kPa, OFF/ON 比 1.000, 衝撃波フロント 189mm 同一) | active |
+| `run_0030_limA_pshock` / `run_0031_limC_pshock` / `run_0032_limC_pshock_long` | **リミッタ無次元化の回帰** (`run_sym_H_2up_node` の `res_80000` から index コピー restart、A=`mr0/scaled0` 生産既定, C=`mr1/scaled1` 無次元化。旧キー `LESorRANS/LESmodel/RANSmodel` は `model: "sst"` に置換)。C は 8000 step では過渡が残るので +24000 step 継続 | **衝撃位置は同一** (`check_quasisteady --quantity shock` 両者 **STEADY**, tail mean **240.9**, drift 0.0 %)。残差は過渡が抜けると C が上: `rms_roUx` 2.19e-2→**3.14e-3**, `rms_roK` 2.96e-1→**3.04e-2**, `ro`/`roUy`/`roe` も C が下、`roOmega` のみ 1.09 倍 | ref ([../../plans/active/convection-node-wall-reconstruction.md](../../plans/active/convection-node-wall-reconstruction.md) §4.22) |
 
 - **結論: Ducros 1 次化を切っても場の差は <0.1% (中心軸 P 差 max 1.3kPa, ducros 発火セルに局在)。
   衝撃波列 ripple 振幅・フロント位置・limit-cycle 変動はいずれも不変**。ユーザ予想の「変動が激しく
