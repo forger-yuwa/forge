@@ -251,8 +251,11 @@ def patch_ic(h5, inlet_csv, gas="CPG"):
             sys.path.insert(0, str(ROOT / "design"))
             from forge_design.gas.semiperfect import GasSemiPerfect
             g = GasSemiPerfect(D["dry_air_Y"], Tt=2000.0)
-            href = float(g.h_mass(298.15))
-            e_u = np.array([float(g.h_mass(t)) - href - D["R_tp"] * t for t in uniq])
+            # **numpy 2 系では 0 次元でない配列の float() がエラーになる**ので、
+            # setup.py と同じ `_f` で明示的にスカラー化する (AWS の numpy で実際に落ちる)。
+            from setup import _f
+            href = _f(g.h_mass(298.15))
+            e_u = np.array([_f(g.h_mass(t)) - href - D["R_tp"] * t for t in uniq])
             roe = ro * (e_u[inv] + 0.5 * u2)
             print("  IC(TP): T %.1f..%.1f K, 一意温度 %d 点" % (Tfield.min(), Tfield.max(), len(uniq)))
         else:

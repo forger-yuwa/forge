@@ -81,8 +81,16 @@ def _solve_T_of_h(gas, h_target, lo=150.0, hi=3000.0):
 
 
 def load_case(path=None):
-    """最上位入力 case.json (旧 conditions.json 互換)。"""
-    p = Path(path or HERE / "case.json")
+    """最上位入力 case.json (旧 conditions.json 互換)。
+
+    **共有 `case.json` を書き換えずに別条件を回せるように** 環境変数 `CASE49_CASE` で
+    差し替えられる (`CASE49_MANIFEST` と対)。M9 のような別作動点は `case_m9.json` を作り
+    `CASE49_CASE=case_m9.json CASE49_MANIFEST=manifest_m9.json` で駆動する。
+    共有ファイルを書き換えると、同時に走る後処理が別条件で評価してしまう
+    (2026-09-19 に偏心スイープで実害あり)。
+    """
+    import os
+    p = Path(path or HERE / os.environ.get("CASE49_CASE", "case.json"))
     if not p.exists():
         p = HERE / "conditions.json"
     c = json.loads(p.read_text())
