@@ -112,10 +112,16 @@ def plot_htc(run, step, man, D, wh, out):
             deep = np.isfinite(Z)
             if g in ("cav_outer", "cyl_side"):
                 deep = deep & (V < -lipmm)
-            lo = np.nanpercentile(Z[np.isfinite(Z)], 0.5) if r else 0.0
+            fin = np.isfinite(Z)
+            lo = np.nanpercentile(Z[fin], 0.5) if (r and fin.any()) else 0.0
             hi = (np.nanpercentile(Z[deep], 99.0) if deep.any()
-                  else np.nanpercentile(Z[np.isfinite(Z)], 99.5))
-            zmax = float(np.nanmax(Z[np.isfinite(Z)])) if np.isfinite(Z).any() else float("nan")
+                  else (np.nanpercentile(Z[fin], 99.5) if fin.any() else 1.0))
+            zmax = float(np.nanmax(Z[fin])) if fin.any() else float("nan")
+            # **縮退を防ぐ**: その壁がほぼ一様 (偏心時の底面は入熱がほぼゼロ) だと lo==hi になり
+            # contourf が "Contour levels must be increasing" で落ちる。全体の最大値、
+            # それでも縮退するなら微小幅にフォールバックする。
+            if not (hi > lo):
+                hi = zmax if (np.isfinite(zmax) and zmax > lo) else lo + max(abs(lo), 1.0) * 1e-6
             # **未定義ビンは塗らない** (灰色のハッチで示す)。h_ref は dT_ref <= 閾値の領域で
             # 定義できず、そこを近傍で埋めると閾値の等高線が階段状の不連続として現れる。
             und = ~np.isfinite(Z)
