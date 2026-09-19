@@ -267,9 +267,9 @@ CFL・梯子 step 数・MOC 初期値・収束判定の実測。**個々の結�
 | `run_0216_w1_barth_mr0` | Barth + `mr: 0` | step 27 NaN。ベース壁節点の `ro` が **−0.001003** | ref (A/B) |
 | `run_0217_w1_barth_mr1` | Barth + `mr: 1` (28 step) | NaN 無し | 破棄 (長尺 0219 で置換) |
 | `run_0218_w1_venkat_mr1_long` | Venkat + `mr: 1` (400 step 指定) | **step 31 NaN** = 3 step の延命のみ | ref (W1 の G2) |
-| `run_0219_w1_barth_mr1_long` | **Barth + `mr: 1`** (400 step 指定) | **400 step 完走・非物理な再構成ゼロ**。ベース壁 `ro` 0.003581→0.001039 で頭打ち | ref (**W1 の主要根拠**) |
+| `run_0219_w1_barth_mr1_long` | **Barth + `mr: 1`** (400 step 指定) | **400 step まで有限状態を維持**。G3 非物理ゼロ (`--state-from prev`)。~~`ro` 頭打ち~~ **撤回**: `check_quasisteady` は **DRIFTING** (drift 5.4 %/tail, fluct 40.4 %)、収束は NOT CONVERGED | ref (W1 の主要根拠。ただし定常性は未達) |
 | `run_0220_r4e_barth_mr1` | 全レシピ (Barth + `mr: 1`) | **mid 段 step 129 NaN** (既定 28 の 4.6 倍)。NaN は同じベース近傍 55 節点 → **根治ではない** | ref (W1 の限界) |
-| `run_0221_w1_bitcheck_baseline` | 変更を外した HEAD のバイナリ (worktree ビルド) で `mr: 0` | `mr: 0` との差は run 間ノイズ床と同オーダー | ref (非退行確認) |
+| `run_0221_w1_bitcheck_baseline` | 変更を外した HEAD のバイナリ (worktree ビルド) で `mr: 0` | 差は run 間ノイズ床と同オーダーだが **`check_field_regress.py --boundary` (床×2) は step 1/10 で FAIL** (`roUy`/`roe` 2.92 倍, `h0` 3.62 倍)。**非退行は未確定** | ref (非退行・未達) |
 | `run_0222_w1_repeat_mr0` | `run_0214` と同一設定の反復 = ノイズ床 | `ro` 2e-7〜8e-7 | ref (ノイズ床) |
 
 ### S7 3D の現状 (2026-09-05)
