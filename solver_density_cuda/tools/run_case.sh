@@ -20,8 +20,17 @@ rc=$?
 echo "[run_case] forge exit=$rc"
 
 echo "[run_case] convergence check ->"
-python3 "$ROOT/solver_density_cuda/tools/check_convergence.py" . > CONVERGENCE_VERDICT.txt 2>&1 || true
+# 判定の終了コードを **握りつぶさず記録する**。段階起動では段ごとに未収束でも先へ進むのが正しいので
+# 既定では run_case 自体の終了コードには反映しないが、`FORGE_STRICT_CONVERGENCE=1` を立てると
+# 未収束・判定不能を run_case の失敗として返す (2026-09-19 codex: `|| true` で飲み込んでいた)。
+python3 "$ROOT/solver_density_cuda/tools/check_convergence.py" . > CONVERGENCE_VERDICT.txt 2>&1
+conv_rc=$?
+echo "CONVERGENCE_EXIT: $conv_rc" >> CONVERGENCE_VERDICT.txt
 cat CONVERGENCE_VERDICT.txt
 python3 "$ROOT/solver_density_cuda/tools/plot_implicit_residuals.py" \
     --input residual_history.csv --output residual_history.png > /dev/null 2>&1 || true
+if [ "${FORGE_STRICT_CONVERGENCE:-0}" != "0" ] && [ "$rc" -eq 0 ] && [ "$conv_rc" -ne 0 ]; then
+    echo "[run_case] FORGE_STRICT_CONVERGENCE=1 かつ収束判定が非ゼロ ($conv_rc) -> 失敗として返す"
+    exit "$conv_rc"
+fi
 exit $rc
