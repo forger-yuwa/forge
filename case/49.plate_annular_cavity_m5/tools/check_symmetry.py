@@ -145,18 +145,23 @@ def main():
     ap.add_argument("runs", nargs="+")
     ap.add_argument("--tol", type=float, default=0.02, help="asym_rms の許容 (既定 2 %)")
     ap.add_argument("--series", action="store_true", help="全スナップショットで時系列を見る")
+    ap.add_argument("--ref-run", default=None,
+                    help="擾乱なしの定常 run。旋回の**減衰率**で判定する (これが本来の判定)")
+    ap.add_argument("--decay", type=float, default=0.2,
+                    help="残った旋回 / 初期擾乱 の許容 (既定 0.2 = 8 割減衰していれば PASS)")
     a = ap.parse_args()
     man = gc.load_manifest()
     if man["geometry"].get("half_model", True):
         print("注意: manifest が半割 (half_model: true)。全周 run には CASE49_MANIFEST=manifest_full.json")
     worst, grow, floor_lo, floor_hi = 0.0, False, float("inf"), 0.0
+    swirl_hist = []
     for run in a.runs:
         snaps = snapshots(run)
         print("\n=== %s  (%d スナップショット) ===" % (run, len(snaps)))
         if not snaps:
             print("  res_*.h5 が無い"); return 1
         use = snaps if a.series else snaps[-1:]
-        hist = []
+        hist, swirl_hist = [], []
         for res in use:
             step = int(res.stem.split("_")[1])
             fa = field_asym(res, man)
@@ -189,12 +194,34 @@ def main():
             print("     -> 物理の最大ビン asym / メッシュ床 = %.2f 倍"
                   % (max(fa["bin"][k][0] for k in fa["bin"]) / max(fl, 1e-30)))
             hist.append((step, abs(sw)))
+            swirl_hist.append((step, sw))
         if len(hist) >= 3:
             h = [v for _, v in hist]
             n = max(2, len(h) // 3)
             grow = grow or (np.mean(h[-n:]) > 1.3 * np.mean(h[:n]))
             print("  |平均旋回|: 前期 %.2e -> 末期 %.2e  (%s)"
                   % (np.mean(h[:n]), np.mean(h[-n:]), "成長" if grow else "減衰/横ばい"))
+    # --- 旋回の減衰率による判定 (主) ---
+    if a.ref_run and swirl_hist:
+        rs = field_asym(snapshots(a.ref_run)[-1], man)
+        sref = rs["swirl"][0] if rs else 0.0
+        s0, s1 = swirl_hist[0][1], swirl_hist[-1][1]
+        d0, d1 = abs(s0 - sref), abs(s1 - sref)
+        frac = d1 / max(d0, 1e-30)
+        print("\n旋回の減衰: 擾乱 %+.3e -> 末尾 %+.3e   (基準 %+.3e)" % (s0, s1, sref))
+        print("  |末尾-基準| / |擾乱-基準| = %.4f   (許容 %.3g)" % (frac, a.decay))
+        if d0 < 1e-6:
+            print("VERDICT: NO-PERTURBATION (擾乱が基準と同じ — 擾乱が効いていない)")
+            return 2
+        if frac <= a.decay:
+            print("VERDICT: SYMMETRIC (反対称モードが減衰 = 半割で可。減衰 %.1f %%)" % (100 * (1 - frac)))
+            return 0
+        if frac >= 1.0:
+            print("VERDICT: ASYMMETRIC (反対称モードが減衰しない/成長 — 半割は不可)")
+            return 1
+        print("VERDICT: PARTIAL-DECAY (%.1f %% しか減衰していない — 観測窓を延ばす)" % (100 * (1 - frac)))
+        return 2
+
     print("\n最大 ビン asym = %.3e  (許容 %.3g)   メッシュ床 %.3e 〜 %.3e%s"
           % (worst, a.tol, floor_lo, floor_hi, "   非対称が成長" if grow else ""))
     if grow:
