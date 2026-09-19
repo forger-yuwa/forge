@@ -39,6 +39,9 @@ sys.path.insert(0, str(HERE))
 from setup import load as load_conditions  # noqa: E402
 
 # manifest は環境変数で差し替えられる (塞ぎ形状 manifest_plug.json などの併存用)
+sys.path.insert(0, str(HERE / "tools"))
+import geom_common as gc  # noqa: E402
+
 MAN = json.loads((HERE / os.environ.get("CASE49_MANIFEST", "manifest.json")).read_text())
 PID, G = MAN["phys_id"], MAN["geometry"]
 D = load_conditions()
@@ -92,22 +95,43 @@ def urans_cfg(nsteps, dt, *, cfl_pseudo=12.0, nsub=10, outint=200, gas=None, mes
     return base
 
 
-def perturb_asym(h5, amp=0.01):
-    """左右非対称の微小擾乱を開口近傍の k に与える (plan §4.9(a))。
-    全周 URANS で「半割が禁じる反対称モード」が成長するか減衰するかを見るため、
-    完全対称 IC のまま無擾乱で回さない。amp は相対振幅 (既定 1 %)。"""
+def perturb_asym(h5, amp=0.05):
+    """キャビティ気体に**一様な周方向旋回**を与える (plan §4.9(a))。
+
+    半割 (y=0 対称面) が禁じるのは「鏡像で符号が変わるモード」で、環状キャビティでは
+    その代表が**周方向循環 (swirl)** である。鏡像は旋回の向きを反転させるので、
+    対称解では循環が**厳密に 0**。したがって
+      「旋回を与えて、それが減衰して 0 に戻るか」
+    が半割の可否をそのまま判定する。**この指標はメッシュの左右非対称に汚染されない**
+    (以前は開口の k を ±1 % だけ触っていたが、T に効かず指標が動かなかった)。
+
+    amp はキャビティ気体の rms 速さに対する相対振幅。運動量を足し、対応する運動
+    エネルギーを roe にも足して**温度を変えない**。
+    """
     with h5py.File(h5, "r+") as f:
         c = np.array(f["MESH/COORD"]).reshape(-1, 3)
         ro = np.array(f["/VALUE/ro"])
-        rk = np.array(f["/VALUE/roK"]) if "/VALUE/roK" in f else None
-        if rk is None:
-            print("  roK が無いので擾乱なし"); return
-        r = np.hypot(c[:, 0], c[:, 1])
-        near = (c[:, 2] < 0.002) & (c[:, 2] > -0.010) & (r < G["Ro"] * 1.2)
-        th = np.arctan2(c[:, 1], -c[:, 0])
-        rk[near] *= (1.0 + amp * np.sin(th[near]))      # sinθ = 左右反対称
-        f["/VALUE/roK"][:] = rk.astype(np.float32)
-        print("  左右非対称擾乱: %d ノードの k を ±%.1f %% (sinθ)" % (int(near.sum()), 100 * amp))
+        rux, ruy = np.array(f["/VALUE/roUx"]), np.array(f["/VALUE/roUy"])
+        ruz = np.array(f["/VALUE/roUz"])
+        roe = np.array(f["/VALUE/roe"])
+        m = gc.cavity_mask(c[:, 0], c[:, 1], c[:, 2], MAN, shrink=0.0)
+        if m.sum() < 100:
+            print("  キャビティ節点が取れないので擾乱なし"); return
+        u = np.stack([rux[m] / ro[m], ruy[m] / ro[m], ruz[m] / ro[m]], axis=1)
+        uref = float(np.sqrt(np.mean(np.sum(u ** 2, axis=1))))
+        r = np.hypot(c[m, 0], c[m, 1])
+        # e_theta = (-y, x)/r  (右ねじ方向の一様旋回)
+        et = np.stack([-c[m, 1] / np.maximum(r, 1e-12), c[m, 0] / np.maximum(r, 1e-12)], axis=1)
+        du = amp * uref
+        k0 = 0.5 * (rux[m] ** 2 + ruy[m] ** 2 + ruz[m] ** 2) / ro[m]
+        rux[m] += ro[m] * du * et[:, 0]
+        ruy[m] += ro[m] * du * et[:, 1]
+        k1 = 0.5 * (rux[m] ** 2 + ruy[m] ** 2 + ruz[m] ** 2) / ro[m]
+        roe[m] += (k1 - k0)                      # 内部エネルギー (= 温度) を保つ
+        for nm, arr in (("roUx", rux), ("roUy", ruy), ("roe", roe)):
+            f["/VALUE/" + nm][:] = arr.astype(f["/VALUE/" + nm].dtype)
+        print("  一様旋回擾乱: %d ノードに u_theta = %.3g m/s (rms 速さ %.3g の %.0f %%)"
+              % (int(m.sum()), du, uref, 100 * amp))
 
 
 def solver_cfg(nsteps, cfl, *, conv=1, lim=2, ninner=4, relax=0.7, outint=2000,
