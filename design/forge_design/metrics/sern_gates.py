@@ -195,7 +195,7 @@ def residual_scale_gate(run_dir, ratio: float = 1.0e6) -> dict:
 
 
 def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: str | None = None,
-                   p_min: float | None = None) -> dict:
+                   p_min: float | None = None, require_residual_plateau: bool = True) -> dict:
     """全ゲートを評価して verdict / fail_class を返す。fail_class は数値失敗の種別:
     DIVERGED (rc≠0 / 発散ダンプ / 非有限・非正の場 / 残差 NaN), RESIDUAL_RISING, NOT_CONVERGED (require 時のみ),
     NO_FORCES (壁出力が無い), UNSTEADY (目的量・力係数が頭打ちしていない)。物理的 INFEASIBLE はここでは出さない。"""
@@ -216,6 +216,12 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: 
         reasons += resid.get("reasons", []); fail = fail or ("DIVERGED" if resid["nan"] else "RESIDUAL_RISING")
     elif require_residual_pass and not resid["converged"]:
         reasons.append(f"residual {resid['verdict']} (require_residual_pass)"); fail = fail or "NOT_CONVERGED"
+    elif require_residual_plateau and resid.get("converging"):
+        # **プラトー要求** (2026-09-19 ユーザ決定): 上昇は当然不可だが、「まだ低下中」も過渡が
+        # 終わっていないので不可。全列がプラトー (頭打ち) に達していることを収束の条件とする。
+        # この case は残差が 1–2.5 桁でプラトーする性質なので、3 桁低下 (require_residual_pass) は課さない。
+        reasons.append(f"residual まだ低下中 (プラトー未達) columns {resid['converging']}")
+        fail = fail or "NOT_PLATEAU"
     if not floors["ok"]:
         reasons += floors["reasons"]; fail = fail or "FLOOR_STUCK"
     if not rscale["ok"]:
@@ -227,7 +233,8 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: 
     return {"verdict": "PASS" if fail is None else "FAIL", "fail_class": fail, "reasons": reasons, "rc": rc,
             "objective": stead["objective"], "field": field, "residual": resid, "steadiness": stead,
             "floors": floors, "residual_scale": rscale,
-            "require_residual_pass": bool(require_residual_pass)}
+            "require_residual_pass": bool(require_residual_pass),
+            "require_residual_plateau": bool(require_residual_plateau)}
 
 
 def forge_rc_from_log(run_dir) -> int | None:

@@ -338,13 +338,77 @@ def apply_wall_offset(design, wall_offset: dict, H: float):
     return d
 
 
-def paste_region_ic(h5path, y_mid, y_top, scale: float, st: dict, gamma: float) -> None:
-    """領域別一様 IC: 中間線とランプ/プルーム上線の間 = 燃焼器出口状態、それ以外 (カウル下・ランプ側外部流) = 外部流。"""
+
+def moc_ic_arrays(kern, xn, yn, upper, st: dict, gamma: float, gas=None) -> tuple:
+    """**MOC 場を初期値にする** (2026-09-19, ユーザ提案)。
+
+    現行の領域別一様 IC は、ノズル内を燃焼器出口状態 (例 101 kPa) で埋める。実際の解は出口で
+    ~6.5 kPa まで膨張するので、**初期値が 17 倍ずれた状態**から始めることになり、
+    梯子 12000 step を cfl 0.1 で這わせる主因になっている。MOC は同じ形状の非粘性解を
+    station ごとに (Y, TH, M) で持っているので、それを内挿すれば初期値が解のすぐ近くから始まる。
+
+    返り値: (arrays, n_moc) — n_moc は MOC を当てられたノード数 (残りは一様 IC のまま)。
+    MOC の被覆外 (kernel の x 範囲外・上下境界の外) は `upper` による一様値に落とす。
+    等エントロピー: よどみ量は排気の入口状態から作り、M(x,y)・θ(x,y) で静圧・静温・速度に展開する。
+    """
+    ex = st["exhaust"]
+    g = float(gamma); gm = g - 1.0
+    R = float(ex.get("R", ex["P"] / (ex["ro"] * ex["T"])))
+    M_in = float(ex.get("M", 0.0))
+    # 入口状態からよどみ量 (等エントロピー)
+    T0 = ex["T"] * (1.0 + 0.5 * gm * M_in * M_in)
+    P0 = ex["P"] * (1.0 + 0.5 * gm * M_in * M_in) ** (g / gm)
+    X = np.asarray(kern.X)
+    M = np.full(len(xn), np.nan); TH = np.full(len(xn), np.nan)
+    # **被覆外は外挿する** (2026-09-19)。x を kernel 範囲に、y を各 station の範囲にクランプして端の値を伸ばす。
+    # 落とすと排気域の中に一様値 (入口状態) の塊が残り、その境界が 17 倍の圧力段差になって
+    # 一様 IC より悪い初期値になる (実測: 排気域 32268 ノードのうち 13111 が一様のまま → mid 段 step 6 で発散)
+    sel = np.flatnonzero(upper)
+    xc = np.clip(xn[sel], X[0], X[-1])
+    idx = np.clip(np.searchsorted(X, xc), 1, len(X) - 1)
+    for j, (i1, x, y) in enumerate(zip(idx, xc, yn[sel])):
+        i0 = i1 - 1
+        t = (x - X[i0]) / max(X[i1] - X[i0], 1e-30)
+        a = np.interp(y, kern.Y[i0], kern.M[i0]); b = np.interp(y, kern.Y[i1], kern.M[i1])   # 端はクランプ = 外挿
+        ta = np.interp(y, kern.Y[i0], kern.TH[i0]); tb = np.interp(y, kern.Y[i1], kern.TH[i1])
+        M[sel[j]] = a + t * (b - a)
+        TH[sel[j]] = ta + t * (tb - ta)
+    ok = np.isfinite(M) & (M > 0.0)
+    base = region_ic_arrays(upper, st, gamma)
+    if not ok.any():
+        return base, 0
+    f = 1.0 + 0.5 * gm * M[ok] ** 2
+    T = T0 / f; P = P0 / f ** (g / gm); ro = P / (R * T)
+    q = M[ok] * np.sqrt(g * R * T)
+    base["ro"][ok] = ro
+    base["roUx"][ok] = ro * q * np.cos(TH[ok])
+    base["roUy"][ok] = ro * q * np.sin(TH[ok])
+    base["roK"][ok] = ro * float(ex["k"]); base["roOmega"][ok] = ro * float(ex["omega"])
+    if st.get("gas_model") == "frozen_tp":
+        # 内部エネルギーは **NASA-9 をそのまま使う** (定 cv の近似はしない)。forge の thermoHrefTemp 基準と同一
+        if gas is None:
+            raise ValueError("frozen_tp の MOC IC には FrozenGas が要る")
+        base["roe"][ok] = ro * (gas.h_sens(T) - ex["R"] * T + 0.5 * q * q)
+        if st.get("tracer"):
+            base["roXi"][ok] = ro
+        for i, ye in enumerate(ex["Y"]):
+            base[f"roY{i}"][ok] = ro * float(ye)
+    else:
+        base["roe"][ok] = P / gm + 0.5 * ro * q * q
+    return base, int(ok.sum())
+
+
+def paste_region_ic(h5path, y_mid, y_top, scale: float, st: dict, gamma: float, kern=None, gas=None) -> int:
+    """領域別一様 IC: 中間線とランプ/プルーム上線の間 = 燃焼器出口状態、それ以外 (カウル下・ランプ側外部流) = 外部流。
+    `kern` を渡すと排気側を **MOC 場**で埋める (`moc_ic_arrays`)。戻り値 = MOC を当てたノード数。"""
     with h5py.File(h5path, "r+") as f:
         cc = f["/CELLS/centCoords"][:].reshape(-1, 3)
         xn, yn = cc[:, 0] / scale, cc[:, 1] / scale
         upper = (yn > y_mid(xn)) & (yn < y_top(xn))
-        write_ic_arrays(f["/VALUE"], region_ic_arrays(upper, st, gamma))
+        if kern is None:
+            write_ic_arrays(f["/VALUE"], region_ic_arrays(upper, st, gamma)); return 0
+        arrays, n = moc_ic_arrays(kern, xn, yn, upper, st, gamma, gas)
+        write_ic_arrays(f["/VALUE"], arrays); return n
 
 
 def convert_mesh(run_dir, msh: str, out: str) -> None:
@@ -417,10 +481,17 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     for f in run_dir.glob("sern_qc.xmf"):
         f.unlink()
     (run_dir / "solverConfig.yaml").write_text(cfg)
-    paste_region_ic(run_dir / MESH, y_mid, y_top, H, st, p.gamma)
+    # `mesh.ic: moc` で排気側を MOC 場から与える (既定 uniform)。一様 IC は入口状態を全域に置くので
+    # 出口で 17 倍ずれており、梯子 12000 step の主因になっている (2026-09-19)
+    _ic = str(p.mesh.get("ic", "uniform")).lower()
+    _gs = frozen_gases(p)
+    n_moc = paste_region_ic(run_dir / MESH, y_mid, y_top, H, st, p.gamma,
+                           kern=(kern if _ic == "moc" else None),
+                           gas=((_gs or {}).get("exhaust")))
     ex = st["exhaust"]
     F_ideal_nd, M_e_id = ideal_thrust(p, st)
     info = {"problem": str(problem_path), "run_dir": str(run_dir), "nsteps": n, "H_m": H, "states": st, "gas_model": st["gas_model"],
+            "ic": {"mode": _ic, "n_moc_nodes": int(n_moc)},
             "operating_point": opinfo, "wall_offset": bool(wall_offset), "design_point": d0,
             "design": {"key_point": list(design.key_point), "foot_a": list(design.foot_a), "lip_e": list(design.lip_e),
                        "L_ramp": design.L_ramp, "mass_fraction_check": design.mass_fraction_check,
@@ -610,6 +681,7 @@ def run_forge(run_dir) -> int:
 
 def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: float = 0.5, soft_conv: int = 0,
                warm_lam_steps: int = 0, warm_lam_cfl: float = 0.2, mid_steps: int = 0,
+               warm_lam_ramp=None,
                warm_src=None, warm_adapt_steps: int = 500) -> int:
     """soft_cfl / soft_conv: soft 段の CFL と convMethod (既定 0.5 / 1 次)。3D SST の後縁 3 重点など、1 次でも
     立ち上がりが厳しいケースで下げる。
@@ -654,21 +726,28 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
             f.unlink()
         warm_lam_steps = 0      # 以降は mid → 本段
     if warm_lam_steps > 0 and 'model: "sst"' in cfg_main:      # 層流暖機段 (SST を後から入れる)
-        lam = re.sub(r'turbulence: \{model: "sst"[^}]*\}', 'turbulence: {model: "none"}', cfg_main)
-        if 'model: "none"' not in lam:
+        lam0 = re.sub(r'turbulence: \{model: "sst"[^}]*\}', 'turbulence: {model: "none"}', cfg_main)
+        if 'model: "none"' not in lam0:
             raise RuntimeError("層流暖機: turbulence 行の置換に失敗 (solverConfig の書式が変わった)")
-        lam = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {warm_lam_cfl}, cfl_pseudo: {warm_lam_cfl}", lam)
-        lam = lam.replace("convMethod: 1", "convMethod: 0")
-        lam = re.sub(r"nStepOuter: \d+", f"nStepOuter: {warm_lam_steps}", lam)
-        lam = re.sub(r"outStepInterval: \d+", f"outStepInterval: {warm_lam_steps}", lam)
-        (run_dir / "solverConfig.yaml").write_text(lam)
-        rc = run_forge(run_dir)
-        res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
-        if rc != 0 or not res:
-            raise RuntimeError("層流暖機段が失敗 (res_nan_*.h5 / forge_run.log を見る)")
-        restart_by_index(res[-1], run_dir / MESH)
-        for f in run_dir.glob("res_*"):
-            f.unlink()
+        lam0 = lam0.replace("convMethod: 1", "convMethod: 0")
+        # **CFL ramp** (2026-09-19 ユーザ提案): 暖機は固定 CFL だと 0.1 が上限だが、場が育つにつれ上げられる。
+        # ソルバ側に ramp が無いので runner が forge を複数回起動して段階昇圧する
+        # (風洞チェーン `runner_axismach.run_staged_ns(stages="ramp")` と同じ方式)。
+        # `warm_lam_ramp` が空なら従来どおり `warm_lam_cfl` 固定の 1 段。
+        legs = [(float(c), int(warm_lam_steps / max(len(warm_lam_ramp), 1))) for c in warm_lam_ramp] \
+            if warm_lam_ramp else [(float(warm_lam_cfl), int(warm_lam_steps))]
+        for c, n_leg in legs:
+            lam = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", lam0)
+            lam = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", lam)
+            lam = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", lam)
+            (run_dir / "solverConfig.yaml").write_text(lam)
+            rc = run_forge(run_dir)
+            res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
+            if rc != 0 or not res:
+                raise RuntimeError(f"層流暖機段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
+            restart_by_index(res[-1], run_dir / MESH)
+            for f in run_dir.glob("res_*"):
+                f.unlink()
     if warm_src is not None:      # soft は適応段で代替済み → mid へ
         return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps)
     soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {soft_cfl}, cfl_pseudo: {soft_cfl}", cfg_main)
@@ -764,6 +843,7 @@ def main(argv=None):
     rc = run_staged(a.run_dir, a.stages,
                     soft_steps=int(o.get("soft_steps", 3000)), soft_cfl=float(o.get("soft_cfl", 0.5)),
                     warm_lam_steps=int(o.get("warm_lam_steps", 0)), warm_lam_cfl=float(o.get("warm_lam_cfl", 0.2)),
+                    warm_lam_ramp=o.get("warm_lam_ramp"),
                     mid_steps=int(o.get("mid_steps", 0)),
                     warm_adapt_steps=int(o.get("warm_adapt_steps", 500)))
     out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))
