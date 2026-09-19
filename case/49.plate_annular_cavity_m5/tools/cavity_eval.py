@@ -584,7 +584,9 @@ def main():
                          d.get("dTref_mean", float("nan"))))
         y1 = next((d["y1"] for d in wh.values() if "y1" in d), None)
         if y1 is not None:
-            print("    --- 壁解像 (**第一内部ノード基準**。ソルバ出力の y+ は dcc 基準で node では退化) ---")
+            print("    --- 壁解像 (**参考値**。正式判定は "
+                  "`solver_density_cuda/tools/check_wall_resolution.py <run>` を使うこと: "
+                  "ここの u_τ はソルバ出力で node 経路では高せん断域が stale、y1 も全域共通) ---")
             print("    第一層厚 y1 = %.4g m" % y1)
             for g, d in wh.items():
                 if "y1plus_mean" in d:

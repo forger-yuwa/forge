@@ -20,7 +20,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "solver_density_cuda" / "tools"))
-from check_quasisteady import classify, SEV      # noqa: E402  判定ロジックは正本を借りる
+# **`classify` を直呼びしない**。非有限を黙って落とすため、[1,1,1,1,1,NaN] が STEADY になる。
+# 正本の `classify_series` (非有限を NONFINITE にする) を使う (2026-09-19 codex Major 4)。
+from check_quasisteady import classify_series as classify, SEV      # noqa: E402
 
 # **必須列**: 1 つでも欠けていたら / 非有限が混じっていたら FAIL にする
 # (2026-09-19 codex Major: 旧実装は欠けた列を無言で飛ばし、NaN を除去する classify を呼ぶため
