@@ -211,6 +211,17 @@ __global__ void limiter_r1_d
 // 旧実装の関数ポインタ経由の呼び出しは device 上で間接 CALL になり (インライン化不可・レジスタ退避)、
 // 2 パス × 5 変数 × 近傍面のループで 1 セルあたり数十回の CALL が入って 3D 2.37 M 節点で 9.5 ms/step を
 // 食っていた (plans/active/performance-3d-node-sst-speedup.md §4.1)。数式・演算順序は同一 (ビット同一)。
+// --- 有界性診断 (plan convection-node-wall-reconstruction §4.20) ---
+// **後処理で測れない**ので流束が使う値をカーネル内で直接数える。
+// 後処理は res_*.h5 から再構成を組み直すが、保存量は更新後・勾配は更新前で 1 step ずれており、
+// さらに境界条件が壁速度・壁温由来の P を書き換えるため、ro 以外は流束時の状態を再現できない
+// (実測: Uy の逸脱 1.3 万〜1.9 万が全構成で出て、厳密有界のはずの Barth でも消えない = 判定不能だった)。
+// ここでは psi 確定後に**流束と同じ増分**で再構成値を作り、そのノードの近傍 min/max を外れた
+// face-side を変数ごとに数える。既定 off (g_limDiag=0) で atomicAdd は一切走らない。
+__device__ int g_limDiag = 0;
+__device__ unsigned long long g_limG1[5] = {0,0,0,0,0};   // ro, Ux, Uy, Uz, P
+__device__ unsigned long long g_limSides = 0;             // 数えた face-side 総数 (分母)
+
 template<int SCHEME>
 __global__ void limiter_r1_fused5_d
 (
@@ -342,6 +353,34 @@ __global__ void limiter_r1_fused5_d
 
     #pragma unroll
     for (int k=0;k<5;k++) Lim[k][ic0] = min(max(ltmp[k], (flow_float)0.0), (flow_float)1.0);
+
+    // pass3 (診断・既定 off): psi 確定後に流束と同じ再構成を作り、近傍 min/max を外れた面側を数える。
+    if (g_limDiag != 0) {
+        flow_float psi[5];
+        #pragma unroll
+        for (int k=0;k<5;k++) psi[k] = min(max(ltmp[k], (flow_float)0.0), (flow_float)1.0);
+        for (geom_int ilp=index_st; ilp<index_en; ilp++) {
+            geom_int ip = cell_planes[ilp];
+            if (ip >= nNormalPlanes) continue;
+            const geom_int ic1 = plane_cells[2*ip+0] + plane_cells[2*ip+1] - ic0;
+            flow_float dx, dy, dz;
+            if (matchRecon != 0 && edgeMid != 0) {
+                dx = (flow_float)0.5*(ccx[ic1]-cx0); dy = (flow_float)0.5*(ccy[ic1]-cy0); dz = (flow_float)0.5*(ccz[ic1]-cz0);
+            } else {
+                dx = pcx[ip]-cx0; dy = pcy[ip]-cy0; dz = pcz[ip]-cz0;
+            }
+            atomicAdd(&g_limSides, 1ULL);
+            #pragma unroll
+            for (int k=0;k<5;k++) {
+                const flow_float d = recon_increment(convM, qc[k], Q[k][ic1], gx[k], gy[k], gz[k], dx, dy, dz);
+                const flow_float qf = qc[k] + psi[k]*d;
+                // 丸め許容は「近傍レンジ」と「値の大きさ」の大きい方 (自由流でレンジ 0・0 を跨ぐ速度の両方に耐える)
+                const flow_float mag = max(fabsf(qmax[k]), fabsf(qmin[k]));
+                const flow_float sc  = max(qmax[k]-qmin[k], mag) * (flow_float)1.0e-5;
+                if (qf > qmax[k] + sc || qf < qmin[k] - sc) atomicAdd(&g_limG1[k], 1ULL);
+            }
+        }
+    }
 }
 
 
@@ -361,6 +400,12 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         gpuErrchk( cudaPeekAtLastError() );
         gpuErrchkKernelSync();
         return;
+    }
+
+    // 有界性診断 (§4.20)。既定 off。on のとき一定間隔でカウンタを 1 行印字してリセットする。
+    {
+        const int diag = cfg.limiterDiag;
+        CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limDiag, &diag, sizeof(int)));
     }
 
     // ro,Ux,Uy,Uz,P を 1 カーネルに融合 (connectivity/geometry の 5 重読みを除去)。数式は per-variable と同一。
@@ -401,6 +446,23 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
     else
         limiter_r1_fused5_d<2><<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (FORGE_LIMITER_FUSED5_ARGS);
     #undef FORGE_LIMITER_FUSED5_ARGS
+
+    if (cfg.limiterDiag == 1) {
+        static int s_lim_call = 0;
+        const int interval = 200;
+        if ((s_lim_call % interval) == 0) {
+            gpuErrchkKernelSync();
+            unsigned long long g1[5] = {0,0,0,0,0}, sides = 0;
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(g1,    g_limG1,    5*sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&sides, g_limSides, sizeof(unsigned long long)));
+            printf("LIMG1 call=%d sides=%llu out[ro=%llu Ux=%llu Uy=%llu Uz=%llu P=%llu]\n",
+                   s_lim_call, sides, g1[0], g1[1], g1[2], g1[3], g1[4]);
+            const unsigned long long z5[5] = {0,0,0,0,0}, z = 0ULL;
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limG1,    z5, 5*sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limSides, &z, sizeof(unsigned long long)));
+        }
+        s_lim_call++;
+    }
 
     // 多成分 face 整合再構成: 各化学種 Y_s に Venkat リミタ ψ_Y を計算 (∇Y は speciesGradient 済)。
     // speciesFaceReconstruction==1 のみ。flux では min(ψ_ρ, ψ_Y) を Y 再構成に使う (boundedness)。

@@ -507,6 +507,7 @@ void solverConfig::read(std::string fname)
             throw std::runtime_error("Key 'venkatK' in 'space' must be > 0.");
         }
         this->limiterRefLength = getOptionalValidatedValue<double>(space, "limiterRefLength", 0.0, "space");
+        this->limiterDiag = getOptionalValidatedValue<int>(space, "limiterDiag", 0, "space");
         if (this->limiterScaled == 1 && this->discretization != "node") {
             std::cout << "[config] limiterScaled: 1 は discretization 'node' 専用のため無効化した" << std::endl;
             this->limiterScaled = 0;

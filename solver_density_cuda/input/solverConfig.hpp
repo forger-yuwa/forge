@@ -251,7 +251,9 @@ public:
     double limiterRefLength = 0.0;    // 無次元化の基準長 [m]。0 = メッシュ境界箱の対角から自動
     // 以下は起動時に場から決める (config では書かない)
     double limiterRoRef = 0.0, limiterPRef = 0.0, limiterARef = 0.0;
-    int limiterLengthFromArea = 0;    // 1 = h_i に sqrt(A_planar) を使う (2D / 軸対称)
+    int limiterLengthFromArea = 0;
+    // 有界性診断 (§4.20): psi 確定後にカーネル内で「近傍 min/max を外れた面側」を数える。既定 0 = off
+    int limiterDiag = 0;    // 1 = h_i に sqrt(A_planar) を使う (2D / 軸対称)
 
     // free-stream 保存: 対流流束の圧力項を (p_tilde - pRef)*s で組み、非直交メッシュで
     // 大きな p*s を float32 加算する際の桁落ち(metric closure 由来の偽運動量源)を抑える。
