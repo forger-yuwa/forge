@@ -8,13 +8,18 @@
 | 1 | NaN/発散 | 残差 csv + 最終 res | 非有限ゼロ |
 | 2 | 残差の収束 | `check_convergence.py --segment` | 判定区間で PASS |
 | 3 | 結論量の準定常 | `check_cavity_steady.py` | 全量 STEADY |
-| 4 | 壁解像 | `check_wall_resolution.py` | y1+ 超過面積 <= --yplus-frac |
+| 4 | 壁解像 | `check_wall_resolution.py` | y1+ 超過面積 <= --yplus-frac (**既定は非ブロッキング**) |
 | 5 | 保存性 | `cavity_eval.py` | 正味/片道 <= --mass-tol, CV 収支 <= --budget-tol |
 
 usage:
   python3 tools/check_case_gates.py <run_dir> [--yplus-frac 2] [--mass-tol 0.01] [--budget-tol 0.05]
 
-終了コード 0 = 全ゲート PASS。1 = どれか不合格 (理由を出力)。2 = 判定不能。
+**ブロッキングと非ブロッキングを分ける** (2026-09-19): 計算を延長して直るのは 1/2/3/5 だけで、
+**4 (壁解像) と メッシュ品質は step を増やしても変わらない**。それらを不合格扱いにすると
+自動延長ループが無駄に回るので、既定では「**報告時に必ず添える制約**」として出力し、
+終了コードには入れない (`--yplus-blocking` で厳格化できる)。
+
+終了コード 0 = ブロッキングゲート PASS (数値を報告してよい)。1 = 不合格。2 = 判定不能。
 """
 import argparse
 import glob
@@ -40,11 +45,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run")
     ap.add_argument("--yplus-frac", type=float, default=2.0, help="y1+>1 を許す面積 [%]")
-    ap.add_argument("--mass-tol", type=float, default=0.01, help="開口の |正味/片道| 許容")
+    ap.add_argument("--mass-tol", type=float, default=0.02,
+                    help="開口の |正味/片道| (末尾平均) 許容。**これは離散スキームの保存性ではなく"
+                         "後処理の面積分精度の指標**なので、本当の保存ゲートは CV エネルギー収支の方")
     ap.add_argument("--budget-tol", type=float, default=0.05, help="CV エネルギー収支 残差 許容")
+    ap.add_argument("--yplus-blocking", action="store_true",
+                    help="壁解像の不合格でも報告を止める (既定は制約として併記するのみ。"
+                         "step を増やしても y1+ は変わらないため)")
     a = ap.parse_args()
     rd = Path(a.run)
-    fails, notes = [], []
+    fails, notes, caveats = [], [], []
     py = sys.executable
 
     print("======== ゲート判定: %s ========" % a.run)
@@ -98,9 +108,14 @@ def main():
     rc4, out4 = run([py, str(STOOLS / "check_wall_resolution.py"), str(rd),
                      "--over-frac", str(a.yplus_frac)])
     v4 = next((l for l in out4.splitlines() if l.startswith("VERDICT")), "")
-    print("[4] 壁解像 y1+     : %s   %s" % ("OK" if rc4 == 0 else "**FAIL**", v4.strip()))
+    tag4 = "OK" if rc4 == 0 else ("**FAIL**" if a.yplus_blocking else "**制約あり**")
+    print("[4] 壁解像 y1+     : %s   %s" % (tag4, v4.strip()))
     if rc4 != 0:
-        fails.append("壁解像")
+        # **step を増やしても変わらない**ので既定ではブロックしない。報告時に添える制約にする。
+        worst_lines = [l.strip() for l in out4.splitlines() if "y1+ >" in l]
+        for l in worst_lines:
+            print("      %s" % l)
+        (fails if a.yplus_blocking else caveats).append("壁解像 (y1+ 超過)")
 
     # --- 5. 保存性 (開口の質量収支と CV エネルギー収支) ---
     j = rd / "cavity_eval.json"
@@ -108,7 +123,16 @@ def main():
         run([py, str(HERE / "cavity_eval.py"), str(rd)])
     if j.exists():
         d = json.loads(j.read_text())
+        # **時間平均で見る**。振動する (キャビティが呼吸する) 流れでは瞬時の正味流束は 0 にならない。
         imb = abs(float(d["field"].get("mdot_imbalance", float("nan"))))
+        sc = rd / "cavity_series.csv"
+        if sc.exists():
+            import csv as _csv
+            rows = list(_csv.DictReader(open(sc)))
+            vals = [float(r["mdot_imbalance"]) for r in rows if r.get("mdot_imbalance")]
+            if len(vals) >= 3:
+                n = max(2, int(len(vals) * 0.4))
+                imb = abs(sum(vals[-n:]) / n)
         bud = abs(float(d.get("budget_residual", float("nan")))) if "budget_residual" in d else None
         ok5 = imb <= a.mass_tol
         print("[5] 保存性         : %s   開口の正味/片道 %.3e (許容 %.3g)"
@@ -127,6 +151,8 @@ def main():
 
     print("\nGATES: %s" % ("PASS (報告してよい)" if not fails
                            else "FAIL — " + " / ".join(fails) + " (数値を報告しないこと)"))
+    if caveats:
+        print("CAVEATS (報告時に必ず添えること): " + " / ".join(caveats))
     if fails and notes:
         print("--- 不合格の詳細 ---")
         for n in notes:

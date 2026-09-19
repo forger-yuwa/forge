@@ -170,6 +170,8 @@
     "flux_depth_frac": 0.02,
     "lip_band_m": 0.001,
     "_href_threshold": "h_ref = q''/dT_ref の分母が T0 の数値ノイズに埋もれる点を平均から外すための閾値。既定は **測って決める**: dT_min = href_noise_factor * ulp(h0)/cp (実測 1.24e-4 K)。href_dT_min_K を書くと手動固定になる (根拠のない大きな値は h_ref を下げ、図に階段状の境界を作る)。閾値に依存しない指標は h_eff = Q/∫dT dA",
-    "href_noise_factor": 10.0
+    "href_noise_factor": 10.0,
+    "_flux_depth_m": "開口流束の評価面 [m]。**絶対長さで指定する** (深さの割合だと形状変更で開口に近づきすぎる)",
+    "flux_depth_m": 0.001
   }
 }
