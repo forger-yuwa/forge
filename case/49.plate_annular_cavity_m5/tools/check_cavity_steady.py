@@ -37,6 +37,8 @@ LABEL = {"q_wall_sum": "3壁 総入熱 Q [W]", "q_outer": "外筒壁 Q [W]", "q_
 # ゼロ近傍の量が判定できないので、固定尺度でも見る。
 ABS_TOL = {"dT_mouth": ("K", 2.0), "dT_mid": ("K", 2.0), "dT_floor": ("K", 2.0),
            "zpen_25": ("m", 0.5e-3), "mdot_imbalance": ("-", 0.001)}
+# 壁ごとの入熱は **総入熱に対する割合**で許容する (絶対値が小さい壁ほど相対 drift は当てにならない)
+Q_REL_TOL = 0.005      # 3 壁合計の 0.5 %
 
 
 def main():
@@ -67,6 +69,13 @@ def main():
         steps = [float(r["step"]) for r in rows]
         print("  スナップショット %d 点 (step %d..%d),  tail=%.0f%%  drift<%.3g  osc<%.3g"
               % (len(steps), steps[0], steps[-1], 100 * a.tail, a.drift, a.osc))
+        qsum_scale = 0.0
+        if "q_wall_sum" in rows[0]:
+            qv = [float(r["q_wall_sum"]) for r in rows if r["q_wall_sum"] not in ("", None)]
+            qv = [x for x in qv if x == x]
+            if qv:
+                n0 = max(2, int(len(qv) * a.tail))
+                qsum_scale = abs(sum(qv[-n0:]) / n0)
         missing = [k for k in want if k not in rows[0]]
         if missing:
             print("  **必須列が無い**: %s  -> FAIL (系列の作り直しが要る)" % ", ".join(missing))
@@ -82,19 +91,34 @@ def main():
                 worst = max(worst, SEV["NONFINITE"])
                 continue
             verd, detail, ma = classify(steps, vals, a.tail, a.drift, a.osc, a.min_snaps)
-            worst = max(worst, SEV.get(verd, 4))
             tag = LABEL.get(k, k)
             ext = ""
             if ma and verd == "OSCILLATING":
                 ext = "   -> 平均 %.4g +/- %.3g で報告" % ma
-            if k in ABS_TOL and ma:
+            tol = None
+            if k in ABS_TOL:
                 unit, tol = ABS_TOL[k]
+            elif k in ("q_wall_sum", "q_outer", "q_cylside", "q_floor") and qsum_scale:
+                unit, tol = "W", Q_REL_TOL * qsum_scale
+            if tol is not None and ma:
                 n = max(2, int(len(vals) * a.tail))
                 swing = max(vals[-n:]) - min(vals[-n:])
+                within = swing <= tol
                 ext += "   [絶対 %s %.3g / 許容 %.3g %s]" % (
-                    "OK" if swing <= tol else "**超過**", swing, tol, unit)
-                if swing > tol:
+                    "OK" if within else "**超過**", swing, tol, unit)
+                if not within:
                     worst = max(worst, SEV["DRIFTING"])
+                elif verd in ("DRIFTING", "TRANSIENT-UNSETTLED"):
+                    # **ゼロ近傍の量を相対 drift で落とさない**。絶対許容は「工学的に意味のある
+                    # 変化量」なので、そこに収まっていれば相対がいくら大きくても定常扱いにする
+                    # (実例: 偏心時の底面 Q は 1.1e-4 W = 総入熱の 0.0004 % で相対 drift 14.6 %、
+                    #  絶対の振れは 2e-5 W で許容 0.13 W の 1/6000。2026-09-19)。
+                    verd = "STEADY"
+                    ext += "  ← 相対は大きいが**絶対許容内**なので定常扱い"
+                    worst = max(worst, SEV["STEADY"])
+                    print("  %-22s %-20s %s%s" % (tag, verd, detail, ext))
+                    continue
+            worst = max(worst, SEV.get(verd, 4))
             print("  %-22s %-20s %s%s" % (tag, verd, detail, ext))
     name = [k for k, v in SEV.items() if v == worst]
     print("\nVERDICT: %s" % ("STEADY (全量)" if worst == 0 else (name[0] if name else "?")))
