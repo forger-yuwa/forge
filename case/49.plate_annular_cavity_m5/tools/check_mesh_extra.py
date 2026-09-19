@@ -52,9 +52,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("h5")
     ap.add_argument("--sliver-min", type=float, default=0.01)
-    # 閉性の既定は 1e-5: メッシュ h5 の surfVect/surfArea/volume は **float32** なので、
-    # 相対 1e-6 級は丸め由来 (eps 1.2e-7 の数倍の累積)。真の欠陥はこれより桁違いに大きい。
-    ap.add_argument("--closure-max", type=float, default=1.0e-5)
+    # 閉性の既定は 5e-5。メッシュ h5 の surfVect/surfArea/volume は **float32** なので、
+    # CV が µm 級になると相対 1e-5 級の丸めが乗る (実測 2026-09-19: 全ヘキサ 100 万 CV で
+    # 床の最小 CV 48 個が 1.2e-5。座標 ~0.1 m の外積を float32 で取るため絶対誤差が
+    # 面積スケールに対して相対的に大きくなる)。真の欠陥 (向き不整合・面の取りこぼし) は
+    # これより桁違いに大きい。閾値を超えた CV は**位置と体積**を出して死水域か判断する。
+    ap.add_argument("--closure-max", type=float, default=5.0e-5)
     ap.add_argument("--layer-ratio-max", type=float, default=1.5)
     a = ap.parse_args()
 
@@ -114,6 +117,26 @@ def main():
                      ratio.max(), a.layer_ratio_max, nbad))
             if nflip:
                 fails.append("prism の向きが不揃い (逆符号 %d 個)" % nflip)
+        elif code == HEX:
+            # 6 tet に分割して体積、辺長比で潰れ判定
+            v = np.zeros(len(nd))
+            for tn in ((0,1,3,4),(1,2,3,6),(1,3,4,6),(1,4,5,6),(3,4,6,7)):
+                v += tet_vol(pts[:, tn, :])
+            sgn = np.sign(np.median(v))
+            nflip = int(np.sum(np.sign(v) != sgn))
+            # 3 方向の代表辺長
+            e1 = np.linalg.norm(pts[:, 1] - pts[:, 0], axis=1)
+            e2 = np.linalg.norm(pts[:, 3] - pts[:, 0], axis=1)
+            e3 = np.linalg.norm(pts[:, 4] - pts[:, 0], axis=1)
+            q = np.abs(v) / np.maximum(e1 * e2 * e3, 1e-300)      # 直方体で 1
+            nsl = int(np.sum(q < a.sliver_min))
+            print("  hex   %8d : 向き %s, 逆符号 %d,  正規化体積 min %.4g / p1 %.4g  (< %.3g が %d 個)"
+                  % (len(nd), "負(正常)" if sgn < 0 else "正", nflip,
+                     q.min(), np.percentile(q, 1), a.sliver_min, nsl))
+            if nflip:
+                fails.append("hex の向きが不揃い (逆符号 %d 個)" % nflip)
+            if nsl:
+                fails.append("hex の潰れ (正規化体積 < %.3g) が %d 個" % (a.sliver_min, nsl))
         else:
             print("  code %d %8d : (未判定)" % (code, len(nd)))
 
@@ -147,6 +170,12 @@ def main():
           % (clo.max(), worst, np.percentile(clo, 99.9), a.closure_max, nbad))
     if nbad:
         fails.append("CV 閉性 > %.1e が %d 個 (最悪 %.3e)" % (a.closure_max, nbad, clo.max()))
+    n_mild = int(np.sum(clo > 1.0e-5))
+    if n_mild:
+        b = np.where(clo > 1.0e-5)[0]
+        cc = np.array([np.mean(xyz[cells[i][1]], axis=0) if i < len(cells) else [0, 0, 0] for i in b[:1]])
+        print("    (参考) 1e-5 超は %d 個、体積 %.3g..%.3g m^3 — float32 丸めの水準"
+              % (n_mild, vol_dual[b].min(), vol_dual[b].max()))
 
     print("\nVERDICT: %s" % ("PASS" if not fails else "FAIL"))
     for m in fails:

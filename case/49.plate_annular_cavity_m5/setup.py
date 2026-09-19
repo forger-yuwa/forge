@@ -225,6 +225,8 @@ def mesh_manifest(M, geo):
                 bumped[k] = (out[k + "_m"], lim)
                 out[k + "_m"] = lim
     out["size_bumped_by_vl"] = {k: [a * 1e3, b * 1e3] for k, (a, b) in bumped.items()}
+    if "hex" in M:                       # 全ヘキサ版 (cad/build_hex_mesh.py) の分割数
+        out["hex"] = {k: v for k, v in M["hex"].items() if not k.startswith("_")}
     # 継ぎ目の段差: 最終プリズム層厚 / 隣接する tet の代表サイズ。1 に近いほど滑らか。
     wall_min = min(out["size_cav_m"], out["size_plate_in_m"], out["size_floor_m"], out["size_cyl_top_m"])
     out["junction_ratio"] = out["vl_last_m"] / wall_min

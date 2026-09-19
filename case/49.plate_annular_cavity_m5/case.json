@@ -120,7 +120,27 @@
     "_growth_rate": "NETGEN の体積成長率 (既定 0.3)。小さいほど層->tet の継ぎ目が滑らか",
     "growth_rate": 0.15,
     "_guard_edge_by_vl": "開口リップのエッジサイズに VL 総厚の下限を課すか (false は実験用)",
-    "guard_edge_by_vl": true
+    "guard_edge_by_vl": true,
+    "_hex": "全ヘキサ版 (cad/build_hex_mesh.py) の分割数。tet/prism 版とは別系統",
+    "hex": {
+      "n_theta_per_45": 30,
+      "n_gap_half": 12,
+      "gap_first_um": 20.0,
+      "n_depth": 100,
+      "n_up": 55,
+      "up_first_um": 20.0,
+      "Rs_mm": 45.0,
+      "n_ogrid": 20,
+      "ogrid_first_mm": 0.3,
+      "n_disc": 14,
+      "disc_first_mm": 0.3,
+      "n_left": 22,
+      "n_right": 38,
+      "n_top": 14,
+      "_note": "第一セル: すきま壁/平板 20 um (y+ ~0.25), 開口側 20 um, 床側 80 um (床は死水域。詰めすぎると float32 で CV 閉性が悪化)",
+      "mouth_first_um": 20.0,
+      "floor_first_um": 80.0
+    }
   },
   "eval": {
     "_n_theta": "周方向平均の分点数 (半割 0..180deg)",
