@@ -88,6 +88,8 @@ def main():
     ap.add_argument("--manifest", default=os.environ.get("CASE49_MANIFEST", "manifest.json"))
     ap.add_argument("--show-sizes", action="store_true")
     ap.add_argument("--no-mesh", action="store_true", help="形状だけ作って終わる (確認用)")
+    ap.add_argument("--scale", type=float, default=1.0,
+                    help="全方向の分割数を一律に掛ける (系統的な格子細分列を作る。第一セルは 1/scale)")
     a = ap.parse_args()
 
     MAN = json.loads((CASE / a.manifest).read_text())
@@ -99,7 +101,19 @@ def main():
 
     Ro, Ri, off, dep = G["Ro"], G["Ri"], G["x_off"], G["depth"]
     x0, x1, ym, zt = G["x_in"], G["x_out"], G["y_max"], G["z_top"]
-    H = M.get("hex", {})
+    H = dict(M.get("hex", {}))
+    # --- 系統細分: **全方向の分割数を一律 scale 倍、第一セルを 1/scale 倍** ---
+    # これができるのがヘキサ (構造化) の利点。tet+prism では VL 総厚と接線サイズが
+    # 結合していて独立に振れず、A〜D の 4 格子が系統列にならなかった (2026-09-19)。
+    if abs(a.scale - 1.0) > 1e-9:
+        for k in ("n_theta_per_45", "n_gap_half", "n_depth", "n_up", "n_ogrid",
+                  "n_disc", "n_left", "n_right", "n_top"):
+            H[k] = max(2, int(round(H.get(k, 10) * a.scale)))
+        for k in ("gap_first_um", "up_first_um", "mouth_first_um", "floor_first_um",
+                  "ogrid_first_mm", "disc_first_mm"):
+            if k in H:
+                H[k] = H[k] / a.scale
+        print("scale %.3f -> %s" % (a.scale, {k: H[k] for k in sorted(H) if not k.startswith("_")}))
     n_az4 = int(H.get("n_theta_per_45", 30))          # 45° あたりの周方向セル数
     n_gap_half = int(H.get("n_gap_half", 12))         # すきま半分の半径方向セル数
     gap_first = H.get("gap_first_um", 10.0) * 1e-6
