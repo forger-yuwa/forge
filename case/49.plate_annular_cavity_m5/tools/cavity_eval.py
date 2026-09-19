@@ -365,7 +365,7 @@ def main():
     ap.add_argument("--flux-depth", type=float, default=None,
                     help="開口流束の評価深さ [mm] (既定は manifest の flux_depth_frac)")
     a = ap.parse_args()
-    man = gc.load_manifest()
+    man = gc.load_manifest(run=a.run)      # run が自分の manifest を持っていればそれを使う
     if a.flux_depth is not None:
         man["eval"]["flux_depth_frac"] = a.flux_depth * 1e-3 / man["geometry"]["depth"]
     D = load_conditions()
@@ -386,6 +386,16 @@ def main():
             for nm, g in (("q_outer", "cav_outer"), ("q_cylside", "cyl_side"), ("q_floor", "cav_floor")):
                 q[nm] = wq[g]["Q_W"] if g in wq else float("nan")
             q["q_wall_sum"] = q["q_outer"] + q["q_cylside"] + q["q_floor"]
+            # **時系列でも h_ref を出す** (これが無いと準定常判定でスナップショット 0 点になり、
+            # ユーザに報告する主量の定常性が確認できないまま通ってしまう。2026-09-19 修正)
+            try:
+                sys.path.insert(0, str(Path(__file__).resolve().parents[3]
+                                       / "solver_density_cuda" / "tools"))
+                from total_quantities import total_state
+                T0s = np.asarray(total_state(a.run, str(res))["T0"], float)
+                wall_href(wq, man, D, c, v, T0s)
+            except Exception as e:                       # noqa: BLE001
+                print("  step %6d  総温 T0 を作れない (%s) -> h_ref なし" % (st, e), flush=True)
             # 3 壁をまとめた h_ref (面積重み)。**判定量は run 間で同じ定義**にする
             aw = [(wq[g].get("area_m2", float("nan")), wq[g].get("h_ref", float("nan")))
                   for g in ("cav_outer", "cyl_side", "cav_floor") if g in wq]

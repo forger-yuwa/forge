@@ -18,10 +18,22 @@ from pathlib import Path
 import numpy as np
 
 
-def load_manifest(path=None):
+def load_manifest(path=None, run=None):
+    """manifest を読む。優先順は  明示 path > run/manifest.json > CASE49_MANIFEST > manifest.json。
+
+    **run ディレクトリに manifest.json があればそれを最優先**にする。偏心スイープのように
+    幾何が run ごとに違う場合、共有の `manifest.json` を読むと**別の偏心の CV マスク**で
+    評価してしまう (2026-09-19 に実際に起きた: すきま中央 ΔT 11.75 K が 10.53 K、
+    侵入深さ 46.0 mm が 4.5 mm になった)。run 自身が持つ幾何を使えばこれが起きない。
+    """
     import os
-    p = (Path(path) if path else
-         Path(__file__).resolve().parent.parent / os.environ.get("CASE49_MANIFEST", "manifest.json"))
+    if path:
+        p = Path(path)
+    elif run is not None and (Path(run) / "manifest.json").exists():
+        p = Path(run) / "manifest.json"
+    else:
+        p = (Path(__file__).resolve().parent.parent
+             / os.environ.get("CASE49_MANIFEST", "manifest.json"))
     if not p.exists():
         raise SystemExit("manifest が無い: %s  (`python3 setup.py --resolve` を先に実行)" % p)
     return json.loads(p.read_text())

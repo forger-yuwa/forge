@@ -7,7 +7,7 @@ usage:
   python3 sweep_offset.py --offsets 0.5 --mesher salome      # 旧 tet+prism 経路 (ローカル専用)
 
 各点で (既定 = ヘキサ経路):
-  case.json の geometry.x_off を書き換え -> setup.py --resolve -> manifest.json
+  case_<tag>.json (x_off だけ差し替えた複製) -> setup.py --resolve -> manifest_<tag>.json
     -> cad/build_hex_mesh.py --scale S   -> cad/hex_off<NNN>.msh   (gmsh API のみ)
     -> gen_runs.py convert               -> mesh/off<NNN>.h5       (品質 VERDICT を残す)
     -> tools/check_mesh_extra.py         -> 追加ゲート
@@ -20,6 +20,13 @@ Ro-Ri-|x_off| 〜 Ro-Ri+|x_off| になる。ヘキサ経路は外筒軸からの
 (tet 経路は VL 層数を最小すきまから引き直すため、偏心ごとに格子族が変わってしまう)。
 
 **ヘキサ経路は FreeCAD も SALOME も要らない** → AWS 上で完結できる (`pip install gmsh`)。
+
+**共有の `case.json` / `manifest.json` は書き換えない** (2026-09-19)。以前は偏心ごとに
+共有 `case.json` を上書きして `setup.py --resolve` していたため、**スイープ中に別の
+後処理を走らせると偏心した CV マスクで評価してしまう**事故が起きた (run_0103 の
+すきま中央 ΔT が 11.75 K → 10.53 K、侵入深さ 46.0 mm → 4.5 mm と別物になった)。
+いまは偏心ごとに `case_<tag>.json` / `manifest_<tag>.json` を作り、子プロセスには
+`CASE49_MANIFEST` で渡す。run ディレクトリにも使った manifest を複製して残す。
 """
 import argparse
 import json
@@ -59,11 +66,11 @@ def grep(out, *keys):
     return [l.strip() for l in out.splitlines() if any(k in l for k in keys)]
 
 
-def build_hex(tag, scale, log):
+def build_hex(tag, scale, log, env=None):
     """gmsh API で全ヘキサ・メッシュを作る。戻り値 = .msh のパス (失敗なら None)。"""
     msh = HERE / "cad" / ("hex_%s.msh" % tag)
     r = sh([venv_python(), "build_hex_mesh.py", "--out", str(msh), "--scale", str(scale)],
-           cwd=HERE / "cad", log=log)
+           cwd=HERE / "cad", env=env, log=log)
     nl = grep(r.stdout, "節点")
     print("  ", nl[-1] if nl else "メッシュ失敗 (log: %s)" % log)
     if not msh.exists():
@@ -120,16 +127,19 @@ def main():
             cfg["geometry"]["x_off"] = off
             if a.stage:
                 cfg["mesh"]["stage"] = a.stage
-            (HERE / "case.json").write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
-            r = sh([sys.executable, "setup.py", "--resolve"], cwd=HERE)
+            casef, manf = "case_%s.json" % tag, "manifest_%s.json" % tag
+            (HERE / casef).write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+            r = sh([sys.executable, "setup.py", "--resolve", "--case", casef, "--out", manf],
+                   cwd=HERE)
             print("  ", grep(r.stdout, "gap", "VL "))
+            env = {"CASE49_MANIFEST": manf}      # 子プロセスは全部これを読む
             if a.dry:
                 continue
 
             mesh_h5 = HERE / "mesh" / ("%s.h5" % tag)
             if not (a.skip_mesh and mesh_h5.exists()):
                 if a.mesher == "hex":
-                    msh = build_hex(tag, a.scale, HERE / "cad" / ("_hex_%s.log" % tag))
+                    msh = build_hex(tag, a.scale, HERE / "cad" / ("_hex_%s.log" % tag), env)
                 else:
                     msh = build_salome(tag, HERE / "cad")
                 if msh is None:
@@ -137,9 +147,10 @@ def main():
                     continue
                 r = sh([sys.executable, "gen_runs.py", "convert", "--msh",
                         str(msh.relative_to(HERE)), "--out", "mesh/%s.h5" % tag], cwd=HERE,
-                       log=HERE / ("_conv_%s.log" % tag))
+                       env=env, log=HERE / ("_conv_%s.log" % tag))
                 print("  ", grep(r.stdout, "VERDICT"))
-                r = sh([sys.executable, "tools/check_mesh_extra.py", "mesh/%s.h5" % tag], cwd=HERE)
+                r = sh([sys.executable, "tools/check_mesh_extra.py", "mesh/%s.h5" % tag], cwd=HERE,
+                       env=env)
                 print("  ", grep(r.stdout, "VERDICT"))
 
             rd = HERE / ("%s%02d_%s" % (a.run_prefix, i, tag))
@@ -149,17 +160,19 @@ def main():
                 r = sh([sys.executable, "gen_runs.py", "run", "--run", rd.name,
                         "--mesh", "mesh/%s.h5" % tag, "--inlet-csv", "mesh/inlet_profile.csv",
                         "--gas", a.gas, "--main-steps", str(a.main_steps), "--cfl", str(a.cfl)],
-                       cwd=HERE, log=HERE / ("_sweep_%s.log" % tag))
+                       cwd=HERE, env=env, log=HERE / ("_sweep_%s.log" % tag))
                 print("  run:", grep(r.stdout, "  [", "main rc")[-3:])
-            r = sh([sys.executable, "tools/cavity_eval.py", rd.name], cwd=HERE)
+            # **使った manifest を run に残す** (後から再評価しても幾何を取り違えない)
+            if rd.exists():
+                shutil.copy(HERE / manf, rd / "manifest.json")
+            r = sh([sys.executable, "tools/cavity_eval.py", rd.name], cwd=HERE, env=env)
             keep = grep(r.stdout, "合計 Q", "dT_mouth", "dT_mid", "dT_floor", "dT_up", "dT_dn",
                         "zpen(25", "imbalance", "CV 収支")
             for l in keep:
                 print("   ", l)
             summary.append((off, tag, rd.name, keep))
     finally:
-        (HERE / "case.json").write_text(json.dumps(base, indent=2, ensure_ascii=False))
-        print("\ncase.json を元に戻しました")
+        pass       # 共有の case.json / manifest.json はそもそも触らない
 
     if summary:
         print("\n================ 偏心スイープ まとめ ================")

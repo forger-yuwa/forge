@@ -150,7 +150,7 @@ def main():
     ap.add_argument("--decay", type=float, default=0.2,
                     help="残った旋回 / 初期擾乱 の許容 (既定 0.2 = 8 割減衰していれば PASS)")
     a = ap.parse_args()
-    man = gc.load_manifest()
+    man = gc.load_manifest(run=a.runs[0])
     if man["geometry"].get("half_model", True):
         print("注意: manifest が半割 (half_model: true)。全周 run には CASE49_MANIFEST=manifest_full.json")
     worst, grow, floor_lo, floor_hi = 0.0, False, float("inf"), 0.0

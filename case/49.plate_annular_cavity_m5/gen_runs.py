@@ -335,6 +335,9 @@ def cmd_run(a):
         shutil.copy(sdb, rd / "species_db.yaml")
     print("  gas =", gas)
     (rd / "GEN_ARGS").write_text(" ".join(sys.argv[1:]) + "\n")
+    # **使った manifest を run に残す** (run を自己記述にする)。偏心スイープのように幾何が
+    # run ごとに違うとき、後から共有 manifest.json で評価すると別の CV マスクになる。
+    shutil.copy(HERE / os.environ.get("CASE49_MANIFEST", "manifest.json"), rd / "manifest.json")
     (rd / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
     if a.ic_from:
         src = sorted((HERE / a.ic_from).glob("res_[0-9]*.h5"),

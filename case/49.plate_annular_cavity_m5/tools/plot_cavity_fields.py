@@ -114,7 +114,7 @@ def main():
                     help="場の線形補間に使うノード数の上限 (3D Delaunay が重いので間引く)")
     ap.add_argument("--step", type=int, default=None)
     a = ap.parse_args()
-    man = gc.load_manifest()
+    man = gc.load_manifest(run=a.run)
     D = load_conditions()
     G = man["geometry"]
     Tw, Ro, Ri, off, dep = D["wall_T"], G["Ro"], G["Ri"], G["x_off"], G["depth"]

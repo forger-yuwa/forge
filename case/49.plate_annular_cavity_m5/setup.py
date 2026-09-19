@@ -262,17 +262,25 @@ def main():
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--resolve", action="store_true", help="manifest.json を書く")
     ap.add_argument("--config", default=None)
+    ap.add_argument("--case", default=None,
+                    help="読む case json (既定 case.json)。--config の別名だが意図が明確")
+    ap.add_argument("--out", default="manifest.json",
+                    help="書き出す manifest のファイル名。**スイープは共有の manifest.json を"
+                         "上書きしないこと** (同時に走る後処理が別の幾何で評価してしまう)")
     a = ap.parse_args()
     if a.resolve:
-        man = resolve(a.config)
-        (HERE / "manifest.json").write_text(json.dumps(man, indent=2, ensure_ascii=False))
+        man = resolve(a.case or a.config)
+        outp = HERE / a.out
+        man["_provenance"] = {"source": a.case or a.config or "case.json",
+                              "tool": "setup.py --resolve", "out": a.out}
+        outp.write_text(json.dumps(man, indent=2, ensure_ascii=False))
         g, me = man["geometry"], man["mesh"]
         print("gap nom/min/max [mm]: %.3f / %.3f / %.3f" % (g["gap_nom"] * 1e3, g["gap_min"] * 1e3, g["gap_max"] * 1e3))
         print("VL stage %s: first %.1f um x %.3f x %d layers -> total %.4f mm (<= %.4f), last %.4f mm"
               % (me["stage"], me["vl_first_m"] * 1e6, me["vl_stretch"], me["vl_nlayers"],
                  me["vl_total_m"] * 1e3, me["vl_total_max_m"] * 1e3, me["vl_last_m"] * 1e3))
         print("groups:", ", ".join("%s %.1f mm2" % (k, v) for k, v in sorted(g["group_area_mm2"].items())))
-        print("wrote", HERE / "manifest.json")
+        print("wrote", outp)
         return
     d = load(a.config)
     (HERE / "derived.json").write_text(json.dumps(d, indent=2, ensure_ascii=False))
