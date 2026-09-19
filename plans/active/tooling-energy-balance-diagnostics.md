@@ -1,85 +1,183 @@
-# エネルギー収支診断の出力 (拘束前残差と境界数値流束)
+# エネルギー収支診断 (定常 node の同一状態における離散収支)
 
 ## メタ
 
 - **area**: `tooling / architecture (output)`
 - **status**: `draft`
 - **related_docs**:
-  - [`methods/architecture/overview.md`](../../methods/architecture/overview.md) — 出力登録と時間積分の現在仕様
+  - [`methods/architecture/overview.md`](../../methods/architecture/overview.md) — 残差組立てと時間積分の現在仕様
   - [`procedures/solver-settings.md`](../../procedures/solver-settings.md) — `output.level` / `extraFields`
 - **related_plans**:
-  - [`case-hypersonic-gap-heating-validation.md`](case-hypersonic-gap-heating-validation.md) — **発注元**。すきま壁の熱量を離散収支で裏取りしたいが、現状は取得経路が無い (あちらの §4.8)
+  - [`case-hypersonic-gap-heating-validation.md`](case-hypersonic-gap-heating-validation.md) — **発注元** (§4.8)。すきま壁の熱量を離散スキームの言葉で検算したい
+  - [`../accepted/output-level-and-h0.md`](../accepted/output-level-and-h0.md)、[`../accepted/output-node-wall-surface-viz.md`](../accepted/output-node-wall-surface-viz.md) — **再利用する基盤** (重複ではない)
 - **created**: `2026-09-19`
 - **owner**: `sano`
 
 ## 1. 目的
 
-壁熱量や領域熱収支を**離散スキームの言葉で**検算できるようにする。現状、
-[`nodeWallDirichlet_d.cu`](../../solver_density_cuda/cuda_forge/nodeWallDirichlet_d.cu) が等温壁ノードの
-エネルギー残差をゼロ化し、拘束前の `res_roe` とエネルギー数値流束は
-[`variables.hpp`](../../solver_density_cuda/variables.hpp) に未登録なので
-([`output.cpp`:55](../../solver_density_cuda/output/output.cpp) の仕様上 `extraFields` でも出ない)、
-**場から積分した物理収支しか取れない**。これは SLAU の数値散逸・再構成・node の拘束操作を含まないので、
-「壁熱量が離散的にも閉じているか」を答えられない。
+**壁面の局所伝導寄与は既に取得できる** ([`viscousFlux_d.cu`:560](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) が
+残差へ入れた寄与を `qwall = heatflux/sss` として保存し、[`output.cpp`:355](../../solver_density_cuda/output/output.cpp) が境界変数を出す)。
+足りないのは、**(a) 壁 Dirichlet 拘束による熱授受 (拘束反力) と、(b) 領域境界を横切る全数値流束を、
+同一状態で対応づけること**である。この 2 つが無いと「壁熱量が離散的に閉じているか」に答えられない
+(場から積分した物理収支は SLAU の数値散逸・再構成・拘束操作を含まない)。
+
+> 注意: フィールドが存在することと、その run で診断できることは別。旧 `case/24` の `run_isoT_condN_node` の
+> 最終壁出力は上下とも `qwall` 全 17 点がゼロだった。
 
 ## 2. スコープ
 
-- **やる**: (a) 拘束前 `res_roe` の出力、(b) CV 境界を横切るエネルギー数値流束の出力、
-  (c) 符号・単位・対象 CV の定義、(d) 解除試験 (1D 熱伝導で機械精度で閉じること)
-- **やらない**: 収支に基づく自動判定ツール、他方程式 (運動量・化学種) への拡張、cell 離散化での同等機能
+- **やる (初版)**: **定常 node** の、**同一状態における離散収支**。
+  収支式と拘束反力の定義、採取位相の固定、`res_roe` への全加算経路の採取、CV/面の HDF5 スキーマ、
+  明示 opt-in、解除試験。
+- **やらない (初版で受理しない = 診断要求時に明示的に拒否する)**: 非定常/dual-time、RK 各ステージ、
+  `cell` 離散化、周期・軸対称 (§4.6 の単位・合算規約が閉じるまで)、任意幾何断面での CV 切り出し、
+  収支に基づく自動判定ツール、運動量・化学種方程式そのものの診断
+  (**ただしエネルギー式へ入る寄与は省略しない**、§4.3)。
 
-## 3. 関連 docs と前提
+## 3. 前提
 
 - 出力登録は `variables.hpp` の `output_cellValNames` に無いと `extraFields` でも出ない (警告のみ)。
-- node の壁は Dirichlet 拘束でエネルギー残差を潰すため、**拘束前**の値が要る。
+- `output.level>=2` は登録量を全出力し ([`output.cpp`:39](../../solver_density_cuda/output/output.cpp))、
+  登録された CV 配列は一律確保される ([`variables.cpp`:282](../../solver_density_cuda/variables.cpp))
+  → **静的登録は「要求していない run にもコストを課す」**。
+- 面配列は `var.p` / `nPlanes` 管理で、CV 配列 (`var.c` / `nCells`) とは別系統
+  ([`variables.cpp`:303](../../solver_density_cuda/variables.cpp))。
 
 ## 4. 設計方針
 
-- 診断は **opt-in** (既定 OFF、`output.extraFields` で拾う形) とし、既定の出力量・性能を変えない。
-- 対象 CV 群 (壁列、壁から 1 層内側、開口断面で囲まれた領域) を指定できるようにする。
-- 数値流束は**面単位**で集計し、CV 境界の向き (外向き正) と単位 [W] を明示する。
+### 4.1 収支式と拘束反力 (codex M1)
+
+面流束 $F$ を**外向き正**、体積ソース $S$ と拘束反力 $C$ を**流体への供給を正**とする。
+
+$$R_i^{raw} = -\sum_f F_{if} + S_i,\qquad D_t(V_iE_i) = -\sum_f F_{if} + S_i + C_i$$
+
+- [`nodeWallDirichlet_d.cu`:80](../../solver_density_cuda/cuda_forge/nodeWallDirichlet_d.cu) は
+  $roe=\rho(e(T_w,Y)+e_k)$ を上書きし、:90 で残差をゼロ化する。一方
+  [`timeIntegration_d.cu`:1023](../../solver_density_cuda/cuda_forge/timeIntegration_d.cu) は
+  **エネルギー補正をゼロにしても密度の更新は残す** → 壁温一定でも密度・組成変化で壁 CV の蓄積は動く。
+- 定常の拘束行では $C_i = -R_i^{raw}$。**拘束前残差はすでに壁面の伝導流束を含む**ので、
+  **実効壁熱量は「物理境界流束 + 拘束反力」から作る** (拘束前残差をそのまま壁熱量と呼ばない)。
+- **壁 CV を含む領域**と**第一内部列から始まる領域**では比較する熱量の定義が違う。両方を別名で定義する。
+- 状態上書き (温度ピン・no-slip) による $\Delta(VE)$ も記録する (過渡を扱うときに必要)。
+
+### 4.2 採取位相 (codex M2)
+
+- **残差組立ての最中に、同一状態のエネルギー・面流束・体積ソース・拘束前残差を 1 組で保存**する。
+  [`main.cpp`:1583](../../solver_density_cuda/main.cpp) で残差を組み、:1610–1615 で DPLUR 補正、
+  :1744 で更新後の場を出力するので、**素朴に退避配列を足すと「更新前の流束」と「更新後の `roe`」が
+  同じファイルに入る**。
+- 属性に `step` / 評価位相 / (将来) RK stage・dual-time subiteration / **空間残差か BDF 込みか**を書く。
+- **定常 DPLUR の反復差分を物理的なエネルギー変化率に換算しない**。
+- 出力時の再評価 (`assembleResidual` の再実行) は**しない** (状態ピンを含むため診断が計算を変える)。
+
+### 4.3 `res_roe` への全加算経路 (codex M3)
+
+**面流束と体積ソースを別々に**、かつ**各カーネルが実際に加算した値**を採取する (後処理で再計算しない)。
+
+| 経路 | 実装 |
+| --- | --- |
+| 対流 (SLAU) | [`convectiveFlux_slau_d.inc.cuh`:528](../../solver_density_cuda/cuda_forge/convection/convectiveFlux_slau_d.inc.cuh) |
+| 粘性・伝導・粘性仕事 | [`viscousFlux_d.cu`:320](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) |
+| 化学種拡散のエンタルピー輸送 $\sum h_s J_s$ | [`speciesTransport_d.cu`:271](../../solver_density_cuda/cuda_forge/speciesTransport_d.cu) |
+| $k$ 拡散 (`sstEnergyIncludesK`) | [`viscousFlux_d.cu`:285](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) |
+| SST のエネルギーソース | [`ransSource_d.cu`:230](../../solver_density_cuda/cuda_forge/ransSource_d.cu) |
+| 軸対称 (`axisymMethod: 1`) の幾何ソース | [`axisymmetricSource_d.cu`:232](../../solver_density_cuda/cuda_forge/axisymmetricSource_d.cu) |
+| 体積力の仕事 | [`bodyForce_d.cu`:43](../../solver_density_cuda/cuda_forge/bodyForce_d.cu) |
+
+- **収支対象が `roe` か `roe+roK` か**を属性に残す。
+- 初版で未対応の物理・スキームが有効なら、**診断要求を起動時に拒否**する (黙って一部だけ閉じない)。
+- 発注元は多成分 TP・SST を含むので、**純伝導だけ閉じても要求を満たさない**。
+
+### 4.4 データモデル (codex M4)
+
+- **CV 診断と面診断で HDF5 スキーマを分ける**。面配列は `var.p`/`nPlanes` 管理なので
+  `output_cellValNames` に足すだけでは出力できない。
+- 面側の最小項目: `face_id` / owner・neighbor / 境界種別・`physID` / 向き / **使用した面積ベクトル** / 流束。
+- **node の可視化用 primal 面と、残差を組む dual 面を混同しない**。
+- §5 は「登録」より先に**データモデルと採取位置の確定**を置く。影響範囲に流束カーネル・`main.cpp`・
+  変数確保/転送を含める。
+
+### 4.5 opt-in の契約 (codex M5)
+
+- **明示要求を初期化時に解決**し、有効時だけ登録・確保・採取・転送する。
+- **`output.level: 2` だけでは有効化しない** (level 2 は登録量を全出力するため、静的登録だと巻き込む)。
+- 確認: **ON/OFF で解が変わらないこと**、OFF で追加の確保・カーネル・同期が無いこと。
+
+### 4.6 CV 選択・周期・単位 (codex M6)
+
+- 対象領域は **「指定した solver CV の和集合」**と定義し、**所属が片側だけの dual 面**を領域境界にする。
+  任意幾何断面で CV を切る機能は初版から外す。
+- 周期: [`mesh.cpp`:699](../../solver_density_cuda/mesh/mesh.cpp) は合併前の部分体積を保存し、
+  :710–717 で合併体積を全 member に複写する。さらに [`main.cpp`:1423](../../solver_density_cuda/main.cpp) は
+  **壁拘束の後**に周期残差を合算・broadcast する → **出力 `volume` と各ノード値の単純積分は重複計上**。
+  → root 単位の一回集計 / 部分 CV 単位の集計のどちらかに統一し、**対応表を出力**する。初版は受理しない。
+- 単位: 平面 2D は単位スパン当たり `W/m`、3D は `W`、軸対称 method 0 は面積に半径を掛ける方式
+  ([`variables.cpp`:505](../../solver_density_cuda/variables.cpp)) なので単位角度当たり量と全周換算を区別する。
 
 ## 5. 実装ステップ
 
-1. `variables.hpp` への登録 (`res_roe_raw`, `eflux_face` 等) と `output.cpp` の経路確認。
-2. 拘束前 `res_roe` の退避 (node 拘束の直前)。
-3. 面エネルギー流束の集計と出力。
-4. 解除試験の追加。
+1. **収支式と拘束反力の確定** (§4.1) — 何を「実効壁熱量」と呼ぶかを先に決める。
+2. **採取位相の確定** (§4.2) — どの時点の状態を 1 組にするか。
+3. **全加算経路の棚卸しと対応機能の確定** (§4.3) — 未対応なら拒否する条件も。
+4. **データモデル (CV/面スキーマ) と opt-in 契約** (§4.4・§4.5) — ここまで決めてから登録・確保に触る。
+5. **実装** (流束カーネルでの採取 → 転送 → 出力)。
+6. **解除試験** (§6)。
 
 ### 5.1 残作業 (優先順)
 
 | # | 項目 | 内容 |
 | --- | --- | --- |
-| 1 | 要求の確定 | 発注元 ([case-hypersonic-gap-heating-validation](case-hypersonic-gap-heating-validation.md) §4.8) と対象 CV・量・単位をすり合わせる |
-| 2 | 出力登録 | `variables.hpp` / `output.cpp` の経路。既定挙動を変えない |
-| 3 | 拘束前残差の退避 | `nodeWallDirichlet` 直前の値 |
-| 4 | 面流束の集計 | 外向き正・[W]・面単位 |
-| 5 | 解除試験 | 1D 熱伝導で収支が機械精度で閉じる。これが通って初めて発注元の離散収支評価を開始できる |
-| 6 | codex レビュー | `plan` 段 (§4 が書けた時点)、`result` 段 |
+| 1 | 収支式と拘束反力 | §4.1。$R^{raw}$ / $C$ / 実効壁熱量、壁 CV 込み領域と第一内部列起点領域の別定義 |
+| 2 | 採取位相 | §4.2。同一状態で 1 組、属性に位相。DPLUR 反復差分を変化率にしない |
+| 3 | 全加算経路 | §4.3。面流束と体積ソースを別採取、`roe` か `roe+roK` か、未対応は起動時拒否 |
+| 4 | CV/面スキーマと opt-in | §4.4・§4.5。面は `var.p` 系。level 2 では有効化しない |
+| 5 | 解除試験 | §6。4 本立て + 丸め誤差限界の事前定義 |
+| 6 | 発注元との受け渡し | 発注元 ([case-hypersonic-gap-heating-validation](case-hypersonic-gap-heating-validation.md) §4.8) の離散収支評価は**本計画の解除試験が通ってから**開始 |
+| 7 | codex レビュー 2 巡目 | §4 書き直し後に再度 `--stage plan` |
 
-## 6. 検証
+## 6. 検証 (codex M7 で全面改訂)
 
-- **単体**: 1D 熱伝導 (解析解あり) で、CV 境界の数値流束和 = 内部エネルギー変化率 が機械精度で閉じる。
-- **回帰**: 診断 OFF で既存ケースの場・残差・速度が不変。
-- **判定基準**: 収支残差が保存量の丸め誤差程度 (double 相当) / float 経路では丸め見積り以内。
+**符号**: ソース・拘束が無ければ $D_t(V E) = -\sum_f F$ (**負の流束和**)。実装は対流が owner に負、
+粘性が owner に正を加えるので、採取時に符号規約へ揃える。
+
+- **(1) 組立て恒等式**: 同一状態で、独立に保存した残差と「面流束 + ソース」を比較。
+  **内部面の相殺・壁列・第一内部列・領域和**をそれぞれ検査する。
+- **(2) 壁の拘束収支**: 既知の純伝導問題で、**物理境界流束・拘束反力・実効壁熱量を別々に**検査する。
+  **全領域の正味ゼロだけでは上下壁を両方誤ってゼロにしても通る**。
+- **(3) 実用途**: SLAU の対流・再構成・粘性仕事を含む node ケースと、発注元の**低 Re SST / TP 経路**。
+  標準の `case/48` と整合させる。
+- **(4) 定量判定**: **float の加算数と $\sum|F|$ に基づく丸め誤差限界を事前定義**する
+  (残差は float の `atomicAdd` で組まれるので「double 相当」を要求しない)。解析解との差は
+  **別の離散化誤差**として判定する。定常解の主張には `check_convergence.py`、熱量系列には
+  `check_quasisteady.py` の VERDICT を貼る。
+- **既存 run を解除試験に流用しない**: `case/24.laminar_channel_bl/run_isoT_condN_node/` を再判定すると
+  **`NOT CONVERGED (stalled/plateau)`** (`rms_roe` 4.42e-4, `rms_roUy` 8.27e-7, ともに rising)。
+  新規 run はメッシュ品質・IC・段階起動・run 索引 (case README) の手順を踏む。
+- **回帰**: 診断 OFF で既存ケースの場・残差・速度が不変。**ON/OFF で解が変わらない**ことも確認。
 
 ### 6.1 レビュー記録 (codex)
 
-<!-- 実装着手前に `--stage plan` を回し、ここに 1 行 (段階/日付/記録パス/判定/対応) を入れる。 -->
+| 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
+| --- | --- | --- | --- | --- |
+| plan | `2026-09-19` | [`notes/reviews/2026-09-19-tooling-energy-balance-diagnostics-plan.md`](../../notes/reviews/2026-09-19-tooling-energy-balance-diagnostics-plan.md) | **NO-GO**, C0/M7/m1 | **全件採用**。M1→§4.1 (収支式・拘束反力・実効壁熱量の定義、密度更新は残る)、M2→§4.2 (採取位相を残差組立て中に固定、DPLUR 差分を変化率にしない)、M3→§4.3 (種拡散 $\sum h_sJ_s$・$k$ 拡散・SST/軸対称/体積力まで棚卸し、未対応は拒否)、M4→§4.4 (面は `var.p` 系で別スキーマ、primal と dual を混同しない)、M5→§4.5 (初期化時解決の opt-in、level 2 で有効化しない、ON/OFF で解不変)、M6→§4.6 (CV 和集合・周期の重複計上・単位規約、周期/軸対称は初版で受理しない)、M7→§6 (解除試験を 4 本に分割、符号を訂正、float 丸め限界、既存 case/24 run は未収束なので流用しない)、m1→§1 (壁の局所伝導寄与は `qwall` で取得可能。足りないのは拘束反力と領域境界の全数値流束の対応づけ) |
 
 ## 7. 影響範囲
 
-- `solver_density_cuda/variables.hpp`, `output/output.cpp`, `cuda_forge/nodeWallDirichlet_d.cu` 周辺。
-- 既定 OFF なので既存ケースへの影響は無い想定 (回帰で確認)。
+- `solver_density_cuda/cuda_forge/` の流束・ソースカーネル (採取点)、`main.cpp` (採取位相)、
+  `variables.{hpp,cpp}` / `output/output.cpp` (確保・転送・スキーマ)。
+- 診断 OFF では追加の確保・カーネル・同期を持たない (§4.5 の契約)。
 
 ## 8. 完了条件
 
-- [ ] 解除試験 (1D 熱伝導) が機械精度で閉じる
-- [ ] 診断 OFF の回帰が不変
-- [ ] codex レビュー (`plan` / `result`) を §6.1 に記録
+- [ ] §6 の (1)–(4) が通る (丸め誤差限界を事前定義したうえで)
+- [ ] 診断 OFF の回帰が不変、ON/OFF で解が変わらない
+- [ ] codex レビュー (`plan` 2 巡目 / `result`) を §6.1 に記録
+- [ ] 発注元へ「離散収支評価を開始してよい」と伝える条件を満たす
 - [ ] `status: done` にし `plans/accepted/` へ移動、`plans/README.md` を同期
 
 ## 9. 変更ログ
 
-- `2026-09-19` — 初稿。[case-hypersonic-gap-heating-validation](case-hypersonic-gap-heating-validation.md) の
-  codex plan レビュー (2–4 巡目) で「離散収支の取得経路が無い」と指摘されたのを受けて起票。
+- `2026-09-19` — 初稿 (スタブ)。発注元のレビューで「離散収支の取得経路が無い」と指摘されたのを受けて起票。
+- `2026-09-19` — codex plan レビュー 1 巡目 (**NO-GO**, C0/M7/m1) を全件採用して全面改訂。
+  初版を**定常 node の同一状態における離散収支**に限定し、収支式と拘束反力・採取位相・全加算経路・
+  CV/面スキーマと opt-in・CV 選択と周期/単位・解除試験 4 本立てを定義。周期/軸対称/非定常/cell は初版で受理しない。
