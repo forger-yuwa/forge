@@ -569,6 +569,16 @@ __global__ void viscousFlux_wall_d
 
         // mode 1/2 では壁関数/壁モデルカーネルが y⁺=u_τ y/ν を既に格納済み。
         // ここで dcc/mu_total ベースの値で上書きすると定義が不整合になるため mode 0 のみ更新する。
+        //
+        // **この ypls を「壁解像の y₁⁺」として読んではいけない** (2026-09-19):
+        //   dcc は「ゴーストセル重心 - 内点セル重心」の距離なので、**node 方式では壁ノードが
+        //   壁面上に乗って退化**し、値が 1 桁以上小さく出る (実測 case/49: ここの 0.043 に対し
+        //   第一内部ノード基準の y₁⁺ は平均 0.32、面積の 7.8 % が 1 超)。
+        //   さらに node の既定経路は下流で twall_* だけを上書きし utau/ypls を更新しないため、
+        //   高せん断域で |τ_w|/(ρ u_τ²) が 1 から外れる (実測 最大 74.5)。
+        //   壁解像の判定は solver_density_cuda/tools/check_wall_resolution.py を使うこと
+        //   (接続から壁面ごとの局所 y₁ を引き、接線 traction から u_τ を組む)。
+        //   詳細は methods/turbulence/implementation.md の該当節と AGENTS.md「壁解像確認」。
         if (wallTreatment == 0) {
             ypls_b[ib] = ro[ic]*utau*dcc/mu_total;
         }

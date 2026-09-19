@@ -195,6 +195,31 @@ cell モードは ghost 経由で正しく課されるため不変。設計詳�
 	置換 (法線粘性項・熱流束は不変、no-slip なので壁せん断仕事 0)。`twall_*_b` / `ypls_b` は
 	この modeled 値で上書き出力。mode 0 は現行の分子勾配式。
 
+#### 3.7.x `ypls` / `utau` の定義と、**壁解像の指標には使えない**こと (2026-09-19)
+
+壁面ダンプ (`res_<群>_<physID>_<step>.h5`) の `ypls` / `utau` は **mode ごとに定義が違う診断量**で、
+**そのまま $y_1^+$ として読んではいけない**。
+
+| mode | `utau` | `ypls` | 備考 |
+| --- | --- | --- | --- |
+| 0 (低 Re) | 分子勾配 traction の**大きさ** ([`viscousFlux_d.cu`](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) `viscousFlux_wall_d`) | $\rho u_\tau d_{cc}/\mu$。$d_{cc}$ は**ゴースト重心と内点重心の距離** | node では壁ノードが壁面に乗り $d_{cc}$ が退化 |
+| 1 (automatic) | Reichardt 逆解き ([`ransWallFunction_d.cu`](../../solver_density_cuda/cuda_forge/ransWallFunction_d.cu)) | 代表内部点の $\rho,\mu$ と `wall_dist` から | modeled 値で上書き |
+
+**問題点** (実測 `case/49` run_0103 `cav_outer`):
+
+- **node 方式で `ypls` が 1 桁以上小さく出る**。$d_{cc}$ が退化するため。ソルバ自身、
+  流束計算では `dcc` を使わない別経路 (`∇φ·S` 弱形式) を通っている。
+  実測: `ypls` 平均 0.043 に対し、正しい $y_1^+$ は平均 0.32・**面積の 7.8 % が 1 超**。
+- **node の既定経路は `twall_*` だけを上書きし `utau`/`ypls` を更新しない**。そのため
+  $|\boldsymbol\tau_w|/(\rho u_\tau^2)$ が 1 から外れる (中央値 0.996 だが**最大 74.5**)。
+  ずれるのは**高せん断域**なので、$y_1^+$ の最大値がまさに信用できない。
+
+**したがって壁解像は `solver_density_cuda/tools/check_wall_resolution.py` で測る** (AGENTS.md
+「壁解像確認 (必須)」)。同ツールは `PLANES/STRUCT` の接続から**壁面ごとの局所**第一内部点を
+法線方向に引き、**接線** traction から $u_\tau=\sqrt{|\boldsymbol\tau_{w,t}|/\rho_w}$ を組む。
+$y_1$ が構造格子の第一層厚と一致することが自己検査になる。
+**判定は超過面積割合で行う** — 鋭角エッジがあると traction が発散するので最大値は格子収束しない。
+
 `utau` は `wall` / `wall_isothermal` の `bvar` 初期化リスト (`boundaryCond.hpp`) と
 `mesh.hpp` の `bplaneValNames` マスターリストの**両方**に追加する (片方だと device 未確保で
 illegal memory access)。`wf_pk` は `variables.hpp` の `cellValNames` に登録し、
