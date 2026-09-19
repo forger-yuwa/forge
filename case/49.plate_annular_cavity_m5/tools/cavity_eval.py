@@ -28,6 +28,7 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+from scipy.interpolate import LinearNDInterpolator
 from scipy.spatial import cKDTree
 
 HERE = Path(__file__).resolve().parent
@@ -155,7 +156,19 @@ def eval_snapshot(c, v, man, D):
         idx = np.where(prof > eps)[0]
         out["zpen_%g" % eps] = float(fr[idx[-1]] * G["depth"]) if idx.size else 0.0
 
-    # 開口面 (z = -shrink) の質量流束: 極座標グリッドで面積分
+    # 開口面 (z = -shrink) の質量流束: 極座標グリッドで面積分。
+    # **線形補間を使う** (IDW は符号が変わる u_z を平滑化して流入/流出を潰す)。
+    # 開口近傍のノードだけで Delaunay を張る (全域だと重い)。
+    # 開口面の評価深さ: 開口直下すぎると壁ピン (u=0) のノードを拾って流入/流出を潰す。
+    # 実測 (2026-09-19): z=-0.2 mm で質量収支 +33 %、z=-0.5〜-1 mm で ±5 % に収まる。
+    zf = E.get("flux_depth_frac", 0.02) * G["depth"]
+    slab = (np.abs(c[:, 2] + zf) < 3.0e-3) & (np.hypot(c[:, 0], c[:, 1]) < G["Ro"] + 3.0e-3)
+    lin = {}
+    if slab.sum() > 200:
+        tri_pts = c[slab]
+        for nm in ("ro", "Uz", "h0"):
+            if nm in v:
+                lin[nm] = LinearNDInterpolator(tri_pts, v[nm][slab])
     nth, nr = 361, 60
     tg = np.linspace(0.0, np.pi, nth)
     ri = gc.inner_radius_at(tg, man)
@@ -163,10 +176,18 @@ def eval_snapshot(c, v, man, D):
     TH = np.repeat(tg[:, None], nr, axis=1)
     RR = ri[:, None] + frac_r[None, :] * (G["Ro"] - ri[:, None])
     dA = (G["Ro"] - ri[:, None]) / nr * RR * (np.pi / (nth - 1))
-    pts = np.stack([RR * np.cos(TH), RR * np.sin(TH), np.full_like(RR, -shrink)], axis=-1).reshape(-1, 3)
-    ro = fa.at(pts, "ro").reshape(nth, nr)
-    uz = fa.at(pts, "Uz").reshape(nth, nr)
-    h0 = fa.at(pts, "h0").reshape(nth, nr) if "h0" in v else None
+    pts = np.stack([RR * np.cos(TH), RR * np.sin(TH), np.full_like(RR, -zf)], axis=-1).reshape(-1, 3)
+    def samp(nm):
+        if nm in lin:
+            val = lin[nm](pts)
+            bad = ~np.isfinite(val)
+            if bad.any():
+                val[bad] = fa.at(pts[bad], nm)
+            return val.reshape(nth, nr)
+        return fa.at(pts, nm).reshape(nth, nr)
+    ro = samp("ro")
+    uz = samp("Uz")
+    h0 = samp("h0") if "h0" in v else None
     flux = ro * uz * dA
     out["mdot_in"] = float(-flux[flux < 0].sum())
     out["mdot_out"] = float(flux[flux > 0].sum())
@@ -174,45 +195,78 @@ def eval_snapshot(c, v, man, D):
     den = max(out["mdot_in"], out["mdot_out"], 1e-30)
     out["mdot_imbalance"] = out["mdot_net"] / den
     out["_H_open"] = float(np.sum(flux * h0)) if h0 is not None else float("nan")
+    out["_flux_z_m"] = float(-zf)
 
-    # 等温壁の入熱 (照合用の**物理量推定**): q_w = lambda_w dT/dn, 片側 2 次差分。
-    # **壁近傍を除外した fg ではなく全ノードの fa を使う** (shrink したマスクで壁際を
-    # 評価すると勾配を数倍過大に出す。2026-09-19 実測で solver q_w の 7 倍になった)。
-    # 差分間隔は VL 第一層に見合わせる (メッシュが解けていない間隔で差分しない)。
-    lam_w = mu_suth(Tw) * D["cp"] / D["prandtl_lam"]
-    gmin = G["gap_min"]
-    h = max(2.0 * man["mesh"]["vl_first_m"], 0.01 * gmin)
-    for nm, area_key in (("q_outer", "cav_outer"), ("q_cylside", "cyl_side"), ("q_floor", "cav_floor")):
-        zs = np.linspace(-G["depth"] * 0.999, -G["depth"] * 0.001, 60)
-        if nm == "q_floor":
-            tg2 = np.linspace(0, np.pi, 91)
-            r2 = np.linspace(0.02, 0.98, 12)
-            ri2 = gc.inner_radius_at(tg2, man)
-            RR2 = ri2[:, None] + r2[None, :] * (G["Ro"] - ri2[:, None])
-            TH2 = np.repeat(tg2[:, None], len(r2), axis=1)
-            base = np.stack([RR2 * np.cos(TH2), RR2 * np.sin(TH2),
-                             np.full_like(RR2, -G["depth"])], axis=-1).reshape(-1, 3)
-            nrm = np.tile(np.array([0.0, 0.0, 1.0]), (len(base), 1))
-        else:
-            tg2 = np.linspace(0, np.pi, 91)
-            TH2 = np.repeat(tg2[:, None], len(zs), axis=1)
-            ZZ = np.tile(zs, (len(tg2), 1))
-            if nm == "q_outer":
-                R = G["Ro"]
-                base = np.stack([R * np.cos(TH2), R * np.sin(TH2), ZZ], axis=-1).reshape(-1, 3)
-                nrm = np.stack([-np.cos(TH2), -np.sin(TH2), np.zeros_like(TH2)], axis=-1).reshape(-1, 3)
-            else:
-                R, off = G["Ri"], G["x_off"]
-                base = np.stack([off + R * np.cos(TH2), R * np.sin(TH2), ZZ], axis=-1).reshape(-1, 3)
-                nrm = np.stack([np.cos(TH2), np.sin(TH2), np.zeros_like(TH2)], axis=-1).reshape(-1, 3)
-        T1 = fa.at(base + nrm * h, "T")
-        T2 = fa.at(base + nrm * (2.0 * h), "T")
-        dTdn = (-3.0 * Tw + 4.0 * T1 - T2) / (2.0 * h)
-        out[nm] = float(-lam_w * np.mean(dTdn) * gc.wall_area(man, area_key))  # 壁に入る側を正
-    out["q_wall_sum"] = out["q_outer"] + out["q_cylside"] + out["q_floor"]
-    if np.isfinite(out["_H_open"]):
-        out["budget"] = float((out["q_wall_sum"] + out["_H_open"]) / max(abs(out["q_wall_sum"]), 1e-30))
+    # NOTE: 場の勾配から q_w を組む案は**この種のメッシュでは使えない** (2026-09-19 実測)。
+    # 壁から数十 µm の点を IDW/線形で補間すると、接線 1-2 mm 間隔のノードを拾って
+    # dT/dn をソルバ値の 7 倍に出す。**壁熱流束はソルバ出力 (wall_heat) を一次情報とし**、
+    # 離散保存の独立検算は残作業 #4 (非拘束 CV 群の流束収支) で行う。
     return out
+
+
+def mid_surface(man, n_th=181, n_z=200):
+    """すきま中央面の点群 [m]。**底面は「すきま幅の半分」だけ切り取る** (ユーザ指定 2026-09-19):
+    z は 0 から -(depth - gap_local(θ)/2) まで。こうすると床の壁点に対する最近傍点が
+    床から gap/2 上になり、側壁の壁点が中央面まで gap/2 なのと整合する。"""
+    G = man["geometry"]
+    th = np.linspace(0.0, np.pi, n_th)
+    rc = gc.gap_center_radius(th, man)
+    gap = gc.gap_at(th, man)
+    fr = np.linspace(0.0, 1.0, n_z)
+    z = -(G["depth"] - 0.5 * gap)[:, None] * fr[None, :]    # (n_th, n_z)
+    R = np.repeat(rc[:, None], n_z, axis=1)
+    TH = np.repeat(th[:, None], n_z, axis=1)
+    return np.stack([R * np.cos(TH), R * np.sin(TH), z], axis=-1).reshape(-1, 3)
+
+
+def wall_href(wh, man, D, c, v, T0):
+    """基準温度 = すきま中央面の最近傍点の**総温 T0** で熱伝達率を出す (ユーザ指定 2026-09-19)。
+        h_ref = q'' / (T0_ref - T_w)
+    T0 は `tools/total_quantities.py` の `total_state` (h0 の逆算) で作った node 値を使う
+    (スクリプトで T + u^2/2cp を組まない: AGENTS.md「出力と後処理の原則」)。"""
+    Tw = D["wall_T"]
+    mid = mid_surface(man)
+    m_gas = gc.cavity_mask(c[:, 0], c[:, 1], c[:, 2], man, shrink=man["eval"]["shrink_m"])
+    f = Field(c, {"T0": T0}, mask=m_gas)
+    T0_mid = f.at(mid, "T0")
+    tree = cKDTree(mid)
+    for g, d in wh.items():
+        if "_z_node" not in d:
+            continue
+        xyz = np.stack([d["_x_node"], d["_y_node"], d["_z_node"]], axis=1)
+        _, j = tree.query(xyz)
+        Tref = T0_mid[j]
+        dT = np.maximum(Tref - Tw, 1.0)
+        qn = d["_qin_node"]
+        w = d["_w_node"]
+        d["Tref_mean"] = float(np.sum(Tref * w) / max(np.sum(w), 1e-30))
+        d["Tref_min"] = float(Tref.min())
+        d["Tref_max"] = float(Tref.max())
+        d["h_ref"] = float(np.sum((qn / dT) * w) / max(np.sum(w), 1e-30))
+        d["_href_node"] = qn / dT
+        d["_Tref_node"] = Tref
+        if "_z" in d:                        # 深さ分布 (面積重み付き)
+            zb = d["_z"]
+            edges = np.linspace(d["_z_node"].min(), d["_z_node"].max(), len(zb) + 1)
+            ib = np.clip(np.digitize(d["_z_node"], edges) - 1, 0, len(zb) - 1)
+            num = np.bincount(ib, weights=(qn / dT) * w, minlength=len(zb))
+            den = np.bincount(ib, weights=w, minlength=len(zb))
+            d["_href"] = num / np.maximum(den, 1e-30)
+            numT = np.bincount(ib, weights=Tref * w, minlength=len(zb))
+            d["_Tref"] = numT / np.maximum(den, 1e-30)
+    return wh
+
+
+def wall_Q_below(wh, groups, z_cut):
+    """z < z_cut の壁だけの入熱 [W] (開口面 z_cut での流束と収支を組むため)。"""
+    tot = 0.0
+    for g in groups:
+        d = wh.get(g)
+        if d is None or "_z_node" not in d:
+            continue
+        m = d["_z_node"] < z_cut
+        tot += float(np.sum(d["_qin_node"][m] * d["_w_node"][m]))
+    return tot
 
 
 def wall_heat(run, step, man, D, prof_n=40):
@@ -248,6 +302,11 @@ def wall_heat(run, step, man, D, prof_n=40):
                  ypls_mean=float(np.sum(np.asarray(w["ypls"], float) * wt) / max(A, 1e-30))
                  if "ypls" in w else float("nan"),
                  all_zero=bool(np.all(qin == 0.0)))
+        d["_x_node"] = w["xyz"][:, 0]
+        d["_y_node"] = w["xyz"][:, 1]
+        d["_z_node"] = w["xyz"][:, 2]
+        d["_qin_node"] = qin
+        d["_w_node"] = wt
         # 深さ (z) 方向の分布 (側壁) / 半径方向 (床)
         z = w["xyz"][:, 2]
         if g in ("cav_outer", "cyl_side"):
@@ -263,7 +322,7 @@ def wall_heat(run, step, man, D, prof_n=40):
 
 SERIES_COLS = ["dT_floor", "dT_mid", "dT_mouth", "dT_up", "dT_dn",
                "zpen_25", "mdot_in", "mdot_out", "mdot_imbalance",
-               "q_outer", "q_cylside", "q_floor"]
+               "q_outer", "q_cylside", "q_floor"]   # q_* は wall_heat で埋める
 
 
 def main():
@@ -284,7 +343,15 @@ def main():
         for res in snaps:
             c, v = read(res)
             q = eval_snapshot(c, v, man, D)
-            rows.append((int(res.stem.split("_")[1]), q))
+            st = int(res.stem.split("_")[1])
+            wq = wall_heat(a.run, st, man, D)
+            if not wq:                     # 壁ダンプの無いスナップショット (step 0 等) は飛ばす
+                print("  step %6d  壁ダンプ無し -> skip" % st, flush=True)
+                continue
+            for nm, g in (("q_outer", "cav_outer"), ("q_cylside", "cyl_side"), ("q_floor", "cav_floor")):
+                q[nm] = wq[g]["Q_W"] if g in wq else float("nan")
+            q["q_wall_sum"] = q["q_outer"] + q["q_cylside"] + q["q_floor"]
+            rows.append((st, q))
             print("  step %6d  dT_mid %8.2f  dT_mouth %8.2f  zpen25 %6.2f mm  q_sum %9.3f W"
                   % (rows[-1][0], q["dT_mid"], q["dT_mouth"], q["zpen_25"] * 1e3, q["q_wall_sum"]),
                   flush=True)
@@ -304,17 +371,31 @@ def main():
     Tw = D["wall_T"]
     Taw = D.get("Taw_tp", D["Taw_cpg"])
     wh = wall_heat(a.run, step, man, D)
+    # 総温 T0 (h0 の逆算; CPG/TP 両対応) — AGENTS.md「出力と後処理の原則」
+    T0 = None
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "solver_density_cuda" / "tools"))
+        from total_quantities import total_state
+        T0 = np.asarray(total_state(a.run, str(snaps[-1]))["T0"], float)
+    except Exception as e:                       # noqa: BLE001
+        print("  WARNING: 総温 T0 を作れない (%s) -> 基準温度基準の h は出せない" % e)
+    if T0 is not None and wh:
+        wall_href(wh, man, D, c, v, T0)
     print("=== %s  (%s) ===" % (a.run, snaps[-1].name))
     if wh:
         print("  --- 壁面 (ソルバ出力 q_w, 壁に入る側が正。半割) ---")
-        print("  %-10s %10s %10s %10s %10s %10s %9s" %
-              ("group", "Q[W]", "q''[W/m2]", "q''max", "h_aw", "tau[Pa]", "y+ mean"))
+        print("  %-10s %9s %10s %10s %8s %9s %9s %8s" %
+              ("group", "Q[W]", "q''[W/m2]", "q''max", "h_aw", "T_ref[K]", "h_ref", "y+ mean"))
         for g, d in wh.items():
             flag = ("  (断熱壁なので 0 が正しい)" if d["all_zero"] and g in ("plate", "plate_in")
                     else ("  (全点 0: qwall 診断の無いバイナリ)" if d["all_zero"] else ""))
-            print("  %-10s %10.4g %10.4g %10.4g %10.4g %10.4g %9.3g%s" %
-                  (g, d["Q_W"], d["qpp_mean"], d["qpp_max"], d["h_aw"], d["tau_mean"],
+            print("  %-10s %9.4g %10.4g %10.4g %8.4g %9.4g %9.4g %8.3g%s" %
+                  (g, d["Q_W"], d["qpp_mean"], d["qpp_max"], d["h_aw"],
+                   d.get("Tref_mean", float("nan")), d.get("h_ref", float("nan")),
                    d["ypls_mean"], flag))
+        print("    h_aw  = q''/(T_aw - T_w)       … 外部流の回復温度基準")
+        print("    h_ref = q''/(T0_ref - T_w)     … **基準温度** = すきま中央面の最近傍点の総温"
+              " (底面はすきま幅の半分で切取り)")
         cav = [g for g in ("cav_outer", "cyl_side", "cav_floor") if g in wh]
         if cav:
             Qc = sum(wh[g]["Q_W"] for g in cav)
@@ -329,9 +410,13 @@ def main():
         print("  zpen(%2g K)  %9.2f mm" % (eps, q["zpen_%g" % eps] * 1e3))
     print("  mdot in/out %.4e / %.4e kg/s   imbalance %.2e" %
           (q["mdot_in"], q["mdot_out"], q["mdot_imbalance"]))
-    print("  q_outer %9.3f W  q_cylside %9.3f W  q_floor %9.3f W  -> sum %9.3f W (半割)"
-          % (q["q_outer"], q["q_cylside"], q["q_floor"], q["q_wall_sum"]))
-    print("  budget (Σq + H_open)/Σq = %.3f" % q.get("budget", float("nan")))
+    if wh and np.isfinite(q["_H_open"]):
+        zc = q["_flux_z_m"]
+        qs = wall_Q_below(wh, ("cav_outer", "cyl_side", "cav_floor"), zc)
+        qall = sum(wh[g]["Q_W"] for g in ("cav_outer", "cyl_side", "cav_floor") if g in wh)
+        print("  CV 収支 (評価面 z=%.2f mm 以深): Σq_壁 %.3f W  vs  開口からの正味エンタルピー流入 %.3f W"
+              "  -> 残差比 %.3f   [全深さの Σq は %.3f W]"
+              % (zc * 1e3, qs, -q["_H_open"], (qs + q["_H_open"]) / max(abs(qs), 1e-30), qall))
     Path(Path(a.run) / "cavity_eval.json").write_text(json.dumps(
         {"field": {k: val for k, val in q.items() if not k.startswith("_")},
          "wall": {g: {k: val for k, val in d.items() if not k.startswith("_")}
@@ -340,13 +425,59 @@ def main():
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        fig, ax = plt.subplots(figsize=(5.2, 6.4))
-        ax.plot(q["_dT_profile"] + Tw, -q["_depth_frac"] * man["geometry"]["depth"] * 1e3, lw=2)
-        ax.axvline(Tw, ls="--", c="r", label="wall %g K" % Tw)
-        ax.axvline(D.get("Taw_tp", D["Taw_cpg"]), ls=":", c="k", label="T_aw")
-        ax.set_xlabel("T [K] (周方向平均・すきま中央)"); ax.set_ylabel("z [mm]")
-        ax.grid(alpha=.3); ax.legend()
-        fig.tight_layout(); fig.savefig(Path(a.run) / "cavity_profile.png", dpi=130)
+        from matplotlib import font_manager
+        for fp in Path.home().joinpath(".fonts").glob("NotoSansCJKjp-Regular.otf"):
+            font_manager.fontManager.addfont(str(fp))
+            matplotlib.rcParams["font.family"] = font_manager.FontProperties(fname=str(fp)).get_name()
+        dep = man["geometry"]["depth"] * 1e3
+        fig, ax = plt.subplots(1, 3, figsize=(13.5, 6.0), sharey=True)
+        # (a) 温度プロファイル
+        z = -q["_depth_frac"] * dep
+        ax[0].plot(q["_dT_profile"] + Tw, z, lw=2.2, color="#b91c1c", label="静温 (すきま中央)")
+        d0 = wh.get("cav_outer")
+        if d0 and "_Tref" in d0:
+            ax[0].plot(d0["_Tref"], d0["_z"] * 1e3, lw=1.8, color="#7c3aed",
+                       label="基準温度 T0_ref (総温)")
+        ax[0].axvline(Tw, ls="--", c="#1d4ed8", lw=1.4, label="壁温 %g K" % Tw)
+        ax[0].axvline(Taw, ls=":", c="#111", lw=1.4, label="回復温度 %.0f K" % Taw)
+        ax[0].set_xlabel("ガス温度 [K] (周方向平均・すきま中央)")
+        ax[0].set_ylabel("深さ z [mm]")
+        ax[0].legend(fontsize=9, loc="lower right")
+        ax[0].set_title("(a) 温度の深さ分布", fontsize=12, loc="left")
+        # (b) 壁熱流束 q'' の深さ分布
+        for g, c_, lab in (("cav_outer", "#dc2626", "外筒壁 (r=%.0f mm)" % (man["geometry"]["Ro"] * 1e3)),
+                           ("cyl_side", "#ea580c", "内円柱側面")):
+            d = wh.get(g)
+            if d and "_z" in d:
+                ax[1].plot(d["_qpp"] * 1e-3, d["_z"] * 1e3, lw=2.0, color=c_, label=lab)
+        ax[1].axvline(0, c="#999", lw=.8)
+        ax[1].set_xlabel("壁熱流束 q'' [kW/m²]  (壁に入る側が正)")
+        ax[1].legend(fontsize=9, loc="lower right")
+        ax[1].set_title("(b) 熱流束の深さ分布", fontsize=12, loc="left")
+        # (c) 熱伝達率: 基準温度 (すきま中央面の総温) 基準を主、回復温度基準を従で
+        has_ref = any("_href" in (wh.get(g) or {}) for g in ("cav_outer", "cyl_side"))
+        for g, c_, lab in (("cav_outer", "#dc2626", "外筒壁"), ("cyl_side", "#ea580c", "内円柱側面")):
+            d = wh.get(g)
+            if not d or "_z" not in d:
+                continue
+            if "_href" in d:
+                ax[2].plot(d["_href"], d["_z"] * 1e3, lw=2.2, color=c_, label=lab + " (基準温度基準)")
+            ax[2].plot(d["_qpp"] / (Taw - Tw), d["_z"] * 1e3, lw=1.4, ls="--", color=c_,
+                       alpha=.75, label=lab + " (回復温度基準)")
+        ax[2].axvline(0, c="#999", lw=.8)
+        ax[2].set_xlabel("熱伝達率 h [W/m²K]")
+        ax[2].legend(fontsize=8, loc="lower right")
+        ax[2].set_title("(c) 熱伝達率  実線: h=q''/(T0_ref−T_w) / 破線: q''/(T_aw−T_w)",
+                        fontsize=11, loc="left")
+        for a_ in ax:
+            a_.grid(alpha=.3)
+            a_.set_ylim(-dep * 1.02, 2)
+        qs = sum(wh[g]["Q_W"] for g in ("cav_outer", "cyl_side", "cav_floor") if g in wh)
+        fig.suptitle("case/49  M%.2g 環状深キャビティ (すきま %.2f mm × 深さ %.0f mm, 壁 %g K)  — "
+                     "キャビティ 3 壁 総入熱 %.1f W (全周)"
+                     % (D["mach"], man["geometry"]["gap_nom"] * 1e3, dep, Tw, 2 * qs), fontsize=13)
+        fig.tight_layout()
+        fig.savefig(Path(a.run) / "cavity_profile.png", dpi=130, bbox_inches="tight")
         print("wrote", Path(a.run) / "cavity_profile.png")
 
 

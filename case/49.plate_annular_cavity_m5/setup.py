@@ -195,13 +195,24 @@ def mesh_manifest(M, geo):
     # と VL 0.8695 mm × リップ 1.0 mm はいずれも成功。よって全壁面サイズに下限を課す。
     lim = out["vl_total_m"]
     out["vl_size_floor_m"] = lim
+    # 下限は **壁面サイズ全部** に課す (2026-09-19 実測 3 例):
+    #   リップ 0.30 / 面 0.8-1.2 × VL 0.87 -> tet 0 (失敗)
+    #   リップ 1.00 / 面 0.8-1.2 × VL 0.87 -> 成功
+    #   リップ 0.90 / 面 0.5     × VL 0.90 -> tet 0 (失敗)   ← エッジだけの下限では不十分
+    # すなわち「凸角まわりの**接線セルサイズ**が VL 総厚を下回ると層が自己交差する」。
+    # よって**キャビティ内面を細かくしたいときは VL 総厚も一緒に薄くする**必要がある
+    # (第一層 y1 は独立に決められるので y+ は保てる)。
     bumped = {}
-    for k in ("size_plate", "size_plate_in", "size_cav", "size_floor",
-              "size_cyl_top", "size_edge_opening"):
-        if out[k + "_m"] < lim:
-            bumped[k] = (out[k + "_m"], lim)
-            out[k + "_m"] = lim
+    if M.get("guard_edge_by_vl", True):
+        for k in ("size_plate_in", "size_cav", "size_floor", "size_cyl_top", "size_edge_opening"):
+            if out[k + "_m"] < lim:
+                bumped[k] = (out[k + "_m"], lim)
+                out[k + "_m"] = lim
     out["size_bumped_by_vl"] = {k: [a * 1e3, b * 1e3] for k, (a, b) in bumped.items()}
+    # 継ぎ目の段差: 最終プリズム層厚 / 隣接する tet の代表サイズ。1 に近いほど滑らか。
+    wall_min = min(out["size_cav_m"], out["size_plate_in_m"], out["size_floor_m"], out["size_cyl_top_m"])
+    out["junction_ratio"] = out["vl_last_m"] / wall_min
+    out["growth_rate"] = M.get("growth_rate", 0.3)
     return out
 
 

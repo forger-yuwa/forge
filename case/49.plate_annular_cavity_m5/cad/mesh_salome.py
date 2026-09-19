@@ -151,6 +151,13 @@ par = algo.Parameters()
 par.SetMaxSize(M["maxh_m"] * S)
 par.SetMinSize(M["minh_m"] * S)
 par.SetFineness(M["fineness"])
+# 体積要素の成長率 (NETGEN 既定 0.3)。小さいほど壁から離れるときの粗大化が緩やかになり、
+# **prism 層 -> tet の継ぎ目の段差**が小さくなる (ユーザ要件 2026-09-19)。
+try:
+    par.SetGrowthRate(M.get("growth_rate", 0.3))
+    print("growth rate =", M.get("growth_rate", 0.3), flush=True)
+except Exception as _e:                       # noqa: BLE001
+    print("WARNING: SetGrowthRate 不可:", _e, flush=True)
 par.SetSecondOrder(0)                       # forge は線形要素のみ
 par.SetOptimize(1)
 
