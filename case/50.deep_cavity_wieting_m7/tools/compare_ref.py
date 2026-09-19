@@ -40,12 +40,14 @@ def main():
     xr = np.array([float(r[0]) for r in rows]); qr = np.array([float(r[1]) for r in rows])
     o = np.argsort(cfd[:, 0]); xc, qc = cfd[o, 0], cfd[o, 1]
 
+    from burggraf import qs_over_qfp
+    w, d = 1.270e-3, 20.32e-3
     print(f"run {a.run}  分母: 文献 {ev['q_lit']*1e-3:.2f} / forge smooth {ev['q_cfd']*1e-3:.2f} kW/m²")
-    print(f"{'x/d':>7} {'実験':>8} {'CFD/文献':>10} {'CFD/forge':>10} {'CFD/実験':>10}")
+    print(f"{'x/d':>7} {'実験':>8} {'理論(B4)':>10} {'CFD/文献':>10} {'実験/理論':>10} {'CFD/理論':>10}")
     for x, qe in zip(xr, qr):
-        qi = float(np.interp(x, xc, qc))
-        print(f"{x:7.3f} {qe:8.3f} {qi/ev['q_lit']:10.4f} {qi/ev['q_cfd']:10.4f} "
-              f"{qi/ev['q_lit']/qe:10.3f}")
+        qi = float(np.interp(x, xc, qc)) / ev["q_lit"]
+        qt = float(qs_over_qfp(x * d, w, d))
+        print(f"{x:7.3f} {qe:8.3f} {qt:10.4f} {qi:10.5f} {qe/qt:10.2f} {qi/qt:10.3f}")
     print(f"\n開口面積平均 q̄_c/q_fp: CFD {ev['qbar_over_lit']:.3f} (文献分母) / "
           f"{ev['qbar_over_cfd']:.3f} (forge 分母)   vs 実験 1.07 (Fig 12 試読)")
 
@@ -56,13 +58,16 @@ def main():
     ax.semilogy(xc, qc / ev["q_lit"], "-", lw=2, color="#2E6F9E", label="forge (分母 = 文献 q_fp)")
     ax.semilogy(xc, qc / ev["q_cfd"], "--", lw=1.6, color="#2E6F9E", alpha=.7,
                 label="forge (分母 = forge smooth)")
+    xt = np.linspace(0.004, 1.0, 400)
+    ax.semilogy(xt, qs_over_qfp(xt * d, w, d), "-.", lw=1.8, color="#4C7A34",
+                label="Burggraf 非粘性コア理論 (B4)")
     ax.axhspan(1e-4, 0.02, color="0.5", alpha=.18)
     ax.text(0.62, 0.012, "計測限界帯 (q/q_fp ≲ 0.02)", fontsize=8.5, color="0.35")
     ax.axvline(1.270 / 20.32, color="0.4", ls=":", lw=1)
     ax.text(1.270 / 20.32 * 1.05, 0.5, "1 すきま幅", fontsize=8.5, color="0.35", rotation=90, va="top")
     ax.set_xlabel("x / d  (後壁を上端から下向き)")
     ax.set_ylabel("$q_s / q_{fp}$")
-    ax.set_xlim(0, 0.6); ax.set_ylim(1e-3, 2)
+    ax.set_xlim(0, 0.6); ax.set_ylim(1e-4, 3)
     ax.grid(alpha=.25, which="both")
     ax.legend(fontsize=9, loc="upper right")
     ax.set_title("深キャビティ後壁の熱流束分布 (w/d = 0.063, M 6.9, 層流)", fontsize=11)
