@@ -138,16 +138,16 @@ codex が現行コードで再現した**誤合格**を先に塞ぐ。いずれ�
 
 | # | 項目 | 状態 |
 | --- | --- | --- |
-| 1 | `check_convergence.py`: 残差列ゼロ/必須列欠損を**判定不能で非ゼロ終了**、低下桁数を**末尾窓**で測る | ⏳ |
-| 2 | `check_quasisteady.py`: HDF5 経路を `classify_series` に寄せ、step の有限性・順序も検査 | ⏳ |
-| 3 | `check_mesh_quality.py`: 非有限座標・ゼロ/負体積・不正 Jacobian を**外れ値許容の前に無条件拒否** | ⏳ |
-| 4 | 不正入力テスト (上記 3 つ + 既存正常ケースの回帰) を先に置く | ⏳ |
-| 5 | 共通判定 API を用意し `run_case.sh` (`|| true`) と `sern_gates.py` (直呼び) を寄せる | ⏳ |
+| 1 | `check_convergence.py`: 残差列ゼロ/必須列欠損を**判定不能で非ゼロ終了**、低下桁数を**末尾窓**で測る | ✅ |
+| 2 | `check_quasisteady.py`: HDF5 経路を `classify_series` に寄せ、step の有限性も検査 | ✅ |
+| 3 | `check_mesh_quality.py`: 非有限座標・ゼロ/負体積・向き混在を**外れ値許容の前に無条件拒否** | ✅ |
+| 4 | 不正入力テスト `test_gate_bad_input.py` (10 件) + 実データ回帰 (過去 PASS の 3 run・実メッシュ 3 種) | ✅ |
+| 5 | 呼び出し側: 検証を `analyze()` 内に置いたので `sern_gates.py` は自動継承。`run_case.sh` は判定 rc を `CONVERGENCE_EXIT:` として記録し `FORGE_STRICT_CONVERGENCE=1` で伝播 | ✅ |
 | 6 | 段情報 `stage_manifest.json` の生成と `check_convergence.py` の同一性検査 | ⏳ |
-| 7 | `check_wall_resolution.py`: 壁面ごとの局所 $y_1$・接線 $u_\tau$・run の粘性モデル | ⏳ |
+| 7 | `check_wall_resolution.py`: 壁面ごとの局所 $y_1$ (PLANES/STRUCT の接続から法線方向の第一内部点)・接線 traction からの $u_\tau$・run の `viscMethod` に応じた $\mu$・壁ダンプ節点と DOF の**厳密一致による対応づけ**。自己検査: $y_1$ が第一層厚と一致 | ✅ |
 | 8 | 壁解像の小規模テスト (解析的に距離が分かる非一様・斜交・複数壁・角・軸対称・周期) | ⏳ |
 | 9 | 実ケース展開: `case/26`、**`case/48` (冷却平板。手順 `procedures/verification/48-flat-plate-cooled.md`)**、TP ケース | ⏳ |
-| 10 | AGENTS.md と `methods/turbulence/implementation.md` の追記 (運用義務化は最後) | ⏳ |
+| 10 | AGENTS.md に「壁解像確認 (必須)」節 + 収束節に判定区間と判定不能の 2 項目 ✅ / `methods/turbulence/implementation.md` ⏳ |
 | 11 | `case/49` のケース内ツール (`stack_residuals.py` / `check_cavity_steady.py` / `wall_y1plus`) を共通ツールへ寄せる | ⏳ |
 
 ## 6. 検証
@@ -178,5 +178,10 @@ codex が現行コードで再現した**誤合格**を先に塞ぐ。いずれ�
 
 ## 変更ログ
 
+- 2026-09-19 (2): §5.1 #1〜#5, #7, #10 の一部を実装。実測: `case/49` 全ヘキサ 3 格子で
+  $y_1$ が第一層厚 (28.57/20.00/14.29 µm) と厳密一致、$y_1^+>1$ の面積が外筒壁で
+  13.5 → 10.5 → **7.8 %**、平板は最細で **0 %**。**最大値はリップ特異点のため収束しない**
+  (18.9 → 14.4 → 11.1) ので判定は超過面積割合で行う。過去に報告した「y⁺ 0.04」も
+  「$y_1^+$ 平均 0.146」も誤りだった (前者は `dcc` 退化、後者は全域共通 $y_1$ と stale な `utau`)。
 - 2026-09-19: 起票。`case/49` の result レビュー (codex NO-GO, C1/M10/m1) の M3・M4・M9 を
   ケース内で塞いだが、**同じ誤りが他ケースでも起きる構造**なのでユーザ指示により恒久対応に格上げ。
