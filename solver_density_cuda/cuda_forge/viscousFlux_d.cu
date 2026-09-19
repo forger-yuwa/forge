@@ -557,6 +557,16 @@ __global__ void viscousFlux_wall_d
         flow_float twall = sqrt(tau_x*tau_x + tau_y*tau_y + tau_z*tau_z)/sss;
         flow_float utau = sqrt(twall/ro[ic]);
 
+        // 解像壁 (wallTreatment==0, 壁関数によるエネルギー置換なし) では、従来 qwall_b / utau_b に
+        // 誰も書かないため壁面ダンプ (res_wall_<physID>_*.h5) の qwall/utau が**全点 0** になり、
+        // 低 Re 壁の熱流束・熱伝達率・C_f が取り出せなかった。ここで**診断として**、
+        // 実際に残差へ入れた値と同じもの (符号規約は壁→流体正、モデル経路と同一) を格納する。
+        // mode 1/2 と sstEnergyWf!=0 では qwall_b/utau_b は入力側なので触れない (ビット不変)。
+        if (wallTreatment == 0) {
+            utau_b[ib] = utau;
+            if (sstEnergyWf == 0) qwall_b[ib] = heatflux/sss;
+        }
+
         // mode 1/2 では壁関数/壁モデルカーネルが y⁺=u_τ y/ν を既に格納済み。
         // ここで dcc/mu_total ベースの値で上書きすると定義が不整合になるため mode 0 のみ更新する。
         if (wallTreatment == 0) {

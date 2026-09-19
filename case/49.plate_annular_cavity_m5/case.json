@@ -1,0 +1,123 @@
+{
+  "_comment": "case/49 の最上位入力 (plan §4.11)。CAD・メッシュ・IC・BC・評価は全て `python3 setup.py --resolve` が書く manifest.json だけを読む。マッハ数・すきま・偏心を変えるときはこのファイルだけ直し、manifest を作り直す。",
+  "conditions": {
+    "mach": 5.0,
+    "_altitude_km": "標準大気から P_inf/T_inf を出す高度 [km]。P_inf/T_inf を直接書くなら null",
+    "altitude_km": 20.0,
+    "P_inf": null,
+    "T_inf": null,
+    "wall_T": 500.0,
+    "_cyl_top_thermal": "内部円柱上面: isothermal | adiabatic (仮定。感度 run で両方)",
+    "cyl_top_thermal": "isothermal",
+    "turb_intensity": 0.005,
+    "mut_over_mu": 10.0,
+    "_gas": "生産 EOS。TP = semi-perfect 乾燥空気 (plan §4.10 で既定に確定)。CPG は疎通用",
+    "gas": "TP",
+    "cp": 1004.5,
+    "gamma": 1.4,
+    "prandtl_lam": 0.72,
+    "prandtl_turb": 0.9,
+    "dry_air_Y": {
+      "N2": 0.75518,
+      "O2": 0.23139,
+      "AR": 0.012885,
+      "CO2": 0.000545
+    },
+    "_delta_target_mm": "3D 入口に与える流入境界層の目標厚さ delta_99 [mm]",
+    "delta_target_mm": 5.0
+  },
+  "geometry": {
+    "_units": "mm (manifest では m に直す)",
+    "Ro": 25.0,
+    "Ri": 22.5,
+    "_x_off": "内側円柱の x 偏心 [mm] (>0 で下流ずらし)。|x_off| < Ro-Ri",
+    "x_off": 0.0,
+    "depth": 50.0,
+    "x_in": -80.0,
+    "_x_plate": "助走 slip -> no-slip 平板 の切替 x。x_in と同値なら助走なし",
+    "x_plate": -80.0,
+    "x_out": 120.0,
+    "y_max": 70.0,
+    "z_top": 60.0,
+    "_r_patch": "平板 z=0 を r<r_patch (細) と r>r_patch (粗) に分ける半径。Ro 以下で無効",
+    "r_patch": 55.0,
+    "protrude": 0.5,
+    "fuzzy": 0.001,
+    "_plug_cavity": "true にするとキャビティ無しの「塞ぎ」形状を作る (流入 BL 移送の検証用, plan §4.3)",
+    "plug_cavity": false
+  },
+  "mesh": {
+    "_stage": "A = 疎通/レシピ/URANS 用の粗メッシュ, B = 生産",
+    "stage": "B",
+    "_vl": "prism 境界層。総厚は vl_total_frac_gap * gap_min で自動 (両壁から張ってコアを残す)",
+    "vl_first_um": {
+      "A": 40.0,
+      "B": 10.0
+    },
+    "vl_stretch": {
+      "A": 1.35,
+      "B": 1.25
+    },
+    "vl_total_frac_gap": 0.2,
+    "_sizes": "面ごとの最大要素サイズ [mm]",
+    "maxh": {
+      "A": 10.0,
+      "B": 6.0
+    },
+    "minh": 0.02,
+    "size_plate": {
+      "A": 5.0,
+      "B": 2.5
+    },
+    "size_plate_in": {
+      "A": 2.0,
+      "B": 0.8
+    },
+    "size_cav": {
+      "A": 2.5,
+      "B": 1.2
+    },
+    "size_floor": {
+      "A": 2.0,
+      "B": 0.8
+    },
+    "size_cyl_top": {
+      "A": 2.5,
+      "B": 1.2
+    },
+    "size_edge_opening": {
+      "A": 0.8,
+      "B": 0.45
+    },
+    "fineness": 3,
+    "_budget": "節点数の目安 (上限は Stage A の実測メモリから確定する)",
+    "node_budget": {
+      "A": 250000,
+      "B": 800000
+    }
+  },
+  "eval": {
+    "_n_theta": "周方向平均の分点数 (半割 0..180deg)",
+    "n_theta": 73,
+    "_probe_depth_frac": "測点の深さ (0=開口, 1=床)。mouth/mid/floor",
+    "probe_depth_frac": {
+      "mouth": 0.04,
+      "mid": 0.5,
+      "floor": 0.98
+    },
+    "_shrink_mm": "壁ピン値を避けるためマスクを壁から内側へ絞る量 [mm]",
+    "shrink_mm": 0.15,
+    "_zpen_eps_K": "侵入深さ T-Tw のしきい値 [K] (併記する 3 通り)",
+    "zpen_eps_K": [
+      10.0,
+      25.0,
+      50.0
+    ],
+    "_tol": "準定常の絶対許容 (plan §4.7/§6.4)",
+    "tol_dT_drift_K": 2.0,
+    "tol_zpen_drift_mm": 0.5,
+    "tol_q_drift_frac": 0.01,
+    "tol_mdot_imbalance": 0.001,
+    "tol_budget_frac": 0.05
+  }
+}
