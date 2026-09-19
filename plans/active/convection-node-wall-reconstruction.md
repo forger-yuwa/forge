@@ -566,6 +566,48 @@ flow_float eps2 = K*K*K*volume;
 **無改造の ① を含む 3 形すべてが現行バイナリで step 82 に発散**した (保存されている旧 run は 5.9e-3 まで収束している)。
 = **この回帰ケースは現行バイナリで再現しない** (私の変更とは無関係。別途調査が要る)。深く収束するケースで別途確認が要る。
 
+### 4.19 MLP は実装可能だが別仕事 (2026-09-19, ユーザ関心)
+
+**forge に MLP は無い。** ただし `limiter_d.cu` の `limiter_r1_d` の直上に
+
+```c
+// Modified multi-dimensional limiting process with enhanced shock stability on unstructured grids
+```
+
+と**論文題名だけが引用**されており (実装は 1-ring の Barth/Venkatakrishnan)、
+§4.18 の比の形のコメントと合わせて**このファイルには実装されていない手法への引用が 2 つ**ある。
+
+**MLP に要る 3 つの接続の在庫**:
+
+| 必要なもの | 状態 |
+| --- | --- |
+| primal 要素 → 節点 (vertex neighbourhood の素) | **solver の host に在る** — `msh.vizCONNE` (`/VIZMESH/CONNE`)。ただし可視化専用で **device には一切上がっていない** (`cuda_forge/` に `vizCONNE` のヒット 0) |
+| device の広いステンシル | **無い**。device は 1-ring のみ (`map_plane_cells_d` / `map_cell_planes_*_d`)。**LSQ 勾配も同じ 1-ring** なので流用できない |
+| 双対 CV の頂点座標 (primal セル重心・面重心) | **host にも device にも無い**。エッジ中点だけ device で再構成可能。`PLANES/centCoords` は双対**面**の重心で別物 |
+
+**2-ring は代用にならない (実測)**:
+
+| | 1-ring 次数 | vertex nbhd 次数 | `1∪2-ring` から漏れる vertex nbhd |
+| --- | --- | --- | --- |
+| 2D quad (`case/46` sern, 62070 節点) | 3.97 | 7.90 | **0** (ただし軸方向 2 つ先が ~3.93 個余分に入り**リミッタが緩くなる**) |
+| **3D hex** (`case/18` backstep, 98973 節点) | 5.73 | 23.58 | **6.93 個 (最大 8)** ← 六面体の体対角は primal エッジで 3 ホップ |
+
+**コスト**: vertex-neighbour CSR は 2D sern で ~2.2 MB、3D backstep で ~9.7 MB、
+**3D hex 2.37 M 節点で ~234 MB**。pass1 の gather は 1-ring 比 **約 4.1 倍**。
+リミッタは既に「3D 2.37 M 節点で 9.5 ms/step」と記録のある工程なので無視できない。
+
+**実装の足がかりはある**: CSR 構築は変換器の `renumberNodesRCM` (`gmshReader.hpp:202-225`) が
+**まさに vertex neighbourhood グラフ**を作っており流用できる。device 上の 2-ring 走査の先例も
+`ransBoundary_d.cu` の `compute_wall_y_eff_d` にある。
+
+**落とし穴** (コードで確認済み): 周期 node では CV が union-find で合併されるので、MLP の min/max も
+`periodicGatherMax/Min` で group 合併しないと周期対で ψ が食い違う (既存 2 段構造と同じ手当てが要る)。
+
+**判断: 本 plan では扱わない。** ③ 比の形で `ro` の逸脱は既に 0 になっており、MLP が追加で改善するのは
+`Ux`/`Uy`/`P` の逸脱 (現状 213 / 13604 / 554) だが、その多くは診断の時相アーチファクトを含んでいて
+**現状の測定器では改善を判定できない**。MLP は
+**(a) device への `vizCONNE` 配線と ~234 MB / 4.1 倍コストの是非、(b) 判定できる測定器**が揃ってからの別 plan とする。
+
 ## 5. 実装ステップ
 
 1. 設計確定 (§4.5 の未決を codex レビューで決める)
@@ -579,6 +621,7 @@ flow_float eps2 = K*K*K*volume;
 | --- | --- | --- |
 | W0 | ~~測定器の座標~~ **完了 (2026-09-19)**: `check_wall_cv_drain.py` を削除し `check_face_reconstruction.py` に置換 (ノード座標・再構成状態の物理性のみ)。§4.5/§4.6 の結論を訂正 |
 | W1 | **共通化と範囲限定まで完了 (2026-09-19) → §4.8 設計 / §4.15 実装**。`reconIncrement_d.cuh` に増分の唯一の定義を置き、流束とリミッタが同じ関数を呼ぶ。周期・化学種・受動スカラーへの波及を遮断し、config で node + convMethod 0/1/2 に限定。**可否判定は保留** — A/B に使っていた 2D ベース診断は float レベルでカオス的で生存 step が指標にならないと判明 (§4.15)。**W1c が前提** |
+| W2b | **MLP (vertex neighbourhood ステンシル) は別 plan** → §4.19。接続は host の `vizCONNE` に在るが device 未配線、**3D では 2-ring が代用にならない** (体対角 6.93 個が漏れる)、コストは ~234 MB / pass1 4.1 倍 (2.37 M 節点)。③ で `ro` は既に 0 なので、残る `Ux`/`Uy`/`P` の改善を**判定できる測定器**ができてから |
 | W1c | ~~A/B の土台を作り直す~~ **完了 (2026-09-19) → §4.16**。ベース無しの安定ケースで 4 構成とも GATES PASS。**`ro` で Barth + `mr:1` のみ厳密有界 (0)**、Venkat は `mr` を変えても不変 (~6600) = **W1 単独では生産既定は直らない**。目的量は Venkat + `mr:1` で **+0.54 %** 動くので G4 の SU2 クロスチェックが要る |
 | W1b | **実装 + 形の比較まで完了 (2026-09-19) → §4.13 / §4.17 / §4.18**。`space.limiterScaled` 0/1/2 + `venkatK`。**③ 比の形 (eps=1e-3) が最良** — `ro` 逸脱 0 かつ他変数も最少、**基準値が不要**なので ② の設計問題が消える。目的量の変化は +0.026 %。**残**: 収束速度の試験 (深く収束するケース)、単位変換・相似拡大・格子細分・軸対称、標準ケース回帰、既定化の判断 |
 | W2 | **面単位の非物理フォールバック** (SU2 の `bad_recon` 相当) を**導入候補として独立検証**。§4.5 のとおりベース run でのみ発火し対照では発火しないので**本件の直接候補**。組成・エンタルピーも整合して再計算すること |
