@@ -57,10 +57,18 @@ def load_series(path):
 
 
 def _tail_rise(ser, tail_frac):
-    """末尾 2*tail_frac 窓で log10|値| を直線に当て、(窓全体の上昇桁数 D, 残差の標準偏差 sigma)
-    を返す。D はその窓のトレンド、sigma はその列自身のジッタの大きさ。点数が足りない・
-    分散が無い場合は **None** を返す (ジッタが測れないので、判定は既存の 2 窓平均比だけに
-    委ねる。数 step で落ちた run の系列がこれに当たる)。"""
+    """末尾 2*tail_frac 窓を 2 通りに評価し `(spike, slow)` を返す。
+
+    - `spike`: **末端の急増**。窓末尾の数点の最大が窓中央値の 10 倍を超えるか。
+      緩やかなトレンドの検定では捕まらない「最後の数 step での爆発」を独立に見る
+      (実例: `case/37.pintle_nozzle/run_0009` の `rms_roUx` は末尾 5 点で 2.77e-4 → 7.58e22 と
+      26 桁跳ねるのに、窓 444 点の回帰では上昇 0.13 桁・散らばり 1.58 桁に埋もれる)。
+    - `slow`: **持続的な緩い上昇**。log10|値| の線形回帰の傾きが有意 (t > 3) で、窓全体の
+      上昇が 10 % を超えるか。散らばりが大きいことは上昇が無い証明にならないので、
+      「上昇 > 散らばり」ではなく回帰の有意性で見る (codex plan レビュー Major 1)。
+
+    点数が足りない・分散が無い場合は **None** を返す (判定は既存の 2 窓平均比だけに委ねる。
+    数 step で落ちた run の系列がこれに当たる)。"""
     w = [abs(x) for x in ser[int(len(ser) * (1 - 2 * tail_frac)):] if x > 0.0]
     m = len(w)
     if m < 8:
@@ -73,8 +81,18 @@ def _tail_rise(ser, tail_frac):
         return None
     slope = sum((i - xb) * (yi - yb) for i, yi in enumerate(y)) / sxx
     resid = [yi - (yb + slope * (i - xb)) for i, yi in enumerate(y)]
-    sigma = math.sqrt(sum(r * r for r in resid) / m)
-    return slope * (m - 1), sigma
+    var = sum(r * r for r in resid) / (m - 2) if m > 2 else 0.0
+    se = math.sqrt(var / sxx) if var > 0.0 and sxx > 0.0 else 0.0
+    rise = slope * (m - 1)
+    tval = (rise / (m - 1)) / se if se > 0.0 else (math.inf if slope > 0.0 else 0.0)
+    slow = tval > 3.0 and rise > math.log10(1.10)
+
+    ntip = max(3, int(math.ceil(0.02 * m)))
+    srt = sorted(w)
+    med = srt[m // 2] if m % 2 else 0.5 * (srt[m // 2 - 1] + srt[m // 2])
+    tip = max(w[-ntip:])
+    spike = med > 0.0 and tip > 10.0 * med
+    return spike, slow
 
 
 def analyze(path, min_drop, tail_frac):
@@ -109,17 +127,14 @@ def analyze(path, min_drop, tail_frac):
         # 2026-08-15)。本物のリバウンド発散は最小値の 2 倍を速やかに超えるので
         # 検出力は保たれる。
         smin = min(abs(x) for x in ser if x != 0.0) if any(x != 0.0 for x in ser) else 0.0
-        # rising の 3 条件目: **上昇がその列自身のジッタを超えていること**。これが無いと、
+        # rising の 3 条件目: **末端の急増か、有意な緩い上昇があること**。これが無いと、
         # プラトー自体が数倍の幅で揺れている列では 2 窓平均の大小がジッタの位相だけで決まり、
         # 判定が再現しない。実証 (2026-09-19): case/46 の run_0193 と run_0195 は設定重複で
         # 同一形状・同一レシピになっており rms_roY1 の分布も同一 (後半中央値 1.37e-6 / 1.33e-6、
         # p5-p95 一致、帯 8.5 倍) だったのに、ma/mb が 0.961 と 1.053 に割れて flat / rising に
-        # 分かれ、ゲートが PASS / FAIL に反転した。窓全体の上昇桁数 D が 1σ を超えることを課す。
-        # σ が大きい (元から荒れている) 列で本物の発散を見逃さないよう、閾値は 1 桁で頭打ちに
-        # する (D > 1 dec なら σ によらず rising)。
+        # 分かれ、ゲートが PASS / FAIL に反転した。判定は `_tail_rise` に分離してある。
         rise = _tail_rise(ser, tail_frac)
-        over_jitter = True if rise is None else (
-            rise[0] > max(math.log10(1.10), min(rise[1], 1.0)))
+        over_jitter = True if rise is None else (rise[0] or rise[1])
         trend = ('rising' if (ma > mb * 1.05 and ma > 2.0 * smin and over_jitter)
                  else ('flat' if ma > mb * 0.9 else 'falling'))
 

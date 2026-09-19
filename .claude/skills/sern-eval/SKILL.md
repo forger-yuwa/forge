@@ -14,7 +14,8 @@ description: ⑤ SERN (case/46) の評価 run を組む・回す・判定する�
 
 > **検証済み (2026-09-19, R-b)。** 「梯子 1500×3 + 本段 500 = 5000 step」を 3 設計 (`L_cowl` 1.2 / 3.0 /
 > θ_r0 21°) で長時間参照 (4000×3 + 本段 12000 = 24000 step) と直接比較し、**全比較量が事前宣言した許容内**:
-> `C_T_with_shear` 相対 3e-6、壁圧 L2 ≤ 1e-3、`vis_turb` L2 ≤ 9e-4、剥離なし、質量不均衡 ≤ 0.002 %。
+> `C_T_with_shear` 相対差 2.400e-6 / 3.413e-6 / 2.991e-6 (A/B/C)、`C_M` 4.842e-5 / 5.956e-5 / 6.354e-5、
+> 壁圧 L2 ≤ 1e-3、`vis_turb` L2 ≤ 9e-4、剥離なし、質量不均衡 ≤ 0.002 %。
 > run は `case/46.sern_design/run_0194`–`run_0199`、詳細は
 > [`plans/active/tooling-nozzle-sern-startup.md`](../../../plans/active/tooling-nozzle-sern-startup.md) §5.1 R-b。
 > **注意**: `vis_turb` の「500 step で DRIFTING」は準定常判定の話で、参照との**差**は 1e-3 以下 (上表の比較)。
@@ -25,15 +26,18 @@ description: ⑤ SERN (case/46) の評価 run を組む・回す・判定する�
 | `gas.model` | `frozen_tp` | 排気 = CEA 凍結組成 EXH、外気 = AIR。熱力学は NASA-9 |
 | `spec.wall_thermal` | 等温 1000 K | 断熱は M∞10 で回復温度 4600 K になり残差がプラトー (R4b) |
 | `mesh.ic` | **`moc`** | 一様 IC は入口状態を全域に置き出口で 17 倍ずれる。MOC 場を外挿して埋める |
-| 梯子 (暖機/soft/mid) | **各 1500 step, CFL 0.1** | 1000 は設計によって `rms_roY1` が上昇。3 設計で確認 |
-| 本段 | **CFL 5.0, 500 step** | 上限は 6 (12 で発散)。頭打ちは cfl 6 で 500 step (0.001 % 以内) |
+| 暖機 (層流, 1 次) | **1500 step, CFL ramp 0.1 → 0.3 → 1.0** | `opt.warm_lam_ramp`。runner が forge を 3 回起動する |
+| soft (SST, 1 次) | **1500 step, CFL 1.0** | `opt.soft_cfl` |
+| mid (SST, 2 次) | **1500 step, CFL 1.0** (`soft_cfl` と共有) | 次数と CFL を同時に上げない |
+| 本段 (SST, 2 次) | **500 step, CFL 5.0** | 上限は 6 (12 で発散)。合計 5000 step |
 | `evaluate.implicit_relax` | **使わない** | 0.7 は定常解を 0.05 % 動かす。CFL を上げる方で速くする |
 | `evaluate.p_min` | 20.0 | 既定 1.0 Pa は M∞10 の膨張で割れる |
 | `evaluate.outlet_kind` | **`outflow`** (3D) | `statPress` の Ps は実出口圧より桁違いに低く、node の亜音速壁列から unstart |
 
-**CFL の上限は段で 60 倍違う**。立ち上がりは 0.1、発達後は 6。梯子は外せない (一様 IC からの直接起動は cfl 0.1 でも発散)。
-`opt.warm_lam_ramp: [0.1, 0.3, 1.0]` で暖機の CFL を段階昇圧できる (runner が forge を複数回起動)。
+**CFL の上限は段で 50 倍違う**。暖機の入りは 0.1、本段は 5〜6。梯子は外せない (一様 IC からの直接起動は cfl 0.1 でも発散)。
 **soft と mid は `soft_cfl` を共有していて独立に振れない** (段ごとの上限は未測定)。
+`opt.warm_lam_cfl: 0.1` は ramp の初段として残る (ramp を書かないときの固定値)。
+**過去の「梯子は全段 CFL 0.1」という記述は誤り** — R-b で実際に回した入力は soft/mid とも 1.0 (codex plan-2 M2)。
 
 ## 2. 収束の判定 (5 条件すべて)
 

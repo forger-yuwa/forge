@@ -48,7 +48,11 @@ def field_health(run_dir) -> dict:
         out["ok"] = False; out["reasons"].append("no volume res_*.h5"); return out
     out["file"] = res[-1].name
     with h5py.File(res[-1], "r") as f:
-        for v in FIELD_VARS:
+        # 固定の保存量に加え、**ファイルにある化学種・受動スカラーを全部**見る (codex plan-2 M3)。
+        # FIELD_VARS だけだと roY* の NaN が field_health も floor_gate も素通りする実例があった。
+        extra = tuple(sorted(k for k in f["VALUE"].keys() if re.fullmatch(r"(roY|Y|roXi|roQ)\d*[\d_]*", k)))
+        out["species_checked"] = list(extra)
+        for v in FIELD_VARS + extra:
             if f"VALUE/{v}" not in f:
                 continue
             a = f[f"VALUE/{v}"][:]
@@ -191,12 +195,17 @@ def floor_gate(run_dir, p_min: float | None = None, tol: float = 1.0e-6) -> dict
             ys = sorted(k for k in V.keys() if re.fullmatch(r"roY\d+", k))
             if ys and "ro" in V:
                 roa = np.asarray(V["ro"][:]); tot = np.zeros_like(roa)
-                neg = 0
+                neg = 0; nonfin = 0
                 for k in ys:
                     a = np.asarray(V[k][:]); tot += a
+                    # **非有限を先に数える** (codex plan-2 M3)。isfinite で絞ってから負値を見ると
+                    # NaN が「負でない」として合格側に落ちる
+                    nonfin += int(np.sum(~np.isfinite(a)))
                     neg += int(np.sum(np.isfinite(a) & (a < -tol * np.maximum(roa, 1e-30))))
+                counts["roY 非有限"] = nonfin
                 counts["roY<0"] = neg
                 good = np.isfinite(tot) & np.isfinite(roa) & (roa > 0)
+                # 全点判定不能なら -1 を返し、下の bad 判定で不合格にする
                 counts["|sum(roY)/ro-1| max"] = float(np.max(np.abs(tot[good] / roa[good] - 1.0))) if good.any() else -1.0
             if "roOmega" in V:
                 a = np.asarray(V["roOmega"][:])
@@ -204,8 +213,9 @@ def floor_gate(run_dir, p_min: float | None = None, tol: float = 1.0e-6) -> dict
             # k の床判定は壁ピン (正当) と区別できないので**当面外す** (R-f)
     except Exception as e:                                 # **読めないときは判定不能で不合格**
         return {"ok": False, "counts": {}, "reasons": [f"判定不能: {type(e).__name__}: {e}"]}
+    # `|sum...|` は許容超過 **と 判定不能 (-1)** の両方を不合格にする (codex plan-2 M3)
     bad = {k: v for k, v in counts.items()
-           if (k.startswith("|sum") and v > 1.0e-4) or (not k.startswith("|sum") and v != 0)}
+           if (k.startswith("|sum") and (v > 1.0e-4 or v < 0.0)) or (not k.startswith("|sum") and v != 0)}
     return {"ok": not bad, "counts": counts, "file": os.path.basename(fs[-1]),
             "reasons": [] if not bad else ["床/下限に張り付き: " + ", ".join(f"{k} {v} ノード" for k, v in bad.items())]}
 
