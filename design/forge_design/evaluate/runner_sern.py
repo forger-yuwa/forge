@@ -486,7 +486,7 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
                         ext_top=bool(int(m.get("ext_top", 0))), top_depth=float(m.get("top_depth", 2.0)),
                         nj_ext_top=int(m.get("nj_ext_top", 41)), nj_wake=int(m.get("nj_wake", 9)),
                         vehicle_clearance=float(m.get("vehicle_clearance", 0.06)), first_top_frac=float(m.get("first_top_frac", 0.02)),
-                        vehicle_taper=float(m.get("vehicle_taper", 0.0)), t_base=float(m.get("t_base", 0.0)), split_plume_at_te=bool(m.get("split_plume_at_te", False)),
+                        vehicle_taper=float(m.get("vehicle_taper", 0.0)), t_base=float(m.get("t_base", 0.0)), first_wake_frac=float(m.get("first_wake_frac", 0.0)), split_plume_at_te=bool(m.get("split_plume_at_te", False)),
                         vehicle_wedge_deg=float(m.get("vehicle_wedge_deg", 3.0)), ramp_fillet=float(m.get("ramp_fillet", 0.0)),
                         scale=H)
     if wall_offset:

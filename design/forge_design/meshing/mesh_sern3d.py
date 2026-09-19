@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .mesh2d import _radial_fracs
-from .mesh_sern import _cluster_stations, _tanh_two_sided
+from .mesh_sern import _cluster_stations, _tanh_two_sided, _wake_stations
 
 PHYS_SERN3D = {"inlet_nozzle": 1, "inlet_ext": 2, "outlet": 3, "ramp": 4, "cowl_in": 5, "cowl_out": 6, "bottom": 7,
                "top_out": 8, "sym": 9, "side_far": 10, "sidewall_in": 11, "sidewall_out": 12, "fluid": 13, "vehicle": 14, "vehicle_top": 15, "underside_far": 16, "vehicle_side": 17, "vehicle_base": 18}
@@ -62,6 +62,8 @@ class SernMesh3DParams:
     L_up: float = 0.5
     x_out_extra: float = 2.0
     bot_depth: float = 3.0
+    first_wake_frac: float = 0.0  # ベース直後の第一 station 間隔 /H (**絶対値**)。t_base > 0 のとき必須で
+                                  # t_base/5 以下 (plan convection-node-wall-reconstruction §4.28)
     first_wall_frac: float = 4.0e-3
     first_z_frac: float = 4.0e-3
     interface_angle: float = 0.0
@@ -71,6 +73,26 @@ class SernMesh3DParams:
                                  # 側端 (z = W/2) の外は板が無いので、最後の z セルで厚さ 0 に閉じる
     x_cluster_w: float = 0.15
     x_cluster_a: float = 3.0
+
+
+def _sern3d_plume(L_cowl, x_out, prm):
+    """プルーム区間の station。ベース厚さ `t_base` があるなら、後縁直後の第一間隔を**絶対値**で押さえる。
+
+    3D の R4e は `t_base` が既定 > 0 (有限ベース) なので、ここを外すと
+    ベース後流の剪断層を 1 セルで跨いで発散する (plan convection-node-wall-reconstruction §4.28)。
+    形状でなく解像度の問題なので、粗い指定は黙って通さず**生成を失敗させる**。"""
+    tb = float(getattr(prm, "t_base", 0.0))
+    fw = float(getattr(prm, "first_wake_frac", 0.0))
+    if tb > 0.0:
+        if not (fw > 0.0):
+            raise ValueError(
+                f"mesh_sern3d: t_base={tb:g} > 0 なのに first_wake_frac が未設定。"
+                f"ベース直後の第一 station 間隔を絶対値で与えること (t_base/5 = {tb/5.0:g} 以下)")
+        if fw > tb / 5.0:
+            raise ValueError(
+                f"mesh_sern3d: first_wake_frac {fw:g} がベース厚さ {tb:g} に対して粗すぎる "
+                f"(t_base/5 = {tb/5.0:g} 以下にすること。plan convection-node-wall-reconstruction §4.28)")
+    return _wake_stations(L_cowl, x_out, int(prm.ni_plume), fw, prm.x_cluster_w, prm.x_cluster_a)
 
 
 def generate_sern_mesh3d(design, prm: SernMesh3DParams):
@@ -89,14 +111,14 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
             _cluster_stations(-prm.L_up, xf1, max(prm.ni_up - 6, 4), (False, True), prm.x_cluster_w, prm.x_cluster_a),
             np.linspace(xf1, 0.0, nf)[1:], np.linspace(0.0, xf2, nf)[1:],
             _cluster_stations(xf2, L_cowl, prm.ni_noz, (True, True), prm.x_cluster_w, prm.x_cluster_a)[1:],
-            _cluster_stations(L_cowl, x_out, prm.ni_plume, (True, False), prm.x_cluster_w, prm.x_cluster_a)[1:],
+            _sern3d_plume(L_cowl, x_out, prm)[1:],
         ])
     else:
         R_f = 0.0; t_f = xf1 = xf2 = 0.0
         xs = np.concatenate([
             _cluster_stations(-prm.L_up, 0.0, prm.ni_up, (False, True), prm.x_cluster_w, prm.x_cluster_a),
             _cluster_stations(0.0, L_cowl, prm.ni_noz, (True, True), prm.x_cluster_w, prm.x_cluster_a)[1:],
-            _cluster_stations(L_cowl, x_out, prm.ni_plume, (True, False), prm.x_cluster_w, prm.x_cluster_a)[1:],
+            _sern3d_plume(L_cowl, x_out, prm)[1:],
         ])
     xs[int(np.argmin(np.abs(xs - L_ramp)))] = L_ramp
     i_te = int(np.argmin(np.abs(xs - L_cowl))); assert abs(xs[i_te] - L_cowl) < 1e-12

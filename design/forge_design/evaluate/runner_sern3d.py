@@ -121,7 +121,7 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
                            cowl_thickness=float(m.get("cowl_thickness", m2.get("cowl_thickness", 0.0))),
                            ext_top=bool(int(m2.get("ext_top", 0))),
                            vehicle_side=bool(m.get("vehicle_side", True)), nj_vside=int(m.get("nj_vside", 17)), top_depth=float(m2.get("top_depth", 2.0)), nj_ext_top=int(m2.get("nj_ext_top", 41)),
-                           vehicle_clearance=float(m2.get("vehicle_clearance", 0.06)), t_base=float(m2.get("t_base", 0.02)), first_top_frac=float(m2.get("first_top_frac", 0.02)),
+                           vehicle_clearance=float(m2.get("vehicle_clearance", 0.06)), t_base=float(m2.get("t_base", 0.02)), first_wake_frac=float(m.get("first_wake_frac", m2.get("first_wake_frac", 0.0))), first_top_frac=float(m2.get("first_top_frac", 0.02)),
                            vehicle_taper=float(m2.get("vehicle_taper", 0.0)), vehicle_wedge_deg=float(m2.get("vehicle_wedge_deg", 3.0)),
                            ramp_fillet=float(m2.get("ramp_fillet", 0.0)),
                            interface_angle=float(m2.get("interface_angle_rad", theta_b)),

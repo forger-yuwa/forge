@@ -55,6 +55,9 @@ class SernMeshParams:
     top_depth: float = 2.0               # 機体上面線から上境界までの高さ / H
     nj_ext_top: int = 41
     nj_wake: int = 9                     # base 高さ分の後流ブロックの j 点数
+    first_wake_frac: float = 0.0          # ベース直後の第一 station 間隔 /H (**絶対値**, 0 = 従来のクラスタ比)。
+                                         # t_base > 0 のときは必須で、t_base/5 以下でなければ生成を失敗させる
+                                         # (plan convection-node-wall-reconstruction §4.28)。
     t_base: float = 0.0                  # 機体後縁ベースの厚み /H。**物理入力**。> 0 で「テーパ + 薄いベース」
                                          # (3D の R4e 案 (d) と同じ形状)。0 = 従来のテーパ (厚さ 0 で終わる)。
                                          # `vehicle_taper = 0` の全高鉛直ベース (h_base ≈ 1.9 H) とは別物で、
@@ -88,17 +91,36 @@ def _cluster_stations(x0, x1, n, ends=(True, True), w=0.15, a=3.0):
     return x0 + L * np.interp(np.linspace(0.0, 1.0, n), cum, xi)
 
 
+def _wake_stations(x_te, x_out, n, first_abs, w, a):
+    """ベース直後 (x_te) の第一 station 間隔を**絶対値** `first_abs` にして x_out まで伸ばす。
+
+    ベース後流は壁法線が流れ方向なので、`first_wall_frac` が壁法線に対して果たす役割を
+    ここでは流れ方向に持たせる必要がある。等間隔やクラスタ比では「ベース厚さの数倍のセルが
+    ベース直後に並ぶ」状態を許してしまい、剪断層を 1 セルで跨いで発散する
+    (plan convection-node-wall-reconstruction §4.28: 厚さ 2.0 mm のベースに対し第一 station が
+    8.19 mm = 4.1 倍で、壁 u=0 から 1100 m/s へのエッジ中点に u_face≈550 m/s が立った)。
+    戻り値は x_te を**含む**。"""
+    L = x_out - x_te
+    if not (first_abs > 0.0):
+        return _cluster_stations(x_te, x_out, n, (True, False), w, a)
+    return x_te + L * _geom_start(n, first_abs / L)
+
+
 def _plume_stations(L_cowl, L_ramp, x_out, n, prm):
     """プルーム区間の station。`split_plume_at_te` で後縁 L_ramp を境に 2 分割し、両側にクラスタを置く。
     戻り値は L_cowl を**含まない** (呼び出し側が前区間と連結する)。"""
     w, a = prm.x_cluster_w, prm.x_cluster_a
-    if not getattr(prm, "split_plume_at_te", False) or not (L_cowl < L_ramp < x_out):
+    # t_base > 0 のときは **必ず** 後縁で分割する。分割しないとベース直後の第一 station が
+    # プルーム全長のクラスタ比で決まり、`first_wake_frac` が効かない
+    # (plan convection-node-wall-reconstruction §4.28: これを見落として 8.19 mm のまま生成していた)。
+    _split = bool(getattr(prm, "split_plume_at_te", False)) or float(getattr(prm, "t_base", 0.0)) > 0.0
+    if not _split or not (L_cowl < L_ramp < x_out):
         return _cluster_stations(L_cowl, x_out, n, (True, False), w, a)[1:]
     fa = (L_ramp - L_cowl) / (x_out - L_cowl)
     na = max(int(round(n * fa)), 5)
     nb = max(n - na + 1, 5)
     return np.concatenate([_cluster_stations(L_cowl, L_ramp, na, (True, True), w, a)[1:],
-                           _cluster_stations(L_ramp, x_out, nb, (True, False), w, a)[1:]])
+                           _wake_stations(L_ramp, x_out, nb, float(getattr(prm, "first_wake_frac", 0.0)), w, a)[1:]])
 
 def _geom_start(n, first):
     """[0,1] を n 点、始端の第一間隔が first (比) になる幾何級数で切る (first ≥ 1/(n−1) なら一様)。"""
@@ -140,6 +162,21 @@ def generate_sern_mesh(design, prm: SernMeshParams):
     L_ramp = float(design.L_ramp)
     y_e = float(design.ramp_xy[-1, 1])
     x_out = L_ramp + prm.x_out_extra
+    # ベース厚さがあるなら、その後流を 1 セルで跨がせない (plan convection-node-wall-reconstruction §4.28)。
+    # 粗いまま黙って生成すると、壁 u=0 から外側 1000 m/s へのエッジ中点に数百 m/s の面速度が立ち、
+    # 有界性も物理性も満たしたまま壁 CV から質量が抜けて発散する。**形状でなく解像度なので生成を失敗させる**。
+    _tb = float(getattr(prm, "t_base", 0.0))
+    if _tb > 0.0:
+        _fw = float(getattr(prm, "first_wake_frac", 0.0))
+        if not (_fw > 0.0):
+            raise ValueError(
+                f"mesh_sern: t_base={_tb:g} > 0 なのに first_wake_frac が未設定。"
+                f"ベース直後の第一 station 間隔を絶対値で与えること (t_base/5 = {_tb/5.0:g} 以下)")
+        if _fw > _tb / 5.0:
+            raise ValueError(
+                f"mesh_sern: first_wake_frac {_fw:g} がベース厚さ {_tb:g} に対して粗すぎる "
+                f"(t_base/5 = {_tb/5.0:g} 以下にすること)。ベース後流の剪断層を 1 セルで跨ぐと発散する "
+                f"(plan convection-node-wall-reconstruction §4.28)")
     # 丸め区間 [xf1, xf2] は station を「追加」せず**ブロック境界**にする (追加すると既存点と 1e-9 まで接近して AR が飛ぶ)
     Rf0 = float(prm.ramp_fillet)
     if Rf0 > 0.0 and len(design.ramp_xy) > 1:
