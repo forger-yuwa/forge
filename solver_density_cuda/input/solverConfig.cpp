@@ -488,6 +488,38 @@ void solverConfig::read(std::string fname)
         std::cout << "'output': level=" << this->outputLevel << " extraFields=" << this->outputExtraFields.size()
                   << " interfaceDiag=" << this->interfaceDiag << "\n";
 
+        // ソルバ内 CHT (`conjugate:` ブロック, 既定 無効)
+        if (config["conjugate"]) {
+            auto cj = config["conjugate"];
+            this->conjugateEnabled   = 1;
+            this->conjugateMode      = getOptionalValidatedValue<std::string>(cj, "mode", std::string("local1d"), "conjugate");
+            if (this->conjugateMode != "local1d")
+                throw std::runtime_error("Key 'mode' in 'conjugate': only 'local1d' is implemented (shell2d/fem2d は外部ループ tools/cht_loop.py を使う).");
+            this->conjugateThickness = getValidatedValue<double>(cj, "thickness", "conjugate");
+            this->conjugateKsolid    = getValidatedValue<double>(cj, "k_solid", "conjugate");
+            if (!(this->conjugateThickness > 0.0) || !(this->conjugateKsolid > 0.0))
+                throw std::runtime_error("'conjugate': thickness and k_solid must be positive.");
+            this->conjugateBackKind  = getOptionalValidatedValue<std::string>(cj, "back", std::string("isothermal"), "conjugate");
+            this->conjugateTb        = getOptionalValidatedValue<double>(cj, "T_b", 300.0, "conjugate");
+            this->conjugateHc        = getOptionalValidatedValue<double>(cj, "h_c", 0.0, "conjugate");
+            if (this->conjugateBackKind == "coolant" && !(this->conjugateHc > 0.0))
+                throw std::runtime_error("'conjugate': back=coolant requires h_c > 0.");
+            if (this->conjugateBackKind == "adiabatic")
+                throw std::runtime_error("'conjugate': back=adiabatic は定常解を持たない (正味入熱が 0 でない限り)。isothermal か coolant を使うこと.");
+            if (this->conjugateBackKind != "isothermal" && this->conjugateBackKind != "coolant")
+                throw std::runtime_error("Key 'back' in 'conjugate' must be 'isothermal' or 'coolant'.");
+            this->conjugateInterval  = getOptionalValidatedValue<int>(cj, "interval", 50, "conjugate");
+            this->conjugateWarmup    = getOptionalValidatedValue<int>(cj, "warmup", 0, "conjugate");
+            this->conjugateRelax     = getOptionalValidatedValue<double>(cj, "relax", 1.0, "conjugate");
+            if (!(this->conjugateInterval > 0)) throw std::runtime_error("'conjugate': interval must be > 0.");
+            if (!(this->conjugateRelax > 0.0 && this->conjugateRelax <= 1.0))
+                throw std::runtime_error("'conjugate': relax must be in (0, 1].");
+            std::cout << "'conjugate': mode=" << this->conjugateMode << " t=" << this->conjugateThickness
+                      << " k_s=" << this->conjugateKsolid << " back=" << this->conjugateBackKind
+                      << " T_b=" << this->conjugateTb << " interval=" << this->conjugateInterval
+                      << " warmup=" << this->conjugateWarmup << " relax=" << this->conjugateRelax << "\n";
+        }
+
         // 空間設定
         auto space = config["space"];
         this->convMethod = getValidatedValue<int>(space, "convMethod", "space");

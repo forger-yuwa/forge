@@ -40,6 +40,8 @@ python3 verify_v1.py run_0001_v1_slab    # VERDICT
 | `run_*` | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
 | --- | --- | --- | --- |
 | `run_0001_v1_slab` | **V1 本体**: 外部弱連成ループ (11 反復, 各 10000 step)。`--flux q_compact`, $R_s$=0.2, 背面 300 K, 上壁 350 K | **VERDICT PASS**: $T_w$=316.2659 K (解析解 316.2618、温度上昇 16.27 K に対し **0.025 %**)、**両側 $q$ の不一致 0.0053 %** (81.3252 vs 81.3296 W/m²)、$q$ の解析解差 0.0199 %。壁面の $T_w$ ばらつき 6.1e-4 K。履歴 `cht_history.csv`、最終壁温 `Tw_final.csv`、各反復 `it_NNN/` | active (**V1 の根拠**) |
+| `run_0002_v1_insolver` | **ソルバ内連成 (Phase 2a, `conjugate: {mode: local1d, ...}`)**: 同じ固体 ($R_s$=0.2)、20000 step、`interval: 50`、`warmup: 200` | $T_w$ 316.234 K まで来て更新量 3e-4 K/更新 (まだ緩和中) → `run_0003` へ継続 | 中継 |
+| `run_0003_v1_insolver_cont` | 上の継続 (40000 step)。**再開は `conjugate_Tw_3.csv` → `wall_profile_3.csv`** で壁温を引き継ぎ (`ints: {conjugate: 1, wallProfile: 1}`) | **$T_w$=316.2371 K (解析解比 −0.152 % of rise)、両側 $q$ 不一致 0.0002 %** (81.1856 / 81.1855 W/m²)、更新量 1.5e-5 K で静定。外部ループ (run_0001, 316.2659 K) との差 **0.029 K = 0.18 % of rise** = 同じ壁温での流体側離散解の差 (±0.2 %) の範囲 | active (**Phase 2a の根拠 / V4**) |
 
 **収束の根拠**: 外部ループは `cht_history.csv` の `dTw_max` 7.2e-5 K・`res_rel` 7.2e-6 が 2 反復連続で
 許容以下 (`--tol-K 1e-3 --tol-rel 1e-3`)。各反復の CFD は**壁温固定での緩和試験**で 10000 step 後に

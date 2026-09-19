@@ -221,7 +221,8 @@ SST automatic wall treatment (`wallTreatmentSST`) とはコードパスが分離
 > **実装済み**: 界面診断の出力 (`output.interfaceDiag`)、壁温分布の入力 (`wallProfile`)、
 > 共有 CV の壁温競合の起動時拒否、**固体側モデル** ([`tools/solid_shell.py`](../solver_density_cuda/tools/solid_shell.py))、
 > **外部弱連成ループ** ([`tools/cht_loop.py`](../solver_density_cuda/tools/cht_loop.py))。
-> **未実装**: ソルバ内連成 (`conjugate` 属性)、`fem2d` 固体、拘束反力込みの $q_{\rm eff}$。
+> **ソルバ内連成も実装済み (Phase 2a, `local1d` のみ)**: `conjugate:` ブロック + bcond `ints: {conjugate: 1}`。
+> **未実装**: ソルバ内の `shell2d`/`fem2d` (面内伝導が要るなら外部ループを使う)、拘束反力込みの $q_{\rm eff}$、dual-time 連成。
 > 検証: 1 次元純伝導の共役解を解析解と照合 (`case/52.conjugate_slab`) — $T_w$ 誤差 0.025 %、
 > 両側 $q$ の不一致 0.0053 % で **PASS**。
 > 設計判断と検証計画は [`plans/active/boundary-conjugate-heat-transfer.md`](../plans/active/boundary-conjugate-heat-transfer.md)
@@ -303,6 +304,33 @@ $$\left(A_s+D_f\right)T^{k+1}=b_s+Q_f(T^{k})+D_f\,T^{k}$$
   素の固定点反復は収束しないことがある (実測: 三重対角 SPD の応答で 200 反復未収束 → Anderson 深さ 5 で 57 反復)。
   加速候補は $\Phi$ が降下しなければ棄却し、$D_f$ を変えたら履歴を捨てる。
   **$\Delta\Phi$ が丸め以下の停滞を合格にしない**。局所最大ノルムは最終ゲート (下記 G-if) に使う。
+
+#### ソルバ内連成 (`conjugate:`, Phase 2a)
+
+```yaml
+conjugate: {mode: local1d, thickness: 1.0e-3, k_solid: 0.217, back: isothermal, T_b: 300.0,
+            interval: 50, warmup: 500, relax: 1.0}
+```
+
+と書き、対象壁の bcond に `ints: {conjugate: 1}` を付ける (種別は `wall_isothermal` のまま)。
+`interval` step ごとに、**ステップ完了後** (次の残差組立ての前) に壁温を**抵抗加重平均**で更新する:
+
+$$g_f = \frac{k_{\rm eff}}{d_1},\quad g_s = \frac{1}{R_{\rm tot}},\quad
+  T_w^{new} = \frac{g_f T_1 + g_s T_b}{g_f + g_s}$$
+
+(SU2 の `AVERAGED_TEMPERATURE` と同型。**収束解は更新式に依らない** — 両側の 1 次元法則の交点)。
+
+- **起動時に拒否**: `node` 以外、`unsteady: 1` (dual-time)、`mode != local1d`、背面断熱、
+  対象壁が `wall_isothermal` でない、第一内部点が定まらない壁 CV が 1 つでもある場合。
+- **面内伝導が要るなら使わない**: `local1d` は点ごとの 1 次元抵抗。シェル/一般 2D 固体は
+  外部ループ ([`tools/cht_loop.py`](../solver_density_cuda/tools/cht_loop.py) + `solid_shell.py`) の担当。
+- **再開**: 出力ステップごとに `conjugate_Tw_<physID>.csv` を書く。続きを回すときは
+  これを `wall_profile_<physID>.csv` にコピーして `ints: {conjugate: 1, wallProfile: 1}` にすると、
+  収束した壁温から再開できる (`wallProfile` が初期値、`conjugate` がその後の更新)。
+- **実測 (case/52, V1 の 1 次元共役解)**: 解析解 $T_w$=316.2618 K に対し
+  **ソルバ内 316.2371 K (温度上昇の −0.152 %)**、外部ループ (shell2d) 316.2659 K (+0.025 %)。
+  両側 $q$ の不一致はそれぞれ **0.0002 % / 0.0053 %**。両者の差 0.029 K は
+  **流体側の離散解の差** (同じ壁温での $q$ が ±0.2 % 動く) の範囲。
 
 #### 壁温分布の入力 (`wallProfile`)
 

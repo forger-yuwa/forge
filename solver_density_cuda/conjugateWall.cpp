@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -269,6 +270,134 @@ void checkWallTemperatureSharing(const solverConfig& cfg, const mesh& msh)
     }
     std::cout << "[conjugateWall] wall temperature sharing check: OK ("
               << owners.size() << " wall CVs scanned)" << std::endl;
+}
+
+
+// ---------------------------------------------------------------- 内部 CHT (Phase 2a)
+namespace {
+
+bool bcondIsConjugate(const bcond& bc)
+{
+    const auto it = bc.inputInts.find("conjugate");
+    return (it != bc.inputInts.end() && it->second == 1);
+}
+
+double backResistance(const solverConfig& cfg)
+{
+    if (cfg.conjugateBackKind == "coolant") return 1.0 / cfg.conjugateHc;
+    return 0.0;                                   // isothermal
+}
+
+} // namespace
+
+bool conjugateActive(const solverConfig& cfg, const mesh& msh)
+{
+    if (cfg.conjugateEnabled != 1) return false;
+    for (const bcond& bc : msh.bconds) if (bcondIsConjugate(bc)) return true;
+    return false;
+}
+
+void initConjugateWalls(const solverConfig& cfg, const mesh& msh)
+{
+    if (!conjugateActive(cfg, msh)) {
+        // ブロックだけ書いて bcond で有効化していない = 黙って無効になるので警告する
+        if (cfg.conjugateEnabled == 1)
+            std::cerr << "[conjugateWall] WARNING: 'conjugate:' block is present but no bcond has "
+                         "ints: {conjugate: 1} — the coupling is inactive.\n";
+        return;
+    }
+    if (cfg.discretization != "node") {
+        std::cerr << "[conjugateWall] ERROR: in-solver CHT is implemented for discretization: node only "
+                     "(cell は wallProfile までが対象)。\n";
+        exit(EXIT_FAILURE);
+    }
+    if (cfg.unsteady == 1) {
+        std::cerr << "[conjugateWall] ERROR: in-solver CHT does not support dual-time (unsteady: 1). "
+                     "過渡では拘束反力が C = D_t(VE) - R^raw になり、本実装の定常仮定が崩れる。\n";
+        exit(EXIT_FAILURE);
+    }
+    for (const bcond& bc : msh.bconds) {
+        if (!bcondIsConjugate(bc)) continue;
+        if (bc.bcondKind != "wall_isothermal") {
+            std::cerr << "[conjugateWall] ERROR: physID " << bc.physID << " has ints: {conjugate: 1} but kind="
+                      << bc.bcondKind << " (must be wall_isothermal).\n";
+            exit(EXIT_FAILURE);
+        }
+        const FirstInterior& fi = firstInterior(cfg, msh, bc);
+        geom_int nbad = 0;
+        for (size_t ib = 0; ib < fi.ok.size(); ++ib) if (!fi.ok[ib]) ++nbad;
+        if (nbad > 0) {
+            std::cerr << "[conjugateWall] ERROR: physID " << bc.physID << ": " << nbad << " / "
+                      << fi.ok.size() << " wall CVs have no usable first interior point "
+                      << "(alignment < " << cfg.interfaceDiagAlignMin << "). 角・斜交で界面抵抗が定義できない。\n";
+            exit(EXIT_FAILURE);
+        }
+    }
+    std::cout << "[conjugateWall] in-solver CHT active (mode=" << cfg.conjugateMode
+              << ", interval=" << cfg.conjugateInterval << ", warmup=" << cfg.conjugateWarmup
+              << ", relax=" << cfg.conjugateRelax << ")" << std::endl;
+}
+
+void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, int iStep)
+{
+    if (!conjugateActive(cfg, msh)) return;
+    if (iStep < cfg.conjugateWarmup) return;
+    if ((iStep - cfg.conjugateWarmup) % cfg.conjugateInterval != 0) return;
+
+    const std::vector<flow_float> T        = pullField(cfg, var, "T",         msh.nCells);
+    const std::vector<flow_float> thermCond= pullField(cfg, var, "thermCond", msh.nCells);
+    const std::vector<flow_float> cp       = pullField(cfg, var, "cp",        msh.nCells);
+    const std::vector<flow_float> visTurb  = pullField(cfg, var, "vis_turb",  msh.nCells);
+    const double Rback = backResistance(cfg);
+
+    for (bcond& bc : msh.bconds) {
+        if (!bcondIsConjugate(bc)) continue;
+        const FirstInterior& fi = firstInterior(cfg, msh, bc);
+        auto& Ts = bc.bvar["Ts"];
+        double dTmax = 0.0;
+        for (size_t ib = 0; ib < bc.iCells.size() && ib < Ts.size(); ++ib) {
+            const geom_int ic = bc.iCells[ib];
+            const geom_int j  = fi.jdof[ib];
+            if (j < 0) continue;
+            const double keff = (double)thermCond[ic] + (double)cp[ic]*(double)visTurb[ic]/cfg.turbulentPrandtl;
+            const double gf   = keff / fi.d1[ib];                    // [W/m2K]
+            const double Rtot = cfg.conjugateThickness / cfg.conjugateKsolid + Rback;
+            const double gs   = 1.0 / Rtot;
+            // 抵抗加重平均 (固定点は両側の 1 次元法則の交点。更新式は収束速度のみを決める)
+            const double Tnew = (gf * (double)T[j] + gs * cfg.conjugateTb) / (gf + gs);
+            const double Tw   = (1.0 - cfg.conjugateRelax) * (double)Ts[ib] + cfg.conjugateRelax * Tnew;
+            dTmax = std::max(dTmax, std::fabs(Tw - (double)Ts[ib]));
+            Ts[ib] = (flow_float)Tw;
+        }
+        // **注意**: H2D ラッパの引数順は (host, device, n) で、D2H の (device, host, n) と逆。
+        if (cfg.gpu == 1 && bc.bvar_d.count("Ts"))
+            cudaWrapper::cudaMemcpy_H2D_wrapper(Ts.data(), bc.bvar_d["Ts"], (geom_int)Ts.size());
+        if (iStep % (cfg.conjugateInterval * 20) == 0) {
+            double tmin = 1e30, tmax = -1e30;
+            for (const flow_float v : Ts) { tmin = std::min(tmin, (double)v); tmax = std::max(tmax, (double)v); }
+            std::cout << "[conjugateWall] step " << iStep << " physID " << bc.physID
+                      << ": Tw " << tmin << " .. " << tmax << " K, max|dTw| " << dTmax << " K" << std::endl;
+        }
+    }
+}
+
+void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
+{
+    if (!conjugateActive(cfg, msh)) return;
+    const bool nodeMode = (cfg.discretization == "node");
+    for (const bcond& bc : msh.bconds) {
+        if (!bcondIsConjugate(bc)) continue;
+        const auto it = bc.bvar.find("Ts");
+        if (it == bc.bvar.end()) continue;
+        std::ofstream ofs("conjugate_Tw_" + std::to_string(bc.physID) + ".csv");
+        ofs << "x y z Ts\n";
+        ofs.precision(10);
+        for (size_t ib = 0; ib < bc.iCells.size() && ib < it->second.size(); ++ib) {
+            double xyz[3]; dofCoords(msh, nodeMode, bc.iCells[ib], xyz);
+            ofs << std::scientific << xyz[0] << " " << xyz[1] << " " << xyz[2] << " "
+                << (double)it->second[ib] << "\n";
+        }
+    }
 }
 
 } // namespace conjugateWall

@@ -360,8 +360,11 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
    **V1 の判定より前に用意する** (codex 2 巡目 #5。旧稿は S6 に置いていた)。
 7. **V1 / V2 / V3** (§6)。**ここを通るまで Phase 2 に進まない**。
    V1 は**依存診断の dual-time 解除**が前提 (§4.3)。
-8. **S6 ソルバ内連成**: `conjugateWall.{hpp,cpp}`、`ints: {conjugate: 1}` の配管、`conjugate_state.h5`、
-   `stage_manifest` の区間 (外部入力のハッシュ込み)、界面ゲート出力。
+8. **S6 ソルバ内連成** — **Phase 2a 完了 (2026-09-19)**: `conjugate:` ブロック + `ints: {conjugate: 1}`、
+   **`local1d` (点ごとの 1 次元抵抗、行列不要)** を C++ 実装。更新は抵抗加重平均で、`interval` step ごとに
+   **ステップ完了後** (`advanceOneStep` 末尾 = 次の残差組立ての前) に適用。起動時拒否 (node 以外 / dual-time /
+   `mode != local1d` / 背面断熱 / 第一内部点が定まらない壁)。再開は `conjugate_Tw_<physID>.csv` → `wallProfile`。
+   **残り**: ソルバ内の面内伝導 (`shell2d`)、`stage_manifest` の区間 (外部入力ハッシュ)、界面ゲートの出力。
 9. **V4 / V5 / V6**。
 10. **S7 docs 整合確認**: 実装と S0 の差分、`procedures/su2-cross-check.md` に CHT (multizone) 手順、
     `procedures/recommended-settings.md`、`procedures/verification/`、`design/CAPABILITIES.md`。
@@ -391,7 +394,7 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | 12 | V2 (M8) | §6。SU2 CHT は multizone。**まず 1D スラブで成立**させ、版・固体メッシュ・界面対応・物性・両ゾーン残差を固定。`procedures/su2-cross-check.md` に手順追加 |
 | 13 | 界面ゲート (M10) | §6。既存ツールの拡張: 未緩和の局所界面不釣合い・固体方程式残差・**絶対**温度更新量・温度量子化の解像性。区間識別に外部入力のハッシュ |
 | 14 | ~~外部ループ~~ **完了 (2026-09-19)**: `tools/cht_loop.py` + `case/52.conjugate_slab` (V1 PASS) | 残り: `--flux q_eff` (拘束反力込み) を依存診断の完成後に接続 |
-| 15 | ソルバ内連成 | §4.6 |
+| 15 | ソルバ内連成 | §4.6。~~`local1d`~~ **Phase 2a 完了 (2026-09-19)**。残り: `shell2d` の C++ 化、`stage_manifest` 区間、界面ゲートの出力、dual-time 契約 |
 | 16 | **一次適用先 (公知データ)** | §4.9。CR-168015 入手 → 翼型座標・$k_s(T)$・冷却孔条件・計測点・run 条件を表に → `case/53` (C3X, 亜音速) → `case/54` (Mark II, **超音速出口**)。内部 HTC 感度帯つき |
 | 17 | Phase 3 判定 | §4.8 の 3 条件を V6 の数値で評価し、要否を結論づける |
 | 18 | docs 同期 | S0 / S7 |
@@ -412,6 +415,19 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
   T3 断熱孤立系の拒否、T4 $k_s(T)$、T5 連成反復が非対角応答でも厳密固定点に到達 (57 反復, 5.6e-8 K)、
   **T5b = codex 3 巡目 #1 の反例を回帰試験化** (最大ノルムは 1.000→1.701 と増えるが $\Phi$ は 1.0081→0.8831 と減る)、
   T5c = 素の固定点反復では収束しないこと (加速器が飾りでない根拠)。
+- **V4 (Phase1 ↔ Phase2) の実測 (2026-09-19)** — run: `case/52.conjugate_slab/run_0003_v1_insolver_cont/`。
+  **ソルバ内連成 (`local1d`)**: $T_w$=**316.2371 K** (解析解比 **−0.152 % of rise**)、
+  **両側 $q$ の不一致 0.0002 %** (81.1856 / 81.1855 W/m²)、更新量 1.5e-5 K で静定。
+  外部ループ (shell2d, 316.2659 K) との差は **0.029 K = 0.18 % of rise** で V4 の許容 (≤0.3 %) 内。
+  差の出どころは**同じ壁温での流体側の離散解の差** (固定壁温の緩和試験で $q$ が ±0.2 % 動く) であり、
+  連成の定式化の差ではない (両者とも自分の界面条件を 0.005 % 以下で満たしている)。
+  再開経路 (`conjugate_Tw_<physID>.csv` → `wall_profile_<physID>.csv`) も同 run で通した。
+- **外部ループを乱流平板に当てた結果 (2026-09-19, 未収束)** — run: `case/48.flat_plate_cooled_m4/run_0017_cht_shell/`。
+  12 反復 (各 6000 step) で `res_rel` が 0.28–0.31 から下がらず、$T_w$ 最大値が 818–863 K で振動して**未収束**。
+  前縁近傍で $h$ が桁で変わるため $D_f^{(0)}=k_{\rm eff}A/d_1$ が過大 (平均 68.8 W/K) で過減衰になったことと、
+  各反復の CFD が 6000 step では収束しきっていないことが効いている。
+  **「外部ループは検証用、生産はソルバ内」という §4.5 の位置づけを実測で裏づけた形**。
+  同じ問題のソルバ内連成は `run_0018_cht_insolver`。
 - **V1 合格 (2026-09-19)** — run: `case/52.conjugate_slab/run_0001_v1_slab/` (11 反復 × 10000 step)。
   `python3 case/52.conjugate_slab/verify_v1.py run_0001_v1_slab` → **VERDICT PASS**:
   $T_w$ = **316.2659 K** (解析解 316.2618、温度上昇 16.27 K に対し **0.025 %** ≤ 0.5 %)、
@@ -538,3 +554,7 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
   (`gen_mesh.py` / `verify_v1.py` / `solid.json`)。`run_0001_v1_slab`: $T_w$ 誤差 **0.025 %**・
   **両側 $q$ 不一致 0.0053 %** で **VERDICT PASS** (11 反復)。
   検証ケースの設計要件 (一様メッシュ・低圧化・`cfl_pseudo` 5) を README に記録。
+- `2026-09-19` — **Phase 2a (ソルバ内連成, `local1d`) 実装・検証**。`conjugate:` ブロックと
+  `ints: {conjugate: 1}`、抵抗加重平均の更新、起動時の拒否条件、`conjugate_Tw_*.csv` による再開。
+  case/52 で **$T_w$ 誤差 −0.152 % of rise・両側 $q$ 不一致 0.0002 %**、外部ループとの差 0.18 % of rise (V4 許容内)。
+  **外部ループは乱流平板 (case/48 run_0017) では 12 反復で未収束**で、生産はソルバ内という位置づけを実測で確認。

@@ -41,6 +41,19 @@ public:
     // iface_T1 / iface_d1 / iface_keff / iface_q_compact / iface_q_recon / iface_ok / iface_align を追加する。
     // 定義と符号は conjugateWall.hpp と methods/boundary.md「共役熱伝達 (CHT)」が正本。
     int interfaceDiag = 0;
+    // ソルバ内 CHT (Phase 2a, `conjugate:` ブロック + bcond `ints: {conjugate: 1}`)。
+    // 初版は node 限定・定常陰解法限定・薄肉の点ごと 1 次元抵抗 (local1d) のみ。
+    // 仕様は methods/boundary.md「共役熱伝達 (CHT)」、符号は conjugateWall.hpp。
+    int conjugateEnabled = 0;            // `conjugate:` ブロックの有無 (bcond 側の ints で個別に有効化)
+    std::string conjugateMode = "local1d";
+    double conjugateThickness = 0.0;     // t [m]
+    double conjugateKsolid = 0.0;        // k_s [W/mK]
+    std::string conjugateBackKind = "isothermal";   // isothermal | coolant | adiabatic
+    double conjugateTb = 300.0;          // 背面環境温度 [K]
+    double conjugateHc = 0.0;            // coolant: h_c [W/m2K]
+    int conjugateInterval = 50;          // K step ごとに更新
+    int conjugateWarmup = 0;             // 最初の N step は等温固定 (壁温を動かさない)
+    double conjugateRelax = 1.0;         // 追加緩和 (1.0 = 抵抗加重そのまま)
     // 第一内部点の整列度 |d·n|/|d| の下限 (これ未満は評価不能。tools/check_wall_resolution.py の --align-min と同義)
     double interfaceDiagAlignMin = 0.5;
 

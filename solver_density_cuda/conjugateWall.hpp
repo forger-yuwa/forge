@@ -77,4 +77,20 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
 // 呼び出しは applyWallProfiles の後 (per-face Ts が確定した状態で見る)。
 void checkWallTemperatureSharing(const solverConfig& cfg, const mesh& msh);
 
+// ソルバ内 CHT (Phase 2a): `conjugate:` ブロック + bcond `ints: {conjugate: 1}` の壁で、
+// interval step ごとに壁温を**抵抗加重平均** (= SU2 の AVERAGED_TEMPERATURE と同型) で更新する。
+//
+//     g_f = k_eff / d_1  [W/m2K]  (流体側の第一内部点までのコンダクタンス)
+//     g_s = 1 / R_tot,  R_tot = t/k_s + R_back
+//     T_w^{new} = (g_f T_1 + g_s T_b) / (g_f + g_s)
+//
+// **収束した解は更新式に依らない** (両側の 1 次元法則の交点)。更新式は収束速度だけを決める。
+// 初版の制限 (いずれも起動時に拒否): node 以外、dual-time、`mode != local1d`、背面断熱。
+// 面内伝導が要る場合は外部ループ (tools/cht_loop.py + solid_shell.py) を使う。
+void initConjugateWalls(const solverConfig& cfg, const mesh& msh);   // 起動時の検査 (拒否条件)
+void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, int iStep);
+bool conjugateActive(const solverConfig& cfg, const mesh& msh);
+// 収束した壁温を run ディレクトリに残す (再開時は wall_profile_<physID>.csv にコピーして使う)。
+void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep);
+
 } // namespace conjugateWall

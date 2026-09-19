@@ -1155,6 +1155,8 @@ cudaConfig initializeSimulation(
     applyWallProfiles(cfg , msh);
     // 壁温を陽に扱う run では、共有 CV に矛盾する壁温を与えていないかを検査する (後勝ち事故の防止)。
     conjugateWall::checkWallTemperatureSharing(cfg , msh);
+    // ソルバ内 CHT (conjugate: ブロック + bcond ints: {conjugate: 1}) の対応範囲を検査する。
+    conjugateWall::initConjugateWalls(cfg , msh);
 
     // 化学種変数を登録 (allocVariables より前)。nSpecies<=1 では no-op。
     var.registerSpecies(cfg.nSpecies, cfg.chemEnabled);
@@ -1313,6 +1315,8 @@ void writeStepOutputs(
     outputH5_XDMF(cfg , msh, var, iStep);
     outputBconds_H5_XDMF(cfg , msh, var, iStep);
     pprobes.outputProbes(cfg , cuda_cfg , msh , var , iStep);
+    // ソルバ内 CHT の壁温を残す (再開時は wall_profile_<physID>.csv にコピーして使う)。
+    conjugateWall::writeConjugateState(cfg , msh , iStep);
 }
 
 void writeInitialOutputs(
@@ -2037,6 +2041,10 @@ void advanceOneStep(
             advanceExplicitRK(s);
         }
     });
+
+    // ソルバ内 CHT: ステップ完了後に壁温を更新する (次ステップの残差組立ての前に効く)。
+    // 行番号でなく「完了した定常ステップ数」で interval を数える (advanceImplicitSteady 経路が主対象)。
+    conjugateWall::updateConjugateWalls(cfg , msh , var , iStep);
 
     // detectNaN 診断モード (既定 off): 保存量+P を検査し NaN/Inf があればダンプして停止する。
     if (cfg.detectNaN == 1) {
