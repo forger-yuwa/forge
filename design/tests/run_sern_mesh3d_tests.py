@@ -4,6 +4,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 import numpy as np
+from dataclasses import replace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from forge_design.geometry.moc_sern import PlanarMOC, SernKernelSpec  # noqa: E402
 from forge_design.meshing.mesh_sern3d import PHYS_SERN3D, SernMesh3DParams, generate_sern_mesh3d  # noqa: E402
@@ -76,42 +77,80 @@ coords, hexes, B, info, y_mid = generate_sern_mesh3d(d, prm)
 print(f"--- ext_top: cells {info['cells']} nodes {info['nodes']} top nodes {info['n_top_nodes']} vehicle_top faces {len(B['vehicle_top'])}")
 nun, miss, extra = closure(hexes, B)
 check("ext_top: 境界の閉性 (プルーム上線が内部面になり top_out は上面だけ)", miss == 0 and extra == 0, f"unshared {nun} missing {miss} extra {extra}")
-ir = info["i_ramp_te"]
-# R4c: 機体はノズル幅に閉じたので、機体上面は幅内 (k < k_sw) だけ + 後縁の先端区間 1 本 (幅外も含む)
-i_end = info["i_vehicle_end"]; k_sw = info["k_sw"]
-_exp = i_end * k_sw + (info["nz"] - 1)
-check("ext_top: vehicle_top 面数 = i_end × k_sw + 先端区間 (R4c で幅外は内部面)",
-      len(B["vehicle_top"]) == _exp, f"{len(B['vehicle_top'])} vs {_exp}")
-# R4c の新しい不変量: 幅外 (z > W/2) に固体が無い = 旧ランプ線の上に流体セルが在る
+ir = info["i_ramp_te"]; k_sw = info["k_sw"]; nzf = info["nz"]
+# R4e 案 (d): 機体上面は **幅内 (k < k_sw) かつ後縁より上流**だけ。幅外はバンド、後縁より下流は後流ブロックとの内部面
+_exp = ir * k_sw
+check("ext_top: vehicle_top 面数 = 後縁 station × 幅内 z セル数", len(B["vehicle_top"]) == _exp, f"{len(B['vehicle_top'])} vs {_exp}")
 zc = np.array([coords[list(q), 2].mean() for q in B["vehicle_top"]]) / prm.scale
-check("ext_top: 機体上面は幅内のみ (先端区間を除き z ≤ W/2)",
-      float(np.median(zc)) <= 0.5 * prm.W, f"median z {float(np.median(zc)):.3f}")
-check("ext_top: 幅外の旧ランプ線は内部面 (vehicle / underside_far は出ない)",
-      len(B.get("vehicle", [])) + len(B.get("underside_far", [])) <= (info["nz"] - 1),
+check("ext_top: 機体上面は全面が幅内 (z ≤ W/2)  ← 中央値でなく最大値で見る (codex plan-3 M5)",
+      float(zc.max()) <= 0.5 * prm.W + 1e-9, f"max z {float(zc.max()):.3f}")
+check("ext_top: 幅外の旧ランプ線は内部面 (vehicle / underside_far は 0)",
+      len(B.get("vehicle", [])) + len(B.get("underside_far", [])) == 0,
       f"vehicle {len(B.get('vehicle',[]))} underside_far {len(B.get('underside_far',[]))}")
 check("ext_top: 機体側面 (vehicle_side) が在る", len(B.get("vehicle_side", [])) > 0, f"{len(B.get('vehicle_side',[]))} faces")
+
+# --- R4e の核心: 幅外を横断して塞ぐ壁が 1 面も無いこと ---
+# 「幅外 (z > W/2) に在って法線が x 方向を向く壁面」= 旧実装が 224 面持っていた閉じ壁
+def _face_normal_x(q):
+    P = coords[list(q)]
+    n = np.cross(P[1] - P[0], P[2] - P[0])
+    nl = np.linalg.norm(n)
+    return abs(n[0]) / nl if nl > 0 else 0.0
+_wall_groups = ("vehicle_side", "vehicle_base", "vehicle_top", "ramp", "cowl_in", "cowl_out",
+                "sidewall_in", "sidewall_out", "vehicle", "underside_far")
+_blockers = [q for g in _wall_groups for q in B.get(g, [])
+             if coords[list(q), 2].mean() / prm.scale > 0.5 * prm.W + 1e-9 and _face_normal_x(q) > 0.5]
+check("ext_top: 幅外を横断する壁面が 0 (R4e: 旧実装は 224 面で 5.72 MPa を溜めた)",
+      len(_blockers) == 0, f"{len(_blockers)} faces")
+
+# --- 機体ベース: 幅内のみ・面積が t_base × W/2 と一致 ---
+vb = B.get("vehicle_base", [])
+check("ext_top: 機体ベース (vehicle_base) が在る", len(vb) > 0, f"{len(vb)} faces")
+check("ext_top: ベースは幅内のみ (z ≤ W/2)",
+      all(coords[list(q), 2].mean() / prm.scale <= 0.5 * prm.W + 1e-9 for q in vb))
+def _quad_area(q):
+    P = coords[list(q)]
+    return 0.5 * (np.linalg.norm(np.cross(P[1] - P[0], P[2] - P[0])) + np.linalg.norm(np.cross(P[2] - P[0], P[3] - P[0])))
+A_base = sum(_quad_area(q) for q in vb) / prm.scale ** 2
+A_exp = float(info["t_base"]) * 0.5 * prm.W
+check("ext_top: ベース面積 = t_base × W/2 (設計値と照合)", abs(A_base - A_exp) < 1e-6 * max(A_exp, 1.0),
+      f"{A_base:.6f} vs {A_exp:.6f}")
 check("ext_top: top_out 面数 = (ni−1)(nz−1) (上面のみ)", len(B["top_out"]) == (info["ni"] - 1) * (info["nz"] - 1))
 yt_faces = np.array([coords[list(q), 1].mean() for q in B["top_out"]]) / prm.scale
 check("ext_top: top_out は y3 + top_depth より上", np.all(yt_faces > info["y_veh"] - 1e-9))
 vt = np.array([coords[list(q), 1].mean() for q in B["vehicle_top"]]) / prm.scale
 rp = np.array([coords[list(q), 1].mean() for q in B["ramp"]]) / prm.scale
 check("ext_top: 機体上面はランプ (下面) より上", vt.min() >= rp.min() and vt.max() >= rp.max())
-# 後縁でテーパが y_e に着地 (x = L_ramp の上面ノード = プルーム上線ノードと共有)
-# R4c: 機体は i_end (厚さ < first_wall_frac) で終わり、以降は上面線をランプ線と共有する。
-# したがって x > x(i_end) の上面ノードは下面 (ramp) のノードと一致する。
-x_end = coords[:, 0].reshape(-1)  # noqa: F841 (可読性のため)
-def _nodes_at(groups, xmin):
-    out = set()
-    for g in groups:
-        for q in B.get(g, []):
-            for n in q:
-                if coords[n, 0] / prm.scale > xmin + 1e-9:
-                    out.add(int(n))
-    return out
-x_ie = float(coords[:, 0].max()) / prm.scale  # 使わないがデバッグ用
-te_up = _nodes_at(("top_out",), info["L_ramp"] - 1e-9)
-check("ext_top: 後縁より下流は上面線 = プルーム上線を共有 (top_out は上面のみ)", len(te_up) > 0, f"{len(te_up)} nodes")
-check("ext_top: hex は非退化 (体積 > 0)", np.all(np.abs(np.linalg.det(np.stack([coords[hexes[:, 1]] - coords[hexes[:, 0]], coords[hexes[:, 3]] - coords[hexes[:, 0]], coords[hexes[:, 4]] - coords[hexes[:, 0]]], axis=1))) > 1e-18))
+
+# --- 幾何: **符号付き** Jacobian (絶対値では負向き要素を見逃す, codex plan-3 M5) ---
+_J = np.linalg.det(np.stack([coords[hexes[:, 1]] - coords[hexes[:, 0]],
+                             coords[hexes[:, 3]] - coords[hexes[:, 0]],
+                             coords[hexes[:, 4]] - coords[hexes[:, 0]]], axis=1))
+check("ext_top: hex の符号付き Jacobian が全て同符号かつ非退化", np.all(_J > 1e-18) or np.all(_J < -1e-18),
+      f"min {_J.min():.3e} max {_J.max():.3e} 負 {int((_J<0).sum())}/{len(_J)}")
+
+# --- float32 変換後の節点衝突 (変換器は float32 で書く) ---
+# スリット (カウル板厚 0 / 側壁) の重複ノードは**設計上わざと座標一致**しているので、
+# 判定は「float32 にして **新たに** 衝突するノードが 0」かどうか
+_u64 = np.unique(coords, axis=0).shape[0]
+_u32 = np.unique(coords.astype(np.float32), axis=0).shape[0]
+check("ext_top: float32 化で新たな節点衝突が起きない", _u32 == _u64, f"float32 {_u32} vs float64 {_u64}")
+_nd = info["n_dup_cowl"] + info["n_dup_side"]
+check("ext_top: 座標一致ノードはスリット由来だけ (カウル + 側壁)", coords.shape[0] - _u64 == _nd,
+      f"{coords.shape[0] - _u64} vs {_nd}")
+
+# --- 形状が格子に依存しないこと (codex plan-3 M3) ---
+_p2 = replace(prm, nj_ext_top=13, first_top_frac=0.01)
+_c2, _h2, _B2, _i2, _ = generate_sern_mesh3d(d, _p2)
+check("ext_top: first_top_frac を変えても機体上面の高さが動かない",
+      abs(_i2["y_veh"] - info["y_veh"]) < 1e-12, f"{_i2['y_veh']:.6f} vs {info['y_veh']:.6f}")
+_n2, _m2, _e2 = closure(_h2, _B2)
+check("ext_top: 細かい格子でも閉性", _m2 == 0 and _e2 == 0, f"missing {_m2} extra {_e2}")
+try:
+    generate_sern_mesh3d(d, replace(prm, first_top_frac=0.05)); ok = False
+except ValueError:
+    ok = True
+check("ext_top: クリアランスに対して粗すぎる格子は生成を失敗させる (形状を動かさない)", ok)
 try:
     generate_sern_mesh3d(d, SernMesh3DParams(ni_up=6, ni_noz=20, ni_plume=30, nj_top=15, nj_bot=11, nz_in=7, nz_out=6, ext_top=True, vehicle_taper=0.0,
                                              interface_angle=float(k.TH[-1, 0]), top_ext_angle=d.info["theta_e"])); ok = False

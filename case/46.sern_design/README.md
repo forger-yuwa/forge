@@ -249,6 +249,7 @@ CFL・梯子 step 数・MOC 初期値・収束判定の実測。**個々の結�
 | `run_0197_rb_ref_C` | R-b: 長時間参照、設計 C | PASS, C_T_ws 0.922894 | active (R-b 正本) |
 | `run_0198_rb_prop_A` | R-b 取り直し: 提案レシピ、**正しい設計 A** (`L_cowl` 1.2, L_ramp 10.77) | PASS, C_T_ws 0.915409 | active (R-b 正本) |
 | `run_0199_rb_ref_A` | R-b 取り直し: 長時間参照、正しい設計 A | PASS, C_T_ws 0.915407 | active (R-b 正本) |
+| `run_0200_r4e_mesh` | R4e 案 (d) のメッシュ確認 (`--prepare-only`、CFD 未実行)。生産設定 `problem_r5_3d_sst_outflow.yaml` | 1105796 cells、幅外を横断する壁面 224→**0**、`vehicle`/`underside_far` 0 面、ベース面積 0.020000 H²=設計値、`y_veh` 不変、MESH_QUALITY **PASS** (AR 789.2 / skew 0.401) | ref (R4e の根拠メッシュ) |
 
 ### S7 3D の現状 (2026-09-05)
 

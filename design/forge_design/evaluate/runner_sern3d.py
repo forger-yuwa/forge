@@ -62,12 +62,14 @@ def _bcond_config(p, st):
             + f"sym: {{physID: {P['sym']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
             + f"side_far: {{physID: {P['side_far']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
             + wall("sidewall_in") + wall("sidewall_out")
-            # R4c: 機体側面 (z = W/2, x ≤ L_ramp)。ダクト側壁とは別タグ・別帳簿
-            + (wall("vehicle_side") if (int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0
-                                        and p.raw.get("mesh3d", {}).get("vehicle_side", True)
-                                        and p.raw.get("mesh3d", {}).get("ext_top", p.raw.get("mesh", {}).get("ext_top", 0))) else "")
-            # R2: 幅外の機体下面 (vehicle)。R4c 後は機体後縁の先端区間だけが残る (数面) が、
-            # メッシュがその面を出す以上 bcond 行は必ず要る (無いと forge が physID 14 で止まる)
+            # R4c/R4e: 機体側面 (z = W/2, x ≤ L_ramp) と機体ベース (x = L_ramp, 幅内)。
+            # ダクト側壁とは別タグ・別帳簿。**上面・側面・ベースは同一の等温壁で揃える** (codex plan-3 M4)
+            + ((wall("vehicle_side") + wall("vehicle_base"))
+               if (int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0
+                   and p.raw.get("mesh3d", {}).get("vehicle_side", True)
+                   and p.raw.get("mesh3d", {}).get("ext_top", p.raw.get("mesh", {}).get("ext_top", 0))) else "")
+            # R2: 幅外の機体下面 (vehicle)。**R4e で 0 面になった** (幅外はバンドが全長を覆う) が、
+            # 旧メッシュ (vehicle_side なし) はまだ面を出すので行は残す (無いと forge が physID 14 で止まる)
             + (wall("vehicle") if int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0 else "")
             + (f"underside_far: {{physID: {P['underside_far']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
                if p.raw.get("mesh3d", {}).get("W_vehicle") is not None else "")
@@ -119,7 +121,7 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
                            cowl_thickness=float(m.get("cowl_thickness", m2.get("cowl_thickness", 0.0))),
                            ext_top=bool(int(m2.get("ext_top", 0))),
                            vehicle_side=bool(m.get("vehicle_side", True)), nj_vside=int(m.get("nj_vside", 17)), top_depth=float(m2.get("top_depth", 2.0)), nj_ext_top=int(m2.get("nj_ext_top", 41)),
-                           vehicle_clearance=float(m2.get("vehicle_clearance", 0.02)), first_top_frac=float(m2.get("first_top_frac", 0.02)),
+                           vehicle_clearance=float(m2.get("vehicle_clearance", 0.06)), t_base=float(m2.get("t_base", 0.02)), first_top_frac=float(m2.get("first_top_frac", 0.02)),
                            vehicle_taper=float(m2.get("vehicle_taper", 0.0)), vehicle_wedge_deg=float(m2.get("vehicle_wedge_deg", 3.0)),
                            ramp_fillet=float(m2.get("ramp_fillet", 0.0)),
                            interface_angle=float(m2.get("interface_angle_rad", theta_b)),
@@ -237,6 +239,10 @@ def surface_forces(h5file, expect_dir, p_a, x_ref, y_ref, z_split=None, z_vehicl
     return out
 
 
+# 機体側の面集合 (ノズル力に入れない。codex plan-3 M4)。`vehicle` は幅外機体下面 (R4e で 0 面、旧メッシュ互換)
+_VEHICLE_FACES = ("vehicle", "vehicle_top", "vehicle_side", "vehicle_base")
+
+
 def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0, mdot_u_in=0.0, p_in=0.0, twall_on_fluid=False,
              half_W_vehicle=None):
     """3D の力係数。**帳簿 (R2, codex M5 採用 2026-09-09)**: C_T / C_L / C_M は**ノズル力**
@@ -247,8 +253,10 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
     P = PHYS_SERN3D; run_dir = Path(run_dir)
     spec = {"ramp": (P["ramp"], (0, 1, 0)), "cowl_in": (P["cowl_in"], (0, -1, 0)), "cowl_out": (P["cowl_out"], (0, 1, 0)),
             "sidewall_in": (P["sidewall_in"], (0, 0, 1)), "sidewall_out": (P["sidewall_out"], (0, 0, -1)),
-            "vehicle": (P["vehicle"], (0, 1, 0)),      # R2: 幅外機体下面 (メッシャが分離したタグ。旧 run は ramp の z 分割で代替)
-            "vehicle_top": (P["vehicle_top"], (0, -1, 0))}   # R4: 機体上面 (帳簿外・診断のみ: C_T_vehicle_top)
+            "vehicle": (P["vehicle"], (0, 1, 0)),      # R2: 幅外機体下面 (R4e で 0 面。旧メッシュ互換で残す)
+            "vehicle_top": (P["vehicle_top"], (0, -1, 0)),   # R4: 機体上面
+            "vehicle_side": (P["vehicle_side"], (0, 0, -1)),  # R4c: 機体側面 (z = W/2、外向きは −z)
+            "vehicle_base": (P["vehicle_base"], (-1, 0, 0))}  # R4e: 機体ベース (x = L_ramp、外向きは −x)
     parts = {}
     for name, (pid, d) in spec.items():
         c = list(run_dir.glob(f"res_{name}_{pid}_{step}.h5"))
@@ -260,10 +268,10 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
         for name, v in parts.items():
             if name == "ramp" and "inside" in v:
                 tot += v["inside"][key] if sel == "nozzle" else (v["outside"][key] if sel == "vehicle" else 0.0)
-            elif name == "vehicle":
-                tot += v[key] if sel == "vehicle" else 0.0
-            elif name == "vehicle_top":
-                tot += v[key] if sel == "vehicle_top" else 0.0
+            elif name in _VEHICLE_FACES:
+                # **機体面はノズル力に入れない** (codex plan-3 M4)。集計は明示的な面集合で三分する:
+                # ノズル = ramp(幅内) + cowl + ダクト側壁 / 機体 = 上面 + 側面 + ベース + 幅外下面 / 全収支 = 両者
+                tot += v[key] if sel in ("vehicle", name) else 0.0
             elif sel == "nozzle":
                 tot += v[key]
         return tot
@@ -276,7 +284,11 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
            "C_T_vehicle": -Fx_v / F_ideal, "C_L_vehicle": Fy_v / F_ideal, "C_M_vehicle": Mn_v / (F_ideal * H),
            "C_T_total_with_vehicle": (inlet - Fx - Fx_v) / F_ideal, "C_L_total_with_vehicle": (Fy + Fy_v) / F_ideal,
            "half_W_vehicle": half_W_vehicle,
-           "C_T_vehicle_top": -_sum("Fx_p", "vehicle_top") / F_ideal, "C_L_vehicle_top": _sum("Fy_p", "vehicle_top") / F_ideal}
+           "C_T_vehicle_top": -_sum("Fx_p", "vehicle_top") / F_ideal, "C_L_vehicle_top": _sum("Fy_p", "vehicle_top") / F_ideal,
+           # 機体面を個別にも残す (ベース抗力は帳簿外だが**機体力として保存する**。codex plan-3 M4)
+           "C_T_vehicle_side": -_sum("Fx_p", "vehicle_side") / F_ideal,
+           "C_T_vehicle_base": -_sum("Fx_p", "vehicle_base") / F_ideal,
+           "C_L_vehicle_base": _sum("Fy_p", "vehicle_base") / F_ideal}
     if "ramp" in parts and "inside" in parts["ramp"]:
         ri, ro = parts["ramp"]["inside"], parts["ramp"]["outside"]
         out["C_L_ramp_inside"] = ri["Fy_p"] / F_ideal; out["C_L_ramp_outside"] = ro["Fy_p"] / F_ideal
@@ -285,8 +297,8 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
     if any("Fx_tau" in v for v in parts.values()):
         # 摩擦: vehicle タグがあればノズル面 (vehicle 以外) だけを足す。旧 run (ramp が幅外を含む) では全面の値になる
         sgn = 1.0 if twall_on_fluid else -1.0
-        Fx_t = sgn * sum(v.get("Fx_tau", 0.0) for name, v in parts.items() if name not in ("vehicle", "vehicle_top"))
-        Fx_tv = sgn * parts.get("vehicle", {}).get("Fx_tau", 0.0)
+        Fx_t = sgn * sum(v.get("Fx_tau", 0.0) for name, v in parts.items() if name not in _VEHICLE_FACES)
+        Fx_tv = sgn * sum(parts.get(n, {}).get("Fx_tau", 0.0) for n in _VEHICLE_FACES)
         out["C_T_with_shear"] = (inlet - Fx + Fx_t) / F_ideal; out["C_T_friction"] = Fx_t / F_ideal
         out["C_T_friction_vehicle"] = Fx_tv / F_ideal
         out["friction_note"] = ("nozzle faces only (vehicle tag separate)" if "vehicle" in parts

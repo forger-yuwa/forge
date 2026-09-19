@@ -51,7 +51,8 @@ class SernMeshParams:
     top_depth: float = 2.0               # 機体上面線から上境界までの高さ / H
     nj_ext_top: int = 41
     nj_wake: int = 9                     # base 高さ分の後流ブロックの j 点数
-    vehicle_clearance: float = 0.02      # 機体上面 = max(ランプ y) + これ (/H)
+    vehicle_clearance: float = 0.06      # 機体上面 = max(ランプ y) + これ (/H)。**物理入力** (格子から独立)。
+                                         # 旧実装の実効値 max(0.02, 3*first_top_frac) = 0.06 をそのまま既定にした
     first_top_frac: float = 0.02         # top バンドの第一セル / H (slip 壁なので粗くてよい)
     ramp_fillet: float = 0.0             # ランプ膨張角部 (x=0) の丸め半径 / H。0 = 鋭角 (従来)。
                                          # 鋭角だと SST が θ_r0 ≳ 18° で `roOmega` 発散する (case/46 run_0055-0057)。
@@ -250,7 +251,14 @@ def _add_ext_top(coords, quads, bedges, xs, yt, k, L_ramp, y_e, up, njt, prm, ex
     ni = len(xs); njT, njW = int(prm.nj_ext_top), int(prm.nj_wake)
     # 機体上面はランプ最大 y の上に置く。クリアランスは絶対値 (H) だが、壁第一セル (first_top_frac) より
     # 十分厚くないとテーパ区間で潰れるので下限を課す (run_0071 の発散対策)
-    clr = max(float(prm.vehicle_clearance), 3.0 * float(prm.first_top_frac))
+    # **形状は格子間隔に依存させない** (2026-09-19, codex plan-3 M3 を 2D にも適用)。
+    # 旧: max(vehicle_clearance, 3*first_top_frac) — `first_top_frac` を変えると機体上面が動き、
+    # 格子独立性試験が成立しなかった。いまは物理値のみで決め、格子が粗ければ生成を失敗させる。
+    clr = float(prm.vehicle_clearance)
+    if float(prm.first_top_frac) > clr / 3.0:
+        raise ValueError(
+            f"mesh_sern: first_top_frac {prm.first_top_frac:g} が vehicle_clearance {clr:g} に対して粗すぎる "
+            f"(clr/3 = {clr / 3.0:g} 以下が要る)。**形状を格子に合わせて動かさない**ので、格子側を細かくすること")
     y_veh = float(yt[:k + 1].max()) + clr
     ii = np.arange(ni)
     if prm.vehicle_taper > 0.0:
