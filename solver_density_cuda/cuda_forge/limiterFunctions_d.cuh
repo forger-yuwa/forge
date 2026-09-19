@@ -31,6 +31,22 @@ __device__ flow_float venkata_limiter(flow_float delta_p_max, flow_float delta_p
     return res;
 }
 
+// 無次元化版 Venkatakrishnan (plan convection-node-wall-reconstruction §4.13)。
+// 呼び出し側が delta を**変数ごとの固定物理参照**で割って渡し、eps2 も無次元で渡す
+// (eps2 = (K * h_i / L_ref)^3)。現行版との違いは 2 つ:
+//   (1) eps2 が変数の次元と無関係でなくなる (現行の eps2 = K^3*volume は sqrt(volume) が
+//       変数の値と同じ大きさになると一切制限しない — 密度で実際に起きた)
+//   (2) 分子分母の余分な delta_m 因子を**約分**してある。現行の 3 次積は
+//       K=0, dp=0, dm=1e-19 で 0/0 -> NaN になる (codex plan-2 M4 が float32 で再現)
+__device__ flow_float venkata_limiter_scaled(flow_float delta_p_max, flow_float delta_p_min,
+                                             flow_float delta_m, flow_float eps2) {
+    const flow_float delta_p = (delta_m > (flow_float)0.0) ? delta_p_max : delta_p_min;
+    const flow_float num = delta_p*delta_p + eps2 + (flow_float)2.0*delta_m*delta_p;
+    const flow_float den = delta_p*delta_p + (flow_float)2.0*delta_m*delta_m + delta_p*delta_m + eps2;
+    return (den > (flow_float)0.0) ? num/den : (flow_float)1.0;
+}
+
+
 __device__ flow_float barth_Jespersen_limiter(flow_float delta_p_max, flow_float delta_p_min, 
                                               flow_float delta_m, flow_float volume) {
 

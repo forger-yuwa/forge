@@ -238,6 +238,19 @@ public:
     // 根拠と設計は plans/active/convection-node-wall-reconstruction.md §4.8。SU2 は既定でこの一致形。
     int limiterMatchRecon = 0;
 
+    // Venkatakrishnan の平滑化を**無次元化**する (既定 0 = 従来の式のまま)。
+    // 現行は eps2 = K^3 * volume を**次元付きの** delta と比べており、閾値 sqrt(volume) が
+    // 変数の値と同じ大きさになると一切制限されない (plan convection-node-wall-reconstruction §4.11/§4.13)。
+    // 1 のとき: delta を run 中固定の物理参照値で割り (ro_ref / p_ref / 速度は共通の a_ref)、
+    //           eps2 = (venkatK * h_i / limiterRefLength)^3 とする。h_i は半径重み前の面積の平方根 (2D/軸対称)
+    //           または体積の立方根 (3D)。式の余分な delta_m 因子も約分する。対象は流れ 5 変数・node のみ。
+    int limiterScaled = 0;
+    double venkatK = 1.0;             // Venkatakrishnan の K (SU2 の VENKAT_LIMITER_COEFF 相当。既定は現行の 1.0)
+    double limiterRefLength = 0.0;    // 無次元化の基準長 [m]。0 = メッシュ境界箱の対角から自動
+    // 以下は起動時に場から決める (config では書かない)
+    double limiterRoRef = 0.0, limiterPRef = 0.0, limiterARef = 0.0;
+    int limiterLengthFromArea = 0;    // 1 = h_i に sqrt(A_planar) を使う (2D / 軸対称)
+
     // free-stream 保存: 対流流束の圧力項を (p_tilde - pRef)*s で組み、非直交メッシュで
     // 大きな p*s を float32 加算する際の桁落ち(metric closure 由来の偽運動量源)を抑える。
     // 既定 0.0 で従来挙動(ビット不変)。一様基準(動作/フリーストリーム)静圧を入れる。

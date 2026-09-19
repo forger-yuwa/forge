@@ -208,6 +208,9 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     # リミッタの試行値を流束が適用する増分と同じ形・同じ点で評価する (既定 0 = 従来)。
     # plan convection-node-wall-reconstruction §4.8。Barth と組むと厳密有界になる
     _lmr = int(p.evaluate.get("limiter_match_recon", 0))
+    # Venkatakrishnan の平滑化を無次元化する (plan convection-node-wall-reconstruction §4.13)
+    _lsc = int(p.evaluate.get("limiter_scaled", 0))
+    _vk = float(p.evaluate.get("venkat_k", 1.0))
     ir = p.evaluate.get("implicit_relax")
     _relax = f", implicitRelax: {float(ir)}" if ir is not None else ""
     pm = p.evaluate.get("p_min")
@@ -251,7 +254,7 @@ time:
   outStepInterval: {out_int}
   timeIntegration: 11
   nStepInner: 5
-space: {{convMethod: 1, limiter: {_lim}, pRef: {p_ref}, limiterMatchRecon: {_lmr}}}
+space: {{convMethod: 1, limiter: {_lim}, pRef: {p_ref}, limiterMatchRecon: {_lmr}, limiterScaled: {_lsc}, venkatK: {_vk}}}
 {turb}
 initial: "uniform_p101325_u10"
 """

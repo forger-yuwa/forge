@@ -230,7 +230,13 @@ __global__ void limiter_r1_fused5_d
  // リミッタの試行増分を流束と一致させる (plan convection-node-wall-reconstruction §4.8)。
  //   matchRecon=0: 従来 (双対面重心で g·d のみ。式は変更前と同一)
  //   matchRecon=1: 流束と同じ点・同じ形 — edgeMid なら目標点はエッジ中点、convM==2 は隣接値差の項も含む
- int matchRecon, int edgeMid, int convM
+ int matchRecon, int edgeMid, int convM,
+ // 無次元化 Venkatakrishnan (plan §4.13)。scaled=0 で従来の式 (ビット変化なし)。
+ //   qref[5]  : ro_ref, a_ref, a_ref, a_ref, p_ref (速度 3 成分は共通の a_ref)
+ //   eps2Coef : (K / L_ref)^3 。eps2 = eps2Coef * h_i^3、h_i は下の lenArea で決まる
+ //   lenArea  : 1 = h_i = sqrt(A_planar) (2D/軸対称) / 0 = cbrt(volume) (3D)
+ int scaled, flow_float qr0, flow_float qr1, flow_float qr4,
+ flow_float eps2Coef, int lenArea, geom_float* A_planar
 )
 {
     geom_int ic0 = blockDim.x*blockIdx.x + threadIdx.x;
@@ -311,9 +317,19 @@ __global__ void limiter_r1_fused5_d
                 // 流束と**同じ関数**で増分を作る (reconIncrement_d.cuh)。Qt を経由しないので桁落ちも無い
                 const flow_float delta = recon_increment(convM, qc[k], Q[k][ic1],
                                                          gx[k], gy[k], gz[k], dcp_x, dcp_y, dcp_z);
-                const flow_float lk = (SCHEME == 1)
-                    ? barth_Jespersen_limiter(qmax[k]-qc[k], qmin[k]-qc[k], delta, volume)
-                    : venkata_limiter        (qmax[k]-qc[k], qmin[k]-qc[k], delta, volume);
+                flow_float lk;
+                if (scaled != 0 && SCHEME != 1) {
+                    // 変数ごとの固定参照で無次元化してから Venkatakrishnan
+                    const flow_float qr = (k == 0) ? qr0 : ((k == 4) ? qr4 : qr1);
+                    const flow_float inv = (flow_float)1.0/qr;
+                    const flow_float hi = (lenArea != 0) ? sqrtf(A_planar[ic0]) : cbrtf(volume);
+                    const flow_float e2 = eps2Coef * hi*hi*hi;
+                    lk = venkata_limiter_scaled((qmax[k]-qc[k])*inv, (qmin[k]-qc[k])*inv, delta*inv, e2);
+                } else {
+                    lk = (SCHEME == 1)
+                        ? barth_Jespersen_limiter(qmax[k]-qc[k], qmin[k]-qc[k], delta, volume)
+                        : venkata_limiter        (qmax[k]-qc[k], qmin[k]-qc[k], delta, volume);
+                }
                 ltmp[k] = min(ltmp[k], lk);
             }
         }
@@ -358,7 +374,11 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         var.c_d["dUzdx"], var.c_d["dUzdy"], var.c_d["dUzdz"], \
         var.c_d["dPdx"] , var.c_d["dPdy"] , var.c_d["dPdz"], \
         ((cfg.primPack != 0 && cfg.gradLSQ == 2) ? prim_pack_device_ptr() : nullptr), \
-        cfg.limiterMatchRecon, (cfg.discretization == "node" ? 1 : 0), cfg.convMethod
+        cfg.limiterMatchRecon, (cfg.discretization == "node" ? 1 : 0), cfg.convMethod, \
+        cfg.limiterScaled, (flow_float)cfg.limiterRoRef, (flow_float)cfg.limiterARef, (flow_float)cfg.limiterPRef, \
+        (flow_float)(cfg.venkatK*cfg.venkatK*cfg.venkatK/(cfg.limiterRefLength*cfg.limiterRefLength*cfg.limiterRefLength)), \
+        cfg.limiterLengthFromArea, \
+        (var.c_d.count("A_planar") ? var.c_d["A_planar"] : var.c_d["volume"])
     // 周期 node (合併 CV) は 2 段 (極値の group max/min → ψ の group min) で周期対の ψ を一致させる (§4.8)。
     const bool perNode = periodicNodeActive(cfg, msh);
     if (perNode) {

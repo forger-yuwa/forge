@@ -1234,6 +1234,51 @@ cudaConfig initializeSimulation(
 
     pprobes.init(cfg , cuda_cfg , msh);
 
+
+    // リミッタの無次元化基準 (plan convection-node-wall-reconstruction §4.13)。**run 中固定**。
+    // 初期場から体積加重平均で ro_ref / p_ref (絶対圧) / a_ref (音速) を取り、
+    // 基準長は未指定ならメッシュ境界箱の対角 (格子細分で変わらない長さ)。
+    // h_i は 2D / 軸対称では半径重み前の面積の平方根、3D では体積の立方根 (ieleType で判別)。
+    if (cfg.limiterScaled == 1) {
+        std::vector<flow_float> h_ro(msh.nCells), h_P(msh.nCells), h_a(msh.nCells);
+        gpuErrchk( cudaMemcpy(h_ro.data(), var.c_d["ro"],    msh.nCells*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+        gpuErrchk( cudaMemcpy(h_P.data(),  var.c_d["P"],     msh.nCells*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+        gpuErrchk( cudaMemcpy(h_a.data(),  var.c_d["sonic"], msh.nCells*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+        double wro=0.0, wP=0.0, wa=0.0, wv=0.0;
+        double xmin=1e300,xmax=-1e300,ymin=1e300,ymax=-1e300,zmin=1e300,zmax=-1e300;
+        bool all2D = true;
+        for (geom_int ic=0; ic<msh.nCells; ic++) {
+            const double v = msh.cells[ic].volume;
+            wv += v; wro += v*std::fabs((double)h_ro[ic]); wP += v*std::fabs((double)h_P[ic]); wa += v*std::fabs((double)h_a[ic]);
+        }
+        for (const auto& nd : msh.nodes) {
+            if (nd.coords.size() < 3) continue;
+            xmin=std::min(xmin,(double)nd.coords[0]); xmax=std::max(xmax,(double)nd.coords[0]);
+            ymin=std::min(ymin,(double)nd.coords[1]); ymax=std::max(ymax,(double)nd.coords[1]);
+            zmin=std::min(zmin,(double)nd.coords[2]); zmax=std::max(zmax,(double)nd.coords[2]);
+        }
+        cfg.limiterRoRef = (wv>0.0 && wro>0.0) ? wro/wv : 1.0;
+        cfg.limiterPRef  = (wv>0.0 && wP >0.0) ? wP /wv : 1.0;
+        cfg.limiterARef  = (wv>0.0 && wa >0.0) ? wa /wv : 1.0;
+        if (!(cfg.limiterRefLength > 0.0)) {
+            const double dx=xmax-xmin, dy=ymax-ymin, dz=zmax-zmin;
+            const double diag = std::sqrt(dx*dx+dy*dy+dz*dz);
+            cfg.limiterRefLength = (diag > 0.0) ? diag : 1.0;
+        }
+        // 2D 判定は**境界箱が 1 方向に潰れているか**で行う (平面 2D は z 幅 0)。
+        // ieleType は node の双対 CV では primal の型を持たないので使えない。
+        {
+            const double dx=xmax-xmin, dy=ymax-ymin, dz=zmax-zmin;
+            const double dmax=std::max(dx,std::max(dy,dz));
+            all2D = (dmax > 0.0) && (std::min(dx,std::min(dy,dz)) < 1.0e-6*dmax);
+        }
+        cfg.limiterLengthFromArea = (all2D || cfg.isAxisymmetric == 1) ? 1 : 0;
+        std::cout << "[limiter] scaled: ro_ref=" << cfg.limiterRoRef << " p_ref=" << cfg.limiterPRef
+                  << " a_ref=" << cfg.limiterARef << " L_ref=" << cfg.limiterRefLength
+                  << " K=" << cfg.venkatK << " h_i=" << (cfg.limiterLengthFromArea ? "sqrt(A_planar)" : "cbrt(volume)")
+                  << std::endl;
+    }
+
     return cuda_cfg;
 }
 

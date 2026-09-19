@@ -498,6 +498,20 @@ void solverConfig::read(std::string fname)
         // 対象は **流れ 5 変数・node・convMethod 0/1/2 のみ** (plan convection-node-wall-reconstruction §4.14)。
         // cell は目標点が双対面重心のままで流束と整合しているが、convMethod 2 の増分の形は変わるので拒否する。
         // MINMOD (その他の convMethod) は増分の式が別なので共通関数の対象外。
+        this->limiterScaled = getOptionalValidatedValue<int>(space, "limiterScaled", 0, "space");
+        if (this->limiterScaled != 0 && this->limiterScaled != 1) {
+            throw std::runtime_error("Key 'limiterScaled' in 'space' must be 0 or 1.");
+        }
+        this->venkatK = getOptionalValidatedValue<double>(space, "venkatK", 1.0, "space");
+        if (!(this->venkatK > 0.0)) {
+            throw std::runtime_error("Key 'venkatK' in 'space' must be > 0.");
+        }
+        this->limiterRefLength = getOptionalValidatedValue<double>(space, "limiterRefLength", 0.0, "space");
+        if (this->limiterScaled == 1 && this->discretization != "node") {
+            std::cout << "[config] limiterScaled: 1 は discretization 'node' 専用のため無効化した" << std::endl;
+            this->limiterScaled = 0;
+        }
+
         // 例外でなく**警告して無効化**する: 同じ solverConfig をメッシュ変換 (convertGmshToForge の
         // 品質チェック用 cell 変換) など別用途のユーティリティも読むため、投げると無関係な工程が落ちる。
         if (this->limiterMatchRecon == 1 && this->discretization != "node") {
