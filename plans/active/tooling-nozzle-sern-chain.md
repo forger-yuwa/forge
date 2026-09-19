@@ -596,6 +596,36 @@ $t_{\rm base}/H = 0.02$ は**暫定モデル値**と明記し、0.01 / 0.02 / 0.
 
 ベース圧・再循環長も時系列監視に入れる。定常擬似時間で振動する場合、**その振動を物理的な後流変動と解釈しない**。
 
+#### 4.15.4 R4e 着手順 ③: 2D 有限ベース診断の結果 (2026-09-19)
+
+3D に進む前に、**同じ形状 (テーパ + 厚み `t_base` のベース) を 2D で**回した (codex plan-3 M2/M5 の指定)。
+2D メッシャに「テーパ + 薄いベース」モードを追加 (`mesh.t_base`)。従来の `vehicle_taper = 0` は**全高の鉛直ベース**
+($h_{\rm base} \approx 1.9$ H) で、`run_0034` が落ちたのはそちら — 今回のベースは**その約 1/100**。
+
+| run | 形状・設定 | 結果 |
+| --- | --- | --- |
+| `run_0202_r4e_2d_base` | `t_base` 0.02、ベース = **slip** (2D 既定)、soft cfl 1.0 | 暖機 (層流) 3 段**完走** (残差 −2.5 桁) → **soft (SST 1 次) step 7 で NaN**、42 節点 |
+| `run_0203_r4e_2d_base_cfl01` | 同上、soft cfl **0.1** | **soft step 57 で NaN**、同じ 42 節点・同じ位置 |
+| `run_0204_r4e_2d_base_t005` | `t_base` **0.005**、soft cfl 1.0 | **soft step 20 で NaN**、同じ 42 節点 |
+| `run_0205_r4e_2d_base_wall` | `t_base` 0.02、ベース = **等温粘性壁** (`evaluate.vehicle_kind: wall`) | **soft 1500 step 完走** (`rms_ro` 2.9e-5 → 1.0e-5) → **mid (2 次) step 28 で NaN**、34 節点 |
+| `run_0206_r4e_2d_base_wall_barth` | 同上 + `limiter: 1` (Barth) | **mid step 27 で NaN** (Venkatakrishnan と同じ) |
+
+**読み取れたこと**:
+
+1. **CFL 律速ではない**。cfl を 1/10 にすると step が約 8 倍 (7 → 57) = **同じ擬似時間で落ちる**。構造的な問題。
+2. **厚みを 1/4 にしても消えない** (step 7 → 20、節点数は同じ 42)。ベースを薄くするだけでは解決しない。
+3. **slip のベースが SST と相性が悪い**。鋭い 90° 角の slip 面で `wall_dist` が 0 に落ちる
+   ([[sst-mesh-walldist-gotcha]] と同型)。**等温粘性壁に変えると SST 1 次段を完走する** —
+   codex M4 の「上面・側面・ベースを同一の壁条件に統一せよ」を裏付ける実測。
+4. **残る壁は 2 次再構成**。壁版の NaN は x/H 10.773 (= L_ramp) から下流・y/H 2.706–2.728 (ベース高さ帯) に
+   34 節点で、有限 `P` の最小が **0** = ベース角で 2 次再構成が圧力を潰している。
+   **リミッタでは直らない** (Barth も Venkatakrishnan も同じ step)。
+
+**次の候補** (未実施): 肩の丸め (半径・接点・変更するランプ区間を先に定義する。codex M2 は「丸めは検証候補であって
+発散回避の保証ではない」と釘を刺している)、ベース近傍の格子分布、ベース高さ方向の点数 (`nj_wake`)。
+**`mesh.bndFirstOrder` は使用禁止**なので「ベース近傍だけ 1 次」は採らない。
+
+
 
 ### 4.16 CFL・収束判定・起動レシピ → [`tooling-nozzle-sern-startup.md`](tooling-nozzle-sern-startup.md)
 
@@ -619,7 +649,7 @@ $t_{\rm base}/H = 0.02$ は**暫定モデル値**と明記し、0.01 / 0.02 / 0.
 | R5 | **3D SST を現行バイナリで再現** (codex M3 採用): 「解決済 (run_0082)」を**撤回**し状態を「加速点で完走、生産点は未成立」に戻す。バイナリ・実効設定を固定して生産 3 作動点を同一幾何で再試験、`L_sw` 分離・鈍頭化はその後の比較対象。通らなければソルバ修正を別 plan 化 | run_0082 NOT CONVERGED (stalled, 終端 `rms_roOmega` 7.6e16 = 完走の証拠であって収束ではない)、run_0083/0084/0087/0088 DIVERGED (`check_convergence.py` 再確認済)。9/8 の SST 既定 (`solverConfig.hpp` L202) と `scalarTransport_d.cu` L104 の相対ガード変更後なので 9/6 の結果から現行の限界は言えない |
 | R6 | **検証・問題定義の整合** (codex M4/M7/M8/M9 採用) — **(a) 完了** (§4.11 の「同じ物理時刻」を撤回・§4.7 で擬似時間の OSCILLATING を物理振動と解釈しないと明記; 2026-09-13)、**(c) 完了** (`run_sern_moc_tests.py` 6b: 縁条件残差 0 の点が等長拘束の下で C_T 最大であることを assert 付きで検算)、**(e) 完了** (§8-10 で帰還必須論を撤回済、§5.1-4 は L_sw を足した小規模探索を先にする記述)、**(b) 完了** (`check_quasisteady.py --series-csv` + `force_history.csv`、判定器一本化)、**(d) 一部完了** (§4.2 を 5 変数・2 目的に訂正、作動点別 C_M 窓 `opt.cm_window`、`L_ramp_max` 最終輪郭再検査 = §5.1-8b 決着)。残 = (a)(c)(e) と (d) の許容値明記: (a) 定常擬似時間の履歴を物理時間と解釈しない (§4.11 の「CFL 半減で破綻 step 倍 = 同じ物理時刻」と §4.7 の RSS/FSS 統計は撤回。振動を採用するなら dual-time で時間刻み・内部反復・統計窓の独立性を確認、P 床到達は診断指標)、(b) `check_quasisteady.py --quantity C_T,C_L,C_M` を接続し `steadiness` と判定器を一本化、(c) Rao 検証は同一ガス・作動点・長さ拘束で独立に行い Shyne 式 11–15 との対応を assert 付きで (`run_sern_moc_tests.py` L117 の掃引は assert なし)、§4.3 の「Pareto 端点に Rao 点が出なければ実装誤り」は撤回、格子・領域誤差の許容 (例 $\|\Delta C_T\| < 0.002$) を明記、(d) 問題定義を **5 変数・推力効率と長さの 2 目的**と明文化 (§4.2 の 6 変数・4 目的は `driver_sern.py` L33 と不一致、`theta_c` は `moc_sern.py` L387 で場から決まる)、$C_M$ は加重平均でなく作動点別の許容窓、`L_ramp_max` を最終輪郭で再検査 (§5.1-8b と統合)、(e) 「3D 最適化には MOC への帰還が必須」(§8-10-4) は撤回: MOC は形状パラメータ化として維持し、3D 評価器の成立後に `L_sw` を足した小規模探索で改善を測る。帰還は既存族の不足を実測してから別 plan | `methods/design/overview.md` L799 (無帰還・3D 確認) と本 plan を一致させる |
 | R4c | **3D 領域トポロジを作り直す (codex C1、最優先)**: `z > W/2` の旧ランプ線〜旧機体上面線を**流体で埋める**、`z = W/2` に**機体側面**を専用タグで新設 (`L_sw` より下流にも及ぶ・ダクト側壁と帳簿を分ける)、交線のノード定義、新領域の組成/初期値を領域情報から与える (`runner_sern3d.py:72` の index 算術を流用しない)。**テストに断面検査を足す** (固体/流体の連結性・内部面の共有・正体積・双対閉性。現行 30 項目は幻の固体を通す) | §4.14 / §4.14.1 |
-| R4e | ~~**側面バンド末端の壁を除去する (codex C2)**~~ **メッシュ側 完了 (2026-09-19)**。案 (d) を実装 (§4.15.3)。`_vehicle_top_line` はバンド上端 `b(x)` を全 x で返し後縁で厚み `t_base`、`b ≥ yt + t_base` の下限で退化区間を作らない (旧 `i_end` は廃止)。上バンドは j=0 を常に自前で持ち**後縁で担当を切り替えない**。バンドは幅外で全長・幅内で後縁下流のみ。新タグ `vehicle_base` (physID 18)。<br>**生産メッシュ (`case/46.sern_design/run_0200_r4e_mesh/`, 1105796 cells) の実測**:<br><br>| 量 | 旧 | 新 |<br>| --- | --- | --- |<br>| 幅外を横断する壁面 | 224 | **0** |<br>| `vehicle` / `underside_far` 面 | 176 / 44 | **0 / 0** |<br>| `vehicle_base` 面積 | — | 0.020000 H² (= `t_base`×W/2 と厳密一致) |<br>| `y_veh` (形状) | 3.8408936552 | 3.8408936552 (**不変**) |<br>| メッシュ品質 | AR 789.2 / skew 0.401 PASS | AR 789.2 / skew 0.401 PASS |<br><br>**形状を格子から独立させた** (M3): `clearance = max(vehicle_clearance, 3*first_top_frac)` を廃し物理値のみに。粗すぎる格子は `ValueError` で**生成を失敗させる**。旧実効値 0.06 を既定・既存 config 78 件に明示 (2D も同じ扱いにし、2D メッシュがビット一致することを確認)。<br>**帳簿を三分割した** (M4): `vehicle_top`/`vehicle_side`/`vehicle_base` を同一の等温壁にし、`_VEHICLE_FACES` でノズル力から外して機体力に保存 (`C_T_vehicle_side` / `C_T_vehicle_base` を追加)。<br>**試験を強化した** (M5): 幅外横断壁 0・ベース面積照合・**符号付き** Jacobian・float32 の新規衝突 0・格子を変えても形状が動かないこと・粗い格子で生成失敗すること。`run_sern_mesh3d_tests.py` ALL PASS。<br>**残り = CFD 側** (codex の着手順 ③④): 2D 有限ベース診断 → 3D 層流 → SST、および R5b と定量検証条件 | `mesh_sern3d.py` / `mesh_sern.py` / `runner_sern3d.py` / `tests/run_sern_mesh3d_tests.py` |
+| R4e | ~~**側面バンド末端の壁を除去する (codex C2)**~~ **メッシュ側 完了 (2026-09-19)**。案 (d) を実装 (§4.15.3)。`_vehicle_top_line` はバンド上端 `b(x)` を全 x で返し後縁で厚み `t_base`、`b ≥ yt + t_base` の下限で退化区間を作らない (旧 `i_end` は廃止)。上バンドは j=0 を常に自前で持ち**後縁で担当を切り替えない**。バンドは幅外で全長・幅内で後縁下流のみ。新タグ `vehicle_base` (physID 18)。<br>**生産メッシュ (`case/46.sern_design/run_0200_r4e_mesh/`, 1105796 cells) の実測**:<br><br>| 量 | 旧 | 新 |<br>| --- | --- | --- |<br>| 幅外を横断する壁面 | 224 | **0** |<br>| `vehicle` / `underside_far` 面 | 176 / 44 | **0 / 0** |<br>| `vehicle_base` 面積 | — | 0.020000 H² (= `t_base`×W/2 と厳密一致) |<br>| `y_veh` (形状) | 3.8408936552 | 3.8408936552 (**不変**) |<br>| メッシュ品質 | AR 789.2 / skew 0.401 PASS | AR 789.2 / skew 0.401 PASS |<br><br>**形状を格子から独立させた** (M3): `clearance = max(vehicle_clearance, 3*first_top_frac)` を廃し物理値のみに。粗すぎる格子は `ValueError` で**生成を失敗させる**。旧実効値 0.06 を既定・既存 config 78 件に明示 (2D も同じ扱いにし、2D メッシュがビット一致することを確認)。<br>**帳簿を三分割した** (M4): `vehicle_top`/`vehicle_side`/`vehicle_base` を同一の等温壁にし、`_VEHICLE_FACES` でノズル力から外して機体力に保存 (`C_T_vehicle_side` / `C_T_vehicle_base` を追加)。<br>**試験を強化した** (M5): 幅外横断壁 0・ベース面積照合・**符号付き** Jacobian・float32 の新規衝突 0・格子を変えても形状が動かないこと・粗い格子で生成失敗すること。`run_sern_mesh3d_tests.py` ALL PASS。<br>**着手順 ③ = 2D 有限ベース診断 完了 (§4.15.4、`run_0202`–`run_0206`)**: ベースを **slip から等温粘性壁に変えると SST 1 次段を完走**する (codex M4 の裏付け)。残る壁は**ベース角の 2 次再構成で `P` が 0 に潰れる**ことで、CFL・厚み・リミッタのいずれでも直らない。次の候補は肩の丸め (半径・接点を先に定義) とベース近傍の格子分布。<br>**残り = ③の続き + ④**: 2 次の突破 → 3D 層流 → 3D SST、および R5b と定量検証条件 | `mesh_sern3d.py` / `mesh_sern.py` / `runner_sern3d.py` / `tests/run_sern_mesh3d_tests.py` |
 | R4f | ~~**`vehicle_top` を等温粘性壁に統一する (codex M3)**~~ **実装済 (2026-09-19)**: 既定を `wall_isothermal` (Ts 1000 K) に変更し機体側面と揃えた。旧 slip は `evaluate.vehicle_top_kind: slip` で比較用に残す。残 = R4e/R5b の後に同一幾何で差を測る。以下は旧記述: 現状 slip。機体側面は等温粘性壁で不整合。slip は比較用に残し、R4e/R5b の後に同一幾何で差を測る。上面の壁距離再生成と近壁解像度も検証対象 | `runner_sern3d.py:75` |
 | R5b | ~~**床に張り付いた解を受理しないゲート**~~ **実装済 (2026-09-19)**: `sern_gates.py` に `floor_gate` (EOS 床 `pMin`/`tMin`/`roMin` と乱流下限 `roOmega` 1e-20・`k`≤0 の張り付きノード数) と `residual_scale_gate` (残差列の桁の揃い、中央値の 1e6 倍超を検出) を追加し `evaluate_gates` に接続 (`fail_class` = `FLOOR_STUCK` / `RESIDUAL_UNBALANCED`)。**run_0122 を正しく落とす**: T≤50K 70 ノード / roOmega≤1e-20 **1 ノード** (codex が名指しした ID 646932) / k≤0 28 ノード、残差中央値 3.42e-05 に対し rms_roOmega 8.95e+15。残 = R5 の受入で `require_residual_pass` を必須にする。以下は旧記述:  (codex M2): `sern_gates.py:39` は有限・正値しか見ない。`pMin`/`DEPVAR_TMIN`/`roMin` 到達ノード数、床による保存量変更、床感度を受理条件に足す。**さらに `roOmega` 下限到達と更新クリップも追加し、R5 の受入では `require_residual_pass` を必須にする** (codex C1)。m10 の解析値は 0.147 Pa / 18.0 K / 2.83e-5 で三つの床に抵触 | §4.14-5 |
 | R4d | **幅外を開いた後の遠方境界・領域独立性** (codex M4): `side_far` の slip 固定 (反射) を見直し、生産 TP・SST で $C_L/C_M$ まで含めた領域独立性を測る。許容値を係数ごとに数値で固定 | `r4_domain_study.py` は加速点 Euler・$C_T$ のみ |

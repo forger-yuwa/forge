@@ -250,6 +250,11 @@ CFL・梯子 step 数・MOC 初期値・収束判定の実測。**個々の結�
 | `run_0198_rb_prop_A` | R-b 取り直し: 提案レシピ、**正しい設計 A** (`L_cowl` 1.2, L_ramp 10.77) | PASS, C_T_ws 0.915409 | active (R-b 正本) |
 | `run_0199_rb_ref_A` | R-b 取り直し: 長時間参照、正しい設計 A | PASS, C_T_ws 0.915407 | active (R-b 正本) |
 | `run_0200_r4e_mesh` | R4e 案 (d) のメッシュ確認 (`--prepare-only`、CFD 未実行)。生産設定 `problem_r5_3d_sst_outflow.yaml` | 1105796 cells、幅外を横断する壁面 224→**0**、`vehicle`/`underside_far` 0 面、ベース面積 0.020000 H²=設計値、`y_veh` 不変、MESH_QUALITY **PASS** (AR 789.2 / skew 0.401) | ref (R4e の根拠メッシュ) |
+| `run_0202_r4e_2d_base` | R4e ③ 2D 有限ベース診断: `t_base` 0.02、ベース slip、soft cfl 1.0 | 暖機 3 段完走 → **soft (SST 1 次) step 7 NaN** (ベース直近 42 節点) | ref (診断) |
+| `run_0203_r4e_2d_base_cfl01` | 同上、soft cfl 0.1 (CFL 律速かの切り分け) | **soft step 57 NaN** 同位置 = 同じ擬似時間で落ちる → CFL 律速でない | ref (診断) |
+| `run_0204_r4e_2d_base_t005` | 同上、`t_base` 0.005 (厚み依存の切り分け) | **soft step 20 NaN** 同じ 42 節点 → 薄くしても消えない | ref (診断) |
+| `run_0205_r4e_2d_base_wall` | ベースを**等温粘性壁**に (`evaluate.vehicle_kind: wall`) | **soft 1500 step 完走** (rms_ro 2.9e-5→1.0e-5) → **mid (2 次) step 28 NaN**、P 最小 0 | ref (R4e の主要根拠) |
+| `run_0206_r4e_2d_base_wall_barth` | 同上 + `limiter: 1` (Barth) | **mid step 27 NaN** → リミッタでは直らない | ref (診断) |
 
 ### S7 3D の現状 (2026-09-05)
 

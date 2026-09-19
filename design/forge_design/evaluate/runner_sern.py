@@ -275,8 +275,13 @@ def _bcond_config(p: Problem, st: dict) -> str:
             + wall("cowl_out", P["cowl_out"]) + outlet("bottom", P["bottom"])
             + (outlet("top_out", P["top_out"]) if p.evaluate.get("top_out_kind", "outlet") == "outlet"
                else f"top_out: {{physID: {P['top_out']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n")
-            # 機体上面 + base (§4.11): 機体の力なので帳簿外だが base 圧の診断のため壁出力する。Euler/SST とも slip
-            + (f"vehicle: {{physID: {P['vehicle']}, kind: slip, outputHDFflg: 1, ints: , floats: }}\n"
+            # 機体上面 + base (§4.11)。機体の力なので帳簿外だが base 圧の診断のため壁出力する。
+            # 既定は slip (2D 中立モデル)。**`evaluate.vehicle_kind: wall` で等温粘性壁**にできる
+            # (3D の生産仕様 R4f/R4e と揃えるため。有限ベース `mesh.t_base > 0` の診断で使う —
+            #  slip の base は鋭い 90° 角で wall_dist が 0 に落ち、SST の ω が発散する)
+            + ((f"vehicle: {p.wall_bcond_line(model == 'euler', phys_id=P['vehicle'], output=1)}\n"
+                if str(p.evaluate.get("vehicle_kind", "slip")) == "wall"
+                else f"vehicle: {{physID: {P['vehicle']}, kind: slip, outputHDFflg: 1, ints: , floats: }}\n")
                if int(p.mesh.get("ext_top", 0)) else ""))
 
 
@@ -474,8 +479,8 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
                         top_ext_angle=float(np.deg2rad(m.get("top_ext_angle_deg", np.rad2deg(design.info["theta_e"])))),
                         ext_top=bool(int(m.get("ext_top", 0))), top_depth=float(m.get("top_depth", 2.0)),
                         nj_ext_top=int(m.get("nj_ext_top", 41)), nj_wake=int(m.get("nj_wake", 9)),
-                        vehicle_clearance=float(m.get("vehicle_clearance", 0.02)), first_top_frac=float(m.get("first_top_frac", 0.02)),
-                        vehicle_taper=float(m.get("vehicle_taper", 0.0)),
+                        vehicle_clearance=float(m.get("vehicle_clearance", 0.06)), first_top_frac=float(m.get("first_top_frac", 0.02)),
+                        vehicle_taper=float(m.get("vehicle_taper", 0.0)), t_base=float(m.get("t_base", 0.0)),
                         vehicle_wedge_deg=float(m.get("vehicle_wedge_deg", 3.0)), ramp_fillet=float(m.get("ramp_fillet", 0.0)),
                         scale=H)
     if wall_offset:

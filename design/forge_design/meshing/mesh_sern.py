@@ -51,6 +51,10 @@ class SernMeshParams:
     top_depth: float = 2.0               # 機体上面線から上境界までの高さ / H
     nj_ext_top: int = 41
     nj_wake: int = 9                     # base 高さ分の後流ブロックの j 点数
+    t_base: float = 0.0                  # 機体後縁ベースの厚み /H。**物理入力**。> 0 で「テーパ + 薄いベース」
+                                         # (3D の R4e 案 (d) と同じ形状)。0 = 従来のテーパ (厚さ 0 で終わる)。
+                                         # `vehicle_taper = 0` の全高鉛直ベース (h_base ≈ 1.9 H) とは別物で、
+                                         # run_0034 が発散したのはそちら (ベースが 100 倍厚い)
     vehicle_clearance: float = 0.06      # 機体上面 = max(ランプ y) + これ (/H)。**物理入力** (格子から独立)。
                                          # 旧実装の実効値 max(0.02, 3*first_top_frac) = 0.06 をそのまま既定にした
     first_top_frac: float = 0.02         # top バンドの第一セル / H (slip 壁なので粗くてよい)
@@ -278,10 +282,15 @@ def _add_ext_top(coords, quads, bedges, xs, yt, k, L_ramp, y_e, up, njt, prm, ex
                   + (_s ** 3 - _s ** 2) * taper_len * m1)
         y3_veh = np.where(xs < x0, y_veh, y3_veh)
         # 保険: 上面は必ずランプより上。最小厚 = 後縁から張ったくさびの厚み (TE で 0 なので端点条件と衝突しない)
-        y3_veh = np.maximum(y3_veh, yt + np.clip(np.tan(np.radians(float(prm.vehicle_wedge_deg)))
-                                                 * (L_ramp - xs), 0.0, clr))
-        y3_veh[k] = y_e
-        h_base = 0.0
+        tb = float(prm.t_base)
+        if tb > 0.0:
+            # R4e 案 (d) と同じ「テーパ + 有限ベース」。後縁で厚み t_base、どこでも yt + t_base 以上
+            y3_veh = np.maximum(y3_veh + tb * _s ** 3, yt + tb)
+        else:
+            y3_veh = np.maximum(y3_veh, yt + np.clip(np.tan(np.radians(float(prm.vehicle_wedge_deg)))
+                                                     * (L_ramp - xs), 0.0, clr))
+        y3_veh[k] = y_e + tb
+        h_base = tb
     else:
         y3_veh = np.full(ni, y_veh)
         h_base = y_veh - y_e
