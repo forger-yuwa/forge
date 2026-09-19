@@ -1,4 +1,5 @@
 #pragma once
+#include "cuda_forge/reconIncrement_d.cuh"   // 再構成増分の唯一の定義 (流束と共有)
 // 周期 node (median-dual の合併 CV) 用の 2 段リミッタ (plans/active/species-passive-scalar-unification.md §4.8, codex result-2 M3)。
 //
 // 周期 group (root + member) は 1 つの合併 CV だが、1 段の limiter_r1_d / limiter_r1_scaled_d は各 member の**部分 CV** の
@@ -101,12 +102,9 @@ __global__ void limiter_psi_merged_d
         }
         flow_float delta_m;
         if (matchRecon != 0) {
-            delta_m = gx*dcp_x + gy*dcp_y + gz*dcp_z;                          // Qt を経由しない (桁落ち回避)
-            if (convM == 2) {                                                  // interp_MUSCL_3rd と同形
-                if (ic1p < 0) ic1p = plane_cells[2*ip+0] + plane_cells[2*ip+1] - ic0;
-                const flow_float kk = (flow_float)(1.0/3.0);
-                delta_m = (flow_float)0.5*kk*(Q[ic1p]-Qc) + ((flow_float)1.0-kk)*delta_m;
-            }
+            if (ic1p < 0) ic1p = plane_cells[2*ip+0] + plane_cells[2*ip+1] - ic0;
+            // 流束と**同じ関数**で増分を作る (reconIncrement_d.cuh)。Qt を経由しないので桁落ちも無い
+            delta_m = recon_increment(convM, Qc, Q[ic1p], gx, gy, gz, dcp_x, dcp_y, dcp_z);
             if (SCALED) delta_m *= inv_ref;
         } else if (SCALED) {
             delta_m = (gx*dcp_x + gy*dcp_y + gz*dcp_z) * inv_ref;              // limiter_r1_scaled_d と同式

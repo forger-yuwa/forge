@@ -271,6 +271,8 @@ CFL・梯子 step 数・MOC 初期値・収束判定の実測。**個々の結�
 | `run_0220_r4e_barth_mr1` | 全レシピ (Barth + `mr: 1`) | **mid 段 step 129 NaN** (既定 28 の 4.6 倍)。NaN は同じベース近傍 55 節点 → **根治ではない** | ref (W1 の限界) |
 | `run_0221_w1_bitcheck_baseline` | 変更を外した HEAD のバイナリ (worktree ビルド) で `mr: 0` | 差は run 間ノイズ床と同オーダーだが **`check_field_regress.py --boundary` (床×2) は step 1/10 で FAIL** (`roUy`/`roe` 2.92 倍, `h0` 3.62 倍)。**非退行は未確定** | ref (非退行・未達) |
 | `run_0222_w1_repeat_mr0` | `run_0214` と同一設定の反復 = ノイズ床 | `ro` 2e-7〜8e-7 | ref (ノイズ床) |
+| `run_0223_w1r_barth_mr1` | 共有増分関数へのリファクタ後の Barth + `mr:1` | **step 217 NaN** (リファクタ前は 400 完走)。差の出どころは `limiter_ro` 1 節点 5.4e-5 → **この診断ケースは float レベルでカオス的** | ref (W1c の根拠) |
+| `run_0224_w1r_venkat_mr0` | 同・既定 (Venkat `mr:0`) | step 28 (不変)。既定パスはノイズ水準で不変 | ref (非退行) |
 
 ### S7 3D の現状 (2026-09-05)
 

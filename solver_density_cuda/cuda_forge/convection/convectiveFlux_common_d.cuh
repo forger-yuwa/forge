@@ -5,6 +5,7 @@
 //     の定義をここに置くため、他 TU から include しないこと (多重定義になる)。
 //   - sign_sano は betaPls_slau/betaMns_slau より前に置き正順で参照させる。
 // =============================================================================
+#include "cuda_forge/reconIncrement_d.cuh"
 
 
 // free-stream 保存: 対流流束の圧力項を (p_tilde - d_pRef)*s で組むための基準静圧。
@@ -77,7 +78,8 @@ __device__ flow_float interp_MUSCL_2nd(int scheme, int limit_scheme,
     flow_float r;
     flow_float psi_r;
 
-    phif = phiC + limiter*(dphidx*cpdx +dphidy*cpdy +dphidz*cpdz);
+    // 増分は recon_increment (reconIncrement_d.cuh) が唯一の定義。リミッタも同じ関数を呼ぶ。
+    phif = phiC + limiter*recon_increment(1, phiC, phiD, dphidx, dphidy, dphidz, cpdx, cpdy, cpdz);
 
     return phif;
 };
@@ -96,8 +98,8 @@ __device__ flow_float interp_MUSCL_3rd(int scheme, int limit_scheme,
     flow_float r;
     flow_float psi_r;
 
-    k = 1.0f/3.0f;
-    phif = phiC + limiter*(0.5f*k*(phiD-phiC) +(1.0f-k)*(dphidx*cpdx +dphidy*cpdy +dphidz*cpdz));
+    (void)k;
+    phif = phiC + limiter*recon_increment(2, phiC, phiD, dphidx, dphidy, dphidz, cpdx, cpdy, cpdz);
 
     return phif;
 };

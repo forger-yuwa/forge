@@ -1,4 +1,5 @@
 #include "limiter_d.cuh"
+#include "cuda_forge/reconIncrement_d.cuh"   // 再構成増分の唯一の定義 (流束と共有)
 #include "calcGradient_d.cuh"
 #include "cuda_forge/cudaWrapper.cuh"
 
@@ -44,7 +45,8 @@ template<bool SCALED>
 static void limiter_periodic_merged
 (
  solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
- flow_float phi_floor, flow_float* Q, flow_float* limiter_Q,
+ // matchRecon: 対象は**流れ 5 変数・node のみ** (plan §4.14)。化学種・受動スカラーは 0 を渡すこと
+ flow_float phi_floor, int matchRecon, flow_float* Q, flow_float* limiter_Q,
  flow_float* dQdx, flow_float* dQdy, flow_float* dQdz
 )
 {
@@ -62,7 +64,7 @@ static void limiter_periodic_merged
         var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
         var.p_d["pcx"], var.p_d["pcy"], var.p_d["pcz"],
         phi_floor, Q, s_lim_qmax, s_lim_qmin, limiter_Q, dQdx, dQdy, dQdz,
-        cfg.limiterMatchRecon, (cfg.discretization == "node" ? 1 : 0), cfg.convMethod);
+        matchRecon, (cfg.discretization == "node" ? 1 : 0), cfg.convMethod);
     gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
     periodicGatherMinArray_d_wrapper(cfg, cuda_cfg, msh, limiter_Q);
 }
@@ -306,11 +308,9 @@ __global__ void limiter_r1_fused5_d
             }
             #pragma unroll
             for (int k=0;k<5;k++){
-                flow_float delta = gx[k]*dcp_x + gy[k]*dcp_y + gz[k]*dcp_z;
-                if (convM == 2) {                     // interp_MUSCL_3rd と同形 (k = 1/3)
-                    const flow_float kk = (flow_float)(1.0/3.0);
-                    delta = (flow_float)0.5*kk*(Q[k][ic1]-qc[k]) + ((flow_float)1.0-kk)*delta;
-                }
+                // 流束と**同じ関数**で増分を作る (reconIncrement_d.cuh)。Qt を経由しないので桁落ちも無い
+                const flow_float delta = recon_increment(convM, qc[k], Q[k][ic1],
+                                                         gx[k], gy[k], gz[k], dcp_x, dcp_y, dcp_z);
                 const flow_float lk = (SCHEME == 1)
                     ? barth_Jespersen_limiter(qmax[k]-qc[k], qmin[k]-qc[k], delta, volume)
                     : venkata_limiter        (qmax[k]-qc[k], qmin[k]-qc[k], delta, volume);
@@ -368,7 +368,7 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         const char* gyn[5] = {"drody","dUxdy","dUydy","dUzdy","dPdy"};
         const char* gzn[5] = {"drodz","dUxdz","dUydz","dUzdz","dPdz"};
         for (int k = 0; k < 5; ++k)
-            limiter_periodic_merged<false>(cfg, cuda_cfg, msh, var, 0.0f,
+            limiter_periodic_merged<false>(cfg, cuda_cfg, msh, var, 0.0f, cfg.limiterMatchRecon,
                 var.c_d[qn[k]], var.c_d[ln[k]], var.c_d[gxn[k]], var.c_d[gyn[k]], var.c_d[gzn[k]]);
     } else if (cfg.limiter == 1)
         limiter_r1_fused5_d<1><<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (FORGE_LIMITER_FUSED5_ARGS);
@@ -383,7 +383,8 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
             const std::string i = std::to_string(s);
             fill_limiter_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(var.c_d["limiter_Y"+i], msh.nCells_all, 1.0f);
             if (perNode) {
-                limiter_periodic_merged<false>(cfg, cuda_cfg, msh, var, 0.0f,
+                // 化学種は対象外 (matchRecon=0)。対象は流れ 5 変数・node のみ (plan §4.14)
+                limiter_periodic_merged<false>(cfg, cuda_cfg, msh, var, 0.0f, 0,
                     var.c_d["Y"+i], var.c_d["limiter_Y"+i], var.c_d["dY"+i+"dx"], var.c_d["dY"+i+"dy"], var.c_d["dY"+i+"dz"]);
                 continue;
             }
@@ -419,7 +420,8 @@ void passiveLimiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
     for (int q = 0; q < n; ++q) {
         const std::string& pn = prims[q];
         if (perNode) {   // 周期 node: 合併極値 (φ_ref も合併極値) の 2 段 ψ_P (§4.8)
-            limiter_periodic_merged<true>(cfg, cuda_cfg, msh, var, static_cast<flow_float>(1.0e-30),
+            // 受動スカラーは対象外 (matchRecon=0)
+            limiter_periodic_merged<true>(cfg, cuda_cfg, msh, var, static_cast<flow_float>(1.0e-30), 0,
                 var.c_d[pn], var.c_d["limiter_"+pn], var.c_d["d"+pn+"dx"], var.c_d["d"+pn+"dy"], var.c_d["d"+pn+"dz"]);
             continue;
         }

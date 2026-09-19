@@ -495,6 +495,19 @@ void solverConfig::read(std::string fname)
         if (this->limiterMatchRecon != 0 && this->limiterMatchRecon != 1) {
             throw std::runtime_error("Key 'limiterMatchRecon' in 'space' must be 0 or 1.");
         }
+        // 対象は **流れ 5 変数・node・convMethod 0/1/2 のみ** (plan convection-node-wall-reconstruction §4.14)。
+        // cell は目標点が双対面重心のままで流束と整合しているが、convMethod 2 の増分の形は変わるので拒否する。
+        // MINMOD (その他の convMethod) は増分の式が別なので共通関数の対象外。
+        if (this->limiterMatchRecon == 1) {
+            if (this->discretization != "node") {
+                throw std::runtime_error("'limiterMatchRecon: 1' is for discretization 'node' only "
+                                         "(cell already evaluates at the dual-face centroid the flux uses).");
+            }
+            if (this->convMethod != 0 && this->convMethod != 1 && this->convMethod != 2) {
+                throw std::runtime_error("'limiterMatchRecon: 1' supports convMethod 0, 1, 2 only "
+                                         "(MINMOD uses a different increment).");
+            }
+        }
 
         // free-stream 保存用の基準静圧 (既定 0.0 = 従来挙動・ビット不変)
         this->pRef = getOptionalValidatedValue<double>(space, "pRef", 0.0, "space");
