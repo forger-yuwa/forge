@@ -18,6 +18,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator
+from scipy.spatial import Delaunay
 
 import matplotlib
 matplotlib.use("Agg")
@@ -108,6 +109,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--max-points", type=int, default=120000,
+                    help="場の線形補間に使うノード数の上限 (3D Delaunay が重いので間引く)")
     ap.add_argument("--step", type=int, default=None)
     a = ap.parse_args()
     man = gc.load_manifest()
@@ -123,8 +126,18 @@ def main():
     # キャビティ + 開口すぐ上のノードだけで線形補間器を作る
     m = gc.cavity_mask(c[:, 0], c[:, 1], c[:, 2], man) | (
         (c[:, 2] < 0.004) & (c[:, 2] > -1e-9) & (np.hypot(c[:, 0], c[:, 1]) < Ro * 1.3))
-    pts = c[m]
-    L = {k: LinearNDInterpolator(pts, v[k][m]) for k in ("Ux", "Uy", "Uz", "T")}
+    idx = np.flatnonzero(m)
+    # **3D Delaunay は点数に対して急激に重くなる** (1.00M 節点の run で RSS 4.3 GB・10 分超に
+    # なり、同時に走っていた 2.74M 節点の計算を OOM で落としかけた)。図のサンプル格子は
+    # 181x200 / 44x180 しかないので、雲を間引いても絵は変わらない。
+    if idx.size > a.max_points:
+        rng = np.random.default_rng(0)                    # 図の再現性のため固定 seed
+        idx = np.sort(rng.choice(idx, a.max_points, replace=False))
+        print("  補間点を %d -> %d に間引き (--max-points)" % (int(m.sum()), idx.size), flush=True)
+    pts = c[idx]
+    # **三角形分割は 1 回だけ作って 4 変数で共有する** (変数ごとに張ると 4 倍かかる)
+    tri = Delaunay(pts)
+    L = {k: LinearNDInterpolator(tri, v[k][idx]) for k in ("Ux", "Uy", "Uz", "T")}
 
     fig = plt.figure(figsize=(16.5, 9.4))
     gs = fig.add_gridspec(2, 3, height_ratios=[1.0, 1.15], hspace=0.30, wspace=0.26)
