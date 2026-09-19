@@ -56,7 +56,8 @@ def grid_mean(u, v, val, w, nu=120, nv=48, ulim=None, vlim=None):
         idx = distance_transform_edt(np.isnan(g), return_distances=False, return_indices=True)
         g = g[tuple(idx)]
     UC = 0.5 * (ue[1:] + ue[:-1]); VC = 0.5 * (ve[1:] + ve[:-1])
-    return np.meshgrid(UC, VC) + [g]
+    # numpy 2 系では meshgrid が tuple を返すので list 化してから連結する
+    return list(np.meshgrid(UC, VC)) + [g]
 
 
 def wall_uv(d, man, grp):
@@ -155,12 +156,23 @@ def main():
         z = xyz[:, 2] * 1e3
         q = -np.asarray(w["qwall"], float) * 1e-3          # 壁に入る側を正 [kW/m2]
         sel = (z < -1e-6) & (z > -dep * 1e3 + 1e-6)
-        lv = np.linspace(0, max(np.percentile(q[sel], 99.5), 1e-6), 21)
+        # **カラースケールはリップ帯を除いた領域から決める**。開口リップは 90 度の鋭角で
+        # q'' が h^-1/2 で発散する幾何的特異点なので (plan §4.4.2)、そこを含めて正規化すると
+        # 図が真っ黒になり、深部の分布がまったく見えない (実測: 最大 418 kW/m2 対 平均 3 kW/m2)。
+        # リップ帯は飽和させ、上限をタイトルに書く。
+        lipmm = man["eval"].get("lip_band_m", 1.0e-3) * 1e3
+        deep = sel & (z < -lipmm)
+        hi = max(np.percentile(q[deep], 99.0), 1e-6) if deep.any() else 1e-6
+        lv = np.linspace(0, hi, 21)
+        qmax_all = float(np.max(q[sel])) if sel.any() else 0.0
         cf = ax.tricontourf(th[sel], z[sel], np.clip(q[sel], lv[0], lv[-1]), levels=lv, cmap="inferno")
         fig.colorbar(cf, ax=ax, label="q'' [kW/m²]")
         ax.set_xlabel("周方向 θ [deg]  (0=上流, 180=下流)")
         ax.set_ylabel("深さ z [mm]")
         ax.set_title("(%s) %s の壁熱流束" % ("ab"[i], ttl), fontsize=12, loc="left")
+        # 飽和の断り書きは軸内に小さく置く (タイトルに入れると隣のパネルと重なる)
+        ax.text(0.015, 0.015, "上限 %.3g kW/m² で飽和\nリップ最大 %.0f kW/m²" % (hi, qmax_all),
+                transform=ax.transAxes, fontsize=8.5, color="w", va="bottom", ha="left")
         ax.set_xlim(0, 180); ax.set_ylim(-dep * 1e3, 0)
 
     # ---------- (c) すきま中央面の速度ベクトル ----------
