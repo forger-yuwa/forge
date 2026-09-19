@@ -51,6 +51,13 @@ def isa(z_km):
     return T, P
 
 
+def _f(x):
+    """numpy の 0/1 次元どちらでも Python float にする (新しい numpy は float(配列) を拒否)。"""
+    import numpy as np
+    a = np.asarray(x)
+    return float(a.reshape(-1)[0]) if a.ndim else float(a)
+
+
 def tp_gas(Y):
     """semi-perfect 乾燥空気 (NASA-9)。design/forge_design が無ければ None"""
     import sys
@@ -66,7 +73,7 @@ def tp_gas(Y):
 def _solve_T_of_h(gas, h_target, lo=150.0, hi=3000.0):
     for _ in range(200):
         mid = 0.5 * (lo + hi)
-        if float(gas.h_mass(mid)) < h_target:
+        if _f(gas.h_mass(mid)) < h_target:
             lo = mid
         else:
             hi = mid
@@ -121,12 +128,12 @@ def load(cfg_path=None):
     # semi-perfect (TP) の全温・回復温度・cp 比 (CPG の偏りを測るため常に出す)
     g = tp_gas(C["dry_air_Y"])
     if g is not None:
-        h_inf = float(g.h_mass(T_inf))
+        h_inf = _f(g.h_mass(T_inf))
         d["Tt_tp"] = _solve_T_of_h(g, h_inf + 0.5 * U * U)
         d["Taw_tp"] = _solve_T_of_h(g, h_inf + r_rec * 0.5 * U * U)
-        d["cp_tp_298"] = float(g.cp_mass(298.15))
-        d["cp_tp_at_Tt"] = float(g.cp_mass(d["Tt_tp"]))
-        d["gamma_tp_at_Tt"] = float(g.gamma(d["Tt_tp"]))
+        d["cp_tp_298"] = _f(g.cp_mass(298.15))
+        d["cp_tp_at_Tt"] = _f(g.cp_mass(d["Tt_tp"]))
+        d["gamma_tp_at_Tt"] = _f(g.gamma(d["Tt_tp"]))
         d["cp_rise_pct"] = 100.0 * (d["cp_tp_at_Tt"] / d["cp_tp_298"] - 1.0)
         d["Taw_cpg_minus_tp"] = d["Taw_cpg"] - d["Taw_tp"]
     d["Tw_over_Taw"] = d["wall_T"] / d.get("Taw_tp", d["Taw_cpg"])
