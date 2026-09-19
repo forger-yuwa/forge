@@ -143,7 +143,7 @@ codex が現行コードで再現した**誤合格**を先に塞ぐ。いずれ�
 | 3 | `check_mesh_quality.py`: 非有限座標・ゼロ/負体積・向き混在を**外れ値許容の前に無条件拒否** | ✅ |
 | 4 | 不正入力テスト `test_gate_bad_input.py` (10 件) + 実データ回帰 (過去 PASS の 3 run・実メッシュ 3 種) | ✅ |
 | 5 | 呼び出し側: 検証を `analyze()` 内に置いたので `sern_gates.py` は自動継承。`run_case.sh` は判定 rc を `CONVERGENCE_EXIT:` として記録し `FORGE_STRICT_CONVERGENCE=1` で伝播 | ✅ |
-| 6 | 段情報 `stage_manifest.json` の生成と `check_convergence.py` の同一性検査 | ⏳ |
+| 6 | 段情報 `stage_manifest.json` (`stage_manifest.py` の `StageManifest`) と `check_convergence.py --segment` ✅。hard キー (convMethod/limiter/turbulenceModel/wallTreatmentSST/viscMethod/thermalMethod/unsteady/dualTime/axisymmetric + bcond のハッシュ) が同じ連続区間だけ連結。**列が区間内で違えば連結しない** (共通列への縮退は誤合格を再導入するため)。case/49 の段構成で S5 ランプ以降+本段が 1 区間と正しく出る |
 | 7 | `check_wall_resolution.py`: 壁面ごとの局所 $y_1$ (PLANES/STRUCT の接続から法線方向の第一内部点)・接線 traction からの $u_\tau$・run の `viscMethod` に応じた $\mu$・壁ダンプ節点と DOF の**厳密一致による対応づけ**。自己検査: $y_1$ が第一層厚と一致 | ✅ |
 | 8 | 壁解像の小規模テスト `test_wall_resolution.py` (一様直交 / 非一様 = 壁ごとに別 y1 / 斜交 75° = 評価不能 / 角 = 2 面共有) ✅。⏳ 軸対称・周期の配置は未追加 |
 | 8b | 判定は**超過面積割合** (`--over-frac`, 既定 2 %) で行う。最大値は幾何的特異点で収束しないので使わない ✅ |

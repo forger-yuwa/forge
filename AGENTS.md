@@ -80,6 +80,11 @@
   (`check_convergence.py` は系列全体の最大値を低下桁数の基準に取る)。**数値設定 (方程式・BC・
   空間離散化) が同一の区間**で判定し、応答にはその区間を書くこと。CFL・反復数だけの違いは連結可。
   収束済み場からの継続は `--from-floor <参照 run>` を使う。
+  **区間は段名で決めない**: run 生成側が `solver_density_cuda/tools/stage_manifest.py` の
+  `StageManifest` で段ごとの実効設定を `stage_manifest.json` に書き、
+  `check_convergence.py <run> --segment` が**その最後の区間**を連結して判定する
+  (段名のプレフィックスでは方程式・BC・離散化の同一性を保証できない)。
+  区間の確認は `python3 solver_density_cuda/tools/stage_manifest.py <run> --segments`。
 - **判定ツールが「判定不能」を返したら、それは合格ではない**。残差列が無い / 必須の保存量列が
   欠けている / 末尾窓の代表値が 0 といった入力は、以前は**合格として通っていた** (2026-09-19 修正)。
   回帰試験は `python3 solver_density_cuda/tools/test_gate_bad_input.py`。判定ロジックを触るときは必ず通す。

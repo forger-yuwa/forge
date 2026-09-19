@@ -187,6 +187,58 @@ def analyze(path, min_drop, tail_frac):
     return laststep, report, ok, any_nan, any_stalled, any_converging
 
 
+def build_segment_csv(run_dir):
+    """`stage_manifest.json` の**最後の区間**を step オフセット付きで連結した CSV を書いて返す。
+
+    段名でなく**実効設定 (hard キー)** が同じ連続区間だけを繋ぐので、別の方程式・BC の過渡を
+    本段の低下桁数の基準にしてしまう事故が起きない (2026-09-19 codex Major 1)。
+    列が段で違う場合は**共通列に落とさず**、区間内で列集合が一致することを要求する
+    (共通列への縮退は検出したい誤合格を再導入する: 同 Major 2)。
+    """
+    import csv as _csv
+    import json as _json
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from stage_manifest import segments
+    p = os.path.join(run_dir, 'stage_manifest.json')
+    if not os.path.exists(p):
+        return None
+    segs = segments(_json.load(open(p)))
+    if not segs:
+        return None
+    seg = segs[-1]
+    rows, hdr, off = [], None, 0
+    used = []
+    for st in seg:
+        f = os.path.join(run_dir, st['history'])
+        if not os.path.exists(f):
+            continue
+        r = list(_csv.reader(open(f)))
+        if len(r) < 2:
+            continue
+        h = [c.strip() for c in r[0]]
+        if hdr is None:
+            hdr = h
+        elif h != hdr:
+            print(f"  [segment] 段 {st['tag']} の列が区間内で一致しない -> 連結しない "
+                  f"(共通列に落とすと誤合格を再導入する)")
+            return None
+        body = [x for x in r[1:] if x and x[0].strip().lstrip('-').isdigit()]
+        if not body:
+            continue
+        n1 = int(body[-1][0])
+        for x in body:
+            x = list(x); x[0] = str(int(x[0]) + off); rows.append(x)
+        used.append(st['tag'])
+        off += n1 + 1
+    if not rows:
+        return None
+    out = os.path.join(run_dir, 'residual_history_segment.csv')
+    with open(out, 'w', newline='') as f:
+        w = _csv.writer(f); w.writerow(hdr); w.writerows(rows)
+    print(f"  [segment] 判定区間 = {' -> '.join(used)}  ({len(rows)} 行) -> {out}")
+    return out
+
+
 def reference_floor(path, tail_frac):
     """参照 run の各残差列の末尾床 (末尾 tail_frac の |値| 平均)。
     戻り値 (floor, zero_cols): floor は非ゼロ列だけ、zero_cols は all-zero (非活性) 列の集合。"""
@@ -253,6 +305,10 @@ def main():
     ap.add_argument('--from-floor', '--reference-floor', dest='from_floor', default=None, metavar='REF_RUN',
                     help='収束場からの restart 判定: REF_RUN の末尾床 (tail 平均) の --floor-factor 倍以内に全期間留まれば PASS')
     ap.add_argument('--floor-factor', type=float, default=1.5, help='--from-floor の許容倍率 (既定 1.5)')
+    ap.add_argument('--segment', action='store_true',
+                    help='段階起動の run で **stage_manifest.json の最後の区間** '
+                         '(方程式・BC・空間離散化が同一の連続区間) を連結して判定する。'
+                         '段名でなく実効設定で区間を決めるので、別 BC の過渡を基準にしない')
     args = ap.parse_args()
 
     floor = None
@@ -280,7 +336,15 @@ def main():
 
     all_pass = True
     for rd in args.run_dirs:
-        path = rd if rd.endswith('.csv') else os.path.join(rd, 'residual_history.csv')
+        if args.segment and not rd.endswith('.csv'):
+            path = build_segment_csv(rd)
+            if path is None:
+                print(f"[{rd}] stage_manifest.json が無い -> --segment は使えない "
+                      f"(判定区間を人が明示すること)")
+                worst = max(worst, 2)
+                continue
+        else:
+            path = rd if rd.endswith('.csv') else os.path.join(rd, 'residual_history.csv')
         if not os.path.exists(path):
             print(f"[{rd}] NO residual_history.csv"); all_pass = False; continue
         if floor is not None:

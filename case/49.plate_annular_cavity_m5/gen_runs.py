@@ -293,7 +293,17 @@ def run_forge(rd):
     return r.returncode
 
 
+_SM = {}      # run ごとの StageManifest
+
+
 def stage(rd, tag, cfgtext, bctext, nsteps, keep=False):
+    # **段ごとの実効設定を記録する** (収束判定の区間を段名でなくデータで決めるため。
+    #  2026-09-19 codex: 段名のプレフィックスでは方程式・BC・離散化の同一性を保証できない)
+    sys.path.insert(0, str(ROOT / "solver_density_cuda" / "tools"))
+    from stage_manifest import StageManifest
+    sm = _SM.setdefault(str(rd), StageManifest(rd))
+    sm.add(tag, cfgtext, bctext)
+    sm.write()
     (rd / "solverConfig.yaml").write_text(cfgtext)
     (rd / "bcondConfig.yaml").write_text(bctext)
     rc = run_forge(rd)
@@ -400,8 +410,15 @@ def cmd_run(a):
     for i, cv in enumerate([float(v) for v in a.ramp.split(",") if v]):
         stage(rd, "S5_ramp%d_cfl%g" % (i, cv), solver_cfg(2000, cv, outint=2000, gas=gas), bcond("isothermal", **ip), 2000)
     # S6: 本段
-    (rd / "solverConfig.yaml").write_text(solver_cfg(a.main_steps, a.cfl, outint=a.out_int, gas=gas))
-    (rd / "bcondConfig.yaml").write_text(bcond("isothermal", **ip))
+    main_cfg = solver_cfg(a.main_steps, a.cfl, outint=a.out_int, gas=gas)
+    main_bc = bcond("isothermal", **ip)
+    sys.path.insert(0, str(ROOT / "solver_density_cuda" / "tools"))
+    from stage_manifest import StageManifest
+    sm = _SM.setdefault(str(rd), StageManifest(rd))
+    sm.add("S6_main", main_cfg, main_bc, history="residual_history.csv")
+    sm.write()
+    (rd / "solverConfig.yaml").write_text(main_cfg)
+    (rd / "bcondConfig.yaml").write_text(main_bc)
     rc = run_forge(rd)
     print("main rc", rc)
     print((rd / "CONVERGENCE_VERDICT.txt").read_text()[-900:])
