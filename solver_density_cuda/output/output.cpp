@@ -1,6 +1,7 @@
 #include "cuda_forge/passiveTransport_d.cuh"
 #include <cstdio>
 #include "output.hpp"
+#include "conjugateWall.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -285,6 +286,10 @@ void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var ,
 
         bc.copyVariables_bplane_D2H();
 
+        // CHT 界面診断 (output.interfaceDiag: 1)。device bvar のコピー後に host で作る
+        // (bvar を上書きしないので、既定 run の出力はビット不変)。
+        conjugateWall::fillInterfaceDiagnostics(cfg , msh , var , bc);
+
         elementTypeMap eleTypeMap;
         ostringstream oss;
         ostringstream oss_id;
@@ -368,6 +373,25 @@ void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var ,
                 copy(bc.bvar[name].begin(), bc.bvar[name].begin()+bc.planes_local.size(), vtemp.begin());
             }
             file.createDataSet("/VALUE/"+name , vtemp);
+        }
+
+        // host 専用の診断量 (CHT 界面診断)。bplane 順なので bvar と同じ並べ替えを通す。
+        for (auto& dv : bc.diagVar)
+        {
+            if ((geom_int)dv.second.size() < (geom_int)bc.planes_local.size()) continue;
+            std::vector<flow_float> vtemp;
+            if (nodeWallViz) {
+                vtemp.assign(bc.inodes_l2g.size(), (flow_float)0.0);
+                for (geom_int j = 0; j < (geom_int)bc.planes_local.size(); j++) {
+                    if (bc.planes_local[j].iNodes.empty()) continue;
+                    geom_int L = bc.inodes_g2l[bc.planes_local[j].iNodes[0]];
+                    if (L >= 0) vtemp[L] = dv.second[j];
+                }
+            } else {
+                vtemp.resize(bc.planes_local.size());
+                copy(dv.second.begin(), dv.second.begin()+bc.planes_local.size(), vtemp.begin());
+            }
+            file.createDataSet("/VALUE/"+dv.first , vtemp);
         }
 
 //

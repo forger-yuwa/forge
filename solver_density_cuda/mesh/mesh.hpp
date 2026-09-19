@@ -102,6 +102,11 @@ public:
     std::map<std::string, std::vector<flow_float>> bvar;
     std::map<std::string, flow_float* > bvar_d; // cuda
 
+    // 壁面ダンプに載せる host 専用の診断量 (device 側を持たない)。CHT の界面診断
+    // (conjugateWall::fillInterfaceDiagnostics) が bplane 順で詰め、output がそのまま書く。
+    // bvar と違い copyVariables_bplane_D2H で上書きされない。
+    std::map<std::string, std::vector<flow_float>> diagVar;
+
     // 多成分 TP (M5): 入口組成 Y_s^in の device ポインタ配列 (flow_float*[nSpecies])。
     // inlet カーネルが混合則 thermo を計算するため。inlet_uniformVelocity_d_wrapper で
     // bvar_d["Y{s}"] から遅延構築する。単成分では nullptr のまま。

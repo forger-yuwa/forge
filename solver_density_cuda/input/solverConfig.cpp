@@ -480,8 +480,13 @@ void solverConfig::read(std::string fname)
             this->outputLevel = getOptionalValidatedValue<int>(out, "level", 1, "output");
             if (this->outputLevel < 0 || this->outputLevel > 2) throw std::runtime_error("Key 'level' in 'output' must be 0, 1, or 2.");
             if (out["extraFields"]) this->outputExtraFields = out["extraFields"].as<std::vector<std::string>>();
+            this->interfaceDiag = getOptionalValidatedValue<int>(out, "interfaceDiag", 0, "output");
+            if (this->interfaceDiag != 0 && this->interfaceDiag != 1) throw std::runtime_error("Key 'interfaceDiag' in 'output' must be 0 or 1.");
+            this->interfaceDiagAlignMin = getOptionalValidatedValue<double>(out, "interfaceDiagAlignMin", 0.5, "output");
+            if (!(this->interfaceDiagAlignMin > 0.0 && this->interfaceDiagAlignMin <= 1.0)) throw std::runtime_error("Key 'interfaceDiagAlignMin' in 'output' must be in (0, 1].");
         }
-        std::cout << "'output': level=" << this->outputLevel << " extraFields=" << this->outputExtraFields.size() << "\n";
+        std::cout << "'output': level=" << this->outputLevel << " extraFields=" << this->outputExtraFields.size()
+                  << " interfaceDiag=" << this->interfaceDiag << "\n";
 
         // 空間設定
         auto space = config["space"];

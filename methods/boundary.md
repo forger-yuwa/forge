@@ -217,7 +217,9 @@ SST automatic wall treatment (`wallTreatmentSST`) とはコードパスが分離
 
 ### 共役熱伝達 (CHT) — 壁温を固体と連立して解く
 
-> **状態: 仕様確定・未実装 (2026-09-19)**。本節は実装前に固定した**契約**であり、コードはまだ無い。
+> **状態 (2026-09-19)**: 契約は下記のとおり確定。**実装済み = 界面診断の出力 (`output.interfaceDiag`)・
+> 壁温分布の入力 (`wallProfile`)・共有 CV の壁温競合の起動時拒否**。
+> **未実装 = 固体モデル・連成反復・`conjugate` 属性** (外部ループとソルバ内連成)。
 > 設計判断と検証計画は [`plans/active/boundary-conjugate-heat-transfer.md`](../plans/active/boundary-conjugate-heat-transfer.md)
 > (codex plan レビュー 3 巡: NO-GO → NO-GO → GO-with-changes、全件採用)。実装時は本節と実装の整合を確認する。
 
@@ -292,28 +294,58 @@ $$\left(A_s+D_f\right)T^{k+1}=b_s+Q_f(T^{k})+D_f\,T^{k}$$
 `Ts` は `valueTypes==1` の **per-face bvar** で、起動時に YAML の一様値で 1 度埋めた後は
 カーネルが書き換えない。したがって面ごとに違う $T_w$ を入れればそのまま効く
 (cell ゴースト `wall_isothermal_d`、node 温度ピン `pin_wall_node_temperature_d` とも `Tsb[ib]` を読む)。
-`ints: {wallProfile: 1}` で `wall_profile_<physID>.csv` から埋める (入口分布 `applyInletProfiles` の一般化)。
+`ints: {wallProfile: 1}` で `wall_profile_<physID>.csv` から埋める (入口分布 `applyInletProfiles` の一般化。
+CSV 書式は入口分布と同じで、先頭の連続 x/y/z 列が補間座標、残りが量名 = 壁では `Ts`)。
 
 - **補間位置**: node は**ノード座標**、cell は面重心。
   face 重心をそのまま node に使うと位置がずれる (case/48 `run_0011` で実測 0.679 mm)。
 - **verify は `bvar` の再出力では不十分**。壁ダンプの `Ts` は入力の再表示なので、
   場に入ったことは `VALUE/T` と EOS 整合まで見て確認する。
 - CHT 内部の転送は座標補間でなく**安定なノード ID** を正本にする。
+- **実測 (case/48 `run_0015_wallprofile`)**: $T_w = 300+100x$ を与えると、**場の `VALUE/T` が壁ノードで
+  同じ分布になる (最大差 0.068 K)**。`bvar` の `Ts` を見るだけでは「入力が入ったこと」しか分からない。
+- **入口分布 (`inletProfile`) は従来どおり face 重心で補間する** (既存 run のビット不変を守るため)。
+  node の入口にも同じ位置ずれの問題はあるので、必要になったら別途 opt-in で直す (本節の契約の範囲外)。
 
 #### 起動時に拒否する構成
 
 契約を散文で守らず、次はいずれも**起動時にエラーで落とす**。
 
 1. `cell` 離散化で `conjugate: 1`。
-2. **温度を拘束する壁どうしが CV を共有**していて、片方が連成・片方が非連成 `wall_isothermal` の場合
+2. **温度を拘束する壁どうしが CV を共有**していて、**そこに与える壁温が食い違う**場合
    (温度ピンは bcond 順に適用され、角ノードは複数 bcond に重複するので**後勝ち**になる)。
-   異なる `conjugateGroup` 間の共有も同じく拒否。
+   連成の有無を問わず拒否する。**実装済み** (`conjugateWall::checkWallTemperatureSharing`):
+   壁温を陽に扱っている run (`wallProfile` か `interfaceDiag` が有効) でのみ走り、
+   競合 CV の数・physID・それぞれの $T_w$ を出して起動時に落とす。それ以外の run は挙動不変。
+   検証: case/48 の平板で `sym` (前縁上流の対称面) を $T_s$=500 K の等温壁にすると、
+   前縁で共有する 1 CV を検出して exit 1 する。
 3. 断熱・孤立固体で正味入熱が非零 (定常解が無い)。
 4. 未定義の構成: 周期同一視・軸対称の面内伝導・壁関数併用・dual-time 連成。
 
 #### 診断出力とゲート
 
-壁ダンプ (`res_wall_<physID>_*.h5`) に opt-in で $T_1$, $d_1$, $k_{\rm eff}$, `q_compact`, `q_recon`, `q_eff` を出す。
+**実装済み**: `output: {interfaceDiag: 1}` (既定 0) で、壁 (`wall` / `wall_isothermal`) のダンプ
+`res_wall_<physID>_*.h5` に次を追加する (host 側で作るので device の `bvar` を汚さず、既定 run の出力は不変)。
+
+| データセット | 中身 |
+| --- | --- |
+| `iface_T1` / `iface_d1` | 第一内部点の温度と法線距離 (定義は上記。`tools/check_wall_resolution.py` と同一規則) |
+| `iface_keff` | $k_{\rm eff}=k_{\rm lam}+c_p\mu_t/Pr_t$ (viscousFlux の壁経路と同じ) |
+| `iface_q_compact` | $k_{\rm eff}(T_1-T_w)/d_1$ (**固体向き正**) |
+| `iface_q_recon` | $-$`qwall` = viscousFlux が残差に入れた再構成勾配形 (**固体向き正**に反転済み) |
+| `iface_q_2nd` | 3 点非等間隔の 2 次片側差分による $k_{\rm eff}\,dT/dn$ |
+| `iface_ok` / `iface_align` | 第一内部点が定まったか / 整列度 $|d\cdot\hat n|/|d|$ |
+
+**実測 (case/48 `run_0014_iface_diag`, 壁法線に整列した node メッシュ, $y_1$=3 µm)**:
+
+- `iface_d1` = 3.0001 µm = **第一層厚と一致**、`align` = 1.000、1001/1001 点が評価可。
+- **`q_recon` は `q_compact` と 1.6e-7 相対で一致する**。この配置では再構成勾配がコンパクト差分に帰着するため。
+- **`q_2nd` は `q_compact` と中央値 2.79 % 違う** (最大 3.1 %)。つまり過去に見えた ~2.7 % の食い違いは
+  **後処理の差分形式の選択**であって、ソルバ内部の不整合ではない。滑らかな分布では 2 次片側の方が正確なので、
+  **カーネルの壁熱流束はこの解像度で ~3 % の 1 次打ち切り誤差を持つ** (誤差予算に入れる)。
+- 斜交・非整列メッシュでは 3 つが分かれるはずなので、**どれを見ているかを列名で明示する**。
+
+$q_{\rm eff}$ (拘束反力込み、= 連成の正本) は依存診断の完成後に追加する。
 
 - **G-cons (熱収支)**: $\varepsilon=\big|\sum_i Q_{f,i}-(\text{固体正味入熱})\big|$ を
   $\max(\sum_i|Q_{f,i}|,\,Q_{\rm floor})$ で規格化する (正味量で割ると符号相殺で分母が消える)。

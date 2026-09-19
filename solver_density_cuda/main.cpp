@@ -24,6 +24,7 @@
 
 #include "mesh/gmshReader.hpp"
 #include "output/output.hpp"
+#include "conjugateWall.hpp"
 #include "boundaryCond.hpp"
 
 #include "setStructualVariables.hpp"
@@ -1150,6 +1151,10 @@ cudaConfig initializeSimulation(
     // 入口分布プロファイル (ints:{inletProfile:1} の inlet): per-face bvar を CSV から face 重心で補間。
     // mesh.planes (重心) と bvar が揃った後・最初の applyBconds より前に適用。未指定 inlet は一様のまま。
     applyInletProfiles(cfg , msh);
+    // 壁温分布 (ints: {wallProfile: 1})。inlet と同じ位相で、最初の applyBconds より前に入れる。
+    applyWallProfiles(cfg , msh);
+    // 壁温を陽に扱う run では、共有 CV に矛盾する壁温を与えていないかを検査する (後勝ち事故の防止)。
+    conjugateWall::checkWallTemperatureSharing(cfg , msh);
 
     // 化学種変数を登録 (allocVariables より前)。nSpecies<=1 では no-op。
     var.registerSpecies(cfg.nSpecies, cfg.chemEnabled);

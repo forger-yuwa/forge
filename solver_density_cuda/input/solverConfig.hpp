@@ -37,6 +37,12 @@ public:
     //   extraFields: level 0/1 に個別追加する名前 (output_cellValNames にあるもの)
     int outputLevel = 1;
     std::vector<std::string> outputExtraFields;
+    // CHT 界面診断 (output: {interfaceDiag: 1}, 既定 0 = 出さない)。壁面ダンプに
+    // iface_T1 / iface_d1 / iface_keff / iface_q_compact / iface_q_recon / iface_ok / iface_align を追加する。
+    // 定義と符号は conjugateWall.hpp と methods/boundary.md「共役熱伝達 (CHT)」が正本。
+    int interfaceDiag = 0;
+    // 第一内部点の整列度 |d·n|/|d| の下限 (これ未満は評価不能。tools/check_wall_resolution.py の --align-min と同義)
+    double interfaceDiagAlignMin = 0.5;
 
     int dtControl; // 0: use dt , 1: cfl
     flow_float totalTime=0.0;

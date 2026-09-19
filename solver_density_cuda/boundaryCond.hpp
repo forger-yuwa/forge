@@ -265,3 +265,9 @@ void readBcondConfig(solverConfig& , vector<bcond>& );
 // 最初の applyBconds より前に呼ぶ。詳細は boundaryCond.cpp の関数ヘッダ参照。
 void applyInletProfiles(solverConfig& cfg , mesh& msh);
 
+// 壁温分布プロファイル: `ints: {wallProfile: 1}` の壁 bcond の per-face `Ts` を
+// `wall_profile_<physID>.csv` から補間してセットする (inlet 版と同じ CSV 書式)。
+// **評価点は値を課す位置** (node モードは壁ノード座標、cell モードは CV 重心) で、
+// inlet の face 重心とは違う。readBcondConfig の後・最初の applyBconds より前に呼ぶ。
+void applyWallProfiles(solverConfig& cfg , mesh& msh);
+

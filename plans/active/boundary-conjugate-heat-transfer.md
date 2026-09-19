@@ -332,11 +332,16 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
    **撤回済みの旧方針が索引・親 plan に残っているので同時に直す** (codex 2 巡目 #7):
    [`plans/README.md`](../README.md) の「コンパクト差分形を一次」「Bi 非依存の安定化」、
    [親 plan](tooling-nozzle-isothermal-wall-chain.md) §5.1 の `wall_conjugate`。
-2. **S1 界面診断**: 壁ダンプへの $T_1,d_1,k_{\rm eff},q_{\rm compact},q_{\rm recon}$ 追加 (opt-in)。
-   `q_eff` (拘束反力込み) は [`tooling-energy-balance-diagnostics`](tooling-energy-balance-diagnostics.md) の成果を使う。
-3. **S2 `wallProfile`**: フラグ追加 + **node はノード座標で補間** + verify (`VALUE/T` と EOS 整合)。回帰はビット不変。
-4. **S3 幾何と接合**: facet 単位の幾何・荷重、`conjugateGroup`、**角ノード競合の起動時エラー**、
-   軸対称・周期の規定と未対応構成の拒否。
+2. ~~**S1 界面診断**~~ — **完了 (2026-09-19)**。`conjugateWall.{hpp,cpp}` 新設 (符号規約の正本)、
+   `output: {interfaceDiag: 1}` で壁ダンプに `iface_T1/d1/keff/q_compact/q_recon/q_2nd/ok/align`。
+   host 側で作るので device `bvar` を汚さない。`q_eff` (拘束反力込み) は
+   [`tooling-energy-balance-diagnostics`](tooling-energy-balance-diagnostics.md) の完成後。
+3. ~~**S2 `wallProfile`**~~ — **完了 (2026-09-19)**。`applyInletProfiles` を `applyBoundaryProfiles` に
+   一般化し `applyWallProfiles` を追加。**壁は値を課す位置 (node はノード座標) で補間**、入口は従来どおり
+   face 重心 (既存 run のビット不変)。verify は場の `VALUE/T` で確認済み。
+4. **S3 幾何と接合** — **部分完了 (2026-09-19)**: **共有 CV の壁温競合の起動時エラーを実装**
+   (`checkWallTemperatureSharing`。壁温を陽に扱う run でのみ走り、既定 run の挙動は不変)。
+   **残り**: facet 単位の幾何・荷重、`conjugateGroup`、軸対称・周期の規定と未対応構成の拒否。
 5. **S4 固体ソルバ**: `tools/solid_shell.py` (`local1d`/`shell2d`) と `tools/solid_fem2d.py`。単体は解析解。
 6. **S5 外部ループ**: `tools/cht_loop.py` (§4.2 の更新式、セカント $D_f$、Aitken の安全装置)。
 6.5. **S5b 界面ゲートの実装**: G-if / G-cons の判定 (局所ノルム・絶対許容・連続反復数) と区間ハッシュ。
@@ -381,7 +386,7 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | 20 | **受理・退避仕様 (停止しないこと)** (3 巡目 #1) | §4.2。メリット関数 $\Phi=r^{\mathsf T}(A_s+D_f)^{-1}r$ + line search、再試行上限、停滞の不合格化。V1b に反例と非一様 $D_f$ |
 | 21 | **依存診断の解除契約** (2 巡目 #1 + 3 巡目 #2) | dual-time 解除を **V1 前**、周期解除を **V5 前**。**提供側 plan の残作業表にも** $R^{raw}$ の定義・$D_t(VE)$ の算出・BDF 符号試験・周期 root 集計を登録する |
 | 22 | **ゲートの数値仕様** (2 巡目 #5 + 3 巡目 #3) | §6 G-cons/G-if。規格化 ($\sum|Q|$ と絶対床)、局所面積尺度、絶対×相対×連続回数、準定常は **drift と osc の両方**を比較許容の 1/5。**Phase 1 判定前に実装** |
-| 23 | **共有角の唯一の所有者** (3 巡目 #4) | §4.4b。温度を拘束する全壁を走査、**非連成等温壁との共有も拒否**、global CV ID で固体 DOF を一意化、$Q_j$ は 1 回転送。試験 2 本を Phase 0 に |
+| 23 | **共有角の唯一の所有者** (3 巡目 #4) | §4.4b。~~温度を拘束する全壁を走査して拒否~~ **実装・検証済み (2026-09-19)**: `checkWallTemperatureSharing` が競合 CV・physID・各 $T_w$ を出して exit 1 (case/48 で `sym` を 500 K 等温壁にした拒否試験)。**残り**: global CV ID で固体 DOF を一意化、$Q_j$ の 1 回転送 (連成実装時) |
 | 24 | **`fem2d` の連成契約と単体試験** (2 巡目 #3) | §4.4d。$E$ / $K_s$ / 荷重転送 (面積の再乗算禁止)。単体は孔 Robin の円環解析解・非一様荷重・共有角保存 |
 | 25 | **V5 各段の入力と合格条件** (2 巡目 #6 + 3 巡目 #5) | §4.9・§6 V5。(a) 実測 $T_w$ → $h$/熱流束/壁圧、(b) 外周 Dirichlet + 孔 Robin の固体単独 (原典データ処理の再現検査)、(c) CHT。帯の**合成規則**まで事前登録 |
 | 26 | **陰解法フックの設計** (2 巡目 #4) | §4.6。`advanceImplicitSteady`/`implicitNonlinearUpdate` 経路で $K$ を数える。dual-time は別契約 (初版は対象外) |
@@ -390,6 +395,20 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 
 ## 6. 検証
 
+- **S1–S3 のコード検証 (完了, 2026-09-19)** — run は `case/48.flat_plate_cooled_m4/`:
+  - `run_0013_iface_base` (基準, interfaceDiag 0) / `run_0014_iface_diag` (1) /
+    `run_0015_wallprofile` (+ `wallProfile`) / `run_0016_iface_base_rep` (反復=ノイズ床)。各 200 step warm start。
+  - **診断は解を動かさない**: 場の相対差 base↔diag 1.9e-6 に対し、**同一設定の反復間 (ノイズ床) が 1.8e-6**
+    (atomicAdd の非決定性)。
+  - **第一内部点**: $d_1$=3.0001 µm = 第一層厚と一致、align 1.000、1001/1001 点評価可。
+  - **3 形式の差**: `q_recon` は `q_compact` と **1.6e-7 相対で一致** (壁法線に整列した node メッシュでは
+    再構成勾配がコンパクト差分に帰着する)。**`q_2nd` (2 次片側) は中央値 2.79 %・最大 3.1 % 違う**
+    → codex が `run_0011` で測った 2.67 % は**後処理の差分形式の差**であり、ソルバ内部の不整合ではない。
+    滑らかな分布では 2 次片側が正確なので、**カーネルの壁熱流束はこの解像度で ~3 % の 1 次打ち切り誤差**を持つ
+    (§4.10 の誤差予算に入れる)。**斜交メッシュでの 3 形式の分離は未測定** (残作業)。
+  - **`wallProfile`**: $T_w=300+100x$ が**場の `VALUE/T`** に入る (最大差 0.068 K)。
+  - **共有角の拒否**: `sym` を 500 K 等温壁にすると前縁の 1 CV を検出して exit 1。
+  - これらは**収束を主張する run ではない** (200 step のコード検証)。NaN/Inf 無しは確認済み。
 - **単体 / ビルド**: 固体ソルバの単体 (1D 直列抵抗・面内フィン)。**格子収束で連続解析解に近づくこと**と
   **離散残差が機械精度で 0 になること**を**別の試験**にする (codex M7)。`wallProfile` の回帰 (ビット不変)。
   角ノード競合の起動時エラー試験 (L 字の 2 bcond)。
@@ -476,3 +495,8 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
 - `2026-09-19` — **S0 完了**: [`methods/boundary.md`](../../methods/boundary.md) に「共役熱伝達 (CHT)」節を追加し、
   界面契約・固体モデル・受理判定・`wallProfile`・**起動時拒否条件**・ゲートを実装前の契約として固定。
   `methods/index.md` の状態欄と、提供側 plan への解除マイルストーン登録も完了。
+- `2026-09-19` — **S1/S2 完了・S3 部分完了**。`conjugateWall.{hpp,cpp}` (符号規約の正本 + 第一/第二内部点 +
+  界面診断 + 共有 CV の壁温競合検査)、`output.interfaceDiag`、`applyWallProfiles` を実装し、
+  case/48 の 4 run (`run_0013`–`run_0016`) で検証。**主な実測**: 診断は解をノイズ床内でしか動かさない /
+  $d_1$ が第一層厚と一致 / **`q_recon` ≡ `q_compact` (1.6e-7)** で、~2.7 % の食い違いは
+  **2 次片側差分との差 = 後処理の選択**だった / `wallProfile` が場に入る / 共有角の拒否が効く。

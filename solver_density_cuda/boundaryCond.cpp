@@ -239,17 +239,26 @@ static std::vector<std::string> splitWS(const std::string& s)
     return out;
 }
 
-void applyInletProfiles(solverConfig& cfg , mesh& msh)
+// 境界値プロファイルの共通実装。inlet (face 重心で補間) と wall (node は DOF=ノード座標で補間) が共有する。
+//   flagName   : bcond の ints キー (inletProfile / wallProfile)
+//   filePrefix : CSV のファイル名接頭辞 (inlet_profile_ / wall_profile_)
+//   tag        : ログの接頭辞
+//   dofCoords  : true なら評価点を境界 DOF の値位置 (node モードはノード座標) にする
+static void applyBoundaryProfiles(solverConfig& cfg , mesh& msh ,
+                                  const std::string& flagName , const std::string& filePrefix ,
+                                  const std::string& tag , bool dofCoords)
 {
+    const std::string tagp = "[" + tag + "] ";
+    const bool nodeMode = (cfg.discretization == "node");
     for (bcond& bc : msh.bconds)
     {
-        const auto it = bc.inputInts.find("inletProfile");
+        const auto it = bc.inputInts.find(flagName);
         if (it == bc.inputInts.end() || it->second != 1) continue;
 
-        const std::string fname = "inlet_profile_" + std::to_string(bc.physID) + ".csv";
+        const std::string fname = filePrefix + std::to_string(bc.physID) + ".csv";
         std::ifstream fin(fname);
         if (!fin) {
-            std::cerr << "[applyInletProfiles] inletProfile=1 but file '" << fname
+            std::cerr << tagp << flagName << "=1 but file '" << fname
                       << "' not found (physID=" << bc.physID << ").\n";
             exit(EXIT_FAILURE);
         }
@@ -271,7 +280,7 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
             else break;
         }
         if (ncoord == 0) {
-            std::cerr << "[applyInletProfiles] " << fname << ": header must start with x/y/z coordinate column(s).\n";
+            std::cerr << tagp << fname << ": header must start with x/y/z coordinate column(s).\n";
             exit(EXIT_FAILURE);
         }
         std::vector<std::string> qnames(hdr.begin() + ncoord, hdr.end());
@@ -289,7 +298,7 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
             rowC.push_back(c); rowQ.push_back(q);
         }
         const int nrow = (int)rowC.size();
-        if (nrow < 1) { std::cerr << "[applyInletProfiles] " << fname << ": no data rows.\n"; exit(EXIT_FAILURE); }
+        if (nrow < 1) { std::cerr << tagp << fname << ": no data rows.\n"; exit(EXIT_FAILURE); }
 
         // 1D の場合は補間軸で昇順ソート (線形補間用)
         const bool oneD = (ncoord == 1);
@@ -309,9 +318,25 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
         for (size_t i = 0; i < bc.iPlanes.size(); ++i)
         {
             const geom_int ip = bc.iPlanes[i];
-            const double fc[3] = { (double)msh.planes[ip].centCoords[0],
-                                   (double)msh.planes[ip].centCoords[1],
-                                   (double)msh.planes[ip].centCoords[2] };
+            // 評価点: inlet は従来どおり face 重心 (既存 run のビット不変を守る)。
+            // wall (dofCoords=true) は**値を課す位置**で引く — node モードでは温度ピンが壁ノードに
+            // 当たるので、face 重心で引くと位置がずれる (case/48 run_0011 で実測 0.679 mm)。
+            double fc[3];
+            const geom_int icw = (i < bc.iCells.size()) ? bc.iCells[i] : -1;
+            if (dofCoords && icw >= 0 && icw < msh.nCells
+                && nodeMode && (geom_int)msh.nodes.size() > icw && msh.nodes[icw].coords.size() >= 3) {
+                fc[0] = (double)msh.nodes[icw].coords[0];
+                fc[1] = (double)msh.nodes[icw].coords[1];
+                fc[2] = (double)msh.nodes[icw].coords[2];
+            } else if (dofCoords && icw >= 0 && icw < msh.nCells) {
+                fc[0] = (double)msh.cells[icw].centCoords[0];
+                fc[1] = (double)msh.cells[icw].centCoords[1];
+                fc[2] = (double)msh.cells[icw].centCoords[2];
+            } else {
+                fc[0] = (double)msh.planes[ip].centCoords[0];
+                fc[1] = (double)msh.planes[ip].centCoords[1];
+                fc[2] = (double)msh.planes[ip].centCoords[2];
+            }
             std::vector<double> qv(qnames.size());
             if (oneD) {
                 const int ax = axisIdx[0];
@@ -365,13 +390,13 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
         for (const auto& qn : qnames) {
             if (isInputQuantity(qn)) applied += " " + qn; else ignored += " " + qn;
         }
-        std::cout << "[applyInletProfiles] physID=" << bc.physID << " kind=" << bc.bcondKind
+        std::cout << tagp << "physID=" << bc.physID << " kind=" << bc.bcondKind
                   << ": set " << qnames.size() << " quantities from " << fname
                   << " (" << (oneD ? "1D interp" : (std::to_string(ncoord) + "D nearest")) << ", " << nrow << " rows, "
                   << bc.iPlanes.size() << " faces). applied:" << (applied.empty() ? " (none)" : applied)
                   << (ignored.empty() ? "" : "  IGNORED (not an input quantity of this kind):" + ignored) << "\n";
         if (applied.empty()) {
-            std::cerr << "[applyInletProfiles] " << fname << ": no column matches a boundary value of kind "
+            std::cerr << tagp << fname << ": no column matches a boundary value of kind "
                       << bc.bcondKind << " (see procedures/inlet-profile.md).\n";
             exit(EXIT_FAILURE);
         }
@@ -387,14 +412,14 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
                         const auto it2 = bc.bvar.find("Y" + std::to_string(sidx));
                         const double y = (it2 != bc.bvar.end()) ? (double)it2->second[i] : 0.0;
                         if (!(y >= -1.0e-6 && y <= 1.0 + 1.0e-6)) {
-                            std::cerr << "[applyInletProfiles] " << fname << ": Y" << sidx << "=" << y
+                            std::cerr << tagp << fname << ": Y" << sidx << "=" << y
                                       << " at face " << i << " is outside [0,1].\n";
                             exit(EXIT_FAILURE);
                         }
                         ysum += y;
                     }
                     if (std::fabs(ysum - 1.0) > 1.0e-3) {
-                        std::cerr << "[applyInletProfiles] " << fname << ": sum of Y_s = " << ysum << " at face " << i
+                        std::cerr << tagp << fname << ": sum of Y_s = " << ysum << " at face " << i
                                   << " (must be 1 within 1e-3; write all species columns or use gen_inlet_profile.py).\n";
                         exit(EXIT_FAILURE);
                     }
@@ -402,6 +427,21 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
             }
         }
     }
+}
+
+// 入口分布プロファイル (従来どおり face 重心で補間)。
+void applyInletProfiles(solverConfig& cfg , mesh& msh)
+{
+    applyBoundaryProfiles(cfg , msh , "inletProfile" , "inlet_profile_" , "applyInletProfiles" , false);
+}
+
+// 壁温分布プロファイル: `wall_isothermal` の per-face `Ts` を CSV から埋める。
+// `Ts` は valueTypes==1 (起動時に一様値を 1 度入れるだけでカーネルは書き換えない) なので、
+// ここで面ごとに違う値を入れればそのまま効く。CHT の弱連成ループの入口でもある
+// (methods/boundary.md「共役熱伝達 (CHT)」/ plans/active/boundary-conjugate-heat-transfer.md)。
+void applyWallProfiles(solverConfig& cfg , mesh& msh)
+{
+    applyBoundaryProfiles(cfg , msh , "wallProfile" , "wall_profile_" , "applyWallProfiles" , true);
 }
 
 void applyBconds(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var , matrix& mat_p , fluct_variables& fluct)

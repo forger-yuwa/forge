@@ -75,6 +75,7 @@ file( GLOB forge_cppfiles
     update.cpp 
     variables.cpp 
     boundaryCond.cpp 
+    conjugateWall.cpp 
     convectiveFlux.cpp 
     input/solverConfig.cpp 
     input/calcWallDistance_kdtree.cpp 

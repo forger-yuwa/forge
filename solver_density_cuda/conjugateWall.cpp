@@ -1,0 +1,274 @@
+#include "conjugateWall.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <iostream>
+#include <limits>
+#include <map>
+#include <sstream>
+#include <unordered_map>
+#include <utility>
+
+#include "cuda_forge/cudaWrapper.cuh"
+
+namespace conjugateWall {
+
+namespace {
+
+// DOF -> 隣接 DOF (内部面が繋ぐ 2 つの CV)。メッシュ全体で 1 度だけ作る。
+const std::vector<std::vector<geom_int>>& dofNeighbors(const mesh& msh)
+{
+    static std::vector<std::vector<geom_int>> nb;
+    static const mesh* built_for = nullptr;
+    if (built_for == &msh && !nb.empty()) return nb;
+
+    nb.assign(msh.nCells, {});
+    for (geom_int ip = 0; ip < (geom_int)msh.planes.size(); ip++) {
+        const auto& ic = msh.planes[ip].iCells;
+        if (ic.size() < 2) continue;
+        const geom_int a = ic[0], b = ic[1];
+        if (a < 0 || b < 0 || a >= msh.nCells || b >= msh.nCells) continue;  // ゴーストは除く
+        nb[a].push_back(b);
+        nb[b].push_back(a);
+    }
+    built_for = &msh;
+    return nb;
+}
+
+// 値の位置 (node モードはノード座標 = T の DOF 位置、cell モードは CV 重心)。
+inline void dofCoords(const mesh& msh, bool nodeMode, geom_int ic, double xyz[3])
+{
+    if (nodeMode && (geom_int)msh.nodes.size() > ic && msh.nodes[ic].coords.size() >= 3) {
+        xyz[0] = msh.nodes[ic].coords[0];
+        xyz[1] = msh.nodes[ic].coords[1];
+        xyz[2] = msh.nodes[ic].coords[2];
+    } else {
+        xyz[0] = msh.cells[ic].centCoords[0];
+        xyz[1] = msh.cells[ic].centCoords[1];
+        xyz[2] = msh.cells[ic].centCoords[2];
+    }
+}
+
+std::vector<flow_float> pullField(const solverConfig& cfg, variables& var, const std::string& name, geom_int n)
+{
+    std::vector<flow_float> h(n, (flow_float)0.0);
+    const auto itd = var.c_d.find(name);
+    if (cfg.gpu == 1 && itd != var.c_d.end() && itd->second != nullptr) {
+        cudaWrapper::cudaMemcpy_D2H_wrapper(itd->second, h.data(), n);
+        return h;
+    }
+    const auto ith = var.c.find(name);
+    if (ith != var.c.end() && (geom_int)ith->second.size() >= n) {
+        std::copy(ith->second.begin(), ith->second.begin() + n, h.begin());
+    }
+    return h;
+}
+
+} // namespace
+
+const FirstInterior& firstInterior(const solverConfig& cfg, const mesh& msh, const bcond& bc)
+{
+    const bool nodeMode  = (cfg.discretization == "node");
+    const double alignMin = cfg.interfaceDiagAlignMin;
+    static std::map<geom_int, FirstInterior> cache;
+    const auto it = cache.find(bc.physID);
+    if (it != cache.end()) return it->second;
+
+    const auto& nb = dofNeighbors(msh);
+    const geom_int nbp = (geom_int)bc.iPlanes.size();
+
+    // 壁 DOF ごとの法線 = 属する境界面ベクトルの合算 (角では平均法線)。
+    std::unordered_map<geom_int, std::array<double,3>> nrm;
+    for (geom_int ib = 0; ib < nbp; ib++) {
+        const geom_int ic = bc.iCells[ib];
+        const geom_int ip = bc.iPlanes[ib];
+        auto& v = nrm[ic];
+        v[0] += msh.planes[ip].surfVect[0];
+        v[1] += msh.planes[ip].surfVect[1];
+        v[2] += msh.planes[ip].surfVect[2];
+    }
+
+    FirstInterior fi;
+    fi.jdof.assign(nbp, -1);
+    fi.jdof2.assign(nbp, -1);
+    fi.d1.assign(nbp, std::numeric_limits<double>::quiet_NaN());
+    fi.d2.assign(nbp, std::numeric_limits<double>::quiet_NaN());
+    fi.align.assign(nbp, 0.0);
+    fi.nx.assign(nbp, 0.0); fi.ny.assign(nbp, 0.0); fi.nz.assign(nbp, 0.0);
+    fi.ok.assign(nbp, 0);
+
+    for (geom_int ib = 0; ib < nbp; ib++) {
+        const geom_int ic = bc.iCells[ib];
+        if (ic < 0 || ic >= msh.nCells) continue;
+        const auto& v = nrm[ic];
+        const double ln = std::sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+        if (!(ln > 0.0)) continue;
+        const double nh[3] = { v[0]/ln, v[1]/ln, v[2]/ln };
+        fi.nx[ib] = nh[0]; fi.ny[ib] = nh[1]; fi.nz[ib] = nh[2];
+
+        double xw[3]; dofCoords(msh, nodeMode, ic, xw);
+        double bestAl = -1.0, bestD = 0.0; geom_int bestJ = -1;
+        for (const geom_int j : nb[ic]) {
+            double xj[3]; dofCoords(msh, nodeMode, j, xj);
+            const double d[3] = { xj[0]-xw[0], xj[1]-xw[1], xj[2]-xw[2] };
+            const double dn = std::sqrt(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
+            if (!(dn > 0.0)) continue;
+            const double proj = std::fabs(d[0]*nh[0] + d[1]*nh[1] + d[2]*nh[2]);
+            const double al = proj/dn;
+            if (al > bestAl) { bestAl = al; bestD = proj; bestJ = j; }
+        }
+        fi.align[ib] = (bestAl > 0.0) ? bestAl : 0.0;
+        if (bestJ >= 0 && bestAl >= alignMin && bestD > 0.0) {
+            fi.jdof[ib] = bestJ;
+            fi.d1[ib]   = bestD;
+            fi.ok[ib]   = 1;
+            // 第二内部点: 第一内部点の隣で、同じ法線に沿ってさらに遠いもの (2 次片側差分用)。
+            double best2Al = -1.0, best2D = 0.0; geom_int best2J = -1;
+            for (const geom_int j2 : nb[bestJ]) {
+                if (j2 == ic) continue;
+                double x2[3]; dofCoords(msh, nodeMode, j2, x2);
+                const double d2v[3] = { x2[0]-xw[0], x2[1]-xw[1], x2[2]-xw[2] };
+                const double dn2 = std::sqrt(d2v[0]*d2v[0] + d2v[1]*d2v[1] + d2v[2]*d2v[2]);
+                if (!(dn2 > 0.0)) continue;
+                const double proj2 = std::fabs(d2v[0]*nh[0] + d2v[1]*nh[1] + d2v[2]*nh[2]);
+                if (proj2 <= bestD) continue;              // 壁から遠い側だけ
+                const double al2 = proj2/dn2;
+                if (al2 > best2Al) { best2Al = al2; best2D = proj2; best2J = j2; }
+            }
+            if (best2J >= 0 && best2Al >= alignMin) { fi.jdof2[ib] = best2J; fi.d2[ib] = best2D; }
+        }
+    }
+
+    geom_int nok = 0;
+    for (geom_int ib = 0; ib < nbp; ib++) nok += (fi.ok[ib] ? 1 : 0);
+    std::cout << "[interfaceDiag] physID=" << bc.physID << " (" << bc.physName << "): "
+              << "first interior point resolved for " << nok << " / " << nbp
+              << " wall DOFs (alignMin=" << alignMin << ")" << std::endl;
+
+    return cache.emplace(bc.physID, std::move(fi)).first->second;
+}
+
+void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variables& var, bcond& bc)
+{
+    if (cfg.interfaceDiag != 1) return;
+    if (!(bc.bcondKind == "wall" || bc.bcondKind == "wall_isothermal")) return;
+
+    const geom_int nbp = (geom_int)bc.iPlanes.size();
+    if (nbp <= 0) return;
+
+    const FirstInterior& fi = firstInterior(cfg, msh, bc);
+
+    const std::vector<flow_float> T        = pullField(cfg, var, "T",         msh.nCells);
+    const std::vector<flow_float> thermCond= pullField(cfg, var, "thermCond", msh.nCells);
+    const std::vector<flow_float> cp       = pullField(cfg, var, "cp",        msh.nCells);
+    const std::vector<flow_float> visTurb  = pullField(cfg, var, "vis_turb",  msh.nCells);
+
+    std::vector<flow_float> d_T1(nbp, 0.0), d_d1(nbp, 0.0), d_keff(nbp, 0.0);
+    std::vector<flow_float> d_qc(nbp, 0.0), d_qr(nbp, 0.0), d_ok(nbp, 0.0), d_al(nbp, 0.0);
+    std::vector<flow_float> d_q2(nbp, 0.0);
+
+    const auto itq = bc.bvar.find("qwall");
+    const bool hasQwall = (itq != bc.bvar.end() && (geom_int)itq->second.size() >= nbp);
+
+    for (geom_int ib = 0; ib < nbp; ib++) {
+        const geom_int ic = bc.iCells[ib];
+        d_al[ib] = (flow_float)fi.align[ib];
+        // k_eff は viscousFlux の壁経路と同じ定義 (k_lam + cp mu_t / Pr_t)。
+        const flow_float keff = thermCond[ic] + cp[ic]*visTurb[ic]/cfg.turbulentPrandtl;
+        d_keff[ib] = keff;
+        // q_recon: qwall は「壁→流体が正」なので固体向き正へ反転する。
+        d_qr[ib] = hasQwall ? (flow_float)(-itq->second[ib]) : (flow_float)0.0;
+
+        if (!fi.ok[ib]) { d_ok[ib] = 0.0; continue; }
+        const geom_int j = fi.jdof[ib];
+        d_ok[ib] = 1.0;
+        d_T1[ib] = T[j];
+        d_d1[ib] = (flow_float)fi.d1[ib];
+        // q_compact: 固体向き正 (T_1 > T_w なら流体から固体へ)。
+        d_qc[ib] = (flow_float)(keff * (double)(T[j] - T[ic]) / fi.d1[ib]);
+        // q_2nd: 3 点非等間隔の 2 次片側差分 (壁 0 / 第一内部点 a / 第二内部点 b)。
+        //   f'(0) = -((a+b)/(a b)) f0 + (b/(a(b-a))) f1 - (a/(b(b-a))) f2
+        if (fi.jdof2[ib] >= 0) {
+            const double a = fi.d1[ib], b = fi.d2[ib];
+            if (b > a && a > 0.0) {
+                const double dTdn = -((a+b)/(a*b))*(double)T[ic]
+                                  + (b/(a*(b-a)))*(double)T[j]
+                                  - (a/(b*(b-a)))*(double)T[fi.jdof2[ib]];
+                d_q2[ib] = (flow_float)(keff * dTdn);
+            }
+        }
+    }
+
+    bc.diagVar["iface_T1"]        = std::move(d_T1);
+    bc.diagVar["iface_d1"]        = std::move(d_d1);
+    bc.diagVar["iface_keff"]      = std::move(d_keff);
+    bc.diagVar["iface_q_compact"] = std::move(d_qc);
+    bc.diagVar["iface_q_recon"]   = std::move(d_qr);
+    bc.diagVar["iface_q_2nd"]     = std::move(d_q2);
+    bc.diagVar["iface_ok"]        = std::move(d_ok);
+    bc.diagVar["iface_align"]     = std::move(d_al);
+}
+
+void checkWallTemperatureSharing(const solverConfig& cfg, const mesh& msh)
+{
+    // 壁温を陽に扱っている run でのみ検査する (既定 run のログと挙動を変えない)。
+    bool anyProfile = false;
+    for (const bcond& bc : msh.bconds) {
+        const auto it = bc.inputInts.find("wallProfile");
+        if (it != bc.inputInts.end() && it->second == 1) anyProfile = true;
+    }
+    if (!anyProfile && cfg.interfaceDiag != 1) return;
+
+    // DOF -> (bcond index, その bplane の Ts)
+    std::unordered_map<geom_int, std::vector<std::pair<int,double>>> owners;
+    for (int ib = 0; ib < (int)msh.bconds.size(); ib++) {
+        const bcond& bc = msh.bconds[ib];
+        if (bc.bcondKind != "wall_isothermal") continue;   // 温度を拘束するのはこの種別
+        const auto itv = bc.bvar.find("Ts");
+        if (itv == bc.bvar.end()) continue;
+        for (size_t k = 0; k < bc.iCells.size() && k < itv->second.size(); k++) {
+            owners[bc.iCells[k]].push_back({ib, (double)itv->second[k]});
+        }
+    }
+
+    int nConflict = 0;
+    const double tol = 1.0e-6;   // 同一壁温とみなす差 [K]
+    std::string first;
+    for (const auto& kv : owners) {
+        const auto& lst = kv.second;
+        if (lst.size() < 2) continue;
+        double tmin = lst[0].second, tmax = lst[0].second;
+        for (const auto& e : lst) { tmin = std::min(tmin, e.second); tmax = std::max(tmax, e.second); }
+        if (tmax - tmin <= tol) continue;                 // 同じ壁温なら順序に依らない
+        // 同一 bcond 内の複数 bplane (node では起きない) は競合としない
+        bool crossBcond = false;
+        for (size_t a = 0; a + 1 < lst.size(); a++)
+            for (size_t b = a + 1; b < lst.size(); b++)
+                if (lst[a].first != lst[b].first && std::fabs(lst[a].second - lst[b].second) > tol) crossBcond = true;
+        if (!crossBcond) continue;
+        if (nConflict == 0) {
+            std::ostringstream oss;
+            oss << "CV " << kv.first << " shared by";
+            for (const auto& e : lst)
+                oss << " {physID " << msh.bconds[e.first].physID << " (" << msh.bconds[e.first].physName
+                    << ") Ts=" << e.second << "}";
+            first = oss.str();
+        }
+        ++nConflict;
+    }
+
+    if (nConflict > 0) {
+        std::cerr << "[conjugateWall] ERROR: " << nConflict
+                  << " control volume(s) are shared by isothermal walls that prescribe different wall temperatures.\n"
+                  << "[conjugateWall]   " << first << "\n"
+                  << "[conjugateWall]   node の温度ピンは bcond 順に適用されるため、共有ノードの壁温は\n"
+                  << "[conjugateWall]   設定順で決まってしまう (後勝ち)。形状を分割して共有 CV に矛盾する Ts を与えないこと。\n"
+                  << "[conjugateWall]   詳細: methods/boundary.md「共役熱伝達 (CHT)」の「起動時に拒否する構成」。\n";
+        exit(EXIT_FAILURE);
+    }
+    std::cout << "[conjugateWall] wall temperature sharing check: OK ("
+              << owners.size() << " wall CVs scanned)" << std::endl;
+}
+
+} // namespace conjugateWall
