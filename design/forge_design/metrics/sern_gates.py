@@ -128,7 +128,10 @@ def steadiness_gate(hist, obj: str | None = None) -> dict:
 # 割られて、その 1 点だけで rms_roOmega = 8.95e15 を作っていた (保存場は有限・力係数は ALL STEADY)。
 FLOORS = {"P": ("pMin", 1.0), "T": ("tMin", 50.0), "ro": ("roMin", 1.0e-4)}
 OMEGA_FLOOR = 1.0e-20          # update_d.cu の roOmega 下限
-K_FLOOR = 0.0                  # k=0 は F1=0 を招き交差拡散が発散する
+# ~~K_FLOOR~~ **削除 (2026-09-19, codex plan レビュー M6)**: `k <= 0` を一律に異常とするのは誤り。
+# node 低 Re 壁は `sstNodeWallKPin` (既定 1) が**壁ノードの k を 0 にピンするのが正しい仕様**
+# (`procedures/solver-settings.md` の SST 表)。run_0122 で「k≤0 が 28 ノード」と報告したのは
+# その壁ピンを拾っていた可能性が高い。壁ピンを除いた領域で評価する仕組みが要る (残作業 R-f)。
 
 
 def floor_gate(run_dir, p_min: float | None = None, tol: float = 1.0e-6) -> dict:
@@ -155,9 +158,7 @@ def floor_gate(run_dir, p_min: float | None = None, tol: float = 1.0e-6) -> dict
             if "roOmega" in V:
                 a = np.asarray(V["roOmega"][:])
                 counts[f"roOmega<={OMEGA_FLOOR:g}"] = int(np.sum(np.isfinite(a) & (a <= OMEGA_FLOOR * (1.0 + tol))))
-            if "k" in V:
-                a = np.asarray(V["k"][:])
-                counts["k<=0"] = int(np.sum(np.isfinite(a) & (a <= K_FLOOR)))
+            # k の床判定は壁ピン (正当) と区別できないので**当面外す** (R-f)
     except Exception as e:                                 # 読めないときは落とさず報告だけ
         return {"ok": True, "skipped": f"{type(e).__name__}: {e}", "counts": {}}
     bad = {k: v for k, v in counts.items() if v > 0}

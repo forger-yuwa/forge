@@ -681,7 +681,7 @@ def run_forge(run_dir) -> int:
 
 def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: float = 0.5, soft_conv: int = 0,
                warm_lam_steps: int = 0, warm_lam_cfl: float = 0.2, mid_steps: int = 0,
-               warm_lam_ramp=None,
+               warm_lam_ramp=None, soft_ramp=None,
                warm_src=None, warm_adapt_steps: int = 500) -> int:
     """soft_cfl / soft_conv: soft 段の CFL と convMethod (既定 0.5 / 1 次)。3D SST の後縁 3 重点など、1 次でも
     立ち上がりが厳しいケースで下げる。
@@ -750,29 +750,45 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
                 f.unlink()
     if warm_src is not None:      # soft は適応段で代替済み → mid へ
         return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps)
-    soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {soft_cfl}, cfl_pseudo: {soft_cfl}", cfg_main)
-    soft = soft.replace("convMethod: 1", f"convMethod: {soft_conv}")
-    soft = re.sub(r"nStepOuter: \d+", f"nStepOuter: {soft_steps}", soft)
-    soft = re.sub(r"outStepInterval: \d+", f"outStepInterval: {soft_steps}", soft)
-    (run_dir / "solverConfig.yaml").write_text(soft)
-    rc = run_forge(run_dir)
-    res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
-    if rc != 0 or not res:
-        raise RuntimeError("soft 段が失敗 (res_nan_*.h5 / forge_run.log を見る)")
-    restart_by_index(res[-1], run_dir / MESH)
-    for f in run_dir.glob("res_*"):
-        f.unlink()
-    return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps)
+    # soft 段も **CFL ramp** できる (`opt.soft_ramp`, 2026-09-19)。暖機で ramp が効いた (固定 0.5 は step 30 で
+    # 発散するのに ramp なら 1.0 まで到達) のと同じ理屈。固定 soft_cfl 1.0 は設計によって
+    # `rms_roY1` (排気∩外気のせん断層) が上昇するので、段階昇圧で通す。
+    _soft_legs = [(float(c), max(int(soft_steps / len(soft_ramp)), 1)) for c in soft_ramp] \
+        if soft_ramp else [(float(soft_cfl), int(soft_steps))]
+    for c, n_leg in _soft_legs:
+        soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", cfg_main)
+        soft = soft.replace("convMethod: 1", f"convMethod: {soft_conv}")
+        soft = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", soft)
+        soft = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", soft)
+        (run_dir / "solverConfig.yaml").write_text(soft)
+        rc = run_forge(run_dir)
+        res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
+        if rc != 0 or not res:
+            raise RuntimeError(f"soft 段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
+        restart_by_index(res[-1], run_dir / MESH)
+        for f in run_dir.glob("res_*"):
+            f.unlink()
+    return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps, soft_ramp)
 
 
-def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int) -> int:
+def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, soft_ramp=None) -> int:
     """mid 段 (2 次 + soft CFL) → 本段。soft/暖機/warm start の後段として共用する。"""
     if mid_steps > 0:      # mid 段: 2 次に上げるが CFL は soft のまま (次数と CFL を同時に上げない)
-        mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {soft_cfl}, cfl_pseudo: {soft_cfl}", cfg_main)
-        mid = re.sub(r"nStepOuter: \d+", f"nStepOuter: {mid_steps}", mid)
-        mid = re.sub(r"outStepInterval: \d+", f"outStepInterval: {mid_steps}", mid)
-        (run_dir / "solverConfig.yaml").write_text(mid)
-        rc = run_forge(run_dir)
+        legs = [(float(c), max(int(mid_steps / len(soft_ramp)), 1)) for c in soft_ramp] \
+            if soft_ramp else [(float(soft_cfl), int(mid_steps))]
+        for _ci, (c, n_leg) in enumerate(legs):
+            mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", cfg_main)
+            mid = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", mid)
+            mid = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", mid)
+            (run_dir / "solverConfig.yaml").write_text(mid)
+            rc = run_forge(run_dir)
+            if _ci < len(legs) - 1:
+                _r = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(ch for ch in f.stem if ch.isdigit())))
+                if rc != 0 or not _r:
+                    raise RuntimeError(f"mid 段が失敗 (cfl {c})")
+                restart_by_index(_r[-1], run_dir / MESH)
+                for f in run_dir.glob("res_*"):
+                    f.unlink()
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res:
             raise RuntimeError("mid 段 (2 次 + soft CFL) が失敗 (res_nan_*.h5 / forge_run.log を見る)")
@@ -843,7 +859,7 @@ def main(argv=None):
     rc = run_staged(a.run_dir, a.stages,
                     soft_steps=int(o.get("soft_steps", 3000)), soft_cfl=float(o.get("soft_cfl", 0.5)),
                     warm_lam_steps=int(o.get("warm_lam_steps", 0)), warm_lam_cfl=float(o.get("warm_lam_cfl", 0.2)),
-                    warm_lam_ramp=o.get("warm_lam_ramp"),
+                    warm_lam_ramp=o.get("warm_lam_ramp"), soft_ramp=o.get("soft_ramp"),
                     mid_steps=int(o.get("mid_steps", 0)),
                     warm_adapt_steps=int(o.get("warm_adapt_steps", 500)))
     out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))

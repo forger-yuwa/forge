@@ -10,7 +10,13 @@ description: ⑤ SERN (case/46) の評価 run を組む・回す・判定する�
 [`case/46.sern_design/README.md`](../../../case/46.sern_design/README.md) の run 一覧。
 **過去 run の YAML をそのままコピーしない** — 却下済みの設定 (断熱壁・旧トポロジ) が残っている。
 
-## 1. 起動レシピ (2D、2026-09-19 実測)
+## 1. 起動レシピ (2D)
+
+> **⚠ 2026-09-19 時点で確定していない。** codex plan レビュー (NO-GO, M6) で、下表の
+> 「梯子 1500×3 + 本段 500」は**一度も回していない組み合わせ**と判明し撤回した。
+> 500 step 時点では `vis_turb` が未発達 (局所 DRIFTING)。**受理基準 (`require_residual_plateau`) にも
+> 実装バグ**があり、3 桁低下してなお下降中の列が素通りする。再検証まで下表は**暫定値**として扱い、
+> 生産採用しない。改訂後の残作業は [`plans/active/tooling-nozzle-sern-startup.md`](../../../plans/active/tooling-nozzle-sern-startup.md) §5.1。
 
 | 項目 | 生産値 | 根拠 |
 | --- | --- | --- |
@@ -32,7 +38,9 @@ description: ⑤ SERN (case/46) の評価 run を組む・回す・判定する�
 `metrics/sern_gates.py` の `evaluate_gates` が返す `verdict` を**必ず貼る**。
 
 1. 保存場に NaN/Inf 無し・正値
-2. **全残差列がプラトー** — 上昇列なし **かつ「まだ低下中」の列もなし** (`require_residual_plateau`, 既定 True)
+2. ~~**全残差列がプラトー**~~ **実装バグあり (2026-09-19)**: `check_convergence.py:108` は 3 桁低下した列に
+   状態文字列を付けないので、**3 桁落ちてなお下降中の列が素通りする**。プラトーは収束の十分条件でもない
+   (残差の大きさを問わないので float32 の更新消失やクランプで止まった状態と区別できない)
 3. 残差列の桁が揃う (1 列だけ中央値の 1e6 倍以上でない)
 4. 床・下限への張り付き 0 ノード (`pMin`/`tMin` 50 K/`roMin`/`roOmega` 1e-20/`k`≤0)
 5. `C_T_with_shear` ほか力係数が STEADY
