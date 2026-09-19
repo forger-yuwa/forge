@@ -5,18 +5,43 @@
   "M": 10.3,
   "model": {
     "kind": "flat plate + single transverse gap (配列ではない)",
-    "gap_width_cm": 0.229, "gap_depth_cm": 4.572, "depth_over_width": 19.97,
-    "skin": {"material": "304 SS", "thickness_cm": 0.0406, "n_thermocouples": 21, "location": "midspan"},
-    "upstream_plate": {"material": "brass", "thickness_cm": 0.3175, "heaters_W": [350, 400, 400, 400]},
-    "downstream_plate": {"material": "17-4 PH SS", "heated": false, "instrumented": false},
+    "gap_width_cm": 0.229,
+    "gap_depth_cm": 4.572,
+    "depth_over_width": 19.97,
+    "skin": {
+      "material": "304 SS",
+      "thickness_cm": 0.0406,
+      "n_thermocouples": 21,
+      "location": "midspan"
+    },
+    "upstream_plate": {
+      "material": "brass",
+      "thickness_cm": 0.3175,
+      "heaters_W": [
+        350,
+        400,
+        400,
+        400
+      ]
+    },
+    "downstream_plate": {
+      "material": "17-4 PH SS",
+      "heated": false,
+      "instrumented": false
+    },
     "thermal_isolation": "すきまは断熱材 + 水冷通路で加熱板から熱的に絶縁",
-    "sweep_angle_deg": [0, 22.5, 45, 60]
+    "sweep_angle_deg": [
+      0,
+      22.5,
+      45,
+      60
+    ]
   },
   "reference": {
     "h_definition": "h = q / (T_aw - T_w)",
     "T_aw": "T_inf + 0.89 (T_t - T_inf)   (乱流 r = 0.89)",
     "h_fp_correlation": "h_fp = C * Re_inf^0.69   [W/(m^2 K)], Re_inf [1/m]  (Appendix (A2); 元は N_St Re_{w,theta}^0.07 = const)",
-    "C_digitized": 7.95e-5,
+    "C_digitized": 7.95e-05,
     "_C_note": "Appendix 図の 4 点 (1.5e6→1.45, 3.3e6→2.50, 6.1e6→3.75, 7.8e6→4.6 W/m2K) から。式との差は ±2 %",
     "_warning": "test ごとの smooth 実測ではなく**相関値**。CFD 側も同じ演算で h/h_fp を作る"
   },
@@ -24,17 +49,56 @@
     "_source": "Fig 4 (目視読み取り、対数軸のため ±5 %)",
     "_note": "トンネル側壁の厚い乱流 BL。すきま幅の 46-56 倍という巨大なスケール分離",
     "series": [
-      {"Re_m": 1.47e6, "dstar_cm": 12.8, "theta_cm": 1.42, "dstar_over_w": 56, "theta_over_w": 6.2},
-      {"Re_m": 3.32e6, "dstar_cm": 11.5, "theta_cm": 1.19, "dstar_over_w": 50, "theta_over_w": 5.2},
-      {"Re_m": 6.10e6, "dstar_cm": 10.8, "theta_cm": 1.08, "dstar_over_w": 47, "theta_over_w": 4.7},
-      {"Re_m": 7.82e6, "dstar_cm": 10.5, "theta_cm": 1.03, "dstar_over_w": 46, "theta_over_w": 4.5}
+      {
+        "Re_m": 1470000.0,
+        "dstar_cm": 12.8,
+        "theta_cm": 1.42,
+        "dstar_over_w": 56,
+        "theta_over_w": 6.2
+      },
+      {
+        "Re_m": 3320000.0,
+        "dstar_cm": 11.5,
+        "theta_cm": 1.19,
+        "dstar_over_w": 50,
+        "theta_over_w": 5.2
+      },
+      {
+        "Re_m": 6100000.0,
+        "dstar_cm": 10.8,
+        "theta_cm": 1.08,
+        "dstar_over_w": 47,
+        "theta_over_w": 4.7
+      },
+      {
+        "Re_m": 7820000.0,
+        "dstar_cm": 10.5,
+        "theta_cm": 1.03,
+        "dstar_over_w": 46,
+        "theta_over_w": 4.5
+      }
     ]
   },
   "temperature_ratio_series": {
     "_source": "Fig 8(a) (掃引角 0°)。**公称 1.0/1.2/1.4/1.6 ではなく Re 系列ごとに実測値が違う**",
-    "1.47e6": [1.00, 1.19, 1.37, 1.61],
-    "3.32e6": [1.00, 1.18, 1.34, 1.52],
-    "7.82e6": [1.00, 1.17, 1.38, 1.59]
+    "1.47e6": [
+      1.0,
+      1.19,
+      1.37,
+      1.61
+    ],
+    "3.32e6": [
+      1.0,
+      1.18,
+      1.34,
+      1.52
+    ],
+    "7.82e6": [
+      1.0,
+      1.17,
+      1.38,
+      1.59
+    ]
   },
   "measured_range": {
     "basic_distributions": "Fig 5-7 は主に z/W <= 6",
@@ -46,9 +110,16 @@
     ]
   },
   "open_items": [
-    "T_t, T_inf, T_gap の実値 (本文から未抽出)",
+    "T_t (本文に未記載; Langley continuous-flow hypersonic tunnel の運転条件から別途確定する)",
     "加熱板の長さと温度分布",
     "Fig 5-8 の h/h_fp 分布の digitize",
-    "2D 中央断面近似の妥当性 (TH75 は横方向の BL 分布変化・壁圧と自由流静圧の差を明記)"
-  ]
+    "2D 中央断面近似の妥当性 (TH75 は横方向の BL 分布変化・壁圧と自由流静圧の差を明記)",
+    "BL 分布の原典は ref.6 (Throckmorton, NASA TM X-71945) — 速度分布はそちらにある"
+  ],
+  "test_procedure": "模型は射出室内 (試験部静圧と同圧) で隔離 → 加熱板を所定温度へ → **ヒータとすきま冷却を切り** → 高速射出。すきま内は射出時点で等温 (T_gap) なので、薄肉スキンへの熱流束はステップ入力になる。データは 20 Hz × 約 5 秒記録し、その後引き戻す。加熱板の局所温度は平均の ±3 % 以内",
+  "stagnation_pressure_MN_m2": {
+    "1.5e6": 2.41,
+    "3.3e6": 5.34,
+    "7.8e6": 12.07
+  }
 }

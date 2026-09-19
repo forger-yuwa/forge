@@ -3,7 +3,6 @@ set -e
 cd "$(dirname "$0")"
 export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial
 RUN="../../solver_density_cuda/tools/run_case.sh"
-while pgrep -f "forge$" >/dev/null || pgrep -f "_precond_ab.sh" >/dev/null; do sleep 30; done
 echo "=== 格子細分 再投入 (soft 0.1 / mid 0.3) ==="
 rm -rf run_0014_T1_wd0063_fine
 python3 tools/make_case.py --run run_0014_T1_wd0063_fine --mesh t1_wd0063_fine --series A1 \
