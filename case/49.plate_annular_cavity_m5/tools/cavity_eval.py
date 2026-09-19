@@ -332,8 +332,12 @@ def main():
     ap.add_argument("--series", action="store_true")
     ap.add_argument("--plot", action="store_true")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--flux-depth", type=float, default=None,
+                    help="開口流束の評価深さ [mm] (既定は manifest の flux_depth_frac)")
     a = ap.parse_args()
     man = gc.load_manifest()
+    if a.flux_depth is not None:
+        man["eval"]["flux_depth_frac"] = a.flux_depth * 1e-3 / man["geometry"]["depth"]
     D = load_conditions()
     snaps = snapshots(a.run)
     if not snaps:
