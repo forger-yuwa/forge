@@ -296,7 +296,43 @@ def classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps, allow_nonfin
         return 'OSCILLATING', detail + f"  -> report {mean:.4g} +/- {amp:.2g}", (mean, amp)
     if extremum_at_end and drift > drift_tol * 0.5:
         return 'TRANSIENT-UNSETTLED', detail + "  (still trending at tail-end)", (mean, amp)
+    # **単調なら「まだ動いている」ことを明示し、漸近値を併記する** (2026-09-19 ユーザ指摘:
+    # 「上がり続けている・下がり続けているなら収束していないはず」)。drift が許容内でも
+    # 単調増加/減少は続いているので、増分が幾何級数的に減衰する場合の**外挿値**を出す。
+    mono = _monotone_limit(s, v)
+    if mono is not None:
+        lim, direction, rel = mono
+        detail += ("  [単調%s; 増分減衰から漸近値 %.6g (最終比 %+.3f %%)]"
+                   % (direction, lim, 100 * rel))
     return 'STEADY', detail, (mean, amp)
+
+
+def _monotone_limit(s, v, frac=0.5, min_pts=5):
+    r"""末尾が**単調**なら、増分の幾何減衰から漸近値を外挿して返す。
+
+    戻り値 (漸近値, "増加"/"減少", (漸近値-最終値)/|最終値|)、単調でなければ None。
+    増分比 r = Δ_last/Δ_prev が 0<r<1 のとき、残りの和は Δ_last·r/(1-r) で近似する。
+    """
+    n = len(v)
+    k = max(min_pts, int(math.ceil(frac * n)))
+    if n < min_pts + 1:
+        return None
+    vt = v[-k:]
+    d = np.diff(vt)
+    if not (np.all(d > 0) or np.all(d < 0)):
+        return None                      # 単調でない (振動) -> 何も言わない
+    direction = "増加" if d[0] > 0 else "減少"
+    # 増分の比 (後半の平均)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        rr = d[1:] / d[:-1]
+    rr = rr[np.isfinite(rr) & (rr > 0) & (rr < 1.0)]
+    last = float(v[-1])
+    if rr.size == 0:
+        return (last, direction, 0.0)    # 減衰していない -> 外挿しない (値そのまま)
+    r = float(np.median(rr))
+    rest = float(d[-1]) * r / max(1.0 - r, 1e-12)
+    lim = last + rest
+    return (lim, direction, rest / max(abs(last), 1e-30))
 
 
 SEV = {'STEADY': 0, 'OSCILLATING': 1, 'TRANSIENT-UNSETTLED': 2, 'DRIFTING': 3, 'NONFINITE': 4}
