@@ -57,7 +57,21 @@ $$R_i^{raw} = -\sum_f F_{if} + S_i,\qquad D_t(V_iE_i) = -\sum_f F_{if} + S_i + C
   **エネルギー補正をゼロにしても密度の更新は残す** → 壁温一定でも密度・組成変化で壁 CV の蓄積は動く。
 - 定常の拘束行では $C_i = -R_i^{raw}$。**拘束前残差はすでに壁面の伝導流束を含む**ので、
   **実効壁熱量は「物理境界流束 + 拘束反力」から作る** (拘束前残差をそのまま壁熱量と呼ばない)。
-- **壁 CV を含む領域**と**第一内部列から始まる領域**では比較する熱量の定義が違う。両方を別名で定義する。
+- **壁別の実効熱量は集計式と帰属規則まで決める** (codex 2 巡目 M1)。角ノードは複数の `bcond.iCells` に
+  重複して現れる ([`gmshReader.hpp`:2292](../../solver_density_cuda/mesh/gmshReader.hpp)) 一方、
+  ゼロ化されるエネルギー残差は**その CV に 1 つだけ**
+  ([`nodeWallDirichlet_d.cu`:170](../../solver_density_cuda/cuda_forge/nodeWallDirichlet_d.cu)) なので、
+  壁ごとに `iCells` 上で $C_i$ を積分すると**共有ノードの反力を二重計上する**。
+  - 重複しない拘束 CV 集合 $W$ と、対応する物理壁面集合 $B_W$ に対して
+
+    $$Q_{\mathrm{eff}}(W) = -\sum_{f\in B_W} F_f + \sum_{i\in W} C_i$$
+
+    と定義する (**外向き $F$ と供給方向 $C$ をそのまま足さない**)。
+  - **$C_i$ は CV ごとに一度だけ保存**し、複数壁が共有する反力は初版では**接合部の別勘定**にする
+    (壁別に無理に配賦しない)。壁∩出口のような非壁面流束も保持する。
+  - **第一内部列への供給は別定義**: 壁 CV と内部 CV の間の**全数値流束**。壁部分領域には接線輸送・ソースも
+    あるので、$Q_{\mathrm{eff}}$ との無条件な同一視を禁止する。
+  - 検証: **共有角を含む試験で、壁別勘定 + 接合部勘定の合計が領域全体に戻ること**。
 - 状態上書き (温度ピン・no-slip) による $\Delta(VE)$ も記録する (過渡を扱うときに必要)。
 
 ### 4.2 採取位相 (codex M2)
@@ -74,19 +88,25 @@ $$R_i^{raw} = -\sum_f F_{if} + S_i,\qquad D_t(V_iE_i) = -\sum_f F_{if} + S_i + C
 
 **面流束と体積ソースを別々に**、かつ**各カーネルが実際に加算した値**を採取する (後処理で再計算しない)。
 
-| 経路 | 実装 |
-| --- | --- |
-| 対流 (SLAU) | [`convectiveFlux_slau_d.inc.cuh`:528](../../solver_density_cuda/cuda_forge/convection/convectiveFlux_slau_d.inc.cuh) |
-| 粘性・伝導・粘性仕事 | [`viscousFlux_d.cu`:320](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) |
-| 化学種拡散のエンタルピー輸送 $\sum h_s J_s$ | [`speciesTransport_d.cu`:271](../../solver_density_cuda/cuda_forge/speciesTransport_d.cu) |
-| $k$ 拡散 (`sstEnergyIncludesK`) | [`viscousFlux_d.cu`:285](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) |
-| SST のエネルギーソース | [`ransSource_d.cu`:230](../../solver_density_cuda/cuda_forge/ransSource_d.cu) |
-| 軸対称 (`axisymMethod: 1`) の幾何ソース | [`axisymmetricSource_d.cu`:232](../../solver_density_cuda/cuda_forge/axisymmetricSource_d.cu) |
-| 体積力の仕事 | [`bodyForce_d.cu`:43](../../solver_density_cuda/cuda_forge/bodyForce_d.cu) |
+| 経路 | 実装 | 初版の扱い |
+| --- | --- | --- |
+| 対流 (SLAU) | [`convectiveFlux_slau_d.inc.cuh`:528](../../solver_density_cuda/cuda_forge/convection/convectiveFlux_slau_d.inc.cuh) | **受理** (面流束) |
+| 粘性・伝導・粘性仕事 | [`viscousFlux_d.cu`:320](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) | **受理** (面流束) |
+| 化学種拡散のエンタルピー輸送 $\sum h_s J_s$ | [`speciesTransport_d.cu`:271](../../solver_density_cuda/cuda_forge/speciesTransport_d.cu) | **受理** (面流束)。非反応 TP が中核 |
+| $k$ 拡散 (`sstEnergyIncludesK`) | [`viscousFlux_d.cu`:285](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) | 受理するなら**スキーマに対応を明記** (下記) |
+| SST のエネルギーソース | [`ransSource_d.cu`:230](../../solver_density_cuda/cuda_forge/ransSource_d.cu) | **受理** (体積ソース、条件付き) |
+| 軸対称の幾何ソース | [`axisymmetricSource_d.cu`:232](../../solver_density_cuda/cuda_forge/axisymmetricSource_d.cu) | **拒否** (§4.6 の単位規約が未確定) |
+| 体積力の仕事 | [`bodyForce_d.cu`:43](../../solver_density_cuda/cuda_forge/bodyForce_d.cu) | **受理** (体積ソース) |
+| **化学反応熱** `res_roe += V·Qdot` | [`chemistry_d.cu`:108](../../solver_density_cuda/cuda_forge/chemistry_d.cu) (残差組立て中に [`main.cpp`:1402](../../solver_density_cuda/main.cpp) から) | **拒否** (初版は非反応に限る) |
+| **陰的連成補正** | [`speciesTransport_d.cu`:502](../../solver_density_cuda/cuda_forge/speciesTransport_d.cu) ([`main.cpp`:1610](../../solver_density_cuda/main.cpp) から) | **採取対象外**。空間残差の物理ソースとして採ると誤る |
+| 凝縮・壁モデルなど未検証の組合せ | — | **拒否** (設定条件で起動時に判定) |
 
-- **収支対象が `roe` か `roe+roK` か**を属性に残す。
-- 初版で未対応の物理・スキームが有効なら、**診断要求を起動時に拒否**する (黙って一部だけ閉じない)。
-- 発注元は多成分 TP・SST を含むので、**純伝導だけ閉じても要求を満たさない**。
+- **採取区間を固定する**: 「**境界状態・物性・勾配の評価後**から、**壁残差射影の直前**まで」。
+  これにより陰的連成補正 (`main.cpp`:1610 以降) は自然に外れる。
+- **収支対象**: `sstEnergyIncludesK` を受理する場合、[`ransTransport_d.cu`:163](../../solver_density_cuda/cuda_forge/ransTransport_d.cu) の
+  分割保持に従い「**残差は $roe+roK$ の式、保存配列 `roe` は平均流エネルギー**」という対応をスキーマに明記する。
+- 初版の中核は**発注元に必要な「非反応 TP・層流 / 低 Re SST」**。拒否対象は**起動時に明示的に拒否**する
+  (黙って一部だけ閉じない)。
 
 ### 4.4 データモデル (codex M4)
 
@@ -131,9 +151,9 @@ $$R_i^{raw} = -\sum_f F_{if} + S_i,\qquad D_t(V_iE_i) = -\sum_f F_{if} + S_i + C
 | 2 | 採取位相 | §4.2。同一状態で 1 組、属性に位相。DPLUR 反復差分を変化率にしない |
 | 3 | 全加算経路 | §4.3。面流束と体積ソースを別採取、`roe` か `roe+roK` か、未対応は起動時拒否 |
 | 4 | CV/面スキーマと opt-in | §4.4・§4.5。面は `var.p` 系。level 2 では有効化しない |
-| 5 | 解除試験 | §6。4 本立て + 丸め誤差限界の事前定義 |
+| 5 | 解除試験 | §6。(1)–(6) + $\gamma_n$ 丸め限界の事前定義 + 受理経路ごとの非ゼロ試験 + 拒否の起動拒否試験 |
 | 6 | 発注元との受け渡し | 発注元 ([case-hypersonic-gap-heating-validation](case-hypersonic-gap-heating-validation.md) §4.8) の離散収支評価は**本計画の解除試験が通ってから**開始 |
-| 7 | codex レビュー 2 巡目 | §4 書き直し後に再度 `--stage plan` |
+| 7 | codex レビュー | plan 2 巡完了 (NO-GO → GO-with-changes)。実装後に `--stage result` |
 
 ## 6. 検証 (codex M7 で全面改訂)
 
@@ -146,10 +166,27 @@ $$R_i^{raw} = -\sum_f F_{if} + S_i,\qquad D_t(V_iE_i) = -\sum_f F_{if} + S_i + C
   **全領域の正味ゼロだけでは上下壁を両方誤ってゼロにしても通る**。
 - **(3) 実用途**: SLAU の対流・再構成・粘性仕事を含む node ケースと、発注元の**低 Re SST / TP 経路**。
   標準の `case/48` と整合させる。
-- **(4) 定量判定**: **float の加算数と $\sum|F|$ に基づく丸め誤差限界を事前定義**する
-  (残差は float の `atomicAdd` で組まれるので「double 相当」を要求しない)。解析解との差は
-  **別の離散化誤差**として判定する。定常解の主張には `check_convergence.py`、熱量系列には
-  `check_quasisteady.py` の VERDICT を貼る。
+- **(4) 定量判定 (codex 2 巡目 M3 で具体化)**:
+  - **組立て試験の合格式**: CV $i$ に実際に加えた項を $a_{ij}$ として
+
+    $$\left|R_i^{raw}-\sum_j a_{ij}\right| \le B_i,\qquad
+      B_i \sim \gamma_{n_i}\sum_j |a_{ij}|,\quad
+      \gamma_n=\frac{nu}{1-nu},\ u=2^{-24}$$
+
+    **限界は $\sum|F|$ だけでなく体積ソース加算も含める** (体積力仕事などが漏れる)。
+    保存時の丸めと集計誤差も含め、**領域和は FP64 で評価**する。
+  - **「組立て誤差の範囲内」と「壁熱量を必要精度で検算できる」を分ける**。
+    誤差限界が対象熱量の誤差予算を超えるときは、後者を**判定不能**とする (合格にしない)。
+  - 解析解との差は**別の離散化誤差**として判定する。定常解の主張には `check_convergence.py`、
+    熱量系列には `check_quasisteady.py` の VERDICT を貼る。
+- **(5) 受理経路ごとの非ゼロ試験 (事前登録)**: 経路が**実際に発動したこと**も検査する。
+  低 Re SST を回すだけでは [`ransSource_d.cu`:230](../../solver_density_cuda/cuda_forge/ransSource_d.cu) の
+  条件付きソースを検証できず、一様組成の TP では
+  [`speciesTransport_d.cu`:263](../../solver_density_cuda/cuda_forge/speciesTransport_d.cu) の種拡散が 0 になりうる。
+  → **組成勾配 / $k$ 勾配 / 非平衡の $P_k-D_k$ / 体積力仕事**がそれぞれ非ゼロになる試験を割り当て、
+  **拒否対象には起動拒否試験**を用意する。
+- **(6) 純伝導の独立検証**: 上下壁それぞれの**符号・期待熱量・離散化誤差許容**を固定する。
+  $C=-R^{raw}$ から作った恒等式が閉じるだけでは**熱量の正しさの独立検証にならない**。
 - **既存 run を解除試験に流用しない**: `case/24.laminar_channel_bl/run_isoT_condN_node/` を再判定すると
   **`NOT CONVERGED (stalled/plateau)`** (`rms_roe` 4.42e-4, `rms_roUy` 8.27e-7, ともに rising)。
   新規 run はメッシュ品質・IC・段階起動・run 索引 (case README) の手順を踏む。
@@ -160,6 +197,7 @@ $$R_i^{raw} = -\sum_f F_{if} + S_i,\qquad D_t(V_iE_i) = -\sum_f F_{if} + S_i + C
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
 | plan | `2026-09-19` | [`notes/reviews/2026-09-19-tooling-energy-balance-diagnostics-plan.md`](../../notes/reviews/2026-09-19-tooling-energy-balance-diagnostics-plan.md) | **NO-GO**, C0/M7/m1 | **全件採用**。M1→§4.1 (収支式・拘束反力・実効壁熱量の定義、密度更新は残る)、M2→§4.2 (採取位相を残差組立て中に固定、DPLUR 差分を変化率にしない)、M3→§4.3 (種拡散 $\sum h_sJ_s$・$k$ 拡散・SST/軸対称/体積力まで棚卸し、未対応は拒否)、M4→§4.4 (面は `var.p` 系で別スキーマ、primal と dual を混同しない)、M5→§4.5 (初期化時解決の opt-in、level 2 で有効化しない、ON/OFF で解不変)、M6→§4.6 (CV 和集合・周期の重複計上・単位規約、周期/軸対称は初版で受理しない)、M7→§6 (解除試験を 4 本に分割、符号を訂正、float 丸め限界、既存 case/24 run は未収束なので流用しない)、m1→§1 (壁の局所伝導寄与は `qwall` で取得可能。足りないのは拘束反力と領域境界の全数値流束の対応づけ) |
+| plan (2 巡目) | `2026-09-19` | [`notes/reviews/2026-09-19-tooling-energy-balance-diagnostics-plan-2.md`](../../notes/reviews/2026-09-19-tooling-energy-balance-diagnostics-plan-2.md) | **GO-with-changes**, C0/M3/m0 (旧 M2/M5/M6/m1 は解消) | **全件採用**。M1→§4.1 ($Q_{\mathrm{eff}}(W)$ の集計式、**角ノードは複数 bcond に重複するが残差ゼロ化は CV に 1 つ**→二重計上の禁止、$C_i$ は CV ごとに一度、共有反力は接合部の別勘定、第一内部列への供給は別定義)、M2→§4.3 (**化学反応熱 `V·Qdot` の欠落を補い拒否**、陰的連成補正は採取対象外、採取区間を「境界状態・物性・勾配の評価後〜壁残差射影の直前」に固定、`sstEnergyIncludesK` は残差 $roe+roK$ / 配列 `roe` の対応をスキーマ化、経路ごとに有効条件・採取対象・拒否条件を表に)、M3→§6 (組立て合格式 $\gamma_n$、体積ソース加算も限界に含める、領域和は FP64、「組立て誤差内」と「熱量を必要精度で検算できる」の分離、受理経路ごとの非ゼロ試験と起動拒否試験、純伝導の壁別独立検証) |
 
 ## 7. 影響範囲
 
@@ -181,3 +219,6 @@ $$R_i^{raw} = -\sum_f F_{if} + S_i,\qquad D_t(V_iE_i) = -\sum_f F_{if} + S_i + C
 - `2026-09-19` — codex plan レビュー 1 巡目 (**NO-GO**, C0/M7/m1) を全件採用して全面改訂。
   初版を**定常 node の同一状態における離散収支**に限定し、収支式と拘束反力・採取位相・全加算経路・
   CV/面スキーマと opt-in・CV 選択と周期/単位・解除試験 4 本立てを定義。周期/軸対称/非定常/cell は初版で受理しない。
+- `2026-09-19` — codex plan レビュー 2 巡目 (**GO-with-changes**, C0/M3/m0) を全件採用。壁別実効熱量の集計式と
+  共有角の別勘定、経路表への化学反応熱の追加と陰的連成補正の除外・採取区間の固定、解除試験の定量化
+  (丸め限界 $\gamma_n$・経路別非ゼロ試験・起動拒否試験・純伝導の壁別独立検証)。**仕様確定 → 実装の順で進める**。

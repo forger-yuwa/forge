@@ -47,6 +47,25 @@ __device__ flow_float venkata_limiter_scaled(flow_float delta_p_max, flow_float 
 }
 
 
+// **比の形** Venkatakrishnan (plan convection-node-wall-reconstruction §4.18)。
+// y = delta_p / delta_m (許容幅 / 再構成増分) の**無次元な比**だけで決まるので、
+// 基準値 (ro_ref / p_ref / a_ref) も長さ尺度も要らない。eps は**ただの数**。
+// このファイル冒頭が引用している Michalak の流儀で、現行実装の 1 行上に
+//   //return (x*x + 2.0*x + eps*eps)/(x*x + x + 2.0 + eps*eps);
+// とコメントアウトされていた形そのもの。
+//   y -> 0 で psi -> eps^2/(2+eps^2) ~ 0、y -> 無限大で psi -> 1、y=1 で 3/4。
+//   psi <= y なので Barth の有界性を満たす (y>2 で psi>1 になるが呼び出し側が 1 でクランプする)。
+// **代償**: 尺度を持たないので「ほぼ一様な領域の数値ノイズは制限しない」という
+// Venkatakrishnan 本来の性質を失う。収束の鈍りが出ないかは実測で見る (§4.18)。
+__device__ flow_float venkata_limiter_ratio(flow_float delta_p_max, flow_float delta_p_min,
+                                            flow_float delta_m, flow_float eps) {
+    const flow_float delta_p = (delta_m > (flow_float)0.0) ? delta_p_max : delta_p_min;
+    const flow_float y  = delta_p / delta_m;            // 呼び出し側が |delta_m| > 1e-20 を保証する
+    const flow_float e2 = eps*eps;
+    return (y*y + (flow_float)2.0*y + e2) / (y*y + y + (flow_float)2.0 + e2);
+}
+
+
 __device__ flow_float barth_Jespersen_limiter(flow_float delta_p_max, flow_float delta_p_min, 
                                               flow_float delta_m, flow_float volume) {
 

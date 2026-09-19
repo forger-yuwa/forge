@@ -244,6 +244,8 @@ public:
     // 1 のとき: delta を run 中固定の物理参照値で割り (ro_ref / p_ref / 速度は共通の a_ref)、
     //           eps2 = (venkatK * h_i / limiterRefLength)^3 とする。h_i は半径重み前の面積の平方根 (2D/軸対称)
     //           または体積の立方根 (3D)。式の余分な delta_m 因子も約分する。対象は流れ 5 変数・node のみ。
+    // 0: 現行 (次元付き eps2 = K^3*volume) / 1: 無次元化した差 + eps2=(K h_i/L_ref)^3 /
+    // 2: **比の形** psi(y), y=delta_p/delta_m (基準値も長さも不要。venkatK を無次元 eps として使う)
     int limiterScaled = 0;
     double venkatK = 1.0;             // Venkatakrishnan の K (SU2 の VENKAT_LIMITER_COEFF 相当。既定は現行の 1.0)
     double limiterRefLength = 0.0;    // 無次元化の基準長 [m]。0 = メッシュ境界箱の対角から自動

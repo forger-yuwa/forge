@@ -499,8 +499,8 @@ void solverConfig::read(std::string fname)
         // cell は目標点が双対面重心のままで流束と整合しているが、convMethod 2 の増分の形は変わるので拒否する。
         // MINMOD (その他の convMethod) は増分の式が別なので共通関数の対象外。
         this->limiterScaled = getOptionalValidatedValue<int>(space, "limiterScaled", 0, "space");
-        if (this->limiterScaled != 0 && this->limiterScaled != 1) {
-            throw std::runtime_error("Key 'limiterScaled' in 'space' must be 0 or 1.");
+        if (this->limiterScaled < 0 || this->limiterScaled > 2) {
+            throw std::runtime_error("Key 'limiterScaled' in 'space' must be 0 (current), 1 (scaled delta) or 2 (ratio form).");
         }
         this->venkatK = getOptionalValidatedValue<double>(space, "venkatK", 1.0, "space");
         if (!(this->venkatK > 0.0)) {
