@@ -44,6 +44,10 @@ class SernMeshParams:
     interface_angle: float = 0.0
     top_ext_angle: float = 0.0
     scale: float = 1.0
+    split_plume_at_te: bool = False      # プルーム区間 (L_cowl→x_out) を **ランプ後縁 L_ramp で分割**し、
+                                         # 後縁の前後に station クラスタを置く。既定 False = 従来 (後縁は最寄り station を
+                                         # 置換するだけでクラスタ無し)。R4e ④: ベース直後の流れ方向間隔がベース厚の 4 倍あり、
+                                         # 極小の壁 CV が巨大な隣接へ吐く構図を緩めるための試験用
     x_cluster_w: float = 0.15
     x_cluster_a: float = 3.0
     # --- ランプ側外部流ブロック (plan §4.11) ---
@@ -83,6 +87,18 @@ def _cluster_stations(x0, x1, n, ends=(True, True), w=0.15, a=3.0):
     cum /= cum[-1]
     return x0 + L * np.interp(np.linspace(0.0, 1.0, n), cum, xi)
 
+
+def _plume_stations(L_cowl, L_ramp, x_out, n, prm):
+    """プルーム区間の station。`split_plume_at_te` で後縁 L_ramp を境に 2 分割し、両側にクラスタを置く。
+    戻り値は L_cowl を**含まない** (呼び出し側が前区間と連結する)。"""
+    w, a = prm.x_cluster_w, prm.x_cluster_a
+    if not getattr(prm, "split_plume_at_te", False) or not (L_cowl < L_ramp < x_out):
+        return _cluster_stations(L_cowl, x_out, n, (True, False), w, a)[1:]
+    fa = (L_ramp - L_cowl) / (x_out - L_cowl)
+    na = max(int(round(n * fa)), 5)
+    nb = max(n - na + 1, 5)
+    return np.concatenate([_cluster_stations(L_cowl, L_ramp, na, (True, True), w, a)[1:],
+                           _cluster_stations(L_ramp, x_out, nb, (True, False), w, a)[1:]])
 
 def _geom_start(n, first):
     """[0,1] を n 点、始端の第一間隔が first (比) になる幾何級数で切る (first ≥ 1/(n−1) なら一様)。"""
@@ -135,13 +151,13 @@ def generate_sern_mesh(design, prm: SernMeshParams):
             np.linspace(f1, 0.0, nf)[1:],
             np.linspace(0.0, f2, nf)[1:],
             _cluster_stations(f2, L_cowl, prm.ni_noz, (True, True), prm.x_cluster_w, prm.x_cluster_a)[1:],
-            _cluster_stations(L_cowl, x_out, prm.ni_plume, (True, False), prm.x_cluster_w, prm.x_cluster_a)[1:],
+            _plume_stations(L_cowl, L_ramp, x_out, prm.ni_plume, prm),
         ])
     else:
         xs = np.concatenate([
             _cluster_stations(-prm.L_up, 0.0, prm.ni_up, (False, True), prm.x_cluster_w, prm.x_cluster_a),
             _cluster_stations(0.0, L_cowl, prm.ni_noz, (True, True), prm.x_cluster_w, prm.x_cluster_a)[1:],
-            _cluster_stations(L_cowl, x_out, prm.ni_plume, (True, False), prm.x_cluster_w, prm.x_cluster_a)[1:],
+            _plume_stations(L_cowl, L_ramp, x_out, prm.ni_plume, prm),
         ])
     # ランプ後縁に station を置く (最寄りを置換)
     k = int(np.argmin(np.abs(xs - L_ramp)))

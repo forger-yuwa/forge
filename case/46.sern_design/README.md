@@ -260,6 +260,8 @@ CFL・梯子 step 数・MOC 初期値・収束判定の実測。**個々の結�
 | `run_0209_r4e_diag_nobase` | **ベース無し**生産形状 (`run_0198` から) を同条件 2 次 | **40 step 完走・不動**。カウル後縁の負圧再構成 (−13747 Pa) は同じく毎 step 出る → 不整合は原因でない | ref (対照) |
 | `run_0210_r4e_diag_2nd_nowd` | 2 次 + **`nodeWallDirichlet: 0`** | **40 step 完走**、ベース節点 P は上昇。ただし壁節点が 1500 m/s = 壁でない (診断) | ref (診断) |
 | `run_0211_r4e_diag_2nd_cfl01` | 2 次 + **cfl 0.1** | **step 184 NaN** (cfl 1/10 で step 6.6 倍 = 同じ擬似時間) → CFL 律速でない | ref (診断) |
+| `run_0212_r4e_diag_2nd_relax07` | R4e ③ 2 次 + **`implicitRelax` 0.7** (診断) | **step 39 NaN** (従来 28 = 1.4 倍の延命のみ) → 時間積分は機構でない | ref (診断) |
+| `run_0213_r4e_texd` | R4e ④ **後縁前後に station クラスタ** (`mesh.split_plume_at_te`)。ベース直後 Δx 0.082→0.025 | **mid 段 step 10 NaN** (従来 28)。壁 CV 体積 3.3 倍減で step 2.8 倍早い = **格子細分は悪化** | ref (診断) |
 
 ### S7 3D の現状 (2026-09-05)
 
