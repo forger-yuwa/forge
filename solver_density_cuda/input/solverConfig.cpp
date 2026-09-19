@@ -490,6 +490,12 @@ void solverConfig::read(std::string fname)
         if (this->limiter != 0 && this->limiter != 1 && this->limiter != 2 && this->limiter != -1) {
             throw std::runtime_error("Key 'limiter' in 'space' must be one of 0, 1, 2, or -1.");
         }
+        // リミッタ評価点/増分を流束と一致させる (既定 0 = 従来の式)。plan convection-node-wall-reconstruction §4.8
+        this->limiterMatchRecon = getOptionalValidatedValue<int>(space, "limiterMatchRecon", 0, "space");
+        if (this->limiterMatchRecon != 0 && this->limiterMatchRecon != 1) {
+            throw std::runtime_error("Key 'limiterMatchRecon' in 'space' must be 0 or 1.");
+        }
+
         // free-stream 保存用の基準静圧 (既定 0.0 = 従来挙動・ビット不変)
         this->pRef = getOptionalValidatedValue<double>(space, "pRef", 0.0, "space");
 

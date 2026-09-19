@@ -47,13 +47,16 @@ __global__ void limiter_psi_merged_d
  int limiter_scheme,
  geom_int nCells,
  geom_int nNormalPlanes,
+ geom_int* plane_cells,
  geom_int* cell_planes_index, geom_int* cell_planes,
  geom_float* vol, geom_float* ccx, geom_float* ccy, geom_float* ccz,
  geom_float* pcx, geom_float* pcy, geom_float* pcz,
  flow_float phi_floor,
  flow_float* Q, flow_float* Q_max_in, flow_float* Q_min_in,
  flow_float* limiter_Q,
- flow_float* dQdx, flow_float* dQdy, flow_float* dQdz
+ flow_float* dQdx, flow_float* dQdy, flow_float* dQdz,
+ // 通常経路と同じ「流束一致」オプション (plan convection-node-wall-reconstruction §4.8)。既定 0 で式は変更前と同一。
+ int matchRecon, int edgeMid, int convM
 )
 {
     const geom_int ic0 = blockDim.x*blockIdx.x + threadIdx.x;
@@ -84,11 +87,28 @@ __global__ void limiter_psi_merged_d
     for (geom_int ilp = index_st; ilp < index_en; ++ilp) {
         const geom_int ip = cell_planes[ilp];
         if (ip >= nNormalPlanes) continue;
-        const flow_float dcp_x = pcx[ip] - ccx[ic0];
-        const flow_float dcp_y = pcy[ip] - ccy[ic0];
-        const flow_float dcp_z = pcz[ip] - ccz[ic0];
+        flow_float dcp_x, dcp_y, dcp_z;
+        geom_int ic1p = -1;
+        if (matchRecon != 0 && edgeMid != 0) {        // node: 目標点 = エッジ中点 (流束と同じ)
+            ic1p = plane_cells[2*ip+0] + plane_cells[2*ip+1] - ic0;
+            dcp_x = (flow_float)0.5*(ccx[ic1p] - ccx[ic0]);
+            dcp_y = (flow_float)0.5*(ccy[ic1p] - ccy[ic0]);
+            dcp_z = (flow_float)0.5*(ccz[ic1p] - ccz[ic0]);
+        } else {
+            dcp_x = pcx[ip] - ccx[ic0];
+            dcp_y = pcy[ip] - ccy[ic0];
+            dcp_z = pcz[ip] - ccz[ic0];
+        }
         flow_float delta_m;
-        if (SCALED) {
+        if (matchRecon != 0) {
+            delta_m = gx*dcp_x + gy*dcp_y + gz*dcp_z;                          // Qt を経由しない (桁落ち回避)
+            if (convM == 2) {                                                  // interp_MUSCL_3rd と同形
+                if (ic1p < 0) ic1p = plane_cells[2*ip+0] + plane_cells[2*ip+1] - ic0;
+                const flow_float kk = (flow_float)(1.0/3.0);
+                delta_m = (flow_float)0.5*kk*(Q[ic1p]-Qc) + ((flow_float)1.0-kk)*delta_m;
+            }
+            if (SCALED) delta_m *= inv_ref;
+        } else if (SCALED) {
             delta_m = (gx*dcp_x + gy*dcp_y + gz*dcp_z) * inv_ref;              // limiter_r1_scaled_d と同式
         } else {
             const flow_float Qt = Qc + gx*dcp_x + gy*dcp_y + gz*dcp_z;          // limiter_r1_d と同式

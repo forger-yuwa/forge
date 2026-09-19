@@ -57,11 +57,12 @@ static void limiter_periodic_merged
     periodicGatherMaxArray_d_wrapper(cfg, cuda_cfg, msh, s_lim_qmax);
     periodicGatherMinArray_d_wrapper(cfg, cuda_cfg, msh, s_lim_qmin);
     limiter_psi_merged_d<SCALED><<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>>(
-        cfg.limiter, msh.nCells, msh.nNormalPlanes,
+        cfg.limiter, msh.nCells, msh.nNormalPlanes, msh.map_plane_cells_d,
         msh.map_cell_planes_index_d, msh.map_cell_planes_d,
         var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
         var.p_d["pcx"], var.p_d["pcy"], var.p_d["pcz"],
-        phi_floor, Q, s_lim_qmax, s_lim_qmin, limiter_Q, dQdx, dQdy, dQdz);
+        phi_floor, Q, s_lim_qmax, s_lim_qmin, limiter_Q, dQdx, dQdy, dQdz,
+        cfg.limiterMatchRecon, (cfg.discretization == "node" ? 1 : 0), cfg.convMethod);
     gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
     periodicGatherMinArray_d_wrapper(cfg, cuda_cfg, msh, limiter_Q);
 }
@@ -223,7 +224,11 @@ __global__ void limiter_r1_fused5_d
  flow_float* d2x, flow_float* d2y, flow_float* d2z,
  flow_float* d3x, flow_float* d3y, flow_float* d3z,
  flow_float* d4x, flow_float* d4y, flow_float* d4z,
- const flow_float* __restrict__ prim   // 原始量 AoS パック [ro,Ux,Uy,Uz,P,...] (nullptr なら Q0..Q4 から gather)
+ const flow_float* __restrict__ prim,  // 原始量 AoS パック [ro,Ux,Uy,Uz,P,...] (nullptr なら Q0..Q4 から gather)
+ // リミッタの試行増分を流束と一致させる (plan convection-node-wall-reconstruction §4.8)。
+ //   matchRecon=0: 従来 (双対面重心で g·d のみ。式は変更前と同一)
+ //   matchRecon=1: 流束と同じ点・同じ形 — edgeMid なら目標点はエッジ中点、convM==2 は隣接値差の項も含む
+ int matchRecon, int edgeMid, int convM
 )
 {
     geom_int ic0 = blockDim.x*blockIdx.x + threadIdx.x;
@@ -274,16 +279,43 @@ __global__ void limiter_r1_fused5_d
     for (geom_int ilp=index_st; ilp<index_en; ilp++) {
         geom_int ip = cell_planes[ilp];
         if (ip >= nNormalPlanes) continue;
-        flow_float dcp_x = pcx[ip]-cx0;
-        flow_float dcp_y = pcy[ip]-cy0;
-        flow_float dcp_z = pcz[ip]-cz0;
-        #pragma unroll
-        for (int k=0;k<5;k++){
-            flow_float Qt = qc[k] + gx[k]*dcp_x + gy[k]*dcp_y + gz[k]*dcp_z;
-            const flow_float lk = (SCHEME == 1)
-                ? barth_Jespersen_limiter(qmax[k]-qc[k], qmin[k]-qc[k], Qt-qc[k], volume)
-                : venkata_limiter        (qmax[k]-qc[k], qmin[k]-qc[k], Qt-qc[k], volume);
-            ltmp[k] = min(ltmp[k], lk);
+        if (matchRecon == 0) {
+            // 従来経路 (式は変更前と同一): 双対面重心で g·d を評価し、Qt を作ってから差を取る
+            flow_float dcp_x = pcx[ip]-cx0;
+            flow_float dcp_y = pcy[ip]-cy0;
+            flow_float dcp_z = pcz[ip]-cz0;
+            #pragma unroll
+            for (int k=0;k<5;k++){
+                flow_float Qt = qc[k] + gx[k]*dcp_x + gy[k]*dcp_y + gz[k]*dcp_z;
+                const flow_float lk = (SCHEME == 1)
+                    ? barth_Jespersen_limiter(qmax[k]-qc[k], qmin[k]-qc[k], Qt-qc[k], volume)
+                    : venkata_limiter        (qmax[k]-qc[k], qmin[k]-qc[k], Qt-qc[k], volume);
+                ltmp[k] = min(ltmp[k], lk);
+            }
+        } else {
+            // 流束一致経路: 目標点と増分の形を convectiveFlux 側と揃える。
+            // 増分 delta を直接作る (Qt を経由しないので float32 の足して引く桁落ちが無い)。
+            const geom_int ic1 = plane_cells[2*ip+0] + plane_cells[2*ip+1] - ic0;
+            flow_float dcp_x, dcp_y, dcp_z;
+            if (edgeMid != 0) {                      // node: 目標点 = エッジ中点 (g_reconEdgeMid と同じ)
+                dcp_x = (flow_float)0.5*(ccx[ic1]-cx0);
+                dcp_y = (flow_float)0.5*(ccy[ic1]-cy0);
+                dcp_z = (flow_float)0.5*(ccz[ic1]-cz0);
+            } else {                                  // cell: 双対面重心のままで流束と整合している
+                dcp_x = pcx[ip]-cx0; dcp_y = pcy[ip]-cy0; dcp_z = pcz[ip]-cz0;
+            }
+            #pragma unroll
+            for (int k=0;k<5;k++){
+                flow_float delta = gx[k]*dcp_x + gy[k]*dcp_y + gz[k]*dcp_z;
+                if (convM == 2) {                     // interp_MUSCL_3rd と同形 (k = 1/3)
+                    const flow_float kk = (flow_float)(1.0/3.0);
+                    delta = (flow_float)0.5*kk*(Q[k][ic1]-qc[k]) + ((flow_float)1.0-kk)*delta;
+                }
+                const flow_float lk = (SCHEME == 1)
+                    ? barth_Jespersen_limiter(qmax[k]-qc[k], qmin[k]-qc[k], delta, volume)
+                    : venkata_limiter        (qmax[k]-qc[k], qmin[k]-qc[k], delta, volume);
+                ltmp[k] = min(ltmp[k], lk);
+            }
         }
     }
 
@@ -325,7 +357,8 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         var.c_d["dUydx"], var.c_d["dUydy"], var.c_d["dUydz"], \
         var.c_d["dUzdx"], var.c_d["dUzdy"], var.c_d["dUzdz"], \
         var.c_d["dPdx"] , var.c_d["dPdy"] , var.c_d["dPdz"], \
-        ((cfg.primPack != 0 && cfg.gradLSQ == 2) ? prim_pack_device_ptr() : nullptr)
+        ((cfg.primPack != 0 && cfg.gradLSQ == 2) ? prim_pack_device_ptr() : nullptr), \
+        cfg.limiterMatchRecon, (cfg.discretization == "node" ? 1 : 0), cfg.convMethod
     // 周期 node (合併 CV) は 2 段 (極値の group max/min → ψ の group min) で周期対の ψ を一致させる (§4.8)。
     const bool perNode = periodicNodeActive(cfg, msh);
     if (perNode) {

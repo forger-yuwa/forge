@@ -233,6 +233,10 @@ public:
 
     flow_float  convMethod;
     int limiter;    // 0: off, 1: Barth-Jespersen, 2: Venkata, -1: legacy
+    // リミッタの試行値を、流束が実際に適用する増分と同じ形・同じ点で評価する (既定 0 = 従来の式)。
+    // 0: 従来 (双対面重心で g·d のみ評価) / 1: 流束と一致 (node はエッジ中点、convMethod 2 は隣接値差の項も含む)
+    // 根拠と設計は plans/active/convection-node-wall-reconstruction.md §4.8。SU2 は既定でこの一致形。
+    int limiterMatchRecon = 0;
 
     // free-stream 保存: 対流流束の圧力項を (p_tilde - pRef)*s で組み、非直交メッシュで
     // 大きな p*s を float32 加算する際の桁落ち(metric closure 由来の偽運動量源)を抑える。

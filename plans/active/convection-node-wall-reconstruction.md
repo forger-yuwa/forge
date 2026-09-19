@@ -233,6 +233,55 @@ __device__ flow_float recon_increment(int scheme, flow_float phiC, flow_float ph
 `case/09.Taylor-Green` (周期 = W1 の周期経路)、`case/23.axi_nozzle` (軸対称)、
 `case/44.vitiated_air_wt` (TP・凝縮)。変更範囲に応じて増やす。
 
+### 4.10 W1 の実装と A/B の実測 (2026-09-19)
+
+**実装**: `space.limiterMatchRecon` (既定 0)。`limiter_d.cu` の `limiter_r1_fused5_d` と
+`limiterPeriodic_d.cuh` の `limiter_psi_merged_d` に分岐を足し、`=1` のとき
+
+- 目標点を **node ならエッジ中点** (`0.5*(cc[ic1]-cc[ic0])`) にする
+- `convMethod: 2` なら **隣接値差の項も含めた増分**にする (`interp_MUSCL_3rd` と同形)
+- 増分 `delta` を**直接**作る (`Qt` を経由しないので float32 の足して引く桁落ちが無い)
+
+周期経路には `plane_cells` を引数追加して partner を取れるようにした。cell は分岐を維持。
+
+**既定パスの非退行**: 変更を外した HEAD の worktree でバイナリを作って比較した。
+**ビット同一ではないが、差は run 間非決定性の水準**:
+
+| | 同一バイナリの反復 (ノイズ床) | 変更前バイナリ vs `mr:0` |
+| --- | --- | --- |
+| step 1 `ro` | 1.96e-07 | 4.51e-07 |
+| step 10 `ro` | 8.08e-07 | 6.52e-07 |
+| step 27 `ro` | 7.90e-07 | 1.34e-06 |
+
+(この診断 run は step 28 で発散するのでノイズがカオス的に増幅する。`limiter_P` はノイズ床自体が 0.96。)
+**カーネル引数を足すとレジスタ割り当てと命令スケジューリングが変わる**ので、式が同一でもビット同一にはならない。
+コード中の「ビット不変」というコメントは実測に合わせて「式は変更前と同一」に訂正した。
+
+**A/B (共通初期場 `run_0205/res_0.h5`, cfl 1.0, 2 次)**:
+
+| 構成 | 結果 |
+| --- | --- |
+| Venkatakrishnan + `mr:0` (既定) | step 28 で NaN |
+| Venkatakrishnan + `mr:1` | step 31 (**3 step の延命のみ**) |
+| Barth + `mr:0` | step 27 で NaN (ベース壁ノードの `ro` が **−0.001003** = 負に) |
+| **Barth + `mr:1`** | **400 step 完走・NaN 無し** |
+
+**ゲート判定**:
+
+- **G1/G3**: Barth + `mr:1` は step 1〜400 すべてで**非物理な再構成ゼロ**
+  (`check_face_reconstruction.py` VERDICT OK、再構成 P の最小は 338〜1065 Pa)。
+- ベース壁ノードの密度: `mr:0` は 26 step で負になるが、`mr:1` は 0.003581 → 0.001039 で**頭打ち**
+  (step 100 → 400 で 0.001156 → 0.001039 = 300 step で −10 %)。**排出が止まる**。
+- **G2**: Venkatakrishnan は 3 step しか延びない。`eps2 = volume` の平滑化が残るので厳密有界にならない
+  = codex Major 6 の分離がそのまま出た。
+
+**ただし根治ではない**。全レシピ (`problem_r4e_2d_base_barth_mr1.yaml`, `run_0220_r4e_barth_mr1`) を回すと
+**mid 段 step 129 で NaN** (既定は 28。4.6 倍)。NaN は同じベース近傍 (x/H 10.66–11.19, y/H 2.70–2.77 の 55 節点)。
+
+**読み**: W1 はリミッタの正しさの問題として**独立に価値がある** (Barth の厳密有界性が実際に効くようになる)。
+ベース発散も大きく緩和するが**消さない**ので、W2 (面単位の非物理フォールバック) と
+SERN 側の解像度・形状の検討はどちらも残る。
+
 ## 5. 実装ステップ
 
 1. 設計確定 (§4.5 の未決を codex レビューで決める)
@@ -245,7 +294,7 @@ __device__ flow_float recon_increment(int scheme, flow_float phiC, flow_float ph
 | # | 項目 | 内容 |
 | --- | --- | --- |
 | W0 | ~~測定器の座標~~ **完了 (2026-09-19)**: `check_wall_cv_drain.py` を削除し `check_face_reconstruction.py` に置換 (ノード座標・再構成状態の物理性のみ)。§4.5/§4.6 の結論を訂正 |
-| W1 | ~~リミッタ評価点を再構成点に揃える~~ **設計完了 (2026-09-19) → §4.8 / 合否ゲート §4.9**。ずれは **点** (双対面重心 vs エッジ中点) と **形** (`convMethod: 2` の隣接値差の項をリミッタが見ていない) の 2 成分。増分を作る共通関数を 1 つにし、流束とリミッタが同じ引数で呼ぶ。必要な入力は揃っている (partner は pass1 と同じ一行、`phiD` も既読)。`Qt − qc` の往復も同時に解消 (float32 の桁落ち)。周期経路も同じ関数、cell は分岐維持。**次は実装と A/B** |
+| W1 | ~~リミッタ評価点を再構成点に揃える~~ **実装 + A/B 完了 (2026-09-19) → §4.8 設計 / §4.9 ゲート / §4.10 実測**。`space.limiterMatchRecon` (既定 0)。**Barth と組むと G1/G3 を満たし** (400 step 非物理ゼロ、ベース壁ノードの `ro` が頭打ち)、Venkatakrishnan では 3 step しか延びない。**既定パスの差は run 間非決定性の水準** (ビット同一ではない)。**ベース発散の根治ではない** (全レシピは mid 段 step 28 → 129)。残 = 標準ケース回帰 (§4.9 の 5 ケース) と既定化の判断 |
 | W2 | **面単位の非物理フォールバック** (SU2 の `bad_recon` 相当) を**導入候補として独立検証**。§4.5 のとおりベース run でのみ発火し対照では発火しないので**本件の直接候補**。組成・エンタルピーも整合して再計算すること |
 | W3 | **更新率制限と点ロールバックは別 plan へ**。forge には既に `update_d.cu` の `updateGuardScale` があり、[`accepted/time_integration-update-positivity-geard.md`](../accepted/time_integration-update-positivity-guard.md) に「試験した CFL 上限を改善しなかった」実測がある。SU2 の `MAX_UPDATE_FLOW` をそのまま移植する設計では、流れ 5 変数の後に別途更新される SST・化学種・凝縮との整合 (ΣρY=ρ、組成依存 EOS、周期共有 DOF、TP のエネルギー基準) を失う。**3 件一括の既定 on は推奨されない** |
 | W4 | ~~壁ノードからの速度再構成を制限する~~ **撤回 (§4.5)**。再構成は片側勾配の理論値に厳密一致しており異常でない |

@@ -205,6 +205,9 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     と記録している。run_0075 の発散 (M∞10 の boat-tail 膨張で 18 % のノードが pMin=1 Pa に着地 → 負密度) は
     まさにこの指紋なので、relax を効かせる。"""
     _lim = int(p.evaluate.get("limiter", 2))   # 2=Venkatakrishnan (既定), 1=Barth
+    # リミッタの試行値を流束が適用する増分と同じ形・同じ点で評価する (既定 0 = 従来)。
+    # plan convection-node-wall-reconstruction §4.8。Barth と組むと厳密有界になる
+    _lmr = int(p.evaluate.get("limiter_match_recon", 0))
     ir = p.evaluate.get("implicit_relax")
     _relax = f", implicitRelax: {float(ir)}" if ir is not None else ""
     pm = p.evaluate.get("p_min")
@@ -248,7 +251,7 @@ time:
   outStepInterval: {out_int}
   timeIntegration: 11
   nStepInner: 5
-space: {{convMethod: 1, limiter: {_lim}, pRef: {p_ref}}}
+space: {{convMethod: 1, limiter: {_lim}, pRef: {p_ref}, limiterMatchRecon: {_lmr}}}
 {turb}
 initial: "uniform_p101325_u10"
 """

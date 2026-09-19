@@ -137,8 +137,9 @@ static std::vector<float> two_stage(const Chain& m, const DevChain& d, const std
     float *dQ = up(Q), *dgx = up(gx), *dgy = up(zero), *dgz = up(zero), *dlim = up(one), *dmax = up(zero), *dmin = up(zero);
     limiter_extrema_d<<<(n+127)/128,128>>>(n, m.nNormal, d.pc, d.cpi, d.cp, dQ, dmax, dmin);
     gather_max(n, droot, dmax); gather_min(n, droot, dmin);
-    limiter_psi_merged_d<SCALED><<<(n+127)/128,128>>>(scheme, n, m.nNormal, d.cpi, d.cp, d.vol, d.ccx, d.ccy, d.ccz, d.pcx, d.pcy, d.pcz,
-        1.0e-30f, dQ, dmax, dmin, dlim, dgx, dgy, dgz);
+    limiter_psi_merged_d<SCALED><<<(n+127)/128,128>>>(scheme, n, m.nNormal, d.pc, d.cpi, d.cp, d.vol, d.ccx, d.ccy, d.ccz, d.pcx, d.pcy, d.pcz,
+        1.0e-30f, dQ, dmax, dmin, dlim, dgx, dgy, dgz,
+        0, 0, 1);   // matchRecon=0 (従来経路) でビット不変を確認する
     gather_min(n, droot, dlim);
     cudaError_t e = cudaDeviceSynchronize(); if (e != cudaSuccess) { printf("CUDA error %s\n", cudaGetErrorString(e)); ++g_fail; }
     auto out = down(dlim, n);
