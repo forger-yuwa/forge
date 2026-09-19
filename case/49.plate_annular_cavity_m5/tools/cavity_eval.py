@@ -338,8 +338,9 @@ def wall_href(wh, man, D, c, v, T0):
         #
         # h = q''/ΔT は ΔT→0 でも破綻しない: 深部では q'' も一緒に小さくなり、比は 30 W/m2K
         # 前後の妥当な値に落ち着く (実測 θ=140°: z=-8.1 mm で ΔT 0.35 K / q'' 11 W/m2 -> h 32)。
-        # 実測では **ΔT が負になる面積は 0.00 %** なので、符号の問題も無い。
-        # 閾値が要る唯一の理由は「T0 の数値ノイズに埋もれる点を平均に入れない」ことだけ。
+        # **同心形状**では ΔT が負になる面積は 0.00 % で符号の問題も無い。ただし偏心すると
+        # 深部が壁と熱平衡になり符号が崩れる (下の same_sign を参照)。
+        # ノイズ閾値が要る理由は「T0 のノイズに埋もれる点を平均に入れない」ことだけ。
         #
         # T0 は h0/cp を float32 の h0 から作るので、分解能は ulp(h0)/cp
         # (実測 h0 ~ 1.25e6 J/kg -> ulp 0.125 -> 1.24e-4 K)。その `href_noise_factor` 倍を閾値にする。
@@ -356,9 +357,16 @@ def wall_href(wh, man, D, c, v, T0):
             dT_min = nf * t0_noise                        # 既定は**測って決める**
         d["href_dT_min_basis"] = ("T0 ノイズ %.3e K × %.3g" % (t0_noise, nf)
                                   if man["eval"].get("href_dT_min_K") is None else "手動指定")
-        ok = dT > dT_min
+        # **符号が逆の点も除く**。基準温度は「すきま中央面」の非局所値なので、キャビティが
+        # 壁と熱平衡に達した領域では q'' と dT の符号が一致しなくなり、局所係数が負になる
+        # (2026-09-19 実測、偏心 1.5 mm 細格子: 外筒で dT<0 が面積の 12.3 %、
+        #  q'' と dT の符号が逆が 44.9 % → h_ref の面積平均が -210 W/m2K になった)。
+        # これはバグではなく**この定義が成り立たない領域**なので、平均から外して面積を報告する。
+        same_sign = (qn * dT) > 0.0
+        ok = (dT > dT_min) & same_sign
         d["href_undef_area_frac"] = float(np.sum(w[~ok]) / max(np.sum(w), 1e-30))
         d["href_neg_area_frac"] = float(np.sum(w[dT <= 0.0]) / max(np.sum(w), 1e-30))
+        d["href_opp_sign_area_frac"] = float(np.sum(w[~same_sign]) / max(np.sum(w), 1e-30))
         d["href_dT_min_K"] = dT_min
         d["Tref_mean"] = float(np.sum(Tref * w) / max(np.sum(w), 1e-30))
         d["dTref_mean"] = d["Tref_mean"] - Tw              # **分母は温度差**。絶対温度で語らない
@@ -610,13 +618,17 @@ def main():
                    d["ypls_mean"], flag))
         for g, d in wh.items():
             if "h_eff" in d:
+                opp = 100 * d.get("href_opp_sign_area_frac", 0.0)
                 print("    %-10s h_eff = Q/∫dT dA = %8.4g W/m2K   (dT_ref 平均 %.2f K; "
-                      "dT<=%.3g K = %.2f %% [%s]; dT<0 = %.2f %%)"
+                      "係数を出さない面積 %.1f %% [dT<=%.3g K: %s]; dT<0 %.1f %%; "
+                      "**q'' と dT の符号が逆 %.1f %%**)"
                       % (g, d["h_eff"], d.get("dTref_mean", float("nan")),
-                         d.get("href_dT_min_K", 0.0),
                          100 * d.get("href_undef_area_frac", 0.0),
-                         d.get("href_dT_min_basis", "-"),
-                         100 * d.get("href_neg_area_frac", 0.0)))
+                         d.get("href_dT_min_K", 0.0), d.get("href_dT_min_basis", "-"),
+                         100 * d.get("href_neg_area_frac", 0.0), opp))
+                if opp > 5.0:
+                    print("      ** 符号が逆の面積が %.0f %% — この壁では**基準温度基準の係数が"
+                          "成り立っていない** (キャビティが壁と熱平衡)。q'' で報告すること **" % opp)
         y1 = next((d["y1"] for d in wh.values() if "y1" in d), None)
         if y1 is not None:
             print("    --- 壁解像 (**参考値**。正式判定は "

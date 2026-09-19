@@ -28,6 +28,12 @@ OSCILLATING (リミットサイクル) は 0 扱いだが「平均±振幅」で
 """
 import sys, os, glob, argparse, math
 import numpy as np
+
+
+def _trapz(y, x):
+    """台形積分。**numpy 2 で `np.trapz` が削除された**ので互換に包む (AWS の numpy で落ちた)。"""
+    f = getattr(np, "trapezoid", None) or getattr(np, "trapz")
+    return f(y, x)
 import h5py
 
 GAMMA = 1.4
@@ -184,7 +190,7 @@ def _theta_and_utau(cc, V, xs, ytop=None, law='reichardt'):
     ue = ux[m].max()
     roe = ro[m][int(np.argmax(ux[m]))]
     core = (ro[m] / roe) * (ux[m] / ue) * (1.0 - ux[m] / ue)
-    theta = float(np.trapz(core, yy[m]))
+    theta = float(_trapz(core, yy[m]))
     nu1 = mu[first] / ro[first]
     utau = _solve_utau(ux[first], yy[first], nu1, law)
     return theta, utau, ue
@@ -202,7 +208,7 @@ def _dstar(cc, V, xs, ytop=None):
         ro = np.concatenate((ro[:1], ro))
     m = np.ones(len(yy), bool) if ytop is None else (yy <= ytop)
     ue = ux[m].max(); roe = ro[m][int(np.argmax(ux[m]))]
-    return float(np.trapz(1.0 - (ro[m] * ux[m]) / (roe * ue), yy[m]))
+    return float(_trapz(1.0 - (ro[m] * ux[m]) / (roe * ue), yy[m]))
 
 
 def make_q_cf_momentum(xs, ytop, window=0.08, order=2, xmin=0.1, xmax=0.95):

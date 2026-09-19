@@ -133,18 +133,34 @@ def plot_htc(run, step, man, D, wh, out):
                 frac = 100.0 * und.sum() / und.size
                 note = "上限 %.4g で飽和 (最大 %.4g)" % (hi, zmax)
                 if und.any():
-                    note += "\n灰色 = 係数が定義できない領域 (dT_ref ≤ %.3g K) %.0f %%" % (
-                        d.get("href_dT_min_K", 0.05), frac)
+                    # **灰色の理由を分けて書く**。大半が符号の不整合なのに「閾値」とだけ
+                    # 書くと誤解を招く (2026-09-19 偏心 1.5 mm で灰色 50 % の内訳は符号 45 %)。
+                    note += ("\n灰色 %.0f %% = 符号が逆 %.0f %% + dT 微小 %.0f %%"
+                             % (frac, 100 * d.get("href_opp_sign_area_frac", 0.0),
+                                100 * max(d.get("href_undef_area_frac", 0.0)
+                                          - d.get("href_opp_sign_area_frac", 0.0), 0.0)))
                 ax[r][i].text(0.985, 0.02, note, transform=ax[r][i].transAxes,
-                              fontsize=8.5, color="w", ha="right", va="bottom")
+                              fontsize=8.0, color="w", ha="right", va="bottom")
             ax[r][i].set_xlabel("周方向 θ [deg]  (0=上流, 180=下流)")
             ax[r][i].set_ylabel(vlab)
             ax[r][i].set_title("(%s) %s の %s" % ("abcdef"[r * len(grps) + i], names[g],
                                                   "熱伝達率" if r == 0 else "基準温度"),
                                fontsize=12, loc="left")
-    hm = sum(wh[g]["h_ref"] * wh[g]["area_m2"] for g in grps) / sum(wh[g]["area_m2"] for g in grps)
+    # **定義が成り立つ壁だけで平均する**。NaN の壁 (全面で符号が逆) を混ぜると nan になる。
+    okg = [g for g in grps if np.isfinite(wh[g].get("h_ref", np.nan))]
+    if okg:
+        hm = (sum(wh[g]["h_ref"] * wh[g]["area_m2"] for g in okg)
+              / sum(wh[g]["area_m2"] for g in okg))
+        sub = "面積平均 h_ref = %.1f W/m²K" % hm
+        if len(okg) < len(grps):
+            sub += " (%s のみ; 他は定義不成立)" % "/".join(names[g] for g in okg)
+    else:
+        sub = "**どの壁でも h_ref が定義できない** (キャビティが壁と熱平衡)"
+    opp = max(100 * wh[g].get("href_opp_sign_area_frac", 0.0) for g in grps)
+    if opp > 5.0:
+        sub += "  —  q'' と dT の符号が逆の面積 最大 %.0f %%" % opp
     fig.suptitle("case/49  キャビティ壁の熱伝達率 h_ref = q''/(T0_ref − T_w) と基準温度  —  %s"
-                 "  (面積平均 h_ref = %.1f W/m²K)" % (run, hm), fontsize=12.5)
+                 "  (%s)" % (run, sub), fontsize=12.0)
     fig.tight_layout()
     fig.savefig(out, dpi=125, bbox_inches="tight")
     print("wrote", out)
@@ -316,6 +332,17 @@ def main():
     plot_floor(a.run, step, man, D, wh, Path(a.run) / "cavity_floor.png")
 
 
+def _levels(Z, lo=0.0, pct=99.5):
+    """contourf の levels を作る。**縮退 (lo==hi) を防ぐ** — 入熱がほぼゼロの面
+    (偏心時の底面) では上限と下限が一致して "Contour levels must be increasing" で落ちる。"""
+    fin = np.isfinite(Z)
+    hi = float(np.nanpercentile(Z[fin], pct)) if fin.any() else lo + 1.0
+    if not (hi > lo):
+        zmax = float(np.nanmax(Z[fin])) if fin.any() else lo
+        hi = zmax if zmax > lo else lo + max(abs(lo), 1.0) * 1e-6
+    return hi, np.linspace(lo, hi, 21)
+
+
 def plot_floor(run, step, man, D, wh, out):
     """底面 (cav_floor) の熱流束・熱伝達率を θ × すきま横断位置に展開して描く。"""
     if "cav_floor" not in wh:
@@ -327,14 +354,14 @@ def plot_floor(run, step, man, D, wh, out):
     npan = 3 if hr is not None else 2
     fig, ax = plt.subplots(1, npan, figsize=(5.4 * npan, 4.6))
     U, V, Q = grid_mean(u, vv, d["_qin_node"] * 1e-3, d["_w_node"], nu=120, nv=30, ulim=(0, 180))
-    hi = np.nanpercentile(Q, 99.5)
-    cf = ax[0].contourf(U, V, np.clip(Q, 0, hi), levels=np.linspace(0, hi, 21), cmap="inferno")
+    hi, lv = _levels(Q)
+    cf = ax[0].contourf(U, V, np.clip(Q, 0, hi), levels=lv, cmap="inferno")
     fig.colorbar(cf, ax=ax[0], label="q'' [kW/m²]")
     ax[0].set_title("(a) 底面の熱流束", fontsize=12, loc="left")
     if hr is not None:
         U, V, H = grid_mean(u, vv, hr, d["_w_node"], nu=120, nv=30, ulim=(0, 180))
-        hi2 = np.nanpercentile(H, 99.5)
-        cf = ax[1].contourf(U, V, np.clip(H, 0, hi2), levels=np.linspace(0, hi2, 21), cmap="viridis")
+        hi2, lv2 = _levels(H)
+        cf = ax[1].contourf(U, V, np.clip(H, 0, hi2), levels=lv2, cmap="viridis")
         fig.colorbar(cf, ax=ax[1], label="h_ref [W/m²K]")
         ax[1].set_title("(b) 底面の熱伝達率 (基準温度基準)", fontsize=12, loc="left")
     for b in ax[:npan - 1]:

@@ -22,6 +22,12 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+
+def _trapz(y, x):
+    """台形積分。**numpy 2 で `np.trapz` が削除された**ので互換に包む (AWS の numpy で落ちた)。"""
+    f = getattr(np, "trapezoid", None) or getattr(np, "trapz")
+    return f(y, x)
+
 HERE = Path(__file__).resolve().parent
 CASE = HERE.parent
 sys.path.insert(0, str(CASE))
@@ -67,8 +73,8 @@ def bl_quantities(c, v, idx):
     d99 = np.interp(0.99 * ue, u[:i_e + 1], y[:i_e + 1])
     f1 = 1.0 - ro * u / (roe_ * ue)
     f2 = (ro * u) / (roe_ * ue) * (1.0 - u / ue)
-    ds = np.trapz(f1[:i_e + 1], y[:i_e + 1])
-    th = np.trapz(f2[:i_e + 1], y[:i_e + 1])
+    ds = _trapz(f1[:i_e + 1], y[:i_e + 1])
+    th = _trapz(f2[:i_e + 1], y[:i_e + 1])
     mu_e = v["vis_lam"][idx][i_e]
     tau_w = v["vis_lam"][idx][0] * (u[1] - u[0]) / (y[1] - y[0])
     return dict(delta99=float(d99), delta_star=float(ds), theta=float(th),

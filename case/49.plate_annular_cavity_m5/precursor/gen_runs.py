@@ -131,6 +131,11 @@ def main():
     ap.add_argument("--out-int", type=int, default=2000)
     ap.add_argument("--ramp", default="0.5,1,2")
     ap.add_argument("--ramp-steps", type=int, default=2000)
+    ap.add_argument("--lam-cfl", type=float, default=0.2, help="層流暖機の CFL")
+    ap.add_argument("--lam-steps", type=int, default=2000)
+    ap.add_argument("--sst-cfl", default="0.3,1.0",
+                    help="SST 1 次段の CFL 列 (カンマ区切り)。M9 など厳しい条件では刻む")
+    ap.add_argument("--sst-steps", type=int, default=2000)
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args()
 
@@ -148,9 +153,13 @@ def main():
     patch_ic(rd / "mesh.h5")
     if a.dry:
         return
-    stage(rd, cfg(2000, 0.2, a.relax, 0, 0, 10, 2000, lam=True), 2000, "lam")
-    stage(rd, cfg(2000, 0.3, a.relax, 0, 0, 10, 2000), 2000, "soft")
-    stage(rd, cfg(2000, 1.0, a.relax, 0, 0, 10, 2000), 2000, "mid")
+    # **SST 段の CFL は指定できるようにする**。M5 の 0.3 → 1.0 は M9 では `mid` で落ちた
+    # (2026-09-19)。マッハ数を上げるときは `--sst-cfl` を細かく刻む。
+    stage(rd, cfg(a.lam_steps, a.lam_cfl, a.relax, 0, 0, 10, a.lam_steps, lam=True),
+          a.lam_steps, "lam")
+    for i, cv in enumerate([float(x) for x in a.sst_cfl.split(",") if x]):
+        stage(rd, cfg(a.sst_steps, cv, a.relax, 0, 0, 10, a.sst_steps), a.sst_steps,
+              "sst%d_cfl%g" % (i, cv))
     for i, cv in enumerate([float(v) for v in a.ramp.split(",") if v]):
         stage(rd, cfg(a.ramp_steps, cv, a.relax, 1, 2, 4, a.ramp_steps), a.ramp_steps,
               "ramp%d_cfl%g" % (i, cv))
