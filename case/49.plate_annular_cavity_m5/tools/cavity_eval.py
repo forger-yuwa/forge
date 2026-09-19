@@ -62,6 +62,29 @@ class Field:
         return np.sum(self.vals[name][j] * w, axis=-1) / np.sum(w, axis=-1)
 
 
+def run_conditions(run):
+    """**run 自身に固定された作動条件**を読む。無ければ共有 case.json に落ちる (旧 run 用)。
+
+    共有 `case.json` を読み直すと、M や壁温を変えた時点で**過去 run の評価が変わる**
+    (2026-09-19 codex Major 10)。`gen_runs.py` は run 作成時に `conditions.json` を書く。
+    """
+    p = Path(run) / "conditions.json"
+    if p.exists():
+        return json.loads(p.read_text())
+    print("  WARNING: %s に conditions.json が無い -> 共有 case.json を使う "
+          "(共有入力を変えるとこの run の評価が変わる)" % run)
+    return load_conditions()
+
+
+def taw_of(D):
+    """**run が実際に使った EOS** の回復温度。CPG run で TP の Taw を使うと h_aw が過大になる
+    (2026-09-19 codex Major 10: 本ケースの温度差で約 9.8 %)。"""
+    gas = str(D.get("gas_used", D.get("gas", "CPG"))).upper()
+    if gas == "TP" and D.get("Taw_tp") is not None:
+        return float(D["Taw_tp"])
+    return float(D["Taw_cpg"])
+
+
 def read(res):
     with h5py.File(res, "r") as f:
         c = np.array(f["MESH/COORD"]).reshape(-1, 3)
@@ -319,7 +342,7 @@ def wall_heat(run, step, man, D, prof_n=40):
       h_loc = q'' / (T_gas - T_w)  … その深さのすきま中央ガス温度基準 (キャビティ内部で物理的)
     """
     PID = man["phys_id"]
-    Taw = D.get("Taw_tp", D["Taw_cpg"])
+    Taw = taw_of(D)
     Tw = D["wall_T"]
     res = {}
     for g in ("cav_outer", "cyl_side", "cav_floor", "cyl_top", "plate", "plate_in"):
@@ -435,7 +458,7 @@ def main():
     man = gc.load_manifest(run=a.run)      # run が自分の manifest を持っていればそれを使う
     if a.flux_depth is not None:
         man["eval"]["flux_depth_frac"] = a.flux_depth * 1e-3 / man["geometry"]["depth"]
-    D = load_conditions()
+    D = run_conditions(a.run)
     snaps = snapshots(a.run)
     if not snaps:
         raise SystemExit("res_*.h5 が無い: %s" % a.run)
@@ -486,7 +509,7 @@ def main():
     step = int(snaps[-1].stem.split("_")[1])
     q = eval_snapshot(c, v, man, D)
     Tw = D["wall_T"]
-    Taw = D.get("Taw_tp", D["Taw_cpg"])
+    Taw = taw_of(D)
     wh = wall_heat(a.run, step, man, D)
     # 総温 T0 (h0 の逆算; CPG/TP 両対応) — AGENTS.md「出力と後処理の原則」
     T0 = None
@@ -539,7 +562,10 @@ def main():
                   "『発散する』ではない。リップ帯を除いた Q は限定領域の別指標 **")
     if a.lip_scan and wh:
         lip_scan(wh, [float(x) * 1e-3 for x in a.lip_scan.split(",") if x])
-    print("  Tw = %.1f K,  Taw(CPG/TP) = %.1f / %.1f K" % (Tw, D["Taw_cpg"], D.get("Taw_tp", float("nan"))))
+    print("  Tw = %.1f K,  Taw(CPG/TP) = %.1f / %.1f K  -> **使用 %s の %.1f K** (gas=%s)"
+          % (Tw, D["Taw_cpg"], D.get("Taw_tp", float("nan")),
+             str(D.get("gas_used", D.get("gas", "CPG"))).upper(), taw_of(D),
+             D.get("gas_used", "(run に記録なし)")))
     for k in ("dT_mouth", "dT_mid", "dT_floor", "dT_up", "dT_dn"):
         print("  %-10s %9.2f K   (T = %8.2f K)" % (k, q[k], Tw + q[k]))
     for eps in man["eval"]["zpen_eps_K"]:

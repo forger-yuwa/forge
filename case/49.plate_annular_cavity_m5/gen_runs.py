@@ -338,6 +338,13 @@ def cmd_run(a):
     # **使った manifest を run に残す** (run を自己記述にする)。偏心スイープのように幾何が
     # run ごとに違うとき、後から共有 manifest.json で評価すると別の CV マスクになる。
     shutil.copy(HERE / os.environ.get("CASE49_MANIFEST", "manifest.json"), rd / "manifest.json")
+    # **解決済みの作動条件も run に固定する** (2026-09-19 codex Major 10: 評価側が共有 case.json を
+    # 読み直していたため、M や壁温を変えると**過去 run の評価が変わって**しまっていた)。
+    # 使った EOS も書く (回復温度 Taw を EOS に合わせて選ぶため)。
+    cond = dict(D)
+    cond["gas_used"] = gas
+    (rd / "conditions.json").write_text(json.dumps(cond, indent=2, ensure_ascii=False,
+                                                   default=float))
     (rd / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
     if a.ic_from:
         src = sorted((HERE / a.ic_from).glob("res_[0-9]*.h5"),
