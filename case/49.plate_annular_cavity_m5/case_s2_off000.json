@@ -38,7 +38,7 @@
     "x_plate": -80.0,
     "x_out": 120.0,
     "y_max": 70.0,
-    "z_top": 60.0,
+    "z_top": 35.0,
     "_r_patch": "平板 z=0 を r<r_patch (細) と r>r_patch (粗) に分ける半径。Ro 以下で無効",
     "r_patch": 55.0,
     "protrude": 0.5,
@@ -46,7 +46,8 @@
     "_plug_cavity": "true にするとキャビティ無しの「塞ぎ」形状を作る (流入 BL 移送の検証用, plan §4.3)",
     "plug_cavity": false,
     "_half_model": "false で全周 (360°) モデル。対称面を使わない (URANS の対称性検証用)",
-    "half_model": true
+    "half_model": true,
+    "_z_top": "領域高さ [mm]。入口に境界層分布を与えるので前縁衝撃は領域内に無く、M9 のマッハ角 6.4 度ならキャビティ擾乱は下流 120 mm で 13 mm しか上がらない。60 mm だと開口上方の外部セルが伸びて AR が 2264 になり SOFT-PASS だった (2026-09-19)。"
   },
   "mesh": {
     "_stage": "A = 疎通/レシピ/URANS 用の粗メッシュ, B = 生産",
