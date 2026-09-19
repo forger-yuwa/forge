@@ -62,12 +62,26 @@ def main():
         fails.append("NaN/発散")
 
     # --- 2. 残差の収束 (判定区間) ---
+    # **継続 run (`--main-only`) は「低下桁数」で判定しない**。収束場から始まるので 3 桁落ちることは
+    # 原理的に無く、正しい問いは「床に留まっているか (上昇していないか)」である
+    # (2026-09-19: これを見落として自動延長 run が必ず不合格になる設計ミスをした)。
+    cont = (rd / "CONTINUED_FROM").exists()
     seg = ["--segment"] if (rd / "stage_manifest.json").exists() else []
     rc, out = run([py, str(STOOLS / "check_convergence.py"), str(rd)] + seg)
     head = next((l for l in out.splitlines() if l.startswith("===")), "(出力なし)")
-    print("[2] 残差の収束     : %s" % ("OK" if rc == 0 else "**FAIL**"))
-    print("      %s" % head.strip())
-    if rc != 0:
+    if cont:
+        rising = [l for l in out.splitlines() if "RISING" in l or "DIVERGED" in l]
+        ok2 = (not rising) and ("NaN" not in out or "NaN/Inf present" not in out)
+        print("[2] 残差の収束     : %s  (継続 run: 低下桁数でなく**上昇の有無**で判定)"
+              % ("OK" if ok2 else "**FAIL**"))
+        print("      %s" % head.strip())
+        if rising:
+            print("      上昇している列: %s" % " / ".join(l.split(":")[0].strip() for l in rising))
+    else:
+        ok2 = (rc == 0)
+        print("[2] 残差の収束     : %s" % ("OK" if ok2 else "**FAIL**"))
+        print("      %s" % head.strip())
+    if not ok2:
         fails.append("残差")
         notes.append(out)
 
