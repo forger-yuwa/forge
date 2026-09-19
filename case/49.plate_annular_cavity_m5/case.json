@@ -44,7 +44,9 @@
     "protrude": 0.5,
     "fuzzy": 0.001,
     "_plug_cavity": "true にするとキャビティ無しの「塞ぎ」形状を作る (流入 BL 移送の検証用, plan §4.3)",
-    "plug_cavity": false
+    "plug_cavity": false,
+    "_half_model": "false で全周 (360°) モデル。対称面を使わない (URANS の対称性検証用)",
+    "half_model": true
   },
   "mesh": {
     "_stage": "A = 疎通/レシピ/URANS 用の粗メッシュ, B = 生産",

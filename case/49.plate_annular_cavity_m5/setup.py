@@ -153,27 +153,31 @@ def geometry_manifest(G):
     if abs(off) >= Ro - Ri:
         raise SystemExit("|x_off| が すきま Ro-Ri 以上 (内側円柱が外筒に接触)")
     Lx = m["x_out"] - m["x_in"]
+    half = bool(m.get("half_model", True))
+    fy = 1.0 if half else 2.0          # y 方向の広がり倍率 (全周は -y_max..+y_max)
     has_runup = m["x_plate"] > m["x_in"] + 1e-12
     has_patch = m["r_patch"] > Ro
     plug = bool(m.get("plug_cavity", False))
-    ring = math.pi * (Ro ** 2 - Ri ** 2) / 2.0                 # 半環 (偏心でも不変)
-    a = {"inlet": m["y_max"] * m["z_top"], "outlet": m["y_max"] * m["z_top"],
-         "top": Lx * m["y_max"], "side": Lx * m["z_top"]}
-    a["sym"] = Lx * m["z_top"] + (0.0 if plug else 2.0 * (Ro - Ri) * d)
+    ring = math.pi * (Ro ** 2 - Ri ** 2) / 2.0 * fy            # 環 (偏心でも不変)
+    a = {"inlet": fy * m["y_max"] * m["z_top"], "outlet": fy * m["y_max"] * m["z_top"],
+         "top": Lx * m["y_max"] * fy, "side": Lx * m["z_top"] * fy}
+    if half:
+        a["sym"] = Lx * m["z_top"] + (0.0 if plug else 2.0 * (Ro - Ri) * d)
     if not plug:
-        a.update(cav_outer=math.pi * Ro * d, cyl_side=math.pi * Ri * d,
-                 cav_floor=ring, cyl_top=math.pi * Ri ** 2 / 2.0)
+        a.update(cav_outer=math.pi * Ro * d * fy, cyl_side=math.pi * Ri * d * fy,
+                 cav_floor=ring, cyl_top=math.pi * Ri ** 2 / 2.0 * fy)
     rp = m["r_patch"] if has_patch else Ro
-    a_plate_all = ((m["x_out"] - m["x_plate"]) if has_runup else Lx) * m["y_max"]
+    a_plate_all = ((m["x_out"] - m["x_plate"]) if has_runup else Lx) * m["y_max"] * fy
     if has_runup:
-        a["runup"] = (m["x_plate"] - m["x_in"]) * m["y_max"]
+        a["runup"] = (m["x_plate"] - m["x_in"]) * m["y_max"] * fy
     if has_patch:
-        a["plate_in"] = math.pi * (rp ** 2 - (Ro ** 2 if not plug else 0.0)) / 2.0
-        a["plate"] = a_plate_all - math.pi * rp ** 2 / 2.0
+        a["plate_in"] = math.pi * (rp ** 2 - (Ro ** 2 if not plug else 0.0)) / 2.0 * fy
+        a["plate"] = a_plate_all - math.pi * rp ** 2 / 2.0 * fy
     else:
-        a["plate"] = a_plate_all - (ring if not plug else 0.0) - (math.pi * Ri ** 2 / 2.0 if not plug else 0.0)
+        a["plate"] = a_plate_all - (ring if not plug else 0.0) \
+            - (math.pi * Ri ** 2 / 2.0 * fy if not plug else 0.0)
     m.update(gap_nom=Ro - Ri, gap_min=Ro - Ri - abs(off), gap_max=Ro - Ri + abs(off),
-             has_runup=has_runup, has_patch=has_patch, plug_cavity=plug,
+             has_runup=has_runup, has_patch=has_patch, plug_cavity=plug, half_model=half,
              group_area_m2=a, total_area_m2=sum(a.values()),
              group_area_mm2={k: v * 1e6 for k, v in a.items()})
     return m

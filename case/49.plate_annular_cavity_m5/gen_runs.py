@@ -79,6 +79,37 @@ def bcond(stage, inlet_profile=False):
     return "\n".join(L) + "\n"
 
 
+def urans_cfg(nsteps, dt, *, cfl_pseudo=12.0, nsub=10, outint=200, gas=None, mesh_file="mesh.h5"):
+    """dual-time の非定常設定 (plan §4.9(b))。
+    **`deltaT.control: 0` (固定物理 dt) が必須** — 定常の control:1 を継承すると
+    main.cpp が例外終了する。`dualTime: 1` と `blockDPLUR: 1` も必須。
+    **`implicitRelax` は書かない** (物理時間項が安定性を担うので緩和は遅いモードを残すだけ)。"""
+    base = solver_cfg(nsteps, cfl_pseudo, outint=outint, gas=gas, mesh_file=mesh_file)
+    base = base.replace("  unsteady: 0\n  dualTime: 0", "  unsteady: 1\n  dualTime: 1")
+    base = base.replace("control: 1, dt: 1e-9", "control: 0, dt: %.6g" % dt)
+    base = base.replace(", implicitRelax: 0.7", "")
+    base = base.replace("  nStepInner: 4", "  nStepInner: 4\n  nSubIterDualTime: %d" % nsub)
+    return base
+
+
+def perturb_asym(h5, amp=0.01):
+    """左右非対称の微小擾乱を開口近傍の k に与える (plan §4.9(a))。
+    全周 URANS で「半割が禁じる反対称モード」が成長するか減衰するかを見るため、
+    完全対称 IC のまま無擾乱で回さない。amp は相対振幅 (既定 1 %)。"""
+    with h5py.File(h5, "r+") as f:
+        c = np.array(f["MESH/COORD"]).reshape(-1, 3)
+        ro = np.array(f["/VALUE/ro"])
+        rk = np.array(f["/VALUE/roK"]) if "/VALUE/roK" in f else None
+        if rk is None:
+            print("  roK が無いので擾乱なし"); return
+        r = np.hypot(c[:, 0], c[:, 1])
+        near = (c[:, 2] < 0.002) & (c[:, 2] > -0.010) & (r < G["Ro"] * 1.2)
+        th = np.arctan2(c[:, 1], -c[:, 0])
+        rk[near] *= (1.0 + amp * np.sin(th[near]))      # sinθ = 左右反対称
+        f["/VALUE/roK"][:] = rk.astype(np.float32)
+        print("  左右非対称擾乱: %d ノードの k を ±%.1f %% (sinθ)" % (int(near.sum()), 100 * amp))
+
+
 def solver_cfg(nsteps, cfl, *, conv=1, lim=2, ninner=4, relax=0.7, outint=2000,
                model="sst", mesh_file="mesh.h5", gas=None):
     gas = (gas or D["gas"]).upper()
@@ -281,7 +312,27 @@ def cmd_run(a):
     print("  gas =", gas)
     (rd / "GEN_ARGS").write_text(" ".join(sys.argv[1:]) + "\n")
     (rd / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
-    patch_ic(rd / "mesh.h5", a.inlet_csv, gas=gas)
+    if a.ic_from:
+        src = sorted((HERE / a.ic_from).glob("res_[0-9]*.h5"),
+                     key=lambda f: int(f.stem.split("_")[1]))[-1]
+        index_copy(src, rd / "mesh.h5")
+        (rd / "CONTINUED_FROM").write_text(str(src) + "\n")
+        print("  IC: %s から index コピー" % src.name)
+    else:
+        patch_ic(rd / "mesh.h5", a.inlet_csv, gas=gas)
+    if a.urans:
+        if a.perturb > 0:
+            perturb_asym(rd / "mesh.h5", a.perturb)
+        cfgu = urans_cfg(a.main_steps, a.dt, cfl_pseudo=a.cfl_pseudo, nsub=a.nsub,
+                         outint=a.out_int, gas=gas)
+        (rd / "solverConfig.yaml").write_text(cfgu)
+        (rd / "bcondConfig.yaml").write_text(bcond("isothermal", inlet_profile=True))
+        if a.dry:
+            return
+        rc = run_forge(rd)
+        print("urans rc", rc)
+        print((rd / "CONVERGENCE_VERDICT.txt").read_text()[-600:])
+        return
     if a.dry:
         (rd / "solverConfig.yaml").write_text(solver_cfg(a.main_steps, a.cfl, gas=gas))
         (rd / "bcondConfig.yaml").write_text(bcond("isothermal", inlet_profile=True))
@@ -325,6 +376,12 @@ def main():
     r.add_argument("--out-int", type=int, default=2000)
     r.add_argument("--ramp", default="0.5,1,2")
     r.add_argument("--gas", default=None, choices=["CPG", "TP"], help="既定は case.json の gas")
+    r.add_argument("--urans", action="store_true", help="定常場から dual-time の非定常へ (plan §4.9)")
+    r.add_argument("--dt", type=float, default=3.0e-7, help="URANS の物理 dt [s]")
+    r.add_argument("--nsub", type=int, default=10)
+    r.add_argument("--cfl-pseudo", type=float, default=12.0)
+    r.add_argument("--ic-from", default=None, help="定常場の run (mesh.h5 を index コピーで引き継ぐ)")
+    r.add_argument("--perturb", type=float, default=0.01, help="URANS の左右非対称擾乱 (相対)")
     r.add_argument("--dry", action="store_true")
     a = ap.parse_args()
     (cmd_convert if a.cmd == "convert" else cmd_run)(a)

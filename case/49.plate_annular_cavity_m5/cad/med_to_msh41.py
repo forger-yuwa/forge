@@ -18,7 +18,8 @@ import meshio
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-MAN = json.loads((HERE.parent / "manifest.json").read_text())
+import os
+MAN = json.loads((HERE.parent / os.environ.get("CASE49_MANIFEST", "manifest.json")).read_text())
 PHYS = MAN["phys_id"]                      # 面グループ -> physID
 FLUID_ID = MAN["fluid_id"]
 

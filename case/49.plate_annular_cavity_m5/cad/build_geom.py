@@ -40,9 +40,11 @@ MAN = json.loads((Path(__file__).resolve().parents[1] / "manifest.json").read_te
 _G = MAN["geometry"]
 _LEN = ("Ro", "Ri", "x_off", "depth", "x_in", "x_plate", "x_out", "y_max", "z_top",
         "r_patch", "protrude")
-P = {k: (_G[k] * 1e3 if k in _LEN else _G[k]) for k in _LEN + ("fuzzy", "plug_cavity")}
+P = {k: (_G[k] * 1e3 if k in _LEN else _G[k])
+     for k in _LEN + ("fuzzy", "plug_cavity", "half_model")}
 EXP_AREA = _G["group_area_mm2"]          # グループ別の期待面積 [mm^2] (正本は setup.py)
-OUT = "cavity_plug_half.step" if P["plug_cavity"] else "cavity_fluid_half.step"
+_sfx = "half" if P.get("half_model", True) else "full"
+OUT = ("cavity_plug_%s.step" if P["plug_cavity"] else "cavity_fluid_%s.step") % _sfx
 
 if os.path.exists("geom_config.json"):   # 実験用の一時上書き (常用しない)
     with open("geom_config.json") as f:
@@ -87,6 +89,8 @@ def assemble(P):
         parts.append(Part.makeCylinder(P['r_patch'], zt, Vector(0, 0, 0.0), Vector(0, 0, 1)))
 
     f = base.fuse(parts, P['fuzzy'])
+    if not P.get('half_model', True):
+        return f                      # 全周モデル (対称面を使わない。URANS の対称性検証用)
     big = 4.0 * max(abs(P['x_in']), P['x_out'], P['y_max'], zt)
     return f.cut(Part.makeBox(big, big, big, Vector(-big / 2, -big, -big / 2)))  # y<0 を削る
 
@@ -113,9 +117,9 @@ def classify(fc, P, D, tol=1.0e-4):
             return "outlet"
         return "UNKNOWN_planeX_%.4f" % c.x
     if abs(abs(n.y) - 1.0) < 1e-6:                     # y 一定面
-        if abs(c.y - P['y_max']) < tol:
-            return "side"
-        if abs(c.y) < tol:
+        if abs(abs(c.y) - P['y_max']) < tol:
+            return "side"              # 全周では ±y_max の 2 面とも side
+        if abs(c.y) < tol and P.get('half_model', True):
             return "sym"
         return "UNKNOWN_planeY_%.4f" % c.y
     if abs(abs(n.z) - 1.0) < 1e-6:                     # z 一定面
@@ -155,7 +159,8 @@ def main():
         aerr = abs(fluid.Area - D['total_area']) / D['total_area']
         ok = (fluid.isValid() and len(fluid.Solids) == 1 and closed
               and abs(b.XMin - P['x_in']) < 1e-3 and abs(b.XMax - P['x_out']) < 1e-3
-              and abs(b.YMin) < 1e-3 and abs(b.YMax - P['y_max']) < 1e-3
+              and abs(b.YMin - (0.0 if P.get('half_model', True) else -P['y_max'])) < 1e-3
+              and abs(b.YMax - P['y_max']) < 1e-3
               and abs(b.ZMin + (0.0 if D['plug'] else P['depth'])) < 1e-3 and abs(b.ZMax - P['z_top']) < 1e-3
               and aerr < 1e-6)
         print("attempt %d: valid=%s solids=%d closed=%s faces=%d area=%.4f (exp %.4f, err %.2e) "

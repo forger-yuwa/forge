@@ -26,12 +26,13 @@ from salome.geom import geomBuilder  # noqa: E402
 from salome.smesh import smeshBuilder  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MAN = json.load(open(os.path.join(HERE, "..", "manifest.json")))
+MAN = json.load(open(os.path.join(HERE, "..", os.environ.get("CASE49_MANIFEST", "manifest.json"))))
 G, M = MAN["geometry"], MAN["mesh"]
 
 argv = sys.argv[1:]
+_sfx = "half" if G.get("half_model", True) else "full"
 STEP = argv[0] if len(argv) > 0 and argv[0] else os.path.join(
-    HERE, "cavity_plug_half.step" if G["plug_cavity"] else "cavity_fluid_half.step")
+    HERE, ("cavity_plug_%s.step" if G["plug_cavity"] else "cavity_fluid_%s.step") % _sfx)
 OUT = argv[1] if len(argv) > 1 and argv[1] else os.path.join(
     HERE, "cavity_plug.med" if G["plug_cavity"] else "cavity_salome.med")
 
@@ -86,9 +87,9 @@ def classify(f):
             return "outlet"
         return "UNKNOWN_planeX_%.6f" % x
     if flat == dy_:
-        if abs(y - G["y_max"] * S) < TOL:
-            return "side"
-        if abs(y) < TOL:
+        if abs(abs(y) - G["y_max"] * S) < TOL:
+            return "side"                      # 全周では ±y_max の 2 面とも side
+        if abs(y) < TOL and G.get("half_model", True):
             return "sym"
         return "UNKNOWN_planeY_%.6f" % y
     if flat == dz_:

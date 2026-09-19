@@ -1,2 +1,19 @@
 __pycache__/
 *.pyc
+# メッシュ本体・計算成果物は git に入れない (AGENTS.md)
+*.med
+*.msh
+*.step
+mesh/
+run_*/
+precursor/run_*/
+precursor/mesh/*.h5
+precursor/mesh/*.msh
+precursor/mesh/*.geo
+manifest*.json
+derived.json
+geom_used.json
+_*.log
+_*.out
+_*.txt
+_*.sh
