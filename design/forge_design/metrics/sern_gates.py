@@ -81,13 +81,23 @@ def residual_health(run_dir, min_drop: float = 3.0, tail: float = 0.2) -> dict:
         out["reasons"] = ["empty residual_history.csv"]; return out
     laststep, report, ok, any_nan, any_stalled, any_converging = res
     out["last_step"] = laststep; out["nan"] = bool(any_nan); out["converged"] = bool(ok)
+    # **trend は msg から直接読む** (2026-09-19, codex plan レビュー M1)。
+    # 旧実装は `<-- RISING` 等の**注記文字列**で分類していたが、`check_convergence.py:107` は
+    # 3 桁低下した列を col_ok = True として注記を付けない。そのため
+    # **3 桁落ちてなお下降中 (falling) の列がどのリストにも入らず**、
+    # 「全列プラトー」を要求したはずのゲートを素通りしていた。
+    # msg は必ず `drop=X.Xdec <trend>` を含むので、そこから分類する。
+    import re as _re
     for c, (msg, col_ok) in report.items():
-        out["columns"][c] = {"msg": msg, "ok": bool(col_ok)}
-        if "RISING" in msg:
+        m = _re.search(r"drop=\s*([-\d.]+)dec\s+(rising|falling|flat)", msg)
+        trend = m.group(2) if m else ""
+        drop = float(m.group(1)) if m else float("nan")
+        out["columns"][c] = {"msg": msg, "ok": bool(col_ok), "trend": trend, "drop": drop}
+        if trend == "rising":
             out["rising"].append(c)
-        elif "STALLED" in msg:
+        elif trend == "flat":
             out["stalled"].append(c)
-        elif "still converging" in msg:
+        elif trend == "falling":
             out["converging"].append(c)
     if ok:
         out["verdict"] = "PASS (converged)"
@@ -196,7 +206,7 @@ def residual_scale_gate(run_dir, ratio: float = 1.0e6) -> dict:
 
 
 def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: str | None = None,
-                   p_min: float | None = None, require_residual_plateau: bool = True) -> dict:
+                   p_min: float | None = None, require_residual_plateau: bool = False) -> dict:
     """全ゲートを評価して verdict / fail_class を返す。fail_class は数値失敗の種別:
     DIVERGED (rc≠0 / 発散ダンプ / 非有限・非正の場 / 残差 NaN), RESIDUAL_RISING, NOT_CONVERGED (require 時のみ),
     NO_FORCES (壁出力が無い), UNSTEADY (目的量・力係数が頭打ちしていない)。物理的 INFEASIBLE はここでは出さない。"""
@@ -218,9 +228,11 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: 
     elif require_residual_pass and not resid["converged"]:
         reasons.append(f"residual {resid['verdict']} (require_residual_pass)"); fail = fail or "NOT_CONVERGED"
     elif require_residual_plateau and resid.get("converging"):
-        # **プラトー要求** (2026-09-19 ユーザ決定): 上昇は当然不可だが、「まだ低下中」も過渡が
-        # 終わっていないので不可。全列がプラトー (頭打ち) に達していることを収束の条件とする。
-        # この case は残差が 1–2.5 桁でプラトーする性質なので、3 桁低下 (require_residual_pass) は課さない。
+        # **プラトー要求は既定 OFF に降格** (2026-09-19, codex plan レビュー M1)。
+        # プラトーは収束の**十分条件ではない**: 残差の大きさを問わないので、float32 の更新消失や
+        # クランプで動かなくなった状態と、方程式を満たして止まった状態を区別できない。
+        # 受理には方程式別の無次元残差上限・保存収支・場/目的量の定常性が要る (残作業 R-a)。
+        # 停滞の**診断情報**としては有用なので opt-in で残す。
         reasons.append(f"residual まだ低下中 (プラトー未達) columns {resid['converging']}")
         fail = fail or "NOT_PLATEAU"
     if not floors["ok"]:
@@ -234,6 +246,10 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: 
     return {"verdict": "PASS" if fail is None else "FAIL", "fail_class": fail, "reasons": reasons, "rc": rc,
             "objective": stead["objective"], "field": field, "residual": resid, "steadiness": stead,
             "floors": floors, "residual_scale": rscale,
+            # プラトー到達は**診断**として常に載せる (受理条件ではない)
+            "plateau": {"all_flat": not resid.get("converging") and not resid.get("rising"),
+                        "falling": resid.get("converging", []), "rising": resid.get("rising", []),
+                        "flat": resid.get("stalled", [])},
             "require_residual_pass": bool(require_residual_pass),
             "require_residual_plateau": bool(require_residual_plateau)}
 
