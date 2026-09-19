@@ -38,7 +38,8 @@ ENV = dict(os.environ,
 sys.path.insert(0, str(HERE))
 from setup import load as load_conditions  # noqa: E402
 
-MAN = json.loads((HERE / "manifest.json").read_text())
+# manifest は環境変数で差し替えられる (塞ぎ形状 manifest_plug.json などの併存用)
+MAN = json.loads((HERE / os.environ.get("CASE49_MANIFEST", "manifest.json")).read_text())
 PID, G = MAN["phys_id"], MAN["geometry"]
 D = load_conditions()
 

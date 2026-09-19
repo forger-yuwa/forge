@@ -517,22 +517,25 @@ case.json  (= conditions.json + geometry を束ねた最上位入力)
 
 ### 5.1 残作業 (優先順)
 
-| # | 項目 | 内容 |
+**進捗 (2026-09-19)**: ✅ = 完了。CPG で Stage A/B/C/D の 4 格子まで通し、熱流束・熱伝達率・
+すきま内部の流れまで出せる状態。
+
+| # | 項目 | 状態 / 内容 |
 | --- | --- | --- |
-| 1 | manifest 統合 | `case.json` → `setup.py --resolve` → `manifest.json`。CAD/メッシュ/IC/BC/評価が全部これを読む (§4.11, codex M5) |
-| 2 | `tools/geom_common.py` | 偏心対応の CV マスク・すきま中央線・周方向平均の重み・基準尺度 (§4.8) |
-| 3 | 入口 CSV 直書き | `tools/extract_profile.py` が `z ro Ux Uy Uz Ps k omega` を書く (`gen --table` は `Ps` を落とす: codex M3)。`applied:` ログと入口断面の照合まで |
-| 4 | 評価ツール先行整備 | `tools/cavity_eval.py` (物理 $q_w$ と離散収支を**別実装**・細分で差が減ることを確認) + `tools/check_mesh_extra.py` (§4.4 の表)。解析解のある環状すきま伝導で検算 (codex M6, M9) |
-| 5 | 塞ぎ 3D の BL 検証 | キャビティ無し 3D で、前駆の $x_0+50$ mm と分布・$\tau_w$ を比較 + 細分差 (codex M4)。ここで 19 点の採否を決める |
-| 6 | Salome メッシュ | `mesh_salome.py` (面分類・グループ面積照合、VL は $g_{min}$ 駆動)、塞ぎ → Stage A → Stage B |
-| 7 | 段階起動 | `gen_runs.py` (最終壁タグで変換 → S0 は bcond 差し替え, `pRef`, キャビティ静止 IC, 移行判定) |
-| 8 | TP 化 | 乾燥空気 1 擬似種 DB 生成、前駆・入口 CSV も TP で、CPG→TP は $P,T,U$ 保持で再構成 (§4.10) |
-| 9 | **全周 URANS** | Stage A 360° + 左右非対称擾乱。`unsteady:1`+`dualTime:1`+`control:0`。dt 半減 / nSub 倍増 / 細分の 3 本で 2 % 以内、観測窓は統計が安定するまで倍増 (codex M1, M2) |
-| 10 | 予算確定 | Stage A 実測の GPU/host メモリと s/step から Stage B 節点上限を確定 |
-| 11 | 感度 run 群 | 格子 (両方向)・領域・流入 BL $\delta$・`cyl_top` 断熱・`implicitRelax` 無し |
-| 12 | BL 解像が不足なら | 箱とすきまを別ソリッドに分割し ViscousLayers を 2 系統 (SMESH sub-mesh) にする退避策 (§4.4) |
-| 13 | 3D 最近傍 restart | 必要になったら case 側に 3 座標 KD-tree の restart ツール。**共有 `interp_field.py` は触らない** |
-| 14 | 偏心・すきま変更 run | ユーザ可変前提 (`x_off`>0, すきま変更, M 変更) の本計算 — 既定形状が片付いてから |
+| 1 | manifest 統合 | ✅ `case.json` → `setup.py --resolve` → `manifest.json`。CAD/メッシュ/IC/BC/評価が全部これを読む。`CASE49_MANIFEST` で差し替え可 (塞ぎ形状用) |
+| 2 | `tools/geom_common.py` | ✅ 偏心対応 CV マスク (同心式は 12 % 取りこぼすことを MC で再現)・すきま中央線・周方向重み。**方位は上流基準 θ=0** (2026-09-19 ユーザ指定) |
+| 3 | 入口 CSV 直書き | ✅ `tools/extract_profile.py`。起動ログで `applied: ro Ux Uy Uz Ps k omega` の 7 列反映を確認 |
+| 4 | 評価ツール | ✅ `tools/cavity_eval.py` (温度・侵入深さ・開口流束・**ソルバ出力 q_w**・**h_ref**)、`tools/plot_cavity_fields.py` (流れ・熱流束・熱伝達率・底面)、`tools/compare_runs.py` (格子比較)。⏳ `check_mesh_extra.py` (体積/sliver/dual) は未着手 |
+| 5 | 塞ぎ 3D の BL 検証 | ⏳ 形状・メッシュ (410k 節点, PASS) と変換まで完了。**run と前駆比較が未実施** |
+| 6 | Salome メッシュ | ✅ Stage A 69k / B 330k / C 589k / D 741k。品質は全て PASS。VL/サイズの整合ガード実装済 |
+| 7 | 段階起動 | ✅ S0–S6 が 4 格子とも NaN 0 で完走。6.2 / 21 / 27 / 64 ms/step |
+| 8 | TP 化 | ✅ 乾燥空気 1 擬似種 DB 生成・`--gas TP`・IC の datum 組み直し・R_tp での自由流。⏳ **TP の本 run 未実施** |
+| 9 | **全周 URANS** | ⏳ 未着手 (plan §4.9 の必須ゲート) |
+| 10 | 予算確定 | ✅ 実測: 589k 節点で GPU 2.27 GB / 12 GB。**100 万節点級まではローカルで回せる** |
+| 11 | 感度 run 群 | ⏳ 格子は A–D の 4 点で実施中。領域・流入 BL δ・`cyl_top` 断熱・`implicitRelax` 無しは未着手 |
+| 12 | BL 解像が不足なら | (退避策。まだ不要) |
+| 13 | 3D 最近傍 restart | (必要になっていない。各 Stage は S0 から立てている) |
+| 14 | **偏心・すきま変更 run** | ⏳ `sweep_offset.py` を用意 (CAD→メッシュ→計算→評価を偏心量ごとに通す。VL 層数は最小すきまから自動)。格子収束の確認後に投入 |
 
 ## 6. 検証
 

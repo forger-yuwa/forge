@@ -19,7 +19,9 @@ import numpy as np
 
 
 def load_manifest(path=None):
-    p = Path(path) if path else Path(__file__).resolve().parent.parent / "manifest.json"
+    import os
+    p = (Path(path) if path else
+         Path(__file__).resolve().parent.parent / os.environ.get("CASE49_MANIFEST", "manifest.json"))
     if not p.exists():
         raise SystemExit("manifest が無い: %s  (`python3 setup.py --resolve` を先に実行)" % p)
     return json.loads(p.read_text())
