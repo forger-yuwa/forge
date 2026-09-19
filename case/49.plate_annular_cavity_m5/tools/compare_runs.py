@@ -20,7 +20,8 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 CASE = HERE.parent
 
-KEYS = [("Q_cav", "キャビティ3壁 Q [W]"), ("qpp_cav", "面平均 q'' [W/m2]"),
+KEYS = [("Q_cav", "3壁 Q [W]"), ("Q_nolip", "Q リップ除 [W]"),
+        ("qpp_cav", "面平均 q'' [W/m2]"), ("qpp_max", "q''max [W/m2]"),
         ("h_ref", "h_ref [W/m2K]"), ("T_mouth", "開口ガス T [K]"),
         ("T_mid", "中央 T [K]"), ("T_floor", "底 T [K]"), ("zpen25", "侵入(25K) [mm]"),
         ("mdot_in", "開口流入 [kg/s]")]
@@ -45,7 +46,9 @@ def load(run, force=False):
     Q = sum(w[g]["Q_W"] for g in cav)
     A = sum(w[g]["area_m2"] for g in cav)
     hr = sum(w[g].get("h_ref", float("nan")) * w[g]["area_m2"] for g in cav) / max(A, 1e-30)
-    return {"Q_cav": Q, "qpp_cav": Q / max(A, 1e-30), "h_ref": hr,
+    Qn = sum(w[g].get("Q_nolip_W", float("nan")) for g in cav)
+    return {"Q_cav": Q, "Q_nolip": Qn, "qpp_cav": Q / max(A, 1e-30),
+            "qpp_max": max(w[g]["qpp_max"] for g in cav), "h_ref": hr,
             "T_mouth": 500.0 + f["dT_mouth"], "T_mid": 500.0 + f["dT_mid"],
             "T_floor": 500.0 + f["dT_floor"], "zpen25": f["zpen_25"] * 1e3,
             "mdot_in": f["mdot_in"], "nodes": nodes_of(run)}
@@ -130,9 +133,9 @@ def main():
             font_manager.fontManager.addfont(str(fp))
             matplotlib.rcParams["font.family"] = font_manager.FontProperties(fname=str(fp)).get_name()
         h = np.array([d["nodes"] ** (-1 / 3) for _, d in rows])
-        fig, ax = plt.subplots(2, 4, figsize=(15.5, 7))
+        fig, ax = plt.subplots(2, 5, figsize=(19.0, 7))
         for i, (k, lab) in enumerate(KEYS):
-            b = ax[i // 4][i % 4]
+            b = ax[i // 5][i % 5]
             b.plot(h, [d[k] for _, d in rows], "o-", lw=2, color="#1d4ed8")
             b.set_xlabel("$N^{-1/3}$ (格子の細かさ →)")
             b.set_title(lab, fontsize=11)

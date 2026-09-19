@@ -162,11 +162,30 @@ def eval_snapshot(c, v, man, D):
     # 開口近傍のノードだけで Delaunay を張る (全域だと重い)。
     # 開口面の評価深さ: 開口直下すぎると壁ピン (u=0) のノードを拾って流入/流出を潰す。
     # 実測 (2026-09-19): z=-0.2 mm で質量収支 +33 %、z=-0.5〜-1 mm で ±5 % に収まる。
+    # **補間は 2D (x,y) で張る**。評価面は 1 枚の平面なので 3 次元は要らないうえ、
+    # 厚さ 3 mm の薄いスラブの 3D Delaunay は退化点群になって病的に遅い
+    # (2026-09-19 実測: 2.74M 節点の run で 40 分以上終わらなかった)。
+    # 構造化 (ヘキサ) では評価面付近に**節点層**があるので、その 1 層だけを取れば
+    # z 方向の混ぜ込みも無くなる。非構造では層が無いので薄いスラブで代用する。
     zf = E.get("flux_depth_frac", 0.02) * G["depth"]
-    slab = (np.abs(c[:, 2] + zf) < 3.0e-3) & (np.hypot(c[:, 0], c[:, 1]) < G["Ro"] + 3.0e-3)
+    inr = np.hypot(c[:, 0], c[:, 1]) < G["Ro"] + 3.0e-3
     lin = {}
-    if slab.sum() > 200:
-        tri_pts = c[slab]
+    zc = c[inr & (np.abs(c[:, 2] + zf) < 3.0e-3), 2]
+    slab = None
+    if zc.size > 200:
+        zu = np.unique(np.round(zc, 9))
+        zpick = zu[np.argmin(np.abs(zu + zf))]
+        layer = inr & (np.abs(c[:, 2] - zpick) < 1e-9)
+        if layer.sum() > 200:                     # 節点層がある (構造化)
+            slab = layer
+            print("  開口評価: z=%.4f mm の節点層 %d 点で 2D 補間"
+                  % (zpick * 1e3, int(layer.sum())), flush=True)
+        else:                                     # 層が無い (非構造) -> 薄いスラブ
+            slab = inr & (np.abs(c[:, 2] + zf) < 1.0e-3)
+            print("  開口評価: 厚さ ±1 mm のスラブ %d 点で 2D 補間 (節点層なし)"
+                  % int(slab.sum()), flush=True)
+    if slab is not None and slab.sum() > 200:
+        tri_pts = c[slab][:, :2]                  # (x, y) のみ
         for nm in ("ro", "Uz", "h0"):
             if nm in v:
                 lin[nm] = LinearNDInterpolator(tri_pts, v[nm][slab])
@@ -180,7 +199,7 @@ def eval_snapshot(c, v, man, D):
     pts = np.stack([RR * np.cos(TH), RR * np.sin(TH), np.full_like(RR, -zf)], axis=-1).reshape(-1, 3)
     def samp(nm):
         if nm in lin:
-            val = lin[nm](pts)
+            val = lin[nm](pts[:, :2])             # 2D 補間 (x, y)
             bad = ~np.isfinite(val)
             if bad.any():
                 val[bad] = fa.at(pts[bad], nm)
@@ -295,7 +314,17 @@ def wall_heat(run, step, man, D, prof_n=40):
         qpp = Q / max(A, 1e-30)                       # 面積平均 [W/m2]
         tw = np.sqrt(np.asarray(w["twall_x"], float) ** 2 + np.asarray(w["twall_y"], float) ** 2
                      + np.asarray(w["twall_z"], float) ** 2)
-        d = dict(Q_W=Q, area_m2=A, qpp_mean=qpp, qpp_max=float(np.max(qin)),
+        # **開口リップ (90° の鋭角) は幾何的特異点**で、細分すると q'' が h^-1/2 で発散する
+        # (2026-09-19 実測: q''max 290 -> 355 -> 419 kW/m2、増分比が r^-0.5 に一致)。
+        # そのため総入熱 Q は観測次数 0.24 の遅い収束になり Richardson 外挿の不確かさが 32 % になる。
+        # **リップ帯を除いた入熱**を併記して、残りが収束していることを示す
+        # (帯幅は `eval.lip_band_m`、既定 1 mm = 深さの 2 %)。
+        lip = man["eval"].get("lip_band_m", 1.0e-3)
+        zn = w["xyz"][:, 2]
+        deep = zn < -lip
+        Q_nolip = float(np.sum(qin[deep] * wt[deep])) if deep.any() else float("nan")
+        d = dict(Q_W=Q, Q_nolip_W=Q_nolip, lip_band_m=lip,
+                 area_m2=A, qpp_mean=qpp, qpp_max=float(np.max(qin)),
                  qpp_min=float(np.min(qin)),
                  h_aw=qpp / max(Taw - Tw, 1e-30),
                  tau_mean=float(np.sum(tw * wt) / max(A, 1e-30)),
@@ -414,6 +443,13 @@ def main():
             print("  キャビティ 3 壁 合計 Q = %.4g W (半割) = %.4g W (全周),  平均 q'' = %.4g W/m2,"
                   "  h_aw = %.4g W/m2K   [T_aw-T_w = %.1f K]"
                   % (Qc, 2 * Qc, Qc / Ac, Qc / Ac / (Taw - Tw), Taw - Tw))
+            Qn = sum(wh[g].get("Q_nolip_W", float("nan")) for g in cav)
+            lipb = wh[cav[0]].get("lip_band_m", 1e-3)
+            print("    うち開口リップ帯 (上端 %.1f mm) を除く Q = %.4g W (半割) = %.4g W (全周)"
+                  "   [リップ帯 %.4g W = %.1f %%]"
+                  % (lipb * 1e3, Qn, 2 * Qn, Qc - Qn, 100 * (Qc - Qn) / max(Qc, 1e-30)))
+            print("    ** リップは 90 度の鋭角 = 幾何的特異点で q'' が h^-1/2 で発散するため、"
+                  "総 Q と q''max は格子収束しない。収束を見るのはリップ帯を除いた Q **")
     print("  Tw = %.1f K,  Taw(CPG/TP) = %.1f / %.1f K" % (Tw, D["Taw_cpg"], D.get("Taw_tp", float("nan"))))
     for k in ("dT_mouth", "dT_mid", "dT_floor", "dT_up", "dT_dn"):
         print("  %-10s %9.2f K   (T = %8.2f K)" % (k, q[k], Tw + q[k]))
