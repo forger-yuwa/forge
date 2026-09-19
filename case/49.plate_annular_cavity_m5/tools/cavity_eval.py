@@ -267,6 +267,40 @@ def mid_surface(man, n_th=181, n_z=200):
     return np.stack([R * DX, R * DY, z], axis=-1).reshape(-1, 3)
 
 
+def wall_y1plus(wh, man, c, v):
+    r"""**第一内部ノードの** $y_1^+ = \rho u_\tau y_1/\mu$ を後処理で出す。
+
+    ソルバの壁面ダンプ `ypls` は `ρ u_τ dcc/μ` で、`dcc` は**ゴーストセル重心と内点セル重心の
+    距離**である ([`viscousFlux_d.cu`](../../../solver_density_cuda/cuda_forge/viscousFlux_d.cu))。
+    **node 方式では壁ノードが壁面上に乗るので dcc がほぼ 0 に退化し**、y⁺ が実際より桁違いに
+    小さく出る (ソルバ自身、流束計算ではこの退化を避けている)。よって壁解像の根拠に使えない
+    (2026-09-19 codex Major 9)。
+
+    ここでは場の `wall_dist` から**キャビティ気体ノードの最小正値** $y_1$ を取り、
+    壁面ダンプの $u_\tau$ と壁の $\rho,\mu$ で $y_1^+$ を組む。構造化ヘキサなので $y_1$ は
+    第一層厚そのものになる。
+    """
+    if "wall_dist" not in v:
+        return
+    m = gc.cavity_mask(c[:, 0], c[:, 1], c[:, 2], man, shrink=0.0)
+    wd = np.asarray(v["wall_dist"], float)[m]
+    pos = wd[wd > 1e-9]
+    if pos.size == 0:
+        return
+    y1 = float(np.percentile(pos, 0.1))          # 最小値はガベージを拾い得るので下位 0.1 %
+    for g, d in wh.items():
+        ut = d.get("_utau_node")
+        ro = d.get("_ro_node")
+        mu = d.get("_mu_node")
+        if ut is None or ro is None or mu is None:
+            continue
+        w = d["_w_node"]
+        yp = ro * ut * y1 / np.maximum(mu, 1e-30)
+        d["y1"] = y1
+        d["y1plus_mean"] = float(np.sum(yp * w) / max(np.sum(w), 1e-30))
+        d["y1plus_max"] = float(np.max(yp))
+
+
 def wall_href(wh, man, D, c, v, T0):
     """基準温度 = すきま中央面の最近傍点の**総温 T0** で熱伝達率を出す (ユーザ指定 2026-09-19)。
         h_ref = q'' / (T0_ref - T_w)
@@ -376,6 +410,13 @@ def wall_heat(run, step, man, D, prof_n=40):
                  ypls_mean=float(np.sum(np.asarray(w["ypls"], float) * wt) / max(A, 1e-30))
                  if "ypls" in w else float("nan"),
                  all_zero=bool(np.all(qin == 0.0)))
+        # y₁⁺ を後処理で組むための壁面値 (ソルバの `ypls` は dcc 基準で node では退化する)
+        if "utau" in w:
+            d["_utau_node"] = np.asarray(w["utau"], float)
+        if "ro" in w:
+            d["_ro_node"] = np.asarray(w["ro"], float)
+        if "Ts" in w:
+            d["_mu_node"] = mu_suth(np.asarray(w["Ts"], float))
         d["_x_node"] = w["xyz"][:, 0]
         d["_y_node"] = w["xyz"][:, 1]
         d["_z_node"] = w["xyz"][:, 2]
@@ -519,6 +560,8 @@ def main():
         T0 = np.asarray(total_state(a.run, str(snaps[-1]))["T0"], float)
     except Exception as e:                       # noqa: BLE001
         print("  WARNING: 総温 T0 を作れない (%s) -> 基準温度基準の h は出せない" % e)
+    if wh:
+        wall_y1plus(wh, man, c, v)
     if T0 is not None and wh:
         wall_href(wh, man, D, c, v, T0)
     print("=== %s  (%s) ===" % (a.run, snaps[-1].name))
@@ -539,6 +582,14 @@ def main():
                       "dT_ref 平均 %.2f K)"
                       % (g, d["h_eff"], 100 * d.get("href_undef_area_frac", 0.0),
                          d.get("dTref_mean", float("nan"))))
+        y1 = next((d["y1"] for d in wh.values() if "y1" in d), None)
+        if y1 is not None:
+            print("    --- 壁解像 (**第一内部ノード基準**。ソルバ出力の y+ は dcc 基準で node では退化) ---")
+            print("    第一層厚 y1 = %.4g m" % y1)
+            for g, d in wh.items():
+                if "y1plus_mean" in d:
+                    print("    %-10s y1+ 平均 %8.3g / 最大 %8.3g   (ソルバ ypls 平均 %8.3g)"
+                          % (g, d["y1plus_mean"], d["y1plus_max"], d["ypls_mean"]))
         print("    h_aw  = q''/(T_aw - T_w)       … 外部流の回復温度基準")
         print("    h_ref = <q''/(T0_ref - T_w)>_A … 局所係数の面積平均。**分母は温度差 dT_ref**"
               " (絶対温度ではない)。h_eff = Q/∫dT dA は総入熱を再現する別の係数。")
