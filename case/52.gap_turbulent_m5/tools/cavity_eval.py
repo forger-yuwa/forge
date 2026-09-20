@@ -111,8 +111,10 @@ def main():
         arr0 = np.loadtxt(CASE / a.qfp_from / "wall_q.csv", delimiter=",", skiprows=1)
         q_lit = float(np.interp(xr - 0.5 * w, arr0[:, 0], arr0[:, 1]))
         print(f"分母: 等温平板 run {a.qfp_from} の q_w(x={1e3*(xr-0.5*w):.1f} mm) = {q_lit*1e-3:.3f} kW/m²")
+        LBL_A = f"forge 等温平板 ({a.qfp_from})"
     else:
         q_lit = s["qfp_kW"] * 1e3
+        LBL_A = "文献"
     q_ana = float("nan")   # case/52 は乱流なので層流平板の解析値は使わない
     t0csv = CASE / a.t0 / "wall_q.csv"
     if t0csv.exists():
@@ -130,7 +132,7 @@ def main():
     ev = evaluate(res, xf, xr, d)
 
     print(f"run {a.run}  res {res.name}   w = {w*1e3:.3f} mm (w/d = {s['w_over_d']}), d = {d*1e3:.2f} mm")
-    print(f"分母: 文献 {q_lit*1e-3:.2f} / forge smooth {q_cfd*1e-3:.2f} / 解析 {q_ana*1e-3:.2f} kW/m²")
+    print(f"分母: {LBL_A} {q_lit*1e-3:.2f} / forge smooth {q_cfd*1e-3:.2f} / 解析 {q_ana*1e-3:.2f} kW/m²")
     print()
     for name, (xs, q) in (("後壁", ev["rear"]), ("前壁", ev["front"]), ("床", ev["floor"])):
         print(f"[{name}] {len(xs)} 点  q_w: {np.min(q)*1e-3:+.3f} … {np.max(q)*1e-3:+.3f} kW/m²")
@@ -145,7 +147,7 @@ def main():
     print()
     print(f"総入熱 Q_c' = {Qc:.3f} W/m (後壁 {integrate(ev['rear'][0]*d, ev['rear'][1]):.3f} + "
           f"前壁 {integrate(ev['front'][0]*d, ev['front'][1]):.3f} + 床 {integrate(ev['floor'][0]*d, ev['floor'][1]):.3f})")
-    for lbl, qd in (("文献", q_lit), ("forge smooth", q_cfd)):
+    for lbl, qd in ((LBL_A, q_lit), ("forge smooth", q_cfd)):
         print(f"  開口面積平均 q̄_c/q_fp [{lbl}] = {Qc/w/qd:.4f}   (= Q_c/Q_fp)")
     out = dict(run=a.run, w=w, d=d, q_lit=q_lit, q_cfd=q_cfd, q_ana=q_ana, Qc_per_span=Qc,
                qbar_over_lit=Qc / w / q_lit, qbar_over_cfd=Qc / w / q_cfd)

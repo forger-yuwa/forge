@@ -52,32 +52,33 @@
       {
         "Re_m": 1470000.0,
         "dstar_cm": 12.8,
-        "theta_cm": 1.42,
         "dstar_over_w": 56,
-        "theta_over_w": 6.2
+        "theta_cm_REJECTED": 1.42,
+        "theta_over_w_REJECTED": 6.2
       },
       {
         "Re_m": 3320000.0,
         "dstar_cm": 11.5,
-        "theta_cm": 1.19,
         "dstar_over_w": 50,
-        "theta_over_w": 5.2
+        "theta_cm_REJECTED": 1.19,
+        "theta_over_w_REJECTED": 5.2
       },
       {
         "Re_m": 6100000.0,
         "dstar_cm": 10.8,
-        "theta_cm": 1.08,
         "dstar_over_w": 47,
-        "theta_over_w": 4.7
+        "theta_cm_REJECTED": 1.08,
+        "theta_over_w_REJECTED": 4.7
       },
       {
         "Re_m": 7820000.0,
         "dstar_cm": 10.5,
-        "theta_cm": 1.03,
         "dstar_over_w": 46,
-        "theta_over_w": 4.5
+        "theta_cm_REJECTED": 1.03,
+        "theta_over_w_REJECTED": 4.5
       }
-    ]
+    ],
+    "_THETA_REJECTED": "2026-09-20: Fig 4 から読んだ theta_cm は delta*_cm と両立しない (H=9.0 は M 10.3 / T_w 300 K のどの定義でも出ない; 圧縮性 25 / 運動学 1.4)。theta を固定すると delta が 49-65 cm となり 78.74 cm 角試験部で一様コアが消えるため棄却。**theta は bl_derived.json の導出値を使うこと**。原典 Fig 4 の再読み取りが最優先の残作業。"
   },
   "temperature_ratio_series": {
     "_source": "Fig 8(a) (掃引角 0°)。**公称 1.0/1.2/1.4/1.6 ではなく Re 系列ごとに実測値が違う**",
@@ -110,7 +111,7 @@
     ]
   },
   "open_items": [
-    "T_t (本文に未記載; Langley continuous-flow hypersonic tunnel の運転条件から別途確定する)",
+    "**Fig 4 の theta 再読み取り** (現在の値は物理的に棄却済み。bl_derived.json 参照)",
     "加熱板の長さと温度分布",
     "Fig 5-8 の h/h_fp 分布の digitize",
     "2D 中央断面近似の妥当性 (TH75 は横方向の BL 分布変化・壁圧と自由流静圧の差を明記)",
@@ -121,5 +122,8 @@
     "1.5e6": 2.41,
     "3.3e6": 5.34,
     "7.8e6": 12.07
+  },
+  "_resolved": {
+    "T_t": "1090 K (Gate A: Pt-M-Re' から 3 系列独立に解いて 1112/1096/1063 K, ばらつき 4.5 %)"
   }
 }
