@@ -14,9 +14,22 @@ EXP = {"0.063": 1.07, "0.211": 0.73, "0.383": 0.58, "0.524": 0.49}
 d = 20.32e-3
 W = json.loads((CASE / "geometry.json").read_text())["cavity"]["widths"]
 
-def theory_avg(w):
-    s = np.linspace(1e-6, 2 * d + w, 40001)
-    return float(np.trapz(qs_over_qfp(s, w, d), s) / w)
+def theory_avg(w, n=200001):
+    """(B4) を s=0 から積分する。
+
+    被積分関数はリップで zeta(1/2, s/k) ~ sqrt(k/s) の **可積分特異性**を持つ。
+    s=1e-6 から台形で積分していたため端点寄与を落としており、最狭幅で 2.8 % 小さく出ていた
+    (2026-09-20 codex result-2 M6)。s=u^2 と置くと被積分関数 x ds = f(u^2) 2u du が
+    u=0 で有限になり、素直に積分できる。
+    """
+    smax = 2 * d + w
+    u = np.linspace(0.0, np.sqrt(smax), n)
+    f = np.zeros_like(u)
+    f[1:] = qs_over_qfp(u[1:] ** 2, w, d) * 2.0 * u[1:]
+    # u->0 の極限: 0.21/sqrt(1+d/w) * sqrt(k) * 2  (第 2 項は有限なので落ちる)
+    k = 2.0 * (w + d)
+    f[0] = 0.21 / np.sqrt(1.0 + d / w) * np.sqrt(k) * 2.0
+    return float(np.trapz(f, u) / w)
 
 jp_font()
 import matplotlib.pyplot as plt

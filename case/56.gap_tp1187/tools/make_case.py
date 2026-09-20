@@ -174,7 +174,14 @@ def main():
     for tag, kw in stages:
         (rd / "solverConfig.yaml").write_text(CFG.format(species=", ".join(SPECIES), **kw))
         print(f"--- stage {tag}: cfl={kw['cfl']} conv={kw['conv']} turb={kw['turb']} → {kw['nsteps']} step")
-        subprocess.run([str(TOOLS / "run_case.sh"), str(rd)], check=False)
+        # **失敗段から古い場を引き継がない**。run_case.sh の戻り値と、当該段の最終出力・
+        # NaN の有無を確認してから次段へ進む (2026-09-20 codex result-2 M4)。
+        rc = subprocess.run([str(TOOLS / "run_case.sh"), str(rd)]).returncode
+        cur = rd / f"res_{kw['nsteps']}.h5"
+        if rc != 0 or not cur.exists() or list(rd.glob("res_nan_*.h5")):
+            raise SystemExit(f"stage {tag}: rc={rc}, res_{kw['nsteps']}.h5="
+                             f"{cur.exists()}, nan={bool(list(rd.glob('res_nan_*.h5')))} "
+                             "→ 段の失敗。古い場を引き継がずに中断する")
         for suf in ("forge_run.log", "residual_history.csv", "CONVERGENCE_VERDICT.txt"):
             src = rd / suf
             if src.exists():

@@ -50,7 +50,7 @@ time:
   outStepInterval: {out_int}
   timeIntegration: 11
   nStepInner: {inner}
-space: {{convMethod: {conv}, limiter: {lim}}}
+space: {{convMethod: {conv}, limiter: {lim}, limiterScaled: 1, limiterRoRef: {ro_ref:.10g}, limiterPRef: {p_ref:.10g}, limiterARef: {a_ref:.10g}}}
 turbulence: {{model: "none"}}
 initial: "uniform_p101325_u10"
 output: {{level: 1, extraFields: [thermCond, vis_lam]}}
@@ -153,7 +153,12 @@ def main():
              Y=gas.Y, R=gas.R, mesh=a.mesh, cp_Tstar=gas.cp(530.0), Pr_Tstar=gas.Pr(530.0)),
         indent=2, ensure_ascii=False), encoding="utf-8")
 
-    common = dict(mu_inf=mu, lam_inf=gas.lam(T), cp_ref=gas.cp(T), gam_ref=gas.gamma(T), relax=1.0)
+    # リミッタ基準値を**自由流で固定**する。auto だと開始場依存の作用素になり
+    # 分割実行が連続実行と一致しない (2026-09-20 codex result-2 M5)。
+    import math as _m
+    _aref = _m.sqrt(gas.gamma(T) * gas.R * T)
+    _lim = dict(ro_ref=rho, p_ref=p, a_ref=_aref)
+    common = dict(mu_inf=mu, lam_inf=gas.lam(T), cp_ref=gas.cp(T), gam_ref=gas.gamma(T), relax=1.0, **_lim)
     stages = [
         ("soft", dict(conv=0, lim=0, cfl=a.soft_cfl, inner=10, nsteps=a.soft_steps,
                       out_int=a.soft_steps, **common)),

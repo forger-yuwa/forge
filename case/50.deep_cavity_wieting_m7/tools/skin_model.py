@@ -24,6 +24,8 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 CASE = HERE.parent
 LAM_S, RHO_C, TAU = 15.0, 7900 * 500.0, 0.305e-3
+# [W70] の報告された精度限界 (標準偏差ではなく区間)。plan §4.10。
+Q_PRECISION_W_M2 = 0.68e3
 ALPHA_S = LAM_S / RHO_C
 
 
@@ -50,7 +52,9 @@ def build_path(run, depth, width, n):
     s = np.linspace(0.0, depth + width, n)
     q = np.where(s <= depth,
                  np.interp(np.clip(s, 0, depth) / depth, rear[:, 0], rear[:, 1]),
-                 np.interp(np.clip(s - depth, 0, width) / width, flo[:, 0], flo[:, 1]))
+                 # 床 csv の座標は **y/d** (幅 W ではない)。W で割ると床の大半が端値の外挿になる
+                 # (2026-09-20 codex result-2 M8)。
+                 np.interp(np.clip(s - depth, 0, width) / depth, flo[:, 0], flo[:, 1]))
     return s, q
 
 
@@ -70,9 +74,16 @@ def solve(s, qc, t_end, T_lip, lip="dirichlet"):
         T += dt * (src + ALPHA_S * lap)
         if lip == "dirichlet":
             T[0] = T_lip * (k + 1) * dt / t_end
+    # **時間更新と同じ境界演算子**を使う。lap[0]=lap[1] で代用していたため
+    # 全経路積分が 1.017 倍ずれ、それを「保存」と誤って報告していた
+    # (2026-09-20 codex result-2 M8)。同じ演算子なら厳密に保存する。
     lap = np.zeros_like(T)
     lap[1:-1] = (T[2:] - 2.0 * T[1:-1] + T[:-2]) / ds ** 2
-    lap[0] = lap[1]; lap[-1] = 2.0 * (T[-2] - T[-1]) / ds ** 2
+    lap[-1] = 2.0 * (T[-2] - T[-1]) / ds ** 2
+    if lip == "adiabatic":
+        lap[0] = 2.0 * (T[1] - T[0]) / ds ** 2
+    else:
+        lap[0] = lap[1]          # Dirichlet 端では壁側の値を使わない
     return T, RHO_C * TAU * (src + ALPHA_S * lap)
 
 
@@ -98,8 +109,10 @@ def main():
         R = read_ref(CASE / ref)
         print(f"\n=== {run}  w/d={wd}  W={W*1e3:.3f} mm  q_fp={qfp*1e-3:.1f} kW/m²  "
               f"拡散長({a.t_eval}s)={np.sqrt(ALPHA_S*a.t_eval)/W:.2f} W ===")
-        print(f"{'z/W':>6} {'x/d':>6} {'実測':>8} {'CFD 生':>9} | "
-              f"{'リップ断熱':>10} {'リップ Dir':>10} | {'実測は帯の中か':>14}")
+        eps = Q_PRECISION_W_M2 / qfp
+        print(f"  実測の精度限界 ±{Q_PRECISION_W_M2*1e-3:.2f} kW/m² = ±{eps:.4f} (q/q_fp)")
+        print(f"{'z/W':>6} {'x/d':>6} {'実測±限界':>17} {'CFD 生':>9} | "
+              f"{'リップ断熱':>10} {'リップ Dir':>10} | {'帯が重なるか':>13}")
         for zt in (0.5, 1, 2, 3, 4, 6, 8):
             sz = zt * W
             if sz > d:
@@ -110,9 +123,12 @@ def main():
                   if R[:, 0].min() <= xdi <= R[:, 0].max() else np.nan)
             lo = adb[1][i] / qfp; hi = out[a.t_eval][1][i] / qfp
             lo, hi = min(lo, hi), max(lo, hi)
-            inside = "YES" if lo <= rq <= hi else ("低すぎ" if rq < lo else "高すぎ")
-            print(f"{zt:6.1f} {xdi:6.3f} {rq:8.4f} {qc[i]/qfp:9.4f} | "
-                  f"{lo:10.4f} {hi:10.4f} | {inside:>14}")
+            # **実測にも精度限界の区間がある**。両方の区間が重なるかで判定する
+            # (2026-09-20 codex result-2 M9: 点値で「届かない」と判定していた)。
+            mlo, mhi = rq - eps, rq + eps
+            ov = "YES" if (lo <= mhi and mlo <= hi) else ("低すぎ" if mhi < lo else "高すぎ")
+            print(f"{zt:6.1f} {xdi:6.3f} {rq:8.4f}±{eps:.4f} {qc[i]/qfp:9.4f} | "
+                  f"{lo:10.4f} {hi:10.4f} | {ov:>13}")
         print(f"  リップ温度上昇 ({a.t_eval}s) = {qfp*a.t_eval/(RHO_C*TAU):.2f} K"
               f"  (本文: 計測区間の最大温度上昇 < 22 K)")
     print("\n値は q/q_fp。**全点・全幅に同一の観測モデル**を掛け、リップ端の両極 "
