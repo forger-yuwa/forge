@@ -532,6 +532,11 @@ void solverConfig::read(std::string fname)
         if (this->limiter != 0 && this->limiter != 1 && this->limiter != 2 && this->limiter != -1) {
             throw std::runtime_error("Key 'limiter' in 'space' must be one of 0, 1, 2, or -1.");
         }
+        if (space["roeEntropyFixCoeff"]) {
+            this->roeEntropyFixCoeff = space["roeEntropyFixCoeff"].as<flow_float>();
+            std::cout << "'roeEntropyFixCoeff' in 'space': " << this->roeEntropyFixCoeff
+                      << "  (SU2 ENTROPY_FIX_COEFF 同形の固有値下限; 0=従来)" << std::endl;
+        }
         if (space["heatCorrSU2"]) {
             this->heatCorrSU2 = space["heatCorrSU2"].as<int>();
             std::cout << "'heatCorrSU2' in 'space': " << this->heatCorrSU2

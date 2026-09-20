@@ -437,6 +437,16 @@ public:
     // plan boundary-conjugate-heat-transfer §5.1 #43、methods/diffusion/。
     int heatCorrSU2 = 0;
 
+    // ROE の固有値下限 (SU2 の ENTROPY_FIX_COEFF と同形): lam[i] = max(lam[i], coeff*(|Ua|+ca))。
+    // 0 (既定) で従来どおり = forge の Harten 補正のみ。SU2 の既定は 0.001。
+    // **動機**: forge の現行 Harten 補正は `eta_vl = 0.1*(|Ua|/ca + 1.0)` で、|Ua|/ca が無次元なので
+    // eta_vl も無次元 (0.1-0.2) になり、速度次元の lam と比較している (次元不整合)。
+    // 正しい形はすぐ下にコメントアウトされている `0.05*(|Ua|+ca)`。この case (c~530 m/s) では
+    // 本来 ~53 m/s のところ実効 ~0.1 で、**接触波 (エントロピー波) の散逸が約 500 倍弱い**。
+    // 壁近傍では |Ua|->0 なので、ここが T/rho の 2 節点交番 (市松) の容疑になる。
+    // plan boundary-conjugate-heat-transfer §5.1 #43。
+    flow_float roeEntropyFixCoeff = 0.0;
+
     int nodeInletCornerWall = 0;
     std::vector<int> wallDistExtraPhysIDs;   // 壁距離の壁点集合に加える非 wall bcond の physID (例: 出口バッファの slip 壁)。SST の F1/F2 用   // 1: 変換時に入口∩壁コーナーの入口側半割面を壁へ帰属 (node)。methods/discretization.md §7.2 (D)
 

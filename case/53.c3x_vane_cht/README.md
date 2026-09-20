@@ -345,6 +345,57 @@ $T_W$ が SU2 とほぼ同じ範囲に落ち着いたので**実装は SU2 の�
 両側 4 反復でノイズ床を測り、RMS 差の中央値で交差/群内 = **0.91–0.97** (同一 population)。
 交番振幅自体は再現的で旧 0.9112 % / 新 0.9111 %、幅 **0.0001 %**。
 
+
+### 市松の切り分け 第 2 ラウンド (2026-09-20 夜) — 全候補が外れる
+
+**全 run はクリアンビルド・同一シード (`run_0009` の収束場)・2000 step で揃えた。**
+基準は負圧面 $s/S$ 0.30–0.80 の odd-even (有意差閾値 0.001 %、run-to-run 幅 0.0001 % の 10 倍)。
+
+| run | 変更点 | odd-even | 第一内部点 $T$ |
+| --- | --- | ---: | ---: |
+| `run_0051_ctrl_recheck` | SLAU 既定 (対照) | **0.9106 %** | 0.0819 K |
+| `run_0052_slau_heatcorr` | 内部面の熱伝導を SU2 corrected-gradient へ | 0.9107 % | 0.0820 K |
+| `run_0053_slau_pref0` | `pRef: 0` (float32 桁落ち対策 OFF) | 0.9109 % | 0.0820 K |
+| `run_0054_weak_clean` | 弱形式等温壁 (SU2 型) | **1.2066 %** | 0.1115 K |
+| `run_0042_implicitdbl` | 陰解法の線形 solve を**倍精度** | 0.9165 % | 0.0825 K |
+| `run_0049_roe_clean` | ROE | 1.2547 % | 0.0634 K |
+| `run_0050_roefix_clean` | ROE + エントロピー床 0.001 (SU2 既定) | 1.2257 % | 0.0635 K |
+| `run_0055_roefix0p05` | ROE + 床 0.05 | 1.6527 % | 0.0738 K |
+| `run_0056_roefix0p2` | ROE + 床 0.2 | **3.0331 %** | 0.0912 K |
+
+**エントロピー波の散逸を増やすほど交番は悪化する** (単調) ので、「$M\to0$ で接触波の上流化散逸が消えるのが原因」
+という説も棄却。`pRef: 0` は桁落ちを**意図的に悪化**させる方向なのに不変で、float32 相殺説も否定。
+陰解法の倍精度化も不変。
+
+### 副産物 1: forge の Harten エントロピー補正が次元不整合 (未修正)
+
+[`convectiveFlux_roe_d.inc.cuh`](../../solver_density_cuda/cuda_forge/convection/convectiveFlux_roe_d.inc.cuh) の有効経路:
+
+```cpp
+eta_vl = 0.1*(abs(Ua)/ca + 1.0);   // |Ua|/ca は無次元 -> eta_vl も無次元 (0.1-0.2)
+if (lam[1] < eta_vl) ...            // lam は m/s (Ua, ca とも m/s)
+```
+
+すぐ下にコメントアウトされた `h_fix = 0.05*(abs(Ua)+ca)` が本来の Harten 形。
+この case ($c\approx530$ m/s) では本来 ~53 m/s のところ実効 ~0.1。SU2 の床 $0.001(|U_a|+c_a)\approx0.53$ m/s。
+**市松の原因ではない**ことは上の掃引で分かったが、**次元不整合そのものは欠陥**なので別途起票する。
+opt-in の `space.roeEntropyFixCoeff` (既定 0 = ビット不変) を SU2 同形で追加済み。
+
+### 副産物 2: `solverConfig.hpp` 変更後の差分ビルドで ROE が step 3 NaN
+
+`roeEntropyFixCoeff` をメンバに足した直後、**係数 0 でも** ROE が step 3 で NaN になった。
+bisect で「committed 状態では完走」を確認し、**クリーンビルドで解消**。
+既知の罠 ([[stale-build-struct-layout-trap]]) を踏んだもので、エントロピー床のロジックは無罪。
+**`solverConfig.hpp` を触ったら差分ビルドを信用しない。**
+
+### ROE の TP / 凝縮対応 (ユーザ指摘 2026-09-20)
+
+`thermalMethod == 2` の分岐はあるが、**固有値・固有ベクトルは CPG の $\gamma$ で組んでいる**
+(`ca_L = sqrt(gamma P/ro)`, `roe_L = P/(gamma-1) + rho v^2/2`)。実効 $\gamma$ や
+$\partial p/\partial\rho|_e$ を使う厳密な TP Roe にはなっていない。
+凝縮も `condModel` で物性を切り替えるだけで、二相 frozen 音速は入っていない。
+**本件 (C3X) は `thermalMethod: 0` なので影響しないが、将来課題。**
+
 ## 計算 run 一覧 (追補) — CHT 連成
 
 | `run_*` | 目的・主要設定差分 | 主要結果・成果物 | 状態 |

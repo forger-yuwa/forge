@@ -10,6 +10,10 @@ __global__ void ROE_d
 (
  int conv_scheme, int limit_scheme,
  flow_float ga,
+ // SU2 の ENTROPY_FIX_COEFF と同形の固有値下限 (0 = 従来 = forge の Harten 補正のみ)。
+ // lam[i] = max(lam[i], coeff*(|Ua|+ca))。SU2 既定は 0.001。
+ // 現行 Harten 補正 `0.1*(|Ua|/ca+1)` は次元不整合で実効が ~500 倍弱い (下の該当行を参照)。
+ flow_float entropyFixCoeff,
  int thermalMethod,                           // 0: calorically perfect, 2: thermally-perfect (NASA-9)
  const SpeciesThermo* sp, int nSpecies,       // thermally-perfect 用化学種データ
  CondArgs      cnd,    // cp_cpg / g_total / T_cell / condModel (非平衡凝縮の二相エネルギー補正)
@@ -332,6 +336,14 @@ __global__ void ROE_d
             if (lam[4] <= eta_vl) lam[4] = (lam[4]*lam[4] + eta_vl*eta_vl)/(2*eta_vl);
         }
  
+        // SU2 同形の固有値下限 (opt-in)。**全 5 固有値**に coeff*(|Ua|+ca) の床を課す。
+        // 壁近傍は |Ua|->0 なので、接触波 (lam[1..3] = |Ua|) がここで初めて有限の散逸を得る。
+        // 既定 0 でビット不変。SU2: roe.cpp:200 `max(fabs(Lambda), coeff*MaxLambda)`。
+        if (entropyFixCoeff > (flow_float)0.0) {
+            const flow_float floorLam = entropyFixCoeff*(abs(Ua) + ca);
+            for (int i = 0; i < 5; i++) lam[i] = max(lam[i], floorLam);
+        }
+
         // entropy fix
         //flow_float h_fix = 0.05*(abs(Ua)+ca);
 

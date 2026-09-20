@@ -275,6 +275,7 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         ROE_d<<<dimGrid_normal_halo , cuda_cfg.dimBlock>>> (
             cfg.convMethod, cfg.limiter,
             cfg.gamma,
+            cfg.roeEntropyFixCoeff,
             cfg.thermalMethod, thermo_species_device_ptr(), cfg.nSpecies,
             cnd, geom, st, reso, lim, grd
         );
