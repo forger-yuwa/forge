@@ -2,6 +2,8 @@
 
 ルールの正本は [`AGENTS.md`](../AGENTS.md) 「codex レビュー (計画立案時と検証結果時の 2 回)」。本書はその手順。
 
+Claude Code はプロンプトの作法・禁止事項 (巨大ファイルを読ませない / 読んでよい `sed -n` を列挙する / 仮説と A/B を 1 つに絞らせる / 最終回答は `tokens used` の後ろに出る) を skill `codex-review` で参照する (`.claude/skills/codex-review/SKILL.md`)。
+
 ## 1. いつ回すか
 
 | 段階 | タイミング | 何を見てもらうか |

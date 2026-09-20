@@ -240,6 +240,7 @@ public:
         "limiter_Uy" , 
         "limiter_Uz" , 
         "limiter_P" , 
+        "limiter_T" ,     // space.reconT=1 のみ計算される (それ以外は 0 のまま)
         //"limiter_Ht" , 
 
         "dt_local",

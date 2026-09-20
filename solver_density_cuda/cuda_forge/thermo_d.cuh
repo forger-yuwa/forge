@@ -937,4 +937,37 @@ __device__ inline GasStateAtT thermo_state_at_T(
     }
     return g;
 }
+// ---------------------------------------------------------------------------
+// double ビルド (flowFormat.hpp の typedef を double に切り替えたもの) 用のオーバーロード。
+// 化学種の熱力学テーブル `SpeciesThermoF` は float 固定 (区分 3 次表) なので、
+// double の Y/X 配列をローカルの float 配列へ写してから本体を呼ぶ。
+// float ビルドではこれらは実体化されない (double != float のときだけ宣言される)。
+#if !defined(FORGE_THERMO_NO_DOUBLE_SHIM)
+THERMO_HD float thermo_R_mix_f(const SpeciesThermoF* sp, int n, const double* Y)
+{
+    float Yf[THERMO_MAX_SPECIES];
+    for (int s = 0; s < n; ++s) Yf[s] = (float)Y[s];
+    return thermo_R_mix_f(sp, n, Yf);
+}
+THERMO_HD void thermo_X_from_Y_f(const SpeciesThermoF* sp, int n, const double* Y, double* X)
+{
+    float Yf[THERMO_MAX_SPECIES], Xf[THERMO_MAX_SPECIES];
+    for (int s = 0; s < n; ++s) Yf[s] = (float)Y[s];
+    thermo_X_from_Y_f(sp, n, Yf, Xf);
+    for (int s = 0; s < n; ++s) X[s] = (double)Xf[s];
+}
+THERMO_HD float thermo_h_mix_f(const SpeciesThermoF* sp, int n, const double* Y, double T)
+{
+    float Yf[THERMO_MAX_SPECIES];
+    for (int s = 0; s < n; ++s) Yf[s] = (float)Y[s];
+    return thermo_h_mix_f(sp, n, Yf, (float)T);
+}
+THERMO_HD float thermo_Dmix_species_f(const SpeciesThermoF* sp, int n, const double* X, int i, double T, double P)
+{
+    float Xf[THERMO_MAX_SPECIES];
+    for (int s = 0; s < n; ++s) Xf[s] = (float)X[s];
+    return thermo_Dmix_species_f(sp, n, Xf, i, (float)T, (float)P);
+}
+#endif
+
 #endif // __CUDACC__

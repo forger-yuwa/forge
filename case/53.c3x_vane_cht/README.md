@@ -669,7 +669,8 @@ if (ideal_gas && !low_mach && (Upwind == ROE || Upwind == MSW)) {
 
 SLAU の MUSCL 再構成を `rho, u, v, w, P` → **`T, u, v, w, P`** に変え、
 $\rho_{\rm face}=P_{\rm face}/(R\,T_{\rm face})$ を導出する (SU2 と同じ構成)。
-**限界**: `limiter_T` は未計算なので `limiter_P` を流用している。
+リミッタは `reconT: 1` のとき **$T$ 専用の $\psi_T$** を計算する (`limiter_d.cu`、基準
+$T_{\rm ref}=P_{\rm ref}/(R\rho_{\rm ref})$)。`reconT: 2` は同じ再構成で $\psi_P$ を流用する A/B 対照。
 
 | run | $\delta P/P$ | $\delta\rho/\rho$ | $\delta T/T$ | 比 |
 | --- | ---: | ---: | ---: | ---: |
@@ -682,10 +683,44 @@ $\rho_{\rm face}=P_{\rm face}/(R\,T_{\rm face})$ を導出する (SU2 と同じ�
 **$T$ 再構成は効く (21 %) が、それだけでは足りない。** メッシュ平滑化 (3.2×) と合わせて **3.8×**、
 SU2 との差は 42 倍 → **11 倍**。
 
-**まだ閉じない理由の候補**: (a) `limiter_P` 流用 (SU2 は再構成変数ごとにリミッタを持つ)、
-(b) セル値の $T$ は依然として保存量から導出されるので、面の整合がセルまで伝わりきらない、
-(c) SU2 は $\rho$ を再構成せず **4 変数しか勾配・リミッタを計算しない**のに対し、forge は
-$\rho$ の勾配・リミッタを計算し続けている (未使用でも `drodx` 等は他所で使われる)。
+#### 候補 (a) 「リミッタ流用」— 4000 step では空振り、16000 step では効く (2026-09-20)
+
+codex の指摘 (「`limiter_P` の流用は $T$ 自身の極値・勾配に基づく制限でない」) に従い $\psi_T$ を実装し、
+同一メッシュ (平滑メッシュ 30564 節点)・同一初期場・他は完全固定で A/B した。
+
+**まず 4000 step で比べて「4 桁一致 = 空振り」と判断したが、これは誤りだった。**
+4000 step はまだ過渡で、$A_T$ も比も落ち着いていない。1000 step ごとのスナップショットで
+時系列を取ると、比は 4000 step 付近で 1.047 まで跳ね、12000 step 以降でようやく頭打ちになる。
+**codex の事前警告 (「4000 step 後の差だけでは判定できない」) が正しかった。**
+
+判定は `check_quasisteady.py --series-csv <run>/nyquist_series.csv --series-cols ratio,A_T`
+(各 run に `nyquist_series.csv` を残してある)。**比は `STEADY`、$A_T$ は絶対値が小さく `DRIFTING`**
+なので、比を主判定・$A_T$ を従にする。非決定性 (`atomicAdd`) の影響を見るため各条件を 2 回ずつ回した。
+
+| run | 設定 | 精度 | 比 (末尾平均) | VERDICT | $A_T$ (末尾平均) |
+| --- | --- | --- | ---: | --- | ---: |
+| `run_0079_reconT_long` | `reconT: 1` 専用 $\psi_T$ | float32 | **1.027** | `STEADY` (drift 1.1 %) | −0.00051 % |
+| `run_0082_psiT_rep` | 同上 (再現性確認) | float32 | **1.027** | `STEADY` (drift 0.9 %) | −0.00052 % |
+| `run_0081_psiP_long` | `reconT: 2` $\psi_P$ 流用 | float32 | **1.037** | `STEADY` (drift 0.3 %) | −0.00067 % |
+| `run_0083_psiP_rep` | 同上 (再現性確認) | float32 | **1.037** | `STEADY` (drift 0.3 %) | −0.00067 % |
+| `run_0080_double_long` | `reconT: 1` 専用 $\psi_T$ | **double** | **1.027** | `STEADY` (drift 1.3 %) | −0.00053 % |
+| **SU2** | — | float64 | **0.995** | (収束解) | +0.0001 % |
+
+**結論 1: 専用 $\psi_T$ は効く。** $|比-1|$ が 0.037 → 0.027 (**−27 %**)、$A_T$ が −0.00067 → −0.00051 %
+(**−23 %**)。再現 run が 3 桁一致するので、この差は run-to-run ノイズの遥か上。
+
+**結論 2: float32 は原因でない。** 全体を `double` にした `run_0080_double_long` (`flowFormat.hpp` の
+typedef を `double` に切り替えた `build-double`) が float32 と比 1.027 で一致し、
+12000–16000 step の $A_P,A_\rho,A_T$ も 1–2 % 以内で一致する。
+**交番は丸めの残差床ではなく、離散作用素が持つ正真正銘の定常モード**である。
+これで codex の推奨仮説 (b)「float32 の書き戻し丸めが停止位置を決める」は**棄却**。
+
+累積: 粗メッシュ 1.240 → 平滑メッシュ 1.064 → `reconT` 1.049 (4000 step 値) →
+**準定常・専用 $\psi_T$ で 1.027**。SU2 は 0.995 なので、残差は $|比-1|$ で **5.4 倍**。
+
+**残る候補**: (b) 連続式とエネルギー式の離散化の非対称性、(c) 近壁の分子熱伝導率・乱流 $\mathrm{Pr}_t$ の
+SU2 との一致 (未照合。SU2 は `VISCOSITY_MODEL= SUTHERLAND` + `PRANDTL_LAM= 0.72` / `PRANDTL_TURB= 0.90`、
+forge は `viscMethod: 1` + `thermCondMethod: 1, prandtlLam: 0.72` + `turbulentPrandtl: 0.9`)。
 
 ### 副産物 1: forge の Harten エントロピー補正が次元不整合 (未修正)
 
@@ -738,6 +773,16 @@ $\partial p/\partial\rho|_e$ を使う厳密な TP Roe にはなっていない�
 | `run_0031`–`run_0038` | 既定パス不変の確認 (ノイズ床を両側から測る)。200 step を旧バイナリ 4 反復 / 新バイナリ 4 反復 | **node の C3X は `atomicAdd` で run-to-run 非決定** (旧 1 回目 vs 2 回目が新 vs 旧と同程度に違う)。RMS 差の中央値で交差/群内 = **0.91–0.97** = 同一 population。**交番振幅自体は再現的** (旧 0.9112 % / 新 0.9111 %、幅 **0.0001 %**) → 有意差閾値 0.001 % を事前登録 | ref |
 | `run_0040_wallflux0` | **決定的診断**。強制のまま等温壁の**壁半割面の熱流束だけ**を 0 に (`nodeIsothermalEnergyBC: 2`)、200 step | 場の変化は run-to-run ノイズ床の **0.70–0.85 倍** = **変わらない**。`zero_res_roe_bplane_d` と陰解法エネルギー行の単位行化で、壁半割面の寄与は**まるごと捨てられている** (診断にしか出ない) | ref |
 | `run_0041_heatcorrsu2` | 市松の切り分け。内部面の**熱伝導だけ** SU2 の corrected-gradient $a=(d\cdot S)/\|d\|^2$ に (`space.heatCorrSU2: 1`)。運動量の $\tau$ は不変 | odd-even **0.9186 → 0.9159 %** (相対 0.3 %)、第一内部点 $T$ の交番 0.0827 → 0.0825 K = **ほぼ不変**。近壁が直交なので両係数が一致する (codex の予測どおり) | ref |
+| `run_0063_cs2000` | 壁節点間隔の交番を除いた**平滑メッシュ** (`gen_fluid_mesh.py --curv-smooth 2000`、30564 節点)。他は `run_0009` と同じ | $\Delta s$ の交番 2.80 → 0.026 %。log-Nyquist で $\delta T/T$ **−0.0013 %**、比 1.064 (粗 1.240) | ref (以降の A/B の基準メッシュ) |
+| `run_0074_reconT` | `space.reconT: 1` ($T,u,v,w,P$ を再構成し $\rho$ を導出) の初回、**粗メッシュ** | $\delta T/T$ −0.0042 → **−0.0033 %**、比 1.240 → 1.188 | ref |
+| `run_0075_reconT_smooth` | `reconT: 1` × **平滑メッシュ**。4000 step、`run_0063` 系の場から | $\delta T/T$ **−0.0011 %**、比 **1.049** (SU2 0.995)。SU2 との差 42 → **11 倍** | active |
+| `run_0076_psiT` | **$\psi_T$ A/B の試験側**。`reconT: 1` = $T$ 専用 Venkatakrishnan リミッタ。`FORGE_CUDA_BLOCKSIZE=256` (512 ではレジスタ超過で起動不能)、4000 step | L1 $\delta T/T$ **−0.0011 %**、比 **1.048** = 対照と 4 桁一致 = **空振り** | active |
+| `run_0077_psiP` | **$\psi_T$ A/B の対照側**。`reconT: 2` = 同じ再構成で $\psi_P$ を流用 (旧実装の再現)。他は `run_0076` と完全同一 | L1 $\delta T/T$ **−0.0011 %**、比 **1.049** | active |
+| `run_0078_psiTdiag` | A/B が空振りでないことの裏取り。`run_0076` と同じで 200 step・`output.extraFields: [limiter_T, limiter_P, limiter_ro]` | L1 で $\psi_T$ 平均 0.9708/最小 0.6840、$\psi_P$ 平均 0.9590/最小 0.4702、$|\psi_T-\psi_P|$ 平均 0.0499/最大 0.4870 = **リミッタは不活性でないし両者は違う**。それでも交番は動かない | ref |
+| `run_0079_reconT_long` | **準定常まで伸ばした $\psi_T$ 側**。`run_0076` と同じで 16000 step・1000 step ごと出力 | 比 **1.027** `STEADY` (drift 1.1 %)、$A_T$ −0.00051 %。**4000 step の 1.047 は過渡だった**。`check_convergence.py` は `NOT CONVERGED (stalled/plateau)` (C3X は後縁渦放出で定常解なし)。成果物 `nyquist_series.csv` | active |
+| `run_0080_double_long` | **全体 double ビルド** (`flowFormat.hpp` の typedef を `double` に、`build-double`) で `run_0079` と同一設定。`FORGE_CUDA_BLOCKSIZE=128` | 比 **1.027** = float32 と一致、12000–16000 step の $A_P,A_\rho,A_T$ も 1–2 % 以内。**float32 の丸め説を棄却** | active |
+| `run_0081_psiP_long` | **準定常まで伸ばした $\psi_P$ 流用側** (`reconT: 2`)。他は `run_0079` と同一 | 比 **1.037** `STEADY` (drift 0.3 %)、$A_T$ −0.00067 % | active |
+| `run_0082_psiT_rep` / `run_0083_psiP_rep` | 上 2 条件の**再現 run** (`atomicAdd` 非決定性の確認) | 比 **1.027 / 1.037** と 3 桁一致。$A_T$ も 2 % / 0.5 % 以内。**$\psi_T$ 側の改善 (−27 %) はノイズの遥か上** | ref |
 | `run_0005_band_Tc350` | 帯: 冷却剤温度 $T_c$=350 K (孔の $h_c$ も同じ $T_c$ で再同定) | $T_w$ 差 **最大 2.2 K** | active |
 | `run_0005_band_ks_hi` / `_ks_lo` | 帯: 材料熱伝導率 ±3 % (報告の不確かさ) | $T_w$ 差 **最大 2.0 / 1.7 K** | active |
 

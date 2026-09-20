@@ -512,6 +512,23 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         limiter_r1_fused5_d<2><<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (FORGE_LIMITER_FUSED5_ARGS);
     #undef FORGE_LIMITER_FUSED5_ARGS
 
+    // space.reconT=1: 再構成対象が rho -> T に変わるので、**T 自身の極値・勾配から psi_T を作る**
+    // (codex レビュー 2026-09-20: limiter_P の流用は「T 自身の制限ではない」ので改善すべき近似)。
+    // 汎用の 1 変数経路を T に対してもう一度呼ぶ (6 変数 fused カーネルは作らない)。
+    // 無次元化の基準は T_ref = P_ref/(R rho_ref) で、他 5 変数の基準と整合させる。
+    if (cfg.reconT == 1 && cfg.limiter != 0 && var.c_d.count("limiter_T") && var.c_d.count("dTdx")) {
+        const flow_float Rg = (flow_float)(cfg.cp * (cfg.gamma - 1.0) / cfg.gamma);
+        const flow_float Tref = (flow_float)(cfg.limiterPRef / max(Rg * (flow_float)cfg.limiterRoRef, (flow_float)1.0e-30));
+        if (cfg.limiterScaled != 0)
+            limiter_periodic_merged<true>(cfg, cuda_cfg, msh, var, 0.0f, cfg.limiterMatchRecon,
+                var.c_d["T"], var.c_d["limiter_T"], var.c_d["dTdx"], var.c_d["dTdy"], var.c_d["dTdz"],
+                cfg.limiterScaled, Tref, -1);
+        else
+            limiter_periodic_merged<false>(cfg, cuda_cfg, msh, var, 0.0f, cfg.limiterMatchRecon,
+                var.c_d["T"], var.c_d["limiter_T"], var.c_d["dTdx"], var.c_d["dTdy"], var.c_d["dTdz"],
+                cfg.limiterScaled, Tref, -1);
+    }
+
     if (cfg.limiterDiag > 0) {
         static int s_lim_call = 0;
         const int interval = cfg.limiterDiag;

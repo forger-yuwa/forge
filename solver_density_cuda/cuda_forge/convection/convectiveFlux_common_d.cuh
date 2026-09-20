@@ -281,6 +281,7 @@ struct ResidualOut {
 struct LimiterFields {
     flow_float *limiter_ro, *limiter_Ux, *limiter_Uy, *limiter_Uz, *limiter_P;
     flow_float *ducros;
+    flow_float *limiter_T = nullptr;   // space.reconT=1 のみ (nullptr なら limiter_P を流用)
 };
 struct GradFields {
     flow_float *drodx, *drody, *drodz;

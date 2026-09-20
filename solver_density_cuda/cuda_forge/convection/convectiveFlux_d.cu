@@ -217,7 +217,7 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         var.c_d["res_ro"], var.c_d["res_roUx"], var.c_d["res_roUy"], var.c_d["res_roUz"], var.c_d["res_roe"] };
     LimiterFields lim {
         var.c_d["limiter_ro"], var.c_d["limiter_Ux"], var.c_d["limiter_Uy"], var.c_d["limiter_Uz"], var.c_d["limiter_P"],
-        var.c_d["ducros"] };
+        var.c_d["ducros"], (cfg.reconT == 1 && var.c_d.count("limiter_T")) ? var.c_d["limiter_T"] : nullptr };
     GradFields grd {
         var.c_d["drodx"], var.c_d["drody"], var.c_d["drodz"],
         var.c_d["dUxdx"], var.c_d["dUxdy"], var.c_d["dUxdz"],
