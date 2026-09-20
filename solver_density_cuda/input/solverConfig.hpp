@@ -470,6 +470,18 @@ public:
     // plan boundary-conjugate-heat-transfer §5.1 #43。
     flow_float roeEntropyFixCoeff = 0.0;
 
+    // SLAU の**接触波 (エントロピー波) 散逸に速度下限**を足す (SLAU のみ、既定 0.0 = ビット不変)。
+    // **動機** (codex 2026-09-21): SLAU の `mdot` は一様圧力なら -(S/2)|u_n| dro を持つので接触波散逸は
+    // 「無い」のではなく、**下限が無い**。Roe は `convectiveFlux_roe_d.inc.cuh:342-344` で
+    // lambda_j <- max(lambda_j, eps(|U_a|+c_a)) を**接触波を含む全固有値**に適用する。
+    // 近壁では面法線速度 u_n がほぼ 0 なので、SLAU では接触波の Nyquist モードが減衰しない。
+    // **効果**: dlambda_s = max(0, eps(|u_n|+c) - |u_n|)、alpha_s = dro - dP/c^2 として
+    //   dF = -(S/2) dlambda_s alpha_s (1, ux, uy, uz, |u|^2/2)
+    // を 5 保存量の流束に足す (massflux にも質量分を反映)。**mdot を変えて h_upwind を掛けるのは不可**
+    // (追加エネルギーが接触波方向にならない)。SU2 の実 run の下限値の再現ではなく、**因果試験**である。
+    // plan boundary-conjugate-heat-transfer §5.1 #43。
+    flow_float slauContactFloor = 0.0;
+
     int nodeInletCornerWall = 0;
     std::vector<int> wallDistExtraPhysIDs;   // 壁距離の壁点集合に加える非 wall bcond の physID (例: 出口バッファの slip 壁)。SST の F1/F2 用   // 1: 変換時に入口∩壁コーナーの入口側半割面を壁へ帰属 (node)。methods/discretization.md §7.2 (D)
 

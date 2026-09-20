@@ -701,6 +701,15 @@ codex の指摘 (「`limiter_P` の流用は $T$ 自身の極値・勾配に基�
 | --- | --- | --- | ---: | --- | ---: |
 | `run_0079_reconT_long` | `reconT: 1` 専用 $\psi_T$ | float32 | **1.027** | `STEADY` (drift 1.1 %) | −0.00051 % |
 | `run_0082_psiT_rep` | 同上 (再現性確認) | float32 | **1.027** | `STEADY` (drift 0.9 %) | −0.00052 % |
+| `run_0084_kresid_long` | 壁 $k$ 残差ゼロ化 (`mesh.nodeWallKResidualZero: 1`) を `run_0079` に足しただけ、16000 step | 比 **1.027** `STEADY` = 基準と**完全同値**。壁 $k$ の $\omega$ との非対称は交番に効かない (準定常で再確認) | ref |
+| `run_0085_prt1e6_long` | **乱流熱伝導を実質 OFF** (`turbulentPrandtl: 1.0e6`)、他は `run_0079` と同じ | 比 **0.986** (`DRIFTING` なので暫定)、$A_T$ **+0.00013 %** = SU2 (+0.0001 %) と同オーダー。**乱流熱流束が $T$ 交番の経路であることを示す** (物理を壊す診断なので生産には使えない) | ref |
+| `run_0086_slau_recon0_long` | スキーム A/B の対照。SLAU × `reconT: 0` (\rho 再構成)、16000 step | 比 **1.039** `STEADY` | ref |
+| `run_0087_roe_recon0_long` | スキーム A/B の試験側。**ROE** × `reconT: 0`、他は `run_0086` と同一 | 比 1.016 だが **使えない** — `rms_roe` が 1.26e3 → **3.87e4** と 1.5 桁**上昇**して張り付く (`NOT CONVERGED`)。ROE はこの case で定常状態を保てない (`run_0029_roe` と同じ)。Harten エントロピー補正の次元不整合 (下記「副産物 1」) が疑わしい | 破棄予定 |
+| `run_0088_cf0` | **接触波下限 A/B の対照**。`run_0079` と同じ設定を**新バイナリ**で回し直し (`slauContactFloor` 実装後の既定 0 = ビット不変の確認も兼ねる) | 比 **1.027** `STEADY` = `run_0079`/`run_0082` と一致 → 差分ビルドの取りこぼし無し | active |
+| `run_0089_cf1em3` / `run_0091_cf1em3_rep` | **接触波下限 $\epsilon=0.001$** (`space.slauContactFloor: 0.001`)。他は `run_0088` と完全同一 | 比 **1.021 / 1.020** `STEADY`、$A_T$ −0.00038 / −0.00037 % (対照 −0.00051 %)。再現 2 本が比 0.001 以内 = **効果はノイズの遥か上** | active |
+| `run_0092_cf3em3` | $\epsilon=0.003$ | 比 **1.021** `STEADY`、$A_T$ −0.00038 % (0.001 と同値 = 飽和) | ref |
+| `run_0090_cf1em2` | $\epsilon=0.01$ | 比 **1.018** `STEADY`、$A_T$ −0.00034 %。単調だが頭打ち | ref |
+| `su2_smooth/` (forge run ではない) | **同一の平滑メッシュ上の SU2** (`gmsh -2 mesh/fluid_c3x.geo -format su2` で書き出し、`su2_run108/case.cfg` と同一設定・`RESTART_SOL= NO`)。iter 9089 で SIGTERM 停止 | rms[Rho] **−5.187** (参照 run の最終 −5.191 と同水準)。L1 比 **1.009** / $A_T$ **−0.0002 %** / $A_{\mu_t}$ +0.0452 %。**「SU2=0.995」は粗メッシュの値だった** | ref |
 | `run_0081_psiP_long` | `reconT: 2` $\psi_P$ 流用 | float32 | **1.037** | `STEADY` (drift 0.3 %) | −0.00067 % |
 | `run_0083_psiP_rep` | 同上 (再現性確認) | float32 | **1.037** | `STEADY` (drift 0.3 %) | −0.00067 % |
 | `run_0080_double_long` | `reconT: 1` 専用 $\psi_T$ | **double** | **1.027** | `STEADY` (drift 1.3 %) | −0.00053 % |
@@ -718,9 +727,111 @@ typedef を `double` に切り替えた `build-double`) が float32 と比 1.027
 累積: 粗メッシュ 1.240 → 平滑メッシュ 1.064 → `reconT` 1.049 (4000 step 値) →
 **準定常・専用 $\psi_T$ で 1.027**。SU2 は 0.995 なので、残差は $|比-1|$ で **5.4 倍**。
 
-**残る候補**: (b) 連続式とエネルギー式の離散化の非対称性、(c) 近壁の分子熱伝導率・乱流 $\mathrm{Pr}_t$ の
-SU2 との一致 (未照合。SU2 は `VISCOSITY_MODEL= SUTHERLAND` + `PRANDTL_LAM= 0.72` / `PRANDTL_TURB= 0.90`、
-forge は `viscMethod: 1` + `thermCondMethod: 1, prandtlLam: 0.72` + `turbulentPrandtl: 0.9`)。
+#### 候補 (c) 「分子輸送が SU2 と違う」は照合して棄却 (2026-09-21)
+
+SU2 は `VISCOSITY_MODEL= SUTHERLAND` ($\mu_0$ 1.716e−5, $T_0$ 273.15 K, $S$ 110.4 K) + `PRANDTL_LAM= 0.72` /
+`PRANDTL_TURB= 0.90`。forge は `viscMethod: 1` が同じ Sutherland 形 ($T_0$ 273.0 K, $S$ 111.0 K;
+`gasProperties_d.cu:58-66`) で、`thermCondMethod: 1` が $k=\mu c_p/\mathrm{Pr}$、`prandtlLam: 0.72` /
+`turbulentPrandtl: 0.9`。**定数のずれは $\mu$ にして 566–800 K で 0.11–0.13 % の一様バイアスだけ**であり、
+一様スケールは交番モードを作れない。よって分子輸送は原因でない。
+
+#### 真の経路は乱流熱伝導 (2026-09-21)
+
+`run_0085_prt1e6_long` で**乱流熱伝導だけを実質 OFF** (`turbulentPrandtl: 1.0e6`) にすると、
+比が **1.027 → 0.986**、$A_T$ が **−0.00051 → +0.00013 %** (SU2 は +0.0001 %) になる。
+$T$ の交番は乱流熱流束 $-(\mu_t/\mathrm{Pr}_t)c_p\nabla T$ が**減衰させているのではなく駆動している**。
+機構は $\nabla\cdot q$ の交番成分 $\propto \nabla(\mu_t/\mathrm{Pr}_t)\cdot\nabla T$ で、壁法線温度勾配が
+$4.5\times10^6$ K/m と巨大なので、$\mu_t$ のわずかな交番が大きな交番熱源になる。
+ただしこれは物理を壊す診断で生産には使えない (判定も `DRIFTING`)。
+
+**同一メッシュ (粗 30703 節点、写像距離 0) での forge / SU2 直接比較** (`run_0009_uniformTw` vs `su2_run108`):
+
+| 層 | 量 | forge | SU2 |
+| ---: | --- | ---: | ---: |
+| L1 | $A_{\mu_t}$ | **−0.1114 %** | −0.0182 % |
+| L1 | $A_k$ | −0.0890 % | +0.0245 % |
+| L1 | $A_\omega$ | −0.0003 % | +0.0216 % |
+| L1 | $A_T$ | −0.0041 % | +0.0001 % |
+| L1 | 比 | 1.178 | 0.994 |
+
+粗メッシュでは forge の $\mu_t$ が SU2 の **6 倍**交番し、$k$ は符号まで逆。
+ただし平滑メッシュ + `reconT: 1` にすると forge の L1 は $A_k$ +0.063 % / $A_{\mu_t}$ **+0.0065 %** まで下がる
+(SU2 の粗メッシュ値より小さい) のに比は 1.027 のまま。**平滑メッシュ上の SU2 が無いので、
+ここから先は同一メッシュでの比較ができていない** — 次は SU2 を平滑メッシュで回すのが筋。
+
+#### 候補 (b) 「SLAU にエントロピー波散逸が無い」は**誤り** (codex 2026-09-21)
+
+当方は「SLAU の質量束散逸は $\Delta P$ 比例項しか持たない」と読んだが、**見落としだった**。
+一定速度・一定圧力の密度摂動 (接触波) では `convectiveFlux_slau_d.inc.cuh:531-534` で
+$\widehat{|V_n|}_p=\widehat{|V_n|}_m=|u_n|$ となり、`:562` は厳密に
+
+$$\dot m/S_f = \tfrac{u_n}{2}(\rho_L+\rho_R) - \tfrac{|u_n|}{2}\Delta\rho$$
+
+で、第 2 項がまさに接触波散逸である。`:422-423` の完全気体エンタルピーと `:593-597` の風上輸送を
+合わせると、散逸は接触波方向 $r_s=(1,u_x,u_y,u_z,|u|^2/2)$ に対して
+$-\frac{S_f}{2}|u_n|\Delta\rho\,r_s$ となり、質量だけでなく運動量・エネルギーまで整合している。
+forge の Roe も同じ成分を持ち ($-\frac{S_f}{2}|u_n|(\Delta\rho-\Delta P/c^2) r_s$)、
+**純粋な接触波では両者の減衰率は同じ** $\lambda_s=|u_n|$。
+
+**指標の解釈も訂正**: 接触波成分の射影は $A_\rho - A_P/\gamma$ であって $A_T=A_P-A_\rho$ ではない。
+**$R=1$ は「等温」であって「エントロピー波成分ゼロ」ではない**。$R=1.027$ は $A_T = 0.027 A_\rho$ の意味で、
+「温度交番が 2.7 %」ではない。
+
+#### 現行の候補: 接触波散逸の**速度下限**が SLAU に無い
+
+Roe は `convectiveFlux_roe_d.inc.cuh:342-344` で $\lambda_j\leftarrow\max\{\lambda_j,\epsilon(|U_a|+c_a)\}$ を
+**接触波を含む全固有値**に適用する。SLAU の `mdot` にはこの下限が無い。
+**近壁では面法線速度 $u_n$ がほぼ 0 なので、SLAU の接触波散逸 $|u_n|\Delta\rho$ が消える** —
+これが交番の近壁局在と整合する。
+
+検証は `space.slauContactFloor`$=\epsilon$ (既定 0.0 = ビット不変) として、**下限の不足分だけ**を
+接触波方向に足す実装で行う (ROE への切替は交絡するので使わない):
+
+$$\alpha_s=\Delta\rho-\Delta P/\bar c^2,\quad
+\delta\lambda_s=\max\{0,\epsilon(|\bar u_n|+\bar c)-|\bar u_n|\},\quad
+\delta F=-\tfrac{S_f}{2}\delta\lambda_s\alpha_s\,(1,\bar u_x,\bar u_y,\bar u_z,|\bar u|^2/2)$$
+
+記録: [`notes/reviews/2026-09-21-codex-c3x-contact-wave.md`](../../notes/reviews/2026-09-21-codex-c3x-contact-wave.md)。
+
+**ROE への単純切替は使えない**: `run_0087_roe_recon0_long` は `rms_roe` が 1.26e3 → 3.87e4 と
+1.5 桁**上昇**して張り付く (`NOT CONVERGED`)。Harten エントロピー補正の次元不整合 (下記「副産物 1」) が疑わしい。
+
+#### 接触波下限の A/B 結果 — 効くが、それだけでは閉じない (2026-09-21)
+
+全 run: 平滑メッシュ・`reconT: 1` + 専用 $\psi_T$・同一初期場・16000 step・`FORGE_CUDA_BLOCKSIZE=256`。
+判定は `check_quasisteady.py --series-csv <run>/nyquist_series.csv --series-cols ratio,A_T`。
+
+| run | $\epsilon$ (`space.slauContactFloor`) | 比 $R$ | VERDICT | $A_T$ |
+| --- | ---: | ---: | --- | ---: |
+| `run_0088_cf0` | 0 (対照) | **1.027** | `STEADY` | −0.00051 % |
+| `run_0089_cf1em3` | 0.001 | **1.021** | `STEADY` | −0.00038 % |
+| `run_0091_cf1em3_rep` | 0.001 (再現) | **1.020** | `STEADY` | −0.00037 % |
+| `run_0092_cf3em3` | 0.003 | **1.021** | `STEADY` | −0.00038 % |
+| `run_0090_cf1em2` | 0.01 | **1.018** | `STEADY` | −0.00034 % |
+
+単調に効き、$\epsilon\gtrsim0.003$ で飽和する。再現 run が比で 0.001・$A_T$ で 1 % 以内に一致するので、
+$0.027\to0.018$ はノイズの遥か上。**接触波散逸の速度下限の欠如は実際に寄与している** (残差の約 1/3)。
+
+#### 基準の訂正: SU2 の値はメッシュで変わる — 同一メッシュでは差は 2〜3 倍
+
+これまで「SU2 = 0.995」と比べてきたが、**それは粗メッシュの値**だった。
+同じ平滑メッシュで SU2 を回し直した (`su2_smooth/`、`gmsh -2 ... -format su2` で書き出し、
+`su2_run108/case.cfg` と同一設定・`RESTART_SOL= NO`、iter 9089 で rms[Rho] **−5.187**
+= 参照 run の最終 −5.191 と同水準)。写像距離は 0 (同一節点)。
+
+| | forge $\epsilon=0$ | forge $\epsilon=0.01$ | **SU2** |
+| --- | ---: | ---: | ---: |
+| L1 比 $R$ | 1.027 | 1.018 | **1.009** |
+| L1 $A_T$ | −0.00051 % | −0.00034 % | **−0.0002 %** |
+| L3 比 $R$ | 1.094 | — | **1.064** |
+| L1 $A_{\mu_t}$ | +0.0065 % | — | **+0.0452 %** |
+
+**差は $|R-1|$ で 3.0 倍 (下限つきで 2.0 倍)** であって、粗メッシュ基準で言っていた 5.4 倍ではない。
+SU2 自身は平滑メッシュで**悪化**している (0.994 → 1.009) 一方、forge は 1.178 → 1.027 と大きく改善した。
+また**平滑メッシュでは forge の $\mu_t$ の交番は SU2 の 1/7** なので、
+「forge の $\mu_t$ が余計に交番している」という筋は同一メッシュでは成り立たない
+(粗メッシュでの 6 倍差はメッシュ強制への感度差だった)。
+
 
 ### 副産物 1: forge の Harten エントロピー補正が次元不整合 (未修正)
 

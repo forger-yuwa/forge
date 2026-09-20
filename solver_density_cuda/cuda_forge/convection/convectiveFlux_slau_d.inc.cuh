@@ -16,6 +16,8 @@ __global__ void SLAU_d
  // **T が独立な 2 つの再構成の差**になり 2 節点モードを浴びる (case/53 実測: (dP/P)/(drho/rho) が
  // forge 1.24 / SU2 0.995、等温=1.000)。0 でビット不変。**リミッタは limiter_P を流用** (limiter_T は未計算)。
  int reconT,
+ // 接触波 (エントロピー波) 散逸の速度下限 eps。0.0 でビット不変 (solverConfig.hpp `slauContactFloor` 参照)
+ flow_float contactFloor,
  int lowMachPrecond, flow_float precondEps,   // 低マッハ前処理 (1: 散逸スケールを c'、0: 従来 c_hat)
  int lowMachThornber,                         // Thornber 再構成補正 (1: L/R 速度ジャンプを z=min(M,1) で縮約)
  flow_float ga,
@@ -595,6 +597,28 @@ __global__ void SLAU_d
         flow_float res_roUy_temp = 0.5f*(mdot+abs(mdot))*Uy_L +0.5f*(mdot-abs(mdot))*Uy_R +p_tilde_r*syy;
         flow_float res_roUz_temp = 0.5f*(mdot+abs(mdot))*Uz_L +0.5f*(mdot-abs(mdot))*Uz_R +p_tilde_r*szz;
         flow_float res_roe_temp  = 0.5f*(mdot+abs(mdot))*h_p +0.5f*(mdot-abs(mdot))*h_m ;
+
+        // 接触波散逸の速度下限 (space.slauContactFloor > 0 のときだけ)。
+        // SLAU の mdot は -(S/2)|u_n| dro を既に持つが**下限が無い**ので、近壁 (u_n ~ 0) で
+        // 接触波の Nyquist モードが減衰しない。Roe は全固有値に max(lambda, eps(|u_n|+c)) を掛ける。
+        // ここでは**不足分 dlambda_s のみ**を接触波方向 r_s=(1,u,|u|^2/2) に足す。
+        if (contactFloor > 0.0f) {
+            const flow_float un_bar = 0.5f*(Vn_p + Vn_m);
+            const flow_float dlam   = max(0.0f, contactFloor*(abs(un_bar) + c_hat) - abs(un_bar));
+            if (dlam > 0.0f) {
+                const flow_float alpha_s = (ro_R - ro_L) - (P_R - P_L)/(c_hat*c_hat);
+                const flow_float ux_b = 0.5f*(Ux_L + Ux_R);
+                const flow_float uy_b = 0.5f*(Uy_L + Uy_R);
+                const flow_float uz_b = 0.5f*(Uz_L + Uz_R);
+                const flow_float coef = -0.5f*sss*dlam*alpha_s;
+                res_ro_temp   += coef;
+                res_roUx_temp += coef*ux_b;
+                res_roUy_temp += coef*uy_b;
+                res_roUz_temp += coef*uz_b;
+                res_roe_temp  += coef*0.5f*(ux_b*ux_b + uy_b*uy_b + uz_b*uz_b);
+                massflux[ip]   = res_ro_temp;   // 化学種移流が読む質量束にも反映
+            }
+        }
 
         atomicAdd(&res_ro[ic0]  , -res_ro_temp);
         atomicAdd(&res_roUx[ic0], -res_roUx_temp);

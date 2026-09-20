@@ -259,6 +259,7 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
 
         SLAU_d<<<dimGrid_normal_halo , cuda_cfg.dimBlock>>> (
             cfg.convMethod, cfg.limiter, slauVariant, cfg.reconT,
+            cfg.slauContactFloor,
             cfg.lowMachPrecond, cfg.precondEps,
             cfg.lowMachThornber,
             cfg.gamma,
