@@ -10,6 +10,12 @@ __global__ void SLAU_d
 (
  int conv_scheme, int limit_scheme,
  int slauVariant,   // 1: SLAU, 2: SLAU2 (圧力束第3項のみ低マッハ改良)
+ // space.reconT=1: MUSCL 再構成を **rho でなく T** に対して行い、面密度を EOS から導く
+ // (rho_face = P_face/(R T_face))。SU2 は理想気体+ROE で T,u,v,P の 4 変数だけ再構成し rho を導出する
+ // (CEulerVariable.cpp:38-41, nPrimVarGrad = ndim+2)。既定 (0) は rho,u,v,w,P を再構成して T を導出するため、
+ // **T が独立な 2 つの再構成の差**になり 2 節点モードを浴びる (case/53 実測: (dP/P)/(drho/rho) が
+ // forge 1.24 / SU2 0.995、等温=1.000)。0 でビット不変。**リミッタは limiter_P を流用** (limiter_T は未計算)。
+ int reconT,
  int lowMachPrecond, flow_float precondEps,   // 低マッハ前処理 (1: 散逸スケールを c'、0: 従来 c_hat)
  int lowMachThornber,                         // Thornber 再構成補正 (1: L/R 速度ジャンプを z=min(M,1) で縮約)
  flow_float ga,
@@ -67,6 +73,7 @@ __global__ void SLAU_d
     flow_float *dUydx=grd.dUydx, *dUydy=grd.dUydy, *dUydz=grd.dUydz;
     flow_float *dUzdx=grd.dUzdx, *dUzdy=grd.dUzdy, *dUzdz=grd.dUzdz;
     flow_float *dPdx=grd.dPdx, *dPdy=grd.dPdy, *dPdz=grd.dPdz;
+    flow_float *T_cellv=st.T, *dTdx=grd.dTdx, *dTdy=grd.dTdy, *dTdz=grd.dTdz;   // space.reconT=1 のみ
     // --- ローカル展開ここまで ---
 
     geom_int ip_orig = blockDim.x*blockIdx.x + threadIdx.x;
@@ -164,7 +171,13 @@ __global__ void SLAU_d
             atomicMin(&g_psiRhoY_min_scaled, (int)(min(lim_rho_L, lim_rho_R)*1.0e6f));
         }
 
-        flow_float ro_L = interp_dispatch(conv_scheme, limit_scheme, ro[ic0] , ro[ic1], drodx[ic0], drody[ic0], drodz[ic0], drodx[ic1], drody[ic1], drodz[ic1], dcc_x, dcc_y, dcc_z, dc0p_x, dc0p_y, dc0p_z, f, lim_rho_L);
+        flow_float ro_L;
+        flow_float T_L_recon = 0.0f, T_R_recon = 0.0f;
+        if (reconT != 0) {
+            T_L_recon = interp_dispatch(conv_scheme, limit_scheme, T_cellv[ic0], T_cellv[ic1], dTdx[ic0], dTdy[ic0], dTdz[ic0], dTdx[ic1], dTdy[ic1], dTdz[ic1], dcc_x, dcc_y, dcc_z, dc0p_x, dc0p_y, dc0p_z, f, limiter_P[ic0]);
+        } else {
+        ro_L = interp_dispatch(conv_scheme, limit_scheme, ro[ic0] , ro[ic1], drodx[ic0], drody[ic0], drodz[ic0], drodx[ic1], drody[ic1], drodz[ic1], dcc_x, dcc_y, dcc_z, dc0p_x, dc0p_y, dc0p_z, f, lim_rho_L);
+        }
         flow_float Ux_L = interp_dispatch(conv_scheme, limit_scheme, Ux[ic0] , Ux[ic1], dUxdx[ic0], dUxdy[ic0], dUxdz[ic0], dUxdx[ic1], dUxdy[ic1], dUxdz[ic1], dcc_x, dcc_y, dcc_z, dc0p_x, dc0p_y, dc0p_z, f, limiter_Ux[ic0]);
         flow_float Uy_L = interp_dispatch(conv_scheme, limit_scheme, Uy[ic0] , Uy[ic1], dUydx[ic0], dUydy[ic0], dUydz[ic0], dUydx[ic1], dUydy[ic1], dUydz[ic1], dcc_x, dcc_y, dcc_z, dc0p_x, dc0p_y, dc0p_z, f, limiter_Uy[ic0]);
         flow_float Uz_L = interp_dispatch(conv_scheme, limit_scheme, Uz[ic0] , Uz[ic1], dUzdx[ic0], dUzdy[ic0], dUzdz[ic0], dUzdx[ic1], dUzdy[ic1], dUzdz[ic1], dcc_x, dcc_y, dcc_z, dc0p_x, dc0p_y, dc0p_z, f, limiter_Uz[ic0]);
@@ -174,12 +187,24 @@ __global__ void SLAU_d
         //flow_float Uz_L = roUz_L/ro_L;
         // velocity2_L / h_p はブレンド後に算出するため後段へ移動 (lowMachThornber 対応)。
 
-        flow_float ro_R  = interp_dispatch(conv_scheme, limit_scheme, ro[ic1], ro[ic0], drodx[ic1], drody[ic1], drodz[ic1], drodx[ic0], drody[ic0], drodz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, lim_rho_R);
+        flow_float ro_R;
+        if (reconT != 0) {
+            T_R_recon = interp_dispatch(conv_scheme, limit_scheme, T_cellv[ic1], T_cellv[ic0], dTdx[ic1], dTdy[ic1], dTdz[ic1], dTdx[ic0], dTdy[ic0], dTdz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limiter_P[ic1]);
+        } else {
+        ro_R = interp_dispatch(conv_scheme, limit_scheme, ro[ic1], ro[ic0], drodx[ic1], drody[ic1], drodz[ic1], drodx[ic0], drody[ic0], drodz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, lim_rho_R);
+        }
         flow_float Ux_R  = interp_dispatch(conv_scheme, limit_scheme, Ux[ic1], Ux[ic0], dUxdx[ic1], dUxdy[ic1], dUxdz[ic1], dUxdx[ic0], dUxdy[ic0], dUxdz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limiter_Ux[ic1]);
         flow_float Uy_R  = interp_dispatch(conv_scheme, limit_scheme, Uy[ic1], Uy[ic0], dUydx[ic1], dUydy[ic1], dUydz[ic1], dUydx[ic0], dUydy[ic0], dUydz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limiter_Uy[ic1]);
         flow_float Uz_R  = interp_dispatch(conv_scheme, limit_scheme, Uz[ic1], Uz[ic0], dUzdx[ic1], dUzdy[ic1], dUzdz[ic1], dUzdx[ic0], dUzdy[ic0], dUzdz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limiter_Uz[ic1]);
         flow_float P_R   = interp_dispatch(conv_scheme, limit_scheme, Ps[ic1], Ps[ic0], dPdx[ic1] , dPdy[ic1] , dPdz[ic1] , dPdx[ic0] , dPdy[ic0] , dPdz[ic0] ,-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limiter_P[ic1]);
 
+        if (reconT != 0) {
+            const flow_float Rgas = cnd.cp_cpg * (ga - (flow_float)1.0) / ga;
+            ro_L = P_L / max(Rgas * T_L_recon, (flow_float)1.0e-30);
+            ro_R = P_R / max(Rgas * T_R_recon, (flow_float)1.0e-30);
+        }
+        // reconT: 面密度を EOS から導く (rho = P/(R T))。R = cp (ga-1)/ga (CPG)。
+        // P_L/P_R はこの直後に作るので、ここでは確定した T だけ保持し、P 再構成の後で ro を作る。
         // D2a 連続ブレンド (chatter-free): 強組成勾配ほど flow 再構成をセル値(1次)へ滑らかに寄せる。
         if (g_contactBlend > 0.0f && sY_dbg > 0.0f) {
             const flow_float w = min((flow_float)1.0, sY_dbg / g_contactBlend);

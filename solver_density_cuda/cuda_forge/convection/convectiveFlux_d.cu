@@ -211,7 +211,8 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         var.p_d["massflux"] };
     PrimState st {
         var.c_d["ro"], var.c_d["roUx"], var.c_d["roUy"], var.c_d["roUz"], var.c_d["roe"],
-        var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["P"], var.c_d["Ht"], var.c_d["sonic"] };
+        var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["P"], var.c_d["Ht"], var.c_d["sonic"],
+        var.c_d["T"] };
     ResidualOut reso {
         var.c_d["res_ro"], var.c_d["res_roUx"], var.c_d["res_roUy"], var.c_d["res_roUz"], var.c_d["res_roe"] };
     LimiterFields lim {
@@ -222,7 +223,8 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         var.c_d["dUxdx"], var.c_d["dUxdy"], var.c_d["dUxdz"],
         var.c_d["dUydx"], var.c_d["dUydy"], var.c_d["dUydz"],
         var.c_d["dUzdx"], var.c_d["dUzdy"], var.c_d["dUzdz"],
-        var.c_d["dPdx"] , var.c_d["dPdy"] , var.c_d["dPdz"] };
+        var.c_d["dPdx"] , var.c_d["dPdy"] , var.c_d["dPdz"],
+        var.c_d["dTdx"] , var.c_d["dTdy"] , var.c_d["dTdz"] };
     // SST 全エネルギー E_t = E_m + ρk (sstEnergyIncludesK): 面エンタルピー +(5/3)k, 圧力流束 p* = p + (2/3)ρk。
     const bool sstEnergyK = (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1);
     if (sstEnergyK && !(cfg.solver == "SLAU" || cfg.solver == "SLAU2")) {
@@ -256,7 +258,7 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         }
 
         SLAU_d<<<dimGrid_normal_halo , cuda_cfg.dimBlock>>> (
-            cfg.convMethod, cfg.limiter, slauVariant,
+            cfg.convMethod, cfg.limiter, slauVariant, cfg.reconT,
             cfg.lowMachPrecond, cfg.precondEps,
             cfg.lowMachThornber,
             cfg.gamma,

@@ -272,6 +272,8 @@ struct FaceGeom {
 struct PrimState {
     flow_float *ro, *roUx, *roUy, *roUz, *roe;
     flow_float *Ux, *Uy, *Uz, *Ps, *Ht, *sonic;
+    // space.reconT=1 で MUSCL 再構成を ρ でなく T に対して行うときの温度場 (0 では未使用)。
+    flow_float *T = nullptr;
 };
 struct ResidualOut {
     flow_float *res_ro, *res_roUx, *res_roUy, *res_roUz, *res_roe;
@@ -286,6 +288,8 @@ struct GradFields {
     flow_float *dUydx, *dUydy, *dUydz;
     flow_float *dUzdx, *dUzdy, *dUzdz;
     flow_float *dPdx, *dPdy, *dPdz;
+    // space.reconT=1 用 (0 では未使用)。
+    flow_float *dTdx = nullptr, *dTdy = nullptr, *dTdz = nullptr;
 };
 // 非平衡凝縮 (二相) のエネルギー流束補正。g_total==nullptr で従来挙動 (ビット不変)。全スキーム共通。
 struct CondArgs {

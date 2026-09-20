@@ -541,6 +541,11 @@ void solverConfig::read(std::string fname)
             std::cout << "'roeEntropyFixCoeff' in 'space': " << this->roeEntropyFixCoeff
                       << "  (SU2 ENTROPY_FIX_COEFF 同形の固有値下限; 0=従来)" << std::endl;
         }
+        if (space["reconT"]) {
+            this->reconT = space["reconT"].as<int>();
+            std::cout << "'reconT' in 'space': " << this->reconT
+                      << (this->reconT ? "  (reconstruct T, derive rho -- SU2 form)" : "  (reconstruct rho, derive T)") << std::endl;
+        }
         if (space["heatCorrSU2"]) {
             this->heatCorrSU2 = space["heatCorrSU2"].as<int>();
             std::cout << "'heatCorrSU2' in 'space': " << this->heatCorrSU2

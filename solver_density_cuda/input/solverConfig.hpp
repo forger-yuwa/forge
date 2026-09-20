@@ -438,6 +438,17 @@ public:
     // plan boundary-conjugate-heat-transfer §5.1 #43、methods/diffusion/。
     int heatCorrSU2 = 0;
 
+    // MUSCL 再構成する原始変数の選び方 (SLAU のみ)。
+    // 0 (既定): rho, u, v, w, P を再構成し T = P/(rho R) を導出 (従来)。
+    // 1: **T, u, v, w, P を再構成し rho = P/(R T) を導出** — SU2 と同じ構成。
+    //    SU2 は理想気体 + ROE で nPrimVarGrad = ndim+2 (CEulerVariable.cpp:38-41)、原始変数の並びが
+    //    [T, u, v, P, rho, h, c] なので **T,u,v,P の 4 つだけ再構成し rho は導出**する。
+    // **動機**: 既定 (0) では T が独立な 2 つの再構成の差になり、近壁の 2 節点モードを浴びる。
+    //    実測 (case/53 第一内部点、log Nyquist 射影): (dP/P)/(drho/rho) が forge 1.24 / SU2 0.995
+    //    (等温=1.000)、その差がそのまま dT/T の交番 (forge -0.0041 % / SU2 +0.0001 %)。
+    // **限界**: limiter_T は未計算なので limiter_P を流用している。
+    int reconT = 0;
+
     // 壁ノードの k 残差を 0 に射影する (ω と同じ扱いにする)。既定 0 = 従来。
     // **動機**: 壁解像 (低 Re) SST では k_w=0 は Dirichlet なのに、forge は状態ピン (nodeWallKPin) だけで
     // res_roK を射影していない。ω は状態ピン + res_roOmega ゼロ化の両方をしている。SU2 は
