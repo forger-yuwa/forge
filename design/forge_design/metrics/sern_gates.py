@@ -151,11 +151,25 @@ OMEGA_FLOOR = 1.0e-20          # update_d.cu の roOmega 下限
 def _solver_floors(run_dir) -> dict:
     """run の `solverConfig.yaml` から実効の床を読む (2026-09-19, codex plan レビュー M6)。
     書かれていなければソルバ既定 (`solverConfig.hpp`: pMin 1.0 / roMin 1e-4 / tMin 1e-4) を使う。
-    ただし温度は `dependentVariables_d.cu` の反転クランプ `DEPVAR_TMIN` 50 K が実効下限。"""
-    out = {"P": 1.0, "ro": 1.0e-4, "T": 50.0}
+
+    **温度の実効下限は経路で違う** (2026-09-20, codex plan レビュー M2 で誤りが判明):
+
+    - **単相 CPG** (`thermalMethod: 0` かつ凝縮なし) は `dependentVariables_d.cu` L290 の
+      `T = max(intE/(cp/gamma), tMin)` で、床は **config の `tMin` (既定 1e-4 K)**。
+    - **TP / 多成分 / 凝縮**の温度反転だけが `DEPVAR_TMIN` = **50 K** でクランプされる
+      (同 L148/151/160)。
+
+    旧実装は経路を見ずに一律 50 K を下限にしていたため、CPG run の 37.6 K を
+    「床に張り付いた」と誤判定していた (`case/46` `run_0415`)。"""
+    out = {"P": 1.0, "ro": 1.0e-4, "T": 1.0e-4}
     f = Path(run_dir) / "solverConfig.yaml"
     if f.exists():
         txt = f.read_text()
+        m = re.search(r"thermalMethod\s*:\s*(\d+)", txt)
+        tp = (m is not None and int(m.group(1)) != 0)
+        mc = re.search(r"condensation\s*:\s*(\d+)", txt)
+        if tp or (mc is not None and int(mc.group(1)) != 0):
+            out["T"] = 50.0          # DEPVAR_TMIN: 温度反転を通る経路だけ
         for key, name in (("pMin", "P"), ("roMin", "ro"), ("tMin", "T")):
             m = re.search(rf"{key}\s*:\s*([-\d.eE+]+)", txt)
             if m:
