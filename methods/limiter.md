@@ -58,6 +58,82 @@ $$
 $\delta_m \to 0$ で $\psi \to 1$ (連続)。$|\delta_m|$ が体積スケール以下では実質
 無リミットになり、滑らかな領域での精度低下を避ける。
 
+#### ⚠ 既定の $\epsilon^2$ は**次元が合っていない**
+
+$\epsilon^2 = (K|V_C|^{1/3})^3 = K^3 |V_C|$ は**長さの 3 乗の次元**を持つのに、比べる相手の
+$\delta$ は変数そのものの次元 ($\rho$ なら kg/m³、$P$ なら Pa) である。結果:
+
+- **メッシュを拡大すると実質 OFF になる**。座標を ×1024 すると $\epsilon^2$ が面積とともに ×2²⁰ 増え、
+  分子分母を支配して常に $\psi \approx 1$ を返す (実測: $\bar\psi_\rho$ 0.9718 → 0.99998、
+  62069 ノード中 58761 で $\psi$ が変化)。
+- **変数ごとに効き方が桁違いになる**。同じ $\epsilon^2$ を $\Delta\rho \sim O(0.1)$ と
+  $\Delta P \sim O(10^5)$ に当てるので、片方では無リミット・片方では通常動作になる。
+
+SU2 が同じ形の式で壊れないのは、**解を無次元化して解いている**ため $\delta$ が $O(1)$ だからである
+(`Common/src/CConfig.cpp:5021` `RefElemLength = 1.0`, `VENKAT_LIMITER_COEFF = 0.05` → $\epsilon^2 = 1.25\times10^{-4}$)。
+forge は SI 次元のまま解くので同じ式が成立しない。
+
+#### 無次元化 Venkatakrishnan (`space.limiterScaled: 1`, opt-in)
+
+$\delta$ を**変数ごとの固定参照** $q_\mathrm{ref}$ で割ってから Venkatakrishnan を当てる。
+
+$$
+\hat\delta = \delta / q_\mathrm{ref}, \qquad
+\hat\epsilon^2 = \left(\frac{K\,h_i}{L_\mathrm{ref}}\right)^3 ,
+$$
+
+- $q_\mathrm{ref}$: $\rho$ は `limiterRoRef`、$P$ は `limiterPRef`、速度 3 成分は `limiterARef` (音速)。
+  **明示指定 (>0) が最優先**で、0 (既定) なら起動時に初期場の体積加重平均から決める。
+  自動だと restart のたびに値が変わるのでログに `(auto)` と警告を出す。貼り付け用の行も印字する。
+- $h_i$: **軸対称は `A_planar`、平面 2D は `volume` (奥行 1 の面積) の平方根**、3D は $V^{1/3}$。
+  `A_planar` は軸対称のときしか device へ転送されないので、**平面 2D で `A_planar` を読んではいけない**
+  (読むと $\epsilon^2=0$ になり `venkatK` が効かなくなる)。
+- $L_\mathrm{ref}$: `limiterRefLength`。0 ならメッシュ境界箱の対角。
+
+**`space.venkatK` の推奨は 0.05** (SU2 既定と同値)。既定の 1.0 は Sod で全変数を悪化させる
+(密度の近傍逸脱が K=1.0 で 86674 面側、K=0.05 で **0**)。SERN でも K=1.0 は $\rho$ 797 / $U_y$ 1777 に対し
+K=0.05 は $\rho$/$U_x$/$P$ が 0。
+
+**`space.limiterScaled > 0` は `space.limiterMatchRecon: 1` を要求する** (通常経路は `matchRecon==0` で
+`limiterScaled` を無視するのに周期経路は適用するため、契約が割れる)。
+
+#### 比の形 (`space.limiterScaled: 2`) — **棄却**
+
+$\psi$ を $y=\delta^+/\delta_m$ だけの関数にする形。基準値も長さも要らないが、
+**滑らか域でリミッタが切れない**ので定常残差の床が 2〜5 倍上がる (case/44 で実測)。使わないこと。
+
+### リミッタの評価点 (`space.limiterMatchRecon`)
+
+リミッタが $\delta_m$ を評価する点は、**流束が再構成する点と一致していなければならない**。
+
+| 設定 | 評価点 | 増分の形 |
+| --- | --- | --- |
+| `0` (既定) | 双対面重心 | $g\cdot d$ のみ |
+| `1` | **流束と同じ点** (node は常にエッジ中点) | `convMethod` と同じ (2 なら隣接値差の項も含む) |
+
+node の流束は `matchRecon` に関係なく**常にエッジ中点**で再構成する (`convectiveFlux_d.cu` の
+`g_reconEdgeMid` は node なら無条件 1) ので、既定の `0` では**リミッタと流束が別の点を見ている**。
+実測ではこれが $U_x$ と $P$ の近傍逸脱の原因で、`1` にすると 0 になる
+(密度と $U_y$ の逸脱は次元不整合が原因なので `limiterScaled` 側で直す)。
+
+### 有界性の診断 (`space.limiterDiag: N`, 既定 0)
+
+$\psi$ 確定後に**流束と同じ点・同じ増分関数**で face 値を作り直し、そのノードの近傍 min/max を
+外れた face-side を変数ごとに数える。N 回の flux 呼び出しごとに印字し、**窓と累計 (`CUM`) の両方**を出す。
+
+- 許容幅は $\max(\text{近傍レンジ},\ |q|_\max) \times 10^{-5}$ に**絶対床 $10^{-6} q_\mathrm{ref}$** を敷く
+  (恒等 0 の変数では近傍レンジも 0 になり float ノイズを逸脱と数えてしまうため)。
+- 非有限は別枠で数える (NaN は大小比較が両方 false になるので「逸脱なし」に化ける)。
+- 検査件数 0 は `VERDICT=NO-CHECKS(FAIL)`。幾何尺度 $h_i \le 0$ も警告する。
+- **後処理で再構成を再現して判定してはいけない** — 出力ファイルは状態が更新後・勾配が更新前で 1 step ずれる。
+
+### 面単位の非物理フォールバック (`space.badReconDiag` / `badReconFallback`, 既定 0)
+
+SU2 の `bad_recon` 相当。流束が消費する L/R 状態が $\rho \le$ `roMin` / $P \le$ `pMin` / 非有限なら、
+**その面だけ**両側をセル値に戻し (`conv_scheme = -1`)、N 回の訪問だけ 1 次に保つ。
+**⚠ カウンタはフォールバック前に数える**ので、発火数から介入の効果は読めない。
+SERN のベース発散には効かなかった (opt-in で残置)。
+
 ### Nishikawa R1 リミッタ (未有効)
 
 `nishikawa_r1_limiter` の実装は残されているがコメントアウト済み。

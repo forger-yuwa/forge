@@ -263,7 +263,11 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
 
 void outputH5_XDMF(const solverConfig& cfg , const mesh& msh , variables& var , const int& iStep)
 {
-    if (iStep%cfg.outStepInterval != 0 or iStep < cfg.outStepStart) return;
+    // **最終 step は間隔に関係なく必ず保存する** (codex 2026-09-20 plan レビュー Major 4)。
+    // 剰余判定だけだと `nStepOuter` が `outStepInterval` の倍数でない run は最終場を残さず、
+    // 「完走した」のに比較できる場が無い (run_0324 は 40 step 走って res_0 しか書いていなかった)。
+    const bool isLast = (cfg.nStepOuter > 0) && (iStep >= cfg.nStepOuter);
+    if (!isLast && (iStep%cfg.outStepInterval != 0 or iStep < cfg.outStepStart)) return;
 
     writeSolutionH5_XDMF(cfg , msh , var , iStep , "res_");
 }
