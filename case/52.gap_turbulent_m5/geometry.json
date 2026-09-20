@@ -1,0 +1,22 @@
+{
+  "_source": "case/49.plate_annular_cavity_m5 の case.json (M5 環状深キャビティ) の 2 次元等価",
+  "_note": "環状すきま (外径 50 mm / 内円柱径 45 mm → 幅 2.5 mm, 深さ 50 mm) を、2D の単一横すきまに置き換える",
+  "units": "mm",
+  "plate": {
+    "holder_length": 450.0,
+    "le_radius_nominal": 0.0
+  },
+  "cavity": {
+    "depth": 50.0,
+    "x_rear_wall_from_le": 350.0,
+    "_x_note": "開口位置。smooth run (run_0003) で δ99 ∝ x^0.649 (2.119 mm @ x=100 mm) と実測し、case/49 の目標 δ99 = 5 mm (= 2W) になる x ≈ 350 mm に置いた (δ99 ≈ 4.8 mm = 1.9W)",
+    "spanwise_length_main": 0.0,
+    "widths": {
+      "0.05": 2.5
+    }
+  },
+  "instrumentation": {
+    "pressure_model_orifice_x_from_le": 250.0,
+    "pressure_cavity_orifice_above_floor": 2.5
+  }
+}
