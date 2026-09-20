@@ -135,7 +135,8 @@ def wall_dump(run, physid, step, name=None):
         else:
             continue
         warea[nd] += a / len(nd)
-    return dict(xyz=xyz, w=warea, area=float(warea.sum()), **v)
+    return dict(xyz=xyz, w=warea, area=float(warea.sum()),
+                conn=conn, offs=offs, **v)
 
 
 def snapshots(run):
@@ -401,15 +402,74 @@ def wall_href(wh, man, D, c, v, T0):
     return wh
 
 
-def wall_Q_below(wh, groups, z_cut):
-    """z < z_cut の壁だけの入熱 [W] (開口面 z_cut での流束と収支を組むため)。"""
+def _poly_area(pts):
+    """3D 多角形の面積 (平面性は仮定しない: 扇形分割の外積和)。"""
+    if len(pts) < 3:
+        return 0.0
+    o = pts[0]
+    n = np.zeros(3)
+    for i in range(1, len(pts) - 1):
+        n = n + np.cross(pts[i] - o, pts[i + 1] - o)
+    return 0.5 * float(np.linalg.norm(n))
+
+
+def face_cut_integral(w, vals, z_cut, below=True):
+    """各**面を z = z_cut で切断**して積分する [値 x 面積 の総和]。
+
+    旧実装は「ノードの z が条件を満たすか」で面積重みを採否していたため、
+    **実効的な積分範囲がノード配置 = 格子に依存**していた (codex M6, 残作業 #16)。
+    面を平面 z = z_cut で Sutherland-Hodgman クリップし、切った多角形の面積と、
+    その頂点での値 (新頂点は辺上の線形補間) の平均を掛ける。これで積分範囲は
+    **格子によらず固定した物理領域**になる。
+    """
+    xyz = w["xyz"]
+    conn, offs = w["conn"], w["offs"]
+    tot = 0.0
+    s0 = 0
+    sign = -1.0 if below else 1.0            # below: z < z_cut を残す
+    for e in range(len(offs)):
+        nd = conn[s0:offs[e]]
+        s0 = offs[e]
+        if len(nd) < 3:
+            continue
+        P = xyz[nd].astype(float)
+        V = np.asarray(vals, float)[nd]
+        d = sign * (P[:, 2] - z_cut)         # > 0 が残す側
+        if np.all(d <= 0):
+            continue
+        if np.all(d >= 0):
+            tot += _poly_area(P) * float(V.mean())
+            continue
+        op, ov = [], []
+        n = len(nd)
+        for i in range(n):
+            j = (i + 1) % n
+            if d[i] >= 0:
+                op.append(P[i]); ov.append(V[i])
+            if (d[i] > 0) != (d[j] > 0):
+                t = d[i] / (d[i] - d[j])
+                op.append(P[i] + t * (P[j] - P[i]))
+                ov.append(V[i] + t * (V[j] - V[i]))
+        if len(op) >= 3:
+            tot += _poly_area(np.array(op)) * float(np.mean(ov))
+    return tot
+
+
+def wall_Q_below(wh, groups, z_cut, node_weights=False):
+    """z < z_cut の壁だけの入熱 [W] (開口面 z_cut での流束と収支を組むため)。
+
+    既定は**面切断**。`node_weights=True` で旧挙動 (ノード採否) に戻せる (比較用)。
+    """
     tot = 0.0
     for g in groups:
         d = wh.get(g)
         if d is None or "_z_node" not in d:
             continue
-        m = d["_z_node"] < z_cut
-        tot += float(np.sum(d["_qin_node"][m] * d["_w_node"][m]))
+        if node_weights or "_dump" not in d:
+            m = d["_z_node"] < z_cut
+            tot += float(np.sum(d["_qin_node"][m] * d["_w_node"][m]))
+        else:
+            tot += face_cut_integral(d["_dump"], d["_qin_node"], z_cut, below=True)
     return tot
 
 
@@ -446,8 +506,10 @@ def wall_heat(run, step, man, D, prof_n=40):
         lip = man["eval"].get("lip_band_m", 1.0e-3)
         zn = w["xyz"][:, 2]
         deep = zn < -lip
-        Q_nolip = float(np.sum(qin[deep] * wt[deep])) if deep.any() else float("nan")
-        d = dict(Q_W=Q, Q_nolip_W=Q_nolip, lip_band_m=lip,
+        # **面を切って積分する** (残作業 #16 / codex M6)。ノード採否だと積分範囲が格子依存。
+        Q_nolip = face_cut_integral(w, qin, -lip, below=True)
+        Q_nolip_nodes = float(np.sum(qin[deep] * wt[deep])) if deep.any() else float("nan")
+        d = dict(Q_W=Q, Q_nolip_W=Q_nolip, Q_nolip_nodes_W=Q_nolip_nodes, lip_band_m=lip,
                  area_m2=A, qpp_mean=qpp, qpp_max=float(np.max(qin)),
                  qpp_min=float(np.min(qin)),
                  h_aw=qpp / max(Taw - Tw, 1e-30),
@@ -463,6 +525,7 @@ def wall_heat(run, step, man, D, prof_n=40):
             d["_ro_node"] = np.asarray(w["ro"], float)
         if "Ts" in w:
             d["_mu_node"] = mu_suth(np.asarray(w["Ts"], float))
+        d["_dump"] = w
         d["_x_node"] = w["xyz"][:, 0]
         d["_y_node"] = w["xyz"][:, 1]
         d["_z_node"] = w["xyz"][:, 2]
@@ -504,9 +567,13 @@ def lip_scan(wh, eps):
     for e in sorted(eps):
         q = 0.0
         for g in cav:
-            zn, qin, w = wh[g]["_z_node"], wh[g]["_qin_node"], wh[g]["_w_node"]
-            m = zn < -e
-            q += float(np.sum(qin[m] * w[m])) if m.any() else 0.0
+            d = wh[g]
+            if "_dump" in d:                 # **面切断** (残作業 #16)。ノード採否は格子依存
+                q += face_cut_integral(d["_dump"], d["_qin_node"], -e, below=True)
+            else:
+                zn, qin, w = d["_z_node"], d["_qin_node"], d["_w_node"]
+                m = zn < -e
+                q += float(np.sum(qin[m] * w[m])) if m.any() else 0.0
         print("    ε = %6.3f mm   Q = %8.4g W" % (e * 1e3, 2 * q))
         xs.append(np.sqrt(e)); ys.append(2 * q)
     def fit(xs, ys, tag):
