@@ -73,10 +73,12 @@ SU2 が同じ形の式で壊れないのは、**解を無次元化して解い�
 (`Common/src/CConfig.cpp:5021` `RefElemLength = 1.0`, `VENKAT_LIMITER_COEFF = 0.05` → $\epsilon^2 = 1.25\times10^{-4}$)。
 forge は SI 次元のまま解くので同じ式が成立しない。
 
-#### 無次元化 Venkatakrishnan (`space.limiterScaled: 1`, opt-in)
+#### 無次元化 Venkatakrishnan (`space.limiterScaled: 1`, **既定**)
 
 **`limiterScaled: 1` は評価点の一致を内包する** (2026-09-20 に `limiterMatchRecon` を畳んだ)。
-公開値は **0 (旧経路) / 1 (修正版)** の 2 つだけ。
+公開値は **0 (旧経路) / 1 (修正版)** の 2 つだけで、**既定は 1** (2026-09-20 変更)。
+旧値を再現したい run は `limiterScaled: 0` を明記すること。
+node 以外 / `convMethod` 対象外では**警告して自動で 0 に落ちる**。
 
 $\delta$ を**変数ごとの固定参照** $q_\mathrm{ref}$ で割ってから Venkatakrishnan を当てる。
 

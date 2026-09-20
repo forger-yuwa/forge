@@ -27,6 +27,7 @@
 mesh: {discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: X.h5, valueFileName: X.h5}
 solver: "SLAU"
 space: {convMethod: 1, limiter: 2}                      # 本段。起動は convMethod 0 (§1.2)
+                                                        # limiterScaled は既定 1 (無次元化 Venkatakrishnan, venkatK 0.05)
 time:
   unsteady: 0
   last: {nStepOuter: N}
@@ -42,6 +43,13 @@ output: {level: 1}                                      # 保存量 + 原始量 
   **node 用に変換した h5** (`discretization: node` を書いた config で `convertGmshToForge`) を使い、2D は
   **平面メッシュ** (押し出し 2 ノード spanwise は 2 次 MUSCL の散逸が消えて発散)。
 - 対流は SLAU。`convMethod: 1, limiter: 2` が本段の標準、`limiter: 0` は使わない、**`mesh.bndFirstOrder` は禁止**。
+- **リミッタは `limiterScaled: 1` が既定** (2026-09-20 変更)。旧式 (`0`) は $\varepsilon^2=K^3|V|$ を次元のある $\Delta$ と
+  比べており、**メッシュを拡大すると実質 OFF になり、変数ごとに効き方が桁違い**になる。
+  修正版は $\Delta$ を変数ごとの基準で無次元化し、評価点を流束と揃える。`venkatK` の既定は **0.05**。
+  根拠: 厳密 Riemann 解との L1 収束次数が 0.76/1.00 → **0.82/1.04**、近傍逸脱が数千 → **0**、
+  座標 ×1024 でビット不変 ([`limiter-config-simplify.md`](../plans/active/limiter-config-simplify.md) §4.5)。
+  **切り替えで答えは変わる** — ⑤ SERN の目的量で +0.54 %。旧値を再現したい run は `limiterScaled: 0` を明記すること。
+  node 以外 / `convMethod` 対象外では**自動で 0 に落ちる** (警告を出す)。
 - 定常は陰解法 `timeIntegration: 11` + `blockDPLUR: 1`。実効 CFL は `cfl_pseudo` (§solver-settings「CFL の定義」)。
   `cfl` は表示用なので同じ値を入れておく。**`nStepInner` は 4** (node NS の soft/mid 段は 10)。
   根拠 (2026-09-12, 3D node SST TP case/16 run_0410–0412): 本段の `nStepInner: 3` は 5 と残差経路が全列一致

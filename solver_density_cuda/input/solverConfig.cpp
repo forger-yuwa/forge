@@ -541,7 +541,10 @@ void solverConfig::read(std::string fname)
         // 対象は **流れ 5 変数・node・convMethod 0/1/2 のみ** (plan convection-node-wall-reconstruction §4.14)。
         // cell は目標点が双対面重心のままで流束と整合しているが、convMethod 2 の増分の形は変わるので拒否する。
         // MINMOD (その他の convMethod) は増分の式が別なので共通関数の対象外。
-        this->limiterScaled = getOptionalValidatedValue<int>(space, "limiterScaled", 0, "space");
+        // **既定は 1 (修正版)** (2026-09-20 ユーザ決定、plan limiter-config-simplify §4.7)。
+        // 旧経路 (0) は ε² = K³·体積 を次元のある Δ と比べており、メッシュを拡大すると実質 OFF になり、
+        // 変数ごとに効き方が桁違いになる。厳密 Riemann 解との比較でも修正版が優る。
+        this->limiterScaled = getOptionalValidatedValue<int>(space, "limiterScaled", 1, "space");
         if (this->limiterScaled == 2) {
             throw std::runtime_error(
                 "Key 'limiterScaled: 2' (ratio form) in 'space' is no longer supported: it raises the steady residual "

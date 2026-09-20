@@ -211,7 +211,7 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     if "limiter_match_recon" in p.evaluate:
         raise ValueError("evaluate.limiter_match_recon は廃止。limiter_scaled: 0 (旧経路) / 1 (評価点一致 + 無次元化) を使うこと "
                          "(中間の match_recon=1, scaled=0 は機能打ち切り)")
-    _lsc = int(p.evaluate.get("limiter_scaled", 0))
+    _lsc = int(p.evaluate.get("limiter_scaled", 1))   # 既定 1 = 修正版 (2026-09-20)
     if _lsc not in (0, 1):
         raise ValueError(f"evaluate.limiter_scaled は 0 か 1 (比の形 2 は棄却済み): {_lsc}")
     # 既定はソルバと揃える: 修正版 (1) は 0.05、旧経路 (0) は 1.0 (旧経路の K は device 側で 1.f 固定)
