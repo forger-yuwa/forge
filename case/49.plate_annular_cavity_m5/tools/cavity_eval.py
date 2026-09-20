@@ -41,6 +41,32 @@ from setup import load as load_conditions  # noqa: E402
 MU0, T0S, SS = 1.716e-5, 273.0, 111.0
 
 
+_CP_TAB = {}
+
+
+def cp_of_T(D, T):
+    """局所 $c_p(T)$ [J/(kg K)]。TP なら NASA-9 の表引き、CPG なら定数。
+
+    ソルバは `gasProperties_d.cu` で局所 cp を使うので、**後処理も同じにする**
+    (2026-09-20 codex result M5: 298 K の 1004.5 を固定で使っていて 1273 K で 15.2 % 小さかった)。
+    毎点 NASA-9 を評価すると遅いので 150-4000 K の表を作って線形補間する。
+    """
+    if str(D.get("gas_used", D.get("gas", ""))).upper() != "TP":
+        return float(D.get("cp", 1004.5))
+    key = tuple(sorted((D.get("dry_air_Y") or {}).items()))
+    if key not in _CP_TAB:
+        import sys as _sys
+        _sys.path.insert(0, str(CASE))
+        from setup import tp_gas, _f
+        g = tp_gas(dict(key))
+        if g is None:
+            return float(D.get("cp", 1004.5))
+        Tg = np.linspace(150.0, 4000.0, 400)
+        _CP_TAB[key] = (Tg, np.array([_f(g.cp_mass(t)) for t in Tg]))
+    Tg, cg = _CP_TAB[key]
+    return np.interp(np.clip(np.asarray(T, float), Tg[0], Tg[-1]), Tg, cg)
+
+
 def mu_suth(T):
     return MU0 * (T / T0S) ** 1.5 * (T0S + SS) / (T + SS)
 
@@ -301,10 +327,17 @@ def eval_snapshot(c, v, man, D):
             dUzdz = (samp3("Uz", hi) - samp3("Uz", lo)) / dz
         mu = samp("vis_lam") if "vis_lam" in v else np.full_like(dTdz, 1.7e-5)
         mut = samp("vis_turb") if "vis_turb" in v else np.zeros_like(dTdz)
-        cp = float(D.get("cp", 1004.5))
         prl = float(D.get("prandtl_lam", 0.72))
         prt = float(D.get("prandtl_turb", 0.9))
-        kcond = cp * (mu / prl + mut / prt)
+        # **TP なら局所 cp(T) を使う** (2026-09-20 codex result M5)。従来は
+        # `conditions.json` の `cp=1004.5` (298 K の値) 固定で、ソルバが
+        # `gasProperties_d.cu` で使う局所 cp と食い違っていた。1273 K で 1184.81 J/kgK =
+        # **+15.2 %**。伝導流束がその分だけ小さく出ていた。
+        cp_loc = cp_of_T(D, samp("T"))
+        kcond = cp_loc * (mu / prl + mut / prt)
+        out["_cp_source"] = ("局所 cp(T) [%.1f..%.1f J/kgK]"
+                             % (float(np.nanmin(cp_loc)), float(np.nanmax(cp_loc)))
+                             if np.ndim(cp_loc) else "定数 cp %.1f" % float(cp_loc))
         mue = mu + mut
         ux = samp("Ux"); uy = samp("Uy")
         tau_u = (mue * dUxdz) * ux + (mue * dUydz) * uy + (4.0 / 3.0 * mue * dUzdz) * uz

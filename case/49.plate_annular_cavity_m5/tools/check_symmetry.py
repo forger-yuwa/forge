@@ -140,6 +140,35 @@ def wall_asym(run, step, man):
     return out
 
 
+def swirl_verdict(dev, decay=0.2):
+    """旋回の減衰判定 (**本番ロジック**)。`tools/test_symmetry_gate.py` が直接呼ぶ。
+
+    `dev` は |旋回 - 基準| の時系列。終点 1 点で判定しない (codex result-1 M8):
+    末尾窓の**最大**で測り、末尾窓平均 / 中間窓平均 > 1.10 を再成長として弾き、
+    3 点未満は判定不能にする。
+    """
+    import numpy as _np
+    dev = _np.asarray(dev, float)
+    n = len(dev)
+    info = {}
+    if n < 3:
+        return "INCONCLUSIVE", 2, info
+    d0 = dev[0]
+    nt = max(2, n // 3)
+    info["tail_max"] = float(dev[-nt:].max())
+    info["tail_mean"] = float(dev[-nt:].mean())
+    info["mid_mean"] = float(dev[-2 * nt:-nt].mean()) if n >= 2 * nt else info["tail_mean"]
+    info["frac"] = info["tail_max"] / max(d0, 1e-30)
+    info["rising"] = info["tail_mean"] > 1.10 * info["mid_mean"]
+    if d0 < 1e-6:
+        return "NO-PERTURBATION", 2, info
+    if info["rising"] or info["frac"] >= 1.0:
+        return "ASYMMETRIC", 1, info
+    if info["frac"] <= decay:
+        return "SYMMETRIC", 0, info
+    return "PARTIAL-DECAY", 2, info
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("runs", nargs="+")
@@ -203,6 +232,7 @@ def main():
                   % (np.mean(h[:n]), np.mean(h[-n:]), "成長" if grow else "減衰/横ばい"))
     # --- 旋回の減衰率による判定 (主) ---
     if a.ref_run and swirl_hist:
+        # 判定そのものは `swirl_verdict()` に出してある (回帰試験が**本番を呼ぶ**ため)
         rs = field_asym(snapshots(a.ref_run)[-1], man)
         sref = rs["swirl"][0] if rs else 0.0
         steps = np.array([st for st, _ in swirl_hist], float)
@@ -231,6 +261,8 @@ def main():
         print("  末尾窓平均 / 中間窓平均 = %.3f  (%s)   e-folding %s step"
               % (tail_mean / max(mid_mean, 1e-30), "**上昇**" if rising else "非上昇",
                  ("%.3g" % efold) if np.isfinite(efold) else "減衰していない"))
+        v, rc_s, info = swirl_verdict(dev, a.decay)
+        print("  判定 (本番ロジック): %s" % v)
         if len(dev) < 3:
             # **1〜2 点で減衰は測れない**。旧実装はこの場合でも frac を出して判定していた
             # (`--series` を付け忘れると最終スナップショット 1 点だけになる)。

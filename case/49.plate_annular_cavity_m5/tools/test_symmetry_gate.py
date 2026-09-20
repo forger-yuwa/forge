@@ -11,29 +11,16 @@ usage: python3 tools/test_symmetry_gate.py
 import sys
 import numpy as np
 
+sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import check_symmetry  # noqa: E402
+
 ok = True
 
 
 def verdict(dev, decay=0.2):
-    """check_symmetry.py の判定部と同じロジック (末尾窓の最大 + 再成長検査)。"""
-    dev = np.asarray(dev, float)
-    steps = np.arange(len(dev), dtype=float)
-    d0 = dev[0]
-    nt = max(2, len(dev) // 3)
-    tail_max = float(dev[-nt:].max())
-    tail_mean = float(dev[-nt:].mean())
-    mid_mean = float(dev[-2 * nt:-nt].mean()) if len(dev) >= 2 * nt else tail_mean
-    frac = tail_max / max(d0, 1e-30)
-    rising = tail_mean > 1.10 * mid_mean
-    if d0 < 1e-6:
-        return "NO-PERTURBATION"
-    if rising:
-        return "ASYMMETRIC"
-    if frac >= 1.0:
-        return "ASYMMETRIC"
-    if frac <= decay:
-        return "SYMMETRIC"
-    return "PARTIAL-DECAY"
+    """**本番判定を直接呼ぶ** (2026-09-20 codex result m10)。
+    以前は試験側に同じロジックを書き写していたので、本番の退行を検出できなかった。"""
+    return check_symmetry.swirl_verdict(dev, decay)[0]
 
 
 def endpoint_only(dev, decay=0.2):
