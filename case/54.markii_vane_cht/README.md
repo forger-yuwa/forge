@@ -63,8 +63,23 @@ PDF p.150 (報告 p.144) から**ページ画像で転記**、68 点。`tools/ru
 | `run_0012_fine_uniTw` | **残リップルの決着試験**。`run_0010_fine` (680 節点) と同一で**壁 BC だけ**一様 533 K、20000 step | 同じ $s/S$ の各帯で局所 2 節点振幅が 480 節点比で下がる (0.3–0.4 0.476→0.223 %、0.4–0.5 0.267→0.087 %、0.6–0.7 0.171→0.049 %、帯平均 **0.195 → 0.085 %**)。$\Delta s\times0.71$ に対し ×0.44 = **$\Delta s^{2.4}$**。**残りは接線解像で、細分化すれば収束する** (ソルバの欠陥ではない)。$h$ は動かない | active |
 | `run_0013_cht_smooth` | **平滑メッシュ上の連成**。固体を新しい流体壁に合わせて作り直し (`gen_solid_mesh.py --vane markii --outer-from run_0009_prod_su2turb/wall_nodes_ordered.csv` → 5881 節点 / 外周 480 が流体壁と 1 対 1)、孔は `make_solid_json.py` 再生成 (`solid_smooth.json`、$T_c$ 315.6–414.9 K / $k_s$ 12.1–23.7 W/mK)。流体テンプレートは `_cht_template_smooth/` (cs400 メッシュ・`reconT: 1`・`katoLaunder: 0`・入口 $k$ 71.92 / $\omega$ 294233)。1 反復 = forge 8000 step、22 反復 | $T_w$ **487.6–660.4 K**。`dTw` 0.135 K・`res_rel` 5.4e−3・`res_solid` 1.0e−3・$Q$ 43.4 kW/m まで落ちたが 既定 tol に入らず `NOT CONVERGED` 表示 (`run_0003_cht` も同様)。**同一の測り方で `run_0003_cht` と比べると PS +2.2 → +8.6 K、SS 層流 +38.3 → +41.0 K、SS 遷移後 +16.5 → +21.6 K、全体 +14.2 → +19.5 K** (RMS は 27.0 → 28.1 K でほぼ不変)。気相 $h$ の遷移後が 6 ポイント上がったのに対し**金属温度は 3–6 K 高温側**に動く = 固体伝導と冷却孔が緩衝している。**「誤差は連成でなく遷移モデル」という結論は変わらない** | active |
 | `run_0003_cht` | **V5 段 (c)**。`cht_loop --solid-mode fem2d`、固体 5871 節点 (外周 480 = 流体壁と 1 対 1)、孔は逆算 $h_c$ 747–2913 W/m²K・$T_c$=300 K。1 反復 = forge 8000 step | $T_w$ **477.3–583.8 K** ($s/S\le0.87$、実測 470.6–597.1)。`dTw` 0.03 K・$Q$ 42.6 kW/m で頭打ち。成果物 `Tw_compare.png` | active |
+| `run_0014_rough_kl` | 粗メッシュ (`run_0002` の mesh) × 現行バイナリ・cs400 と同一設定 (`reconT: 1`, KL on)。**`run_0002` との比較がバイナリ跨ぎだったことの切り分け** | 80000 step では PS がまだ過渡 (+94 → +2.3 %)。遷移後 +24.7 % (`q_eff`) | 破棄予定 (`run_0016` が後継) |
+| `run_0015_rough_recon0` | 同上から `reconT` だけ落とす | 遷移後 +23.9 % — `run_0014` と 0.8 pt。**`reconT` は Mark II でも効かない**。したがって `run_0002` の +13.7 % は `limiterScaled`/`venkatK` 既定変更前のバイナリが原因 | ref (切り分け用) |
+| `run_0016_rough_long` | **粗メッシュの確定 run**。`run_0014` と同一で 300000 step | PS **+1.9 %** / 層流 +79.7 % / 遷移後 **+23.0 %** / 全体 +30.4 %、step 100000 で頭打ち。cs400 (`run_0009`) の +8.7 / +76.3 / +23.7 / +32.5 % と比べ、**メッシュは遷移後を 0.7 pt しか動かさない** (PS は 6.8 pt 動く)。「メッシュで遷移後が 6.4 pt」は撤回 | active |
+| `run_0017_cht_qeff` | **連成を保存形で回し直す** (`cht_loop --flux q_eff`)。`run_0013_cht_smooth` と同一設定 | 実行中 | active |
 
 ## V5 の結果 (2026-09-20)
+
+> **報告する熱流束の定義を変更した (2026-09-21、ユーザ指示)**: 以後の $h$ は**保存形
+> `iface_q_eff`**。SU2 と比べるときだけ `iface_q_compact` 同士にする。詳細は
+> [case/53 README](../53.c3x_vane_cht/README.md) の同名の注と
+> [`methods/boundary.md`](../../methods/boundary.md)。
+>
+> **併せて `run_0002_shortexit` は他 run と比較できないことが判明した (2026-09-21)**:
+> `limiterScaled` / `venkatK` の既定変更**前**のバイナリで回っており (log に `[limiter] scaled:` 行が無い)、
+> 同一メッシュ・同一設定を現行バイナリで回した `run_0014_rough_kl` / `run_0015_rough_recon0` とは
+> 遷移後 $h$ が +13.7 % 対 +19.5 % (`q_compact`) と 6 pt 違う。**「メッシュ変更で遷移後が 6.4 pt 動く」は撤回**。
+
 
 ### 段 (a) 実測 $T_w$ を課した $h$ (`run_0002_shortexit`)
 

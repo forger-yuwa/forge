@@ -199,6 +199,15 @@ Dittus–Boelter は ~2000 W/m²K になり、同定値 (218–4706) の**前方
 $h = q_w/(T_g-T_w)$、$T_g$ = 入口全温 786 K、$h_0$=1135 W/m²K。$q_w$ は界面診断
 `iface_q_compact` ($k_{\rm eff}(T_1-T_w)/d_1$)。比較はデータ範囲 $s/S\le0.87$ の 402 節点。
 
+> **報告する熱流束の定義を変更した (2026-09-21、ユーザ指示)**: 以後の $h$ は**保存形
+> `iface_q_eff`** (壁半 CV に実際に入った粘性エネルギー流束 ÷ 面積) を一次に取る。plan
+> [`boundary-conjugate-heat-transfer`](../../plans/active/boundary-conjugate-heat-transfer.md) §4.3 の
+> 正本であり、実測 $h$ も金属の熱収支から出ているのでこちらが対応する量。`compare_h.py --flux`
+> の既定、`cht_loop.py --flux` の既定とも `q_eff` に変更済み。**本節以前の表は
+> `iface_q_compact` の値**で、C3X では保存形の方がバイアスで約 2.2 pt 大きい。
+> **SU2 と比べるときだけは `iface_q_compact` 同士**にすること — SU2 の `Heat_Flux` は等温境界で
+> $k(T_{here}-T_{wall})/d_{ij}$ (`CFVMFlowSolverBase.inl:2638`) と同一構成で、保存形の出力を持たない。
+
 | 領域 | 節点数 | バイアス | RMS |
 | --- | ---: | ---: | ---: |
 | 正圧面 (全域) | 164 | **+10.6 %** | 21.7 % |
@@ -721,6 +730,11 @@ codex の指摘 (「`limiter_P` の流用は $T$ 自身の極値・勾配に基�
 | `run_0102_fine_uniTw` | **格子独立性の確認**。`run_0099_cf0_su2turb` と同一設定で壁 480 → **680 節点**・lc 2.5e-3 → 1.77e-3 (配置則は `--curv-smooth 2000` のまま、47480 節点、`check_mesh_quality` PASS AR 352 / skew 0.728)。`run_0099` の場から cross-mesh restart、16000 step | 局所 2 節点振幅の帯平均 ($s/S$ 0.15–0.9) は **0.0455 → 0.0463 %** (比 1.02) = **細分化しても落ちない**。同じ試験で Mark II は ×0.44 ($\Delta s^{2.4}$) で落ちる。**C3X の残りは格子独立 = 離散作用素の性質** | active |
 | `run_0103_ediagA` / `run_0104_ediagB` | **陰解法エネルギー対角の感度 A/B** (codex 設計)。`run_0099_cf0_su2turb` と同一設定・同一初期場で、B だけ `timeIntegration_d.cu` の block 経路の粘性対角に `diag_block[4][4] += 0.4*viscous_diag` (= エネルギー行だけ ×1.4)。コンパイル時マクロ `FORGE_TEST_ENERGY_VISCOUS_DIAG` で、既定 (A) はコンパイル除外 = ビット不変 | **NULL**。末尾 8000–16000 step (n=9) で比 $R$ = **1.0195 ± 0.0053** (A) 対 **1.0186 ± 0.0063** (B)、差 0.0009 に対し合成 SE 0.008。$A_T$ も差 8e−6 / SE 2e−4 で有意でない。**codex の打ち切り基準に該当し、この線の追跡を終了**。副次: モデル整合後は $R$ の反復間変動が大きく (fluct 5.3–5.8 %)、**$\|R-1\|$ = 0.020 ± 0.005 で SU2 0.009 の約 2 倍** | active |
 | `run_0105_cht_smooth` | **平滑メッシュ上の C3X 連成**。固体を新しい流体壁に合わせて作り直し (`gen_solid_mesh.py --vane c3x --outer-from run_0100_prod_su2turb/wall_nodes_ordered.csv` → 7071 節点 / 外周 480 が流体壁と 1 対 1、`mesh/solid_c3x.npz` を更新)。孔は `make_solid_json.py` 再生成 (`solid_smooth.json`、$T_c$ 331.7–437.4 K)。流体は `_cht_template_smooth/` (cs400 + `reconT: 1` + `katoLaunder: 0` + 入口 $k$ 55.55 / $\omega$ 217233)、1 反復 = forge 4000 step、25 反復 | $T_w$ **522.4–663.4 K**、`dTw` **1.1e−4 K** で壁温は完全に落ち着く。`res_rel` は **5.0e−2** で止まるが、**`run_0004_cht` の 1.2e−3 とは定義が違うので比較できない** — `ac34c011` (2026-09-20) で codex result M5 を受けて規格化を $\max|Q_f|$ のみに変えた (背面温度を含む $b$ を混ぜると不釣合い 100 % でも 1e−6 に見えるため)。旧定義の run は履歴 CSV に `res_abs_W` 列が無いことで識別できる。**新定義ではゲート基準に届いておらず、界面反復を強く回すべきかは未決**。**同一の測り方で `run_0004_cht` と比べると PS +8.8 → +9.8 K、SS 層流 +20.4 → +20.2 K、SS 遷移後 +6.5 → **+4.2 K**、全体 +10.0 → **+9.4 K** (RMS 18.2 → **17.1 K**)**。気相の遷移後 $h$ が +4.7 → +3.6 % と良くなった分がそのまま金属温度に出ており、**C3X は全体 0.6 K しか動かず、しかも改善方向**。Mark II (気相 +6 pt / 金属 +5.3 K) と合わせて **気相の変化がほぼそのまま金属温度に出る**ことが 2 翼で確認できた | active |
+| `run_0106_rough_su2turb` | 粗メッシュ (`run_0009` の mesh) × 生産レシピ・SU2 整合乱流。Figure 12/13 の灰色線を like-for-like にするための短尺版 | **16000 step では PS が過渡** (+4.1 % と上昇中)。`run_0109` に置換。VERDICT `NOT CONVERGED (plateau)` | 破棄予定 (`run_0109` が後継) |
+| `run_0107_prod_su2turb_long` | **§02 生産の確定 run**。`run_0100_prod_su2turb` と同一設定で 200000 step | PS **+16.2 %** / SS 層流 +41.5 % / 遷移後 **+6.6 %** / 全体 +20.0 % (`iface_q_eff`)。**step 60000 で頭打ちし以後 140000 step 不動**。20000 step の +14.4 % は過渡。報告の不確かさ帯 (表 VI) に入る節点は遷移後 50 % / 層流 12 % | active |
+| `run_0108_cf0_su2turb_long` | **§06 SU2 対照の確定 run**。一様壁 566 K・cs2000、200000 step | PS +19.0 / 層流 +43.3 / 遷移後 +8.1 / 全体 +22.0 % (`q_eff`)。SU2 と**同一構成** (`q_compact`) で比べると +17.6 / +40.8 / +4.8 / +19.7 % 対 SU2 +21.3 / +45.4 / +6.7 / +23.1 %。壁総入熱 49.61 kW/m 対 SU2 49.80 (0.4 %) | active |
+| `run_0109_rough_su2turb_long` | 粗メッシュ × 同一設定、200000 step。**メッシュのみを変えた対照** | PS +18.7 / 層流 +44.0 / 遷移後 +8.1 / 全体 +22.2 % — `run_0108` と **0.0〜0.7 pt しか違わない**。C3X では曲率平滑メッシュは $h$ を動かさない (動かすのはリップルだけ) | active |
+| `run_0110_cht_qeff` | **連成を保存形で回し直す**。`run_0105_cht_smooth` と同一で `cht_loop --flux q_eff` のみ変更 (plan §4.3 の正本に合わせた。既定も `q_eff` に変更済み) | 実行中 | active |
 | `su2_fine/` (forge run ではない) | `run_0102_fine_uniTw` と同一の細分メッシュ上で SU2 も格子独立か見る狙いだった (`gmsh -2 ... -format su2`、`su2_smooth/case.cfg` と同一設定) | **破棄**。同ツリーで別セッションが `case/56.gap_tp1187` の SU2 を 8 スレッドで回しており、28 分で iter 473 (必要 ~9000) しか進まず、相手の計算を止めない方針で SIGTERM 停止した。**結論は SU2 無しで成立する** — 格子独立性は forge 内部の 480 対 680 比較 (`run_0099` 対 `run_0102`) で示せており、SU2 との水準比較は平滑メッシュ (`su2_smooth`、forge 0.021 % / SU2 0.011 %) で既に取ってある | 破棄予定 |
 | `run_0081_psiP_long` | `reconT: 2` $\psi_P$ 流用 | float32 | **1.037** | `STEADY` (drift 0.3 %) | −0.00067 % |
 | `run_0083_psiP_rep` | 同上 (再現性確認) | float32 | **1.037** | `STEADY` (drift 0.3 %) | −0.00067 % |

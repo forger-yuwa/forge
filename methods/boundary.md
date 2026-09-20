@@ -521,6 +521,13 @@ $q_{\rm eff}$ (拘束反力込み、= 連成の正本) は依存診断の完成�
 | `iface_q_recon` | 再構成勾配 (`qwall` の符号反転) | 診断 |
 | `iface_q_2nd` | 3 点非等間隔の 2 次片側差分 | 診断 |
 
+**SU2 と比べるときだけはコンパクト差分を使う** (2026-09-21): SU2 の表面出力 `Heat_Flux` は
+等温境界では `HeatFlux = thermal_conductivity * (There - Twall) / dist_ij`
+(`SU2_CFD/include/solvers/CFVMFlowSolverBase.inl:2638`) で、`iface_q_compact` と**同一構成**である。
+SU2 には保存形の対応物が無いので、`iface_q_eff` と `Heat_Flux` を並べるのは別量の比較になる。
+実測 ($h$ は金属の熱収支から出る) との比較は `iface_q_eff`、SU2 との比較は `iface_q_compact` 同士、
+と使い分けること。C3X run 108 で両者は平均 2.2 % 違う (保存形が大きい)。
+
 **なぜコンパクト差分ではいけないか**: 壁 CV に実際に入った熱は `viscousFlux` の再構成勾配と
 内部面の離散の和であって、$k_{\rm eff}(T_1-T_w)/d_1$ ではない。これを連成に使うと**熱量が
 閉じない解を合格させてしまう**。実測 (case/53 C3X 翼列, 480 節点): `q_eff` は `q_compact` に対し

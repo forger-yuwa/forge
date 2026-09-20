@@ -15,7 +15,7 @@ plans/active/boundary-conjugate-heat-transfer.md。固体側は `solid_shell.py`
 usage:
   python3 solver_density_cuda/tools/cht_loop.py <run_dir> \
       --template <template_dir> --forge <forge binary> --solid solid.json \
-      --phys-id 4 [--phys-name wall] [--steps 2000] [--max-iter 20] [--flux q_compact]
+      --phys-id 4 [--phys-name wall] [--steps 2000] [--max-iter 20] [--flux q_eff]
 
 <template_dir> には mesh.h5 / solverConfig.yaml / bcondConfig.yaml (+ probe.yaml) を置く。
 対象壁の bcond には `ints: {wallProfile: 1}` が要る (無ければ本スクリプトが落とす)。
@@ -154,8 +154,10 @@ def main():
     ap.add_argument("--phys-id", type=int, required=True)
     ap.add_argument("--phys-name", default="wall")
     ap.add_argument("--max-iter", type=int, default=20)
-    ap.add_argument("--flux", default="q_compact", choices=["q_compact", "q_recon", "q_2nd", "q_eff"],
-                    help="界面に渡す熱流束の定義 (既定 q_compact。**どれを使ったか履歴に残す**)")
+    ap.add_argument("--flux", default="q_eff", choices=["q_compact", "q_recon", "q_2nd", "q_eff"],
+                    help="界面に渡す熱流束の定義 (既定 q_eff = 壁半 CV に実際に入った保存形。"
+                         "plan boundary-conjugate-heat-transfer §4.3 の正本。"
+                         "**どれを使ったか履歴に残す**)")
     ap.add_argument("--tol-K", type=float, default=1.0e-3, help="max|dTw| の収束許容 [K]")
     ap.add_argument("--tol-rel", type=float, default=1.0e-3, help="max|r|/スケール の収束許容")
     ap.add_argument("--n-consec", type=int, default=2, help="収束と見なす連続回数")

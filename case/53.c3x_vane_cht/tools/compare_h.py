@@ -5,8 +5,10 @@ r"""V5 段 (a): **実測壁温を課した CFD の熱伝達係数を実測 $h$ �
   - $h \equiv q_w / (T_g - T_w)$、$T_g$ は**ガス全温** (run 108 は $T_{T1}$=786 K)。
   - $h$ は $h_0$=1135 W/m²K、$T_w$ は 811 K で正規化して報告されている。
 
-壁熱流束は**壁ダンプの界面診断** (`iface_q_compact` = $k_{eff}(T_1-T_w)/d_1$) を一次に取り、
-`iface_q_2nd` (2 次片側差分) を感度として併記する。`qwall` は低 Re 経路のソルバ出力。
+壁熱流束は**保存形の界面診断** (`iface_q_eff`: 壁半 CV に実際に入る粘性流束を面積で割った値。
+CHT 連成が受け渡すのと同じ量) を一次に取る。`iface_q_compact` ($k_{eff}(T_1-T_w)/d_1$)、
+`iface_q_2nd` (2 次片側差分)、`iface_q_recon` を感度として併記する。`qwall` は低 Re 経路のソルバ出力。
+`--flux` で一次に取る定義を変えられる (古い run は `iface_q_eff` を持たないので自動で compact に落ちる)。
 
 usage: python3 case/53.c3x_vane_cht/tools/compare_h.py <run_dir> [--run run108] [--step N]
 """
@@ -20,7 +22,9 @@ import h5py
 ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from run_data import TABLES                     # noqa: E402
+import run_data as rd_mod
+from run_data import TABLES
+from uncertainty import h_uncertainty_pct                     # noqa: E402
 
 H0, TREF = 1135.0, 811.0
 TG = {"run108": 786.0, "run42": 788.0}          # ガス全温 = 入口全温 (報告 表 VIII/IX)
@@ -73,6 +77,8 @@ def main():
     ap.add_argument("--vane", default=None, help="既定は run の vane (TABLES から)")
     ap.add_argument("--step", type=int, default=None)
     ap.add_argument("--phys", type=int, default=5)
+    ap.add_argument("--flux", default="iface_q_eff",
+                    help="一次に取る壁熱流束の定義 (既定 iface_q_eff = 連成が使う保存形)")
     a = ap.parse_args()
 
     vane = a.vane or ("markii" if TABLES[a.run]["vane"].lower().startswith("mark") else "c3x")
@@ -85,13 +91,20 @@ def main():
         C = np.array(f["MESH/COORD"]).reshape(-1, 3)
         v = f["VALUE"]
         Tw = np.array(v["Ts"])
-        q = {k: np.array(v[k]) for k in ("iface_q_compact", "iface_q_2nd", "iface_q_recon", "qwall")}
+        q = {k: np.array(v[k]) for k
+             in ("iface_q_eff", "iface_q_compact", "iface_q_2nd", "iface_q_recon", "qwall")
+             if k in v}
         ok = np.array(v["iface_ok"]) > 0.5
     Tg = TG[a.run]
     s_norm, is_ss = arc_map(C[:, :2])
 
     # **判読不能セル (None) は落とす** (case/54 README 参照)。内挿の節点が減るだけ。
-    rows = [r for r in TABLES[a.run]["rows"] if r[3] is not None]
+    # 転記許容差が粗い点 (run_data.RUN42_PARTIAL の tol > 0.01) も統計から外す:
+    # 数字が 1 桁しか残っておらず、値そのものが ±10 % 不定なので比較の基準にならない。
+    coarse = {i for i, d in getattr(rd_mod, "RUN42_PARTIAL", {}).items()
+              if a.run == "run42" and d["tol"] > 0.01}
+    rows = [r for i, r in enumerate(TABLES[a.run]["rows"])
+            if r[3] is not None and i not in coarse]
     sd = np.array([r[0] for r in rows])
     hd = np.array([r[3] for r in rows]) * H0
     i_stag = int(np.argmin(sd))
@@ -111,23 +124,32 @@ def main():
 
     # **面と遷移で分けて出す**: 低 Re SST は遷移モデルを持たないので負圧面前縁の層流域だけ
     # 大きく外れる。全域 1 つの数字にすると、遷移後が合っていることが見えない。
-    h = out["iface_q_compact"]
-    print(f"\n  regional breakdown (iface_q_compact, s/S<=0.87):")
+    key = a.flux if a.flux in out else "iface_q_compact"
+    if key != a.flux:
+        print(f"  [warn] {a.flux} が無い run なので {key} で判定する")
+    h = out[key]
+    print(f"\n  regional breakdown ({key}, s/S<=0.87):")
     stats = {}
+    # 報告自身の不確かさ (表 V/VI) の帯に入っているか。**絶対値比較なのでこの表が正しい用途**
+    # (報告 p.28: "the uncertainty in absolute level")。
+    unc = h_uncertainty_pct(vane, is_ss, s_norm)
     for name, m in (("PS", ok & ~is_ss & (s_norm <= 0.87)),
                     ("SS laminar (s/S<0.25)", ok & is_ss & (s_norm < 0.25)),
                     ("SS post-transition", ok & is_ss & (s_norm >= 0.25) & (s_norm <= 0.87)),
                     ("all", ok & (s_norm <= 0.87))):
         r = (h[m] - he[m]) / he[m]
-        stats[name] = (int(m.sum()), 100 * r.mean(), 100 * float(np.sqrt((r ** 2).mean())))
+        inband = float(np.mean(np.abs(100 * r) <= unc[m])) * 100.0
+        stats[name] = (int(m.sum()), 100 * r.mean(), 100 * float(np.sqrt((r ** 2).mean())), inband)
         print(f"    {name:<24} n={m.sum():3d}  bias {100*r.mean():+6.1f}%  "
-              f"rms {100*np.sqrt((r**2).mean()):5.1f}%")
+              f"rms {100*np.sqrt((r**2).mean()):5.1f}%  "
+              f"within report unc. {inband:5.1f}%  (band ±{unc[m].min():.1f}–{unc[m].max():.1f}%)")
 
     # 固体メッシュの外周を流体の壁節点に合わせるための出力 (弧長順・閉輪郭)。
     o = np.argsort(np.where(is_ss, 1.0 + s_norm, 1.0 - s_norm))   # PS(TE->LE) -> SS(LE->TE)
     np.savetxt(rd / "wall_nodes_ordered.csv", C[o, :2], delimiter=",", header="x,y", comments="")
 
     np.savez(rd / "h_compare.npz", s_norm=s_norm, is_ss=is_ss, Tw=Tw, ok=ok, Tg=Tg,
+             primary=key,
              **{k: v for k, v in out.items()})
     try:
         import matplotlib
@@ -136,10 +158,12 @@ def main():
         fig, ax = plt.subplots(figsize=(9, 5.5))
         for side, sgn, col in (("SS", +1, "tab:red"), ("PS", -1, "tab:blue")):
             se, he_ = exp[side]
-            ax.plot(sgn * se, he_ / H0, "o-", color=col, ms=3, lw=1, label=f"exp {side}")
+            eu = h_uncertainty_pct(vane, side == "SS", se) / 100.0 * (he_ / H0)
+            ax.errorbar(sgn * se, he_ / H0, yerr=eu, fmt="o-", color=col, ms=3, lw=1,
+                        elinewidth=0.9, capsize=2, label=f"exp {side} (CR-168015 表 V/VI)")
             sel = ok & (is_ss if side == "SS" else ~is_ss)
             o = np.argsort(s_norm[sel])
-            ax.plot(sgn * s_norm[sel][o], out["iface_q_compact"][sel][o] / H0, "-", color=col,
+            ax.plot(sgn * s_norm[sel][o], h[sel][o] / H0, "-", color=col,
                     alpha=0.55, lw=2, label=f"forge {side}")
         ax.set_xlabel("$-s/S$ (PS)   |   $+s/S$ (SS)")
         ax.set_ylabel("$h/h_0$   ($h_0$=1135 W/m²K)")
