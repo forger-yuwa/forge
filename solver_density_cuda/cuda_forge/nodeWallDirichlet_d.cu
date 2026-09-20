@@ -82,12 +82,18 @@ __global__ void pin_wall_node_temperature_d(
     sonic[ic] = sqrt(g.gamma * g.R * Tw);
 }
 
-// res_roe を bcond の壁ノードで 0 化 (Dirichlet ノードの残差は BC 強制であり物理不均衡でない)
-__global__ void zero_res_roe_bplane_d(geom_int nb, geom_int* bplane_cell, flow_float* res_roe)
+// res_roe を bcond の壁ノードで 0 化 (Dirichlet ノードの残差は BC 強制であり物理不均衡でない)。
+// **0 化する直前の値が $R^{raw}$** (拘束反力 $C=-R^{raw}$ の素材)。CHT の保存的な実効界面熱量
+// $Q_f=\sum F^E-C$ はこれが無いと作れない (後から res_roe を読んでも 0 しか出ない)。
+// plan boundary-conjugate-heat-transfer §4.3。`ifaceRraw` は nullptr なら触らない。
+__global__ void zero_res_roe_bplane_d(geom_int nb, geom_int* bplane_cell, flow_float* res_roe,
+                                      flow_float* ifaceRraw)
 {
     const geom_int ib = blockDim.x*blockIdx.x + threadIdx.x;
     if (ib >= nb) return;
-    res_roe[bplane_cell[ib]] = static_cast<flow_float>(0.0);
+    const geom_int ic = bplane_cell[ib];
+    if (ifaceRraw != nullptr) ifaceRraw[ib] = res_roe[ic];
+    res_roe[ic] = static_cast<flow_float>(0.0);
 }
 
 } // namespace
@@ -170,7 +176,8 @@ void zeroNodeIsothermalEnergyResidual(solverConfig& cfg , cudaConfig& cuda_cfg ,
         zero_res_roe_bplane_d<<<cuda_cfg.dimGrid_bplane , cuda_cfg.dimBlock>>>(
             static_cast<geom_int>(bc.iPlanes.size()),
             bc.map_bplane_cell_d,
-            var.c_d["res_roe"]);
+            var.c_d["res_roe"],
+            (cfg.interfaceDiag != 0 && bc.bvar_d.count("ifaceRraw")) ? bc.bvar_d["ifaceRraw"] : nullptr);
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

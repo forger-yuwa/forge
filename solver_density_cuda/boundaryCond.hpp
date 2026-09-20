@@ -75,6 +75,12 @@ struct bcondConfFormat{
               {"twall_z",0},
               {"utau",0},
               {"qwall",0},   // WMLES 壁モデルの q_w (Kader。viscousFlux wallTreatment==2 が消費)
+              // CHT の**保存的な実効界面熱量** $Q_f=\sum F^E-C$ の素材 (plan boundary-conjugate-heat-transfer §4.3)。
+              //   `ifaceFw`   : 壁半割面が res_roe に入れた寄与そのもの (= $-\sum F^E_{\partial w}$)
+              //   `ifaceRraw` : 壁ノードの**残差射影より前**の res_roe (= $R^{raw}$、定常 Dirichlet では $C=-R^{raw}$)
+              // どちらも `output.interfaceDiag: 1` のときだけ書かれる (既定は触らないのでビット不変)。
+              {"ifaceFw",0},
+              {"ifaceRraw",0},
 
           }},
 

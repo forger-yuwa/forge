@@ -172,6 +172,35 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
     const auto itq = bc.bvar.find("qwall");
     const bool hasQwall = (itq != bc.bvar.end() && (geom_int)itq->second.size() >= nbp);
 
+    // ---- 保存的な実効界面熱量 $Q_f = \sum F^E - C$ (plan boundary-conjugate-heat-transfer §4.3) ----
+    // 定常の Dirichlet 行では $C=-R^{raw}$ なので、壁ノード 1 点あたり
+    //   $Q_f = \sum F^E_{\partial w} + R^{raw}$,  $\sum F^E_{\partial w} = -(\text{壁面が res\_roe に入れた寄与})$
+    // である。`ifaceFw` が後者、`ifaceRraw` が前者の素材。面積で割って [W/m²] にする。
+    // **適用範囲** (超えたら NaN を出す。散文で保証しない):
+    //   - 定常 (`unsteady: 0`) のみ。dual-time は $C=D_t(VE)-R^{raw}$ で式が違う (§4.3)。
+    //   - node の等温壁 Dirichlet ピンがある壁のみ (断熱壁には $R^{raw}$ が無い)。
+    //   - 周期境界に属する壁ノードは除く (root 単位の 1 回集計が要る。依存 plan の解除待ち)。
+    std::vector<flow_float> d_qeff(nbp, std::numeric_limits<flow_float>::quiet_NaN());
+    const auto itFw = bc.bvar.find("ifaceFw");
+    const auto itRr = bc.bvar.find("ifaceRraw");
+    const bool hasEff = (cfg.unsteady == 0)
+                     && (bc.bcondKind == "wall_isothermal")
+                     && (itFw != bc.bvar.end() && (geom_int)itFw->second.size() >= nbp)
+                     && (itRr != bc.bvar.end() && (geom_int)itRr->second.size() >= nbp);
+    if (hasEff) {
+        const bool hasPer = !msh.periodicRoot.empty();
+        for (geom_int ib = 0; ib < nbp; ib++) {
+            const geom_int ic = bc.iCells[ib];
+            if (hasPer && ic < (geom_int)msh.periodicRoot.size() && msh.periodicRoot[ic] != ic) continue;
+            const geom_int ip = bc.iPlanes[ib];
+            const double area = (double)msh.planes[ip].surfArea;
+            if (!(area > 0.0)) continue;
+            const double Fw   = (double)itFw->second[ib];    // 壁面が res_roe に入れた寄与
+            const double Rraw = (double)itRr->second[ib];    // 射影前の res_roe
+            d_qeff[ib] = (flow_float)((Rraw - Fw) / area);   // 固体向き正
+        }
+    }
+
     for (geom_int ib = 0; ib < nbp; ib++) {
         const geom_int ic = bc.iCells[ib];
         d_al[ib] = (flow_float)fi.align[ib];
@@ -209,6 +238,7 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
     bc.diagVar["iface_q_2nd"]     = std::move(d_q2);
     bc.diagVar["iface_ok"]        = std::move(d_ok);
     bc.diagVar["iface_align"]     = std::move(d_al);
+    bc.diagVar["iface_q_eff"]     = std::move(d_qeff);
 }
 
 void checkWallTemperatureSharing(const solverConfig& cfg, const mesh& msh)

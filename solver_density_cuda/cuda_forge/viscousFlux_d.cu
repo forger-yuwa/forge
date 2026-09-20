@@ -408,7 +408,11 @@ __global__ void viscousFlux_wall_d
  // SST エネルギー壁関数 (§6.5(g), sstEnergyWallFunction==1 × wall_isothermal): 壁面熱流束を
  // ransWallFunction が書いた qwall_b (Kader q_w) に置換する (運動量は wallTreatment==1 のまま)。
  // node では壁ノード res_roe が Dirichlet で 0 化されるため実効は cell のみ (書いても無害)。
- int sstEnergyWf
+ int sstEnergyWf,
+ // CHT の保存的界面熱量 (plan boundary-conjugate-heat-transfer §4.3) の素材。
+ // 壁半割面が res_roe に入れた寄与そのものを保存する (= $-\sum F^E_{\partial w}$、
+ // 符号は「流体へ入る側が正」= qwall と同じ)。nullptr なら何もしない (既定はビット不変)。
+ flow_float* ifaceFw_b
 )
 {
     geom_int ib  = blockDim.x*blockIdx.x + threadIdx.x;
@@ -549,6 +553,7 @@ __global__ void viscousFlux_wall_d
         atomicAdd(&res_roUy[ic], res_roUy_temp);
         atomicAdd(&res_roUz[ic], res_roUz_temp);
         atomicAdd(&res_roe[ic] , res_roe_temp);
+        if (ifaceFw_b != nullptr) ifaceFw_b[ib] = res_roe_temp;   // CHT: $-\sum F^E_{\partial w}$
 
         twall_x_b[ib] = tau_x/sss;
         twall_y_b[ib] = tau_y/sss;
@@ -1017,7 +1022,10 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
                 (bc.bcondKind == "wall") ? 1 : 0,         // 断熱壁: 伝導熱流束を厳密 0 (等温壁は 0=従来)
                 // SST エネルギー壁関数 (§6.5(g)): 等温壁の壁面熱流束を Kader q_w に置換
                 (cfg.LESorRANS == 2 && cfg.RANSmodel == 1 && cfg.wallTreatmentSST == 1
-                 && cfg.sstEnergyWallFunction == 1 && bc.bcondKind == "wall_isothermal") ? 1 : 0
+                 && cfg.sstEnergyWallFunction == 1 && bc.bcondKind == "wall_isothermal") ? 1 : 0,
+                // CHT の保存的界面熱量の素材 (plan boundary-conjugate-heat-transfer §4.3)。
+                // `output.interfaceDiag: 1` のときだけ渡す (既定 nullptr = ビット不変)。
+                (cfg.interfaceDiag != 0 && bc.bvar_d.count("ifaceFw")) ? bc.bvar_d["ifaceFw"] : nullptr
             ) ;
         }
     }

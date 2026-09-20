@@ -438,6 +438,51 @@ $q_{\rm eff}$ (拘束反力込み、= 連成の正本) は依存診断の完成�
 同診断は初版で dual-time・周期・軸対称を対象外としているため、**dual-time は 1 次元検証の前、周期は翼列検証の前**に
 解除するマイルストーンを同 plan の残作業に登録済み。
 
+
+#### 界面熱量の 4 つの定義 — **保存的な `iface_q_eff` が正本**
+
+`output.interfaceDiag: 1` の壁ダンプ (`res_wall_<physID>_*.h5`) は 4 つ出す。**どれを見ているかを
+必ず明記する** (実測で 2〜19 % 違う)。符号はすべて**固体向きが正**。
+
+| 列 | 定義 | 用途 |
+| --- | --- | --- |
+| **`iface_q_eff`** | $Q_f=\sum F^E_{\partial w}-C$ を面積で割ったもの。**正本** | 連成の熱量 (`cht_loop --flux q_eff`)、収支ゲート |
+| `iface_q_compact` | $k_{\rm eff}(T_1-T_w)/d_1$ | $D_f$ の初期推定・精度診断 |
+| `iface_q_recon` | 再構成勾配 (`qwall` の符号反転) | 診断 |
+| `iface_q_2nd` | 3 点非等間隔の 2 次片側差分 | 診断 |
+
+**なぜコンパクト差分ではいけないか**: 壁 CV に実際に入った熱は `viscousFlux` の再構成勾配と
+内部面の離散の和であって、$k_{\rm eff}(T_1-T_w)/d_1$ ではない。これを連成に使うと**熱量が
+閉じない解を合格させてしまう**。実測 (case/53 C3X 翼列, 480 節点): `q_eff` は `q_compact` に対し
+**bias +2.26 % / rms 3.28 % / 局所最大 19.1 %** 違う。
+
+**$Q_f$ の作り方** (符号規約はここが正本。散文で保証せず V1 で検算する):
+面流束 $F^E$ は**流体 CV から外向きを正**、拘束反力 $C$ は**流体への供給を正**とすると、壁 1 節点で
+
+$$Q_{f,i}=\sum_{f\in\partial_w}F^{E}_{if}-C_i,\qquad \text{定常の Dirichlet 行では } C_i=-R_i^{raw}$$
+
+実装は残差の言葉で次の 2 つを採る。
+
+- `ifaceFw[ib]`: **壁半割面が `res_roe` に入れた寄与そのもの** ([`viscousFlux_d.cu`](../solver_density_cuda/cuda_forge/viscousFlux_d.cu) の
+  `res_roe_temp`)。残差規約が $R=-\sum F$ なので $\sum F^E_{\partial w}=-\,$`ifaceFw`。
+- `ifaceRraw[ib]`: **壁残差射影の直前**の `res_roe` ([`nodeWallDirichlet_d.cu`](../solver_density_cuda/cuda_forge/nodeWallDirichlet_d.cu) の
+  `zero_res_roe_bplane_d` が 0 化する前に退避)。**後から `res_roe` を読んでも 0 しか出ない**ので、
+  この位置で採るしかない。
+
+よって `iface_q_eff = (ifaceRraw - ifaceFw) / 面積`。これは恒等的に
+$-\sum_{f\in \text{内部面}}F^E$ (= 流体内部から壁 CV へ入る正味熱) に等しく、
+**壁面流束の離散化に依らず保存する**。
+
+**適用範囲** (超えたら `NaN` を出す。ここに無い構成では使わない):
+
+- **定常 (`unsteady: 0`) のみ**。dual-time は $C_i=D_t(V_iE_i)-R_i^{raw}$ で式が違う。
+- **node の等温壁 (`wall_isothermal`) で Dirichlet ピンがあるもののみ**。断熱壁には $R^{raw}$ が無い。
+- **周期境界に属する壁ノードを除く**。root 単位の 1 回集計が要る (依存 plan の解除待ち)。
+
+**検証** (V1, `case/52.conjugate_slab/run_0005_qeff`): 1 次元純伝導の解析解 $q$=81.3090 W/m² に対し
+`iface_q_eff` **81.1837 W/m² (−0.154 %)** で、`q_compact` (−0.155 %)・`q_recon` (−0.155 %) と同等。
+**符号と絶対値を再現している**。
+
 ### ディスパッチ
 
 [`applyBconds`](../solver_density_cuda/boundaryCond.cpp#L116) が
