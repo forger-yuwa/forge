@@ -1,5 +1,6 @@
 # c3x run108 (code 4411, M2=0.9) — NASA CR-168015 Appendix A, report p.164 (PDF p.170)
 # 転記元はページ画像 (OCR は桁落ちするため使わない)。Tw = Tw_norm * 811.0 K
+# 空欄 = スキャン (300 dpi 2 値) で判読不能。推測で埋めていない
 # 並び: 正圧面 (後縁->前縁) のあと 負圧面 (前縁->後縁)
 surface,s_over_S,x_over_bx,Tw_norm,Tw_K,h_norm
 PS,0.8627,0.8656,0.7544,611.82,0.5614
