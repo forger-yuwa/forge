@@ -763,6 +763,57 @@ NaN 節点 75 個の分布は x 1.0702–1.0808 / y 0.2694–0.2791 で、**ベ�
 → **短窓の指標は再現するが、生産設定の順位付けには使えない**。`cfl_main 1.0` を維持する。
 (relax は解自体も動かす [[sern-cfl-no-implicit-relax]]。)
 
+### 4.23 codex 相談 (plan 段) の反映と、指標の作り直し (2026-09-20)
+
+[`notes/reviews/2026-09-20-tooling-nozzle-sern-3d-plan.md`](../../notes/reviews/2026-09-20-tooling-nozzle-sern-3d-plan.md) (**GO-with-changes**, Major 6 / Minor 1)。
+
+#### 非決定性の**発生源が特定された** (Major 1)
+
+codex が独立に `run_0292` と `run_0323` を比較し (入力の SHA-256 一致、`res_0` ビット一致、
+`res_1` の `ro` が 18811 点・最大 3.73e-8、`roe` が 13613 点・最大 0.0625 で相違)、
+**SLAU の残差集積に浮動小数点 `atomicAdd`** があることを示した:
+
+- `convectiveFlux_slau_d.inc.cuh:563` — `atomicAdd(&res_ro[ic0], ...)` ほか流れ 5 変数。**1 スレッド = 1 面**なので
+  1 つの CV に複数面が非決定的な順序で加算される。**node でも通る主ループ**である。
+- `ransTransport_d.cu:55` — SST 勾配も同じ構造。
+
+**[[cell-atomicadd-nondeterminism]] の「node は決定的」は正確でない** — node も同じ `atomicAdd` を通り、
+振幅が cell より小さい (~1e-7/step vs ~6e-4) だけである。
+
+また **「2 回走に差があるから出力バグではない」という私の判別論理は成立しない** (両者は併存しうる)。
+結論自体は次で裏づけられた。
+
+#### 出力経路はソース読解でも無罪 (Major 2)
+
+codex がソースで確認: `output.cpp:65` の `outputH5_XDMF` は **D2H コピーのみで EOS を呼ばない**、
+`main.cpp:1374` の `dependentVariables` は残差組立側で呼ばれる。
+**通常の HDF5 出力から EOS 再適用へ至る直接経路は無い**。
+ただし `dependentVariables_d.cu:76,209` は**密度床を適用し TP 経路で `roe` を再構成する**ので、
+**診断のために EOS を追加で呼ぶと診断自体が介入になる**。今後の診断は複製した状態の上だけで行う。
+
+#### 指標の作り直し (Major 3) — `%/step` をやめて**質量収支**にする
+
+`dt_local` は CFL と局所状態に依存する (`setDT_d.cu:216`) ので、`%/step` は粗細・CFL 間で**同じ尺度ではない**。
+固定ノード集合の **ΣρV** で測り直した (ベース帯 8 節点):
+
+| | 初期 ΣρV [kg/m] | 経過 |
+| --- | --- | --- |
+| **粗 (cfl 1, `run_0269`)** | 7.972854e-08 | step 4 **94.0 %** → 12 **81.5 %** → 24 **65.4 %** → step 28 **0 % (NaN)** |
+| **細 (cfl 1, `run_0306`)** | 1.036875e-08 | step 2000 **99.974 %** → 12000 **99.973 %** (**12000 step 平坦**) |
+
+**正規化不要で結論が言える**: 粗メッシュは 24 step でベース帯の質量を **1/3 失って**消滅し、
+細メッシュは **12000 step で 0.027 % しか動かず横ばい**。
+(粗/細で開始場が違う点は残る [Major 1/5] が、この差はその感度をはるかに超える。)
+
+#### 未反映のまま残す指摘 (§5.1 へ)
+
+- **Major 3 の残り**: 面 `massflux` の流入/流出別収支と圧力差項の寄与、`dt_local`・DPLUR 補正・EOS 床/壁ピンによる
+  保存量変更を**時相ごとに分けて**記録する。固定線形系に対する sweep ごとの線形残差で、線形解法と非線形更新を分ける。
+- **Major 4**: `run_0324` は 40 step 走ったが `res_0.h5` しか書いていない (`output.cpp:264` は単純な剰余判定で
+  **最終 step の強制保存が無い**)。短窓 A/B では**最終 step の保存を明示する**こと。
+- **Major 5**: `interp_field.py` は共通初期場を保証しない。粗/細の比較をやり直すときは移植後の場を検査する。
+- **Major 6**: 設定キーだけでなく**バイナリと実効作用素**も固定して記録する。
+
 ## 5. 実装ステップ
 
 本体 plan §5 の R4 系を引き継ぐ。着手順は §4.15.3 末尾 (codex plan-3 の指定):
@@ -791,6 +842,7 @@ NaN 節点 75 個の分布は x 1.0702–1.0808 / y 0.2694–0.2791 で、**ベ�
 
 | stage | 日付 | 記録 | 判定 | 採否 |
 | --- | --- | --- | --- | --- |
+| plan | 2026-09-20 | [2026-09-20-tooling-nozzle-sern-3d-plan.md](../../notes/reviews/2026-09-20-tooling-nozzle-sern-3d-plan.md) | GO-with-changes, M6/m1 | **全件採用 → §4.23**。M1 → 非決定性の発生源が `convectiveFlux_slau_d.inc.cuh:563` と `ransTransport_d.cu:55` の float `atomicAdd` と特定 (node も通る)。私の「2 回走に差があるから出力バグでない」という判別論理は不成立と認め、出力の無罪は M2 のソース読解で裏づけ。M2 → 通常出力から EOS 再適用への経路は無いが `dependentVariables` は床適用と `roe` 再構成をするので診断で EOS を呼ばないこと。M3 → `%/step` を廃し**固定ノード集合の ΣρV** に変更 (粗 24 step で 65.4 % → 0、細 12000 step で 99.973 %)。残りの機序分離指標は §5.1。M4/M5/M6 → 最終 step の強制保存・`interp_field` 後の検査・バイナリ固定を §5.1 に起票 |
 | **result** | 2026-09-20 | [2026-09-20-tooling-nozzle-sern-3d-result.md](../../notes/reviews/2026-09-20-tooling-nozzle-sern-3d-result.md) | NO-GO, M7/m2 | **全件採用 → §4.20 で大幅撤回**。**M1** → `run_0269` は config もログも `cfl_pseudo=1` で「粗・cfl 5」ではなかった。2×2 は成立せず「CFL 非依存」を撤回。**M2** → `run_0304`/`0305` のログは `implicitRelax=1` で A/B 未実施。「relax で止まる」を撤回。**M3 (実バグ)** → 3D は `_wake_stations(L_cowl, ...)` とカウル後縁から細分しており**ベース直後は 42.75 倍粗いまま**だった。`L_ramp` 分割に修正し、入力値でなく**生成後の実座標**を見る `check_wake_first_spacing()` を追加 (`_geom_start` は公比上限 3 で打ち切るので入力検査では保証できない)。検証: 2D 0.000400 m / 3D 0.004000。**M4 (私の退行)** → ハードエラーが `run_sern_mesh3d_tests.py` を壊していた。未設定は `t_base/5` を既定にして **ALL PASS に復帰**。`t_base/5`・soft ramp・CFL は暫定レシピと明記。**M5/M6/M7** → `run_0308` を「通し完走」までに限定、段階の実効設定と途中場の保存を残作業に、§5.1 と完了条件を同期。**m1/m2** → 現在仕様の旧トポロジ記述と、phase を跨いだ変動係数の計算を訂正。**自分で追加確認**: 同一入力の繰り返しで NaN が step **34/38/53** とばらつく = §4.16–§4.17 の A/B は全部保留 |
 | plan | 2026-09-19 | [2026-09-19-tooling-nozzle-sern-chain-plan-2.md](../../notes/reviews/2026-09-19-tooling-nozzle-sern-chain-plan-2.md) | NO-GO, C2/M5/m1 | **全件採用** (§4.15.1)。C2 → R4e、M1 → R4d、M3 → R4f を起票 |
 | plan | 2026-09-19 | [2026-09-19-tooling-nozzle-sern-chain-plan-3.md](../../notes/reviews/2026-09-19-tooling-nozzle-sern-chain-plan-3.md) | GO-with-changes, C0/M5/m1 | **全件採用** (§4.15.3)。案 (d) 採用、`run_0034` の診断撤回、形状を格子から独立、帳簿三分割、検証 5 段 |
