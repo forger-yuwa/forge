@@ -75,6 +75,9 @@ forge は SI 次元のまま解くので同じ式が成立しない。
 
 #### 無次元化 Venkatakrishnan (`space.limiterScaled: 1`, opt-in)
 
+**`limiterScaled: 1` は評価点の一致を内包する** (2026-09-20 に `limiterMatchRecon` を畳んだ)。
+公開値は **0 (旧経路) / 1 (修正版)** の 2 つだけ。
+
 $\delta$ を**変数ごとの固定参照** $q_\mathrm{ref}$ で割ってから Venkatakrishnan を当てる。
 
 $$
@@ -90,17 +93,32 @@ $$
   (読むと $\epsilon^2=0$ になり `venkatK` が効かなくなる)。
 - $L_\mathrm{ref}$: `limiterRefLength`。0 ならメッシュ境界箱の対角。
 
-**`space.venkatK` の推奨は 0.05** (SU2 既定と同値)。既定の 1.0 は Sod で全変数を悪化させる
+**`space.venkatK` の既定は経路で変わる**: `limiterScaled: 1` なら **0.05** (SU2 既定と同値)、`0` なら 1.0。
+**旧経路の K は `limiterFunctions_d.cuh` で `1.f` 固定**なので、`limiterScaled: 0` では `venkatK` を変えても効かない。
+K=1.0 は Sod で全変数を悪化させる
 (密度の近傍逸脱が K=1.0 で 86674 面側、K=0.05 で **0**)。SERN でも K=1.0 は $\rho$ 797 / $U_y$ 1777 に対し
 K=0.05 は $\rho$/$U_x$/$P$ が 0。
 
-**`space.limiterScaled > 0` は `space.limiterMatchRecon: 1` を要求する** (通常経路は `matchRecon==0` で
-`limiterScaled` を無視するのに周期経路は適用するため、契約が割れる)。
+**`limiterMatchRecon` は廃止** (2026-09-20)。`limiterScaled: 1` が評価点の一致を含む。
+**中間だった `matchRecon: 1, scaled: 0` (評価点だけ直して旧 Venkat 式を使う。Barth にも効いた) は機能打ち切り**で、
+改名ではない。旧キーは移行先を示して拒否する。
 
-#### 比の形 (`space.limiterScaled: 2`) — **棄却**
+#### 比の形 — **削除済み** (旧 `space.limiterScaled: 2`)
 
 $\psi$ を $y=\delta^+/\delta_m$ だけの関数にする形。基準値も長さも要らないが、
-**滑らか域でリミッタが切れない**ので定常残差の床が 2〜5 倍上がる (case/44 で実測)。使わないこと。
+**滑らか域でリミッタが切れない**ので定常残差の床が 2〜5 倍上がった (case/44 で実測)。
+**2026-09-20 にコードごと削除**し、指定すると理由つきで拒否する。
+
+#### 定常 2 次の残差プラトーについて
+
+**活きたリミッタを持つと定常 2 次は機械収束しない** (`case/08` で実測: `limiter: 0` なら 5.11e-7 まで落ちるが、
+Venkatakrishnan K=0.05 で 1.20e-3、Barth で 4.91e-3)。支配するのは**衝撃反射点**の節点で、
+`cfl_pseudo` を上げるとプラトーも上がる。**K を上げれば収束は戻るが、それはリミッタが切れていくからである**
+(K=50 で残差はリミッタ無しと同等、近傍逸脱は 255 万)。
+
+**ψ の凍結は実装していない** (2026-09-20 決定)。プラトー run は「**未収束の準定常評価**」として、
+目的量・局所場・保存収支・CFL/内部反復感度が**事前に決めた誤差予算内**にある場合だけ受理する
+(plan [`limiter-config-simplify.md`](../plans/active/limiter-config-simplify.md) §4.3)。
 
 ### リミッタの評価点 (`space.limiterMatchRecon`)
 

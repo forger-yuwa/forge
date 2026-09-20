@@ -57,13 +57,6 @@ __device__ flow_float venkata_limiter_scaled(flow_float delta_p_max, flow_float 
 //   psi <= y なので Barth の有界性を満たす (y>2 で psi>1 になるが呼び出し側が 1 でクランプする)。
 // **代償**: 尺度を持たないので「ほぼ一様な領域の数値ノイズは制限しない」という
 // Venkatakrishnan 本来の性質を失う。収束の鈍りが出ないかは実測で見る (§4.18)。
-__device__ flow_float venkata_limiter_ratio(flow_float delta_p_max, flow_float delta_p_min,
-                                            flow_float delta_m, flow_float eps) {
-    const flow_float delta_p = (delta_m > (flow_float)0.0) ? delta_p_max : delta_p_min;
-    const flow_float y  = delta_p / delta_m;            // 呼び出し側が |delta_m| > 1e-20 を保証する
-    const flow_float e2 = eps*eps;
-    return (y*y + (flow_float)2.0*y + e2) / (y*y + y + (flow_float)2.0 + e2);
-}
 
 
 __device__ flow_float barth_Jespersen_limiter(flow_float delta_p_max, flow_float delta_p_min, 

@@ -527,30 +527,39 @@ void solverConfig::read(std::string fname)
         if (this->limiter != 0 && this->limiter != 1 && this->limiter != 2 && this->limiter != -1) {
             throw std::runtime_error("Key 'limiter' in 'space' must be one of 0, 1, 2, or -1.");
         }
-        // リミッタ評価点/増分を流束と一致させる (既定 0 = 従来の式)。plan convection-node-wall-reconstruction §4.8
-        this->limiterMatchRecon = getOptionalValidatedValue<int>(space, "limiterMatchRecon", 0, "space");
-        if (this->limiterMatchRecon != 0 && this->limiterMatchRecon != 1) {
-            throw std::runtime_error("Key 'limiterMatchRecon' in 'space' must be 0 or 1.");
+        // `limiterMatchRecon` は廃止 (plan limiter-config-simplify §4.2)。`limiterScaled` に内包した。
+        // **これは同義キーの削除ではなく機能打ち切り**である: 旧 `matchRecon=1, scaled=0`
+        // (評価点・増分だけ直して旧 Venkat 式を使う。Barth にも効いた) は無くなる。
+        if (space["limiterMatchRecon"]) {
+            throw std::runtime_error(
+                "Key 'limiterMatchRecon' in 'space' is no longer supported. It is now implied by 'limiterScaled': "
+                "use 'limiterScaled: 1' (evaluation point matched to the flux AND non-dimensionalised Venkatakrishnan) "
+                "or 'limiterScaled: 0' (legacy path). The intermediate combination "
+                "'limiterMatchRecon: 1, limiterScaled: 0' is discontinued, not renamed "
+                "(plan limiter-config-simplify.md 4.2).");
         }
         // 対象は **流れ 5 変数・node・convMethod 0/1/2 のみ** (plan convection-node-wall-reconstruction §4.14)。
         // cell は目標点が双対面重心のままで流束と整合しているが、convMethod 2 の増分の形は変わるので拒否する。
         // MINMOD (その他の convMethod) は増分の式が別なので共通関数の対象外。
         this->limiterScaled = getOptionalValidatedValue<int>(space, "limiterScaled", 0, "space");
-        if (this->limiterScaled < 0 || this->limiterScaled > 2) {
-            throw std::runtime_error("Key 'limiterScaled' in 'space' must be 0 (current), 1 (scaled delta) or 2 (ratio form).");
+        if (this->limiterScaled == 2) {
+            throw std::runtime_error(
+                "Key 'limiterScaled: 2' (ratio form) in 'space' is no longer supported: it raises the steady residual "
+                "floor by 2-5x because psi never switches off in smooth regions (case/44). Use 'limiterScaled: 1' "
+                "(plan convection-node-wall-reconstruction.md 4.22).");
         }
-        this->venkatK = getOptionalValidatedValue<double>(space, "venkatK", 1.0, "space");
+        if (this->limiterScaled != 0 && this->limiterScaled != 1) {
+            throw std::runtime_error("Key 'limiterScaled' in 'space' must be 0 (legacy) or 1 (matched evaluation point + non-dimensionalised Venkatakrishnan).");
+        }
+        // `limiterScaled: 1` は評価点の一致を**含む**。内部フラグはここで立てる。
+        this->limiterMatchRecon = (this->limiterScaled == 1) ? 1 : 0;
+        // `venkatK` の既定は経路で変える: 修正版は 0.05 (SU2 既定と同値。1.0 は Sod でも SERN でも悪い)。
+        // **旧経路の K は `limiterFunctions_d.cuh` で 1.f 固定**なので、`limiterScaled: 0` では効かない。
+        this->venkatK = getOptionalValidatedValue<double>(space, "venkatK", (this->limiterScaled == 1) ? 0.05 : 1.0, "space");
         if (!(this->venkatK > 0.0)) {
             throw std::runtime_error("Key 'venkatK' in 'space' must be > 0.");
         }
         this->limiterRefLength = getOptionalValidatedValue<double>(space, "limiterRefLength", 0.0, "space");
-        // 通常経路は matchRecon==0 だと limiterScaled を無視するが、周期経路は matchRecon に依らず適用する。
-        // 同じ設定が周期の有無で別動作になるので**束で要求する** (codex 2026-09-20 result レビュー Major 2)。
-        if (this->limiterScaled > 0 && this->limiterMatchRecon != 1) {
-            throw std::runtime_error("Key 'limiterScaled' > 0 in 'space' requires 'limiterMatchRecon: 1' "
-                                     "(the non-periodic path ignores limiterScaled when matchRecon==0, "
-                                     "while the periodic path applies it regardless).");
-        }
 
         // 基準値の明示指定 (codex plan-3 Major 6)。0 = 起動時に初期場から自動決定。
         this->limiterRoRef = getOptionalValidatedValue<double>(space, "limiterRoRef", 0.0, "space");

@@ -115,11 +115,7 @@ __global__ void limiter_psi_merged_d
             delta_m = Qt - Qc;
         }
         flow_float l;
-        if (limScaled == 2 && limiter_scheme != 1) {
-            // 比の形 (基準値も長さも不要)
-            l = (fabsf(delta_m) > (flow_float)1.0e-20)
-              ? venkata_limiter_ratio(dp_max, dp_min, delta_m, eps2Coef) : (flow_float)1.0;
-        } else if (limScaled == 1 && limiter_scheme != 1) {
+        if (limScaled == 1 && limiter_scheme != 1) {
             // 変数ごとの固定参照で無次元化してから Venkatakrishnan (通常経路 limiter_r1_fused5_d と同式)
             const flow_float inv = (flow_float)1.0/qRef;
             const flow_float hi  = (lenArea != 0) ? sqrtf(A_planar[ic0]) : cbrtf(volume);

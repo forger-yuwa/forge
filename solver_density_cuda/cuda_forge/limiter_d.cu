@@ -83,8 +83,7 @@ static void limiter_periodic_merged
         phi_floor, Q, s_lim_qmax, s_lim_qmin, limiter_Q, dQdx, dQdy, dQdz,
         matchRecon, (cfg.discretization == "node" ? 1 : 0), cfg.convMethod,
         limScaled, qRef,
-        (limScaled == 2 ? (flow_float)cfg.venkatK
-            : (flow_float)(cfg.venkatK*cfg.venkatK*cfg.venkatK/(cfg.limiterRefLength*cfg.limiterRefLength*cfg.limiterRefLength))),
+        (flow_float)(cfg.venkatK*cfg.venkatK*cfg.venkatK/(cfg.limiterRefLength*cfg.limiterRefLength*cfg.limiterRefLength)),
         cfg.limiterLengthFromArea,
         (cfg.isAxisymmetric == 1 ? var.c_d.at("A_planar") : var.c_d.at("volume")));
     gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
@@ -373,12 +372,7 @@ __global__ void limiter_r1_fused5_d
                 const flow_float delta = recon_increment(convM, qc[k], Q[k][ic1],
                                                          gx[k], gy[k], gz[k], dcp_x, dcp_y, dcp_z);
                 flow_float lk;
-                if (scaled == 2 && SCHEME != 1) {
-                    // 比の形: 無次元なので基準値も長さも要らない (venkatK を eps として使う)
-                    lk = (fabsf(delta) > (flow_float)1.0e-20)
-                       ? venkata_limiter_ratio(qmax[k]-qc[k], qmin[k]-qc[k], delta, eps2Coef)
-                       : (flow_float)1.0;
-                } else if (scaled == 1 && SCHEME != 1) {
+                if (scaled == 1 && SCHEME != 1) {
                     // 変数ごとの固定参照で無次元化してから Venkatakrishnan
                     const flow_float qr = (k == 0) ? qr0 : ((k == 4) ? qr4 : qr1);
                     const flow_float inv = (flow_float)1.0/qr;
@@ -493,8 +487,7 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         ((cfg.primPack != 0 && cfg.gradLSQ == 2) ? prim_pack_device_ptr() : nullptr), \
         cfg.limiterMatchRecon, (cfg.discretization == "node" ? 1 : 0), cfg.convMethod, \
         cfg.limiterScaled, (flow_float)cfg.limiterRoRef, (flow_float)cfg.limiterARef, (flow_float)cfg.limiterPRef, \
-        (cfg.limiterScaled == 2 ? (flow_float)cfg.venkatK \
-            : (flow_float)(cfg.venkatK*cfg.venkatK*cfg.venkatK/(cfg.limiterRefLength*cfg.limiterRefLength*cfg.limiterRefLength))), \
+        (flow_float)(cfg.venkatK*cfg.venkatK*cfg.venkatK/(cfg.limiterRefLength*cfg.limiterRefLength*cfg.limiterRefLength)), \
         cfg.limiterLengthFromArea, \
         (cfg.isAxisymmetric == 1 ? var.c_d.at("A_planar") : var.c_d.at("volume"))
     // 周期 node (合併 CV) は 2 段 (極値の group max/min → ψ の group min) で周期対の ψ を一致させる (§4.8)。

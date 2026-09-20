@@ -45,6 +45,10 @@ HARD_PATTERNS = [
     # (表示名, solverConfig の正規表現)
     ("convMethod", r"convMethod\s*:\s*(\S+)"),
     ("limiter", r"\blimiter\s*:\s*(\S+)"),
+    # リミッタの**式そのもの**を変えるキー。これが変わった段を同一区間として連結してはいけない
+    # (codex 2026-09-20 limiter-config-simplify plan レビュー M5)。
+    ("limiterScaled", r"limiterScaled\s*:\s*(\S+)"),
+    ("venkatK", r"venkatK\s*:\s*(\S+)"),
     ("turbulenceModel", r"turbulenceModel\s*:\s*(\S+)"),
     ("wallTreatmentSST", r"wallTreatmentSST\s*:\s*(\S+)"),
     ("viscMethod", r"viscMethod\s*:\s*(\S+)"),
