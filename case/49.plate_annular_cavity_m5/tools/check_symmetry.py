@@ -205,20 +205,51 @@ def main():
     if a.ref_run and swirl_hist:
         rs = field_asym(snapshots(a.ref_run)[-1], man)
         sref = rs["swirl"][0] if rs else 0.0
-        s0, s1 = swirl_hist[0][1], swirl_hist[-1][1]
-        d0, d1 = abs(s0 - sref), abs(s1 - sref)
-        frac = d1 / max(d0, 1e-30)
-        print("\n旋回の減衰: 擾乱 %+.3e -> 末尾 %+.3e   (基準 %+.3e)" % (s0, s1, sref))
-        print("  |末尾-基準| / |擾乱-基準| = %.4f   (許容 %.3g)" % (frac, a.decay))
+        steps = np.array([st for st, _ in swirl_hist], float)
+        dev = np.abs(np.array([v for _, v in swirl_hist], float) - sref)
+        d0 = dev[0]
+        # **終点 1 点で判定しない** (codex result-1 M8, 2026-09-20)。
+        # 減衰したあと再成長しても、振動して偶然終点が基準近傍でも合格してしまっていた。
+        # 末尾窓の**最大**で測り、さらに末尾が上昇していないかを別に見る。
+        nt = max(2, len(dev) // 3)
+        tail_max = float(dev[-nt:].max())
+        tail_mean = float(dev[-nt:].mean())
+        mid_mean = float(dev[-2 * nt:-nt].mean()) if len(dev) >= 2 * nt else tail_mean
+        frac = tail_max / max(d0, 1e-30)
+        rising = tail_mean > 1.10 * mid_mean
+        # 指数減衰率 (e-folding step)。遅い減衰と速い減衰を区別する
+        efold = float("nan")
+        ok = dev > 0
+        if ok.sum() >= 3:
+            sl = np.polyfit(steps[ok], np.log(dev[ok]), 1)[0]
+            if sl < 0:
+                efold = -1.0 / sl
+        print("\n旋回の減衰: 擾乱 %+.3e -> 末尾窓 最大 %.3e / 平均 %.3e   (基準 %+.3e)"
+              % (swirl_hist[0][1], tail_max, tail_mean, sref))
+        print("  |末尾窓の最大-基準| / |擾乱-基準| = %.4f   (許容 %.3g)   末尾 %d 点"
+              % (frac, a.decay, nt))
+        print("  末尾窓平均 / 中間窓平均 = %.3f  (%s)   e-folding %s step"
+              % (tail_mean / max(mid_mean, 1e-30), "**上昇**" if rising else "非上昇",
+                 ("%.3g" % efold) if np.isfinite(efold) else "減衰していない"))
+        if len(dev) < 3:
+            # **1〜2 点で減衰は測れない**。旧実装はこの場合でも frac を出して判定していた
+            # (`--series` を付け忘れると最終スナップショット 1 点だけになる)。
+            print("VERDICT: INCONCLUSIVE (時系列が %d 点しかない — `--series` を付けて"
+                  "スナップショット列で見ること)" % len(dev))
+            return 2
         if d0 < 1e-6:
             print("VERDICT: NO-PERTURBATION (擾乱が基準と同じ — 擾乱が効いていない)")
             return 2
-        if frac <= a.decay:
-            print("VERDICT: SYMMETRIC (反対称モードが減衰 = 半割で可。減衰 %.1f %%)" % (100 * (1 - frac)))
-            return 0
+        if rising:
+            print("VERDICT: ASYMMETRIC (末尾で再成長 — 終点だけ見ると見逃す)")
+            return 1
         if frac >= 1.0:
             print("VERDICT: ASYMMETRIC (反対称モードが減衰しない/成長 — 半割は不可)")
             return 1
+        if frac <= a.decay:
+            print("VERDICT: SYMMETRIC (反対称モードが減衰 = 半割で可。減衰 %.1f %%、"
+                  "末尾窓で再成長なし)" % (100 * (1 - frac)))
+            return 0
         print("VERDICT: PARTIAL-DECAY (%.1f %% しか減衰していない — 観測窓を延ばす)" % (100 * (1 - frac)))
         return 2
 
