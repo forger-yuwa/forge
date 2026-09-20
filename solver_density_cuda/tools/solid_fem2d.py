@@ -108,6 +108,40 @@ class Fem2DOperator:
                 b[idx[i]] += h * Tc * L / 2.0
         return K.tocsr(), b
 
+    # ---- 逆問題・繰り返し解析用: 作用素を部品に分けて先に組む ----
+    def parts(self, T_ref=None, groups=None):
+        r"""伝導剛性と **Robin 群ごとの行列・荷重**を一度だけ組んで返す。
+
+        $K(h_1..h_m) = K_{cond} + \sum_k h_k M_k$, $b = \sum_k h_k T_{c,k} v_k$ なので、
+        $h_k, T_{c,k}$ を振る解析 (内部条件の同定など) は**毎回組み直さずに済む**。
+
+        groups: 辺リストの配列 (省略時は self.robin_edges を 1 群として扱う)
+        戻り値: (K_cond, [(M_k, v_k), ...])
+        """
+        u_ref = np.full(self.N, float(T_ref) if T_ref is not None else 300.0)
+        saved, self.robin_edges = self.robin_edges, []      # 伝導だけ組む
+        K_cond, _ = self.assemble_full(u_ref)
+        self.robin_edges = saved
+        if groups is None:
+            groups = [[(e[0], e[1]) for e in self.robin_edges]]
+        out = []
+        for g in groups:
+            rows, cols, vals = [], [], []
+            v = np.zeros(self.N)
+            for e in g:
+                n0, n1 = int(e[0]), int(e[1])
+                L = float(np.linalg.norm(self.xy[n1] - self.xy[n0]))
+                if L <= 0:
+                    continue
+                Me = L / 6.0 * np.array([[2.0, 1.0], [1.0, 2.0]])
+                idx = [n0, n1]
+                for i in range(2):
+                    for j in range(2):
+                        rows.append(idx[i]); cols.append(idx[j]); vals.append(Me[i, j])
+                    v[idx[i]] += L / 2.0
+            out.append((sp.csr_matrix((vals, (rows, cols)), shape=(self.N, self.N)), v))
+        return K_cond, out
+
     # ---- 界面への縮約 (Schur 補元) ----
     def assemble(self, T_iface):
         u = self.u if self.u is not None else np.full(self.N, float(np.mean(T_iface)))
