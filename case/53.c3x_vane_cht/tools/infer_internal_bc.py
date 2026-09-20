@@ -76,7 +76,7 @@ def main():
     holes = [d[k] for k in d.files if k.startswith("hole")]
 
     tbl = TABLES[a.run]
-    Tg = a.Tg if a.Tg is not None else {"run108": 786.0}[a.run]
+    Tg = a.Tg if a.Tg is not None else {"run108": 786.0, "run42": 788.0}[a.run]
     mat = json.loads((case / "ref/material_astm310.json").read_text())
     kT, kk = np.array(mat["k_table"]["T"], float) + 273.15, np.array(mat["k_table"]["k"], float)
 
@@ -129,7 +129,8 @@ def main():
           f"(SS {ss_arc:.3f} vs 表 IV {ref_arc[0]}, PS {ps_arc:.3f} vs {ref_arc[1]} cm; "
           f"差 {100*(ss_arc/ref_arc[0]-1):+.1f} % / {100*(ps_arc/ref_arc[1]-1):+.1f} %)")
 
-    rows = tbl["rows"]
+    # **判読不能セル (None) のある行は落とす** (Mark II run42 は 9 セル欠測。case/54 README)。
+    rows = [r for r in tbl["rows"] if r[2] is not None and r[3] is not None]
     s_dat = np.array([r[0] for r in rows]); Tw_dat = np.array([r[2] for r in rows]) * TREF
     h_dat = np.array([r[3] for r in rows]) * H0
     i_stag = int(np.argmin(s_dat))

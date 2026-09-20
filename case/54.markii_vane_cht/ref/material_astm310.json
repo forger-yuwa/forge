@@ -1,0 +1,18 @@
+{
+  "material": "ASTM type 310 stainless steel (vane material, NASA CR-168015 p.14)",
+  "note_source": "報告には k_s(T) の数値が無い (p.24: 「材料を指定してあるので既知」として不確かさ ±3 % とだけ書かれている)。よって**外部出典**を使う。V5 の誤差帯には (a) 報告が主張する ±3 % と (b) 出典間のばらつき の両方を別項目として積むこと。",
+  "source": "Engineering ToolBox, AISI 310 stainless steel properties (thermal conductivity vs temperature)",
+  "source_url": "https://www.engineeringtoolbox.com/stainless-steel-310-properties-d_2167.html",
+  "retrieved": "2026-09-20",
+  "units": {"T": "degC", "k": "W/m/K"},
+  "k_table": {
+    "T": [0, 25, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700],
+    "k": [12.1, 12.7, 13.2, 14.1, 15.0, 15.8, 16.6, 17.3, 18.0, 18.8, 19.4, 20.1, 20.9, 22.2, 23.0, 23.7]
+  },
+  "range_of_interest": {
+    "Tw_measured_K": [512.6, 611.8],
+    "Tw_measured_degC": [239.5, 338.7],
+    "k_at_range_W_m_K": [16.5, 18.0],
+    "comment": "run 108 の実測壁温域。固体内部は冷却孔側でもう少し低い。"
+  }
+}

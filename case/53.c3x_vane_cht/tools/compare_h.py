@@ -23,7 +23,8 @@ sys.path.insert(0, str(HERE))
 from run_data import TABLES                     # noqa: E402
 
 H0, TREF = 1135.0, 811.0
-TG = {"run108": 786.0}
+TG = {"run108": 786.0, "run42": 788.0}          # ガス全温 = 入口全温 (報告 表 VIII/IX)
+CASE = {"c3x": "case/53.c3x_vane_cht", "markii": "case/54.markii_vane_cht"}
 
 
 def arc_map(P):
@@ -69,11 +70,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run_dir")
     ap.add_argument("--run", default="run108")
+    ap.add_argument("--vane", default=None, help="既定は run の vane (TABLES から)")
     ap.add_argument("--step", type=int, default=None)
     ap.add_argument("--phys", type=int, default=5)
     a = ap.parse_args()
 
-    rd = Path(a.run_dir if Path(a.run_dir).is_absolute() else ROOT / "case/53.c3x_vane_cht" / a.run_dir)
+    vane = a.vane or ("markii" if TABLES[a.run]["vane"].lower().startswith("mark") else "c3x")
+    rd = Path(a.run_dir if Path(a.run_dir).is_absolute() else ROOT / CASE[vane] / a.run_dir)
     fs = sorted(rd.glob(f"res_wall_{a.phys}_[0-9]*.h5"), key=lambda p: int(p.stem.split("_")[-1]))
     if not fs:
         sys.exit(f"no wall dump in {rd}")
@@ -87,7 +90,8 @@ def main():
     Tg = TG[a.run]
     s_norm, is_ss = arc_map(C[:, :2])
 
-    rows = TABLES[a.run]["rows"]
+    # **判読不能セル (None) は落とす** (case/54 README 参照)。内挿の節点が減るだけ。
+    rows = [r for r in TABLES[a.run]["rows"] if r[3] is not None]
     sd = np.array([r[0] for r in rows])
     hd = np.array([r[3] for r in rows]) * H0
     i_stag = int(np.argmin(sd))
@@ -143,7 +147,7 @@ def main():
         ax.text(0.125, ax.get_ylim()[0] + 0.03, "SS laminar\n(no transition model)",
                 ha="center", va="bottom", fontsize=8, color="0.35")
         ax.grid(alpha=0.3); ax.legend(loc="lower right")
-        ax.set_title(f"C3X {a.run} — h (measured $T_w$ imposed)   "
+        ax.set_title(f"{TABLES[a.run]['vane']} {a.run} — h (measured $T_w$ imposed)   "
                      + "  ".join(f"{k}: {v[1]:+.0f}%/{v[2]:.0f}%" for k, v in stats.items()
                                  if k != "all"), fontsize=9)
         fig.tight_layout(); fig.savefig(rd / "h_compare.png", dpi=110)
