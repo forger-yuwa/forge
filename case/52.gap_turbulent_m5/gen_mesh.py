@@ -47,7 +47,7 @@ cavity: {physID: 6, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {Ux:
 
 
 def geo_text(g, w, d, ny, r_y, nx_up, nx_pl, nx_gap, nx_dn, nx_buf, ny_cav,
-             bump_pl, bump_dn, bump_cav, with_cavity):
+             bump_pl, bump_dn, bump_cav, with_cavity, bump_gap=0.0):
     """B1 助走(slip) | B2 平板上流 | B3 開口上 | B4 平板下流 | B5 出口バッファ(slip)  (+ B6 キャビティ)
 
     平板は模型長 197 mm で終わり、その下流は slip 延長にする (出口境界を境界層で切らない)。
@@ -74,7 +74,7 @@ def geo_text(g, w, d, ny, r_y, nx_up, nx_pl, nx_gap, nx_dn, nx_buf, ny_cav,
     A(f"Transfinite Line {{11, 12, 13, 14, 15, 16}} = {ny} Using Progression {r_y:.8f};")
     A(f"Transfinite Line {{1, 6}} = {nx_up} Using Progression 1.08;")
     A(f"Transfinite Line {{2, 7}} = {nx_pl} Using Bump {bump_pl};")
-    A(f"Transfinite Line {{3, 8}} = {nx_gap};")
+    A(f"Transfinite Line {{3, 8}} = {nx_gap}" + (f" Using Bump {bump_gap};" if bump_gap > 0 else ";"))
     A(f"Transfinite Line {{4, 9}} = {nx_dn} Using Bump {bump_dn};")
     A(f"Transfinite Line {{5, 10}} = {nx_buf} Using Progression 1.02;")
     for k in range(1, 6):
@@ -87,7 +87,7 @@ def geo_text(g, w, d, ny, r_y, nx_up, nx_pl, nx_gap, nx_dn, nx_buf, ny_cav,
         A("Line(17) = {13, 14};")   # 床
         A("Line(18) = {4, 14};")    # 後壁 (下向き)
         A("Line(19) = {3, 13};")    # 前壁 (下向き)
-        A(f"Transfinite Line {{17}} = {nx_gap};")
+        A(f"Transfinite Line {{17}} = {nx_gap}" + (f" Using Bump {bump_gap};" if bump_gap > 0 else ";"))
         A(f"Transfinite Line {{18, 19}} = {ny_cav} Using Bump {bump_cav};")
         A("Curve Loop(6) = {19, 17, -18, -3};")
         A("Plane Surface(6) = {6};  Transfinite Surface {6};  Recombine Surface(6);")
@@ -128,6 +128,8 @@ def main():
     ap.add_argument("--bump-plate", type=float, default=0.02)
     ap.add_argument("--bump-down", type=float, default=0.05)
     ap.add_argument("--bump-cav", type=float, default=0.02)
+    ap.add_argument("--bump-gap", type=float, default=0.0,
+                    help="開口幅方向を側壁に寄せる (すきま側壁の y1+ を下げる)。0 で一様")
     ap.add_argument("--tag", default=None)
     ap.add_argument("--no-convert", action="store_true")
     a = ap.parse_args()
@@ -151,7 +153,8 @@ def main():
     tag = a.tag or (f"{a.case.lower()}_wd{a.wd:g}_y{a.y1:g}um")
     MESH.mkdir(exist_ok=True)
     txt = geo_text(g, w, d, ny, r, a.nx_up, a.nx_plate, a.nx_gap, a.nx_down, a.nx_buf, a.ny_cav,
-                   a.bump_plate, a.bump_down, a.bump_cav, with_cavity=(a.case == "T1"))
+                   a.bump_plate, a.bump_down, a.bump_cav, with_cavity=(a.case == "T1"),
+                   bump_gap=a.bump_gap)
     (MESH / f"{tag}.geo").write_text(txt)
     print(f"[{tag}] w = {w*1e3:.3f} mm, d = {d*1e3:.2f} mm, 開口 {a.nx_gap-1} セル ({w*1e3/(a.nx_gap-1)*1e3:.1f} µm/セル)")
     print(f"        ny = {ny} (y1 = {a.H*(r-1)/(r**(ny-1)-1)*1e6:.3f} µm, r = {r:.5f})")
