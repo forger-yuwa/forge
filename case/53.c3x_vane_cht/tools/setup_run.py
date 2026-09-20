@@ -34,8 +34,14 @@ H0, TREF = 1135.0, 811.0
 # 入口は質量流束指定なので、**報告の出口条件 (M2, Pt, Tt, スロート面積) と整合する流量**から決める:
 #   mdot = rho2 U2 A_throat,  rho1 U1 = mdot / pitch  ->  M1 = 0.1628 (報告の 0.17 に対し -4 %)
 # 得られた**入口全圧が報告の 319.5 kPa になるか**を後段で照合する (これが整合性の検査)。
-COND = {"run108": dict(vane="c3x", Pt=319500.0, Tt=786.0, M2=0.90, Tu=0.065, M1=0.1628,
-                       M1_reported=0.17, throat_m=0.03292, pitch_m=0.11773)}
+COND = {
+    "run108": dict(vane="c3x", Pt=319500.0, Tt=786.0, M2=0.90, Tu=0.065, M1=0.1628,
+                   M1_reported=0.17, throat_m=0.03292, pitch_m=0.11773),
+    # Mark II (超音速出口)。報告 表 VIII: Pt1 48.89 psia, Tt1 788 K, M1 0.19, M2 1.04
+    "run42": dict(vane="markii", Pt=337100.0, Tt=788.0, M2=1.04, Tu=0.065, M1=0.19,
+                  M1_reported=0.19, throat_m=0.03983, pitch_m=0.12974),
+}
+CASE = {"c3x": "case/53.c3x_vane_cht", "markii": "case/54.markii_vane_cht"}
 
 FORGE = ROOT / "solver_density_cuda/.build-native/relwithdebinfo/forge"
 TOOLS = ROOT / "solver_density_cuda/tools"
@@ -138,7 +144,8 @@ def wall_profile_csv(vane, run, msh_path):
     s_norm = np.where(side_fwd, s / arc_f, (total - s) / arc_b)
     is_ss = side_fwd if ss_is_fwd else ~side_fwd
 
-    rows = TABLES[run]["rows"]
+    # **判読不能セル (None) は落とす**。壁温は弧長で内挿するので、欠測点を飛ばせばよい。
+    rows = [r for r in TABLES[run]["rows"] if r[2] is not None]
     sd = np.array([r[0] for r in rows]); td = np.array([r[2] for r in rows]) * TREF
     i_stag = int(np.argmin(sd))
     dat = {"PS": (sd[:i_stag + 1][::-1], td[:i_stag + 1][::-1]), "SS": (sd[i_stag:], td[i_stag:])}
@@ -164,7 +171,7 @@ def main():
     ap.add_argument("--go", action="store_true", help="準備だけでなく実行もする")
     a = ap.parse_args()
 
-    case = ROOT / "case/53.c3x_vane_cht"
+    case = ROOT / CASE[a.vane]
     mesh_dir = case / "mesh"
     rd = Path(a.run_dir if Path(a.run_dir).is_absolute() else case / a.run_dir)
     rd.mkdir(parents=True, exist_ok=True)
@@ -202,7 +209,7 @@ def main():
     # 既定は損失ゼロ仮定。実際は翼列損失 (~2 %) の分だけ M2 が下がるので、
     # 1 回目の結果の出口 Pt を使って --ps-exit で追い込む。
     Ps_exit = a.ps_exit if a.ps_exit else c["Pt"] / (1 + 0.2 * c["M2"] ** 2) ** 3.5
-    pitch_m = (11.773 if a.vane == "c3x" else 12.974) / 100.0
+    pitch_m = c["pitch_m"]          # COND は m で持つ (cm ではない)
     (rd / "bcondConfig.yaml").write_text(bcond_cfg(pitch_m, Ps_exit, c["Pt"], c["Tt"], c["M1"], inlet=a.inlet))
 
     P, Tw = wall_profile_csv(a.vane, a.run, mesh_dir / f"fluid_{a.vane}.msh")
@@ -221,8 +228,17 @@ def main():
     import os
     env = dict(os.environ, LD_LIBRARY_PATH=ENV_LD + ":" + os.environ.get("LD_LIBRARY_PATH", ""))
     for si, spec in enumerate(a.stages):
-        stage, nstep = spec.split(":")
-        nstep = int(nstep)
+        # 段の指定は `name:steps` または `name:steps:ps_exit`。
+        # **閉塞する翼列 (Mark II は M2=1.04) は背圧を段階的に下げる** — 一様 IC からいきなり
+        # 超音速出口の背圧を課すと、出口ブロックが過膨張して圧力床に張り付き、
+        # 「完走したが M=628・P=1 Pa」という壊れた場になる (実測 2026-09-20)。
+        parts = spec.split(":")
+        stage, nstep = parts[0], int(parts[1])
+        if len(parts) > 2:
+            ps_stage = float(parts[2])
+            (rd / "bcondConfig.yaml").write_text(
+                bcond_cfg(pitch_m, ps_stage, c["Pt"], c["Tt"], c["M1"], inlet=a.inlet))
+            print(f"[setup]   back pressure -> {ps_stage/1000:.1f} kPa")
         (rd / "solverConfig.yaml").write_text(solver_cfg(stage, nstep, max(nstep // 4, 500), precond=a.precond))
         print(f"[setup] stage {stage} ({nstep} steps) ...", flush=True)
         with open(rd / f"forge_run_{stage}.log", "w") as log:

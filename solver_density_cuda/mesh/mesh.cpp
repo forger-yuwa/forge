@@ -1,5 +1,8 @@
 #include "mesh.hpp"
 #include "cuda_forge/cudaWrapper.cuh"
+#include <cmath>
+#include <iostream>
+#include <stdexcept>
 
 using namespace std;
 using namespace HighFive;
@@ -586,6 +589,14 @@ void mesh::setPeriodicPartner()
                         ib1_local++;
                     }
 
+                    // **対応の検査用**: 最近傍探索は距離を見ないので、平行移動量 (dx,dy,dz) が
+                    // 間違っていても「一番近い面」を黙って選んでしまう。実例 (2026-09-20):
+                    // 翼列ピッチを m でなく cm 換算で書き、dy が 100 倍小さかったが、
+                    // 変換も計算もエラーを出さず「完走したが M=1264・P=1 Pa」の場になった。
+                    geom_float pair_dist2_max = 0.0;
+                    geom_float face_size_min  = 1e+30;
+                    std::vector<int> partner_use(bc1.iPlanes.size(), 0);
+
                     geom_int ib0_local = 0;
                     for (geom_int& ip0 : bc0.iPlanes) {
                         geom_float x0 = this->planes[ip0].centCoords[0];
@@ -628,9 +639,38 @@ void mesh::setPeriodicPartner()
                         bc0.bint["partnerCellID"][ib0_local] = ic1;
                         bc1.bint["partnerCellID"][index]     = ic0;
 
+                        if (dist2 > pair_dist2_max) pair_dist2_max = dist2;
+                        const geom_float fs = std::sqrt(this->planes[ip0].surfArea);
+                        if (fs < face_size_min) face_size_min = fs;
+                        partner_use[index] += 1;
 
                         ib0_local++;
                     }
+
+                    // 検査 1: 残差距離が面寸法に対して小さいこと (平行移動量の取り違え検出)
+                    const geom_float pair_dist_max = std::sqrt(pair_dist2_max);
+                    if (pair_dist_max > 0.25*face_size_min) {
+                        std::cerr << "Mesh Error: periodic pairing for bcond physID " << bcID
+                                  << " <-> " << bcID_partner << " does not close.\n"
+                                  << "  max residual distance after translation = " << pair_dist_max
+                                  << " m, smallest face size = " << face_size_min << " m.\n"
+                                  << "  given translation (dx,dy,dz) = (" << dx << ", " << dy
+                                  << ", " << dz << ") m. Check the units and the sign.\n";
+                        throw std::runtime_error("periodic boundary translation does not match the mesh");
+                    }
+                    // 検査 2: 1 対 1 であること (同じ相手に 2 面が付くのは対応が崩れている)
+                    int n_unused = 0, n_multi = 0;
+                    for (int u : partner_use) { if (u == 0) ++n_unused; else if (u > 1) ++n_multi; }
+                    if (n_unused || n_multi) {
+                        std::cerr << "Mesh Error: periodic pairing for bcond physID " << bcID
+                                  << " <-> " << bcID_partner << " is not one-to-one ("
+                                  << n_unused << " unmatched, " << n_multi
+                                  << " matched more than once).\n";
+                        throw std::runtime_error("periodic boundary pairing is not one-to-one");
+                    }
+                    std::cout << "[setPeriodicPartner] physID " << bcID << " <-> " << bcID_partner
+                              << ": " << bc0.iPlanes.size() << " faces, max residual "
+                              << pair_dist_max << " m (face size " << face_size_min << " m)\n";
                 } 
             }else {
                 continue; // already added bc
