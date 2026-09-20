@@ -31,12 +31,30 @@ sys.path.insert(0, str(CASE))
 from setup import load as load_conditions  # noqa: E402
 
 D = load_conditions()
-IC_DELTA0 = 3.0e-4          # IC の壁近傍速度ランプ幅 [m] (前縁の巨大せん断を避ける)
+IC_DELTA0 = 3.0e-4
+
+
+def phys_block(gas):
+    """物性ブロック。**生産と同じ EOS を使う** (2026-09-20 codex result M1)。
+
+    従来は `thermalMethod: 0` (CPG) 固定だったため、TP の生産計算に**完全ガスの境界層**を
+    入口として与えていた。入口 CSV を TP 物性で読み直すと最大 $T_0$ が 3258.46 K となり、
+    条件から求めた主流総温 3165.65 K を **92.8 K 超過**する (本来存在しないエンタルピー)。
+    """
+    kc = D["mu_inf"] * D["cp"] / D["prandtl_lam"]
+    if (gas or D["gas"]).upper() == "TP":
+        return ('physProp: {thermalMethod: 2, species: ["MIXDRY"], speciesDBFile: "species_db.yaml", '
+                'thermoHrefTemp: 298.15, viscMethod: 1, visc: %.8g, thermCond: %.8g, thermCondMethod: 1, '
+                'prandtlLam: %s, cp: %s, gamma: %s}'
+                % (D["mu_inf"], kc, D["prandtl_lam"], D["cp"], D["gamma"]))
+    return ('physProp: {thermalMethod: 0, viscMethod: 1, visc: %.8g, thermCond: %.8g, '
+            'thermCondMethod: 1, prandtlLam: %s, cp: %s, gamma: %s}'
+            % (D["mu_inf"], kc, D["prandtl_lam"], D["cp"], D["gamma"]))          # IC の壁近傍速度ランプ幅 [m] (前縁の巨大せん断を避ける)
 
 CFG = """mesh: {{discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: "mesh.h5", valueFileName: "mesh.h5"}}
 gpu: 1
 solver: "SLAU"
-physProp: {{thermalMethod: 0, viscMethod: 1, visc: {mu:.6g}, thermCond: {kc:.6g}, thermCondMethod: 1, prandtlLam: {pr}, cp: {cp}, gamma: {gam}}}
+{phys}
 time:
   unsteady: 0
   dualTime: 0
@@ -59,8 +77,9 @@ sym:    {{physID: 5, kind: slip, outputHDFflg: 0, ints: , floats: }}
 """
 
 
-def cfg(nsteps, cfl, relax, conv, lim, ninner, outint, lam=False):
-    return CFG.format(mu=D["mu_inf"], kc=D["mu_inf"] * D["cp"] / D["prandtl_lam"],
+def cfg(nsteps, cfl, relax, conv, lim, ninner, outint, lam=False, gas=None):
+    return CFG.format(phys=phys_block(gas),
+                      mu=D["mu_inf"], kc=D["mu_inf"] * D["cp"] / D["prandtl_lam"],
                       pr=D["prandtl_lam"], cp=D["cp"], gam=D["gamma"], nsteps=nsteps, cfl=cfl,
                       relax=relax, outint=outint, ninner=ninner, conv=conv, lim=lim,
                       pref=D["P_inf"], model="none" if lam else "sst", prt=D["prandtl_turb"],
@@ -123,6 +142,7 @@ def stage(rd, text, nsteps, tag):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--gas", default=None, help="CPG | TP。**生産と揃えること** (既定は case.json の gas)")
     ap.add_argument("--run", required=True)
     ap.add_argument("--mesh", required=True)
     ap.add_argument("--main-steps", type=int, default=20000)
@@ -144,24 +164,30 @@ def main():
         raise SystemExit("%s exists" % rd)
     rd.mkdir()
     shutil.copy(HERE / "mesh" / (a.mesh + ".h5"), rd / "mesh.h5")
+    if (a.gas or D["gas"]).upper() == "TP":
+        sdb = CASE / "species_db.yaml"
+        if not sdb.exists():
+            raise SystemExit("species_db.yaml が無い (setup.py --resolve で生成される)")
+        shutil.copy(sdb, rd / "species_db.yaml")
+        print("  gas = TP (species_db.yaml をコピー)")
     (rd / "bcondConfig.yaml").write_text(BC.format(ro=D["ro_inf"], u=D["U_inf"], p=D["P_inf"],
                                                    t=D["T_inf"], k=D["k_inf"], om=D["omega_inf"]))
     (rd / "GEN_ARGS").write_text(" ".join(sys.argv[1:]) + "\n")
     (rd / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
-    main_cfg = cfg(a.main_steps, a.cfl, a.relax, 1, 2, 4, a.out_int)
+    main_cfg = cfg(a.main_steps, a.cfl, a.relax, 1, 2, 4, a.out_int, gas=a.gas)
     (rd / "solverConfig.yaml").write_text(main_cfg)
     patch_ic(rd / "mesh.h5")
     if a.dry:
         return
     # **SST 段の CFL は指定できるようにする**。M5 の 0.3 → 1.0 は M9 では `mid` で落ちた
     # (2026-09-19)。マッハ数を上げるときは `--sst-cfl` を細かく刻む。
-    stage(rd, cfg(a.lam_steps, a.lam_cfl, a.relax, 0, 0, 10, a.lam_steps, lam=True),
+    stage(rd, cfg(a.lam_steps, a.lam_cfl, a.relax, 0, 0, 10, a.lam_steps, lam=True, gas=a.gas),
           a.lam_steps, "lam")
     for i, cv in enumerate([float(x) for x in a.sst_cfl.split(",") if x]):
-        stage(rd, cfg(a.sst_steps, cv, a.relax, 0, 0, 10, a.sst_steps), a.sst_steps,
+        stage(rd, cfg(a.sst_steps, cv, a.relax, 0, 0, 10, a.sst_steps, gas=a.gas), a.sst_steps,
               "sst%d_cfl%g" % (i, cv))
     for i, cv in enumerate([float(v) for v in a.ramp.split(",") if v]):
-        stage(rd, cfg(a.ramp_steps, cv, a.relax, 1, 2, 4, a.ramp_steps), a.ramp_steps,
+        stage(rd, cfg(a.ramp_steps, cv, a.relax, 1, 2, 4, a.ramp_steps, gas=a.gas), a.ramp_steps,
               "ramp%d_cfl%g" % (i, cv))
     (rd / "solverConfig.yaml").write_text(main_cfg)
     rc = run_forge(rd)
