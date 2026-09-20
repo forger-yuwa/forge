@@ -48,7 +48,7 @@ TOOLS = ROOT / "solver_density_cuda/tools"
 ENV_LD = "/usr/lib/x86_64-linux-gnu/hdf5/serial"
 
 
-def solver_cfg(stage, nstep, out_int, mesh="mesh.h5", precond=0):
+def solver_cfg(stage, nstep, out_int, mesh="mesh.h5", precond=0, kInf=57.51, omInf=224528.0):
     """段ごとの solverConfig。**1 次/2 次・乱流・CFL だけを変える** (区間判定のため)。"""
     model = '"none"' if stage == "warm" else '"sst"'
     # **convMethod 1 は (リミッタ無しでも) 2 次**。起動段は 0 = 1 次にする
@@ -76,10 +76,41 @@ time:
   timeIntegration: 11
   nStepInner: 4
 space: {{convMethod: {conv}, limiter: {lim}, pRef: 250000.0}}
-turbulence: {{model: {model}, scalarDiffusion: 1, dilatationCorrection: 0, katoLaunder: {kl}, wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInf: 57.4, omegaInf: 240000.0}}
+turbulence: {{model: {model}, scalarDiffusion: 1, dilatationCorrection: 0, katoLaunder: {kl}, wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInf: {kInf:.2f}, omegaInf: {omInf:.0f}}}
 output: {{level: 1, interfaceDiag: 1}}
 initial: "uniform_p101325_u10"
 """
+
+
+def inlet_turbulence(Pt, Tt, M1, Tu=0.065, visc_ratio=10.0):
+    """入口の k, omega を**報告値の Tu** と**渦粘性比の仮定**から導く。
+
+    - `Tu` = 6.5 % は NASA CR-168015 の Table VIII (Mark II) / Table IX (C3X) p.30
+      (`ref/test_conditions.csv` に転記)。**報告書の値**。
+    - `visc_ratio` = mu_t/mu = 10 は **報告書に無い仮定**。SU2 の既定値
+      (`FREESTREAM_TURB2LAMVISCRATIO`, CConfig.cpp:1460) に合わせてある。
+      報告書は入口の長さスケールも渦粘性比も公表していない。
+    - k = 1.5 (Tu U1)^2、omega = rho1 k / (visc_ratio * mu(T1))、mu は forge の Sutherland。
+
+    2026-09-21 まで両翼に C3X の値 (k 57.4 / omega 240000) がハードコードされており、
+    (a) C3X の実効渦粘性比が 9.34 (10 でない)、(b) Mark II の k が自分の入口マッハ
+    (0.19 対 0.17) でなく C3X のもので 20 % 低い、という 2 つのずれがあった。
+
+    **C3X は SU2 の自由流表に合わせる** (`su2_run108/su2.log` の "Initial and free-stream
+    conditions"): M 0.167 / P 313642 Pa / T 782 K / U 93.62 / rho 1.3972 / mu 3.57263e-5 から
+    **k = 55.5463, omega = 217233**。SU2 は `MACH_NUMBER= 0.167` を自由流に使うので、
+    forge が入口に課す M1 (閉塞流量に合わせた 0.1628) ではなくこちらに合わせると
+    両コードが**同一の入口乱流値**を課すことになる。Mark II には SU2 run が無いので、
+    同じ手順 (Tu 6.5 %, mu_t/mu 10) を報告の自分の入口条件に適用する。
+    """
+    T1 = Tt / (1.0 + 0.2 * M1 ** 2)
+    P1 = Pt / (1.0 + 0.2 * M1 ** 2) ** 3.5
+    ro1 = P1 / (287.0 * T1)
+    U1 = M1 * math.sqrt(1.4 * 287.0 * T1)
+    mu1 = 1.716e-5 * (T1 / 273.0) ** 1.5 * (273.0 + 111.0) / (T1 + 111.0)
+    k = 1.5 * (Tu * U1) ** 2
+    omega = ro1 * k / (visc_ratio * mu1)
+    return k, omega
 
 
 def bcond_cfg(pitch_m, Ps_exit, Pt, Tt, M1=0.17, wall_profile=True, inlet="pt"):
@@ -97,13 +128,14 @@ def bcond_cfg(pitch_m, Ps_exit, Pt, Tt, M1=0.17, wall_profile=True, inlet="pt"):
     T1 = Tt / (1.0 + 0.2 * M1 ** 2)
     U1 = M1 * math.sqrt(1.4 * 287.0 * T1)
     Ps1 = Pt / (1.0 + 0.2 * M1 ** 2) ** 3.5
+    kInf, omInf = inlet_turbulence(Pt, Tt, M1)
     if inlet == "pt":
         inlet_line = (f"inlet:   {{physID: 1, kind: inlet_Pressure_dir, outputHDFflg: 0, ints: , "
-                      f"floats: {{Ux: 1.0, Uy: 0.0, Uz: 0.0, Pt: {Pt}, Tt: {Tt}, k: 57.4, omega: 240000.0}}}}")
+                      f"floats: {{Ux: 1.0, Uy: 0.0, Uz: 0.0, Pt: {Pt}, Tt: {Tt}, k: {kInf:.2f}, omega: {omInf:.0f}}}}}")
     else:
         inlet_line = (f"inlet:   {{physID: 1, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , "
                       f"floats: {{ro: {ro1:.6f}, Ux: {U1:.3f}, Uy: 0.0, Uz: 0.0, Ps: {Ps1:.1f}, "
-                      f"k: 57.4, omega: 240000.0}}}}")
+                      f"k: {kInf:.2f}, omega: {omInf:.0f}}}}}")
     return f"""{inlet_line}
 outlet:  {{physID: 2, kind: outlet_statPress, outputHDFflg: 0, ints: , floats: {{Ps: {Ps_exit:.1f}, Pt: {Pt}, Tt: {Tt}}}}}
 per_low: {{physID: 3, kind: periodic, outputHDFflg: 0, ints: {{type: 0, partnerBCID: 4}}, floats: {{dx: 0.0, dy: {pitch_m:.9f}, dz: 0.0}}}}
@@ -198,7 +230,7 @@ def main():
         if p0 is not None:
             for name, val in (("ro", ro), ("roUx", ro * u0), ("roUy", 0.0), ("roUz", 0.0),
                               ("roe", ro * (1004.5 / 1.4 * T0 + 0.5 * u0 ** 2)),
-                              ("roK", ro * 57.4), ("roOmega", ro * 240000.0)):
+                              ("roK", ro * kInf), ("roOmega", ro * omInf)):
                 if name in g:
                     del g[name]
                 g.create_dataset(name, data=np.full(n, val, dtype=np.float32))
@@ -245,7 +277,8 @@ def main():
             (rd / "bcondConfig.yaml").write_text(
                 bcond_cfg(pitch_m, ps_stage, c["Pt"], c["Tt"], c["M1"], inlet=a.inlet))
             print(f"[setup]   back pressure -> {ps_stage/1000:.1f} kPa")
-        (rd / "solverConfig.yaml").write_text(solver_cfg(stage, nstep, max(nstep // 4, 500), precond=a.precond))
+        (rd / "solverConfig.yaml").write_text(solver_cfg(stage, nstep, max(nstep // 4, 500), precond=a.precond,
+                                                                    kInf=kInf, omInf=omInf))
         print(f"[setup] stage {stage} ({nstep} steps) ...", flush=True)
         with open(rd / f"forge_run_{stage}.log", "w") as log:
             r = subprocess.run([str(FORGE)], cwd=rd, stdout=log, stderr=subprocess.STDOUT, env=env)
