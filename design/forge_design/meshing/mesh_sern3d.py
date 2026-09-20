@@ -194,18 +194,24 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
         return float(np.exp((1.0 - w) * np.log(_fw) + w * np.log(_ff)))
 
     # **ブレンドが急すぎると skew が出る**ので生成を失敗させる (2026-09-21)。
-    # `wall_frac_blend_len` 0.5 H では station あたり 1.78 倍で skew max 0.933 (>0.90 が 0.10 %) だった。
-    # 3.0 H にすると 1.10 倍で skew max 0.701・>0.90 が 0 になり、AR は変わらない。
+    # 判定量は **第一層厚の x 方向勾配** df/dx (無次元)。これは第 1 j 線が壁からずれる角の tan で、
+    # skew を直接押し上げる。**station あたりの比では駄目**: 遠方は Δx が大きいので比が勝手に上がり、
+    # 実際には skew が出ていないところで落ちる (生産 config, blend 3.0 で上バンド比 3.13 でも skew 0.701)。
+    # 較正 (生産 config, `first_wall_frac` 4e-05 → far 4e-03):
+    #   blend 0.5 下バンド df/dx **0.0111** → skew max 0.933 (>0.90 が 0.10 %) = 不可
+    #   blend 3.0 下バンド 0.00098 / 上バンド 0.00162 → skew max 0.701 (>0.90 が 0) = 可
+    # 閾値 0.004 は両者の間 (可の 2.5 倍・不可の 1/2.8)。最終判定は `check_mesh_quality` が行う。
     _flo = np.array([_first_at(x, L_cowl) for x in xs])
     _fup = np.array([_first_at(x, L_ramp) for x in xs])
     if _ff > 0.0 and _ff != _fw:
-        _r = max(float(np.max(np.maximum(_flo[1:] / _flo[:-1], _flo[:-1] / _flo[1:]))),
-                 float(np.max(np.maximum(_fup[1:] / _fup[:-1], _fup[:-1] / _fup[1:]))))
-        if _r > 1.30:
+        _dx = np.diff(xs)
+        _g = max(float(np.max(np.abs(np.diff(_flo)) / np.maximum(_dx, 1e-30))),
+                 float(np.max(np.abs(np.diff(_fup)) / np.maximum(_dx, 1e-30))))
+        if _g > 4.0e-3:
             raise ValueError(
-                f"mesh_sern3d: 壁第 1 層の x ブレンドが急すぎる (station あたり {_r:.3f} 倍 > 1.30)。"
+                f"mesh_sern3d: 壁第 1 層の x ブレンドが急すぎる (df/dx = {_g:.4g} > 4.0e-3)。"
                 f"`wall_frac_blend_len` を大きくするか station 数を増やすこと。"
-                f"急なブレンドは skew を生む (0.5 H で skew max 0.933; plan sern-3d §4.41)")
+                f"急なブレンドは skew を生む (df/dx 0.0111 で skew max 0.933; plan sern-3d §4.41)")
     for i in range(ni):
         f_lo = _flo[i]     # 下バンドの細端 = 中間線 (カウル)
         f_up = _fup[i]     # 上バンドの細端 = 上線 (ランプ)。両側 tanh なので片側で決める
