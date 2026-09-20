@@ -900,6 +900,14 @@ def main():
         q["budget_cond_W"] = cond
         q["budget_visc_W"] = visc
         q["budget_residual"] = (qs + q["_H_open"]) / max(abs(qs), 1e-30)
+        # **全深さの Σq で正規化した残差も出す** (2026-09-20)。評価面より下の壁入熱 `qs` は、
+        # 非一様壁温だと**熱い壁の放熱と冷たい壁の吸熱が打ち消して小さくなる**ので、
+        # 同じ絶対誤差 (実測 0.9-3.0 W) でも相対値が跳ね上がる
+        # (mixA: 面下 20.09 W → -14.7 %、一様 20 degC: 面下 70.17 W → +4.0 %)。
+        # **ゲートはこちらで判定する** (分母が壁温分布に依らない)。
+        qall = sum(wh[g]["Q_W"] for g in ("cav_outer", "cyl_side", "cav_floor") if g in wh)
+        q["budget_q_wall_alldepth_W"] = qall
+        q["budget_residual_alldepth"] = (qs + q["_H_open"]) / max(abs(qall), 1e-30)
         if np.isfinite(cond):
             q["budget_residual_all"] = (qs - (adv + cond + visc)) / max(abs(qs), 1e-30)
         q["budget_grad_source"] = q.get("_grad_source", "不明")

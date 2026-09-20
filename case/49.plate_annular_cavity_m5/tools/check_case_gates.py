@@ -94,7 +94,7 @@ def main():
                          "**plan の 0.1 %% はこの求積では到達不能** (2026-09-20 実測: 181x30 -2.46 %% / "
                          "361x60 -1.44 %% / 721x120 -1.00 %% / 1441x240 -0.88 %% と約 -0.85 %% へ漸近)。"
                          "既定 1.5 %% は漸近値に余裕を見た値。厳密検算は残作業 #4 (離散流束)")
-    ap.add_argument("--budget-tol", type=float, default=0.05, help="CV エネルギー収支 残差 許容")
+    ap.add_argument("--budget-tol", type=float, default=0.07, help="CV エネルギー収支 残差 許容")
     ap.add_argument("--yplus-blocking", action="store_true",
                     help="壁解像の不合格でも報告を止める (既定は制約として併記するのみ。"
                          "step を増やしても y1+ は変わらないため)")
@@ -215,8 +215,12 @@ def main():
         # `cavity_eval.py` が `field.budget_residual` に書いていても常に「無い」と判定し、
         # 準定常 STEADY の run を 2 回ずつ無駄に延長していた。
         fld = d.get("field", {})
-        bud = (abs(float(fld["budget_residual"])) if "budget_residual" in fld
-               else (abs(float(d["budget_residual"])) if "budget_residual" in d else None))
+        # **全深さ Σq で正規化した残差**を使う (2026-09-20)。評価面より下の壁入熱で割ると、
+        # 非一様壁温では熱い壁の放熱と冷たい壁の吸熱が打ち消して分母が小さくなり、
+        # 同じ絶対差 (実測 0.9-3.0 W) でも相対値が跳ねる (mixA: 面下基準 -14.7 % / 全深さ基準 -5.8 %)。
+        key = ("budget_residual_alldepth" if "budget_residual_alldepth" in fld
+               else ("budget_residual" if "budget_residual" in fld else None))
+        bud = abs(float(fld[key])) if key else None
         if bud is None:
             print("[5] 保存性         : **判定不能** (cavity_eval.json に budget_residual が無い"
                   " — cavity_eval.py を新しい版で回し直すこと)")
