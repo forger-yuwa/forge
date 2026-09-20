@@ -39,7 +39,7 @@ from fit_wall_network import WALLS, PAIRS, JP, read_run, build  # noqa: E402
 SIGMA = 5.670374419e-8
 
 
-def qpp_grid(run, nth=37, nz=26):
+def qpp_grid(run, nth=37):
     """壁ごとに q''(theta, z) を (theta, z) 格子へ束ねる。半割なので theta は 0..180 度。"""
     run = Path(run)
     man = gc.load_manifest(run=run)
@@ -55,16 +55,45 @@ def qpp_grid(run, nth=37, nz=26):
         d = wh[g]
         th = np.degrees(np.arctan2(np.abs(d["_y_node"]), -d["_x_node"]))
         it = np.clip(np.digitize(th, te) - 1, 0, nth - 1)
-        if g == "cav_floor" or g == "cyl_top":
-            # 水平面は半径方向に束ねる
-            rr = np.hypot(d["_x_node"], d["_y_node"])
-            ze = np.linspace(rr.min(), rr.max(), nz + 1)
-            iz = np.clip(np.digitize(rr, ze) - 1, 0, nz - 1)
-            axis, unit = "r", "m"
+        # **等間隔 bin にしない**。節点は層状に並んでいて層厚が 2 桁違うので、等間隔だと
+        # セルの 19〜42 % が空欄になり、受け渡しファイルとして使えない (2026-09-20 実測)。
+        # **実在する層 (丸めた座標の一意値) で束ねる**ので空欄が出ない。
+        if g in ("cav_floor", "cyl_top"):
+            # **水平面は半径が層になっていない** (バタフライ / O グリッドなので r が θ で連続に
+            # 変わる)。一意値で束ねると 1 点しか入らない列が並ぶ (cyl_top で 999 列・空欄 89 %)。
+            # さらに**偏心するとギャップ幅が θ で 5->1 mm と変わる**ので、絶対半径の分位でも
+            # θ ごとに範囲が違って埋まらない (偏心の底面で空欄 20 %)。
+            # 底面は**すきま内の正規化半径** (0=内円柱壁, 1=外筒壁)、円柱上面は**円柱軸からの
+            # 半径を Ri で正規化**して、どの θ でも 0..1 を張る。
+            G_ = man["geometry"]
+            if g == "cav_floor":
+                rr = np.hypot(d["_x_node"], d["_y_node"])
+                thc = np.arctan2(np.abs(d["_y_node"]), -d["_x_node"])
+                ri = gc.inner_radius_at(np.clip(thc, 0.0, np.pi), man)
+                coord = np.clip((rr - ri) / np.maximum(G_["Ro"] - ri, 1e-12), 0.0, 1.0)
+                axis, unit = "gap_frac", "0=内円柱壁 / 1=外筒壁"
+            else:
+                rc = np.hypot(d["_x_node"] - G_["x_off"], d["_y_node"])
+                coord = np.clip(rc / max(G_["Ri"], 1e-12), 0.0, 1.0)
+                axis, unit = "r_over_Ri", "0=円柱中心 / 1=リップ"
+            # 正規化しただけでは足りない: 壁際に節点が密集するので等間隔だと中央が空く。
+            # **分位 bin** にし、さらに**空欄が消えるまで bin 数を自動で下げる**
+            # (受け渡しファイルに穴を残さないことを優先する)。
+            for nb in (16, 12, 10, 8, 6, 4):
+                eg = np.unique(np.quantile(coord, np.linspace(0.0, 1.0, nb + 1)))
+                if len(eg) < 3:
+                    continue
+                iz = np.clip(np.digitize(coord, eg) - 1, 0, len(eg) - 2)
+                cnt = np.bincount(it * (len(eg) - 1) + iz, minlength=nth * (len(eg) - 1))
+                if cnt.min() > 0:
+                    break
+            zc = 0.5 * (eg[1:] + eg[:-1])
         else:
-            ze = np.linspace(-dep, 0.0, nz + 1)
-            iz = np.clip(np.digitize(d["_z_node"], ze) - 1, 0, nz - 1)
+            # 側壁は押し出しの z 層そのもの (空欄ゼロ)
+            coord = d["_z_node"]
             axis, unit = "z", "m"
+            zc, iz = np.unique(np.round(coord.astype(np.float64), 9), return_inverse=True)
+        nz = len(zc)
         ib = it * nz + iz
         w = d["_w_node"]
         den = np.bincount(ib, weights=w, minlength=nth * nz)
@@ -73,7 +102,7 @@ def qpp_grid(run, nth=37, nz=26):
         q[den.reshape(nth, nz) <= 0] = np.nan
         out[g] = dict(theta_deg=(0.5 * (te[1:] + te[:-1])).tolist(),
                       axis=axis, axis_unit=unit,
-                      axis_vals=(0.5 * (ze[1:] + ze[:-1])).tolist(),
+                      axis_vals=zc.tolist(),
                       qpp_W_m2=q.tolist(), area_m2=float(d["area_m2"]),
                       Q_W_half=float(d["Q_W"]))
     return D, out
