@@ -180,6 +180,11 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
             s_top = _tanh_two_sided(njt, min(prm.first_wall_frac / h_up, 0.5 / (njt - 1)))
             Y[i, :njb] = y_bot + s_bot * (lo - y_bot)
             Y[i, jm:] = up + s_top * (yt[i] - up)
+            # j = jm は**下バンドの壁ノード (cowl_out)**。上の 2 行では `up` で上書きされ、
+            # `Yin[i,jm]` が上面になって板厚が消えていた (cowl_in と cowl_out が同一座標の
+            # **厚さ 0 スリット**。`cowl_thickness` が 3D で効いていなかった。2026-09-20 修正)。
+            # 代入は `lo` **そのもの** (`y_bot + 1.0*(lo-y_bot)` は丸めで一致しない)。
+            Y[i, jm] = lo
     # --- ノード番号 ---
     N_base = ni * NJ * nz
     def base(i, j, k): return (i * NJ + j) * nz + k
@@ -202,6 +207,13 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
             u = (zs[kt:k_sw + 1] - zs[kt]) / max(zs[k_sw] - zs[kt], 1e-30)
             sz[kt:k_sw + 1] = 1.0 - u * u * (3.0 - 2.0 * u)
         sz[k_sw + 1:] = 0.0
+    # 板の半厚 (x station, z ごと)。**float32 で解けない厚みは 0 に丸める**: 変換器は座標を float32 で
+    # 書くので、解けない隙間を残すと双子ノード (cowl_in / cowl_out) が「ほぼ一致」になり、
+    # 衝突するかどうかが丸めに依存する。**設計どおり閉じるところは厳密に閉じる**
+    # ([[axisym-rweight-closure-fp32]] と同じ方針)。閉じた列は上下とも同じ量だけ動かさない。
+    _half = 0.5 * tk[:, None] * sz[None, :]                       # (ni, nz)
+    _closed = _half < (1.0e-5 * np.maximum(1.0, np.abs(ym))[:, None])
+    _szw = np.where(_closed, 0.0, 1.0) * sz[None, :]              # (ni, nz) 実効 sz
     coords = np.zeros((nid, 3))
     for i in range(ni):
         for j in range(NJ):
@@ -210,9 +222,12 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
             # base(i, jm, k) は「下側 (cowl_out)」。板がある内側 (k <= k_sw) だけ Yin、外側は Y2 (= 単一の中間線)。
             coords[b:b + nz, 1] = Y2[i, j]
             if t_c > 0.0 and tk[i] > 0.0:
-                coords[b:b + nz, 1] += (Yin[i, j] - Y2[i, j]) * sz
+                coords[b:b + nz, 1] += (Yin[i, j] - Y2[i, j]) * _szw[i]
+    n_dup_cowl_closed = 0
     for (i, k), n in dup1.items():
-        coords[n] = (xs[i], ym[i] + 0.5 * tk[i] * sz[k], zs[k])   # 上側 (cowl_in)
+        coords[n] = (xs[i], ym[i] + 0.5 * tk[i] * _szw[i, k], zs[k])   # 上側 (cowl_in)
+        if t_c <= 0.0 or tk[i] <= 0.0 or _closed[i, k]:
+            n_dup_cowl_closed += 1                 # 座標一致の双子 (設計どおり閉じた列)
     for (i, j), n in dup2.items():
         coords[n] = (xs[i], Y2[i, j], zs[k_sw])
 
@@ -298,6 +313,7 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
             coords, hexes = _add_vehicle_side3d(coords, hexes, B, xs, yt, zs, k_sw, node, top_fn, NJ, prm, ext, L_ramp, y_e)
     coords *= prm.scale
     info = {"ni": ni, "NJ": NJ, "nz": nz, "jm": jm, "k_sw": k_sw, "i_te": i_te, "i_sw": i_sw, "cells": int(hexes.shape[0]),
+            "n_dup_cowl_closed": int(n_dup_cowl_closed),
             "nodes": int(coords.shape[0]), "W": prm.W, "Z_far": float(zs[-1]), "L_sw": L_sw, "cowl_thickness": t_c, "x_out": x_out, "y_bot": y_bot,
             "L_cowl": L_cowl, "L_ramp": L_ramp, "n_dup_cowl": len(dup1), "n_dup_side": len(dup2),
             "W_vehicle": prm.W_vehicle, "n_vehicle_faces": len(B["vehicle"]), "ramp_fillet": R_f, **ext}

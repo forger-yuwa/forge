@@ -27,6 +27,15 @@ usage:
   python3 solver_density_cuda/tools/check_wall_resolution.py <run_dir> [--mesh mesh.h5]
       [--step N] [--groups cav_outer,cyl_side] [--target 1.0] [--align-min 0.5]
 
+  # メッシュだけ (流れ場より前に第一層厚を実測する。壁解像メッシュを設計するとき)
+  python3 solver_density_cuda/tools/check_wall_resolution.py <mesh.h5> --geometry-only \
+      [--bcond bcondConfig.yaml]
+
+`--geometry-only` は $y_1$ だけを出す ($y_1^+$ は $\tau_w$ が要るので出さない)。
+**入力値 (`first_wall_frac` など) は保証にならない**: 分布関数が公比上限で打ち切る・両側 tanh が
+要求どおり刻まないなどで、生成された格子の第一層厚は入力とずれる。既存 run の $y_1^+$ と
+新メッシュの $y_1$ の比から、計算を回す前に $y_1^+$ を見積もるための入口。
+
 VERDICT: 低 Re (`wallTreatmentSST: 0`) は**局所 $y_1^+\le$ --target** を目標とし、
 超過面積割合と最大値の位置を出す。**判定に使うのは超過面積割合**であって最大値ではない:
 鋭角エッジなど幾何的特異点があると traction が発散するので**最大値は格子収束しない**
@@ -137,6 +146,57 @@ def wall_first_distance(mesh, phys_id, nb, align_min, coords=None):
     return out
 
 
+def geometry_only(mesh, a):
+    """メッシュだけから壁ごとの第一内部点距離 y1 を出す (y1+ は tau_w が要るので出さない)。
+
+    **なぜ要るか**: 壁解像メッシュを設計するとき、`first_wall_frac` などの**入力値は保証にならない**
+    (分布関数が公比上限で打ち切る・両側 tanh が要求どおりに刻まないなど)。
+    生成後の実座標で第一層厚を測り、既存 run の y1+ との比で新メッシュの y1+ を見積もる。
+    """
+    names = {}
+    bp = a.bcond or os.path.join(a.run, "bcondConfig.yaml")
+    if os.path.exists(bp):
+        try:
+            import yaml
+            for nm, d in (yaml.safe_load(open(bp)) or {}).items():
+                if isinstance(d, dict) and str(d.get("kind", "")).startswith("wall"):
+                    names[int(d["physID"])] = nm
+        except Exception as e:                      # noqa: BLE001
+            print("  WARNING: bcondConfig.yaml を読めない (%s)" % e)
+    with h5py.File(mesh, "r") as f:
+        pids = sorted(int(k) for k in f["BCONDS"]) if "BCONDS" in f else []
+        nod = np.array(f["MESH/COORD"]).reshape(-1, 3)
+        ncell = len(np.array(f["CELLS/centCoords"]).reshape(-1, 3))
+    if not names:
+        print("bcondConfig.yaml から壁が引けない -> BCONDS 全部を出す (名前は physID)")
+        names = {p: "phys%d" % p for p in pids}
+    nb = dof_neighbors(mesh)
+    print("=== %s  (geometry-only: y1 のみ) ===" % mesh)
+    with h5py.File(mesh, "r") as f:
+        dof_node = len(nod) >= ncell        # node 方式なら DOF index = 節点 index
+        dof_xyz = nod if dof_node else np.array(f["CELLS/centCoords"]).reshape(-1, 3)
+    print("  DOF 座標 = %s" % ("MESH/COORD (node)" if dof_node else "CELLS/centCoords (cell)"))
+    bad = []
+    for pid in pids:
+        if pid not in names:
+            continue
+        wd = wall_first_distance(mesh, pid, nb, a.align_min, coords=dof_xyz)
+        if not wd:
+            print("  %-13s BCONDS/%d が空 -> 判定不能" % (names[pid], pid)); bad.append(names[pid]); continue
+        y1 = np.array([v[0] for v in wd.values()])
+        ok = np.array([v[2] for v in wd.values()])
+        if not ok.any():
+            print("  %-13s 評価できた壁点が無い -> 判定不能" % names[pid]); bad.append(names[pid]); continue
+        g = y1[ok]
+        print("  %-13s n=%7d  y1 中央値 %.4e  平均 %.4e  最小 %.4e  最大 %.4e  (評価 %.1f %%)"
+              % (names[pid], len(y1), float(np.median(g)), float(np.mean(g)),
+                 float(np.min(g)), float(np.max(g)), 100.0 * ok.sum() / len(ok)))
+    if bad:
+        print("\nVERDICT: INDETERMINATE (判定不能: %s)" % ", ".join(bad)); return 2
+    print("\nVERDICT: MEASURED (y1 のみ。y1+ は壁ダンプのある run で測ること)")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run")
@@ -145,14 +205,22 @@ def main():
     ap.add_argument("--groups", default=None, help="壁群名をカンマ区切り (既定は壁ダンプ全部)")
     ap.add_argument("--target", type=float, default=1.0, help="低 Re の局所 y1+ 目標 (既定 1)")
     ap.add_argument("--over-frac", type=float, default=2.0,
-                    help="目標超過を許す面積割合 [%] (既定 2)。**判定はここで行う**: "
+                    help="目標超過を許す面積割合 [%%] (既定 2)。**判定はここで行う**: "
                          "前縁や鋭角エッジなど幾何的特異点では traction が発散し最大値は"
                          "格子収束しないので、最大値では判定しない")
     ap.add_argument("--align-min", type=float, default=0.5,
                     help="第一内部点として認める法線との沿い方 (既定 0.5)")
+    ap.add_argument("--geometry-only", action="store_true",
+                    help="壁ダンプを使わず**メッシュだけ**から壁ごとの y1 を出す (y1+ は出さない)。"
+                         "メッシュ設計を回すとき、変換直後に第一層厚を実測で確かめるための入口。"
+                         "`run` にはメッシュ h5 を置いたディレクトリか h5 そのものを渡す")
+    ap.add_argument("--bcond", default=None,
+                    help="--geometry-only のとき壁名を引く bcondConfig.yaml (既定は run の中)")
     a = ap.parse_args()
 
     cfg = None
+    if a.geometry_only and os.path.isfile(a.run) and a.run.endswith(".h5") and a.mesh is None:
+        a.mesh, a.run = a.run, os.path.dirname(os.path.abspath(a.run))
     cpath = os.path.join(a.run, "solverConfig.yaml")
     if os.path.exists(cpath):
         try:
@@ -172,6 +240,9 @@ def main():
         print("mesh h5 が無い (config の mesh.meshFileName も見た): %s" % (mesh or a.run))
         return 2
     wt = int(((cfg or {}).get("turbulence", {}) or {}).get("wallTreatmentSST", 0))
+
+    if a.geometry_only:
+        return geometry_only(mesh, a)
 
     dumps = sorted(glob.glob(os.path.join(a.run, "res_*_*_*.h5")))
     pat = re.compile(r"res_(.+)_(\d+)_(\d+)\.h5$")
