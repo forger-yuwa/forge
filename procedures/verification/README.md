@@ -4,11 +4,34 @@
 
 ## 標準検証ケース
 
-標準検証ケースは次の 3 つとする。
+**⚠ 下の 4 ケースは cell 時代の選定で、node には使えないものが混ざっている** (2026-09-20 実測)。
+[[user-prefers-node-base]] のとおり現在は node のみを使うので、**node 向けの一覧を先に示す**。
 
-- `case/08.bump`
-- `case/20.naca_ml`
-- `case/13.nozzle_H`
+### node の標準検証ケース (2026-09-20 改訂)
+
+| ケース | `convMethod` | 用途 | 状態 |
+| --- | --- | --- | --- |
+| `case/05.sod_shock_tube` | **2** | 衝撃管。**厳密 Riemann 解と比較できる**唯一のケース。リミッタ・対流スキームの一次資料 | 完走 |
+| `case/09.Taylor-Green` | 1 | 周期境界の保存性、低散逸スキーム、受動スカラー | 完走 |
+| `case/36.passive_pseudoshock_control` | 1 | node SST + 擬似衝撃波 (定常陰解法) | 完走 |
+| `case/44.vitiated_air_wt` | 1 | **軸対称 + 多成分 TP + 非平衡凝縮**。軸対称経路の唯一の常用ケース | 完走 |
+| `case/46.sern_design` | 1 | 設計チェーン全体 (梯子起動 + ゲート判定) | 完走 |
+
+**変更の理由** (実測):
+
+- **`case/20.naca_ml` と `case/13.nozzle_H` は全 run が cell**。node 入力が無いので node の変更を検証できない。
+- **`case/08.bump` は入口 BC が誤っていた** — 入口 M=1.650 (超音速) なのに `inlet_Pressure`
+  (亜音速の全条件入口) を使っており、**2 次にすると入口の 1 節点から発散する**
+  (`convMethod: 0` なら 5.1〜5.3 桁収束)。入口を `inlet_uniformVelocity` に替えると 5000 step 完走するが、
+  **2 次では残差が 1.2〜1.4 桁で頭打ち**するため、まだ回帰の基準には使えない
+  (plan [convection-node-wall-reconstruction](../../plans/active/convection-node-wall-reconstruction.md) §4.34)。
+- `case/48.flat_plate_cooled_m4` は等温壁 × 低 Re SST の唯一のケースなので**残す**。
+
+### 旧 (cell 時代) の一覧
+
+- `case/08.bump` (入口 BC 要修正 + 2 次プラトー)
+- `case/20.naca_ml` (cell のみ)
+- `case/13.nozzle_H` (cell のみ)
 - `case/48.flat_plate_cooled_m4` (等温壁 × 低 Re SST の冷却超音速平板: [48-flat-plate-cooled.md](48-flat-plate-cooled.md))
 
 ## 既定の検証先
