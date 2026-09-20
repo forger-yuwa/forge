@@ -41,6 +41,10 @@
   入口を `inlet_uniformVelocity` に替えると 5000 step 完走した
   (plan [convection-node-wall-reconstruction](../plans/active/convection-node-wall-reconstruction.md) §4.34)。
   **切り分け方**: NaN 節点が 1 個で、その座標が入口境界上なら真っ先にこれを疑う。
+  **⚠ `inlet_Pressure` 側にも実装の不整合がある** (2026-09-20): 速度を新しい音速に整合させないので
+  **指定した Tt/Pt を再現しない** (反例: γ1.4/cp1005/T_i 100 K/|U_n| 100 m/s、指定 Tt 293.15・Pt 100000 →
+  返る境界状態は Tt 284.232・Pt 89751)。亜音速で使う場合もこの誤差を承知しておくこと
+  (修正は plan [convection-node-wall-reconstruction](../plans/active/convection-node-wall-reconstruction.md) §5.1 W1l)。
   亜音速は `inlet_Pressure` / `inlet_Pressure_dir` を推奨 (forge の亜音速 `inlet_uniformVelocity`
   は非反射化済みだが、圧力入口の方が安定なことが多い)。
 

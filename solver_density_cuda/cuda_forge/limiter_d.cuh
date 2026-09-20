@@ -29,3 +29,6 @@ __device__ deltas calcDeltaIJ_dash(geom_float pcx , geom_float pcy, geom_float p
 
 
 void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);
+
+// run 終了時に 1 度呼び、診断の末尾取りこぼしを回収する (plan §4.35)
+void limiterDiag_finalize(solverConfig& cfg);

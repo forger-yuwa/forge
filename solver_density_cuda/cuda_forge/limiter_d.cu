@@ -49,6 +49,10 @@ __device__ unsigned long long g_limNonFinite[5] = {0,0,0,0,0};   // 非有限を
 __device__ unsigned long long g_limMaxExcess[5] = {0,0,0,0,0};   // 許容幅に対する最大逸脱倍率 x1e3
 __device__ unsigned long long g_limBadScale = 0;   // 幾何尺度 h_i が 0/非有限だった回数 (ε² が潰れる)
 
+// 診断の累計 (host 側)。**終了時 flush** から見えるようにファイルスコープに置く
+// (codex 2026-09-20 result-2 レビュー Major 5: 窓集計だけでは末尾が落ちる)。
+static unsigned long long s_cumG1[5] = {0,0,0,0,0}, s_cumNF[5] = {0,0,0,0,0}, s_cumSides = 0, s_cumCalls = 0;
+
 template<bool SCALED>
 static void limiter_periodic_merged
 (
@@ -381,7 +385,7 @@ __global__ void limiter_r1_fused5_d
                     const flow_float hi = (lenArea != 0) ? sqrtf(A_planar[ic0]) : cbrtf(volume);
                     // 幾何尺度が 0/非有限なら ε² が消えて K が効かなくなる (codex Critical 1 の再発防止)。
                     // 診断が ON のときだけ数える (生産では分岐のみでコストは無視できる)。
-                    if (g_limDiag != 0 && !(hi > (flow_float)0.0)) atomicAdd(&g_limBadScale, 1ULL);
+                    if (g_limDiag != 0 && !(isfinite(hi) && hi > (flow_float)0.0)) atomicAdd(&g_limBadScale, 1ULL);
                     const flow_float e2 = eps2Coef * hi*hi*hi;
                     lk = venkata_limiter_scaled((qmax[k]-qc[k])*inv, (qmin[k]-qc[k])*inv, delta*inv, e2);
                 } else {
@@ -534,16 +538,15 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
                 : ((g1[0]|g1[1]|g1[2]|g1[3]|g1[4]|nf[0]|nf[1]|nf[2]|nf[3]|nf[4]) ? " VERDICT=VIOLATIONS" : " VERDICT=CLEAN");
             // 窓 (直前 interval 回) と**累計**の両方を出す。窓だけだと最後の flush が無く、
             // 「全期間の逸脱数」として読むと過小になる (codex 2026-09-20 result レビュー Major 6)。
-            static unsigned long long c_g1[5]={0,0,0,0,0}, c_nf[5]={0,0,0,0,0}, c_sides=0;
-            for (int k=0;k<5;k++){ c_g1[k]+=g1[k]; c_nf[k]+=nf[k]; }
-            c_sides += sides;
+            for (int k=0;k<5;k++){ s_cumG1[k]+=g1[k]; s_cumNF[k]+=nf[k]; }
+            s_cumSides += sides; s_cumCalls += (unsigned long long)interval;
             printf("LIMG1 call=%d sides=%llu out[ro=%llu Ux=%llu Uy=%llu Uz=%llu P=%llu]"
                    " nonfinite[%llu %llu %llu %llu %llu] maxexcess_x1e3[%llu %llu %llu %llu %llu]"
                    " CUM sides=%llu out[%llu %llu %llu %llu %llu] nonfinite[%llu %llu %llu %llu %llu]%s\n",
                    s_lim_call, sides, g1[0], g1[1], g1[2], g1[3], g1[4],
                    nf[0], nf[1], nf[2], nf[3], nf[4], ex[0], ex[1], ex[2], ex[3], ex[4],
-                   c_sides, c_g1[0], c_g1[1], c_g1[2], c_g1[3], c_g1[4],
-                   c_nf[0], c_nf[1], c_nf[2], c_nf[3], c_nf[4], verdict);
+                   s_cumSides, s_cumG1[0], s_cumG1[1], s_cumG1[2], s_cumG1[3], s_cumG1[4],
+                   s_cumNF[0], s_cumNF[1], s_cumNF[2], s_cumNF[3], s_cumNF[4], verdict);
             const unsigned long long z5b[5] = {0,0,0,0,0};
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limNonFinite, z5b, 5*sizeof(unsigned long long)));
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limMaxExcess, z5b, 5*sizeof(unsigned long long)));
@@ -553,10 +556,7 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limSides, &z, sizeof(unsigned long long)));
         }
         s_lim_call++;
-        // 終了時 flush は wrapper 側では呼べないので、`limiterDiag` の印字は必ず run の最後にも出るよう
-        // 「残りが interval 未満なら次の呼び出しで出す」ではなく、**最終 step でも出す**必要がある。
-        // ここでは cfg.nStepOuter を見ずに済むよう、印字間隔を跨がない run では call=0 の 1 行に
-        // 全期間が入る (interval >= 総呼び出し数 を指定すること)。
+        // 終了時の取りこぼしは `limiterDiag_finalize()` (run の最後に main から呼ぶ) が回収する。
     }
 
     // 多成分 face 整合再構成: 各化学種 Y_s に Venkat リミタ ψ_Y を計算 (∇Y は speciesGradient 済)。
@@ -617,4 +617,31 @@ void passiveLimiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             var.c_d[pn], var.c_d["limiter_"+pn],
             var.c_d["d"+pn+"dx"], var.c_d["d"+pn+"dy"], var.c_d["d"+pn+"dz"]);
     }
+}
+
+
+// run の最後に 1 度だけ呼び、窓に入らなかった末尾の呼び出し分を回収して累計を確定させる
+// (codex 2026-09-20 result-2 レビュー Major 5)。`limiterDiag` が 0 なら何もしない。
+void limiterDiag_finalize(solverConfig& cfg)
+{
+    if (cfg.limiterDiag <= 0) return;
+    unsigned long long g1[5]={0,0,0,0,0}, nf[5]={0,0,0,0,0}, ex[5]={0,0,0,0,0}, sides=0, bs=0;
+    gpuErrchkKernelSync();
+    CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(g1,    g_limG1,        5*sizeof(unsigned long long)));
+    CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(nf,    g_limNonFinite, 5*sizeof(unsigned long long)));
+    CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(ex,    g_limMaxExcess, 5*sizeof(unsigned long long)));
+    CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&sides, g_limSides,    sizeof(unsigned long long)));
+    CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&bs,    g_limBadScale, sizeof(unsigned long long)));
+    for (int k=0;k<5;k++){ s_cumG1[k]+=g1[k]; s_cumNF[k]+=nf[k]; }
+    s_cumSides += sides;
+    const bool viol = (s_cumG1[0]|s_cumG1[1]|s_cumG1[2]|s_cumG1[3]|s_cumG1[4]
+                      |s_cumNF[0]|s_cumNF[1]|s_cumNF[2]|s_cumNF[3]|s_cumNF[4]) != 0ULL;
+    // 幾何尺度が不正だった run は「逸脱 0」を名乗れない (eps^2 が潰れているため)
+    const char* verdict = (s_cumSides == 0ULL) ? " VERDICT=NO-CHECKS(FAIL)"
+                        : (bs != 0ULL)         ? " VERDICT=BAD-SCALE(FAIL)"
+                        : (viol ? " VERDICT=VIOLATIONS" : " VERDICT=CLEAN");
+    printf("LIMG1 FINAL sides=%llu out[ro=%llu Ux=%llu Uy=%llu Uz=%llu P=%llu]"
+           " nonfinite[%llu %llu %llu %llu %llu] badscale=%llu%s\n",
+           s_cumSides, s_cumG1[0], s_cumG1[1], s_cumG1[2], s_cumG1[3], s_cumG1[4],
+           s_cumNF[0], s_cumNF[1], s_cumNF[2], s_cumNF[3], s_cumNF[4], bs, verdict);
 }
