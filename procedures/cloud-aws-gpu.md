@@ -105,6 +105,25 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/forge-home \
 `.geo` を対話編集したいときだけ後述の NICE DCV を使う (通常は不要)。
 メッシュ品質チェック (`check_mesh_quality.py`) と HDF5 変換もクラウド側で通常ルール通り実施する。
 
+#### 大規模メッシュ (>5M 節点) の変換はホスト RAM が律速 (2026-09-20)
+
+g5.xlarge の **RAM は 15 GB** しかなく、GPU (A10G 23 GB) より先にここで詰まる。
+
+- `convertGmshToForge` は **5.5M 節点で RSS 8.6 GB / VM 17 GB**。他の計算と同居していると **OOM kill** される
+  (実例: `case/46` `run_0412_3d_wallres` の初回、`anon-rss:8579624kB` で kill)。
+- **node 方式は変換が 2 回走る**。設計チェーンの `prepare` は QC 用に `discretization: "cell"` で 1 回、
+  本番の node で 1 回呼ぶので、ピークが 2 回来る。
+- 対策は順に **(1) 他の計算を止めて単独で変換する → (2) スワップを張る → (3) インスタンスを大きくする**。
+  スワップは非破壊・即時で、再起動で消える:
+
+  ```bash
+  sudo fallocate -l 16G /swapfile && sudo chmod 600 /swapfile
+  sudo mkswap -q /swapfile && sudo swapon /swapfile && swapon --show
+  ```
+
+- **ディスクも見る**: 1.16M 節点 × 41 スナップショットの 3D run が **6.1 GB**。`outStepInterval` を粗くし、
+  収束・準定常の判定を済ませたら中間スナップショットを間引く。
+
 ### 定型の後処理図 — matplotlib (同梱)
 
 `residual_history.png`・line profile・断面図などのスクリプト後処理はイメージ内の
