@@ -197,6 +197,67 @@ node (median-dual) の `wall_isothermal` は、壁ノードの温度状態を BC
 ため。cfl_pseudo 20 は発散)。ピン導入前は壁ノード T が壁 CV 平均に緩み (~0.1 K オフセット)、
 第 1 スペーシング勾配 −24% だった。
 
+#### 等温壁のエネルギー境界: 強制 と 弱形式 (`mesh.nodeIsothermalEnergyBC`)
+
+連続系の条件は同じ $T|_{\rm wall}=T_w$ だが、**離散化に 2 通りある**。既定は従来どおり強制 (0)。
+
+| | 強制 `0` (既定) | 弱形式 `1` (opt-in, SU2 型) |
+| --- | --- | --- |
+| 壁ノード $T$ | BC 値へ上書き (`pin_wall_node_temperature_d`) | 上書きしない (方程式を解く) |
+| 壁エネルギー残差 | ゼロ化 (`zero_res_roe_bplane_d`) | 残す |
+| 陰解法エネルギー行 | 単位行 | 対角ブロックに線形化を加算 |
+| 壁半割面の伝導 | $\nabla T\cdot S$ (ghostless) | $k_{\rm eff}(T_I-T_w)/d_1\cdot A_{\rm half}$ で**置換** |
+| 運動量 no-slip | 強制 | 強制 (変えない) |
+
+弱形式の残差寄与は壁半割面ごとに
+
+$$R^{\rm roe}_W \mathrel{-}= k_{\rm eff}\,\frac{T_I-T_w}{d_1}\,A_{\rm half},\qquad
+k_{\rm eff}=k_{\rm lam}+\frac{c_p\mu_t}{{\rm Pr}_t}$$
+
+で、$I$ は第一内部点 (壁法線との alignment 最大の非壁隣接)、$d_1$ は**法線投影距離**
+$\lvert(\mathbf x_I-\mathbf x_W)\cdot\hat n\rvert$。**点間距離ではない** — 法線から 30° 傾いた辺では
+点間距離版の熱流束が 13.4 % 小さくなる。**$T_W$ 自身は使わない**。
+
+陰解法には**近似対角項**を足す。$g=k_{\rm eff}A_{\rm half}/d_1$ と置くと壁寄与は
+$R_W^{\rm wall}=-g(T_I-T_w)$ なので、**$(\rho e)_W$ による厳密微分は 0** であり温度微分は
+内部点 $I$ の列にある。SU2 も同じく内部点温度による残差に対して壁点の対角項を加える
+**近似線形化**である。forge は `res_roe` を右辺に取り行列へは符号を反転して組むので、
+CPG でのエネルギー対角への追加は
+
+$$\Delta A_{WW}^{\rm energy}=+\frac{g}{\rho\,c_v}$$
+
+**初版は `thermalMethod: 0` (CPG) 限定**。TP は $e(T)$ を使うので密度微分の CPG 式を一般化できない。
+
+**2026-07-20 に棄却した旧弱形式とは別物**である。旧実装は壁ノード $T$ を浮かせ、**その緩んだ
+$T$ で壁流束を作った**ので壁 CV 平均へ落ち (~0.1 K オフセット)、第 1 スペーシング勾配が $-24\,\%$
+だった。本節の弱形式は流束を**指定 $T_w$** から作るのでこの経路が無い。SU2 の実装は
+`SU2_CFD/src/solvers/CNSSolver.cpp` の `BC_Isothermal_Wall_Generic` で、コメントに
+"Apply a weak boundary condition for the energy equation" と明記され、
+運動量だけ `Jacobian.DeleteValsRowi` で強制している。実測で SU2 の壁ノード保存温度は
+566.011–566.886 K (指定 566 K)。
+
+**動機**: 強制の既知の副作用 3 つ — (a) 壁熱流束の節点交番が同一メッシュの SU2 の **20 倍**
+(C3X 負圧面 0.919 % vs 0.046 %)、(b) 第 1 スペーシング勾配の $-15\,\%$ バイアス、
+(c) エネルギー行 decouple による擬似 CFL 上限 $\sim5$ — がこの閉包に帰属するかを切り分ける。
+対流スキーム (ROE 0.901 % / HLLE 2.10 %)・低マッハ前処理 (破綻)・float32 の丸め
+(観測 0.083 K は 1360 ULP) は**いずれも棄却済み**。
+計画は [`plans/active/boundary-weak-isothermal-wall.md`](../plans/active/boundary-weak-isothermal-wall.md)。
+
+**CHT との整合**: 保存的界面熱量 $Q_f=\sum F^E-C$ の拘束反力 $C=-R^{\rm raw}$ は、弱形式では
+**拘束が無いので $C=0$**。$Q_f=\sum F^E$ がそのまま収支に一致する。`iface_q_eff` の式は変えない。
+
+**併用不可 (起動時に拒否)**: `wallTreatmentSST: 1`、`wallModelLES: 1`、cell 方式、`thermalMethod != 0`、
+軸対称、壁ノードが周期で同一視される構成、移動壁、内部点なし / $d_1$ 退化 / 選ばれた $I$ が別の壁ノード。
+`nodeWallDirichlet: 1` は必須条件。**`nodeWallDirichlet: 0` で代用してはならない** (運動量まで弱くなる)。
+
+**置換するのは `viscousFlux_wall_d` の壁半割面の伝導だけ**で、内部双対面には触らない。
+`Qw_Wall` は W–I **内部双対面**を置換する別機構で、`> -0.5` を有効判定に使いマーカと符号付き値を
+兼用しているため、冷却壁 (負の流束) に流用できない。
+
+**診断との整合**: `iface_q_compact` は壁ノードの**保存温度**を使うので、強制側では $T_W=T_w$ で隠れるが
+弱形式では境界流束と別量になる。比較用のコンパクト熱流束は**両枝とも指定 $T_w$** で定義し、
+保存温度からの勾配は別名の診断量にする。`Tw_bc` と `T_W` を別々に壁ダンプへ記録する。
+
 #### WMLES 壁モデルの指定 (`wallModelLES`)
 
 `wall` / `wall_isothermal` の `ints:` に `wallModelLES: 1` を書くと、その壁の粘性流束が
