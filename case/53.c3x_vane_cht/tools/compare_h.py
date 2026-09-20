@@ -105,6 +105,10 @@ def main():
         print(f"{key:<18}{h[ok].mean():9.1f}{h[ok].max():9.1f}  |  "
               f"{100*r.mean():+7.1f}{100*np.sqrt((r**2).mean()):8.1f}  (n={m.sum()})")
 
+    # 固体メッシュの外周を流体の壁節点に合わせるための出力 (弧長順・閉輪郭)。
+    o = np.argsort(np.where(is_ss, 1.0 + s_norm, 1.0 - s_norm))   # PS(TE->LE) -> SS(LE->TE)
+    np.savetxt(rd / "wall_nodes_ordered.csv", C[o, :2], delimiter=",", header="x,y", comments="")
+
     np.savez(rd / "h_compare.npz", s_norm=s_norm, is_ss=is_ss, Tw=Tw, ok=ok, Tg=Tg,
              **{k: v for k, v in out.items()})
     try:

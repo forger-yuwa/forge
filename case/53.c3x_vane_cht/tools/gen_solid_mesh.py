@@ -25,8 +25,13 @@ OUT = {"c3x": ROOT / "case/53.c3x_vane_cht/mesh",
        "markii": ROOT / "case/54.markii_vane_cht/mesh"}
 
 
-def load_profile(vane):
-    f = REF[vane] / (f"vane_{vane}_profile.csv" if vane == "c3x" else "vane_markii_profile.csv")
+def load_profile(vane, which="smooth"):
+    """翼型輪郭を読む。既定は **平滑化輪郭** `vane_<vane>_smooth.csv`
+    (`smooth_profile.py` が作る。折れ角 60° の角を消した正本。無ければ素の輪郭に落ちる)。"""
+    f = REF[vane] / f"vane_{vane}_smooth.csv"
+    if which != "smooth" or not f.exists():
+        f = REF[vane] / (f"vane_{vane}_profile.csv" if vane == "c3x" else "vane_markii_profile.csv")
+    print(f"[profile] {f.name}")
     pts = []
     for line in open(f):
         if line.startswith("#") or line.startswith("i,"):
@@ -179,13 +184,27 @@ def main():
     ap.add_argument("--vane", default="c3x", choices=["c3x", "markii"])
     ap.add_argument("--n-outer", type=int, default=240, help="外周の節点数 (流体メッシュと共有する)")
     ap.add_argument("--lc", type=float, default=0.0012, help="代表要素寸法 [m]")
+    ap.add_argument("--outer-from", default=None,
+                    help="外周点を CSV (x,y [m]、弧長順の閉輪郭) から取る。"
+                         "**流体メッシュの壁節点をそのまま渡して界面を 1 対 1 にする**ため。"
+                         "`tools/compare_h.py` が書く `wall_nodes_ordered.csv` を想定")
     a = ap.parse_args()
 
     P = load_profile(a.vane)
     holes = load_holes(a.vane)
-    outer, arc = resample_closed(P, a.n_outer)
-    print(f"[{a.vane}] profile arc length {arc:.3f} cm -> {a.n_outer} nodes "
-          f"(spacing {arc/a.n_outer*10:.2f} mm)")
+    if a.outer_from:
+        # 流体側の壁節点をそのまま外周にする (再標本化しない)。単位は m → 内部表現の cm。
+        W = np.loadtxt(a.outer_from, delimiter=",", skiprows=1)[:, :2] * 100.0
+        outer = W
+        seg = np.hypot(*np.diff(np.vstack([W, W[:1]]), axis=0).T)
+        arc = float(seg.sum())
+        a.n_outer = len(W)
+        print(f"[{a.vane}] outer from {a.outer_from}: {len(W)} nodes, arc {arc:.3f} cm "
+              f"(min/max spacing {seg.min()*10:.3f}/{seg.max()*10:.3f} mm)")
+    else:
+        outer, arc = resample_closed(P, a.n_outer)
+        print(f"[{a.vane}] profile arc length {arc:.3f} cm -> {a.n_outer} nodes "
+              f"(spacing {arc/a.n_outer*10:.2f} mm)")
 
     OUT[a.vane].mkdir(parents=True, exist_ok=True)
     geo = OUT[a.vane] / f"solid_{a.vane}.geo"

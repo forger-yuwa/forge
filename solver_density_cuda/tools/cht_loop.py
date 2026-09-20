@@ -39,6 +39,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from solid_shell import ShellOperator, SolidModel   # noqa: E402
+from solid_fem2d import Fem2DOperator                # noqa: E402
 
 XDMF_NNODE = {2: 2, 4: 3, 5: 4}     # Polyline / Triangle / Quadrilateral
 
@@ -96,12 +97,59 @@ def write_wall_profile(path: Path, coords: np.ndarray, Tw: np.ndarray):
             f.write(f"{x:.10e} {y:.10e} {z:.10e} {T:.10e}\n")
 
 
+
+def build_fem2d(spec: dict, wall_coords: np.ndarray):
+    """固体 npz + 孔ごとの Robin から `Fem2DOperator` を作り、**壁ダンプ順 → 界面節点順**の
+    並べ替え index を返す。
+
+    界面は**流体の壁節点と 1 対 1** であることを要求する (座標一致 < 1e-9 m)。
+    `gen_solid_mesh.py --outer-from <compare_h が書く wall_nodes_ordered.csv>` で作った
+    固体メッシュを渡すこと。一致しない節点があれば落とす (黙って内挿しない)。
+    """
+    d = np.load(spec["mesh_npz"])
+    nodes, tris = d["nodes"], d["tris"]
+    outer_edges = d["outer_edges"]
+    iface = np.array(sorted(set(outer_edges.ravel().tolist())), int)
+    holes = [k for k in d.files if k.startswith("hole")]
+    robin = []
+    hs = spec["holes"]
+    if len(hs) not in (1, len(holes)):
+        sys.exit(f"[cht_loop] solid.json の holes が {len(hs)} 個、メッシュの孔は {len(holes)} 個")
+    for i, hk in enumerate(sorted(holes, key=lambda s_: int(s_[4:]))):
+        hp = hs[i] if len(hs) > 1 else hs[0]
+        for (n0, n1) in d[hk]:
+            robin.append((int(n0), int(n1), float(hp["h"]), float(hp["T_c"])))
+    k_solid = tuple(spec["k_table"]) if "k_table" in spec else float(spec["k_solid"])
+    op = Fem2DOperator(nodes, tris, iface, [tuple(e) for e in outer_edges], robin, k_solid)
+
+    # 壁ダンプ順 -> 界面節点順 の対応 (座標一致を要求する)
+    W = np.asarray(wall_coords, float)[:, :2]
+    S = op.coords[:, :2]
+    if len(W) != len(S):
+        sys.exit(f"[cht_loop] 壁節点 {len(W)} と固体界面節点 {len(S)} の数が違う "
+                 "(gen_solid_mesh.py --outer-from で合わせること)")
+    perm = np.empty(len(S), int)
+    for i, p in enumerate(S):
+        k = int(np.argmin(np.hypot(*(W - p).T)))
+        dmin = float(np.hypot(*(W[k] - p)))
+        if dmin > 1e-9:
+            sys.exit(f"[cht_loop] 固体界面節点 {i} {p} に一致する壁節点が無い (最近傍 {dmin:.3e} m)")
+        perm[i] = k
+    if len(set(perm.tolist())) != len(perm):
+        sys.exit("[cht_loop] 壁節点と固体界面節点の対応が 1 対 1 でない")
+    return op, perm
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run_dir")
     ap.add_argument("--template", required=True, help="mesh.h5 と config を置いたディレクトリ")
     ap.add_argument("--forge", required=True)
-    ap.add_argument("--solid", required=True, help="固体モデル JSON (solid_shell.SolidModel)")
+    ap.add_argument("--solid", required=True,
+                    help="固体モデル JSON。`shell2d` は solid_shell.SolidModel、"
+                         "`fem2d` は {mesh_npz, k_solid|k_table, holes:[{h,T_c}|...], T_init} を読む")
+    ap.add_argument("--solid-mode", default="shell2d", choices=["shell2d", "fem2d"],
+                    help="固体バックエンド。fem2d は一般 2D 断面 (冷却孔を Robin 辺で持つ)")
     ap.add_argument("--phys-id", type=int, required=True)
     ap.add_argument("--phys-name", default="wall")
     ap.add_argument("--max-iter", type=int, default=20)
@@ -118,7 +166,10 @@ def main():
     run = Path(a.run_dir).resolve()
     tpl = Path(a.template).resolve()
     run.mkdir(parents=True, exist_ok=True)
-    model = SolidModel.from_json(a.solid)
+    if a.solid_mode == "shell2d":
+        model = SolidModel.from_json(a.solid)
+    else:
+        model = json.loads(Path(a.solid).read_text())
     shutil.copy(a.solid, run / "solid.json")
 
     env = dict(os.environ)
@@ -154,7 +205,7 @@ def main():
                            check=True, env=env, stdout=subprocess.DEVNULL)
         prof = itd / f"wall_profile_{a.phys_id}.csv"
         if Tw is not None:
-            write_wall_profile(prof, op.coords, Tw)
+            write_wall_profile(prof, op.coords, Tw)   # coords は固体界面節点の座標 (順不同で可)
         elif (tpl / f"wall_profile_{a.phys_id}.csv").exists():
             shutil.copy(tpl / f"wall_profile_{a.phys_id}.csv", prof)
         else:
@@ -179,14 +230,24 @@ def main():
                      "角・斜交で評価不能。幾何を見直すか --align-min を検討すること。")
 
         if op is None:
-            op = ShellOperator(coords, faces, model, axisym=a.axisym)
-            T0 = np.full(op.n, a.Tw_init if a.Tw_init is not None else model.T_b)
+            if a.solid_mode == "shell2d":
+                op = ShellOperator(coords, faces, model, axisym=a.axisym)
+                T_back = model.T_b
+            else:
+                op, perm = build_fem2d(model, coords)
+                T_back = float(model.get("T_init", np.mean([h["T_c"] for h in model["holes"]])))
+            T0 = np.full(op.n, a.Tw_init if a.Tw_init is not None else T_back)
             # D_f の初期推定 = k_eff A / d1 (**上界ではない**。受理判定と退避で守る)
-            Df0 = np.maximum(vals["iface_keff"] * op.area / np.maximum(vals["iface_d1"], 1e-12), 1e-12)
+            keff, d1 = np.asarray(vals["iface_keff"], float), np.asarray(vals["iface_d1"], float)
+            if a.solid_mode == "fem2d":
+                keff, d1 = keff[perm], d1[perm]       # 壁ダンプ順 -> 界面節点順
+            Df0 = np.maximum(keff * op.area / np.maximum(d1, 1e-12), 1e-12)
             drv = op.driver(T0, Df0=Df0, anderson=a.anderson)
             Tw = drv.T.copy()
             # 初回は壁温が config の一様値なので、そのまま 1 回目の Q_f を使う
         q = np.asarray(vals[key], float)                 # [W/m2] 固体向き正
+        if a.solid_mode == "fem2d":
+            q = q[perm]                                  # 壁ダンプ順 -> 固体界面節点順
         Qf = q * op.area                                 # 節点荷重 [W] (平面 2D は W/m)
         Tw_new, info = drv.advance(Qf, tol_K=a.tol_K, tol_rel=a.tol_rel, n_consec=a.n_consec)
         wr.writerow([it, a.flux, f"{Tw.min():.6f}", f"{Tw.max():.6f}", f"{Tw.mean():.6f}",
