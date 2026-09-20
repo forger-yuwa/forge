@@ -122,6 +122,14 @@ def main():
     ap.add_argument("--x-in", type=float, default=None, help="入口 x [cm] (既定: 前縁 - 1 軸弦長)")
     ap.add_argument("--no-convert", action="store_true")
     ap.add_argument("--x-out", type=float, default=None, help="出口 x [cm] (既定: 後縁 + 1.5 軸弦長)")
+    # GEOM の exit_angle は報告 表 IV の設計値。**報告の翼型座標そのものから測った
+    # 喉/ピッチは別の角度を与える** (C3X: o/pitch 0.2881 -> 73.26° に対し表 IV は 72.38°)。
+    # **この 0.88° の食い違いは解に効かない** (2026-09-20 A/B: run_0025 72.38° と
+    # run_0026 73.26° で壁圧の bias/rms が 4 桁まで同一、出口気流角も 73.07 / 73.06°)。
+    # 周期の出口ブロックは流れの向きを決めず、流れが自分で出口角を決める。
+    # したがって後縁側に残る壁圧欠損の原因ではない (case/53 README「負圧面後縁の壁圧」)。
+    ap.add_argument("--exit-angle", type=float, default=None,
+                    help="出口気流角 [deg] を上書き (既定は GEOM の表 IV 設計値)")
     a = ap.parse_args()
 
     g = GEOM[a.vane]
@@ -131,7 +139,10 @@ def main():
     x_in = a.x_in if a.x_in is not None else P[:, 0].min() - 1.0 * bx
     x_out = a.x_out if a.x_out is not None else P[:, 0].max() + 1.5 * bx
     cam = camber_line(P)
-    path = periodic_path(cam, x_in, x_out, g["exit_angle"])
+    exit_angle = a.exit_angle if a.exit_angle is not None else g["exit_angle"]
+    print(f"[mesh] exit_angle = {exit_angle:.2f} deg"
+          f"{' (表 IV 既定)' if a.exit_angle is None else ' (上書き)'}")
+    path = periodic_path(cam, x_in, x_out, exit_angle)
     low = path - np.array([0.0, g["pitch"] / 2])
 
     mesh_dir = ROOT / g["case"] / "mesh"
