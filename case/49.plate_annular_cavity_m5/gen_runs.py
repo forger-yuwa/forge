@@ -148,7 +148,11 @@ def perturb_asym(h5, amp=0.05):
 
 
 def solver_cfg(nsteps, cfl, *, conv=1, lim=2, ninner=4, relax=0.7, outint=2000,
-               model="sst", mesh_file="mesh.h5", gas=None):
+               model="sst", mesh_file="mesh.h5", gas=None, extra_fields=None):
+    # **診断勾配の追加出力** (残作業 #28)。`dTd*` は `output_cellValNames` に無く出せないので、
+    # TP (単一擬似種 = R 一定) の EOS で ∇T = ∇P/(ρR) − P∇ρ/(ρ²R) と再構成するために
+    # `dPd*` / `drod*` を、粘性仕事のために速度勾配を足す。level 2 より軽い。
+    extra = ("" if not extra_fields else ", extraFields: [%s]" % ", ".join(extra_fields))
     gas = (gas or D["gas"]).upper()
     kc = D["mu_inf"] * D["cp"] / D["prandtl_lam"]
     if gas == "TP":
@@ -181,7 +185,7 @@ time:
   nStepInner: {ninner}
 space: {{convMethod: {conv}, limiter: {lim}, pRef: {D['P_inf']:.8g}}}
 {turb}
-output: {{level: 1}}
+output: {{level: 1{extra}}}
 initial: "uniform_p101325_u10"
 """
 
@@ -441,7 +445,10 @@ def cmd_run(a):
         # 段階起動をやり直してしまい、**S0 の全 slip が解を壊す**ので専用の入口を用意する。
         if not a.ic_from:
             raise SystemExit("--main-only は --ic-from と併用する (引き継ぐ場が要る)")
-        cfgtext = solver_cfg(a.main_steps, a.cfl, outint=a.out_int, gas=gas, relax=a.relax)
+        cfgtext = solver_cfg(a.main_steps, a.cfl, outint=a.out_int, gas=gas, relax=a.relax,
+                             extra_fields=(["dPdx", "dPdy", "dPdz", "drodx", "drody", "drodz",
+                                            "dUxdz", "dUydz", "dUzdz", "dUzdx", "dUzdy"]
+                                           if a.grad_out else None))
         bctext = bcond("isothermal", inlet_profile=True)
         # **継続 run にも stage_manifest.json を書く**。以前は書いていなかったため
         # `check_convergence.py --segment` が「区間を決められない」で落ち、ゲートは
@@ -459,20 +466,23 @@ def cmd_run(a):
         return
     ip = dict(inlet_profile=True)
     # S0: 全壁 slip・層流・1 次 (キャビティ内圧の平衡化)
-    stage(rd, "S0_slip", solver_cfg(2000, 0.5, conv=0, lim=0, ninner=10, outint=2000, model="none", gas=gas),
+    sc = float(getattr(a, "startup_cfl_scale", 1.0))
+    if sc != 1.0:
+        print("  段階起動の CFL を x%.3g" % sc)
+    stage(rd, "S0_slip", solver_cfg(2000, 0.5 * sc, conv=0, lim=0, ninner=10, outint=2000, model="none", gas=gas),
           bcond("slip", **ip), 2000)
     # S1: no-slip 断熱 (層流)
-    stage(rd, "S1_lam", solver_cfg(2000, 0.3, conv=0, lim=0, ninner=10, outint=2000, model="none", gas=gas),
+    stage(rd, "S1_lam", solver_cfg(2000, 0.3 * sc, conv=0, lim=0, ninner=10, outint=2000, model="none", gas=gas),
           bcond("adiabatic", **ip), 2000)
     # S2: キャビティ等温壁 (層流)
-    stage(rd, "S2_iso", solver_cfg(2000, 0.5, conv=0, lim=0, ninner=10, outint=2000, model="none", gas=gas),
+    stage(rd, "S2_iso", solver_cfg(2000, 0.5 * sc, conv=0, lim=0, ninner=10, outint=2000, model="none", gas=gas),
           bcond("isothermal", **ip), 2000)
     # S3/S4: SST soft -> mid (1 次)
-    stage(rd, "S3_sst_soft", solver_cfg(3000, 0.3, conv=0, lim=0, ninner=10, outint=3000, gas=gas), bcond("isothermal", **ip), 3000)
-    stage(rd, "S4_sst_mid", solver_cfg(3000, 1.0, conv=0, lim=0, ninner=10, outint=3000, gas=gas), bcond("isothermal", **ip), 3000)
+    stage(rd, "S3_sst_soft", solver_cfg(6000, 0.3 * sc, conv=0, lim=0, ninner=10, outint=3000, gas=gas), bcond("isothermal", **ip), 6000)
+    stage(rd, "S4_sst_mid", solver_cfg(3000, 1.0 * sc, conv=0, lim=0, ninner=10, outint=3000, gas=gas), bcond("isothermal", **ip), 3000)
     # S5: 2 次ランプ
     for i, cv in enumerate([float(v) for v in a.ramp.split(",") if v]):
-        stage(rd, "S5_ramp%d_cfl%g" % (i, cv), solver_cfg(2000, cv, outint=2000, gas=gas), bcond("isothermal", **ip), 2000)
+        stage(rd, "S5_ramp%d_cfl%g" % (i, cv), solver_cfg(2000, cv * sc, outint=2000, gas=gas), bcond("isothermal", **ip), 2000)
     # S6: 本段
     main_cfg = solver_cfg(a.main_steps, a.cfl, outint=a.out_int, gas=gas)
     main_bc = bcond("isothermal", **ip)
@@ -509,6 +519,11 @@ def main():
     r.add_argument("--cfl-pseudo", type=float, default=12.0)
     r.add_argument("--ic-from", default=None, help="定常場の run (mesh.h5 を index コピーで引き継ぐ)")
     r.add_argument("--perturb", type=float, default=0.01, help="URANS の左右非対称擾乱 (相対)")
+    r.add_argument("--startup-cfl-scale", type=float, default=1.0,
+                   help="段階起動 (S0-S5) の CFL に掛ける係数。**第一層を薄くすると SST 投入段 "
+                        "(S3) で omega 壁値が y1^-2 で増えて落ちる** ため 0.3-0.5 で緩める")
+    r.add_argument("--grad-out", action="store_true",
+                   help="開口収支をソルバ勾配で組むための診断場を追加出力する (#28)")
     r.add_argument("--relax", type=float, default=0.7,
                    help="implicitRelax。**1.0 = 緩和なし** (解が緩和で動いていないかの確認用)。"
                         "AGENTS の SERN 系は relax を使わない方針なので感度を取る")

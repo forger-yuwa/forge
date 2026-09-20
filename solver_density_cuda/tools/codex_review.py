@@ -157,7 +157,24 @@ def main():
            "-c", f'model_reasoning_effort="{a.effort}"', "-o", last_msg]
     if a.model:
         cmd += ["-m", a.model]
-    cmd.append(prompt)
+    # **長いプロンプトは引数で渡せない** (2026-09-20)。plan が育つと `execve` の
+    # 引数長上限に当たり `OSError: [Errno 7] Argument list too long` で落ちる
+    # (case/49 の plan で 142 kB)。上限に近ければ**ファイルに落として読ませる**。
+    # codex は read-only サンドボックスでもリポジトリ内のファイルを読める。
+    prompt_file = None
+    if len(prompt.encode()) > 96 * 1024:
+        prompt_file = os.path.join(a.out_dir, name + ".prompt.md")
+        with open(prompt_file, "w", encoding="utf-8") as pf:
+            pf.write(prompt)
+        rel = os.path.relpath(prompt_file, ROOT)
+        cmd.append("レビュー依頼の全文は `%s` にある。**まずこのファイルを読み**、"
+                   "その指示どおりにレビューして結果を出力せよ。"
+                   "(プロンプトが %d kB と長く引数で渡せないためファイル渡しにしている)"
+                   % (rel, len(prompt.encode()) // 1024))
+        print("  prompt: %s (%d kB, 引数長上限のためファイル渡し)"
+              % (rel, len(prompt.encode()) // 1024))
+    else:
+        cmd.append(prompt)
 
     head = git("rev-parse", "--short", "HEAD")
     branch = git("rev-parse", "--abbrev-ref", "HEAD")

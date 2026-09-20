@@ -146,7 +146,13 @@ def main():
             if len(vals) >= 3:
                 n = max(2, int(len(vals) * 0.4))
                 imb = abs(sum(vals[-n:]) / n)
+        # **欠損はスキップでなく判定不能** (2026-09-20 codex result M4)。
+        # 従来は `budget_residual` が JSON に無く、この検査が常に飛んでいた。
         bud = abs(float(d.get("budget_residual", float("nan")))) if "budget_residual" in d else None
+        if bud is None:
+            print("[5] 保存性         : **判定不能** (cavity_eval.json に budget_residual が無い"
+                  " — cavity_eval.py を新しい版で回し直すこと)")
+            return 2
         ok5 = imb <= a.mass_tol
         print("[5] 保存性         : %s   開口の正味/片道 %.3e (許容 %.3g)"
               % ("OK" if ok5 else "**FAIL**", imb, a.mass_tol))

@@ -89,7 +89,9 @@ def read(res):
     with h5py.File(res, "r") as f:
         c = np.array(f["MESH/COORD"]).reshape(-1, 3)
         keys = [k for k in ("ro", "Ux", "Uy", "Uz", "P", "T", "h0", "k", "omega",
-                            "vis_lam", "vis_turb", "wall_dist") if "VALUE/" + k in f]
+                            "vis_lam", "vis_turb", "wall_dist",
+                            "dPdz", "drodz", "dUxdz", "dUydz", "dUzdz",
+                            "dUzdx", "dUzdy") if "VALUE/" + k in f]
         v = {k: np.array(f["VALUE/" + k]) for k in keys}
     return c, v
 
@@ -258,6 +260,23 @@ def eval_snapshot(c, v, man, D):
     # **境界層近似** (∂/∂z が支配的) で τ を組む:
     #   τ_zx ≈ μ_e ∂u_x/∂z,  τ_zy ≈ μ_e ∂u_y/∂z,  τ_zz ≈ (4/3) μ_e ∂u_z/∂z
     # これは厳密ではないので、**収支の残差がこれで説明できるか**の判定にだけ使う。
+    # **ソルバ勾配があればそれを使う** (残作業 #28)。2 点差分 (Δz 0.22〜1.5 mm) より正確。
+    # 温度勾配 `dTd*` は `output_cellValNames` に無いので出せないが、**TP は単一擬似種で
+    # R が定数**なので $T=P/(\rho R)$ から
+    #   ∇T = ∇P/(ρR) − P∇ρ/(ρ²R)
+    # と**厳密に**再構成できる。必要な出力は `extraFields: [dPdx,dPdy,dPdz,drodx,drody,drodz,
+    # dUxdz,dUydz,dUzdz,dUzdx,dUzdy]` (または `level: 2`)。
+    grad_keys = ("dPdz", "drodz", "dUxdz", "dUydz", "dUzdz")
+    use_solver_grad = all(k in v for k in grad_keys)
+    if use_solver_grad:
+        Rg = float(D.get("R_tp", D.get("R", 287.0)))
+        rog = samp("ro")
+        Pg = samp("P")
+        dTdz_s = samp("dPdz") / (rog * Rg) - Pg * samp("drodz") / (rog ** 2 * Rg)
+        out["_grad_source"] = "solver (dPdz/drodz から ∇T を EOS で再構成)"
+    else:
+        out["_grad_source"] = "2 点差分 (節点層)"
+
     zl_all = np.unique(np.round(c[:, 2], 9))
     k_here = int(np.argmin(np.abs(zl_all + zf)))
     lo = zl_all[max(k_here - 1, 0)]
@@ -268,10 +287,14 @@ def eval_snapshot(c, v, man, D):
             q = np.concatenate([xy, np.full((len(xy), 1), zv)], axis=1)
             return fa.at(q, nm).reshape(nth, nr)
         dz = hi - lo
-        dTdz = (samp3("T", hi) - samp3("T", lo)) / dz
-        dUxdz = (samp3("Ux", hi) - samp3("Ux", lo)) / dz
-        dUydz = (samp3("Uy", hi) - samp3("Uy", lo)) / dz
-        dUzdz = (samp3("Uz", hi) - samp3("Uz", lo)) / dz
+        if use_solver_grad:
+            dTdz = dTdz_s
+            dUxdz = samp("dUxdz"); dUydz = samp("dUydz"); dUzdz = samp("dUzdz")
+        else:
+            dTdz = (samp3("T", hi) - samp3("T", lo)) / dz
+            dUxdz = (samp3("Ux", hi) - samp3("Ux", lo)) / dz
+            dUydz = (samp3("Uy", hi) - samp3("Uy", lo)) / dz
+            dUzdz = (samp3("Uz", hi) - samp3("Uz", lo)) / dz
         mu = samp("vis_lam") if "vis_lam" in v else np.full_like(dTdz, 1.7e-5)
         mut = samp("vis_turb") if "vis_turb" in v else np.zeros_like(dTdz)
         cp = float(D.get("cp", 1004.5))
@@ -809,7 +832,9 @@ def main():
             # **伝導・粘性仕事を足した収支** (codex M7)。残差がこれで説明できるかを見る
             tot = adv + cond + visc
             print("    内訳: 対流 %.3f + 伝導 %.3f + 粘性仕事 %.3f = %.3f W "
-                  "(勾配は Δz=%.4g mm の差分)" % (adv, cond, visc, tot, q["_grad_dz_m"] * 1e3))
+                  "(勾配: %s)" % (adv, cond, visc, tot,
+                                           q.get("_grad_source", "Δz=%.4g mm の差分"
+                                                 % (q.get("_grad_dz_m", 0.0) * 1e3))))
             print("    -> 伝導・粘性込みの残差比 %.4f  (対流のみ %.4f)"
                   % ((qs - tot) / max(abs(qs), 1e-30), (qs - adv) / max(abs(qs), 1e-30)))
     # **既定でない評価面で正本を上書きしない** (2026-09-20)。`--flux-depth` を振ったとき
@@ -819,6 +844,23 @@ def main():
                else "cavity_eval_fd%.3gmm.json" % a.flux_depth)
     if a.flux_depth is not None:
         print("  ** 評価面が既定でないので %s に書く (cavity_eval.json は触らない) **" % outname)
+    # **収支を JSON に保存する** (2026-09-20 codex result M4)。従来は標準出力にしか出ず、
+    # `check_case_gates.py` の `budget_residual` 参照が**常に欠損 = 検査スキップ**だった。
+    if wh and np.isfinite(q.get("_H_open", float("nan"))):
+        zc = q["_flux_z_m"]
+        qs = wall_Q_below(wh, ("cav_outer", "cyl_side", "cav_floor"), zc)
+        adv = -q["_H_open"]
+        cond = -q.get("_Qcond_open", float("nan"))
+        visc = -q.get("_Wvisc_open", float("nan"))
+        q["budget_z_m"] = zc
+        q["budget_q_wall_W"] = qs
+        q["budget_adv_W"] = adv
+        q["budget_cond_W"] = cond
+        q["budget_visc_W"] = visc
+        q["budget_residual"] = (qs + q["_H_open"]) / max(abs(qs), 1e-30)
+        if np.isfinite(cond):
+            q["budget_residual_all"] = (qs - (adv + cond + visc)) / max(abs(qs), 1e-30)
+        q["budget_grad_source"] = q.get("_grad_source", "不明")
     Path(Path(a.run) / outname).write_text(json.dumps(
         {"field": {k: val for k, val in q.items() if not k.startswith("_")},
          "wall": {g: {k: val for k, val in d.items() if not k.startswith("_")}

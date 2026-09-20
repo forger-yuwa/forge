@@ -152,6 +152,20 @@ def main():
         "rc=%d %s" % (r.returncode, "Traceback" if "Traceback" in out else out.strip().splitlines()[-1:]))
     shutil.rmtree(d, ignore_errors=True)
 
+    # 段区間のキーが**層流と SST を区別する**か (2026-09-20 codex result M3)。
+    # `turbulenceModel:` だけを見ていたため `turbulence: {model: ...}` 書式で同一キーになり、
+    # 層流段と SST 段が 1 区間に連結されていた。
+    import stage_manifest as sm
+    lam = 'turbulence: {model: "none"}\nspace: {convMethod: 1, limiter: 2}\n'
+    sst = 'turbulence: {model: "sst", scalarDiffusion: 1}\nspace: {convMethod: 1, limiter: 2}\n'
+    chk("層流段と SST 段が別キーになる", sm.stage_key(lam, "") != sm.stage_key(sst, ""),
+        "none=%s sst=%s" % (sm.stage_key(lam, "").get("turbulence.model"),
+                            sm.stage_key(sst, "").get("turbulence.model")))
+    cm = 'turbulence: {model: "sst"}\nspace: {convMethod: 2, limiter: 2}\n'
+    chk("同じ乱流モデルで convMethod だけ違えば別キー",
+        sm.stage_key(sst, "") != sm.stage_key(cm, ""), "")
+    chk("同一 config は同一キー", sm.stage_key(sst, "x") == sm.stage_key(sst, "x"), "")
+
     print("\nVERDICT: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 

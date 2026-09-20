@@ -10,7 +10,8 @@ FEM 側の入れ方:
   1. 各壁に T_gas = T_aw 固定・h_i = G_i0 / A_i の対流 BC
   2. 壁面どうしに線形コンダクタンス G_ij (面間熱伝達要素)
   3. 壁面どうしに放射 (T^4。線形化しない)
-  4. リップ帯は帯積分入熱を保存したまま幅 eps に均す。eps <= sqrt(alpha t) で選ぶ
+  4. リップ帯は**この出力では均していない** (未実装, 残作業)。使う側で帯積分を
+     保存したまま幅 eps に均すこと。eps <= sqrt(alpha t) で選ぶ
 
 出力 (既定 `fem_bc/`):
   network.json      G_i0 / G_ij / T_aw / 面積 / 放射の形態係数パラメータ / リップ帯
@@ -145,9 +146,11 @@ def main():
             A_inner_m2=areas.get("cyl_side"), A_outer_m2=areas.get("cav_outer"),
             note="eps>=0.4 で対流の G_ij を上回る (eps=0.8 で 4 倍)。線形化せず T^4 で入れること",
         ),
-        lip=dict(band_mm=a.eps_mm,
+        lip=dict(recommended_band_mm=a.eps_mm,
+                 smeared=False,
                  rule="eps <= sqrt(alpha t) で選ぶ。秒オーダーなら 1 mm、0.1 s 以下は 0.5 mm 以下",
-                 note="帯積分入熱を保存したまま均す。ピーク q'' は格子収束しない (plan §4.4.2)"),
+                 note="**qpp_*.csv は未加工 (均していない)**。ピーク q'' は格子収束しない "
+                      "(q'' ~ s^-1/2, plan §4.4.2) ので、使う側で帯積分を保存して均すこと"),
         validity=dict(
             geometry="Ro %.1f / Ri %.1f / depth %.1f / x_off %.1f mm"
                      % tuple(float(gc.load_manifest(run=Path(a.runs[0]))["geometry"][k]) * 1e3
@@ -189,9 +192,12 @@ def main():
    正味入熱は **-12.7 W (放熱側)** だが、壁間項を落とすと +37.5 W になる。
 3. **放射**: `network.json` の `radiation` の式で面間放射を張る。**線形化しない**。
    放射率 0.4 以上で対流の壁間結合を上回る (0.8 で 4 倍)。
-4. **リップ**: `qpp_*.csv` の開口端 %.1f mm は帯積分入熱を保存したまま均してある。
-   評価時刻 t に対し `eps <= sqrt(alpha t)` を満たす幅か確認すること
-   (秒オーダーなら 1 mm、0.1 s 以下なら 0.5 mm 以下)。
+4. **リップ (未加工)**: `qpp_*.csv` は**格子の値をそのまま**出している。**均していない**。
+   開口端 %.1f mm の帯には層が残り、同じ方位で数百 kW/m2 の幅で値が並ぶ。
+   ピーク熱流束は格子収束しない (`q'' ~ s^-1/2`, plan §4.4.2) ので、**FEM に入れる前に
+   使う側で均すこと**。幅は評価時刻 t に対し `eps <= sqrt(alpha t)` で選ぶ
+   (秒オーダーなら 1 mm、0.1 s 以下なら 0.5 mm 以下)。`network.json` の `lip.band_mm` は
+   **推奨幅のメモであって、加工済みという意味ではない**。
 
 ## やってはいけないこと
 

@@ -49,7 +49,12 @@ HARD_PATTERNS = [
     # (codex 2026-09-20 limiter-config-simplify plan レビュー M5)。
     ("limiterScaled", r"limiterScaled\s*:\s*(\S+)"),
     ("venkatK", r"venkatK\s*:\s*(\S+)"),
+    # **`turbulence: {model: ...}` の書式も拾う** (2026-09-20 codex result M3)。
+    # `turbulenceModel:` だけを見ていたため、層流 (`model: "none"`) と SST (`model: "sst"`)
+    # が**同一キー**になり、段階起動の層流段と SST 段が 1 区間に連結されていた。
+    # 区間分離という本ツールの目的そのものが効いていなかった。
     ("turbulenceModel", r"turbulenceModel\s*:\s*(\S+)"),
+    ("turbulence.model", r"turbulence\s*:\s*\{[^}]*?\bmodel\s*:\s*\"?([A-Za-z0-9_]+)"),
     ("wallTreatmentSST", r"wallTreatmentSST\s*:\s*(\S+)"),
     ("viscMethod", r"viscMethod\s*:\s*(\S+)"),
     ("thermalMethod", r"thermalMethod\s*:\s*(\S+)"),
