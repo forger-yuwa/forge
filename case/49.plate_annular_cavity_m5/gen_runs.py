@@ -441,7 +441,7 @@ def cmd_run(a):
         # 段階起動をやり直してしまい、**S0 の全 slip が解を壊す**ので専用の入口を用意する。
         if not a.ic_from:
             raise SystemExit("--main-only は --ic-from と併用する (引き継ぐ場が要る)")
-        cfgtext = solver_cfg(a.main_steps, a.cfl, outint=a.out_int, gas=gas)
+        cfgtext = solver_cfg(a.main_steps, a.cfl, outint=a.out_int, gas=gas, relax=a.relax)
         bctext = bcond("isothermal", inlet_profile=True)
         # **継続 run にも stage_manifest.json を書く**。以前は書いていなかったため
         # `check_convergence.py --segment` が「区間を決められない」で落ち、ゲートは
@@ -509,6 +509,9 @@ def main():
     r.add_argument("--cfl-pseudo", type=float, default=12.0)
     r.add_argument("--ic-from", default=None, help="定常場の run (mesh.h5 を index コピーで引き継ぐ)")
     r.add_argument("--perturb", type=float, default=0.01, help="URANS の左右非対称擾乱 (相対)")
+    r.add_argument("--relax", type=float, default=0.7,
+                   help="implicitRelax。**1.0 = 緩和なし** (解が緩和で動いていないかの確認用)。"
+                        "AGENTS の SERN 系は relax を使わない方針なので感度を取る")
     r.add_argument("--ic-force", default="",
                    help="引き継ぎ元と条件が違っても進める理由 (意図的な壁温変更など)。"
                         "空なら不一致で停止する")

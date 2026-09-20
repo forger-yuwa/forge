@@ -812,7 +812,14 @@ def main():
                   "(勾配は Δz=%.4g mm の差分)" % (adv, cond, visc, tot, q["_grad_dz_m"] * 1e3))
             print("    -> 伝導・粘性込みの残差比 %.4f  (対流のみ %.4f)"
                   % ((qs - tot) / max(abs(qs), 1e-30), (qs - adv) / max(abs(qs), 1e-30)))
-    Path(Path(a.run) / "cavity_eval.json").write_text(json.dumps(
+    # **既定でない評価面で正本を上書きしない** (2026-09-20)。`--flux-depth` を振ったとき
+    # `cavity_eval.json` がその深さの値で書き換わり、後から読むと別の面の数字を掴む
+    # (実際に `mdot_in` が 36 % 違う値で残っていた)。深さを指定したときは別名に書く。
+    outname = ("cavity_eval.json" if a.flux_depth is None
+               else "cavity_eval_fd%.3gmm.json" % a.flux_depth)
+    if a.flux_depth is not None:
+        print("  ** 評価面が既定でないので %s に書く (cavity_eval.json は触らない) **" % outname)
+    Path(Path(a.run) / outname).write_text(json.dumps(
         {"field": {k: val for k, val in q.items() if not k.startswith("_")},
          "wall": {g: {k: val for k, val in d.items() if not k.startswith("_")}
                   for g, d in wh.items()}}, indent=2))
