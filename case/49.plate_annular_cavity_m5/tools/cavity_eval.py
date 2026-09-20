@@ -248,6 +248,46 @@ def eval_snapshot(c, v, man, D):
     out["_H_open"] = float(np.sum(flux * h0)) if h0 is not None else float("nan")
     out["_flux_z_m"] = float(-zf)
 
+    # **伝導と粘性仕事も足す** (codex result-1 M7 / 残作業 #15)。
+    # 全エネルギー流束は  ρ u H - k∇T - τ·u  で、開口面 (法線 +z) を出ていく分は
+    #   ρ u_z h0  -  k ∂T/∂z  -  (τ·u)_z
+    # 従来は第 1 項だけで収支を組んでいたので、残差を「後処理の誤差」と断定できなかった。
+    #
+    # 勾配は**開口面の上下の節点層で差分**する (res は level 1 で勾配を持たないため)。
+    # せん断層は z 方向に薄く、周方向・半径方向のスケール (3 mm 以上) よりずっと小さいので、
+    # **境界層近似** (∂/∂z が支配的) で τ を組む:
+    #   τ_zx ≈ μ_e ∂u_x/∂z,  τ_zy ≈ μ_e ∂u_y/∂z,  τ_zz ≈ (4/3) μ_e ∂u_z/∂z
+    # これは厳密ではないので、**収支の残差がこれで説明できるか**の判定にだけ使う。
+    zl_all = np.unique(np.round(c[:, 2], 9))
+    k_here = int(np.argmin(np.abs(zl_all + zf)))
+    lo = zl_all[max(k_here - 1, 0)]
+    hi = zl_all[min(k_here + 1, len(zl_all) - 1)]
+    if hi > lo and all(nm in v for nm in ("T", "Ux", "Uy", "Uz")):
+        xy = pts[:, :2]
+        def samp3(nm, zv):
+            q = np.concatenate([xy, np.full((len(xy), 1), zv)], axis=1)
+            return fa.at(q, nm).reshape(nth, nr)
+        dz = hi - lo
+        dTdz = (samp3("T", hi) - samp3("T", lo)) / dz
+        dUxdz = (samp3("Ux", hi) - samp3("Ux", lo)) / dz
+        dUydz = (samp3("Uy", hi) - samp3("Uy", lo)) / dz
+        dUzdz = (samp3("Uz", hi) - samp3("Uz", lo)) / dz
+        mu = samp("vis_lam") if "vis_lam" in v else np.full_like(dTdz, 1.7e-5)
+        mut = samp("vis_turb") if "vis_turb" in v else np.zeros_like(dTdz)
+        cp = float(D.get("cp", 1004.5))
+        prl = float(D.get("prandtl_lam", 0.72))
+        prt = float(D.get("prandtl_turb", 0.9))
+        kcond = cp * (mu / prl + mut / prt)
+        mue = mu + mut
+        ux = samp("Ux"); uy = samp("Uy")
+        tau_u = (mue * dUxdz) * ux + (mue * dUydz) * uy + (4.0 / 3.0 * mue * dUzdz) * uz
+        out["_Qcond_open"] = float(np.sum(-kcond * dTdz * dA))
+        out["_Wvisc_open"] = float(np.sum(-tau_u * dA))
+        out["_grad_dz_m"] = float(dz)
+    else:
+        out["_Qcond_open"] = float("nan")
+        out["_Wvisc_open"] = float("nan")
+
     # NOTE: 場の勾配から q_w を組む案は**この種のメッシュでは使えない** (2026-09-19 実測)。
     # 壁から数十 µm の点を IDW/線形で補間すると、接線 1-2 mm 間隔のノードを拾って
     # dT/dn をソルバ値の 7 倍に出す。**壁熱流束はソルバ出力 (wall_heat) を一次情報とし**、
@@ -611,7 +651,11 @@ def main():
     a = ap.parse_args()
     man = gc.load_manifest(run=a.run)      # run が自分の manifest を持っていればそれを使う
     if a.flux_depth is not None:
+        # **`flux_depth_m` を書く**。`flux_depth_frac` を書いても manifest の
+        # `flux_depth_m` が優先されるので、オプションが黙って効かなかった (2026-09-20 修正)。
+        man["eval"]["flux_depth_m"] = a.flux_depth * 1e-3
         man["eval"]["flux_depth_frac"] = a.flux_depth * 1e-3 / man["geometry"]["depth"]
+        print("  開口流束の評価深さを %.3g mm に上書き" % a.flux_depth)
     D = run_conditions(a.run)
     snaps = snapshots(a.run)
     if not snaps:
@@ -749,9 +793,19 @@ def main():
         zc = q["_flux_z_m"]
         qs = wall_Q_below(wh, ("cav_outer", "cyl_side", "cav_floor"), zc)
         qall = sum(wh[g]["Q_W"] for g in ("cav_outer", "cyl_side", "cav_floor") if g in wh)
+        adv = -q["_H_open"]
+        cond = -q.get("_Qcond_open", float("nan"))
+        visc = -q.get("_Wvisc_open", float("nan"))
         print("  CV 収支 (評価面 z=%.2f mm 以深): Σq_壁 %.3f W  vs  開口からの正味エンタルピー流入 %.3f W"
               "  -> 残差比 %.3f   [全深さの Σq は %.3f W]"
-              % (zc * 1e3, qs, -q["_H_open"], (qs + q["_H_open"]) / max(abs(qs), 1e-30), qall))
+              % (zc * 1e3, qs, adv, (qs + q["_H_open"]) / max(abs(qs), 1e-30), qall))
+        if np.isfinite(cond):
+            # **伝導・粘性仕事を足した収支** (codex M7)。残差がこれで説明できるかを見る
+            tot = adv + cond + visc
+            print("    内訳: 対流 %.3f + 伝導 %.3f + 粘性仕事 %.3f = %.3f W "
+                  "(勾配は Δz=%.4g mm の差分)" % (adv, cond, visc, tot, q["_grad_dz_m"] * 1e3))
+            print("    -> 伝導・粘性込みの残差比 %.4f  (対流のみ %.4f)"
+                  % ((qs - tot) / max(abs(qs), 1e-30), (qs - adv) / max(abs(qs), 1e-30)))
     Path(Path(a.run) / "cavity_eval.json").write_text(json.dumps(
         {"field": {k: val for k, val in q.items() if not k.startswith("_")},
          "wall": {g: {k: val for k, val in d.items() if not k.startswith("_")}
