@@ -11,6 +11,34 @@
   `https://ntrs.nasa.gov/api/citations/<ID>/downloads/<ID>.pdf`。**1970 年代のスキャンでも OCR テキスト層がある**
   (PyMuPDF で本文抽出可、図は 200 dpi レンダで digitize 可)。
 
+
+## 2026-09-20 追記 — TN D-8233 / TN D-7939 の基準流れについて分かったこと
+
+[TH76] TN D-8233 を T2 (乱流一次検証) に立てる前提で原典を読み込んだ結果、**分母 $h_{fp}$ の
+素性**が分かった。ここは文献選定に直接効くので survey 側にも残す。
+
+- TN D-8233 の**参考文献 6 は TN D-7939** (`Pressure Gradient Effects...`, NTRS 19750020309)。
+  ref.3 の TM X-71945 とは別物。BL プロファイルと平板基準データの**両方**がこちらにある。
+- 平板基準の**原式は $Re'$ の式ではない**: $N_{St}R_{w,\theta}^{0.07}=A\delta^*+B$
+  ($A$=−2.77e−4 cm⁻¹, $B$=4.66e−3)。TN D-8233 Appendix の $h_{fp}=C\,Re'^{0.69}$ はその還元形。
+- **基準流れは平板ではなくトンネル壁 BL** で、TN D-7939 自身が
+  (i) 角干渉 (側壁・床・天井) による**3 次元性**でプロファイル形状が横方向に大きく変わること、
+  (ii) データがノズル/試験部交差部の作る**圧縮領域**で取られたこと、
+  (iii) **"The correlation has no application to any flow other than this tunnel-wall boundary layer"**
+  を明記している。
+- 独立検算 (Van Driest II + Reynolds 相似) では $h_{fp}$ は圧縮性乱流平板理論の **1/1.8**、
+  $Re'$ 依存の冪も 0.69 vs 0.81 と違う。上の 3 点と整合する。
+- 報告の $\delta^*/\theta$ = 8.9 は $M$ 10.3 の圧縮性定義では再現できない (どの $T_w$・速度冪でも
+  $H\ge24$)。$\delta^*$ は TM X-71945 本文の独立記述で裏が取れるが、$\theta$ は取れない。
+
+**文献選定への含意**: TN D-8233 は「$h=q/(T_{aw}-T_w)$ で分母を定義し、壁温を振り、BL 厚を測った
+唯一の乱流 deep gap データ」という点で依然として価値が高いが、**その分母は 2D 平板 CFD で
+再現できる量ではない**。比 $h/h_{fp}$ の再現に賭けるか、分母の定義が異なる
+[A78] TP-1187 / [WAC75] TM X-3225 / [A85] TP-2307 / [HN90] TP-2988 に一次検証を移すかの判断が要る。
+詳細は [`case/51 README`](../../case/51.gap_turbulent_thd8233/README.md) と
+[計画 §4.2b-1](../../plans/active/case-hypersonic-gap-heating-validation.md)。
+
+
 ## 0. 要約 — 何が分かっているか
 
 1. **すきま内の熱伝達は、開口部近傍を除いて平板より 1〜2 桁小さい**。深さ方向は単調減衰。

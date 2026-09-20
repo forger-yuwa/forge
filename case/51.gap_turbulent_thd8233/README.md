@@ -110,33 +110,68 @@ $\delta^*/w$ と $\theta/w$ を別軸で直接プロットしており、$\delta
 ($\to \theta$ = 1.44 cm) と読める。左パネルの $\delta^*$ [cm]・$\theta$ [cm] とも整合する。
 **報告は本当に $H\approx9$ を載せている。**
 
-### 定義の組合せを総当たりすると 1 つだけ合う
+### 原典 ref.6 を入手した — 運動学説は否定され、別の答えが出た
 
-| 組合せ ($1/7$ 乗則 / $1/10$ 乗則) | $H$ |
-| --- | --- |
-| $\delta^*_{圧縮性}/\theta_{圧縮性}$ | 24.79 / 24.44 |
-| **$\delta^*_{圧縮性}/\theta_{運動学}$** | **6.49 / 7.48** (冪を上げるほど 8.9 に近づく) |
-| $\delta^*_{運動学}/\theta_{圧縮性}$ | 4.91 / 3.92 |
-| $\delta^*_{運動学}/\theta_{運動学}$ | 1.29 / 1.20 |
+TN D-8233 の参考文献 6 は **TN D-7939** (`Pressure Gradient Effects on Heat Transfer to RSI
+Tile-Array Gaps`, 1975; NTRS 19750020309) だった (ref.3 の TM X-71945 とは別物。両方取得済み)。
+ここに BL プロファイルと**分母の平板データの両方**がある。
 
-$\delta^*$ を質量流束定義で固定した再構成が、報告の $\theta$ を**運動学定義**でどこまで再現するか:
+**(a) 定義は圧縮性だった**。式 (5)(6) は
+$\delta^*=\int(1-\frac{\rho u}{\rho_e U_e})dz$、$\theta=\int\frac{\rho u}{\rho_e U_e}(1-\frac{u}{U_e})dz$。
+→ **運動学定義という推定は否定された**。
 
-| $Re'$ | $\delta$ [cm] | $\theta_{運動学}$ [cm] | $\theta$ 報告 [cm] | 比 |
-| --- | --- | --- | --- | --- |
-| 1.47e6 | 22.95 | 1.863 | 1.42 | 1.31 |
-| 3.32e6 | 20.99 | 1.634 | 1.19 | 1.37 |
-| 6.10e6 | 19.92 | 1.507 | 1.08 | 1.40 |
-| 7.82e6 | 19.44 | 1.455 | 1.03 | 1.41 |
+**(b) $\rho$ と $u$ は独立に測られていない**。プロファイルは **11 本ピトー・レーク**の
+ピトー圧から還元したもので、密度分布を得るには仮定が要る。その仮定は報告に書かれていない。
 
-運動学と読めば **1.31–1.41 倍**まで寄る (圧縮性と読んだときの 2.5–2.8 倍とは別物)。
-残る 35 % は、ノズル壁 BL が平板の Spalding+Coles より**充実している** (実効冪が大きい) ことで
-説明がつく向きで、冪を上げると $H$ も 8.9 に近づく。
+**(c) この BL は 2 次元平衡平板ではない**。TN D-7939 本文が明記している:
 
-→ **報告の $\theta$ は圧縮性 (質量流束) 運動量厚さではない**、というのが現時点の結論。
-$\delta^*$ を錨にして再構成し、forge が出す圧縮性 $\theta$ は別途記録する。
+> "A significant change in the boundary-layer profile shape as a function of transverse position
+> is observed. This transverse variation ... is an indication of the **three-dimensional character**
+> of the boundary-layer flow in a nozzle of square cross section. The three dimensionality
+> results from the **corner interaction** of the tunnel sidewall, floor, and ceiling boundary layers."
 
-> **これは推定であって原典の明言ではない**。確定には出典 ref.6 (Throckmorton, NASA TM X-71945)
-> の速度プロファイルと還元手順が要る。T2 の不確かさに残す。
+> "The tunnel nozzle expands the flow to a point approximately 1 meter upstream of the
+> test-section center ... The intersection of the expansion-section and test-section walls then
+> constitutes a **compression corner** for the wall boundary-layer flow. The data presented herein
+> were obtained **in the compression region** downstream of this corner."
+
+$\delta^*$ は横方向に大きく変わり (中心線で最大)、$Re'$ にはほとんど依らない、とも書いてある。
+
+**(d) 分母の原式は $Re'$ の式ではなく $\delta^*$ の式**だった。TN D-7939 式 (7):
+
+$$N_{St}\,R_{w,\theta}^{0.07} = A\,\delta^* + B,\qquad A=-2.77\times10^{-4}\ \mathrm{cm^{-1}},\ B=4.66\times10^{-3}$$
+
+TN D-8233 の Appendix はこれを $h_{fp}=C\,Re'^{0.69}$ に**還元**したもの。$A\delta^*+B$ は
+$\delta^*$=16.8 cm でゼロを切る鋭敏な式で、$\delta^*$ の横方向変化がそのまま効く。
+
+**(e) 著者自身が適用範囲を限定している**:
+
+> "**The correlation has no application to any flow other than this tunnel-wall boundary layer**;
+> however, it indicates a good understanding of this flow."
+
+**(f) digitize は原図 6 倍描画で確認した**。Appendix 図の縦軸は $h_{fp}$ [**W/(m²K)**] の対数軸で、
+4 点は 1.45 / 2.5 / 3.7 / 4.65。$C$ = 7.95e-5・冪 0.69 は正しい。
+
+### T2 の成立可否への含意 (重要)
+
+$H$=8.9 が 2 次元平衡プロファイルで出ないことと、$h_{fp}$ が VD-II の 1/1.8 しかないことは、
+**同じ 1 つの原因で説明がつく**: この基準流れは角干渉で 3 次元化し圧縮領域にある
+トンネル壁 BL であって、平板ではない。
+
+- **2D 平板 CFD で $h_{fp}$ の絶対値は再現できない**。T2-G0 の「smooth の熱伝達が合うこと」は
+  原理的に通らない。
+- 使えるとすれば**比 $h/h_{fp}$ のみ**で、それは「比が局所のエッジ条件と $\delta^*/W$ で決まり、
+  3 次元性と圧力勾配が分子分母で相殺する」という**未検証の仮定**に乗る。
+  これはまさに T2-G0 が試すはずだった仮定である。
+- → 計画 §4.2b の「満たせない場合 T2 は探索に降格し、case/49 への受け渡しは行わない」に
+  **該当する可能性が高い**。降格するなら、乱流一次検証は分母の定義が異なる他文献
+  ([A78] TP-1187 / [WAC75] TM X-3225 / [A85] TP-2307 / [HN90] TP-2988) から選び直す。
+
+$\theta$ の 2.5–2.8 倍差は、(b) のピトー還元の密度仮定と (c) の 3 次元性のどちらか
+(あるいは両方) に帰着すると考えられるが、報告からは分離できない。**$\theta$ は T2 の拘束条件
+として使わない**。$\delta^*$ は TM X-71945 本文の独立記述
+(「$Re$ = 1×10⁶/ft で $\delta^*\approx$ 4.75 in = 12.07 cm」、Fig 4 の同条件 11.5 cm と 5 % 一致)
+で裏が取れているので、こちらを錨にする。
 
 ### 訂正後の台帳 (`bl_derived.json`)
 
@@ -160,10 +195,13 @@ Karman–Schoenherr の $C_f$ が上がり、$h_{VDII}/h_{corr}$ は **1.57 – 
 
 ## 未着手 (T2-G0 以降)
 
-- **ref.6 (TM X-71945) の入手** ($\theta$ の定義と還元手順を原典で確定する。最優先)
+- **T2 を一次検証として残すか、探索に降格するかの決定** ← 最優先 (上節 (a)–(f) を踏まえて)
+- 降格する場合: 乱流一次検証の差し替え先を [A78] TP-1187 / [WAC75] TM X-3225 / [A85] TP-2307 /
+  [HN90] TP-2988 から選定 (分母の定義が異なるので正規化から組み直す)
 - Fig 5–8 の $h/h_{fp}$ 分布の digitize (現状 Fig 5(a) Re 1.47e6 の 34 点のみ)
-- **2D 中央断面近似の妥当性** — TH75 は横方向の BL 分布変化・壁圧と自由流静圧の差を明記している
-- 流入 BL の **CSV 化** (プロファイル自体は組めた。`inletProfile` 形式で書き出して G0-b へ)
+- ~~2D 中央断面近似の妥当性~~ → **上節 (c) で否定的な答えが出た** (角干渉による 3 次元性 +
+  圧縮領域)。残るのは「比なら相殺するか」の検証
+- 流入 BL の **CSV 化** (プロファイルは組めた。降格しないと決めた場合に `inletProfile` 形式へ)
 - 加熱板の長さと温度分布 (本文未記載)
 
 ## 計算 run 一覧
