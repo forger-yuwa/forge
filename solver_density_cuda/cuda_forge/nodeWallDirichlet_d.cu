@@ -42,6 +42,10 @@ __global__ void zeroWallDirichletResiduals_d
     // Dirichlet ノードの残差は BC 強制であり物理的不均衡でない → rms_roOmega の汚染 (収束判定の誤検出) を防ぐ。
     // nullptr で無効 (非 SST)。k はノイマンなので res_roK は触らない。
     flow_float* res_roOmega,
+    // 壁ノードの k 残差 (mesh.nodeWallKResidualZero=1 のときだけ非 nullptr)。
+    // 壁解像 SST では k_w=0 は Dirichlet なので、状態ピン (nodeWallKPin) と対で残差も射影する
+    // — ω と同じ扱い。SU2 は k も ω も LinSysRes.SetBlock_Zero + DeleteValsRowi で強制する。
+    flow_float* res_roK,
     // WMLES 等温壁 (node): 壁ノード温度は温度ピンで Dirichlet されるため res_roe も 0 に射影する。
     // 対象ノードの識別は Qw_Wall マーカ (>-0.5 = 等温 WMLES 壁ノード)。nullptr で無効。
     // 素の等温壁 (非 WMLES) の res_roe は zeroNodeIsothermalEnergyResidual (bcond 単位) が担う。
@@ -54,6 +58,7 @@ __global__ void zeroWallDirichletResiduals_d
         res_roUy[ic] = (flow_float)0.0;
         res_roUz[ic] = (flow_float)0.0;
         if (res_roOmega != nullptr) res_roOmega[ic] = (flow_float)0.0;
+        if (res_roK != nullptr) res_roK[ic] = (flow_float)0.0;
         if (Qw_Wall != nullptr && Qw_Wall[ic] > (flow_float)-0.5f) res_roe[ic] = (flow_float)0.0;
     }
 }
@@ -119,6 +124,7 @@ void zeroWallDirichletResiduals_d_wrapper(solverConfig& cfg , cudaConfig& cuda_c
         msh.nCells, msh.wall_flag_d,
         var.c_d["res_roUx"], var.c_d["res_roUy"], var.c_d["res_roUz"],
         sst ? var.c_d["res_roOmega"] : nullptr,
+        (sst && cfg.nodeWallKResidualZero != 0) ? var.c_d["res_roK"] : nullptr,
         wmlesIso ? var.c_d["Qw_Wall"] : nullptr,
         wmlesIso ? var.c_d["res_roe"] : nullptr
     );

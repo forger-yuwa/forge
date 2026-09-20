@@ -209,6 +209,10 @@ void solverConfig::read(std::string fname)
         if (config["mesh"]["nodeWallDirichlet"]) {
             this->nodeWallDirichlet = config["mesh"]["nodeWallDirichlet"].as<int>();
         }
+        if (config["mesh"]["nodeWallKResidualZero"]) {
+            this->nodeWallKResidualZero = config["mesh"]["nodeWallKResidualZero"].as<int>();
+            std::cout << "'nodeWallKResidualZero' in 'mesh': " << this->nodeWallKResidualZero << std::endl;
+        }
         if (config["mesh"]["nodeIsothermalEnergyBC"]) {
             this->nodeIsothermalEnergyBC = config["mesh"]["nodeIsothermalEnergyBC"].as<int>();
             std::cout << "'nodeIsothermalEnergyBC' in 'mesh': " << this->nodeIsothermalEnergyBC

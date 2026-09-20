@@ -438,6 +438,15 @@ public:
     // plan boundary-conjugate-heat-transfer §5.1 #43、methods/diffusion/。
     int heatCorrSU2 = 0;
 
+    // 壁ノードの k 残差を 0 に射影する (ω と同じ扱いにする)。既定 0 = 従来。
+    // **動機**: 壁解像 (低 Re) SST では k_w=0 は Dirichlet なのに、forge は状態ピン (nodeWallKPin) だけで
+    // res_roK を射影していない。ω は状態ピン + res_roOmega ゼロ化の両方をしている。SU2 は
+    // `LinSysRes.SetBlock_Zero(iPoint)` + `Jacobian.DeleteValsRowi(iPoint, 0/1)` で **k も ω も**強制する。
+    // この非対称が、近壁で k にだけ 2 節点モードが立ち ω には立たない (実測 k -0.089 % / ω -0.0003 %、
+    // その結果 mu_t = rho k/omega が k の交番をそのまま受ける) 原因の候補。
+    // plan boundary-conjugate-heat-transfer §5.1 #43。
+    int nodeWallKResidualZero = 0;
+
     // ROE の固有値下限 (SU2 の ENTROPY_FIX_COEFF と同形): lam[i] = max(lam[i], coeff*(|Ua|+ca))。
     // 0 (既定) で従来どおり = forge の Harten 補正のみ。SU2 の既定は 0.001。
     // **動機**: forge の現行 Harten 補正は `eta_vl = 0.1*(|Ua|/ca + 1.0)` で、|Ua|/ca が無次元なので
