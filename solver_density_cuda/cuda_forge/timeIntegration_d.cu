@@ -949,6 +949,18 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                     }
                 } else {
                     block_dplur::add_identity_scaled(diag_block, viscous_diag);
+                    // **診断専用 A/B** (codex 2026-09-21、既定はコンパイルから除外されビット不変)。
+                    // 粘性対角 2ν_eff·delta/dcc は `add_identity_scaled` で**5 行すべてに同じ量**が入る。
+                    // エネルギー行の真の拡散 Jacobian はこれと違う (完全気体で rho,rho u を固定すると
+                    // ∂T/∂(ρE)=1/(ρc_v) なので k∂T/∂(ρE)=γα、さらに交差微分がある) が、
+                    // **不足率は α/ν=1.11-1.39 からは証明できない** (codex 指摘)。
+                    // ここで調べるのは「非収束状態の 2 節点指標がエネルギー対角に感度を持つか」だけで、
+                    // 1.4 倍は物理係数の再現ではなく試験強度である。
+                    // 効いた場合も「Pr 補正が正しい」ではなく「指標が陰解法作用素に依存する」と結論する。
+                    // plan boundary-conjugate-heat-transfer §5.1 #43。
+#if defined(FORGE_TEST_ENERGY_VISCOUS_DIAG)
+                    diag_block[4][4] += static_cast<ST>(0.4) * viscous_diag;
+#endif
                 }
             }
         }
