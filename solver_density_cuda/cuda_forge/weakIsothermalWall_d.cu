@@ -13,7 +13,7 @@ namespace weakIsoWall {
 
 bool active(const solverConfig& cfg, const mesh& msh)
 {
-    if (cfg.nodeIsothermalEnergyBC == 0) return false;
+    if (cfg.nodeIsothermalEnergyBC != 1) return false;   // 2 は診断専用 (強制のまま壁流束 0)
     if (cfg.discretization != "node") return false;
     for (const auto& bc : msh.bconds) if (bc.bcondKind == "wall_isothermal") return true;
     return false;
@@ -30,7 +30,7 @@ static void die(const char* what)
 
 void validate(const solverConfig& cfg, const mesh& msh)
 {
-    if (cfg.nodeIsothermalEnergyBC == 0) return;
+    if (cfg.nodeIsothermalEnergyBC != 1) return;
     if (cfg.discretization != "node")
         die("cell 方式では使えない (node 限定)。");
     if (cfg.nodeWallDirichlet == 0)

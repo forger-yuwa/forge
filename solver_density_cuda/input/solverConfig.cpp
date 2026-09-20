@@ -532,6 +532,12 @@ void solverConfig::read(std::string fname)
         if (this->limiter != 0 && this->limiter != 1 && this->limiter != 2 && this->limiter != -1) {
             throw std::runtime_error("Key 'limiter' in 'space' must be one of 0, 1, 2, or -1.");
         }
+        if (space["heatCorrSU2"]) {
+            this->heatCorrSU2 = space["heatCorrSU2"].as<int>();
+            std::cout << "'heatCorrSU2' in 'space': " << this->heatCorrSU2
+                      << (this->heatCorrSU2 ? "  (SU2 corrected-gradient, heat conduction only)"
+                                            : "  (forge over-relaxed)") << std::endl;
+        }
         // `limiterMatchRecon` は廃止 (plan limiter-config-simplify §4.2)。`limiterScaled` に内包した。
         // **これは同義キーの削除ではなく機能打ち切り**である: 旧 `matchRecon=1, scaled=0`
         // (評価点・増分だけ直して旧 Venkat 式を使う。Barth にも効いた) は無くなる。

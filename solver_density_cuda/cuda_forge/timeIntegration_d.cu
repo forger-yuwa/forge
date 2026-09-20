@@ -1497,7 +1497,7 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 ((cfg.discretization == "node" && cfg.isAxisymmetric == 1) ? msh.axis_flag_d : nullptr),  /* axis_ur_flag: 軸ノードの roUy 行 decouple (常時) */ \
                 ((cfg.discretization == "node" && cfg.isAxisymmetric == 1) ? msh.axis_flag_d : nullptr),  /* axis_flag_src: SU2 流 (enc==2) の軸ソース Jacobian ガード (軸ノードはソース 0) */ \
                 ((cfg.discretization == "node" && cfg.nodeWallDirichlet == 1) ? msh.wall_flag_d : nullptr),  /* wall_flag: 壁運動量3行 decouple */ \
-                ((cfg.discretization == "node" && cfg.nodeWallDirichlet == 1 && cfg.nodeIsothermalEnergyBC == 0) ? msh.iso_wall_flag_d : nullptr),  /* iso_wall_flag: 等温壁 roe 行 decouple (T ピンと対)。弱形式 (nodeIsothermalEnergyBC=1) では単位行化も rowDec も外す (plan boundary-weak-isothermal-wall §4.3) */ \
+                ((cfg.discretization == "node" && cfg.nodeWallDirichlet == 1 && cfg.nodeIsothermalEnergyBC != 1) ? msh.iso_wall_flag_d : nullptr),  /* iso_wall_flag: 等温壁 roe 行 decouple (T ピンと対)。弱形式 (nodeIsothermalEnergyBC=1) では単位行化も rowDec も外す (plan boundary-weak-isothermal-wall §4.3) */ \
                 (weakIsoWall::active(cfg, msh) ? weakIsoWall::diagBuf(msh) : nullptr),  /* weakIsoDiag: 弱形式の近似対角 */ \
                 (flow_float)(cfg.cp / max(cfg.gamma, 1.0e-30)),  /* weakIsoCv = cp/gamma = c_v (CPG) */ \
                 ((cfg.discretization == "node") ? 1 : 0),  /* isNode: 5e 境界半割面の粘性対角スキップ */ \

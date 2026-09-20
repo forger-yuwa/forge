@@ -136,7 +136,7 @@ bool nodeIsothermalPinActive(const solverConfig& cfg, const mesh& msh)
     // 状態ピン・エネルギー残差ゼロ化・陰解法エネルギー行の単位行化を一組で外す。
     // 運動量の no-slip (enforceWallNoSlip / 運動量残差射影) と SST 壁条件は不変。
     // plan boundary-weak-isothermal-wall §4.4。
-    if (cfg.nodeIsothermalEnergyBC != 0) return false;
+    if (cfg.nodeIsothermalEnergyBC == 1) return false;   // 2 は強制のまま (診断用)
     for (const auto& bc : msh.bconds)
         if (bc.bcondKind == "wall_isothermal" && !wmlesActiveForBcond(cfg, bc)) return true;
     return false;

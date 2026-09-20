@@ -427,6 +427,16 @@ public:
     // 軸対称, 移動壁, nodeWallDirichlet=0。
     int nodeIsothermalEnergyBC = 0;
 
+    // 内部面の**熱伝導**だけの非直交補正の形 (0 = forge の over-relaxed 既定, 1 = SU2 の corrected-gradient)。
+    // どちらも $F/\kappa = \bar g\cdot S + a(\Delta T - \bar g\cdot d)$ の形で、係数だけが違う:
+    //   a_forge = |S|^2 / |d.S|   (over-relaxed)
+    //   a_SU2   = (d.S) / |d|^2   (corrected-gradient)
+    // 直交面では一致し、非直交面では比が 1/cos^2(theta) で **forge のほうが大きい** (減衰は forge が強い)。
+    // 壁熱流束の 2 節点交番 (forge 0.92 % vs SU2 0.046 %) の切り分け用 opt-in。
+    // **運動量 (粘性応力) には適用しない** — 熱伝導だけを替えて因果を分離する (codex 2026-09-20 推奨)。
+    // plan boundary-conjugate-heat-transfer §5.1 #43、methods/diffusion/。
+    int heatCorrSU2 = 0;
+
     int nodeInletCornerWall = 0;
     std::vector<int> wallDistExtraPhysIDs;   // 壁距離の壁点集合に加える非 wall bcond の physID (例: 出口バッファの slip 壁)。SST の F1/F2 用   // 1: 変換時に入口∩壁コーナーの入口側半割面を壁へ帰属 (node)。methods/discretization.md §7.2 (D)
 

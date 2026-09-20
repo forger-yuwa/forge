@@ -85,7 +85,11 @@ __global__ void viscousFlux_d
  // sstEnergyIncludesK (plan turbulence-sst-energy-includes-k §4.2): E_t のエネルギー流束に k 拡散
  //   (μ + σ_k μt)(∂k/∂n) S を足す。離散化は scalarTransport の k 拡散 (法線 over-relaxed 項のみ、相対ゼロ割ガード、
  //   σ_k は sstF1 ブレンド) と同形。nullptr/0 で無効。
- flow_float* dKdx_e, flow_float* dKdy_e, flow_float* dKdz_e, flow_float* sstF1_e, int sigmaBlend_e, int energyK
+ flow_float* dKdx_e, flow_float* dKdy_e, flow_float* dKdz_e, flow_float* sstF1_e, int sigmaBlend_e, int energyK,
+ // 内部面の**熱伝導だけ**の非直交補正の形: 0 = forge の over-relaxed (a=|S|^2/|d.S|),
+ // 1 = SU2 の corrected-gradient (a=(d.S)/|d|^2)。運動量の tau には適用しない。
+ // 壁熱流束の 2 節点交番の切り分け用 (plan boundary-conjugate-heat-transfer §5.1 #43)。
+ int heatCorrSU2
 )
 {
     geom_int ip = blockDim.x*blockIdx.x + threadIdx.x;
@@ -226,8 +230,22 @@ __global__ void viscousFlux_d
         tc_face += cp_face*v_turb/Prt;
         // W-I 内部熱拡散は既定で DOF 状態 (Ts) と DOF 勾配で評価する。モデル温度の単純 compact
         // 代入は禁止 (上の Taw_Ov コメント参照)。例外は mode 2 の SU2 corrected-gradient (下)。
-        flow_float heatflux = tc_face*((Ts[ic1] -Ts[ic0])/dcc)*delta;
-        heatflux += tc_face*(dTdxf*k_x +dTdyf*k_y +dTdzf*k_z);
+        // 熱伝導の非直交補正: 0 = forge の over-relaxed (a=|S|^2/|d.S|), 1 = SU2 の
+        // corrected-gradient (a=(d.S)/|d|^2)。どちらも F/k = ḡ·S + a(ΔT - ḡ·d) の形で係数だけが違う。
+        // 直交面では一致し、非直交面では比が 1/cos^2(θ) で forge のほうが大きい。
+        // **熱伝導だけに適用する** (運動量の tau は触らない) — 因果を分離するため。
+        flow_float heatflux;
+        if (heatCorrSU2 != 0) {
+            const flow_float dd2   = max(dcc_x*dcc_x + dcc_y*dcc_y + dcc_z*dcc_z, (flow_float)1.0e-30);
+            const flow_float a_su2 = (dcc_x*sxx + dcc_y*syy + dcc_z*szz)/dd2;
+            heatflux  = tc_face*a_su2*(Ts[ic1] - Ts[ic0]);
+            heatflux += tc_face*(dTdxf*(sxx - a_su2*dcc_x)
+                               + dTdyf*(syy - a_su2*dcc_y)
+                               + dTdzf*(szz - a_su2*dcc_z));
+        } else {
+            heatflux  = tc_face*((Ts[ic1] -Ts[ic0])/dcc)*delta;
+            heatflux += tc_face*(dTdxf*k_x +dTdyf*k_y +dTdzf*k_z);
+        }
 
         // SST 断熱壁 SU2 式熱結合 (mode 2): overlay 端点 (Taw) を持つ内部辺は SU2 corrected-gradient
         //   g_corr = ḡ + (ΔT_flux − ḡ·d)·d/|d|²,  q = k_eff·(g_corr·S)
@@ -972,7 +990,8 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
         var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"],
         var.c_d.count("sstF1") ? var.c_d["sstF1"] : nullptr,
         cfg.sstSigmaBlend,
-        (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? 1 : 0
+        (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? 1 : 0,
+        cfg.heatCorrSU2
     ) ;
 
     gpuErrchk( cudaPeekAtLastError() );
@@ -1047,7 +1066,12 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
                     : (wmlesActiveForBcond(cfg, bc) ? 2 : 0),
                 bc.bvar_d["utau"], bc.bvar_d["qwall"],
                 (cfg.discretization == "node") ? 1 : 0,   // node: 壁法線/熱流束を ∇φ·S で評価 (ghostless)
-                (bc.bcondKind == "wall") ? 1 : 0,         // 断熱壁: 伝導熱流束を厳密 0 (等温壁は 0=従来)
+                // 断熱壁: 伝導熱流束を厳密 0 (等温壁は 0=従来)。
+                // **診断用 nodeIsothermalEnergyBC: 2** — 強制のまま等温壁の壁半割面熱流束だけを 0 にする。
+                // 強制側は壁ノードの res_roe をゼロ化するので、これで場が変わらなければ
+                // 「壁半割面の流束は解に入っていない」ことの直接証拠になる (plan §5.1 #6a)。
+                ((bc.bcondKind == "wall") ||
+                 (cfg.nodeIsothermalEnergyBC == 2 && bc.bcondKind == "wall_isothermal")) ? 1 : 0,
                 // SST エネルギー壁関数 (§6.5(g)): 等温壁の壁面熱流束を Kader q_w に置換
                 (cfg.LESorRANS == 2 && cfg.RANSmodel == 1 && cfg.wallTreatmentSST == 1
                  && cfg.sstEnergyWallFunction == 1 && bc.bcondKind == "wall_isothermal") ? 1 : 0,
