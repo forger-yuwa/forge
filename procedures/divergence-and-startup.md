@@ -32,6 +32,15 @@
 - `outlet_statPress` の**逆流分岐は `Ptb`/`Ttb` から逆流ガスの静的状態を作る**。`Ps` だけだと
   `Pt=0`→ρ=0→NaN。混合・剥離・再循環など出口逆流が起こりうる流れでは `Pt`/`Tt` 必須。
 - 入口も同様: 亜音速で `inlet_uniformVelocity` (全量固定=超音速向け) を使うと音響反射しやすい。
+- **逆も同じくらい危ない**: **超音速入口に `inlet_Pressure` (亜音速の全条件入口) を使ってはいけない**。
+  この閉包は**内点の Mach から等エントロピーで Ps・ρ を決める** (`boundaryCond_d.cu:1058`) ので、
+  超音速入口 (全特性が流入) では内点が入口を支配してしまい、**`ρ↓ → U↑ → Ps↓ → ρ↓` の正帰還**で
+  **入口の 1 節点だけが十数 step で枯れて発散する**。1 次では減衰するので**2 次にしたときだけ落ちる**
+  という紛らわしい出方をする。実例: `case/08.bump` (入口 M=1.65 なのに `inlet_Pressure`) は
+  `convMethod: 0` なら 5.1〜5.3 桁収束するが 1/2 次では step ~200 で NaN。
+  入口を `inlet_uniformVelocity` に替えると 5000 step 完走した
+  (plan [convection-node-wall-reconstruction](../plans/active/convection-node-wall-reconstruction.md) §4.34)。
+  **切り分け方**: NaN 節点が 1 個で、その座標が入口境界上なら真っ先にこれを疑う。
   亜音速は `inlet_Pressure` / `inlet_Pressure_dir` を推奨 (forge の亜音速 `inlet_uniformVelocity`
   は非反射化済みだが、圧力入口の方が安定なことが多い)。
 
