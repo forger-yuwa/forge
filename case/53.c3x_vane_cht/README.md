@@ -154,8 +154,29 @@ $h_c$ の妥当性: $\phi$6.3 mm 孔で Dittus–Boelter 相当は $Re_D\sim3\ti
 4. **流体メッシュ** (翼列周期)。固体側は上記で完了。
 5. run 42 (Mark II) の実測データ転記と、同じ逆算。
 
+## 流体メッシュ
+
+`tools/gen_fluid_mesh.py` → `mesh/fluid_c3x.{msh,h5}` (22442 節点)。翼列 1 ピッチ分の通路で、
+周期境界はキャンバー線 ± ピッチ/2、翼面は `BoundaryLayer` フィールドで低 Re 解像。
+**node 離散化**なので変換は `discretization=node` の config で行う ([[node-mesh-must-convert-with-node-config]])。
+
 ## 計算 run 一覧
 
 | `run_*` | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
 | --- | --- | --- | --- |
-| (まだ無し) | — | 一次資料の抽出のみ完了 | — |
+| `run_0001_measTw` | V5 段 (a) 初回。入口 `inlet_uniformVelocity` (M1=0.1628 を課す)、5 段起動 (warm/sst_soft/sst_mid/ramp/main 計 59000 step) | **失敗 (使わない)**。`NOT CONVERGED (stalled/plateau)`、`rms_roOmega` 増大。入口ブロックに大きな低速塊が残り、$x$ 面の $\int\rho u\,dy$ が 12.8 / 6.1 / 15.6 と非保存、$P_t$・$T_t$ が下流ほど**上昇**。**真因は入口 BC** (下記) | 破棄予定 |
+| `run_0002_ptinlet` | 同上を**全圧入口** `inlet_Pressure_dir` (Pt 319.5 kPa, Tt 786 K, 軸方向) に置換。出口静圧は損失込みで 185.06 kPa に追い込み。`run_0001` の場から継続 | 入口 $M_1$=0.165 (報告 0.17)、出口 $P_t$=313.0 kPa (損失 2.0 %)・$T_t$=782.5 K・$M_2$=0.881。全残差が単調低下 | active |
+
+### `run_0001` が収束しなかった理由 (2026-09-20)
+
+`inlet_uniformVelocity` は「速度 3 成分 + config エントロピー $P_s/\rho^\gamma$」を課して $R^+$ を内点から
+取る**正しく posed な**亜音速入口だが、**全温を固定しない**。内部静圧が config アンカー (313.6 kPa) でなく
+252 kPa に落ち着いた結果、入口 $T_t$ が 786 → **738 K** (−48 K) になった。$h$ は $T_g$ 基準なので
+この時点で比較に使えない。あわせて入口ブロックが定常に落ち着かず (低マッハ域の大規模モード)、
+残差が 1e−3 台で停滞した。**全圧入口に替えたら同じメッシュ・同じ CFL で残差が 3 桁下がり**、
+$P_t$・$T_t$ が全面で指定値どおりになった。
+
+その `inlet_Pressure_dir` は step 214 で入口節点が NaN 化して使えなかったが、真因は BC カーネルの
+欠陥 2 件で 2026-09-20 に修正した ([`methods/boundary.md`](../../methods/boundary.md) 「例: 全圧固定流入」):
+(1) $P_c>P_t$ で境界マッハの根号内が負、(2) 方向ベクトルを保持する `bvar` を毎 step 次元付き速度で
+上書きするため $M\to0$ で長さ 0 → 0/0。

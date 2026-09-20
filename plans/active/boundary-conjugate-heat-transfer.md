@@ -408,6 +408,7 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | 25 | **V5 各段の入力と合格条件** (2 巡目 #6 + 3 巡目 #5) | §4.9・§6 V5。(a) 実測 $T_w$ → $h$/熱流束/壁圧、(b) ~~外周 Dirichlet + 孔 Robin の固体単独~~ → **設計変更 (2026-09-20)**: **冷却孔ごとの冷却剤温度・流量は報告に無い** (方法のみ記載、付録 A にも欄が無い)。(b) は**公開量から内部条件を逆算する**段に変更し、同定の不確かさを帯に別項目で積む。(c) CHT。帯の**合成規則**まで事前登録 |
 | 26 | **陰解法フックの設計** (2 巡目 #4) | §4.6。`advanceImplicitSteady`/`implicitNonlinearUpdate` 経路で $K$ を数える。dual-time は別契約 (初版は対象外) |
 | 27 | **索引・親 plan の残り** (3 巡目 #6) | 指定箇所は同期済み。**親 plan §4.6-4 の「弱ループが収束しない = 軸方向伝導が支配的」**を本計画 §4.8 のモデル感度基準に置き換える |
+| 28 | **C3X 翼列の SU2 対照** (2026-09-20 codex 推奨、採用) | 同一メッシュ・同一の実測壁温分布で SU2 低 Re SST を回し、$h$ の分布を突き合わせる。**V5 段 (a) の差が forge 固有かモデル共通かを切り分ける**ため ([[reichardt-5pct-gap-not-forge]] と同じ性格の差が出る可能性)。手順は [`procedures/su2-cross-check.md`](../../procedures/su2-cross-check.md) |
 | 19 | codex result レビュー | `done` にする前 |
 
 ## 6. 検証
@@ -505,6 +506,7 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| 自由形式 (V5 実行中の診断) | `2026-09-20` | [`notes/reviews/2026-09-20-codex-c3x-cascade-diagnosis.md`](../../notes/reviews/2026-09-20-codex-c3x-cascade-diagnosis.md) + [`…-codex-node-isothermal-roe-frozen.md`](../../notes/reviews/2026-09-20-codex-node-isothermal-roe-frozen.md) | 判定なし (診断依頼)。実装欠陥 3 件 + 切り分け | **採用**: (1) node 等温壁の `roe` 凍結 → `main.cpp` の壁ピン順序修正 (EOS/物性/RANS 壁の前 + 陰解法最終更新後)。(2) `inlet_Pressure_dir` の根号・方向ゼロ割 → `boundaryCond_d.cu` ガード追加。(3) `convMethod: 1, limiter: 0` は 2 次 → 起動段を `convMethod: 0` に。(4) SU2 対照 → §5.1 #28 |
 | plan (3 巡目) | `2026-09-19` | [`notes/reviews/2026-09-19-boundary-conjugate-heat-transfer-plan-4.md`](../../notes/reviews/2026-09-19-boundary-conjugate-heat-transfer-plan-4.md) | **GO-with-changes**, C0/M5/m1 (2 巡目 #3 一部・#4・#6・#7 は**解消**) | **全件採用**: #1 受理判定が収束反復を止める反例 → §4.2 をメリット関数 + line search へ / #2 提供側 plan への解除契約登録 + V6 壁関数の分離 → §4.3 + §5.1 #21 / #3 drift と osc の両方 + G-if の数式化 → §6 / #4 非連成等温壁との共有角競合 → §4.4b / #5 V5 (a)(b) の入力・比較・合格と不確かさ合成 → §6 V5 / m6 親 plan の旧判断 → §5.1 #27 |
 | plan (2 巡目) | `2026-09-19` | [`notes/reviews/2026-09-19-boundary-conjugate-heat-transfer-plan-3.md`](../../notes/reviews/2026-09-19-boundary-conjugate-heat-transfer-plan-3.md) | **NO-GO**, C0/M6/m1 (1 巡目の C1/M4/M5/M9/m11/m12 は**解消**と再評価) | **全件採用**: #1 依存診断の対応範囲 (dual-time/周期の解除マイルストーン・過渡の $C$) → §4.3 + §5.1 #20 / #2 $D_f$ は上界でない (反例 5.675) → §4.2 + #21 / #3 `fem2d` の連成契約と単体試験 → §4.4d + #22 / #4 陰解法フック (`advanceImplicitSteady` 経路) → §4.6 + #23 / #5 ゲートの数値仕様と前倒し → §6 + #24 / #6 V5 の 3 段分解と不確かさ項目 → §4.9 + §6 V5 + #25 / #7 索引・親 plan の同期 → §5 S0 + #26 |
 | plan (2 巡目 初回, **中断**) | `2026-09-19` | [`notes/reviews/2026-09-19-boundary-conjugate-heat-transfer-plan-2.md`](../../notes/reviews/2026-09-19-boundary-conjugate-heat-transfer-plan-2.md) (codex の利用上限で最終メッセージ無し。検算ログのみ) | 判定なし。検算で 3 件検出 | **全件採用**: 界面熱量の符号・組合せ ($\sum F-C$; 旧稿 $-60$ vs 正 $100$) → §4.3 / 成分セカント $D_f$ は過小評価でスペクトル半径 1.818 → §4.2 / 放射 1500 K は 287 kW/m² → §4.10。**上限解除後に 2 巡目をやり直す** |
@@ -604,3 +606,11 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
   (b) **残差床 10.7 K はマッピングに鈍感**でモデル (10 孔 Robin + 2D 伝導) の限界、
   (c) 後縁 35/240 節点はデータ範囲外で検証対象外。
   → **段 (c) で「実測と一致」を主張できる下限がこの 10 K 級**であることを、計算前に登録する。
+- `2026-09-20` — **V5 段 (a) の翼列 run を投入するなかで forge 本体の欠陥 2 件を直した** (どちらも codex の
+  自由形式診断 [`notes/reviews/2026-09-20-codex-c3x-cascade-diagnosis.md`](../../notes/reviews/2026-09-20-codex-c3x-cascade-diagnosis.md) と独立再現):
+  (1) **node 等温壁の `roe` が凍結**し、EOS が密度床に落ちた温度 (9.19e6 K) で $\mu$ が 151 倍・壁 $\omega$ が
+  8.1e15 になっていた → `main.cpp` で壁ピンを `dependentVariables`/`gasProperties`/RANS 壁の**前**へ移し、
+  陰解法の最終更新後にも適用。(2) **`inlet_Pressure_dir` が $P_c>P_t$ で根号負・方向ベクトル長 0 で 0/0** →
+  `boundaryCond_d.cu` にガード ([`methods/boundary.md`](../../methods/boundary.md) 「例: 全圧固定流入」)。
+  あわせて **`inlet_uniformVelocity` は全温を固定しない**ことを実測で確認 (case/53 で入口 $T_t$ が
+  786→738 K)。$T_g$ 基準の $h$ を比較する V5 では**全圧入口を使う**と決めた (§4.9)。

@@ -1359,6 +1359,12 @@ void assembleResidual(StepContext& s, int stage_index)
     // node × 軸対称: 軸ノード u_r=0 の状態ピン (roUy=0, roe から半径 KE 除去)。壁 no-slip と同相で、
     // 残差 0 化 (zeroAxisRadialResidual) と block-DPLUR の roUy 行 decouple (axis_ur_flag) と三点セット。
     enforceAxisSymmetry_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+    // node 等温壁の温度ピンは**状態更新の直後・EOS/物性/RANS 壁境界より前**に置く (2026-09-20 修正)。
+    // 以前は applyBconds の後に置いていたため、EOS は「更新で巻き戻った roe」と「更新後の ρ」から
+    // 温度を作り、gasProperties と壁 ω がその誤った温度を使っていた。壁で ρ が動くケース
+    // (翼列の前縁よどみ点) では EOS が ρ を床に張り付かせ、T が 9.2e6 K、μ が 151 倍、
+    // 壁 ω が 8e15 s⁻¹ になって発散した (case/53 で実測。codex 診断 2026-09-20)。
+    applyNodeIsothermalWallPin(s.cfg , s.cuda_cfg , s.msh , s.var);
     s.profiler.measureCuda(ProfileSection::DependentVariables, [&]() {
         speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // Y_s = ρY_s/ρ (混合則 thermo の前)
         condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // φ = ρφ/ρ (スカラ移流の上流値)
@@ -1376,7 +1382,6 @@ void assembleResidual(StepContext& s, int stage_index)
     s.profiler.measureWall(ProfileSection::ApplyBconds, [&]() {
         applyRansScalarBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
         applyWmlesWallModel(s.cfg , s.cuda_cfg , s.msh , s.var);   // WMLES 壁応力モデル (§10)
-        applyNodeIsothermalWallPin(s.cfg , s.cuda_cfg , s.msh , s.var);   // 素の node 等温壁 T ピン
         applySstThermalWallFunction(s.cfg , s.cuda_cfg , s.msh , s.var);  // SST 熱的壁関数: 断熱壁 T_aw (§6.5(f))
         applySpeciesBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
         applyCondensationBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
@@ -1765,6 +1770,11 @@ void advanceImplicitSteady(StepContext& s)
 {
     // baseline (roN) は前ステップ末尾 / 初期化の updateVariablesOuter で設定済み（ro == roN）。
     implicitNonlinearUpdate(s, 0);
+
+    // **最後の更新のあとにもピンを当てる**: dq_roe=0 なので更新は roe を step 冒頭の値へ戻す。
+    // ここで当てないと、出力される保存量と次ステップの基準 (roN) が等温条件を満たさず、
+    // ρ が動くほど roe/(ρ c_v T_w) がずれていく (実測: 壁ノードの roe が 1000 step ビット不変)。
+    applyNodeIsothermalWallPin(s.cfg , s.cuda_cfg , s.msh , s.var);
 
     s.profiler.measureWall(ProfileSection::UpdateOuter, [&]() {
         updateVariablesOuter(s.cfg , s.cuda_cfg , s.msh , s.var , s.mat_ns);

@@ -47,15 +47,32 @@ def load_holes(vane):
     return rows
 
 
-def resample_closed(P, n):
-    """閉曲線を弧長等間隔で n 点に再標本化する。"""
+def resample_closed(P, n, curv_weight=6.0, kappa_ref=2.0):
+    """閉曲線を**曲率重み付き**で n 点に再標本化する (流体・固体で共通。界面節点を一致させる)。
+
+    弧長等間隔だと**後縁 (R=1.7 mm) に 4 点しか載らず**、2 µm の境界層セルと組み合わさって
+    step 6 で圧力が床に張り付いて発散した (実測 2026-09-20)。曲率 κ [1/cm] に応じて
+    密度 ∝ 1 + curv_weight * min(κ/kappa_ref, 1) で詰める。
+    """
     Q = np.vstack([P, P[:1]])
     seg = np.hypot(np.diff(Q[:, 0]), np.diff(Q[:, 1]))
     s = np.concatenate([[0.0], np.cumsum(seg)])
     total = s[-1]
-    t = np.linspace(0.0, total, n, endpoint=False)
-    x = np.interp(t, s, Q[:, 0])
-    y = np.interp(t, s, Q[:, 1])
+    # 曲率: 3 点円の逆半径
+    m = len(P)
+    kap = np.zeros(m)
+    for i in range(m):
+        a, b, c = P[(i - 1) % m], P[i], P[(i + 1) % m]
+        ab = np.linalg.norm(b - a); bc = np.linalg.norm(c - b); ca = np.linalg.norm(a - c)
+        area2 = abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]))
+        kap[i] = 0.0 if ab * bc * ca < 1e-12 else 2.0 * area2 / (ab * bc * ca)
+    dens = 1.0 + curv_weight * np.minimum(kap / kappa_ref, 1.0)
+    dens_s = np.concatenate([dens, dens[:1]])
+    w = 0.5 * (dens_s[:-1] + dens_s[1:]) * seg          # 重み付き弧長
+    W = np.concatenate([[0.0], np.cumsum(w)])
+    t = np.linspace(0.0, W[-1], n, endpoint=False)
+    su = np.interp(t, W, s)
+    x = np.interp(su, s, Q[:, 0]); y = np.interp(su, s, Q[:, 1])
     return np.column_stack([x, y]), total
 
 
