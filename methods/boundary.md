@@ -65,6 +65,26 @@ $$
 
 速度方向は外挿 (`inlet_Pressure`) または指定方向 (`inlet_Pressure_dir`)。
 
+**速度の大きさは新しい音速に整合させる** (2026-09-20 修正、`boundaryCond_d.cu` CPG 分岐)。
+$M_L$ は**内点の音速**で測った値なので、上式で $T_R$ を作ると音速が変わる。ここで速度を内点値のまま
+残すと境界状態の実マッハが $|u_L|/a_R \ne M_L$ になり、**指定した $T_t$・$P_t$ を再現しない**。
+
+$$|u_R| = |M_L|\,a_R,\qquad a_R = \sqrt{(\gamma-1)c_p T_R},\qquad \mathbf{u}_R = -|u_R|\,\mathbf{n}.$$
+
+反例 ($\gamma$ 1.4, $c_p$ 1005, $T_L$ 100 K, $|u_{n,L}|$ 100 m/s、指定 $T_t$ 293.15 K / $P_t$ 100 kPa):
+修正前は $T_t$ **284.232 K** / $P_t$ **89751 Pa** を返していた (3.0 % / 10.2 % 低い)。修正後は厳密に指定値を返す。
+TP 分岐 (`thermalMethod: 2`) は `thermo_isentropic_from_total_*` の $|u|$ で速度を作り直しており、
+**CPG 分岐だけが取り残されていた**。
+
+**⚠ 定常の設計点では現れない**: 内点が指定全条件と等エントロピーで整合していると $a_R = a_L$ になり
+不整合が消える (`case/08.bump` は修正前でも境界 $T_t$/$P_t$ の誤差 0.000 %)。
+**過渡・オフデザインでのみ出る**ので、検査は過渡で行うこと。
+
+**⚠ 超音速流入に使ってはいけない**: この閉包は内点から境界を決めるので、全特性が流入する超音速入口では
+**$\rho\downarrow \to u\uparrow \to P_s\downarrow \to \rho\downarrow$ の正帰還**になり、
+**入口の 1 節点だけが十数 step で枯れて発散する**。超音速入口は `inlet_uniformVelocity` を使う
+(詳細と指紋は [`procedures/divergence-and-startup.md`](../procedures/divergence-and-startup.md))。
+
 **`inlet_Pressure_dir` の退避 2 点** (2026-09-20 修正、`boundaryCond_d.cu`)。どちらも過渡で
 入口面の一部の節点だけが非有限になる形で出る (実測: case/53 翼列で step 214、49 節点中 24 節点)。
 

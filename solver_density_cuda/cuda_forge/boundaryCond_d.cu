@@ -1139,6 +1139,17 @@ void inlet_Pressure_d
                 Ts_new = Tt_b/(1.0+0.5*(ga-1.0)*mach_c*mach_c);
                 sonic_new = sqrt((ga-1.0)*cp*Ts_new);
                 ro_new = ga*Ps_new/((ga-1.0)*cp*Ts_new);
+                // **速度を新しい音速に整合させる** (plan convection-node-wall-reconstruction §4.36)。
+                // 上で Ts_new を作ると音速が内点値から変わるので、速度を Un_c のまま残すと
+                // 境界状態の実 Mach が Un_c/sonic_new ≠ mach_c になり、**指定した Tt/Pt を再現しない**
+                // (反例 ga1.4/cp1005/T_i100K/|Un|100: Tt 293.15→284.232, Pt 100000→89751)。
+                // TP 分岐は `um_d` で速度を作り直しており、CPG 分岐だけ取り残されていた。
+                // 流入方向は境界法線の内向き (-n)、大きさは |mach_c|·sonic_new。
+                const flow_float umag_new = fabs(mach_c)*sonic_new;
+                const flow_float invs = 1.0f/sss;
+                Ux_new = -umag_new * sxx*invs;
+                Uy_new = -umag_new * syy*invs;
+                Uz_new = -umag_new * szz*invs;
             }
 
         } else { // reverse-flow detected at pressure inlet: clamp ghost to stagnation
