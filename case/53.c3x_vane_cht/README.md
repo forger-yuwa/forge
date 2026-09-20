@@ -292,6 +292,35 @@ codex 記録: [`notes/reviews/2026-09-20-codex-c3x-checkerboard-triage.md`](../.
 **`nodeWallDirichlet: 0` 単独では不可** (運動量条件まで変わり、`viscousFlux_d.cu:529` が壁勾配を使う)。
 効いても**一式の効果までしか確定しない**。plan §5.1 #43。
 
+
+### 弱形式等温壁 (SU2 型) の A/B — 市松は悪化 (2026-09-20)
+
+plan [`boundary-weak-isothermal-wall`](../../plans/active/boundary-weak-isothermal-wall.md)。
+`mesh.nodeIsothermalEnergyBC: 1` で壁ノード $T$ のピン・エネルギー残差ゼロ化・陰解法エネルギー行の
+単位行化を**一組で外し**、壁半割面の伝導を $k_{\rm eff}(T_I-T_w)/d_1\cdot A_{\rm half}$ で置換する。
+
+| | 壁ノード $T_W$ | odd-even ($s/S$ 0.30–0.80) | 第一内部点 $T$ の交番 |
+| --- | --- | ---: | ---: |
+| A 強制 (`run_0009_uniformTw`) | 566.000–566.000 K | **0.9186 %** | 0.0827 K |
+| C 弱形式 (`run_0039_weakbc`) | **566.001–566.831 K** | **1.2092 %** | 0.1120 K |
+| SU2 (参考、同一メッシュ) | 566.011–566.886 K | 0.046 % | — |
+
+$T_W$ が SU2 とほぼ同じ範囲に落ち着いたので**実装は SU2 の挙動を再現している**。
+にもかかわらず**市松は 32 % 悪化**した。`check_convergence.py` `NOT CONVERGED`、`rms_roK`/`rms_roOmega` **RISING**。
+
+**判定: 熱的壁閉包一式を SU2 型に替えるだけでは市松は解消せず、むしろ悪化する。**
+
+**設計上の訂正 (2026-09-20)**: 当初「A↔C は流束形と拘束形が交絡している」と書いたが**誤り**。
+**強制側は壁ノードの `res_roe` をゼロ化するので壁半割面の流束は解に一切入らない** (診断にのみ出る)。
+したがって A↔C の差は拘束一式だけで交絡はない。一方**弱形式では壁半割面の流束が初めて解に効く**ので、
+その離散化が残る唯一の未検証変数になる (plan §5.1 #6b)。
+初版は純粋な 2 点差分で、forge が内部面で使う **over-relaxed 非直交補正が入っていない**。
+**弱形式のまま $\nabla T\cdot S$ に戻すのは不可** ($T_W$ が自由だと指定 $T_w$ がどこにも入らない = 旧弱形式)。
+
+**既定パス不変の確認**: node の C3X は `atomicAdd` で **run-to-run 非決定**なので「ビット同一」は不成立。
+両側 4 反復でノイズ床を測り、RMS 差の中央値で交差/群内 = **0.91–0.97** (同一 population)。
+交番振幅自体は再現的で旧 0.9112 % / 新 0.9111 %、幅 **0.0001 %**。
+
 ## 計算 run 一覧 (追補) — CHT 連成
 
 | `run_*` | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
@@ -310,6 +339,8 @@ codex 記録: [`notes/reviews/2026-09-20-codex-c3x-checkerboard-triage.md`](../.
 | `run_0028_precond2` | 市松の仮説 (2)。`run_0009` に `lowMachPrecond: 2` を足しただけ | **破綻**。残差 2.3 桁**上昇** (rms_ro 4.2e−2)、odd-even **56.9 %**。前処理は本件に使えない | 破棄予定 |
 | `run_0029_roe` | 市松の対流スキーム切り分け。`run_0009` の `solver` を SLAU → **ROE** | odd-even **0.901 %** (SLAU 0.919 %) = **改善しない**。`NOT CONVERGED` (rms_ro 1.4e−2) なので参考値 | ref |
 | `run_0030_hlle` | 同上、**HLLE** | odd-even **2.10 %** = 悪化。`NOT CONVERGED` | ref |
+| `run_0039_weakbc` | **弱形式等温壁 (SU2 型) の A/B** (plan boundary-weak-isothermal-wall)。`run_0009` と同一で `mesh.nodeIsothermalEnergyBC: 1` のみ追加。`run_0009` の場から restart、20000 step | 壁ノード $T_W$ = **566.001–566.831 K** (SU2 実測 566.011–566.886 K と同等 = 実装は SU2 の挙動を再現)。しかし odd-even は **0.9186 → 1.2092 %** と **32 % 悪化**、第一内部点 $T$ の交番も 0.0827 → 0.1120 K。`check_convergence.py` `NOT CONVERGED`、`rms_roK`/`rms_roOmega` **RISING** | active |
+| `run_0031`–`run_0038` | 既定パス不変の確認 (ノイズ床を両側から測る)。200 step を旧バイナリ 4 反復 / 新バイナリ 4 反復 | **node の C3X は `atomicAdd` で run-to-run 非決定** (旧 1 回目 vs 2 回目が新 vs 旧と同程度に違う)。RMS 差の中央値で交差/群内 = **0.91–0.97** = 同一 population。**交番振幅自体は再現的** (旧 0.9112 % / 新 0.9111 %、幅 **0.0001 %**) → 有意差閾値 0.001 % を事前登録 | ref |
 | `run_0005_band_Tc350` | 帯: 冷却剤温度 $T_c$=350 K (孔の $h_c$ も同じ $T_c$ で再同定) | $T_w$ 差 **最大 2.2 K** | active |
 | `run_0005_band_ks_hi` / `_ks_lo` | 帯: 材料熱伝導率 ±3 % (報告の不確かさ) | $T_w$ 差 **最大 2.0 / 1.7 K** | active |
 

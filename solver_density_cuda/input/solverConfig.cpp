@@ -209,6 +209,11 @@ void solverConfig::read(std::string fname)
         if (config["mesh"]["nodeWallDirichlet"]) {
             this->nodeWallDirichlet = config["mesh"]["nodeWallDirichlet"].as<int>();
         }
+        if (config["mesh"]["nodeIsothermalEnergyBC"]) {
+            this->nodeIsothermalEnergyBC = config["mesh"]["nodeIsothermalEnergyBC"].as<int>();
+            std::cout << "'nodeIsothermalEnergyBC' in 'mesh': " << this->nodeIsothermalEnergyBC
+                      << (this->nodeIsothermalEnergyBC ? "  (weak, SU2-type)" : "  (strong pin)") << std::endl;
+        }
         if (config["mesh"]["hoopAreaFromClosure"]) {
             this->hoopAreaFromClosure = config["mesh"]["hoopAreaFromClosure"].as<int>();
         }

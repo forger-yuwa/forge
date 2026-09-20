@@ -67,6 +67,7 @@
 #include "cuda_forge/axisymmetricSource_d.cuh"
 #include "cuda_forge/wmlesWallModel_d.cuh"
 #include "cuda_forge/nodeWallDirichlet_d.cuh"
+#include "cuda_forge/weakIsothermalWall_d.cuh"
 #include "cuda_forge/bodyForce_d.cuh"
 #include "cuda_forge/turbulent_viscosity_d.cuh"
 #include "cuda_forge/residualMonitor_d.cuh"
@@ -1223,6 +1224,7 @@ cudaConfig initializeSimulation(
     applyBconds(cfg , cuda_cfg , msh , var, mat_ns , fluct);
     applyRansScalarBoundaries(cfg , cuda_cfg , msh , var);
     applyWmlesWallModel(cfg , cuda_cfg , msh , var);   // WMLES 壁応力モデル (wallModelLES 壁のみ, §10)
+    weakIsoWall::validate(cfg, msh);   // 弱形式 (nodeIsothermalEnergyBC=1) の構成検査 (併用不可を拒否)
     applyNodeIsothermalWallPin(cfg , cuda_cfg , msh , var);   // 素の node 等温壁の壁ノード T ピン
     applySstThermalWallFunction(cfg , cuda_cfg , msh , var);  // SST 熱的壁関数: 断熱壁 T_aw (§6.5(f))
     applySpeciesBoundaries(cfg , cuda_cfg , msh , var);

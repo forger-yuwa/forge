@@ -1,4 +1,5 @@
 #include "timeIntegration_d.cuh"
+#include "weakIsothermalWall_d.cuh"
 #include "lowMachPrecond_d.cuh"   // Phase 4: β (lowMachBeta)・c' (lowMachCprime) device ヘルパ
 #include "cuda_forge/eos_jacobian_d.cuh"  // 一般EOS固有系 (eos_split_jacobian_general_closed)。precond 経路で使用
 #include "cuda_forge/block_dplur_jacobian_d.cuh"  // block_dplur::accumulate_split_jacobian_cf (共有ヘッダ)
@@ -752,6 +753,13 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
  // 壁ノード T ピン (applyNodeIsothermalWallPin / WMLES 等温 pin) と対。ピンで状態を上書きしながら
  // エネルギー行を連成したまま解くと Jacobian 不整合で発散する (2026-07-20 純伝導検証で実測)。
  const geom_int* __restrict__ iso_wall_flag,
+ // 等温壁エネルギー境界の弱形式 (mesh.nodeIsothermalEnergyBC=1) の近似対角項の素材
+ // g = Σ_{壁半割面} k_eff A_half / d_1 [W/K] (viscousFlux_wall_d が残差と同じ k_eff・幾何で積む)。
+ // 厳密微分は対角 0 で温度微分は内部点の列にある。ここで足すのは SU2 型の**近似対角**である
+ // (codex plan レビュー M1)。forge は残差微分の符号を反転して行列を組むので **+** で足す。
+ // CPG: ΔA[4][4] = + g/(ρ c_v)。nullptr なら何もしない (既定はビット不変)。
+ const flow_float* __restrict__ weakIsoDiag,
+ flow_float weakIsoCv,
 
  // node-centered 弱形式 (Phase 2, 5e): node モードはゴーストセルを使わない。境界半割面 (has_nbr=false=ゴースト
  // 側) をこの node-to-node Jacobian ループから完全に除外する (continue)。境界ノードは物理境界上に乗るため
@@ -1017,6 +1025,16 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                     diag_block[row][row] = static_cast<ST>(1.0);
                 }
                 rhs[row] = static_cast<ST>(0.0);
+            }
+        }
+
+        // 弱形式の等温壁 (nodeIsothermalEnergyBC=1): エネルギー行は残したまま、壁寄与の近似対角を足す。
+        // iso_wall_flag が nullptr になっているので下の単位行化とは排他。
+        if (weakIsoDiag != nullptr && !cached) {
+            const ST g = static_cast<ST>(weakIsoDiag[ic]);
+            if (g > static_cast<ST>(0.0)) {
+                const ST rho = static_cast<ST>(max(ro[ic], (flow_float)1.0e-30));
+                diag_block[4][4] += g / (rho * static_cast<ST>(weakIsoCv));
             }
         }
 
@@ -1479,7 +1497,9 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 ((cfg.discretization == "node" && cfg.isAxisymmetric == 1) ? msh.axis_flag_d : nullptr),  /* axis_ur_flag: 軸ノードの roUy 行 decouple (常時) */ \
                 ((cfg.discretization == "node" && cfg.isAxisymmetric == 1) ? msh.axis_flag_d : nullptr),  /* axis_flag_src: SU2 流 (enc==2) の軸ソース Jacobian ガード (軸ノードはソース 0) */ \
                 ((cfg.discretization == "node" && cfg.nodeWallDirichlet == 1) ? msh.wall_flag_d : nullptr),  /* wall_flag: 壁運動量3行 decouple */ \
-                ((cfg.discretization == "node" && cfg.nodeWallDirichlet == 1) ? msh.iso_wall_flag_d : nullptr),  /* iso_wall_flag: 等温壁 roe 行 decouple (T ピンと対) */ \
+                ((cfg.discretization == "node" && cfg.nodeWallDirichlet == 1 && cfg.nodeIsothermalEnergyBC == 0) ? msh.iso_wall_flag_d : nullptr),  /* iso_wall_flag: 等温壁 roe 行 decouple (T ピンと対)。弱形式 (nodeIsothermalEnergyBC=1) では単位行化も rowDec も外す (plan boundary-weak-isothermal-wall §4.3) */ \
+                (weakIsoWall::active(cfg, msh) ? weakIsoWall::diagBuf(msh) : nullptr),  /* weakIsoDiag: 弱形式の近似対角 */ \
+                (flow_float)(cfg.cp / max(cfg.gamma, 1.0e-30)),  /* weakIsoCv = cp/gamma = c_v (CPG) */ \
                 ((cfg.discretization == "node") ? 1 : 0),  /* isNode: 5e 境界半割面の粘性対角スキップ */ \
                 ((cfg.lineImplicit == 1) ? msh.line_prev_d : nullptr), \
                 ((cfg.lineImplicit == 1) ? msh.line_next_d : nullptr), \

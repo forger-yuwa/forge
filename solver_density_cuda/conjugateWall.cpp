@@ -168,6 +168,10 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
     std::vector<flow_float> d_T1(nbp, 0.0), d_d1(nbp, 0.0), d_keff(nbp, 0.0);
     std::vector<flow_float> d_qc(nbp, 0.0), d_qr(nbp, 0.0), d_ok(nbp, 0.0), d_al(nbp, 0.0);
     std::vector<flow_float> d_q2(nbp, 0.0);
+    // M4: 指定壁温と保存壁温を**別々に**記録する (弱形式では一致しない)。
+    std::vector<flow_float> d_Twbc(nbp, 0.0), d_Tnode(nbp, 0.0), d_qcn(nbp, 0.0);
+    const auto itTs = bc.bvar.find("Ts");
+    const bool hasTsb = (itTs != bc.bvar.end() && (geom_int)itTs->second.size() >= nbp);
 
     const auto itq = bc.bvar.find("qwall");
     const bool hasQwall = (itq != bc.bvar.end() && (geom_int)itq->second.size() >= nbp);
@@ -183,10 +187,15 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
     std::vector<flow_float> d_qeff(nbp, std::numeric_limits<flow_float>::quiet_NaN());
     const auto itFw = bc.bvar.find("ifaceFw");
     const auto itRr = bc.bvar.find("ifaceRraw");
+    // 弱形式 (mesh.nodeIsothermalEnergyBC=1) では壁エネルギーを拘束しないので **C = 0**。
+    // したがって $Q_f = \sum F^E$ がそのまま収支に一致し、`ifaceRraw` は不要 (読んでも 0)。
+    // ただし $C=0$ は流体側の定常性も固体との収支も保証しない。G-cons と収束判定を別途通すこと
+    // (plan boundary-weak-isothermal-wall §4.5)。
+    const bool weakIso = (cfg.nodeIsothermalEnergyBC != 0) && (cfg.discretization == "node");
     const bool hasEff = (cfg.unsteady == 0)
                      && (bc.bcondKind == "wall_isothermal")
                      && (itFw != bc.bvar.end() && (geom_int)itFw->second.size() >= nbp)
-                     && (itRr != bc.bvar.end() && (geom_int)itRr->second.size() >= nbp);
+                     && (weakIso || (itRr != bc.bvar.end() && (geom_int)itRr->second.size() >= nbp));
     if (hasEff) {
         const bool hasPer = !msh.periodicRoot.empty();
         for (geom_int ib = 0; ib < nbp; ib++) {
@@ -196,7 +205,8 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
             const double area = (double)msh.planes[ip].surfArea;
             if (!(area > 0.0)) continue;
             const double Fw   = (double)itFw->second[ib];    // 壁面が res_roe に入れた寄与
-            const double Rraw = (double)itRr->second[ib];    // 射影前の res_roe
+            const double Rraw = weakIso ? 0.0                // 弱形式: 拘束が無いので C=0
+                                        : (double)itRr->second[ib];    // 射影前の res_roe
             d_qeff[ib] = (flow_float)((Rraw - Fw) / area);   // 固体向き正
         }
     }
@@ -216,13 +226,20 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
         d_T1[ib] = T[j];
         d_d1[ib] = (flow_float)fi.d1[ib];
         // q_compact: 固体向き正 (T_1 > T_w なら流体から固体へ)。
-        d_qc[ib] = (flow_float)(keff * (double)(T[j] - T[ic]) / fi.d1[ib]);
+        // **壁温は指定値 (bvar Ts) を使う** — 強制側は T[ic]=Tw なので従来とビット同一だが、
+        // 弱形式では T[ic] が自由 DOF なので保存温度を使うと境界流束と別量になる
+        // (codex plan レビュー M4)。保存温度からの勾配は `iface_q_compact_Tnode` に分ける。
+        const double Tw_bc = hasTsb ? (double)itTs->second[ib] : (double)T[ic];
+        d_Twbc[ib] = (flow_float)Tw_bc;
+        d_Tnode[ib] = T[ic];
+        d_qc[ib]  = (flow_float)(keff * ((double)T[j] - Tw_bc)   / fi.d1[ib]);
+        d_qcn[ib] = (flow_float)(keff * (double)(T[j] - T[ic])   / fi.d1[ib]);
         // q_2nd: 3 点非等間隔の 2 次片側差分 (壁 0 / 第一内部点 a / 第二内部点 b)。
         //   f'(0) = -((a+b)/(a b)) f0 + (b/(a(b-a))) f1 - (a/(b(b-a))) f2
         if (fi.jdof2[ib] >= 0) {
             const double a = fi.d1[ib], b = fi.d2[ib];
             if (b > a && a > 0.0) {
-                const double dTdn = -((a+b)/(a*b))*(double)T[ic]
+                const double dTdn = -((a+b)/(a*b))*Tw_bc
                                   + (b/(a*(b-a)))*(double)T[j]
                                   - (a/(b*(b-a)))*(double)T[fi.jdof2[ib]];
                 d_q2[ib] = (flow_float)(keff * dTdn);
@@ -233,7 +250,10 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
     bc.diagVar["iface_T1"]        = std::move(d_T1);
     bc.diagVar["iface_d1"]        = std::move(d_d1);
     bc.diagVar["iface_keff"]      = std::move(d_keff);
+    bc.diagVar["iface_Tw_bc"]     = std::move(d_Twbc);
+    bc.diagVar["iface_T_node"]    = std::move(d_Tnode);
     bc.diagVar["iface_q_compact"] = std::move(d_qc);
+    bc.diagVar["iface_q_compact_Tnode"] = std::move(d_qcn);
     bc.diagVar["iface_q_recon"]   = std::move(d_qr);
     bc.diagVar["iface_q_2nd"]     = std::move(d_q2);
     bc.diagVar["iface_ok"]        = std::move(d_ok);

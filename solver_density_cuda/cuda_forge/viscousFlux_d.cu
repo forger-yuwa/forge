@@ -1,5 +1,6 @@
 #include "convection/convectiveFlux_d.cuh"
 #include "cuda_forge/wmlesWallModel_d.cuh"   // wmlesActiveForBcond / wmlesNodeActive (WMLES ゲート)
+#include "cuda_forge/weakIsothermalWall_d.cuh"   // 等温壁エネルギー境界の弱形式 (SU2 型) の幾何
 #include <cstdlib>
 #include <cstdio>
 #include <vector>
@@ -412,7 +413,19 @@ __global__ void viscousFlux_wall_d
  // CHT の保存的界面熱量 (plan boundary-conjugate-heat-transfer §4.3) の素材。
  // 壁半割面が res_roe に入れた寄与そのものを保存する (= $-\sum F^E_{\partial w}$、
  // 符号は「流体へ入る側が正」= qwall と同じ)。nullptr なら何もしない (既定はビット不変)。
- flow_float* ifaceFw_b
+ flow_float* ifaceFw_b,
+ // 等温壁のエネルギー境界を弱形式 (SU2 型) で課す (mesh.nodeIsothermalEnergyBC=1)。
+ // 1 のとき壁半割面の伝導を **k_eff (T_I - Tw_bc)/d_1 * A_half** で置換する
+ // (置換するのはここだけ。内部双対面には触らない。Qw_Wall 機構は流用しない)。
+ // weakJ_b: 第一内部点の DOF index、weakD1_b: **法線投影距離**、Tw_b: 指定壁温 (bvar Ts)。
+ // 選択フラグと符号付き流束を分離してある (Qw_Wall の >-0.5 兼用と違い冷却壁でも安全)。
+ // plan boundary-weak-isothermal-wall §4.2、methods/boundary.md。
+ int weakIsoEnergy,
+ const geom_int*   weakJ_b,
+ const flow_float* weakD1_b,
+ const flow_float* Tw_b,
+ // 陰解法の近似対角項の素材 g = Σ k_eff A_half / d_1 [W/K] を DOF へ積む (weakIsoEnergy のみ)。
+ flow_float* weakDiag
 )
 {
     geom_int ib  = blockDim.x*blockIdx.x + threadIdx.x;
@@ -530,6 +543,17 @@ __global__ void viscousFlux_wall_d
         flow_float heatflux;
         if (wallTreatment == 2 || sstEnergyWf != 0)  heatflux = qwall_b[ib]*sss;
         else if (adiabaticWall != 0)    heatflux = (flow_float)0.0;
+        else if (weakIsoEnergy != 0) {
+            // 弱形式 (SU2 型): **指定壁温 Tw_bc と第一内部点**から作る。T[W] 自身は使わない。
+            // 符号は他経路と同じ「流体 (壁ノード) へ入る側が正」。冷却壁 (T_I > Tw) では負。
+            // cell の ghost 形 tc_w*((Ts[ig]-Ts[ic])/dcc)*sss (Ts[ig]=2Tw-T_I, dcc=2 d1) と
+            // 恒等的に同じ値になる。
+            const geom_int jj = weakJ_b[ib];
+            const flow_float g = tc_w*sss/weakD1_b[ib];          // [W/K]
+            heatflux = g*(Tw_b[ib] - Ts[jj]);
+            // 残差と**同じ k_eff・同じ幾何**を陰解法へ渡す (別々に組むと符号検査が通らない)。
+            if (weakDiag != nullptr) atomicAdd(&weakDiag[ic], g);
+        }
         else                            heatflux = (isNode != 0)
                                             ? tc_w*(dTdx[ic]*sxx +dTdy[ic]*syy +dTdz[ic]*szz)
                                             : tc_w*((Ts[ig]- Ts[ic])/dcc)*sss;
@@ -954,9 +978,13 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
 
+    if (weakIsoWall::active(cfg, msh)) weakIsoWall::diagReset(msh);
+
     for (auto& bc : msh.bconds)
     {
         if (bc.bcondKind == "wall" or bc.bcondKind == "wall_isothermal") {
+            // 弱形式が効くのは等温壁のみ (断熱壁は adiabaticWall で厳密 0)。
+            const bool weakOn = (bc.bcondKind == "wall_isothermal") && weakIsoWall::active(cfg, msh);
             viscousFlux_wall_d<<<cuda_cfg.dimGrid_bplane , cuda_cfg.dimBlock>>> ( 
                 // mesh structure
                 bc.iPlanes.size(),
@@ -1025,7 +1053,14 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
                  && cfg.sstEnergyWallFunction == 1 && bc.bcondKind == "wall_isothermal") ? 1 : 0,
                 // CHT の保存的界面熱量の素材 (plan boundary-conjugate-heat-transfer §4.3)。
                 // `output.interfaceDiag: 1` のときだけ渡す (既定 nullptr = ビット不変)。
-                (cfg.interfaceDiag != 0 && bc.bvar_d.count("ifaceFw")) ? bc.bvar_d["ifaceFw"] : nullptr
+                (cfg.interfaceDiag != 0 && bc.bvar_d.count("ifaceFw")) ? bc.bvar_d["ifaceFw"] : nullptr,
+                // 等温壁エネルギー境界の弱形式 (mesh.nodeIsothermalEnergyBC=1)。
+                // 既定 0 では 0 / nullptr を渡す (ビット不変)。
+                weakOn ? 1 : 0,
+                weakOn ? weakIsoWall::geom(cfg, msh, bc).j_d  : nullptr,
+                weakOn ? weakIsoWall::geom(cfg, msh, bc).d1_d : nullptr,
+                weakOn ? bc.bvar_d["Ts"] : nullptr,
+                weakOn ? weakIsoWall::diagBuf(msh) : nullptr
             ) ;
         }
     }

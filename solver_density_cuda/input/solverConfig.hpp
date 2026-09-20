@@ -415,6 +415,18 @@ public:
     // discretization-node-wall-implicit-dirichlet)。これが無いと壁速度が再循環域でドリフトする。
     // 非 node (cell) / explicit では no-op。0 で旧挙動 (弱形式半割面のみ)。
     int nodeWallDirichlet = 1;
+
+    // node 等温壁のエネルギー境界: 0 = 強制 (壁ノード T ピン + エネルギー残差 0 化 + 陰解法
+    // エネルギー行の単位行化。既定)、1 = **弱形式 (SU2 型)**: 壁ノードのエネルギー方程式を残し、
+    // 壁半割面の伝導を k_eff (T_I - Tw_bc)/d_1 * A_half で置換し、対角へ近似線形化 +g/(rho cv) を足す。
+    // d_1 は**法線投影距離** (conjugateWall::firstInterior と同一規約)、T_I は第一内部点。
+    // **T_W 自身は使わない** (2026-07-20 に棄却した旧弱形式との差)。
+    // 診断: 市松・第 1 スペーシング勾配 -15% ・擬似 CFL 上限 ~5 が熱的壁閉包に帰属するかの切り分け。
+    // plan boundary-weak-isothermal-wall、methods/boundary.md。
+    // 併用不可 (起動時に拒否): cell, thermalMethod!=0, wallTreatmentSST=1, wallModelLES=1,
+    // 軸対称, 移動壁, nodeWallDirichlet=0。
+    int nodeIsothermalEnergyBC = 0;
+
     int nodeInletCornerWall = 0;
     std::vector<int> wallDistExtraPhysIDs;   // 壁距離の壁点集合に加える非 wall bcond の physID (例: 出口バッファの slip 壁)。SST の F1/F2 用   // 1: 変換時に入口∩壁コーナーの入口側半割面を壁へ帰属 (node)。methods/discretization.md §7.2 (D)
 

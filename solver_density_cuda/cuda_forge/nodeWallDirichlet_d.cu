@@ -132,6 +132,11 @@ void zeroWallDirichletResiduals_d_wrapper(solverConfig& cfg , cudaConfig& cuda_c
 bool nodeIsothermalPinActive(const solverConfig& cfg, const mesh& msh)
 {
     if (cfg.discretization != "node" || cfg.nodeWallDirichlet == 0 || msh.wall_flag_d == nullptr) return false;
+    // 弱形式 (mesh.nodeIsothermalEnergyBC=1) では**温度系の強制を一切しない**:
+    // 状態ピン・エネルギー残差ゼロ化・陰解法エネルギー行の単位行化を一組で外す。
+    // 運動量の no-slip (enforceWallNoSlip / 運動量残差射影) と SST 壁条件は不変。
+    // plan boundary-weak-isothermal-wall §4.4。
+    if (cfg.nodeIsothermalEnergyBC != 0) return false;
     for (const auto& bc : msh.bconds)
         if (bc.bcondKind == "wall_isothermal" && !wmlesActiveForBcond(cfg, bc)) return true;
     return false;

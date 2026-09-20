@@ -19,6 +19,8 @@ add_library(cuda_forge STATIC
     wmlesWallModel_d.cu
     wmlesWallModel_d.cuh
     nodeWallDirichlet_d.cu
+    weakIsothermalWall_d.cu
+
     nodeWallDirichlet_d.cuh
     bodyForce_d.cu
     bodyForce_d.cuh
