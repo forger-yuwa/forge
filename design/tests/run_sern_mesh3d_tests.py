@@ -172,12 +172,13 @@ check("fillet: info に ramp_fillet", info["ramp_fillet"] == 0.1)
 
 
 # --- 壁第 1 層の x ブレンド (plan sern-3d §4.41) ---
-_pb = SernMesh3DParams(ni_up=6, ni_noz=20, ni_plume=30, nj_top=15, nj_bot=11, nz_in=7, nz_out=6, W=2.0, Z_ext=1.5,
+# ブレンドは station 数が要る (急だと skew が出るのでガードが落とす) のでプルームを細かくした専用 params
+_pb = SernMesh3DParams(ni_up=6, ni_noz=20, ni_plume=120, nj_top=15, nj_bot=11, nz_in=7, nz_out=6, W=2.0, Z_ext=1.5,
                        interface_angle=float(k.TH[-1, 0]), top_ext_angle=d.info["theta_e"], first_wall_frac=4.0e-4)
 c0, h0, B0, i0, _ = generate_sern_mesh3d(d, _pb)
 c1, h1, B1, i1, _ = generate_sern_mesh3d(d, replace(_pb, first_wall_frac_far=0.0))
 check("xblend: 既定 (far=0) は座標がビット一致", np.array_equal(c0, c1))
-c2, h2, B2, i2, _ = generate_sern_mesh3d(d, replace(_pb, first_wall_frac_far=4.0e-3, wall_frac_blend_len=0.5))
+c2, h2, B2, i2, _ = generate_sern_mesh3d(d, replace(_pb, first_wall_frac_far=4.0e-3, wall_frac_blend_len=3.0))
 check("xblend: 節点数・要素数は変わらない", c2.shape == c0.shape and h2.shape == h0.shape)
 check("xblend: 壁の形状は動かない (ランプ線 y の最大)",
       abs(float(np.max(c2[:, 1])) - float(np.max(c0[:, 1]))) < 1e-12,
@@ -195,10 +196,19 @@ _x_far = _xs[np.argmin(np.abs(_xs - (_Lr + 1.5)))]           # ブレンド完�
 check("xblend: 壁の内側では第一層厚が first_wall_frac のまま",
       abs(_first_layer(c2, _x_in) - _first_layer(c0, _x_in)) < 1e-12,
       f"{_first_layer(c2,_x_in):.3e} vs {_first_layer(c0,_x_in):.3e}")
-check("xblend: 壁の下流では第一層厚が粗くなる (>= 5 倍)",
-      _first_layer(c2, _x_far) >= 5.0 * _first_layer(c0, _x_far),
-      f"{_first_layer(c2,_x_far):.3e} vs {_first_layer(c0,_x_far):.3e}")
+# 上バンドの壁終端は `L_ramp` で、下流は `x_out_extra` (既定 2 H) しかないので
+# ブレンド長 3 H は**領域内で完了しない**。完了を要求せず「単調に粗くなる」ことを見る。
+_xd = _xs[_xs > _Lr]
+_seq = [_first_layer(c2, x) for x in _xd]
+check("xblend: 壁の下流で第一層厚が単調に粗くなる",
+      all(b >= a - 1e-15 for a, b in zip(_seq[:-1], _seq[1:])) and _seq[-1] >= 2.5 * _first_layer(c0, _x_far),
+      f"{_seq[0]:.3e} -> {_seq[-1]:.3e} (壁値 {_first_layer(c0,_x_far):.3e})")
 _n2, _m2, _e2 = closure(h2, B2)
 check("xblend: 境界の閉性", _m2 == 0 and _e2 == 0, f"missing {_m2} extra {_e2}")
+try:      # 急なブレンドは skew を生むので生成を失敗させる
+    generate_sern_mesh3d(d, replace(_pb, first_wall_frac_far=4.0e-3, wall_frac_blend_len=0.05))
+    check("xblend: 急なブレンドは生成を失敗させる", False, "例外が出なかった")
+except ValueError as e:
+    check("xblend: 急なブレンドは生成を失敗させる", "急すぎる" in str(e))
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)

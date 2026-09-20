@@ -113,6 +113,6 @@ mesh3d:
   nj_bot: 65   # R5d 段階1: **y 法線壁のみ**壁解像 (plan sern-3d §4.32)。側壁 (z 法線) は現行のまま — z を細くすると AR が 5000 を超えるため (probB/probC で確認)
   first_wall_frac: 4.0e-05   # R5d 段階1: **y 法線壁のみ**壁解像 (plan sern-3d §4.32)。側壁 (z 法線) は現行のまま — z を細くすると AR が 5000 を超えるため (probB/probC で確認)
   first_wall_frac_far: 4.0e-03   # 壁が終わった下流は粗いまま (plan sern-3d §4.41)
-  wall_frac_blend_len: 0.5       # ブレンドの物理長 /H
+  wall_frac_blend_len: 3.0       # ブレンドの物理長 /H。**0.5 では station あたり 1.78 倍で skew 0.933 が出た** (plan sern-3d §4.41)
   first_z_frac: 4.0e-03   # R5d 段階1: **y 法線壁のみ**壁解像 (plan sern-3d §4.32)。側壁 (z 法線) は現行のまま — z を細くすると AR が 5000 を超えるため (probB/probC で確認)
   first_wake_frac: 1.7e-04   # R5d 段階1: **y 法線壁のみ**壁解像 (plan sern-3d §4.32)。側壁 (z 法線) は現行のまま — z を細くすると AR が 5000 を超えるため (probB/probC で確認) (vehicle_base)

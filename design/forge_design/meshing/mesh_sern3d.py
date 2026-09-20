@@ -193,9 +193,22 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
         w = t * t * (3.0 - 2.0 * t)
         return float(np.exp((1.0 - w) * np.log(_fw) + w * np.log(_ff)))
 
+    # **ブレンドが急すぎると skew が出る**ので生成を失敗させる (2026-09-21)。
+    # `wall_frac_blend_len` 0.5 H では station あたり 1.78 倍で skew max 0.933 (>0.90 が 0.10 %) だった。
+    # 3.0 H にすると 1.10 倍で skew max 0.701・>0.90 が 0 になり、AR は変わらない。
+    _flo = np.array([_first_at(x, L_cowl) for x in xs])
+    _fup = np.array([_first_at(x, L_ramp) for x in xs])
+    if _ff > 0.0 and _ff != _fw:
+        _r = max(float(np.max(np.maximum(_flo[1:] / _flo[:-1], _flo[:-1] / _flo[1:]))),
+                 float(np.max(np.maximum(_fup[1:] / _fup[:-1], _fup[:-1] / _fup[1:]))))
+        if _r > 1.30:
+            raise ValueError(
+                f"mesh_sern3d: 壁第 1 層の x ブレンドが急すぎる (station あたり {_r:.3f} 倍 > 1.30)。"
+                f"`wall_frac_blend_len` を大きくするか station 数を増やすこと。"
+                f"急なブレンドは skew を生む (0.5 H で skew max 0.933; plan sern-3d §4.41)")
     for i in range(ni):
-        f_lo = _first_at(xs[i], L_cowl)     # 下バンドの細端 = 中間線 (カウル)
-        f_up = _first_at(xs[i], L_ramp)     # 上バンドの細端 = 上線 (ランプ)。両側 tanh なので片側で決める
+        f_lo = _flo[i]     # 下バンドの細端 = 中間線 (カウル)
+        f_up = _fup[i]     # 上バンドの細端 = 上線 (ランプ)。両側 tanh なので片側で決める
         for Y, lo, up in ((Y2, ym[i], ym[i]), (Yin, ym[i] - 0.5 * tk[i], ym[i] + 0.5 * tk[i])):
             h_lo = max(lo - y_bot, 1e-12); h_up = max(yt[i] - up, 1e-12)
             s_bot = _radial_fracs(njb, min(f_lo / h_lo, 0.5 / (njb - 1)))
