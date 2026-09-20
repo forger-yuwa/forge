@@ -623,9 +623,50 @@ $T$ が小さい保証はない」という指摘を検算したところ、**lo
 問題は**ソルバがどの性質のモードを許すか**であり、$\mu_t$・壁閉包・応力形・熱伝導補正を
 いくら直しても $T$ が動かなかったのはこのためである。
 
-**残る問い**: 2 節点モードの**等温性**を決めているのは何か。
-$P,\rho$ の振幅自体は両コード同等なので、振幅を下げる方向ではなく**位相/熱力学的性質**を揃える方向に効く
-機構を探す必要がある。
+#### 真因: **再構成する原始変数の選び方**が違う
+
+[`CEulerVariable.cpp:38-41`](../../.external/su2-src/SU2_CFD/src/variables/CEulerVariable.cpp) —
+理想気体・低マッハ補正なし・ROE (本ケース) では
+
+```cpp
+if (ideal_gas && !low_mach && (Upwind == ROE || Upwind == MSW)) {
+    // Based on CRoeBase (numerics_simd).
+    return ndim + 2;      // 2D なら 4
+}
+```
+
+原始変数の並びは `[T, u, v, P, rho, h, c]` (`LowMachPrimitiveCorrection` の添字 `nDim+1`=P, `nDim+2`=rho, `nDim+4`=c から確認)。
+したがって **SU2 が MUSCL 再構成するのは `T, u, v, P` の 4 つだけで、$\rho$ は再構成せず EOS から導出**する。
+
+| | 再構成する量 | 導出する量 |
+| --- | --- | --- |
+| **SU2** | $T$, $u$, $v$, $P$ | **$\rho = P/(RT)$** |
+| **forge** | $\rho$, $u$, $v$, $w$, $P$ ([`convectiveFlux_slau_d.inc.cuh:167-181`](../../solver_density_cuda/cuda_forge/convection/convectiveFlux_slau_d.inc.cuh)) | **$T = P/(\rho R)$** |
+
+**これで全部説明がつく**:
+- SU2 は $T$ を**直接再構成**するので面の $T$ は滑らか。不整合は $\rho$ に行き、$\rho$ が $P$ を正確に追う (実測 −0.0211 vs −0.0210)。
+- forge は $T$ が**独立な 2 つの再構成の差**なので、両者の不一致をそのまま浴びる。
+- $\mu_t$・壁閉包・応力形・熱伝導補正・スキーム・精度をどういじっても $T$ が動かなかったのは、
+  どれも**再構成する変数の選び方**に触っていないから。
+
+さらに SU2 には `ComputeConsistentExtrapolation` (「再構成量を**熱力学的に整合するよう**再計算する」) と
+`LowMachPrimitiveCorrection` があり、理想気体ではどちらも飛ばされる。
+**再構成変数の選び方だけで整合が取れているため**であり、SU2 がこの問題を設計として認識していることが分かる。
+
+比 $(\delta P/P)/(\delta\rho/\rho)$ の実測 (等温 = 1.000):
+
+| run | 比 |
+| --- | ---: |
+| forge 対照 (粗) | 1.240 |
+| forge リミッタ無し | 1.217 |
+| forge 1 次 | 2.150 |
+| forge Barth | 1.160 |
+| forge 平滑メッシュ | **1.064** |
+| forge 平滑 + $k$ 射影 | 1.061 |
+| **SU2 (粗メッシュ)** | **0.995** |
+
+**次の A/B**: forge の再構成を `rho, u, v, w, P` から **`T, u, v, w, P`** に変え、$\rho_{face}=P_{face}/(R T_{face})$ を導出する
+(opt-in)。SU2 と同じ構成になる。
 
 ### 副産物 1: forge の Harten エントロピー補正が次元不整合 (未修正)
 
