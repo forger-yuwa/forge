@@ -53,8 +53,10 @@ HARD_PATTERNS = [
     # `turbulenceModel:` だけを見ていたため、層流 (`model: "none"`) と SST (`model: "sst"`)
     # が**同一キー**になり、段階起動の層流段と SST 段が 1 区間に連結されていた。
     # 区間分離という本ツールの目的そのものが効いていなかった。
+    # **正規表現は flow 形式・二重引用符しか拾えない**ので、下の `YAML_PATHS` による
+    # 構造解析が正本で、この行は YAML が壊れている場合の保険 (2026-09-21 codex result M4)。
     ("turbulenceModel", r"turbulenceModel\s*:\s*(\S+)"),
-    ("turbulence.model", r"turbulence\s*:\s*\{[^}]*?\bmodel\s*:\s*\"?([A-Za-z0-9_]+)"),
+    ("turbulence.model", r"turbulence\s*:\s*\{[^}]*?\bmodel\s*:\s*[\"']?([A-Za-z0-9_]+)"),
     ("wallTreatmentSST", r"wallTreatmentSST\s*:\s*(\S+)"),
     ("viscMethod", r"viscMethod\s*:\s*(\S+)"),
     ("thermalMethod", r"thermalMethod\s*:\s*(\S+)"),
@@ -72,6 +74,49 @@ SOFT_PATTERNS = [
 ]
 
 
+# **YAML として構造解析して拾う hard キー** (2026-09-21 codex result M4)。
+# 正規表現は書式に依存する: `turbulence:\n  model: "sst"` (block 形式) や
+# `turbulence: {model: 'sst'}` (単引用符) では層流と SST が同一キーになっていた。
+# **構造解析を正本とし、正規表現は YAML が読めないときの保険**にする。
+YAML_HARD_PATHS = [
+    ("turbulence.model", ("turbulence", "model")),
+    ("turbulence.wallTreatmentSST", ("turbulence", "wallTreatmentSST")),
+    ("space.convMethod", ("space", "convMethod")),
+    ("space.limiter", ("space", "limiter")),
+    ("space.limiterScaled", ("space", "limiterScaled")),
+    ("space.venkatK", ("space", "venkatK")),
+    ("physics.viscMethod", ("physics", "viscMethod")),
+    ("physics.thermalMethod", ("physics", "thermalMethod")),
+    ("time.unsteady", ("time", "unsteady")),
+    ("time.dualTime", ("time", "dualTime")),
+]
+
+
+def _yaml_grab(text, paths):
+    """solverConfig を YAML として読み、指定パスの値を拾う。読めなければ空 dict。"""
+    try:
+        import yaml
+    except ImportError:
+        return {}
+    try:
+        doc = yaml.safe_load(text or "")
+    except Exception:
+        return {}
+    if not isinstance(doc, dict):
+        return {}
+    out = {}
+    for name, path in paths:
+        cur = doc
+        for k in path:
+            if not isinstance(cur, dict) or k not in cur:
+                cur = None
+                break
+            cur = cur[k]
+        if cur is not None and not isinstance(cur, (dict, list)):
+            out[name] = str(cur).strip().strip('"\'')
+    return out
+
+
 def _grab(text, pats):
     out = {}
     for name, pat in pats:
@@ -84,6 +129,8 @@ def _grab(text, pats):
 def stage_key(cfg_text, bcond_text):
     """段の **hard キー** (方程式・BC・空間離散化)。BC は全文のハッシュで見る。"""
     k = _grab(cfg_text, HARD_PATTERNS)
+    # **構造解析の値で上書きする** (正規表現より優先。書式差で取りこぼさないため)。
+    k.update(_yaml_grab(cfg_text, YAML_HARD_PATHS))
     k["bcond_sha1"] = hashlib.sha1((bcond_text or "").encode()).hexdigest()[:12]
     return k
 

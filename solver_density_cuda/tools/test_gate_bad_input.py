@@ -166,6 +166,19 @@ def main():
         sm.stage_key(sst, "") != sm.stage_key(cm, ""), "")
     chk("同一 config は同一キー", sm.stage_key(sst, "x") == sm.stage_key(sst, "x"), "")
 
+    # **書式を変えても区別できるか** (2026-09-21 codex result M4)。正規表現は flow 形式 +
+    # 二重引用符しか拾えず、block 形式・単引用符では層流と SST が同一キーになっていた。
+    blk_l = 'turbulence:\n  model: "none"\nspace:\n  convMethod: 1\n'
+    blk_s = 'turbulence:\n  model: "sst"\nspace:\n  convMethod: 1\n'
+    chk("block 形式でも層流と SST が別キー", sm.stage_key(blk_l, "") != sm.stage_key(blk_s, ""),
+        "none=%s sst=%s" % (sm.stage_key(blk_l, "").get("turbulence.model"),
+                            sm.stage_key(blk_s, "").get("turbulence.model")))
+    sq_l = "turbulence: {model: 'none'}\n"
+    sq_s = "turbulence: {model: 'sst'}\n"
+    chk("単引用符でも層流と SST が別キー", sm.stage_key(sq_l, "") != sm.stage_key(sq_s, ""),
+        "none=%s sst=%s" % (sm.stage_key(sq_l, "").get("turbulence.model"),
+                            sm.stage_key(sq_s, "").get("turbulence.model")))
+
     print("\nVERDICT: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 

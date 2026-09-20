@@ -86,8 +86,28 @@ def cfg(nsteps, cfl, relax, conv, lim, ninner, outint, lam=False, gas=None):
                       k=D["k_inf"], om=D["omega_inf"])
 
 
-def patch_ic(h5):
-    """一様自由流 + 平板上 (x>=0) は壁距離 tanh で速度を落とし、壁ノードは u=0。"""
+def _tp_internal_energy(T):
+    """TP (semi-perfect 1 擬似種) の比内部エネルギー e(T) [J/kg]。
+
+    datum は `thermoHrefTemp: 298.15` (h(298.15)=0)、e = h(T) - h(298.15) - R_tp T。
+    生産側 `gen_runs.py:_tp_energy` と同じ式を使う。
+    """
+    sys.path.insert(0, str(ROOT / "design"))
+    from forge_design.gas.semiperfect import GasSemiPerfect
+    from setup import _f
+    g = GasSemiPerfect(D["dry_air_Y"], Tt=2000.0)
+    href = _f(g.h_mass(298.15))
+    return _f(g.h_mass(T)) - href - D["R_tp"] * T
+
+
+def patch_ic(h5, gas="CPG"):
+    """一様自由流 + 平板上 (x>=0) は壁距離 tanh で速度を落とし、壁ノードは u=0。
+
+    **TP では内部エネルギーを TP の datum で組む** (2026-09-21 codex result M3)。
+    従来は EOS によらず CPG の `roe = P/(gamma-1) + rho u^2/2` を書いていたので、
+    `thermalMethod: 2` のソルバが読み戻すと静温 624.65 K・静圧 15.785 kPa になり、
+    指定の 216.65 K・5.475 kPa と全く違う場から起動していた。
+    """
     with h5py.File(h5, "r+") as f:
         n = f["/VALUE/ro"].shape[0]
         c = f["/MESH/COORD"][:].reshape(-1, 3)
@@ -96,7 +116,13 @@ def patch_ic(h5):
         onplate = c[:, 0] >= -1e-9
         u[onplate] = D["U_inf"] * np.tanh(np.maximum(wd[onplate], 0.0) / IC_DELTA0)
         u[(wd <= 0.0) & onplate] = 0.0
-        roe = D["P_inf"] / (D["gamma"] - 1.0) + 0.5 * ro * u ** 2
+        if (gas or D["gas"]).upper() == "TP":
+            e_int = _tp_internal_energy(D["T_inf"])
+            roe = ro * (e_int + 0.5 * u ** 2)
+            print("  IC(TP): T=%.2f K -> e=%.6g J/kg (datum h(298.15)=0)"
+                  % (D["T_inf"], e_int))
+        else:
+            roe = D["P_inf"] / (D["gamma"] - 1.0) + 0.5 * ro * u ** 2
         f["/VALUE/ro"][:] = ro.astype(np.float32)
         f["/VALUE/roUx"][:] = (ro * u).astype(np.float32)
         f["/VALUE/roUy"][:] = np.zeros(n, np.float32)
@@ -176,7 +202,7 @@ def main():
     (rd / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
     main_cfg = cfg(a.main_steps, a.cfl, a.relax, 1, 2, 4, a.out_int, gas=a.gas)
     (rd / "solverConfig.yaml").write_text(main_cfg)
-    patch_ic(rd / "mesh.h5")
+    patch_ic(rd / "mesh.h5", gas=a.gas)
     if a.dry:
         return
     # **SST 段の CFL は指定できるようにする**。M5 の 0.3 → 1.0 は M9 では `mid` で落ちた

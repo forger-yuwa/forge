@@ -84,6 +84,29 @@ def tail_levels(csv, tail=0.2):
     return out
 
 
+BUDGET_KEYS = ("budget_residual_all_alldepth", "budget_residual_alldepth", "budget_residual")
+
+
+def budget_key(fld):
+    """収支残差として読むキーを選ぶ。**全流束 (対流+伝導+粘性仕事) を含むものが正本**。
+
+    2026-09-21 codex result M2: 従来は `budget_residual_alldepth` (= 対流のみ) を優先し、
+    伝導・粘性仕事を落とした残差で合否を決めていた。対流だけ 0・全項 20 % の入力でも
+    PASS になる。伝導込みのキーが無い JSON は**古い評価版**なので合格にしない。
+    """
+    return next((k for k in BUDGET_KEYS if k in (fld or {})), None)
+
+
+def residual_inconclusive(out, rc):
+    """継続 run の残差判定が**判定不能**か。
+
+    2026-09-21 codex result M1: 継続 run は収束場から始まるので `rc == 0` は要求できないが
+    (`NOT CONVERGED` が正常)、残差列の欠落・末尾窓 0 のような**入力不備**は別物で、
+    `RISING`/`DIVERGED` を含まないため合格として通っていた。
+    """
+    return ("判定不能" in (out or "")) or (rc is not None and rc >= 2)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run")
@@ -94,7 +117,9 @@ def main():
                          "**plan の 0.1 %% はこの求積では到達不能** (2026-09-20 実測: 181x30 -2.46 %% / "
                          "361x60 -1.44 %% / 721x120 -1.00 %% / 1441x240 -0.88 %% と約 -0.85 %% へ漸近)。"
                          "既定 1.5 %% は漸近値に余裕を見た値。厳密検算は残作業 #4 (離散流束)")
-    ap.add_argument("--budget-tol", type=float, default=0.07, help="CV エネルギー収支 残差 許容")
+    # **plan §6.4 の 5 % に合わせる** (2026-09-21 codex result M8)。既定が 0.07 で、
+    # plan (5 %) と docstring (0.05) の両方とずれていた。
+    ap.add_argument("--budget-tol", type=float, default=0.05, help="CV エネルギー収支 残差 許容")
     ap.add_argument("--yplus-blocking", action="store_true",
                     help="壁解像の不合格でも報告を止める (既定は制約として併記するのみ。"
                          "step を増やしても y1+ は変わらないため)")
@@ -153,7 +178,13 @@ def main():
                 if lv_p[k] > 0 and lv_c[k] > 1.5 * lv_p[k]:
                     worse.append("%s %.2e -> %.2e (x%.2f)" % (k, lv_p[k], lv_c[k], lv_c[k] / lv_p[k]))
         nan_bad = "NaN/Inf present" in out
-        ok2 = (not rising) and (not nan_bad) and (not worse)
+        # **判定不能・入力不備・異常終了は合格にしない** (2026-09-21 codex result M1)。
+        # 継続 run は低下桁数で測れないので `rc == 0` は要求できないが (収束場から
+        # 始まるので `check_convergence.py` は NOT CONVERGED を返すのが正常)、
+        # **「判定不能」= 残差列の欠落・末尾窓 0 などの入力不備**は別物で、
+        # 従来はこれが RISING/DIVERGED を含まないため合格として通っていた。
+        incon = residual_inconclusive(out, rc)
+        ok2 = (not rising) and (not nan_bad) and (not worse) and (not incon)
         print("[2] 残差の収束     : %s  (継続 run: 低下桁数でなく**上昇の有無 + 親の水準比**で判定)"
               % ("OK" if ok2 else "**FAIL**"))
         print("      %s" % head.strip())
@@ -163,6 +194,8 @@ def main():
             print("      上昇している列: %s" % " / ".join(l.split(":")[0].strip() for l in rising))
         if worse:
             print("      親より悪化した列: %s" % " / ".join(worse))
+        if incon:
+            print("      **判定不能** (入力不備 / check_convergence が異常終了 rc=%d)" % rc)
     else:
         ok2 = (rc == 0)
         print("[2] 残差の収束     : %s" % ("OK" if ok2 else "**FAIL**"))
@@ -218,12 +251,21 @@ def main():
         # **全深さ Σq で正規化した残差**を使う (2026-09-20)。評価面より下の壁入熱で割ると、
         # 非一様壁温では熱い壁の放熱と冷たい壁の吸熱が打ち消して分母が小さくなり、
         # 同じ絶対差 (実測 0.9-3.0 W) でも相対値が跳ねる (mixA: 面下基準 -14.7 % / 全深さ基準 -5.8 %)。
-        key = ("budget_residual_alldepth" if "budget_residual_alldepth" in fld
-               else ("budget_residual" if "budget_residual" in fld else None))
+        # **全流束 (対流+伝導+粘性仕事) の残差で判定する** (2026-09-21 codex result M2)。
+        # 従来は `budget_residual_alldepth` を優先していたが、これは**対流のみ**の残差で、
+        # 伝導・粘性仕事を落としていた (対流だけ 0・全項 20 % の入力でも PASS を再現)。
+        # 分母は壁温分布に依らない全深さ Σq のままにする。
+        key = budget_key(fld)
         bud = abs(float(fld[key])) if key else None
         if bud is None:
             print("[5] 保存性         : **判定不能** (cavity_eval.json に budget_residual が無い"
                   " — cavity_eval.py を新しい版で回し直すこと)")
+            return 2
+        if key != "budget_residual_all_alldepth":
+            # 伝導・粘性を含む残差が無い JSON は**古い評価版**。合格にしない。
+            print("[5] 保存性         : **判定不能** (%s しか無い = 対流のみの残差。"
+                  "伝導・粘性込みの budget_residual_all_alldepth が要る"
+                  " — cavity_eval.py を新しい版で回し直すこと)" % key)
             return 2
         ok5 = imb <= a.mass_tol
         print("[5] 保存性         : %s   開口の正味/片道 %.3e (許容 %.3g)"

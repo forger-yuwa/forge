@@ -910,6 +910,11 @@ def main():
         q["budget_residual_alldepth"] = (qs + q["_H_open"]) / max(abs(qall), 1e-30)
         if np.isfinite(cond):
             q["budget_residual_all"] = (qs - (adv + cond + visc)) / max(abs(qs), 1e-30)
+            # **ゲートが見るべきはこれ** (2026-09-21 codex result M2)。従来ゲートは
+            # `budget_residual_alldepth` (= **対流のみ**) を優先しており、伝導・粘性仕事を
+            # 落とした残差で合否を決めていた。分母は壁温分布に依らない全深さ Σq に揃える。
+            q["budget_residual_all_alldepth"] = ((qs - (adv + cond + visc))
+                                                 / max(abs(qall), 1e-30))
         q["budget_grad_source"] = q.get("_grad_source", "不明")
     Path(Path(a.run) / outname).write_text(json.dumps(
         {"field": {k: val for k, val in q.items() if not k.startswith("_")},

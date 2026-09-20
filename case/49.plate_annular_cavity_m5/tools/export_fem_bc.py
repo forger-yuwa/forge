@@ -117,7 +117,7 @@ def main():
     ap.add_argument("--eps-mm", type=float, default=1.0, help="リップ帯の幅 [mm]")
     a = ap.parse_args()
     out = Path(a.out)
-    out.mkdir(exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
 
     rows = [read_run(r) for r in list(a.runs) + list(a.mixed)]
     A, b = build(rows)
