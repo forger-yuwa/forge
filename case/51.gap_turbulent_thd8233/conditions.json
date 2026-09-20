@@ -53,32 +53,32 @@
         "Re_m": 1470000.0,
         "dstar_cm": 12.8,
         "dstar_over_w": 56,
-        "theta_cm_REJECTED": 1.42,
-        "theta_over_w_REJECTED": 6.2
+        "theta_cm_reported": 1.42,
+        "theta_over_w_reported": 6.2
       },
       {
         "Re_m": 3320000.0,
         "dstar_cm": 11.5,
         "dstar_over_w": 50,
-        "theta_cm_REJECTED": 1.19,
-        "theta_over_w_REJECTED": 5.2
+        "theta_cm_reported": 1.19,
+        "theta_over_w_reported": 5.2
       },
       {
         "Re_m": 6100000.0,
         "dstar_cm": 10.8,
         "dstar_over_w": 47,
-        "theta_cm_REJECTED": 1.08,
-        "theta_over_w_REJECTED": 4.7
+        "theta_cm_reported": 1.08,
+        "theta_over_w_reported": 4.7
       },
       {
         "Re_m": 7820000.0,
         "dstar_cm": 10.5,
         "dstar_over_w": 46,
-        "theta_cm_REJECTED": 1.03,
-        "theta_over_w_REJECTED": 4.5
+        "theta_cm_reported": 1.03,
+        "theta_over_w_reported": 4.5
       }
     ],
-    "_THETA_REJECTED": "2026-09-20: Fig 4 から読んだ theta_cm は delta*_cm と両立しない (H=9.0 は M 10.3 / T_w 300 K のどの定義でも出ない; 圧縮性 25 / 運動学 1.4)。theta を固定すると delta が 49-65 cm となり 78.74 cm 角試験部で一様コアが消えるため棄却。**theta は bl_derived.json の導出値を使うこと**。原典 Fig 4 の再読み取りが最優先の残作業。"
+    "_THETA_DEFINITION": "2026-09-20: Fig 4 を原典で再読し digitize は正しいと確認した (右パネルが w=0.229 cm 明記で delta*/w=56, theta/w=6.3 を直接プロット)。報告の H=8.89 は M 10.3 の圧縮性(質量流束)定義では出ない (どの T_w・速度冪でも 24 以上)。定義の組合せを総当たりすると delta*(圧縮性)/theta(運動学) だけが 8.9 に届き、delta* 固定の再構成は報告 theta を運動学定義で 1.31-1.41 倍まで再現する。→ **報告の theta は圧縮性運動量厚さではない**と判断。CFD 用の圧縮性 theta は bl_derived.json。確定には出典 ref.6 (TM X-71945) が要る。"
   },
   "temperature_ratio_series": {
     "_source": "Fig 8(a) (掃引角 0°)。**公称 1.0/1.2/1.4/1.6 ではなく Re 系列ごとに実測値が違う**",
@@ -111,7 +111,7 @@
     ]
   },
   "open_items": [
-    "**Fig 4 の theta 再読み取り** (現在の値は物理的に棄却済み。bl_derived.json 参照)",
+    "**ref.6 (TM X-71945) の入手** — theta の定義と還元手順の確定。T2 流入場と Gate B が依存",
     "加熱板の長さと温度分布",
     "Fig 5-8 の h/h_fp 分布の digitize",
     "2D 中央断面近似の妥当性 (TH75 は横方向の BL 分布変化・壁圧と自由流静圧の差を明記)",
