@@ -143,6 +143,9 @@ def build(a):
     out = MESH / f"{a.tag}.msh"
     gmsh.option.setNumber("Mesh.MshFileVersion", 4.1)
     gmsh.write(str(out))
+    # **同一の gmsh モデルから SU2 用も書き出す** (procedures/su2-cross-check.md:
+    # 「メッシュ違い」を交絡させないため同一 .geo から両方を出す)
+    gmsh.write(str(MESH / f"{a.tag}.su2"))
     n = len(gmsh.model.mesh.getNodes()[0])
     et, tg, _ = gmsh.model.mesh.getElements(2)
     comp = ", ".join(f"{'quad' if int(e)==3 else ('tri' if int(e)==2 else int(e))}:{len(t)}"
