@@ -490,6 +490,7 @@ $z/W$ 1–4 が同じ桁に収まるのは事実だが、以下が未解決な�
 | `run_0014_T1_wd0063_fine` (+`_long`) | 細格子 再投入 (soft 0.1 / mid 0.3) | 完走。60k step 時点で平均比 0.696 だが **DRIFTING 21 %/tail** → そのままでは使えない | active (run_0016 の IC) |
 | `run_0016_T1_wd0063_fine_settle` | 細格子を 150k step 継続 | 平均比 **0.5821** (粗格子 0.5804 の **+0.3 %**)、`check_quasisteady` **STEADY** (0.6 %/tail) → **格子収束を確認** | active (**格子検証**) |
 | `run_0015_T1_wd0383_precond2` (+ `run_0017..._settle`) | 広い幅での前処理 A/B | 30k step で 0.192 だが DRIFTING 37 %。**precond 2 自体が非物理と判明したため判定材料としては用いない** | 参考 |
+| `run_0018_T1_wd0063_lim_old` / `..._lim_new` | **リミッタ既定変更の A/B** (#41, codex result-3 M6)。`run_0016` の収束場から index コピーし **`space.limiterScaled`/`venkatK` だけ**変えた 2 本 (`0`+`1.0` = 09-19 までの既定 ↔ `1`+`0.05` = 現行既定)。各 50k step | $Q_c^{(b)}$ = **18.594 → 18.662 W/m (+0.37 %)**、末尾平均はどちらも 18.63、`run_0016` (18.677) との差は new で 0.08 %。→ **既存 4 幅の結果は現行既定でもそのまま使える** (許容 5 %)。`Qc_front_theory_W_m` は両者 `STEADY` (0.4 % / 0.2 %/tail)、残差は old `NOT CONVERGED (RISING)` / new `NOT CONVERGED (plateau)` (§4.7-4 の有界振動) | active (**再現性検証・完了**) |
 
 ## 既知の注意
 

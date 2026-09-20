@@ -63,9 +63,12 @@ def main():
     q = np.asarray(pd["Heat_Flux"]).ravel()
     T = np.asarray(pd["Temperature"]).ravel()
     xd = 0.9e-3
-    # 下流側 (前向き壁) の壁節点: x = +W/2 (鉛直部) と下流円弧
+    # 下流側 (前向き壁) の壁節点: x = +W/2 (鉛直部) と下流円弧、および床。
+    # **y >= 0 を外す** (2026-09-20): 以前は `c[:,1] < 1e-9` だったので下流側の
+    # 板上面 (y=0, x=3.4-60 mm) が 161 点まぎれ込み、深さ 0 に潰れて浅い点の
+    # 内挿を汚していた (q は板上面で 5.6e5 W/m² まである)。
     wall = np.abs(q) > 0
-    sel = wall & (c[:, 0] > 1e-9) & (c[:, 1] < 1e-9)
+    sel = wall & (c[:, 0] > 1e-9) & (c[:, 1] < -1e-9)
     d = -c[sel, 1]; qq = q[sel]; o = np.argsort(d)
     d, qq = d[o], qq[o]
     print(f"{Path(a.vtu).name}: 壁節点 {int(wall.sum())}, 下流側すきま壁 {len(d)}")

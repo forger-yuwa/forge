@@ -7,6 +7,13 @@
 #
 # これを唯一の forge 実行経路にすることで「forge を回したら収束チェック」を強制する
 # (PreToolUse フックが直接 build/forge を弾く)。
+#
+# **実行中にこのファイルを編集しないこと** (2026-09-20 に事故): bash はスクリプトを
+# バイト位置で逐次読むので、長時間 run の最中に行を挿入すると forge 終了後の再開位置が
+# ずれ、コメントの途中から実行されて **forge 起動行をもう一度実行する**。
+# 実例: `case/56/run_0009_gap_t8_uniform` が 800k step 完了直後に 2 周目を始め、
+# `residual_history.csv` が上書きされた (`launch.log` に `command not found` が残る)。
+# 編集が要るときは、走っている run が無いことを確かめてからにする。
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial:${LD_LIBRARY_PATH:-}
