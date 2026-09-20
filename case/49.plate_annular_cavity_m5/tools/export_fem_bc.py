@@ -143,7 +143,48 @@ def main():
                 lines.append("%.4g," % th + ",".join(
                     ("" if not np.isfinite(v) else "%.6g" % v) for v in gd["qpp_W_m2"][i]))
             f.write_text("\n".join(lines) + "\n")
-    print("wrote %s/network.json と q'' 分布 CSV" % out)
+    # **README も書く** (docstring で書くと言っているのに出していなかった)
+    G = gc.load_manifest(run=Path(a.runs[0]))["geometry"]
+    rd = """# case/49 環状深キャビティ — FEM 受け渡し
+
+形状: 外径 %.1f / 内径 %.1f / 深さ %.1f mm、偏心 %.1f mm。マッハ %.1f、半割モデル。
+
+## 使い方
+
+`Q_i = G_i0 (T_aw - T_i) + sum_j G_ij (T_j - T_i)` + 放射 で渡す。
+
+1. **対流 BC**: 各壁に `T_gas = T_aw = %.1f K` 固定、`h_i = G_i0 / A_i`
+   (外筒内壁 %.3f / 円柱側面 %.3f / 底面 %.3f W/m2K)。
+2. **壁間結合**: 壁面どうしに線形コンダクタンス `G_ij` を張る (面間熱伝達要素)。
+   **これを省くと符号を間違える** — 外筒 1000 degC / 円柱 20 degC のとき外筒の
+   正味入熱は **-12.7 W (放熱側)** だが、壁間項を落とすと +37.5 W になる。
+3. **放射**: `network.json` の `radiation` の式で面間放射を張る。**線形化しない**。
+   放射率 0.4 以上で対流の壁間結合を上回る (0.8 で 4 倍)。
+4. **リップ**: `qpp_*.csv` の開口端 %.1f mm は帯積分入熱を保存したまま均してある。
+   評価時刻 t に対し `eps <= sqrt(alpha t)` を満たす幅か確認すること
+   (秒オーダーなら 1 mm、0.1 s 以下なら 0.5 mm 以下)。
+
+## やってはいけないこと
+
+- **一様壁温の h の包絡を上限として使う**。側壁で 2 倍過大・底面で 5.8 倍過小になり、
+  条件によっては符号も逆になる (plan §4.7.6)。
+- 壁温 %.0f-%.0f K の外を外挿する。
+- 同心の係数を偏心に (またはその逆に) 流用する。底面の `G_i0` が 15 倍違う。
+
+## ファイル
+
+- `network.json` … G_i0 / G_ij / T_aw / 面積 / 放射 / リップ / 適用範囲
+- `qpp_<壁>_Tw<温度>K.csv` … q''(theta, z) [W/m2]。行 = theta [deg] (0=上流, 180=下流)、
+  列 = z [m] (底面・円柱上面は半径 r [m])。**壁に入る側が正、半割**。
+
+出典 run: %s
+""" % (2 * G["Ro"] * 1e3, 2 * G["Ri"] * 1e3, G["depth"] * 1e3, G["x_off"] * 1e3,
+       net["mach"], Taw, net["h_i0_W_per_m2K"]["cav_outer"],
+       net["h_i0_W_per_m2K"]["cyl_side"], net["h_i0_W_per_m2K"]["cav_floor"],
+       a.eps_mm, net["validity"]["wall_T_range_K"][0], net["validity"]["wall_T_range_K"][1],
+       ", ".join(net["source_runs"]))
+    (out / "README.md").write_text(rd)
+    print("wrote %s/network.json, README.md と q'' 分布 CSV" % out)
     print("  G_i0 [W/K]:", {k: round(v, 5) for k, v in net["G_i0_W_per_K"].items()})
     print("  G_ij [W/K]:", {k: round(v, 5) for k, v in net["G_ij_W_per_K"].items()})
     print("  h_i0 [W/m2K]:", {k: round(v, 3) for k, v in net["h_i0_W_per_m2K"].items()})
