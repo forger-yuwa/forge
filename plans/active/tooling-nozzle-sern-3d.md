@@ -565,6 +565,37 @@ NaN 節点 75 個の分布は x 1.0702–1.0808 / y 0.2694–0.2791 で、**ベ�
 2. **残差プラトー**。積分量は STEADY なので設計チェーンの目的量は取れるが、
    `require_residual_pass` を立てると落ちる。プルーム側の振動源を特定するまではゲートを積分量で見る。
 
+### 4.19 R4e 有限ベース 2D が**通しで完走** — 生産レシピ確定 (2026-09-20)
+
+§4.18 の残課題「起動が不安定」を潰した。soft 段の CFL が高すぎたのが原因:
+
+| soft の設定 | 結果 |
+| --- | --- |
+| `soft_cfl: 1.0` 固定 (`run_0301`) | **soft 段 step 229 で NaN** |
+| `soft_ramp: [0.2, 0.5, 1.0]` (`run_0307`) | 0.2 と 0.5 の脚は通り、**1.0 の脚で step 87 NaN** |
+| **`soft_ramp: [0.2, 0.35, 0.5]`, `soft_cfl: 0.5`** (`run_0308`) | **全段通過** |
+
+**`run_0308_wake_soft05` (`problem_r4e_2d_base_wake_soft05.yaml`) — 通しで完走**:
+
+- 段: warm 0.1 → 0.3 → 1.0 (層流) / soft 0.2 → 0.35 → 0.5 (SST, 1 次) / mid 0.2 → 0.35 → 0.5 (2 次) / 本段 8000 step cfl 1.0。
+- 設計チェーンの **`GATES: PASS`** (`fail_class=None`, `reasons=[]`)、目的量 **`C_T_with_shear` = 0.9154138**
+  (`C_T` 0.9244435, `C_M` −7.368420)。
+- `check_quasisteady.py` **`OVERALL: ALL STEADY`** (81 スナップショット。shock / machmax 8.559 / pmax 1.206e5、drift 0.0 %/tail・fluct 0.0 %)。
+- `check_convergence.py` **`NOT CONVERGED (stalled/plateau)`**。全列 1.5〜2.3 桁低下してプラトー。
+  §4.18 と同じ**残差のリミットサイクル**で、ベース領域は静止している。
+
+**生産レシピ (2D 有限ベース `t_base > 0`)** — ベース無しの値とは別物なので取り違えないこと:
+
+| 項目 | 有限ベース | ベース無し (従来) |
+| --- | --- | --- |
+| `mesh.first_wake_frac` | **必須, ≤ `t_base/5`** (無いと生成が失敗する) | 不要 |
+| `opt.soft_ramp` / `soft_cfl` | **[0.2, 0.35, 0.5] / 0.5** | 1.0 |
+| `opt.cfl_main` | **1.0** (上限 3、4 で発散) | 5.0 |
+| `implicitRelax` / `nStepInner` / `lowMachPrecond` | **1.0 / 5 / 0** (変えると悪化: §4.17) | 同じ |
+
+**残件**: 残差プラトーの振動源 (プルーム側) の特定。積分量は STEADY なので目的量は取れるが、
+`opt.require_residual_pass` は立てられない。
+
 ## 5. 実装ステップ
 
 本体 plan §5 の R4 系を引き継ぐ。着手順は §4.15.3 末尾 (codex plan-3 の指定):
