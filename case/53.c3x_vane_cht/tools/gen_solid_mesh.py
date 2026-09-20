@@ -52,7 +52,7 @@ def load_holes(vane):
     return rows
 
 
-def resample_closed(P, n, curv_weight=6.0, kappa_ref=2.0):
+def resample_closed(P, n, curv_weight=6.0, kappa_ref=2.0, curv_smooth=0):
     """閉曲線を**曲率重み付き**で n 点に再標本化する (流体・固体で共通。界面節点を一致させる)。
 
     弧長等間隔だと**後縁 (R=1.7 mm) に 4 点しか載らず**、2 µm の境界層セルと組み合わさって
@@ -71,6 +71,15 @@ def resample_closed(P, n, curv_weight=6.0, kappa_ref=2.0):
         ab = np.linalg.norm(b - a); bc = np.linalg.norm(c - b); ca = np.linalg.norm(a - c)
         area2 = abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]))
         kap[i] = 0.0 if ab * bc * ca < 1e-12 else 2.0 * area2 / (ab * bc * ca)
+    # **曲率推定のノイズが節点間隔に乗り、解の 2 節点モードを強制する** (2026-09-20)。
+    # 3 点円の kappa は平滑化した輪郭 (3200 点) の上でも **16.6 %** 交番しており、
+    # これが curv_weight を通して壁の接線間隔に **2.78 %** の交番を作る (メッシュ実測 2.80 %)。
+    # 解の側では第一内部点の T が 0.083 K 交番し、SU2 (同一メッシュ) の 20 倍になる。
+    # 弧長等間隔 (curv_weight=0) なら 0.01 % だが、後縁 (R=1.7 mm) に 4 点しか載らず発散する。
+    # **kappa だけを平滑化してクラスタリングは残す** のが正解: 80 回で 0.86 %、min/max は 153/967 µm のまま。
+    # curv_smooth=0 で従来とビット同一。case/53 README「メッシュ由来の強制」。
+    for _ in range(int(curv_smooth)):
+        kap = 0.25 * np.roll(kap, 1) + 0.5 * kap + 0.25 * np.roll(kap, -1)
     dens = 1.0 + curv_weight * np.minimum(kap / kappa_ref, 1.0)
     dens_s = np.concatenate([dens, dens[:1]])
     w = 0.5 * (dens_s[:-1] + dens_s[1:]) * seg          # 重み付き弧長

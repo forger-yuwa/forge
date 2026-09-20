@@ -128,13 +128,17 @@ def main():
     # run_0026 73.26° で壁圧の bias/rms が 4 桁まで同一、出口気流角も 73.07 / 73.06°)。
     # 周期の出口ブロックは流れの向きを決めず、流れが自分で出口角を決める。
     # したがって後縁側に残る壁圧欠損の原因ではない (case/53 README「負圧面後縁の壁圧」)。
+    ap.add_argument("--curv-smooth", type=int, default=0,
+                    help="壁節点の再標本化に使う曲率を平滑化する回数 (0=従来)。"
+                         "曲率推定のノイズが接線間隔の 2 節点交番を作り、解の市松を強制する "
+                         "(case/53 README「メッシュ由来の強制」)。80 で 2.78%% -> 0.86%%")
     ap.add_argument("--exit-angle", type=float, default=None,
                     help="出口気流角 [deg] を上書き (既定は GEOM の表 IV 設計値)")
     a = ap.parse_args()
 
     g = GEOM[a.vane]
     P = load_profile(a.vane)
-    wall, arc = resample_closed(P, a.n_wall)
+    wall, arc = resample_closed(P, a.n_wall, curv_smooth=a.curv_smooth)
     bx = P[:, 0].max() - P[:, 0].min()
     x_in = a.x_in if a.x_in is not None else P[:, 0].min() - 1.0 * bx
     x_out = a.x_out if a.x_out is not None else P[:, 0].max() + 1.5 * bx
