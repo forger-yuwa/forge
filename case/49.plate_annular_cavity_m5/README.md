@@ -84,16 +84,16 @@ tools/cavity_eval.py --> 温度/熱流束/侵入深さ/開口流束 + 時系列 
 | `run_*` | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
 | --- | --- | --- | --- |
 | **TP 入口系列 (2026-09-21 正本)** | ↓ `run_0419`〜`run_0428`。codex result M1 (前駆が CPG のままで入口総温が主流 Tt を 92.8 K 超過) を受け、前駆を TP にして**全 9 ケースを回し直した**系列。熱回路 6 係数の正本はここ | plan §4.3.1 / §4.7.7 / §4.7.11 | — |
-| `run_0419_s2_off000_tw20_tpinlet` | 同心・壁温 20 ℃・**TP 前駆入口**。CPG 入口との A/B 基準 | 総入熱の差 **−0.05 %** (入口 EOS の影響は小さい)。`GATES: PASS` | active (熱回路の入力) |
-| `run_0420_s2_off000_tw500_tp` | 同心・500 ℃・TP 入口 | 熱回路同定の入力。`GATES: PASS` | active |
-| `run_0421_s2_off000_tw1000_tp` | 同心・1000 ℃・TP 入口 | 熱回路同定の入力。`GATES: PASS` | active |
-| `run_0422_s2_off200_tw20_tp` → **`_ext2`** | 偏心 2 mm・20 ℃・TP 入口 | 収支残差 +2.49 %。`GATES: PASS` | active |
-| `run_0423_s2_off200_tw500_tp` → **`_ext2`** | 偏心・500 ℃・TP 入口 | `GATES: PASS` | active |
-| `run_0424_s2_off200_tw1000_tp` → **`_ext2`** | 偏心・1000 ℃・TP 入口 | `GATES: PASS` | active |
-| `run_0425_s2_off000_mixA_tp` → **`_ext2`** | 同心 **mixA** (側壁・リップ 1000 ℃ / 底面 20 ℃)・TP 入口 | 収支残差 **−5.80 %**。`GATES: PASS` | active (熱回路の入力) |
-| `run_0426_s2_off000_mixB_tp` → **`_ext2`** | 同心 **mixB** (外筒 1000 / 円柱 20 / 底面 500 ℃)・TP 入口 | 収支残差 +1.23 %。`GATES: PASS` | active (熱回路の入力) |
-| `run_0427_s2_off200_mixA_tp` → **`_ext2`** | 偏心 **mixA**・TP 入口 | 収支残差 **−7.52 % (許容 7 % 超過) → `GATES: FAIL`**。偏心の熱回路係数が暫定扱いなのはこの run のため (plan §5.1 #41) | active (要再検証) |
-| `run_0428_s2_off200_mixB_tp` | 偏心 **mixB**・TP 入口 | 収支残差 +2.67 %。`GATES: PASS` | active (熱回路の入力) |
+| `run_0419_s2_off000_tw20_tpinlet` → **`_tp_ext1`** | 同心・壁温 20 ℃・**TP 前駆入口**。CPG 入口との A/B 基準。親はスナップショット 3 枚で準定常が判定不能だったため 48000 step 延長 (`out-int 8000` で 7 枚) | 総入熱の差 **−0.05 %** (入口 EOS の影響は小さい)。延長版は `GATES: PASS` (収支 0.028、準定常 `STEADY (全量)`、壁解像 CAVEAT: y1⁺>1 が外筒 33.3 % / `cyl_top` 100 %) | active (熱回路の入力) |
+| `run_0420_s2_off000_tw500_tp` → **`_tp_ext1`** | 同心・500 ℃・TP 入口。同じ理由で延長 | 延長版 `GATES: PASS` (収支 0.004、壁解像 CAVEAT) | active |
+| `run_0421_s2_off000_tw1000_tp` → **`_tp_ext1`** | 同心・1000 ℃・TP 入口。同じ理由で延長 | 延長版 `GATES: PASS` (収支 0.002、壁解像 CAVEAT) | active |
+| `run_0422_s2_off200_tw20_tp` → **`_ext2`** | 偏心 2 mm・20 ℃・TP 入口 | 全流束の収支残差 −2.73 %。`GATES: PASS` | active |
+| `run_0423_s2_off200_tw500_tp` → **`_ext2`** | 偏心・500 ℃・TP 入口 | 全流束の収支残差 −1.09 %。`GATES: PASS` | active |
+| `run_0424_s2_off200_tw1000_tp` → **`_ext2`** | 偏心・1000 ℃・TP 入口 | 全流束の収支残差 −0.90 %。`GATES: PASS` | active |
+| `run_0425_s2_off000_mixA_tp` → **`_ext2`** | 同心 **mixA** (側壁・リップ 1000 ℃ / 底面 20 ℃)・TP 入口 | **全流束の収支残差 −12.18 %** (対流のみなら −5.80 %) で許容 5 % 超過 → **`GATES: FAIL`**。切り分けは plan §4.8.6.2 | active (要再検証) |
+| `run_0426_s2_off000_mixB_tp` → **`_ext2`** | 同心 **mixB** (外筒 1000 / 円柱 20 / 底面 500 ℃)・TP 入口 | 全流束の収支残差 −2.72 %。`GATES: PASS` | active (熱回路の入力) |
+| `run_0427_s2_off200_mixA_tp` → **`_ext2`** | 偏心 **mixA**・TP 入口 | **全流束の収支残差 −10.00 %** (対流のみなら −7.52 %) → **`GATES: FAIL`**。熱回路係数が同心・偏心とも暫定扱いなのはこの run と `run_0425` のため (plan §5.1 #41) | active (要再検証) |
+| `run_0428_s2_off200_mixB_tp` | 偏心 **mixB**・TP 入口 | 全流束の収支残差 −3.75 %。`GATES: PASS` | active (熱回路の入力) |
 | `run_0410_s2_off200_mixA_side1000_floor20` / `run_0411_..._mixB_ext1` | 偏心の非一様壁温 (CPG 入口)。TP 版は `run_0427` / `run_0428` | 偏心熱回路の初版 (§4.7.11 の旧値) | ref |
 | `run_0412_s2_off000_tw20_up10_ext1` | `cyl_top` 第一層 20→10 µm の A/B (#18) | y1⁺ 4.47→2.23、`cyl_top` の q'' +14.6 %。キャビティ 3 壁は ±0.2 % で不変 | ref |
 | `run_0413_s2_off000_tw20_relax1` | `implicitRelax` 1.0 (緩和なし) の感度 (#11) | 解の移動 **0.007 %** = relax は解を動かさない。**スナップショット間引きで準定常は再検証不能** (plan §4.8.5) | ref |
