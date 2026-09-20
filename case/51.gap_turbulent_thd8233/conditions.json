@@ -1,0 +1,129 @@
+{
+  "_source": "NASA TN D-8233 (Throckmorton 1976) — 本文・Appendix・Fig 4 / Fig 8(a) を 200-260 dpi 描画から目視で読み取り (2026-09-19)",
+  "_status": "T2-G0 (試験再構成) の入力台帳。計算はまだ実施していない",
+  "facility": "Langley continuous-flow hypersonic tunnel (78.74 cm 角試験部)、試験気体 空気",
+  "M": 10.3,
+  "model": {
+    "kind": "flat plate + single transverse gap (配列ではない)",
+    "gap_width_cm": 0.229,
+    "gap_depth_cm": 4.572,
+    "depth_over_width": 19.97,
+    "skin": {
+      "material": "304 SS",
+      "thickness_cm": 0.0406,
+      "n_thermocouples": 21,
+      "location": "midspan"
+    },
+    "upstream_plate": {
+      "material": "brass",
+      "thickness_cm": 0.3175,
+      "heaters_W": [
+        350,
+        400,
+        400,
+        400
+      ]
+    },
+    "downstream_plate": {
+      "material": "17-4 PH SS",
+      "heated": false,
+      "instrumented": false
+    },
+    "thermal_isolation": "すきまは断熱材 + 水冷通路で加熱板から熱的に絶縁",
+    "sweep_angle_deg": [
+      0,
+      22.5,
+      45,
+      60
+    ]
+  },
+  "reference": {
+    "h_definition": "h = q / (T_aw - T_w)",
+    "T_aw": "T_inf + 0.89 (T_t - T_inf)   (乱流 r = 0.89)",
+    "h_fp_correlation": "h_fp = C * Re_inf^0.69   [W/(m^2 K)], Re_inf [1/m]  (Appendix (A2); 元は N_St Re_{w,theta}^0.07 = const)",
+    "C_digitized": 7.95e-05,
+    "_C_note": "Appendix 図の 4 点 (1.5e6→1.45, 3.3e6→2.50, 6.1e6→3.75, 7.8e6→4.6 W/m2K) から。式との差は ±2 %",
+    "_warning": "test ごとの smooth 実測ではなく**相関値**。CFD 側も同じ演算で h/h_fp を作る"
+  },
+  "boundary_layer": {
+    "_source": "Fig 4 (目視読み取り、対数軸のため ±5 %)",
+    "_note": "トンネル側壁の厚い乱流 BL。すきま幅の 46-56 倍という巨大なスケール分離",
+    "series": [
+      {
+        "Re_m": 1470000.0,
+        "dstar_cm": 12.8,
+        "dstar_over_w": 56,
+        "theta_cm_reported": 1.42,
+        "theta_over_w_reported": 6.2
+      },
+      {
+        "Re_m": 3320000.0,
+        "dstar_cm": 11.5,
+        "dstar_over_w": 50,
+        "theta_cm_reported": 1.19,
+        "theta_over_w_reported": 5.2
+      },
+      {
+        "Re_m": 6100000.0,
+        "dstar_cm": 10.8,
+        "dstar_over_w": 47,
+        "theta_cm_reported": 1.08,
+        "theta_over_w_reported": 4.7
+      },
+      {
+        "Re_m": 7820000.0,
+        "dstar_cm": 10.5,
+        "dstar_over_w": 46,
+        "theta_cm_reported": 1.03,
+        "theta_over_w_reported": 4.5
+      }
+    ],
+    "_THETA_DEFINITION": "2026-09-20: Fig 4 を原典で再読し digitize は正しいと確認した (右パネルが w=0.229 cm 明記で delta*/w=56, theta/w=6.3 を直接プロット)。報告の H=8.89 は M 10.3 の圧縮性(質量流束)定義では出ない (どの T_w・速度冪でも 24 以上)。定義の組合せを総当たりすると delta*(圧縮性)/theta(運動学) だけが 8.9 に届き、delta* 固定の再構成は報告 theta を運動学定義で 1.31-1.41 倍まで再現する。→ **報告の theta は圧縮性運動量厚さではない**と判断。CFD 用の圧縮性 theta は bl_derived.json。確定には出典 ref.6 (TM X-71945) が要る。"
+  },
+  "temperature_ratio_series": {
+    "_source": "Fig 8(a) (掃引角 0°)。**公称 1.0/1.2/1.4/1.6 ではなく Re 系列ごとに実測値が違う**",
+    "1.47e6": [
+      1.0,
+      1.19,
+      1.37,
+      1.61
+    ],
+    "3.32e6": [
+      1.0,
+      1.18,
+      1.34,
+      1.52
+    ],
+    "7.82e6": [
+      1.0,
+      1.17,
+      1.38,
+      1.59
+    ]
+  },
+  "measured_range": {
+    "basic_distributions": "Fig 5-7 は主に z/W <= 6",
+    "solid_symbols": "極端に低く精度に疑義のあるデータ (本文明記) → 精度検証から除外する",
+    "key_observations": [
+      "後壁 > 前壁 は z/W < 4。z/W > 5 では両壁ほぼ等しい",
+      "T_surf/T_gap 増で上端の h 増・深部の h 減、反転は 2 < z/W < 3",
+      "Re 増で上端の無次元 h 減・深部増"
+    ]
+  },
+  "open_items": [
+    "**ref.6 (TM X-71945) の入手** — theta の定義と還元手順の確定。T2 流入場と Gate B が依存",
+    "加熱板の長さと温度分布",
+    "Fig 5-8 の h/h_fp 分布の digitize",
+    "2D 中央断面近似の妥当性 (TH75 は横方向の BL 分布変化・壁圧と自由流静圧の差を明記)",
+    "BL 分布の原典は ref.6 (Throckmorton, NASA TM X-71945) — 速度分布はそちらにある"
+  ],
+  "test_procedure": "模型は射出室内 (試験部静圧と同圧) で隔離 → 加熱板を所定温度へ → **ヒータとすきま冷却を切り** → 高速射出。すきま内は射出時点で等温 (T_gap) なので、薄肉スキンへの熱流束はステップ入力になる。データは 20 Hz × 約 5 秒記録し、その後引き戻す。加熱板の局所温度は平均の ±3 % 以内",
+  "stagnation_pressure_MN_m2": {
+    "1.5e6": 2.41,
+    "3.3e6": 5.34,
+    "7.8e6": 12.07
+  },
+  "_resolved": {
+    "T_t": "1090 K (Gate A: Pt-M-Re' から 3 系列独立に解いて 1112/1096/1063 K, ばらつき 4.5 %)"
+  }
+}

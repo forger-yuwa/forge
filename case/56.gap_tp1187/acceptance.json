@@ -1,0 +1,108 @@
+{
+  "_about": "T4 (TP-1187) の合否基準。AGENTS.md の VERDICT 規律と plan §4.10 に対応する事前登録ファイル。",
+  "_honesty_rule": "status が pre_registered の項目だけが『事前登録』である。post_hoc は結果を見てから書いた観察であり、合否の根拠に使わない。事後に数値を緩めた場合は必ず revisions に残す。",
+  "_written": "2026-09-20",
+  "_plan": "plans/active/case-hypersonic-gap-heating-validation.md",
+
+  "gates": [
+    {
+      "id": "T4-A",
+      "name": "条件再構成 (Gate A)",
+      "status": "post_hoc",
+      "_why_post_hoc": "2026-09-20 に先に実施済み。ここには実施済みの基準を記録として残すだけで、再判定には使わない。",
+      "quantity": "回復係数 q_dyn から解いた Pt_test の妥当性",
+      "criterion": "recovery 0.2-0.35 の範囲に全 17 run が入る",
+      "observed": "0.248-0.311 (中央値 0.287) — 満たす"
+    },
+    {
+      "id": "T4-B",
+      "name": "分母 q_FP の再現 (Gate B)",
+      "status": "post_hoc",
+      "_why_post_hoc": "解析参照温度法との比較を先に見てから帯を書いた。codex result-2 の指摘どおり、これは事前登録ではない。",
+      "quantity": "q_FP,forge / q_FP,measured (較正パネル冷壁)",
+      "criterion": "1.10 および 1.30 を中心に ±0.25",
+      "observed": "run_0002_fp_t8_long で 1.188 / 1.219 — 満たす。ただし生産モデルの Gate B は最大 20.26 % で FAIL"
+    },
+
+    {
+      "id": "T4-X",
+      "name": "SU2 クロスチェック (#38)",
+      "status": "partially_pre_registered",
+      "_why": "forge 側 (run_0008_xcheck_forge2) の深部 q_w は既に見ている。SU2 側および両者の比は未見なので、比に対する基準はこの時点で確定させる。forge の値を知った上で書いている点は割り引いて読むこと。",
+      "written_before_seeing": ["SU2 の全出力", "forge/SU2 の比"],
+      "already_seen": {
+        "forge_deep_qw_W_per_m2": {"1.39": 2.99e3, "4.22": 5.65, "8.44": 2.73, "21.17": 2.84},
+        "_note": "z/W=1.39 のみ kW 級。4.22 以深は O(1) W/m² で、これは丸め・数値散逸と区別がついていない量。"
+      },
+      "criteria": [
+        {
+          "key": "X1_shallow",
+          "quantity": "z/W <= 2 の壁熱流束 q_w の forge/SU2 比",
+          "criterion": "0.5 - 2.0 (係数 2 以内) なら『ソルバ依存でない』",
+          "rationale": "この深さは物理的に有意な熱流束 (kW/m²) があり、離散化差は係数 2 に収まるべき。"
+        },
+        {
+          "key": "X2_deep",
+          "quantity": "z/W >= 4 の q_w",
+          "criterion": "両ソルバとも浅部の 1e-3 倍未満なら『深部は両ソルバで同様に静穏』。比そのものは判定に使わない。",
+          "rationale": "O(1) W/m² は forge の float32 ULP 帯と同程度で、比は意味を持たない。桁の一致だけを見る。"
+        },
+        {
+          "key": "X3_deep_velocity",
+          "quantity": "深部 (z/W >= 4) の |U| の準定常性",
+          "criterion": "両ソルバとも check_quasisteady 相当で末尾が頭打ち。片方だけ緩和が遅い場合は『未収束につき判定不能』とし、差を物理差と呼ばない。",
+          "rationale": "第 1 版で SU2 が 40k 反復でも深部に 200 m/s を残した。緩和の遅さ自体はソルバ固有でない。"
+        },
+        {
+          "key": "X4_integral",
+          "quantity": "開口から深さ 4W までの区間熱量 Q_c [W/m]",
+          "criterion": "forge/SU2 が 0.7 - 1.4 (±30-40 %)。外れたら forge 固有の疑いとして切り分けを続ける。",
+          "rationale": "局所値より積分量のほうが離散化差に鈍い。"
+        }
+      ],
+      "disqualifiers": [
+        "どちらかの run に NaN/Inf がある",
+        "SU2 が Error Exit した (2026-09-20 の FGMRES subspace 事故のような設定起因を含む)",
+        "メッシュが同一 gmsh モデル由来でない",
+        "μ, γ, R, Pr, 壁温, 入口状態のいずれかが xcheck_state.json と一致しない"
+      ]
+    },
+
+    {
+      "id": "T4-3D",
+      "name": "3D (縦すきま × 横すきま) の深さ分布照合 (#27)",
+      "status": "pre_registered",
+      "_why": "計算がまだ存在しない。完全な事前登録。",
+      "reference": "TP-1187 run 8 位置 II、TC 87-92 (深さ 3.81 / 2.54 / 1.52 / 0.76 / 0.51 / 0.25 cm)",
+      "observation_model": "薄肉スキン (304SS, 0.8 mm) の順方向過渡を必ず通す (#24)。生の q_conv と実測を直接比較しない。",
+      "criteria": [
+        {
+          "key": "D1_impinging",
+          "quantity": "縦すきま中心線断面 (実測 TC がある断面) の h/h_FP 深さ分布",
+          "criterion": "観測モデル適用後の CFD 帯が、実測 6 点のうち 4 点以上を覆う",
+          "band": "薄板のリップ熱的接続を断熱端/連続端の両極で挟んだ帯 + 測定精度 ±0.68 kW/m²",
+          "rationale": "case/50 では全点を覆えなかった。4/6 は『使える照合』の下限としてここで固定する。"
+        },
+        {
+          "key": "D2_monotonic",
+          "quantity": "深さ方向の単調減衰",
+          "criterion": "CFD・実測とも z/W に対して単調減少 (局所反転は隣接点比 1.2 倍以内なら許容)",
+          "rationale": "分布の形が合わなければ点別の一致は偶然。"
+        },
+        {
+          "key": "D3_bare_lateral",
+          "quantity": "タイル中心線断面 (給気されない素の横すきま) の深さ分布",
+          "criterion": "照合対象ではない。D1 が合格した計算からのみ case/49 へ渡す。",
+          "rationale": "実測がない断面なので、検証済みの計算からの外挿であることを明記して渡す。"
+        }
+      ],
+      "disqualifiers": [
+        "D1 が不合格なら D3 を case/49 へ渡さない",
+        "check_convergence / check_quasisteady が DRIFTING のまま報告する",
+        "check_wall_resolution が FAIL"
+      ]
+    }
+  ],
+
+  "revisions": []
+}

@@ -1,0 +1,52 @@
+{
+  "_about": "数値誤差の上限。acceptance.json の帯は『物理モデル誤差 + ここの数値誤差』を含んだ幅として読む。",
+  "_written": "2026-09-20",
+
+  "precision": {
+    "forge_float32_ulp_at_300K": 3.05e-5,
+    "_unit": "K",
+    "_note": "深部の T 変動がこの数倍以内なら物理解と丸めを分離できない。q_w が O(1) W/m² の深部は同じ理由で『検出限界帯』として扱う。",
+    "measurement_precision_W_per_m2": 680.0,
+    "_measurement_note": "TP-1187 の薄板過渡法の読み取り精度 ±0.68 kW/m² (codex result-2 M8)。実測側の帯はこれを必ず含める。"
+  },
+
+  "grid": {
+    "policy": "量別に誤差を出す (実測座標の局所値 / 深部区間熱量 / 総入熱)。非単調なら GCI を形式適用せず『未解決』とする。",
+    "levels_required": 3,
+    "max_relative_error": {
+      "local_q_at_measured_points": 0.10,
+      "interval_heat_Q_c": 0.05,
+      "total_heat_input": 0.03
+    },
+    "wall_resolution": "check_wall_resolution.py で局所 y1+ <= 1。超過面積割合と位置を必ず報告する。",
+    "mesh_quality": "check_mesh_quality.py: AR <= 1000, skew <= 0.9。壁法線構造格子の境界層層のみ AR <= 5000 (明記必須)。"
+  },
+
+  "iteration": {
+    "policy": "残差プラトーは収束ではない。報告量ごとに check_quasisteady.py の VERDICT を貼る。",
+    "required_verdicts": {
+      "reported_scalar": ["STEADY"],
+      "acceptable_with_caveat": ["OSCILLATING (平均±振幅で報告)"],
+      "not_reportable": ["DRIFTING", "TRANSIENT-UNSETTLED"]
+    },
+    "steady_drift_max_per_tail": 0.01,
+    "_note": "STEADY でも単調なら漸近値を併記する (AGENTS.md)。"
+  },
+
+  "cross_solver": {
+    "_about": "T4-X の判定に使う数値的な許容。物理差でなく離散化差として許す幅。",
+    "matched_state_file": "xcheck_state.json",
+    "allowed_state_mismatch": 0.0,
+    "_state_note": "μ, γ, R, Pr, 壁温, 入口状態は完全一致が条件 (第 1 版はここで 9.3 % ずれて無効になった)。",
+    "shallow_q_ratio": [0.5, 2.0],
+    "interval_heat_ratio": [0.7, 1.4]
+  },
+
+  "observation_model": {
+    "skin_material": "304SS",
+    "thickness_m": 0.0008,
+    "alpha_s_m2_per_s": 3.797e-6,
+    "lip_boundary": ["adiabatic", "continuous"],
+    "_note": "両極を必ず計算し、帯として報告する。片側だけの値を『補正後』と呼ばない (case/50 で z/W=2 が 0.112 ↔ 0.316 と 3 倍動いた)。"
+  }
+}

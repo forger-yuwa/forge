@@ -85,6 +85,13 @@
   `check_convergence.py <run> --segment` が**その最後の区間**を連結して判定する
   (段名のプレフィックスでは方程式・BC・離散化の同一性を保証できない)。
   区間の確認は `python3 solver_density_cuda/tools/stage_manifest.py <run> --segments`。
+- **収束ゲート (Stop フック) はセッション別スコープ** (2026-09-20)。`hook_convergence_gate.py` は
+  `case/*/run_*` をファイル状態だけで見るため、共有ワークツリーで並行作業すると**他セッションの run**で
+  ターン終了を block してしまう。そこで PreToolUse(Bash) の `hook_forge_guard.py` が
+  「このセッションが forge を回した case」を `forge_gate_claims.py` 経由で claim し、Stop 側は
+  **claim した case の run だけ**を検査する。`session_id` が取れないときは絞り込まず全件検査する
+  (ゲートを弱めない)。**他セッションの run ディレクトリに VERDICT を書きに行かないこと** —
+  block されたらその旨を伝えて止まる。
 - **判定ツールが「判定不能」を返したら、それは合格ではない**。残差列が無い / 必須の保存量列が
   欠けている / 末尾窓の代表値が 0 といった入力は、以前は**合格として通っていた** (2026-09-19 修正)。
   回帰試験は `python3 solver_density_cuda/tools/test_gate_bad_input.py`。判定ロジックを触るときは必ず通す。
