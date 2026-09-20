@@ -56,11 +56,13 @@ initial: "uniform_p101325_u10"
 output: {{level: 1, extraFields: [thermCond, vis_lam, vis_turb]}}
 """
 
-BC = """inlet:  {{physID: 1, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , floats: {{ro: {ro:.8f}, Ux: {U:.4f}, Uy: 0.0, Uz: 0.0, Ps: {p:.6f}, k: {kinf:.4f}, omega: {ominf:.2f}, {ymf}}}}}
+BC = """inlet:  {{physID: 1, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: {ints}, floats: {{ro: {ro:.8f}, Ux: {U:.4f}, Uy: 0.0, Uz: 0.0, Ps: {p:.6f}, k: {kinf:.4f}, omega: {ominf:.2f}, {ymf}}}}}
 outlet: {{physID: 2, kind: outlet_statPress, outputHDFflg: 0, ints: , floats: {{Ps: {p:.6f}, Pt: {p:.6f}, Tt: {t:.4f}}}}}
 top:    {{physID: 3, kind: slip, outputHDFflg: 0, ints: , floats: }}
 plate:  {{physID: 4, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {{Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: {tw:.2f}}}}}
 slip:   {{physID: 5, kind: slip, outputHDFflg: 0, ints: , floats: }}
+"""
+BC_GAP = """gap:    {{physID: 6, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {{Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: {tw:.2f}}}}}
 """
 
 
@@ -98,6 +100,9 @@ def main():
     ap.add_argument("--cfl", type=float, default=1.5)
     ap.add_argument("--main-steps", type=int, default=40000)
     ap.add_argument("--out-int", type=int, default=5000)
+    ap.add_argument("--inlet-table", default=None,
+                    help="入口分布の測定表 (空白区切り, ヘッダ y ro Ux Uy Uz Ps k omega Y0..)。"
+                         "与えると bcond に inletProfile: 1 を付け inlet_profile_1.csv を作る")
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args()
 
@@ -119,8 +124,13 @@ def main():
     (rd / "probe.yaml").write_text(
         "outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n", encoding="utf-8")
     ymf = ", ".join(f"Y{i}: {gas.Y[sp]:.8f}" for i, sp in enumerate(SPECIES))
-    (rd / "bcondConfig.yaml").write_text(BC.format(
-        ro=rho, U=U, p=p, t=T, tw=a.tw, kinf=k_inf, ominf=om_inf, ymf=ymf), encoding="utf-8")
+    bc = BC.format(ro=rho, U=U, p=p, t=T, tw=a.tw, kinf=k_inf, ominf=om_inf, ymf=ymf,
+                   ints="{inletProfile: 1}" if a.inlet_table else "")
+    with h5py.File(rd / "mesh.h5", "r") as _f:
+        has_gap = "6" in _f["BCONDS"]
+    if has_gap:
+        bc += BC_GAP.format(tw=a.tw)
+    (rd / "bcondConfig.yaml").write_text(bc, encoding="utf-8")
     (rd / "case_setup.json").write_text(json.dumps(
         dict(tp1187_run=a.series, M=o["M"], T_inf=T, U_inf=U, rho_inf=rho, p_inf=p,
              mu_inf=mu, T_aw=o["T_aw"], Tt_c=o["Tt_c"], Tw=a.tw, mesh=a.mesh,
@@ -144,6 +154,11 @@ def main():
                                 out_int=a.out_int, **common)))
     (rd / "stages.json").write_text(json.dumps(
         [{**st, "tag": tag} for tag, st in stages], indent=2), encoding="utf-8")
+
+    if a.inlet_table:
+        subprocess.run([sys.executable, str(TOOLS / "gen_inlet_profile.py"), "gen",
+                        "--run", str(rd), "--physID", "1", "--table", a.inlet_table,
+                        "--axis", "y"], check=True)
 
     st0 = dict(rho=rho, U=U, T=T, p=p)
     m50.IC_DELTA0 = IC_DELTA0
