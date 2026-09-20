@@ -211,7 +211,12 @@ def main():
                 imb = abs(sum(vals[-n:]) / n)
         # **欠損はスキップでなく判定不能** (2026-09-20 codex result M4)。
         # 従来は `budget_residual` が JSON に無く、この検査が常に飛んでいた。
-        bud = abs(float(d.get("budget_residual", float("nan")))) if "budget_residual" in d else None
+        # **`field` の下を見る** (2026-09-20 修正)。トップレベルを見ていたため、
+        # `cavity_eval.py` が `field.budget_residual` に書いていても常に「無い」と判定し、
+        # 準定常 STEADY の run を 2 回ずつ無駄に延長していた。
+        fld = d.get("field", {})
+        bud = (abs(float(fld["budget_residual"])) if "budget_residual" in fld
+               else (abs(float(d["budget_residual"])) if "budget_residual" in d else None))
         if bud is None:
             print("[5] 保存性         : **判定不能** (cavity_eval.json に budget_residual が無い"
                   " — cavity_eval.py を新しい版で回し直すこと)")
