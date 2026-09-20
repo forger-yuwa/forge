@@ -34,8 +34,8 @@ def read_fig12():
     return out
 
 
-def verdict(run, quantity="Qc_per_span_W_m"):
-    """報告量の準定常判定 (AGENTS.md: 派生量を報告する応答には VERDICT を貼る)。"""
+def verdict(run, quantity="Qc_front_theory_W_m"):
+    """報告量の準定常判定。**一次比較量 (b) = 前壁置換後の熱量**の列を見る\n    (codex result-3 m1: 置換前の Qc で判定して置換後の量を報告していた)。"""
     csv = CASE / run / "cavity_series.csv"
     if not csv.exists():
         return "(cavity_series.csv なし — cavity_eval.py --series を先に回す)"
@@ -81,6 +81,30 @@ def main():
     print(f"  → 加算モデルが比例モデルより残差 {rms(Qm-k*Qf)/rms(Qm-Qf-c):.1f} 倍小さい。"
           f"傾きは {slope:.3f} (1 から {abs(1-slope)*100:.0f} %)。")
 
+    # --- 4 点の回帰をどこまで信じてよいか (codex result-3 M1) ---
+    # 「加算項は幅に依らない」と読むには、隣接幅の増分比が 1 付近で一定でなければならない。
+    # 実際には単調に落ちるので、**差は幅に依存する**。傾きも 1 点除くだけで大きく動く。
+    inc = (Qm[1:] - Qm[:-1]) / (Qf[1:] - Qf[:-1])
+    print("\n[この回帰をどこまで信じてよいか] — 4 点しかないことの帰結")
+    print("  隣接幅の増分比 ΔQ_meas/ΔQ_forge:")
+    for i, v in enumerate(inc):
+        print(f"     w/d {rows[i]['wd']:.3f} → {rows[i+1]['wd']:.3f} : {v:.3f}")
+    print(f"  → {inc[0]:.3f} → {inc[-1]:.3f} と**単調に落ちる**。加算項が幅に依らないなら"
+          f" 1 付近で一定のはずなので、**差は幅に依存する**。")
+    print("  1 点除外の傾き:")
+    los = []
+    for kk in range(len(Qf)):
+        m = np.ones(len(Qf), bool); m[kk] = False
+        sl, ic = np.linalg.lstsq(np.c_[Qf[m], np.ones(int(m.sum()))], Qm[m], rcond=None)[0]
+        los.append(float(sl))
+        print(f"     w/d={rows[kk]['wd']:.3f} を除く: 傾き {sl:.3f}, 切片 {ic:+.1f} W/m")
+    print(f"  → 傾きは {min(los):.3f}–{max(los):.3f} に動く。**「実測と 12 % 以内で一致」とは言えない**"
+          f" (最も狭い点に依存している)。")
+    print(f"  差そのもの {np.round(Qm-Qf,2)} W/m も単調でなく、最大は w/d={rows[int(np.argmax(Qm-Qf))]['wd']:.3f}。")
+    print("  ** 結論: これは 4 点への事後的な回帰であって、検証精度ではない。")
+    print("     測定・digitize・前壁理論補完・格子の誤差を傾きに伝播させ、独立条件で確かめるまで")
+    print("     case/49 へ定量値として渡さない。")
+
     print("\n[加算量の出所の上界] — 薄板リップの横方向伝導 (両リップ) が供給しうる量")
     qfp_typ = float(np.mean([r["qfp"] for r in rows]))
     for t in T_MEAS:
@@ -100,6 +124,12 @@ def main():
     out = dict(rows=[{k2: v for k2, v in r.items()} for r in rows],
                fit_proportional=k, fit_offset=c, fit_slope=float(slope), fit_intercept=float(icpt),
                rms_proportional=rms(Qm - k * Qf), rms_offset=rms(Qm - Qf - c),
+               increment_ratios=[float(x) for x in (Qm[1:]-Qm[:-1])/(Qf[1:]-Qf[:-1])],
+               leave_one_out_slopes=[float(np.linalg.lstsq(
+                   np.c_[Qf[np.arange(len(Qf)) != kk], np.ones(len(Qf)-1)],
+                   Qm[np.arange(len(Qf)) != kk], rcond=None)[0][0]) for kk in range(len(Qf))],
+               caveat="4 点への事後回帰。増分比が単調に落ちるので加算項は幅に依らない訳ではない。"
+                      "検証精度として引用しないこと (codex result-3 M1)。",
                lip_conduction_bound_W_per_m={str(t): 2 * qfp_typ * float(np.sqrt(ALPHA_S * t))
                                              for t in T_MEAS})
     (CASE / "width_scaling.json").write_text(json.dumps(out, indent=2, ensure_ascii=False),

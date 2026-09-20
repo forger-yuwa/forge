@@ -3,7 +3,6 @@
   "_honesty_rule": "status が pre_registered の項目だけが『事前登録』である。post_hoc は結果を見てから書いた観察であり、合否の根拠に使わない。事後に数値を緩めた場合は必ず revisions に残す。",
   "_written": "2026-09-20",
   "_plan": "plans/active/case-hypersonic-gap-heating-validation.md",
-
   "gates": [
     {
       "id": "T4-A",
@@ -23,15 +22,22 @@
       "criterion": "1.10 および 1.30 を中心に ±0.25",
       "observed": "run_0002_fp_t8_long で 1.188 / 1.219 — 満たす。ただし生産モデルの Gate B は最大 20.26 % で FAIL"
     },
-
     {
       "id": "T4-X",
       "name": "SU2 クロスチェック (#38)",
       "status": "partially_pre_registered",
       "_why": "forge 側 (run_0008_xcheck_forge2) の深部 q_w は既に見ている。SU2 側および両者の比は未見なので、比に対する基準はこの時点で確定させる。forge の値を知った上で書いている点は割り引いて読むこと。",
-      "written_before_seeing": ["SU2 の全出力", "forge/SU2 の比"],
+      "written_before_seeing": [
+        "SU2 の全出力",
+        "forge/SU2 の比"
+      ],
       "already_seen": {
-        "forge_deep_qw_W_per_m2": {"1.39": 2.99e3, "4.22": 5.65, "8.44": 2.73, "21.17": 2.84},
+        "forge_deep_qw_W_per_m2": {
+          "1.39": 2990.0,
+          "4.22": 5.65,
+          "8.44": 2.73,
+          "21.17": 2.84
+        },
         "_note": "z/W=1.39 のみ kW 級。4.22 以深は O(1) W/m² で、これは丸め・数値散逸と区別がついていない量。"
       },
       "criteria": [
@@ -67,26 +73,25 @@
         "μ, γ, R, Pr, 壁温, 入口状態のいずれかが xcheck_state.json と一致しない"
       ]
     },
-
     {
       "id": "T4-3D",
       "name": "3D (縦すきま × 横すきま) の深さ分布照合 (#27)",
       "status": "pre_registered",
       "_why": "計算がまだ存在しない。完全な事前登録。",
-      "reference": "TP-1187 run 8 位置 II、TC 87-92 (深さ 3.81 / 2.54 / 1.52 / 0.76 / 0.51 / 0.25 cm)",
+      "reference": "TP-1187 run 8 位置 II (θ=90°, W=0.18 cm, Pt,c=17.2 MPa, α=0.2°)、TC 87–92 (深さ 3.81 / 2.54 / 1.52 / 0.76 / 0.51 / 0.25 cm)。実測 q/q_FP = 0.00 / 0.05 / (欠) / 2.44 / 3.21 / 4.06",
       "observation_model": "薄肉スキン (304SS, 0.8 mm) の順方向過渡を必ず通す (#24)。生の q_conv と実測を直接比較しない。",
       "criteria": [
         {
           "key": "D1_impinging",
-          "quantity": "縦すきま中心線断面 (実測 TC がある断面) の h/h_FP 深さ分布",
-          "criterion": "観測モデル適用後の CFD 帯が、実測 6 点のうち 4 点以上を覆う",
-          "band": "薄板のリップ熱的接続を断熱端/連続端の両極で挟んだ帯 + 測定精度 ±0.68 kW/m²",
-          "rationale": "case/50 では全点を覆えなかった。4/6 は『使える照合』の下限としてここで固定する。"
+          "quantity": "縦すきま中心線断面の q/q_FP 深さ分布",
+          "criterion": "**検出限界 0.02 以上の実測点すべて**を、観測モデル適用後の CFD 帯が覆う (点数の閾値は設けない — 任意の点数基準で一次検証を成立させない)",
+          "band": "薄板 (304SS, 0.8 mm) の順方向過渡をリップ熱的接続の両極 (断熱端/連続端) で挟んだ帯",
+          "rationale": "『何点合えば合格』は用途要求からも実験の不確かさからも出ない。限界以上の点は全部合わせる、限界未満は判定しない、という切り方なら実験自身の記述だけで決まる。"
         },
         {
           "key": "D2_monotonic",
           "quantity": "深さ方向の単調減衰",
-          "criterion": "CFD・実測とも z/W に対して単調減少 (局所反転は隣接点比 1.2 倍以内なら許容)",
+          "criterion": "CFD・実測とも z/d に対して単調減少 (隣接点比 1.2 倍以内の局所反転は許容)",
           "rationale": "分布の形が合わなければ点別の一致は偶然。"
         },
         {
@@ -100,9 +105,30 @@
         "D1 が不合格なら D3 を case/49 へ渡さない",
         "check_convergence / check_quasisteady が DRIFTING のまま報告する",
         "check_wall_resolution が FAIL"
-      ]
+      ],
+      "_revised": "2026-09-20 codex result-3 M2 を受けて作り直した。旧版は (i) 比較量を h/h_FP と書いていたが §4.4a により TP-1187 は**冷壁 q/q_FP**、(ii) 精度に [W70] の ±0.68 kW/m² を流用していた、(iii) 『6 点中 4 点』に根拠が無かった。",
+      "quantity": "q/q_FP (冷壁 q 比。§4.4a の形式 (i)。h 比ではない — すきま内の T_aw が外部と違うが原報は割っていない)",
+      "detection_limit": {
+        "rule": "q/q_FP < 0.02 の実測点は合否判定から外す (TP-1187 自身が精度に疑義を記している)",
+        "excluded_points": [
+          "TC 87 (深さ 3.81 cm, 実測 0.00)"
+        ],
+        "judged_points": [
+          "TC 92 (4.06)",
+          "TC 91 (3.21)",
+          "TC 90 (2.44)",
+          "TC 88 (0.05)"
+        ]
+      }
     }
   ],
-
-  "revisions": []
+  "revisions": [
+    {
+      "date": "2026-09-20",
+      "gate": "T4-3D",
+      "trigger": "codex result-3 M2",
+      "what": "比較量を h/h_FP → q/q_FP に訂正、精度を [W70] の ±0.68 kW/m² → TP-1187 自身の q/q_FP<0.02 に差し替え、『6 点中 4 点』を『検出限界以上の全点』に変更",
+      "_note": "**帯を緩めた変更ではない** (点数基準を撤去して全点要求にしたので厳しくなっている)。"
+    }
+  ]
 }

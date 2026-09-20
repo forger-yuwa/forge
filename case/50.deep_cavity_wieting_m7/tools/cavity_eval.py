@@ -197,19 +197,23 @@ def main():
         rows = []
         for fp in files:
             e = evaluate(fp, xf, xr, d)
-            Q = (integrate(e["rear"][0] * d, e["rear"][1]) + integrate(e["front"][0] * d, e["front"][1])
-                 + integrate(e["floor"][0] * d, e["floor"][1]))
+            I_r = integrate(e["rear"][0] * d, e["rear"][1])
+            I_fl = integrate(e["floor"][0] * d, e["floor"][1])
+            Q = I_r + integrate(e["front"][0] * d, e["front"][1]) + I_fl
+            # 一次比較量 (b) も同じ時系列で出す。width_scaling.py が引用する VERDICT はこちら。
+            # (codex result-3 m1: 置換前の量で判定して置換後の量を報告していた)
+            Q_b = I_r + integrate(e["front"][0] * d, front_theory(e["front"][0], w, d, q_lit)) + I_fl
             qdeep = float(np.interp(0.75, np.sort(e["rear"][0]), e["rear"][1][np.argsort(e["rear"][0])]))
-            rows.append((int(fp.stem.split("_")[1]), Q, qdeep))
+            rows.append((int(fp.stem.split("_")[1]), Q, Q_b, qdeep))
         np.savetxt(rd / "cavity_series.csv", np.array(rows), delimiter=",",
-                   header="step,Qc_per_span_W_m,q_rear_xd075_W_m2", comments="")
+                   header="step,Qc_per_span_W_m,Qc_front_theory_W_m,q_rear_xd075_W_m2", comments="")
         print(f"  → {rd/'cavity_series.csv'} ({len(rows)} スナップショット)")
         # 量が落ち着いていない run の平均比を「結果」として引用させない (2026-09-19 の失敗の実体化)
         import subprocess
         tool = CASE.parents[1] / "solver_density_cuda" / "tools" / "check_quasisteady.py"
         r = subprocess.run([sys.executable, str(tool), "--series-csv", str(rd / "cavity_series.csv"),
-                            "--series-cols", "Qc_per_span_W_m"], capture_output=True, text=True)
-        verdict = [l for l in r.stdout.splitlines() if "Qc_per_span" in l]
+                            "--series-cols", "Qc_front_theory_W_m"], capture_output=True, text=True)
+        verdict = [l for l in r.stdout.splitlines() if "Qc_front_theory" in l]
         print("  " + (verdict[0].strip() if verdict else "(準定常判定を取得できず)"))
         if "STEADY" not in (verdict[0] if verdict else ""):
             print("  " + "!" * 72)

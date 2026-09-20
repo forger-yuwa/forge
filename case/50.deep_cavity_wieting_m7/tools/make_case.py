@@ -193,11 +193,20 @@ def main():
         # 次段の IC は最終 res を同一メッシュへ index コピー
         subprocess.run([sys.executable, str(TOOLS / "interp_field.py"), str(res[-1]), str(rd / "mesh.h5")],
                        env=ENV, check=True, capture_output=True, text=True)
-        for f in rd.glob("res_*"):
-            f.unlink()
-        for f in ("residual_history.csv", "residual_history.png", "CONVERGENCE_VERDICT.txt", "forge_run.log"):
-            if (rd / f).exists():
-                shutil.move(str(rd / f), str(rd / f"{Path(f).stem}_{tag}{Path(f).suffix}"))
+        # **本段の成果物は残す** (codex result-3 M3)。以前は最終段でも全 res_* を消し
+        # 標準名の残差・VERDICT を改名していたので、本段の時系列で準定常を判定できなかった。
+        if tag != stages[-1][0]:
+            for f in rd.glob("res_*"):
+                f.unlink()
+            for f in ("residual_history.csv", "residual_history.png",
+                      "CONVERGENCE_VERDICT.txt", "forge_run.log"):
+                if (rd / f).exists():
+                    shutil.move(str(rd / f), str(rd / f"{Path(f).stem}_{tag}{Path(f).suffix}"))
+        else:
+            # 前段の出力と混ざらないよう、前段までの res は既に消えている。
+            # 標準名のまま残すので check_convergence.py / check_quasisteady.py が直接読める。
+            print(f"    本段 {tag}: res_*.h5 {len(list(rd.glob('res_[0-9]*.h5')))} 個と"
+                  f" 標準名の残差・VERDICT を保持")
     print("done:", rd)
 
 

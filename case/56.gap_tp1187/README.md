@@ -363,7 +363,8 @@ $z/W$ を揃えて対数補間すると:
 | `run_0002_fp_t8_long` | 同設定で +150k step (index コピー継続) | $q$ **83.49 / 77.34** (比 **1.188 / 1.219**)、$\delta^*$ 0.870 / 1.343 cm。**残差はプラトーだが報告量は 0.02 % しか動かない** | active (**分母の生産値**) |
 | `run_0003_gap_t8` | 横すきま 2D (メッシュ `gap2d_v4`、$r/W$=1.39)、入口分布あり、段階起動 56.5k step | `NOT CONVERGED (still converging)`。**未収束の値で一致を主張してしまった (訂正済)** | active (初回) |
 | `run_0004_gap_t8_long` | 同設定で +160k step | $q/q_{FP}$ = 3.39e-2 (1.39) / 1.79e-3 (2.83)。深部はまだ動いていた | active |
-| `run_0005_gap_t8_deep` | 同設定で +800k step (完了) | **3.379e-2 (1.39) / 1.771e-3 (2.83) / 2.456e-5 (4.22)** が `STEADY`。$z/W$=8.44/14.11 は `DRIFTING` (0〜3e-6)。残差 `NOT CONVERGED (stalled/plateau)` |
+| `run_0005_gap_t8_deep` | 同設定で +800k step (**完了、最終 step 799999**) | **3.379e-2 (1.39) / 1.771e-3 (2.83) / 2.456e-5 (4.22)** が `STEADY`。$z/W$=8.44/14.11 は `DRIFTING` (0〜3e-6)。残差 `NOT CONVERGED (stalled/plateau)` | active (**2D 素の横すきまの基準**) |
 | `run_0006_xcheck_forge` | **SU2 比較用の第 1 版** (理想気体+Sutherland+一様入口+SST)。120k step | 深部 $q_w$ 2.7–2.8 W/m²。**ただし SU2 と物性・SST が揃っていなかった** (codex result-2 M3) → run_0008 で組み直し | 破棄予定 (交絡あり) |
 | `run_0007_xcheck_su2` | **SU2 v8.5.0** (同一 gmsh モデルの `.su2`)。Sutherland を forge の直書き値に合わせ、SST-2003m | 第 1 版は 40k 反復でも深部に 200 m/s が残り未収束。揃えた条件で再実行中 | active (**SU2 側**) |
-| `run_0008_xcheck_forge2` | forge 側を SU2 に合わせた版 (`dilatationCorrection: 0`, `katoLaunder: 0`)。120k step | 計算中 | active (**forge 側**) | active (**素の横すきまの確定値**) |
+| `run_0008_xcheck_forge2` | forge 側を SU2 に合わせた版 (`dilatationCorrection: 0`, `katoLaunder: 0`)。120k step | 完了・NaN なし。深部 $q_w$ = 2.99e3 (z/W 1.39) / 5.65 (4.22) / 2.73 (8.44) / 2.84 (21.17) W/m²。SST 補正 ON 版と 1–8 % 差なので **SST は交絡因子として小さい**。残差 `NOT CONVERGED (stalled/plateau)` | active (**forge 側**) |
+| `run_0009_gap_t8_uniform` | **#39 の交絡を外す単一因子 run**。`run_0005_gap_t8_deep` から index コピーで継続し **`inletProfile: 1` を外しただけ** (solverConfig は完全同一)。800k step | 計算中 (2026-09-20) | active (**入口依存の判定用**) |

@@ -14,6 +14,21 @@ RUNDIR="${1:-$PWD}"
 cd "$RUNDIR" || { echo "run_case: bad run dir $RUNDIR"; exit 1; }
 
 echo "[run_case] forge in $RUNDIR"
+# --- 来歴を残す (codex result-3 M6) ---
+# 既定値はソルバ側で変わることがある (例: 2026-09-20 に space.limiterScaled の既定が 0→1、
+# venkatK が 1.0→0.05)。config に書いていないキーは run のログに現れないので、
+# **どのバイナリで回したか**が分からないと過去の run がどの作用素の結果か決まらない。
+FORGE_EXE="${FORGE_BIN:-$ROOT/solver_density_cuda/build/forge}"
+{
+  echo "date        : $(date -Is)"
+  echo "forge_bin   : $FORGE_EXE"
+  echo "forge_mtime : $(date -Is -r "$FORGE_EXE" 2>/dev/null || echo unknown)"
+  echo "forge_sha256: $(sha256sum "$FORGE_EXE" 2>/dev/null | cut -d' ' -f1)"
+  echo "git_head    : $(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+  echo "git_dirty   : $(git -C "$ROOT" status --porcelain 2>/dev/null | wc -l) 件"
+  echo "host        : $(hostname)"
+} > RUN_PROVENANCE.txt
+
 # FORGE_BIN で別ビルドの forge を指定できる (A/B 回帰で旧バイナリを回す用途。既定は build/forge)
 "${FORGE_BIN:-$ROOT/solver_density_cuda/build/forge}" > forge_run.log 2>&1
 rc=$?
