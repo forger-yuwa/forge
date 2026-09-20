@@ -118,6 +118,9 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
                            W=float(m.get("W", 2.0)), Z_ext=float(m.get("Z_ext", 1.5)), L_sw=m.get("L_sw"), W_vehicle=m.get("W_vehicle"), L_up=float(m2.get("L_up", 0.5)),
                            x_out_extra=float(m2.get("x_out_extra", 2.0)), bot_depth=float(m2.get("bot_depth", 3.0)),
                            first_wall_frac=float(m.get("first_wall_frac", m2.get("first_wall_frac", 4e-3))), first_z_frac=float(m.get("first_z_frac", 4e-3)),
+                           # 壁が終わった下流の第一層厚 (0 = ブレンドしない = 既定・挙動不変。plan sern-3d §4.41)
+                           first_wall_frac_far=float(m.get("first_wall_frac_far", 0.0)),
+                           wall_frac_blend_len=float(m.get("wall_frac_blend_len", 0.5)),
                            cowl_thickness=float(m.get("cowl_thickness", m2.get("cowl_thickness", 0.0))),
                            ext_top=bool(int(m2.get("ext_top", 0))),
                            vehicle_side=bool(m.get("vehicle_side", True)), nj_vside=int(m.get("nj_vside", 17)), top_depth=float(m2.get("top_depth", 2.0)), nj_ext_top=int(m2.get("nj_ext_top", 41)),

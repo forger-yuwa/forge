@@ -169,5 +169,36 @@ near = (xr > -0.05) & (xr < 0.05)
 check("fillet: 角部近傍のランプ面は y > 1 (流体と反対側へ膨らむ)", near.any() and np.all(yr[near] >= 1.0 - 1e-12), f"min y {yr[near].min():.4f}")
 check("fillet: info に ramp_fillet", info["ramp_fillet"] == 0.1)
 
+
+
+# --- 壁第 1 層の x ブレンド (plan sern-3d §4.41) ---
+_pb = SernMesh3DParams(ni_up=6, ni_noz=20, ni_plume=30, nj_top=15, nj_bot=11, nz_in=7, nz_out=6, W=2.0, Z_ext=1.5,
+                       interface_angle=float(k.TH[-1, 0]), top_ext_angle=d.info["theta_e"], first_wall_frac=4.0e-4)
+c0, h0, B0, i0, _ = generate_sern_mesh3d(d, _pb)
+c1, h1, B1, i1, _ = generate_sern_mesh3d(d, replace(_pb, first_wall_frac_far=0.0))
+check("xblend: 既定 (far=0) は座標がビット一致", np.array_equal(c0, c1))
+c2, h2, B2, i2, _ = generate_sern_mesh3d(d, replace(_pb, first_wall_frac_far=4.0e-3, wall_frac_blend_len=0.5))
+check("xblend: 節点数・要素数は変わらない", c2.shape == c0.shape and h2.shape == h0.shape)
+check("xblend: 壁の形状は動かない (ランプ線 y の最大)",
+      abs(float(np.max(c2[:, 1])) - float(np.max(c0[:, 1]))) < 1e-12,
+      f"{np.max(c2[:,1]):.12f} vs {np.max(c0[:,1]):.12f}")
+# 生成後の実座標で第 1 層厚を測る (入力値でなく結果を見る)
+_Lc = float(d.cowl_xy[-1, 0]); _Lr = float(d.L_ramp)
+def _first_layer(coords, xq):
+    """x = xq の station で、上線 (ランプ) 直下の第一層厚を返す"""
+    m = np.abs(coords[:, 0] - xq) < 1e-9
+    ys = np.unique(np.round(coords[m, 1], 12))
+    return float(ys[-1] - ys[-2])
+_xs = np.unique(c0[:, 0])
+_x_in = _xs[np.argmin(np.abs(_xs - 0.5 * _Lr))]              # 壁の内側
+_x_far = _xs[np.argmin(np.abs(_xs - (_Lr + 1.5)))]           # ブレンド完了後
+check("xblend: 壁の内側では第一層厚が first_wall_frac のまま",
+      abs(_first_layer(c2, _x_in) - _first_layer(c0, _x_in)) < 1e-12,
+      f"{_first_layer(c2,_x_in):.3e} vs {_first_layer(c0,_x_in):.3e}")
+check("xblend: 壁の下流では第一層厚が粗くなる (>= 5 倍)",
+      _first_layer(c2, _x_far) >= 5.0 * _first_layer(c0, _x_far),
+      f"{_first_layer(c2,_x_far):.3e} vs {_first_layer(c0,_x_far):.3e}")
+_n2, _m2, _e2 = closure(h2, B2)
+check("xblend: 境界の閉性", _m2 == 0 and _e2 == 0, f"missing {_m2} extra {_e2}")
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)

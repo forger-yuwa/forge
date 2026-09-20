@@ -65,6 +65,10 @@ class SernMesh3DParams:
     first_wake_frac: float = 0.0  # ベース直後の第一 station 間隔 /H (**絶対値**)。t_base > 0 のとき必須で
                                   # t_base/5 以下 (plan convection-node-wall-reconstruction §4.28)
     first_wall_frac: float = 4.0e-3
+    first_wall_frac_far: float = 0.0   # 壁が終わった下流の第一層厚 /H。**0 = ブレンドしない (既定・挙動不変)**。
+                                       # 正値なら `first_wall_frac` からここへ滑らかに移す (plan sern-3d §4.41)。
+                                       # 下バンドの壁終端は `L_cowl`、上バンドは `L_ramp`
+    wall_frac_blend_len: float = 0.5   # ブレンドの**物理長** /H。格子間隔から決めない
     first_z_frac: float = 4.0e-3
     interface_angle: float = 0.0
     top_ext_angle: float = 0.0
@@ -173,11 +177,29 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
           if t_c > 0.0 else np.zeros_like(xs))
     Y2 = np.zeros((ni, NJ))       # 板の外側 (z > W/2) 用: 中間線は単一
     Yin = np.zeros((ni, NJ))      # 板の内側 (z <= W/2) 用: 中間線は ym ± t/2
+    # --- 壁第 1 層の x ブレンド (plan sern-3d §4.41) ---
+    # `first_wall_frac` は全 station に効くので、**壁が終わった下流にも壁用の細層**を敷いていた。
+    # R5m の実測では AR > 5000 セルの 57.8 % がそこで、外側 z を細分しても max AR は下がらなかった。
+    # 壁の終端 (下バンド = `L_cowl`、上バンド = `L_ramp`) から**物理長** `wall_frac_blend_len` かけて
+    # `first_wall_frac_far` へ smoothstep で移す。間隔は 25 倍も跨ぐので**対数補間**。
+    _fw = float(prm.first_wall_frac)
+    _ff = float(getattr(prm, "first_wall_frac_far", 0.0) or 0.0)
+    _bl = max(float(getattr(prm, "wall_frac_blend_len", 0.5)), 1.0e-12)
+
+    def _first_at(x, x_end):
+        if not (_ff > 0.0) or _ff == _fw:
+            return _fw                      # 既定: ブレンドしない (既存メッシュはビット一致)
+        t = min(max((x - x_end) / _bl, 0.0), 1.0)
+        w = t * t * (3.0 - 2.0 * t)
+        return float(np.exp((1.0 - w) * np.log(_fw) + w * np.log(_ff)))
+
     for i in range(ni):
+        f_lo = _first_at(xs[i], L_cowl)     # 下バンドの細端 = 中間線 (カウル)
+        f_up = _first_at(xs[i], L_ramp)     # 上バンドの細端 = 上線 (ランプ)。両側 tanh なので片側で決める
         for Y, lo, up in ((Y2, ym[i], ym[i]), (Yin, ym[i] - 0.5 * tk[i], ym[i] + 0.5 * tk[i])):
             h_lo = max(lo - y_bot, 1e-12); h_up = max(yt[i] - up, 1e-12)
-            s_bot = _radial_fracs(njb, min(prm.first_wall_frac / h_lo, 0.5 / (njb - 1)))
-            s_top = _tanh_two_sided(njt, min(prm.first_wall_frac / h_up, 0.5 / (njt - 1)))
+            s_bot = _radial_fracs(njb, min(f_lo / h_lo, 0.5 / (njb - 1)))
+            s_top = _tanh_two_sided(njt, min(f_up / h_up, 0.5 / (njt - 1)))
             Y[i, :njb] = y_bot + s_bot * (lo - y_bot)
             Y[i, jm:] = up + s_top * (yt[i] - up)
             # j = jm は**下バンドの壁ノード (cowl_out)**。上の 2 行では `up` で上書きされ、
@@ -314,6 +336,7 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
     coords *= prm.scale
     info = {"ni": ni, "NJ": NJ, "nz": nz, "jm": jm, "k_sw": k_sw, "i_te": i_te, "i_sw": i_sw, "cells": int(hexes.shape[0]),
             "n_dup_cowl_closed": int(n_dup_cowl_closed),
+            "first_wall_frac_far": float(_ff), "wall_frac_blend_len": float(_bl),
             "nodes": int(coords.shape[0]), "W": prm.W, "Z_far": float(zs[-1]), "L_sw": L_sw, "cowl_thickness": t_c, "x_out": x_out, "y_bot": y_bot,
             "L_cowl": L_cowl, "L_ramp": L_ramp, "n_dup_cowl": len(dup1), "n_dup_side": len(dup2),
             "W_vehicle": prm.W_vehicle, "n_vehicle_faces": len(B["vehicle"]), "ramp_fillet": R_f, **ext}
