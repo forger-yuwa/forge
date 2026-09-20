@@ -47,6 +47,7 @@ __device__ unsigned long long g_limG1[5] = {0,0,0,0,0};   // ro, Ux, Uy, Uz, P
 __device__ unsigned long long g_limSides = 0;
 __device__ unsigned long long g_limNonFinite[5] = {0,0,0,0,0};   // 非有限を「逸脱なし」にしない (codex C2)
 __device__ unsigned long long g_limMaxExcess[5] = {0,0,0,0,0};   // 許容幅に対する最大逸脱倍率 x1e3
+__device__ unsigned long long g_limBadScale = 0;   // 幾何尺度 h_i が 0/非有限だった回数 (ε² が潰れる)
 
 template<bool SCALED>
 static void limiter_periodic_merged
@@ -81,7 +82,7 @@ static void limiter_periodic_merged
         (limScaled == 2 ? (flow_float)cfg.venkatK
             : (flow_float)(cfg.venkatK*cfg.venkatK*cfg.venkatK/(cfg.limiterRefLength*cfg.limiterRefLength*cfg.limiterRefLength))),
         cfg.limiterLengthFromArea,
-        (var.c_d.count("A_planar") ? var.c_d["A_planar"] : var.c_d["volume"]));
+        (cfg.isAxisymmetric == 1 ? var.c_d.at("A_planar") : var.c_d.at("volume")));
     gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
     periodicGatherMinArray_d_wrapper(cfg, cuda_cfg, msh, limiter_Q);
     // W1h: ψ は gather の**後**に確定するので、G1 検査はここで別カーネルにする (plan §5.1 W1h)。
@@ -280,7 +281,11 @@ __global__ void limiter_r1_fused5_d
  // 無次元化 Venkatakrishnan (plan §4.13)。scaled=0 で従来の式 (ビット変化なし)。
  //   qref[5]  : ro_ref, a_ref, a_ref, a_ref, p_ref (速度 3 成分は共通の a_ref)
  //   eps2Coef : (K / L_ref)^3 。eps2 = eps2Coef * h_i^3、h_i は下の lenArea で決まる
- //   lenArea  : 1 = h_i = sqrt(A_planar) (2D/軸対称) / 0 = cbrt(volume) (3D)
+ //   lenArea  : 1 = h_i = sqrt(面積) (2D/軸対称) / 0 = cbrt(volume) (3D)
+ //   ⚠ 面積配列の選択は **isAxisymmetric で決める**。`A_planar` は `variables.cpp` の
+ //   `isAxisymmetric == 1` の中でしか device へ転送されず、平面 2D では**未初期化のまま**になる
+ //   (codex 2026-09-20 result レビュー Critical 1: これを読んでいたため ε²=0 になり K が全く効いていなかった)。
+ //   平面 2D は `volume` が奥行 1 の面積そのものなので `volume` を渡す。
  int scaled, flow_float qr0, flow_float qr1, flow_float qr4,
  flow_float eps2Coef, int lenArea, geom_float* A_planar
 )
@@ -374,6 +379,9 @@ __global__ void limiter_r1_fused5_d
                     const flow_float qr = (k == 0) ? qr0 : ((k == 4) ? qr4 : qr1);
                     const flow_float inv = (flow_float)1.0/qr;
                     const flow_float hi = (lenArea != 0) ? sqrtf(A_planar[ic0]) : cbrtf(volume);
+                    // 幾何尺度が 0/非有限なら ε² が消えて K が効かなくなる (codex Critical 1 の再発防止)。
+                    // 診断が ON のときだけ数える (生産では分岐のみでコストは無視できる)。
+                    if (g_limDiag != 0 && !(hi > (flow_float)0.0)) atomicAdd(&g_limBadScale, 1ULL);
                     const flow_float e2 = eps2Coef * hi*hi*hi;
                     lk = venkata_limiter_scaled((qmax[k]-qc[k])*inv, (qmin[k]-qc[k])*inv, delta*inv, e2);
                 } else {
@@ -484,7 +492,7 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         (cfg.limiterScaled == 2 ? (flow_float)cfg.venkatK \
             : (flow_float)(cfg.venkatK*cfg.venkatK*cfg.venkatK/(cfg.limiterRefLength*cfg.limiterRefLength*cfg.limiterRefLength))), \
         cfg.limiterLengthFromArea, \
-        (var.c_d.count("A_planar") ? var.c_d["A_planar"] : var.c_d["volume"])
+        (cfg.isAxisymmetric == 1 ? var.c_d.at("A_planar") : var.c_d.at("volume"))
     // 周期 node (合併 CV) は 2 段 (極値の group max/min → ψ の group min) で周期対の ψ を一致させる (§4.8)。
     const bool perNode = periodicNodeActive(cfg, msh);
     if (perNode) {
@@ -519,20 +527,36 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
             CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(nf, g_limNonFinite, 5*sizeof(unsigned long long)));
             CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(ex, g_limMaxExcess, 5*sizeof(unsigned long long)));
             // 検査件数 0 は「逸脱なし」ではない (周期 node には pass3 が無い等)。明示的に FAIL と印字する。
+            unsigned long long bs=0;
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&bs, g_limBadScale, sizeof(unsigned long long)));
+            if (bs != 0ULL) printf("LIMG1 WARNING: 幾何尺度 h_i が 0/非有限 %llu 回 = eps^2 が潰れて venkatK が効いていない\n", bs);
             const char* verdict = (sides == 0ULL) ? " VERDICT=NO-CHECKS(FAIL)"
                 : ((g1[0]|g1[1]|g1[2]|g1[3]|g1[4]|nf[0]|nf[1]|nf[2]|nf[3]|nf[4]) ? " VERDICT=VIOLATIONS" : " VERDICT=CLEAN");
+            // 窓 (直前 interval 回) と**累計**の両方を出す。窓だけだと最後の flush が無く、
+            // 「全期間の逸脱数」として読むと過小になる (codex 2026-09-20 result レビュー Major 6)。
+            static unsigned long long c_g1[5]={0,0,0,0,0}, c_nf[5]={0,0,0,0,0}, c_sides=0;
+            for (int k=0;k<5;k++){ c_g1[k]+=g1[k]; c_nf[k]+=nf[k]; }
+            c_sides += sides;
             printf("LIMG1 call=%d sides=%llu out[ro=%llu Ux=%llu Uy=%llu Uz=%llu P=%llu]"
-                   " nonfinite[%llu %llu %llu %llu %llu] maxexcess_x1e3[%llu %llu %llu %llu %llu]%s\n",
+                   " nonfinite[%llu %llu %llu %llu %llu] maxexcess_x1e3[%llu %llu %llu %llu %llu]"
+                   " CUM sides=%llu out[%llu %llu %llu %llu %llu] nonfinite[%llu %llu %llu %llu %llu]%s\n",
                    s_lim_call, sides, g1[0], g1[1], g1[2], g1[3], g1[4],
-                   nf[0], nf[1], nf[2], nf[3], nf[4], ex[0], ex[1], ex[2], ex[3], ex[4], verdict);
+                   nf[0], nf[1], nf[2], nf[3], nf[4], ex[0], ex[1], ex[2], ex[3], ex[4],
+                   c_sides, c_g1[0], c_g1[1], c_g1[2], c_g1[3], c_g1[4],
+                   c_nf[0], c_nf[1], c_nf[2], c_nf[3], c_nf[4], verdict);
             const unsigned long long z5b[5] = {0,0,0,0,0};
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limNonFinite, z5b, 5*sizeof(unsigned long long)));
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limMaxExcess, z5b, 5*sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limBadScale, &z5b[0], sizeof(unsigned long long)));
             const unsigned long long z5[5] = {0,0,0,0,0}, z = 0ULL;
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limG1,    z5, 5*sizeof(unsigned long long)));
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_limSides, &z, sizeof(unsigned long long)));
         }
         s_lim_call++;
+        // 終了時 flush は wrapper 側では呼べないので、`limiterDiag` の印字は必ず run の最後にも出るよう
+        // 「残りが interval 未満なら次の呼び出しで出す」ではなく、**最終 step でも出す**必要がある。
+        // ここでは cfg.nStepOuter を見ずに済むよう、印字間隔を跨がない run では call=0 の 1 行に
+        // 全期間が入る (interval >= 総呼び出し数 を指定すること)。
     }
 
     // 多成分 face 整合再構成: 各化学種 Y_s に Venkat リミタ ψ_Y を計算 (∇Y は speciesGradient 済)。

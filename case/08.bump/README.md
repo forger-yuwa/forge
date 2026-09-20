@@ -17,5 +17,6 @@ SU2 とのライン比較の基準ケースとして使う。形状元: [mesh/bu
 | `run_0001`〜`run_0018_*` | SLAU 低/高マッハ × 陽/陰 × CFL スイープ (`*_exp_cfl*` / `*_imp_cfl*`) | 陰解法の安定 CFL 上限と陽解法比の速度評価 ([[bump-implicit-vs-explicit-result]]) | ref |
 | `run_dual_*` | cell vs node (median-dual) 双対比較 (m2/m3, tri 含む) | 離散化レイアウト検証の入力 | ref |
 | `run_0018`〜`run_0024_std8*` | **リミッタの標準ケース回帰**と、その過程で見つかった**退行の切り分け** (保管 `run_dual_hiM_node_m3imp` = node + 陰解法 + `convMethod 2` + `limiter 2` と同一入力。旧キー `LESorRANS: 0 / LESmodel: 0` は `model: "none"` に置換) | **保管 run は PASS (rms_ro 4.0 桁) だが現行バイナリでは全て DIVERGED**: 生産既定 step 217 / ② K=0.05 step 240 / 診断キー無し step 228 / **`build-native` (09-19 10:16、本セッションの変更前) でも step 243** → **本セッションの変更ではない**。step 0 残差は保管とビット一致、有効設定値にも差は無い。`build-passive` (09-18) は削除済み `meshFormat` を要求するので同一 config で遡れない | ref (**plan convection-node-wall-reconstruction §4.31 / 退行は未解決**) |
+| `run_0025`/`run_0026_std8_nobnd_*` | **禁止フラグ `mesh.bndFirstOrder: 1` を外して再実行** (保管 run から複製する際に落とし忘れていた。codex 2026-09-20 result Major 7) | **step 0 残差も発散も変わらない** (`rms_roUy` 2.01e-4、DIVERGED)。→ 退行の原因は bndFirstOrder ではない。**保管 run との step 0 差は `rms_roUy` 21.70760 vs 0.000200996 = 10⁵ 倍** (`rms_ro` と `rms_roe` だけ一致)。bump は **slip 壁**なので node slip 境界の扱いの変化が疑われる | ref (plan §4.31) |
 
 > 注: 上記 SLAU/dual 系は既存の入力リファレンス群。本表は新規 run 追加・破棄時に同期する。

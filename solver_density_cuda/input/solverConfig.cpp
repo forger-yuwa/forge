@@ -544,6 +544,14 @@ void solverConfig::read(std::string fname)
             throw std::runtime_error("Key 'venkatK' in 'space' must be > 0.");
         }
         this->limiterRefLength = getOptionalValidatedValue<double>(space, "limiterRefLength", 0.0, "space");
+        // 通常経路は matchRecon==0 だと limiterScaled を無視するが、周期経路は matchRecon に依らず適用する。
+        // 同じ設定が周期の有無で別動作になるので**束で要求する** (codex 2026-09-20 result レビュー Major 2)。
+        if (this->limiterScaled > 0 && this->limiterMatchRecon != 1) {
+            throw std::runtime_error("Key 'limiterScaled' > 0 in 'space' requires 'limiterMatchRecon: 1' "
+                                     "(the non-periodic path ignores limiterScaled when matchRecon==0, "
+                                     "while the periodic path applies it regardless).");
+        }
+
         // 基準値の明示指定 (codex plan-3 Major 6)。0 = 起動時に初期場から自動決定。
         this->limiterRoRef = getOptionalValidatedValue<double>(space, "limiterRoRef", 0.0, "space");
         this->limiterPRef  = getOptionalValidatedValue<double>(space, "limiterPRef",  0.0, "space");

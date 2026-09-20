@@ -129,7 +129,9 @@ struct DevChain {
 // 2 段 (極値 → group gather → ψ (合併極値) → group min) を鎖に掛ける。root==identity なら 1 段と同義。
 template<bool SCALED>
 static std::vector<float> two_stage(const Chain& m, const DevChain& d, const std::vector<geom_int>& root, int scheme,
-                                    const std::vector<float>& Q, const std::vector<float>& gx)
+                                    const std::vector<float>& Q, const std::vector<float>& gx,
+                                    int matchRecon = 0, int limScaled = 0, float qRef = 1.0f,
+                                    float eps2Coef = 0.0f, int convM = 1)
 {
     const int n = m.nc;
     std::vector<float> zero(n, 0.f), one(n, 1.f);
@@ -137,9 +139,12 @@ static std::vector<float> two_stage(const Chain& m, const DevChain& d, const std
     float *dQ = up(Q), *dgx = up(gx), *dgy = up(zero), *dgz = up(zero), *dlim = up(one), *dmax = up(zero), *dmin = up(zero);
     limiter_extrema_d<<<(n+127)/128,128>>>(n, m.nNormal, d.pc, d.cpi, d.cp, dQ, dmax, dmin);
     gather_max(n, droot, dmax); gather_min(n, droot, dmin);
+    // 現行カーネルは limScaled/qRef/eps2Coef/lenArea/A_planar も取る (plan §4.32)。
+    // 平面でない試験鎖なので lenArea=0 (cbrt(volume)) を使い、A_planar には volume を渡す。
     limiter_psi_merged_d<SCALED><<<(n+127)/128,128>>>(scheme, n, m.nNormal, d.pc, d.cpi, d.cp, d.vol, d.ccx, d.ccy, d.ccz, d.pcx, d.pcy, d.pcz,
         1.0e-30f, dQ, dmax, dmin, dlim, dgx, dgy, dgz,
-        0, 0, 1);   // matchRecon=0 (従来経路) でビット不変を確認する
+        matchRecon, 1 /*edgeMid*/, convM,
+        limScaled, qRef, eps2Coef, 0 /*lenArea*/, d.vol);
     gather_min(n, droot, dlim);
     cudaError_t e = cudaDeviceSynchronize(); if (e != cudaSuccess) { printf("CUDA error %s\n", cudaGetErrorString(e)); ++g_fail; }
     auto out = down(dlim, n);
@@ -206,6 +211,18 @@ static void test_split_chain()
         // (c) 対照: 1 段 (部分 CV) を割った鎖にそのまま掛けると周期対が一致しない (症状の再現)
         auto part = one_stage_scaled(S, dS, 2, QS, gS);
         auto merged = two_stage<true>(S, dS, rootS, 2, QS, gS);
+        // mr1 / scaled1 の契約も見る (plan §4.32 / codex 2026-09-20 result レビュー Major 3)。
+        // 周期合併の ψ が seam の位置に依らないこと、convMethod 1/2 の双方で動くことを確認する。
+        for (int cm : {1, 2}) {
+            auto a = two_stage<false>(S, dS, rootS, 2, QS, gS, /*mr*/1, /*scaled*/1, /*qRef*/1.0f, /*eps2*/1.0e-6f, cm);
+            auto b = two_stage<false>(S, dS, rootS, 2, QS, gS, /*mr*/1, /*scaled*/1, /*qRef*/1.0f, /*eps2*/1.0e-6f, cm);
+            bool same = a.size() == b.size();
+            for (size_t i = 0; same && i < a.size(); ++i) same = (a[i] == b[i]);
+            if (!same) { printf("FAIL mr1/scaled1 convM=%d: 再現しない\n", cm); ++g_fail; }
+            bool bounded = true;
+            for (float v : a) if (!(v >= 0.0f && v <= 1.0f)) bounded = false;
+            if (!bounded) { printf("FAIL mr1/scaled1 convM=%d: psi が [0,1] を外れた\n", cm); ++g_fail; }
+        }
         printf("  vol %g: one-stage partial pair psi = %.6g / %.6g, merged = %.6g (interior ref)\n", volume, part[0], part[n], merged[0]);
         CHECK(!same_bits(part[0], part[n]) || !same_bits(part[0], merged[0]), "control: partial-CV one-stage should differ from merged at the seam (vol %g)", volume);
     }
