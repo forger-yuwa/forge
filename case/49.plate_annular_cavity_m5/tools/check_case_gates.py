@@ -12,7 +12,7 @@
 | 5 | 保存性 | `cavity_eval.py` | 正味/片道 <= --mass-tol, CV 収支 <= --budget-tol |
 
 usage:
-  python3 tools/check_case_gates.py <run_dir> [--yplus-frac 2] [--mass-tol 0.01] [--budget-tol 0.05]
+  python3 tools/check_case_gates.py <run_dir> [--yplus-frac 2] [--mass-tol 0.015] [--budget-tol 0.05]
 
 **ブロッキングと非ブロッキングを分ける** (2026-09-19): 計算を延長して直るのは 1/2/3/5 だけで、
 **4 (壁解像) と メッシュ品質は step を増やしても変わらない**。それらを不合格扱いにすると
@@ -41,13 +41,59 @@ def run(cmd):
     return r.returncode, r.stdout + r.stderr
 
 
+def parent_run(rd):
+    """`CONTINUED_FROM` が指す引き継ぎ元の run ディレクトリ。"""
+    f = rd / "CONTINUED_FROM"
+    if not f.exists():
+        return None
+    src = Path(f.read_text().strip().splitlines()[0])
+    par = src.parent
+    if not par.is_absolute():
+        par = (rd.parent / par).resolve()
+    return par if (par / "residual_history.csv").exists() else None
+
+
+def tail_levels(csv, tail=0.2):
+    """残差列ごとの**末尾窓の中央値** (水準の比較用)。"""
+    import csv as _csv
+    try:
+        rows = list(_csv.reader(open(csv)))
+    except OSError:
+        return {}
+    if len(rows) < 3:
+        return {}
+    hdr = [c.strip() for c in rows[0]]
+    idx = [i for i, c in enumerate(hdr) if c.startswith("rms_")]
+    body = [r for r in rows[1:] if r and len(r) > max(idx, default=0)]
+    if not body:
+        return {}
+    n = max(2, int(len(body) * tail))
+    out = {}
+    for i in idx:
+        v = []
+        for r in body[-n:]:
+            try:
+                x = abs(float(r[i]))
+            except (ValueError, IndexError):
+                continue
+            if x == x and x != float("inf"):
+                v.append(x)
+        if v:
+            v.sort()
+            out[hdr[i]] = v[len(v) // 2]
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run")
     ap.add_argument("--yplus-frac", type=float, default=2.0, help="y1+>1 を許す面積 [%]")
-    ap.add_argument("--mass-tol", type=float, default=0.02,
+    ap.add_argument("--mass-tol", type=float, default=0.015,
                     help="開口の |正味/片道| (末尾平均) 許容。**これは離散スキームの保存性ではなく"
-                         "後処理の面積分精度の指標**なので、本当の保存ゲートは CV エネルギー収支の方")
+                         "後処理の面積分精度の指標**なので、本当の保存ゲートは CV エネルギー収支の方。"
+                         "**plan の 0.1 %% はこの求積では到達不能** (2026-09-20 実測: 181x30 -2.46 %% / "
+                         "361x60 -1.44 %% / 721x120 -1.00 %% / 1441x240 -0.88 %% と約 -0.85 %% へ漸近)。"
+                         "既定 1.5 %% は漸近値に余裕を見た値。厳密検算は残作業 #4 (離散流束)")
     ap.add_argument("--budget-tol", type=float, default=0.05, help="CV エネルギー収支 残差 許容")
     ap.add_argument("--yplus-blocking", action="store_true",
                     help="壁解像の不合格でも報告を止める (既定は制約として併記するのみ。"
@@ -90,16 +136,33 @@ def main():
               % ("無い" if nline == 0 else "ヘッダのみ"))
         return 2
     if cont:
-        rising = [l for l in out.splitlines() if "RISING" in l or "DIVERGED" in l]
-        ok2 = (not rising) and ("NaN" not in out or "NaN/Inf present" not in out)
         if head == "(出力なし)":                 # 判定行が出ていないのも判定不能
             print("[2] 残差の収束     : **判定不能** (check_convergence が判定行を出さなかった)")
             return 2
-        print("[2] 残差の収束     : %s  (継続 run: 低下桁数でなく**上昇の有無**で判定)"
+        rising = [l for l in out.splitlines() if "RISING" in l or "DIVERGED" in l]
+        # **文字列検査だけで通さない** (2026-09-20 codex result M2)。従来は `RISING` /
+        # `DIVERGED` が出ていなければ合格で、**終了コードも親の残差水準も見ていなかった**。
+        # 継続 run は収束場から始まるので低下桁数では測れないが、
+        # **親の末尾水準より悪化していないこと**は測れる。
+        worse = []
+        par = parent_run(rd)
+        if par is not None:
+            lv_c = tail_levels(rd / "residual_history.csv")
+            lv_p = tail_levels(par / "residual_history.csv")
+            for k in sorted(set(lv_c) & set(lv_p)):
+                if lv_p[k] > 0 and lv_c[k] > 1.5 * lv_p[k]:
+                    worse.append("%s %.2e -> %.2e (x%.2f)" % (k, lv_p[k], lv_c[k], lv_c[k] / lv_p[k]))
+        nan_bad = "NaN/Inf present" in out
+        ok2 = (not rising) and (not nan_bad) and (not worse)
+        print("[2] 残差の収束     : %s  (継続 run: 低下桁数でなく**上昇の有無 + 親の水準比**で判定)"
               % ("OK" if ok2 else "**FAIL**"))
         print("      %s" % head.strip())
+        if par is None:
+            print("      [注意] 親 run を特定できず水準比を取れていない (CONTINUED_FROM を確認)")
         if rising:
             print("      上昇している列: %s" % " / ".join(l.split(":")[0].strip() for l in rising))
+        if worse:
+            print("      親より悪化した列: %s" % " / ".join(worse))
     else:
         ok2 = (rc == 0)
         print("[2] 残差の収束     : %s" % ("OK" if ok2 else "**FAIL**"))

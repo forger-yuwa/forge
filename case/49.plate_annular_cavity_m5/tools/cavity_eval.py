@@ -221,7 +221,11 @@ def eval_snapshot(c, v, man, D):
         for nm in ("ro", "Uz", "h0"):
             if nm in v:
                 lin[nm] = LinearNDInterpolator(tri_pts, v[nm][slab])
-    nth, nr = 361, 60
+    # **開口の求積格子** (2026-09-20)。粗いと「正味/片道」が求積誤差で膨らむ:
+    # 181x30 -2.46 % / 361x60 -1.44 % / 721x120 -1.00 % / 1441x240 -0.88 % と、
+    # 約 -0.85 % へ漸近する (run_0419 実測)。残る分はソルバの双対面とは別の求積を
+    # 使っていることによる系統差で、**離散流束での厳密検算は残作業 #4**。
+    nth, nr = 721, 120
     tg = np.linspace(0.0, np.pi, nth)
     ri = gc.inner_radius_at(tg, man)
     frac_r = (np.arange(nr) + 0.5) / nr
