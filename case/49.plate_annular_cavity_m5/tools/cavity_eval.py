@@ -23,6 +23,7 @@ usage:
 """
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -181,6 +182,15 @@ def eval_snapshot(c, v, man, D):
     if m_gas.sum() < 50:
         raise SystemExit("キャビティ内のガスノードが少なすぎる (%d)" % m_gas.sum())
     fg = Field(c, v, mask=m_gas)
+    # **積を節点で作ってから補間する版**も持たせる (2026-09-21, 残作業 #41 の切り分け)。
+    # 開口の対流流束は ro・Uz・h0 を**別々に補間してから掛けて**いる。積の補間と
+    # 補間の積は一致せず、u_z と h0 が強く相関する場 (熱い側壁が駆動する循環) では
+    # 系統的に偏る。`CAV_FLUXPROD=1` で節点積 `_rouzh0` を補間する経路に切り替える。
+    if "h0" in v and "Uz" in v and "ro" in v:
+        v = dict(v)
+        v["_rouzh0"] = np.asarray(v["ro"], float) * np.asarray(v["Uz"], float) \
+            * np.asarray(v["h0"], float)
+        v["_rouz"] = np.asarray(v["ro"], float) * np.asarray(v["Uz"], float)
     fa = Field(c, v)                                   # 全域 (開口面の流束用)
 
     th = np.linspace(0.0, np.pi, E["n_theta"])
@@ -251,7 +261,11 @@ def eval_snapshot(c, v, man, D):
     # 181x30 -2.46 % / 361x60 -1.44 % / 721x120 -1.00 % / 1441x240 -0.88 % と、
     # 約 -0.85 % へ漸近する (run_0419 実測)。残る分はソルバの双対面とは別の求積を
     # 使っていることによる系統差で、**離散流束での厳密検算は残作業 #4**。
+    # **求積解像度は環境変数で振れるようにする** (2026-09-21, 残作業 #41 の切り分け用)。
+    # `CAV_QUAD=1441x240` のように渡す。既定は下の 721x120。
     nth, nr = 721, 120
+    if os.environ.get("CAV_QUAD"):
+        nth, nr = (int(v) for v in os.environ["CAV_QUAD"].lower().split("x"))
     tg = np.linspace(0.0, np.pi, nth)
     ri = gc.inner_radius_at(tg, man)
     frac_r = (np.arange(nr) + 0.5) / nr
@@ -278,6 +292,12 @@ def eval_snapshot(c, v, man, D):
     den = max(out["mdot_in"], out["mdot_out"], 1e-30)
     out["mdot_imbalance"] = out["mdot_net"] / den
     out["_H_open"] = float(np.sum(flux * h0)) if h0 is not None else float("nan")
+    # 節点積を補間した版 (上のコメント参照)。診断用に常に出し、`CAV_FLUXPROD=1` で採用する。
+    if "_rouzh0" in v:
+        out["_H_open_prod"] = float(np.sum(samp("_rouzh0") * dA))
+        out["_mdot_net_prod"] = float(np.sum(samp("_rouz") * dA))
+        if os.environ.get("CAV_FLUXPROD") == "1":
+            out["_H_open"] = out["_H_open_prod"]
     out["_flux_z_m"] = float(-zf)
 
     # **伝導と粘性仕事も足す** (codex result-1 M7 / 残作業 #15)。
