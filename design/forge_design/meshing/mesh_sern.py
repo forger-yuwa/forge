@@ -106,6 +106,28 @@ def _wake_stations(x_te, x_out, n, first_abs, w, a):
     return x_te + L * _geom_start(n, first_abs / L)
 
 
+def check_wake_first_spacing(xs, x_base, t_base, first_wake_frac, tol=1.05):
+    """**生成後の実座標**で、ベース直後 (x_base の直後) の第一 station 間隔を検査する。
+
+    入力値の検査だけでは保証にならない (`_geom_start` は公比の探索上限 3 で打ち切ってから正規化するので、
+    要求間隔を実現できないまま返ることがある。codex 2026-09-20 result レビュー Major 3)。
+    ベースが無い (t_base <= 0) なら何もしない。"""
+    if not (float(t_base) > 0.0):
+        return
+    xs = np.asarray(xs, dtype=float)
+    after = xs[xs > x_base + 1e-12]
+    if after.size == 0:
+        raise ValueError(f"mesh_sern: ベース x={x_base:g} より下流に station が無い")
+    d1 = float(after.min() - x_base)
+    want = float(first_wake_frac) if float(first_wake_frac) > 0.0 else float(t_base) / 5.0
+    if not (d1 <= want * tol):
+        raise ValueError(
+            f"mesh_sern: ベース直後の第一 station 間隔が {d1:g} で要求 {want:g} を超えた "
+            f"(ベース厚さ {t_base:g} の {d1/float(t_base):.2f} 倍)。station 数 (ni_plume) を増やすか "
+            f"first_wake_frac を見直すこと。後流を 1 セルで跨ぐと壁 CV から質量が抜ける "
+            f"(plan convection-node-wall-reconstruction §4.28)")
+
+
 def _plume_stations(L_cowl, L_ramp, x_out, n, prm):
     """プルーム区間の station。`split_plume_at_te` で後縁 L_ramp を境に 2 分割し、両側にクラスタを置く。
     戻り値は L_cowl を**含まない** (呼び出し側が前区間と連結する)。"""
@@ -169,9 +191,12 @@ def generate_sern_mesh(design, prm: SernMeshParams):
     if _tb > 0.0:
         _fw = float(getattr(prm, "first_wake_frac", 0.0))
         if not (_fw > 0.0):
-            raise ValueError(
-                f"mesh_sern: t_base={_tb:g} > 0 なのに first_wake_frac が未設定。"
-                f"ベース直後の第一 station 間隔を絶対値で与えること (t_base/5 = {_tb/5.0:g} 以下)")
+            # 未設定は失敗させず **t_base/5 を既定**にする (既存 config を壊さない。
+            # codex 2026-09-20 result レビュー Major 4)。保証は生成後の `check_wake_first_spacing` で行う。
+            _fw = _tb / 5.0
+            try: prm.first_wake_frac = _fw
+            except Exception: pass
+            print(f"[mesh_sern] first_wake_frac 未設定 → t_base/5 = {_fw:g} を使う")
         if _fw > _tb / 5.0:
             raise ValueError(
                 f"mesh_sern: first_wake_frac {_fw:g} がベース厚さ {_tb:g} に対して粗すぎる "
@@ -199,6 +224,9 @@ def generate_sern_mesh(design, prm: SernMeshParams):
     # ランプ後縁に station を置く (最寄りを置換)
     k = int(np.argmin(np.abs(xs - L_ramp)))
     xs[k] = L_ramp
+    # **生成後の実座標**でベース直後の第一間隔を検査する (入力値の検査では保証にならない)
+    check_wake_first_spacing(xs, L_ramp, float(getattr(prm, "t_base", 0.0)),
+                             float(getattr(prm, "first_wake_frac", 0.0)))
     i_te = int(np.argmin(np.abs(xs - L_cowl)))
     assert abs(xs[i_te] - L_cowl) < 1e-12
     rx, ry = design.ramp_xy[:, 0], design.ramp_xy[:, 1]

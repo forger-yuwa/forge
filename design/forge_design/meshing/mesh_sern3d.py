@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .mesh2d import _radial_fracs
-from .mesh_sern import _cluster_stations, _tanh_two_sided, _wake_stations
+from .mesh_sern import _cluster_stations, _tanh_two_sided, _wake_stations, check_wake_first_spacing
 
 PHYS_SERN3D = {"inlet_nozzle": 1, "inlet_ext": 2, "outlet": 3, "ramp": 4, "cowl_in": 5, "cowl_out": 6, "bottom": 7,
                "top_out": 8, "sym": 9, "side_far": 10, "sidewall_in": 11, "sidewall_out": 12, "fluid": 13, "vehicle": 14, "vehicle_top": 15, "underside_far": 16, "vehicle_side": 17, "vehicle_base": 18}
@@ -75,7 +75,7 @@ class SernMesh3DParams:
     x_cluster_a: float = 3.0
 
 
-def _sern3d_plume(L_cowl, x_out, prm):
+def _sern3d_plume(L_cowl, L_ramp, x_out, prm):
     """プルーム区間の station。ベース厚さ `t_base` があるなら、後縁直後の第一間隔を**絶対値**で押さえる。
 
     3D の R4e は `t_base` が既定 > 0 (有限ベース) なので、ここを外すと
@@ -85,14 +85,24 @@ def _sern3d_plume(L_cowl, x_out, prm):
     fw = float(getattr(prm, "first_wake_frac", 0.0))
     if tb > 0.0:
         if not (fw > 0.0):
-            raise ValueError(
-                f"mesh_sern3d: t_base={tb:g} > 0 なのに first_wake_frac が未設定。"
-                f"ベース直後の第一 station 間隔を絶対値で与えること (t_base/5 = {tb/5.0:g} 以下)")
+            fw = tb / 5.0   # 未設定は既定 t_base/5 (codex Major 4: 既存 config/テストを壊さない)
+            print(f"[mesh_sern3d] first_wake_frac 未設定 → t_base/5 = {fw:g} を使う")
         if fw > tb / 5.0:
             raise ValueError(
                 f"mesh_sern3d: first_wake_frac {fw:g} がベース厚さ {tb:g} に対して粗すぎる "
                 f"(t_base/5 = {tb/5.0:g} 以下にすること。plan convection-node-wall-reconstruction §4.28)")
-    return _wake_stations(L_cowl, x_out, int(prm.ni_plume), fw, prm.x_cluster_w, prm.x_cluster_a)
+    # **ベース直後 (= ランプ後縁 L_ramp) から**細分する。前版は L_cowl を渡しており、
+    # カウル後縁が細かくなるだけでベース直後は粗いままだった
+    # (codex 2026-09-20 result レビュー Major 3: 要求 0.004 に対し実測 0.171 = 42.75 倍)。
+    n = int(prm.ni_plume)
+    if not (L_cowl < L_ramp < x_out) or not (tb > 0.0):
+        return _wake_stations(L_cowl, x_out, n, 0.0, prm.x_cluster_w, prm.x_cluster_a)
+    fa = (L_ramp - L_cowl) / (x_out - L_cowl)
+    na = max(int(round(n * fa)), 5)
+    nb = max(n - na + 1, 5)
+    return np.concatenate([
+        _cluster_stations(L_cowl, L_ramp, na, (True, True), prm.x_cluster_w, prm.x_cluster_a),
+        _wake_stations(L_ramp, x_out, nb, fw, prm.x_cluster_w, prm.x_cluster_a)[1:]])
 
 
 def generate_sern_mesh3d(design, prm: SernMesh3DParams):
@@ -111,16 +121,18 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
             _cluster_stations(-prm.L_up, xf1, max(prm.ni_up - 6, 4), (False, True), prm.x_cluster_w, prm.x_cluster_a),
             np.linspace(xf1, 0.0, nf)[1:], np.linspace(0.0, xf2, nf)[1:],
             _cluster_stations(xf2, L_cowl, prm.ni_noz, (True, True), prm.x_cluster_w, prm.x_cluster_a)[1:],
-            _sern3d_plume(L_cowl, x_out, prm)[1:],
+            _sern3d_plume(L_cowl, L_ramp, x_out, prm)[1:],
         ])
     else:
         R_f = 0.0; t_f = xf1 = xf2 = 0.0
         xs = np.concatenate([
             _cluster_stations(-prm.L_up, 0.0, prm.ni_up, (False, True), prm.x_cluster_w, prm.x_cluster_a),
             _cluster_stations(0.0, L_cowl, prm.ni_noz, (True, True), prm.x_cluster_w, prm.x_cluster_a)[1:],
-            _sern3d_plume(L_cowl, x_out, prm)[1:],
+            _sern3d_plume(L_cowl, L_ramp, x_out, prm)[1:],
         ])
     xs[int(np.argmin(np.abs(xs - L_ramp)))] = L_ramp
+    check_wake_first_spacing(xs, L_ramp, float(getattr(prm, "t_base", 0.0)),
+                             float(getattr(prm, "first_wake_frac", 0.0)))
     i_te = int(np.argmin(np.abs(xs - L_cowl))); assert abs(xs[i_te] - L_cowl) < 1e-12
     i_sw = int(np.argmin(np.abs(xs - L_sw)))
 
