@@ -670,6 +670,8 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
   [`notes/reviews/2026-09-20-codex-laminar-nonconvergence.md`](../../notes/reviews/2026-09-20-codex-laminar-nonconvergence.md) →
   dual-time で確認)。後縁 $Re_D$=4.2e4、dual-time ($\Delta t$=50 ns, 200 µs) で**後縁 2 mm 下流の
   2 点が逆位相・PSD ピーク 29.3 kHz ($St$=0.29)** のカルマン渦列を確認 (`run_0018_lam_dualtime`)。
+  **$\Delta t$ を 25 ns に半減しても ピークは 29.9 kHz** (差 2 %、分解能 3.3 kHz 以内、振幅も 5 % 以内)
+  で**時間解像できている** (`run_0019_lam_dt_half`、`maxCFL` も 14.5–14.9 で推奨域)。$St$=0.295。
   `cfl_pseudo` を 0.05 まで下げても `nStepInner` を 30 にしても残差が動かないことと整合する。
   **あわせて 2 つの記述を訂正**: (a) 変動は負圧面剥離でなく**後縁後流**、(b) **SU2 も残差基準では
   `NOT CONVERGED`** (`rms[RhoE]` +0.465)、定常なのは積分量。ただし場の静定度は SU2 44 Pa に対し
