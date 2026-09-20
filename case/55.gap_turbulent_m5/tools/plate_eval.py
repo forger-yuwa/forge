@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""case/52 平板評価 — q_w(x) と T_w(x) を場から出す (断熱 run では T_w = T_aw)。
+"""case/55 平板評価 — q_w(x) と T_w(x) を場から出す (断熱 run では T_w = T_aw)。
 
 q_w = λ_w (dT/dn)_w。λ は forge の出力 `thermCond` (viscMethod 2) をそのまま使う。
 dT/dn は壁ノードから内側 2 点の 2 次片側差分。case/50 の抽出器と同じ式。

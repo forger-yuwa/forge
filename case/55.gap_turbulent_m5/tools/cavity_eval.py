@@ -115,7 +115,7 @@ def main():
     else:
         q_lit = s["qfp_kW"] * 1e3
         LBL_A = "文献"
-    q_ana = float("nan")   # case/52 は乱流なので層流平板の解析値は使わない
+    q_ana = float("nan")   # case/55 は乱流なので層流平板の解析値は使わない
     t0csv = CASE / a.t0 / "wall_q.csv"
     if t0csv.exists():
         arr = np.loadtxt(t0csv, delimiter=",", skiprows=1)

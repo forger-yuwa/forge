@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""case/52 の run 生成 — 乾燥空気 TP (4 種) + 低 Re SST + 段階起動 (case/48 の M4.19 レシピ準拠)。
+"""case/55 の run 生成 — 乾燥空気 TP (4 種) + 低 Re SST + 段階起動 (case/48 の M4.19 レシピ準拠)。
 
 物性は tools/gas_model.py と**同じ経路**にする (plan §4.3):
   熱力学  : forge `thermalMethod: 2` (NASA-9, speciesDBFile) ← 同じ DB

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""case/52 の気体 — 乾燥空気の semi-perfect (TP)。case/50 の CombustionProducts と同じ API を出す。
+"""case/55 の気体 — 乾燥空気の semi-perfect (TP)。case/50 の CombustionProducts と同じ API を出す。
 
 熱力学: NASA-9 (ResolvedSpeciesDB)、輸送: Chapman–Enskog + Wilke / Mason–Saxena (forge の viscMethod 2 と同族)。
 組成は case/49 と同じ (N2 0.75518 / O2 0.23139 / AR 0.012885 / CO2 0.000545)。
