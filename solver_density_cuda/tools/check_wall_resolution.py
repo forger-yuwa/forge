@@ -343,9 +343,21 @@ def main():
         tw = np.stack([V["twall_x"], V["twall_y"], V["twall_z"]], axis=1)
         tn = np.sum(tw * nvec, axis=1)[:, None] * nvec
         tt = np.linalg.norm(tw - tn, axis=1)               # **接線成分**
-        mu = mu_of(V["Ts"].astype(float), cfg)
+        # **まずソルバ自身の `vis_lam` を使う** (2026-09-20): 体積出力 `res_<step>.h5` の `vis_lam` は
+        # DOF ごとの分子粘性で、**輸送モデルに依らず正しい** (多成分 Wilke も含む)。
+        # `mu_of` の Sutherland 再現は CPG 専用で、TP/多成分では `None` を返して判定不能になっていた。
+        mu = None
+        vpath = os.path.join(a.run, "res_%d.h5" % step)
+        if os.path.exists(vpath):
+            with h5py.File(vpath, "r") as fv:
+                if "VALUE/vis_lam" in fv:
+                    vl = np.array(fv["VALUE/vis_lam"])
+                    if len(vl) > int(np.max(uniq)):
+                        mu = vl[uniq].astype(float)
         if mu is None:
-            print("  %-12s 粘性モデルを解決できない (viscMethod) -> 判定不能" % name)
+            mu = mu_of(V["Ts"].astype(float), cfg)
+        if mu is None:
+            print("  %-12s 粘性モデルを解決できない (viscMethod、体積出力の vis_lam も無い) -> 判定不能" % name)
             fails.append(name); continue
         ro = V["ro"].astype(float)
         yp = np.where(okc, y1 * np.sqrt(np.maximum(ro, 0) * tt) / np.maximum(mu, 1e-30), np.nan)
