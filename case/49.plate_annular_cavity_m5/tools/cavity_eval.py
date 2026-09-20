@@ -345,8 +345,13 @@ def wall_y1plus(wh, man, c, v):
         w = d["_w_node"]
         yp = ro * ut * y1 / np.maximum(mu, 1e-30)
         d["y1"] = y1
-        d["y1plus_mean"] = float(np.sum(yp * w) / max(np.sum(w), 1e-30))
-        d["y1plus_max"] = float(np.max(yp))
+        # **名前を分ける** (2026-09-20)。正本は `check_wall_resolution.py` で、
+        # そちらは壁ごとの局所接続から第一内部ノードを引き、接線壁応力で組む。
+        # ここは `wall_dist` の最小正値 (= 層厚) と壁ダンプの u_tau を使う粗い代用で、
+        # **値が大きく食い違う** (cyl_top で 1.53 vs 正本 4.47)。同じ名前で出していたため
+        # 壁解像を 1/3 に見誤って報告した。診断用と分かる名前にし、判定には使わない。
+        d["y1plus_rough_mean"] = float(np.sum(yp * w) / max(np.sum(w), 1e-30))
+        d["y1plus_rough_max"] = float(np.max(yp))
 
 
 def wall_href(wh, man, D, c, v, T0):
@@ -753,9 +758,10 @@ def main():
                   "ここの u_τ はソルバ出力で node 経路では高せん断域が stale、y1 も全域共通) ---")
             print("    第一層厚 y1 = %.4g m" % y1)
             for g, d in wh.items():
-                if "y1plus_mean" in d:
-                    print("    %-10s y1+ 平均 %8.3g / 最大 %8.3g   (ソルバ ypls 平均 %8.3g)"
-                          % (g, d["y1plus_mean"], d["y1plus_max"], d["ypls_mean"]))
+                if "y1plus_rough_mean" in d:      # **粗い代用**。判定は check_wall_resolution.py
+                    print("    %-10s y1+(粗) 平均 %8.3g / 最大 %8.3g   (ソルバ ypls 平均 %8.3g)"
+                          "  ** 判定は check_wall_resolution.py **"
+                          % (g, d["y1plus_rough_mean"], d["y1plus_rough_max"], d["ypls_mean"]))
         print("    h_aw  = q''/(T_aw - T_w)       … 外部流の回復温度基準")
         print("    h_ref = <q''/(T0_ref - T_w)>_A … 局所係数の面積平均。**分母は温度差 dT_ref**"
               " (絶対温度ではない)。h_eff = Q/∫dT dA は総入熱を再現する別の係数。")
