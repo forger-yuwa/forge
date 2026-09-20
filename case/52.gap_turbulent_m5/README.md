@@ -49,7 +49,7 @@ IC の壁近傍ランプ幅 400 µm。
 | `run_0006_T1_cav` (+`_main`) | キャビティ (開口幅方向 一様 25 µm) | 平均比 **1.493**、`STEADY` (漸近 +0.46 %)。**$y_1^+$ 後壁 最大 2.22 で G10 FAIL** | active (粗) |
 | `run_0007_T1_cav_gapref` (+`_main`) | 同 (開口幅方向を側壁に寄せ 第一セル 7.5 µm) | 平均比 1.511、$y_1^+$ 最大 **1.12** (5.7 % が 1 超、G10 FAIL)。`DRIFTING 8.1 %` → run_0009 で決着 | active (格子) |
 | `run_0008_T1_cav_urans` | URANS (dt 1e-7, 500 µs = せん断層 89 周期) | $Q_c$ 308.7 ± 1.9 W/m = 定常の **0.977 倍**。**非定常は効かない** | active (非定常の否定) |
-| `run_0009_T1_cav_settle` | run_0007 から index コピーで継続、同一数値設定で +400k step | $Q_c$ = **320.5 W/m**、`STEADY` (drift 0.1 %/tail, fluct 0.2 %)、比 **1.532**。run_0007 の外挿 323 W/m と 0.8 % 一致 | active (**T3 の確定値**) |
+| `run_0009_T1_cav_settle` | run_0007 から index コピーで継続、同一数値設定で +400k step (44 分) | $Q_c$ = **320.97 W/m**、比 **1.534**。$Q_c$ 時系列 (21 点) `STEADY` drift **0.0 %/tail** fluct **0.1 %**。**残差は `NOT CONVERGED` (プラトー 0.3 桁)**。run_0007 の外挿 323 W/m と 0.6 % 一致 | active (**T3 の確定値**) |
 
 ## 結果 (2026-09-20)
 
@@ -86,6 +86,24 @@ IC の壁近傍ランプ幅 400 µm。
 
 **ただし条件差は大きい**: M 5 vs 10.3、そして**流入 BL 厚が $\delta/W$ = 2.3 vs $\delta^*/W$ = 46–56**。
 TN D-8233 のすきまは非常に厚い乱流 BL の底に埋まっている。**この差を潰すのが T2** (case/51)。
+
+### 判定 (run_0009, 400k step)
+
+```
+check_convergence : NOT CONVERGED (stalled/plateau — needs scheme change, not more steps)
+                    全列 drop 0.3 dec (rms_roK 1.1 / rms_roOmega 1.6)、init→peak→fin が
+                    6.1e-7 → 6.3e-6 → 2.2e-6 と 3 倍振れるリミットサイクル
+check_quasisteady : ALL STEADY   (shock / machmax / pmax いずれも drift 0.0 %/tail)
+Qc 時系列 (21 点)  : STEADY  tail mean=321  drift=0.0 %/tail  fluct=0.1 %
+y1+ (tools/y1plus.py): 平板 最大 0.807 / 前壁 0.414 / 床 0.003 は PASS、
+                    **すきま後壁 最大 1.123 (6.0 % が 1 超) で VERDICT: FAIL** → G10 未達
+NaN/Inf           : なし (res_nan_* 無し、全 rms_* 列に NaN 無し)
+```
+
+**「収束した」とは書けない**。残差は 0.3 桁しか下がらずプラトーで 3 倍振れている。
+報告してよいのは「**報告対象量 $Q_c$ が定常化している** (drift 0.0 %/tail, fluct 0.1 %)」
+までで、これは残差プラトーとリミットサイクルが共存する典型。$y_1^+$ も後壁で未達なので、
+**T3 の 1.534 は「後壁の壁解像が一部 $y_1^+>1$、残差プラトー」という但し書き付きの値**。
 
 ### 非定常も効かない (run_0008)
 
