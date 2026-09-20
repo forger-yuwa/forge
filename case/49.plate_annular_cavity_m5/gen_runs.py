@@ -400,6 +400,11 @@ def cmd_run(a):
                    and (abs(par[k] - D[k]) > 1e-9 * max(1.0, abs(par[k]))
                         if isinstance(par[k], (int, float)) and isinstance(D[k], (int, float))
                         else par[k] != D[k])]
+            if bad and getattr(a, "ic_force", ""):
+                print("  [条件不一致だが --ic-force で続行: %s]" % a.ic_force)
+                for k, x, y in bad:
+                    print("     %-16s 親 %s  ->  今回 %s" % (k, x, y))
+                bad = []
             if bad:
                 raise SystemExit(
                     "引き継ぎ元 %s と条件が違う (CASE49_CASE / CASE49_MANIFEST の export 漏れ?):\n"
@@ -504,6 +509,9 @@ def main():
     r.add_argument("--cfl-pseudo", type=float, default=12.0)
     r.add_argument("--ic-from", default=None, help="定常場の run (mesh.h5 を index コピーで引き継ぐ)")
     r.add_argument("--perturb", type=float, default=0.01, help="URANS の左右非対称擾乱 (相対)")
+    r.add_argument("--ic-force", default="",
+                   help="引き継ぎ元と条件が違っても進める理由 (意図的な壁温変更など)。"
+                        "空なら不一致で停止する")
     r.add_argument("--wall-temps", default="",
                    help="壁ごとの等温壁温度を上書き (例 cav_outer=1273.15,cyl_side=1273.15,cav_floor=293.15)")
     r.add_argument("--main-only", action="store_true",
