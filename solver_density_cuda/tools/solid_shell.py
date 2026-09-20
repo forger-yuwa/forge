@@ -420,7 +420,8 @@ class FixedPointDriver:
             A, b = self.op.assemble(T)       # 局所 k_s(T) で組み直す
         return A, b
 
-    def advance(self, Qf, tol_K=1e-6, tol_rel=1e-6, n_consec=2):
+    def advance(self, Qf, tol_K=1e-6, tol_rel=1e-6, n_consec=2,
+                tol_abs_W=None, tol_solid=None):
         """最新の $Q_f(T_k)$ を受け取り、次の $T_{k+1}$ を返す。"""
         Qf = np.asarray(Qf, float)
         A, b = self._assemble(self.T)
@@ -464,9 +465,31 @@ class FixedPointDriver:
                 self.Ts.pop(0); self.Gs.pop(0)
 
         dT = float(np.max(np.abs(Tn - self.T)))
-        conv_now = (dT < tol_K) and (res_rel < tol_rel) and not rejected
+        # ---- 界面ゲート G-if (plan boundary-conjugate-heat-transfer §6、codex result M5) ----
+        # **独立に満たすものを全部見る**。旧実装は dT と res_rel だけで、$D_f$ を倍にして
+        # 更新が小さくなっただけの状態を「収束」にできた (反例: A_s=1000, b=3e5, Q_f=1 で
+        # res_rel 3.3e-6 に見えて物理的な不釣合いは 100 %)。
+        #   res_abs   : 界面残差の絶対値 [W] (面積あたりでなく節点荷重の単位)
+        #   res_rel   : $\max|r| / \max|Q_f|$ (規格化は $Q_f$ のみ。b は混ぜない)
+        #   res_solid : 固体内部の残差 (界面へ縮約した作用素と内部復元の整合)
+        #   dT        : 温度更新の絶対値
+        #   Df_grown  : この反復で $D_f$ を上げた (= 退避した) なら収束と認めない
+        res_abs = float(np.max(np.abs(r)))
+        res_solid = float("nan")
+        if hasattr(self.op, "interior_residual"):
+            try:
+                res_solid = float(self.op.interior_residual(self.T))
+            except Exception:
+                res_solid = float("nan")
+        ok_abs = True if tol_abs_W is None else (res_abs < tol_abs_W)
+        ok_solid = True
+        if tol_solid is not None and np.isfinite(res_solid):
+            ok_solid = (res_solid < tol_solid)
+        conv_now = ((dT < tol_K) and (res_rel < tol_rel) and ok_abs and ok_solid
+                    and not rejected)
         self._ok_streak = self._ok_streak + 1 if conv_now else 0
         info = {"iter": self.it, "phi": phi, "res_rel": res_rel, "dT": dT, "used": used,
+                "res_abs": res_abs, "res_solid": res_solid,
                 "rejected": rejected, "Df_mean": float(np.mean(self.Df)),
                 "converged": self._ok_streak >= n_consec}
         self.history.append(info)

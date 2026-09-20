@@ -483,6 +483,36 @@ $-\sum_{f\in \text{内部面}}F^E$ (= 流体内部から壁 CV へ入る正味�
 `iface_q_eff` **81.1837 W/m² (−0.154 %)** で、`q_compact` (−0.155 %)・`q_recon` (−0.155 %) と同等。
 **符号と絶対値を再現している**。
 
+
+#### 合否ゲート — **G-if (界面反復) と G-cons (収支) を別々に満たす**
+
+**G-if** (`cht_loop`、判定は `solid_shell.FixedPointDriver.advance`): 次を**独立に**満たし、
+かつ `--n-consec` 回連続したときだけ収束とする。1 つでも欠けると、$D_f$ を上げて更新が
+小さくなっただけの状態を収束と認めてしまう。
+
+| 量 | 意味 | 渡し方 |
+| --- | --- | --- |
+| `dTw` | 温度更新の絶対値 [K] | `--tol-K` |
+| `res_abs` | 界面残差の**絶対値** [W] (単位奥行きなら W/m) | `--tol-abs-W` (**事前登録**) |
+| `res_rel` | $\max\lvert r\rvert/\max\lvert Q_f\rvert$。**規格化は $Q_f$ のみ** | `--tol-rel` |
+| `res_solid` | 固体**内部**の残差 (Schur 縮約と内部復元の整合) | `--tol-solid` |
+| 退避していないこと | $D_f$ を上げた反復は収束と認めない | — |
+
+**規格化に $b$ を混ぜない**のが要点。旧実装は $\max(\lvert Q_f\rvert,\lvert b\rvert)$ で割っており、
+背面温度で $b$ が大きいと $A_s=1000$ W/K, $b=3\times10^5$ W, $Q_f=1$ W, $D=10^9$ W/K のような構成で
+`res_rel` が **3.33e−6** に見え、物理的な不釣合いが **100 %** でも合格した
+(回帰試験 `test_solid_shell.py` T7)。
+
+**G-cons** (`tools/check_cht_balance.py`): 同一状態で
+
+$$\varepsilon=\Big|\sum_i Q_{f,i}-Q_{\rm solid}\Big|,\qquad
+  \text{分母}=\max\Big(\sum_i\lvert Q_{f,i}\rvert,\ Q_{\rm floor}\Big)$$
+
+とし、$\varepsilon/\text{分母}\le$ `--tol-rel` (既定 0.5 %) **かつ** $\varepsilon\le$ `--tol-abs` で合格。
+**正味量で割らない** (正負が相殺する構成で分母が消える)。$Q_{\rm floor}$ は
+**ケースごとに計算前に登録**する絶対床。`iface_q_eff` が `NaN` の節点が 1 つでもあれば**不合格**
+(適用範囲外の構成をそのまま通さない)。
+
 ### ディスパッチ
 
 [`applyBconds`](../solver_density_cuda/boundaryCond.cpp#L116) が

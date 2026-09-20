@@ -159,6 +159,13 @@ def main():
     ap.add_argument("--tol-K", type=float, default=1.0e-3, help="max|dTw| の収束許容 [K]")
     ap.add_argument("--tol-rel", type=float, default=1.0e-3, help="max|r|/スケール の収束許容")
     ap.add_argument("--n-consec", type=int, default=2, help="収束と見なす連続回数")
+    # ---- 界面ゲート G-if (plan §6、codex result M5) ----
+    # **事前登録**して渡す。dT と res_rel だけでは、$D_f$ を上げて更新が小さくなっただけの
+    # 状態を収束と認めてしまう (反例は `test_solid_shell.py` T7)。
+    ap.add_argument("--tol-abs-W", type=float, default=None,
+                    help="界面残差の**絶対**許容 [W] (単位奥行きなら W/m)。ケースごとに事前登録する")
+    ap.add_argument("--tol-solid", type=float, default=None,
+                    help="固体**内部**残差の許容 [W] (同上)。`fem2d` のみ評価される")
     ap.add_argument("--anderson", type=int, default=5)
     ap.add_argument("--Tw-init", type=float, default=None, help="初期壁温 [K] (既定 = 固体の背面温度)")
     ap.add_argument("--Tg", type=float, default=None,
@@ -193,7 +200,8 @@ def main():
     hist = open(hist_path, "w", newline="")
     wr = csv.writer(hist)
     wr.writerow(["iter", "flux", "Tw_min", "Tw_max", "Tw_mean", "dTw_max", "res_rel",
-                 "Q_total_W", "Df_mean", "used", "rejected", "converged"])
+                 "res_abs_W", "res_solid_W", "Q_total_W", "Df_mean", "used", "rejected",
+                 "converged"])
     hist.flush()
 
     op = drv = None
@@ -276,13 +284,17 @@ def main():
         if a.solid_mode == "fem2d":
             q = q[perm]                                  # 壁ダンプ順 -> 固体界面節点順
         Qf = q * op.area                                 # 節点荷重 [W] (平面 2D は W/m)
-        Tw_new, info = drv.advance(Qf, tol_K=a.tol_K, tol_rel=a.tol_rel, n_consec=a.n_consec)
+        Tw_new, info = drv.advance(Qf, tol_K=a.tol_K, tol_rel=a.tol_rel, n_consec=a.n_consec,
+                                   tol_abs_W=a.tol_abs_W, tol_solid=a.tol_solid)
         wr.writerow([it, a.flux, f"{Tw.min():.6f}", f"{Tw.max():.6f}", f"{Tw.mean():.6f}",
-                     f"{info['dT']:.6e}", f"{info['res_rel']:.6e}", f"{np.sum(Qf):.6e}",
+                     f"{info['dT']:.6e}", f"{info['res_rel']:.6e}",
+                     f"{info['res_abs']:.6e}", f"{info['res_solid']:.6e}",
+                     f"{np.sum(Qf):.6e}",
                      f"{info['Df_mean']:.6e}", info["used"], int(info["rejected"]), int(info["converged"])])
         hist.flush()
         print(f"[cht_loop]   Tw {Tw.min():.3f}..{Tw.max():.3f} K | dTw {info['dT']:.3e} K | "
-              f"res_rel {info['res_rel']:.3e} | Q {np.sum(Qf):.4g} | {info['used']}"
+              f"res {info['res_abs']:.3e} W ({info['res_rel']:.3e}) | "
+              f"solid {info['res_solid']:.2e} | Q {np.sum(Qf):.4g} | {info['used']}"
               + (" REJECTED" if info["rejected"] else ""))
         prev, Tw = itd, Tw_new
         if info["converged"]:

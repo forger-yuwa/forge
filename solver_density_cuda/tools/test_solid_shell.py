@@ -151,6 +151,26 @@ def t5_coupling_acceptance():
           f"max-norm {np.max(np.abs(r)):.3f} -> {np.max(np.abs(rtrial)):.3f}, Phi {phi0:.6f} -> {phi1:.6f}")
 
 
+def test_gif_normalisation():
+    r"""**規格化は $\max|Q_f|$ のみ** (codex result M5 の反例, 2026-09-20)。
+
+    $A_s=1000$ W/K, $b=300000$ W, $T=300.002$ K, $Q_f=1$ W とすると残差は $|r|=1$ W。
+    旧実装は $\max(|Q_f|,|b|)$ で割っていたので `res_rel` が **3.33e-6** に見え、
+    物理的な不釣合いが **100 %** でも 2 反復で `converged=True` になっていた。
+    """
+    class Op1:
+        n = 1
+        def assemble(self, T):
+            return sp.csr_matrix(np.array([[1000.0]])), np.array([300000.0])
+    drv = FixedPointDriver(Op1(), np.array([300.002]), Df0=np.array([1.0e9]), anderson=0)
+    _, info = drv.advance(np.array([1.0]), tol_K=1e-3, tol_rel=1e-3, n_consec=1)
+    ok = (info["res_rel"] > 0.5) and (not info["converged"])
+    check("T7 G-if normalises by max|Qf| only (not b)", ok,
+          f"res_rel={info['res_rel']:.4g} (旧実装 3.33e-06), res_abs={info['res_abs']:.4g} W, "
+          f"converged={info['converged']}")
+    return ok
+
+
 def test_reject_keeps_state_pair():
     """**棄却時に $T$ と $Q_f$ を組で戻す** (codex result M2, 2026-09-20 の反例)。
 
@@ -181,6 +201,7 @@ if __name__ == "__main__":
     t4_temperature_dependent_k()
     t5_coupling_acceptance()
     test_reject_keeps_state_pair()
+    test_gif_normalisation()
     print()
     if FAILS:
         print("VERDICT: FAIL (%d)" % len(FAILS))

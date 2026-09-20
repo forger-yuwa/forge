@@ -169,6 +169,18 @@ class Fem2DOperator:
         self.u = u
         return u
 
+    def interior_residual(self, T_iface):
+        r"""**内部節点の残差** $\max|K_{oo}u_o + K_{oi}T_i - b_o|$ [W/m] (G-if の 1 項目)。
+
+        界面へ縮約した Schur 作用素だけを見ていると、内部の復元 (`recover_interior`) と
+        物性の局所評価がずれていても気づけない。同じ評価温度で全系を組み直して残差を測る。
+        """
+        u = self.recover_interior(np.asarray(T_iface, float))
+        K, b = self.assemble_full(u)
+        res = np.asarray(K.dot(u)).ravel() - np.asarray(b).ravel()
+        o = self._other
+        return float(np.max(np.abs(res[o]))) if len(o) else 0.0
+
     def solve(self, Qf, T0=None, iters=15, tol=1e-10):
         """節点熱荷重 Qf [W/m] を界面に与えて解く (k_s(T) は Picard)。"""
         T = np.full(self.n, 300.0) if T0 is None else np.asarray(T0, float).copy()
