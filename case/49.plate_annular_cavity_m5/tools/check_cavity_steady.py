@@ -29,6 +29,13 @@ from check_quasisteady import classify_series as classify, SEV      # noqa: E402
 #  h_ref が全点 NaN でも他が STEADY なら PASS になっていた)
 DEFAULT = ["q_wall_sum", "q_outer", "q_cylside", "q_floor", "dT_mouth", "dT_mid", "dT_floor",
            "zpen_25", "mdot_in", "mdot_out", "mdot_imbalance", "h_ref"]
+
+# **非一様壁温では判定に使えない列** (2026-09-20)。`h_ref = <q''/(T0_mid - Tw)>_A` は
+# 局所係数の面積平均なので、壁ごとに壁温が違うと**すきま中央のガス温度が壁温の中間**に来て
+# ΔT ≈ 0 の場所が必ず生じ、`q''/ΔT` が発散する (mixB 実測: 平均 1.71e4 W/m2K・変動 252 %、
+# 一方で壁入熱は 5-6 桁一致の完全な定常)。§4.7.3 の「(A) 局所 T0 基準は非一様壁温では
+# 定義できない」と同じ理由。**壁温が一様でない run では除外する**。
+NONUNIFORM_EXCLUDE = ["h_ref"]
 LABEL = {"q_wall_sum": "3壁 総入熱 Q [W]", "q_outer": "外筒壁 Q [W]", "q_cylside": "円柱側面 Q [W]",
          "q_floor": "底面 Q [W]", "dT_mouth": "開口 dT [K]", "dT_mid": "中央 dT [K]",
          "dT_floor": "底 dT [K]", "zpen_25": "侵入深さ(25K) [m]", "mdot_in": "開口流入 [kg/s]",
@@ -44,6 +51,20 @@ ABS_TOL = {"dT_mouth": ("K", 2.0, 0.02), "dT_mid": ("K", 2.0, 0.02), "dT_floor":
 Q_REL_TOL = 0.005      # 3 壁合計の 0.5 %
 
 
+def is_nonuniform_wall(run):
+    """`conditions.json` に `wall_T_by_group` があり、壁温が実際に割れているか。"""
+    import json as _json
+    f = Path(run) / "conditions.json"
+    if not f.exists():
+        return False
+    d = _json.loads(f.read_text())
+    by = d.get("wall_T_by_group") or {}
+    if not by:
+        return False
+    vals = set(round(float(v), 6) for v in by.values()) | {round(float(d["wall_T"]), 6)}
+    return len(vals) > 1
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("runs", nargs="+")
@@ -57,6 +78,15 @@ def main():
 
     worst = 0
     for run in a.runs:
+        cols = list(want)
+        if not a.quantity and is_nonuniform_wall(run):
+            drop = [c for c in NONUNIFORM_EXCLUDE if c in cols]
+            for c in drop:
+                cols.remove(c)
+            if drop:
+                print("  [非一様壁温] 判定から除外: %s  "
+                      "(壁温が割れていると ΔT≈0 の点が生じ q''/ΔT が発散する。§4.7.3)"
+                      % ", ".join(drop))
         csvp = Path(run) / "cavity_series.csv"
         print("\n=== %s ===" % run)
         if not csvp.exists():
@@ -79,11 +109,11 @@ def main():
             if qv:
                 n0 = max(2, int(len(qv) * a.tail))
                 qsum_scale = abs(sum(qv[-n0:]) / n0)
-        missing = [k for k in want if k not in rows[0]]
+        missing = [k for k in cols if k not in rows[0]]
         if missing:
             print("  **必須列が無い**: %s  -> FAIL (系列の作り直しが要る)" % ", ".join(missing))
             worst = max(worst, SEV["NONFINITE"])
-        for k in want:
+        for k in cols:
             if k not in rows[0]:
                 continue
             raw = [r[k] for r in rows]
