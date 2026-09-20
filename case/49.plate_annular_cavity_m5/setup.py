@@ -71,6 +71,21 @@ def tp_gas(Y):
 
 
 def _solve_T_of_h(gas, h_target, lo=150.0, hi=3000.0):
+    """h(T) = h_target の根。**必ずブラケットを確認してから二分法に入る**。
+
+    旧実装は上限を確認せず、h_target > h(hi) のとき黙って `hi` を返していた。
+    M9 の主流全エンタルピーは h(3000 K) を 214.9 kJ/kg 超えるため、**Tt が 3000.0 K に
+    張り付いた値として出力され**、それを総温として report していた (2026-09-19, codex 指摘)。
+    真値は 3165.65 K。Taw = 2883.4 K は範囲内なので影響を受けていない。
+    """
+    if _f(gas.h_mass(lo)) > h_target:
+        raise ValueError("h_target %.6g J/kg が下限 %.1f K のエンタルピーを下回る" % (h_target, lo))
+    for _ in range(60):                      # 上限が足りなければ広げる (張り付かせない)
+        if _f(gas.h_mass(hi)) >= h_target:
+            break
+        lo, hi = hi, hi * 1.5
+    else:
+        raise ValueError("h_target %.6g J/kg を挟む上限が見つからない (hi=%.1f K)" % (h_target, hi))
     for _ in range(200):
         mid = 0.5 * (lo + hi)
         if _f(gas.h_mass(mid)) < h_target:

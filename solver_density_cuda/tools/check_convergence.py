@@ -211,7 +211,14 @@ def build_segment_csv(run_dir):
     for st in seg:
         f = os.path.join(run_dir, st['history'])
         if not os.path.exists(f):
-            continue
+            # 段が 1 つだけの run (継続 run の本段のみ) は段別履歴を分けないので、
+            # 素の residual_history.csv がその段の履歴そのものである (2026-09-20)。
+            # ここで黙って飛ばすと区間が空になり「stage_manifest が無い」と同じ扱いになっていた。
+            alt = os.path.join(run_dir, 'residual_history.csv')
+            if len(seg) == 1 and os.path.exists(alt):
+                f = alt
+            else:
+                continue
         r = list(_csv.reader(open(f)))
         if len(r) < 2:
             continue
@@ -339,9 +346,11 @@ def main():
         if args.segment and not rd.endswith('.csv'):
             path = build_segment_csv(rd)
             if path is None:
+                # **判定不能は合格ではない** (AGENTS.md)。以前は未定義の `worst` を触って
+                # UnboundLocalError で落ち、呼び出し側から見ると「判定なし」で素通りしていた。
                 print(f"[{rd}] stage_manifest.json が無い -> --segment は使えない "
-                      f"(判定区間を人が明示すること)")
-                worst = max(worst, 2)
+                      f"(判定区間を人が明示すること)  <-- 判定不能")
+                all_pass = False
                 continue
         else:
             path = rd if rd.endswith('.csv') else os.path.join(rd, 'residual_history.csv')

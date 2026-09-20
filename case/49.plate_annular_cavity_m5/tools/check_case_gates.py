@@ -79,9 +79,22 @@ def main():
     seg = ["--segment"] if (rd / "stage_manifest.json").exists() else []
     rc, out = run([py, str(STOOLS / "check_convergence.py"), str(rd)] + seg)
     head = next((l for l in out.splitlines() if l.startswith("===")), "(出力なし)")
+    # **残差列がそもそも出ていない run を合格にしない** (2026-09-19)。
+    # インスタンス再起動で forge が 1 step も回らなかった run
+    # (`residual_history.csv` 無し / 空) を「継続 run は上昇の有無で判定」の経路が
+    # 「上昇が無い」=OK と判定して通していた。判定不能は不合格。
+    rh = rd / "residual_history.csv"
+    nline = len(rh.read_text().strip().splitlines()) if rh.exists() else 0
+    if nline < 2:
+        print("[2] 残差の収束     : **判定不能** (residual_history.csv が %s)"
+              % ("無い" if nline == 0 else "ヘッダのみ"))
+        return 2
     if cont:
         rising = [l for l in out.splitlines() if "RISING" in l or "DIVERGED" in l]
         ok2 = (not rising) and ("NaN" not in out or "NaN/Inf present" not in out)
+        if head == "(出力なし)":                 # 判定行が出ていないのも判定不能
+            print("[2] 残差の収束     : **判定不能** (check_convergence が判定行を出さなかった)")
+            return 2
         print("[2] 残差の収束     : %s  (継続 run: 低下桁数でなく**上昇の有無**で判定)"
               % ("OK" if ok2 else "**FAIL**"))
         print("      %s" % head.strip())

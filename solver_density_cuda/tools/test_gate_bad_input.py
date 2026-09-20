@@ -95,6 +95,7 @@ def main():
     chk("正常系列 -> 従来どおり STEADY", v == "STEADY", "verdict=%s" % v)
 
     print("=== check_mesh_quality: 成立していないメッシュ ===")
+    import shutil
     import subprocess
     import h5py
     tool = os.path.join(HERE, "check_mesh_quality.py")
@@ -133,6 +134,23 @@ def main():
     rc, out = run_tool(p3)
     chk("正常な四面体 -> 従来どおり合格", rc == 0, "rc=%d" % rc)
     os.unlink(p3)
+
+    # --segment で stage_manifest.json が無い run (継続 run で実際に起きた)。
+    # 以前は未定義の `worst` を触って UnboundLocalError で落ち、呼び出し側からは
+    # 「判定が出ていない」だけに見えて素通りしていた (2026-09-19)。
+    cc_tool = os.path.join(HERE, "check_convergence.py")
+    d = tempfile.mkdtemp()
+    with open(os.path.join(d, "residual_history.csv"), "w") as f:
+        f.write("step,rms_ro,rms_roUx,rms_roUy,rms_roUz,rms_roe\n")
+        for i in range(200):
+            v = 10.0 ** (-3 - 3 * i / 199.0)
+            f.write("%d,%g,%g,%g,%g,%g\n" % (i, v, v, v, v, v))
+    r = subprocess.run([sys.executable, cc_tool, d, "--segment"], capture_output=True, text=True)
+    out = r.stdout + r.stderr
+    chk("--segment で stage_manifest 無し -> 例外でなく非ゼロ終了",
+        r.returncode != 0 and "Traceback" not in out,
+        "rc=%d %s" % (r.returncode, "Traceback" if "Traceback" in out else out.strip().splitlines()[-1:]))
+    shutil.rmtree(d, ignore_errors=True)
 
     print("\nVERDICT: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1

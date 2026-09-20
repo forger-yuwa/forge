@@ -56,6 +56,19 @@ SLIPS = [g for g in (["top", "side", "sym"] + (["runup"] if G["has_runup"] else 
 
 
 # ---------------------------------------------------------------- config
+WALL_T_OVERRIDE = {}          # {壁グループ名: 壁温 [K]}。--wall-temps で埋める
+
+
+def wall_T_of(group):
+    """その壁グループの等温壁温度。**非一様壁温 (plan §5.1 #21) のための上書きに対応**。
+
+    等温壁 3 本 (全壁同温) では熱回路の Q_i = G_i0(T_ext - T_i) + Σ_j G_ij(T_j - T_i) の
+    第 2 項 (他の壁からガス越しに受ける熱) が恒等的に 0 になり同定できない
+    (2026-09-19 codex)。壁ごとに違う温度を与えてこの項を測る。
+    """
+    return float(WALL_T_OVERRIDE.get(group, D["wall_T"]))
+
+
 def bcond(stage, inlet_profile=False):
     """stage: 'convert'|'slip'|'adiabatic'|'isothermal'
     convert = 最終形 (wall_dist 用)。slip = S0 用に全壁 slip。"""
@@ -78,7 +91,7 @@ def bcond(stage, inlet_profile=False):
                      "floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0}}" % (w + ":", PID[w]))
         else:                                  # convert / isothermal の等温壁
             L.append("%-10s {physID: %d, kind: wall_isothermal, outputHDFflg: 1, ints: , "
-                     "floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: %.8g}}" % (w + ":", PID[w], D["wall_T"]))
+                     "floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: %.8g}}" % (w + ":", PID[w], wall_T_of(w)))
     return "\n".join(L) + "\n"
 
 
@@ -354,12 +367,46 @@ def cmd_run(a):
     # **解決済みの作動条件も run に固定する** (2026-09-19 codex Major 10: 評価側が共有 case.json を
     # 読み直していたため、M や壁温を変えると**過去 run の評価が変わって**しまっていた)。
     # 使った EOS も書く (回復温度 Taw を EOS に合わせて選ぶため)。
+    if getattr(a, "wall_temps", ""):
+        for kv in a.wall_temps.split(","):
+            g, _, t = kv.partition("=")
+            g = g.strip()
+            if g not in PID:
+                raise SystemExit("--wall-temps: 未知の壁グループ %r (候補 %s)"
+                                 % (g, ",".join(sorted(PID))))
+            WALL_T_OVERRIDE[g] = float(t)
+        print("  壁温上書き: " + ", ".join("%s=%.2f K" % (k, v)
+                                           for k, v in sorted(WALL_T_OVERRIDE.items())))
     cond = dict(D)
+    if WALL_T_OVERRIDE:
+        cond["wall_T_by_group"] = dict(WALL_T_OVERRIDE)
     cond["gas_used"] = gas
     (rd / "conditions.json").write_text(json.dumps(cond, indent=2, ensure_ascii=False,
                                                    default=float))
     (rd / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
     if a.ic_from:
+        # **引き継ぎ元と条件が一致しているか必ず検査する** (2026-09-20)。
+        # `CASE49_CASE` / `CASE49_MANIFEST` を export し忘れると既定の `case.json`
+        # (別のマッハ数・別の壁温) で回ってしまい、IC だけ前 run という無意味な計算が
+        # 静かに完走する。実際に M9/壁温 20・1000 degC のつもりで M5/500 degC を 2 本回した。
+        pj = HERE / a.ic_from / "conditions.json"
+        if pj.exists():
+            import json as _json
+            par = _json.loads(pj.read_text())
+            keys = ("mach", "wall_T", "gas", "T_inf", "P_inf", "cyl_top_thermal",
+                    "wall_T_by_group")
+            bad = [(k, par.get(k), D.get(k)) for k in keys
+                   if k in par and k in D
+                   and (abs(par[k] - D[k]) > 1e-9 * max(1.0, abs(par[k]))
+                        if isinstance(par[k], (int, float)) and isinstance(D[k], (int, float))
+                        else par[k] != D[k])]
+            if bad:
+                raise SystemExit(
+                    "引き継ぎ元 %s と条件が違う (CASE49_CASE / CASE49_MANIFEST の export 漏れ?):\n"
+                    % a.ic_from
+                    + "\n".join("  %-16s 親 %s  !=  今回 %s" % (k, x, y) for k, x, y in bad))
+        else:
+            print("  [警告] %s/conditions.json が無く、条件の一致を検査できない" % a.ic_from)
         src = sorted((HERE / a.ic_from).glob("res_[0-9]*.h5"),
                      key=lambda f: int(f.stem.split("_")[1]))[-1]
         index_copy(src, rd / "mesh.h5")
@@ -389,9 +436,18 @@ def cmd_run(a):
         # 段階起動をやり直してしまい、**S0 の全 slip が解を壊す**ので専用の入口を用意する。
         if not a.ic_from:
             raise SystemExit("--main-only は --ic-from と併用する (引き継ぐ場が要る)")
-        (rd / "solverConfig.yaml").write_text(solver_cfg(a.main_steps, a.cfl, outint=a.out_int,
-                                                         gas=gas))
-        (rd / "bcondConfig.yaml").write_text(bcond("isothermal", inlet_profile=True))
+        cfgtext = solver_cfg(a.main_steps, a.cfl, outint=a.out_int, gas=gas)
+        bctext = bcond("isothermal", inlet_profile=True)
+        # **継続 run にも stage_manifest.json を書く**。以前は書いていなかったため
+        # `check_convergence.py --segment` が「区間を決められない」で落ち、ゲートは
+        # 弱い代替判定 (上昇の有無) に落ちていた (2026-09-19)。段は本段 1 つだけ。
+        sys.path.insert(0, str(ROOT / "solver_density_cuda" / "tools"))
+        from stage_manifest import StageManifest
+        sm = StageManifest(rd)
+        sm.add("S6_main_ext", cfgtext, bctext)
+        sm.write()
+        (rd / "solverConfig.yaml").write_text(cfgtext)
+        (rd / "bcondConfig.yaml").write_text(bctext)
         rc = run_forge(rd)
         print("main-only rc", rc)
         print((rd / "CONVERGENCE_VERDICT.txt").read_text()[-600:])
@@ -448,6 +504,8 @@ def main():
     r.add_argument("--cfl-pseudo", type=float, default=12.0)
     r.add_argument("--ic-from", default=None, help="定常場の run (mesh.h5 を index コピーで引き継ぐ)")
     r.add_argument("--perturb", type=float, default=0.01, help="URANS の左右非対称擾乱 (相対)")
+    r.add_argument("--wall-temps", default="",
+                   help="壁ごとの等温壁温度を上書き (例 cav_outer=1273.15,cyl_side=1273.15,cav_floor=293.15)")
     r.add_argument("--main-only", action="store_true",
                    help="段階起動を飛ばして本段だけ回す (--ic-from 必須。収束済みの場を伸ばす用)")
     r.add_argument("--dry", action="store_true")
