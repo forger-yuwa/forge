@@ -166,7 +166,8 @@ def main():
     ap.add_argument("--resume", action="store_true", help="既存 run の mesh.h5 (前段の場) から続ける")
     ap.add_argument("--inlet", default="pt", choices=["pt", "u"], help="pt=全圧入口 / u=一様速度入口")
     ap.add_argument("--ps-exit", type=float, default=None,
-                    help="出口静圧 [Pa] を直接指定 (既定は Pt/(1+0.2 M2^2)^3.5 = 全圧損失ゼロ仮定)")
+                    help="出口静圧 [Pa] を直接指定。**段階起動の背圧ランプ専用** — "
+                         "最終段の既定 Pt/(1+0.2 M2^2)^3.5 (報告の理想 M2) を上書きしないこと")
     ap.add_argument("--precond", type=int, default=0, help="lowMachPrecond (低マッハ市松対策は 2)")
     ap.add_argument("--go", action="store_true", help="準備だけでなく実行もする")
     a = ap.parse_args()
@@ -206,8 +207,13 @@ def main():
     (rd / "probe.yaml").write_text("outStepInterval: 100000\noutStepStart: 0\npoints:\nsurfaces:\n")
 
     c = COND[a.run]
-    # 既定は損失ゼロ仮定。実際は翼列損失 (~2 %) の分だけ M2 が下がるので、
-    # 1 回目の結果の出口 Pt を使って --ps-exit で追い込む。
+    # 報告の M2 は翼列の標準定義である**理想出口マッハ** (入口全圧と出口静圧の比) なので、
+    # 背圧はこの式がそのまま正解であり、**計算した出口 Pt で追い込んではいけない**。
+    # 2026-09-20 の失敗: 出口面の局所 Pt から出した M2 が 0.901 になるまで下げた結果、
+    # 翼列損失 1.9 % を二重に引いて背圧が 2.1 % 低くなり (185,064 Pa = 理想 M2 0.919)、
+    # 後縁側の壁圧が Ps/Pt で -0.026 低く出た。SU2 も同じだけ低かったのでソルバ無罪。
+    # 正しい値は 188,908 Pa (case/53 README「負圧面後縁の壁圧」)。
+    # --ps-exit は**段階起動の背圧ランプ専用**であり、最終段は必ず理想値に戻すこと。
     Ps_exit = a.ps_exit if a.ps_exit else c["Pt"] / (1 + 0.2 * c["M2"] ** 2) ** 3.5
     pitch_m = c["pitch_m"]          # COND は m で持つ (cm ではない)
     (rd / "bcondConfig.yaml").write_text(bcond_cfg(pitch_m, Ps_exit, c["Pt"], c["Tt"], c["M1"], inlet=a.inlet))
