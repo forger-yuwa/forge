@@ -167,23 +167,58 @@ __global__ void viscousFlux_d
         // 完全な Newton 応力 tau_ij S_j = mu(du_i/dx_j + du_j/dx_i)S_j - (2/3)mu divu S_i。
         // 第1項 (Laplacian, mu grad(u_i).S) は over-relaxed: 法線スカラー delta + 同成分勾配.k。
         // 第2項 (転置, mu du_j/dx_i S_j) は面平均勾配にフル S を内積。第3項 (発散) は成分 s**。
-        flow_float tau_x = mu_total*((Ux[ic1] -Ux[ic0])/dcc)*delta;
-        tau_x += mu_total*(dUxdxf*k_x +dUxdyf*k_y +dUxdzf*k_z);
+        // heatCorrSU2 == 2: **運動量の Laplacian 項だけ** SU2 係数に (不完全。切り分け用に残す)。
+        // heatCorrSU2 == 3: **SU2 と同形** — 勾配そのものを補正してから全応力を組む:
+        //     r_i = (U_i[1]-U_i[0]) - (G_i . d),   G^c_ij = G_ij + r_i d_j / |d|^2
+        //     tau_i = mu[ (G^c + G^cT - (2/3) tr(G^c) I) S ]_i
+        // 2 に欠けていたのは転置項 mu*d(r.S)/|d|^2 と発散項 -(2/3)mu(r.d)S/|d|^2 (codex 2026-09-20)。
+        // 粘性仕事 (res_roe += tau.u) は下で同じ tau を使うので自動的に整合する。
+        flow_float d_mom = delta, kx_m = k_x, ky_m = k_y, kz_m = k_z;
+        if (heatCorrSU2 == 2) {
+            const flow_float dd2m  = max(dcc_x*dcc_x + dcc_y*dcc_y + dcc_z*dcc_z, (flow_float)1.0e-30);
+            const flow_float a_su2 = (dcc_x*sxx + dcc_y*syy + dcc_z*szz)/dd2m;
+            d_mom = a_su2*dcc;
+            kx_m = sxx - a_su2*dcc_x; ky_m = syy - a_su2*dcc_y; kz_m = szz - a_su2*dcc_z;
+        }
+        flow_float tau_x, tau_y, tau_z;
+        if (heatCorrSU2 == 3) {
+            const flow_float iL2 = (flow_float)1.0/max(dcc_x*dcc_x + dcc_y*dcc_y + dcc_z*dcc_z, (flow_float)1.0e-30);
+            const flow_float rx = (Ux[ic1]-Ux[ic0]) - (dUxdxf*dcc_x + dUxdyf*dcc_y + dUxdzf*dcc_z);
+            const flow_float ry = (Uy[ic1]-Uy[ic0]) - (dUydxf*dcc_x + dUydyf*dcc_y + dUydzf*dcc_z);
+            const flow_float rz = (Uz[ic1]-Uz[ic0]) - (dUzdxf*dcc_x + dUzdyf*dcc_y + dUzdzf*dcc_z);
+            // G^c_ij = G_ij + r_i d_j iL2
+            const flow_float gxx=dUxdxf+rx*dcc_x*iL2, gxy=dUxdyf+rx*dcc_y*iL2, gxz=dUxdzf+rx*dcc_z*iL2;
+            const flow_float gyx=dUydxf+ry*dcc_x*iL2, gyy=dUydyf+ry*dcc_y*iL2, gyz=dUydzf+ry*dcc_z*iL2;
+            const flow_float gzx=dUzdxf+rz*dcc_x*iL2, gzy=dUzdyf+rz*dcc_y*iL2, gzz=dUzdzf+rz*dcc_z*iL2;
+            const flow_float trg = (isAxisymmetric == 1)
+                ? (divu + (rx*dcc_x + ry*dcc_y + rz*dcc_z)*iL2)   // 軸対称は u_r/r 込みの divu に補正分を足す
+                : (gxx + gyy + gzz);
+            tau_x = mu_total*((gxx*sxx + gxy*syy + gxz*szz) + (gxx*sxx + gyx*syy + gzx*szz) - (2.0f/3.0f)*trg*sxx);
+            tau_y = mu_total*((gyx*sxx + gyy*syy + gyz*szz) + (gxy*sxx + gyy*syy + gzy*szz) - (2.0f/3.0f)*trg*syy);
+            tau_z = mu_total*((gzx*sxx + gzy*syy + gzz*szz) + (gxz*sxx + gyz*syy + gzz*szz) - (2.0f/3.0f)*trg*szz);
+            if (isoStress != 0 && kturb != nullptr) {
+                const flow_float rk23 = -(2.0f/3.0f)*(f*ro[ic0]+(1.0f-f)*ro[ic1])*(f*kturb[ic0]+(1.0f-f)*kturb[ic1]);
+                tau_x += rk23*sxx; tau_y += rk23*syy; tau_z += rk23*szz;
+            }
+        } else {
+        tau_x = mu_total*((Ux[ic1] -Ux[ic0])/dcc)*d_mom;
+        tau_x += mu_total*(dUxdxf*kx_m +dUxdyf*ky_m +dUxdzf*kz_m);
         tau_x += mu_total*(dUxdxf*sxx +dUydxf*syy +dUzdxf*szz);
         tau_x += -mu_total*2.0f/3.0f*(divu)*sxx;
         if (isoStress != 0 && kturb != nullptr) tau_x += -(2.0f/3.0f)*(f*ro[ic0]+(1.0f-f)*ro[ic1])*(f*kturb[ic0]+(1.0f-f)*kturb[ic1])*sxx;
 
-        flow_float tau_y = mu_total*((Uy[ic1] -Uy[ic0])/dcc)*delta;
-        tau_y += mu_total*(dUydxf*k_x +dUydyf*k_y +dUydzf*k_z);
+        tau_y = mu_total*((Uy[ic1] -Uy[ic0])/dcc)*d_mom;
+        tau_y += mu_total*(dUydxf*kx_m +dUydyf*ky_m +dUydzf*kz_m);
         tau_y += mu_total*(dUxdyf*sxx +dUydyf*syy +dUzdyf*szz);
         tau_y += -mu_total*2.0f/3.0f*(divu)*syy;
         if (isoStress != 0 && kturb != nullptr) tau_y += -(2.0f/3.0f)*(f*ro[ic0]+(1.0f-f)*ro[ic1])*(f*kturb[ic0]+(1.0f-f)*kturb[ic1])*syy;
 
-        flow_float tau_z = mu_total*((Uz[ic1] -Uz[ic0])/dcc)*delta;
-        tau_z += mu_total*(dUzdxf*k_x +dUzdyf*k_y +dUzdzf*k_z);
+        tau_z = mu_total*((Uz[ic1] -Uz[ic0])/dcc)*d_mom;
+        tau_z += mu_total*(dUzdxf*kx_m +dUzdyf*ky_m +dUzdzf*kz_m);
         tau_z += mu_total*(dUxdzf*sxx +dUydzf*syy +dUzdzf*szz);
         tau_z += -mu_total*2.0f/3.0f*(divu)*szz;
         if (isoStress != 0 && kturb != nullptr) tau_z += -(2.0f/3.0f)*(f*ro[ic0]+(1.0f-f)*ro[ic1])*(f*kturb[ic0]+(1.0f-f)*kturb[ic1])*szz;
+        }
 
         // SST node 壁関数 (SU2 AddTauWall): 片端のみ壁ノードの内部双対面 (W-I) で、解像した粘性 traction
         // の接線成分をモデル τ_w に再スケールする。粗い y+ メッシュでは生の解像勾配が τ_w を過小評価する

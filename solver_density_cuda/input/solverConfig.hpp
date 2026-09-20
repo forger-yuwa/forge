@@ -433,7 +433,8 @@ public:
     //   a_SU2   = (d.S) / |d|^2   (corrected-gradient)
     // 直交面では一致し、非直交面では比が 1/cos^2(theta) で **forge のほうが大きい** (減衰は forge が強い)。
     // 壁熱流束の 2 節点交番 (forge 0.92 % vs SU2 0.046 %) の切り分け用 opt-in。
-    // **運動量 (粘性応力) には適用しない** — 熱伝導だけを替えて因果を分離する (codex 2026-09-20 推奨)。
+    // 1 = 熱伝導だけ (因果の分離用)。**2 = 熱伝導 + 運動量の Laplacian 項**
+    // (近壁の交番は圧力 1.4x・速度 4.7x・温度 20x で速度が主因と分かったため、2026-09-20 に追加)。
     // plan boundary-conjugate-heat-transfer §5.1 #43、methods/diffusion/。
     int heatCorrSU2 = 0;
 
