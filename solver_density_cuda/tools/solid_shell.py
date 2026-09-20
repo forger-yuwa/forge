@@ -409,28 +409,47 @@ class FixedPointDriver:
         self.it = 0
         self._ok_streak = 0
 
+    def _assemble(self, T):
+        """固体作用素を組む。`fem2d` のように内部節点を持つ作用素では、**内部温度を復元してから
+        組み直す** (codex result M4, 2026-09-20)。これをしないと $k_s(T)$ が界面平均温度で
+        全域一様に評価され、`solve()` の局所 Picard とは別の方程式を解くことになる
+        (温度依存円環で 2.07 K ずれた状態を `converged` にしていた)。"""
+        A, b = self.op.assemble(T)
+        if hasattr(self.op, "recover_interior"):
+            self.op.recover_interior(T)      # self.u を現在の T に整合させる
+            A, b = self.op.assemble(T)       # 局所 k_s(T) で組み直す
+        return A, b
+
     def advance(self, Qf, tol_K=1e-6, tol_rel=1e-6, n_consec=2):
         """最新の $Q_f(T_k)$ を受け取り、次の $T_{k+1}$ を返す。"""
         Qf = np.asarray(Qf, float)
-        A, b = self.op.assemble(self.T)
+        A, b = self._assemble(self.T)
         M = (A + sp.diags(self.Df)).tocsr()
         r = A @ self.T - b - Qf
         phi = ShellOperator._merit_M(M, r)
-        scale = max(float(np.max(np.abs(Qf))), float(np.max(np.abs(b))), 1e-30)
+        # **規格化は $\max|Q_f|$ のみ** (codex result M5): 背面温度を含む大きな $b$ を混ぜると、
+        # 物理的な不釣合いが 100 % でも res_rel が 1e-6 に見えて合格してしまう。
+        scale = max(float(np.max(np.abs(Qf))), 1e-30)
         res_rel = float(np.max(np.abs(r))) / scale
 
         rejected = False
         if self.best is not None and phi > self.best[0]:
-            # 退避: 最後に良かった状態へ戻し、D_f を上げて履歴を捨てる
+            # 退避: **最後に良かった状態の $T$ と $Q_f$ を組で戻す** (codex result M2)。
+            # 旧実装は $T$ だけ戻して $Q_f$ は棄却された $T$ のものを使っており、
+            # 異なる評価点を混ぜた更新になっていた (反例: 正 297.33 に対し 315.67 を返す)。
             self.T = self.best[1].copy()
+            Qf = self.best[2].copy()
             self.Df = np.minimum(self.Df * 2.0, self.Df_cap)
             self.Ts.clear(); self.Gs.clear()
             self._ok_streak = 0
             rejected = True
-            A, b = self.op.assemble(self.T)
+            A, b = self._assemble(self.T)
             M = (A + sp.diags(self.Df)).tocsr()
+            # **重みを変えたら基準メリットも新しい重みで測り直す** (混在比較の禁止)
+            r_best = A @ self.T - b - Qf
+            self.best = (ShellOperator._merit_M(M, r_best), self.T.copy(), Qf.copy())
         else:
-            self.best = (phi, self.T.copy())
+            self.best = (phi, self.T.copy(), Qf.copy())
 
         G = ShellOperator._linsolve(M, b + Qf + self.Df * self.T, self.T)
         Tn = G

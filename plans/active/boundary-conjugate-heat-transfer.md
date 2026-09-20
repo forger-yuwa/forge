@@ -410,6 +410,17 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | 27 | **索引・親 plan の残り** (3 巡目 #6) | 指定箇所は同期済み。**親 plan §4.6-4 の「弱ループが収束しない = 軸方向伝導が支配的」**を本計画 §4.8 のモデル感度基準に置き換える |
 | 28 | **C3X 翼列の SU2 対照** (2026-09-20 codex 推奨、採用) | 同一メッシュ・同一の実測壁温分布で SU2 低 Re SST を回し、$h$ の分布を突き合わせる。**V5 段 (a) の差が forge 固有かモデル共通かを切り分ける**ため ([[reichardt-5pct-gap-not-forge]] と同じ性格の差が出る可能性)。手順は [`procedures/su2-cross-check.md`](../../procedures/su2-cross-check.md) |
 | 29 | **遷移モデル** (2026-09-20, V5 の差の主因。**Mark II で必須と確定**) | 低 Re SST に $\gamma$–$Re_\theta$ 等が無いため負圧面前縁の 層流域で $h$ が +40 % になり、CHT 壁温に +21 K 効く。**CHT の合否とは分けて扱う** (帯の別項目) が、Mark II (超音速出口) では遷移位置がさらに効くので、少なくとも**遷移位置を与えた感度計算**を V6 前に行う。実測 (2026-09-20): C3X 負圧面層流域 $h$ +40.5 %/$T_w$ +21.4 K、**Mark II は +74.8 %/+42.8 K** |
+| 30 | **C1 保存的界面熱量の接続** | `iface_q_eff` ($Q_f=\sum F^E-C$) を出力し `cht_loop --flux q_eff` を通す。依存: [`tooling-energy-balance-diagnostics`](tooling-energy-balance-diagnostics.md)。**これが通るまで V1/V4/V5 を「保存的 CHT の合格実績」と呼ばない** |
+| 31 | **M2 受理・退避の状態一貫性** | 棄却時に $T$・$Q_f$・固体状態を**同じ評価点の組**で保存/復元する。$D_f$ を変えたら基準メリットを再計算し履歴を捨てる。初期壁温は**実際に課した分布**から取る (実 run では課 512–612 K / 仮定 566 K 一様だった)。line search と再試行上限も未実装 |
+| 32 | **M3 $D_f$ の安定条件** | `hA` は初期推定に留め、「安全率 2 で十分」の主張は撤回。安定性は #31 の受理処理で担保する。試験は低周波だけでなく**交番温度摂動**と CFD 緩和長依存 |
+| 33 | **M4 `fem2d` の局所 $k_s(T)$** | `FixedPointDriver.advance()` が `recover_interior()` を呼ばず、全域が $k_s(\overline{T_w})$ になっている。各評価温度で内部温度と物性を自己整合させ、内部残差も判定する。温度依存円環で `driver` と全系求解を照合 (codex 実測 494.82 vs 492.75 K) |
+| 34 | **M5 収束ゲート (G-if) の実装** | 規格化を $\max|Q_f|$ に直し、**絶対熱流束残差・相対残差・固体内部残差・温度更新・連続回数**を独立に満たすときだけ合格。$D_f$ 増大による微小更新を収束と認めない |
+| 35 | **M6 V5 の格下げと独立検証** | V5 は「**同定条件下での整合性評価**」。$h_c$ は公開されていない (公開は $T_c$ と流量のみ) ので、孔位置の再構成と相関の選択が $h_c$ に入る。**「連成は正しい」「差の主因は遷移モデル」を結論として書かない** (遷移は有力仮説)。切り分けは #28 SU2 対照 + #29 遷移感度 + 格子感度 |
+| 36 | **M7 局所量の準定常判定** | 報告する**局所量**にも事前登録した許容を当てる。積分 `q_total` の `STEADY` を局所分布の保証に使わない |
+| 37 | **M8 共有角の所有者検査** | 初期温度の一致でなく**共有 CV の拘束所有者**を検査する。`conjugateGroup` と一意温度 DOF、未対応構成の明示拒否 |
+| 38 | **M9 同一メッシュ再開** | `cht_loop` の warm start が `interp_field` (2D 最近傍)。同一性を確認して index コピーにする。3D spanwise 非一様場で再開不変を検証 |
+| 39 | **M10 cell の `wallProfile` 座標** | `boundaryCond.cpp` が cell で内部セル重心を使っている。面重心 (`msh.planes[ip].centCoords`) に戻す |
+| 40 | **m11 docs と残作業表の同期** | `methods/index.md` / `design/CAPABILITIES.md` が「未実装」のまま。#10/#24 の記述矛盾、`stage_manifest` の外部入力ハッシュ未実装 |
 | 19 | codex result レビュー | `done` にする前 |
 
 ## 6. 検証
@@ -507,6 +518,7 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result | `2026-09-20` | [`notes/reviews/2026-09-20-boundary-conjugate-heat-transfer-result.md`](../../notes/reviews/2026-09-20-boundary-conjugate-heat-transfer-result.md) | **NO-GO**, C1/M9/m1 | **全件採用** (反例つきで再現されており、うち 4 件は自分でも独立に気づいた): C1 保存的界面熱量 $Q_f=\sum F^E-C$ 未実装 → §5.1 #30 / M2 棄却時に別状態の $T$ と $Q_f$ を混ぜる + 初回の壁温不一致 (課したのは実測分布、ドライバは一様) → #31 / M3 `Df_safety=2` は上界でない (反例 固有値 −5.67) → #32 / M4 `fem2d` 外部連成が $k_s(T)$ を局所で解いていない (2.07 K 差で converged) → #33 / M5 収束ゲートの規格化が $\max(|Q_f|,|b|)$ で不釣合い 100 % でも合格 → #34 / **M6 V5 は同定データへの再適合で独立検証でない → §4.9 と case README を格下げ、「差の主因は遷移」を仮説へ撤回** → #35 / M7 積分量の `STEADY` が局所量を保証しない (C3X 局所 $q$ 402 点中 255 点 `DRIFTING`) → #36 / M8 共有角検査が連成中の競合を防げない → #37 / M9 同一メッシュ再開が 2D 最近傍 → #38 / M10 cell の `wallProfile` が壁面重心でなく内部セル重心 → #39 / m11 docs と残作業表の同期 → #40。**`accepted` への移動は取り消し、`active` のまま保存的連成の検証を先にやる** |
 | 自由形式 (V5 実行中の診断) | `2026-09-20` | [`notes/reviews/2026-09-20-codex-c3x-cascade-diagnosis.md`](../../notes/reviews/2026-09-20-codex-c3x-cascade-diagnosis.md) + [`…-codex-node-isothermal-roe-frozen.md`](../../notes/reviews/2026-09-20-codex-node-isothermal-roe-frozen.md) | 判定なし (診断依頼)。実装欠陥 3 件 + 切り分け | **採用**: (1) node 等温壁の `roe` 凍結 → `main.cpp` の壁ピン順序修正 (EOS/物性/RANS 壁の前 + 陰解法最終更新後)。(2) `inlet_Pressure_dir` の根号・方向ゼロ割 → `boundaryCond_d.cu` ガード追加。(3) `convMethod: 1, limiter: 0` は 2 次 → 起動段を `convMethod: 0` に。(4) SU2 対照 → §5.1 #28 |
 | plan (3 巡目) | `2026-09-19` | [`notes/reviews/2026-09-19-boundary-conjugate-heat-transfer-plan-4.md`](../../notes/reviews/2026-09-19-boundary-conjugate-heat-transfer-plan-4.md) | **GO-with-changes**, C0/M5/m1 (2 巡目 #3 一部・#4・#6・#7 は**解消**) | **全件採用**: #1 受理判定が収束反復を止める反例 → §4.2 をメリット関数 + line search へ / #2 提供側 plan への解除契約登録 + V6 壁関数の分離 → §4.3 + §5.1 #21 / #3 drift と osc の両方 + G-if の数式化 → §6 / #4 非連成等温壁との共有角競合 → §4.4b / #5 V5 (a)(b) の入力・比較・合格と不確かさ合成 → §6 V5 / m6 親 plan の旧判断 → §5.1 #27 |
 | plan (2 巡目) | `2026-09-19` | [`notes/reviews/2026-09-19-boundary-conjugate-heat-transfer-plan-3.md`](../../notes/reviews/2026-09-19-boundary-conjugate-heat-transfer-plan-3.md) | **NO-GO**, C0/M6/m1 (1 巡目の C1/M4/M5/M9/m11/m12 は**解消**と再評価) | **全件採用**: #1 依存診断の対応範囲 (dual-time/周期の解除マイルストーン・過渡の $C$) → §4.3 + §5.1 #20 / #2 $D_f$ は上界でない (反例 5.675) → §4.2 + #21 / #3 `fem2d` の連成契約と単体試験 → §4.4d + #22 / #4 陰解法フック (`advanceImplicitSteady` 経路) → §4.6 + #23 / #5 ゲートの数値仕様と前倒し → §6 + #24 / #6 V5 の 3 段分解と不確かさ項目 → §4.9 + §6 V5 + #25 / #7 索引・親 plan の同期 → §5 S0 + #26 |

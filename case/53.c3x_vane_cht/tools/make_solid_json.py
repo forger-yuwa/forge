@@ -14,6 +14,8 @@ import argparse
 import json
 from pathlib import Path
 
+import numpy as np
+
 ROOT = Path(__file__).resolve().parents[3]
 CASE = {"c3x": ROOT / "case/53.c3x_vane_cht", "markii": ROOT / "case/54.markii_vane_cht"}
 
@@ -36,7 +38,11 @@ def main():
     if not npz.exists():
         raise SystemExit(f"solid mesh not found: {npz}")
 
-    Tc = a.Tc if a.Tc is not None else bc["T_c_K"][0]
+    # **孔ごとの T_c** (公開値を使った同定なら 10 個違う値が入る)
+    Tc_list = bc["T_c_K"] if isinstance(bc["T_c_K"], list) else [bc["T_c_K"]] * len(bc["h_c_W_m2K"])
+    if a.Tc is not None:
+        Tc_list = [a.Tc] * len(Tc_list)
+    Tc = float(np.mean(Tc_list)) if False else Tc_list
     spec = {
         "_note": "冷却孔の h_c / T_c は報告に無いので公開量から逆算した**推定値**",
         "_source": {"internal_bc": f"ref/{a.run}_internal_bc.json",
@@ -45,12 +51,13 @@ def main():
         "mesh_npz": str(npz),
         # 出典の表は °C なので K に直す (Fem2DOperator は K で内挿する)
         "k_table": [[t + 273.15 for t in mat["k_table"]["T"]], mat["k_table"]["k"]],
-        "holes": [{"h": float(h), "T_c": float(Tc)} for h in bc["h_c_W_m2K"]],
-        "T_init": float(Tc),
+        "holes": [{"h": float(h), "T_c": float(t)}
+                  for h, t in zip(bc["h_c_W_m2K"], Tc_list)],
+        "T_init": float(np.mean(Tc_list)),
     }
     out = Path(a.out) if a.out else case / f"ref/solid_{a.vane}_{a.run}.json"
     out.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n")
-    print(f"[make_solid_json] {len(spec['holes'])} holes, T_c={Tc} K, "
+    print(f"[make_solid_json] {len(spec['holes'])} holes, T_c={min(Tc_list):.1f}-{max(Tc_list):.1f} K, "
           f"k_s {min(spec['k_table'][1]):.1f}..{max(spec['k_table'][1]):.1f} W/mK -> "
           f"{out}")
 

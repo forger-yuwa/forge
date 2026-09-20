@@ -22,7 +22,7 @@ import numpy as np
 import scipy.sparse as sp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from solid_shell import ShellOperator, SolidModel   # noqa: E402
+from solid_shell import ShellOperator, SolidModel, FixedPointDriver   # noqa: E402
 
 FAILS = []
 
@@ -151,12 +151,36 @@ def t5_coupling_acceptance():
           f"max-norm {np.max(np.abs(r)):.3f} -> {np.max(np.abs(rtrial)):.3f}, Phi {phi0:.6f} -> {phi1:.6f}")
 
 
+def test_reject_keeps_state_pair():
+    """**棄却時に $T$ と $Q_f$ を組で戻す** (codex result M2, 2026-09-20 の反例)。
+
+    $A_s=1,\\ b_s=0,\\ Q(T)=3300-10T,\\ T_0=301,\\ D=1$。旧実装は $T$ だけ `best` に戻し、
+    $Q_f$ は棄却された $T$ で評価したものを使っていたため 315.667 K を返していた。
+    同じ評価点の組で更新すれば 297.333 K になる。
+    """
+    class Op1:
+        n = 1
+        def assemble(self, T):
+            return sp.csr_matrix(np.array([[1.0]])), np.array([0.0])
+    op = Op1()
+    Q = lambda T: 3300.0 - 10.0 * T
+    drv = FixedPointDriver(op, np.array([301.0]), Df0=np.array([1.0]), anderson=0)
+    T1, _ = drv.advance(np.array([Q(301.0)]))
+    T2, info = drv.advance(np.array([Q(float(T1[0]))]))
+    ok = abs(float(T2[0]) - 297.3333333) < 1e-6
+    check("T6 rejection restores (T, Qf) as one state", ok,
+          f"first={float(T1[0]):.4f} -> after reject {float(T2[0]):.4f} K "
+          f"(正 297.3333, 旧実装 315.6667; rejected={info['rejected']})")
+    return ok
+
+
 if __name__ == "__main__":
     t1_series_resistance()
     t2_fin_convergence()
     t3_nullspace()
     t4_temperature_dependent_k()
     t5_coupling_acceptance()
+    test_reject_keeps_state_pair()
     print()
     if FAILS:
         print("VERDICT: FAIL (%d)" % len(FAILS))
@@ -164,3 +188,5 @@ if __name__ == "__main__":
             print("  -", f)
         sys.exit(1)
     print("VERDICT: PASS (all)")
+
+

@@ -242,7 +242,17 @@ def main():
             else:
                 op, perm = build_fem2d(model, coords)
                 T_back = float(model.get("T_init", np.mean([h["T_c"] for h in model["holes"]])))
-            T0 = np.full(op.n, a.Tw_init if a.Tw_init is not None else T_back)
+            # **初期壁温は「実際に課した分布」から取る** (codex result M2, 2026-09-20)。
+            # 旧実装はテンプレートの `wall_profile_*.csv` (実測分布) を forge に課しながら、
+            # ドライバには一様値を持たせていた (実 run: 課 512-612 K / 仮定 566 K)。
+            # 壁ダンプの `Ts` はまさに forge がその反復で使った壁温なので、これを T0 にする。
+            if "Ts" in vals:
+                T0 = np.asarray(vals["Ts"], float)
+                if a.solid_mode == "fem2d":
+                    T0 = T0[perm]
+                print(f"[cht_loop]   T0 <- 壁ダンプの Ts ({T0.min():.2f}..{T0.max():.2f} K)")
+            else:
+                T0 = np.full(op.n, a.Tw_init if a.Tw_init is not None else T_back)
             # D_f の初期推定 = k_eff A / d1 (**上界ではない**。受理判定と退避で守る)
             keff, d1 = np.asarray(vals["iface_keff"], float), np.asarray(vals["iface_d1"], float)
             if a.solid_mode == "fem2d":
@@ -255,7 +265,7 @@ def main():
                 qq0 = np.asarray(vals["iface_" + a.flux], float)
                 if a.solid_mode == "fem2d":
                     qq0 = qq0[perm]
-                dT = np.maximum(a.Tg - T0, 10.0)
+                dT = np.maximum(a.Tg - np.asarray(T0, float), 10.0)
                 Df0 = a.Df_safety * np.maximum(np.abs(qq0) * op.area / dT, 1e-12)
             else:
                 Df0 = a.Df_safety * np.maximum(keff * op.area / np.maximum(d1, 1e-12), 1e-12)

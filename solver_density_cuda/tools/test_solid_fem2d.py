@@ -133,6 +133,39 @@ def t4_coupling():
           f"(T range {T.min():.1f}..{T.max():.1f} K)")
 
 
+def t5_local_k_of_T():
+    r"""**温度依存 $k_s(T)$ が局所で解かれているか** (codex result M4, 2026-09-20)。
+
+    外部ドライバは `assemble()` しか呼ばず `recover_interior()` を呼ばなかったため、
+    `self.u` が `None` のまま = 全固体節点が**界面平均温度**とみなされ、$k_s$ が全域一様に
+    評価されていた。`solve()` の局所 Picard とは別の方程式であり、codex の再現では
+    壁温が 2.07 K ずれた状態を `converged=True` にしていた。
+    """
+    a, b, h, Tc = 0.002, 0.010, 5000.0, 400.0
+    kT = (np.array([300.0, 600.0, 900.0, 1200.0]), np.array([12.0, 18.0, 26.0, 36.0]))
+    op, nodes = build(a, b, 8, 48, kT, h, Tc)
+    n = op.n
+    Qf = np.full(n, 0.0)
+    # 界面に一様熱荷重 (単位奥行き)
+    Qf = 9.0e4 * op.area
+    T_full = op.solve(Qf, T0=np.full(n, 600.0), iters=60, tol=1e-13)
+    # **ドライバ側は必ず新しい作用素で始める**。同じ op を使い回すと `solve()` が残した
+    # `self.u` が初期値になり、「内部温度を復元していない」欠陥が隠れる。
+    op2, _ = build(a, b, 8, 48, kT, h, Tc)
+    drv = op2.driver(np.full(n, 600.0), Df0=np.full(n, h) * op2.area)
+    T = drv.T; info = {}
+    for _ in range(300):
+        T, info = drv.advance(Qf, tol_K=1e-8, tol_rel=1e-8)
+        if info["converged"]:
+            break
+    err = float(np.max(np.abs(T - T_full)))
+    check("T5 driver solves the same k_s(T) equation as the full Picard solve",
+          info.get("converged", False) and err < 1e-3,
+          f"driver {T.mean():.4f} K vs full {T_full.mean():.4f} K, max|diff| {err:.3e} K "
+          f"(修正前は 2.07 K ずれて converged=True だった)")
+
+
+
 if __name__ == "__main__":
     t1_annulus(); t2_schur_equals_full(); t3_nonuniform_load(); t4_coupling()
     print()

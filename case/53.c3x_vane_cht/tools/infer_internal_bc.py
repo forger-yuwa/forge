@@ -65,6 +65,16 @@ def main():
     ap.add_argument("--Tc-sweep", type=float, nargs="+", default=[300, 350, 400, 450, 500],
                     help="冷却剤温度の走査値 [K] (h_c との縮退を示すため)")
     ap.add_argument("--Tc-nominal", type=float, default=300.0, help="代表として採る冷却剤温度 [K]")
+    ap.add_argument("--Tc-published", action="store_true",
+                    help="冷却剤温度を**公開値 (孔ごと)** に固定して h_c だけ同定する。"
+                         "T_c の縮退 (帯の 1 項目) が消える")
+    ap.add_argument("--dirichlet", action="store_true",
+                    help="報告と同じ向き (外表面 Dirichlet + 孔 Robin) で解き、外表面熱流束から"
+                         "作った h を報告の h と比べる (同定なしの直接検査)")
+    ap.add_argument("--hc-scale", type=float, default=1.0, help="公開 h_c の全体倍率")
+    ap.add_argument("--published", action="store_true",
+                    help="同定せず、**公開された冷却剤データ** (ref_data.COOLANT) から作った h_c/T_c を"
+                         "そのまま使って外表面温度を評価する (報告自身の整合チェック)")
     ap.add_argument("--le-shift-cm", type=float, default=None,
                     help="弧長原点 (s=0) を前縁頂点から動かす量 [cm]。既定は表 IV の PS/SS 弧長比に合わせる値")
     a = ap.parse_args()
@@ -182,6 +192,90 @@ def main():
                           xtol=1e-12, ftol=1e-12, max_nfev=300)
         return np.exp(r.x), float(np.sqrt(np.mean(r.fun ** 2)))
 
+    if a.dirichlet:
+        # **報告と同じ向きで解く** (p.21: 「試験翼の 2 次元断面を fluxmeter として使う」)。
+        # 外表面に**実測壁温を Dirichlet**、孔に公開された $T_c$ と相関 $h_c$ の Robin を課し、
+        # 外表面へ出入りする熱流束を求めて**報告の $h$ と比べる**。同定を一切しないので、
+        # 「自分の固体モデル + 自分の $h_c$」が報告の $h$ を再現するかの直接検査になる。
+        from ref_data import h_c_from_coolant                     # noqa: E402
+        pub = h_c_from_coolant(a.run)
+        hc = np.array([r["h"] for r in pub]) * a.hc_scale
+        Tc = np.array([r["T_c"] for r in pub])
+        A = K.copy(); rhs = np.zeros(op.N)
+        for k in range(len(groups)):
+            M, v = parts[k]
+            A = A + hc[k] * M
+            rhs += hc[k] * Tc[k] * v
+        A = A.tolil()
+        # 外周を Dirichlet に (行をピン)。反力 = 外表面から入った熱量。
+        Kc = A.tocsr().copy()
+        for g in loop:
+            A[g, :] = 0.0; A[g, g] = 1.0; rhs[g] = Tw_meas[list(loop).index(g)] if False else 0.0
+        Tw_vec = np.zeros(op.N); Tw_vec[loop] = Tw_meas
+        rhs2 = rhs.copy(); rhs2[loop] = Tw_meas
+        u = spla.spsolve(A.tocsc(), rhs2)
+        # 反力: 元の系での残差 (外表面節点) = 外から入れるべき熱量 [W/m]
+        react = Kc.dot(u) - rhs
+        q_calc = react[loop] / lump                       # [W/m2]、固体向き正
+        h_calc = q_calc / (Tg - Tw_meas)
+        e = (h_calc - h_meas)[covered]
+        print(f"\n[{a.vane} {a.run}] **実測 T_w を Dirichlet、孔は公開条件** "
+              f"(h_c x{a.hc_scale:.3f}, k_s {op.k_solid:.2f} W/mK)")
+        print(f"  外表面の総入熱 {react[loop][covered].sum():.1f} W/m "
+              f"(報告の h から積むと {Q_nodal[covered].sum():.1f} W/m)")
+        print(f"  h の比較: bias {100*np.mean(e/h_meas[covered]):+.1f} %, "
+              f"rms {100*np.sqrt(np.mean((e/h_meas[covered])**2)):.1f} %, "
+              f"計算 {h_calc[covered].min():.0f}..{h_calc[covered].max():.0f} / "
+              f"報告 {h_meas[covered].min():.0f}..{h_meas[covered].max():.0f} W/m2K")
+        return
+
+    if a.published:
+        # **公開値をそのまま使う**: 孔ごとの平均冷却剤温度と、流量・孔径から報告と同じ方法で
+        # 作った h_c。同定しないので、外表面温度が実測に合うかどうかが**報告データ自身の整合**の
+        # 検査になる (ここが合えば、連成 (段 c) を逆算なしの盲目予測にできる)。
+        from ref_data import h_c_from_coolant                     # noqa: E402
+        pub = h_c_from_coolant(a.run)
+        hc = np.array([r["h"] for r in pub]); Tc = np.array([r["T_c"] for r in pub])
+        u = solve(hc, Tc)
+        err = u[loop] - Tw_meas
+        rms = float(np.sqrt(np.mean(err[covered] ** 2)))
+        print(f"\n[{a.vane} {a.run}] **公開された冷却剤条件をそのまま適用** "
+              f"(k_s = {op.k_solid:.2f} W/mK)")
+        for r in pub:
+            print(f"  hole {r['hole']:2d}: T_c {r['T_c']:6.1f} K, Re {r['Re']:8.3g}, "
+                  f"h_c {r['h']:7.1f} W/m2K")
+        print(f"  外表面温度の残差: RMS {rms:.2f} K, max |err| {np.abs(err[covered]).max():.2f} K "
+              f"(bias {err[covered].mean():+.2f} K, 実測 T_w の幅 "
+              f"{Tw_meas[covered].min():.0f}-{Tw_meas[covered].max():.0f} K)")
+        print(f"  外表面の総入熱 {Q_nodal[covered].sum():.1f} W/m")
+
+        # **1 パラメータ版**: 公開された $T_c$ と、相関で作った $h_c$ の**分布**はそのままに、
+        # 全体倍率 f だけを実測壁温に合わせる。報告は相関の種類を書いていないので、
+        # 「どの相関か」の不確かさが f に集約される。10 個の $h_c$ を自由に振るより
+        # はるかに良条件で、逆算の循環性もほぼ無くなる (拘束は 1 自由度)。
+        def resid_f(p):
+            return (solve(np.exp(p[0]) * hc, Tc)[loop] - Tw_meas)[covered]
+        rf = least_squares(resid_f, [0.0], xtol=1e-14, ftol=1e-14)
+        f = float(np.exp(rf.x[0]))
+        uf = solve(f * hc, Tc); ef = uf[loop] - Tw_meas
+        rmsf = float(np.sqrt(np.mean(ef[covered] ** 2)))
+        print(f"  --> 全体倍率のみ同定: **f = {f:.3f}** (h_c {f*hc.min():.0f}..{f*hc.max():.0f} W/m2K), "
+              f"残差 RMS {rmsf:.2f} K, bias {ef[covered].mean():+.2f} K, "
+              f"max {np.abs(ef[covered]).max():.2f} K")
+        out = case / f"ref/{a.run}_published_bc.json"
+        out.write_text(json.dumps({
+            "note": "公開された冷却剤データ (温度・流量) + Dittus-Boelter x C_r の h_c。"
+                    "相関の種類が報告に無いので全体倍率 f だけを実測壁温に合わせた",
+            "run": a.run, "vane": a.vane, "Tg_K": Tg, "k_solid_W_mK": float(op.k_solid),
+            "scale_f": f, "h_c_W_m2K": list(map(float, f * hc)), "T_c_K": list(map(float, Tc)),
+            "h_c_correlation_W_m2K": list(map(float, hc)),
+            "residual_Tw_rms_K": rmsf, "residual_Tw_bias_K": float(ef[covered].mean()),
+            "residual_Tw_max_K": float(np.abs(ef[covered]).max()),
+            "nodes_used": int(covered.sum()), "nodes_total": int(n),
+        }, indent=2, ensure_ascii=False) + "\n")
+        print(f"  -> {out.relative_to(ROOT)}")
+        return
+
     print(f"\n[{a.vane} {a.run}] 冷却剤温度を振って h_c を同定 (縮退の確認)")
     sweep = []
     for Tc_val in a.Tc_sweep:
@@ -189,9 +283,24 @@ def main():
         sweep.append((Tc_val, hc_s, rms_s))
         print(f"  T_c = {Tc_val:5.0f} K -> RMS {rms_s:6.2f} K, h_c = "
               f"{hc_s.min():6.0f} .. {hc_s.max():6.0f} W/m2K (平均 {hc_s.mean():6.0f})")
-    Tc_nom = a.Tc_nominal
-    hc, rms_fit = fit_for_Tc(Tc_nom)
-    Tc = np.full(nh, Tc_nom)
+    if a.Tc_published:
+        # **公開された孔ごとの平均冷却剤温度**を使う (報告 p.165/p.145 の COOLANT FLOW DATA)。
+        # これで「T_c と h_c の縮退」は無くなる (T_c はデータであって自由度でない)。
+        from ref_data import COOLANT                               # noqa: E402
+        Tc = np.array([r[2] for r in COOLANT[a.run]])
+
+        def resid_pub(p):
+            return (solve(np.exp(p), Tc)[loop] - Tw_meas)[covered]
+        rp = least_squares(resid_pub, np.full(nh, math.log(1500.0)), method="trf",
+                           xtol=1e-12, ftol=1e-12, max_nfev=300)
+        hc = np.exp(rp.x); rms_fit = float(np.sqrt(np.mean(rp.fun ** 2)))
+        Tc_nom = float(Tc.mean())
+        print(f"\n[{a.vane} {a.run}] T_c は公開値に固定 ({Tc.min():.1f}-{Tc.max():.1f} K)、"
+              f"h_c のみ同定 -> RMS {rms_fit:.2f} K")
+    else:
+        Tc_nom = a.Tc_nominal
+        hc, rms_fit = fit_for_Tc(Tc_nom)
+        Tc = np.full(nh, Tc_nom)
     u = solve(hc, Tc)
     err = u[loop] - Tw_meas
     rms = float(np.sqrt(np.mean(err[covered] ** 2)))
