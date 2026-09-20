@@ -1157,6 +1157,14 @@ AR > 5000 のセルの**最短辺は probB/probC では z**で、位置は **z =
   (テンソル積の `zs` を (i, j) 依存にする、または側壁近傍だけ別ブロックにする)。
   費用対効果は段階 1 の結果を見てから決める。
 
+**段階 1 の投入は一度止まった — SERN チェーンに `mesh.ar_max` が無かった** (2026-09-20)。
+AR max 4819 / p99 995 / **skew max 0.466 (>0.90 は 0 セル)** = AGENTS.md が認めた
+「壁法線に沿った構造格子の境界層セルは AR ≤ 5000 まで可」(2026-09-12 ユーザ決定) そのものなのに、
+`runner_sern3d.py` / `runner_sern.py` は `check_mesh_quality.py` を**既定の `--ar-max 1000` で呼んでいた**
+(`runner_axismach.py` / `runner_wt.py` は既に `p.mesh.get("ar_max", 1000)` を渡していた)。
+両 runner に同じ knob を足し、`problem_3d_sst_cycle_m6on_wallres_y.yaml` に
+**`mesh.ar_max: 5000` と「AR 緩和 (≤5000)」の根拠**を明記した。既定 1000 は変えていないので既存 run に影響は無い。
+
 **`run_0412_3d_wallres` は破棄**(`sern.msh` / `sern_qc.h5` を削除し `MESH_QUALITY.txt` だけ残した)。
 
 ### 4.31 R5f プラトーの正体は **近壁** — リミッタでも CFL でもない (2026-09-20)

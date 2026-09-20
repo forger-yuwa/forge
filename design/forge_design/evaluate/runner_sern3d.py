@@ -138,7 +138,11 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"')
                                                .replace(", nodeWallDirichlet: 1", "").replace(", nodeInletCornerWall: 1", ""))
     R2.convert_mesh(run_dir, "sern.msh", "sern_qc.h5")
-    q = subprocess.run([sys.executable, str(R2.FORGE_TOOLS / "check_mesh_quality.py"), "sern_qc.h5", "--mode", "3d"], cwd=run_dir, env=R2._ENV, capture_output=True, text=True)
+    # AR 上限は問題 YAML の `mesh.ar_max` で緩められる (既定 1000)。**壁法線に沿った構造格子の
+    # 境界層セルに限り 5000 まで** (AGENTS.md「メッシュ品質チェック」2026-09-12 ユーザ決定)。
+    # 他の設計チェーン (`runner_axismach` / `runner_wt`) は既にこの knob を持っている。
+    q = subprocess.run([sys.executable, str(R2.FORGE_TOOLS / "check_mesh_quality.py"), "sern_qc.h5", "--mode", "3d",
+                        "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=R2._ENV, capture_output=True, text=True)
     (run_dir / "MESH_QUALITY.txt").write_text(q.stdout + q.stderr)
     if q.returncode != 0:
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")

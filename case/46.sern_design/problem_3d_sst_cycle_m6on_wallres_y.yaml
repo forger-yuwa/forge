@@ -63,6 +63,9 @@ mesh:
   nj_ext_top: 57   # R5d 段階1: **y 法線壁のみ**壁解像 (plan sern-3d §4.32)。側壁 (z 法線) は現行のまま — z を細くすると AR が 5000 を超えるため (probB/probC で確認)
   nj_wake: 9
   vehicle_clearance: 0.06        # 物理値 (旧実装は 0.02 と書いて max(0.02, 3*first_top_frac) = 0.06 に膨らませていた)
+  ar_max: 5000            # **AR 緩和 (≤5000)**: 壁法線に沿った構造格子の境界層セルに限る
+                          # (AGENTS.md「メッシュ品質チェック」2026-09-12 ユーザ決定)。
+                          # 実測 AR max 4819 / p99 995 / skew max 0.466 (>0.90 は 0 セル)
   first_top_frac: 6.0e-04   # R5d 段階1: **y 法線壁のみ**壁解像 (plan sern-3d §4.32)。側壁 (z 法線) は現行のまま — z を細くすると AR が 5000 を超えるため (probB/probC で確認)
   vehicle_taper: 0.35     # 機体後端テーパ長 = L_ramp の 35 %。係数は smoothstep (C¹) — 線形 clip はテーパ開始点で
                           # 上面が水平から不連続に折れ、M∞10 のスリップ壁上の凸角として ω 発散した (run_0071 inf_00/01)
