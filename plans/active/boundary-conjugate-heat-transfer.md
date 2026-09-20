@@ -422,6 +422,7 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | 39 | **M10 cell の `wallProfile` 座標** | `boundaryCond.cpp` が cell で内部セル重心を使っている。面重心 (`msh.planes[ip].centCoords`) に戻す |
 | 40 | **m11 docs と残作業表の同期** | `methods/index.md` / `design/CAPABILITIES.md` が「未実装」のまま。#10/#24 の記述矛盾、`stage_manifest` の外部入力ハッシュ未実装 |
 | 41 | **forge と SU2 の残差 (層流壁熱伝達)** | 遷移後 −1.6 %/2.6 % に対し **正圧面 −6.7 %/7.6 %・層流域 −4.0 %/6.4 %**。**消した可能性** (2026-09-20, case/53 README「残った forge–SU2 差の切り分け」): 熱流束の定義 (SU2 も同じコンパクト差分に揃えた)・幾何 ($d_1$ 同一)・層流物性 (Sutherland に対し 0.14 % 以内)・第一内点の $\mu_t$ (両者 0)・`sstEnergyIncludesK` (SU2 形にしても改善せず、**棄却**)。**残る事実**: 速度は ±1 % 一致なのに $T(y)$ だけ壁から 20 µm でずれる。層流単独対照は forge が非定常で**不成立**。次の候補: 対流スキーム (SLAU+MUSCL vs ROE+Venkat) の近壁温度への効き / node 壁半 CV のエネルギー流束 / 前縁からの BL 発達履歴 |
+| 42 | **`outlet_statPress` が擬似 CFL を律速する** | case/53 は `cfl_pseudo` 0.5 で回しているが、**4.0 にすると出口ブロック (壁から 0.3–0.44 m) で圧力が床に落ちて発散**する (層流 step 292 / SST step 754、`run_0012`/`run_0013`)。1.5 と 4.0+`implicitRelax` 0.5 は安定。SU2 は同条件で CFL 5 固定で回る。**生産 run の計算時間を直接律速している**ので、出口 BC の陰解法整合 (境界の Jacobian 寄与) を見る |
 | 19 | codex result レビュー | `done` にする前 |
 
 ## 6. 検証
@@ -664,3 +665,15 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
   層流単独対照は **forge が定常解に落ちない** (負圧面剥離で非定常、残差 0.0 dec) ため不成立
   (`run_0011_laminar`、破棄予定)。**残る事実は「速度は ±1 % 一致なのに $T(y)$ が壁から 20 µm で
   系統的にずれる」**こと。次の候補は対流スキーム・node 壁半 CV のエネルギー流束・BL 発達履歴。
+- `2026-09-20` — **「forge が層流で収束しない」は欠陥ではなく物理だった** (ユーザ指摘
+  「層流で収束しない? まずくない?」→ codex 診断
+  [`notes/reviews/2026-09-20-codex-laminar-nonconvergence.md`](../../notes/reviews/2026-09-20-codex-laminar-nonconvergence.md) →
+  dual-time で確認)。後縁 $Re_D$=4.2e4、dual-time ($\Delta t$=50 ns, 200 µs) で**後縁 2 mm 下流の
+  2 点が逆位相・PSD ピーク 29.3 kHz ($St$=0.29)** のカルマン渦列を確認 (`run_0018_lam_dualtime`)。
+  `cfl_pseudo` を 0.05 まで下げても `nStepInner` を 30 にしても残差が動かないことと整合する。
+  **あわせて 2 つの記述を訂正**: (a) 変動は負圧面剥離でなく**後縁後流**、(b) **SU2 も残差基準では
+  `NOT CONVERGED`** (`rms[RhoE]` +0.465)、定常なのは積分量。ただし場の静定度は SU2 44 Pa に対し
+  forge 2934 Pa で **67 倍**違う。**SST の非収束は別物** (スナップショット間 $P$ rms 差が
+  15.9 / 1.07 Pa と 200–2700 倍静か)。
+  副産物: `cfl_pseudo` 4.0 は**出口 (`outlet_statPress`) で圧力床に落ちて発散**する (層流・SST とも)。
+  → §5.1 #42。
