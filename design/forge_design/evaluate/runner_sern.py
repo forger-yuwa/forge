@@ -244,7 +244,11 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     else:
         phys = (f"physProp: {{thermalMethod: {_tm}, viscMethod: 1, visc: 1.8e-5, thermCond: 0.0257, "
                 f"thermCondMethod: 1, prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}}}")
-        turb = 'turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 1}'
+        # 壁処理は**既定 0 (低 Re 壁解像)**。node の SST 壁関数は使わない方針 (2026-09-20)。
+        # 壁関数を使うには問題 YAML に `evaluate.wall_treatment_sst: 1` を明示し、理由を run の README に書くこと。
+        _wts = int(p.evaluate.get("wall_treatment_sst", 0))
+        turb = ('turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, '
+                f'katoLaunder: 1, wallTreatmentSST: {_wts}}}')
     return f"""mesh: {{discretization: "{disc}", isAxisymmetric: 0{node_keys}, meshFileName: "{MESH}", valueFileName: "{MESH}"}}
 gpu: 1
 solver: "SLAU"

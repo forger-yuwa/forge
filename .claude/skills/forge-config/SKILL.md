@@ -15,11 +15,16 @@ description: forge の solverConfig.yaml / bcondConfig.yaml を新規に組む�
    node の `nodeInletCornerWall`。
 4. **段階起動** (§1.2): soft → mid → 本段。同一メッシュは index コピー、cross-mesh は `interp_field.py`。
    一様 IC から超音速/SST を直接始めない。初期 k/ω は非ゼロ。
-5. **投入前チェック**: `python3 solver_density_cuda/tools/check_solver_config.py <run_dir>` の VERDICT (残差では気づけない
+5. **SST なら壁処理を確認する**: **`wallTreatmentSST: 0` (低 Re 壁解像) を使う。`1` (壁関数) は使わない方針**
+   (既定も 0。`1` を指定するとソルバが既知欠損を列挙して警告する)。
+   **過去 run から複製するときは必ず落とす** — `mesh.bndFirstOrder` と同じ扱い。
+   y⁺≈1 が要るので、AR と両立しないときは**壁関数に逃げず** AR 緩和 (壁法線構造格子は ≤5000) か解像度で解く。
+   理由は `procedures/recommended-settings.md` の壁処理の節 (Cf −6 %、3D 角線で u_τ=0、壁モデル渦粘性に上限が無く低密度域で発散)。
+6. **投入前チェック**: `python3 solver_density_cuda/tools/check_solver_config.py <run_dir>` の VERDICT (残差では気づけない
    設定ミスを止める: 禁止キー、dual-time の `implicitRelax`、S3 が `convMethod 0` で不活性、FCT が作動しない組合せ、
    凝縮 dual-time の `passiveScalarScheme 0`)、`check_mesh_quality.py` の VERDICT、バイナリ鮮度 (`find ... -newer build/forge`)、
    `output.level` (既定 1; 診断が要るときだけ 2)、新しい `run_NNNN_<slug>` ディレクトリ。
-6. **報告**: run パス、`check_convergence` / `check_quasisteady` の VERDICT、case README の run 一覧。
+7. **報告**: run パス、`check_convergence` / `check_quasisteady` の VERDICT、case README の run 一覧。
 
 **定常と非定常で分かれる設定** (間違えても残差には出ないので注意):
 

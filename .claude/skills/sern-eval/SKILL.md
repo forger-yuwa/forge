@@ -25,6 +25,7 @@ description: ⑤ SERN (case/46) の評価 run を組む・回す・判定する�
 | --- | --- | --- |
 | `gas.model` | `frozen_tp` | 排気 = CEA 凍結組成 EXH、外気 = AIR。熱力学は NASA-9 |
 | `spec.wall_thermal` | 等温 1000 K | 断熱は M∞10 で回復温度 4600 K になり残差がプラトー (R4b) |
+| **壁処理** | **`wallTreatmentSST: 0` (低 Re)** | **壁関数 (`1`) は使わない方針** (2026-09-20)。生成器の既定も 0 にした (`evaluate.wall_treatment_sst`)。**3D は壁関数で `ν_t=ν(1/g−1)` が低密度域で発散し `k=2.06e9` になって死ぬ** (plan sern-3d §4.25)。y⁺≈1 のメッシュが要る |
 | `mesh.ic` | **`moc`** | 一様 IC は入口状態を全域に置き出口で 17 倍ずれる。MOC 場を外挿して埋める |
 | 暖機 (層流, 1 次) | **1500 step, CFL ramp 0.1 → 0.3 → 1.0** | `opt.warm_lam_ramp`。runner が forge を 3 回起動する |
 | soft (SST, 1 次) | **1500 step, CFL 1.0** | `opt.soft_cfl` |

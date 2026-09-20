@@ -167,7 +167,9 @@ cell モードは ghost 経由で正しく課されるため不変。設計詳�
 ### 3.7 automatic (enhanced / y⁺ 非依存) wall treatment
 
 理論は [`theory.md`](theory.md) §6.5。`wallTreatmentSST`
-(`solverConfig` の `turbulence.wallTreatmentSST`, 0:wall-resolved / **1:automatic [既定]**)。
+(`solverConfig` の `turbulence.wallTreatmentSST`, **0:wall-resolved [既定]** / 1:automatic)。
+**1 は使わない方針** (2026-09-20): 既知欠損が積み上がっており、指定すると起動時に警告が出る。
+理由と帰結は [`procedures/recommended-settings.md`](../../procedures/recommended-settings.md) の壁処理の節。
 **既定は 1** (2026-06-28 に 0→1 へ変更, user 指示)。`0` で §6.1 の wall-resolved 型 (`60ν/β₁y²`) に戻せる。
 あわせて node Dirichlet 既定も ON: `mesh.nodeWallDirichlet=1`・`turbulence.nodeKwfDirichlet=1` (§3.7 適用先・theory §6.5(e))。
 **注**: 既定変更で y⁺~1 wall-resolved 前提の cell 検証 (case/26 $C_f$, flat-plate 回帰 等) は automatic に切替わるため要再検証。

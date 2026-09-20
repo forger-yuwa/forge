@@ -111,9 +111,23 @@ turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaun
   乱流の跳ねが T に伝播しない)。エネルギー整合の検証で必要なときだけ 1 (opt-in) にし、全温は h0 (k 込み属性) から。
 - `dilatationCorrection: 2` はノズル BL を SU2 比 −16 % 薄くする (モデル形式差、ソルバ無罪)。SU2 と揃える A/B は 0。
 - `katoLaunder: 1` はノズル喉のよどみ偽生産抑制用。平板など剪断層主体では 0 でも可 (A/B で無影響)。
-- 壁処理: y⁺≈1 のメッシュは `wallTreatmentSST: 0` (低 Re)。高 Re で y⁺≈1 と AR ≤ 1000 が両立しないときは
-  y⁺ 30〜80 + `wallTreatmentSST: 1`。node 壁関数は Cf −6 % の既知欠損あり ([node-wallfunction-pk-convention-deficit])、
-  3D の角線ノードでは代表点なし→u_τ=0 になる (未対応)。断熱壁の壁温出力は `sstThermalWallFunction: 3` (defect-flux)。
+- **壁処理: `wallTreatmentSST: 0` (低 Re 壁解像) を使う。`1` (SST 壁関数) は使わない** (2026-09-20 ユーザ方針)。
+  **ソルバ既定も 0 に変更**し、`1` を指定すると起動時に既知欠損を列挙した警告が出る。
+  設計チェーンの生成器もハードコードをやめ、`evaluate.wall_treatment_sst` (既定 0) にした。
+
+  **使わない理由** (積み上がった既知欠損):
+
+  | 欠損 | 根拠 |
+  | --- | --- |
+  | Cf −6 % | 壁関数 P_k 規約の欠損 ([node-wallfunction-pk-convention-deficit]) |
+  | 3D の角線ノードで u_τ=0 | 代表点が無い ([node-sst-wallfunction-utau-zero]) |
+  | **壁モデル渦粘性に上限が無い** | `ν_t = ν(1/g−1)` が `g→0` で発散。低密度域で **4660 m²/s → k 2.06e9** となり 3D SST が死ぬ ([`tooling-nozzle-sern-3d.md`](../plans/active/tooling-nozzle-sern-3d.md) §4.25) |
+  | case/40 の壁温 | y⁺1 低 Re と SU2 壁関数のみが根拠。**node 壁関数系列は撤回済み** |
+
+  **帰結**: y⁺≈1 を満たすメッシュが要る。y⁺≈1 と AR ≤ 1000 が両立しないときは
+  **壁関数に逃げず**、AR 緩和 (壁法線構造格子は ≤5000 可) か形状・解像度の見直しで解く。
+  やむを得ず `1` を使う run は **README に理由を書く**こと。
+  断熱壁の壁温出力は `sstThermalWallFunction: 3` (defect-flux) だが、これも `wallTreatmentSST: 1` 依存である。
 - 3D node SST の角部加熱は k/ω 拡散の相対ゼロ割ガード (2026-09-08 修正) で解消済み。**3D SST の壁圧は実験より +9 %
   (側壁合流域の乱流 BL 過厚) が未解決** (case/16 run_0228)。定量比較には 3D 層流 (0.7 %) か 2D SST (+1.5 %) を使う。
 - restart で `vis_turb` が再現されない (敏感な擬似衝撃波は位置が動く) [forge-sst-restart-nonfidelity]。

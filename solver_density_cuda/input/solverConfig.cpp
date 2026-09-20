@@ -678,8 +678,20 @@ void solverConfig::read(std::string fname)
         }
 
         // SST 壁処理 (methods/turbulence §6.5): 0=low-Re 壁解像 (60ν/β₁y², 既定), 1=automatic (y⁺ 非依存)
-        this->wallTreatmentSST = getOptionalValidatedValue<int>(turb, "wallTreatmentSST", 1, "turbulence"); // 既定 1 (automatic)
+        // **既定 0 = 低 Re 壁解像** (2026-09-20 ユーザ方針: node の SST 壁関数は使わない)。
+        this->wallTreatmentSST = getOptionalValidatedValue<int>(turb, "wallTreatmentSST", 0, "turbulence");
 
+        if (this->wallTreatmentSST == 1) {
+            // 黙って継承されるのを防ぐ: 使うたびに既知欠損を読ませる (2026-09-20 ユーザ方針)。
+            std::cout << "[turbulence] 警告: wallTreatmentSST: 1 (SST 壁関数) は**使わない方針**です。既知欠損:\n"
+                      << "[turbulence]   - Cf -6% (壁関数 P_k 規約の欠損)\n"
+                      << "[turbulence]   - 3D の角線ノードで代表点が無く u_tau=0 になる\n"
+                      << "[turbulence]   - 壁モデル渦粘性 nu_t = nu*(1/g - 1) に上限が無く、低密度域で発散する\n"
+                      << "[turbulence]     (plan tooling-nozzle-sern-3d.md 4.25: nu_t 4660 m^2/s -> k 2.06e9 で 3D SST が死ぬ)\n"
+                      << "[turbulence]   - case/40 の壁温は y+1 低 Re と SU2 壁関数のみが根拠。node 壁関数系列は撤回済み\n"
+                      << "[turbulence] 壁解像 (wallTreatmentSST: 0, y+ ~ 1) を使うこと。やむを得ず使うなら run の README に理由を書くこと。"
+                      << std::endl;
+        }
         if (this->wallTreatmentSST < 0 || this->wallTreatmentSST > 1) {
             throw std::runtime_error("Key 'wallTreatmentSST' in 'turbulence' must be 0 or 1.");
         }
