@@ -20,5 +20,6 @@ SU2 とのライン比較の基準ケースとして使う。形状元: [mesh/bu
 | `run_0025`/`run_0026_std8_nobnd_*` | **禁止フラグ `mesh.bndFirstOrder: 1` を外して再実行** (保管 run から複製する際に落とし忘れていた。codex 2026-09-20 result Major 7) | **step 0 残差も発散も変わらない** (`rms_roUy` 2.01e-4、DIVERGED)。→ 退行の原因は bndFirstOrder ではない。**保管 run との step 0 差は `rms_roUy` 21.70760 vs 0.000200996 = 10⁵ 倍** (`rms_ro` と `rms_roe` だけ一致)。bump は **slip 壁**なので node slip 境界の扱いの変化が疑われる | ref (plan §4.31) |
 | `run_0027_std8_pref` / `run_0028`〜`run_0031_std8_*` | **W1i: 「退行」の追跡** (`pRef: 21839.5` 追加 + `convMethod`/`cfl_pseudo` スイープ) | **退行ではなく自由流保存の修正だった**: IC は厳密に一様 (ρ std 2.98e-8, **Uy std 0**) なので `rms_roUy≈0` が正しく、保管 run の 21.708 がスプリアスな壁力。`pRef` で 2.01e-4 → **1.54e-5**。**`convMethod: 0` + `pRef` は `PASS (converged)` 全列 5.1〜5.3 桁**。1 次以外 (cm 1/2, cfl_pseudo 1/3) は全て DIVERGED | ref (**plan §4.33**) |
 | `run_0032`〜`run_0035_lim8_*` | **リミッタ修正で 2 次が救えるか** (cm 1/2 × ① / ② K=0.05) | **4 本とも DIVERGED** (cm2 は step 182)。上下が `slip` 壁なので [[node-slip-spurious-flow]] が本命で、リミッタの問題ではない。→ **標準ケース回帰は「node + 2 次で収束するケースが無い」ためブロック継続** | ref (plan §4.33) |
+| `run_0036_slip8_noslip` / `run_0037_slip8_slipref` | **slip 壁説の検証** (上下を `slip` → `wall` に変えて `convMethod: 1`) | **両方 DIVERGED** → slip は原因でない。`case/05` Sod は slip 壁 2 枚・`convMethod: 2` で完走するのでも裏づけ。**case/08 の 2 次発散の原因は未特定** | ref (plan §4.33) |
 
 > 注: 上記 SLAU/dual 系は既存の入力リファレンス群。本表は新規 run 追加・破棄時に同期する。
