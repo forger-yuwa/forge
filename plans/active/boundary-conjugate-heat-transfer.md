@@ -422,7 +422,7 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | 39 | **M10 cell の `wallProfile` 座標** | `boundaryCond.cpp` が cell で内部セル重心を使っている。面重心 (`msh.planes[ip].centCoords`) に戻す |
 | 40 | **m11 docs と残作業表の同期** | `methods/index.md` / `design/CAPABILITIES.md` が「未実装」のまま。#10/#24 の記述矛盾、`stage_manifest` の外部入力ハッシュ未実装 |
 | 41 | **forge と SU2 の残差 (層流壁熱伝達)** | 遷移後 −1.6 %/2.6 % に対し **正圧面 −6.7 %/7.6 %・層流域 −4.0 %/6.4 %**。**消した可能性** (2026-09-20, case/53 README「残った forge–SU2 差の切り分け」): 熱流束の定義 (SU2 も同じコンパクト差分に揃えた)・幾何 ($d_1$ 同一)・層流物性 (Sutherland に対し 0.14 % 以内)・第一内点の $\mu_t$ (両者 0)・`sstEnergyIncludesK` (SU2 形にしても改善せず、**棄却**)。**残る事実**: 速度は ±1 % 一致なのに $T(y)$ だけ壁から 20 µm でずれる。層流単独対照は forge が非定常で**不成立**。次の候補: 対流スキーム (SLAU+MUSCL vs ROE+Venkat) の近壁温度への効き / node 壁半 CV のエネルギー流束 / 前縁からの BL 発達履歴 |
-| 42 | **`outlet_statPress` が擬似 CFL を律速する** (2026-09-20 切り分け済み) | **症状**: `cfl_pseudo` 4.0 で出口ブロックが発散 (層流 step 292 / SST step 754、`run_0012`/`run_0013`)。0.5/1.5 と 4.0+`implicitRelax` 0.5 は安定。SU2 は同条件で CFL 5 固定。**発達の様子** (`run_0020_diag_outlet`, 25 step ごと): 出口面 49 節点の静圧の幅が **step 0 で 1.1 kPa → step 275 で 42 kPa** と単調に開き、内部 (M max 1.10→1.21) は最後まで健全。**境界が振動源**。**コード上の機構** ([`timeIntegration_d.cu`](../../solver_density_cuda/cuda_forge/timeIntegration_d.cu) の DPLUR sweep): 境界面も対角 `face_coeff` には寄与するが、`if (other_ic < nCells)` でゴーストの $\delta q$ を**ゼロ扱い**する。ゴースト状態は外側ループの `applyBconds` で 1 step に 1 回しか更新されないので、内点に強く依存する亜音速特性出口は**1 step 遅れる**。**対策候補**: ゴーストの線形化依存 $\partial q_{ghost}/\partial q_{int}$ を対角に入れる / sweep 内で境界を作り直す。**生産 run の計算時間を直接律速している** |
+| 42 | ~~**`outlet_statPress` が擬似 CFL を律速する**~~ → **撤回 (2026-09-20)**。`cfl_pseudo` 4.0 の発散は事実だが **(a) 原因は出口 BC でなく 2 次再構成** (1 次なら安定、リミッタを Barth/`venkatK` 0.01/旧経路に替えても全滅、ゴースト緩和 w=0.3 も無効)、**(b) `implicitRelax` 0.7 や `nStepInner` 30 で上限は外せるが速くならない** — SST 本番で 20000 step の最終 `rms_ro` は現行 `cfl_pseudo` 0.5 が **4.6e−06**、cfl 2.0 が 4.5e−03、cfl 8+relax 0.7 が 1.6e−03、cfl 4+inner 30 が 7.0e−03 (所要時間はほぼ同じ)。**現行設定が最良**で、生産 run の律速ではない。詳細は case/53 README |
 | 19 | codex result レビュー | `done` にする前 |
 
 ## 6. 検証
@@ -679,3 +679,9 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
   15.9 / 1.07 Pa と 200–2700 倍静か)。
   副産物: `cfl_pseudo` 4.0 は**出口 (`outlet_statPress`) で圧力床に落ちて発散**する (層流・SST とも)。
   → §5.1 #42。
+- `2026-09-20` — **#42 を撤回した**。「出口 BC が擬似 CFL を律速し生産 run の時間を食っている」は誤り。
+  発散の**場所**は出口だが**原因は 2 次再構成** (1 次なら `cfl_pseudo` 4.0 で安定、リミッタ 4 種すべて
+  発散、`outlet_statPress` のゴースト緩和も無効)。`implicitRelax` 0.7 / `nStepInner` 30 で上限は
+  外せるものの、**SST 本番 20000 step の最終残差は現行 `cfl_pseudo` 0.5 が 4.6e−06 に対し
+  cfl 2.0 で 4.5e−03・cfl 8+relax 0.7 で 1.6e−03 と 300–1500 倍悪く、所要時間はほぼ同じ**。
+  現行設定が最良。速度を詰めるなら擬似時間の CFL 以外を見る。
