@@ -766,7 +766,12 @@ def main():
         print("wrote", out)
         print("  use: check_quasisteady.py --series-csv %s --series-cols %s"
               % (out, ",".join(SERIES_COLS)))
-        return
+        # **ここで return しない** (2026-09-20)。`--series` は時系列 CSV だけ書いて
+        # `cavity_eval.json` を更新しないため、ゲート [5] が読む `budget_residual` が
+        # 入らず**判定不能で不合格**になっていた。実際 `run_0422` / `run_0423` は
+        # 準定常 STEADY なのに 2 回ずつ無駄に延長された。最終スナップショットの
+        # 通常評価まで続けて JSON を書く。
+        print("  -> 続けて最終スナップショットの通常評価を行い cavity_eval.json を更新する")
 
     c, v = read(snaps[-1])
     step = int(snaps[-1].stem.split("_")[1])
