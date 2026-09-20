@@ -400,7 +400,7 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | 18 | docs 同期 | S0 / S7 |
 | 20 | **受理・退避仕様 (停止しないこと)** (3 巡目 #1) | §4.2。メリット関数 $\Phi=r^{\mathsf T}(A_s+D_f)^{-1}r$ + line search、再試行上限、停滞の不合格化。V1b に反例と非一様 $D_f$ |
 | 21 | **依存診断の解除契約** (2 巡目 #1 + 3 巡目 #2) | dual-time 解除を **V1 前**、周期解除を **V5 前**。**提供側 plan の残作業表にも** $R^{raw}$ の定義・$D_t(VE)$ の算出・BDF 符号試験・周期 root 集計を登録する |
-| 22 | **ゲートの数値仕様** (2 巡目 #5 + 3 巡目 #3) | §6 G-cons/G-if。規格化 ($\sum|Q|$ と絶対床)、局所面積尺度、絶対×相対×連続回数、準定常は **drift と osc の両方**を比較許容の 1/5。**Phase 1 判定前に実装** |
+| 22 | **ゲートの数値仕様** (2 巡目 #5 + 3 巡目 #3) | **一部実装 (2026-09-19)**: `tools/cht_wall_series.py` が壁ダンプから界面量の時系列 (`Tw_*`, `q_total`, `imbalance_max/rel`) を書き、`check_quasisteady.py --series-csv` に渡せる。**残り**: 絶対/相対/連続回数の事前登録と自動判定、区間ハッシュ。**実測の注意**: `imbalance_rel` は 1e-4 級の微小量なので相対 drift 判定は意味を持たず `DRIFTING` になる → **絶対値 (W/m²) で報告する**。| §6 G-cons/G-if。規格化 ($\sum|Q|$ と絶対床)、局所面積尺度、絶対×相対×連続回数、準定常は **drift と osc の両方**を比較許容の 1/5。**Phase 1 判定前に実装** |
 | 23 | **共有角の唯一の所有者** (3 巡目 #4) | §4.4b。~~温度を拘束する全壁を走査して拒否~~ **実装・検証済み (2026-09-19)**: `checkWallTemperatureSharing` が競合 CV・physID・各 $T_w$ を出して exit 1 (case/48 で `sym` を 500 K 等温壁にした拒否試験)。**残り**: global CV ID で固体 DOF を一意化、$Q_j$ の 1 回転送 (連成実装時) |
 | 24 | **`fem2d` の連成契約と単体試験** (2 巡目 #3) | §4.4d。$E$ / $K_s$ / 荷重転送 (面積の再乗算禁止)。単体は孔 Robin の円環解析解・非一様荷重・共有角保存 |
 | 25 | **V5 各段の入力と合格条件** (2 巡目 #6 + 3 巡目 #5) | §4.9・§6 V5。(a) 実測 $T_w$ → $h$/熱流束/壁圧、(b) 外周 Dirichlet + 孔 Robin の固体単独 (原典データ処理の再現検査)、(c) CHT。帯の**合成規則**まで事前登録 |
@@ -430,7 +430,15 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
   前縁近傍で $h$ が桁で変わるため $D_f^{(0)}=k_{\rm eff}A/d_1$ が過大 (平均 68.8 W/K) で過減衰になったことと、
   各反復の CFD が 6000 step では収束しきっていないことが効いている。
   **「外部ループは検証用、生産はソルバ内」という §4.5 の位置づけを実測で裏づけた形**。
-  **同じ問題をソルバ内連成 (`run_0018_cht_insolver`) は 1 run 30000 step = 3.6 分で回した**
+  **同じ問題をソルバ内連成は静定させられた** (`run_0018_cht_insolver` 30000 step → `run_0019_cht_insolver_cont` +60000 step、
+  合計 6.7 分)。**`check_quasisteady.py --series-csv wall_series.csv` → `STEADY` (ALL STEADY、漸近値 = 最終値 +0.000 %)**:
+  $T_w$ 平均 **578.30 K** / x=0.5 m **569.87 K** / 範囲 **551.63–986.15 K**、$Q_w$ **60.39 kW/m**、
+  **両側 $q$ の不一致 局所最大 31.6 W/m² = 相対 2.1e-4**、更新量 1.6e-3 K。
+  ただし **`check_convergence.py` は `NOT CONVERGED (stalled/plateau)`** で、**`--from-floor run_0011` は REFUSED**
+  (参照 run_0011 自体が PASS しない = この case には収束した参照床が無い)。
+  → **case/48 系列は残差ベースでは合格にできない**ので、派生量の定常性と界面不釣合いで判定する。
+  界面量の時系列は `tools/cht_wall_series.py` が壁ダンプから作る (G-if の入力)。
+  以下は 30000 step 時点の途中値の記録:
   (`check_convergence.py` VERDICT は **`NOT CONVERGED (stalled/plateau)`** — `rms_roe` が 2.1 dec で flat、
   `rms_ro`/`rms_roK`/`rms_roOmega` は falling。**親の run_0011 が NOT CONVERGED なのを継承**しており、
   以下は収束解ではなく 30000 step 時点の値):
@@ -567,3 +575,7 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
   `ints: {conjugate: 1}`、抵抗加重平均の更新、起動時の拒否条件、`conjugate_Tw_*.csv` による再開。
   case/52 で **$T_w$ 誤差 −0.152 % of rise・両側 $q$ 不一致 0.0002 %**、外部ループとの差 0.18 % of rise (V4 許容内)。
   **外部ループは乱流平板 (case/48 run_0017) では 12 反復で未収束**で、生産はソルバ内という位置づけを実測で確認。
+- `2026-09-20` — 平板のソルバ内連成を**静定まで回した** (`run_0019_cht_insolver_cont`, +60000 step)。
+  `check_quasisteady` **ALL STEADY** ($T_w$ x=0.5 m 569.87 K、$Q_w$ 60.39 kW/m、両側不一致 31.6 W/m² = 2.1e-4)。
+  **`check_convergence` は `NOT CONVERGED (stalled/plateau)`、`--from-floor` は参照未収束のため REFUSED**
+  → case/48 系列は残差では合格にできないと確定。界面時系列ツール `tools/cht_wall_series.py` を追加。
