@@ -58,7 +58,11 @@ def fit_arc_span(tab, i0, R, tol=ARC_TOL):
         r = least_squares(lambda c: np.hypot(*(Q - c).T) - R, c0)
         return r.x, float(np.max(np.abs(np.hypot(*(Q - r.x).T) - R)))
 
-    best = None
+    # **初期区間 (頂点 ±1 点) 自体をまず評価する**。Mark II の鈍頭前縁は表が 3 点しか刻まず
+    # (両隣まで 1.3/1.6 cm 飛ぶ)、そこから伸ばすと必ず許容を外れるので、初期区間を
+    # 評価しないと「円弧区間なし」になって鼻が角ばる。
+    c0, dev0 = fit([(i0 + k) % n for k in (-1, 0, 1)])
+    best = (c0, -1, 1, dev0) if dev0 <= tol else None
     a, b = -1, 1
     while True:
         grown = False
@@ -174,7 +178,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--vane", default="c3x", choices=["c3x", "markii"])
     ap.add_argument("--n", type=int, default=3200, help="書き出す点数 (メッシュ側でさらに間引く)")
-    ap.add_argument("--max-turn", type=float, default=5.0, help="再標本化後の折れ角の上限 [deg]")
+    ap.add_argument("--max-turn", type=float, default=1.5,
+                    help="折れ角の**局所中央値からの外れ** (= 角) の上限 [deg]")
     ap.add_argument("--smooth-scale", type=float, default=0.05, help="平滑化量 s = scale * m")
     a = ap.parse_args()
 
@@ -223,8 +228,19 @@ def main():
         fails.append(f"deviation rms {np.sqrt((dev**2).mean()):.5f} > {SIG_TABLE} cm")
     if dev.max() > 3 * SIG_TABLE:
         fails.append(f"deviation max {dev.max():.5f} > {3*SIG_TABLE} cm")
-    if ang.max() > a.max_turn:
-        fails.append(f"turn angle max {ang.max():.2f}° > {a.max_turn}°")
+    # **折れ角そのものを閾値にしない**: 後縁のように曲率が大きい所は刻み幅に対して
+    # 折れ角が大きくて当たり前 (Mark II の鈍頭後縁 R=0.88 mm × 0.092 mm 刻み = 6°)。
+    # 見たいのは「角」なので、**近傍の折れ角からの外れ** (局所中央値との差) で測る。
+    k = 3
+    med = np.array([np.median(np.take(ang, range(i - k, i + k + 1), mode="wrap"))
+                    for i in range(len(ang))])
+    kink = np.abs(ang - med)
+    print(f"  kink (turn - local median): max {kink.max():.2f}° at "
+          f"({P[int(np.argmax(kink)),0]:.3f},{P[int(np.argmax(kink)),1]:.3f})")
+    if kink.max() > a.max_turn:
+        fails.append(f"kink max {kink.max():.2f}° > {a.max_turn}° (角が残っている)")
+    if ang.max() > 30.0:
+        fails.append(f"turn angle max {ang.max():.2f}° > 30° (折り返しの疑い)")
     for nm, R, Rr in (("LE", R_le, RADII[a.vane]["LE"]), ("TE", R_te, RADII[a.vane]["TE"])):
         if Rr > 0 and abs(R - Rr) > 0.20 * Rr:
             fails.append(f"{nm} radius {R:.3f} cm vs {Rr} cm (>20 %)")
