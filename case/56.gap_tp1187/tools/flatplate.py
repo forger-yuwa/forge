@@ -112,8 +112,9 @@ def main():
           f"   ← 本文 1.10")
     print(f"乱流 理論/実測 : {tur.min():.3f} - {tur.max():.3f} (中央 {np.median(tur):.3f})"
           f"   ← 本文 1.30")
-    ok_l = 0.85 < np.median(lam) < 1.45
-    ok_t = 0.95 < np.median(tur) < 1.75
+    # 表示文と実装を一致させる (codex result M4: 旧実装は 0.85-1.45 / 0.95-1.75 で ±0.25 でなかった)
+    ok_l = 1.10 - 0.25 < np.median(lam) < 1.10 + 0.25
+    ok_t = 1.30 - 0.25 < np.median(tur) < 1.30 + 0.25
     verdict = "PASS" if (ok_l and ok_t) else "FAIL"
     print(f"GATE B VERDICT: {verdict}  (本文の偏り 1.10 / 1.30 を ±0.25 で挟めるか)")
     (HERE.parent / "gateB.json").write_text(json.dumps(

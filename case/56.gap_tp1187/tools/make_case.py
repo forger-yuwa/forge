@@ -49,7 +49,7 @@ time:
   outStepInterval: {out_int}
   timeIntegration: 11
   nStepInner: {inner}
-space: {{convMethod: {conv}, limiter: {lim}}}
+space: {{convMethod: {conv}, limiter: {lim}, limiterRoRef: {ro_ref:.10g}, limiterPRef: {p_ref:.10g}, limiterARef: {a_ref:.10g}}}
 turbulence: {{model: "{turb}", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1,
              wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInit: {kinf:.4f}, omegaInit: {ominf:.2f}}}
 initial: "uniform_p101325_u10"
@@ -139,8 +139,12 @@ def main():
         indent=2, ensure_ascii=False), encoding="utf-8")
 
     turb = "none" if a.laminar else "sst"
+    # リミッタの基準値を**固定**する。auto だと開始場依存の作用素になり、分割実行が
+    # 連続実行と一致しない (forge 自身が警告を出す。2026-09-20 codex result M10)。
+    a_inf = float(np.sqrt(gas.gamma(T) * gas.R * T))
     common = dict(mu_inf=mu, lam_inf=gas.lam(T), cp_ref=gas.cp(T), gam_ref=gas.gamma(T),
-                  relax=1.0, kinf=k_inf, ominf=om_inf, turb=turb)
+                  relax=1.0, kinf=k_inf, ominf=om_inf, turb=turb,
+                  ro_ref=rho, p_ref=p, a_ref=a_inf)
     stages = [("lam",  dict(conv=0, lim=0, cfl=0.2, inner=10, nsteps=a.soft_steps,
                             out_int=a.soft_steps, **{**common, "turb": "none"})),
               ("soft", dict(conv=0, lim=0, cfl=a.soft_cfl, inner=10, nsteps=a.soft_steps,
@@ -175,7 +179,11 @@ def main():
             src = rd / suf
             if src.exists():
                 src.rename(rd / f"{Path(suf).stem}_{tag}{Path(suf).suffix}")
-        res = sorted(rd.glob("res_[0-9]*.h5"), key=lambda f: int(f.stem.split("_")[1]))
+        # **その段が書いた res を名前で取る**。全段の最大番号を取ると、mid (3000 step) が
+        # ramp (2500 step) より大きいので ramp/本段が古い mid の場から再開してしまう
+        # (2026-09-20 codex result レビュー M9 で発覚。ramp 段が空振りしていた)。
+        cur = rd / f"res_{kw['nsteps']}.h5"
+        res = [cur] if cur.exists() else []
         if res:
             subprocess.run([sys.executable, str(TOOLS / "interp_field.py"), str(res[-1]),
                             str(rd / "mesh.h5")], check=True)

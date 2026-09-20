@@ -200,7 +200,11 @@ def main():
         print(f"--- stage {tag}: cfl={kw['cfl']} conv={kw['conv']} → step {kw['nsteps']}")
         r = subprocess.run([str(TOOLS / "run_case.sh"), str(rd)], env=ENV, capture_output=True, text=True)
         (rd / f"run_stdout_{tag}.log").write_text(r.stdout + r.stderr)
-        res = sorted(rd.glob("res_[0-9]*.h5"), key=lambda f: int(f.stem.split("_")[1]))
+        # **その段が書いた res を名前で取る**。全段の最大番号を取ると、mid (3000 step) が
+        # ramp (2500 step) より大きいので ramp/本段が古い mid の場から再開してしまう
+        # (2026-09-20 codex result レビュー M9 で発覚。ramp 段が空振りしていた)。
+        cur = rd / f"res_{kw['nsteps']}.h5"
+        res = [cur] if cur.exists() else []
         last = int(res[-1].stem.split("_")[1]) if res else -1
         if r.returncode != 0 or last < kw["nsteps"]:
             print(r.stdout[-3000:])
