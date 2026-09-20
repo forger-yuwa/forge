@@ -102,7 +102,8 @@ def build_fem2d(spec: dict, wall_coords: np.ndarray):
     """固体 npz + 孔ごとの Robin から `Fem2DOperator` を作り、**壁ダンプ順 → 界面節点順**の
     並べ替え index を返す。
 
-    界面は**流体の壁節点と 1 対 1** であることを要求する (座標一致 < 1e-9 m)。
+    界面は**流体の壁節点と 1 対 1** であることを要求する (座標一致 < 1e-7 m。壁ダンプの座標は
+    float32 なので 1e-8 m 級の丸めが乗る。節点間隔 0.15 mm に対しては十分に厳しい)。
     `gen_solid_mesh.py --outer-from <compare_h が書く wall_nodes_ordered.csv>` で作った
     固体メッシュを渡すこと。一致しない節点があれば落とす (黙って内挿しない)。
     """
@@ -132,7 +133,7 @@ def build_fem2d(spec: dict, wall_coords: np.ndarray):
     for i, p in enumerate(S):
         k = int(np.argmin(np.hypot(*(W - p).T)))
         dmin = float(np.hypot(*(W[k] - p)))
-        if dmin > 1e-9:
+        if dmin > 1e-7:      # 壁ダンプの座標は float32 なので ~1e-8 m の丸めが乗る
             sys.exit(f"[cht_loop] 固体界面節点 {i} {p} に一致する壁節点が無い (最近傍 {dmin:.3e} m)")
         perm[i] = k
     if len(set(perm.tolist())) != len(perm):
@@ -160,6 +161,11 @@ def main():
     ap.add_argument("--n-consec", type=int, default=2, help="収束と見なす連続回数")
     ap.add_argument("--anderson", type=int, default=5)
     ap.add_argument("--Tw-init", type=float, default=None, help="初期壁温 [K] (既定 = 固体の背面温度)")
+    ap.add_argument("--Tg", type=float, default=None,
+                    help="界面感度 D_f の初期値を**熱伝達係数** h=q/(Tg-Tw) から作るときの駆動温度 [K] "
+                         "(既定は第一セルの伝導 k_eff A/d1)。")
+    ap.add_argument("--Df-safety", type=float, default=2.0,
+                    help="D_f 初期値の安全率 (過大なら遅いだけ、過小だと発散しうる)")
     ap.add_argument("--axisym", action="store_true")
     a = ap.parse_args()
 
@@ -241,7 +247,18 @@ def main():
             keff, d1 = np.asarray(vals["iface_keff"], float), np.asarray(vals["iface_d1"], float)
             if a.solid_mode == "fem2d":
                 keff, d1 = keff[perm], d1[perm]       # 壁ダンプ順 -> 界面節点順
-            Df0 = np.maximum(keff * op.area / np.maximum(d1, 1e-12), 1e-12)
+            if a.Tg is not None:
+                # **D_f は $\partial Q_f/\partial T_w$ = 熱伝達係数 × 面積**である。
+                # 第一セルの伝導 $k_{\rm eff}A/d_1$ を使うと、境界層の厚み分だけ過大になる
+                # ($k/d_1$ vs $k/\delta_T$)。実測 (case/53, $d_1$=2 µm): 13.7 vs 0.44 W/K で **31 倍**。
+                # 過大な $D_f$ は安定だが**更新が止まる**ので、棄却のたびに倍加すると収束しない。
+                qq0 = np.asarray(vals["iface_" + a.flux], float)
+                if a.solid_mode == "fem2d":
+                    qq0 = qq0[perm]
+                dT = np.maximum(a.Tg - T0, 10.0)
+                Df0 = a.Df_safety * np.maximum(np.abs(qq0) * op.area / dT, 1e-12)
+            else:
+                Df0 = a.Df_safety * np.maximum(keff * op.area / np.maximum(d1, 1e-12), 1e-12)
             drv = op.driver(T0, Df0=Df0, anderson=a.anderson)
             Tw = drv.T.copy()
             # 初回は壁温が config の一様値なので、そのまま 1 回目の Q_f を使う

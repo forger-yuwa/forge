@@ -52,7 +52,7 @@ def main():
     out.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n")
     print(f"[make_solid_json] {len(spec['holes'])} holes, T_c={Tc} K, "
           f"k_s {min(spec['k_table'][1]):.1f}..{max(spec['k_table'][1]):.1f} W/mK -> "
-          f"{out.relative_to(ROOT)}")
+          f"{out}")
 
 
 if __name__ == "__main__":

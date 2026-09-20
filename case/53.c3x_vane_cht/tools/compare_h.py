@@ -96,14 +96,28 @@ def main():
     print(f"[compare_h] {fn.relative_to(ROOT)}  Tg={Tg} K  nodes={len(C)} (iface_ok {ok.sum()})")
     print(f"{'source':<18}{'h mean':>9}{'h max':>9}  |  vs exp: bias% rms% (points in data range)")
     out = {}
+    he = np.array([np.interp(s_norm[k], *exp["SS" if is_ss[k] else "PS"]) for k in range(len(C))])
     for key, qq in q.items():
         h = qq / (Tg - Tw)
         out[key] = h
         m = ok & (s_norm <= 0.87)          # 後縁側はデータ範囲外 (README 参照)
-        he = np.array([np.interp(s_norm[k], *exp["SS" if is_ss[k] else "PS"]) for k in range(len(C))])
         r = (h[m] - he[m]) / he[m]
         print(f"{key:<18}{h[ok].mean():9.1f}{h[ok].max():9.1f}  |  "
               f"{100*r.mean():+7.1f}{100*np.sqrt((r**2).mean()):8.1f}  (n={m.sum()})")
+
+    # **面と遷移で分けて出す**: 低 Re SST は遷移モデルを持たないので負圧面前縁の層流域だけ
+    # 大きく外れる。全域 1 つの数字にすると、遷移後が合っていることが見えない。
+    h = out["iface_q_compact"]
+    print(f"\n  regional breakdown (iface_q_compact, s/S<=0.87):")
+    stats = {}
+    for name, m in (("PS", ok & ~is_ss & (s_norm <= 0.87)),
+                    ("SS laminar (s/S<0.25)", ok & is_ss & (s_norm < 0.25)),
+                    ("SS post-transition", ok & is_ss & (s_norm >= 0.25) & (s_norm <= 0.87)),
+                    ("all", ok & (s_norm <= 0.87))):
+        r = (h[m] - he[m]) / he[m]
+        stats[name] = (int(m.sum()), 100 * r.mean(), 100 * float(np.sqrt((r ** 2).mean())))
+        print(f"    {name:<24} n={m.sum():3d}  bias {100*r.mean():+6.1f}%  "
+              f"rms {100*np.sqrt((r**2).mean()):5.1f}%")
 
     # 固体メッシュの外周を流体の壁節点に合わせるための出力 (弧長順・閉輪郭)。
     o = np.argsort(np.where(is_ss, 1.0 + s_norm, 1.0 - s_norm))   # PS(TE->LE) -> SS(LE->TE)
@@ -125,7 +139,13 @@ def main():
                     alpha=0.55, lw=2, label=f"forge {side}")
         ax.set_xlabel("$-s/S$ (PS)   |   $+s/S$ (SS)")
         ax.set_ylabel("$h/h_0$   ($h_0$=1135 W/m²K)")
-        ax.grid(alpha=0.3); ax.legend(); ax.set_title(f"C3X {a.run} — h (measured $T_w$ imposed)")
+        ax.axvspan(0.0, 0.25, color="0.85", zorder=0)
+        ax.text(0.125, ax.get_ylim()[0] + 0.03, "SS laminar\n(no transition model)",
+                ha="center", va="bottom", fontsize=8, color="0.35")
+        ax.grid(alpha=0.3); ax.legend(loc="lower right")
+        ax.set_title(f"C3X {a.run} — h (measured $T_w$ imposed)   "
+                     + "  ".join(f"{k}: {v[1]:+.0f}%/{v[2]:.0f}%" for k, v in stats.items()
+                                 if k != "all"), fontsize=9)
         fig.tight_layout(); fig.savefig(rd / "h_compare.png", dpi=110)
         print(f"[compare_h] -> {(rd/'h_compare.png').relative_to(ROOT)}")
     except Exception as e:                      # 図は補助
