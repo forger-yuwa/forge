@@ -36,11 +36,34 @@ from solid_fem2d import Fem2DOperator          # noqa: E402
 from cht_loop import build_fem2d, read_wall_dump, latest_wall_dump   # noqa: E402
 
 
+def _dump_area(coords, faces):
+    """壁ダンプの可視化要素から節点あたりの面積 (2D なら長さ) を集中させる。"""
+    n = len(coords)
+    a = np.zeros(n)
+    for f in faces:
+        idx = [int(k) for k in f if int(k) >= 0]
+        if len(idx) == 2:
+            L = float(np.linalg.norm(coords[idx[1]] - coords[idx[0]]))
+            a[idx[0]] += 0.5*L; a[idx[1]] += 0.5*L
+        elif len(idx) >= 3:
+            p = coords[idx]
+            ar = 0.0
+            for k in range(1, len(idx)-1):
+                ar += 0.5*float(np.linalg.norm(np.cross(p[k]-p[0], p[k+1]-p[0])))
+            for k in idx:
+                a[k] += ar/len(idx)
+    return a
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run_dir")
-    ap.add_argument("--solid", required=True)
-    ap.add_argument("--solid-mode", default="fem2d", choices=["fem2d"])
+    ap.add_argument("--solid", default=None,
+                    help="fem2d のとき必須 (固体 JSON)。local1d では run の solverConfig.yaml を読む")
+    ap.add_argument("--solid-mode", default="fem2d", choices=["fem2d", "local1d"],
+                    help="fem2d: `cht_loop` の外部連成 (固体 JSON)。"
+                         "local1d: **ソルバ内連成** (`conjugate:` 節)。"
+                         "固体側は $\\sum_i (T_{w,i}-T_b)/R_{\\rm tot}\\,A_i$ で作る")
     ap.add_argument("--phys-id", type=int, required=True)
     ap.add_argument("--phys-name", default="wall")
     ap.add_argument("--flux", default="q_eff",
@@ -65,6 +88,44 @@ def main():
     q = np.asarray(vals[key], float)
     n_nan = int(np.sum(~np.isfinite(q)))
 
+    if a.solid_mode == "local1d":
+        # ---- ソルバ内連成 (`conjugate: {mode: local1d, ...}`) ----
+        # 固体は節点ごとに独立な直列抵抗 $R_{\rm tot}=t/k_s+R_{\rm back}$ なので、
+        # 固体が持ち去る熱は $\sum_i (T_{w,i}-T_b)/R_{\rm tot}\cdot A_i$。
+        # 界面の面積は壁ダンプの三角形/線分から作らず、**forge と同じ bplane 面積**が要るので
+        # `iface_q_eff` と `Q` の比から逆算せず、mesh.h5 の面積を使う (下で読む)。
+        import yaml
+        cfgp = src / "solverConfig.yaml"
+        cfg = yaml.safe_load(cfgp.read_text())
+        cj = cfg.get("conjugate", {})
+        t_s = float(cj["thickness"]); k_s = float(cj["k_solid"])
+        Tb = float(cj["T_b"]); back = str(cj.get("back", "isothermal"))
+        Rb = 0.0 if back == "isothermal" else float(cj.get("R_back", 0.0))
+        Rtot = t_s/k_s + Rb
+        Tw = np.asarray(vals["Ts"], float)
+        with h5py.File(src / "mesh.h5", "r") as mf:
+            pass
+        # 面積: 壁ダンプの線分長 (2D) / 三角形面積 (3D) から作る
+        area = _dump_area(coords, faces)
+        Qf = q * area
+        sum_Qf = float(np.sum(Qf[np.isfinite(Qf)]))
+        sum_absQf = float(np.sum(np.abs(Qf[np.isfinite(Qf)])))
+        Q_solid = float(np.sum((Tw - Tb)/Rtot * area))
+        eps = abs(sum_Qf - Q_solid); denom = max(sum_absQf, a.q_floor); rel = eps/denom
+        ok = (rel <= a.tol_rel) and (eps <= tol_abs) and (n_nan == 0)
+        print(f"=== G-cons: {run.name}  ({dump.name}, flux={key}, local1d) ===")
+        print(f"  固体: R_tot = t/k_s + R_back = {t_s}/{k_s} + {Rb} = {Rtot:.6f} m2K/W, T_b = {Tb} K")
+        print(f"  流体側  sum Q_f     = {sum_Qf:14.6f} W   (sum |Q_f| = {sum_absQf:.6f})")
+        print(f"  固体側  Q_solid     = {Q_solid:14.6f} W")
+        print(f"  不釣合い eps        = {eps:14.6f} W")
+        print(f"  規格化  eps/denom   = {100*rel:14.6f} %     (denom = max(sum|Q_f|, q_floor={a.q_floor}))")
+        print(f"  NaN 節点            = {n_nan} / {len(q)}")
+        print(f"  許容                : rel <= {100*a.tol_rel:.3f} % かつ abs <= {tol_abs}")
+        print(f"VERDICT: {'PASS' if ok else 'FAIL'}")
+        return 0 if ok else 1
+
+    if a.solid is None:
+        sys.exit("--solid-mode fem2d には --solid が要る")
     spec = json.loads(Path(a.solid).read_text())
     op, perm = build_fem2d(spec, coords)
     qs = q[perm]
