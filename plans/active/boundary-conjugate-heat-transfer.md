@@ -353,7 +353,9 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 4. **S3 幾何と接合** — **部分完了 (2026-09-19)**: **共有 CV の壁温競合の起動時エラーを実装**
    (`checkWallTemperatureSharing`。壁温を陽に扱う run でのみ走り、既定 run の挙動は不変)。
    **残り**: facet 単位の幾何・荷重、`conjugateGroup`、軸対称・周期の規定と未対応構成の拒否。
-5. **S4 固体ソルバ**: `tools/solid_shell.py` (`local1d`/`shell2d`) と `tools/solid_fem2d.py`。単体は解析解。
+5. ~~**S4 固体ソルバ**~~ — **完了 (2026-09-19/20)**: `tools/solid_shell.py` (`local1d`/`shell2d`) と
+   `tools/solid_fem2d.py` (一般 2D + Robin 孔 + Schur 縮約)。単体は解析解 (`test_solid_shell.py` /
+   `test_solid_fem2d.py` とも **PASS (all)**)。
 6. ~~**S5 外部ループ**~~ — **完了 (2026-09-19)**: `tools/cht_loop.py` (1 反復 = forge 1 回。
    §4.2 の更新式 + Anderson + 受理/退避、`wallProfile` の書き出し、warm start、`cht_history.csv`)。
 6.5. **S5b 界面ゲートの実装**: G-if / G-cons の判定 (局所ノルム・絶対許容・連続反復数) と区間ハッシュ。
@@ -402,7 +404,7 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | 21 | **依存診断の解除契約** (2 巡目 #1 + 3 巡目 #2) | dual-time 解除を **V1 前**、周期解除を **V5 前**。**提供側 plan の残作業表にも** $R^{raw}$ の定義・$D_t(VE)$ の算出・BDF 符号試験・周期 root 集計を登録する |
 | 22 | **ゲートの数値仕様** (2 巡目 #5 + 3 巡目 #3) | **一部実装 (2026-09-19)**: `tools/cht_wall_series.py` が壁ダンプから界面量の時系列 (`Tw_*`, `q_total`, `imbalance_max/rel`) を書き、`check_quasisteady.py --series-csv` に渡せる。**残り**: 絶対/相対/連続回数の事前登録と自動判定、区間ハッシュ。**実測の注意**: `imbalance_rel` は 1e-4 級の微小量なので相対 drift 判定は意味を持たず `DRIFTING` になる → **絶対値 (W/m²) で報告する**。| §6 G-cons/G-if。規格化 ($\sum|Q|$ と絶対床)、局所面積尺度、絶対×相対×連続回数、準定常は **drift と osc の両方**を比較許容の 1/5。**Phase 1 判定前に実装** |
 | 23 | **共有角の唯一の所有者** (3 巡目 #4) | §4.4b。~~温度を拘束する全壁を走査して拒否~~ **実装・検証済み (2026-09-19)**: `checkWallTemperatureSharing` が競合 CV・physID・各 $T_w$ を出して exit 1 (case/48 で `sym` を 500 K 等温壁にした拒否試験)。**残り**: global CV ID で固体 DOF を一意化、$Q_j$ の 1 回転送 (連成実装時) |
-| 24 | **`fem2d` の連成契約と単体試験** (2 巡目 #3) | §4.4d。$E$ / $K_s$ / 荷重転送 (面積の再乗算禁止)。単体は孔 Robin の円環解析解・非一様荷重・共有角保存 |
+| 24 | **`fem2d` の連成契約と単体試験** (2 巡目 #3) | ~~§4.4d~~ **実装・検証済み (2026-09-20)**: `tools/solid_fem2d.py` (線形三角形 FE + Robin 辺 + **内部節点を消去した Schur 補元**で界面作用素をシェルと同じ顔にする) + `tools/test_solid_fem2d.py` **PASS (all)**: 孔 Robin の円環解析解 (**rate 1.97**)、Schur = 全系解 (5e-12)、非一様荷重、連成 **7 反復**で厳密固定点。**残り**: 共有角の保存試験 (界面が複数 bcond に分かれる構成)、`cht_loop` からの選択 (`--solid` の mode 分岐) |
 | 25 | **V5 各段の入力と合格条件** (2 巡目 #6 + 3 巡目 #5) | §4.9・§6 V5。(a) 実測 $T_w$ → $h$/熱流束/壁圧、(b) 外周 Dirichlet + 孔 Robin の固体単独 (原典データ処理の再現検査)、(c) CHT。帯の**合成規則**まで事前登録 |
 | 26 | **陰解法フックの設計** (2 巡目 #4) | §4.6。`advanceImplicitSteady`/`implicitNonlinearUpdate` 経路で $K$ を数える。dual-time は別契約 (初版は対象外) |
 | 27 | **索引・親 plan の残り** (3 巡目 #6) | 指定箇所は同期済み。**親 plan §4.6-4 の「弱ループが収束しない = 軸方向伝導が支配的」**を本計画 §4.8 のモデル感度基準に置き換える |
@@ -579,3 +581,8 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
   `check_quasisteady` **ALL STEADY** ($T_w$ x=0.5 m 569.87 K、$Q_w$ 60.39 kW/m、両側不一致 31.6 W/m² = 2.1e-4)。
   **`check_convergence` は `NOT CONVERGED (stalled/plateau)`、`--from-floor` は参照未収束のため REFUSED**
   → case/48 系列は残差では合格にできないと確定。界面時系列ツール `tools/cht_wall_series.py` を追加。
+- `2026-09-20` — **`fem2d` 実装・検証** (`tools/solid_fem2d.py` + `test_solid_fem2d.py`)。
+  界面作用素は**内部節点を消去した Schur 補元**にしてシェルと同じ契約 ([W/K], [W]) に揃えた。
+  円環 (Robin 孔) の解析解に対し **rate 1.97**、Schur = 全系解 5e-12、
+  **物理的な (対角優位な) 流体応答なら連成は 7 反復**で厳密固定点 → §4.2 の反例は最悪ケースであることを確認。
+  これで **V5 (Mark II / C3X) の固体側が揃った**。
