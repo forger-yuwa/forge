@@ -7,7 +7,10 @@
     {
       "id": "denominator",
       "what": "分母 h_fp の系統差",
-      "interval": [1.0, 1.8],
+      "interval": [
+        1.0,
+        1.8
+      ],
       "basis": "gateB.json の h_vdii/h_corr = 1.755 (Tw 300 K, Re 1.47e6)。系列全体では 1.57-2.04 (中央 1.77)",
       "direction": "forge も実測も同じ相関分母で割るので一次では相殺するが、相関自体が 3 次元化したトンネル壁 BL 由来なので上端側を残す"
     },
@@ -22,7 +25,16 @@
     {
       "id": "inflow_BL",
       "what": "入口 BL の再構成の不確かさ",
-      "interval": {"dstar": [0.7, 1.4], "u_tau": [0.7, 1.4]},
+      "interval": {
+        "dstar": [
+          0.7,
+          1.4
+        ],
+        "u_tau": [
+          0.7,
+          1.4
+        ]
+      },
       "basis": "README §T2-G0。delta* は Fig 4 の digitize、u_tau は Cf を仮定せずに組んだ値 (bl_derived.json)",
       "direction": "両側"
     },
@@ -37,10 +49,35 @@
       "what": "格子",
       "interval_rule": "開口幅方向 2 段格子の差をそのまま区間に入れる (acceptance T2p-M で <= 10 % を要求)",
       "basis": "plan §6 G7b と同じ考え方"
+    },
+    {
+      "id": "viscosity_law",
+      "what": "forge の Sutherland 定数直書きによる μ∞ の差",
+      "interval": [
+        0.92,
+        1.0
+      ],
+      "_interval_exact": "[1/1.087, 1.0]",
+      "basis": "cuda_forge/gasProperties_d.cu:59-62 が mu0 1.716e-5 / T0 273 / S 111 を直書きし physProp.visc を使わない。T_inf 52.635 K で mu_S = 3.409e-6 に対し台帳 (Chapman-Enskog) 3.844e-6、比 0.887 → forge 内部の Re' は 1.657e6/m (+12.8 %)、h_fp ∝ Re'^0.69 なら ×1.0866。**分母は施設ラベルの Re' = 1.47e6 (h_fp 1.4316) で固定する** — 実測相関は施設が状態に付けた Re' ラベルで作られており、forge 内部の粘性則で Re' を再定義すると実測と違う演算になるため。ここには『実効 Re' で割った場合の差』を区間として入れる",
+      "direction": "比を下げる側 = 上端判定には影響しない",
+      "_note": "壁 300 K で mu_S 1.844e-5、回復温度 995 K でも Sutherland と CE は 0.7 % 一致。ずれは寒冷な自由流 (外層の層流 μ、そこは mu_t 支配) に限られる"
+    },
+    {
+      "id": "gas_model",
+      "what": "run は CPG、台帳 (Gate A・T_aw・入口 T 分布) は semi-perfect",
+      "interval": [
+        0.93,
+        1.0
+      ],
+      "_interval_exact": "[1/1.075, 1.0]",
+      "basis": "run は cp 1004.5 / gamma 1.4 (thermalMethod 0)。同じ (T_inf, U_inf) で CPG の T_t = 1170.6 K (台帳 1112.02)、T_aw = 1047.6 K (台帳 995.49)。h = q/(T_aw - T_w) を 995.49 で割ると CPG 整合値より (1047.6-300)/(995.49-300) = 1.075 倍大きく出る",
+      "direction": "比を下げる側",
+      "_which_is_used": "上端判定では台帳の T_aw = 995.49 K を使う (比が大きく出る側)"
     }
   ],
   "not_included": [
     "2D 中央断面近似の誤差 (原理的に定量化できない。これが T2 を一次検証にできない理由そのもの。分類 alpha/beta/gamma の粗さで吸収する前提)",
-    "掃引角 0 deg 以外の系列"
+    "掃引角 0 deg 以外の系列",
+    "Gate A の T_t は、施設が付けた実測 Re' ラベルを Chapman-Enskog 粘性で逆変換して解いた値。施設が別の粘性則を使っていれば T_t が 1 割程度動く (未確認)。状態ラベルの不確かさであって run の設定ではない"
   ]
 }

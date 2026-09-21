@@ -259,3 +259,5 @@ Karman–Schoenherr の $C_f$ が上がり、$h_{VDII}/h_{corr}$ は **1.57 – 
 | run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
 | --- | --- | --- | --- |
 | — | **計算はまだ実施していない**。現状は入力台帳・Gate A・Gate B・T2-G0a (流入 BL 再構成) | `derived.json`, `gateB.json`, `bl_derived.json`, `inlet_bl.json` | — |
+| `run_0001_t2p_g51_coarse` | **T2′ の先行 run** (AWS)。粗メッシュ `t2p_y30um_g51_coarse` (216,650 セル, PASS)。Re′ 1.47e6/m・壁温比 1.00 (T_surf=T_gap=300 K)。T2p-M の格子感度でどのみち要る run を**先に**回し、3 深さの比が分類境界から ±15 % 以上離れているか (= 簿記項が分類に効かないか) を確かめる (`acceptance.json` の revisions に投入前宣言済み) | (実行中) | 投入 |
+| `run_0002_t2p_g101_prod` | **T2′ 本命** (AWS)。本命メッシュ `t2p_y30um_g101_r1025` (250,900 セル, PASS)。設定は run_0001 と同一 (粗い方が境界に近づいた場合のみ多成分 TP へ切り替え) | — | 予定 |

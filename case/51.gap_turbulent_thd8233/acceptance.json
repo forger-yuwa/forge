@@ -12,11 +12,42 @@
   "case": {
     "series": "Re' = 1.47e6 /m, 壁温比 1.00, 掃引角 0 deg",
     "reference_csv": "ref/th76_fig5a_re147.csv",
-    "freestream": {"M": 10.3, "Pt_Pa": 2410000.0, "Tt_K": 1112.02, "T_inf_K": 52.63, "p_inf_Pa": 56.96, "ro_inf": 0.0037703, "U_inf_ms": 1498.69, "T_aw_K": 995.49, "_source": "derived.json (Gate A)"},
+    "freestream": {
+      "M": 10.3,
+      "Pt_Pa": 2410000.0,
+      "Tt_K": 1112.02,
+      "T_inf_K": 52.63,
+      "p_inf_Pa": 56.96,
+      "ro_inf": 0.0037703,
+      "U_inf_ms": 1498.69,
+      "T_aw_K": 995.49,
+      "_source": "derived.json (Gate A)",
+      "_gas_model": "CPG (cp 1004.5, gamma 1.4) + Sutherland (ソース直書き)",
+      "_Re_m_label": 1470000.0,
+      "_Re_m_forge_internal": 1657000.0,
+      "_Re_m_note": "forge 内部の Sutherland で数えると 1.657e6/m。**分母 h_fp には使わない** (施設ラベル 1.47e6 で固定)"
+    },
     "wall_K": 300.0,
-    "geometry": {"W_cm": 0.229, "D_cm": 4.572, "D_over_W": 19.97, "_source": "conditions.json"},
-    "inflow_BL": {"dstar_cm": 12.8, "delta_cm": 22.945, "theta_cm": 0.5111, "Re_theta": 7513, "u_tau_ms": 66.31, "Cf": 6.870e-4, "_source": "bl_derived.json"},
-    "h_fp": {"form": "7.95e-5 * Re'^0.69", "value_W_m2K": 1.4316, "_source": "Appendix (A2)"}
+    "geometry": {
+      "W_cm": 0.229,
+      "D_cm": 4.572,
+      "D_over_W": 19.97,
+      "_source": "conditions.json"
+    },
+    "inflow_BL": {
+      "dstar_cm": 12.8,
+      "delta_cm": 22.945,
+      "theta_cm": 0.5111,
+      "Re_theta": 7513,
+      "u_tau_ms": 66.31,
+      "Cf": 0.000687,
+      "_source": "bl_derived.json"
+    },
+    "h_fp": {
+      "form": "7.95e-5 * Re'^0.69",
+      "value_W_m2K": 1.4316,
+      "_source": "Appendix (A2)"
+    }
   },
   "gates": [
     {
@@ -37,8 +68,18 @@
       "name": "主判定 — 3 分類 (排他的)",
       "status": "pre_registered",
       "quantity": "下流壁 (せん断層が当たる側) midspan の h/h_fp。h = q/(T_aw - T_w)、分母は Appendix 相関 (実測と同じ作り方、plan §4.4b)",
-      "depths_zW": [1.4, 2.2, 3.0],
-      "reference_values": {"1.4": 0.45, "2.2": 0.30, "3.0": 0.14, "_wall": "down", "_T_ratio": 1.00},
+      "depths_zW": [
+        1.4,
+        2.2,
+        3.0
+      ],
+      "reference_values": {
+        "1.4": 0.45,
+        "2.2": 0.3,
+        "3.0": 0.14,
+        "_wall": "down",
+        "_T_ratio": 1.0
+      },
       "excluded": "z/W = 0.7 はスキン滲みの拡散長内なので参考のみ。solid=1 (黒塗り記号、原典が精度に疑義) の点は全て除外",
       "band_rule": "伝播 (tolerances.json) を区間として加算し、比 forge/実測 が取りうる範囲の上端で判定する (= 欠損が最も縮む側に倒す)",
       "classes": {
@@ -70,5 +111,19 @@
       "observed": "Gate A: Tt を解いて 1090 +- 4.5 % で PASS。Gate B: h_vdii/h_corr = 1.57-2.04 (中央 1.77)"
     }
   ],
-  "revisions": []
+  "revisions": [
+    {
+      "date": "2026-09-22",
+      "trigger": "投入前の設定点検 (diagnostician)",
+      "what": "tolerances.json に viscosity_law と gas_model の 2 区間を追加し、Gate A の T_t ラベル依存を not_included に列挙した。どちらも比を下げる側なので **T2p-C の上端判定は不変**。分母は施設ラベル Re' 1.47e6 (h_fp 1.4316) で固定することを明記した",
+      "_before_any_cfd": true
+    },
+    {
+      "date": "2026-09-22",
+      "trigger": "投入順序の事前宣言",
+      "what": "**粗メッシュ (t2p_y30um_g51_coarse, T2p-M の格子感度で必須) を先に回す**。3 深さの比が分類境界 (1/10, 1/3, 3) から ±15 % 以上離れていれば簿記項 (粘性則 -8.7 % / 気体モデル -7.5 %) は分類に無関係と確定し、細メッシュも同一 config で進める。±15 % 以内に入った場合に限り、細メッシュを多成分 TP (viscMethod 2 + thermalMethod 2 + 乾燥空気) に切り替えて μ と cp を台帳どおりにし、再登録する",
+      "_why_declared_now": "結果を見てから TP に切り替えた、と後から言われないため",
+      "_before_any_cfd": true
+    }
+  ]
 }
