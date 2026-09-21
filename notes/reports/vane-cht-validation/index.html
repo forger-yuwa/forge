@@ -1151,16 +1151,19 @@
     1 &#181;m mesh passes and moves the figures by 1.4 to 2.3 points; Mark II has not been run
     at 1 &#181;m, and its post-transition figure is still rising with refinement along the
     wall.</li>
-    <li><strong>The wall control volume is first-order accurate, not second.</strong> A
-    manufactured-solution study on a curved, stretched, high-aspect wall layer (the face formula
+    <li><strong>The viscous work at the wall is only first-order accurate in relative terms.</strong>
+    A manufactured-solution study on a curved, stretched, high-aspect wall layer (the face formula
     checked against the solver's own kernel to 0.3 W/m²) shows the corrected weight giving
-    second-order temperature and velocity, but only first-order conduction and viscous work
-    into the wall control volume: the dual face's centroid sits closer to the wall than the edge
-    midpoint by the sag of the chord, so the face velocity is taken slightly too high. At the
-    C3X resolution that raises the reported flux by an estimated <span class="n">0.8 %</span>;
-    halving the first cell halves it. The old weight did not converge at all &#8212; its
-    viscous work stayed 25&#8211;33 % off at every refinement. SST and species diffusion were
-    not part of that study.</li>
+    second-order temperature and velocity. The viscous work entering the wall control volume
+    converges too, but because the work itself shrinks with the first cell, its <em>relative</em>
+    error falls only at first order, from <span class="n">31 %</span> on the coarsest grid: on a
+    curved wall the edge midpoint where the face velocity is taken and the broken dual face over
+    which the exact flux is integrated are not in the same place. That term is
+    <span class="n">2.8 %</span> of the reported flux at the C3X resolution, so the effect on the
+    flux is below a percent and halves with the first cell; its sign and size on the real vane
+    have not been evaluated. With the old weight the same relative error stayed near
+    <span class="n">25 %</span> at every refinement. SST and species diffusion were not part of
+    that study.</li>
     <li><strong>The remaining forge&#8211;SU2 difference</strong>, <span class="n">2.6 %</span>
     on the suction side and <span class="n">2.8 %</span> on the pressure side when both are
     evaluated as the wall-face estimate. Its origin is not identified.</li>
@@ -1183,7 +1186,7 @@
   </ul>
 
   <footer>
-    forge · plans/active/boundary-conjugate-heat-transfer.md · plans/active/discretization-node-face-weight-midpoint.md · case/53.c3x_vane_cht · case/54.markii_vane_cht
+    forge · plans/active/boundary-conjugate-heat-transfer.md · plans/accepted/discretization-node-face-weight-midpoint.md · case/53.c3x_vane_cht · case/54.markii_vane_cht
   </footer>
 </div>
 

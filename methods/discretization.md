@@ -706,7 +706,7 @@ cell モード・境界半割面 (`ip>=nNormalPlanes`) は対象外。`fx` は�
 (gradient の over-relaxed 法線項が使う `dcc` は CV 中心間距離のまま)。
 
 **再訂正 (2026-09-21) — 「幾何 fx が中点相当」は高 AR の曲面壁層で成り立たない**
-([plan](../plans/active/discretization-node-face-weight-midpoint.md))。冷却翼 (case/53 C3X、第一層 2 µm × 壁沿い 0.73 mm) で
+([plan](../plans/accepted/discretization-node-face-weight-midpoint.md))。冷却翼 (case/53 C3X、第一層 2 µm × 壁沿い 0.73 mm) で
 壁側の重みが翼全周 **0.07–0.96** に散っていた。原因は 2 つ:
 
 1. **実装の式が射影ではない**。`calcStructualVariables_d.cu` は
@@ -725,8 +725,9 @@ $s/S$ 0.45–0.95 で rms 571 W/m²)。`fx=0.5` でうねり rms 1.22 → 0.46 k
 `nodeMode = (discretization=="node")`。オプションは無い)。周期 TGV (case/09)・軸対称凝縮ノズル (case/44) はノイズ床内で不変、
 平板を 30° 回した同一問題では回転不変性が 3–4 倍よくなる ($\tau_w$ の差 0.085 → 0.024 %)。
 **製造解での測定** ([notes](../notes/investigations/2026-09-22-mms-node-face-weight.md)、曲面・AR 350・成長率 1.1/1.2・4 水準):
-`fx=0.5` は**節点値 (温度・速度) が $p$ = 2.00**、**壁の検査体積に入る熱伝導・粘性仕事は 1 次** (双対面の面積重心が弦のたるみの分だけ
-辺中点より壁側にあるため。粘性仕事で最粗 31 % → 最細 2.9 %)。旧式は同じ量が**細分化しても 25–33 % ずれたまま収束しない**。
+`fx=0.5` は**節点値 (温度・速度) が $p$ = 2.00** (節点勾配と物性に解析値を使う補助問題)、**壁の検査体積に入る粘性仕事の相対 RMS 誤差は約 1 次**
+(最粗 31 % → 最細 2.9 %。絶対誤差は約 2 次。曲面上で辺中点の評価位置と双対面上の積分位置がずれるため)。旧式は同じ相対誤差が**約 25 % に停滞する**
+(絶対誤差は約 1 次)。
 2 点差分の壁面熱流束・壁せん断は重みに依らず 1 次。
 
 **検証 (case/29 conical, node laminar viscous 40k)**: `fx=0.5` は近壁 `dUxdy` の checkerboard roughness を

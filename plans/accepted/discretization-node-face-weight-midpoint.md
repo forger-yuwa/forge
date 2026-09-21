@@ -3,12 +3,12 @@
 ## メタ
 
 - **area**: `discretization`
-- **status**: `in_progress`
+- **status**: `done`
 - **related_docs**:
   - [`methods/discretization.md`](../../methods/discretization.md) (「node 内部双対面の面補間係数」の節)
   - [`methods/boundary.md`](../../methods/boundary.md) (壁熱流束 `iface_q_eff` の定義)
-- **related_plans**: [`boundary-conjugate-heat-transfer.md`](boundary-conjugate-heat-transfer.md) §5.1 #57–#61 (発見の経緯)、
-  [`architecture-node-option-consolidation.md`](architecture-node-option-consolidation.md) (`nodeMidpointFx` を撤去した plan。その前提を本 plan が覆す)
+- **related_plans**: [`boundary-conjugate-heat-transfer.md`](../active/boundary-conjugate-heat-transfer.md) §5.1 #57–#61 (発見の経緯)、
+  [`architecture-node-option-consolidation.md`](../active/architecture-node-option-consolidation.md) (`nodeMidpointFx` を撤去した plan。その前提を本 plan が覆す)
 - **created**: `2026-09-21`
 - **owner**: Claude (ユーザ指示「熱流束のガタつきに対処する」)
 
@@ -78,10 +78,10 @@ node の内部双対面で `fx = 0.5` に固定する (`calcStructualVariables_d
 内部面流束は両 CV に同じ値を逆符号で足すので**保存性は `fx` に依らない**。
 
 **精度について主張する範囲** (codex M2 採用、2026-09-22 に製造解の結果で更新): 辺中点の算術平均は「線形場で厳密、滑らかな場の
-**値補間**として 2 次」。製造解 (§5.1 #7) で測れたのは: **節点値 (温度・速度) は $p$ = 2.00**、**壁の検査体積に入る熱伝導・粘性仕事は
-1 次** (双対面の面積重心が弦のたるみの分だけ辺中点より壁側にあるため。誤差は たるみ / 第一層の半分 に比例)、**2 点差分の壁面値は
-重みに依らず 1 次**。「`fx=0.5` で壁熱流束が 2 次になる」とは主張しない。主張するのは「旧式は細分化しても壁 CV の粘性仕事が
-25–33 % ずれたまま収束しない (不整合) が、`fx=0.5` は 1 次で収束する」こと。
+**値補間**として 2 次」。製造解 (§5.1 #7) で測れたのは: **節点値 (温度・速度) は $p$ = 2.00** (節点勾配と物性に解析値を使う補助問題での値)、**壁の検査体積に入る粘性仕事の相対 RMS 誤差は約 1 次**
+(絶対誤差は約 2 次。曲面上で、辺中点の評価位置と折れた双対面上の積分位置が (たるみ / 第一層厚) のオーダーでずれるため)、**2 点差分の壁面値は
+重みに依らず 1 次**。「`fx=0.5` で壁熱流束が 2 次になる」とは主張しない。主張するのは「旧式は壁 CV の粘性仕事の相対誤差が測定範囲で約 25 % に
+停滞する (絶対誤差は約 1 次) が、`fx=0.5` は相対でも約 1 次で縮む」こと。**実機の `q_eff` への符号付きの影響は見積もっていない** (codex result-3 M1)。
 
 ### 4.3 試行結果 (環境変数 `FORGE_NODE_FX_HALF=1` での A/B)
 
@@ -113,15 +113,15 @@ Mark II の層流域は +3.8 pt」に限る。いずれの run も残差は `NOT
 | # | 項目 | 内容 |
 | --- | --- | --- |
 | 1 | ~~codex plan レビュー~~ | 済 (2026-09-21、GO-with-changes C0/M4。§6.1)。4 件とも採用 |
-| 2 | 回帰範囲の補完 (codex M3) | **比較は済・合格証拠は不足 (codex result M1)**。対照 2 本 + 試行 2 本を `check_field_regress.py` でノイズ床と比較。**`case/09.Taylor-Green`** (周期・受動スカラー、`run_0169_fx_ctrl_a`/`run_0170_fx_ctrl_b` 対 `run_0171_fx_half_a`/`run_0172_fx_half_b`): `VERDICT: PASS` (最大比 1.39)。**`case/44.vitiated_air_wt`** (軸対称・多成分 TP・凝縮、`run_0505`/`run_0506` 対 `run_0507`/`run_0508`、`--boundary`): `VERDICT: PASS` (最大比 1.88 < 2)。ただし `case/44` は Euler で `fx` を読む粘性・拡散経路をほとんど通らないので**不変の確認にしかならない**。`case/48` 平板 (`run_0020`/`run_0021`: $q$ 最大 0.0031 %・$\tau_w$ 0.0020 %)、`case/52` スラブ (`run_0006`/`run_0007`: 5e−7) も不変。**ただし §6 が要求する `check_convergence.py` の `PASS` は平板・スラブとも取れていない** (4 本とも `NOT CONVERGED (stalled/plateau)`。`--from-floor case/48…/run_0011_Bplain_tw300_y3` は参照 run 自身が継続 run で `PASS` でないため `REFUSED`)。差が小さいことは回帰合格の証明ではないので、**平板を `procedures/verification/48-flat-plate-cooled.md` の全段起動で新バイナリから回し直して `PASS` と基準値 (C_f/VD-II・2St/C_f・エネルギー閉合) を取る**のを #2c として残す |
+| 2 | ~~回帰範囲の補完 (codex M3)~~ | **済**。(履歴: result 1 回目で「当初の合格条件 `PASS` が取れていない」と差し戻し → 合格条件を §6 のとおり改め #2c で充足。)対照 2 本 + 試行 2 本を `check_field_regress.py` でノイズ床と比較。**`case/09.Taylor-Green`** (周期・受動スカラー、`run_0169_fx_ctrl_a`/`run_0170_fx_ctrl_b` 対 `run_0171_fx_half_a`/`run_0172_fx_half_b`): `VERDICT: PASS` (最大比 1.39)。**`case/44.vitiated_air_wt`** (軸対称・多成分 TP・凝縮、`run_0505`/`run_0506` 対 `run_0507`/`run_0508`、`--boundary`): `VERDICT: PASS` (最大比 1.88 < 2)。ただし `case/44` は Euler で `fx` を読む粘性・拡散経路をほとんど通らないので**不変の確認にしかならない**。`case/48` 平板 (`run_0020`/`run_0021`: $q$ 最大 0.0031 %・$\tau_w$ 0.0020 %)、`case/52` スラブ (`run_0006`/`run_0007`: 5e−7) も不変。**ただし §6 が要求する `check_convergence.py` の `PASS` は平板・スラブとも取れていない** (4 本とも `NOT CONVERGED (stalled/plateau)`。`--from-floor case/48…/run_0011_Bplain_tw300_y3` は参照 run 自身が継続 run で `PASS` でないため `REFUSED`)。差が小さいことは回帰合格の証明ではないので、**平板を `procedures/verification/48-flat-plate-cooled.md` の全段起動で新バイナリから回し直して `PASS` と基準値 (C_f/VD-II・2St/C_f・エネルギー閉合) を取る**のを #2c として残す |
 | 2c | ~~平板の全段起動による回帰合格 (codex result M1)~~ | **済 (2026-09-22)**。`procedures/verification/48-flat-plate-cooled.md` の手順どおり新バイナリで冷間起動: `case/48.flat_plate_cooled_m4/run_0024_A_ad_y3_fx05` (断熱、全段 + 本段 48000) → `run_0025_B_tw300_y3_fx05` (冷却壁 300 K、soft + ランプ + 本段 48000)。`cooled_plate_eval.py --ref … --closure --series --integrals`: $C_f$/VD-II **0.969–0.994** (基準 0.97–0.99)、$2St/C_f$ **1.15–1.16** (1.16)、エネルギー閉合 **1.016** (1.017)、θ の CONTUR 比 0 %、`SERIES VERDICT: STEADY`。2026-09-12 の基準 run `run_0005_B_tw300_y3` を同じツールで評価し直した値との差は $C_f$ +0.1〜+0.2 %、$q_w$ +0.1〜+0.2 %、δ\* −0.9〜+0.8 %、積分 $C_D$・熱量とも +0.18 % = **手順の回帰基準 (3 %) の 1/15 以下**。この差には 2026-09-20 のリミッタ既定変更も含まれる。**`check_convergence.py` の `PASS` はこのケースでは取れない** — 前縁特異点による残差床 (`rms_ro`≈1e−7、`rms_roe`≈0.2) が手順書に既知の床として明記されており、基準 run 自身も `NOT CONVERGED (stalled/plateau)` である。そのため §6 の合格条件を「手順書の物理量基準 + 系列 `STEADY`」に改めた (下)。付随: `gen_runs.py` の廃止キー (`meshFormat`・`isCompressible`・`ro`・`last.control`・`kInf`/`omegaInf`) と、`interp_field.py` より後に config を書いていた順序を修正 |
 | 2b | ~~回転不変性の直接試験~~ | **済 (2026-09-21)**。`case/48` の平板のメッシュ・場・入口速度を **z 軸まわりに 30° 回した**同一問題 (`mesh.h5` の座標・面ベクトル・運動量を回転) を 4000 step。回す前の同じスキームの解との差 ($x/L$ 0.3–0.95 の rms): 幾何 `fx` (`run_0022_rot30_fx_ctrl`) は $\tau_w$ **0.085 %**・壁面勾配流束 **0.254 %**・`q_eff` の平均 **+0.28 %**、`fx=0.5` (`run_0023_rot30_fx_half`) は **0.024 %**・**0.062 %**・**+0.01 %**。**4000 step 時点で、回転前後の差が `fx=0.5` で 3.5 倍 ($\tau_w$)・4.1 倍 (壁面勾配流束) 小さい**。両 run とも `NOT CONVERGED` (`rms_roOmega` の低下 0.6–0.7 桁で停滞) なので、残る差を座標の float32 丸め ($x\sim1$ m で 0.06 µm = 第一層 3 µm の 2 %) に帰属させることは**まだできない** (codex result M3 採用。原点移動または倍精度座標の対照が要る)。回したメッシュでは `q_eff` の節点間ノイズが両スキームとも 0.9 % 出る — 壁 CV の質量残差 (float32 の面ベクトル閉性) 由来で `fx` とは無関係。旧定義 `iface_q_eff_raw` なら 3.1 % |
 | 3 | ~~合格条件の固定 (codex M4)~~ | **済**。§6 に反映。生産設定の A/B (`case/53` `run_0125`/`run_0126`、`case/54` `run_0024`/`run_0025`) は領域別偏差・うねり rms・2 節点振幅の時系列 (`tools/h_series.py`) を `check_quasisteady.py --series-csv` にかけ 4 本とも `ALL STEADY` |
 | 4 | ~~恒久実装~~ | **済 (2026-09-22)**。`calcStructualVariables_d_wrapper` で `nodeMode = (discretization=="node")`、環境変数 `FORGE_NODE_FX_HALF` は撤去。環境変数版との照合 `case/53.c3x_vane_cht/run_0127_fxhalf_permanent_check`: 4000 step 後の最大相対差 ρ 4.6e−5・T 2.0e−5 (後流の非定常の範囲) |
 | 5 | ~~翼の生産 run の更新~~ | **済 (2026-09-22)**。報告に載る run を新スキームで 60000 step 継続し直した: `case/53` `run_0125` (生産)・`run_0128` (SU2 対照)・`run_0129` (節点配置)・`run_0130`–`run_0133` (入口乱流)・`run_0134` (層流)・`run_0135` (1 µm)、`case/54` `run_0024` (生産)・`run_0026` (層流)・`run_0027`/`run_0028` (格子)。引用する量は `tools/report_numbers.py` で `check_quasisteady --series-csv` の判定つきで出す。連成は CHT plan §5.1 #62 |
 | 6 | cell の `fx` の式 | 回転不変でない式のまま (同じ幾何を 45° 回すと重みが 0.8 → 0.637 に変わる: codex の代数チェック)。cell は使わない方針なので**修正せず記録のみ** |
-| 7 | ~~格子系列での次数測定 (codex M2 / result-2 M1・M2)~~ | **済 (2026-09-22 改訂: 熱 + 運動量 + 粘性仕事)**。[`notes/investigations/2026-09-22-mms-node-face-weight.md`](../../notes/investigations/2026-09-22-mms-node-face-weight.md)。内部面の式は共通関数 `solver_density_cuda/tools/node_visc_face.py` で、**実機の場に当てるとカーネルが積んだ熱伝導・粘性仕事を 480 壁節点で 0.28 / 0.00 W/m² の差で再現する** (旧式の重みのとき。射影・0.5 では仕事項が 2.0 kW/m² ずれる = 照合は重みを見分ける)。製造解は半径 0.2 m の 15°–30° 扇形 (旧式の欠陥が最大の向き)、最粗 AR 350、成長率 1.1 / 1.2、壁沿い間隔に変調 ±30 % + 交番 ±0.3 %、4 水準 (両方向 2 倍、第一層 1/2、成長率は平方根)。**結果**: (i) **旧式は不整合** — 壁 CV に入る粘性仕事の誤差が細分化しても 25–33 % から動かず、重みが 0.5 に寄らない (0.34–0.69)。実機のうねりと同じ大きさ。節点値も $p$ = 1.8–1.9。(ii) **`fx=0.5` の節点値 (温度・速度) は $p$ = 2.00**。(iii) **壁 CV に入る流束は `fx=0.5` でも 1 次** (粘性仕事 31 % → 2.9 %)。双対面の面積重心が弦のたるみの分だけ辺中点より壁側にあるため。射影の重みはこの項に限れば誤差が半分だが、節点値の誤差は 1.25 倍で、実機の格子では 0.03–1.00 に振れるので採らない。`q_eff` への影響は +0.8 % 程度 (たるみ / 第一層の半分 = 0.3)。(iv) 2 点差分の壁面熱流束・壁せん断は重みに依らず 1 次 ($p\approx0.95$)。初版の「壁面熱流束も 2 次」は、厳密温度に同じ 2 点差分を当てた値との差を見ていた誤りで撤回 (codex result-2 M1)。**限界**: SST・化学種の拡散は未測定、実カーネルそのものは呼んでいない (上の照合で担保)、節点勾配は解析値、対流・リミッタ・float32 なし |
-| 8 | codex result レビュー | **1 回目 2026-09-22: NO-GO (C0/M4/m1)** — 恒久実装は設計どおりだが `accepted` へは移さない。#2c・#7 を終えてから再レビュー |
+| 7 | ~~格子系列での次数測定 (codex M2 / result-2 M1・M2)~~ | **済 (2026-09-22 改訂: 熱 + 運動量 + 粘性仕事)**。[`notes/investigations/2026-09-22-mms-node-face-weight.md`](../../notes/investigations/2026-09-22-mms-node-face-weight.md)。内部面の式は共通関数 `solver_density_cuda/tools/node_visc_face.py` で、**実機の場に当てるとカーネルが積んだ熱伝導・粘性仕事を 480 壁節点で 0.28 / 0.00 W/m² の差で再現する** (旧式の重みのとき。射影・0.5 では仕事項が 2.0 kW/m² ずれる = 照合は重みを見分ける)。製造解は半径 0.2 m の 15°–30° 扇形 (旧式の欠陥が最大の向き)、最粗 AR 350、成長率 1.1 / 1.2、壁沿い間隔に変調 ±30 % + 交番 ±0.3 %、4 水準 (両方向 2 倍、第一層 1/2、成長率は平方根)。**結果**: (i) **旧式は壁 CV の粘性仕事の相対誤差が約 25 % に停滞** (絶対誤差は 253 → 33 W/m² で約 1 次。厳密な仕事自体が第一層厚に比例して小さくなるので相対値が縮まない)、重みが 0.5 に寄らない (0.34–0.69)。実機のうねりと同じ大きさ。節点値も $p$ = 1.8–1.9。(ii) **`fx=0.5` の節点値 (温度・速度) は $p$ = 2.00**。(iii) **壁 CV に入る粘性仕事の相対 RMS 誤差は `fx=0.5` でも約 1 次** (31 % → 2.9 %。絶対誤差は 240 → 3.8 W/m² で約 2 次)。曲面上で辺中点の評価位置と双対面上の積分位置がずれるため。射影の重みはこの試験で誤差の絶対値を約半分にするが符号が反転し (+27.7 % → −14.9 %)、節点値の誤差は 1.25 倍、実機の格子では 0.03–1.00 に振れるので採らない。**実機の `q_eff` への影響は「1 % 未満の規模で影響し得る」までで、初版の「+0.8 %」は撤回** (相対 RMS を符号付き誤差として使い分母も揃っていなかった: codex result-3 M1)。(iv) 2 点差分の壁面熱流束・壁せん断は重みに依らず 1 次 ($p\approx0.95$)。初版の「壁面熱流束も 2 次」は、厳密温度に同じ 2 点差分を当てた値との差を見ていた誤りで撤回 (codex result-2 M1)。**限界**: SST・化学種の拡散は未測定、実カーネルそのものは呼んでいない (上の照合で担保)、節点勾配は解析値、対流・リミッタ・float32 なし |
+| 8 | ~~codex result レビュー~~ | **済**。1 回目 NO-GO (C0/M4/m1) → 2 回目 NO-GO (C0/M2/m3) → **3 回目 GO-with-changes (C0/M1/m3)、指摘 4 件を反映して `accepted` へ** (§6.1) |
 
 ## 6. 検証
 
@@ -141,6 +141,7 @@ Mark II の層流域は +3.8 pt」に限る。いずれの run も残差は `NOT
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result (3 回目) | `2026-09-22` | [`notes/reviews/2026-09-22-discretization-node-face-weight-midpoint-result-3.md`](../../notes/reviews/2026-09-22-discretization-node-face-weight-midpoint-result-3.md) | **GO-with-changes**, C0/M1/m3 | **全件採用 → `accepted`**。codex は成長率 1.1 の全 4 水準 × 3 重みを再実行して保存表を再現。M1 (実機 `q_eff` +0.8 % は誤差の定義と分母が揃っていない) → 撤回し規模の評価に限定。m2 (「1 次」「収束しない」は相対誤差の話。絶対誤差は half で約 2 次・旧式で約 1 次) → 相対 RMS と明記し絶対誤差を併記。m3 (面重心の沈みと面積分の誤差の同一視。射影は符号が反転) → 説明を「辺中点の評価位置と双対面上の積分位置の違い」に修正。m4 (残作業表の不同期) → #2・#8 を更新。追加計算は移行条件にされていない |
 | result (2 回目) | `2026-09-22` | [`notes/reviews/2026-09-22-discretization-node-face-weight-midpoint-result-2.md`](../../notes/reviews/2026-09-22-discretization-node-face-weight-midpoint-result-2.md) | **NO-GO**, C0/M2/m3 | **全件採用、`active` のまま**。平板の合格条件を手順書の物理量基準に変えたことは「妥当、逃げではない」との判断 (残差収束とは区別して書くこと、との但し書き)。M1 (製造解の壁面熱流束の誤差が解析値に対するものでない) → 指標を 3 つに分けて測り直し、「壁面熱流束も 2 次」を撤回 (§5.1 #7)。M2 (主因の粘性仕事を測っていない) → 運動量と粘性仕事を追加し、面の式を実カーネルの出力と照合した共通関数に (同)。m3 (「$p\ge1.8$ は `fx=0.5` のみ」は数値と矛盾) → 撤回。m4 (§4.3 の合格根拠) → 同一定義の生産 A/B (#3) を合格根拠とし、§4.3 は「旧定義の有限区間での低減傾向」に限定。m5 (#2 の文言・「原理的に取れない」) → 下記のとおり訂正 |
 | result | `2026-09-22` | [`notes/reviews/2026-09-22-discretization-node-face-weight-midpoint-result.md`](../../notes/reviews/2026-09-22-discretization-node-face-weight-midpoint-result.md) | **NO-GO**, C0/M4/m1 | **全件採用、plan は `active` のまま**。M1 (平板・スラブに `PASS` が無い) → §5.1 #2 を差し戻し #2c。M2 (回帰は次数測定の代わりにならない) → #7 を `accepted` の前提に。M3 (回転試験の残差を丸めに帰属) → #2b の表現を限定。M4 (§4.3 の準定常判定が別 run) → `run_0122`/`run_0123` 自身の判定を §4.3 に追記 (うねり rms は試行側 `DRIFTING`、補正後定義の `run_0128` で `STEADY`)。m1 → `plans/README.md` 同期。実装 (node 内部面のみ 0.5、`roe/ro × Rro` の係数・符号) は「設計どおり」との確認 |
 | plan | `2026-09-21` | [`notes/reviews/2026-09-21-discretization-node-face-weight-midpoint-plan.md`](../../notes/reviews/2026-09-21-discretization-node-face-weight-midpoint-plan.md) | GO-with-changes, C0/M4/m0 | **全件採用**。M1 (蓄積項の係数は $H_w$ でなく $e_w$) → CHT plan §5.1 #61 を訂正し `conjugateWall.cpp` を修正。M2 (値補間の 2 次と演算子の次数の混同) → §4.2 を限定し §5.1 #7。M3 (`fx` の実使用一覧と回帰範囲) → §3・§5.1 #2。M4 (未収束同士の比較・定義変更の混入) → §6・§5.1 #3、生産値の差し替えは result レビュー後 (#5) |
@@ -153,10 +154,15 @@ Mark II の層流域は +3.8 pt」に限る。いずれの run も残差は `NOT
 
 ## 8. 未確定事項
 
+- SST の $k$/$\omega$ 拡散・化学種拡散での収束次数は未測定 (同じ `fx` と同形の法線項)。
+- 壁 CV の粘性仕事の 1 次誤差が実機の `q_eff` に与える**符号付き**の影響は未評価 (規模は 1 % 未満。第一層厚に比例)。
+- 30° 回転試験で `fx=0.5` に残る差 (τ_w 0.024 %) の帰属は未了 (両 run とも未収束。座標の float32 丸めが候補)。
+
 - 境界半割面の `fx` は現状のまま (壁半割面の粘性流束は `fx` を読まない)。入口・出口面で問題が出るかは未確認。
 
 ## 9. 変更ログ
 
+- `2026-09-22` codex result 3 回目 **GO-with-changes** → 4 件反映、`status: done`、`plans/accepted/` へ移動。残る未測定 (SST・化学種の拡散の次数、実機 `q_eff` への符号付き影響、回転試験の残差の帰属) は §8 に記録。
 - `2026-09-22` codex result 再レビュー (result-2) NO-GO (C0/M2/m3) → 全件採用。製造解を熱 + 運動量 + 粘性仕事に拡張し、面の式を実カーネルと照合した共通関数に載せ替え。「壁面熱流束も 2 次」は撤回。
 - `2026-09-22` #2c (平板の冷間起動: 基準 run と 0.2 % 以内) と #7 (製造解: `fx=0.5` は $p$=2.00) を実施。§6 の合格条件を手順書の基準に改めた。codex result 再レビューへ。
 - `2026-09-22` codex result レビュー 1 回目 NO-GO → 全件採用。実装は維持、plan は active のまま #2c・#7 を残す。

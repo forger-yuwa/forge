@@ -186,6 +186,11 @@ def main():
                          "N>=2 なら節点ごとの平均の標準誤差も出してドライバに渡し、受理・収束判定が"
                          "ノイズを知った形になる (plan boundary-conjugate-heat-transfer §5.1 #63)。"
                          "テンプレートの outStepInterval を、後半に N 枚以上入るように設定すること")
+    ap.add_argument("--early-steps", type=int, default=None,
+                    help="最初の --early-iters 反復だけ forge の nStepOuter をこの値にする (序盤は壁温が大きく動くので "
+                         "流れを緩和させきる意味が薄い。plan boundary-conjugate-heat-transfer §5.1 #64)。"
+                         "outStepInterval も N // (2*flux_avg) に合わせる。既定は無効")
+    ap.add_argument("--early-iters", type=int, default=0)
     ap.add_argument("--anderson", type=int, default=5)
     ap.add_argument("--Tw-init", type=float, default=None, help="初期壁温 [K] (既定 = 固体の背面温度)")
     ap.add_argument("--Tg", type=float, default=None,
@@ -233,6 +238,14 @@ def main():
         for f in ("mesh.h5", "solverConfig.yaml", "bcondConfig.yaml", "probe.yaml"):
             if (tpl / f).exists():
                 shutil.copy(tpl / f, itd / f)
+        early = (a.early_steps is not None) and (it < a.early_iters)
+        if early:
+            cfg_p = itd / "solverConfig.yaml"; txt = cfg_p.read_text()
+            txt, n1 = re.subn(r"nStepOuter:\s*\d+", f"nStepOuter: {a.early_steps}", txt, count=1)
+            txt, n2 = re.subn(r"outStepInterval:\s*\d+", f"outStepInterval: {max(a.early_steps // (2 * max(a.flux_avg, 1)), 1)}", txt, count=1)
+            if n1 != 1 or n2 != 1:
+                sys.exit(f"[cht_loop] --early-steps: {cfg_p} に nStepOuter / outStepInterval が見つからない")
+            cfg_p.write_text(txt)
         if prev is not None:      # warm start (同一メッシュなので index コピー)
             subprocess.run([sys.executable, str(HERE / "interp_field.py"),
                             str(latest_field(prev)), str(itd / "mesh.h5")],
@@ -332,6 +345,9 @@ def main():
               f"solid {info['res_solid']:.2e} | Q {np.sum(Qf):.4g} | {info['used']}"
               + (" REJECTED" if info["rejected"] else "") + (" [at noise floor]" if info.get("at_floor") else ""))
         prev, Tw = itd, Tw_new
+        # 序盤 (短い流体評価) が収束判定の窓に入っている間は収束を宣言しない
+        if info["converged"] and a.early_steps is not None and it < a.early_iters + max(a.n_consec, 4):
+            info["converged"] = False
         if info["converged"]:
             if a.flux_avg >= 2:
                 print(f"[cht_loop] CONVERGED at iter {it} (直近 {max(a.n_consec, 4)} 反復で壁温平均の傾き < {a.tol_K:g} K/反復、"
