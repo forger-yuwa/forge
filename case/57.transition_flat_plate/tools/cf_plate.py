@@ -45,9 +45,13 @@ def load_su2(d):
     return two_point(col("x"), col("y"), col("Momentum_x") / col("Density")), f
 
 
-def onset(x, cf, xmin=0.02):
+def onset(x, cf, xmin=0.01):
+    """遷移開始 = 前縁から見て**最初の** Cf の極小、遷移終了 = その下流で最初の極大 (T3B のように遷移後の Cf が板端まで下がり続けても拾える)。
+    極値が無ければ (完全乱流・完全層流) 板端を返す。"""
     m = x > xmin; xx, cc = x[m], cf[m]
-    i0 = int(np.argmin(cc)); i1 = i0 + int(np.argmax(cc[i0:]))
+    d = np.diff(cc)
+    i0 = next((i for i in range(1, len(d)) if d[i - 1] < 0 <= d[i]), len(cc) - 1)
+    i1 = next((i for i in range(i0 + 1, len(d)) if d[i - 1] > 0 >= d[i]), len(cc) - 1)
     return xx[i0], cc[i0], xx[i1], cc[i1]
 
 
@@ -100,7 +104,7 @@ def main():
             e = np.genfromtxt(a.exp, comments="#"); ax.plot(e[:, 0] * 1e-3, e[:, 1], "ko", ms=5, mfc="none", label="ERCOFTAC T3A (exp.)")
         for lab, x, cf, y1, f, kind in curves:
             ax.plot(x, cf, "-" if kind == "forge" else "-.", lw=1.6, label=lab)
-        ax.set_xlim(0, 1.5); ax.set_ylim(0, 0.01); ax.set_xlabel("x [m]  (Re/m = 3.6e5)"); ax.set_ylabel("Cf"); ax.grid(alpha=0.3)
+        ax.set_xlim(0, 1.5); ax.set_ylim(0, 0.01); ax.set_xlabel("x [m]  (Re/m = %.3g)" % (RO * U / MU)); ax.set_ylabel("Cf"); ax.grid(alpha=0.3)
         ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False); fig.tight_layout(); fig.savefig(a.out, dpi=140); print("wrote", a.out)
 
 

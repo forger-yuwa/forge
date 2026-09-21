@@ -601,6 +601,7 @@ ghost の $k$ は node では書かれない (ghostless) ため主ループの g
 - **陰的対角 $J^-$** は項ごとの負の部分: $1.5\,c_{e1}F_{length}c_{a1}S\sqrt{F_{onset}\gamma}$ ($P_\gamma$ の $-\gamma^{3/2}$ 側) と
   $\max(c_{a2}\Omega F_{turb}(2c_{e2}\gamma-1),0)$、$\tilde{Re}_{\theta t}$ は $(c_{\theta t}/t)(1-F_{\theta t})$。$P_\gamma$ の $+0.5/\sqrt\gamma$ 側は陽的に残す
   ($\gamma\to0$ で正側に発散するので対角に入れられない。受けは下限 $10^{-4}$ と上限 1)。定常解は対角の取り方に依らない。
+- **局所 $Tu$ の上限 100 %** は初期化と入口ピンだけ (停滞点の保護)。ソースは SU2 と同じく下限 0.027 % だけで上限は無い (停滞点は $U<10^{-6}a$ のガードで評価しない)。
 - **相関**: $Re_{\theta c}$ と $F_{length,1}$ の多項式は桁落ちするので倍精度で評価する (節点あたり数回の乗算)。$Re_{\theta t}(Tu,\lambda_\theta)$ の
   不動点反復は上限 100 回・相対 $10^{-6}$ で停止 (T3A の収束場で平均 3.3 回・最大 6 回)。
 - **SST 側** (`ransSource_d.cu`): $P_k\to\gamma_{eff}P_k$ (リミッタ・Kato–Launder・壁関数置換の**後**)、$D_k$ と `src_jac_k` に $\min(\max(\gamma_{eff},0.1),1)$。

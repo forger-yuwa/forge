@@ -83,6 +83,8 @@ __global__ void transition_primitive_d(
     }
     gammaTr[ic] = min(max(roGamma[ic] / r, kGammaMin), kGammaMax);
     reTheta[ic] = max(roReth[ic] / r, kRethMin);
+    // ソース評価の前 (初期出力) は γ_sep が未定なので γ を入れておく。評価後は transition_lm_source_d が毎反復上書きする。
+    if (gammaEff[ic] <= static_cast<flow_float>(0.0)) gammaEff[ic] = gammaTr[ic];
 }
 
 // node 入口ピン: γ=1, Re_θt = 自由流相関 (局所 Tu)。

@@ -1233,6 +1233,11 @@ cudaConfig initializeSimulation(
 
     applyBconds(cfg , cuda_cfg , msh , var, mat_ns , fluct);
     applyRansScalarBoundaries(cfg , cuda_cfg , msh , var);
+    // 遷移モデル: 初期出力 (res_0) の前に原始量の生成 (入力に無ければ初期化)・入口ピン・周期同期を済ませる
+    // (codex result M1: 未初期化の roGamma/roReth/gammaTr/reTheta/gammaEff が初期出力に出ていた)。none では no-op。
+    periodicMirrorTransitionState_d_wrapper(cfg , cuda_cfg , msh , var);
+    transitionPrimitive_d_wrapper(cfg , cuda_cfg , msh , var);
+    applyTransitionBoundaries(cfg , cuda_cfg , msh , var);
     applyWmlesWallModel(cfg , cuda_cfg , msh , var);   // WMLES 壁応力モデル (wallModelLES 壁のみ, §10)
     weakIsoWall::validate(cfg, msh);   // 弱形式 (nodeIsothermalEnergyBC=1) の構成検査 (併用不可を拒否)
     applyNodeIsothermalWallPin(cfg , cuda_cfg , msh , var);   // 素の node 等温壁の壁ノード T ピン

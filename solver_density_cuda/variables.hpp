@@ -260,6 +260,8 @@ public:
         // omega 残差収支調査 (入口×壁コーナー残差プラトーの局在, 一時診断): 残差 res_roOmega,
         // 源項ヤコビ src_jac_omega, 輸送対角 transport_diag_omega
         "res_roOmega" , "src_jac_omega" , "transport_diag_omega" , "res_roK" ,
+        // 平均流の残差場 (level 2 のみ)。残差の下げ止まりが**どこに**あるかを見るため (2026-09-22, plan turbulence-transition-lm2009 codex result M4)。
+        "res_ro" , "res_roUx" , "res_roUy" , "res_roe" ,
 
         // W-I 実力診断 (plan turbulence-node-wf-omega-source §4.2)
         "wi_ftan" , "wi_fnrm" , "wi_fnrm_abs" , "wi_ftan_res" , "wi_eheat" , "wi_ework" , "wf_irep_flag" ,

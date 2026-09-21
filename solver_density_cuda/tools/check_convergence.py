@@ -278,7 +278,7 @@ def reference_floor(path, tail_frac):
     return floor, zero_cols
 
 
-def analyze_from_floor(path, floor, zero_cols, factor, tail_frac):
+def analyze_from_floor(path, floor, zero_cols, factor, tail_frac, ref_path=None):
     """収束場からの restart 判定: 全期間ピークと末尾平均が参照床の factor 倍以内なら列 PASS。
     列対応 (codex result-2 m1): 参照に無い列・参照で all-zero だった列が対象で非ゼロなら FAIL (前提不成立を PASS にしない)。
     参照の非ゼロ列が対象に無い場合も FAIL。"""
@@ -289,6 +289,16 @@ def analyze_from_floor(path, floor, zero_cols, factor, tail_frac):
     report = {}
     ok = True
     any_nan = False
+    # 必須列の検査は通常判定と共通 (codex result M2: --from-floor が遷移残差の欠落を通していた)。
+    # 参照と対象で方程式系 (遷移モデルの有無) が違えば、床の比較そのものが成り立たない。
+    if ref_path is not None and transition_active(ref_path) != transition_active(path):
+        report['(参照)'] = ('参照 run と遷移モデルの有無が違う (別の方程式系)  <-- 判定不能', False)
+        ok = False
+    need = REQUIRED_COLS + (TRANSITION_COLS if transition_active(path) else ())
+    missing = [c for c in need if c not in cols]
+    if missing:
+        report['(入力)'] = ('必須の保存量残差列が無い: %s  <-- 判定不能' % ', '.join(missing), False)
+        ok = False
     for c in floor:
         if c not in cols:
             report[c] = ('missing in target (reference has a nonzero floor)  <-- COLUMN MISMATCH', False)
@@ -374,7 +384,7 @@ def main():
         if not os.path.exists(path):
             print(f"[{rd}] NO residual_history.csv"); all_pass = False; continue
         if floor is not None:
-            res = analyze_from_floor(path, floor, zero_cols, args.floor_factor, args.tail)
+            res = analyze_from_floor(path, floor, zero_cols, args.floor_factor, args.tail, ref_path)
             if res is None:
                 print(f"[{rd}] empty residual file"); all_pass = False; continue
             laststep, report, ok, any_nan = res

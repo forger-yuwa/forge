@@ -1113,8 +1113,8 @@ $\tau_w$ を誤り、高 Re の緩剥離では標準 SGS 係数との組合せ�
 
 ## 11. 遷移モデル $\gamma$–$Re_{\theta t}$ (Langtry–Menter 2009, `turbulence.transition: "lm2009"`)
 
-低 Re SST は遷移の閉包を持たず、前縁から乱流になる。冷却翼 (case/53, 54) の負圧面層流域で $h$ を +44〜+80 % 過大に出す原因が
-これであることは、層流対照と SU2 の同一メッシュ比較で確認済み。そこで SST に Langtry–Menter の 2 方程式遷移モデル
+低 Re SST は遷移の閉包を持たず、前縁から乱流になる。冷却翼 (case/53, 54) の負圧面層流域で $h$ が +44〜+80 % 過大に出ることの**最優先の仮説**が
+これである (層流対照はその領域で実測を下回り、同一メッシュの SU2 も同じだけ過大)。そこで SST に Langtry–Menter の 2 方程式遷移モデル
 (AIAA J. 47(12), 2009。相関は同論文の $Re_{\theta c}$・$F_{length}$ = SU2 の `LM` 既定 `MENTER_LANGTRY`) を足す。
 **式と定数は SU2 8.x の実装 (`trans_sources.hpp`, `trans_correlations.hpp`, `CTransLMSolver.cpp`) と 1 対 1 に合わせる**
 (同一メッシュでの突き合わせを検証の柱にするため)。

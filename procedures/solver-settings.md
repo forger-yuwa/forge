@@ -266,7 +266,7 @@ turbulence: {model: "sst", ..., wallTreatmentSST: 0, transition: "lm2009"}   # �
 | 値 | 内容 |
 | --- | --- |
 | `none` (既定) | 遷移モデルなし。SST は前縁から完全乱流 |
-| `lm2009` | Langtry–Menter 2009 の $\gamma$–$\tilde{Re}_{\theta t}$ 2 方程式 (SU2 の `KIND_TRANS_MODEL= LM` と同じ式・同じ下限)。理論は [`methods/turbulence/theory.md`](../methods/turbulence/theory.md) §11、実装は同 `implementation.md` |
+| `lm2009` | Langtry–Menter 2009 の $\gamma$–$\tilde{Re}_{\theta t}$ 2 方程式 (SU2 の `KIND_TRANS_MODEL= LM` と同じソース式・相関)。輸送変数の上下限は SU2 と違う: forge は $\gamma\in[10^{-4},1]$・$\tilde{Re}_{\theta t}\ge20$、SU2 は $\gamma\in[10^{-4},5]$・$\tilde{Re}_{\theta t}\ge10^{-4}$ (T3A の準定常場で下限の作動は 0 %、$\gamma=1$ は自由流の 7 %)。理論は [`methods/turbulence/theory.md`](../methods/turbulence/theory.md) §11、実装は同 `implementation.md` |
 
 - **受け付ける組み合わせは検証したものだけ**: node・`model: sst`・`wallTreatmentSST: 0`・非軸対称・DES なし・`sstEnergyIncludesK: 0`・`scalarDiffusion: 1`・定常陰解法。外れると起動時に止まる。
 - 入口は $\gamma=1$、$\tilde{Re}_{\theta t}$ は入口の $k$ と速度から決まる局所 $Tu$ の相関値。**追加の入口キーは無い**。入口の $k$・$\omega$ (乱れの強さと減衰の速さ) が遷移位置を決めるので、

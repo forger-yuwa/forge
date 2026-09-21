@@ -81,9 +81,15 @@ def sources(ro, U, G, k, om, mu, dist, gam, ret):
     Pt = C_THETA * ro / tscale * (ret_corr - ret) * (1.0 - f_theta)
     gsep = np.minimum(2.0 * np.maximum(re_v / (3.235 * rec) - 1.0, 0.0) * np.exp(-(r_t / 20.0) ** 4), 2.0) * f_theta
     gsep = np.clip(gsep, 0.0, 2.0)
+    # forge の陰的対角 (項ごとの負の部分; methods/turbulence/implementation.md)。SU2 はソース微分そのもの (su2_jac_gamma) を足す。
+    jac_g = 1.5 * C_E1 * f_len * C_A1 * S * np.sqrt(np.maximum(f_onset * gam, 0.0)) + np.maximum(C_A2 * Om * f_turb * (2.0 * C_E2 * gam - 1.0), 0.0)
+    jac_t = C_THETA / tscale * (1.0 - f_theta)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        su2_jg = f_len * C_A1 * S * np.sqrt(f_onset) * (0.5 * gam ** -0.5 - 1.5 * C_E1 * gam ** 0.5) - C_A2 * Om * f_turb * (2.0 * C_E2 * gam - 1.0)
     wall = dist <= 1e-10
     z = lambda a: np.where(wall, 0.0, a)
     return dict(src_gamma=z(Pg - Dg), src_reth=z(Pt), gamma_eff=np.maximum(gam, gsep), gamma_sep=gsep, Tu=tu, f_onset=f_onset,
+                jac_gamma=z(jac_g), jac_reth=z(jac_t), su2_jac_gamma=z(su2_jg), P_gamma=z(Pg), E_gamma=z(Dg),
                 f_length=f_len, f_theta=f_theta, re_theta_c=rec, re_theta_corr=ret_corr, re_v=re_v, r_t=r_t)
 
 

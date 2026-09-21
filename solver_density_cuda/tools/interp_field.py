@@ -130,7 +130,11 @@ def main():
             fields = {"ro": ro, "roUx": ro*Ux, "roUy": ro*Uy, "roUz": ro*Uz, "roe": roe}
             if "k" in V and "omega" in V:
                 fields["roK"] = ro*np.array(V["k"]); fields["roOmega"] = ro*np.array(V["omega"])
-            if "gammaTr" in V and "reTheta" in V:   # 遷移モデル (LM2009): 原始量 → 保存量
+            # 遷移モデル (LM2009): **保存量があればそのまま使う** (出力の原始量は更新前・密度は更新後なので ρ·原始量 は 1 step ずれる;
+            # codex result M1)。保存量の無い旧形式だけ原始量から復元する。
+            if "roGamma" in V and "roReth" in V:
+                fields["roGamma"] = np.array(V["roGamma"]); fields["roReth"] = np.array(V["roReth"])
+            elif "gammaTr" in V and "reTheta" in V:
                 fields["roGamma"] = ro*np.array(V["gammaTr"]); fields["roReth"] = ro*np.array(V["reTheta"])
             for key in V:                      # scalar transport Y* -> roY*
                 if key.startswith("Y") and key[1:].isdigit():

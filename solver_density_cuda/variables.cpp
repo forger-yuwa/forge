@@ -122,6 +122,7 @@ void variables::registerTransition(int enabled, int diag)
         for (const char* nm : {"lmFonset", "lmFlength", "lmFtheta", "lmRethCorr", "lmGammaSep", "lmPgamma", "lmEgamma", "lmPtheta", "lmCorrIter"}) {
             names.emplace_back(nm); outs.emplace_back(nm);
         }
+        outs.emplace_back("src_jac_gamma"); outs.emplace_back("src_jac_reth");   // 陰的対角も単体検査の対象 (codex result M3)
     }
     for (const auto& name : names) {
         this->cellValNames.push_back(name);
@@ -315,7 +316,10 @@ void variables::allocVariables(const int &useGPU , mesh& msh)
                 || cellValName.rfind("rep_", 0) == 0 || cellValName.rfind("cond", 0) == 0
                 || cellValName.rfind("passiveFloorCorr_", 0) == 0 || cellValName.rfind("passiveLimCorr_", 0) == 0 || cellValName.rfind("roYraw", 0) == 0
                 || cellValName == "wf_irep_flag" || cellValName == "wf_sprod"
-                || cellValName == "wf_g") {
+                || cellValName == "wf_g"
+                || cellValName.rfind("lm", 0) == 0 || cellValName == "gammaEff" || cellValName == "gammaTr" || cellValName == "reTheta"
+                || cellValName == "roGamma" || cellValName == "roReth" || cellValName.find("_gamma") != std::string::npos
+                || cellValName.find("_reth") != std::string::npos || cellValName == "res_roGamma" || cellValName == "res_roReth") {
                 gpuErrchk( cudaMemset(this->c_d.at(cellValName), 0, (msh.nCells_all)*sizeof(flow_float)) );
             }
         }

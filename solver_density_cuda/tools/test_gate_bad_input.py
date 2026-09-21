@@ -102,6 +102,24 @@ def main():
         f.write('turbulence: {model: "sst", wallTreatmentSST: 0, transition: "none"}\n')
     res = cc.analyze(pth, 3.0, 0.2)
     chk("transition: none なら 5 列で従来どおり合格", res is not None and res[2] is True, "ok=%s" % res[2])
+    # --from-floor も同じ必須列検査を通す (codex result M2)。参照 = 遷移なしの 5 列、対象 = 遷移有効だが 2 列欠落
+    with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
+        f.write('turbulence: {model: "sst", wallTreatmentSST: 0, transition: "lm2009"}\n')
+    fl = {c: 1e-9 for c in cols[2:]}
+    r2 = cc.analyze_from_floor(pth, fl, set(), 1e30, 0.2)
+    chk("--from-floor: 遷移有効で 2 列欠落 -> 合格にしない", r2 is not None and r2[2] is False, "ok=%s" % (None if r2 is None else r2[2]))
+    d2 = tempfile.mkdtemp()
+    with open(os.path.join(d2, "solverConfig.yaml"), "w") as f:
+        f.write('turbulence: {model: "sst", wallTreatmentSST: 0}\n')
+    refp = os.path.join(d2, "residual_history.csv")
+    _sh0 = __import__("shutil"); _sh0.copy(pth, refp)
+    tfull = os.path.join(d, "residual_history.csv")
+    with open(tfull, "w", newline="") as f:
+        w = csv.writer(f); w.writerow(tcols); w.writerows([[i, "outer_end"] + [1e-10] * 9 for i in range(40)])
+    fl9 = {c: 1e-9 for c in tcols[2:]}
+    r3 = cc.analyze_from_floor(tfull, fl9, set(), 1e30, 0.2, refp)
+    chk("--from-floor: 参照 (遷移なし) と対象 (遷移あり) の方程式系が違う -> 合格にしない", r3 is not None and r3[2] is False, "ok=%s" % (None if r3 is None else r3[2]))
+    _sh0.rmtree(d2)
     import shutil as _sh; _sh.rmtree(d)
     # 段キー: SST と SST+遷移は別の方程式系 -> 別区間
     import stage_manifest as sm
