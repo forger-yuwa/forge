@@ -96,21 +96,37 @@ gap:    {{physID: 6, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {{U
 """
 
 
-def patch_ic(h5, st, tw_plate, tw_gap, k_inf, om_inf, ic_delta):
-    """一様自由流 + 壁近傍の速度ランプを input h5 に書く (case/56 `patch_ic` と同じ考え方)。
+def patch_ic(h5, st, tw_plate, tw_gap, k_inf, om_inf, ic_delta, profile_csv=None):
+    """初期場を input h5 に書く。
 
-    CPG なので $\\rho e = p/(\\gamma-1) + \\rho u^2/2$ で直接組む。圧力は全域 p∞ 一様、
-    壁ノード (wall_dist=0) だけ u=0・T=T_w にして密度を EOS で合わせる (等温 BC が step 0
-    から効く)。すきま内部は wall_dist が小さいのでランプが自動的に u≈0 にする。
+    **既定は入口プロファイルの x 方向押し出し** (`profile_csv`)。この試験の流入 BL は
+    δ = 229 mm と厚く、一様流 + 薄い壁ランプで始めると**入口列でプロファイルと初期場が衝突して
+    発散する** (2026-09-22, run_0001 第 1 試行: NaN 251 節点が x = −0.100〜−0.0976 m ·
+    y = 0.87〜2.7 mm = ランプ幅 2 mm が切れる高さに集中)。同じ CSV を初期場にも使えば段差が消える。
+
+    `profile_csv` が無いときだけ旧来の tanh ランプ (`ic_delta`) に落ちる。
+    どちらでも圧力は全域 p∞ 一様、壁ノード (wall_dist=0) は u=0・T=T_w、
+    すきま内部 (y<0) は静止・T=T_w で埋める。CPG なので roe = p/(γ−1) + ρu²/2。
     """
     with h5py.File(h5, "r+") as f:
         n = f["/VALUE/ro"].shape[0]
         c = f["/MESH/COORD"][:].reshape(-1, 3)
         wd = f["/VALUE/wall_dist"][:].astype(float)
-        u = st["U"] * np.tanh(np.maximum(wd, 0.0) / ic_delta)
-        ro = np.full(n, st["ro"])
         wall = wd <= 0.0
         ingap = c[:, 1] < -1e-9                      # y<0 の壁ノード = すきま壁 (前壁/床/後壁)
+        if profile_csv is not None and Path(profile_csv).exists():
+            tab = np.loadtxt(profile_csv, skiprows=1)
+            yp, rop, uxp = tab[:, 0], tab[:, 3], tab[:, 4]
+            yq = np.maximum(c[:, 1], 0.0)            # すきま内 (y<0) は開口の値 = ほぼ静止
+            u = np.interp(yq, yp, uxp)
+            ro = np.interp(yq, yp, rop)
+            u[c[:, 1] < 0.0] = 0.0                   # すきま内部は静止で始める
+            ro[c[:, 1] < 0.0] = st["p"] / (R_GAS * tw_gap)
+            ic_kind = f"inletProfile 押し出し ({len(yp)} 点)"
+        else:
+            u = st["U"] * np.tanh(np.maximum(wd, 0.0) / ic_delta)
+            ro = np.full(n, st["ro"])
+            ic_kind = f"tanh ランプ δ_ic={ic_delta*1e3:.2f} mm"
         u[wall] = 0.0
         ro[wall & ~ingap] = st["p"] / (R_GAS * tw_plate)
         ro[wall & ingap] = st["p"] / (R_GAS * tw_gap)
@@ -128,7 +144,7 @@ def patch_ic(h5, st, tw_plate, tw_gap, k_inf, om_inf, ic_delta):
             else:
                 f.create_dataset(key, data=v)
         print(f"IC: n={n}, 壁ノード {int(wall.sum())} (うちすきま {int((wall & ingap).sum())}), "
-              f"T∞={st['T']:.2f} K, U∞={st['U']:.1f} m/s, ramp δ_ic={ic_delta*1e3:.2f} mm, "
+              f"T∞={st['T']:.2f} K, U∞={st['U']:.1f} m/s, IC={ic_kind}, "
               f"Tw_plate={tw_plate:.1f} K, Tw_gap={tw_gap:.1f} K")
 
 
@@ -175,6 +191,9 @@ def main():
                     help="平板 (physID 4) の壁温 T_surf [K]。入口 BL の再構成にも使う")
     ap.add_argument("--gap-Tw", type=float, default=300.0,
                     help="すきま壁 (physID 6) の壁温 T_gap [K]。壁温比は T_surf/T_gap")
+    ap.add_argument("--ic-ramp", action="store_true",
+                    help="初期場を入口プロファイルでなく旧来の tanh 壁ランプにする "
+                         "(この case では入口列で段差が出て発散する。比較用)")
     ap.add_argument("--ic-delta", type=float, default=2.0e-3, help="IC の壁近傍ランプ幅 [m]")
     ap.add_argument("--tu", type=float, default=0.005, help="自由流乱れ度 (k∞ = 1.5 (Tu U)²)")
     ap.add_argument("--mut-ratio", type=float, default=10.0, help="自由流 μ_t/μ (ω∞ = ρk/(比·μ))")
@@ -264,7 +283,8 @@ def main():
              ic_delta=a.ic_delta, inlet_profile="inlet_profile_1.csv (tools/gen_inlet_csv.py)"),
         indent=2, ensure_ascii=False), encoding="utf-8")
 
-    patch_ic(rd / "mesh.h5", st, a.plate_Tw, a.gap_Tw, k_inf, om_inf, a.ic_delta)
+    patch_ic(rd / "mesh.h5", st, a.plate_Tw, a.gap_Tw, k_inf, om_inf, a.ic_delta,
+             profile_csv=None if a.ic_ramp else rd / "inlet_profile_1.csv")
 
     # --- 段構成 ---
     # リミッタ基準値を**自由流で固定**する (auto だと開始場依存の作用素になり、分割実行が
