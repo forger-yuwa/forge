@@ -1,0 +1,46 @@
+{
+  "_about": "T2' の比較に入れる不確かさ。すべて区間 (interval) として加算し、統計量として扱わない (plan §4.10)。",
+  "_written": "2026-09-22",
+  "_written_before_any_cfd": true,
+  "_rule": "比 forge/実測 の取りうる範囲を、下の各項の両端の組み合わせで作る。acceptance.json の T2p-C はその上端 (= 欠損が最も縮む側) で判定する。",
+  "items": [
+    {
+      "id": "denominator",
+      "what": "分母 h_fp の系統差",
+      "interval": [1.0, 1.8],
+      "basis": "gateB.json の h_vdii/h_corr = 1.755 (Tw 300 K, Re 1.47e6)。系列全体では 1.57-2.04 (中央 1.77)",
+      "direction": "forge も実測も同じ相関分母で割るので一次では相殺するが、相関自体が 3 次元化したトンネル壁 BL 由来なので上端側を残す"
+    },
+    {
+      "id": "skin_smear",
+      "what": "すきま薄肉 (304SS 0.406 mm) の横方向伝導による実測の嵩上げ",
+      "interval_rule": "case/50/tools/skin_smear.py 相当の順方向モデルを、熱的接続の両極 (リップ端で断熱 / 連続) で回して帯にする",
+      "basis": "conditions.json の skin.thickness_cm 0.0406。plan §5.1 #24 の規定 (生の q_conv と実測を直接比べない)",
+      "direction": "実測を下げる側 = 欠損が縮む側",
+      "_missing": "TH76 の計測時間 (拡散長 sqrt(alpha t) に必要) が未確認。取れなければ case/50 と同じ t = 0.25-2 s の範囲を使い、その旨を明記する"
+    },
+    {
+      "id": "inflow_BL",
+      "what": "入口 BL の再構成の不確かさ",
+      "interval": {"dstar": [0.7, 1.4], "u_tau": [0.7, 1.4]},
+      "basis": "README §T2-G0。delta* は Fig 4 の digitize、u_tau は Cf を仮定せずに組んだ値 (bl_derived.json)",
+      "direction": "両側"
+    },
+    {
+      "id": "digitize",
+      "what": "実測 h/h_fp の読み取り",
+      "interval_abs": 0.03,
+      "basis": "ref/th76_fig5a_re147.csv のヘッダ (200 dpi 描画からの目視、不確かさ 絶対 +-0.03)"
+    },
+    {
+      "id": "grid",
+      "what": "格子",
+      "interval_rule": "開口幅方向 2 段格子の差をそのまま区間に入れる (acceptance T2p-M で <= 10 % を要求)",
+      "basis": "plan §6 G7b と同じ考え方"
+    }
+  ],
+  "not_included": [
+    "2D 中央断面近似の誤差 (原理的に定量化できない。これが T2 を一次検証にできない理由そのもの。分類 alpha/beta/gamma の粗さで吸収する前提)",
+    "掃引角 0 deg 以外の系列"
+  ]
+}

@@ -65,3 +65,4 @@
 | 2026-09-22 | 0-2 (別プロセスで事前確認) | 3 本とも読み込み、Sonnet 5 / Opus 5 (1M) / Fable 5.1 で動作 |
 | 2026-09-22 | 1-5 (事前確認) | 親・子とも同じ `session_id` の台帳に claim された |
 | 2026-09-22 | 1-3 (read-only 試験) | 形式・境界は守った。終了済み run に `RUNNING` を付けた → 定義を修正済み |
+| 2026-09-22 | 0-1 / 0-2 / 0-3 (新セッション実地) | 主 = Opus 5 (`settings.local.json` `"model": "opus"`)、3 本とも呼び出し可 (run-watcher=sonnet / implementer=opus / diagnostician=claude-fable-5-1)、フック 3 本 (PreToolUse Bash / Stop / PostToolUse Write\|Edit) 登録済み |

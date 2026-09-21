@@ -1,0 +1,74 @@
+{
+  "_about": "T2' (TN D-8233 を『桁の下界試験』として 2D で 1 系列回す) の合否基準。plan §4.10 の事前登録ファイル。",
+  "_honesty_rule": "status が pre_registered の項目だけが『事前登録』である。post_hoc は結果を見てから書いた観察であり合否の根拠に使わない。事後に緩めた場合は必ず revisions に残す。",
+  "_written": "2026-09-22",
+  "_written_before_any_cfd": true,
+  "_plan": "plans/active/case-hypersonic-gap-heating-validation.md",
+  "_scope": {
+    "decision": "2026-09-22 ユーザ判断。2026-09-20 に探索へ降格した T2 を、10 % 級の一次検証ではなく『桁 (x3 / x10) の下界試験』として再利用する。3D (T4) は取り止め。",
+    "why_not_primary": "分母 h_fp が 3 次元化したトンネル壁 BL の実験相関であり (README §T2-G0)、系統差は約 1.8 倍 (gateB.json の h_vdii/h_corr = 1.755 @ Tw 300 K, Re 1.47e6)。1.8 倍は『10 % 級の一致』を殺すが『桁』は殺さない。",
+    "deliverable": "合否ではなく分類 (alpha / beta / gamma)。case/49 へは『forge = 下界、上界の目安 = 分類の係数』として渡す。モデル誤差の値そのものは渡さない (plan §4.11 (B) の未定量は維持)。"
+  },
+  "case": {
+    "series": "Re' = 1.47e6 /m, 壁温比 1.00, 掃引角 0 deg",
+    "reference_csv": "ref/th76_fig5a_re147.csv",
+    "freestream": {"M": 10.3, "Pt_Pa": 2410000.0, "Tt_K": 1112.02, "T_inf_K": 52.63, "p_inf_Pa": 56.96, "ro_inf": 0.0037703, "U_inf_ms": 1498.69, "T_aw_K": 995.49, "_source": "derived.json (Gate A)"},
+    "wall_K": 300.0,
+    "geometry": {"W_cm": 0.229, "D_cm": 4.572, "D_over_W": 19.97, "_source": "conditions.json"},
+    "inflow_BL": {"dstar_cm": 12.8, "delta_cm": 22.945, "theta_cm": 0.5111, "Re_theta": 7513, "u_tau_ms": 66.31, "Cf": 6.870e-4, "_source": "bl_derived.json"},
+    "h_fp": {"form": "7.95e-5 * Re'^0.69", "value_W_m2K": 1.4316, "_source": "Appendix (A2)"}
+  },
+  "gates": [
+    {
+      "id": "T2p-M",
+      "name": "数値要件 (これを満たさない run は分類に使わない)",
+      "status": "pre_registered",
+      "criteria": [
+        "check_mesh_quality.py が VERDICT: PASS (AR<=1000, skew<=0.90)。case/56 の 2D すきまメッシュは VOUT ブロックの対辺点数不整合で FAIL だったので、同じ欠陥を持ち込まないこと",
+        "check_wall_resolution.py が すきま壁・平板とも y1+ <= 1 (超過面積割合 0)。超過するなら位置と割合を報告し、格子感度で裏づけるまで分類に使わない",
+        "開口幅方向 2 段格子で判定点の局所 h/h_fp の差 <= 10 %",
+        "判定深さ (z/W = 1.4 / 2.2 / 3.0) の h/h_fp が check_quasisteady.py で STEADY",
+        "残差は check_convergence.py の VERDICT を必ず貼るが、合否には使わない (plan §4.7-4 の有界振動。#46)"
+      ],
+      "registered_exception": "判定深さが DRIFTING でも、末尾窓の最大値が実測の 1/10 を下回っているなら alpha の成立を妨げない (検出限界級の漂いで決着が変わらないため)。この例外は run 前に登録したものであり、結果を見てから作ったものではない。"
+    },
+    {
+      "id": "T2p-C",
+      "name": "主判定 — 3 分類 (排他的)",
+      "status": "pre_registered",
+      "quantity": "下流壁 (せん断層が当たる側) midspan の h/h_fp。h = q/(T_aw - T_w)、分母は Appendix 相関 (実測と同じ作り方、plan §4.4b)",
+      "depths_zW": [1.4, 2.2, 3.0],
+      "reference_values": {"1.4": 0.45, "2.2": 0.30, "3.0": 0.14, "_wall": "down", "_T_ratio": 1.00},
+      "excluded": "z/W = 0.7 はスキン滲みの拡散長内なので参考のみ。solid=1 (黒塗り記号、原典が精度に疑義) の点は全て除外",
+      "band_rule": "伝播 (tolerances.json) を区間として加算し、比 forge/実測 が取りうる範囲の上端で判定する (= 欠損が最も縮む側に倒す)",
+      "classes": {
+        "alpha": "上端でも forge/実測 < 1/10 が z/W 2.2 と 3.0 の両方で成立 → 『forge は深部で 10 倍以上の下界』",
+        "beta": "比が [1/3, 3] に入るのが z/W 1.4 と 2.2 の両方 → 『x3 以内』",
+        "gamma": "上記いずれでもない → 『x3 - x10 の未確定帯』"
+      },
+      "_note": "どの分類でも case/49 への受け渡しは行う。分類そのものが成果物であり、PASS/FAIL ではない。"
+    },
+    {
+      "id": "T2p-Q",
+      "name": "定性 (内部流の向き)",
+      "status": "pre_registered",
+      "criterion": "z/W < 4 で 下流壁 h > 上流壁 h。実測は z/W 1.4 で 0.45 vs 0.27、2.2 で 0.30 vs 0.21",
+      "_use": "PASS / FAIL を記録する。分類には影響させない"
+    },
+    {
+      "id": "T2p-T",
+      "name": "壁温比の向き (任意・+1 run)",
+      "status": "pre_registered",
+      "criterion": "壁温比 1.61 で『上端が増え深部が減る』向きが出るか。量は渡さず向きだけ",
+      "_why": "case/49 mixA (側壁 1000 degC / 底 20 degC) に直接効く項目"
+    },
+    {
+      "id": "T2p-A",
+      "name": "条件再構成 (Gate A) と分母の独立検算 (Gate B)",
+      "status": "post_hoc",
+      "_why_post_hoc": "2026-09-19/20 に実施済み (derived.json / gateB.json)。記録として置くだけで再判定には使わない",
+      "observed": "Gate A: Tt を解いて 1090 +- 4.5 % で PASS。Gate B: h_vdii/h_corr = 1.57-2.04 (中央 1.77)"
+    }
+  ],
+  "revisions": []
+}
