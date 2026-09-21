@@ -221,14 +221,15 @@ def build(out, P, quiet=False):
     xs = {p[0] for p in G.prof} | {G.LSW, G.LCOWL, G.XEND, 0.5 * (G.LSW + G.LCOWL), G.LSW - G.ZONE, G.LCOWL + G.ZONE}
     for (xa, ua, la), (xb, ub, lb) in zip(G.prof[:-1], G.prof[1:]):
         if (ua, la) != (ub, lb):
+            kink = False
             for ra, rb in ((ua, ub), (la, lb)):      # r が dr を横切る位置: 内側線の角が円弧に変わり CUR(x) が折れるので station にする
                 if (ra - G.DR) * (rb - G.DR) < 0:
                     lo, hi = xa, xb
                     for _ in range(80):
                         xm_ = 0.5 * (lo + hi); rm = ra + smooth((xm_ - xa) / (xb - xa)) * (rb - ra)
                         lo, hi = (xm_, hi) if (rm - G.DR) * (ra - G.DR) > 0 else (lo, xm_)
-                    xs.add(0.5 * (lo + hi))
-            xs.add(0.5 * (xa + xb))          # 対角辺の第一間隔 s1 = h1 L/dr は r について連続なので、r = 0 の手前に特別な station は要らない
+                    xs.add(0.5 * (lo + hi)); kink = True
+            if not kink: xs.add(0.5 * (xa + xb))   # 折れ点の station があれば中点は足さない (station が詰まると x 間隔が飛ぶ)          # 対角辺の第一間隔 s1 = h1 L/dr は r について連続なので、r = 0 の手前に特別な station は要らない
     xs = sorted(x for x in xs if -1e-12 <= x <= G.XEND + 1e-12)
     xs = [x for i, x in enumerate(xs) if i == 0 or x - xs[i - 1] > 1e-9]
     reg = lambda xa, xb: "A" if xb <= G.LSW + 1e-12 else ("B" if xb <= G.LCOWL + 1e-12 else "C")

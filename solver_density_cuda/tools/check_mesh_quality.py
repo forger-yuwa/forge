@@ -76,12 +76,41 @@ TETRA_OF = {
 }
 
 
+# 六面体の各頂点で、その頂点から出る 3 辺 (右手系の順) が張る体積 = 頂点 Jacobian。VTK/gmsh の頂点順
+HEX_CORNER = {0: (1, 3, 4), 1: (2, 0, 5), 2: (3, 1, 6), 3: (0, 2, 7), 4: (7, 5, 0), 5: (4, 6, 1), 6: (5, 7, 2), 7: (6, 4, 3)}
+
+
+def hex_corner_jacobians(coord3, hx):
+    """(n, 8) の頂点 Jacobian。全部同符号なら妥当な六面体、符号が混じれば局所反転。"""
+    P = np.asarray(coord3, dtype=np.float64)
+    return np.stack([np.einsum("ij,ij->i", np.cross(P[hx[:, a]] - P[hx[:, c]], P[hx[:, b]] - P[hx[:, c]]), P[hx[:, d]] - P[hx[:, c]])
+                     for c, (a, b, d) in HEX_CORNER.items()], 1)
+
+
 def cell_volumes(coord3, conn, offs, types):
-    """セルの符号付き体積 (四面体分割の和)。型が未知なら NaN。**成立性検査専用**。"""
+    """セルの符号付き体積。型が未知なら NaN。**成立性検査専用**。戻り値 (vols, 局所反転した六面体の数)。
+
+    六面体は四面体分割の和を使わない (2026-09-22): 5 四面体分割は向かい合う面を別の対角線で切るので、
+    **面の反り (曲面壁の弦の矢高) が層厚より大きい薄い壁層セル**では分割どうしが交差して和が負になり、頂点 Jacobian が
+    8 つとも正の妥当なセルを「向きの不整合」と誤判定した (case/46 接続模型のフィレット壁層 111 セル)。逆に和だけでは
+    局所反転 (最小頂点 Jacobian < 0) を見逃す (codex 2026-09-21)。六面体は**頂点 Jacobian の平均を体積、符号の混在を局所反転**とする。
+    """
     vols = np.full(len(offs), np.nan)
+    offs = np.asarray(offs); types = np.asarray(types); conn = np.asarray(conn)
+    starts = np.r_[0, offs[:-1]]; ishex = (types == 12) & ((offs - starts) == 8)
+    n_inverted = 0
+    if ishex.any():
+        hx = conn[(starts[ishex][:, None] + np.arange(8)[None, :])]
+        for i0 in range(0, len(hx), 500000):
+            J = hex_corner_jacobians(coord3, hx[i0:i0 + 500000])
+            v = J.mean(1); mixed = (J.min(1) * J.max(1) <= 0.0) & np.isfinite(v)
+            n_inverted += int(mixed.sum())
+            vols[np.flatnonzero(ishex)[i0:i0 + 500000]] = v
     s = 0
     for i, o in enumerate(offs):
         idx = conn[s:o]; s = o
+        if ishex[i]:
+            continue
         tets = TETRA_OF.get(int(types[i]))
         if tets is None or len(idx) < 4:
             continue
@@ -95,7 +124,7 @@ def cell_volumes(coord3, conn, offs, types):
             p0, p1, p2, p3 = pts[t[0]], pts[t[1]], pts[t[2]], pts[t[3]]
             v += np.dot(np.cross(p1 - p0, p2 - p0), p3 - p0) / 6.0
         vols[i] = v if okc else np.nan
-    return vols
+    return vols, n_inverted
 
 
 def cell_metrics_3d(pts, vtk):
@@ -218,7 +247,9 @@ def main():
         bad_nodes = int(np.count_nonzero(~np.isfinite(coord3).all(axis=1)))
         fatal.append("非有限座標: 成分 %d 個 / 節点 %d 個" % (nonfinite, bad_nodes))
     if is3d:
-        vols = cell_volumes(coord3, np.asarray(conn), np.asarray(offs), np.asarray(types))
+        vols, n_inverted = cell_volumes(coord3, np.asarray(conn), np.asarray(offs), np.asarray(types))
+        if n_inverted:
+            fatal.append("六面体の頂点 Jacobian の符号が混在 (局所反転) %d 個" % n_inverted)
         nv_bad = int(np.count_nonzero(~np.isfinite(vols)))
         nz_bad = int(np.count_nonzero(np.abs(vols) <= 0.0))
         neg = int(np.count_nonzero(vols < 0.0))
