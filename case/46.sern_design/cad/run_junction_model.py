@@ -20,7 +20,7 @@ from forge_design.probdef import load_problem               # noqa: E402
 MESH = R2.MESH
 WALLS = ("ramp", "vehicle", "sidewall_in", "sidewall_out", "sidewall_end", "cowl_in", "cowl_out", "cowl_side", "cowl_base")
 # 接続模型の形状 (hex_junction_model.py の P0 と同じ。IC の領域分けに使う)
-H, ZW, TSW, TC = 0.1, 0.1, 0.005, 0.002
+H, ZW, TSW, TC, LSW, LCOWL = 0.1, 0.1, 0.005, 0.002, 0.12, 0.16
 
 
 def phys_ids(msh):
@@ -51,7 +51,8 @@ def bcond(p, st, ids):
     return s
 
 
-def prepare(problem, msh, run_dir, op=None):
+def prepare(problem, msh, run_dir, op=None, wake_at_rest=True):
+    n_wake = 0
     p = load_problem(problem); run_dir = Path(run_dir); run_dir.mkdir(parents=True, exist_ok=False)
     R2.select_operating_point(p, op); st = R2.gas_states(p)
     shutil.copy(msh, run_dir / "sern.msh"); ids = phys_ids(run_dir / "sern.msh")
@@ -72,18 +73,26 @@ def prepare(problem, msh, run_dir, op=None):
     with h5py.File(run_dir / MESH, "r+") as f:             # 領域別一様 IC: 排気 = カウル上面より上 かつ 側壁内面より内側 (板厚の中央で分ける)
         cc = f["/CELLS/centCoords"][:].reshape(-1, 3)
         upper = (cc[:, 1] > -0.5 * TC) & (cc[:, 2] < ZW + 0.5 * TSW)
-        R2.write_ic_arrays(f["/VALUE"], R2.region_ic_arrays(upper, st, p.gamma))
+        arr = R2.region_ic_arrays(upper, st, p.gamma)
+        if wake_at_rest:
+            # 板の後端面の後ろ (後流ブロック SW・CW) は**静止**で始める。一様流のまま始めると、no-slip の端面から流体が 1600-1800 m/s で遠ざかる
+            # = ピストンを音速の 5 倍で引き抜くのと同じで、端面に真空ができて床を割る (run_0423: 暖機 step 454 で NaN。NaN はカウル後端面の直後)
+            x, y, z = cc[:, 0], cc[:, 1], cc[:, 2]; eps = 1e-9
+            wake = ((x > LSW - eps) & (z > ZW - eps) & (z < ZW + TSW + eps) & (y > -TC - eps)) | ((x > LCOWL - eps) & (y > -TC - eps) & (y < eps) & (z < ZW + TSW + eps))
+            ke = 0.5 * arr["roUx"] ** 2 / arr["ro"]
+            arr["roe"] = np.where(wake, arr["roe"] - ke, arr["roe"]); arr["roUx"] = np.where(wake, 0.0, arr["roUx"]); n_wake = int(wake.sum())
+        R2.write_ic_arrays(f["/VALUE"], arr)
     info = {"problem": str(problem), "msh": str(msh), "run_dir": str(run_dir), "H_m": H, "states": st, "gas_model": st["gas_model"], "phys_ids": ids,
-            "model": p.evaluate.get("model", "euler"), "dim": 3, "nodes": int(len(cc)), "n_exhaust_ic": int(upper.sum())}
+            "model": p.evaluate.get("model", "euler"), "dim": 3, "nodes": int(len(cc)), "n_exhaust_ic": int(upper.sum()), "wake_at_rest": bool(wake_at_rest), "n_wake_ic": n_wake}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1)); return info
 
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("problem"); ap.add_argument("msh"); ap.add_argument("run_dir")
-    ap.add_argument("--prepare-only", action="store_true"); ap.add_argument("--stages", default="full", choices=["full", "none", "main"]); ap.add_argument("--op", default=None)
+    ap.add_argument("--prepare-only", action="store_true"); ap.add_argument("--stages", default="full", choices=["full", "none", "main"]); ap.add_argument("--op", default=None); ap.add_argument("--moving-wake", action="store_true", help="後流ブロックも一様流で始める (run_0423 の再現用)")
     a = ap.parse_args()
     if a.stages != "main":
-        info = prepare(a.problem, a.msh, a.run_dir, a.op); print(json.dumps({k: info[k] for k in ("nodes", "n_exhaust_ic", "phys_ids", "gas_model")}, indent=1))
+        info = prepare(a.problem, a.msh, a.run_dir, a.op, wake_at_rest=not a.moving_wake); print(json.dumps({k: info[k] for k in ("nodes", "n_exhaust_ic", "n_wake_ic", "gas_model")}, indent=1))
     if a.prepare_only: return 0
     o = (load_problem(a.problem).raw.get("opt") or {})
     return R2.run_staged(a.run_dir, a.stages, int(o.get("soft_steps", 2000)), soft_cfl=float(o.get("soft_cfl", 0.5)), soft_conv=int(o.get("soft_conv", 0)),
