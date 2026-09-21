@@ -20,6 +20,18 @@ PYTHONPATH=. .venv-opt/bin/python -m forge_design.evaluate.runner_sern \
 `python3 solver_density_cuda/tools/check_quasisteady.py --series-csv <run>/force_history.csv --series-cols C_T_with_shear,C_L,C_M --drift 0.02 --osc 0.05`
 で正式ツールの VERDICT を再取得できる。既存キャンペーンの再判定は `driver_sern <problem> <campaign> --rejudge <out_dir>`。
 
+## メッシュ方式の試作 (`cad/`, 計算 run ではない)
+
+側壁×カウル接合部の有限厚化に向けたメッシュ方式の試作。計画は [`plans/active/tooling-sern-mesh-blocking.md`](../../plans/active/tooling-sern-mesh-blocking.md)。
+出力は `cad/demo_out/` (git 追跡外・再生成可)。
+
+| スクリプト | 内容 | 主要結果 | 状態 |
+| --- | --- | --- | --- |
+| `cad/hex_junction_demo.py` | **本線**: gmsh Python API の transfinite ブロック分割 (全ヘキサ)。ダクト内 4 ブロック/断面のバタフライ、上下独立のフィレット r(x) (徐変で立ち上げ・側壁後端の手前で 0 に絞る) | 321,786 節点・六面体 100 %・負 Jacobian 0 (float32 でも 0)・skew max 0.501・AR max 1177 (plan §4.7) | active (§4.10 の接続模型へ拡張中) |
+| `cad/salome_junction_demo.py` + `cad/med_to_msh41.py` | **予備**: Salome GEOM (ロフトしたガセットでフィレット) → NETGEN + ViscousLayers → MED → msh4.1 → `convertGmshToForge` | SOFT-PASS (AR max 686)。壁接線寸法 1.5 mm で 1,381,415 節点 / 3 mm で 395,009 節点。VL 総厚 < 最薄板厚が必須 (plan §4.8) | ref (予備として保持) |
+
+実行: `.venv-mesh/bin/python case/46.sern_design/cad/hex_junction_demo.py` (gmsh 4.15.2。AWS には未導入)。
+
 ## 計算 run 一覧
 
 | run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
