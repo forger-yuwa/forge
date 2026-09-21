@@ -550,6 +550,22 @@ $$Q_{f,i}=\sum_{f\in\partial_w}F^{E}_{if}-C_i,\qquad \text{定常の Dirichlet �
 $-\sum_{f\in \text{内部面}}F^E$ (= 流体内部から壁 CV へ入る正味熱) に等しく、
 **壁面流束の離散化に依らず保存する**。
 
+**未収束の擬似時間での蓄積項 (2026-09-21)**。定常解では壁 CV の質量残差 $R_\rho$ は 0 だが、擬似時間が落ちきらない場
+(翼の衝撃足のように解が動き続ける所) では 0 でない。壁 CV は固定体積・$u=0$・$T=T_w$ なので、そのエネルギーは
+$d(V\rho e_w)/d\tau=e_wR_\rho$ だけ変わる。これは壁 CV の**蓄積**であって固体へ渡る熱ではない (下の dual-time の $D_t(VE)$ と同じ位置づけ)。そこで
+
+$$\texttt{iface\_q\_eff}=\frac{R^{raw}-F_w-e_wR_\rho}{A},\qquad e_w=\frac{\rho E}{\rho}\Big|_w$$
+
+**係数は $H_w$ ではない**。対流エネルギー残差は $H_wR_\rho$ として現れる (実測: `case/53.c3x_vane_cht/run_0124_fxhalf_rro` の衝撃足で
+相関 1.000、傾き 571 kJ/kg = $c_pT_w$) が、差 $(P/\rho)R_\rho$ は等温のまま質量を押し込む流動仕事で、壁が実際に受け取る熱である
+(codex 2026-09-21)。block-DPLUR の実際の更新量 $V\Delta\rho/\Delta\tau$ は $R_\rho$ と一般に一致しないので、これは**半離散式に基づく推定**。
+とし、引く前の値を `iface_q_eff_raw` に残す。$R_\rho$ は壁ピンの直前に `ifaceRro` へ退避する。定常では両者一致
+(1 次元スラブ `case/52.conjugate_slab/run_0006_ctrl_newbin`: 上壁 −81.51316、`q_compact` −81.51314)。
+壁エネルギー残差の内訳は `ifaceRconv` (対流の直後)・`ifaceRpre` (粘性の直前) で対流・ソース・粘性に分けられ、
+`FORGE_WI_FORCE_DIAG=1` の `wi_eheat`/`wi_ework` で内部面の熱伝導と粘性仕事に分けられる
+(`case/53.c3x_vane_cht/tools/resid_split.py`)。$q_{eff}$ と壁面勾配流束の差 (C3X で +2.5 %) の平均は
+壁半 CV 内の粘性仕事 $\tau_w U_1(1-f)$ で、第一層厚に比例する (2 µm で 2.47 %、1 µm で 1.31 %)。
+
 **適用範囲** (超えたら `NaN` を出す。ここに無い構成では使わない):
 
 - **定常 (`unsteady: 0`) のみ**。dual-time は $C_i=D_t(V_iE_i)-R_i^{raw}$ で式が違う。

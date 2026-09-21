@@ -42,6 +42,9 @@ python3 verify_v1.py run_0001_v1_slab    # VERDICT
 | `run_0001_v1_slab` | **V1 本体**: 外部弱連成ループ (11 反復, 各 10000 step)。`--flux q_compact`, $R_s$=0.2, 背面 300 K, 上壁 350 K | **VERDICT PASS**: $T_w$=316.2659 K (解析解 316.2618、温度上昇 16.27 K に対し **0.025 %**)、**両側 $q$ の不一致 0.0053 %** (81.3252 vs 81.3296 W/m²)、$q$ の解析解差 0.0199 %。壁面の $T_w$ ばらつき 6.1e-4 K。履歴 `cht_history.csv`、最終壁温 `Tw_final.csv`、各反復 `it_NNN/` | active (**V1 の根拠**) |
 | `run_0002_v1_insolver` | **ソルバ内連成 (Phase 2a, `conjugate: {mode: local1d, ...}`)**: 同じ固体 ($R_s$=0.2)、20000 step、`interval: 50`、`warmup: 200` | $T_w$ 316.234 K まで来て更新量 3e-4 K/更新 (まだ緩和中) → `run_0003` へ継続 | 中継 |
 | `run_0003_v1_insolver_cont` | 上の継続 (40000 step)。**再開は `conjugate_Tw_3.csv` → `wall_profile_3.csv`** で壁温を引き継ぎ (`ints: {conjugate: 1, wallProfile: 1}`) | **$T_w$=316.2371 K (解析解比 −0.152 % of rise)、両側 $q$ 不一致 0.0002 %** (81.1856 / 81.1855 W/m²)、更新量 1.5e-5 K で静定。外部ループ (run_0001, 316.2659 K) との差 **0.029 K = 0.18 % of rise** = 同じ壁温での流体側離散解の差 (±0.2 %) の範囲 | active (**Phase 2a の根拠 / V4**) |
+| `run_0004_pinfix` / `run_0005_qeff` | `run_0003` の設定で 8000 step。`0004` = 等温壁エネルギーピンの修正後、`0005` = `iface_q_eff` 診断の追加後 (2026-09-20、本表への記載漏れを 2026-09-21 に補完) | `run_0005`: 下壁 `q_eff` 81.18368 / `q_compact` 81.18324 W/m² (差 −5.2e−6 相当)。`res_wall_{bot_3,top_4}_8000.h5` | ref |
+| `run_0006_ctrl_newbin` | `run_0005` と同一入力を **2026-09-21 のバイナリ** (`iface_q_eff` から蓄積項 $H_wR_\rho$ を引く版) で再計算。`fx` A/B の対照 | 下壁 `q_eff` 81.18349 / 上壁 −81.51316 (`q_compact` −81.51314 に一致。旧 −81.50878) | active |
+| `run_0007_fxhalf` | 上と同じ + `FORGE_NODE_FX_HALF=1` (node 内部双対面の `fx=0.5`)。[`discretization-node-face-weight-midpoint.md`](../../plans/active/discretization-node-face-weight-midpoint.md) §6 (c) | 下壁 `q_eff` 81.18345 (対照比 −5e−7) = **1 次元では不変**。`check_convergence`: `NOT CONVERGED (stalled/plateau)` = 対照と同じ (純伝導の丸め床) | active |
 
 ### 収束の扱い (AGENTS.md「収束確認」)
 

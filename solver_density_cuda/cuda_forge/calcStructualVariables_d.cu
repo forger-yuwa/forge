@@ -3,6 +3,8 @@
 
 #include "flowFormat.hpp"
 #include "iostream"
+#include <cstdlib>
+#include <cstdio>
 
 __global__ 
 void calcStructualVariables_d 
@@ -63,7 +65,11 @@ void calcStructualVariables_d
 void calcStructualVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh,  variables& v)
 {
     // (nodeMidpointFx 撤去 2026-08-16) 値=ノード座標では幾何 fx が中点相当になるため常に幾何 fx。
-    const int nodeMode = 0;
+    // 試験 (plan boundary-conjugate-heat-transfer §5.1 #60): FORGE_NODE_FX_HALF=1 で node の内部双対面を fx=0.5 に固定。
+    // 幾何 fx は高 AR の曲面壁層で 0.07–0.96 に散る (式が回転不変でない + 弦のたるみ)。既定は従来どおり幾何 fx。
+    const char* fxHalfEnv = std::getenv("FORGE_NODE_FX_HALF");
+    const int nodeMode = (cfg.discretization == "node" && fxHalfEnv && std::atoi(fxHalfEnv) != 0) ? 1 : 0;
+    if (nodeMode == 1) printf("[EXPERIMENT] FORGE_NODE_FX_HALF: node internal dual faces use fx = 0.5\n");
     calcStructualVariables_d<<<cuda_cfg.dimGrid_plane , cuda_cfg.dimBlock>>>(
         msh.nPlanes, msh.nNormalPlanes,
         msh.map_plane_cells_d,

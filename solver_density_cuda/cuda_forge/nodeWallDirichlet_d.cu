@@ -101,6 +101,15 @@ __global__ void zero_res_roe_bplane_d(geom_int nb, geom_int* bplane_cell, flow_f
     res_roe[ic] = static_cast<flow_float>(0.0);
 }
 
+// 壁 bplane の res_roe を読むだけで写す (残差の内訳診断。res_roe は書かない)。
+__global__ void copy_res_roe_bplane_d(geom_int nb, geom_int* bplane_cell, flow_float* res_roe,
+                                      flow_float* dst)
+{
+    const geom_int ib = blockDim.x*blockIdx.x + threadIdx.x;
+    if (ib >= nb) return;
+    dst[ib] = res_roe[bplane_cell[ib]];
+}
+
 } // namespace
 
 void enforceWallNoSlip_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
@@ -251,6 +260,28 @@ void applySstThermalWallFunction(solverConfig& cfg , cudaConfig& cuda_cfg , mesh
             static_cast<geom_int>(bc.iPlanes.size()),
             bc.map_bplane_cell_d,
             var.c_d["Taw_diag"], bc.bvar_d["Ts"]);
+    }
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchkKernelSync();
+}
+
+// 残差組み立ての途中で、等温壁ノードのエネルギー残差を bvar `name` に写す (plan
+// boundary-conjugate-heat-transfer §5.1 #58)。対流の直後 (`ifaceRconv`) と粘性の直前 (`ifaceRpre`) に呼び、
+// 壁熱流束のうねりが対流・ソース・粘性のどれに乗るかを切り分ける。`interfaceDiag: 0` (既定) では no-op。
+// **読むだけ**なので診断の有無で解はビット同一。
+void captureNodeIsothermalEnergyResidual(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var ,
+                                         const std::string& name , const std::string& srcField)
+{
+    if (cfg.interfaceDiag == 0) return;
+    if (!nodeIsothermalPinActive(cfg, msh)) return;
+    for (auto& bc : msh.bconds) {
+        if (bc.bcondKind != "wall_isothermal") continue;
+        if (bc.iPlanes.empty() || !bc.bvar_d.count(name)) continue;
+        copy_res_roe_bplane_d<<<cuda_cfg.dimGrid_bplane , cuda_cfg.dimBlock>>>(
+            static_cast<geom_int>(bc.iPlanes.size()),
+            bc.map_bplane_cell_d,
+            var.c_d[srcField],
+            bc.bvar_d[name]);
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

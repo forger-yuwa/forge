@@ -226,7 +226,7 @@ void variables::allocVariables(const int &useGPU , mesh& msh)
     {
         const char* e = std::getenv("FORGE_WI_FORCE_DIAG");
         if (!(e && std::atoi(e) != 0)) {
-            for (const char* n : {"wi_ftan", "wi_fnrm", "wi_fnrm_abs", "wi_ftan_res"}) {
+            for (const char* n : {"wi_ftan", "wi_fnrm", "wi_fnrm_abs", "wi_ftan_res", "wi_eheat", "wi_ework"}) {
                 cellValNames.remove(n);
                 output_cellValNames.remove(n);
                 c.erase(n);

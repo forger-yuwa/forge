@@ -140,6 +140,9 @@ public:
         //   wi_ftan_res : 再スケール **前** の解像接線力 [N]
         // 毎ステップ 0 クリアして atomicAdd で積む。壁ノード以外は 0。
         "wi_ftan", "wi_fnrm", "wi_fnrm_abs", "wi_ftan_res",
+        // 同じ診断群 (FORGE_WI_FORCE_DIAG=1): 内部面の粘性エネルギー流束を**熱伝導と粘性仕事に分けて**
+        // 両端節点へ残差と同じ符号で積む [W]。壁半 CV の q_eff の内訳 (plan boundary-conjugate-heat-transfer §5.1 #58)。
+        "wi_eheat", "wi_ework",
         // 診断 (2026-08-13, plan turbulence-node-wf-omega-source §4.1): omega 方程式の項別収支。
         // res_roOmega に加える前後を分解して、平衡がどの項で決まっているかを直接見る。
         // 単位はすべて [kg/(m·s²)] 相当 = res_roOmega と同じ (体積込み)。
@@ -230,6 +233,7 @@ public:
         "dUzdx" , "dUzdy" , "dUzdz" ,
         "drodx" , "drody" , "drodz" ,
         "dPdx"  , "dPdy"  , "dPdz" ,
+        "dTdx"  , "dTdy"  , "dTdz" ,   // 粘性流束の熱伝導項が読む勾配 (壁熱流束の内訳診断用。level 2 / extraFields)
         "dKdx"  , "dKdy"  , "dKdz" ,
         "dOmegadx", "dOmegady", "dOmegadz",
 
@@ -258,7 +262,7 @@ public:
         "res_roOmega" , "src_jac_omega" , "transport_diag_omega" , "res_roK" ,
 
         // W-I 実力診断 (plan turbulence-node-wf-omega-source §4.2)
-        "wi_ftan" , "wi_fnrm" , "wi_fnrm_abs" , "wi_ftan_res" , "wf_irep_flag" ,
+        "wi_ftan" , "wi_fnrm" , "wi_fnrm_abs" , "wi_ftan_res" , "wi_eheat" , "wi_ework" , "wf_irep_flag" ,
         "omg_prod" , "omg_dest" , "omg_cross" , "omg_trans" , "omg_axisym" , "wf_sprod" , "wf_g" ,
         "rep_id" , "rep_y" , "rep_dist" , "rep_cos" , "rep_toff" , "rep_wdratio" ,
         "rep_nx" , "rep_ny" , "rep_nz" ,

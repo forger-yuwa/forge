@@ -81,6 +81,12 @@ struct bcondConfFormat{
               // どちらも `output.interfaceDiag: 1` のときだけ書かれる (既定は触らないのでビット不変)。
               {"ifaceFw",0},
               {"ifaceRraw",0},
+              //   `ifaceRconv`: 対流流束の直後の res_roe、`ifaceRpre`: 粘性流束の直前の res_roe。
+              //   粘性分 = Rraw − Rpre、ソース分 = Rpre − Rconv (plan 同 §5.1 #58。読むだけで解は不変)。
+              {"ifaceRconv",0},
+              {"ifaceRpre",0},
+              //   `ifaceRro`  : 壁ノードの質量残差 (未収束の擬似時間では壁 CV の蓄積項 e_w·R_ρ が q_eff に混ざる。その診断)
+              {"ifaceRro",0},
 
           }},
 

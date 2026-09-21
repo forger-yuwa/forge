@@ -185,6 +185,21 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
     //   - node の等温壁 Dirichlet ピンがある壁のみ (断熱壁には $R^{raw}$ が無い)。
     //   - 周期境界に属する壁ノードは除く (root 単位の 1 回集計が要る。依存 plan の解除待ち)。
     std::vector<flow_float> d_qeff(nbp, std::numeric_limits<flow_float>::quiet_NaN());
+    // 未収束の擬似時間では壁 CV の質量残差 $R_\rho$ が 0 でなく、壁 CV (固定体積・$u=0$・$T=T_w$) のエネルギーが
+    // $d(V\rho e_w)/d\tau = e_w R_\rho$ だけ変わる。これは蓄積であって固体へ渡る熱ではないので `iface_q_eff` から引く
+    // (dual-time の $D_t(VE)$ と同じ位置づけ。plan boundary-conjugate-heat-transfer §5.1 #61)。
+    // **係数は $e_w=\rho E/\rho$ であって $H_w$ ではない** (codex 2026-09-21): 対流が運ぶのは $H_wR_\rho$ だが、
+    // 差 $(P/\rho)R_\rho$ は等温のまま質量を押し込む流動仕事で、壁が実際に受け取る熱である。
+    // 引く前の値は `iface_q_eff_raw`。定常 ($R_\rho=0$) では一致する。block-DPLUR の実際の更新量とは
+    // 一般に一致しないので「半離散式に基づく推定」である。
+    std::vector<flow_float> d_qeff_raw(nbp, std::numeric_limits<flow_float>::quiet_NaN());
+    const auto itRo = bc.bvar.find("ifaceRro");
+    const bool hasRro = (itRo != bc.bvar.end() && (geom_int)itRo->second.size() >= nbp);
+    std::vector<flow_float> f_ro, f_roe;
+    if (hasRro) {
+        f_ro  = pullField(cfg, var, "ro",  msh.nCells);
+        f_roe = pullField(cfg, var, "roe", msh.nCells);
+    }
     const auto itFw = bc.bvar.find("ifaceFw");
     const auto itRr = bc.bvar.find("ifaceRraw");
     // 弱形式 (mesh.nodeIsothermalEnergyBC=1) では壁エネルギーを拘束しないので **C = 0**。
@@ -207,7 +222,11 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
             const double Fw   = (double)itFw->second[ib];    // 壁面が res_roe に入れた寄与
             const double Rraw = weakIso ? 0.0                // 弱形式: 拘束が無いので C=0
                                         : (double)itRr->second[ib];    // 射影前の res_roe
-            d_qeff[ib] = (flow_float)((Rraw - Fw) / area);   // 固体向き正
+            d_qeff_raw[ib] = (flow_float)((Rraw - Fw) / area);   // 固体向き正
+            double store = 0.0;                                   // 壁 CV の蓄積 $e_w R_\rho$ (弱形式は拘束なしなので対象外)
+            if (hasRro && !weakIso && f_ro[ic] > (flow_float)0.0)
+                store = (double)f_roe[ic] / (double)f_ro[ic] * (double)itRo->second[ib];
+            d_qeff[ib] = (flow_float)((Rraw - Fw - store) / area);
         }
     }
 
@@ -259,6 +278,7 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
     bc.diagVar["iface_ok"]        = std::move(d_ok);
     bc.diagVar["iface_align"]     = std::move(d_al);
     bc.diagVar["iface_q_eff"]     = std::move(d_qeff);
+    bc.diagVar["iface_q_eff_raw"] = std::move(d_qeff_raw);   // 蓄積項 $e_w R_\rho$ を引く前 (旧定義)
 }
 
 void checkWallTemperatureSharing(const solverConfig& cfg, const mesh& msh)

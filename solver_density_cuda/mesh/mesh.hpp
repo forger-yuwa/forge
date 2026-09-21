@@ -65,7 +65,7 @@ public:
         "ypls" , "twall_x" , "twall_y" , "twall_z" , "utau" , "qwall",
         // CHT の保存的界面熱量 $Q_f=\sum F^E-C$ の素材 (plan boundary-conjugate-heat-transfer §4.3)。
         // **このリストに無いと bvar/bvar_d が確保されない** (valueTypes 側の宣言だけでは足りない)。
-        "ifaceFw" , "ifaceRraw"
+        "ifaceFw" , "ifaceRraw" , "ifaceRconv" , "ifaceRpre" , "ifaceRro"
     };
 
     std::list<std::string> bplaneIntNames =  

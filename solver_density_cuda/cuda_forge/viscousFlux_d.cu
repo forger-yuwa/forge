@@ -55,6 +55,7 @@ __global__ void viscousFlux_d
  // 診断 (§4.2): W-I 面で実際に残差へ加えた接線力/法線力と、再スケール前の解像接線力を壁ノードへ集計。
  // nullptr 可 (診断オフ)。
  flow_float* wi_ftan, flow_float* wi_fnrm, flow_float* wi_fnrm_abs, flow_float* wi_ftan_res,
+ flow_float* wi_eheat, flow_float* wi_ework,   // 診断: 内部面のエネルギー流束の内訳 (nullptr で無効)
 
  // WMLES 等温壁 (node): 壁ノードに格納した q_w [W/m²] (壁→流体正, 非対象は -1)。片端だけ壁ノードの
  // W-I 面で解像伝導熱流束を q_w·S に置換する (AddQWall, methods/turbulence §10.4)。nullptr で無効。
@@ -333,6 +334,10 @@ __global__ void viscousFlux_d
         flow_float res_roUy_temp = tau_y;
         flow_float res_roUz_temp = tau_z;
         flow_float res_roe_temp  = tau_x*Uxf +tau_y*Uyf +tau_z*Uzf;
+        if (wi_eheat != nullptr) {          // 診断のみ (res_* は触らない)
+            atomicAdd(&wi_ework[ic0],  res_roe_temp); atomicAdd(&wi_ework[ic1], -res_roe_temp);
+            atomicAdd(&wi_eheat[ic0],  heatflux);     atomicAdd(&wi_eheat[ic1], -heatflux);
+        }
         res_roe_temp += heatflux;
 
         // sstEnergyIncludesK: k 拡散のエネルギー流束 (k 式の拡散と同形: 法線項のみ・相対ガード・σ_k ブレンド)
@@ -886,6 +891,8 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
         gpuErrchk(cudaMemset(var.c_d["wi_fnrm"],     0, sizeof(flow_float)*msh.nCells_all));
         gpuErrchk(cudaMemset(var.c_d["wi_fnrm_abs"], 0, sizeof(flow_float)*msh.nCells_all));
         gpuErrchk(cudaMemset(var.c_d["wi_ftan_res"], 0, sizeof(flow_float)*msh.nCells_all));
+        gpuErrchk(cudaMemset(var.c_d["wi_eheat"],    0, sizeof(flow_float)*msh.nCells_all));
+        gpuErrchk(cudaMemset(var.c_d["wi_ework"],    0, sizeof(flow_float)*msh.nCells_all));
     }
 
     // 距離診断 (1 回限り)。FORGE_VISC_WALL_DIAG=1 のとき壁半割面の dn/dcc/tangential を集計表示。
@@ -986,6 +993,8 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
         (wiDiagOn && var.c_d.count("wi_fnrm"))     ? var.c_d["wi_fnrm"]     : nullptr,
         (wiDiagOn && var.c_d.count("wi_fnrm_abs")) ? var.c_d["wi_fnrm_abs"] : nullptr,
         (wiDiagOn && var.c_d.count("wi_ftan_res")) ? var.c_d["wi_ftan_res"] : nullptr,
+        (wiDiagOn && var.c_d.count("wi_eheat"))    ? var.c_d["wi_eheat"]    : nullptr,
+        (wiDiagOn && var.c_d.count("wi_ework"))    ? var.c_d["wi_ework"]    : nullptr,
         // node WMLES 等温壁 / node SST エネルギー壁関数 (§6.5(g)) のとき Qw_Wall を渡し
         // AddQWall (W-I 熱流束置換)。それ以外は nullptr (Qw_Wall 未初期化のため)。
         (wmlesNodeIsothermalActive(cfg, msh) || sstEnergyWfNodeActive(cfg, msh))

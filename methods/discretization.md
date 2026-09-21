@@ -705,6 +705,23 @@ $\phi_f=\tfrac12(\phi_A+\phi_B)$ の中点補間にする ([calcStructualVariabl
 cell モード・境界半割面 (`ip>=nNormalPlanes`) は対象外。`fx` は対流・粘性の全面補間で使われる
 (gradient の over-relaxed 法線項が使う `dcc` は CV 中心間距離のまま)。
 
+**再訂正 (2026-09-21) — 「幾何 fx が中点相当」は高 AR の曲面壁層で成り立たない**
+([plan](../plans/active/discretization-node-face-weight-midpoint.md))。冷却翼 (case/53 C3X、第一層 2 µm × 壁沿い 0.73 mm) で
+壁側の重みが翼全周 **0.07–0.96** に散っていた。原因は 2 つ:
+
+1. **実装の式が射影ではない**。`calcStructualVariables_d.cu` は
+   $d_0=\sqrt{\sum_i (n_i\Delta_{0,i})^2}$ ($\Delta_0=x_{pc}-x_0$) を使っており、上の記述「法線方向に射影した距離比」
+   ($|n\cdot\Delta|$) と違う。$\Delta$ の接線成分 $a$ は射影なら消えるが、この式では $\sqrt2\,|n_xn_y|\,a$ として残り、
+   **壁の向きに依存する** (軸に沿った平面壁では 0 なので平板の検証では見えない)。面重心の接線ずれは壁沿い間隔の
+   不均一で µm 級あり、$d_1/2$ と同程度になる。
+2. **射影に直しても足りない**。曲率 $\kappa$ の壁では面重心が弦のたるみ $\kappa\Delta s^2/8$ だけ沈み、これが $d_1/2$ と
+   同程度なので、射影でも 0.03–1.00 になる。
+
+症状は壁熱流束 `iface_q_eff` の**約 25 節点周期・空間固定のうねり** (粘性仕事 $\tau\cdot U_f$、$U_f=(1-f)U_1$ に乗る。
+$s/S$ 0.45–0.95 で rms 571 W/m²)。`fx=0.5` でうねり rms 1.22 → 0.46 kW/m²、平板 (case/48) と 1 次元スラブ (case/52) は不変。
+**node の内部双対面は `fx=0.5` の固定スキームに戻す** (現在は試験用の環境変数 `FORGE_NODE_FX_HALF=1`。
+恒久化は上の plan の codex レビュー後)。
+
 **検証 (case/29 conical, node laminar viscous 40k)**: `fx=0.5` は近壁 `dUxdy` の checkerboard roughness を
 低減 (99pct 12.84→8.23, −36%)。SU2 (axisym laminar 同条件) との**壁圧比較で fx ON/OFF は区別不能** (<0.5% 差、
 両者とも SU2 に平均 3.2% 一致、最大は未収束の超音速出口)。局所 Ux は出口リップ近傍で大きく変わる

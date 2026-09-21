@@ -1420,6 +1420,7 @@ void assembleResidual(StepContext& s, int stage_index)
     s.profiler.measureCuda(ProfileSection::ConvectiveFlux, [&]() {
         convectiveFlux_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, s.mat_ns);
     });
+    captureNodeIsothermalEnergyResidual(s.cfg , s.cuda_cfg , s.msh , s.var , "ifaceRconv");   // 診断 (既定 no-op)
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         // k/ω 勾配と F1 を拡散の**前**に評価する (2026-09-08, plan turbulence-sst-consistency-options §2.1):
         // 旧順序 (transport → gradient → source) では拡散の非直交補正と σ ブレンドの F1 が前回評価の値
@@ -1447,6 +1448,7 @@ void assembleResidual(StepContext& s, int stage_index)
         axisymmetricSourceSU2_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // method 1 (SU2 流): 1/y 全ソース
         bodyForce_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 一様体積力 (bodyForce, off なら no-op)
     });
+    captureNodeIsothermalEnergyResidual(s.cfg , s.cuda_cfg , s.msh , s.var , "ifaceRpre");    // 診断 (既定 no-op)
     s.profiler.measureCuda(ProfileSection::ViscousFlux, [&]() {
         viscousFlux_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, s.mat_ns);
     });
@@ -1456,6 +1458,7 @@ void assembleResidual(StepContext& s, int stage_index)
     zeroAxisRadialResidual_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     // node-centered 壁 Dirichlet: 壁ノードの運動量残差を 0 に射影し u=0 を保つ (壁ゴースト撤廃の代替)。
     // 軸射影の後に置き、コーナー (壁∩軸はまれだが) でも壁 no-slip を最終確定する。cell/非 node では no-op。
+    captureNodeIsothermalEnergyResidual(s.cfg , s.cuda_cfg , s.msh , s.var , "ifaceRro" , "res_ro");   // 診断 (既定 no-op)
     zeroWallDirichletResiduals_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     // node-centered 周期境界 DOF 同一視 (median-dual M4, §4.5): 全 flux/source 積算 + 壁/軸射影の後に、
     // 周期 group の保存量残差を全員で足し合わせ全員へ書き戻す。合併体積と合わせ両側部分 CV を 1 CV として
