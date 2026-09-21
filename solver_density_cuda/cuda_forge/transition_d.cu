@@ -19,7 +19,10 @@ constexpr flow_float kCa2    = static_cast<flow_float>(0.06);
 constexpr flow_float kCtheta = static_cast<flow_float>(0.03);
 constexpr flow_float kGammaMin = static_cast<flow_float>(1.0e-4);   // SU2 CTransLMSolver.cpp lowerlimit[0]
 constexpr flow_float kGammaMax = static_cast<flow_float>(1.0);
-constexpr flow_float kRethMin  = static_cast<flow_float>(20.0);
+// $Re_{\theta t,min}$: 相関値と輸送変数 $\tilde{Re}_{\theta t}$ の下限。**既定 20 は LM2009/SU2 の推奨値** (`Corr_Ret_lim`)。
+// `turbulence.transitionRethMin` で case ごとに変えられる (文献では 100〜200 に上げて負圧面の遷移を遅らせる調整例がある:
+// Lin ら JGPP 6(3):9-15, 2014。notes/investigations/2026-09-23-vane-transition-literature.md)。下限を上げると遷移が遅れる。
+constexpr flow_float kRethMinDefault = static_cast<flow_float>(20.0);
 constexpr flow_float kTuMin    = static_cast<flow_float>(0.027);
 constexpr flow_float kTuMax    = static_cast<flow_float>(100.0);    // 停滞点の保護 (U→0 で Tu→∞)。相関の適用範囲外なので値に意味は無い
 
@@ -48,7 +51,7 @@ __device__ __forceinline__ flow_float lm_f_length1(flow_float ret_f)
 }
 
 // 自由流 (λ_θ=0) の Re_θt(Tu)。入口値と初期値に使う (SU2 CTransLMSolver.cpp:112-124 と同じ形)。
-__device__ __forceinline__ flow_float lm_re_theta_t_freestream(flow_float tu)
+__device__ __forceinline__ flow_float lm_re_theta_t_freestream(flow_float tu, flow_float rethMin)
 {
     flow_float v;
     if (tu <= static_cast<flow_float>(1.3)) {
@@ -56,7 +59,7 @@ __device__ __forceinline__ flow_float lm_re_theta_t_freestream(flow_float tu)
     } else {
         v = static_cast<flow_float>(331.5) * pow(tu - static_cast<flow_float>(0.5658), static_cast<flow_float>(-0.671));
     }
-    return max(v, kRethMin);
+    return max(v, rethMin);
 }
 
 __device__ __forceinline__ flow_float lm_local_tu(flow_float k, flow_float umag)
@@ -68,7 +71,7 @@ __device__ __forceinline__ flow_float lm_local_tu(flow_float k, flow_float umag)
 
 // 原始量の復元 + 初回初期化。
 __global__ void transition_primitive_d(
-    geom_int nCells, int doInit,
+    geom_int nCells, int doInit, flow_float rethMin,
     flow_float* ro, flow_float* Ux, flow_float* Uy, flow_float* Uz, flow_float* k,
     flow_float* roGamma, flow_float* roReth, flow_float* gammaTr, flow_float* reTheta, flow_float* gammaEff)
 {
@@ -78,18 +81,18 @@ __global__ void transition_primitive_d(
     if (doInit != 0) {
         const flow_float umag = sqrt(Ux[ic] * Ux[ic] + Uy[ic] * Uy[ic] + Uz[ic] * Uz[ic]);
         roGamma[ic] = r;
-        roReth[ic]  = r * lm_re_theta_t_freestream(lm_local_tu(k[ic], umag));
+        roReth[ic]  = r * lm_re_theta_t_freestream(lm_local_tu(k[ic], umag), rethMin);
         gammaEff[ic] = static_cast<flow_float>(1.0);
     }
     gammaTr[ic] = min(max(roGamma[ic] / r, kGammaMin), kGammaMax);
-    reTheta[ic] = max(roReth[ic] / r, kRethMin);
+    reTheta[ic] = max(roReth[ic] / r, rethMin);
     // ソース評価の前 (初期出力) は γ_sep が未定なので γ を入れておく。評価後は transition_lm_source_d が毎反復上書きする。
     if (gammaEff[ic] <= static_cast<flow_float>(0.0)) gammaEff[ic] = gammaTr[ic];
 }
 
 // node 入口ピン: γ=1, Re_θt = 自由流相関 (局所 Tu)。
 __global__ void transition_inlet_pin_d(
-    geom_int nCells, flow_float* pin,
+    geom_int nCells, flow_float rethMin, flow_float* pin,
     flow_float* ro, flow_float* Ux, flow_float* Uy, flow_float* Uz, flow_float* k,
     flow_float* roGamma, flow_float* roReth, flow_float* gammaTr, flow_float* reTheta)
 {
@@ -97,7 +100,7 @@ __global__ void transition_inlet_pin_d(
     if (ic >= nCells) return;
     if (pin[ic] != static_cast<flow_float>(1.0)) return;
     const flow_float umag = sqrt(Ux[ic] * Ux[ic] + Uy[ic] * Uy[ic] + Uz[ic] * Uz[ic]);
-    const flow_float ret  = lm_re_theta_t_freestream(lm_local_tu(k[ic], umag));
+    const flow_float ret  = lm_re_theta_t_freestream(lm_local_tu(k[ic], umag), rethMin);
     gammaTr[ic] = static_cast<flow_float>(1.0);
     reTheta[ic] = ret;
     roGamma[ic] = ro[ic];
@@ -106,7 +109,7 @@ __global__ void transition_inlet_pin_d(
 
 // ソース・陰的対角・γ_eff。体積 vol は周期 node では部分体積 (ransSource と同じ理由)。
 __global__ void transition_lm_source_d(
-    geom_int nCells, geom_float* vol,
+    geom_int nCells, geom_float* vol, flow_float rethMin,
     flow_float* ro, flow_float* Ux, flow_float* Uy, flow_float* Uz, flow_float* sonic,
     flow_float* dUxdx, flow_float* dUxdy, flow_float* dUxdz,
     flow_float* dUydx, flow_float* dUydy, flow_float* dUydz,
@@ -202,7 +205,7 @@ __global__ void transition_lm_source_d(
     const flow_float f_turb  = exp(-rt4 * rt4 * rt4 * rt4);
 
     // Re_θt(Tu, λ_θ) の不動点反復 (SU2 と同じ初期値 20・上限 100 回)。
-    flow_float corr = kRethMin, corr_old = static_cast<flow_float>(0.0);
+    flow_float corr = rethMin, corr_old = static_cast<flow_float>(0.0);
     const flow_float tu15 = exp(-pow(tu / static_cast<flow_float>(1.5), static_cast<flow_float>(1.5)));
     const flow_float tu05 = exp(-tu / static_cast<flow_float>(0.5));
     const flow_float base = (tu <= static_cast<flow_float>(1.3))
@@ -220,7 +223,7 @@ __global__ void transition_lm_source_d(
         } else {
             fl = static_cast<flow_float>(1.0) + static_cast<flow_float>(0.275) * (static_cast<flow_float>(1.0) - exp(static_cast<flow_float>(-35.0) * lam)) * tu05;
         }
-        corr = max(base * fl, kRethMin);
+        corr = max(base * fl, rethMin);
         if (fabs(corr - corr_old) <= static_cast<flow_float>(1.0e-6) * corr) { ++it; break; }
         corr_old = corr;
     }
@@ -257,7 +260,7 @@ __global__ void transition_lm_source_d(
 
 // point-implicit 更新: D = V/Δτ + V·src_jac + transport_diag、δ = relax·res/D。上下限は更新後の保存量に直接掛ける。
 __global__ void transition_point_implicit_d(
-    geom_int nCells, geom_float* vol, flow_float* dt_local, flow_float relax,
+    geom_int nCells, geom_float* vol, flow_float* dt_local, flow_float relax, flow_float rethMin,
     flow_float* ro,
     flow_float* roGamma, flow_float* roReth,
     flow_float* res_roGamma, flow_float* res_roReth,
@@ -274,7 +277,7 @@ __global__ void transition_point_implicit_d(
     const flow_float dg = relax * res_roGamma[ic] / max(Dg, static_cast<flow_float>(1.0e-30));
     const flow_float dt = relax * res_roReth[ic]  / max(Dt, static_cast<flow_float>(1.0e-30));
     roGamma[ic] = min(max(roGamma[ic] + dg, r * kGammaMin), r * kGammaMax);
-    roReth[ic]  = max(roReth[ic] + dt, r * kRethMin);
+    roReth[ic]  = max(roReth[ic] + dt, r * rethMin);
 }
 
 std::array<ScalarTransportDesc, 2> buildTransitionDescs(variables& var)
@@ -311,11 +314,10 @@ void transitionValidateConfig(const solverConfig& cfg)
 
 void transitionPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
-    (void)cfg;
     if (!transitionOn(var)) return;
     const int doInit = (var.transitionNeedsInit != 0) ? 1 : 0;
     transition_primitive_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
-        msh.nCells, doInit,
+        msh.nCells, doInit, static_cast<flow_float>(cfg.transitionRethMin),
         var.c_d["ro"], var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["k"],
         var.c_d["roGamma"], var.c_d["roReth"], var.c_d["gammaTr"], var.c_d["reTheta"], var.c_d["gammaEff"]);
     gpuErrchk( cudaPeekAtLastError() );
@@ -328,10 +330,9 @@ void transitionPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh
 
 void applyTransitionBoundaries(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
-    (void)cfg;
     if (!transitionOn(var)) return;
     transition_inlet_pin_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
-        msh.nCells, var.c_d["scalarDirichletPin"],
+        msh.nCells, static_cast<flow_float>(cfg.transitionRethMin), var.c_d["scalarDirichletPin"],
         var.c_d["ro"], var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["k"],
         var.c_d["roGamma"], var.c_d["roReth"], var.c_d["gammaTr"], var.c_d["reTheta"]);
     gpuErrchk( cudaPeekAtLastError() );
@@ -357,6 +358,7 @@ void transitionSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
     transition_lm_source_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
         msh.nCells,
         (msh.volumePartial_d != nullptr) ? msh.volumePartial_d : var.c_d["volume"],
+        static_cast<flow_float>(cfg.transitionRethMin),
         var.c_d["ro"], var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["sonic"],
         var.c_d["dUxdx"], var.c_d["dUxdy"], var.c_d["dUxdz"],
         var.c_d["dUydx"], var.c_d["dUydy"], var.c_d["dUydz"],
@@ -378,7 +380,7 @@ void applyTransitionPointImplicit_d_wrapper(solverConfig& cfg, cudaConfig& cuda_
 {
     if (!transitionOn(var)) return;
     transition_point_implicit_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
-        msh.nCells, var.c_d["volume"], var.c_d["dt_local"], static_cast<flow_float>(cfg.implicitRelax),
+        msh.nCells, var.c_d["volume"], var.c_d["dt_local"], static_cast<flow_float>(cfg.implicitRelax), static_cast<flow_float>(cfg.transitionRethMin),
         var.c_d["ro"],
         var.c_d["roGamma"], var.c_d["roReth"],
         var.c_d["res_roGamma"], var.c_d["res_roReth"],

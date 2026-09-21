@@ -684,7 +684,13 @@ void solverConfig::read(std::string fname)
                 // 受付条件: 検証した組み合わせだけを通す (未検証の経路を黙って動かさない)。
                 if (!(this->LESorRANS == 2 && this->RANSmodel == 1 && this->DESmode == 0))
                     throw std::runtime_error("'transition: lm2009' requires turbulence.model: sst (no DES).");
+                this->transitionRethMin = getOptionalValidatedValue<double>(turb, "transitionRethMin", 20.0, "turbulence");
+                if (this->transitionRethMin < 1.0)
+                    throw std::runtime_error("Key 'transitionRethMin' in 'turbulence' must be >= 1 (default 20).");
                 std::cout << "'transition' in 'turbulence': lm2009 (Langtry-Menter gamma-Re_theta_t, SU2-matched)\n";
+                if (this->transitionRethMin != 20.0)
+                    std::cout << "[transition] Re_theta_t lower bound changed from the recommended 20 to "
+                              << this->transitionRethMin << " (case-specific tuning; record it in the run README)\n";
             }
         }
         this->scalarDiffusion = getOptionalValidatedValue<int>(turb, "scalarDiffusion", 1, "turbulence");

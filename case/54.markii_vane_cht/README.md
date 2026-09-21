@@ -83,6 +83,10 @@ PDF p.150 (報告 p.144) から**ページ画像で転記**、68 点。`tools/ru
 | `run_0036_sst_1um` | **第一層 1 µm メッシュ** (`gen_fluid_mesh.py --vane markii --n-wall 480 --x-out 10.3 --curv-smooth 400 --hwall 1.0e-6`、28854 節点、`check_mesh_quality` **PASS** AR 913 / skew 0.808。`mesh/fluid_markii_1um.*`)。`run_0024` の場から cross-mesh restart、遷移なし、120000 step | +10.5 / +82.4 / +23.8 / +35.0 % (rms 56.4。2 µm 比 +1.0〜+2.7 pt)。全量 STEADY。**壁解像ゲート FAIL** ($y_1^+$ 最大 1.22、1 超 11.0 %: 完全乱流の層は壁せん断が大きい)。`NOT CONVERGED (stalled/plateau)` | active |
 | `run_0037_lm_1um` | 1 µm メッシュ・遷移モデル ON・入口粘性比 10。`run_0036` から 200000 step | **−27.7 / −5.5 / +20.0 / −7.6 % (rms 32.0)**。負圧面層流域の rms 95.0 → **9.3 %** (節点の 73 % が報告の不確かさ帯の中)。全量 STEADY。**壁解像ゲート PASS** ($y_1^+$ 最大 1.15、1 超 0.6 %)。`NOT CONVERGED (stalled/plateau)` | active |
 | `run_0038_lm_1um_mur100` | 同上、入口粘性比 100 | +22.9 / +5.3 / +23.3 / +18.0 % (rms 27.5)。**正圧面が TRANSIENT-UNSETTLED** (末尾平均 +23.2、まだ動いている)。壁解像 PASS。`NOT CONVERGED (stalled/plateau)` | active |
+| `run_0039_lm_1um_mur20` | 1 µm・遷移あり・**入口粘性比 20** ($\omega$ × 0.5)。300000 step | −21.4 / −3.5 / +20.7 / −4.1 % (rms 30.0)。全量 STEADY、壁解像 PASS | active |
+| `run_0040_lm_1um_mur40` | 同・**入口粘性比 40** ($\omega$ × 0.25)。300000 step。**入口乱れの掃引で最も実測に近い** | **−9.2 / −0.5 / +21.8 / +2.2 % (rms 27.3)**。前縁手前の $Tu$ 3.6 % / $\mu_t/\mu$ 37。全量 STEADY、壁解像 PASS。**値の採用ではなく感度** (報告は長さスケールを与えない) | active |
+| `run_0041_lm_diag` | `run_0037` の継続 2000 step・`output.level 2`。**$Re_{\theta t}$ の下限が効く余地があるかの診断** | `check_lm_kernel.py` **PASS**。壁から 0.3 mm 以内で**相関 $Re_{\theta t}$ が下限 20 に触れる節点 496 個** (場所は衝撃下流 $s/S$ 0.3–0.5、相関 34–44。そこは既に $\gamma\to1$)。**腹側の輸送 $\tilde{Re}_{\theta t}$ は 133–368** で下限から遠い → 下限は腹側に効かない | active |
+| `run_0042_lm_rt130` / `run_0043_lm_rt200` | 1 µm・粘性比 10・**$Re_{\theta t,min}$ を 20 → 130 / 200** (`turbulence.transitionRethMin`。Lin ら JGPP 6(3):9-15 2014 と同じ振り方、[調査メモ](../../notes/investigations/2026-09-23-vane-transition-literature.md)) | **ほぼ空振り**: 130 → −27.8 / −5.5 / +19.4 / −7.8、200 → −27.8 / −5.5 / +19.0 / −7.9 (既定 20 は −27.7 / −5.5 / +20.0 / −7.6)。動くのは背側遷移後だけで 20→200 で 1.0 pt。130 の `SS_post` は **DRIFTING** (5.0 %/窓)、200 は STEADY。壁解像 PASS | active |
 
 ## V5 の結果 (2026-09-20)
 

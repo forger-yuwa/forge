@@ -300,6 +300,9 @@ public:
     // node + 低 Re SST + 定常 block-DPLUR のみ受け付ける (plan turbulence-transition-lm2009 §4.1)。
     int transitionModel = 0;
     bool transitionEnabled() const { return transitionModel != 0; }
+    // 遷移モデルの Re_θt 下限 (turbulence.transitionRethMin)。既定 20 = LM2009/SU2 の推奨値。
+    // case ごとに上げると遷移が遅れる (文献の調整例)。20 以外は「実験に合わせた調整」なので run に明記すること。
+    double transitionRethMin = 20.0;
     int scalarDiffusion = 1; // 0:advection-only 1:advection+diffusion
     int dilatationCorrection = 2; // SST生産項の圧縮性補正 0:off 1:deviatoric(A) 2:deviatoric+isotropic(A+B) 既定:2
     // SST ω 交差拡散の point-implicit Jacobian (plans/active/turbulence-sst-omega-crossdiff-jacobian.md)。

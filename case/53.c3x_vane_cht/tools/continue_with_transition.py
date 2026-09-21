@@ -9,7 +9,7 @@ r"""既存の翼 run を**遷移モデル (turbulence.transition: lm2009) つき
 - `--omega-scale s`: 入口 $\omega$ を s 倍する。入口粘性比 $\mu_t/\mu=\rho k/(\omega\mu)$ は 1/s 倍になる (元 run は約 10)。
 - `--off`: 遷移モデルを入れない対照 (同じ出発場・同じ step 数。初期場の違いを切り分けるため)。
 
-usage: continue_with_transition.py SRC_RUN NEW_RUN [--steps 60000] [--out-int 5000] [--omega-scale 1.0] [--no-reset-turb] [--off] [--kato 0|1] [--cfl C] [--dry]
+usage: continue_with_transition.py SRC_RUN NEW_RUN [--steps 60000] [--out-int 5000] [--omega-scale 1.0] [--no-reset-turb] [--off] [--kato 0|1] [--reth-min R] [--cfl C] [--dry]
 """
 import argparse, os, re, shutil, subprocess, sys
 from pathlib import Path
@@ -26,6 +26,7 @@ def main():
     ap.add_argument("--steps", type=int, default=60000); ap.add_argument("--out-int", type=int, default=5000)
     ap.add_argument("--omega-scale", type=float, default=1.0); ap.add_argument("--no-reset-turb", action="store_true")
     ap.add_argument("--off", action="store_true"); ap.add_argument("--cfl", type=float, default=None); ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--reth-min", type=float, default=None, help="turbulence.transitionRethMin (既定 20 = LM2009/SU2 推奨)。上げると遷移が遅れる")
     ap.add_argument("--level", type=int, default=None, help="output.level を上書き (2 で遷移モデルの診断場 lm* と残差場も出す)")
     ap.add_argument("--kato", type=int, default=None, help="katoLaunder を上書き (前縁よどみ点の k 過大生成を抑える。LM2009 の著者が併用を勧める)")
     a = ap.parse_args()
@@ -40,6 +41,9 @@ def main():
         cfg = re.sub(r"cfl:\s*[0-9.eE+-]+", f"cfl: {a.cfl}", cfg); cfg = re.sub(r"cfl_pseudo:\s*[0-9.eE+-]+", f"cfl_pseudo: {a.cfl}", cfg)
     if not a.off and "transition" not in cfg:     # 継続元が既に遷移つきならそのまま
         cfg, n = re.subn(r'(turbulence:\s*\{[^}]*)\}', r'\1, transition: "lm2009"}', cfg, count=1); assert n == 1
+    if a.reth_min is not None:
+        assert "transitionRethMin" not in cfg
+        cfg, n = re.subn(r'(transition:\s*"lm2009")', rf'\1, transitionRethMin: {a.reth_min:g}', cfg, count=1); assert n == 1
     if a.level is not None:
         cfg, n = re.subn(r"(output:\s*\{[^}]*?level:\s*)\d", rf"\g<1>{a.level}", cfg); assert n == 1
     if a.kato is not None:

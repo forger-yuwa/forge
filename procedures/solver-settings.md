@@ -271,6 +271,9 @@ turbulence: {model: "sst", ..., wallTreatmentSST: 0, transition: "lm2009"}   # �
 - **受け付ける組み合わせは検証したものだけ**: node・`model: sst`・`wallTreatmentSST: 0`・非軸対称・DES なし・`sstEnergyIncludesK: 0`・`scalarDiffusion: 1`・定常陰解法。外れると起動時に止まる。
 - 入口は $\gamma=1$、$\tilde{Re}_{\theta t}$ は入口の $k$ と速度から決まる局所 $Tu$ の相関値。**追加の入口キーは無い**。入口の $k$・$\omega$ (乱れの強さと減衰の速さ) が遷移位置を決めるので、
   $\omega$ は「入口粘性比」の感度を必ず見る。
+- **`turbulence.transitionRethMin`** (既定 **20** = LM2009/SU2 の推奨値 `Corr_Ret_lim`): 相関値と輸送変数 $\tilde{Re}_{\theta t}$ の下限。上げると遷移が遅れる。
+  文献には case ごとに 100〜200 へ上げる調整例がある (Lin ら JGPP 6(3):9-15, 2014) が、**Mark II で 20/130/200 を試したところほぼ空振り**だった
+  (下限に触れるのは衝撃下流の $\gamma\to1$ の領域だけで、層流域の輸送値は 130 以上。plan §6.5)。**20 以外にしたら run の README に「実験に合わせた調整」と明記する**。
 - 壁は $y_1^+\le1$ が前提 (モデルの定義)。残差は `rms_roGamma` / `rms_roReth` が増える (`check_convergence.py` が読む)。
 - 出発場は完全乱流の SST 場でよい (平板 T3A で、$k$/$\omega$ を入口値に戻した場からの解と 4 桁一致)。
 - 検証: `case/57.transition_flat_plate` (ERCOFTAC T3A、同一メッシュの SU2 LM と比較)。
