@@ -9,3 +9,4 @@
 | [2026-09-09-tooling-nozzle-sern-chain-plan.md](2026-09-09-tooling-nozzle-sern-chain-plan.md) | `tooling-nozzle-sern-chain` | plan | NO-GO, C2/M7/m0 |
 | [2026-09-19-tooling-divergence-triage-minimal-plan.md](2026-09-19-tooling-divergence-triage-minimal-plan.md) | `tooling-divergence-triage-minimal` (草案 v1) | plan | NO-GO, C0/M11/m1 |
 | [2026-09-19-tooling-divergence-triage-minimal-plan-2.md](2026-09-19-tooling-divergence-triage-minimal-plan-2.md) | `tooling-divergence-triage-minimal` (草案 v2) | plan | NO-GO, C0/M8/m2 |
+| [2026-09-22-codex-model-tiering.md](2026-09-22-codex-model-tiering.md) | 無し (`AGENTS.md`「モデル分担とエスカレーション」。採否は記録本文) | 自由形式 | GO-with-changes, C0/M6/m2 |
