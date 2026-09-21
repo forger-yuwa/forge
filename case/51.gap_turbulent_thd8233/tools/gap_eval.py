@@ -35,6 +35,9 @@ import sys
 from pathlib import Path
 
 import numpy as np
+
+# numpy 2.0 で np.trapz が削除された (AWS は numpy 2.x)。名前だけの差なので薄く吸収する。
+_trapz = getattr(np, "trapezoid", None) or np.trapz
 import h5py
 
 HERE = Path(__file__).resolve().parent
@@ -239,7 +242,7 @@ def band_mean(w, W, zw_max=QUAL_ZW_MAX):
     m = w["depth"] <= zw_max * W + 1e-12
     if m.sum() < 2:
         return float("nan")
-    return float(np.trapz(w["ratio"][m], w["depth"][m]) /
+    return float(_trapz(w["ratio"][m], w["depth"][m]) /
                  (w["depth"][m][-1] - w["depth"][m][0]))
 
 
