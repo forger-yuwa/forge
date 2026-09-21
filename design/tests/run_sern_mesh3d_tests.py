@@ -171,6 +171,21 @@ check("fillet: info に ramp_fillet", info["ramp_fillet"] == 0.1)
 
 
 
+# --- カウル板の自由な側端 (z = W/2, L_sw < x < L_cowl) は上下で 1 節点 (plan sern-3d R5r) ---
+# 二重化したままだと双子の双対 CV が閉じない (|ΣS|/Σ|S| = 0.3。primal の面の閉性では見えず、変換後の check_dual_closure.py でだけ出る)
+_pe = SernMesh3DParams(ni_up=6, ni_noz=20, ni_plume=120, nj_top=15, nj_bot=11, nz_in=7, nz_out=6, W=2.0, Z_ext=1.5, L_sw=0.67,
+                       interface_angle=float(k.TH[-1, 0]), top_ext_angle=d.info["theta_e"], cowl_thickness=0.005)
+_ce, _he, _Be, _ie, _ = generate_sern_mesh3d(d, _pe)
+_co, _ho, _Bo, _io, _ = generate_sern_mesh3d(d, replace(_pe, share_cowl_free_edge=False))
+_nfree = _ie["i_te"] - _ie["i_sw"]
+_sh = lambda B: len({n for q in B["cowl_in"] for n in q} & {n for q in B["cowl_out"] for n in q})
+check("free edge: 側壁より長いカウル板がある", _nfree > 0, f"{_nfree} station")
+check("free edge: 上下で共有する節点が側端の station 数だけ増える", _sh(_Be) - _sh(_Bo) == _nfree, f"{_sh(_Bo)} -> {_sh(_Be)}")
+check("free edge: 二重節点がその数だけ減る", _io["n_dup_cowl"] - _ie["n_dup_cowl"] == _nfree)
+_u, _m, _x = closure(_he, _Be)
+check("free edge: 境界の閉性", _m == 0 and _x == 0, f"missing {_m} extra {_x}")
+
+
 # --- 壁第 1 層の x ブレンド (plan sern-3d §4.41) ---
 # ブレンドは station 数が要る (急だと skew が出るのでガードが落とす) のでプルームを細かくした専用 params
 _pb = SernMesh3DParams(ni_up=6, ni_noz=20, ni_plume=120, nj_top=15, nj_bot=11, nz_in=7, nz_out=6, W=2.0, Z_ext=1.5,

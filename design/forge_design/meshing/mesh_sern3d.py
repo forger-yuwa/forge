@@ -39,6 +39,10 @@ class SernMesh3DParams:
     W: float = 2.0           # ノズル幅 / H (全幅)
     Z_ext: float = 1.5       # 側壁外側の空間 / H
     L_sw: float | None = None  # 側壁の x 範囲 (None → L_cowl)
+    # カウル板の自由な側端 (z = W/2、側壁が終わった x > L_sw) の節点を上下で共有する。False は 2026-09-22 以前の挙動 (A/B 用):
+    # 端の節点まで二重化していたので、双子の双対 CV が互いの間の面を欠いて**閉じていなかった** (|ΣS|/Σ|S| = 0.30 が
+    # (i_te − i_sw) × 2 個。`check_dual_closure.py` で検出。plan sern-3d R5r)。板の後縁 (i_te) と同じく、端は 1 節点にする
+    share_cowl_free_edge: bool = True
     W_vehicle: float | None = None  # 機体の物理幅 / H (全幅)。None = 遠方境界まで機体下面 (旧挙動)。W/2 < z ≤ W_vehicle/2 が vehicle タグ
     # R4 (codex M6, 2026-09-13): ランプ側外部流ブロック (2D の ext_top を z 一様に押し出し)。機体上面 (vehicle_top, 後端テーパ) +
     # 自由流バンド top_depth。ランプ後縁より下流はプルーム上線とノード共有 (2D と同じ)。vehicle_taper > 0 必須 (鉛直 base は node で発散)
@@ -234,6 +238,8 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
     nid = N_base
     for i in range(i_te):
         for k in range(k_sw + 1):
+            if k == k_sw and i >= i_sw and not no_outer and prm.share_cowl_free_edge:
+                continue                       # 板の自由な側端: 上下で共有 (node() が base に落ちる)
             dup1[(i, k)] = nid; nid += 1
     for i in (range(0) if no_outer else range(i_sw)):   # 側壁後縁 (i_sw) は共有 (カウル TE と同じ)。外側空間なしなら重複なし
         for j in range(jm + 1, NJ):            # ランプ線 (j = NJ−1) も内外 2 重: 共有すると入口面で
