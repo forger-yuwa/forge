@@ -84,6 +84,31 @@ def main():
         res is not None and res[2] is True, "ok=%s" % (None if res is None else res[2]))
     os.unlink(p)
 
+    # (5) 遷移モデルの残差列 (rms_roGamma / rms_roReth): NaN は DIVERGED、遷移が有効な run で列が欠けたら判定不能
+    tcols = cols + ["rms_roK", "rms_roOmega", "rms_roGamma", "rms_roReth"]
+    rows = [[i, "outer_end"] + [v] * 7 + [v if i < 30 else float("nan"), v] for i, v in enumerate(ser)]
+    p = write_csv(rows, tcols)
+    res = cc.analyze(p, 3.0, 0.2)
+    chk("rms_roGamma に NaN -> DIVERGED", res is not None and res[2] is False and res[3] is True, "ok=%s nan=%s" % (res[2], res[3]))
+    os.unlink(p)
+    d = tempfile.mkdtemp()
+    with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
+        f.write('turbulence: {model: "sst", wallTreatmentSST: 0, transition: "lm2009"}\n')
+    pth = os.path.join(d, "residual_history.csv")
+    with open(pth, "w", newline="") as f:
+        w = csv.writer(f); w.writerow(cols); w.writerows([[i, "outer_end"] + [v] * 5 for i, v in enumerate(ser)])
+    chk("遷移有効の run で rms_roGamma/rms_roReth が無い -> 合格にしない", *okof(cc.analyze(pth, 3.0, 0.2)))
+    with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
+        f.write('turbulence: {model: "sst", wallTreatmentSST: 0, transition: "none"}\n')
+    res = cc.analyze(pth, 3.0, 0.2)
+    chk("transition: none なら 5 列で従来どおり合格", res is not None and res[2] is True, "ok=%s" % res[2])
+    import shutil as _sh; _sh.rmtree(d)
+    # 段キー: SST と SST+遷移は別の方程式系 -> 別区間
+    import stage_manifest as sm
+    ka = sm.stage_key('turbulence: {model: "sst", wallTreatmentSST: 0}\nspace: {convMethod: 1, limiter: 2}\n', "")
+    kb = sm.stage_key('turbulence: {model: "sst", wallTreatmentSST: 0, transition: "lm2009"}\nspace: {convMethod: 1, limiter: 2}\n', "")
+    chk("SST -> SST+遷移 の段切替は別区間", ka != kb)
+
     print("=== check_quasisteady: 不正入力 ===")
     v, _, _ = cq.classify([0, 1, 2, 3, 4, 5], [1, 1, 1, 1, 1, float("nan")], 0.4, 0.02, 0.05, 4)
     chk("classify([1,1,1,1,1,NaN]) -> STEADY にしない", v != "STEADY", "verdict=%s" % v)

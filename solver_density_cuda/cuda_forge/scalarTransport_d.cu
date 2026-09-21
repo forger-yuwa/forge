@@ -71,7 +71,8 @@ __global__ void scalar_diffusion_first_order_d(
     flow_float* res_rho_phi,
     flow_float* transport_diag,
     flow_float sigma2,
-    flow_float* F1blend)
+    flow_float* F1blend,
+    flow_float sigma_lam)
 {
     geom_int ih = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -116,8 +117,8 @@ __global__ void scalar_diffusion_first_order_d(
         const flow_float F1b = (F1blend != nullptr) ? F1blend[(ic1 < nCells) ? ic1 : ic0] : static_cast<flow_float>(1.0);
         const flow_float sig0 = (F1blend != nullptr) ? (F1a * sigma + (static_cast<flow_float>(1.0) - F1a) * sigma2) : sigma;
         const flow_float sig1 = (F1blend != nullptr) ? (F1b * sigma + (static_cast<flow_float>(1.0) - F1b) * sigma2) : sigma;
-        const flow_float mu0 = vis_lam[ic0] + sig0 * max(vis_turb[ic0], static_cast<flow_float>(0.0));
-        const flow_float mu1 = vis_lam[ic1] + sig1 * max(vis_turb[ic1], static_cast<flow_float>(0.0));
+        const flow_float mu0 = sigma_lam * vis_lam[ic0] + sig0 * max(vis_turb[ic0], static_cast<flow_float>(0.0));
+        const flow_float mu1 = sigma_lam * vis_lam[ic1] + sig1 * max(vis_turb[ic1], static_cast<flow_float>(0.0));
         const flow_float mu_face = f * mu0 + (1.0f - f) * mu1;
 
         const flow_float dphi = phi[ic1] - phi[ic0];
@@ -145,6 +146,7 @@ struct MultiScalarPtrs {
     flow_float* diag[SCALAR_MULTI_MAX];
     flow_float  sigma[SCALAR_MULTI_MAX];
     flow_float  sigma2[SCALAR_MULTI_MAX];
+    flow_float  sigmaLam[SCALAR_MULTI_MAX];
     flow_float* F1[SCALAR_MULTI_MAX];
     int         diffusion[SCALAR_MULTI_MAX];
 };
@@ -213,8 +215,8 @@ __global__ void scalar_diffusion_multi_d(
         const flow_float F1c = (F1b != nullptr) ? F1b[(ic1 < nCells) ? ic1 : ic0] : static_cast<flow_float>(1.0);
         const flow_float sig0 = (F1b != nullptr) ? (F1a * P.sigma[s] + (static_cast<flow_float>(1.0) - F1a) * P.sigma2[s]) : P.sigma[s];
         const flow_float sig1 = (F1b != nullptr) ? (F1c * P.sigma[s] + (static_cast<flow_float>(1.0) - F1c) * P.sigma2[s]) : P.sigma[s];
-        const flow_float mu0 = vl0 + sig0 * vt0;
-        const flow_float mu1 = vl1 + sig1 * vt1;
+        const flow_float mu0 = P.sigmaLam[s] * vl0 + sig0 * vt0;
+        const flow_float mu1 = P.sigmaLam[s] * vl1 + sig1 * vt1;
         const flow_float mu_face = f * mu0 + (1.0f - f) * mu1;
         const flow_float dphi = P.phi[s][ic1] - P.phi[s][ic0];
         const flow_float flux = mu_face * (dphi / dcc) * delta;
@@ -339,7 +341,8 @@ void scalarTransportResidual_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
             desc.res_rho_phi,
             desc.transport_diag,
             desc.sigma2,
-            desc.F1);
+            desc.F1,
+            desc.sigma_lam);
     }
 }
 
@@ -359,7 +362,7 @@ void scalarTransportResidualMulti_d(solverConfig& cfg, cudaConfig& cuda_cfg, mes
     bool anyDiff = false;
     for (int s = 0; s < n; ++s) {
         P.phi[s] = descs[s].phi; P.res[s] = descs[s].res_rho_phi; P.diag[s] = descs[s].transport_diag;
-        P.sigma[s] = descs[s].sigma; P.sigma2[s] = descs[s].sigma2; P.F1[s] = descs[s].F1;
+        P.sigma[s] = descs[s].sigma; P.sigma2[s] = descs[s].sigma2; P.F1[s] = descs[s].F1; P.sigmaLam[s] = descs[s].sigma_lam;
         P.diffusion[s] = (cfg.scalarDiffusion == 1 && descs[s].diffusion == 1) ? 1 : 0;
         anyDiff = anyDiff || (P.diffusion[s] != 0);
     }

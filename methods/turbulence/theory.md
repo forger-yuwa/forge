@@ -1110,3 +1110,56 @@ $y^+, u^+$ は §10.2 で収束した値を再利用する。
 $\tau_w$ を誤り、高 Re の緩剥離では標準 SGS 係数との組合せで剥離を見逃す実例がある
 ([`turbulence-des-wmles-survey.md`](../../notes/investigations/turbulence-des-wmles-survey.md))。
 剥離を含むケースでは SGS 係数・ES 散逸 $\sigma$ の感度確認を必須とする。
+
+## 11. 遷移モデル $\gamma$–$Re_{\theta t}$ (Langtry–Menter 2009, `turbulence.transition: "lm2009"`)
+
+低 Re SST は遷移の閉包を持たず、前縁から乱流になる。冷却翼 (case/53, 54) の負圧面層流域で $h$ を +44〜+80 % 過大に出す原因が
+これであることは、層流対照と SU2 の同一メッシュ比較で確認済み。そこで SST に Langtry–Menter の 2 方程式遷移モデル
+(AIAA J. 47(12), 2009。相関は同論文の $Re_{\theta c}$・$F_{length}$ = SU2 の `LM` 既定 `MENTER_LANGTRY`) を足す。
+**式と定数は SU2 8.x の実装 (`trans_sources.hpp`, `trans_correlations.hpp`, `CTransLMSolver.cpp`) と 1 対 1 に合わせる**
+(同一メッシュでの突き合わせを検証の柱にするため)。
+
+### 11.1 輸送方程式
+
+間欠度 $\gamma$ と遷移開始運動量厚さレイノルズ数 $\tilde{Re}_{\theta t}$ を保存形 $\rho\gamma$, $\rho\tilde{Re}_{\theta t}$ で運ぶ。
+
+$$\frac{\partial\rho\gamma}{\partial t}+\nabla\cdot(\rho u\gamma)=P_\gamma-E_\gamma+\nabla\cdot\Big[\Big(\mu+\frac{\mu_t}{\sigma_f}\Big)\nabla\gamma\Big],\qquad
+\frac{\partial\rho\tilde{Re}_{\theta t}}{\partial t}+\nabla\cdot(\rho u\tilde{Re}_{\theta t})=P_{\theta t}+\nabla\cdot\big[\sigma_{\theta t}(\mu+\mu_t)\nabla\tilde{Re}_{\theta t}\big]$$
+
+$$P_\gamma=F_{length}\,c_{a1}\,\rho S\,\sqrt{\gamma F_{onset}}\,(1-c_{e1}\gamma),\qquad
+E_\gamma=c_{a2}\,\rho\Omega\,\gamma F_{turb}\,(c_{e2}\gamma-1),\qquad
+P_{\theta t}=c_{\theta t}\frac{\rho}{t}\,(Re_{\theta t}-\tilde{Re}_{\theta t})(1-F_{\theta t})$$
+
+定数: $c_{e1}=1$, $c_{a1}=2$, $c_{e2}=50$, $c_{a2}=0.06$, $\sigma_f=1$, $c_{\theta t}=0.03$, $\sigma_{\theta t}=2$。$t=500\mu/(\rho U^2)$。
+
+**開始関数**: $Re_v=\rho y^2S/\mu$, $R_T=\rho k/(\mu\omega)$,
+$F_{onset1}=Re_v/(2.193\,Re_{\theta c})$, $F_{onset2}=\min(\max(F_{onset1},F_{onset1}^4),2)$, $F_{onset3}=\max(1-(R_T/2.5)^3,0)$,
+$F_{onset}=\max(F_{onset2}-F_{onset3},0)$, $F_{turb}=e^{-(R_T/4)^4}$。
+$F_{length}=F_{length,1}(1-F_{sub})+40F_{sub}$, $F_{sub}=e^{-(R_\omega/200)^2}$, $R_\omega=\rho y^2\omega/\mu$。
+
+**境界層の外で $\tilde{Re}_{\theta t}$ を自由流の相関値へ引く**ための遮蔽:
+$\theta_{BL}=\tilde{Re}_{\theta t}\mu/(\rho U)$, $\delta_{BL}=7.5\theta_{BL}$, $\delta=50\,\Omega y\,\delta_{BL}/U$,
+$F_{wake}=e^{-(Re_\omega/10^5)^2}$ ($Re_\omega=\rho\omega y^2/\mu$),
+$F_{\theta t}=\min\{\max[F_{wake}e^{-(y/\delta)^4},\,1-((\gamma-1/c_{e2})/(1-1/c_{e2}))^2],\,1\}$。
+
+**経験相関** ($Tu$ [%] $=100\sqrt{2k/3}/U$、下限 0.027):
+$Re_{\theta t}=(1173.51-589.428Tu+0.2196/Tu^2)F(\lambda_\theta)$ ($Tu\le1.3$)、$331.5\,(Tu-0.5658)^{-0.671}F(\lambda_\theta)$ ($Tu>1.3$)、下限 20。
+$\lambda_\theta=(\rho\theta^2/\mu)\,dU/ds$ を $[-0.1,0.1]$ に制限、$\theta=Re_{\theta t}\mu/(\rho U)$ なので**不動点反復**で解く。
+$F(\lambda_\theta)=1-(-12.986\lambda-123.66\lambda^2-405.689\lambda^3)e^{-(Tu/1.5)^{1.5}}$ ($\lambda\le0$)、
+$1+0.275(1-e^{-35\lambda})e^{-Tu/0.5}$ ($\lambda>0$)。$dU/ds$ は速度勾配テンソルから $\hat u\cdot\nabla|u|$。
+$Re_{\theta c}(\tilde{Re}_{\theta t})$ と $F_{length,1}(\tilde{Re}_{\theta t})$ は Langtry–Menter の区分多項式 (SU2 `MENTER_LANGTRY`)。
+
+### 11.2 SST との結合
+
+剥離誘起遷移の補正 $\gamma_{sep}=\min\{2\max[Re_v/(3.235Re_{\theta c})-1,0]F_{reattach},2\}F_{\theta t}$, $F_{reattach}=e^{-(R_T/20)^4}$、
+$\gamma_{eff}=\max(\gamma,\gamma_{sep})$ を使って、$k$ 式だけを変える ($\omega$ 式は不変):
+
+$$\tilde P_k=\gamma_{eff}P_k,\qquad \tilde D_k=\min(\max(\gamma_{eff},0.1),1)\,D_k,\qquad F_1=\max(F_{1,orig},F_3),\ F_3=e^{-(R_y/120)^8},\ R_y=\rho y\sqrt k/\mu$$
+
+### 11.3 境界条件と自由流
+
+壁: $\gamma$, $\tilde{Re}_{\theta t}$ とも**法線勾配 0** (node では壁節点を固定せず、壁半割面の拡散流束を足さない)。
+入口: $\gamma=1$、$\tilde{Re}_{\theta t}$ = 入口の $Tu$ から上の相関 ($\lambda_\theta=0$) で決めた値。出口・slip・周期: $k$/$\omega$ と同じ扱い。
+**自由流の $Tu$ の減衰が遷移位置を決める**ので、入口の $k$ と $\omega$ (= 粘性比) の与え方は結果に直結する
+($k$ の減衰率は $\omega$ で決まる)。翼列では SST だけのときに既に「粘性比が圧力面の $h$ を 23 pt 動かす」ことが分かっており
+(報告 §02)、遷移モデルではこの感度がさらに大きくなる。

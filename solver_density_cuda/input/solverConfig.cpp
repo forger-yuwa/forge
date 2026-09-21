@@ -675,6 +675,18 @@ void solverConfig::read(std::string fname)
                 "none | wale | sigma | sst | sst-ddes | sst-iddes (got '" + turbModel + "').");
         }
         std::cout << "'model' in 'turbulence': " << turbModel << "\n";
+        {
+            const std::string tr = getOptionalValidatedValue<std::string>(turb, "transition", std::string("none"), "turbulence");
+            if      (tr == "none")   this->transitionModel = 0;
+            else if (tr == "lm2009") this->transitionModel = 1;
+            else throw std::runtime_error("Key 'transition' in 'turbulence' must be one of: none | lm2009 (got '" + tr + "').");
+            if (this->transitionModel != 0) {
+                // 受付条件: 検証した組み合わせだけを通す (未検証の経路を黙って動かさない)。
+                if (!(this->LESorRANS == 2 && this->RANSmodel == 1 && this->DESmode == 0))
+                    throw std::runtime_error("'transition: lm2009' requires turbulence.model: sst (no DES).");
+                std::cout << "'transition' in 'turbulence': lm2009 (Langtry-Menter gamma-Re_theta_t, SU2-matched)\n";
+            }
+        }
         this->scalarDiffusion = getOptionalValidatedValue<int>(turb, "scalarDiffusion", 1, "turbulence");
         this->dilatationCorrection = getOptionalValidatedValue<int>(turb, "dilatationCorrection", 2, "turbulence");
 

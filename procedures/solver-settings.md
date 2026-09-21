@@ -257,6 +257,24 @@ turbulence: {model: "sst", ..., sstNodeWallKPin: 1, sstOmegaProdFromPk: 1, sstSi
 検証 (plan [turbulence-sst-consistency-options](../plans/active/turbulence-sst-consistency-options.md)): case/16 2D node SST では全オプションが壁圧比 ≤0.25 % の差、case/26 平板 Cf と case/16 3D の結果は同 plan 参照。
 `tools/test_scale_invariance.py` (相似メッシュで無次元残差の一致を見る) は単位付き閾値の検出用。
 
+### 遷移モデル `turbulence.transition` (2026-09-22)
+
+```yaml
+turbulence: {model: "sst", ..., wallTreatmentSST: 0, transition: "lm2009"}   # 既定 "none"
+```
+
+| 値 | 内容 |
+| --- | --- |
+| `none` (既定) | 遷移モデルなし。SST は前縁から完全乱流 |
+| `lm2009` | Langtry–Menter 2009 の $\gamma$–$\tilde{Re}_{\theta t}$ 2 方程式 (SU2 の `KIND_TRANS_MODEL= LM` と同じ式・同じ下限)。理論は [`methods/turbulence/theory.md`](../methods/turbulence/theory.md) §11、実装は同 `implementation.md` |
+
+- **受け付ける組み合わせは検証したものだけ**: node・`model: sst`・`wallTreatmentSST: 0`・非軸対称・DES なし・`sstEnergyIncludesK: 0`・`scalarDiffusion: 1`・定常陰解法。外れると起動時に止まる。
+- 入口は $\gamma=1$、$\tilde{Re}_{\theta t}$ は入口の $k$ と速度から決まる局所 $Tu$ の相関値。**追加の入口キーは無い**。入口の $k$・$\omega$ (乱れの強さと減衰の速さ) が遷移位置を決めるので、
+  $\omega$ は「入口粘性比」の感度を必ず見る。
+- 壁は $y_1^+\le1$ が前提 (モデルの定義)。残差は `rms_roGamma` / `rms_roReth` が増える (`check_convergence.py` が読む)。
+- 出発場は完全乱流の SST 場でよい (平板 T3A で、$k$/$\omega$ を入口値に戻した場からの解と 4 桁一致)。
+- 検証: `case/57.transition_flat_plate` (ERCOFTAC T3A、同一メッシュの SU2 LM と比較)。
+
 ## output — 出力する場の量の絞り込みと h0 (2026-09-08)
 
 ```yaml

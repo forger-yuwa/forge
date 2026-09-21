@@ -111,6 +111,27 @@ void variables::registerSpecies(int nSpecies, int chemistry)
 // 受動トレーサ (排気率 ξ; physProp.tracer: exhaust)。凝縮モーメントと同じ 8 本構成。
 //   roXi : 保存量 ρξ, Xi : 原始量 ξ=ρξ/ρ, roXiN/roXiM : RK ステップ/ステージ始点,
 //   res_roXi, res_roXi_m : 残差 / 4thRunge 累積, src_jac_Xi : 源項ヤコビアン (0), transport_diag_Xi : 輸送対角 [m³/s]
+void variables::registerTransition(int enabled, int diag)
+{
+    this->transitionRegistered = (enabled != 0) ? 1 : 0;
+    if (enabled == 0) return;
+    std::vector<std::string> names = {"roGamma", "roReth", "gammaTr", "reTheta", "gammaEff", "res_roGamma", "res_roReth",
+                                      "src_jac_gamma", "src_jac_reth", "transport_diag_gamma", "transport_diag_reth"};
+    std::vector<std::string> outs  = {"roGamma", "roReth", "gammaTr", "reTheta", "gammaEff"};
+    if (diag != 0) {
+        for (const char* nm : {"lmFonset", "lmFlength", "lmFtheta", "lmRethCorr", "lmGammaSep", "lmPgamma", "lmEgamma", "lmPtheta", "lmCorrIter"}) {
+            names.emplace_back(nm); outs.emplace_back(nm);
+        }
+    }
+    for (const auto& name : names) {
+        this->cellValNames.push_back(name);
+        this->c.emplace(name, std::vector<flow_float>{});
+        this->c_d.emplace(name, nullptr);
+    }
+    for (const auto& name : outs) this->output_cellValNames.push_back(name);
+    std::cout << "registerTransition: LM2009 gamma-Re_theta_t registered (" << names.size() << " cell variables)\n";
+}
+
 void variables::registerTracer(int enabled)
 {
     if (enabled == 0) {
@@ -763,6 +784,22 @@ void variables::readValueHDF5(std::string fname , mesh& msh,
             sp_names.push_back(Yname);
         }
         this->copyVariables_cell_H2D(sp_names);
+    }
+
+    // --- 遷移モデル: ργ, ρRe_θt を読み込む。無ければ初回の transitionPrimitive が γ=1 / 自由流相関で初期化する ---
+    if (this->transitionRegistered != 0) {
+        const bool has = file.exist("/VALUE/roGamma") && file.exist("/VALUE/roReth");
+        if (has) {
+            std::vector<geom_float> g, r;
+            file.getDataSet("/VALUE/roGamma").read(g);
+            file.getDataSet("/VALUE/roReth").read(r);
+            std::vector<flow_float>& vg = this->c.at("roGamma");
+            std::vector<flow_float>& vr = this->c.at("roReth");
+            for (geom_int i=0; i<msh.nCells; i++) { vg[i] = g[i]; vr[i] = r[i]; }
+            this->copyVariables_cell_H2D({"roGamma", "roReth"});
+        }
+        this->transitionNeedsInit = has ? 0 : 1;
+        std::cout << "[variables] transition roGamma/roReth " << (has ? "read from input" : "not in input: will be initialised on the first step") << "\n";
     }
 
     // --- 受動トレーサ: ρξ を読み込む (VALUE/roXi → VALUE/Xi×ρ → 0 の優先順) ---

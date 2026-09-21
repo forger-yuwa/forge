@@ -86,6 +86,8 @@ add_library(cuda_forge STATIC
     thermo_d.cuh
     ../input/speciesDB.cpp
     ../input/speciesDB.hpp
+    transition_d.cu
+    transition_d.cuh
     tracerTransport_d.cu
     tracerTransport_d.cuh
     residualMonitor_d.cu

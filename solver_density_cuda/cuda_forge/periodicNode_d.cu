@@ -91,6 +91,10 @@ void periodicNodeGather_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
     for (const auto& nm : var.speciesVarNames)     extra.push_back("res_" + nm);
     for (const auto& nm : var.condMomentConsNames) extra.push_back("res_" + nm);
     if (var.tracerRegistered != 0)                 extra.push_back("res_roXi");   // 受動トレーサ (codex 2026-09-16 M5)
+    // 遷移モデル: 残差と輸送対角の両方を合併する (対角の V は合併体積。plan turbulence-transition-lm2009 §4.1)。
+    if (var.transitionRegistered != 0) {
+        for (const char* nm : {"res_roGamma", "res_roReth", "transport_diag_gamma", "transport_diag_reth"}) extra.push_back(nm);
+    }
     // 輸送対角 transport_diag_* も合併する (plan species-passive-scalar-unification §4.1-5, codex M4): 対角
     // D = V/Δτ + V·src_jac + transport_diag の V は合併体積なので、部分 CV の transport_diag のままでは seam の
     // 点陰的/DPLUR 更新が内部と不整合になる。化学種は常に、受動種は passiveScalarScheme 1 のとき (旧経路はビット不変)。
@@ -145,6 +149,16 @@ void periodicMirrorScalarState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cf
         auto it = var.c_d.find(k);
         if (it == var.c_d.end() || it->second == nullptr) continue;
         periodicBroadcast1FromRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, it->second);
+        gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+    }
+}
+
+void periodicMirrorTransitionState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
+{
+    if (cfg.discretization != "node" || msh.periodicRoot_d == nullptr || msh.nPeriodicMembers == 0) return;
+    if (var.transitionRegistered == 0) return;
+    for (const char* k : {"roGamma", "roReth"}) {
+        periodicBroadcast1FromRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, var.c_d[k]);
         gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
     }
 }

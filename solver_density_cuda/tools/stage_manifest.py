@@ -81,6 +81,7 @@ SOFT_PATTERNS = [
 YAML_HARD_PATHS = [
     ("turbulence.model", ("turbulence", "model")),
     ("turbulence.wallTreatmentSST", ("turbulence", "wallTreatmentSST")),
+    ("turbulence.transition", ("turbulence", "transition")),   # 遷移モデルの有無は別の方程式系
     ("space.convMethod", ("space", "convMethod")),
     ("space.limiter", ("space", "limiter")),
     ("space.limiterScaled", ("space", "limiterScaled")),

@@ -295,6 +295,12 @@ public:
     // 受動トレーサ (physProp.tracer: exhaust)。registerTracer() で 1 なら roXi 系変数が登録済み。
     // 0 のときは何も登録せず従来経路を保つ (tracerTransport_d.cu の wrapper は全て no-op)。
     int tracerRegistered = 0;
+    // 遷移モデル (turbulence.transition: lm2009)。registerTransition は allocVariables の前に 1 度だけ呼ぶ。
+    //   roGamma/roReth: 保存量 ργ, ρRe_θt。gammaTr/reTheta: 原始量。gammaEff: SST が読む max(γ, γ_sep)。
+    //   diag!=0 で相関・ソースの診断場 (lm*) も確保して出力する。
+    int transitionRegistered = 0;
+    int transitionNeedsInit = 0;   // 入力に roGamma/roReth が無かった (初回の primitive で初期化する)
+    void registerTransition(int enabled, int diag);
 
     variables();
 

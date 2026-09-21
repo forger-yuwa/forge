@@ -29,6 +29,8 @@ void periodicGradientGather_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg ,
 // RANS SST: k/ω 状態 (roK, roOmega) を周期 group root から member へミラー (§4.5)。point-implicit SST 更新の
 // 直後に呼び、周期同一視ノードの k/ω drift を防ぐ。非 SST / cell / 非周期では no-op。
 void periodicMirrorScalarState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);
+// 遷移モデル (γ–Re_θt) の保存量 roGamma/roReth を root→member ミラー (transition: none では no-op)。
+void periodicMirrorTransitionState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);
 
 // NS 保存量 (ro,roUx,roUy,roUz,roe) を周期 group root から member へミラー (§4.5.9)。残差 gather は「同 res を
 // 異なる state に足す」ため初期 desync (例: 非周期な seed 摂動) や丸めで master/slave の保存量が drift し、

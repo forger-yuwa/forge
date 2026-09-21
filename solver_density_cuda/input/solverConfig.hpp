@@ -296,6 +296,10 @@ public:
     int LESorRANS; // 0:no 1:LES 2:RANS
     int LESmodel; // 1:WALE
     int RANSmodel = 0; // 0:none 1:SST
+    // 遷移モデル (turbulence.transition): 0 = none, 1 = lm2009 (Langtry-Menter γ-Reθt。methods/turbulence/theory.md §11)。
+    // node + 低 Re SST + 定常 block-DPLUR のみ受け付ける (plan turbulence-transition-lm2009 §4.1)。
+    int transitionModel = 0;
+    bool transitionEnabled() const { return transitionModel != 0; }
     int scalarDiffusion = 1; // 0:advection-only 1:advection+diffusion
     int dilatationCorrection = 2; // SST生産項の圧縮性補正 0:off 1:deviatoric(A) 2:deviatoric+isotropic(A+B) 既定:2
     // SST ω 交差拡散の point-implicit Jacobian (plans/active/turbulence-sst-omega-crossdiff-jacobian.md)。

@@ -33,7 +33,8 @@ forge の run ディレクトリの residual_history.csv を読み、**全保存
 import csv, math, sys, argparse, os
 
 CONSERVED = ['rms_ro', 'rms_roUx', 'rms_roUy', 'rms_roUz', 'rms_roe',
-             'rms_roK', 'rms_roOmega']
+             'rms_roK', 'rms_roOmega',
+             'rms_roGamma', 'rms_roReth']   # 遷移モデル (turbulence.transition: lm2009)
 
 
 def load_series(path):
@@ -98,6 +99,21 @@ def _tail_rise(ser, tail_frac):
 # **必須の保存量残差列**。これが 1 つも無い / 欠けている CSV を合格にしてはいけない
 # (2026-09-19 codex: `step,phase` だけの CSV や `rms_ro` だけの CSV が ok=True になっていた)。
 REQUIRED_COLS = ('rms_ro', 'rms_roUx', 'rms_roUy', 'rms_roUz', 'rms_roe')
+# 遷移モデル (turbulence.transition: lm2009) が有効な run では、この 2 列も必須 (codex plan M5, 2026-09-22)。
+# 有効かどうかは残差 CSV の隣の solverConfig.yaml から読む。
+TRANSITION_COLS = ('rms_roGamma', 'rms_roReth')
+
+
+def transition_active(csv_path):
+    import re
+    cfgp = os.path.join(os.path.dirname(os.path.abspath(csv_path)), 'solverConfig.yaml')
+    try:
+        txt = open(cfgp, encoding='utf-8').read()
+    except OSError:
+        return False
+    txt = re.sub(r'#.*', '', txt)
+    m = re.search(r'\btransition\s*:\s*["\']?([A-Za-z0-9_]+)', txt)
+    return bool(m) and m.group(1).lower() not in ('none', '0')
 
 
 def analyze(path, min_drop, tail_frac):
@@ -111,7 +127,8 @@ def analyze(path, min_drop, tail_frac):
     if not cols:
         report['(入力)'] = ('残差列が 1 つも無い  <-- 判定不能', False)
         return laststep, report, False, False, False, False
-    missing = [c for c in REQUIRED_COLS if c not in cols]
+    need = REQUIRED_COLS + (TRANSITION_COLS if transition_active(path) else ())
+    missing = [c for c in need if c not in cols]
     if missing:
         report['(入力)'] = ('必須の保存量残差列が無い: %s  <-- 判定不能' % ', '.join(missing), False)
         ok = False

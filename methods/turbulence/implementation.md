@@ -582,3 +582,32 @@ $E_t$ の式に交換ソースは現れない。理論と設計判断は plan `t
 ghost の $k$ は node では書かれない (ghostless) ため主ループの ghost 側は内部値を使う。`sstIsotropicStress` / `sstEnergyKSource` は 1 のとき無効化 (後継)。
 検証 (plan §6): 周期箱の一様減衰で $\Sigma V(E_m + \rho k)$ が 1e-7 で保存し $c_v\Delta T = -\Delta k$、$u=0$ 維持 (case/09 run_0046–0048)。
 後処理の全温は $T + u^2/2c_p + k/c_p$ で比較する。
+
+## 遷移モデル γ–Re_θt (`turbulence.transition: lm2009`, 2026-09-22)
+
+式と定数は [theory.md §11](theory.md)。実装は `cuda_forge/transition_d.cu` に閉じており、`transition: none` (既定) では全 wrapper が no-op である
+(`var.transitionRegistered == 0`)。SST 側が読むのは `gammaEff` だけ。
+
+| 段 | 実装 | 呼び出し位置 (`main.cpp` の `assembleResidual`) |
+|---|---|---|
+| 原始量 | `transitionPrimitive_d_wrapper`: $\gamma=\rho\gamma/\rho\in[10^{-4},1]$, $\tilde{Re}_{\theta t}\ge20$。入力 h5 に `roGamma`/`roReth` が無い初回だけ $\gamma=1$・自由流相関 (局所 $Tu$) で初期化 | `dependentVariables` の直後 (初期化に $U$, $k$ が要る) |
+| 入口 | `applyTransitionBoundaries`: `scalarDirichletPin==1` の節点を $\gamma=1$, $\tilde{Re}_{\theta t}=Re_{\theta t}(Tu_{local},\lambda_\theta=0)$ にピン | `applyRansScalarBoundaries` の直後 ($k$ のピンの後) |
+| 輸送 | `transitionTransport_d_wrapper`: 汎用 `scalarTransportResidualMulti_d` に記述子 2 本。$\gamma$: $\mu+\mu_t$、$\tilde{Re}_{\theta t}$: $2(\mu+\mu_t)$ (`sigma_lam = 2`, `sigma = 2`) | `ransTransport` の直後 |
+| ソース | `transitionSource_d_wrapper`: $P_\gamma-E_\gamma$, $P_{\theta t}$, 陰的対角, `gammaEff` | **`ransSource` の前** ($k$ 式が同じ反復の $\gamma_{eff}$ を読む) |
+| 更新 | `applyTransitionPointImplicit_d_wrapper`: $D=V/\Delta\tau+V\,J^-+$ `transport_diag`、上下限は更新後の保存量に直接 | SST の point-implicit 更新の直後 |
+
+- **壁**: node の境界半割面は拡散を skip し、壁ノードは $u=0$ で移流もゼロなので、何も課さなければ法線勾配ゼロになる。壁ノード・壁距離 0・停滞点
+  ($U<10^{-6}a$) はソースを評価せず ($1/U$, $1/U^2$ のゼロ割)、`gammaEff` には $\gamma$ そのものを書く。
+- **陰的対角 $J^-$** は項ごとの負の部分: $1.5\,c_{e1}F_{length}c_{a1}S\sqrt{F_{onset}\gamma}$ ($P_\gamma$ の $-\gamma^{3/2}$ 側) と
+  $\max(c_{a2}\Omega F_{turb}(2c_{e2}\gamma-1),0)$、$\tilde{Re}_{\theta t}$ は $(c_{\theta t}/t)(1-F_{\theta t})$。$P_\gamma$ の $+0.5/\sqrt\gamma$ 側は陽的に残す
+  ($\gamma\to0$ で正側に発散するので対角に入れられない。受けは下限 $10^{-4}$ と上限 1)。定常解は対角の取り方に依らない。
+- **相関**: $Re_{\theta c}$ と $F_{length,1}$ の多項式は桁落ちするので倍精度で評価する (節点あたり数回の乗算)。$Re_{\theta t}(Tu,\lambda_\theta)$ の
+  不動点反復は上限 100 回・相対 $10^{-6}$ で停止 (T3A の収束場で平均 3.3 回・最大 6 回)。
+- **SST 側** (`ransSource_d.cu`): $P_k\to\gamma_{eff}P_k$ (リミッタ・Kato–Launder・壁関数置換の**後**)、$D_k$ と `src_jac_k` に $\min(\max(\gamma_{eff},0.1),1)$。
+  **$P_\omega$ は補正前の `Pk_base` から作る**。$F_1=\max(F_1,F_3)$ は共通の `sst_f1_transition` をソースカーネルと `rans_sst_blend_f1_d` の両方に通す。
+- **周期 node**: 残差と `transport_diag_*` を group で合算し、更新後に `roGamma`/`roReth` を root→member でミラーする。ソースの体積は部分体積。
+- **受付条件** (`transitionValidateConfig`): node・SST・`wallTreatmentSST: 0`・非軸対称・DES なし・`sstEnergyIncludesK: 0`・`scalarDiffusion: 1`・定常陰解法。違反は起動時に例外。
+- **出力**: level 1 で `roGamma`, `roReth`, `gammaTr`, `reTheta`, `gammaEff`。level 2 で相関・ソースの診断場 `lm*` も出る。
+  `tools/check_lm_kernel.py <run>` が診断場を numpy 参照 (`tools/lm2009_reference.py`、倍精度) と節点ごとに突き合わせる。
+- **初期場**: 平板 (T3A) では、完全乱流の SST 場からそのまま始めても、$k$/$\omega$ を入口値に戻してから始めても同じ解に落ちる (`case/57` `run_0011` と `run_0005` が 4 桁一致)。
+  乱流境界層の中は $F_{turb}=e^{-(R_T/4)^4}=0$ で $\gamma$ の破壊項が働かないが、上流から $\gamma$ の小さい流体が入れ替わるので履歴は残らない。

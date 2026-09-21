@@ -130,6 +130,8 @@ def main():
             fields = {"ro": ro, "roUx": ro*Ux, "roUy": ro*Uy, "roUz": ro*Uz, "roe": roe}
             if "k" in V and "omega" in V:
                 fields["roK"] = ro*np.array(V["k"]); fields["roOmega"] = ro*np.array(V["omega"])
+            if "gammaTr" in V and "reTheta" in V:   # 遷移モデル (LM2009): 原始量 → 保存量
+                fields["roGamma"] = ro*np.array(V["gammaTr"]); fields["roReth"] = ro*np.array(V["reTheta"])
             for key in V:                      # scalar transport Y* -> roY*
                 if key.startswith("Y") and key[1:].isdigit():
                     fields["ro"+key] = ro*np.array(V[key])
@@ -142,7 +144,7 @@ def main():
                 fields["roXi"] = ro*np.clip(np.array(V["Xi"], dtype=np.float64), 0.0, 1.0)
         else:                                  # input (conserved)
             fields = {n: np.array(V[n]) for n in
-                      ["ro","roUx","roUy","roUz","roe","roK","roOmega"] if n in V}
+                      ["ro","roUx","roUy","roUz","roe","roK","roOmega","roGamma","roReth"] if n in V}
             for key in V:
                 if key.startswith("roY") and key[3:].isdigit():
                     fields[key] = np.array(V[key])
@@ -165,7 +167,7 @@ def main():
             ds = "VALUE/"+name
             if ds in d and name != "wall_dist":
                 d[ds][...] = arr[idx].astype(d[ds].dtype); moved.append(name)
-            elif name.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")) or (name.startswith("roY") and name[3:].isdigit()) or name == "roXi":
+            elif name.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")) or (name.startswith("roY") and name[3:].isdigit()) or name in ("roXi", "roGamma", "roReth"):
                 # 凝縮モーメントと化学種は convert 直後の入力 h5 に無いので新規作成する (無ければ forge は第 1 種以外を 0 に
                 # 初期化し、carrier では rog<=roY_w のクランプで液相が消える: codex 2026-09-16 result M2)。
                 # forge は VALUE/<consName> が存在すれば読む (無ければ 0 = dry restart)。2026-08-18 / 2026-09-16

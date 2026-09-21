@@ -51,6 +51,7 @@
 #include "cuda_forge/convection/convectiveFlux_d.cuh"
 #include "cuda_forge/ransTransport_d.cuh"
 #include "cuda_forge/ransSource_d.cuh"
+#include "cuda_forge/transition_d.cuh"
 #include "cuda_forge/speciesTransport_d.cuh"
 #include "cuda_forge/chemistrySource_d.cuh"
 #include "cuda_forge/condensationTransport_d.cuh"
@@ -185,6 +186,11 @@ std::vector<std::string> residualEquationNames(const solverConfig& cfg)
         for (const auto* name : kScalarResidualEquationNames) {
             names.emplace_back(name);
         }
+    }
+    // 遷移モデル rms_roGamma / rms_roReth (SST の直後)。
+    if (cfg.transitionEnabled()) {
+        names.emplace_back("roGamma");
+        names.emplace_back("roReth");
     }
 
     // 化学種 rms_roY{s} (流れ/RANS の後、凝縮モーメントの前)。受動トレーサ rms_roXi はその次。
@@ -1168,6 +1174,10 @@ cudaConfig initializeSimulation(
     // 受動トレーサ roXi を登録 (allocVariables より前)。physProp.tracer 未指定では no-op。
     var.registerTracer(cfg.tracerEnabled() ? 1 : 0);
 
+    // 遷移モデル (turbulence.transition: lm2009) の変数を登録。none では no-op。診断場は output.level>=2 のときだけ確保。
+    transitionValidateConfig(cfg);
+    var.registerTransition(cfg.transitionEnabled() ? 1 : 0, (cfg.outputLevel >= 2) ? 1 : 0);
+
     var.allocVariables(cfg.gpu , msh);
 
     // device roY[] ポインタ配列を構築 (c_d 確保後, dependentVariables より前)。
@@ -1374,6 +1384,7 @@ void assembleResidual(StepContext& s, int stage_index)
     });
     s.profiler.measureWall(ProfileSection::DependentVariables, [&]() {
         dependentVariables(s.cfg , s.cuda_cfg , s.msh , s.var, s.mat_ns);
+        transitionPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // γ, Re_θt (初回初期化は Ux/k が要るのでここ)
     });
     s.profiler.measureCuda(ProfileSection::GasProperties, [&]() {
         gasProperties_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
@@ -1383,6 +1394,7 @@ void assembleResidual(StepContext& s, int stage_index)
     });
     s.profiler.measureWall(ProfileSection::ApplyBconds, [&]() {
         applyRansScalarBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
+        applyTransitionBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);   // 遷移モデル: node 入口ピン (k のピンの後)
         applyWmlesWallModel(s.cfg , s.cuda_cfg , s.msh , s.var);   // WMLES 壁応力モデル (§10)
         applySstThermalWallFunction(s.cfg , s.cuda_cfg , s.msh , s.var);  // SST 熱的壁関数: 断熱壁 T_aw (§6.5(f))
         applySpeciesBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
@@ -1428,6 +1440,7 @@ void assembleResidual(StepContext& s, int stage_index)
         ransGradient_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         ransBlendF1_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         ransTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);
+        transitionTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);   // γ / Re_θt の移流拡散 (none で no-op)
     });
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         speciesTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);  // 化学種移流残差
@@ -1441,6 +1454,7 @@ void assembleResidual(StepContext& s, int stage_index)
         passivePinResidual_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 受動種経路: node 入口ピンノードの残差除外 (ソース集計の後)
     });
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
+        transitionSource_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // γ_eff を先に確定 (SST の k 式が同じ反復の値を読む)
         ransSource_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // k/ω 勾配は上 (ransTransport の前) で評価済み
     });
     s.profiler.measureCuda(ProfileSection::AxisymmetricSource, [&]() {
@@ -1665,6 +1679,7 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
             applySSTPointImplicit(s.cfg , s.cuda_cfg , s.msh , s.var , s.mat_ns);
             // node 周期 DOF 同一視 (§4.5): point-implicit SST 更新後に k/ω 状態を root→member ミラーし drift を防ぐ。
             periodicMirrorScalarState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            applyTransitionPointImplicit_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 遷移モデル γ / Re_θt (周期ミラー込み)
             sstEnergyKCorrection_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, 0);   // E_t 保存: roe -= (roK − roK_prev) (増分更新)
         });
     }
@@ -1975,6 +1990,10 @@ void checkNonFiniteAndHalt(StepContext& s)
     if (scalarResidualEnabled(s.cfg)) {
         names.emplace_back("roK");
         names.emplace_back("roOmega");
+    }
+    if (s.cfg.transitionEnabled()) {
+        names.emplace_back("roGamma");
+        names.emplace_back("roReth");
     }
 
     std::string offending;

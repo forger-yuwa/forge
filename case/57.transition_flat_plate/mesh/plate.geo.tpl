@@ -1,0 +1,31 @@
+// 遷移平板 (ERCOFTAC T3A / T3B) — 平面 2D 構造メッシュ (node 用)
+//   領域: x in [-X_UP, L], y in [0, H]。x<0 は slip 助走 (入口を前縁の X_UP 上流に置く: Langtry-Menter の設定)、x>=0 が no-slip 平板
+Mesh.ScalingFactor = 1.0;
+lc = 0.05;
+x0 = -__X_UP__;  x1 = 0.0;  x2 = __L__;  H = __H__;
+nx_up = __NX_UP__;  r_up = __R_UP__;
+nx_plate = __NX_PLATE__;  r_plate = __R_PLATE__;
+ny = __NY__;  r_y = __R_Y__;
+Point(1) = {x0, 0.0, 0.0, lc};
+Point(2) = {x1, 0.0, 0.0, lc};
+Point(3) = {x2, 0.0, 0.0, lc};
+Point(4) = {x2, H,   0.0, lc};
+Point(5) = {x1, H,   0.0, lc};
+Point(6) = {x0, H,   0.0, lc};
+Line(1) = {1, 2};   Line(2) = {2, 3};   Line(3) = {3, 4};   Line(4) = {4, 5};
+Line(5) = {5, 2};   Line(6) = {5, 6};   Line(7) = {6, 1};
+Transfinite Line {7} = ny Using Progression 1.0/r_y;
+Transfinite Line {5} = ny Using Progression 1.0/r_y;
+Transfinite Line {3} = ny Using Progression r_y;
+Transfinite Line {1} = nx_up Using Progression 1.0/r_up;
+Transfinite Line {6} = nx_up Using Progression r_up;
+Transfinite Line {2} = nx_plate Using Progression r_plate;
+Transfinite Line {4} = nx_plate Using Progression 1.0/r_plate;
+Curve Loop(1) = {7, 1, -5, 6};  Plane Surface(1) = {1};  Transfinite Surface {1};  Recombine Surface(1);
+Curve Loop(2) = {5, 2, 3, 4};   Plane Surface(2) = {2};  Transfinite Surface {2};  Recombine Surface(2);
+Physical Curve("inlet",  1) = {7};
+Physical Curve("outlet", 2) = {3};
+Physical Curve("top",    3) = {4, 6};
+Physical Curve("wall",   4) = {2};
+Physical Curve("sym",    5) = {1};
+Physical Surface("fluid", 8) = {1, 2};
