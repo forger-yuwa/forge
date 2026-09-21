@@ -45,22 +45,24 @@ C3 = ROOT / "case/53.c3x_vane_cht"
 MK = ROOT / "case/54.markii_vane_cht"
 
 # ---- どの図がどの run か (報告の run 一覧と一致させること) ----
+# 2026-09-21: node 内部双対面の fx=0.5 固定 (plan discretization-node-face-weight-midpoint) 後の run に差し替え。
+# `run_0125` / `run_0024` は環境変数 FORGE_NODE_FX_HALF=1 の試行バイナリ (恒久実装と同じスキーム。run_0127 で照合)。
 RUNS = {
     "c3x": dict(base=C3, key="run108", Tg=786.0, Pt=319500.0, table="VI",
-                prod="run_0107_prod_su2turb_long", laminar="run_0119_laminar",
+                prod="run_0125_prod_fxhalf", laminar="run_0134_laminar_fx05",
                 prod_note="cs400 mesh, reconT=1, SU2-matched turbulence, exit 188.9 kPa",
                 name="C3X run 108"),
     "markii": dict(base=MK, key="run42", Tg=788.0, Pt=337100.0, table="V",
-                   prod="run_0019_tecut_long", laminar="run_0020_laminar",
+                   prod="run_0024_tecut_fxhalf", laminar="run_0026_laminar_fx05",
                    prod_note="cs400 mesh with the base cut, reconT=1, exit 169.9 kPa",
                    name="Mark II run 42"),
 }
-SU2_CTRL = dict(forge="run_0108_cf0_su2turb_long", su2="su2_smooth/vol_solution.vtu", Tw=566.0)
-TURB = [("run_0118_tu3", "Tu 3 %", "#2a9d8f", "--"),
-        ("run_0108_cf0_su2turb_long", r"Tu 6.5 %, $\mu_t/\mu$=10  (used here)", "k", "-"),
-        ("run_0117_tu15", "Tu 15 %", "#e9a23b", "--"),
-        ("run_0115_mut1", r"$\mu_t/\mu$ = 1", "tab:blue", "-"),
-        ("run_0116_mut100", r"$\mu_t/\mu$ = 100", "tab:red", "-")]
+SU2_CTRL = dict(forge="run_0128_cf0_fx05", su2="su2_smooth/vol_solution.vtu", Tw=566.0)
+TURB = [("run_0133_tu3_fx05", "Tu 3 %", "#2a9d8f", "--"),
+        ("run_0128_cf0_fx05", r"Tu 6.5 %, $\mu_t/\mu$=10  (used here)", "k", "-"),
+        ("run_0132_tu15_fx05", "Tu 15 %", "#e9a23b", "--"),
+        ("run_0130_mut1_fx05", r"$\mu_t/\mu$ = 1", "tab:blue", "-"),
+        ("run_0131_mut100_fx05", r"$\mu_t/\mu$ = 100", "tab:red", "-")]
 
 
 def last_wall(run_dir):

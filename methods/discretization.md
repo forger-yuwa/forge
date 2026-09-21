@@ -719,8 +719,10 @@ cell モード・境界半割面 (`ip>=nNormalPlanes`) は対象外。`fx` は�
 
 症状は壁熱流束 `iface_q_eff` の**約 25 節点周期・空間固定のうねり** (粘性仕事 $\tau\cdot U_f$、$U_f=(1-f)U_1$ に乗る。
 $s/S$ 0.45–0.95 で rms 571 W/m²)。`fx=0.5` でうねり rms 1.22 → 0.46 kW/m²、平板 (case/48) と 1 次元スラブ (case/52) は不変。
-**node の内部双対面は `fx=0.5` の固定スキームに戻す** (現在は試験用の環境変数 `FORGE_NODE_FX_HALF=1`。
-恒久化は上の plan の codex レビュー後)。
+**node の内部双対面は `fx=0.5` の固定スキーム** (2026-09-22 恒久化。`calcStructualVariables_d_wrapper` の
+`nodeMode = (discretization=="node")`。オプションは無い)。周期 TGV (case/09)・軸対称凝縮ノズル (case/44) はノイズ床内で不変、
+平板を 30° 回した同一問題では回転不変性が 3–4 倍よくなる ($\tau_w$ の差 0.085 → 0.024 %)。
+**辺中点の算術平均は線形場で厳密・値補間として 2 次**であり、伸長格子上の拡散演算子の次数は別に格子系列で測る (未実施)。
 
 **検証 (case/29 conical, node laminar viscous 40k)**: `fx=0.5` は近壁 `dUxdy` の checkerboard roughness を
 低減 (99pct 12.84→8.23, −36%)。SU2 (axisym laminar 同条件) との**壁圧比較で fx ON/OFF は区別不能** (<0.5% 差、

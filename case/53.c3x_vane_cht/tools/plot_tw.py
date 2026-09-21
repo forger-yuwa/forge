@@ -58,10 +58,17 @@ def main():
     ax.set_title(f"{t['vane']} {a.run} — coupled CHT wall temperature "
                  f"(bias {e.mean():+.1f} K, rms {np.sqrt((e**2).mean()):.1f} K over s/S<=0.87)",
                  fontsize=10)
-    ax.grid(alpha=0.3); ax.legend(loc="best", fontsize=9)
+    ax.grid(alpha=0.3); ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=9, frameon=False)
     out = a.out or str(Path(a.run_dir) / "Tw_compare.png")
     fig.tight_layout(); fig.savefig(out, dpi=110)
     print(f"[plot_tw] {f} -> {out}")
+    # 領域別の壁温偏差 (compare_h と同じ区分。報告の表はここから転記する)
+    for name, mm in (("PS", ~ss & (s <= 0.87)), ("SS laminar (s/S<0.25)", ss & (s < 0.25)),
+                     ("SS post-transition", ss & (s >= 0.25) & (s <= 0.87)), ("all", s <= 0.87)):
+        d = Tw[mm] - Te[mm]
+        print(f"    {name:<24} n={mm.sum():3d}  bias {d.mean():+6.1f} K  rms {np.sqrt((d**2).mean()):5.1f} K  "
+              f"max|err| {np.abs(d).max():5.1f} K")
+    print(f"    Tw range {Tw.min():.1f}-{Tw.max():.1f} K, mean {Tw.mean():.1f} K")
 
 
 if __name__ == "__main__":

@@ -64,12 +64,12 @@ void calcStructualVariables_d
 
 void calcStructualVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh,  variables& v)
 {
-    // (nodeMidpointFx 撤去 2026-08-16) 値=ノード座標では幾何 fx が中点相当になるため常に幾何 fx。
-    // 試験 (plan boundary-conjugate-heat-transfer §5.1 #60): FORGE_NODE_FX_HALF=1 で node の内部双対面を fx=0.5 に固定。
-    // 幾何 fx は高 AR の曲面壁層で 0.07–0.96 に散る (式が回転不変でない + 弦のたるみ)。既定は従来どおり幾何 fx。
-    const char* fxHalfEnv = std::getenv("FORGE_NODE_FX_HALF");
-    const int nodeMode = (cfg.discretization == "node" && fxHalfEnv && std::atoi(fxHalfEnv) != 0) ? 1 : 0;
-    if (nodeMode == 1) printf("[EXPERIMENT] FORGE_NODE_FX_HALF: node internal dual faces use fx = 0.5\n");
+    // (nodeMidpointFx 撤去 2026-08-16 → 2026-09-21 に固定スキームとして復活。下記)
+    // node の内部双対面は fx=0.5 (辺中点) の固定スキーム (2026-09-21, plan discretization-node-face-weight-midpoint)。
+    // 幾何 fx は (i) 下の式が法線射影でなく成分ごとの積のノルムなので**回転不変でなく**、(ii) 射影に直しても
+    // 高 AR の曲面壁層では弦のたるみ κΔs²/8 ~ d1 のため 0.03–1.00 に散る。「値=ノード座標なら幾何 fx は中点相当」
+    // (2026-08-16 の nodeMidpointFx 撤去の前提) は等方セルでしか成り立たない。cell と境界半割面は従来どおり。
+    const int nodeMode = (cfg.discretization == "node") ? 1 : 0;
     calcStructualVariables_d<<<cuda_cfg.dimGrid_plane , cuda_cfg.dimBlock>>>(
         msh.nPlanes, msh.nNormalPlanes,
         msh.map_plane_cells_d,

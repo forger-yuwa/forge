@@ -99,10 +99,11 @@ node の内部双対面で `fx = 0.5` に固定する (`calcStructualVariables_d
 | # | 項目 | 内容 |
 | --- | --- | --- |
 | 1 | ~~codex plan レビュー~~ | 済 (2026-09-21、GO-with-changes C0/M4。§6.1)。4 件とも採用 |
-| 2 | 回帰範囲の補完 (codex M3) | `procedures/verification/README.md` の node 一覧に沿って **`case/09` (周期・受動スカラー)** と **`case/44` (軸対称・多成分 TP・凝縮)** を `FORGE_NODE_FX_HALF` の A/B で回す。済: `case/48` 平板 (`run_0020`/`run_0021`: $q$ 最大 0.0031 %・$\tau_w$ 0.0020 % = 不変)、`case/52` スラブ (`run_0006`/`run_0007`: 5e−7) |
-| 3 | 合格条件の固定 (codex M4) | §6 の通り。A/B は同じ熱流束定義で比べる / 壁熱流束の領域別偏差・うねり rms の**時系列**を `check_quasisteady.py --series-csv` で判定 / 未収束の run は機構診断として扱う |
-| 4 | 恒久実装 | #2・#3 を満たしてから。`nodeMode = (discretization=="node")`、環境変数 `FORGE_NODE_FX_HALF` は撤去 |
-| 5 | 翼の生産 run の更新 | 恒久実装と result レビューの**後**に報告の数字を差し替える。それまでは `FORGE_NODE_FX_HALF=1` の試行 run (`case/53` `run_0125`、`case/54` `run_0024`) を「試行」と明記して併記する |
+| 2 | ~~回帰範囲の補完 (codex M3)~~ | **済 (2026-09-21)**。対照 2 本 + 試行 2 本を `check_field_regress.py` でノイズ床と比較。**`case/09.Taylor-Green`** (周期・受動スカラー、`run_0169_fx_ctrl_a`/`run_0170_fx_ctrl_b` 対 `run_0171_fx_half_a`/`run_0172_fx_half_b`): `VERDICT: PASS` (最大比 1.39)。**`case/44.vitiated_air_wt`** (軸対称・多成分 TP・凝縮、`run_0505`/`run_0506` 対 `run_0507`/`run_0508`、`--boundary`): `VERDICT: PASS` (最大比 1.88 < 2)。ただし `case/44` は Euler で `fx` を読む粘性・拡散経路をほとんど通らないので**不変の確認にしかならない**。`case/48` 平板 (`run_0020`/`run_0021`: $q$ 最大 0.0031 %・$\tau_w$ 0.0020 %)、`case/52` スラブ (`run_0006`/`run_0007`: 5e−7) も不変 |
+| 2b | ~~回転不変性の直接試験~~ | **済 (2026-09-21)**。`case/48` の平板のメッシュ・場・入口速度を **z 軸まわりに 30° 回した**同一問題 (`mesh.h5` の座標・面ベクトル・運動量を回転) を 4000 step。回す前の同じスキームの解との差 ($x/L$ 0.3–0.95 の rms): 幾何 `fx` (`run_0022_rot30_fx_ctrl`) は $\tau_w$ **0.085 %**・壁面勾配流束 **0.254 %**・`q_eff` の平均 **+0.28 %**、`fx=0.5` (`run_0023_rot30_fx_half`) は **0.024 %**・**0.062 %**・**+0.01 %**。**`fx=0.5` で回転不変性が 3–4 倍よくなる** (残りは回した座標の float32 丸め: $x\sim1$ m で 0.06 µm、第一層 3 µm の 2 %)。回したメッシュでは `q_eff` の節点間ノイズが両スキームとも 0.9 % 出る — 壁 CV の質量残差 (float32 の面ベクトル閉性) 由来で `fx` とは無関係。旧定義 `iface_q_eff_raw` なら 3.1 % |
+| 3 | ~~合格条件の固定 (codex M4)~~ | **済**。§6 に反映。生産設定の A/B (`case/53` `run_0125`/`run_0126`、`case/54` `run_0024`/`run_0025`) は領域別偏差・うねり rms・2 節点振幅の時系列 (`tools/h_series.py`) を `check_quasisteady.py --series-csv` にかけ 4 本とも `ALL STEADY` |
+| 4 | ~~恒久実装~~ | **済 (2026-09-22)**。`calcStructualVariables_d_wrapper` で `nodeMode = (discretization=="node")`、環境変数 `FORGE_NODE_FX_HALF` は撤去。環境変数版との照合 `case/53.c3x_vane_cht/run_0127_fxhalf_permanent_check`: 4000 step 後の最大相対差 ρ 4.6e−5・T 2.0e−5 (後流の非定常の範囲) |
+| 5 | ~~翼の生産 run の更新~~ | **済 (2026-09-22)**。報告に載る run を新スキームで 60000 step 継続し直した: `case/53` `run_0125` (生産)・`run_0128` (SU2 対照)・`run_0129` (節点配置)・`run_0130`–`run_0133` (入口乱流)・`run_0134` (層流)・`run_0135` (1 µm)、`case/54` `run_0024` (生産)・`run_0026` (層流)・`run_0027`/`run_0028` (格子)。引用する量は `tools/report_numbers.py` で `check_quasisteady --series-csv` の判定つきで出す。連成は CHT plan §5.1 #62 |
 | 6 | cell の `fx` の式 | 回転不変でない式のまま (同じ幾何を 45° 回すと重みが 0.8 → 0.637 に変わる: codex の代数チェック)。cell は使わない方針なので**修正せず記録のみ** |
 | 7 | 格子系列での次数測定 (codex M2) | 成長率 1.1/1.2 の伸長格子・曲面高 AR 格子・回転した同一格子で製造解 (または解析解のある層流) を 3 格子。温度・速度・壁熱流束の誤差次数を測り、2 次を主張する範囲は $p\ge1.8$ を要求。細分化時の成長率の扱いを明記する |
 | 8 | codex result レビュー | `done` にする前 |
@@ -137,5 +138,7 @@ node の内部双対面で `fx = 0.5` に固定する (`calcStructualVariables_d
 
 ## 9. 変更ログ
 
+- `2026-09-22` 恒久実装。報告の run を新スキームで回し直し、報告を改訂。codex result レビューへ。
+- `2026-09-21` 回帰 (`case/09`, `case/44`: `check_field_regress` PASS) と回転不変性の試験 (`case/48` 30° 回転) を実施。恒久実装へ。
 - `2026-09-21` codex plan レビュー (GO-with-changes)。4 件採用。平板・スラブの回帰は不変を確認。
 - `2026-09-21` 起票。真因の特定 (`run_0121_resid_split`) と環境変数での A/B (`run_0122`/`run_0123`) まで。

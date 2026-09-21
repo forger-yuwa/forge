@@ -30,8 +30,8 @@ def main():
     C, qe0, qc0 = wall(a.ctrl); C1, qe1, qc1 = wall(a.trial); assert np.abs(C - C1).max() == 0
     XY, QS = read_su2(C3 / SU2_CTRL["su2"]); d, idx = cKDTree(XY).query(C); assert d.max() == 0.0
     s, ss = arc_map(C); o = np.argsort(s[ss]); sS = s[ss][o]; g = lambda y: y[ss][o] / 1e3
-    cur = [("forge, geometric face weight (current)", g(qe0), "tab:red", 1.4),
-           ("forge, face weight 0.5 (trial)", g(qe1), "k", 1.8),
+    cur = [("forge before: geometric face weight, storage term counted as heat", g(qe0), "tab:red", 1.4),
+           ("forge after: edge-midpoint face weight, storage term removed", g(qe1), "k", 1.8),
            ("SU2 8.5, same mesh (wall-gradient flux)", g(QS[idx]), "tab:green", 1.4)]
     fig, ax = plt.subplots(2, 1, figsize=(10.5, 7.2), sharex=True)
     m = (sS >= 0.45) & (sS <= 0.95)

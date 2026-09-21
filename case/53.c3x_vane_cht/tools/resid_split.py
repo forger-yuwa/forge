@@ -56,15 +56,19 @@ def main():
     print("corr of detrended q_eff with: " + "  ".join(f"{k} {np.corrcoef(D['q_eff'], D[k])[0,1]:+.2f}" for k in D if k != "q_eff"))
     if a.out:
         import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
-        fig, ax = plt.subplots(3, 1, figsize=(11, 9), sharex=True)
-        for k in ("q_eff", "wall(-Fw)", "q_compact"):
-            ax[0].plot(sS, comp[k][ss][o] / 1e3, lw=1, label=k)
-        for k in ("conv", "src", "visc_int"):
-            ax[1].plot(sS, comp[k][ss][o] / 1e3, lw=1, label=k)
-            ax[2].plot(sS, (comp[k][ss][o] - smooth(comp[k][ss][o], a.win)) / 1e3, lw=1, label=k + " - smooth")
-        ax[2].plot(sS, (comp["q_eff"][ss][o] - smooth(comp["q_eff"][ss][o], a.win)) / 1e3, "k", lw=1, label="q_eff - smooth")
-        for x in ax: x.legend(loc="upper left", bbox_to_anchor=(1.0, 1.0), fontsize=8); x.grid(alpha=.3); x.set_ylabel("kW/m$^2$")
-        ax[2].set_xlabel("s/S (suction side)"); ax[1].set_ylim(-15, 15); ax[2].set_ylim(-6, 6); ax[0].set_xlim(0.2, 1.0)
+        LAB = {"q_eff": "heat given up to the wall (reported)", "wall(-Fw)": "flux through the wall face",
+               "conv": "convective, into the wall control volume", "src": "sources",
+               "visc_int": "viscous (conduction + work), interior faces"}
+        fig, ax = plt.subplots(2, 1, figsize=(10.5, 6.6), sharex=True)
+        for k, c in (("q_eff", "k"), ("wall(-Fw)", "tab:green")):
+            ax[0].plot(sS, comp[k][ss][o] / 1e3, lw=1.3, color=c, label=LAB[k])
+        for k, c in (("conv", "tab:blue"), ("visc_int", "tab:red")):
+            ax[1].plot(sS, (comp[k][ss][o] - smooth(comp[k][ss][o], a.win)) / 1e3, lw=1.2, color=c, label=LAB[k])
+        ax[1].plot(sS, (comp["q_eff"][ss][o] - smooth(comp["q_eff"][ss][o], a.win)) / 1e3, "k", lw=1.0, ls="--", label=LAB["q_eff"])
+        for x in ax: x.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize=8, frameon=False); x.grid(alpha=.3)
+        ax[0].set_ylabel("kW/m$^2$"); ax[1].set_ylabel(f"minus {a.win}-node moving mean [kW/m$^2$]")
+        ax[1].set_xlabel("s/S, suction side"); ax[1].set_ylim(-6, 6); ax[0].set_xlim(0.2, 1.0); ax[0].set_ylim(140, 205)
+        ax[0].set_title(f"C3X, uniform $T_w$ — {rd.name}, step {fn.stem.split('_')[-1]}", fontsize=10)
         fig.tight_layout(); fig.savefig(a.out, dpi=110)
 
 
