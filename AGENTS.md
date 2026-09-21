@@ -264,6 +264,10 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
   `~/.cache/forge-gate-claims/<session_id>.txt` に claim された)。したがって子が回した run は親の Stop ゲートの検査対象に入る。
   Claude Code の更新でこの挙動が変わりうるので、ゲートが子の run を見ていない兆候があれば同じ方法で測り直す
   (`echo "run_case.sh case/99.claimprobe_child"` を子に打たせて台帳を見る)。
+- **定義はセッション開始時に読み込まれる** (2026-09-22 実測)。`.claude/agents/*.md` を追加・変更したセッションからは
+  その定義を呼べない (`Agent type not found`)。新規セッションでは 3 本とも読み込まれ、`run-watcher` = Sonnet 5 /
+  `implementer` = Opus 5 / `diagnostician` = Fable 5.1 (`model: claude-fable-5-1` は受理される) で動くことを確認した。
+  定義を変えたら `claude -p --model haiku` の別プロセスから 1 回呼んで確かめる。
 - **固定コスト**: サブエージェントは 1 回の呼び出しで AGENTS.md・メモリ索引・ツール定義ぶん**約 4.7 万トークン**を読む
   (2026-09-22 実測、`echo` 1 回で 47,499)。上位の `diagnostician` は編集単位で細かく呼ばず、**判断単位にまとめて**呼ぶ。
   費用削減は未計測の見立てなので、運用開始後にセッション別の実費で確かめる。

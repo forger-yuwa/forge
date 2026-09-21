@@ -28,7 +28,9 @@ model: sonnet
 
 ### early-check
 走行中の run の `residual_history.csv` の全 `rms_*` 列を数十ステップ分見て、NaN/Inf の有無と最初の step を返す。
-状態は `RUNNING` (問題なし) か `FAILED` (NaN)。
+状態は `RUNNING` (走行中で NaN なし) か `FAILED` (NaN)。**forge が既に終了していたら `RUNNING` と書かない** —
+NaN の有無だけ報告し、「終了済み。`post-check` で呼ぶこと」を「次に親がやること」に書く
+(動作試験で、終了済みの run に `RUNNING` を付けた実績がある)。
 
 ### post-check
 1. forge が終了していることを確かめる (`residual_history.csv` の更新が止まっている・プロセスが無い)。走行中なら `RUNNING` で返す。
