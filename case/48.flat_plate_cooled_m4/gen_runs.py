@@ -23,21 +23,21 @@ RO_INF = P_INF / (R * T_INF); A_INF = (GAM * R * T_INF) ** 0.5; U_INF = M_INF * 
 K_INF, OM_INF = 75.0, 26000.0     # TI 0.5 %, mu_t/mu ~ 10
 IC_DELTA0 = 3.0e-4               # IC の壁近傍速度ランプ幅 [m]
 
-CFG = """mesh: {{meshFormat: "hdf5", discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: "mesh.h5", valueFileName: "mesh.h5"}}
+CFG = """mesh: {{discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: "mesh.h5", valueFileName: "mesh.h5"}}
 gpu: 1
 solver: "SLAU"
-physProp: {{isCompressible: 1, thermalMethod: 0, viscMethod: 1, ro: 1.2, visc: 1.8e-5, thermCond: 0.0257, thermCondMethod: 1, prandtlLam: 0.72, cp: {cp}, gamma: {gam}}}
+physProp: {{thermalMethod: 0, viscMethod: 1, visc: 1.8e-5, thermCond: 0.0257, thermCondMethod: 1, prandtlLam: 0.72, cp: {cp}, gamma: {gam}}}
 time:
   unsteady: 0
   dualTime: 0
-  last: {{control: 0, nStepOuter: {nsteps}}}
+  last: {{nStepOuter: {nsteps}}}
   deltaT: {{control: 1, dt: 1e-8, cfl: {cfl}, cfl_pseudo: {cfl}, implicitRelax: {relax}, blockDPLUR: 1, lowMachPrecond: 0, dt_min: 1e-10, dt_max: 1.0, detectNaN: 1}}
   outStepStart: 0
   outStepInterval: {outint}
   timeIntegration: 11
   nStepInner: {ninner}
 space: {{convMethod: {conv}, limiter: {lim}}}
-turbulence: {{model: "sst", scalarDiffusion: 1, dilatationCorrection: {dil}, katoLaunder: {kl}, wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInf: {k}, omegaInf: {om}}}
+turbulence: {{model: "sst", scalarDiffusion: 1, dilatationCorrection: {dil}, katoLaunder: {kl}, wallTreatmentSST: 0, turbulentPrandtl: 0.9}}
 output: {{level: 1}}
 initial: "uniform_p101325_u10"
 """
@@ -142,6 +142,8 @@ def main():
     rd.mkdir()
     shutil.copy(HERE / "mesh" / f"{a.mesh}.h5", rd / "mesh.h5")
     Tw = None if a.wall == "adiabatic" else float(a.wall)
+    # interp_field は DST の隣の solverConfig.yaml で化学種署名を照合する (無いと REFUSED) ので、先に config を置く
+    (rd / "solverConfig.yaml").write_text(cfg(a.main_steps, a.cfl, a.relax, 1, a.limiter, 5, a.out_int, a.plain))
     if a.ic_mesh:
         shutil.copy(a.ic_mesh, rd / "mesh.h5"); (rd / "CONTINUED_FROM").write_text(str(a.ic_mesh) + "\n")
     elif a.ic_from:

@@ -112,13 +112,13 @@ Mark II の層流域は +3.8 pt」に限る。いずれの run も残差は `NOT
 | --- | --- | --- |
 | 1 | ~~codex plan レビュー~~ | 済 (2026-09-21、GO-with-changes C0/M4。§6.1)。4 件とも採用 |
 | 2 | 回帰範囲の補完 (codex M3) | **比較は済・合格証拠は不足 (codex result M1)**。対照 2 本 + 試行 2 本を `check_field_regress.py` でノイズ床と比較。**`case/09.Taylor-Green`** (周期・受動スカラー、`run_0169_fx_ctrl_a`/`run_0170_fx_ctrl_b` 対 `run_0171_fx_half_a`/`run_0172_fx_half_b`): `VERDICT: PASS` (最大比 1.39)。**`case/44.vitiated_air_wt`** (軸対称・多成分 TP・凝縮、`run_0505`/`run_0506` 対 `run_0507`/`run_0508`、`--boundary`): `VERDICT: PASS` (最大比 1.88 < 2)。ただし `case/44` は Euler で `fx` を読む粘性・拡散経路をほとんど通らないので**不変の確認にしかならない**。`case/48` 平板 (`run_0020`/`run_0021`: $q$ 最大 0.0031 %・$\tau_w$ 0.0020 %)、`case/52` スラブ (`run_0006`/`run_0007`: 5e−7) も不変。**ただし §6 が要求する `check_convergence.py` の `PASS` は平板・スラブとも取れていない** (4 本とも `NOT CONVERGED (stalled/plateau)`。`--from-floor case/48…/run_0011_Bplain_tw300_y3` は参照 run 自身が継続 run で `PASS` でないため `REFUSED`)。差が小さいことは回帰合格の証明ではないので、**平板を `procedures/verification/48-flat-plate-cooled.md` の全段起動で新バイナリから回し直して `PASS` と基準値 (C_f/VD-II・2St/C_f・エネルギー閉合) を取る**のを #2c として残す |
-| 2c | 平板の全段起動による回帰合格 (codex result M1) | 上記。スラブは純伝導で残差が丸め床 (2e−5) に張り付くので、収束判定でなく解析解との一致 (−0.154 %、不変) を合格条件にすることを §6 に明記する |
+| 2c | ~~平板の全段起動による回帰合格 (codex result M1)~~ | **済 (2026-09-22)**。`procedures/verification/48-flat-plate-cooled.md` の手順どおり新バイナリで冷間起動: `case/48.flat_plate_cooled_m4/run_0024_A_ad_y3_fx05` (断熱、全段 + 本段 48000) → `run_0025_B_tw300_y3_fx05` (冷却壁 300 K、soft + ランプ + 本段 48000)。`cooled_plate_eval.py --ref … --closure --series --integrals`: $C_f$/VD-II **0.969–0.994** (基準 0.97–0.99)、$2St/C_f$ **1.15–1.16** (1.16)、エネルギー閉合 **1.016** (1.017)、θ の CONTUR 比 0 %、`SERIES VERDICT: STEADY`。2026-09-12 の基準 run `run_0005_B_tw300_y3` を同じツールで評価し直した値との差は $C_f$ +0.1〜+0.2 %、$q_w$ +0.1〜+0.2 %、δ\* −0.9〜+0.8 %、積分 $C_D$・熱量とも +0.18 % = **手順の回帰基準 (3 %) の 1/15 以下**。この差には 2026-09-20 のリミッタ既定変更も含まれる。**`check_convergence.py` の `PASS` はこのケースでは取れない** — 前縁特異点による残差床 (`rms_ro`≈1e−7、`rms_roe`≈0.2) が手順書に既知の床として明記されており、基準 run 自身も `NOT CONVERGED (stalled/plateau)` である。そのため §6 の合格条件を「手順書の物理量基準 + 系列 `STEADY`」に改めた (下)。付随: `gen_runs.py` の廃止キー (`meshFormat`・`isCompressible`・`ro`・`last.control`・`kInf`/`omegaInf`) と、`interp_field.py` より後に config を書いていた順序を修正 |
 | 2b | ~~回転不変性の直接試験~~ | **済 (2026-09-21)**。`case/48` の平板のメッシュ・場・入口速度を **z 軸まわりに 30° 回した**同一問題 (`mesh.h5` の座標・面ベクトル・運動量を回転) を 4000 step。回す前の同じスキームの解との差 ($x/L$ 0.3–0.95 の rms): 幾何 `fx` (`run_0022_rot30_fx_ctrl`) は $\tau_w$ **0.085 %**・壁面勾配流束 **0.254 %**・`q_eff` の平均 **+0.28 %**、`fx=0.5` (`run_0023_rot30_fx_half`) は **0.024 %**・**0.062 %**・**+0.01 %**。**4000 step 時点で、回転前後の差が `fx=0.5` で 3.5 倍 ($\tau_w$)・4.1 倍 (壁面勾配流束) 小さい**。両 run とも `NOT CONVERGED` (`rms_roOmega` の低下 0.6–0.7 桁で停滞) なので、残る差を座標の float32 丸め ($x\sim1$ m で 0.06 µm = 第一層 3 µm の 2 %) に帰属させることは**まだできない** (codex result M3 採用。原点移動または倍精度座標の対照が要る)。回したメッシュでは `q_eff` の節点間ノイズが両スキームとも 0.9 % 出る — 壁 CV の質量残差 (float32 の面ベクトル閉性) 由来で `fx` とは無関係。旧定義 `iface_q_eff_raw` なら 3.1 % |
 | 3 | ~~合格条件の固定 (codex M4)~~ | **済**。§6 に反映。生産設定の A/B (`case/53` `run_0125`/`run_0126`、`case/54` `run_0024`/`run_0025`) は領域別偏差・うねり rms・2 節点振幅の時系列 (`tools/h_series.py`) を `check_quasisteady.py --series-csv` にかけ 4 本とも `ALL STEADY` |
 | 4 | ~~恒久実装~~ | **済 (2026-09-22)**。`calcStructualVariables_d_wrapper` で `nodeMode = (discretization=="node")`、環境変数 `FORGE_NODE_FX_HALF` は撤去。環境変数版との照合 `case/53.c3x_vane_cht/run_0127_fxhalf_permanent_check`: 4000 step 後の最大相対差 ρ 4.6e−5・T 2.0e−5 (後流の非定常の範囲) |
 | 5 | ~~翼の生産 run の更新~~ | **済 (2026-09-22)**。報告に載る run を新スキームで 60000 step 継続し直した: `case/53` `run_0125` (生産)・`run_0128` (SU2 対照)・`run_0129` (節点配置)・`run_0130`–`run_0133` (入口乱流)・`run_0134` (層流)・`run_0135` (1 µm)、`case/54` `run_0024` (生産)・`run_0026` (層流)・`run_0027`/`run_0028` (格子)。引用する量は `tools/report_numbers.py` で `check_quasisteady --series-csv` の判定つきで出す。連成は CHT plan §5.1 #62 |
 | 6 | cell の `fx` の式 | 回転不変でない式のまま (同じ幾何を 45° 回すと重みが 0.8 → 0.637 に変わる: codex の代数チェック)。cell は使わない方針なので**修正せず記録のみ** |
-| 7 | 格子系列での次数測定 (codex M2) | 成長率 1.1/1.2 の伸長格子・曲面高 AR 格子・回転した同一格子で製造解 (または解析解のある層流) を 3 格子。温度・速度・壁熱流束の誤差次数を測り、2 次を主張する範囲は $p\ge1.8$ を要求。細分化時の成長率の扱いを明記する |
+| 7 | ~~格子系列での次数測定 (codex M2)~~ | **済 (2026-09-22、熱伝導の内部面の式に限る)**。[`notes/investigations/2026-09-22-mms-node-face-weight.md`](../../notes/investigations/2026-09-22-mms-node-face-weight.md)、`solver_density_cuda/tools/mms_face_weight.py`。ソルバは製造解のソースを入れられないので、内部面の熱伝導の式を同形で Python に写し、円環 (曲面壁・全方位)・最粗 AR 700・成長率 **1.1 / 1.2**・壁沿い間隔に変調 ±30 % と交番 ±0.3 % を入れた双対格子で 4 水準 (両方向 2 倍、第一層 1/2、**成長率は平方根**)。**`fx=0.5`: 温度 L2/L∞ も壁面熱流束も $p$ = 2.04 → 2.01 → **2.00****。幾何重みは温度で 1.95–1.97、**壁面熱流束で 1.69 (射影) / 1.86 (旧式)** に落ち、最細水準の誤差は +53 % / +25 %。$p\ge1.8$ の要求を満たすのは `fx=0.5` のみ。**限界**: 運動量の粘性応力・粘性仕事・SST 拡散は未測定 (同じ `fx` と同形の法線項)、ソルバ本体でなく写し (忠実度の根拠は `wallcv_flux_terms.py` がカーネルの仕事項を 0.0 W/m² で再現したこと)、対流・リミッタ・float32 は含まない |
 | 8 | codex result レビュー | **1 回目 2026-09-22: NO-GO (C0/M4/m1)** — 恒久実装は設計どおりだが `accepted` へは移さない。#2c・#7 を終えてから再レビュー |
 
 ## 6. 検証
@@ -129,8 +129,9 @@ Mark II の層流域は +3.8 pt」に限る。いずれの run も残差は `NOT
 - **判定基準**: (a) `q_eff` うねり rms が対照の 1/2 以下、$h$ の領域別偏差の変化 3 pt 以内。(b) $C_f$ の変化 1 % 以内。(c) 壁熱流束の変化 0.01 % 以内。
   いずれも NaN なし。
 - **比較の作法** (codex M4 採用): A/B は**同じ熱流束定義**で比べる (`iface_q_eff_raw` と `iface_q_eff` を両方保存)。
-  §4.3 の表は蓄積項補正を入れる前のバイナリで両 run とも旧定義。定常回帰 (b)(c) は `check_convergence.py` の `PASS`
-  (収束場からの継続は `--from-floor`) を要求する。(a) の翼は全 run が `NOT CONVERGED (stalled/plateau)` なので
+  §4.3 の表は蓄積項補正を入れる前のバイナリで両 run とも旧定義。定常回帰の合格条件は **(b) 平板 = 手順書 `48-flat-plate-cooled.md` の物理量基準 (基準 run 比 3 % 以内) と `SERIES VERDICT: STEADY`**、
+  **(c) スラブ = 解析解との一致が不変** とする。当初ここに書いた「`check_convergence.py` の `PASS`」は両ケースとも原理的に取れない
+  (平板は前縁特異点の既知の残差床で基準 run 自身が `NOT CONVERGED`、スラブは純伝導で残差が丸め床に張り付く) ので 2026-09-22 に改めた。(a) の翼は全 run が `NOT CONVERGED (stalled/plateau)` なので
   **機構診断**として扱い、領域別偏差とうねり rms の時系列を `check_quasisteady.py --series-csv` で `STEADY` と確認した量だけを引用する。
 
 ### 6.1 レビュー記録 (codex)
@@ -152,6 +153,7 @@ Mark II の層流域は +3.8 pt」に限る。いずれの run も残差は `NOT
 
 ## 9. 変更ログ
 
+- `2026-09-22` #2c (平板の冷間起動: 基準 run と 0.2 % 以内) と #7 (製造解: `fx=0.5` は $p$=2.00) を実施。§6 の合格条件を手順書の基準に改めた。codex result 再レビューへ。
 - `2026-09-22` codex result レビュー 1 回目 NO-GO → 全件採用。実装は維持、plan は active のまま #2c・#7 を残す。
 - `2026-09-22` 恒久実装。報告の run を新スキームで回し直し、報告を改訂。codex result レビューへ。
 - `2026-09-21` 回帰 (`case/09`, `case/44`: `check_field_regress` PASS) と回転不変性の試験 (`case/48` 30° 回転) を実施。恒久実装へ。
