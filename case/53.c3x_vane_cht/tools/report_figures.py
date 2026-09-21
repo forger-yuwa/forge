@@ -14,6 +14,7 @@ r"""報告 (Artifact「Cooled Vane CHT Validation」) の**線グラフを全部
   trans_plate.png              遷移平板 T3A の $C_f$ (forge 3 格子・SU2 LM・実験・遷移なし SST・層流)
   trans_c3x.png / trans_mk.png 遷移モデル ON/OFF と入口粘性比の感度 (実測 $T_w$、同一メッシュ)
   trans_su2.png                C3X 一様壁: forge と SU2 の遷移モデルどうし (同一メッシュ)
+  trans_sweep.png              入口乱流粘性比と Re_θt 下限の掃引 (領域別 h 偏差。compare_h.py と同じ規約)
 
 規約: 熱流束は全図 `iface_q_eff`。実測点には報告の表 V/VI の不確かさを付ける。
 凡例はデータに重ねない (skill `forge-contour` と同じ)。コンタ図は
@@ -203,10 +204,77 @@ TRANS = {
             ("run_0146_lm_1um_cont", "transition model, $\\mu_t/\\mu$ = 10", "#e8590c", "-"),
             ("run_0147_lm_1um_mur100", "transition model, $\\mu_t/\\mu$ = 100", "#862e9c", "-")],
     "markii": [("run_0036_sst_1um", "no transition model, inlet $\\mu_t/\\mu$ = 10", "#1f77b4", "-"),
-               ("run_0037_lm_1um", "transition model, $\\mu_t/\\mu$ = 10", "#e8590c", "-"),
+               ("run_0037_lm_1um", "transition model, $\\mu_t/\\mu$ = 10", "#f2b134", "-"),
+               ("run_0039_lm_1um_mur20", "transition model, $\\mu_t/\\mu$ = 20", "#e8590c", "-"),
+               ("run_0040_lm_1um_mur40", "transition model, $\\mu_t/\\mu$ = 40", "#c92a2a", "-"),
                ("run_0038_lm_1um_mur100", "transition model, $\\mu_t/\\mu$ = 100 (pressure side still drifting)", "#862e9c", "-")],
 }
 TRANS_SU2 = dict(forge="run_0153_lm_cf0_su2ctrl", su2="su2_smooth_lm/vol_solution.vtu", forge_off="run_0128_cf0_fx05", Tw=566.0)
+
+
+def regional_bias(run_dir, vane, key="run108"):
+    """領域別の $h$ 平均偏差 [%] を `compare_h.py` と**同じ規約**で出す (最後の壁ダンプ、iface_ok、s/S<=0.87)。
+    戻り値 {PS, SS_lam, SS_post, all}。plan §6.3/§6.5 とレポートの表はこの値。"""
+    from compare_h import TG
+    s, ss, V, C, step = wall(Path(run_dir))
+    h = np.array(V[FLUX]) / (TG[key] - np.array(V["Ts"]))
+    ok = np.array(V["iface_ok"]) > 0.5
+    coarse = {i for i, d in getattr(__import__("run_data"), "RUN42_PARTIAL", {}).items()
+              if key == "run42" and d["tol"] > 0.01}
+    rows = [r for i, r in enumerate(TABLES[key]["rows"]) if r[3] is not None and i not in coarse]
+    sd = np.array([r[0] for r in rows]); hd = np.array([r[3] for r in rows]) * H0; i0 = int(np.argmin(sd))
+    exp = {"PS": (sd[:i0 + 1][::-1], hd[:i0 + 1][::-1]), "SS": (sd[i0:], hd[i0:])}
+    he = np.array([np.interp(s[k], *exp["SS" if ss[k] else "PS"]) for k in range(len(s))])
+    out = {}
+    for name, m in (("PS", ok & ~ss & (s <= 0.87)), ("SS_lam", ok & ss & (s < 0.25)),
+                    ("SS_post", ok & ss & (s >= 0.25) & (s <= 0.87)), ("all", ok & (s <= 0.87))):
+        out[name] = 100.0 * float(((h[m] - he[m]) / he[m]).mean())
+    return out
+
+
+# 掃引の点 (x 値, run)。数字は図の中で regional_bias が読み直すので、ここは run の対応表だけ。
+SWEEP = {
+    "c3x_ratio": ("C3X", "run108", C3, "inlet eddy viscosity ratio", "log",
+                  [(1, "run_0148_lm_1um_mur1"), (10, "run_0146_lm_1um_cont"), (30, "run_0152_lm_1um_mur30_cont"), (100, "run_0147_lm_1um_mur100")],
+                  [(10, "run_0135_hwall1um_fx05"), (100, "run_0149_sst_1um_mur100_ctrl")]),
+    "mk_ratio": ("Mark II", "run42", MK, "inlet eddy viscosity ratio", "log",
+                 [(10, "run_0037_lm_1um"), (20, "run_0039_lm_1um_mur20"), (40, "run_0040_lm_1um_mur40"), (100, "run_0038_lm_1um_mur100")],
+                 [(10, "run_0036_sst_1um")]),
+    "mk_reth": ("Mark II", "run42", MK, "lower bound on $\\widetilde{Re}_{\\theta t}$", "linear",
+                [(20, "run_0037_lm_1um"), (130, "run_0042_lm_rt130"), (200, "run_0043_lm_rt200")], []),
+}
+REGIONS = [("PS", "pressure side", "#1f77b4", "o"), ("SS_lam", "suction, $s/S<0.25$", "#c92a2a", "s"),
+           ("SS_post", "suction, after transition", "#2b8a3e", "^")]
+
+
+def fig_trans_sweep(out, plt):
+    fig, axs = plt.subplots(1, 3, figsize=(12.4, 4.6), sharey=True)
+    for ax, keyname in zip(axs, ("c3x_ratio", "mk_ratio", "mk_reth")):
+        name, key, base, xlab, xscale, on, off = SWEEP[keyname]
+        ax.axhline(0, color="k", lw=1.0, zorder=1)
+        ax.axhspan(-10, 10, color="0.85", alpha=.45, zorder=0)
+        for rk, rlab, col, mk in REGIONS:
+            xs = [x for x, r in on if (base / r).exists()]
+            ys = [regional_bias(base / r, name, key)[rk] for x, r in on if (base / r).exists()]
+            ax.plot(xs, ys, "-", marker=mk, ms=6, color=col, lw=1.8, zorder=4,
+                    label=(rlab if keyname == "c3x_ratio" else None))
+            xo = [x for x, r in off if (base / r).exists()]
+            yo = [regional_bias(base / r, name, key)[rk] for x, r in off if (base / r).exists()]
+            if xo:
+                ax.plot(xo, yo, linestyle="none", marker=mk, ms=7, mfc="none", mec=col, mew=1.4, zorder=3,
+                        label=("same, no transition model" if (keyname == "c3x_ratio" and rk == "PS") else None))
+        ax.set_xscale(xscale); ax.grid(alpha=.3)
+        ax.set_xlabel(xlab)
+        ax.set_title(f"{name} — {'inlet turbulence decay' if xscale == 'log' else 'the model constant'}", fontsize=10)
+        if xscale == "log":
+            ax.set_xticks([x for x, _ in on]); ax.set_xticklabels([str(x) for x, _ in on])
+        else:
+            ax.set_xticks([x for x, _ in on])
+    axs[0].set_ylabel("mean departure of $h$ from the measurement  [%]")
+    axs[0].set_ylim(-45, 90)
+    h1, l1 = axs[0].get_legend_handles_labels()
+    fig.legend(h1, l1, fontsize=9, loc="lower center", bbox_to_anchor=(0.5, -0.05), ncol=4, frameon=False)
+    fig.tight_layout(); fig.savefig(out, dpi=115, bbox_inches="tight"); print(f"[report_figures] -> {out}")
 
 
 def fig_trans_plate(out, plt):
@@ -297,7 +365,8 @@ FIGS = {"h_c3x": lambda o, p: fig_h("c3x", o, p), "h_mk": lambda o, p: fig_h("ma
         "su2": fig_su2, "turb": fig_turb,
         "lam_c3x": lambda o, p: fig_lam("c3x", o, p), "lam_mk": lambda o, p: fig_lam("markii", o, p),
         "trans_plate": fig_trans_plate, "trans_c3x": lambda o, p: fig_trans("c3x", o, p),
-        "trans_mk": lambda o, p: fig_trans("markii", o, p), "trans_su2": fig_trans_su2}
+        "trans_mk": lambda o, p: fig_trans("markii", o, p), "trans_su2": fig_trans_su2,
+        "trans_sweep": fig_trans_sweep}
 
 
 def main():
