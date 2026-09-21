@@ -796,6 +796,13 @@ r: 壁側幾何級数クラスタリング)、**gmsh msh4.1 テキストを直�
 同一トポロジで再生成するため、帰還パス間の場移植は同 index コピーで済む (補間ノイズなし)。
 生成のたび `check_mesh_quality.py` ゲート (AR≤1000 / skew≤0.9) を通す。
 
+### SERN 3D の全ヘキサ・マルチブロック (gmsh Python API, 方式検証中 2026-09-21)
+
+計画: [`plans/active/tooling-sern-mesh-blocking.md`](../../plans/active/tooling-sern-mesh-blocking.md)。
+
+SERN 3D の現行メッシャ `mesh_sern3d.py` は x-station × y-band × z の**テンソル積**で、薄板 (カウル・側壁) を同一座標の双子ノードで表す。この構造は (1) 厚さ 0 の面が 2 つ交わる線で ρ が床に張り付く欠陥 (格子細分で悪化) を持ち、(2) **断面 (y–z) の隅フィレット**を作れない (隅ノードで格子線が同じ円弧に接し skew → 1)。
+後継として、**固体を有限厚で明示し、流体をその補集合としてブロックに切る**方式を検証している: ダクト内はバタフライ型の C リングで隅フィレットを受け、外部は H 型、x 方向は物理端点で区間を切って transfinite 体積でつなぐ。壁が終わった下流は格子帯を潰さず内部ブロックとして延ばし、板の後ろはスロット後流ブロックで埋める。出力は msh4.1 で既存の `convertGmshToForge` (node) に乗る。**旧メッシャは互換用に保持し既定のまま**。
+
 ### 壁の熱境界条件 (断熱 / 等温) と壁温影響の評価 (2026-09-12 起票、検証中)
 
 計画: [`plans/active/tooling-nozzle-isothermal-wall-chain.md`](../../plans/active/tooling-nozzle-isothermal-wall-chain.md)。
