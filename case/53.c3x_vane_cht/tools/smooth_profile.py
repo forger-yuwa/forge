@@ -34,6 +34,15 @@ sys.path.insert(0, str(HERE))
 from gen_solid_mesh import REF                         # noqa: E402
 
 RADII = {"c3x": dict(LE=1.168, TE=0.173), "markii": dict(LE=1.280, TE=0.0)}
+
+# **後縁が切り落とし (base cut) の翼**: 表の点番号 (1 起点) で切り口の 2 つの角を与える。
+# Mark II は図 4 で後縁に R が振られておらず、表 II の点 31 (6.8544, 0.0000 = 図の "STA 31") と
+# 点 32 (6.4912, -0.0686) の間が**長さ 3.70 mm のまっすぐな底面**である。周期スプライン 1 本で
+# 張るとこの 2 つの角が丸まり、面から最大 0.71 mm (= 底面高さの 19 %、外形公差の 9 倍) 膨らむ。
+# 超音速出口の翼では後縁衝撃と後流がここで決まるので、切り口は**直線のまま**残す。
+# C3X は図 5 に R=0.173 cm が明記された丸い後縁なので対象外。
+TE_CUT = {"markii": (31, 32)}
+
 SIG_TABLE = 0.008      # cm、報告 p.24 の外形プロファイル不確かさ
 SIG_ARC = 0.001        # cm、円弧は構成値なのでほぼ厳密
 
@@ -181,6 +190,8 @@ def main():
     ap.add_argument("--max-turn", type=float, default=1.5,
                     help="折れ角の**局所中央値からの外れ** (= 角) の上限 [deg]")
     ap.add_argument("--smooth-scale", type=float, default=0.05, help="平滑化量 s = scale * m")
+    ap.add_argument("--te-cut", default="auto", choices=["auto", "off"],
+                    help="後縁の切り口 (TE_CUT) を直線のまま残すか。off で従来の周期スプライン")
     a = ap.parse_args()
 
     tab = load_table(a.vane)           # 表の点だけ
@@ -196,11 +207,39 @@ def main():
           f"turn max {ang0.max():.1f}° p90 {np.percentile(ang0,90):.1f}°, "
           f"seg {L0.min()*10:.2f}–{L0.max()*10:.2f} mm")
 
-    tck, u = splprep([P0[:, 0], P0[:, 1]], w=w, s=a.smooth_scale * m, per=True, k=3)
-    # 弦長等間隔に近づけるため、細かく評価してから弧長で再標本化
-    uu = np.linspace(0, 1, 20000, endpoint=False)
-    X, Y = splev(uu, tck)
-    Q = np.column_stack([X, Y])
+    cut = TE_CUT.get(a.vane) if a.te_cut != "off" else None
+    if cut is None:
+        tck, u = splprep([P0[:, 0], P0[:, 1]], w=w, s=a.smooth_scale * m, per=True, k=3)
+        uu = np.linspace(0, 1, 20000, endpoint=False)
+        X, Y = splev(uu, tck)
+        Q = np.column_stack([X, Y])
+        cut_idx = None
+    else:
+        # 切り口の 2 角を P0 の中から拾う (円弧挿入で番号がずれるので座標で探す)
+        ca, cb = (tab[cut[0] - 1], tab[cut[1] - 1])
+        ia = int(np.argmin(np.hypot(*(P0 - ca).T)))
+        ib = int(np.argmin(np.hypot(*(P0 - cb).T)))
+        assert ia != ib, "切り口の 2 角が同じ点に落ちた"
+        # ib から ia まで (= 切り口を通らない側) を開曲線として張る
+        order = [(ib + t) % m for t in range((ia - ib) % m + 1)]
+        Po, wo = P0[order], w[order]
+        # 端点は動かさない: 重みを 3 桁上げる (clamped の代用。s を下げると全体が硬くなる)
+        wo = wo.copy(); wo[0] *= 1e3; wo[-1] *= 1e3
+        tck, u = splprep([Po[:, 0], Po[:, 1]], w=wo, s=a.smooth_scale * len(Po), per=False, k=3)
+        uu = np.linspace(0, 1, 20000)
+        X, Y = splev(uu, tck)
+        Qa = np.column_stack([X, Y])
+        Qa[0], Qa[-1] = P0[ib], P0[ia]        # 角を厳密に据える
+        # 切り口はまっすぐ。点間隔は本体と揃える。
+        Lcut = float(np.hypot(*(P0[ib] - P0[ia])))
+        Lbody = float(np.hypot(*np.diff(Qa, axis=0).T).sum())
+        ncut = max(4, int(round(a.n * Lcut / (Lbody + Lcut))))
+        t = np.linspace(0, 1, ncut + 1)[1:-1][:, None]
+        Qc = P0[ia] + (P0[ib] - P0[ia]) * t
+        Q = np.vstack([Qa[:-1], [P0[ia]], Qc])
+        cut_idx = (len(Qa) - 1, len(Q) - 1)    # 角の位置 (Q 上)
+        print(f"[{a.vane}] TE cut: table points {cut[0]}-{cut[1]}, "
+              f"face {Lcut*10:.2f} mm, {ncut} points on it")
     seg = np.hypot(*np.diff(np.vstack([Q, Q[:1]]), axis=0).T)
     s_cum = np.concatenate([[0.0], np.cumsum(seg)])
     total = s_cum[-1]
@@ -211,6 +250,20 @@ def main():
     # ---- 検査 ----
     dev = np.array([np.min(np.hypot(*(Q - p).T)) for p in tab_kept])
     ang, L = turn_angles(P)
+    # **切り口の 2 角は検査から外す**: 翼の実形状であって平滑化の失敗ではない。
+    # 外すのは 2 点だけで、それ以外の角は従来どおり落とす。
+    corner = np.zeros(len(P), bool)
+    if cut is not None:
+        # 角は再標本化の格子に必ずしも乗らないので **±HALF 点**を除外する
+        # (刻み 0.09 mm なので合計 0.4 mm。角そのものの通過角は合計値で報告する)。
+        HALF = 2
+        for c in (P0[ia], P0[ib]):
+            i0 = int(np.argmin(np.hypot(*(P - c).T)))
+            win = [(i0 + t) % len(P) for t in range(-HALF, HALF + 1)]
+            corner[win] = True
+            print(f"  TE cut corner at ({c[0]:.4f},{c[1]:.4f}): "
+                  f"total turn {ang[win].sum():.1f}° over {2*HALF+1} nodes "
+                  f"(実形状として検査から除外)")
     i_le = int(np.argmin(P[:, 0])); i_te = int(np.argmax(P[:, 0]))
     # 円あてはめの窓は**期待半径に合わせる** (窓が半径より広いと丸みを過大に読む)
     ds = total / a.n
@@ -235,13 +288,19 @@ def main():
     med = np.array([np.median(np.take(ang, range(i - k, i + k + 1), mode="wrap"))
                     for i in range(len(ang))])
     kink = np.abs(ang - med)
+    kink = np.where(corner, 0.0, kink)
     print(f"  kink (turn - local median): max {kink.max():.2f}° at "
           f"({P[int(np.argmax(kink)),0]:.3f},{P[int(np.argmax(kink)),1]:.3f})")
-    if kink.max() > a.max_turn:
-        fails.append(f"kink max {kink.max():.2f}° > {a.max_turn}° (角が残っている)")
-    if ang.max() > 30.0:
-        fails.append(f"turn angle max {ang.max():.2f}° > 30° (折り返しの疑い)")
-    for nm, R, Rr in (("LE", R_le, RADII[a.vane]["LE"]), ("TE", R_te, RADII[a.vane]["TE"])):
+    kink_c = np.where(corner, 0.0, kink)
+    ang_c = np.where(corner, 0.0, ang)
+    if kink_c.max() > a.max_turn:
+        fails.append(f"kink max {kink_c.max():.2f}° > {a.max_turn}° (角が残っている)")
+    if ang_c.max() > 30.0:
+        fails.append(f"turn angle max {ang_c.max():.2f}° > 30° (折り返しの疑い)")
+    checks = [("LE", R_le, RADII[a.vane]["LE"])]
+    if cut is None:
+        checks.append(("TE", R_te, RADII[a.vane]["TE"]))
+    for nm, R, Rr in checks:
         if Rr > 0 and abs(R - Rr) > 0.20 * Rr:
             fails.append(f"{nm} radius {R:.3f} cm vs {Rr} cm (>20 %)")
     if xsec:

@@ -192,15 +192,31 @@ def report(vane, make_fig=True):
         ax.set_aspect("equal"); ax.grid(alpha=.3); ax.legend(fontsize=9, loc="best")
         ax.set_xlabel("x [cm]"); ax.set_ylabel("y [cm]")
         ax.set_title(f"{vane} — outline against the report's coordinate table", fontsize=10)
+        # 後縁が切り落としなら、拡大の中心を**切り口の中点**に置き、R でなく面長で題を書く
+        from smooth_profile import TE_CUT
+        cutpts = TE_CUT.get(vane)
         for k, (nm, idx) in enumerate((("leading edge", i_le), ("trailing edge", i_te))):
             axz = fig.add_subplot(gs[k, 2])
             c = sm[idx]
-            w = 1.6 if k == 0 else 0.9
-            axz.plot(sm[:, 0], sm[:, 1], "-", color="k", lw=1.6)
-            axz.plot(tab[:, 0], tab[:, 1], "o", ms=6, color="tab:red", mfc="none", mew=1.4)
+            w = 1.6 if k == 0 else 0.45
+            ttl = f"{nm}  (R = {ref['R_LE']} cm)"
+            if k == 1:
+                if cutpts is None:
+                    ttl = f"{nm}  (R = {ref['R_TE']} cm)"
+                else:
+                    pa, pb = tab[cutpts[0] - 1], tab[cutpts[1] - 1]
+                    c = 0.5 * (pa + pb)
+                    axz.plot([pa[0], pb[0]], [pa[1], pb[1]], "-", color="tab:green", lw=3.2,
+                             alpha=.55, zorder=1,
+                             label=f"Table II points {cutpts[0]}&{cutpts[1]}")
+                    axz.legend(fontsize=7.5, loc="lower left")
+                    ttl = (f"{nm} &mdash; straight cut, "
+                           f"{np.hypot(*(pb - pa))*10:.2f} mm").replace("&mdash;", "\u2014")
+            axz.plot(sm[:, 0], sm[:, 1], "-", color="k", lw=1.6, zorder=2)
+            axz.plot(tab[:, 0], tab[:, 1], "o", ms=6, color="tab:red", mfc="none", mew=1.4, zorder=3)
             axz.set_xlim(c[0] - w, c[0] + w); axz.set_ylim(c[1] - w, c[1] + w)
             axz.set_aspect("equal"); axz.grid(alpha=.3)
-            axz.set_title(f"{nm}  (R = {ref['R_LE'] if k == 0 else ref['R_TE']} cm)", fontsize=9)
+            axz.set_title(ttl, fontsize=9)
         axr = fig.add_subplot(gs[1, :2])
         axr.axhspan(-FORM_TOL_CM, FORM_TOL_CM, color="#cfe3cf", alpha=.8,
                     label=f"published form tolerance ±{FORM_TOL_CM} cm")
