@@ -21,7 +21,21 @@
       "interval_rule": "case/50/tools/skin_smear.py 相当の順方向モデルを、熱的接続の両極 (リップ端で断熱 / 連続) で回して帯にする",
       "basis": "conditions.json の skin.thickness_cm 0.0406。plan §5.1 #24 の規定 (生の q_conv と実測を直接比べない)",
       "direction": "実測を下げる側 = 欠損が縮む側",
-      "_missing": "TH76 の計測時間 (拡散長 sqrt(alpha t) に必要) が未確認。取れなければ case/50 と同じ t = 0.25-2 s の範囲を使い、その旨を明記する"
+      "_source_resolved": {
+        "date": "2026-09-22",
+        "where": "NASA TN D-8233 p.7 'Data Reduction' (PDF p.7) と p.8",
+        "quote_reduction": "the one-half second interval of temperature data immediately following model injection was disregarded ... A quadratic curve was fitted, by the method of least squares, to the subsequent 3-second interval of data for each thermocouple",
+        "quote_slope": "Rates of change of temperature with time dTw/dt were evaluated analytically from the curve-fit expressions **at the initial point of each curve fit**",
+        "quote_conduction": "An assessment of conduction effects which resulted from the long data interval, for representative data from this test, indicates a maximum error in computed heating rate of less than 10 percent",
+        "resolved_time": "フィット窓は t = 0.5-3.5 s、**報告された傾きは初点 t = 0.5 s** で評価されている",
+        "_why_this_is_not_a_loosening": "この値は登録時から '_missing' として『原典が取れたら差し替える』と明記していた項目であり、結果を見て緩めたものではない。しかも **t = 0.5 s の帯 (1.073 / 1.038 / 1.313) は仮置きの 0.25-5 s の帯 (1.512 / 1.725 / 2.689) より狭い**ので、広い側 (保守側) で既に alpha だった判定を、狭い側でも確認する形になる"
+      },
+      "coefficients_on_ratio_upper_end": {
+        "zW_1.4": 1.073,
+        "zW_2.2": 1.038,
+        "zW_3.0": 1.313,
+        "_at": "t = 0.5 s、リップ端 断熱/連続 の両極。tools/skin_smear.py --times 0.5"
+      }
     },
     {
       "id": "inflow_BL",
