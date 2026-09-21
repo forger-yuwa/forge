@@ -37,6 +37,7 @@ papers/**
 # ローカル作業用 (エージェントメモリ / 一時 / 外部依存)
 .claude/*
 !.claude/skills/
+!.claude/agents/
 !.claude/settings.json
 .tmp/
 .external/

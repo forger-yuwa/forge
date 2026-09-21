@@ -15,6 +15,7 @@
 | [`procedures/recommended-settings.md`](procedures/recommended-settings.md) | **推奨解析設定の正本** (解析種別ごとの現行レシピ・日付付き・旧設定一覧)。config を組む/点検するときは skill `forge-config` の手順で参照 |
 | [`procedures/solver-settings.md`](procedures/solver-settings.md) | `convMethod` / `limiter` などの数値設定リファレンス |
 | [`procedures/su2-cross-check.md`](procedures/su2-cross-check.md) | 同一メッシュ・同一 BC で SU2 と比較し forge 固有の問題を切り分ける手順 |
+| `.claude/agents/*.md` | モデル固定のサブエージェント定義 (`run-watcher` / `implementer` / `diagnostician`)。分担とエスカレーション条件の正本は本ファイル「[モデル分担とエスカレーション](#モデル分担とエスカレーション-2026-09-22)」 |
 | [`procedures/codex-review.md`](procedures/codex-review.md) | 計画立案時・検証結果時の **codex 外部レビュー**の手順 (`codex_review.py`、記録の残し方、指摘の採否ルール)。Claude はプロンプト作法・禁止事項を skill `codex-review` |
 | [`plans/active/tooling-nozzle-sern-chain.md`](plans/active/tooling-nozzle-sern-chain.md) | ⑤ SERN の設計チェーン。起動レシピ (§4.12/§4.16)・収束判定 (§4.16.1)・残作業 (§5.1)。Claude は skill `sern-eval` |
 | [`procedures/inlet-profile.md`](procedures/inlet-profile.md) | 入口に分布 (全温・全圧・組成・k/ω・超音速入口の ρ,U,Ps) を与える手順 (`inletProfile` CSV + `gen_inlet_profile.py`)。Claude は skill `forge-inlet-profile` |
@@ -224,6 +225,49 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
   記録ファイルの実在も確認)。plan 編集時の PostToolUse フックがこれを返す。**2026-09-09 以前に起票済みで既に
   実装が進んでいる plan は `plan 免除` 行 + 理由で通す** (以後の `result` 段は免除しない)。
 - 別セッションが同じツリーで並行作業しているときは、相手の plan にレビュー行を書き込まない (自分の plan だけ)。
+
+## モデル分担とエスカレーション (2026-09-22)
+
+上位モデル (Fable) は高価なので**判断の場面だけ**に使い、実装・run・後処理は下位モデルに寄せる。
+分担の軸は「難しさ」ではなく**「誤りをゲートが検知できるか」**である。収束・準定常・メッシュ品質・plan 構造は
+ツールとフックが拾うので下位モデルに任せてよい。ゲートが拾えないのは**もっともらしいが誤った真因**と
+**設計判断**で、これを誤ると GPU 時間と日数を失う (トークン代より高い)。過去の撤回 (抽出アーチファクトを物理と誤認、
+少数点の一致を精度と主張、ソルバ `ypls` を壁解像の根拠に使用) はいずれもこの型だった。
+
+| 担当 | 作業 |
+| --- | --- |
+| **上位 (Fable)** | plan §4 設計方針・§6 検証計画 / 手順で解けない発散・異常の真因切り分け / codex Critical・Major の採否 / result 段の解釈 / `solver_density_cuda/cuda_forge/` の数値カーネル変更のレビュー |
+| **中位 (Opus)** | 既定の主セッション。plan §5.1 に沿った実装、skill 経由の config 組み、メッシュ生成、Python ツール、報告、docs 同期 |
+| **下位 (Sonnet)** | run の投入・監視・NaN 早期確認・`check_*` 実行・`residual_history.png`・case README の run 一覧同期、コード探索 |
+
+**委譲先** (Claude Code のサブエージェント。定義は `.claude/agents/*.md`、モデルは frontmatter で固定):
+
+- `run-watcher` (下位): forge を回す・既存 run の収束や NaN を確認するときは**必ず**これに委譲する。
+  診断はさせない (発散したら事実だけ返す)。
+- `implementer` (中位): 上位モデルの主セッションが plan §5.1 の項目を実装させるときに使う。方針は変えさせない。
+- `diagnostician` (上位・読み取り専用): 下のエスカレーション条件に当たったら諮る。セッションの文脈は引き継がれないので、
+  **症状・run パスと数値・plan の該当節・既に潰した候補・読んでよいファイル**を必ず渡す
+  (作法は skill `codex-review` と同じ)。
+
+**エスカレーション条件** (「難しいと感じたら」では発火しないので、**外から観測できる行為**で決める)。
+主セッションが上位モデルでないとき、次のいずれかに当たったら `diagnostician` に諮ってから先へ進む:
+
+1. `plans/active/*.md` の §4 設計方針・§6 検証計画を新規に書く、または方針を変える。
+2. [`procedures/divergence-and-startup.md`](procedures/divergence-and-startup.md) の手順で**2 回**対処しても発散・未収束が解けない。
+3. 結果が参照 (文献・SU2・過去の accepted 値) や事前の予想と食い違った。
+4. **真因を plan・case README・応答に「原因は○○」と書く前**。思いついた修正を入れて回し直す前に諮る。
+5. codex の Critical / Major の採否を決める。
+6. `solver_density_cuda/cuda_forge/` 配下で数値の振る舞い (流束・勾配・リミッタ・境界・陰解法・ソース項) を変える編集の前。
+
+- **痕跡を残す** (run パス明示・VERDICT 貼付と同じ扱い): 条件に当たった応答には「`diagnostician` に諮った (結論 1 行)」か
+  「諮っていない (理由)」を書く。plan §5.1 残作業表の**担当列** (`F` = 上位の判断が要る / `O` = 中位で自走可) を埋める。
+- `diagnostician` の結論は**仮説**であり、提案された A/B を回して確かめる。codex レビュー 2 回は書き手のモデルによらず維持する
+  (下位に実装を寄せるほど独立チェックの価値が上がる)。
+- 主セッション自身が上位モデルのときは `diagnostician` を呼ばなくてよいが、run と実装の委譲 (下向き) は同じく行う。
+- 上位モデルが §5.1 を書くときは、中位が迷わず実行できる粒度にする (触るファイル・合格条件の VERDICT・回す run)。
+  plan がモデル間の受け渡しの仕様である。
+- サブエージェントは Claude Code のみの仕組み。Copilot 側には本節の分担と条件そのものが規範として効く
+  (判断の場面では上位モデルに切り替える、またはユーザに判断を仰ぐ)。
 
 ## コミット・push 運用
 
