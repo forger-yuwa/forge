@@ -1,0 +1,1198 @@
+<title>Cooled Vane CHT Validation</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@600&display=swap">
+<style>
+  :root{
+    --ground:#f6f7f8; --panel:#ffffff; --ink:#15181c; --ink-2:#4a525c; --ink-3:#7b858f;
+    --rule:#dfe3e7; --rule-2:#eef1f3;
+    --teal:#0f6f74; --teal-soft:#e2f0f0;
+    --exp-ss:#c0392b; --exp-ps:#2c6fb5;
+    --warn:#a8641b; --warn-soft:#f6ecdf;
+    --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --serif:"IBM Plex Serif",Georgia,serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#101317; --panel:#171b20; --ink:#e8ecef; --ink-2:#a9b2bb; --ink-3:#79838d;
+      --rule:#2a3138; --rule-2:#21272d;
+      --teal:#4fbfc2; --teal-soft:#16302f;
+      --exp-ss:#e8705f; --exp-ps:#6ea6e0;
+      --warn:#d9a163; --warn-soft:#2c2417;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#101317; --panel:#171b20; --ink:#e8ecef; --ink-2:#a9b2bb; --ink-3:#79838d;
+    --rule:#2a3138; --rule-2:#21272d;
+    --teal:#4fbfc2; --teal-soft:#16302f;
+    --exp-ss:#e8705f; --exp-ps:#6ea6e0;
+    --warn:#d9a163; --warn-soft:#2c2417;
+  }
+
+  body{background:var(--ground);color:var(--ink);font-family:var(--sans);line-height:1.6;
+       padding-inline:20px;padding-block:0;}
+  .wrap{max-width:860px;margin:0 auto;padding-block:48px 72px;}
+
+  .eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;
+           color:var(--ink-3);margin:0 0 10px;}
+  h1{font-family:var(--serif);font-size:clamp(28px,5.2vw,40px);line-height:1.15;margin:0 0 14px;
+     text-wrap:balance;letter-spacing:-.01em;}
+  .standfirst{font-size:17px;color:var(--ink-2);margin:0 0 6px;max-width:64ch;}
+  .meta{font-family:var(--mono);font-size:12px;color:var(--ink-3);margin-top:18px;
+        display:flex;flex-wrap:wrap;gap:6px 18px;}
+
+  h2{font-family:var(--serif);font-size:22px;margin:56px 0 4px;letter-spacing:-.005em;}
+  h2 .num{font-family:var(--mono);font-size:12px;color:var(--teal);display:block;
+          letter-spacing:.12em;margin-bottom:6px;font-weight:500;}
+  h3{font-size:15px;margin:32px 0 6px;letter-spacing:.005em;}
+  p{margin:10px 0;max-width:68ch;}
+  .lede{color:var(--ink-2);}
+  strong{font-weight:600;}
+  code,.n{font-family:var(--mono);font-size:.92em;font-variant-numeric:tabular-nums;}
+  code{background:var(--rule-2);padding:1px 5px;border-radius:3px;}
+  a{color:var(--teal);}
+
+  hr{border:0;border-top:1px solid var(--rule);margin:0;}
+
+  /* figures */
+  figure{margin:24px 0;}
+  .shot{display:block;width:100%;border:1px solid var(--rule);border-radius:4px;background:var(--panel);
+        cursor:zoom-in;}
+  figcaption{font-size:13px;color:var(--ink-2);margin-top:8px;max-width:68ch;}
+  figcaption .tag{font-family:var(--mono);font-size:11px;color:var(--ink-3);}
+
+  /* tables */
+  .tw{overflow-x:auto;margin:18px 0;}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:480px;}
+  th,td{padding:7px 12px 7px 0;text-align:right;border-bottom:1px solid var(--rule-2);
+        font-variant-numeric:tabular-nums;}
+  th:first-child,td:first-child{text-align:left;padding-left:0;}
+  thead th{font-size:11.5px;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;
+           color:var(--ink-3);border-bottom:1px solid var(--rule);font-weight:500;}
+  tbody tr.key td{font-weight:600;color:var(--teal);}
+  tbody tr.dim td{color:var(--ink-3);}
+  td.u{color:var(--ink-3);}
+
+  /* verdict strip */
+  .verdict{background:var(--panel);border:1px solid var(--rule);border-left:3px solid var(--teal);
+           border-radius:3px;padding:14px 16px;margin:20px 0;font-family:var(--mono);font-size:12.5px;
+           white-space:pre-wrap;overflow-x:auto;color:var(--ink-2);}
+  .verdict b{color:var(--ink);}
+
+  .callout{background:var(--warn-soft);border:1px solid var(--rule);border-left:3px solid var(--warn);
+           border-radius:3px;padding:14px 16px;margin:20px 0;font-size:14px;}
+  .callout p{margin:6px 0;max-width:none;}
+  .callout .h{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+              color:var(--warn);}
+
+  ul{padding-left:18px;max-width:68ch;}
+  li{margin:6px 0;}
+
+  .runs{font-family:var(--mono);font-size:12.5px;}
+  .runs td:first-child{color:var(--teal);white-space:nowrap;}
+
+  footer{margin-top:64px;padding-top:18px;border-top:1px solid var(--rule);
+         font-family:var(--mono);font-size:11.5px;color:var(--ink-3);}
+
+  /* lightbox */
+  #lb{position:fixed;inset:0;background:rgba(8,10,12,.94);display:none;z-index:50;
+      overflow:auto;padding:24px;cursor:zoom-out;}
+  #lb.on{display:block;}
+  #lb img{display:block;margin:0 auto;max-width:none;}
+  #lb .hint{position:fixed;top:12px;right:16px;font-family:var(--mono);font-size:11px;color:#8d98a2;}
+  @media (prefers-reduced-motion:no-preference){.shot{transition:border-color .15s;}}
+  .shot:hover{border-color:var(--teal);}
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">forge · conjugate heat transfer · V5 · revised 2026-09-22</p>
+  <h1>Two cooled turbine vanes, measured in 1983 and solved today</h1>
+  <p class="standfirst">forge couples its gas-side solution to a two-dimensional solid with ten
+  cooling passages, and is checked here against the two vanes of NASA CR-168015. The report is
+  organised one vane at a time: everything about C3X is in section 02, everything about Mark II
+  in section 03, each ending with the same control &#8212; the turbulence model switched off
+  &#8212; which shows the measurement sitting between the laminar and turbulent limits.</p>
+  <div class="meta">
+    <span>NASA CR-168015 · runs 108 &amp; 42</span>
+    <span>C3X · M₂ = 0.90</span>
+    <span>Mark II · M₂ = 1.04</span>
+    <span>2026-09-22</span>
+  </div>
+
+  <h2><span class="num">01 / Setup</span>What is solved, against what, and how it is judged</h2>
+
+  <p>Two vanes from the same 1983 cascade campaign, at the same nominal operating point,
+  close in Reynolds number and at the same nominal inlet turbulence. Each is run three ways: with the measured wall
+  temperature imposed, so the gas side can be judged on its own; with a uniform wall, so the
+  imposed distribution cannot confound the numerics; and coupled to the solid, so the metal
+  temperature is a result rather than an input.</p>
+
+  <figure>
+    <img class="shot" src="img/domain.png" alt="Computational domain for the two cascades">
+    <figcaption><span class="tag">mesh/fluid_c3x.h5 &#183; mesh/fluid_markii.h5</span><br>
+    <b>Figure 1</b>&#8239;&#183;&#8239;One pitch of each cascade: total-pressure inlet one axial chord upstream,
+    translational periodics, the vane wall, and an exit block carrying the flow to a static
+    pressure outlet. Click to enlarge.</figcaption>
+  </figure>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Boundary</th><th>Condition imposed</th><th>C3X run 108</th><th>Mark II run 42</th></tr></thead>
+      <tbody>
+        <tr><td>Inlet (1)</td><td><code>inlet_Pressure_dir</code> &#183; P<sub>t</sub>, T<sub>t</sub>, axial direction</td>
+            <td class="n">319.5 kPa &#183; 786 K</td><td class="n">337.1 kPa &#183; 788 K</td></tr>
+        <tr><td></td><td>inlet turbulence (<code>bcondConfig</code> inlet <code>k</code>, <code>omega</code>)</td>
+            <td class="n">k 55.55 &#183; &#969; 2.172&#215;10&#8309;</td><td class="n">k 71.92 &#183; &#969; 2.942&#215;10&#8309;</td></tr>
+        <tr class="key"><td>Outlet (2)</td><td><code>outlet_statPress</code> &#183; back pressure</td>
+            <td class="n">188.9 kPa</td><td class="n">169.9 kPa</td></tr>
+        <tr><td>Periodic (3,4)</td><td>translation in y by one pitch</td>
+            <td class="n">117.73 mm</td><td class="n">129.74 mm</td></tr>
+        <tr><td>Wall (5)</td><td><code>wall_isothermal</code> &#183; no-slip, T imposed or coupled</td>
+            <td class="n">measured, or 566 K uniform</td><td class="n">measured, or 533 K uniform</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Numerics</th><th>Both vanes</th></tr></thead>
+      <tbody>
+        <tr><td>Discretization</td><td class="n">node-centred median dual, 2nd order, Venkatakrishnan limiter</td></tr>
+        <tr><td>Convective flux</td><td class="n">SLAU, temperature reconstructed with its own limiter (<code>space.reconT: 1</code>)</td></tr>
+        <tr><td>Time integration</td><td class="n">steady, implicit block-DPLUR, CFL<sub>pseudo</sub> 0.5, 4 inner sweeps</td></tr>
+        <tr><td>Turbulence</td><td class="n">Menter SST 2003, low-Re (no wall function), Pr<sub>t</sub> 0.9, production limiter 10&#183;&#946;*&#961;&#969;k, no Kato&#8211;Launder, no compressibility correction &#8212; SU2 8.5's defaults</td></tr>
+        <tr><td>Face values</td><td class="n">edge midpoint (weight &#189;) on interior faces &#8212; section 04</td></tr>
+        <tr><td>Wall resolution</td><td class="n">first node at 2 &#181;m: y<sub>1</sub>⁺ mean 1.16 / max 1.82 on C3X, 1.22 / 2.33 on Mark II &#8212; above the target of 1 on two thirds of the wall; checked at 1 &#181;m below</td></tr>
+        <tr><td>Solid</td><td class="n">2D FEM conduction, ASTM 310 k<sub>s</sub>(T), ten cooling passages, each a convective boundary with its own coefficient and coolant temperature</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>The wall heat flux that is reported</h3>
+  <p>Every heat flux on this page is the same quantity: <b>the heat the fluid gives up to the
+  wall, per unit area, positive into the metal</b> (<code>iface_q_eff</code> in the wall dump).
+  That is not simply the flux the solver assembled on the wall face. At a wall node the energy
+  equation is not solved &#8212; it is replaced by the imposed temperature &#8212; so the heat
+  that reaches the wall is whatever the rest of the wall node's control volume delivers to it.
+  Write the energy residual of that control volume as</p>
+  <p style="text-align:center"><span class="n">R<sub>raw</sub> = I + F<sub>w</sub></span>,</p>
+  <p>where <span class="n">I</span> is the net energy arriving through the faces it shares with
+  the fluid and <span class="n">F<sub>w</sub></span> is the contribution of the wall face
+  (negative when heat leaves through it). Imposing the temperature supplies a reaction
+  <span class="n">C = &#8722;R<sub>raw</sub></span> that holds the node there, so the heat handed
+  to whatever holds the wall at temperature is
+  <span class="n">&#8722;F<sub>w</sub> &#8722; C = I</span>. That reaction is a discrete heat bath,
+  and <em>in the coupled problem the solid is that heat bath</em>; where the measured wall
+  temperature is imposed instead, the real metal and coolant were, and the report's own
+  <span class="n">h</span> was reduced from exactly that balance.</p>
+  <p>One correction is applied to <span class="n">I</span>. These runs do not reach a steady
+  state, and while the solution is still moving the wall control volume gains and loses a little
+  mass. The energy that mass carries stays in the control volume; it has not gone to the metal.
+  The volume is fixed, at rest and at the wall temperature, so what it stores is the internal
+  energy <span class="n">e<sub>w</sub></span> per unit mass, and</p>
+  <p style="text-align:center"><span class="n">A&#183;q = I &#8722; e<sub>w</sub>R<sub>&#961;</sub></span>,</p>
+  <p>with <span class="n">R<sub>&#961;</sub></span> the mass residual of the wall node. At a
+  steady state <span class="n">R<sub>&#961;</sub></span> is zero and the correction vanishes.
+  Section 04 shows where it matters, which is at the foot of the C3X shock and nowhere else.</p>
+
+  <div class="callout">
+    <p class="h">How this differs from the flux through the wall face</p>
+    <p>The reported flux is <span class="n">2.8 %</span> above the flux through the wall face
+    alone on C3X and <span class="n">3.2 %</span> on Mark II. That difference is physical and its origin is known: it is the
+    viscous work done inside the half control volume at the wall, the wall shear stress times
+    the velocity half a cell out. It scales with the height of the first cell &#8212;
+    <span class="n">2.81 %</span> at 2 &#181;m and <span class="n">1.42 %</span> at 1 &#181;m on C3X
+    &#8212; and not with the mesh along the wall (3.3 / 3.2 / 3.5 % at 340 / 480 / 680 wall nodes
+    on Mark II) or with where the 480 nodes sit (2.85 % on both C3X node placements). On the one-dimensional conduction slab, which has no flow,
+    it is <span class="n">5&#215;10&#8315;&#8310;</span>. SU2's surface heat flux is the wall-face
+    estimate and does not contain this term, which is why section 02 also compares the two codes
+    on that estimate.</p>
+    <p>What remains provisional is convergence, not the definition. No vane run on this page
+    passes <code>check_convergence.py</code>; every one returns
+    <code>NOT CONVERGED (stalled/plateau)</code> at about <span class="n">2.4</span> decades.
+    The balance above holds node by node whatever the state of the run. What an unconverged run
+    leaves open is the state itself &#8212; the free cells away from the wall are not in balance
+    &#8212; so each quoted number is taken from a run in which that number has stopped moving,
+    judged quantity by quantity (end of this section).</p>
+  </div>
+
+  <h3>Where the measurement comes from, and what it is worth</h3>
+  <p>Both data sets are <strong>tables, not digitised plots</strong>: Appendix A of the report,
+  one page per run giving surface distance <span class="n">s/S</span>, axial distance, wall
+  temperature normalised by <span class="n">811 K</span> and heat transfer coefficient
+  normalised by <span class="n">h<sub>0</sub></span> = 1135 W/m²K, with a facing page carrying
+  <span class="n">P<sub>s</sub>/P<sub>T</sub></span> and the coolant flow data. C3X run 108 is
+  on report p.164&#8211;165, Mark II run 42 on p.144&#8211;145. The plots in the body of the report are not used here. Its
+  Figure 17, the one drawn with uncertainty bars, is a different Mark II run (run 46) and serves
+  only as the report's own illustration of how large those bars are.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Test conditions (report Tables VIII &amp; IX, p.30)</th><th>C3X run 108</th><th>Mark II run 42</th></tr></thead>
+      <tbody>
+        <tr><td>Code number</td><td class="n">4411</td><td class="n">5411</td></tr>
+        <tr><td>Inlet total pressure P<sub>T1</sub></td><td class="n">46.34 psia = 319.5 kPa</td><td class="n">48.89 psia = 337.1 kPa</td></tr>
+        <tr><td>Inlet total temperature T<sub>T1</sub></td><td class="n">786 K (1415 &#176;R)</td><td class="n">788 K (1418 &#176;R)</td></tr>
+        <tr><td>Inlet / exit Mach number</td><td class="n">0.17 / 0.90</td><td class="n">0.19 / 1.04</td></tr>
+        <tr><td>Exit Reynolds number (true chord)</td><td class="n">1.99&#215;10&#8310;</td><td class="n">2.01&#215;10&#8310;</td></tr>
+        <tr class="key"><td>Inlet turbulence intensity Tu</td><td class="n">6.5 %</td><td class="n">6.5 %</td></tr>
+        <tr><td>Wall-to-gas temperature ratio T<sub>w</sub>/T<sub>g</sub></td><td class="n">0.73</td><td class="n">0.68</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>The four-digit code is the report's own index: exit Mach number, exit Reynolds number,
+  inlet turbulence, wall-to-gas ratio. <strong>These two runs share the Reynolds-number and turbulence digits of that code and differ
+  in the other two</strong> &#8212; exit Mach number 0.90 against 1.04, wall-to-gas ratio 0.73
+  against 0.68 &#8212; as well as in the airfoil itself, its pitch, and the inlet Mach number and
+  pressure that follow from them. All tests ran at a nominal gas total
+  temperature of <span class="n">811 K</span>; 6.5 % is the turbulence the combustor produced by
+  itself and 8.3 % was reached with rods upstream. One caution carried from the data
+  extraction: <strong>the SI pressure column of Tables VIII and IX is wrong by a factor
+  51.7</strong> &#8212; it prints 6177 &quot;Pa&quot; where the psia column says 46.34, i.e.
+  319.5 kPa. The psia column is the one to believe.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Uncertainty in h (report Tables V &amp; VI, p.26&#8211;27)</th><th>C3X</th><th>Mark II</th></tr></thead>
+      <tbody>
+        <tr><td>Pressure surface, front half of the arc</td><td class="n">&#177;6.3 &#8211; 8.9 % (0&#8211;55 %)</td><td class="n">&#177;6.9 &#8211; 10.0 % (0&#8211;55 %)</td></tr>
+        <tr><td>Pressure surface, rear half</td><td class="n">&#177;11.6 &#8211; 23.5 % (55&#8211;100 %)</td><td class="n">&#177;14.4 &#8211; 18.8 % (55&#8211;100 %)</td></tr>
+        <tr class="key"><td>Suction surface, front half</td><td class="n">&#177;6.2 &#8211; 7.1 % (0&#8211;58 %)</td><td class="n">&#177;7.1 &#8211; 9.0 % (0&#8211;52 %)</td></tr>
+        <tr><td>Suction surface, rear half</td><td class="n">&#177;8.6 &#8211; 23.5 % (58&#8211;100 %)</td><td class="n">&#177;10.0 &#8211; 15.8 % (52&#8211;100 %)</td></tr>
+        <tr class="dim"><td>Re / M / T<sub>w</sub>T<sub>g</sub> / Tu (Table VII)</td><td class="n" colspan="2">&#177;3.1 % / &#177;0.9 % / &#177;2.0 % / &#177;10 %</td></tr>
+        <tr class="dim"><td>Pressure taps</td><td class="n" colspan="2">&#177;0.7 kPa (0.1 psi)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>The bands are per arc-length interval, eight to ten of them per surface, resolved in
+  <code>tools/uncertainty.py</code>; every measured point in the figures below carries its own
+  bar. They grow toward the trailing edge because the vane thins there and the finite-element
+  inversion that produced <span class="n">h</span> from the internal thermocouples loses
+  conditioning &#8212; the report says so, and says the resulting scatter could not be reduced
+  without more thermocouples than the airfoil could hold. It is also explicit that these are
+  uncertainties <em>in absolute level</em>, and that comparisons between runs of the same
+  cascade are much tighter. Comparing a CFD solution against the absolute level is the first
+  case, so these are the right bars to draw, and every regional table below reports what
+  fraction of the wall nodes falls inside them.</p>
+
+  <p>One limitation on the Mark II side. The scan of p.144 has a band of faded print, and the
+  file NTRS distributes is a bilevel 300 dpi image &#8212; a copy downloaded fresh is
+  byte-identical to the one in <code>papers/</code>, so there is no better original. Of that
+  page's 272 cells, <strong>four are damaged beyond reading</strong>: the heat transfer
+  coefficient at <span class="n">s/S</span> 0.6334 and 0.6043 keeps only its leading digit, and
+  the wall temperature at <span class="n">s/S</span> 0.1359 and 0.1062 keeps only part of its
+  middle digits. Three more are readable to the precision that matters and are used:
+  <span class="n">.397?</span>, <span class="n">.75?6</span> and <span class="n">.75?1</span>,
+  whose illegible digit is worth at most <span class="n">&#177;0.5 %</span> against a
+  measurement uncertainty of <span class="n">&#177;7 %</span> there. Nothing is filled in by
+  inference. The C3X page is clean and all 75 stations are transcribed.</p>
+  <h3>The shape being solved is the shape that was tested</h3>
+  <p>This is not a formality on these vanes. The first attempt at C3X produced a wall heat flux
+  that jumped between <span class="n">52</span> and <span class="n">302 kW/m²</span> on
+  neighbouring nodes, and the cause was the <em>outline</em>: the coordinate table has 78 points
+  over a 32 cm perimeter, so one chord spans 6 mm and turns 20&#176; through the leading edge,
+  and the reconstructed edge circles had been centred by stepping <span class="n">R</span> in
+  <span class="n">x</span> from the nose, which on a vane set at 60&#176; puts the centre 0.6 mm
+  out and leaves a <span class="n">60&#176;</span> kink where the arc meets the table points.
+  Everything here is downstream of fixing that.</p>
+
+  <figure>
+    <img class="shot" src="img/geom_c3x.png" alt="C3X outline against the report's coordinate table">
+    <figcaption><span class="tag">ref/vane_c3x.csv (report Table III) &#183; tools/check_geometry.py</span><br>
+    <b>Figure 2</b>&#8239;&#183;&#8239;C3X. The outline actually meshed (black) with the report's 78 tabulated
+    points on it, the leading and trailing edges at full scale, and below the distance from each
+    tabulated point to the outline against the form tolerance the report publishes for its own
+    coordinates (<span class="n">&#177;0.008 cm</span>), with the node-to-node turning angle
+    behind it. Click to enlarge.</figcaption>
+  </figure>
+
+  <figure>
+    <img class="shot" src="img/geom_mk.png" alt="Mark II outline against the report's coordinate table">
+    <figcaption><span class="tag">ref/vane_markii.csv (report Table II)</span><br>
+    <b>Figure 3</b>&#8239;&#183;&#8239;The same for Mark II, 60 points. <b>Its trailing edge is a straight cut,
+    not a radius</b>: the report's Figure 4 marks no <span class="n">R</span> there and ends the
+    vane at a station it labels <span class="n">STA 31</span>, and Table II jumps from point 31
+    at <span class="n">(6.8544, 0.0000)</span> to point 32 at
+    <span class="n">(6.4912, &#8722;0.0686)</span> &#8212; a flat base face
+    <span class="n">3.70 mm</span> long with a sharp corner at each end, green in the zoom. A
+    single periodic spline rounded both corners and bulged the outline
+    <span class="n">0.71 mm</span> off that face, nine times the form tolerance; the point-wise
+    check missed it because the two table points <em>are</em> the corners. The smoother now fits
+    the airfoil as an open curve between them and closes it with the straight cut. Click to
+    enlarge.</figcaption>
+  </figure>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Geometry check</th><th>C3X</th><th>Mark II</th></tr></thead>
+      <tbody>
+        <tr class="key"><td>Tabulated points inside the published form tolerance</td>
+            <td class="n">77 / 78</td><td class="n">59 / 60</td></tr>
+        <tr><td>Distance from a tabulated point to the outline, rms / max</td>
+            <td class="n">0.0012 / 0.0104 cm</td><td class="n">0.0012 / 0.0084 cm</td></tr>
+        <tr class="key"><td>Mesh wall nodes off the outline, max</td>
+            <td class="n" colspan="2">1&#215;10&#8315;&#8312; m &#8212; the 480 nodes are on the curve, not near it</td></tr>
+        <tr><td>Outline turning angle, mean / max</td>
+            <td class="n">0.15&#176; / 3.8&#176;</td><td class="n">0.15&#176; / 79&#176; at the two cut corners</td></tr>
+        <tr><td>Axial chord vs Table IV</td><td class="n">&#8722;0.03 %</td><td class="n">&#8722;0.02 %</td></tr>
+        <tr><td>True chord vs Table IV</td><td class="n">+1.23 %</td><td class="n">&#8722;0.76 %</td></tr>
+        <tr><td>Perimeter vs Table IV</td><td class="n">+1.65 %</td><td class="n">+1.26 %</td></tr>
+        <tr><td>Throat / pitch vs Table IV</td><td class="n">+2.66 %</td><td class="n">&#8722;0.70 %</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>The overlay is the primary evidence: all but one tabulated point per vane sits inside the
+  tolerance the report gives for its own coordinates, and the 480 wall nodes the solver
+  integrates over lie on that outline to eight decimal places in metres. The
+  <span class="n">60&#176;</span> kink is gone &#8212; the worst turn left is
+  <span class="n">3.8&#176;</span> on C3X, and the <span class="n">79&#176;</span> on Mark II is
+  the base cut, a real corner of the vane, excluded from the smoother's kink test by name rather
+  than by threshold. Two caveats on the derived quantities. The throat is the minimum passage
+  opening, the only definition that does not depend on where the trailing-edge tangency is
+  placed; measured that way C3X is <span class="n">0.2871</span> of a pitch against
+  <span class="n">0.2881</span> from the report's own coordinate table and
+  <span class="n">0.2796</span> from its Table IV &#8212; <em>the report disagrees with itself
+  by 3 % here</em>, and the mesh sits with the coordinates. The setting angle is left out
+  entirely: Table IV's value differs from <span class="n">arccos(b<sub>x</sub>/c)</span> by
+  2.5&#176; on C3X and 4&#176; on Mark II, so its convention is not the obvious one and is not
+  stated. <code>python3 case/53.c3x_vane_cht/tools/check_geometry.py</code> regenerates both
+  figures and the table.</p>
+
+  <h3>How convergence is judged here</h3>
+  <p>The residual gate stops being informative on these cases at about
+  <span class="n">2.4</span> decades, and it says the same thing at step 16 000 as at step
+  200 000. <em>The answer does not.</em> With SU2's turbulence settings the C3X pressure-surface
+  bias climbed <span class="n">+11.2 &#8594; +14.4 &#8594; +15.9 &#8594; +16.1 &#8594;
+  +16.2 %</span> over steps 2000 / 20 000 / 40 000 / 60 000 / 200 000 and only then stopped
+  moving. There is a slow mode the plateaued residual cannot see, so the judgment is made on
+  each reported quantity instead: its history over the run's snapshots goes through
+  <code>check_quasisteady.py</code>, and only quantities it returns as <code>STEADY</code> are
+  quoted as values.</p>
+  <p>The production runs were taken to 200 000 steps (C3X) and 300 000 steps (Mark II) until
+  flat, and then continued for 60 000 more after the face-weight correction of section 04. That
+  correction moved the C3X suction-side laminar figure from <span class="n">+41.5</span> to
+  <span class="n">+44.6 %</span> within the first 5000 steps; from step 15 000 to 60 000 every
+  regional figure on both vanes moves by less than <span class="n">0.1</span> point, except
+  Mark II after transition, which wanders by <span class="n">&#177;0.3</span>.</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Quasi-steady verdict on the reported h bias</th><th>Pressure</th><th>Suction laminar</th><th>After transition</th><th>All</th></tr></thead>
+      <tbody>
+        <tr class="key"><td>C3X, measured wall &#8212; <span class="n">run_0125</span></td><td class="n">STEADY</td><td class="n">STEADY</td><td class="n">STEADY</td><td class="n">STEADY</td></tr>
+        <tr><td>C3X, uniform wall and the inlet sweep &#8212; <span class="n">run_0128 &#8230; 0133</span></td><td class="n">STEADY</td><td class="n">STEADY</td><td class="n">STEADY</td><td class="n">STEADY</td></tr>
+        <tr><td>C3X, laminar &#8212; <span class="n">run_0134</span></td><td class="n">STEADY</td><td class="n">STEADY</td><td class="n">DRIFTING &#8212; not quoted</td><td class="n">DRIFTING</td></tr>
+        <tr class="key"><td>Mark II, measured wall, three grids &#8212; <span class="n">run_0024, 0027, 0028</span></td><td class="n">STEADY</td><td class="n">STEADY</td><td class="n">STEADY</td><td class="n">STEADY</td></tr>
+        <tr><td>Mark II, laminar &#8212; <span class="n">run_0026</span></td><td class="n">STEADY</td><td class="n">DRIFTING &#8212; quoted as a range</td><td class="n">OSCILLATING &#8212; not quoted</td><td class="n">&#8212;</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="font-size:13.5px;color:var(--ink-2)">Each regional figure is the unweighted mean over
+  the wall nodes of that region of (h &#8722; h<sub>measured</sub>)/h<sub>measured</sub>, with the
+  measurement interpolated linearly in <span class="n">s/S</span> between stations and the region
+  cut at <span class="n">s/S</span> 0.87, the last station. &quot;Inside the report's
+  uncertainty&quot; is the fraction of those nodes whose own deviation is within the band of
+  Table V or VI at that arc length.</p>
+  <h2><span class="num">02 / C3X</span>Subsonic exit, M<sub>2</sub> = 0.90</h2>
+
+  <h3>The field</h3>
+  <figure>
+    <img class="shot" src="img/cont_c3x.png" alt="C3X field contours">
+    <figcaption><span class="tag">run_0125_prod_fxhalf &#183; step 60 000 &#183; one pitch, tiled three times</span><br>
+    <b>Figure 4</b>&#8239;&#183;&#8239;The field once the reported quantities have stopped moving: Mach number, static pressure, eddy viscosity ratio
+    and static temperature. One passage is solved and tiled three times through the periodic
+    translation so the cascade reads as a cascade. The exit is just subsonic, peaking at
+    <span class="n">M = 1.06</span> on the suction surface after the throat. The eddy viscosity
+    panel is clipped at <span class="n">50</span> so the boundary layers are visible; it reaches
+    <span class="n">389</span> in the wake. <strong>Note that it is already 10 to 30 at the
+    leading edge on both surfaces</strong> &#8212; the model is turbulent from the very start,
+    which is the whole subject of this section. Click to enlarge.</figcaption>
+  </figure>
+
+  <h3>Surface pressure</h3>
+  <figure>
+    <img class="shot" src="img/press_c3x.png" alt="C3X surface static pressure">
+    <figcaption><span class="tag">run_0125_prod_fxhalf &#183; exit 188.9 kPa</span><br>
+    <b>Figure 5</b>&#8239;&#183;&#8239;Surface static pressure normalised by inlet total pressure. Click to
+    enlarge.</figcaption>
+  </figure>
+  <p>Bias <span class="n">&#8722;0.010</span> on the suction side and
+  <span class="n">&#8722;0.013</span> on the pressure side, RMS <span class="n">0.026</span> and
+  <span class="n">0.027</span>. The remaining deficit grows toward the trailing edge on both
+  surfaces. The back pressure is part of that story and was this work's own error: the mesh
+  generator's default exit angle produces <span class="n">185.1 kPa</span>, while the value the
+  report's ideal <span class="n">M<sub>2</sub></span> = 0.90 implies is
+  <span class="n">188.9 kPa</span>. Correcting it halves the rear suction-side deficit from
+  <span class="n">&#8722;0.026</span> to <span class="n">&#8722;0.013</span> and drops its RMS
+  from <span class="n">0.035</span> to <span class="n">0.023</span>, and moves the wall heat
+  flux by <span class="n">0.4 %</span>.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Candidate for the rest of the rear deficit</th><th>Verdict</th><th style="text-align:left">Evidence</th></tr></thead>
+      <tbody>
+        <tr><td>The digitised profile</td><td class="n">cleared</td>
+            <td style="text-align:left">Section 01: 77 of 78 tabulated points inside the published form tolerance, throat/pitch with the coordinate table to <span class="n">0.35 %</span>.</td></tr>
+        <tr><td>The periodic exit block angle</td><td class="n">no effect</td>
+            <td style="text-align:left">Rebuilding it at <span class="n">73.26&#176;</span> instead of the design <span class="n">72.38&#176;</span> moves the wall pressure by nothing to four decimals; the flow sets its own exit angle.</td></tr>
+        <tr><td>The <span class="n">s/S</span> convention</td><td class="n">does not explain it</td>
+            <td style="text-align:left">A single fitted shift gains almost nothing on the suction side, and the pressure side wants a shift with the sign opposite to the stagnation-point argument.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Candidates that remain are the two-dimensional idealisation &#8212; an endwall boundary layer
+  contracting the streamtube &#8212; and the base region behind the trailing edge. Neither can
+  be tested here, and the report does not publish the axial velocity density ratio. SU2 on the
+  same mesh produces the same deficit to <span class="n">0.0002</span>, so nothing specific to
+  this code shows in it; that does not say which shared ingredient is responsible.</p>
+
+  <h3>Heat transfer with the measured wall imposed</h3>
+  <figure>
+    <img class="shot" src="img/h_c3x.png" alt="C3X heat transfer coefficient against measurement">
+    <figcaption><span class="tag">run_0125_prod_fxhalf &#183; measured T<sub>w</sub></span><br>
+    <b>Figure 6</b>&#8239;&#183;&#8239;Normalised heat transfer coefficient, pressure surface left and suction
+    surface right, with the report's own uncertainty on each measured point. Grey is the forge solution at every
+    one of its 480 wall nodes; black is the same solution read only at the measurement stations,
+    so that it can be compared point for point with the symbols. The pale mauve curve on the
+    right axis is the imposed wall temperature: 68 readings joined by straight lines, and
+    <span class="n">h = q/(T<sub>g</sub> &#8722; T<sub>w</sub>)</span> carries them both. The
+    shaded band is the suction-side laminar stretch. The remaining unevenness of the grey curve
+    follows the kinks of that imposed temperature (section 04). Click to enlarge.</figcaption>
+  </figure>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Region</th><th>Nodes</th><th>Bias</th><th>RMS</th><th>Inside the report's uncertainty</th></tr></thead>
+      <tbody>
+        <tr><td>Pressure surface</td><td class="n">159</td><td class="n">+16.0 %</td><td class="n">23.6 %</td><td class="n">32 %</td></tr>
+        <tr><td>Suction, laminar (s/S &lt; 0.25)</td><td class="n">106</td><td class="n">+44.1 %</td><td class="n">54.2 %</td><td class="n">11 %</td></tr>
+        <tr class="key"><td>Suction, after transition</td><td class="n">125</td><td class="n">+6.5 %</td><td class="n">12.0 %</td><td class="n">59 %</td></tr>
+        <tr class="dim"><td>All (s/S ≤ 0.87)</td><td class="n">390</td><td class="n">+20.6 %</td><td class="n">32.7 %</td><td class="n">35 %</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Downstream of transition the mean deviation is <strong>+6.5 %</strong>, and
+  <span class="n">59 %</span> of the nodes there sit inside the band the report gives for its
+  own data. The error is concentrated in one place: the first quarter of the suction surface,
+  where the experiment stays laminar &#8212; its <span class="n">h/h₀</span> falls to
+  <span class="n">0.42</span> before climbing &#8212; and the low-Reynolds SST model, which has
+  no transition closure, is turbulent from the leading edge. The rest of this section tests that
+  reading from three sides. Two checks on the numerics first. Where the 480 wall nodes sit does
+  not matter: with a uniform wall, the same case on the unsmoothed outline
+  (<code>run_0129</code> against <code>run_0128</code>) differs by
+  <span class="n">0.0</span> to <span class="n">0.6</span> points. The first cell height matters
+  a little: halving it to 1 &#181;m, which brings <span class="n">y<sub>1</sub>⁺</span> to a
+  mean of 0.58 and a maximum of 0.92 and passes the wall-resolution gate, raises the four
+  figures by <span class="n">1.4</span> to <span class="n">2.3</span> points
+  (<code>run_0135</code>: +17.4 / +46.4 / +7.9 / +22.2 %). The 2 &#181;m production mesh fails
+  that gate, and those two points are the measured cost.</p>
+
+  <h3>The same case in SU2</h3>
+  <p>The explanation on offer was a hypothesis, so the same mesh, generated from the same
+  geometry file, went to SU2 8.5 with the same boundary conditions and a uniform wall so the
+  imposed distribution could not confound it. The model options are matched as well: SU2 8.5
+  with <code>KIND_TURB_MODEL= SST</code> and no <code>SST_OPTIONS</code> resolves to SST-2003m
+  with no production modifier, so forge runs with Kato&#8211;Launder off.</p>
+
+  <figure>
+    <img class="shot" src="img/su2.png" alt="C3X heat transfer: forge, SU2 and the experiment on the same mesh">
+    <figcaption><span class="tag">run_0128_cf0_fx05 &#183; su2_smooth</span><br>
+    <b>Figure 7</b>&#8239;&#183;&#8239;Uniform wall, 566 K. The two codes are on the identical mesh &#8212; the
+    wall nodes are at the same coordinates to zero distance, not merely a similar grid. Click to
+    enlarge.</figcaption>
+  </figure>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Region, uniform wall</th><th>forge</th><th>SU2 8.5</th><th>Difference</th></tr></thead>
+      <tbody>
+        <tr><td>Pressure surface</td><td class="n">+18.8 %</td><td class="n">+21.3 %</td><td class="n">&#8722;2.5 pt</td></tr>
+        <tr class="key"><td>Suction, laminar</td><td class="n">+45.9 %</td><td class="n">+45.4 %</td><td class="n">+0.5 pt</td></tr>
+        <tr><td>Suction, after transition</td><td class="n">+8.0 %</td><td class="n">+6.7 %</td><td class="n">+1.3 pt</td></tr>
+        <tr class="dim"><td>All (s/S ≤ 0.87)</td><td class="n">+22.6 %</td><td class="n">+23.1 %</td><td class="n">&#8722;0.5 pt</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><strong>SU2 departs from the measurement the same way and by the same amount.</strong>
+  Total wall heat is <span class="n">49.74 kW/m</span> against SU2's
+  <span class="n">49.80</span>, a tenth of a percent apart. The regional differences are
+  <span class="n">0.5</span> to <span class="n">2.5</span> points, and on the laminar stretch
+  the two codes are half a point apart while both are <span class="n">45 %</span> above the
+  measurement. No large difference specific to this code shows up. That is all the comparison
+  can say: the two codes share the geometry, the inputs, the turbulence model and the mesh, so
+  it cannot tell which of those the common error comes from.</p>
+
+  <p style="font-size:14px;color:var(--ink-2)">The two codes do not report the same construction.
+  forge reports the heat the wall control volume exchanged; SU2's surface output is the wall-face
+  estimate <span class="n">k(T<sub>1</sub>&#8722;T<sub>w</sub>)/d<sub>1</sub></span> from the
+  first interior point, which leaves out the viscous work described in section 01. Evaluating
+  forge that way as well puts it <span class="n">2.6 %</span> below SU2 on the suction surface
+  and <span class="n">2.8 %</span> below on the pressure surface. Those two figures are the
+  like-for-like difference between the solvers; the table above is each code's own reported
+  flux, in which the viscous-work term happens to cancel most of that difference.</p>
+
+  <h3>How much of it is the inlet turbulence</h3>
+  <p>The report measures <em>one</em> turbulence quantity, <span class="n">Tu = 6.5 %</span> by
+  LDA with <span class="n">&#177;10 %</span> uncertainty, and says nothing about a length scale.
+  The second number a two-equation model needs &#8212;
+  <span class="n">&#956;<sub>t</sub>/&#956;</span>, which fixes <span class="n">&#969;</span>
+  &#8212; is convention; SU2's default of 10 is used here.</p>
+
+  <figure>
+    <img class="shot" src="img/turb.png" alt="C3X inlet turbulence sweep">
+    <figcaption><span class="tag">run_0130_mut1 &#183; run_0131_mut100 &#183; run_0132_tu15 &#183; run_0133_tu3 &#183; uniform 566 K wall, exit 185.1 kPa</span><br>
+    <b>Figure 8</b>&#8239;&#183;&#8239;Uniform wall, same mesh, same everything &#8212; only the inlet
+    <span class="n">k</span> and <span class="n">&#969;</span> differ. The
+    <span class="n">Tu</span> = 3 % and 15 % curves are underneath the black one. Click to
+    enlarge.</figcaption>
+  </figure>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Inlet condition</th><th>Pressure</th><th>Suction laminar</th><th>After transition</th><th>All</th></tr></thead>
+      <tbody>
+        <tr><td>Tu 3 %, &#956;<sub>t</sub>/&#956; 10</td><td class="n">+18.8 %</td><td class="n">+45.9 %</td><td class="n">+8.1 %</td><td class="n">+22.7 %</td></tr>
+        <tr class="key"><td>Tu 6.5 %, &#956;<sub>t</sub>/&#956; 10 &#8212; used here</td><td class="n">+18.8 %</td><td class="n">+45.9 %</td><td class="n">+8.0 %</td><td class="n">+22.6 %</td></tr>
+        <tr><td>Tu 15 %, &#956;<sub>t</sub>/&#956; 10</td><td class="n">+18.5 %</td><td class="n">+45.8 %</td><td class="n">+8.1 %</td><td class="n">+22.5 %</td></tr>
+        <tr class="key"><td>Tu 6.5 %, &#956;<sub>t</sub>/&#956; <b>1</b></td><td class="n">+14.0 %</td><td class="n">+42.5 %</td><td class="n">+8.4 %</td><td class="n">+19.9 %</td></tr>
+        <tr class="key"><td>Tu 6.5 %, &#956;<sub>t</sub>/&#956; <b>100</b></td><td class="n">+36.7 %</td><td class="n">+58.5 %</td><td class="n">+7.6 %</td><td class="n">+33.2 %</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><strong>The measured quantity does nothing and the unmeasured one does everything.</strong>
+  With the viscosity ratio held at 10, taking <span class="n">Tu</span> from 3 % to 15 %
+  &#8212; a factor of 25 in the inlet turbulent kinetic energy (11.8 to 296 m²/s², with &#969; scaled to keep the ratio, around the 55.6 m²/s² and
+  2.17&#215;10&#8309; s&#8315;&#185; used), far outside the <span class="n">&#177;10 %</span> the report claims &#8212; moves the
+  pressure surface by <span class="n">0.3</span> points and the post-transition suction side by
+  <span class="n">0.1</span>. Changing <span class="n">&#956;<sub>t</sub>/&#956;</span> from 1
+  to 100 moves the pressure surface by <span class="n">23</span> points and the laminar stretch
+  by <span class="n">16</span>. So tuning the inlet turbulence would work, and should not be
+  done: the lever is a parameter the experiment never constrained, and it does not reach the
+  error that matters &#8212; at <span class="n">&#956;<sub>t</sub>/&#956;</span> = 1 the laminar
+  stretch is still <span class="n">+42.5 %</span>, and the post-transition side stays within
+  <span class="n">0.8</span> points across the whole factor of 100.</p>
+  <p>Over the range chosen here, then, the pressure-surface figure moves by about
+  <span class="n">&#8722;5 / +18</span> points with a number the experiment does not fix. That is
+  a sensitivity over a chosen range on the uniform-wall case, not an uncertainty budget, and it
+  is not carried over to the measured-wall figures above.</p>
+
+  <h3>And how much of it is the missing transition</h3>
+  <p>Every result above points the same way: the suction surface is laminar in the experiment
+  and turbulent in the model. One more sensitivity test bears on that &#8212; take the turbulent
+  solution, switch the turbulence model off so the flow is laminar everywhere, change nothing
+  else, and run it out. It brackets the measurement; it does not place transition, which would
+  take a computation with the transition location controlled.</p>
+
+  <figure>
+    <img class="shot" src="img/lam_c3x.png" alt="C3X laminar against turbulent and the measurement">
+    <figcaption><span class="tag">run_0125_prod_fxhalf &#183; run_0134_laminar_fx05</span><br>
+    <b>Figure 9</b>&#8239;&#183;&#8239;The measurement sits between the two limits. The laminar curve is drawn
+    only where the laminar solution is steady: past <span class="n">s/S</span> 0.25 on the
+    suction surface it separates and oscillates, so it is not shown there. Click to
+    enlarge.</figcaption>
+  </figure>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Region</th><th>Laminar</th><th>Turbulent (SST)</th><th>Measurement</th></tr></thead>
+      <tbody>
+        <tr class="key"><td>Pressure surface</td><td class="n">&#8722;40.4 %</td><td class="n">+16.0 %</td><td class="n">0</td></tr>
+        <tr class="key"><td>Suction, laminar (s/S &lt; 0.25)</td><td class="n">&#8722;20.9 %</td><td class="n">+44.1 %</td><td class="n">0</td></tr>
+        <tr class="dim"><td>Suction, after transition</td><td class="n">unsteady &#8212; not quoted</td><td class="n">+6.5 %</td><td class="n">0</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><strong>The measurement lies between the two limits wherever the laminar run is
+  steady.</strong> Laminar is 40 points low on the pressure surface and turbulent 16 points
+  high; on the laminar stretch it is 21 low against 44 high. Neither limit is the right model
+  for this boundary layer, which is transitional &#8212; and that is what the original report
+  concluded too: it found that no transition model it tried worked on the pressure surface,
+  dropped the idea of natural transition there, and built a bespoke free-stream-turbulence
+  viscosity model tuned against these very data. The post-transition region is not quoted
+  because the laminar solution separates and swings between <span class="n">+33 %</span> and
+  <span class="n">&#8722;197 %</span> from one snapshot to the next. The two quantities quoted are the
+  ones the quasi-steady gate returns as <code>STEADY</code>.</p>
+
+  <h3>Coupled: the metal temperature as a result</h3>
+  <figure>
+    <img class="shot" src="img/tw.png" alt="C3X coupled wall temperature">
+    <figcaption><span class="tag">run_0136_cht_fx05 &#8594; run_0137 &#8594; run_0138_cht_fx05_cont2 &#183; interface imbalance about 1 W/m of 43 kW/m</span><br>
+    <b>Figure 10</b>&#8239;&#183;&#8239;Coupled wall temperature against the thermocouples. The scallops are
+    the ten cooling passages. Click to enlarge.</figcaption>
+  </figure>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Region</th><th>Nodes</th><th>Bias</th><th>RMS</th><th>max |err|</th></tr></thead>
+      <tbody>
+        <tr><td>Pressure surface</td><td class="n">159</td><td class="n">+17.5 K</td><td class="n">21.6 K</td><td class="n">52.3 K</td></tr>
+        <tr><td>Suction, laminar</td><td class="n">106</td><td class="n">+28.2 K</td><td class="n">31.4 K</td><td class="n">45.6 K</td></tr>
+        <tr class="key"><td>Suction, after transition</td><td class="n">125</td><td class="n">+11.1 K</td><td class="n">14.8 K</td><td class="n">28.4 K</td></tr>
+        <tr class="dim"><td>All (s/S ≤ 0.87)</td><td class="n">390</td><td class="n">+18.3 K</td><td class="n">23.0 K</td><td class="n">52.3 K</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <p class="h">These are about 5 K higher than the previous version of this page, and the earlier figures were the ones in error</p>
+    <p>The coupling loop accepts an update only if it lowers the interface imbalance. Once that
+    imbalance is down to the scatter of the fluid heat flux from one evaluation to the next, it
+    starts rejecting, and each rejection doubles the damping, so the step shrinks geometrically
+    and the wall temperature freezes. <strong>A tiny change per iteration is then a property of
+    the damping, not of having arrived.</strong> The earlier coupled run froze that way at a mean
+    wall temperature of <span class="n">588.5 K</span> with an imbalance of
+    <span class="n">11 W/m</span>. Restarting from the frozen state with the damping reset
+    &#8212; twice &#8212; brings the imbalance to about <span class="n">1 W/m</span> and the mean
+    to <span class="n">593.8 K</span>; the second restart moved it by
+    <span class="n">0.1 K</span>. The first pass of the present run froze the same way at <span class="n">591.2 K</span>.</p>
+  </div>
+
+  <figure>
+    <img class="shot" src="img/solid.png" alt="Temperature field inside the C3X metal">
+    <figcaption><span class="tag">mesh/solid_c3x.npz &#183; interior recovered from the run_0138 interface temperature</span><br>
+    <b>Figure 11</b>&#8239;&#183;&#8239;The solid side. Left: metal temperature, coolest around the forward passages
+    and hottest at the thin trailing edge, which has the least metal and the smallest hole.
+    Right: the conduction mesh; its outer boundary carries 480 nodes, one-to-one with the fluid
+    wall, and each of the ten passages is a convective boundary with its own
+    <span class="n">h<sub>c</sub></span> and <span class="n">T<sub>c</sub></span>. Click to
+    enlarge.</figcaption>
+  </figure>
+
+  <p>The regional pattern of the metal temperature follows that of the gas side: smallest where
+  <span class="n">h</span> is closest (<span class="n">+6.5 %</span>, <span class="n">+11.1 K</span>)
+  and largest where it is furthest (<span class="n">+44.1 %</span>,
+  <span class="n">+28.2 K</span>). That is consistent with the coupling passing on the gas-side
+  error, but it does not separate the two: the conduction model has not been verified on its own
+  for this section, the coolant-side coefficients are inferred rather than measured, and neither
+  the solid mesh nor the interface energy audit has been varied here (section 08). The
+  sensitivity to coolant temperature (300 &#8594; 350 K) and metal conductivity
+  (&#177;3 %) was <span class="n">2.2 K</span> with the earlier loop and has not been
+  repeated.</p>
+  <h2><span class="num">03 / Mark II</span>Supersonic exit, M<sub>2</sub> = 1.04</h2>
+  <p class="lede">The same chain on the same rig, the same nominal point, one digit different in
+  the report's code number. The suction side departs the same way and twice as far: this vane
+  holds its laminar boundary layer to <span class="n">s/S 0.25</span> &#8212; the measured
+  coefficient drops to <span class="n">0.22</span> &#8212; while a low-Reynolds SST with no
+  transition closure is turbulent from the leading edge and runs it up to
+  <span class="n">1.0</span>.</p>
+
+  <h3>The field</h3>
+  <figure>
+    <img class="shot" src="img/cont_mk.png" alt="Mark II field contours">
+    <figcaption><span class="tag">run_0024_tecut_fxhalf &#183; step 60 000 &#183; one pitch, tiled three times</span><br>
+    <b>Figure 12</b>&#8239;&#183;&#8239;The same four fields on the supersonic vane. The exit is choked: a
+    supersonic pocket forms on the suction surface after the throat and reaches
+    <span class="n">M = 1.64</span>, and the trailing-edge shock system is visible in the
+    pressure and temperature panels where the C3X equivalents are smooth. The eddy viscosity
+    reaches <span class="n">434</span> in the wake and is again <span class="n">10 to 30</span>
+    at the leading edge. Click to enlarge.</figcaption>
+  </figure>
+
+  <h3>Surface pressure</h3>
+  <figure>
+    <img class="shot" src="img/press_mk.png" alt="Mark II surface static pressure">
+    <figcaption><span class="tag">run_0024_tecut_fxhalf &#183; exit 169.9 kPa</span><br>
+    <b>Figure 13</b>&#8239;&#183;&#8239;Surface static pressure normalised by inlet total pressure. Click to
+    enlarge.</figcaption>
+  </figure>
+  <p>Bias <span class="n">+0.006</span> on the suction side and
+  <span class="n">&#8722;0.021</span> on the pressure side, RMS <span class="n">0.033</span> and
+  <span class="n">0.055</span>, with the largest departures at the trailing edge where the exit
+  is supersonic. The back pressure was left at the value the mesh generator's exit angle
+  produces; unlike C3X it was never adjusted, so this vane carries no correction of that kind.
+  Restoring the base cut (below) improved the suction-side RMS from <span class="n">0.038</span>
+  to <span class="n">0.033</span>, all of it over the front half of the surface: the cut opens the
+  throat from <span class="n">0.302</span> to <span class="n">0.305</span> of a pitch, and on a
+  choked cascade the throat sets the mass flow and with it the loading upstream.</p>
+
+  <h3>Heat transfer with the measured wall imposed</h3>
+  <figure>
+    <img class="shot" src="img/h_mk.png" alt="Mark II heat transfer coefficient against measurement">
+    <figcaption><span class="tag">run_0024_tecut_fxhalf &#183; base cut restored</span><br>
+    <b>Figure 14</b>&#8239;&#183;&#8239;The forge curve peaks inside the shaded laminar band where the measurement
+    bottoms out. Measured points carry the report's own uncertainty. Click to
+    enlarge.</figcaption>
+  </figure>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Region</th><th>Nodes</th><th>Bias</th><th>RMS</th><th>Inside the report's uncertainty</th></tr></thead>
+      <tbody>
+        <tr class="key"><td>Pressure surface</td><td class="n">166</td><td class="n">+9.5 %</td><td class="n">15.9 %</td><td class="n">53 %</td></tr>
+        <tr><td>Suction, laminar</td><td class="n">112</td><td class="n">+79.7 %</td><td class="n">92.2 %</td><td class="n">11 %</td></tr>
+        <tr><td>Suction, after transition</td><td class="n">113</td><td class="n">+22.7 %</td><td class="n">39.6 %</td><td class="n">43 %</td></tr>
+        <tr class="dim"><td>All (s/S ≤ 0.87)</td><td class="n">391</td><td class="n">+33.4 %</td><td class="n">54.8 %</td><td class="n">38 %</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The pressure surface is the good region here &#8212; a mean of <span class="n">+9.5 %</span>,
+  with <span class="n">53 %</span> of its nodes inside the report's own band &#8212; and the
+  laminar stretch is the bad one at <span class="n">+79.7 %</span>, worse than C3X's
+  <span class="n">+44.1</span> because the measured coefficient it is being compared against is
+  lower.</p>
+
+  <h3>Grid, and the model options</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Wall nodes / total, base-cut geometry</th><th>Pressure</th><th>Suction laminar</th><th>After transition</th><th>All</th></tr></thead>
+      <tbody>
+        <tr><td>340 / 17 832 &#8212; <span class="n">run_0027</span></td><td class="n">+9.8 %</td><td class="n">+80.3 %</td><td class="n">+21.3 %</td><td class="n">+33.5 %</td></tr>
+        <tr class="key"><td>480 / 26 452 (production) &#8212; <span class="n">run_0024</span></td><td class="n">+9.5 %</td><td class="n">+79.7 %</td><td class="n">+22.7 %</td><td class="n">+33.4 %</td></tr>
+        <tr><td>680 / 40 486 &#8212; <span class="n">run_0028</span></td><td class="n">+9.4 %</td><td class="n">+80.1 %</td><td class="n">+24.1 %</td><td class="n">+34.0 %</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Across a factor of two in wall nodes the pressure surface moves by
+  <span class="n">0.4</span> points and the laminar stretch by <span class="n">0.6</span>.
+  <strong>The post-transition suction side is not settled</strong>: it rises by
+  <span class="n">1.4</span> points at each refinement and has not levelled off, so the
+  <span class="n">+22.7 %</span> quoted for it carries a grid dependence of that size. All three
+  grids keep the 2 &#181;m first cell and all three fail the wall-resolution gate
+  (<span class="n">y<sub>1</sub>⁺</span> above 1 on about two thirds of the wall), so this table
+  measures refinement along the wall only.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Model option &#8212; earlier runs: rounded trailing edge, geometric face weight</th><th>Pressure</th><th>Suction laminar</th><th>After transition</th></tr></thead>
+      <tbody>
+        <tr><td>Kato&#8211;Launder on</td><td class="n">+2.0 %</td><td class="n">+78.6 %</td><td class="n">+23.2 %</td></tr>
+        <tr class="key"><td>Kato&#8211;Launder off &#8212; SU2's setting, used here</td><td class="n">+8.7 %</td><td class="n">+76.3 %</td><td class="n">+24.1 %</td></tr>
+        <tr class="key"><td>&#8230; + inlet k, &#969; from Mark II's own conditions</td><td class="n">+8.7 %</td><td class="n">+76.3 %</td><td class="n">+23.7 %</td></tr>
+        <tr class="dim"><td>&#8230; with a uniform wall instead</td><td class="n">+11.4 %</td><td class="n">+62.6 %</td><td class="n">+27.4 %</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>These four were not repeated after the trailing-edge and face-weight corrections, each of
+  which moves the pressure surface and post-transition figures by less than a point, so they
+  are read for the differences between rows only. Turning Kato&#8211;Launder off to match SU2
+  moves the pressure surface by <span class="n">6.7</span> points, which is the single largest
+  model choice on this vane.
+  Correcting the inlet turbulence from C3X's values to Mark II's own
+  (<span class="n">k</span> 57.4 &#8594; 71.9 m²/s², a 25 % change) moves nothing &#8212; the same
+  result the sweep in section 02 gives, arrived at independently.</p>
+
+  <h3>And how much of it is the missing transition</h3>
+  <figure>
+    <img class="shot" src="img/lam_mk.png" alt="Mark II laminar against turbulent and the measurement">
+    <figcaption><span class="tag">run_0024_tecut_fxhalf &#183; run_0026_laminar_fx05</span><br>
+    <b>Figure 15</b>&#8239;&#183;&#8239;The same test as on C3X: turbulence model off, nothing else changed. The
+    laminar curve is drawn only where it is steady. Click to enlarge.</figcaption>
+  </figure>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Region</th><th>Laminar</th><th>Turbulent (SST)</th><th>Measurement</th></tr></thead>
+      <tbody>
+        <tr class="key"><td>Pressure surface</td><td class="n">&#8722;37.6 %</td><td class="n">+9.5 %</td><td class="n">0</td></tr>
+        <tr class="key"><td>Suction, laminar (s/S &lt; 0.25)</td><td class="n">&#8722;8 to &#8722;15 %, not settled</td><td class="n">+79.7 %</td><td class="n">0</td></tr>
+        <tr class="dim"><td>Suction, after transition</td><td class="n">unsteady &#8212; not quoted</td><td class="n">+22.7 %</td><td class="n">0</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Sharper here than on C3X: <strong>on the laminar stretch the laminar run swings between
+  <span class="n">8</span> and <span class="n">15 %</span> below the measurement, where SST is
+  <span class="n">80 %</span> above it.</strong> That figure has not settled &#8212; it
+  alternates between those two levels from one snapshot to the next over the last 40 000 steps,
+  and the quasi-steady gate returns <code>DRIFTING</code> &#8212; so it is given as a range and
+  not as a value. Even so, the measured boundary layer on the front of this suction surface is
+  far closer to laminar than to the model's turbulent one. The pressure surface, which the gate
+  passes as <code>STEADY</code>, is the mirror image: laminar 38 points low against turbulent 10
+  points high, with the measurement between.</p>
+
+    <div class="callout">
+    <p class="h">The trailing edge was wrong, and it did not matter here</p>
+    <p>The base cut described in section 01 was rounded on every Mark II run before the
+    production one. Correcting it and rerunning with nothing else changed moves the regional
+    biases by <span class="n">+0.8</span> on the pressure surface, <span class="n">&#8722;0.5</span>
+    on the laminar stretch and <span class="n">&#8722;0.7</span> after transition &#8212; the
+    last inside the <span class="n">&#177;1</span> point that quantity oscillates by anyway.
+    <strong>A 0.71 mm geometry error at the trailing edge of a vane with a supersonic exit
+    changes the heat transfer coefficient over <span class="n">s/S &#8804; 0.87</span> by less
+    than a point.</strong> Worth knowing in both directions: the shape had to be fixed, and
+    fixing it rescued nothing. (These are differences between two runs made before the face-weight correction, which is
+    common to both.)</p>
+  </div>
+
+  <h3>Coupled: the metal temperature as a result</h3>
+  <figure>
+    <img class="shot" src="img/mk_tw.png" alt="Mark II coupled wall temperature">
+    <figcaption><span class="tag">run_0029_cht_tecut_fx05 &#8594; run_0030 &#8594; run_0031_cht_tecut_fx05_cont2 &#183; fluid and solid both on the base-cut outline</span><br>
+    <b>Figure 16</b>&#8239;&#183;&#8239;Coupled metal temperature. The pressure surface, on the left, is tracked
+    through every cooling-hole scallop. Click to enlarge.</figcaption>
+  </figure>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Region</th><th>h bias, measured wall</th><th>T<sub>w</sub> bias, coupled</th><th>T<sub>w</sub> RMS</th></tr></thead>
+      <tbody>
+        <tr class="key"><td>Pressure surface</td><td class="n">+9.5 %</td><td class="n">+6.9 K</td><td class="n">12.7 K</td></tr>
+        <tr><td>Suction, laminar</td><td class="n">+79.7 %</td><td class="n">+47.0 K</td><td class="n">51.6 K</td></tr>
+        <tr><td>Suction, after transition</td><td class="n">+22.7 %</td><td class="n">+21.4 K</td><td class="n">26.5 K</td></tr>
+        <tr class="dim"><td>All (s/S ≤ 0.87)</td><td class="n">+33.4 %</td><td class="n">+22.6 K</td><td class="n">32.1 K</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Both columns are now on the same geometry; the previous version of this page set the heat
+  transfer of the corrected outline beside the metal temperature of the rounded one. The
+  coupled run on the corrected outline had stalled at <span class="n">548 K</span> before the
+  accumulation term of section 04 was removed from the interface flux; with it removed the loop
+  reaches a mean of <span class="n">566.4 K</span>, reproduced to <span class="n">0.2 K</span>
+  across two restarts. Locally the wall temperature still moves by
+  <span class="n">0.5 K</span> rms (<span class="n">6.6 K</span> at worst, at the base) between
+  restarts, and the interface imbalance stays between <span class="n">10</span> and
+  <span class="n">200 W/m</span> of <span class="n">44 kW/m</span>, an order above C3X: the
+  supersonic exit and the sharp base make the fluid heat flux noisier from one evaluation to
+  the next.</p>
+  <p>The pattern is the one seen on C3X, more pronounced: <span class="n">+6.9 K</span> where
+  the gas side is within the measurement's own uncertainty for half its nodes, and
+  <span class="n">+47 K</span> on the laminar stretch, where the heat transfer coefficient is
+  <span class="n">80 %</span> high. The two go together region by region; this page does not
+  show that the first is caused only by the second (section 08).</p>
+<h2><span class="num">04 / Wall heat flux</span>Why the curves were ragged, and what fixed it</h2>
+  <p>In earlier versions of this page the heat flux curves were visibly ragged while the
+  pressure curves were not &#8212; same wall, same nodes, same solution. Five causes were found.
+  The first two are defects in the solver and account for nearly all of it; they were found
+  last, by writing out the energy balance of the wall control volume term by term, and they are
+  corrected in every result on this page. The other three are about the mesh, the
+  reconstruction and the boundary data.</p>
+
+  <figure>
+    <img class="shot" src="img/flux_fix.png" alt="C3X suction-side wall heat flux before and after the two corrections, with SU2">
+    <figcaption><span class="tag">run_0123_fxgeom_ctrl &#183; run_0128_cf0_fx05 &#183; su2_smooth &#183; uniform 566 K wall, identical mesh</span><br>
+    <b>Figure 17</b>&#8239;&#183;&#8239;Top: wall heat flux along the C3X suction surface &#8212; red before the
+    two corrections, black after, green SU2. Bottom: the same curves with a 41-node moving mean
+    removed, which leaves only the unevenness. The waves of &#177;2 kW/m² between
+    <span class="n">s/S</span> 0.4 and 0.95 and the spike at the shock foot near 0.33 are gone;
+    what is left at 0.33 is the shock foot itself still moving. The large structure in the SU2
+    curve beyond 0.85 is a difference in the solution near the trailing edge, not unevenness.
+    Click to enlarge.</figcaption>
+  </figure>
+
+  <p>Two measures are used below, both on the suction surface between <span class="n">s/S</span>
+  0.45 and 0.95. The <em>wave amplitude</em> is the rms of the flux minus its 41-node moving
+  mean. The <em>two-node amplitude</em> is the rms of
+  <span class="n">a<sub>i</sub> = (q<sub>i</sub> &#8722; (q<sub>i&#8722;1</sub> + q<sub>i+1</sub>)/2)/2</span>,
+  as a percentage of the mean flux; for a pure zig-zag
+  <span class="n">q<sub>i</sub> = q&#772; + a(&#8722;1)<sup>i</sup></span> it returns
+  <span class="n">a</span>, so neighbouring nodes differ by twice that figure.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>C3X, uniform wall, s/S 0.45&#8211;0.95</th><th>Wave amplitude</th><th>Two-node amplitude</th></tr></thead>
+      <tbody>
+        <tr><td>forge before, reported flux</td><td class="n">1.22 kW/m²</td><td class="n">&#8212;</td></tr>
+        <tr class="key"><td>forge after, reported flux</td><td class="n">0.47 kW/m²</td><td class="n">0.042 %</td></tr>
+        <tr><td>forge after, wall-face estimate</td><td class="n">0.62 kW/m²</td><td class="n">0.039 %</td></tr>
+        <tr><td>SU2, wall-face estimate</td><td class="n">1.17 kW/m²</td><td class="n">0.054 %</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><strong>First, the weight used to interpolate to a face.</strong> Between a wall node and
+  the first node off the wall there is one face, and the viscous work crossing it is the shear
+  stress times the velocity <em>at that face</em>. The wall node is at rest, so the face
+  velocity is <span class="n">(1 &#8722; f)&#183;U<sub>1</sub></span>, where
+  <span class="n">f</span> is the interpolation weight toward the wall node. In an edge-based
+  scheme the face sits at the middle of the edge and <span class="n">f</span> is one half.
+  forge instead computed <span class="n">f</span> from the mesh &#8212; the distance from the
+  face centroid to each of the two nodes &#8212; on the assumption that this comes out at one
+  half anyway. On a wall-resolving mesh around a curved vane it does not, for two reasons.</p>
+  <ul>
+    <li><strong>The distance was measured in a way that depends on how the wall is turned
+    relative to the coordinate axes.</strong> The distance of the face centroid from a node,
+    along the face normal <span class="n">n</span>, is the dot product
+    <span class="n">n&#183;&#916; = n<sub>x</sub>&#916;<sub>x</sub> + n<sub>y</sub>&#916;<sub>y</sub></span>.
+    The code multiplied the two vectors component by component and took the length of the
+    result, <span class="n">&#8730;((n<sub>x</sub>&#916;<sub>x</sub>)² + (n<sub>y</sub>&#916;<sub>y</sub>)²)</span>.
+    Split the offset into a part <span class="n">b</span> along the normal and a part
+    <span class="n">a</span> along the wall. The dot product returns <span class="n">b</span>
+    and ignores <span class="n">a</span>, as it should. The other form returns
+    <span class="n">&#8730;(b²(n<sub>x</sub>&#8308;+n<sub>y</sub>&#8308;) + 2ab&#183;n<sub>x</sub>n<sub>y</sub>(n<sub>y</sub>²&#8722;n<sub>x</sub>²) + 2a²n<sub>x</sub>²n<sub>y</sub>²)</span>:
+    it depends on <span class="n">a</span>, and its middle term changes sign between the two
+    nodes of the edge, so the two distances come out unequal even when the face is exactly
+    midway. With <span class="n">a = b</span> and the face midway, the weight is
+    <span class="n">0.50</span> on a wall at 0&#176;, 45&#176; or 90&#176; to the x axis,
+    <span class="n">0.37</span> at 22.5&#176; and <span class="n">0.63</span> at 67.5&#176;.
+    Wherever the node spacing along the wall changes, the face centroid is displaced along the
+    wall by about a micron, and half the first cell is one micron, so
+    <span class="n">a</span> and <span class="n">b</span> really are the same size here.
+    A flat plate along the x axis is blind to this, which is why the plate
+    verification never showed it.</li>
+    <li><strong>Even measured correctly, the geometric weight is not one half on a curved
+    wall.</strong> The neighbouring wall nodes lie below the tangent at a node by the sag of the
+    chord, <span class="n">&#954;&#916;s²/8</span> &#8212; 0.1 to 1 &#181;m on C3X, again the
+    size of the first cell &#8212; and that pulls the face centroid toward the wall.</li>
+  </ul>
+  <p>The weight toward the wall node came out between <span class="n">0.07</span> and
+  <span class="n">0.96</span> around the vane, and between 0.42 and 0.75 over the rear suction
+  surface in a pattern some 25 nodes long &#8212; fixed in space, because it is a property of the
+  mesh. Evaluating the code's formula outside the solver reproduces the solver's own
+  viscous-work term node by node to <span class="n">0.0 W/m²</span>; the correct dot product does
+  not (correlation 0.14).</p>
+
+  <figure>
+    <img class="shot" src="img/flux_terms.png" alt="Energy balance of the C3X wall control volumes, term by term, before the corrections">
+    <figcaption><span class="tag">run_0121_resid_split &#183; before the corrections</span><br>
+    <b>Figure 18</b>&#8239;&#183;&#8239;The energy balance of the wall control volumes before the corrections. Top:
+    the reported flux and the flux through the wall face. Bottom, with the moving mean removed:
+    the unevenness of the reported flux (dashed) is the viscous term through the interior faces
+    (red) everywhere except at the shock foot near <span class="n">s/S</span> 0.33, where the
+    convective term (blue) takes over. Click to enlarge.</figcaption>
+  </figure>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Energy into the wall control volume, s/S 0.45&#8211;0.95, before</th><th>Mean</th><th>Wave amplitude</th></tr></thead>
+      <tbody>
+        <tr><td>Convection</td><td class="n">0 W/m²</td><td class="n">70 W/m²</td></tr>
+        <tr><td>Conduction through the interior faces, minus the wall face</td><td class="n">761 W/m²</td><td class="n">109 W/m²</td></tr>
+        <tr class="key"><td>Viscous work through the interior faces</td><td class="n">4106 W/m²</td><td class="n">571 W/m²</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>The weight is now one half on every interior face of a node-centred mesh, as in SU2. The
+  wave amplitude falls from <span class="n">1.22</span> to <span class="n">0.47 kW/m²</span>
+  (both steady over their snapshots, to &#177;5 % and &#177;2 %),
+  and the regional heat-transfer figures move by less than a point except the suction-side
+  laminar stretch, which rises by <span class="n">2.6</span> points on C3X and
+  <span class="n">3.8</span> on Mark II. The change was checked where it should do nothing and
+  where it should help. A flat plate along x (wall heat flux within <span class="n">0.003 %</span>),
+  the one-dimensional slab, a periodic Taylor&#8211;Green case and an axisymmetric condensing
+  nozzle are unchanged to within run-to-run noise. Rotating the flat-plate problem by 30&#176;
+  &#8212; mesh, solution and inlet velocity together, which should change nothing &#8212; moved
+  the wall shear stress by <span class="n">0.085 %</span> and the wall-face heat flux by
+  <span class="n">0.25 %</span> with the old weight, and by <span class="n">0.024 %</span> and
+  <span class="n">0.06 %</span> with the new one, compared after 4000 steps. Those two runs are
+  not converged, so what remains has not been attributed; the rounding of the rotated
+  single-precision coordinates is a candidate.</p>
+
+  <p><strong>Second, mass moving in and out of the wall control volume.</strong> With the weight
+  corrected, a two-node spike of <span class="n">+5 / &#8722;6.5 kW/m²</span> was still left at
+  the foot of the shock. It is in the convective term. The residual of these runs stalls, and
+  the shock foot keeps shifting by a fraction of a cell as the iteration goes on; while it does,
+  the wall control volumes under it gain and lose mass, and the energy carried by that mass was
+  being counted as heat given up to the wall. The convective part of the wall energy balance
+  follows the mass imbalance of the same node with a correlation of
+  <span class="n">1.000</span> and a slope of <span class="n">571 kJ/kg</span>, the wall enthalpy
+  <span class="n">c<sub>p</sub>T<sub>w</sub></span> = 568.5.</p>
+  <p>Energy that accumulates in the control volume has not gone to the metal, so it is now
+  subtracted (section 01). What is subtracted is the internal energy
+  <span class="n">e<sub>w</sub></span> per unit of accumulated mass, not the enthalpy
+  <span class="n">H<sub>w</sub></span> the inflow carries: the difference,
+  <span class="n">p/&#961;</span> per unit mass, is the work of pushing mass into a fixed volume
+  held at constant temperature, and that does leave as heat. The first version of this
+  correction subtracted the enthalpy; an independent review caught it. At a steady state the
+  mass imbalance is zero and nothing changes &#8212; on the conduction slab the reported flux
+  moved from <span class="n">&#8722;81.5088</span> to <span class="n">&#8722;81.5132 W/m²</span>
+  against a wall-face estimate of <span class="n">&#8722;81.5131</span>.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Shock foot, s/S 0.30&#8211;0.40</th><th>Scatter between snapshots</th><th>Two-node amplitude</th></tr></thead>
+      <tbody>
+        <tr><td>Accumulation counted as heat (before)</td><td class="n">1101 W/m²</td><td class="n">1131 W/m²</td></tr>
+        <tr class="key"><td>Accumulation removed (reported)</td><td class="n">520 W/m²</td><td class="n">460 W/m²</td></tr>
+        <tr class="dim"><td>Wall-face estimate, for scale</td><td class="n">385 W/m²</td><td class="n">316 W/m²</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>What remains there is the shock foot itself moving, which no definition of the flux can
+  remove; it is listed in section 08.</p>
+
+  <p><strong>Third, where the wall nodes sit.</strong> The spacing of the wall nodes alternated
+  by <span class="n">2.8 %</span> from one node to the next, because the outline resampler
+  weights point density by curvature and that curvature estimate is itself noisy. Smoothing the
+  curvature estimate &#8212; not the spacing, which would strip the trailing edge &#8212; takes
+  the alternation to <span class="n">0.31 %</span> on the production meshes and
+  <span class="n">0.026 %</span> on the mesh used for the SU2 comparison. It is not a refinement:
+  the same 480 wall nodes on the same curve, in different places.</p>
+
+  <figure>
+    <img class="shot" src="img/mesh_forcing.png" alt="Wall node spacing and the solution's response">
+    <figcaption><span class="tag">run_0051 &#183; run_0062 &#183; run_0063 &#183; run_0065 &#183; earlier runs</span><br>
+    <b>Figure 19</b>&#8239;&#183;&#8239;Left: the wall spacing over a fifth of the suction surface, before and after
+    smoothing the curvature estimate. Right: what the solution does about it. Click to
+    enlarge.</figcaption>
+  </figure>
+
+  <p><strong>Fourth, the reconstruction.</strong> SU2 reconstructs temperature and derives
+  density; forge reconstructed density and derived temperature, which made
+  <span class="n">T</span> the difference of two independent reconstructions and gave it the
+  noise of both. Reconstructing <span class="n">T</span> instead, with a limiter built from its
+  own extrema, halved the node-to-node alternation of the wall flux in the runs where it was
+  tested (<span class="n">0.048 &#177; 0.002</span> to <span class="n">0.021 &#177; 0.016 %</span>,
+  measured then as the mean alternating difference between neighbours over
+  <span class="n">s/S</span> 0.30&#8211;0.80). It is on in every run on this page.</p>
+
+  <p><strong>Fifth, the boundary data.</strong> The production runs impose 68 thermocouple
+  readings joined by straight lines across 480 nodes. Every kink of that polyline is a step in
+  wall temperature gradient, and the boundary layer answers each one; that response is what is
+  still visible in Figures 6 and 14, and it is a property of the data as imposed, not of the
+  solver &#8212; with a uniform wall the same mesh gives the smooth black curve of Figure 17.
+  Smoothing the imposed temperature was rejected: the choice of interpolant alone moves the
+  distribution by up to <span class="n">7.6 K</span> on C3X and <span class="n">11.5 K</span> on
+  Mark II, and nothing in the report constrains the shape between thermocouples.</p>
+
+  <p>Before the term-by-term balance pointed at the face weight, single precision, the
+  turbulence model, the molecular transport law, the diagonal of the implicit solve and a
+  contact-wave floor in the convective flux were each tried as the cause. None of them moved
+  the measure it was tested on, and none is switched on or changed as a result; the records are
+  in the case README.</p>
+  <h2><span class="num">05 / Convergence</span>Runs that stall, and how they are read</h2>
+  <p>No vane run on this page passes <code>check_convergence.py</code>; all of them stall at
+  about <span class="n">2.4</span> decades. One candidate for the cause has been observed
+  directly: a laminar dual-time run of C3X sheds from its <span class="n">1.7 mm</span> trailing
+  edge at <span class="n">29 kHz</span>, and halving the physical time step reproduces the
+  frequency, so in that run it is physical. That the stall of the steady SST runs is the same
+  shedding has not been shown &#8212; it would take a dual-time run of the production
+  configuration, with the reported quantities averaged in time &#8212; and section 04 adds a
+  second unsteady spot, the foot of the C3X shock.</p>
+
+  <figure>
+    <img class="shot" src="img/shed.png" alt="Trailing edge shedding resolved in dual time">
+    <figcaption><span class="tag">run_0018_lam_dualtime &#183; run_0019_lam_dt_half &#183; laminar</span><br>
+    <b>Figure 20</b>&#8239;&#183;&#8239;Trailing-edge shedding in the laminar dual-time run. Halving the
+    physical time step gives the same frequency. Click to enlarge.</figcaption>
+  </figure>
+
+  <p>The consequence carried through the page is that judgment moves from the residual to the
+  reported quantity: each number comes from a run in which that number has stopped moving
+  (the table at the end of section 01), and where it has not, the page says so and gives a range
+  or nothing. The residual said &quot;as converged as it will get&quot; 140 000 steps before the
+  C3X pressure-surface figure stopped moving.</p>
+
+  <h2><span class="num">06 / Also fixed</span>Three more defects in the solver itself</h2>
+  <p>Besides the face weight and the accumulation term of section 04. Each was reproduced, fixed
+  and regression-checked.</p>
+  <ul>
+    <li><strong>The wall diagnostics were all zero on a resolved wall.</strong> At
+    <code>wallTreatment 0</code> with no energy wall function, nobody wrote
+    <span class="n">q<sub>wall</sub></span> or <span class="n">u<sub>&#964;</sub></span>, so the
+    wall dump reported zero heat flux and zero friction velocity for every low-Reynolds run.
+    They now carry the values actually put into the residual, with the same sign convention as
+    the model path.</li>
+    <li><strong>The inlet corner node fought the wall.</strong> Where the inlet meets the vane
+    wall, two boundary conditions claimed the same node and the pressure ran away.
+    <code>mesh.nodeInletCornerWall</code> resolves it at conversion time.</li>
+    <li><strong>The coupling loop carried the wrong flux by default.</strong> Its default was
+    the first-interior-point estimate while the design note called for the heat the wall control
+    volume actually exchanged.
+    Both defaults are now the conservative one; recoupling both vanes moved the metal by one to
+    two kelvin, in opposite directions on the two vanes.</li>
+  </ul>
+
+  <h2><span class="num">07 / Runs</span>Every run on this page, with what was imposed</h2>
+  <p>Everything common is in section 01. What differs run to run is below.
+  <span class="n">meas</span> means the 68 thermocouple readings interpolated onto the wall and
+  <span class="n">coupled</span> means the wall temperature came from the solid. Mesh names:
+  <span class="n">as gen.</span> is the raw output of the outline resampler, and
+  <span class="n">cs400 / cs2000</span> are the same 480 wall nodes redistributed by smoothing
+  the curvature estimate that drives their spacing (<code>--curv-smooth 400 / 2000</code>)
+  &#8212; a change of placement, not of count. Inlet k is in m²/s² and &#969; in s&#8315;&#185;.
+  Runs marked <span class="n">+60 k</span> continue an earlier run of the same setup (200 000
+  to 300 000 steps with the geometric face weight) for 60 000 steps with the corrected one.</p>
+  <div class="tw">
+    <table class="runs">
+      <thead><tr><th>Run</th><th>Mesh</th><th>Wall</th><th>Exit p<sub>s</sub></th>
+      <th>Inlet k / &#969;</th><th>Steps</th><th style="text-align:left">What it is for</th></tr></thead>
+      <tbody>
+        <tr><td colspan="7" style="text-align:left;color:var(--ink-3)">case/53.c3x_vane_cht/ &#8212; C3X run 108</td></tr>
+        <tr class="key"><td>run_0125_prod_fxhalf</td><td>cs400</td><td>meas</td><td class="n">188.9 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left"><b>section 02 &#8212; Figures 4, 5, 6 and 9</b> (continues run_0107)</td></tr>
+        <tr class="key"><td>run_0128_cf0_fx05</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left"><b>the SU2 control, Figures 7 and 17</b> (continues run_0108)</td></tr>
+        <tr><td>run_0129_rough_fx05</td><td>as gen.</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left">same as run_0128 on the unsmoothed outline &#8212; isolates node placement</td></tr>
+        <tr><td>run_0130 / 0131 / 0132 / 0133</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">swept</td><td class="n">+60 k</td><td style="text-align:left">inlet turbulence sweep, Figure 8 &#8212; &#956;<sub>t</sub>/&#956; 1 and 100, Tu 15 % and 3 %</td></tr>
+        <tr class="key"><td>run_0134_laminar_fx05</td><td>cs400</td><td>meas</td><td class="n">188.9 kPa</td><td class="n">&#8212;</td><td class="n">+60 k</td><td style="text-align:left"><b>laminar control, Figure 9</b> (continues run_0119)</td></tr>
+        <tr><td>run_0135_hwall1um_fx05</td><td>cs400, first cell 1 &#181;m</td><td>meas</td><td class="n">188.9 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left">wall-normal refinement; passes the wall-resolution gate</td></tr>
+        <tr class="key"><td>run_0136_cht_fx05</td><td>cs400</td><td>coupled</td><td class="n">188.9 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">25&#215;4 k</td><td style="text-align:left"><b>coupled metal, Figures 10 and 11</b></td></tr>
+        <tr><td>run_0121 / 0123 / 0124</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">2 k / 40 k / 4 k</td><td style="text-align:left">section 04: the term-by-term balance (Figure 18), the &quot;before&quot; curve of Figure 17, and the mass-residual diagnostic</td></tr>
+        <tr><td>su2_smooth</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">9089 it</td><td style="text-align:left">SU2 8.5, identical nodes &#8212; the external control</td></tr>
+        <tr class="dim"><td>run_0018_lam_dualtime / run_0019_lam_dt_half</td><td>as gen.</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">&#8212;</td><td class="n">dual time</td><td style="text-align:left">laminar, time-accurate: the 29 kHz shedding of Figure 20 (geometric face weight)</td></tr>
+        <tr><td colspan="7" style="text-align:left;color:var(--ink-3)">case/54.markii_vane_cht/ &#8212; Mark II run 42</td></tr>
+        <tr class="key"><td>run_0024_tecut_fxhalf</td><td>cs400 + cut</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left"><b>section 03 &#8212; Figures 12, 13, 14 and 15</b> (continues run_0019)</td></tr>
+        <tr><td>run_0027_coarse / run_0028_fine</td><td>cs400 + cut, &#177;&#8730;2</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left">340 and 680 wall nodes &#8212; the grid study</td></tr>
+        <tr class="key"><td>run_0026_laminar_fx05</td><td>cs400 + cut</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">&#8212;</td><td class="n">+60 k</td><td style="text-align:left"><b>laminar control, Figure 15</b> (continues run_0020)</td></tr>
+        <tr class="key"><td>run_0029_cht_tecut_fx05</td><td>cs400 + cut</td><td>coupled</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">25&#215;8 k</td><td style="text-align:left"><b>coupled metal, Figure 16</b> &#8212; fluid and solid both on the base-cut outline</td></tr>
+        <tr class="dim"><td>run_0006 / run_0007 / run_0008</td><td>cs400, rounded TE</td><td>meas / 533 K</td><td class="n">169.9 kPa</td><td class="n">57.4 / 2.40&#215;10&#8309;</td><td class="n">80 k</td><td style="text-align:left">Kato&#8211;Launder off / on, uniform wall &#8212; the model-option table (geometric face weight)</td></tr>
+        <tr class="dim"><td>run_0009 / run_0018</td><td>cs400, rounded / cut</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">80 k</td><td style="text-align:left">the trailing-edge comparison (geometric face weight)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="font-size:13.5px;color:var(--ink-2)">The exit static pressure is what the run
+  imposes, not what the report measured: 185.1 kPa is what the mesh generator's default exit
+  angle produces and 188.9 kPa is the value the report's ideal
+  <span class="n">M<sub>2</sub></span> = 0.90 implies. The run index in each case directory's
+  README is the permanent record; this table lists only the runs this page draws on.</p>
+
+  <h2><span class="num">08 / Open</span>What is not settled</h2>
+  <ul>
+    <li><strong>The transition closure.</strong> The largest departure on both vanes, supported
+    by the laminar controls in sections 02 and 03 and shared with SU2 in section 02. A
+    computation with the transition location controlled would test it directly.</li>
+    <li><strong>The state the numbers are taken from.</strong> Every vane run stalls at about
+    2.4 decades. The quoted quantities are steady by their own histories, but no vane
+    configuration here has a residual that actually falls, and the foot of the C3X shock keeps
+    moving. A dual-time run of the production configuration, with time-averaged heat flux, is
+    the missing check.</li>
+    <li><strong>Wall-normal resolution.</strong> The 2 &#181;m production meshes fail the
+    <span class="n">y<sub>1</sub>⁺ &#8804; 1</span> gate on two thirds of the wall. On C3X the
+    1 &#181;m mesh passes and moves the figures by 1.4 to 2.3 points; Mark II has not been run
+    at 1 &#181;m, and its post-transition figure is still rising with refinement along the
+    wall.</li>
+    <li><strong>The order of accuracy of the corrected face weight</strong> on stretched and
+    curved wall layers has not been measured on a grid sequence; what has been shown is that it
+    improves rotation invariance and leaves the verification cases unchanged within noise. The
+    flat-plate verification has also not been rerun from a cold start with it, so there is no
+    formal convergence pass for the change yet.</li>
+    <li><strong>The remaining forge&#8211;SU2 difference</strong>, <span class="n">2.6 %</span>
+    on the suction side and <span class="n">2.8 %</span> on the pressure side when both are
+    evaluated as the wall-face estimate. Its origin is not identified.</li>
+    <li><strong>The pressure deficit toward the trailing edge</strong>, identical in both codes.
+    The two-dimensional idealisation is a candidate, not a demonstrated cause; the report does
+    not publish the axial velocity density ratio.</li>
+    <li><strong>The coupling loop's stopping rule.</strong> It froze short of its fixed point on
+    every coupled run until restarted (section 02). It needs an acceptance test on a
+    time-averaged interface flux, or a damping that does not double on rejection, and a
+    convergence criterion on the imbalance rather than on the step.</li>
+    <li><strong>The solid side on its own.</strong> The coupled results have not been separated
+    into gas-side and solid-side error: there is no stand-alone verification of the conduction
+    model on these sections, no interface energy audit and no solid-mesh sensitivity here.</li>
+    <li><strong>Two configuration keys that are silently ignored.</strong>
+    <code>turbulence.kInf</code> and <code>omegaInf</code> appear nowhere in the solver; the
+    inlet turbulence comes from the boundary condition file alone. No number on this page was
+    affected, but a sweep of the wrong key returned four bit-identical runs before it was
+    noticed. The solver should reject unknown keys.</li>
+  </ul>
+
+  <footer>
+    forge · plans/active/boundary-conjugate-heat-transfer.md · plans/active/discretization-node-face-weight-midpoint.md · case/53.c3x_vane_cht · case/54.markii_vane_cht
+  </footer>
+</div>
+
+<div id="lb"><span class="hint">click anywhere to close</span><img id="lbimg" alt=""></div>
+
+<script>
+  (function(){
+    var lb = document.getElementById('lb'), img = document.getElementById('lbimg');
+    document.querySelectorAll('.shot').forEach(function(el){
+      el.addEventListener('click', function(){
+        img.src = el.getAttribute('src');
+        img.alt = el.getAttribute('alt') || '';
+        lb.classList.add('on');
+        lb.scrollTop = 0;
+      });
+    });
+    lb.addEventListener('click', function(){ lb.classList.remove('on'); img.src=''; });
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape' && lb.classList.contains('on')) {
+        lb.classList.remove('on'); img.src='';
+      }
+    });
+  })();
+</script>

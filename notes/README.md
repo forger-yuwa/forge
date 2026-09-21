@@ -41,3 +41,5 @@
 | [implicit-acceleration-session-prompt.md](sessions/implicit-acceleration-session-prompt.md) | 別セッション用プロンプト: 陰解法の安定 CFL 引き上げ |
 | [precision-mixed-axisym-session-prompt.md](sessions/precision-mixed-axisym-session-prompt.md) | 新セッション引き継ぎプロンプト — 軸対称 近軸の陰解法を混合精度で root-fix |
 | [species-in-dplur-session-prompt.md](sessions/species-in-dplur-session-prompt.md) | 引継ぎプロンプト: 化学種 `roY_s` を block-DPLUR に結合する (roe↔roY coupling) |
+
+- `reports/` — 公開した報告 (Artifact) の原稿の控え。`/tmp` の作業領域は再起動で消えるので、公開のたびにここへ写す (例: `reports/vane-cht-validation/`)。
