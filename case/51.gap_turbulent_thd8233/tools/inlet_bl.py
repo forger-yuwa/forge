@@ -28,6 +28,9 @@ _sp = _ilu.spec_from_file_location("t2_conditions", HERE / "conditions.py")
 _m = _ilu.module_from_spec(_sp); _sp.loader.exec_module(_m)
 Air = _m.Air
 
+# numpy 2.0 で np.trapz が削除された (AWS は numpy 2.x)。名前だけの差なので薄く吸収する。
+_trapz = getattr(np, "trapezoid", None) or np.trapz
+
 KAPPA, B_LOG, BETA_STAR = 0.41, 5.2, 0.09
 R_FACTOR = 0.89
 
@@ -93,8 +96,8 @@ class Profile:
     def thicknesses(self, pr):
         roe, Ue = self.fs["ro"], self.fs["U"]
         f = pr["ro"] * pr["u"] / (roe * Ue)
-        dstar = np.trapz(1.0 - f, pr["y"])
-        theta = np.trapz(f * (1.0 - pr["u"] / Ue), pr["y"])
+        dstar = _trapz(1.0 - f, pr["y"])
+        theta = _trapz(f * (1.0 - pr["u"] / Ue), pr["y"])
         return dstar, theta
 
     def solve(self, dstar_t, theta_t, guess=(0.30, 50.0)):
