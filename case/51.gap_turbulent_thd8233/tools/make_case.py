@@ -62,6 +62,7 @@ physProp:
   thermCondMethod: 1
   prandtlLam: {pr:.3f}
   visc: {mu_inf:.6e}
+  thermCond: {kcond:.6e}
   cp: {cp:.2f}
   gamma: {gam:.3f}
   pMin: {pmin:.6g}
@@ -268,7 +269,9 @@ def main():
     # --- 段構成 ---
     # リミッタ基準値を**自由流で固定**する (auto だと開始場依存の作用素になり、分割実行が
     # 連続実行と一致しない。2026-09-20 codex result M10)。
-    common = dict(mu_inf=mu, cp=CP, gam=GAMMA, pr=PRANDTL_LAM, pmin=PMIN, romin=ROMIN, tmin=TMIN,
+    # thermCond は thermCondMethod: 1 (Prandtl 則) でも必須キー。基準値として mu*cp/Pr を入れる
+    common = dict(mu_inf=mu, cp=CP, gam=GAMMA, pr=PRANDTL_LAM, kcond=mu * CP / PRANDTL_LAM,
+                  pmin=PMIN, romin=ROMIN, tmin=TMIN,
                   relax=1.0, kinf=k_inf, ominf=om_inf, turb="sst",
                   ro_ref=ro, p_ref=p, a_ref=a_inf)
     stages = build_stages(a, common)
