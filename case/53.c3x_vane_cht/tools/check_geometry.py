@@ -189,7 +189,9 @@ def report(vane, make_fig=True):
         ax.plot(sm[:, 0], sm[:, 1], "-", color="k", lw=1.4, label="mesh outline (periodic spline)")
         ax.plot(tab[:, 0], tab[:, 1], "o", ms=4.2, color="tab:red", mfc="none", mew=1.2,
                 label=f"report Table {'III' if vane == 'c3x' else 'II'} ({len(tab)} points)")
-        ax.set_aspect("equal"); ax.grid(alpha=.3); ax.legend(fontsize=9, loc="best")
+        ax.set_aspect("equal"); ax.grid(alpha=.3)
+        ax.legend(fontsize=8.5, loc="upper left", bbox_to_anchor=(0.0, -0.10),
+                  ncol=2, frameon=False)
         ax.set_xlabel("x [cm]"); ax.set_ylabel("y [cm]")
         ax.set_title(f"{vane} — outline against the report's coordinate table", fontsize=10)
         # 後縁が切り落としなら、拡大の中心を**切り口の中点**に置き、R でなく面長で題を書く
@@ -209,7 +211,8 @@ def report(vane, make_fig=True):
                     axz.plot([pa[0], pb[0]], [pa[1], pb[1]], "-", color="tab:green", lw=3.2,
                              alpha=.55, zorder=1,
                              label=f"Table II points {cutpts[0]}&{cutpts[1]}")
-                    axz.legend(fontsize=7.5, loc="lower left")
+                    axz.text(0.03, 0.06, f"green = Table II points {cutpts[0]}&{cutpts[1]}",
+                             transform=axz.transAxes, fontsize=7.2, color="#2e6b2e")
                     ttl = (f"{nm} &mdash; straight cut, "
                            f"{np.hypot(*(pb - pa))*10:.2f} mm").replace("&mdash;", "\u2014")
             axz.plot(sm[:, 0], sm[:, 1], "-", color="k", lw=1.6, zorder=2)
@@ -223,7 +226,9 @@ def report(vane, make_fig=True):
         axr.plot(np.arange(1, len(d) + 1), d, "o-", ms=3.4, lw=1, color="tab:red",
                  label="distance from each table point to the outline")
         axr.set_xlabel("table point index"); axr.set_ylabel("distance [cm]")
-        axr.grid(alpha=.3); axr.legend(fontsize=8.6, loc="upper center")
+        axr.grid(alpha=.3)
+        axr.legend(fontsize=8.2, loc="lower left", bbox_to_anchor=(0.0, 1.02),
+                   ncol=2, frameon=False)
         axt = axr.twinx()
         axt.plot(np.linspace(1, len(d), len(ang)), ang, "-", color="#9a9ad0", lw=1.0, alpha=.85)
         axt.set_ylabel("outline turning angle [deg]", color="#6a6ab0")
