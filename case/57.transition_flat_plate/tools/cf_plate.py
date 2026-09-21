@@ -45,13 +45,21 @@ def load_su2(d):
     return two_point(col("x"), col("y"), col("Momentum_x") / col("Density")), f
 
 
-def onset(x, cf, xmin=0.01):
-    """遷移開始 = 前縁から見て**最初の** Cf の極小、遷移終了 = その下流で最初の極大 (T3B のように遷移後の Cf が板端まで下がり続けても拾える)。
-    極値が無ければ (完全乱流・完全層流) 板端を返す。"""
-    m = x > xmin; xx, cc = x[m], cf[m]
-    d = np.diff(cc)
-    i0 = next((i for i in range(1, len(d)) if d[i - 1] < 0 <= d[i]), len(cc) - 1)
-    i1 = next((i for i in range(i0 + 1, len(d)) if d[i - 1] > 0 >= d[i]), len(cc) - 1)
+def onset(x, cf, xmin=0.01, rise=0.05, fall=0.01):
+    """遷移開始 = 前縁から見て最初の Cf の極小、遷移終了 = その下流の最初の極大。
+    **丸めの小さな凹凸を極値と誤認しないよう、極値の確定に閾値を置く** (codex result-2 M2 の再生成で、細格子の 1 時刻だけ
+    極小直後の 1e-7 の凹凸を極大と拾った): 極小は「その後 Cf が走行最小の (1+rise) 倍を超えた」時点で確定、
+    極大は「その後 Cf が走行最大の (1-fall) 倍を下回った」時点で確定。確定しなければ (完全乱流・完全層流) 板端を返す。"""
+    m = x > xmin; xx, cc = x[m], cf[m]; n = len(cc)
+    i0, run = 0, cc[0]; found = False
+    for i in range(1, n):
+        if cc[i] < run: run, i0 = cc[i], i
+        elif cc[i] > (1.0 + rise) * run: found = True; break
+    if not found: return xx[-1], cc[-1], xx[-1], cc[-1]
+    i1, run = i0, cc[i0]
+    for i in range(i0 + 1, n):
+        if cc[i] > run: run, i1 = cc[i], i
+        elif cc[i] < (1.0 - fall) * run: break
     return xx[i0], cc[i0], xx[i1], cc[i1]
 
 
@@ -64,6 +72,7 @@ def main():
     a = ap.parse_args()
     globals()["MU"] = a.mu
     st = [float(s) for s in a.stations.split(",")]
+    assert len({"%g" % v for v in st}) == len(st), "--stations に重複"
     if a.series:
         # 連続する run の全スナップショットから報告量の時系列を書く (check_quasisteady.py --series-csv の入力)
         import h5py
@@ -77,7 +86,7 @@ def main():
                 rows.append([off + n, xo, cmin, xe, cmax] + [float(np.interp(s_, x, cf)) for s_ in st])
             off += int(os.path.basename(fs[-1])[4:-3])
         with open(a.series_out, "w") as g:
-            g.write("step,x_onset,cf_min,x_end,cf_max," + ",".join("cf_x%.1f" % s_ for s_ in st) + "\n")
+            g.write("step,x_onset,cf_min,x_end,cf_max," + ",".join("cf_x%g" % s_ for s_ in st) + "\n")
             for r in rows: g.write(",".join(f"{v:.8g}" for v in r) + "\n")
         print("wrote", a.series_out, len(rows), "snapshots"); return
     curves = []

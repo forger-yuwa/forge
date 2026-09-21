@@ -30,43 +30,76 @@ def main():
     f = os.path.join(a.run, f"res_{a.step}.h5") if a.step is not None else files[-1]
     with h5py.File(f, "r") as h:
         V = {k: np.array(h["VALUE"][k], dtype=float) for k in h["VALUE"]}
-    need = ["lmFonset", "lmPgamma", "dUxdx", "gammaTr", "reTheta", "vis_lam", "wall_dist", "gammaEff"]
-    lack = [n for n in need if n not in V]
+    V = check_inputs(V, f)
+    if V is None:
+        print("VERDICT: FAIL"); return 1
+    return judge(V, f, a.rtol, a.atol)
+
+
+NEED = ["ro", "Ux", "Uy", "Uz", "k", "omega", "sonic", "vis_lam", "wall_dist", "gammaTr", "reTheta", "gammaEff",
+        "lmFonset", "lmFlength", "lmFtheta", "lmRethCorr", "lmGammaSep", "lmPgamma", "lmEgamma", "lmPtheta", "lmCorrIter",
+        "src_jac_gamma", "src_jac_reth"] + [f"dU{i}d{j}" for i in "xyz" for j in "xyz"]
+
+
+def check_inputs(V, f="(memory)"):
+    """必須場の有無・形状・有限性を先に見る (codex result-2 M1: NaN や診断場の欠落が PASS になっていた)。不備なら None。"""
+    lack = [n for n in NEED if n not in V]
     if lack:
-        print(f"[check_lm_kernel] {f}: 必要な場が無い {lack} (output.level 2 の LM run が要る)"); print("VERDICT: FAIL"); return 1
+        print(f"[check_lm_kernel] {f}: 必要な場が無い {lack} (output.level 2 の LM run が要る)"); return None
+    n = len(V["ro"]); bad = [k for k in NEED if np.shape(V[k]) != (n,)]
+    if bad or n == 0:
+        print(f"[check_lm_kernel] {f}: 形状が合わない場 {bad} (n={n})"); return None
+    nonfin = [k for k in NEED if not np.all(np.isfinite(V[k]))]
+    if nonfin:
+        print(f"[check_lm_kernel] {f}: 非有限値 (NaN/Inf) を含む場 {nonfin}"); return None
+    return V
+
+
+def judge(V, f, rtol, atol):
+    class A: pass
+    a = A(); a.rtol, a.atol = rtol, atol
     n = len(V["ro"])
     U = np.stack([V["Ux"], V["Uy"], V["Uz"]], -1)
     G = np.zeros((n, 3, 3))
     for i, ui in enumerate("xyz"):
         for j, xj in enumerate("xyz"):
             G[:, i, j] = V[f"dU{ui}d{xj}"]
-    # カーネルがソースを評価しない節点 (壁・停滞点・入口ピン) は診断が 0。参照側も同じ節点を外す。
-    active = V["lmFlength"] > 0.0
+    # 評価対象は**検査される側の出力でなく入力から**決める (codex result-2 M1): 壁距離 > 1e-10 かつ |U| >= 1e-6 a。
+    # カーネルはこのほか入口ピン節点 (gamma = 1 に固定) も評価しない。入力側で対象なのにカーネルが評価していない節点は、
+    # 「gamma = 1 の入口ピン」として説明できる数 (全体の 2 % 以下) でなければ FAIL。
+    umag = np.linalg.norm(U, axis=-1)
+    expected = (V["wall_dist"] > 1e-10) & (umag >= 1e-6 * V["sonic"])
+    kern = V["lmFlength"] > 0.0
+    skipped = expected & ~kern
+    ok_mask = (skipped.sum() <= 0.02 * n) and bool(np.all(np.abs(V["gammaTr"][skipped] - 1.0) < 1e-6)) and not bool((kern & ~expected).any())
+    active = expected & kern
+    if active.sum() == 0:
+        print("[check_lm_kernel] 評価対象の節点が 0"); print("VERDICT: FAIL"); return 1
     r = lm.sources(V["ro"], U, G, np.maximum(V["k"], 0.0), np.maximum(V["omega"], 1e-12), V["vis_lam"], np.maximum(V["wall_dist"], 1e-30), V["gammaTr"], V["reTheta"])
     pairs = [("F_onset", V["lmFonset"], r["f_onset"]), ("F_length", V["lmFlength"], r["f_length"]), ("F_theta", V["lmFtheta"], r["f_theta"]),
              ("Re_theta_corr", V["lmRethCorr"], r["re_theta_corr"]), ("gamma_sep", V["lmGammaSep"], r["gamma_sep"]),
              ("P_gamma", V["lmPgamma"], r["P_gamma"]), ("E_gamma", V["lmEgamma"], r["E_gamma"]), ("P_theta", V["lmPtheta"], r["src_reth"]),
              ("gammaEff", V["gammaEff"], r["gamma_eff"])]
-    if "src_jac_gamma" in V:
-        pairs += [("diag_gamma (forge)", V["src_jac_gamma"], r["jac_gamma"]), ("diag_Re_theta", V["src_jac_reth"], r["jac_reth"])]
+    pairs += [("diag_gamma (forge)", V["src_jac_gamma"], r["jac_gamma"]), ("diag_Re_theta", V["src_jac_reth"], r["jac_reth"])]
     print(f"[check_lm_kernel] {f}: {int(active.sum())}/{n} 節点でソースを評価  (許容 rtol {a.rtol:g}, atol {a.atol:g}·max)")
     print(f"{'量':<20}{'max|参照|':>14}{'最大 |差|/許容':>16}{'超過節点':>10}  判定")
-    ok = True
+    ok = ok_mask
+    print(f"評価対象: 入力から {int(expected.sum())} 節点、うちカーネルが評価しなかった {int(skipped.sum())} 節点 (入口ピン gamma=1 のはず)  {'ok' if ok_mask else 'NG'}")
     for name, ker, ref in pairs:
         k_, r_ = ker[active], ref[active]
         sc = max(np.abs(r_).max(), 1e-30); ratio = np.abs(k_ - r_) / (a.rtol * np.abs(r_) + a.atol * sc)
-        nbad = int((ratio > 1.0).sum()); good = nbad == 0; ok &= good
+        nbad = int((~(ratio <= 1.0)).sum()); good = nbad == 0; ok &= good      # NaN も違反に数える
         print(f"{name:<20}{sc:14.5e}{ratio.max():16.3e}{nbad:10d}  {'ok' if good else 'NG'}")
     # ソースを評価しない節点では gammaEff = gamma のはず
     dge = np.abs(V["gammaEff"][~active] - V["gammaTr"][~active]).max() if (~active).any() else 0.0
     good = dge <= 1e-6; ok &= good
     print(f"非評価節点の gammaEff - gamma: 最大 {dge:.3e}  {'ok' if good else 'NG'}")
-    if "lmCorrIter" in V:
+    if True:
         it = V["lmCorrIter"][active]; ncap = int((it >= 100).sum()); ok &= (ncap == 0)
         print(f"相関の不動点反復: 平均 {it.mean():.1f} 回, 最大 {it.max():.0f} 回, 上限 100 到達 {ncap} 節点  {'ok' if ncap == 0 else 'NG'}")
     g, t = V["gammaTr"], V["reTheta"]
     print(f"上下限の作動 (表示のみ): gamma<=1e-4 が {100*np.mean(g <= 1.0001e-4):.2f} %, gamma>=1 が {100*np.mean(g >= 1.0):.2f} %, Re_theta_t<=20 が {100*np.mean(t <= 20.0):.2f} %")
-    if "src_jac_gamma" in V:
+    if True:
         s2 = r["su2_jac_gamma"][active]; fo = r["jac_gamma"][active]; m = np.isfinite(s2)
         print(f"参考: forge の対角 / SU2 のソース微分の負部 = 中央値 {np.median(fo[m][-s2[m] > 1e-12] / (-s2[m])[-s2[m] > 1e-12]):.2f} (項ごとに負部を取るぶん forge が大きい。定常解には影響しない)")
     print("VERDICT:", "PASS" if ok else "FAIL"); return 0 if ok else 1
