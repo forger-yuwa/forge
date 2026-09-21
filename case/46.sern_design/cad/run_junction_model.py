@@ -75,12 +75,20 @@ def prepare(problem, msh, run_dir, op=None, wake_at_rest=True):
         upper = (cc[:, 1] > -0.5 * TC) & (cc[:, 2] < ZW + 0.5 * TSW)
         arr = R2.region_ic_arrays(upper, st, p.gamma)
         if wake_at_rest:
-            # 板の後端面の後ろ (後流ブロック SW・CW) は**静止**で始める。一様流のまま始めると、no-slip の端面から流体が 1600-1800 m/s で遠ざかる
-            # = ピストンを音速の 5 倍で引き抜くのと同じで、端面に真空ができて床を割る (run_0423: 暖機 step 454 で NaN。NaN はカウル後端面の直後)
-            x, y, z = cc[:, 0], cc[:, 1], cc[:, 2]; eps = 1e-9
-            wake = ((x > LSW - eps) & (z > ZW - eps) & (z < ZW + TSW + eps) & (y > -TC - eps)) | ((x > LCOWL - eps) & (y > -TC - eps) & (y < eps) & (z < ZW + TSW + eps))
+            # 板の後端面 (no-slip) の直後を一様流で始めると、端面から流体が 1600-1800 m/s で遠ざかる = ピストンを音速の 5 倍で
+            # 引き抜くのと同じで、端面に真空ができて床を割る (run_0423: 暖機 step 454 で NaN。NaN はカウル後端面の直後)。
+            # 後流ブロックだけを静止にすると、動く流体との境界 (16 µm の壁層) に 1600 m/s の不連続ができて step 2 で NaN (run_0424)。
+            # そこで**端面からの 3D 距離 d で速度を 0 → 一様値へ滑らかに立ち上げる** (d < L_b = 10 t で smoothstep)。不連続は作らない
+            x, y, z = cc[:, 0], cc[:, 1], cc[:, 2]
+            def dist_face(xf, y0, y1, z0, z1):            # x = xf の矩形 [y0,y1]×[z0,z1] への距離 (上流側 x < xf は面の裏 = 固体側なので対象外)
+                dy = np.maximum(np.maximum(y0 - y, y - y1), 0.0); dz = np.maximum(np.maximum(z0 - z, z - z1), 0.0)
+                return np.where(x >= xf, np.sqrt((x - xf) ** 2 + dy ** 2 + dz ** 2), np.inf)
+            yr = lambda xx: H * (1.0 + 0.30 * xx / H - 0.02 * (xx / H) ** 2)
+            fac = np.ones_like(x)
+            for d, Lb in ((dist_face(LSW, -TC, yr(LSW), ZW, ZW + TSW), 10 * TSW), (dist_face(LCOWL, -TC, 0.0, 0.0, ZW + TSW), 10 * TC)):
+                t = np.clip(d / Lb, 0.0, 1.0); fac = np.minimum(fac, t * t * (3.0 - 2.0 * t))
             ke = 0.5 * arr["roUx"] ** 2 / arr["ro"]
-            arr["roe"] = np.where(wake, arr["roe"] - ke, arr["roe"]); arr["roUx"] = np.where(wake, 0.0, arr["roUx"]); n_wake = int(wake.sum())
+            arr["roUx"] = arr["roUx"] * fac; arr["roe"] = arr["roe"] - ke * (1.0 - fac ** 2); n_wake = int((fac < 1.0).sum())
         R2.write_ic_arrays(f["/VALUE"], arr)
     info = {"problem": str(problem), "msh": str(msh), "run_dir": str(run_dir), "H_m": H, "states": st, "gas_model": st["gas_model"], "phys_ids": ids,
             "model": p.evaluate.get("model", "euler"), "dim": 3, "nodes": int(len(cc)), "n_exhaust_ic": int(upper.sum()), "wake_at_rest": bool(wake_at_rest), "n_wake_ic": n_wake}
