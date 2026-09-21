@@ -84,6 +84,8 @@ def tail_levels(csv, tail=0.2):
     return out
 
 
+import check_cavity_steady as cs  # noqa: E402  (is_nonuniform_wall を使う)
+
 BUDGET_KEYS = ("budget_residual_all_alldepth", "budget_residual_alldepth", "budget_residual")
 
 
@@ -274,10 +276,25 @@ def main():
             fails.append("質量収支")
         if bud is not None:
             ok5b = bud <= a.budget_tol
-            print("                      CV エネルギー収支 残差 %.3f (許容 %.3g) %s"
-                  % (bud, a.budget_tol, "OK" if ok5b else "**FAIL**"))
-            if not ok5b:
-                fails.append("エネルギー収支")
+            # **壁温が不連続な run では収支が閉じないのが正しい** (2026-09-21, plan §4.8.6.4)。
+            # 底面と側壁の壁温が違うと、その角に $q''\propto s^{-1}$ の特異点が立つ
+            # (mixA 実測: 側壁の最下 0.1 mm で −702.7 kW/m²、一様壁は +0.2 kW/m² で平坦)。
+            # $1/s$ の面積分は**対数発散**するので角近傍の壁入熱は格子収束せず、
+            # 有限の流体側流束と釣り合わない。mixA は全入熱の 18 % がこの帯にある。
+            # **FAIL にはしないが、黙って PASS にもしない** — CAVEAT として必ず報告させる。
+            nonuni = cs.is_nonuniform_wall(rd)
+            if not ok5b and nonuni:
+                print("                      CV エネルギー収支 残差 %.3f (許容 %.3g) "
+                      "**超過するが壁温不連続なので FAIL にしない**" % (bud, a.budget_tol))
+                print("                      → 底面/側壁の角に q''∝s^-1 の特異点 (plan §4.8.6.4)。"
+                      "角近傍の壁入熱は格子収束しないので収支は閉じない")
+                caveats.append("エネルギー収支 %.1f %% (壁温不連続の角特異点)" % (100 * bud))
+            else:
+                print("                      CV エネルギー収支 残差 %.3f (許容 %.3g) %s%s"
+                      % (bud, a.budget_tol, "OK" if ok5b else "**FAIL**",
+                         "  [壁温不連続]" if nonuni else ""))
+                if not ok5b:
+                    fails.append("エネルギー収支")
     else:
         print("[5] 保存性         : **判定不能** (cavity_eval.json が作れない)")
         fails.append("保存性(判定不能)")

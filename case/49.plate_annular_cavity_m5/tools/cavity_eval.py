@@ -538,8 +538,12 @@ def _poly_area(pts):
     return 0.5 * float(np.linalg.norm(n))
 
 
-def face_cut_integral(w, vals, z_cut, below=True):
-    """各**面を z = z_cut で切断**して積分する [値 x 面積 の総和]。
+def face_cut_integral(w, vals, z_cut, below=True, scalar=None):
+    """各**面を scalar = z_cut で切断**して積分する [値 x 面積 の総和]。
+
+    `scalar` を省くと従来どおり **z** で切る。**角帯 (底面/側壁の接合) を除く**ときは
+    壁ごとに別の量で切りたいので (側壁は z、底面は縁までの距離)、節点ごとのスカラーを
+    渡せるようにしてある (2026-09-21, 残作業 #51)。
 
     旧実装は「ノードの z が条件を満たすか」で面積重みを採否していたため、
     **実効的な積分範囲がノード配置 = 格子に依存**していた (codex M6, 残作業 #16)。
@@ -549,9 +553,10 @@ def face_cut_integral(w, vals, z_cut, below=True):
     """
     xyz = w["xyz"]
     conn, offs = w["conn"], w["offs"]
+    sc = np.asarray(xyz[:, 2] if scalar is None else scalar, float)
     tot = 0.0
     s0 = 0
-    sign = -1.0 if below else 1.0            # below: z < z_cut を残す
+    sign = -1.0 if below else 1.0            # below: scalar < z_cut を残す
     for e in range(len(offs)):
         nd = conn[s0:offs[e]]
         s0 = offs[e]
@@ -559,7 +564,7 @@ def face_cut_integral(w, vals, z_cut, below=True):
             continue
         P = xyz[nd].astype(float)
         V = np.asarray(vals, float)[nd]
-        d = sign * (P[:, 2] - z_cut)         # > 0 が残す側
+        d = sign * (sc[nd] - z_cut)          # > 0 が残す側
         if np.all(d <= 0):
             continue
         if np.all(d >= 0):

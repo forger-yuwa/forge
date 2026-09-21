@@ -50,6 +50,15 @@ def main():
     tol = max(cs.ABS_TOL["dT_mid"][1], cs.ABS_TOL["dT_mid"][2] * 455.0)
     chk("平均 455 K で 6 K のうねりは許容超過", 6.0 > tol, "許容 %.3g K" % tol)
 
+    # --- #50: 壁温不連続の run では収支超過を FAIL にしない (が CAVEAT に必ず出す) ---
+    import inspect
+    src = inspect.getsource(g.main)
+    chk("壁温不連続なら収支超過を fails に積まない",
+        "if not ok5b and nonuni:" in src and 'caveats.append("エネルギー収支' in src)
+    chk("壁温不連続でなければ従来どおり fails に積む",
+        src.count('fails.append("エネルギー収支")') == 1)
+    chk("is_nonuniform_wall を本番から呼んでいる", "cs.is_nonuniform_wall(rd)" in src)
+
     print("\nVERDICT: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
 
