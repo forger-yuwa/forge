@@ -1,3 +1,41 @@
+forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
+SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
+リポジトリに対する**外部レビュー**を依頼する。忖度なしで、主張はコードと実測 (run の数値) で検証すること。
+結論が「この計画/結果は誤り」でも構わない。両論併記で逃げず、推奨は 1 つに絞ること。
+
+ルール:
+- **ファイルを変更しない** (read-only サンドボックスで動いている。読む・実行して確認するのは可)。
+- 出力は日本語。識別子・ファイル名は原語のまま。
+- 指摘は **Critical / Major / Minor** の重大度付きで、必ず根拠 (`ファイル:行` または `run_*` の数値) と対案をセットで書く。
+- リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
+  用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
+- 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
+  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+
+## 依頼: 計画立案時レビュー (stage = plan)
+
+対象の plan は下に全文を貼る (`plans/active/tooling-nozzle-sern-3d.md`)。これから実装に入る前の段階なので、次を順に評価せよ。
+
+1. **目的とスコープ** (§1, §2): 解こうとしている課題は正しく同定されているか。既に解決済み/別 plan と重複していないか
+   (`plans/README.md` と `plans/accepted/` を確認)。
+2. **設計方針** (§4): 数学的・数値的に健全か。forge の既存構造 (`methods/architecture/overview.md`、該当 `methods/<area>/`)
+   と整合するか。node/cell 両離散化、float32、陰解法 (block-DPLUR)、周期・軸対称などの既知の落とし穴に抵触しないか。
+   代替案と比べて費用対効果は妥当か。
+3. **実装ステップと残作業表** (§5, §5.1): 順序・粒度は妥当か。抜けている前提 (メッシュ品質、IC、段階起動) はないか。
+4. **検証計画** (§6): 判定基準は定量的か。検証ケースの選択は `procedures/verification/README.md` と整合するか。
+   「収束」「一致」を何で判定するかが書かれているか。
+5. **見落としているリスク**: 我々が気づいていない構造的問題があれば挙げよ。
+
+最後に「この計画で実装に進んでよいか」を **GO / GO-with-changes / NO-GO** の 1 語で判定し、
+GO-with-changes なら実装前に直すべき点を優先順で列挙すること。
+
+## 重点
+
+§4.44 R5q の設計だけを見てほしい: 側壁に物理厚み + z 分布の station 依存化 + カウル側端テーパ廃止、の 3 点同時で厚さ0の交線を消す案。トポロジ不変・dup2 の条件も k_sw 索引も変えない前提が成立するか、検証項目 5 件で足りるか、見落とした接続 (入口面・後縁 i_sw・ext_top ブロック・面分類の zm) がないか。
+
+## plan 全文 (`plans/active/tooling-nozzle-sern-3d.md`)
+
+```markdown
 # ⑤ SERN の 3D 計算領域 (本体 plan §4.14/§4.15 系の切り出し)
 
 ## メタ
@@ -1847,8 +1885,7 @@ $$ z^{\rm in}_i = \big(\tfrac{W}{2} - \tfrac{t_{sw}(x_i)}{2}\big)\, s_{\rm in},\
 | ~~**R5o**~~ | **完了 (2026-09-21, §4.41/§4.42)**: x ブレンドを実装 (既定は挙動不変・座標ビット一致、急なブレンドは `df/dx > 4e-3` で生成失敗)。メッシュ **SOFT-PASS** (AR>5000 が 0.02 %・skew 0.701)。**摩擦が収束し `C_T_with_shear` が −0.00024 で許容内**、`C_T`/`C_L` も許容内。y 法線壁の y⁺ は `ramp` 0.549 / `cowl_in` 1.234 | `run_0421` / `run_0422` |
 | ~~**R5p**~~ | **決着 (2026-09-21, ユーザ決定)**: **`C_M` の許容を 0.02 → 0.05 に緩めた** (§8 に反映)。腕が 20–29 H あるので $|\Delta C_L| \le 0.002$ と $|\Delta C_M| \le 0.02$ は同時に満たせなかった。**厳密な整合は 0.06** なので、$\Delta C_L$ が 0.002 に近い case が出たら見直す。これにより **g3→g4 の `C_M` −0.04173 は許容内**になり、**4 係数すべてが許容内**に入った | plan §8 |
 
-| **R5q** | **別 plan へ移管 (2026-09-21, codex plan NO-GO + 方式相談を受けて)**。§4.44 の「座標だけ動かす」設計は**撤回**。接合部のトポロジ (露出カウル側端の壁・側壁下端のノード定義・`ext_top`/`vehicle_side` の座標写像・`L_sw` の物理 station 化・厚み 0 の互換分岐・`half_W_m` と入口項の帳簿・新モード試験一式) を明示設計する**新 plan** を立てる。方式は **(a) 自作メッシャ改修**で確定 (CAD+Salome は M5/M6/M7 が消えず、node 変換経路も無い)。**本 plan の 3D 受理は「厚さ 0 交線に床張り付き 12 ノード / 320 万節点、格子細分で悪化」を既知の限界として明記して締める** | 新 plan (未作成) |
-
+| **R5q** | **設計確定・実装へ (2026-09-21, ユーザ決定「なおす」)**: §4.43 で **厚さ 0 が 2 つ交わる線**と特定 (側壁スリット z 差 0.000e+00 × カウル板が側壁で厚さ 0)。格子細分で ρ min が 1.95e-03 → 1.00e-04 (床) と**悪化**。設計は §4.44: **`sidewall_thickness` (物理入力・既定 0 で挙動不変) + z 分布の station 依存化 + カウル側端テーパ `sz` の廃止 (R5j 是正を兼ねる)**。触る箇所は 4 つ、トポロジは不変。**形状が変わるので g1–g4 は取り直し** | `mesh_sern3d.py` L161–169 / L262 / L269 / L273 / L246–250 |
 | ~~R5j~~ | **R5q に統合 (2026-09-21)**: カウル側端テーパ `sz` を廃すことで、「最後の 2 z-セル」で物理幅が決まる問題 (`nz_in` 25→57 で 0.868 → 0.00949 mm、91 倍) が消える | §4.44-3 |
 
 
@@ -1872,8 +1909,6 @@ $$ z^{\rm in}_i = \big(\tfrac{W}{2} - \tfrac{t_{sw}(x_i)}{2}\big)\, s_{\rm in},\
 
 | stage | 日付 | 記録 | 判定 | 採否 |
 | --- | --- | --- | --- | --- |
-| plan | 2026-09-21 | [2026-09-21-tooling-nozzle-sern-3d-plan.md](../../notes/reviews/2026-09-21-tooling-nozzle-sern-3d-plan.md) | **NO-GO**, C0/M7/m1 | **全件採用 → §4.44 の設計を撤回**。M1 `L_sw`(0.8)<`L_cowl`(1.2) で露出カウル側端を閉じる面が無い (未分類面 12)。M2 `dup2` は `j>jm` のみで側壁下端に厚みを与えられない。M3 `_add_ext_top3d`/`_add_vehicle_side3d` も `zs[k]` を使う。M4 `i_sw=argmin(|xs−L_sw|)` で `L_sw` が station に無い。M5 厚み 0 でも `sz` ステップ化で 1108 節点が動きビット一致しない。M6 `half_W_m` 固定で入口項と理想推力に系統誤差。M7 既存試験は新モード未覆。**規模が 3〜5 倍**なので R5q を別 plan へ移管 |
-| 相談 | 2026-09-21 | [2026-09-21-codex-mesh-approach.md](../../notes/reviews/2026-09-21-codex-mesh-approach.md) | **(a) 自作メッシャ改修を推奨** | **全面採用**。CAD+Salome に移っても **M5/M6/M7 は消えない** (とくに入口帳簿はメッシャ非依存)。**Salome→forge の node 経路が存在せず** (`fluent_h5_to_forge.py:442,498` は cell 中心で代用不可)、MED/UNV→msh4.1→`convertGmshToForge` の新設と受入試験が要る。無人生成の成功率も未検証。**(1)(2)(4) の本質は「物理形状と接続を格子索引から独立させる」ことで (a) でも可能**。→ (a) で進め、接合部のトポロジを明示設計する別 plan を立てる |
 | plan | 2026-09-20 | [2026-09-20-tooling-nozzle-sern-3d-plan-2.md](../../notes/reviews/2026-09-20-tooling-nozzle-sern-3d-plan-2.md) | **NO-GO**, C0/M6/m1 | **全件採用**。**M1** → R5 系は生産条件でなく **CPG + 断熱** (`thermalMethod: 0`、壁の `floats:` 空) と確認 → §4.36-1 / R5i。**M2 (実バグ)** → `FLOOR_STUCK` は誤判定。CPG の温度床は `tMin` (1e-4 K) で、50 K の `DEPVAR_TMIN` は TP/凝縮の反転経路だけ。`sern_gates.py::_solver_floors` を経路依存に修正し、`run_0415` は **`GATES: PASS`** になった → §4.35 訂正 1。**M3** → L2 差は符号・位相を落とすので「リミットサイクル」「残り 1 桁が限界」「受理条件の置き換え」を**撤回**、`NOT CONVERGED` を保持 → §4.34 / R5g を未完了へ。**M4** → `dup1` は `i < i_te` のみなので後縁は**同一ノード ID = 正しく閉じた後縁**。「厚さ 0 スリット」の断定を撤回 → §4.35 訂正 2。**M5** → カウル側端テーパが「最後の 2 z-セル」で決まり物理幅が **91 倍**変わる ([[geometry-must-not-follow-mesh-spacing]] の同型違反) → §4.36-2 / R5j。**M6** → §4.32 の「不可能」を「試した分布では不成立」に限定し、側壁解像を受理条件に戻した。**m1** → §5.1 を現状同期 |
 | plan | 2026-09-20 | [2026-09-20-tooling-nozzle-sern-3d-plan.md](../../notes/reviews/2026-09-20-tooling-nozzle-sern-3d-plan.md) | GO-with-changes, M6/m1 | **全件採用 → §4.23**。M1 → 非決定性の発生源が `convectiveFlux_slau_d.inc.cuh:563` と `ransTransport_d.cu:55` の float `atomicAdd` と特定 (node も通る)。私の「2 回走に差があるから出力バグでない」という判別論理は不成立と認め、出力の無罪は M2 のソース読解で裏づけ。M2 → 通常出力から EOS 再適用への経路は無いが `dependentVariables` は床適用と `roe` 再構成をするので診断で EOS を呼ばないこと。M3 → `%/step` を廃し**固定ノード集合の ΣρV** に変更 (粗 24 step で 65.4 % → 0、細 12000 step で 99.973 %)。残りの機序分離指標は §5.1。M4/M5/M6 → 最終 step の強制保存・`interp_field` 後の検査・バイナリ固定を §5.1 に起票 |
 | **result** | 2026-09-20 | [2026-09-20-tooling-nozzle-sern-3d-result.md](../../notes/reviews/2026-09-20-tooling-nozzle-sern-3d-result.md) | NO-GO, M7/m2 | **全件採用 → §4.20 で大幅撤回**。**M1** → `run_0269` は config もログも `cfl_pseudo=1` で「粗・cfl 5」ではなかった。2×2 は成立せず「CFL 非依存」を撤回。**M2** → `run_0304`/`0305` のログは `implicitRelax=1` で A/B 未実施。「relax で止まる」を撤回。**M3 (実バグ)** → 3D は `_wake_stations(L_cowl, ...)` とカウル後縁から細分しており**ベース直後は 42.75 倍粗いまま**だった。`L_ramp` 分割に修正し、入力値でなく**生成後の実座標**を見る `check_wake_first_spacing()` を追加 (`_geom_start` は公比上限 3 で打ち切るので入力検査では保証できない)。検証: 2D 0.000400 m / 3D 0.004000。**M4 (私の退行)** → ハードエラーが `run_sern_mesh3d_tests.py` を壊していた。未設定は `t_base/5` を既定にして **ALL PASS に復帰**。`t_base/5`・soft ramp・CFL は暫定レシピと明記。**M5/M6/M7** → `run_0308` を「通し完走」までに限定、段階の実効設定と途中場の保存を残作業に、§5.1 と完了条件を同期。**m1/m2** → 現在仕様の旧トポロジ記述と、phase を跨いだ変動係数の計算を訂正。**自分で追加確認**: 同一入力の繰り返しで NaN が step **34/38/53** とばらつく = §4.16–§4.17 の A/B は全部保留 |
@@ -1909,3 +1944,11 @@ $\Delta C_L$ はそのまま $\Delta C_M \approx \Delta C_L \times (d/L_{\rm ref
 
 - `2026-09-19` — 本体 plan §4.14/§4.15 系と 3D の残作業を切り出し (本体が codex の 128 KB 引数上限を超えたため)。
   内容は移設のみで変更なし。
+```
+
+## 出力形式
+
+1. 冒頭に **判定 (GO / GO-with-changes / NO-GO)** と 3 行以内の要約。
+2. 指摘一覧 (Critical → Major → Minor の順、番号付き。各項目に根拠と対案)。
+3. 推奨 (1 つに絞る)。
+4. 末尾に `指摘数: Critical N / Major N / Minor N` の 1 行。
