@@ -104,13 +104,15 @@
 </style>
 
 <div class="wrap">
-  <p class="eyebrow">forge · conjugate heat transfer · V5 · revised 2026-09-22</p>
+  <p class="eyebrow">forge · conjugate heat transfer · V5 · revised 2026-09-22 · transition model added</p>
   <h1>Two cooled turbine vanes, measured in 1983 and solved today</h1>
   <p class="standfirst">forge couples its gas-side solution to a two-dimensional solid with ten
   cooling passages, and is checked here against the two vanes of NASA CR-168015. The report is
   organised one vane at a time: everything about C3X is in section 02, everything about Mark II
   in section 03, each ending with the same control &#8212; the turbulence model switched off
-  &#8212; which shows the measurement sitting between the laminar and turbulent limits.</p>
+  &#8212; which shows the measurement sitting between the laminar and turbulent limits. Section 07
+  then adds a transition model, checks it on a flat plate and against SU2, and reports what it
+  does and does not fix on the two vanes.</p>
   <div class="meta">
     <span>NASA CR-168015 · runs 108 &amp; 42</span>
     <span>C3X · M₂ = 0.90</span>
@@ -880,7 +882,7 @@
   the gas side is within the measurement's own uncertainty for half its nodes, and
   <span class="n">+41 K</span> on the laminar stretch, where the heat transfer coefficient is
   <span class="n">80 %</span> high. The two go together region by region; this page does not
-  show that the first is caused only by the second (section 08).</p>
+  show that the first is caused only by the second (section 09).</p>
 <h2><span class="num">04 / Wall heat flux</span>Why the curves were ragged, and what fixed it</h2>
   <p>In earlier versions of this page the heat flux curves were visibly ragged while the
   pressure curves were not &#8212; same wall, same nodes, same solution. Five causes were found.
@@ -1033,7 +1035,7 @@
     </table>
   </div>
   <p>What remains there is the shock foot itself moving, which no definition of the flux can
-  remove; it is listed in section 08.</p>
+  remove; it is listed in section 09.</p>
 
   <p><strong>Third, where the wall nodes sit.</strong> The spacing of the wall nodes alternated
   by <span class="n">2.8 %</span> from one node to the next, because the outline resampler
@@ -1117,7 +1119,211 @@
     two kelvin, in opposite directions on the two vanes.</li>
   </ul>
 
-  <h2><span class="num">07 / Runs</span>Every run on this page, with what was imposed</h2>
+  <h2><span class="num">07 / Transition model</span>Adding the missing closure: what it fixes, and what it does not</h2>
+  <p>Sections 02 and 03 end on the same finding: the turbulence model is turbulent from the
+  leading edge, the measured boundary layer is not, and the front of the suction surface is
+  over-predicted by 44 to 80 %. This section adds the closure that was missing and reports what
+  happened. The short version: <strong>on a flat plate it reproduces the measured transition and
+  matches an independent code to within a percent; on the vanes it removes the over-prediction
+  it was brought in for, but it transitions later and more abruptly than the measurement, it
+  leaves the pressure surface too cold, and how well the whole vane agrees depends on an inlet
+  quantity the 1983 report does not give.</strong></p>
+
+  <h3>What was added</h3>
+  <p>The model is the two-equation correlation model of Langtry and Menter (2009). It carries
+  two more quantities with the flow. The first, the <em>intermittency</em>, is the fraction of
+  the time the boundary layer at that point is turbulent: 1 in the free stream, close to 0
+  inside a laminar layer. It multiplies the production of turbulent kinetic energy in the SST
+  model, so where it is small the layer stays laminar. The second carries, from the free stream
+  into the boundary layer, the Reynolds number at which transition should start; that threshold
+  comes from an empirical correlation in the local turbulence level and the local acceleration
+  of the flow. Transition starts where the boundary layer has grown past the threshold. A
+  separate term switches the layer turbulent quickly if it separates while still laminar.</p>
+  <p>The implementation follows the one in SU2 8.5 equation by equation, so that the two codes
+  can be compared on identical meshes. It is off unless requested, and with it off the solver
+  gives the same fields as before to within the scatter between two runs of the old binary
+  (forge does not reproduce itself bit for bit from run to run, so the comparison is against
+  that scatter: the largest difference is <span class="n">1.8</span> times it, within the
+  factor of two allowed). Each node of the solver's source terms was checked against a separate
+  double-precision implementation of the same equations, on the flat plate and on the C3X
+  passage: all eleven quantities agree at every node.</p>
+
+  <h3>Flat plate: the model does what it should</h3>
+  <figure>
+    <img class="shot" src="img/trans_plate.png" alt="Skin friction on the T3A flat plate: forge with the transition model on three grids, SU2 with the same model, the measurement, and forge without the model and laminar">
+    <figcaption><span class="tag">case/57 &#183; run_0005 / 0007 / 0009 &#183; run_0003 &#183; run_0010 &#183; su2_t3a_lm &#183; identical mesh for forge base grid and SU2</span><br>
+    <b>Figure 22</b>&#8239;&#183;&#8239;Skin friction along a flat plate under 3.3 % free-stream
+    turbulence (the ERCOFTAC T3A experiment). Without the model (blue) the layer is turbulent
+    from the leading edge. With it (black; orange and red are a coarser and a finer grid) the
+    layer follows the laminar curve, leaves it near <span class="n">x</span> = 0.36 m and joins
+    the turbulent curve near 0.85 m, as the measurement does. SU2 with the same model on the
+    same mesh is the green dash-dot line, almost hidden under the black one. Click to
+    enlarge.</figcaption>
+  </figure>
+  <div class="tw">
+    <table>
+      <thead><tr><th>T3A flat plate</th><th>forge coarse</th><th>forge base</th><th>forge fine</th><th>SU2, base grid</th><th>measured</th></tr></thead>
+      <tbody>
+        <tr><td>transition starts (C<sub>f</sub> minimum), x [m]</td><td class="n">0.342</td><td class="n">0.360</td><td class="n">0.358</td><td class="n">0.368</td><td class="n">0.395 (points 0.1 m apart)</td></tr>
+        <tr><td>transition ends (C<sub>f</sub> maximum), x [m]</td><td class="n">0.821</td><td class="n">0.850</td><td class="n">0.869</td><td class="n">0.864</td><td class="n">0.895</td></tr>
+        <tr class="key"><td>C<sub>f</sub> &#215; 10&#179; at x = 0.3 / 0.9 / 1.3 m</td><td class="n">2.28 / 4.40 / 4.15</td><td class="n">2.29 / 4.41 / 4.17</td><td class="n">2.29 / 4.43 / 4.18</td><td class="n">2.27 / 4.41 / 4.18</td><td class="n">&#8212;</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Between the two finest grids the start of transition moves by <span class="n">0.4 %</span>
+  and the skin friction by at most <span class="n">0.4 %</span>. Against SU2 on the same mesh the
+  start differs by <span class="n">2.2 %</span> and the skin friction by at most
+  <span class="n">0.8 %</span>. Against the measurement the start is <span class="n">9 %</span>
+  early, and over the sixteen measured points the skin friction differs by
+  <span class="n">+1.9 %</span> on average and <span class="n">9.9 %</span> rms, the largest
+  miss being in the middle of transition (<span class="n">+25 %</span> at 0.595 m; SU2 misses
+  the same point by <span class="n">+21 %</span>). A second plate at 6.5 % turbulence (T3B),
+  closer to the vane conditions, was compared with SU2 only, because its measured data could
+  not be obtained: the start of transition coincides (<span class="n">x</span> = 0.090 m in
+  both) and the skin friction agrees within <span class="n">1.7 %</span>. The answer does not
+  depend on the starting field: starting from the fully turbulent solution and starting from a
+  field with the turbulence reset give the same result to four digits.</p>
+  <p>Two things said about these plate runs in an earlier draft were wrong and are corrected
+  here. None of them meets the residual criterion; the residuals sit at the rounding floor of
+  single precision (<span class="n">0.8</span> to <span class="n">1.6</span> times machine
+  epsilon) and are spread evenly over the domain, not concentrated at the leading edge as first
+  written. And the first cell exceeds <span class="n">y<sub>1</sub>&#8314;</span> = 1 at the
+  leading-edge node itself (<span class="n">1.0</span> to <span class="n">1.7</span>,
+  <span class="n">0.1</span> to <span class="n">0.3 %</span> of the plate). The quantities in
+  the table are steady by their own histories, which is what they are judged on, as in
+  section 05.</p>
+
+  <h3>C3X: the over-prediction goes, the overall agreement depends on the inlet</h3>
+  <figure>
+    <img class="shot" src="img/trans_c3x.png" alt="C3X heat transfer coefficient with and without the transition model for several inlet turbulence decay rates">
+    <figcaption><span class="tag">run_0135 &#183; run_0149 &#183; run_0148 &#183; run_0146 &#183; run_0147 &#183; measured wall temperature imposed &#183; first cell 1 &#181;m</span><br>
+    <b>Figure 23</b>&#8239;&#183;&#8239;C3X with the measured wall temperature imposed, on the mesh
+    that passes the wall-resolution check. Blue: no transition model, for two inlet settings.
+    Yellow, orange, purple: with the model, for an inlet eddy-viscosity ratio of 1, 10 and 100.
+    The inlet turbulence intensity is the reported 6.5 % in every case; the ratio sets how fast
+    that turbulence decays before it reaches the vane, which the report does not give. Shaded:
+    the front of the suction surface, where sections 02 and 03 found the largest error. Click
+    to enlarge.</figcaption>
+  </figure>
+  <div class="tw">
+    <table>
+      <thead><tr><th>C3X, mean departure of h from the measurement</th><th>Pressure side</th><th>Suction, s/S &lt; 0.25</th><th>Suction, after</th><th>All</th><th>rms, all</th></tr></thead>
+      <tbody>
+        <tr><td>no model, inlet ratio 10 (the setting of section 02)</td><td class="n">+17.4 %</td><td class="n">+46.4 %</td><td class="n">+7.9 %</td><td class="n">+22.2 %</td><td class="n">34.3 %</td></tr>
+        <tr class="key"><td>with the model, inlet ratio 10</td><td class="n">&#8722;33.3 %</td><td class="n">&#8722;15.9 %</td><td class="n">+2.1 %</td><td class="n">&#8722;17.2 %</td><td class="n">37.1 %</td></tr>
+        <tr><td>no model, inlet ratio 100</td><td class="n">+35.7 %</td><td class="n">+58.8 %</td><td class="n">+7.4 %</td><td class="n">+32.9 %</td><td class="n">43.1 %</td></tr>
+        <tr class="key"><td>with the model, inlet ratio 100</td><td class="n">+25.5 %</td><td class="n">&#8722;3.0 %</td><td class="n">+6.4 %</td><td class="n">+11.6 %</td><td class="n">29.3 %</td></tr>
+        <tr><td>with the model, inlet ratio 30</td><td class="n">&#8722;22.4 %</td><td class="n">&#8722;11.3 %</td><td class="n">+4.7 %</td><td class="n">&#8722;10.7 %</td><td class="n">33.2 %</td></tr>
+        <tr><td>with the model, inlet ratio 1</td><td class="n">&#8722;38.8 %</td><td class="n">&#8722;19.7 %</td><td class="n">&#8722;8.8 %</td><td class="n">&#8722;24.0 %</td><td class="n">41.6 %</td></tr>
+        <tr><td>laminar (section 02, 2 &#181;m mesh)</td><td class="n">&#8722;40.4 %</td><td class="n">&#8722;20.9 %</td><td class="n">&#8722;77.2 %</td><td class="n">&#8722;46.9 %</td><td class="n">58.9 %</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul>
+    <li><strong>What it was brought in for, it does.</strong> The front of the suction surface
+    goes from <span class="n">+46</span> to <span class="n">+59 %</span> down to
+    <span class="n">&#8722;3</span> to <span class="n">&#8722;20 %</span>, and up to
+    <span class="n">s/S</span> = 0.15 the computed curve runs through the measured points.</li>
+    <li><strong>The transition is too late and too abrupt.</strong> The measured heat transfer
+    rises gradually from <span class="n">s/S</span> = 0.2 to 0.4. The computed layer stays
+    laminar to 0.3, by which point the heat transfer has fallen to a fifth of the measured
+    value, and then jumps to the turbulent level within 0.04 of the surface length and
+    overshoots by 18 %. This is why the rms after transition gets <em>worse</em>
+    (<span class="n">12.8 %</span> without the model, <span class="n">30</span> to
+    <span class="n">36 %</span> with it) although the mean looks good. The location hardly moves
+    with the inlet setting (0.32 to 0.34 for ratios of 10, 30 and 100). The cause is visible in
+    the model's own variables: the suction-side flow accelerates to five times the inlet
+    velocity by <span class="n">s/S</span> = 0.2, the model measures turbulence intensity
+    against the <em>local</em> velocity, so the 6.5 % at the inlet is about 1 % there and the
+    threshold stays out of reach until the flow starts to decelerate at 0.3; the jump that
+    follows is the separated-layer term. In the measurement transition begins where the
+    acceleration ends.</li>
+    <li><strong>The pressure surface comes out too cold, and that is only half wrong.</strong>
+    The flow along it accelerates strongly: the acceleration parameter
+    <span class="n">K = (&#957;/U&#178;) dU/ds</span> is above <span class="n">3 &#215; 10&#8315;&#8310;</span>,
+    the level at which a turbulent layer cannot be sustained, up to mid-surface
+    (<span class="n">8.3</span>, <span class="n">4.1</span> and <span class="n">2.9 &#215; 10&#8315;&#8310;</span>
+    at <span class="n">s/S</span> = 0.1, 0.3 and 0.5). A laminar front half is therefore what
+    one expects, and the measurement is low there. But the measured level is still 25 to 80 %
+    above the computed laminar layer &#8212; a laminar layer buffeted by 6.5 % turbulence &#8212; and
+    rises towards the turbulent level over the rear half, once <span class="n">K</span> falls
+    below 3. The model has no mechanism for the first and does not produce the second: with
+    inlet ratios of 1, 10 and 30 the pressure surface stays laminar to the trailing edge. At a
+    ratio of 100 it reads <span class="n">+25 %</span>, but not because the layer has
+    transitioned (the eddy viscosity within 0.1 mm of the wall stays small up to
+    <span class="n">s/S</span> = 0.76); the free stream then carries so much eddy viscosity that
+    it diffuses into the thin layer.</li>
+    <li><strong>No single number says whether the vane as a whole got better.</strong> Compared
+    like for like, the model improves every region at an inlet ratio of 100 (rms
+    <span class="n">43</span> to <span class="n">29 %</span>) and improves nothing overall at 10
+    (<span class="n">34</span> to <span class="n">37 %</span>, with the sign reversed). The
+    report gives the turbulence intensity at the inlet and not its length scale, so there is no
+    basis for choosing between them, and none has been chosen. Limiting the production of
+    turbulence at the stagnation point (Kato&#8211;Launder), which the model's authors
+    recommend, moves the pressure surface at a ratio of 100 from <span class="n">+25</span> to
+    <span class="n">&#8722;26 %</span>; which of the two is right is not known either.</li>
+    <li><strong>These runs have to be long.</strong> At a ratio of 30 the pressure-surface figure
+    read <span class="n">+18 %</span> after 60 000 steps and settled at
+    <span class="n">&#8722;22 %</span> after 200 000, unchanged to 500 000.</li>
+  </ul>
+
+  <h3>Is that the model or the solver? The same model in SU2</h3>
+  <figure>
+    <img class="shot" src="img/trans_su2.png" alt="C3X with the transition model in forge and in SU2 on the identical mesh">
+    <figcaption><span class="tag">run_0153_lm_cf0_su2ctrl &#183; su2_smooth_lm &#183; run_0128_cf0_fx05 &#183; uniform 566 K wall, identical mesh</span><br>
+    <b>Figure 24</b>&#8239;&#183;&#8239;The control of section 02 repeated with the transition model
+    in both codes: uniform wall temperature, the same mesh, the same nodes, inlet ratio 10.
+    Black forge, green SU2, grey forge without the model. Click to enlarge.</figcaption>
+  </figure>
+  <p>They agree. Region by region the heat transfer coefficient differs by
+  <span class="n">&#8722;0.4 %</span> on the pressure surface, <span class="n">+0.1 %</span> on
+  the front of the suction surface and <span class="n">+1.4 %</span> behind it, and the rise
+  through transition crosses its mid-point at <span class="n">s/S</span> = 0.337 in both codes.
+  SU2 is as late, as abrupt and as cold on the pressure surface as forge
+  (<span class="n">&#8722;30.7</span> against <span class="n">&#8722;30.9 %</span> there). What
+  the previous subsection describes is therefore a property of the model under these
+  conditions, not of its implementation in forge. (This mesh has a 2 &#181;m first cell and
+  fails the wall-resolution check, as in section 02; the comparison is between codes, not with
+  the measurement. SU2 ran 40 000 iterations, its integrated heat flux constant to five digits
+  over the second half.)</p>
+
+  <h3>Mark II</h3>
+  <figure>
+    <img class="shot" src="img/trans_mk.png" alt="Mark II heat transfer coefficient with and without the transition model">
+    <figcaption><span class="tag">run_0036_sst_1um &#183; run_0037_lm_1um &#183; run_0038_lm_1um_mur100 &#183; measured wall temperature imposed &#183; first cell 1 &#181;m</span><br>
+    <b>Figure 25</b>&#8239;&#183;&#8239;Mark II on a new mesh with a 1 &#181;m first cell. Blue: no
+    transition model. Orange and purple: with the model, inlet ratio 10 and 100. Click to
+    enlarge.</figcaption>
+  </figure>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Mark II, mean departure of h from the measurement</th><th>Pressure side</th><th>Suction, s/S &lt; 0.25</th><th>Suction, after</th><th>All</th><th>rms, all</th></tr></thead>
+      <tbody>
+        <tr><td>no model, inlet ratio 10</td><td class="n">+10.5 %</td><td class="n">+82.4 %</td><td class="n">+23.8 %</td><td class="n">+35.0 %</td><td class="n">56.4 %</td></tr>
+        <tr class="key"><td>with the model, inlet ratio 10</td><td class="n">&#8722;27.7 %</td><td class="n">&#8722;5.5 %</td><td class="n">+20.0 %</td><td class="n">&#8722;7.6 %</td><td class="n">32.0 %</td></tr>
+        <tr><td>with the model, inlet ratio 100 (pressure side still drifting)</td><td class="n">+22.9 %</td><td class="n">+5.3 %</td><td class="n">+23.3 %</td><td class="n">+18.0 %</td><td class="n">27.5 %</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Here the abruptness is not a defect. Mark II has a strong shock on the suction surface near
+  <span class="n">s/S</span> = 0.27, the measured heat transfer falls to it and jumps across it,
+  and the model does the same: the front of the suction surface goes from
+  <span class="n">+82 %</span> (rms <span class="n">95 %</span>) to
+  <span class="n">&#8722;5.5 %</span> (rms <span class="n">9.3 %</span>), which is inside the
+  uncertainty of the measurement for three quarters of the nodes. Behind the shock both the
+  model and the plain turbulence model overshoot by about the same amount, so that figure does
+  not improve. The pressure surface behaves as on C3X. With the model the 1 &#181;m mesh passes
+  the wall-resolution check (<span class="n">0.6 %</span> of the wall above
+  <span class="n">y<sub>1</sub>&#8314;</span> = 1); without it the same mesh still fails
+  (<span class="n">11 %</span>), because the fully turbulent layer has the higher wall
+  shear.</p>
+
+  <p style="font-size:13.5px;color:var(--ink-2)">Not done: the coupled metal temperature has not
+  been recomputed with the transition model. With the pressure surface this sensitive to an
+  unknown inlet quantity, a coupled wall temperature would inherit that choice; it is listed in
+  section 09.</p>
+
+  <h2><span class="num">08 / Runs</span>Every run on this page, with what was imposed</h2>
   <p>Everything common is in section 01. What differs run to run is below.
   <span class="n">meas</span> means the 68 thermocouple readings interpolated onto the wall and
   <span class="n">coupled</span> means the wall temperature came from the solid. Mesh names:
@@ -1132,6 +1338,10 @@
       <thead><tr><th>Run</th><th>Mesh</th><th>Wall</th><th>Exit p<sub>s</sub></th>
       <th>Inlet k / &#969;</th><th>Steps</th><th style="text-align:left">What it is for</th></tr></thead>
       <tbody>
+        <tr><td colspan="7" style="text-align:left;color:var(--ink-3)">case/57.transition_flat_plate/ &#8212; ERCOFTAC T3A and T3B flat plates (section 07, Figure 22)</td></tr>
+        <tr class="key"><td>run_0005 / 0007 / 0009</td><td>base / coarse / fine plate</td><td>adiabatic</td><td class="n">101.3 kPa</td><td class="n">7.87 / 3401</td><td class="n">100 k&#8211;140 k</td><td style="text-align:left"><b>T3A with the transition model</b>, three grids; su2_t3a_lm is SU2 on the base grid</td></tr>
+        <tr><td>run_0003 / run_0010 / run_0011</td><td>base plate</td><td>adiabatic</td><td class="n">101.3 kPa</td><td class="n">7.87 / 3401</td><td class="n">20 k / 60 k / 100 k</td><td style="text-align:left">no model / laminar / the model started from the fully turbulent field (same answer)</td></tr>
+        <tr><td>run_0013_t3b_lm / su2_t3b_lm</td><td>base plate</td><td>adiabatic</td><td class="n">101.3 kPa</td><td class="n">30.56 / 2759</td><td class="n">100 k / 30 000 it</td><td style="text-align:left">T3B (6.5 % turbulence), forge against SU2 only</td></tr>
         <tr><td colspan="7" style="text-align:left;color:var(--ink-3)">case/53.c3x_vane_cht/ &#8212; C3X run 108</td></tr>
         <tr class="key"><td>run_0125_prod_fxhalf</td><td>cs400</td><td>meas</td><td class="n">188.9 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left"><b>section 02 &#8212; Figures 4, 5, 6 and 9</b> (continues run_0107)</td></tr>
         <tr class="key"><td>run_0128_cf0_fx05</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left"><b>the SU2 control, Figures 7 and 18</b> (continues run_0108)</td></tr>
@@ -1142,12 +1352,17 @@
         <tr class="key"><td>run_0144_cht_published</td><td>cs400</td><td>coupled</td><td class="n">188.9 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">31&#215;4 k</td><td style="text-align:left"><b>coupled metal, Figures 10 and 11</b></td></tr>
         <tr><td>run_0121 / 0123 / 0124</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">2 k / 40 k / 4 k</td><td style="text-align:left">section 04: the term-by-term balance (Figure 19), the &quot;before&quot; curve of Figure 18, and the mass-residual diagnostic</td></tr>
         <tr><td>su2_smooth</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">9089 it</td><td style="text-align:left">SU2 8.5, identical nodes &#8212; the external control</td></tr>
+        <tr class="key"><td>run_0146 / 0147 / 0148 / 0152</td><td>cs400, first cell 1 &#181;m</td><td>meas</td><td class="n">188.9 kPa</td><td class="n">55.55 / &#969; &#215; 1, 0.1, 10, 0.33</td><td class="n">200 k&#8211;500 k</td><td style="text-align:left"><b>section 07, Figure 23</b> &#8212; transition model, inlet eddy-viscosity ratio 10 / 100 / 1 / 30 (continue run_0135)</td></tr>
+        <tr><td>run_0149_sst_1um_mur100_ctrl</td><td>cs400, first cell 1 &#181;m</td><td>meas</td><td class="n">188.9 kPa</td><td class="n">55.55 / 2.172&#215;10&#8308;</td><td class="n">120 k</td><td style="text-align:left">no transition model at inlet ratio 100 &#8212; the like-for-like control for run_0147</td></tr>
+        <tr><td>run_0150_lm_1um_mur100_kl</td><td>cs400, first cell 1 &#181;m</td><td>meas</td><td class="n">188.9 kPa</td><td class="n">55.55 / 2.172&#215;10&#8308;</td><td class="n">200 k</td><td style="text-align:left">transition model with Kato&#8211;Launder, inlet ratio 100 (pressure side still drifting)</td></tr>
+        <tr class="key"><td>run_0153_lm_cf0_su2ctrl / su2_smooth_lm</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">260 k / 40 000 it</td><td style="text-align:left"><b>Figure 24</b> &#8212; the transition model in forge and in SU2, identical nodes</td></tr>
         <tr class="dim"><td>run_0018_lam_dualtime / run_0019_lam_dt_half</td><td>as gen.</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">&#8212;</td><td class="n">dual time</td><td style="text-align:left">laminar, time-accurate: the 29 kHz shedding of Figure 21 (geometric face weight)</td></tr>
         <tr><td colspan="7" style="text-align:left;color:var(--ink-3)">case/54.markii_vane_cht/ &#8212; Mark II run 42</td></tr>
         <tr class="key"><td>run_0024_tecut_fxhalf</td><td>cs400 + cut</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left"><b>section 03 &#8212; Figures 13, 14, 15 and 16</b> (continues run_0019)</td></tr>
         <tr><td>run_0027_coarse / run_0028_fine</td><td>cs400 + cut, &#177;&#8730;2</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left">340 and 680 wall nodes &#8212; the grid study</td></tr>
         <tr class="key"><td>run_0026_laminar_fx05</td><td>cs400 + cut</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">&#8212;</td><td class="n">+60 k</td><td style="text-align:left"><b>laminar control, Figure 16</b> (continues run_0020)</td></tr>
         <tr class="key"><td>run_0033_cht_published</td><td>cs400 + cut</td><td>coupled</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">57&#215;8 k</td><td style="text-align:left"><b>coupled metal, Figure 17</b> &#8212; fluid and solid both on the base-cut outline</td></tr>
+        <tr class="key"><td>run_0036_sst_1um / run_0037_lm_1um / run_0038_lm_1um_mur100</td><td>cs400 + cut, first cell 1 &#181;m</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">71.92 / &#969; &#215; 1, 1, 0.1</td><td class="n">120 k / 200 k / 200 k</td><td style="text-align:left"><b>section 07, Figure 25</b> &#8212; no model, transition model at inlet ratio 10 and 100</td></tr>
         <tr class="dim"><td>run_0006 / run_0007 / run_0008</td><td>cs400, rounded TE</td><td>meas / 533 K</td><td class="n">169.9 kPa</td><td class="n">57.4 / 2.40&#215;10&#8309;</td><td class="n">80 k</td><td style="text-align:left">Kato&#8211;Launder off / on, uniform wall &#8212; the model-option table (geometric face weight)</td></tr>
         <tr class="dim"><td>run_0009 / run_0018</td><td>cs400, rounded / cut</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">80 k</td><td style="text-align:left">the trailing-edge comparison (geometric face weight)</td></tr>
       </tbody>
@@ -1159,11 +1374,15 @@
   <span class="n">M<sub>2</sub></span> = 0.90 implies. The run index in each case directory's
   README is the permanent record; this table lists only the runs this page draws on.</p>
 
-  <h2><span class="num">08 / Open</span>What is not settled</h2>
+  <h2><span class="num">09 / Open</span>What is not settled</h2>
   <ul>
-    <li><strong>The transition closure.</strong> The largest departure on both vanes, supported
-    by the laminar controls in sections 02 and 03 and shared with SU2 in section 02. A
-    computation with the transition location controlled would test it directly.</li>
+    <li><strong>The transition closure is now there, and it is not enough.</strong> Section 07:
+    the model removes the over-prediction on the front of the suction surface and matches SU2
+    to a percent, but on C3X it transitions at <span class="n">s/S</span> = 0.32 where the
+    measurement starts at 0.2, it cannot represent a laminar layer heated by free-stream
+    turbulence, and it does not transition the rear of the pressure surface. Whether the vane
+    as a whole agrees better depends on the decay rate of the inlet turbulence, which the report
+    does not give. The coupled metal temperature has not been recomputed with it.</li>
     <li><strong>The state the numbers are taken from.</strong> Every vane run stalls at about
     2.4 decades. The quoted quantities are steady by their own histories, but no vane
     configuration here has a residual that actually falls, and the foot of the C3X shock keeps
@@ -1171,9 +1390,10 @@
     the missing check.</li>
     <li><strong>Wall-normal resolution.</strong> The 2 &#181;m production meshes fail the
     <span class="n">y<sub>1</sub>⁺ &#8804; 1</span> gate on two thirds of the wall. On C3X the
-    1 &#181;m mesh passes and moves the figures by 1.4 to 2.3 points; Mark II has not been run
-    at 1 &#181;m, and its post-transition figure is still rising with refinement along the
-    wall.</li>
+    1 &#181;m mesh passes and moves the figures by 1.4 to 2.3 points. Mark II at 1 &#181;m
+    (section 07) moves them by 1.0 to 2.7 points and still fails without the transition model
+    (<span class="n">11 %</span> of the wall above 1); its post-transition figure is also still
+    rising with refinement along the wall.</li>
     <li><strong>The viscous work at the wall is only first-order accurate in relative terms.</strong>
     A manufactured-solution study on a curved, stretched, high-aspect wall layer (the face formula
     checked against the solver's own kernel to 0.3 W/m²) shows the corrected weight giving

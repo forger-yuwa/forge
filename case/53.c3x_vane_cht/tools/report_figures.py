@@ -11,6 +11,9 @@ r"""報告 (Artifact「Cooled Vane CHT Validation」) の**線グラフを全部
   su2.png                      C3X 一様壁: forge と SU2 (同一メッシュ・同一節点)
   turb.png                     C3X 入口乱流スイープ
   lam_c3x.png / lam_mk.png     層流対照 (層流解が定常な区間だけ描く)
+  trans_plate.png              遷移平板 T3A の $C_f$ (forge 3 格子・SU2 LM・実験・遷移なし SST・層流)
+  trans_c3x.png / trans_mk.png 遷移モデル ON/OFF と入口粘性比の感度 (実測 $T_w$、同一メッシュ)
+  trans_su2.png                C3X 一様壁: forge と SU2 の遷移モデルどうし (同一メッシュ)
 
 規約: 熱流束は全図 `iface_q_eff`。実測点には報告の表 V/VI の不確かさを付ける。
 凡例はデータに重ねない (skill `forge-contour` と同じ)。コンタ図は
@@ -191,6 +194,75 @@ def fig_su2(out, plt):
            f"{SU2_CTRL['forge']}, step {step} . su2_smooth  (wall nodes coincide exactly)")
 
 
+# ---- 遷移モデル (plan turbulence-transition-lm2009)。run は case README の「遷移モデル」節と一致させる ----
+T57 = ROOT / "case/57.transition_flat_plate"
+TRANS = {
+    "c3x": [("run_0135_hwall1um_fx05", "no transition model, inlet $\\mu_t/\\mu$ = 10", "#1f77b4", "-"),
+            ("run_0149_sst_1um_mur100_ctrl", "no transition model, inlet $\\mu_t/\\mu$ = 100", "#1f77b4", "--"),
+            ("run_0148_lm_1um_mur1", "transition model, $\\mu_t/\\mu$ = 1", "#f2b134", "-"),
+            ("run_0146_lm_1um_cont", "transition model, $\\mu_t/\\mu$ = 10", "#e8590c", "-"),
+            ("run_0147_lm_1um_mur100", "transition model, $\\mu_t/\\mu$ = 100", "#862e9c", "-")],
+    "markii": [("run_0036_sst_1um", "no transition model, inlet $\\mu_t/\\mu$ = 10", "#1f77b4", "-"),
+               ("run_0037_lm_1um", "transition model, $\\mu_t/\\mu$ = 10", "#e8590c", "-"),
+               ("run_0038_lm_1um_mur100", "transition model, $\\mu_t/\\mu$ = 100 (pressure side still drifting)", "#862e9c", "-")],
+}
+TRANS_SU2 = dict(forge="run_0153_lm_cf0_su2ctrl", su2="su2_smooth_lm/vol_solution.vtu", forge_off="run_0128_cf0_fx05", Tw=566.0)
+
+
+def fig_trans_plate(out, plt):
+    sys.path.insert(0, str(T57 / "tools")); import cf_plate as cp
+    fig, a = plt.subplots(figsize=(9.2, 5.4))
+    xx = np.linspace(0.004, 1.5, 400); rex = cp.RO * cp.U * xx / cp.MU
+    a.plot(xx, 0.664 / np.sqrt(rex) * 1e3, ":", color="0.35", lw=1.1, label="Blasius, laminar")
+    a.plot(xx, 0.0576 * rex ** -0.2 * 1e3, "--", color="0.35", lw=1.1, label="$0.0576\\,Re_x^{-1/5}$, turbulent")
+    e = np.genfromtxt(T57 / "ref/t3a_exp.dat", comments="#")
+    a.plot(e[:, 0] * 1e-3, e[:, 1] * 1e3, "o", ms=5.5, mfc="w", mec="k", zorder=6, label="ERCOFTAC T3A, measured")
+    for run, lab, col, ls, lw in (("run_0003_t3a_sst", "forge, no transition model", "#1f77b4", "-", 1.5), ("run_0010_t3a_lam", "forge, laminar", "#2b8a3e", "-", 1.5),
+                                  ("run_0007_t3a_lm_coarse", "forge + transition model, coarse grid", "#ffa94d", "-", 1.3), ("run_0009_t3a_lm_fine", "forge + transition model, fine grid", "#c92a2a", "-", 1.3),
+                                  ("run_0005_t3a_lm_cont", "forge + transition model, base grid", "k", "-", 2.0)):
+        (x, tw, _), _f = cp.load_forge(str(T57 / run)); a.plot(x, tw / cp.QINF * 1e3, ls, color=col, lw=lw, label=lab, zorder=(5 if col == "k" else 3))
+    (x, tw, _), _f = cp.load_su2(str(T57 / "su2_t3a_lm")); a.plot(x, tw / cp.QINF * 1e3, "-.", color="tab:green", lw=1.8, label="SU2 8.5 + same model, base grid", zorder=4)
+    a.set_xlim(0, 1.5); a.set_ylim(0, 8); a.set_xlabel("distance from the leading edge  $x$  [m]   ($Re_x$ = 3.6e5 · $x$)"); a.set_ylabel("$C_f \\times 10^3$"); a.grid(alpha=.3)
+    a.set_title("Flat plate, free-stream turbulence 3.3 % (ERCOFTAC T3A) — skin friction\n"
+                "run_0005 / 0007 / 0009 (transition model) . run_0003 (none) . run_0010 (laminar) . su2_t3a_lm", fontsize=10)
+    a.legend(fontsize=8.6, loc="upper center", bbox_to_anchor=(0.5, -0.14), ncol=2, frameon=False)
+    fig.tight_layout(); fig.savefig(out, dpi=115, bbox_inches="tight"); print(f"[report_figures] -> {out}")
+
+
+def fig_trans(vane, out, plt):
+    R = RUNS[vane]
+    fig, a = plt.subplots(figsize=(9.6, 5.8))
+    a.axvspan(0, 0.25, color="#f0d9a8", alpha=.35, zorder=0)
+    plot_measured(a, vane, R["key"], R["table"])
+    names = []
+    for run, lab, col, ls in TRANS[vane]:
+        if not (R["base"] / run).exists(): print(f"[report_figures] skip (no run yet): {run}"); continue
+        s, ss, V, _, step = wall(R["base"] / run)
+        h = np.array(V[FLUX]) / (R["Tg"] - np.array(V["Ts"])) / H0
+        sides(a, s, ss, h, color=col, ls=ls, lw=1.6, alpha=.95, zorder=4, label=lab); names.append(run)
+    a.set_ylabel("$h/h_0$"); a.set_ylim(0, 1.15 if vane == "c3x" else 1.6)
+    finish(a, fig, out, f"{R['name']} — with and without the transition model, measured $T_w$ imposed, same mesh\n" + " . ".join(names))
+
+
+def fig_trans_su2(out, plt):
+    from scipy.spatial import cKDTree
+    s, ss, V, C, step = wall(C3 / TRANS_SU2["forge"])
+    XY, QS = read_su2(C3 / TRANS_SU2["su2"])
+    d, idx = cKDTree(XY).query(C)
+    assert d.max() == 0.0, f"forge と SU2 の壁節点が一致しない (max {d.max()})"
+    sc = 1.0 / ((RUNS["c3x"]["Tg"] - TRANS_SU2["Tw"]) * H0)
+    fig, a = plt.subplots(figsize=(9.2, 5.6))
+    a.axvspan(0, 0.25, color="#f0d9a8", alpha=.35, zorder=0)
+    plot_measured(a, "c3x", "run108", "VI")
+    s0, ss0, V0, _, _ = wall(C3 / TRANS_SU2["forge_off"])
+    sides(a, s0, ss0, np.array(V0[FLUX]) * sc, color="#9aa0a6", lw=1.3, zorder=2, label="forge, no transition model")
+    sides(a, s, ss, np.array(V[FLUX]) * sc, color="k", lw=2.0, zorder=4, label="forge + transition model")
+    sides(a, s, ss, QS[idx] * sc, color="tab:green", lw=1.7, zorder=3, label="SU2 8.5 + same model, same mesh")
+    a.set_ylabel("$h/h_0$"); a.set_ylim(0, 1.15)
+    finish(a, fig, out, "C3X run 108 — the transition model in forge and in SU2 on the identical mesh, uniform $T_w$ = 566 K\n"
+           f"{TRANS_SU2['forge']}, step {step} . su2_smooth_lm  (wall nodes coincide exactly)")
+
+
 def fig_turb(out, plt):
     fig, a = plt.subplots(figsize=(9.6, 5.8))
     a.axvspan(0, 0.25, color="#f0d9a8", alpha=.35, zorder=0)
@@ -223,7 +295,9 @@ def fig_lam(vane, out, plt):
 FIGS = {"h_c3x": lambda o, p: fig_h("c3x", o, p), "h_mk": lambda o, p: fig_h("markii", o, p),
         "press_c3x": lambda o, p: fig_press("c3x", o, p), "press_mk": lambda o, p: fig_press("markii", o, p),
         "su2": fig_su2, "turb": fig_turb,
-        "lam_c3x": lambda o, p: fig_lam("c3x", o, p), "lam_mk": lambda o, p: fig_lam("markii", o, p)}
+        "lam_c3x": lambda o, p: fig_lam("c3x", o, p), "lam_mk": lambda o, p: fig_lam("markii", o, p),
+        "trans_plate": fig_trans_plate, "trans_c3x": lambda o, p: fig_trans("c3x", o, p),
+        "trans_mk": lambda o, p: fig_trans("markii", o, p), "trans_su2": fig_trans_su2}
 
 
 def main():

@@ -132,6 +132,24 @@ turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaun
   (側壁合流域の乱流 BL 過厚) が未解決** (case/16 run_0228)。定量比較には 3D 層流 (0.7 %) か 2D SST (+1.5 %) を使う。
 - restart で `vis_turb` が再現されない (敏感な擬似衝撃波は位置が動く) [forge-sst-restart-nonfidelity]。
 
+### 2.1 遷移モデル (γ–Re_θt) — 現行 (2026-09-22)
+
+```yaml
+turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 0, katoLaunder: 0,
+             wallTreatmentSST: 0, turbulentPrandtl: 0.9, transition: "lm2009"}
+```
+
+- **使う場面**: 層流域が長く、そこでの摩擦・熱伝達が目的量に効くとき (翼の負圧面前半、低 Re 平板)。既定は `none`。
+  キーの意味と受付条件は [`solver-settings.md`](solver-settings.md)「遷移モデル」。
+- **前提は局所 $y_1^+\le1$** (`check_wall_resolution.py` の VERDICT)。C3X は第一層 2 µm だと面積の 67 % が 1 を超えるので 1 µm メッシュを使う。
+- **SST の収束場から継続する** (段階起動の最後の段)。$k$/$\omega$ を入口値に戻す必要は無い (T3A で同じ解)。
+- **遷移位置が落ち着くまで長い**: T3A は cfl 5 で 50000 step、C3X は cfl 0.5 で 150000〜200000 step (粘性比 30 の正圧面は 60000 step で +18 %、200000 step で −22 % — **短い run は符号まで違う値を読む**)。`rms_roGamma` が下がっても遷移終了位置は動き続けるので、
+  **報告量の時系列** (`cf_plate.py --series` / `h_series.py`) を `check_quasisteady.py --series-csv` に掛けて止める。
+- **入口の $\omega$ (入口粘性比) の感度を必ず付ける**。入口から物体までの乱れの減衰は $\omega$ で決まり、実験報告は普通これを与えない。
+  C3X では入口粘性比 1 / 10 / 30 / 100 で正圧面の $h$ 偏差が −39 / −33 / −22 / +25 % と動く。**実験に合う値を事後に選ばない**。
+- `dilatationCorrection` との組み合わせは未検証。`katoLaunder: 1` は前縁よどみ点の $k$ 過大生成を抑え、C3X の正圧面の結果を大きく変える (粘性比 100 で +25 → −26 %)。どちらが正しいかは決まっていない。
+- 検証の到達点: T3A 平板で同一メッシュの SU2 LM と遷移開始 −2.2 %・$C_f$ ±0.8 % ([`case/57`](../case/57.transition_flat_plate/README.md))。翼では遷移が実測より遅く急に起きる (C3X 負圧面 $s/S$ 0.32、実測は 0.2 から緩やかに)。
+
 ## 3. 多成分 semi-perfect (TP)・凝縮・化学 — 現行 (2026-09-07)
 
 ```yaml
@@ -292,6 +310,7 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 
 ## 変更ログ
 
+- `2026-09-22` — §2.1 遷移モデル (γ–Re_θt, `turbulence.transition: lm2009`) のレシピを追加 (plan [turbulence-transition-lm2009](../plans/active/turbulence-transition-lm2009.md))。
 - `2026-09-17` — §6 に dual-time の内部反復レシピを追加 (`cfl_pseudo` 12–20 + `nSubIterDualTime` 10–20 + 緩和なし; 擬似 CFL に安定限界が見つからず、必要な nSub は `cfl_pseudo` で決まる)。定常の `implicitRelax 0.7` は据え置き。投入前チェック `check_solver_config.py` を追加。
 
 - `2026-09-08` — 初稿 (散在していた推奨値を集約。ユーザ要請「既定の解析設定を 1 か所に、最新/旧を明記」)。

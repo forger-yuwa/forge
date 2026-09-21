@@ -85,7 +85,7 @@ def main():
         run, _, lab = spec.partition(":"); (x, tw, y1), f = load_forge(run); curves.append((lab or os.path.basename(run.rstrip("/")), x, tw / QINF, y1, f, "forge"))
     for spec in a.su2:
         d, _, lab = spec.partition(":"); (x, tw, y1), f = load_su2(d); curves.append((lab or os.path.basename(d.rstrip("/")), x, tw / QINF, y1, f, "su2"))
-    print(f"{'curve':<28}{'x_onset[m]':>11}{'Cf_min':>10}{'x_end[m]':>10}{'Cf_max':>10}" + "".join(f"{'Cf@%.1f' % s:>11}" for s in st) + f"{'max y1+':>9}  file")
+    print(f"{'curve':<28}{'x_onset[m]':>11}{'Cf_min':>10}{'x_end[m]':>10}{'Cf_max':>10}" + "".join(f"{'Cf@%.2f' % s:>11}" for s in st) + f"{'max y1+':>9}  file")
     for lab, x, cf, y1, f, kind in curves:
         xo, cmin, xe, cmax = onset(x, cf)
         utau = np.sqrt(np.maximum(cf, 0) * QINF / RO); yp = (y1 * utau * RO / MU)[x > 0.02].max()
