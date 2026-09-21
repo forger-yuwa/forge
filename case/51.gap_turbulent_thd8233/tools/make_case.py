@@ -191,6 +191,10 @@ def main():
                     help="平板 (physID 4) の壁温 T_surf [K]。入口 BL の再構成にも使う")
     ap.add_argument("--gap-Tw", type=float, default=300.0,
                     help="すきま壁 (physID 6) の壁温 T_gap [K]。壁温比は T_surf/T_gap")
+    ap.add_argument("--visc-num", type=float, default=None,
+                    help="局所 dt と陰解法の粘性対角が読む `physProp.visc` [Pa s] を上書きする。"
+                         "**残差には入らない** (viscMethod 1 では流束は Sutherland mu(T) を使う) ので"
+                         "定常解は変わらず、数値的な剛性の見積りだけが変わる。既定は mu(T_inf)")
     ap.add_argument("--ic-ramp", action="store_true",
                     help="初期場を入口プロファイルでなく旧来の tanh 壁ランプにする "
                          "(この case では入口列で段差が出て発散する。比較用)")
@@ -290,7 +294,7 @@ def main():
     # リミッタ基準値を**自由流で固定**する (auto だと開始場依存の作用素になり、分割実行が
     # 連続実行と一致しない。2026-09-20 codex result M10)。
     # thermCond は thermCondMethod: 1 (Prandtl 則) でも必須キー。基準値として mu*cp/Pr を入れる
-    common = dict(mu_inf=mu, cp=CP, gam=GAMMA, pr=PRANDTL_LAM, kcond=mu * CP / PRANDTL_LAM,
+    common = dict(mu_inf=(a.visc_num if a.visc_num else mu), cp=CP, gam=GAMMA, pr=PRANDTL_LAM, kcond=mu * CP / PRANDTL_LAM,
                   pmin=PMIN, romin=ROMIN, tmin=TMIN,
                   relax=1.0, kinf=k_inf, ominf=om_inf, turb="sst",
                   ro_ref=ro, p_ref=p, a_ref=a_inf)
