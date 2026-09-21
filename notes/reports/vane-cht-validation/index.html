@@ -162,7 +162,7 @@
         <tr><td>Turbulence</td><td class="n">Menter SST 2003, low-Re (no wall function), Pr<sub>t</sub> 0.9, production limiter 10&#183;&#946;*&#961;&#969;k, no Kato&#8211;Launder, no compressibility correction &#8212; SU2 8.5's defaults</td></tr>
         <tr><td>Face values</td><td class="n">edge midpoint (weight &#189;) on interior faces &#8212; section 04</td></tr>
         <tr><td>Wall resolution</td><td class="n">first node at 2 &#181;m: y<sub>1</sub>⁺ mean 1.16 / max 1.82 on C3X, 1.22 / 2.33 on Mark II &#8212; above the target of 1 on two thirds of the wall; checked at 1 &#181;m below</td></tr>
-        <tr><td>Solid</td><td class="n">2D FEM conduction, ASTM 310 k<sub>s</sub>(T), ten cooling passages, each a convective boundary with its own coefficient and coolant temperature</td></tr>
+        <tr><td>Solid</td><td class="n">2D FEM conduction, ASTM 310 k<sub>s</sub>(T), ten cooling passages, each a convective boundary whose coolant temperature and heat transfer coefficient come from the report's own coolant data (sections 02 and 03) &#8212; nothing on the coolant side is fitted</td></tr>
       </tbody>
     </table>
   </div>
@@ -619,65 +619,88 @@
   ones the quasi-steady gate returns as <code>STEADY</code>.</p>
 
   <h3>Coupled: the metal temperature as a result</h3>
+  <p>The loop is: run the fluid with a wall temperature, take the heat the fluid gives up at each
+  of the 480 wall nodes, solve two-dimensional conduction in the metal cross-section with that
+  heat on the outside and the coolant on the inside, hand the resulting outside temperature back
+  to the fluid, repeat. The metal is a finite-element mesh of the actual section (7438 nodes)
+  whose outer nodes coincide with the fluid wall nodes; each of the ten holes is a convective
+  boundary with one heat transfer coefficient and one coolant temperature. <strong>Both come
+  from the report and neither is fitted</strong>: the coolant temperature and flow rate of each
+  hole are tabulated in Appendix A, and the report states the correlation it used,
+  <span class="n">Nu<sub>D</sub> = C<sub>r</sub>&#183;0.022&#183;Pr<sup>0.5</sup>Re<sub>D</sub><sup>0.8</sup></span>,
+  which gives <span class="n">1380</span> to <span class="n">2670 W/m²K</span> here.</p>
+
   <figure>
     <img class="shot" src="img/tw.png" alt="C3X coupled wall temperature">
-    <figcaption><span class="tag">run_0142_cht_guard &#183; 67 coupling iterations, one pass &#183; interface imbalance 0.5 W/m of 43 kW/m</span><br>
-    <b>Figure 10</b>&#8239;&#183;&#8239;Coupled wall temperature against the thermocouples. The scallops are
-    the ten cooling passages. Click to enlarge.</figcaption>
+    <figcaption><span class="tag">run_0144_cht_published &#183; 31 coupling iterations, one pass &#183; interface imbalance 0.9 W/m of 42 kW/m</span><br>
+    <b>Figure 10</b>&#8239;&#183;&#8239;Coupled wall temperature against the thermocouples (black). The scallops are
+    the ten cooling passages. Grey is the earlier model, with the holes misplaced and their
+    coefficients fitted to these same measurements; its scallops on the pressure surface are out
+    of step with the data. Click to enlarge.</figcaption>
   </figure>
 
   <div class="tw">
     <table>
       <thead><tr><th>Region</th><th>Nodes</th><th>Bias</th><th>RMS</th><th>max |err|</th></tr></thead>
       <tbody>
-        <tr><td>Pressure surface</td><td class="n">159</td><td class="n">+17.6 K</td><td class="n">21.7 K</td><td class="n">52.2 K</td></tr>
-        <tr><td>Suction, laminar</td><td class="n">106</td><td class="n">+28.3 K</td><td class="n">31.5 K</td><td class="n">45.7 K</td></tr>
-        <tr class="key"><td>Suction, after transition</td><td class="n">125</td><td class="n">+11.2 K</td><td class="n">14.9 K</td><td class="n">28.4 K</td></tr>
-        <tr class="dim"><td>All (s/S ≤ 0.87)</td><td class="n">390</td><td class="n">+18.4 K</td><td class="n">23.1 K</td><td class="n">52.2 K</td></tr>
+        <tr><td>Pressure surface</td><td class="n">159</td><td class="n">+9.7 K</td><td class="n">13.1 K</td><td class="n">27.1 K</td></tr>
+        <tr><td>Suction, laminar</td><td class="n">106</td><td class="n">+21.1 K</td><td class="n">23.9 K</td><td class="n">34.6 K</td></tr>
+        <tr class="key"><td>Suction, after transition</td><td class="n">125</td><td class="n">+6.4 K</td><td class="n">7.7 K</td><td class="n">16.2 K</td></tr>
+        <tr class="dim"><td>All (s/S ≤ 0.87)</td><td class="n">390</td><td class="n">+11.7 K</td><td class="n">15.6 K</td><td class="n">34.6 K</td></tr>
       </tbody>
     </table>
   </div>
 
+  <figure>
+    <img class="shot" src="img/solid.png" alt="Temperature field inside the C3X metal">
+    <figcaption><span class="tag">mesh/solid_c3x.npz &#183; interior recovered from the run_0144 interface temperature</span><br>
+    <b>Figure 11</b>&#8239;&#183;&#8239;The solid side. Left: metal temperature, coolest around the forward passages
+    and hottest at the thin trailing edge, which has the least metal and the smallest hole.
+    Right: the conduction mesh. Click to enlarge.</figcaption>
+  </figure>
+
   <div class="callout">
-    <p class="h">These are about 5 K higher than the first published version, and the earlier figures were the ones in error</p>
-    <p>The coupling loop used to accept an update only if it lowered the interface imbalance, and
-    to double its damping at every rejection. The fluid's answer to a new wall temperature is not
-    complete after one 4000-step evaluation &#8212; re-evaluating at the <em>same</em> wall
-    temperature moved the imbalance from 4.6 to 5.3 W/m &#8212; so steps in the right direction
-    were judged worse, rejected, and the damping doubled until the wall temperature froze.
-    <strong>A tiny change per iteration was then a property of the damping, not of having
-    arrived.</strong> The first published result had frozen that way at a mean of
-    <span class="n">588.5 K</span> with an imbalance of <span class="n">11 W/m</span>.</p>
-    <p>The loop now averages the interface flux over the last four wall snapshots of each fluid
-    evaluation, keeps rejection only as a guard against divergence (a fourfold worsening), and
-    declares convergence when the mean wall temperature has stopped drifting
-    (below <span class="n">0.002 K</span> per iteration over six iterations) with the imbalance
-    no longer falling. In one pass from the measured wall temperature it reaches
-    <span class="n">593.9 K</span> with an imbalance of <span class="n">0.5 W/m</span>; restarting
-    the old loop by hand three times had given <span class="n">593.8 K</span>.</p>
+    <p class="h">Two errors in earlier versions of this page, both on the coupled side</p>
+    <p><strong>The cooling holes were in the wrong place.</strong> The report gives the hole
+    centres in its own (U, V) frame and does not say how that frame sits on the vane. They had
+    been placed by searching for the rigid motion that kept every hole inside the metal with the
+    largest minimum wall. Read from the report's figure, the frame is simply the tangent line
+    along the pressure side and the perpendicular tangent at the leading edge; in that frame the
+    vane measures <span class="n">14.54 cm</span> against the report's true chord of
+    <span class="n">14.49</span>. The earlier placement was <span class="n">7.4 mm</span> too
+    far forward, half a hole spacing (2.3 mm on Mark II). With the holes misplaced, the report's
+    own coolant conditions reproduced the measured wall temperature only to
+    <span class="n">60 K</span> rms, which had been taken as a reason to fit a coefficient per
+    hole instead; the fit returned values from 280 to 9000 W/m²K. With the holes where the report
+    puts them, the unfitted conditions reproduce it to <span class="n">17 K</span>, and a fit, run
+    only as a check, returns <span class="n">1270</span> to <span class="n">2830</span>
+    &#8212; within about ten percent of the correlation for the nine holes the data constrain.</p>
+    <p><strong>The coupling loop stopped short of its answer.</strong> It accepted an update only
+    if it lowered the interface imbalance and doubled its damping at every rejection. The fluid's
+    answer to a new wall temperature is not complete after one 4000-step evaluation, so steps in
+    the right direction were judged worse, and the wall temperature froze about 5 K low while the
+    change per iteration went to zero. The loop now averages the interface flux over the last four
+    snapshots of each evaluation, keeps rejection only as a guard against divergence, and stops
+    when the mean wall temperature has stopped drifting (below 0.002 K per iteration over six
+    iterations) with the imbalance no longer falling.</p>
   </div>
 
   <figure>
-    <img class="shot" src="img/solid.png" alt="Temperature field inside the C3X metal">
-    <figcaption><span class="tag">mesh/solid_c3x.npz &#183; interior recovered from the run_0142 interface temperature</span><br>
-    <b>Figure 11</b>&#8239;&#183;&#8239;The solid side. Left: metal temperature, coolest around the forward passages
-    and hottest at the thin trailing edge, which has the least metal and the smallest hole.
-    Right: the conduction mesh; its outer boundary carries 480 nodes, one-to-one with the fluid
-    wall, and each of the ten passages is a convective boundary with its own
-    <span class="n">h<sub>c</sub></span> and <span class="n">T<sub>c</sub></span>. Click to
-    enlarge.</figcaption>
+    <img class="shot" src="img/holes.png" alt="Cooling hole placement on both vanes, corrected and earlier">
+    <figcaption><span class="tag">ref/cooling_holes_c3x.csv &#183; ref/cooling_holes_markii.csv &#183; report Figures 6 and 7</span><br>
+    <b>Figure 12</b>&#8239;&#183;&#8239;The cooling holes placed by the report's frame (red) and as they were
+    placed before (grey, dashed). Click to enlarge.</figcaption>
   </figure>
 
   <p>The regional pattern of the metal temperature follows that of the gas side: smallest where
-  <span class="n">h</span> is closest (<span class="n">+6.5 %</span>, <span class="n">+11.2 K</span>)
+  <span class="n">h</span> is closest (<span class="n">+6.5 %</span>, <span class="n">+6.4 K</span>)
   and largest where it is furthest (<span class="n">+44.1 %</span>,
-  <span class="n">+28.3 K</span>). That is consistent with the coupling passing on the gas-side
-  error, but it does not separate the two: the conduction model has not been verified on its own
-  for this section, the coolant-side coefficients are inferred rather than measured, and neither
-  the solid mesh nor the interface energy audit has been varied here (section 08). The
-  sensitivity to coolant temperature (300 &#8594; 350 K) and metal conductivity
-  (&#177;3 %) was <span class="n">2.2 K</span> with the earlier loop and has not been
-  repeated.</p>
+  <span class="n">+21.1 K</span>). With nothing fitted on the coolant side this is now a
+  prediction rather than a consistency check, but it still does not separate gas-side from
+  solid-side error: imposing the <em>measured</em> heat flux on this solid leaves
+  <span class="n">17 K</span> rms of its own (mostly a <span class="n">&#8722;10 K</span> bias),
+  and neither the solid mesh nor the metal conductivity has been varied on the corrected
+  model.</p>
   <h2><span class="num">03 / Mark II</span>Supersonic exit, M<sub>2</sub> = 1.04</h2>
   <p class="lede">The same chain on the same rig, the same nominal point, one digit different in
   the report's code number. The suction side departs the same way and twice as far: this vane
@@ -690,7 +713,7 @@
   <figure>
     <img class="shot" src="img/cont_mk.png" alt="Mark II field contours">
     <figcaption><span class="tag">run_0024_tecut_fxhalf &#183; step 60 000 &#183; one pitch, tiled three times</span><br>
-    <b>Figure 12</b>&#8239;&#183;&#8239;The same four fields on the supersonic vane. The exit is choked: a
+    <b>Figure 13</b>&#8239;&#183;&#8239;The same four fields on the supersonic vane. The exit is choked: a
     supersonic pocket forms on the suction surface after the throat and reaches
     <span class="n">M = 1.64</span>, and the trailing-edge shock system is visible in the
     pressure and temperature panels where the C3X equivalents are smooth. The eddy viscosity
@@ -702,7 +725,7 @@
   <figure>
     <img class="shot" src="img/press_mk.png" alt="Mark II surface static pressure">
     <figcaption><span class="tag">run_0024_tecut_fxhalf &#183; exit 169.9 kPa</span><br>
-    <b>Figure 13</b>&#8239;&#183;&#8239;Surface static pressure normalised by inlet total pressure. Click to
+    <b>Figure 14</b>&#8239;&#183;&#8239;Surface static pressure normalised by inlet total pressure. Click to
     enlarge.</figcaption>
   </figure>
   <p>Bias <span class="n">+0.006</span> on the suction side and
@@ -719,7 +742,7 @@
   <figure>
     <img class="shot" src="img/h_mk.png" alt="Mark II heat transfer coefficient against measurement">
     <figcaption><span class="tag">run_0024_tecut_fxhalf &#183; base cut restored</span><br>
-    <b>Figure 14</b>&#8239;&#183;&#8239;The forge curve peaks inside the shaded laminar band where the measurement
+    <b>Figure 15</b>&#8239;&#183;&#8239;The forge curve peaks inside the shaded laminar band where the measurement
     bottoms out. Measured points carry the report's own uncertainty. Click to
     enlarge.</figcaption>
   </figure>
@@ -785,7 +808,7 @@
   <figure>
     <img class="shot" src="img/lam_mk.png" alt="Mark II laminar against turbulent and the measurement">
     <figcaption><span class="tag">run_0024_tecut_fxhalf &#183; run_0026_laminar_fx05</span><br>
-    <b>Figure 15</b>&#8239;&#183;&#8239;The same test as on C3X: turbulence model off, nothing else changed. The
+    <b>Figure 16</b>&#8239;&#183;&#8239;The same test as on C3X: turbulence model off, nothing else changed. The
     laminar curve is drawn only where it is steady. Click to enlarge.</figcaption>
   </figure>
 
@@ -827,35 +850,35 @@
   <h3>Coupled: the metal temperature as a result</h3>
   <figure>
     <img class="shot" src="img/mk_tw.png" alt="Mark II coupled wall temperature">
-    <figcaption><span class="tag">run_0032_cht_tecut_guard &#183; 31 coupling iterations, one pass &#183; fluid and solid both on the base-cut outline</span><br>
-    <b>Figure 16</b>&#8239;&#183;&#8239;Coupled metal temperature. The pressure surface, on the left, is tracked
-    through every cooling-hole scallop. Click to enlarge.</figcaption>
+    <figcaption><span class="tag">run_0033_cht_published &#183; 57 coupling iterations, one pass &#183; fluid and solid both on the base-cut outline</span><br>
+    <b>Figure 17</b>&#8239;&#183;&#8239;Coupled metal temperature (black) against the thermocouples; grey is the
+    earlier model with fitted hole coefficients. Click to enlarge.</figcaption>
   </figure>
 
   <div class="tw">
     <table>
       <thead><tr><th>Region</th><th>h bias, measured wall</th><th>T<sub>w</sub> bias, coupled</th><th>T<sub>w</sub> RMS</th></tr></thead>
       <tbody>
-        <tr class="key"><td>Pressure surface</td><td class="n">+9.5 %</td><td class="n">+8.7 K</td><td class="n">13.7 K</td></tr>
-        <tr><td>Suction, laminar</td><td class="n">+79.7 %</td><td class="n">+47.1 K</td><td class="n">51.3 K</td></tr>
-        <tr><td>Suction, after transition</td><td class="n">+22.7 %</td><td class="n">+22.5 K</td><td class="n">27.3 K</td></tr>
-        <tr class="dim"><td>All (s/S ≤ 0.87)</td><td class="n">+33.4 %</td><td class="n">+23.7 K</td><td class="n">32.4 K</td></tr>
+        <tr class="key"><td>Pressure surface</td><td class="n">+9.5 %</td><td class="n">+7.5 K</td><td class="n">12.1 K</td></tr>
+        <tr><td>Suction, laminar</td><td class="n">+79.7 %</td><td class="n">+41.0 K</td><td class="n">45.4 K</td></tr>
+        <tr><td>Suction, after transition</td><td class="n">+22.7 %</td><td class="n">+17.6 K</td><td class="n">21.8 K</td></tr>
+        <tr class="dim"><td>All (s/S ≤ 0.87)</td><td class="n">+33.4 %</td><td class="n">+20.0 K</td><td class="n">28.1 K</td></tr>
       </tbody>
     </table>
   </div>
-  <p>Both columns are now on the same geometry; the first published version set the heat
-  transfer of the corrected outline beside the metal temperature of the rounded one. With the
-  old loop the coupled run on the corrected outline stalled at <span class="n">548 K</span>;
-  with the accumulation term of section 04 removed from the interface flux and the loop changed
-  as described for C3X, it converges in one pass to a mean of <span class="n">567.7 K</span>.
-  The interface imbalance stays between <span class="n">20</span> and
-  <span class="n">70 W/m</span> of <span class="n">44 kW/m</span>, two orders above C3X: the
-  supersonic exit and the sharp base make the fluid heat flux much noisier from one evaluation
-  to the next, and the mean wall temperature is correspondingly less certain &#8212; hand
-  restarts of the old loop had stopped at <span class="n">566.4 K</span>, 1.3 K lower.</p>
-  <p>The pattern is the one seen on C3X, more pronounced: <span class="n">+8.7 K</span> where
+  <p>The solid is built the same way as for C3X: hole positions from the report's frame, coolant
+  temperatures from Appendix A, coefficients from the report's correlation
+  (<span class="n">1800</span> to <span class="n">2980 W/m²K</span>), nothing fitted, and the
+  base-cut outline for both fluid and solid. Imposing the measured heat flux on it reproduces the
+  measured wall temperature to <span class="n">16 K</span> rms. The loop converges in one pass
+  to a mean of <span class="n">565.1 K</span>, but the interface imbalance stays between
+  <span class="n">40</span> and <span class="n">120 W/m</span> of <span class="n">44 kW/m</span>,
+  two orders above C3X: the supersonic exit and the sharp base make the fluid heat flux much
+  noisier from one evaluation to the next, and the wall temperature is correspondingly less
+  certain, by about a kelvin in the mean.</p>
+  <p>The pattern is the one seen on C3X, more pronounced: <span class="n">+7.5 K</span> where
   the gas side is within the measurement's own uncertainty for half its nodes, and
-  <span class="n">+47 K</span> on the laminar stretch, where the heat transfer coefficient is
+  <span class="n">+41 K</span> on the laminar stretch, where the heat transfer coefficient is
   <span class="n">80 %</span> high. The two go together region by region; this page does not
   show that the first is caused only by the second (section 08).</p>
 <h2><span class="num">04 / Wall heat flux</span>Why the curves were ragged, and what fixed it</h2>
@@ -869,7 +892,7 @@
   <figure>
     <img class="shot" src="img/flux_fix.png" alt="C3X suction-side wall heat flux before and after the two corrections, with SU2">
     <figcaption><span class="tag">run_0123_fxgeom_ctrl &#183; run_0128_cf0_fx05 &#183; su2_smooth &#183; uniform 566 K wall, identical mesh</span><br>
-    <b>Figure 17</b>&#8239;&#183;&#8239;Top: wall heat flux along the C3X suction surface &#8212; red before the
+    <b>Figure 18</b>&#8239;&#183;&#8239;Top: wall heat flux along the C3X suction surface &#8212; red before the
     two corrections, black after, green SU2. Bottom: the same curves with a 41-node moving mean
     removed, which leaves only the unevenness. The waves of &#177;2 kW/m² between
     <span class="n">s/S</span> 0.4 and 0.95 and the spike at the shock foot near 0.33 are gone;
@@ -943,7 +966,7 @@
   <figure>
     <img class="shot" src="img/flux_terms.png" alt="Energy balance of the C3X wall control volumes, term by term, before the corrections">
     <figcaption><span class="tag">run_0121_resid_split &#183; before the corrections</span><br>
-    <b>Figure 18</b>&#8239;&#183;&#8239;The energy balance of the wall control volumes before the corrections. Top:
+    <b>Figure 19</b>&#8239;&#183;&#8239;The energy balance of the wall control volumes before the corrections. Top:
     the reported flux and the flux through the wall face. Bottom, with the moving mean removed:
     the unevenness of the reported flux (dashed) is the viscous term through the interior faces
     (red) everywhere except at the shock foot near <span class="n">s/S</span> 0.33, where the
@@ -1023,7 +1046,7 @@
   <figure>
     <img class="shot" src="img/mesh_forcing.png" alt="Wall node spacing and the solution's response">
     <figcaption><span class="tag">run_0051 &#183; run_0062 &#183; run_0063 &#183; run_0065 &#183; earlier runs</span><br>
-    <b>Figure 19</b>&#8239;&#183;&#8239;Left: the wall spacing over a fifth of the suction surface, before and after
+    <b>Figure 20</b>&#8239;&#183;&#8239;Left: the wall spacing over a fifth of the suction surface, before and after
     smoothing the curvature estimate. Right: what the solution does about it. Click to
     enlarge.</figcaption>
   </figure>
@@ -1040,8 +1063,8 @@
   <p><strong>Fifth, the boundary data.</strong> The production runs impose 68 thermocouple
   readings joined by straight lines across 480 nodes. Every kink of that polyline is a step in
   wall temperature gradient, and the boundary layer answers each one; that response is what is
-  still visible in Figures 6 and 14, and it is a property of the data as imposed, not of the
-  solver &#8212; with a uniform wall the same mesh gives the smooth black curve of Figure 17.
+  still visible in Figures 6 and 15, and it is a property of the data as imposed, not of the
+  solver &#8212; with a uniform wall the same mesh gives the smooth black curve of Figure 18.
   Smoothing the imposed temperature was rejected: the choice of interpolant alone moves the
   distribution by up to <span class="n">7.6 K</span> on C3X and <span class="n">11.5 K</span> on
   Mark II, and nothing in the report constrains the shape between thermocouples.</p>
@@ -1064,7 +1087,7 @@
   <figure>
     <img class="shot" src="img/shed.png" alt="Trailing edge shedding resolved in dual time">
     <figcaption><span class="tag">run_0018_lam_dualtime &#183; run_0019_lam_dt_half &#183; laminar</span><br>
-    <b>Figure 20</b>&#8239;&#183;&#8239;Trailing-edge shedding in the laminar dual-time run. Halving the
+    <b>Figure 21</b>&#8239;&#183;&#8239;Trailing-edge shedding in the laminar dual-time run. Halving the
     physical time step gives the same frequency. Click to enlarge.</figcaption>
   </figure>
 
@@ -1111,20 +1134,20 @@
       <tbody>
         <tr><td colspan="7" style="text-align:left;color:var(--ink-3)">case/53.c3x_vane_cht/ &#8212; C3X run 108</td></tr>
         <tr class="key"><td>run_0125_prod_fxhalf</td><td>cs400</td><td>meas</td><td class="n">188.9 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left"><b>section 02 &#8212; Figures 4, 5, 6 and 9</b> (continues run_0107)</td></tr>
-        <tr class="key"><td>run_0128_cf0_fx05</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left"><b>the SU2 control, Figures 7 and 17</b> (continues run_0108)</td></tr>
+        <tr class="key"><td>run_0128_cf0_fx05</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left"><b>the SU2 control, Figures 7 and 18</b> (continues run_0108)</td></tr>
         <tr><td>run_0129_rough_fx05</td><td>as gen.</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left">same as run_0128 on the unsmoothed outline &#8212; isolates node placement</td></tr>
         <tr><td>run_0130 / 0131 / 0132 / 0133</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">swept</td><td class="n">+60 k</td><td style="text-align:left">inlet turbulence sweep, Figure 8 &#8212; &#956;<sub>t</sub>/&#956; 1 and 100, Tu 15 % and 3 %</td></tr>
         <tr class="key"><td>run_0134_laminar_fx05</td><td>cs400</td><td>meas</td><td class="n">188.9 kPa</td><td class="n">&#8212;</td><td class="n">+60 k</td><td style="text-align:left"><b>laminar control, Figure 9</b> (continues run_0119)</td></tr>
         <tr><td>run_0135_hwall1um_fx05</td><td>cs400, first cell 1 &#181;m</td><td>meas</td><td class="n">188.9 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left">wall-normal refinement; passes the wall-resolution gate</td></tr>
-        <tr class="key"><td>run_0142_cht_guard</td><td>cs400</td><td>coupled</td><td class="n">188.9 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">67&#215;4 k</td><td style="text-align:left"><b>coupled metal, Figures 10 and 11</b></td></tr>
-        <tr><td>run_0121 / 0123 / 0124</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">2 k / 40 k / 4 k</td><td style="text-align:left">section 04: the term-by-term balance (Figure 18), the &quot;before&quot; curve of Figure 17, and the mass-residual diagnostic</td></tr>
+        <tr class="key"><td>run_0144_cht_published</td><td>cs400</td><td>coupled</td><td class="n">188.9 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">31&#215;4 k</td><td style="text-align:left"><b>coupled metal, Figures 10 and 11</b></td></tr>
+        <tr><td>run_0121 / 0123 / 0124</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">2 k / 40 k / 4 k</td><td style="text-align:left">section 04: the term-by-term balance (Figure 19), the &quot;before&quot; curve of Figure 18, and the mass-residual diagnostic</td></tr>
         <tr><td>su2_smooth</td><td>cs2000</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">55.55 / 2.172&#215;10&#8309;</td><td class="n">9089 it</td><td style="text-align:left">SU2 8.5, identical nodes &#8212; the external control</td></tr>
-        <tr class="dim"><td>run_0018_lam_dualtime / run_0019_lam_dt_half</td><td>as gen.</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">&#8212;</td><td class="n">dual time</td><td style="text-align:left">laminar, time-accurate: the 29 kHz shedding of Figure 20 (geometric face weight)</td></tr>
+        <tr class="dim"><td>run_0018_lam_dualtime / run_0019_lam_dt_half</td><td>as gen.</td><td>566 K</td><td class="n">185.1 kPa</td><td class="n">&#8212;</td><td class="n">dual time</td><td style="text-align:left">laminar, time-accurate: the 29 kHz shedding of Figure 21 (geometric face weight)</td></tr>
         <tr><td colspan="7" style="text-align:left;color:var(--ink-3)">case/54.markii_vane_cht/ &#8212; Mark II run 42</td></tr>
-        <tr class="key"><td>run_0024_tecut_fxhalf</td><td>cs400 + cut</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left"><b>section 03 &#8212; Figures 12, 13, 14 and 15</b> (continues run_0019)</td></tr>
+        <tr class="key"><td>run_0024_tecut_fxhalf</td><td>cs400 + cut</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left"><b>section 03 &#8212; Figures 13, 14, 15 and 16</b> (continues run_0019)</td></tr>
         <tr><td>run_0027_coarse / run_0028_fine</td><td>cs400 + cut, &#177;&#8730;2</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">+60 k</td><td style="text-align:left">340 and 680 wall nodes &#8212; the grid study</td></tr>
-        <tr class="key"><td>run_0026_laminar_fx05</td><td>cs400 + cut</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">&#8212;</td><td class="n">+60 k</td><td style="text-align:left"><b>laminar control, Figure 15</b> (continues run_0020)</td></tr>
-        <tr class="key"><td>run_0032_cht_tecut_guard</td><td>cs400 + cut</td><td>coupled</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">31&#215;8 k</td><td style="text-align:left"><b>coupled metal, Figure 16</b> &#8212; fluid and solid both on the base-cut outline</td></tr>
+        <tr class="key"><td>run_0026_laminar_fx05</td><td>cs400 + cut</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">&#8212;</td><td class="n">+60 k</td><td style="text-align:left"><b>laminar control, Figure 16</b> (continues run_0020)</td></tr>
+        <tr class="key"><td>run_0033_cht_published</td><td>cs400 + cut</td><td>coupled</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">57&#215;8 k</td><td style="text-align:left"><b>coupled metal, Figure 17</b> &#8212; fluid and solid both on the base-cut outline</td></tr>
         <tr class="dim"><td>run_0006 / run_0007 / run_0008</td><td>cs400, rounded TE</td><td>meas / 533 K</td><td class="n">169.9 kPa</td><td class="n">57.4 / 2.40&#215;10&#8309;</td><td class="n">80 k</td><td style="text-align:left">Kato&#8211;Launder off / on, uniform wall &#8212; the model-option table (geometric face weight)</td></tr>
         <tr class="dim"><td>run_0009 / run_0018</td><td>cs400, rounded / cut</td><td>meas</td><td class="n">169.9 kPa</td><td class="n">71.92 / 2.942&#215;10&#8309;</td><td class="n">80 k</td><td style="text-align:left">the trailing-edge comparison (geometric face weight)</td></tr>
       </tbody>
@@ -1175,9 +1198,11 @@
     near <span class="n">0.1 %</span> of the heat load because the fluid flux itself is noisy.
     Coupling inside the solver, so the wall temperature moves with the flow instead of between
     evaluations, is the way to remove both.</li>
-    <li><strong>The solid side on its own.</strong> The coupled results have not been separated
-    into gas-side and solid-side error: there is no stand-alone verification of the conduction
-    model on these sections, no interface energy audit and no solid-mesh sensitivity here.</li>
+    <li><strong>The solid side on its own.</strong> With the measured heat flux imposed, the
+    conduction model leaves 16 to 17 K rms against the measured wall temperature, mostly a bias of
+    &#8722;7 to &#8722;10 K. The metal conductivity is from an outside source (the report gives no
+    value), the last hole lies beyond the measured range, and neither the solid mesh nor the
+    conductivity has been varied on the corrected model.</li>
     <li><strong>Two configuration keys that are silently ignored.</strong>
     <code>turbulence.kInf</code> and <code>omegaInf</code> appear nowhere in the solver; the
     inlet turbulence comes from the boundary condition file alone. No number on this page was
