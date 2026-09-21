@@ -44,7 +44,7 @@ python3 ../../solver_density_cuda/tools/check_lm_kernel.py run_A      # output.l
   遷移開始 $x_{onset}$ は $C_f$ が最小になる位置、遷移終了 $x_{end}$ はその下流で $C_f$ が最大になる位置。
 - **全 run が `NOT CONVERGED (stalled/plateau)`** (SST 単体・層流でも同じ床)。残差は前縁に集中していない (`run_0015`、`tools/residual_map.py`: 上位 10 節点の寄与 5 %、前縁 10 mm 以内 0.0〜0.1 %) —
   当初「前縁の特異点」と書いたのは誤り。大きさは単精度の丸めと整合する: 節点ごとの目安 $\epsilon_{32}\sum_f(|\rho u\cdot S|+p|S|/c)$ に対し $|res|$ は中央値 0.11 倍・最大 2.0〜2.2 倍
-  (`tools/rounding_floor.py`、`run_0015…/ROUNDING_FLOOR.txt`)。目安であって証明ではない (倍精度の対照は未実施)。「`rms_ro`/⟨ρ⟩ が eps の何倍」という以前の書き方は次元が合っておらず撤回。
+  (`tools/rounding_floor.py`、`run_0015…/ROUNDING_FLOOR.txt`)。**倍精度ビルドの対照 `run_0016` で確かめた**: 残差は床から 2.6〜5.2 桁下がり、遷移位置は同一・$C_f$ の差は最大 2.4e−4。「`rms_ro`/⟨ρ⟩ が eps の何倍」という以前の書き方は次元が合っておらず撤回。
   したがって結果は**未収束・報告量は準定常**として扱い、量は `check_quasisteady.py --series-csv` の VERDICT で判定する。
 - 局所 $y_1^+$ は前縁を含む全壁で 粗 1.67 / 基準 1.31 / 細 1.02 が最大 (いずれも前縁の節点)。1 を超える壁長は 0.34 / 0.12 / 0.08 %。run 一覧の「$y_1^+$ 最大」は $x>$ 0.02 m の値。
 
@@ -62,6 +62,7 @@ python3 ../../solver_density_cuda/tools/check_lm_kernel.py run_A      # output.l
 | `run_0012_t3b_sst` / `run_0013_t3b_lm` | **T3B** ($Tu$ 6.5 %、$Re/m$ 6.27e5)。SST 段階起動 → LM 100000 step (k/ω は戻さない) | 遷移開始 0.090 m ($Re_x$ 5.6e4)・終了 0.189 m、$C_f$($x$ 0.1/0.2/0.6/1.3) = 0.00520 / 0.00533 / 0.00450 / 0.00390、$y_1^+$ 最大 0.75 ($x>$ 0.02 m)。全 9 量 **STEADY** (`cf_series.csv` は 2026-09-22 に作り直した: 旧版は遷移位置が 1.5 m の定数列で、列名 `cf_x0.1` が $x$ 0.05 と 0.1 で衝突していた)。`NOT CONVERGED (stalled/plateau)`。**SU2 LM 比: 遷移開始 0.0 %、終了 −3.0 %、$C_f$ +1.0 / +1.7 / +1.5 / +1.1 / +1.0 %** ($x$ 0.05/0.1/0.2/0.6/1.3 m) | active |
 | `run_0014_t3a_lm_unitcheck` | **カーネル単体検査 (強化版)** と初期出力・restart の確認。`run_0011` の準定常場から cfl 0.01・50 step・level 2 | `check_lm_kernel.py`: **VERDICT PASS** (11 量・全節点、最大で許容の 0.21 倍、相関反復 平均 3.3 / 最大 6 回、下限の作動 0 %)。`res_0` の遷移 5 変数が有限、`roGamma`/`roReth` は継続元とビット一致 (入口ピン 2〜5 節点のみ 1e−7)。`LM_KERNEL_VERDICT.txt` | active |
 | `run_0015_t3a_lm_resmap` | **残差の床の所在と大きさ** (`RESIDUAL_MAP.txt`, `ROUNDING_FLOOR.txt`)。`run_0011` から 2000 step・level 2 (平均流の残差場つき) | `RESIDUAL_MAP.txt`: 平均流の残差は全域一様 (上位 10 節点 5 %、前縁 10 mm 以内 0.0〜0.1 %)。`res_roOmega` だけ壁第一層に局在 (上位 10 節点 38 %) | active |
+| `run_0016_t3a_lm_double` | **倍精度の対照**。`flowFormat.hpp` を double にした同一コミットのビルド (scratchpad)。`run_0011` の準定常場から 40000 step・level 2 | `rms_ro` 1.3e−7 → 2.3e−10、`rms_roe` 4.2e−2 → 3.9e−5、`rms_roOmega` −5.2 桁 (`rms_roUy` は 3.7e−7 で横ばい、判定は `NOT CONVERGED`)。遷移開始 0.3595 / 終了 0.8496 m は float32 と同一、$C_f$ の差 最大 2.4e−4 → **float32 の床は丸めで、報告量には効いていない** | active |
 | `run_0006_t3a_sst_coarse` / `run_0007_t3a_lm_coarse` | 格子系列 (粗)。SST 段階起動 → LM 100000 step | $x_{onset}$ 0.3415 / $x_{end}$ 0.8209 m、$C_f$ = 0.002282 / 0.004400 / 0.004153、$y_1^+$ 最大 0.63。全 7 量 **STEADY**。`NOT CONVERGED (stalled/plateau)` | active |
 | `run_0008_t3a_sst_fine` / `run_0009_t3a_lm_fine` | 格子系列 (細)。SST 段階起動 → LM 140000 step | $x_{onset}$ 0.3581 / $x_{end}$ 0.8694 m、$C_f$ = 0.002288 / 0.004431 / 0.004179、$y_1^+$ 最大 0.32。**基準 → 細の変化: 遷移開始 −0.4 %、$C_f$ +0.0 / +0.4 / +0.2 %**。全 7 量 **STEADY**。`NOT CONVERGED (stalled/plateau)` | active |
 | `run_0010_t3a_lam` | 遷移・乱流モデルなしの層流 (`run_0003` の場から 60000 step)。層流ソルバの検査 | $C_f$ の Blasius 比 −1.8 % ($x$ 0.05) 〜 +2.4 % ($x$ 1.4 m)。残差の床は LM・SST と同じ (`rms_roe` 5e−2) → 床は乱流・遷移モデルと無関係。`NOT CONVERGED (stalled/plateau)` | active |
