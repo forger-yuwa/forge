@@ -194,6 +194,46 @@ def test_reject_keeps_state_pair():
     return ok
 
 
+def test_noise_aware_acceptance():
+    r"""**ノイズを知った受理** (plan boundary-conjugate-heat-transfer §5.1 #63)。
+
+    固体は節点ごとに独立な抵抗 ($A_s$=50 W/K, 背面 300 K)、流体は $Q(T)=h(T_g-T)$ ($h$=200 W/K, $T_g$=800 K)
+    に反復ごとの乱数 (σ=40 W) を足す。不動点は $T^*=(50\cdot300+200\cdot800)/250=700$ K。
+    旧ロジック (σ を渡さない) は不動点の手前でノイズに負けて棄却を続け、$D_f$ が倍々に増えて凍る。
+    新ロジックはノイズ幅 (σ/(A_s+h)=0.16 K の数倍) 以内に着き、`converged` を返す。
+    """
+    n, As, Tb, h, Tg, sig = 40, 50.0, 300.0, 200.0, 800.0, 40.0
+    Df0 = 20.0 * h          # 安全側に大きい感度 = 1 反復の縮小率 0.94。ノイズに負けやすい実機の状況
+    class OpN:
+        def __init__(self): self.n = n
+        def assemble(self, T):
+            return sp.identity(n, format="csr") * As, np.full(n, As * Tb)
+    Tstar = (As * Tb + h * Tg) / (As + h)
+    out = {}
+    for mode in ("old", "new", "understated"):
+        rng = np.random.default_rng(7)
+        drv = FixedPointDriver(OpN(), np.full(n, 400.0), Df0=np.full(n, Df0), anderson=0)
+        T = drv.T; conv_it = None
+        for it in range(400):
+            Qf = h * (Tg - T) + rng.normal(0.0, sig, n)
+            # "understated": 呼び出し側の σ が実際の 1/20 (実機と同じ状況)。回し直しのずれから学習できること
+            kw = {} if mode == "old" else {"Qf_sigma": np.full(n, sig if mode == "new" else sig / 20.0)}
+            T, info = drv.advance(Qf, tol_K=(1e-3 if mode == "old" else 5e-3), tol_rel=1e-3, n_consec=(3 if mode == "old" else 8), **kw)
+            if info["converged"]:
+                conv_it = it; break
+        out[mode] = (float(np.abs(T - Tstar).max()), float(np.mean(drv.Df)), conv_it)
+    err_old, df_old, _ = out["old"]; err_new, df_new, it_new = out["new"]
+    ok = (err_new < 5 * sig / (As + h)) and (it_new is not None) and (df_new == Df0) and (df_old > 100 * Df0) and (err_old > 3 * err_new)
+    err_u, df_u, it_u = out["understated"]
+    ok_u = (err_u < 5 * sig / (As + h)) and (df_u < 64 * Df0)
+    check("T9 understated sigma: reproducibility learned from re-evaluation, no freeze", ok_u,
+          f"max|T-T*|={err_u:.3f} K, D_f grown x{df_u/Df0:.0f} (旧ロジックは x{df_old/Df0:.0f}), converged at it {it_u}")
+    check("T8 noise-aware acceptance reaches the fixed point; the old rule freezes", ok,
+          f"new: max|T-T*|={err_new:.3f} K, D_f unchanged, converged at it {it_new} | "
+          f"old: max|T-T*|={err_old:.3f} K with D_f grown x{df_old/Df0:.0f}")
+    return ok and ok_u
+
+
 if __name__ == "__main__":
     t1_series_resistance()
     t2_fin_convergence()
@@ -202,6 +242,7 @@ if __name__ == "__main__":
     t5_coupling_acceptance()
     test_reject_keeps_state_pair()
     test_gif_normalisation()
+    test_noise_aware_acceptance()
     print()
     if FAILS:
         print("VERDICT: FAIL (%d)" % len(FAILS))

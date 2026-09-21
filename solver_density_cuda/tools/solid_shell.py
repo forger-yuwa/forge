@@ -395,7 +395,34 @@ class FixedPointDriver:
     受理: 固定重み $M=A_s+D_f$ での $\Phi=r^\mathsf{T}M^{-1}r$ が増えたら、その反復を**退避**して
     (最後に良かった $T$ に戻し) $D_f$ を倍にし、Anderson 履歴を捨てる。
     収束: max|ΔT| < tol_K かつ max|r| < tol_rel * スケール が `n_consec` 回連続。
+
+    **ノイズを知った判定** (2026-09-22, plan boundary-conjugate-heat-transfer §5.1 #63):
+    CFD 側の $Q_f$ に反復ごとのばらつきがあると、不動点の近くで $\Phi$ はノイズ床
+    $\Phi_n=\sigma^\mathsf{T}M^{-1}\sigma$ ($\sigma$ = $Q_f$ の平均の標準誤差) に張り付き、降下で受理を
+    決められなくなる。旧ロジックはそこで棄却を続け、$D_f$ が指数的に増えて**不動点の手前で凍った**
+    (`dT` は小さくなるが着いていない。C3X で 5 K 手前)。`advance(..., Qf_sigma=σ)` を渡すと:
+      - 棄却は「$\Phi-\Phi_{best}$ が、ノイズから見積もった $\Phi$ の標準偏差
+        $s_\Phi=2\sqrt{\sum_i (y_i\sigma_i)^2}$ ($y=M^{-1}r$) の `Z_NOISE` 倍を超え、かつ床 $\kappa\Phi_n$ より上」のときだけ。
+        **凍結は床に着く前に起きる**: 1 反復の降下量がノイズによる $\Phi$ の揺れに負けた時点で棄却が始まる
+        (合成試験 T8 では床の 10 倍上)。床だけを見る判定では防げない
+      - 収束は「直近 `n_consec` 反復の**壁温平均の傾きが `tol_K` [K/反復] 未満**、かつ**メリットが下げ止まっている**」。
+        床 $\kappa\Phi_n$ に入っただけでは足りず (実機 C3X で床の中を +0.008 K/反復で上がり続ける状態を収束と誤判定した。
+        不動点まで 1.1 K)、逆に床を必須にもしない (呼び出し側の σ は過小なことが多い)。返す $T$ は窓の平均
+      - Anderson は床の下でも使う (切ると初期 $D_f$ の素の反復になり、床の中の這い上がりが 1 桁遅くなる)
+    `Qf_sigma` を渡さなければ従来どおり (ビット不変)。
+
+    **ノイズの大きさは「同じ壁温で回し直したときのずれ」から学習する**。呼び出し側が渡す σ (1 本の CFD run 内の
+    ダンプ間ばらつき) は、反復間の再現性を**過小評価する** (実機 C3X: run 内 0.2–0.4 W に対し、回し直した $Q_f$ の
+    ずれは数 W。前の壁温の履歴が 1 反復の CFD では抜けきらないため)。そこで σ を渡されているときは、
+    メリットが悪化しても**すぐには棄却しない**: まず `best` の $T$ に戻して**同じ $T$ でもう一度評価させる** (再検)。
+    2 回の $Q_f$ の差の rms/√2 を `sigma_floor` として保持して以後の σ の下限にし、`best` の $Q_f$ は 2 回の平均に
+    置き換える。そのうえで、悪化が学習後のノイズ幅を超えていたときだけ $D_f$ を倍にする。
+    これが無いと、たまたま低く出た `best` の $\Phi$ と比べ続けて棄却が止まらない (勝者の呪い)。
     """
+
+    KAPPA_NOISE = 4.0
+    Z_NOISE = 3.0
+    DIVERGE_FACTOR = 4.0   # σ つきモードで再検に回すのは、メリットがこの倍率を超えて悪化したときだけ
 
     def __init__(self, op: ShellOperator, T0, Df0=None, anderson=5, Df_cap=1e12):
         self.op = op
@@ -408,6 +435,10 @@ class FixedPointDriver:
         self.history = []
         self.it = 0
         self._ok_streak = 0
+        self._floor_T = []          # ノイズ床の下にいる間の T (収束時に平均を返す)
+        self.sigma_floor = 0.0      # 回し直しのずれから学習した Q_f の再現性 [W] (節点共通のスカラー)
+        self._recheck = False       # True: 次に渡される Q_f は best の T で回し直したもの (再検)
+        self._rej_phi = None
 
     def _assemble(self, T):
         """固体作用素を組む。`fem2d` のように内部節点を持つ作用素では、**内部温度を復元してから
@@ -421,20 +452,69 @@ class FixedPointDriver:
         return A, b
 
     def advance(self, Qf, tol_K=1e-6, tol_rel=1e-6, n_consec=2,
-                tol_abs_W=None, tol_solid=None):
-        """最新の $Q_f(T_k)$ を受け取り、次の $T_{k+1}$ を返す。"""
+                tol_abs_W=None, tol_solid=None, Qf_sigma=None):
+        """最新の $Q_f(T_k)$ を受け取り、次の $T_{k+1}$ を返す。
+
+        `Qf_sigma`: $Q_f$ の節点ごとの標準誤差 [W]。与えるとノイズを知った受理・収束判定になる (クラス docstring)。"""
         Qf = np.asarray(Qf, float)
         A, b = self._assemble(self.T)
         M = (A + sp.diags(self.Df)).tocsr()
         r = A @ self.T - b - Qf
         phi = ShellOperator._merit_M(M, r)
+        phi_noise = None
+        rechecked = False
+        if Qf_sigma is not None and self._recheck and self.best is not None:
+            # 再検: いまの Q_f は best と同じ T での回し直し。差が評価器の再現性。
+            dQ = Qf - self.best[2]
+            self.sigma_floor = max(self.sigma_floor, float(np.sqrt(np.mean(dQ ** 2))) / np.sqrt(2.0))
+            Qf = 0.5 * (Qf + self.best[2])
+            r = A @ self.T - b - Qf
+            phi = ShellOperator._merit_M(M, r)
+            rechecked = True
+        if Qf_sigma is not None:
+            Qf_sigma = np.maximum(np.asarray(Qf_sigma, float), self.sigma_floor)
+            phi_noise = self.KAPPA_NOISE * ShellOperator._merit_M(M, Qf_sigma)
+        at_floor = (phi_noise is not None) and (phi <= phi_noise)
+        phi_std = 0.0
+        if Qf_sigma is not None:
+            y = ShellOperator._linsolve(M, r, np.zeros_like(r))
+            phi_std = 2.0 * float(np.sqrt(np.sum((y * np.asarray(Qf_sigma, float)) ** 2)))
         # **規格化は $\max|Q_f|$ のみ** (codex result M5): 背面温度を含む大きな $b$ を混ぜると、
         # 物理的な不釣合いが 100 % でも res_rel が 1e-6 に見えて合格してしまう。
         scale = max(float(np.max(np.abs(Qf))), 1e-30)
         res_rel = float(np.max(np.abs(r))) / scale
 
         rejected = False
-        if self.best is not None and phi > self.best[0]:
+        worse = (self.best is not None) and (phi > self.best[0]) and not rechecked
+        if worse and Qf_sigma is not None:
+            # **CFD の評価には遅れがある** (壁温を変えた直後の 1 反復では応答が出きらず、同じ壁温で回し直すと
+            # 残差が単調に動く。実機 C3X: 4.6 → 5.3 W)。遅れのある評価器にメリット降下の受理判定を使うと、
+            # 正しい方向へ進んでいる途中を「悪化」と見て止めてしまう。再検に回すのは**発散の兆候**
+            # (メリットが DIVERGE_FACTOR 倍を超えて悪化、かつノイズ幅の外) に限る。それ以外は受理して進む。
+            tol_phi = self.Z_NOISE * float(np.hypot(phi_std, getattr(self, "_best_std", 0.0)))
+            worse = (phi > self.DIVERGE_FACTOR * self.best[0]) and (phi - self.best[0] > tol_phi) and not at_floor
+        if rechecked:
+            # 学習後のノイズ幅で見ても棄却した一歩が悪かったなら、ここで初めて D_f を倍にする
+            if self._rej_phi is not None and (self._rej_phi - phi) > self.Z_NOISE * 2.0 * phi_std:
+                self.Df = np.minimum(self.Df * 2.0, self.Df_cap)
+                M = (A + sp.diags(self.Df)).tocsr()
+                phi = ShellOperator._merit_M(M, r)
+            self.best = (phi, self.T.copy(), Qf.copy()); self._best_std = phi_std
+            self._recheck = False; self._rej_phi = None
+        elif worse and Qf_sigma is not None:
+            # σ つき: すぐには棄却せず、best の T で回し直させる (D_f は触らない)
+            self._rej_phi = phi
+            self._recheck = True
+            self.T = self.best[1].copy()
+            self.Ts.clear(); self.Gs.clear(); self._ok_streak = 0; self._floor_T.clear()
+            info = {"iter": self.it, "phi": phi, "res_rel": res_rel, "dT": 0.0, "used": "recheck",
+                    "res_abs": float(np.max(np.abs(r))), "res_solid": float("nan"),
+                    "rejected": True, "Df_mean": float(np.mean(self.Df)),
+                    "phi_noise": float(phi_noise), "sigma_floor": float(self.sigma_floor),
+                    "at_floor": False, "converged": False}
+            self.history.append(info); self.it += 1
+            return self.T, info
+        elif worse:
             # 退避: **最後に良かった状態の $T$ と $Q_f$ を組で戻す** (codex result M2)。
             # 旧実装は $T$ だけ戻して $Q_f$ は棄却された $T$ のものを使っており、
             # 異なる評価点を混ぜた更新になっていた (反例: 正 297.33 に対し 315.67 を返す)。
@@ -451,6 +531,7 @@ class FixedPointDriver:
             self.best = (ShellOperator._merit_M(M, r_best), self.T.copy(), Qf.copy())
         else:
             self.best = (phi, self.T.copy(), Qf.copy())
+            self._best_std = phi_std
 
         G = ShellOperator._linsolve(M, b + Qf + self.Df * self.T, self.T)
         Tn = G
@@ -485,15 +566,43 @@ class FixedPointDriver:
         ok_solid = True
         if tol_solid is not None and np.isfinite(res_solid):
             ok_solid = (res_solid < tol_solid)
-        conv_now = ((dT < tol_K) and (res_rel < tol_rel) and ok_abs and ok_solid
-                    and not rejected)
+        if phi_noise is None:
+            conv_now = ((dT < tol_K) and (res_rel < tol_rel) and ok_abs and ok_solid
+                        and not rejected)
+        else:
+            # ノイズを知った判定: dT と res_rel は見ない ($D_f$ で幾らでも小さくできる / 床で下げ止まる)。
+            conv_now = False      # 下で窓の統計から決める
+        drift = float("nan")
+        if phi_noise is not None:
+            # 収束 = 直近 n_consec 反復で (i) 壁温平均の傾きが tol_K [K/反復] 未満、(ii) メリットが下げ止まっている
+            # (窓の後半の平均が前半の 1/2 より大きい = もう桁では落ちていない)。床 κΦ_n に入ったかどうかは
+            # 記録するが条件にしない: 呼び出し側の σ は過小なことが多く、床を条件にすると着いていても収束と言えない。
+            if rejected:
+                self._floor_T.clear(); self._win_phi = []
+            else:
+                self._floor_T.append(self.T.copy())
+                self._win_phi = getattr(self, "_win_phi", []) + [phi]
+            nw = max(n_consec, 4)
+            if len(self._floor_T) >= nw:
+                m = np.array([t.mean() for t in self._floor_T[-nw:]])
+                drift = float(np.polyfit(np.arange(nw), m, 1)[0])          # 壁温平均の傾き [K/反復]
+                ph = np.array(self._win_phi[-nw:])
+                stalled = ph[nw // 2:].mean() > 0.5 * ph[:nw // 2].mean()
+                conv_now = (abs(drift) < tol_K) and stalled and ok_abs and ok_solid
         self._ok_streak = self._ok_streak + 1 if conv_now else 0
         info = {"iter": self.it, "phi": phi, "res_rel": res_rel, "dT": dT, "used": used,
                 "res_abs": res_abs, "res_solid": res_solid,
                 "rejected": rejected, "Df_mean": float(np.mean(self.Df)),
-                "converged": self._ok_streak >= n_consec}
+                "phi_noise": (float("nan") if phi_noise is None else float(phi_noise)),
+                "sigma_floor": float(self.sigma_floor),
+                "at_floor": bool(at_floor),
+                "drift_K_per_it": drift,
+                "converged": (self._ok_streak >= (n_consec if phi_noise is None else 1))}
         self.history.append(info)
         self.T = Tn
+        if info["converged"] and phi_noise is not None and len(self._floor_T) >= 1:
+            # 床の下で T はノイズ幅の中を動くだけなので、その間の平均を答えにする
+            self.T = np.mean(np.vstack(self._floor_T[-max(n_consec, 4):]), axis=0)
         self.it += 1
         return self.T, info
 

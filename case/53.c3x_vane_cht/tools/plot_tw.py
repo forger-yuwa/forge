@@ -17,6 +17,13 @@ from compare_h import arc_map, CASE  # noqa: E402
 
 
 def load(run_dir):
+    """連成 run の最終壁温。`Tw_final.csv` (収束時にループが書く。ノイズ床の間の平均) があればそれを、
+    無ければ最後の反復の `wall_profile_5.csv` を読む。"""
+    fin = Path(run_dir) / "Tw_final.csv"
+    if fin.exists():
+        d = np.loadtxt(fin, delimiter=",", skiprows=1)
+        s, ss = arc_map(d[:, :2])
+        return s, ss, d[:, 3], str(fin)
     f = sorted(glob.glob(str(Path(run_dir) / "it_*/wall_profile_5.csv")))[-1]
     d = np.loadtxt(f, skiprows=1)
     s, ss = arc_map(d[:, :2])

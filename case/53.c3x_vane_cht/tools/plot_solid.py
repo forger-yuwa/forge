@@ -18,8 +18,12 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument("run_dir"); ap.add_argument("--solid", required=True)
     ap.add_argument("--out", required=True); ap.add_argument("--phys", default="5")
     a = ap.parse_args()
-    f = sorted(glob.glob(str(Path(a.run_dir) / f"it_*/wall_profile_{a.phys}.csv")))[-1]
-    d = np.loadtxt(f, skiprows=1)
+    fin = Path(a.run_dir) / "Tw_final.csv"
+    if fin.exists():
+        f = str(fin); d = np.loadtxt(fin, delimiter=",", skiprows=1)
+    else:
+        f = sorted(glob.glob(str(Path(a.run_dir) / f"it_*/wall_profile_{a.phys}.csv")))[-1]
+        d = np.loadtxt(f, skiprows=1)
     op, perm = build_fem2d(json.load(open(a.solid)), d[:, :3])
     Tif = d[perm, 3]
     for _ in range(8):                      # k_s(T) は前回の内部温度で評価されるので数回まわして固定点に

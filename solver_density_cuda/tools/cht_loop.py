@@ -78,6 +78,18 @@ def latest_wall_dump(run: Path, phys_name: str, phys_id: int) -> Path:
     return best
 
 
+def last_wall_dumps(run: Path, phys_name: str, phys_id: int, n: int):
+    """壁ダンプを step 順に並べ、**最後の n 枚**を返す (step 0 は初期状態なので除く)。"""
+    pat = re.compile(rf"^res_{re.escape(phys_name)}_{phys_id}_(\d+)\.h5$")
+    fs = []
+    for p in run.glob(f"res_{phys_name}_{phys_id}_*.h5"):
+        m = pat.match(p.name)
+        if m and int(m.group(1)) > 0:
+            fs.append((int(m.group(1)), p))
+    fs.sort()
+    return [p for _, p in fs[-n:]]
+
+
 def latest_field(run: Path) -> Path:
     best, best_step = None, -1
     for p in run.glob("res_*.h5"):
@@ -158,7 +170,8 @@ def main():
                     help="界面に渡す熱流束の定義 (既定 q_eff = 壁半 CV に実際に入った保存形。"
                          "plan boundary-conjugate-heat-transfer §4.3 の正本。"
                          "**どれを使ったか履歴に残す**)")
-    ap.add_argument("--tol-K", type=float, default=1.0e-3, help="max|dTw| の収束許容 [K]")
+    ap.add_argument("--tol-K", type=float, default=1.0e-3,
+                    help="max|dTw| の収束許容 [K]。--flux-avg >= 2 のときは**壁温平均の傾きの許容 [K/反復]** として使う")
     ap.add_argument("--tol-rel", type=float, default=1.0e-3, help="max|r|/スケール の収束許容")
     ap.add_argument("--n-consec", type=int, default=2, help="収束と見なす連続回数")
     # ---- 界面ゲート G-if (plan §6、codex result M5) ----
@@ -168,6 +181,11 @@ def main():
                     help="界面残差の**絶対**許容 [W] (単位奥行きなら W/m)。ケースごとに事前登録する")
     ap.add_argument("--tol-solid", type=float, default=None,
                     help="固体**内部**残差の許容 [W] (同上)。`fem2d` のみ評価される")
+    ap.add_argument("--flux-avg", type=int, default=1,
+                    help="界面熱流束を 1 反復の**最後の N 枚の壁ダンプで平均**する (既定 1 = 最後の 1 枚、従来どおり)。"
+                         "N>=2 なら節点ごとの平均の標準誤差も出してドライバに渡し、受理・収束判定が"
+                         "ノイズを知った形になる (plan boundary-conjugate-heat-transfer §5.1 #63)。"
+                         "テンプレートの outStepInterval を、後半に N 枚以上入るように設定すること")
     ap.add_argument("--anderson", type=int, default=5)
     ap.add_argument("--Tw-init", type=float, default=None, help="初期壁温 [K] (既定 = 固体の背面温度)")
     ap.add_argument("--Tg", type=float, default=None,
@@ -203,7 +221,7 @@ def main():
     wr = csv.writer(hist)
     wr.writerow(["iter", "flux", "Tw_min", "Tw_max", "Tw_mean", "dTw_max", "res_rel",
                  "res_abs_W", "res_solid_W", "Q_total_W", "Df_mean", "used", "rejected",
-                 "converged"])
+                 "converged", "phi", "phi_noise", "at_floor", "sigma_rms_W", "sigma_floor_W", "drift_K_per_it"])
     hist.flush()
 
     op = drv = None
@@ -283,25 +301,44 @@ def main():
             Tw = drv.T.copy()
             # 初回は壁温が config の一様値なので、そのまま 1 回目の Q_f を使う
         q = np.asarray(vals[key], float)                 # [W/m2] 固体向き正
+        q_sem = None
+        if a.flux_avg >= 2:
+            dumps = last_wall_dumps(itd, a.phys_name, a.phys_id, a.flux_avg)
+            if len(dumps) < a.flux_avg:
+                sys.exit(f"[cht_loop] --flux-avg {a.flux_avg} だが壁ダンプが {len(dumps)} 枚しか無い "
+                         f"({itd})。テンプレートの outStepInterval を細かくすること")
+            qs = np.array([np.asarray(read_wall_dump(d_)[2][key], float) for d_ in dumps])
+            q = qs.mean(axis=0)
+            q_sem = qs.std(axis=0, ddof=1) / np.sqrt(len(dumps))
         if a.solid_mode == "fem2d":
             q = q[perm]                                  # 壁ダンプ順 -> 固体界面節点順
+            if q_sem is not None:
+                q_sem = q_sem[perm]
         Qf = q * op.area                                 # 節点荷重 [W] (平面 2D は W/m)
+        Qf_sigma = None if q_sem is None else q_sem * op.area
         Tw_new, info = drv.advance(Qf, tol_K=a.tol_K, tol_rel=a.tol_rel, n_consec=a.n_consec,
-                                   tol_abs_W=a.tol_abs_W, tol_solid=a.tol_solid)
+                                   tol_abs_W=a.tol_abs_W, tol_solid=a.tol_solid, Qf_sigma=Qf_sigma)
         wr.writerow([it, a.flux, f"{Tw.min():.6f}", f"{Tw.max():.6f}", f"{Tw.mean():.6f}",
                      f"{info['dT']:.6e}", f"{info['res_rel']:.6e}",
                      f"{info['res_abs']:.6e}", f"{info['res_solid']:.6e}",
                      f"{np.sum(Qf):.6e}",
-                     f"{info['Df_mean']:.6e}", info["used"], int(info["rejected"]), int(info["converged"])])
+                     f"{info['Df_mean']:.6e}", info["used"], int(info["rejected"]), int(info["converged"]),
+                     f"{info['phi']:.6e}", f"{info.get('phi_noise', float('nan')):.6e}", int(info.get("at_floor", False)),
+                     ("nan" if Qf_sigma is None else f"{float(np.sqrt(np.mean(Qf_sigma**2))):.6e}"),
+                     f"{info.get('sigma_floor', 0.0):.6e}", f"{info.get('drift_K_per_it', float('nan')):.4e}"])
         hist.flush()
         print(f"[cht_loop]   Tw {Tw.min():.3f}..{Tw.max():.3f} K | dTw {info['dT']:.3e} K | "
               f"res {info['res_abs']:.3e} W ({info['res_rel']:.3e}) | "
               f"solid {info['res_solid']:.2e} | Q {np.sum(Qf):.4g} | {info['used']}"
-              + (" REJECTED" if info["rejected"] else ""))
+              + (" REJECTED" if info["rejected"] else "") + (" [at noise floor]" if info.get("at_floor") else ""))
         prev, Tw = itd, Tw_new
         if info["converged"]:
-            print(f"[cht_loop] CONVERGED at iter {it} (dTw < {a.tol_K} K, res_rel < {a.tol_rel}, "
-                  f"{a.n_consec} 回連続)")
+            if a.flux_avg >= 2:
+                print(f"[cht_loop] CONVERGED at iter {it} (直近 {max(a.n_consec, 4)} 反復で壁温平均の傾き < {a.tol_K:g} K/反復、"
+                      f"かつメリット関数が下げ止まり。壁温はその間の平均 -> Tw_final.csv)")
+            else:
+                print(f"[cht_loop] CONVERGED at iter {it} (dTw < {a.tol_K} K, res_rel < {a.tol_rel}, "
+                      f"{a.n_consec} 回連続)")
             np.savetxt(run / "Tw_final.csv",
                        np.column_stack([op.coords, Tw]), delimiter=",",
                        header="x,y,z,Tw", comments="")
