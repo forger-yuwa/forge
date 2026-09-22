@@ -69,16 +69,23 @@ def prepare(problem, msh, run_dir, op=None, wake_at_rest=True):
         q = subprocess.run([sys.executable, str(tools / cmd[0])] + cmd[1:], cwd=run_dir, capture_output=True, text=True); txt += q.stdout + q.stderr
         if cmd[0] == "check_mesh_quality.py" and q.returncode != 0:
             (run_dir / "MESH_QUALITY.txt").write_text(txt); raise RuntimeError("メッシュ品質 FAIL:\n" + q.stdout)
+        if cmd[0] == "check_dual_closure.py" and q.returncode != 0:
+            print("WARNING: check_dual_closure FAIL (変換器の単精度、plan B1b)。続行するが結果の解釈で考慮する", file=sys.stderr)
     (run_dir / "MESH_QUALITY.txt").write_text(txt)
     with h5py.File(run_dir / MESH, "r+") as f:             # 領域別一様 IC: 排気 = カウル上面より上 かつ 側壁内面より内側 (板厚の中央で分ける)
         cc = f["/CELLS/centCoords"][:].reshape(-1, 3)
         # 排気 = カウル上面より上 かつ 側壁内面より内側 (板厚の中央で分ける)。**板が終わった後ろでは境目を幅 δ = 5 mm で滑らかにする**:
         # 静止した後流ブロックの中に 35 倍の圧力段差を 60 µm 隣の節点間に置くと、受け側 (冷・静止・c 300 m/s) の局所 dt が
         # 高圧側から来る波 (c 900 m/s+) に対して 3 倍大きく、1 step で密度が負になった (run_0426 診断: step 1 で ρ −0.28、カウル後端面の直後・板厚中央)
+        # 排気/外気の境目 (板厚の中央) は、板が終わる x の手前 dl から x 方向にも smoothstep で「二値 → 幅 2dl の混合」へ移す
+        # (2026-09-22 codex M3: x > L − dl で二値から混合へ突然切り替えると、流体内で wz 1 → 0.85 の段差が出る)
         x, y, z = cc[:, 0], cc[:, 1], cc[:, 2]; dl = 5.0e-3
         ss = lambda t: (lambda u: u * u * (3.0 - 2.0 * u))(np.clip(t, 0.0, 1.0))
-        wz = np.where(x > LSW - dl, ss((ZW + 0.5 * TSW - z + dl) / (2 * dl)), (z < ZW + 0.5 * TSW).astype(float))
-        wy = np.where(x > LCOWL - dl, ss((y + 0.5 * TC + dl) / (2 * dl)), (y > -0.5 * TC).astype(float))
+        def blend(sharp, smooth_w, x_end):
+            ax = ss((x - (x_end - 2 * dl)) / dl)                  # x_end − 2dl で二値、x_end − dl で混合 (x について連続)
+            return (1.0 - ax) * sharp + ax * smooth_w
+        wz = blend((z < ZW + 0.5 * TSW).astype(float), ss((ZW + 0.5 * TSW - z + dl) / (2 * dl)), LSW)
+        wy = blend((y > -0.5 * TC).astype(float), ss((y + 0.5 * TC + dl) / (2 * dl)), LCOWL)
         w = wz * wy; upper = w > 0.5
         A1 = R2.region_ic_arrays(np.ones(len(cc), bool), st, p.gamma); A0 = R2.region_ic_arrays(np.zeros(len(cc), bool), st, p.gamma)
         arr = {k: w * A1[k] + (1.0 - w) * A0[k] for k in A1}        # 保存量を線形に混ぜる (混合気として整合)
@@ -87,9 +94,10 @@ def prepare(problem, msh, run_dir, op=None, wake_at_rest=True):
             # 引き抜くのと同じで、端面に真空ができて床を割る (run_0423: 暖機 step 454 で NaN。NaN はカウル後端面の直後)。
             # 後流ブロックだけを静止にすると、動く流体との境界 (16 µm の壁層) に 1600 m/s の不連続ができて step 2 で NaN (run_0424)。
             # そこで**端面からの 3D 距離 d で速度を 0 → 一様値へ滑らかに立ち上げる** (d < L_b = 10 t で smoothstep)。不連続は作らない
-            def dist_face(xf, y0, y1, z0, z1):            # x = xf の矩形 [y0,y1]×[z0,z1] への距離 (上流側 x < xf は面の裏 = 固体側なので対象外)
+            def dist_face(xf, y0, y1, z0, z1):            # x = xf の矩形 [y0,y1]×[z0,z1] への 3D 距離。上流側 (x < xf) も切らない
+                # (2026-09-22 codex M3: 上流を ∞ にすると、側壁内面のすぐ内側の流体で x = xf を跨ぐとき係数が 1 → 0 に跳ぶ)
                 dy = np.maximum(np.maximum(y0 - y, y - y1), 0.0); dz = np.maximum(np.maximum(z0 - z, z - z1), 0.0)
-                return np.where(x >= xf, np.sqrt((x - xf) ** 2 + dy ** 2 + dz ** 2), np.inf)
+                return np.sqrt((x - xf) ** 2 + dy ** 2 + dz ** 2)
             yr = lambda xx: H * (1.0 + 0.30 * xx / H - 0.02 * (xx / H) ** 2)
             fac = np.ones_like(x)
             for d, Lb in ((dist_face(LSW, -TC, yr(LSW), ZW, ZW + TSW), 10 * TSW), (dist_face(LCOWL, -TC, 0.0, 0.0, ZW + TSW), 10 * TC)):
