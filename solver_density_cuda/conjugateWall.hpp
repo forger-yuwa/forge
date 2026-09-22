@@ -78,15 +78,31 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
 void checkWallTemperatureSharing(const solverConfig& cfg, const mesh& msh);
 
 // ソルバ内 CHT (Phase 2a): `conjugate:` ブロック + bcond `ints: {conjugate: 1}` の壁で、
-// interval step ごとに壁温を**抵抗加重平均** (= SU2 の AVERAGED_TEMPERATURE と同型) で更新する。
+// interval step ごとに壁温を更新する。
 //
 //     g_f = k_eff / d_1  [W/m2K]  (流体側の第一内部点までのコンダクタンス)
 //     g_s = 1 / R_tot,  R_tot = t/k_s + R_back
-//     T_w^{new} = (g_f T_1 + g_s T_b) / (g_f + g_s)
 //
-// **収束した解は更新式に依らない** (両側の 1 次元法則の交点)。更新式は収束速度だけを決める。
-// 初版の制限 (いずれも起動時に拒否): node 以外、dual-time、`mode != local1d`、背面断熱。
+// **`flux: q_eff` (既定, 保存形)** — plan boundary-conjugate-heat-transfer §4.2 の更新式:
+//
+//     (g_s + D_f) T_w^{k+1} = g_s T_b + q_eff(T_w^k) + D_f T_w^k,   D_f = g_f (初期推定)
+//
+// 収束すると g_s (T_w - T_b) = q_eff、すなわち**保存形の界面熱量**と固体の 1 次元法則が釣り合う。
+// D_f は収束速度だけを決める (固定点は D_f に依らない)。`output: {interfaceDiag: 1}` が要る。
+//
+// **`flux: q_compact` (旧実装)** — 抵抗加重平均 T_w^{new} = (g_f T_1 + g_s T_b)/(g_f + g_s)。
+// これは q_compact = k_eff (T_1 - T_w)/d_1 の固定点であり、**保存形 q_eff とは一致しない**:
+// 差は壁半 CV 内の粘性加熱 tau.u と流動仕事で、第一層厚 d_1 に比例する。
+// 実測 (case/48, d_1=3.0 um): 同一状態の G-cons が q_eff で **1.77 % (FAIL)**、q_compact で
+// 0.000017 % (更新式の固定点なので恒等)。前縁では節点差が +26 % に達する
+// (plan boundary-conjugate-heat-transfer §5.1 #66、run `case/48.flat_plate_cooled_m4/run_0026_cht_qeff_gcons`)。
+// したがって **q_compact は A/B のときだけ使う**。
+//
+// 初版の制限 (いずれも起動時に拒否): node 以外、dual-time、`mode != local1d`、背面断熱、
+// `flux: q_eff` で `interfaceDiag != 1`。
 // 面内伝導が要る場合は外部ループ (tools/cht_loop.py + solid_shell.py) を使う。
+// 界面の収束判定 (G-if) の素材は run 直下の `conjugate_history.csv` に出る
+// (step, physID, Tw 統計, max|dTw|, 未緩和の界面残差 res_abs_Wm2 / res_max_W / res_rel, q_total)。
 void initConjugateWalls(const solverConfig& cfg, const mesh& msh);   // 起動時の検査 (拒否条件)
 void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, int iStep);
 bool conjugateActive(const solverConfig& cfg, const mesh& msh);

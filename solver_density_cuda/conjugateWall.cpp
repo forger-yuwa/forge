@@ -8,6 +8,7 @@
 #include <limits>
 #include <map>
 #include <sstream>
+#include <set>
 #include <unordered_map>
 #include <utility>
 
@@ -386,6 +387,13 @@ void initConjugateWalls(const solverConfig& cfg, const mesh& msh)
                      "過渡では拘束反力が C = D_t(VE) - R^raw になり、本実装の定常仮定が崩れる。\n";
         exit(EXIT_FAILURE);
     }
+    if (cfg.conjugateFlux == "q_eff" && cfg.interfaceDiag != 1) {
+        std::cerr << "[conjugateWall] ERROR: conjugate flux=q_eff (既定) は保存形の界面熱量 iface_q_eff を使うので "
+                     "output: {interfaceDiag: 1} が要る。\n"
+                  << "[conjugateWall]   旧実装の抵抗加重平均に戻すなら conjugate: {flux: q_compact} "
+                     "(ただし §4.3 の保存形と 1〜2 % ずれる。plan §5.1 #66)。\n";
+        exit(EXIT_FAILURE);
+    }
     for (const bcond& bc : msh.bconds) {
         if (!bcondIsConjugate(bc)) continue;
         if (bc.bcondKind != "wall_isothermal") {
@@ -404,6 +412,7 @@ void initConjugateWalls(const solverConfig& cfg, const mesh& msh)
         }
     }
     std::cout << "[conjugateWall] in-solver CHT active (mode=" << cfg.conjugateMode
+              << ", flux=" << cfg.conjugateFlux
               << ", interval=" << cfg.conjugateInterval << ", warmup=" << cfg.conjugateWarmup
               << ", relax=" << cfg.conjugateRelax << ")" << std::endl;
 }
@@ -419,34 +428,113 @@ void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, in
     const std::vector<flow_float> cp       = pullField(cfg, var, "cp",        msh.nCells);
     const std::vector<flow_float> visTurb  = pullField(cfg, var, "vis_turb",  msh.nCells);
     const double Rback = backResistance(cfg);
+    const bool useEff  = (cfg.conjugateFlux == "q_eff");
 
     for (bcond& bc : msh.bconds) {
         if (!bcondIsConjugate(bc)) continue;
         const FirstInterior& fi = firstInterior(cfg, msh, bc);
+
+        // ---- 保存形 $Q_f$ を使う場合は、この step の壁面素材を host に降ろして作る ----
+        // `iface_q_eff` = $(R^{raw}-F_w-e_wR_\rho)/A$ (定義と符号は本ファイル冒頭と methods/boundary.md)。
+        // 素材 (`ifaceFw`/`ifaceRraw`/`ifaceRro`) はデバイス側で毎 step 採れているので D2H だけで足りる。
+        const std::vector<flow_float>* qeff = nullptr;
+        if (useEff) {
+            bc.copyVariables_bplane_D2H();
+            fillInterfaceDiagnostics(cfg, msh, var, bc);
+            const auto itq = bc.diagVar.find("iface_q_eff");
+            if (itq == bc.diagVar.end() || itq->second.size() < bc.iCells.size()) {
+                std::cerr << "[conjugateWall] ERROR: physID " << bc.physID
+                          << ": conjugate flux=q_eff だが iface_q_eff が作れない。"
+                             "output.interfaceDiag: 1 と定常 (unsteady: 0) の node 等温壁が要る。\n";
+                exit(EXIT_FAILURE);
+            }
+            qeff = &itq->second;
+        }
+
         auto& Ts = bc.bvar["Ts"];
         double dTmax = 0.0;
+        // G-if の素材 (plan boundary-conjugate-heat-transfer §6 G-if)。
+        //   r_i = Q_{f,i} - g_s (T_{w,i}-T_b) A_i   [W]  … **更新前 (未緩和) の界面残差**
+        double resAbsW = 0.0;      // max_i |r_i| / A_i  [W/m2]  (局所面積で規格化)
+        double resMaxW = 0.0;      // max_i |r_i|        [W or W/m]
+        double qfMaxW  = 0.0;      // max_i |Q_{f,i}|
+        double qTotal  = 0.0;      // sum_i Q_{f,i}
+        double Tsum = 0.0, Tmin = 1e30, Tmax = -1e30;
+        geom_int nUsed = 0, nBadQ = 0;
+
         for (size_t ib = 0; ib < bc.iCells.size() && ib < Ts.size(); ++ib) {
             const geom_int ic = bc.iCells[ib];
             const geom_int j  = fi.jdof[ib];
             if (j < 0) continue;
             const double keff = (double)thermCond[ic] + (double)cp[ic]*(double)visTurb[ic]/cfg.turbulentPrandtl;
-            const double gf   = keff / fi.d1[ib];                    // [W/m2K]
+            const double gf   = keff / fi.d1[ib];                    // [W/m2K] 流体側コンダクタンス
             const double Rtot = cfg.conjugateThickness / cfg.conjugateKsolid + Rback;
             const double gs   = 1.0 / Rtot;
-            // 抵抗加重平均 (固定点は両側の 1 次元法則の交点。更新式は収束速度のみを決める)
-            const double Tnew = (gf * (double)T[j] + gs * cfg.conjugateTb) / (gf + gs);
-            const double Tw   = (1.0 - cfg.conjugateRelax) * (double)Ts[ib] + cfg.conjugateRelax * Tnew;
-            dTmax = std::max(dTmax, std::fabs(Tw - (double)Ts[ib]));
+            const double Twk  = (double)Ts[ib];
+
+            double Tnew;
+            if (useEff) {
+                // §4.2 の更新式 (固定点を保存する形): $(g_s+D_f)T^{k+1}=g_sT_b+q_{\rm eff}+D_fT^k$。
+                // 収束すると $g_s(T_w-T_b)=q_{\rm eff}$ = **保存形の界面熱量と固体の 1 次元法則の釣り合い**。
+                // $D_f$ は界面抵抗の初期推定 $g_f$ (plan §5.1 #32: `hA` は初期推定に留める)。収束速度だけを決める。
+                const double q = (double)(*qeff)[ib];
+                if (!std::isfinite(q)) { ++nBadQ; continue; }
+                const double Df = gf;
+                Tnew = (gs*cfg.conjugateTb + q + Df*Twk) / (gs + Df);
+
+                const geom_int ip = bc.iPlanes[ib];
+                const double area = (double)msh.planes[ip].surfArea;
+                const double Qf   = q * area;
+                const double r    = Qf - gs*(Twk - cfg.conjugateTb)*area;   // 未緩和の界面残差 [W]
+                if (area > 0.0) resAbsW = std::max(resAbsW, std::fabs(r)/area);
+                resMaxW = std::max(resMaxW, std::fabs(r));
+                qfMaxW  = std::max(qfMaxW,  std::fabs(Qf));
+                qTotal += Qf;
+            } else {
+                // 旧実装 (`flux: q_compact`) — 抵抗加重平均。**ビット不変**にするため式をそのまま残す。
+                Tnew = (gf * (double)T[j] + gs * cfg.conjugateTb) / (gf + gs);
+            }
+
+            const double Tw = (1.0 - cfg.conjugateRelax) * Twk + cfg.conjugateRelax * Tnew;
+            dTmax = std::max(dTmax, std::fabs(Tw - Twk));
             Ts[ib] = (flow_float)Tw;
+            Tsum += Tw; Tmin = std::min(Tmin, Tw); Tmax = std::max(Tmax, Tw); ++nUsed;
         }
+
+        if (nBadQ > 0) {
+            std::cerr << "[conjugateWall] ERROR: physID " << bc.physID << ": iface_q_eff が " << nBadQ
+                      << " 節点で非有限。適用範囲外の構成 (dual-time / 周期に属する壁ノード / 断熱壁) では\n"
+                      << "[conjugateWall]   保存形の界面熱量が定義できない (conjugateWall.cpp の適用範囲を参照)。\n"
+                      << "[conjugateWall]   外部ループ (tools/cht_loop.py) を使うか、flux: q_compact で旧定義に戻すこと。\n";
+            exit(EXIT_FAILURE);
+        }
+
         // **注意**: H2D ラッパの引数順は (host, device, n) で、D2H の (device, host, n) と逆。
         if (cfg.gpu == 1 && bc.bvar_d.count("Ts"))
             cudaWrapper::cudaMemcpy_H2D_wrapper(Ts.data(), bc.bvar_d["Ts"], (geom_int)Ts.size());
+
+        // ---- G-if: 更新ごとに界面の残差と温度更新量を残す (判定は check_* 側で行う) ----
+        if (useEff && nUsed > 0) {
+            static std::set<int> headerWritten;
+            const std::string fn = "conjugate_history.csv";
+            const bool needHeader = headerWritten.empty() && !std::ifstream(fn).good();
+            std::ofstream ofs(fn, std::ios::app);
+            if (needHeader)
+                ofs << "step,physID,n,Tw_mean,Tw_min,Tw_max,dTw_max,res_abs_Wm2,res_max_W,res_rel,q_total\n";
+            headerWritten.insert(bc.physID);
+            ofs.precision(10);
+            ofs << iStep << "," << bc.physID << "," << nUsed << ","
+                << std::scientific << Tsum/nUsed << "," << Tmin << "," << Tmax << ","
+                << dTmax << "," << resAbsW << "," << resMaxW << ","
+                << (qfMaxW > 0.0 ? resMaxW/qfMaxW : 0.0) << "," << qTotal << "\n";
+        }
+
         if (iStep % (cfg.conjugateInterval * 20) == 0) {
-            double tmin = 1e30, tmax = -1e30;
-            for (const flow_float v : Ts) { tmin = std::min(tmin, (double)v); tmax = std::max(tmax, (double)v); }
             std::cout << "[conjugateWall] step " << iStep << " physID " << bc.physID
-                      << ": Tw " << tmin << " .. " << tmax << " K, max|dTw| " << dTmax << " K" << std::endl;
+                      << ": Tw " << Tmin << " .. " << Tmax << " K, max|dTw| " << dTmax << " K";
+            if (useEff) std::cout << ", if-res " << resAbsW << " W/m2 (rel "
+                                  << (qfMaxW > 0.0 ? resMaxW/qfMaxW : 0.0) << ")";
+            std::cout << std::endl;
         }
     }
 }

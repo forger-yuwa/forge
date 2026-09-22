@@ -54,6 +54,9 @@ public:
     int conjugateInterval = 50;          // K step ごとに更新
     int conjugateWarmup = 0;             // 最初の N step は等温固定 (壁温を動かさない)
     double conjugateRelax = 1.0;         // 追加緩和 (1.0 = 抵抗加重そのまま)
+    // 連成に渡す界面熱量の定義。既定 `q_eff` = 保存形 ($Q_f=\sum F^E-C$, plan §4.3 の正本)。
+    // `q_compact` は旧実装 (k_eff(T_1-T_w)/d_1 の抵抗加重平均) の再現用で、A/B のときだけ使う。
+    std::string conjugateFlux = "q_eff";
     // 第一内部点の整列度 |d·n|/|d| の下限 (これ未満は評価不能。tools/check_wall_resolution.py の --align-min と同義)
     double interfaceDiagAlignMin = 0.5;
 

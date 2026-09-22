@@ -328,7 +328,8 @@ SST automatic wall treatment (`wallTreatmentSST`) とはコードパスが分離
 > 共有 CV の壁温競合の起動時拒否、**固体側モデル** ([`tools/solid_shell.py`](../solver_density_cuda/tools/solid_shell.py))、
 > **外部弱連成ループ** ([`tools/cht_loop.py`](../solver_density_cuda/tools/cht_loop.py))。
 > **ソルバ内連成も実装済み (Phase 2a, `local1d` のみ)**: `conjugate:` ブロック + bcond `ints: {conjugate: 1}`。
-> **未実装**: ソルバ内の `shell2d`/`fem2d` (面内伝導が要るなら外部ループを使う)、拘束反力込みの $q_{\rm eff}$、dual-time 連成。
+> **ソルバ内連成も保存形 $q_{\rm eff}$ で更新する (2026-09-22、既定)**: `conjugate: {flux: q_eff}`。
+> **未実装**: ソルバ内の `shell2d`/`fem2d` (面内伝導が要るなら外部ループを使う)、dual-time 連成。
 > 検証: 1 次元純伝導の共役解を解析解と照合 (`case/52.conjugate_slab`) — $T_w$ 誤差 0.025 %、
 > 両側 $q$ の不一致 0.0053 % で **PASS**。
 > 設計判断と検証計画は [`plans/active/boundary-conjugate-heat-transfer.md`](../plans/active/boundary-conjugate-heat-transfer.md)
@@ -414,20 +415,37 @@ $$\left(A_s+D_f\right)T^{k+1}=b_s+Q_f(T^{k})+D_f\,T^{k}$$
 #### ソルバ内連成 (`conjugate:`, Phase 2a)
 
 ```yaml
-conjugate: {mode: local1d, thickness: 1.0e-3, k_solid: 0.217, back: isothermal, T_b: 300.0,
-            interval: 50, warmup: 500, relax: 1.0}
+conjugate: {mode: local1d, flux: q_eff, thickness: 1.0e-3, k_solid: 0.217, back: isothermal,
+            T_b: 300.0, interval: 50, warmup: 500, relax: 1.0}
 ```
 
 と書き、対象壁の bcond に `ints: {conjugate: 1}` を付ける (種別は `wall_isothermal` のまま)。
-`interval` step ごとに、**ステップ完了後** (次の残差組立ての前) に壁温を**抵抗加重平均**で更新する:
+`interval` step ごとに、**ステップ完了後** (次の残差組立ての前) に壁温を更新する。
 
-$$g_f = \frac{k_{\rm eff}}{d_1},\quad g_s = \frac{1}{R_{\rm tot}},\quad
-  T_w^{new} = \frac{g_f T_1 + g_s T_b}{g_f + g_s}$$
+**`flux: q_eff` (既定、保存形)** — 上の「界面熱量」で定義した $q_{\rm eff}$ を使い、
+[plan §4.2](../plans/active/boundary-conjugate-heat-transfer.md) の**固定点を保存する形**で解く:
 
-(SU2 の `AVERAGED_TEMPERATURE` と同型。**収束解は更新式に依らない** — 両側の 1 次元法則の交点)。
+$$(g_s + D_f)\,T_w^{k+1} = g_s T_b + q_{\rm eff}(T_w^k) + D_f\,T_w^k,\qquad
+  g_f = \frac{k_{\rm eff}}{d_1},\quad g_s = \frac{1}{R_{\rm tot}},\quad D_f = g_f$$
+
+収束点は $g_s(T_w - T_b) = q_{\rm eff}$、すなわち**保存形の界面熱量**と固体の 1 次元法則の釣り合いで、
+外部ループ (`cht_loop.py --flux q_eff`) と**同じ不動点**である。$D_f$ は界面抵抗の初期推定で、
+収束速度だけを決める (固定点は $D_f$ に依らない)。**`output: {interfaceDiag: 1}` が要る** (無ければ起動時に拒否)。
+
+**`flux: q_compact` (旧実装、A/B 専用)** — 抵抗加重平均 $T_w^{new} = (g_f T_1 + g_s T_b)/(g_f+g_s)$
+(SU2 の `AVERAGED_TEMPERATURE` と同型)。これは $q_{\rm compact}$ の固定点であり、**保存形とは一致しない**。
+差は壁半 CV 内の粘性加熱 $\tau\cdot u$ と流動仕事で、第一層厚 $d_1$ に比例する。
+**実測** (`case/48.flat_plate_cooled_m4`, $d_1$=3.0 µm、[plan §5.1 #66](../plans/active/boundary-conjugate-heat-transfer.md)):
+同一状態の G-cons が $q_{\rm eff}$ 形の更新では **0.0028 % (PASS)**、$q_{\rm compact}$ 形では **1.77 % (FAIL)**。
+壁温は平均 599.96 → **604.17 K**、前縁の最大 987.1 → **1148.5 K** と動く。
 
 - **起動時に拒否**: `node` 以外、`unsteady: 1` (dual-time)、`mode != local1d`、背面断熱、
-  対象壁が `wall_isothermal` でない、第一内部点が定まらない壁 CV が 1 つでもある場合。
+  対象壁が `wall_isothermal` でない、第一内部点が定まらない壁 CV が 1 つでもある場合、
+  `flux: q_eff` なのに `interfaceDiag != 1`、$q_{\rm eff}$ が 1 節点でも非有限 (適用範囲外の構成)。
+- **界面の収束判定 (G-if)**: 更新ごとに run 直下の `conjugate_history.csv` に
+  `step, physID, n, Tw_mean, Tw_min, Tw_max, dTw_max, res_abs_Wm2, res_max_W, res_rel, q_total` を追記する。
+  $r_i = Q_{f,i} - g_s(T_{w,i}-T_b)A_i$ は**更新前 (未緩和)** の界面残差で、`res_abs_Wm2` $=\max_i|r_i|/A_i$、
+  `res_rel` $=\max_i|r_i|/\max_i|Q_{f,i}|$。判定 (許容と連続回数) は判定ツール側で行う。
 - **面内伝導が要るなら使わない**: `local1d` は点ごとの 1 次元抵抗。シェル/一般 2D 固体は
   外部ループ ([`tools/cht_loop.py`](../solver_density_cuda/tools/cht_loop.py) + `solid_shell.py`) の担当。
 - **再開**: 出力ステップごとに `conjugate_Tw_<physID>.csv` を書く。続きを回すときは

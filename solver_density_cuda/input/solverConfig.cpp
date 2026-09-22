@@ -520,13 +520,17 @@ void solverConfig::read(std::string fname)
             this->conjugateInterval  = getOptionalValidatedValue<int>(cj, "interval", 50, "conjugate");
             this->conjugateWarmup    = getOptionalValidatedValue<int>(cj, "warmup", 0, "conjugate");
             this->conjugateRelax     = getOptionalValidatedValue<double>(cj, "relax", 1.0, "conjugate");
+            this->conjugateFlux      = getOptionalValidatedValue<std::string>(cj, "flux", std::string("q_eff"), "conjugate");
+            if (this->conjugateFlux != "q_eff" && this->conjugateFlux != "q_compact")
+                throw std::runtime_error("Key 'flux' in 'conjugate' must be 'q_eff' (保存形, 既定) or 'q_compact' (旧実装の再現用).");
             if (!(this->conjugateInterval > 0)) throw std::runtime_error("'conjugate': interval must be > 0.");
             if (!(this->conjugateRelax > 0.0 && this->conjugateRelax <= 1.0))
                 throw std::runtime_error("'conjugate': relax must be in (0, 1].");
             std::cout << "'conjugate': mode=" << this->conjugateMode << " t=" << this->conjugateThickness
                       << " k_s=" << this->conjugateKsolid << " back=" << this->conjugateBackKind
                       << " T_b=" << this->conjugateTb << " interval=" << this->conjugateInterval
-                      << " warmup=" << this->conjugateWarmup << " relax=" << this->conjugateRelax << "\n";
+                      << " warmup=" << this->conjugateWarmup << " relax=" << this->conjugateRelax
+                      << " flux=" << this->conjugateFlux << "\n";
         }
 
         // 空間設定
