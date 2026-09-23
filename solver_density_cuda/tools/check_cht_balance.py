@@ -127,10 +127,44 @@ def main():
         print(f"VERDICT: {'PASS' if ok else 'FAIL'}")
         return 0 if ok else 1
 
-    if a.solid is None:
-        sys.exit("--solid-mode fem2d には --solid が要る")
-    spec = json.loads(Path(a.solid).read_text())
-    op, perm = build_fem2d(spec, coords)
+    # **ソルバ内連成 (`conjugate.mode: fem2d`) なら JSON/npz は要らない** (codex result 6 巡目 m1)。
+    # 必要なのは固体 HDF5 (界面・Robin・座標) と保存温度だけで、JSON を要求すると可搬性が落ちる。
+    insolver_probe, solid_probe = False, None
+    cfgp0 = src / "solverConfig.yaml"
+    if cfgp0.exists():
+        try:
+            import yaml
+            cj0 = (yaml.safe_load(cfgp0.read_text()) or {}).get("conjugate")
+            if isinstance(cj0, dict) and str(cj0.get("mode", "")) == "fem2d":
+                insolver_probe, solid_probe = True, cj0.get("solid")
+        except Exception:
+            pass
+    if a.solid is None and not insolver_probe:
+        sys.exit("--solid-mode fem2d には --solid が要る (ソルバ内連成の run なら不要)")
+    if a.solid is not None:
+        spec = json.loads(Path(a.solid).read_text())
+        op, perm = build_fem2d(spec, coords)
+    else:
+        # 固体 HDF5 から作用素を組む (JSON を通さない)
+        spec = None
+        sh5 = src / str(solid_probe)
+        with h5py.File(sh5, "r") as fh:
+            nodes_h = np.asarray(fh["MESH/COORD"][:], float)
+            tris_h = np.asarray(fh["MESH/TRIS"][:], int)
+            ifn_h = np.asarray(fh["IFACE/NODES"][:], int)
+            ife_h = np.asarray(fh["IFACE/EDGES"][:], int)
+            re_h = np.asarray(fh["ROBIN/EDGES"][:], int)
+            rh_h = np.asarray(fh["ROBIN/H"][:], float)
+            rt_h = np.asarray(fh["ROBIN/TC"][:], float)
+            kT_h = np.asarray(fh["SOLID/K_T"][:], float)
+            kV_h = np.asarray(fh["SOLID/K_V"][:], float)
+        robin_h = [(int(x), int(y), float(hh), float(tt))
+                   for (x, y), hh, tt in zip(re_h, rh_h, rt_h)]
+        op = Fem2DOperator(nodes_h, tris_h, ifn_h, [tuple(e) for e in ife_h], robin_h,
+                           (kT_h, kV_h) if len(kT_h) > 1 else float(kV_h[0]))
+        # 壁ダンプ順 -> 界面節点順
+        W = np.asarray(coords, float)[:, :2]
+        perm = np.array([int(np.argmin(np.hypot(*(W - p).T))) for p in op.coords[:, :2]], int)
     # **積分済み荷重があればそれを使う** (codex result 2 巡目 M4)。面積で割って集中辺長を
     # 掛け直すと角で +30 % 歪む。ソルバ内連成と同じ契約にする。
     if Qdirect is not None:
