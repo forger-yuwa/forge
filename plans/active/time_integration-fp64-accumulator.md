@@ -42,7 +42,25 @@
 - **(b) 症状**: 定常解ならゼロであるべき $\lvert\dot m\rvert = |\int\rho U_y dx|$ が
   **べき乗則** $\propto\mathrm{step}^{-0.23}$ でしか減らない (step 倍加で 15 %)。
   同じ場を倍精度ビルドで継続すると**幾何級数** (25k step ごとに 1/2.81) になり、
-  300k step で 4.54e-7 → **4.56e-12** (SU2 の床 8.59e-12 を下回る)。
+  減衰区間 (先頭 16 点) で 4.54e-7 から **4.59e4 倍**落ち、末尾は **1.234e-11 ± 2.5e-12** の床に座る。
+  ~~300k step で 4.56e-12 (SU2 の床 8.59e-12 を下回る)~~ **撤回 (codex plan M3)**: 4.56e-12 は 1.9M の谷で
+  2.0M では 1.48e-11 に戻る。過渡を定常値として報告したもの (§6.2)。
+  **本計画の主張は深部の局所停滞に限る** (2026-09-23 に範囲を絞った。codex plan-2 M4 + `diagnostician`)。
+  全保存量の残差プラトーは**倍精度でも消えず、しかも FP32 と 4〜5 桁一致する**:
+
+  | 列 | FP64 `run_0020_double` (step 360k–400k) | FP32 `run_0014` (step 760k–800k) | 比 |
+  | --- | --- | --- | --- |
+  | `rms_ro` | 2.5315e-6 (cv 0.050, min/max 0.870) | 2.5316e-6 (cv 0.050, min/max 0.870) | 1.0000 |
+  | `rms_roUx` | 5.3529e-3 (cv 0.043) | 5.3531e-3 (cv 0.043) | 1.0000 |
+  | `rms_roUy` | 8.3532e-4 (cv 0.021) | 8.3532e-4 (cv 0.021) | 1.0000 |
+  | `rms_roe` | 5.3718 (cv 0.039) | 5.3721 (cv 0.039) | 1.0001 |
+  | `rms_roK` / `rms_roOmega` | 3.2867e-4 / 2.0628 | 3.2930e-4 / 2.0648 | 1.0019 / 1.0010 |
+
+  **別の step 区間なのに統計量まで一致する有界振動**なので、このプラトーは**丸めと無関係**である。
+  global `rms_ro` 2.5e-6 は深部 `res_ro` 3.4e-11 の 5 桁上で、プラトーの所在は深部の外 (リップ剪断層等)。
+  したがって**局所停滞とグローバルなプラトーは独立**で、本計画は前者だけを扱う (§6 の G2-L / G2-G)。
+  ~~「倍精度でも NOT CONVERGED だから前提が弱い」~~ **逆**: FP32/FP64 が一致することが
+  「プラトーは丸めではない」証拠で、主張の範囲を**絞る**根拠になる。
 - **(c) 交絡のうち 2 つは否定した。ただし「commit 丸めが唯一の律速」は未証明** (codex plan M2)。
   `run_0020_double` は `flow_float` と `geom_float` を**ともに**変えているので、状態保持だけでなく
   流束・EOS・残差・線形解法・SST 更新も変わっている。**閉性誤差 0 は、非一様流の流束評価・総和・勾配の
@@ -173,6 +191,33 @@ dq_block を nStepInner 回緩和する」)。したがって
 これが**陽解法 `timeIntegration=3` (凸結合) と dual-time を v1 から外す理由**でもある:
 そちらは commit の基準が `Q_N`/`Q_M` という**別配列の FP32 値**なので、`Qacc` を足すだけでは閉じない。
 
+**拒否した 2 経路は同じ理由で拒否されており、外し方も同じ** (2026-09-23 確認)。
+どちらも **commit の基準が `Q` 自身でなく FP32 の履歴配列**である:
+
+| 経路 | commit の基準 | 必要な FP64 影 |
+| --- | --- | --- |
+| `timeIntegration=3` (TVD RK3) | `Q_N` (外側 step 冒頭) と `Q_M` (段冒頭、`updateVariablesInner`) | `Qacc_N`, `Qacc_M` |
+| dual-time (BDF1/2) | `Q_N`, `Q_NN` (`shiftDualTimeLevels_d`, `update_d.cu:486-503` で 1 段ずつ FP32 コピー) | `Qacc_N`, `Qacc_NN` |
+
+いずれも**履歴配列と並べて FP64 影を 1 段ずつ shift するだけ**で、機構は同一 (コピーのみ)。
+費用は履歴 1 段につき **+40 B/CV**。「原理的に無理」ではなく**費用と作業量の問題**なので、
+v1 から外すのは費用対効果の判断であって、恒久的な制限ではない (#10)。
+
+**実使用の分布** (リポジトリ内の全 `run_*/solverConfig.yaml` 3172 件、2026-09-23 集計):
+
+| `timeIntegration` | unsteady | run 数 | v1 の扱い |
+| --- | --- | --- | --- |
+| 11 (陰解法) | 0 | **2131** | **対応** |
+| 11 (陰解法) | 1 = dual-time | 456 | 拒否 (#10) |
+| 3 (TVD RK3) | 0 / 1 | **516** | 拒否 (#10) |
+| 4 (RK4) | 0 / 1 | 49 | 対応 (最終段のみ) |
+| 1 (前進 Euler) | 0 | 14 | 対応 |
+
+**これは「陽解法に対応する」という言い方への警告でもある**: 実際に使われている陽解法は
+**tI=3 (516 run、`case/05`・`case/08` の標準検証)** であって、v1 に入れようとしている
+tI=1/4 は合わせて 63 run (2 %) しかない。v1 で「陽解法対応」と書くと、
+ユーザが使う陽解法は対応していない、という誤解を生む。**段別に書くこと**。
+
 **判断の分かれ目**: 「別の writer が `Q` を**上書き**するのか、**増分を足す**のか」。
 上書きなら reconcile で追従させるのが正しい (壁ピン・周期ミラー)。
 **増分なら Qacc に同じ増分を当てるべき**で、reconcile に拾わせると残余を捨ててしまう。
@@ -223,13 +268,18 @@ GPU メモリが逼迫する規模では `qAccumulatorFP64: 0` で従来に戻�
 | 13 | O | ~~書き込み側の棚卸し~~ **済・結論は訂正** | §4.3 の撤回 2。定常経路では `dependentVariables` の書き戻しは commit に上書きされ**状態に残らない**。`periodicNode` も名前依存の grep で漏れていた writer がある (`periodicBroadcastFromRoot_d`) |
 | 11 | O | ~~`mdot_decay.py` に区間分離~~ **済** | 膝検出で減衰区間と床を分離 |
 | **S0** | O | ~~**G0 の単体テスト**~~ **PASS (2026-09-23)** | `solver_density_cuda/cuda_forge/qAccumulator_d.cuh` (commit/reconcile の device 関数) と `tests/unit/test_qacc_commit.cu`。`nvcc --expt-relaxed-constexpr -I. -o test_qacc_commit tests/unit/test_qacc_commit.cu` で単体ビルドできる。<br>**(a)** `Qacc-Q0` = 2.9700e-08 = $N\,dq$ (相対差 **0.00e+00**)、ミラーは **16 ULP** 動いた / **(c)** OFF 経路は **0.0000e+00** (現行の症状を再現) / **(b)** 壁ピンは**ピンから 0.478 ULP しか離れない**・採用 25/100 step / **(d)** 残余ゼロの 1 step は 20 万サンプルで **ON/OFF がビット一致** (差 0 件)。**VERDICT: PASS**<br>⚠ 初回は 3 件 FAIL したが**いずれもテストの期待値の誤り**だった: (c) の −7.93e-11 は `(float32)RO0` と `RO0` の**表現差**を累積と取り違えたもの、(b) の「毎 step 採用」は誤りで、**残余が ½ ULP を超えたときだけ reconcile が発火する** (理論値 ~32 回) のが正しい挙動 = 「ピンから離れられない」という性質そのもの |
-| **S1** | O | 配線 | `time.qAccumulatorFP64` キー、`Qacc` 確保 (`nCells` のみ)、block/scalar 両 commit に FP64 分岐、**reconcile を `updateVariablesOuter_d` に融合** (新規 launch を増やさない)、起動時拒否リスト、採用セル数カウンタ。→ **G1** |
-| **S2** | O | FP64 checkpoint | 既存 `/CHECKPOINT` の契約 (`output/output.cpp:167-194` 書き、`main.cpp:983-1059` 読み・layout 不一致は拒否) に `qacc_ro…` 5 本を double で追加。**読込は `vector<double>`** (現行 `readValueHDF5` は `vector<geom_float>`=float なので使い回せない)。→ **G4** |
-| **S3** | F | **#12 の判別 A/B** | 下記 |
+| **S1a** | O | **最小配線 (case/56 用)** | block/scalar 両 commit に FP64 分岐 + `Q=(float)Qacc`、**reconcile を `updateVariablesOuter_d` に融合** (同カーネルは `nCells_all` ループなので `ic<nCells` ガードが要る)、`qaccInitFromQ` の**呼出を追加** (現状 `variables.cpp` に実装だけあって `main.cpp` から呼ばれていない。置き場は init の `updateVariablesOuter` = `main.cpp:1252` の**後**。`:1221` の周期ミラー・初期ピンより前に初期化すると初期射影が失われる)、採用セル数カウンタ。<br>**拒否リスト**: `tI==11 && unsteady==0 && !(node && isAxisymmetric) && sstEnergyIncludesK==0 && nPeriodicMembers==0`。<br>**合格**: G1 = OFF が現 HEAD と `res_*.h5` 一致 (200 step) / ON 1 step と OFF 1 step がビット一致 / **採用カウンタ = 等温壁ノード数** (両数をログ) |
+| **S3** | F | **#12 の判別 A/B — S1a の直後に回す** | `run_0022_qacc_f32`。下記 §5.2 の事前登録条件。**この結果が S1b の優先を決める** |
+| **S1b-①** | O | 軸の**基準射影**を `Qacc` に | `enforceAxisSymmetry_d` に `Qacc` 5 本を渡し、axis セルで `if(Qacc_ro>0) Qacc_roe -= 0.5·Qacc_roUy²/Qacc_ro; Qacc_roUy = 0; roeN=(float)Qacc_roe; roUyN=0;` (読んでから零化、既存と同順)。`Q` 側の FP32 射影は「残差評価用の暫定書換え」として現状維持。<br>⚠ `applyBlockImplicitCorrection_d:253` にも axis 分岐があるが、**wrapper が `nullptr` を渡すので現状 inert** (`update_d.cu:283`、発散したため暫定無効)。有効化するなら同時に `Qacc_roUy=0` が要る。<br>**合格**: codex の反例 (ρ=1, ρu_r=0.125, ρe=2, dq=0 → `Q` と `Qacc` の**両方**で ρu_r=0, ρe=1.9921875。現 G0 の「commit 後ピン」順序では 0.125 が残る) を単体試験に追加して PASS; G3 `case/44` で採用カウンタ 0 |
+| **S1b-②** | O | SST-K を段別に | 陰解法 (`fromN=0`) は増分を 1 回 `Qacc_roe -= (double)Δ`、陽解法 (`fromN=1`, 毎段 `roK−roKN`) は**最終段のみ** `Qacc`。**ON 経路では補正後に必ず `roe=(flow_float)Qacc_roe` を生成**する (FP32 側を独立に更新すると丸めが食い違い reconcile が蓄積を消す)。<br>**合格**: RK 反例 (roKN=8、各段 9/10/11/12 → 正しい補正 −4、全段累積の −10 でないこと) の単体試験 |
+| **S1b-③** | O | 周期を **FP64 で同期** | `periodicMirrorQacc` を FP32 ミラー (`main.cpp:1221`, `:1753`) と**一組**にする。reconcile カーネルに `Qacc[ic] != Qacc[root[ic]]` の不一致カウンタ (期待 0) を入れる。<br>⚠ 陰解法は状態ミラーを持たず `periodicMirrorDq_d_wrapper` (`main.cpp:1558`) で **dq を** root→member にミラーする別経路。構造的には一致を保つはずだが**未検証なので S1a では周期を拒否**し、ここで実測する。<br>**合格**: 陰解法・陽解法とも不一致 0; G3 `case/09` |
+| **S1b-④** | O | 陽解法 (段別に書くこと) | `tI=1` (前進 Euler) と `tI=4` の**最終段のみ**を `Qacc` commit、中間段は FP32 のまま。`unsteady=1` を許可 (陽解法に BDF 履歴は無い)。**`tI=3`・dual-time・陽解法×node 軸対称は拒否のまま** (最後のものは `main.cpp:1764` で enforce が無効化済み = 現状でも動かない経路)。<br>⚠ 陽解法 unsteady では物理 dt で $\lvert dq\rvert \gg$ ULP なので効果は小さい。**G3 `case/09` は互換性ゲート (ON≈OFF) であって効果ゲートではない**と明記する。<br>**合格**: `case/09 run_0046` 設定で ON/OFF 場距離 ≤ OFF の run-to-run ノイズ床 (**両側測定**)、採用カウンタ 0 |
+| **S1b-⑤** | O | FP64 checkpoint を **dual-time と独立に** | `/QACC` を新設する (既存 `/CHECKPOINT` は `output/output.cpp:168`・`main.cpp:989` とも `unsteady==1 && dualTime==1` 限定で、**v1 が拒否する経路**なので追記では機能しない)。復元は `main.cpp:1252` の後。**読込は `vector<double>`** (`readValueHDF5` は `vector<geom_float>`=float なので使い回せない)。<br>**合格**: G4 = (a) 復元直後に 5 本がビット一致 (b) ON の連続/再開の距離 ≤ OFF の連続/再開の距離 (limiter 基準値 `main.cpp:1286` の自動算出の影響は OFF 対照で吸収) |
 | **S4** | O | G3 (`case/36`・`48`・`44`・`09`) と G5 | 量ごとの許容値を事前登録。scalar/block 両 commit |
 | 9 | F | codex result 段レビュー | `done` にする前 |
-| 10 | O | 横展開の別計画起票 | 化学種 `roY_s` / 乱流 `roK`,`roOmega` / 凝縮モーメント。dual-time は `QaccN/QaccNN` の shift |
-| 14 | O | 調査 1 件 | 起動時拒否に `speciesImplicitCoupling==2` を入れるか (`speciesEOSFinalCommit` が `ro` も書くか)。v1 は CPG 単成分なので急がない |
+| 10 | O | 横展開の別計画起票 | 化学種 `roY_s` / 乱流 `roK`,`roOmega` / 凝縮モーメント。**`tI=3` と dual-time は同じ機構** (履歴配列と並べて FP64 影を 1 段 shift。§4.4 の表) |
+| 15 | O | **プラトーの所在特定** (本計画のゲートではない) | 全保存量の残差プラトーは FP32/FP64 で 4〜5 桁一致 = 丸めと無関係 (§3)。所在は別途。`res_ro` を `extraFields` に登録して `run_0014` 最終場から 1000 step (`run_0016` では未登録と判明済み) |
+| 14 | O | ~~`speciesImplicitCoupling==2` を拒否に入れるか~~ **済: 拒否しない** | `species_eos_final_commit_d` (`speciesTransport_d.cu:508`) は `ro`/`roN` を**読むだけ**で書くのは `roY` (codex plan-2 + 自分で確認)。なお `speciesEnergyCorrection_d_wrapper` (同 :312 の `roe += droe`) は**呼出元が無い** — 棚卸し表では「現行の動的 writer」と「未呼出コード」を分けて記録する |
 
 ### 5.1a 残差側の桁落ち — 第 2 仮説の確度を上げる材料 (2026-09-23 実測)
 
@@ -286,7 +336,8 @@ A/B の合格条件は上記 (1 桁) で登録し、G2 は 300k 以上で判定�
 | ゲート | 内容 | 合格条件 (**事前登録**) |
 | --- | --- | --- |
 | **G1** | 後方互換 | `qAccumulatorFP64: 0` で既存 run の `res_*.h5` が**数値配列として一致**。<br>**「ビット不変」とは書かない** — 成立するのは*同じ FP32 入力に対する同じ演算*までで、蓄積で状態が変われば流束もリミッタも変わる (M6) |
-| **G2** | 主検証 (`case/56.gap_tp1187`) | **減衰区間と末尾区間を分けて**判定する。**300k step 以上で判定** (e 折り 3.23e4 なら 3 桁に $\ge$2.3e5 step 要る。100k の A/B とは別物)。<br>① **減衰区間**: $\lvert\dot m\rvert$ が幾何級数で 3 桁以上落ちる<br>② **末尾区間**: 床の値と変動幅を報告し、`check_quasisteady` で `STEADY` または `OSCILLATING` (平均±振幅で報告)<br>③ **全保存量の `check_convergence` VERDICT** と**対象量の `check_quasisteady` VERDICT** を併記<br>④ SU2 比較も**両者の判定つき**で行う |
+| **G2-L** | **主検証・本計画の合否** (`case/56` の**深部局所量**) | **減衰区間と末尾区間を分けて**判定する。**300k step 以上で判定** (e 折り 3.23e4 なら 3 桁に $\ge$2.3e5 step 要る。100k の A/B とは別物)。<br>① **減衰区間**: $\lvert\dot m\rvert$ の e 折りが 3.23e4 step の **×2 以内** (100k で $\ge$10 倍、300k で $\ge$3 e 折り)<br>② `zW844` / `zW1411` / `U_rms_deep` が `check_quasisteady` で **`STEADY` または `OSCILLATING`** (`run_0014` は `DRIFTING`/`TRANSIENT`)。`OSCILLATING` は平均±振幅で報告<br>③ 深部 $q_w$ は「**到達最小レベル ± 振れ幅**」で報告する (単一の最小値を床と呼ばない → §6.2)<br>④ SU2 比較も**両者の判定つき**で行う |
+| **G2-G** | **対象外・期待は「不変」** (全保存量の残差) | **本計画の合否に使わない。** §3 のとおりプラトーは FP32/FP64 で 4〜5 桁一致 = 丸めと無関係。<br>期待: `check_convergence` は `NOT CONVERGED (plateau)` のまま、**末尾平均が §3 の表の ±20 % 以内かつ min/max $\ge$ 0.8** (有界振動が保たれている)。<br>**×2 以上動いたら「発見」として別項目 (#15) に切る** — 合否ではなく観測として扱う |
 | **G3** | 標準検証ケース | **`case/08.bump` は使わない** (`procedures/verification/README.md:23` が「まだ回帰の基準には使えない」と明記)。代わりに **node の SST = `case/36`・`case/48`**、**軸対称 TP・凝縮 = `case/44`**、**共有の周期経路 = `case/09`**。量ごとの許容値を**事前に**登録する。**scalar / block の両 commit** を試験対象にする |
 | **G4** | restart 一貫性 | **連続実行と中断再開が一致**すること (FP64 checkpoint が無いと下位ビットを失う → §4.3 #2) |
 | **G5** | 速度 | 1 step のコスト増が **+3 % 以内を実測**。<br>⚠ 初稿の「+0.1 %」は FLOP モデルで**誤り** (codex M7)。65k CV で 1.63 ms/step = **25 ns/CV は launch+sync 律速**で、別カーネルを足すと +1〜3 %。→ **commit と `updateVariablesOuter` に融合し新規 launch を増やさない**ことを設計要件にする |
@@ -313,7 +364,7 @@ AGENTS が戒める「過渡を定常値として報告」に該当する。
 | 区間 | 内容 |
 | --- | --- |
 | 減衰区間 (先頭 16 点) | $\lvert\dot m\rvert\propto\exp(-3.10\times10^{-5}\,\mathrm{step})$、e 折り **3.23e4 step**、**4.59e4 倍**落ちた |
-| 床 (末尾 2 点) | **1.234e-11 ± 2.5e-12** (振れ幅 1.50 倍)。**最小値 4.56e-12 を床と呼ばない** |
+| 床 (末尾 2 点) | **1.234e-11 ± 2.5e-12** (振れ幅 1.50 倍)。**最小値 4.56e-12 を床と呼ばない**。**床は平坦でもない** (4.6e-12〜1.5e-11 を行き来する) ので、値は「到達最小レベルと振れ幅」で書く |
 | float32 (`run_0014`) | **膝が検出されない** = 床に届いていない。べき乗則のまま、e 折り 4.98e6 step |
 
 
@@ -326,16 +377,17 @@ AGENTS が戒める「過渡を定常値として報告」に該当する。
 | stage | 日付 | 記録 | 判定 | 指摘 | 対応 |
 | --- | --- | --- | --- | --- | --- |
 | 診断 | `2026-09-23` | (セッション内 `diagnostician`、結論は §4.3・§5.2) | 案 A/B とも却下 → **第 3 案 (影アキュムレータ)** | **全件採用・実測で確認**。**#13 の結論を訂正**: 定常経路では `dependentVariables` の書き戻しは commit に上書きされ状態に残らない (`main.cpp` の順序 1641→1391→1671 を自分で確認)。$f_{32}(a+b)=f_{32}(f_{64}(a)+f_{64}(b))$ を 20 万サンプルで検査し **100.0000 % 一致** → 残余ゼロなら ON は OFF とビット同一。**G5 の「+0.1 %」は FLOP モデルで誤り** (25 ns/CV は launch 律速) → 「+3 % 以内を実測」+ 融合要件に訂正。メモリも 40 B/CV で **+400 MB** に訂正。対応範囲の拒否リスト (`sstEnergyIncludesK=1` は全域で累積が消えるので拒否) を §4.4 に |
+| plan | `2026-09-23` | [2026-09-23-time_integration-fp64-accumulator-plan-2.md](../../notes/reviews/2026-09-23-time_integration-fp64-accumulator-plan-2.md) | **GO-with-changes**, C0/M5/m1 | **全件採用** (5 Major とも自分でソース確認し、いずれも codex が正しかった)。`diagnostician` に採否を諮り同意 (2026-09-23)。<br>**M1 軸 → 採用・§4.4 の私の読みが誤り**: `axisymmetricSource_d.cu:312-323` は `Q` 側と**同時に commit の基準 `roeN`/`roUyN` も射影**し、呼出 (`main.cpp:1379`) は `assembleResidual` 内 = commit (`:1671`) **より前**。`Q` 側の射影は commit `Q=Q_N+dq` で上書きされて消えるので、reconcile (`:1805`) では拾えない。→ **S1b-①** (基準射影を `Qacc` に当てる)。<br>**M2 SST → 採用**: 陰解法 (`fromN=0`) は増分で私の読みどおりだが、陽解法 (`main.cpp:1756`, `fromN=1`) は**毎段 `roK−roKN`** なので毎段引くと重複 (反例: roKN=8, 9/10/11/12 → 正 −4 / 累積 −10)。→ **S1b-②** (段別 + 補正後に `roe=(float)Qacc_roe`)。<br>**M3 周期 → 採用・`=`/`+=` の分類規則が不十分**: `periodicNode_d.cu:119` は同一自由度の**転送**で、FP32 値だけ配ると root の下位ビットが member の `Qacc` に伝わらず、値が一致すると reconcile も不発。→ **S1b-③** (FP64 同期 + 不一致カウンタ)。<br>**M4 範囲 → 採用**: 陽解法に BDF 履歴は無い (`main.cpp:1733`) ので「unsteady は履歴が要るから拒否」は dual-time にしか当たらない。G3 `case/09 run_0046` が自分の拒否条件で回せない状態だった。→ **S1b-④**。<br>**M5 checkpoint → 採用**: `/CHECKPOINT` は `unsteady==1 && dualTime==1` 限定 (`output.cpp:168`, `main.cpp:989`) で v1 が拒否する経路。追記では機能しない。→ **S1b-⑤** (`/QACC` を独立に)。<br>**副次指摘も採用**: `speciesImplicitCoupling==2` は拒否根拠なし (#14 を「拒否しない」で閉じる)、`speciesEnergyCorrection_d_wrapper` は未呼出。<br>**m1 → 採用** (§3 の「SU2 の床を下回る」、§7 の `Q` 型変更・既定 ON を除去)。<br>**§3 の前提を絞った**: 全保存量のプラトーは FP32/FP64 で 4〜5 桁一致 (別 step 区間で cv・min/max まで一致) = **丸めと無関係**。本計画は深部局所停滞だけを扱う。→ **G2 を G2-L (合否) / G2-G (対象外・不変を期待)** に分離。<br>**順序は「案 A の範囲・案 B の順序」**: case/56 の実効設定 (`tI 11 / unsteady 0 / node / 軸対称なし / 周期なし / sstEnergyIncludesK なし`) は 5 経路のどれも踏まないので、**S1a → S3 の A/B → (結果をゲートに) S1b-①〜⑤** とする |
 | plan | `2026-09-23` | [2026-09-23-time_integration-fp64-accumulator-plan.md](../../notes/reviews/2026-09-23-time_integration-fp64-accumulator-plan.md) | **NO-GO**, C0/M7/m1 | **全件採用・実測で確認**。**M1→§4.3 全面改訂**: commit は `Q = Q_N + dq` で `Q_N` は step 末尾に float32 コピー (`update_d.cu:39`)。`Q` だけ倍精度にしても **100 step の累積が 0** (自分で再現)。書き込み側 5 箇所の棚卸しを #13 に。**M2→§3・§4.1 の断定を撤回** (`run_0020` は `geom_float` も変えており「commit 丸めが唯一の律速」は未証明。3 本比較を #12 に)。**M3→§6 全面改訂・G2 参照値を撤回**: 1.9M の 4.56e-12 は谷で、**2.0M では 1.48e-11 に戻る** (自分で再現)。「SU2 の床を下回った」は過渡を定常値と報告したもので撤回。減衰区間と末尾区間の分離を #11 に。**M4→§4.4a 新設** (型切替・FP64 checkpoint・restart 一貫性ゲート G4)。**M5→既定を 1 から 0 へ**、非対応経路は起動時に拒否。**M6→G3 から `case/08.bump` を外し** `case/36`・`48`・`44`・`09` へ、「ビット不変」の主張も成立条件つきに訂正 |
 
 ## 7. 影響範囲
 
 - `solver_density_cuda/input/solverConfig.{cpp,hpp}` — キー追加
-- `solver_density_cuda/variables.{cpp,hpp}` — `Q` 5 本の型
+- `solver_density_cuda/variables.{cpp,hpp}` — `Qacc` 5 本の確保・初期化・解放 (**`Q` の型は変えない**)
 - `solver_density_cuda/cuda_forge/update_d.cu` — commit カーネル 2 本と `updateGuardScale`
-- `Q` を読む全カーネル — float32 へ落とす変換を挟む (§5.1 #2 で洗い出す)
-- **既存 run の再現性**: 既定 ON なので、既定のまま回すと過去 run と**ビット一致しない**。
-  再現には `qAccumulatorFP64: 0` を明記する。`RUN_PROVENANCE.txt` と合わせて追えるようにする。
+- ~~`Q` を読む全カーネル — float32 へ落とす変換を挟む~~ **不要** (§4.3 の影アキュムレータでは `Q` は FP32 のまま)
+- **既存 run の再現性**: **既定は 0** なので既定のまま回せば従来とビット一致する (codex plan M5)。
+  ON にした run は `RUN_PROVENANCE.txt` からたどれるようにする。
 
 ## 8. 完了条件
 
