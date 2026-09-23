@@ -233,8 +233,8 @@ $$\nabla_{\!s}\!\cdot\!\left(k_s t\,\nabla_{\!s} T_w\right) \;+\; q_{\rm gas} \;
 | mode | 内容 | 用途 |
 | --- | --- | --- |
 | `local1d` | 点ごとの 1D 抵抗 ($k_s t\to0$) | 面内伝導の寄与を測る基準、薄肉の第一近似 |
-| `shell2d` | §4.4a の面内 2D シェル | すきまライナ、冷却ノズル壁 (Phase 2 の生産経路) |
-| `fem2d` | **一般 2D 固体領域**の伝導 (三角形 FEM、内部孔は Robin 境界) | **公知データ検証 (§4.9 のタービン翼) に必須**。Phase 1 (外部) のみ |
+| `shell2d` | §4.4a の面内 2D シェル | すきまライナ、冷却ノズル壁。**Phase 1 (外部) のみ** (2026-09-23 決定: ソルバ内は `fem2d` に壁を厚さ $t$ で押し出した帯メッシュを食わせる = バックエンド 1 本) |
+| `fem2d` | **一般 2D 固体領域**の伝導 (三角形 FEM、内部孔は Robin 境界) | **公知データ検証 (§4.9 のタービン翼) に必須**。**Phase 1 (外部) + Phase 2 (ソルバ内)** — 2026-09-23 ユーザ決定で Phase 2 に拡大 (§4.6a) |
 
 #### 4.4d `fem2d` の連成契約 (codex 2 巡目 #3 採用)
 
@@ -283,6 +283,42 @@ $$\left(K_s + E^{\mathsf T} D_f E\right)u^{k+1} \;=\; b_s + E^{\mathsf T}\!\left
   **連成の有効/無効・$K$・$D_f$ 方式・`solid.json` と `wallProfile` の内容ハッシュ**を含める (codex M10)。
 - **実装保証は node のみ**。cell で `conjugate: 1` を指定したら起動時に拒否する。
 
+#### 4.6a Phase 2 を `fem2d` に広げる (2026-09-23 ユーザ決定、`diagnostician` に設計を諮った)
+
+**決定**: 翼 (§4.9) をソルバ内連成で回す。動機は §5.1 #63/#64 の実測 — 外部ループは 1 反復の 88 % が
+forge の時間進行で、C3X 12.4 万 step / Mark II 45.6 万 step かかる。序盤短縮 (#64) は総 step −9 % にとどまり、
+「連成の時間を減らすにはソルバ内連成を `fem2d` に広げるしかない」が両行の結論だった。
+
+- **Schur 補元は C++ に移植しない**。Schur は外部ループが `ShellOperator` と同じ顔 (メリット関数・Anderson) を
+  要求したための装置であり、ソルバ内には要件が無い。**毎更新、固体全節点系を 1 回直接解く**:
+  $$\bigl(K_s(u^k) + E^{\mathsf T}D_fE\bigr)u^{k+1} = b_s + E^{\mathsf T}\bigl[Q_f + D_f\,Eu^k\bigr]$$
+  未知数は全節点温度 $u$ そのもの。内部温度は**状態**なので「復元」が要らず、§5.1 #33 の $k_s(T)$ 自己整合問題は
+  構造的に消える。$k_s(T)$ は 1 更新 = 1 Picard 段 ($u^k$ で評価) として外側の固定点反復に畳み込む。
+- **線形代数は自前のバンド Cholesky** (新しい依存を足さない)。`CMakeLists.txt`:97-98 のリンクは HDF5・yaml-cpp・CUDA のみで
+  **LAPACK も Eigen もリンクされていない**。固体は C3X で $N$=7438・RCM 後バンド幅 82、Mark II で 6028・69 なので
+  $Nb^2\approx5\times10^7$ flop。RCM 並べ替えは変換時 (npz → HDF5) に Python 側で済ませる。
+  正定でない (全断熱 = 零空間あり) 入力は起動時に拒否する。
+- **再分解の条件 (数値で決める)**: $\max_i|u_i^k-u_i^{\rm fact}| > 1$ K で再分解、それ以外は分解を再利用して
+  右辺だけ更新する。根拠: ASTM310 の $k_s$ 勾配は $(23.7-12.1)/700 = 0.11$ %/K なので 1 K の凍結は作用素の
+  0.1 % 以下の摂動。**最終出力前の更新は必ず再分解**し、G-if の固体内部残差は現在の $k_s(u)$ で組んだ $K_s$ で測る。
+- **$D_f$ は界面対角のみ** $D_{f,ii}=g_f A_i$ ($g_f=k_{\rm eff}/d_1$、$A_i$ = **固体側の集中辺長**)。`local1d` と同じ。
+  非対角性は左辺の $K_s$ が厳密に持つので $D_f$ に入れない。流体応答の非対角 (壁列の接線伝導) は
+  $(d_1/\Delta s)^2\sim10^{-6}$ で無視できる。
+- **メリット関数・line search・Anderson はソルバ内に持ち込まない**。ソルバ内の $Q_f(T)$ は step ごとに動く写像で、
+  更新間の $\Phi$ 比較は同じ関数の比較にならない。外部ループを凍らせた機構 (#62/#63) はまさに評価器の遅れと
+  受理規則の相性だった。素の固定点で足りることは `case/48.flat_plate_cooled_m4/run_0027_cht_qeff` が示している
+  (`res_rel` 0.91 → 1.2e-4、`dTw_max` 78 → 1.2e-3 K、受理判定なし)。
+- **安全装置は自動調整でなく停止**: 非有限 / $T_w\notin[\min T_c-20,\ \max T_{t,\rm gas}+20]$ K /
+  `dTw_max` が 10 更新連続で増加かつ 2 倍以上 → 停止して報告する。手動再投入用に `conjugate.Df_scale` (既定 1) だけ置く
+  ($D_f$ は増やす方向にだけ動かす。§4.2)。
+- **$Q_f$ は固体側の集中辺長 × `iface_q_eff` で作る** (`cht_loop.py` の `q * op.area` と同じ規約)。
+  **`msh.planes[ip].surfArea` を使わない**: C3X の流体メッシュは真の平面 2D ($z\equiv0$) なので辺長と一致するが、
+  **押し出し疑似 2D では surfArea に奥行きが乗る**。初版は $z\equiv0$ の平面 2D 以外を**起動時に拒否**する。
+- **再開**: 固体状態 ($u$、$D_f$、step) を `conjugate_state.h5` に保存する。`stage_manifest.py` の区間キーに
+  連成の有効/無効・`mode`・$K$・`flux`・`Df_scale`・固体 h5 の sha1 を含める (現状は `bcond_sha1` だけで `conjugate:` を見ていない)。
+- **config** (未知キーは拒否する。§5.1 #52):
+  `conjugate: {mode: fem2d, solid: <h5>, holes: [{h, T_c}...], interval, warmup, flux, Df_scale, refactorDT, gate: {...}}`
+
 ### 4.7 (欠番 — 旧 §4.7 は §4.8 に統合)
 
 ### 4.8 Phase 3 (固体ゾーン) に進む条件
@@ -291,7 +327,7 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 
 1. `local1d` と `shell2d` の差が目的量の許容を超え、かつ厚さ方向 1D 近似が破れる ($\mathrm{Bi}_t=ht/k_s>0.1$)。
 2. 角部・リップで固体内 2D/3D 熱橋が支配的で、シェル近似誤差が V6 の格子・モデル感度より大きい。
-3. 厚肉で背面条件を 1 点に縮約できない (§4.9 のタービン翼はここに該当するので、**Phase 1 の `fem2d` で扱う**)。
+3. 厚肉で背面条件を 1 点に縮約できない (§4.9 のタービン翼はここに該当するので、**Phase 2 のソルバ内 `fem2d` で扱う** — 2026-09-23 ユーザ決定。旧稿は「Phase 1 の `fem2d`」だった)。
 
 ### 4.9 一次適用先 — 公知試験データ (ユーザ指示 2026-09-19)
 
@@ -405,7 +441,7 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | 12 | V2 (M8) | §6。SU2 CHT は multizone。**まず 1D スラブで成立**させ、版・固体メッシュ・界面対応・物性・両ゾーン残差を固定。`procedures/su2-cross-check.md` に手順追加 |
 | 13 | 界面ゲート (M10) | §6。既存ツールの拡張: 未緩和の局所界面不釣合い・固体方程式残差・**絶対**温度更新量・温度量子化の解像性。区間識別に外部入力のハッシュ |
 | 14 | ~~外部ループ~~ **完了 (2026-09-19)**: `tools/cht_loop.py` + `case/52.conjugate_slab` (V1 PASS)。~~残り: `--flux q_eff` (拘束反力込み) を依存診断の完成後に接続~~ **完了 (2026-09-21)**: `cht_loop.py` の `--flux` 既定を `q_eff` に変更 (§4.3 の正本と一致させた。**run_0004/0105/0013 はいずれも `q_compact` で回っており、plan と食い違っていた**)。再連成は `case/53.c3x_vane_cht/run_0110_cht_qeff/` と `case/54.markii_vane_cht/run_0017_cht_qeff/` | — |
-| 15 | ソルバ内連成 | §4.6。~~`local1d`~~ **Phase 2a 完了 (2026-09-19)**。~~第 1 項: `shell2d` の C++ 化~~ → **#66 の A/B (FAIL) により「更新式の `q_eff` 化」に差し替え、2026-09-22 完了**: `conjugate: {flux: q_eff}` を既定にし、§4.2 の固定点保存形 $(g_s+D_f)T^{k+1}=g_sT_b+q_{\rm eff}+D_fT^k$ ($D_f=g_f$) で更新する (`conjugateWall.cpp`、仕様は [`methods/boundary.md`](../../methods/boundary.md))。`flux: q_compact` で旧式を再現でき、**回帰はノイズ床以内** (同一設定の反復 5.9e-4 に対し旧実装との差 4.4e-4、`run_0028_cht_qcompact_regress` / `run_0029_cht_qcompact_rep`)。**G-if の出力も完了**: 更新ごとに `conjugate_history.csv` (`res_abs_Wm2`/`res_max_W`/`res_rel`/`dTw_max`/`q_total`)。**残り**: `stage_manifest` 区間 (連成の有効/無効・$K$・$D_f$ 方式・固体設定のハッシュ)、判定ツール側での G-if の自動判定 (許容と連続回数の事前登録)、`shell2d` の C++ 化 (#66 の範囲決定待ち)、dual-time 契約 |
+| 15 | ソルバ内連成 | §4.6。~~`local1d`~~ **Phase 2a 完了 (2026-09-19)**。~~第 1 項: `shell2d` の C++ 化~~ → **#66 の A/B (FAIL) により「更新式の `q_eff` 化」に差し替え、2026-09-22 完了**: `conjugate: {flux: q_eff}` を既定にし、§4.2 の固定点保存形 $(g_s+D_f)T^{k+1}=g_sT_b+q_{\rm eff}+D_fT^k$ ($D_f=g_f$) で更新する (`conjugateWall.cpp`、仕様は [`methods/boundary.md`](../../methods/boundary.md))。`flux: q_compact` で旧式を再現でき、**回帰はノイズ床以内** (同一設定の反復 5.9e-4 に対し旧実装との差 4.4e-4、`run_0028_cht_qcompact_regress` / `run_0029_cht_qcompact_rep`)。**G-if の出力も完了**: 更新ごとに `conjugate_history.csv` (`res_abs_Wm2`/`res_max_W`/`res_rel`/`dTw_max`/`q_total`)。**残り**: 下の #67 (ソルバ内 `fem2d`) に引き継ぐ。~~`shell2d` の C++ 化~~ は**不採用** (2026-09-23: ソルバ内 shell の消費者が無く、将来要れば壁を厚さ $t$ で押し出した帯メッシュを `fem2d` に食わせる。§4.4c)。dual-time 契約は初版対象外のまま |
 | 16 | **一次適用先 (公知データ)** | §4.9。**着手 (2026-09-20)**: CR-168015 入手 (`papers/cht/`, 追跡外) → **翼型座標と試験条件を抽出・検証済み** (`case/53.c3x_vane_cht/tools/extract_vane_data.py`: cm/in の 2.54 則で全点検証、OCR が壊した 11 点は画像目視で補修、欠測があれば落ちる)。C3X 78 点 / Mark II 60 点、run 108 (M2 0.90) と run 42 (M2 1.04)。**報告自身の不整合 2 件を記録** (表 VIII/IX の SI 圧力列が psia と 51.7 倍ずれ / C3X 点 29 の inch 誤植)。**残り**: $k_s(T)$・冷却孔配置・孔ごとの HTC と冷却剤温度・測定壁温分布・カスケード幾何 (表 IV) → メッシュ |
 | 17 | Phase 3 判定 | §4.8 の 3 条件を V6 の数値で評価し、要否を結論づける |
 | 18 | docs 同期 | S0 / S7 |
@@ -423,7 +459,7 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | 30b | **G-cons (収支ゲート)** | **完了 (2026-09-20)**: `tools/check_cht_balance.py`。同一状態で $\varepsilon=\lvert\sum Q_f-Q_{\rm solid}\rvert$ を **$\max(\sum\lvert Q_f\rvert, Q_{\rm floor})$ で規格化** (正味量で割らない)、`--q-floor` は**ケースごとに事前登録**。`iface_q_eff` が `NaN` の節点が 1 つでもあれば不合格。実測: `run_0022_cht_qeff` (1 反復 4000 step) は **FAIL 2.77 %** で G-if の `res_rel` 3.5 % と整合。16000 step では **PASS 0.0272 %**。**同一状態で定義だけ変えると `q_compact` 2.66 % / `q_recon` 2.66 % が FAIL、`q_2nd` 0.29 % / `q_eff` 0.027 % が PASS** = C1 の実証。V1 (`local1d`, ソルバ内連成) は **0.000125 %** で PASS。`local1d` 対応済み (`--solid-mode local1d`) |
 | 31 | **M2 受理・退避の状態一貫性** | 棄却時に $T$・$Q_f$・固体状態を**同じ評価点の組**で保存/復元する。$D_f$ を変えたら基準メリットを再計算し履歴を捨てる。初期壁温は**実際に課した分布**から取る (実 run では課 512–612 K / 仮定 566 K 一様だった)。line search と再試行上限も未実装 |
 | 32 | **M3 $D_f$ の安定条件** | `hA` は初期推定に留め、「安全率 2 で十分」の主張は撤回。安定性は #31 の受理処理で担保する。試験は低周波だけでなく**交番温度摂動**と CFD 緩和長依存 |
-| 33 | **M4 `fem2d` の局所 $k_s(T)$** | `FixedPointDriver.advance()` が `recover_interior()` を呼ばず、全域が $k_s(\overline{T_w})$ になっている。各評価温度で内部温度と物性を自己整合させ、内部残差も判定する。温度依存円環で `driver` と全系求解を照合 (codex 実測 494.82 vs 492.75 K) |
+| 33 | **M4 `fem2d` の局所 $k_s(T)$** | ~~`FixedPointDriver.advance()` が `recover_interior()` を呼ばず、全域が $k_s(\overline{T_w})$ になっている~~ **修正済み (2026-09-20, codex result M4)**: [`solid_shell.py`](../../solver_density_cuda/tools/solid_shell.py):443-452 の `_assemble()` が `recover_interior()` を呼んでから組み直す。**ソルバ内 `fem2d` (§4.6a) では全節点系を解くので問題自体が消える** (内部温度が状態になり「復元」が要らない)。以下は旧記述: 各評価温度で内部温度と物性を自己整合させ、内部残差も判定する。温度依存円環で `driver` と全系求解を照合 (codex 実測 494.82 vs 492.75 K) |
 | 34 | **M5 収束ゲート (G-if) の実装** | **完了 (2026-09-20)**: 規格化を $\max\lvert Q_f\rvert$ のみに直し (反例は `test_solid_shell.py` **T7**: 旧 `res_rel` 3.33e-6 に対し物理的不釣合い 100 %)、**絶対残差 `res_abs` [W]・相対残差 `res_rel`・固体内部残差 `res_solid`・温度更新 `dTw`・退避していないこと**を独立に満たし `--n-consec` 回連続したときだけ収束とする。許容は `cht_loop --tol-abs-W / --tol-rel / --tol-solid / --tol-K` で**事前登録**。`res_solid` は `Fem2DOperator.interior_residual`。`cht_history.csv` に 3 列追加。仕様は [`methods/boundary.md`](../../methods/boundary.md) |
 | 35 | **M6 V5 の格下げと独立検証** | V5 は「**同定条件下での整合性評価**」。$h_c$ は公開されていない (公開は $T_c$ と流量のみ) ので、孔位置の再構成と相関の選択が $h_c$ に入る。**「連成は正しい」「差の主因は遷移モデル」を結論として書かない** (遷移は有力仮説)。切り分けは #28 SU2 対照 + #29 遷移感度 + 格子感度 |
 | 36 | **M7 局所量の準定常判定** | 報告する**局所量**にも事前登録した許容を当てる。積分 `q_total` の `STEADY` を局所分布の保証に使わない |
@@ -457,6 +493,7 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | 64 | **連成ループの序盤の流体 step 数を減らす** (2026-09-22、ユーザ了承) | #63 の実測で 1 反復の 88 % が forge の時間進行 (4000 step) で、C3X は 67 反復 = 27 万 step。序盤は壁温が 1 反復で 1–25 K 動くので、その壁温に対して流れを緩和させきる意味が薄い。**方針**: `cht_loop.py --early-steps N --early-iters K` — 最初の K 反復だけ、反復ディレクトリの `solverConfig.yaml` の `nStepOuter` を N に、`outStepInterval` を `N // (2*flux_avg)` に書き換える (後半に `--flux-avg` 枚のダンプが入るように)。K 反復目以降はテンプレートのまま。**収束判定は序盤の反復では出さない** (窓に短い反復が混ざっている間は `converged` を立てない)。既定は無効 (従来どおり)。**検証**: C3X を `--early-steps 1000 --early-iters 25` で回し、`run_0142_cht_guard` の 593.88 K に 0.2 K 以内で着くこと、総 step 数と実時間の削減を記録する。**結果 (2026-09-22): 効果は小さい**。`case/53.c3x_vane_cht/run_0143_cht_early` は反復 79 で 593.877 K (= `run_0142` と一致) に着くが、傾き 0.0046 K/反復で収束判定に届かず 80 反復で打ち切り。総 step 数は 24.5 万で `run_0142` (26.8 万) の **−9 %** にとどまる — 序盤を短くすると流れの応答の遅れが増え、後半の反復数が増えて相殺される。オプションは残すが既定にしない。**連成の時間を本当に減らすには反復間の出し入れを無くす = ソルバ内連成を `fem2d` に広げる (§4.6) しかない**、が現時点の結論 |
 | 65 | **冷却孔の位置が間違っていた — 直すと、報告の公開値だけ (合わせ込みなし) で固体が組める** (2026-09-22、ユーザの質問「孔ごとの熱伝達率は?」から) | 経緯: これまで孔ごとの $h_c$ を実測壁温に最小二乗で当てはめていた (C3X で 279–9017 W/m²K と不自然にばらつく)。理由は 2 つの思い込みだった。**(1)「報告は相関式を書いていない」は見落とし** — 報告 p.22 に $Nu_D=C_r(0.022\,Pr^{0.5}Re_D^{0.8})$ と明記 (`ref_data.h_c_from_coolant` は Dittus–Boelter で代用していた。係数 8 % 違い)。**(2) 孔の位置**を「全孔が翼内に入り最小肉厚が最大になる剛体変換」の最適化で置いていたが、図 6/7 の (U,V) 系は**V 軸 = 圧力面側の共通接線、U 軸 = 前縁の接線**と読める。この定義で置くと翼の V 方向の広がりが C3X 14.540 cm (表 IV の true chord 14.493、+0.3 %)、Mark II 13.482 cm (13.622、−1.0 %) になり、**旧配置は C3X で翼弦方向に 0.74 cm (孔間隔の約半分)、Mark II で 0.23 cm ずれていた**。**確認 (CFD 不要、`infer_internal_bc.py`)**: 実測の $q=h(T_g-T_w)$ を外周に課し、孔は**報告の式と公開の流量・温度そのまま**にしたときの外表面温度の残差が、C3X で **RMS 60.2 → 16.7 K** (bias −10 K)、Mark II で **15.5 K**。孔ごとに同定し直した $h_c$ は C3X で 1654 / 1612 / 1545 / 1594 / 1760 / 1271 / 1769 / 2827 / 1747 W/m²K と、**報告の式の値 (1804–2673) に孔 1–9 で約 1 割以内** (孔 10 は $s/S>0.87$ でデータが無く拘束されない)、同定の残差も 10.0 → **4.5 K** (Mark II 7.7 → 5.6 K)。**決定**: 連成の固体は `solid_published.json` ($h_c$ = 報告の式、$T_c$ = 付録 A、倍率なし、孔位置は定義どおり) を正本にし、**合わせ込んだ `solid_smooth.json` / `solid_tecut.json` は参考に格下げ**。これで連成壁温は冷却側を実測に合わせ込まない**独立な予測**になる。**実機の結果 (2026-09-22)**: C3X `case/53.c3x_vane_cht/run_0144_cht_published` は反復 30 で収束、壁温平均 587.09 K、$T_w$ 偏差 PS +9.7 / 層流域 +21.1 / 遷移後 +6.4 / 全体 **+11.7 K** (RMS 15.6、最大 34.6。合わせ込んだ旧モデルは +18.4 / 23.1 / 52.2)。Mark II `case/54.markii_vane_cht/run_0033_cht_published` は反復 56 で収束、565.09 K、+7.5 / +41.0 / +17.6 / 全体 **+20.0 K** (RMS 28.1。旧 +23.7 / 32.4)。**合わせ込みをやめたほうが実測に近い** = 旧モデルの当てはめは孔位置の誤りを吸収して歪んでいた。報告 V38 に反映 (連成の節を書き直し、孔の配置図を追加)。残: 固体単独の残差 16–17 K rms (bias −7〜−10 K) の内訳 ($k_s$ の出典、孔 10、固体メッシュ) は未調査 |
 | 66 | **Phase 2 の適用範囲を決める前に、ソルバ内連成の界面契約を保存形で測る** (2026-09-22、`diagnostician` に諮った結論: 翼を Phase 2 の合格条件にしない = 案 C。ただし #15 の第 1 項は `shell2d` の C++ 化ではなく更新式の `q_eff` 化かもしれないので、先に測る) | **問題**: ソルバ内連成 ([`conjugateWall.cpp`](../../solver_density_cuda/conjugateWall.cpp):435-437) の更新式は $T_w^{new}=(g_fT_1+g_sT_b)/(g_f+g_s)$ = **`q_compact` 固定点**で、Phase 1 (`cht_loop.py --flux` 既定 `q_eff`) と**別の界面熱量**を使っている ([`methods/boundary.md`](../../methods/boundary.md):330 自身が「未実装: 拘束反力込みの $q_{\rm eff}$」と書いている)。既存の G-cons 実測 (V1 0.000125 %、`run_0019` の両側 $q$ 不一致 2.1e-4) は **`q_compact` 対 $g_s(T_w-T_b)$ の比較**で、更新式が両者を等しくするので恒等的に閉じる = **契約を試していない**。`conjugate:` を持つ既存 8 run のうち `iface_q_eff` を持つのは `case/52` の恒等ケースのみ。**せん断のある壁では $q_{\rm eff}-q_{\rm compact}$ = $O(d_1)$ の粘性加熱 $\tau\cdot u$ (#56: $d_1$ 2 µm で +2.47 %)** なので、case/48 ($d_1$=3.0 µm) で効くはず。**判別 A/B (事前登録, 2026-09-22 — 結果を見る前に書いた)**: `run_0019_cht_insolver_cont` の静定場と壁温から **現 HEAD のバイナリ**で 5000 step 再開した `case/48.flat_plate_cooled_m4/run_0026_cht_qeff_gcons/` の最終壁ダンプに `python3 solver_density_cuda/tools/check_cht_balance.py <run> --solid-mode local1d --phys-id 4 --phys-name wall --flux q_eff --q-floor 300` を当てる ($Q_{\rm floor}$=300 W/m = `run_0019` の $Q_w$ 60.39 kW/m の 0.5 %)。**合格 = $\varepsilon/\max(\sum|Q_f|,Q_{\rm floor})\le0.5$ %** (§6 G-cons と同じ)。**A (PASS)** なら `q_eff` 形の更新は #15 の後段でよく、Phase 2 は `shell2d` の C++ 化から入れる。**B (FAIL)** なら「Phase 2a は契約済み」が消えるので、**§4.2 形の更新 $(g_s+D_f)T^{k+1}=g_sT_b+Q_f/A+D_fT^k$ ($Q_f$ は `ifaceRraw`−`ifaceFw`−$e_w$`ifaceRro`)** を #15 の第 1 項にする。素材はデバイス側で毎 step 採取済み (`interfaceDiag != 0` のとき) なので $K$ step ごとの D2H で足りる。その場合 `conjugate` 有効時は `interfaceDiag: 1` を必須にして拒否する。**結果 (2026-09-22): B (FAIL)**。`case/48.flat_plate_cooled_m4/run_0026_cht_qeff_gcons/res_wall_4_5000.h5` で **`--flux q_eff`: $\varepsilon$=1085.9 W/m、$\varepsilon/\sum|Q_f|$=**1.766 %** → FAIL** (許容 0.5 %)、**`--flux q_compact`: 0.000017 % → PASS** (更新式の固定点なので恒等)、`--flux q_2nd`: 1.547 % → FAIL。節点ごとの差は中央値 +1.56 % / p95 +2.02 %、$x$ 帯別に +1.35 % ($x$=0.5–1.0) → +1.86 % ($x$=0.01–0.1) → **前縁 $x<0.01$ で +26 % (局所最大 +932 %)** で、#56 の $\tau\cdot u$ ($\propto d_1$、本 run は $d_1$=3.0 µm) と整合する。**したがって「Phase 2a は契約済み」は成り立たない**: ソルバ内 `local1d` の固定点は保存形の界面熱量と 熱負荷の 1.8 % ずれており、G-cons を保存形で測ると不合格になる。**決定**: #15 の第 1 項を 「更新式を §4.2 形 ($Q_f$ = `iface_q_eff`·A) にする」に差し替える (`shell2d` の C++ 化はその後)。**壁温への影響は本 run からは出さない** (局所の $g_f$ は $g_s$ の 77 倍で線形化が効かず、$T_1$ 自体が 境界層の応答で動くため)。連成し直した run で測る。**副産物 (本件とは別の欠陥)**: HEAD (`5f1a1f5f`) の native Release ビルド (nvcc 12.0, sm_86) は **既定ブロックサイズ 512 で SLAU の node カーネルが `too many resources requested for launch`** になる (`convectiveFlux_d.cu`:316)。`FORGE_CUDA_BLOCKSIZE=128` で完走。9/20 の `build/forge` は 512 で完走していたので**いつからかは未特定** (bisect していない)。本 run は 128 で回した。**実装後の実測 (2026-09-22)**: `case/48.flat_plate_cooled_m4/run_0027_cht_qeff/` (30000 step、`flux: q_eff`) で **G-cons が反転**した — `--flux q_eff` **0.00284 % PASS** (前 1.766 % FAIL)、`--flux q_compact` 1.616 % FAIL (前 0.000017 % PASS)。界面残差は `conjugate_history.csv` で `res_rel` 0.91 → **1.2e-4**、`dTw_max` 78 → **1.2e-3 K**。壁温は平均 599.96 → **604.17 K** (+4.21)、$x>0.01$ の平均 593.03 → **596.13 K** (+3.10)、最小 551.6 → 553.7、**前縁の最大 987.1 → 1148.5 K (+161)**。`check_quasisteady.py --series-csv wall_series.csv` → **ALL STEADY** (単調増加、漸近値は最終値 +0.003 %)、`check_convergence.py` は `NOT CONVERGED (stalled/plateau)` = case/48 系列の既知の残差床 (README のとおり派生量で判定)。最終場に NaN/Inf なし、$\rho$ 0.0237–0.0874、$P$ 5036–11310 Pa、$T$ 279–1149 K。**前縁の +161 K は額面どおりに受け取らない**: $q_{\rm eff}$ の節点差が $x<0.01$ で +26 % (局所最大 +932 %) と大きいのは淀み点特異と $\tau\cdot u$ ($\propto d_1$) が重なる領域で、この 1 点の壁温を物理値として引用しないこと |
+| 67 | **ソルバ内 `fem2d` (Phase 2 の本体)** (2026-09-23 ユーザ決定 + `diagnostician` の設計。§4.6a) | 担当 `O`。順序どおりに進める。**①** `solidMeshIO` + `npz` → HDF5 変換 (RCM 並べ替え済み、界面節点座標のハッシュ同梱)。**②** `solidFem2d` の組立 + バンド Cholesky + 同値試験 a1–a5 (§6)。**③** `updateConjugateWalls` に `mode: fem2d` 分岐、`conjugate_state.h5` ($u$, $D_f$, step) と再開。**④** `stage_manifest.py` に区間キー (連成の有効/無効・`mode`・$K$・`flux`・`Df_scale`・固体 h5 の sha1)。**⑤** `check_cht_interface.py` を新規に作る (`conjugate_history.csv` を読み、ソルバが起動時に書く `conjugate_gate.json` の登録値で判定して `CHT_INTERFACE_VERDICT.txt` を残す。`check_convergence.py` には混ぜない — 列も意味も違う)。**⑥** V4 を C3X で判定 (§6)。**⑦** Mark II は報告。**置き場所**: `solver_density_cuda/conjugate/` を新設 (`solidModel` / `solidFem2d` / `solidMeshIO` / `interfaceGate`)。**`mesh.cpp` と `cuda_forge/` は触らない** (固体は host のみ・倍精度)。**Python 実装 (`solid_fem2d.py`) は参照オラクルとして残す** (外部ループが使い続け、移植の同値試験の真値になる) |
 | 19 | codex result レビュー | `done` にする前 |
 
 ## 6. 検証
@@ -534,6 +571,7 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | V2 | SU2 CHT | **まず V1 と同じ 1D スラブ**で SU2 multizone (固体ゾーン + `MARKER_CHT_INTERFACE`, `DIRECT_TEMPERATURE_*`) と一致させる。その後 case/48 へ拡張し、**固体格子収束とシェル近似誤差を別に測る** | 1D スラブ: $T_w$ **≤0.2 %**。case/48: $T_w$ ≤2 %・$\int q\,ds$ ≤3 %。**両ゾーンの残差と版・メッシュ・物性を記録** |
 | V3 | 等温との整合 | case/48 で「共役解の $T_w(x)$ を `wallProfile` で与えた等温 run」と共役 run を比較 | $q_w,\delta^*,C_f$ が **≤0.5 %** |
 | V4 | Phase 1 ↔ Phase 2 | 同一問題を外部ループとソルバ内で | $T_w$ **≤0.3 %**、$Q_w$ **≤1 %** |
+| V4b | **Phase 2 の `fem2d`** (2026-09-23 事前登録。§4.6a、`diagnostician` の設計) | **gate は C3X (`case/53`) だけ**。`run_0144_cht_published/it_027` の場と `Tw_final.csv` から開始し、$K$=50・`Df_scale` 1・`relax` 1 で 40k step。**Mark II は報告項目 (soft target)** — `run_0033` の界面残差は `res_abs` 37–96 W に対しノイズ $\sigma$ 0.6–2.3 W で、**局所不釣合いは実在する** (床ではない) ので**局所壁温を gate にしない**。壁温平均は 10 反復で 565.06–565.12 K と安定なので平均だけ比較する | **(a) 移植同値 (Python が真値)**: a1 組立 $K_su$ の相対差 ≤ 1e-12 / a2 `run_0144/it_027` の荷重で全 7438 節点 max\|ΔT\| ≤ **1e-6 K**・孔 Robin 持ち去り総量の相対差 ≤ 1e-9 / a3 円環解析解 rate ≥ 1.6・誤差 < 2 % / a4 内部残差 ≤ 1e-9·max\|Q_f\| (Python の `interior_residual` に通しても ≤ 1e-8) / a5 RCM 並べ替え前後で 1e-12 一致。**(b) V4 (C3X)**: 壁温平均 \|Δ\| ≤ **1.76 K** (0.3 % of 587.09)、**局所 max\|ΔT_w\| ≤ 3 K** (Phase 1 の局所残差 0.9 W ÷ 界面コンダクタンス ≈ 0.02 K、再始動再現性 0.12 K の 25 倍なので FAIL を Phase 1 のノイズに帰せない)、$Q_{\rm total}$ \|Δ\| ≤ 1 % = **435 W/m**。**(c) G-cons** ≤ 0.5 %、$Q_{\rm floor}$=**220 W/m** (両翼とも 44 kW/m の 0.5 %)。**(d) G-if**: $\epsilon_{\rm rel}$=**1e-3** (ノイズ床 1.4e-4 の 7 倍)、$\epsilon_{\rm abs}$=**150 W/m²**、更新あたり max\|ΔT_w\| ≤ **1e-2 K**、**$n_{\rm consec}$=80 更新 (=4000 step)** (Phase 1 で流束の遅れが 1 反復続いた実測に合わせる)。**(e) 準定常**: $T_w$ 平均・最大・$Q_{\rm total}$ が STEADY (`--drift`/`--osc` は比較許容の 1/5 = $T_w$ 0.06 % / $Q$ 0.2 %)。流体残差は本系列が全て `NOT CONVERGED` なので**界面ゲート + 準定常で判定すると明記する**。**(f) 速度 (測定項目、主張しない)**: ① `conjugate` on/off の ms/step 差 ≤ 5 %、② 固体の組立+分解+求解の host 時間、③ 実測壁温から G-if 到達までの総 step vs Phase 1 の 12.4 万 step。**6.2 万 step を超えたら「Phase 2 は速い」は誤り**と事前に書く |
 | V5 | **公知データ (超音速)** | §4.9。**3 段に分けて誤差を分離する** (codex 2 巡目 #6): **(a) 実測壁温を与えた流体計算** (流体側の $h$ を当てる) → **(b) 公開条件による固体単独検証** (`fem2d` の検算) → **(c) 壁温を未知とした CHT**。`case/54` Mark II run 42 ($M_2$=1.04) を主、`case/53` C3X run 108 ($M_2$=0.90) を先行 | **各段の入力と合格を先に固定する** (codex 3 巡目 #5)。**(a)**: 実測 $T_w$ を課し、**原典と同じ温度基準で定義した $h$**・熱流束・壁圧を比較点ごとに比較。**(b)**: 実測 $T_w$ を**外周 Dirichlet**、公開冷却条件を孔 Robin として固体単独で解き、**外周の反力熱流束**を比較する (= **原典のデータ処理の再現検査**。入力した壁温に一致することを成果にしない)。**(c)**: 壁温を未知に戻して CHT。<br>(a)(b) が通ってから (c) を判定し、(c) は測定点 $T_w$ が**事前登録した帯**の中。帯は 冷却孔ごとの HTC 相関 / 計測断面の冷却剤温度推定 / 材料物性 / **表 VII の温度比 ±2 %** を項目別に立て、**合成規則 (単純和か二乗和か、相関の扱い) を計算前に決める**。**合うまで帯を広げる運用を禁止** |
 | V6 | すきま適用と感度 | case/51 の薄肉ライナ。$K$ (50/200)、$D_f$ 方式、`local1d` vs `shell2d`。**壁関数併用は §4.3 の対象外宣言に合わせ、診断解除後の追加試験に分離** (codex 3 巡目 #2) | $K$・$D_f$ 依存が $T_w$ で **≤0.5 %**。面内項の寄与と放射の桁 (§4.10) を数値で併記 |
 | G-cons | **熱収支** (C1) | 同一状態で 流体側 $\sum Q_{f,i}$ = 固体正味入熱 = 背面 + 端部流出 + 接合授受 | **熱量の 0.5 % 以内**。**これを満たさない run は合格させない** |

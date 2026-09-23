@@ -446,8 +446,9 @@ $$(g_s + D_f)\,T_w^{k+1} = g_s T_b + q_{\rm eff}(T_w^k) + D_f\,T_w^k,\qquad
   `step, physID, n, Tw_mean, Tw_min, Tw_max, dTw_max, res_abs_Wm2, res_max_W, res_rel, q_total` を追記する。
   $r_i = Q_{f,i} - g_s(T_{w,i}-T_b)A_i$ は**更新前 (未緩和)** の界面残差で、`res_abs_Wm2` $=\max_i|r_i|/A_i$、
   `res_rel` $=\max_i|r_i|/\max_i|Q_{f,i}|$。判定 (許容と連続回数) は判定ツール側で行う。
-- **面内伝導が要るなら使わない**: `local1d` は点ごとの 1 次元抵抗。シェル/一般 2D 固体は
-  外部ループ ([`tools/cht_loop.py`](../solver_density_cuda/tools/cht_loop.py) + `solid_shell.py`) の担当。
+- **面内伝導が要るなら使わない**: `local1d` は点ごとの 1 次元抵抗。**一般 2D 固体 (`fem2d`) のソルバ内連成は
+  実装中** (2026-09-23 決定、設計は [plan §4.6a](../plans/active/boundary-conjugate-heat-transfer.md))。
+  `shell2d` は外部ループ ([`tools/cht_loop.py`](../solver_density_cuda/tools/cht_loop.py) + `solid_shell.py`) の担当のまま。
 - **再開**: 出力ステップごとに `conjugate_Tw_<physID>.csv` を書く。続きを回すときは
   これを `wall_profile_<physID>.csv` にコピーして `ints: {conjugate: 1, wallProfile: 1}` にすると、
   収束した壁温から再開できる (`wallProfile` が初期値、`conjugate` がその後の更新)。
