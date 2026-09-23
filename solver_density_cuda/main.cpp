@@ -2180,6 +2180,24 @@ int main(void) {
             exit(1);
         }
         printf("[qAccumulatorFP64] 有効: 保存量 5 本の正本を FP64 に置く (内点 %ld CV)\n", (long)msh.nCells);
+        // **対象は流れの 5 本だけ**。乱流・化学種・凝縮モーメント・受動種・遷移モデルの保存量は
+        // **float32 のまま**で、commit の丸めを受ける経路に残る。拒否はしない (case/56 では
+        // 全域 FP64 ビルドと物理量が 0.00-3.77 % で一致しており実害が出ていない) が、
+        // **混在していることを黙らせない** (2026-09-24)。横展開は
+        // plans/active/time_integration-fp64-accumulator-rollout.md。
+        {
+            std::vector<std::string> notAcc;
+            if (cfg.LESorRANS == 2) notAcc.push_back("乱流 (roK, roOmega)");
+            if (cfg.nSpecies > 1)   notAcc.push_back("化学種 (roY*)");
+            if (var.condMomentConsNames.size() > 0) notAcc.push_back("凝縮モーメント");
+            if (var.tracerRegistered != 0)     notAcc.push_back("受動トレーサ (roXi)");
+            if (var.transitionRegistered != 0) notAcc.push_back("遷移モデル (roGamma, roReth)");
+            if (!notAcc.empty()) {
+                printf("[qAccumulatorFP64] **注意**: 次は FP64 正本を持たない (float32 のまま):");
+                for (size_t i = 0; i < notAcc.size(); ++i) printf("%s %s", i ? " /" : "", notAcc[i].c_str());
+                printf("\n[qAccumulatorFP64]   流れの保存量だけが累積される混在状態になる。\n");
+            }
+        }
     }
 
     // line-implicit (plans/active/time_integration-line-implicit.md): 壁法線ラインを構築。

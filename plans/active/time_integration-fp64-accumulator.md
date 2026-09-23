@@ -161,6 +161,31 @@ dual-time (`update_d.cu:407`, `implicitCorrection_d.cu:53`)・軸対称 (`axisym
   (黙って劣化させない)。要求値と実効値の両方をログと `RUN_PROVENANCE.txt` に残す。
 - 既定を 1 に変えるかは、対応経路の検証が済んでから別途判断する。
 
+**⚠ 対象は「流れの保存量 5 本」だけ** (2026-09-24 に明記。ユーザ指摘で気づいた)。
+`Qacc` は `ro, roUx, roUy, roUz, roe` の 5 本のみ (`variables.cpp:236`)。**次は FP64 正本を持たない**:
+
+| 変数 | 更新経路 | 扱い |
+| --- | --- | --- |
+| 乱流 `roK`, `roOmega` | `applySSTPointImplicit` (segregated point-implicit) | **float32 のまま** |
+| 化学種 `roY_s` | `speciesTimeIntegration` | **float32 のまま** |
+| 凝縮モーメント | `condensationTimeIntegration` | **float32 のまま** |
+| 受動トレーサ `roXi` | `tracerTimeIntegration` | **float32 のまま** |
+| 遷移モデル `roGamma`, `roReth` | `applyTransitionPointImplicit` | **float32 のまま** |
+
+**これらを使う run は拒否しない**。理由: `case/56` は SST を使っている (`turbulence: {model: "sst"}`) が、
+**全域 FP64 ビルド (乱流も化学種も全部 FP64 で累積する) と物理量が 0.00–3.77 % で一致した** (§6.1 G2)。
+つまり**このケースでは乱流を float32 に残しても答えが変わっていない**。
+
+**ただし混在は黙らせない**: 起動時に「次は FP64 正本を持たない: …」と列挙する
+(`main.cpp`、2026-09-24 追加。実際に `[qAccumulatorFP64] **注意**: … 乱流 (roK, roOmega)` が出ることを確認)。
+
+⚠ **`roK` が吸収されているかは未判定**: 深部 z/W>10 の 1 step で値が動く CV は `roK` **0.28 %** で、
+対策前の流れ変数 (0.03 %) に似て見える。**しかし出力にあるのは丸めた後の Δ で 0 か 1 ULP 以上しか
+取らないので、意図した $dq$ が分からず吸収かどうか区別できない** (アキュムレータ ON の `ro` も 0.01 %)。
+判定には意図増分の出力が要る → 後続計画 §4.1a / §5.1 #0。
+**`case/56` で無害だったことは「乱流を含む全ケースで無害」の証拠ではない**
+(このケースは深部がほぼ静止しており乱流が効いていない可能性がある)。
+
 **v1 の対応範囲** — **2026-09-23 に拒否リストを見直した (要レビュー)**。
 
 > **経緯**: 初版は `diagnostician` の報告をそのまま写して 4 経路を「拒否」にしたが、
