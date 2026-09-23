@@ -90,6 +90,18 @@ YAML_HARD_PATHS = [
     ("physics.thermalMethod", ("physics", "thermalMethod")),
     ("time.unsteady", ("time", "unsteady")),
     ("time.dualTime", ("time", "dualTime")),
+    # **ソルバ内 CHT** (2026-09-23)。連成の有無・固体モデル・界面熱量の定義・更新間隔・平均窓・D_f は
+    # いずれも**解いている方程式を変える**ので、これらが違う段を 1 区間として連結してはいけない
+    # (plan boundary-conjugate-heat-transfer §4.6a / §5.1 #67 ④)。
+    # 固体そのもの (メッシュ・孔 Robin・k_s(T)) は下の `conjugate.solid_sha1` で見る。
+    ("conjugate.mode", ("conjugate", "mode")),
+    ("conjugate.flux", ("conjugate", "flux")),
+    ("conjugate.interval", ("conjugate", "interval")),
+    ("conjugate.flux_avg", ("conjugate", "flux_avg")),
+    ("conjugate.Df_scale", ("conjugate", "Df_scale")),
+    ("conjugate.thickness", ("conjugate", "thickness")),
+    ("conjugate.k_solid", ("conjugate", "k_solid")),
+    ("conjugate.T_b", ("conjugate", "T_b")),
 ]
 
 
@@ -127,12 +139,47 @@ def _grab(text, pats):
     return out
 
 
-def stage_key(cfg_text, bcond_text):
+def _conjugate_solid_sha1(cfg_text, run_dir):
+    """`conjugate.solid` が指す固体 HDF5 の sha1 (先頭 12 桁)。
+
+    固体メッシュ・孔 Robin・$k_s(T)$ は**解いている方程式そのもの**なので、
+    これが変わった段を同一区間として連結してはいけない。ファイルが見つからないときは
+    `missing` を返す (黙って「同じ」にしない)。
+    """
+    try:
+        import yaml
+        cj = (yaml.safe_load(cfg_text) or {}).get("conjugate")
+    except Exception:
+        return None
+    if not isinstance(cj, dict) or "solid" not in cj:
+        return None
+    if not run_dir:
+        return "unknown"
+    path = os.path.join(str(run_dir), str(cj["solid"]))
+    if not os.path.exists(path):
+        return "missing"
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()[:12]
+
+
+def stage_key(cfg_text, bcond_text, run_dir=None):
     """段の **hard キー** (方程式・BC・空間離散化)。BC は全文のハッシュで見る。"""
     k = _grab(cfg_text, HARD_PATTERNS)
     # **構造解析の値で上書きする** (正規表現より優先。書式差で取りこぼさないため)。
     k.update(_yaml_grab(cfg_text, YAML_HARD_PATHS))
     k["bcond_sha1"] = hashlib.sha1((bcond_text or "").encode()).hexdigest()[:12]
+    # ソルバ内 CHT: 連成の有無と固体の中身 (plan §5.1 #67 ④)。
+    try:
+        import yaml
+        k["conjugate.enabled"] = "1" if isinstance((yaml.safe_load(cfg_text) or {}).get("conjugate"), dict) else "0"
+    except Exception:
+        k["conjugate.enabled"] = "1" if re.search(r"^conjugate\s*:", cfg_text or "", re.M) else "0"
+    sha = _conjugate_solid_sha1(cfg_text, run_dir)
+    if sha is not None:
+        k["conjugate.solid_sha1"] = sha
     return k
 
 
@@ -148,7 +195,7 @@ class StageManifest:
             "history": history or ("residual_history_%s.csv" % tag),
             "restart_from": restart_from if restart_from is not None else (
                 self.stages[-1]["tag"] if self.stages else None),
-            "key": stage_key(cfg_text, bcond_text),
+            "key": stage_key(cfg_text, bcond_text, self.run),
             "soft": _grab(cfg_text, SOFT_PATTERNS),
         })
 

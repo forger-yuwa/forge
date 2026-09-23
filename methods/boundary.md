@@ -446,9 +446,45 @@ $$(g_s + D_f)\,T_w^{k+1} = g_s T_b + q_{\rm eff}(T_w^k) + D_f\,T_w^k,\qquad
   `step, physID, n, Tw_mean, Tw_min, Tw_max, dTw_max, res_abs_Wm2, res_max_W, res_rel, q_total` を追記する。
   $r_i = Q_{f,i} - g_s(T_{w,i}-T_b)A_i$ は**更新前 (未緩和)** の界面残差で、`res_abs_Wm2` $=\max_i|r_i|/A_i$、
   `res_rel` $=\max_i|r_i|/\max_i|Q_{f,i}|$。判定 (許容と連続回数) は判定ツール側で行う。
-- **面内伝導が要るなら使わない**: `local1d` は点ごとの 1 次元抵抗。**一般 2D 固体 (`fem2d`) のソルバ内連成は
-  実装中** (2026-09-23 決定、設計は [plan §4.6a](../plans/active/boundary-conjugate-heat-transfer.md))。
+- **面内伝導が要るなら `mode: fem2d`** (下の節)。`local1d` は点ごとの 1 次元抵抗で、面内伝導を落とした極限。
   `shell2d` は外部ループ ([`tools/cht_loop.py`](../solver_density_cuda/tools/cht_loop.py) + `solid_shell.py`) の担当のまま。
+##### `mode: fem2d` — 一般 2D 固体をソルバ内で解く (2026-09-23)
+
+```yaml
+conjugate:
+  mode: fem2d
+  solid: solid.h5        # tools/solid_mesh_to_h5.py が作る (メッシュ・孔 Robin・k_s(T) の正本)
+  flux: q_eff            # 既定。保存形の界面熱量
+  interval: 50           # K step ごとに更新
+  flux_avg: 42           # 界面熱量を N 更新の後方移動平均にする (既定 1 = 平均しない)
+  Df_scale: 1.0          # D_f の倍率 (発散したとき手で上げる。自動調整はしない)
+  refactorDT: 1.0        # [K] 固体温度がこれ以上動いたら分解し直す
+  gate: {eps_rel: 1.0e-3, eps_abs_Wm2: 150.0, dT_K: 1.0e-2, n_consec: 80}
+```
+
+毎更新、**固体の全節点系を 1 回直接解く** (Schur 補元は作らない):
+
+$$\bigl(K_s(u^k) + E^{\mathsf T}D_fE\bigr)u^{k+1} = b_s + E^{\mathsf T}\bigl[\bar Q_f + D_f\,Eu^k\bigr]$$
+
+- 未知数は**全節点温度** $u$ なので内部温度が状態になり、$k_s(T)$ の自己整合に「復元してから組み直す」操作が要らない。
+- $D_f$ は**界面対角のみ** $g_fA_i$ ($g_f=k_{\rm eff}/d_1$、$A_i$ は**固体側の集中辺長**)。非対角性は左辺の $K_s$ が持つ。
+  **$Q_f$ に流体側の `surfArea` を使ってはいけない** (押し出し疑似 2D で奥行きが乗る)。初版は $z\equiv0$ の平面 2D 以外を拒否する。
+- 行列は SPD なので**下三角バンド Cholesky** (RCM 並べ替えは変換時に済ませる)。
+  **分解は `refactorDT` 以内なら再利用する。そのとき $D_f$ も一緒に凍結する** —
+  行列側が古い $D_f$ のまま右辺だけ新しくすると固定点が $K u-b-Q_f=(D_f^{new}-D_f^{old})T_w$ にずれ、連成が振動する
+  (実測: `res_rel` 1.8e-4 → 1.5e-2)。
+- **受理判定・line search・Anderson は持ち込まない**。ソルバ内の $Q_f(T)$ は step ごとに動く写像なので、
+  更新間のメリット比較は同じ関数の比較にならない (外部ループが凍った機構)。
+- **`flux_avg`**: 流体側に局所振動があると瞬時の $Q_f$ では界面ゲートが床に当たる。
+  C3X は吸込面の $k$ オンセット前線が**周期 1012 step** で揺れ、最悪節点の $Q_f$ が中央値の 78 倍ばらつく。
+  窓は「$F_N\le\epsilon_{\rm abs}L_i/2$ を全節点で満たす最小 N」で選ぶ (C3X では 21 = 1 周期。周期揺らぎ対策で 42 を採用)。
+- **出力**: 更新ごとに `conjugate_history.csv` (G-if の素材)、流体の出力間隔で `res_solid_<physID>_<step>.h5`+`.xmf`
+  (`T` / `k_s` / `q_iface` / `q_hole`) と再開用の `conjugate_state_<physID>.h5`。
+- **起動時に拒否**: 平面 2D 以外、界面節点が流体の壁節点と 1 対 1 でない (**内挿しない**)、Robin 辺が 1 本も無い
+  (定数零空間)、$q_{\rm eff}$ が 1 節点でも非有限、`flux: q_eff` なのに `interfaceDiag != 1`。
+- **判定**: 界面の収束は [`tools/check_cht_interface.py`](../solver_density_cuda/tools/check_cht_interface.py) が
+  `conjugate_gate.json` の**事前登録値**で行う (`check_convergence.py` は流体の保存量しか見ない)。
+
 - **再開**: 出力ステップごとに `conjugate_Tw_<physID>.csv` を書く。続きを回すときは
   これを `wall_profile_<physID>.csv` にコピーして `ints: {conjugate: 1, wallProfile: 1}` にすると、
   収束した壁温から再開できる (`wallProfile` が初期値、`conjugate` がその後の更新)。
