@@ -355,7 +355,11 @@ python3 solver_density_cuda/tools/interp_field.py <past_run>/res_NNNN.h5 <new_ru
 - 保存量 (ro,roUx,roUy,roUz,roe)・乱流 (roK,roOmega)・スカラー輸送 (roY*) を移植。
 - **wall_dist は移植しない** (新メッシュで convert 時に計算された値を使う; 別メッシュの距離は不整合)。
 - SRC は res (primitives) でも入力 h5 (conserved) でも可。scipy `cKDTree` 最近傍。
-- 同一メッシュ内での restart (背圧変更など) は同ケースの `restart_field.py` を使う。
+- 同一メッシュ内での restart (背圧変更など) は **`solver_density_cuda/tools/restart_field.py`** を使う
+  (`res_*.h5` の保存量を index コピーし、SRC とビット一致することを検査して VERDICT を出す)。
+  **`interp_field.py` は同一メッシュに使わない** — cross-mesh 用で原始量から保存量を組み直すため、
+  `roUx = ρ·Ux` の丸めで元の保存量に戻らない (2026-09-23, case/56 で `roUy` が最大 1.6 % ずれた)。
+  `case/*/restart_field.py` の古い実装も原始量から組み直すので使わないこと。
 
 ## メッシュ品質チェック (計算前・必須)
 
