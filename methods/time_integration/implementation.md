@@ -175,6 +175,36 @@ $\Delta\mathbf Q_{\text{new}} = D_i^{-1}\,\text{RHS}$ を解く。`cfg.implicitR
 （`applyScalarImplicitCorrection` と対称、`update_d.cu` に新設）で `Q = Q_baseline + dq_block` を
 **1 度だけ** commit する。残差 `res_*` と $|\widetilde A_f|$ は sweep 中固定（matrix-free のため固定 Q から毎 sweep 再構築してよい）。
 
+#### commit の丸め — 定常解の到達限界を決める (2026-09-23)
+
+commit は `update_d.cu` で `ro[ic] = roN[ic] + d0`（`d0` = `dq_block_old_0`）である。
+`Q` が `flow_float`（既定 float32）なので、**$|dq| < \tfrac12\,\mathrm{ULP}(Q)$ になった時点で加算は丸めで消え、
+反復はそこで進まなくなる**。定常解へ近づくほど $dq$ は小さくなるので、これは**収束の到達限界**そのものである。
+
+`updateGuardScale`（同ファイル）は $\rho$ か $e_i$ を $\alpha$ 倍未満に落とす更新だけを半減列で縮める
+局所 under-relax であり、$dq/\rho \ll 1$ の領域では発動しない（$s$=1）。したがってこの丸めを緩和しない。
+
+**実測例**（`case/56.gap_tp1187`、M7 の深いすきま、深さ $z/W>10$ の 16607 CV）:
+
+| 量 | 値 |
+| --- | --- |
+| $\langle\rho\rangle$ | 0.017755 |
+| 1 ULP (float32) | 1.86e-9 |
+| $\langle\lvert dq\rvert\rangle$ | 2.97e-10 = **0.159 ULP** |
+| 1 step で値が動く CV | **0.03 %** |
+| 実効 $\langle d\rho\rangle$ / 意図した $dq$ | **0.3 %** |
+
+この状態では、残差が系統的に残っているのに場が動かない。すきま断面を通る正味の質量流束
+$\lvert\dot m\rvert$（定常解ならゼロ）は **step のべき乗則** $\propto \mathrm{step}^{-0.23}$ でしか減らず、
+step を 2 倍にしても 15 % しか下がらない。同じ場を**倍精度ビルド**で継続すると**幾何級数**（25k step ごとに
+2.81 分の 1）に変わり、300k step で 4.54e-7 → 4.56e-12 まで落ちる。
+
+**切り分けの指標**: $\lvert dq\rvert/\mathrm{ULP}(Q)$ が O(1) を下回っていないか。下回っていれば、
+sweep 数（`nStepInner`）を増やしても `lineImplicit` を入れても改善しない（どちらも $dq$ を精緻にするだけで、
+その $dq$ が表現できない）。実測でも 4→16 sweep が ±20 % 以内、line-implicit は壁時計あたり 1 桁悪化した。
+
+詳細と対処の設計は [`plans/active/time_integration-fp64-accumulator.md`](../../plans/active/time_integration-fp64-accumulator.md)。
+
 #### 閉形式 FVS と混合精度 (`implicitSolvePrecision`)
 
 `accumulate_split_jacobian_cf<T>` は固有ベクトル行列 $R,L$ を陽に作らず、$\mathrm{diag}(g)-g_2 I$ が
