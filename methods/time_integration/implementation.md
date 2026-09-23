@@ -202,11 +202,13 @@ step を 2 倍にしても 15 % しか下がらない。同じ場を**倍精度�
 床は**平坦でなく**、到達最小レベルと振れ幅で書くこと (1.234e-11 ± 2.5e-12、振れ幅 1.50 倍)。
 
 **使い方** (2026-09-24): `time.deltaT.qAccumulatorFP64: 1` (既定 0、**`time:` 直下ではない**)。
-対応するのは `timeIntegration: 11` かつ `unsteady: 0`、node 軸対称でない、`sstEnergyIncludesK: 0`、
-node 周期でない場合のみで、それ以外は起動時に拒否する。**`Qacc` は checkpoint されない**。ただし**失うのは ½ ULP 分だけ**で実害は無い:
+対応するのは **GPU (`gpu: 1`)・node 離散化**かつ `timeIntegration: 11` かつ `unsteady: 0`、軸対称でない、`sstEnergyIncludesK: 0`、
+node 周期でない場合のみで、それ以外は起動時に拒否する。**`Qacc` は checkpoint されない** = **restart は残余を失う**。失う量は ½ ULP 分:
 commit は `Qacc += dq` のあと必ず `Q = (flow_float)Qacc` とするため $\lvert Q_{acc}-Q\rvert\le\tfrac12\mathrm{ULP}(Q)$ が
 構造上いつでも成り立ち、**残余は 1 ULP を超えて溜まらない**。実測の $\langle\lvert dq\rvert\rangle$ = 0.159 ULP/step から
-restart の代償は case/56 の $dq$/ULP 比では**平均 3 step 分の進捗**。**「実害は無い」とは書かない** —
+restart の代償は case/56 の $dq$/ULP 比で**平均 3 step 分に相当する**。
+**ただしこれは「$\tfrac12\mathrm{ULP}\div\langle\lvert dq\rvert\rangle$」という割り算であって、
+符号相殺を含む進捗の損失そのものではない**。言えるのは —
 言えるのは「このケース・この $dq$/ULP 比・100k step に 1 回の restart では、差がノイズ床の中」まで。
 **ただし一般化しないこと**: $dq$ が小さいほど相当 step 数は増え、**頻回 restart は機能を丸ごと消す**
 ($Q=1$, $dq=0.125$ ULP を 100 回: 連続は 12 ULP 動くが毎 step restart では **0 ULP**)。case/56 で 100k から再開した軌道は、連続で回した軌道と

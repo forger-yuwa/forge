@@ -40,6 +40,13 @@ FORGE_EXE="${FORGE_BIN:-$ROOT/solver_density_cuda/build/forge}"
   for v in FORGE_CUDA_BLOCKSIZE FORGE_KERNEL_SYNC FORGE_NODE_FX_HALF FORGE_AXIS_DIAG_ALPHA FORGE_RESID_SNAP FORGE_BIN; do
     if [ -n "${!v-}" ]; then echo "env         : $v=${!v}"; fi
   done
+  # 解を変える opt-in の**要求値**を config から拾う (実効値は forge のログが出す)。
+  # plan time_integration-fp64-accumulator §4.4 が要求。要求どおり効いたかは
+  # forge_run.log の "[qAccumulatorFP64] 有効" 行と突き合わせる。
+  for key in qAccumulatorFP64 lineImplicit lowMachPrecond wallTreatmentSST sstEnergyIncludesK; do
+    v=$(grep -o "${key}: *[0-9][0-9]*" solverConfig.yaml 2>/dev/null | head -1 | grep -o '[0-9][0-9]*$')
+    if [ -n "$v" ]; then echo "cfg         : $key=$v (要求値)"; fi
+  done
 } > RUN_PROVENANCE.txt
 
 # FORGE_BIN で別ビルドの forge を指定できる (A/B 回帰で旧バイナリを回す用途。既定は build/forge)

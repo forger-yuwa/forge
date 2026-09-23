@@ -52,5 +52,7 @@ CONTUR 平面積分 (`deltastar_integral.flat_plate_integral`)・温度–速度
 | `run_0016_iface_base_rep` | run_0013 の**反復** (同一設定・同一 IC) | run-to-run ノイズ床の測定: 残差 max 相対 2.1e-1 / 場 1.8e-6。atomicAdd 由来の非決定性 (既知) | 破棄可 (コード検証) |
 
 
-| `run_0040_g3_{preacc,off,offb,on}` | **G3 scalar commit** (plan `time_integration-fp64-accumulator` §6.1): `blockDPLUR:0`・`cfl_pseudo 0.5`・2000 step。導入前バイナリ `48ee9e56` / HEAD OFF / HEAD OFF 再実行 / HEAD ON | **PASS** — d(導入前,OFF)/d(OFF,OFF') = 0.71–0.84 (許容 ×3)。採用カウンタ 0 = roe が変わった壁ノード 0 (等号成立) | `ref` |
-| `run_0042_g3blk_{preacc,off,offb,on}` | **G3 block commit** (同上、`blockDPLUR:1`・`cfl_pseudo 2.0`) | **PASS** — 比 0.95–1.16。採用カウンタ 172–420/step (上界 1001)。**case/56 と違い多 step の分解能がある** | `ref` |
+| `run_0040_g3_{preacc,off,offb,on}` | **G3 scalar commit** (plan `time_integration-fp64-accumulator` §6.1): `blockDPLUR:0`・`cfl_pseudo 0.5`・2000 step。導入前バイナリ `48ee9e56` / HEAD OFF / HEAD OFF 再実行 / HEAD ON | ~~PASS~~ **撤回** (床が 1 対で判定不能・後に別バイナリ混在も判明)。**`run_0045_v2_sca_*` で取り直して PASS**。採用カウンタ 0 は「**scalar のゼロ整合**」であって非ゼロの等号検証ではない | `ref` |
+| `run_0042_g3blk_{preacc,off,offb,on}` | **G3 block commit** (同上、`blockDPLUR:1`・`cfl_pseudo 2.0`) | ~~PASS~~ **撤回** (同上)。**`run_0045_v2_blk_*` で取り直して PASS**。採用カウンタ 172–558/step は「**上界 1001 の確認**」まで | `ref` |
+| `run_0044_noise_{1..4}` | G3 のノイズ床用 (同一設定 4 本) | **無効** — 別バイナリ (`45cf9822` vs `7b66fa2a`) で回っており 15 対中 8 対が混在した | `破棄予定` |
+| `run_0045_v2_{blk,sca}_{A1..A4,B1..B4}` | **G3-v2** (plan §6.1、投入前に規則登録): 同一 SHA で導入前 4 本 + HEAD 4 本 × block/scalar = 16 本 | **PASS** — cross/within 比 block 0.91–1.02 / scalar 0.93–1.04、変動係数 0.14–0.46。⚠ `roUz` は全 16 本・全 CV でゼロなので相対距離の対象外 (全配列ゼロを直接確認) | `ref` |

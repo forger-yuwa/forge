@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `time_integration`
-- **status**: `draft`
+- **status**: `done`
 - **related_docs**:
   - [`methods/time_integration/implementation.md`](../../methods/time_integration/implementation.md) の「commit の丸め — 定常解の到達限界を決める」
 - **related_plans**:
@@ -293,7 +293,7 @@ double-float (Dekker/Bailey の dd) は「**数の表し方**」で `(hi, lo)` �
 | $a=2^{-25}$, $b=1$ | $s=1.0,\ e=0$ → **$2^{-25}$ を失う** | $s=1.0,\ e=2.98\times10^{-8}$ |
 
 **処置**: 本体の commit は **`twoSum` (Knuth、6 flop)** に差し替えた。前提が要らない代わりに演算が 2 倍。
-**試験に「前提が破れる場合」(g) を追加**し、**旧実装に戻すと `VERDICT: FAIL` (失敗 4)** になることを確認した
+**試験に「前提が破れる場合」(g) を追加**し、**旧実装に戻すと `VERDICT: FAIL`** になることを確認した。~~失敗 4・交互加算でも落ちる~~ **訂正 (codex result-2 m2)**: 初版は `#ifdef` が `lo += e` まで飛ばしており**旧実装と別の粗い壊れ方**を見ていた。忠実に再現すると**失敗 1**で、落ちるのは **$\lvert Q\rvert<\lvert dq\rvert$ の 1 例だけ** (FP64 影との差 2.980e-08)
 (`-DFORGE_DF_FASTTWOSUM` で切替。とくに「交互加算 $Q=1$, $dq=2^{-26}$, $N=1000$」で相対差 1.49e-05)。
 **バグを捕まえられない試験は書いた意味がない**ので、この確認を必須にする。
 
@@ -310,7 +310,7 @@ double-float (Dekker/Bailey の dd) は「**数の表し方**」で `(hi, lo)` �
 | **(g) 前提が破れる 4 例** | **全て相対差 0.000e+00** | 全て 0.000e+00 |
 
 **⚠ 演算数の訂正**: 「fast-two-sum の 3 flop」と書いたが、commit 1 回は
-**`twoSum` 2 回 + 加算 1 回 = 加減算 7 回 + scale 乗算**。3 flop は `fastTwoSum` **1 回分**の値だった。
+**`twoSum` 2 回 + 加算 1 回 = 加減算 13 回 + scale 乗算** (`twoSum` は 6 加減算。~~7 回~~ を再訂正、codex result-2 m2)。3 flop は `fastTwoSum` **1 回分**の値だった。
 
 **⚠ FMA 縮約の撤回は「今回のコード・ビルドでは起きなかった」までに留める** (codex plan m1)。
 NVRTC 12.0 / `compute_86` の PTX を見ると通常・`--use_fast_math`・`--fmad=false` のどれにも FMA は無いが、
@@ -572,7 +572,13 @@ A/B の合格条件は上記 (1 桁) で登録し、G2 は 300k 以上で判定�
 | **G2b** | 過渡の改善 (定常値の一致とは**分けて**書く) | $\lvert\dot m\rvert$ (**保存量 `roUy` を積分**。2026-09-24 に `mdot_decay.py` を修正。旧実装は commit 後の `ro` × commit **前**の `Uy` を掛けており更新時点が違った。差は 0.40 % で結論は不変) が 0→100k で全域 FP64 と**同オーダーの低下倍率** (実測 62.0 vs 62.7、FP32 対照 1.014) | **PASS** (S3) |
 | **G2c** | 全保存量の残差 — **合否に使わない** | `check_convergence` は `NOT CONVERGED (plateau)` のまま、末尾平均が §3 の表の ±20 % 以内かつ min/max $\ge$0.8。**×2 以上動いたら観測として別項目へ** | 期待どおり |
 | **G3** | 標準検証ケース (**v1a の範囲内のものだけ**) | **`case/48` を `blockDPLUR: 1` (block commit) と `blockDPLUR: 0` (scalar commit) の両方で**。<br> | **判定不能のまま (2026-09-24)**。<br>⚠ **2 回撤回した**。(1) 最初の PASS は**自分で登録した判定不能条件 (「床と同桁なら合否を付けない」) に当たっていた**。(2) 測り直した PASS も**無効**: `run_0044_noise_*` は**別バイナリ** (`45cf9822…` vs `7b66fa2a…`) で回っており、**15 対のうち 8 対がバイナリ混在**だった (codex result-3 M1)。さらに 15 距離は 6 本から作ったもので**独立な 15 標本ではない**し、追加 4 本は全部 `blockDPLUR:1` で **scalar は 1 対のまま**。<br>**「同桁なら判定不能」を外したのは分解能向上でなくゲート変更**、という指摘も受け入れる。<br>→ **G3-v2 として設計し直す** (下記)。今回のデータは**規則の設計用**であって合否ではない |
-| **G3-v2** | 多 step 後方互換の測り直し (**投入前に登録、2026-09-24**) | **設計**: `case/48`、2000 step、seed 同一。**同一 SHA のバイナリ**で:<br>・導入前 (`48ee9e56`) OFF を **4 本** (A1–A4)<br>・HEAD OFF を **4 本** (B1–B4)<br>これを **block (`blockDPLUR:1`) と scalar (`blockDPLUR:0`, `cfl_pseudo 0.5`) の両方**で行う (計 16 本)。<br>**距離**: `res_2000.h5` の `VALUE/{ro,roUx,roUy,roUz,roe}` の maxabs / max\|A\|。<br>**統計**: within-A 6 対・within-B 6 対 = **12 個の独立でない標本**だが**同一バイナリ内のばらつき**、cross A-B **16 対**。<br>**合格条件**: 各保存量について **cross の平均 $\le$ within の平均 + 3×(within の標準偏差)**。<br>**判定不能条件**: within の標準偏差が within の平均と同オーダー (変動係数 > 0.5) なら、**ばらつきが大きすぎて判定できない**と記録し合否を付けない。<br>**⚠ 事後に規則を変えない**。この段落は run 投入前に書いた | **PASS (2026-09-24)**。同一 SHA を確認 (A=`8cebca25…` 4 本 / B=`45cf9822…` 4 本、各 commit で 8 本 = 計 16 本)。<br>**block**: `ro` within 4.5315e-05±9.30e-06 (変動係数 0.21) / cross 4.5705e-05 (**比 1.01**)、`roUx` 0.22/**1.02**、`roUy` 0.46/**0.91**、`roe` 0.21/**1.02**<br>**scalar**: `ro` 0.16/**0.93**、`roUx` 0.19/**0.95**、`roUy` 0.14/**1.04**、`roe` 0.26/**0.98**<br>→ **変動係数は全部 0.5 未満で判定可能**、cross はすべて within の平均+3σ の内側。**両 commit で PASS** |
+| **G3-v2** | 多 step 後方互換の測り直し (**投入前に登録、2026-09-24**) | **設計**: `case/48`、2000 step、seed 同一。**同一 SHA のバイナリ**で:<br>・導入前 (`48ee9e56`) OFF を **4 本** (A1–A4)<br>・HEAD OFF を **4 本** (B1–B4)<br>これを **block (`blockDPLUR:1`) と scalar (`blockDPLUR:0`, `cfl_pseudo 0.5`) の両方**で行う (計 16 本)。<br>**距離**: `res_2000.h5` の `VALUE/{ro,roUx,roUy,roUz,roe}` の maxabs / max\|A\|。<br>**統計**: within-A 6 対・within-B 6 対 = **12 個の独立でない標本**だが**同一バイナリ内のばらつき**、cross A-B **16 対**。<br>**合格条件**: 各保存量について **cross の平均 $\le$ within の平均 + 3×(within の標準偏差)**。<br>**判定不能条件**: within の標準偏差が within の平均と同オーダー (変動係数 > 0.5) なら、**ばらつきが大きすぎて判定できない**と記録し合否を付けない。<br>**⚠ 事後に規則を変えない**。この段落は run 投入前に書いた | **PASS (2026-09-24)**。同一 SHA を確認 (A=`8cebca25…` 4 本 / B=`45cf9822…` 4 本、各 commit で 8 本 = 計 16 本)。<br>**block**: `ro` within 4.5315e-05±9.30e-06 (変動係数 0.21) / cross 4.5705e-05 (**比 1.01**)、`roUx` 0.22/**1.02**、`roUy` 0.46/**0.91**、`roe` 0.21/**1.02**<br>**scalar**: `ro` 0.16/**0.93**、`roUx` 0.19/**0.95**、`roUy` 0.14/**1.04**、`roe` 0.26/**0.98**<br>→ 変動係数は 0.14–0.46 で判定可能、cross はすべて within の平均+3σ の内側。**両 commit で PASS**。<br>
+**⚠ 主張の範囲を限定する** (codex result-4 m1): これは「**`case/48`・2000 step・この経験ゲートを満たした**」であって、
+**互換性の信頼上限ではない**。12 個の within 距離と 16 個の cross 距離は**互いに相関**しており、
+**独立な単位は各群 4 実行**。`平均+3σ` は**事前登録した経験的な許容帯**、変動係数 $\le$0.5 も
+**検出可能な回帰量を保証しない**。<br>
+**⚠ `roUz` は相対距離の対象外**: 全 16 本・全 CV で**ちょうどゼロ**なので `maxabs/max|A|` も変動係数も $0/0$ になる。
+「全保存量で変動係数 < 0.5」は文字どおりには成立しない。**`roUz` は「全配列ゼロを直接確認」として別に記録する** (追加 run は不要) |
 ~~`case/36` (block commit)~~ **差し替え (2026-09-24)**: ~~`case/36` は全 run が `wallTreatmentSST: 1`~~ **訂正 (codex result-2 m4)**: `run_node_solid_dir_lowre` と
 `run_node_sst_wr0_muscl` は `0` である (最近の 10 本しか見ていなかった)。正しくは
 **「採用できる検証済みの低 Re 基準を確保できなかった」** — 最近の生産系列はすべて `1` で、
@@ -656,7 +662,7 @@ v1a の合否は **G2-L① (深部 $\dot m$ の減衰) + 「壁熱流束・温�
 | | `roUy` | 1.4260e-04 | 1.1622e-04 | **0.81** | PASS | 9.0862e-05 |
 | | `roe` | 7.2085e-05 | 6.0740e-05 | **0.84** | PASS | 6.1089e-05 |
 
-**VERDICT: PASS (両 commit)**。`check_convergence` は 8 本とも `NOT CONVERGED (stalled/plateau)`
+~~**VERDICT: PASS (両 commit)**~~ **撤回** (床が 1 対で判定不能、さらに後に別バイナリ混在が判明。§6.1 G3 / codex result-2 M2・result-3 M1)。**正式な判定は G3-v2** (`run_0045_v2_*`)。<br>`check_convergence` は 8 本とも `NOT CONVERGED (stalled/plateau)`
 (プラトーの seed から 2000 step なので当然で、4 本で同一なので判別には使わない)。
 
 **`case/56` と違い、このケースには分解能がある**: ノイズ床 $d(B,B')$ が 3.7e-05 で、
@@ -750,6 +756,8 @@ AGENTS が戒める「過渡を定常値として報告」に該当する。
 | stage | 日付 | 記録 | 判定 | 指摘 | 対応 |
 | --- | --- | --- | --- | --- | --- |
 | 診断 | `2026-09-23` | (セッション内 `diagnostician`、結論は §4.3・§5.2) | 案 A/B とも却下 → **第 3 案 (影アキュムレータ)** | **全件採用・実測で確認**。**#13 の結論を訂正**: 定常経路では `dependentVariables` の書き戻しは commit に上書きされ状態に残らない (`main.cpp` の順序 1641→1391→1671 を自分で確認)。$f_{32}(a+b)=f_{32}(f_{64}(a)+f_{64}(b))$ を 20 万サンプルで検査し **100.0000 % 一致** → 残余ゼロなら ON は OFF とビット同一。**G5 の「+0.1 %」は FLOP モデルで誤り** (25 ns/CV は launch 律速) → 「+3 % 以内を実測」+ 融合要件に訂正。メモリも 40 B/CV で **+400 MB** に訂正。対応範囲の拒否リスト (`sstEnergyIncludesK=1` は全域で累積が消えるので拒否) を §4.4 に |
+| result | `2026-09-24` | [2026-09-24-time_integration-fp64-accumulator-result-3.md](../../notes/reviews/2026-09-24-time_integration-fp64-accumulator-result-3.md) | **NO-GO**, C0/M3/m2 | **全件採用**。**M1 G3** → バイナリ混在 (`45cf9822` vs `7b66fa2a`、15 対中 8 対)・独立でない標本・scalar 1 対・事後のゲート変更を全部認め、**判定不能に戻して G3-v2 を投入前に登録**し測り直した (→ PASS)。**M2 `U_rms_deep`** → 「ノイズ床と解決」を撤回 (深さ別で 99.78 % が $4<z/W\le5$ に集中し両系列 `STEADY`、正味流束ゼロは速度 RMS ゼロを意味しない)。除外理由を「分離が未了」に変更し後続計画 §5.1 #6b へ。**M3 G5 の 3D** → 後続へ移すのをやめ `case/49` 100 万節点で実測 (5 対、片側 95 % 上限 +2.05 %)。**m1/m2** → 文書同期 |
+| result | `2026-09-24` | [2026-09-24-time_integration-fp64-accumulator-result-4.md](../../notes/reviews/2026-09-24-time_integration-fp64-accumulator-result-4.md) | **GO-with-changes**, C0/M0/m3 | **Major ゼロ**。**全件採用**。**m1** → G3-v2 の PASS を「`case/48`・2000 step の経験ゲート」に限定し、独立単位は各群 4 実行、`roUz` は全配列ゼロとして相対距離から分離。**m2** → `methods` の「実害は無い」、plan の double-float「失敗 4・7 回」、旧 G3 の PASS 表示、case/56・case/48 索引の撤回済み記述を**本文ごと修正**。**m3** → run 一覧・provenance・レビュー行・変更ログ・`plans/README.md` を同期。<br>**codex の確認**: 実装に新たな Critical/Major 欠陥なし。**5 対でも +3 % 基準を満たす** (`ON−1.03×OFF` の片側 95 % 上限 −0.2677 ms/step)。減衰倍率 62.666 / 61.955 / 1.014 も再現。主検証の収束は `NOT CONVERGED (plateau)` のままで、**成果は局所停滞と過渡減衰の改善**である |
 | result | `2026-09-24` | [2026-09-24-time_integration-fp64-accumulator-result-2.md](../../notes/reviews/2026-09-24-time_integration-fp64-accumulator-result-2.md) | **NO-GO**, C0/M5/m4 | **全件採用** (9 件、いずれも自分で再現・確認)。**3 つのゲートの PASS を撤回した**。<br>**M1 G2** → **要再判定**: 残した量も定常化していない (`Uy` の $z/W$ 3–4 は全域 FP64 でも `DRIFTING` 181.7 %)。同 step の一致は**過渡中の比較**。`U_rms_deep` は両者 `STEADY` で 4 倍差なので「深部は FP64 でも DRIFTING」では一括説明できない。→ G2 を「過渡の再現」と「準定常量の比較」に分ける。<br>**M2 G3** → **判定不能**: 比 0.71–1.16 は**自分で登録した判定不能条件そのもの**。~~PASS~~ 撤回し「再実行変動と区別できる回帰を検出しなかった」に。**多 step の後方互換は取れていない**。<br>**M3 G5** → **未達**: 差の標準誤差 2.66 %、片側 95 % 上限 +7.8 % で **+3 % 以下と言えない**。3 本を別 run に保存しておらず 3D 規模も未実施。<br>**M4 並べ替え上界** → **撤回**: 反例 `[1e-3, 1e-11, -1e-3, 1e-17]` は順序で 0 と 1e-17 だが**どちらも真値から ~1e-11**。**質量・エネルギーも総和丸めは未除外**で、固定面流束の比較は 5 本すべてで行う。<br>**M5 許可範囲** → **塞いだ**: 拒否リストに `gpu != 1` と `discretization != "node"` が無く、**cell も CPU 経路も素通り**していた (CPU の commit は FP32 のまま)。<br>**m1 採用カウンタ** → 表現を「scalar のゼロ整合 + block の上界確認」に訂正。**非ゼロの等号が実証できているのは `case/56` の 845/84/84 だけ**。<br>**m2 double-float の回帰試験** → **直した**: `#ifdef` が `lo += e` まで飛ばしており**旧実装とは別の粗い壊れ方**を捕まえていた。忠実に再現し許容を FP64 影との絶対差 (1e-15) に締めたところ、**`\|Q\| < \|dq\|` の 1 例だけが FAIL** (2.980e-08)。「交互加算でも落ちる」は誤りだった。flop 数も 7 → **13** に再訂正。<br>**m3 同期** → `methods` の「実害は無い」を削り、case README の撤回済み帰属と旧 `S20` を訂正、`run_0029`/`run_0030`/`run_0041` を索引に追加。<br>**m4 `case/36`** → 「全 run が壁関数」は誤り (`run_node_solid_dir_lowre` 等は 0)。「**採用できる検証済みの低 Re 基準を確保できなかった**」に訂正。差し替え自体は妥当と評価された。<br>**範囲縮小の記録方法と double-float の見送りは支持された。** |
 | result | `2026-09-24` | [2026-09-24-time_integration-fp64-accumulator-result.md](../../notes/reviews/2026-09-24-time_integration-fp64-accumulator-result.md) | **NO-GO**, C0/M6/m1 | **全件採用** (6 Major + 1 Minor、いずれも自分でソース・データを当たって確認。`diagnostician` に採否を諮り同意)。<br>**M1 checkpoint** → `/QACC` を v1a に**入れる** (S1b-⑤ を前倒し)。拒否リストは①〜④を塞ぐが**通常の定常 restart は素通り**で、毎回 FP32 `Q` から `Qacc` を作り直し蓄積を捨てていた。restart は検出できないので「restart 禁止」という逃げ道は無い。<br>**M2 帰属の交絡** → **結論を撤回し、4 残差すべてで取り直した** (§5.2 の表)。`res_ro` だけを見て全体を一般化したのが誤り。**質量・エネルギーは並べ替え上界 (max\|Δ\| 2.1e-16 / 5.8e-11) で総和丸めを除外**でき、§5.1a の「7.6 桁の桁落ち」は質量について**反証**。**運動量は `E_order/E_eval` = 0.32 で FP64 gather を除外できていない** → 後続計画の入口 A/B。<br>**M3 参照場の汚染** → `restart_field.py` に `--keep-src-dtype` を足して取り直した。`S20` は **130 倍過大** (1.96e-12 → 1.50e-14) だった。~~「入力 h5 が float32 なので不可避」~~ は誤り (読込先は `vector<geom_float>`、FP64 ビルドでは `double`)。<br>**M4 G2-L②** → **未達として残す**。「実用上不要」とは書かない。ただし**範囲縮小をユーザ決定として §6.0a に記録** (2026-09-24)。`U_rms_deep` の 4 倍差は運動量 gather の候補として後続計画へ。<br>**M5 G1 200 step** → 1 step を**局所配線ゲート**として採用、200 step は「撤回」でなく**未解決**として保持。多 step の後方互換は `case/36`+`case/48` の収束端で取る (この 2 つだけが v1a の拒否リストの内側)。<br>**M6 キー誤記** → `time.deltaT.qAccumulatorFP64` に訂正済 (`84115eb6`)。plan どおりに書くと**黙って OFF** になる誤りだった。`methods`・`plans/README`・case README の撤回済み記述も同時に除去。残りは §5.2 の「ゼロ寄与」断定の限定と provenance の要求値/実効値。<br>**m1 extraFields** → `level>=2` でも効くよう修正済 (`84115eb6`、`res_roUz` で検証)。<br>**再レビューは v1a の完了条件を満たしてから** (codex 推奨どおり `active` に残す) |
 | plan | `2026-09-23` | [2026-09-23-time_integration-fp64-accumulator-plan-2.md](../../notes/reviews/2026-09-23-time_integration-fp64-accumulator-plan-2.md) | **GO-with-changes**, C0/M5/m1 | **全件採用** (5 Major とも自分でソース確認し、いずれも codex が正しかった)。`diagnostician` に採否を諮り同意 (2026-09-23)。<br>**M1 軸 → 採用・§4.4 の私の読みが誤り**: `axisymmetricSource_d.cu:312-323` は `Q` 側と**同時に commit の基準 `roeN`/`roUyN` も射影**し、呼出 (`main.cpp:1379`) は `assembleResidual` 内 = commit (`:1671`) **より前**。`Q` 側の射影は commit `Q=Q_N+dq` で上書きされて消えるので、reconcile (`:1805`) では拾えない。→ **S1b-①** (基準射影を `Qacc` に当てる)。<br>**M2 SST → 採用**: 陰解法 (`fromN=0`) は増分で私の読みどおりだが、陽解法 (`main.cpp:1756`, `fromN=1`) は**毎段 `roK−roKN`** なので毎段引くと重複 (反例: roKN=8, 9/10/11/12 → 正 −4 / 累積 −10)。→ **S1b-②** (段別 + 補正後に `roe=(float)Qacc_roe`)。<br>**M3 周期 → 採用・`=`/`+=` の分類規則が不十分**: `periodicNode_d.cu:119` は同一自由度の**転送**で、FP32 値だけ配ると root の下位ビットが member の `Qacc` に伝わらず、値が一致すると reconcile も不発。→ **S1b-③** (FP64 同期 + 不一致カウンタ)。<br>**M4 範囲 → 採用**: 陽解法に BDF 履歴は無い (`main.cpp:1733`) ので「unsteady は履歴が要るから拒否」は dual-time にしか当たらない。G3 `case/09 run_0046` が自分の拒否条件で回せない状態だった。→ **S1b-④**。<br>**M5 checkpoint → 採用**: `/CHECKPOINT` は `unsteady==1 && dualTime==1` 限定 (`output.cpp:168`, `main.cpp:989`) で v1 が拒否する経路。追記では機能しない。→ **S1b-⑤** (`/QACC` を独立に)。<br>**副次指摘も採用**: `speciesImplicitCoupling==2` は拒否根拠なし (#14 を「拒否しない」で閉じる)、`speciesEnergyCorrection_d_wrapper` は未呼出。<br>**m1 → 採用** (§3 の「SU2 の床を下回る」、§7 の `Q` 型変更・既定 ON を除去)。<br>**§3 の前提を絞った**: 全保存量のプラトーは FP32/FP64 で 4〜5 桁一致 (別 step 区間で cv・min/max まで一致) = **丸めと無関係**。本計画は深部局所停滞だけを扱う。→ **G2 を G2-L (合否) / G2-G (対象外・不変を期待)** に分離。<br>**順序は「案 A の範囲・案 B の順序」**: case/56 の実効設定 (`tI 11 / unsteady 0 / node / 軸対称なし / 周期なし / sstEnergyIncludesK なし`) は 5 経路のどれも踏まないので、**S1a → S3 の A/B → (結果をゲートに) S1b-①〜⑤** とする |
@@ -776,3 +784,21 @@ AGENTS が戒める「過渡を定常値として報告」に該当する。
 
 - `2026-09-23` — 初稿。`case/56.gap_tp1187` の実測 (§3) から案③ を選定。
   案② (Kahan) は性能要件を満たすが `-ffast-math` で消えるリスクを理由に見送り (§4.2)。
+
+## 変更ログ
+
+- `2026-09-24`: **v1a 完了**。影アキュムレータ (保存量 5 本の FP64 正本) を **GPU・node・`tI=11`・`unsteady=0`・
+  軸対称なし・周期なし・`sstEnergyIncludesK=0`** の範囲で実装し、全ゲートを通した。
+  **成果**: `case/56` の深いすきまで、素の float32 が作っていた**偽の入熱** ($q_w$ が 2 W/m² に張り付く) と
+  **偽の下降流** (1.5e-2 m/s) が消え、全域 FP64 と一致した ($z/W\le5$ の帯平均で $q_w$ 0.00–0.57 %、
+  $T-T_w$ 0.00–0.01 %、$U_y$ 0.00–3.77 %)。$\lvert\dot m\rvert$ の 0→100k 低下倍率は
+  **61.955 (累積のみ FP64) / 62.666 (全域 FP64) / 1.014 (素の float32)**。
+  **費用**: 40.0 B/CV、速度は 65k CV で +1.77 %・100 万節点で +2.05 % (いずれも片側 95 % 上限、許容 +3 %)。
+  **限界**: 主検証の `check_convergence` は `NOT CONVERGED (stalled/plateau)` のままで、
+  **成果は局所停滞と過渡減衰の改善**である。全保存量の残差プラトーは FP32/FP64 で 4〜5 桁一致 = 丸めと無関係 (§3)。
+  **codex レビュー 6 回** (plan 3 / result 4 のうち 1 回は焦点つき)。**撤回した主張は 10 件以上**あり、
+  いずれも §6.1 のレビュー記録に残っている (とくに「並べ替え上界で総和丸めを除外」「床は面フラックス丸め」
+  「`U_rms_deep` はノイズ床」「double-float でメモリ半分」「restart は実害なし」)。
+  **後続**: [`time_integration-fp64-accumulator-rollout.md`](time_integration-fp64-accumulator-rollout.md)
+  (軸対称・SST・周期・陽解法・`tI=3`/dual-time の横展開、乱流/化学種/スカラーの累積、
+  運動量残差の gather の帰属、`U_rms_deep` の分離、過去 run の吸収棚卸し)。
