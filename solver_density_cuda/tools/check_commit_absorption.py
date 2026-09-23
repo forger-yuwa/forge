@@ -11,9 +11,19 @@ $\\lvert dq\\rvert < \\tfrac12\\mathrm{ULP}(Q)$ になった加算は**丸めで
 `[dq_block_old_0, dq_block_old_1, dq_block_old_2, dq_block_old_3, dq_block_old_4]`
 を指定して `res_1.h5` を出す。本ツールはそれを読んで $\\lvert dq\\rvert/\\mathrm{ULP}(Q)$ を出す。
 
-**読み方**: 0.5 未満の割合が大きいほど「その領域は丸めで止まっている」。
-`case/56.gap_tp1187` の深いすきまでは **99.8 %** が 0.5 未満だった (中央値 0.146)。
-一方 `case/48` の平板のように流れが活きている領域では 1 を大きく超える。
+**読み方 — これは「壊れているか」の判定ではない** (2026-09-24 に訂正):
+6 case で測ったところ、**健全な `case/48` 冷却平板でも最悪の帯で 92.2 %** が 0.5 未満だった。
+**吸収は例外でなく、float32 で「収束した」run の normal な姿**である
+(収束すれば定義上 $\lvert dq\rvert$ は小さくなり、いずれ $\tfrac12$ULP を下回る)。
+
+実測 (最悪の帯で $\lvert dq_\rho\rvert<\tfrac12$ULP だった CV の割合 / 中央値):
+`case/56` すきま **99.8 % / 0.146** ・ `case/53` 翼 CHT **93.5 % / 0.177** ・
+`case/48` 平板 **92.2 % / 0.189** ・ `case/55` 乱流すきま 52.4 % / 0.473 ・
+`case/50` 深キャビティ 22.6 % / 4.537。
+
+**正しい問いは「吸収する前に物理の答えに着いていたか」**で、本ツールだけでは決まらない。
+**判別するには `qAccumulatorFP64` の ON/OFF で答えが動くかを見る** (動けばその run は床律速だった)。
+本ツールはその**入口**として「どの領域が床に当たっているか」を示すもの。
 
 ⚠ **`rms_dq_*` 列は使えない**: `residual_history.csv` に列はあるが `main.cpp` が常に 0 を書く。
 """
@@ -45,6 +55,14 @@ with h5py.File(a.res) as h:
          for i, v in enumerate(CONS) if f"VALUE/dq_block_old_{i}" in h}
 
 order = [v for v in CONS if v in Q and v in D]
+# **全 CV で dq がちょうど 0 の成分は判定から外す** (2026-09-24)。
+# 疑似 2D の roUz などは 0/ULP = 0 になり「0.5 未満」に数えられて VERDICT を汚す。
+zero = [v for v in order if not np.any(np.asarray(D[v]) != 0.0)]
+order = [v for v in order if v not in zero]
+if zero:
+    print(f"  ⚠ 全 CV で dq=0 のため判定から除外: {zero}")
+if not order:
+    sys.exit("判定できる成分が無い (全部 dq=0)")
 n = len(next(iter(Q.values())))
 axis = {"y": 1, "x": 0}.get(a.split)
 if axis is None:
@@ -77,5 +95,8 @@ for lbl, m in groups:
         if lbl != "全域": worst = max(worst, f)
     print(line + "   " + " ".join("%6s" % x for x in fr))
 print(f"\n  最悪の帯で 0.5 未満だった割合: **{worst*100:.1f} %**")
-print("  VERDICT:", "吸収している (丸めで止まっている領域がある)" if worst > 0.5
-      else "吸収は目立たない" if worst > 0.1 else "吸収していない")
+print("  VERDICT:", "床に当たっている領域が広い" if worst > 0.5
+      else "一部が床に当たっている" if worst > 0.1 else "床には当たっていない")
+print("  ⚠ これは「結果が壊れている」判定ではない。**収束した run では正常にこうなる**")
+print("     (健全な case/48 冷却平板でも最悪の帯で 92.2 %)。")
+print("     答えが床律速だったかは **qAccumulatorFP64 の ON/OFF で場が動くか**で判別する。")
