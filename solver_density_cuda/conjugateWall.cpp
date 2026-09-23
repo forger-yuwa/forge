@@ -652,7 +652,7 @@ void appendInterfaceHistory(int iStep, int physID, int n, double tmean, double t
 //   (K_s(u^k) + E^T D_f E) u^{k+1} = b_s + E^T [ Q_f + D_f E u^k ]
 // Q_f は**固体側の集中辺長** × `iface_q_eff` [W/m2] で作る (流体の surfArea は使わない)。
 // D_f は界面対角のみ (g_f A_i)。受理判定・line search・Anderson は持ち込まない (§4.6a)。
-void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
+void updateFem2dWall(const solverConfig& cfg, const mesh& msh, variables& var, bcond& bc,
                      const FirstInterior& fi, const std::vector<flow_float>* qeff,
                      const std::vector<flow_float>* Qfeff,
                      const std::vector<flow_float>& T, const std::vector<flow_float>& thermCond,
@@ -772,15 +772,25 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
     for (int i = 0; i < st.mesh.nNodes; i++) rhs[i] = st.u[i] + delta[i];
 
     // ---- 安全装置 (自動調整はしない。止めて報告する。§4.6a) ----
-    // 上限は**ガス側の全温** (bcond の Tt の最大) + 20 K。固体がガスより熱くなることはない。
-    // (codex result 2026-09-23 M6: 下限しか見ていなかった)
-    double tcMin = 1e30, ttMax = -1e30;
+    // 上限は**場から計算した全温** $T+|u|^2/(2c_p)$ の最大 + 20 K。固体がガスより熱くなることはない。
+    // **bcond の `Tt` は使わない** (2026-09-24 に誤爆): case/48 の `outlet_statPress` が持つ `Tt: 283` は
+    // 出口逆流用の値で、ガスの全温 (M4.19 で約 1276 K) ではない。これを上限にすると、
+    // 正常な固体温度 332 K が「範囲外」で停止した。
+    double tcMin = 1e30;
     for (const double t : st.mesh.robinTc) tcMin = std::min(tcMin, t);
-    for (const bcond& b2 : msh.bconds) {
-        const auto itt = b2.inputFloats.find("Tt");
-        if (itt != b2.inputFloats.end()) ttMax = std::max(ttMax, (double)itt->second);
+    double t0Max = -1e30;
+    {
+        const std::vector<flow_float> Ux = pullField(cfg, var, "Ux", msh.nCells);
+        const std::vector<flow_float> Uy = pullField(cfg, var, "Uy", msh.nCells);
+        const std::vector<flow_float> Uz = pullField(cfg, var, "Uz", msh.nCells);
+        for (geom_int i = 0; i < msh.nCells; i++) {
+            const double cpi = (double)cp[i];
+            if (!(cpi > 0.0)) continue;
+            const double u2 = (double)Ux[i]*Ux[i] + (double)Uy[i]*Uy[i] + (double)Uz[i]*Uz[i];
+            t0Max = std::max(t0Max, (double)T[i] + 0.5*u2/cpi);
+        }
     }
-    const double tHi = (ttMax > -1e29) ? ttMax + 20.0 : 1e30;   // Tt を持つ bcond が無ければ上限なし
+    const double tHi = (t0Max > -1e29) ? t0Max + 20.0 : 1e30;
     for (int i = 0; i < st.mesh.nNodes; i++) {
         if (!std::isfinite(rhs[i]) || rhs[i] < tcMin - 20.0 || rhs[i] > tHi) {
             std::cerr << "[conjugateWall] ERROR: step " << iStep << " physID " << bc.physID
@@ -893,7 +903,7 @@ void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, in
             qeff = &itq->second;
         }
 
-        if (femMode) { updateFem2dWall(cfg, msh, bc, fi, qeff, Qfeff, T, thermCond, cp, visTurb, iStep); continue; }
+        if (femMode) { updateFem2dWall(cfg, msh, var, bc, fi, qeff, Qfeff, T, thermCond, cp, visTurb, iStep); continue; }
 
         auto& Ts = bc.bvar["Ts"];
         double dTmax = 0.0;
