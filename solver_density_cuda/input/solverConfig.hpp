@@ -58,6 +58,9 @@ public:
     // `q_compact` は旧実装 (k_eff(T_1-T_w)/d_1 の抵抗加重平均) の再現用で、A/B のときだけ使う。
     std::string conjugateFlux = "q_eff";
     std::string conjugateSolidFile;      // fem2d: tools/solid_mesh_to_h5.py が作った固体 HDF5
+    // 更新に使う界面熱量を **N 更新の後方移動平均**にする (既定 1 = 平均しない)。
+    // 流体側に局所振動があるとき、瞬時値では界面ゲートが床に当たる (plan §5.1 #70)。
+    int    conjugateFluxAvg = 1;
     double conjugateDfScale = 1.0;       // D_f の倍率 (発散したとき手で上げる。自動調整はしない)
     // 界面ゲート (G-if) の許容。**run を投入する前に書く** = 結果を見てから決めない仕組み。
     // ソルバが起動時に conjugate_gate.json に写し、tools/check_cht_interface.py がそれで判定する。

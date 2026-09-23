@@ -513,6 +513,9 @@ void solverConfig::read(std::string fname)
                 if (!(this->conjugateThickness > 0.0) || !(this->conjugateKsolid > 0.0))
                     throw std::runtime_error("'conjugate': thickness and k_solid must be positive.");
             }
+            this->conjugateFluxAvg   = getOptionalValidatedValue<int>(cj, "flux_avg", 1, "conjugate");
+            if (this->conjugateFluxAvg < 1)
+                throw std::runtime_error("'conjugate': flux_avg must be >= 1.");
             this->conjugateDfScale   = getOptionalValidatedValue<double>(cj, "Df_scale", 1.0, "conjugate");
             if (cj["gate"]) {
                 auto g = cj["gate"];

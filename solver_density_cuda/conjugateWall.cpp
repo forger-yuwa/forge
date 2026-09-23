@@ -364,7 +364,9 @@ struct SolidState {
     std::vector<int>    wallOfIface;   // 界面節点 -> 壁 bplane index (座標一致で 1 対 1)
     std::vector<double> lumped;        // 界面節点の集中辺長 [m]
     std::vector<double> u;             // 固体全節点温度 [K] (これが状態)
-    std::vector<double> qIface;        // 直近の界面荷重 [W/m] (出力用)
+    std::vector<double> qIface;        // 直近の界面荷重 [W/m] (出力用。平均後の値)
+    std::vector<std::vector<double>> qBuf;  // 界面熱量の環状バッファ (flux_avg 更新分)
+    size_t qPos = 0, qFilled = 0;      // 書き込み位置と充填数
     double dTprev = -1.0;
     int    nGrow  = 0;                 // dTw が増え続けた回数 (発散検知)
     bool   ready  = false;
@@ -598,7 +600,25 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
         Twk[i] = (double)Ts[ib];
     }
 
+    // ---- 流束の時間平均 (plan §5.1 #70 / §6 V4b(g)) ----
+    // 流体側に局所振動があると**瞬時の $Q_f$ では界面ゲートが床に当たる** (C3X 吸込面の k オンセット
+    // 前線が周期 1012 step で揺れ、最悪節点の $Q_f$ が中央値の 78 倍ばらつく)。N 更新の後方移動平均を
+    // 使う。$D_f$ は平均しない (固定点に効かず、反復経路だけを決めるため)。
+    const int navg = std::max(1, cfg.conjugateFluxAvg);
+    if (navg > 1) {
+        if (st.qBuf.size() != (size_t)navg) { st.qBuf.assign(navg, std::vector<double>(ni, 0.0)); st.qPos = 0; st.qFilled = 0; }
+        st.qBuf[st.qPos] = Qf;
+        st.qPos = (st.qPos + 1) % (size_t)navg;
+        st.qFilled = std::min(st.qFilled + 1, (size_t)navg);
+        for (int i = 0; i < ni; i++) {
+            double sum = 0.0;
+            for (size_t k = 0; k < st.qFilled; k++) sum += st.qBuf[k][i];
+            Qf[i] = sum / (double)st.qFilled;
+        }
+    }
+
     // ---- G-if: **更新前 (未緩和)** の界面残差 r_i = (K u^k - b)_i - Q_f,i ----
+    // (平均を使っているときは**平均後の $Q_f$ で**測る = 実際に解いている方程式の残差にする)
     const std::vector<double> r0 = st.fem->residual(st.u);
     double resAbs = 0.0, resMax = 0.0, qfMax = 0.0, qTotal = 0.0, resSolid = 0.0;
     {
@@ -668,6 +688,7 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
 
     if (iStep % (cfg.conjugateInterval * 20) == 0)
         std::cout << "[conjugateWall] step " << iStep << " physID " << bc.physID
+                  << (navg > 1 ? " (flux_avg " + std::to_string(st.qFilled) + "/" + std::to_string(navg) + ")" : "")
                   << ": Tw " << tmin << " .. " << tmax << " K, max|dTw| " << dTmax
                   << " K, if-res " << resAbs << " W/m2 (rel "
                   << (qfMax > 0.0 ? resMax / qfMax : 0.0) << "), solid-res " << resSolid
