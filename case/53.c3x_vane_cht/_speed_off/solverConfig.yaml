@@ -1,0 +1,20 @@
+# C3X cascade — stage main
+mesh: {discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: "mesh.h5", valueFileName: "mesh.h5"}
+gpu: 1
+solver: "SLAU"
+physProp: {thermalMethod: 0, viscMethod: 1, visc: 3.3e-5, thermCond: 0.05, thermCondMethod: 1, prandtlLam: 0.72, cp: 1004.5, gamma: 1.4}
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {nStepOuter: 4000}
+  deltaT: {control: 1, dt: 1e-9, cfl: 0.5, cfl_pseudo: 0.5, implicitRelax: 1.0, blockDPLUR: 1, lowMachPrecond: 0, dt_min: 1e-12, dt_max: 1.0, detectNaN: 1}
+  outStepStart: 0
+  outStepInterval: 4000
+  timeIntegration: 11
+  nStepInner: 4
+space: {convMethod: 1, limiter: 2, pRef: 250000.0, reconT: 1}
+turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 0, katoLaunder: 0, wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInf: 55.55, omegaInf: 217233.0}
+output: {level: 1, interfaceDiag: 1}
+initial: "uniform_p101325_u10"
+# ソルバ内連成 (Phase 2, mode: fem2d)。固体は solid.h5 が正本 (メッシュ・孔 Robin・k_s(T))。
+# plan boundary-conjugate-heat-transfer §4.6a / §6 V4b。

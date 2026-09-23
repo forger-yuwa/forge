@@ -1,0 +1,7 @@
+date        : 2026-09-23T21:43:02+09:00
+forge_bin   : /home/sano/work/forge-cht/solver_density_cuda/.build-native/release/forge
+forge_mtime : 2026-09-23T21:39:56+09:00
+forge_sha256: 77c3455619dd59a6e2e0d9c8fc573de004dcf145ca37d64e8e8a2079baddfc12
+git_head    : fea7a97402be3f645403d6c967f83714294b34d6
+git_dirty   : 7 件
+host        : DESKTOP-S8N5ES6

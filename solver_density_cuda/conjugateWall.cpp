@@ -198,6 +198,10 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
     // 引く前の値は `iface_q_eff_raw`。定常 ($R_\rho=0$) では一致する。block-DPLUR の実際の更新量とは
     // 一般に一致しないので「半離散式に基づく推定」である。
     std::vector<flow_float> d_qeff_raw(nbp, std::numeric_limits<flow_float>::quiet_NaN());
+    // **積分済みの節点荷重** [W] (平面 2D は W/m)。連成にはこれをそのまま渡す。
+    // 面積で割って固体側の集中辺長を掛け直すと、両者が違う角で荷重が歪む
+    // (実測: Mark II 後縁の角で L/A=1.299、2.076 -> 2.634 W/m。codex result 2026-09-23 M3)。
+    std::vector<flow_float> d_Qeff(nbp, std::numeric_limits<flow_float>::quiet_NaN());
     const auto itRo = bc.bvar.find("ifaceRro");
     const bool hasRro = (itRo != bc.bvar.end() && (geom_int)itRo->second.size() >= nbp);
     std::vector<flow_float> f_ro, f_roe;
@@ -232,6 +236,7 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
             if (hasRro && !weakIso && f_ro[ic] > (flow_float)0.0)
                 store = (double)f_roe[ic] / (double)f_ro[ic] * (double)itRo->second[ib];
             d_qeff[ib] = (flow_float)((Rraw - Fw - store) / area);
+            d_Qeff[ib] = (flow_float)(Rraw - Fw - store);      // 積分済み (面積で割らない)
         }
     }
 
@@ -284,6 +289,7 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
     bc.diagVar["iface_align"]     = std::move(d_al);
     bc.diagVar["iface_q_eff"]     = std::move(d_qeff);
     bc.diagVar["iface_q_eff_raw"] = std::move(d_qeff_raw);   // 蓄積項 $e_w R_\rho$ を引く前 (旧定義)
+    bc.diagVar["iface_Qf_eff"]    = std::move(d_Qeff);       // **連成に渡す積分済み荷重** [W or W/m]
 }
 
 void checkWallTemperatureSharing(const solverConfig& cfg, const mesh& msh)
@@ -366,6 +372,7 @@ struct SolidState {
     std::vector<double> u;             // 固体全節点温度 [K] (これが状態)
     std::vector<double> qIface;        // 直近の界面荷重 [W/m] (出力用。平均後の値)
     std::vector<double> uFact;         // 分解を作ったときの温度 (再分解の判定用)
+    double dTgrowStart = -1.0;         // dTw が増え始めたときの値 (累積増幅の判定用)
     std::vector<double> dfFact;        // **そのとき使った D_f** (再利用中は右辺もこれで組む)
     bool hasFact = false;
     long nFact = 0, nUpdate = 0;       // 分解した回数 / 更新回数 (コストの記録)
@@ -458,6 +465,55 @@ void initSolidFem2d(const solverConfig& cfg, const mesh& msh, const bcond& bc)
     for (int i = 0; i < ni; i++)
         if (itTs != bc.bvar.end() && st.wallOfIface[i] < (int)itTs->second.size())
             st.u[st.mesh.ifaceNodes[i]] = (double)itTs->second[st.wallOfIface[i]];
+
+    // ---- 再開: `conjugate_state_<physID>.h5` があれば固体状態と平均バッファを復元する ----
+    // (codex result 2026-09-23 M4: 書くだけで読んでいなかった。壁温 CSV だけでは
+    //  内部温度と 42 更新の荷重履歴が失われ、連続実行と再開が別物になる)
+    const std::string stateFile = "conjugate_state_" + std::to_string(bc.physID) + ".h5";
+    if (std::ifstream(stateFile).good()) {
+        try {
+            HighFive::File f(stateFile, HighFive::File::ReadOnly);
+            std::string sha;
+            if (f.hasAttribute("iface_sha1")) f.getAttribute("iface_sha1").read(sha);
+            if (!sha.empty() && !st.mesh.ifaceSha1.empty() && sha != st.mesh.ifaceSha1) {
+                std::cerr << "[conjugateWall] ERROR: " << stateFile << " の iface_sha1 (" << sha
+                          << ") が固体メッシュ (" << st.mesh.ifaceSha1 << ") と違う。"
+                             "別の固体の状態から再開しようとしている。\n";
+                exit(EXIT_FAILURE);
+            }
+            std::vector<double> u0;
+            f.getDataSet("SOLID/T").read(u0);
+            if ((int)u0.size() != st.mesh.nNodes) {
+                std::cerr << "[conjugateWall] ERROR: " << stateFile << " の SOLID/T が "
+                          << u0.size() << " 点 (固体は " << st.mesh.nNodes << " 点)。\n";
+                exit(EXIT_FAILURE);
+            }
+            st.u = u0;
+            int savedAvg = 1;
+            if (f.hasAttribute("flux_avg")) f.getAttribute("flux_avg").read(savedAvg);
+            if (f.exist("SOLID/QBUF") && savedAvg == std::max(1, cfg.conjugateFluxAvg)) {
+                std::vector<std::vector<double>> buf;
+                f.getDataSet("SOLID/QBUF").read(buf);
+                st.qBuf.assign(buf.begin(), buf.end());
+                int qp = 0, qf = 0, nu = 0;
+                if (f.hasAttribute("q_pos")) f.getAttribute("q_pos").read(qp);
+                if (f.hasAttribute("q_filled")) f.getAttribute("q_filled").read(qf);
+                if (f.hasAttribute("n_update")) f.getAttribute("n_update").read(nu);
+                st.qPos = (size_t)qp; st.qFilled = (size_t)qf; st.nUpdate = nu;
+                std::cout << "[conjugateWall] physID " << bc.physID << ": " << stateFile
+                          << " から再開 (平均バッファ " << qf << "/" << savedAvg
+                          << ", 更新 " << nu << " 回目から)" << std::endl;
+            } else {
+                std::cout << "[conjugateWall] physID " << bc.physID << ": " << stateFile
+                          << " から固体温度のみ復元 (flux_avg が保存時 " << savedAvg
+                          << " / 今回 " << std::max(1, cfg.conjugateFluxAvg)
+                          << " で違うのでバッファは捨てる)" << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[conjugateWall] ERROR: " << stateFile << " を読めない: " << e.what() << "\n";
+            exit(EXIT_FAILURE);
+        }
+    }
     st.ready = true;
 
     std::cout << "[conjugateWall] physID " << bc.physID << ": solid fem2d "
@@ -526,6 +582,8 @@ void initConjugateWalls(const solverConfig& cfg, const mesh& msh)
             << ",\n  \"dT_K\": " << cfg.conjugateGateDtK
             << ",\n  \"n_consec\": " << cfg.conjugateGateNConsec;
         if (cfg.conjugateGateTolSolid >= 0.0) ofs << ",\n  \"tol_solid\": " << cfg.conjugateGateTolSolid;
+        ofs << ",\n  \"flux_avg\": " << std::max(1, cfg.conjugateFluxAvg)
+            << ",\n  \"mode\": \"" << cfg.conjugateMode << "\"";
         ofs << "\n}\n";
         std::cout << "[conjugateWall] G-if の許容を conjugate_gate.json に登録した "
                      "(eps_rel " << cfg.conjugateGateEpsRel << ", eps_abs " << cfg.conjugateGateEpsAbs
@@ -547,20 +605,24 @@ namespace {
 // G-if の履歴 1 行 (local1d と共通の書式にする)。
 void appendInterfaceHistory(int iStep, int physID, int n, double tmean, double tmin, double tmax,
                             double dTmax, double resAbs, double resMax, double resRel,
-                            double qTotal, double resSolid)
+                            double qTotal, double resSolid,
+                            int nAvg, int nFilled, long update)
 {
     static bool headerDone = false;
     const std::string fn = "conjugate_history.csv";
     const bool needHeader = !headerDone && !std::ifstream(fn).good();
     std::ofstream ofs(fn, std::ios::app);
     if (needHeader)
+        // **平均窓と更新番号も出す** — 判定側が「バッファ充填後 2N 更新待つ」を実装できるようにする
+        // (codex result 2026-09-23 M2。これが無いと未完成の窓を PASS にできてしまう)。
         ofs << "step,physID,n,Tw_mean,Tw_min,Tw_max,dTw_max,res_abs_Wm2,res_max_W,res_rel,"
-               "q_total,res_solid\n";
+               "q_total,res_solid,n_avg,n_filled,update\n";
     headerDone = true;
     ofs.precision(10);
     ofs << iStep << "," << physID << "," << n << ","
         << std::scientific << tmean << "," << tmin << "," << tmax << "," << dTmax << ","
-        << resAbs << "," << resMax << "," << resRel << "," << qTotal << "," << resSolid << "\n";
+        << resAbs << "," << resMax << "," << resRel << "," << qTotal << "," << resSolid
+        << "," << nAvg << "," << nFilled << "," << update << "\n";
 }
 
 } // namespace
@@ -571,6 +633,7 @@ void appendInterfaceHistory(int iStep, int physID, int n, double tmean, double t
 // D_f は界面対角のみ (g_f A_i)。受理判定・line search・Anderson は持ち込まない (§4.6a)。
 void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
                      const FirstInterior& fi, const std::vector<flow_float>* qeff,
+                     const std::vector<flow_float>* Qfeff,
                      const std::vector<flow_float>& T, const std::vector<flow_float>& thermCond,
                      const std::vector<flow_float>& cp, const std::vector<flow_float>& visTurb,
                      int iStep)
@@ -585,6 +648,20 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
         const int ib = st.wallOfIface[i];
         const geom_int ic = bc.iCells[ib];
         double q = 0.0;
+        if (Qfeff) {
+            // **積分済み荷重をそのまま使う** (面積で割って辺長を掛け直さない。codex result M3)。
+            const double Q = (double)(*Qfeff)[ib];
+            if (!std::isfinite(Q)) {
+                std::cerr << "[conjugateWall] ERROR: physID " << bc.physID
+                          << ": iface_Qf_eff が界面節点 " << i << " で非有限。\n";
+                exit(EXIT_FAILURE);
+            }
+            Qf[i] = Q;
+            const double keff0 = (double)thermCond[ic] + (double)cp[ic]*(double)visTurb[ic]/cfg.turbulentPrandtl;
+            Df[i]  = keff0 / fi.d1[ib] * st.lumped[i] * cfg.conjugateDfScale;
+            Twk[i] = (double)Ts[ib];
+            continue;
+        }
         if (qeff) {
             q = (double)(*qeff)[ib];
             if (!std::isfinite(q)) {
@@ -621,29 +698,15 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
         }
     }
 
-    // ---- 分解を再利用するか決める (§4.6a) ----
-    // **$D_f$ は分解と一緒に凍結する**。行列側が古い $D_f$ のまま右辺だけ新しい $D_f$ にすると、
-    // 固定点が $K u-b-Q_f=(D_f^{new}-D_f^{old})T_w$ にずれて連成が振動する
-    // (2026-09-23 に実測: `res_rel` 1.8e-4 -> 1.5e-2、窓内の壁温の振れ 2.34 K)。
-    double dFact = 1e30;
-    if (st.hasFact && st.uFact.size() == st.u.size()) {
-        dFact = 0.0;
-        for (size_t i = 0; i < st.u.size(); i++) dFact = std::max(dFact, std::fabs(st.u[i] - st.uFact[i]));
-    }
-    const bool doFactor = (!st.hasFact || dFact > cfg.conjugateRefactorDT);
-    if (doFactor) st.dfFact = Df;
-    const std::vector<double>& Dfu = st.dfFact;      // 実際に使う D_f (再利用中は凍結されたもの)
-
-    // ---- 組立てと右辺 ----
-    st.fem->assemble(st.u, Dfu);
+    // ---- 組立てと右辺 (**常に現在の $k_s(u)$ と現在の $D_f$**) ----
+    st.fem->assemble(st.u, Df);
     std::vector<double> rhs = st.fem->rhs();
-    for (int i = 0; i < ni; i++) rhs[st.mesh.ifaceNodes[i]] += Qf[i] + Dfu[i] * Twk[i];
+    for (int i = 0; i < ni; i++) rhs[st.mesh.ifaceNodes[i]] += Qf[i] + Df[i] * Twk[i];
 
-    // ---- G-if: **更新前 (未緩和)** の界面残差 ----
-    // $r = (K+D_f)u^k - (b + Q_f + D_fT_w^k)$ を使う。界面では $u^k_{\rm iface}=T_w^k$ に
-    // 揃えてあるので $D_f$ の項は厳密に相殺し、$r_i = (K u^k - b)_i - Q_{f,i}$ に一致する
-    // (組み直さずに済むので、分解の再利用と両立する)。平均を使っているときは**平均後の $Q_f$**
-    // で測る = 実際に解いている方程式の残差にする。
+    // ---- G-if と更新の素材: **更新前 (未緩和)** の残差 ----
+    // $r = (K+D_f)u^k - (b + Q_f + D_fT_w^k)$。界面では $u^k_{\rm iface}=T_w^k$ に揃えてあるので
+    // $D_f$ の項は厳密に相殺し、$r = (K(u^k)u^k - b) - E^{\mathsf T}Q_f$ に一致する
+    // (= **$D_f$ に依らない**)。平均を使っているときは平均後の $Q_f$ で測る。
     const std::vector<double> Au = st.fem->matvec(st.u);
     double resAbs = 0.0, resMax = 0.0, qfMax = 0.0, qTotal = 0.0, resSolid = 0.0;
     {
@@ -661,21 +724,41 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
             if (!isIface[i]) resSolid = std::max(resSolid, std::fabs(Au[i] - rhs[i]));
     }
 
-    // ---- 分解 (分解が 8 ms、組立てが 1 ms。ここを毎回やると per-step コストが跳ねる) ----
+    // ---- 更新は**残差補正形**で解く (codex result 2026-09-23 M1) ----
+    //   $\Delta = -A_{\rm old}^{-1} r$,   $u^{k+1} = u^k + \Delta$
+    // 残差 $r$ は**現在の $k_s(u)$** で組んだ作用素から作るので、**固定点は常に現在の物性**で決まる
+    // ($A_{\rm old}$ は前処理としてしか効かない)。直接 $A_{\rm old}u^{k+1}=b$ を解き続けると、
+    // 固定点が $K_s(u_{\rm fact})u=b+Q$ のまま凍り、現在物性で解き直すと温度が動く
+    // (実測 0.0368 K / 内部残差 0.0318 W/m)。$D_f$ の凍結も不要になる ($r$ が $D_f$ に依らないため)。
     st.nUpdate++;
-    if (doFactor) {
+    double dFact = 1e30;
+    if (st.hasFact && st.uFact.size() == st.u.size()) {
+        dFact = 0.0;
+        for (size_t i = 0; i < st.u.size(); i++) dFact = std::max(dFact, std::fabs(st.u[i] - st.uFact[i]));
+    }
+    if (!st.hasFact || dFact > cfg.conjugateRefactorDT) {
         st.fem->factorize();
         st.uFact = st.u;
         st.hasFact = true;
         st.nFact++;
     }
-    st.fem->solveInPlace(rhs);
+    std::vector<double> delta(st.mesh.nNodes);
+    for (int i = 0; i < st.mesh.nNodes; i++) delta[i] = -(Au[i] - rhs[i]);
+    st.fem->solveInPlace(delta);
+    for (int i = 0; i < st.mesh.nNodes; i++) rhs[i] = st.u[i] + delta[i];
 
     // ---- 安全装置 (自動調整はしない。止めて報告する。§4.6a) ----
-    double tcMin = 1e30;
+    // 上限は**ガス側の全温** (bcond の Tt の最大) + 20 K。固体がガスより熱くなることはない。
+    // (codex result 2026-09-23 M6: 下限しか見ていなかった)
+    double tcMin = 1e30, ttMax = -1e30;
     for (const double t : st.mesh.robinTc) tcMin = std::min(tcMin, t);
+    for (const bcond& b2 : msh.bconds) {
+        const auto itt = b2.inputFloats.find("Tt");
+        if (itt != b2.inputFloats.end()) ttMax = std::max(ttMax, (double)itt->second);
+    }
+    const double tHi = (ttMax > -1e29) ? ttMax + 20.0 : 1e30;   // Tt を持つ bcond が無ければ上限なし
     for (int i = 0; i < st.mesh.nNodes; i++) {
-        if (!std::isfinite(rhs[i]) || rhs[i] < tcMin - 20.0) {
+        if (!std::isfinite(rhs[i]) || rhs[i] < tcMin - 20.0 || rhs[i] > tHi) {
             std::cerr << "[conjugateWall] ERROR: step " << iStep << " physID " << bc.physID
                       << ": 固体温度が範囲外 (節点 " << i << " = " << rhs[i] << " K, 下限 "
                       << tcMin - 20.0 << ")。連成が発散している。\n"
@@ -700,11 +783,23 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
     st.qIface.assign(ni, 0.0);
     for (int i = 0; i < ni; i++) st.qIface[i] = Qf[i];
 
-    if (st.dTprev >= 0.0 && dTmax > st.dTprev) st.nGrow++; else st.nGrow = 0;
-    if (st.nGrow >= 10 && st.dTprev > 0.0 && dTmax > 2.0 * st.dTprev) {
+    // **増加区間の始点からの累積増幅**で見る (codex result 2026-09-23 M6)。
+    // 「直前比 2 倍」だけだと、毎回 1.1 倍 (10 更新で 2.59 倍) の発散を見逃す。
+    if (st.dTprev >= 0.0 && dTmax > st.dTprev) {
+        if (st.nGrow == 0) st.dTgrowStart = st.dTprev;
+        st.nGrow++;
+    } else {
+        st.nGrow = 0;
+        st.dTgrowStart = -1.0;
+    }
+    // **収束域では発散判定しない**。更新量が登録した許容 (`gate.dT_K`) 以下なら、ノイズで 2 倍に
+    // なっても発散ではない (2026-09-23: `dTw` 0.0025 -> 0.005 K = 許容 1e-2 K の半分で誤爆した)。
+    const double dtFloor = (cfg.conjugateGateSet == 1) ? cfg.conjugateGateDtK : 1.0e-2;
+    if (dTmax > dtFloor && st.nGrow >= 10 && st.dTgrowStart > 0.0 && dTmax > 2.0 * st.dTgrowStart) {
         std::cerr << "[conjugateWall] ERROR: step " << iStep << " physID " << bc.physID
-                  << ": max|dTw| が 10 更新連続で増え、かつ 2 倍を超えた ("
-                  << st.dTprev << " -> " << dTmax << " K)。連成が発散している。\n";
+                  << ": max|dTw| が " << st.nGrow << " 更新連続で増え、増加区間の始点から "
+                  << (dTmax / st.dTgrowStart) << " 倍になった (" << st.dTgrowStart << " -> "
+                  << dTmax << " K)。連成が発散している。\n";
         exit(EXIT_FAILURE);
     }
     st.dTprev = dTmax;
@@ -713,7 +808,8 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
         cudaWrapper::cudaMemcpy_H2D_wrapper(Ts.data(), bc.bvar_d["Ts"], (geom_int)Ts.size());
 
     appendInterfaceHistory(iStep, bc.physID, ni, tsum / std::max(1, ni), tmin, tmax, dTmax,
-                           resAbs, resMax, (qfMax > 0.0 ? resMax / qfMax : 0.0), qTotal, resSolid);
+                           resAbs, resMax, (qfMax > 0.0 ? resMax / qfMax : 0.0), qTotal, resSolid,
+                           navg, (int)st.qFilled, st.nUpdate);
 
     if (iStep % (cfg.conjugateInterval * 20) == 0)
         std::cout << "[conjugateWall] step " << iStep << " physID " << bc.physID
@@ -748,9 +844,12 @@ void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, in
         // `iface_q_eff` = $(R^{raw}-F_w-e_wR_\rho)/A$ (定義と符号は本ファイル冒頭と methods/boundary.md)。
         // 素材 (`ifaceFw`/`ifaceRraw`/`ifaceRro`) はデバイス側で毎 step 採れているので D2H だけで足りる。
         const std::vector<flow_float>* qeff = nullptr;
+        const std::vector<flow_float>* Qfeff = nullptr;   // 積分済み荷重 (fem2d が使う)
         if (useEff) {
             bc.copyVariables_bplane_D2H();
             fillInterfaceDiagnostics(cfg, msh, var, bc);
+            const auto itQ = bc.diagVar.find("iface_Qf_eff");
+            if (itQ != bc.diagVar.end() && itQ->second.size() >= bc.iCells.size()) Qfeff = &itQ->second;
             const auto itq = bc.diagVar.find("iface_q_eff");
             if (itq == bc.diagVar.end() || itq->second.size() < bc.iCells.size()) {
                 std::cerr << "[conjugateWall] ERROR: physID " << bc.physID
@@ -761,7 +860,7 @@ void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, in
             qeff = &itq->second;
         }
 
-        if (femMode) { updateFem2dWall(cfg, msh, bc, fi, qeff, T, thermCond, cp, visTurb, iStep); continue; }
+        if (femMode) { updateFem2dWall(cfg, msh, bc, fi, qeff, Qfeff, T, thermCond, cp, visTurb, iStep); continue; }
 
         auto& Ts = bc.bvar["Ts"];
         double dTmax = 0.0;
@@ -879,8 +978,18 @@ void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
                     HighFive::File f("conjugate_state_" + std::to_string(bc.physID) + ".h5",
                                      HighFive::File::Overwrite);
                     f.createDataSet("SOLID/T", st.u);
+                    // **平均バッファと更新位相も保存する** (codex result 2026-09-23 M4)。
+                    // 壁温 CSV だけでは連成状態 (内部温度・42 更新の荷重履歴) が失われる。
+                    if (!st.qBuf.empty()) {
+                        std::vector<std::vector<double>> buf(st.qBuf.begin(), st.qBuf.end());
+                        f.createDataSet("SOLID/QBUF", buf);
+                    }
                     f.createAttribute("step", iStep);
                     f.createAttribute("iface_sha1", st.mesh.ifaceSha1);
+                    f.createAttribute("q_pos", (int)st.qPos);
+                    f.createAttribute("q_filled", (int)st.qFilled);
+                    f.createAttribute("n_update", (int)st.nUpdate);
+                    f.createAttribute("flux_avg", (int)std::max(1, cfg.conjugateFluxAvg));
                 } catch (const std::exception& e) {
                     std::cerr << "[conjugateWall] WARNING: conjugate_state を書けない: "
                               << e.what() << "\n";

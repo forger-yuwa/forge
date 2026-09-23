@@ -1,4 +1,5 @@
 #include "input/solverConfig.hpp"
+#include <set>
 #include <cctype>
 
 
@@ -501,6 +502,27 @@ void solverConfig::read(std::string fname)
         if (config["conjugate"]) {
             auto cj = config["conjugate"];
             this->conjugateEnabled   = 1;
+            // **未知キーを拒否する** (codex result 2026-09-23 m9)。`flux_avgg: 42` のような綴り違いが
+            // 黙って無視されて既定値に落ちると、設定を変えたつもりの run が同じ結果になる
+            // (§5.1 #52 と同じ事故。turbulence.kInf で 4 run を無駄にした)。
+            {
+                static const std::set<std::string> allowedCj = {
+                    "mode", "solid", "flux", "flux_avg", "thickness", "k_solid", "back", "T_b", "h_c",
+                    "interval", "warmup", "relax", "Df_scale", "refactorDT", "gate"};
+                static const std::set<std::string> allowedGate = {
+                    "eps_rel", "eps_abs_Wm2", "dT_K", "n_consec", "tol_solid"};
+                for (auto it = cj.begin(); it != cj.end(); ++it) {
+                    const std::string key = it->first.as<std::string>();
+                    if (allowedCj.count(key) == 0)
+                        throw std::runtime_error("Unknown key '" + key + "' in 'conjugate'.");
+                    if (key == "gate" && it->second.IsMap())
+                        for (auto g = it->second.begin(); g != it->second.end(); ++g) {
+                            const std::string gk = g->first.as<std::string>();
+                            if (allowedGate.count(gk) == 0)
+                                throw std::runtime_error("Unknown key '" + gk + "' in 'conjugate.gate'.");
+                        }
+                }
+            }
             this->conjugateMode      = getOptionalValidatedValue<std::string>(cj, "mode", std::string("local1d"), "conjugate");
             if (this->conjugateMode != "local1d" && this->conjugateMode != "fem2d")
                 throw std::runtime_error("Key 'mode' in 'conjugate' must be 'local1d' or 'fem2d' (shell2d は外部ループ tools/cht_loop.py を使う).");

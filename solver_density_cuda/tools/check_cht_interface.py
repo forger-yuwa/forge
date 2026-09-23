@@ -80,6 +80,9 @@ def main() -> int:
                     [f"  許容が登録されていない: {', '.join(missing)}",
                      "  **結果を見てから決めないこと**。plan §6 に書いた値を --gate-json か CLI で渡す。"])
 
+    mode = gate.get("mode")
+    n_avg = int(gate.get("flux_avg", 1) or 1)
+
     rows = list(csv.DictReader(open(hist)))
     if not rows:
         return fail(run, "REFUSED", ["  conjugate_history.csv が空 (更新が 1 回も起きていない)"])
@@ -101,6 +104,32 @@ def main() -> int:
             return float(r[k])
         except (TypeError, ValueError):
             return math.nan
+
+    # **平均バッファが満ちてから 2N 更新待つ** (§6 V4b(g))。窓の先頭がその待機期間に入っていたら
+    # 判定しない (codex result 2026-09-23 M2: 待機を見ないと未完成の窓を PASS にできてしまう)。
+    if n_avg > 1:
+        if "update" not in rows[0] or "n_filled" not in rows[0]:
+            return fail(run, "REFUSED",
+                        ["  flux_avg > 1 なのに履歴に update / n_filled 列が無い",
+                         "  (古い run。平均窓の待機を検査できないので合格にしない)"])
+        need = 2 * n_avg
+        rows_ok = [r for r in rows if int(float(r["n_filled"])) >= n_avg
+                   and int(float(r["update"])) >= need]
+        if len(rows_ok) < n_consec:
+            return fail(run, "NOT CONVERGED",
+                        [f"  flux_avg={n_avg}: バッファ充填後 2N={need} 更新を過ぎた行が "
+                         f"{len(rows_ok)} 行しかない (n_consec={n_consec})"])
+        rows = rows_ok
+
+    # **`fem2d` では固体内部残差を必須にする** (codex result 2026-09-23 M2)。
+    # 列も許容も無いまま「検査を省略して PASS」を出さない。
+    if (mode == "fem2d") or ("res_solid" in rows[0]):
+        if "res_solid" not in rows[0]:
+            return fail(run, "REFUSED", ["  mode=fem2d なのに履歴に res_solid 列が無い"])
+        if tol_solid is None:
+            return fail(run, "REFUSED",
+                        ["  固体内部残差の許容 (tol_solid) が登録されていない",
+                         "  conjugate.gate に tol_solid を書くか --tol-solid で渡すこと"])
 
     tail = rows[-n_consec:]
     vals = {k: [col(r, k) for r in tail] for k in ("dTw_max", "res_abs_Wm2", "res_rel")}

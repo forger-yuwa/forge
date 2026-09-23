@@ -102,6 +102,11 @@ YAML_HARD_PATHS = [
     ("conjugate.thickness", ("conjugate", "thickness")),
     ("conjugate.k_solid", ("conjugate", "k_solid")),
     ("conjugate.T_b", ("conjugate", "T_b")),
+    # 背面条件は固体抵抗 $R_{\rm tot}=t/k_s+R_{\rm back}$ を変える = 別の方程式
+    # (codex result 2026-09-23 M7: `h_c` 100 と 10000 が同一キーになっていた)。
+    ("conjugate.back", ("conjugate", "back")),
+    ("conjugate.h_c", ("conjugate", "h_c")),
+    ("conjugate.relax", ("conjugate", "relax")),
 ]
 
 
