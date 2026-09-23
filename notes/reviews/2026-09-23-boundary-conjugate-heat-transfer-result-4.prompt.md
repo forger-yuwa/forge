@@ -1,3 +1,43 @@
+forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
+SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
+リポジトリに対する**外部レビュー**を依頼する。忖度なしで、主張はコードと実測 (run の数値) で検証すること。
+結論が「この計画/結果は誤り」でも構わない。両論併記で逃げず、推奨は 1 つに絞ること。
+
+ルール:
+- **ファイルを変更しない** (read-only サンドボックスで動いている。読む・実行して確認するのは可)。
+- 出力は日本語。識別子・ファイル名は原語のまま。
+- 指摘は **Critical / Major / Minor** の重大度付きで、必ず根拠 (`ファイル:行` または `run_*` の数値) と対案をセットで書く。
+- リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
+  用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
+- 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
+  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+
+## 依頼: 検証結果レビュー (stage = result)
+
+対象の plan は下に全文を貼る (`plans/active/boundary-conjugate-heat-transfer.md`)。実装と検証が終わり、`status: done` にして `plans/accepted/` へ移す直前の段階である。
+次を順に評価せよ。
+
+1. **実装 diff の検証**: `git diff main...HEAD -- solver_density_cuda design methods procedures` (必要なら `git log main..HEAD --oneline`)
+   を自分で取り、plan §4 の設計方針どおりに実装されているか、符号・単位・境界 (node の境界半割面、周期 seam、軸)・
+   float32 桁落ち・ゼロ割ガードの絶対閾値などの誤りがないかを見る。
+2. **検証結果の裏付け**: plan の §6 / 変更ログに書かれた数値・主張 (収束、一致、改善率) を、挙げられている `run_*`
+   ディレクトリの `CONVERGENCE_VERDICT.txt` / `residual_history.csv` / `README.md` の run 一覧で確認する。
+   主張と実測が食い違う箇所、VERDICT が NOT CONVERGED / DRIFTING のまま「一致」と書いている箇所を挙げよ。
+3. **回帰**: 既存機能 (既定値、他ケース) を壊していないか。既定挙動が変わった場合にそれが plan に明記されているか。
+4. **文書整合**: `methods/<area>/` の現在仕様、`procedures/` の手順、`methods/index.md`、`plans/README.md` が
+   実装と一致しているか。
+5. **残作業表**: 未解決事項が §5.1 の残作業表に残っているか (対話で決めて書いていない、が無いか)。
+
+最後に「accepted に移してよいか」を **GO / GO-with-changes / NO-GO** の 1 語で判定し、
+GO-with-changes なら移す前に直すべき点を優先順で列挙すること。
+
+## 重点
+
+3 巡目 (notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result-3.md) の Major 4 + Minor 1 への対処を最優先で検証する。(1) 最終保存の時刻一致・累積 step と暖機の扱い・flux_avg=1 での位相復元、(2) check_cht_balance が保存 SOLID/T を RCM 並べ替えを戻して使っているか、(3) cht_loop の --flux 尊重、(4) cht_wall_series の q_eff 既定と Qf_eff_total 列。再判定は run_0157_r3_avg42 (C3X)・run_0158_rs_cont / run_0159_rs_legA / run_0160_rs_legB (再開回帰 flux_avg=1 warmup=100 非倍数分割)・run_0037_r3_avg42 (Mark II)。Mark II は報告項目 (局所は gate にしない) であることを前提に、C3X の accepted 移行可否を判断してほしい
+
+## plan 全文 (`plans/active/boundary-conjugate-heat-transfer.md`)
+
+```markdown
 # 共役熱伝達 (CHT) の導入方針 — 保存的な界面契約と段階連成
 
 ## メタ
@@ -512,7 +552,6 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | 74 | **codex の Major 7 + Minor 1 を直して V4b を再判定した** (2026-09-23) | **修正**: M3 流体側の**積分済み荷重** `iface_Qf_eff` をそのまま渡す (面積で割って辺長を掛け直さない)。M1 更新を**残差補正形** $\Delta=-A_{\rm old}^{-1}r$, $u\leftarrow u+\Delta$ にした — $r$ は現在の $K_s(u)$ で作るので**固定点は常に現在の物性**で決まり、古い分解は前処理としてしか効かない ($D_f$ の凍結も不要になった)。M2 `fem2d` では固体内部残差の列と許容を**必須**にし (欠落は `REFUSED`)、`flux_avg>1` では**充填後 $2N$ 更新を過ぎた行だけ**を判定対象にする (履歴に `n_avg`/`n_filled`/`update` を追加)。M4 `conjugate_state_<physID>.h5` から固体温度・平均バッファ・更新位相を**復元**する (界面ハッシュ不一致は起動時拒否)。M6 温度上限をガス全温 (bcond の `Tt` 最大) +20 K にし、`dTw` は**増加区間の始点からの累積増幅**で見る。M7 区間キーに `conjugate.{back,h_c,relax}` を追加。m9 `conjugate` / `conjugate.gate` の**未知キーを拒否**。**途中で自分の安全停止が誤爆した**: `dTw` 0.0025 → 0.005 K (許容 1e-2 K の半分) で停止した → **更新量が登録許容以下なら発散判定しない**を追加。**再判定 (`run_0151_fixed_avg42`, 40000 step)**: **G-if PASS** (`res_abs` 48.3 / `res_rel` 2.07e-4 / `dTw` 2.24e-3 / **`res_solid` 2.18e-4 ≤ 1e-2**)、壁温平均 **+0.198 K**・局所 **0.502 K**、G-cons PASS、**準定常は登録値 `0.0006` で ALL STEADY**。**再開同値 (`run_0152_restart_legA` + `run_0153_restart_legB`)**: 連続 40000 の 587.2953 K に対し 20000+再開 20000 が **587.3038 K (差 +0.0084 K**、局所 rms 0.0093 / 最大 0.0178 K) で、窓内のゆらぎ 7.3e-3 K と同程度。**Mark II (`run_0035_fixed_avg42`)**: 壁温平均 **+0.406 K** (soft target 1.76 K 内)、局所 rms 0.826・最大 6.438 K、**`res_solid` は PASS (1.52e-3)** だが界面は **NOT CONVERGED** (`res_rel` 2.95e-2)、`Tw_max` は **OSCILLATING (663.5 ± 0.45 K)** → 平均±振幅で報告する |
 | 75 | **codex result 2 巡目の Major 5 + Minor 1** (2026-09-23) | **全件採用・修正済み**。**M1** 残差を **$r=K(u)u-b-E^{\mathsf T}Q_f$ として直接組む** (相殺に頼らない)。右辺の $D_fT_w^k$ も **double の固体状態 $u$** を使い、float の `Ts` を混ぜない。**M2** 判定窓を動かさず、**実際の末尾 `n_consec` 更新の全行**が「充填後 2N 更新」の待機を満たすことを要求する (バッファ再初期化も追跡)。**M3** 固体 h5 に **`content_sha1`** (節点順・接続・物性・冷却条件を含む) を持たせ、再開時はこれで照合する (無ければ拒否)。累積 `step` を保存して**更新位相を保ち**、最終 step で状態を強制保存する。変換器の書き出し 2 経路を `write_solid_h5` に**一本化**した (ハッシュを片方に入れ忘れた)。**M4** `cht_loop.py` と `check_cht_balance.py` も `iface_Qf_eff` (積分済み) を使う。**M5** 増幅の基準を **max(増加区間の始点, 登録許容)** にして 0 からの増大も検知する。**再判定 (`run_0154_r2_avg42`)**: G-if **PASS** (`res_abs` 49.9 / `res_rel` 2.17e-4 / `dTw` 2.33e-3 / `res_solid` 2.31e-4)、壁温平均 **+0.206 K**・局所 **0.512 K**、G-cons **0.0958 % PASS**、準定常 **ALL STEADY** (登録値 0.0006)。**再開同値は interval の倍数でない位置で切って確認** (`run_0155_r2_legA` 20025 step + `run_0156_r2_legB` 19975 step): 連続 40000 の 587.3037 K に対し **587.3018 K (差 −0.0018 K**、局所 rms 0.0067 / 最大 0.0164 K)。**Mark II (`run_0036_r2_avg42`)**: 平均 **+0.451 K** (soft target 内)、局所 rms 0.855・最大 5.658 K、`res_solid` PASS だが界面 **NOT CONVERGED** (`res_rel` 3.2e-2)、`Tw_max` **DRIFTING** |
 | 76 | **codex result 3 巡目の Major 4 + Minor 1** (2026-09-23) | **全件採用・修正済み**。**M1** 最終 step の判定を呼び出し規約 (`iStep+1` = 完了 step 数) に合わせ、累積 `step` の復元を平均バッファ分岐の**外**へ出し、**暖機も累積 step で数える**。**M2** `check_cht_balance.py` が **保存された固体状態 `conjugate_state_<physID>.h5` (`SOLID/T`)** を読むようにし、`content_sha1` を照合、固体状態の出所を出力に明記する。**実装中に自分で 1 件出した**: `SOLID/T` は固体 h5 の **RCM 並べ替え後**の順なのに npz 順の作用素に渡していて、孔の持ち去りが 66740 W/m (正 43473) と桁違いに出た → `MESH/PERM` で戻して解決。**M3** `cht_loop.py` の積分済み荷重採用を **`--flux q_eff` のときだけ**に限定。**M4** `cht_wall_series.py` の既定を `q_eff` にし、**連成が実際に渡す積分済み荷重を `Qf_eff_total` 列**で出す。**再判定 (`run_0157_r3_avg42`)**: G-if **PASS** (`res_abs` 52.6 / `res_rel` 2.26e-4 / `dTw` 2.45e-3 / `res_solid` 2.43e-4)、壁温平均 **+0.209 K**・局所 **0.514 K**、**G-cons 0.0059 % PASS** (保存固体と比較)、準定常 **ALL STEADY** (`Tw_mean` / `Tw_max` / **`Qf_eff_total`**)。固体の最終保存が step 40000 = 流体と同時刻になった。**再開回帰 (`flux_avg=1` / `warmup=100` / 出力間隔 1005 = 非倍数)**: `run_0158_rs_cont` (連続 8000) と `run_0159_rs_legA` (4025) + `run_0160_rs_legB` (3975) で壁温平均の差 **−0.0000 K** (局所 rms 0.0005 / 最大 0.0021 K)。**Mark II (`run_0037_r3_avg42`)**: 平均 **+0.398 K**・局所 rms 0.745/最大 5.335 K、**G-cons 0.1194 % PASS**、界面は **NOT CONVERGED** (`dTw` 0.347 K)、`Tw_max` **OSCILLATING 663.3 ± 0.28 K**、**`Qf_eff_total` は DRIFTING** (0.3 %/tail) |
-| 77 | **codex result 4 巡目の Major 3 + Minor 1** (2026-09-23) | **全件採用・修正済み**。**M1** `outputBconds_H5_XDMF` に**最終 step の強制出力**を足し、壁ダンプに **`step_abs` (累積 step)** を書く。G-cons は壁ダンプと固体チェックポイントの**時刻一致を要求**し、違えば `REFUSED`。**M2** ソルバ内連成では **`solid.h5` の `MESH/COORD` / `ROBIN/{EDGES,H,TC}` と保存 `SOLID/T` から直接**孔の持ち去りを集計する (JSON/npz を通さない)。**M3** NaN 検査を**実際に集計する荷重配列**に対して行い、1 点でも非有限なら `REFUSED`。**硬化の確認 (codex が示した壊し方をそのまま再現)**: `iface_Qf_eff[269]` を NaN にする → `REFUSED`、固体チェックポイントの `step` を 39040 にずらす → `REFUSED`。**再判定 (`run_0161_r4_avg42`)**: G-if PASS、**G-cons 0.0016 % PASS** (保存固体 × `solid.h5` の Robin 辺、時刻一致)。**再開回帰 (`run_0162`/`run_0163`/`run_0164`)**: 壁ダンプの `step_abs` が連続・再開とも 8000 で**揃い**、壁温平均の差 **−0.0002 K**、再開側の G-cons **0.0004 % PASS**。**Mark II (`run_0038_r4_avg42`)**: 平均 +0.457 K、G-cons **0.0232 % PASS**、界面 NOT CONVERGED、`Tw_max` **TRANSIENT-UNSETTLED**、`Qf_eff_total` **DRIFTING** |
 | 19 | codex result レビュー | `done` にする前 |
 
 ## 6. 検証
@@ -611,7 +650,6 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
-| result (Phase 2, 4 巡目) | `2026-09-23` | [`notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result-4.md`](../../notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result-4.md) | **NO-GO**, C0/M3/m1 | **全件採用** → §5.1 #77。M1 **壁ダンプに最終強制保存が無く**、960 step ずれた組合せを G-cons が PASS にしていた。M2 G-cons が**照合していない JSON/npz** から作用素を作っており、孔の `h` を 10 % 変えても拒否されない (43474 → 47821 W/m)。M3 NaN 検査が `iface_q_eff` 対象で、**実際に集計する `iface_Qf_eff`** の NaN 1 点を素通りさせていた |
 | result (Phase 2, 3 巡目) | `2026-09-23` | [`notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result-3.md`](../../notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result-3.md) | **NO-GO**, C0/M4/m1 | **全件採用** → §5.1 #76。M1 最終保存が 1 step 早い (`writeStepOutputs` には `iStep+1` が渡る) + `flux_avg=1` で位相が戻らない + 暖機を再開のたびに繰り返す。M2 **G-cons が初期入力の `wall_profile` から復元した固体と比べていた** (保存 `SOLID/T` を読まない)。M3 `cht_loop` が `iface_Qf_eff` を無条件採用し **`--flux` の指定を無視**。M4 `cht_wall_series` の既定が `q_compact` のままで、準定常が連成と別の熱流束を見ていた |
 | result (Phase 2, 2 巡目) | `2026-09-23` | [`notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result-2.md`](../../notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result-2.md) | **NO-GO**, C0/M5/m1 | **全件採用** → §5.1 #75。M1 残差が double の $u$ と float の `Ts` を混ぜており $D_f(Eu-T_s)$ が残る (4 節点の玩具問題で物理的不釣合い 99.9998 % が PASS)。M2 待機が `update>=2N` で仕様の「充填後さらに 2N」に足りず、**条件を満たす行だけ拾う実装が末尾の不良を捨てて PASS** にしていた。M3 再開の照合が界面座標だけで、内部 2 節点の入れ替え (保存温度が 214 K ずれる) を検出できない + `step` を読まず更新位相が変わる + 最終 step の強制保存が無い。M4 保存荷重の修正が `cht_loop.py` / `check_cht_balance.py` に届いておらず Phase 1 と Phase 2 が別契約 (角で +29.9 %)。M5 増加開始値が 0 だと発散検知が永久に成立しない (81 更新で 2.05 K/更新まで育っても止まらない) |
 | result (Phase 2) | `2026-09-23` | [`notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result.md`](../../notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result.md) | **NO-GO**, C0/M7/m2 | **全件採用** → §5.1 #73。2 件は当方で独立に再現した: (M5) `check_quasisteady --drift/--osc` は**割合**なので `0.06` は 6 % = 登録した 0.06 % の **100 倍緩い**。登録値 `0.0006` で測り直すと **Mark II の `Tw_max` は DRIFTING** で、「ALL STEADY」は**誤報告**だった (C3X は登録値でも ALL STEADY)。(M3) `q_eff` の分母が流体の `surfArea`、固体へ戻す係数が集中辺長で、Mark II 後縁の角 1 点だけ **L/A=1.29891** → その節点の荷重が 2.076 → **2.634 W/m (+27 %)** (全周積分では −0.11 %)。**`accepted` への移動は見送り、`active` のまま修正して V4b を再判定する** |
@@ -813,3 +851,11 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
   case/53 の**同一状態で界面熱量の定義だけ変える**と、`q_eff` 0.027 % / `q_2nd` 0.29 % が PASS、
   **`q_compact` 2.66 % と `q_recon` 2.66 % が FAIL**。**コンパクト差分で連成すると、固体が持ち去る熱を
   流体が供給していない解を通してしまう**ことを数値で示した (codex C1 の主張どおり)。
+```
+
+## 出力形式
+
+1. 冒頭に **判定 (GO / GO-with-changes / NO-GO)** と 3 行以内の要約。
+2. 指摘一覧 (Critical → Major → Minor の順、番号付き。各項目に根拠と対案)。
+3. 推奨 (1 つに絞る)。
+4. 末尾に `指摘数: Critical N / Major N / Minor N` の 1 行。

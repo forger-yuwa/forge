@@ -140,13 +140,26 @@ def main():
         qs = q[perm]
         area = op.area                          # 界面の集中長さ [m] (単位奥行き)
         Qf = qs * area                          # [W/m]
-    sum_Qf = float(np.sum(Qf[np.isfinite(Qf)]))
-    sum_absQf = float(np.sum(np.abs(Qf[np.isfinite(Qf)])))
+    # **実際に集計する配列**の非有限を検査する (codex result 4 巡目 M3)。
+    # `iface_q_eff` だけ見ていたので、`iface_Qf_eff` の 1 点を NaN にしても「NaN 0/480」で PASS した。
+    Qf = np.asarray(Qf, float)
+    n_nan_load = int(np.count_nonzero(~np.isfinite(Qf)))
+    if n_nan_load > 0:
+        print(f"=== G-cons: {run.name} -> REFUSED ===")
+        print(f"  集計に使う荷重に非有限が {n_nan_load} / {Qf.size} 点ある "
+              f"(flux={key}{', 積分済み荷重' if Qdirect is not None else ''})")
+        print("\nVERDICT: REFUSED")
+        return 1
+    sum_Qf = float(np.sum(Qf))
+    sum_absQf = float(np.sum(np.abs(Qf)))
 
     # 固体側: 孔 Robin が持ち去る熱。
     # **ソルバ内連成では保存された固体状態 `conjugate_state_<physID>.h5` を使う** (3 巡目 M2)。
     # 初期入力の `wall_profile_*.csv` から復元すると、**比較相手が最新の流体荷重でなく初期条件**になる
     # (実測: C3X で 43430.6 W/m vs 保存状態からの 43473.5 W/m)。
+    # **ソルバ内連成では、照合した固体 h5 からそのまま集計する** (codex result 4 巡目 M2)。
+    # `--solid` の JSON / npz は**ハッシュ照合の対象外**なので、そこから作った作用素で計算すると
+    # 孔の `h` を 10 % 変えるだけで固体放熱量が 43474 → 47821 W/m に変わっても拒否されない。
     state = src / f"conjugate_state_{a.phys_id}.h5"
     solid_src = "conjugate_state"
     if state.exists():
@@ -166,11 +179,35 @@ def main():
             mesh_sha = fh.attrs.get("content_sha1", "")
         if st_sha and mesh_sha and mesh_sha != st_sha:
             sys.exit(f"{state} の content_sha1 が {solid_h5} と違う (別の固体の状態)")
+        u_raw = u.copy()                     # h5 (RCM) 順
         u_old = np.empty_like(u)
         u_old[perm_h5] = u
         u = u_old
-        op.assemble(u[op.iface])             # parts() が使う中間量を張る
-        solid_src = f"conjugate_state (step {st_step})"
+        # 孔 Robin の持ち去りを**固体 h5 の幾何と条件から直接**計算する (JSON を通さない)。
+        with h5py.File(solid_h5, "r") as fh:
+            xy = np.asarray(fh["MESH/COORD"][:], float)
+            re_ = np.asarray(fh["ROBIN/EDGES"][:], int)
+            rh = np.asarray(fh["ROBIN/H"][:], float)
+            rtc = np.asarray(fh["ROBIN/TC"][:], float)
+        u_h5 = np.asarray(u_raw, float)          # h5 (RCM) 順のまま使う
+        L = np.hypot(xy[re_[:, 1], 0] - xy[re_[:, 0], 0], xy[re_[:, 1], 1] - xy[re_[:, 0], 1])
+        Q_solid_direct = float(np.sum(rh * L * (0.5 * (u_h5[re_[:, 0]] + u_h5[re_[:, 1]]) - rtc)))
+        solid_src = f"conjugate_state (step {st_step}) + solid.h5 の Robin 辺"
+        direct = True
+        # **時刻の一致を要求する** (4 巡目 M1: 壁が 960 step 古い組合せを PASS にしていた)。
+        with h5py.File(dump, "r") as fw:
+            w_abs = int(fw.attrs["step_abs"]) if "step_abs" in fw.attrs else None
+        if w_abs is None:
+            print(f"=== G-cons: {run.name} -> REFUSED ===")
+            print(f"  壁ダンプ {dump.name} に step_abs 属性が無い (古い run)。"
+                  "固体チェックポイントとの時刻一致を確認できないので合格にしない")
+            print("\nVERDICT: REFUSED")
+            return 1
+        if st_step >= 0 and w_abs != st_step:
+            print(f"=== G-cons: {run.name} -> REFUSED ===")
+            print(f"  時刻が違う: 壁ダンプ step_abs={w_abs} / 固体チェックポイント step={st_step}")
+            print("\nVERDICT: REFUSED")
+            return 1
     else:
         prof = sorted(glob.glob(str(src / f"wall_profile_{a.phys_id}.csv")))
         if not prof:
@@ -184,13 +221,20 @@ def main():
         op.assemble(Tw)                      # 局所 k_s(T) で組み直してから最終復元
         u = op.recover_interior(Tw)
         solid_src = "wall_profile (外部ループ想定)"
-    K, parts = op.parts(T_ref=float(np.mean(u[op.iface])),
+        direct = False
+    K = parts = None
+    if not direct:
+        K, parts = op.parts(T_ref=float(np.mean(u[op.iface])),
                         groups=[[(int(e[0]), int(e[1])) for e in np.load(spec["mesh_npz"])[k]]
                                 for k in sorted([k for k in np.load(spec["mesh_npz"]).files
                                                  if k.startswith("hole")],
                                                 key=lambda z: int(z[4:]))])
-    Q_solid = 0.0
-    for k, hole in enumerate(spec["holes"]):
+    if direct:
+        Q_solid = Q_solid_direct
+        K = parts = None
+    else:
+      Q_solid = 0.0
+      for k, hole in enumerate(spec["holes"]):
         M, v = parts[k]
         h, Tc = float(hole["h"]), float(hole["T_c"])
         Q_solid += h * (float(np.asarray(M.dot(u)).sum()) - Tc * float(np.asarray(v).sum()))

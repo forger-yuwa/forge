@@ -983,6 +983,13 @@ void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, in
     }
 }
 
+int stepOffsetForOutput()
+{
+    int off = 0;
+    for (const auto& kv : solidStates()) off = std::max(off, kv.second.stepOffset);
+    return off;
+}
+
 void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
 {
     if (!conjugateActive(cfg, msh)) return;

@@ -283,7 +283,11 @@ void dumpSolutionH5_force(const solverConfig& cfg , const mesh& msh , variables&
 
 void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var , const int& iStep)
 {
-    if (iStep%cfg.outStepInterval != 0 or iStep < cfg.outStepStart) return;
+    // **最終 step は必ず出す** (CHT の収支ゲートが壁ダンプと固体チェックポイントを突き合わせるため。
+    // 出力間隔だけで制御していたので、非倍数で終わる run では壁だけ 960 step 古い組合せができ、
+    // それを G-cons が PASS にしていた。codex result 4 巡目 M1)。
+    const bool lastStep = (cfg.nStepOuter > 0) && (iStep == cfg.nStepOuter);
+    if (!lastStep && (iStep%cfg.outStepInterval != 0 or iStep < cfg.outStepStart)) return;
 
 
     for (auto& bc : msh.bconds) {
@@ -311,6 +315,13 @@ void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var ,
         ofstream ofsH5(fnameH5);
 
         File file(fnameH5, File::ReadWrite | File::Truncate);
+        // **累積 step** を属性で残す (再開後はファイル名の step がローカルになるため、
+        // 固体チェックポイントとの時刻一致を機械的に確認できるようにする)。
+        {
+            const int sabs = iStep + conjugateWall::stepOffsetForOutput();
+            file.createAttribute<int>("step", HighFive::DataSpace::From(iStep)).write(iStep);
+            file.createAttribute<int>("step_abs", HighFive::DataSpace::From(sabs)).write(sabs);
+        }
 
         // write boundary
         vector<geom_float> COORD;

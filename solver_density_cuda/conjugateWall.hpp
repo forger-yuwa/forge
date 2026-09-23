@@ -108,5 +108,7 @@ void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, in
 bool conjugateActive(const solverConfig& cfg, const mesh& msh);
 // 収束した壁温を run ディレクトリに残す (再開時は wall_profile_<physID>.csv にコピーして使う)。
 void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep);
+// 再開時の累積 step オフセット (出力側が壁ダンプに `step_abs` を書くために使う)。
+int stepOffsetForOutput();
 
 } // namespace conjugateWall
