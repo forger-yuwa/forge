@@ -334,7 +334,9 @@ config 検証は 4 経路すべてで起動時に停止する (黙って無効�
 | `571e81df` (limiter_T) | **138** | **不可** ← 最初に越えた commit |
 | `adcd5579` / `39526328` / HEAD | 136 | 不可 (上限 481 threads) |
 
-**`6430909d` が余裕を使い切り `571e81df` が越えた**。どちらも既定 0 でビット不変の opt-in だが、
+**`6430909d` が余裕を使い切り `571e81df` が越えた** (手順と対策の正本は
+[`procedures/development-environment.md`](../../procedures/development-environment.md) の
+「カーネル起動が `too many resources requested for launch` で落ちるとき」)。どちらも既定 0 でビット不変の opt-in だが、
 **レジスタは実行時フラグに依らず確保される**ので既定構成の起動が壊れた。
 **本計画の `slauWallNormalChi` (`5a4886ea`) はレジスタを 1 つも増やしていない** (直前の `39526328` が既に 136)。
 恒久対策 (既定ブロック 256 化 / `__launch_bounds__`) は**本計画の範囲外**。node の残差 gather は `atomicAdd` なので
