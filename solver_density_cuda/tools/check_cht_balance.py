@@ -160,25 +160,69 @@ def main():
     # **ソルバ内連成では、照合した固体 h5 からそのまま集計する** (codex result 4 巡目 M2)。
     # `--solid` の JSON / npz は**ハッシュ照合の対象外**なので、そこから作った作用素で計算すると
     # 孔の `h` を 10 % 変えるだけで固体放熱量が 43474 → 47821 W/m に変わっても拒否されない。
+    # **ソルバ内連成 (`conjugate.mode: fem2d`) かどうかを run の config で判別する** (5 巡目 M1)。
+    # チェックポイントの有無で経路を選ぶと、**無いときに初期壁温から復元した別状態で合格**してしまう
+    # (実測: チェックポイントを隠すと 43474.1 → 43430.6 W/m・0.0984 % で PASS した)。
+    insolver, solid_cfg = False, None
+    cfgp = src / "solverConfig.yaml"
+    if cfgp.exists():
+        try:
+            import yaml
+            cj = (yaml.safe_load(cfgp.read_text()) or {}).get("conjugate")
+            if isinstance(cj, dict) and str(cj.get("mode", "")) == "fem2d":
+                insolver = True
+                solid_cfg = cj.get("solid")
+        except Exception:
+            pass
+
     state = src / f"conjugate_state_{a.phys_id}.h5"
     solid_src = "conjugate_state"
+    if insolver and not state.exists():
+        print(f"=== G-cons: {run.name} -> REFUSED ===")
+        print(f"  mode: fem2d なのに {state.name} が無い。"
+              "初期壁温から復元した固体で代替しない (別状態を合格にしてしまう)")
+        print("\nVERDICT: REFUSED")
+        return 1
     if state.exists():
         with h5py.File(state, "r") as fs:
             u = np.asarray(fs["SOLID/T"][:], float)
-            st_sha = fs.attrs.get("content_sha1", "")
-            st_step = int(fs.attrs.get("step", -1))
+            st_sha = str(fs.attrs.get("content_sha1", ""))
+            st_step = int(fs.attrs["step"]) if "step" in fs.attrs else None
+        # **必須属性が欠けていたら合格にしない** (5 巡目 M2: 欠落時に照合を飛ばしていた)
+        if st_step is None or st_step < 0:
+            print(f"=== G-cons: {run.name} -> REFUSED ===")
+            print(f"  {state.name} に有効な step 属性が無い (時刻一致を確認できない)")
+            print("\nVERDICT: REFUSED")
+            return 1
+        if not st_sha:
+            print(f"=== G-cons: {run.name} -> REFUSED ===")
+            print(f"  {state.name} に content_sha1 が無い (固体の同一性を確認できない)")
+            print("\nVERDICT: REFUSED")
+            return 1
         if len(u) != op.N:
             sys.exit(f"{state}: SOLID/T が {len(u)} 点 (固体は {op.N} 点)")
         # **並べ替えを戻す**。`SOLID/T` は固体 h5 の RCM 並べ替え後の順、`op` は npz の元の順。
         # ここを取り違えると孔の持ち去りが 66740 W/m (正 43473) のように桁違いに出る。
-        solid_h5 = src / "solid.h5"
+        # **固体ファイルは config の `conjugate.solid` から解決する** (固定名 `solid.h5` に頼らない)
+        solid_h5 = (src / str(solid_cfg)) if solid_cfg else (src / "solid.h5")
         if not solid_h5.exists():
-            sys.exit(f"{src}: solid.h5 が無い (conjugate_state の並べ替えを戻せない)")
+            print(f"=== G-cons: {run.name} -> REFUSED ===")
+            print(f"  固体 HDF5 {solid_h5} が無い (conjugate.solid = {solid_cfg})")
+            print("\nVERDICT: REFUSED")
+            return 1
         with h5py.File(solid_h5, "r") as fh:
             perm_h5 = np.asarray(fh["MESH/PERM"][:], int)     # new[i] = old index
-            mesh_sha = fh.attrs.get("content_sha1", "")
-        if st_sha and mesh_sha and mesh_sha != st_sha:
-            sys.exit(f"{state} の content_sha1 が {solid_h5} と違う (別の固体の状態)")
+            mesh_sha = str(fh.attrs.get("content_sha1", ""))
+        if not mesh_sha:
+            print(f"=== G-cons: {run.name} -> REFUSED ===")
+            print(f"  {solid_h5.name} に content_sha1 が無い (古い変換器で作った)")
+            print("\nVERDICT: REFUSED")
+            return 1
+        if mesh_sha != st_sha:
+            print(f"=== G-cons: {run.name} -> REFUSED ===")
+            print(f"  content_sha1 が違う: 状態 {st_sha[:16]} / 固体 {mesh_sha[:16]} (別の固体)")
+            print("\nVERDICT: REFUSED")
+            return 1
         u_raw = u.copy()                     # h5 (RCM) 順
         u_old = np.empty_like(u)
         u_old[perm_h5] = u
@@ -203,7 +247,7 @@ def main():
                   "固体チェックポイントとの時刻一致を確認できないので合格にしない")
             print("\nVERDICT: REFUSED")
             return 1
-        if st_step >= 0 and w_abs != st_step:
+        if w_abs != st_step:
             print(f"=== G-cons: {run.name} -> REFUSED ===")
             print(f"  時刻が違う: 壁ダンプ step_abs={w_abs} / 固体チェックポイント step={st_step}")
             print("\nVERDICT: REFUSED")

@@ -462,9 +462,15 @@ conjugate:
   gate: {eps_rel: 1.0e-3, eps_abs_Wm2: 150.0, dT_K: 1.0e-2, tol_solid: 1.0e-2, n_consec: 80}
 ```
 
-毎更新、**固体の全節点系を 1 回直接解く** (Schur 補元は作らない):
+毎更新、**固体の全節点系を 1 回解く** (Schur 補元は作らない)。解き方は**残差補正形**:
 
-$$\bigl(K_s(u^k) + E^{\mathsf T}D_fE\bigr)u^{k+1} = b_s + E^{\mathsf T}\bigl[\bar Q_f + D_f\,Eu^k\bigr]$$
+$$r = K_s(u^k)u^k - b_s - E^{\mathsf T}\bar Q_f,\qquad
+  \Delta = -\bigl(K_s(u^{\rm fact}) + E^{\mathsf T}D_fE\bigr)^{-1} r,\qquad u^{k+1} = u^k + \Delta$$
+
+残差 $r$ は**常に現在の $k_s(u^k)$** で組むので、固定点は $K_s(u)u = b_s + E^{\mathsf T}\bar Q_f$ になり、
+分解を再利用しても物性が凍らない (左辺は前処理としてしか効かない)。
+$r$ は **$D_f$ を含まない形で直接組む** — 相殺に頼ると界面温度の精度差 $D_f(Eu-T_s)$ が残り、
+$D_f$ が大きいとき量子化で止まった状態を合格にできる。
 
 - 未知数は**全節点温度** $u$ なので内部温度が状態になり、$k_s(T)$ の自己整合に「復元してから組み直す」操作が要らない。
 - $D_f$ は**界面対角のみ** $g_fA_i$ ($g_f=k_{\rm eff}/d_1$、$A_i$ は**固体側の集中辺長**)。非対角性は左辺の $K_s$ が持つ。
@@ -491,6 +497,10 @@ $$\bigl(K_s(u^k) + E^{\mathsf T}D_fE\bigr)u^{k+1} = b_s + E^{\mathsf T}\bigl[\ba
 - **再開**: 出力ステップごとに `conjugate_Tw_<physID>.csv` を書く。続きを回すときは
   これを `wall_profile_<physID>.csv` にコピーして `ints: {conjugate: 1, wallProfile: 1}` にすると、
   収束した壁温から再開できる (`wallProfile` が初期値、`conjugate` がその後の更新)。
+  **`mode: fem2d` では CSV だけでは足りない** — 固体の内部温度・平均バッファ・更新位相・累積 step は
+  `conjugate_state_<physID>.h5` にあるので、**これも次の run ディレクトリへコピーする**。
+  起動時に `content_sha1` を照合し、違えば拒否する。収支ゲートも
+  **このチェックポイントを必須**とし、無ければ `REFUSED` にする (初期壁温から復元した固体で代替しない)。
 - **実測 (case/52, V1 の 1 次元共役解)**: 解析解 $T_w$=316.2618 K に対し
   **ソルバ内 316.2371 K (温度上昇の −0.152 %)**、外部ループ (shell2d) 316.2659 K (+0.025 %)。
   両側 $q$ の不一致はそれぞれ **0.0002 % / 0.0053 %**。両者の差 0.029 K は
