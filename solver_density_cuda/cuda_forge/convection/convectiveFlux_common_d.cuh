@@ -268,6 +268,9 @@ struct FaceGeom {
     geom_float *pcx, *pcy, *pcz, *fx;
     geom_float *sx, *sy, *sz, *ss;
     flow_float* massflux;
+    // node の壁ノードフラグ [nCells] (cell 方式・未設定では nullptr)。space.slauWallNormalChi が読む。
+    // ゴースト index (>= nCells) には無いので参照前に範囲で弾くこと。
+    geom_int*   wall_flag = nullptr;
 };
 struct PrimState {
     flow_float *ro, *roUx, *roUy, *roUz, *roe;

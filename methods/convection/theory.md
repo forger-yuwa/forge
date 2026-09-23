@@ -374,9 +374,22 @@ $\widehat{M}$ は**速度ベクトルの大きさ**で組む (面法線成分で
 $\hat c$ = 700.5 m/s) では $\widehat M = 1.33 \to 1$、$\chi = 0$ で、壁ノードの圧力 58 Pa に対し内点 3545 Pa という
 61 倍の差があっても質量が戻らなかった。同じ場で流束を Roe に替えると 1 step 目から符号が反転する。
 
-対策は [`plans/active/convection-slau-wall-normal-chi.md`](../../plans/active/convection-slau-wall-normal-chi.md) で
-検討中 (壁隣接面に限って $\widehat M$ を面法線成分で組む opt-in。AUSM⁺-up が質量流束の圧力拡散の切替を
-面法線マッハで行うのと同型)。**未実装**。
+**対策 (opt-in)**: `space.slauWallNormalChi: 1` で、**壁隣接面の質量流束に限って** $\widehat M$ を面法線成分で組む:
+
+$$\widehat M_n = \min\Big(1, \frac{\sqrt{\tfrac12(V_{nL}^2+V_{nR}^2)}}{\hat c}\Big), \qquad
+\chi_{\text{mass}} = (1-\widehat M_n)^2, \qquad \chi_{\text{pressure}} = \chi\ (\text{現行のまま}).$$
+
+対象は **node 方式 × `nodeWallDirichlet: 1`** で、内部面のうち少なくとも一端が壁ノードの面
+(境界半割面は $\dot m=0$ なので対象外。cell 方式は無効)。上の実測面では $\widehat M_n=0.28 \Rightarrow \chi_n=0.52$。
+
+**圧力束の $\chi$ は変えない**。$\chi_n\ge\chi$ なので圧力束第 3 項の係数 $(1-\chi)$ は逆に小さくなり、
+同じ面で $\tilde p$ が 807 → 1070 Pa (+32.5 %) 動く — 補充機序 (質量) とは別作用なので分離する。
+分離してよいのは、**SLAU2 が既に第 3 項から $\chi$ を外している**ため (SLAU 族は「1 つの $\chi$」で閉じた性質に依存しない)。
+本フラグは SLAU / SLAU2 の双方で同じ効果を持つ (どちらも $\dot m$ の $\chi$ だけが変わる)。
+
+既定は 0 (演算としてビット同一)。**面法線マッハを全面に使った版 (`mSLAU`) には収束悪化と格子感度の報告がある**
+ため ([Furusawa & Kitamura 2023](https://doi.org/10.1002/fld.5183))、本実装は壁隣接面への局所適用に限る。
+設計判断と検証は [`plans/active/convection-slau-wall-normal-chi.md`](../../plans/active/convection-slau-wall-normal-chi.md)。
 
 #### 風上化と残差
 
