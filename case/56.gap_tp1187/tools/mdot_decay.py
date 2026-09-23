@@ -20,16 +20,30 @@ W = 0.18e-2
 XW = 0.9e-3
 
 
-def mdot(res, zW):
+def mdot(res, zW, signed=False):
+    """帯 z/W の質量流束 |∫ ρU_y dx|。
+
+    **保存量 `roUy` を直接積分する** (2026-09-24 に修正、codex plan-3 m3)。
+    以前は `ro * Uy` = 「commit 後の保存量 × commit **前**の原始量」を掛けていた。
+    `res_*.h5` の原始量は commit 前の評価値なので、**更新時点の違う量を混ぜていた**。
+    床を論じる指標に不要な誤差を持ち込むので直した (実測の差は run_0026/res_400000 で
+    5.90398e-10 → 5.88065e-10、0.4 %。減衰率の結論は変わらない)。
+
+    `signed=True` で符号つきを返す。**床付近は符号が零をまたぐ**ので、
+    絶対値だけ見ていると「床に張り付いている」ように見える (実際は零の周りの振れ)。
+    """
     with h5py.File(res) as h:
         c = h["/MESH/COORD"][:].reshape(-1, 3)
-        ro = h["/VALUE/ro"][:].astype(float)
-        uy = h["/VALUE/Uy"][:].astype(float)
+        if "/VALUE/roUy" in h:
+            f = h["/VALUE/roUy"][:].astype(float)          # 保存量をそのまま
+        else:                                              # 古い出力に roUy が無い場合の後方互換
+            f = h["/VALUE/ro"][:].astype(float) * h["/VALUE/Uy"][:].astype(float)
     m = (np.abs(c[:, 1] + zW * W) < 0.12e-3) & (np.abs(c[:, 0]) <= XW + 1e-9)
     if m.sum() < 5:
         return np.nan
     o = np.argsort(c[m, 0])
-    return abs(float(np.trapz((ro[m] * uy[m])[o], c[m, 0][o])))
+    v = float(np.trapz(f[m][o], c[m, 0][o]))
+    return v if signed else abs(v)
 
 
 def main():
