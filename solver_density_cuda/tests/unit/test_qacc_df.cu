@@ -172,7 +172,13 @@ int main()
             const double relA  = (want != 0.0) ? fabs(acco/want - 1.0) : fabs(acco);
             printf("    %-34s double-float 相対差 %.3e / FP64 影 %.3e%s\n",
                    c.name, relDF, relA, (relDF > 1e-6) ? "   <-- 落ちている" : "");
-            CHECK(relDF < 1e-6, "(g) %s で double-float が落ちた (相対差 %.3e)", c.name, relDF);
+            // ⚠ 許容 1e-6 では反例 (2^-25 + 1) の欠落 2.98e-8 を**通してしまう**
+            //    (2026-09-24, codex result-2 m2)。**FP64 影との差を直接見る**。
+            const double absDiff = fabs(dfv - acco);
+            const double tolAbs = fabs(acco) * 1e-15 + 1e-300;
+            printf("      |double-float - FP64 影| = %.3e  (許容 %.3e)\n", absDiff, tolAbs);
+            CHECK(absDiff <= tolAbs, "(g) %s で double-float が FP64 影から離れた (差 %.3e > 許容 %.3e)",
+                  c.name, absDiff, tolAbs);
         }
         printf("\n");
     }

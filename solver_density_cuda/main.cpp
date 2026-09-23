@@ -2151,11 +2151,20 @@ int main(void) {
         // **v1a の対応範囲** (§5.1 S1a)。どれも原理的な制限ではなく「まだ Qacc を扱っていない」だけで、
         // S1b-①〜④ で順に外す。**黙って劣化させるくらいなら拒否する** (codex plan M5)。
         const char* why = nullptr;
-        if (cfg.timeIntegration != 11)
+        // **検証済みの経路だけ通す** (2026-09-24, codex result-2 M5)。
+        // 以前は node / GPU の検査が無く、**cell も CPU 経路も素通り**していた。
+        // CPU の commit (`update.cpp` の applyScalarImplicitCorrection 等) は FP32 のままなので、
+        // `gpu != 1` で ON にすると device 正本だけ確保されて一切使われない。
+        // cell はユーザ方針で使わない (AGENTS.md / [[user-prefers-node-base]]) ため**未検証**。
+        if (cfg.gpu != 1)
+            why = "GPU 経路 (gpu=1) のみ対応 (CPU の commit は FP32 のまま)";
+        else if (cfg.discretization != "node")
+            why = "node のみ対応 (cell は未検証。ユーザ方針で cell は使わない)";
+        else if (cfg.timeIntegration != 11)
             why = "v1a は timeIntegration=11 のみ (陽解法 tI 1/4 は S1b-④、tI 3 は凸結合なので Qacc_N/Qacc_M が要る)";
         else if (cfg.unsteady != 0)
             why = "v1a は unsteady=0 のみ (dual-time は QaccN/QaccNN の shift が要る。陽解法 unsteady は S1b-④)";
-        else if (cfg.isAxisymmetric != 0 && cfg.discretization == "node")
+        else if (cfg.isAxisymmetric != 0)
             // enforceAxisSymmetry は commit の**基準** roeN/roUyN を射影する (axisymmetricSource_d.cu:312-323)。
             // Qacc は Q_N を読まないので、その射影を Qacc に当てるまでは対応できない。
             why = "node 軸対称は S1b-① 待ち (軸ピンが commit の基準 roeN/roUyN を射影するため)";
@@ -2168,7 +2177,7 @@ int main(void) {
             why = "node 周期は S1b-③ 待ち (root→member ミラーが FP32 値だけを配るため)";
         if (why != nullptr) {
             fprintf(stderr, "[qAccumulatorFP64] 拒否: %s\n", why);
-            fprintf(stderr, "[qAccumulatorFP64] v1a の対応: timeIntegration=11 && unsteady=0、block/scalar DPLUR、"
+            fprintf(stderr, "[qAccumulatorFP64] v1a の対応: GPU・node・timeIntegration=11 && unsteady=0、block/scalar DPLUR、"
                             "軸対称なし、周期なし、sstEnergyIncludesK=0\n");
             exit(1);
         }

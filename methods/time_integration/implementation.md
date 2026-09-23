@@ -206,7 +206,8 @@ step を 2 倍にしても 15 % しか下がらない。同じ場を**倍精度�
 node 周期でない場合のみで、それ以外は起動時に拒否する。**`Qacc` は checkpoint されない**。ただし**失うのは ½ ULP 分だけ**で実害は無い:
 commit は `Qacc += dq` のあと必ず `Q = (flow_float)Qacc` とするため $\lvert Q_{acc}-Q\rvert\le\tfrac12\mathrm{ULP}(Q)$ が
 構造上いつでも成り立ち、**残余は 1 ULP を超えて溜まらない**。実測の $\langle\lvert dq\rvert\rangle$ = 0.159 ULP/step から
-restart の代償は case/56 の $dq$/ULP 比では**平均 3 step 分の進捗**。
+restart の代償は case/56 の $dq$/ULP 比では**平均 3 step 分の進捗**。**「実害は無い」とは書かない** —
+言えるのは「このケース・この $dq$/ULP 比・100k step に 1 回の restart では、差がノイズ床の中」まで。
 **ただし一般化しないこと**: $dq$ が小さいほど相当 step 数は増え、**頻回 restart は機能を丸ごと消す**
 ($Q=1$, $dq=0.125$ ULP を 100 回: 連続は 12 ULP 動くが毎 step restart では **0 ULP**)。case/56 で 100k から再開した軌道は、連続で回した軌道と
 通算 125k–200k の 4 点すべてで **run 間ノイズ床 (絶対 1.3e-9) の中**にあり区別できない

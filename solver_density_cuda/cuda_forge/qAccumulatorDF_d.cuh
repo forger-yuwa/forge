@@ -4,8 +4,9 @@
 // **狙い**: FP64 影は `Qacc` に 8 B/変数を要る (5 保存量で 40 B/CV)。double-float なら
 // `Q` (既にある float ミラー) を上位、残余 `lo` を下位に置けるので **追加は 4 B/変数 = 20 B/CV**。
 // 実効精度は ~48 bit で、必要なのは「1 ULP 未満の残余を溜める」ことだけなので十分。
-// 加算は two-sum (Knuth) 2 回 + 加算 1 回 = **加減算 7 回 + scale 乗算** (codex plan m2 で訂正。
-// 「3 flop」は fast-two-sum 1 回分の値で、commit 1 回の費用ではなかった)。
+// 加算は two-sum (Knuth) 2 回 + 加算 1 回 = **加減算 13 回 + scale 乗算**
+// (`twoSum` は 6 加減算。2026-09-24 に 7 → 13 へ再訂正、codex result-2 m2。
+// 「3 flop」は `fastTwoSum` 1 回分の値で、commit 1 回の費用ではなかった)。
 //
 // **罠とその実測** (2026-09-24): two-sum は「加算の丸め誤差をちょうど拾う」ことに依存する。
 //     s = a + b;  e = b - (s - a);
@@ -58,15 +59,22 @@ __device__ inline void twoSum(float a, float b, float& s, float& e)
 __device__ inline void qaccDFCommitCell(float& q, float& lo, float dq, float scale)
 {
     float s, e;
+    // FORGE_DF_FASTTWOSUM: **旧実装を忠実に再現**する (試験が本当に捕まえるかの確認用)。
+    // ⚠ 以前は `lo = dfAdd(lo, e)` まで #else に入れてしまい、**旧実装とは別の粗い壊れ方**を
+    // 捕まえていた (2026-09-24, codex result-2 m2)。差し替えるのは two-sum の種類だけにする。
 #ifdef FORGE_DF_FASTTWOSUM
-    fastTwoSum(q, dq * scale, s, e); // **旧実装 (前提つき)**。試験が捕まえることの確認用
+    fastTwoSum(q, dq * scale, s, e);
 #else
     twoSum(q, dq * scale, s, e);     // **大小関係を仮定しない** (運動量のゼロ近傍・符号反転に備える)
+#endif
     lo = dfAdd(lo, e);               // 取りこぼした分を下位へ
     // 正規化: 下位が 1 ULP を超えたら上位へ畳む
-#endif
     float s2, e2;
+#ifdef FORGE_DF_FASTTWOSUM
+    fastTwoSum(s, lo, s2, e2);
+#else
     twoSum(s, lo, s2, e2);
+#endif
     q  = s2;
     lo = e2;
 }
