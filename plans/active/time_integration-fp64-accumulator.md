@@ -257,7 +257,21 @@ double-float (Dekker/Bailey の dd) は「**数の表し方**」で `(hi, lo)` �
 | FP64 影 (現行) | **40 B** | FP64 加算 1 回 (RTX 3060 は FP32 の 1/32 レート) | 53 bit |
 | **double-float** | **20 B** | **FP32 3 flop** (fast-two-sum、$\lvert Q\rvert\gg\lvert dq\rvert$ なので条件成立) | ~48 bit |
 
-**単体試験は S0 と同じ 4 項目 + 2 項目で `VERDICT: PASS`**:
+**⚠ 初版の試作には実バグがあった** (2026-09-24, codex plan M1 を自分で再現)。
+`fastTwoSum` は **$\lvert a\rvert\ge\lvert b\rvert$ のときだけ**丸め誤差を厳密に返す。
+「commit では $\lvert Q\rvert\gg\lvert dq\rvert$ なので常に成立」と書いたが**誤り**で、
+**運動量はゼロ近傍・符号反転・初期過渡で破れる**し、正値性ガードも運動量成分にこの条件を課していない。
+
+| 入力 | `fastTwoSum` | 正しい `twoSum` (Knuth) |
+| --- | --- | --- |
+| $a=2^{-25}$, $b=1$ | $s=1.0,\ e=0$ → **$2^{-25}$ を失う** | $s=1.0,\ e=2.98\times10^{-8}$ |
+
+**処置**: 本体の commit は **`twoSum` (Knuth、6 flop)** に差し替えた。前提が要らない代わりに演算が 2 倍。
+**試験に「前提が破れる場合」(g) を追加**し、**旧実装に戻すと `VERDICT: FAIL` (失敗 4)** になることを確認した
+(`-DFORGE_DF_FASTTWOSUM` で切替。とくに「交互加算 $Q=1$, $dq=2^{-26}$, $N=1000$」で相対差 1.49e-05)。
+**バグを捕まえられない試験は書いた意味がない**ので、この確認を必須にする。
+
+**単体試験 (`twoSum` 版) は S0 と同じ 4 項目 + 3 項目で `VERDICT: PASS`**:
 
 | 項目 | double-float | FP64 影 |
 | --- | --- | --- |
@@ -267,18 +281,27 @@ double-float (Dekker/Bailey の dd) は「**数の表し方**」で `(hi, lo)` �
 | (c) OFF 経路 | 0.0 (症状を再現) | 0.0 |
 | (d) 残余ゼロで OFF とビット一致 | **0/200000 件の差** | 0/200000 |
 | (e) FP64 影との差 | **9.437e-16** (相対 3.18e-08) | — |
+| **(g) 前提が破れる 4 例** | **全て相対差 0.000e+00** | 全て 0.000e+00 |
 
-**⚠ 私が警告した FMA 縮約は、このコード形では起きなかった**: 素の `+`/`-`・`--use_fast_math`・
-`scale` = 1/0.5/0.375/0.123・`-fmad=false` のどれでも intrinsic 版と**同一結果**。理由は構造的で、
-(1) nvcc の fast-math は FP 加算を再結合しない、(2) `dq*scale` が `s` と `e` の共通部分式なので
-積が値として確定する。**intrinsic は保険であって必須ではない**。ただし将来の書き換えで (2) が
-崩れると黙って劣化するので、試験の (e) を番人にする。
+**⚠ 演算数の訂正**: 「fast-two-sum の 3 flop」と書いたが、commit 1 回は
+**`twoSum` 2 回 + 加算 1 回 = 加減算 7 回 + scale 乗算**。3 flop は `fastTwoSum` **1 回分**の値だった。
+
+**⚠ FMA 縮約の撤回は「今回のコード・ビルドでは起きなかった」までに留める** (codex plan m1)。
+NVRTC 12.0 / `compute_86` の PTX を見ると通常・`--use_fast_math`・`--fmad=false` のどれにも FMA は無いが、
+fast-math では加減乗算に `.ftz` が付く。NVIDIA の仕様上 fast-math は FTZ と FMA contraction を有効にするので、
+**共通部分式であることを言語的保証にはできない**。intrinsic は残す。
+
+**⚠ 追加メモリ 20 B/CV も未証明** (codex plan M2): reconcile は「書き換えられる前の上位」を要る。
+単体試験ではローカル変数で持っているが、本体では commit・壁ピン・reconcile が**別カーネル**なので
+期待上位を 5 本持つと **40 B/CV に戻る**。さらに `dependentVariables` (`main.cpp:1400`) が
+**commit 前に `Q` を書き換える**。FP64 影は `Q` を読まないので無傷だが、double-float が `Q` を
+正本の上位として読むと、**撤回済みの「EOS 書き戻しが正本を変える」問題を再導入する**。
 
 **採否は保留**: 切り替える価値は**未測定の G5 (速度: FP64 加算が効いているか) と G6 (メモリ)** 次第。
 生産規模 (SERN 1250 万節点) では **500 MB → 250 MB** の差になり、載らない話をしていた規模では効く。
-**現行の FP64 影を選んだ理由は精度でも速度でもなく**、(i) 正本が 1 つなので他の writer が `Q` を
-書き換えたとき「`Qacc = Q`」の一行で閉じる、(ii) $f_{32}(a+b) = f_{32}(f_{64}(a)+f_{64}(b))$ が
-成り立つので「残余ゼロなら OFF とビット同一」を証明でき後方互換ゲートの土台になった、の 2 点。
+**現行の FP64 影を残す理由** (codex plan M2 で訂正): (ii) の「残余ゼロなら OFF とビット同一」は
+**double-float でも作れる**ので FP64 固有の利点ではない (丸めモード・FTZ・writer の処理順を揃える必要はある)。
+**本当の理由は (i) の方**で、正本が `Q` と独立なので他の writer に汚されず、契約が**現行構造で既に実装できている**こと。
 
 **double-float が効かない場所**: 運動量残差の gather (§5.2 で `E_order/E_eval` = 0.32 と判明)。
 `(hi, lo)` の対は **atomic に足せない**ので、そこは FP64 の `atomicAdd` (sm_60 以降ハード対応) が素直。
@@ -364,7 +387,11 @@ GPU メモリが逼迫する規模では `time.deltaT.qAccumulatorFP64: 0` で�
 | **S1b-②** | O | SST-K を段別に | 陰解法 (`fromN=0`) は増分を 1 回 `Qacc_roe -= (double)Δ`、陽解法 (`fromN=1`, 毎段 `roK−roKN`) は**最終段のみ** `Qacc`。**ON 経路では補正後に必ず `roe=(flow_float)Qacc_roe` を生成**する (FP32 側を独立に更新すると丸めが食い違い reconcile が蓄積を消す)。<br>**合格**: RK 反例 (roKN=8、各段 9/10/11/12 → 正しい補正 −4、全段累積の −10 でないこと) の単体試験 |
 | **S1b-③** | O | 周期を **FP64 で同期** | `periodicMirrorQacc` を FP32 ミラー (`main.cpp:1221`, `:1753`) と**一組**にする。reconcile カーネルに `Qacc[ic] != Qacc[root[ic]]` の不一致カウンタ (期待 0) を入れる。<br>⚠ 陰解法は状態ミラーを持たず `periodicMirrorDq_d_wrapper` (`main.cpp:1558`) で **dq を** root→member にミラーする別経路。構造的には一致を保つはずだが**未検証なので S1a では周期を拒否**し、ここで実測する。<br>**合格**: 陰解法・陽解法とも不一致 0; G3 `case/09` |
 | **S1b-④** | O | 陽解法 (段別に書くこと) | `tI=1` (前進 Euler) と `tI=4` の**最終段のみ**を `Qacc` commit、中間段は FP32 のまま。`unsteady=1` を許可 (陽解法に BDF 履歴は無い)。**`tI=3`・dual-time・陽解法×node 軸対称は拒否のまま** (最後のものは `main.cpp:1764` で enforce が無効化済み = 現状でも動かない経路)。<br>⚠ 陽解法 unsteady では物理 dt で $\lvert dq\rvert \gg$ ULP なので効果は小さい。**G3 `case/09` は互換性ゲート (ON≈OFF) であって効果ゲートではない**と明記する。<br>**合格**: `case/09 run_0046` 設定で ON/OFF 場距離 ≤ OFF の run-to-run ノイズ床 (**両側測定**)、採用カウンタ 0 |
-| **S1b-⑤** | F | ~~FP64 checkpoint (`/QACC`)~~ **不要と判定 (2026-09-24、実測)** | codex result M1 は「restart で蓄積した下位ビットを失う」と指摘し、私は**量を見積もらずに**「`/QACC` を実装する」と答えていた。**測ったら要らなかった**。<br>**理屈**: commit は `Qacc += dq` のあと必ず `Q = (flow_float)Qacc` とするので **`Q` は常に `Qacc` の丸め値**であり、$\lvert Q_{acc}-Q\rvert \le \tfrac12\mathrm{ULP}(Q)$ が**構造上いつでも**成り立つ。**残余は 1 ULP を超えて溜まらない**ので、restart で失うのは「まだ見えていない ½ ULP 分」だけで蓄積の履歴ではない。実測の $\langle\lvert dq\rvert\rangle$ = 0.159 ULP/step から**平均 3 step 分の進捗**に相当。<br>**実測** (`case/56.gap_tp1187/run_0030_restart_cost/`、`run_0026` の 100k から再開して 100k、`check_convergence` → `NOT CONVERGED (plateau)` = G2-G のとおり対象外、NaN 0):<br>通算 125k/150k/175k/200k の $\dot m$ を連続 run と比べ、差は **7.49e-10 / 3.74e-10 / 3.99e-10 / 2.19e-10** で**4 点とも run 間ノイズ床 (絶対 1.3e-9) の中**。再開した軌道と連続の軌道を**区別できない**。<br>**処置**: `/QACC` は実装しない。代わりに**「restart は ½ ULP・約 3 step 分を失う」を `methods/time_integration/implementation.md` に明記**する。費用 (全スナップショットに 5 本×double = 65194 CV で 2.6 MB/枚、100 万節点級で 40 MB/枚) に見合わない。<br>⚠ **見積もらずに指摘を受け入れかけた**のが今回の反省点。codex の指摘は正しかった (蓄積は確かに失われる) が、**失う量が問題になる大きさか**は別問題で、そこを測らずに実装を決めかけた |
+| **S1b-⑤** | F | ~~FP64 checkpoint (`/QACC`)~~ **不要と判定 (2026-09-24、実測)** | codex result M1 は「restart で蓄積した下位ビットを失う」と指摘し、私は**量を見積もらずに**「`/QACC` を実装する」と答えていた。**測ったら要らなかった**。<br>**理屈**: commit は `Qacc += dq` のあと必ず `Q = (flow_float)Qacc` とするので **`Q` は常に `Qacc` の丸め値**であり、$\lvert Q_{acc}-Q\rvert \le \tfrac12\mathrm{ULP}(Q)$ が**構造上いつでも**成り立つ。**残余は 1 ULP を超えて溜まらない**ので、restart で失うのは「まだ見えていない ½ ULP 分」だけで蓄積の履歴ではない。実測の $\langle\lvert dq\rvert\rangle$ = 0.159 ULP/step から**平均 3 step 分の進捗**に相当。<br>**実測** (`case/56.gap_tp1187/run_0030_restart_cost/`、`run_0026` の 100k から再開して 100k、`check_convergence` → `NOT CONVERGED (plateau)` = G2-G のとおり対象外、NaN 0):<br>通算 125k/150k/175k/200k の $\dot m$ を連続 run と比べ、差は **7.49e-10 / 3.74e-10 / 3.99e-10 / 2.19e-10** で**4 点とも run 間ノイズ床 (絶対 1.3e-9) の中**。再開した軌道と連続の軌道を**区別できない**。<br>**⚠ 一般化しすぎだった** (2026-09-24, codex plan M5 を自分で再現): 「½ ULP ÷ 平均 $\lvert dq\rvert$ = 約 3 step」は
+**符号相殺を伴う進捗の損失 step 数にはならない**し、$dq$ が小さいほど相当 step 数が増える。反例:
+$Q=1$, $dq=2^{-26}$ (=0.125 ULP) を 100 回足すと、**連続は 12 ULP 動くが毎 step restart では 0 ULP** —
+残余が常に ½ ULP 以下でも**反復削除は機能を丸ごと消す**。<br>**したがって言えるのは「case/56 の $dq$/ULP 比で、100k step に 1 回の restart はノイズ以下」まで**。<br>**処置**: v1a は「**残余を失う restart**」と明記し `/QACC` は実装しない。ただし**恒久的に不要とは決着させない**。
+G4 は「厳密な再開一致」でなく「**指定した再開間隔での量別許容誤差**」に変える。頻回 restart の限界は単体試験に残す。費用 (全スナップショットに 5 本×double = 65194 CV で 2.6 MB/枚、100 万節点級で 40 MB/枚) に見合わない。<br>⚠ **見積もらずに指摘を受け入れかけた**のが今回の反省点。codex の指摘は正しかった (蓄積は確かに失われる) が、**失う量が問題になる大きさか**は別問題で、そこを測らずに実装を決めかけた |
 | **S1b-⑤x** | O | ~~FP64 checkpoint を dual-time と独立に~~ **上記により不要** | `/QACC` を新設する (既存 `/CHECKPOINT` は `output/output.cpp:168`・`main.cpp:989` とも `unsteady==1 && dualTime==1` 限定で、**v1 が拒否する経路**なので追記では機能しない)。復元は `main.cpp:1252` の後。**読込は `vector<double>`** (`readValueHDF5` は `vector<geom_float>`=float なので使い回せない)。<br>**合格**: G4 = (a) 復元直後に 5 本がビット一致 (b) ON の連続/再開の距離 ≤ OFF の連続/再開の距離 (limiter 基準値 `main.cpp:1286` の自動算出の影響は OFF 対照で吸収) |
 | **S4** | O | G3 (`case/36`・`48`・`44`・`09`) と G5 | 量ごとの許容値を事前登録。scalar/block 両 commit |
 | 9 | F | codex result 段レビュー | `done` にする前 |

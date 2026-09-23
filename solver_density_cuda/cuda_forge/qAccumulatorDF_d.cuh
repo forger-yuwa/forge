@@ -4,7 +4,8 @@
 // **狙い**: FP64 影は `Qacc` に 8 B/変数を要る (5 保存量で 40 B/CV)。double-float なら
 // `Q` (既にある float ミラー) を上位、残余 `lo` を下位に置けるので **追加は 4 B/変数 = 20 B/CV**。
 // 実効精度は ~48 bit で、必要なのは「1 ULP 未満の残余を溜める」ことだけなので十分。
-// 加算は fast-two-sum の 3 flop (FP32) で、FP64 加算が 1/32 レートの機種では速くなりうる。
+// 加算は two-sum (Knuth) 2 回 + 加算 1 回 = **加減算 7 回 + scale 乗算** (codex plan m2 で訂正。
+// 「3 flop」は fast-two-sum 1 回分の値で、commit 1 回の費用ではなかった)。
 //
 // **罠とその実測** (2026-09-24): two-sum は「加算の丸め誤差をちょうど拾う」ことに依存する。
 //     s = a + b;  e = b - (s - a);
@@ -32,23 +33,40 @@ __device__ inline float dfAdd(float a, float b) { return __fadd_rn(a, b); }
 __device__ inline float dfSub(float a, float b) { return __fsub_rn(a, b); }
 #endif
 
-// fast-two-sum: |a| >= |b| のとき s=a+b の丸め誤差 e を厳密に返す (3 flop)。
-// commit では a=Q (保存量)、b=dq (1 ULP 未満) なので条件は常に満たす。
+// fast-two-sum: **|a| >= |b| のときだけ**丸め誤差 e を厳密に返す (3 flop)。
+// ⚠ **前提が破れると誤差を丸ごと落とす** (2026-09-24, codex plan M1 の反例を自分で再現):
+//     a = 2^-25, b = 1  ->  s = 1.0, e = 0.0   (2^-25 が消える。正しくは e = 2.98e-08)
+// 「commit では |Q| >> |dq| なので常に成立」と書いていたが**誤り**: 運動量はゼロ近傍・符号反転・
+// 初期過渡で |Q| < |dq| になりうるし、正値性ガードも運動量成分にこの条件を課していない。
+// **したがって本体では使わない。** 残すのは「前提が成り立つ場所での比較用」としてのみ。
 __device__ inline void fastTwoSum(float a, float b, float& s, float& e)
 {
     s = dfAdd(a, b);
     e = dfSub(b, dfSub(s, a));
 }
 
+// two-sum (Knuth): **大小関係を問わず**丸め誤差 e を厳密に返す (6 flop)。
+// fast-two-sum の 2 倍の演算だが前提が要らない。保存量 5 本すべてに使えるのはこちらだけ。
+__device__ inline void twoSum(float a, float b, float& s, float& e)
+{
+    s = dfAdd(a, b);
+    const float bb = dfSub(s, a);
+    e = dfAdd(dfSub(a, dfSub(s, bb)), dfSub(b, bb));
+}
+
 // commit: 上位 q と下位 lo の対に dq を積む。q は FP64 影版と同じく「そのまま使える値」。
 __device__ inline void qaccDFCommitCell(float& q, float& lo, float dq, float scale)
 {
     float s, e;
-    fastTwoSum(q, dq * scale, s, e);
+#ifdef FORGE_DF_FASTTWOSUM
+    fastTwoSum(q, dq * scale, s, e); // **旧実装 (前提つき)**。試験が捕まえることの確認用
+#else
+    twoSum(q, dq * scale, s, e);     // **大小関係を仮定しない** (運動量のゼロ近傍・符号反転に備える)
     lo = dfAdd(lo, e);               // 取りこぼした分を下位へ
     // 正規化: 下位が 1 ULP を超えたら上位へ畳む
+#endif
     float s2, e2;
-    fastTwoSum(s, lo, s2, e2);
+    twoSum(s, lo, s2, e2);
     q  = s2;
     lo = e2;
 }

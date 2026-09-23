@@ -144,6 +144,39 @@ int main()
         CHECK(nDiff == 0, "(d) 上位が OFF とビット一致しない (%d 件)", nDiff);
     }
 
+    {   // --- (g) **前提が破れる場合** (codex plan M1): |Q| < |dq|、ゼロ近傍、符号反転 ---
+        struct Case { const char* name; float q0; float dq; int n; };
+        const Case cs[] = {
+            {"|Q| < |dq| (Q=2^-25, dq=1)",      ldexpf(1.0f,-25), 1.0f,          1},
+            {"ゼロ近傍 (Q=0, dq=1e-30)",         0.0f,             1e-30f,        1},
+            {"符号反転 (Q=-1e-7, dq=+1e-7)",     -1e-7f,           1e-7f,         1},
+            {"交互加算 (Q=1, dq=2^-26, N=1000)", 1.0f,             ldexpf(1.0f,-26), 1000},
+        };
+        printf("(g) 前提が破れる場合 — double-float vs FP64 影:\n");
+        for (const auto& c : cs) {
+            float q = c.q0, lo = 0.0f; double acc = (double)c.q0; float mir = c.q0;
+            cudaMemcpy(d_qdf, &q, 4, cudaMemcpyHostToDevice);
+            cudaMemcpy(d_lodf, &lo, 4, cudaMemcpyHostToDevice);
+            cudaMemcpy(d_mir, &mir, 4, cudaMemcpyHostToDevice);
+            cudaMemcpy(d_off, &mir, 4, cudaMemcpyHostToDevice);
+            cudaMemcpy(d_acc, &acc, 8, cudaMemcpyHostToDevice);
+            k_acc<<<1,32>>>(d_qdf, d_lodf, d_acc, d_mir, d_off, c.dq, c.n);
+            cudaDeviceSynchronize();
+            float qo, loo; double acco;
+            cudaMemcpy(&qo, d_qdf, 4, cudaMemcpyDeviceToHost);
+            cudaMemcpy(&loo, d_lodf, 4, cudaMemcpyDeviceToHost);
+            cudaMemcpy(&acco, d_acc, 8, cudaMemcpyDeviceToHost);
+            const double dfv = (double)qo + (double)loo;
+            const double want = (double)c.q0 + (double)c.n * (double)c.dq;
+            const double relDF = (want != 0.0) ? fabs(dfv/want - 1.0) : fabs(dfv);
+            const double relA  = (want != 0.0) ? fabs(acco/want - 1.0) : fabs(acco);
+            printf("    %-34s double-float 相対差 %.3e / FP64 影 %.3e%s\n",
+                   c.name, relDF, relA, (relDF > 1e-6) ? "   <-- 落ちている" : "");
+            CHECK(relDF < 1e-6, "(g) %s で double-float が落ちた (相対差 %.3e)", c.name, relDF);
+        }
+        printf("\n");
+    }
+
     printf("(f) 追加メモリ (5 保存量/CV): double-float %zu B  vs  FP64 影 %zu B\n",
            5*sizeof(float), 5*sizeof(double));
     printf("\n%s (失敗 %d)\n", g_fail ? "VERDICT: FAIL" : "VERDICT: PASS", g_fail);
