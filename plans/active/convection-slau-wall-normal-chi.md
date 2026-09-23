@@ -24,10 +24,14 @@ SLAU の質量流束の圧力差項 $-\chi(P_R-P_L)/\hat c$ が $\chi=0$ で消�
 ## 2. スコープ
 
 - **やる**: `space.slauWallNormalChi` (opt-in, 既定 0) の追加。node 方式・`nodeWallDirichlet: 1` で、
-  内部面のうち少なくとも一端が壁ノードの面について $\chi$ を $\widehat M_n$ から作る。SLAU / SLAU2 の双方。
-- **やらない**: 既定の変更 (§6 V3 が全部通ってから別途判断)。cell 方式の実装。
-  EOS 床の意味の修正 ([`tooling-sern-mesh-blocking.md`](tooling-sern-mesh-blocking.md) §5.1 B1e。**別 commit・別判断**)。
-  Roe 側の改修。接続模型の格子解像度 ($\Delta x_1$) の振り直し。
+  内部面のうち少なくとも一端が壁ノードの面について、**質量流束 $\dot m$ の $\chi$ のみ** $\widehat M_n$ から作る
+  (`chi_mass = χ_n`, `chi_pressure = χ`)。SLAU / SLAU2 の双方。
+- **やらない**: **圧力束の $\chi$ の変更** (§4.2 で却下)。既定の変更 (§6 V3 が全部通ってから別途判断)。cell 方式の実装
+  (明示的に無効化する)。EOS 床の意味の修正 ([`tooling-sern-mesh-blocking.md`](tooling-sern-mesh-blocking.md) §5.1 B1e。
+  **別 commit・別判断**)。Roe 側の改修。接続模型の格子解像度 ($\Delta x_1$) の振り直し。
+- **制限事項 (flag 1 の適用範囲)**: 本計画で検証するのは **非周期・非軸対称の node 構成** (§6 の V1–V3 のケース) に限る。
+  $\chi_n$ は面局所量で体積ソースを持たず、mask は `wall_flag` (周期 seam の両メンバに存在) なので保存性は変わらない
+  見込みだが**未検証**。**周期・軸対称で flag 1 を使う前に小規模 node 試験を要する** (§5.1)。
 
 ## 3. 関連 docs と前提
 
@@ -37,97 +41,211 @@ SLAU の質量流束の圧力差項 $-\chi(P_R-P_L)/\hat c$ が $\chi=0$ で消�
   **`res_ro` は触らない** = 密度行は自由)。
 - 境界半割面は `convectiveFlux_boundary_d.inc.cuh:192` の $\dot m = A\rho_R(\mathbf U_b\!\cdot\!\mathbf n)$ で
   no-slip なら厳密 0。本計画の対象外。
-- **前提の確認 (起票時点で未了)**: Shima–Kitamura (2011) が $\widehat M$ に速度ベクトルの大きさ $|\mathbf u|$ を使う理由
-  (多次元性 / carbuncle 対策と理解しているが一次資料で確認する)。AUSM⁺-up は面法線 Mach で低 Mach スケーリングするので先例はある。
+
+### 3.1 文献 — 面法線マッハ版は既に研究され、**全面適用では悪化が報告されている**
+
+**これは本計画の最大のリスクなので、先例の話より先に書く** (2026-09-23 調査。codex plan 段 M1 の指摘を受けて実施)。
+
+- **[Furusawa & Kitamura (2023), IJNMF 95(6) 992–1010](https://onlinelibrary.wiley.com/doi/10.1002/fld.5183)**
+  "Stability effect of multidimensional velocity components in numerical flux SLAU":
+  **`mSLAU` = SLAU の速度を面法線成分だけにした版**が既に存在し (回転翼計算で使用)、本論文がその影響を調べている。
+  結論は **SLAU の多次元速度成分が、質の悪い格子に対する安定性に寄与している** (等方的に十分な数値散逸を作るため)、
+  **とくに低亜音速と超音速で**。`mSLAU` は minmod と組めば中程度のマッハ ($0.1<M<1.0$) は実用になるが、
+  **面法線成分のみの使用は収束を悪化させ、格子形状に敏感になりうる**。
+- **本計画との関係 (重要)**: `mSLAU` は**全面適用**である。本計画は**壁隣接面に限った opt-in の局所適用**なので、
+  報告された悪化がそのまま当たるとは限らない。しかし**悪化が報告された条件 (超音速・質の悪い格子) は本件の条件そのもの**
+  (case/46 は M6 級、壁層の AR は最大 676)。→ **§6 V3 の「収束の悪化」と「格子感度」を明示的に見る**。
+  局所適用で回避できるかどうかが、本計画の賭けの中身である。
+- **一次資料 (Shima–Kitamura 2011) の §III.K / Fig.20 が面法線マッハ版を比較している**と codex plan 段で指摘されたが、
+  **原典は有料で未読** (ResearchGate / AIAA とも 403)。上記 2023 年論文が同じ著者グループによる追跡研究で、
+  問いも同一なので、**当面はこれを出典として扱う**。原典は `result` 段の前に入手を試みる (§5.1)。
+- なお `mSLAU` について「経験的に安定と主張されているが、面法線成分のみの使用は数値不安定を引き起こすと指摘されている」
+  という二次的な記述もある。
+
+### 3.2 forge 内の先例 (構造としての先例。根拠の主役ではない)
+
+AUSM⁺-up (Liou 2006, JCP 214) は質量流束の圧力拡散項の切替を面法線速度で組む。forge 自身がそのカーネルを持つ
+(`cuda_forge/convection/AUSM_d.cu:277-290`):
+
+```
+U_L = (u_L·n),  U_R = (u_R·n)                 // 面法線成分
+M_bar = ... (U_L, U_R から)                    // ← 速度ベクトルの大きさではない
+M_p = -Kp/fa * max(1 - sig*M_bar^2, 0) * (P_R-P_L)/(ro_half*c_half^2)
+```
+
+「質量流束の圧力拡散を面法線マッハで切る」構造自体は AUSM 系の既存の作法である。
+**ただし §3.1 のとおり、SLAU に対して同じことを全面で行った版 (`mSLAU`) には悪化報告がある**。
+したがって**「AUSM⁺-up と同型だから妥当」とは主張しない** (codex M1 の指摘を採用)。
+
+- **注意 (休眠コードの疑い)**: `AUSM_d.cu:277` の `M_bar` は Liou の $\bar M^2=(u_L^2+u_R^2)/(2a_{1/2}^2)$ と
+  式形が合わない (sqrt の位置)。AUSM は `convectiveFlux_d.cu` の dispatch に無い休眠コードなので本計画に影響は無いが、
+  **引くのは「面法線で切る」という構造であって、この実装の係数ではない**。AUSM を復活させるときは要確認。
 
 ## 4. 設計方針
 
 **キー**: `space.slauWallNormalChi` (int, 既定 0)。`space` 直下に置く ([[keepdiss-keys-toplevel-trap]] の罠を踏まないよう、
-起動ログで実効値を出す)。0 のとき現行とビット同一。
+起動ログで実効値を出す)。0 のとき現行とビット同一 (演算式として。場のビット一致は §6 V2 参照)。
 
 **対象面**: node 方式 × `nodeWallDirichlet: 1` で、**内部面のうち少なくとも一端が `wall_flag==1` の面**。
+境界半割面は $\dot m=0$ なので対象外。cell 方式は**明示的に無効化**する。
 
-- W↔W' (両側が壁ノード) は両側 $V_n=0$ で既に $\widehat M=0,\ \chi=1$ なので実効的な変化は無い。
-- したがって実効は **W↔I 面** (壁ノード ↔ 内点)。
-- 境界半割面は $\dot m=0$ なので対象外。cell 方式は実装しない。
-
-**定義**: 現行の
-
-$$\widehat M = \min\Big(1, \frac{\sqrt{\tfrac12(|\mathbf u_L|^2+|\mathbf u_R|^2)}}{\hat c}\Big), \qquad \chi=(1-\widehat M)^2$$
-
-を、対象面でのみ**面法線成分**で置き換える:
+**定義**: 現行の $\widehat M = \min(1, \sqrt{\tfrac12(|\mathbf u_L|^2+|\mathbf u_R|^2)}/\hat c)$、$\chi=(1-\widehat M)^2$ を、
+対象面でのみ**面法線成分**で置き換える:
 
 $$\widehat M_n = \min\Big(1, \frac{\sqrt{\tfrac12(V_{nL}^2+V_{nR}^2)}}{\hat c}\Big), \qquad \chi_n=(1-\widehat M_n)^2 .$$
 
 case/46 の面 575140 ($V_{nL}=0,\ V_{nR}=276.2,\ \hat c=700.5$) では $\widehat M_n=0.28 \Rightarrow \chi_n=0.52$
-(現行は $|\mathbf u_R|\ge991$ より $\widehat M=1,\ \chi=0$)。補充は $\approx 0.52\times\tfrac12 A\,\Delta P/\hat c \approx 1.2$e-7 kg/s で、
-排出 4.3e-9 kg/s を 2 桁上回る → 壁 CV は $P_w \to P_i$ へ向かう。
+(現行は $|\mathbf u_R|\ge991$ より $\widehat M=1,\ \chi=0$)。
 
-**適用箇所**: $\chi$ は質量流束 $\dot m$ と圧力束の第 3 項 $(1-\chi)(\beta_++\beta_--1)\tfrac12(P_L+P_R)$ の**両方**に入るので、
-対象面では**両方**を $\chi_n$ で組む (SLAU は 1 つの $\chi$ で構成されている)。SLAU2 の第 3 項は $\chi$ を使わないので、
-SLAU2 では $\dot m$ だけが変わる。
+**$\widehat M_n$ の入力は「流束が実際に消費する面速度」**: ピン留めした節点値そのものではなく、
+`interp_dispatch` による**再構成・補正後の面状態** (`convectiveFlux_slau_d.inc.cuh:185-198`) を使う (codex M5)。
 
-**付随リスクが小さいと考える理由**: 付着境界層では壁法線面の $\Delta P \approx 0$ なので、$\chi_n \ne 0$ でも
-圧力差項はほぼ 0 のまま。効くのは**壁法線方向に大きな圧力段差がある剥離縁**だけで、これは狙った場所そのもの。
-とはいえ壁散逸を増やす変更なので、§6 V3 で摩擦・熱流束の回帰を必ず見る。
+### 4.1 適用箇所は**質量流束のみ** (圧力束は現行のまま)
 
-**代替案 (併記。推奨は上記)**:
+$$\chi_{\text{mass}} = \chi_n, \qquad \chi_{\text{pressure}} = \chi \ (\text{現行のまま})$$
 
-| 案 | 内容 | 評価 |
+$\chi$ は質量流束 $\dot m$ と圧力束の第 3 項 $(1-\chi)(\beta_++\beta_--1)\tfrac12(P_L+P_R)$ の両方に入るが、
+$\chi_n \ge \chi$ なので**圧力束側は係数 $(1-\chi)$ が小さくなり散逸が減る** — 補充機序 (質量) とは**別作用**である。
+面 575140 の記録状態で代数評価すると、$\dot m$ は $+4.35$e-9 → $-1.17$e-7 kg/s と反転する一方、
+**面圧力 $\tilde p$ は 807 → 1070 Pa (+32.5 %)** になる (codex の代数と当方の手計算が一致)。
+これは V3 の $C_T \pm0.1$ % を確実に壊すので、**初回は質量流束に限定する**。
+
+- **分離してよい根拠**: SLAU 族は「1 つの $\chi$」で閉じた性質に依存していない。**SLAU2 が既に第 3 項から $\chi$ を外している**
+  (`convectiveFlux_slau_d.inc.cuh:546-551`)。質量流束と圧力束の散逸を独立に設計するのは同族の先例である。
+- **付随する流束**: $\dot m$ が壁向きに反転すると運動量・エネルギーの風上項 $\tfrac12(\dot m-|\dot m|)U_R,\ h_R$ が壁 CV に入るが、
+  運動量は Dirichlet 射影 (`nodeWallDirichlet_d.cu:57-59`) で捨てられ、等温壁は `roe` もピンで捨てる。
+  **断熱壁は `roe` が自由なので質量と一緒にエネルギーが入る** (物理的に整合)。
+  化学種は `massflux[ip] = mdot` (`:565`) 経由で自動的に同じ $\dot m$ を使う。
+
+### 4.2 平衡壁圧 — 機序を説明する**近似モデル** (合否判定には使わない)
+
+**この式は機序の説明用であり、V1 の合否には使わない** (codex M2 を採用)。壁 CV の排出と補充が釣り合う点を、
+面 575140 だけの収支 (W↔W' を無視、$\rho_w \ll \rho_i$、$\rho_w=P_w/(RT_w)$) で解くと:
+
+$$\frac{P_w}{P_i} \approx \frac{1}{1 + \dfrac{2\,V_{n,i}\,\hat c}{\chi_n\,R\,T_w}} \qquad (\chi_n=0.52 \Rightarrow 0.313)$$
+
+**この近似は使えない**: (i) 移流項の正確形は $A\frac{\rho_w\rho_i}{\rho_w+\rho_i}V_{n,i}$ で、調和因子込みだと平衡比は **0.406**。
+(ii) より重要なのは、**無視した W↔W' の補充が排出の約 65 %** ある (run_0430 記録: 内点面の排出 4.345e-9 に対し
+壁同士の補充 合計 2.841e-9)。CV 189814 では壁同士の補充が内点面の排出を**上回る**。
+→ **V1 は全接続面の収支で判定する** (§6 V1-c)。
+
+**それでも残る含意 (記述として重要)**:
+
+- **壁 CV は「満たされる」のではなく、$V_{n,i}/\hat c$ で決まる高さで止まる**。$V_{n,i}\to0$ (後流に再循環が立つ) になれば
+  $P_w\to P_i$ に戻る。「$P_w \to P_i$ へ向かう」という書き方はしない。
+- **リスクが残る場所**: 壁隣接面に $V_n\ne0$ と大きな $\Delta p$ が同居する所 = **衝撃の壁面衝突点**
+  (SERN 2D のカウル衝撃がランプに当たる所)。§6 V3 で**衝撃足の壁圧分布**を明示的に見る。
+
+### 4.3 検討して採らなかった案
+
+| 案 | 判断 | 理由 |
 | --- | --- | --- |
-| (b) | Roe 型の音響散逸を壁隣接面の質量流束にだけ加える | 効果は確認済み (run_0433 で符号反転) だが 2 つのスキームの混成になる |
-| (c) | 既存 opt-in `time.deltaT.updateGuardAlpha` (commit 時に $dq$ を正値性で縮める) | **排出を止めず遅らせるだけ**。単独では不可 |
-| (d) | EOS 床の意味を直す | 独立の欠陥。[`tooling-sern-mesh-blocking.md`](tooling-sern-mesh-blocking.md) §5.1 B1e で別途 |
+| **圧力束にも $\chi_n$ を適用** | **却下** (当初案から変更) | 面圧力が +32.5 % 変わり V3 の $C_T$ ±0.1 % を壊す。補充機序と別作用。**V1 が質量流束限定で通れば圧力側の変更は永久に不要**なので「将来の拡張」としても残さない |
+| **B: 壁隣接面に KEEP の ES 行列散逸を重ねる** | **却下** | (1) σ が掛かるのは**散逸項だけ**なので正味流入の閾値は σ > 4.3e-9/2.4e-7 ≈ **0.018**。(2) より本質的に、§4.2 の式で σ=0.02 なら $P_w/P_i\approx0.02$ = **今の排出しきった状態 (0.016) を固定するだけ**。σ→1 にすれば A/Roe と同等だが、それは Roe を壁隣接面に貼るのと同じで KEEP を借りる意味が無い。(3) 5 成分すべての流束が変わる (`convectiveFlux_keep_d.inc.cuh:392-400,557-570`) ので $\chi$ だけを触る本案より侵襲的。(4) SLAU の $\dot m$ が既に持つ $-(S/2)\lvert\widehat V_n\rvert\Delta\rho$ と ES のエントロピー波が二重計上になる。(5) 本案が V3 で落ちるなら B も同じ面に散逸を足すので落ちる = **fallback にならない** |
+| **C: 既存の改良 AUSM 族を丸ごと採用** | **保留 (出典として吸収する方向)** | 質量流束の圧力拡散の切替が面法線か $\lvert\mathbf u\rvert$ かを確認して §3 に加える。丸ごと採用はしない: forge の AUSM⁺/AUSM⁺-up は dispatch に無く (`convectiveFlux_d.cu:239-286` は SLAU/SLAU2/HLLE/ROE/KEEP のみ)、TP・node 対応も未確認。**1 つの隅の問題のためにスキームを替えない**。「AUSM⁺ の密度正値保存性」は壁 CV の補充とは別の性質なので根拠に使わない |
+| **D: `time.deltaT.updateGuardAlpha`** | 併用可・単独不可 | commit 時に $dq$ を正値性で縮める既存 opt-in。**排出を止めず遅らせるだけ** |
+| **E: EOS 床の意味を直す** | 別 plan | [`tooling-sern-mesh-blocking.md`](tooling-sern-mesh-blocking.md) §5.1 B1e。独立の欠陥なので**本計画と同じ commit にしない** |
 
 ## 5. 実装ステップ
 
-1. `input/solverConfig.{hpp,cpp}` に `slauWallNormalChi` を追加し、起動ログに実効値を出す。
-2. `cuda_forge/convection/convectiveFlux_slau_d.inc.cuh` の $\widehat M$ 算出箇所 (`:538` 付近) に分岐を入れる。
-   壁ノード判定は既存の `wall_flag` を流束カーネルへ渡す (無ければ `mesh` から引き回す)。
-3. `methods/convection/theory.md` の SLAU 節に $\chi_n$ の節を追加し、`methods/index.md` と整合させる。
-4. §6 の V1–V3 を回す。
+**docs 更新は実装前** (codex m7)。
+
+1. `methods/convection/{theory,implementation}.md` に $\chi_n$ の仕様を書き、`methods/index.md` と整合させる。
+2. `input/solverConfig.{hpp,cpp}` に `slauWallNormalChi` を追加し、**起動ログに実効値を出す**。
+   `discretization != node` または `nodeWallDirichlet != 1` のとき 1 を指定したら**エラーで止める** (黙って無効にしない)。
+3. 配線: `SLAU_d` の現在の引数に壁フラグが無く、呼出し元は `cuda_forge/convection/convectiveFlux_d.cu:260`。
+   **wrapper を変更対象に含め**、`wall_flag_d` をカーネルへ渡す。
+4. `cuda_forge/convection/convectiveFlux_slau_d.inc.cuh` の $\widehat M$ 算出 (`:538` 付近) に分岐を入れる。
+   **質量流束の $\chi$ だけ**を $\chi_n$ にする (圧力束の $(1-\chi)$ は現行のまま。§4.1)。
+5. 単体確認 (§6 V0) → V2 → V1 → V3 の順に回す。
 
 ### 5.1 残作業 (優先順)
 
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
-| 1 | **codex plan レビュー** | §4 と §6 が書けた本状態で `codex_review.py <この plan> --stage plan`。Critical / Major の採否を §6.1 と本表に反映してから実装に入る | F |
-| 2 | 出典の確認 | `papers/` に SLAU の一次資料が無い。$\widehat M$ に $|\mathbf u|$ を使う理由を確認し §3 に追記 (多次元性 / carbuncle 対策の理解が正しいか)。**実装前** | F |
-| 3 | 実装 (§5 の 1–2) | 触るファイル: `input/solverConfig.{hpp,cpp}`, `cuda_forge/convection/convectiveFlux_slau_d.inc.cuh`。合格: ビル ド成功 + flag 0 で V2 がビット同一 | O |
-| 4 | V1 (本件の検証) | case/46 接続模型。合格条件は §6 のとおり | O |
-| 5 | V2 / V3 (無害性と回帰) | case/48・case/16・SERN 2D 生産。1 つでも外れたら**既定化しない** | O |
-| 6 | docs 同期 | `methods/convection/theory.md` に $\chi_n$、`methods/index.md` の目次 | O |
-| 7 | codex result レビュー | V1–V3 の VERDICT が出そろってから `--stage result` | F |
+| ~~1~~ (済 2026-09-23) | **codex plan レビュー** | **GO-with-changes, C0/M5/m2。全件採用**して §2–§7 を改訂 (§6.1) | F |
+| 2 | **出典の確認 (実装前。M1 で前倒し)** | (i) **済**: [Furusawa & Kitamura 2023](https://onlinelibrary.wiley.com/doi/10.1002/fld.5183) で `mSLAU` (全面適用版) の悪化報告を確認し §3.1 に反映。(ii) **未**: 原典 Shima–Kitamura 2011 §III.K / Fig.20 は有料で未入手 — `result` 段の前に再度試みる。(iii) **未**: 改良 AUSM 族 (Appl. Math. Model. 2019 等) の切替が面法線か $\lvert\mathbf u\rvert$ か | F |
+| 3 | 実装 (§5 の 1–4) | 触るファイル: `methods/convection/{theory,implementation}.md`, `methods/index.md`, `input/solverConfig.{hpp,cpp}`, `cuda_forge/convection/convectiveFlux_d.cu` (wrapper), `cuda_forge/convection/convectiveFlux_slau_d.inc.cuh`。合格: ビルド成功 + V0 + V2 | O |
+| 4 | V0 (単体) → V2 (無害性) | §6 のとおり | O |
+| 5 | V1 (本件の検証) | case/46 接続模型。合格条件は §6 V1-a〜d | O |
+| 6 | V3 (回帰・受入) | case/48・case/16・SERN 2D 生産。**不合格なら受入保留・設計へ戻る** | O |
+| 7 | 周期・軸対称の小規模 node 試験 | flag 1 を周期/軸対称で使う前に必要 (§2 制限事項)。`result` 段までに実施 | O |
+| 8 | codex result レビュー | V0–V3 の VERDICT が出そろってから `--stage result` | F |
 
 ## 6. 検証
 
-- **単体 / ビルド**: `slauWallNormalChi: 0` で既存バイナリとビット同一を確認 (V2)。
-- **検証ケース**: [`../../procedures/verification/README.md`](../../procedures/verification/README.md) の選定に従い、
-  下の V1–V4。
+- **検証ケース**: [`../../procedures/verification/README.md`](../../procedures/verification/README.md) の選定に従う。
+- **基準 run は flag 0 の同一バイナリ・同一 commit で取り直す** (旧 run を基準にしない。codex M4)。
 
 **判定基準 (結果を見る前に固定する)**:
 
-| # | 内容 | 合格 | 不合格 |
-| --- | --- | --- | --- |
-| **V1** | case/46 接続模型。`run_0430` の `res_1800` 起点、SLAU + $\chi_n$、**6000 step 以上**、200 step 出力 + 系列 CSV | $\rho$(CV 153797), $\rho$(CV 189814) が**常に $10\rho_{Min}$ 以上**を保ち、床到達 0、`check_quasisteady.py --series-csv` が **STEADY** (OSCILLATING なら振幅 < 20 %)、終端で $P_w/P_i \in [0.3, 1.5]$ | 下向き DRIFTING / NaN / $P_w > 2P_i$ (過補正) |
-| **V2** | 無害性。`slauWallNormalChi: 0` で case/48・case/16 | `check_field_regression` で現行と**ビット同一** | 差があれば実装の誤り |
-| **V3** | flag 1 の回帰。case/48 冷却平板 (y⁺≈1)・case/16・SERN 2D 生産 | case/48 の $C_f$・$q_w$ が flag 0 と **±1 %**、case/16 の壁 $p/p_0$ **±0.5 %**、SERN 2D の $C_T$ **±0.1 %** かつ起動レシピ通過 | 1 つでも外れたら**既定化しない** (opt-in のまま残す) |
-| **V4** (任意) | [[base-wake-resolution-rule]] の旧ベース形状 | 壁 CV の排出率が 0 になる | — |
+### V0 単体 (実装直後)
 
-いずれも `check_convergence.py` の同一設定区間 VERDICT を併記する。
+- 面向き反転で $\dot m$ が符号反転のみ (SLAU / SLAU2 双方)。
+- 等状態 ($L=R$) で $\dot m$ が厳密に移流のみ。
+- **非対象面 (両端とも非壁) の流束が flag 0 とビット同一**。
+- cell 方式で flag 1 を指定したらエラー終了。
+
+### V1 case/46 接続模型 (本件の検証)
+
+`run_0430` の `res_1800` 起点、SLAU + $\chi_n$、**6000 step 以上**、200 step 出力 + 毎 step probe
+(CV 153797 / **153880** / 189814 / 1135684) + 系列 CSV。**入力の密度や床は変えない** (交絡。codex M3)。
+
+| 記号 | 内容 | 合格 |
+| --- | --- | --- |
+| **V1-a** | 監視 CV の $\rho_w$ の時系列 | 単調増加 → プラトー |
+| **V1-b** | 収支の符号。診断ツール `diag_wall_cv_budget.py` に**ソルバ前処理 (床・`pMin`・$T_{eos}$)** を足した版で、各 dump の監視 CV の**全接続面**の $\Sigma\dot m$ | 起点直後の dump で $\Sigma\dot m<0$ (正味流入)。プラトー後は $\lvert\Sigma\dot m\rvert\,\Delta t_l/V$ が $\rho_w$ の **1 %/dump 未満**。**これを $dq$ と同一視しない** (RHS 収支と陰解法の更新は別) |
+| **V1-c** | 機序の定量。同じツールで、各 dump の隣接状態を凍結して $\Sigma_{\text{全面}}\dot m(P_w)=0$ となる $P_w$ を 1 次元求根 (調和因子込み・W↔W' 込み) | STEADY 後の最後の 3 dump で**観測 $P_w$ が予測の ×/÷1.5 以内**。外れたら「機序の理解が誤り」ではなく「**凍結近傍近似が破れた**」と読み、内点 $V_{n,i}$ の時系列を添えて再検討する |
+| **V1-d** | 床と定常性 | **全壁ノードで床到達 0**。`check_quasisteady.py --series-csv` ($\rho_{153797},\rho_{153880},\rho_{189814},n_{floor},\rho_{min}$) が **STEADY** (既定 `--drift 5 % / --osc 10 %` でよい。V3 とは別) |
+| **V1-e** | 回復の期限 | 153797・153880・189814 が **step 200 (第 1 dump) までに $10\rho_{Min}$ を超え、以後 V1 終了まで維持**。導出: 補充率 $\mathrm{d}\rho/\mathrm{d}t \approx (A/V)\tfrac12\chi_n(P_i-P_w)/\hat c \approx 1.0$e4 kg/m³/s → 1.7e-4 → 1e-3 に要する局所擬似時間 8e-8 s ≈ 17 step (陽的)。Roe の実測から陰解法の減衰 ≈2 倍、$\chi_n$ は Roe の約半分 → **≈50 step**、安全率 4 で 200 step。**Roe の飽和見積り 47 step から取らない** |
+| (打切り) | — | **1000 step を超えても届かなければ補充係数の見積りが 1 桁違う**ので設計へ戻る (合否とは別の打切り条件) |
+
+「常に $10\rho_{Min}$ 以上」とは**書かない** (起点が 1.711e-4 で要求 1e-3 の 17 % しかなく初期時点で不合格になる。codex M3)。
+
+### V2 無害性 (flag 0)
+
+- **面流束演算のビット同一性** (V0 で確認) と、**場の回帰**を分ける (codex m6)。
+- 場は `solver_density_cuda/tools/check_field_regress.py` で、**同一バイナリの反復からノイズ床を作り、その何倍かで判定**
+  (残差は `atomicAdd` で集積するので**無変更でもビット一致しない**)。**両側 3 本以上** ([[noise-floor-both-sides]])。
+  case/48・case/16。`--boundary` で壁出力 (`twall_*`, `qwall`) も比較する。
+
+### V3 回帰・受入 (flag 1)
+
+**不合格なら「受入保留・設計へ戻る」** (「既定化しない」は受入ゲートにならない。既定化はもともとスコープ外。codex M4)。
+
+| ケース | 量 | 許容差 | 準定常の要求 (**許容差の 1/5 以下**) |
+| --- | --- | --- | --- |
+| case/48 冷却平板 (y⁺≈1) | $C_f$, $q_w$ | ±1 % | `--drift 0.002 --osc 0.005` |
+| case/16 | 壁 $p/p_0$ | ±0.5 % | `--drift 0.001 --osc 0.0025` |
+| SERN 2D 生産 | $C_T$ | ±0.1 % | `--drift 0.0002 --osc 0.0005` |
+| SERN 2D 生産 | **カウル衝撃がランプに当たる衝撃足の壁圧分布** (§4.2 の残リスク) | ±1 % (ノルムを固定して比較) | 同上 |
+| 全ケース | **収束の悪化と格子感度** (§3.1 の `mSLAU` 報告) | flag 0 と比べ $\Sigma$ CFL あたりの低下桁数が悪化しないこと | — |
+
+- 両側 (flag 0 / flag 1) の `check_convergence.py` VERDICT を**同一設定区間**で併記する。
+- `OSCILLATING` を許す場合は**平均 ± 振幅**で比較し、**終端 dump を代表値にしない**。
+- block-DPLUR の固定点確認として `cfl_pseudo` を 0.2 → 0.4 にした run を 1 本足す (`nStepInner 5` 固定)。
+- **V1 の診断成功と、生産利用可能な検証完了を区別する**。
+
+### V4 (任意)
+
+[[base-wake-resolution-rule]] の旧ベース形状で壁 CV の排出率が 0 になるか。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
-| plan | (未実施) | | | §5.1 #1。**実装前に回す** |
+| plan | `2026-09-23` | [2026-09-23-convection-slau-wall-normal-chi-plan.md](../../notes/reviews/2026-09-23-convection-slau-wall-normal-chi-plan.md) | **GO-with-changes**, C0/M5/m2 | **全件採用** (却下なし)。M1 → §4.1 (質量流束限定) + §3.1 (文献) + §5.1 #2 を実装前へ。M2 → §4.2 を近似モデルへ降格 + §6 V1-b/c。M3 → §6 V1-e (期限方式) + 153880 を監視に追加。M4 → §6 V3 (受入保留・許容差の 1/5)。M5 → §4 (再構成後の面速度・条件付きの主張) + §6 V0 + §2 制限事項 + §5.1 #7。m6 → §6 V2 (ツール名 `check_field_regress.py` に訂正・ノイズ床比)。m7 → §5 の 1–3 (wrapper 配線・docs 先行) |
 
 ## 7. 影響範囲
 
 - `solver_density_cuda/input/solverConfig.{hpp,cpp}`
+- `solver_density_cuda/cuda_forge/convection/convectiveFlux_d.cu` (**wrapper。`wall_flag_d` の受渡し**)
 - `solver_density_cuda/cuda_forge/convection/convectiveFlux_slau_d.inc.cuh`
-- `methods/convection/theory.md`, `methods/index.md`
+- `methods/convection/{theory,implementation}.md`, `methods/index.md` (**実装前に更新**)
 - 既定 0 なので既存ケース・手順への影響は無い (V2 で担保)。
+- **制限事項**: flag 1 は**非周期・非軸対称の node 構成でのみ検証**する (§2)。周期・軸対称で使う前に §5.1 #7 が要る。
+- block-DPLUR の Jacobian は近似 FVS のままでよい (`block_dplur_jacobian_d.cuh:22`)。
+  ただし CFL・内反復数による固定点と収束性は V3 で確認する。
 
 ## 8. 完了条件
 
@@ -140,5 +258,7 @@ SLAU2 では $\dot m$ だけが変わる。
 
 ## 9. 変更ログ
 
-- `2026-09-23` — 初稿。[`tooling-sern-mesh-blocking.md`](tooling-sern-mesh-blocking.md) §4.13.1 の診断 (run_0430–0434) と
+- `2026-09-23` — 初稿。
+- `2026-09-23` — 文献調査と `diagnostician` の判断で §3/§4/§6 を改訂。**A を本命のまま維持**し、根拠を「自作」から「**AUSM⁺-up の面法線マッハ切替則の局所適用**」に置き換え (`AUSM_d.cu:277-290`)。**§4.1 平衡壁圧の関係式**を追加し、V1 の合否をこれで判定する形に変更 (「完走」でも「$P_w\to P_i$」でもない)。**B (KEEP の ES 散逸流用) を却下** (σ=0.02 では平衡壁圧 0.02 で現状固定、A の fallback にもならない)、C は出典として吸収する方向で保留。[`tooling-sern-mesh-blocking.md`](tooling-sern-mesh-blocking.md) §4.13.1 の診断 (run_0430–0434) と
   `diagnostician` の設計方針を受けて起票。**実装前に codex plan 段が必要** (§5.1 #1)。
+- `2026-09-23` — **codex plan 段 GO-with-changes (C0/M5/m2) を全件採用**して §2–§7 を全面改訂。**適用を質量流束のみに限定** (圧力束は現行のまま。面圧力が +32.5 % 変わるため)。**§4.2 平衡式を近似モデルへ降格**し V1 は全接続面の収支で判定 (無視していた W↔W' の補充が排出の 65 %)。V1 の合格条件を「常に $10\rho_{Min}$ 以上」から**期限方式 (step 200 までに超えて維持)** へ。V3 を受入ゲート化。**文献調査で `mSLAU` (全面適用版) の悪化報告を発見**し §3.1 に記載。
