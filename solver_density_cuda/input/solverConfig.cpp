@@ -516,6 +516,9 @@ void solverConfig::read(std::string fname)
             this->conjugateFluxAvg   = getOptionalValidatedValue<int>(cj, "flux_avg", 1, "conjugate");
             if (this->conjugateFluxAvg < 1)
                 throw std::runtime_error("'conjugate': flux_avg must be >= 1.");
+            this->conjugateRefactorDT = getOptionalValidatedValue<double>(cj, "refactorDT", 1.0, "conjugate");
+            if (!(this->conjugateRefactorDT >= 0.0))
+                throw std::runtime_error("'conjugate': refactorDT must be >= 0 (0 = 毎回分解する).");
             this->conjugateDfScale   = getOptionalValidatedValue<double>(cj, "Df_scale", 1.0, "conjugate");
             if (cj["gate"]) {
                 auto g = cj["gate"];

@@ -134,6 +134,7 @@ SolidFem2D::SolidFem2D(const SolidMesh& m) : m_(m), n_(m.nNodes)
         std::cout << "[solidFem2d] 注意: 実測帯幅 " << bw_ << " が h5 の属性 " << m_.bandwidth
                   << " より大きい (Robin 辺が三角形の辺でない)。実測値を使う。\n";
     ab_.assign((size_t)(bw_ + 1) * n_, 0.0);
+    abF_.assign((size_t)(bw_ + 1) * n_, 0.0);
     b_.assign(n_, 0.0);
 }
 
@@ -209,9 +210,10 @@ std::vector<double> SolidFem2D::matvec(const std::vector<double>& u) const
 
 void SolidFem2D::factorize()
 {
+    abF_ = ab_;                    // 組んだ行列は残す (同じ更新で残差も測るため)
     // 下三角バンド Cholesky (LAPACK dpbtf2 と同じ順序)。
     for (int j = 0; j < n_; j++) {
-        double d = at(j, j);
+        double d = atF(j, j);
         if (!(d > 0.0)) {
             std::cerr << "[solidFem2d] ERROR: 固体行列が正定でない (節点 " << j
                       << " で対角 " << d << ")。孔・背面の Robin が付いていない"
@@ -219,13 +221,13 @@ void SolidFem2D::factorize()
             exit(EXIT_FAILURE);
         }
         d = std::sqrt(d);
-        at(j, j) = d;
+        atF(j, j) = d;
         const int kmax = std::min(bw_, n_ - 1 - j);
-        for (int i = 1; i <= kmax; i++) at(j + i, j) /= d;
+        for (int i = 1; i <= kmax; i++) atF(j + i, j) /= d;
         for (int k = 1; k <= kmax; k++) {
-            const double ajk = at(j + k, j);
+            const double ajk = atF(j + k, j);
             if (ajk == 0.0) continue;
-            for (int i = k; i <= kmax; i++) at(j + i, j + k) -= at(j + i, j) * ajk;
+            for (int i = k; i <= kmax; i++) atF(j + i, j + k) -= atF(j + i, j) * ajk;
         }
     }
     factored_ = true;
@@ -235,15 +237,15 @@ void SolidFem2D::solveInPlace(std::vector<double>& v) const
 {
     // L y = v
     for (int j = 0; j < n_; j++) {
-        v[j] /= at(j, j);
+        v[j] /= atF(j, j);
         const int kmax = std::min(bw_, n_ - 1 - j);
-        for (int k = 1; k <= kmax; k++) v[j + k] -= at(j + k, j) * v[j];
+        for (int k = 1; k <= kmax; k++) v[j + k] -= atF(j + k, j) * v[j];
     }
     // L^T x = y
     for (int j = n_ - 1; j >= 0; j--) {
         const int kmax = std::min(bw_, n_ - 1 - j);
-        for (int k = 1; k <= kmax; k++) v[j] -= at(j + k, j) * v[j + k];
-        v[j] /= at(j, j);
+        for (int k = 1; k <= kmax; k++) v[j] -= atF(j + k, j) * v[j + k];
+        v[j] /= atF(j, j);
     }
 }
 

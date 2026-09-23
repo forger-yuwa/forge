@@ -61,6 +61,9 @@ public:
     // 更新に使う界面熱量を **N 更新の後方移動平均**にする (既定 1 = 平均しない)。
     // 流体側に局所振動があるとき、瞬時値では界面ゲートが床に当たる (plan §5.1 #70)。
     int    conjugateFluxAvg = 1;
+    // 固体行列を組み直して**分解し直す**しきい値 [K] (§4.6a)。k_s(T) の勾配は 0.11 %/K なので
+    // 1 K 凍結は作用素の 0.1 % 以下の摂動。組立ては毎回やる (残差を現在の k_s で測るため)。
+    double conjugateRefactorDT = 1.0;
     double conjugateDfScale = 1.0;       // D_f の倍率 (発散したとき手で上げる。自動調整はしない)
     // 界面ゲート (G-if) の許容。**run を投入する前に書く** = 結果を見てから決めない仕組み。
     // ソルバが起動時に conjugate_gate.json に写し、tools/check_cht_interface.py がそれで判定する。

@@ -365,6 +365,10 @@ struct SolidState {
     std::vector<double> lumped;        // 界面節点の集中辺長 [m]
     std::vector<double> u;             // 固体全節点温度 [K] (これが状態)
     std::vector<double> qIface;        // 直近の界面荷重 [W/m] (出力用。平均後の値)
+    std::vector<double> uFact;         // 分解を作ったときの温度 (再分解の判定用)
+    std::vector<double> dfFact;        // **そのとき使った D_f** (再利用中は右辺もこれで組む)
+    bool hasFact = false;
+    long nFact = 0, nUpdate = 0;       // 分解した回数 / 更新回数 (コストの記録)
     std::vector<std::vector<double>> qBuf;  // 界面熱量の環状バッファ (flux_avg 更新分)
     size_t qPos = 0, qFilled = 0;      // 書き込み位置と充填数
     double dTprev = -1.0;
@@ -617,29 +621,54 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
         }
     }
 
-    // ---- G-if: **更新前 (未緩和)** の界面残差 r_i = (K u^k - b)_i - Q_f,i ----
-    // (平均を使っているときは**平均後の $Q_f$ で**測る = 実際に解いている方程式の残差にする)
-    const std::vector<double> r0 = st.fem->residual(st.u);
+    // ---- 分解を再利用するか決める (§4.6a) ----
+    // **$D_f$ は分解と一緒に凍結する**。行列側が古い $D_f$ のまま右辺だけ新しい $D_f$ にすると、
+    // 固定点が $K u-b-Q_f=(D_f^{new}-D_f^{old})T_w$ にずれて連成が振動する
+    // (2026-09-23 に実測: `res_rel` 1.8e-4 -> 1.5e-2、窓内の壁温の振れ 2.34 K)。
+    double dFact = 1e30;
+    if (st.hasFact && st.uFact.size() == st.u.size()) {
+        dFact = 0.0;
+        for (size_t i = 0; i < st.u.size(); i++) dFact = std::max(dFact, std::fabs(st.u[i] - st.uFact[i]));
+    }
+    const bool doFactor = (!st.hasFact || dFact > cfg.conjugateRefactorDT);
+    if (doFactor) st.dfFact = Df;
+    const std::vector<double>& Dfu = st.dfFact;      // 実際に使う D_f (再利用中は凍結されたもの)
+
+    // ---- 組立てと右辺 ----
+    st.fem->assemble(st.u, Dfu);
+    std::vector<double> rhs = st.fem->rhs();
+    for (int i = 0; i < ni; i++) rhs[st.mesh.ifaceNodes[i]] += Qf[i] + Dfu[i] * Twk[i];
+
+    // ---- G-if: **更新前 (未緩和)** の界面残差 ----
+    // $r = (K+D_f)u^k - (b + Q_f + D_fT_w^k)$ を使う。界面では $u^k_{\rm iface}=T_w^k$ に
+    // 揃えてあるので $D_f$ の項は厳密に相殺し、$r_i = (K u^k - b)_i - Q_{f,i}$ に一致する
+    // (組み直さずに済むので、分解の再利用と両立する)。平均を使っているときは**平均後の $Q_f$**
+    // で測る = 実際に解いている方程式の残差にする。
+    const std::vector<double> Au = st.fem->matvec(st.u);
     double resAbs = 0.0, resMax = 0.0, qfMax = 0.0, qTotal = 0.0, resSolid = 0.0;
     {
         std::vector<char> isIface(st.mesh.nNodes, 0);
         for (int i = 0; i < ni; i++) isIface[st.mesh.ifaceNodes[i]] = 1;
         for (int i = 0; i < ni; i++) {
-            const double r = r0[st.mesh.ifaceNodes[i]] - Qf[i];
+            const int nd = st.mesh.ifaceNodes[i];
+            const double r = Au[nd] - rhs[nd];
             resMax = std::max(resMax, std::fabs(r));
             if (st.lumped[i] > 0.0) resAbs = std::max(resAbs, std::fabs(r) / st.lumped[i]);
             qfMax  = std::max(qfMax, std::fabs(Qf[i]));
             qTotal += Qf[i];
         }
         for (int i = 0; i < st.mesh.nNodes; i++)
-            if (!isIface[i]) resSolid = std::max(resSolid, std::fabs(r0[i]));
+            if (!isIface[i]) resSolid = std::max(resSolid, std::fabs(Au[i] - rhs[i]));
     }
 
-    // ---- 更新 (固体全節点系をバンド Cholesky で 1 回解く) ----
-    st.fem->assemble(st.u, Df);
-    st.fem->factorize();
-    std::vector<double> rhs = st.fem->rhs();
-    for (int i = 0; i < ni; i++) rhs[st.mesh.ifaceNodes[i]] += Qf[i] + Df[i] * Twk[i];
+    // ---- 分解 (分解が 8 ms、組立てが 1 ms。ここを毎回やると per-step コストが跳ねる) ----
+    st.nUpdate++;
+    if (doFactor) {
+        st.fem->factorize();
+        st.uFact = st.u;
+        st.hasFact = true;
+        st.nFact++;
+    }
     st.fem->solveInPlace(rhs);
 
     // ---- 安全装置 (自動調整はしない。止めて報告する。§4.6a) ----
@@ -690,7 +719,8 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
         std::cout << "[conjugateWall] step " << iStep << " physID " << bc.physID
                   << (navg > 1 ? " (flux_avg " + std::to_string(st.qFilled) + "/" + std::to_string(navg) + ")" : "")
                   << ": Tw " << tmin << " .. " << tmax << " K, max|dTw| " << dTmax
-                  << " K, if-res " << resAbs << " W/m2 (rel "
+                  << " K, 分解 " << st.nFact << "/" << st.nUpdate
+                  << ", if-res " << resAbs << " W/m2 (rel "
                   << (qfMax > 0.0 ? resMax / qfMax : 0.0) << "), solid-res " << resSolid
                   << " W/m" << std::endl;
 }
@@ -835,6 +865,7 @@ void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
         // (2026-09-23 に 19751 ファイル/13 GB を作った)。
         const bool outStep = (cfg.outStepInterval > 0)
                           && (iStep % cfg.outStepInterval == 0) && (iStep >= cfg.outStepStart);
+
         if (cfg.conjugateMode == "fem2d" && outStep) {
             const auto it = solidStates().find(bc.physID);
             if (it != solidStates().end() && it->second.ready) {
@@ -858,6 +889,10 @@ void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
         }
         const auto it = bc.bvar.find("Ts");
         if (it == bc.bvar.end()) continue;
+        // **毎 step 書かない** (本関数は毎 step 呼ばれる)。480 行の CSV を毎 step 上書きすると
+        // 1 step あたり ~0.14 ms かかり、連成の per-step コストの大半を占める (2026-09-23 実測)。
+        // 再開に要るのは最新版だけなので、流体の出力間隔に合わせる。
+        if (!outStep && iStep != 0) continue;
         std::ofstream ofs("conjugate_Tw_" + std::to_string(bc.physID) + ".csv");
         ofs << "x y z Ts\n";
         ofs.precision(10);

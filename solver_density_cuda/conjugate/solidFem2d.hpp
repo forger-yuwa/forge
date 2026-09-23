@@ -62,9 +62,11 @@ public:
                   const std::vector<double>& dfDiag = {},
                   const std::vector<double>& dfRhs  = {});
 
-    void factorize();                          // バンド Cholesky (ab_ を上書き)
-    void solveInPlace(std::vector<double>& v) const;  // 前進後退代入
-    std::vector<double> matvec(const std::vector<double>& u) const;  // 分解前の K u
+    // バンド Cholesky。**組んだ行列 ab_ は壊さず、複製 abF_ を分解する**ので、
+    // 分解を再利用しながら同じ更新で残差 (matvec) も測れる。
+    void factorize();
+    void solveInPlace(std::vector<double>& v) const;  // 前進後退代入 (abF_ を使う)
+    std::vector<double> matvec(const std::vector<double>& u) const;  // 組んだ行列 (分解前) の K u
 
     // 界面に節点荷重 Qf [W/m] を与えて解く (D_f = 0、k_s(T) は Picard)。
     // 戻り値は反復回数。u は入出力 (初期値として使う)。
@@ -82,12 +84,15 @@ private:
     const SolidMesh& m_;
     int n_ = 0;
     int bw_ = 0;
-    std::vector<double> ab_;     // 下三角バンド
+    std::vector<double> ab_;     // 下三角バンド (組んだまま)
+    std::vector<double> abF_;    // その複製を分解したもの
     std::vector<double> b_;
     bool factored_ = false;
 
     inline double& at(int i, int j) { return ab_[(i - j) + (size_t)j * (bw_ + 1)]; }
     inline double  at(int i, int j) const { return ab_[(i - j) + (size_t)j * (bw_ + 1)]; }
+    inline double& atF(int i, int j) { return abF_[(i - j) + (size_t)j * (bw_ + 1)]; }
+    inline double  atF(int i, int j) const { return abF_[(i - j) + (size_t)j * (bw_ + 1)]; }
 };
 
 // 固体場を forge と同じ XDMF 規約で書く (plan §4.6a。ParaView で流体と重ねられる)。
