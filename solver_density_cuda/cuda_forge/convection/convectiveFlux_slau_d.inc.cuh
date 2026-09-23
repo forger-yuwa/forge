@@ -16,6 +16,9 @@ __global__ void SLAU_d
  // **T が独立な 2 つの再構成の差**になり 2 節点モードを浴びる (case/53 実測: (dP/P)/(drho/rho) が
  // forge 1.24 / SU2 0.995、等温=1.000)。0 でビット不変。**リミッタは limiter_P を流用** (limiter_T は未計算)。
  int reconT,
+ // 壁隣接面に限り、**質量流束の chi だけ**を面法線 Mach で組み直す (0 でビット不変)。
+ // 圧力束の (1-chi) は変えない。plans/active/convection-slau-wall-normal-chi.md §4.1
+ int slauWallNormalChi,
  // 接触波 (エントロピー波) 散逸の速度下限 eps。0.0 でビット不変 (solverConfig.hpp `slauContactFloor` 参照)
  flow_float contactFloor,
  int lowMachPrecond, flow_float precondEps,   // 低マッハ前処理 (1: 散逸スケールを c'、0: 従来 c_hat)
@@ -538,6 +541,18 @@ __global__ void SLAU_d
         flow_float M_hat = min(one, sqrt(half*(velocity2_R + velocity2_L))/c_hat);
         flow_float chi = (1.0f-M_hat)*(1.0f-M_hat);
 
+        // 壁隣接面の質量流束だけ chi を面法線 Mach で組み直す (space.slauWallNormalChi)。
+        // 壁ノードは u=0 で移流の流入経路を持たないのに、隣の内点の**接線**速度が大きいと
+        // M_hat (= |u| ベース) が 1 に張り付いて chi=0 になり、圧力差項による補充が消える。
+        // 圧力束の (1-chi) は変えない (chi_n >= chi なので圧力散逸が減る = 別作用)。
+        flow_float chi_mass = chi;
+        if (slauWallNormalChi != 0 && geom.wall_flag != nullptr
+            && ((ic0 < geom.nCells && geom.wall_flag[ic0] == 1)
+             || (ic1 < geom.nCells && geom.wall_flag[ic1] == 1))) {
+            const flow_float M_hat_n = min(one, sqrt(half*(Vn_p*Vn_p + Vn_m*Vn_m))/c_hat);
+            chi_mass = (1.0f-M_hat_n)*(1.0f-M_hat_n);
+        }
+
         flow_float pressure_sum = Pf_L + Pf_R;
         // 圧力束の第3項のみ slauVariant で分岐 (mdot は SLAU/SLAU2 共通)。
         // SLAU : (1-chi)(beta_p+beta_m-1) * (P_L+P_R)/2   ... 低マッハで消失し圧力散逸が乏しい
@@ -561,7 +576,7 @@ __global__ void SLAU_d
             c_diss = lowMachCprime(c_hat, velMag_face, Un_face, precondEps);
         }
 
-        flow_float mdot = sss*0.5f*((ro_L*(Vn_p+Vn_hat_p_abs)+ro_R*(Vn_m-Vn_hat_m_abs)) -chi/(c_diss)*P_del);
+        flow_float mdot = sss*0.5f*((ro_L*(Vn_p+Vn_hat_p_abs)+ro_R*(Vn_m-Vn_hat_m_abs)) -chi_mass/(c_diss)*P_del);
         massflux[ip] = mdot;
 
         // S3: 同一の再構成 face 組成 (upwind) を Yface_out[ip*nSpecies+s] へ書き出す。species 移流がこれを読む。

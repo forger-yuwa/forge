@@ -75,6 +75,12 @@ output: {level: 1}                                      # 保存量 + 原始量 
   `outlet_statPress` の Ps を実出口圧に合わせる (node は壁列が常に亜音速なので Ps ≪ 実圧だと SST が出口列から
   unstart [node-supersonic-exit-outflow])。3D の出口角線で unstart が続く場合は出口バッファ (slip 延長, physID 別)
   + `mesh.wallDistExtraPhysIDs: [そのID]` + Ps 一致 (case/16 run_0226〜0228)。
+  **⑤ SERN (case/46) は出口・`far_bottom` とも設計上つねに超音速なので、runner の `evaluate.outlet_kind` の既定を
+  `outflow` にした (2026-09-23)**。この罠は**同じ case で 2 回踏んでいる**: run_0121 で出口 P 7.5 → 128 kPa に積み上がって発散
+  (対策が `problem_r5_3d_sst_outflow.yaml` の個別 YAML に留まり既定へ反映されなかった)、接続模型 run_0430–0436 で
+  出口の亜音速率 3.5 → 99.5 %・`far_bottom` の圧力 22 MPa・残差 +0.8 桁。**`outflow` に変えるだけで**同一起点・同一設定で
+  亜音速率 4.4 %・逆流 0.1 %・全域 P>2e5 が 0 節点・残差 −1.3 桁になった (run_0435 対 run_0437)。
+  **超音速出口に静圧を課さない**こと。
 - 壁: NS は `wall` (断熱 no-slip)、等温は `wall_isothermal` (キーは `Ts`)。Euler は `slip`。
   **SST の壁は変換時に no-slip `wall` でないと wall_dist=0 になり ω が step 0 で発散**。
 - 対称面/疑似 2D 側面は `slip`。

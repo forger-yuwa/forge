@@ -600,6 +600,12 @@ void solverConfig::read(std::string fname)
             this->slauContactFloor = space["slauContactFloor"].as<flow_float>();
             std::cout << "'slauContactFloor' in 'space': " << this->slauContactFloor << std::endl;
         }
+        if (space["slauWallNormalChi"]) {
+            this->slauWallNormalChi = space["slauWallNormalChi"].as<int>();
+            std::cout << "'slauWallNormalChi' in 'space': " << this->slauWallNormalChi
+                      << (this->slauWallNormalChi ? "  (wall-adjacent faces: mass-flux chi from face-normal Mach)"
+                                                  : "  (off; bit-identical)") << std::endl;
+        }
         if (space["roeEntropyFixCoeff"]) {
             this->roeEntropyFixCoeff = space["roeEntropyFixCoeff"].as<flow_float>();
             std::cout << "'roeEntropyFixCoeff' in 'space': " << this->roeEntropyFixCoeff
@@ -670,6 +676,22 @@ void solverConfig::read(std::string fname)
         this->badReconFallback = getOptionalValidatedValue<int>(space, "badReconFallback", 0, "space");
         if (this->badReconFallback < 0 || this->badReconFallback > 100) {
             throw std::runtime_error("Key 'badReconFallback' in 'space' must be 0 (off) or 1..100 (hysteresis visits; SU2 uses 20).");
+        }
+        if (this->slauWallNormalChi != 0) {
+            if (this->slauWallNormalChi != 1) {
+                throw std::runtime_error("Key 'slauWallNormalChi' in 'space' must be 0 (off) or 1.");
+            }
+            if (this->discretization != "node") {
+                throw std::runtime_error("'slauWallNormalChi: 1' in 'space' requires 'mesh.discretization: node' "
+                                         "(the wall CV drain it addresses is specific to node-centred Dirichlet wall nodes).");
+            }
+            if (this->nodeWallDirichlet != 1) {
+                throw std::runtime_error("'slauWallNormalChi: 1' in 'space' requires 'mesh.nodeWallDirichlet: 1' "
+                                         "(without the velocity pin there is no starved wall CV to fix).");
+            }
+            if (this->solver != "SLAU" && this->solver != "SLAU2") {
+                throw std::runtime_error("'slauWallNormalChi: 1' in 'space' requires 'solver: SLAU' or 'SLAU2'.");
+            }
         }
         if (this->limiterScaled == 1 && this->discretization != "node") {
             std::cout << "[config] limiterScaled: 1 は discretization 'node' 専用のため無効化した" << std::endl;

@@ -208,7 +208,8 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
         var.p_d["pcx"]   , var.p_d["pcy"], var.p_d["pcz"], var.p_d["fx"],
         var.p_d["sx"]    , var.p_d["sy"] , var.p_d["sz"] , var.p_d["ss"],
-        var.p_d["massflux"] };
+        var.p_d["massflux"],
+        msh.wall_flag_d };
     PrimState st {
         var.c_d["ro"], var.c_d["roUx"], var.c_d["roUy"], var.c_d["roUz"], var.c_d["roe"],
         var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["P"], var.c_d["Ht"], var.c_d["sonic"],
@@ -259,6 +260,7 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
 
         SLAU_d<<<dimGrid_normal_halo , cuda_cfg.dimBlock>>> (
             cfg.convMethod, cfg.limiter, slauVariant, cfg.reconT,
+            cfg.slauWallNormalChi,
             cfg.slauContactFloor,
             cfg.lowMachPrecond, cfg.precondEps,
             cfg.lowMachThornber,

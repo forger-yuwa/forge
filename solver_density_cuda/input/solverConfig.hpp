@@ -508,6 +508,12 @@ public:
     // plan boundary-conjugate-heat-transfer §5.1 #43。
     flow_float slauContactFloor = 0.0;
 
+    // SLAU の質量流束の圧力散逸 chi を、**壁隣接面に限って**面法線 Mach で組み直す (opt-in, 既定 0 = ビット同一)。
+    // node × nodeWallDirichlet=1 の壁ノード (u=0) が接線速度の大きい内点と面を共有すると chi=0 になり、
+    // 壁 CV への補充経路が消えて排出される (methods/convection/theory.md「既知の限界」)。
+    // **圧力束の (1-chi) は変えない** (別作用。plans/active/convection-slau-wall-normal-chi.md §4.1)。
+    int slauWallNormalChi = 0;
+
     int nodeInletCornerWall = 0;
     std::vector<int> wallDistExtraPhysIDs;   // 壁距離の壁点集合に加える非 wall bcond の physID (例: 出口バッファの slip 壁)。SST の F1/F2 用   // 1: 変換時に入口∩壁コーナーの入口側半割面を壁へ帰属 (node)。methods/discretization.md §7.2 (D)
 
