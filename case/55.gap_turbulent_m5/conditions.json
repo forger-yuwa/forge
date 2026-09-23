@@ -1,0 +1,13 @@
+{
+  "_source": "case/49 derived.json (ISA 20 km, M5) をそのまま使う。分母は h 比 (平板が断熱なので q 比は定義できない)",
+  "gas": {"kind": "dry_air_tp", "Y": {"N2": 0.75518, "O2": 0.23139, "AR": 0.012885, "CO2": 0.000545}},
+  "wall": {"Tw_cavity": 500.0, "plate": "adiabatic", "_note": "case/49: キャビティ壁 500 K 等温、平板は断熱"},
+  "turbulence": {"model": "sst", "turb_intensity": 0.005, "mut_over_mu": 10.0, "k_inf": 81.609, "omega_inf": 50530.8},
+  "series": [
+    {"id": "K1", "w_over_d": 0.05, "M": 5.0, "T_inf": 216.65, "P_inf": 5474.7177, "ro_inf": 0.08803358,
+     "U_inf": 1475.2116, "mu_inf": 1.42178e-05, "Re_m": 9134195.2,
+     "Tt_tp": 1222.725, "Taw_tp": 1126.329, "Tw_over_Taw": 0.4439,
+     "_qfp_note": "平板が断熱なので q_fp は存在しない。比較は h = q/(T_aw - T_w) で作る",
+     "qfp_kW": null}
+  ]
+}
