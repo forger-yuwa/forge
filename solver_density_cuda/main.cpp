@@ -1251,9 +1251,14 @@ cudaConfig initializeSimulation(
     periodicGradientGather_d_wrapper(cfg , cuda_cfg , msh , var);
     axisymmetricGeomTerms_d_wrapper(cfg , cuda_cfg , msh , var);
     updateVariablesOuter(cfg , cuda_cfg , msh , var , mat_ns);
-    // FP64 正本の初期化は **updateVariablesOuter の後**に置く (§5.1 S1a)。
+    // FP64 正本は **updateVariablesOuter の後**に「確保 → 初期化」を**隣接させて**置く (§5.1 S1a)。
     // ここより前 (周期ミラー :1221・初期ピン) に置くと、それらの初期射影が Qacc に入らない。
-    var.initQAccumulatorFromQ(msh.nCells);
+    // **離すと壊れる**: 以前は確保を main() 側に置いていたため初期化が先に走って no-op になり、
+    // Qacc=0 のまま commit されて ro≈0 → step 4 で発散した (2026-09-23, run_0023_g1_on)。
+    if (cfg.qAccumulatorFP64 == 1) {
+        var.allocQAccumulator(msh.nCells);
+        var.initQAccumulatorFromQ(msh.nCells);
+    }
     speciesUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // roY{s}N/M ベースライン
     condensationUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // 液相モーメント N/M ベースライン
     tracerUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // トレーサ N/M ベースライン
@@ -2167,7 +2172,13 @@ int main(void) {
                             "軸対称なし、周期なし、sstEnergyIncludesK=0\n");
             exit(1);
         }
-        var.allocQAccumulator(msh.nCells);
+        // 確保と初期化は initializeSimulation の中 (updateVariablesOuter の直後) で隣接して行う。
+        // ここでは**それが済んでいることを確かめるだけ**にする (黙って未初期化のまま進ませない)。
+        if (var.qacc_d[0] == nullptr) {
+            fprintf(stderr, "[qAccumulatorFP64] 内部エラー: 正本が確保されていない "
+                            "(initializeSimulation での確保・初期化が走っていない)\n");
+            exit(1);
+        }
         printf("[qAccumulatorFP64] 有効: 保存量 5 本の正本を FP64 に置く (内点 %ld CV)\n", (long)msh.nCells);
     }
 

@@ -249,7 +249,13 @@ void variables::allocQAccumulator(geom_int nCells)
 
 void variables::initQAccumulatorFromQ(geom_int nCells)
 {
-    if (this->qacc_d[0] == nullptr) return;
+    // **黙って no-op にしない** (2026-09-23): 以前はここで return していたため、確保より先に
+    // 呼ばれていたことに気づけず、Qacc=0 のまま commit されて ro≈0 → 発散した。
+    if (this->qacc_d[0] == nullptr) {
+        std::cerr << "initQAccumulatorFromQ: 正本が未確保のまま呼ばれた "
+                     "(allocQAccumulator より前に呼んでいる)\n";
+        std::exit(1);
+    }
     flow_float* q[5];
     for (int i = 0; i < 5; i++) q[i] = this->c_d.at(s_qaccNames[i]);
     qaccInitFromQ(this->qacc_d, q, nCells);
