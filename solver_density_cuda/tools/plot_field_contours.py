@@ -70,6 +70,18 @@ def main():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.tri import Triangulation
+    # 日本語タイトルが豆腐になるのを防ぐ (既定の DejaVu には CJK が無い)。
+    # ~/.fonts の Noto Sans CJK JP を登録する。無ければ黙って既定のまま。
+    try:
+        from matplotlib import font_manager
+        import pathlib as _pl
+        for _f in _pl.Path.home().glob(".fonts/NotoSansCJK*"):
+            font_manager.fontManager.addfont(str(_f))
+        if any("Noto Sans CJK JP" == f.name for f in font_manager.fontManager.ttflist):
+            plt.rcParams["font.family"] = "Noto Sans CJK JP"
+            plt.rcParams["axes.unicode_minus"] = False
+    except Exception:
+        pass
 
     X, tri, F = read(a.res)
     Xc = X * 100.0
