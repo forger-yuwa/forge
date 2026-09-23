@@ -10,6 +10,9 @@ add_library(cuda_forge STATIC
     dependentVariables_d.cuh
     update_d.cu
     update_d.cuh
+    qAccumulator_d.cu
+    qAccumulator_d.cuh
+    qAccumulator.hpp
     boundaryCond_d.cu
     boundaryCond_d.cuh
     ransBoundary_d.cu

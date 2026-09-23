@@ -11,6 +11,7 @@
 #include "variables.hpp"
 #include "cuda_forge/cudaWrapper.cuh"
 #include "cuda_forge/calcStructualVariables_d.cuh"
+#include "cuda_forge/qAccumulator.hpp"
 
 
 
@@ -229,6 +230,39 @@ void variables::registerCondensation(int nCondSpecies)
               << " -> registered " << nCondSpecies*(4*17+8) << " cell variables\n";
 }
 
+// --- FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.3) ---
+// **内点 CV だけ**確保する (nCells。ゴースト nCells_all-nCells は境界条件が毎 step 書くので正本を持たない)。
+// 5 保存量 x 8 B = 40 B/CV。1000 万 CV で +400 MB。
+static const char* const s_qaccNames[5] = {"ro", "roUx", "roUy", "roUz", "roe"};
+
+void variables::allocQAccumulator(geom_int nCells)
+{
+    if (this->qacc_d[0] != nullptr) return;   // 二重確保を防ぐ
+    for (int i = 0; i < 5; i++) {
+        gpuErrchk( cudaMalloc((void**) &(this->qacc_d[i]), nCells*sizeof(double)) );
+    }
+    gpuErrchk( cudaMalloc((void**) &(this->qaccAdopt_d), sizeof(int)) );
+    qaccResetAdoptCounter(this->qaccAdopt_d);
+    std::cout << "allocQAccumulator: FP64 影アキュムレータ " << nCells << " CV x 5 変数 ("
+              << (double)nCells*5.0*8.0/1024.0/1024.0 << " MB)\n";
+}
+
+void variables::initQAccumulatorFromQ(geom_int nCells)
+{
+    if (this->qacc_d[0] == nullptr) return;
+    flow_float* q[5];
+    for (int i = 0; i < 5; i++) q[i] = this->c_d.at(s_qaccNames[i]);
+    qaccInitFromQ(this->qacc_d, q, nCells);
+}
+
+void variables::freeQAccumulator()
+{
+    for (int i = 0; i < 5; i++) {
+        if (this->qacc_d[i] != nullptr) { cudaWrapper::cudaFree_wrapper(this->qacc_d[i]); this->qacc_d[i] = nullptr; }
+    }
+    if (this->qaccAdopt_d != nullptr) { cudaWrapper::cudaFree_wrapper(this->qaccAdopt_d); this->qaccAdopt_d = nullptr; }
+}
+
 variables::~variables() {
     for (auto& cellValName : cellValNames)
     {
@@ -239,6 +273,8 @@ variables::~variables() {
     {
         cudaWrapper::cudaFree_wrapper(this->p_d.at(planeValName));
     }
+
+    this->freeQAccumulator();
 }
 
 void variables::allocVariables(const int &useGPU , mesh& msh)

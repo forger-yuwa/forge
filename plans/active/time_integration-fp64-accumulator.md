@@ -142,13 +142,41 @@ dual-time (`update_d.cu:407`, `implicitCorrection_d.cu:53`)・軸対称 (`axisym
   (黙って劣化させない)。要求値と実効値の両方をログと `RUN_PROVENANCE.txt` に残す。
 - 既定を 1 に変えるかは、対応経路の検証が済んでから別途判断する。
 
-**v1 の対応範囲** (`diagnostician` 2026-09-23):
+**v1 の対応範囲** — **2026-09-23 に拒否リストを見直した (要レビュー)**。
 
-| | 経路 |
-| --- | --- |
-| **対応** | `timeIntegration 11 && unsteady 0`、block/scalar DPLUR、CPG/TP 単相、node/cell、平面 |
-| **起動時拒否** | unsteady/dual-time、陽解法、**node 軸対称** (`axisymmetricSource_d.cu:321-322` が `roN` を直接書く)、**`sstEnergyIncludesK=1`** (`ransTransport_d.cu:175` が毎 step 全 SST セルの `roe` を書くので累積が全域で消える) |
-| **カウンタつきで許容** | 等温壁ピン (`main.cpp:1802`、壁ノードのみ)、化学種の `roe += droe` (`speciesTransport_d.cu:312`)、node 周期ミラー (`main.cpp:1753`) |
+> **経緯**: 初版は `diagnostician` の報告をそのまま写して 4 経路を「拒否」にしたが、
+> **自分でソースを読んでいなかった**。読んだところ**原理的に無理なものは 1 つも無く**、
+> 大半は「未配線」だった。ユーザから「陰解法専用・unsteady 非対応はしんどい」との指摘もあり、
+> 下表に組み替える。**この組み替え自体を codex のレビューに出す**。
+
+| 経路 | 初版 | **実測した中身** | 改訂案 |
+| --- | --- | --- | --- |
+| `sstEnergyIncludesK=1` | 拒否 | `ransTransport_d.cu:175` は `roe[ic] -= (roK[ic]-roKref[ic])` = **上書きでなく増分**。reconcile に拾わせると毎 step 全域で残余が消えるのは事実だが、**commit と同じ形なので `Qacc_roe -= (double)Δ` を当てれば済む** | **拒否をやめ、増分を Qacc に当てる** (1 行) |
+| node 軸対称 | 拒否 | `axisymmetricSource_d.cu:314-322` が書くのは**軸上 CV だけ**。しかも `roUy[ic]=0`・`roe[ic]-=…` と **`Q` 側も書いており reconcile が拾う**。`roUyN[ic]=0` の方は、影アキュムレータでは commit が `Q_N` を読まないので**無効化されるだけ** (`Q` 側の書き込みと効果が重複) | **拒否をやめ、`Q` 側で足りることを G3 (`case/44`) で確認** |
+| 陽解法 `timeIntegration=1` (前進 Euler) | 拒否 | `coef_N=1, coef_M=0, coef_Res=1` (`solverConfig.cpp:1157`) なので `Q = Q_N + res·dt/v` で **commit と同型** | **v1 に入れる** |
+| 陽解法 `timeIntegration=4` (4 次 RK) | 拒否 | `timeIntegration_d.cu:407-412` の **最終段 (`loop==3`) だけ** が `Q = Q_N + res_m` の commit。中間段 (`loop<3`) は捨てる暫定値なので FP32 のままでよい | **v1 に入れる** (最終段のみ分岐) |
+| 陽解法 `timeIntegration=3` (3 次 TVD RK) | 拒否 | `timeIntegration_d.cu:465` は `Q = coef_N·Q_N + coef_M·Q_M + coef_Res·res·dt/v`、係数 `(1/3, 2/3, 2/3)` (`solverConfig.cpp:1169-1171`) の**凸結合**。`Q` が増分でなく**再スケール**されるので、FP64 正本にするには `Qacc_N`/`Qacc_M` が要る | **v1 では拒否のまま** (dual-time と同じ理由) |
+| unsteady / dual-time | 拒否 | BDF が `Q_N`/`Q_NN` を持ち、残差も `(Q-Q_N)·v/dt` (`implicitCorrection_d.cu:52-56`) を使う。`Qacc_N`/`Qacc_NN` の shift が要る | **v1 では拒否のまま**、#10 で横展開 |
+
+**commit は外側 step につき 1 回** (2026-09-23 に確認、`Qacc += dq` の形が成り立つ根拠)。
+`advanceImplicitSteady` (`main.cpp:1795-1813`) は `implicitNonlinearUpdate(s, 0)` を**1 回だけ**呼び、
+その中で `applyBlockImplicitCorrection` が 1 回走る。`nStepInner` は `blockDPLURSolve` 内の
+**Jacobi sweep 回数**であって `Q` を触らない (`main.cpp:1509`「固定残差 res_* に対し Q を更新せず
+dq_block を nStepInner 回緩和する」)。したがって
+
+- commit 時の `Q_N` は**その step 冒頭の値** = `(float)Qacc` なので、`Q = Q_N + dq` の FP64 版は
+  **`Qacc += dq`** でよい (`Qacc_N` は要らない)。
+- commit → (壁ピン・BC・SST・化学種) → `updateVariablesOuter` (`Q_N = Q_M = Q`) の順なので、
+  **reconcile を `updateVariablesOuter_d` に融合する**と、その step の FP32 writer が全部走り終えた
+  直後・次 step の基準を取る直前に入る。カーネルの追加起動はいらない (G5)。
+
+これが**陽解法 `timeIntegration=3` (凸結合) と dual-time を v1 から外す理由**でもある:
+そちらは commit の基準が `Q_N`/`Q_M` という**別配列の FP32 値**なので、`Qacc` を足すだけでは閉じない。
+
+**判断の分かれ目**: 「別の writer が `Q` を**上書き**するのか、**増分を足す**のか」。
+上書きなら reconcile で追従させるのが正しい (壁ピン・周期ミラー)。
+**増分なら Qacc に同じ増分を当てるべき**で、reconcile に拾わせると残余を捨ててしまう。
+初版はこの区別をしていなかった。
 
 **採用セル数のカウンタ**を `monitorInterval` ごとにログへ出す (reconcile が何セルで発火したか)。
 これが想定外に多ければ、その writer が累積を消している。
