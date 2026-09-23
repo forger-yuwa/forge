@@ -181,11 +181,11 @@ $$\frac{P_w}{P_i} \approx \frac{1}{1 + \dfrac{2\,V_{n,i}\,\hat c}{\chi_n\,R\,T_w
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | ~~1~~ (済 2026-09-23) | **codex plan レビュー** | **GO-with-changes, C0/M5/m2。全件採用**して §2–§7 を改訂 (§6.1) | F |
-| 2 | **出典の確認 (実装前。M1 で前倒し)** | (i) **済**: [Furusawa & Kitamura 2023](https://onlinelibrary.wiley.com/doi/10.1002/fld.5183) で `mSLAU` (全面適用版) の悪化報告を確認し §3.1 に反映。(ii) **未**: 原典 Shima–Kitamura 2011 §III.K / Fig.20 は有料で未入手 — `result` 段の前に再度試みる。(iii) **未**: 改良 AUSM 族 (Appl. Math. Model. 2019 等) の切替が面法線か $\lvert\mathbf u\rvert$ か | F |
-| 3 | 実装 (§5 の 1–4) | 触るファイル: `methods/convection/{theory,implementation}.md`, `methods/index.md`, `input/solverConfig.{hpp,cpp}`, `cuda_forge/convection/convectiveFlux_d.cu` (wrapper), `cuda_forge/convection/convectiveFlux_slau_d.inc.cuh`。合格: ビルド成功 + V0 + V2 | O |
-| 4 | V0 (単体) → V2 (無害性) | §6 のとおり | O |
-| 5 | V1 (本件の検証) | case/46 接続模型。合格条件は §6 V1-a〜d | O |
-| 6 | V3 (回帰・受入) | case/48・case/16・SERN 2D 生産。**不合格なら受入保留・設計へ戻る** | O |
+| ~~2~~ (一部済 2026-09-23) | 出典の確認 | (i) **済**: [Furusawa & Kitamura 2023](https://onlinelibrary.wiley.com/doi/10.1002/fld.5183) で `mSLAU` (**全面適用版**) の 「多次元速度成分が質の悪い格子への安定性に寄与、面法線のみは収束悪化と格子感度」を確認し §3.1 に反映。**本計画は壁隣接面への局所適用**なので直接は当たらないが、悪化が報告された条件 (超音速・質の悪い格子) は本件の条件そのもの → §6 V3 に収束悪化と格子感度を見る条件を追加した。(ii) **未**: 原典 Shima–Kitamura 2011 §III.K / Fig.20 は **AIAA・ResearchGate とも 403 で入手できず**。`result` 段の前に再度試みる。(iii) **未**: 改良 AUSM 族の切替が面法線か $\lvert\mathbf u\rvert$ か。**実装は (i) を踏まえて先行した** (既定 0・ビット同一の opt-in なので後戻り可能) | F |
+| ~~3~~ (済 2026-09-23, `5a4886ea`) | 実装 (§5 の 1–4) | 触るファイル: `methods/convection/{theory,implementation}.md`, `methods/index.md`, `input/solverConfig.{hpp,cpp}`, `cuda_forge/convection/convectiveFlux_d.cu` (wrapper), `cuda_forge/convection/convectiveFlux_slau_d.inc.cuh`。合格: ビルド成功 + V0 + V2 | O |
+| ~~4~~ (済 2026-09-23) | V0 (単体) → V2 (無害性) | §6 のとおり | O |
+| ~~5~~ (a/c/e 済・d は #6b) | V1 (本件の検証) | case/46 接続模型。合格条件は §6 V1-a〜d | O |
+| ~~6~~ (case/48・SERN 2D 済、case/16 は #6c) | V3 (回帰・受入) | case/48・case/16・SERN 2D 生産。**不合格なら受入保留・設計へ戻る** | O |
 | 6b | V1-d の STEADY 確認 | `run_0438` は全列 falling で通算 4.1 桁低下だが STEADY ではない。さらに伸ばして `check_quasisteady --series-csv` (ρ_153797, ρ_153880, ρ_189814, n_floor, ρ_min) が STEADY になるか。**落ちない**ことは確認済み | O |
 | 6c | V3 の case/16 | run データが AWS・手元とも残っておらずメッシュ生成から要る。V3 は case/48 と SERN 2D の 2 件で通っているので優先度は低い | O |
 | 6d | $C_L$ / $C_M$ の差の切り分け | 2D で +0.47 % / +0.35 %。判定対象外だが run 間ノイズか実効果かを反復 run の床で切り分ける。**既定化の判断前に必要** | O |
