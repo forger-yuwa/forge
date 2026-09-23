@@ -55,7 +55,30 @@ def main():
         # log(step) がほぼ定数になり log-log が不当に勝つ (2026-09-23 に実際に誤判定した:
         # step 1.60M→1.65M の 3 点で「べき乗則 step^-67.6、相関 -1.0000」と出た)。
         # 同じ log(|mdot|) 空間での残差 RMS で比べ、step 幅が足りなければ判定を保留する。
-        span = np.log10(s[-1] / s[0])
+        # **減衰区間と末尾区間を分ける** (codex plan M3)。床付近まで一括 fit すると
+        # 「べき乗則」「DRIFTING」と出るが、これは判定が不適切なのであって指数減衰が
+        # 無いのではない。末尾の頭打ちを検出し、そこから前を減衰区間として扱う。
+        n = len(v)
+        knee = n
+        if n >= 6:
+            lv = np.log(v)
+            # 末尾から遡り、単調減少が崩れた (= 床に入った) 最初の点を探す
+            for k in range(n - 1, 2, -1):
+                if lv[k] >= lv[k - 1]:
+                    knee = k
+                else:
+                    break
+        if knee < n:
+            tail = v[knee - 1:]
+            print(f"   **末尾 {n-knee+1} 点は頭打ち**: {v[knee-1]:.4e} .. {v[-1]:.4e}"
+                  f"  (平均 {tail.mean():.4e} ± {tail.std():.1e}, 振れ幅 {tail.max()/tail.min():.2f} 倍)")
+            print(f"   -> **床としてはこの平均±振幅を報告する。最小値を床と呼ばないこと。**")
+            if knee >= 4:
+                bd, ad = np.polyfit(s[:knee], np.log(v[:knee]), 1)
+                print(f"   減衰区間 (先頭 {knee} 点): |mdot| ∝ exp({bd:+.3e}·step)"
+                      f"  e 折り {abs(1/bd):.3e} step、{v[0]/v[knee-1]:.3g} 倍落ちた")
+            s, v = s[:knee], v[:knee]   # 以降の判定は減衰区間だけで行う
+        span = np.log10(s[-1] / s[0]) if len(s) > 1 else 0.0
         bp, ap_ = np.polyfit(np.log(s), np.log(v), 1)
         be, ae = np.polyfit(s, np.log(v), 1)
         rp = float(np.sqrt(np.mean((np.log(v) - (bp * np.log(s) + ap_)) ** 2)))
