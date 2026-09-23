@@ -8,10 +8,14 @@
 #include <limits>
 #include <map>
 #include <sstream>
+#include <memory>
 #include <set>
 #include <unordered_map>
 #include <utility>
 
+#include <highfive/highfive.hpp>
+
+#include "conjugate/solidFem2d.hpp"
 #include "cuda_forge/cudaWrapper.cuh"
 
 namespace conjugateWall {
@@ -353,6 +357,27 @@ bool bcondIsConjugate(const bcond& bc)
     return (it != bc.inputInts.end() && it->second == 1);
 }
 
+// ---- mode: fem2d の固体状態 (physID ごとに 1 つ持つ) ----
+struct SolidState {
+    conjugate::SolidMesh mesh;
+    std::unique_ptr<conjugate::SolidFem2D> fem;
+    std::vector<int>    wallOfIface;   // 界面節点 -> 壁 bplane index (座標一致で 1 対 1)
+    std::vector<double> lumped;        // 界面節点の集中辺長 [m]
+    std::vector<double> u;             // 固体全節点温度 [K] (これが状態)
+    std::vector<double> qIface;        // 直近の界面荷重 [W/m] (出力用。平均後の値)
+    std::vector<std::vector<double>> qBuf;  // 界面熱量の環状バッファ (flux_avg 更新分)
+    size_t qPos = 0, qFilled = 0;      // 書き込み位置と充填数
+    double dTprev = -1.0;
+    int    nGrow  = 0;                 // dTw が増え続けた回数 (発散検知)
+    bool   ready  = false;
+};
+
+std::map<int, SolidState>& solidStates()
+{
+    static std::map<int, SolidState> s;
+    return s;
+}
+
 double backResistance(const solverConfig& cfg)
 {
     if (cfg.conjugateBackKind == "coolant") return 1.0 / cfg.conjugateHc;
@@ -360,6 +385,82 @@ double backResistance(const solverConfig& cfg)
 }
 
 } // namespace
+
+// mode: fem2d の起動時準備 — 固体を読み、流体の壁節点と **座標一致で 1 対 1** に結ぶ。
+// 合わないものは黙って内挿せず落とす (plan §4.4d「初版は流体と固体の外周節点を一致させる」)。
+void initSolidFem2d(const solverConfig& cfg, const mesh& msh, const bcond& bc)
+{
+    SolidState& st = solidStates()[bc.physID];
+    st.mesh = conjugate::SolidMesh::read(cfg.conjugateSolidFile);
+    st.fem.reset(new conjugate::SolidFem2D(st.mesh));
+    st.lumped = st.mesh.ifaceLumped();
+
+    const bool nodeMode = (cfg.discretization == "node");
+    const int nb = (int)bc.iCells.size();
+    const int ni = st.mesh.nIface();
+
+    // **平面 2D ($z\equiv0$) 以外は拒否する** (§4.6a)。押し出し疑似 2D では流体側の量に
+    // 奥行きが乗るので、固体の集中辺長 [m] と単位が合わない。
+    double zmax = 0.0;
+    for (int ib = 0; ib < nb; ib++) {
+        double xyz[3];
+        dofCoords(msh, nodeMode, bc.iCells[ib], xyz);
+        zmax = std::max(zmax, std::fabs(xyz[2]));
+    }
+    if (zmax > 1.0e-9) {
+        std::cerr << "[conjugateWall] ERROR: mode fem2d は平面 2D (z=0) のみ。physID " << bc.physID
+                  << " の壁節点に |z| = " << zmax << " m がある。\n"
+                  << "[conjugateWall]   押し出し疑似 2D では流体側の熱量に奥行きが乗り、"
+                     "固体 (W/m) と単位が合わない。\n";
+        exit(EXIT_FAILURE);
+    }
+    if (nb != ni) {
+        std::cerr << "[conjugateWall] ERROR: 壁節点 " << nb << " と固体界面節点 " << ni
+                  << " の数が違う (gen_solid_mesh.py --outer-from で合わせること)。\n";
+        exit(EXIT_FAILURE);
+    }
+
+    st.wallOfIface.assign(ni, -1);
+    std::vector<char> used(nb, 0);
+    double dworst = 0.0;
+    for (int i = 0; i < ni; i++) {
+        int best = -1;
+        double dbest = 1e30;
+        for (int ib = 0; ib < nb; ib++) {
+            double xyz[3];
+            dofCoords(msh, nodeMode, bc.iCells[ib], xyz);
+            const double d = std::hypot(xyz[0] - st.mesh.ifaceX[i], xyz[1] - st.mesh.ifaceY[i]);
+            if (d < dbest) { dbest = d; best = ib; }
+        }
+        if (dbest > 1.0e-7 || best < 0 || used[best]) {
+            std::cerr << "[conjugateWall] ERROR: 固体界面節点 " << i << " ("
+                      << st.mesh.ifaceX[i] << ", " << st.mesh.ifaceY[i] << ") に対応する壁節点が無い"
+                      << " (最近傍 " << dbest << " m" << (best >= 0 && used[best] ? ", 既に使用済み" : "")
+                      << ")。**内挿はしない**。\n";
+            exit(EXIT_FAILURE);
+        }
+        used[best] = 1;
+        st.wallOfIface[i] = best;
+        dworst = std::max(dworst, dbest);
+    }
+
+    // 初期の固体温度: 界面は現在の壁温、内部はその平均から始める (最初の更新で解き直す)。
+    const auto itTs = bc.bvar.find("Ts");
+    double tsum = 0.0;
+    for (int i = 0; i < ni; i++)
+        tsum += (itTs != bc.bvar.end() && st.wallOfIface[i] < (int)itTs->second.size())
+                ? (double)itTs->second[st.wallOfIface[i]] : 300.0;
+    st.u.assign(st.mesh.nNodes, tsum / std::max(1, ni));
+    for (int i = 0; i < ni; i++)
+        if (itTs != bc.bvar.end() && st.wallOfIface[i] < (int)itTs->second.size())
+            st.u[st.mesh.ifaceNodes[i]] = (double)itTs->second[st.wallOfIface[i]];
+    st.ready = true;
+
+    std::cout << "[conjugateWall] physID " << bc.physID << ": solid fem2d "
+              << st.mesh.nNodes << " nodes / " << st.mesh.nTris << " tris / "
+              << ni << " iface (最大ずれ " << dworst << " m, 帯幅 " << st.fem->bandwidth()
+              << ", iface_sha1 " << st.mesh.ifaceSha1 << ")" << std::endl;
+}
 
 bool conjugateActive(const solverConfig& cfg, const mesh& msh)
 {
@@ -402,6 +503,7 @@ void initConjugateWalls(const solverConfig& cfg, const mesh& msh)
             exit(EXIT_FAILURE);
         }
         const FirstInterior& fi = firstInterior(cfg, msh, bc);
+        if (cfg.conjugateMode == "fem2d") initSolidFem2d(cfg, msh, bc);
         geom_int nbad = 0;
         for (size_t ib = 0; ib < fi.ok.size(); ++ib) if (!fi.ok[ib]) ++nbad;
         if (nbad > 0) {
@@ -411,10 +513,186 @@ void initConjugateWalls(const solverConfig& cfg, const mesh& msh)
             exit(EXIT_FAILURE);
         }
     }
+    // 界面ゲートの許容を run に**事前登録**する (判定は tools/check_cht_interface.py)。
+    if (cfg.conjugateGateSet == 1) {
+        std::ofstream ofs("conjugate_gate.json");
+        ofs.precision(10);
+        ofs << "{\n  \"eps_rel\": " << cfg.conjugateGateEpsRel
+            << ",\n  \"eps_abs_Wm2\": " << cfg.conjugateGateEpsAbs
+            << ",\n  \"dT_K\": " << cfg.conjugateGateDtK
+            << ",\n  \"n_consec\": " << cfg.conjugateGateNConsec;
+        if (cfg.conjugateGateTolSolid >= 0.0) ofs << ",\n  \"tol_solid\": " << cfg.conjugateGateTolSolid;
+        ofs << "\n}\n";
+        std::cout << "[conjugateWall] G-if の許容を conjugate_gate.json に登録した "
+                     "(eps_rel " << cfg.conjugateGateEpsRel << ", eps_abs " << cfg.conjugateGateEpsAbs
+                  << " W/m2, dT " << cfg.conjugateGateDtK << " K, n_consec "
+                  << cfg.conjugateGateNConsec << ")" << std::endl;
+    } else {
+        std::cout << "[conjugateWall] WARNING: conjugate.gate が無い。界面の合否は判定できない "
+                     "(結果を見てから許容を決めないこと。plan §6 G-if)" << std::endl;
+    }
+
     std::cout << "[conjugateWall] in-solver CHT active (mode=" << cfg.conjugateMode
               << ", flux=" << cfg.conjugateFlux
               << ", interval=" << cfg.conjugateInterval << ", warmup=" << cfg.conjugateWarmup
               << ", relax=" << cfg.conjugateRelax << ")" << std::endl;
+}
+
+namespace {
+
+// G-if の履歴 1 行 (local1d と共通の書式にする)。
+void appendInterfaceHistory(int iStep, int physID, int n, double tmean, double tmin, double tmax,
+                            double dTmax, double resAbs, double resMax, double resRel,
+                            double qTotal, double resSolid)
+{
+    static bool headerDone = false;
+    const std::string fn = "conjugate_history.csv";
+    const bool needHeader = !headerDone && !std::ifstream(fn).good();
+    std::ofstream ofs(fn, std::ios::app);
+    if (needHeader)
+        ofs << "step,physID,n,Tw_mean,Tw_min,Tw_max,dTw_max,res_abs_Wm2,res_max_W,res_rel,"
+               "q_total,res_solid\n";
+    headerDone = true;
+    ofs.precision(10);
+    ofs << iStep << "," << physID << "," << n << ","
+        << std::scientific << tmean << "," << tmin << "," << tmax << "," << dTmax << ","
+        << resAbs << "," << resMax << "," << resRel << "," << qTotal << "," << resSolid << "\n";
+}
+
+} // namespace
+
+// mode: fem2d の 1 回の更新 (plan §4.6a)。
+//   (K_s(u^k) + E^T D_f E) u^{k+1} = b_s + E^T [ Q_f + D_f E u^k ]
+// Q_f は**固体側の集中辺長** × `iface_q_eff` [W/m2] で作る (流体の surfArea は使わない)。
+// D_f は界面対角のみ (g_f A_i)。受理判定・line search・Anderson は持ち込まない (§4.6a)。
+void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
+                     const FirstInterior& fi, const std::vector<flow_float>* qeff,
+                     const std::vector<flow_float>& T, const std::vector<flow_float>& thermCond,
+                     const std::vector<flow_float>& cp, const std::vector<flow_float>& visTurb,
+                     int iStep)
+{
+    SolidState& st = solidStates()[bc.physID];
+    if (!st.ready) return;
+    auto& Ts = bc.bvar["Ts"];
+    const int ni = st.mesh.nIface();
+
+    std::vector<double> Qf(ni, 0.0), Df(ni, 0.0), Twk(ni, 0.0);
+    for (int i = 0; i < ni; i++) {
+        const int ib = st.wallOfIface[i];
+        const geom_int ic = bc.iCells[ib];
+        double q = 0.0;
+        if (qeff) {
+            q = (double)(*qeff)[ib];
+            if (!std::isfinite(q)) {
+                std::cerr << "[conjugateWall] ERROR: physID " << bc.physID
+                          << ": iface_q_eff が界面節点 " << i << " で非有限。\n";
+                exit(EXIT_FAILURE);
+            }
+        } else {
+            // flux: q_compact (A/B 用)。壁温は bvar の指定値を使う。
+            const geom_int j = fi.jdof[ib];
+            const double keff = (double)thermCond[ic] + (double)cp[ic]*(double)visTurb[ic]/cfg.turbulentPrandtl;
+            q = (j >= 0) ? keff * ((double)T[j] - (double)Ts[ib]) / fi.d1[ib] : 0.0;
+        }
+        const double keff = (double)thermCond[ic] + (double)cp[ic]*(double)visTurb[ic]/cfg.turbulentPrandtl;
+        Qf[i]  = q * st.lumped[i];                                    // [W/m]
+        Df[i]  = keff / fi.d1[ib] * st.lumped[i] * cfg.conjugateDfScale;
+        Twk[i] = (double)Ts[ib];
+    }
+
+    // ---- 流束の時間平均 (plan §5.1 #70 / §6 V4b(g)) ----
+    // 流体側に局所振動があると**瞬時の $Q_f$ では界面ゲートが床に当たる** (C3X 吸込面の k オンセット
+    // 前線が周期 1012 step で揺れ、最悪節点の $Q_f$ が中央値の 78 倍ばらつく)。N 更新の後方移動平均を
+    // 使う。$D_f$ は平均しない (固定点に効かず、反復経路だけを決めるため)。
+    const int navg = std::max(1, cfg.conjugateFluxAvg);
+    if (navg > 1) {
+        if (st.qBuf.size() != (size_t)navg) { st.qBuf.assign(navg, std::vector<double>(ni, 0.0)); st.qPos = 0; st.qFilled = 0; }
+        st.qBuf[st.qPos] = Qf;
+        st.qPos = (st.qPos + 1) % (size_t)navg;
+        st.qFilled = std::min(st.qFilled + 1, (size_t)navg);
+        for (int i = 0; i < ni; i++) {
+            double sum = 0.0;
+            for (size_t k = 0; k < st.qFilled; k++) sum += st.qBuf[k][i];
+            Qf[i] = sum / (double)st.qFilled;
+        }
+    }
+
+    // ---- G-if: **更新前 (未緩和)** の界面残差 r_i = (K u^k - b)_i - Q_f,i ----
+    // (平均を使っているときは**平均後の $Q_f$ で**測る = 実際に解いている方程式の残差にする)
+    const std::vector<double> r0 = st.fem->residual(st.u);
+    double resAbs = 0.0, resMax = 0.0, qfMax = 0.0, qTotal = 0.0, resSolid = 0.0;
+    {
+        std::vector<char> isIface(st.mesh.nNodes, 0);
+        for (int i = 0; i < ni; i++) isIface[st.mesh.ifaceNodes[i]] = 1;
+        for (int i = 0; i < ni; i++) {
+            const double r = r0[st.mesh.ifaceNodes[i]] - Qf[i];
+            resMax = std::max(resMax, std::fabs(r));
+            if (st.lumped[i] > 0.0) resAbs = std::max(resAbs, std::fabs(r) / st.lumped[i]);
+            qfMax  = std::max(qfMax, std::fabs(Qf[i]));
+            qTotal += Qf[i];
+        }
+        for (int i = 0; i < st.mesh.nNodes; i++)
+            if (!isIface[i]) resSolid = std::max(resSolid, std::fabs(r0[i]));
+    }
+
+    // ---- 更新 (固体全節点系をバンド Cholesky で 1 回解く) ----
+    st.fem->assemble(st.u, Df);
+    st.fem->factorize();
+    std::vector<double> rhs = st.fem->rhs();
+    for (int i = 0; i < ni; i++) rhs[st.mesh.ifaceNodes[i]] += Qf[i] + Df[i] * Twk[i];
+    st.fem->solveInPlace(rhs);
+
+    // ---- 安全装置 (自動調整はしない。止めて報告する。§4.6a) ----
+    double tcMin = 1e30;
+    for (const double t : st.mesh.robinTc) tcMin = std::min(tcMin, t);
+    for (int i = 0; i < st.mesh.nNodes; i++) {
+        if (!std::isfinite(rhs[i]) || rhs[i] < tcMin - 20.0) {
+            std::cerr << "[conjugateWall] ERROR: step " << iStep << " physID " << bc.physID
+                      << ": 固体温度が範囲外 (節点 " << i << " = " << rhs[i] << " K, 下限 "
+                      << tcMin - 20.0 << ")。連成が発散している。\n"
+                      << "[conjugateWall]   conjugate.Df_scale を上げる / interval を短くする / "
+                         "流体を先に落ち着かせること。\n";
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // ---- 反映 ----
+    double dTmax = 0.0, tsum = 0.0, tmin = 1e30, tmax = -1e30;
+    for (int i = 0; i < ni; i++) {
+        const int ib = st.wallOfIface[i];
+        const double Tnew = rhs[st.mesh.ifaceNodes[i]];
+        const double Tw = (1.0 - cfg.conjugateRelax) * Twk[i] + cfg.conjugateRelax * Tnew;
+        dTmax = std::max(dTmax, std::fabs(Tw - Twk[i]));
+        Ts[ib] = (flow_float)Tw;
+        rhs[st.mesh.ifaceNodes[i]] = Tw;              // 状態と壁温を一致させる
+        tsum += Tw; tmin = std::min(tmin, Tw); tmax = std::max(tmax, Tw);
+    }
+    st.u = rhs;
+    st.qIface.assign(ni, 0.0);
+    for (int i = 0; i < ni; i++) st.qIface[i] = Qf[i];
+
+    if (st.dTprev >= 0.0 && dTmax > st.dTprev) st.nGrow++; else st.nGrow = 0;
+    if (st.nGrow >= 10 && st.dTprev > 0.0 && dTmax > 2.0 * st.dTprev) {
+        std::cerr << "[conjugateWall] ERROR: step " << iStep << " physID " << bc.physID
+                  << ": max|dTw| が 10 更新連続で増え、かつ 2 倍を超えた ("
+                  << st.dTprev << " -> " << dTmax << " K)。連成が発散している。\n";
+        exit(EXIT_FAILURE);
+    }
+    st.dTprev = dTmax;
+
+    if (cfg.gpu == 1 && bc.bvar_d.count("Ts"))
+        cudaWrapper::cudaMemcpy_H2D_wrapper(Ts.data(), bc.bvar_d["Ts"], (geom_int)Ts.size());
+
+    appendInterfaceHistory(iStep, bc.physID, ni, tsum / std::max(1, ni), tmin, tmax, dTmax,
+                           resAbs, resMax, (qfMax > 0.0 ? resMax / qfMax : 0.0), qTotal, resSolid);
+
+    if (iStep % (cfg.conjugateInterval * 20) == 0)
+        std::cout << "[conjugateWall] step " << iStep << " physID " << bc.physID
+                  << (navg > 1 ? " (flux_avg " + std::to_string(st.qFilled) + "/" + std::to_string(navg) + ")" : "")
+                  << ": Tw " << tmin << " .. " << tmax << " K, max|dTw| " << dTmax
+                  << " K, if-res " << resAbs << " W/m2 (rel "
+                  << (qfMax > 0.0 ? resMax / qfMax : 0.0) << "), solid-res " << resSolid
+                  << " W/m" << std::endl;
 }
 
 void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, int iStep)
@@ -429,6 +707,8 @@ void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, in
     const std::vector<flow_float> visTurb  = pullField(cfg, var, "vis_turb",  msh.nCells);
     const double Rback = backResistance(cfg);
     const bool useEff  = (cfg.conjugateFlux == "q_eff");
+
+    const bool femMode = (cfg.conjugateMode == "fem2d");
 
     for (bcond& bc : msh.bconds) {
         if (!bcondIsConjugate(bc)) continue;
@@ -450,6 +730,8 @@ void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, in
             }
             qeff = &itq->second;
         }
+
+        if (femMode) { updateFem2dWall(cfg, msh, bc, fi, qeff, T, thermCond, cp, visTurb, iStep); continue; }
 
         auto& Ts = bc.bvar["Ts"];
         double dTmax = 0.0;
@@ -545,6 +827,35 @@ void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
     const bool nodeMode = (cfg.discretization == "node");
     for (const bcond& bc : msh.bconds) {
         if (!bcondIsConjugate(bc)) continue;
+
+        // mode: fem2d は**固体場そのもの**を流体と同じ間隔で出す (plan §4.6a)。
+        // 可視化 (`res_solid_<step>`) と再開 (`conjugate_state.h5`) は**別ファイル**にする。
+        // **本関数は毎 step 呼ばれる** (壁温 CSV は上書きなので無害だった)。固体場は step ごとに
+        // 別ファイルになるので、流体の出力間隔で間引かないと run が数万ファイル・10 GB 級になる
+        // (2026-09-23 に 19751 ファイル/13 GB を作った)。
+        const bool outStep = (cfg.outStepInterval > 0)
+                          && (iStep % cfg.outStepInterval == 0) && (iStep >= cfg.outStepStart);
+        if (cfg.conjugateMode == "fem2d" && outStep) {
+            const auto it = solidStates().find(bc.physID);
+            if (it != solidStates().end() && it->second.ready) {
+                SolidState& st = it->second;
+                std::ostringstream oss;
+                oss << "res_solid_" << bc.physID << "_" << iStep;
+                conjugate::writeSolidField(oss.str(), st.mesh, st.u, st.qIface,
+                                           (double)iStep);
+                // 再開用の状態 (可視化の間引きと混ぜない)。
+                try {
+                    HighFive::File f("conjugate_state_" + std::to_string(bc.physID) + ".h5",
+                                     HighFive::File::Overwrite);
+                    f.createDataSet("SOLID/T", st.u);
+                    f.createAttribute("step", iStep);
+                    f.createAttribute("iface_sha1", st.mesh.ifaceSha1);
+                } catch (const std::exception& e) {
+                    std::cerr << "[conjugateWall] WARNING: conjugate_state を書けない: "
+                              << e.what() << "\n";
+                }
+            }
+        }
         const auto it = bc.bvar.find("Ts");
         if (it == bc.bvar.end()) continue;
         std::ofstream ofs("conjugate_Tw_" + std::to_string(bc.physID) + ".csv");

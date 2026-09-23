@@ -502,18 +502,47 @@ void solverConfig::read(std::string fname)
             auto cj = config["conjugate"];
             this->conjugateEnabled   = 1;
             this->conjugateMode      = getOptionalValidatedValue<std::string>(cj, "mode", std::string("local1d"), "conjugate");
-            if (this->conjugateMode != "local1d")
-                throw std::runtime_error("Key 'mode' in 'conjugate': only 'local1d' is implemented (shell2d/fem2d は外部ループ tools/cht_loop.py を使う).");
-            this->conjugateThickness = getValidatedValue<double>(cj, "thickness", "conjugate");
-            this->conjugateKsolid    = getValidatedValue<double>(cj, "k_solid", "conjugate");
-            if (!(this->conjugateThickness > 0.0) || !(this->conjugateKsolid > 0.0))
-                throw std::runtime_error("'conjugate': thickness and k_solid must be positive.");
+            if (this->conjugateMode != "local1d" && this->conjugateMode != "fem2d")
+                throw std::runtime_error("Key 'mode' in 'conjugate' must be 'local1d' or 'fem2d' (shell2d は外部ループ tools/cht_loop.py を使う).");
+            if (this->conjugateMode == "fem2d") {
+                // 固体は HDF5 が正本 (メッシュ・孔 Robin・k_s(T) をすべて持つ)。
+                this->conjugateSolidFile = getValidatedValue<std::string>(cj, "solid", "conjugate");
+            } else {
+                this->conjugateThickness = getValidatedValue<double>(cj, "thickness", "conjugate");
+                this->conjugateKsolid    = getValidatedValue<double>(cj, "k_solid", "conjugate");
+                if (!(this->conjugateThickness > 0.0) || !(this->conjugateKsolid > 0.0))
+                    throw std::runtime_error("'conjugate': thickness and k_solid must be positive.");
+            }
+            this->conjugateFluxAvg   = getOptionalValidatedValue<int>(cj, "flux_avg", 1, "conjugate");
+            if (this->conjugateFluxAvg < 1)
+                throw std::runtime_error("'conjugate': flux_avg must be >= 1.");
+            this->conjugateDfScale   = getOptionalValidatedValue<double>(cj, "Df_scale", 1.0, "conjugate");
+            if (cj["gate"]) {
+                auto g = cj["gate"];
+                this->conjugateGateSet     = 1;
+                this->conjugateGateEpsRel  = getValidatedValue<double>(g, "eps_rel", "conjugate.gate");
+                this->conjugateGateEpsAbs  = getValidatedValue<double>(g, "eps_abs_Wm2", "conjugate.gate");
+                this->conjugateGateDtK     = getValidatedValue<double>(g, "dT_K", "conjugate.gate");
+                this->conjugateGateNConsec = getValidatedValue<int>(g, "n_consec", "conjugate.gate");
+                this->conjugateGateTolSolid = getOptionalValidatedValue<double>(g, "tol_solid", -1.0, "conjugate.gate");
+                if (!(this->conjugateGateEpsRel > 0.0) || !(this->conjugateGateEpsAbs > 0.0)
+                    || !(this->conjugateGateDtK > 0.0) || this->conjugateGateNConsec <= 0)
+                    throw std::runtime_error("'conjugate.gate': eps_rel / eps_abs_Wm2 / dT_K / n_consec must be positive.");
+            }
+            if (!(this->conjugateDfScale > 0.0))
+                throw std::runtime_error("'conjugate': Df_scale must be > 0.");
+            if (this->conjugateMode == "fem2d") {
+                // 背面・孔の条件は固体 h5 が持つので、ここでは読まない (書かれていたら拒否する)。
+                for (const char* k : {"back", "T_b", "h_c", "thickness", "k_solid"})
+                    if (cj[k]) throw std::runtime_error(std::string("Key '") + k +
+                        "' in 'conjugate' is not used with mode: fem2d (固体条件は solid の HDF5 が持つ).");
+            }
             this->conjugateBackKind  = getOptionalValidatedValue<std::string>(cj, "back", std::string("isothermal"), "conjugate");
             this->conjugateTb        = getOptionalValidatedValue<double>(cj, "T_b", 300.0, "conjugate");
             this->conjugateHc        = getOptionalValidatedValue<double>(cj, "h_c", 0.0, "conjugate");
-            if (this->conjugateBackKind == "coolant" && !(this->conjugateHc > 0.0))
+            if (this->conjugateMode == "local1d" && this->conjugateBackKind == "coolant" && !(this->conjugateHc > 0.0))
                 throw std::runtime_error("'conjugate': back=coolant requires h_c > 0.");
-            if (this->conjugateBackKind == "adiabatic")
+            if (this->conjugateMode == "local1d" && this->conjugateBackKind == "adiabatic")
                 throw std::runtime_error("'conjugate': back=adiabatic は定常解を持たない (正味入熱が 0 でない限り)。isothermal か coolant を使うこと.");
             if (this->conjugateBackKind != "isothermal" && this->conjugateBackKind != "coolant")
                 throw std::runtime_error("Key 'back' in 'conjugate' must be 'isothermal' or 'coolant'.");
@@ -526,7 +555,9 @@ void solverConfig::read(std::string fname)
             if (!(this->conjugateInterval > 0)) throw std::runtime_error("'conjugate': interval must be > 0.");
             if (!(this->conjugateRelax > 0.0 && this->conjugateRelax <= 1.0))
                 throw std::runtime_error("'conjugate': relax must be in (0, 1].");
-            std::cout << "'conjugate': mode=" << this->conjugateMode << " t=" << this->conjugateThickness
+            std::cout << "'conjugate': mode=" << this->conjugateMode
+                      << (this->conjugateMode == "fem2d" ? " solid=" + this->conjugateSolidFile : "")
+                      << " t=" << this->conjugateThickness
                       << " k_s=" << this->conjugateKsolid << " back=" << this->conjugateBackKind
                       << " T_b=" << this->conjugateTb << " interval=" << this->conjugateInterval
                       << " warmup=" << this->conjugateWarmup << " relax=" << this->conjugateRelax

@@ -76,6 +76,7 @@ file( GLOB forge_cppfiles
     variables.cpp 
     boundaryCond.cpp 
     conjugateWall.cpp 
+    conjugate/solidFem2d.cpp 
     convectiveFlux.cpp 
     input/solverConfig.cpp 
     input/calcWallDistance_kdtree.cpp 
@@ -96,6 +97,16 @@ target_compile_options(forge PUBLIC
 
 target_link_libraries(forge PRIVATE cuda_forge probe)
 target_link_libraries(forge PRIVATE ${HDF5_LIBRARIES} yaml-cpp ${dyn_libs_cuda})
+
+# --------------------------------------
+# *** CHT 固体 FE の同値試験用 CLI ***
+# 参照実装 (tools/solid_fem2d.py) と突き合わせるためだけの小さな実行ファイル。
+# 本体 (forge) には conjugate/solidFem2d.cpp が入っているので、ここは main だけ足す。
+# --------------------------------------
+add_executable(solid_fem2d_tool conjugate/solid_fem2d_tool.cpp conjugate/solidFem2d.cpp)
+target_include_directories(solid_fem2d_tool PRIVATE ${CMAKE_SOURCE_DIR} ${HIGHFIVE_ROOT})
+target_link_libraries(solid_fem2d_tool ${HDF5_LIBRARIES})
+target_compile_options(solid_fem2d_tool PRIVATE -O3)
 
 # ----------------------
 # *** mesh conversion***
