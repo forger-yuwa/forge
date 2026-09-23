@@ -58,6 +58,55 @@ def bandwidth(n_nodes: int, tris: np.ndarray) -> int:
     return int(np.abs(e[:, 0].astype(np.int64) - e[:, 1].astype(np.int64)).max())
 
 
+def write_solid_h5(out, nodes, tris, outer_edges, robin_e, robin_h, robin_tc,
+                   kT, kV, rcm=True, source="(generated)"):
+    """固体 FE の HDF5 を書く (RCM 並べ替えつき)。**変換器と試験が同じ経路を通る**ようにする
+    ため関数にしてある。戻り値は (perm, bandwidth_before, bandwidth_after)。"""
+    nodes = np.asarray(nodes, float)[:, :2]
+    tris = np.asarray(tris, int)
+    outer_edges = np.asarray(outer_edges, int)
+    robin_e = np.asarray(robin_e, int).reshape(-1, 2)
+    N = len(nodes)
+    bw0 = bandwidth(N, tris)
+
+    perm = np.arange(N) if not rcm else np.asarray(
+        reverse_cuthill_mckee(adjacency(N, tris).tocsr(), symmetric_mode=True), int)
+    inv = np.empty(N, int)
+    inv[perm] = np.arange(N)
+
+    nodes_p, tris_p = nodes[perm], inv[tris]
+    outer_p = inv[outer_edges]
+    robin_p = inv[robin_e] if len(robin_e) else robin_e
+    bw1 = bandwidth(N, tris_p)
+
+    iface = np.array(sorted(set(outer_p.ravel().tolist())), int)
+    iface_xyz = np.zeros((len(iface), 3))
+    iface_xyz[:, :2] = nodes_p[iface]
+    key = np.round(iface_xyz[np.lexsort((iface_xyz[:, 1], iface_xyz[:, 0]))], 9)
+    sha = hashlib.sha1(key.tobytes()).hexdigest()
+
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(out, "w") as f:
+        f.create_dataset("MESH/COORD", data=nodes_p)
+        f.create_dataset("MESH/TRIS", data=tris_p.astype(np.int32))
+        f.create_dataset("MESH/PERM", data=perm.astype(np.int32))
+        f.create_dataset("IFACE/NODES", data=iface.astype(np.int32))
+        f.create_dataset("IFACE/COORD", data=iface_xyz)
+        f.create_dataset("IFACE/EDGES", data=outer_p.astype(np.int32))
+        f.create_dataset("ROBIN/EDGES", data=robin_p.astype(np.int32))
+        f.create_dataset("ROBIN/H", data=np.asarray(robin_h, float))
+        f.create_dataset("ROBIN/TC", data=np.asarray(robin_tc, float))
+        f.create_dataset("SOLID/K_T", data=np.asarray(kT, float))
+        f.create_dataset("SOLID/K_V", data=np.asarray(kV, float))
+        for k, v in (("n_nodes", N), ("n_tris", len(tris)), ("n_iface", len(iface)),
+                     ("bandwidth", bw1)):
+            f.attrs[k] = int(v)
+        f.attrs["iface_sha1"] = sha
+        f.attrs["source_npz"] = str(source)
+    return perm, bw0, bw1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
