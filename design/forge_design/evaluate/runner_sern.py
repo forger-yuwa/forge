@@ -272,12 +272,19 @@ initial: "uniform_p101325_u10"
 def _bcond_config(p: Problem, st: dict) -> str:
     model = p.evaluate.get("model", "euler")
     ex, en = st["exhaust"], st["ext"]
+    # `evaluate.outlet_kind`: outflow (既定・全量外挿) / statPress。**既定は 2026-09-23 に statPress から変更**。
+    # SERN の出口と bottom は設計上つねに超音速なので、静圧指定は node の壁列・後流の**亜音速ノード**に
+    # Ps ≪ 実出口圧を課し、そこから圧力が育つ (procedures/recommended-settings.md「出口」/ [[node-supersonic-exit-outflow]])。
+    # 実績: run_0121 で出口 P 7.5 → 128 kPa で発散、run_0430–0436 で出口の亜音速率 3.5 → 99.5 %・far_bottom 22 MPa。
+    okind = str(p.evaluate.get("outlet_kind", "outflow"))
 
     def inlet(name, pid, s):
         return (f"{name}: {{physID: {pid}, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , "
                 f"floats: {{ro: {s['ro']:.6g}, Ux: {s['u']:.6g}, Uy: 0.0, Uz: 0.0, Ps: {s['P']:.6g}, k: {s['k']:.6g}, omega: {s['omega']:.6g}{inlet_species_floats(s)}}}}}\n")
 
     def outlet(name, pid):
+        if okind == "outflow":
+            return f"{name}: {{physID: {pid}, kind: outflow, outputHDFflg: 0, ints: , floats: }}\n"
         return (f"{name}: {{physID: {pid}, kind: outlet_statPress, outputHDFflg: 0, ints: , "
                 f"floats: {{Ps: {en['P']:.6g}, Pt: {en['P']:.6g}, Tt: {en['T']:.6g}}}}}\n")
 

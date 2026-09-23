@@ -38,11 +38,11 @@ def _bcond_config(p, st):
         return (f"{name}: {{physID: {P[name]}, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , "
                 f"floats: {{ro: {s['ro']:.6g}, Ux: {s['u']:.6g}, Uy: 0.0, Uz: 0.0, Ps: {s['P']:.6g}, k: {s['k']:.6g}, omega: {s['omega']:.6g}{R2.inlet_species_floats(s)}}}}}\n")
 
-    # `evaluate.outlet_kind`: statPress (既定) / outflow (全量外挿)。
+    # `evaluate.outlet_kind`: outflow (既定・全量外挿) / statPress。**既定は 2026-09-23 に statPress から変更**
     # node は壁列が常に亜音速なので、実出口圧より桁違いに低い Ps を課すとその列から unstart する
     # (case/16 run_0212/0213 で確定)。SERN 3D の出口はプルーム実圧 ~7.5 kPa に対し Ps 2851 Pa で、
     # run_0121 は出口面の圧力が 7.5 → 128 kPa に積み上がり Ux が 1714 → 153 m/s に落ちて発散した。
-    _okind = str(p.evaluate.get("outlet_kind", "statPress"))
+    _okind = str(p.evaluate.get("outlet_kind", "outflow"))   # 既定 outflow (SERN 出口は超音速。run_junction_model.py の注記参照)
 
     def outlet(name):
         if _okind == "outflow":

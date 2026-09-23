@@ -38,7 +38,11 @@ def phys_ids(msh):
 
 def bcond(p, st, ids):
     model = p.evaluate.get("model", "euler"); ex, en = st["exhaust"], st["ext"]
-    okind = str(p.evaluate.get("outlet_kind", "statPress"))
+    # SERN の出口 (と far_bottom) は設計上つねに超音速なので既定は `outflow` (全量外挿)。
+    # `outlet_statPress` は node の壁列・後流の**亜音速ノード**に Ps ≪ 実出口圧を課し、そこから圧力が育つ
+    # (procedures/recommended-settings.md「出口」/ [[node-supersonic-exit-outflow]])。
+    # 実績: run_0121 で出口 P 7.5 → 128 kPa、run_0430–0436 で出口の亜音速率 3.5 → 99.5 %・far_bottom 22 MPa。
+    okind = str(p.evaluate.get("outlet_kind", "outflow"))
     inlet = lambda n, s: (f"{n}: {{physID: {ids[n]}, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , floats: {{ro: {s['ro']:.6g}, Ux: {s['u']:.6g}, "
                           f"Uy: 0.0, Uz: 0.0, Ps: {s['P']:.6g}, k: {s['k']:.6g}, omega: {s['omega']:.6g}{R2.inlet_species_floats(s)}}}}}\n")
     def outlet(n):
