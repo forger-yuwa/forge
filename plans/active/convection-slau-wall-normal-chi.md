@@ -318,8 +318,12 @@ config 検証は 4 経路すべてで起動時に停止する (黙って無効�
 | `roK` / `roOmega` | 0.99–1.02 / 1.03–1.33 | | `T` | 1.02 / 1.05 |
 
 比が 1 前後 = **同一バイナリを 2 回回した差と同程度**。`ypls`・`roUz` 等は数値的にゼロで判定対象外。
-なお**ローカル GPU (RTX 3060) では既定のブロックサイズでカーネルが起動できず** (`too many resources requested for launch`)、
-`FORGE_CUDA_BLOCKSIZE=64` を両バイナリ共通で指定した。**旧バイナリでも同じ失敗**が出るので変更とは無関係。
+なお**既定のブロックサイズ (512) では SLAU の node カーネルが起動できず** (`convectiveFlux_d.cu:316`,
+`too many resources requested for launch`)、`FORGE_CUDA_BLOCKSIZE=64` を両バイナリ共通で指定した。
+本変更とは無関係 (比較対象の基準バイナリでも同じ失敗が出る) が、~~ローカル GPU (RTX 3060) の制約~~
+という当初の帰属は誤り (2026-09-24 撤回)。CHT セッションの報告では **2026-09-20 のバイナリは 512 で完走**しており、
+その後 HEAD までのどこかで入った**回帰**の可能性が高い (nvcc 12.0 / sm_86 で `FORGE_CUDA_BLOCKSIZE=128` でも回避可)。
+私の「旧バイナリ」も HEAD 近傍で建てたものなので、この 2 者の比較では回帰の有無を判定できていない。bisect 未実施。
 
 **V3 case/48 (flag 1 の実害) — 合格**。同じ収束場から flag 0 / flag 1 を 20000 step
 (`_v3/v3_flag0`, `_v3/v3_flag1`、新バイナリ・`slauWallNormalChi` のみ差分):
