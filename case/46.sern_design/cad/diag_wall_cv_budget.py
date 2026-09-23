@@ -52,8 +52,14 @@ def load_state(fn, keys=("ro", "P", "Ux", "Uy", "Uz", "sonic", "T")):
         return {k: np.asarray(V[k][...], dtype=np.float64) for k in keys}
 
 
-def slau_mdot(A, nx, ny, nz, L, R):
-    """1 次 SLAU の質量流束 (kg/s)。L/R は dict of scalars。戻り: (mdot, 移流項, 圧力差項, chi, c_hat, Vn_L, Vn_R)"""
+def slau_mdot(A, nx, ny, nz, L, R, wall_face=False):
+    """1 次 SLAU の質量流束 (kg/s)。L/R は dict of scalars。
+
+    `wall_face=True` のとき、**質量流束の chi だけ**を面法線成分で組み直す
+    (`space.slauWallNormalChi: 1` と同型。`convectiveFlux_slau_d.inc.cuh:544-556`)。
+    圧力束は本ツールでは扱わないので、chi_pressure は返さない。
+
+    戻り: (mdot, 移流項, 圧力差項, chi_mass, c_hat, Vn_L, Vn_R)"""
     VnL = L["Ux"] * nx + L["Uy"] * ny + L["Uz"] * nz
     VnR = R["Ux"] * nx + R["Uy"] * ny + R["Uz"] * nz
     c_hat = 0.5 * (L["sonic"] + R["sonic"])
@@ -66,6 +72,9 @@ def slau_mdot(A, nx, ny, nz, L, R):
     u2R = R["Ux"] ** 2 + R["Uy"] ** 2 + R["Uz"] ** 2
     M_hat = min(1.0, np.sqrt(0.5 * (u2L + u2R)) / c_hat)
     chi = (1.0 - M_hat) ** 2
+    if wall_face:                                   # space.slauWallNormalChi: 1
+        M_hat_n = min(1.0, np.sqrt(0.5 * (VnL ** 2 + VnR ** 2)) / c_hat)
+        chi = (1.0 - M_hat_n) ** 2
     adv = 0.5 * (L["ro"] * (VnL + vhp) + R["ro"] * (VnR - vhm))
     pre = -0.5 * chi / c_hat * (R["P"] - L["P"])
     return A * (adv + pre), A * adv, A * pre, chi, c_hat, VnL, VnR
@@ -86,6 +95,12 @@ def main():
                     help="隣接状態を凍結し、全接続面の Σmdot = 0 となる壁 CV の P_w を 1 次元求根で出し、観測値と比べる "
                          "(plan convection-slau-wall-normal-chi §6 V1-c)。壁ノードは T=Tw ピンなので ro_w = P_w/(R Tw)")
     ap.add_argument("--tw", type=float, default=1000.0, help="--equilibrium の壁温 [K]")
+    ap.add_argument("--wall-normal-chi", action="store_true",
+                    help="`space.slauWallNormalChi: 1` の run を解析するときに指定する。壁隣接面 (いずれかの端点が壁ノード) "
+                         "の質量流束の chi を面法線 Mach で組む。**指定を忘れると別スキームの流束を計算する** "
+                         "(codex result M1: 指定なしで壁 0/接線 1000/法線 0/Δp 900 の面は mdot=0、指定ありは −0.643 kg/s)")
+    ap.add_argument("--wall-phys-ids", default="",
+                    help="壁の physID をカンマ区切りで (例 1,2,3,4,10,11,12,13,15)。--wall-normal-chi に必須")
     ap.add_argument("--ro-min", type=float, default=1e-4, help="roMin (床到達数の判定用)")
     ap.add_argument("--p-min", type=float, default=20.0, help="pMin (床到達数の判定用)")
     a = ap.parse_args()
@@ -104,6 +119,22 @@ def main():
     print(f"# mesh {mesh}  CV {ncv}  faces {len(S)} (内部 {(nei >= 0).sum()}, 境界半割 {(nei < 0).sum()})")
     if len(xyz) != ncv:
         print(f"# WARNING: MESH/COORD {len(xyz)} != CV {ncv} — 座標指定は centCoords (双対重心) で行う")
+
+    wallf = np.zeros(ncv, bool)
+    if a.wall_normal_chi:
+        if not a.wall_phys_ids:
+            raise SystemExit("--wall-normal-chi には --wall-phys-ids が要る (カーネルと同じ壁ノード集合を作るため)")
+        with h5py.File(mesh, "r") as f:
+            for k in a.wall_phys_ids.split(","):
+                k = k.strip()
+                if k not in f["BCONDS"]: raise SystemExit(f"BCONDS/{k} が無い")
+                ic = np.asarray(f["BCONDS"][k]["iCells"]).ravel()
+                wallf[ic[(ic >= 0) & (ic < ncv)]] = True
+        print(f"# slauWallNormalChi: 1 として解析 (壁ノード {int(wallf.sum())} / {ncv})")
+
+    def is_wall_face(ip):
+        o, n = int(own[ip]), int(nei[ip])
+        return bool(a.wall_normal_chi and ((0 <= o < ncv and wallf[o]) or (0 <= n < ncv and wallf[n])))
 
     fs = res_files(run_dir)
     if not fs: raise SystemExit(f"{run_dir} に res_*.h5 が無い")
@@ -157,7 +188,7 @@ def main():
                 R = {k: V[k][j if role == "own" else i] for k in V}
                 if not (np.isfinite(L["ro"]) and np.isfinite(R["ro"])): continue
                 n = S[ip] / A[ip]
-                m, _, _, _, _, _, _ = slau_mdot(A[ip], *n, L, R)
+                m, _, _, _, _, _, _ = slau_mdot(A[ip], *n, L, R, is_wall_face(ip))
                 tot += m if role == "own" else -m       # CV i から見た流出
             u = np.hypot(np.hypot(V["Ux"][i], V["Uy"][i]), V["Uz"][i])
             drodt = -tot / vol[i]
@@ -179,7 +210,7 @@ def main():
                         oth = {k: V[k][j] for k in V}
                         L, Rr = (self_st, oth) if role == "own" else (oth, self_st)
                         n = S[ip] / A[ip]
-                        m, _, _, _, _, _, _ = slau_mdot(A[ip], *n, L, Rr)
+                        m, _, _, _, _, _, _ = slau_mdot(A[ip], *n, L, Rr, is_wall_face(ip))
                         tot += m if role == "own" else -m
                     return tot
 
@@ -211,7 +242,7 @@ def main():
                     L = {k: V[k][i if role == "own" else j] for k in V}
                     R = {k: V[k][j if role == "own" else i] for k in V}
                     n = S[ip] / A[ip]
-                    m, adv, pre, chi, ch, VnL, VnR = slau_mdot(A[ip], *n, L, R)
+                    m, adv, pre, chi, ch, VnL, VnR = slau_mdot(A[ip], *n, L, R, is_wall_face(ip))
                     s = 1.0 if role == "own" else -1.0      # CV i から見た流出符号
                     rows.append((s * m, ip, j, A[ip], s * n, s * m, s * adv, s * pre, chi, ch,
                                  s * (VnL if role == "own" else VnR), s * (VnR if role == "own" else VnL),
