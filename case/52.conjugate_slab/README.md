@@ -67,3 +67,27 @@ python3 verify_v1.py run_0001_v1_slab    # VERDICT
 2. **界面の静定** — 外部ループは `dTw_max` 7.2e-5 K・`res_rel` 7.2e-6 が 2 反復連続で許容以下。
    ソルバ内は更新量 max|d$T_w$| が 1.5e-5 K で一定。
 3. **流体側の緩和** — 壁温固定の緩和試験で 10000 step 後に $q$ が 4 桁一定 (本 README 上部)。
+
+## SU2 との突き合わせ (V2 の 1D スラブ段、2026-09-24)
+
+`su2/` に SU2 v8.5.0 の multizone CHT ケースがある。**同じ問題**を別ソルバで解いて、forge と解析解に突き合わせる。
+
+```bash
+python3 su2/gen_su2_mesh.py                       # fluid.su2 / solid.su2 (生成物なので commit しない)
+cd su2 && LD_LIBRARY_PATH=<su2>/lib <su2>/bin/SU2_CFD slab_cht.cfg
+```
+
+| | $T_w$ [K] | 解析解比 | SU2 比 |
+| --- | --- | --- | --- |
+| 解析解 | 316.261800 | — | −0.00001 K |
+| **SU2 v8.5.0 multizone CHT** | **316.261809** | **+0.00001 K** | — |
+| forge ソルバ内 (`local1d`) | 316.237100 | −0.02470 K | **−0.02471 K** |
+| forge 外部ループ (`shell2d`) | 316.265900 | +0.00410 K | **+0.00409 K** |
+
+**登録許容 0.2 % of rise = 0.0325 K に対し、forge の 2 経路とも PASS**
+([plan](../../plans/active/boundary-conjugate-heat-transfer.md) §6 V2、許容の定義は実施前に確定)。
+SU2 側は温度分布が厳密に線形 (差 ≤7.4e-8 K)・速度 0・$q$=81.30905 (解析 81.30900 W/m²)。
+
+**罠**: 静止流体では流体の BGS 残差が最初から −23 で既定の収束判定を満たし、**固体が −0.62 のまま
+11 外反復で終了**する (そのときの界面温度は解析解から 1.8 K ずれていた)。判定を固体側に付けて
+3000 外反復まで回すこと。詳細は [`procedures/su2-cross-check.md`](../../procedures/su2-cross-check.md)。
