@@ -143,6 +143,37 @@ int main()
         cudaFree(da); cudaFree(db);
     }
 
+    // --- (e) restart の代償: 残余を捨てる頻度で効果がどこまで消えるか ---
+    //     (plan §5.1 S1b-⑤。codex result M5 の反例を試験に残す)
+    //     残余は常に ½ ULP 以下だが、**捨てる頻度が上がると累積が丸ごと消える**。
+    {
+        const flow_float q0 = (flow_float)1.0;
+        const flow_float dqs = (flow_float)ldexp(1.0, -26);   // 0.125 ULP @ Q=1
+        const int N = 100;
+        const double ulp1 = (double)std::nextafter(q0, (flow_float)2.0) - (double)q0;
+        printf("\n(e) restart の代償 (Q=1, dq=%.3f ULP, N=%d step):\n", (double)dqs / ulp1, N);
+        printf("    %-24s %14s\n", "残余を捨てる間隔", "ミラーの移動 [ULP]");
+        struct R { const char* name; int every; };
+        const R cases[] = {{"捨てない (連続)", 0}, {"100 step ごと", 100}, {"10 step ごと", 10},
+                           {"1 step ごと (毎回)", 1}};
+        double moved[4];
+        for (int k = 0; k < 4; ++k) {
+            double acc = (double)q0; flow_float q = q0;
+            for (int n = 0; n < N; ++n) {
+                acc += (double)dqs; q = (flow_float)acc;
+                // restart 相当: FP32 の Q から正本を作り直す = 残余 (≤½ ULP) を捨てる
+                if (cases[k].every > 0 && (n + 1) % cases[k].every == 0) acc = (double)q;
+            }
+            moved[k] = ((double)q - (double)q0) / ulp1;
+            printf("    %-24s %14.1f\n", cases[k].name, moved[k]);
+        }
+        CHECK(moved[0] >= 11.0, "(e) 連続で 12 ULP 動かない (%.1f)", moved[0]);
+        CHECK(moved[3] == 0.0, "(e) 毎 step restart なのに動いた (%.1f) — 反例が再現していない", moved[3]);
+        CHECK(moved[1] > moved[3], "(e) 100 step ごとの方が毎回より動かない");
+        printf("    -> **残余は常に ½ ULP 以下でも、捨てる頻度が上がると効果が丸ごと消える**。\n");
+        printf("       「½ ULP しか失わないから実害なし」と一般化しないこと。\n");
+    }
+
     printf("\n%s (失敗 %d)\n", g_fail ? "VERDICT: FAIL" : "VERDICT: PASS", g_fail);
     return g_fail ? 1 : 0;
 }
