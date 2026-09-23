@@ -55,11 +55,20 @@ static std::list<std::string> effectiveOutputNames(const solverConfig& cfg, cons
     for (const auto& n : var.output_cellValNames) {
         if (std::find(base.begin(), base.end(), n) != base.end()) out.push_back(n);
     }
+    // **extraFields は確保済みの cell 変数なら何でも出せる** (2026-09-24)。
+    // 以前は `output_cellValNames` に入っているものしか受け付けず、`res_ro` のように
+    // `cellValNames` には在って出力候補に入っていない診断量を**指定しても黙って無視**していた
+    // (警告は出るが出力は増えない)。丸めの内訳を場で測るのに残差そのものが要る (plan
+    // time_integration-fp64-accumulator §5.1 S6 / #15)。
     for (const auto& n : cfg.outputExtraFields) {
-        if (std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), n) == var.output_cellValNames.end()) {
-            static bool warned = false;
-            if (!warned) { std::cerr << "[output] extraFields: '" << n << "' is not an output variable (ignored)\n"; warned = true; }
+        if (std::find(out.begin(), out.end(), n) != out.end()) continue;
+        if (std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), n) != var.output_cellValNames.end()) continue;
+        if (var.c.count(n) != 0 || var.c_d.count(n) != 0) {
+            out.push_back(n);   // 確保済みの診断量 (res_* など)
+            continue;
         }
+        static bool warned = false;
+        if (!warned) { std::cerr << "[output] extraFields: '" << n << "' は確保されていない変数なので無視する\n"; warned = true; }
     }
     return out;
 }

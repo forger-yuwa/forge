@@ -71,7 +71,26 @@ with h5py.File(a.src, "r") as s, h5py.File(a.dst, "r" if a.dry_run else "r+") as
         sys.exit(0)
 
     # --- 検査: 写した量が SRC とビット一致すること ---
-    bad = [n for n in moved if not np.array_equal(np.asarray(sv[n]), np.asarray(dv[n]))]
+    # **例外は「SRC の方が広い型」のとき** (倍精度 run の res_*.h5 → float32 の入力 h5)。
+    # forge の入力 h5 は float32 なので、倍精度の場を種にするときは丸めが必ず入る
+    # (run_0020_double 自身も float32 の種から出発している)。この場合はビット一致を求めず、
+    # **丸めで失われた大きさを報告**して続行する。
+    bad, narrowed = [], []
+    for n in moved:
+        a = np.asarray(sv[n]); b = np.asarray(dv[n])
+        if np.array_equal(a, b):
+            continue
+        if a.dtype.itemsize > b.dtype.itemsize:
+            rel = np.max(np.abs(a.astype(np.float64) - b.astype(np.float64))) / max(np.max(np.abs(a)), 1e-300)
+            narrowed.append((n, rel))
+        else:
+            bad.append(n)
     if bad:
         sys.exit(f"検査 NG: 写したのに SRC と一致しない: {bad}")
-    print(f"VERDICT: OK ({len(moved)} 量が SRC とビット一致)")
+    if narrowed:
+        print(f"型の縮小 ({sv[moved[0]].dtype} -> {dv[moved[0]].dtype}) で丸めが入った "
+              f"(入力 h5 が float32 のため不可避):")
+        for n, rel in narrowed:
+            print(f"    {n:<10} 相対 {rel:.3e}")
+    print(f"VERDICT: OK ({len(moved)} 量を移した"
+          f"{'、うち ' + str(len(narrowed)) + ' 量は型の縮小で丸めあり' if narrowed else '、SRC とビット一致'})")
