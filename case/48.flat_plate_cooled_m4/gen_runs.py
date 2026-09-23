@@ -5,7 +5,9 @@ usage: python3 gen_runs.py --run run_0001_A_ad_y3 --mesh fp_y1_3um --wall adiaba
   --wall adiabatic → kind: wall / 数値 → wall_isothermal Ts=数値
   --plain          → dilatationCorrection 0, katoLaunder 0 (SU2 比較用の素 SST)
 段階: soft (1次, cfl 0.5, nStepInner 10, 2000) → mid (1次, cfl 1.0, 2000) → main (2次, cfl, implicitRelax, main-steps)。
-段間は interp_field.py (同一メッシュなので index 同値) で mesh h5 の VALUE を更新。
+段間は restart_field.py (同一メッシュ) で mesh h5 の VALUE を更新。
+**interp_field.py は cross-mesh 用で、原始量から保存量を組み直すので同一メッシュに使ってはいけない**
+(2026-09-24 実測: この case のメッシュで roUx 29037/89440 が最大 14.2 %、roUy 47630 が最大 100 % ずれた)。
 """
 import argparse, os, re, shutil, subprocess, sys
 from pathlib import Path
@@ -110,7 +112,7 @@ def stage(rd, text, nsteps, tag=""):
     res = sorted(rd.glob("res_[0-9]*.h5"), key=lambda f: int(f.stem.split("_")[1]))
     if rc != 0 or not res or int(res[-1].stem.split("_")[1]) < nsteps:
         raise SystemExit(f"stage failed rc={rc} res={[r.name for r in res][-2:]}")
-    subprocess.run([sys.executable, str(TOOLS / "interp_field.py"), str(res[-1]), str(rd / "mesh.h5")], env=ENV, check=True,
+    subprocess.run([sys.executable, str(TOOLS / "restart_field.py"), str(res[-1]), str(rd / "mesh.h5")], env=ENV, check=True,
                    capture_output=True, text=True)
     # 層流段の res には roK/roOmega が無い → 自由流値を入れ直す (SST 段の IC)
     with h5py.File(rd / "mesh.h5", "r+") as f:
@@ -134,7 +136,7 @@ def main():
     ap.add_argument("--ramp", default="0.5,1,2", help="本段前の 2 次 cfl ランプ (各 --ramp-steps)。空文字で無し")
     ap.add_argument("--ramp-steps", type=int, default=2000)
     ap.add_argument("--limiter", type=int, default=2)
-    ap.add_argument("--ic-from", default=None, help="warm start 元 run (mesh.h5 を interp_field で作る; 同一メッシュ)")
+    ap.add_argument("--ic-from", default=None, help="warm start 元 run (mesh.h5 を restart_field で作る; 同一メッシュ)")
     ap.add_argument("--ic-mesh", default=None, help="場入り mesh h5 をそのまま mesh.h5 に使う (段階起動済み場の再利用)")
     a = ap.parse_args()
     rd = HERE / a.run
@@ -142,13 +144,13 @@ def main():
     rd.mkdir()
     shutil.copy(HERE / "mesh" / f"{a.mesh}.h5", rd / "mesh.h5")
     Tw = None if a.wall == "adiabatic" else float(a.wall)
-    # interp_field は DST の隣の solverConfig.yaml で化学種署名を照合する (無いと REFUSED) ので、先に config を置く
+    # 同一メッシュなので restart_field (保存量を index コピーしビット一致を検査する) を使う
     (rd / "solverConfig.yaml").write_text(cfg(a.main_steps, a.cfl, a.relax, 1, a.limiter, 5, a.out_int, a.plain))
     if a.ic_mesh:
         shutil.copy(a.ic_mesh, rd / "mesh.h5"); (rd / "CONTINUED_FROM").write_text(str(a.ic_mesh) + "\n")
     elif a.ic_from:
         src = sorted((HERE / a.ic_from).glob("res_[0-9]*.h5"), key=lambda f: int(f.stem.split("_")[1]))[-1]
-        subprocess.run([sys.executable, str(TOOLS / "interp_field.py"), str(src), str(rd / "mesh.h5")], env=ENV, check=True,
+        subprocess.run([sys.executable, str(TOOLS / "restart_field.py"), str(src), str(rd / "mesh.h5")], env=ENV, check=True,
                        capture_output=True, text=True)
         (rd / "CONTINUED_FROM").write_text(str(src) + "\n")
         if Tw is not None: set_wall_T(rd / "mesh.h5", Tw)
