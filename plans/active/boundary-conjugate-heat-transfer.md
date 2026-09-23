@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `boundary`
-- **status**: `draft`
+- **status**: `in_progress`
 - **related_docs**:
   - [`methods/boundary.md`](../../methods/boundary.md) — 壁 / 等温壁 (cell ゴースト・node 壁ノード T ピン) の現在仕様
   - [`methods/architecture/overview.md`](../../methods/architecture/overview.md) — 残差組立てと時間積分 (連成フックの位置)

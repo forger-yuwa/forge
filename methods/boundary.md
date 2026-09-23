@@ -323,13 +323,13 @@ SST automatic wall treatment (`wallTreatmentSST`) とはコードパスが分離
 
 ### 共役熱伝達 (CHT) — 壁温を固体と連立して解く
 
-> **状態 (2026-09-19)**: 契約は下記のとおり確定。
+> **状態 (2026-09-23)**: 契約は下記のとおり確定。
 > **実装済み**: 界面診断の出力 (`output.interfaceDiag`)、壁温分布の入力 (`wallProfile`)、
 > 共有 CV の壁温競合の起動時拒否、**固体側モデル** ([`tools/solid_shell.py`](../solver_density_cuda/tools/solid_shell.py))、
-> **外部弱連成ループ** ([`tools/cht_loop.py`](../solver_density_cuda/tools/cht_loop.py))。
-> **ソルバ内連成も実装済み (Phase 2a, `local1d` のみ)**: `conjugate:` ブロック + bcond `ints: {conjugate: 1}`。
-> **ソルバ内連成も保存形 $q_{\rm eff}$ で更新する (2026-09-22、既定)**: `conjugate: {flux: q_eff}`。
-> **未実装**: ソルバ内の `shell2d`/`fem2d` (面内伝導が要るなら外部ループを使う)、dual-time 連成。
+> **外部弱連成ループ** ([`tools/cht_loop.py`](../solver_density_cuda/tools/cht_loop.py))、
+> **ソルバ内連成** (`conjugate:` ブロック + bcond `ints: {conjugate: 1}`): `mode: local1d` (点ごとの 1 次元抵抗) と
+> **`mode: fem2d`** (一般 2D 固体を全節点系で解く。下の節)。界面熱量は既定で**保存形** $q_{\rm eff}$。
+> **未実装**: ソルバ内の `shell2d` (帯メッシュを `fem2d` に食わせる方針)、dual-time 連成。
 > 検証: 1 次元純伝導の共役解を解析解と照合 (`case/52.conjugate_slab`) — $T_w$ 誤差 0.025 %、
 > 両側 $q$ の不一致 0.0053 % で **PASS**。
 > 設計判断と検証計画は [`plans/active/boundary-conjugate-heat-transfer.md`](../plans/active/boundary-conjugate-heat-transfer.md)
