@@ -259,7 +259,24 @@ $$\frac{P_w}{P_i} \approx \frac{1}{1 + \dfrac{2\,V_{n,i}\,\hat c}{\chi_n\,R\,T_w
 
 ### 6.2 結果 (2026-09-23)
 
-**V0 単体 — 合格**。config 検証は 4 経路すべてで起動時に停止する (黙って無効化しない):
+**V0 単体 — 合格** (2026-09-23。codex result M3「面反転・等状態・非対象面の試験記録を追えない」を受けて
+`cad/test_diag_wall_cv_budget.py` に固定した。`python3 case/46.sern_design/cad/test_diag_wall_cv_budget.py` で `ALL PASS`):
+
+| 試験 | 内容 | 結果 |
+| --- | --- | --- |
+| **カーネル照合** | カーネル式の独立な書き下しと項ごとに比較 (flag on/off 双方) | 一致 |
+| **codex の反例** | 壁 0 / 内点の接線 1000 m/s / $\hat c$ 700 / 面法線 0 / $\Delta p$ 900 Pa / $A$=1 m² | off: $\dot m$=**0** / on: **−0.642857 kg/s** |
+| **面向き反転** | $\mathbf n \to -\mathbf n$ かつ L↔R で $\dot m$ が符号反転のみ (flag on/off) | 一致 |
+| **等状態** | $L=R$ で圧力差項が厳密 0、$\dot m = A\rho V_n$ (flag on/off) | 一致 |
+| **$\Delta p$ 比例** | $\Delta p$ = 1/10/100 Pa で flag の差が 8.11e-4 / 8.11e-3 / 8.11e-2 | **正比例** |
+| **$\Delta p$=0** | 接線速度 400 m/s があっても flag の差 | **厳密に 0** |
+
+最後の 2 件が **M5 の実証**: flag の差を決めるのは $\Delta p$ であって剥離の有無ではない。
+
+**非対象面の不変性**は config 検証と mask の構成から担保する (`is_wall_face` が偽なら `slau_mdot` は従来式と同一行を通る)。
+**cell 方式での拒否**は下の config 検証に含む。
+
+config 検証は 4 経路すべてで起動時に停止する (黙って無効化しない):
 `discretization: cell` / `nodeWallDirichlet: 0` / `solver: ROE` / 値 2 で、それぞれ固有のエラーを出して終了。
 正しい組合せでは実効値をログに出し、キー省略時 (既定 0) は何も出さない。
 
