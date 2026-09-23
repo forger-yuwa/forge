@@ -203,8 +203,12 @@ step を 2 倍にしても 15 % しか下がらない。同じ場を**倍精度�
 
 **使い方** (2026-09-24): `time.deltaT.qAccumulatorFP64: 1` (既定 0、**`time:` 直下ではない**)。
 対応するのは `timeIntegration: 11` かつ `unsteady: 0`、node 軸対称でない、`sstEnergyIncludesK: 0`、
-node 周期でない場合のみで、それ以外は起動時に拒否する。**`Qacc` は checkpoint されない**ので、
-restart すると蓄積した下位ビットは失われる (対処は plan §5.1 S1b-⑤)。
+node 周期でない場合のみで、それ以外は起動時に拒否する。**`Qacc` は checkpoint されない**。ただし**失うのは ½ ULP 分だけ**で実害は無い:
+commit は `Qacc += dq` のあと必ず `Q = (flow_float)Qacc` とするため $\lvert Q_{acc}-Q\rvert\le\tfrac12\mathrm{ULP}(Q)$ が
+構造上いつでも成り立ち、**残余は 1 ULP を超えて溜まらない**。実測の $\langle\lvert dq\rvert\rangle$ = 0.159 ULP/step から
+restart の代償は**平均 3 step 分の進捗**。case/56 で 100k から再開した軌道は、連続で回した軌道と
+通算 125k–200k の 4 点すべてで **run 間ノイズ床 (絶対 1.3e-9) の中**にあり区別できない
+(`run_0030_restart_cost`, 2026-09-24)。したがって `/QACC` の出力は行わない。
 
 **切り分けの指標**: $\lvert dq\rvert/\mathrm{ULP}(Q)$ が O(1) を下回っていないか。下回っていれば、
 sweep 数（`nStepInner`）を増やしても `lineImplicit` を入れても改善しない（どちらも $dq$ を精緻にするだけで、
