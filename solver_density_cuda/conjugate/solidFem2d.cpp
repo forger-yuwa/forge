@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 
 #include <highfive/highfive.hpp>
@@ -101,6 +102,20 @@ double SolidMesh::kOf(double T) const
     const double t0 = kT[j-1], t1 = kT[j];
     const double w = (t1 > t0) ? (T - t0) / (t1 - t0) : 0.0;
     return kV[j-1] + w * (kV[j] - kV[j-1]);
+}
+
+std::vector<double> SolidMesh::ifaceLumped() const
+{
+    std::vector<int> local(nNodes, -1);
+    for (size_t i = 0; i < ifaceNodes.size(); i++) local[ifaceNodes[i]] = (int)i;
+    std::vector<double> a(ifaceNodes.size(), 0.0);
+    for (size_t e = 0; e + 1 < ifaceEdges.size(); e += 2) {
+        const int n0 = ifaceEdges[e], n1 = ifaceEdges[e+1];
+        const double L = std::hypot(x[n1] - x[n0], y[n1] - y[n0]);
+        if (local[n0] >= 0) a[local[n0]] += 0.5 * L;
+        if (local[n1] >= 0) a[local[n1]] += 0.5 * L;
+    }
+    return a;
 }
 
 SolidFem2D::SolidFem2D(const SolidMesh& m) : m_(m), n_(m.nNodes)
@@ -260,6 +275,66 @@ std::vector<double> SolidFem2D::residual(const std::vector<double>& u)
     std::vector<double> r = matvec(u);
     for (int i = 0; i < n_; i++) r[i] -= b_[i];
     return r;
+}
+
+void writeSolidField(const std::string& stem, const SolidMesh& m,
+                     const std::vector<double>& u, const std::vector<double>& qIface,
+                     double timeValue)
+{
+    const int N = m.nNodes;
+    std::vector<std::vector<double>> coord(N, std::vector<double>(3, 0.0));
+    for (int i = 0; i < N; i++) { coord[i][0] = m.x[i]; coord[i][1] = m.y[i]; }
+
+    // XDMF Mixed: 三角形は要素コード 4 (output/output.cpp と同じ規約)
+    std::vector<int> conne;
+    conne.reserve(4 * m.nTris);
+    for (int e = 0; e < m.nTris; e++) {
+        conne.push_back(4);
+        for (int k = 0; k < 3; k++) conne.push_back(m.tris[3*e + k]);
+    }
+
+    std::vector<double> ks(N), qh(N, 0.0), qi(N, 0.0);
+    for (int i = 0; i < N; i++) ks[i] = m.kOf(u[i]);
+    for (size_t r = 0; r < m.robinH.size(); r++) {
+        const int n0 = m.robinEdges[2*r], n1 = m.robinEdges[2*r+1];
+        const double L = std::hypot(m.x[n1] - m.x[n0], m.y[n1] - m.y[n0]);
+        const double h = m.robinH[r], Tc = m.robinTc[r];
+        qh[n0] += 0.5 * L * h * (u[n0] - Tc);
+        qh[n1] += 0.5 * L * h * (u[n1] - Tc);
+    }
+    for (int i = 0; i < m.nIface(); i++)
+        if (i < (int)qIface.size()) qi[m.ifaceNodes[i]] = qIface[i];
+
+    const std::string h5name = stem + ".h5";
+    {
+        HighFive::File f(h5name, HighFive::File::Overwrite);
+        f.createDataSet("MESH/COORD", coord);
+        f.createDataSet("MESH/CONNE", conne);
+        f.createDataSet("VALUE/T", u);
+        f.createDataSet("VALUE/k_s", ks);
+        f.createDataSet("VALUE/q_iface", qi);
+        f.createDataSet("VALUE/q_hole", qh);
+    }
+
+    const size_t slash = h5name.find_last_of('/');
+    const std::string h5base = (slash == std::string::npos) ? h5name : h5name.substr(slash + 1);
+    std::ofstream ofs(stem + ".xmf");
+    ofs << "<?xml version='1.0' ?>\n<!DOCTYPE Xdmf SYSTEM 'Xdmf.dtd' []>\n<Xdmf>\n  <Domain>\n";
+    ofs << "    <Grid GridType='Collection' CollectionType='Spatial' Name='Mixed'>\n";
+    ofs << "    <Time TimeType='Single' Value='" << timeValue << "'/> \n";
+    ofs << "      <Grid Name='solid'>\n";
+    ofs << "        <Topology Type='Mixed' NumberOfElements='" << m.nTris << "'>\n";
+    ofs << "          <DataItem Format='HDF' DataType='Int' Dimensions='" << conne.size() << "'>\n";
+    ofs << "            " << h5base << ":MESH/CONNE\n          </DataItem>\n        </Topology>\n";
+    ofs << "        <Geometry Type='XYZ'>\n";
+    ofs << "          <DataItem Format='HDF' DataType='Float' Precision='8' Dimensions='" << N*3 << "'>\n";
+    ofs << "            " << h5base << ":MESH/COORD\n          </DataItem>\n        </Geometry>\n";
+    for (const char* nm : {"T", "k_s", "q_iface", "q_hole"}) {
+        ofs << "        <Attribute Name='" << nm << "' Center='Node' >\n";
+        ofs << "          <DataItem Format='HDF' DataType='Float' Precision='8' Dimensions='" << N << "'>\n";
+        ofs << "            " << h5base << ":VALUE/" << nm << "\n          </DataItem>\n        </Attribute>\n";
+    }
+    ofs << "      </Grid>\n    </Grid>\n  </Domain>\n</Xdmf>\n";
 }
 
 } // namespace conjugate

@@ -46,6 +46,9 @@ struct SolidMesh {
 
     static SolidMesh read(const std::string& path);   // 読めなければ exit(1)
     double kOf(double T) const;                       // 線形内挿 (両端はクランプ)
+    // 界面節点の**集中辺長** [m] (IFACE/NODES の順)。連成荷重は q_eff [W/m2] × これ。
+    // **流体側の surfArea を使ってはいけない** (押し出し疑似 2D で奥行きが乗る。§4.6a)。
+    std::vector<double> ifaceLumped() const;
     int nIface() const { return (int)ifaceNodes.size(); }
 };
 
@@ -86,5 +89,12 @@ private:
     inline double& at(int i, int j) { return ab_[(i - j) + (size_t)j * (bw_ + 1)]; }
     inline double  at(int i, int j) const { return ab_[(i - j) + (size_t)j * (bw_ + 1)]; }
 };
+
+// 固体場を forge と同じ XDMF 規約で書く (plan §4.6a。ParaView で流体と重ねられる)。
+//   VALUE/T (節点温度) / k_s / q_iface (ガス側から受け取った熱 [W/m]) / q_hole (孔が持ち去った熱)
+// `stem` は拡張子なしのパス (`res_solid_1000` → `.h5` と `.xmf` を書く)。
+void writeSolidField(const std::string& stem, const SolidMesh& m,
+                     const std::vector<double>& u, const std::vector<double>& qIface,
+                     double timeValue);
 
 } // namespace conjugate

@@ -57,6 +57,16 @@ public:
     // 連成に渡す界面熱量の定義。既定 `q_eff` = 保存形 ($Q_f=\sum F^E-C$, plan §4.3 の正本)。
     // `q_compact` は旧実装 (k_eff(T_1-T_w)/d_1 の抵抗加重平均) の再現用で、A/B のときだけ使う。
     std::string conjugateFlux = "q_eff";
+    std::string conjugateSolidFile;      // fem2d: tools/solid_mesh_to_h5.py が作った固体 HDF5
+    double conjugateDfScale = 1.0;       // D_f の倍率 (発散したとき手で上げる。自動調整はしない)
+    // 界面ゲート (G-if) の許容。**run を投入する前に書く** = 結果を見てから決めない仕組み。
+    // ソルバが起動時に conjugate_gate.json に写し、tools/check_cht_interface.py がそれで判定する。
+    int    conjugateGateSet = 0;         // gate: ブロックが書かれたか
+    double conjugateGateEpsRel = 0.0;    // max|r|/max|Q_f|
+    double conjugateGateEpsAbs = 0.0;    // max|r|/A_i [W/m2]
+    double conjugateGateDtK    = 0.0;    // max|dTw| [K]
+    double conjugateGateTolSolid = -1.0; // 固体内部残差 [W/m] (省略時は判定しない)
+    int    conjugateGateNConsec = 0;     // 連続回数
     // 第一内部点の整列度 |d·n|/|d| の下限 (これ未満は評価不能。tools/check_wall_resolution.py の --align-min と同義)
     double interfaceDiagAlignMin = 0.5;
 
