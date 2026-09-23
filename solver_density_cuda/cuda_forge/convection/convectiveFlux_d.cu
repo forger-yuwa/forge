@@ -1,4 +1,7 @@
 #include <cstdlib>
+#include <fstream>
+#include <vector>
+#include <iostream>
 #include "../condensationTransport_d.cuh"   // cond_prop_opts() (凝縮物性オプション → CondArgs)
 #include "../condensationEOS_d.cuh"         // cond_face_h_cpg (SLAU CPG 二相の面エンタルピー)
 #include "../condensationSourceF_d.cuh"     // cond_face_h_cpg_f / cond_tab_latent_f (float 面潜熱, plan condensation-float-speedup)
@@ -402,5 +405,51 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
 
+    // 診断ダンプ (env `FORGE_DUMP_MASSFLUX=<path>`、既定 off。**数値の振る舞いは変えない**)。
+    // 面流束 massflux[nPlanes] を **最初の呼び出しだけ** ホストへ写して raw float32 で書く。
+    // plan convection-slau-wall-normal-chi §6 V5 (#10d): 場 (res_*.h5) は残差の atomicAdd で
+    // 1 step でもビット再現しないが、massflux[ip] は 1 面 = 1 スレッドが非 atomic に書くので
+    // 面レベルのビット比較ができる。**第 2 評価以降は flag 0/1 で状態が違う**ので 1 回目に限る。
+    {
+        static bool s_mfDumped = false;
+        static int  s_cfCall = 0;
+        ++s_cfCall;                      // この wrapper の呼び出し回数 (1 = 第 1 評価)
+        if (!s_mfDumped) {
+            const char* mfPath = std::getenv("FORGE_DUMP_MASSFLUX");
+            if (mfPath && *mfPath) {
+                s_mfDumped = true;
+                std::vector<flow_float> mf(msh.nPlanes);
+                CHECK_CUDA_ERROR(cudaMemcpy(mf.data(), var.p_d["massflux"],
+                                            msh.nPlanes*sizeof(flow_float), cudaMemcpyDeviceToHost));
+                std::ofstream ofs(mfPath, std::ios::binary);
+                if (ofs) {
+                    ofs.write(reinterpret_cast<const char*>(mf.data()),
+                              (std::streamsize)(msh.nPlanes*sizeof(flow_float)));
+                    std::cout << "[FORGE_DUMP_MASSFLUX] wrote " << msh.nPlanes
+                              << " faces to " << mfPath << " (call " << s_cfCall << ")\n";
+                } else {
+                    std::cout << "[FORGE_DUMP_MASSFLUX] cannot open " << mfPath << '\n';
+                }
+                // **カーネルが実際に読む状態**も同じ呼び出しで書く。res_*.h5 の値を代理に使うと
+                // 1 ulp ずれることがある (§6 V5 の P2 初版が 3 面で FAIL した原因)。
+                // 並び: ro, Ux, Uy, Uz, Ps, sonic を各 nCells 個、この順に連結。
+                {
+                    const std::string sPath = std::string(mfPath) + ".state";
+                    std::ofstream sfs(sPath, std::ios::binary);
+                    if (sfs) {
+                        std::vector<flow_float> buf(msh.nCells);
+                        for (const char* nm : {"ro", "Ux", "Uy", "Uz", "P", "sonic"}) {
+                            CHECK_CUDA_ERROR(cudaMemcpy(buf.data(), var.c_d[nm],
+                                                        msh.nCells*sizeof(flow_float), cudaMemcpyDeviceToHost));
+                            sfs.write(reinterpret_cast<const char*>(buf.data()),
+                                      (std::streamsize)(msh.nCells*sizeof(flow_float)));
+                        }
+                        std::cout << "[FORGE_DUMP_MASSFLUX] wrote state (ro,Ux,Uy,Uz,P,sonic x "
+                                  << msh.nCells << ") to " << sPath << '\n';
+                    }
+                }
+            }
+        }
+    }
 
 }

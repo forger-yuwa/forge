@@ -201,7 +201,9 @@ $$\frac{P_w}{P_i} \approx \frac{1}{1 + \dfrac{2\,V_{n,i}\,\hat c}{\chi_n\,R\,T_w
 | **10** | **case/16 の V2・V3 — 現在の受入ゲート** | **§6 V3 の受入条件なので「既定化の必須条件」へ格下げしない** (codex result-2 M1: 受入ゲートは結果を見てから動かさない)。node run が全部 Euler (`slip` 壁) で $\chi_n$ の対象外 → **NS 設定を新規に組む**。メッシュも手元・AWS とも無い。出口も `outlet_statPress` で B1f の見直し対象 | O |
 | **10b** | **V3 SERN 2D の受入判定 (保留中)** | 終端差は許容内 ($C_T$ 0.031 %、衝撃足 0.842 %) だが**差の時系列が `DRIFTING`** (変動 53.5 % / 25.8 % / 1.3 %)。本段を延長して差が STEADY になるか確認するまで**合格と書かない** (§6.2) | O |
 | **10c** | **固定点の判定 (保留中)** | `run_0442` と `run_0439` の終端場差 0.011 % は固定点の証明ではない。両 CFL で全保存量の収束判定 + 独立に延長した末尾区間の比較が要る (§6.2) | O |
-| **10d** | **実カーネル照合** | 単体試験は**Python による式の確認**で float32・実 mask・非対象面のビット不変は未試験。実効設定・前処理を含む面流束照合を追加する (§6.2) | O |
+| ~~**10d-1**~~ (済 2026-09-24) | **診断ダンプの実装** | env `FORGE_DUMP_MASSFLUX=<path>` で `var.p_d["massflux"]` を**最初の呼び出しだけ**ホストへ写して書く (`convectiveFlux_d.cu` の wrapper、カーネル本体は不変)。§6 V5 の前提。**数値の振る舞いを変えないのでカーネル変更ではない** (2026-09-24 `diagnostician` 判断) | O |
+| ~~**10d-2**~~ (済 2026-09-24) | **人工状態の生成** | §6 V5 の $\Delta P$ 付き状態を `fp_y1_12um.h5` に書くスクリプト。$\Delta P=0$ の帯を含めること | O |
+| ~~**10d**~~ (**済 2026-09-24, P0–P5 全て PASS**) | **実カーネル照合 (V5 P0–P5)** | 単体試験は**Python による式の確認**で float32・実 mask・非対象面のビット不変は未試験。**場では測らない** (1 step でもビット再現しない実測 + 陰解法では非対象ノードが動くのが正しい)。面流束 `massflux` で P0–P5 を判定する。設計: §6 V5 (2026-09-24 `diagnostician`: 「場でなく面で測れ」) | O |
 | **11** | **既定化の判断** (**F**) | **前提**: #7・#9・#10・#10b–#10d の完了 + $C_L$ 0.433 % / $C_M$ 0.316 % / 衝撃足の壁圧 0.842 % の**正否を独立に判定** (格子収束・別スキーム・実験/文献のいずれか)。これが無いうちは **opt-in のまま**。既定化は本 plan のスコープ外 (§2) | F |
 | 8 | codex result レビュー (**3 回目の発火条件**) | **受入セットが揃ったら**回す: case/16 の flag 0/1 完了 + #10b の時系列 VERDICT + #10c の固定点判定 (延長 run)。**揃う前に出すと同じ M1 で NO-GO になりレビューを 1 周捨てる** (2 回目の教訓) | F |
 
@@ -259,11 +261,108 @@ $$\frac{P_w}{P_i} \approx \frac{1}{1 + \dfrac{2\,V_{n,i}\,\hat c}{\chi_n\,R\,T_w
 - block-DPLUR の固定点確認として `cfl_pseudo` を 0.2 → 0.4 にした run を 1 本足す (`nStepInner 5` 固定)。
 - **V1 の診断成功と、生産利用可能な検証完了を区別する**。
 
+### V5 実カーネル照合 (面流束, #10d) — 2026-09-24 に設計、結果を見る前に固定
+
+**場 (`res_*.h5`) では測らない。面流束 `massflux[ip]` で測る。** 理由は 2 つある。
+
+1. **場は 1 step でもビット再現しない** (実測: `case/48.flat_plate_cooled_m4/run_0030_bitrep_a` と
+   `run_0031_bitrep_b`、同一メッシュ・同一 IC・同一設定・同一ブロックサイズ 128・1 step で
+   `roUy` 3181/89440・`roUx` 3・`ro` 2 が不一致、他は同一)。残差は `atomicAdd` で集める
+   (`convectiveFlux_slau_d.inc.cuh:638`)。
+2. **陰解法では「非対象ノードの場が動かないこと」は正しい要求ではない**。flag 1 で壁ノードの RHS が
+   変われば block-DPLUR の sweep が差を隣接へ運ぶ。動くのが正しい。
+   一方 `massflux[ip] = mdot` は **1 面 = 1 スレッドが非 atomic に書く** (同 :580) ので、
+   面レベルではビット同一が定義どおり成立する。
+
+**試験**: `case/48.flat_plate_cooled_m4/mesh/fp_y1_12um.h5` (89440 節点、`check_mesh_quality` PASS) に
+**$\Delta P$ を設計で与えた人工状態**を置き、`space.slauWallNormalChi` 0 / 1 だけを変えて **RHS の第 1 評価**
+(`iStep=0, inner=0`) の面流束をダンプして比較する。**収束場は使わない**: 収束した ZPG 平板は壁隣接面の
+$\Delta P$ が最小のケース ($\partial p/\partial n\approx0$, $\mathrm{d}p/\mathrm{d}x\approx0$) で、
+V3 case/48 の $C_f$ 差 0.000 % がその証拠。人工状態のほうが信号が大きく、かつ**閉形式で予測できる**。
+
+- 人工状態: 内点 $U_x = U_t$ ($M_t\approx0.6$ = $\chi$ が 0/1 にクリップされない)、$U_y = 0.2U_t r_1$、
+  $P = P_\infty(1+0.05 r_2)$、$T = T_\infty$ 一様、$\rho = P/(RT)$、壁ノード $u=0$。
+  $r_1,r_2\in[-1,1]$ は節点 index からの決定的疑似乱数。**$x$ のある帯では $r_2=0$** として
+  「対象面だが $\Delta P=0$」の集合を意図的に作る。
+- 比較対象: 面配列 `m0`,`m1` (flag 0/1)、診断ツール `diag_wall_cv_budget.py` の **float64** 値
+  `m_t(flag)` と $\Delta_t = m_t(1)-m_t(0)$。
+- **許容差** $\tau_b = 10^{-5} A\bar\rho\hat c$。根拠: `mdot` は約 25 flop、各 ≤0.5 ulp32 (6e-8)、
+  最大中間量は $M\le1$ で $\lesssim 3A\bar\rho\hat c$ → 最悪 ≈ $5\times10^{-6}A\bar\rho\hat c$。
+  $10^{-5}$ はその 2 倍で「丸めでは決して落ちない」閾値。人工状態では
+  $\Delta_t \approx A\tfrac12\Delta\chi\cdot0.05P_\infty/\hat c$ なので $\Delta_t/\tau_b \approx 1800\Delta\chi \gg 100$。
+
+| 記号 | 内容 | 合格 |
+| --- | --- | --- |
+| **P0** (前提) | flag 0 を 2 本回す | `m0` が**全面ビット同一**。不成立なら**試験不能**として別の非決定源を探す (**ここで合否を判定しない**) |
+| **P1** | 両端 `wall_flag=0` の面 | `m0 == m1` ビット同一。**1 面でも違えば不合格** |
+| **P2** | 対象面のうち **カーネルがダンプした `Ps`** が両端で float32 同値の面、および両端が壁の面 | `m0 == m1` ビット同一。**母集団を `res_0.h5` の `P` で代理してはいけない** (1 ulp ずれる。§6.2 の経緯) |
+| **P3** | 対象面 $S$ (`wall_flag` ∧ $\Delta P\ne0$ ∧ $\chi_n\ne\chi$) | $\lvert\Delta_k-\Delta_t\rvert \le 2\tau_b$。かつ $\lvert\Delta_t\rvert \ge 100\tau_b$ の面で相対差 ≤ 1e-2。$S$ で `m0==m1` になってよいのは $\lvert\Delta_t\rvert < \mathrm{ulp}(m_0)$ の面だけ |
+| **P4** | flag 0・1 各々、全内部面 | $\lvert m_k - m_t\rvert \le \tau_b$。**flag 0 の非対象面で落ちたらカーネルの不合格ではなく状態不一致** (ダンプ時刻と `res_0` の書かれる位置を疑う) |
+| **P5** | ブロックサイズ | flag 1 を `FORGE_CUDA_BLOCKSIZE=256` でもう 1 本。`m1` が**全面ビット同一**。→ 面流束照合は 512 へ外挿可 (ブロックサイズが効くのは `atomicAdd` の集積順だけ) |
+
+**前提条件**: 試験 config の実効値ログで `convMethod 0`, `limiter 0`, `reconT 0`, `lowMachThornber 0`,
+`contactBlend 0`, `slauContactFloor 0`, `lowMachPrecond 0`, `sstEnergyIncludesK 0`, `model none`, 単一化学種
+を確認する (1 つでも非 0 ならツールの 1 次式と like-with-like でない)。ツールの mask には
+**`wall` と `wall_isothermal` の両方の physID** を渡す (`mesh.cpp:968` で両方が `wall_flag` に入る)。
+
+**やらないこと**: 場の差からノイズ床を作って P1 を主張する / `nStepInner 5` の末尾状態の `massflux` を
+比べる (第 2 評価以降は flag 0/1 で状態が違う) / 収束場を作るために数時間回す /
+$S$ の**全面**が変わることを要求する ($\lvert\Delta_t\rvert<\mathrm{ulp}$ の面は変わらないのが正しい)。
+
 ### V4 (任意)
 
 [[base-wake-resolution-rule]] の旧ベース形状で壁 CV の排出率が 0 になるか。
 
 ### 6.2 結果 (2026-09-23)
+
+**V5 実カーネル照合 (#10d) — P0–P5 全て PASS** (2026-09-24)。run: `case/48.flat_plate_cooled_m4/_v5/`
+(`v5_flag0_a`, `v5_flag0_b`, `v5_flag1`, `v5_flag1_bs256`。各 1 step、メッシュ `mesh/fp_y1_12um.h5`
+89440 節点・`check_mesh_quality` **VERDICT: PASS (AR≤1000, skew≤0.90)**)。
+実効設定は `forge_run.log` で確認: `convMethod 0` / `limiter 0` / `slauContactFloor 0` / `reconT 0` /
+`lowMachPrecond 0` / `model none` / `energyIncludesK 0` / 単一化学種 N2 / tracer none。
+ダンプは `[FORGE_DUMP_MASSFLUX] ... (call 1)` = **第 1 評価**。
+
+```
+faces 180007 (内部 177754, 境界半割 2253)  壁ノード 1001/89440
+P0 flag0 x2 全面ビット同一 : 不一致 0/180007                        -> PASS
+P1 非対象面 175752 面      : 不一致 0                               -> PASS
+P2 対象面かつ ΔP=0  270 面 : 不一致 0                               -> PASS
+P3 対象面 S 868 面         : max|Δk−Δt|/τ_b = 0.003 (許容 2)        -> PASS
+   |Δt|>=100τ_b の 795 面  : max 相対差 3.237e-06 (許容 1e-2)       -> PASS
+P4 flag0 全内部面          : max e/τ_b 0.014, 超過 0/177754         -> PASS
+   flag1 全内部面          : max e/τ_b 0.014, 超過 0/177754         -> PASS
+P5 blocksize 128 vs 256    : 不一致 0/180007                        -> PASS
+```
+
+**P2 は初版で FAIL した。結果を見てから閾値を緩めたのではなく、代理量の誤りを直した** (経緯を残す):
+
+1. 初版は母集団を「**`res_0.h5` の `P` が両端で float32 同値**」で代理し、273 面中 **3 面で FAIL**
+   ($\Delta_k = -6.11/-7.28/-6.98\times10^{-10}$ kg/s)。
+2. $\chi_{mass}$ が `mdot` に入る経路は `−chi_mass/c_diss·P_del` の 1 項だけ (`:578`) なので、
+   **$\Delta_k\ne0$ は「カーネル内で $P_{del}\ne0$」の十分条件**である。したがって
+   「$\Delta P=0$ なのに $\chi_n$ が効いた」という読みは論理的に成り立たず、問いは「なぜ $P_{del}\ne0$ か」に限られる
+   (2026-09-24 `diagnostician`)。実際 $\Delta_k$ は $-A\tfrac12\Delta\chi/\hat c\cdot\mathrm{ulp}(P)$ の予測に
+   **0.994 / 1.016 / 1.030** で乗った。
+3. **カーネルが読む `Ps` を同じ第 1 呼び出しでダンプして確かめた** (#10d-1)。`res_0.h5` の `P` は
+   カーネルの `Ps` と **1716/89440 節点で不一致、ずれは常にちょうど 1 ulp** (`sonic` は 409 節点、同じく 1 ulp。
+   `ro`,`Ux`,`Uy`,`Uz` は完全一致)。3 面は**ダンプでは `5037.4` vs `5037.4004` = +1.00 ulp** だった。
+   **代理が不適だった**のであってカーネルの不合格ではない。母集団を `Ps` で定義し直すと 270 面・不一致 0。
+   外れた 3 面は $S$ へ移り ($865\to868$)、P3 は同じ閾値で PASS (相対差は 1.149e-05 → **3.237e-06** に改善)。
+4. **機序をコードで特定した** (行は 2026-09-24 に確認): `dependentVariables_d.cu:291` が
+   $P=\max((\gamma-1)(\rho e-\rho\,ek),\,p_{Min})$ を作り、**直後の `:297` が
+   $\rho e = P/(\gamma-1)+\rho\,ek$ と書き戻す** (float32 の往復)。これが流束の前に **2 回**走る:
+   `main.cpp:1225` (初期化) → **`:1344` が `res_0` に $P_1$ を書く** → `:1391` (step 0 の再更新) →
+   **`:1438` の流束が読むのは $P_2$**。**配列は同じ `var.c_d["P"]` でも時点が違う**。
+   「同じ配列だから同じ値」は時点を無視した推論だった。
+5. **機序を測定でも独立に確認した**。人工状態の $\rho e = P/(\gamma-1)+\tfrac12\rho\lvert u\rvert^2$ を EOS で
+   $P$ に戻すとき、$\lvert u\rvert^2$ が節点ごとに違うので丸めが節点依存になる。壁ノードは $u=0$ で
+   $\rho e$ が厳密なので丸めが出ない — 帯内の**壁 137 節点は 0 個**、**内点 11645 節点中 741 個 (6.4 %)** がずれた。
+   帯内の **I–I 面 23068 中 2778 面 (12.0 %)** で `Ps` が不一致 (非対象面なので P1 の合否には無関係)。
+   `roe` は入力 h5 と `res_0` で 28867 節点ちがうが**最大 2 ulp** (相対 1.48e-7) で、同じ丸めの往復である。
+
+**波及**: 「`res_0.h5` を読めば like-with-like」は**未確認の前提だった**。以後、面流束をツールと突き合わせる
+ときは**ダンプした状態**をツールの入力にする (P3/P4 も今回はそうした。影響は $\tau_b$ の 0.003 で無視できるが、形を揃える)。
+
 
 **V0 単体 — 合格** (2026-09-23。codex result M3「面反転・等状態・非対象面の試験記録を追えない」を受けて
 `cad/test_diag_wall_cv_budget.py` に固定した。`python3 case/46.sern_design/cad/test_diag_wall_cv_budget.py` で `ALL PASS`):

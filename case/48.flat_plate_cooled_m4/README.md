@@ -51,3 +51,4 @@ CONTUR 平面積分 (`deltastar_integral.flat_plate_integral`)・温度–速度
 | `run_0015_wallprofile` | 同上 + `ints: {wallProfile: 1}` と `wall_profile_4.csv` ($T_w$ = 300 + 100x K) | `applyWallProfiles` が 1001 面に `Ts` をセット。**場の `VALUE/T` が壁ノードで 300+100x に一致 (最大差 0.068 K)** = bvar だけでなく場に入っている。q_compact 15.4–95.8 kW/m² | 破棄可 (コード検証) |
 | `run_0016_iface_base_rep` | run_0013 の**反復** (同一設定・同一 IC) | run-to-run ノイズ床の測定: 残差 max 相対 2.1e-1 / 場 1.8e-6。atomicAdd 由来の非決定性 (既知) | 破棄可 (コード検証) |
 
+| `run_0030_bitrep_a` / `run_0031_bitrep_b` | **1 step の場がビット再現するかの測定** ([plan](../../plans/active/convection-slau-wall-normal-chi.md) §6 V5 の前提)。同一メッシュ (`mesh/fp_y1_12um.h5`)・同一 IC・同一設定 (層流 1 次 cfl 0.2)・同一ブロックサイズ 128 で 1 step を 2 回 | **1 step でもビット再現しない**: `roUy` 3181/89440・`roUx` 3・`ro` 2 が不一致 (他は同一、NaN なし)。残差の `atomicAdd` 由来 (`convectiveFlux_slau_d.inc.cuh:638`)。**場のビット比較は 1 step でも使えない**ことの根拠 | active (測定記録) |
