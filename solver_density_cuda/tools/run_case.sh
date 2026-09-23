@@ -34,6 +34,12 @@ FORGE_EXE="${FORGE_BIN:-$ROOT/solver_density_cuda/build/forge}"
   echo "git_head    : $(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "git_dirty   : $(git -C "$ROOT" status --porcelain 2>/dev/null | wc -l) 件"
   echo "host        : $(hostname)"
+  # forge の挙動を変える環境変数を**値ごと**残す (2026-09-23)。
+  # FORGE_CUDA_BLOCKSIZE は結果に効く (case/56 で 100k あたりの減衰が 1.40 % vs 1.88 %) のに
+  # どこにも記録されず、後から run_0020/run_0021 を突き合わせたときに揃っているか確認できなかった。
+  for v in FORGE_CUDA_BLOCKSIZE FORGE_KERNEL_SYNC FORGE_NODE_FX_HALF FORGE_AXIS_DIAG_ALPHA FORGE_RESID_SNAP FORGE_BIN; do
+    if [ -n "${!v-}" ]; then echo "env         : $v=${!v}"; fi
+  done
 } > RUN_PROVENANCE.txt
 
 # FORGE_BIN で別ビルドの forge を指定できる (A/B 回帰で旧バイナリを回す用途。既定は build/forge)
