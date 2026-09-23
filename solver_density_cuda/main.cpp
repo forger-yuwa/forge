@@ -80,6 +80,7 @@
 #include "probe/point_probes.cuh"
 #include "cuda_forge/setDT_d.cuh"
 #include "cuda_forge/periodicNode_d.cuh"
+#include "cuda_forge/qAccumulator.hpp"
 
 #include <cuda_runtime.h>
 
@@ -1250,6 +1251,9 @@ cudaConfig initializeSimulation(
     periodicGradientGather_d_wrapper(cfg , cuda_cfg , msh , var);
     axisymmetricGeomTerms_d_wrapper(cfg , cuda_cfg , msh , var);
     updateVariablesOuter(cfg , cuda_cfg , msh , var , mat_ns);
+    // FP64 正本の初期化は **updateVariablesOuter の後**に置く (§5.1 S1a)。
+    // ここより前 (周期ミラー :1221・初期ピン) に置くと、それらの初期射影が Qacc に入らない。
+    var.initQAccumulatorFromQ(msh.nCells);
     speciesUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // roY{s}N/M ベースライン
     condensationUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // 液相モーメント N/M ベースライン
     tracerUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // トレーサ N/M ベースライン
@@ -1804,6 +1808,17 @@ void advanceImplicitSteady(StepContext& s)
     s.profiler.measureWall(ProfileSection::UpdateOuter, [&]() {
         updateVariablesOuter(s.cfg , s.cuda_cfg , s.msh , s.var , s.mat_ns);
     });
+    // FP64 影アキュムレータの**計器**: reconcile が採用したセル数 (§4.4)。
+    // 「上書き型の writer に書き換えられた保存量の数」であり、run ごとに**期待値を事前登録して
+    // 突き合わせる** (case/56 なら等温壁ノード数、case/09 や case/44 なら 0)。
+    // 期待を超える = 棚卸しできていない writer がいる、という意味なので計器として出す。
+    if (s.cfg.qAccumulatorFP64 == 1 && s.var.qaccAdopt_d != nullptr
+        && s.iStep % s.cfg.monitorInterval == 0) {
+        const int nAdopt = qaccReadAdoptCounter(s.var.qaccAdopt_d);
+        printf("[qAccumulatorFP64] step %d: reconcile 採用 %d (= 上書き型 writer が触った保存量の数)\n",
+               s.iStep + 1, nAdopt);
+        qaccResetAdoptCounter(s.var.qaccAdopt_d);
+    }
     s.profiler.measureWall(ProfileSection::WriteOutputs, [&]() {
         writeStepOutputs(s.cfg , s.cuda_cfg , s.msh , s.var , s.pprobes , s.iStep+1);
     });
@@ -2128,21 +2143,31 @@ int main(void) {
     // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.4)。
     // **非対応の経路で明示 ON されたら黙って劣化させず拒否する** (累積が消える経路があるため)。
     if (cfg.qAccumulatorFP64 == 1) {
+        // **v1a の対応範囲** (§5.1 S1a)。どれも原理的な制限ではなく「まだ Qacc を扱っていない」だけで、
+        // S1b-①〜④ で順に外す。**黙って劣化させるくらいなら拒否する** (codex plan M5)。
         const char* why = nullptr;
-        if (cfg.timeIntegration != 11)  why = "timeIntegration=11 (定常陰解法) 以外は未対応";
-        else if (cfg.unsteady != 0)     why = "unsteady/dual-time は未対応 (QaccN/QaccNN の shift が要る)";
-        // node 軸対称: axisymmetricSource_d.cu が roN を直接書くため累積が消える
+        if (cfg.timeIntegration != 11)
+            why = "v1a は timeIntegration=11 のみ (陽解法 tI 1/4 は S1b-④、tI 3 は凸結合なので Qacc_N/Qacc_M が要る)";
+        else if (cfg.unsteady != 0)
+            why = "v1a は unsteady=0 のみ (dual-time は QaccN/QaccNN の shift が要る。陽解法 unsteady は S1b-④)";
         else if (cfg.isAxisymmetric != 0 && cfg.discretization == "node")
-            why = "node 軸対称は未対応 (axisymmetricSource が roN を直接書く)";
-        // sstEnergyIncludesK: ransTransport が毎 step 全 SST セルの roe を書き、全域で累積が消える
+            // enforceAxisSymmetry は commit の**基準** roeN/roUyN を射影する (axisymmetricSource_d.cu:312-323)。
+            // Qacc は Q_N を読まないので、その射影を Qacc に当てるまでは対応できない。
+            why = "node 軸対称は S1b-① 待ち (軸ピンが commit の基準 roeN/roUyN を射影するため)";
         else if (cfg.sstEnergyIncludesK != 0)
-            why = "sstEnergyIncludesK=1 は未対応 (毎 step 全 SST セルの roe が書き換わり累積が消える)";
+            // ransTransport_d.cu:175 は roe への**増分**なので、Qacc にも同じ増分を当てる必要がある。
+            why = "sstEnergyIncludesK=1 は S1b-② 待ち (roe への増分を Qacc にも当てる必要がある)";
+        else if (msh.nPeriodicMembers > 0)
+            // periodicNode_d.cu:119 は FP32 値だけを root→member に配るので、member の Qacc の
+            // 下位ビットが root と食い違ったまま残る (値が一致すると reconcile も発火しない)。
+            why = "node 周期は S1b-③ 待ち (root→member ミラーが FP32 値だけを配るため)";
         if (why != nullptr) {
             fprintf(stderr, "[qAccumulatorFP64] 拒否: %s\n", why);
-            fprintf(stderr, "[qAccumulatorFP64] 対応: timeIntegration=11 && unsteady=0、block/scalar DPLUR、"
-                            "CPG/TP 単相、node/cell、平面\n");
+            fprintf(stderr, "[qAccumulatorFP64] v1a の対応: timeIntegration=11 && unsteady=0、block/scalar DPLUR、"
+                            "軸対称なし、周期なし、sstEnergyIncludesK=0\n");
             exit(1);
         }
+        var.allocQAccumulator(msh.nCells);
         printf("[qAccumulatorFP64] 有効: 保存量 5 本の正本を FP64 に置く (内点 %ld CV)\n", (long)msh.nCells);
     }
 
