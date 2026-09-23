@@ -2125,6 +2125,27 @@ int main(void) {
             var.output_cellValNames.push_back(n);
         printf("[FORGE_RESID_SNAP] subiter-0 residual/dq snapshots added to h5 outputs\n");
     }
+    // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.4)。
+    // **非対応の経路で明示 ON されたら黙って劣化させず拒否する** (累積が消える経路があるため)。
+    if (cfg.qAccumulatorFP64 == 1) {
+        const char* why = nullptr;
+        if (cfg.timeIntegration != 11)  why = "timeIntegration=11 (定常陰解法) 以外は未対応";
+        else if (cfg.unsteady != 0)     why = "unsteady/dual-time は未対応 (QaccN/QaccNN の shift が要る)";
+        // node 軸対称: axisymmetricSource_d.cu が roN を直接書くため累積が消える
+        else if (cfg.isAxisymmetric != 0 && cfg.discretization == "node")
+            why = "node 軸対称は未対応 (axisymmetricSource が roN を直接書く)";
+        // sstEnergyIncludesK: ransTransport が毎 step 全 SST セルの roe を書き、全域で累積が消える
+        else if (cfg.sstEnergyIncludesK != 0)
+            why = "sstEnergyIncludesK=1 は未対応 (毎 step 全 SST セルの roe が書き換わり累積が消える)";
+        if (why != nullptr) {
+            fprintf(stderr, "[qAccumulatorFP64] 拒否: %s\n", why);
+            fprintf(stderr, "[qAccumulatorFP64] 対応: timeIntegration=11 && unsteady=0、block/scalar DPLUR、"
+                            "CPG/TP 単相、node/cell、平面\n");
+            exit(1);
+        }
+        printf("[qAccumulatorFP64] 有効: 保存量 5 本の正本を FP64 に置く (内点 %ld CV)\n", (long)msh.nCells);
+    }
+
     // line-implicit (plans/active/time_integration-line-implicit.md): 壁法線ラインを構築。
     // blockDPLUR==1 専用・完全前処理 (lowMachPrecond>=2) とは併用不可。
     if (cfg.lineImplicit == 1) {

@@ -336,6 +336,11 @@ void solverConfig::read(std::string fname)
         this->implicitRelax = getOptionalValidatedValue<double>(deltaT, "implicitRelax", 1.0, "time.deltaT");
         this->updateGuardAlpha = getOptionalValidatedValue<flow_float>(deltaT, "updateGuardAlpha", 0.0, "time.deltaT");
         this->lineImplicit = getOptionalValidatedValue<int>(deltaT, "lineImplicit", 0, "time.deltaT");
+        // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md)。
+        this->qAccumulatorFP64 = getOptionalValidatedValue<int>(deltaT, "qAccumulatorFP64", 0, "time.deltaT");
+        if (this->qAccumulatorFP64 != 0 && this->qAccumulatorFP64 != 1) {
+            throw std::runtime_error("Key 'qAccumulatorFP64' in 'time.deltaT' must be 0 or 1.");
+        }
         this->blockDPLURDiagCache = getOptionalValidatedValue<int>(deltaT, "blockDPLURDiagCache", 0, "time.deltaT");
         this->blockDPLURDqPack = getOptionalValidatedValue<int>(deltaT, "blockDPLURDqPack", 0, "time.deltaT");
         // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md):

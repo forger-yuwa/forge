@@ -93,6 +93,12 @@ public:
     // blockDPLUR==1 専用・lowMachPrecond>=2 とは併用不可 (config 検証で拒否)。
     // plans/active/time_integration-line-implicit.md
     int lineImplicit = 0;
+    // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.3)。
+    // 1: Q (ro..roe) の正本を内点 CV だけの FP64 配列に置き、commit を Qacc += dq (FP64) で行う。
+    //    Q 自体は float32 のまま全カーネルが読む。step 末尾の reconcile で、FP32 の別 writer が
+    //    書き換えたセルだけ Qacc を追従させる。**残余ゼロなら OFF とビット同一**。
+    // 既定 0: 対応経路 (timeIntegration 11 && unsteady 0) 以外は起動時に拒否する。
+    int qAccumulatorFP64 = 0;
     // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md)。lineImplicit==1 専用。
     int lineKFreeze = 0;              // 1: dual-time サブ反復間で K/diag/LU を凍結 (subiter 0 のみ構築)
     int lineViscCoupling = 0;         // 1: line 面にスカラー粘性結合 K+=α·I (対角 2α→α)
