@@ -28,6 +28,9 @@ ap = argparse.ArgumentParser()
 ap.add_argument("src", help="継続元の res_*.h5")
 ap.add_argument("dst", help="forge 入力 h5 (mesh.h5 等)。/VALUE を上書きする")
 ap.add_argument("--dry-run", action="store_true", help="書かずに何が起きるかだけ出す")
+ap.add_argument("--keep-src-dtype", action="store_true",
+                help="DST のデータセットを SRC の型で作り直す (倍精度 res → 倍精度 seed)。"
+                     "**FP64 ビルドは倍精度の入力をそのまま読める** ので、倍精度の場を種にするときはこれを使う")
 a = ap.parse_args()
 
 with h5py.File(a.src, "r") as s, h5py.File(a.dst, "r" if a.dry_run else "r+") as d:
@@ -58,7 +61,12 @@ with h5py.File(a.src, "r") as s, h5py.File(a.dst, "r" if a.dry_run else "r+") as
         if val.shape != dv[name].shape:
             sys.exit(f"{name}: 形が違う (SRC {val.shape} != DST {dv[name].shape})")
         if not a.dry_run:
-            dv[name][...] = val.astype(dv[name].dtype, copy=False)
+            if a.keep_src_dtype and dv[name].dtype != val.dtype:
+                # DST のデータセットを SRC の型で作り直す (縮小丸めを起こさない)。
+                del dv[name]
+                dv.create_dataset(name, data=val)
+            else:
+                dv[name][...] = val.astype(dv[name].dtype, copy=False)
         moved.append(name)
 
     print(f"移した保存量  : {moved}")
@@ -71,10 +79,13 @@ with h5py.File(a.src, "r") as s, h5py.File(a.dst, "r" if a.dry_run else "r+") as
         sys.exit(0)
 
     # --- 検査: 写した量が SRC とビット一致すること ---
-    # **例外は「SRC の方が広い型」のとき** (倍精度 run の res_*.h5 → float32 の入力 h5)。
-    # forge の入力 h5 は float32 なので、倍精度の場を種にするときは丸めが必ず入る
-    # (run_0020_double 自身も float32 の種から出発している)。この場合はビット一致を求めず、
-    # **丸めで失われた大きさを報告**して続行する。
+    # **SRC の方が広い型のとき** (倍精度 run の res_*.h5 → float32 の入力 h5) は縮小丸めが入る。
+    # ~~「forge の入力 h5 は float32 なので不可避」~~ **誤り** (2026-09-24, codex result M3):
+    # 読込先は `std::vector<geom_float>` (`variables.cpp:730-736`) で **FP64 ビルドでは double**、
+    # HDF5 にも制約は無い。**倍精度の場を種にするときは `--keep-src-dtype` を使うこと**。
+    # これを怠って倍精度の参照場を float32 に丸めたまま測り、参照残差を汚染した事故がある
+    # (`run_0027_s6_f64_from20`: `ro` 65193/65194 CV が変化、深部 max abs `roe` 1.168e-4)。
+    # 指定しなかった場合はビット一致を求めず、**丸めで失われた大きさを報告**して続行する。
     bad, narrowed = [], []
     for n in moved:
         a = np.asarray(sv[n]); b = np.asarray(dv[n])
@@ -88,8 +99,8 @@ with h5py.File(a.src, "r") as s, h5py.File(a.dst, "r" if a.dry_run else "r+") as
     if bad:
         sys.exit(f"検査 NG: 写したのに SRC と一致しない: {bad}")
     if narrowed:
-        print(f"型の縮小 ({sv[moved[0]].dtype} -> {dv[moved[0]].dtype}) で丸めが入った "
-              f"(入力 h5 が float32 のため不可避):")
+        print(f"⚠ 型の縮小 ({sv[moved[0]].dtype} -> {dv[moved[0]].dtype}) で丸めが入った。"
+              f"**倍精度の場を種にするなら --keep-src-dtype を使うこと**:")
         for n, rel in narrowed:
             print(f"    {n:<10} 相対 {rel:.3e}")
     print(f"VERDICT: OK ({len(moved)} 量を移した"
