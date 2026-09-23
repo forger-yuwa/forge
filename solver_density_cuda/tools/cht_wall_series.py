@@ -37,7 +37,10 @@ def main():
     ap.add_argument("run_dir")
     ap.add_argument("--phys-id", type=int, required=True)
     ap.add_argument("--phys-name", default="wall")
-    ap.add_argument("--flux", default="q_compact", choices=["q_compact", "q_recon", "q_2nd"])
+    # **連成が使う量は `q_eff` (積分済みは `iface_Qf_eff`)**。既定を `q_compact` のままにすると、
+    # 準定常判定が連成とは別の熱流束を見ることになる (3 巡目 M4: C3X で 42247 vs 43472 W/m)。
+    ap.add_argument("--flux", default="q_eff",
+                    choices=["q_eff", "q_compact", "q_recon", "q_2nd"])
     ap.add_argument("--Rtot", type=float, default=None, help="固体の全抵抗 [m2K/W] (与えると固体側と比較する)")
     ap.add_argument("--Tb", type=float, default=300.0)
     ap.add_argument("--x", type=float, default=None, help="この x に最も近い節点の壁温を列に出す")
@@ -55,7 +58,7 @@ def main():
     files.sort()
 
     out = a.out or os.path.join(a.run_dir, "wall_series.csv")
-    cols = ["step", "Tw_mean", "Tw_min", "Tw_max", "q_total"]
+    cols = ["step", "Tw_mean", "Tw_min", "Tw_max", "q_total", "Qf_eff_total"]
     if a.x is not None:
         cols.insert(4, "Tw_at_x")
     if a.Rtot is not None:
@@ -82,6 +85,10 @@ def main():
              "Tw_mean": float(np.sum(Tw * w) / np.sum(w)),
              "Tw_min": float(Tw.min()), "Tw_max": float(Tw.max()),
              "q_total": float(np.sum(q * w))}
+        # **連成が実際に渡している積分済み荷重**も別列で出す (3 巡目 M4)。
+        # `q_total` は面積重みを掛け直した量なので角で食い違う。どちらを判定したかを明示できるようにする。
+        if "iface_Qf_eff" in vals:
+            r["Qf_eff_total"] = float(np.sum(np.array(vals["iface_Qf_eff"], float)))
         if a.x is not None:
             i = int(np.argmin(np.abs(coords[:, 0] - a.x)))
             r["Tw_at_x"] = float(Tw[i])

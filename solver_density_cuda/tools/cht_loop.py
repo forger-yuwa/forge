@@ -316,7 +316,10 @@ def main():
         q = np.asarray(vals[key], float)                 # [W/m2] 固体向き正
         q_sem = None
         # **積分済み荷重** (ソルバが出す `iface_Qf_eff`)。あればこちらを正本にする。
-        Qdirect = np.asarray(vals["iface_Qf_eff"], float) if "iface_Qf_eff" in vals else None
+        # **`--flux q_eff` のときだけ**正本にする (3 巡目 M3: 無条件に使うと `--flux q_compact` を
+        # 指定した A/B でも q_eff の荷重が渡り、履歴には指定した名前が残って食い違う)。
+        Qdirect = (np.asarray(vals["iface_Qf_eff"], float)
+                   if (a.flux == "q_eff" and "iface_Qf_eff" in vals) else None)
         Qd_sem = None
         if a.flux_avg >= 2:
             dumps = last_wall_dumps(itd, a.phys_name, a.phys_id, a.flux_avg)

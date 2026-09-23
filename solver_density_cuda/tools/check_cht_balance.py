@@ -143,20 +143,48 @@ def main():
     sum_Qf = float(np.sum(Qf[np.isfinite(Qf)]))
     sum_absQf = float(np.sum(np.abs(Qf[np.isfinite(Qf)])))
 
-    # 固体側: 最後に forge へ課した壁温から、孔 Robin が持ち去る熱
-    prof = sorted(glob.glob(str(src / f"wall_profile_{a.phys_id}.csv")))
-    if not prof:
-        sys.exit(f"{src}: wall_profile_{a.phys_id}.csv が無い")
-    d = np.loadtxt(prof[-1], skiprows=1)
-    Tw_file = d[:, 3]
-    # 壁プロファイルは固体界面節点の順 (cht_loop が op.coords で書いている)
-    Tw = Tw_file if len(Tw_file) == op.n else Tw_file[perm]
-    # `recover_interior` は `assemble` が張る Schur の中間量を使うので、必ず先に組む
-    Tw = np.asarray(Tw, float)
-    op.assemble(Tw); op.recover_interior(Tw)
-    op.assemble(Tw)                      # 局所 k_s(T) で組み直してから最終復元
-    u = op.recover_interior(Tw)
-    K, parts = op.parts(T_ref=float(np.mean(Tw)),
+    # 固体側: 孔 Robin が持ち去る熱。
+    # **ソルバ内連成では保存された固体状態 `conjugate_state_<physID>.h5` を使う** (3 巡目 M2)。
+    # 初期入力の `wall_profile_*.csv` から復元すると、**比較相手が最新の流体荷重でなく初期条件**になる
+    # (実測: C3X で 43430.6 W/m vs 保存状態からの 43473.5 W/m)。
+    state = src / f"conjugate_state_{a.phys_id}.h5"
+    solid_src = "conjugate_state"
+    if state.exists():
+        with h5py.File(state, "r") as fs:
+            u = np.asarray(fs["SOLID/T"][:], float)
+            st_sha = fs.attrs.get("content_sha1", "")
+            st_step = int(fs.attrs.get("step", -1))
+        if len(u) != op.N:
+            sys.exit(f"{state}: SOLID/T が {len(u)} 点 (固体は {op.N} 点)")
+        # **並べ替えを戻す**。`SOLID/T` は固体 h5 の RCM 並べ替え後の順、`op` は npz の元の順。
+        # ここを取り違えると孔の持ち去りが 66740 W/m (正 43473) のように桁違いに出る。
+        solid_h5 = src / "solid.h5"
+        if not solid_h5.exists():
+            sys.exit(f"{src}: solid.h5 が無い (conjugate_state の並べ替えを戻せない)")
+        with h5py.File(solid_h5, "r") as fh:
+            perm_h5 = np.asarray(fh["MESH/PERM"][:], int)     # new[i] = old index
+            mesh_sha = fh.attrs.get("content_sha1", "")
+        if st_sha and mesh_sha and mesh_sha != st_sha:
+            sys.exit(f"{state} の content_sha1 が {solid_h5} と違う (別の固体の状態)")
+        u_old = np.empty_like(u)
+        u_old[perm_h5] = u
+        u = u_old
+        op.assemble(u[op.iface])             # parts() が使う中間量を張る
+        solid_src = f"conjugate_state (step {st_step})"
+    else:
+        prof = sorted(glob.glob(str(src / f"wall_profile_{a.phys_id}.csv")))
+        if not prof:
+            sys.exit(f"{src}: wall_profile_{a.phys_id}.csv も conjugate_state も無い")
+        d = np.loadtxt(prof[-1], skiprows=1)
+        Tw_file = d[:, 3]
+        # 壁プロファイルは固体界面節点の順 (cht_loop が op.coords で書いている)
+        Tw = np.asarray(Tw_file if len(Tw_file) == op.n else Tw_file[perm], float)
+        # `recover_interior` は `assemble` が張る Schur の中間量を使うので、必ず先に組む
+        op.assemble(Tw); op.recover_interior(Tw)
+        op.assemble(Tw)                      # 局所 k_s(T) で組み直してから最終復元
+        u = op.recover_interior(Tw)
+        solid_src = "wall_profile (外部ループ想定)"
+    K, parts = op.parts(T_ref=float(np.mean(u[op.iface])),
                         groups=[[(int(e[0]), int(e[1])) for e in np.load(spec["mesh_npz"])[k]]
                                 for k in sorted([k for k in np.load(spec["mesh_npz"]).files
                                                  if k.startswith("hole")],
@@ -172,7 +200,9 @@ def main():
     rel = eps / denom
     ok = (rel <= a.tol_rel) and (eps <= tol_abs) and (n_nan == 0)
 
-    print(f"=== G-cons: {run.name}  ({dump.name}, flux={key}) ===")
+    print(f"=== G-cons: {run.name}  ({dump.name}, flux={key}"
+          f"{', 積分済み荷重' if Qdirect is not None else ''}) ===")
+    print(f"  固体状態の出所      : {solid_src}")
     print(f"  流体側  sum Q_f     = {sum_Qf:14.4f} W/m   (sum |Q_f| = {sum_absQf:.4f})")
     print(f"  固体側  Q_solid     = {Q_solid:14.4f} W/m   (孔 Robin の持ち去り)")
     print(f"  不釣合い eps        = {eps:14.4f} W/m")

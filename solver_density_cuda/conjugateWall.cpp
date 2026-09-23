@@ -504,6 +504,9 @@ void initSolidFem2d(const solverConfig& cfg, const mesh& msh, const bcond& bc)
                 exit(EXIT_FAILURE);
             }
             st.u = u0;
+            // **累積 step は平均バッファと独立に復元する** (3 巡目 M1: `flux_avg=1` では
+            // バッファ分岐に入らず位相が戻らなかった)。
+            if (f.hasAttribute("step")) f.getAttribute("step").read(st.stepOffset);
             int savedAvg = 1;
             if (f.hasAttribute("flux_avg")) f.getAttribute("flux_avg").read(savedAvg);
             if (f.exist("SOLID/QBUF") && savedAvg == std::max(1, cfg.conjugateFluxAvg)) {
@@ -515,15 +518,17 @@ void initSolidFem2d(const solverConfig& cfg, const mesh& msh, const bcond& bc)
                 if (f.hasAttribute("q_filled")) f.getAttribute("q_filled").read(qf);
                 if (f.hasAttribute("n_update")) f.getAttribute("n_update").read(nu);
                 st.qPos = (size_t)qp; st.qFilled = (size_t)qf; st.nUpdate = nu;
-                if (f.hasAttribute("step")) f.getAttribute("step").read(st.stepOffset);
                 std::cout << "[conjugateWall] physID " << bc.physID << ": " << stateFile
                           << " から再開 (平均バッファ " << qf << "/" << savedAvg
                           << ", 更新 " << nu << " 回目から)" << std::endl;
             } else {
+                const int nowAvg = std::max(1, cfg.conjugateFluxAvg);
                 std::cout << "[conjugateWall] physID " << bc.physID << ": " << stateFile
-                          << " から固体温度のみ復元 (flux_avg が保存時 " << savedAvg
-                          << " / 今回 " << std::max(1, cfg.conjugateFluxAvg)
-                          << " で違うのでバッファは捨てる)" << std::endl;
+                          << " から固体温度と更新位相を復元 (step " << st.stepOffset << ")";
+                if (nowAvg <= 1) std::cout << " — 平均バッファは無し (flux_avg=1)";
+                else std::cout << " — 平均バッファは捨てる (保存時 " << savedAvg
+                               << " / 今回 " << nowAvg << ")";
+                std::cout << std::endl;
             }
         } catch (const std::exception& e) {
             std::cerr << "[conjugateWall] ERROR: " << stateFile << " を読めない: " << e.what() << "\n";
@@ -846,13 +851,14 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
 void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, int iStep)
 {
     if (!conjugateActive(cfg, msh)) return;
-    if (iStep < cfg.conjugateWarmup) return;
     // **再開しても更新位相を保つ** (codex result 2 巡目 M3)。再開後の `iStep` は 0 から数え直すので、
     // 保存時の累積 step を足してから位相を取らないと、interval の倍数でない位置から再開したときに
     // 更新のタイミングがずれる。
     int stepOffset = 0;
     for (const auto& kv : solidStates()) stepOffset = std::max(stepOffset, kv.second.stepOffset);
-    if ((iStep + stepOffset - cfg.conjugateWarmup) % cfg.conjugateInterval != 0) return;
+    const int stepAbs = iStep + stepOffset;          // 累積 step (再開をまたいで連続)
+    if (stepAbs < cfg.conjugateWarmup) return;       // **暖機も累積で数える** (再開で繰り返さない)
+    if ((stepAbs - cfg.conjugateWarmup) % cfg.conjugateInterval != 0) return;
 
     const std::vector<flow_float> T        = pullField(cfg, var, "T",         msh.nCells);
     const std::vector<flow_float> thermCond= pullField(cfg, var, "thermCond", msh.nCells);
@@ -990,7 +996,10 @@ void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
         // 別ファイルになるので、流体の出力間隔で間引かないと run が数万ファイル・10 GB 級になる
         // (2026-09-23 に 19751 ファイル/13 GB を作った)。
         // 最終 step は必ず保存する (流体の最終場と固体チェックポイントの時刻を揃えるため。2 巡目 M3)
-        const bool lastStep = (cfg.nStepOuter > 0) && (iStep == cfg.nStepOuter - 1);
+        // `writeStepOutputs` には **`iStep+1` (= 完了した step 数)** が渡る (main.cpp:1808)。
+        // `nStepOuter-1` で判定していたため固体だけ 1 step 早く保存され、流体 `res_19975.h5` に対し
+        // 固体が `res_solid_5_19974.h5` になっていた (codex result 3 巡目 M1)。
+        const bool lastStep = (cfg.nStepOuter > 0) && (iStep == cfg.nStepOuter);
         const bool outStep = lastStep
                           || ((cfg.outStepInterval > 0)
                               && (iStep % cfg.outStepInterval == 0) && (iStep >= cfg.outStepStart));
