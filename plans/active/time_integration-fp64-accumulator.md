@@ -149,7 +149,7 @@ dual-time (`update_d.cu:407`, `implicitCorrection_d.cu:53`)・軸対称 (`axisym
 
 ### 4.4 切替の既定と後方互換
 
-- `time.qAccumulatorFP64` (0/1、**初期版は既定 0**)。
+- **`time.deltaT.qAccumulatorFP64`** (0/1、**既定 0**)。**`time.` 直下ではない** — `solverConfig.cpp:340` は `deltaT` ノードから読む。`time:` 直下に書くと**黙って既定 0 のまま**になる (codex result M6 で指摘されるまで plan がそう案内していた)。
 
 > **訂正 (codex plan M5)**: 初稿は「OFF が静かに収束しない状態だから既定 1」と書いたが、
 > **対応経路を検証する前に既定を変えてはいけない**。`Q` 配列は陽解法・dual-time でも共有され、
@@ -246,13 +246,13 @@ tI=1/4 は合わせて 63 run (2 %) しかない。v1 で「陽解法対応」�
 
 影アキュムレータは **40 B/CV** (FP64 5 本、内点のみ)。65k CV で +2.6 MB、**1000 万 CV の 3D で +400 MB**。
 (初稿の「+200 MB」は `Q` の型を変える案 A の数字で、本設計では倍になる。)
-GPU メモリが逼迫する規模では `qAccumulatorFP64: 0` で従来に戻せる (§4.4)。
+GPU メモリが逼迫する規模では `time.deltaT.qAccumulatorFP64: 0` で従来に戻せる (§4.4)。
 
 ## 5. 実装ステップ
 
 1. `methods/time_integration/implementation.md` の現在仕様を更新する (**済**: 「commit の丸め」節)。
 2. 本計画を書き、**codex の plan 段レビュー**を受ける (**次**)。
-3. `time.qAccumulatorFP64` を `solverConfig` に追加し、起動ログに出す。
+3. **`time.deltaT.qAccumulatorFP64`** を `solverConfig` に追加し、起動ログに出す。
 4. `Q` 5 本の device 確保を倍精度にし、commit カーネル 2 本 (`applyBlockImplicitCorrection_d` /
    `applyScalarImplicitCorrection_d`) を倍精度で書く。読み出し側は float32 へ落とす。
 5. §6 の検証を回す。

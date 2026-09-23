@@ -37,29 +37,37 @@ flow_float outputTimeValue(const solverConfig& cfg, int iStep)
 //   h0 (全エンタルピー) は level>=1 で合成出力 (Ht [+k]) し、属性 h0_includes_k を付ける。
 static std::list<std::string> effectiveOutputNames(const solverConfig& cfg, const variables& var)
 {
-    if (cfg.outputLevel >= 2) return var.output_cellValNames;
-    std::vector<std::string> base = {"ro","roUx","roUy","roUz","roe","roK","roOmega"};
-    for (const auto& n : var.speciesVarNames) base.push_back(n);            // roY{s}
-    for (const auto& n : var.condMomentConsNames) base.push_back(n);        // 凝縮モーメント保存量
-    if (var.tracerRegistered != 0) base.push_back("roXi");                  // 受動トレーサ保存量 (restart 用)
-    if (var.transitionRegistered != 0) { base.push_back("roGamma"); base.push_back("roReth"); }   // 遷移モデル保存量 (restart 用)
-    if (cfg.outputLevel >= 1) {
-        if (var.tracerRegistered != 0) base.push_back("Xi");
-        if (var.transitionRegistered != 0) { for (const char* n : {"gammaTr","reTheta","gammaEff"}) base.push_back(n); }
-        for (const char* n : {"P","T","Ux","Uy","Uz","k","omega","sonic","vis_lam","vis_turb","wall_dist"}) base.push_back(n);
-        for (const auto& n : var.speciesVarNames) base.push_back(n.substr(2));   // Y{s}
-        for (const auto& n : var.condMomentConsNames) base.push_back(n.substr(2));
+    // level 2 は output_cellValNames 全部、level 0/1 は基本集合。
+    // **extraFields はどの level でも効く** (2026-09-24, codex result m1): 以前は level>=2 で
+    // 即 return していたため、下の「確保済み変数を出力する」処理へ到達せず、`level: 2` の run では
+    // `res_ro` などを指定しても黙って出なかった。
+    std::vector<std::string> base;
+    if (cfg.outputLevel >= 2) {
+        for (const auto& n : var.output_cellValNames) base.push_back(n);
+    } else {
+        for (const char* n : {"ro","roUx","roUy","roUz","roe","roK","roOmega"}) base.push_back(n);
+        for (const auto& n : var.speciesVarNames) base.push_back(n);            // roY{s}
+        for (const auto& n : var.condMomentConsNames) base.push_back(n);        // 凝縮モーメント保存量
+        if (var.tracerRegistered != 0) base.push_back("roXi");                  // 受動トレーサ保存量 (restart 用)
+        if (var.transitionRegistered != 0) { base.push_back("roGamma"); base.push_back("roReth"); }   // 遷移モデル保存量 (restart 用)
+        if (cfg.outputLevel >= 1) {
+            if (var.tracerRegistered != 0) base.push_back("Xi");
+            if (var.transitionRegistered != 0) { for (const char* n : {"gammaTr","reTheta","gammaEff"}) base.push_back(n); }
+            for (const char* n : {"P","T","Ux","Uy","Uz","k","omega","sonic","vis_lam","vis_turb","wall_dist"}) base.push_back(n);
+            for (const auto& n : var.speciesVarNames) base.push_back(n.substr(2));   // Y{s}
+            for (const auto& n : var.condMomentConsNames) base.push_back(n.substr(2));
+        }
     }
     for (const auto& n : cfg.outputExtraFields) base.push_back(n);
+
     std::list<std::string> out;
     for (const auto& n : var.output_cellValNames) {
         if (std::find(base.begin(), base.end(), n) != base.end()) out.push_back(n);
     }
     // **extraFields は確保済みの cell 変数なら何でも出せる** (2026-09-24)。
     // 以前は `output_cellValNames` に入っているものしか受け付けず、`res_ro` のように
-    // `cellValNames` には在って出力候補に入っていない診断量を**指定しても黙って無視**していた
-    // (警告は出るが出力は増えない)。丸めの内訳を場で測るのに残差そのものが要る (plan
-    // time_integration-fp64-accumulator §5.1 S6 / #15)。
+    // `cellValNames` には在って出力候補に入っていない診断量を**指定しても黙って無視**していた。
+    // 丸めの内訳を場で測るのに残差そのものが要る (plan time_integration-fp64-accumulator §5.1 S6)。
     for (const auto& n : cfg.outputExtraFields) {
         if (std::find(out.begin(), out.end(), n) != out.end()) continue;
         if (std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), n) != var.output_cellValNames.end()) continue;
