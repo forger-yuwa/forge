@@ -268,7 +268,7 @@ GPU メモリが逼迫する規模では `qAccumulatorFP64: 0` で従来に戻�
 | 13 | O | ~~書き込み側の棚卸し~~ **済・結論は訂正** | §4.3 の撤回 2。定常経路では `dependentVariables` の書き戻しは commit に上書きされ**状態に残らない**。`periodicNode` も名前依存の grep で漏れていた writer がある (`periodicBroadcastFromRoot_d`) |
 | 11 | O | ~~`mdot_decay.py` に区間分離~~ **済** | 膝検出で減衰区間と床を分離 |
 | **S0** | O | ~~**G0 の単体テスト**~~ **PASS (2026-09-23)** | `solver_density_cuda/cuda_forge/qAccumulator_d.cuh` (commit/reconcile の device 関数) と `tests/unit/test_qacc_commit.cu`。`nvcc --expt-relaxed-constexpr -I. -o test_qacc_commit tests/unit/test_qacc_commit.cu` で単体ビルドできる。<br>**(a)** `Qacc-Q0` = 2.9700e-08 = $N\,dq$ (相対差 **0.00e+00**)、ミラーは **16 ULP** 動いた / **(c)** OFF 経路は **0.0000e+00** (現行の症状を再現) / **(b)** 壁ピンは**ピンから 0.478 ULP しか離れない**・採用 25/100 step / **(d)** 残余ゼロの 1 step は 20 万サンプルで **ON/OFF がビット一致** (差 0 件)。**VERDICT: PASS**<br>⚠ 初回は 3 件 FAIL したが**いずれもテストの期待値の誤り**だった: (c) の −7.93e-11 は `(float32)RO0` と `RO0` の**表現差**を累積と取り違えたもの、(b) の「毎 step 採用」は誤りで、**残余が ½ ULP を超えたときだけ reconcile が発火する** (理論値 ~32 回) のが正しい挙動 = 「ピンから離れられない」という性質そのもの |
-| **S1a** | O | **最小配線 (case/56 用)** | block/scalar 両 commit に FP64 分岐 + `Q=(float)Qacc`、**reconcile を `updateVariablesOuter_d` に融合** (同カーネルは `nCells_all` ループなので `ic<nCells` ガードが要る)、`qaccInitFromQ` の**呼出を追加** (現状 `variables.cpp` に実装だけあって `main.cpp` から呼ばれていない。置き場は init の `updateVariablesOuter` = `main.cpp:1252` の**後**。`:1221` の周期ミラー・初期ピンより前に初期化すると初期射影が失われる)、採用セル数カウンタ。<br>**拒否リスト**: `tI==11 && unsteady==0 && !(node && isAxisymmetric) && sstEnergyIncludesK==0 && nPeriodicMembers==0`。<br>**合格**: G1 = OFF が現 HEAD と `res_*.h5` 一致 (200 step) / ON 1 step と OFF 1 step がビット一致 / **採用カウンタ = 等温壁ノード数** (両数をログ) |
+| **S1a** | O | **最小配線 (case/56 用)** | block/scalar 両 commit に FP64 分岐 + `Q=(float)Qacc`、**reconcile を `updateVariablesOuter_d` に融合** (同カーネルは `nCells_all` ループなので `ic<nCells` ガードが要る)、`qaccInitFromQ` の**呼出を追加** (現状 `variables.cpp` に実装だけあって `main.cpp` から呼ばれていない。置き場は init の `updateVariablesOuter` = `main.cpp:1252` の**後**。`:1221` の周期ミラー・初期ピンより前に初期化すると初期射影が失われる)、採用セル数カウンタ。<br>**拒否リスト**: `tI==11 && unsteady==0 && !(node && isAxisymmetric) && sstEnergyIncludesK==0 && nPeriodicMembers==0`。<br>**合格** (2026-09-23 に書き直し、§6.1 G1 と §6.1a):<br>(1) 1 step で「導入前バイナリ / 導入後 OFF / 導入後 ON」の三者が互いにノイズ床の中。<br>(2) **採用カウンタ = #{等温壁ノード: `roe(res_1)` $\ne$ `roe(res_0)`}** の**厳密一致**。<br>&nbsp;&nbsp;等号が成り立つ理由: 等温壁ノードはエネルギー行が単位行化され `rhs[4]=0` (`timeIntegration_d.cu:1055-1060`) なので **`dq_roe \equiv 0`**。壁ノードの `Qacc_roe` は**蓄積せず**、発火条件は「今回のピン値 $\ne$ 前回のピン値」に帰着する。ピン (`nodeWallDirichlet_d.cu:164-174`) の入力で動くのは $\rho$ だけ。<br>&nbsp;&nbsp;**等号形にすることで、上界では拾えない「棚卸し漏れの writer」も同時に検出できる** (上界だけだと 845 未満で紛れ込むと見えない)。<br>&nbsp;&nbsp;⚠ ~~「FP64 残余が育って `(float)Qacc` がピンから 1 ULP ずれる」~~ **この case では起きない** (`dq_roe≡0` のため)。S0 (b) は「`dq≠0` のセルに一定値を書き続ける writer」の試験で**機構が違う**。<br>&nbsp;&nbsp;上界は **unique 845** (`plate` 342 + `gap` 505 = 847 は角 2 ノードの重複込み)。<br>(3) ON が NaN 無しで完走 |
 | **S1a-fix** | O | ~~**確保と初期化の順序**~~ **済 (2026-09-23)** | G1 初回 (`run_0023_g1_on`) が **step 4 で `ro` に NaN** を出し、1 step でも `ro` の最大相対差 1.018・`P` 1.000 (= 新しい値がほぼ 0) になった。**真因は設計でなく配線**: `initQAccumulatorFromQ` は `initializeSimulation` の中 (`main.cpp:1256`)、`allocQAccumulator` は `main()` の中 (`:2170`) に置いており、`initializeSimulation` の呼出が `:2122` なので**初期化が確保より先に走って黙って no-op** になっていた。`Qacc=0` のまま commit され `ro=(float)(0+dq)≈0`。<br>**処置**: (1) 確保と初期化を `updateVariablesOuter` の直後に**隣接**させる (`main.cpp:1256`)、(2) `main()` 側は確保済みかを**検査するだけ**にする、(3) `initQAccumulatorFromQ` は未確保で呼ばれたら**黙って return せず落とす** (`variables.cpp`)。<br>**教訓**: 黙った no-op が順序の誤りを隠した。判定ツールの「判定不能は合格ではない」と同じ形 |
 | **S3** | F | **#12 の判別 A/B — S1a の直後に回す** | `run_0022_qacc_f32`。下記 §5.2 の事前登録条件。**この結果が S1b の優先を決める** |
 | **S1b-①** | O | 軸の**基準射影**を `Qacc` に | `enforceAxisSymmetry_d` に `Qacc` 5 本を渡し、axis セルで `if(Qacc_ro>0) Qacc_roe -= 0.5·Qacc_roUy²/Qacc_ro; Qacc_roUy = 0; roeN=(float)Qacc_roe; roUyN=0;` (読んでから零化、既存と同順)。`Q` 側の FP32 射影は「残差評価用の暫定書換え」として現状維持。<br>⚠ `applyBlockImplicitCorrection_d:253` にも axis 分岐があるが、**wrapper が `nullptr` を渡すので現状 inert** (`update_d.cu:283`、発散したため暫定無効)。有効化するなら同時に `Qacc_roUy=0` が要る。<br>**合格**: codex の反例 (ρ=1, ρu_r=0.125, ρe=2, dq=0 → `Q` と `Qacc` の**両方**で ρu_r=0, ρe=1.9921875。現 G0 の「commit 後ピン」順序では 0.125 が残る) を単体試験に追加して PASS; G3 `case/44` で採用カウンタ 0 |
@@ -336,13 +336,42 @@ A/B の合格条件は上記 (1 桁) で登録し、G2 は 300k 以上で判定�
 
 | ゲート | 内容 | 合格条件 (**事前登録**) |
 | --- | --- | --- |
-| **G1** | 後方互換 | `qAccumulatorFP64: 0` で既存 run の `res_*.h5` が**数値配列として一致**。<br>**ON/OFF の差は必ずノイズ床と並べて測る** (2026-09-23 追加): 同一設定の OFF を 2 本回して OFF-vs-OFF の差を取り、ON-vs-OFF がそれを**超えたデータセットだけ**を差とみなす。片側だけでは「7 桁目の違い」が実差かノイズか決まらない ([[noise-floor-both-sides]] と同趣旨)。<br>**「ビット不変」とは書かない** — 成立するのは*同じ FP32 入力に対する同じ演算*までで、蓄積で状態が変われば流束もリミッタも変わる (M6) |
+| **G1** | 後方互換 | **判定は 1 step で行う。200 step では判定しない** (2026-09-23 に事前登録を差し替え。下の「§6.1a なぜ 200 step で判定しないか」)。<br>① **3 者が互いにノイズ床の中**: (a) 同一バイナリ 2 本 = 床、(b) **アキュムレータ導入前バイナリ** vs 導入後 OFF、(c) OFF vs ON。(b)(c) が (a) と同オーダー・差セル数も同程度であること。**片側 1 対では 1.3 倍を分解できないので「超えていない」と書かず「区別できない」と書く**。<br>② **採用カウンタが等号で合う** (下記)。<br>③ ON が所定 step まで NaN 無しで完走する。<br>**「ビット不変」とは書かない** — 成立するのは*同じ FP32 入力に対する同じ演算*までで、蓄積で状態が変われば流束もリミッタも変わる (M6) |
 | **G2-L** | **主検証・本計画の合否** (`case/56` の**深部局所量**) | **減衰区間と末尾区間を分けて**判定する。**300k step 以上で判定** (e 折り 3.23e4 なら 3 桁に $\ge$2.3e5 step 要る。100k の A/B とは別物)。<br>① **減衰区間**: $\lvert\dot m\rvert$ の e 折りが 3.23e4 step の **×2 以内** (100k で $\ge$10 倍、300k で $\ge$3 e 折り)<br>② `zW844` / `zW1411` / `U_rms_deep` が `check_quasisteady` で **`STEADY` または `OSCILLATING`** (`run_0014` は `DRIFTING`/`TRANSIENT`)。`OSCILLATING` は平均±振幅で報告<br>③ 深部 $q_w$ は「**到達最小レベル ± 振れ幅**」で報告する (単一の最小値を床と呼ばない → §6.2)<br>④ SU2 比較も**両者の判定つき**で行う |
 | **G2-G** | **対象外・期待は「不変」** (全保存量の残差) | **本計画の合否に使わない。** §3 のとおりプラトーは FP32/FP64 で 4〜5 桁一致 = 丸めと無関係。<br>期待: `check_convergence` は `NOT CONVERGED (plateau)` のまま、**末尾平均が §3 の表の ±20 % 以内かつ min/max $\ge$ 0.8** (有界振動が保たれている)。<br>**×2 以上動いたら「発見」として別項目 (#15) に切る** — 合否ではなく観測として扱う |
 | **G3** | 標準検証ケース | **`case/08.bump` は使わない** (`procedures/verification/README.md:23` が「まだ回帰の基準には使えない」と明記)。代わりに **node の SST = `case/36`・`case/48`**、**軸対称 TP・凝縮 = `case/44`**、**共有の周期経路 = `case/09`**。量ごとの許容値を**事前に**登録する。**scalar / block の両 commit** を試験対象にする |
 | **G4** | restart 一貫性 | **連続実行と中断再開が一致**すること (FP64 checkpoint が無いと下位ビットを失う → §4.3 #2) |
 | **G5** | 速度 | 1 step のコスト増が **+3 % 以内を実測**。<br>⚠ 初稿の「+0.1 %」は FLOP モデルで**誤り** (codex M7)。65k CV で 1.63 ms/step = **25 ns/CV は launch+sync 律速**で、別カーネルを足すと +1〜3 %。→ **commit と `updateVariablesOuter` に融合し新規 launch を増やさない**ことを設計要件にする |
 | **G6** | メモリ | 増分が設計どおり (正本の置き方が決まってから数える) |
+
+### 6.1a なぜ G1 を 200 step で判定しないか (2026-09-23、事前登録の差し替え)
+
+当初 G1 に「200 step で OFF が導入前と一致 (床の 3 倍以内 = $\le$6e-5)」と事前登録したが、
+**この閾値はコードでなくカオス増幅を測っていた**。実測 (`case/56`, 200 step, `res_200.h5`):
+
+| 比較 | `ro` maxabs/scale | `P` | `roe` | 差セル数 |
+| --- | --- | --- | --- | --- |
+| (i) 同コード・別ビルド床 (`run_0023_g1_off` vs `run_0024_g1_off`) | 1.93e-05 | 1.91e-05 | 1.78e-05 | ~4.0e4 / 65194 |
+| (ii) **導入前バイナリ** (`48ee9e56`) vs 導入後 OFF (`run_0025_g1_preacc` vs `run_0024_g1_off`) | **3.19e-04** | **5.68e-04** | **1.22e-04** | ~4.0e4 |
+| (iii) OFF vs ON (`run_0024_g1_off` vs `_on`) | 1.38e-03 | 1.42e-03 | 1.40e-03 | — |
+
+**(ii) はアキュムレータを一切含まない組なのに閾値 1e-4 を外す**。同じ 1 step を見ると:
+
+| 比較 | `ro` maxabs | 差セル数 |
+| --- | --- | --- |
+| (A) 同一バイナリ 2 本 = ノイズ床 (`run_0024_g1_off1` vs `_off1b`) | 1.4901e-08 | 5188 |
+| (ii-1) 導入前 vs 導入後 OFF (`run_0025_g1_preacc1` vs `run_0024_g1_off1`) | 1.8626e-08 | 4922 |
+| (B) OFF vs ON (`run_0024_g1_off1` vs `_on1`) | 1.6764e-08 | 5259 |
+
+**三者が同オーダー・同じ差セル数**。この場は 1 step で既に 5188/65194 CV が run 間で食い違う
+(node 残差組立の `atomicAdd` 非決定性) ので、200 step ではカオス増幅が支配し**比較の分解能が無い**。
+
+- したがって **G1 は 1 step で判定する**。
+- **200 step の ON/OFF 差 (iii) を「蓄積が効いている表れ」と書かない** (2026-09-23 撤回)。
+  アキュムレータ無しの (ii) が同じ桁を出す以上、(iii) からは何も言えない。
+  蓄積の効果は **S3 の A/B (§5.2) で判定する**のであって、G1 の差の大きさからは言えない。
+- **原始量 (`T`,`Ux`,`sonic` 等) は 1 step 比較の指標に使えない**: `ro` が違っても全ビット一致する
+  (commit 前の評価値が出力されるため)。**保存量だけで比べる**。
 
 ### 6.2 `run_0020_double` は「参照値」でなく「上界の参考」
 
