@@ -373,6 +373,7 @@ struct SolidState {
     std::vector<double> qIface;        // 直近の界面荷重 [W/m] (出力用。平均後の値)
     std::vector<double> uFact;         // 分解を作ったときの温度 (再分解の判定用)
     double dTgrowStart = -1.0;         // dTw が増え始めたときの値 (累積増幅の判定用)
+    int    stepOffset = 0;             // 再開時の累積 step (更新位相を保つ)
     std::vector<double> dfFact;        // **そのとき使った D_f** (再利用中は右辺もこれで組む)
     bool hasFact = false;
     long nFact = 0, nUpdate = 0;       // 分解した回数 / 更新回数 (コストの記録)
@@ -473,11 +474,25 @@ void initSolidFem2d(const solverConfig& cfg, const mesh& msh, const bcond& bc)
     if (std::ifstream(stateFile).good()) {
         try {
             HighFive::File f(stateFile, HighFive::File::ReadOnly);
+            // **中身全体のハッシュで照合する** (codex result 2 巡目 M3)。界面座標だけでは
+            // 内部節点の順序・接続・物性・冷却条件の違いを検出できない (内部 2 節点の入れ替えで
+            // 保存温度の対応が 214 K ずれた)。
             std::string sha;
-            if (f.hasAttribute("iface_sha1")) f.getAttribute("iface_sha1").read(sha);
-            if (!sha.empty() && !st.mesh.ifaceSha1.empty() && sha != st.mesh.ifaceSha1) {
-                std::cerr << "[conjugateWall] ERROR: " << stateFile << " の iface_sha1 (" << sha
-                          << ") が固体メッシュ (" << st.mesh.ifaceSha1 << ") と違う。"
+            if (f.hasAttribute("content_sha1")) f.getAttribute("content_sha1").read(sha);
+            if (sha.empty()) {
+                std::cerr << "[conjugateWall] ERROR: " << stateFile
+                          << " に content_sha1 が無い (古い状態ファイル)。固体の同一性を確認できないので"
+                             "再開しない。tools/solid_mesh_to_h5.py で作り直すこと。\n";
+                exit(EXIT_FAILURE);
+            }
+            if (st.mesh.contentSha1.empty()) {
+                std::cerr << "[conjugateWall] ERROR: 固体 h5 に content_sha1 が無い "
+                             "(古い変換器で作った)。tools/solid_mesh_to_h5.py で作り直すこと。\n";
+                exit(EXIT_FAILURE);
+            }
+            if (sha != st.mesh.contentSha1) {
+                std::cerr << "[conjugateWall] ERROR: " << stateFile << " の content_sha1 (" << sha
+                          << ") が固体メッシュ (" << st.mesh.contentSha1 << ") と違う。"
                              "別の固体の状態から再開しようとしている。\n";
                 exit(EXIT_FAILURE);
             }
@@ -500,6 +515,7 @@ void initSolidFem2d(const solverConfig& cfg, const mesh& msh, const bcond& bc)
                 if (f.hasAttribute("q_filled")) f.getAttribute("q_filled").read(qf);
                 if (f.hasAttribute("n_update")) f.getAttribute("n_update").read(nu);
                 st.qPos = (size_t)qp; st.qFilled = (size_t)qf; st.nUpdate = nu;
+                if (f.hasAttribute("step")) f.getAttribute("step").read(st.stepOffset);
                 std::cout << "[conjugateWall] physID " << bc.physID << ": " << stateFile
                           << " から再開 (平均バッファ " << qf << "/" << savedAvg
                           << ", 更新 " << nu << " 回目から)" << std::endl;
@@ -659,7 +675,7 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
             Qf[i] = Q;
             const double keff0 = (double)thermCond[ic] + (double)cp[ic]*(double)visTurb[ic]/cfg.turbulentPrandtl;
             Df[i]  = keff0 / fi.d1[ib] * st.lumped[i] * cfg.conjugateDfScale;
-            Twk[i] = (double)Ts[ib];
+            Twk[i] = st.u[st.mesh.ifaceNodes[i]];   // **double の固体状態**を使う (float の Ts を混ぜない)
             continue;
         }
         if (qeff) {
@@ -678,7 +694,7 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
         const double keff = (double)thermCond[ic] + (double)cp[ic]*(double)visTurb[ic]/cfg.turbulentPrandtl;
         Qf[i]  = q * st.lumped[i];                                    // [W/m]
         Df[i]  = keff / fi.d1[ib] * st.lumped[i] * cfg.conjugateDfScale;
-        Twk[i] = (double)Ts[ib];
+        Twk[i] = st.u[st.mesh.ifaceNodes[i]];   // 同上
     }
 
     // ---- 流束の時間平均 (plan §5.1 #70 / §6 V4b(g)) ----
@@ -703,10 +719,12 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
     std::vector<double> rhs = st.fem->rhs();
     for (int i = 0; i < ni; i++) rhs[st.mesh.ifaceNodes[i]] += Qf[i] + Df[i] * Twk[i];
 
-    // ---- G-if と更新の素材: **更新前 (未緩和)** の残差 ----
-    // $r = (K+D_f)u^k - (b + Q_f + D_fT_w^k)$。界面では $u^k_{\rm iface}=T_w^k$ に揃えてあるので
-    // $D_f$ の項は厳密に相殺し、$r = (K(u^k)u^k - b) - E^{\mathsf T}Q_f$ に一致する
-    // (= **$D_f$ に依らない**)。平均を使っているときは平均後の $Q_f$ で測る。
+    // ---- G-if と更新の素材: **更新前 (未緩和) の物理残差** ----
+    // $r = K(u^k)u^k - b - E^{\mathsf T}Q_f$ を**直接**組む。
+    // 「$D_f$ の項が相殺する」に頼らない (codex result 2 巡目 M1): 相殺は界面温度を
+    // 同じ精度で持っているときだけ成り立ち、float の `Ts` を混ぜると $D_f(Eu-T_s)$ が残る。
+    // $D_f=10^5$ 級では量子化で止まった状態 (物理的不釣合い 99.9998 %) が PASS になりうる。
+    // ここでは組んだ $A=K+E^{\mathsf T}D_fE$ から界面対角の $D_f u$ を**引いて** $Ku$ に戻す。
     const std::vector<double> Au = st.fem->matvec(st.u);
     double resAbs = 0.0, resMax = 0.0, qfMax = 0.0, qTotal = 0.0, resSolid = 0.0;
     {
@@ -714,14 +732,15 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
         for (int i = 0; i < ni; i++) isIface[st.mesh.ifaceNodes[i]] = 1;
         for (int i = 0; i < ni; i++) {
             const int nd = st.mesh.ifaceNodes[i];
-            const double r = Au[nd] - rhs[nd];
+            // $ (Au)_{nd} - D_{f,i}u_{nd} - b_{nd} - Q_{f,i} $ = 物理残差 (D_f を含まない)
+            const double r = Au[nd] - Df[i] * st.u[nd] - st.fem->rhs()[nd] - Qf[i];
             resMax = std::max(resMax, std::fabs(r));
             if (st.lumped[i] > 0.0) resAbs = std::max(resAbs, std::fabs(r) / st.lumped[i]);
             qfMax  = std::max(qfMax, std::fabs(Qf[i]));
             qTotal += Qf[i];
         }
         for (int i = 0; i < st.mesh.nNodes; i++)
-            if (!isIface[i]) resSolid = std::max(resSolid, std::fabs(Au[i] - rhs[i]));
+            if (!isIface[i]) resSolid = std::max(resSolid, std::fabs(Au[i] - st.fem->rhs()[i]));
     }
 
     // ---- 更新は**残差補正形**で解く (codex result 2026-09-23 M1) ----
@@ -786,7 +805,7 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
     // **増加区間の始点からの累積増幅**で見る (codex result 2026-09-23 M6)。
     // 「直前比 2 倍」だけだと、毎回 1.1 倍 (10 更新で 2.59 倍) の発散を見逃す。
     if (st.dTprev >= 0.0 && dTmax > st.dTprev) {
-        if (st.nGrow == 0) st.dTgrowStart = st.dTprev;
+        if (st.nGrow == 0) st.dTgrowStart = st.dTprev;   // 0 でもよい (上で許容と max を取る)
         st.nGrow++;
     } else {
         st.nGrow = 0;
@@ -795,10 +814,13 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, bcond& bc,
     // **収束域では発散判定しない**。更新量が登録した許容 (`gate.dT_K`) 以下なら、ノイズで 2 倍に
     // なっても発散ではない (2026-09-23: `dTw` 0.0025 -> 0.005 K = 許容 1e-2 K の半分で誤爆した)。
     const double dtFloor = (cfg.conjugateGateSet == 1) ? cfg.conjugateGateDtK : 1.0e-2;
-    if (dTmax > dtFloor && st.nGrow >= 10 && st.dTgrowStart > 0.0 && dTmax > 2.0 * st.dTgrowStart) {
+    // 増幅の基準は **max(増加区間の始点, 登録許容)**。始点が 0 だと `> 0` 条件で永久に成立せず、
+    // 0 -> 0.001 -> 1.1 倍… と 81 更新で 2.05 K/更新まで育っても止まらなかった (2 巡目 M5)。
+    const double growBase = std::max(st.dTgrowStart, dtFloor);
+    if (dTmax > dtFloor && st.nGrow >= 10 && dTmax > 2.0 * growBase) {
         std::cerr << "[conjugateWall] ERROR: step " << iStep << " physID " << bc.physID
-                  << ": max|dTw| が " << st.nGrow << " 更新連続で増え、増加区間の始点から "
-                  << (dTmax / st.dTgrowStart) << " 倍になった (" << st.dTgrowStart << " -> "
+                  << ": max|dTw| が " << st.nGrow << " 更新連続で増え、基準 (増加区間の始点と許容の大きい方) から "
+                  << (dTmax / growBase) << " 倍になった (" << growBase << " -> "
                   << dTmax << " K)。連成が発散している。\n";
         exit(EXIT_FAILURE);
     }
@@ -825,7 +847,12 @@ void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, in
 {
     if (!conjugateActive(cfg, msh)) return;
     if (iStep < cfg.conjugateWarmup) return;
-    if ((iStep - cfg.conjugateWarmup) % cfg.conjugateInterval != 0) return;
+    // **再開しても更新位相を保つ** (codex result 2 巡目 M3)。再開後の `iStep` は 0 から数え直すので、
+    // 保存時の累積 step を足してから位相を取らないと、interval の倍数でない位置から再開したときに
+    // 更新のタイミングがずれる。
+    int stepOffset = 0;
+    for (const auto& kv : solidStates()) stepOffset = std::max(stepOffset, kv.second.stepOffset);
+    if ((iStep + stepOffset - cfg.conjugateWarmup) % cfg.conjugateInterval != 0) return;
 
     const std::vector<flow_float> T        = pullField(cfg, var, "T",         msh.nCells);
     const std::vector<flow_float> thermCond= pullField(cfg, var, "thermCond", msh.nCells);
@@ -962,8 +989,11 @@ void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
         // **本関数は毎 step 呼ばれる** (壁温 CSV は上書きなので無害だった)。固体場は step ごとに
         // 別ファイルになるので、流体の出力間隔で間引かないと run が数万ファイル・10 GB 級になる
         // (2026-09-23 に 19751 ファイル/13 GB を作った)。
-        const bool outStep = (cfg.outStepInterval > 0)
-                          && (iStep % cfg.outStepInterval == 0) && (iStep >= cfg.outStepStart);
+        // 最終 step は必ず保存する (流体の最終場と固体チェックポイントの時刻を揃えるため。2 巡目 M3)
+        const bool lastStep = (cfg.nStepOuter > 0) && (iStep == cfg.nStepOuter - 1);
+        const bool outStep = lastStep
+                          || ((cfg.outStepInterval > 0)
+                              && (iStep % cfg.outStepInterval == 0) && (iStep >= cfg.outStepStart));
 
         if (cfg.conjugateMode == "fem2d" && outStep) {
             const auto it = solidStates().find(bc.physID);
@@ -984,8 +1014,9 @@ void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
                         std::vector<std::vector<double>> buf(st.qBuf.begin(), st.qBuf.end());
                         f.createDataSet("SOLID/QBUF", buf);
                     }
-                    f.createAttribute("step", iStep);
+                    f.createAttribute("step", iStep + st.stepOffset);
                     f.createAttribute("iface_sha1", st.mesh.ifaceSha1);
+                    f.createAttribute("content_sha1", st.mesh.contentSha1);
                     f.createAttribute("q_pos", (int)st.qPos);
                     f.createAttribute("q_filled", (int)st.qFilled);
                     f.createAttribute("n_update", (int)st.nUpdate);

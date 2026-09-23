@@ -42,6 +42,7 @@ struct SolidMesh {
     std::vector<double> robinH, robinTc;
     std::vector<double> kT, kV;        // k_s(T) のテーブル (1 点なら定数)
     std::string ifaceSha1;
+    std::string contentSha1;   // 中身全体 (節点順・接続・物性・冷却条件) のハッシュ
     std::string sourceNpz;
 
     static SolidMesh read(const std::string& path);   // 読めなければ exit(1)

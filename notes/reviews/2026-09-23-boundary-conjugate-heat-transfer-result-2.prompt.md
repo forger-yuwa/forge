@@ -1,3 +1,43 @@
+forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
+SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
+リポジトリに対する**外部レビュー**を依頼する。忖度なしで、主張はコードと実測 (run の数値) で検証すること。
+結論が「この計画/結果は誤り」でも構わない。両論併記で逃げず、推奨は 1 つに絞ること。
+
+ルール:
+- **ファイルを変更しない** (read-only サンドボックスで動いている。読む・実行して確認するのは可)。
+- 出力は日本語。識別子・ファイル名は原語のまま。
+- 指摘は **Critical / Major / Minor** の重大度付きで、必ず根拠 (`ファイル:行` または `run_*` の数値) と対案をセットで書く。
+- リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
+  用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
+- 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
+  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+
+## 依頼: 検証結果レビュー (stage = result)
+
+対象の plan は下に全文を貼る (`plans/active/boundary-conjugate-heat-transfer.md`)。実装と検証が終わり、`status: done` にして `plans/accepted/` へ移す直前の段階である。
+次を順に評価せよ。
+
+1. **実装 diff の検証**: `git diff main...HEAD -- solver_density_cuda design methods procedures` (必要なら `git log main..HEAD --oneline`)
+   を自分で取り、plan §4 の設計方針どおりに実装されているか、符号・単位・境界 (node の境界半割面、周期 seam、軸)・
+   float32 桁落ち・ゼロ割ガードの絶対閾値などの誤りがないかを見る。
+2. **検証結果の裏付け**: plan の §6 / 変更ログに書かれた数値・主張 (収束、一致、改善率) を、挙げられている `run_*`
+   ディレクトリの `CONVERGENCE_VERDICT.txt` / `residual_history.csv` / `README.md` の run 一覧で確認する。
+   主張と実測が食い違う箇所、VERDICT が NOT CONVERGED / DRIFTING のまま「一致」と書いている箇所を挙げよ。
+3. **回帰**: 既存機能 (既定値、他ケース) を壊していないか。既定挙動が変わった場合にそれが plan に明記されているか。
+4. **文書整合**: `methods/<area>/` の現在仕様、`procedures/` の手順、`methods/index.md`、`plans/README.md` が
+   実装と一致しているか。
+5. **残作業表**: 未解決事項が §5.1 の残作業表に残っているか (対話で決めて書いていない、が無いか)。
+
+最後に「accepted に移してよいか」を **GO / GO-with-changes / NO-GO** の 1 語で判定し、
+GO-with-changes なら移す前に直すべき点を優先順で列挙すること。
+
+## 重点
+
+1 巡目 (notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result.md) の Major 7 + Minor 2 への対処が正しいかを最優先で見る。特に (1) 残差補正形 delta = -A_old^{-1} r による更新が固定点を現在物性で保存しているか、(2) 積分済み荷重 iface_Qf_eff の受け渡しが角で保存するか、(3) G-if の内部残差必須化と 2N 待機、(4) 再開経路の同値 (run_0152/run_0153 で差 0.0084 K)、(5) 安全停止の誤爆対策が発散を見逃さないか。再判定は run_0151_fixed_avg42 (C3X) と run_0035_fixed_avg42 (Mark II)
+
+## plan 全文 (`plans/active/boundary-conjugate-heat-transfer.md`)
+
+```markdown
 # 共役熱伝達 (CHT) の導入方針 — 保存的な界面契約と段階連成
 
 ## メタ
@@ -311,7 +351,7 @@ forge の時間進行で、C3X 12.4 万 step / Mark II 45.6 万 step かかる�
 - **安全装置は自動調整でなく停止**: 非有限 / $T_w\notin[\min T_c-20,\ \max T_{t,\rm gas}+20]$ K /
   `dTw_max` が 10 更新連続で増加かつ 2 倍以上 → 停止して報告する。手動再投入用に `conjugate.Df_scale` (既定 1) だけ置く
   ($D_f$ は増やす方向にだけ動かす。§4.2)。
-- **$Q_f$ は流体側の積分済み荷重 `iface_Qf_eff` をそのまま渡す** (2026-09-23 訂正、codex result M3)。~~固体側の集中辺長 × `iface_q_eff`~~ は角で +30 % 歪む。集中辺長は熱流束への換算だけに使う。
+- **$Q_f$ は固体側の集中辺長 × `iface_q_eff` で作る** (`cht_loop.py` の `q * op.area` と同じ規約)。
   **`msh.planes[ip].surfArea` を使わない**: C3X の流体メッシュは真の平面 2D ($z\equiv0$) なので辺長と一致するが、
   **押し出し疑似 2D では surfArea に奥行きが乗る**。初版は $z\equiv0$ の平面 2D 以外を**起動時に拒否**する。
 - **再開**: 固体状態 ($u$、$D_f$、step) を `conjugate_state.h5` に保存する。`stage_manifest.py` の区間キーに
@@ -510,7 +550,6 @@ Phase 2 の実測で次のいずれかが示されたとき、**別 plan** を�
 | 72 | **速度を登録値に入れる過程で 2 件 — CSV の毎 step 書き出しと、分解再利用が固定点をずらした事故** (2026-09-23) | **① `conjugate` on/off の ms/step 差 (登録 ≤5 %) を最初 +16 % で外した**。1/interval でスケールしない per-step 成分 (≈0.14 ms/step) があり、切り分けると **`writeConjugateState` が壁温 CSV (480 行) を毎 step 上書きしていた** (本関数は毎 step 呼ばれる。`local1d` の頃からある既存の無駄)。出力間隔に間引いて **+16 % → +7.1 %**。**② 残りは固体の分解 (8 ms/更新)**。§4.6a に書いてあったのに未実装だった再分解条件を実装した — **が、最初の実装は連成を壊した**: `res_rel` 1.8e-4 → **1.5e-2**、窓内の壁温の振れ **2.34 K**、G-if FAIL (`run_0149_final_avg42`)。**原因**: 分解を再利用すると**行列側の $D_f$ は古いまま右辺の $D_fT_w$ だけ新しくなり**、固定点が $K u-b-Q_f=(D_f^{new}-D_f^{old})T_w$ にずれる。**$D_f$ を分解と一緒に凍結**して解決 (`run_0150_dffrozen_avg42`: G-if PASS、**分解 4/781 回**)。**教訓**: 速度の最適化が**固定点を動かした**。コードを変えたら合格条件を取り直すこと (取り直さなければ `run_0147` の PASS をそのまま報告していた)。**最終実測**: on/off 差 **+4.2 %** (off 2.35–2.41 / on 2.44–2.51 ms/step、交互 3 対)。短い run では壁が動くので分解が増える (4000 step で 14/60)。定常では 4/781 = 0.5 % |
 | 73 | **codex result レビュー (2026-09-23) の Major 7 + Minor 2** | **全件採用**。順に直してから V4b を再判定する。**M1 分解再利用が $K_s(T)$ も凍結する**: 残差は現在の $K_s(u)$ で測るのに求解は古い分解なので、固定点が $K_s(u_{\rm fact})u=b+Q$ のまま。§4.6a の「最終出力前は必ず再分解」も未実装。実測: `run_0150` の最終場を現在物性で 組み直すと内部残差 **0.0318 W/m**、解き直すと温度が最大 **0.0368 K** 動く。→ 古い分解は**残差補正**に使い、判定前は現在物性で再分解・再求解する。**M2 G-if が固体内部残差と平均バッファの待機を検査しない**: `tol_solid` 未登録だと内部残差 (末尾 80 更新の最大 **0.0346 W/m**) が判定から外れる。合成入力で**内部残差 1e9 W/m が PASS** することを codex が再現。V4b(g) の「充填後さらに $2N$ 更新待つ」も未実装。→ `fem2d` では内部残差の許容と列を**必須**にし、欠落は `REFUSED`。平均窓長・充填数・更新番号を履歴に出し、待機期間を除いて判定する。**M3 界面荷重が保存しない**: `q_eff` は流体の `surfArea` で割り、固体へは集中辺長を掛けている。**当方で再現**: Mark II 後縁の角 `(0.064912, -0.000686)` で **L/A=1.29891**、荷重 2.076 → **2.634 W/m (+27 %)** (他の節点は 1.00000、全周積分では −0.11 %)。→ **流体側の積分済み荷重 $R^{raw}-F_w-e_wR_\rho$ をそのまま渡す**。熱流束に換算する段でだけ集中辺長を使う。角を含む保存試験を追加。**M4 再開経路が無い**: `conjugate_state` は書くだけで読まない。$D_f$・分解基準温度・42 更新の荷重履歴も保存していない。→ 保存/復元と固体ハッシュ検査、連続実行と途中再開の同値試験。**M5 準定常の単位を 100 倍間違えた**: `--drift 0.06` は **6 %**。**当方で再現**: 登録値 `0.0006` で測ると **Mark II の `Tw_max` が DRIFTING** (C3X は ALL STEADY のまま)。あわせて `cht_wall_series.py` の既定が `q_compact` で、`wall_series.csv` の熱量 42246 W/m は連成履歴の 43472 W/m と**別の量**。→ 判定をやり直し、`q_eff` を選べるようにする。**M6 安全停止が仕様どおりでない**: 温度上限 (ガス全温基準) 未実装。`dTw` の停止条件が「直前比 2 倍」なので 毎回 1.1 倍 (10 更新で 2.59 倍) を見逃す。→ 増加区間の始点からの累積増幅で判定する。**M7 区間識別に `conjugate.back` / `h_c` が無い**: `h_c: 100` と `10000` が同一キーになる (codex 確認)。**m8 docs の不整合**: `methods/boundary.md`:330 の状態欄と後段の説明が矛盾、`methods/index.md`:22 が CHT を未実装のまま、plan の status も `draft`。→ Phase 2 の承認と plan 全体の完了を分けて書く。**m9 `conjugate` の未知キー拒否が未実装**: `flux_avgg: 42` が黙って無視される (§4.6a の宣言と不一致)。→ `conjugate` と `conjugate.gate` に許可キー検査 (#52 と同じ機構) |
 | 74 | **codex の Major 7 + Minor 1 を直して V4b を再判定した** (2026-09-23) | **修正**: M3 流体側の**積分済み荷重** `iface_Qf_eff` をそのまま渡す (面積で割って辺長を掛け直さない)。M1 更新を**残差補正形** $\Delta=-A_{\rm old}^{-1}r$, $u\leftarrow u+\Delta$ にした — $r$ は現在の $K_s(u)$ で作るので**固定点は常に現在の物性**で決まり、古い分解は前処理としてしか効かない ($D_f$ の凍結も不要になった)。M2 `fem2d` では固体内部残差の列と許容を**必須**にし (欠落は `REFUSED`)、`flux_avg>1` では**充填後 $2N$ 更新を過ぎた行だけ**を判定対象にする (履歴に `n_avg`/`n_filled`/`update` を追加)。M4 `conjugate_state_<physID>.h5` から固体温度・平均バッファ・更新位相を**復元**する (界面ハッシュ不一致は起動時拒否)。M6 温度上限をガス全温 (bcond の `Tt` 最大) +20 K にし、`dTw` は**増加区間の始点からの累積増幅**で見る。M7 区間キーに `conjugate.{back,h_c,relax}` を追加。m9 `conjugate` / `conjugate.gate` の**未知キーを拒否**。**途中で自分の安全停止が誤爆した**: `dTw` 0.0025 → 0.005 K (許容 1e-2 K の半分) で停止した → **更新量が登録許容以下なら発散判定しない**を追加。**再判定 (`run_0151_fixed_avg42`, 40000 step)**: **G-if PASS** (`res_abs` 48.3 / `res_rel` 2.07e-4 / `dTw` 2.24e-3 / **`res_solid` 2.18e-4 ≤ 1e-2**)、壁温平均 **+0.198 K**・局所 **0.502 K**、G-cons PASS、**準定常は登録値 `0.0006` で ALL STEADY**。**再開同値 (`run_0152_restart_legA` + `run_0153_restart_legB`)**: 連続 40000 の 587.2953 K に対し 20000+再開 20000 が **587.3038 K (差 +0.0084 K**、局所 rms 0.0093 / 最大 0.0178 K) で、窓内のゆらぎ 7.3e-3 K と同程度。**Mark II (`run_0035_fixed_avg42`)**: 壁温平均 **+0.406 K** (soft target 1.76 K 内)、局所 rms 0.826・最大 6.438 K、**`res_solid` は PASS (1.52e-3)** だが界面は **NOT CONVERGED** (`res_rel` 2.95e-2)、`Tw_max` は **OSCILLATING (663.5 ± 0.45 K)** → 平均±振幅で報告する |
-| 75 | **codex result 2 巡目の Major 5 + Minor 1** (2026-09-23) | **全件採用・修正済み**。**M1** 残差を **$r=K(u)u-b-E^{\mathsf T}Q_f$ として直接組む** (相殺に頼らない)。右辺の $D_fT_w^k$ も **double の固体状態 $u$** を使い、float の `Ts` を混ぜない。**M2** 判定窓を動かさず、**実際の末尾 `n_consec` 更新の全行**が「充填後 2N 更新」の待機を満たすことを要求する (バッファ再初期化も追跡)。**M3** 固体 h5 に **`content_sha1`** (節点順・接続・物性・冷却条件を含む) を持たせ、再開時はこれで照合する (無ければ拒否)。累積 `step` を保存して**更新位相を保ち**、最終 step で状態を強制保存する。変換器の書き出し 2 経路を `write_solid_h5` に**一本化**した (ハッシュを片方に入れ忘れた)。**M4** `cht_loop.py` と `check_cht_balance.py` も `iface_Qf_eff` (積分済み) を使う。**M5** 増幅の基準を **max(増加区間の始点, 登録許容)** にして 0 からの増大も検知する。**再判定 (`run_0154_r2_avg42`)**: G-if **PASS** (`res_abs` 49.9 / `res_rel` 2.17e-4 / `dTw` 2.33e-3 / `res_solid` 2.31e-4)、壁温平均 **+0.206 K**・局所 **0.512 K**、G-cons **0.0958 % PASS**、準定常 **ALL STEADY** (登録値 0.0006)。**再開同値は interval の倍数でない位置で切って確認** (`run_0155_r2_legA` 20025 step + `run_0156_r2_legB` 19975 step): 連続 40000 の 587.3037 K に対し **587.3018 K (差 −0.0018 K**、局所 rms 0.0067 / 最大 0.0164 K)。**Mark II (`run_0036_r2_avg42`)**: 平均 **+0.451 K** (soft target 内)、局所 rms 0.855・最大 5.658 K、`res_solid` PASS だが界面 **NOT CONVERGED** (`res_rel` 3.2e-2)、`Tw_max` **DRIFTING** |
 | 19 | codex result レビュー | `done` にする前 |
 
 ## 6. 検証
@@ -609,7 +648,6 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
-| result (Phase 2, 2 巡目) | `2026-09-23` | [`notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result-2.md`](../../notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result-2.md) | **NO-GO**, C0/M5/m1 | **全件採用** → §5.1 #75。M1 残差が double の $u$ と float の `Ts` を混ぜており $D_f(Eu-T_s)$ が残る (4 節点の玩具問題で物理的不釣合い 99.9998 % が PASS)。M2 待機が `update>=2N` で仕様の「充填後さらに 2N」に足りず、**条件を満たす行だけ拾う実装が末尾の不良を捨てて PASS** にしていた。M3 再開の照合が界面座標だけで、内部 2 節点の入れ替え (保存温度が 214 K ずれる) を検出できない + `step` を読まず更新位相が変わる + 最終 step の強制保存が無い。M4 保存荷重の修正が `cht_loop.py` / `check_cht_balance.py` に届いておらず Phase 1 と Phase 2 が別契約 (角で +29.9 %)。M5 増加開始値が 0 だと発散検知が永久に成立しない (81 更新で 2.05 K/更新まで育っても止まらない) |
 | result (Phase 2) | `2026-09-23` | [`notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result.md`](../../notes/reviews/2026-09-23-boundary-conjugate-heat-transfer-result.md) | **NO-GO**, C0/M7/m2 | **全件採用** → §5.1 #73。2 件は当方で独立に再現した: (M5) `check_quasisteady --drift/--osc` は**割合**なので `0.06` は 6 % = 登録した 0.06 % の **100 倍緩い**。登録値 `0.0006` で測り直すと **Mark II の `Tw_max` は DRIFTING** で、「ALL STEADY」は**誤報告**だった (C3X は登録値でも ALL STEADY)。(M3) `q_eff` の分母が流体の `surfArea`、固体へ戻す係数が集中辺長で、Mark II 後縁の角 1 点だけ **L/A=1.29891** → その節点の荷重が 2.076 → **2.634 W/m (+27 %)** (全周積分では −0.11 %)。**`accepted` への移動は見送り、`active` のまま修正して V4b を再判定する** |
 | result | `2026-09-20` | [`notes/reviews/2026-09-20-boundary-conjugate-heat-transfer-result.md`](../../notes/reviews/2026-09-20-boundary-conjugate-heat-transfer-result.md) | **NO-GO**, C1/M9/m1 | **全件採用** (反例つきで再現されており、うち 4 件は自分でも独立に気づいた): C1 保存的界面熱量 $Q_f=\sum F^E-C$ 未実装 → §5.1 #30 / M2 棄却時に別状態の $T$ と $Q_f$ を混ぜる + 初回の壁温不一致 (課したのは実測分布、ドライバは一様) → #31 / M3 `Df_safety=2` は上界でない (反例 固有値 −5.67) → #32 / M4 `fem2d` 外部連成が $k_s(T)$ を局所で解いていない (2.07 K 差で converged) → #33 / M5 収束ゲートの規格化が $\max(|Q_f|,|b|)$ で不釣合い 100 % でも合格 → #34 / **M6 V5 は同定データへの再適合で独立検証でない → §4.9 と case README を格下げ、「差の主因は遷移」を仮説へ撤回** → #35 / M7 積分量の `STEADY` が局所量を保証しない (C3X 局所 $q$ 402 点中 255 点 `DRIFTING`) → #36 / M8 共有角検査が連成中の競合を防げない → #37 / M9 同一メッシュ再開が 2D 最近傍 → #38 / M10 cell の `wallProfile` が壁面重心でなく内部セル重心 → #39 / m11 docs と残作業表の同期 → #40。**`accepted` への移動は取り消し、`active` のまま保存的連成の検証を先にやる** |
 | 自由形式 (市松の 3 仮説切り分け) | `2026-09-20` | [`notes/reviews/2026-09-20-codex-c3x-checkerboard-triage.md`](../../notes/reviews/2026-09-20-codex-c3x-checkerboard-triage.md) | 判定なし (切り分け依頼)。**真因は断定できないと結論** | **採用**: (1) float32 の温度丸めは説明不足 → 棄却。(2) 低マッハ前処理は圧力 odd-even の機構で本件と整合しない。(3) 熱的壁閉包が有力だがコード比較だけでは帰属不能。**A/B 設計を採用** (3 拘束を一組で解除、`nodeWallDirichlet: 0` 単独は不可、T と q 両方で評価)。**§5.1 #43 の文言を訂正** (「壁ピンが原因と確定」→「熱的壁閉包一式の効果まで確定」)。**codex 未検討の対流スキームは当方で A/B し棄却** (ROE 0.901 % / HLLE 2.10 % vs SLAU 0.919 %) |
@@ -809,3 +847,11 @@ codex の実測: 末尾 `[99,101,101,99]` の系列は **drift を 0.04 % に締
   case/53 の**同一状態で界面熱量の定義だけ変える**と、`q_eff` 0.027 % / `q_2nd` 0.29 % が PASS、
   **`q_compact` 2.66 % と `q_recon` 2.66 % が FAIL**。**コンパクト差分で連成すると、固体が持ち去る熱を
   流体が供給していない解を通してしまう**ことを数値で示した (codex C1 の主張どおり)。
+```
+
+## 出力形式
+
+1. 冒頭に **判定 (GO / GO-with-changes / NO-GO)** と 3 行以内の要約。
+2. 指摘一覧 (Critical → Major → Minor の順、番号付き。各項目に根拠と対案)。
+3. 推奨 (1 つに絞る)。
+4. 末尾に `指摘数: Critical N / Major N / Minor N` の 1 行。

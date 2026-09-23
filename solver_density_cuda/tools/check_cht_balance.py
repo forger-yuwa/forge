@@ -86,6 +86,9 @@ def main():
     if key not in vals:
         sys.exit(f"{dump}: {key} が無い (output.interfaceDiag: 1 が要る)")
     q = np.asarray(vals[key], float)
+    # 積分済み荷重 (ソルバが出す `iface_Qf_eff`)。`--flux q_eff` のときだけ正本にする。
+    Qdirect = (np.asarray(vals["iface_Qf_eff"], float)
+               if (a.flux == "q_eff" and "iface_Qf_eff" in vals) else None)
     n_nan = int(np.sum(~np.isfinite(q)))
 
     if a.solid_mode == "local1d":
@@ -128,9 +131,15 @@ def main():
         sys.exit("--solid-mode fem2d には --solid が要る")
     spec = json.loads(Path(a.solid).read_text())
     op, perm = build_fem2d(spec, coords)
-    qs = q[perm]
-    area = op.area                              # 界面の集中長さ [m] (単位奥行き)
-    Qf = qs * area                              # [W/m]
+    # **積分済み荷重があればそれを使う** (codex result 2 巡目 M4)。面積で割って集中辺長を
+    # 掛け直すと角で +30 % 歪む。ソルバ内連成と同じ契約にする。
+    if Qdirect is not None:
+        Qf = Qdirect[perm]                      # [W/m]
+        area = op.area
+    else:
+        qs = q[perm]
+        area = op.area                          # 界面の集中長さ [m] (単位奥行き)
+        Qf = qs * area                          # [W/m]
     sum_Qf = float(np.sum(Qf[np.isfinite(Qf)]))
     sum_absQf = float(np.sum(np.abs(Qf[np.isfinite(Qf)])))
 

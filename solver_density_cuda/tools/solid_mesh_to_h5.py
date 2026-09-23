@@ -103,6 +103,15 @@ def write_solid_h5(out, nodes, tris, outer_edges, robin_e, robin_h, robin_tc,
                      ("bandwidth", bw1)):
             f.attrs[k] = int(v)
         f.attrs["iface_sha1"] = sha
+        # **中身全体のハッシュ** — 界面座標だけでは内部節点の順序・接続・物性・冷却条件を識別できない
+        # (codex result 2 巡目 M3: 内部 2 節点を入れ替えても界面ハッシュと節点数は同じで、
+        #  保存温度の対応が 214 K ずれた)。再開時はこちらを照合する。
+        h = hashlib.sha1()
+        for arr in (nodes_p, tris_p, iface, iface_xyz, outer_p, robin_p,
+                    np.asarray(robin_h, float), np.asarray(robin_tc, float),
+                    np.asarray(kT, float), np.asarray(kV, float)):
+            h.update(np.ascontiguousarray(arr).tobytes())
+        f.attrs["content_sha1"] = h.hexdigest()
         f.attrs["source_npz"] = str(source)
     return perm, bw0, bw1
 
@@ -144,64 +153,32 @@ def main():
             robin_tc.append(float(hp["T_c"]))
     robin_e = np.asarray(robin_e, int).reshape(-1, 2)
 
-    N = len(nodes)
-    bw0 = bandwidth(N, tris)
-
-    # ---- RCM 並べ替え (C++ 側はバンド Cholesky なので帯幅がそのままコストになる) ----
-    if a.no_rcm:
-        perm = np.arange(N)
-    else:
-        perm = np.asarray(reverse_cuthill_mckee(adjacency(N, tris).tocsr(), symmetric_mode=True), int)
-    inv = np.empty(N, int)
-    inv[perm] = np.arange(N)                 # old index -> new index
-
-    nodes_p = nodes[perm]
-    tris_p = inv[tris]
-    outer_p = inv[outer_edges]
-    robin_p = inv[robin_e] if len(robin_e) else robin_e
-    bw1 = bandwidth(N, tris_p)
-
-    iface = np.array(sorted(set(outer_p.ravel().tolist())), int)
-    iface_xyz = np.zeros((len(iface), 3))
-    iface_xyz[:, :2] = nodes_p[iface]
-
-    # 界面座標のハッシュ (順序に依らないよう座標で整列してから取る)。
-    key = np.round(iface_xyz[np.lexsort((iface_xyz[:, 1], iface_xyz[:, 0]))], 9)
-    sha = hashlib.sha1(key.tobytes()).hexdigest()
-
     if "k_table" in spec:
         kT = np.asarray(spec["k_table"]["T"] if isinstance(spec["k_table"], dict) else spec["k_table"][0], float)
         kV = np.asarray(spec["k_table"]["k"] if isinstance(spec["k_table"], dict) else spec["k_table"][1], float)
     else:
         kT, kV = np.array([300.0]), np.array([float(spec["k_solid"])])
 
+    # **書き出しは write_solid_h5 に一本化する** (2 経路あると必ずずれる。
+    #  実際 content_sha1 を足したとき片方に入っていなかった)。
     out = Path(a.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(out, "w") as f:
-        f.create_dataset("MESH/COORD", data=nodes_p)
-        f.create_dataset("MESH/TRIS", data=tris_p.astype(np.int32))
-        f.create_dataset("MESH/PERM", data=perm.astype(np.int32))
-        f.create_dataset("IFACE/NODES", data=iface.astype(np.int32))
-        f.create_dataset("IFACE/COORD", data=iface_xyz)
-        f.create_dataset("IFACE/EDGES", data=outer_p.astype(np.int32))
-        f.create_dataset("ROBIN/EDGES", data=robin_p.astype(np.int32))
-        f.create_dataset("ROBIN/H", data=np.asarray(robin_h, float))
-        f.create_dataset("ROBIN/TC", data=np.asarray(robin_tc, float))
-        f.create_dataset("SOLID/K_T", data=kT)
-        f.create_dataset("SOLID/K_V", data=kV)
-        for k, v in (("n_nodes", N), ("n_tris", len(tris)), ("n_iface", len(iface)),
-                     ("bandwidth", bw1)):
-            f.attrs[k] = int(v)
-        f.attrs["iface_sha1"] = sha
-        f.attrs["source_npz"] = str(npz_path)
+    perm, bw0, bw1 = write_solid_h5(out, nodes, tris, outer_edges, robin_e, robin_h, robin_tc,
+                                    kT, kV, rcm=not a.no_rcm, source=str(npz_path))
+    with h5py.File(out, "r+") as f:
         f.attrs["source_sha256"] = hashlib.sha256(npz_path.read_bytes()).hexdigest()
+        sha = f.attrs["iface_sha1"]
+        content = f.attrs["content_sha1"]
+        N = int(f.attrs["n_nodes"])
+        n_iface = int(f.attrs["n_iface"])
+        n_robin = len(f["ROBIN/H"])
 
     print(f"[solid_mesh_to_h5] {out}")
-    print(f"  nodes {N}  tris {len(tris)}  iface {len(iface)}  robin edges {len(robin_p)}")
+    print(f"  nodes {N}  tris {len(tris)}  iface {n_iface}  robin edges {n_robin}")
     print(f"  帯幅  {bw0} -> {bw1}" + ("  (RCM 無効)" if a.no_rcm else "  (RCM)"))
     print(f"  バンド Cholesky の作業量 ~ N*b^2 = {N * bw1 * bw1:.3e} flop")
     print(f"  k_s   {kV.min():.3f} .. {kV.max():.3f} W/mK  ({len(kT)} 点)")
     print(f"  iface_sha1 {sha}")
+    print(f"  content_sha1 {content}")
     print(f"  source     {npz_path}")
 
 

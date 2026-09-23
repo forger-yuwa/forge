@@ -70,6 +70,7 @@ SolidMesh SolidMesh::read(const std::string& path)
 
         if (f.hasAttribute("bandwidth")) f.getAttribute("bandwidth").read(m.bandwidth);
         if (f.hasAttribute("iface_sha1")) f.getAttribute("iface_sha1").read(m.ifaceSha1);
+        if (f.hasAttribute("content_sha1")) f.getAttribute("content_sha1").read(m.contentSha1);
         if (f.hasAttribute("source_npz")) f.getAttribute("source_npz").read(m.sourceNpz);
     } catch (const std::exception& e) {
         std::cerr << "[solidFem2d] ERROR: 固体メッシュ " << path << " を読めない: " << e.what() << "\n"

@@ -315,20 +315,35 @@ def main():
             # 初回は壁温が config の一様値なので、そのまま 1 回目の Q_f を使う
         q = np.asarray(vals[key], float)                 # [W/m2] 固体向き正
         q_sem = None
+        # **積分済み荷重** (ソルバが出す `iface_Qf_eff`)。あればこちらを正本にする。
+        Qdirect = np.asarray(vals["iface_Qf_eff"], float) if "iface_Qf_eff" in vals else None
+        Qd_sem = None
         if a.flux_avg >= 2:
             dumps = last_wall_dumps(itd, a.phys_name, a.phys_id, a.flux_avg)
             if len(dumps) < a.flux_avg:
                 sys.exit(f"[cht_loop] --flux-avg {a.flux_avg} だが壁ダンプが {len(dumps)} 枚しか無い "
                          f"({itd})。テンプレートの outStepInterval を細かくすること")
-            qs = np.array([np.asarray(read_wall_dump(d_)[2][key], float) for d_ in dumps])
+            allv = [read_wall_dump(d_)[2] for d_ in dumps]
+            qs = np.array([np.asarray(v[key], float) for v in allv])
             q = qs.mean(axis=0)
             q_sem = qs.std(axis=0, ddof=1) / np.sqrt(len(dumps))
+            if Qdirect is not None and all("iface_Qf_eff" in v for v in allv):
+                Qs = np.array([np.asarray(v["iface_Qf_eff"], float) for v in allv])
+                Qdirect = Qs.mean(axis=0)
+                Qd_sem = Qs.std(axis=0, ddof=1) / np.sqrt(len(dumps))
         if a.solid_mode == "fem2d":
             q = q[perm]                                  # 壁ダンプ順 -> 固体界面節点順
             if q_sem is not None:
                 q_sem = q_sem[perm]
-        Qf = q * op.area                                 # 節点荷重 [W] (平面 2D は W/m)
-        Qf_sigma = None if q_sem is None else q_sem * op.area
+        # **積分済み荷重があればそれを使う** (codex result 2 巡目 M4)。面積で割って集中辺長を
+        # 掛け直すと、両者が違う角で荷重が歪む (Mark II 後縁で +29.9 %)。ソルバ内連成は
+        # `iface_Qf_eff` を直接渡しており、外部ループも同じ契約に揃える。
+        if Qdirect is not None:
+            Qf = Qdirect[perm] if a.solid_mode == "fem2d" else Qdirect
+            Qf_sigma = None if Qd_sem is None else (Qd_sem[perm] if a.solid_mode == "fem2d" else Qd_sem)
+        else:
+            Qf = q * op.area                             # 節点荷重 [W] (平面 2D は W/m)
+            Qf_sigma = None if q_sem is None else q_sem * op.area
         Tw_new, info = drv.advance(Qf, tol_K=a.tol_K, tol_rel=a.tol_rel, n_consec=a.n_consec,
                                    tol_abs_W=a.tol_abs_W, tol_solid=a.tol_solid, Qf_sigma=Qf_sigma)
         wr.writerow([it, a.flux, f"{Tw.min():.6f}", f"{Tw.max():.6f}", f"{Tw.mean():.6f}",

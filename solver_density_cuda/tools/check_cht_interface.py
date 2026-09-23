@@ -105,21 +105,35 @@ def main() -> int:
         except (TypeError, ValueError):
             return math.nan
 
-    # **平均バッファが満ちてから 2N 更新待つ** (§6 V4b(g))。窓の先頭がその待機期間に入っていたら
-    # 判定しない (codex result 2026-09-23 M2: 待機を見ないと未完成の窓を PASS にできてしまう)。
+    # **判定は「実際に最後の n_consec 更新」で行う** (codex result 2 巡目 M2)。
+    # 条件を満たす行だけを拾って並べ直すと、**末尾の不良データを捨てて過去の良い窓で PASS** にできる
+    # (末尾に「バッファ再初期化・残差 1e9」を足しても PASS した)。窓は動かさず、
+    # 窓の全行が待機条件を満たしていなければ不合格にする。
     if n_avg > 1:
         if "update" not in rows[0] or "n_filled" not in rows[0]:
             return fail(run, "REFUSED",
                         ["  flux_avg > 1 なのに履歴に update / n_filled 列が無い",
                          "  (古い run。平均窓の待機を検査できないので合格にしない)"])
-        need = 2 * n_avg
-        rows_ok = [r for r in rows if int(float(r["n_filled"])) >= n_avg
-                   and int(float(r["update"])) >= need]
-        if len(rows_ok) < n_consec:
+        # バッファが満ちた (= n_filled が n_avg に達した) 直近の時点を追う。
+        # n_filled が減ったら再初期化なので、そこから数え直す。
+        fill_at, prev_filled = None, -1
+        for r in rows:
+            nf = int(float(r["n_filled"]))
+            if nf < prev_filled:            # 再初期化
+                fill_at = None
+            if fill_at is None and nf >= n_avg:
+                fill_at = int(float(r["update"]))
+            prev_filled = nf
+            r["_ready"] = (fill_at is not None
+                           and int(float(r["update"])) - fill_at >= 2 * n_avg
+                           and nf >= n_avg)
+        tail_chk = rows[-n_consec:]
+        if not all(r["_ready"] for r in tail_chk):
+            nbad = sum(1 for r in tail_chk if not r["_ready"])
             return fail(run, "NOT CONVERGED",
-                        [f"  flux_avg={n_avg}: バッファ充填後 2N={need} 更新を過ぎた行が "
-                         f"{len(rows_ok)} 行しかない (n_consec={n_consec})"])
-        rows = rows_ok
+                        [f"  flux_avg={n_avg}: 末尾 {n_consec} 更新のうち {nbad} 行が "
+                         f"「充填後 2N={2*n_avg} 更新」の待機を満たしていない",
+                         "  (窓は動かさない。条件を満たす行だけ拾うと末尾の不良を捨てて合格にできる)"])
 
     # **`fem2d` では固体内部残差を必須にする** (codex result 2026-09-23 M2)。
     # 列も許容も無いまま「検査を省略して PASS」を出さない。
