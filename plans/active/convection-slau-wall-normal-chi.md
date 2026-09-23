@@ -186,6 +186,9 @@ $$\frac{P_w}{P_i} \approx \frac{1}{1 + \dfrac{2\,V_{n,i}\,\hat c}{\chi_n\,R\,T_w
 | 4 | V0 (単体) → V2 (無害性) | §6 のとおり | O |
 | 5 | V1 (本件の検証) | case/46 接続模型。合格条件は §6 V1-a〜d | O |
 | 6 | V3 (回帰・受入) | case/48・case/16・SERN 2D 生産。**不合格なら受入保留・設計へ戻る** | O |
+| 6b | V1-d の STEADY 確認 | `run_0438` は全列 falling で通算 4.1 桁低下だが STEADY ではない。さらに伸ばして `check_quasisteady --series-csv` (ρ_153797, ρ_153880, ρ_189814, n_floor, ρ_min) が STEADY になるか。**落ちない**ことは確認済み | O |
+| 6c | V3 の case/16 | run データが AWS・手元とも残っておらずメッシュ生成から要る。V3 は case/48 と SERN 2D の 2 件で通っているので優先度は低い | O |
+| 6d | $C_L$ / $C_M$ の差の切り分け | 2D で +0.47 % / +0.35 %。判定対象外だが run 間ノイズか実効果かを反復 run の床で切り分ける。**既定化の判断前に必要** | O |
 | 7 | 周期・軸対称の小規模 node 試験 | flag 1 を周期/軸対称で使う前に必要 (§2 制限事項)。`result` 段までに実施 | O |
 | 8 | codex result レビュー | V0–V3 の VERDICT が出そろってから `--stage result` | F |
 
@@ -343,6 +346,49 @@ codex M2 が求めた「ソルバ前処理つきの再収支」は不要 ($\rho$
 まだ上昇途中であることとも整合する (壁 $\rho$ は起点 1.71e-4 → **1.67e-3 = 床の 17 倍**)。
 
 **V1-d は `run_0438_3d_junction_outflow_long` (通算 30000 step) で判定中**。
+
+#### V1-d と V3 (SERN 2D) の結果 (2026-09-23)
+
+**V1-d — `run_0438_3d_junction_outflow_long`** (`run_0437/res_6000` から継続、通算 30000 step、出口 `outflow`):
+
+```
+check_convergence.py -> NOT CONVERGED (**still converging — run more steps**)
+  rms_ro      2.65e-07 -> 1.25e-09  (2.1 dec) falling
+  rms_roUx    4.87e-04 -> 2.13e-06  (2.1 dec) falling
+  rms_roUy    1.38e-04 -> 4.12e-07  (2.2 dec) falling
+  rms_roUz    8.54e-05 -> 6.81e-07  (1.9 dec) falling
+  rms_roe     5.29e-01 -> 2.66e-03  (1.9 dec) falling
+  rms_roY0/1  1.7-2.0 dec falling
+```
+
+**全列 `falling`** で、判定理由が `stalled/plateau` (頭打ち = スキーム変更が要る) から
+**`still converging` (step を増やせ)** に変わった。通算では起点から **4.1 桁**低下
+(run_0437 の 1.3 桁 + run_0438 の 2.1 桁)。**STEADY を名乗れる状態ではない**が、
+「プラトーで止まっている」でもない。V1-d は**「さらに伸ばせば下がる」ところまで**とし、
+STEADY の確認は残作業 (§5.1) に置く。
+
+**V3 SERN 2D 生産 — PASS**。`problem_moo_frozen_tp_cycle3op.yaml` (設計点 m6_on)、
+**両方とも新既定の `outflow`** で段階起動 (暖機 → soft 4000 → mid 4000 → 本段 12000) を rc=0 で完走
+(`_v3sern/v3s_flag0`, `_v3sern/v3s_flag1`、差分は `slauWallNormalChi` のみ):
+
+| 量 | flag 0 | flag 1 | 差 | 許容 |
+| --- | --- | --- | --- | --- |
+| **$C_T$** | 0.9293864 | 0.9291175 | **−0.029 %** | ±0.1 % → **PASS** |
+| **$C_T$ (摩擦込)** | 0.8983631 | 0.8981576 | **−0.023 %** | ±0.1 % → **PASS** |
+| $C_T$ 摩擦成分 | −0.0310233 | −0.0309599 | −0.205 % | (判定対象外) |
+| $C_L$ | 0.2771498 | 0.2784627 | **+0.474 %** | (判定対象外) |
+| $C_M$ | −7.1572 | −7.1823 | **+0.350 %** | (判定対象外) |
+| `sep_frac_ramp` | 0.0 | 0.0 | 0 | — |
+
+両者の `check_convergence` は `NOT CONVERGED (stalled/plateau)` だが**これは本ケースの性格**
+(case/46 README run_0091: 「verdict は NOT CONVERGED stalled/plateau = 本ケースの性格」)。残差の水準は一致
+(`rms_ro` fin 8.82e-05 対 8.09e-05、`rms_roOmega` 1.24e+02 対 1.02e+02) で、**flag 1 の方がわずかに低い**。
+
+**$C_L$ +0.47 % / $C_M$ +0.35 % は判定対象外だが記録する**。残差がプラトーで揺れる量なので run 間ノイズの
+可能性があるが、**切り分けていない**。既定化を検討するときは反復 run で床を取ってから判断する。
+
+**副産物**: この 2 本は**出口の既定変更 (B1f) が生産レシピを壊していない**ことの実証でもある
+(段階起動 4 段を含めて rc=0、力係数が過去の生産値と同オーダー)。
 
 ### 6.1 レビュー記録 (codex)
 
