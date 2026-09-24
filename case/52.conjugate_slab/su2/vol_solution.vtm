@@ -1,0 +1,31 @@
+<VTKFile type="vtkMultiBlockDataSet" version="1.0">
+<vtkMultiBlockDataSet>
+<Block name="Zone 0 (Incomp. Fluid)">
+<Block name="Internal">
+<DataSet name="Internal" file="vol_solution/zone_0/Internal.vtu"/>
+</Block>
+<Block name="Boundary">
+<DataSet name="fluid_left" file="vol_solution/zone_0/fluid_left.vtu"/>
+<DataSet name="fluid_right" file="vol_solution/zone_0/fluid_right.vtu"/>
+<DataSet name="fluid_interface" file="vol_solution/zone_0/fluid_interface.vtu"/>
+<DataSet name="fluid_top" file="vol_solution/zone_0/fluid_top.vtu"/>
+</Block>
+</Block>
+<Block name="Zone 1 (Solid Heat)">
+<Block name="Internal">
+<DataSet name="Internal" file="vol_solution/zone_1/Internal.vtu"/>
+</Block>
+<Block name="Boundary">
+<DataSet name="solid_left" file="vol_solution/zone_1/solid_left.vtu"/>
+<DataSet name="solid_right" file="vol_solution/zone_1/solid_right.vtu"/>
+<DataSet name="solid_interface" file="vol_solution/zone_1/solid_interface.vtu"/>
+<DataSet name="solid_back" file="vol_solution/zone_1/solid_back.vtu"/>
+</Block>
+</Block>
+</vtkMultiBlockDataSet>
+<FieldData>
+<DataArray type='Float32' Name='TimeValue'>
+0
+</DataArray>
+</FieldData>
+</VTKFile>

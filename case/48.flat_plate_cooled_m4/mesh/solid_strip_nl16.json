@@ -1,0 +1,12 @@
+{
+  "_note": "case/48 の固体帯 (厚さ 0.001 m, 16 層)。背面は h=1e+08 の Robin で Dirichlet 300.0 K を近似 (1/h / (t/k_s) = 2.17e-06)",
+  "mesh_npz": "case/48.flat_plate_cooled_m4/mesh/solid_strip_nl16.npz",
+  "k_solid": 0.217,
+  "holes": [
+    {
+      "h": 100000000.0,
+      "T_c": 300.0
+    }
+  ],
+  "T_init": 500.0
+}
