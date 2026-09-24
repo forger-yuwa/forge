@@ -25,6 +25,13 @@ def main():
     ap.add_argument("--m0", required=True); ap.add_argument("--m0b", required=True)
     ap.add_argument("--m1", required=True); ap.add_argument("--m1-256", default=None)
     ap.add_argument("--wall-phys-ids", required=True)
+    ap.add_argument("--axisymmetric", action="store_true",
+                    help="tau_b の面積に r 重みを掛ける。variables.cpp:530- が sx..ss に r_face=max(pcy,r_floor) を "
+                         "掛けるので、planar の |surfVect| をそのまま使うと全面が係数 r ずれて P4 が全滅する "
+                         "(カーネルの不合格ではない)")
+    ap.add_argument("--r-floor", type=float, default=1e-20, help="axisRFloor と同じ値")
+    ap.add_argument("--periodic-phys-ids", default="",
+                    help="周期 physID をカンマ区切り。その iPlanes を全集合から明示的に除外する (nei<0 に頼らない)")
     a = ap.parse_args()
 
     with h5py.File(a.mesh) as f:
@@ -37,7 +44,22 @@ def main():
             wallf[ic[(ic >= 0) & (ic < ncv)]] = True
     own, nei, got = parse_struct(st, len(S))
     if got != len(S): raise SystemExit("PLANES/STRUCT を全面読めない")
-    nP = len(S); A = np.linalg.norm(S, axis=1)
+    nP = len(S); A_norm = np.linalg.norm(S, axis=1)     # 法線の正規化用 (planar)
+    A = A_norm.copy()                                   # 流束と tau_b の面積
+    if a.axisymmetric:                      # variables.cpp:530- と同じ r 重み
+        # **法線には掛けない**: カーネルの n = S/|S| は r が分子分母で消えて planar と同じ。
+        # ここで A_norm まで r 倍すると n が 1/r ずれ、全面で P4 が落ちる (2026-09-24 に実際に踏んだ)。
+        with h5py.File(a.mesh) as f:
+            pcy = np.asarray(f["PLANES/centCoords"], np.float64).reshape(-1, 3)[:, 1]
+        A = A_norm * np.maximum(pcy, a.r_floor)
+        print(f"# 軸対称: tau_b の面積に r 重み (r_floor={a.r_floor:g}, r 範囲 {pcy.min():.4g}..{pcy.max():.4g})")
+        print(f"# P6-ax(b) 内部面で centCoords[1] <= r_floor: {int((pcy[nei >= 0] <= a.r_floor).sum())} 面 (期待 0)")
+    per_faces = np.zeros(nP, bool)
+    if a.periodic_phys_ids:                 # P6-per: 周期半割面は明示的に除外する
+        with h5py.File(a.mesh) as f:
+            for k in a.periodic_phys_ids.split(","):
+                per_faces[np.asarray(f["BCONDS"][k.strip()]["iPlanes"]).ravel()] = True
+        print(f"# 周期半割面 {int(per_faces.sum())} 面を全集合から除外")
     print(f"# faces {nP} (内部 {(nei>=0).sum()}, 境界半割 {(nei<0).sum()})  壁ノード {int(wallf.sum())}/{ncv}")
 
     # **状態はカーネルが読む配列のダンプから読む** (`<massflux>.state`: ro,Ux,Uy,Uz,P,sonic x nCells)。
@@ -55,7 +77,7 @@ def main():
 
     m0, m0b, m1 = (load_bin(getattr(a, k), nP) for k in ("m0", "m0b", "m1"))
 
-    intf = nei >= 0
+    intf = (nei >= 0) & ~per_faces
     o, ne = own.astype(int), nei.astype(int)
     tgt = np.zeros(nP, bool)
     tgt[intf] = wallf[o[intf]] | wallf[ne[intf]]
@@ -79,7 +101,7 @@ def main():
         ii = np.where(intf)[0]
         for ip in ii:
             i0, i1 = o[ip], ne[ip]
-            nx, ny, nz = S[ip]/A[ip]
+            nx, ny, nz = S[ip]/A_norm[ip]
             L = dict(ro=ro[i0], P=P[i0], Ux=Ux[i0], Uy=Uy[i0], Uz=Uz[i0], sonic=son[i0])
             Rr = dict(ro=ro[i1], P=P[i1], Ux=Ux[i1], Uy=Uy[i1], Uz=Uz[i1], sonic=son[i1])
             out[ip] = slau_mdot(A[ip], nx, ny, nz, L, Rr, wall_face=bool(flag and tgt[ip]))[0]
