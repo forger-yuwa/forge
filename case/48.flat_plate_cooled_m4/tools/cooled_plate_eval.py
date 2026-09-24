@@ -18,6 +18,11 @@ import argparse, csv, glob, json, math, sys
 from pathlib import Path
 import numpy as np
 
+# numpy 2.0 で `trapz` が `trapezoid` に改名された。**古い numpy でも動くようにする**
+# (この環境は 1.x で、そのままでは AttributeError で評価が走らない)。
+if not hasattr(np, "trapezoid"):
+    np.trapezoid = np.trapz  # type: ignore[attr-defined]
+
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "design"))
 sys.path.insert(0, str(ROOT / "solver_density_cuda" / "tools"))
