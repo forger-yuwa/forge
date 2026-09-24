@@ -234,6 +234,30 @@ sudo shutdown -h now        # または コンソール/CLI から stop-instance
 ```
 
 - **stop** は EBS が残り再開できる (通常はこれ)。**terminate** はディスクごと消える (撤収時のみ)。
+### インスタンスの起動・停止 (2026-09-25)
+
+`solver_density_cuda/tools/aws_instance.sh {status|ip|start|stop|ssh}`。**鍵はスクリプトに含めない**
+(インスタンス ID とリージョンだけ)。`start` は running になり **SSH が上がるまで**待って IP を返す (実測 26 秒)。
+
+**認証情報は WSL ネイティブ側に置く**。`~/.aws` が `/mnt/c` へのリンクだと **drvfs はパーミッションを持たないので
+`chmod 600` が黙って 777 になる** (2026-09-25 実測)。Windows 側からも読める場所に長期の鍵を置かないこと。
+
+```
+/home/sano/.aws-wsl/credentials   [forge]          ← 700/600, WSL ネイティブ
+/home/sano/.aws-wsl/config        [profile forge]  ← **config だけ `profile ` 接頭辞が要る**
+```
+
+`config` を `[forge]` と書くとリージョンが読まれず `NoRegion` になる (credentials 側は `[forge]` で正しい)。
+`~/.bashrc` で `AWS_SHARED_CREDENTIALS_FILE` / `AWS_CONFIG_FILE` / `AWS_PROFILE` を指す。
+
+IAM は **当該インスタンス 1 台の `StartInstances`/`StopInstances` + `DescribeInstances` のみ**。
+`TerminateInstances` も `RunInstances` も付けない (最悪でも「1 台が動きっぱなし」が上限)。
+ポリシーの `Resource` はアカウント番号を `*` にしてよい (インスタンス ID が一意)。
+
+**止まっているのは異常ではない**: 下の `idle_autostop.sh` が正しく働いた結果である。2026-09-24 に 3 回止まったが、
+いずれも run 終了後に手元で解析していた 30 分間だった。**偽のプロセスを走らせて保護を回避しないこと** —
+起動が 26 秒で済む以上、止まってから起こす方が安い。
+
 - 消し忘れ保険: `idle_autostop.sh` が root cron で 5 分おきに監視し、「GPU 使用率 0 + forge プロセス無し + ログイン無し」が 30 分続くと自動 shutdown する。長時間バッチは forge プロセスが生きている限り止まらない。
 - ローカルへの取り込みは `aws s3 sync s3://forge-runs-<name>/case/... case/...` で逆方向に。
 
