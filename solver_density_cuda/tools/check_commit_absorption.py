@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""commit の丸め吸収を場で測る — その run は「足しても消える」領域にいるか。
+r"""commit の丸め吸収を場で測る — その run は「足しても消える」領域にいるか。
 
     python3 solver_density_cuda/tools/check_commit_absorption.py <res_with_dq.h5> [--split y|x|none]
 
@@ -59,6 +59,8 @@ def absorbed(q, dq):
 
 ap = argparse.ArgumentParser()
 ap.add_argument("res", help="dq_block_old_* を含む res_*.h5 (1 step 回したもの)")
+ap.add_argument("--baseline", help="commit の基準になる**前 step**の res (通常 res_0.h5)。"
+                                   "省略すると更新後値を使うので**誤判定する**")
 ap.add_argument("--split", default="y", choices=["y", "x", "none"], help="深さ方向の分割軸")
 ap.add_argument("--bins", type=int, default=4, help="分割数")
 a = ap.parse_args()
@@ -67,7 +69,15 @@ with h5py.File(a.res) as h:
     if "VALUE/dq_block_old_0" not in h:
         sys.exit("dq_block_old_* が無い。output.extraFields に 5 本を指定して 1 step 回すこと")
     c = h["MESH/COORD"][:].reshape(-1, 3)
-    Q = {v: np.asarray(h[f"VALUE/{v}"][:]) for v in CONS if f"VALUE/{v}" in h}
+    Qpost = {v: np.asarray(h[f"VALUE/{v}"][:]) for v in CONS if f"VALUE/{v}" in h}
+    Q, src = {}, {}
+    if a.baseline:
+        with h5py.File(a.baseline) as hb:
+            for v in CONS:
+                if f"VALUE/{v}" in hb: Q[v] = np.asarray(hb[f"VALUE/{v}"][:]); src[v] = f"{a.baseline}:{v}"
+    else:
+        for v in CONS:
+            if f"VALUE/{v}" in h: Q[v] = np.asarray(h[f"VALUE/{v}"][:]); src[v] = v + " ⚠更新後値"
     D = {v: np.asarray(h[f"VALUE/dq_block_old_{i}"][:]).astype(np.float64)
          for i, v in enumerate(CONS) if f"VALUE/dq_block_old_{i}" in h}
 
@@ -93,7 +103,15 @@ else:
         groups.append((f"{'xyz'[axis]} {edges[k]:+.3e}..{edges[k+1]:+.3e}", m))
 
 print(f"=== {a.res}  ({n} CV) ===")
-print("  **直接検査**: float32 で q+dq を計算し値が変わらなければ吸収 (ULP 比は補助)\n")
+print("  **直接検査**: float32 で Q_N+dq を計算し値が変わらなければ吸収")
+print("  baseline: " + ", ".join(f"{v}<-{src[v]}" for v in order))
+# 別 writer の検出: 実際の更新後値が Q_N+dq と違えば、commit 以外が触っている
+for v in order:
+    if v in Qpost and src[v].endswith("N"):
+        pred = (np.float32(Q[v]) + np.float32(D[v])).astype(np.float32)
+        nd = int((pred != np.asarray(Qpost[v], dtype=np.float32)).sum())
+        if nd: print(f"  ⚠ {v}: {nd} CV で Q_new != float32(Q_N+dq) — **commit 以外の writer が触っている**")
+print()
 hdr = "%-30s %8s" % ("領域", "CV 数")
 for v in order: hdr += " %9s" % (v + " 吸収")
 for v in order: hdr += " %8s" % (v + " dq=0")
@@ -109,7 +127,8 @@ for lbl, m in groups:
         f = ab.sum() / nz if nz > 0 else float("nan")
         line += " %8.1f%%" % (f * 100 if f == f else float("nan"))
         zs.append(z.mean() * 100)
-        if lbl != "全域" and f == f: worst = max(worst, f)
+        # 帯が 1 つ (--split none) のときは全域を使う
+        if f == f and (lbl != "全域" or len(groups) == 1): worst = max(worst, f)
     for x in zs: line += " %7.2f%%" % x
     print(line)
 print(f"\n  最悪の帯の吸収率 (非ゼロ増分のうち丸めで消えた割合): **{worst*100:.1f} %**")
