@@ -23,7 +23,12 @@ case "${1:-status}" in
   status) printf '%s\t%s\t%s\n' "$(q State.Name)" "$(q PublicIpAddress)" "$(q InstanceType)" ;;
   ip)     q PublicIpAddress ;;
   start)
-    st=$(q State.Name)
+    # **stopping / pending からは start できない** (IncorrectInstanceState)。終端状態まで待つ。
+    for _ in $(seq 60); do
+      st=$(q State.Name)
+      case "$st" in running|stopped) break ;; esac
+      sleep 5
+    done
     [ "$st" = running ] || aws ec2 start-instances --region "$REGION" --instance-ids "$IID" >/dev/null
     for _ in $(seq 60); do
       [ "$(q State.Name)" = running ] && break; sleep 5
