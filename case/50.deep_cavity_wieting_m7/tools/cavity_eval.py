@@ -54,7 +54,15 @@ def load(res):
                 f["/VALUE/thermCond"][:].astype(float), f["/VALUE/P"][:].astype(float))
 
 
-def wall_flux_line(c, T, lam, fixed_axis, fixed_val, span_axis, span_lo, span_hi, inward_sign, tol=1e-9):
+def wall_flux_line(c, T, lam, fixed_axis, fixed_val, span_axis, span_lo, span_hi, inward_sign, tol=1e-7):
+    """⚠ `tol` は 1e-9 だった。**float32 の丸めに依存して動いていた** (2026-09-25 修正)。
+
+    `geometry.json` の壁位置 (xr = 1.584960000e-1) とメッシュの実際の壁位置
+    (1.584960073233e-1) は **7.32e-09** ずれている。float32 の配列では引き算がこの差を
+    表現できず **0 になる**ので `tol=1e-9` を通っていたが、**float64 メッシュ
+    (全域 FP64 ビルドの出力) では 1 点も拾えず** `zero-size array` で落ちる。
+    メッシュ間隔は 1.06e-05 なので `tol=1e-7` でも隣接点を拾う心配はない。
+    """
     """fixed_axis = fixed_val の壁線上の各点で、内側 3 点から q_w = λ dT/dn を出す。"""
     sel = (np.abs(c[:, fixed_axis] - fixed_val) < tol) & \
           (c[:, span_axis] > span_lo - tol) & (c[:, span_axis] < span_hi + tol)
