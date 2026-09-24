@@ -34,11 +34,28 @@ import numpy as np
 CONS = ["ro", "roUx", "roUy", "roUz", "roe"]
 
 def ulp32(a):
+    """**補助指標**。符号を見ない片側 ULP なので、判定には使わない (下の absorbed を使う)。"""
     a = np.abs(np.asarray(a, dtype=np.float32))
     out = np.full(a.shape, np.inf, dtype=np.float64)
     m = a > 0
     out[m] = (np.nextafter(a[m], np.float32(np.inf)) - a[m]).astype(np.float64)
     return out
+
+def absorbed(q, dq):
+    """**直接検査**: float32 で `q + dq` を実際に計算し、値が変わらなければ吸収。
+
+    ⚠ ULP 比で判定してはいけない (2026-09-24, codex rollout plan M7):
+      - 2 のべき乗の境界では**下向きの ULP が半分**なので、正方向 ULP で割ると誤判定する
+        (`Q=1, dq=-4e-8` は比 0.336 だが **値は 0.99999994 に変わる**)。
+      - `Q=0` の ULP を無限大にすると、非ゼロ増分でも比が 0 になって吸収と誤判定する。
+    戻り値は (吸収したか, 増分がゼロか)。**増分ゼロは「吸収」と別に数える**
+      (更新する気が無いだけで、丸めで消されたのではない)。
+    """
+    q = np.asarray(q, dtype=np.float32)
+    d = np.asarray(dq, dtype=np.float32)
+    zero = (d == np.float32(0.0))
+    same = (np.float32(q) + d) == q
+    return (same & ~zero), zero
 
 ap = argparse.ArgumentParser()
 ap.add_argument("res", help="dq_block_old_* を含む res_*.h5 (1 step 回したもの)")
@@ -76,25 +93,27 @@ else:
         groups.append((f"{'xyz'[axis]} {edges[k]:+.3e}..{edges[k+1]:+.3e}", m))
 
 print(f"=== {a.res}  ({n} CV) ===")
-print("  |dq| / ULP(Q) — 0.5 未満は**その加算が丸めで消える**\n")
+print("  **直接検査**: float32 で q+dq を計算し値が変わらなければ吸収 (ULP 比は補助)\n")
 hdr = "%-30s %8s" % ("領域", "CV 数")
-for v in order: hdr += " %10s" % v
-print(hdr + "   " + " ".join("%6s" % (v + "<.5") for v in order))
+for v in order: hdr += " %9s" % (v + " 吸収")
+for v in order: hdr += " %8s" % (v + " dq=0")
+print(hdr)
 worst = 0.0
 for lbl, m in groups:
     if m.sum() < 5: continue
     line = "%-30s %8d" % (lbl[:30], m.sum())
-    fr = []
+    zs = []
     for v in order:
-        r = np.abs(D[v][m]) / ulp32(Q[v][m])
-        r = r[np.isfinite(r)]
-        if len(r) == 0: line += " %10s" % "-"; fr.append("-"); continue
-        line += " %10.3f" % np.median(r)
-        f = (r < 0.5).mean()
-        fr.append("%5.1f%%" % (f * 100))
-        if lbl != "全域": worst = max(worst, f)
-    print(line + "   " + " ".join("%6s" % x for x in fr))
-print(f"\n  最悪の帯で 0.5 未満だった割合: **{worst*100:.1f} %**")
+        ab, z = absorbed(Q[v][m], D[v][m])
+        nz = (~z).sum()
+        f = ab.sum() / nz if nz > 0 else float("nan")
+        line += " %8.1f%%" % (f * 100 if f == f else float("nan"))
+        zs.append(z.mean() * 100)
+        if lbl != "全域" and f == f: worst = max(worst, f)
+    for x in zs: line += " %7.2f%%" % x
+    print(line)
+print(f"\n  最悪の帯の吸収率 (非ゼロ増分のうち丸めで消えた割合): **{worst*100:.1f} %**")
+print("  (吸収率は **増分が非ゼロの CV だけ**を分母にした。増分ゼロは別列)")
 print("  VERDICT:", "床に当たっている領域が広い" if worst > 0.5
       else "一部が床に当たっている" if worst > 0.1 else "床には当たっていない")
 print("  ⚠ これは「結果が壊れている」判定ではない。**収束した run では正常にこうなる**")
