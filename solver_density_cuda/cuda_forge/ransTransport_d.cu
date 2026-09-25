@@ -1,6 +1,5 @@
 #include "ransTransport_d.cuh"
 #include "periodicNode_d.cuh"
-extern bool g_sstF1Computed;   // ransSource_d.cu (F1 が一度でも計算されたか)
 
 #include "scalarTransport_d.cuh"
 
@@ -107,14 +106,10 @@ __global__ void fill_const_d(geom_int n, flow_float* a, flow_float v)
 std::array<ScalarTransportDesc, 2> buildScalarDescs(variables& var, const solverConfig& cfg, cudaConfig& cuda_cfg, geom_int nCells)
 {
     // sstSigmaBlend=1: σ_k = F1·0.85 + (1−F1)·1.0, σ_ω = F1·0.5 + (1−F1)·0.856 (Menter SST の正式ブレンド)。
-    // 0 (既定): k-ω 側定数 0.85 / 0.5 (現行)。F1 は ransSource が書く sstF1 (初回は 1 で埋める)。
+    // 0 (既定): k-ω 側定数 0.85 / 0.5 (現行)。F1 は ransSource が書く sstF1 (初期値 1 は allocVariables)。
     flow_float* F1 = nullptr;
     if (cfg.sstSigmaBlend != 0 && var.c_d.count("sstF1")) {
-        static bool inited = false;
-        if (!inited && !g_sstF1Computed) {   // 計算済みの F1 を 1 で上書きしない (codex plan m5)
-            fill_const_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(nCells, var.c_d["sstF1"], static_cast<flow_float>(1.0));
-            inited = true;
-        }
+        // 初期値 1 は allocVariables が入れる (ここでは埋めない: 計算済みの F1 を上書きしないため)
         F1 = var.c_d["sstF1"];
     }
     std::array<ScalarTransportDesc, 2> d = {{

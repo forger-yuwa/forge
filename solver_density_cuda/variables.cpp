@@ -323,6 +323,12 @@ void variables::allocVariables(const int &useGPU , mesh& msh)
                 gpuErrchk( cudaMemset(this->c_d.at(cellValName), 0, (msh.nCells_all)*sizeof(flow_float)) );
             }
         }
+        // SST F1 の初期値は 1 (配列の確保時に入れる。以前は buildScalarDescs が初回に 1 で埋めており、直前に計算した F1 を
+        // 上書きしていた。plan boundary-node-periodic-gradient-fix §4.2 / codex m5・実装レビュー m3)
+        if (this->c_d.count("sstF1") && this->c_d.at("sstF1") != nullptr) {
+            std::vector<flow_float> ones(msh.nCells_all, (flow_float)1.0);
+            gpuErrchk( cudaMemcpy(this->c_d.at("sstF1"), ones.data(), sizeof(flow_float)*msh.nCells_all, cudaMemcpyHostToDevice) );
+        }
 
     }
     for (auto& planeValName : planeValNames)

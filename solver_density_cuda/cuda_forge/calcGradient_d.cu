@@ -779,18 +779,21 @@ static int lsqPre_mergePeriodic(mesh& msh, variables& var, flow_float* cInt_d, d
             if (found < 0) { cls.push_back(Cls{e.jroot, e.dx, e.dy, e.dz, 0}); found = (int)cls.size() - 1; }
             cls[found].count += 1; e.cls = found;
         }
+        // 行列と係数には**各 incidence の実変位**を使い、同値類は重複数 α=1/count の決定にだけ使う (codex 実装レビュー M1:
+        // 代表変位に置き換えると float32 座標の丸め差 (≲1e-4 h_min) が実行時の場の差分と食い違い、線形精度を壊す)。
+        // 完全に重複する incidence では Σ_E w_E d_E d_E^T と同じ。
         double m00=0,m01=0,m02=0,m11=0,m12=0,m22=0;
-        for (auto& c : cls) {
-            const double w = 1.0/std::fmax(c.dx*c.dx + c.dy*c.dy + c.dz*c.dz, 1.0e-300);
-            m00+=w*c.dx*c.dx; m01+=w*c.dx*c.dy; m02+=w*c.dx*c.dz; m11+=w*c.dy*c.dy; m12+=w*c.dy*c.dz; m22+=w*c.dz*c.dz;
+        for (auto& e : incs) {
+            const double a = 1.0/cls[e.cls].count;
+            const double w = a/std::fmax(e.dx*e.dx + e.dy*e.dy + e.dz*e.dz, 1.0e-300);
+            m00+=w*e.dx*e.dx; m01+=w*e.dx*e.dy; m02+=w*e.dx*e.dz; m11+=w*e.dy*e.dy; m12+=w*e.dy*e.dz; m22+=w*e.dz*e.dz;
         }
         double i00,i01,i02,i11,i12,i22; int degen;
         lsqPre_pinv(m00,m01,m02,m11,m12,m22, thresh, i00,i01,i02,i11,i12,i22, degen);
         nDegen += degen;
         for (auto& e : incs) {
-            const Cls& c = cls[e.cls];
-            const double w = 1.0/std::fmax(c.dx*c.dx + c.dy*c.dy + c.dz*c.dz, 1.0e-300)/c.count;   // α = 1/重複数
-            const double bx = w*c.dx, by = w*c.dy, bz = w*c.dz;
+            const double w = 1.0/std::fmax(e.dx*e.dx + e.dy*e.dy + e.dz*e.dz, 1.0e-300)/cls[e.cls].count;   // α = 1/重複数
+            const double bx = w*e.dx, by = w*e.dy, bz = w*e.dz;
             cInt[3*(size_t)e.ilp+0] = (flow_float)(i00*bx + i01*by + i02*bz);
             cInt[3*(size_t)e.ilp+1] = (flow_float)(i01*bx + i11*by + i12*bz);
             cInt[3*(size_t)e.ilp+2] = (flow_float)(i02*bx + i12*by + i22*bz);

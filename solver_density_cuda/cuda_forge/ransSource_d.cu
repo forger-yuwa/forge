@@ -358,10 +358,6 @@ __global__ void rans_sst_blend_f1_d(
 
 }
 
-// F1 が一度でも計算されたか (buildScalarDescs の初回 1 埋めが計算済みの F1 を上書きしないため、
-// plan boundary-node-periodic-gradient-fix §4.2 / codex plan m5)。
-bool g_sstF1Computed = false;
-
 void ransBlendF1_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     if (!(cfg.LESorRANS == 2 && cfg.RANSmodel == 1)) return;
@@ -374,7 +370,6 @@ void ransBlendF1_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, v
         var.c_d["sstF1"], (var.transitionRegistered != 0) ? 1 : 0);
     gpuErrchk(cudaPeekAtLastError());
     gpuErrchkKernelSync();
-    g_sstF1Computed = true;
 }
 
 void ransSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
