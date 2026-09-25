@@ -103,7 +103,7 @@ $\nabla u_r=\cos\theta\nabla u_y+\sin\theta\nabla u_z+u_\theta\nabla\theta$、$\
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | ~~1~~ (**済 2026-09-26**: GO-with-changes C0/M7/m2、全件採用) | codex plan 段 | | F |
-| **0** | **LSQ seam 合算の測定と修正** (§4.0、最優先) | (1) 並進周期 node mesh に線形場を置き 1 step の勾配、seam / 内部の比を記録 (期待: 現行 2.0、修正後 1.0 ± 1e-5)。2 倍が出なければ「確認済み・修正不要」。(2) 修正: 事前計算で $M$ を seam 越しに合算 (`calcGradient_d.cu`、`mesh.cpp`)。(3) 線形場試験 PASS。**区切りで codex** | O (F レビュー) |
+| **0** (**測定済み 2026-09-26: 2 倍を確認**、§6.2。修正は codex に諮ってから) | **LSQ seam 合算の測定と修正** (§4.0、最優先) | (1) 並進周期 node mesh に線形場を置き 1 step の勾配、seam / 内部の比を記録 (期待: 現行 2.0、修正後 1.0 ± 1e-5)。2 倍が出なければ「確認済み・修正不要」。(2) 修正: 事前計算で $M$ を seam 越しに合算 (`calcGradient_d.cu`、`mesh.cpp`)。(3) 線形場試験 PASS。**区切りで codex** | O (F レビュー) |
 | 2 | 角の簿記・pairing・閉ループ・受付表 + 負例試験 | `mesh.cpp`・`mesh.hpp`・`boundaryCond.cpp` (dtheta を double で)。合格: §6 U0・U1 | O |
 | 3 | 回転の gather / broadcast / ミラー / dq / 勾配 ($M$ の回転を含む) | `periodicNode_d.{cu,cuh}`。合格: V1 (純軸流 free-stream) + V2-i (固定状態の作用素比較)。**区切りで codex** | O (F レビュー) |
 | 4 | 円筒成分リミタ | `limiter_d.cu`・`limiterPeriodic_d.cuh`、キー `limiterCylindricalVelocity`。全周で単独検証 (§6 V6)。**区切りで codex** | O (F レビュー) |
@@ -137,7 +137,10 @@ $\nabla u_r=\cos\theta\nabla u_y+\sin\theta\nabla u_z+u_\theta\nabla\theta$、$\
 
 ### 6.2 結果
 
-(未実施)
+**G0 並進周期 (2026-09-26) — LSQ の seam 勾配は 2 倍 (欠陥を確認)**。case/09 TGV メッシュ (32³、35,937 節点、node、SLAU、三重周期) に
+線形場 $U_x=10+y$ を置き 1 step。y・z の継ぎ目から 2.5 格子以上離れた節点で $\partial U_x/\partial y$: **x の継ぎ目 1458 点 平均 2.000000 [1.999990, 2.000012]**、
+内部 19683 点 平均 1.000000 [0.999995, 1.000006] → **比 2.000000**。証拠 `case/09.Taylor-Green/_g0_lsq_seam/G0_translational.txt`。
+**並進周期の node 計算すべてに効く** (継ぎ目の節点で LSQ 勾配が 2 倍: 粘性応力・2 次再構成・リミタ・SST 生成など)。修正方針 (§4.0) は実装前に codex に諮る。
 
 ## 7. 影響範囲
 
