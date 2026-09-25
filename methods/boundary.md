@@ -127,6 +127,24 @@ incoming/outgoing 特性の捌きは upwind フラックスに委ねる。出口
 周期境界は他境界と異なり、対応するペアセル値を直接コピーする。
 対流再構成は内部面と同じ MUSCL 経路で処理されるため、`scheme` の強制 1 次降格は無い。
 
+- **並進 (`type: 0`, `dx/dy/dz`) と回転 (`type: 1`, `dtheta`、x 軸まわり)**。cell 方式はゴーストへのコピーで、回転ではゴーストの $(u_y,u_z)$・$(\rho u_y,\rho u_z)$ を
+  $R(d\theta)$ で回す (`boundaryCond_d.cu`)。
+- **node 方式は seam 合算の別経路** (`periodicNode_d.cu`): 継ぎ目で割れた CV を union-find で group にし、合併体積のもとで残差を root に集めて
+  全員へ書き戻す (保存量・勾配・dq もミラー)。詳細は [`discretization.md`](discretization.md) §2.5.5 と
+  plan [`discretization-median-dual-3d.md`](../plans/active/discretization-median-dual-3d.md) §4.5。
+- **node の回転周期 (実装中、plan [`boundary-node-rotational-periodic.md`](../plans/active/boundary-node-rotational-periodic.md))**: 各 member は root 相対角
+  $\theta_m$ を持ち、**ベクトル量の授受にだけ** x 軸まわりの回転 $R_m=R(\theta_m)$ をはさむ。
+  | 量 | gather (member → root) | broadcast / ミラー (root → member) |
+  | --- | --- | --- |
+  | 運動量残差・保存量・dq の $(y,z)$ 成分 | $R_m^{\mathsf T}\,\mathbf v_m$ | $R_m\,\mathbf v$ |
+  | スカラーの勾配 $\nabla\phi$ | $R_m^{\mathsf T}\,\mathbf g_m$ | $R_m\,\mathbf g$ |
+  | 速度勾配テンソル $G_{ij}=\partial u_i/\partial x_j$ | $R_m^{\mathsf T} G_m R_m$ | $R_m\,G\,R_m^{\mathsf T}$ |
+  | 陰解法の対角ブロック | $\mathcal R_m^{\mathsf T} D_m \mathcal R_m$ | $\mathcal R_m D\,\mathcal R_m^{\mathsf T}$ |
+  | $\rho,\rho e$、化学種・乱流量・遷移・凝縮モーメント・受動種、$\nabla\cdot\mathbf u$ | 恒等 (回転不変) | 恒等 |
+
+  リミタの seam 越し min/max は、スカラーと $u_x$ は従来どおり、$u_y,u_z$ は回転 group では取らない (自側の隣接だけで bound)。
+  並進のみの mesh は従来のカーネルをそのまま使う (ビット不変)。軸対称との併用と、軸 ($r=0$) を含むセクタは対象外。
+
 ### 物理 ID と YAML 設定
 
 各境界面はメッシュ生成時に物理 ID を持ち、`bcondConfig.yaml` で
