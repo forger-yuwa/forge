@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `boundary`
-- **status**: `draft`
+- **status**: `in_progress`
 - **related_docs**:
   - [`methods/gradient.md`](../../methods/gradient.md) (「境界寄与」node × 周期の継ぎ目)
   - [`methods/discretization.md`](../../methods/discretization.md) §7.3 (LSQ)、§4.5 (周期の DOF 同一視)
@@ -15,7 +15,7 @@
 
 ## 1. 目的
 
-node の周期境界の継ぎ目にある既存の欠陥 2 件を直す。どちらも回転と無関係に、**今の並進周期の node 計算すべてに効く**。
+node の周期境界の継ぎ目にある既存の欠陥 2 件を直す。どちらも回転と無関係に、**今の並進周期の node 計算 (非軸対称) すべてに効く**。本 plan の適用範囲は **node ∧ 並進周期 ∧ 非軸対称** (codex plan M2: 軸対称では gather が `periodicNode_d.cu:174` で return し、GG は `A_planar` を使うので前提が異なる)。
 
 1. **LSQ 勾配の 2 重計上**: node の勾配は `gradLSQ: 2` 固定で、継ぎ目で割れた各部分 CV が片側の隣接だけで完全な LSQ 勾配を解き、
    `periodicGradientGather` が和を取る。**線形場で継ぎ目の勾配が正確に 2 倍** (2026-09-26 実測、case/09 TGV 32³、`Ux = 10+y` で x 継ぎ目 1458 点の
@@ -55,20 +55,28 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 
 ## 4. 設計方針 (2026-09-26 `diagnostician`、codex plan (回転 plan の 2 回目) を採用)
 
-### 4.1 合併 stencil の LSQ
+### 4.1 合併 stencil の LSQ (codex plan M1 で精度仕様を固定)
 
-- 各 group (root と member) で、全 member の隣接を**同じ物理隣接ごとに同定**する (隣接の `periodicRoot` と、root 系での $\Delta\mathbf x$ の一致で重複を除く。
-  `periodicRoot` が同じでも方向の違う隣接は潰さない)。
-- 同じ物理隣接が複数の member に現れるとき、配分係数 $\alpha_{mj}$ (同一隣接で総和 1) を付ける。
-- $M_r=\sum_{m,j}\alpha_{mj}w_{mj}\,d_{mj}d_{mj}^{\mathsf T}$ ($d$ = 隣接へのベクトル、並進では root 系と同じ)。**スペクトル打ち切りは合併した $M_r$ に 1 回だけ**。
-- 各部分 CV の係数 $c_{mj}=M_{r,\tau}^{+}\,\alpha_{mj}w_{mj}d_{mj}$ を焼き込む。**毎 step の gather は現行の和のまま** (部分和が合併 LSQ になる)。
-- 壁∩継ぎ目では、実在する内部隣接だけを合併する (壁の疑似点は足さない。現行仕様と整合)。
-- **不採用**: root の値での上書き、一律 0.5 倍 (4・8 member の角、非対称 stencil、部分的な rank 欠損を扱えない。codex の反例)。
+- **適用条件**: node ∧ 並進周期 ∧ 非軸対称。係数の合併と §4.2 の gather は**同じ条件関数**を使う。軸対称の既存経路は変えない。
+- **周期像の識別と幾何の照合を分ける**: 同一物理隣接の候補は、隣接の `periodicRoot` が一致すること。そのうえで幾何を
+  $\lvert\Delta\mathbf x_{mj}-\Delta\mathbf x_{m'j'}\rvert \le 10^{-4}\,h_{min}$ ($h_{min}$ = その節点の最短内部エッジ長。float32 座標差の丸め ~1e-7 相対より十分大きく、
+  隣接間隔より十分小さい) で照合する。**`periodicRoot` が同じでも $\Delta\mathbf x$ が違う (異なる周期像) ものは統合しない**。
+- 同定した同値類 $E$ ごとに $d_E, w_E$ ($w=1/\lvert d\rvert^2$、現行) を**最初の incidence (root 側優先) の値で 1 つ決め、行列組立と係数生成の両方で同じ値を使う**。
+- 配分係数 $\alpha = 1/\text{重複数}$。$M_r=\sum_E w_E d_E d_E^{\mathsf T}$ (= $\sum_{m,j}\alpha w d d^{\mathsf T}$)。**スペクトル打ち切りは $M_r$ に 1 回だけ**。
+- 各部分 CV の incidence の係数 $c_{mj}=M_{r,\tau}^{+}\,\alpha_{mj}w_E d_E$ を焼き込む。**毎 step の gather は現行の和のまま**。
+- 壁∩継ぎ目では実在する内部隣接だけを合併する (壁の疑似点は足さない)。
+- 係数は**変数に依らない**形で作る (後続のスカラー LSQ 統一で流用)。
+- **不採用**: root の値での上書き、一律 0.5 倍 (4・8 member の角、非対称 stencil、部分的な rank 欠損を扱えない)。
+- codex の CPU 数値確認: 重複を持つ非対称 stencil を 2・4・8 member に配分した合併は、一意 stencil の解と最大 3.4e-16 で一致 (式の確認)。
 
-### 4.2 SST の $k,\omega$ 勾配
+### 4.2 SST の $k,\omega$ 勾配 (本 plan では Green–Gauss のまま合算を直す)
 
-`ransGradient` の直後 (`ransBlendF1` の前) に $k,\omega$ 専用の gather を置く (Green–Gauss、周期半割面を除外して積算、合併体積で割った部分寄与の和)。
-早い方の gather (`main.cpp:1459`) からは $k,\omega$ を外す。
+- `ransGradient` の直後 (`ransBlendF1` の前) に $k,\omega$ 専用の gather (Green–Gauss、**周期半割面を除外して積算**、合併体積で割った部分寄与の和)。
+  早い方の gather (`main.cpp:1459`) からは $k,\omega$ を外す。順序は `ransGradient → 専用 gather → ransBlendF1 → ransTransport`。
+- **LSQ 化は後続 plan** (`diagnostician`: 本 plan で LSQ 化まで入れると、R1 の変化が「継ぎ目の欠陥の修正」と「スキームの変更」の 2 要因になり帰属できない。
+  合併 GG の $k,\omega$ は後続の LSQ 化の回帰参照にもなる)。
+- **F1 の初回上書き (codex m5)**: `buildScalarDescs` (`ransTransport_d.cu:104`) が初回に `sstF1` を 1 で埋め、直前に計算した F1 を使わない。初期充填を変数初期化時へ移す。
+  初回 step が変わるので、非周期 run も 1 step 目からビット差が出る (回帰は 2 step 目以降のノイズ床比較で判定)。
 
 ### 4.3 影響
 
@@ -99,18 +107,21 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 
 ## 6. 検証 (測る前に固定)
 
-| # | 試験 | 合格 |
+| # | 試験 | 合格 (測る前に固定) |
 | --- | --- | --- |
-| G0 | 線形場 (局所作用素試験) — 2/4/8 member (面・辺・角)、非対称 stencil、壁∩継ぎ目、root 交換 | 非退化方向の最大誤差 ≤ 1e-5、ゼロ成分は絶対誤差 ≤ 1e-5 × |真勾配|。退化方向は同じ打ち切りを施した参照解と比較 |
-| G1 | $k,\omega$ 勾配: 線形の $k,\omega$ 場で継ぎ目の勾配 | 真値との最大誤差 ≤ 1e-5 (相対) |
-| G2 | 二次場: CPU double の一意 stencil の LSQ を参照にした作用素試験と、格子細分 (3 水準) | 作用素試験は参照と float32 丸め内。細分では継ぎ目の勾配誤差が内部と同じ次数 (勾配は一般に O(h)。面再構成の O(h²) と混同しない) |
-| R1 | case/39 周期丘: 現行レシピに設定を整備 (`wallTreatmentSST: 1`・旧 `kInf/omegaInf` を落とす) し、修正前後 | 継ぎ目の速度勾配・壁応力・$k,\omega$ 勾配・F1 の不連続が消える (継ぎ目と隣接列の差が内部の列間差と同水準)。定常結果は全残差と対象量の VERDICT を併記 |
-| R2 | case/09 TGV | 一意 DOF で質量・運動量・全エネルギーの保存、KE・エントロピー履歴。修正前後の差を記録 (定常 PASS は要求しない) |
+| G0 | LSQ の局所作用素試験: 各 group の**展開した局所座標**で線形場を作り、BC・ミラー・時間更新の**前**に作用素だけ比較 (三重周期の角で大域線形場は周期条件を満たさないため)。2/4/8 member (面・辺・角)、非対称 stencil、壁∩継ぎ目、root 交換、原点移動、斜め並進、部分で rank 欠損 → 合併で回復する例 | 非退化方向の最大誤差 ≤ 1e-5 (相対)。ゼロ成分と**非零定数場の勾配**は絶対誤差 ≤ 1e-6×\|φ\|/h。退化方向は同じ打ち切りの参照解と比較 |
+| G1 | $k,\omega$ 勾配: 一様直交格子では解析解、非対称・壁∩継ぎ目・2/4/8 member では **CPU double の合併 GG** (同じ面値規則) を参照。F1 は初回と 2 回目の残差組立で、輸送が実際に読む値を検査 | 参照との最大誤差 ≤ 1e-5 (相対) |
+| G2 | 作用素の精度: 参照 = 格納済み float32 座標・場を double で評価した合併 stencil LSQ | $\max_i\lvert\nabla\phi_{gpu}-\nabla\phi_{ref}\rvert \le 10^{-5}\,S$、$S=\max_i\lvert\nabla\phi_{ref}\rvert$ |
+| G2' | 細分 3 水準 (二次場) | 継ぎ目の節点の誤差 (対 解析勾配) の収束次数 ≥ 0.9 (勾配は O(h)。面再構成の O(h²) と混同しない)、各水準で継ぎ目誤差 / 内部誤差 ≤ 2 |
+| R1 | case/39 周期丘: 整備設定 (`wallTreatmentSST: 0`、実際の `kInit/omegaInit`、段階起動、`check_mesh_quality` PASS、$y_1^+$ 報告) で**旧/新バイナリを同一メッシュ・IC から再生成** | 両 run 同一区間で `check_convergence` **PASS**、$C_f$ 3 点・$x_r$ が `--drift 0.002 --osc 0.005` で STEADY。継ぎ目指標 (z 継ぎ目の列 vs 隣接内部列、末尾平均): $\lvert\nabla\mathbf u\rvert$・$\lvert\nabla k\rvert$・$\lvert\nabla\omega\rvert$ の L2 比と $F_1$ が**新で [0.9, 1.1]** (旧は記録のみ、≈2 の想定)。$C_f$ 相対 L2 差・$x_r$ 差は記録 (変わるのが正)。新の低下桁数 ≥ 旧 − 0.5 |
+| R2 | case/09 TGV: `procedures/verification/09-taylor-green.md` の非粘性 KEEP 基準 (保存誤差の閾値そのまま、初期総量で正規化) + **粘性 SLAU 2 次** 1 本 (勾配を読む経路)。共通固定 dt、終了時刻 $t = 10\,t_c$、一意 DOF | KEEP は既存閾値。SLAU は質量・運動量・全エネルギーの保存と KE・エントロピー履歴の旧新差を記録。定常 PASS は要求しない |
+| R3 | 非周期・軸対称の回帰: case/48 (node、非周期)、case/16 (化学種 GG)、case/44 (軸対称) の固定状態 | 勾配配列が旧新で**ビット同一** (継ぎ目が無ければ係数不変、軸対称は経路不変) |
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan | `2026-09-26` | [2026-09-26-boundary-node-periodic-gradient-fix-plan.md](../../notes/reviews/2026-09-26-boundary-node-periodic-gradient-fix-plan.md) | **GO-with-changes**, C0/M4/m1 (合併 LSQ と ransGradient 直後の gather を支持) | **全件採用** (2026-09-26 `diagnostician` 判断)。M1 → 周期像の識別と幾何照合を分離、照合許容 1e-4 h_min、同値類で共通の d_E,w_E (§4.1)。M2 → 適用範囲を node ∧ 並進 ∧ 非軸対称に、同じ条件関数 (§1、§4.1)。M3 → G0/G2 は局所座標で作用素比較、G1 は CPU double の合併 GG を参照 (§6)。M4 → 閾値・区間・再生成条件を具体値で固定 (§6)。m5 → F1 の初回充填を初期化時へ (§4.2)。**k/ω の LSQ 化は後続 plan** (本 plan で入れると R1 の変化の帰属ができない) |
 
 ### 6.2 結果
 
@@ -133,6 +144,7 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 
 ## 9. 変更ログ
 
+- `2026-09-26` — codex plan 段 GO-with-changes (C0/M4/m1) を全件採用して §4/§6 を改訂。回転周期の書きかけ (mesh.cpp の角の割当) は `notes/sessions/boundary-node-rotational-periodic-wip.patch` に退避。
 - `2026-09-26` — ユーザ決定: スカラーの勾配も LSQ に揃える (本 plan の後に別 plan)。本 plan の合併 LSQ 係数は変数に依らない形で作る。
 - `2026-09-26` — 初稿。回転周期 plan の G0 で見つかった LSQ の 2 重計上と、codex (同 plan の 2 回目) が見つけた SST $k,\omega$ 勾配の未合算を、
   回転と独立に先に直すため切り出した (`diagnostician` 判断)。

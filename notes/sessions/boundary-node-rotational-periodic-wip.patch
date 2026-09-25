@@ -1,0 +1,118 @@
+diff --git a/solver_density_cuda/mesh/mesh.cpp b/solver_density_cuda/mesh/mesh.cpp
+index 0f66b022..ca2568dd 100755
+--- a/solver_density_cuda/mesh/mesh.cpp
++++ b/solver_density_cuda/mesh/mesh.cpp
+@@ -698,20 +698,31 @@ void mesh::buildPeriodicNodeGroups(bool nodeMode, geom_float* var_volume_d)
+     for (auto& bc : this->bconds) if (bc.bcondKind == "periodic") hasPeriodic = true;
+     if (!hasPeriodic) return;
+ 
+-    // union-find (path halving, iterative なので std::function 不要)
+-    auto findRoot = [&](geom_int x) {
+-        while (this->periodicRoot[x] != x) {
+-            this->periodicRoot[x] = this->periodicRoot[this->periodicRoot[x]];
+-            x = this->periodicRoot[x];
+-        }
++    // 重み付き union-find (plan boundary-node-rotational-periodic §4.1)。off[x] = θ_x − θ_parent[x]。
++    // 並進 (type 0) は角 0 なので従来どおりの union-find と同じ group・同じ root になる。
++    std::vector<double> off(this->nCells, 0.0);
++    auto findRoot = [&](geom_int x, double& th) {
++        // 経路上の角を積算しながら root へ (path compression は後段の平坦化で行う)
++        th = 0.0;
++        while (this->periodicRoot[x] != x) { th += off[x]; x = this->periodicRoot[x]; }
+         return x;
+     };
+-    auto unite = [&](geom_int a, geom_int b) {
+-        geom_int ra = findRoot(a), rb = findRoot(b);
+-        if (ra == rb) return;
++    const double TWO_PI = 6.283185307179586;
++    auto wrap = [&](double a) { a = std::fmod(a, TWO_PI); if (a > M_PI) a -= TWO_PI; if (a < -M_PI) a += TWO_PI; return a; };
++    int nClosureViol = 0; double maxClosure = 0.0;
++    // unite(a, b, d): θ_b = θ_a + d
++    auto unite = [&](geom_int a, geom_int b, double d) {
++        double wa, wb;
++        geom_int ra = findRoot(a, wa), rb = findRoot(b, wb);
++        if (ra == rb) {
++            const double e = std::fabs(wrap(wb - wa - d));
++            if (e > maxClosure) maxClosure = e;
++            if (e > 1e-9) ++nClosureViol;
++            return;
++        }
+         // 小さい index を root に固定 (決定的)
+-        if (rb < ra) { geom_int t = ra; ra = rb; rb = t; }
+-        this->periodicRoot[rb] = ra;
++        if (ra < rb) { this->periodicRoot[rb] = ra; off[rb] = wa + d - wb; }
++        else         { this->periodicRoot[ra] = rb; off[ra] = wb - d - wa; }
+     };
+ 
+     for (auto& bc : this->bconds) {
+@@ -721,6 +732,9 @@ void mesh::buildPeriodicNodeGroups(bool nodeMode, geom_float* var_volume_d)
+                       << " has no partnerCellID (setPeriodicPartner not run?). skip.\n";
+             continue;
+         }
++        // この bcond の面 (node) と partner (相手 bcond の node) の角の差。setPeriodicPartner は相手側の座標を
++        // −dtheta 回して一致を探すので、相手 = 自分を +dtheta 回した位置: θ_part = θ_node + dtheta。
++        const double d = (bc.inputInts.count("type") && bc.inputInts["type"] == 1) ? (double)bc.inputFloats["dtheta"] : 0.0;
+         const auto& partner = bc.bint["partnerCellID"];
+         for (size_t l = 0; l < bc.iPlanes.size(); ++l) {
+             const geom_int ip = bc.iPlanes[l];
+@@ -728,12 +742,21 @@ void mesh::buildPeriodicNodeGroups(bool nodeMode, geom_float* var_volume_d)
+             if (l >= partner.size()) break;
+             const geom_int part = partner[l];
+             if (node < 0 || node >= this->nCells || part < 0 || part >= this->nCells) continue;
+-            unite(node, part);
++            unite(node, part, d);
+         }
+     }
++    if (nClosureViol > 0) {
++        std::cerr << "[buildPeriodicNodeGroups] rotational periodic closure violated at " << nClosureViol
++                  << " pairs (max " << maxClosure << " rad). The periodic tiling is inconsistent "
++                  << "(check dtheta signs of the partner bconds).\n";
++        throw std::runtime_error("rotational periodic closure violated");
++    }
++    // 各 CV の root 相対角
++    this->periodicTheta.assign(this->nCells, 0.0);
++    for (geom_int c = 0; c < this->nCells; ++c) { double th; findRoot(c, th); this->periodicTheta[c] = th; }
+ 
+     // 全 root を平坦化 + member 数カウント
+-    for (geom_int c = 0; c < this->nCells; ++c) this->periodicRoot[c] = findRoot(c);
++    for (geom_int c = 0; c < this->nCells; ++c) { double th; this->periodicRoot[c] = findRoot(c, th); }
+     for (geom_int c = 0; c < this->nCells; ++c) if (this->periodicRoot[c] != c) this->nPeriodicMembers++;
+ 
+     // ★ 合併前の部分体積を退避 (体積ソースの二重計上防止用)。gather が group 合算するため、
+@@ -765,6 +788,19 @@ void mesh::buildPeriodicNodeGroups(bool nodeMode, geom_float* var_volume_d)
+     gpuErrchk(cudaMemcpy(this->periodicRoot_d, this->periodicRoot.data(),
+                          sizeof(geom_int)*this->nCells, cudaMemcpyHostToDevice));
+ 
++    // 回転周期: 非零角があれば cos/sin を device へ (角は double から 1 回だけ float 化)
++    this->perRotFlag = 0;
++    for (geom_int c = 0; c < this->nCells; ++c) if (std::fabs(this->periodicTheta[c]) > 1e-12) { this->perRotFlag = 1; break; }
++    if (this->perRotFlag) {
++        std::vector<flow_float> cs(this->nCells), sn(this->nCells);
++        for (geom_int c = 0; c < this->nCells; ++c) { cs[c] = (flow_float)std::cos(this->periodicTheta[c]); sn[c] = (flow_float)std::sin(this->periodicTheta[c]); }
++        gpuErrchk(cudaMalloc((void **)&(this->perCos_d), sizeof(flow_float)*this->nCells));
++        gpuErrchk(cudaMalloc((void **)&(this->perSin_d), sizeof(flow_float)*this->nCells));
++        gpuErrchk(cudaMemcpy(this->perCos_d, cs.data(), sizeof(flow_float)*this->nCells, cudaMemcpyHostToDevice));
++        gpuErrchk(cudaMemcpy(this->perSin_d, sn.data(), sizeof(flow_float)*this->nCells, cudaMemcpyHostToDevice));
++        std::cout << "[buildPeriodicNodeGroups] rotational periodic: member angles set (closure max "
++                  << maxClosure << " rad)\n";
++    }
+     std::cout << "[buildPeriodicNodeGroups] node periodic DOF identification: "
+               << this->nPeriodicMembers << " slave CVs merged into masters (union-find).\n";
+ }
+diff --git a/solver_density_cuda/mesh/mesh.hpp b/solver_density_cuda/mesh/mesh.hpp
+index aa5a853b..44235cfe 100755
+--- a/solver_density_cuda/mesh/mesh.hpp
++++ b/solver_density_cuda/mesh/mesh.hpp
+@@ -222,6 +222,12 @@ public:
+     // ソース側はこの部分体積を使うこと (plans/active/turbulence-iddes-sst.md 変更ログ 2026-07-22)。
+     geom_float* volumePartial_d = nullptr;
+     geom_int  nPeriodicMembers = 0;           // root != self の CV 数 (>0 なら周期同一視を実行)
++    // 回転周期 (plan boundary-node-rotational-periodic §4.1): 各 CV の root 相対角 θ (x 軸まわり)。
++    // perRotFlag==0 (並進のみ) のときは perCos_d/perSin_d を確保せず、従来のカーネルを使う (ビット不変)。
++    std::vector<double> periodicTheta;        // [nCells] host
++    int  perRotFlag = 0;
++    flow_float* perCos_d = nullptr;           // [nCells] device, cos θ_m
++    flow_float* perSin_d = nullptr;           // [nCells] device, sin θ_m
+ 
+     mesh();
+     ~mesh();
