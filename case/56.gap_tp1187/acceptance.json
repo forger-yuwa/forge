@@ -1,143 +1,183 @@
 {
- "_about": "T4 (TP-1187) の合否基準。AGENTS.md の VERDICT 規律と plan §4.10 に対応する事前登録ファイル。",
- "_honesty_rule": "status が pre_registered の項目だけが『事前登録』である。post_hoc は結果を見てから書いた観察であり、合否の根拠に使わない。事後に数値を緩めた場合は必ず revisions に残す。",
- "_written": "2026-09-20",
- "_plan": "plans/active/case-hypersonic-gap-heating-validation.md",
- "gates": [
-  {
-   "id": "T4-A",
-   "name": "条件再構成 (Gate A)",
-   "status": "post_hoc",
-   "_why_post_hoc": "2026-09-20 に先に実施済み。ここには実施済みの基準を記録として残すだけで、再判定には使わない。",
-   "quantity": "回復係数 q_dyn から解いた Pt_test の妥当性",
-   "criterion": "recovery 0.2-0.35 の範囲に全 17 run が入る",
-   "observed": "0.248-0.311 (中央値 0.287) — 満たす"
-  },
-  {
-   "id": "T4-B",
-   "name": "分母 q_FP の再現 (Gate B)",
-   "status": "post_hoc",
-   "_why_post_hoc": "解析参照温度法との比較を先に見てから帯を書いた。codex result-2 の指摘どおり、これは事前登録ではない。",
-   "quantity": "q_FP,forge / q_FP,measured (較正パネル冷壁)",
-   "criterion": "1.10 および 1.30 を中心に ±0.25",
-   "observed": "run_0002_fp_t8_long で 1.188 / 1.219 — 満たす。ただし生産モデルの Gate B は最大 20.26 % で FAIL"
-  },
-  {
-   "id": "T4-X",
-   "name": "SU2 クロスチェック (#38)",
-   "status": "partially_pre_registered",
-   "_why": "forge 側 (run_0008_xcheck_forge2) の深部 q_w は既に見ている。SU2 側および両者の比は未見なので、比に対する基準はこの時点で確定させる。forge の値を知った上で書いている点は割り引いて読むこと。",
-   "written_before_seeing": [
-    "SU2 の全出力",
-    "forge/SU2 の比"
-   ],
-   "already_seen": {
-    "forge_deep_qw_W_per_m2": {
-     "1.39": 2990.0,
-     "4.22": 5.65,
-     "8.44": 2.73,
-     "21.17": 2.84
-    },
-    "_note": "z/W=1.39 のみ kW 級。4.22 以深は O(1) W/m² で、これは丸め・数値散逸と区別がついていない量。"
-   },
-   "criteria": [
+  "_about": "T4 (TP-1187) の合否基準。AGENTS.md の VERDICT 規律と plan §4.10 に対応する事前登録ファイル。",
+  "_honesty_rule": "status が pre_registered の項目だけが『事前登録』である。post_hoc は結果を見てから書いた観察であり、合否の根拠に使わない。事後に数値を緩めた場合は必ず revisions に残す。",
+  "_written": "2026-09-20",
+  "_plan": "plans/active/case-hypersonic-gap-heating-validation.md",
+  "gates": [
     {
-     "key": "X1_shallow",
-     "quantity": "z/W <= 2 の壁熱流束 q_w の forge/SU2 比",
-     "criterion": "0.5 - 2.0 (係数 2 以内) なら『ソルバ依存でない』",
-     "rationale": "この深さは物理的に有意な熱流束 (kW/m²) があり、離散化差は係数 2 に収まるべき。"
+      "id": "T4-A",
+      "name": "条件再構成 (Gate A)",
+      "status": "post_hoc",
+      "_why_post_hoc": "2026-09-20 に先に実施済み。ここには実施済みの基準を記録として残すだけで、再判定には使わない。",
+      "quantity": "回復係数 q_dyn から解いた Pt_test の妥当性",
+      "criterion": "recovery 0.2-0.35 の範囲に全 17 run が入る",
+      "observed": "0.248-0.311 (中央値 0.287) — 満たす"
     },
     {
-     "key": "X2_deep",
-     "quantity": "z/W >= 4 の q_w",
-     "criterion": "両ソルバとも浅部の 1e-3 倍未満なら『深部は両ソルバで同様に静穏』。比そのものは判定に使わない。",
-     "rationale": "O(1) W/m² は forge の float32 ULP 帯と同程度で、比は意味を持たない。桁の一致だけを見る。"
+      "id": "T4-B",
+      "name": "分母 q_FP の再現 (Gate B)",
+      "status": "post_hoc",
+      "_why_post_hoc": "解析参照温度法との比較を先に見てから帯を書いた。codex result-2 の指摘どおり、これは事前登録ではない。",
+      "quantity": "q_FP,forge / q_FP,measured (較正パネル冷壁)",
+      "criterion": "1.10 および 1.30 を中心に ±0.25",
+      "observed": "run_0002_fp_t8_long で 1.188 / 1.219 — 満たす。ただし生産モデルの Gate B は最大 20.26 % で FAIL"
     },
     {
-     "key": "X3_deep_velocity",
-     "quantity": "深部 (z/W >= 4) の |U| の準定常性",
-     "criterion": "両ソルバとも check_quasisteady 相当で末尾が頭打ち。片方だけ緩和が遅い場合は『未収束につき判定不能』とし、差を物理差と呼ばない。",
-     "rationale": "第 1 版で SU2 が 40k 反復でも深部に 200 m/s を残した。緩和の遅さ自体はソルバ固有でない。"
+      "id": "T4-X",
+      "name": "SU2 クロスチェック (#38)",
+      "status": "partially_pre_registered",
+      "_why": "forge 側 (run_0008_xcheck_forge2) の深部 q_w は既に見ている。SU2 側および両者の比は未見なので、比に対する基準はこの時点で確定させる。forge の値を知った上で書いている点は割り引いて読むこと。",
+      "written_before_seeing": [
+        "SU2 の全出力",
+        "forge/SU2 の比"
+      ],
+      "already_seen": {
+        "forge_deep_qw_W_per_m2": {
+          "1.39": 2990.0,
+          "4.22": 5.65,
+          "8.44": 2.73,
+          "21.17": 2.84
+        },
+        "_note": "z/W=1.39 のみ kW 級。4.22 以深は O(1) W/m² で、これは丸め・数値散逸と区別がついていない量。"
+      },
+      "criteria": [
+        {
+          "key": "X1_shallow",
+          "quantity": "z/W <= 2 の壁熱流束 q_w の forge/SU2 比",
+          "criterion": "0.5 - 2.0 (係数 2 以内) なら『ソルバ依存でない』",
+          "rationale": "この深さは物理的に有意な熱流束 (kW/m²) があり、離散化差は係数 2 に収まるべき。"
+        },
+        {
+          "key": "X2_deep",
+          "quantity": "z/W >= 4 の q_w",
+          "criterion": "両ソルバとも浅部の 1e-3 倍未満なら『深部は両ソルバで同様に静穏』。比そのものは判定に使わない。",
+          "rationale": "O(1) W/m² は forge の float32 ULP 帯と同程度で、比は意味を持たない。桁の一致だけを見る。"
+        },
+        {
+          "key": "X3_deep_velocity",
+          "quantity": "深部 (z/W >= 4) の |U| の準定常性",
+          "criterion": "両ソルバとも check_quasisteady 相当で末尾が頭打ち。片方だけ緩和が遅い場合は『未収束につき判定不能』とし、差を物理差と呼ばない。",
+          "rationale": "第 1 版で SU2 が 40k 反復でも深部に 200 m/s を残した。緩和の遅さ自体はソルバ固有でない。"
+        },
+        {
+          "key": "X4_integral",
+          "quantity": "開口から深さ 4W までの区間熱量 Q_c [W/m]",
+          "criterion": "forge/SU2 が 0.7 - 1.4 (±30-40 %)。外れたら forge 固有の疑いとして切り分けを続ける。",
+          "rationale": "局所値より積分量のほうが離散化差に鈍い。"
+        }
+      ],
+      "disqualifiers": [
+        "どちらかの run に NaN/Inf がある",
+        "SU2 が Error Exit した (2026-09-20 の FGMRES subspace 事故のような設定起因を含む)",
+        "メッシュが同一 gmsh モデル由来でない",
+        "μ, γ, R, Pr, 壁温, 入口状態のいずれかが xcheck_state.json と一致しない"
+      ]
     },
     {
-     "key": "X4_integral",
-     "quantity": "開口から深さ 4W までの区間熱量 Q_c [W/m]",
-     "criterion": "forge/SU2 が 0.7 - 1.4 (±30-40 %)。外れたら forge 固有の疑いとして切り分けを続ける。",
-     "rationale": "局所値より積分量のほうが離散化差に鈍い。"
+      "id": "T4-3D",
+      "name": "3D (縦すきま × 横すきま) の深さ分布照合 (#27)",
+      "status": "void",
+      "_why": "計算がまだ存在しない。完全な事前登録。",
+      "reference": "TP-1187 run 8 位置 II (θ=90°, W=0.18 cm, Pt,c=17.2 MPa, α=0.2°)、TC 87–92 (深さ 3.81 / 2.54 / 1.52 / 0.76 / 0.51 / 0.25 cm)。実測 q/q_FP = 0.00 / 0.05 / (欠) / 2.44 / 3.21 / 4.06",
+      "observation_model": "薄肉スキン (304SS, 0.8 mm) の順方向過渡を必ず通す (#24)。生の q_conv と実測を直接比較しない。",
+      "criteria": [
+        {
+          "key": "D1_impinging",
+          "quantity": "縦すきま中心線断面の q/q_FP 深さ分布",
+          "criterion": "**検出限界 0.02 以上の実測点すべて**を、観測モデル適用後の CFD 帯が覆う (点数の閾値は設けない — 任意の点数基準で一次検証を成立させない)",
+          "band": "薄板 (304SS, 0.8 mm) の順方向過渡をリップ熱的接続の両極 (断熱端/連続端) で挟んだ帯",
+          "rationale": "『何点合えば合格』は用途要求からも実験の不確かさからも出ない。限界以上の点は全部合わせる、限界未満は判定しない、という切り方なら実験自身の記述だけで決まる。"
+        },
+        {
+          "key": "D2_monotonic",
+          "quantity": "深さ方向の単調減衰",
+          "criterion": "CFD・実測とも z/d に対して単調減少 (隣接点比 1.2 倍以内の局所反転は許容)",
+          "rationale": "分布の形が合わなければ点別の一致は偶然。"
+        },
+        {
+          "key": "D3_bare_lateral",
+          "quantity": "タイル中心線断面 (給気されない素の横すきま) の深さ分布",
+          "criterion": "照合対象ではない。D1 が合格した計算からのみ case/49 へ渡す。",
+          "rationale": "実測がない断面なので、検証済みの計算からの外挿であることを明記して渡す。"
+        }
+      ],
+      "disqualifiers": [
+        "D1 が不合格なら D3 を case/49 へ渡さない",
+        "check_convergence / check_quasisteady が DRIFTING のまま報告する",
+        "check_wall_resolution が FAIL"
+      ],
+      "_revised": "2026-09-20 codex result-3 M2 を受けて作り直した。旧版は (i) 比較量を h/h_FP と書いていたが §4.4a により TP-1187 は**冷壁 q/q_FP**、(ii) 精度に [W70] の ±0.68 kW/m² を流用していた、(iii) 『6 点中 4 点』に根拠が無かった。",
+      "quantity": "q/q_FP (冷壁 q 比。§4.4a の形式 (i)。h 比ではない — すきま内の T_aw が外部と違うが原報は割っていない)",
+      "detection_limit": {
+        "rule": "q/q_FP < 0.02 の実測点は合否判定から外す (TP-1187 自身が精度に疑義を記している)",
+        "excluded_points": [
+          "TC 87 (深さ 3.81 cm, 実測 0.00)"
+        ],
+        "judged_points": [
+          "TC 92 (4.06)",
+          "TC 91 (3.21)",
+          "TC 90 (2.44)",
+          "TC 88 (0.05)"
+        ]
+      },
+      "_voided": "2026-09-22 ユーザ判断で 3D 取り止め。判定不能として失効 (revisions 参照)。"
+    },
+    {
+      "id": "T4-3D-AB",
+      "name": "3D 生産の前に回す A/B — 縦すきま上流端の扱い (#52 (e))",
+      "status": "pre_registered",
+      "_written": "2026-09-25 — **両腕の結果を見る前に**書いた。腕 A は実行中 (run_0049_ab3d_wall)、腕 B は未投入 (run_0050_ab3d_open)。",
+      "_why": "上流端を壁で塞ぐのは #52 の簡略 2。Table III(c)/(f) の run 8 は L=15.24 と 30.48 を同時計測しており、縦すきまの上流端の接続が変わるだけで TC 92/91/90 が 4.06/3.21/2.44 → 2.93/2.19/1.39 (比 0.72/0.68/0.57) と 28-43 % 動く。塞ぐ簡略が同じ桁で効くなら生産に使えない。",
+      "arms": {
+        "A": "run_0049_ab3d_wall — 縦すきま上流端 (x=-L) を無滑り壁で塞ぐ。メッシュ gap3d_c50 (1,010,580 セル)",
+        "B": "run_0050_ab3d_open — 上流横すきま (x∈[-L-W,-L]、全 z、深さ D、エッジ半径つき) へ開く。メッシュ gap3d_c50b (1,426,740 セル)"
+      },
+      "controlled": "上流端以外は同一 (同じ生成器・同じ入口分布 run_0002_fp_t8_long x=1.7076 m・同じ IC の作り方・同じ段構成・qAccumulatorFP64: 1・FORGE_CUDA_BLOCKSIZE=128)。**メッシュ規模は腕 B の方が大きい**ので、差が出たときは格子の差と交絡しうることを明記する。",
+      "criteria": [
+        {
+          "key": "AB1_qw",
+          "quantity": "前向き壁 (x=+W/2) の q_w、z<=6 mm の帯、深さ 0.25 / 0.51 / 0.76 cm (TC 92/91/90 相当)",
+          "criterion": "**3 点とも |A-B| / max(|A|,|B|) < 10 %** なら簡略 2 は生産に使ってよい (腕 A を採用)。1 点でも 10 % 以上なら腕 B を生産構成にする。",
+          "rationale": "10 % は run 8 と run 14 (同一公称条件の反復) の浅部ばらつき 8-14 % の内側。反復ばらつきに埋もれる差は実測と照合しても見分けられない。"
+        },
+        {
+          "key": "AB2_pwall",
+          "quantity": "前向き壁の最大静圧 (衝突の強さ)",
+          "criterion": "|A-B| / max < 10 %。AB1 と食い違ったら腕 B を採る。",
+          "rationale": "q_w は壁温差と乱流に依存するが、よどみ圧は衝突そのものの強さを直接見る。"
+        }
+      ],
+      "gating": [
+        "両腕とも check_convergence.py の判定区間 (main 段) と check_quasisteady.py (--series-csv の q_tc92,q_tc91,q_tc90,p_fwd_max) を通し、**両方が STEADY** になってから比較する。",
+        "片方でも DRIFTING / TRANSIENT-UNSETTLED なら比較しない (run を伸ばす)。",
+        "深さの定義はここでは上面 y=0 からの鉛直距離。実測との対応づけ (D1) は別途固定が要る (TP-1187 の s は『タイル半径中心弧からの表面距離』)。A/B は同一定義の両腕比較なのでこの定義で足りる。"
+      ],
+      "disqualifiers": [
+        "結果を見てから 10 % の閾値を動かさない",
+        "未収束・未定常の場どうしを比べて『差が無い』と言わない"
+      ]
     }
-   ],
-   "disqualifiers": [
-    "どちらかの run に NaN/Inf がある",
-    "SU2 が Error Exit した (2026-09-20 の FGMRES subspace 事故のような設定起因を含む)",
-    "メッシュが同一 gmsh モデル由来でない",
-    "μ, γ, R, Pr, 壁温, 入口状態のいずれかが xcheck_state.json と一致しない"
-   ]
-  },
-  {
-   "id": "T4-3D",
-   "name": "3D (縦すきま × 横すきま) の深さ分布照合 (#27)",
-   "status": "void",
-   "_why": "計算がまだ存在しない。完全な事前登録。",
-   "reference": "TP-1187 run 8 位置 II (θ=90°, W=0.18 cm, Pt,c=17.2 MPa, α=0.2°)、TC 87–92 (深さ 3.81 / 2.54 / 1.52 / 0.76 / 0.51 / 0.25 cm)。実測 q/q_FP = 0.00 / 0.05 / (欠) / 2.44 / 3.21 / 4.06",
-   "observation_model": "薄肉スキン (304SS, 0.8 mm) の順方向過渡を必ず通す (#24)。生の q_conv と実測を直接比較しない。",
-   "criteria": [
+  ],
+  "revisions": [
     {
-     "key": "D1_impinging",
-     "quantity": "縦すきま中心線断面の q/q_FP 深さ分布",
-     "criterion": "**検出限界 0.02 以上の実測点すべて**を、観測モデル適用後の CFD 帯が覆う (点数の閾値は設けない — 任意の点数基準で一次検証を成立させない)",
-     "band": "薄板 (304SS, 0.8 mm) の順方向過渡をリップ熱的接続の両極 (断熱端/連続端) で挟んだ帯",
-     "rationale": "『何点合えば合格』は用途要求からも実験の不確かさからも出ない。限界以上の点は全部合わせる、限界未満は判定しない、という切り方なら実験自身の記述だけで決まる。"
+      "date": "2026-09-20",
+      "gate": "T4-3D",
+      "trigger": "codex result-3 M2",
+      "what": "比較量を h/h_FP → q/q_FP に訂正、精度を [W70] の ±0.68 kW/m² → TP-1187 自身の q/q_FP<0.02 に差し替え、『6 点中 4 点』を『検出限界以上の全点』に変更",
+      "_note": "**帯を緩めた変更ではない** (点数基準を撤去して全点要求にしたので厳しくなっている)。"
     },
     {
-     "key": "D2_monotonic",
-     "quantity": "深さ方向の単調減衰",
-     "criterion": "CFD・実測とも z/d に対して単調減少 (隣接点比 1.2 倍以内の局所反転は許容)",
-     "rationale": "分布の形が合わなければ点別の一致は偶然。"
+      "date": "2026-09-22",
+      "gate": "T4-3D",
+      "trigger": "ユーザ判断 (3D 取り止め)",
+      "what": "T4-3D (D1 検出限界 0.02 以上の全点を帯が覆う / D2 単調減衰 / D3 D1 合格時のみ case/49 へ) を**失効**させた。3D 計算を行わないため判定不能。削除せず記録として残す。",
+      "_replacement": "T4 は『分母 q_FP の整合診断』のみに縮退 (run_0002_fp_t8_long、解析と 1-2 %、実測比 1.188/1.219)。判定ゲートは作らない。case/49 への受け渡しは case/51 の T2' (桁の下界試験) へ移した (case/51/acceptance.json)。",
+      "_note": "帯を緩めた変更ではなく、判定そのものを取り下げた変更である。"
     },
     {
-     "key": "D3_bare_lateral",
-     "quantity": "タイル中心線断面 (給気されない素の横すきま) の深さ分布",
-     "criterion": "照合対象ではない。D1 が合格した計算からのみ case/49 へ渡す。",
-     "rationale": "実測がない断面なので、検証済みの計算からの外挿であることを明記して渡す。"
+      "date": "2026-09-25",
+      "what": "T4-3D を void のまま残し、**T4-3D-AB を新規に事前登録**した。T4-3D 自体は #52 (c) で書き直す (D1 の基準値を run 8/14 の反復区間にする / D3 を削除 / D4 = L 依存を新設)。",
+      "why": "3D をユーザ判断で復活させ (2026-09-25)、幾何が #27 の設計と違っていた (z=7.62 cm は下流列の縦すきま中心線) ため。D3 の前提『素の横すきま断面が同一計算に同居する』は Fig 2(a) より不成立。"
     }
-   ],
-   "disqualifiers": [
-    "D1 が不合格なら D3 を case/49 へ渡さない",
-    "check_convergence / check_quasisteady が DRIFTING のまま報告する",
-    "check_wall_resolution が FAIL"
-   ],
-   "_revised": "2026-09-20 codex result-3 M2 を受けて作り直した。旧版は (i) 比較量を h/h_FP と書いていたが §4.4a により TP-1187 は**冷壁 q/q_FP**、(ii) 精度に [W70] の ±0.68 kW/m² を流用していた、(iii) 『6 点中 4 点』に根拠が無かった。",
-   "quantity": "q/q_FP (冷壁 q 比。§4.4a の形式 (i)。h 比ではない — すきま内の T_aw が外部と違うが原報は割っていない)",
-   "detection_limit": {
-    "rule": "q/q_FP < 0.02 の実測点は合否判定から外す (TP-1187 自身が精度に疑義を記している)",
-    "excluded_points": [
-     "TC 87 (深さ 3.81 cm, 実測 0.00)"
-    ],
-    "judged_points": [
-     "TC 92 (4.06)",
-     "TC 91 (3.21)",
-     "TC 90 (2.44)",
-     "TC 88 (0.05)"
-    ]
-   },
-   "_voided": "2026-09-22 ユーザ判断で 3D 取り止め。判定不能として失効 (revisions 参照)。"
-  }
- ],
- "revisions": [
-  {
-   "date": "2026-09-20",
-   "gate": "T4-3D",
-   "trigger": "codex result-3 M2",
-   "what": "比較量を h/h_FP → q/q_FP に訂正、精度を [W70] の ±0.68 kW/m² → TP-1187 自身の q/q_FP<0.02 に差し替え、『6 点中 4 点』を『検出限界以上の全点』に変更",
-   "_note": "**帯を緩めた変更ではない** (点数基準を撤去して全点要求にしたので厳しくなっている)。"
-  },
-  {
-   "date": "2026-09-22",
-   "gate": "T4-3D",
-   "trigger": "ユーザ判断 (3D 取り止め)",
-   "what": "T4-3D (D1 検出限界 0.02 以上の全点を帯が覆う / D2 単調減衰 / D3 D1 合格時のみ case/49 へ) を**失効**させた。3D 計算を行わないため判定不能。削除せず記録として残す。",
-   "_replacement": "T4 は『分母 q_FP の整合診断』のみに縮退 (run_0002_fp_t8_long、解析と 1-2 %、実測比 1.188/1.219)。判定ゲートは作らない。case/49 への受け渡しは case/51 の T2' (桁の下界試験) へ移した (case/51/acceptance.json)。",
-   "_note": "帯を緩めた変更ではなく、判定そのものを取り下げた変更である。"
-  }
- ]
+  ]
 }
