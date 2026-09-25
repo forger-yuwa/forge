@@ -389,6 +389,7 @@ $$\widehat M_n = \min\Big(1, \frac{\sqrt{\tfrac12(V_{nL}^2+V_{nR}^2)}}{\hat c}\B
 
 既定は 0 (演算としてビット同一)。**面法線マッハを全面に使った版 (`mSLAU`) には収束悪化と格子感度の報告がある**
 ため ([Furusawa & Kitamura 2023](https://doi.org/10.1002/fld.5183))、本実装は壁隣接面への局所適用に限る。
+**検証範囲**: 非周期・非軸対称の node 生産構成 (case/46・case/48・case/16・SERN 2D)。周期・軸対称は小規模試験のみ (生産規模では未使用)。
 設計判断と検証は [`plans/active/convection-slau-wall-normal-chi.md`](../../plans/active/convection-slau-wall-normal-chi.md)。
 
 #### 風上化と残差

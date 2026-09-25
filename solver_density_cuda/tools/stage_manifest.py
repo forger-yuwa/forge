@@ -107,7 +107,15 @@ YAML_HARD_PATHS = [
     ("conjugate.back", ("conjugate", "back")),
     ("conjugate.h_c", ("conjugate", "h_c")),
     ("conjugate.relax", ("conjugate", "relax")),
+    # 壁隣接面の質量流束 χ を面法線マッハから取る opt-in (plan convection-slau-wall-normal-chi, 既定 0)。
+    # 空間離散化を変えるので 0 と 1 を同一区間にしない (codex result-3 M5, 2026-09-25)。
+    ("space.slauWallNormalChi", ("space", "slauWallNormalChi")),
 ]
+
+# 既定値と同じなら**キーごと落とす** hard キー。省略と明示の既定値を同一区間にし、
+# このキーを足す前に書かれた stage_manifest.json (キー無し) とも一致させるため。
+# (`space.limiterScaled` / `space.venkatK` も省略と明示で割れるが、既定が変わった経緯があり別判断。)
+YAML_HARD_DEFAULTS = {"space.slauWallNormalChi": "0"}
 
 
 def _yaml_grab(text, paths):
@@ -140,7 +148,10 @@ def _grab(text, pats):
     for name, pat in pats:
         m = re.search(pat, text or "")
         if m:
-            out[name] = m.group(1).strip().strip('"\'')
+            # flow 形式 `{convMethod: 1, limiter: 2}` では `\S+` が区切りの `,` `}` まで拾い、
+            # 同じ値が末尾のキーか否かで `2}` / `2,` に割れていた (block 形式とも不一致)。
+            # 区切り記号を落として書式に依存しない値にする (2026-09-25, plan convection-slau-wall-normal-chi #12)。
+            out[name] = m.group(1).rstrip(",}]").strip().strip('"\'')
     return out
 
 
@@ -175,6 +186,9 @@ def stage_key(cfg_text, bcond_text, run_dir=None):
     k = _grab(cfg_text, HARD_PATTERNS)
     # **構造解析の値で上書きする** (正規表現より優先。書式差で取りこぼさないため)。
     k.update(_yaml_grab(cfg_text, YAML_HARD_PATHS))
+    for name, dflt in YAML_HARD_DEFAULTS.items():
+        if name in k and k[name] == dflt:
+            del k[name]
     k["bcond_sha1"] = hashlib.sha1((bcond_text or "").encode()).hexdigest()[:12]
     # ソルバ内 CHT: 連成の有無と固体の中身 (plan §5.1 #67 ④)。
     try:
