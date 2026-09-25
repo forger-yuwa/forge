@@ -107,18 +107,56 @@ YAML_HARD_PATHS = [
     ("conjugate.back", ("conjugate", "back")),
     ("conjugate.h_c", ("conjugate", "h_c")),
     ("conjugate.relax", ("conjugate", "relax")),
-    # 壁隣接面の質量流束 χ を面法線マッハから取る opt-in (plan convection-slau-wall-normal-chi, 既定 0)。
-    # 空間離散化を変えるので 0 と 1 を同一区間にしない (codex result-3 M5, 2026-09-25)。
-    ("space.slauWallNormalChi", ("space", "slauWallNormalChi")),
+    # space.slauWallNormalChi は既定が構成依存 (auto) になったので YAML の値でなく**実効値**で扱う
+    # (下の infer_wall_normal_chi と segments()。plan convection-slau-wall-normal-chi-default §4.3)。
     # 流束方式そのもの。SLAU→ROE の切替を 1 区間に連結しない (plan convection-slau-wall-normal-chi-usage-rule
     # codex plan m8, 2026-09-25)。solver は必須キーで既定値が無いので、大文字小文字だけ揃える。
     ("solver", ("solver",)),
 ]
 
-# 既定値と同じなら**キーごと落とす** hard キー。省略と明示の既定値を同一区間にし、
-# このキーを足す前に書かれた stage_manifest.json (キー無し) とも一致させるため。
-# (`space.limiterScaled` / `space.venkatK` も省略と明示で割れるが、既定が変わった経緯があり別判断。)
-YAML_HARD_DEFAULTS = {"space.slauWallNormalChi": "0"}
+CHI_KEY = "space.slauWallNormalChi.effective"
+MANIFEST_VERSION = 2
+
+
+def fnv1a64(data):
+    """forge の appendLaunchRecord (main.cpp) と同じ FNV-1a 64。段と forge_launches.jsonl の起動を結び付ける。"""
+    h = 14695981039346656037
+    for b in (data.encode() if isinstance(data, str) else data):
+        h ^= b
+        h = (h * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return format(h, "x")
+
+
+def infer_wall_normal_chi(cfg_text):
+    """solverConfig から slauWallNormalChi の実効値を**推定**する (C++ solverConfig.cpp の auto 解決と同じ規則)。
+    戻り (値 "0"/"1", 由来 "explicit"/"inferred")。起動の記録 (forge_launches.jsonl) があればそちらが正本。"""
+    try:
+        import yaml
+        doc = yaml.safe_load(cfg_text or "") or {}
+    except Exception:
+        return "0", "inferred"
+    sp = doc.get("space") or {}
+    if isinstance(sp, dict) and "slauWallNormalChi" in sp:
+        return str(int(sp["slauWallNormalChi"])), "explicit"
+    ms = doc.get("mesh") or {}
+    node = str(ms.get("discretization", "")).strip('"\'') == "node"
+    nwd = int(ms.get("nodeWallDirichlet", 1)) == 1
+    slau = str(doc.get("solver", "")).strip('"\'').upper() in ("SLAU", "SLAU2")
+    return ("1" if (node and nwd and slau) else "0"), "inferred"
+
+
+def load_launches(run_dir):
+    """forge_launches.jsonl を読む (cfg_fnv → 最後の起動の実効値)。無ければ空。"""
+    out = {}
+    p = os.path.join(str(run_dir), "forge_launches.jsonl") if run_dir else None
+    if p and os.path.exists(p):
+        for line in open(p):
+            try:
+                r = json.loads(line)
+                out[r["cfg_fnv"]] = str(int(r["slauWallNormalChi"]))
+            except Exception:
+                continue
+    return out
 
 
 def _yaml_grab(text, paths):
@@ -191,9 +229,7 @@ def stage_key(cfg_text, bcond_text, run_dir=None):
     k.update(_yaml_grab(cfg_text, YAML_HARD_PATHS))
     if "solver" in k:
         k["solver"] = k["solver"].upper()
-    for name, dflt in YAML_HARD_DEFAULTS.items():
-        if name in k and k[name] == dflt:
-            del k[name]
+    k[CHI_KEY] = infer_wall_normal_chi(cfg_text)[0]
     k["bcond_sha1"] = hashlib.sha1((bcond_text or "").encode()).hexdigest()[:12]
     # ソルバ内 CHT: 連成の有無と固体の中身 (plan §5.1 #67 ④)。
     try:
@@ -220,21 +256,44 @@ class StageManifest:
             "restart_from": restart_from if restart_from is not None else (
                 self.stages[-1]["tag"] if self.stages else None),
             "key": stage_key(cfg_text, bcond_text, self.run),
+            "cfg_fnv": fnv1a64(cfg_text or ""),
+            "chi_source": infer_wall_normal_chi(cfg_text)[1],
             "soft": _grab(cfg_text, SOFT_PATTERNS),
         })
 
     def write(self):
         p = os.path.join(self.run, "stage_manifest.json")
         with open(p, "w") as f:
-            json.dump({"stages": self.stages}, f, indent=2, ensure_ascii=False)
+            json.dump({"manifest_version": MANIFEST_VERSION, "stages": self.stages}, f, indent=2, ensure_ascii=False)
         return p
 
 
-def segments(man):
-    """hard キーが同じ連続区間に切る。戻り値 [[stage, ...], ...]"""
-    segs, cur = [], []
+def _normalize(man, launches):
+    """段の key を実効値で揃える (旧形式の移行と起動記録での確定)。戻り: 段のコピーのリスト。"""
+    out = []
     for st in man["stages"]:
-        if cur and st["key"] != cur[-1]["key"]:
+        st = dict(st); k = dict(st["key"])
+        if CHI_KEY not in k:
+            # 旧形式 (manifest_version < 2): 明示 1 は "space.slauWallNormalChi": "1"、キー無しは当時の既定 0
+            k[CHI_KEY] = str(k.pop("space.slauWallNormalChi", "0"))
+            st["chi_source"] = "legacy"
+        fnv = st.get("cfg_fnv")
+        if launches and fnv in launches:
+            k[CHI_KEY] = launches[fnv]
+            st["chi_source"] = "launch"
+        st["key"] = k
+        out.append(st)
+    return out
+
+
+def segments(man, launches=None):
+    """hard キーが同じ連続区間に切る。戻り [[stage, ...], ...]。
+    実効値が**推定** (inferred) の段と、確定 (launch/explicit/legacy) の段は、値が同じでも連結しない
+    (由来不明の推定値を既知と自動連結しない。plan convection-slau-wall-normal-chi-default §4.3、codex plan M1)。"""
+    segs, cur = [], []
+    for st in _normalize(man, launches):
+        inf = st.get("chi_source") == "inferred"
+        if cur and (st["key"] != cur[-1]["key"] or inf != (cur[-1].get("chi_source") == "inferred")):
             segs.append(cur); cur = []
         cur.append(st)
     if cur:
@@ -254,7 +313,7 @@ def main():
               "無い run では**判定区間を人が明示する**しかない (AGENTS.md 収束確認)。")
         return 2
     man = json.load(open(p))
-    segs = segments(man)
+    segs = segments(man, load_launches(a.run))
     print("=== %s : %d 段 / %d 区間 ===" % (a.run, len(man["stages"]), len(segs)))
     for i, sg in enumerate(segs):
         tags = " -> ".join(s["tag"] for s in sg)

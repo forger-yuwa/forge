@@ -40,6 +40,8 @@ FORGE_EXE="${FORGE_BIN:-$ROOT/solver_density_cuda/build/forge}"
 "${FORGE_BIN:-$ROOT/solver_density_cuda/build/forge}" > forge_run.log 2>&1
 rc=$?
 echo "[run_case] forge exit=$rc"
+# 実効設定 (起動エコー) を RUN_PROVENANCE にも写す (plan convection-slau-wall-normal-chi-default §4.2)
+grep -h "^'slauWallNormalChi' effective" forge_run.log >> RUN_PROVENANCE.txt 2>/dev/null || true
 
 echo "[run_case] convergence check ->"
 # 判定の終了コードを **握りつぶさず記録する**。段階起動では段ごとに未収束でも先へ進むのが正しいので

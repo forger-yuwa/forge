@@ -82,6 +82,41 @@
 #include "cuda_forge/periodicNode_d.cuh"
 
 #include <cuda_runtime.h>
+#include <sys/stat.h>
+#include <ctime>
+#include <fstream>
+#include <sstream>
+
+// 起動ごとの実効設定の記録 (plan convection-slau-wall-normal-chi-default §4.3、codex plan M1)。
+// run_case.sh は forge_run.log / RUN_PROVENANCE.txt を起動ごとに上書きし、段階起動の runner は残差しか退避しないので、
+// 段ごとの実効値は forge 自身が **追記** で残す。stage_manifest.py が cfg_fnv (solverConfig.yaml の FNV-1a 64) で段と結び付ける。
+static unsigned long long fnv1a64File(const std::string& path)
+{
+    std::ifstream f(path, std::ios::binary);
+    unsigned long long h = 14695981039346656037ULL;
+    char buf[1 << 16];
+    while (f) {
+        f.read(buf, sizeof(buf));
+        for (std::streamsize i = 0; i < f.gcount(); ++i) { h ^= (unsigned char)buf[i]; h *= 1099511628211ULL; }
+    }
+    return h;
+}
+
+static void appendLaunchRecord(const solverConfig& cfg)
+{
+    struct stat st{};
+    long long exeSize = 0, exeMtime = 0;
+    if (stat("/proc/self/exe", &st) == 0) { exeSize = (long long)st.st_size; exeMtime = (long long)st.st_mtime; }
+    std::ostringstream os;
+    os << "{\"time\": " << (long long)std::time(nullptr)
+       << ", \"cfg_fnv\": \"" << std::hex << fnv1a64File("solverConfig.yaml") << "\""
+       << ", \"bcond_fnv\": \"" << fnv1a64File("bcondConfig.yaml") << std::dec << "\""
+       << ", \"exe_size\": " << exeSize << ", \"exe_mtime\": " << exeMtime
+       << ", \"slauWallNormalChi\": " << cfg.slauWallNormalChi
+       << ", \"slauWallNormalChi_source\": \"" << cfg.slauWallNormalChiReason << "\"}";
+    std::ofstream out("forge_launches.jsonl", std::ios::app);
+    if (out) out << os.str() << "\n";
+}
 
 
 #define CHECK_LAST_CUDA_ERROR() checkLast(__FILE__, __LINE__)
@@ -1089,6 +1124,7 @@ cudaConfig initializeSimulation(
 {
     cout << "Read Solver Config \n";
     cfg.read("solverConfig.yaml");
+    appendLaunchRecord(cfg);
 
     // 化学種 DB の host 側解決 (GPU 非依存; 未知種名はここで exit)。bcond の X{s}→Y{s} 換算と
     // 起動ログ (種表) が使う。thermo_init_db は同じ結果を device へ上げる。

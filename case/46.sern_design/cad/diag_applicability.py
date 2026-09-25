@@ -44,7 +44,8 @@ REQ = [
     ("turbulence.sstEnergyIncludesK", ("turbulence", "sstEnergyIncludesK"), {"0"}, "0", ":516 の p* 差"),
     ("space.lowMachPrecond", ("space", "lowMachPrecond"), {"0"}, "0", "散逸スケール c'"),
     ("time.deltaT.lowMachPrecond", ("time", "deltaT", "lowMachPrecond"), {"0"}, "0", "散逸スケール c' (deltaT 側の綴り)"),
-    ("space.slauWallNormalChi", ("space", "slauWallNormalChi"), {"0"}, "0", "--wall-normal-chi は置換予測用"),
+    # 既定は構成依存 (auto、2026-09-26)。省略かつ起動エコーが無ければ実効値が確定しないので NG (要求 0 を満たさない)。
+    ("space.slauWallNormalChi", ("space", "slauWallNormalChi"), {"0"}, "auto", "--wall-normal-chi は置換予測用"),
     ("space.badReconFallback", ("space", "badReconFallback"), {"0"}, "0", "面状態の差し替え"),
     ("mesh.isAxisymmetric", ("mesh", "isAxisymmetric"), {"0"}, "0", "適用範囲外 (軸対称)"),
     ("physProp.isAxisymmetric", ("physProp", "isAxisymmetric"), {"0"}, "0", "適用範囲外 (軸対称、旧配置)"),
@@ -69,6 +70,10 @@ def log_echo(log_text):
         out[f"{sec}.{key}"] = val
     for k, v in re.findall(r"^'(\w+)':\s*(\S+)", log_text, re.M):
         out.setdefault(k, v)
+    # 実効値の行 (plan convection-slau-wall-normal-chi-default §4.2): "'slauWallNormalChi' effective: 1 (auto: ...)"
+    m = re.search(r"^'slauWallNormalChi' effective:\s*(\d)", log_text, re.M)
+    if m:
+        out["space.slauWallNormalChi"] = m.group(1)
     return out
 
 

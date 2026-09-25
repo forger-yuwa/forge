@@ -602,9 +602,10 @@ void solverConfig::read(std::string fname)
         }
         if (space["slauWallNormalChi"]) {
             this->slauWallNormalChi = space["slauWallNormalChi"].as<int>();
-            std::cout << "'slauWallNormalChi' in 'space': " << this->slauWallNormalChi
-                      << (this->slauWallNormalChi ? "  (wall-adjacent faces: mass-flux chi from face-normal Mach)"
-                                                  : "  (off; bit-identical)") << std::endl;
+            if (this->slauWallNormalChi != 0 && this->slauWallNormalChi != 1) {
+                throw std::runtime_error("Key 'slauWallNormalChi' in 'space' must be 0 (off) or 1 (omit it for auto).");
+            }
+            this->slauWallNormalChiReason = "explicit";
         }
         if (space["roeEntropyFixCoeff"]) {
             this->roeEntropyFixCoeff = space["roeEntropyFixCoeff"].as<flow_float>();
@@ -677,10 +678,24 @@ void solverConfig::read(std::string fname)
         if (this->badReconFallback < 0 || this->badReconFallback > 100) {
             throw std::runtime_error("Key 'badReconFallback' in 'space' must be 0 (off) or 1..100 (hysteresis visits; SU2 uses 20).");
         }
-        if (this->slauWallNormalChi != 0) {
-            if (this->slauWallNormalChi != 1) {
-                throw std::runtime_error("Key 'slauWallNormalChi' in 'space' must be 0 (off) or 1.");
+        // 省略 = auto の解決 (plan convection-slau-wall-normal-chi-default §4.1)。明示 1 の検査は下で従来どおり。
+        if (this->slauWallNormalChi < 0) {
+            if (this->discretization != "node") {
+                this->slauWallNormalChi = 0; this->slauWallNormalChiReason = "auto: " + this->discretization;
+            } else if (this->nodeWallDirichlet != 1) {
+                this->slauWallNormalChi = 0; this->slauWallNormalChiReason = "auto: nodeWallDirichlet=" + std::to_string(this->nodeWallDirichlet);
+            } else if (this->solver != "SLAU" && this->solver != "SLAU2") {
+                this->slauWallNormalChi = 0; this->slauWallNormalChiReason = "auto: solver=" + this->solver;
+            } else {
+                this->slauWallNormalChi = 1; this->slauWallNormalChiReason = "auto: node+nodeWallDirichlet+" + this->solver;
             }
+        }
+        // **起動エコーは常に 1 行** (stage_manifest・RUN_PROVENANCE・diag_applicability の正本)。
+        std::cout << "'slauWallNormalChi' effective: " << this->slauWallNormalChi
+                  << " (" << this->slauWallNormalChiReason << ")"
+                  << (this->slauWallNormalChi ? "  (wall-adjacent faces: mass-flux chi from face-normal Mach)"
+                                              : "  (off; bit-identical to the pre-2026-09-23 flux)") << std::endl;
+        if (this->slauWallNormalChi != 0) {
             if (this->discretization != "node") {
                 throw std::runtime_error("'slauWallNormalChi: 1' in 'space' requires 'mesh.discretization: node' "
                                          "(the wall CV drain it addresses is specific to node-centred Dirichlet wall nodes).");

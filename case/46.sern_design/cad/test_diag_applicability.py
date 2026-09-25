@@ -59,7 +59,7 @@ check("否定: 内部面がツールと食い違う → 診断不能", not ok)
 # ---- キー検査 ----
 cfg = {"mesh": {"discretization": "node", "nodeWallDirichlet": 1}, "solver": "SLAU",
        "space": {"convMethod": 0}, "physProp": {"thermalMethod": 2}}
-echo = {"solver": "SLAU", "space.convMethod": "0", "physProp.thermalMethod": "2"}
+echo = {"solver": "SLAU", "space.convMethod": "0", "physProp.thermalMethod": "2", "space.slauWallNormalChi": "0"}
 _, bad, unconf = check_config(cfg, echo, {"wall": {"physID": 3, "kind": "wall"}}, True)
 check("肯定: 既知構成の設定 → キー OK", bad == [])
 check("肯定: エコーの無いキーは『未確認』に列挙", "space.slauContactFloor" in unconf)
@@ -78,5 +78,14 @@ check("否定: slauContactFloor 0.01 → 診断不能", bool(bad))
 _, bad, _ = check_config(cfg, dict(echo, **{"space.convMethod": "1"}), {}, True)
 check("否定: convMethod の yaml 0 / エコー 1 → 診断不能", bool(bad))
 
+from diag_applicability import log_echo
+e = log_echo("'slauWallNormalChi' effective: 1 (auto: node+nodeWallDirichlet+SLAU)  (wall-adjacent ...)\n")
+check("新エコー形式を読める (実効 1)", e.get("space.slauWallNormalChi") == "1")
+_, bad, _ = check_config(cfg, dict(echo, **{"space.slauWallNormalChi": "1"}), {}, True)
+check("否定: 実効 1 (auto で有効) の run → 診断不能 (診断は flag 0 の run で行う)", bool(bad))
+_, bad, _ = check_config(cfg, {k: v for k, v in echo.items() if k != "space.slauWallNormalChi"}, {}, True)
+check("否定: 省略かつエコー無し → 実効値未確定で診断不能", bool(bad))
+_, bad, _ = check_config(cfg, dict(echo, **{"space.slauWallNormalChi": "0"}), {}, True)
+check("肯定: エコーで実効 0 → キー OK", bad == [])
 print("VERDICT:", "PASS" if fails == 0 else f"FAIL ({fails})")
 sys.exit(1 if fails else 0)

@@ -263,7 +263,7 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
 
         SLAU_d<<<dimGrid_normal_halo , cuda_cfg.dimBlock>>> (
             cfg.convMethod, cfg.limiter, slauVariant, cfg.reconT,
-            cfg.slauWallNormalChi,
+            (cfg.slauWallNormalChi > 0 ? 1 : 0),   // 未解決の auto (-1) を有効扱いにしない
             cfg.slauContactFloor,
             cfg.lowMachPrecond, cfg.precondEps,
             cfg.lowMachThornber,

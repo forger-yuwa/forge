@@ -215,11 +215,11 @@ def build_segment_csv(run_dir):
     import csv as _csv
     import json as _json
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from stage_manifest import segments
+    from stage_manifest import segments, load_launches
     p = os.path.join(run_dir, 'stage_manifest.json')
     if not os.path.exists(p):
         return None
-    segs = segments(_json.load(open(p)))
+    segs = segments(_json.load(open(p)), load_launches(os.path.dirname(p)))
     if not segs:
         return None
     seg = segs[-1]
