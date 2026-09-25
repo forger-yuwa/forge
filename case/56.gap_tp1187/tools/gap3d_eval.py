@@ -52,11 +52,14 @@ def main():
     ap.add_argument("--depth", type=float, default=6.35e-2)
     ap.add_argument("--zband", type=float, default=6.0e-3, help="z の帯 [m] (熱電対の横方向範囲)")
     ap.add_argument("--tol", type=float, default=1.0e-6)
+    ap.add_argument("--min-step", type=int, default=0,
+                    help="この step 未満のスナップショットを捨てる。**段階起動では必須** "
+                         "— 暖機段の出力が同じ step 番号で混ざり、定常性判定が別方程式の過渡を含む")
     ap.add_argument("--csv", default=None)
     a = ap.parse_args()
     xd = 0.5 * a.w
 
-    ss = snaps(a.run)
+    ss = [(k, f) for k, f in snaps(a.run) if k >= a.min_step]
     if not ss:
         raise SystemExit(f"{a.run}: res_gap_6_*.h5 が無い (bcond gap の outputHDFflg を確認)")
     rows = []
@@ -64,18 +67,32 @@ def main():
         c, q, ps = forward_wall(f, xd, a.r, a.depth, a.zband, a.tol)
         if len(c) < 4:
             print(f"  step {step}: 前向き壁の節点が {len(c)} 個しか取れない"); continue
-        o = np.argsort(-c[:, 1])                       # 浅い -> 深い
-        y, qq = c[o, 1], q[o]
-        vals = []
-        for d in DEPTH_CM:
-            vals.append(float(np.interp(-d * 1e-2, y[::-1], qq[::-1])))
-        rows.append([step] + vals + [float(ps.max())])
+        # **z 線ごとに深さ補間してから帯で平均する**。帯内の全節点を y でソートして
+        # np.interp に渡すと、同じ y に複数の z の値が重なって深さごとに 1 節点を
+        # 拾うだけになり、時系列が桁で振れる (2026-09-25 に踏んだ。抽出アーチファクト)。
+        zs = np.unique(np.round(c[:, 2], 9))
+        prof = np.full((len(zs), len(DEPTH_CM)), np.nan)
+        for iz, z0 in enumerate(zs):
+            m = np.abs(c[:, 2] - z0) < 1e-9
+            if m.sum() < 3:
+                continue
+            yy, qq = c[m, 1], q[m]
+            o = np.argsort(yy)                          # 深い -> 浅い (y 昇順)
+            prof[iz] = np.interp([-d * 1e-2 for d in DEPTH_CM], yy[o], qq[o])
+        vals = np.nanmean(prof, axis=0)
+        spread = np.nanstd(prof, axis=0)
+        iz0 = int(np.argmin(np.abs(zs)))                # 縦すきま中心線に最も近い z 線
+        vals0 = prof[iz0]
+        rows.append([step] + list(vals) + list(vals0) + [float(ps.max())])
         if step == ss[-1][0]:
-            print(f"[{a.run}] step {step}  前向き壁の節点 {len(c)} (z<={a.zband*1e3:.1f} mm)")
-            for tc, d, v in zip(TC, DEPTH_CM, vals):
-                print(f"   TC {tc}  深さ {d:.2f} cm   q_w = {v:11.2f} W/m^2")
+            print(f"[{a.run}] step {step}  前向き壁: z 線 {len(zs)} 本 x 節点 {len(c)} "
+                  f"(z<={a.zband*1e3:.1f} mm)")
+            for tc, d, v, sd, v0 in zip(TC, DEPTH_CM, vals, spread, vals0):
+                print(f"   TC {tc}  深さ {d:.2f} cm   帯平均 q_w = {v:11.2f} +- {sd:9.2f}"
+                      f"   z=0 線 {v0:11.2f} W/m^2")
             print(f"   前向き壁の最大静圧 = {ps.max():.2f} Pa")
-    cols = ["step"] + [f"q_tc{t}" for t in TC] + ["p_fwd_max"]
+    cols = (["step"] + [f"q_tc{t}" for t in TC]
+            + [f"q0_tc{t}" for t in TC] + ["p_fwd_max"])
     if a.csv:
         out = Path(a.csv)
         np.savetxt(out, np.array(rows), delimiter=",", header=",".join(cols),

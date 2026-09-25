@@ -25,6 +25,8 @@ _sp = _ilu.spec_from_file_location("c56_make_case", HERE / "make_case.py")
 mc = _ilu.module_from_spec(_sp); _sp.loader.exec_module(mc)
 from gas_htst import htst                                          # noqa: E402
 import extract_inlet_table as eit                                  # noqa: E402
+sys.path.insert(0, str(TOOLS))
+from stage_manifest import StageManifest                            # noqa: E402
 
 SPECIES = mc.SPECIES
 BC_SYM = """sym:    {physID: 7, kind: slip, outputHDFflg: 0, ints: , floats: }
@@ -82,6 +84,28 @@ def patch_ic_profile(h5, tab, gas, Tw):
               f"U 端 {u.max():.1f} m/s, T 範囲 {T.min():.1f}-{T.max():.1f} K")
 
 
+def cfg_of(stage_kw):
+    """段の solverConfig 本文 (アキュムレータ ON を含む最終形)。"""
+    return mc.CFG.format(species=", ".join(SPECIES), **stage_kw).replace(
+        "detectNaN: 1", "detectNaN: 1, qAccumulatorFP64: 1")
+
+
+def write_manifest(rd, stages, bc_text):
+    """段ごとの**実効設定**を stage_manifest.json に残す。
+
+    これが無いと `check_convergence.py --segment` が使えず、判定区間を人が言うしかない
+    (AGENTS.md 収束確認: 段名では方程式・BC・離散化の同一性を保証できない)。
+    """
+    sm = StageManifest(rd)
+    prev = None
+    for tag, kw in stages:
+        sm.add(tag, cfg_of(kw), bc_text, history=f"residual_history_{tag}.csv",
+               restart_from=prev)
+        prev = tag
+    sm.write()
+    print(f"  stage_manifest.json: {len(stages)} 段")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True)
@@ -104,6 +128,8 @@ def main():
                          "(REG 136 -> 481 スレッド) を超えて起動できない。**値は結果に効く**ので "
                          "A/B の両腕で必ず揃える (2D 生産 run も 128)")
     ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--manifest-only", action="store_true",
+                    help="既存 run に stage_manifest.json だけを後付けする (計算しない)")
     a = ap.parse_args()
     os.environ["FORGE_CUDA_BLOCKSIZE"] = str(a.blocksize)
 
@@ -118,18 +144,22 @@ def main():
 
     rd = CASE / a.run
     rd.mkdir(exist_ok=True)
-    for f in list(rd.glob("res_*")) + list(rd.glob("*.log")) + list(rd.glob("residual_history*")):
-        f.unlink()
-    shutil.copy(CASE / "mesh" / f"{a.mesh}.h5", rd / "mesh.h5")
-    mc.m50.write_species_db(rd)
-    (rd / "probe.yaml").write_text(
-        "outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n", encoding="utf-8")
+    if not a.manifest_only:          # **既存 run を壊さない** (res_* / ログを消すため)
+        for f in (list(rd.glob("res_*")) + list(rd.glob("*.log"))
+                  + list(rd.glob("residual_history*"))):
+            f.unlink()
+        shutil.copy(CASE / "mesh" / f"{a.mesh}.h5", rd / "mesh.h5")
+    if not a.manifest_only:
+        mc.m50.write_species_db(rd)
+        (rd / "probe.yaml").write_text(
+            "outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n", encoding="utf-8")
 
     # --- 入口分布 ---
     tabf = rd / "_inlet_table.txt"
-    subprocess.run([sys.executable, str(HERE / "extract_inlet_table.py"),
-                    "--run", a.inlet_run, "--x", str(a.inlet_x),
-                    "--out", str(tabf), "--steady"], check=True)
+    if not a.manifest_only:
+        subprocess.run([sys.executable, str(HERE / "extract_inlet_table.py"),
+                        "--run", a.inlet_run, "--x", str(a.inlet_x),
+                        "--out", str(tabf), "--steady"], check=True)
     raw = np.loadtxt(tabf, skiprows=1)
     cols = tabf.read_text().splitlines()[0].split()
     tab = {c: raw[:, i] for i, c in enumerate(cols)}
@@ -138,8 +168,9 @@ def main():
     bc = mc.BC.format(ro=rho, U=U, p=p, t=T, tw=a.tw, kinf=k_inf, ominf=om_inf,
                       ymf=ymf, ints="{inletProfile: 1}")
     bc += mc.BC_GAP.format(tw=a.tw) + BC_SYM
-    (rd / "bcondConfig.yaml").write_text(bc, encoding="utf-8")
-    patch_ic_profile(rd / "mesh.h5", tab, gas, a.tw)
+    if not a.manifest_only:
+        (rd / "bcondConfig.yaml").write_text(bc, encoding="utf-8")
+        patch_ic_profile(rd / "mesh.h5", tab, gas, a.tw)
 
     a_inf = float(np.sqrt(gas.gamma(T) * gas.R * T))
     common = dict(mu_inf=mu, lam_inf=gas.lam(T), cp_ref=gas.cp(T), gam_ref=gas.gamma(T),
@@ -159,6 +190,9 @@ def main():
                                 out_int=a.out_int, **common)))
     (rd / "stages.json").write_text(json.dumps(
         [{**st, "tag": tag} for tag, st in stages], indent=2), encoding="utf-8")
+    write_manifest(rd, stages, bc)
+    if a.manifest_only:
+        print("manifest-only: ここで終了 (計算も上書きもしない)"); return
     (rd / "case_setup.json").write_text(json.dumps(
         dict(tp1187_run=a.series, M=o["M"], T_inf=T, U_inf=U, rho_inf=rho, p_inf=p,
              mu_inf=mu, T_aw=o["T_aw"], Tt_c=o["Tt_c"], Tw=a.tw, mesh=a.mesh,
@@ -168,13 +202,14 @@ def main():
         indent=2, ensure_ascii=False), encoding="utf-8")
 
     # **FP64 影アキュムレータを全段で入れる** (深部の float32 アーチファクトを消す)。
-    cfg0 = mc.CFG.format(species=", ".join(SPECIES), **stages[0][1])
-    (rd / "solverConfig.yaml").write_text(
-        cfg0.replace("detectNaN: 1", "detectNaN: 1, qAccumulatorFP64: 1"), encoding="utf-8")
-    # 入口分布の CSV は solverConfig.yaml が要る (gen が読む) のでここで作る
-    subprocess.run([sys.executable, str(TOOLS / "gen_inlet_profile.py"), "gen",
-                    "--run", str(rd), "--physID", "1", "--table", str(tabf),
-                    "--axis", "y"], check=True)
+    if not a.manifest_only:
+        cfg0 = mc.CFG.format(species=", ".join(SPECIES), **stages[0][1])
+        (rd / "solverConfig.yaml").write_text(
+            cfg0.replace("detectNaN: 1", "detectNaN: 1, qAccumulatorFP64: 1"), encoding="utf-8")
+        # 入口分布の CSV は solverConfig.yaml が要る (gen が読む) のでここで作る
+        subprocess.run([sys.executable, str(TOOLS / "gen_inlet_profile.py"), "gen",
+                        "--run", str(rd), "--physID", "1", "--table", str(tabf),
+                        "--axis", "y"], check=True)
     print(f"  段: {', '.join(t for t, _ in stages)}  -> {rd}")
     if a.dry:
         print("dry: 投入しない"); return
