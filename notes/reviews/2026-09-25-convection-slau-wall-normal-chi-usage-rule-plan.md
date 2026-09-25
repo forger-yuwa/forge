@@ -1,6 +1,6 @@
 # codex レビュー: convection-slau-wall-normal-chi-usage-rule (plan)
 
-- **plan**: [`plans/active/convection-slau-wall-normal-chi-usage-rule.md`](../../plans/active/convection-slau-wall-normal-chi-usage-rule.md)
+- **plan**: [`plans/accepted/convection-slau-wall-normal-chi-usage-rule.md`](../../plans/accepted/convection-slau-wall-normal-chi-usage-rule.md)
 - **stage**: `plan`
 - **date**: 2026-09-25
 - **commit**: `615eafda` (feature/sern-design)
@@ -22,13 +22,13 @@
 
    対象は `EXH/AIR` の二成分ですが、Roe は左右の面状態を **`sp[0]` の単成分物性**で再構成します。Roe 平均状態も `thermo_T_from_h(sp, 1, &Yone, ...)` であり、混合組成を使いません。根拠: [Roe の左面状態](/home/sano/work/forge-sern-design/solver_density_cuda/cuda_forge/convection/convectiveFlux_roe_d.inc.cuh:159)、[Roe 平均状態](/home/sano/work/forge-sern-design/solver_density_cuda/cuda_forge/convection/convectiveFlux_roe_d.inc.cuh:242)。
 
-   したがって、[plan §4.4](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:70) の比較には流束方式以外の差が混入します。壁 CV への流束が初手で反転することも、力係数の精度を保証しません。また、同一物理の比較ができたとしても、最細格子 1 点で Roe に近いだけでは正しさを決められません。
+   したがって、[plan §4.4](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:70) の比較には流束方式以外の差が混入します。壁 CV への流束が初手で反転することも、力係数の精度を保証しません。また、同一物理の比較ができたとしても、最細格子 1 点で Roe に近いだけでは正しさを決められません。
 
    **対案:** 現行 Roe による Q3 を外し、独立精度評価は保留する。同じ混合物性・BC を扱う参照手法と、その格子・反復誤差を確認できるまで、Q1 の結果を「正否」に読み替えない。Roe の多成分化を行うなら、本件の「コード変更なし」とは別の計画にする。
 
 2. **Major — 2D メッシャの `scale` は格子密度ではなく物理寸法を変える**
 
-   [plan §4.2](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:58) は `scale` で細分化するとしています。しかし runner は **`scale=H`** を渡し、メッシャは接続を作った後に **`coords *= prm.scale`** を実行します。根拠: [runner](/home/sano/work/forge-sern-design/design/forge_design/evaluate/runner_sern.py:495)、[メッシャ](/home/sano/work/forge-sern-design/design/forge_design/meshing/mesh_sern.py:325)。
+   [plan §4.2](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:58) は `scale` で細分化するとしています。しかし runner は **`scale=H`** を渡し、メッシャは接続を作った後に **`coords *= prm.scale`** を実行します。根拠: [runner](/home/sano/work/forge-sern-design/design/forge_design/evaluate/runner_sern.py:495)、[メッシャ](/home/sano/work/forge-sern-design/design/forge_design/meshing/mesh_sern.py:325)。
 
    この値を半分にしても節点数は増えません。物理寸法を縮めれば、今回の粘性計算では Reynolds 数も変わり、固定形状の格子比較になりません。
 
@@ -36,7 +36,7 @@
 
 3. **Major — Q4 は未定常な過渡を「限界サイクル」に変更して通せる**
 
-   [plan §4.5・§6](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:75) の「一度倍にしても STEADY でなければ限界サイクル」は成立しません。判定器は `DRIFTING`、`OSCILLATING`、`TRANSIENT-UNSETTLED` を明確に分けています。根拠: [判定実装](/home/sano/work/forge-sern-design/solver_density_cuda/tools/check_quasisteady.py:293)。単調増加する人工系列を実際に判定すると、長さを倍にしても `DRIFTING` のままでした。
+   [plan §4.5・§6](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:75) の「一度倍にしても STEADY でなければ限界サイクル」は成立しません。判定器は `DRIFTING`、`OSCILLATING`、`TRANSIENT-UNSETTLED` を明確に分けています。根拠: [判定実装](/home/sano/work/forge-sern-design/solver_density_cuda/tools/check_quasisteady.py:293)。単調増加する人工系列を実際に判定すると、長さを倍にしても `DRIFTING` のままでした。
 
    また、§4.1 の「2D 生産は flag 0 で収束」は既存記録と矛盾します。保存された本段 CSV を再判定した結果は、両側とも次のとおりです。
 
@@ -47,7 +47,7 @@
 
 4. **Major — Q2 の `D_inter` だけでは CFL 独立性を示せない**
 
-   [plan §6 Q2](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:106) は、累積 CFL を揃えた run 間差だけを判定します。両者が同じ過渡を追えば、この差は小さくなります。前計画はそのために **各 run 自身の `D_intra`** を要求していました。根拠: [前計画 V7](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:469)。
+   [plan §6 Q2](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:106) は、累積 CFL を揃えた run 間差だけを判定します。両者が同じ過渡を追えば、この差は小さくなります。前計画はそのために **各 run 自身の `D_intra`** を要求していました。根拠: [前計画 V7](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:469)。
 
    `D_inter(1) ≤ 2 D_inter(0)` も、flag 0 の差が丸め床付近なら不安定な判定です。両側が ε を十分下回っていても落ち得ます。
 
@@ -57,7 +57,7 @@
 
 5. **Major — Q1 の分岐は、格子極限について誤った結論を出し、未定義の場合もある**
 
-   [plan §6 Q1](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:105) の比率 `>0.7` は、異なる極限への収束を意味しません。例えば
+   [plan §6 Q1](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:105) の比率 `>0.7` は、異なる極限への収束を意味しません。例えば
 
    \[
    \Delta(h)=0.04h^{1/4}
@@ -71,7 +71,7 @@
 
 6. **Major — 適用規則の条件が壁 CV 排出を識別していない**
 
-   [plan §4.1](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:53) の条件は「床到達 > 0 **または** 高速な壁隣接内点」です。しかし、[`--summary` の実装](/home/sano/work/forge-sern-design/case/46.sern_design/cad/diag_wall_cv_budget.py:141) は**全域**の床到達数を数えており、壁 CV に限定していません。
+   [plan §4.1](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:53) の条件は「床到達 > 0 **または** 高速な壁隣接内点」です。しかし、[`--summary` の実装](/home/sano/work/forge-sern-design/case/46.sern_design/cad/diag_wall_cv_budget.py:141) は**全域**の床到達数を数えており、壁 CV に限定していません。
 
    速度条件も排出の十分条件ではありません。接線速度が大きくても、法線速度と圧力差がゼロなら、その面の質量流束はゼロです。実装でフラグが変える項は **`(χ_n−χ)ΔP`** であり、再構成後の面状態を使います。根拠: [SLAU 実装](/home/sano/work/forge-sern-design/solver_density_cuda/cuda_forge/convection/convectiveFlux_slau_d.inc.cuh:541)。
 
@@ -79,7 +79,7 @@
 
 7. **Major — 引き継ぐ振幅評価は、両側の差の不確かさを過小評価する**
 
-   [plan §4.2](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:61) が参照する #10b 式は、不確かさを **両 run の半幅の大きい方**と定義しています。根拠: [前計画 #10b](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:942)。
+   [plan §4.2](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:61) が参照する #10b 式は、不確かさを **両 run の半幅の大きい方**と定義しています。根拠: [前計画 #10b](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:942)。
 
    位相が独立なら、差の変動には両側が寄与します。例えば平均差 0.015、半幅 0.003／0.004 では、現式は **0.019 で合格**ですが、対称な変動帯どうしの差の上限は **0.022** となり、`C_M` 許容 0.02 を超えます。
 
@@ -87,7 +87,7 @@
 
 8. **Minor — `stage_manifest` は SLAU→Roe の切替を区間として分離しない**
 
-   [plan §6](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:109) は全 run を `--segment` で判定しますが、[`stage_key`](/home/sano/work/forge-sern-design/solver_density_cuda/tools/stage_manifest.py:184) の hard キーには `solver` がありません。同一 config の `solver: SLAU` を `ROE` に変えた呼出しで、**`stage_key(SLAU) == stage_key(ROE)`** を再現しました。
+   [plan §6](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:109) は全 run を `--segment` で判定しますが、[`stage_key`](/home/sano/work/forge-sern-design/solver_density_cuda/tools/stage_manifest.py:184) の hard キーには `solver` がありません。同一 config の `solver: SLAU` を `ROE` に変えた呼出しで、**`stage_key(SLAU) == stage_key(ROE)`** を再現しました。
 
    **対案:** 将来 Q3 を実施するときは、Roe 側だけの独立した履歴・manifest を作り、SLAU の履歴を連結しない。共通ツールで保証するなら `solver` を hard キーに追加して検証する。
 

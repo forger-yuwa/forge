@@ -1,6 +1,6 @@
 # codex レビュー: convection-slau-wall-normal-chi-usage-rule (plan)
 
-- **plan**: [`plans/active/convection-slau-wall-normal-chi-usage-rule.md`](../../plans/active/convection-slau-wall-normal-chi-usage-rule.md)
+- **plan**: [`plans/accepted/convection-slau-wall-normal-chi-usage-rule.md`](../../plans/accepted/convection-slau-wall-normal-chi-usage-rule.md)
 - **stage**: `plan`
 - **date**: 2026-09-25
 - **commit**: `e5ed2312` (feature/sern-design)
@@ -38,7 +38,7 @@
 
 2. **Major — 生産許容の参照値が旧値になっている**
 
-   **根拠:** [対象 plan:40](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:40) は、sern-3d §8 を出典として `|ΔC_M|≤0.02` としています。しかし、[実際の §8:1918](/home/sano/work/forge-sern-design/plans/active/tooling-nozzle-sern-3d.md:1918) は **`0.05`** です。直後に「2026-09-21、ユーザ決定で `0.02→0.05`」と明記されています。
+   **根拠:** [対象 plan:40](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:40) は、sern-3d §8 を出典として `|ΔC_M|≤0.02` としています。しかし、[実際の §8:1918](/home/sano/work/forge-sern-design/plans/active/tooling-nozzle-sern-3d.md:1918) は **`0.05`** です。直後に「2026-09-21、ユーザ決定で `0.02→0.05`」と明記されています。
 
    したがって「差 `0.023` は現行の生産許容を超える」という前提は成立しません。**前回レビューもこの旧値を踏襲しており、訂正が必要です。** ただし、既存 `C_L/C_M` の未定常性が解消されるわけではありません。
 
@@ -46,7 +46,7 @@
 
 3. **Major — Q1 の「3 結論」は、依然として網羅的でも排他的でもない**
 
-   **根拠:** [対象 plan:135](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:135) の条件を、そのまま人工データで評価しました。振幅はゼロ、許容は記載どおり `0.02` とします。
+   **根拠:** [対象 plan:135](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:135) の条件を、そのまま人工データで評価しました。振幅はゼロ、許容は記載どおり `0.02` とします。
 
    | 粗→中→細の値 | 判定結果 |
    |---|---|
@@ -59,7 +59,7 @@
 
 4. **Major — `|平均差| + span/2 の和` は、一般には上限にならない**
 
-   **根拠:** [対象 plan:85](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:85) は、平均を中心に半幅 `span/2` を置いています。しかし、非対称な変動では平均と最大・最小の中点は一致しません。
+   **根拠:** [対象 plan:85](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:85) は、平均を中心に半幅 `span/2` を置いています。しかし、非対称な変動では平均と最大・最小の中点は一致しません。
 
    人工系列で、flag 0 を一定 `−7`、flag 1 を各周期の9点で `−6.987`、1点で `−6.977` とすると、
 
@@ -79,7 +79,7 @@
 
 5. **Major — 上限が許容を超えただけでは、「flag が許容を超えて解を変える」と結論できない**
 
-   **根拠:** [対象 plan:135](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:135) は `U>許容` を有意な flag 差として扱います。
+   **根拠:** [対象 plan:135](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:135) は `U>許容` を有意な flag 差として扱います。
 
    例えば全格子・両 flag が同じ `−7±0.015` の周期系列なら、平均差も格子間変化もゼロです。それでも現式は `U=0.030>0.02` となり、**全く同じ系列を「flag が解を変える」と判定します**。この系列も指定閾値で `OSCILLATING`、窓間平均差はゼロでした。
 
