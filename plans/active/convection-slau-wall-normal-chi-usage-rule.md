@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `convection`
-- **status**: `draft` (codex plan 段 NO-GO → 改訂中)
+- **status**: `draft` (codex plan 段 2 回 NO-GO → 縮小して改訂中)
 - **related_docs**:
   - [`methods/convection/theory.md`](../../methods/convection/theory.md) (「既知の限界」「対策 (opt-in)」節)
   - [`procedures/recommended-settings.md`](../../procedures/recommended-settings.md) (適用規則を書く先)
@@ -15,101 +15,84 @@
 
 ## 1. 目的
 
-`space.slauWallNormalChi` を**いつ 1 にするか**の規則を決め、flag 1 が 2D 生産で動かす量の**大きさが生産許容 (R5n) に対してどこにあるか**と、
-**その差が格子で減るか**を定量化する。**どちらが正しいかは決めない** (同一混合物性・同一 BC の参照手法が無い。§4.1)。**既定値は変えない**。
+`space.slauWallNormalChi` を**いつ 1 にするか**の規則を書き、前 plan で未確定だった 2 点 — (a) 2D 生産での flag 差が生産許容の帯内か、
+(b) カウル衝撃足での flag 差 (前 plan は膨張角を測っていた) — を**既存 dump と最小限の run** で確定して閉じる。**既定値は変えない**。
+**どちらの flag が正しいかは決めない** (同一混合物性・同一 BC の参照手法が無い)。
 
 ## 2. スコープ
 
-- **やる**: 適用規則 (§4.2)、Q1 差の格子依存 (2D、3 水準 × 2 flag)、Q2 CFL 独立性 (2D、両フラグを独立に)、全 run の準定常 (§4.5)。
-  ツール 2 点 (`v7_dist.py` の壁 ID・列の引数化、`stage_manifest` の `solver` hard キー)。
-- **やらない**:
-  - **既定化** (前 plan §5.1 #11 は「既定 0 のまま・規則で使う」で閉じた。§4.1)。
-  - **正否の判定 (旧 Q3)**: **保留**。現行 Roe は EXH/AIR 2 成分 TP を `sp[0]` の単成分物性で再構成し (`convectiveFlux_roe_d.inc.cuh:159-162, 242-244`)、
-    同一物理にならない。Roe の多成分化は別 plan (本 plan はコード変更なし)。**同一物理でない比較を「参考」として回さない**。
-  - **3D の格子収束 (前 plan #9b)**: sern-3d の R5n 型を flag 1 で再取得する作業として [`tooling-nozzle-sern-3d.md`](tooling-nozzle-sern-3d.md) §5.1 へ委譲。
-  - **3D の固定点 (前 plan V7 のドリフト減衰)**: **2D の Q2 で解決した扱いにしない**。委譲先の未解決事項として残す。
-  - SU2 を第三者にすること (frozen_tp 2 成分・等温壁 TP を同一 BC で組めない)。
+- **やる**: 適用規則 (§4.1)、既存 `_v3sern/*_ext` の $C_T/C_L/C_M$ 系列の再判定 (§4.3)、衝撃足の再同定 (§4.4)、前 plan の訂正、
+  `stage_manifest` の `solver` hard キー。
+- **やらない (理由つき)**:
+  - **既定化**: 前 plan §5.1 #11 で「既定 0 のまま・規則で使う」と判断済み。
+  - **Q1 差の格子依存 (2D 3 水準)**: 撤回 (2026-09-25 `diagnostician`、codex plan-2)。規則が「2D は 0」である以上**どの決定も変えない**うえ、
+    `mesh_sern.py:347,359` が格子から機体形状を決めるので**形状固定の格子列が現状作れない** (codex が座標で確認: 3.97e-4 / 6.56e-4 H のずれ)。
+    再開するときの要件は §7。
+  - **Q2 CFL 独立性 (2D)**: 撤回。2D 生産で flag 1 を使わないので決定を変えない。3D (flag 1 必須) の CFL・格子は sern-3d の生産格子収束列で扱う。
+  - **Q3 正否の第三者**: 保留。現行 Roe は EXH/AIR 2 成分 TP を `sp[0]` の単成分物性で再構成し (`convectiveFlux_roe_d.inc.cuh:159-162, 242-244`)、
+    同一物理にならない。Roe の多成分化は別 plan。同一物理でない比較を「参考」として回さない。
+  - **3D の格子収束・固定点 (前 plan #9b・V7)**: [`tooling-nozzle-sern-3d.md`](tooling-nozzle-sern-3d.md) §5.1 へ委譲。**2D で解決した扱いにしない**。
+  - SU2 を第三者にすること (同一 BC が組めない)。
 
 ## 3. 関連 docs と前提
 
-- 前 plan の受入 (opt-in として、試験したケース・設定・区間で回帰許容内) と「未解決・適用限界」(§6.2)。
-- 2D SERN 生産の起動レシピと判定: [`tooling-nozzle-sern-chain.md`](tooling-nozzle-sern-chain.md) §4.12 / §4.16 / §4.16.1、skill `sern-eval`。
-- **2D 生産の収束状態 (訂正、codex plan M3)**: 2D 生産 (`case/46.sern_design/_r3_m1m3/sern2d_conv/flag{0,1}`) は flag 0/1 とも NaN なく完走するが、
-  残差は**全列 `NOT CONVERGED (stalled/plateau)`、本段で 0.2–0.6 桁**。比較できるのは目的量 $C_T$ が §6 閾値で STEADY だから (前 plan #10b)。
-  **「収束」とは書かない**。
-- 許容は新設しない: 力係数は sern-3d §8 の R5n ($|\Delta C_T|\le0.002$, $|\Delta C_L|\le0.002$, $|\Delta C_M|\le0.02$、絶対値)、衝撃足は前 plan V3
-  (L2 ≤ 1 %、$x_{foot}$ ≤ 格子 1 つ)、CFL 独立性は前 plan V7 の $\varepsilon$。
-- 前 plan の実測: 2D 生産 (m6_on) で flag 1 − flag 0 = $C_L$ +0.437 % / $C_M$ −0.320 % (絶対 0.0012 / 0.023)、flag0 の $C_L$ は `DRIFTING`。
-  **$C_M$ の差 0.023 は R5n 許容 0.02 を超える**。
+- 前 plan の受入と「未解決・適用限界」、および 2026-09-25 の訂正 2 件 (#10b の不確かさ式、「衝撃足」の誤同定)。
+- **生産許容 (現行)**: sern-3d §8 (`tooling-nozzle-sern-3d.md:1916-1920`、**2026-09-21 ユーザ決定で $C_M$ 0.02 → 0.05**):
+  $|\Delta C_T|\le0.002$, $|\Delta C_L|\le0.002$, $|\Delta C_M|\le0.05$。**1 回目の設計 (2026-09-25) と codex 1 回目は旧値 0.02 を踏襲していた**
+  (`diagnostician` の設計ミス、codex plan-2 M2 で訂正)。したがって「$C_M$ 差 0.023 は生産許容を超える」は撤回する。
+- **2D 生産の収束状態**: flag 0/1 とも NaN なく完走するが、残差は**全列 `NOT CONVERGED (stalled/plateau)`、本段 0.2–0.6 桁**。比較できるのは目的量が
+  §4.3 の閾値で STEADY/OSCILLATING のときだけ。「収束」とは書かない。
+- 前 plan の実測 (末尾平均): flag 差 $C_T$ 0.0003 / $C_L$ 0.0012 / $C_M$ 0.023 (いずれも現行許容の帯内)。ただし $C_L/C_M$ の準定常は
+  $C_T$ 用の閾値でしか判定されておらず、量別の閾値では**未判定** (flag0 は `DRIFTING` と記録)。
 
 ## 4. 設計方針
 
-### 4.1 既定化はしない / 正否は決めない (2026-09-25 `diagnostician` 判断、codex plan M1・M3 で改訂)
+### 4.1 適用規則 (`procedures/recommended-settings.md` に書く文、codex plan M6・plan-2 M6 で改訂)
 
-- flag 1 が**必要**な構成は、現状 1 つだけ: node + `nodeWallDirichlet: 1` で**側壁∩後端面の壁 CV が排出される 3D 接続構成**
-  (flag 0 は 3 格子とも NaN、`case/46.sern_design/README.md` の run_0443–0446)。
-- 2D 生産は flag 0/1 とも完走するが (残差はプラトー、§3)、flag 1 は $C_L$/$C_M$ を**正否不明のまま**動かす。既定 ON は既存 node 生産の答えを
-  黙って変える操作で、利得が無い。規則 (opt-in を明示) の方が監査できる (`stage_manifest` の hard キー、`RUN_PROVENANCE`)。
-- 本 plan で決めるのは (i) 適用規則、(ii) flag 差の大きさが R5n 許容に対してどこにあるか、(iii) その差が格子で減るか。**正否は決めない**。
+「`space.slauWallNormalChi: 1` は **node + `nodeWallDirichlet: 1` の 3D 側壁∩後端面接続構成 (case/46 接続模型・SERN 3D 生産) でのみ**使う。
+2D 生産・case/16・case/48・周期・軸対称は 0 (周期・軸対称は小規模試験 V6 まで)。新しい構成で 1 にするのは、**`convMethod: 0` の起動区間**で
+`diag_wall_cv_budget.py` (1 次 SLAU の再計算) により (i) 対象壁 CV (`bcondConfig` の wall physID から作る) の $\rho_w$ が 3 dump 以上単調減少し
+$\rho_w/\rho_i<0.1$、(ii) 全接続面の正味流出 $\Sigma\dot m>0$ が 3 dump 以上持続、(iii) 元の $\chi=0$ かつ $\Delta P\neq0$ の壁隣接面があり、
+同じ面状態で $\chi\to\chi_n$ に置換した再計算で当該 CV への補充 $\dot m$ が増える (元 $\chi$・$\chi_n$・$\Delta P$・置換前後の $\dot m$ を併記)、
+の 3 つを満たしたときだけ。2 次生産場での診断は再構成後の面状態が取れるまで保留。flag は `stage_manifest` の hard キーなので段の途中で切り替えない。」
 
-### 4.2 適用規則 (codex plan M6 で改訂)
+- `--summary` の床到達数 (全域) と「壁隣接内点 $|\mathbf u|>\sqrt2\hat c$」は**診断を始める兆候**であって適用条件ではない。
+- `--wall-normal-chi` は「$\chi$ を $\chi_n$ に置換して再計算する」オプションであって「元の $\chi$ を確認する」ものではない
+  (`diag_wall_cv_budget.py:75-77`)。docstring に明記する (§5.1 #5)。
 
-- **兆候 (診断を始める合図であって適用条件ではない)**: `diag_wall_cv_budget.py --summary` の床到達 > 0 (全域カウントで壁 CV に限らない)、
-  壁隣接内点 $|\mathbf u|>\sqrt2\,\hat c$ (速度だけでは流束は変わらない。flag が変える項は再構成後の面状態での $(\chi_n-\chi)\Delta P$、
-  `convectiveFlux_slau_d.inc.cuh:541`)。
-- **適用判断 (3 条件すべて)**: (1) 対象壁 CV (`bcondConfig` の wall physID から作る) の $\rho_w$ が 3 dump 以上単調減少し $\rho_w/\rho_i<0.1$;
-  (2) `diag_wall_cv_budget.py --faces-all` の全接続面正味流出 $\Sigma\dot m>0$ が 3 dump 以上持続; (3) 同 `--wall-normal-chi` で、再構成後の面状態に
-  $\chi=0$ かつ $\Delta P\ne0$ の壁隣接面がある (= 補充項が消えている)。
-- **適用範囲は既知の 3D node 側壁接続構成のみ**。周期・軸対称の生産構成へ一般化しない (V6 は小規模試験のみ)。**2D 生産は 0 のまま**
-  (Q1 の結果で「差の大きさ」を注記する)。
+### 4.2 比較式 — 差区間 (codex plan-2 M4・M5、測る前に固定)
 
-### 4.3 Q1 格子 3 水準 (codex plan M2 で改訂)
+- 各 run の末尾窓 (末尾 40 %) の観測範囲 $I_f=[\min C_f, \max C_f]$ から、**差区間** $I_\Delta=[\min C_1-\max C_0,\ \max C_1-\min C_0]$。
+- 判定 (許容帯 $B=[-\text{tol}, +\text{tol}]$): **$I_\Delta\subset B$ → 帯内**、**$I_\Delta\cap B=\emptyset$ → 差が残る**、**それ以外 → 判定不能**。
+  $I_\Delta$ は観測窓内の範囲であり、平均値の統計的不確かさ (末尾窓の前半/後半の平均差) とは**別欄**に記録する。
+- 旧式 $\lvert\Delta\rvert+a_0+a_1$ (1 回目) と前 plan #10b の式は、非対称な変動で上限にならない (codex の反例: 旧式 0.019、実最大差 0.023)。
+  前 plan #10b の $C_T$ と膨張角窓もこの差区間で再計算し、訂正行を足す (§5.1 #2。判定は計算してから書く)。
 
-**メッシャの `scale` は使わない** (`runner_sern.py:495` が `scale=H` を渡し、`mesh_sern.py:325` の `coords *= prm.scale` は**物理寸法**を変える。
-縮めると Reynolds 数が変わり、固定形状の格子比較にならない)。`H_m`・形状・領域・`cowl_thickness`・`x_out_extra`・`bot_depth`・`top_depth`・
-`vehicle_*`・`ramp_fillet` を固定し、`problem_moo_frozen_tp_cycle3op.yaml` の**解像度キーだけ**を変える:
+### 4.3 既存系列の再判定 (新規 run なし)
 
-| 水準 | `ni_up/ni_noz/ni_plume` | `nj_top/nj_bot/nj_ext_top/nj_wake` | `first_wall_frac` | `first_wake_frac` |
-| --- | --- | --- | --- | --- |
-| 粗 = 生産 | 16/160/180 | 81/51/41/9 | 0.004 | 既定 ($t_{base}/5$) |
-| 中 (×√2) | 23/226/255 | 115/72/58/13 | 0.00283 | 既定/√2 |
-| 細 (×2) | 32/320/360 | 161/101/81/17 | 0.002 | 既定/2 |
+- 対象: 前 plan の `_v3sern/v3s_flag{0,1}_ext` (72 dump、36000 step)。量 $C_T, C_L, C_M$ (`forge_design.metrics.sern_forces.force_history` で作った
+  既存 `ct_flag{0,1}.csv`)。
+- **量別の準定常閾値** (絶対許容の 1/5 を各量の末尾平均で相対化。出所を併記): $C_T$ `--drift 0.0002 --osc 0.0005` (前 plan V3 表)、
+  $C_L$ `0.0014/0.0014` (= 0.002/0.277/5)、$C_M$ `0.0014/0.0014` (= 0.05/7.16/5)、`--tail 0.4`。
+- **`DRIFTING` / `TRANSIENT-UNSETTLED` → 「判定保留」**(ラベルを変えない。延長 run は本 plan ではしない: 2D は flag 0 で生産するので決定を変えない)。
+  `STEADY` / `OSCILLATING` の量だけ §4.2 の差区間で判定する。
 
-- **run ごとの記録**: 生成コマンド全文・節点数・衝撃足窓の局所接線間隔・3 station の第一内部ノード距離・**壁ノードの生産壁折れ線からの距離 max ≤ 1e-6 H**
-  (形状不変)・`check_mesh_quality` VERDICT。
-- **IC**: 生産 flag 0 の場を `interp_field.py` で各格子へ (cross-mesh、原始量から)、`warm_adapt` 500 step (1 次・soft CFL) → 本段 12000 を flag 0 で回し、
-  その終端から `restart_field.py` で flag 0/1 を分岐して各 12000 (**別起動しない**)。
+### 4.4 衝撃足の再同定 (codex plan-2 M7、測る前に固定)
 
-### 4.4 比較式 (codex plan M7、測る前に固定)
-
-- 差は末尾 40 % の**平均差** $\Delta=\bar C^{(1)}-\bar C^{(0)}$。**上限 $U=\lvert\Delta\rvert+a_0+a_1$** ($a_f$ = 各 run の末尾 span/2。位相独立を仮定した保守側)。
-  **合格は $U\le$ 許容**。
-- 併記: **平均の安定性** $s_f=\lvert\bar C_{\text{前半}}-\bar C_{\text{後半}}\rvert$ (末尾窓の前半・後半) が許容の 1/5 以下でないと、平均差そのものを報告しない。
-- 前 plan #10b の「両 run の半幅の大きい方」は過小 (位相独立なら両側が寄与) — 前 plan に訂正行を足した (§9)。
-
-### 4.5 準定常 (codex plan M3 で改訂)
-
-- **全 run (Q1・Q2) × 全量** ($C_T$, $C_L$, $C_M$, 衝撃足 L2, $x_{foot}$) に適用。閾値: $C_T$ `--drift 0.0002 --osc 0.0005`、$C_L$ `0.0014/0.0014`、
-  $C_M$ `0.00056/0.00056`、衝撃足 `0.002/0.005`、`--tail 0.4`。
-- **`DRIFTING` / `TRANSIENT-UNSETTLED` → 本段を 1 回だけ倍にして再判定。それでも同じなら「判定保留」** (比較しない・**ラベルを変えない**・予算上限を書く)。
-  `OSCILLATING` → 平均±振幅で比較 (§4.4)。**未定常を「限界サイクル」と言い換えない**。
-- 「残差プラトー」と「目的量が比較可能」を run ごとに**別欄**で記録する。
-
-### 4.6 Q2 CFL 独立性 (codex plan M4 で改訂)
-
-- 生産格子、各フラグ・各 CFL (`cfl_main` 0.5 と 0.25、**ΣCFL を揃える**)。**まず各 run の $D_{intra}$ (種→終端) と目的量の準定常を通し、それから $D_{inter}$**。
-- 主判定は前 plan V7 と同じ「列ごと $\max\{D_{intra}(a), D_{intra}(b), D_{inter}\}\le\varepsilon$」を**フラグごとに独立に**。
-  旧案の比 $D_{inter}(1)\le2D_{inter}(0)$ は削除 (丸め床付近で不安定)。比は検出限界つきの補助情報に留める。
-- 壁集合は 2D の `bcondConfig` の wall physID から作る (`v7_dist.py` は 3D の壁 physID を固定しているので `--wall-ids` 引数化。第一内部ノードも同様)。
-  列: `ro, roUx, roUy, roe, P` はゲート ($\varepsilon$: P 0.02 %、他 0.2 %)、`roY0/roY1` は ro と同じ 0.2 %、`roK/roOmega` は**監視のみ** (許容を新設しない)。
+- **探索区間**: ランプ上の物理座標 $x\in[L_{cowl}, L_{ramp}]$ (カウル唇より下流のランプ)。**条件**: $dp_w/dx>0$ (圧縮) の最大位置 $x_f$、
+  かつ窓 $[x_f-2t, x_f+5t]$ で $p_{後}/p_{前}\ge1.1$ ($t$ = カウル板厚 2 mm)。圧縮・膨張を区別しない旧抽出 (`v3sern_foot_perrun.py:42`,
+  `v3sern_series.py:39-40`) は使わない。
+- **比較**: 両 run の壁圧を**共通の物理 x 格子** (窓内の局所間隔) に補間し、相対 L2 ≤ 1 %、$x_f$ 差 ≤ 局所間隔 1 つ (前 plan V3 と同じ許容)。
+- **各 run の準定常**: $x_f$ と窓内壁圧を `0.002/0.005` で判定 (§4.3 の規則)。差は §4.2 の差区間。
+- **圧縮足がランプ上に無ければ**「設計点 m6_on ではカウル衝撃がランプに当たらない」と記録し、**m4_off の flag 0/1 対** (2D、生産レシピ、flag 0 から分岐) を
+  1 組だけ回して同じ手順で判定する (AWS)。
 
 ## 5. 実装ステップ
 
-1. plan 改訂 + 前 plan #10b の訂正行 + codex plan 再レビュー。
-2. ツール: `v7_dist.py --wall-ids/--cols`、`stage_manifest` に `solver` hard キー + 単体試験。
-3. Q1 メッシュ 3 水準 (生成・記録・QC) + interp 起動 (flag 0)。
-4. Q1 分岐 6 run + 準定常 + 判定。Q2 4 run。
-5. 規則の本文化 (`recommended-settings.md`) + codex result。
+1. plan 縮小 + 前 plan の訂正 + codex plan 3 回目。
+2. §4.3 の再判定と §4.4 の再同定 (既存 dump。必要なら m4_off の 1 組)。
+3. `stage_manifest` の `solver` キー、`diag_wall_cv_budget.py` の docstring。
+4. 規則の本文化、codex result、accepted。
 
 ### 5.1 残作業 (優先順)
 
@@ -117,33 +100,30 @@
 
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
-| 1 | **plan 改訂 + codex plan 再レビュー** | 本改訂 (§4/§6)、前 plan #10b の訂正行。`codex_review.py --stage plan` を再度。Critical/Major は `diagnostician` に諮る | F |
-| 2 | ツール 2 点 | `case/46.sern_design/cad/v7_dist.py` に `--wall-ids` / `--cols` 引数 (既定は現行の 3D 値でビット同一の出力)、`solver_density_cuda/tools/stage_manifest.py` に `solver` hard キー + 単体試験 (SLAU↔ROE が別区間・省略 ≡ 既定 SLAU)。合格: 単体試験 PASS、`test_gate_bad_input.py` PASS | O |
-| 3 | Q1 メッシュ 3 水準 + interp 起動 (flag 0) | §4.3 の表のキーで生成、記録項目をすべて run に残す、`check_mesh_quality` PASS。`interp_field.py` → warm 500 → 本段 12000 (flag 0)。AWS、格子 ×2 で本段 ≈ 4 倍 → 計 ≈ 2–3 h | O |
-| 4 | Q1 分岐 6 run + 準定常 + 判定 | `restart_field.py` で分岐、§4.5 の準定常を全量に、§6 Q1 の 3 結論で判定。AWS ≈ 2 h | O (結論は F) |
-| 5 | Q2 4 run | 生産格子、`cfl_main` 0.5 / 0.25、ΣCFL 揃え、§4.6。AWS ≈ 1 h | O (結論は F) |
-| 6 | 規則の本文化 + codex result | 結果を §6.2 に、規則を `procedures/recommended-settings.md` に (§4.2 の 3 条件)。`methods/convection/theory.md` からリンク | F |
-| 7 | 3D の格子収束・固定点を sern-3d へ委譲 | `tooling-nozzle-sern-3d.md` §5.1 に「R5n を `slauWallNormalChi: 1` で再取得 (メッシュ生成コマンド・blocksize 記録)。3D 固定点は未解決」を 1 行 | F |
-| — | 旧 Q3 (Roe) | **保留** (別 plan: Roe 多成分化)。同一物理でない比較は回さない | — |
+| 1 | **plan 縮小 + codex plan 3 回目** | 本改訂。Critical/Major は `diagnostician` に諮る | F |
+| 2 | 既存系列の再判定 (§4.3) + 前 plan #10b の差区間での再計算 | `_v3sern/ct_flag{0,1}.csv` (AWS から csv だけ取得) に量別閾値で `check_quasisteady.py --series-csv`、`STEADY`/`OSCILLATING` の量だけ差区間 (§4.2)。前 plan #10b の $C_T$・膨張角窓も差区間で再計算し訂正行 | O |
+| 3 | 衝撃足の再同定 (§4.4) | 新スクリプト (探索区間・圧縮条件・共通 x 補間) を**結果を見る前に**書いて commit、既存 72 dump に当てる。圧縮足が無ければ m4_off の 1 組 (AWS ≈ 30 min)。結論は `diagnostician` | O (結論 F) |
+| 4 | 前 plan の訂正行 | **済 2026-09-25**: V3 表・§6.2・#14・受入の範囲・§9 を「膨張角窓の壁圧」に改名し、カウル衝撃足を「未測定」に | O |
+| 5 | ツール | `stage_manifest.py` に `solver` hard キー + 単体試験 (SLAU↔ROE が別区間・省略 ≡ 既定 SLAU)、`diag_wall_cv_budget.py` の docstring に `--wall-normal-chi` の意味。合格: 単体試験 PASS、`test_gate_bad_input.py` PASS | O |
+| 6 | 規則の本文化 + codex result → accepted | §4.1 の文を `procedures/recommended-settings.md` に、`methods/convection/theory.md` の対策節からリンク | F |
+| 7 | sern-3d への委譲 | `tooling-nozzle-sern-3d.md` §5.1 に「R5n を `slauWallNormalChi: 1` で再取得 (メッシュ生成コマンド・blocksize 記録)。3D 固定点は未解決」を 1 行 | F |
 
 ## 6. 検証
 
-**判定基準はすべて測る前に固定する** (2026-09-25 `diagnostician`、codex plan M3–M7 で改訂)。**新設の許容差は無い**。
+**判定基準はすべて測る前に固定する**。**新設の許容差は無い** (生産許容は sern-3d §8 の現行値、衝撃足は前 plan V3)。
 
 | 項目 | 量 | 判定 (測る前に固定) |
 | --- | --- | --- |
-| Q1 差の格子依存 | 量ごとに (i) 各フラグの格子間変化 $\delta^{(f)}_k=C^{(f)}_{k+1}-C^{(f)}_k$、(ii) 各格子のフラグ差上限 $U_k$ (§4.4)。量 = $C_T, C_L, C_M$、衝撃足 L2、$x_{foot}$ | 結論は 3 つだけ。**検証範囲で許容内**: 3 格子すべてで $U_k\le$ 許容、かつ両フラグとも $\lvert\delta_{\text{細}}\rvert\le$ 許容。**差が残る**: 両フラグとも $\lvert\delta_{\text{細}}\rvert\le$ 許容なのに最細で $U>$ 許容 → 「flag は許容を超えて解を変える。正否は未判定 (参照手法なし)」、規則は変えない。**判定不能**: どちらかのフラグで $\lvert\delta_{\text{細}}\rvert>$ 許容、または $\delta$ の符号が水準間で反転 → 水準を 1 つ足す (1 回のみ)、それでも同じなら「格子収束が取れない」と書く。**比率 $\Delta_{細}/\Delta_{粗}$ は分岐に使わない** (表で推移を示すだけ)。**複数量は最悪の量の結論を全体の結論にする** |
-| Q2 CFL 独立性 | 各フラグ・各 CFL の $D_{intra}$、ΣCFL を揃えた $D_{inter}$ (§4.6) | フラグごとに独立に、列ごと $\max\{D_{intra}(a), D_{intra}(b), D_{inter}\}\le\varepsilon$。比は補助情報 |
-| 準定常 | 全 run × 全量 (§4.5) | STEADY / OSCILLATING (平均±振幅) のみ比較。DRIFTING / TRANSIENT-UNSETTLED は 1 回延長、それでも同じなら判定保留 |
-| 収束 | 全 run | `check_convergence.py --segment` の VERDICT を同一設定区間で併記。「残差プラトー」と「目的量が比較可能」を別欄に |
-
-- **参照値の出所**: Q1 は同格子の flag 0 と各フラグの格子間変化 (外部参照なし)、Q2 は前 plan V7 の $\varepsilon$、許容は sern-3d §8 の R5n 値と前 plan V3。
+| 既存系列 (§4.3) | 各 run の $C_T, C_L, C_M$ | 量別閾値で `STEADY`/`OSCILLATING` の量だけ差区間 $I_\Delta$ を判定: $I_\Delta\subset B$ → 帯内 / $I_\Delta\cap B=\emptyset$ → 差が残る / それ以外 → 判定不能。`DRIFTING`/`TRANSIENT-UNSETTLED` は「判定保留」 |
+| 衝撃足 (§4.4) | 各 run の $x_f$・窓内壁圧、共通 x 格子での相対 L2、$x_f$ 差 | 各 run が `STEADY`/`OSCILLATING` のときだけ比較。相対 L2 は差区間で ≤ 1 % → 帯内 (他は §4.2 の 3 値)、$x_f$ 差 ≤ 局所間隔 1 つ。圧縮足が見つからなければ m4_off で同じ判定 |
+| ツール | `stage_manifest` 単体試験 | PASS |
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
 | plan | `2026-09-25` | [2026-09-25-convection-slau-wall-normal-chi-usage-rule-plan.md](../../notes/reviews/2026-09-25-convection-slau-wall-normal-chi-usage-rule-plan.md) | **NO-GO**, C0/M7/m1 | **全件採用** (却下なし、2026-09-25 `diagnostician` 判断。根拠は各行をコードで確認)。M1 → Q3 (Roe) を保留、目的を「正否は決めない」に (§1・§2・§4.1)。M2 → `scale` をやめ解像度キーで 3 水準・形状不変の記録・IC 手順 (§4.3)。M3 → 「2D 生産は収束」を訂正 (§3)、準定常を全 run・全量に、未定常を言い換えない (§4.5)。M4 → Q2 を $D_{intra}$ 先行・フラグごと独立・比を削除、`v7_dist.py` 引数化 (§4.6、§5.1 #2)。M5 → Q1 を「格子間変化とフラグ差を別評価・3 結論」に (§6)。M6 → 兆候と適用 3 条件を分離、適用範囲を既知 3D 構成に限定 (§4.2)。M7 → 上限 $U=\lvert\Delta\rvert+a_0+a_1$ と平均の安定性 (§4.4)、前 plan #10b に訂正行。m8 → `stage_manifest` に `solver` hard キー (§5.1 #2) |
+| plan | `2026-09-25` (2 回目) | [2026-09-25-convection-slau-wall-normal-chi-usage-rule-plan-2.md](../../notes/reviews/2026-09-25-convection-slau-wall-normal-chi-usage-rule-plan-2.md) | **NO-GO**, C0/M7/m0 | **全件採用** (2026-09-25 `diagnostician` 判断)。**M2 で前提が変わった** ($C_M$ 許容は現行 0.05、flag 差は全量帯内) ため **Q1/Q2 を撤回して plan を縮小** (§2)。M1・M3 → Q1 撤回で解消し、再開時の必須要件として §7 に残す。M4・M5 → 差区間 $I_\Delta$ と 3 値判定 (§4.2)。M6 → 適用規則を `convMethod: 0` 起動区間の 3 条件に (§4.1)。M7 → 衝撃足の再同定 (§4.4) と前 plan の訂正 (「膨張角窓の壁圧」に改名、カウル衝撃足は未測定) |
 
 ### 6.2 結果
 
@@ -151,21 +131,25 @@
 
 ## 7. 影響範囲
 
-- コード変更なし (既定値は変えない)。`procedures/recommended-settings.md` に適用規則を追加。
-- `methods/convection/theory.md` の「対策 (opt-in)」節に規則へのリンクを足す。
-- 既存ケース・手順への影響なし (既定 0 のまま)。
+- コード変更なし (既定値は変えない)。`procedures/recommended-settings.md` に適用規則、`methods/convection/theory.md` からリンク。
+- ツール: `solver_density_cuda/tools/stage_manifest.py` (`solver` キー)、`case/46.sern_design/cad/diag_wall_cv_budget.py` (docstring)、衝撃足の新抽出スクリプト。
+- **Q1 (2D 格子 3 水準) を再開するときの必須要件** (codex plan M2/plan-2 M1・M3、撤回で未実施):
+  生産格子の壁折れ線を固定入力として節点を足す格子生成器 (`mesh_sern.py:347,359` が格子から機体形状を決めるため現状不可)、
+  実在するブロックだけの解像度表 (`first_top_frac` を含む。`t_base` 未指定では wake ブロックが無い)、
+  優先順つき if/elif/else の判定表 + codex plan-2 の反例 2 つを判定器の試験に入れること。
 
 ## 8. 完了条件
 
-- [ ] `procedures/recommended-settings.md` に適用規則を本文化 (暫定を外す)
-- [ ] Q1・Q2 を §6 の基準で判定し §6.2 に記録 (旧 Q3 は保留)
-- [ ] sern-3d §5.1 に R5n の flag 1 再取得と 3D 固定点の未解決を追加 (委譲)
+- [ ] 適用規則を `procedures/recommended-settings.md` に本文化
+- [ ] §4.3 の再判定と §4.4 の再同定を §6 の基準で判定し §6.2 に記録、前 plan に結果の訂正行
+- [ ] sern-3d §5.1 に委譲の行を追加
 - [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録し、Critical / Major の採否を残作業表に反映済み
 - [ ] `status` を `done` に変更し、§9 に変更ログを記載
 - [ ] `plans/active/` → `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
 
+- `2026-09-25` — codex plan 段 2 回目 **NO-GO (C0/M7/m0)** を全件採用。**$C_M$ の生産許容は現行 0.05** (旧値 0.02 を設計と 1 回目レビューが踏襲していた) で flag 差は全量帯内 → **Q1 (格子 3 水準)・Q2 (CFL) を撤回**し、既存系列の再判定・衝撃足の再同定・適用規則だけに縮小。比較は差区間 $I_\Delta$ の 3 値判定に。前 plan の「衝撃足」は x≈0 膨張角を測っていたので訂正した。
 - `2026-09-25` — codex plan 段 **NO-GO (C0/M7/m1)** を全件採用して改訂 (§6.1)。**目的を「適用規則 + flag 差の大きさと格子依存」に狭め、正否判定 (旧 Q3 Roe) は保留** (現行 Roe は 2 成分 TP を単成分物性で組むので同一物理でない)。格子 3 水準は `scale` でなく解像度キーで、判定規則・比較式・準定常の扱いを測る前に固定し直した。
 - `2026-09-25` — 初稿。前 plan (accepted) の未解決 (#9b・#11・V7・$C_L$/$C_M$) を引き継ぐ。`diagnostician` の判断で**既定化を目的から外し**、
   適用規則の確定と 2D での正否判定に置き換えた (§4.1)。3D の格子収束は sern-3d へ委譲、3D 固定点は判断基準から外した。
