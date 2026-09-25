@@ -98,7 +98,12 @@ def main():
     ap.add_argument("--wall-normal-chi", action="store_true",
                     help="`space.slauWallNormalChi: 1` の run を解析するときに指定する。壁隣接面 (いずれかの端点が壁ノード) "
                          "の質量流束の chi を面法線 Mach で組む。**指定を忘れると別スキームの流束を計算する** "
-                         "(codex result M1: 指定なしで壁 0/接線 1000/法線 0/Δp 900 の面は mdot=0、指定ありは −0.643 kg/s)")
+                         "(codex result M1: 指定なしで壁 0/接線 1000/法線 0/Δp 900 の面は mdot=0、指定ありは −0.643 kg/s)。"
+                         "**元の chi を chi_n で置き換えて再計算する**オプションであって、元の chi を確認するものではない "
+                         "(flag 0 の run に付ければ「flag 1 にしたらどうなるか」の予測になる)。"
+                         "**1 次 SLAU の再計算で、slauContactFloor・sstEnergyIncludesK の p* 差・lowMachPrecond は入っていない** "
+                         "(それらが有効な run では実カーネルと符号まで食い違うことがある。plan "
+                         "convection-slau-wall-normal-chi-usage-rule §4.1.1)")
     ap.add_argument("--wall-phys-ids", default="",
                     help="壁の physID をカンマ区切りで (例 1,2,3,4,10,11,12,13,15)。--wall-normal-chi に必須")
     ap.add_argument("--ro-min", type=float, default=1e-4, help="roMin (床到達数の判定用)")

@@ -110,6 +110,9 @@ YAML_HARD_PATHS = [
     # 壁隣接面の質量流束 χ を面法線マッハから取る opt-in (plan convection-slau-wall-normal-chi, 既定 0)。
     # 空間離散化を変えるので 0 と 1 を同一区間にしない (codex result-3 M5, 2026-09-25)。
     ("space.slauWallNormalChi", ("space", "slauWallNormalChi")),
+    # 流束方式そのもの。SLAU→ROE の切替を 1 区間に連結しない (plan convection-slau-wall-normal-chi-usage-rule
+    # codex plan m8, 2026-09-25)。solver は必須キーで既定値が無いので、大文字小文字だけ揃える。
+    ("solver", ("solver",)),
 ]
 
 # 既定値と同じなら**キーごと落とす** hard キー。省略と明示の既定値を同一区間にし、
@@ -186,6 +189,8 @@ def stage_key(cfg_text, bcond_text, run_dir=None):
     k = _grab(cfg_text, HARD_PATTERNS)
     # **構造解析の値で上書きする** (正規表現より優先。書式差で取りこぼさないため)。
     k.update(_yaml_grab(cfg_text, YAML_HARD_PATHS))
+    if "solver" in k:
+        k["solver"] = k["solver"].upper()
     for name, dflt in YAML_HARD_DEFAULTS.items():
         if name in k and k[name] == dflt:
             del k[name]
