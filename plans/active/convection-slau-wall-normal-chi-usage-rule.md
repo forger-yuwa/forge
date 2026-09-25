@@ -153,12 +153,12 @@ $\rho_w/\rho_i<0.1$、(ii) 全接続面の正味流出 $\Sigma\dot m>0$ が 3 du
 | --- | --- | --- | --- |
 | ~~1~~ (**済 2026-09-25**: plan 3 回目 GO-with-changes C0/M4/m1、全件採用して §4 に反映) | **plan 縮小 + codex plan 3 回目** | 本改訂。Critical/Major は `diagnostician` に諮る | F |
 | ~~2~~ (**済 2026-09-25: 全 5 列帯内**、§6.2) | 既存系列の再判定 (§4.3) + 前 plan #10b の差区間での再計算 | `_v3sern/ct_flag{0,1}.csv` (AWS から csv だけ取得) の **5 列 (`C_T`, `C_T_with_shear`, `C_L`, `C_L_with_shear`, `C_M`)** に §4.3 の閾値表で `check_quasisteady.py --series-csv`、`STEADY`/`OSCILLATING` の量だけ差区間 (§4.2)。前 plan #10b の $C_T$・膨張角窓も差区間で再計算し訂正行 | O |
-| 3 | 衝撃足の再同定 (§4.4) | 新スクリプト (§4.4 の手順 1–3・分岐表、座標は `MESH/COORD`、分布比較は §4.2 の全 dump 対 $\ell_{ij}$) を**結果を見る前に**書いて commit、既存 72 dump に当てる (AWS)。m6_on で両側未検出なら m4_off の 1 組 (AWS ≈ 30 min)。結論は `diagnostician` | O (結論 F) |
+| ~~3~~ (**済 2026-09-25: 両作動点で判定保留**、§6.2) | 衝撃足の再同定 (§4.4) | 新スクリプト (§4.4 の手順 1–3・分岐表、座標は `MESH/COORD`、分布比較は §4.2 の全 dump 対 $\ell_{ij}$) を**結果を見る前に**書いて commit、既存 72 dump に当てる (AWS)。m6_on で両側未検出なら m4_off の 1 組 (AWS ≈ 30 min)。結論は `diagnostician` | O (結論 F) |
 | ~~3b~~ (**済 2026-09-25**: 既知構成で診断可能・照合 0.002×2τ_b、否定側も確認、§6.2) | 診断可能性の検査スクリプト (§4.1.1) | `case/46.sern_design/cad/diag_applicability.py`: 表のキー検査 (起動エコーと yaml の両方、省略 ≡ 既定値) + `FORGE_DUMP_MASSFLUX` 1 step 照合。合格 = 全キー OK かつ対象 CV 全接続面の $\lvert\dot m_{tool}-\dot m_{kernel}\rvert$ が前 plan V5 の許容内。試験: 既知の 3D 側壁接続 (`run_0437/res_0` 相当、AWS) で PASS、`slauContactFloor` 0.01 の config で「診断不能」を返すこと | O |
 | 4 | 前 plan の訂正行 | **済 2026-09-25**: V3 表・§6.2・#14・受入の範囲・§9 を「膨張角窓の壁圧」に改名し、カウル衝撃足を「未測定」に | O |
 | ~~5~~ (**済 2026-09-25**: `solver` hard キー 試験 10/10 PASS、docstring) | ツール | `stage_manifest.py` に `solver` hard キー + 単体試験 (SLAU↔ROE が別区間・省略 ≡ 既定 SLAU)、`diag_wall_cv_budget.py` の docstring に `--wall-normal-chi` の意味。合格: 単体試験 PASS、`test_gate_bad_input.py` PASS | O |
 | 6 | 規則の本文化 + codex result → accepted | §4.1 の文を `procedures/recommended-settings.md` に、`methods/convection/theory.md` の対策節からリンク | F |
-| 7 | sern-3d への委譲 | `tooling-nozzle-sern-3d.md` §5.1 に「R5n を `slauWallNormalChi: 1` で再取得 (メッシュ生成コマンド・blocksize 記録)。3D 固定点は未解決」を 1 行 | F |
+| ~~7~~ (**済 2026-09-25**: `tooling-nozzle-sern-3d.md` §5.1 に R5o-chi を追加。相手 plan に未コミット変更なし・直近編集 09-22 を確認してから 1 行だけ) | sern-3d への委譲 | `tooling-nozzle-sern-3d.md` §5.1 に「R5n を `slauWallNormalChi: 1` で再取得 (メッシュ生成コマンド・blocksize 記録)。3D 固定点は未解決」を 1 行 | F |
 
 ## 6. 検証
 
@@ -194,7 +194,7 @@ $\rho_w/\rho_i<0.1$、(ii) 全接続面の正味流出 $\Sigma\dot m>0$ が 3 du
 
 - 平均の安定性 (末尾窓の前半/後半の平均差) は全列で許容の 1/5 を大きく下回る (最大 $C_M$ flag1 8.3e-4)。
 - 前 plan が `DRIFTING` と記録した flag0 の $C_L$/$C_M$ は、**$C_T$ 用の閾値で判定していた**ためで、量別の閾値では `OSCILLATING`。
-- **余裕**: $C_L$ の差区間の上端 0.0016 は許容 0.002 の 8 割。「帯内」だが余裕は大きくない。
+- **余裕**: $C_L$ の差区間の上端 0.00158 は許容 0.002 の **79 %**。「帯内」だが余裕は大きくない。
 - 前 plan #10b の $C_T$ を差区間で再計算すると相対 [−0.043 %, −0.020 %] (許容 0.1 %) で判定不変。
 
 **#3b 診断可能性の検査 (2026-09-25) — 既知構成で「診断可能」、`slauContactFloor` 0.01 で「診断不能」**。
@@ -206,8 +206,20 @@ max $|\dot m_{kernel}-\dot m_{tool}|/(2\tau_b)$ = **0.002**。$\rho_w/\rho_i$ = 
 **#3 衝撃足の再同定 — m6_on は「登録条件では同定できない」** (2026-09-25、`v3sern_shockfoot.py` は結果を見る前に commit `4e90800c`)。
 両 run の末尾 29 dump すべてで識別済み候補 0。**スクリプトの不具合確認** (判定条件は変えずに中間量を出した): 探索区間 $x\in[0.120, 1.009]$ m の
 ランプ壁ノード 148 点、壁圧は 54.7 kPa → 10.3 kPa とほぼ単調に膨張。$dp/dx>0$ の局所最大 4 個の上昇比は最大 1.019 (登録条件 1.05 未満)。
-**分岐表どおり m4_off の flag 0/1 対へ** (`run_0450_m4off_flag0` 段階起動 → `run_0451_m4off_flag0_br` / `run_0452_m4off_flag1_br` 分岐、AWS)。
-**「衝撃が当たらない」とは書かない**。
+**分岐表どおり m4_off の flag 0/1 対へ**: `run_0450_m4off_flag0` (`runner_sern --op m4_off` の段階起動、`GATES: PASS`、本段 plateau) →
+`restart_field.py` で `run_0451_m4off_flag0_br` / `run_0452_m4off_flag1_br` (各 36000 step・73 dump、flag1 は起動ログ `'slauWallNormalChi' in 'space': 1` を確認、
+両方 `check_convergence` plateau)。**両 run の末尾 29 dump とも識別候補 0 → 「m4_off でも未検出 → 判定保留 (本手順では衝撃足を同定できず)」**。
+- **観察として残す** (判定条件は変えずに出した中間量。「これが衝撃足」とも「衝撃が当たらない」とも書かない): m4_off のランプ壁圧は 5.2 kPa (x=0.12 m) →
+  x≈0.29–0.36 m で 6.7 kPa まで上昇する**幅 ~0.1 m の拡散した圧縮**があり、上昇比 $r$ の最大は 1.049 @ x=0.293 m (登録 1.05 のわずか下)、
+  唇由来の判定率 0.72 (< 0.8)。codex plan-3 M2 が予告した「拡散した圧縮を取り逃がす」型に当たった。証拠 `_rule_usage/{sf_diag_m6.txt,sf_diag_m4.txt,m6_on_VERDICT.json,_rule_usage_sf/m4_off_VERDICT.json}`。
+- **$t$ の食い違い**: 前 plan の V3 ノルム定義 (2026-09-23) の $t$ = 2 mm を「カウル板厚」として継承したが、問題 YAML の `cowl_thickness` は 0.005 H = **0.5 mm** (H 0.1 m)。
+  登録値のまま使った (事後変更なし)。$r$ の採取幅 ±2t = ±4 mm は幅 0.1 m の圧縮に対して短く、未検出の一因になりうる。
+- run の所在: AWS `~/tmp/forge-rule/case/46.sern_design/run_0450–0452` (自分の worktree、他セッションの `~/forge-sern` には書いていない)。主要成果物は `_rule_usage/` に複製。
+
+**結論 (2026-09-25, `diagnostician` 確認)**:
+- **#2**: m6_on・生産格子・末尾 29 dump (step 22000–36000) の窓で、5 列とも差区間が生産許容の帯内 ($C_L$ 上端は許容の 79 %)。
+- **#3b**: 既知構成 (`run_0437/res_0`、flag 0、`convMethod 0`) で §4.1.1 の検査を通り、診断 3 条件が成立。否定側は「診断不能」を返す。**示したのは 1 dump・1 構成**で一般化しない。
+- **#3**: 登録条件では m6_on・m4_off とも衝撃足を同定できず **判定保留**。前 plan の「カウル衝撃足 未測定」はそのまま (後継 plan で 2 作動点を試み判定保留、と注記)。
 - **気づいた点 (結果の解釈は diagnostician に諮る)**: 前 plan から引き継いだ $t$ = 2 mm は「カウル板厚」とされていたが、問題 YAML の
   `cowl_thickness` は 0.005 H = 0.5 mm。登録値 2 mm はそのまま使った (事後に変えない)。
 
@@ -215,6 +227,7 @@ max $|\dot m_{kernel}-\dot m_{tool}|/(2\tau_b)$ = **0.002**。$\rho_w/\rho_i$ = 
 
 - コード変更なし (既定値は変えない)。`procedures/recommended-settings.md` に適用規則、`methods/convection/theory.md` からリンク。
 - ツール: `solver_density_cuda/tools/stage_manifest.py` (`solver` キー)、`case/46.sern_design/cad/diag_wall_cv_budget.py` (docstring)、衝撃足の新抽出スクリプト。
+- **衝撃足の再同定を将来やるときの要件**: 圧縮の幅に依らない条件 (例: 唇からの斜め衝撃の理論位置 ± 幅、または圧縮帯自身の始点–終点で $r$ を取る) を、**結果を見ていない作動点・格子で**先に登録する。今回のデータで条件を作り直すのは不可。
 - **Q1 (2D 格子 3 水準) を再開するときの必須要件** (codex plan M2/plan-2 M1・M3、撤回で未実施):
   生産格子の壁折れ線を固定入力として節点を足す格子生成器 (`mesh_sern.py:347,359` が格子から機体形状を決めるため現状不可)、
   実在するブロックだけの解像度表 (`first_top_frac` を含む。`t_base` 未指定では wake ブロックが無い)、

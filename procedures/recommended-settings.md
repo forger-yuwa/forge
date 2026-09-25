@@ -65,6 +65,30 @@ output: {level: 1}                                      # 保存量 + 原始量 
 - 出力は `output: {level: 1}` (既定)。勾配・リミッタ・診断が要る run だけ `level: 2` か `extraFields`。
   全温・全圧は `VALUE/h0` から `tools/total_quantities.py` で作る (AGENTS.md「出力と後処理の原則」)。
 
+### 1.0a 壁隣接面の $\chi$ (`space.slauWallNormalChi`) — 現行 (2026-09-25)
+
+**既定 0 のまま。1 にするのは次の構成だけ** (plan [convection-slau-wall-normal-chi-usage-rule](../plans/active/convection-slau-wall-normal-chi-usage-rule.md) §4.1、
+前 plan [convection-slau-wall-normal-chi](../plans/accepted/convection-slau-wall-normal-chi.md))。
+
+- **1 にする**: node + `nodeWallDirichlet: 1` の **3D 側壁∩後端面接続構成** (case/46 接続模型・SERN 3D 生産)。flag 0 は壁 CV が排出されて発散する (3 格子とも NaN)。
+- **0 のまま**: 2D 生産・case/16・case/48・周期・軸対称 (周期・軸対称は小規模試験 V6 まで)。
+- **新しい構成で 1 にする条件**: 診断ツール `case/46.sern_design/cad/diag_wall_cv_budget.py` の質量流束が実カーネルと一致する設定であることを
+  `case/46.sern_design/cad/diag_applicability.py` で確認し (設定キーの検査 + 同 dump の 1 step `FORGE_DUMP_MASSFLUX` で対象 CV の全接続面を照合)、
+  **`convMethod: 0` の起動区間**で次の 3 つがすべて成り立つときだけ:
+  (i) 対象壁 CV (`bcondConfig` の wall physID から作る) の $\rho_w$ が 3 dump 以上単調減少し $\rho_w/\rho_i<0.1$ ($\rho_i$ = 壁でない隣接ノードの平均);
+  (ii) 全接続面の正味流出 $\Sigma\dot m>0$ が 3 dump 以上持続;
+  (iii) 元の $\chi=0$ かつ $\Delta P\neq0$ の壁隣接面があり、$\chi\to\chi_n$ に置換した再計算で当該 CV への補充が増える。
+  **検査に落ちる設定 (例: `slauContactFloor ≠ 0`、`convMethod: 1`、`lowMachPrecond ≠ 0`、凝縮) は「診断不能」で、既知構成以外では 1 にしない**。
+  2 次生産場での診断は再構成後の面状態が取れるまで保留。
+- **段の途中で切り替えない** (`stage_manifest` の hard キー。`RUN_PROVENANCE` にも残る)。
+- **注記**:
+  - 2D 生産 (m6_on、生産格子) で flag 1 にしたときの差は $C_T$・$C_T$(摩擦込)・$C_L$・$C_L$(摩擦込)・$C_M$ の 5 列とも生産許容内 ($C_L$ は許容の 79 %)。
+    **これは 2D を 0 のままにしてよい根拠であって、1 にしてよい根拠ではない**。2D では排出の 3 条件が成立しないので 1 にしない。
+  - **衝撃がランプに当たる点の壁圧への影響は未評価** (m6_on・m4_off とも登録条件で衝撃足を同定できず判定保留)。衝撃衝突のある構成で flag 1 を使うときは、
+    その構成で壁圧分布の比較を別途行う。
+  - 診断可能性は 3D 側壁接続 (`run_0437`) で 1 dump 確認しただけ。他構成では検査を毎回通す。
+  - 1 にした run は SLAU の node カーネルのレジスタ上限に当たりうるので `FORGE_CUDA_BLOCKSIZE=128` (比較する run どうしで揃える)。
+
 ### 1.1 境界条件 — 現行 (2026-09-07)
 
 - 入口: `inlet_Pressure` (Pt/Tt/組成/k/ω)。node NS では `mesh.nodeInletCornerWall: 1` を**変換時**に付ける
@@ -316,6 +340,7 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 
 ## 変更ログ
 
+- `2026-09-25` — §1.0a に `space.slauWallNormalChi` の適用規則 (3D 側壁接続のみ 1、新構成は診断可能性の検査 + 3 条件) を追加 (plan [convection-slau-wall-normal-chi-usage-rule](../plans/active/convection-slau-wall-normal-chi-usage-rule.md))。
 - `2026-09-22` — §2.1 遷移モデル (γ–Re_θt, `turbulence.transition: lm2009`) のレシピを追加 (plan [turbulence-transition-lm2009](../plans/active/turbulence-transition-lm2009.md))。
 - `2026-09-17` — §6 に dual-time の内部反復レシピを追加 (`cfl_pseudo` 12–20 + `nSubIterDualTime` 10–20 + 緩和なし; 擬似 CFL に安定限界が見つからず、必要な nSub は `cfl_pseudo` で決まる)。定常の `implicitRelax 0.7` は据え置き。投入前チェック `check_solver_config.py` を追加。
 

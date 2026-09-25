@@ -1885,6 +1885,7 @@ $$ z^{\rm in}_i = \big(\tfrac{W}{2} - \tfrac{t_{sw}(x_i)}{2}\big)\, s_{\rm in},\
 
 | R5c | ~~SST 壁関数の壁モデル渦粘性に上限~~ **優先度低下 (2026-09-20)**: 壁関数を使わない方針になったため。欠陥の記録は §4.25 に残す。将来 `wallTreatmentSST: 1` を復活させるなら必須 |
 | R4d | **幅外を開いた後の遠方境界・領域独立性** (codex M4): `side_far` の slip 固定 (反射) を見直し、生産 TP・SST で $C_L/C_M$ まで含めた領域独立性を測る。許容値を係数ごとに数値で固定 | `r4_domain_study.py` は加速点 Euler・$C_T$ のみ |
+| **R5o-chi** | **R5n 型の格子収束列を `space.slauWallNormalChi: 1` で再取得** (2026-09-25 委譲、元: [`convection-slau-wall-normal-chi-usage-rule.md`](convection-slau-wall-normal-chi-usage-rule.md) §5.1 #7)。3D 生産は flag 0 で解を持たず常に flag 1 なので、決めるべきは flag 1 の生産解の格子収束。メッシュ生成コマンドと `FORGE_CUDA_BLOCKSIZE` を run に記録。**3D の固定点 (前 plan V7 のドリフト減衰) も未解決のまま**ここに属する | 許容は §8 (R5n)。前 plan [`convection-slau-wall-normal-chi.md`](../accepted/convection-slau-wall-normal-chi.md) §5.1 #9b・V7 |
 
 ## 6. 検証
 
