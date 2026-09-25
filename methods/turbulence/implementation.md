@@ -202,16 +202,19 @@ cell モードは ghost 経由で正しく課されるため不変。設計詳�
 壁面ダンプ (`res_<群>_<physID>_<step>.h5`) の `ypls` / `utau` は **mode ごとに定義が違う診断量**で、
 **そのまま $y_1^+$ として読んではいけない**。
 
-| mode | `utau` | `ypls` | 備考 |
-| --- | --- | --- | --- |
-| 0 (低 Re) | 分子勾配 traction の**大きさ** ([`viscousFlux_d.cu`](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) `viscousFlux_wall_d`) | $\rho u_\tau d_{cc}/\mu$。$d_{cc}$ は**ゴースト重心と内点重心の距離** | node では壁ノードが壁面に乗り $d_{cc}$ が退化 |
+| mode | 離散化 | `utau` | `ypls` | 備考 |
+| --- | --- | --- | --- | --- |
+| 0 (低 Re) | **cell** | 分子勾配 traction の**大きさ** ([`viscousFlux_d.cu`](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) `viscousFlux_wall_d`) | $\rho u_\tau d_{cc}/\mu_{total}$。$d_{cc}$ は**ゴースト重心と内点重心の距離** | 層厚規約は $y_1$ と同じだが $\mu_{total}$ (乱流粘性込み) と $|\tau|$ (法線込み) が $y^+$ の定義と違う |
+| 0 (低 Re) | **node** (2026-09-26 修正) | 同上 (未修正。`ransBoundary_d` が mode 1 で読むため触っていない) | **$y_1^+=y_1\sqrt{\rho_W\lvert\tau_t\rvert}/\mu_{\mathrm{lam},W}$** を `wallStressForOutput_node_d` が上書き。$y_1$=Normal_Neighbor の法線射影距離、$\tau_t$=`twall_*` の接線成分、**未評価は −1** | **`check_wall_resolution.py` と同定義** (ツールが正本)。**修正前は $d_{cc}$ 退化で全点厳密 0** (2026-09-26 に `case/48` で実測: 壁 1001 節点すべて 0、`utau` は 56.5–299.7 で非ゼロ)。設計は plan [`tooling-convergence-and-wall-resolution-gates.md`](../../plans/active/tooling-convergence-and-wall-resolution-gates.md) §4.6 |
 | 1 (automatic) | Reichardt 逆解き ([`ransWallFunction_d.cu`](../../solver_density_cuda/cuda_forge/ransWallFunction_d.cu)) | 代表内部点の $\rho,\mu$ と `wall_dist` から | modeled 値で上書き |
 
 **問題点** (実測 `case/49` run_0103 `cav_outer`):
 
-- **node 方式で `ypls` が 1 桁以上小さく出る**。$d_{cc}$ が退化するため。ソルバ自身、
-  流束計算では `dcc` を使わない別経路 (`∇φ·S` 弱形式) を通っている。
+- **node 方式で `ypls` が 1 桁以上小さく出る** (→ **2026-09-26 に node/mode 0 は修正済み**。上の表を参照)。
+  $d_{cc}$ が退化するため。ソルバ自身、流束計算では `dcc` を使わない別経路 (`∇φ·S` 弱形式) を通っている。
   実測: `ypls` 平均 0.043 に対し、正しい $y_1^+$ は平均 0.32・**面積の 7.8 % が 1 超**。
+  さらに `case/48` (平面 2D・低 Re) では **`ypls` が壁 1001 節点すべて厳密に 0** で、
+  **ParaView ではフィールドが存在して中身だけ 0** だった (誤読しやすい)。
 - **node の既定経路は `twall_*` だけを上書きし `utau`/`ypls` を更新しない**。そのため
   $|\boldsymbol\tau_w|/(\rho u_\tau^2)$ が 1 から外れる (中央値 0.996 だが**最大 74.5**)。
   ずれるのは**高せん断域**なので、$y_1^+$ の最大値がまさに信用できない。

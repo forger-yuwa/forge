@@ -132,6 +132,47 @@ codex が現行コードで再現した**誤合格**を先に塞ぐ。いずれ�
   **ソルバ出力の `ypls` を壁解像の根拠にしない**ことを明記。
 - 「収束確認」節: **段階起動では判定区間を明示する**ことを追記。
 
+### 4.6 ソルバ側 `ypls` を node/mode 0 で正しく出す (2026-09-26 ユーザ決定、`diagnostician` 設計)
+
+**きっかけ**: `case/48` `run_0036_v2_fem2d_nl16/res_wall_4_40000.h5` で **`ypls` が壁 1001 節点すべて厳密に 0**
+だった (同じダンプの `utau` は 56.5–299.7、`twall_x` 104–8771 でいずれも非ゼロ)。
+`viscousFlux_d.cu` の `wallTreatment==0` 分岐が書く `ypls_b = ρ u_τ d_cc/μ_total` は、
+$\rho>0$・$u_\tau>0$・$\mu>0$ なら **`ypls`=0 ⟺ `d_cc`=0** であり、node では壁ノードが壁面上に乗るため
+$d_{cc}$ (ミラーゴースト重心距離) が退化する。§1.2 は「読んではいけない」と記録していたが、
+**node ではそもそも情報を持っていない**。**ParaView ではフィールドが存在して中身だけ 0** なので、
+気づかずに「$y^+$ が小さい」と誤読する事故になる (実際にユーザがこれを指摘して本項目が起票された)。
+
+**定義** ([`check_wall_resolution.py`](../../solver_density_cuda/tools/check_wall_resolution.py) と同一。
+**ツールが正本・カーネルはその写し**):
+
+$$y_1^+ = y_1\,\frac{\sqrt{\rho_W\,|\boldsymbol\tau_t|}}{\mu_{\mathrm{lam},W}}$$
+
+- $y_1$ … 内向き法線 $-\hat n$ と最も揃う内部ノード $I$ への**法線射影**距離 (Normal_Neighbor)。
+  $\cos < 0.5$ (ツールの `--align-min` 既定) は**評価不能**。**$|x_I-x_W|$ をそのまま使わない**
+  (斜交格子で別物になる)。
+- $\boldsymbol\tau_t$ … edge kernel が確定させた `twall_*` の**接線**成分 ($\hat n$ は壁半割面の法線)。
+- $\rho_W,\mu_{\mathrm{lam},W}$ … 壁ノードの `ro` / `vis_lam`。**`mu_total` (乱流粘性込み) を使わない**
+  — $y^+$ の定義ではない。
+
+**場所**: [`viscousFlux_d.cu`](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) の
+`wallStressForOutput_node_d` **末尾** (`Tau_Wall` 再スケールの後)。隣接走査・W→I の距離・`wall_flag` が
+そこにしか無く、`twall_*` が確定するのもそこ。引数に `ro` と `ypls_b` を足すだけ。
+
+**番兵**: 評価不能は **−1**。**NaN にしない** ([`check_field_regress.py`](../../solver_density_cuda/tools/check_field_regress.py)
+が非有限値で終了する)、**0 にしない** (今回の事故そのものと区別がつかない)。
+`viscousFlux_wall_d` の node 分岐も 0 でなく −1 を書く。
+
+**触らないもの**:
+
+- **`utau_b`** — `ransBoundary_d.cu:54` が `wallTreatment==1` で $\omega$ 壁 BC に読む。**別項目にする**。
+- **cell 分岐・mode 1/2** — ビット不変のまま。cell の $d_{cc}$ 基準は「第一層厚 × $u_\tau/\nu_{total}$」で
+  層厚規約は同じなので実用上の誤読は小さい。**定義が 2 つ併存する**ことを
+  [`methods/turbulence/implementation.md`](../../methods/turbulence/implementation.md) の表と
+  `viscousFlux_d.cu` のコメントに明記する。
+
+**解がビット不変である根拠**: `ypls_b` は **device のどこからも読まれない** (全参照が書き込みか launch 引数。
+host 側は `output.cpp` が h5 へ写すだけ)。新たに読むのは `ro`/`vis_lam`/確定後の `twall_*`/幾何のみ。
+
 ## 5. 実装
 
 ### 5.1 残作業 (優先順。codex の推奨順「①不正入力拒否と段情報 → ②局所 y1・接線応力・物性 → ③閾値と適用範囲 → ④呼び出し側移行と独立検証」に合わせた)
@@ -150,6 +191,10 @@ codex が現行コードで再現した**誤合格**を先に塞ぐ。いずれ�
 | 9 | 実ケース展開 ✅: **`case/26`** (cell・壁関数) が設計 3 水準を再現 (y1 4.35/115/356 µm → y1+ 0.79/25.5/66.5)、**`case/48`** (冷却平板) が等温壁で断熱の 5 倍 (0.101→0.506) = 既知挙動と一致、**`case/49`** (node・低 Re) で `cyl_top` の全面 y1+>1 を検出。⏳ TP ケースは未 |
 | 10 | AGENTS.md に「壁解像確認 (必須)」節 + 収束節に判定区間と判定不能の 2 項目 ✅ / `methods/turbulence/implementation.md` §3.7.x に `ypls`/`utau` の mode 別定義と node での退化を記載 ✅ / `viscousFlux_d.cu` に同趣旨のコメント ✅ (コード変更なし=解はビット不変) |
 | 11 | `check_cavity_steady.py` を `classify_series` 経由に ✅ / `cavity_eval` の y1+ は参考値と明記し正式判定は共通ツールへ ✅ / ⏳ `stack_residuals.py` は #6 の段情報が入ってから統合 |
+| 12a | **カーネル実装** (2026-09-26): `wallStressForOutput_node_d` に `ro`/`ypls_b` を足し、末尾で §4.6 の $y_1^+$ を書く。`viscousFlux_wall_d` の node 分岐は −1。**実装済み** |
+| 12b | **コメントと docs**: `viscousFlux_d.cu` のコメントを「cell: $d_{cc}$・$\mu_{total}$ / node: edge kernel が $y_1$・$\mu_{lam}$・$\tau_t$ で上書き、−1=未評価」に書き換え ✅ / `methods/turbulence/implementation.md` の `ypls`/`utau` の表に離散化列を足して node/mode 0 の新定義を 1 行追加 |
+| 12c | **A/B 回帰 (2026-09-26 実施)**。同一ソースから該当ファイルだけ戻した対照バイナリ (`build-yplsbase`) ×2 と 変更後 (`build-ypls`) ×2 を、同一 IC (`run_0013_iface_base` の `res_0.h5`) で 200 step。run は `case/48.flat_plate_cooled_m4/run_0061_ypls_{base_a,base_b,new_a,new_b}` と定義確認用 `run_0060_ypls_new`。**(i) PASS**: `check_field_regress.py --boundary --factor 2` で **`ypls` 以外の 22 量すべて `ok`** (比 0.73–1.50)。`ypls` だけ NG (比 2.6e7) は**設計どおり** — 基準側が**両反復とも 1001/1001 厳密 0**、変更後が 0.438–3.994 なので、ノイズ床比では必ず外れる。**(ii) PASS**: 独立再計算との**最大相対差 3.26e-5** (許容 1e-4)、評価点 1001/1001・未評価 0。ソルバ 平均 0.5099 / p99 0.7678 / 最大 3.9944 (index 0) に対し ツールは 0.510 / 0.768 / 3.994 (index 0)。**(iv) PASS**: $y_1^+/(\sqrt{\rho|\tau_t|}/\mu)$ の中央値 **3.0001e-6 m** = 第一層厚。**(iii) 未実施**: cell + 壁関数で壁ダンプを持つ既存 run が無く、`cell` は使わない方針 ([[user-prefers-node-base]]) なので新規作成も筋が悪い。**代わりの根拠は字面**: 変更は `(isNode != 0) ? -1 : ro[ic]*utau*dcc/mu_total` の三項演算子で、`isNode==0` 側の式は**一字も変えていない**。**「ビット不変を実測した」とは書かない** |
+| 12d | `check_wall_resolution.py` の「ソルバ `ypls` 平均」表示を、**≤0 を除外しツール値との最大相対差**に変える (自己検査化。0 を平均に入れると壊れていることが見えない) |
 
 ## 6. 検証
 
@@ -160,6 +205,16 @@ codex が現行コードで再現した**誤合格**を先に塞ぐ。いずれ�
 | plan | `2026-09-19` | [`notes/reviews/2026-09-19-tooling-convergence-and-wall-resolution-gates-plan.md`](../../notes/reviews/2026-09-19-tooling-convergence-and-wall-resolution-gates-plan.md) | **NO-GO**, C0/M9/m0 | **全件採用**。M1 段名では同一性を保証できない・本段単独判定は許可すべき → §4.2 を書き直し / M2 共通列縮退は誤合格を再導入・`check_convergence` の空検査と最終 1 点ゼロの穴 → §4.1, §5.1 #1 / M3 `wall_dist` 全域パーセンタイルは局所距離でない → §4.3 / M4 `utau` と `twall` の不整合 (最大 74.5 倍) → §4.3 で接線 traction から組む / M5 Sutherland 固定は 3 経路ある物性と不整合 → §4.3 / M6 閾値が局所精度と automatic treatment を取り違え → §4.3 / M7 準定常の穴は HDF5 経路 → §5.1 #2 / M8 `check_mesh_quality` がゼロ体積・NaN 座標を通す → §5.1 #3 / M9 呼び出し側の迂回と独立検証の欠落 → §5.1 #5, #8, #9 |
 
 ### 6.2 合否条件
+
+#### 6.2b ソルバ `ypls` (§4.6) の合否 — 2026-09-26 事前登録
+
+| # | 条件 |
+| --- | --- |
+| (i) **場の非退行** | `check_field_regress.py --repeat OLD1 OLD2 --candidate NEW1 NEW2 --boundary` が **PASS (factor 2)**。**`--quantities` から `ypls` を外す** (旧側の床が厳密 0 なのでビット一致を要求すると設計上 FAIL になる) |
+| (ii) **定義一致** | NEW の `res_wall_4_<step>.h5` の `ypls` と `check_wall_resolution.py` の $y_1^+$ が、**評価点で最大相対差 ≤ 1e-4**。**未評価集合 (`ypls`<0 ⇔ ツール NaN) が完全一致**。`case/48` の期待値: 平均 **0.200** / p99 **0.232** / 最大 **1.161** (index 0) |
+| (iii) **陽性対照** | cell + 壁関数の `case/26` 短 run で `ypls` が**旧新ビット一致** (cell を触っていないことの確認) |
+| (iv) **幾何自己検査** | 構造格子で $y_1^+/(\sqrt{\rho|\tau_t|}/\mu)$ が第一層厚 **3.000e-6 m** と一致 |
+
 
 - **不正入力テスト**: 残差列ゼロ / 必須列欠損 / 最終 1 点だけゼロ / `[1,1,1,1,1,NaN]` /
   NaN 座標メッシュ / ゼロ体積四面体 が**すべて非ゼロ終了**する。

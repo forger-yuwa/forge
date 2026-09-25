@@ -667,7 +667,13 @@ __global__ void viscousFlux_wall_d
         //   (接続から壁面ごとの局所 y₁ を引き、接線 traction から u_τ を組む)。
         //   詳細は methods/turbulence/implementation.md の該当節と AGENTS.md「壁解像確認」。
         if (wallTreatment == 0) {
-            ypls_b[ib] = ro[ic]*utau*dcc/mu_total;
+            // **node では dcc が壁ノードの退化で 0 になり全点 0 だった** (2026-09-26 case/48 実測:
+            // utau 56.5-299.7 は非ゼロ、ypls は 1001/1001 が厳密 0)。node の値は
+            // wallStressForOutput_node_d が y₁⁺ の正しい定義で上書きするので、ここでは
+            // **未評価を表す -1** を置く (そのカーネルが走らない構成でも 0 と区別できる)。
+            // cell はビット不変 (従来の d_cc/μ_total 定義のまま)。
+            ypls_b[ib] = (isNode != 0) ? static_cast<flow_float>(-1.0)
+                                       : ro[ic]*utau*dcc/mu_total;
         }
         //if (ib == 1) {
         //    printf("ib = %d\n", ib);
@@ -721,7 +727,9 @@ __global__ void wallStressForOutput_node_d
  int isAxisymmetric, flow_float* axisym_divU,
 
  flow_float* twall_x_b , flow_float* twall_y_b , flow_float* twall_z_b,
- flow_float* Tau_Wall              // 壁関数 modeled τ_w=ρu_τ² (>0 で active, ransWallFunction が算出)。再スケール用。
+ flow_float* Tau_Wall ,            // 壁関数 modeled τ_w=ρu_τ² (>0 で active, ransWallFunction が算出)。再スケール用。
+ flow_float* ro ,                  // 壁解像 y₁⁺ 用 (壁ノードの密度)。nullptr なら y₁⁺ を書かない。
+ flow_float* ypls_b                // 出力専用。device のどこからも読まれない (utau_b とは違う)。
 )
 {
     geom_int ib = blockDim.x*blockIdx.x + threadIdx.x;
@@ -827,6 +835,68 @@ __global__ void wallStressForOutput_node_d
                     const flow_float sc = tauM / twMag;
                     twall_x_b[ib] *= sc; twall_y_b[ib] *= sc; twall_z_b[ib] *= sc;
                 }
+            }
+        }
+
+        // ---- 壁解像 y₁⁺ (2026-09-26 ユーザ決定。plan tooling-convergence-and-wall-resolution-gates §4.6) ----
+        // 定義は solver_density_cuda/tools/check_wall_resolution.py と同一 (**ツールが正本・ここはその写し**):
+        //     y₁⁺ = y₁ · sqrt(ρ_W |τ_t|) / μ_lam,W
+        //   y₁    … 内向き法線 -n̂ と最も揃う内部ノード I への**法線射影**距離 (Normal_Neighbor)。
+        //           cos < 0.5 (ツールの --align-min 既定) は「評価不能」。**|x_I-x_W| をそのまま使わない**
+        //           (斜交格子で別物になる)。
+        //   τ_t   … 上で確定した twall_* の**接線**成分 (法線成分を抜く)。
+        //   ρ_W,μ … 壁ノードの ro / vis_lam。**mu_total (vis_turb 込み) を使わない** — y⁺ の定義でない。
+        //
+        // **なぜここで上書きするか** (2026-09-26, case/48 run_0036 で実測): viscousFlux_wall_d が書く
+        // cell 定義 ρ u_τ d_cc/μ_total は、node では d_cc (ミラーゴースト重心距離) が壁ノードの退化で 0 に
+        // なるため **壁 1001 節点すべて厳密に 0** だった (utau は 56.5-299.7 で非ゼロ)。ParaView では
+        // フィールドが存在して中身だけ 0 なので、気づかず「y⁺ が小さい」と誤読する事故になる。
+        //
+        // **未評価は -1** を書く。NaN にしない (check_field_regress.py が非有限値で止まる)、
+        // 0 にしない (今回の事故そのものと区別がつかない)。
+        // **出力専用**: ypls_b は device のどこからも読まれない。utau_b は ransBoundary_d.cu が
+        // wallTreatment==1 で読むので**触らない**。よって解はビット不変。
+        if (ypls_b != nullptr && ro != nullptr) {
+            const flow_float inv_ss = (ss_wall > static_cast<flow_float>(1.0e-30))
+                                    ? static_cast<flow_float>(1.0)/ss_wall : static_cast<flow_float>(0.0);
+            const flow_float nx = sx[ipw]*inv_ss;
+            const flow_float ny = sy[ipw]*inv_ss;
+            const flow_float nz = sz[ipw]*inv_ss;
+
+            flow_float bestCos = static_cast<flow_float>(-2.0);
+            flow_float y1      = static_cast<flow_float>(-1.0);
+            for (geom_int j = cell_planes_index[W]; j < cell_planes_index[W+1]; ++j) {
+                const geom_int ip = cell_planes[j];
+                if (ip >= nNormalPlanes) continue;              // 内部双対面のみ
+                const geom_int a = plane_cells[2*ip+0];
+                const geom_int b = plane_cells[2*ip+1];
+                const geom_int I = (a == W) ? b : a;
+                if (wall_flag[I] != 0) continue;                // 内部ノードのみ
+                const flow_float dx = ccx[I] - ccx[W];
+                const flow_float dy = ccy[I] - ccy[W];
+                const flow_float dz = ccz[I] - ccz[W];
+                const flow_float dmag = sqrt(dx*dx + dy*dy + dz*dz);
+                if (dmag <= static_cast<flow_float>(1.0e-30)) continue;
+                const flow_float proj = -(dx*nx + dy*ny + dz*nz);   // 内向き (-n̂) 成分
+                const flow_float cs   = proj/dmag;
+                if (cs > bestCos) { bestCos = cs; y1 = proj; }
+            }
+
+            const flow_float kY1AlignMin = static_cast<flow_float>(0.5);
+            const flow_float muW = vis_lam[W];
+            if (bestCos >= kY1AlignMin && y1 > static_cast<flow_float>(0.0)
+                && muW > static_cast<flow_float>(1.0e-30)) {
+                const flow_float tx_ = twall_x_b[ib];
+                const flow_float ty_ = twall_y_b[ib];
+                const flow_float tz_ = twall_z_b[ib];
+                const flow_float tn  = tx_*nx + ty_*ny + tz_*nz;
+                const flow_float ttx = tx_ - tn*nx;
+                const flow_float tty = ty_ - tn*ny;
+                const flow_float ttz = tz_ - tn*nz;
+                const flow_float tt  = sqrt(ttx*ttx + tty*tty + ttz*ttz);
+                ypls_b[ib] = y1*sqrt(ro[W]*tt)/muW;
+            } else {
+                ypls_b[ib] = static_cast<flow_float>(-1.0);      // 評価不能 (斜交・角線ノード・物性異常)
             }
         }
     }
@@ -1169,7 +1239,8 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
                 // nullptr (Tau_Wall 未初期化のため; カーネルは nullptr で再スケール無し=解像値のまま)。
                 ((cfg.LESorRANS == 2 && cfg.RANSmodel == 1 && cfg.wallTreatmentSST == 1)
                  || wmlesActiveForBcond(cfg, bc))
-                    ? var.c_d["Tau_Wall"] : nullptr
+                    ? var.c_d["Tau_Wall"] : nullptr,
+                var.c_d["ro"], bc.bvar_d["ypls"]     // 壁解像 y₁⁺ (出力専用)
             ) ;
         }
         gpuErrchk( cudaPeekAtLastError() );
