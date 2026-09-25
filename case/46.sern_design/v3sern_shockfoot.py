@@ -68,7 +68,7 @@ def lip_test(interp, xc, yc, xl, yl, delta):
     pts = np.array([xc, yc]) + s * L * d
     g = (interp(pts + delta * n) - interp(pts - delta * n)) / (2 * delta)
     g = g[np.isfinite(g)]
-    if g.size == 0:
+    if g.size < 0.9 * N_LINE:                      # 有効点が 45/50 未満なら判定不能 = 不成立 (codex result m5)
         return 0.0
     return max((g > 0).mean(), (g < 0).mean())
 
@@ -101,7 +101,7 @@ def detect(P, X, ramp, x_lip, y_lip, L_ramp, t, xy_interp_nodes):
 def quasisteady(csv, cols):
     r = subprocess.run([sys.executable, str(TOOLS / "check_quasisteady.py"), "--series-csv", str(csv),
                         "--series-cols", ",".join(cols), "--drift", str(QS_DRIFT), "--osc", str(QS_OSC),
-                        "--tail", "0.4"], capture_output=True, text=True)
+                        "--tail", "1.0"], capture_output=True, text=True)   # 系列は既に末尾窓 (二重に切らない、codex result m5)
     txt = r.stdout + r.stderr
     labels = dict(re.findall(r"^\s*(\S+)\s*:.*?\s(STEADY|OSCILLATING|DRIFTING|TRANSIENT-UNSETTLED|NONFINITE)\s*$", txt, re.M))
     return txt, labels
@@ -145,8 +145,10 @@ def main():
     res["detect"] = {"flag0": s0, "flag1": s1}
     xr = X[ramp, 0]
     # 分岐表 (plan §4.4、上から優先)
-    half0 = s0["n_found"] >= s0["n_dumps"] / 2
-    half1 = s1["n_found"] >= s1["n_dumps"] / 2
+    # run の「検出」= 末尾窓のどれかの dump で識別済み候補がある (登録表に無い「半数以上」条件は削除、codex result m5)。
+    # 未検出の主張が最も強くなる側 (検出を最も広く取る) に揃えた。
+    half0 = s0["n_found"] > 0
+    half1 = s1["n_found"] > 0
     if not half0 and not half1:
         res["verdict"] = f"登録条件では同定できない ({a.label})"
         res["next"] = "m6_on なら m4_off の flag 0/1 対で再実行。m4_off でも未検出なら 判定保留 (衝撃が当たらないとは書かない)"
