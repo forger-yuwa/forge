@@ -109,8 +109,8 @@ AWS は他セッションと共有なので起動前に `aws_instance.sh status`
 | ~~1~~ (**済 2026-09-26**: GO-with-changes C0/M7/m1、全件採用) | codex plan 段 | | F |
 | ~~2~~ (**済 2026-09-26**) | 三値化 + 解決 + エコー | `solverConfig.{hpp,cpp}`、kernel へは `cfg > 0` を渡す防御。確認: エコー 5 パターン (省略→1 auto / 明示 0 / 明示 1 / ROE→0 auto / nodeWallDirichlet 0→0 auto) と明示 1 のエラー 3 種 (ROE・nwd 0・値 2) | O |
 | ~~3~~ (**済 2026-09-26**) | 来歴 (起動記録) + manifest + diag_applicability | `main.cpp` の `appendLaunchRecord` (FNV は Python と一致を確認)、`stage_manifest.py` v2 (`test_stage_manifest_wall_normal_chi.py` 15/15、`test_gate_bad_input.py` PASS)、`check_convergence.py` が起動記録を渡す、`run_case.sh` が RUN_PROVENANCE に写す、`diag_applicability.py` (試験 22/22) | O |
-| 4 | runner auto + 変換経路、ledger/driver | `design/forge_design/evaluate/runner_sern*.py` (キーを書かない、問題 YAML で明示 0)、`metrics.json`/ledger/driver (§4.4)。合格: 2D・3D とも「品質検査 cell 変換 → node 変換 → 計算」が通り起動記録に auto→1、旧台帳からの再開で除外件数が出る | O |
-| 5 | `check_solver_config` INFO | node + SLAU で省略なら INFO | O |
+| ~~4~~ (**済 2026-09-26**: runner は元からキーを書かない (= auto)。`mesh.slau_wall_normal_chi: 0` で明示 0。2D で「品質検査 cell 変換 → node 変換 → config」が auto・明示 0 とも rc=0。`metrics.json` に実効値 (起動記録の最後) と `flag_policy`、driver は `flag_policy` 不一致の PASS 行を学習から除外し件数を表示。3D runner は 2D と同じ cell 置換経路で、実 run は B1 (i) で確認) | runner auto + 変換経路、ledger/driver | `design/forge_design/evaluate/runner_sern*.py` (キーを書かない、問題 YAML で明示 0)、`metrics.json`/ledger/driver (§4.4)。合格: 2D・3D とも「品質検査 cell 変換 → node 変換 → 計算」が通り起動記録に auto→1、旧台帳からの再開で除外件数が出る | O |
+| ~~5~~ (**済 2026-09-26**: 判定に影響しない INFO として表示) | `check_solver_config` INFO | node + SLAU で省略なら INFO | O |
 | 6 | **B0** | §6 B0。ローカル 1 step | O |
 | 7 | **B1 通常域** (i) 接続模型の救済 (AWS) (ii) case/46 2D 3 作動点 (AWS) (iii) case/16 SST (ローカル) | §6 B1 | O (結論 F) |
 | 8 | **B1 追加域** p: case/39 周期丘 / a: case/40 軸対称 / c: case/16 凝縮 | §6 B1-p/a/c。小規模は手元、重ければ AWS | O (結論 F) |

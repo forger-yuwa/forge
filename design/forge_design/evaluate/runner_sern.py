@@ -33,6 +33,24 @@ _ENV = dict(os.environ, LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/hdf5/serial")
 MESH = "sern.h5"
 
 
+
+# slauWallNormalChi の既定が変わった日 (2026-09-26)。設計 DB で旧既定 (0) の評価と混ぜないための識別子。
+FLAG_POLICY = "2026-09-26"
+
+
+def _last_launch_chi(run_dir):
+    """forge_launches.jsonl の最後の起動の slauWallNormalChi 実効値 (0/1)。無ければ None。"""
+    p = Path(run_dir) / "forge_launches.jsonl"
+    if not p.exists():
+        return None
+    last = None
+    for line in p.read_text().splitlines():
+        try:
+            last = int(json.loads(line)["slauWallNormalChi"])
+        except Exception:
+            continue
+    return last
+
 def _dv(p: Problem, name, default=None) -> float:
     v = dv_value(p, name, default)
     return float(v["value"] if isinstance(v, dict) else v)
@@ -216,6 +234,13 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
         raise ValueError(f"evaluate.limiter_scaled は 0 か 1 (比の形 2 は棄却済み): {_lsc}")
     # 既定はソルバと揃える: 修正版 (1) は 0.05、旧経路 (0) は 1.0 (旧経路の K は device 側で 1.f 固定)
     _vk = float(p.evaluate.get("venkat_k", 0.05 if _lsc == 1 else 1.0))
+    # space.slauWallNormalChi (2026-09-26 既定化、plan convection-slau-wall-normal-chi-default §4.4): runner は既定でキーを書かない
+    # (= auto。node+Dirichlet 壁+SLAU なら 1、品質検査用の cell 変換では 0 に静かに解決する)。明示 1 を書くと cell 変換が起動エラーになる。
+    # 問題 YAML `mesh.slau_wall_normal_chi: 0` のときだけ明示 0 (旧挙動) を書く。
+    _wnc = p.mesh.get("slau_wall_normal_chi", None)
+    if _wnc is not None and int(_wnc) not in (0, 1):
+        raise ValueError(f"mesh.slau_wall_normal_chi must be 0 or 1 (or omitted for auto): {_wnc}")
+    _wnc_key = ", slauWallNormalChi: 0" if (_wnc is not None and int(_wnc) == 0) else ""
     ir = p.evaluate.get("implicit_relax")
     _relax = f", implicitRelax: {float(ir)}" if ir is not None else ""
     pm = p.evaluate.get("p_min")
@@ -263,7 +288,7 @@ time:
   outStepInterval: {out_int}
   timeIntegration: 11
   nStepInner: 5
-space: {{convMethod: 1, limiter: {_lim}, pRef: {p_ref}, limiterScaled: {_lsc}, venkatK: {_vk}}}
+space: {{convMethod: 1, limiter: {_lim}, pRef: {p_ref}, limiterScaled: {_lsc}, venkatK: {_vk}{_wnc_key}}}
 {turb}
 initial: "uniform_p101325_u10"
 """
@@ -909,6 +934,10 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
         if on_design:
             out["cfd_vs_moc"] = {k: (last[k] - info["moc_forces"][k]) for k in ("C_T", "C_L", "C_M")}
         write_force_history_csv(out_dir / "force_history.csv", hist)
+    # 実効 slauWallNormalChi と設定方針 (plan convection-slau-wall-normal-chi-default §4.4、codex plan M3)。
+    # 起動記録 forge_launches.jsonl の**最後の起動** (本段) の値。記録が無い run (旧バイナリ) は None = 不明。
+    out["slau_wall_normal_chi_effective"] = _last_launch_chi(run_dir)
+    out["flag_policy"] = FLAG_POLICY
     (out_dir / "metrics.json").write_text(json.dumps(out, indent=1))
     return out
 

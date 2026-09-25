@@ -156,6 +156,21 @@ def check(y):
     return fails, warns
 
 
+
+def infos(y):
+    """判定に影響しない注意 (INFO)。"""
+    out = []
+    mesh = y.get('mesh', {}) or {}
+    sp = y.get('space', {}) or {}
+    node = str(mesh.get('discretization', '')) == 'node'
+    nwd = int(mesh.get('nodeWallDirichlet', 1) or 0) == 1
+    slau = str(y.get('solver', '')).upper() in ('SLAU', 'SLAU2')
+    if node and nwd and slau and 'slauWallNormalChi' not in sp:
+        out.append(('space.slauWallNormalChi',
+                    '省略 = auto で実効 1 (2026-09-26 に既定化)。2026-09-25 以前の結果を再現するには 0 を明記 '
+                    '(plan convection-slau-wall-normal-chi-default、recommended-settings §1.0a)'))
+    return out
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('-')]
     if not args:
@@ -175,6 +190,8 @@ def main():
             print(f'  FAIL {k}: {m}')
         for k, m in warns:
             print(f'  WARN {k}: {m}')
+        for k, m in infos(y):
+            print(f'  INFO {k}: {m}')
         if fails:
             bad = True
         print(f'  VERDICT: {"FAIL" if fails else ("WARN" if warns else "PASS")}')

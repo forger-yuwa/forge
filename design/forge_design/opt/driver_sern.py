@@ -42,6 +42,9 @@ DV_ORDER = ("M_c", "f", "theta_r0_deg", "theta_c0_deg", "L_cowl")
 GATE_KEYS = ("C_T", "C_L", "C_M")
 
 
+# slauWallNormalChi の既定変更 (runner_sern.FLAG_POLICY と同じ値)
+from ..evaluate.runner_sern import FLAG_POLICY  # noqa: E402
+
 class DesignInfeasible(ValueError):
     """物理的に成立しない候補 (逆設計不成立 / L_ramp_max 超過)。数値失敗と区別する (R1)。"""
 
@@ -71,6 +74,10 @@ class SernCampaign:
         self.optcfg = self.base_raw.get("opt", {})
         self.ledger = self.dir / "ledger.jsonl"
         self.rows = [json.loads(l) for l in self.ledger.read_text().splitlines() if l.strip()] if self.ledger.exists() else []
+        _old = sum(1 for r in self.rows if r.get("status") == "PASS" and r.get("flag_policy") != FLAG_POLICY)
+        if _old:
+            print(f"[campaign] flag_policy が {FLAG_POLICY} でない PASS 行 {_old} 件を学習から除外 "
+                  f"(slauWallNormalChi の既定変更前の評価。plan convection-slau-wall-normal-chi-default §4.4)", flush=True)
 
     def _write_problem(self, x, path: Path) -> Path:
         raw = json.loads(json.dumps(self.base_raw))
@@ -158,6 +165,7 @@ class SernCampaign:
         return {"C_T": out.get(g.get("objective", "C_T"), out.get("C_T")), "C_T_p": out.get("C_T"), "C_L": out.get("C_L"), "C_M": out.get("C_M"),
                 "step": out.get("step"), "run_dir": str(rd), "sep_frac_ramp": out.get("sep_frac_ramp"), "sep_x_min_ramp": out.get("sep_x_min_ramp"),
                 "forge_rc": out.get("forge_rc"), "gate": g.get("verdict"), "gate_fail_class": g.get("fail_class"),
+                "slau_wall_normal_chi_effective": out.get("slau_wall_normal_chi_effective"), "flag_policy": out.get("flag_policy"),
                 "residual": g.get("residual", {}).get("verdict"), "objective": g.get("objective"),
                 "steadiness": {k: v.get("verdict") for k, v in g.get("steadiness", {}).get("series", {}).items()}}
 
@@ -178,7 +186,8 @@ class SernCampaign:
     def evaluate(self, x, tag: str) -> dict:
         x = [float(v) for v in np.asarray(x, dtype=float)]
         t0 = time.time(); prob = self._write_problem(x, self.dir / f"{tag}.yaml")
-        row = {"tag": tag, "x": x, "status": "FAIL", "fail_class": None, "ops": {}, "note": "", "degraded": False, "degraded_ops": []}
+        row = {"tag": tag, "x": x, "status": "FAIL", "fail_class": None, "ops": {}, "note": "", "degraded": False, "degraded_ops": [],
+               "flag_policy": FLAG_POLICY}
         try:
             ct_w, L_ramp, cm_w, wsum = 0.0, None, 0.0, 0.0
             for o in self.ops:
@@ -222,7 +231,9 @@ class SernCampaign:
         return row
 
     def _XF(self):
-        ok = [r for r in self.rows if r["status"] == "PASS"]
+        # slauWallNormalChi の既定変更 (2026-09-26) 前後の評価を同じ応答関数として学習しない (plan
+        # convection-slau-wall-normal-chi-default §4.4、codex plan M3)。flag_policy の無い旧行と不一致の行は除外する。
+        ok = [r for r in self.rows if r["status"] == "PASS" and r.get("flag_policy") == FLAG_POLICY]
         X = np.array([r["x"] for r in ok]); F = np.array([[-r["C_T_w"], r["L_ramp"]] for r in ok])
         return X, F
 
