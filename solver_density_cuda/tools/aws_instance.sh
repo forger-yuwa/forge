@@ -5,8 +5,11 @@
 #
 # **インスタンスは 1 台を複数セッションで共有している**。別セッションが起動して run を回して
 # いることがある。`stop` は forge プロセス・他ログイン・GPU 使用があれば拒否する
-# (上書きは FORGE_AWS_FORCE_STOP=1。ユーザが明示したときだけ使う)。`start` は既に running なら
-# 使用状況を表示する — 自分が起こしたと思い込まず、他の run と GPU を取り合わないか確認すること。
+# (上書きは FORGE_AWS_FORCE_STOP=1。ユーザが明示したときだけ使う)。
+# **原則として手動で stop しない** (2026-09-25 ユーザ指示「停止はほかとの兼ね合いに注意」)。
+# 転送・変換・ビルド準備中の他セッションは forge も GPU も 0 に見える。止めるのは idle_autostop.sh に任せる。
+# `ssh=` は自分以外の非対話 ssh (scp・コマンド実行) の数 (この確認用の接続自身を 1 引いている)。
+# `start` は既に running なら使用状況を表示する — 自分が起こしたと思い込まず、他の run と GPU を取り合わないか確認すること。
 #
 # 認証情報は WSL ネイティブ側に置くこと (`/mnt/c` 配下は drvfs でパーミッションが効かず
 # chmod 600 が 777 になる):
@@ -24,8 +27,9 @@ KEY=${FORGE_AWS_KEY:-$HOME/.ssh/test.pem}
 # 使用状況: forge プロセス数 / 対話ログイン数 (コマンド指定の ssh は who に出ないので自分は数えない) / GPU 使用率 (%) を 1 行で返す
 busy() {
   ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i "$KEY" "ubuntu@$(q PublicIpAddress)" \
-    'printf "forge=%s logins=%s gpu=%s\n" "$(pgrep -xc forge || true)" \
+    'printf "forge=%s logins=%s ssh=%s gpu=%s\n" "$(pgrep -xc forge || true)" \
        "$(who | wc -l)" \
+       "$(( $(pgrep -c -f "^sshd: ubuntu@notty" || true) - 1 ))" \
        "$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -1)"'
 }
 q() { aws ec2 describe-instances --region "$REGION" --instance-ids "$IID" \
@@ -60,7 +64,7 @@ case "${1:-status}" in
     if [ "$(q State.Name)" = running ] && [ "${FORGE_AWS_FORCE_STOP:-0}" != 1 ]; then
       u=$(busy) || { echo "使用状況を取得できないので止めない (FORGE_AWS_FORCE_STOP=1 で強制)" >&2; exit 3; }
       case "$u" in
-        "forge=0 logins=0 gpu=0") ;;
+        "forge=0 logins=0 ssh=0 gpu=0") ;;
         *) echo "使用中なので止めない: $u (別セッションの run の可能性。FORGE_AWS_FORCE_STOP=1 で強制)" >&2; exit 3 ;;
       esac
     fi
