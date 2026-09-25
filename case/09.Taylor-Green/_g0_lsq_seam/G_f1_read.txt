@@ -1,0 +1,17 @@
+# F1 の読み出し試験 (plan boundary-node-periodic-gradient-fix §4.2、codex m3)
+harness revision: 1f03c036
+forge_mtime : 2026-09-26T06:49:26+09:00
+forge_sha256: bb55e1bf538f00b5561050101c17ffbffc5e3ff645e8228a45272b1e729388f2
+git_head    : 1f03c03679103252c577c2570087f06401521c1f
+
+期待比 Δres_ω/Δres_k = 64·(0.856−0.5)/(1.0−0.85) = 151.893 (計算値 F1=0 を読んだとき)
+
+| 残差組立 | 対 | max|Δres_k| / max|res_k| | max|Δres_ω| / max|res_ω| | Δres_ω/Δres_k 中央値 [p5, p95] | 床 (再実行との差) / max|res_k| | 判定 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 回目 | wall_dist ∞ (計算値 F1=0): blend1 − blend0 | 1.441e-04 | 3.718e-04 | 151.893 [151.627, 152.170] | 7.6e-08 | ok |
+| 1 回目 | wall_dist 1e-6 (計算値 F1=1): blend1 − blend0 | 7.6e-08 | 4.6e-08 | - | 7.6e-08 | ok (床の 10 倍以内) |
+| 2 回目 | wall_dist ∞ (計算値 F1=0): blend1 − blend0 | 1.443e-04 | 3.726e-04 | 151.895 [151.629, 152.189] | 7.6e-08 | ok |
+| 2 回目 | wall_dist 1e-6 (計算値 F1=1): blend1 − blend0 | 1.5e-07 | 9.1e-08 | - | 7.6e-08 | ok (床の 10 倍以内) |
+
+run: inf_b0 = g_harness_f1_inf_b0, inf_b1 = g_harness_f1_inf_b1, inf_b1_repeat = g_harness_f1_inf_b1_repeat, tiny_b0 = g_harness_f1_tiny_b0, tiny_b1 = g_harness_f1_tiny_b1
+VERDICT F1 読み出し (1・2 回目の残差組立で輸送が計算値 F1 を読む): PASS
