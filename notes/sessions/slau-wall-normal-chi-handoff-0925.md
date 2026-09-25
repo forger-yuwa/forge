@@ -3,7 +3,7 @@
 **残作業の正本は [`plans/active/convection-slau-wall-normal-chi.md`](../../plans/active/convection-slau-wall-normal-chi.md) §5.1 の表。**
 本文書は写しとポインタだけ (`notes/sessions/` は使い捨て。恒久的な残作業をここに置かない)。
 
-- ブランチ `feature/sern-design`、HEAD **`a68447d1`**、push 済み・未コミット無し。
+- ブランチ `feature/sern-design`、本文書のコミット `bb2b075d` 時点で push 済み・未コミット無し。
 - CHT セッションが `feature/cht-phase2-fem2d` をこのブランチへマージ済み (`60bd88f`)。
 
 ## いま何が残っているか
@@ -43,6 +43,10 @@
   鍵は `/home/sano/.aws-wsl/` (700/600)。**`/mnt/c` 配下は chmod が効かず 777 になる**。
   `config` だけ `[profile forge]`、`credentials` は `[forge]`。skill `/aws-gpu` に罠をまとめた。
   **インスタンスが止まるのは正常** (`idle_autostop.sh`: GPU 0 % + forge 無し + ログイン無しが 30 分)。回避しない。
+  **インスタンスは 1 台を複数セッションで共有している**。「前回自動停止したから止まっている」と決めつけない
+  (別セッションが起こして run を回していることがある)。触る前に `status`、running なら `busy`
+  (`forge=… logins=… gpu=…`) で使用状況を見る。`stop` は使用中なら拒否する (2026-09-25 追加)。
+  既に running でも自分が起こしたことにせず、他の run と GPU を取り合う投入をしない。
 - **面流束で測る**: `FORGE_DUMP_MASSFLUX=<path>` で第 1 評価の `massflux` と
   **カーネルが読んだ状態** (`<path>.state`) を書く。場は 1 step でもビット再現しない (`atomicAdd`)。
   **`res_*.h5` の `P` は流束が読む `P` と 1 ulp 違う** (EOS の往復が流束前に 2 回走る) ので `.state` を使う。

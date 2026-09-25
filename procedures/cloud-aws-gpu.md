@@ -236,7 +236,7 @@ sudo shutdown -h now        # または コンソール/CLI から stop-instance
 - **stop** は EBS が残り再開できる (通常はこれ)。**terminate** はディスクごと消える (撤収時のみ)。
 ### インスタンスの起動・停止 (2026-09-25)
 
-`solver_density_cuda/tools/aws_instance.sh {status|ip|start|stop|ssh}`。**鍵はスクリプトに含めない**
+`solver_density_cuda/tools/aws_instance.sh {status|ip|busy|start|stop|ssh}`。**鍵はスクリプトに含めない**
 (インスタンス ID とリージョンだけ)。`start` は running になり **SSH が上がるまで**待って IP を返す (実測 26 秒)。
 
 **認証情報は WSL ネイティブ側に置く**。`~/.aws` が `/mnt/c` へのリンクだと **drvfs はパーミッションを持たないので
@@ -257,6 +257,13 @@ IAM は **当該インスタンス 1 台の `StartInstances`/`StopInstances` + `
 **止まっているのは異常ではない**: 下の `idle_autostop.sh` が正しく働いた結果である。2026-09-24 に 3 回止まったが、
 いずれも run 終了後に手元で解析していた 30 分間だった。**偽のプロセスを走らせて保護を回避しないこと** —
 起動が 26 秒で済む以上、止まってから起こす方が安い。
+
+**インスタンスは 1 台を複数セッションで共有している** (2026-09-25)。別セッションが起動して run を回していることがあるので:
+
+- 触る前に `status`。running なら `busy` で `forge=<プロセス数> logins=<対話ログイン数> gpu=<使用率%>` を見る。
+- `stop` は上の 3 つが全部 0 でなければ拒否する (取得できないときも拒否)。上書き `FORGE_AWS_FORCE_STOP=1` はユーザが明示したときだけ。
+  run 準備中 (ビルド・変換) は forge も GPU も 0 に見えるので、ログイン有無と合わせても完全ではない。
+- `start` は既に running なら使用状況を表示する。自分が起こしたと思い込まず、他の run と GPU を取り合う投入をしない。
 
 - 消し忘れ保険: `idle_autostop.sh` が root cron で 5 分おきに監視し、「GPU 使用率 0 + forge プロセス無し + ログイン無し」が 30 分続くと自動 shutdown する。長時間バッチは forge プロセスが生きている限り止まらない。
 - ローカルへの取り込みは `aws s3 sync s3://forge-runs-<name>/case/... case/...` で逆方向に。
