@@ -24,6 +24,34 @@ DEPTH_CM = [0.25, 0.51, 0.76, 1.52, 2.54, 3.81]      # TC 92,91,90,89,88,87
 TC = [92, 91, 90, 89, 88, 87]
 
 
+def crossing_mach(run, step, W, r, zband):
+    """交差部 (縦すきまが横すきまに入る所) の流れ状態。
+
+    `diagnostician` (2026-09-26) の指摘: 腕 A の q_w スパイクは**交差部が遷音速化した
+    スナップショット**と一致していた。生産 run では main 段の最初の 2-3 枚でこれを
+    基準メッシュと比べ、早期に打ち切り判断ができるようにする。
+
+    返り値: (口の下 y∈[-6,-2.5] mm の M_max, y<-2.5 mm で M>1 の節点数)
+    """
+    fld = CASE / run / f"res_{step}.h5"
+    msh = CASE / run / "mesh.h5"
+    if not fld.exists() or not msh.exists():
+        return float("nan"), -1
+    with h5py.File(msh) as m:
+        c = np.asarray(m["MESH/COORD"], dtype=float).reshape(-1, 3)
+    with h5py.File(fld) as h:
+        if "VALUE/sonic" not in h:
+            return float("nan"), -1
+        a = np.asarray(h["VALUE/sonic"], dtype=float)
+        u = np.sqrt(sum(np.asarray(h["VALUE/U" + k], dtype=float) ** 2 for k in "xyz"))
+    M = u / np.maximum(a, 1e-30)
+    col = (np.abs(c[:, 0]) < 0.5 * W + r) & (c[:, 2] <= zband)
+    band = col & (c[:, 1] <= -r) & (c[:, 1] >= -6.0e-3)
+    deep = col & (c[:, 1] < -r)
+    return (float(M[band].max()) if band.any() else float("nan"),
+            int((M[deep] > 1.0).sum()))
+
+
 def snaps(run):
     fs = glob.glob(str(CASE / run / "res_gap_6_*.h5"))
     out = []
@@ -83,7 +111,8 @@ def main():
         spread = np.nanstd(prof, axis=0)
         iz0 = int(np.argmin(np.abs(zs)))                # 縦すきま中心線に最も近い z 線
         vals0 = prof[iz0]
-        rows.append([step] + list(vals) + list(vals0) + [float(ps.max())])
+        mmax, nsup = crossing_mach(a.run, step, a.w, a.r, a.zband)
+        rows.append([step] + list(vals) + list(vals0) + [float(ps.max()), mmax, nsup])
         if step == ss[-1][0]:
             print(f"[{a.run}] step {step}  前向き壁: z 線 {len(zs)} 本 x 節点 {len(c)} "
                   f"(z<={a.zband*1e3:.1f} mm)")
@@ -91,8 +120,10 @@ def main():
                 print(f"   TC {tc}  深さ {d:.2f} cm   帯平均 q_w = {v:11.2f} +- {sd:9.2f}"
                       f"   z=0 線 {v0:11.2f} W/m^2")
             print(f"   前向き壁の最大静圧 = {ps.max():.2f} Pa")
+            print(f"   交差部 (|x|<W/2+r, z<={a.zband*1e3:.1f} mm): 口下 y[-6,-2.5] mm の M_max "
+                  f"= {mmax:.3f}、y<-2.5 mm で M>1 の節点 {nsup}")
     cols = (["step"] + [f"q_tc{t}" for t in TC]
-            + [f"q0_tc{t}" for t in TC] + ["p_fwd_max"])
+            + [f"q0_tc{t}" for t in TC] + ["p_fwd_max", "M_cross_max", "n_supersonic"])
     if a.csv:
         out = Path(a.csv)
         np.savetxt(out, np.array(rows), delimiter=",", header=",".join(cols),
