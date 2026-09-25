@@ -119,7 +119,7 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | 3a (**実装済 2026-09-26**) | 実装レビュー M1・m3 | M1: 各 incidence の実変位で組む (§4.1)。m3: F1 初期値を `allocVariables` へ (§4.2) | O (判断: 2026-09-26 `diagnostician`・全件採用) |
 | 5a | G0/G1/G2/G2′ ハーネス | #2 の再現物に加え、G1-a の CPU float32 再現、線形 $Y$ (化学種) を 1 本焼いて床を 1 行記録、float32 反例 (期待 1.000000、root 両順序)、ジッタ格子 (±0.2h、決定論的、周期像は同じ量)、CPU double 参照、F1≠1 入力で 1・2 回目に輸送が読む値。合格: §6 G0/G1/G2/G2′ | O |
 | 5b | R3 | case/48・case/16・case/44 の勾配配列が旧新ビット同一 (F1 初期化で 1 step 目が変わる run は 2 step 目以降のノイズ床比較) | O |
-| 5c | 周期半割面の除外 (§4.2a) | `mesh` に `planePeriodic`、3 カーネルの条件置換。合格: §6 G1-a/G1-b/定数場を 7 run 再実行、R3 ビット同一。`plans/accepted/species-passive-scalar-unification.md` §4.1-5-1 に訂正 1 行 | O (判断: 2026-09-26 `diagnostician`・本 plan で修正) |
+| 5c (**実装済 2026-09-26**、G1-a/G1-b PASS、R3 は #5b) | 周期半割面の除外 (§4.2a) | `mesh` に `planePeriodic`、3 カーネルの条件置換。合格: §6 G1-a/G1-b/定数場を 7 run 再実行、R3 ビット同一。`plans/accepted/species-passive-scalar-unification.md` §4.1-5-1 に訂正 1 行 | O (判断: 2026-09-26 `diagnostician`・本 plan で修正) |
 | 5 | 検証 R1・R2 | §6 R1・R2 (5a・5b の後)。**区切りで codex** | O (結論 F) |
 | 6 | docs + codex result | `methods/gradient.md` の「修正中」を外す | F |
 
@@ -152,6 +152,13 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 - **G0 (修正前、2026-09-26)**: 並進、case/09 TGV 32³、線形場 `Ux = 10+y` で x 継ぎ目 1458 点の $\partial U_x/\partial y$ = 2.000000 [1.999990, 2.000012]、
   内部 19683 点 1.000000。`case/09.Taylor-Green/_g0_lsq_seam/G0_translational.txt`。
 
+- **ハーネス #5a (2026-09-26、HEAD `1f03c036`、半割面除外の修正前)**: G0 (2/4/8 member・mirror による root 交換・原点移動・ジッタ・壁∩継ぎ目・float32 反例) PASS、G2 ≤ 1.4e-7·S PASS、
+  G2′ 次数 0.95/0.93・継ぎ目/内部 ≤ 1.00 PASS、F1 読み取り PASS。**G1-a FAIL** (継ぎ目 4.7–27 ε·max|φ|/h) → §4.2a の欠陥を特定。G2′ ゼロ成分は基準の誤指定 (§6 訂正)。
+  修正前の床 (tgv、GPU − CPU double、ε·max|φ|/h): 内部 dK 1.1 / dΩ 1.3 / dξ 0.9、**継ぎ目 dK 20.8 / dΩ 26.5 / dξ 22.7**、LSQ dUx 0.4/0.4。
+- **§4.2a 修正後 (2026-09-26、バイナリ sha256 `88e949fa…`)**: 7 run (tgv / tgv_mirror / tgv_shift / tgv_repeat / tgv_bcswap / jitter32 / channel) で G0・G2・G1-a・G1-b すべて PASS。
+  継ぎ目の床は tgv で dK 1.7 / dΩ 2.4 / dξ 1.5 (修正前 20.8 / 26.5 / 22.7)。**継ぎ目/内部比は全 run 0.83–1.85 (≤ 2)**。G1-a の最大差は ≤ 1.7 ε (≤ 4 ε)。
+  結果 `case/09.Taylor-Green/_g0_lsq_seam/G_*.txt`。**未実施**: GPU の定数場単独試験 (§6 G1、#5a に残す)。
+
 ## 7. 影響範囲
 
 - `solver_density_cuda/cuda_forge/calcGradient_d.cu`、`periodicNode_d.cu`、`ransTransport_d.cu`、`main.cpp`、`mesh/mesh.cpp`。
@@ -168,6 +175,8 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 - [ ] `plans/active/` → `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-26` — §4.2a 実装 (`mesh` の面フラグ `planePeriodic_d`、`calc_scalar_gradient_face_d`・`species_gradient_d` の条件置換)。7 run で G1-a/G1-b PASS、継ぎ目/内部比 ≤ 1.85。
 
 - `2026-09-26` — ハーネス #5a: G0・G2・G2′ 次数・F1 読み取り PASS。**G1-a FAIL** から、周期半割面の除外条件 (`ic1 < nCells`) が死にコードだったと特定。直前の行の「float32 床」は**誤りと訂正** (記録は残す)。§4.2a で修正方針を決定 (`diagnostician`)。
 

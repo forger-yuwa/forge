@@ -53,7 +53,12 @@
 化学種 Y は `dY{s}d*` が出力変数に無い (`variables.hpp` の output_cellValNames) ので測れない。受動トレーサ ξ は同じカーネル
 (`species_gradient_d`、`speciesTransport_d.cu:1229`) と同じ合併 (`periodicGradientGather`) を通るので代理にした。
 
-### G1-a の不合格: 周期半割面が GG から除外されていない
+### 修正後 (2026-09-26、plan §4.2a、バイナリ sha256 `88e949fa…`)
+
+`G_*.txt` 7 本は修正後の再実行で上書きした (修正前は git の `633997bf`)。G0・G2・G1-a・G1-b すべて PASS。
+継ぎ目の床 (tgv、ε·max|φ|/h) dK 1.7 / dΩ 2.4 / dξ 1.5 (修正前 20.8 / 26.5 / 22.7)、継ぎ目/内部比 0.83–1.85。上の表の G1-a 行は修正前。
+
+### G1-a の不合格: 周期半割面が GG から除外されていない (修正前、上記で解消)
 
 `ransTransport_d.cu:43` と `speciesTransport_d.cu:649` の除外条件は `ip >= nNormalPlanes && ic1 < nCells` だが、実行時の
 `plane_cells` では周期半割面にも ghost が割り当てられ (`mesh.cpp:443-456`、全 bcond の iBPlanes に ghost を作る)、

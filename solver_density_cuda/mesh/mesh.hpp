@@ -216,6 +216,10 @@ public:
     // periodicNodeGather (res 和を group 全員に書く) と合併体積で「両側部分 CV を 1 CV」として扱う。
     std::vector<geom_int> periodicRoot;       // [nCells] host: 各 CV の group root
     geom_int* periodicRoot_d = nullptr;       // [nCells] device
+    // 周期 bcond (bcondKind=="periodic") の半割面なら 1 [nPlanes] device。node/cell 問わず setMeshMap_d で作る。
+    // スカラー GG が node 周期の継ぎ目で半割面を除外する判定に使う (ゴーストの有無では判定できない:
+    // 周期 bcond にもゴーストが付くため。plan boundary-node-periodic-gradient-fix §4.2a)。
+    unsigned char* planePeriodic_d = nullptr;
     // 合併前の部分 CV 体積 [nCells] (node periodic 時のみ確保、他は nullptr)。
     // 体積ソース (bodyForce, ransSource の k/ω 源) は periodicNodeGather で group 合算されるため、
     // merged volume (var volume) を使うと seam で 2 倍 (コーナー group は 4 倍) になる。

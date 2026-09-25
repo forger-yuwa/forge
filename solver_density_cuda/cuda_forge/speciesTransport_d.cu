@@ -633,20 +633,20 @@ void speciesAdvectionFaceY_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
 
 // 化学種セル勾配 ∇Y{s} を Green-Gauss で計算する (calcGradient と同形)。speciesFaceReconstruction==1 のみ。
 // 境界は Neumann ghost (applySpeciesBoundaries 済) を用い、内部面と同様に集計する。
-// excludePeriodic (node 周期; plan species-passive-scalar-unification §4.1-5-1): 周期半割面 (ip>=nNormalPlanes かつ相手が
-// 実 CV) を積算から除外し、勾配は内部双対面だけ (片側) にしておく。後段 periodicGradientGather が両側を合併体積で
+// excludePeriodic (node 周期; plan species-passive-scalar-unification §4.1-5-1): 周期半割面 (面フラグ planePeriodic。
+// 2026-09-26 まで「ip>=nNormalPlanes かつ相手が実 CV」で判定しており、周期にもゴーストが付くため一度も除外していなかった) を積算から除外し、勾配は内部双対面だけ (片側) にしておく。後段 periodicGradientGather が両側を合併体積で
 // 厳密合併する (流れの calcGradient と同じ扱い)。0 のとき (cell / 非周期) は従来どおり全 plane。
 __global__ void species_gradient_d(
     geom_int nCells, geom_int nPlanes, geom_int* plane_cells,
     geom_float* vol, geom_float* fx, geom_float* sx, geom_float* sy, geom_float* sz,
     int nSpecies, flow_float** Y, flow_float** dYdx, flow_float** dYdy, flow_float** dYdz,
-    int excludePeriodic, geom_int nNormalPlanes)
+    int excludePeriodic, const unsigned char* planePeriodic)
 {
     geom_int ip = blockDim.x*blockIdx.x + threadIdx.x;
     if (ip < nPlanes) {
         geom_int ic0 = plane_cells[2*ip+0];
         geom_int ic1 = plane_cells[2*ip+1];
-        if (excludePeriodic != 0 && ip >= nNormalPlanes && ic1 < nCells) return;   // node 周期半割面
+        if (excludePeriodic != 0 && planePeriodic[ip] != 0) return;   // node 周期半割面 (面フラグで判定、gradient-fix §4.2a)
         geom_float f = fx[ip];
         const geom_float sxx = sx[ip], syy = sy[ip], szz = sz[ip];
         for (int s = 0; s < nSpecies; ++s) {
@@ -687,7 +687,7 @@ void speciesGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
     species_gradient_d<<<cuda_cfg.dimGrid_plane, cuda_cfg.dimBlock>>>(
         msh.nCells, msh.nPlanes, msh.map_plane_cells_d, gvol, var.p_d["fx"], gsx, gsy, gsz,
         n, g_Y_dev, g_dYdx_dev, g_dYdy_dev, g_dYdz_dev,
-        periodicNodeActive(cfg, msh) ? 1 : 0, msh.nNormalPlanes);
+        periodicNodeActive(cfg, msh) ? 1 : 0, msh.planePeriodic_d);
     species_gradient_normalize_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells, gvol, n, g_dYdx_dev, g_dYdy_dev, g_dYdz_dev);
     gpuErrchk( cudaPeekAtLastError() );
@@ -1229,7 +1229,7 @@ void passiveGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
     species_gradient_d<<<cuda_cfg.dimGrid_plane, cuda_cfg.dimBlock>>>(
         msh.nCells, msh.nPlanes, msh.map_plane_cells_d, gvol, var.p_d["fx"], gsx, gsy, gsz,
         g_nPassive, g_p_prim_dev, g_p_gx_dev, g_p_gy_dev, g_p_gz_dev,
-        periodicNodeActive(cfg, msh) ? 1 : 0, msh.nNormalPlanes);
+        periodicNodeActive(cfg, msh) ? 1 : 0, msh.planePeriodic_d);
     species_gradient_normalize_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells, gvol, g_nPassive, g_p_gx_dev, g_p_gy_dev, g_p_gz_dev);
     gpuErrchk( cudaPeekAtLastError() );

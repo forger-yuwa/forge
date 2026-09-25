@@ -31,7 +31,7 @@ __global__ void calc_scalar_gradient_face_d(
     flow_float* dOmegady,
     flow_float* dOmegadz,
     int excludePeriodic,
-    geom_int nNormalPlanes)
+    const unsigned char* planePeriodic)
 {
     geom_int ip = blockDim.x * blockIdx.x + threadIdx.x;
     if (ip >= nPlanes) return;
@@ -40,7 +40,8 @@ __global__ void calc_scalar_gradient_face_d(
     const geom_int ic1 = plane_cells[2 * ip + 1];
     // node 周期半割面 (相手が実 CV) は積算しない。勾配は内部双対面だけの部分寄与にし、後段の gather で合併する
     // (plan boundary-node-periodic-gradient-fix §4.2。化学種 species_gradient_d の excludePeriodic と同じ扱い)。
-    if (excludePeriodic != 0 && ip >= nNormalPlanes && ic1 < nCells) return;
+    // 判定は面フラグで行う (周期 bcond にもゴーストが付くので ic1 < nCells は成立しない、§4.2a)。
+    if (excludePeriodic != 0 && planePeriodic[ip] != 0) return;
 
     geom_float f   = fx[ip];
     flow_float kf, wf;
@@ -228,7 +229,7 @@ void ransGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, 
         var.c_d["omega"],
         var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"],
         var.c_d["dOmegadx"], var.c_d["dOmegady"], var.c_d["dOmegadz"],
-        periodicSeamMergeActive(cfg, msh) ? 1 : 0, msh.nNormalPlanes);
+        periodicSeamMergeActive(cfg, msh) ? 1 : 0, msh.planePeriodic_d);
 
     calc_scalar_gradient_div_vol_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
         msh.nCells,

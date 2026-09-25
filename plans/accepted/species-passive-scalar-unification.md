@@ -90,6 +90,9 @@
   ピン残差除去は BDF 項追加の**後**にも適用する (§4.4)。
 - **周期 node (codex M4)**: 名前ベースの `res_*` gather だけでは不足。処理順を固定する:
   1. 勾配積算は周期半割面を除外して行い (`species_gradient_d` に除外引数を追加)、勾配を gather (既存の周期勾配 gather に受動種・化学種の勾配を登録);
+     **訂正 (2026-09-26)**: 除外条件 `ip >= nNormalPlanes && ic1 < nCells` は周期 bcond にもゴーストが付く (`mesh.cpp:443-456`) ため一度も成立せず、
+     半割面は φ[ic0] で積算されていた (継ぎ目に $\phi(S_a+S_b)/V$ の誤差)。面フラグ `planePeriodic` による修正は
+     [boundary-node-periodic-gradient-fix](../active/boundary-node-periodic-gradient-fix.md) §4.2a。
   2. 空間残差 `res_*` と **`transport_diag_*`** を gather (ソース Jacobian `src_jac_*` は体積比で整合);
   3. dual-time では gather 後に合併体積で BDF 項を**一度だけ**追加;
   4. 受動種の更新後に状態 mirror (`periodicMirrorScalarState` に受動種を登録; 平均流更新時の mirror では不十分)。

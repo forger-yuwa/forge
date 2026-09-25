@@ -773,6 +773,16 @@ void mesh::buildPeriodicNodeGroups(bool nodeMode, geom_float* var_volume_d)
 void mesh::setMeshMap_d()
 {
     gpuErrchk(cudaMalloc((void **)&(this->map_plane_cells_d), sizeof(geom_int)*this->nPlanes*2));
+    {
+        // 周期 bcond の半割面フラグ (plan boundary-node-periodic-gradient-fix §4.2a)
+        std::vector<unsigned char> flag(this->nPlanes, 0);
+        for (auto& bc : this->bconds) {
+            if (bc.bcondKind != "periodic") continue;
+            for (geom_int ip : bc.iPlanes) flag[ip] = 1;
+        }
+        gpuErrchk(cudaMalloc((void **)&(this->planePeriodic_d), sizeof(unsigned char)*this->nPlanes));
+        gpuErrchk(cudaMemcpy(this->planePeriodic_d, flag.data(), sizeof(unsigned char)*this->nPlanes, cudaMemcpyHostToDevice));
+    }
 
     // Build a list of plane indices to be processed by convective-flux kernels.
     // Layout:

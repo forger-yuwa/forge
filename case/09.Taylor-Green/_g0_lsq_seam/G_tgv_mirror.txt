@@ -1,9 +1,9 @@
 # tgv_mirror: plan boundary-node-periodic-gradient-fix §6 G0/G1/G2
 run: /tmp/claude-1000/-home-sano-work-forge/4b0c8643-66fb-4fde-8878-7c8a5104c060/scratchpad/g_harness_tgv_mirror
-forge_mtime : 2026-09-26T06:49:26+09:00
-forge_sha256: bb55e1bf538f00b5561050101c17ffbffc5e3ff645e8228a45272b1e729388f2
-git_head    : 1f03c03679103252c577c2570087f06401521c1f
-harness revision: 1f03c036 (dirty)
+forge_mtime : 2026-09-26T07:29:50+09:00
+forge_sha256: 88e949fae70c29146a2880eee230e294584943ee78f7dab1631cf775d97b9288
+git_head    : 633997bf9da1dc86929a6782ad0375f722565983
+harness revision: 633997bf (dirty)
 CV 35937, 周期 group 2977, member 数の内訳 1:29791, 2:5766, 4:372, 8:8, 周期対の最大残差 3.80e-07, 同値類 (重複 >1) 12096
 
 ## G0: 合併 stencil LSQ の線形場 (解析勾配との差)
@@ -43,25 +43,25 @@ G1-a: GPU − CPU float32 再現 ≤ 4ε·max|φ|/h。G1-b: GPU − CPU double �
 | 場 | 区分 | 節点数 | N_max | G1-a 最大差 [ε·max|φ|/h] | G1-b 最大差 [ε·max|φ|/h] | G1-b 閾値 [同] | 判定 a / b | 半割面込み再現との差 [同] |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | k | 内部 | 29791 | 6 | 0.00 | 1.09 | 12.0 | ok / ok | 0.00 |
-| k | 面 (2 member) | 5766 | 10 | 24.40 | 25.10 | 40.0 (×n_member) | NG / ok | 1.00 |
-| k | 辺 (4 member) | 372 | 16 | 13.08 | 13.70 | 32.0 | NG / ok | 0.25 |
-| k | 角 (8 member) | 8 | 24 | 0.11 | 0.28 | 48.0 | ok / ok | 0.00 |
+| k | 面 (2 member) | 5766 | 10 | 0.97 | 1.66 | 20.0 | ok / ok | 24.40 |
+| k | 辺 (4 member) | 372 | 16 | 0.49 | 1.42 | 32.0 | ok / ok | 13.07 |
+| k | 角 (8 member) | 8 | 24 | 0.00 | 0.33 | 48.0 | ok / ok | 0.11 |
 | omega | 内部 | 29791 | 6 | 0.00 | 1.27 | 12.0 | ok / ok | 0.00 |
-| omega | 面 (2 member) | 5766 | 10 | 27.62 | 28.38 | 40.0 (×n_member) | NG / ok | 1.75 |
-| omega | 辺 (4 member) | 372 | 16 | 17.25 | 17.51 | 32.0 | NG / ok | 0.22 |
-| omega | 角 (8 member) | 8 | 24 | 0.30 | 0.16 | 48.0 | ok / ok | 0.00 |
+| omega | 面 (2 member) | 5766 | 10 | 1.69 | 2.36 | 20.0 | ok / ok | 28.46 |
+| omega | 辺 (4 member) | 372 | 16 | 0.42 | 1.25 | 32.0 | ok / ok | 17.25 |
+| omega | 角 (8 member) | 8 | 24 | 0.00 | 0.44 | 48.0 | ok / ok | 0.30 |
 | Xi | 内部 | 29791 | 6 | 0.00 | 0.95 | 12.0 | ok / ok | 0.00 |
-| Xi | 面 (2 member) | 5766 | 10 | 24.92 | 25.38 | 40.0 (×n_member) | NG / ok | 0.55 |
-| Xi | 辺 (4 member) | 372 | 16 | 13.91 | 14.00 | 32.0 | NG / ok | 0.27 |
-| Xi | 角 (8 member) | 8 | 24 | 0.77 | 0.45 | 48.0 | ok / ok | 0.00 |
+| Xi | 面 (2 member) | 5766 | 10 | 1.58 | 1.50 | 20.0 | ok / ok | 24.92 |
+| Xi | 辺 (4 member) | 372 | 16 | 0.53 | 0.74 | 32.0 | ok / ok | 13.91 |
+| Xi | 角 (8 member) | 8 | 24 | 0.00 | 0.59 | 48.0 | ok / ok | 0.77 |
   対の周期半割面の面ベクトル不一致 max|S_a+S_b|/|S_a| = 3.67e-06。定数場 φ≡1 の GG 勾配 (半割面込み、double): 継ぎ目 max 3.67e-06·φ/h、内部 max 0.00e+00·φ/h
-VERDICT G1-a (tgv_mirror): FAIL
+VERDICT G1-a (tgv_mirror): PASS
 VERDICT G1-b (tgv_mirror): PASS
 
 ## 4 量の床 (GPU − CPU double、ε·max|φ|/h 単位、h = 各節点の合併体積^(1/3))
 | 量 | 内部 最大 | 内部 中央値 | 継ぎ目 (member≥2) 最大 | 継ぎ目 中央値 |
 | --- | --- | --- | --- | --- |
 | dUx (LSQ) | 0.2 | 0.00 | 0.2 | 0.00 |
-| dK (GG) | 1.1 | 0.37 | 25.1 | 0.85 |
-| dΩ (GG) | 1.3 | 0.40 | 28.4 | 1.05 |
-| dξ (GG、Y の代理) | 0.9 | 0.23 | 25.4 | 0.68 |
+| dK (GG) | 1.1 | 0.37 | 1.7 | 0.50 |
+| dΩ (GG) | 1.3 | 0.40 | 2.4 | 0.39 |
+| dξ (GG、Y の代理) | 0.9 | 0.23 | 1.5 | 0.24 |
