@@ -455,5 +455,7 @@ $z/W$ を揃えて対数補間すると:
 | `run_0030_restart_cost` | restart の代償: `run_0026` の 100k から再開して 100k | 通算 125k–200k の 4 点で連続 run との差 2.2e-10–7.5e-10 = **ノイズ床 1.3e-9 の中**。`/QACC` は実装しないと判断 | `ref` |
 | `run_0041_g5_{off,on}` | G5 速度: 同一バイナリで OFF/ON 交互 3 回、10k step | 平均とも 1.7200 ms/step。~~差の標準誤差 2.66 % で未達~~ → **8 対で測り直して片側 95 % 上限 +1.77 % = PASS** (`G5_TIMINGS.txt`) | `破棄予定` |
 | `run_0047_dqprobe` | commit の丸め吸収を場で測る診断 (`dq_block_old_*` を `extraFields` で出力、1 step) | 深部で `\|dq\|/ULP` 中央値 **0.145**・**99.8 % が 0.5 未満** (= 加算が丸めで消える)。リップ上は 2.139・22.3 %。`tools/check_commit_absorption.py` の検算 | `ref` |
-| `run_0049_ab3d_wall` | **3D A/B 腕 A** — 縦すきま上流端を無滑り壁で塞ぐ。メッシュ `gap3d_c50` (1,010,580 セル, `SOFT-PASS`)、入口は `run_0002_fp_t8_long` の $x$=1.7076 m 断面 ($\delta^*$ 1.5177 cm) を `inletProfile`、IC も同断面、`qAccumulatorFP64: 1`、`FORGE_CUDA_BLOCKSIZE=128`、段階起動 (lam→soft→mid→ramp×3→main 60k) | 実行中 | active |
-| `run_0050_ab3d_open` | **3D A/B 腕 B** — 上流横すきまへ開く (`--upstream open`)。メッシュ `gap3d_c50b` (1,426,740 セル, `SOFT-PASS`)。**上流端以外は腕 A と完全同一** | 未投入 | active |
+| `run_0049_ab3d_wall` | **3D A/B 腕 A** — 縦すきま上流端を無滑り壁で塞ぐ。メッシュ `gap3d_c50` (1,010,580 セル, `SOFT-PASS`)、入口は `run_0002_fp_t8_long` の $x$=1.7076 m 断面 ($\delta^*$ 1.5177 cm) を `inletProfile`、IC も同断面、`qAccumulatorFP64: 1`、`FORGE_CUDA_BLOCKSIZE=128`、段階起動 (lam→soft→mid→ramp×3→main 60k) | 判定区間 (ramp0→main) で `NOT CONVERGED (stalled/plateau)`、派生量 `DRIFTING` (61–145 %/tail)。前向き壁 $q_w$ は $z$=0 線で −69.4 kW/m² (リップ)。**未収束なので値は使わない** | `run_0051` へ継続 |
+| `run_0050_ab3d_open` | **3D A/B 腕 B** — 上流横すきまへ開く (`--upstream open`)。メッシュ `gap3d_c50b` (1,426,740 セル, `SOFT-PASS`)。**上流端以外は腕 A と完全同一** | 同じく `NOT CONVERGED (stalled/plateau)` だが派生量はほぼ定常 (drift 0.5–5.3 %/tail、`q_tc92` 漸近値 −32,440 で最終比 0.16 %)。$q_w$ は $z$=0 線で −48.9 kW/m² | `run_0052` へ継続予定 |
+| `run_0051_ab3d_wall_long` | 腕 A の継続 (+150k step、`res_60000` から index コピー、設定・バイナリ同一) | 実行中 | active |
+| `run_0052_ab3d_open_long` | 腕 B の継続 (+150k step、同上) | 未投入 | active |
