@@ -114,6 +114,9 @@ def main():
     ap.add_argument("--tw", type=float, default=300.0)
     ap.add_argument("--inlet-run", default="run_0002_fp_t8_long")
     ap.add_argument("--inlet-x", type=float, default=1.7076)
+    ap.add_argument("--inlet-table", default=None,
+                    help="既存の入口テーブルを使う (抽出元の平板 run が無い機械で組むとき)。"
+                         "指定すると extract_inlet_table.py を呼ばない")
     ap.add_argument("--soft-steps", type=int, default=2000)
     ap.add_argument("--mid-steps", type=int, default=3000)
     ap.add_argument("--ramp", default="0.3,0.6,1.0")
@@ -157,9 +160,13 @@ def main():
     # --- 入口分布 ---
     tabf = rd / "_inlet_table.txt"
     if not a.manifest_only:
-        subprocess.run([sys.executable, str(HERE / "extract_inlet_table.py"),
-                        "--run", a.inlet_run, "--x", str(a.inlet_x),
-                        "--out", str(tabf), "--steady"], check=True)
+        if a.inlet_table:
+            shutil.copy(a.inlet_table, tabf)
+            print(f"  入口テーブル: {a.inlet_table} を複製 (抽出はしない)")
+        else:
+            subprocess.run([sys.executable, str(HERE / "extract_inlet_table.py"),
+                            "--run", a.inlet_run, "--x", str(a.inlet_x),
+                            "--out", str(tabf), "--steady"], check=True)
     raw = np.loadtxt(tabf, skiprows=1)
     cols = tabf.read_text().splitlines()[0].split()
     tab = {c: raw[:, i] for i, c in enumerate(cols)}
