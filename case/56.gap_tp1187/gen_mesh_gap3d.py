@@ -133,13 +133,18 @@ def build(a):
     xu, xd = -0.5 * W, 0.5 * W                 # 横すきまのスリット側壁
     xvu, xvd = xu - r, xd + r                  # 谷の肩 (上面と半径の接点)
     xg, xe, xpe = -L, xd + a.l_dn, a.x_plate_end
+    OPEN = (a.upstream == "open")          # 縦すきま上流端を上流横すきまへ開く (A/B の腕 B)
+    x2d, x2u = xg, xg - W                  # 上流横すきまの下流壁 / 上流壁
+    x2vu, x2vd = x2u - r, x2d + r          # その肩
     z1, z2 = 0.5 * W, Zh - 0.5 * W
     y1 = a.y1 * 1e-6 / a.scale
 
     for cond, msg in [(a.x_in < xg < xvu, "x_in < -L < xvu"),
                       (xvd < xe < xpe < a.x_out, "xvd < x_dn_end < x_plate_end < x_out"),
                       (z1 < z2, "W/2 < Zh-W/2"),
-                      (h < 0.5 * W and h < r, "h1 < W/2 かつ h1 < r")]:
+                      (h < 0.5 * W and h < r, "h1 < W/2 かつ h1 < r"),
+                      (not OPEN or a.x_in < x2vu, "open: x_in < x2vu"),
+                      (not OPEN or x2vd < xvu, "open: x2vd < xvu")]:
         if not cond:
             sys.exit(f"幾何が成立しない: {msg}")
 
@@ -180,16 +185,46 @@ def build(a):
     rc = 0.5 * W - h
     q["cc"] = P(0.0, -r); q["cm"] = P(0.0, -r - rc)
     q["gD"] = P(xg, -D)
+    if OPEN:                                # 上流横すきま (腕 B)
+        q["v2u0"] = P(x2vu, 0.0); q["s2u"] = P(x2u, -r); q["b2u"] = P(x2u, -D)
+        q["b2d"] = P(x2d, -D); q["s2d"] = P(x2d, -r); q["v2d0"] = P(x2vd, 0.0)
+        q["c2u"] = P(x2vu, -r); q["c2d"] = P(x2vd, -r)
+        q["v2u1"] = P(x2vu, h); q["s2u1"] = P(x2u + h, -r); q["b2u1"] = P(x2u + h, -D + h)
+        q["b2d1"] = P(x2d - h, -D + h); q["s2d1"] = P(x2d - h, -r); q["v2d1"] = P(x2vd, h)
+        q["v2uH"] = P(x2vu, H); q["v2dH"] = P(x2vd, H)
 
     C = {}
-    C["pl_u0"] = g.addLine(q["in0"], q["g0"]); C["pl_u1"] = g.addLine(q["g0"], q["vu0"])
+    if OPEN:
+        # in0 → v2u0 (平板) → 上流横すきま → v2d0 → vu0 (縦すきまの上の帯)
+        C["pl_u0"] = g.addLine(q["in0"], q["v2u0"])
+        C["arc2_u"] = g.addCircleArc(q["v2u0"], q["c2u"], q["s2u"])
+        C["w2_u"] = g.addLine(q["s2u"], q["b2u"]); C["floor2"] = g.addLine(q["b2u"], q["b2d"])
+        C["w2_d"] = g.addLine(q["b2d"], q["s2d"])
+        C["arc2_d"] = g.addCircleArc(q["s2d"], q["c2d"], q["v2d0"])
+        C["pl_u1"] = g.addLine(q["v2d0"], q["vu0"])
+        C["off_u0"] = g.addLine(q["in1"], q["v2u1"])
+        C["oarc2_u"] = g.addCircleArc(q["v2u1"], q["c2u"], q["s2u1"])
+        C["ow2_u"] = g.addLine(q["s2u1"], q["b2u1"])
+        C["ofloor2"] = g.addLine(q["b2u1"], q["b2d1"])
+        C["ow2_d"] = g.addLine(q["b2d1"], q["s2d1"])
+        C["oarc2_d"] = g.addCircleArc(q["s2d1"], q["c2d"], q["v2d1"])
+        C["off_u1"] = g.addLine(q["v2d1"], q["vu1"])
+        C["core_top2"] = g.addLine(q["s2u1"], q["s2d1"])
+        C["r_s2u"] = g.addLine(q["s2u"], q["s2u1"]); C["r_b2u"] = g.addLine(q["b2u"], q["b2u1"])
+        C["r_b2d"] = g.addLine(q["b2d"], q["b2d1"]); C["r_s2d"] = g.addLine(q["s2d"], q["s2d1"])
+        C["v_v2u"] = g.addLine(q["v2u1"], q["v2uH"]); C["v_v2d"] = g.addLine(q["v2d1"], q["v2dH"])
+        C["tU0"] = g.addLine(q["inH"], q["v2uH"]); C["tV2"] = g.addLine(q["v2uH"], q["v2dH"])
+        C["tU1"] = g.addLine(q["v2dH"], q["vuH"])
+        C["tr_f"] = g.addLine(q["b2d"], q["bu"])       # トレンチ床 x∈[x2d, xu]
+    else:
+        C["pl_u0"] = g.addLine(q["in0"], q["g0"])
+        C["pl_u1"] = g.addLine(q["g0"], q["vu0"])
     C["arc_u"] = g.addCircleArc(q["vu0"], q["cu"], q["su"])
     C["w_u"] = g.addLine(q["su"], q["bu"]); C["floor"] = g.addLine(q["bu"], q["bd"])
     C["w_d"] = g.addLine(q["bd"], q["sd"])
     C["arc_d"] = g.addCircleArc(q["sd"], q["cd"], q["vd0"])
     C["pl_d0"] = g.addLine(q["vd0"], q["e0"]); C["pl_d1"] = g.addLine(q["e0"], q["pe0"])
     C["slip"] = g.addLine(q["pe0"], q["ou0"])
-    C["off_u0"] = g.addLine(q["in1"], q["g1"]); C["off_u1"] = g.addLine(q["g1"], q["vu1"])
     C["oarc_u"] = g.addCircleArc(q["vu1"], q["cu"], q["su1"])
     C["ow_u"] = g.addLine(q["su1"], q["bu1"]); C["ofloor"] = g.addLine(q["bu1"], q["bd1"])
     C["ow_d"] = g.addLine(q["bd1"], q["sd1"])
@@ -206,23 +241,46 @@ def build(a):
     else:
         C["core_top"] = g.addLine(q["su1"], q["sd1"])
         vbot = [C["core_top"]]
-    for k, (p0, p1) in {"r_in": ("in0", "in1"), "r_g": ("g0", "g1"), "r_su": ("su", "su1"),
+    for k, (p0, p1) in {"r_in": ("in0", "in1"), "r_su": ("su", "su1"),
                         "r_bu": ("bu", "bu1"), "r_bd": ("bd", "bd1"), "r_sd": ("sd", "sd1"),
                         "r_e": ("e0", "e1"), "r_pe": ("pe0", "pe1"),
                         "r_ou": ("ou0", "ou1")}.items():
         C[k] = g.addLine(q[p0], q[p1])
-    C["v_g"] = g.addLine(q["g1"], q["gH"]); C["v_vu"] = g.addLine(q["vu1"], q["vuH"])
+    C["v_vu"] = g.addLine(q["vu1"], q["vuH"])
     C["v_vd"] = g.addLine(q["vd1"], q["vdH"]); C["v_inH"] = g.addLine(q["in1"], q["inH"])
     C["v_ouH"] = g.addLine(q["ou1"], q["ouH"])
-    C["tU0"] = g.addLine(q["inH"], q["gH"]); C["tU1"] = g.addLine(q["gH"], q["vuH"])
     C["tV"] = g.addLine(q["vuH"], q["vdH"]); C["tD"] = g.addLine(q["vdH"], q["ouH"])
-    C["tr_l"] = g.addLine(q["gD"], q["g0"]); C["tr_f"] = g.addLine(q["gD"], q["bu"])
+    if not OPEN:
+        C["off_u0"] = g.addLine(q["in1"], q["g1"])
+        C["off_u1"] = g.addLine(q["g1"], q["vu1"])
+        C["v_g"] = g.addLine(q["g1"], q["gH"])
+        C["tU0"] = g.addLine(q["inH"], q["gH"]); C["tU1"] = g.addLine(q["gH"], q["vuH"])
+        C["r_g"] = g.addLine(q["g0"], q["g1"])
+        C["tr_l"] = g.addLine(q["gD"], q["g0"]); C["tr_f"] = g.addLine(q["gD"], q["bu"])
 
     S = {}
     def surf(nm, loop):
         S[nm] = g.addPlaneSurface([g.addCurveLoop(loop)])
-    surf("K1a", [C["pl_u0"], C["r_g"], -C["off_u0"], -C["r_in"]])
-    surf("K1b", [C["pl_u1"], C["arc_u"], C["r_su"], -C["oarc_u"], -C["off_u1"], -C["r_g"]])
+    if OPEN:
+        # 上流横すきま: 主すきまと同じ襟ブロッキングを x2 station に作る
+        surf("K1a", [C["pl_u0"], C["arc2_u"], C["r_s2u"], -C["oarc2_u"], -C["off_u0"],
+                     -C["r_in"]])
+        surf("K2b", [C["w2_u"], C["r_b2u"], -C["ow2_u"], -C["r_s2u"]])
+        surf("K3b", [C["floor2"], C["r_b2d"], -C["ofloor2"], -C["r_b2u"]])
+        surf("K4b", [C["w2_d"], C["r_s2d"], -C["ow2_d"], -C["r_b2d"]])
+        surf("COREb", [C["ow2_u"], C["ofloor2"], C["ow2_d"], -C["core_top2"]])
+        surf("VOUTb", [C["oarc2_u"], C["core_top2"], C["oarc2_d"], C["v_v2d"], -C["tV2"],
+                       -C["v_v2u"]])
+        surf("TU0", [C["off_u0"], C["v_v2u"], -C["tU0"], -C["v_inH"]])
+        # 縦すきまの上の帯 + 主すきまの上流円弧をまとめた襟
+        surf("K1b", [C["arc2_d"], C["pl_u1"], C["arc_u"], C["r_su"], -C["oarc_u"],
+                     -C["off_u1"], -C["oarc2_d"], -C["r_s2d"]])
+        surf("TU1", [C["off_u1"], C["v_vu"], -C["tU1"], -C["v_v2d"]])
+    else:
+        surf("K1a", [C["pl_u0"], C["r_g"], -C["off_u0"], -C["r_in"]])
+        surf("K1b", [C["pl_u1"], C["arc_u"], C["r_su"], -C["oarc_u"], -C["off_u1"], -C["r_g"]])
+        surf("TU0", [C["off_u0"], C["v_g"], -C["tU0"], -C["v_inH"]])
+        surf("TU1", [C["off_u1"], C["v_vu"], -C["tU1"], -C["v_g"]])
     surf("K2", [C["w_u"], C["r_bu"], -C["ow_u"], -C["r_su"]])
     surf("K3", [C["floor"], C["r_bd"], -C["ofloor"], -C["r_bu"]])
     surf("K4", [C["w_d"], C["r_sd"], -C["ow_d"], -C["r_bd"]])
@@ -231,12 +289,13 @@ def build(a):
     surf("K5c", [C["slip"], C["r_ou"], -C["off_s"], -C["r_pe"]])
     surf("CORE", [C["ow_u"], C["ofloor"], C["ow_d"]] + [-c for c in vbot[::-1]])
     surf("VOUT", [C["oarc_u"]] + vbot + [C["oarc_d"], C["v_vd"], -C["tV"], -C["v_vu"]])
-    surf("TU0", [C["off_u0"], C["v_g"], -C["tU0"], -C["v_inH"]])
-    surf("TU1", [C["off_u1"], C["v_vu"], -C["tU1"], -C["v_g"]])
     surf("TD", [C["off_d0"], C["off_d1"], C["off_s"], C["v_ouH"], -C["tD"], -C["v_vd"]])
     # トレンチは 1 ブロック。上面と円弧の接点 vu0、円弧とスリット壁の接点 su の
     # うち、**接線連続な vu0 は辺の途中**に置く (角にすると内角 180° で潰れる)。
-    surf("t1", [C["tr_f"], -C["w_u"], -C["arc_u"], -C["pl_u1"], -C["tr_l"]])
+    if OPEN:
+        surf("t1", [C["tr_f"], -C["w_u"], -C["arc_u"], -C["pl_u1"], -C["arc2_d"], -C["w2_d"]])
+    else:
+        surf("t1", [C["tr_f"], -C["w_u"], -C["arc_u"], -C["pl_u1"], -C["tr_l"]])
     g.synchronize()
 
     r_bl = solve_r(y1, h, n_bl)
@@ -249,13 +308,26 @@ def build(a):
 
     def tc(nm, n, **kw):
         g.mesh.setTransfiniteCurve(C[nm], n, **kw)
-    for nm in ("r_in", "r_g", "r_su", "r_bu", "r_bd", "r_sd", "r_e", "r_pe", "r_ou"):
+    rad = ["r_in", "r_su", "r_bu", "r_bd", "r_sd", "r_e", "r_pe", "r_ou"]
+    rad += (["r_s2u", "r_b2u", "r_b2d", "r_s2d"] if OPEN else ["r_g"])
+    for nm in rad:
         tc(nm, n_bl, meshType="Progression", coef=r_bl)
     for nm in ("pl_u0", "off_u0", "tU0"):
         tc(nm, n_up0, meshType="Progression", coef=-1.05)
     for nm in ("pl_u1", "off_u1", "tU1"):
         tc(nm, n_up1, meshType="Progression", coef=-1.02)
-    tc("tr_f", n_up1 + n_arc - 1, meshType="Progression", coef=-1.02)
+    n_tr = n_up1 + (2 * n_arc - 2 if OPEN else n_arc - 1)   # トレンチ床 = 上辺の点数
+    tc("tr_f", n_tr, meshType="Progression", coef=(1.0 if OPEN else -1.02))
+    if OPEN:
+        for nm in ("arc2_u", "arc2_d", "oarc2_u", "oarc2_d"):
+            tc(nm, n_arc)
+        for nm in ("w2_u", "w2_d", "ow2_u", "ow2_d"):
+            tc(nm, n_dep, meshType="Progression", coef=a.dep_coef)
+        for nm in ("floor2", "ofloor2", "core_top2"):
+            tc(nm, n_core, meshType="Bump", coef=0.35)
+        for nm in ("v_v2u", "v_v2d"):
+            tc(nm, n_top, meshType="Progression", coef=r_top)
+        tc("tV2", n_vtop)
     for nm in ("pl_d0", "off_d0"):
         tc(nm, n_dn0, meshType="Progression", coef=1.02)
     for nm in ("pl_d1", "off_d1"):
@@ -266,7 +338,8 @@ def build(a):
         tc(nm, n_arc)
     for nm in ("w_u", "w_d", "ow_u", "ow_d"):
         tc(nm, n_dep, meshType="Progression", coef=a.dep_coef)
-    tc("tr_l", n_dep, meshType="Progression", coef=a.dep_coef)
+    if not OPEN:
+        tc("tr_l", n_dep, meshType="Progression", coef=a.dep_coef)
     for nm in ("floor", "ofloor"):
         tc(nm, n_core, meshType="Bump", coef=0.35)
     if a.valley_arc:
@@ -274,12 +347,26 @@ def build(a):
             tc(nm, n_ch)
     else:
         tc("core_top", n_core, meshType="Bump", coef=0.35)
-    for nm in ("v_g", "v_vu", "v_vd", "v_inH", "v_ouH"):
+    for nm in (["v_vu", "v_vd", "v_inH", "v_ouH"] + ([] if OPEN else ["v_g"])):
         tc(nm, n_top, meshType="Progression", coef=r_top)
     tc("tV", n_vtop); tc("tD", n_dn0 + n_dn1 + n_buf - 2)
 
     ms = g.mesh
-    ms.setTransfiniteSurface(S["K1b"], "Left", [q["g0"], q["su"], q["su1"], q["g1"]])
+    if OPEN:
+        ms.setTransfiniteSurface(S["K1a"], "Left",
+                                 [q["in0"], q["s2u"], q["s2u1"], q["in1"]])
+        ms.setTransfiniteSurface(S["K1b"], "Left",
+                                 [q["s2d"], q["su"], q["su1"], q["s2d1"]])
+        # VOUTb も VOUT と同じ理由で構造化しない
+        if a.vout_transfinite:
+            ms.setTransfiniteSurface(S["VOUTb"], "Left",
+                                     [q["v2u1"], q["v2d1"], q["v2dH"], q["v2uH"]])
+        for k in ("K2b", "K3b", "K4b"):
+            ms.setTransfiniteSurface(S[k])
+        ms.setTransfiniteSurface(S["COREb"], "Left",
+                                 [q["s2u1"], q["b2u1"], q["b2d1"], q["s2d1"]])
+    else:
+        ms.setTransfiniteSurface(S["K1b"], "Left", [q["g0"], q["su"], q["su1"], q["g1"]])
     ms.setTransfiniteSurface(S["K5a"], "Left", [q["sd"], q["e0"], q["e1"], q["sd1"]])
     # VOUT (谷の上) は transfinite で張らない。底辺が su1/sd1 で 90° 折れるので
     # 構造格子だとそこの第一層が楔に潰れる (実測 skew 0.98)。gmsh の非構造 +
@@ -287,16 +374,20 @@ def build(a):
     if a.vout_transfinite:
         ms.setTransfiniteSurface(S["VOUT"], "Left", [q["vu1"], q["vd1"], q["vdH"], q["vuH"]])
     ms.setTransfiniteSurface(S["TD"], "Left", [q["vd1"], q["ou1"], q["ouH"], q["vdH"]])
-    ms.setTransfiniteSurface(S["t1"], "Left", [q["gD"], q["bu"], q["su"], q["g0"]])
+    ms.setTransfiniteSurface(S["t1"], "Left",
+                             ([q["b2d"], q["bu"], q["su"], q["s2d"]] if OPEN
+                              else [q["gD"], q["bu"], q["su"], q["g0"]]))
     ms.setTransfiniteSurface(S["CORE"], "Left",
                              [q["su1"], q["bu1"], q["bd1"], q["sd1"]])
-    for k in ("K1a", "K2", "K3", "K4", "K5b", "K5c", "TU0", "TU1"):
+    for k in (["K2", "K3", "K4", "K5b", "K5c", "TU0", "TU1"] + ([] if OPEN else ["K1a"])):
         ms.setTransfiniteSurface(S[k])
     for s in S.values():
         ms.setRecombine(2, s)
     g.synchronize()
 
-    for nm, s1, s2 in [("K1b", n_up1 + n_arc - 1, n_up1 + n_arc - 1),
+    for nm, s1, s2 in [("K1b", n_up1 + n_arc - 1 + (n_arc - 1 if OPEN else 0),
+                        n_up1 + n_arc - 1 + (n_arc - 1 if OPEN else 0)),
+                       ("t1", n_tr, n_tr),
                        ("K5a", n_arc + n_dn0 - 1, n_arc + n_dn0 - 1),
                        ("TD", n_dn0 + n_dn1 + n_buf - 2, n_dn0 + n_dn1 + n_buf - 2),
                        ("t1", n_up1 + n_arc - 1, n_up1 + n_arc - 1)]:
@@ -428,6 +519,8 @@ def main():
     ap.add_argument("--depth", type=float, default=6.35e-2)
     ap.add_argument("--l-long", type=float, default=15.24e-2, help="上流縦すきま長 [m]")
     ap.add_argument("--l-dn", type=float, default=5.0e-2, help="下流縦すきま長 (打ち切り) [m]")
+    ap.add_argument("--upstream", choices=("wall", "open"), default="wall",
+                    help="縦すきま上流端: wall=無滑り壁で塞ぐ / open=上流横すきまへ開く")
     ap.add_argument("--zhalf", type=float, default=7.62e-2, help="pitch/2 [m]")
     ap.add_argument("--H", type=float, default=0.08)
     ap.add_argument("--dz-gap", type=float, default=0.08, help="縦すきま内の dz 上限 [mm]")
