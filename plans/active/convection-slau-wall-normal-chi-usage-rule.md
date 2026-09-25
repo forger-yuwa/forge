@@ -152,11 +152,11 @@ $\rho_w/\rho_i<0.1$、(ii) 全接続面の正味流出 $\Sigma\dot m>0$ が 3 du
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | ~~1~~ (**済 2026-09-25**: plan 3 回目 GO-with-changes C0/M4/m1、全件採用して §4 に反映) | **plan 縮小 + codex plan 3 回目** | 本改訂。Critical/Major は `diagnostician` に諮る | F |
-| 2 | 既存系列の再判定 (§4.3) + 前 plan #10b の差区間での再計算 | `_v3sern/ct_flag{0,1}.csv` (AWS から csv だけ取得) の **5 列 (`C_T`, `C_T_with_shear`, `C_L`, `C_L_with_shear`, `C_M`)** に §4.3 の閾値表で `check_quasisteady.py --series-csv`、`STEADY`/`OSCILLATING` の量だけ差区間 (§4.2)。前 plan #10b の $C_T$・膨張角窓も差区間で再計算し訂正行 | O |
+| ~~2~~ (**済 2026-09-25: 全 5 列帯内**、§6.2) | 既存系列の再判定 (§4.3) + 前 plan #10b の差区間での再計算 | `_v3sern/ct_flag{0,1}.csv` (AWS から csv だけ取得) の **5 列 (`C_T`, `C_T_with_shear`, `C_L`, `C_L_with_shear`, `C_M`)** に §4.3 の閾値表で `check_quasisteady.py --series-csv`、`STEADY`/`OSCILLATING` の量だけ差区間 (§4.2)。前 plan #10b の $C_T$・膨張角窓も差区間で再計算し訂正行 | O |
 | 3 | 衝撃足の再同定 (§4.4) | 新スクリプト (§4.4 の手順 1–3・分岐表、座標は `MESH/COORD`、分布比較は §4.2 の全 dump 対 $\ell_{ij}$) を**結果を見る前に**書いて commit、既存 72 dump に当てる (AWS)。m6_on で両側未検出なら m4_off の 1 組 (AWS ≈ 30 min)。結論は `diagnostician` | O (結論 F) |
-| 3b | 診断可能性の検査スクリプト (§4.1.1) | `case/46.sern_design/cad/diag_applicability.py`: 表のキー検査 (起動エコーと yaml の両方、省略 ≡ 既定値) + `FORGE_DUMP_MASSFLUX` 1 step 照合。合格 = 全キー OK かつ対象 CV 全接続面の $\lvert\dot m_{tool}-\dot m_{kernel}\rvert$ が前 plan V5 の許容内。試験: 既知の 3D 側壁接続 (`run_0437/res_0` 相当、AWS) で PASS、`slauContactFloor` 0.01 の config で「診断不能」を返すこと | O |
+| ~~3b~~ (**済 2026-09-25**: 既知構成で診断可能・照合 0.002×2τ_b、否定側も確認、§6.2) | 診断可能性の検査スクリプト (§4.1.1) | `case/46.sern_design/cad/diag_applicability.py`: 表のキー検査 (起動エコーと yaml の両方、省略 ≡ 既定値) + `FORGE_DUMP_MASSFLUX` 1 step 照合。合格 = 全キー OK かつ対象 CV 全接続面の $\lvert\dot m_{tool}-\dot m_{kernel}\rvert$ が前 plan V5 の許容内。試験: 既知の 3D 側壁接続 (`run_0437/res_0` 相当、AWS) で PASS、`slauContactFloor` 0.01 の config で「診断不能」を返すこと | O |
 | 4 | 前 plan の訂正行 | **済 2026-09-25**: V3 表・§6.2・#14・受入の範囲・§9 を「膨張角窓の壁圧」に改名し、カウル衝撃足を「未測定」に | O |
-| 5 | ツール | `stage_manifest.py` に `solver` hard キー + 単体試験 (SLAU↔ROE が別区間・省略 ≡ 既定 SLAU)、`diag_wall_cv_budget.py` の docstring に `--wall-normal-chi` の意味。合格: 単体試験 PASS、`test_gate_bad_input.py` PASS | O |
+| ~~5~~ (**済 2026-09-25**: `solver` hard キー 試験 10/10 PASS、docstring) | ツール | `stage_manifest.py` に `solver` hard キー + 単体試験 (SLAU↔ROE が別区間・省略 ≡ 既定 SLAU)、`diag_wall_cv_budget.py` の docstring に `--wall-normal-chi` の意味。合格: 単体試験 PASS、`test_gate_bad_input.py` PASS | O |
 | 6 | 規則の本文化 + codex result → accepted | §4.1 の文を `procedures/recommended-settings.md` に、`methods/convection/theory.md` の対策節からリンク | F |
 | 7 | sern-3d への委譲 | `tooling-nozzle-sern-3d.md` §5.1 に「R5n を `slauWallNormalChi: 1` で再取得 (メッシュ生成コマンド・blocksize 記録)。3D 固定点は未解決」を 1 行 | F |
 
@@ -181,7 +181,35 @@ $\rho_w/\rho_i<0.1$、(ii) 全接続面の正味流出 $\Sigma\dot m>0$ が 3 du
 
 ### 6.2 結果
 
-(未実施)
+**#2 既存系列の帯判定 (2026-09-25) — 全 5 列「帯内」= 生産許容内** (m6_on、生産格子、この窓)。`_v3sern/v3s_flag{0,1}_ext` の
+`ct_flag{0,1}.csv` 末尾 40 % (29 dump、step 22000–36000)、閾値は §4.3 の表。証拠 `case/46.sern_design/_rule_usage/{BAND_VERDICT.txt,QS_flag0.txt,QS_flag1.txt}`。
+
+| 列 | flag0 | flag1 | 平均差 | 差区間 $I_\Delta$ | 許容 | 判定 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `C_T` | STEADY | STEADY | −0.000287 | [−0.000399, −0.000183] | ±0.002 | 帯内 |
+| `C_T_with_shear` | STEADY | STEADY | −0.000223 | [−0.000335, −0.000119] | ±0.002 | 帯内 |
+| `C_L` | OSCILLATING (0.2773 ± 0.00024) | STEADY | +0.001211 | [+0.000790, +0.001584] | ±0.002 | 帯内 |
+| `C_L_with_shear` | OSCILLATING (0.2803 ± 0.00024) | STEADY | +0.001225 | [+0.000800, +0.001601] | ±0.002 | 帯内 |
+| `C_M` | OSCILLATING (−7.160 ± 0.0054) | STEADY | −0.022933 | [−0.031365, −0.013462] | ±0.05 | 帯内 |
+
+- 平均の安定性 (末尾窓の前半/後半の平均差) は全列で許容の 1/5 を大きく下回る (最大 $C_M$ flag1 8.3e-4)。
+- 前 plan が `DRIFTING` と記録した flag0 の $C_L$/$C_M$ は、**$C_T$ 用の閾値で判定していた**ためで、量別の閾値では `OSCILLATING`。
+- **余裕**: $C_L$ の差区間の上端 0.0016 は許容 0.002 の 8 割。「帯内」だが余裕は大きくない。
+- 前 plan #10b の $C_T$ を差区間で再計算すると相対 [−0.043 %, −0.020 %] (許容 0.1 %) で判定不変。
+
+**#3b 診断可能性の検査 (2026-09-25) — 既知構成で「診断可能」、`slauContactFloor` 0.01 で「診断不能」**。
+`run_0437/res_0` 起点を flag 0 にして 1 step (`FORGE_DUMP_MASSFLUX`、AWS)、対象 3 CV の全接続面 15 面で
+max $|\dot m_{kernel}-\dot m_{tool}|/(2\tau_b)$ = **0.002**。$\rho_w/\rho_i$ = 0.020 / 0.030 / 0.047、$\Sigma[\text{流出}(\chi_n)-\text{流出}(\chi)]$ =
+−1.21e-7 / −1.37e-7 / −2.98e-7 kg/s (3 CV とも補充が増える = §4.1 条件 iii を満たす)。証拠 `_rule_usage/APPLICABILITY_run0437_res0.txt`。
+キー検査の否定側 (`convMethod: 1`、`slauContactFloor: 0.01`) は手元で「診断不能」を確認。
+
+**#3 衝撃足の再同定 — m6_on は「登録条件では同定できない」** (2026-09-25、`v3sern_shockfoot.py` は結果を見る前に commit `4e90800c`)。
+両 run の末尾 29 dump すべてで識別済み候補 0。**スクリプトの不具合確認** (判定条件は変えずに中間量を出した): 探索区間 $x\in[0.120, 1.009]$ m の
+ランプ壁ノード 148 点、壁圧は 54.7 kPa → 10.3 kPa とほぼ単調に膨張。$dp/dx>0$ の局所最大 4 個の上昇比は最大 1.019 (登録条件 1.05 未満)。
+**分岐表どおり m4_off の flag 0/1 対へ** (`run_0450_m4off_flag0` 段階起動 → `run_0451_m4off_flag0_br` / `run_0452_m4off_flag1_br` 分岐、AWS)。
+**「衝撃が当たらない」とは書かない**。
+- **気づいた点 (結果の解釈は diagnostician に諮る)**: 前 plan から引き継いだ $t$ = 2 mm は「カウル板厚」とされていたが、問題 YAML の
+  `cowl_thickness` は 0.005 H = 0.5 mm。登録値 2 mm はそのまま使った (事後に変えない)。
 
 ## 7. 影響範囲
 
