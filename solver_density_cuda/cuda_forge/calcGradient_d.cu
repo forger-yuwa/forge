@@ -2,6 +2,9 @@
 #include "cuda_forge/cudaWrapper.cuh"
 #include <vector>
 #include <cstdio>
+#include <cmath>
+#include <map>
+#include "periodicNode_d.cuh"
 
 __global__ void calcGradient_1_d
 ( 
@@ -585,7 +588,7 @@ __global__ void lsqGrad_solve_d(
 // plans/active/discretization-lsq-gradient.md 候補④ / methods/discretization.md §7.3.1。
 
 // 対称 3×3 の解析固有値 (Smith のトリゴ法)。l0 <= l1 <= l2 で返す。
-__device__ __forceinline__ static void lsqPre_sym3_eigvals(
+__host__ __device__ __forceinline__ static void lsqPre_sym3_eigvals(
     double m00,double m01,double m02,double m11,double m12,double m22,
     double& l0,double& l1,double& l2)
 {
@@ -607,7 +610,7 @@ __device__ __forceinline__ static void lsqPre_sym3_eigvals(
 
 // 固有値 mu に対応する固有ベクトル: (M−μI) の 2 行のクロス積のうち最大ノルムを採用。
 // mu が他の固有値からよく分離しているときのみ呼ぶ (呼び出し側で保証)。
-__device__ __forceinline__ static void lsqPre_sym3_eigvec(
+__host__ __device__ __forceinline__ static void lsqPre_sym3_eigvec(
     double m00,double m01,double m02,double m11,double m12,double m22, double mu,
     double& vx,double& vy,double& vz)
 {
@@ -629,7 +632,7 @@ __device__ __forceinline__ static void lsqPre_sym3_eigvec(
 }
 
 // 対称 3×3 の直接逆行列 (adjugate/det)。呼び出し側で det の健全性を保証。
-__device__ __forceinline__ static void lsqPre_sym3_inv(
+__host__ __device__ __forceinline__ static void lsqPre_sym3_inv(
     double m00,double m01,double m02,double m11,double m12,double m22,
     double& i00,double& i01,double& i02,double& i11,double& i12,double& i22)
 {
@@ -639,6 +642,50 @@ __device__ __forceinline__ static void lsqPre_sym3_inv(
     i00=c00*idet; i01=c01*idet; i02=c02*idet;
     i11=(m00*m22-m02*m02)*idet; i12=(m02*m01-m00*m12)*idet;
     i22=(m00*m11-m01*m01)*idet;
+}
+
+// スペクトル打ち切り擬似逆 (§7.3.1)。GPU の事前計算と、node 周期の合併 stencil (host, lsqPre_mergePeriodic) で共有する。
+__host__ __device__ static void lsqPre_pinv(
+    double m00,double m01,double m02,double m11,double m12,double m22, double thresh,
+    double& i00,double& i01,double& i02,double& i11,double& i12,double& i22, int& degen)
+{
+    degen = 0;
+    double l0,l1,l2;
+    lsqPre_sym3_eigvals(m00,m01,m02,m11,m12,m22, l0,l1,l2);
+    const double cut = fmax(thresh*l2, 1.0e-300);
+    if (l2 <= 1.0e-300) {
+        // 近傍ゼロ (来ないはず): 勾配 0
+        i00=i01=i02=i11=i12=i22=0.0;
+        degen = 1;
+    } else if (l0 >= cut) {
+        // 全モード健全: 直接逆行列
+        lsqPre_sym3_inv(m00,m01,m02,m11,m12,m22, i00,i01,i02,i11,i12,i22);
+    } else if (l1 >= cut) {
+        // 1 モード退化 (l0 のみ落とす)。l0 は kept (>=cut) からよく分離 → 固有ベクトル健全。
+        // M⁺ = inv(M + l2·v0v0ᵀ)·(I − v0v0ᵀ) (シフトで退化方向を持ち上げてから射影で消す)
+        double vx,vy,vz;
+        lsqPre_sym3_eigvec(m00,m01,m02,m11,m12,m22, l0, vx,vy,vz);
+        const double K=l2;
+        double s00,s01,s02,s11,s12,s22;
+        lsqPre_sym3_inv(m00+K*vx*vx, m01+K*vx*vy, m02+K*vx*vz,
+                        m11+K*vy*vy, m12+K*vy*vz, m22+K*vz*vz,
+                        s00,s01,s02,s11,s12,s22);
+        // P = I − v vᵀ を右から掛ける (両者は同じ固有基底を持ち可換 → 結果は対称)
+        const double p00=1.0-vx*vx, p01=-vx*vy, p02=-vx*vz;
+        const double p11=1.0-vy*vy, p12=-vy*vz, p22=1.0-vz*vz;
+        i00=s00*p00+s01*p01+s02*p02; i01=s00*p01+s01*p11+s02*p12; i02=s00*p02+s01*p12+s02*p22;
+        i11=s01*p01+s11*p11+s12*p12; i12=s01*p02+s11*p12+s12*p22;
+        i22=s02*p02+s12*p12+s22*p22;
+        degen = 1;
+    } else {
+        // 2 モード退化: 最大固有値方向のみ残す。l2 は dropped (<cut) からよく分離。
+        double vx,vy,vz;
+        lsqPre_sym3_eigvec(m00,m01,m02,m11,m12,m22, l2, vx,vy,vz);
+        const double il=1.0/l2;
+        i00=il*vx*vx; i01=il*vx*vy; i02=il*vx*vz;
+        i11=il*vy*vy; i12=il*vy*vz; i22=il*vz*vz;
+        degen = 1;
+    }
 }
 
 // setup 1/3: ノードごとに M (double) を組み、スペクトル打ち切り擬似逆 M⁺ を Minv6 に格納。
@@ -668,45 +715,90 @@ __global__ void lsqPre_setup_d(
         const double w=1.0/fmax(dx*dx+dy*dy+dz*dz,1.0e-300);
         m00+=w*dx*dx; m01+=w*dx*dy; m02+=w*dx*dz; m11+=w*dy*dy; m12+=w*dy*dz; m22+=w*dz*dz;
     }
-    double l0,l1,l2;
-    lsqPre_sym3_eigvals(m00,m01,m02,m11,m12,m22, l0,l1,l2);
-    const double cut = fmax(thresh*l2, 1.0e-300);
-    double i00,i01,i02,i11,i12,i22;
-    if (l2 <= 1.0e-300) {
-        // 近傍ゼロ (来ないはず): 勾配 0
-        i00=i01=i02=i11=i12=i22=0.0;
-        atomicAdd(degenCount, 1);
-    } else if (l0 >= cut) {
-        // 全モード健全: 直接逆行列
-        lsqPre_sym3_inv(m00,m01,m02,m11,m12,m22, i00,i01,i02,i11,i12,i22);
-    } else if (l1 >= cut) {
-        // 1 モード退化 (l0 のみ落とす)。l0 は kept (>=cut) からよく分離 → 固有ベクトル健全。
-        // M⁺ = inv(M + l2·v0v0ᵀ)·(I − v0v0ᵀ) (シフトで退化方向を持ち上げてから射影で消す)
-        double vx,vy,vz;
-        lsqPre_sym3_eigvec(m00,m01,m02,m11,m12,m22, l0, vx,vy,vz);
-        const double K=l2;
-        double s00,s01,s02,s11,s12,s22;
-        lsqPre_sym3_inv(m00+K*vx*vx, m01+K*vx*vy, m02+K*vx*vz,
-                        m11+K*vy*vy, m12+K*vy*vz, m22+K*vz*vz,
-                        s00,s01,s02,s11,s12,s22);
-        // P = I − v vᵀ を右から掛ける (両者は同じ固有基底を持ち可換 → 結果は対称)
-        const double p00=1.0-vx*vx, p01=-vx*vy, p02=-vx*vz;
-        const double p11=1.0-vy*vy, p12=-vy*vz, p22=1.0-vz*vz;
-        i00=s00*p00+s01*p01+s02*p02; i01=s00*p01+s01*p11+s02*p12; i02=s00*p02+s01*p12+s02*p22;
-        i11=s01*p01+s11*p11+s12*p12; i12=s01*p02+s11*p12+s12*p22;
-        i22=s02*p02+s12*p12+s22*p22;
-        atomicAdd(degenCount, 1);
-    } else {
-        // 2 モード退化: 最大固有値方向のみ残す。l2 は dropped (<cut) からよく分離。
-        double vx,vy,vz;
-        lsqPre_sym3_eigvec(m00,m01,m02,m11,m12,m22, l2, vx,vy,vz);
-        const double il=1.0/l2;
-        i00=il*vx*vx; i01=il*vx*vy; i02=il*vx*vz;
-        i11=il*vy*vy; i12=il*vy*vz; i22=il*vz*vz;
-        atomicAdd(degenCount, 1);
-    }
+    double i00,i01,i02,i11,i12,i22; int degen;
+    lsqPre_pinv(m00,m01,m02,m11,m12,m22, thresh, i00,i01,i02,i11,i12,i22, degen);
+    if (degen) atomicAdd(degenCount, 1);
     Minv6[6*ic+0]=i00; Minv6[6*ic+1]=i01; Minv6[6*ic+2]=i02;
     Minv6[6*ic+3]=i11; Minv6[6*ic+4]=i12; Minv6[6*ic+5]=i22;
+}
+
+// setup 2b (host): node 周期の継ぎ目の**合併 stencil** の LSQ 係数 (plan boundary-node-periodic-gradient-fix §4.1)。
+// 継ぎ目で割れた CV の各部分 (root と member) は、自分側の内部隣接だけで完全な LSQ を解いていたので、
+// periodicGradientGather の和が線形場で 2 倍 (角で 4・8 倍) になっていた。group の全 incidence を集め、
+// 同じ物理隣接 (隣接の periodicRoot が同じ ∧ Δx が 1e-4 h_min 以内) を同値類 E にまとめ、
+// M_r = Σ_E w_E d_E d_E^T (打ち切りは M_r に 1 回) から c_mj = M_r^+ (w_E d_E / n_E) を各 incidence に焼き込む。
+// 毎 step の gather (部分和) は変えない → 部分和 = 合併 stencil の LSQ。並進周期のみ (d はそのまま共通座標)。
+static int lsqPre_mergePeriodic(mesh& msh, variables& var, flow_float* cInt_d, double thresh, int& nDegen)
+{
+    const geom_int n = msh.nCells;
+    std::vector<geom_int> idx(n + 1);
+    gpuErrchk(cudaMemcpy(idx.data(), msh.map_cell_planes_index_d, sizeof(geom_int)*(n + 1), cudaMemcpyDeviceToHost));
+    const geom_int nInc = idx[n];
+    std::vector<geom_int> cp(nInc), pc(2*(size_t)msh.nPlanes);
+    gpuErrchk(cudaMemcpy(cp.data(), msh.map_cell_planes_d, sizeof(geom_int)*nInc, cudaMemcpyDeviceToHost));
+    gpuErrchk(cudaMemcpy(pc.data(), msh.map_plane_cells_d, sizeof(geom_int)*2*(size_t)msh.nPlanes, cudaMemcpyDeviceToHost));
+    std::vector<flow_float> cx(n), cy(n), cz(n), cInt(3*(size_t)nInc);
+    gpuErrchk(cudaMemcpy(cx.data(), var.c_d["ccx"], sizeof(flow_float)*n, cudaMemcpyDeviceToHost));
+    gpuErrchk(cudaMemcpy(cy.data(), var.c_d["ccy"], sizeof(flow_float)*n, cudaMemcpyDeviceToHost));
+    gpuErrchk(cudaMemcpy(cz.data(), var.c_d["ccz"], sizeof(flow_float)*n, cudaMemcpyDeviceToHost));
+    gpuErrchk(cudaMemcpy(cInt.data(), cInt_d, sizeof(flow_float)*3*(size_t)nInc, cudaMemcpyDeviceToHost));
+    const auto& root = msh.periodicRoot;
+
+    // group (root → members)。member が 2 以上の group だけ
+    std::map<geom_int, std::vector<geom_int>> groups;
+    for (geom_int c = 0; c < n; ++c) if (root[c] != c) groups[root[c]].push_back(c);
+    int nGroups = 0; nDegen = 0;
+    struct Inc { geom_int ilp, jroot; double dx, dy, dz; int cls; };
+    struct Cls { geom_int jroot; double dx, dy, dz; int count; };
+    for (auto& g : groups) {
+        std::vector<geom_int> mem; mem.push_back(g.first);            // root を先頭 (代表値は root 側優先)
+        for (geom_int m : g.second) mem.push_back(m);
+        std::vector<Inc> incs;
+        double hmin = 1e300;
+        for (geom_int m : mem) {
+            for (geom_int ilp = idx[m]; ilp < idx[m + 1]; ++ilp) {
+                const geom_int ip = cp[ilp];
+                if (ip >= msh.nNormalPlanes) continue;
+                const geom_int ic0 = pc[2*ip], ic1 = pc[2*ip + 1];
+                const geom_int jc = (ic0 == m) ? ic1 : ic0;
+                Inc e{ilp, root[jc], (double)cx[jc] - (double)cx[m], (double)cy[jc] - (double)cy[m], (double)cz[jc] - (double)cz[m], -1};
+                const double L = std::sqrt(e.dx*e.dx + e.dy*e.dy + e.dz*e.dz);
+                if (L > 0 && L < hmin) hmin = L;
+                incs.push_back(e);
+            }
+        }
+        const double tol = 1e-4*hmin;
+        std::vector<Cls> cls;
+        for (auto& e : incs) {
+            int found = -1;
+            for (size_t k = 0; k < cls.size(); ++k) {
+                if (cls[k].jroot != e.jroot) continue;
+                const double ex = e.dx - cls[k].dx, ey = e.dy - cls[k].dy, ez = e.dz - cls[k].dz;
+                if (std::sqrt(ex*ex + ey*ey + ez*ez) <= tol) { found = (int)k; break; }
+            }
+            if (found < 0) { cls.push_back(Cls{e.jroot, e.dx, e.dy, e.dz, 0}); found = (int)cls.size() - 1; }
+            cls[found].count += 1; e.cls = found;
+        }
+        double m00=0,m01=0,m02=0,m11=0,m12=0,m22=0;
+        for (auto& c : cls) {
+            const double w = 1.0/std::fmax(c.dx*c.dx + c.dy*c.dy + c.dz*c.dz, 1.0e-300);
+            m00+=w*c.dx*c.dx; m01+=w*c.dx*c.dy; m02+=w*c.dx*c.dz; m11+=w*c.dy*c.dy; m12+=w*c.dy*c.dz; m22+=w*c.dz*c.dz;
+        }
+        double i00,i01,i02,i11,i12,i22; int degen;
+        lsqPre_pinv(m00,m01,m02,m11,m12,m22, thresh, i00,i01,i02,i11,i12,i22, degen);
+        nDegen += degen;
+        for (auto& e : incs) {
+            const Cls& c = cls[e.cls];
+            const double w = 1.0/std::fmax(c.dx*c.dx + c.dy*c.dy + c.dz*c.dz, 1.0e-300)/c.count;   // α = 1/重複数
+            const double bx = w*c.dx, by = w*c.dy, bz = w*c.dz;
+            cInt[3*(size_t)e.ilp+0] = (flow_float)(i00*bx + i01*by + i02*bz);
+            cInt[3*(size_t)e.ilp+1] = (flow_float)(i01*bx + i11*by + i12*bz);
+            cInt[3*(size_t)e.ilp+2] = (flow_float)(i02*bx + i12*by + i22*bz);
+        }
+        ++nGroups;
+    }
+    gpuErrchk(cudaMemcpy(cInt_d, cInt.data(), sizeof(flow_float)*3*(size_t)nInc, cudaMemcpyHostToDevice));
+    return nGroups;
 }
 
 // setup 2/3: 内部双対面 incidence の係数 c = M⁺·(w d) を cell_planes CSR 位置に float32 で格納。
@@ -888,6 +980,12 @@ void calcGradient_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh
             CHECK_CUDA_ERROR(cudaMemcpy(&degH, degD, sizeof(int), cudaMemcpyDeviceToHost));
             printf("gradLSQ=2 precomp: %d/%lld nodes spectral-truncated (thresh=%.2e)\n",
                    degH, (long long)msh.nCells, (double)cfg.gradLSQDegenThresh);
+            if (periodicSeamMergeActive(cfg, msh)) {
+                int nDegP = 0;
+                const int nG = lsqPre_mergePeriodic(msh, var, cInt, (double)cfg.gradLSQDegenThresh, nDegP);
+                printf("gradLSQ=2 periodic seam: %d groups re-fitted on the merged stencil (%d truncated) "
+                       "(plan boundary-node-periodic-gradient-fix)\n", nG, nDegP);
+            }
             cudaFree(Minv6); cudaFree(degD);
             pre_n = msh.nCells;
         }

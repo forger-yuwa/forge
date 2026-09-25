@@ -100,8 +100,8 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | --- | --- | --- | --- |
 | 1 | codex plan 段 | Critical/Major は `diagnostician` に諮る | F |
 | 2 | G0 拡張と再現物 | 線形場を生成スクリプトで焼く (`initial` ではなく)。入力 h5 生成・集計スクリプト・修正前の勾配出力・revision を `case/09.Taylor-Green/_g0_lsq_seam/` に保存し README に登録。2/4/8 member (面・辺・角)、非対称 stencil、壁∩継ぎ目、root 交換のメッシュ | O |
-| 3 | 合併 LSQ | `calcGradient_d.cu` の事前計算、`mesh.cpp` の group 情報。合格: §6 G0 | O (F レビュー、条件 6) |
-| 4 | $k,\omega$ 勾配の gather | `main.cpp`、`periodicNode_d.cu`、`ransTransport_d.cu`。合格: §6 G1 | O (F レビュー) |
+| 3 (**実装済 2026-09-26**、正式試験は #5) | 合併 LSQ | `calcGradient_d.cu` の事前計算、`mesh.cpp` の group 情報。合格: §6 G0 | O (F レビュー、条件 6) |
+| 4 (**実装済 2026-09-26**、正式試験は #5) | $k,\omega$ 勾配の gather | `main.cpp`、`periodicNode_d.cu`、`ransTransport_d.cu`。合格: §6 G1 | O (F レビュー) |
 | 5 | 検証 | §6 G2・R1・R2。**区切りで codex** | O (結論 F) |
 | 6 | docs + codex result | `methods/gradient.md` の「修正中」を外す | F |
 
@@ -125,6 +125,9 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 
 ### 6.2 結果
 
+- **予備確認 (修正後、2026-09-26、正式な G0/G1 ではない)**: 同じ TGV・線形場で 1 step。x 継ぎ目 1458 点 (y・z 継ぎ目から 2.5 格子以上) で
+  $\partial U_x/\partial y$ = 1.000000 [0.999995, 1.000006] (修正前 2.000000)、接線成分 0。SST を有効にして $k=1+0.1y$、$\omega=100+2y$ を入れると
+  $\partial k/\partial y$ = 0.100000、$\partial\omega/\partial y$ = 2.000000 (内部と一致)。合併し直した group は 2977 (打ち切り 0)。
 - **G0 (修正前、2026-09-26)**: 並進、case/09 TGV 32³、線形場 `Ux = 10+y` で x 継ぎ目 1458 点の $\partial U_x/\partial y$ = 2.000000 [1.999990, 2.000012]、
   内部 19683 点 1.000000。`case/09.Taylor-Green/_g0_lsq_seam/G0_translational.txt`。
 

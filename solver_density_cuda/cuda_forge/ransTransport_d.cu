@@ -1,4 +1,6 @@
 #include "ransTransport_d.cuh"
+#include "periodicNode_d.cuh"
+extern bool g_sstF1Computed;   // ransSource_d.cu (F1 が一度でも計算されたか)
 
 #include "scalarTransport_d.cuh"
 
@@ -28,13 +30,18 @@ __global__ void calc_scalar_gradient_face_d(
     flow_float* dKdz,
     flow_float* dOmegadx,
     flow_float* dOmegady,
-    flow_float* dOmegadz)
+    flow_float* dOmegadz,
+    int excludePeriodic,
+    geom_int nNormalPlanes)
 {
     geom_int ip = blockDim.x * blockIdx.x + threadIdx.x;
     if (ip >= nPlanes) return;
 
     const geom_int ic0 = plane_cells[2 * ip + 0];
     const geom_int ic1 = plane_cells[2 * ip + 1];
+    // node 周期半割面 (相手が実 CV) は積算しない。勾配は内部双対面だけの部分寄与にし、後段の gather で合併する
+    // (plan boundary-node-periodic-gradient-fix §4.2。化学種 species_gradient_d の excludePeriodic と同じ扱い)。
+    if (excludePeriodic != 0 && ip >= nNormalPlanes && ic1 < nCells) return;
 
     geom_float f   = fx[ip];
     flow_float kf, wf;
@@ -104,7 +111,7 @@ std::array<ScalarTransportDesc, 2> buildScalarDescs(variables& var, const solver
     flow_float* F1 = nullptr;
     if (cfg.sstSigmaBlend != 0 && var.c_d.count("sstF1")) {
         static bool inited = false;
-        if (!inited) {
+        if (!inited && !g_sstF1Computed) {   // 計算済みの F1 を 1 で上書きしない (codex plan m5)
             fill_const_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(nCells, var.c_d["sstF1"], static_cast<flow_float>(1.0));
             inited = true;
         }
@@ -225,7 +232,8 @@ void ransGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, 
         var.c_d["k"],
         var.c_d["omega"],
         var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"],
-        var.c_d["dOmegadx"], var.c_d["dOmegady"], var.c_d["dOmegadz"]);
+        var.c_d["dOmegadx"], var.c_d["dOmegady"], var.c_d["dOmegadz"],
+        periodicSeamMergeActive(cfg, msh) ? 1 : 0, msh.nNormalPlanes);
 
     calc_scalar_gradient_div_vol_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
         msh.nCells,
@@ -235,4 +243,13 @@ void ransGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, 
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+
+    // node 周期の継ぎ目: 合併体積で割った部分寄与を group で和 → broadcast (Green–Gauss の合併勾配)。
+    // 以前は periodicGradientGather (main) の後で本関数が作り直していたので、F1 と拡散は片側の勾配を読んでいた
+    // (plan boundary-node-periodic-gradient-fix §4.2)。順序: ransGradient → この gather → ransBlendF1 → ransTransport。
+    if (periodicSeamMergeActive(cfg, msh)) {
+        for (const char* k : {"dKdx", "dKdy", "dKdz", "dOmegadx", "dOmegady", "dOmegadz"}) {
+            periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, var.c_d[k]);   // 和 → broadcast まで行う
+        }
+    }
 }

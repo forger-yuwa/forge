@@ -175,9 +175,9 @@ void periodicGradientGather_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg ,
 
     const char* keys[] = {
         "dUxdx","dUxdy","dUxdz", "dUydx","dUydy","dUydz", "dUzdx","dUzdy","dUzdz",
-        "drodx","drody","drodz", "dPdx","dPdy","dPdz", "dTdx","dTdy","dTdz", "divU",
-        // RANS SST 勾配 (未割当ならスキップ): k/ω の seam 拡散・生産の片側勾配を合併
-        "dKdx","dKdy","dKdz", "dOmegadx","dOmegady","dOmegadz"
+        "drodx","drody","drodz", "dPdx","dPdy","dPdz", "dTdx","dTdy","dTdz", "divU"
+        // k/ω の勾配はここでは合併しない: 後段の ransGradient が作り直すため、合併は ransGradient の直後で行う
+        // (plan boundary-node-periodic-gradient-fix §4.2)
     };
     std::vector<std::string> names(std::begin(keys), std::end(keys));
     // 化学種・受動種の勾配 (speciesFaceReconstruction>=1 で計算; 周期半割面を除外して積算済み) も合併する
@@ -208,6 +208,19 @@ void periodicGradientGather_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg ,
 bool periodicNodeActive(const solverConfig& cfg, const mesh& msh)
 {
     return cfg.discretization == "node" && msh.periodicRoot_d != nullptr && msh.nPeriodicMembers != 0;
+}
+
+// 継ぎ目の合併 stencil (LSQ 係数・SST k/ω 勾配の gather) を使う条件 (plan boundary-node-periodic-gradient-fix §4.1)。
+// node ∧ 周期 group あり ∧ 非軸対称 ∧ 周期 bcond がすべて並進 (type 0)。回転周期は別 plan (boundary-node-rotational-periodic)。
+bool periodicSeamMergeActive(const solverConfig& cfg, const mesh& msh)
+{
+    if (!periodicNodeActive(cfg, msh) || cfg.isAxisymmetric == 1) return false;
+    for (const auto& bc : msh.bconds) {
+        if (bc.bcondKind != "periodic") continue;
+        auto it = bc.inputInts.find("type");
+        if (it != bc.inputInts.end() && it->second != 0) return false;
+    }
+    return true;
 }
 
 void periodicGatherArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a)

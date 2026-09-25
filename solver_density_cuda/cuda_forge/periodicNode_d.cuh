@@ -41,6 +41,7 @@ void periodicMirrorNSState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , 
 // 汎用 1 配列版 (化学種・受動種の gather/mirror 用; plans/active/species-passive-scalar-unification.md §4.1-5)。
 // node 周期 DOF 同一視が有効か (cell / 非周期では false)。
 bool periodicNodeActive(const solverConfig& cfg, const mesh& msh);
+bool periodicSeamMergeActive(const solverConfig& cfg, const mesh& msh);
 // a を周期 group で「和→broadcast」(残差・輸送対角・勾配の合併)。非有効なら no-op。
 void periodicGatherArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a);
 // a を root→member でミラー (状態・dq の同一視)。非有効なら no-op。
