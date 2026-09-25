@@ -2,7 +2,7 @@
 
 **正本は plan 2 本**。本文書は写しとポインタ。残作業を増やすときは plan §5.1 に書く。
 
-- [`plans/active/convection-slau-wall-normal-chi.md`](../../plans/active/convection-slau-wall-normal-chi.md) — 対策本体 (`in_progress`)
+- [`plans/accepted/convection-slau-wall-normal-chi.md`](../../plans/accepted/convection-slau-wall-normal-chi.md) — 対策本体 (`in_progress`)
 - [`plans/active/tooling-sern-mesh-blocking.md`](../../plans/active/tooling-sern-mesh-blocking.md) §4.13.1 / §5.1 B1d–B1f — 接続模型の診断
 
 ## 1. 何が起きていたか (1 分で)

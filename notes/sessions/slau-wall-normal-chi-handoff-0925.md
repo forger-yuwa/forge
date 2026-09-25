@@ -1,6 +1,6 @@
 # 引き継ぎ: `convection-slau-wall-normal-chi` (2026-09-24 〜 25)
 
-**残作業の正本は [`plans/active/convection-slau-wall-normal-chi.md`](../../plans/active/convection-slau-wall-normal-chi.md) §5.1 の表。**
+**残作業の正本は [`plans/accepted/convection-slau-wall-normal-chi.md`](../../plans/accepted/convection-slau-wall-normal-chi.md) §5.1 の表。**
 本文書は写しとポインタだけ (`notes/sessions/` は使い捨て。恒久的な残作業をここに置かない)。
 
 - ブランチ `feature/sern-design`、本文書のコミット `bb2b075d` 時点で push 済み・未コミット無し。

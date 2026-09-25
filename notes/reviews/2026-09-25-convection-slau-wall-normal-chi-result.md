@@ -1,6 +1,6 @@
 # codex レビュー: convection-slau-wall-normal-chi (result)
 
-- **plan**: [`plans/active/convection-slau-wall-normal-chi.md`](../../plans/active/convection-slau-wall-normal-chi.md)
+- **plan**: [`plans/accepted/convection-slau-wall-normal-chi.md`](../../plans/accepted/convection-slau-wall-normal-chi.md)
 - **stage**: `result` (diff base `39526328`)
 - **date**: 2026-09-25
 - **commit**: `e9f2f821` (feature/sern-design)
@@ -33,15 +33,15 @@ case/48 は `/home/sano/work/forge/case/48.flat_plate_cooled_m4/` の実デー�
 
 1. **Major — V1-b の未測定部分が残り、R2-M4 を閉じられません。**
 
-   **根拠:** [plan:233](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:233) は、起点直後の正味流入と、局所時間刻みを含む正規化収支を要求しています。しかし「完全な記録」は [plan:1153](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1153) で **`Δt_l` 未出力**と明記し、単位 `[1/s]` の値だけを示しています。これでは「1 %/dump 未満」を判定できません。起点直後の flag 1 の負の収支も提示されていません。
+   **根拠:** [plan:233](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:233) は、起点直後の正味流入と、局所時間刻みを含む正規化収支を要求しています。しかし「完全な記録」は [plan:1153](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:1153) で **`Δt_l` 未出力**と明記し、単位 `[1/s]` の値だけを示しています。これでは「1 %/dump 未満」を判定できません。起点直後の flag 1 の負の収支も提示されていません。
 
-   また、[受入結論:1199](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1199) の「V1-b 観測/予測1.000」は **V1-c の検証量**です。V5 の成功は診断式の裏付けになりますが、V1-b の不足を代替しません。
+   また、[受入結論:1199](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:1199) の「V1-b 観測/予測1.000」は **V1-c の検証量**です。V5 の成功は診断式の裏付けになりますが、V1-b の不足を代替しません。
 
    **対案:** 起点直後の全接続面収支と、末尾3 dump の `|Σṁ|Δt_l/(ρV)` を保存して判定する。床処理を省略するなら、監視壁だけでなく接続内点を含む前処理の不活性も確認し、R2-M4 をそれまで未完了へ戻してください。
 
 2. **Major — V7 は有限区間の小さな差を示していますが、「CFL に依存する固定点」までは示していません。**
 
-   **根拠:** [plan:490](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:490) は線形ドリフトを過渡として不合格にする設計です。一方、[結果:536](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:536) は、窓長に比例するドリフト、2点比1.42の未定義帯、ドリフト側という解釈を明記しています。それでも #10c と R2-M2 を閉じています。
+   **根拠:** [plan:490](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:490) は線形ドリフトを過渡として不合格にする設計です。一方、[結果:536](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:536) は、窓長に比例するドリフト、2点比1.42の未定義帯、ドリフト側という解釈を明記しています。それでも #10c と R2-M2 を閉じています。
 
    `--from-floor: PASS` と場の距離が ε 以下であることは有用ですが、ドリフトの減衰や漸近先を証明しません。累積 CFL を揃えた差が持続することも、異なる過渡の差を排除しません。
 
@@ -49,17 +49,17 @@ case/48 は `/home/sano/work/forge/case/48.flat_plate_cooled_m4/` の実デー�
 
 3. **Major — SERN の衝撃足は、各 run の準定常確認がまだ差系列で代用されています。**
 
-   **根拠:** [plan:950](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:950) は各 run の `C_T` を判定していますが、衝撃足について示すのは **`foot_L2_pct = 0.8385 ± 0.0091 %` と位置差0**です。[生成コード:61](/home/sano/work/forge-sern-design/case/46.sern_design/v3sern_series.py:61) も、両 run の壁圧差ノルムと位置差を出しています。両側が共通して動けば、差は小さく安定していても各場は未定常です。
+   **根拠:** [plan:950](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:950) は各 run の `C_T` を判定していますが、衝撃足について示すのは **`foot_L2_pct = 0.8385 ± 0.0091 %` と位置差0**です。[生成コード:61](/home/sano/work/forge-sern-design/case/46.sern_design/v3sern_series.py:61) も、両 run の壁圧差ノルムと位置差を出しています。両側が共通して動けば、差は小さく安定していても各場は未定常です。
 
-   微小な差系列に相対閾値を掛けた誤りを直す判断は妥当です。しかし、修正後も**各 run の壁圧分布・衝撃足位置**の判定が必要です。また同節で `C_L` は flag 0 が `DRIFTING` なのに、[結論:974](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:974) は限界サイクル振幅による「実効果」の確定を維持しています。
+   微小な差系列に相対閾値を掛けた誤りを直す判断は妥当です。しかし、修正後も**各 run の壁圧分布・衝撃足位置**の判定が必要です。また同節で `C_L` は flag 0 が `DRIFTING` なのに、[結論:974](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:974) は限界サイクル振幅による「実効果」の確定を維持しています。
 
    **対案:** 各側の壁圧分布と絶対衝撃足位置を指定閾値で判定し、その後に差ノルムを評価する。`C_L`／`C_M` は現区間の差として記録し、§5.1 #11 の独立精度評価には準定常確認を明記してください。`C_T` の改善は認めますが、R2-M1 全体は閉じません。
 
 4. **Major — 3格子の起動成功を、格子感度ゲートの完了として扱っています。**
 
-   **根拠:** [plan:324](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:324) は収束悪化・格子感度を受入対象にしています。しかし [結果:1049](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1049) は格子間の設定一致を保証できず、[同:1059](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1059) は定常解・壁圧・収束率の格子比較が未実施と明記しています。追加したのは起動成否の証拠であり、残っていた懸念の検証ではありません。
+   **根拠:** [plan:324](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:324) は収束悪化・格子感度を受入対象にしています。しかし [結果:1049](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:1049) は格子間の設定一致を保証できず、[同:1059](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:1059) は定常解・壁圧・収束率の格子比較が未実施と明記しています。追加したのは起動成否の証拠であり、残っていた懸念の検証ではありません。
 
-   さらに [同:1062](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1062) と1076行には、撤回したはずの「細かいほど早い」が現役の説明として残っています。
+   さらに [同:1062](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:1062) と1076行には、撤回したはずの「細かいほど早い」が現役の説明として残っています。
 
    **対案:** #9 を「起動成否3水準は済／壁圧・収束性の格子評価は未」に分ける。設定を照合可能な比較で残りを評価し、R1-M3・R2-M3 と #11 の前提を同期してください。
 
@@ -81,7 +81,7 @@ case/48 は `/home/sano/work/forge/case/48.flat_plate_cooled_m4/` の実デー�
 
 7. **Minor — case/16 の合格から、ノイズや局所機序を言い過ぎています。**
 
-   **根拠:** [受入結論:1200](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1200) は床比 **0.80–1.47**を「反復ノイズ以下」としています。これは正確には「設定したノイズ床2倍以内」です。また場の差が小さいことだけから、[同:1204](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1204) の原因を `χ_n≈χ` と確定できません。流束差には面圧力差も掛かり、実装が読むのは再構成後の速度です。
+   **根拠:** [受入結論:1200](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:1200) は床比 **0.80–1.47**を「反復ノイズ以下」としています。これは正確には「設定したノイズ床2倍以内」です。また場の差が小さいことだけから、[同:1204](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:1204) の原因を `χ_n≈χ` と確定できません。流束差には面圧力差も掛かり、実装が読むのは再構成後の速度です。
 
    **対案:** 「この500 step試験では反復ノイズと同程度、V3許容内」とする。機序を確定するなら、当該ケースの再構成面状態による `Δχ`・`Δp` を測定してください。
 

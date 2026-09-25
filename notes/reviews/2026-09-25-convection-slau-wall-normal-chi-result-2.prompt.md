@@ -1,3 +1,43 @@
+forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
+SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
+リポジトリに対する**外部レビュー**を依頼する。忖度なしで、主張はコードと実測 (run の数値) で検証すること。
+結論が「この計画/結果は誤り」でも構わない。両論併記で逃げず、推奨は 1 つに絞ること。
+
+ルール:
+- **ファイルを変更しない** (read-only サンドボックスで動いている。読む・実行して確認するのは可)。
+- 出力は日本語。識別子・ファイル名は原語のまま。
+- 指摘は **Critical / Major / Minor** の重大度付きで、必ず根拠 (`ファイル:行` または `run_*` の数値) と対案をセットで書く。
+- リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
+  用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
+- 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
+  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+
+## 依頼: 検証結果レビュー (stage = result)
+
+対象の plan は下に全文を貼る (`plans/active/convection-slau-wall-normal-chi.md`)。実装と検証が終わり、`status: done` にして `plans/accepted/` へ移す直前の段階である。
+次を順に評価せよ。
+
+1. **実装 diff の検証**: `git diff 39526328...HEAD -- solver_density_cuda design methods procedures` (必要なら `git log 39526328..HEAD --oneline`)
+   を自分で取り、plan §4 の設計方針どおりに実装されているか、符号・単位・境界 (node の境界半割面、周期 seam、軸)・
+   float32 桁落ち・ゼロ割ガードの絶対閾値などの誤りがないかを見る。
+2. **検証結果の裏付け**: plan の §6 / 変更ログに書かれた数値・主張 (収束、一致、改善率) を、挙げられている `run_*`
+   ディレクトリの `CONVERGENCE_VERDICT.txt` / `residual_history.csv` / `README.md` の run 一覧で確認する。
+   主張と実測が食い違う箇所、VERDICT が NOT CONVERGED / DRIFTING のまま「一致」と書いている箇所を挙げよ。
+3. **回帰**: 既存機能 (既定値、他ケース) を壊していないか。既定挙動が変わった場合にそれが plan に明記されているか。
+4. **文書整合**: `methods/<area>/` の現在仕様、`procedures/` の手順、`methods/index.md`、`plans/README.md` が
+   実装と一致しているか。
+5. **残作業表**: 未解決事項が §5.1 の残作業表に残っているか (対話で決めて書いていない、が無いか)。
+
+最後に「accepted に移してよいか」を **GO / GO-with-changes / NO-GO** の 1 語で判定し、
+GO-with-changes なら移す前に直すべき点を優先順で列挙すること。
+
+## 重点
+
+4 回目の result 段。(1) 対応表の『限定』行 (R2-M2/R2-M3/R3-M2/R3-M4 = 固定点・格子感度) は受入条件から外して §5.1 #11 (既定化) の前提へ移した (§2 に線引きを明記)。この移動が opt-in・既定 0 の受入として妥当かを判定してほしい (再測定を求めるなら、どの量をどの長さで)。(2) §6.2『受入の範囲』の各文が対応表の『閉』行のみを根拠にしているか。(3) #14 の判定列を差系列・自 run 偏差から run の量 (絶対 x_foot・窓内壁圧) に変えた理由 (operand の型) が結果依存でないか。(4) V1-c (全接続面収支の凍結近傍求根) と §4.2 (単面近似、合否に使わない) の区別が読めるか。(5) V3 表『収束の悪化』行: SERN 2D は登録量 (本段の低下桁数、flag1 ≥ flag0−0.2 桁) で PASS、分岐 2 件 (case/16・case/48) は代替量という扱いが受入根拠として成立するか。前 3 回の型は『測れた範囲を超えて書いた』。
+
+## plan 全文 (`plans/active/convection-slau-wall-normal-chi.md`)
+
+```markdown
 # SLAU の圧力散逸を壁隣接面で面法線 Mach により評価する (`slauWallNormalChi`)
 
 ## メタ
@@ -1273,3 +1313,370 @@ python3 ../cad/diag_wall_cv_budget.py sern.h5 --ids 153797,153880,189814 \
 - `2026-09-23` — 文献調査と `diagnostician` の判断で §3/§4/§6 を改訂。**A を本命のまま維持**し、根拠を「自作」から「**AUSM⁺-up の面法線マッハ切替則の局所適用**」に置き換え (`AUSM_d.cu:277-290`)。**§4.1 平衡壁圧の関係式**を追加し、V1 の合否をこれで判定する形に変更 (「完走」でも「$P_w\to P_i$」でもない)。**B (KEEP の ES 散逸流用) を却下** (σ=0.02 では平衡壁圧 0.02 で現状固定、A の fallback にもならない)、C は出典として吸収する方向で保留。[`tooling-sern-mesh-blocking.md`](tooling-sern-mesh-blocking.md) §4.13.1 の診断 (run_0430–0434) と
   `diagnostician` の設計方針を受けて起票。**実装前に codex plan 段が必要** (§5.1 #1)。
 - `2026-09-23` — **codex plan 段 GO-with-changes (C0/M5/m2) を全件採用**して §2–§7 を全面改訂。**適用を質量流束のみに限定** (圧力束は現行のまま。面圧力が +32.5 % 変わるため)。**§4.2 平衡式を近似モデルへ降格**し V1 は全接続面の収支で判定 (無視していた W↔W' の補充が排出の 65 %)。V1 の合格条件を「常に $10\rho_{Min}$ 以上」から**期限方式 (step 200 までに超えて維持)** へ。V3 を受入ゲート化。**文献調査で `mSLAU` (全面適用版) の悪化報告を発見**し §3.1 に記載。
+```
+
+## 参考: `notes/reviews/2026-09-25-convection-slau-wall-normal-chi-result.md`
+
+```
+# codex レビュー: convection-slau-wall-normal-chi (result)
+
+- **plan**: [`plans/active/convection-slau-wall-normal-chi.md`](../../plans/active/convection-slau-wall-normal-chi.md)
+- **stage**: `result` (diff base `39526328`)
+- **date**: 2026-09-25
+- **commit**: `e9f2f821` (feature/sern-design)
+- **codex**: effort `high`, 7.1 min, rc=0
+- **判定**: **NO-GO**, 指摘 C0/M5/m2
+- **focus**: 3 回目の result 段。§6.2 末尾の『codex result 段の指摘への対応表』の各行 (前 2 回の Major 10 件) が本当に閉じているか、『受入の範囲』の結論文が測った範囲を超えていないか、§2 制限事項と §5.1 #11 の前提が実測と整合するかに集中してほしい。前 2 回の型は『測れた範囲を超えて書いた』。新規: case/16 V2・V3 (2026-09-25, §6 V3 case/16 条件の結果)。前提ゲートの参照値を撤回・差し替えた経緯も同節にある (合否条件は不変と主張している)。
+- **extra**: `notes/reviews/2026-09-23-convection-slau-wall-normal-chi-result.md`, `notes/reviews/2026-09-23-convection-slau-wall-normal-chi-result-2.md`, `case/16.nozzle_wys/v3_case16/B_10b_RULE.txt`, `case/16.nozzle_wys/v3_case16/C_CONVERGENCE_RATIO.txt`, `case/16.nozzle_wys/v3_case16/QUASISTEADY_VERDICT.txt`, `case/16.nozzle_wys/_v2/V2_VERDICT.txt`, `case/16.nozzle_wys/_v2/SIDE_new0_vs_new1.txt`, `case/16.nozzle_wys/_v2/PROVENANCE.txt`
+
+本文は codex の最終メッセージをそのまま転記 (指摘の採否と対応は plan 側の「レビュー記録」表と残作業表に書く)。
+
+---
+
+**判定: NO-GO**  
+`chi_mass` の実装、V5 の保存ダンプ照合、case/16・case/48 の回帰には裏付けがあります。  
+ただし、V1-b・固定点・衝撃足・格子感度には未完了の受入条件があり、対応表の「Major 全件閉」は支持できません。
+
+HEAD `e9f2f821` で指定 diff を取得しました。質量流束のみの変更、再構成後の面速度、壁 mask、境界半割面の除外、既定0、config の拒否条件は設計と整合しています。追加流束式に明白な符号・単位・ゼロ割の誤りは見つかりませんでした。
+
+独立に確認できた範囲は次のとおりです。
+
+| 対象 | 再確認結果 |
+|---|---|
+| Python 単体試験／case/48 V5 保存ダンプ | `ALL PASS`／P0–P5 `PASS` |
+| case/16・case/48 V2 | 両方 `VERDICT: PASS` |
+| case/16 `run_0506`／`run_0507` | 残差は両方 `NOT CONVERGED`。指定閾値で輪郭壁197点すべて `STEADY`。末尾平均輪郭の最大相対差 **0.0000464 %** |
+| case/48 `_v3/v3_flag{0,1}` | 残差は両方 `NOT CONVERGED`。各11 dump・5地点の `Cf`／`qw` は指定閾値で全て `STEADY` |
+| 上記 case/16・case/48 V3 | 全スナップショットの `VALUE/*` に非有限値なし |
+
+case/48 は `/home/sano/work/forge/case/48.flat_plate_cooled_m4/` の実データを使用しました。case/46 の主要な AWS run、SERN 延長 run、V7、V6 の実測ファイルは手元で確認できず、以下ではコード上の事実と plan 記載値に基づく判断を区別します。
+
+1. **Major — V1-b の未測定部分が残り、R2-M4 を閉じられません。**
+
+   **根拠:** [plan:233](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:233) は、起点直後の正味流入と、局所時間刻みを含む正規化収支を要求しています。しかし「完全な記録」は [plan:1153](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1153) で **`Δt_l` 未出力**と明記し、単位 `[1/s]` の値だけを示しています。これでは「1 %/dump 未満」を判定できません。起点直後の flag 1 の負の収支も提示されていません。
+
+   また、[受入結論:1199](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1199) の「V1-b 観測/予測1.000」は **V1-c の検証量**です。V5 の成功は診断式の裏付けになりますが、V1-b の不足を代替しません。
+
+   **対案:** 起点直後の全接続面収支と、末尾3 dump の `|Σṁ|Δt_l/(ρV)` を保存して判定する。床処理を省略するなら、監視壁だけでなく接続内点を含む前処理の不活性も確認し、R2-M4 をそれまで未完了へ戻してください。
+
+2. **Major — V7 は有限区間の小さな差を示していますが、「CFL に依存する固定点」までは示していません。**
+
+   **根拠:** [plan:490](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:490) は線形ドリフトを過渡として不合格にする設計です。一方、[結果:536](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:536) は、窓長に比例するドリフト、2点比1.42の未定義帯、ドリフト側という解釈を明記しています。それでも #10c と R2-M2 を閉じています。
+
+   `--from-floor: PASS` と場の距離が ε 以下であることは有用ですが、ドリフトの減衰や漸近先を証明しません。累積 CFL を揃えた差が持続することも、異なる過渡の差を排除しません。
+
+   **対案:** 現結果を「測定区間の場の変化・CFL間差は規定 ε 内」と限定し、固定点の断定を撤回する。独立した後続窓でドリフトの減衰・飽和を判定し、組成の遅いモードも観察対象として残してください。固定点確認を受入条件として維持する限り、#10c は未完了です。
+
+3. **Major — SERN の衝撃足は、各 run の準定常確認がまだ差系列で代用されています。**
+
+   **根拠:** [plan:950](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:950) は各 run の `C_T` を判定していますが、衝撃足について示すのは **`foot_L2_pct = 0.8385 ± 0.0091 %` と位置差0**です。[生成コード:61](/home/sano/work/forge-sern-design/case/46.sern_design/v3sern_series.py:61) も、両 run の壁圧差ノルムと位置差を出しています。両側が共通して動けば、差は小さく安定していても各場は未定常です。
+
+   微小な差系列に相対閾値を掛けた誤りを直す判断は妥当です。しかし、修正後も**各 run の壁圧分布・衝撃足位置**の判定が必要です。また同節で `C_L` は flag 0 が `DRIFTING` なのに、[結論:974](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:974) は限界サイクル振幅による「実効果」の確定を維持しています。
+
+   **対案:** 各側の壁圧分布と絶対衝撃足位置を指定閾値で判定し、その後に差ノルムを評価する。`C_L`／`C_M` は現区間の差として記録し、§5.1 #11 の独立精度評価には準定常確認を明記してください。`C_T` の改善は認めますが、R2-M1 全体は閉じません。
+
+4. **Major — 3格子の起動成功を、格子感度ゲートの完了として扱っています。**
+
+   **根拠:** [plan:324](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:324) は収束悪化・格子感度を受入対象にしています。しかし [結果:1049](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1049) は格子間の設定一致を保証できず、[同:1059](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1059) は定常解・壁圧・収束率の格子比較が未実施と明記しています。追加したのは起動成否の証拠であり、残っていた懸念の検証ではありません。
+
+   さらに [同:1062](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1062) と1076行には、撤回したはずの「細かいほど早い」が現役の説明として残っています。
+
+   **対案:** #9 を「起動成否3水準は済／壁圧・収束性の格子評価は未」に分ける。設定を照合可能な比較で残りを評価し、R1-M3・R2-M3 と #11 の前提を同期してください。
+
+5. **Major — 新フラグが収束判定区間の識別から漏れています。**
+
+   **根拠:** [stage_manifest.py:80](/home/sano/work/forge-sern-design/solver_density_cuda/tools/stage_manifest.py:80) の hard キーに `space.slauWallNormalChi` がありません。case/16 の実 config を同じ YAML 書式に揃え、**この値だけ0→1**にしたところ、`stage_key` が同一となり、[segments:214](/home/sano/work/forge-sern-design/solver_density_cuda/tools/stage_manifest.py:214) は **1区間**を返しました。
+
+   段途中で flag を切り替えると、異なる空間離散化の残差を連結し、変更前の過渡を低下桁数の基準にできます。今回の独立した2本の比較が直ちに無効になるという指摘ではなく、新機能と既存の収束判定機構の接続漏れです。
+
+   **対案:** 新フラグを hard キーへ追加し、省略と明示0は同一、0と1は別区間になることを確認してください。
+
+6. **Minor — 撤回済みの数値・結論と台帳が同期していません。**
+
+   **根拠:** [plans/README:62](/home/sano/work/forge-sern-design/plans/README.md:62) は「本命は未確定」のままです。[case/46 README:344](/home/sano/work/forge-sern-design/case/46.sern_design/README.md:344) には「5桁一致＝独立」、続く行には旧固定点 PASS・格子非依存の説明が残ります。step 800 の記載値 `2.6535e−5` と `2.6542e−5` の差は **0.0264 %**で、5有効桁の一致でもありません。
+
+   case/48 の保存評価を再計算した最大差は **`Cf` 0.001804 %／`qw` 0.002388 %**で、plan の0.000 %／0.011 %と異なります。許容内という結論は変わりません。[methods の仕様節](/home/sano/work/forge-sern-design/methods/convection/theory.md:377) にも、生産検証範囲と周期・軸対称の小規模試験の区別がありません。
+
+   **対案:** 最新結果を正本にし、旧主張には撤回・後継節を付ける。run 索引、計画一覧、methods、対応表を同時に同期してください。
+
+7. **Minor — case/16 の合格から、ノイズや局所機序を言い過ぎています。**
+
+   **根拠:** [受入結論:1200](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1200) は床比 **0.80–1.47**を「反復ノイズ以下」としています。これは正確には「設定したノイズ床2倍以内」です。また場の差が小さいことだけから、[同:1204](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi.md:1204) の原因を `χ_n≈χ` と確定できません。流束差には面圧力差も掛かり、実装が読むのは再構成後の速度です。
+
+   **対案:** 「この500 step試験では反復ノイズと同程度、V3許容内」とする。機序を確定するなら、当該ケースの再構成面状態による `Δχ`・`Δp` を測定してください。
+
+case/16 の前提参照値を変更した経緯は明示されており、**2D層流の稼働確認として使う限り、変更自体を不合格理由にはしません**。新しい帯は実験精度の検証ではなく、V3 の相対差・準定常条件とは別物、という限定を維持してください。§2 の周期・軸対称を小規模試験までに限定する方針も適切です。
+
+**推奨は、既定0・`active / in_progress` を維持し、上記Majorを解消して再レビューすることです。** R1-M1 の診断式修正とR1-M5／R2-M5の適用範囲修正には実質的な裏付けがありますが、対応表全体を「閉」とする段階には達していません。ファイル変更・plan反映はしていません。
+
+指摘数: Critical 0 / Major 5 / Minor 2
+```
+
+## 参考: `case/46.sern_design/_r3_m1m3/V1B_b_VERDICT.txt`
+
+```
+V1-b (b): |Σṁ|·Δt_l·6000/(ρV) [%/dump], 判定 < 1 %/dump (plan :242)
+res_24000 CV 153797: Σṁ(out) +4.1380e-14 kg/s  |dρ/dt|/ρ 2.3425e+00 1/s  Δt_l 1.5290e-08 s  → 0.0215 %/dump
+res_30000 CV 153797: Σṁ(out) +3.0223e-14 kg/s  |dρ/dt|/ρ 1.7109e+00 1/s  Δt_l 1.5290e-08 s  → 0.0157 %/dump
+res_36000 CV 153797: Σṁ(out) +5.2086e-14 kg/s  |dρ/dt|/ρ 2.9486e+00 1/s  Δt_l 1.5290e-08 s  → 0.0271 %/dump
+res_24000 CV 153880: Σṁ(out) +2.0696e-14 kg/s  |dρ/dt|/ρ 1.0212e+00 1/s  Δt_l 1.8438e-08 s  → 0.0113 %/dump
+res_30000 CV 153880: Σṁ(out) -5.3865e-16 kg/s  |dρ/dt|/ρ 2.6578e-02 1/s  Δt_l 1.8438e-08 s  → 0.0003 %/dump
+res_36000 CV 153880: Σṁ(out) +3.3228e-14 kg/s  |dρ/dt|/ρ 1.6395e+00 1/s  Δt_l 1.8438e-08 s  → 0.0181 %/dump
+res_24000 CV 189814: Σṁ(out) -3.9406e-13 kg/s  |dρ/dt|/ρ 8.5497e+00 1/s  Δt_l 1.1760e-08 s  → 0.0603 %/dump
+res_30000 CV 189814: Σṁ(out) -8.0313e-14 kg/s  |dρ/dt|/ρ 1.7422e+00 1/s  Δt_l 1.1761e-08 s  → 0.0123 %/dump
+res_36000 CV 189814: Σṁ(out) -2.0785e-14 kg/s  |dρ/dt|/ρ 4.5089e-01 1/s  Δt_l 1.1761e-08 s  → 0.0032 %/dump
+max 0.0603 %/dump  VERDICT: PASS
+```
+
+## 参考: `case/46.sern_design/_r3_m1m3/run0437_budget.txt`
+
+```
+# mesh sern.h5  CV 2446572  faces 7409370 (内部 7271119, 境界半割 138251)
+# slauWallNormalChi: 1 として解析 (壁ノード 37956 / 2446572)
+
+=== CV 153797  node (x,y,z)/H = [1.2     1.26751 1.00458]  dual centroid/H = [1.20062 1.26723 1.00461]  V = 1.1723e-11 m^3  faces 6 ===
+            dump          ro           P       |U|        c  sum mdot(out)       dro/dt  (dro/dt)/ro
+        res_0.h5  1.7106e-04  5.7845e+01       0.0    665.1   -1.19908e-07   1.0228e+04   5.9793e+07
+     res_6000.h5  1.6674e-03  5.6590e+02       0.0    666.2    8.49726e-11  -7.2483e+00  -4.3469e+03
+
+=== CV 153880  node (x,y,z)/H = [1.2     1.26751 1.00551]  dual centroid/H = [1.20062 1.26723 1.00555]  V = 1.3454e-11 m^3  faces 6 ===
+            dump          ro           P       |U|        c  sum mdot(out)       dro/dt  (dro/dt)/ro
+        res_0.h5  2.2193e-04  7.5049e+01       0.0    665.1   -1.34701e-07   1.0012e+04   4.5114e+07
+     res_6000.h5  1.7837e-03  6.0466e+02       0.0    665.9    1.96487e-10  -1.4605e+01  -8.1878e+03
+
+=== CV 189814  node (x,y,z)/H = [ 1.6     -0.00366  0.43333]  dual centroid/H = [ 1.60062 -0.00368  0.43333]  V = 2.8337e-11 m^3  faces 6 ===
+            dump          ro           P       |U|        c  sum mdot(out)       dro/dt  (dro/dt)/ro
+        res_0.h5  5.3883e-04  1.8006e+02       0.0    661.6   -2.97004e-07   1.0481e+04   1.9452e+07
+     res_6000.h5  1.3234e-03  4.4929e+02       0.0    666.3   -5.86503e-12   2.0698e-01   1.5640e+02
+```
+
+## 参考: `case/46.sern_design/_r3_m1m3/PERRUN_QS_flag0.txt`
+
+```
+=== /tmp/claude-1000/-home-sano-work-forge/4b0c8643-66fb-4fde-8878-7c8a5104c060/scratchpad/aws/perrun_flag0.csv  [72 rows, steps 500..36000]  -> STEADY ===
+  xfoot           : tail mean=-0.0008777  drift=0.0%/tail  fluct=0.0%       STEADY
+  pwin_mean       : tail mean=6.205e+04  drift=0.0%/tail  fluct=0.0%        STEADY
+  p_m1t           : tail mean=9.957e+04  drift=0.0%/tail  fluct=0.0%        STEADY
+  p_p1t           : tail mean=5.66e+04  drift=0.0%/tail  fluct=0.0%         STEADY
+  p_p3t           : tail mean=5.355e+04  drift=0.0%/tail  fluct=0.1%        STEADY
+
+OVERALL: ALL STEADY
+```
+
+## 参考: `case/46.sern_design/_r3_m1m3/PERRUN_QS_flag1.txt`
+
+```
+=== /tmp/claude-1000/-home-sano-work-forge/4b0c8643-66fb-4fde-8878-7c8a5104c060/scratchpad/aws/perrun_flag1.csv  [72 rows, steps 500..36000]  -> STEADY ===
+  xfoot           : tail mean=-0.0008777  drift=0.0%/tail  fluct=0.0%       STEADY
+  pwin_mean       : tail mean=6.221e+04  drift=0.0%/tail  fluct=0.0%        STEADY
+  p_m1t           : tail mean=9.914e+04  drift=0.0%/tail  fluct=0.0%        STEADY
+  p_p1t           : tail mean=5.631e+04  drift=0.0%/tail  fluct=0.0%        STEADY
+  p_p3t           : tail mean=5.351e+04  drift=0.0%/tail  fluct=0.0%        STEADY
+
+OVERALL: ALL STEADY
+```
+
+## 参考: `case/46.sern_design/_r3_m1m3/PROVENANCE.txt`
+
+```
+codex result-3 M1/M3 (plan §5.1 #13/#14), 2026-09-25, AWS g5.xlarge
+V1-b (a): run_0437/res_0,res_6000 -> run0437_budget.txt (diag_wall_cv_budget.py --wall-normal-chi, ids 153797,153880,189814)
+V1-b (b): run_0439/res_{24000,30000,36000} -> run0439_budget.txt; dt_local from 1-step continuations ~/tmp/v1b/cont_N (restart_field.py, output level 2 + extraFields [dt_local], FORGE_CUDA_BLOCKSIZE=128)
+  binary: ~/forge-sern/solver_density_cuda/.build-native/relwithdebinfo/forge sha256 7a149acc (run_0439 used c8c0b91b; rebuilt later)
+#14: _v3sern/v3s_flag{0,1}_ext 72 dumps -> perrun_flag{0,1}.csv (v3sern_foot_perrun.py)
+note: PERRUN_QS_flag*.txt のヘッダの csv パスは scratchpad を指すが、同じ csv を本ディレクトリの perrun_flag*.csv に複製した
+```
+
+## 参考: `case/46.sern_design/_r3_m1m3/sern2d_conv/CONV_DETERIORATION_VERDICT.txt`
+
+```
+SERN 2D 本段 (最終区間, 12000 step × cfl_pseudo 0.5 = ΣCFL 6000, 両 run 同一): 合格 = flag1 の低下桁数 ≥ flag0 − 0.2 桁 (plan V3 表, 2026-09-25 事前固定)
+rms_ro       flag0 0.4 dec  flag1 0.4 dec  OK
+rms_roUx     flag0 0.4 dec  flag1 0.4 dec  OK
+rms_roUy     flag0 0.3 dec  flag1 0.4 dec  OK
+rms_roe      flag0 0.2 dec  flag1 0.2 dec  OK
+rms_roK      flag0 0.4 dec  flag1 0.4 dec  OK
+rms_roOmega  flag0 0.5 dec  flag1 0.4 dec  OK
+rms_roY0     flag0 0.5 dec  flag1 0.4 dec  OK
+rms_roY1     flag0 0.6 dec  flag1 0.5 dec  OK
+VERDICT: PASS
+```
+
+## 参考: `case/46.sern_design/_r3_m1m3/sern2d_conv/CONV_flag0.txt`
+
+```
+=== case/46.sern_design/_r3_m1m3/sern2d_conv/flag0  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=9.89e-05 peak=1.96e-04 fin=8.82e-05 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=1.40e-01 peak=1.52e-01 fin=6.27e-02 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=5.77e-02 peak=8.08e-02 fin=4.47e-02 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=2.08e+02 peak=2.52e+02 fin=1.82e+02 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roK     : init=3.27e+00 peak=4.44e+00 fin=2.24e+00 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=1.11e+02 peak=2.52e+02 fin=1.24e+02 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=5.53e-05 peak=1.90e-04 fin=8.08e-05 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=7.93e-05 peak=8.30e-05 fin=2.27e-05 drop= 0.6dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+```
+
+## 参考: `case/46.sern_design/_r3_m1m3/sern2d_conv/CONV_flag1.txt`
+
+```
+=== case/46.sern_design/_r3_m1m3/sern2d_conv/flag1  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.03e-04 peak=1.91e-04 fin=8.09e-05 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=1.28e-01 peak=1.48e-01 fin=5.71e-02 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=6.32e-02 peak=8.40e-02 fin=3.43e-02 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.96e+02 peak=2.51e+02 fin=1.74e+02 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roK     : init=3.81e+00 peak=4.89e+00 fin=1.90e+00 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=1.33e+02 peak=2.55e+02 fin=1.02e+02 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=6.62e-05 peak=1.87e-04 fin=7.33e-05 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=7.76e-05 peak=8.15e-05 fin=2.30e-05 drop= 0.5dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+```
+
+## 参考: `solver_density_cuda/tools/test_stage_manifest_wall_normal_chi.py`
+
+```
+#!/usr/bin/env python3
+"""stage_manifest の `space.slauWallNormalChi` 区間識別 (plan convection-slau-wall-normal-chi §5.1 #12, codex result-3 M5)。
+
+合格 (測る前に固定): 省略 vs 0 → 同一 key・1 区間 / 0 vs 1 → 2 区間 / flow 形式と block 形式で同一 key。
+"""
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from stage_manifest import stage_key, segments
+
+BASE = "time: {{nStepInner: 5}}\n{space}\n"
+FLOW = lambda extra: BASE.format(space="space: {convMethod: 1, limiter: 2%s}" % extra)
+BLOCK = lambda extra: BASE.format(space="space:\n  convMethod: 1\n  limiter: 2\n" + (("  " + extra.strip(", ") + "\n") if extra else ""))
+BC = "wall: {kind: wall}\n"
+
+def segs(*cfgs):
+    man = {"stages": [{"tag": str(i), "key": stage_key(c, BC)} for i, c in enumerate(cfgs)]}
+    return len(segments(man))
+
+fails = 0
+def check(name, cond):
+    global fails
+    print(("PASS " if cond else "FAIL ") + name); fails += (not cond)
+
+check("省略 vs 0 (flow) → 同一 key", stage_key(FLOW(""), BC) == stage_key(FLOW(", slauWallNormalChi: 0"), BC))
+check("省略 vs 0 → 1 区間", segs(FLOW(""), FLOW(", slauWallNormalChi: 0")) == 1)
+check("0 vs 1 → 2 区間", segs(FLOW(", slauWallNormalChi: 0"), FLOW(", slauWallNormalChi: 1")) == 2)
+check("省略 vs 1 → 2 区間", segs(FLOW(""), FLOW(", slauWallNormalChi: 1")) == 2)
+check("flow と block (1) → 同一 key", stage_key(FLOW(", slauWallNormalChi: 1"), BC) == stage_key(BLOCK(", slauWallNormalChi: 1"), BC))
+check("flow と block (省略) → 同一 key", stage_key(FLOW(""), BC) == stage_key(BLOCK(""), BC))
+check("キー無しの旧 manifest と省略が同一 (後方互換)", "space.slauWallNormalChi" not in stage_key(FLOW(""), BC))
+print("VERDICT:", "PASS" if fails == 0 else "FAIL (%d)" % fails)
+sys.exit(1 if fails else 0)
+```
+
+## 参考: `case/16.nozzle_wys/v3_case16/B_10b_RULE.txt`
+
+```
+x16: |Δ tail mean| 0.00001 %  amplitude 0.00014 %  sum 0.00014 % (tol 0.5 %)
+x46: |Δ tail mean| 0.00000 %  amplitude 0.00095 %  sum 0.00095 % (tol 0.5 %)
+x85: |Δ tail mean| 0.00001 %  amplitude 0.00257 %  sum 0.00258 % (tol 0.5 %)
+dLinf over x∈[10,94] tail: max 0.00033 %  mean 0.00019 %
+```
+
+## 参考: `case/16.nozzle_wys/v3_case16/C_CONVERGENCE_RATIO.txt`
+
+```
+(c) rms_ro     flag1/flag0 tail-mean ratio 1.0023 OK
+(c) rms_roUx   flag1/flag0 tail-mean ratio 1.0006 OK
+(c) rms_roUy   flag1/flag0 tail-mean ratio 1.0018 OK
+(c) rms_roe    flag1/flag0 tail-mean ratio 1.0003 OK
+(c) rms_roY0   flag1/flag0 tail-mean ratio 1.0024 OK
+(c) rms_roY1   flag1/flag0 tail-mean ratio 1.0024 OK
+```
+
+## 参考: `case/16.nozzle_wys/v3_case16/QUASISTEADY_VERDICT.txt`
+
+```
+=== v3_case16/v3_series.csv  [25 rows, steps 0..12000]  -> DRIFTING ===
+  f0_x16          : tail mean=0.3583  drift=0.0%/tail  fluct=0.0%           STEADY
+  f0_x46          : tail mean=0.2459  drift=0.0%/tail  fluct=0.0%           STEADY
+  f0_x85          : tail mean=0.1733  drift=0.0%/tail  fluct=0.0%           STEADY
+  f1_x16          : tail mean=0.3583  drift=0.0%/tail  fluct=0.0%           STEADY
+  f1_x46          : tail mean=0.2459  drift=0.0%/tail  fluct=0.0%           STEADY
+  f1_x85          : tail mean=0.1733  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 0.173287 (最終比 -0.001 %)] STEADY
+  dLinf           : tail mean=1.946e-06  drift=101.1%/tail  fluct=113.6%    DRIFTING
+  Mexit0          : tail mean=1.85  drift=0.0%/tail  fluct=0.0%             STEADY
+  Mexit1          : tail mean=1.85  drift=0.0%/tail  fluct=0.0%             STEADY
+
+OVERALL: NOT ALL STEADY (see above)
+```
+
+## 参考: `case/16.nozzle_wys/_v2/V2_VERDICT.txt`
+
+```
+step 500 / 基準側 3 本・候補側 3 本 / 許容 = ノイズ床 × 2
+量               ノイズ床 L2        候補 L2       比      ノイズ床 L∞        候補 L∞       比  判定
+ro           1.2466e-06   1.2330e-06    0.99   4.6551e-05   5.0633e-05    1.09  ok
+roUx         2.0862e-06   2.2576e-06    1.08   8.9950e-05   1.0167e-04    1.13  ok
+roUy         3.3089e-05   3.6647e-05    1.11   5.6060e-04   5.1785e-04    0.92  ok
+roUz                                                                            zero (max|.|=0.00e+00)
+roe          8.6792e-07   9.0310e-07    1.04   3.6624e-05   3.2425e-05    0.89  ok
+P            1.6780e-06   1.6883e-06    1.01   6.6210e-05   6.4278e-05    0.97  ok
+T            3.8844e-07   3.9375e-07    1.01   1.9166e-05   1.9592e-05    1.02  ok
+roK          0.0000e+00   0.0000e+00    0.00   0.0000e+00   0.0000e+00    0.00  ok
+roOmega      0.0000e+00   0.0000e+00    0.00   0.0000e+00   0.0000e+00    0.00  ok
+h0           6.4115e-06   6.3634e-06    0.99   2.3490e-04   2.3989e-04    1.02  ok
+wall_3/Ps    3.6777e-06   3.5445e-06    0.96   4.1433e-05   4.6762e-05    1.13  ok
+wall_3/Ts    7.1256e-07   7.2835e-07    1.02   1.2671e-05   1.5545e-05    1.23  ok
+wall_3/qwall                                                                      zero (max|.|=0.00e+00)
+wall_3/ro    2.5651e-06   2.5362e-06    0.99   2.8874e-05   3.1309e-05    1.08  ok
+wall_3/roUx                                                                      zero (max|.|=0.00e+00)
+wall_3/roUy                                                                      zero (max|.|=0.00e+00)
+wall_3/roUz                                                                      zero (max|.|=0.00e+00)
+wall_3/roe   7.2174e-07   9.3473e-07    1.30   7.9314e-06   1.0614e-05    1.34  ok
+wall_3/twall_x   1.1012e-05   1.5953e-05    1.45   7.9175e-05   1.2474e-04    1.58  ok
+wall_3/twall_y   4.4733e-04   6.1274e-04    1.37   2.2600e-03   3.5471e-03    1.57  ok
+wall_3/twall_z                                                                      zero (max|.|=0.00e+00)
+wall_3/utau   4.7687e-06   6.0897e-06    1.28   7.5920e-05   1.0469e-04    1.38  ok
+wall_3/ypls   6.9200e-05   6.9063e-05    1.00   2.0012e-04   1.8396e-04    0.92  ok
+
+VERDICT: PASS
+```
+
+## 参考: `case/16.nozzle_wys/_v2/SIDE_new0_vs_new1.txt`
+
+```
+step 500 / 基準側 3 本・候補側 3 本 / 許容 = ノイズ床 × 2
+量               ノイズ床 L2        候補 L2       比      ノイズ床 L∞        候補 L∞       比  判定
+ro           1.1494e-06   1.3043e-06    1.13   4.4033e-05   5.4107e-05    1.23  ok
+roUx         2.0862e-06   2.3204e-06    1.11   8.9950e-05   1.1024e-04    1.23  ok
+roUy         3.2018e-05   3.7568e-05    1.17   4.7577e-04   4.9018e-04    1.03  ok
+roUz                                                                            zero (max|.|=0.00e+00)
+roe          8.6792e-07   1.0676e-06    1.23   3.6624e-05   4.1173e-05    1.12  ok
+P            1.5407e-06   1.7398e-06    1.13   5.2288e-05   7.6334e-05    1.46  ok
+T            3.4663e-07   3.8300e-07    1.10   1.3735e-05   1.9272e-05    1.40  ok
+roK          0.0000e+00   0.0000e+00    0.00   0.0000e+00   0.0000e+00    0.00  ok
+roOmega      0.0000e+00   0.0000e+00    0.00   0.0000e+00   0.0000e+00    0.00  ok
+h0           5.6690e-06   6.3997e-06    1.13   1.6739e-04   2.4544e-04    1.47  ok
+wall_3/Ps    3.5539e-06   3.3821e-06    0.95   4.1433e-05   4.8893e-05    1.18  ok
+wall_3/Ts    7.1256e-07   6.2232e-07    0.87   1.2671e-05   1.4161e-05    1.12  ok
+wall_3/qwall                                                                      zero (max|.|=0.00e+00)
+wall_3/ro    2.4517e-06   2.4079e-06    0.98   2.8874e-05   3.4788e-05    1.20  ok
+wall_3/roUx                                                                      zero (max|.|=0.00e+00)
+wall_3/roUy                                                                      zero (max|.|=0.00e+00)
+wall_3/roUz                                                                      zero (max|.|=0.00e+00)
+wall_3/roe   1.0314e-06   1.1318e-06    1.10   1.5863e-05   1.3647e-05    0.86  ok
+wall_3/twall_x   1.8561e-05   1.7991e-05    0.97   1.6914e-04   1.3610e-04    0.80  ok
+wall_3/twall_y   7.0077e-04   6.8671e-04    0.98   4.8362e-03   3.9156e-03    0.81  ok
+wall_3/twall_z                                                                      zero (max|.|=0.00e+00)
+wall_3/utau   4.7687e-06   4.8980e-06    1.03   7.3127e-05   7.6041e-05    1.04  ok
+wall_3/ypls   4.8890e-05   5.2469e-05    1.07   1.1767e-04   1.5099e-04    1.28  ok
+
+VERDICT: PASS
+```
+
+## 出力形式
+
+1. 冒頭に **判定 (GO / GO-with-changes / NO-GO)** と 3 行以内の要約。
+2. 指摘一覧 (Critical → Major → Minor の順、番号付き。各項目に根拠と対案)。
+3. 推奨 (1 つに絞る)。
+4. 末尾に `指摘数: Critical N / Major N / Minor N` の 1 行。

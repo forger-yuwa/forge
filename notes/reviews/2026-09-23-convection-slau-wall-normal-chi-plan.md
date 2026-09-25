@@ -1,6 +1,6 @@
 # codex レビュー: convection-slau-wall-normal-chi (plan)
 
-- **plan**: [`plans/active/convection-slau-wall-normal-chi.md`](../../plans/active/convection-slau-wall-normal-chi.md)
+- **plan**: [`plans/accepted/convection-slau-wall-normal-chi.md`](../../plans/accepted/convection-slau-wall-normal-chi.md)
 - **stage**: `plan`
 - **date**: 2026-09-23
 - **commit**: `6156606b` (feature/sern-design)
@@ -21,7 +21,7 @@
 
 1. **Major — 質量補充の修正に、既存の圧力束散逸を弱める変更が混入している。**
 
-   根拠: [plan:82](/home/sano/work/forge/plans/active/convection-slau-wall-normal-chi.md:82) は `mdot` と `p_third` の双方へ `χ_n` を適用します。しかし、`χ_n ≥ χ` なので、質量流束の圧力拡散を増やす一方、SLAU の圧力束第3項の係数 `1−χ` は小さくなります。[実装:538](/home/sano/work/forge/solver_density_cuda/cuda_forge/convection/convectiveFlux_slau_d.inc.cuh:538)
+   根拠: [plan:82](/home/sano/work/forge/plans/accepted/convection-slau-wall-normal-chi.md:82) は `mdot` と `p_third` の双方へ `χ_n` を適用します。しかし、`χ_n ≥ χ` なので、質量流束の圧力拡散を増やす一方、SLAU の圧力束第3項の係数 `1−χ` は小さくなります。[実装:538](/home/sano/work/forge/solver_density_cuda/cuda_forge/convection/convectiveFlux_slau_d.inc.cuh:538)
 
    面 575140 の記録状態を現行式へ代入すると、`χ_n=0.5201`、質量流束は `+4.35e−9 → −1.17e−7 kg/s` と期待どおり反転します。一方、面圧力 `p_tilde` も **807 → 1070 Pa、約32.5%増**となります。これは凍結した状態での代数評価ですが、補充経路の回復と運動量側の変更が別作用であることを示します。
 
@@ -31,7 +31,7 @@
 
 2. **Major — 単一面の平衡式を、壁 CV 全体の合否判定に使えない。**
 
-   根拠: [plan:88](/home/sano/work/forge/plans/active/convection-slau-wall-normal-chi.md:88) は W↔W′ を無視します。しかし、`case/46.sern_design/run_0430_3d_junction_diag_icfix/` の記録では、内点面の排出 `4.345e−9 kg/s` に対して、主要な壁同士の補充は合計 `2.841e−9 kg/s`、**排出の約65%**です。無視できる項ではありません。CV 189814 には、壁同士の補充が内点面の排出を上回る記録もあります。[面別収支:558](/home/sano/work/forge/plans/active/tooling-sern-mesh-blocking.md:558)
+   根拠: [plan:88](/home/sano/work/forge/plans/accepted/convection-slau-wall-normal-chi.md:88) は W↔W′ を無視します。しかし、`case/46.sern_design/run_0430_3d_junction_diag_icfix/` の記録では、内点面の排出 `4.345e−9 kg/s` に対して、主要な壁同士の補充は合計 `2.841e−9 kg/s`、**排出の約65%**です。無視できる項ではありません。CV 189814 には、壁同士の補充が内点面の排出を上回る記録もあります。[面別収支:558](/home/sano/work/forge/plans/active/tooling-sern-mesh-blocking.md:558)
 
    一次・壁速度ゼロ・外向き `V_n,i>0` に限定しても、内点面の正確な移流項は
    \[
@@ -43,7 +43,7 @@
 
 3. **Major — V1 は指定した初期状態で既に不合格になる。**
 
-   根拠: [plan:151](/home/sano/work/forge/plans/active/convection-slau-wall-normal-chi.md:151) は `run_0430/res_1800` から開始し、CV 153797 の密度を「常に `10ρMin` 以上」と要求します。一方、記録は初期密度 **`1.711e−4`**、`roMin=1e−4` です。要求値 `1e−3` の **17.1%** しかなく、初期時点で条件を満たしません。[初期状態と床:545](/home/sano/work/forge/plans/active/tooling-sern-mesh-blocking.md:545)
+   根拠: [plan:151](/home/sano/work/forge/plans/accepted/convection-slau-wall-normal-chi.md:151) は `run_0430/res_1800` から開始し、CV 153797 の密度を「常に `10ρMin` 以上」と要求します。一方、記録は初期密度 **`1.711e−4`**、`roMin=1e−4` です。要求値 `1e−3` の **17.1%** しかなく、初期時点で条件を満たしません。[初期状態と床:545](/home/sano/work/forge/plans/active/tooling-sern-mesh-blocking.md:545)
 
    また、後続診断で最初の破綻候補とされた **CV 153880** が監視対象から抜けています。[診断:730](/home/sano/work/forge/plans/active/tooling-sern-mesh-blocking.md:730)
 
@@ -51,7 +51,7 @@
 
 4. **Major — V3 は機能の受入ゲートになっておらず、比較精度も保証されていない。**
 
-   根拠: [plan:153](/home/sano/work/forge/plans/active/convection-slau-wall-normal-chi.md:153) の不合格時処置は「既定化しない」だけです。既定化はもともとスコープ外なので、回帰がどれほど悪化しても opt-in を完成扱いにできてしまいます。また、[plan:157](/home/sano/work/forge/plans/active/convection-slau-wall-normal-chi.md:157) は収束 VERDICT の「併記」しか要求しておらず、V3 の各量に準定常判定を要求していません。
+   根拠: [plan:153](/home/sano/work/forge/plans/accepted/convection-slau-wall-normal-chi.md:153) の不合格時処置は「既定化しない」だけです。既定化はもともとスコープ外なので、回帰がどれほど悪化しても opt-in を完成扱いにできてしまいます。また、[plan:157](/home/sano/work/forge/plans/accepted/convection-slau-wall-normal-chi.md:157) は収束 VERDICT の「併記」しか要求しておらず、V3 の各量に準定常判定を要求していません。
 
    `check_quasisteady.py` の既定許容値は drift **5%**、oscillation **10%**です。これをそのまま使うだけでは、`C_T ±0.1%` の比較精度を担保できません。[判定引数:542](/home/sano/work/forge/solver_density_cuda/tools/check_quasisteady.py:542)
 
@@ -59,7 +59,7 @@
 
 5. **Major — 一次の壁ノード値に関する説明を、高次の面状態へ一般化している。**
 
-   根拠: [plan:67](/home/sano/work/forge/plans/active/convection-slau-wall-normal-chi.md:67) の「W↔W′ は変化なし」、同84行の「付着境界層では第3項が0」は一般には成立しません。流束が使う速度は、ピン留めした節点値そのものではなく **`interp_dispatch` 後の面状態**です。[速度再構成:185](/home/sano/work/forge/solver_density_cuda/cuda_forge/convection/convectiveFlux_slau_d.inc.cuh:185)
+   根拠: [plan:67](/home/sano/work/forge/plans/accepted/convection-slau-wall-normal-chi.md:67) の「W↔W′ は変化なし」、同84行の「付着境界層では第3項が0」は一般には成立しません。流束が使う速度は、ピン留めした節点値そのものではなく **`interp_dispatch` 後の面状態**です。[速度再構成:185](/home/sano/work/forge/solver_density_cuda/cuda_forge/convection/convectiveFlux_slau_d.inc.cuh:185)
 
    亜音速域では
    \[
