@@ -41,7 +41,14 @@ def main():
     a = ap.parse_args()
     src, dst = CASE / a.src, CASE / a.dst
     if dst.exists():
-        raise SystemExit(f"{dst} が既にある (連番が衝突している)")
+        # --dry で作った残骸 (計算の痕跡が無い) だけは再利用を許す。
+        # 計算済みの run は絶対に上書きしない。
+        stale = not (list(dst.glob("res_*")) or (dst / "forge_run.log").exists()
+                     or (dst / "residual_history.csv").exists())
+        if not stale:
+            raise SystemExit(f"{dst} が既にある (計算済み。連番が衝突している)")
+        print(f"  {dst.name} は --dry の残骸なので作り直す")
+        shutil.rmtree(dst)
     seed = latest_res(src)
     print(f"[継続] {a.src} の {seed.name} から {a.dst} へ")
 
