@@ -30,8 +30,8 @@ node の周期境界の継ぎ目にある既存の欠陥 2 件を直す。どち
 | --- | --- | --- | --- |
 | 速度・密度・圧力・温度 | LSQ | gather は和 | **欠陥 1 (2 倍)** |
 | $k,\omega$ | Green–Gauss (`ransGradient`) | gather の**後**に作り直され、周期半割面も除外していない | **欠陥 2 (片側)** |
-| 化学種 | Green–Gauss (`speciesFaceReconstruction ≥ 1` のみ) | 周期半割面を除外 (`excludePeriodic`) し、合併体積で割った部分寄与の和 | 正しい |
-| 受動種・凝縮モーメント | Green–Gauss (`passiveGradient`) | 同上 | 正しい |
+| 化学種 | Green–Gauss (`speciesFaceReconstruction ≥ 1` のみ) | 周期半割面を除外 (`excludePeriodic`) し、合併体積で割った部分寄与の和 | 正しい (**合併の意味で**: 重複計上なし。GG の float32 床 $N\varepsilon\max|\phi|/h$ は共通に持つ、§6 G1) |
+| 受動種・凝縮モーメント | Green–Gauss (`passiveGradient`) | 同上 | 正しい (同上、床は共通) |
 | $\gamma,\ Re_{\theta t}$ | 拡散は 2 点差分 (勾配配列なし)。生成項は速度勾配を読む | 状態は root からミラー | 拡散は影響なし。**生成項は欠陥 1 の影響を受け、欠陥 1 の修正で直る** |
 
 **ユーザ決定 (2026-09-26): スカラーの勾配も LSQ に揃える**。node の勾配は NS の原始変数だけ LSQ (`calcGradient`、`gradLSQ: 2` 固定) で、
@@ -105,7 +105,7 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | 3 (**実装済 2026-09-26**、正式試験は #5) | 合併 LSQ | `calcGradient_d.cu` の事前計算、`mesh.cpp` の group 情報。合格: §6 G0 | O (F レビュー、条件 6) |
 | 4 (**実装済 2026-09-26**、正式試験は #5) | $k,\omega$ 勾配の gather | `main.cpp`、`periodicNode_d.cu`、`ransTransport_d.cu`。合格: §6 G1 | O (F レビュー) |
 | 3a (**実装済 2026-09-26**) | 実装レビュー M1・m3 | M1: 各 incidence の実変位で組む (§4.1)。m3: F1 初期値を `allocVariables` へ (§4.2) | O (判断: 2026-09-26 `diagnostician`・全件採用) |
-| 5a | G0/G1/G2/G2′ ハーネス | #2 の再現物に加え、float32 反例 (期待 1.000000、root 両順序)、ジッタ格子 (±0.2h、決定論的、周期像は同じ量)、CPU double 参照、F1≠1 入力で 1・2 回目に輸送が読む値。合格: §6 G0/G1/G2/G2′ | O |
+| 5a | G0/G1/G2/G2′ ハーネス | #2 の再現物に加え、G1-a の CPU float32 再現、線形 $Y$ (化学種) を 1 本焼いて床を 1 行記録、float32 反例 (期待 1.000000、root 両順序)、ジッタ格子 (±0.2h、決定論的、周期像は同じ量)、CPU double 参照、F1≠1 入力で 1・2 回目に輸送が読む値。合格: §6 G0/G1/G2/G2′ | O |
 | 5b | R3 | case/48・case/16・case/44 の勾配配列が旧新ビット同一 (F1 初期化で 1 step 目が変わる run は 2 step 目以降のノイズ床比較) | O |
 | 5 | 検証 R1・R2 | §6 R1・R2 (5a・5b の後)。**区切りで codex** | O (結論 F) |
 | 6 | docs + codex result | `methods/gradient.md` の「修正中」を外す | F |
@@ -115,7 +115,7 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | # | 試験 | 合格 (測る前に固定) |
 | --- | --- | --- |
 | G0 | LSQ の局所作用素試験: 各 group の**展開した局所座標**で線形場を作り、BC・ミラー・時間更新の**前**に作用素だけ比較 (三重周期の角で大域線形場は周期条件を満たさないため)。2/4/8 member (面・辺・角)、非対称 stencil、壁∩継ぎ目、root 交換、原点移動、斜め並進、部分で rank 欠損 → 合併で回復する例 | float32 反例 ($d_0=f32(0.03)-f32(0)$、$d_1=f32(100.03)-f32(100)$) は 1.000000 (root 両順序)。非退化方向の最大誤差 ≤ 1e-5 (相対)。ゼロ成分と**非零定数場の勾配**は絶対誤差 ≤ 1e-6×\|φ\|/h。退化方向は同じ打ち切りの参照解と比較 |
-| G1 | $k,\omega$ 勾配: 一様直交格子では解析解、非対称・壁∩継ぎ目・2/4/8 member では **CPU double の合併 GG** (同じ面値規則) を参照。F1 は初回と 2 回目の残差組立で、輸送が実際に読む値を検査 | 参照との最大誤差 ≤ 1e-5 (相対) |
+| G1 | $k,\omega$ 勾配 (GG)。**2026-09-26 訂正: 当初の「CPU double 参照に相対 1e-5」は float32 GG の桁落ち床を見落とした誤指定** (G0 ハーネスで内部節点でも $\partial\omega/\partial y$ 誤差 9.3e-5 = 3.1 $\varepsilon\phi/h$。`_g0_lsq_seam/G0_translational_m1.txt`)。**G1-a 合併の正しさ**: CPU で同じ面値規則・**同じ float32 演算** (部分和を float32 で積算 → 合併体積で除算 → float32 で和・broadcast) を再現して GPU と比較。**G1-b 精度 (床込み)**: CPU double の合併 GG と比較。一様直交・非対称・壁∩継ぎ目・2/4/8 member。F1 は初回と 2 回目の残差組立で、輸送が実際に読む値を検査 | G1-a: 差 ≤ $4\varepsilon_{f32}\max|\phi|/h$ (atomicAdd の順序差)。通らなければ合併のバグであり床と呼ばない。G1-b: $\le\max(10^{-5}S,\ 2N_{max}\varepsilon_{f32}\max|\phi|/h)$、$N_{max}$ = 対象節点の面数の最大 (メッシュから集計)。継ぎ目で超えるなら $2N_{max}n_{member}$ とし、**定数は面数・member 数から導く** (観測値に合わせて丸めない)。結果欄に 4 量の床を ε 単位で表にする |
 | G2 | 作用素の精度: 参照 = 格納済み float32 座標・場を double で評価した合併 stencil LSQ | $\max_i\lvert\nabla\phi_{gpu}-\nabla\phi_{ref}\rvert \le 10^{-5}\,S$、$S=\max_i\lvert\nabla\phi_{ref}\rvert$ |
 | G2' | 細分 3 水準 (二次場)、**ジッタ格子** (内部節点を ±0.2h の決定論的擬似乱数で動かす。周期像は同じ量で動かす。対称 stencil では二次場の勾配が厳密になるため。一様格子は「床以下 = 厳密」を別行で記録) | 誤差床 $e_{floor}=10\,\varepsilon_{f32}S\approx1.2\times10^{-6}S$。継ぎ目・内部の誤差がともに床を超える水準だけで次数を計算し、使える水準が 2 未満なら曲率を 10 倍にして再試験。継ぎ目の節点の誤差 (対 解析勾配) の収束次数 ≥ 0.9 (勾配は O(h)。面再構成の O(h²) と混同しない)、各水準で継ぎ目誤差 / 内部誤差 ≤ 2。ゼロ成分は絶対誤差 ≤ $e_{floor}$ |
 | R1 | case/39 周期丘: 整備設定 (`wallTreatmentSST: 0`、実際の `kInit/omegaInit`、段階起動、`check_mesh_quality` PASS、$y_1^+$ 報告) で**旧/新バイナリを同一メッシュ・IC から再生成** | 両 run 同一区間で `check_convergence` **PASS**、$C_f$ 3 点・$x_r$ が `--drift 0.002 --osc 0.005` で STEADY。$C_f=\tau_{w,t}/(\tfrac12\rho_bU_b^2)$ ($\tau_{w,t}$ = `twall` を下壁 $+x$ 接線へ射影、符号は `sern_forces.py` の `twall_on_fluid` と同じ。$\rho_b,U_b$ = 丘頂断面 $y\in[h,3.035h]$ のバルク。z は一意 DOF 平均で継ぎ目重複は重み 1/2) を $x/h=0.5,2,6$ で壁ノード線形補間。$x_r$ = 下壁 $C_f$ の負→正の最初のゼロ交差 ($x/h\in[1,8]$、線形補間、交差なしは「未再付着」で判定不能として R1 は落とさない)。CSV `step,Cf_x05,Cf_x2,Cf_x6,xr_h,r_gradu,r_gradk,r_gradw,dF1_inf` を `check_quasisteady.py --series-csv --drift 0.002 --osc 0.005 --tail 0.4` (OSCILLATING は平均±振幅)。継ぎ目指標 (z 継ぎ目の列 vs 隣接内部列、同じ $x$ 集合、末尾平均): $\lvert\nabla\mathbf u\rvert$・$\lvert\nabla k\rvert$・$\lvert\nabla\omega\rvert$ の L2 比が**新で [0.9, 1.1]**、$F_1$ の差の $L^\infty\le0.05$ (旧は記録のみ、≈2 の想定)。$C_f$ 相対 L2 差・$x_r$ 差は記録 (変わるのが正)。新の低下桁数 ≥ 旧 − 0.5 |
@@ -128,6 +128,7 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | --- | --- | --- | --- | --- |
 | plan | `2026-09-26` | [2026-09-26-boundary-node-periodic-gradient-fix-plan.md](../../notes/reviews/2026-09-26-boundary-node-periodic-gradient-fix-plan.md) | **GO-with-changes**, C0/M4/m1 (合併 LSQ と ransGradient 直後の gather を支持) | **全件採用** (2026-09-26 `diagnostician` 判断)。M1 → 周期像の識別と幾何照合を分離、照合許容 1e-4 h_min、同値類で共通の d_E,w_E (§4.1)。M2 → 適用範囲を node ∧ 並進 ∧ 非軸対称に、同じ条件関数 (§1、§4.1)。M3 → G0/G2 は局所座標で作用素比較、G1 は CPU double の合併 GG を参照 (§6)。M4 → 閾値・区間・再生成条件を具体値で固定 (§6)。m5 → F1 の初回充填を初期化時へ (§4.2)。**k/ω の LSQ 化は後続 plan** (本 plan で入れると R1 の変化の帰属ができない) |
 | plan (実装レビュー) | `2026-09-26` | [2026-09-26-boundary-node-periodic-gradient-fix-plan-2.md](../../notes/reviews/2026-09-26-boundary-node-periodic-gradient-fix-plan-2.md) | **GO-with-changes**, C0/M2/m2 | **全件採用** (2026-09-26 `diagnostician` 判断)。M1 → 実変位で組む (§4.1、実装済)。M2 → G2′ の誤差床とジッタ格子、R1 の $C_f$/$x_r$ 抽出規則、R2 の保存上限を具体値で固定 (§6)。m3 → F1 初期値を確保時へ (§4.2、実装済)。m4 → G0 再現物の保存 (§5.1 #2・#5a)。順序 G0/G1/G2′/R3 → R1/R2 |
+| G1 閾値の判断 | `2026-09-26` | (本 plan §6 G1、`_g0_lsq_seam/G0_translational_m1.txt`) | `diagnostician`: G1 の 1e-5 は float32 GG の床の見落とし | 採用。GG カーネルは変えない。G1 を G1-a (float32 再現でバグ検出) と G1-b (面数から導いた床) に分割。§1 の「正しい」を合併の意味に限定 |
 
 ### 6.2 結果
 
@@ -142,6 +143,7 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 - `solver_density_cuda/cuda_forge/calcGradient_d.cu`、`periodicNode_d.cu`、`ransTransport_d.cu`、`main.cpp`、`mesh/mesh.cpp`。
 - **既存の node 周期 run (case/39、case/09、周期翼列など) の結果は継ぎ目付近で変わる** (修正)。再現には修正前の commit のバイナリが要る。
 - docs: `methods/gradient.md`。
+- GG を残す変数 (化学種・受動種・凝縮モーメント) で $N\varepsilon\phi/h$ 床が問題になるなら、$(\phi_f-\phi_i)S_f$ 形を検討する (本 plan では変えない: 全域の GG ビットが変わり R3 の帰属が濁る。k/ω は後続の LSQ 統一 plan で床ごと消え、その plan の §1 にこの床を根拠として引用する)。
 
 ## 8. 完了条件
 
@@ -152,6 +154,8 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 - [ ] `plans/active/` → `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-26` — G0 ハーネス (M1 後): LSQ は継ぎ目・内部とも ε 級で PASS。GG の k/ω は内部でも G1 当初閾値を割る float32 床 ($3$–$61\,\varepsilon\phi/h$) を確認し、`diagnostician` 判断で G1 を書き直した (カーネル不変)。
 
 - `2026-09-26` — 実装レビュー (codex、GO-with-changes C0/M2/m2) を全件採用。M1 (合併 LSQ を各 incidence の実変位で組む) と m3 (F1 初期値 1 を `allocVariables` へ) を実装、ビルド成功。§6 の G2′・R1・R2 を具体値で固定。
 
