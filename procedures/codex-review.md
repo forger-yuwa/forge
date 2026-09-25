@@ -31,6 +31,20 @@ python3 solver_density_cuda/tools/codex_review.py PLAN --stage plan --dry-run
 - 所要 5〜15 分。Claude Code からは **`run_in_background` + timeout 1200 s 以上**で呼ぶ。進捗は
   `notes/reviews/<名前>.log` のサイズ、または `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` の末尾 timestamp で見る。
   フリーズ疑いでも kill する前に `ps -o pid,etime,time` の CPU 時間で進行中か確かめる。
+- **`nohup ... &` で投げない** (2026-09-25 実測、3 回)。ツール呼び出しのシェルが終わると**約 1 分で刈られ**、
+  ログが途中で切れて `.md` も `.last.txt` も残らない。**プロンプトの大小によらず死ぬ** (237 kB でも 6.5 kB でも同じ)。
+  長く回すなら **`setsid` で切り離す**。**出力はセッション用スクラッチパッドに置かない** — セッションが終わると
+  ディレクトリごと消えてログもプロンプトも失う。`notes/reviews/*.log` (git 追跡外) に直書きする。
+
+  ```bash
+  setsid nohup codex exec --sandbox read-only -C "$PWD" --color never \
+    -c model_reasoning_effort="high" "$(cat notes/reviews/<名前>.prompt.txt)" \
+    < /dev/null > notes/reviews/<名前>.log 2>&1 &
+  ```
+
+- **返ってこなかったときに「レビュー済み」と扱わない**。`codex_review.py` は最終メッセージが空なら
+  「codex の最終メッセージが取れなかった」と出して **rc=1 で返る** ([`codex_review.py`:198-203](../solver_density_cuda/tools/codex_review.py))。
+  **そのメッセージも出ていないなら、ツールがそこへ到達する前に殺されている**。`.md` の有無を必ず確かめる。
 - ツールが守っている作法 (手で `codex exec` を打つときも同じ): `--sandbox read-only`、**stdin は `/dev/null`**
   (開いたままだと EOF 待ちで永久ブロック)、**stdout をパイプに通さない** (tail/head を挟むと終了まで何も見えない)、
   `model_reasoning_effort` を `high` に上書き (`~/.codex/config.toml` は `low`)。
