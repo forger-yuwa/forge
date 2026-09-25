@@ -1,6 +1,6 @@
 # codex レビュー: convection-slau-wall-normal-chi-usage-rule (plan)
 
-- **plan**: [`plans/active/convection-slau-wall-normal-chi-usage-rule.md`](../../plans/active/convection-slau-wall-normal-chi-usage-rule.md)
+- **plan**: [`plans/accepted/convection-slau-wall-normal-chi-usage-rule.md`](../../plans/accepted/convection-slau-wall-normal-chi-usage-rule.md)
 - **stage**: `plan`
 - **date**: 2026-09-25
 - **commit**: `e5ed2312` (feature/sern-design)
@@ -28,11 +28,11 @@ Q1/Q2 の撤回と「膨張角窓」への訂正は妥当です。スカラー�
 
 1. **Major — 壁圧の相対 L2 に、スカラーの差区間を適用する定義がない**
 
-   **根拠:** [対象 plan:118](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:118) は「相対 L2 は差区間で」としています。しかし、相対 L2 は既に**二つの圧力分布から作る量**であり、各 run のスカラー `C_f` を引く §4.2 の式を直接使えません。前回 M7 のこの部分は未解消です。
+   **根拠:** [対象 plan:118](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:118) は「相対 L2 は差区間で」としています。しかし、相対 L2 は既に**二つの圧力分布から作る量**であり、各 run のスカラー `C_f` を引く §4.2 の式を直接使えません。前回 M7 のこの部分は未解消です。
 
    人工的な定常分布 `p0=(100,102)`、`p1=(102,100)` では、各分布の L2 ノルムは同じでも、分布間の相対 L2 は **1.9801%**。各 run をノルムに縮約して差区間を作る方法では、この差を見落とします。
 
-   [対象 plan:85](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:85) には、共通窓の固定方法、積分重み、正規化分母、「局所間隔」の選び方もありません。
+   [対象 plan:85](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:85) には、共通窓の固定方法、積分重み、正規化分母、「局所間隔」の選び方もありません。
 
    **対案:** 共通の固定窓・物理座標・積分重みを定義し、末尾の全 dump 対について直接
    \[
@@ -42,7 +42,7 @@ Q1/Q2 の撤回と「膨張角窓」への訂正は妥当です。スカラー�
 
 2. **Major — 衝撃足の「未検出」を「カウル衝撃が当たらない」と断定できない**
 
-   **根拠:** [対象 plan:82](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:82) の検出条件は「最大の正勾配＋窓内圧力比1.1以上」です。これだけではカウル由来かを識別できず、弱い圧縮や広く拡散した圧縮を取り逃がします。人工圧力分布で確認すると、明瞭な8%の圧力上昇は最大正勾配を持ちますが、窓内比 `1.0800` のため不検出になります。
+   **根拠:** [対象 plan:82](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:82) の検出条件は「最大の正勾配＋窓内圧力比1.1以上」です。これだけではカウル由来かを識別できず、弱い圧縮や広く拡散した圧縮を取り逃がします。人工圧力分布で確認すると、明瞭な8%の圧力上昇は最大正勾配を持ちますが、窓内比 `1.0800` のため不検出になります。
 
    また、片方の flag だけで検出、複数候補、窓がランプ端を越える場合、`m4_off` でも未検出の場合の分岐がありません。
 
@@ -52,7 +52,7 @@ Q1/Q2 の撤回と「膨張角窓」への訂正は妥当です。スカラー�
 
 3. **Major — `convMethod: 0` だけでは、診断ツールと実ソルバの質量収支が一致しない**
 
-   **根拠:** [対象 plan:53](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:53) は1次区間を診断の前提としています。しかし [diag_wall_cv_budget.py:79](/home/sano/work/forge-sern-design/case/46.sern_design/cad/diag_wall_cv_budget.py:79) が計算する流束には、実カーネルの次の項がありません。
+   **根拠:** [対象 plan:53](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:53) は1次区間を診断の前提としています。しかし [diag_wall_cv_budget.py:79](/home/sano/work/forge-sern-design/case/46.sern_design/cad/diag_wall_cv_budget.py:79) が計算する流束には、実カーネルの次の項がありません。
 
    - [convectiveFlux_slau_d.inc.cuh:620](/home/sano/work/forge-sern-design/solver_density_cuda/cuda_forge/convection/convectiveFlux_slau_d.inc.cuh:620)：`slauContactFloor` による質量流束の追加。
    - [同:516](/home/sano/work/forge-sern-design/solver_density_cuda/cuda_forge/convection/convectiveFlux_slau_d.inc.cuh:516)：`sstEnergyIncludesK` 有効時の `p*` 差。
@@ -63,7 +63,7 @@ Q1/Q2 の撤回と「膨張角窓」への訂正は妥当です。スカラー�
 
 4. **Major — 生産許容を評価する量から `C_T_with_shear` が落ちている**
 
-   **根拠:** [対象 plan:73](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:73) の対象は `C_T,C_L,C_M` だけです。[sern_forces.py:90](/home/sano/work/forge-sern-design/design/forge_design/metrics/sern_forces.py:90) の `C_T` は摩擦を含まず、摩擦込み推力は同ファイル98行の別列です。
+   **根拠:** [対象 plan:73](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:73) の対象は `C_T,C_L,C_M` だけです。[sern_forces.py:90](/home/sano/work/forge-sern-design/design/forge_design/metrics/sern_forces.py:90) の `C_T` は摩擦を含まず、摩擦込み推力は同ファイル98行の別列です。
 
    許容値の出典である [sern-3d:1867](/home/sano/work/forge-sern-design/plans/active/tooling-nozzle-sern-3d.md:1867) 自体が、`C_T` の格子差は許容内でも、`C_T_with_shear` の差は許容外だった事例を記録しています。前 plan の [#10b:974](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi.md:974) でも摩擦込み係数を評価していました。今回の縮小でこの列を外す理由はありません。
 
@@ -71,7 +71,7 @@ Q1/Q2 の撤回と「膨張角窓」への訂正は妥当です。スカラー�
 
 5. **Minor — §4.3 の閾値説明と、実際に固定した数値が一致していない**
 
-   **根拠:** [対象 plan:75](/home/sano/work/forge-sern-design/plans/active/convection-slau-wall-normal-chi-usage-rule.md:75) は「絶対許容の1/5」と説明しますが、`C_T≈0.92942` に対する指定値は絶対量換算で drift **`0.0001859`**、osc **`0.0004647`**。`0.002/5=0.0004` ではありません。
+   **根拠:** [対象 plan:75](/home/sano/work/forge-sern-design/plans/accepted/convection-slau-wall-normal-chi-usage-rule.md:75) は「絶対許容の1/5」と説明しますが、`C_T≈0.92942` に対する指定値は絶対量換算で drift **`0.0001859`**、osc **`0.0004647`**。`0.002/5=0.0004` ではありません。
 
    また [check_quasisteady.py:282](/home/sano/work/forge-sern-design/solver_density_cuda/tools/check_quasisteady.py:282) の `--osc` は半振幅ではなく **`(max−min)/|mean|`** です。超過時は比較禁止ではなく `OSCILLATING` になります。
 
