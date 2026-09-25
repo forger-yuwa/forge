@@ -47,6 +47,8 @@
 
 ## 4. 設計方針
 
+> **2026-09-26 ユーザ決定**: node の既定を `slauWallNormalChi: 1` にする (§9、後継 plan `convection-slau-wall-normal-chi-default.md`)。下の規則は既定化の実装完了までの現行運用。
+
 ### 4.1 適用規則 (`procedures/recommended-settings.md` に書く文、codex plan M6・plan-2 M6 で改訂)
 
 「`space.slauWallNormalChi: 1` は **node + `nodeWallDirichlet: 1` の 3D 側壁∩後端面接続構成 (case/46 接続模型・SERN 3D 生産) でのみ**使う。
@@ -256,6 +258,7 @@ max $|\dot m_{kernel}-\dot m_{tool}|/(2\tau_b)$ = **0.002**。$\rho_w/\rho_i$ = 
 
 ## 9. 変更ログ
 
+- `2026-09-26` — **ユーザ決定: node では `nodeWallDirichlet: 1` と `slauWallNormalChi: 1` を既定にする**。前 plan §5.1 #11 と本 plan の「既定化しない」(2026-09-25 `diagnostician`) を置き換える。理由 (ユーザ): 傾向はほぼ変わらず (2D 生産で 5 列とも生産許容内、case/16・case/48 はノイズ同程度)、発散を防げる。`nodeWallDirichlet` の既定は既に 1 なので、変わるのは `slauWallNormalChi` のみ。実装・回帰は後継 plan `convection-slau-wall-normal-chi-default.md` で行い、完了まで §1.0a の規則は現行のまま。
 - `2026-09-25` — **完了 (`done`, `accepted` へ移動)**。適用規則を `procedures/recommended-settings.md` §1.0a に本文化 (既定 0、3D 側壁接続のみ 1、新構成は診断可能性の検査 + 3 条件)。2D 生産 (m6_on・生産格子・この窓) の flag 差は 5 列とも生産許容内、膨張角窓も帯内。診断可能性は既知構成の 1 dump で確認 (条件 (i)(ii) は未測定)。カウル衝撃足は両作動点で判定保留。codex result GO-with-changes (C0/M4/m2) を全件採用。3D の格子収束・固定点は sern-3d R5o-chi へ委譲。
 - `2026-09-25` — codex plan 段 3 回目 **GO-with-changes (C0/M4/m1)** を全件採用して §4–§6 に反映。分布比較の式、衝撃足の同定手順と分岐表、診断可能性の検査 (設定表 + 1 step 面流束照合)、摩擦込み係数の追加。`in_progress` へ。
 - `2026-09-25` — codex plan 段 2 回目 **NO-GO (C0/M7/m0)** を全件採用。**$C_M$ の生産許容は現行 0.05** (旧値 0.02 を設計と 1 回目レビューが踏襲していた) で flag 差は全量帯内 → **Q1 (格子 3 水準)・Q2 (CFL) を撤回**し、既存系列の再判定・衝撃足の再同定・適用規則だけに縮小。比較は差区間 $I_\Delta$ の 3 値判定に。前 plan の「衝撃足」は x≈0 膨張角を測っていたので訂正した。
