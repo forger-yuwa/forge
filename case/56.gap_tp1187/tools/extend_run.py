@@ -33,6 +33,10 @@ def main():
     ap.add_argument("--dst", required=True)
     ap.add_argument("--steps", type=int, required=True)
     ap.add_argument("--out-int", type=int, default=10000)
+    ap.add_argument("--cfl", type=float, default=None,
+                    help=("cfl と cfl_pseudo を差し替える。**変えたら収束先が同じか"
+                          "確認すること**。推奨は node NS 定常本段で 4-6 "
+                          "(implicitRelax 1.0 なら上限 6)"))
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args()
     src, dst = CASE / a.src, CASE / a.dst
@@ -57,6 +61,10 @@ def main():
     cfg = (dst / "solverConfig.yaml").read_text(encoding="utf-8")
     cfg = re.sub(r"nStepOuter:\s*\d+", f"nStepOuter: {a.steps}", cfg)
     cfg = re.sub(r"outStepInterval:\s*\d+", f"outStepInterval: {a.out_int}", cfg)
+    if a.cfl is not None:
+        cfg = re.sub(r"cfl: [0-9.]+, cfl_pseudo: [0-9.]+",
+                     f"cfl: {a.cfl:g}, cfl_pseudo: {a.cfl:g}", cfg)
+        print(f"  cfl = cfl_pseudo = {a.cfl:g} に差し替え")
     (dst / "solverConfig.yaml").write_text(cfg, encoding="utf-8")
     m = re.search(r"nStepOuter:\s*(\d+)", cfg)
     print(f"  nStepOuter={m.group(1)}  outStepInterval={a.out_int}")
