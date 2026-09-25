@@ -33,6 +33,10 @@ def main():
     ap.add_argument("--dst", required=True)
     ap.add_argument("--steps", type=int, required=True)
     ap.add_argument("--out-int", type=int, default=10000)
+    ap.add_argument("--relax", type=float, default=None,
+                    help=("implicitRelax を差し替える。定常の安定化として推奨 0.7 "
+                          "(CFL 上限が上がる)。**解を 0.05 %% 程度動かす**ので、"
+                          "変えたら収束後に元の設定で短く回して量が動かないことを確認する"))
     ap.add_argument("--cfl", type=float, default=None,
                     help=("cfl と cfl_pseudo を差し替える。**変えたら収束先が同じか"
                           "確認すること**。推奨は node NS 定常本段で 4-6 "
@@ -72,6 +76,9 @@ def main():
         cfg = re.sub(r"cfl: [0-9.]+, cfl_pseudo: [0-9.]+",
                      f"cfl: {a.cfl:g}, cfl_pseudo: {a.cfl:g}", cfg)
         print(f"  cfl = cfl_pseudo = {a.cfl:g} に差し替え")
+    if a.relax is not None:
+        cfg = re.sub(r"implicitRelax: [0-9.]+", f"implicitRelax: {a.relax:g}", cfg)
+        print(f"  implicitRelax = {a.relax:g} に差し替え")
     (dst / "solverConfig.yaml").write_text(cfg, encoding="utf-8")
     m = re.search(r"nStepOuter:\s*(\d+)", cfg)
     print(f"  nStepOuter={m.group(1)}  outStepInterval={a.out_int}")
