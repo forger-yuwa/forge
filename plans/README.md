@@ -24,6 +24,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [boundary-node-periodic-gradient-fix.md](active/boundary-node-periodic-gradient-fix.md) | `boundary` | **node 周期の継ぎ目勾配の既存欠陥 2 件の修正** (2026-09-26): LSQ 勾配が継ぎ目で 2 倍 (実測)、SST k/ω 勾配が継ぎ目で未合算。合併 stencil の LSQ 係数を焼き込む・k/ω 勾配の gather 位置を修正。全 node 周期 run に効く。回転周期 plan の前提。draft |
 | [boundary-node-rotational-periodic.md](active/boundary-node-rotational-periodic.md) | `boundary` | **node 周期 (seam 合算経路) の回転周期対応** (2026-09-26 ユーザ指示)。member ごとの root 相対角でベクトル量 (運動量・勾配・速度勾配テンソル・陰解法対角) にだけ回転をはさむ、スカラーは恒等。90° 環状セクタ vs 全周で同値性、SLAU + slauWallNormalChi を検証。draft・codex plan 段が先 |
 | [convection-slau-wall-normal-chi-default.md](active/convection-slau-wall-normal-chi-default.md) | `convection` | **node の既定を `slauWallNormalChi: 1` に** (2026-09-26 ユーザ決定)。省略 = auto (node ∧ Dirichlet 壁 ∧ SLAU/SLAU2 → 1)、明示 0 で旧挙動。manifest は実効値を書く。B0 ビット不変 + B1 標準 node ケース A/B。draft・codex plan 段が先 |
 | [tooling-convergence-and-wall-resolution-gates.md](active/tooling-convergence-and-wall-resolution-gates.md) | `tooling` | **収束判定と壁解像判定の恒久対応** (2026-09-19 起票, in_progress): 段階起動 run で本段単独/全段連結のどちらも誤判定になる問題に `check_convergence.py` の**判定区間**認識を入れる。ソルバの `ypls` は `ρu_τ·dcc/μ` で **node では壁ノードが壁面に乗り退化**し 1 桁小さく出るため、第一内部ノード基準の `y₁⁺` を出す `check_wall_resolution.py` を新設し AGENTS.md に貼付義務を追加。`check_quasisteady.py --series-csv` の欠損・非有限も FAIL 化。case/49 の codex result レビュー M3/M4/M9 をリポジトリ全体に格上げしたもの |

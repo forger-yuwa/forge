@@ -152,6 +152,15 @@ $\rho U_*, \rho e, H_t$ の勾配計算用コードは保留 (コメントアウ
 [`calcGradient_d.cu`](../solver_density_cuda/cuda_forge/calcGradient_d.cu) の `calcGradient_b_d` が
 非 periodic の全 bcond について **owner ノードの状態値**を境界面値として加算する (bvar は参照しない)。
 periodic は DOF 同一視・gradient gather (§discretization.md §4.5) に委ね寄与を加えない。
+
+**node × 周期の継ぎ目 (既知の欠陥、修正中: plan [`boundary-node-periodic-gradient-fix.md`](../plans/active/boundary-node-periodic-gradient-fix.md))**:
+継ぎ目で割れた CV の部分勾配は `periodicGradientGather` で**和**を取る。Green–Gauss (合併体積で割った部分寄与) なら和が合併勾配になるが、
+node の既定の **LSQ (`gradLSQ: 2`) では各部分 CV が片側の隣接だけで完全な勾配を解くので、和は線形場で正確に 2 倍**になる
+(2026-09-26 実測、case/09 TGV)。修正は、事前計算で継ぎ目越しの**合併 stencil** の LSQ を組むこと:
+重み $w=1/|\Delta\mathbf x|^2$、同じ物理隣接が両側に現れる継ぎ目接線エッジは配分係数 $\alpha$ (同一隣接で総和 1) で重複を除き、
+$M_r=\sum\alpha w\,\Delta\mathbf x\Delta\mathbf x^{\mathsf T}$、スペクトル打ち切りは $M_r$ に 1 回、各部分 CV の係数 $c=M_r^{+}\alpha w\Delta\mathbf x$ を焼き込む。
+毎 step の gather は和のまま (部分和が合併 LSQ になる)。化学種・受動種・凝縮モーメントの勾配は Green–Gauss なので現行の和が正しい。
+SST の $k,\omega$ 勾配は `ransGradient` が合算の後に作り直していて合算されていない (同 plan で修正)。
 理論・設計判断は [discretization.md §6.2/§7.2.2](discretization.md#62-弱形式境界-weak-form-boundary) を参照。
 
 ### 並列化メモ
