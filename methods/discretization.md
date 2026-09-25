@@ -619,7 +619,9 @@ if (wall_flag != nullptr && wall_flag[ic] == 1) {
   §7.7.1 [`boundary-node-nozzle-wall-outlet-stability.md`](../plans/active/boundary-node-nozzle-wall-outlet-stability.md) §2.11)
   は、この一般化によって「outlet だけの特例」ではなく「全境界の既定」に格上げされ、コード上の特例分岐は不要になった。
 
-#### 7.3 node モード: 最小二乗 (LSQ) 勾配 (`gradLSQ`, 既定 OFF)
+#### 7.3 node モード: 最小二乗 (LSQ) 勾配 (`gradLSQ`、**node は 2 固定**)
+
+> **現状 (2026-09-26 確認)**: node では `gradLSQ: 2` 固定で、それ以外は起動エラー (`solverConfig.cpp`、GG は壁行で市松を作る, case/43)。下の「既定 OFF」「`gradLSQ=0` の node は GG」は導入当時の記述。LSQ が掛かるのは NS の原始変数 (`calcGradient`) だけで、$k,\omega$・化学種・受動種・凝縮モーメントは Green–Gauss (LSQ への統一は plan [`boundary-node-periodic-gradient-fix.md`](../plans/active/boundary-node-periodic-gradient-fix.md) の後続)。
 
 専用計画: [`discretization-lsq-gradient.md`](../plans/active/discretization-lsq-gradient.md)。
 
