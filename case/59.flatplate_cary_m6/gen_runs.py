@@ -112,6 +112,10 @@ def main():
     ap.add_argument("--out-int", type=int, default=1000)
     ap.add_argument("--cfl", type=float, default=2.0)
     ap.add_argument("--relax", type=float, default=0.7)
+    ap.add_argument("--init-from", default=None,
+                    help="収束場の res_*.h5。別メッシュなら interp_field.py で移して段階起動を省き、本段だけを回す")
+    ap.add_argument("--forge-tools", default=None,
+                    help="run_case.sh のあるディレクトリ (別ビルド、例: 全域 FP64 の worktree)。既定はこのリポジトリ")
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args()
 
@@ -149,14 +153,26 @@ def main():
                  visc_stiffness=visc, mesh=a.mesh, cuda_blocksize=128, gen_args=sys.argv[1:])
     (rd / "case_setup.json").write_text(json.dumps(setup, indent=2, ensure_ascii=False))
     (rd / "solverConfig.yaml").write_text(CFG.format(**common, **stages[0][1]))
-    patch_ic(rd / "mesh.h5", fs, Tw)
+    if a.init_from:
+        stages = stages[-1:]                            # 本段だけ
+        sm = StageManifest(rd)
+        sm.add("main", CFG.format(**common, **stages[0][1]), bc, history="residual_history.csv",
+               restart_from=a.init_from)
+        sm.write()
+        (rd / "solverConfig.yaml").write_text(CFG.format(**common, **stages[0][1]))
+        subprocess.run([sys.executable, str(TOOLS / "interp_field.py"), a.init_from, str(rd / "mesh.h5")],
+                       env=ENV, check=True)
+        (rd / "CONTINUED_FROM").write_text(f"{a.init_from} (interp_field.py、別メッシュ)\n")
+    else:
+        patch_ic(rd / "mesh.h5", fs, Tw)
     print(f"{a.run}: Re {re_m:.3g}/m  p∞ {fs['p']:.1f} Pa  ρ∞ {fs['ro']:.4g}  U∞ {U_INF:.1f}  T∞ {T_INF:.2f} K  Tw {Tw:.1f} K  Taw(r0.89) {Taw:.1f} K")
     if a.dry:
         return
     for tag, st in stages:
         (rd / "solverConfig.yaml").write_text(CFG.format(**common, **st))
         print(f"--- {tag}: {st['nsteps']} step, cfl {st['cfl']}", flush=True)
-        rc = subprocess.run([str(TOOLS / "run_case.sh"), str(rd)], env=ENV).returncode
+        run_tools = Path(a.forge_tools) if a.forge_tools else TOOLS
+        rc = subprocess.run([str(run_tools / "run_case.sh"), str(rd)], env=ENV).returncode
         cur = rd / f"res_{st['nsteps']}.h5"
         if rc != 0 or not cur.exists() or list(rd.glob("res_nan_*.h5")):
             raise SystemExit(f"stage {tag}: rc={rc} res={cur.exists()} → 中断 (古い場を引き継がない)")

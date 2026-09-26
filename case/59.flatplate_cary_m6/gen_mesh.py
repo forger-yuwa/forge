@@ -51,6 +51,7 @@ def main():
     ap.add_argument("--L", type=float, default=0.6, help="平板長 [m] (最後の熱電対 49.2 cm より下流まで)")
     ap.add_argument("--nx-plate", type=int, default=900)
     ap.add_argument("--nx-up", type=int, default=200)
+    ap.add_argument("--r-up", type=float, default=1.01, help="助走区間の等比 (前縁側が細かい)")
     ap.add_argument("--r-plate", type=float, default=1.002)
     ap.add_argument("--r-y", type=float, default=1.09)
     ap.add_argument("--no-convert", action="store_true")
@@ -68,7 +69,7 @@ def main():
             if d1 > y1: lo = r
             else: hi = r
         tag = f"fp_y1_{y1um:g}um_nx{a.nx_plate}"
-        geo = tpl.replace("__L__", f"{a.L}").replace("__H__", f"{a.H}").replace("__NX_UP__", str(a.nx_up)).replace("__NX_PLATE__", str(a.nx_plate + 1)) \
+        geo = tpl.replace("__L__", f"{a.L}").replace("__H__", f"{a.H}").replace("__NX_UP__", str(a.nx_up)).replace("__R_UP__", f"{a.r_up}").replace("__NX_PLATE__", str(a.nx_plate + 1)) \
                  .replace("__R_PLATE__", f"{a.r_plate}").replace("__NY__", str(ny)).replace("__R_Y__", f"{r:.8f}")
         (MESH / f"{tag}.geo").write_text(geo)
         dx1 = a.L * (a.r_plate - 1.0) / (a.r_plate ** a.nx_plate - 1.0)

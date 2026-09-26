@@ -10,7 +10,7 @@ Geometry.PointNumbers = 0;
 Mesh.ScalingFactor = 1.0;
 lc = 0.05;
 x0 = -0.1;  x1 = 0.0;  x2 = __L__;  H = __H__;
-nx_up = __NX_UP__;  r_up = 1.01;
+nx_up = __NX_UP__;  r_up = __R_UP__;
 nx_plate = __NX_PLATE__;  r_plate = __R_PLATE__;
 ny = __NY__;  r_y = __R_Y__;
 Point(1) = {x0, 0.0, 0.0, lc};
