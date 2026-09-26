@@ -1,0 +1,202 @@
+# 化学種の熱物性をソルバが持ち、run には組成 (モル分率) だけを書く
+
+## メタ
+
+- **area**: `thermophysics`
+- **status**: `draft`
+- **related_docs**:
+  - [`methods/thermophysics.md`](../../methods/thermophysics.md) (種 DB・擬似種・モル分率入力の現在仕様)
+  - [`methods/condensation.md`](../../methods/condensation.md) (§潜熱 L(T)、§L(T) が液相の熱力学を決めている)
+  - [`procedures/solver-settings.md`](../../procedures/solver-settings.md) (bcond `X{s}`、`speciesDBFile`)
+- **related_plans**:
+  - 前身: [`thermophysics-cea-mole-fraction-species.md`](../accepted/thermophysics-cea-mole-fraction-species.md) (モル分率入力・`full|lumped`。「`thermo_d.cu` 内蔵 DB の変更」をスコープ外にした結果、設計側が DB を合成して run に書く構造になった — 本 plan でその判断を改める)
+  - 関連: [`tooling-design-problem-campaign-recipe.md`](tooling-design-problem-campaign-recipe.md) (problem には組成・lump の指定だけを置き、生成された数値を run に持ち込まない方針と同じ向き)
+- **created**: `2026-09-27`
+- **owner**: `Claude (主セッション) / ユーザ`
+
+## 1. 目的
+
+ユーザ要望 (2026-09-27): 「problem から `species_db.yaml` が生成されて、わけのわからない値 (擬似種の NASA-9 係数・`atoms` の平均原子数) が入るのはやめてほしい。
+CEA の情報はソルバが持ち、モル分率で指定できるようにしたい。外部 DB で上書きできるのは残してよい」。
+完了時には、run の入力は**種名と lump の中身のモル分率** (と境界組成のモル分率) だけになり、熱物性の正本はソルバ配布物の CEA 由来データ 1 か所になる。
+ソルバは使った物性を**解決済み記録として出力**し (入力ではない)、restart はその内容で照合する。
+
+## 2. スコープ
+
+- **やる**:
+  - CEA (`thermo.inp`, McBride–Gordon 2002) 由来の**版とハッシュを固定した共通データ**をソルバ配布物に置き、C++ (ソルバ・変換器) と Python (設計・後処理) が同じものを読む。外部 DB による上書きは残す。
+  - config で lump を「名前 + 構成種のモル分率」で書けるようにし、係数は**ソルバが起動時に合成**する (温度区間は構成種の全区切りの和集合で分割)。
+  - 使用した物性の解決済み記録 (ソルバ出力) と、**内容による** restart 照合。
+  - lump の輸送物性 (粘性・熱伝導) は構成種へ展開して実種の Wilke / Mason–Saxena 混合で評価する。
+  - `atoms` は入力から外す (共通データと解決済み記録には残す)。
+  - 設計 runner は `species_db.yaml` を生成しない (lump の指定を config に書く)。
+- **やらない** (初回):
+  - `species_db.yaml` を先に消すこと (照合の仕組みができるまで残す; codex 2026-09-27 諮問)。
+  - 内蔵化と同時に CEA の版・MW・外挿規約を変えること (差は別項目で判断する; §5.1 #4)。
+  - `full` の強制 (`full|lumped` の選択は前身 plan の既存判断, `thermophysics-cea-mole-fraction-species.md:155`)。
+  - 液相 H2O の物性モデル (密度・表面張力・飽和圧) の変更。**潜熱の気相エンタルピーの出所の統一は後続の別 plan に切り出す** (datum の整合設計が要る; codex plan レビュー M6, §5.1 #10)。
+  - lump と kinetic 混合平均拡散 (`speciesDiffusionMethod: 1`) の併用 (初回は拒否。kinetic 拡散が要るケースは `full` を使う; §4.4)。
+  - 移設と同時に N2 等の 6000–20000 K 区間を有効化すること (外挿規約の変更なので別判断; §5.1 #5)。
+
+## 3. 関連 docs と前提 (観測事実, 2026-09-27)
+
+根拠の詳細はブリーフ [`notes/reviews/briefs/2026-09-27-solver-owned-species-db.md`](../../notes/reviews/briefs/2026-09-27-solver-owned-species-db.md)。
+
+- **CEA 係数が 4 か所**: ソルバ内蔵 7 種 (`solver_density_cuda/input/speciesDB.cpp:83-157`)、設計側 `SPECIES_NASA9` 11 種 (`design/forge_design/gas/semiperfect.py`)、
+  `cea_thermo_to_species_db.py` の thermo.inp 直読み、凝縮潜熱 `h2o_latent` の H2O 気相再ハードコード (`condensationProperties_d.cuh:239-262`)。
+  既知の不一致: H2O MW 0.0180153 vs 0.01801528、AR 高温 a0 0 vs 20.105。
+- ソルバの DB 読み込みは `MW, LJ, Tlo/Tmid/Thi, nasa9_low/high` のみで `atoms` は読まない (`speciesDB.cpp:173-190`)。温度区間は種ごとに持てるが **2 区間まで** (`thermo_d.cuh:46-50`)。
+- `atoms` は設計側の元素質量分率診断 (`composition.py:248-255`) 用で、呼び出しは単体テストだけ。lump の値は構成種のモル加重平均 = 平均原子数 (誤りではない)。
+- lump 合成 (`composition.py:259-280`) は NASA-9 のモル加重線形混合 (固定組成なら cp/h 厳密)。区切りが 200/1000/6000 K でない種は拒否。
+  LJ は質量分率の単純平均で、ソルバの Wilke 混合 (`thermo_d.cuh:346-435`) とは一致しない。codex の物性式検算で平均 LJ の粘性は実種 Wilke に対し **200 K で −1.30 %、300 K で −0.98 %** (CFD 実測ではない; Euler では不使用)。
+- `s°` は等エントロピー変換で使われる (`thermo_d.cuh:801`)。固定組成では混合エントロピー項が差分で消えるので lump で省略してよいが、区間・外挿規約は保持する (codex Minor)。
+- **restart の種署名は内蔵種の係数変更を検出しない**: `solver_density_cuda/tools/forge_species.py:189` が内蔵種の係数・区切りを `None` にし、`:221` が両側 builtin の比較を省く。
+  codex が比較関数を単独実行して確認 (内蔵 `N2.nasa9_low[2]` 0→1 で不一致リスト `[]`、file 由来なら検出)。`interp_field.py:67` の拒否判定もこれを使う。
+- 液相 H2O はソルバにハードコード: 飽和圧 Murphy–Koop、密度 `1000−0.12(277−T)` (下限 920)、表面張力 IAPWS 外挿、潜熱 `L=h_v−h_l` (h_l は CEA H2O(L)、273.15 K 未満は cp_l 4228 一定、373.15 K 以上はクランプ)、
+  `e_l = e_v + R_v T − L`。H2O の液比熱は h_l の傾きで決まる (潜熱からの逆算ではない) が、`h2o_latent` の h_v が種 DB と別ソース・別外挿なので、EOS が暗黙に使う液エンタルピーに差が入る (codex Major; 120 K で 2.39 kJ/kg, `methods/condensation.md:587-590`)。
+  N2 (CPG 経路) は液物性を持たず `c_l = c_p,v − dL/dT` が L のフィットから暗黙に決まる。
+- 既定の化学種拡散は `speciesDiffusionMethod = 1` (kinetic 混合平均, `solverConfig.hpp:579`) で、二元拡散係数も LJ を使う (`thermo_d.cuh:452-462`)。種流束の補正と `Σh_s J_s` のエネルギー項は `speciesTransport_d.cu:254` 付近。
+- `species_db.yaml` を読む後処理・restart reader がソルバ外にもある: `solver_density_cuda/tools/total_quantities.py:119` (無ければ `species_db.yaml` を開く, `_TPGas` は 2 区間前提 `:36-48`)、
+  種変換器 (`convert_species_field.py` が `_TPGas` を import)、SERN runner の `_species_signature` (`design/forge_design/evaluate/runner_sern.py:571`)。
+- 現状の `restart_field.py` は種署名を見ずに配列をコピーし (`restart_field.py:36`)、ソルバは `valueFileName` を直接読む (`main.cpp:1193`)。
+- CEA `thermo.inp` は 2,012 エントリあり、`CO` (MW 28.0101) と `Co` (58.9332) のように大小文字だけが違う別種がある。Python は種名を大文字化 (`composition.py:35`)、C++ も大小文字を同一視 (`speciesDB.cpp:75`)。
+  `H2O(L)` など凝縮相も含む。LJ 表は 23 種分しかなく、現行生成器は LJ 不明種に N2 相当値を仮置きする (`cea_thermo_to_species_db.py:105`)。
+- float の熱物性は `SpeciesThermoF` と専用評価関数 (`thermo_d.cuh:64`)、datum は `low[7]`/`high[7]` の 2 か所に焼き込み (`thermo_d.cu:69`)。
+- 方向の判断: codex (diagnose) に諮った — [`notes/reviews/2026-09-27-solver-owned-species-db-diagnose.md`](../../notes/reviews/2026-09-27-solver-owned-species-db-diagnose.md)
+  — 結論「移行する。(b) を温度区間の和集合に拡張した起動時係数合成。最初の変更は内蔵種を含む解決済み物性の保存・内容照合」。採否は同記録末尾。
+
+## 4. 設計方針
+
+### 4.1 熱物性の正本 (共通データ)
+
+- `thermo.inp` から生成した**全種表** (区間数可変・MW・Hf・LJ・元素組成) を、CEA の版と `thermo.inp` の SHA-256 付きでソルバ配布物に置く (例 `solver_density_cuda/data/species/cea2002.yaml`、生成器は `cea_thermo_to_species_db.py` を拡張)。
+  C++ の内蔵 DB と Python の `SPECIES_NASA9` はこれを読む (ハードコードを撤去)。LJ は CEA に無いので、出典付きで同じファイルに持つ。
+- 外部 DB (`speciesDBFile`) による上書き・追加は残す。
+- **種の ID は大小文字を区別する canonical ID** (CEA の表記) とし、互換の別名 (`AR`→`Ar`、`WATER`→`H2O` 等) は明示的な alias 表で持つ。大文字化による同一視はやめる (`CO`/`Co` の衝突; codex plan レビュー M3)。
+- 各エントリに**相** (気相/凝縮相)・**熱力学の利用可否**・**輸送データ (LJ) の有無**を持たせ、凝縮相を気相 EOS に使う・LJ 無しの種を粘性/拡散に使う、は使用時に拒否する (N2 相当値の仮置きは廃止)。
+- 現行の `AIR` (cp/R 3.5 一定の擬似空気) は CEA の `Air` と別の互換擬似種として残す。
+- 移行の第一段では**現行内蔵値をそのまま共通データに移す** (値を変えない)。CEA 直読みとの差 (H2O MW・AR a0) をどちらに寄せるかは §5.1 #4 で別に判断する。
+
+### 4.2 config での lump 指定と起動時合成
+
+```yaml
+physProp:
+  species:
+    - {name: MIXDRY, lump: {N2: 0.708873, O2: 0.230376, AR: 0.00850387, CO2: 0.0522474}, basis: mole}
+    - H2O
+```
+
+- ソルバは起動時に lump の係数を合成する: 構成種の**全温度区切りの和集合**で区間を分け、区間ごとにモル加重で NASA-9 係数を足す (NASA-9 は係数に線形なので厳密)。
+  端の外挿 (定 cp) も区間として表す。`SpeciesThermo` を 2 区間固定から**区間数可変**に拡張する (上限は定数; GPU 側は区間表のオフセットで持つ)。
+- datum (`thermoHrefTemp`) は**全区間**に適用する (現行は `low[7]`/`high[7]` の 2 か所)。float 表 (`SpeciesThermoF`) も同じ区間表から作る。
+- 輸送種数・lump 展開後の実種数・区間数の上限を分けて定数で持ち、超過は起動時に拒否する。
+- 起動ログに合成結果 (MW・区間・参照温度での cp/h) と lump の中身を出す。
+- 凝縮種は lump に入れられない (独立種として残す)。
+- 境界の組成は従来どおり種 (lump を含む) のモル分率 `X{s}` で書く。将来は実種のモル分率を書いて lump へ写す入力も検討 (初回はやらない)。
+
+### 4.3 解決済み記録と内容照合 (最初の一歩)
+
+- ソルバは使用した全種 (内蔵種を含む) の**解決済み物性** (係数・区間・MW・datum・lump の中身・データの版とハッシュ) を run に**出力**する (例 `resolved_species.yaml`)。これは入力ではなく記録。
+- **記録を保存場に結び付ける** (codex plan レビュー M1): 使用物性の内容ハッシュを**各 `res_*.h5` の属性**に書き、解決済み記録 (ハッシュ名で不変に保存、上書きしない) と対応させる。
+  lump の構成実種の係数・LJ も記録対象。
+- 宛先 (これから回す run) の物性は**起動前に同じ resolver で解決**し、次の全入口で保存場のハッシュと照合する: ソルバの `valueFileName` 直接読込、
+  同一メッシュ restart (`restart_field.py`)、補間 (`interp_field.py`)、種変換 (`convert_species_field.py`)、設計 runner の段間引き継ぎ・warm start。
+- 比較は `source` (builtin/file) でなく**内容**で行う (`forge_species.py:189,221` の builtin 省略を撤廃)。過去 run の署名を現在の内蔵表から再生成しない。
+  記録が無い旧 run は「照合不能」として扱い、明示フラグでのみ許可する。
+
+### 4.4 lump の輸送物性
+
+- lump は構成種の組成を保持し、粘性・熱伝導は**全実種に展開して** Wilke / Mason–Saxena 混合で評価する (lump 内で粘性を作ってさらに混ぜる方式は採らない)。
+- **化学種拡散**: 固定内部組成の lump は、構成実種ごとの拡散速度の違いを表せない。初回は **lump を含む run の化学種拡散を共通 Schmidt 数 (`speciesDiffusionMethod: 0`) に限定**し、
+  lump と kinetic 混合平均拡散 (`1`, 既定) の併用は入力で拒否する (codex plan レビュー M2)。kinetic 拡散が要るケースは `full` を使う。
+- 平均 LJ の擬似分子は廃止する。NS の結果は変わる (codex 検算で粘性 −1 % 級の是正) ので、変更量を記録する (不変を合格条件にしない)。
+
+### 4.5 `atoms`
+
+- run の入力には書かない。共通データ (CEA の元素欄) と解決済み記録には残し、元素診断はそこから作る。
+
+### 4.6 Python 側の共通 API と reader の移行
+
+- Python の物性解決・区間評価・署名比較を 1 つの共通 API (共通データを読む) に集約し、`total_quantities.py` (`_TPGas`)、`convert_species_field.py`、`forge_species.py`、
+  SERN runner の `_species_signature`、設計側 `gas/` をこれに載せ替える (codex plan レビュー M4)。2 区間前提を撤廃する。
+
+### 4.7 設計 runner
+
+- `species_db.yaml` を生成しない。problem の組成・lump 指定を §4.2 の config に翻訳するだけにする。設計側 (MOC・IC) の熱物性も共通データを読むので、設計と CFD の熱力学が同じ正本から来る。
+
+## 5. 実装ステップ
+
+1. 内容照合 (§4.3) — 最初の一歩。
+2. 共通データと生成器、C++/Python の読み込み (§4.1)。
+3. 区間数可変の `SpeciesThermo` と起動時合成、config の lump 指定 (§4.2)。
+4. lump の輸送物性展開 (§4.4)。
+5. 設計 runner の切り替え (§4.6)、docs。
+
+### 5.1 残作業 (優先順)
+
+| # | 項目 | 内容 | 担当 |
+| --- | --- | --- | --- |
+| 1 | ~~plan 段 codex レビュー~~ | 完了 2026-09-27 (GO-with-changes, C0/M7/m1, 全件採用 → §2・§3・§4・#2–#11・§6 に反映; §6.1) | O |
+| 2 | 仕様文書の先行更新 | 実装前に `methods/thermophysics.md` へ resolver・canonical ID と alias・記録スキーマ (res 属性のハッシュ)・区間可変の評価・lump の拡散制約の仕様を書く (codex m8; AGENTS.md 開発フロー) | O |
+| 3 | 保存場に結び付いた記録と全入口の照合 (最初の一歩) | §4.3。`forge_species.py` の内容比較化、ソルバの記録出力と res 属性、起動前解決、全入口の照合。合格は §6 V1 | O |
+| 4 | 共通データ化 (値は変えない) | §4.1。canonical ID・alias・相・利用可否・LJ の有無を持つ表。現行内蔵 7 種 + `SPECIES_NASA9` 11 種を移す (値はそのまま)。合格: 移行前後で全種の係数・MW・区間が**ビット一致** (内蔵と SPECIES_NASA9 の差は差として記録)、`CO`/`Co` を別種として解決、LJ 無し種を輸送に使うと拒否 | O |
+| 5 | CEA 直読みとの差・20000 K 区間 | H2O MW・AR 高温 a0 の寄せ先、LJ の出典、6000–20000 K 区間を有効にするか。値を変えるなら case/44 と #6 の小型ケースの報告量変化を記録 | F |
+| 6 | 区間可変 + 起動時 lump 合成 + config 指定 | §4.2 (全区間 datum・float 表・上限)。合格は §6 V2・V3・V3f | O |
+| 7 | lump の輸送物性展開と拡散制約 | §4.4。合格は §6 V4 | O |
+| 8 | Python 共通 API と reader の移行 | §4.6。合格は §6 V6 | O |
+| 9 | 設計 runner の切り替え | §4.7。`species_db.yaml` 生成を止め config に lump を書く。合格は §6 V5・V6 | O |
+| 10 | 潜熱の気相エンタルピー共通化 → **後続 plan** | 本 plan から切り出す。後続 plan で気相の絶対 h の復元、液相との datum 整合、外部 H2O 上書き時の扱い、Python の二相 EOS 複製も含めて定義し、**datum を変えても L が不変**の単体試験を必須にする (codex plan レビュー M6: sensible の気相 h と絶対基準の液相 h を引くと L(300 K) が 2.44 → 15.9 MJ/kg になる反例) | F |
+| 11 | docs 同期 (完了時) | `procedures/solver-settings.md` (`physProp.species` の lump 形、`speciesDBFile` の位置づけ、lump と拡散の制約)、`recommended-settings.md` §3、`design/CAPABILITIES.md` | O |
+
+## 6. 検証
+
+事前に決める合格条件 (結果を見てから変えない)。**数値を変える作業 (#6 以降) の前に**、比較の基準 (V0) を固定する:
+[`tooling-design-problem-campaign-recipe.md`](tooling-design-problem-campaign-recipe.md) §5.1 #2・#4 の抽出関数・許容差と、**旧バイナリ** (本 plan 着手前の commit で build し sha256 を記録) を固定してから V5 を回す。
+この依存が満たされるまで #6 以降の CFD 比較をしない。
+
+- **V1 (保存場との照合, CFD 0 step)**: codex 諮問の判別 A/B (作成時記録を固定、現在の内蔵 `N2.nasa9_low[2]` を A = 同値 / B = +0.001) に加え、
+  (a) 保存場だけを別 run にコピー、(b) 記録ファイルの取り違え、(c) 外部 DB の係数変更、(d) 起動前の宛先解決、を試す。
+  合格: A と (d) の一致ケースは許可、B・(a) の不一致・(b)・(c) は**該当係数を示して拒否**、記録の無い旧場は「照合不能」で止まり明示フラグでのみ通る。これを
+  ソルバ直接読込・`restart_field.py`・`interp_field.py`・`convert_species_field.py`・runner の段間引き継ぎの**全入口**で確認。
+- **V2 (起動時合成 = 現行生成 DB, double)**: case/44 va3 の lump をソルバで合成した係数が `run_0510` の生成 `species_db.yaml` と相対 1e-12 以内、
+  200–6000 K の 1000 点で cp/h/s° が相対 1e-12 かつ絶対 cp 1e-9 J/(kg·K)・h 1e-6 J/kg・s° 1e-9 J/(kg·K) 以内。
+- **V3 (区切りの違う種を畳む, double)**: Tmid ≠ 1000 K の試験種を含む lump を合成し、構成種ごとの重み付き和と 100–20000 K の全点 (**各区切り温度そのものとその両側 ±1e-9 K** を含む、外挿域を含む) で V2 と同じ許容差。
+  datum を全区間に適用したときの h の連続性も同条件で確認。
+- **V3f (float 経路)**: float 表 (`SpeciesThermoF`) の cp/h と e↔T 往復が、既存 `tools/test_thermo_float.cpp` の基準 (`errHyb/T < 3e-8` 等) を区間可変後も満たす。上限超過が起動時に拒否されること。
+- **V4 (輸送物性と拡散)**: lump を含む混合の粘性・熱伝導が、全実種で直接評価した Wilke / Mason–Saxena と機械精度で一致。旧方式 (平均 LJ) との差を 200/300/1000 K で記録。
+  lump + `speciesDiffusionMethod: 1` が入力で拒否されること。lump + Schmidt 拡散で**組成勾配を持つ試験** (2 流入の混合層など小型ケース) を回し、種の質量収支と `Σh_s J_s` のエネルギー収支が閉じること (許容差は判定ツールの既定)。
+- **V5 (CFD 回帰)**:
+  - (i) case/44 va3 M4.19 L_c8 dry を新 config (lump 指定、`species_db.yaml` なし) で回し、固定済み V0 の抽出関数・許容差で旧バイナリの同条件 run と比較。
+    これは**準定常回帰** (残差は plateau で NOT CONVERGED のまま; 生の VERDICT を記録し、報告量が `check_quasisteady` STEADY であることを条件にする)。
+  - (ii) 全残差 `check_convergence` **PASS** が得られる小型 node TP ケース (前身 plan で使った case/16 の 5 種 run 系列など、着手時に 1 つ選んで §6 に追記) で、新旧の場と報告量を比較。
+  - (iii) NS: 対象ケース・輸送設定 (lump + Schmidt 拡散)・保存収支・判定量を**着手前にここへ書いてから**回す (#7 の輸送変更による変化量を記録し、不変は合格条件にしない)。
+  - いずれもメッシュ品質 VERDICT、IC と datum の整合 (step 0 で T が跳ばない)、段階起動の段と判定区間 (`stage_manifest.json`) を明記。
+- **V6 (DB ファイルなしの一貫経路)**: 新 config で prepare → 段階 restart → `total_quantities.py` → `convert_species_field.py` までを、生成 `species_db.yaml` なしで通す。
+  全温・全圧が旧経路と V2 の許容差で一致。SERN runner の段間署名も同じ API で通る。
+
+### 6.1 レビュー記録 (codex)
+
+| 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
+| --- | --- | --- | --- | --- |
+| plan | 2026-09-27 | [2026-09-27-thermophysics-solver-owned-species-db-plan.md](../../notes/reviews/2026-09-27-thermophysics-solver-owned-species-db-plan.md) | GO-with-changes, C0/M7/m1 | 全件採用。M1 (記録を保存場に結び付け全入口で照合) → §4.3・#3・V1。M2 (lump と kinetic 拡散) → §4.4・#7・V4 (`solverConfig.hpp:579` 既定 1、`thermo_d.cuh:452-462` が LJ 使用を当方で確認)。M3 (canonical ID・相・LJ 有無・AIR 互換) → §4.1・#4。M4 (後処理・restart reader の移行) → §4.6・#8・V6 (`total_quantities.py:119` を当方で確認)。M5 (float 経路・全区間 datum・上限) → §4.2・#6・V3/V3f。M6 (潜熱共通化は datum 設計が要る) → 後続 plan へ切り出し (#10)。M7 (V0 依存・PASS ケース・NS の事前指定) → §6 冒頭・V5。m8 (仕様文書を実装前に) → #2。判断役 (codex) 自身の指摘で却下が無いため、採否の別途諮問は省略 |
+
+## 7. 影響範囲
+
+- `solver_density_cuda/input/speciesDB.{cpp,hpp}`, `cuda_forge/thermo_d.{cu,cuh}` (区間可変・輸送展開), `cuda_forge/condensationProperties_d.cuh` (#8), 新規 `solver_density_cuda/data/species/`
+- `solver_density_cuda/tools/{forge_species.py, interp_field.py, convert_species_field.py, cea_thermo_to_species_db.py, restart_field.py}`
+- `design/forge_design/gas/{semiperfect.py, composition.py}`, `design/forge_design/evaluate/runner_axismach.py` ほか runner
+- 既存 run: `species_db.yaml` 付きの旧 run は引き続き読める (外部 DB 上書き経路)。restart 照合は旧 run で「照合不能」になり得る (§4.3)
+
+## 8. 完了条件
+
+- [ ] 関連 `methods/` の現在仕様を更新済み
+- [ ] 実装・検証完了 (本計画の §6 を満たす)
+- [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録し、Critical / Major の採否を残作業表に反映済み
+- [ ] 本計画の `status` を `done` に変更し、§9 に変更ログを記載
+- [ ] ファイルを `plans/active/` → `plans/accepted/` へ移動
+- [ ] [`plans/README.md`](../README.md) の一覧を同期
+
+## 9. 変更ログ
+
+- `2026-09-27` — codex plan 段レビュー (GO-with-changes, C0/M7/m1) を全件採用し §2–§6 を改訂。最初の実装は「保存場に結び付いた解決済み記録と全 restart 経路の照合」に限定。潜熱の共通化は後続 plan。
+- `2026-09-27` — 初稿。ユーザ要望と codex diagnose 諮問 (`notes/reviews/2026-09-27-solver-owned-species-db-diagnose.md`) の推奨から起票。
