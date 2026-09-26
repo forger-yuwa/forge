@@ -33,7 +33,7 @@ def wall_q(run, step):
     return ux, np.array([q[m][x == u].mean() for u in ux])
 
 
-def exp_curve(ser, su, pe, xs):
+def exp_curve(ser, su, pe, xs, arm="A"):
     T_inf, U, ro, M, Tw, Tt = su["T_inf"], su["U_inf"], su["ro_inf"], su["M"], su["Tw"], su["Tt"]
     rhoucp = ro * U * CP
     Taw = lambda r: T_inf * (1 + r * 0.5 * (GAM - 1) * M ** 2)
@@ -44,7 +44,8 @@ def exp_curve(ser, su, pe, xs):
     q = st * rhoucp * (Taw(r) - Tw)
     x_min = xs[int(np.nanargmin(np.where(xs < 0.30, st, np.nan)))]
     pre = [i for i in range(len(xs)) if ok[i] and xs[i] <= x_min + 1e-12][:5]
-    C = min(q[i] * np.sqrt(xs[i]) for i in pre)
+    ks = [q[i] * np.sqrt(xs[i]) for i in pre]
+    C = min(ks) if arm == "A" else max(ks)          # A = 事前登録 (最小係数)、B = 最大係数 (感度)
     xo, qo, so = xs[ok], q[ok], st[ok]
     den_H = mu_suth(T_inf) * CP * (Tt - Tw)
     ReH = (2 * C * np.sqrt(xo[0]) + cumtrapz(xo, qo)) / den_H
@@ -53,20 +54,29 @@ def exp_curve(ser, su, pe, xs):
     return ReH[sel], so[sel], den_H, rhoucp * (Taw(0.89) - Tw), len(pre)
 
 
-def evaluate(run, step, gate, cond):
+def interp_in(x, xp, fp):
+    """範囲外は NaN (np.interp は端点値を黙って返すので使わない。codex 2026-09-27)。"""
+    if x < xp.min() or x > xp.max():
+        return float("nan")
+    return float(np.interp(x, xp, fp))
+
+
+def evaluate(run, step, gate, cond, arm="A"):
     su = json.loads((Path(run) / "case_setup.json").read_text())
     sid = su["series"]
     grp = next(g for g, v in gate["groups"].items() if sid in v["series"])
     ser = next(s for s in cond["series"] if s["id"] == sid)
     xs = np.array(cond["x_cm"]) / 100.0
-    ReH_e, St_e, den_H, den_St, npre = exp_curve(ser, su, gate["per_series_exp"][sid], xs)
+    ReH_e, St_e, den_H, den_St, npre = exp_curve(ser, su, gate["per_series_exp"][sid], xs, arm)
     ux, q = wall_q(run, step)
     ReH_c = cumtrapz(ux, q) / den_H
     St_c = q / den_St
     pts = gate["groups"][grp]["ReH_points"]
-    R = [np.interp(p, ReH_c, St_c) / np.interp(p, ReH_e, St_e) for p in pts]
+    assert np.all(np.diff(ReH_c) > 0) and np.all(np.diff(ReH_e) > 0), "Re_H が単調増加でない"
+    R = [interp_in(p, ReH_c, St_c) / interp_in(p, ReH_e, St_e) for p in pts]
     return dict(series=sid, group=grp, TwTt=su["Tw_over_Tt"], pts=pts, R=R, npre=npre,
-                St_c=[float(np.interp(p, ReH_c, St_c)) for p in pts])
+                St_c=[interp_in(p, ReH_c, St_c) for p in pts],
+                exp_range=(float(ReH_e.min()), float(ReH_e.max())))
 
 
 def main():
@@ -80,11 +90,16 @@ def main():
     for run in a.runs:
         steps = sorted(int(re.search(r"res_wall_4_(\d+)\.h5$", s).group(1)) for s in glob.glob(str(Path(run) / "res_wall_4_*.h5")))
         e = evaluate(run, steps[-1], gate, cond)
+        eB = evaluate(run, steps[-1], gate, cond, arm="B")
+        e["R_B"] = eB["R"]
         rows.append(e)
         note = "" if e["npre"] > 1 else "  (前縁入熱の外挿感度は未評価: 遷移前 1 点)"
         print(f"[{Path(run).name}] step {steps[-1]}  {e['series']}  群 {e['group']}  Tw/Tt {e['TwTt']}{note}")
-        print("   Re_H: " + "  ".join(f"{p:>6d}" for p in e["pts"]))
-        print("   R   : " + "  ".join(f"{r:6.3f}" for r in e["R"]))
+        print(f"   実験 Re_H 範囲: 腕 A [{e['exp_range'][0]:.0f}, {e['exp_range'][1]:.0f}]  腕 B [{eB['exp_range'][0]:.0f}, {eB['exp_range'][1]:.0f}]")
+        print("   Re_H   : " + "  ".join(f"{p:>6d}" for p in e["pts"]))
+        print("   R (A)  : " + "  ".join(f"{r:6.3f}" for r in e["R"]))
+        print("   R (B)  : " + "  ".join(f"{r:6.3f}" for r in e["R_B"]))
+        print("   B/A−1  : " + "  ".join(f"{b/a-1:+6.3f}" if np.isfinite(a) and np.isfinite(b) else "  範囲外" for a, b in zip(e["R"], e["R_B"])))
         if a.series_csv_dir:
             out = []
             for s in steps:
