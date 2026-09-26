@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """codex に plan の外部レビューを依頼し、結果を notes/reviews/ に残す (AGENTS.md 「codex レビュー」の実体化)。
 
-段階は 2 つ:
+段階は 3 つ:
+  --stage diagnose 診断・設計判断の諮問 (AGENTS.md「モデル分担とエスカレーション」の 7 条件)。旧 `diagnostician`
+                  サブエージェント (Fable) の置き換え (2026-09-26 ユーザ決定、usage 削減)。ブリーフを --brief で渡す。
   --stage plan    計画立案時 (設計方針 §4 が書けた時点、実装着手前)。方針・スコープ・検証計画の妥当性を問う。
   --stage result  検証結果が出た時 (status を done にして accepted/ へ移す前)。実装 diff と run の VERDICT を
                   突き合わせ、変更ログの主張が裏付けられているか・accepted にしてよいかを問う。
@@ -16,10 +18,13 @@
   python3 solver_density_cuda/tools/codex_review.py plans/active/<plan>.md --stage result --base main
   python3 solver_density_cuda/tools/codex_review.py PLAN --stage plan --focus "§4.2 の作動点定義に集中" --extra case/46.sern_design/README.md
   python3 solver_density_cuda/tools/codex_review.py PLAN --stage plan --dry-run   # プロンプトだけ表示
+  python3 solver_density_cuda/tools/codex_review.py --stage diagnose --brief notes/reviews/briefs/<日付>-<slug>.md \
+      [plans/active/<plan>.md] [--extra case/NN/README.md ...]           # 諮問 (plan は任意)
 
 出力:
   notes/reviews/YYYY-MM-DD-<plan stem>-<stage>.md   レビュー本文 (メタ情報ヘッダ + codex の最終メッセージ)
   notes/reviews/YYYY-MM-DD-<plan stem>-<stage>.log  生ログ (*.log は git 追跡外)
+  diagnose は stem にブリーフのファイル名を使う (notes/reviews/YYYY-MM-DD-<brief stem>-diagnose.md)
 最後に plan の「レビュー記録」表へ貼る行を表示する。
 """
 import argparse, datetime, os, re, shutil, subprocess, sys
@@ -80,6 +85,61 @@ STAGE_RESULT = """## 依頼: 検証結果レビュー (stage = result)
 GO-with-changes なら移す前に直すべき点を優先順で列挙すること。
 """
 
+STAGE_DIAGNOSE = """## 依頼: 診断・設計判断の諮問 (stage = diagnose)
+
+あなたは forge の**診断・設計判断係**である。呼び出し側は実装と run を進めている別のモデル (Claude) で、
+**もっともらしい真因に飛びつく前に**あなたに諮っている。仕事は手を動かすことではなく、**次の一手を 1 つに絞ること**。
+
+### 前提
+- あなたは呼び出し側の会話を見ていない。下のブリーフと、自分で読んだファイルだけが根拠になる。
+  足りなければ推測で埋めずに「何が足りないか」を返す。
+- ブリーフは「観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 / 仮説」に分かれて渡される約束である。
+  **観測事実と呼び出し側の解釈が混ざっていたら、まず分け直す**。呼び出し側の要約より、run の数値・コード・
+  設定ファイルを自分で確かめた内容を優先する。
+- forge を起動しない。`python3` による `residual_history.csv` / `res_*.h5` の読み取りは**統計量だけ**を出す
+  (全量ダンプ・長いログ全文をコンテキストに流さない。`*.log`・`*.vtu`・`plans/README.md` は読まない)。
+
+### 診断の作法
+1. **「除外済み」というラベルを信用せず、潰した証拠を確認する** (run パス・設定差分・判定区間・VERDICT)。
+   証拠が足りない・判定期間が短い・変えた設定が実際には効いていない (YAML の階層違い等) なら**候補へ戻す**。
+   証拠が十分な候補は出し直さない。
+2. **症状と原因を分ける**。`detectNaN` が指す変数は結果であって原因ではない (EOS 床 → 負密度 → 圧力暴走 → ω の実績)。
+   後処理のアーチファクト (2 列混在の抽出、`centCoords` の置換、ソルバ `ypls` の退化) を先に疑う。
+3. **このリポジトリで繰り返された真因**を照合する: 投入設定の不整合 (IC と BC、亜音速に超音速 BC)、
+   押し出し 2 ノード spanwise、float32 桁落ち (双対幾何・r 重み)、stale build、cross-mesh IC の基底不一致、
+   絶対値のゼロ割ガード、境界ノードの凍結、YAML キーの階層違いで黙って無視される設定。
+4. 仮説は**確度順に最大 3 つ**。第 1 仮説には根拠を `ファイル:行` か run の数値で付ける。示せないものは「未確認」と明記。
+5. **判別する A/B を 1 つだけ**提案する。安く短く回せて、結果がどちらに出ても仮説が 1 つ消えるもの。
+   「A なら仮説 1、B なら仮説 2」を先に書く (結果を見てから解釈を作らない)。
+6. 少数点の一致・短い窓の値・未収束のトランジェント同士の比較を根拠にしない。
+
+### 設計判断 (plan §4・§6、codex 指摘の採否、result 段の解釈) を諮られたとき
+- 採否は指摘ごとに「採用 / 却下 / 要再検証」と理由。根拠が示されていない指摘は自分で該当箇所を読んでから判定する。
+- 検証計画は「何が出たら方針が誤りと言えるか」が定量的に書かれているかを見る。
+- 既定値の変更・opt-in 機能の削除は、plan の処置欄とユーザ決定の履歴を確認してから判断する
+  (「opt-in 残置」は削除対象でない)。
+- result 段の解釈は、主張ごとに根拠 run・判定ツールの VERDICT・判定区間が揃っているかを確かめる
+  (過渡ピークを定常値と、抽出アーチファクトを物理と誤認した実績は「予想どおり」に見える場面で起きた)。
+
+あなたの結論は**仮説**であって確定ではない。呼び出し側はこの A/B を回して確かめ、plan への反映も呼び出し側が行う。
+"""
+
+DIAG_OUTPUT = """## 出力形式 (この形のまま)
+
+```
+結論: <次にやる一手を 1 文で>
+第 1 仮説: <内容>  確度: <高/中/低>
+  根拠: <ファイル:行 / run パスと数値>
+  反証条件: <何が観測されたらこの仮説は誤りか>
+第 2・第 3 仮説: <あれば 1 行ずつ>
+判別 A/B: <変える設定 1 点、回す長さ、見る量>  → A なら … / B なら …
+やらない方がよいこと: <呼び出し側が取りそうな誤った一手>
+呼び出し側の前提への異議: <ブリーフの枠組み・除外判断・指標の定義で受け入れなかったものと理由。無ければ「無し」>
+不足情報: <あれば>
+```
+設計判断・採否を諮られた場合は、上の前に「採否表 (指摘ごとに 採用/却下/要再検証 と理由)」を置いてよい。
+"""
+
 
 def read(path):
     with open(path, encoding="utf-8") as f:
@@ -91,6 +151,25 @@ def git(*args):
         return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=30).stdout.strip()
     except Exception:
         return ""
+
+
+def build_diagnose_prompt(brief_path, plan_path, extras, focus):
+    parts = [COMMON_HEADER, STAGE_DIAGNOSE]
+    if focus:
+        parts.append("## 重点\n\n" + focus.strip() + "\n")
+    brief_rel = os.path.relpath(brief_path, ROOT)
+    parts.append(f"## ブリーフ (`{brief_rel}`)\n\n{read(brief_path).strip()}\n")
+    if plan_path:
+        plan_rel = os.path.relpath(plan_path, ROOT)
+        parts.append(f"## 関連 plan 全文 (`{plan_rel}`)\n\n```markdown\n{read(plan_path).strip()}\n```\n")
+    for ex in extras:
+        rel = os.path.relpath(os.path.abspath(ex), ROOT)
+        if os.path.isfile(ex):
+            parts.append(f"## 参考: `{rel}`\n\n```\n{read(ex).strip()}\n```\n")
+        else:
+            parts.append(f"## 参考: `{rel}` (ディレクトリ。中を自分で読むこと)\n")
+    parts.append(DIAG_OUTPUT)
+    return "\n".join(parts)
 
 
 def build_prompt(plan_path, stage, base, extras, focus):
@@ -117,23 +196,36 @@ def build_prompt(plan_path, stage, base, extras, focus):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("plan", help="plans/active/<plan>.md")
-    ap.add_argument("--stage", choices=["plan", "result"], required=True)
+    ap.add_argument("plan", nargs="?", default="", help="plans/active/<plan>.md (diagnose では任意)")
+    ap.add_argument("--stage", choices=["plan", "result", "diagnose"], required=True)
+    ap.add_argument("--brief", default="", help="diagnose: ブリーフ (観測事実/期待値と出典/再現条件/実施済み/仮説) の md")
     ap.add_argument("--base", default="main", help="result 段階の diff 基準 ref (既定 main)")
     ap.add_argument("--extra", nargs="*", default=[], help="プロンプトに全文を貼る補助ファイル (case README 等)")
     ap.add_argument("--focus", default="", help="重点的に見てほしい点 (自由文)")
     ap.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh"],
-                    help="model_reasoning_effort の上書き (~/.codex/config.toml は low なので既定で high に上げる)")
+                    help="model_reasoning_effort の上書き (~/.codex/config.toml は low なので既定で high に上げる。"
+                         "難所の diagnose は xhigh も可)")
     ap.add_argument("--model", default="", help="codex の model 上書き (既定は config.toml のもの)")
     ap.add_argument("--timeout", type=int, default=1800, help="秒 (既定 1800)")
     ap.add_argument("--out-dir", default=OUT_DIR)
     ap.add_argument("--dry-run", action="store_true", help="プロンプトを表示して終了")
     a = ap.parse_args()
 
-    plan_path = os.path.abspath(a.plan)
-    if not os.path.isfile(plan_path):
+    plan_path = os.path.abspath(a.plan) if a.plan else ""
+    if plan_path and not os.path.isfile(plan_path):
         sys.exit(f"plan が無い: {a.plan}")
-    prompt = build_prompt(plan_path, a.stage, a.base, a.extra, a.focus)
+    if a.stage == "diagnose":
+        if not a.brief or not os.path.isfile(a.brief):
+            sys.exit("diagnose には --brief <md> が要る (観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 / 仮説)")
+        brief_path = os.path.abspath(a.brief)
+        prompt = build_diagnose_prompt(brief_path, plan_path, a.extra, a.focus)
+        stem = os.path.splitext(os.path.basename(brief_path))[0]
+        stem = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", stem)
+    else:
+        if not plan_path:
+            sys.exit("plan / result 段には plan のパスが要る")
+        prompt = build_prompt(plan_path, a.stage, a.base, a.extra, a.focus)
+        stem = os.path.splitext(os.path.basename(plan_path))[0]
     if a.dry_run:
         print(prompt)
         return 0
@@ -142,7 +234,6 @@ def main():
         sys.exit("codex CLI が PATH に無い (~/.local/bin/codex)")
 
     os.makedirs(a.out_dir, exist_ok=True)
-    stem = os.path.splitext(os.path.basename(plan_path))[0]
     today = datetime.date.today().isoformat()
     name = f"{today}-{stem}-{a.stage}"
     k = 1
@@ -178,7 +269,9 @@ def main():
 
     head = git("rev-parse", "--short", "HEAD")
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
-    print(f"codex review: stage={a.stage} plan={os.path.relpath(plan_path, ROOT)} effort={a.effort}")
+    target = os.path.relpath(plan_path, ROOT) if plan_path else "-"
+    print(f"codex review: stage={a.stage} plan={target} effort={a.effort}"
+          + (f" brief={os.path.relpath(a.brief, ROOT)}" if a.brief else ""))
     print(f"  log : {os.path.relpath(out_log, ROOT)}  (進捗はこのファイルのサイズ、または ~/.codex/sessions/ の rollout jsonl で確認)")
     print(f"  out : {os.path.relpath(out_md, ROOT)}")
     sys.stdout.flush()
@@ -202,6 +295,30 @@ def main():
     if not result:
         print(f"codex の最終メッセージが取れなかった (rc={rc}, {dt:.0f}s)。ログ: {os.path.relpath(out_log, ROOT)}")
         return 1
+
+    if a.stage == "diagnose":
+        concl = re.search(r"^\s*結論\s*[:：]\s*(.+)$", result, re.M)
+        concl = concl.group(1).strip() if concl else "?"
+        header = (
+            f"# codex 諮問 (diagnose): {stem}\n\n"
+            f"- **brief**: [`{os.path.relpath(brief_path, ROOT)}`](../../{os.path.relpath(brief_path, ROOT)})\n"
+            + (f"- **plan**: [`{os.path.relpath(plan_path, ROOT)}`](../../{os.path.relpath(plan_path, ROOT)})\n" if plan_path else "")
+            + f"- **date**: {today}\n"
+            f"- **commit**: `{head}` ({branch})\n"
+            f"- **codex**: effort `{a.effort}`" + (f", model `{a.model}`" if a.model else "") + f", {dt/60:.1f} min, rc={rc}\n"
+            f"- **結論**: {concl}\n"
+            + (f"- **focus**: {a.focus}\n" if a.focus else "")
+            + (f"- **extra**: {', '.join('`'+os.path.relpath(os.path.abspath(e), ROOT)+'`' for e in a.extra)}\n" if a.extra else "")
+            + "\n本文は codex の最終メッセージをそのまま転記。結論は**仮説**であり、提案 A/B で確かめる。"
+            "採否・反映は plan 側 (§5.1 担当列 F の判断欄) に書く。\n\n---\n\n")
+        with open(out_md, "w", encoding="utf-8") as f:
+            f.write(header + result + "\n")
+        print(f"\n完了 ({dt/60:.1f} min, rc={rc})")
+        print(f"諮問記録: {os.path.relpath(out_md, ROOT)}")
+        print(f"結論: {concl}")
+        print("応答・plan に書く痕跡: 「codex (diagnose) に諮った: "
+              f"{os.path.relpath(out_md, ROOT)} — 結論 1 行」")
+        return 0 if rc == 0 else 1
 
     m = re.search(r"指摘数\s*[:：]\s*Critical\s*(\d+)\s*/\s*Major\s*(\d+)\s*/\s*Minor\s*(\d+)", result)
     counts = f"C{m.group(1)}/M{m.group(2)}/m{m.group(3)}" if m else "C?/M?/m?"

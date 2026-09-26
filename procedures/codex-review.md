@@ -14,6 +14,14 @@ Claude Code はプロンプトの作法・禁止事項 (巨大ファイルを読
 対象は [`AGENTS.md`](../AGENTS.md) 「開発フロー」を踏む変更 (新規機能・スキーム/設計方針の変更)。例外 (typo、1 ファイル内バグ修正、
 振る舞い同一のリファクタ、docs のみ) は不要。判断がつかなければ回す側を選ぶ。
 
+### 1.1 診断・設計判断の諮問 (stage = diagnose, 2026-09-26〜)
+
+plan/result 段レビューとは別に、AGENTS.md「モデル分担とエスカレーション」の 7 条件に当たったときの諮問も codex で回す
+(旧 `diagnostician` = Fable サブエージェントを usage 削減のため置き換え)。ブリーフを `notes/reviews/briefs/<日付>-<slug>.md`
+に書き、`codex_review.py --stage diagnose --brief <brief> [plan] [--extra ...]` を回す。出力は
+`notes/reviews/<日付>-<slug>-diagnose.md` (結論・仮説・判別 A/B の定型)。plan の §6.1 レビュー記録表には書かない
+(`check_plans.py` の plan/result 行とは別物)。痕跡は応答と plan §5.1 の `F` 項目の判断欄に残す。
+
 ## 2. 回し方
 
 ```bash

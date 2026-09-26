@@ -16,6 +16,17 @@ python3 solver_density_cuda/tools/codex_review.py plans/active/<plan>.md --stage
 python3 solver_density_cuda/tools/codex_review.py plans/active/<plan>.md --stage result --base main
 ```
 
+**診断・設計判断の諮問 (旧 `diagnostician`、2026-09-26 から codex)** も同じツールで回す:
+
+```bash
+# ブリーフ: 観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 (run パス・commit・設定差分・判定区間・VERDICT) / 仮説
+python3 solver_density_cuda/tools/codex_review.py --stage diagnose \
+    --brief notes/reviews/briefs/<日付>-<slug>.md [plans/active/<plan>.md] [--extra case/NN/README.md] [--effort xhigh]
+```
+
+ブリーフにも下の §2 禁止事項・§3 の 4 点 (指標の定義・潰した候補と証拠・生データ・問いを 1 つ) を入れる。
+結論 1 行と記録パスを応答に書き、採否は plan §5.1 の `F` 項目の判断欄へ。
+
 起動作法 (read-only / stdin=/dev/null / stdout をパイプに通さない / reasoning=high) はツールが守る。
 **自由形式の切り分け依頼**だけ手で `codex exec` を打つ。そのときも同じ作法を守る:
 
