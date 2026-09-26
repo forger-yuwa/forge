@@ -22,9 +22,22 @@ plan boundary-conjugate-heat-transfer §6 G-if / V4b(d)。`check_convergence.py`
 **判定不能は合格ではない** (memory: gate tools hardened): 列が無い / 行が無い /
 値が非有限 / physID が混ざっているのに `--phys-id` が無い、は `REFUSED` を返す。
 
+**帯を限った判定 (`--band-y YTOP YBOT`)** (plan §5.1 #101 ②): 全域 max しか持たない履歴では
+「帯内で n_consec 更新連続」を判定できないので、ソルバの `conjugate.node_log: 1` が書く
+`conjugate_iface_log_<physID>.csv` (毎更新・界面全節点の $r_i, Q_{f,i}, \Delta T_i$) と
+`conjugate_iface_nodes_<physID>.csv` ($y_i, A_i$) から、**帯内節点だけ**で ① ② ③ を組む:
+
+    ① max_{i∈帯} |r_i|/A_i            ② max_{i∈帯} |r_i| / max_{i∈帯} |Q_{f,i}|
+    ③ max_{i∈帯} |ΔT_i|
+
+④ 固体内部残差は**全域のまま** (`conjugate_history.csv` の `res_solid`)。帯は結果を見て動かさないこと
+(評価器が別に決めて渡す)。結果は `CHT_INTERFACE_BAND_VERDICT.txt` に書く (全域の VERDICT は上書きしない)。
+更新番号が末尾窓で連続していない・帯に節点が無い・履歴と更新数が食い違う、は `REFUSED`。
+
 使い方:
   python3 solver_density_cuda/tools/check_cht_interface.py <run_dir> \
       --eps-rel 1e-3 --eps-abs 150 --dt-k 1e-2 --n-consec 80
+  python3 solver_density_cuda/tools/check_cht_interface.py <run_dir> --band-y -0.004166 -0.019779
 """
 from __future__ import annotations
 
@@ -38,11 +51,59 @@ from pathlib import Path
 REQUIRED = ["step", "physID", "dTw_max", "res_abs_Wm2", "res_rel"]
 
 
+VERDICT_FILE = "CHT_INTERFACE_VERDICT.txt"
+
+
 def fail(run: Path, verdict: str, lines: list[str]) -> int:
     text = "\n".join([f"=== G-if: {run.name} -> {verdict} ==="] + lines + [f"\nVERDICT: {verdict}"])
     print(text)
-    (run / "CHT_INTERFACE_VERDICT.txt").write_text(text + "\n")
+    (run / VERDICT_FILE).write_text(text + "\n")
     return 0 if verdict == "PASS" else 1
+
+
+def band_values(run: Path, pid: int, ytop: float, ybot: float, n_consec: int, n_hist: int):
+    """帯内節点で ① ② ③ を更新ごとに組む。戻り値 (vals dict, lines) か、(None, 理由 lines)。"""
+    import numpy as np
+    fn_nodes = run / f"conjugate_iface_nodes_{pid}.csv"
+    fn_log = run / f"conjugate_iface_log_{pid}.csv"
+    if not fn_nodes.exists() or not fn_log.exists():
+        return None, [f"  {fn_log.name} / {fn_nodes.name} が無い (conjugate.node_log: 1 で回した run を渡すこと)"]
+    nd = np.loadtxt(fn_nodes, delimiter=",", skiprows=1, ndmin=2)
+    y, A = nd[:, 3], nd[:, 4]
+    lo, hi = min(ytop, ybot), max(ytop, ybot)
+    inb = (y >= lo - 1e-9) & (y <= hi + 1e-9)       # 帯の端は 1e-9 m に丸めて書かれる
+    if not inb.any():
+        return None, [f"  帯 y∈[{lo:.6g}, {hi:.6g}] に界面節点が無い"]
+    lg = np.loadtxt(fn_log, delimiter=",", skiprows=1, ndmin=2)
+    if not np.isfinite(lg).all():
+        return None, ["  節点ログに非有限値がある (NaN/Inf)"]
+    upd = lg[:, 0].astype(np.int64)
+    ni = len(y)
+    ups = np.unique(upd)
+    if ups[-1] != n_hist:
+        return None, [f"  節点ログの最終更新 {ups[-1]} と履歴の更新数 {n_hist} が食い違う"
+                      " (再開で番号が戻った / 書き込み途中)"]
+    tail_u = ups[-n_consec:]
+    if len(tail_u) < n_consec or np.any(np.diff(tail_u) != 1):
+        return None, [f"  節点ログの末尾 {n_consec} 更新が連続していない (欠け・重複)"]
+    out = {"res_abs_Wm2": [], "res_rel": [], "dTw_max": [], "step": []}
+    for u in tail_u:
+        blk = lg[upd == u]
+        if len(blk) != ni:
+            return None, [f"  更新 {u} の行数 {len(blk)} が界面節点数 {ni} と違う"]
+        idx = blk[:, 2].astype(int)
+        r = np.empty(ni); Q = np.empty(ni); dT = np.empty(ni)
+        r[idx], Q[idx], dT[idx] = blk[:, 3], blk[:, 4], blk[:, 5]
+        rb, Qb, Ab, dTb = r[inb], Q[inb], A[inb], dT[inb]
+        out["res_abs_Wm2"].append(float(np.max(np.abs(rb) / Ab)))
+        qm = float(np.max(np.abs(Qb)))
+        out["res_rel"].append(float(np.max(np.abs(rb))) / qm if qm > 0 else math.inf)
+        out["dTw_max"].append(float(np.max(np.abs(dTb))))
+        out["step"].append(int(blk[0, 1]))
+    lines = [f"  帯 y∈[{lo*1e3:.3f}, {hi*1e3:.3f}] mm: 界面 {ni} 節点のうち {int(inb.sum())} 節点",
+             f"  節点ログの末尾 {n_consec} 更新 (更新 {tail_u[0]} .. {tail_u[-1]}, "
+             f"step {out['step'][0]} .. {out['step'][-1]})"]
+    return out, lines
 
 
 def main() -> int:
@@ -57,7 +118,12 @@ def main() -> int:
     ap.add_argument("--dt-k", type=float, default=None, help="[K]")
     ap.add_argument("--tol-solid", type=float, default=None, help="固体内部残差 [W/m]")
     ap.add_argument("--n-consec", type=int, default=None)
+    ap.add_argument("--band-y", type=float, nargs=2, metavar=("YTOP", "YBOT"), default=None,
+                    help="帯を限った判定 [m] (節点ログを使う。④ は全域のまま)")
     a = ap.parse_args()
+    if a.band_y is not None:
+        global VERDICT_FILE
+        VERDICT_FILE = "CHT_INTERFACE_BAND_VERDICT.txt"
 
     run = Path(a.run_dir)
     hist = run / "conjugate_history.csv"
@@ -149,6 +215,18 @@ def main() -> int:
     vals = {k: [col(r, k) for r in tail] for k in ("dTw_max", "res_abs_Wm2", "res_rel")}
     if "res_solid" in rows[0]:
         vals["res_solid"] = [col(r, "res_solid") for r in tail]
+    band_lines = []
+    if a.band_y is not None:
+        if "update" not in rows[0]:
+            return fail(run, "REFUSED", ["  履歴に update 列が無い (節点ログと突き合わせられない)"])
+        bv, band_lines = band_values(run, pid, a.band_y[0], a.band_y[1], n_consec,
+                                     int(float(rows[-1]["update"])))
+        if bv is None:
+            return fail(run, "REFUSED", band_lines)
+        if [int(float(r["step"])) for r in tail] != bv["step"]:
+            return fail(run, "REFUSED", ["  履歴の末尾窓と節点ログの末尾窓で step が一致しない"])
+        for k in ("dTw_max", "res_abs_Wm2", "res_rel"):
+            vals[k] = bv[k]                        # ① ② ③ は帯内。④ res_solid は全域のまま
     if any(not math.isfinite(v) for vs in vals.values() for v in vs):
         return fail(run, "REFUSED", ["  末尾の窓に非有限値がある (NaN/Inf)"])
 
@@ -161,7 +239,9 @@ def main() -> int:
         checks.append(("④ res_solid [W/m]", max(vals["res_solid"]), tol_solid))
 
     lines = [f"  physID {pid}: 更新 {len(rows)} 回、末尾 {n_consec} 回で判定 "
-             f"(step {tail[0]['step']} .. {tail[-1]['step']})"]
+             f"(step {tail[0]['step']} .. {tail[-1]['step']})"] + band_lines
+    if a.band_y is not None:
+        lines.append("  ① ② ③ は帯内節点、④ res_solid は全域")
     ok = True
     for name, got, tol in checks:
         good = got <= tol

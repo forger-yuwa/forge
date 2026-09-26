@@ -646,6 +646,36 @@ void appendInterfaceHistory(int iStep, int physID, int n, double tmean, double t
         << "," << nAvg << "," << nFilled << "," << update << "\n";
 }
 
+// 界面節点ごとの G-if 素材 (plan §5.1 #101 ②)。全域 max しか残らない `conjugate_history.csv` では
+// **帯を限った G-if** (事前登録の「帯内で 80 更新連続」) を判定できないため、毎更新・全節点を書く。
+//   conjugate_iface_nodes_<physID>.csv : i, 固体節点, x, y, A_i (初回だけ)
+//   conjugate_iface_log_<physID>.csv   : update, step, i, r_i [W/m], Q_f,i [W/m], dT_i [K], T_w,i [K]
+// r_i は**更新前の物理残差** (D_f を含まない。G-if ① ② と同じ量)、dT_i は反映した壁温の変化 (③)。
+void appendInterfaceNodeLog(const SolidState& st, int physID, int iStep,
+                            const std::vector<double>& r, const std::vector<double>& Qf,
+                            const std::vector<double>& dT, const std::vector<double>& Tw)
+{
+    static std::set<int> nodesDone;
+    const int ni = st.mesh.nIface();
+    if (!nodesDone.count(physID)) {
+        std::ofstream o("conjugate_iface_nodes_" + std::to_string(physID) + ".csv");
+        o << "i,solid_node,x,y,A\n";
+        o.precision(12);
+        for (int i = 0; i < ni; i++)
+            o << i << "," << st.mesh.ifaceNodes[i] << "," << std::scientific << st.mesh.ifaceX[i] << ","
+              << st.mesh.ifaceY[i] << "," << st.lumped[i] << std::defaultfloat << "\n";
+        nodesDone.insert(physID);
+    }
+    const std::string fn = "conjugate_iface_log_" + std::to_string(physID) + ".csv";
+    const bool needHeader = !std::ifstream(fn).good();
+    std::ofstream ofs(fn, std::ios::app);
+    if (needHeader) ofs << "update,step,i,r_W,Qf_W,dT_K,Tw_K\n";
+    ofs.precision(10);
+    for (int i = 0; i < ni; i++)
+        ofs << st.nUpdate << "," << iStep << "," << i << "," << std::scientific << r[i] << "," << Qf[i]
+            << "," << dT[i] << "," << Tw[i] << std::defaultfloat << "\n";
+}
+
 } // namespace
 
 // mode: fem2d の 1 回の更新 (plan §4.6a)。
@@ -732,6 +762,7 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, variables& var, b
     // ここでは組んだ $A=K+E^{\mathsf T}D_fE$ から界面対角の $D_f u$ を**引いて** $Ku$ に戻す。
     const std::vector<double> Au = st.fem->matvec(st.u);
     double resAbs = 0.0, resMax = 0.0, qfMax = 0.0, qTotal = 0.0, resSolid = 0.0;
+    std::vector<double> rNode(ni, 0.0);               // 節点ごとの更新前物理残差 [W/m] (node_log 用)
     {
         std::vector<char> isIface(st.mesh.nNodes, 0);
         for (int i = 0; i < ni; i++) isIface[st.mesh.ifaceNodes[i]] = 1;
@@ -739,6 +770,7 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, variables& var, b
             const int nd = st.mesh.ifaceNodes[i];
             // $ (Au)_{nd} - D_{f,i}u_{nd} - b_{nd} - Q_{f,i} $ = 物理残差 (D_f を含まない)
             const double r = Au[nd] - Df[i] * st.u[nd] - st.fem->rhs()[nd] - Qf[i];
+            rNode[i] = r;
             resMax = std::max(resMax, std::fabs(r));
             if (st.lumped[i] > 0.0) resAbs = std::max(resAbs, std::fabs(r) / st.lumped[i]);
             qfMax  = std::max(qfMax, std::fabs(Qf[i]));
@@ -804,10 +836,13 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, variables& var, b
 
     // ---- 反映 ----
     double dTmax = 0.0, tsum = 0.0, tmin = 1e30, tmax = -1e30;
+    std::vector<double> dTNode(ni, 0.0), TwNode(ni, 0.0);
     for (int i = 0; i < ni; i++) {
         const int ib = st.wallOfIface[i];
         const double Tnew = rhs[st.mesh.ifaceNodes[i]];
         const double Tw = (1.0 - cfg.conjugateRelax) * Twk[i] + cfg.conjugateRelax * Tnew;
+        dTNode[i] = Tw - Twk[i];
+        TwNode[i] = Tw;
         dTmax = std::max(dTmax, std::fabs(Tw - Twk[i]));
         Ts[ib] = (flow_float)Tw;
         rhs[st.mesh.ifaceNodes[i]] = Tw;              // 状態と壁温を一致させる
@@ -847,6 +882,8 @@ void updateFem2dWall(const solverConfig& cfg, const mesh& msh, variables& var, b
     appendInterfaceHistory(iStep, bc.physID, ni, tsum / std::max(1, ni), tmin, tmax, dTmax,
                            resAbs, resMax, (qfMax > 0.0 ? resMax / qfMax : 0.0), qTotal, resSolid,
                            navg, (int)st.qFilled, st.nUpdate);
+    if (cfg.conjugateNodeLog == 1)
+        appendInterfaceNodeLog(st, bc.physID, iStep, rNode, Qf, dTNode, TwNode);
 
     if (iStep % (cfg.conjugateInterval * 20) == 0)
         std::cout << "[conjugateWall] step " << iStep << " physID " << bc.physID

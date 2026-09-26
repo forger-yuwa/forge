@@ -508,7 +508,7 @@ void solverConfig::read(std::string fname)
             {
                 static const std::set<std::string> allowedCj = {
                     "mode", "solid", "flux", "flux_avg", "thickness", "k_solid", "back", "T_b", "h_c",
-                    "interval", "warmup", "relax", "Df_scale", "refactorDT", "gate"};
+                    "interval", "warmup", "relax", "Df_scale", "refactorDT", "gate", "node_log"};
                 static const std::set<std::string> allowedGate = {
                     "eps_rel", "eps_abs_Wm2", "dT_K", "n_consec", "tol_solid"};
                 for (auto it = cj.begin(); it != cj.end(); ++it) {
@@ -542,6 +542,10 @@ void solverConfig::read(std::string fname)
             if (!(this->conjugateRefactorDT >= 0.0))
                 throw std::runtime_error("'conjugate': refactorDT must be >= 0 (0 = 毎回分解する).");
             this->conjugateDfScale   = getOptionalValidatedValue<double>(cj, "Df_scale", 1.0, "conjugate");
+            // 界面節点ごとの G-if 素材を毎更新で書く (診断出力のみ。更新式には触れない)。plan §5.1 #101 ②
+            this->conjugateNodeLog   = getOptionalValidatedValue<int>(cj, "node_log", 0, "conjugate");
+            if (this->conjugateNodeLog != 0 && this->conjugateNodeLog != 1)
+                throw std::runtime_error("'conjugate': node_log must be 0 or 1.");
             if (cj["gate"]) {
                 auto g = cj["gate"];
                 this->conjugateGateSet     = 1;

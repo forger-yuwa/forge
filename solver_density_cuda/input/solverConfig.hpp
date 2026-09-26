@@ -65,6 +65,9 @@ public:
     // 1 K 凍結は作用素の 0.1 % 以下の摂動。組立ては毎回やる (残差を現在の k_s で測るため)。
     double conjugateRefactorDT = 1.0;
     double conjugateDfScale = 1.0;       // D_f の倍率 (発散したとき手で上げる。自動調整はしない)
+    // 1 = 界面節点ごとの (r_i, Q_f,i, A_i, ΔT_i, T_w,i) を毎更新 `conjugate_iface_log_<physID>.csv` に書く。
+    // 帯を限った G-if (tools/check_cht_interface.py --node-log) の素材。診断のみで数値は変えない。
+    int    conjugateNodeLog = 0;
     // 界面ゲート (G-if) の許容。**run を投入する前に書く** = 結果を見てから決めない仕組み。
     // ソルバが起動時に conjugate_gate.json に写し、tools/check_cht_interface.py がそれで判定する。
     int    conjugateGateSet = 0;         // gate: ブロックが書かれたか
