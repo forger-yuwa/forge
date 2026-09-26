@@ -114,6 +114,8 @@ def main():
     ap.add_argument("--relax", type=float, default=0.7)
     ap.add_argument("--init-from", default=None,
                     help="収束場の res_*.h5。別メッシュなら interp_field.py で移して段階起動を省き、本段だけを回す")
+    ap.add_argument("--init-same-mesh", action="store_true",
+                    help="--init-from が同じメッシュの場なら restart_field.py (index コピー) で移す")
     ap.add_argument("--forge-tools", default=None,
                     help="run_case.sh のあるディレクトリ (別ビルド、例: 全域 FP64 の worktree)。既定はこのリポジトリ")
     ap.add_argument("--dry", action="store_true")
@@ -160,9 +162,10 @@ def main():
                restart_from=a.init_from)
         sm.write()
         (rd / "solverConfig.yaml").write_text(CFG.format(**common, **stages[0][1]))
-        subprocess.run([sys.executable, str(TOOLS / "interp_field.py"), a.init_from, str(rd / "mesh.h5")],
+        tool = "restart_field.py" if a.init_same_mesh else "interp_field.py"
+        subprocess.run([sys.executable, str(TOOLS / tool), a.init_from, str(rd / "mesh.h5")],
                        env=ENV, check=True)
-        (rd / "CONTINUED_FROM").write_text(f"{a.init_from} (interp_field.py、別メッシュ)\n")
+        (rd / "CONTINUED_FROM").write_text(f"{a.init_from} ({tool})\n")
     else:
         patch_ic(rd / "mesh.h5", fs, Tw)
     print(f"{a.run}: Re {re_m:.3g}/m  p∞ {fs['p']:.1f} Pa  ρ∞ {fs['ro']:.4g}  U∞ {U_INF:.1f}  T∞ {T_INF:.2f} K  Tw {Tw:.1f} K  Taw(r0.89) {Taw:.1f} K")
