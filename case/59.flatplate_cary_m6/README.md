@@ -46,4 +46,5 @@ forge は理論側に乗る。**このずれが冷壁に特有か (モデル側)
 | `run_0021_tw03_re027_ext` | run_0010 から同一設定 +60k | **run_0010 と接続した 100k で `PASS (converged)`** (5.4–9.6 dec)。St **ALL STEADY**。壁解像 最大 0.82。**G14 R = 1.196/1.194/1.212/1.277/1.342** | active (**G14 Tw/Tt 0.3 の結果**) |
 | `run_0018_tw06_re014` (結果) | 低 Re (Re 0.14、Tw/Tt 0.6)、一様初期値からの段階起動・全段 FP64・本段 60k | 判定区間 (ramp0→main、`--segment`) で **`PASS (converged)`** (3.4–3.9 dec)。本段単独は roK が `still converging`。St **ALL STEADY**。壁解像 最大 0.27。**G14 R (群 L、Re_H 3050/3200/3350) = 0.998/1.087/1.056**。同じ系列が run_0011 (高 Re の場から開始) では破綻し、段階起動からは収束した = 破綻は初期化側と整合 (切り分けはここまで) | active (**G14 群 L Tw/Tt 0.6 の結果**) |
 | `run_0019_tw04_re014` (結果) | 低 Re (Tw/Tt 0.4)、段階起動・FP64・本段 60k | 判定区間 (`--segment`) で **`PASS (converged)`** (3.3–3.6 dec)。St **ALL STEADY**。壁解像 最大 0.40。**G14 R (群 L) = 1.218/1.239/1.239** | active (**G14 群 L Tw/Tt 0.4 の結果**) |
-| `run_0020_tw02_re014` | 低 Re (Tw/Tt 0.2)、段階起動・FP64・本段 60k | 実行中 | active |
+| `run_0020_tw02_re014` | 低 Re (Tw/Tt 0.2)、段階起動・FP64・本段 60k | 判定区間でも `NOT CONVERGED (still converging)` (roK 2.8 dec)、St **TRANSIENT-UNSETTLED** (drift 3 %)。壁解像 最大 0.88。暫定 R = 1.313/1.284/1.254 (解釈しない) | 延長元 |
+| `run_0022_tw02_re014_ext` | run_0020 から同一設定 +40k (出力 5000 毎) | 実行中 | active |
