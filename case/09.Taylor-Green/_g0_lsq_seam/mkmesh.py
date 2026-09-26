@@ -93,10 +93,15 @@ def _jitter_msh(path, N, L, frac):
 def _convert(workdir, geo_text, bcond, jitter_fn=None):
     os.makedirs(workdir, exist_ok=True)
     open(os.path.join(workdir, "mesh.geo"), "w").write(geo_text)
-    subprocess.run(["gmsh", "-3", "mesh.geo", "-o", "mesh.msh", "-format", "msh4"], cwd=workdir, check=True,
-                   capture_output=True)
-    if jitter_fn:
-        jitter_fn(os.path.join(workdir, "mesh.msh"))
+    if shutil.which("gmsh") is None and os.path.exists(os.path.join(workdir, "mesh.msh.jittered")):
+        # gmsh の無い機械 (AWS g5) 用: 別の機械で gmsh + ジッタまで済ませた mesh.msh.jittered を置いておけば変換だけ行う
+        shutil.copy(os.path.join(workdir, "mesh.msh.jittered"), os.path.join(workdir, "mesh.msh"))
+    else:
+        subprocess.run(["gmsh", "-3", "mesh.geo", "-o", "mesh.msh", "-format", "msh4"], cwd=workdir, check=True,
+                       capture_output=True)
+        if jitter_fn:
+            jitter_fn(os.path.join(workdir, "mesh.msh"))
+        shutil.copy(os.path.join(workdir, "mesh.msh"), os.path.join(workdir, "mesh.msh.jittered"))
     with open(os.path.join(workdir, "solverConfig.yaml"), "w") as fp:
         yaml.safe_dump(CONV_CFG, fp, sort_keys=False)
     if isinstance(bcond, str):
@@ -118,11 +123,18 @@ def _convert(workdir, geo_text, bcond, jitter_fn=None):
     return os.path.join(workdir, "mesh.h5"), os.path.join(workdir, "bcondConfig.yaml"), (verdict[-1] if verdict else "?")
 
 
-def make_box_h5(workdir, N, jitter=0.0):
+def make_box_h5(workdir, N, jitter=0.0, bcond=TGV_BCOND):
     L = 2.0 * np.pi
     geo = GEO.format(nx=N + 1, ny=N + 1, nz=N, Lx="2*Pi", Ly="2*Pi", Lz="2*Pi", px1="", px3="", py="")
     fn = (lambda p: _jitter_msh(p, N, L, jitter)) if jitter > 0 else None
-    return _convert(workdir, geo, TGV_BCOND, fn)
+    return _convert(workdir, geo, bcond, fn)
+
+
+def slip_box_bcond():
+    """周期の無い箱 (全 6 面 slip)。plan gradient-scalar-lsq-unification S0-c: 周期 gather が no-op なので
+    res_1 の最終配列同士を直接比べられる。"""
+    names = ("bottom", "upper", "left", "right", "inlet", "outlet")
+    return {nm: {"physID": i + 1, "kind": "slip", "outputHDFflg": 0, "ints": None, "floats": None} for i, nm in enumerate(names)}
 
 
 def channel_bcond(Lx=1.0, Lz=0.5):

@@ -1,0 +1,38 @@
+# S0 axi (plan gradient-scalar-lsq-unification §6 S0、mesh.scalarGradient: lsq)
+harness revision: 7ebf6d7 (dirty)
+
+## S0-a 純作用素 (axi, sin 場, 参照 = 非合併 (root = 自分) LSQ double)
+run: /home/ubuntu/sglsq/s0/s0_axi_sin
+forge_mtime : 2026-09-26T09:28:02+00:00
+forge_sha256: 05b42b44f01eff65b56ad1870349c0451746821322b2a349a1abe27c54e5e06a
+git_head    : 7ebf6d7db7e0198e57052952434b7f55020003b6
+起動エコー: 'scalarGradient' effective: lsq (explicit)
+NaN/Inf: なし
+判定: max_i |∇φ_gpu − ∇φ_ref| ≤ 1e-5·S、S = max_i |∇φ_ref| (全節点)。参照の入力は res_0 の場 (境界条件の上書き後)
+| 場 | S | 最大差 | 最大差/S | 区分別 最大差/S (member 1/2/4/8) | 判定 |
+| --- | --- | --- | --- | --- | --- |
+| k | 105.6 | 6.247e-06 | 5.91e-08 | 1:5.9e-08, 2:5.5e-08 | ok |
+| omega | 2997 | 2.288e-04 | 7.63e-08 | 1:7.6e-08, 2:7.6e-08 | ok |
+| Xi | 25.37 | 1.727e-06 | 6.81e-08 | 1:6.8e-08, 2:5.6e-08 | ok |
+  (打ち切り group/節点数 2501)
+化学種 Y: dY{s}d* は出力変数に無いので測れない (保留)
+VERDICT S0-a (axi): PASS
+
+## S0-b 定数場 (axi, k=2・ω=100・ξ=0.5)
+run: /home/ubuntu/sglsq/s0/s0_axi_const
+forge_mtime : 2026-09-26T09:28:02+00:00
+forge_sha256: 05b42b44f01eff65b56ad1870349c0451746821322b2a349a1abe27c54e5e06a
+git_head    : 7ebf6d7db7e0198e57052952434b7f55020003b6
+起動エコー: 'scalarGradient' effective: lsq (explicit)
+NaN/Inf: なし
+判定: 定数だけの stencil の節点 (group 単位) は ∇φ == 0 (厳密)。境界条件で値が変わった節点に stencil が触れる group は |∇φ_gpu − ∇φ_ref| ≤ 4ε·max_stencil|φ|/h (参照 = res_0 の場の LSQ double、h = 節点の合併体積^(1/3))。ξ は全節点で == 0
+| 場 | 区分 | 節点 | 非零の節点 | 最大 |∇φ| or 差 [ε·max|φ|/h] | 判定 |
+| --- | --- | --- | --- | --- | --- |
+| k | stencil が定数のみ (壁込み) | 2501 | 0 | 0.000e+00 (絶対値) | ok |
+| omega | stencil が定数のみ (壁込み) | 2501 | 0 | 0.000e+00 (絶対値) | ok |
+| Xi | stencil が定数のみ (壁込み) | 2501 | 0 | 0.000e+00 (絶対値) | ok |
+VERDICT S0-b (axi): PASS
+
+## まとめ
+S0-a: PASS
+S0-b: PASS

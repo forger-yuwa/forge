@@ -23,6 +23,7 @@ scratch は `--scratch` または環境変数 G_HARNESS_SCRATCH。tgv 系の入�
 import argparse
 import os
 import shutil
+import subprocess
 import sys
 
 import h5py
@@ -435,7 +436,393 @@ def evaluate_const(variant, run):
     return "\n".join(out) + "\n", ok_all
 
 
+# ====================================================================================================
+# S0 (plan gradient-scalar-lsq-unification §6 S0-a〜e): mesh.scalarGradient: lsq のスカラー勾配作用素
+# ====================================================================================================
+# 使い方 (AWS):
+#   python3 g_suite.py s0 <variant> [--scratch DIR] [--kinds sin,const,same] [--eval-only]
+#   python3 g_suite.py s0e_case39 --scratch DIR --src RUN_DIR [--eval-only]
+# 変種: tgv, tgv_mirror, tgv_bcswap, tgv_repeat, tgv_shift, jitter32, channel (既存 7 本)、
+#       box_slip (周期なし・全面 slip の 32³ ジッタ箱 = S0-c の直接比較用)、
+#       axi / axi_m1 (軸対称 × 並進周期 = #6a の r6a_prep 61×41、SST + ξ + 2 成分。axi_m1 は mesh.axisymMethod: 1)。
+# 場の種類 (kind。run = <scratch>/s0_<variant>_<kind>):
+#   sin   : k・ω・ξ を滑らかな周期 sin 場 (gharness.periodic_sin) で焼く → S0-a (double 参照 ≤ 1e-5·S)、S0-d (jitter32)、S0-e (channel)
+#   const : k=2・ω=100・ξ=0.5 の定数場 → S0-b
+#   same  : ρ = k = ω = ξ = q (q = m/2048, m∈[1024,2047] の量子化 sin 場: q² が float32 で厳密なので ρk/ρ = q が厳密)
+#           → S0-c (NS の dρ とスカラー勾配のビット一致)。軸対称 (TP の状態を作り直せない) は対象外
+# 化学種 Y の勾配 (dY{s}d*) は出力変数に無い (variables.hpp output_cellValNames) ので S0-a の Y (5 種)・S0-c の dY は測れない。
+S0_VARIANTS = ("tgv", "tgv_mirror", "tgv_bcswap", "tgv_repeat", "tgv_shift", "jitter32", "channel", "box_slip", "axi", "axi_m1")
+S0_SIN = {"k": (2.0, 0.5, (0.3, 1.1, -0.4)), "omega": (100.0, 20.0, (1.7, -0.6, 0.9)), "Xi": (0.5, 0.2, (-0.8, 0.4, 2.1))}
+S0_GN = {"k": "K", "omega": "Omega", "Xi": "Xi"}
+S0_CONST = {"k": 2.0, "omega": 100.0, "Xi": 0.5}
+
+
+def _s0_source(variant, scr):
+    """(src_h5, bcond (path or dict), solver cfg dict, 追加ファイル, 変換 mode, 合併を期待するか)。"""
+    extra = []
+    if variant.startswith("tgv"):
+        src, bc = os.path.join(scr, TGV_REL), os.path.join(HERE, "bcondConfig.yaml")
+        if variant == "tgv_mirror":
+            bc = bcond_variant(bc, "mirror")
+        elif variant == "tgv_bcswap":
+            bc = bcond_variant(bc, "swap")
+        cfg = G.base_solver_cfg(sst=True, tracer=True)
+        tr = {"tgv_mirror": "mirror", "tgv_shift": "shift"}.get(variant)
+        return src, bc, cfg, extra, tr, True
+    if variant in ("jitter32", "channel", "box_slip"):
+        sub = {"jitter32": "box32_j", "channel": "channel", "box_slip": "box32_slip"}[variant]
+        md = os.path.join(scr, "g_harness_mesh", sub)
+        if os.path.exists(os.path.join(md, "mesh.h5")) and os.path.exists(os.path.join(md, "quality.txt")):
+            src, bc = os.path.join(md, "mesh.h5"), os.path.join(md, "bcondConfig.yaml")
+        elif variant == "jitter32":
+            src, bc, _ = mkmesh.make_box_h5(md, 32, 0.2)
+        elif variant == "box_slip":
+            src, bc, _ = mkmesh.make_box_h5(md, 32, 0.2, mkmesh.slip_box_bcond())
+        else:
+            src, bc, _ = mkmesh.make_channel_h5(md)
+        q = [l for l in open(os.path.join(md, "quality.txt")).read().splitlines() if "VERDICT" in l]
+        print("mesh quality:", q[-1] if q else "?")
+        cfg = G.base_solver_cfg(sst=True, tracer=True, visc=1.8e-5 if variant == "channel" else 0.0)
+        return src, bc, cfg, extra, None, variant != "box_slip"
+    if variant in ("axi", "axi_m1"):
+        pd = os.path.join(scr, "r6a_prep")
+        cfg = yaml.safe_load(open(os.path.join(pd, "solverConfig.yaml")))
+        cfg["turbulence"] = {"model": "sst"}
+        if variant == "axi_m1":
+            cfg["mesh"]["axisymMethod"] = 1
+        extra = [os.path.join(pd, "species_db.yaml")]
+        return os.path.join(pd, "axi.h5"), os.path.join(pd, "bcondConfig.yaml"), cfg, extra, None, False
+    raise SystemExit("unknown S0 variant " + variant)
+
+
+def _s0_quantized(f):
+    """[0.5, 1) の量子化 q = m/2048 (q² が float32 で厳密)。"""
+    m = np.clip(np.rint(f * 2048.0), 1024, 2047)
+    return m / 2048.0
+
+
+def s0_prepare(variant, scr, kind):
+    run = os.path.join(scr, f"s0_{variant}_{kind}")
+    src, bc, cfg, extra, tr, merge = _s0_source(variant, scr)
+    cfg = dict(cfg)
+    cfg["mesh"] = dict(cfg.get("mesh", {}), scalarGradient="lsq")
+    h5name = "axi.h5" if variant.startswith("axi") else "mesh.h5"
+    h5 = G.make_run(run, src, cfg, bc, h5name=h5name)
+    for f in extra:
+        shutil.copy(f, run)
+    if tr == "mirror":
+        transform_mesh(h5, "mirror")
+    elif tr == "shift":
+        transform_mesh(h5, "shift", (100.0, 100.0, 100.0))
+    msh = G.Mesh(h5, os.path.join(run, "bcondConfig.yaml"))
+    w, clean, axes = G.wrapped_coords(msh)
+    x = msh.xyz.astype(np.float64)
+    ext = x.max(0) - x.min(0)
+    if kind == "sin":
+        phi = {v: G.periodic_sin(w, ext, c0, amp, ph) for v, (c0, amp, ph) in S0_SIN.items()}
+    elif kind == "const":
+        phi = {v: np.full(msh.nCells, c) for v, c in S0_CONST.items()}
+    elif kind == "same":
+        if variant.startswith("axi"):
+            raise SystemExit("S0-c (same) は軸対称では作らない")
+        q = _s0_quantized(G.periodic_sin(w, ext, 0.75, 0.2, (0.4, -0.3, 1.2)))
+        phi = {"k": q, "omega": q, "Xi": q}
+    else:
+        raise SystemExit("unknown kind " + kind)
+    if variant.startswith("axi"):
+        # TP 2 成分の状態 (#6a で焼いた ρ・u・e・Y) はそのまま使い、k・ω・ξ だけ焼く
+        with h5py.File(h5, "r") as f:
+            ro = np.asarray(f["VALUE/ro"], dtype=np.float64)
+        G.bake(h5, {"roK": ro * phi["k"], "roOmega": ro * phi["omega"], "roXi": ro * phi["Xi"]})
+    else:
+        ro = phi["k"] if kind == "same" else 1.0
+        fl = {n: c0 + w @ np.asarray(a) for n, (c0, a) in LSQ_FIELDS.items()}
+        G.bake(h5, G.prim_state_fields(msh, ro, fl["Ux"], fl["Uy"], fl["Uz"], 101325.0,
+                                       k=phi["k"], om=phi["omega"], xi=phi["Xi"]))
+    np.savez(os.path.join(run, "baked.npz"), w=w, clean=clean, merge=merge, **phi)
+    return run, merge
+
+
+def _s0_load(run):
+    h5 = os.path.join(run, "axi.h5" if os.path.exists(os.path.join(run, "axi.h5")) else "mesh.h5")
+    msh = G.Mesh(h5, os.path.join(run, "bcondConfig.yaml"))
+    bk = np.load(os.path.join(run, "baked.npz"))
+    s0 = G.read_res(os.path.join(run, "res_0.h5"), ["ro", "k", "omega", "Xi"])
+    gn = [f"d{g}d{c}" for g in list(S0_GN.values()) + ["ro"] for c in "xyz"]
+    g1 = G.read_res(os.path.join(run, "res_1.h5"), gn)
+    grad = lambda g: np.stack([g1[f"d{g}d{c}"] for c in "xyz"], axis=1)
+    return msh, bk, s0, grad
+
+
+def _s0_head(run, title):
+    return [f"\n## {title}", f"run: {run}", G.provenance(run).rstrip(),
+            "起動エコー: " + "; ".join(l.strip() for l in open(os.path.join(run, "forge_run.log"))
+                                   if l.startswith("'scalarGradient' effective") or "回転周期" in l)]
+
+
+def _nan_lines(run):
+    bad = []
+    for st in (0, 1):
+        with h5py.File(os.path.join(run, f"res_{st}.h5"), "r") as f:
+            for k in f["VALUE"]:
+                a = f["VALUE/" + k][()]
+                if a.dtype.kind == "f" and not np.isfinite(a).all():
+                    bad.append(f"res_{st}:{k}")
+    return bad
+
+
+def s0_eval_sin(variant, run):
+    """S0-a (double 参照 ≤ 1e-5·S)、S0-d (jitter32: GG 参照との差 > 1e-5·S)。"""
+    msh, bk, s0, grad = _s0_load(run)
+    merged = bool(bk["merge"])
+    out = _s0_head(run, f"S0-a 純作用素 ({variant}, sin 場, 参照 = {'合併' if merged else '非合併 (root = 自分)'} LSQ double)")
+    P = out.append
+    nan = _nan_lines(run)
+    P(f"NaN/Inf: {nan if nan else 'なし'}")
+    P("判定: max_i |∇φ_gpu − ∇φ_ref| ≤ 1e-5·S、S = max_i |∇φ_ref| (全節点)。参照の入力は res_0 の場 (境界条件の上書き後)")
+    P("| 場 | S | 最大差 | 最大差/S | 区分別 最大差/S (member 1/2/4/8) | 判定 |")
+    P("| --- | --- | --- | --- | --- | --- |")
+    ok = True
+    vd = {}
+    for v, gname in S0_GN.items():
+        ref = G.lsq_merged_ref(msh, s0[v], merged=merged)
+        g = grad(gname).astype(np.float64)
+        S = np.linalg.norm(ref, axis=1).max()
+        dif = np.abs(g - ref).max(axis=1)
+        e = dif.max()
+        cls = ", ".join(f"{nm}:{dif[msh.nmember == nm].max() / S:.1e}" for nm in (1, 2, 4, 8) if (msh.nmember == nm).any())
+        o = e <= 1e-5 * S and np.isfinite(e)
+        ok &= o
+        P(f"| {v} | {S:.4g} | {e:.3e} | {e / S:.2e} | {cls} | {'ok' if o else 'NG'} |")
+        vd[v] = (ref, g, S)
+    P(f"  (打ち切り group/節点数 {msh.lsq_ndegen})")
+    P("化学種 Y: dY{s}d* は出力変数に無いので測れない (保留)")
+    P(f"VERDICT S0-a ({variant}): {'PASS' if ok and not nan else 'FAIL'}")
+    res = {"S0-a": ok and not nan}
+    if variant == "jitter32":
+        P("\n## S0-d 検出力 (負の対照): GPU LSQ と CPU double GG (合併) の差が 1e-5·S を超えること")
+        P("| 場 | S (LSQ 参照) | max|g_lsq − g_GG| | /S | 判定 |")
+        P("| --- | --- | --- | --- | --- |")
+        okd = True
+        for v, (ref, g, S) in vd.items():
+            gg = G.gg_merged(msh, s0[v], "f64", "divide")
+            e = np.abs(g - gg).max()
+            o = e > 1e-5 * S
+            okd &= o
+            P(f"| {v} | {S:.4g} | {e:.3e} | {e / S:.2e} | {'ok' if o else 'NG'} |")
+        P(f"VERDICT S0-d ({variant}): {'PASS' if okd else 'FAIL'}")
+        res["S0-d"] = okd
+    return "\n".join(out) + "\n", res
+
+
+def s0_eval_const(variant, run):
+    """S0-b: ξ は全節点 (壁込み) で勾配 == 0。k/ω は stencil が定数だけの節点で == 0、ピン値に触れる節点は double 参照と ≤ 4ε。"""
+    msh, bk, s0, grad = _s0_load(run)
+    merged = bool(bk["merge"])
+    out = _s0_head(run, f"S0-b 定数場 ({variant}, k=2・ω=100・ξ=0.5)")
+    P = out.append
+    nan = _nan_lines(run)
+    P(f"NaN/Inf: {nan if nan else 'なし'}")
+    P("判定: 定数だけの stencil の節点 (group 単位) は ∇φ == 0 (厳密)。境界条件で値が変わった節点に stencil が触れる group は "
+      "|∇φ_gpu − ∇φ_ref| ≤ 4ε·max_stencil|φ|/h (参照 = res_0 の場の LSQ double、h = 節点の合併体積^(1/3))。ξ は全節点で == 0")
+    root = msh.root if merged else np.arange(msh.nCells)
+    V13 = np.cbrt(msh.vmerged64 if merged else msh.vol.astype(np.float64))
+    wall = np.zeros(msh.nCells, bool); wall[msh.pc[msh.bnd_planes, 0]] = True
+    P("| 場 | 区分 | 節点 | 非零の節点 | 最大 |∇φ| or 差 [ε·max|φ|/h] | 判定 |")
+    P("| --- | --- | --- | --- | --- | --- |")
+    ok = True
+    for v, gname in S0_GN.items():
+        c = np.float32(S0_CONST[v])
+        g = grad(gname).astype(np.float64)
+        okv = s0[v] == c
+        badinc = ~okv[msh.inc_j] | ~okv[msh.inc_m]
+        touch = np.zeros(msh.nCells, bool); touch[root[msh.inc_m[badinc]]] = True
+        touch = touch[root]
+        pure = ~touch
+        nz = np.any(g[pure] != 0.0, axis=1)
+        o1 = not nz.any()
+        ok &= o1
+        wl = "(壁込み)" if (wall & pure).any() else ""
+        P(f"| {v} | stencil が定数のみ {wl} | {int(pure.sum())} | {int(nz.sum())} | {np.abs(g[pure]).max():.3e} (絶対値) | {'ok' if o1 else 'NG'} |")
+        if v == "Xi" and touch.any():
+            ok = False
+            P(f"| {v} | 値が変わった節点に触れる | {int(touch.sum())} | - | - | NG (ξ は全節点で定数のはず) |")
+        elif touch.any():
+            ref = G.lsq_merged_ref(msh, s0[v], merged=merged)
+            # stencil の max|φ|
+            mx = np.abs(s0[v]).astype(np.float64)
+            smax = mx.copy()
+            np.maximum.at(smax, root[msh.inc_m], mx[msh.inc_j])
+            smax = smax[root]
+            unit = G.EPS32 * smax / V13
+            r = (np.abs(g - ref).max(axis=1) / unit)[touch]
+            o2 = r.max() <= 4.0
+            ok &= o2
+            P(f"| {v} | ピン値に触れる | {int(touch.sum())} | - | {r.max():.2f} | {'ok' if o2 else 'NG'} |")
+    P(f"VERDICT S0-b ({variant}): {'PASS' if ok and not nan else 'FAIL'}")
+    return "\n".join(out) + "\n", {"S0-b": ok and not nan}
+
+
+def s0_eval_same(variant, run):
+    """S0-c: ρ = k = ω = ξ = q の場で dρ (NS LSQ) とスカラー勾配を比べる。周期なし (box_slip) は全節点ビット一致。
+    周期あり: member 1・2 はビット一致、3 以上は |差| ≤ 4ε·Σ_m|p_m| (p_m = 合併係数の member ごとの部分和、double)。"""
+    msh, bk, s0, grad = _s0_load(run)
+    out = _s0_head(run, f"S0-c NS との一致 ({variant}, ρ = k = ω = ξ = q、q = m/2048)")
+    P = out.append
+    nan = _nan_lines(run)
+    P(f"NaN/Inf: {nan if nan else 'なし'}")
+    gro = grad("ro")
+    per = bool(bk["merge"])
+    part = np.abs(G.lsq_partials(msh, s0["ro"])) if per else None
+    sabs = np.zeros((msh.nCells, 3))
+    if per:
+        np.add.at(sabs, msh.root, part); sabs = sabs[msh.root]
+    P("比較対象: res_0 でスカラーの値が ρ とビット一致する節点だけで stencil (group 単位) が閉じる節点 (境界条件で k・ω が変わる節点に触れる group は除外)")
+    P("| 場 | 区分 | 節点 (除外) | ビット不一致 | 最大 |差| | 最大 |差|/(ε·Σ|p_m|) | 判定 |")
+    P("| --- | --- | --- | --- | --- | --- | --- |")
+    ok = True
+    for v, gname in S0_GN.items():
+        same = s0[v].view(np.uint32) == s0["ro"].view(np.uint32)
+        badinc = ~same[msh.inc_j] | ~same[msh.inc_m]
+        touch = np.zeros(msh.nCells, bool); touch[msh.root[msh.inc_m[badinc]]] = True
+        sel0 = same & ~touch[msh.root]
+        g = grad(gname)
+        mism = np.any(g.view(np.uint32) != gro.view(np.uint32), axis=1)
+        dif = np.abs(g.astype(np.float64) - gro.astype(np.float64))
+        for nm in sorted(set(msh.nmember.tolist())):
+            m = msh.nmember == nm
+            sel = sel0 & m
+            nex = int((m & ~sel0).sum())
+            if not sel.any():
+                P(f"| {v} | member {nm} | 0 ({nex}) | - | - | - | - |")
+                continue
+            if nm <= 2:
+                o = not mism[sel].any()
+                rr = "-"
+            else:
+                lim = 4.0 * G.EPS32 * sabs[sel]
+                o = bool(np.all(dif[sel] <= lim))
+                rr = f"{(dif[sel] / np.maximum(G.EPS32 * sabs[sel], 1e-300)).max():.2f}"
+            ok &= o
+            P(f"| {v} | member {nm}{' (ビット一致を要求)' if nm <= 2 else ''} | {int(sel.sum())} ({nex}) | {int(mism[sel].sum())} | "
+              f"{dif[sel].max():.3e} | {rr} | {'ok' if o else 'NG'} |")
+    P("化学種 dY と dξ のビット一致 (5 種、チャンク 4+1): dY{s}d* が出力変数に無いので測れない (保留)")
+    P(f"VERDICT S0-c ({variant}): {'PASS' if ok and not nan else 'FAIL'}")
+    return "\n".join(out) + "\n", {"S0-c": ok and not nan}
+
+
+def s0_eval_e(run, label, h5name=None):
+    """S0-e (診断): res_0 (初期化の applyBconds 直後の状態) と res_1 の k・ω の周期 group 内差 (member − root)。
+    wall_y_eff は出力変数に無いので測れない (保留)。"""
+    h5 = os.path.join(run, h5name) if h5name else os.path.join(run, "mesh.h5")
+    msh = G.Mesh(h5, os.path.join(run, "bcondConfig.yaml"))
+    out = [f"\n## S0-e BC 後の周期 group 内の同値性 (診断、{label})", f"run: {run}", G.provenance(run).rstrip()]
+    P = out.append
+    wall = np.zeros(msh.nCells, bool); wall[msh.pc[msh.bnd_planes, 0]] = True
+    wg = np.zeros(msh.nCells, bool); wg[msh.root[wall]] = True; wallg = wg[msh.root]
+    mem = msh.root != np.arange(msh.nCells)
+    P(f"周期 group {len(msh.groups)} (壁∩継ぎ目の group {len({int(msh.root[c]) for c in np.nonzero(mem & wallg)[0]})})")
+    P("| res | 場 | 区分 | member 節点 | group 内差が非零の member | 最大 |φ_m − φ_root| | 最大 相対 |")
+    P("| --- | --- | --- | --- | --- | --- | --- |")
+    nz_any = False
+    for st in (0, 1):
+        s = G.read_res(os.path.join(run, f"res_{st}.h5"), ["k", "omega", "roK", "roOmega"])
+        for v in ("k", "omega", "roK", "roOmega"):
+            if v not in s:
+                continue
+            a = s[v].astype(np.float64)
+            d = np.abs(a - a[msh.root])
+            for lab, m in (("壁∩継ぎ目", mem & wallg), ("壁なし継ぎ目", mem & ~wallg)):
+                if not m.any():
+                    continue
+                nzm = int((d[m] != 0).sum())
+                nz_any |= nzm > 0
+                rel = (d[m] / np.maximum(np.abs(a[msh.root][m]), 1e-300)).max()
+                P(f"| {st} | {v} | {lab} | {int(m.sum())} | {nzm} | {d[m].max():.3e} | {rel:.2e} |")
+    P("wall_y_eff: 出力変数に無い (variables.hpp の output_cellValNames 外) ので測れない (保留)")
+    P(f"S0-e 記録 ({label}): k・ω の group 内差 {'非零あり' if nz_any else 'すべて 0'} (判定ではなく記録)")
+    return "\n".join(out) + "\n", {"S0-e_nonzero": nz_any}
+
+
+def s0e_case39_prepare(scr, src_run):
+    """case/39 run_0039_r1_gradfix_new_ext の res_800000 を restart_field.py で入力へ写し、lsq で 1 step。"""
+    run = os.path.join(scr, "s0e_case39")
+    if os.path.exists(run):
+        shutil.rmtree(run)
+    os.makedirs(run)
+    cfg = yaml.safe_load(open(os.path.join(src_run, "solverConfig.yaml")))
+    for f in (cfg["mesh"]["meshFileName"], cfg["mesh"]["valueFileName"], "bcondConfig.yaml", "probe.yaml"):
+        if os.path.exists(os.path.join(src_run, f)):
+            shutil.copy(os.path.join(src_run, f), run)
+    cfg["mesh"]["scalarGradient"] = "lsq"
+    cfg["time"]["last"]["nStepOuter"] = 1
+    cfg["time"]["outStepStart"] = 0
+    cfg["time"]["outStepInterval"] = 1
+    with open(os.path.join(run, "solverConfig.yaml"), "w") as fp:
+        yaml.safe_dump(cfg, fp, sort_keys=False)
+    rf = os.path.join(G.REPO, "solver_density_cuda", "tools", "restart_field.py")
+    r = subprocess.run(["python3", rf, os.path.join(src_run, "res_800000.h5"), os.path.join(run, cfg["mesh"]["valueFileName"])],
+                       capture_output=True, text=True)
+    open(os.path.join(run, "restart_field.log"), "w").write(r.stdout + r.stderr)
+    if r.returncode != 0:
+        raise SystemExit("restart_field failed: " + r.stdout + r.stderr)
+    return run, cfg["mesh"]["meshFileName"]
+
+
+def s0_main(argv):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("variant")
+    ap.add_argument("--scratch", default=SCR_DEFAULT)
+    ap.add_argument("--kinds", default="sin,const,same")
+    ap.add_argument("--eval-only", action="store_true")
+    ap.add_argument("--src", default=None, help="s0e_case39: 起点 run ディレクトリ")
+    a = ap.parse_args(argv)
+    if a.variant == "s0e_case39":
+        run = os.path.join(a.scratch, "s0e_case39")
+        cfg = yaml.safe_load(open(os.path.join(a.src, "solverConfig.yaml")))
+        mname = cfg["mesh"]["meshFileName"]
+        if not a.eval_only:
+            run, mname = s0e_case39_prepare(a.scratch, a.src)
+            G.run_forge(run)
+        txt, _ = s0_eval_e(run, "case/39 run_0039_r1_gradfix_new_ext res_800000 起点、lsq 1 step", h5name=mname)
+        txt = f"# S0-e case/39 (plan gradient-scalar-lsq-unification §6 S0-e)\nharness revision: {G.git_rev()}\n" + txt
+        outp = os.path.join(HERE, "S0e_case39.txt")
+        open(outp, "w").write(txt); print(txt); print("->", outp)
+        return
+    if a.variant not in S0_VARIANTS:
+        raise SystemExit("unknown S0 variant " + a.variant)
+    kinds = [k for k in a.kinds.split(",") if k]
+    if a.variant.startswith("axi"):
+        kinds = [k for k in kinds if k != "same"]
+    txt = f"# S0 {a.variant} (plan gradient-scalar-lsq-unification §6 S0、mesh.scalarGradient: lsq)\nharness revision: {G.git_rev()}\n"
+    verdict = {}
+    for kind in kinds:
+        run = os.path.join(a.scratch, f"s0_{a.variant}_{kind}")
+        if not a.eval_only:
+            run, merge = s0_prepare(a.variant, a.scratch, kind)
+            G.run_forge(run, expect_merge=merge)
+        if kind == "sin":
+            t, v = s0_eval_sin(a.variant, run)
+            if a.variant == "channel":
+                te, ve = s0_eval_e(run, "channel sin 場、lsq 1 step")
+                t += te; v.update(ve)
+        elif kind == "const":
+            t, v = s0_eval_const(a.variant, run)
+        else:
+            t, v = s0_eval_same(a.variant, run)
+        txt += t
+        verdict.update(v)
+    txt += "\n## まとめ\n" + "\n".join(f"{k}: {('PASS' if x else 'FAIL') if not k.endswith('nonzero') else ('非零あり' if x else '0')}"
+                                       for k, x in verdict.items()) + "\n"
+    outp = os.path.join(HERE, f"S0_{a.variant}.txt")
+    open(outp, "w").write(txt)
+    print(txt)
+    print("->", outp)
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "s0":
+        return s0_main(sys.argv[2:])
     ap = argparse.ArgumentParser()
     ap.add_argument("variant")
     ap.add_argument("--scratch", default=SCR_DEFAULT)

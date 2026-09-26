@@ -182,25 +182,99 @@ def pinv_sym3(M, thresh=LSQ_THRESH):
     return out, degen
 
 
-def lsq_merged_ref(msh, phi):
-    """合併 stencil LSQ の double 参照 (G2)。phi は格納 float32 の場 (nCells)。戻り値 (n,3)、group 全員同値。"""
-    al = msh.alpha()
+def _lsq_system(msh, merged=True):
+    """LSQ の (M⁺ を持つ節点 index の root 配列, M⁺, incidence の重み w)。merged=False は継ぎ目を合併しない
+    (root = 自分、α = 1: 軸対称 × 周期・回転周期で GPU が使う片側 LSQ と同じ。plan gradient-scalar-lsq-unification S0-a)。"""
     d = msh.inc_d
+    al = msh.alpha() if merged else np.ones(len(msh.inc_m))
     w = al / np.maximum(np.sum(d * d, axis=1), 1e-300)
-    dphi = phi.astype(np.float64)[msh.inc_j] - phi.astype(np.float64)[msh.inc_m]
-    r = msh.root[msh.inc_m]
+    root = msh.root if merged else np.arange(msh.nCells)
+    r = root[msh.inc_m]
     n = msh.nCells
-    M = np.zeros((n, 3, 3)); b = np.zeros((n, 3))
+    M = np.zeros((n, 3, 3))
     for a in range(3):
-        b[:, a] = np.bincount(r, weights=w * d[:, a] * dphi, minlength=n)
         for c in range(a, 3):
             M[:, a, c] = np.bincount(r, weights=w * d[:, a] * d[:, c], minlength=n)
             M[:, c, a] = M[:, a, c]
-    roots = np.unique(msh.root)
+    roots = np.unique(root)
     Minv, degen = pinv_sym3(M[roots])
-    g = np.zeros((n, 3)); g[roots] = np.einsum("nij,nj->ni", Minv, b[roots])
+    Mi = np.zeros((n, 3, 3)); Mi[roots] = Minv
     msh.lsq_ndegen = int(degen.sum())
-    return g[msh.root]
+    return root, Mi, w
+
+
+def lsq_merged_ref(msh, phi, merged=True):
+    """合併 stencil LSQ の double 参照 (G2)。phi は格納 float32 の場 (nCells)。戻り値 (n,3)、group 全員同値。
+    merged=False: 継ぎ目を合併しない片側 LSQ (節点ごと、α=1)。"""
+    root, Mi, w = _lsq_system(msh, merged)
+    d = msh.inc_d
+    dphi = phi.astype(np.float64)[msh.inc_j] - phi.astype(np.float64)[msh.inc_m]
+    r = root[msh.inc_m]
+    n = msh.nCells
+    b = np.zeros((n, 3))
+    for a in range(3):
+        b[:, a] = np.bincount(r, weights=w * d[:, a] * dphi, minlength=n)
+    g = np.einsum("nij,nj->ni", Mi, b)
+    return g[root]
+
+
+def lsq_partials(msh, phi):
+    """合併係数での member ごとの部分和 p_m = M⁺_root · Σ_{m の incidence} α w d Δφ (double)。GPU の周期 gather 前の
+    局所配列に当たる。和 Σ_m p_m が lsq_merged_ref。戻り値 (n,3) (節点ごと = member ごと)。S0-c の Σ|部分和| 用。"""
+    root, Mi, w = _lsq_system(msh, True)
+    d = msh.inc_d
+    dphi = phi.astype(np.float64)[msh.inc_j] - phi.astype(np.float64)[msh.inc_m]
+    n = msh.nCells
+    b = np.zeros((n, 3))
+    for a in range(3):
+        b[:, a] = np.bincount(msh.inc_m, weights=w * d[:, a] * dphi, minlength=n)
+    return np.einsum("nij,nj->ni", Mi[root], b)
+
+
+def bitcmp(a, b):
+    """(不一致数 = ビット比較, 最大絶対差 (NaN を除く), 不一致位置の bool 配列)。形状が違えば (None, None, None)。"""
+    if a.shape != b.shape:
+        return None, None, None
+    ai = a.view(np.uint32) if a.dtype == np.float32 else a.view(np.uint64)
+    bi = b.view(np.uint32) if b.dtype == np.float32 else b.view(np.uint64)
+    m = ai != bi
+    dd = np.abs(a.astype(np.float64) - b.astype(np.float64))
+    dd = dd[np.isfinite(dd)]
+    return int(np.count_nonzero(m)), (float(dd.max()) if dd.size else 0.0), m
+
+
+def noise_rule(A, B):
+    """plan gradient-scalar-lsq-unification §6 S1 の判定規則 (2026-09-26 訂正版)。A, B: 同一設定反復の配列のリスト (各 3 本)。
+    - A 同士の全対がビット一致 → A–B の全対もビット一致を要求。
+    - それ以外: ノイズ対 = A 同士 + B 同士 (各 3 対)。A–B (9 対) の最大差 ≤ ノイズ対の最大差の 2 倍 かつ
+      A–B の不一致数の最大 ≤ ノイズ対の不一致数の最大の 2 倍。
+    戻り値 dict(verdict, aa, bb, ab, mask) (aa/bb/ab は (不一致数, 最大差) のリスト、mask は A–B の不一致位置の和集合)。"""
+    import itertools
+    aa = [bitcmp(x, y) for x, y in itertools.combinations(A, 2)]
+    bb = [bitcmp(x, y) for x, y in itertools.combinations(B, 2)]
+    ab = [bitcmp(x, y) for x in A for y in B]
+    if any(t[0] is None for t in aa + bb + ab):
+        return dict(verdict="判定不能 (形状不一致)", aa=[], bb=[], ab=[], mask=None)
+    mask = np.zeros(A[0].shape, bool)
+    for t in ab:
+        mask |= t[2]
+    n_ab, m_ab = max(t[0] for t in ab), max(t[1] for t in ab)
+    if all(t[0] == 0 for t in aa):
+        v = "PASS" if n_ab == 0 else "FAIL (旧同士ビット一致・旧新不一致)"
+    else:
+        noise = aa + bb
+        n_no, m_no = max(t[0] for t in noise), max(t[1] for t in noise)
+        ok_a = m_ab <= 2.0 * m_no
+        ok_b = n_ab <= 2.0 * n_no
+        v = "PASS" if (ok_a and ok_b) else f"FAIL ({'' if ok_a else '最大差 > 2×ノイズ '}{'' if ok_b else '不一致数 > 2×ノイズ'})".replace("( ", "(")
+    return dict(verdict=v, aa=[t[:2] for t in aa], bb=[t[:2] for t in bb], ab=[t[:2] for t in ab], mask=mask)
+
+
+def periodic_sin(w, ext, c0, amp, ph):
+    """継ぎ目中心座標 w (n,3) の滑らかな周期関数 c0 + amp·[sin(2πw_x/L_x+φ0) + 0.7 sin(2πw_y/L_y+φ1)·cos(2πw_z/L_z+φ2)]。
+    L = 各軸の領域幅 (周期軸では周期長なので折返しで不連続が出ない)。幅 0 の軸 (2D) は定数扱い。"""
+    k = np.array([2 * np.pi / e if e > 0 else 0.0 for e in ext])
+    return c0 + amp * (np.sin(k[0] * w[:, 0] + ph[0]) + 0.7 * np.sin(k[1] * w[:, 1] + ph[1]) * np.cos(k[2] * w[:, 2] + ph[2]))
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -320,11 +394,19 @@ def make_run(run_dir, src_h5, solver_cfg, bcond_cfg, h5name="mesh.h5"):
     return os.path.join(run_dir, h5name)
 
 
-def run_forge(run_dir):
+def run_forge(run_dir, expect_merge=True, forge_bin=None):
+    """expect_merge=False: 周期はあるが継ぎ目の合併が無効な構成 (軸対称 × 周期) で、合併ログの有無を検査しない。
+    forge_bin: FORGE_BIN (既定は run_case.sh の build/forge)。"""
     env = dict(os.environ, FORGE_CUDA_BLOCKSIZE="128", FORGE_CUDA_BLOCKSIZE_SMALL="128")
+    env.pop("FORGE_DUMP_SCALARGRAD", None)
+    if forge_bin:
+        env["FORGE_BIN"] = forge_bin
     r = subprocess.run(["bash", RUN_CASE, run_dir], env=env, capture_output=True, text=True)
     log = open(os.path.join(run_dir, "forge_run.log")).read() if os.path.exists(os.path.join(run_dir, "forge_run.log")) else ""
-    if "gradLSQ=2 periodic seam" not in log and "periodic" in open(os.path.join(run_dir, "bcondConfig.yaml")).read():
+    if not os.path.exists(os.path.join(run_dir, "res_1.h5")):
+        print(log[-3000:])
+        raise SystemExit(f"forge run failed (res_1.h5 無し): {run_dir} rc={r.returncode}")
+    if expect_merge and "gradLSQ=2 periodic seam" not in log and "periodic" in open(os.path.join(run_dir, "bcondConfig.yaml")).read():
         print(log[-3000:])
         raise SystemExit(f"forge run failed or seam merge inactive: {run_dir} rc={r.returncode}")
     return log
