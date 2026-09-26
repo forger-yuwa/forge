@@ -38,6 +38,8 @@ def main():
     ap.add_argument("runs", nargs="+")
     ap.add_argument("--step", type=int, default=None)
     ap.add_argument("--tol", type=float, default=0.5, help="[%%] (登録値)")
+    ap.add_argument("--fix-band", type=float, nargs=2, metavar=("YTOP", "YBOT"), default=None,
+                    help="共通帯を外から固定する [m] (省略時は各 run の v6p_band.json の交わり)")
     a = ap.parse_args()
     qs, _, drop = analytic()
     allr = [a.ref] + a.runs
@@ -48,6 +50,9 @@ def main():
             raise SystemExit(f"{fn} が無い (先に eval_v6p.py を回すこと)")
         bands.append(json.load(open(fn)))
     ytop = min(b["ytop"] for b in bands); ybot = max(b["ybot"] for b in bands)
+    if a.fix_band is not None:
+        ytop, ybot = max(a.fix_band), min(a.fix_band)
+    # 各 run は**それぞれの最終 step** で比べる (延長 run は基準より長い。--step は全 run 共通に固定するとき)
     step = a.step if a.step else last_step(a.ref.rstrip("/"))
     y0, T0, q0 = wall(a.ref.rstrip("/"), step)
     sel = np.where((y0 <= ytop + 1e-9) & (y0 >= ybot - 1e-9))[0]
@@ -55,7 +60,7 @@ def main():
     print(f"{'run':<40}{'温度差 max [%]':>16}{'平均':>10}{'q 差 max [%]':>15}{'平均':>10}  判定")
     worst = 0
     for r in a.runs:
-        y, T, q = wall(r.rstrip("/"), step)
+        y, T, q = wall(r.rstrip("/"), a.step if a.step else last_step(r.rstrip("/")))
         j = np.array([np.argmin(np.abs(y - y0[i])) for i in sel])
         if np.abs(y[j] - y0[sel]).max() > 1e-9:
             raise SystemExit(f"{r}: 壁節点が基準と座標で対応しない")

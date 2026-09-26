@@ -86,6 +86,9 @@ def main():
     ap.add_argument("--tol", type=float, default=0.5, help="(a)-(d) の許容 [%%]")
     ap.add_argument("--tol-cons", type=float, default=0.1, help="(e) の許容 [%%]")
     ap.add_argument("--tol-tc", type=float, default=1.0e-3, help="(f) の許容 [K]")
+    ap.add_argument("--fix-band", type=float, nargs=2, metavar=("YTOP", "YBOT"), default=None,
+                    help="帯を外から固定する [m] (感度の比較 run を共通帯で判定するとき。plan §5.1 #102)。"
+                         "自前の帯も参考に表示する")
     a = ap.parse_args()
     run = a.run.rstrip("/")
     step = a.step if a.step else last_step(run)
@@ -152,10 +155,15 @@ def main():
     seg = max(segs, key=len)[:-2]                      # 底側 2 行を除外
     span = (rows[seg[0]] - rows[seg[-1]]) / W
     band = rows[seg]
+    if a.fix_band is not None:
+        hi, lo = max(a.fix_band), min(a.fix_band)
+        print(f"(参考) 自前の帯: {len(band)} 行  y {band.max()*1e3:.3f} .. {band.min()*1e3:.3f} mm")
+        band = rows[(rows <= hi + 1e-9) & (rows >= lo - 1e-9)]
+        span = (band.max() - band.min()) / W
     print(f"=== V6′ 評価: {run}  step {step} ===")
     print(f"解析解: q* = {qs:.1f} W/m2,  T_w1* = {Tw1s:.3f} K,  固体の温度上昇 {drop:.2f} K "
           f"(0.5 % = {0.005*drop:.3f} K)")
-    print(f"帯 (Pe<={a.pe:.1e} / 線形残差<={a.lin:.1e} / 勾配比<={a.rat:.1e}、底 2 行除外): "
+    print(("帯 **固定** " if a.fix_band is not None else "") + f"帯 (Pe<={a.pe:.1e} / 線形残差<={a.lin:.1e} / 勾配比<={a.rat:.1e}、底 2 行除外): "
           f"{len(band)} 行  y {band.max()*1e3:.3f} .. {band.min()*1e3:.3f} mm = {span:.1f} W"
           f"  -> {'OK' if span >= 5 else '**FAIL (5W 未満)**'}")
 
@@ -203,7 +211,7 @@ def main():
     ytop, ybot = float(band.max()), float(band.min())
     with open(f"{run}/v6p_band.json", "w") as f:
         json.dump({"step": step, "ytop": ytop, "ybot": ybot, "rows": int(len(band)),
-                   "span_W": float(span)}, f, indent=1)
+                   "span_W": float(span), "fixed": a.fix_band is not None}, f, indent=1)
     print(f"\n帯を {run}/v6p_band.json に書いた: --band-y {ytop:.9g} {ybot:.9g}")
     fl, fn = f"{run}/conjugate_iface_log_5.csv", f"{run}/conjugate_iface_nodes_5.csv"
     if os.path.exists(fl) and os.path.exists(fn):
