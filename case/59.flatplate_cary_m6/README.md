@@ -35,3 +35,7 @@ forge は理論側に乗る。**このずれが冷壁に特有か (モデル側)
 | `run_0007_tw06_re026` (結果) | バッチの 2 本目 (Tw/Tt 0.6、Re 0.26) | 40k: `NOT CONVERGED (still converging)`、St NOT ALL STEADY。壁解像 最大 0.40。暫定 R = 0.766/0.790/0.765/0.746/0.687 (解釈しない) | 延長元 |
 | `run_0014_tw07_re031_ext` | run_0006 の最終場から同一設定 +60k (`extend_run.sh`)。**初期場は倍精度→float32 の丸めあり** (この 1 本だけ。以後は `--keep-src-dtype`) | 実行中 | active |
 | `run_0015_tw06_re026_ext` | run_0007 の最終場から同一設定 +60k (倍精度のまま引き継ぎ) | 待機 (run_0014 の後) | active |
+| `run_0008_tw05_re026` (結果) | バッチ (Tw/Tt 0.5、Re 0.26) | 40k: `NOT CONVERGED (stalled/plateau)` (roK 低下中)、St 系列 **DRIFTING** (drift 80 %/tail)。壁解像 最大 0.47。暫定 R = 0.926/0.894/0.946/0.973/0.948 (解釈しない) | 延長元 |
+| `run_0009_tw04_re027` (結果) | バッチ (Tw/Tt 0.4、Re 0.27) | 40k: `NOT CONVERGED (still converging)`、St **DRIFTING** (40–45 %)。壁解像 最大 0.60。暫定 R = 1.115/1.168/1.106/1.274/1.213 (解釈しない) | 延長元 |
+| `run_0016_tw05_re026_ext` | run_0008 から同一設定 +60k (倍精度のまま引き継ぎ、ビット一致) | 実行中 | active |
+| `run_0017_tw04_re027_ext` | run_0009 から同一設定 +60k | 待機 (run_0016 の後) | active |
