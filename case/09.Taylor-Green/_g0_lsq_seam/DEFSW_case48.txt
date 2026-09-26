@@ -1,0 +1,110 @@
+# #4d ダンプ非干渉と S1 (2) の再判定 (case48_default) — E/P/N 区分 (事後規則、plan §6「ダンプ非干渉」)
+harness revision: 24365d72
+forge_mtime : 2026-09-26T16:14:59+00:00
+forge_sha256: fcfdc8260904993cc306b238211cc5f8ecd557e43d206e6e6ca7f36ac7881fea
+git_head    : 24365d72af37bef82e93138c231d4b981edbb965
+- off lsq: /home/ubuntu/sglsq/defsw/case48_explsq_a (forge fcfdc8260904993c、mesh 80a338f6453bc298)
+- off lsq: /home/ubuntu/sglsq/defsw/case48_explsq_b (forge fcfdc8260904993c、mesh 80a338f6453bc298)
+- off lsq: /home/ubuntu/sglsq/defsw/case48_explsq_c (forge fcfdc8260904993c、mesh 80a338f6453bc298)
+- on lsq: /home/ubuntu/sglsq/defsw/case48_default_a (forge fcfdc8260904993c、mesh 80a338f6453bc298)
+- on lsq: /home/ubuntu/sglsq/defsw/case48_default_b (forge fcfdc8260904993c、mesh 80a338f6453bc298)
+- on lsq: /home/ubuntu/sglsq/defsw/case48_default_c (forge fcfdc8260904993c、mesh 80a338f6453bc298)
+CV 89440、周期 group 0
+
+## res_0: E (厳密一致、基準 = case48_default_a)
+| res | 配列 | 基準と異なる run 数 | 不一致節点数 (最大) | 判定 |
+| --- | --- | --- | --- | --- |
+| res_0 | P | 0 | 0 | ok |
+| res_0 | T | 0 | 0 | ok |
+| res_0 | Ux | 0 | 0 | ok |
+| res_0 | Uy | 0 | 0 | ok |
+| res_0 | Uz | 0 | 0 | ok |
+| res_0 | dPdx | 0 | 0 | ok |
+| res_0 | dPdy | 0 | 0 | ok |
+| res_0 | dPdz | 0 | 0 | ok |
+| res_0 | dTdx | 0 | 0 | ok |
+| res_0 | dTdy | 0 | 0 | ok |
+| res_0 | dTdz | 0 | 0 | ok |
+| res_0 | dUxdx | 0 | 0 | ok |
+| res_0 | dUxdy | 0 | 0 | ok |
+| res_0 | dUxdz | 0 | 0 | ok |
+| res_0 | dUydx | 0 | 0 | ok |
+| res_0 | dUydy | 0 | 0 | ok |
+| res_0 | dUydz | 0 | 0 | ok |
+| res_0 | dUzdx | 0 | 0 | ok |
+| res_0 | dUzdy | 0 | 0 | ok |
+| res_0 | dUzdz | 0 | 0 | ok |
+| res_0 | drodx | 0 | 0 | ok |
+| res_0 | drody | 0 | 0 | ok |
+| res_0 | drodz | 0 | 0 | ok |
+| res_0 | h0 | 0 | 0 | ok |
+| res_0 | k | 0 | 0 | ok |
+| res_0 | limiter_P | 0 | 0 | ok |
+| res_0 | limiter_T | 0 | 0 | ok |
+| res_0 | limiter_Ux | 0 | 0 | ok |
+| res_0 | limiter_Uy | 0 | 0 | ok |
+| res_0 | limiter_Uz | 0 | 0 | ok |
+| res_0 | limiter_ro | 0 | 0 | ok |
+| res_0 | omega | 0 | 0 | ok |
+| res_0 | ro | 0 | 0 | ok |
+| res_0 | roK | 0 | 0 | ok |
+| res_0 | roOmega | 0 | 0 | ok |
+| res_0 | roUx | 0 | 0 | ok |
+| res_0 | roUy | 0 | 0 | ok |
+| res_0 | roUz | 0 | 0 | ok |
+| res_0 | roe | 0 | 0 | ok |
+
+## res_0: N (両側ノイズ、記録。全対ビット一致 37 件は省略)
+| res | 配列 | kind | 無し同士 | 有り同士 | 無し–有り | 2 倍規則 |
+| --- | --- | --- | --- | --- | --- | --- |
+N 区分 (res_0): 全て 2 倍以内
+
+## res_1: E (厳密一致、基準 = case48_default_a)
+| res | 配列 | 基準と異なる run 数 | 不一致節点数 (最大) | 判定 |
+| --- | --- | --- | --- | --- |
+| res_1 | dPdx | 0 | 0 | ok |
+| res_1 | dPdy | 0 | 0 | ok |
+| res_1 | dPdz | 0 | 0 | ok |
+| res_1 | dTdx | 0 | 0 | ok |
+| res_1 | dTdy | 0 | 0 | ok |
+| res_1 | dTdz | 0 | 0 | ok |
+| res_1 | dUxdx | 0 | 0 | ok |
+| res_1 | dUxdy | 0 | 0 | ok |
+| res_1 | dUxdz | 0 | 0 | ok |
+| res_1 | dUydx | 0 | 0 | ok |
+| res_1 | dUydy | 0 | 0 | ok |
+| res_1 | dUydz | 0 | 0 | ok |
+| res_1 | dUzdx | 0 | 0 | ok |
+| res_1 | dUzdy | 0 | 0 | ok |
+| res_1 | dUzdz | 0 | 0 | ok |
+| res_1 | drodx | 0 | 0 | ok |
+| res_1 | drody | 0 | 0 | ok |
+| res_1 | drodz | 0 | 0 | ok |
+| res_1 | limiter_P | 0 | 0 | ok |
+| res_1 | limiter_T | 0 | 0 | ok |
+| res_1 | limiter_Ux | 0 | 0 | ok |
+| res_1 | limiter_Uy | 0 | 0 | ok |
+| res_1 | limiter_Uz | 0 | 0 | ok |
+| res_1 | limiter_ro | 0 | 0 | ok |
+
+## res_1: N (両側ノイズ、記録。全対ビット一致 38 件は省略)
+| res | 配列 | kind | 無し同士 | 有り同士 | 無し–有り | 2 倍規則 |
+| --- | --- | --- | --- | --- | --- | --- |
+| res_1 | res_ro | lsq | n≤360 / max 3.45e-09 | n≤356 / max 3.45e-09 | n≤392 / max 3.45e-09 | PASS |
+| res_1 | res_roK | lsq | n≤182 / max 3.81e-06 | n≤182 / max 2.38e-07 | n≤193 / max 3.81e-06 | PASS |
+| res_1 | res_roOmega | lsq | n≤323 / max 0.00195 | n≤314 / max 0.000122 | n≤332 / max 0.00195 | PASS |
+| res_1 | res_roUx | lsq | n≤361 / max 4.68e-05 | n≤364 / max 4.68e-05 | n≤405 / max 4.68e-05 | PASS |
+| res_1 | res_roUy | lsq | n≤190 / max 1.41e-06 | n≤79 / max 2.81e-06 | n≤166 / max 2.81e-06 | PASS |
+| res_1 | res_roe | lsq | n≤375 / max 0.00183 | n≤382 / max 0.00183 | n≤419 / max 0.00183 | PASS |
+| res_1 | ro | lsq | n≤24 / max 7.16e-05 | n≤13 / max 2.69e-05 | n≤27 / max 7.16e-05 | PASS |
+| res_1 | roK | lsq | n≤1 / max 7.63e-06 | n≤1 / max 7.63e-06 | n≤1 / max 7.63e-06 | PASS |
+| res_1 | roOmega | lsq | n≤0 / max 0 | n≤3 / max 0.00781 | n≤2 / max 0.00781 | PASS |
+| res_1 | roUx | lsq | n≤63 / max 4.48e-05 | n≤65 / max 2.38e-05 | n≤76 / max 4.48e-05 | PASS |
+| res_1 | roUy | lsq | n≤10158 / max 8.37e-07 | n≤10565 / max 3.36e-07 | n≤10752 / max 8.37e-07 | PASS |
+| res_1 | roe | lsq | n≤1 / max 0.0156 | n≤2 / max 0.0156 | n≤2 / max 0.0156 | PASS |
+| res_1 | transport_diag_k | lsq | n≤17170 / max 4.77e-07 | n≤16142 / max 2.38e-07 | n≤16701 / max 4.77e-07 | PASS |
+| res_1 | transport_diag_omega | lsq | n≤17005 / max 2.38e-07 | n≤15347 / max 2.38e-07 | n≤16787 / max 2.38e-07 | PASS |
+N 区分 (res_1): 全て 2 倍以内
+
+VERDICT E/P (case48_default): A (E 全て厳密一致、P 全点集合内)
+VERDICT N (case48_default): PASS (全配列 2 倍以内)

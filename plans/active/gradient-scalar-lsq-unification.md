@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `gradient`
-- **status**: `in_progress`
+- **status**: `in_progress` (Phase 1 合格・Phase 2 既定化の実装と確認済み 2026-09-27、codex result (Phase 2) 待ち)
 - **related_docs**:
   - [`methods/gradient.md`](../../methods/gradient.md) (「境界寄与」node × 周期の継ぎ目、スカラー勾配)
   - [`methods/discretization.md`](../../methods/discretization.md) §7.3 / §7.3.1 (「LSQ は NS だけ、スカラーは GG」の記述を更新する)
@@ -90,7 +90,7 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 | 2e (**完了 2026-09-26**: 起点 5 件の sha256 を AWS で照合、各 run の `IC_FROM.txt`) | 起点の固定 | §6 の起点表 (所在・sha256・バイナリ・実効設定) を AWS に転送し sha256 照合 | O |
 | 2f (**実装済 2026-09-26**: `solver_density_cuda/tools/check_floor_ratio.py --start <起点 run> <run>...`、`--selftest` 6 通り PASS。比較量の STEADY は従来どおり `check_quasisteady.py`) | S2 収束規則のスクリプト | plateau 許容 + 床比 (末尾平均 ≤ 起点の 1.5 倍、ピーク除外・再進入 step 記録) + STEADY 閾値 | O |
 | 2g (**起票済 2026-09-27**: [`tooling-stage-manifest-launch-binding.md`](tooling-stage-manifest-launch-binding.md)、draft) | **別 plan 起票** `tooling-stage-manifest-launch-binding` | 起動順対応・バイナリ id・legacy 区別・S4 試験。本 plan #6 の前提 | F (§4) / O (実装) |
-| 2h | 設計 DB | `runner_sern.py` FLAG_POLICY 更新と実効 `scalarGradient` 列 (#6 と同時) | O |
+| 2h (**完了 2026-09-27**: `runner_sern.py` の `FLAG_POLICY` を 2026-09-27、行に実効 `scalar_gradient_effective`、`driver_sern.py` の学習は全作動点 lsq の行だけ (codex diagnose 2026-09-27 の Major を採用)、`design/tests/run_sern_scalar_gradient_gate_tests.py` 5 例 PASS = 判別 A) | 設計 DB | `runner_sern.py` FLAG_POLICY 更新と実効 `scalarGradient` 列 (#6 と同時) | O |
 | 2i (**完了 2026-09-26: S3 PASS** — 現行の値は PID 照合版の取り直し (#5i): case/48 0.997・case/39 1.018。以下は旧監視版の記録: lsq/gg 比 case/48 1.010・case/39 1.017 (上限 1.05)。AWS g5・`f99f236d`・block 128・2500 step の step 501–2499 平均・交互 3 反復の中央値 (`s3_perf.py`、`S3_case{48,39}.txt`)。case/48 の初回は別 run と重なったので無効 (`S3_case48_contaminated.txt`) にして走行中監視つきで取り直した。「native」は AWS の native ビルド) | S3 の測定手順 | native・同一 GPU・同一 BLOCKSIZE・ウォームアップ 500 後 2000 step × 3 の中央値、REG/spill | O |
 | 3 (**完了 2026-09-26**、判断: 2026-09-26 `diagnostician`・diff レビューで欠陥なし、periodicGradientGather の登録変更を採用) | 実装 (Phase 1) | §4、§5 の 2。REG 38/39/40/48 (NV 1–4)、spill 0。AWS 最小確認: lsq の線形場誤差 ≤ 丸め床、NS 配列は lsq/gg でビット一致、gg の面寄与ダンプは HEAD と不一致 0 | O |
 | 4 (**完了 2026-09-26: S0/S1 PASS**。S0 は全変種 PASS (軸対称 2 変種の S0-c は §6 の適用除外)。S1 (1) 4 ケース PASS。S1 (2) は §6 の訂正を適用: tgv の NS 18 勾配は gather 前で gg/lsq 12 本ビット一致、group 外節点は厳密一致、2 member 以上は全点が順列和の集合内 (#4d・#4f)。初回 FAIL の記録は §6.2 相当として `S1.txt` に残す) | S0/S1 | ハーネス (AWS)。結果 `case/09.Taylor-Green/_g0_lsq_seam/{S0_*.txt,S0e_case39.txt,S1.txt}` | O |
@@ -117,7 +117,7 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 | 5m (**完了 2026-09-26: A** — 旧版 `36d8ba03` gg (`run_0960`、sha `29e8f590…`) も現行 gg キー省略 (`run_0961`、実効 gg (default) を確認) も `check_passive_budget --mode fct` が同じ remainder 8.45e-2 で FAIL (閉合 5e-10/−4e-10・総量照合 3.6e-9・有界性 [0, 0.9998] は同水準)。→ 本 plan の commit 群がこの FAIL を初めて生んだ仮説を棄却。lsq の精度ゲートは未合格のまま。測る前に固定、判断: codex (diagnose) 5 `notes/reviews/2026-09-26-gradient-scalar-lsq-phase1-status-diagnose.md`) | FCT smoke の実装直前版 / 現行版 gg | 変更因子はバイナリだけ (`36d8ba03` / `f99f236d`)。`run_0954_sglsq_s2_fct_gg` の開始入力を複製し、**両方とも `scalarGradient` キーを省略** (現行の実効 gg を起動エコーで確認)、nSub 15・dt・IC・BC・GPU・BLOCKSIZE 固定で各 200 物理 step (`run_0960_sglsq_s2_fct_gg_base36d8` / `run_0961_sglsq_s2_fct_gg_nokey`)。同じ checker (`check_passive_budget --mode fct`)・同じ閾値で収支閉合・独立総量照合・remainder・有界性を比較。**A**: 旧版も同じ remainder 項で FAIL → 「本 plan の commit 群が初めてこの FAIL を生んだ」仮説を棄却 (lsq の精度ゲートは未合格のまま)。**B**: 旧版 PASS・現行 FAIL → 既存問題として切り離す判断を棄却し commit 群の共通経路へ戻る。診断列の意味・実効設定が揃わなければ判定不能 (数値の近さで代用しない) | O (結論 F) |
 | 5n (codex result-2、採用。**完了 2026-09-26**) | result-2 の指摘対応 | M1: `stage_manifest.py` は PyYAML が無ければ止まる (**済**、回帰試験 5 例)。M2: 一次記録を `case/09.Taylor-Green/_g0_lsq_seam/s2_evidence/` に回収 (**済**: `JUDGEMENTS.txt` = 元ファイルに対する判定ツールの全出力、`INDEX.md` = 元の残差 CSV の sha256。残差の gzip (59 MB) はリポジトリに入れずワークツリーと AWS に保存)。M3: 本表と §4.4 の 2 段ゲートどおり **plan 全体は `in_progress`**、Phase 1 の判定は §6.1 に記録。m4: 文書・索引・本表の状態を同期 | O |
 | 5o (**決着 2026-09-27 ユーザ決定「a」: 合格**。lsq−gg の remainder 差 +2.8e-12 は gg 同士の揺れ 1.9e-12 と同程度なので「lsq が追加の不合格を作らない」とみなす。許容幅を後から決めた判断であることを記録) | FCT smoke の収支 remainder の比較規則 | 差し替え規則は「lsq の remainder が gg 以下」と書いたが許容幅を決めていなかった。丸め前 remAbs: gg `run_0954` 3.523596956e-06 / lsq `run_0955` 3.523599715e-06 (lsq が +2.8e-12、相対 8e-7)。同じ現行 gg の 2 本 (`run_0954` と `run_0961`) の差は 1.9e-12、nSub 30 の gg/lsq は 3.523593235e-06 / 3.523597981e-06。**文言どおりなら不成立、差は gg 同士の揺れと同程度**。許容幅を後から決めるので、ユーザ判断とする | F |
-| 6 (**前提の差し替え 2026-09-27 ユーザ決定「B」**: #2g (起動記録の結び付け) の完了を前提にしない。代わりに (i) node で `scalarGradient` 省略時に既定変更の警告を出す、(ii) **既定切り替え日をまたぐ run は途中から再開せず最初から回し直す**を運用ルールにする (`procedures/solver-settings.md`・`recommended-settings.md` §9)。#2g の本格修正は `tooling-stage-manifest-launch-binding` に残して後回し) | 既定の切り替え (Phase 2) | **前提**: 5r が GO、2g 完了、S3 ≤ 5 %。S4、2h、docs、codex result 2 回目 | F |
+| 6 (**実装・確認済 2026-09-27** (commit `24365d72`、AWS バイナリ `fcfdc826…`): node 省略 → `lsq (default)` + 警告、cell 省略 → `gg (default)`、明示 gg → `gg (explicit)`。省略の既定 lsq と明示 lsq の 1 step 比較は tgv・case/48 とも E/P = A・N PASS (`DEFSW_{tgv,case48}.txt`、`defsw.py`)。S4 は下の差し替えにより「警告 + 運用ルール」で代替。**前提の差し替え 2026-09-27 ユーザ決定「B」**: #2g (起動記録の結び付け) の完了を前提にしない。代わりに (i) node で `scalarGradient` 省略時に既定変更の警告を出す、(ii) **既定切り替え日をまたぐ run は途中から再開せず最初から回し直す**を運用ルールにする (`procedures/solver-settings.md`・`recommended-settings.md` §9)。#2g の本格修正は `tooling-stage-manifest-launch-binding` に残して後回し) | 既定の切り替え (Phase 2) | **前提**: 5r が GO、2g 完了、S3 ≤ 5 %。S4、2h、docs、codex result 2 回目 | F |
 | 7 (**完了 2026-09-26**: `boundary-node-rotational-periodic` §5.1 #0a) | 回転周期 plan への登録 | | O |
 
 ## 6. 検証 (2026-09-26 `diagnostician` 確定、同日 codex plan 対応で改訂。測る前に固定)
@@ -158,6 +158,7 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 | --- | --- | --- | --- | --- |
 | result | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-unification-result.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-unification-result.md) | **NO-GO**, C0/M5/m2 (実装の中核に欠陥なし。M1 床比ツールの誤合格・M2 収束ゲート未達の根拠不足・M3 FCT 収支未確認・M4 S3 監視漏れ・M5 manifest に scalarGradient なし) | **全件採用** (codex (diagnose) 4 で採否、M2・M3 の規則を修正して固定) → §5.1 #5f–#5l。既定 gg・`in_progress` を維持、Phase 2 へ進まない |
 | result | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-unification-result-2.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-unification-result-2.md) | **NO-GO**, C0/M3/m1 (新基準の S2 残差比 PASS は記録と整合・中核実装に欠陥なし。M1 manifest の PyYAML 欠如経路・M2 一次記録の回収・M3 Phase 1 完了と plan 完了の混同、m4 文書同期) | **全件採用** (いずれも数値判断を変えない手続き・ツール修正のため親判断で採用、上位諮問は省略) → §5.1 #5n。**Phase 1 判定 (2026-09-26)**: 現行 gg 基準の S2・S0/S1・S3 は合格、FCT smoke の収支比較規則のみ #5o で未決。plan 全体は `in_progress` |
+| diagnose (既定切り替えの実装方針) | `2026-09-27` | [2026-09-27-scalar-lsq-default-switch-diagnose.md](../../notes/reviews/2026-09-27-scalar-lsq-default-switch-diagnose.md) | Major 1 (`FLAG_POLICY` の日付だけでは gg 評価が学習に混ざる) | **採用**: 実効 scalarGradient の学習ゲート (#2h)、判別試験 A |
 | diagnose (諮問 5、Phase 1 の現状) | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-phase1-status-diagnose.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-phase1-status-diagnose.md) | Major 4 (合格を求める再審査・FCT の完了条件外し・「物理量を変えない」主張を却下、床移動の調査移管は採用だが S2 免除は却下) | **全件採用**。`in_progress`・既定 gg 維持、#5m (FCT smoke の旧版/現行 gg A/B) を先に。result 再審査の提出文は「測定した 2 ケースで S3 を通過したが、S2 は収束・FCT ゲート未達で Phase 1 は未合格」 |
 | diagnose (諮問 4、result 1 の採否) | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-result1-disposition-diagnose.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-result1-disposition-diagnose.md) | C0、7 件採用 (M1 の修正に残る穴・M2 は双方向床比と restart 手順を揃える・M3 は作用素差と確定しない・M4 は PID 照合) | 全件採用 |
 | diagnose (諮問 3、S2 解釈) | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-s2-result-diagnose.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-s2-result-diagnose.md) | C0、Major 4 (現行 gg 床への差し替え却下・床移動は要再検証・FCT は 0476 差の流用却下・case/16 の不足区間と比較対象)、Minor 1 (chi 文書不整合) | **全件採用**。S2 は条件付き・未合格、#5a–#5e を追加 |
@@ -180,6 +181,8 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 - [ ] `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-27` — **Phase 2: node の既定を lsq に切り替え** (`24365d72`)。省略時の警告、設計 DB の実効値ゲート、文書 (`procedures/solver-settings.md`・`recommended-settings.md` §9・`methods/`)。既定 lsq ≡ 明示 lsq を tgv・case/48 で確認。
 
 - `2026-09-27` — ユーザ決定「B」: 既定化の前提を #2g 完了から「省略時の警告 + 切り替え日をまたぐ run は最初から回し直す運用ルール」に差し替え。
 
