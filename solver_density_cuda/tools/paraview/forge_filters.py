@@ -88,6 +88,11 @@ def _attr(ds, assoc):
     return ds.GetPointData() if assoc == POINTS else ds.GetCellData()
 
 
+def _str_prop(value):
+    """stringvector の値を文字列にする。GUI は空欄を None で渡すので "None" にしない。"""
+    return "" if value is None else str(value).strip()
+
+
 def _has(ds, assoc, name):
     return _attr(ds, assoc).GetArray(name) is not None
 
@@ -530,20 +535,20 @@ class ForgeSaturation(VTKPythonAlgorithmBase):
     def SetRunConfig(self, value):
         """run の solverConfig.yaml のパス。指定すると凝縮種の配列 Y{index} を physProp.species / condensation から
         名前で解決する (Vapor Mass Fraction Array より優先)。"""
-        self._run_config = str(value).strip()
+        self._run_config = _str_prop(value)
         self.Modified()
 
     @smproperty.stringvector(name="VaporMassFractionArray", label="Vapor Mass Fraction Array", default_values="")
     def SetVaporMassFractionArray(self, value):
         """蒸気 (凝縮種) の質量分率配列名 (例 Y1)。Run Config 未指定なら必須 (空はエラー; Y1 を自動採用しない)。
         "none" で配列を使わず定数 (Vapor Mass Fraction Constant) を使う。"""
-        self._yv_array = str(value).strip()
+        self._yv_array = _str_prop(value)
         self.Modified()
 
     @smproperty.stringvector(name="LiquidMassFractionArray", label="Liquid Mass Fraction Array", default_values="g_0")
     def SetLiquidMassFractionArray(self, value):
         """液相質量分率配列名 (凝縮 ON の run の g_0)。無ければ 0 として扱う。"""
-        self._g_array = str(value).strip()
+        self._g_array = _str_prop(value)
         self.Modified()
 
     @smproperty.doublevector(name="VaporMassFractionConstant", label="Vapor Mass Fraction Constant", default_values=0.0)
