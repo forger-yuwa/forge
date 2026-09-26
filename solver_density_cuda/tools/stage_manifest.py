@@ -149,17 +149,25 @@ def infer_wall_normal_chi(cfg_text):
     return ("1" if (node and nwd and slau) else "0"), "inferred"
 
 
+AMBIGUOUS = "ambiguous"
+
+
 def load_launches(run_dir):
-    """forge_launches.jsonl を読む (cfg_fnv → 最後の起動の実効値)。無ければ空。"""
+    """forge_launches.jsonl を読む (cfg_fnv → 実効値)。無ければ空。
+    **同じ cfg_fnv の起動で実効値が食い違う**ときは値を `ambiguous` にする (旧バイナリ → 新バイナリで同じ YAML を
+    起動し直した等。どの段がどの起動か分からないので、最後の起動の値で全段を上書きしない。codex result 2026-09-27
+    chi-default M3。起動との結び付けは plan tooling-stage-manifest-launch-binding で後回し)。"""
     out = {}
     p = os.path.join(str(run_dir), "forge_launches.jsonl") if run_dir else None
     if p and os.path.exists(p):
         for line in open(p):
             try:
                 r = json.loads(line)
-                out[r["cfg_fnv"]] = str(int(r["slauWallNormalChi"]))
+                v = str(int(r["slauWallNormalChi"]))
             except Exception:
                 continue
+            k = r.get("cfg_fnv")
+            out[k] = v if out.get(k, v) == v else AMBIGUOUS
     return out
 
 
@@ -288,7 +296,7 @@ def _normalize(man, launches):
         fnv = st.get("cfg_fnv")
         if launches and fnv in launches:
             k[CHI_KEY] = launches[fnv]
-            st["chi_source"] = "launch"
+            st["chi_source"] = AMBIGUOUS if launches[fnv] == AMBIGUOUS else "launch"
         st["key"] = k
         out.append(st)
     return out
@@ -301,7 +309,8 @@ def segments(man, launches=None):
     segs, cur = [], []
     for st in _normalize(man, launches):
         inf = st.get("chi_source") == "inferred"
-        if cur and (st["key"] != cur[-1]["key"] or inf != (cur[-1].get("chi_source") == "inferred")):
+        amb = st.get("chi_source") == AMBIGUOUS or (cur and cur[-1].get("chi_source") == AMBIGUOUS)
+        if cur and (amb or st["key"] != cur[-1]["key"] or inf != (cur[-1].get("chi_source") == "inferred")):
             segs.append(cur); cur = []
         cur.append(st)
     if cur:
@@ -331,6 +340,10 @@ def main():
         softs = {s["tag"]: s["soft"] for s in sg}
         if len(set(json.dumps(v, sort_keys=True) for v in softs.values())) > 1:
             print("        soft (区間内で変化・連結可): %s" % json.dumps(softs, ensure_ascii=False))
+    if segs and any(st.get("chi_source") == AMBIGUOUS for st in segs[-1]):
+        print("\n**判定不能**: 最後の区間の段は同じ設定で chi の実効値が違う起動が混ざっている (%s)。"
+              "どの起動の履歴か分からないので、判定区間を人が明示すること。" % " -> ".join(s["tag"] for s in segs[-1]))
+        return 3
     print("\n**判定区間は最後の区間** (%s)。"
           % " -> ".join(s["tag"] for s in segs[-1]) if segs else "(段が無い)")
     print("  `check_convergence.py` にはこの区間の履歴だけを渡すこと。")

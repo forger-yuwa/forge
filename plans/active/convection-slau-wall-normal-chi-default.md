@@ -62,6 +62,7 @@
   **推定 (`inferred`) の段と確定の段は、値が同じでも連結しない** (由来不明の推定値を既知と自動連結しない)。
 - **旧形式の移行**: `space.slauWallNormalChi: "1"` はその値、キー無しは当時の既定 0 (`legacy`)。
 - `diag_applicability.py` は新エコー (`'slauWallNormalChi' effective: N (...)`) を読み、省略かつエコー無しは実効値未確定で「診断不能」。
+- **制限 (2026-09-27 codex result M3)**: 同じ `cfg_fnv` の起動が複数あると、どの段がどの起動か分からない (旧実装は最後の起動の値で全段を上書きし、同じ YAML の chi [0, 1] を 1 区間にしていた)。暫定対策として、値が食い違う `cfg_fnv` は `ambiguous` にして連結せず、`check_convergence --segment` は判定不能を返す (`test_stage_manifest_wall_normal_chi.py` に反例を追加)。起動との結び付けの本対応は plan [`tooling-stage-manifest-launch-binding`](tooling-stage-manifest-launch-binding.md) (後回し)。運用ルール: **既定変更をまたぐ run は途中から再開しない** (`recommended-settings.md` §1.0a)。
 
 ### 4.4 ツールと設計チェーン
 
@@ -70,6 +71,7 @@
 - **runner は `slauWallNormalChi` を書かない (auto)** (codex plan M2: 明示 1 を書くと品質検査用の cell 変換 `convertGmshToForge` が起動エラーになる)。
   問題 YAML `mesh.slau_wall_normal_chi: 0` のときだけ明示 0 を書く。runner 経路でも auto の除外 (§4.6) が効く。
 - **設計 DB (codex plan M3)**: `metrics.json` と ledger 行に `slau_wall_normal_chi_effective` (起動記録から) と `flag_policy: "2026-09-26"` を書く。
+  **2026-09-27 (codex result M4/m6)**: 起動記録は最後の非空行だけを読み、欠落・破損・0/1 以外は不明 (None)。学習・Pareto は全作動点の実効 chi が 1 (かつ scalarGradient lsq、flag_policy 2026-09-27) の行だけ。3D runner も同じ関数で来歴を書く。試験 `design/tests/run_sern_scalar_gradient_gate_tests.py` (23 例)。
   driver は `flag_policy` が campaign と一致する行だけ学習に使う。旧行 (フィールド無し) は commit hash で「旧既定 0」と分類できるものだけ旧扱い、
   分類できない行は**学習から除外**。旧台帳からの再開で除外件数をログに出す。
 
@@ -115,6 +117,8 @@ AWS は他セッションと共有なので起動前に `aws_instance.sh status`
 | ~~7~~ (**完了 2026-09-27: (i)(ii)(iii) とも PASS** → 既定化は保留しない。(ii) SERN 2D (`problem_moo_frozen_tp_cycle3op.yaml`、基準場 `run_0963/0964_chidef_2d_*_base` = runner 段階起動 12000 step・GATES PASS、分岐 `run_0965`–`0968` 各 36000 step・500 step 毎): m4_off・m10_on とも 4 run GATES PASS (実効 chi 0/1・scalarGradient lsq を metrics で確認)、力係数 5 列すべて帯内 (m4_off C_T −0.0001・C_L +0.0011・C_M −0.021 / m10_on −0.0003・+0.0012・−0.026)、省略側残差 ≤ 2×、m6_on は usage-rule plan の帯内結果を再利用 (`case/46.sern_design/CHI_DEFAULT_B1ii_*.txt`)。(iii) case/16 SST (`run_user_profile.py --disc node --phys sst` + 出口 outflow の基準 `run_0962_chidef_sst_base`、分岐 `run_0965/0966_chidef_sst_*` 各 12000 step): 違う面 627、輪郭壁 p/p0 L∞ 0.0003 %、3 点 STEADY、残差 ≤ 2× (`case/16.nozzle_wys/CHI_DEFAULT_B1iii.txt`)。(i) PASS 2026-09-27: AWS の場ファイルが削除済みのため起点を作り直した (`run_0960` = `jm_c16.msh` から準備 + run_0430 と同設定の層流暖機 1800 step・明示 0、監視 153797 の ρ 1.711e-4 で当時の記録と一致)。`run_0961` (run_0437 の設定から chi キーだけ削除、6000 step): 監視 3 点が step 14/11/8 で 10ρMin 超え・以後維持、壁の床到達 0、NaN 0、初回面流束 741 万面と流束状態が明示 1 (`run_0962`、1 step) とビット同一。`CHI_DEFAULT_B1i.txt`・`cad/chi_default_b1i.py`。(ii) m6_on は usage-rule の帯内結果を再利用、m4_off・m10_on は走行中。(iii) 未) | **B1 通常域** (i) 接続模型の救済 (AWS) (ii) case/46 2D 3 作動点 (AWS) (iii) case/16 SST (ローカル) | §6 B1 | O (結論 F) |
 | 8 (**完了 2026-09-27: 3 域とも PASS → auto から除外する域なし**。B1-p case/39 (`run_0952/0953_chidef_b1p_*`、12000 step): 成立条件 = 初回面流束の違う面 3791、周期 group の壁/非壁混在 0、量 = 下壁 Cf(x) 相対 L2 0.0002 %・x_r 差 0・継ぎ目バルク速度比の差 0.0001 %、全量 STEADY、省略側残差 ≤ 2× (`case/39.periodic_hills/CHI_DEFAULT_B1p.txt`)。B1-a case/40 (`run_0954/0955_chidef_b1a_*`): 違う面 371、壁∩軸ノード 0、η_CF・ṁ の差区間 ±0.0001 % 以内、輪郭壁 p/p0 L∞ 0.38 %、③ q_w は断熱壁のため対象外、STEADY、残差 ≤ 2× (`CHI_DEFAULT_B1a.txt`)。B1-c case/16 凝縮 (`run_0963/0964_chidef_b1c_*`、起点 run_0335/res_48000 `aa22ab18…`): 違う面 434、壁 p/p0 L∞ 0.0012 %、onset 22.508/22.508 mm (差 0)、g_exit 0.01085、STEADY (onset の step 0 = restart 入力は g 未計算で非有限のため除外、既存の凝縮系列と同じ流儀)、残差 ≤ 2× (`CHI_DEFAULT_B1c.txt`)。2026-09-27 着手。**B1-p の基準場を `run_0007_coarse_rans` から `run_0039_r1_gradfix_new_ext/res_800000` に変更** (投入前): run_0007 の config は現在黙って無視される旧キー (トップレベル `lowMachPrecond` 等) を含み、run_0039 は同じ粗さ (80×50×30) で 80 万 step・`--from-floor` PASS・全量 STEADY、`slauWallNormalChi: 0` 明示なので §6 の「PASS または plateau + STEADY の基準場」を既に満たす。抽出器 `case/39.periodic_hills/chidef_b1p.py` は結果を見る前に commit。B1-a の基準場は `run_0045/res_12000` (§6 の `res_24000` は通算 step の書き誤り、sha256 `15e47af0…`)) | **B1 追加域** p: case/39 周期丘 / a: case/40 軸対称 / c: case/16 凝縮 | §6 B1-p/a/c。小規模は手元、重ければ AWS | O (結論 F) |
 | ~~9~~ (**済 2026-09-27**: `procedures/recommended-settings.md` §1.0a を「既定 auto = 実効 1、旧挙動は 0 明記、診断 3 条件は 0 に落とす判断材料」に書き換え + §9 に「省略 = 0 (〜2026-09-25)」、`methods/convection/theory.md` の「実装完了までは既定 0」注記を外し検証完了を記載、`solverConfig.hpp` コメント、前 plan 2 本 (accepted) の変更ログに 1 行) | docs (§4.5) | 4 ファイル。`check_plans.py` PASS | O |
+| 11 (codex result 2026-09-27、**全件採用**。数値判断を変えない手続き・ツールの指摘なので親判断で採用) | result 指摘の対応 | M1 証拠: `case/46.sern_design/chi_evidence/` (判定の全出力 `JUDGEMENTS.txt`・sha256 `INDEX.md`・設定・起動記録・派生量 CSV。残差 gzip はワークツリーと AWS のみ) **済**。M2 等温壁の軸対称 A/B: `run_0956/0957_chidef_b1a_isoT_*` (起点 `run_0048/res_12000` `e7dedadf…`、等温壁 1000 K) + 対応表どおり DRIFTING のため 1 回だけ倍延長 `run_0958/0959_*_ext` → **#12**。M3 manifest の曖昧起動を判定不能に **済**。M4 設計 DB の chi ゲート **済**。M5 `recommended-settings.md` §1.0a を現行方針と履歴に分離 **済**。m6 3D runner の来歴 **済**。m7 索引 **済** | O |
+| 12 (**未決・判断待ち 2026-09-27**) | B1-a 等温壁の壁 p/p0 | 延長後: η_CF・ṁ 差区間 ±0.0001 %、q_w 相対 L2 0.12 % (許容 1 %)、全量 STEADY、残差 ≤ 2× は合格。**輪郭壁 p/p0 L∞ 1.36 % (許容 0.5 %) で FAIL**。超過は壁 221 ノード中**出口角 (x = 0.070 m、壁∩出口) の 1 点だけ**で、延長前は −0.74 %、延長後は +1.36 % と符号が反転 (他の 220 点は ≤ 0.031 %)。断熱壁版でも同じ点が最大 (0.38 %)。事前の対応表どおりなら「`isAxisymmetric` を auto→0 の条件に」。出口角を外すかは事前に決めていない (case/16 V3 の出典は x 10–94 mm で両端を除外していた) ので、外して合格にするのは事後の規則変更になる。`CHI_DEFAULT_B1a_isoT{,_ext}.txt` | F |
 | 10 | codex result → accepted | | F |
 
 ## 6. 検証
@@ -172,11 +176,22 @@ AWS は他セッションと共有なので起動前に `aws_instance.sh status`
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result | `2026-09-27` | [2026-09-27-convection-slau-wall-normal-chi-default-result.md](../../notes/reviews/2026-09-27-convection-slau-wall-normal-chi-default-result.md) | **NO-GO**, C0/M5/m2 (三値解決とカーネルへの受け渡しは設計どおり。M1 証拠不足・M2 B1-a の等温壁 q_w 未実施・M3 同一設定の起動を区別できない・M4 DB が chi を混ぜる・M5 推奨設定の相反記述、m6 3D runner 来歴、m7 索引) | **全件採用** → §5.1 #11 (対応済み)・#12 (等温壁の壁圧 FAIL、判断待ち) |
 | plan | `2026-09-26` | [2026-09-26-convection-slau-wall-normal-chi-default-plan.md](../../notes/reviews/2026-09-26-convection-slau-wall-normal-chi-default-plan.md) | **GO-with-changes**, C0/M7/m1 | **全件採用** (2026-09-26 `diagnostician` 判断)。M1 → forge 自身の起動記録 `forge_launches.jsonl` + manifest v2 (推定と確定を連結しない、旧形式移行) (§4.3)。M2 → runner はキーを書かない (auto) (§4.4)。M3 → metrics/ledger に実効値と `flag_policy`、driver は不一致行を学習から除外 (§4.4)。M4/M5 → ユーザ指示で周期・軸対称・凝縮は**発火するケースで検証** (case/39・case/40・case/16 凝縮)、成立条件と除外処置を事前固定 (§4.6、§6 B1 追加域・対応表)。M6 → case/36・case/44・case/05 を落とし、抽出器・許容・準定常を登録済みのものに (§6)。M7 → 接続模型の救済を受入項目に、利益の記述を限定 (§1、§6 B1 (i))。m8 → cell 等は設定解決の単体確認に (§6 B0) |
 
 ### 6.2 結果
 
-(未実施)
+| 検証 | 結果 | 記録 |
+| --- | --- | --- |
+| B0 | PASS (省略 ≡ 明示 1、明示 0 ≡ 実装前、cell/ROE/nwd0 は 0 auto) | `case/46.sern_design/CHI_DEFAULT_B0.txt` |
+| B1 (i) 接続模型 | PASS (監視 3 点 step 8–14 で 10ρMin 超え・維持、床 0、NaN 0、初回流束ビット同一) | `CHI_DEFAULT_B1i.txt` |
+| B1 (ii) SERN 2D 3 作動点 | PASS (5 列すべて帯内、GATES PASS) | `CHI_DEFAULT_B1ii_*.txt` |
+| B1 (iii) case/16 SST | PASS (壁 p/p0 L∞ 0.0003 %) | `case/16.nozzle_wys/CHI_DEFAULT_B1iii.txt` |
+| B1-p case/39 周期丘 | PASS | `case/39.periodic_hills/CHI_DEFAULT_B1p.txt` |
+| B1-a case/40 断熱壁 | 量 ①② PASS (③ は等温壁で別途) | `case/40.nozzle_design_tool/CHI_DEFAULT_B1a.txt` |
+| B1-a case/40 等温壁 | **壁 p/p0 L∞ FAIL (出口角 1 点)**、①③ PASS → §5.1 #12 | `CHI_DEFAULT_B1a_isoT{,_ext}.txt` |
+| B1-c case/16 凝縮 | PASS | `case/16.nozzle_wys/CHI_DEFAULT_B1c.txt` |
+一次記録: `case/46.sern_design/chi_evidence/`。
 
 ## 7. 影響範囲
 
@@ -194,6 +209,8 @@ AWS は他セッションと共有なので起動前に `aws_instance.sh status`
 - [ ] `plans/active/` → `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-27` — codex result 1 回目 NO-GO (C0/M5/m2) を全件採用して対応 (§5.1 #11)。等温壁の軸対称 A/B を追加し、壁 p/p0 が出口角 1 点で許容超過 (§5.1 #12、判断待ち)。
 
 - `2026-09-27` — B0 (ビット不変) PASS、B1 通常域 (i) 接続模型の救済・(ii) SERN 2D 3 作動点・(iii) case/16 SST、追加域 B1-p 周期丘・B1-a 軸対称・B1-c 凝縮すべて PASS (auto から除外する域なし)。起点は AWS の場ファイル削除のため作り直した (接続模型) / 変更した (case/39 は run_0039)。docs 更新。
 

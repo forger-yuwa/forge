@@ -54,5 +54,19 @@ S = lambda solv: 'solver: "%s"\n' % solv + FLOW("")
 check("SLAU vs ROE → 2 区間", segs(S("SLAU"), S("ROE")) == 2)
 check("SLAU vs slau → 同一 key", stage_key(S("SLAU"), BC) == stage_key(S("slau"), BC))
 check("SLAU vs SLAU2 → 2 区間", segs(S("SLAU"), S("SLAU2")) == 2)
+# codex result 2026-09-27 chi-default M3 の反例: **同じ YAML (同じ cfg_fnv)** の起動記録で chi が [0, 1]
+# (旧バイナリ → 新バイナリ) のとき、最後の起動の値で全段を上書きして 1 区間にしてはいけない
+import json as _json, tempfile as _tf, os as _os
+from stage_manifest import load_launches, AMBIGUOUS
+_d = _tf.mkdtemp()
+_fnv = fnv1a64(cfg.encode())
+open(_os.path.join(_d, "forge_launches.jsonl"), "w").write(
+    _json.dumps({"cfg_fnv": _fnv, "slauWallNormalChi": 0}) + "\n" + _json.dumps({"cfg_fnv": _fnv, "slauWallNormalChi": 1}) + "\n")
+_L = load_launches(_d)
+man = {"stages": [{"tag": "s1", "key": stage_key(cfg, BC), "cfg_fnv": _fnv, "chi_source": "inferred"},
+                  {"tag": "s2", "key": stage_key(cfg, BC), "cfg_fnv": _fnv, "chi_source": "inferred"}]}
+sg = segments(man, _L)
+check("同じ YAML の起動で chi [0,1] → 値は ambiguous", _L.get(_fnv) == AMBIGUOUS)
+check("同じ YAML の起動で chi [0,1] → 連結しない (2 区間) かつ由来 ambiguous", len(sg) == 2 and all(s[0]["chi_source"] == AMBIGUOUS for s in sg))
 print("VERDICT:", "PASS" if fails == 0 else "FAIL (%d)" % fails)
 sys.exit(1 if fails else 0)

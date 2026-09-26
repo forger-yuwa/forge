@@ -1,0 +1,33 @@
+成立条件 (b): 初回面流束が違う面 378 / 36104
+# B1-a 比較: flag0 = run_0956_chidef_b1a_isoT_flag0 / 省略 = run_0957_chidef_b1a_isoT_omit
+追加の成立条件 (記録): 壁ノード 221、壁∩軸ノード 0
+[flag0] === run_0956_chidef_b1a_isoT_flag0/chidef_b1a_eta.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[flag0]   eta_cf          : tail mean=0.9774  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.977369 (最終比 +0.000 %)] STEADY
+[flag0]   mdot            : tail mean=1.302  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 1.30222 (最終比 +0.000 %)] STEADY
+[flag0] === run_0956_chidef_b1a_isoT_flag0/chidef_b1a_wall.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[flag0]   pp0_25          : tail mean=0.9727  drift=0.0%/tail  fluct=0.0%           STEADY
+[flag0]   pp0_50          : tail mean=0.08336  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.0833561 (最終比 +0.000 %)] STEADY
+[flag0]   pp0_75          : tail mean=0.02249  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.0224877 (最終比 +0.001 %)] STEADY
+[omit] === run_0957_chidef_b1a_isoT_omit/chidef_b1a_eta.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[omit]   eta_cf          : tail mean=0.9774  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.97737 (最終比 +0.000 %)] STEADY
+[omit]   mdot            : tail mean=1.302  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 1.30223 (最終比 +0.000 %)] STEADY
+[omit] === run_0957_chidef_b1a_isoT_omit/chidef_b1a_wall.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[omit]   pp0_25          : tail mean=0.9727  drift=0.0%/tail  fluct=0.0%           STEADY
+[omit]   pp0_50          : tail mean=0.08336  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.0833561 (最終比 +0.000 %)] STEADY
+[omit]   pp0_75          : tail mean=0.02249  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.0224877 (最終比 +0.001 %)] STEADY
+① η_CF: 差区間 [-0.0011, +0.0011] % (許容 ±0.1 %) → 帯内
+① ṁ: 差区間 [-0.0028, +0.0028] % (許容 ±0.1 %) → 帯内
+② 輪郭壁 p/p0 L∞ = 0.7382 % (許容 0.5 %) → FAIL
+[flag0] === run_0956_chidef_b1a_isoT_flag0/chidef_b1a_qwall.csv  [24 rows, steps 500..12000]  -> DRIFTING ===
+[flag0]   qw_25           : tail mean=-1.464e+06  drift=0.6%/tail  fluct=0.6%  (extremum at tail-end) DRIFTING
+[flag0]   qw_50           : tail mean=-4.933e+05  drift=0.8%/tail  fluct=0.9%  (extremum at tail-end) DRIFTING
+[flag0]   qw_75           : tail mean=-2.026e+05  drift=0.6%/tail  fluct=0.6%  (extremum at tail-end) DRIFTING
+[omit] === run_0957_chidef_b1a_isoT_omit/chidef_b1a_qwall.csv  [24 rows, steps 500..12000]  -> DRIFTING ===
+[omit]   qw_25           : tail mean=-1.464e+06  drift=0.6%/tail  fluct=0.6%  (extremum at tail-end) DRIFTING
+[omit]   qw_50           : tail mean=-4.933e+05  drift=0.8%/tail  fluct=0.9%  (extremum at tail-end) DRIFTING
+[omit]   qw_75           : tail mean=-2.026e+05  drift=0.6%/tail  fluct=0.6%  (extremum at tail-end) DRIFTING
+③ 等温壁 q_w 相対 L2 (最終) = 0.1517 % (許容 1 %) → PASS
+VERDICT B1-a 量: FAIL
+=== run_0956_chidef_b1a_isoT_flag0  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+=== run_0957_chidef_b1a_isoT_omit  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+=== run_0957_chidef_b1a_isoT_omit  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===

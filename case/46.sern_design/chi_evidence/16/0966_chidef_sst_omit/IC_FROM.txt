@@ -1,0 +1,10 @@
+start_run: case/16.nozzle_wys/run_0962_chidef_sst_base
+res: case/16.nozzle_wys/run_0962_chidef_sst_base/res_12000.h5
+res_sha256: bfffefcd2232a01c347bdc2a89f73fec1c1775d7237e42e3113f7e4dd19471af
+mesh_sha256 (起点の nozzle_user_2d.h5): d156b627e853d8aa6c03c6f6b6b357091c2f769d10d57fa49bd75e74ed55fd88
+value file (restart 先): nozzle_user_2d.h5
+config changes vs start:
+  - mesh.scalarGradient: 書かない (実装前バイナリ、実効 gg)
+  - set time.last.nStepOuter: 12000 -> 12000
+  - set time.outStepInterval: 500 -> 500
+check_solver_config rc=0

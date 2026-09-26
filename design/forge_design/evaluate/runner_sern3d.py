@@ -332,6 +332,10 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
         last = hist[-1]
         out.update({k: last[k] for k in last if k != "parts"})
         write_force_history_csv(out_dir / "force_history.csv", hist)
+    # 来歴 (2D runner と同じ関数・同じ厳格さ。codex result 2026-09-27 chi-default m6)
+    out["slau_wall_normal_chi_effective"] = R2._last_launch_chi(run_dir)
+    out["scalar_gradient_effective"] = R2._last_launch_value(run_dir, "scalarGradient", allowed=("gg", "lsq"))
+    out["flag_policy"] = R2.FLAG_POLICY
     (out_dir / "metrics.json").write_text(json.dumps(out, indent=1))
     return out
 

@@ -65,14 +65,18 @@ class _KrgBoth:
 
 
 REQUIRED_SCALAR_GRADIENT = "lsq"
+REQUIRED_WALL_NORMAL_CHI = 1   # 2026-09-26 から node+SLAU の既定 (auto)。明示 0 の評価は別の応答関数なので混ぜない
 
 
 def _learnable(r: dict) -> bool:
-    """学習に使ってよい行: PASS・現行の flag_policy・全作動点の実効 scalarGradient が lsq。"""
+    """学習・Pareto に使ってよい行: PASS・現行の flag_policy・全作動点の実効 scalarGradient が lsq かつ実効 chi が 1。
+    不明 (None) は除外 (codex result 2026-09-27 chi-default M4: 日付と scalarGradient だけでは chi 0/1/不明が混ざる)。"""
     if r.get("status") != "PASS" or r.get("flag_policy") != FLAG_POLICY:
         return False
     ops = r.get("ops") or {}
-    return bool(ops) and all(o.get("scalar_gradient_effective") == REQUIRED_SCALAR_GRADIENT for o in ops.values())
+    return bool(ops) and all(o.get("scalar_gradient_effective") == REQUIRED_SCALAR_GRADIENT
+                             and o.get("slau_wall_normal_chi_effective") in (REQUIRED_WALL_NORMAL_CHI, str(REQUIRED_WALL_NORMAL_CHI))
+                             for o in ops.values())
 
 
 class SernCampaign:
@@ -91,7 +95,7 @@ class SernCampaign:
                   f"(既定変更前の評価: slauWallNormalChi 2026-09-26 / scalarGradient 2026-09-27)", flush=True)
         _nolsq = sum(1 for r in self.rows if r.get("status") == "PASS" and r.get("flag_policy") == FLAG_POLICY and not _learnable(r))
         if _nolsq:
-            print(f"[campaign] 実効 scalarGradient が全作動点で lsq と確認できない PASS 行 {_nolsq} 件を学習から除外", flush=True)
+            print(f"[campaign] 実効 scalarGradient (lsq) / slauWallNormalChi (1) が全作動点で確認できない PASS 行 {_nolsq} 件を学習から除外", flush=True)
 
     def _write_problem(self, x, path: Path) -> Path:
         raw = json.loads(json.dumps(self.base_raw))

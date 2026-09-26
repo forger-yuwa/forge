@@ -29,9 +29,9 @@ class _Fake:
         self.rows = rows
 
 
-def row(sg_list, policy=FLAG_POLICY):
+def row(sg_list, policy=FLAG_POLICY, chi=1):
     return {"status": "PASS", "flag_policy": policy, "x": [0.0], "C_T_w": 0.9, "L_ramp": 1.0,
-            "ops": {f"op{i}": {"scalar_gradient_effective": sg} for i, sg in enumerate(sg_list)}}
+            "ops": {f"op{i}": {"scalar_gradient_effective": sg, "slau_wall_normal_chi_effective": chi} for i, sg in enumerate(sg_list)}}
 
 
 fails = 0
@@ -73,5 +73,18 @@ summ = SernCampaign.summary(_FakeS(rows))
 ok = summ["n_pass"] == 1 and [p["tag"] for p in summ["pareto"]] == ["a"] and summ["n_pass_excluded_by_policy"] == 2
 fails += not ok
 print(("PASS " if ok else "FAIL ") + f"Pareto: n_pass {summ['n_pass']} / 除外 {summ['n_pass_excluded_by_policy']} / Pareto {[p['tag'] for p in summ['pareto']]} (期待 1 / 2 / ['a'])")
+# chi の実効値 (codex result 2026-09-27 chi-default M4)
+check("chi 0", [row(["lsq"], chi=0)], 0)
+check("chi 不明", [row(["lsq"], chi=None)], 0)
+check("chi 1", [row(["lsq"], chi=1)], 1)
+def effc(lines):
+    d = tempfile.mkdtemp()
+    open(os.path.join(d, "forge_launches.jsonl"), "w").write("\n".join(lines) + "\n")
+    return RS._last_launch_chi(d)
+C = lambda v: json.dumps({"cfg_fnv": "x", "slauWallNormalChi": v})
+for name, lines, want in (("0→1", [C(0), C(1)], 1), ("0→キー欠落", [C(0), json.dumps({"cfg_fnv": "x"})], None),
+                          ("0→JSON 破損", [C(0), "{broken"], None), ("不正値 2", [C(2)], None)):
+    got = effc(lines); ok = got == want; fails += not ok
+    print(("PASS " if ok else "FAIL ") + f"起動記録 chi {name}: {got!r} (期待 {want!r})")
 print("VERDICT:", "PASS" if fails == 0 else f"FAIL ({fails})")
 sys.exit(1 if fails else 0)

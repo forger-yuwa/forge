@@ -76,24 +76,22 @@ plan [convection-slau-wall-normal-chi-default](../plans/accepted/convection-slau
   case/40 軸対称ノズルの $\eta_{CF}$・$\dot m$ (±0.0001 %)・壁 p/p0 (0.38 %) がすべて許容内。3D 接続模型では flag 0 が壁 CV を排出して
   発散する構成を auto 1 が救う (起点から 8〜14 step で回復)。
 - **周期・軸対称・凝縮も auto に含む** (上の追加域の検証で成立条件と許容を満たした)。回転周期は node では未対応 (起動エラー)。
-- 以下の診断 3 条件は「**0 に落とす/落とさない**」を判断する材料として残す (既定化前の「1 にする条件」を読み替えたもの)。
-
-- **新しい構成で 1 にする条件**: 診断ツール `case/46.sern_design/cad/diag_wall_cv_budget.py` の質量流束が実カーネルと一致する設定であることを
-  `case/46.sern_design/cad/diag_applicability.py` で確認し (設定キーの検査 + 同 dump の 1 step `FORGE_DUMP_MASSFLUX` で対象 CV の全接続面を照合)、
-  **`convMethod: 0` の起動区間**で次の 3 つがすべて成り立つときだけ:
-  (i) 対象壁 CV (`bcondConfig` の wall physID から作る) の $\rho_w$ が 3 dump 以上単調減少し $\rho_w/\rho_i<0.1$ ($\rho_i$ = 壁でない隣接ノードの平均);
-  (ii) 全接続面の正味流出 $\Sigma\dot m>0$ が 3 dump 以上持続;
-  (iii) 元の $\chi=0$ かつ $\Delta P\neq0$ の壁隣接面があり、$\chi\to\chi_n$ に置換した再計算で当該 CV への補充が増える。
-  **検査に落ちる設定 (例: `slauContactFloor ≠ 0`、`convMethod: 1`、`lowMachPrecond ≠ 0`、凝縮) は「診断不能」で、既知構成以外では 1 にしない**。
-  2 次生産場での診断は再構成後の面状態が取れるまで保留。
-- **段の途中で切り替えない** (`stage_manifest` の hard キー。`RUN_PROVENANCE` にも残る)。
-- **注記**:
-  - 2D 生産 (**m6_on・生産格子・本段 step 22000–36000 の窓**) で flag 1 にしたときの差は $C_T$・$C_T$(摩擦込)・$C_L$・$C_L$(摩擦込)・$C_M$ の 5 列とも生産許容内 ($C_L$ は許容の 79 %)。
-    **これは 2D を 0 のままにしてよい根拠であって、1 にしてよい根拠ではない**。**現行運用は 0。2D で 1 を適用する根拠 (排出の診断) は未確認**。
-  - **衝撃がランプに当たる点の壁圧への影響は未評価** (m6_on・m4_off とも登録条件で衝撃足を同定できず判定保留)。衝撃衝突のある構成で flag 1 を使うときは、
-    その構成で壁圧分布の比較を別途行う。
-  - 3D 側壁接続 (`run_0437/res_0`) で確認したのは **1 dump での診断可能性と条件 (iii)** まで (全接続面 = 内部 15 + 境界半割 3 面で照合)。条件 (i)(ii) の 3 dump 持続は既存 dump が無く未測定。他構成では検査を毎回通す。
-  - 1 にした run は SLAU の node カーネルのレジスタ上限に当たりうるので `FORGE_CUDA_BLOCKSIZE=128` (比較する run どうしで揃える)。
+- **既定変更をまたぐ run は途中から再開しない** (`scalarGradient` と同じ運用ルール、2026-09-27): 旧既定 0 で始めた段階起動 run を
+  省略のまま新バイナリで再開すると、`stage_manifest.py` は同じ設定の起動を区別できず (起動記録との結び付けは plan
+  [tooling-stage-manifest-launch-binding](../plans/active/tooling-stage-manifest-launch-binding.md) で後回し) 0 の段と 1 の段を 1 区間につなぐ。
+  最初から回し直すか、`slauWallNormalChi: 0` を明記して続ける。**段の途中で切り替えない**。
+- **0 に落とすかの判断材料** (既定化前は「1 にする条件」だったもの): 診断ツール `case/46.sern_design/cad/diag_wall_cv_budget.py` と
+  `case/46.sern_design/cad/diag_applicability.py` (設定キーの検査 + 1 step `FORGE_DUMP_MASSFLUX` で対象 CV の全接続面を照合) で、
+  `convMethod: 0` の起動区間に (i) 壁 CV の $\rho_w$ が 3 dump 以上単調減少し $\rho_w/\rho_i<0.1$、(ii) 全接続面の正味流出が 3 dump 以上持続、
+  (iii) $\chi=0$ の壁隣接面を $\chi_n$ に置換すると補充が増える、の 3 つが成り立つ構成は **0 に落とさない** (0 では壁 CV が排出される)。
+  検査に落ちる設定 (`slauContactFloor ≠ 0`、`convMethod: 1`、`lowMachPrecond ≠ 0` 等) は診断できないので、既定 (1) のまま使い、0 にする理由にはしない。
+- **残る制限**:
+  - **衝撃がランプに当たる点の壁圧への影響は未評価** (m6_on・m4_off とも登録条件で衝撃足を同定できず判定保留)。衝撃衝突のある構成で
+    0/1 の差が問題になりうるときは、その構成で壁圧分布の比較を別途行う。
+  - 1 の run は SLAU の node カーネルのレジスタ上限に当たりうるので `FORGE_CUDA_BLOCKSIZE=128` (比較する run どうしで揃える)。
+- **旧方針 (2026-09-25〜26、履歴)**: 「既定 0 のまま、1 にするのは 3D 側壁∩後端面接続構成だけ」「2D 生産で 1 にしたときの差は生産許容内だが、
+  これは 2D を 0 のままにしてよい根拠であって 1 にしてよい根拠ではない」(plan [convection-slau-wall-normal-chi-usage-rule](../plans/accepted/convection-slau-wall-normal-chi-usage-rule.md))。
+  2026-09-26 のユーザ決定で既定 1 に変わり、上の検証 (2026-09-27) で 2D・周期・軸対称・凝縮も含めた。
 
 ### 1.1 境界条件 — 現行 (2026-09-07)
 

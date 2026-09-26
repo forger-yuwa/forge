@@ -59,21 +59,10 @@ def _last_launch_value(run_dir, key, allowed=None):
 
 
 def _last_launch_chi(run_dir):
-    """forge_launches.jsonl の最後の起動の slauWallNormalChi 実効値 (0/1)。無ければ None。"""
-    p = Path(run_dir) / "forge_launches.jsonl"
-    if not p.exists():
-        return None
-    last = None
-    for line in p.read_text().splitlines():
-        try:
-            last = int(json.loads(line)["slauWallNormalChi"])
-        except Exception:
-            continue
-    return last
-
-def _dv(p: Problem, name, default=None) -> float:
-    v = dv_value(p, name, default)
-    return float(v["value"] if isinstance(v, dict) else v)
+    """最後の起動の slauWallNormalChi 実効値 (0/1)。無い・壊れている・キーが無い・0/1 以外は None (= 不明)。
+    前の起動の値に遡らない (codex result 2026-09-27 chi-default M4、scalarGradient と同じ厳格さ)。"""
+    v = _last_launch_value(run_dir, "slauWallNormalChi", allowed=("0", "1"))
+    return None if v is None else int(v)
 
 
 def design_snapshot(p: Problem) -> dict:

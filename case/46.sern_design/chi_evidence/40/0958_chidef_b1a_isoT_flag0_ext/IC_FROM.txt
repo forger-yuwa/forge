@@ -1,0 +1,10 @@
+start_run: case/40.nozzle_design_tool/run_0956_chidef_b1a_isoT_flag0
+res: case/40.nozzle_design_tool/run_0956_chidef_b1a_isoT_flag0/res_12000.h5
+res_sha256: 2ba2adbe0a2b5448276ddb120a9c34522a048276fcca6c92bdd5312625e7d841
+mesh_sha256 (起点の nozzle.h5): 4cbcf8109193e289e99160019172374f85b15f058538d93a3e3ac949700b9fd0
+value file (restart 先): nozzle.h5
+config changes vs start:
+  - mesh.scalarGradient: 書かない (実装前バイナリ、実効 gg)
+  - set time.last.nStepOuter: 12000 -> 12000
+  - set time.outStepInterval: 500 -> 500
+check_solver_config rc=0

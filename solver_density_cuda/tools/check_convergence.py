@@ -223,6 +223,12 @@ def build_segment_csv(run_dir):
     if not segs:
         return None
     seg = segs[-1]
+    if any(st.get('chi_source') == 'ambiguous' for st in seg):
+        # 同じ設定で chi の実効値が違う起動が混ざる段 (stage_manifest.load_launches)。どの履歴がどの起動か分からない
+        # ので連結しない (判定不能。codex result 2026-09-27 chi-default M3)
+        print(f"[{run_dir}] 最後の区間に chi の実効値が食い違う起動の段がある -> --segment は使えない "
+              f"(判定区間を人が明示すること)  <-- 判定不能")
+        return None
     rows, hdr, off = [], None, 0
     used = []
     for st in seg:
