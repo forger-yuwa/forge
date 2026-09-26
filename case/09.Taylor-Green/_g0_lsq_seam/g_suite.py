@@ -16,7 +16,8 @@
 判定: 状態は res_0.h5 (step 1 の残差組立はこの状態で行う)、勾配は res_1.h5 (k/ω は res_0 では未計算)。
 G1-b (2026-09-26 codex result M3 → §5.1 #6c): 上限は 2·N_max·ε·max|φ|/h のみ (n_member 倍・1e-5·S との max の自動緩和は削除)、
   継ぎ目/内部の誤差比 ≤ 2 も機械判定に入れる。
-GPU 定数場 (同 #6c): 別 run `g_harness_<variant>_const` で k・ω・ξ = const を焼いて 1 step、継ぎ目の勾配 ≤ 4ε|φ|/h。
+GPU 定数場 (同 #6c、2026-09-26 #8c で 3 区分に): 別 run `g_harness_<variant>_const` で k・ω・ξ = const を焼いて 1 step。
+  壁なし継ぎ目 ≤ 4ε|φ|/h、壁∩継ぎ目は φ·ΣS_f/V (格納 float32 面ベクトルの double 閉包) との差 ≤ 4ε|φ|/h、非継ぎ目壁は報告。
 scratch は `--scratch` または環境変数 G_HARNESS_SCRATCH。tgv 系の入力は <scratch>/lsqseam_m1/Taylor-Green.h5。
 """
 import argparse
@@ -360,25 +361,48 @@ def evaluate(variant, run, ref_run=None):
 
 
 def evaluate_const(variant, run):
-    """GPU 定数場: k・ω・ξ = const で 1 step、res_1 の勾配を見る。判定: 継ぎ目 (member≥2) の各成分 |∂φ| ≤ 4ε|φ|/h
-    (h = 節点の合併体積^(1/3))。対象は境界条件の上書き (壁の k/ω ピン等) に stencil が触れない節点。内部は参考。"""
+    """GPU 定数場: k・ω・ξ = const で 1 step、res_1 の勾配を 3 区分で機械判定する (plan §5.1 #8c、codex result-2 M3)。
+
+    区分 (節点の group 単位。壁 = group のいずれかの member が非周期境界面 (壁・slip 等) を持つ):
+      壁なし継ぎ目 (member≥2 ∧ 非壁): max_c |∂φ/∂x_c| ≤ 4ε|φ|/h                         → 判定
+      壁∩継ぎ目   (member≥2 ∧ 壁)  : max_c |∂φ/∂x_c − φ·(ΣS_f)_c/V| ≤ 4ε|φ|/h            → 判定
+      非継ぎ目壁   (member 1 ∧ 壁)   : 同じ参照との差 (と参照そのものの大きさ)                  → 報告 (判定外)
+      内部         (member 1 ∧ 非壁) : max_c |∂φ/∂x_c|                                          → 報告 (判定外)
+    参照 φ·ΣS_f/V: ΣS_f = GPU が積算する面 (内部双対面の incidence を符号付き + 非周期境界面、周期半割面は除外) の
+    **格納 float32 面ベクトル** (PLANES/surfVect) の double 和を group 全 member で合算、V = 合併体積 (double)。
+    = `gharness.gg_merged(φ≡1, 'f64', include_periodic=False)` × φ。壁半割面込みの GG は定数場でも閉包 ΣS_f ≠ 0 の分だけ
+    勾配を持つ (float32 の面ベクトルの閉包誤差、継ぎ目に依らない既知制約) ので、壁の節点はこの参照からのずれで判定する。
+    h = 節点の合併体積^(1/3)、単位 ε|φ|/h。
+    除外 (現行どおり): 境界条件の上書き (壁の k/ω ピン等) で res_0 の値が焼いた定数と違う節点と、その節点に stencil が
+    触れる group。k/ω は壁でピンされるので壁近傍の定数場が壊れる (定数場の試験として意味を持たない) ため。
+    ξ は壁で上書きされないので除外 0。除外数は表に併記する。"""
     h5 = os.path.join(run, "mesh.h5")
     msh = G.Mesh(h5, os.path.join(run, "bcondConfig.yaml"))
     s0 = G.read_res(os.path.join(run, "res_0.h5"), list(CONST_FIELDS))
     V13 = np.cbrt(msh.vmerged64)
     out = []
     P = out.append
-    P(f"\n## G1 定数場 (GPU、k・ω・ξ = const を焼いて 1 step、plan §6 G1・§5.1 #6c)")
+    P(f"\n## G1 定数場 (GPU、k・ω・ξ = const を焼いて 1 step、plan §6 G1・§5.1 #8c の 3 区分)")
     P(f"run: {run}")
     P(G.provenance(run).rstrip())
-    P("判定: 継ぎ目 (member≥2) で max_c |∂φ/∂x_c| ≤ 4ε|φ|/h。単位 ε|φ|/h (節点ごとの h)。"
-      "対象 = 境界条件の上書きに stencil が触れない節点 (除外数を併記)")
-    P("| 場 | φ | 継ぎ目 節点 (除外) | 継ぎ目 最大 [ε|φ|/h] | 内部 節点 (除外) | 内部 最大 [同] (参考) | 判定 |")
-    P("| --- | --- | --- | --- | --- | --- | --- |")
+    P("判定: 壁なし継ぎ目 max_c |∂φ| ≤ 4ε|φ|/h、壁∩継ぎ目 max_c |∂φ − φ·ΣS_f/V| ≤ 4ε|φ|/h "
+      "(ΣS_f = 格納 float32 面ベクトルの double 和、周期半割面を除く・非周期境界面を含む、V = 合併体積)。"
+      "非継ぎ目壁は同じ参照で報告、内部は参考。単位 ε|φ|/h (h = 節点の合併体積^(1/3))")
+    P("除外 (現行どおり): 境界条件の上書きで res_0 が焼いた定数と違う節点と、それに stencil が触れる group "
+      "(k/ω の壁ピン: 定数場が BC で壊れるので試験にならない)。ξ は上書きされないので除外 0")
+    # 壁 (非周期境界面を持つ group)
+    wall = np.zeros(msh.nCells, bool); wall[msh.pc[msh.bnd_planes, 0]] = True
+    wg = np.zeros(msh.nCells, bool); wg[msh.root[wall]] = True; wall = wg[msh.root]
+    seam = msh.nmember > 1
+    classes = [("壁なし継ぎ目", seam & ~wall, "abs", True), ("壁∩継ぎ目", seam & wall, "ref", True),
+               ("非継ぎ目壁", ~seam & wall, "ref", False), ("内部", ~seam & ~wall, "abs", False)]
+    P("区分の節点数 (除外前): " + "、".join(f"{lab} {int(m.sum())}" for lab, m, _, _ in classes))
+    clos = G.gg_merged(msh, np.ones(msh.nCells, np.float32), "f64", "divide", include_periodic=False)   # ΣS_f/V (double)
+    P("| 場 | φ | 区分 | 節点 (除外) | 比較 | 最大 [ε|φ|/h] | 参照 |φ·ΣS_f/V| の最大 [同] | 判定 |")
+    P("| --- | --- | --- | --- | --- | --- | --- | --- |")
     names = [f"d{g}d{c}" for _, g in CONST_FIELDS.values() for c in "xyz"]
     g1 = G.read_res(os.path.join(run, "res_1.h5"), names)
     ok_all = True
-    seam = msh.nmember > 1
     for v, (c0, gname) in CONST_FIELDS.items():
         c32 = np.float32(c0)
         okv = s0[v] == c32
@@ -386,14 +410,28 @@ def evaluate_const(variant, run):
         bg = np.zeros(msh.nCells, bool); bg[msh.root[msh.inc_m[badv]]] = True
         sel = okv & ~bg[msh.root]
         g = np.stack([g1[f"d{gname}d{c}"] for c in "xyz"], 1).astype(np.float64)
-        r = np.abs(g).max(axis=1) / (G.EPS32 * abs(c0) / V13)
-        es = r[sel & seam].max() if (sel & seam).any() else float("nan")
-        ei = r[sel & ~seam].max() if (sel & ~seam).any() else float("nan")
-        ok = bool((sel & seam).any()) and es <= 4.0
-        ok_all &= ok
-        P(f"| {v} | {c0:g} | {(sel & seam).sum()} ({(seam & ~sel).sum()}) | {es:.2f} | {(sel & ~seam).sum()} ({(~seam & ~sel).sum()}) | "
-          f"{ei:.2f} | {'ok' if ok else 'NG'} |")
-    P(f"VERDICT G1 定数場 ({variant}): {'PASS' if ok_all else 'FAIL'}")
+        unit = G.EPS32 * abs(c0) / V13
+        ref = c0 * clos
+        r_abs = np.abs(g).max(axis=1) / unit
+        r_ref = np.abs(g - ref).max(axis=1) / unit
+        r_clo = np.abs(ref).max(axis=1) / unit
+        for lab, m, kind, judged in classes:
+            mm = m & sel
+            nex = int((m & ~sel).sum())
+            if not mm.any():
+                st = ("対象 0 (除外)" if m.any() else "対象 0") if judged else "-"
+                if judged and not m.any() and lab == "壁なし継ぎ目":
+                    ok_all = False; st = "NG (対象 0)"
+                P(f"| {v} | {c0:g} | {lab} | 0 ({nex}) | - | - | - | {st} |")
+                continue
+            r = r_abs if kind == "abs" else r_ref
+            e = r[mm].max()
+            ok = e <= 4.0
+            if judged:
+                ok_all &= ok
+            P(f"| {v} | {c0:g} | {lab} | {int(mm.sum())} ({nex}) | {'|∂φ|' if kind == 'abs' else '|∂φ − φΣS/V|'} | {e:.2f} | "
+              f"{r_clo[mm].max():.2f} | {('ok' if ok else 'NG') if judged else '報告'} |")
+    P(f"VERDICT G1 定数場 ({variant}, 3 区分: 壁なし継ぎ目 ≤ 4ε、壁∩継ぎ目 |∂φ − φΣS_f/V| ≤ 4ε): {'PASS' if ok_all else 'FAIL'}")
     return "\n".join(out) + "\n", ok_all
 
 

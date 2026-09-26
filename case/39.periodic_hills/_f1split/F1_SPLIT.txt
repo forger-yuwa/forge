@@ -13,3 +13,24 @@ AWS run: ~/forge-pgrad-new/case/39.periodic_hills/_f1split/{old_b1,old_b0,new_b1
 判定規則 (§5.1 #6d、測る前に固定): スパイクが sstSigmaBlend 1 側だけ → 仮説支持、両方またはどちらも無し → 原因未特定
 スパイク (参照床の 10 倍超を目安に表示): blend 1 あり / blend 0 あり
 VERDICT F1 仮説: 原因未特定
+
+## #8d (plan §5.1 #8d、codex result-2 M4): m3 だけを当てた旧版で識別 (2026-09-26)
+上の #6d の A/B (旧版の sstSigmaBlend 1 / 0) は、旧版では初回の σ が両条件とも 0.85 / 0.5 になるので識別能力が無い (codex result-2 M4)。
+m3 のみ版: 1266aba1 + notes/sessions/boundary-node-periodic-gradient-fix-8d-m3only.patch (sstF1 の初期値 1 を allocVariables へ、
+buildScalarDescs の初回 1 充填を削除。2ee5f0a7 の F1 部分と同じ。LSQ・gather・半割面除外などの他の変更は入れない)、
+AWS g5 でクリーンビルド、sha256 ef6a91c046d8c34e3dc8c365782ec4ca58fc47432d45f60979d283dc101a35ad。block 128。
+入力・設定は上と同じ (run_0038 の ic_S3_ext.h5 = run_0036 res_800000 の保存量 7 配列とビット一致を再確認、sstF1 は入力に無い。
+run_0038 の solverConfig.yaml に nStepOuter 1・outStepInterval 1・turbulence.sstSigmaBlend 1 を明記しただけ)。
+AWS run: ~/forge-pgrad-new/case/39.periodic_hills/_f1split/{m3_b1,old_b1_rerun} (スクラッチ)
+参照床: run_0036 の rms_roK の末尾 20 % 平均 (check_convergence --from-floor の定義、outer_end 行 800000 のうち末尾 160000) = 3.291146e-09
+(rms_roOmega は 1.253727e-03)
+
+| run | バイナリ・設定 | step 0 rms_roK | ÷ 参照床 | step 0 rms_roOmega | ÷ 同床 | step 0 rms_ro |
+| --- | --- | --- | --- | --- | --- | --- |
+| m3_b1 | 1266aba1 + m3 のみ (sha256 ef6a91c0…)、sstSigmaBlend 1 | 3.247565328e-09 | 0.987 | 1.277059e-03 | 1.019 | 3.874474e-10 |
+| old_b1_rerun | 旧 1266aba1 (sha256 f0505fe8…)、sstSigmaBlend 1 (同セッションの対照、判定外) | 1.344498742e-06 | 408.5 | 1.439659e-03 | 1.148 | 3.874605e-10 |
+| (old_b1、上表) | 旧 1266aba1、sstSigmaBlend 1 | 1.344497832e-06 | 408.5 | 1.441476e-03 | 1.150 | 3.874670e-10 |
+
+(上表 #6d の「÷ 参照床 408.7」は 3.29e-09 で割った値。ここでは 3.291146e-09 で割っている)
+規則 (§5.1 #8d、測る前に固定): m3 のみ版で rms_roK/床 < 10 → 「F1 初回上書きが原因」、≥ 10 → 「原因未特定 (F1 でない)」
+VERDICT #8d: F1 初回上書きが原因 (m3 のみ版の step 0 rms_roK/床 = 0.987 < 10)

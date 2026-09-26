@@ -19,6 +19,10 @@
 | `R6a_axi_periodic.txt` | #6a の結果 (末尾に反復 12 本の総当たりのノイズ分布、参考) |
 | `f1_read_test.py` | F1 の読み出し (codex m3): 1・2 回目の残差組立で輸送が計算値 F1 を読むか |
 | `G_<variant>.txt` / `G0_cpu_cases.txt` / `G2p_jitter.txt` / `G_f1_read.txt` | 結果 (各ファイル末尾に VERDICT) |
+| `r8a_facedump.py` / `R8a_facedump.txt` | #8a: `FORGE_DUMP_SCALARGRAD` の面寄与ダンプを 新 (f67fe877)・旧+ダンプ (1266aba1 + `notes/sessions/boundary-node-periodic-gradient-fix-8a-olddump.patch`)・誤り版 (`…-8a-wrong.patch`) で比較 (軸対称×周期 = #6a の `r6a_prep`、並進周期 = TGV 32³ に化学種 2 + ξ) |
+| `R8a_R3_dumpoff.txt` | #8a の R3 再確認: 新 f67fe877 (ダンプ off) vs bd22376d (再ビルド)、入力は前回 R3 の `r3_prep` |
+| `g2p_fixedshape.py` / `G2p_fixedshape.txt` | #8b: 32³ ジッタ格子の実在の継ぎ目 group の stencil を形状固定で h, h/2, h/4 に縮小し、`lsq_merged_ref` で二次場の次数 (CPU) |
+| `aws8/` | #8a・#8c と比較用ビルドの AWS ドライバ (`~/pgrad8/` に置いて使ったもの、記録用) |
 
 場は ρ=1 で焼く (channel は ρ も線形)。w は継ぎ目中心の局所座標 (周期軸を中央で折り返し、group 内は root の値)。
 折返し不連続に触れる節点は解析値比較から除く。状態は `res_0.h5`、勾配は `res_1.h5` (k/ω の勾配は res_0 では未計算)。
