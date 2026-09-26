@@ -7,6 +7,10 @@
 #include "input/solverConfig.hpp"
 #include "variables.hpp"
 
+#include <array>
+#include <string>
+#include <vector>
+
 // node-centered 周期境界 DOF 同一視 (median-dual M4, §4.5)。
 // setPeriodicPartner + buildPeriodicNodeGroups で構築した周期ノード group (periodicRoot) に対し、
 // 保存量残差 res_* を group 全員で足し合わせ、全員へ同じ和を書き戻す (gather + broadcast)。
@@ -52,3 +56,16 @@ void periodicGatherMaxArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg ,
 void periodicGatherMinArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a);
 // 化学種の保存量 roY{s} を root→member でミラー (化学種更新の直後に呼ぶ; §4.1-5)。
 void periodicMirrorSpeciesState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);
+
+// 診断 (env `FORGE_DUMP_PREGATHER=<path>`、既定 off・出力専用で数値は変えない。plan gradient-scalar-lsq-unification §5.1 #4a)。
+// 周期 gather の**直前**の勾配の局所配列を、tag ごとに最初の 1 回だけ raw float [nVar][nCells][3] (成分 x,y,z が最内) で
+// `<path>.<tag>` に、変数名を `<path>.<tag>.names` (1 行目 "nVar nCells"、以降 1 行 1 名) に書く。D2H は非 atomic の読み出しのみ。
+// env が無いときは何もしない (同期も入れない)。既存の FORGE_DUMP_SCALARGRAD (GG の面寄与) とは別物。
+// env が有効か (初回に getenv して固定)。呼び出し側はこれが false なら引数の vector も組まない。
+bool preGatherDumpEnabled();
+void preGatherDump(const std::string& tag, geom_int nCells, const std::vector<std::string>& names,
+                   const std::vector<std::array<const flow_float*, 3>>& grads);
+// main の periodicGradientGather 直前 (初期化 "init"・ループ初回 "loop1") 用: NS 6 量 (ro,Ux,Uy,Uz,P,T) × 3 成分と、
+// gg 経路で同じ gather に登録される dY{s}・受動種 (ξ・凝縮モーメント) の勾配。scalarGradient: lsq では dY・受動種は
+// 各 wrapper 内で合併済みなのでここには含めない (wrapper 側で gather 直前に別 tag で書く)。
+void preGatherDumpMain(solverConfig& cfg , mesh& msh , variables& var , const char* tag);

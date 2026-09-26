@@ -15,7 +15,7 @@
 - Phase 1 opt-in 実装 (`mesh.scalarGradient: gg|lsq`、既定 gg) は commit 7ebf6d7d (レビュー済み)。
 - S0 (a–e) PASS、S1(1) gg 旧 vs 新 PASS、#4b = **A** (tgv の NS 配列の不一致は周期 gather の atomicAdd 順序差)、#4c (5 種 Y) PASS。
 
-## 未決 (次セッションの最初にやること)
+## 未決 (次セッションの最初にやること) — **2026-09-26 決着** (codex (diagnose) 2 回、plan §5.1 #4a・#4d・#4e・#4f・§6.1)。S0/S1 PASS で閉じ、次は S2 (#2e から)
 
 上位判断 (Fable 上限時は codex、ユーザのルール変更) で決める:
 

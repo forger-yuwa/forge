@@ -233,6 +233,9 @@ void ransGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, 
             s_ptrHost = h;
         }
         lsqScalarGradient_d_wrapper(cuda_cfg, msh, 2, s_ptrDev + 0, s_ptrDev + 2, s_ptrDev + 4, s_ptrDev + 6);
+        if (preGatherDumpEnabled())   // 診断 (FORGE_DUMP_PREGATHER、既定 off・出力専用)
+            preGatherDump("rans.loop1", msh.nCells, {"K", "Omega"},
+                          {{var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"]}, {var.c_d["dOmegadx"], var.c_d["dOmegady"], var.c_d["dOmegadz"]}});
         // 継ぎ目: 合併係数の部分和を group で和 → broadcast (GG 経路と同じ述語・同じ専用 gather)。
         if (periodicSeamMergeActive(cfg, msh)) {
             for (const char* k : {"dKdx", "dKdy", "dKdz", "dOmegadx", "dOmegady", "dOmegadz"}) {
@@ -263,6 +266,9 @@ void ransGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, 
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+    if (preGatherDumpEnabled())   // 診断 (FORGE_DUMP_PREGATHER、既定 off・出力専用)
+        preGatherDump("rans.loop1", msh.nCells, {"K", "Omega"},
+                      {{var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"]}, {var.c_d["dOmegadx"], var.c_d["dOmegady"], var.c_d["dOmegadz"]}});
 
     // node 周期の継ぎ目: 合併体積で割った部分寄与を group で和 → broadcast (Green–Gauss の合併勾配)。
     // 以前は periodicGradientGather (main) の後で本関数が作り直していたので、F1 と拡散は片側の勾配を読んでいた

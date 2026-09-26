@@ -1,0 +1,195 @@
+# #4d ダンプ非干渉と S1 (2) の再判定 (tgv) — E/P/N 区分 (事後規則、plan §6「ダンプ非干渉」)
+harness revision: 1a33427 (dirty)
+forge_mtime : 2026-09-26T09:53:49+00:00
+forge_sha256: a398afdc2c42b64861ac1efdccbbae5c75f929346a1ae23773095fd8ee56766f
+git_head    : 1a334275e07a5fb75724cfdbb9025b8a771add38
+- off gg: /home/ubuntu/sglsq/s1h/s1_tgv_gg_a
+- off gg: /home/ubuntu/sglsq/s1h/s1_tgv_gg_b
+- off gg: /home/ubuntu/sglsq/s1h/s1_tgv_gg_c
+- off lsq: /home/ubuntu/sglsq/s1h/s1_tgv_lsq_a
+- off lsq: /home/ubuntu/sglsq/s1h/s1_tgv_lsq_b
+- off lsq: /home/ubuntu/sglsq/s1h/s1_tgv_lsq_c
+- on gg: /home/ubuntu/sglsq/pg/pg_tgv_gg_a
+- on gg: /home/ubuntu/sglsq/pg/pg_tgv_gg_b
+- on gg: /home/ubuntu/sglsq/pg/pg_tgv_gg_c
+- on lsq: /home/ubuntu/sglsq/pg/pg_tgv_lsq_a
+- on lsq: /home/ubuntu/sglsq/pg/pg_tgv_lsq_b
+- on lsq: /home/ubuntu/sglsq/pg/pg_tgv_lsq_c
+CV 35937、周期 group 2977 (member 数の内訳 1:29791, 2:5766, 4:372, 8:8)
+
+## E0: pre-gather NS 18 配列がダンプ有りの全 run でビット同一か (P の部分和の前提)
+| tag | 変数 | 基準と異なる run 数 | 不一致節点数 (最大) |
+| --- | --- | --- | --- |
+| init | dro | 0 | 0 |
+| init | dUx | 0 | 0 |
+| init | dUy | 0 | 0 |
+| init | dUz | 0 | 0 |
+| init | dP | 0 | 0 |
+| init | dT | 0 | 0 |
+| loop1 | dro | 0 | 0 |
+| loop1 | dUx | 0 | 0 |
+| loop1 | dUy | 0 | 0 |
+| loop1 | dUz | 0 | 0 |
+| loop1 | dP | 0 | 0 |
+| loop1 | dT | 0 | 0 |
+
+## res_0: E (厳密一致、基準 = pg_tgv_gg_a)
+| res | 配列 | 基準と異なる run 数 | 不一致節点数 (最大) | 判定 |
+| --- | --- | --- | --- | --- |
+| res_0 | P | 0 | 0 | ok |
+| res_0 | T | 0 | 0 | ok |
+| res_0 | Ux | 0 | 0 | ok |
+| res_0 | Uy | 0 | 0 | ok |
+| res_0 | Uz | 0 | 0 | ok |
+| res_0 | Xi | 0 | 0 | ok |
+| res_0 | dPdx (group 外) | 0 | 0 | ok |
+| res_0 | dPdy (group 外) | 0 | 0 | ok |
+| res_0 | dPdz (group 外) | 0 | 0 | ok |
+| res_0 | dTdx (group 外) | 0 | 0 | ok |
+| res_0 | dTdy (group 外) | 0 | 0 | ok |
+| res_0 | dTdz (group 外) | 0 | 0 | ok |
+| res_0 | dUxdx (group 外) | 0 | 0 | ok |
+| res_0 | dUxdy (group 外) | 0 | 0 | ok |
+| res_0 | dUxdz (group 外) | 0 | 0 | ok |
+| res_0 | dUydx (group 外) | 0 | 0 | ok |
+| res_0 | dUydy (group 外) | 0 | 0 | ok |
+| res_0 | dUydz (group 外) | 0 | 0 | ok |
+| res_0 | dUzdx (group 外) | 0 | 0 | ok |
+| res_0 | dUzdy (group 外) | 0 | 0 | ok |
+| res_0 | dUzdz (group 外) | 0 | 0 | ok |
+| res_0 | drodx (group 外) | 0 | 0 | ok |
+| res_0 | drody (group 外) | 0 | 0 | ok |
+| res_0 | drodz (group 外) | 0 | 0 | ok |
+| res_0 | h0 | 0 | 0 | ok |
+| res_0 | k | 0 | 0 | ok |
+| res_0 | omega | 0 | 0 | ok |
+| res_0 | ro | 0 | 0 | ok |
+| res_0 | roK | 0 | 0 | ok |
+| res_0 | roOmega | 0 | 0 | ok |
+| res_0 | roUx | 0 | 0 | ok |
+| res_0 | roUy | 0 | 0 | ok |
+| res_0 | roUz | 0 | 0 | ok |
+| res_0 | roXi | 0 | 0 | ok |
+| res_0 | roe | 0 | 0 | ok |
+
+## res_0: P (2 member 以上の節点、pre-gather init の順列和の集合)
+| res | 配列 | 基準と値が違う (run, 節点) 数 | 集合外の (run, 節点) 数 | 判定 |
+| --- | --- | --- | --- | --- |
+| res_0 | dPdx | 0 | 0 | ok |
+| res_0 | dPdy | 0 | 0 | ok |
+| res_0 | dPdz | 0 | 0 | ok |
+| res_0 | dTdx | 0 | 0 | ok |
+| res_0 | dTdy | 0 | 0 | ok |
+| res_0 | dTdz | 0 | 0 | ok |
+| res_0 | dUxdx | 368 | 0 | ok |
+| res_0 | dUxdy | 0 | 0 | ok |
+| res_0 | dUxdz | 352 | 0 | ok |
+| res_0 | dUydx | 0 | 0 | ok |
+| res_0 | dUydy | 0 | 0 | ok |
+| res_0 | dUydz | 0 | 0 | ok |
+| res_0 | dUzdx | 0 | 0 | ok |
+| res_0 | dUzdy | 0 | 0 | ok |
+| res_0 | dUzdz | 0 | 0 | ok |
+| res_0 | drodx | 0 | 0 | ok |
+| res_0 | drody | 0 | 0 | ok |
+| res_0 | drodz | 0 | 0 | ok |
+
+## res_0: N (両側ノイズ、記録。全対ビット一致 98 件は省略)
+| res | 配列 | kind | 無し同士 | 有り同士 | 無し–有り | 2 倍規則 |
+| --- | --- | --- | --- | --- | --- | --- |
+N 区分 (res_0): 全て 2 倍以内
+
+## res_1: E (厳密一致、基準 = pg_tgv_gg_a)
+| res | 配列 | 基準と異なる run 数 | 不一致節点数 (最大) | 判定 |
+| --- | --- | --- | --- | --- |
+| res_1 | dPdx (group 外) | 0 | 0 | ok |
+| res_1 | dPdy (group 外) | 0 | 0 | ok |
+| res_1 | dPdz (group 外) | 0 | 0 | ok |
+| res_1 | dTdx (group 外) | 0 | 0 | ok |
+| res_1 | dTdy (group 外) | 0 | 0 | ok |
+| res_1 | dTdz (group 外) | 0 | 0 | ok |
+| res_1 | dUxdx (group 外) | 0 | 0 | ok |
+| res_1 | dUxdy (group 外) | 0 | 0 | ok |
+| res_1 | dUxdz (group 外) | 0 | 0 | ok |
+| res_1 | dUydx (group 外) | 0 | 0 | ok |
+| res_1 | dUydy (group 外) | 0 | 0 | ok |
+| res_1 | dUydz (group 外) | 0 | 0 | ok |
+| res_1 | dUzdx (group 外) | 0 | 0 | ok |
+| res_1 | dUzdy (group 外) | 0 | 0 | ok |
+| res_1 | dUzdz (group 外) | 0 | 0 | ok |
+| res_1 | drodx (group 外) | 0 | 0 | ok |
+| res_1 | drody (group 外) | 0 | 0 | ok |
+| res_1 | drodz (group 外) | 0 | 0 | ok |
+
+## res_1: P (2 member 以上の節点、pre-gather loop1 の順列和の集合)
+| res | 配列 | 基準と値が違う (run, 節点) 数 | 集合外の (run, 節点) 数 | 判定 |
+| --- | --- | --- | --- | --- |
+| res_1 | dPdx | 0 | 0 | ok |
+| res_1 | dPdy | 0 | 0 | ok |
+| res_1 | dPdz | 0 | 0 | ok |
+| res_1 | dTdx | 0 | 0 | ok |
+| res_1 | dTdy | 0 | 0 | ok |
+| res_1 | dTdz | 0 | 0 | ok |
+| res_1 | dUxdx | 792 | 0 | ok |
+| res_1 | dUxdy | 64 | 0 | ok |
+| res_1 | dUxdz | 92 | 0 | ok |
+| res_1 | dUydx | 0 | 0 | ok |
+| res_1 | dUydy | 0 | 0 | ok |
+| res_1 | dUydz | 0 | 0 | ok |
+| res_1 | dUzdx | 0 | 0 | ok |
+| res_1 | dUzdy | 0 | 0 | ok |
+| res_1 | dUzdz | 0 | 0 | ok |
+| res_1 | drodx | 0 | 0 | ok |
+| res_1 | drody | 0 | 0 | ok |
+| res_1 | drodz | 0 | 0 | ok |
+
+## res_1: N (両側ノイズ、記録。全対ビット一致 88 件は省略)
+| res | 配列 | kind | 無し同士 | 有り同士 | 無し–有り | 2 倍規則 |
+| --- | --- | --- | --- | --- | --- | --- |
+| res_1 | Xi | gg | n≤3 / max 2.98e-08 | n≤3 / max 2.98e-08 | n≤3 / max 2.98e-08 | PASS |
+| res_1 | Xi | lsq | n≤2 / max 2.98e-08 | n≤3 / max 2.98e-08 | n≤3 / max 2.98e-08 | PASS |
+| res_1 | dKdx | gg | n≤282 / max 1.91e-06 | n≤292 / max 1.91e-06 | n≤320 / max 1.91e-06 | PASS |
+| res_1 | dKdx | lsq | n≤0 / max 0 | n≤8 / max 2.98e-08 | n≤8 / max 2.98e-08 | PASS |
+| res_1 | dKdy | gg | n≤212 / max 2.86e-06 | n≤178 / max 1.91e-06 | n≤244 / max 2.86e-06 | PASS |
+| res_1 | dKdy | lsq | n≤4 / max 1.49e-08 | n≤8 / max 1.49e-08 | n≤12 / max 1.49e-08 | PASS |
+| res_1 | dKdz | gg | n≤178 / max 2.86e-06 | n≤146 / max 1.91e-06 | n≤166 / max 2.86e-06 | PASS |
+| res_1 | dKdz | lsq | n≤40 / max 7.45e-09 | n≤4 / max 7.45e-09 | n≤40 / max 7.45e-09 | PASS |
+| res_1 | dOmegadx | gg | n≤262 / max 0.000122 | n≤290 / max 0.000183 | n≤294 / max 0.000183 | PASS |
+| res_1 | dOmegady | gg | n≤260 / max 9.16e-05 | n≤254 / max 9.16e-05 | n≤288 / max 9.16e-05 | PASS |
+| res_1 | dOmegady | lsq | n≤0 / max 0 | n≤4 / max 7.45e-09 | n≤4 / max 7.45e-09 | PASS |
+| res_1 | dOmegadz | gg | n≤252 / max 0.000183 | n≤256 / max 0.000183 | n≤288 / max 0.000183 | PASS |
+| res_1 | dXidx | gg | n≤208 / max 4.77e-07 | n≤188 / max 2.38e-07 | n≤246 / max 7.15e-07 | PASS |
+| res_1 | dXidx | lsq | n≤4 / max 2.33e-10 | n≤0 / max 0 | n≤4 / max 2.33e-10 | PASS |
+| res_1 | dXidy | gg | n≤198 / max 4.77e-07 | n≤192 / max 4.77e-07 | n≤274 / max 4.77e-07 | PASS |
+| res_1 | dXidy | lsq | n≤24 / max 1.49e-08 | n≤24 / max 1.49e-08 | n≤24 / max 1.49e-08 | PASS |
+| res_1 | dXidz | gg | n≤212 / max 4.77e-07 | n≤130 / max 4.77e-07 | n≤168 / max 7.15e-07 | PASS |
+| res_1 | dXidz | lsq | n≤44 / max 3.73e-09 | n≤0 / max 0 | n≤40 / max 3.73e-09 | PASS |
+| res_1 | res_ro | gg | n≤12 / max 2.98e-08 | n≤45 / max 2.98e-08 | n≤42 / max 2.98e-08 | PASS |
+| res_1 | res_ro | lsq | n≤11 / max 2.98e-08 | n≤14 / max 2.98e-08 | n≤40 / max 2.98e-08 | FAIL |
+| res_1 | res_roK | gg | n≤689 / max 2.38e-07 | n≤730 / max 3.58e-07 | n≤700 / max 3.58e-07 | PASS |
+| res_1 | res_roK | lsq | n≤633 / max 1.79e-07 | n≤744 / max 2.38e-07 | n≤781 / max 2.38e-07 | PASS |
+| res_1 | res_roOmega | gg | n≤481 / max 1.14e-05 | n≤606 / max 1.14e-05 | n≤563 / max 1.14e-05 | PASS |
+| res_1 | res_roOmega | lsq | n≤548 / max 1.14e-05 | n≤605 / max 1.14e-05 | n≤559 / max 1.14e-05 | PASS |
+| res_1 | res_roUx | gg | n≤659 / max 0.000244 | n≤740 / max 0.000244 | n≤713 / max 0.000244 | PASS |
+| res_1 | res_roUx | lsq | n≤695 / max 0.000244 | n≤659 / max 0.000244 | n≤768 / max 0.000244 | PASS |
+| res_1 | res_roUy | gg | n≤13527 / max 0.000244 | n≤13718 / max 0.000244 | n≤13895 / max 0.000244 | PASS |
+| res_1 | res_roUy | lsq | n≤13547 / max 0.000244 | n≤13663 / max 0.000244 | n≤13640 / max 0.000244 | PASS |
+| res_1 | res_roe | gg | n≤48 / max 0.0156 | n≤128 / max 0.0156 | n≤136 / max 0.0156 | PASS |
+| res_1 | res_roe | lsq | n≤80 / max 0.0156 | n≤41 / max 0.0156 | n≤145 / max 0.0156 | PASS |
+| res_1 | ro | gg | n≤415 / max 2.38e-07 | n≤316 / max 2.98e-07 | n≤402 / max 2.98e-07 | PASS |
+| res_1 | ro | lsq | n≤338 / max 2.98e-07 | n≤332 / max 2.98e-07 | n≤430 / max 2.98e-07 | PASS |
+| res_1 | roUx | gg | n≤2 / max 9.54e-07 | n≤5 / max 9.54e-07 | n≤7 / max 9.54e-07 | PASS |
+| res_1 | roUx | lsq | n≤0 / max 0 | n≤2 / max 9.54e-07 | n≤2 / max 9.54e-07 | PASS |
+| res_1 | roUy | gg | n≤13708 / max 8.38e-08 | n≤13826 / max 8.36e-08 | n≤14219 / max 8.38e-08 | PASS |
+| res_1 | roUy | lsq | n≤13734 / max 8.36e-08 | n≤13736 / max 8.38e-08 | n≤13767 / max 8.38e-08 | PASS |
+| res_1 | roUz | gg | n≤11123 / max 8.36e-08 | n≤11191 / max 8.38e-08 | n≤11538 / max 8.38e-08 | PASS |
+| res_1 | roUz | lsq | n≤11464 / max 8.36e-08 | n≤11215 / max 8.36e-08 | n≤11446 / max 8.36e-08 | PASS |
+| res_1 | roXi | gg | n≤359 / max 2.38e-07 | n≤266 / max 1.19e-07 | n≤342 / max 2.38e-07 | PASS |
+| res_1 | roXi | lsq | n≤292 / max 2.38e-07 | n≤279 / max 2.38e-07 | n≤362 / max 2.38e-07 | PASS |
+| res_1 | transport_diag_k | gg | n≤1353 / max 1.19e-07 | n≤1370 / max 1.19e-07 | n≤1404 / max 1.19e-07 | PASS |
+| res_1 | transport_diag_k | lsq | n≤1273 / max 1.19e-07 | n≤1278 / max 1.19e-07 | n≤1292 / max 1.19e-07 | PASS |
+| res_1 | transport_diag_omega | gg | n≤1053 / max 1.19e-07 | n≤1122 / max 1.19e-07 | n≤1118 / max 1.19e-07 | PASS |
+| res_1 | transport_diag_omega | lsq | n≤933 / max 1.19e-07 | n≤993 / max 1.19e-07 | n≤1015 / max 1.19e-07 | PASS |
+N 区分 (res_1): 2 倍を超える配列あり
+
+VERDICT #4d (tgv): A (E 全て厳密一致、P 全点集合内)

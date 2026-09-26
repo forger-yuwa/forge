@@ -76,6 +76,7 @@ void variables::registerSpecies(int nSpecies, int chemistry)
         // 保存質量分率 roY{s} と原始 Y{s} を HDF5 出力対象に加える (roY はリスタートに必須)。
         this->output_cellValNames.push_back("roY"+std::to_string(s));
         this->output_cellValNames.push_back("Y"+std::to_string(s));
+        for (const char* c : {"x", "y", "z"}) this->extraOnly_cellValNames.push_back("dY"+std::to_string(s)+"d"+c);   // extraFields 専用
     }
 
     // 診断 (FORGE_SPECIES_RAW_DIAG=1): 再正規化前の生更新値 roYraw{s} を出力する (plan species-passive-scalar-unification §6-1 の

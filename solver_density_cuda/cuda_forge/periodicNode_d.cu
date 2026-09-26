@@ -1,6 +1,10 @@
 #include <vector>
 #include <iterator>
 #include <string>
+#include <set>
+#include <fstream>
+#include <iostream>
+#include <cstdlib>
 #include "periodicNode_d.cuh"
 #include "periodicAtomic_d.cuh"
 #include "calcGradient_d.cuh"   // scalarGradientLsqActive
@@ -292,4 +296,69 @@ void periodicMirrorDq_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh&
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+}
+
+void preGatherDump(const std::string& tag, geom_int nCells, const std::vector<std::string>& names,
+                   const std::vector<std::array<const flow_float*, 3>>& grads)
+{
+    const char* p = std::getenv("FORGE_DUMP_PREGATHER");
+    if (!p || !*p || names.empty() || names.size() != grads.size()) return;
+    static std::set<std::string> done;
+    if (!done.insert(tag).second) return;
+    // 成分の配列が無いときはゼロで埋めない (真のゼロと区別できなくなる)。診断失敗として tag ごと書かない。
+    for (size_t v = 0; v < names.size(); ++v) {
+        for (int c = 0; c < 3; ++c) {
+            if (grads[v][c] == nullptr) {
+                std::cout << "[FORGE_DUMP_PREGATHER] " << tag << ": d" << names[v] << "d" << "xyz"[c]
+                          << " が無いのでこの tag は書かない\n";
+                return;
+            }
+        }
+    }
+    const size_t n = (size_t)nCells;
+    std::vector<flow_float> buf(names.size() * n * 3), tmp(n);
+    for (size_t v = 0; v < names.size(); ++v) {
+        for (int c = 0; c < 3; ++c) {
+            gpuErrchk( cudaMemcpy(tmp.data(), grads[v][c], n * sizeof(flow_float), cudaMemcpyDeviceToHost) );
+            for (size_t i = 0; i < n; ++i) buf[(v * n + i) * 3 + c] = tmp[i];
+        }
+    }
+    const std::string path = std::string(p) + "." + tag;
+    std::ofstream ofs(path, std::ios::binary);
+    if (!ofs) { std::cout << "[FORGE_DUMP_PREGATHER] cannot open " << path << '\n'; return; }
+    ofs.write(reinterpret_cast<const char*>(buf.data()), (std::streamsize)(buf.size() * sizeof(flow_float)));
+    std::ofstream nf(path + ".names");
+    nf << names.size() << " " << n << "\n";
+    for (const auto& nm : names) nf << nm << "\n";
+    std::cout << "[FORGE_DUMP_PREGATHER] wrote " << names.size() << " x " << n << " x 3 pre-gather gradients to " << path << '\n';
+}
+
+bool preGatherDumpEnabled()
+{
+    static const bool on = [] { const char* p = std::getenv("FORGE_DUMP_PREGATHER"); return p != nullptr && *p != '\0'; }();
+    return on;
+}
+
+void preGatherDumpMain(solverConfig& cfg , mesh& msh , variables& var , const char* tag)
+{
+    if (!preGatherDumpEnabled()) return;
+    std::vector<std::string> names;
+    std::vector<std::array<const flow_float*, 3>> g;
+    auto add = [&](const std::string& nm) {
+        auto f = [&](const std::string& k) -> const flow_float* {
+            auto it = var.c_d.find(k); return (it == var.c_d.end()) ? nullptr : it->second; };
+        const flow_float* x = f("d" + nm + "dx");
+        if (x == nullptr) return;
+        names.push_back(nm);
+        g.push_back({x, f("d" + nm + "dy"), f("d" + nm + "dz")});
+    };
+    for (const char* v : {"ro", "Ux", "Uy", "Uz", "P", "T"}) add(v);
+    if (cfg.speciesFaceReconstruction >= 1 && !scalarGradientLsqActive(cfg)) {
+        for (int s = 0; s < var.nSpeciesRegistered; ++s) add("Y" + std::to_string(s));
+        if (cfg.passiveScalarScheme == 1) {
+            if (var.tracerRegistered != 0) add("Xi");
+            for (const auto& nm : var.condMomentConsNames) add(nm.substr(2));
+        }
+    }
+    preGatherDump(tag, msh.nCells, names, g);
 }

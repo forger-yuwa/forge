@@ -222,6 +222,10 @@ public:
         "dcc"   // dcc: distance between two cell centers
     };
 
+    // output.extraFields で**だけ**出せる量 (level 2 の既定出力には入れないので、既存 run の res_*.h5 の中身は変わらない)。
+    // 化学種の勾配 dY{s}d{x,y,z} は registerSpecies() が足す。値は周期 gather 後。plan gradient-scalar-lsq-unification §5.1 #4a。
+    std::list<std::string> extraOnly_cellValNames = {"wall_y_eff"};
+
     // 化学種 (M2): registerSpecies() が Y{s} を出力対象に追加するため非 const。
     std::list<std::string> output_cellValNames =
     {

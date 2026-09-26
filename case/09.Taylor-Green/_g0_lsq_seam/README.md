@@ -148,3 +148,16 @@ dXidx・dXidy の旧新 min は 0 / 1。
 128³ の継ぎ目/内部: 0.77–0.87 (全成分 ≤ 2)。各水準の継ぎ目/内部の最大: 1.00 / 0.95 / 0.85 / 0.87。
 **VERDICT: 判定不能** (64→128 の継ぎ目の次数 最小 0.855 < 0.9、φ_y と φ_z)。内部の次数 (64→128) は 0.825–1.000。
 G2 (GPU − CPU double)/S は 128³ で 9.9e-6 (16/32/64 は 6.6e-7 / 1.8e-6 / 2.8e-6)。一様格子 N=32 の行 (記録) は床以下、ゼロ成分 0。
+
+## plan gradient-scalar-lsq-unification の S0/S1 (2026-09-26、AWS g5・block 128)
+
+plan [`gradient-scalar-lsq-unification.md`](../../../plans/active/gradient-scalar-lsq-unification.md) §5.1 #4–#4f・§6。run はすべて AWS スクラッチ `~/sglsq/{s0,s0h,s1h,pg,pg8}/` (破棄可)。
+
+| ファイル | 内容 |
+| --- | --- |
+| `g_suite.py s0 <variant>` / `S0_*.txt` | S0-a/b/c/d/e (k・ω・ξ の LSQ 勾配、10 変種)。軸対称 2 変種の S0-c は適用除外 (plan §6) |
+| `s0y_species.py` / `S0Y_*.txt` / `S0e_case39.txt` | #4c: Y 5 種 (チャンク境界 4+1)、ΣdY、S0-e wall_y_eff |
+| `s1_nointerference.py` / `S1.txt`・`S1_hook4a.txt` | S1 (1) gg 旧 vs 新・(2) NS 勾配 gg vs lsq。tgv の (2) の初回 FAIL を含む (書き換えない) |
+| `pregather_check.py` / `PREGATHER_4b.txt`・`DUMPCHECK_case48.txt` | #4b (gather 前 NS 18 配列のビット同一性と順列和の集合) と、S1 規則の流用によるダンプ非干渉の初回判定 (FAIL 記録) |
+| `dump_recheck.py` / `DUMP_RECHECK_{tgv,case48}.txt` | #4d: E (厳密) / P (順列集合) / N (両側ノイズ) 区分での再判定 (事後規則)。tgv は N の 1 配列が FAIL |
+| `lsq8_run.py` / `DUMP_RECHECK_tgv_lsq8.txt` | #4f: lsq のダンプ無し・有り各 8 本 (ABBA 順) の一度限りの追加試験 → E/P A・N PASS |

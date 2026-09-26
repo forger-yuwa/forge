@@ -17,6 +17,7 @@
 #include <cstdlib>
 
 #include <algorithm>
+#include <array>
 #include <string>
 #include <utility>
 #include <vector>
@@ -728,6 +729,14 @@ void speciesGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
     // periodicGradientGather は lsq のとき dY を登録しない (二重合併の回避)。FORGE_DUMP_SCALARGRAD は GG 経路専用。
     if (scalarGradientLsqActive(cfg)) {
         lsqScalarGradient_d_wrapper(cuda_cfg, msh, n, g_Y_dev, g_dYdx_dev, g_dYdy_dev, g_dYdz_dev);
+        if (preGatherDumpEnabled()) {   // 診断 (FORGE_DUMP_PREGATHER、既定 off・出力専用): 周期合併の直前の局所配列
+            std::vector<std::string> nm; std::vector<std::array<const flow_float*, 3>> gp;
+            for (int s = 0; s < n; ++s) {
+                const std::string i = std::to_string(s);
+                nm.push_back("Y" + i); gp.push_back({var.c_d["dY"+i+"dx"], var.c_d["dY"+i+"dy"], var.c_d["dY"+i+"dz"]});
+            }
+            preGatherDump("species_lsq.loop1", msh.nCells, nm, gp);
+        }
         if (periodicSeamMergeActive(cfg, msh)) {
             for (int s = 0; s < n; ++s) {
                 const std::string i = std::to_string(s);
@@ -1284,6 +1293,11 @@ void passiveGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
     // mesh.scalarGradient: lsq (node のみ)。化学種と同じ扱い (normalize なし、周期合併は periodicSeamMergeActive のときここで)。
     if (scalarGradientLsqActive(cfg)) {
         lsqScalarGradient_d_wrapper(cuda_cfg, msh, g_nPassive, g_p_prim_dev, g_p_gx_dev, g_p_gy_dev, g_p_gz_dev);
+        if (preGatherDumpEnabled()) {   // 診断 (FORGE_DUMP_PREGATHER、既定 off・出力専用): 周期合併の直前の局所配列
+            std::vector<std::array<const flow_float*, 3>> gp;
+            for (int q = 0; q < g_nPassive; ++q) gp.push_back({h_p_gx[q], h_p_gy[q], h_p_gz[q]});
+            preGatherDump("passive_lsq.loop1", msh.nCells, g_pPrim, gp);
+        }
         if (periodicSeamMergeActive(cfg, msh)) {
             for (int q = 0; q < g_nPassive; ++q) {
                 periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, h_p_gx[q]);

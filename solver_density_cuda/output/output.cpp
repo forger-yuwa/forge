@@ -35,9 +35,19 @@ flow_float outputTimeValue(const solverConfig& cfg, int iStep)
 // 出力する場の量を config output.level で絞る (procedures/solver-settings.md「output」)。
 //   level 2: output_cellValNames 全部 (従来)。level 0/1: 下の基本集合 + extraFields を output_cellValNames の順で。
 //   h0 (全エンタルピー) は level>=1 で合成出力 (Ht [+k]) し、属性 h0_includes_k を付ける。
+// extraFields のうち extraOnly_cellValNames (既定出力に入れない量: wall_y_eff・dY{s}d*) にあるものを末尾に足す。
+static void appendExtraOnly(const solverConfig& cfg, const variables& var, std::list<std::string>& out)
+{
+    for (const auto& n : cfg.outputExtraFields) {
+        if (std::find(var.extraOnly_cellValNames.begin(), var.extraOnly_cellValNames.end(), n) == var.extraOnly_cellValNames.end()) continue;
+        if (std::find(out.begin(), out.end(), n) != out.end() || var.c.count(n) == 0) continue;
+        out.push_back(n);
+    }
+}
+
 static std::list<std::string> effectiveOutputNames(const solverConfig& cfg, const variables& var)
 {
-    if (cfg.outputLevel >= 2) return var.output_cellValNames;
+    if (cfg.outputLevel >= 2) { std::list<std::string> out = var.output_cellValNames; appendExtraOnly(cfg, var, out); return out; }
     std::vector<std::string> base = {"ro","roUx","roUy","roUz","roe","roK","roOmega"};
     for (const auto& n : var.speciesVarNames) base.push_back(n);            // roY{s}
     for (const auto& n : var.condMomentConsNames) base.push_back(n);        // 凝縮モーメント保存量
@@ -55,8 +65,10 @@ static std::list<std::string> effectiveOutputNames(const solverConfig& cfg, cons
     for (const auto& n : var.output_cellValNames) {
         if (std::find(base.begin(), base.end(), n) != base.end()) out.push_back(n);
     }
+    appendExtraOnly(cfg, var, out);
     for (const auto& n : cfg.outputExtraFields) {
-        if (std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), n) == var.output_cellValNames.end()) {
+        if (std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), n) == var.output_cellValNames.end()
+            && std::find(var.extraOnly_cellValNames.begin(), var.extraOnly_cellValNames.end(), n) == var.extraOnly_cellValNames.end()) {
             static bool warned = false;
             if (!warned) { std::cerr << "[output] extraFields: '" << n << "' is not an output variable (ignored)\n"; warned = true; }
         }

@@ -1301,6 +1301,7 @@ cudaConfig initializeSimulation(
     applyTracerBoundaries(cfg , cuda_cfg , msh , var);
     calcGradient_d_wrapper(cfg , cuda_cfg , msh , var);
     // 初期 setup でも周期勾配 gather を適用 (assembleResidual と整合; res_0 出力と初期診断を正しい合併勾配にする)。
+    preGatherDumpMain(cfg , msh , var , "init");   // 診断 (FORGE_DUMP_PREGATHER、既定 off・出力専用)
     periodicGradientGather_d_wrapper(cfg , cuda_cfg , msh , var);
     axisymmetricGeomTerms_d_wrapper(cfg , cuda_cfg , msh , var);
     updateVariablesOuter(cfg , cuda_cfg , msh , var , mat_ns);
@@ -1474,6 +1475,7 @@ void assembleResidual(StepContext& s, int stage_index)
         }
         // node 周期境界 DOF 同一視 (§4.5 拡張): boundary periodic node の Green-Gauss 勾配を「和→broadcast」で
         // 厳密合併に直す (calcGradient_b_d で periodic 半割面は除外済み)。2次再構成・粘性の seam 精度向上。
+        preGatherDumpMain(s.cfg , s.msh , s.var , "loop1");   // 診断 (FORGE_DUMP_PREGATHER、初回のみ・出力専用)
         periodicGradientGather_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     });
     s.profiler.measureCuda(ProfileSection::AxisymmetricSource, [&]() {
