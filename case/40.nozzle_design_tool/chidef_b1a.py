@@ -4,7 +4,9 @@
 量と許容 (plan §6 B1-a 表、測る前に固定):
   ① η_CF と ṁ (`s2_eval_case40.py` = `thrust_metrics`、README:172 と同じ抽出): 末尾 40 % の差区間 (usage-rule §4.2 の式) が ±0.1 % (相対) 以内
   ② 輪郭壁 p/p0 (p0 = 入口全圧 4 MPa、壁 physID 3 の節点): 最終スナップショットの L∞ ≤ 0.5 %
-  ③ 等温壁 q_w: **本ケースの壁は断熱 (`kind: wall`) なので対象外** (記録)
+  ③ 等温壁 q_w (`--isothermal`、壁出力 `res_wall_3_*.h5` の `qwall`): 最終スナップショットの相対 L2 ≤ 1 %、3 点 (壁 x の 25/50/75 %) 系列
+     `--drift 0.002 --osc 0.005`。qwall が全点 0 なら判定不能 (旧バイナリの出力欠陥)。断熱壁の run では対象外 (2026-09-27 codex result M2 で
+     断熱壁だけでは B1-a を満たさないと指摘 → 等温壁 run_0048 起点の A/B を追加)
   準定常: η_CF・ṁ `--drift 0.0002 --osc 0.0005`、壁 3 点 p/p0 (壁 x 範囲の 25/50/75 %) `--drift 0.001 --osc 0.0025`
   追加の成立条件: 壁∩軸ノード数を記録
 
@@ -67,8 +69,23 @@ def qs(csvp, cols, drift, osc):
     return [l for l in r.stdout.splitlines() if l.startswith("===") or l.startswith("  ")]
 
 
+def qwall_series(run):
+    rows, last = [], None
+    for p in sorted(glob.glob(os.path.join(run, "res_wall_3_*.h5")), key=lambda s: int(re.search(r"_(\d+)\.h5$", s).group(1))):
+        st = int(re.search(r"_(\d+)\.h5$", p).group(1))
+        with h5py.File(p, "r") as f:
+            x = f["MESH/COORD"][:].reshape(-1, 3)[:, 0].astype(np.float64); q = f["VALUE/qwall"][:].astype(np.float64)
+        o = np.argsort(x); x, q = x[o], q[o]
+        xp = [x.min() + t * (x.max() - x.min()) for t in (0.25, 0.5, 0.75)]
+        rows.append([st] + [float(np.interp(v, x, q)) for v in xp])
+        last = q
+    return rows, last
+
+
 def main():
-    r0, r1 = sys.argv[1], sys.argv[2]
+    iso = "--isothermal" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--isothermal"]
+    r0, r1 = args[0], args[1]
     mesh = os.path.join(r0, "nozzle.h5")
     iw, iwa, c = wall_nodes(mesh)
     print(f"# B1-a 比較: flag0 = {r0} / 省略 = {r1}")
@@ -104,7 +121,28 @@ def main():
     good = linf <= 0.005
     ok &= good
     print(f"② 輪郭壁 p/p0 L∞ = {linf * 100:.4f} % (許容 0.5 %) → {'PASS' if good else 'FAIL'}")
-    print("③ 等温壁 q_w: 本ケースは断熱壁のため対象外")
+    if iso:
+        q = {}
+        for tag, r in (("flag0", r0), ("omit", r1)):
+            rows, last = qwall_series(r)
+            pq = os.path.join(r, "chidef_b1a_qwall.csv")
+            with open(pq, "w") as f:
+                f.write("step,qw_25,qw_50,qw_75\n")
+                for s_ in rows:
+                    f.write(",".join(f"{v:.9g}" for v in s_) + "\n")
+            for l in qs(pq, "qw_25,qw_50,qw_75", 0.002, 0.005):
+                print(f"[{tag}] {l}")
+            q[tag] = last
+        if not np.any(q["flag0"] != 0) or not np.any(q["omit"] != 0):
+            ok = False
+            print("③ 等温壁 q_w: qwall が全点 0 → 判定不能")
+        else:
+            l2 = np.linalg.norm(q["omit"] - q["flag0"]) / np.linalg.norm(q["flag0"])
+            good = l2 <= 0.01
+            ok &= good
+            print(f"③ 等温壁 q_w 相対 L2 (最終) = {l2 * 100:.4f} % (許容 1 %) → {'PASS' if good else 'FAIL'}")
+    else:
+        print("③ 等温壁 q_w: 本 run は断熱壁のため対象外 (等温壁の A/B を別に行う)")
     print(f"VERDICT B1-a 量: {'PASS' if ok else 'FAIL'}")
 
 
