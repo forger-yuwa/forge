@@ -10,7 +10,9 @@
   準定常: η_CF・ṁ `--drift 0.0002 --osc 0.0005`、壁 3 点 p/p0 (壁 x 範囲の 25/50/75 %) `--drift 0.001 --osc 0.0025`
   追加の成立条件: 壁∩軸ノード数を記録
 
-  python3 chidef_b1a.py RUN_FLAG0 RUN_OMIT
+  python3 chidef_b1a.py RUN_FLAG0 RUN_OMIT [--isothermal] [--exclude-outlet-corner]
+  --exclude-outlet-corner: 2026-09-27 ユーザ決定 (plan §5.1 #12) で、壁∩出口のノードを ② の L∞ から外す (文言どおりの値も併記)。
+  全壁点 (ノード・座標・両 run の p/p0・相対差・壁∩出口の印) を RUN_OMIT/chidef_b1a_wall_all.csv に書く
 """
 import csv
 import glob
@@ -84,7 +86,8 @@ def qwall_series(run):
 
 def main():
     iso = "--isothermal" in sys.argv
-    args = [a for a in sys.argv[1:] if a != "--isothermal"]
+    exclude_corner = "--exclude-outlet-corner" in sys.argv
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
     r0, r1 = args[0], args[1]
     mesh = os.path.join(r0, "nozzle.h5")
     iw, iwa, c = wall_nodes(mesh)
@@ -117,10 +120,27 @@ def main():
         good = -0.001 <= rl and rh <= 0.001
         ok &= good
         print(f"① {nm}: 差区間 [{rl * 100:+.4f}, {rh * 100:+.4f}] % (許容 ±0.1 %) → {'帯内' if good else '帯外/判定不能'}")
-    linf = np.max(np.abs(ser["omit_wall"] - ser["flag0_wall"]) / np.abs(ser["flag0_wall"]))
+    d = np.abs(ser["omit_wall"] - ser["flag0_wall"]) / np.abs(ser["flag0_wall"])
+    linf = float(d.max())
+    # 全壁点の記録 (codex result chi-default-2 M2: 除外の判定を再現できるように)
+    with h5py.File(mesh, "r") as f:
+        io = set(np.unique(f["/BCONDS/2/iCells"][:]).tolist()) if "/BCONDS/2" in f else set()
+    order = iw[np.argsort(c[iw, 0])]
+    corner = np.array([n in io for n in order])
+    with open(os.path.join(r1, "chidef_b1a_wall_all.csv"), "w") as f:
+        f.write("node,x,y,pp0_flag0,pp0_omit,rel_diff,is_wall_outlet\n")
+        for k, n in enumerate(order):
+            f.write(f"{n},{c[n, 0]:.9g},{c[n, 1]:.9g},{ser['flag0_wall'][k]:.9g},{ser['omit_wall'][k]:.9g},{d[k]:.6e},{int(corner[k])}\n")
+    if exclude_corner:
+        # 2026-09-27 ユーザ決定 (plan §5.1 #12): 壁∩出口 (出口角) のノードを L∞ から外す。元の判定も併記する
+        lx = float(d[~corner].max())
+        print(f"② 輪郭壁 p/p0 L∞: 全 {len(d)} 点 {linf * 100:.4f} % (文言どおり {'PASS' if linf <= 0.005 else 'FAIL'}) / "
+              f"壁∩出口 {int(corner.sum())} 点を除外 {lx * 100:.4f} % (許容 0.5 %) → {'PASS' if lx <= 0.005 else 'FAIL'}")
+        linf = lx
     good = linf <= 0.005
     ok &= good
-    print(f"② 輪郭壁 p/p0 L∞ = {linf * 100:.4f} % (許容 0.5 %) → {'PASS' if good else 'FAIL'}")
+    if not exclude_corner:
+        print(f"② 輪郭壁 p/p0 L∞ = {linf * 100:.4f} % (許容 0.5 %) → {'PASS' if good else 'FAIL'}")
     if iso:
         q = {}
         for tag, r in (("flag0", r0), ("omit", r1)):

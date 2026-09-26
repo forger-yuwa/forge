@@ -65,6 +65,11 @@ def _last_launch_chi(run_dir):
     return None if v is None else int(v)
 
 
+def _dv(p: Problem, name, default=None) -> float:
+    v = dv_value(p, name, default)
+    return float(v["value"] if isinstance(v, dict) else v)
+
+
 def design_snapshot(p: Problem) -> dict:
     """作動点で上書きされる**前**の設計点 (入口・外部流・ガス) を控える。逆設計はこれで固定する
     (plan §4.10: 形状は設計点で 1 つに決まる。作動点は CFD の BC/IC だけを変える)。"""
