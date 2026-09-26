@@ -1232,15 +1232,18 @@ cudaConfig initializeSimulation(
     cout << "Set mesh connection map for cuda \n";
     cudaConfig cuda_cfg(msh);
     msh.setMeshMap_d();
-    // node × 回転周期 (bcond periodic の type != 0) は継ぎ目の勾配合併が未対応 (片側 LSQ のまま)。
-    // 周期対の構築 (失敗すると例外) より前に出す。エラー化は回転周期 plan #0a。
+    // node × 回転周期 (bcond periodic の type != 0) は**起動エラー** (plan boundary-node-rotational-periodic §5.1 #0a)。
+    // node の seam 経路は速度・勾配・陰解法の dq を回さず、NS の periodicGradientGather も並進を前提に部分和を足すので、
+    // 走らせると黙って誤った解になる。回転の実装 (同 plan #2–#4) が入るまで止める。周期対の構築 (失敗すると例外) より前に判定する。
     if (cfg.discretization == "node") {
         for (const auto& bc : msh.bconds) {
             if (bc.bcondKind != "periodic") continue;
             auto it = bc.inputInts.find("type");
             if (it != bc.inputInts.end() && it->second != 0) {
-                std::cout << "[config] node 回転周期は未対応 (plan boundary-node-rotational-periodic)" << std::endl;
-                break;
+                std::cerr << "[config] node の回転周期 (bcond periodic, physID " << bc.physID << ", type " << it->second
+                          << ") は未対応です (plan boundary-node-rotational-periodic)。回転の実装が入るまで起動しません。"
+                          << "並進周期 (type 0) か cell を使ってください。" << std::endl;
+                std::exit(1);
             }
         }
     }
