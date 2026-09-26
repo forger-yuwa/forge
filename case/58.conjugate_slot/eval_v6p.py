@@ -158,8 +158,16 @@ def main():
     if a.fix_band is not None:
         hi, lo = max(a.fix_band), min(a.fix_band)
         print(f"(参考) 自前の帯: {len(band)} 行  y {band.max()*1e3:.3f} .. {band.min()*1e3:.3f} mm")
-        band = rows[(rows <= hi + 1e-9) & (rows >= lo - 1e-9)]
+        fm = (rows <= hi + 1e-9) & (rows >= lo - 1e-9)
+        band = rows[fm]
         span = (band.max() - band.min()) / W
+        # **固定帯の全行が帯の適格条件を満たすか検査する** (codex diagnose 2026-09-26 #103: 座標だけで選ぶと
+        # 伝導漸近から外れた行を黙って判定に入れうる)。1 行でも外れれば FAIL にする
+        nbad = int((~ok[fm]).sum())
+        print(f"固定帯の適格性: Pe max {Pe[fm].max():.3e} / 線形残差 max {lin[fm].max():.3e} / "
+              f"勾配比 max {rat_i[fm].max():.3e}  -> " + ("OK" if nbad == 0 else f"**{nbad} 行が不適格**"))
+        if nbad:
+            print("VERDICT: FAIL (固定帯に適格条件を満たさない行がある)"); return 1
     print(f"=== V6′ 評価: {run}  step {step} ===")
     print(f"解析解: q* = {qs:.1f} W/m2,  T_w1* = {Tw1s:.3f} K,  固体の温度上昇 {drop:.2f} K "
           f"(0.5 % = {0.005*drop:.3f} K)")
