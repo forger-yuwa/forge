@@ -147,7 +147,14 @@ def main():
 
     rd = CASE / a.run
     rd.mkdir(exist_ok=True)
-    if not a.manifest_only:          # **既存 run を壊さない** (res_* / ログを消すため)
+    if not a.manifest_only:
+        # **計算済みディレクトリは削除前に失敗させる** (codex result M9, 2026-09-26)。
+        # 同じ run 名で回し直すと検証の根拠が消える。継続は extend_run.py で新しい run に。
+        done = (list(rd.glob("res_[0-9]*.h5")) or (rd / "forge_run.log").exists()
+                or (rd / "residual_history.csv").exists())
+        if done:
+            raise SystemExit(f"{rd} に計算済みの成果物がある。**消さない** — "
+                             "別の run 名にするか、継続なら tools/extend_run.py を使うこと")
         for f in (list(rd.glob("res_*")) + list(rd.glob("*.log"))
                   + list(rd.glob("residual_history*"))):
             f.unlink()
