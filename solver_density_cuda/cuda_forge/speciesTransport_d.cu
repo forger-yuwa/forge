@@ -687,7 +687,7 @@ void speciesGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
     species_gradient_d<<<cuda_cfg.dimGrid_plane, cuda_cfg.dimBlock>>>(
         msh.nCells, msh.nPlanes, msh.map_plane_cells_d, gvol, var.p_d["fx"], gsx, gsy, gsz,
         n, g_Y_dev, g_dYdx_dev, g_dYdy_dev, g_dYdz_dev,
-        periodicNodeActive(cfg, msh) ? 1 : 0, msh.planePeriodic_d);
+        periodicSeamMergeActive(cfg, msh) ? 1 : 0, msh.planePeriodic_d);
     species_gradient_normalize_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells, gvol, n, g_dYdx_dev, g_dYdy_dev, g_dYdz_dev);
     gpuErrchk( cudaPeekAtLastError() );
@@ -1229,7 +1229,7 @@ void passiveGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
     species_gradient_d<<<cuda_cfg.dimGrid_plane, cuda_cfg.dimBlock>>>(
         msh.nCells, msh.nPlanes, msh.map_plane_cells_d, gvol, var.p_d["fx"], gsx, gsy, gsz,
         g_nPassive, g_p_prim_dev, g_p_gx_dev, g_p_gy_dev, g_p_gz_dev,
-        periodicNodeActive(cfg, msh) ? 1 : 0, msh.planePeriodic_d);
+        periodicSeamMergeActive(cfg, msh) ? 1 : 0, msh.planePeriodic_d);
     species_gradient_normalize_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells, gvol, g_nPassive, g_p_gx_dev, g_p_gy_dev, g_p_gz_dev);
     gpuErrchk( cudaPeekAtLastError() );
