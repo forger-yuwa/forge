@@ -74,7 +74,15 @@
     "not_precision": "両腕とも停滞し、各列の末尾中央値が互いに ±20 % 以内 → 精度変更で停滞が解消する仮説を退け、精度に依らない反復停滞 (第 2 仮説) を優先",
     "undecided": "列ごとに割れる・まだ低下中 → 判別保留"
    },
-   "note": "この閾値は診断用で収束合格基準ではない。両腕の check_convergence と St 系列の check_quasisteady の VERDICT は別に記録する"
+   "note": "この閾値は診断用で収束合格基準ではない。両腕の check_convergence と St 系列の check_quasisteady の VERDICT は別に記録する",
+   "outcome": {
+    "date": "2026-09-26",
+    "reading": "precision_dependent (事前登録どおり: B だけが全停滞列で A より 1 桁以上低い)",
+    "A_run_0003_prec_f32": "NOT CONVERGED (stalled/plateau)、末尾 4000 step 中央値 rms_ro 8.99e-8 / roUx 8.96e-5 / roUy 6.37e-6 / roe 4.85e-2 / roOmega 1.89",
+    "B_run_0004_prec_f64": "PASS (converged)、5.0–6.2 dec 低下、末尾中央値 rms_ro 4.49e-13 / roUx 5.22e-10 / roUy 2.95e-11 / roe 2.79e-7 / roOmega 2.54e-5",
+    "effect_on_reported_quantity": "壁 q_w の float32/FP64 相対差: x 0–1 cm 最大 1.3e-5、1–20 cm 最大 4.8e-5、20–50 cm 最大 4.2e-5。R_A・R_B・D は小数 3 桁まで一致。St 系列は両腕 ALL STEADY",
+    "meaning": "残差プラトーは float32 の丸め床。報告量 (St) への影響は 5e-5 以下。T4-0a-0 の収束前提は B (FP64) で満たされ、T4-0a-0 の読みは変わらず判定不能 (壁解像は前縁 0.72 mm で FAIL のまま)"
+   }
   }
  ]
 }
