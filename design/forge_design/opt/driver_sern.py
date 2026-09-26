@@ -286,7 +286,8 @@ class SernCampaign:
     def summary(self, rows=None) -> dict:
         """Pareto 要約。**degraded / tag / 作動点ごとのゲート要約を落とさない** (R1: pareto.json でも追える)。"""
         rows = self.rows if rows is None else rows
-        ok = [r for r in rows if r["status"] == "PASS"]
+        # Pareto・HV の母集団も学習と同じ選別 (codex result 2026-09-27 M2: 学習から外した gg・旧方針の行が Pareto に混ざっていた)
+        ok = [r for r in rows if _learnable(r)]
         X = np.array([r["x"] for r in ok]); F = np.array([[-r["C_T_w"], r["L_ramp"]] for r in ok])
         pareto = []
         if len(ok):
@@ -294,13 +295,18 @@ class SernCampaign:
                 r = ok[i]
                 pareto.append({"tag": r["tag"], "x": dict(zip(DV_ORDER, X[i].tolist())), "C_T_w": float(-F[i, 0]), "L_ramp": float(F[i, 1]),
                                "C_M_w": r["C_M_w"], "degraded": bool(r.get("degraded")), "degraded_ops": r.get("degraded_ops", []),
-                               "ops": {op: {k: v.get(k) for k in ("C_T", "C_M", "gate", "residual", "steadiness")} for op, v in r.get("ops", {}).items()}})
+                               "flag_policy": r.get("flag_policy"),
+                               "ops": {op: {k: v.get(k) for k in ("C_T", "C_M", "gate", "residual", "steadiness", "scalar_gradient_effective")}
+                                       for op, v in r.get("ops", {}).items()}})
         pareto.sort(key=lambda r: r["L_ramp"])
         classes = {}
         for r in rows:
             k = r["status"] + ("/" + r["fail_class"] if r.get("fail_class") else "")
             classes[k] = classes.get(k, 0) + 1
-        return {"n_eval": len(rows), "n_pass": int(len(ok)), "n_degraded": int(sum(1 for r in ok if r.get("degraded"))),
+        n_status_pass = sum(1 for r in rows if r["status"] == "PASS")
+        return {"n_eval": len(rows), "n_pass": int(len(ok)), "n_pass_excluded_by_policy": int(n_status_pass - len(ok)),
+                "flag_policy": FLAG_POLICY, "required_scalar_gradient": REQUIRED_SCALAR_GRADIENT,
+                "n_degraded": int(sum(1 for r in ok if r.get("degraded"))),
                 "hv": (hypervolume2d(F, self.ref) if len(ok) else 0.0), "ref": self.ref, "status_counts": classes,
                 "gate_policy": "R1: rc==0 + finite field + residual no NaN/rising + objective & C_T/C_L/C_M STEADY (no divergent adoption)",
                 "operating_points": self.ops, "pareto": pareto}
@@ -314,7 +320,8 @@ class SernCampaign:
         for r0 in self.rows:
             tag = r0["tag"]; prob = self.dir / f"{tag}.yaml"
             row = {"tag": tag, "x": r0["x"], "status": "FAIL", "fail_class": None, "ops": {}, "note": "", "degraded": False, "degraded_ops": [],
-                   "old_status": r0["status"], "old_fail_class": r0.get("fail_class"), "old_C_T_w": r0.get("C_T_w")}
+                   "old_status": r0["status"], "old_fail_class": r0.get("fail_class"), "old_C_T_w": r0.get("C_T_w"),
+                   "flag_policy": r0.get("flag_policy")}   # 評価時の方針を引き継ぐ (再判定で現行方針に書き換えない)
             try:
                 if not prob.exists():
                     raise EvalFailure("ERROR", "problem yaml missing")

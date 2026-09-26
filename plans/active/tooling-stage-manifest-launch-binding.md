@@ -9,7 +9,7 @@
   - [`procedures/recommended-settings.md`](../../procedures/recommended-settings.md) §1.0a
   - [`AGENTS.md`](../../AGENTS.md) 「収束確認」の段階起動 run の区間判定
 - **related_plans**:
-  - [`gradient-scalar-lsq-unification.md`](gradient-scalar-lsq-unification.md) §4.4・§5.1 #2g・#6 (本 plan の完了が `scalarGradient` 既定化の前提。S4 の試験を本 plan で行う)
+  - [`gradient-scalar-lsq-unification.md`](../accepted/gradient-scalar-lsq-unification.md) §4.4・§5.1 #2g・#6 (本 plan の完了が `scalarGradient` 既定化の前提。S4 の試験を本 plan で行う)
   - `convection-slau-wall-normal-chi-default` (同じ欠陥が `slauWallNormalChi` の既定化にも効いている、codex M7)
 - **created**: `2026-09-27`
 - **owner**: `sano`

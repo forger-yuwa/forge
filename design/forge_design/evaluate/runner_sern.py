@@ -41,19 +41,21 @@ MESH = "sern.h5"
 FLAG_POLICY = "2026-09-27"
 
 
-def _last_launch_value(run_dir, key):
-    """forge_launches.jsonl の最後の起動の実効値 (文字列)。無い・読めなければ None (= 不明)。"""
+def _last_launch_value(run_dir, key, allowed=None):
+    """forge_launches.jsonl の**最後の非空行** (= 最後の起動) の実効値 (文字列)。無い・壊れている・キーが無い・
+    allowed に無い値は None (= 不明)。**前の起動の値に遡らない** (codex result 2026-09-27 M1: 最後の起動が
+    読めないときに過去の lsq を引き継いで学習に採用していた)。"""
     p = Path(run_dir) / "forge_launches.jsonl"
     if not p.exists():
         return None
-    last = None
-    for line in p.read_text().splitlines():
-        try:
-            v = json.loads(line)[key]
-        except Exception:
-            continue
-        last = str(v)
-    return last
+    lines = [l for l in p.read_text().splitlines() if l.strip()]
+    if not lines:
+        return None
+    try:
+        v = str(json.loads(lines[-1])[key])
+    except Exception:
+        return None
+    return v if (allowed is None or v in allowed) else None
 
 
 def _last_launch_chi(run_dir):
@@ -956,7 +958,7 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     # 起動記録 forge_launches.jsonl の**最後の起動** (本段) の値。記録が無い run (旧バイナリ) は None = 不明。
     out["slau_wall_normal_chi_effective"] = _last_launch_chi(run_dir)
     # 実効 mesh.scalarGradient (plan gradient-scalar-lsq-unification #6、codex diagnose 2026-09-27)。記録が無ければ None = 不明。
-    out["scalar_gradient_effective"] = _last_launch_value(run_dir, "scalarGradient")
+    out["scalar_gradient_effective"] = _last_launch_value(run_dir, "scalarGradient", allowed=("gg", "lsq"))
     out["flag_policy"] = FLAG_POLICY
     (out_dir / "metrics.json").write_text(json.dumps(out, indent=1))
     return out

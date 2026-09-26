@@ -377,7 +377,7 @@ NS と同じ事前計算 LSQ 係数 (差分形、境界は内部隣接のみ、�
   新バイナリで再開すると、`stage_manifest.py` が gg 段と lsq 段を 1 区間につないで収束判定する (起動記録との結び付けは
   plan [`tooling-stage-manifest-launch-binding`](../plans/active/tooling-stage-manifest-launch-binding.md) で後回し)。最初から回し直すか、`gg` を明記して続ける。
 - 設計 DB (SERN) は `FLAG_POLICY` 2026-09-27 以降、全作動点の実効値が lsq と確認できた評価だけを学習に使う。
-- 検証: plan [`gradient-scalar-lsq-unification.md`](../plans/active/gradient-scalar-lsq-unification.md) (S0/S1・S2 [現行 gg 基準]・S3 合格)。
+- 検証: plan [`gradient-scalar-lsq-unification.md`](../plans/accepted/gradient-scalar-lsq-unification.md) (S0/S1・S2 [現行 gg 基準]・S3 合格)。
 
 ## 文書に無かった設定キー (2026-09-18, plan [config-key-pruning](../plans/accepted/config-key-pruning.md) §5.3 c/g/n)
 

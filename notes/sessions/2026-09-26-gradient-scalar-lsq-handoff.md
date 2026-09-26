@@ -1,6 +1,6 @@
 # 引き継ぎ: node スカラー勾配の LSQ 統一 (2026-09-26)
 
-残作業の正本は plan [`plans/active/gradient-scalar-lsq-unification.md`](../../plans/active/gradient-scalar-lsq-unification.md) §5.1。ここは写しとポインタ。
+残作業の正本は plan [`plans/accepted/gradient-scalar-lsq-unification.md`](../../plans/accepted/gradient-scalar-lsq-unification.md) §5.1。ここは写しとポインタ。
 
 ## 場所
 

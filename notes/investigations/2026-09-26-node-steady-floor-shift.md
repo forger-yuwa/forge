@@ -1,7 +1,7 @@
 # node 定常 run の残差床が起点 run の床に戻らない (2026-09-26 調査メモ)
 
-起点: plan [`gradient-scalar-lsq-unification.md`](../../plans/active/gradient-scalar-lsq-unification.md) §5.1 #5a・#5g・#5l。
-**このメモへの移管は、スカラー LSQ の Phase 1 GO を意味しない** (S2 の収束ゲート未達は plan 側に残る)。
+起点: plan [`gradient-scalar-lsq-unification.md`](../../plans/accepted/gradient-scalar-lsq-unification.md) §5.1 #5a・#5g・#5l。
+スカラー LSQ の S2 は 2026-09-27 のユーザ決定で基準を「起点 run の床」から「同じ現行バイナリの gg 双子」に差し替えて合格とした。**本メモの問い (現行バイナリの床がなぜ起点の床に戻らないか) は、それとは別の未解決の調査**として残る (スカラー LSQ とは独立: 実装直前版でも再現)。
 
 ## 観測
 

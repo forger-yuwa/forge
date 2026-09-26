@@ -77,7 +77,7 @@ $$
   ([plans/active/discretization-lsq-gradient.md](../plans/active/discretization-lsq-gradient.md) §0/§9)。
 - **node のスカラー勾配** ($k,\omega$・化学種 $Y_s$・受動種 $\xi$・凝縮モーメント): 2026-09-26 までの既定は GG
   (境界半割面を owner 値で積算、軸対称は `A_planar`)。NS の LSQ と同じ事前計算係数に揃える経路
-  `mesh.scalarGradient` は **2026-09-27 から node の既定が `lsq`** (旧既定 `gg` は明記で再現、Phase 1 検証 (2026-09-26: S0/S1・S3 PASS、S2 は現行 gg 基準で PASS [旧起点床の基準では未合格の記録あり]、FCT smoke の収支差は揺れの範囲 [ユーザ決定])。[plans/active/gradient-scalar-lsq-unification.md](../plans/active/gradient-scalar-lsq-unification.md))。cell は常に GG (キーは無視)。
+  `mesh.scalarGradient` は **2026-09-27 から node の既定が `lsq`** (旧既定 `gg` は明記で再現、Phase 1 検証 (2026-09-26: S0/S1・S3 PASS、S2 は現行 gg 基準で PASS [旧起点床の基準では未合格の記録あり]、FCT smoke の収支差は揺れの範囲 [ユーザ決定])。[plans/accepted/gradient-scalar-lsq-unification.md](../plans/accepted/gradient-scalar-lsq-unification.md))。cell は常に GG (キーは無視)。
   LSQ 経路は差分形 $\sum_j c_{ij}(\phi_j-\phi_i)$ で定数場が厳密に 0 (GG は壁節点で float32 の閉包誤差約 $5\,\varepsilon|\phi|/h$)、
   境界は NS と同じ内部隣接のみ、並進周期は NS の合併係数を共有、軸対称×周期・回転周期は片側 (gather しない)。
   既定の生産設定で生きているスカラー勾配は $k,\omega$ だけ (`speciesFaceReconstruction` の既定 0)。
@@ -169,11 +169,11 @@ periodic は DOF 同一視・gradient gather (§discretization.md §4.5) に委�
   配分係数 $\alpha=1/\text{重複数}$ を決める。行列と係数は**各 incidence の実変位** $d_{mj}$ で組む:
   $M_r=\sum\alpha_{mj}w_{mj}d_{mj}d_{mj}^{\mathsf T}$ ($w=1/|d|^2$)、スペクトル打ち切りは $M_r$ に 1 回、係数 $c_{mj}=M_{r,\tau}^{+}\alpha_{mj}w_{mj}d_{mj}$。
   毎 step の `periodicGradientGather` は和のまま (部分和が合併 LSQ になる)。
-- **Green–Gauss (SST の $k,\omega$、化学種、受動種・凝縮モーメント)**: 各部分 CV は**周期半割面を積算しない** (面フラグ `mesh.planePeriodic_d`)。
+- **スカラー ($k,\omega$、化学種、受動種・凝縮モーメント)**: 2026-09-27 から node の既定は **LSQ** (`mesh.scalarGradient: lsq`) で、NS と同じ合併係数を共有し、$k,\omega$ は `ransGradient` の直後、化学種・受動種は各 wrapper 内で部分和を gather する (`periodicGradientGather` には登録しない)。以下は `mesh.scalarGradient: gg` (明記したとき・cell) の **Green–Gauss** 経路: 各部分 CV は**周期半割面を積算しない** (面フラグ `mesh.planePeriodic_d`)。
   合併体積で割った部分寄与を和で合併する。$k,\omega$ は `ransGradient` の直後 (`ransBlendF1` の前) に専用の gather、
   化学種・受動種は `periodicGradientGather` に登録された gather を使う。化学種・受動種は `species_gradient_d` の同じ呼び出し経路。
-- **既知の制約**: 壁の CV は壁半割面を φ[ic0] で積算するので、float32 の格納面ベクトルでは定数場の GG が閉じず、壁節点で約 $5\,\varepsilon|\phi|/h$ の偽勾配が出る (2026-09-26 channel 実測、継ぎ目に依らない)。LSQ 化 (後続 plan) で解消する見込み。
-- **この条件の外** (軸対称×周期、回転周期): スカラー勾配は既定 `gg` なら片側 GG + 半割面込み (既存の未修正挙動で、本修正では不変)、`scalarGradient: lsq` なら**片側 LSQ** (継ぎ目の合併なし、NS と同じ)。
+- **既知の制約**: 壁の CV は壁半割面を φ[ic0] で積算するので、float32 の格納面ベクトルでは定数場の GG が閉じず、壁節点で約 $5\,\varepsilon|\phi|/h$ の偽勾配が出る (2026-09-26 channel 実測、継ぎ目に依らない)。`scalarGradient: lsq` (node の既定) では差分形なので定数場は厳密に 0 (plan gradient-scalar-lsq-unification S0-b)。GG を明記したときだけ残る。
+- **この条件の外** (軸対称×周期、回転周期): スカラー勾配は node の既定 `lsq` なら**片側 LSQ** (継ぎ目の合併なし、NS と同じ)、`gg` を明記したときは片側 GG + 半割面込み (既存の未修正挙動)。
   回転周期は plan `boundary-node-rotational-periodic` で扱う。
 
 **SST の F1 の初期値** (周期に依らず全 SST run): `sstF1` は配列確保時 (`variables.cpp` の `allocVariables`) に 1 で初期化し、`buildScalarDescs` は副作用を持たない。

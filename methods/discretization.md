@@ -621,7 +621,7 @@ if (wall_flag != nullptr && wall_flag[ic] == 1) {
 
 #### 7.3 node モード: 最小二乗 (LSQ) 勾配 (`gradLSQ`、**node は 2 固定**)
 
-> **現状 (2026-09-26 確認)**: node では `gradLSQ: 2` 固定で、それ以外は起動エラー (`solverConfig.cpp`、GG は壁行で市松を作る, case/43)。下の「既定 OFF」「`gradLSQ=0` の node は GG」は導入当時の記述。**2026-09-27 から node ではスカラー ($k,\omega$・化学種・受動種・凝縮モーメント) も NS と同じ事前計算係数の LSQ** (`mesh.scalarGradient` の node 既定 `lsq`、plan [`gradient-scalar-lsq-unification.md`](../plans/active/gradient-scalar-lsq-unification.md))。`mesh.scalarGradient: gg` で旧来の Green–Gauss。cell は常に GG。
+> **現状 (2026-09-26 確認)**: node では `gradLSQ: 2` 固定で、それ以外は起動エラー (`solverConfig.cpp`、GG は壁行で市松を作る, case/43)。下の「既定 OFF」「`gradLSQ=0` の node は GG」は導入当時の記述。**2026-09-27 から node ではスカラー ($k,\omega$・化学種・受動種・凝縮モーメント) も NS と同じ事前計算係数の LSQ** (`mesh.scalarGradient` の node 既定 `lsq`、plan [`gradient-scalar-lsq-unification.md`](../plans/accepted/gradient-scalar-lsq-unification.md))。`mesh.scalarGradient: gg` で旧来の Green–Gauss。cell は常に GG。
 
 専用計画: [`discretization-lsq-gradient.md`](../plans/active/discretization-lsq-gradient.md)。
 
@@ -669,7 +669,7 @@ float32 格納で解く条件数 2 乗の増幅と、(b) 一部メッシュに�
 
 > **スカラーへの適用 (実装中、opt-in)**: 係数は幾何のみで変数に依らないので、$k,\omega$・化学種・受動種の勾配も
 > 同じ係数 (継ぎ目の合併済み) で求められる。`mesh.scalarGradient: lsq` (既定 `gg`)、
-> [plans/active/gradient-scalar-lsq-unification.md](../plans/active/gradient-scalar-lsq-unification.md)。
+> [plans/accepted/gradient-scalar-lsq-unification.md](../plans/accepted/gradient-scalar-lsq-unification.md)。
 
 メッシュが静的なら正規方程式の解は**幾何のみの線形演算子**に畳める:
 

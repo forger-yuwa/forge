@@ -151,7 +151,7 @@ G2 (GPU − CPU double)/S は 128³ で 9.9e-6 (16/32/64 は 6.6e-7 / 1.8e-6 / 2
 
 ## plan gradient-scalar-lsq-unification の S0/S1 (2026-09-26、AWS g5・block 128)
 
-plan [`gradient-scalar-lsq-unification.md`](../../../plans/active/gradient-scalar-lsq-unification.md) §5.1 #4–#4f・§6。run はすべて AWS スクラッチ `~/sglsq/{s0,s0h,s1h,pg,pg8}/` (破棄可)。
+plan [`gradient-scalar-lsq-unification.md`](../../../plans/accepted/gradient-scalar-lsq-unification.md) §5.1 #4–#4f・§6。run はすべて AWS スクラッチ `~/sglsq/{s0,s0h,s1h,pg,pg8}/` (破棄可)。
 
 | ファイル | 内容 |
 | --- | --- |
