@@ -120,8 +120,8 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | 5a | G0/G1/G2/G2′ ハーネス | #2 の再現物に加え、G1-a の CPU float32 再現、線形 $Y$ (化学種) を 1 本焼いて床を 1 行記録、float32 反例 (期待 1.000000、root 両順序)、ジッタ格子 (±0.2h、決定論的、周期像は同じ量)、CPU double 参照、F1≠1 入力で 1・2 回目に輸送が読む値。合格: §6 G0/G1/G2/G2′ | O |
 | 5b (**完了 2026-09-26**、PASS) | R3 | case/48・case/16・case/44 の勾配配列が旧新ビット同一 (F1 初期化で 1 step 目が変わる run は 2 step 目以降のノイズ床比較) | O |
 | 5c (**実装済 2026-09-26**、G1-a/G1-b PASS、R3 は #5b) | 周期半割面の除外 (§4.2a) | `mesh` に `planePeriodic`、3 カーネルの条件置換。合格: §6 G1-a/G1-b/定数場を 7 run 再実行、R3 ビット同一。`plans/accepted/species-passive-scalar-unification.md` §4.1-5-1 に訂正 1 行 | O (判断: 2026-09-26 `diagnostician`・本 plan で修正) |
-| 5d (R2 収支は**完了**、R1 延長は実行中) | R1 延長・R2 収支 (判断: 2026-09-26 `diagnostician`) | R1: 800k 場から `restart_field.py` で +800k step (同一設定・同一閾値、10k–1.6M 全系列 `--tail 0.4`)。なお DRIFTING なら「限定合格 (単調収束中・漸近値・末尾全点で ≤ 0.05)」と書きラベルは変えない。F1 差の L2 と x 継ぎ目の比を参考列に。case/39 の `slauWallNormalChi` 実効値を旧新で控える。R2: 既存 snapshot から $r(t)=(dK/dt+\varepsilon)/(K_0/t_c)$ (測る前に固定: 新は $|r|\le0.05$、旧は $t\lesssim7$ で $r>0$ が持続すれば「継ぎ目由来の注入」、符号不定なら「収支が閉じない」に留める) | O |
-| 5 | 検証 R1・R2 | §6 R1・R2 (5a・5b の後)。**区切りで codex** | O (結論 F) |
+| 5d (**完了 2026-09-26**: R2 収支 成立、R1 延長 限定合格) | R1 延長・R2 収支 (判断: 2026-09-26 `diagnostician`) | R1: 800k 場から `restart_field.py` で +800k step (同一設定・同一閾値、10k–1.6M 全系列 `--tail 0.4`)。なお DRIFTING なら「限定合格 (単調収束中・漸近値・末尾全点で ≤ 0.05)」と書きラベルは変えない。F1 差の L2 と x 継ぎ目の比を参考列に。case/39 の `slauWallNormalChi` 実効値を旧新で控える。R2: 既存 snapshot から $r(t)=(dK/dt+\varepsilon)/(K_0/t_c)$ (測る前に固定: 新は $|r|\le0.05$、旧は $t\lesssim7$ で $r>0$ が持続すれば「継ぎ目由来の注入」、符号不定なら「収支が閉じない」に留める) | O |
+| 5 (**完了 2026-09-26**、§6.2) | 検証 R1・R2 | §6 R1・R2 (5a・5b の後)。**区切りで codex** | O (結論 F) |
 | 6 | docs + codex result | `methods/gradient.md` の「修正中」を外す | F |
 
 ## 6. 検証 (測る前に固定)
@@ -182,8 +182,18 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
   (c) 旧の $K/K_0>1$ 区間で $r>0$ が連続 ≥ 10 snapshot → 15 連続 **成立**。$|r|$ の大きさはゲートにしない (数値散逸の量は本 plan の対象外)。
   **解釈 (`diagnostician` 2026-09-26)**: 旧 SLAU 粘性 TGV は継ぎ目由来の非物理なエネルギー注入を持ち、修正後は注入が消えて $r\le0$ (数値散逸のみ)。
   旧新のバイナリ差は本 plan の 7 commit のみ。「10 % 差」は旧の注入とそれに伴う散逸ピークのずれ。経路 (粘性応力か対流再構成か) は測っていないので書かない。「改善/悪化」とは書かない。
-- **R1 (実行中)**: `case/39.periodic_hills/run_0036_r1_gradfix_old` / `run_0037_r1_gradfix_new` (AWS `~/forge-pgrad-new/`)、メッシュ 80×50×30 y1 1.5e-3 h (品質 PASS、AR 149)、
-  1 次 SST 定常 (S1 静止スピンアップ 2000 → S2 成形 IC 800k step)。先行 300k の暫定: 収束 PASS 旧新とも、新の Cf_x6・dF1・r_gradk は DRIFTING (単調減衰)。継ぎ目比 旧 r_gradu 2.24 / r_gradk 1.58 / r_gradw 0.50 / dF1 0.55 → 新 1.00 / 0.99 / 1.00 / 0.03。壁解像 局所 y1+ 最大 0.75、超過 0 %。最終判定は 800k の結果で行う。
+- **R1 最終 (2026-09-26、S2 800k + 延長 800k = 連結 10k–1.6M、`case/39.periodic_hills/run_0036..0039`、AWS g5・block 128)**:
+  収束: S1→S2 区間 `--segment` 旧新とも **PASS** (roK 旧 4.6 / 新 4.3 桁 ≥ 旧 − 0.5)。延長 (`--from-floor` 各 800k run) 新 **PASS**、旧 NOT CONVERGED — 延長開始直後 step 0 の rms_roK のみ床の 408 倍 (1.34e-6、新は 2.9e-9 で床)、末尾は床の 0.94 倍。
+  **仮説 (未検証)**: 旧バイナリは `buildScalarDescs` の初回呼び出しで計算済みの sstF1 を 1 で上書きする (m3 で修正した挙動) ので、restart 直後の 1 step が乱れる。
+  準定常 (`--drift 0.002 --osc 0.005 --tail 0.4`、160 snap): 旧 全列 STEADY。新 Cf・$x_r$・継ぎ目比は STEADY、**dF1_inf のみ DRIFTING 0.3 %/tail** (800k 時点 1.6 % から減少)。
+  → **限定合格** (事前の決定どおり): dF1_inf は単調収束中、漸近値 ≈0.0335、10k–1.6M の末尾窓全点で ≤ 0.05 (最大 0.0334)。STEADY は未達でラベルは変えない。
+  1.6M の値 (旧 → 新): Cf(0.5) −7.398e-3 → −7.396e-3、Cf(2) −4.578e-3 → −4.539e-3、Cf(6) 5.29e-4 → 3.94e-4、$x_r/h$ 4.811 → 5.034、U_b 26.20 → 26.49 m/s。
+  z 継ぎ目比 (∇u, ∇k, ∇ω) 2.24 / 1.58 / 0.50 → 0.997 / 0.984 / 1.000 (基準 [0.9, 1.1] 成立)、dF1_inf 0.553 → 0.0334 (≤ 0.05 成立)。
+  参考列 (判定外): F1 差 L2 0.058 → 0.0019、x 継ぎ目 (丘頂、両隣列平均との比) 1.87 / 0.63 / 0.50 → 0.94 / 0.99 / 1.00。
+  壁解像 PASS (y1+ 最大 0.75 / 0.74、超過 0 %)。`slauWallNormalChi` 実効値 旧新とも 0 (explicit)。
+  **解釈 (`diagnostician` 2026-09-26)**: 旧の継ぎ目比は LSQ 2 重計上と k/ω 片側 GG の指紋で、新で消えた。Cf(6) −26 %・$x_r$ 4.81→5.03 は本 plan の修正 (旧新差は 7 commit のみ) による継ぎ目の偽勾配の除去の効果。「改善」とは書かず、LES 参照との距離で評価しない。抽出の [解釈] 4 点 (F1 の再計算と 1 step ずれ、隣接 = 第 1 内部層、x 継ぎ目の除外、L2 比) は `r1_extract.py` の docstring どおり承認。
+- ~~**R1 (実行中)**: `case/39.periodic_hills/run_0036_r1_gradfix_old` / `run_0037_r1_gradfix_new` (AWS `~/forge-pgrad-new/`)、メッシュ 80×50×30 y1 1.5e-3 h (品質 PASS、AR 149)、
+  1 次 SST 定常 (S1 静止スピンアップ 2000 → S2 成形 IC 800k step)。先行 300k の暫定: 収束 PASS 旧新とも、新の Cf_x6・dF1・r_gradk は DRIFTING (単調減衰)。継ぎ目比 旧 r_gradu 2.24 / r_gradk 1.58 / r_gradw 0.50 / dF1 0.55 → 新 1.00 / 0.99 / 1.00 / 0.03。壁解像 局所 y1+ 最大 0.75、超過 0 %。最終判定は 800k の結果で行う。~~ (上の R1 最終で置き換え)
 
 ## 7. 影響範囲
 
@@ -201,6 +211,8 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 - [ ] `plans/active/` → `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-26` — R1 延長 (+800k) 完了: 新は dF1_inf のみ DRIFTING 0.3 %/tail で限定合格、他の R1 基準はすべて成立。R2 は KE 収支の符号判定で成立。検証 (§6) は出そろい、codex result 待ち。
 
 - `2026-09-26` — R3 PASS (3 ケース、NS 勾配・リミタはビット一致、GG k/ω は atomicAdd 床と同水準)。既定 SST で step 1 の roK/roOmega が変わるのは m3 (F1 初期値) によることを `sstSigmaBlend: 0` の A/B で確認。
 

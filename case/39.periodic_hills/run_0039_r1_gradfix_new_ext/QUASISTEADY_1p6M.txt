@@ -1,0 +1,11 @@
+=== run_0039_r1_gradfix_new_ext/r1_series_1p6M.csv  [160 rows, steps 10000..1.6e+06]  -> DRIFTING ===
+  Cf_x05          : tail mean=-0.007396  drift=0.0%/tail  fluct=0.0%        STEADY
+  Cf_x2           : tail mean=-0.004539  drift=0.0%/tail  fluct=0.0%        STEADY
+  Cf_x6           : tail mean=0.0003935  drift=0.0%/tail  fluct=0.0%        STEADY
+  xr_h            : tail mean=5.034  drift=0.0%/tail  fluct=0.0%            STEADY
+  r_gradu         : tail mean=0.9974  drift=0.0%/tail  fluct=0.0%           STEADY
+  r_gradk         : tail mean=0.9844  drift=0.0%/tail  fluct=0.0%           STEADY
+  r_gradw         : tail mean=1  drift=0.0%/tail  fluct=0.0%                STEADY
+  dF1_inf         : tail mean=0.03341  drift=0.3%/tail  fluct=0.3%          DRIFTING
+
+OVERALL: NOT ALL STEADY (see above)
