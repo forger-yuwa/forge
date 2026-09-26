@@ -118,7 +118,7 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | 4 (**実装済 2026-09-26**、正式試験は #5) | $k,\omega$ 勾配の gather | `main.cpp`、`periodicNode_d.cu`、`ransTransport_d.cu`。合格: §6 G1 | O (F レビュー) |
 | 3a (**実装済 2026-09-26**) | 実装レビュー M1・m3 | M1: 各 incidence の実変位で組む (§4.1)。m3: F1 初期値を `allocVariables` へ (§4.2) | O (判断: 2026-09-26 `diagnostician`・全件採用) |
 | 5a | G0/G1/G2/G2′ ハーネス | #2 の再現物に加え、G1-a の CPU float32 再現、線形 $Y$ (化学種) を 1 本焼いて床を 1 行記録、float32 反例 (期待 1.000000、root 両順序)、ジッタ格子 (±0.2h、決定論的、周期像は同じ量)、CPU double 参照、F1≠1 入力で 1・2 回目に輸送が読む値。合格: §6 G0/G1/G2/G2′ | O |
-| 5b | R3 | case/48・case/16・case/44 の勾配配列が旧新ビット同一 (F1 初期化で 1 step 目が変わる run は 2 step 目以降のノイズ床比較) | O |
+| 5b (**完了 2026-09-26**、PASS) | R3 | case/48・case/16・case/44 の勾配配列が旧新ビット同一 (F1 初期化で 1 step 目が変わる run は 2 step 目以降のノイズ床比較) | O |
 | 5c (**実装済 2026-09-26**、G1-a/G1-b PASS、R3 は #5b) | 周期半割面の除外 (§4.2a) | `mesh` に `planePeriodic`、3 カーネルの条件置換。合格: §6 G1-a/G1-b/定数場を 7 run 再実行、R3 ビット同一。`plans/accepted/species-passive-scalar-unification.md` §4.1-5-1 に訂正 1 行 | O (判断: 2026-09-26 `diagnostician`・本 plan で修正) |
 | 5 | 検証 R1・R2 | §6 R1・R2 (5a・5b の後)。**区切りで codex** | O (結論 F) |
 | 6 | docs + codex result | `methods/gradient.md` の「修正中」を外す | F |
@@ -159,6 +159,13 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
   継ぎ目の床は tgv で dK 1.7 / dΩ 2.4 / dξ 1.5 (修正前 20.8 / 26.5 / 22.7)。**継ぎ目/内部比は全 run 0.83–1.85 (≤ 2)**。G1-a の最大差は ≤ 1.7 ε (≤ 4 ε)。
   結果 `case/09.Taylor-Green/_g0_lsq_seam/G_*.txt`。**未実施**: GPU の定数場単独試験 (§6 G1、#5a に残す)。
 
+- **R3 (2026-09-26、旧 `1266aba1` sha256 `9b45d018…` / 新 sha256 `88e949fa…`、各 1 step・旧 2・新 2 run、`case/09.Taylor-Green/_g0_lsq_seam/R3.txt`)**: **PASS**。
+  case/48 (node 非周期 SST): 勾配・リミタ 26 配列ビット一致、dK/dΩ 4 配列は旧同士の atomicAdd 床と同水準。case/16 (化学種 GG 有効): 30 配列ビット一致。
+  軸対称 (case/44 の入力メッシュ削除済みのため 101×41 の軸対称 node メッシュで代替、品質 PASS): 30 配列ビット一致。NaN 0。
+  **既定 (`sstSigmaBlend` 1) の case/48 は step 1 の roK/roOmega が旧新で約 5 万点違う** (旧同士 0/2 点) → m3 (F1 初期値 1) の予告どおりの変化。
+  帰属確認: 同じ入力で `sstSigmaBlend: 0` にすると旧新差は roK 1 点・roOmega 3 点 (旧同士 1/0 点) に消える (スクラッチ `r3b_case48_*`)。
+  **未測定**: ∇Y は出力変数に無く直接比較していない (roY の旧新差が旧同士と同水準であることのみ確認)。case/48 は一様 IC のため dP/dT/dρ とリミタは検出力なし。
+
 ## 7. 影響範囲
 
 - `solver_density_cuda/cuda_forge/calcGradient_d.cu`、`periodicNode_d.cu`、`ransTransport_d.cu`、`main.cpp`、`mesh/mesh.cpp`。
@@ -175,6 +182,8 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 - [ ] `plans/active/` → `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-26` — R3 PASS (3 ケース、NS 勾配・リミタはビット一致、GG k/ω は atomicAdd 床と同水準)。既定 SST で step 1 の roK/roOmega が変わるのは m3 (F1 初期値) によることを `sstSigmaBlend: 0` の A/B で確認。
 
 - `2026-09-26` — §4.2a 実装 (`mesh` の面フラグ `planePeriodic_d`、`calc_scalar_gradient_face_d`・`species_gradient_d` の条件置換)。7 run で G1-a/G1-b PASS、継ぎ目/内部比 ≤ 1.85。
 
