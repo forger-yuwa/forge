@@ -1,5 +1,6 @@
 #include "ransTransport_d.cuh"
 #include "periodicNode_d.cuh"
+#include "calcGradient_d.cuh"
 
 #include "scalarTransport_d.cuh"
 
@@ -217,6 +218,29 @@ void ransGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, 
     CHECK_CUDA_ERROR(cudaMemset(var.c_d["dOmegadx"], 0, msh.nCells_all * sizeof(flow_float)));
     CHECK_CUDA_ERROR(cudaMemset(var.c_d["dOmegady"], 0, msh.nCells_all * sizeof(flow_float)));
     CHECK_CUDA_ERROR(cudaMemset(var.c_d["dOmegadz"], 0, msh.nCells_all * sizeof(flow_float)));
+
+    // mesh.scalarGradient: lsq (node のみ) — NS と同じ事前計算 LSQ 係数の差分形 gather (plan gradient-scalar-lsq-unification §4.2)。
+    // 体積除算なし (軸対称も係数が planar LSQ なので A_planar は不要)。ghost はゼロのまま (上の memset)。
+    if (scalarGradientLsqActive(cfg)) {
+        static flow_float** s_ptrDev = nullptr;
+        static std::array<flow_float*, 8> s_ptrHost{};
+        const std::array<flow_float*, 8> h = {
+            var.c_d["k"], var.c_d["omega"],
+            var.c_d["dKdx"], var.c_d["dOmegadx"], var.c_d["dKdy"], var.c_d["dOmegady"], var.c_d["dKdz"], var.c_d["dOmegadz"]};
+        if (s_ptrDev == nullptr) gpuErrchk(cudaMalloc((void**)&s_ptrDev, 8 * sizeof(flow_float*)));
+        if (h != s_ptrHost) {
+            gpuErrchk(cudaMemcpy(s_ptrDev, h.data(), 8 * sizeof(flow_float*), cudaMemcpyHostToDevice));
+            s_ptrHost = h;
+        }
+        lsqScalarGradient_d_wrapper(cuda_cfg, msh, 2, s_ptrDev + 0, s_ptrDev + 2, s_ptrDev + 4, s_ptrDev + 6);
+        // 継ぎ目: 合併係数の部分和を group で和 → broadcast (GG 経路と同じ述語・同じ専用 gather)。
+        if (periodicSeamMergeActive(cfg, msh)) {
+            for (const char* k : {"dKdx", "dKdy", "dKdz", "dOmegadx", "dOmegady", "dOmegadz"}) {
+                periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, var.c_d[k]);
+            }
+        }
+        return;
+    }
 
     calc_scalar_gradient_face_d<<<cuda_cfg.dimGrid_plane, cuda_cfg.dimBlock>>>(
         msh.nPlanes,

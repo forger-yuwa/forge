@@ -6,6 +6,7 @@
 #include "passiveKernels_d.cuh"          // species_advection_faceY_d / passive_bounds_d / passive_diffusion_d (受動種と共用)
 #include "passiveTransport_d.cuh"        // 受動種基盤 (本 TU で実装)
 #include "periodicNode_d.cuh"            // node 周期の gather/mirror (化学種 DPLUR dq・EOS クロス項・受動種)
+#include "calcGradient_d.cuh"             // スカラー勾配の LSQ 経路 (mesh.scalarGradient: lsq)
 #include "passiveFct_d.cuh"              // dual-time 物理 step 末尾の保存的 FCT 補正 (§4.7)
 #include "condensationTransport_d.cuh"   // condensationSource_d_wrapper (FCT の凍結ソース)
 
@@ -722,6 +723,19 @@ void speciesGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
         cudaMemset(var.c_d["dY"+i+"dy"], 0, msh.nCells*sizeof(flow_float));
         cudaMemset(var.c_d["dY"+i+"dz"], 0, msh.nCells*sizeof(flow_float));
     }
+    // mesh.scalarGradient: lsq (node のみ) — NS と同じ事前計算 LSQ 係数の差分形 gather (plan gradient-scalar-lsq-unification §4.2)。
+    // 体積除算 (normalize) はしない。周期の和→broadcast は periodicSeamMergeActive のときだけここで行い、
+    // periodicGradientGather は lsq のとき dY を登録しない (二重合併の回避)。FORGE_DUMP_SCALARGRAD は GG 経路専用。
+    if (scalarGradientLsqActive(cfg)) {
+        lsqScalarGradient_d_wrapper(cuda_cfg, msh, n, g_Y_dev, g_dYdx_dev, g_dYdy_dev, g_dYdz_dev);
+        if (periodicSeamMergeActive(cfg, msh)) {
+            for (int s = 0; s < n; ++s) {
+                const std::string i = std::to_string(s);
+                for (const char* c : {"x", "y", "z"}) periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, var.c_d["dY"+i+"d"+c]);
+            }
+        }
+        return;
+    }
     flow_float* gvol = (cfg.isAxisymmetric == 1) ? var.c_d["A_planar"] : var.c_d["volume"];
     flow_float* gsx = (cfg.isAxisymmetric == 1) ? var.p_d["sx_planar"] : var.p_d["sx"];
     flow_float* gsy = (cfg.isAxisymmetric == 1) ? var.p_d["sy_planar"] : var.p_d["sy"];
@@ -1267,6 +1281,18 @@ void passiveGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
     if (!passiveSchemeEnabled(cfg) || cfg.speciesFaceReconstruction < 1) return;
     const size_t bytes = (size_t)msh.nCells_all*sizeof(flow_float);
     for (int q = 0; q < g_nPassive; ++q) { cudaMemset(h_p_gx[q], 0, bytes); cudaMemset(h_p_gy[q], 0, bytes); cudaMemset(h_p_gz[q], 0, bytes); }
+    // mesh.scalarGradient: lsq (node のみ)。化学種と同じ扱い (normalize なし、周期合併は periodicSeamMergeActive のときここで)。
+    if (scalarGradientLsqActive(cfg)) {
+        lsqScalarGradient_d_wrapper(cuda_cfg, msh, g_nPassive, g_p_prim_dev, g_p_gx_dev, g_p_gy_dev, g_p_gz_dev);
+        if (periodicSeamMergeActive(cfg, msh)) {
+            for (int q = 0; q < g_nPassive; ++q) {
+                periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, h_p_gx[q]);
+                periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, h_p_gy[q]);
+                periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, h_p_gz[q]);
+            }
+        }
+        return;
+    }
     flow_float* gvol = (cfg.isAxisymmetric == 1) ? var.c_d["A_planar"] : var.c_d["volume"];
     flow_float* gsx = (cfg.isAxisymmetric == 1) ? var.p_d["sx_planar"] : var.p_d["sx"];
     flow_float* gsy = (cfg.isAxisymmetric == 1) ? var.p_d["sy_planar"] : var.p_d["sy"];

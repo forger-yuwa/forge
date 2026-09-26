@@ -545,6 +545,13 @@ public:
     // 擬似逆行列にする (退化方向の勾配 1 次化)。近傍方向が共線/共面なノードの LSQ 発散対策。
     double gradLSQDegenThresh = 1.0e-2;
 
+    // node のスカラー勾配 (k/ω・化学種 Y_s・受動種 ξ・凝縮モーメント) の作用素 (mesh.scalarGradient)。
+    //   "gg" (既定): Green–Gauss (従来どおり、ビット不変)。
+    //   "lsq": NS と同じ事前計算 LSQ 係数 (gradLSQ=2 の cInt、継ぎ目の合併係数を含む) による差分形 gather。
+    // cell は常に "gg" (lsq を書いても警告して gg に解決)。plans/active/gradient-scalar-lsq-unification.md §4.4。
+    std::string scalarGradient = "gg";
+    std::string scalarGradientReason = "default";   // 起動エコー用 ("default" / "explicit")
+
     // (撤去 2026-08-16) nodeMidpointFx: 値=ノード座標では幾何 fx が自動的に中点相当になるため不要。
 
     // node-centered 壁摩擦応力 (twall) を「壁ノードに接続する内部双対面 (壁ノード↔内部ノード) の粘性力

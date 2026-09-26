@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <cmath>
 #include <map>
+#include <algorithm>
+#include <cstdlib>
 #include "periodicNode_d.cuh"
 
 __global__ void calcGradient_1_d
@@ -904,6 +906,95 @@ __global__ void lsqPreGrad_finish_d(
     divU[ic] = dUxdx[ic] + dUydy[ic] + dUzdz[ic];
 }
 
+// ---- gradLSQ=2 の係数 (cInt) の保持と公開 (plan gradient-scalar-lsq-unification §4.1) ----
+// 係数は calcGradient_d_wrapper が初回に作る (合併済みを含む)。スカラー勾配の LSQ 経路は読み取り専用で同じ配列を使う。
+// 単一メッシュ・単一プロセス前提 (構築時の nCells・nInc・mesh アドレスを保持し、利用側が一致を検査する)。
+static flow_float* g_lsqCInt  = nullptr;
+static geom_int    g_lsqPreN  = 0;
+static geom_int    g_lsqNInc  = 0;
+static const mesh* g_lsqMesh  = nullptr;
+
+LsqCoefView lsq_coef_view()
+{
+    LsqCoefView v;
+    v.cInt = g_lsqCInt; v.nCells = g_lsqPreN; v.nInc = g_lsqNInc; v.msh = g_lsqMesh;
+    return v;
+}
+
+// スカラー勾配の多変数 LSQ gather (plan gradient-scalar-lsq-unification §4.2)。NV 変数 (≤4) を 1 チャンクとして扱う。
+// NS の lsqPreGrad_internal_d と同じ走査順・同じ係数の読み方・同じ差分形 Σ_j c_ij (φ_j − φ_i) にしてあるので、
+// 同じ場を入れれば NS の勾配とビット同一になる。境界 incidence (ip >= nNormalPlanes) は skip (疑似点なし)。
+// ノード並列・atomic なし。書くのは ic < nCells だけ (ghost 出力は呼び出し側のゼロ初期化のまま)。
+template <int NV>
+__global__ void lsqScalarGrad_internal_d(
+    geom_int nCells, const geom_int* __restrict__ plane_cells,
+    const geom_int* __restrict__ cell_planes_index, const geom_int* __restrict__ cell_planes, geom_int nNormalPlanes,
+    const flow_float* cInt,
+    flow_float* const* phi, flow_float* const* gx, flow_float* const* gy, flow_float* const* gz)
+{
+    geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    const flow_float* p[NV];
+    flow_float p0[NV];
+    flow_float g[NV][3];
+    #pragma unroll
+    for (int v = 0; v < NV; ++v) { p[v] = phi[v]; p0[v] = p[v][ic]; g[v][0] = 0; g[v][1] = 0; g[v][2] = 0; }
+    const geom_int st=cell_planes_index[ic], en=cell_planes_index[ic+1];
+    for (geom_int ilp=st; ilp<en; ++ilp) {
+        const geom_int ip=cell_planes[ilp];
+        if (ip >= nNormalPlanes) continue;      // 境界・periodic は LSQ 点にしない (NS と同じ)
+        const geom_int ic0=plane_cells[2*ip+0], ic1=plane_cells[2*ip+1];
+        const geom_int jc=(ic0==ic)?ic1:ic0;
+        const flow_float c0=cInt[3*ilp+0], c1=cInt[3*ilp+1], c2=cInt[3*ilp+2];
+        #pragma unroll
+        for (int v = 0; v < NV; ++v) {
+            const flow_float d = p[v][jc] - p0[v];
+            g[v][0]+=c0*d; g[v][1]+=c1*d; g[v][2]+=c2*d;
+        }
+    }
+    #pragma unroll
+    for (int v = 0; v < NV; ++v) { gx[v][ic] = g[v][0]; gy[v][ic] = g[v][1]; gz[v][ic] = g[v][2]; }
+}
+
+void lsqScalarGradient_d_wrapper(cudaConfig& cuda_cfg, mesh& msh, int nVar,
+                                 flow_float** phi_dev, flow_float** gx_dev, flow_float** gy_dev, flow_float** gz_dev)
+{
+    if (nVar <= 0) return;
+    // アクセサの契約 (§4.1): 係数が構築済みで、同じメッシュ・同じ規模で作られていること。
+    // nInc の照合は D2H 同期を伴うので、係数配列ごとに 1 回だけ行う (nCells・mesh アドレスは毎回)。
+    const LsqCoefView cv = lsq_coef_view();
+    static const flow_float* s_checkedCInt = nullptr;
+    static geom_int s_nIncNow = 0;
+    if (cv.cInt != nullptr && cv.cInt != s_checkedCInt) {
+        CHECK_CUDA_ERROR(cudaMemcpy(&s_nIncNow, msh.map_cell_planes_index_d + msh.nCells, sizeof(geom_int), cudaMemcpyDeviceToHost));
+        s_checkedCInt = cv.cInt;
+    }
+    const geom_int nIncNow = s_nIncNow;
+    if (cv.cInt == nullptr || cv.msh != &msh || cv.nCells != msh.nCells || cv.nInc != nIncNow) {
+        std::fprintf(stderr, "[scalarGradient lsq] LSQ 係数が未構築か別メッシュのもの (cInt=%p mesh=%p/%p nCells=%lld/%lld nInc=%lld/%lld)。"
+                     "calcGradient (gradLSQ=2, node) の後に呼ぶこと。\n",
+                     (const void*)cv.cInt, (const void*)cv.msh, (const void*)&msh,
+                     (long long)cv.nCells, (long long)msh.nCells, (long long)cv.nInc, (long long)nIncNow);
+        std::exit(1);
+    }
+    for (int q0 = 0; q0 < nVar; q0 += 4) {
+        const int nq = std::min(4, nVar - q0);
+        #define FORGE_LSQ_SCALAR_LAUNCH(NV) \
+            lsqScalarGrad_internal_d<NV><<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>( \
+                msh.nCells, msh.map_plane_cells_d, msh.map_cell_planes_index_d, msh.map_cell_planes_d, msh.nNormalPlanes, \
+                cv.cInt, phi_dev + q0, gx_dev + q0, gy_dev + q0, gz_dev + q0)
+        switch (nq) {
+            case 1: FORGE_LSQ_SCALAR_LAUNCH(1); break;
+            case 2: FORGE_LSQ_SCALAR_LAUNCH(2); break;
+            case 3: FORGE_LSQ_SCALAR_LAUNCH(3); break;
+            default: FORGE_LSQ_SCALAR_LAUNCH(4); break;
+        }
+        #undef FORGE_LSQ_SCALAR_LAUNCH
+    }
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchkKernelSync();
+}
+
 void calcGradient_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
 {
     flow_float* grad_volume = (cfg.isAxisymmetric == 1) ? var.c_d["A_planar"] : var.c_d["volume"];
@@ -956,14 +1047,17 @@ void calcGradient_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh
     if (cfg.gradLSQ == 2 && cfg.discretization == "node") {
         // 境界 (periodic 含む) は LSQ 点にしない (§7.3.1, 2026-08-11 改訂) — 係数テーブルは
         // 内部双対面 incidence のみ。
-        static flow_float *cInt=nullptr;
-        static geom_int pre_n=0;
+        // 係数はファイルスコープ (g_lsqCInt、スカラー勾配の LSQ 経路が lsq_coef_view() で読む)。作り方・合併は従来どおり。
+        flow_float*& cInt = g_lsqCInt;
+        geom_int& pre_n = g_lsqPreN;
         if (cInt==nullptr || pre_n!=msh.nCells) {
             if (cInt){cudaFree(cInt); cInt=nullptr;}
             geom_int nInc=0;
             CHECK_CUDA_ERROR(cudaMemcpy(&nInc, msh.map_cell_planes_index_d + msh.nCells,
                                         sizeof(geom_int), cudaMemcpyDeviceToHost));
             gpuErrchk(cudaMalloc(&cInt, sizeof(flow_float)*3*nInc));
+            g_lsqNInc = nInc;
+            g_lsqMesh = &msh;
             double* Minv6=nullptr; int* degD=nullptr;
             gpuErrchk(cudaMalloc(&Minv6, sizeof(double)*6*msh.nCells));
             gpuErrchk(cudaMalloc(&degD, sizeof(int)));

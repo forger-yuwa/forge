@@ -51,14 +51,14 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 
 - 汎用の多変数 LSQ gather カーネルを 1 本足す: 入力 `flow_float**` (N 変数)、出力 3N 配列。ノード並列 (atomic なし)、アキュムレータは最大 4 変数ずつのチャンク (CSR と `cInt` を読み直す)。REG・spill は `cuobjdump -res-usage` で記録。
 - **差分形** $\nabla\phi_i=\sum_j c_{ij}(\phi_j-\phi_i)$ (NS と同じ)。定数場の勾配は厳密に 0 (前提 plan #7(3) の GG 壁閉包 5.3ε は消える)。
-- 境界の扱いは NS と完全に同一: 内部隣接のみ、境界 incidence は係数 0 を掛けるのでなく `ip >= nNormalPlanes` で **skip** (NS `calcGradient_d.cu:869` と同じ)、疑似点なし。ghost 出力のゼロ初期化の契約は維持 (`speciesTransport_d.cu:1265-1268`)。根拠: accepted の node 境界勾配の原則 (DOF-only) と同じで、変数ごとに境界の扱いが違う現状の方が不整合。GG の内部面値が使う幾何 fx (高 AR 曲面壁で 0.07–0.96 に振れる既知欠陥) も使わない。
+- 境界の扱いは NS と完全に同一: 内部隣接のみ、境界 incidence は係数 0 を掛けるのでなく `ip >= nNormalPlanes` で **skip** (NS `calcGradient_d.cu:869` と同じ)、疑似点なし。ghost 出力のゼロ初期化の契約は維持 (`speciesTransport_d.cu:1265-1268`)。化学種 dY の ghost は両経路とも書かない (GG も `ic1 < nCells` のみ、`:662`) ので未定義のまま。根拠: accepted の node 境界勾配の原則 (DOF-only) と同じで、変数ごとに境界の扱いが違う現状の方が不整合。GG の内部面値が使う幾何 fx (高 AR 曲面壁で 0.07–0.96 に振れる既知欠陥) も使わない。
 - 軸対称: 係数は planar LSQ のまま (NS と同じ)。GG の `A_planar` 除算は不要。
 - 壁節点の $k,\omega$: 低 Re + `sstNodeWallKPin` (既定 ON) では壁ノードは k=0・ω=ω_w にピン (`ransBoundary_d.cu:63-79`) され、残差・対角も 0 (`ransSource_d.cu:303-307`)。**壁ノードの F1 は k=0 により arg1_a = arg1_c = 0 で厳密に 0** (`ransSource_d.cu:343-350`、勾配作用素に依らない。~~1 に張り付く~~ は codex plan M1 で訂正)。作用素の差が入るのは (i) 第一内層ノードの $CD_{k\omega}$・$F_1$、(ii) それを通じた W–I 面の σ(F1) 補間、(iii) `axisymMethod: 1` の半径方向ソース (既定 0、使用 run 0 件)。S2 case/48 で第一内層 F1 の L∞ 差を記録する。
 - **起動時に roK/roOmega も root→member ミラーする** (`periodicMirrorScalarState` を `main.cpp:1257` の直後に追加。現状の初期ミラーは NS・化学種・roXi のみで、roK/roOmega は更新後 `main.cpp:1722,1947` だけ)。同期入力ではビット不変 (S1 で確認)。
 
 ### 4.3 周期
 
-- lsq 経路のスカラー gather (和 → broadcast) は係数合併と同じ述語 `periodicSeamMergeActive` (`periodicNode_d.cu:215-224`: node ∧ 並進 type 0 ∧ 非軸対称) を条件にする。k/ω の専用 gather (`ransTransport_d.cu:246`) は既にこの述語。回転周期・軸対称×周期は片側 LSQ (NS と同じ)。GG 経路の登録 (`periodicGradientGather`) は現行どおり。NS gather の述語統一は回転 plan #0a。
+- lsq 経路のスカラー gather (和 → broadcast) は係数合併と同じ述語 `periodicSeamMergeActive` (`periodicNode_d.cu:215-224`: node ∧ 並進 type 0 ∧ 非軸対称) を条件にする。k/ω の専用 gather (`ransTransport_d.cu:246`) は既にこの述語。回転周期・軸対称×周期は片側 LSQ (NS と同じ)。GG 経路の登録 (`periodicGradientGather`) は現行どおり。**lsq では `periodicGradientGather` に dY・dξ・モーメント勾配を登録しない** (`periodicNode_d.cu:186-188`、2026-09-26 実装時に追加・`diagnostician` 採用: 登録すると wrapper 内の合併と二重になり継ぎ目が 2 倍、また同 gather は回転周期でも合併してしまう)。NS gather の述語統一は回転 plan #0a。
 - 壁∩継ぎ目の ω_w (`wall_y_eff` は部分 stencil の最短距離、`ransBoundary_d.cu:153-203`) の group 同値性は **本 plan の必要条件ではない既存問題** (BC 値の問題で作用素と無関係、GG も同じ露出。整合格子では一致する見込み)。S0-e の診断で確認し、非零なら §5.1 に F 項目 (`wall_y_eff` を group-min に)。
 - node + 回転周期 (type 1) は起動時に警告 (`[config] node 回転周期は未対応 (plan boundary-node-rotational-periodic)`)。エラー化は回転周期 plan の #0a。
 
@@ -83,7 +83,7 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 | 1 (**完了 2026-09-26**) | §4・§6 の確定 | 判断: 2026-09-26 `diagnostician`・§4 案 1–3 採用、周期は並進のみ合併、既定は opt-in から開始、§6 の合否を固定 | F |
 | 2 (**完了 2026-09-26**) | codex plan 段 | GO-with-changes C0/M7/m2 → 判断: 2026-09-26 `diagnostician`・全件採用 (M2 の壁 ω 同値性は既存問題として診断項目に格下げ)、分割せず 2 段ゲート | F |
 | 2a | M1 訂正の反映 | §3・§4.2・S2 表 (本改訂で済)、`axisymMethod: 1` の S0 変種 | O |
-| 2b | roK/roOmega 初期ミラー | `main.cpp:1257` 直後に `periodicMirrorScalarState`。合格: R3 規則でビット不変 | O |
+| 2b (**実装済 2026-09-26**、合格判定は S1) | roK/roOmega 初期ミラー | `main.cpp:1257` 直後に `periodicMirrorScalarState`。合格: R3 規則でビット不変 | O |
 | 2c | S0-e 同値性診断 | channel と case/39 起点で 1 step、applyBconds 直後の k・ω・wall_y_eff の group 内差。非零なら `wall_y_eff` group-min を F 項目に | O (結論 F) |
 | 2d | ハーネス拡張 | 非合併参照 (軸対称×周期)、ξ 定数場 (壁込み)、Y 5 種 (チャンク境界)、負の対照、gather 前配列のダンプ | O |
 | 2e | 起点の固定 | §6 の起点表 (所在・sha256・バイナリ・実効設定) を AWS に転送し sha256 照合 | O |
@@ -91,7 +91,7 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 | 2g | **別 plan 起票** `tooling-stage-manifest-launch-binding` | 起動順対応・バイナリ id・legacy 区別・S4 試験。本 plan #6 の前提 | F (§4) / O (実装) |
 | 2h | 設計 DB | `runner_sern.py` FLAG_POLICY 更新と実効 `scalarGradient` 列 (#6 と同時) | O |
 | 2i | S3 の測定手順 | native・同一 GPU・同一 BLOCKSIZE・ウォームアップ 500 後 2000 step × 3 の中央値、REG/spill | O |
-| 3 | 実装 (Phase 1) | §4、§5 の 2 | O |
+| 3 (**完了 2026-09-26**、判断: 2026-09-26 `diagnostician`・diff レビューで欠陥なし、periodicGradientGather の登録変更を採用) | 実装 (Phase 1) | §4、§5 の 2。REG 38/39/40/48 (NV 1–4)、spill 0。AWS 最小確認: lsq の線形場誤差 ≤ 丸め床、NS 配列は lsq/gg でビット一致、gg の面寄与ダンプは HEAD と不一致 0 | O |
 | 4 | S0/S1 | ハーネス (AWS) | O |
 | 5 | S2/S3 | §6 の表 (**すべて AWS**、ユーザ指示で 2D も AWS) | O (結論 F) |
 | 5r | codex result 1 回目 | Phase 1 | F |
@@ -103,10 +103,10 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 - **S0 作用素** (ハーネス `case/09.Taylor-Green/_g0_lsq_seam/g_suite.py` の 7 変種 + 軸対称×周期 1 本 + `axisymMethod: 1` 1 本):
   - **S0-a 純作用素 (BC 前)**: k・ω・ξ・Y (5 種、チャンク境界 N=5 を跨ぐ) の LSQ 勾配が double 参照と ≤ 1e-5·S。参照は並進周期で `lsq_merged_ref`、軸対称×周期は**非合併** (root = identity) の同関数。非線形場 (sin) で識別。
   - **S0-b 定数場**: ξ (channel は入口が無くピン無し) で全節点・壁節点込みで勾配 == 0 (厳密)。k/ω は非ピン節点で == 0、壁隣接節点はピン値 (k=0, ω_w) からの差分形の解析値と ≤ 4ε。
-  - **S0-c NS との一致**: 同じ場を ro に入れた NS 勾配と、**周期 gather 前の局所配列がビット同一**。gather 後は 2 member group がビット同一、3 member 以上 (多重周期の辺・角、atomicAdd の順序が非決定) は |差| ≤ 4ε·Σ|部分和|。
+  - **S0-c NS との一致**: 同じ場を ro に入れた NS 勾配と、**周期 gather 前の局所配列がビット同一** (周期の無い変種 — box の全面 slip — では gather が no-op なので `res_1` の最終配列同士を直接比較。化学種は Y を ξ と同じ場にして dξ と dY のビット一致、5 種でチャンク境界 4+1 を通す)。gather 後は 2 member group がビット同一、3 member 以上 (多重周期の辺・角、atomicAdd の順序が非決定) は |差| ≤ 4ε·Σ|部分和|。
   - **S0-d 検出力 (負の対照)**: jitter32 で GG 参照との差が 1e-5·S を超える (閾値が GG と LSQ を識別する証拠)。
   - **S0-e BC 後の同値性 (診断)**: channel と case/39 起点で 1 step、applyBconds 直後の k・ω・wall_y_eff の group 内差 == 0 (記録。非零なら F 項目)。
-- **S1 非干渉**: `scalarGradient: gg` で実装前バイナリと全配列が R3 規則で一致 (旧経路の保存、roK/roOmega 初期ミラー追加も含めて)。`lsq` で NS の勾配・リミタ配列が `gg` と同じ step でビット一致 (1 step、初回ダンプ)。
+- **S1 非干渉**: `scalarGradient: gg` で実装前バイナリと全配列が一致 (旧経路の保存、roK/roOmega 初期ミラー追加も含めて)。判定規則 (**測る前の訂正 2026-09-26**、`diagnostician`): 旧同士がビット一致する配列は旧新もビット一致。旧同士でも一致しない配列 (周期 gather の atomicAdd、3 member 以上の group) は、旧 3 本・新 3 本の同一設定反復からノイズ対 (旧旧 3 対・新新 3 対) を取り、旧新 (9 対の最大) が (a) 最大差 ≤ ノイズ対の最大差の 2 倍、(b) 不一致数 ≤ ノイズ対の不一致数の最大の 2 倍。不一致の位置が 3 member 以上の group に限られるかは記録 (判定外)。~~R3 の「不一致数の桁が同じ」規則~~は廃止 (桁境界 8↔12・93↔108 で非決定的に反転する。前提 plan #6a と本 plan の Phase 1 最小確認で再現)。前提 plan の #6a の FAIL 記録は書き換えない。`lsq` で NS の勾配・リミタ配列が `gg` と同じ step でビット一致 (1 step、初回ダンプ)。
 - **S2 物理 A/B — 共通規則**: 起点の最終場から `restart_field.py` で gg/lsq の 2 本、同じバイナリ・同じ step 数。収束は (i) `check_convergence` が DIVERGED でなく RISING 列が無いこと (plateau は既知床として可、先例 case/48 `run_0025`)、(ii) 各列の末尾平均が起点の末尾平均の ≤ 1.5 倍 (ピークは除外し、再進入 step を記録)、(iii) 比較量が `check_quasisteady` で STEADY (閾値は表)。~~`--from-floor`~~ は使わない (codex M4: 全期間ピークを見るので作用素切替直後の跳ねで落ち、case/48・case/40 の起点は plateau で参照側が REFUSED)。ただし case/16 `run_0476` は起点が通常判定 PASS なので `--from-floor` を使える。未達なら同一設定で延長 (初回予算は表の step 数)。**物理ゲートは独立の必須条件**。差が上限を超えたら自動不合格にも自動合格にもせず、格子対診断 (両方向・両経路) を回して F 判断 (codex M5: 縮むかだけでは欠陥と離散化差を識別できない)。
 
   | ケース | 起点 (所在・sha256 先頭) | step | 必須ゲート (既存) | 差 lsq−gg の上限 (超えたら格子対 → F) | STEADY 閾値 |
@@ -142,6 +142,8 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 - [ ] `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-26` — Phase 1 実装 (#3・#2b)。diff を `diagnostician` がレビューし欠陥なし。S1 の判定規則を測る前に訂正 (「不一致数の桁」廃止、両側 3 本のノイズ対)。
 
 - `2026-09-26` — codex plan (GO-with-changes C0/M7/m2) を全件採用して §3–§6 を改訂 (`diagnostician`)。前回の「壁 F1 は 1 に張り付く」は誤りで訂正 (k=0 ピンで F1=0)。2 段ゲート (Phase 1 opt-in → Phase 2 既定化) に。
 

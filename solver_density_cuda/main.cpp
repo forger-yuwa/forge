@@ -113,7 +113,9 @@ static void appendLaunchRecord(const solverConfig& cfg)
        << ", \"bcond_fnv\": \"" << fnv1a64File("bcondConfig.yaml") << std::dec << "\""
        << ", \"exe_size\": " << exeSize << ", \"exe_mtime\": " << exeMtime
        << ", \"slauWallNormalChi\": " << cfg.slauWallNormalChi
-       << ", \"slauWallNormalChi_source\": \"" << cfg.slauWallNormalChiReason << "\"}";
+       << ", \"slauWallNormalChi_source\": \"" << cfg.slauWallNormalChiReason << "\""
+       << ", \"scalarGradient\": \"" << cfg.scalarGradient << "\""
+       << ", \"scalarGradient_source\": \"" << cfg.scalarGradientReason << "\"}";
     std::ofstream out("forge_launches.jsonl", std::ios::app);
     if (out) out << os.str() << "\n";
 }
@@ -1230,6 +1232,18 @@ cudaConfig initializeSimulation(
     cout << "Set mesh connection map for cuda \n";
     cudaConfig cuda_cfg(msh);
     msh.setMeshMap_d();
+    // node × 回転周期 (bcond periodic の type != 0) は継ぎ目の勾配合併が未対応 (片側 LSQ のまま)。
+    // 周期対の構築 (失敗すると例外) より前に出す。エラー化は回転周期 plan #0a。
+    if (cfg.discretization == "node") {
+        for (const auto& bc : msh.bconds) {
+            if (bc.bcondKind != "periodic") continue;
+            auto it = bc.inputInts.find("type");
+            if (it != bc.inputInts.end() && it->second != 0) {
+                std::cout << "[config] node 回転周期は未対応 (plan boundary-node-rotational-periodic)" << std::endl;
+                break;
+            }
+        }
+    }
     msh.setPeriodicPartner();
     // setPeriodicPartner は host の bint["partnerCellID"/"partnerPlnID"] を埋めるが device (bint_d) へは
     // 転送されない (bcondInitVariables の H2D は yaml uniform=type==1 の bint のみ)。これを怠ると periodic_d が
@@ -1255,6 +1269,10 @@ cudaConfig initializeSimulation(
     // seed (2D複製+非周期 Uz 摂動 / restart / 丸め) で周期ペアの保存量が desync していることがあり、残差 gather だけ
     // では desync が永続して継ぎ目フラックス不整合 (seam 圧力欠陥) を生む。dependentVariables より前に揃える。
     periodicMirrorNSState_d_wrapper(cfg , cuda_cfg , msh , var);
+    // SST の roK/roOmega も初期同期する (plan gradient-scalar-lsq-unification §4.2、codex plan M2)。従来は更新後
+    // (point-implicit / 陰解法 sweep の直後) にしかミラーしておらず、読み込んだ場の desync が最初の勾配に入っていた。
+    // 非 SST / cell / 非周期では no-op。
+    periodicMirrorScalarState_d_wrapper(cfg , cuda_cfg , msh , var);
     speciesPrimitive_d_wrapper(cfg , cuda_cfg , msh , var);  // Y_s = ρY_s/ρ (roY を読込済)
     condensationPrimitive_d_wrapper(cfg , cuda_cfg , msh , var);  // φ = ρφ/ρ (液相モーメント読込済)
     tracerPrimitive_d_wrapper(cfg , cuda_cfg , msh , var);  // ξ = ρξ/ρ (トレーサ読込済)

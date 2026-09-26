@@ -3,6 +3,7 @@
 #include <string>
 #include "periodicNode_d.cuh"
 #include "periodicAtomic_d.cuh"
+#include "calcGradient_d.cuh"   // scalarGradientLsqActive
 #include "cuda_forge/cudaWrapper.cuh"
 
 // node-centered 周期境界 DOF 同一視 (median-dual M4, §4.5)。
@@ -182,7 +183,9 @@ void periodicGradientGather_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg ,
     std::vector<std::string> names(std::begin(keys), std::end(keys));
     // 化学種・受動種の勾配 (speciesFaceReconstruction>=1 で計算; 周期半割面を除外して積算済み) も合併する
     // (plan species-passive-scalar-unification §4.1-5-1)。受動種は passiveScalarScheme 1 のときだけ計算される。
-    if (cfg.speciesFaceReconstruction >= 1) {
+    // mesh.scalarGradient: lsq では各 wrapper が periodicSeamMergeActive のときだけ自分で合併するので、ここでは登録しない
+    // (二重合併の回避、plan gradient-scalar-lsq-unification §4.3)。gg は従来どおり。
+    if (cfg.speciesFaceReconstruction >= 1 && !scalarGradientLsqActive(cfg)) {
         for (int s = 0; s < var.nSpeciesRegistered; ++s) {
             const std::string i = std::to_string(s);
             names.push_back("dY"+i+"dx"); names.push_back("dY"+i+"dy"); names.push_back("dY"+i+"dz");

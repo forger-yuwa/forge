@@ -245,6 +245,24 @@ void solverConfig::read(std::string fname)
             }
             this->gradLSQ = 2;
         }
+        // スカラー勾配の作用素 (plan gradient-scalar-lsq-unification §4.4)。既定 gg、node のみ lsq を選べる。
+        if (config["mesh"]["scalarGradient"]) {
+            this->scalarGradient = config["mesh"]["scalarGradient"].as<std::string>();
+            if (this->scalarGradient != "gg" && this->scalarGradient != "lsq") {
+                std::cerr << "[config] mesh.scalarGradient は 'gg' か 'lsq' です (指定値: '" << this->scalarGradient << "')。" << std::endl;
+                std::exit(1);
+            }
+            this->scalarGradientReason = "explicit";
+        }
+        if (this->scalarGradient == "lsq" && this->discretization != "node") {
+            std::cout << "[config] mesh.scalarGradient: lsq は node 専用のため " << this->discretization
+                      << " では gg (Green–Gauss) を使う" << std::endl;
+            this->scalarGradient = "gg";
+            this->scalarGradientReason = "explicit(cell->gg)";   // 明示 gg と区別する (provenance、plan §4.4)
+        }
+        // **起動エコーは常に 1 行** (RUN_PROVENANCE・forge_launches.jsonl と対)。
+        std::cout << "'scalarGradient' effective: " << this->scalarGradient
+                  << " (" << this->scalarGradientReason << ")" << std::endl;
         if (config["mesh"]["nodeWallStressEdgeKernel"]) {
             this->nodeWallStressEdgeKernel = config["mesh"]["nodeWallStressEdgeKernel"].as<int>();
         }

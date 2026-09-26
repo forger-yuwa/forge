@@ -79,3 +79,26 @@ void calcGradient_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh
 // 原始量の AoS パック (stride 8: ro,Ux,Uy,Uz,P,T,0,0)。calcGradient_d_wrapper (gradLSQ==2) が applyBconds 後に組み、
 // LSQ 勾配とリミッタの近傍 gather が 6 配列 (6 セクタ) の代わりに 1 セクタで読む。未構築なら nullptr。
 const flow_float* prim_pack_device_ptr();
+
+// gradLSQ=2 の事前計算 LSQ 係数 (cInt) の読み取り専用ビュー (plan gradient-scalar-lsq-unification §4.1)。
+// cInt は cell_planes CSR の incidence ごとに 3 個 (境界 incidence は 0、継ぎ目は合併済み)。calcGradient_d_wrapper が
+// 初回に構築する。nCells・nInc・msh は構築時の値 (単一メッシュ・単一プロセス前提。利用側が一致を検査する)。
+struct LsqCoefView {
+    const flow_float* cInt = nullptr;
+    geom_int nCells = 0;
+    geom_int nInc = 0;
+    const mesh* msh = nullptr;
+};
+LsqCoefView lsq_coef_view();
+
+// スカラー勾配の LSQ 経路 (mesh.scalarGradient: lsq、node のみ)。
+inline bool scalarGradientLsqActive(const solverConfig& cfg)
+{
+    return cfg.discretization == "node" && cfg.scalarGradient == "lsq";
+}
+
+// 多変数 LSQ gather: phi_dev[q] (q < nVar、device 上のポインタ配列) の勾配を gx/gy/gz_dev[q] に書く。
+// NS と同じ係数・同じ走査順の差分形。最大 4 変数ずつのチャンクで回す。ic < nCells だけ書く (ghost は触らない)。
+// 周期の和→broadcast は呼び出し側 (periodicSeamMergeActive のとき)。
+void lsqScalarGradient_d_wrapper(cudaConfig& cuda_cfg, mesh& msh, int nVar,
+                                 flow_float** phi_dev, flow_float** gx_dev, flow_float** gy_dev, flow_float** gz_dev);
