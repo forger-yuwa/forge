@@ -43,7 +43,38 @@
     "比較点の St 系列 (qwall) の check_quasisteady STEADY",
     "check_wall_resolution --target 1 --over-frac 0 (未評価点ゼロ・面積重み確認)。FAIL なら結果は予備扱い",
     "施設・モデルへの原因帰属はしない"
-   ]
+   ],
+   "outcome": {
+    "date": "2026-09-26",
+    "status": "判定不能 (事前登録の読み)、かつ収束ゲート未達で判別保留",
+    "numbers": "D = +0.091〜+0.258 (平均 +0.146、15/17 点で >10 %)、R_A 平均 1.128、R_B 1.288",
+    "gates": {
+     "convergence": "run_0001 ramp0→main + run_0002 を接続した 66k step で NOT CONVERGED (stalled/plateau)、2.3 dec (roK 3.8 dec 低下中)",
+     "quasisteady": "比較点 St 34 列 ALL STEADY",
+     "wall_resolution": "check_wall_resolution FAIL (ツールの '面積 0.4 %' は点数割合)。自前集計で y1+>1 は前縁 x ≤ 0.72 mm の 4 列のみ、長さ重み 0.16 %、最大 3.94 @ x=0。比較点 28–49 cm では 0.48–0.50"
+    },
+    "what_may_be_said": "未収束・壁解像 FAIL の場では、抽出座標の変更だけで予測比が +9.1〜+25.8 % 変わった。事前登録上は判別保留。D は St_CFD(x−22.22)/St_CFD(x)−1 で実測が約分されるので、実験との差の原因は何も示さない (codex 2026-09-26)",
+    "review": "notes/reviews/2026-09-26-cary-origin-ab-result-diagnose.md"
+   }
+  },
+  {
+   "id": "T4-0a-P",
+   "status": "pre_registered",
+   "name": "残差プラトーの精度依存 A/B (codex diagnose 2026-09-26 の提案)",
+   "_written": "2026-09-26、両腕の結果を見る前",
+   "start": "run_0002_tw02_re027_ext/res_40000.h5 を同一メッシュ restart_field.py で 2 run に分岐",
+   "arms": {
+    "A": "現行 float32 + qAccumulatorFP64: 1 (~/forge56 のバイナリ)",
+    "B": "同一ソース版で flow_float/geom_float を double にした全域 FP64 (~/forge56-double、flowFormat.hpp の typedef のみ変更)"
+   },
+   "fixed": "CFL 2、relax 0.7、SST・BC・メッシュ・比較点すべて同一。各 20,000 step",
+   "output": "outStepInterval 1000 (codex は 100 を例示したが、AWS の空き 4.3 GB で倍精度 200 枚は載らないため)",
+   "decision": {
+    "precision_dependent": "末尾 4,000 step で、B だけが停滞列 (rms_ro, roUx, roUy, roe, roOmega) で A より 1 桁以上低い水準を持続 → 精度依存を支持",
+    "not_precision": "両腕とも停滞し、各列の末尾中央値が互いに ±20 % 以内 → 精度変更で停滞が解消する仮説を退け、精度に依らない反復停滞 (第 2 仮説) を優先",
+    "undecided": "列ごとに割れる・まだ低下中 → 判別保留"
+   },
+   "note": "この閾値は診断用で収束合格基準ではない。両腕の check_convergence と St 系列の check_quasisteady の VERDICT は別に記録する"
   }
  ]
 }
