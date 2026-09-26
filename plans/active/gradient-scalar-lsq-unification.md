@@ -106,6 +106,13 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 | 5d (**測定済 2026-09-26、判定は #5r**: floor 補正累積 rel 7e-19・limCorr 0・上限違反 0 セル・E_ρ 最大 5.5e-6 (gg) / 4.4e-6 (lsq)、トレーサ総量 200 step 後 4.1705e-5 で gg/lsq の差 rel 9e-8。流入流出の収支照合は未実施) | FCT smoke の保存・有界性 | 旧上限 (反復差 × 2) 超過の記録は残す。**0476 の定常差を上限に流用しない** (codex 却下)。受動種の保存収支 (floorCorr・limCorr・total の時系列) と有界性を独立に判定し、差は記録として #5r で審査する。`nSub 15` の十分性は未確認と明記 | O (結論 F) |
 | 5e | `slauWallNormalChi` の文書不整合 | `procedures/recommended-settings.md` §1.0a は既定 0 と書くが `f99f236d` のコードは node+nodeWallDirichlet+SLAU で auto = 1 (`solverConfig.cpp:700`)。担当 plan (`convection-slau-wall-normal-chi-default`) 側で同期してもらう。本 plan の run は実効値を `IC_FROM.txt`・起動エコーで固定済み | O |
 | 5r | codex result 1 回目 | Phase 1。**S2 は「条件付き・未合格」のまま審査に回してよい** (codex (diagnose) S2)。旧ゲート不成立・FCT 旧上限超過・#5a–#5d の結果を併記する | F |
+| 5f (M1、採用) | `check_floor_ratio.py` の誤合格 | 列単位の判定不能・起点で活動していた列の全ゼロ・起点系列の NaN/Inf/必須列欠落/床 ≤ 0 を不合格へ伝播 (**修正済 2026-09-26**、`--selftest` 9 例 PASS)。**修正後に S2 の全床比判定を取り直す** | O |
+| 5g (M2、採用・**測る前に固定 2026-09-26**、判断: codex (diagnose) 4) | 実装直前版との比較 (case/48) | 旧版 `36d8ba03` (AWS `~/sglsq/forge_36d8ba03`、sha256 `29e8f590…`、`f99f236d` と同じ CXXFLAGS・arch 86) を、現行対照 (`run_0950`+`run_0952`) と**同じ 24000 + restart + 24000 step** で (`run_0957_sglsq_s2_base36d8` → `run_0958_sglsq_s2_base36d8_ext`)。IC・メッシュ・BC・実効設定・GPU・BLOCKSIZE を揃え、`scalarGradient` キーは旧版に無いので書かない。chi は両バイナリの起動エコーで実効値を確認。判定: 延長段の全活動残差列の末尾 20 % 平均 f で**各列 2/3 ≤ f_old/f_new ≤ 1.5**、Cf・q_w・δ*・θ (3 station) の固定末尾区間平均で**旧版を分母に相対差 ≤ 0.1 %**、両者の系列 STEADY・既存物理ゲート・NaN/Inf/RISING なし。**A**: 全条件成立かつ旧版も起点床を外れる → 「この case・手順・閾値では大幅な追加変化を検出せず、旧床逸脱は実装直前版でも再現」(「床を変えていない」「原因は過去の commit」とは書かない)。**B**: 床比か物理差が上限超過 → commit 群の調査へ戻る。過渡・設定不一致・証拠不足は判定不能 (自動延長・閾値緩和はしない)。case/48 の結果だけで他ケースの収束ゲート未達は閉じない | O (結論 F) |
+| 5h (M3、採用・**測る前に固定**、#5g の後) | FCT smoke の収支と nSub 感度 | (a) `check_passive_budget.py --mode fct` を `run_0954/0955` に適用 (収支閉合・独立総量照合・低次/HO 残差)。(b) gg・lsq それぞれ `nSubIterDualTime` 15→30 だけを変え、同じ開始状態から同じ 200 物理 step。同じ物理時刻・節点・固定正規化で D_q = ‖q_lsq15 − q_gg15‖、E_q = ‖q_gg30 − q_gg15‖ + ‖q_lsq30 − q_lsq15‖ (q は ro・roY・roUy を含む)。**A**: 全 q で E_q < 0.1 D_q かつ 4 本とも保存・有界性ゲート通過 → 「15→30 の反復感度では差の大部分を説明できない」と記録 (作用素差を支持するが正しい離散化差とは確定しない)。**B**: 感度条件不成立 → 30 の双子を確定値にせず精度差の審査は保留。D_q = 0・ノイズ以下・記録不足・保存ゲート不成立は判定不能。旧上限超過は残し、A でも旧精度ゲートを自動合格にしない | O (結論 F) |
+| 5i (M4、採用) | S3 の競合監視 | GPU 計算プロセスの PID を実際の solver 子プロセス (run_case.sh の bash ではない) と照合し、対象の観測と正常終了を必須に。競合検出試験を通してから S3 を 2 case とも取り直す。ポーリングで短時間の競合まで排除したとは書かない | O |
+| 5j (M5、採用・条件付き暫定。**修正済 2026-09-26**: `YAML_HARD_PATHS` に `mesh.scalarGradient`、YAML 解析不能時は本文ハッシュを key に入れて連結しない、`test_stage_manifest_scalar_gradient.py` 4 例 PASS・既存 chi テスト PASS。本 plan の S2 run は単一段で manifest を使っていない) | stage_manifest の区間 | `YAML_HARD_PATHS` に `mesh.scalarGradient` を追加 (明示 gg↔lsq を別区間に)。既存 manifest の保存済み key は直らないので、既存記録は設定原本から再生成するか判定区間を明示。YAML 解析不能時に黙って連結しない。**#2g の完了が既定化の前提**のまま | O |
+| 5k (m6、採用。**済 2026-09-26**: `methods/gradient.md`・`methods/discretization.md` §7.3・`procedures/solver-settings.md` に `mesh.scalarGradient` 節) | methods / procedures の記述 | `methods/discretization.md`・`methods/gradient.md` を「既定 gg / opt-in lsq (実装済み・検証未完了) / cell は GG 固定」、非合併条件の lsq は「片側 LSQ」に。`procedures/solver-settings.md` に `mesh.scalarGradient` | O |
+| 5l (m7、採用。README 行は済 2026-09-26 (case/48 に chi0・旧版比較、case/16 に 0476 継続)。**床移動の真因は未着手の F 項目**) | 索引と未解決項目 | case/48・case/16 README の追加 run 行と結果。**床移動の真因** (設定差のある 4 case で gg・lsq とも起点床に戻らない、chi 単独は棄却) を独立 F 項目に (別項目化で S2 未合格を解消した扱いにはしない) | F |
 | 6 | 既定の切り替え (Phase 2) | **前提**: 5r が GO、2g 完了、S3 ≤ 5 %。S4、2h、docs、codex result 2 回目 | F |
 | 7 (**完了 2026-09-26**: `boundary-node-rotational-periodic` §5.1 #0a) | 回転周期 plan への登録 | | O |
 
@@ -144,6 +151,8 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-unification-result.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-unification-result.md) | **NO-GO**, C0/M5/m2 (実装の中核に欠陥なし。M1 床比ツールの誤合格・M2 収束ゲート未達の根拠不足・M3 FCT 収支未確認・M4 S3 監視漏れ・M5 manifest に scalarGradient なし) | **全件採用** (codex (diagnose) 4 で採否、M2・M3 の規則を修正して固定) → §5.1 #5f–#5l。既定 gg・`in_progress` を維持、Phase 2 へ進まない |
+| diagnose (諮問 4、result 1 の採否) | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-result1-disposition-diagnose.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-result1-disposition-diagnose.md) | C0、7 件採用 (M1 の修正に残る穴・M2 は双方向床比と restart 手順を揃える・M3 は作用素差と確定しない・M4 は PID 照合) | 全件採用 |
 | diagnose (諮問 3、S2 解釈) | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-s2-result-diagnose.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-s2-result-diagnose.md) | C0、Major 4 (現行 gg 床への差し替え却下・床移動は要再検証・FCT は 0476 差の流用却下・case/16 の不足区間と比較対象)、Minor 1 (chi 文書不整合) | **全件採用**。S2 は条件付き・未合格、#5a–#5e を追加 |
 | diagnose (諮問 2) | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-4d-nfail-diagnose.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-4d-nfail-diagnose.md) | C0、Major 2 (#4d の A をダンプ非干渉と記録しない・N FAIL 継続を「ダンプが分布を変えた」と確定しない) | **全件採用**。gg/lsq のノイズ対プールは却下 (親の案 (a) も採らない)、#4f の 8 本試験を測る前に固定、S2 は E/P と #2e・#2f が条件 |
 | diagnose (諮問、レビュー 2 回とは別) | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-4a-closeout-diagnose.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-4a-closeout-diagnose.md) | C0、Major 2 (ダンプ判定規則の原案却下・S0/S1 は再判定が要る)、Minor 2 (hook)、Minor 1 (S1 (2) のリミタは gather 後) | **全件採用** (Fable 上限中のため codex で諮問)。#4a commit 可 (Minor 修正後)、§6 に E/P/N 区分、#4d・#4e、#5 の着手条件 |
@@ -164,6 +173,8 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 - [ ] `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-26` — codex result 1 回目 **NO-GO** (C0/M5/m2、実装の中核に欠陥なし)。codex (diagnose) 4 で 7 件とも採用、#5f–#5l を追加 (M2・M3 の判定規則は測る前に固定)。M1 は修正済。
 
 - `2026-09-26` — #5a = B (chi 0 でも case/48 は起点床に戻らない → chi 単独説明を棄却)、#5b 0476 継続は上限内、#5c vs 0482 は上限内、#5d FCT 保存・有界性を測定、S3 PASS (1.010 / 1.017)。
 

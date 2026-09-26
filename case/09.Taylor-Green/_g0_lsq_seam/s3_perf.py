@@ -22,9 +22,33 @@ REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 FBIN = os.path.expanduser("~/sglsq/forge_f99f236d")
 
 
-def others_running():
-    r = subprocess.run(["pgrep", "-xc", "forge"], capture_output=True, text=True)
-    return int(r.stdout.strip() or 0)
+def gpu_pids():
+    """GPU を使っている計算プロセスの PID (`nvidia-smi --query-compute-apps`)。プロセス名に依らない
+    (codex result-1 M4: 測定バイナリ `forge_f99f236d` は `pgrep -x forge` に数えられず、競合を見逃していた)。"""
+    r = subprocess.run(["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit("nvidia-smi が使えない (GPU 占有を確認できない)")
+    return {int(x) for x in r.stdout.split() if x.strip().isdigit()}
+
+
+def solver_pids(root_pid):
+    """root_pid (run_case.sh の bash) の子孫のうち、実行ファイルが FBIN のプロセス。"""
+    target = os.path.realpath(FBIN)
+    out, stack = set(), [root_pid]
+    while stack:
+        p = stack.pop()
+        try:
+            kids = open(f"/proc/{p}/task/{p}/children").read().split()
+        except OSError:
+            kids = []
+        for k in map(int, kids):
+            stack.append(k)
+            try:
+                if os.path.realpath(f"/proc/{k}/exe") == target:
+                    out.add(k)
+            except OSError:
+                pass
+    return out
 
 
 def run_one(case, src, res, grad, dst):
@@ -35,18 +59,28 @@ def run_one(case, src, res, grad, dst):
                    capture_output=True, text=True)
     env = dict(os.environ, FORGE_BIN=FBIN, FORGE_CUDA_BLOCKSIZE="128", FORGE_CUDA_BLOCKSIZE_SMALL="128")
     for _ in range(5):
-        while others_running():
+        while gpu_pids():
             time.sleep(20)
         # 走行中に他の forge が現れたら測定を捨てて取り直す (2026-09-26: 開始前だけ見ていて case/48 の 2 反復が重なった)
         pr = subprocess.Popen(["bash", os.path.join(REPO, "solver_density_cuda", "tools", "run_case.sh"), dst], env=env,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        clean = True
+        # 競合判定 (codex result-1 M4): GPU 計算プロセスの PID を、run_case.sh の子孫で実行ファイルが FBIN の
+        # solver PID と照合する。solver 以外の GPU プロセスが 1 回でも見えたら汚染、solver が GPU 上に 1 回も
+        # 観測されない・異常終了も無効。0.5 s ごとのポーリングなので、それより短い競合は検出できない。
+        clean, observed, mine = True, False, set()
         while pr.poll() is None:
-            time.sleep(1)
-            if others_running() > 1:
+            time.sleep(0.5)
+            mine |= solver_pids(pr.pid)
+            now = gpu_pids()
+            if now & mine:
+                observed = True
+            if now - mine:
                 clean = False
-        if clean:
+                print(f"{dst}: solver 以外の GPU プロセス {sorted(now - mine)}", flush=True)
+        if clean and observed and pr.returncode == 0:
             break
+        if not observed:
+            print(f"{dst}: solver を GPU 上で観測できなかった (rc={pr.returncode})", flush=True)
         print(f"{dst}: 走行中に他の forge が重なったので取り直す", flush=True)
     else:
         raise SystemExit(f"{dst}: 5 回とも他の forge と重なった")

@@ -86,6 +86,10 @@ YAML_HARD_PATHS = [
     ("space.limiter", ("space", "limiter")),
     ("space.limiterScaled", ("space", "limiterScaled")),
     ("space.venkatK", ("space", "venkatK")),
+    # node のスカラー勾配の作用素 (gg / lsq)。明示 gg↔lsq を 1 区間に連結しない (plan gradient-scalar-lsq-unification
+    # §5.1 #5j、codex result-1 M5)。**暫定**: 省略 (= 既定) と明示 gg は別キーになる (分けすぎる側)。起動順・バイナリ id・
+    # legacy の区別は別 plan `tooling-stage-manifest-launch-binding` (#2g)。
+    ("mesh.scalarGradient", ("mesh", "scalarGradient")),
     ("physics.viscMethod", ("physics", "viscMethod")),
     ("physics.thermalMethod", ("physics", "thermalMethod")),
     ("time.unsteady", ("time", "unsteady")),
@@ -168,7 +172,9 @@ def _yaml_grab(text, paths):
     try:
         doc = yaml.safe_load(text or "")
     except Exception:
-        return {}
+        # 読めない YAML を空 dict にすると、hard キーが全部欠けた同士として**黙って連結**される
+        # (codex 2026-09-26 gradient-scalar-lsq result-1 M5)。本文のハッシュを入れて別区間にする。
+        return {"yaml_unparsable": hashlib.sha1((text or "").encode()).hexdigest()[:12]}
     if not isinstance(doc, dict):
         return {}
     out = {}

@@ -53,12 +53,21 @@ def judge(path, floor, zero_cols, factor, tail_frac, ref_path):
     back = True
     for c, ser in cols.items():
         if not any(v != 0.0 for v in ser):
-            report[c] = ('all-zero (inactive, skip)', True); continue
+            if c in floor:
+                # 起点で活動していた列が対象で全ゼロ = 方程式が消えた / 出力されていない (codex result-1 M1 の追加例)
+                report[c] = ('起点で活動していた列が対象で all-zero  <-- COLUMN MISMATCH', False); ok_in = False
+            else:
+                report[c] = ('all-zero (both inactive, skip)', True)
+            continue
         if any(math.isnan(v) or math.isinf(v) for v in ser):
             report[c] = ('NaN/Inf present  <-- DIVERGED', False); continue
         if c not in floor:
             why = '起点で all-zero の列が対象で非ゼロ' if c in zero_cols else '起点に無い列'
             report[c] = (f'{why}  <-- COLUMN MISMATCH', False); ok_in = False; continue
+        cc_msg = rep_cc.get(c, ("", True))[0]
+        if "判定不能" in cc_msg:
+            # 通常判定が列単位で判定不能 (末尾窓の代表値が 0 など) なら床比でも合格にしない (codex result-1 M1)
+            report[c] = (f"{cc_msg.strip()}  (check_convergence の列判定)", False); ok_in = False; continue
         a = ser[int(len(ser) * (1 - tail_frac)):]
         r_tail = (sum(abs(x) for x in a) / len(a)) / floor[c]
         peak_i = max(range(len(ser)), key=lambda i: abs(ser[i]))
@@ -76,7 +85,7 @@ def judge(path, floor, zero_cols, factor, tail_frac, ref_path):
     if any_nan:
         v = 'DIVERGED (NaN/Inf)'
     elif not ok_in:
-        v = '判定不能 (列・方程式系の不一致)'
+        v = '判定不能 (列・方程式系の不一致、または列単位の判定不能)'
     elif rising:
         v = 'RISING'
     elif not back:
@@ -86,11 +95,32 @@ def judge(path, floor, zero_cols, factor, tail_frac, ref_path):
     return v, laststep, report
 
 
+def ref_problems(ref_path, floor):
+    """起点系列の検査 (codex result-1 M1): 必須列・NaN/Inf・床が正の有限値か。問題の文字列リスト (空なら可)。"""
+    out = []
+    _, cols = CC.load_series(ref_path)
+    need = CC.REQUIRED_COLS + (CC.TRANSITION_COLS if CC.transition_active(ref_path) else ())
+    miss = [c for c in need if c not in cols]
+    if miss:
+        out.append("必須列が無い " + ", ".join(miss))
+    for c, ser in cols.items():
+        if any(math.isnan(v) or math.isinf(v) for v in ser):
+            out.append(f"{c} に NaN/Inf")
+    for c, f in floor.items():
+        if not (math.isfinite(f) and f > 0.0):
+            out.append(f"{c} の床 {f!r} が正の有限値でない")
+    return out
+
+
 def run(start, targets, factor, tail_frac):
     ref_path = csv_path(start)
     if not os.path.exists(ref_path):
         print(f"[{start}] NO residual_history.csv (起点)  <-- 判定不能"); return False
     floor, zero_cols = CC.reference_floor(ref_path, tail_frac)
+    bad = ref_problems(ref_path, floor)
+    if bad:
+        print(f"[{start}] 起点の残差系列が床の基準にならない: {'; '.join(bad)}  <-- 判定不能")
+        return False
     print(f"起点床: {start} (末尾 {tail_frac:.0%} の |値| 平均、判定は通常基準を問わない)")
     for c in sorted(floor):
         print(f"  {c:14s}: {floor[c]:.3e}")
@@ -145,6 +175,20 @@ def selftest():
     v, _, _ = judge(p, floor, zc, 1.5, 0.2, ref)
     good = v.startswith('判定不能'); ok &= good
     print(f"{'extra_column':16s} -> {v}  [{'ok' if good else 'NG'}]")
+    # codex result-1 M1 の 2 例: 末尾が 0 の系列 / 参照が Inf
+    p = os.path.join(d, 'tailzero.csv'); _write(p, [1e-6] * 320 + [0.0] * 80)
+    v, _, _ = judge(p, floor, zc, 1.5, 0.2, ref)
+    good = not v.startswith('PASS'); ok &= good
+    print(f"{'tail_zero':16s} -> {v}  [{'ok' if good else 'NG'}]")
+    refinf = os.path.join(d, 'refinf.csv'); _write(refinf, [float('inf')] * 400)
+    fi, _ = CC.reference_floor(refinf, 0.2)
+    good = bool(ref_problems(refinf, fi)) and not run(refinf, [os.path.join(d, 'plateau_same.csv')], 1.5, 0.2)
+    ok &= good
+    print(f"{'ref_inf':16s} -> {'判定不能 (拒否)' if good else 'PASS してしまう'}  [{'ok' if good else 'NG'}]")
+    p = os.path.join(d, 'allzero.csv'); _write(p, [0.0] * 400)
+    v, _, _ = judge(p, floor, zc, 1.5, 0.2, ref)
+    good = not v.startswith('PASS'); ok &= good
+    print(f"{'target_allzero':16s} -> {v}  [{'ok' if good else 'NG'}]")
     print('SELFTEST', 'PASS' if ok else 'FAIL')
     return ok
 

@@ -62,7 +62,8 @@ def main():
     ap.add_argument("--res", default=None, help="起点の res (保存量を index コピー)。--no-restart なら不要")
     ap.add_argument("--no-restart", action="store_true", help="起点の入力 h5 の VALUE をそのまま IC に使う (起点 run と同じ IC から回す双子)")
     ap.add_argument("--dst", required=True)
-    ap.add_argument("--grad", choices=("gg", "lsq"), required=True)
+    ap.add_argument("--grad", choices=("gg", "lsq", "none"), required=True,
+                    help="none: キーを書かない (キーを持たない実装前バイナリ用。実効は gg)")
     ap.add_argument("--nstep", type=int, required=True)
     ap.add_argument("--out-int", type=int, required=True)
     ap.add_argument("--extra", nargs="*", default=[])
@@ -97,8 +98,12 @@ def main():
         old = node.get(parts[-1], "<なし>")
         node[parts[-1]] = parse_val(v)
         changes.append(f"set {key}: {old!r} -> {node[parts[-1]]!r}")
-    cfg["mesh"]["scalarGradient"] = a.grad
-    changes.append(f"set mesh.scalarGradient: {a.grad} (明示)")
+    if a.grad == "none":
+        cfg["mesh"].pop("scalarGradient", None)
+        changes.append("mesh.scalarGradient: 書かない (実装前バイナリ、実効 gg)")
+    else:
+        cfg["mesh"]["scalarGradient"] = a.grad
+        changes.append(f"set mesh.scalarGradient: {a.grad} (明示)")
     old_n = cfg["time"]["last"].get("nStepOuter")
     cfg["time"]["last"]["nStepOuter"] = a.nstep
     changes.append(f"set time.last.nStepOuter: {old_n} -> {a.nstep}")
