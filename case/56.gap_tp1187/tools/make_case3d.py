@@ -17,6 +17,7 @@ import h5py
 
 HERE = Path(__file__).resolve().parent
 CASE = HERE.parent
+X_MATCH = 1.88          # 照合点 (横すきま x=0) の 2D 平板 CFD 座標 [m]。**物理の位置 II ではない** — 2D 平板は x=0 がトリップ (物理 13 cm) なので位置 II は CFD 1.75 m (δ* 1.343 cm)。1.88 は δ* が原報 1.62 cm に揃う CFD 位置 (1.6625 cm) を選んだ規約
 ROOT = CASE.parents[1]
 TOOLS = ROOT / "solver_density_cuda" / "tools"
 sys.path.insert(0, str(HERE))
@@ -113,7 +114,9 @@ def main():
     ap.add_argument("--series", type=int, default=8)
     ap.add_argument("--tw", type=float, default=300.0)
     ap.add_argument("--inlet-run", default="run_0002_fp_t8_long")
-    ap.add_argument("--inlet-x", type=float, default=1.7076)
+    ap.add_argument("--inlet-x", type=float, default=None,
+                    help="平板の抽出断面 [m]。省略時はメッシュの領域入口 x_in から "
+                         f"{X_MATCH} - |x_in| を計算する。指定値がそれと食い違えば止める")
     ap.add_argument("--inlet-table", default=None,
                     help="既存の入口テーブルを使う (抽出元の平板 run が無い機械で組むとき)。"
                          "指定すると extract_inlet_table.py を呼ばない")
@@ -134,6 +137,17 @@ def main():
     ap.add_argument("--manifest-only", action="store_true",
                     help="既存 run に stage_manifest.json だけを後付けする (計算しない)")
     a = ap.parse_args()
+    # **抽出断面はメッシュから決める** (2026-09-26)。既定値 1.7076 を L=30.48 のメッシュ
+    # (x_in=-324.8 mm → 1.5552 m) にそのまま使い、照合点の δ* が +8.4 % 厚い対を作った。
+    with h5py.File(CASE / "mesh" / f"{a.mesh}.h5") as m:
+        x_in = float(np.asarray(m["MESH/COORD"], dtype=float).reshape(-1, 3)[:, 0].min())
+    x_want = round(X_MATCH - abs(x_in), 4)
+    if a.inlet_x is None:
+        a.inlet_x = x_want
+    elif abs(a.inlet_x - x_want) > 1e-4:
+        raise SystemExit(f"--inlet-x {a.inlet_x} はメッシュ {a.mesh} (x_in={x_in*1e3:.3f} mm) の "
+                         f"規約値 {x_want} と違う。照合点の δ* がずれるので止める")
+    print(f"  入口抽出断面: x={a.inlet_x} m (メッシュ x_in={x_in*1e3:.3f} mm、照合点 {X_MATCH} m)")
     os.environ["FORGE_CUDA_BLOCKSIZE"] = str(a.blocksize)
 
     der = {o["run"]: o for o in json.loads(
