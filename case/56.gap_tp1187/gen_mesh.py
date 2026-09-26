@@ -44,7 +44,7 @@ slip:   {physID: 5, kind: slip, outputHDFflg: 0, ints: , floats: }
 """
 
 
-def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl):
+def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl, r_up=1.06, r_buf=1.03):
     L = []; A = L.append
     A("// case/56 — TP-1187 較正パネル相当の 2D 平板 (平面 2D, node)。gen_mesh.py が生成。")
     A("Geometry.PointNumbers = 0;  lc = 0.05;")
@@ -60,9 +60,9 @@ def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl
     for i, (b, t) in enumerate(zip(range(1, 5), range(5, 9)), start=7):
         A(f"Line({i}) = {{{b}, {t}}};")              # 7..10 縦線
     A(f"Transfinite Line {{7, 8, 9, 10}} = {ny} Using Progression {r_y:.8f};")
-    A(f"Transfinite Line {{1, 4}} = {nx_up} Using Progression 1.06;")
+    A(f"Transfinite Line {{1, 4}} = {nx_up} Using Progression {r_up};")
     A(f"Transfinite Line {{2, 5}} = {nx_pl} Using Bump {bump_pl};")
-    A(f"Transfinite Line {{3, 6}} = {nx_buf} Using Progression 1.03;")
+    A(f"Transfinite Line {{3, 6}} = {nx_buf} Using Progression {r_buf};")
     for k in range(1, 4):
         A(f"Curve Loop({k}) = {{{k}, {7+k}, -{3+k}, -{6+k}}};")
         A(f"Plane Surface({k}) = {{{k}}};  Transfinite Surface {{{k}}};  Recombine Surface {{{k}}};")
@@ -125,6 +125,8 @@ def main():
     ap.add_argument("--nx-plate", type=int, default=901)
     ap.add_argument("--nx-buf", type=int, default=41)
     ap.add_argument("--bump-plate", type=float, default=0.15)
+    ap.add_argument("--r-up", type=float, default=1.06, help="助走区間の等比 (既定は従来値)")
+    ap.add_argument("--r-buf", type=float, default=1.03, help="出口バッファの等比 (既定は従来値)")
     ap.add_argument("--tag", default="fp")
     ap.add_argument("--no-convert", action="store_true")
     ap.add_argument("--y-file", default=None,
@@ -159,7 +161,7 @@ def make_progression(a):
         else:
             hi = r
     txt = geo_text(a.x_in, a.x_out, a.x_plate_end, a.H, ny, r,
-                   a.nx_up, a.nx_plate, a.nx_buf, a.bump_plate)
+                   a.nx_up, a.nx_plate, a.nx_buf, a.bump_plate, a.r_up, a.r_buf)
     (MESH / f"{a.tag}.geo").write_text(txt)
     print(f"[{a.tag}] 平板 {a.x_plate_end*1e2:.0f} cm, H = {a.H*1e2:.0f} cm")
     print(f"        ny = {ny} (y1 = {a.H*(r-1)/(r**(ny-1)-1)*1e6:.3f} µm, r = {r:.5f}), "
