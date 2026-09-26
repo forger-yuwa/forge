@@ -89,7 +89,7 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 | 2d (**完了 2026-09-26**: `g_suite.py`・`s0y_species.py`・`pregather_check.py`) | ハーネス拡張 | 非合併参照 (軸対称×周期)、ξ 定数場 (壁込み)、Y 5 種 (チャンク境界)、負の対照、gather 前配列のダンプ | O |
 | 2e (**完了 2026-09-26**: 起点 5 件の sha256 を AWS で照合、各 run の `IC_FROM.txt`) | 起点の固定 | §6 の起点表 (所在・sha256・バイナリ・実効設定) を AWS に転送し sha256 照合 | O |
 | 2f (**実装済 2026-09-26**: `solver_density_cuda/tools/check_floor_ratio.py --start <起点 run> <run>...`、`--selftest` 6 通り PASS。比較量の STEADY は従来どおり `check_quasisteady.py`) | S2 収束規則のスクリプト | plateau 許容 + 床比 (末尾平均 ≤ 起点の 1.5 倍、ピーク除外・再進入 step 記録) + STEADY 閾値 | O |
-| 2g | **別 plan 起票** `tooling-stage-manifest-launch-binding` | 起動順対応・バイナリ id・legacy 区別・S4 試験。本 plan #6 の前提 | F (§4) / O (実装) |
+| 2g (**起票済 2026-09-27**: [`tooling-stage-manifest-launch-binding.md`](tooling-stage-manifest-launch-binding.md)、draft) | **別 plan 起票** `tooling-stage-manifest-launch-binding` | 起動順対応・バイナリ id・legacy 区別・S4 試験。本 plan #6 の前提 | F (§4) / O (実装) |
 | 2h | 設計 DB | `runner_sern.py` FLAG_POLICY 更新と実効 `scalarGradient` 列 (#6 と同時) | O |
 | 2i (**完了 2026-09-26: S3 PASS** — 現行の値は PID 照合版の取り直し (#5i): case/48 0.997・case/39 1.018。以下は旧監視版の記録: lsq/gg 比 case/48 1.010・case/39 1.017 (上限 1.05)。AWS g5・`f99f236d`・block 128・2500 step の step 501–2499 平均・交互 3 反復の中央値 (`s3_perf.py`、`S3_case{48,39}.txt`)。case/48 の初回は別 run と重なったので無効 (`S3_case48_contaminated.txt`) にして走行中監視つきで取り直した。「native」は AWS の native ビルド) | S3 の測定手順 | native・同一 GPU・同一 BLOCKSIZE・ウォームアップ 500 後 2000 step × 3 の中央値、REG/spill | O |
 | 3 (**完了 2026-09-26**、判断: 2026-09-26 `diagnostician`・diff レビューで欠陥なし、periodicGradientGather の登録変更を採用) | 実装 (Phase 1) | §4、§5 の 2。REG 38/39/40/48 (NV 1–4)、spill 0。AWS 最小確認: lsq の線形場誤差 ≤ 丸め床、NS 配列は lsq/gg でビット一致、gg の面寄与ダンプは HEAD と不一致 0 | O |
