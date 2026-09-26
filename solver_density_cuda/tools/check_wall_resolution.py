@@ -372,9 +372,28 @@ def main():
         print("  %-12s step %6d  y1 = %.3e m  y1+ 平均 %7.3f / p99 %7.3f / 最大 %7.3f"
               % (name, step, np.nanmedian(y1[good]), np.nanmean(yp[good]),
                  np.nanpercentile(yp[good], 99), np.nanmax(yp[good])))
+        # ソルバ出力 `ypls` の自己検査 (2026-09-26, plan tooling-convergence-and-wall-resolution-gates §5.1 12d)。
+        # **平均を出すだけにしない**: node/mode 0 は 2026-09-26 まで全点厳密 0 で、平均を見ても
+        # 「壊れている」ことが見えなかった (0 を平均に入れると小さい y+ に見える)。
+        # 修正後は同じ定義を書くので、**≤0 (未評価の番兵 -1 と旧実装の 0) を除外し、本ツールとの
+        # 最大相対差**を出す。ずれていれば定義が食い違っている。
+        sol_txt = ""
+        if sol is not None:
+            sv = np.asarray(sol, float)
+            solved = np.isfinite(sv) & (sv > 0.0)
+            n_unset = int(np.count_nonzero(~solved))
+            if solved.any():
+                cmpmask = solved & good
+                if cmpmask.any():
+                    rel = np.abs(sv[cmpmask] - yp[cmpmask]) / np.maximum(np.abs(yp[cmpmask]), 1e-30)
+                    sol_txt = ("  ; ソルバ ypls との最大相対差 %.2e (%d 点で比較, 未評価/0 が %d 点)"
+                               % (float(np.max(rel)), int(cmpmask.sum()), n_unset))
+                else:
+                    sol_txt = "  ; ソルバ ypls と比較できる点が無い"
+            else:
+                sol_txt = ("  ; **ソルバ ypls は全点 ≤0 (%d 点) — 出力が壊れている**" % n_unset)
         print("               評価できた面積割合 %.1f %% ; y1+ > %.3g が %.1f %% ; 最大の位置 index %d%s"
-              % (frac, a.target, over, imax,
-                 ("  ; ソルバ ypls 平均 %.4g" % float(np.mean(sol)) if sol is not None else "")))
+              % (frac, a.target, over, imax, sol_txt))
         worst = max(worst, float(np.nanmax(yp[good])))
         worst_over = max(worst_over, over)
         if frac < 90.0:
