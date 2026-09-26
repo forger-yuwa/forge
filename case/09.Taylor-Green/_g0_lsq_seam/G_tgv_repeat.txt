@@ -1,27 +1,27 @@
 # tgv_repeat: plan boundary-node-periodic-gradient-fix §6 G0/G1/G2
-run: /tmp/claude-1000/-home-sano-work-forge/4b0c8643-66fb-4fde-8878-7c8a5104c060/scratchpad/g_harness_tgv_repeat
-forge_mtime : 2026-09-26T07:29:50+09:00
-forge_sha256: 88e949fae70c29146a2880eee230e294584943ee78f7dab1631cf775d97b9288
-git_head    : 633997bf9da1dc86929a6782ad0375f722565983
-harness revision: 633997bf (dirty)
+run: /home/ubuntu/pgrad6_scratch/g_harness_tgv_repeat
+forge_mtime : 2026-09-26T05:44:54+00:00
+forge_sha256: f0ad00c8b3530576f598f81064cb3aefca98560262536a7c7051ae0d64740a39
+git_head    : bd22376da521335470208b856a4d3ae341adf96b
+harness revision: bd22376 (dirty)
 CV 35937, 周期 group 2977, member 数の内訳 1:29791, 2:5766, 4:372, 8:8, 周期対の最大残差 3.80e-07, 同値類 (重複 >1) 12096
 
 ## G0: 合併 stencil LSQ の線形場 (解析勾配との差)
 閾値: 非零成分 |g_c−a_c| ≤ 1e-5·|a|、ゼロ成分 |g_c| ≤ 1e-6·max|φ|/h (h = 合併体積^(1/3))。対象 = 折返し不連続にも境界条件の上書きにも触れない節点
 | 場 | a | 区分 | 節点数 | 非零成分 最大誤差/|a| | ゼロ成分 最大 |g|·h/max|φ| | 判定 |
 | --- | --- | --- | --- | --- | --- | --- |
-| Ux | (0.0, 1.0, 0.0) | 内部 | 24389 | 5.96e-07 | 0.00e+00 | ok |
-| Ux | (0.0, 1.0, 0.0) | 面 (2 member) | 5046 | 5.96e-07 | 0.00e+00 | ok |
-| Ux | (0.0, 1.0, 0.0) | 辺 (4 member) | 348 | 5.96e-07 | 0.00e+00 | ok |
-| Ux | (0.0, 1.0, 0.0) | 角 (8 member) | 8 | 0.00e+00 | 0.00e+00 | ok |
-| Uy | (1.0, 0.0, 0.0) | 内部 | 24389 | 1.79e-07 | 0.00e+00 | ok |
-| Uy | (1.0, 0.0, 0.0) | 面 (2 member) | 5046 | 1.79e-07 | 0.00e+00 | ok |
-| Uy | (1.0, 0.0, 0.0) | 辺 (4 member) | 348 | 1.79e-07 | 0.00e+00 | ok |
-| Uy | (1.0, 0.0, 0.0) | 角 (8 member) | 8 | 0.00e+00 | 0.00e+00 | ok |
-| Uz | (0.3, -0.7, 0.5) | 内部 | 24389 | 1.34e-06 | 0.00e+00 | ok |
-| Uz | (0.3, -0.7, 0.5) | 面 (2 member) | 5046 | 6.41e-07 | 0.00e+00 | ok |
-| Uz | (0.3, -0.7, 0.5) | 辺 (4 member) | 348 | 2.62e-07 | 0.00e+00 | ok |
-| Uz | (0.3, -0.7, 0.5) | 角 (8 member) | 8 | 1.44e-07 | 0.00e+00 | ok |
+| Ux | (np.float64(0.0), np.float64(1.0), np.float64(0.0)) | 内部 | 24389 | 5.96e-07 | 0.00e+00 | ok |
+| Ux | (np.float64(0.0), np.float64(1.0), np.float64(0.0)) | 面 (2 member) | 5046 | 5.96e-07 | 0.00e+00 | ok |
+| Ux | (np.float64(0.0), np.float64(1.0), np.float64(0.0)) | 辺 (4 member) | 348 | 5.96e-07 | 0.00e+00 | ok |
+| Ux | (np.float64(0.0), np.float64(1.0), np.float64(0.0)) | 角 (8 member) | 8 | 0.00e+00 | 0.00e+00 | ok |
+| Uy | (np.float64(1.0), np.float64(0.0), np.float64(0.0)) | 内部 | 24389 | 1.79e-07 | 0.00e+00 | ok |
+| Uy | (np.float64(1.0), np.float64(0.0), np.float64(0.0)) | 面 (2 member) | 5046 | 1.79e-07 | 0.00e+00 | ok |
+| Uy | (np.float64(1.0), np.float64(0.0), np.float64(0.0)) | 辺 (4 member) | 348 | 1.79e-07 | 0.00e+00 | ok |
+| Uy | (np.float64(1.0), np.float64(0.0), np.float64(0.0)) | 角 (8 member) | 8 | 0.00e+00 | 0.00e+00 | ok |
+| Uz | (np.float64(0.3), np.float64(-0.7), np.float64(0.5)) | 内部 | 24389 | 1.34e-06 | 0.00e+00 | ok |
+| Uz | (np.float64(0.3), np.float64(-0.7), np.float64(0.5)) | 面 (2 member) | 5046 | 6.41e-07 | 0.00e+00 | ok |
+| Uz | (np.float64(0.3), np.float64(-0.7), np.float64(0.5)) | 辺 (4 member) | 348 | 2.81e-07 | 0.00e+00 | ok |
+| Uz | (np.float64(0.3), np.float64(-0.7), np.float64(0.5)) | 角 (8 member) | 8 | 1.44e-07 | 0.00e+00 | ok |
 | ρ (定数 1) | (0,0,0) | 全節点 | 35937 | - | 0.00e+00 | ok |
 VERDICT G0 (tgv_repeat): PASS
 
@@ -38,25 +38,42 @@ S は折返し不連続の節点で大きくなるので、不連続に触れな
 VERDICT G2 (tgv_repeat): PASS
 
 ## G1: node GG (k, ω は ransGradient、ξ は受動種 = 化学種と同じ species_gradient_d)
-G1-a: GPU − CPU float32 再現 ≤ 4ε·max|φ|/h。G1-b: GPU − CPU double ≤ max(1e-5·S, 2·N_max·ε·max|φ|/h) (継ぎ目で超えたら 2·N_max·n_member)。h = 合併体積^(1/3) (区分内の最小)、N_max = 区分内の節点の面数の最大、S = 折返し不連続にも境界条件の上書きにも触れない節点での max|∇φ_ref|。CPU 再現は plan §4.2 どおり周期半割面を除外
+G1-a: GPU − CPU float32 再現 ≤ 4ε·max|φ|/h。G1-b (plan §6 G1、2026-09-26 codex result M3 で自動緩和を削除): GPU − CPU double ≤ 2·N_max·ε·max|φ|/h **かつ** 継ぎ目/内部の誤差比 ≤ 2 (下の「G1-b 誤差比」表。内部が厳密 0 の成分は継ぎ目 ≤ 4ε·max|φ|/h)。h = 合併体積^(1/3) (区分内の最小)、N_max = 区分内の節点の面数の最大。CPU 再現は plan §4.2 どおり周期半割面を除外
 診断列 (判定外): 「半割面込み」= 周期半割面も面値 φ[ic0] で積算する CPU float32 再現との差 (GPU の plane_cells では周期半割面の ic1 が ghost なので `excludePeriodic` が効かない仮説の検査)
 | 場 | 区分 | 節点数 | N_max | G1-a 最大差 [ε·max|φ|/h] | G1-b 最大差 [ε·max|φ|/h] | G1-b 閾値 [同] | 判定 a / b | 半割面込み再現との差 [同] |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | k | 内部 | 29791 | 6 | 0.00 | 1.09 | 12.0 | ok / ok | 0.00 |
 | k | 面 (2 member) | 5766 | 10 | 0.97 | 1.67 | 20.0 | ok / ok | 20.95 |
-| k | 辺 (4 member) | 372 | 16 | 0.49 | 1.13 | 32.0 | ok / ok | 12.58 |
+| k | 辺 (4 member) | 372 | 16 | 0.24 | 1.13 | 32.0 | ok / ok | 12.58 |
 | k | 角 (8 member) | 8 | 24 | 0.00 | 0.32 | 48.0 | ok / ok | 0.11 |
 | omega | 内部 | 29791 | 6 | 0.00 | 1.30 | 12.0 | ok / ok | 0.00 |
 | omega | 面 (2 member) | 5766 | 10 | 1.69 | 2.35 | 20.0 | ok / ok | 27.16 |
-| omega | 辺 (4 member) | 372 | 16 | 0.85 | 1.52 | 32.0 | ok / ok | 17.30 |
+| omega | 辺 (4 member) | 372 | 16 | 0.42 | 1.52 | 32.0 | ok / ok | 17.30 |
 | omega | 角 (8 member) | 8 | 24 | 0.00 | 0.51 | 48.0 | ok / ok | 0.59 |
 | Xi | 内部 | 29791 | 6 | 0.00 | 0.91 | 12.0 | ok / ok | 0.00 |
 | Xi | 面 (2 member) | 5766 | 10 | 1.05 | 1.57 | 20.0 | ok / ok | 22.21 |
-| Xi | 辺 (4 member) | 372 | 16 | 0.53 | 1.35 | 32.0 | ok / ok | 13.94 |
+| Xi | 辺 (4 member) | 372 | 16 | 0.53 | 1.08 | 32.0 | ok / ok | 13.94 |
 | Xi | 角 (8 member) | 8 | 24 | 0.00 | 0.72 | 48.0 | ok / ok | 0.54 |
   対の周期半割面の面ベクトル不一致 max|S_a+S_b|/|S_a| = 3.67e-06。定数場 φ≡1 の GG 勾配 (半割面込み、double): 継ぎ目 max 3.67e-06·φ/h、内部 max 0.00e+00·φ/h
+
+### G1-b 誤差比 (継ぎ目/内部。判定は場ごと (全成分の max) ≤ 2、内部が厳密 0 なら継ぎ目 ≤ 4ε·max|φ|/h。成分ごとは参考)
+| 場 | 成分 | 内部 最大 [ε·max|φ|/h] | 継ぎ目 最大 [同] | 継ぎ目/内部 | 判定 |
+| --- | --- | --- | --- | --- | --- |
+| k | 全成分 (判定) | 1.09 | 1.67 | 1.53 | ok |
+| k | x (参考) | 1.09 | 1.65 | 1.51 | - |
+| k | y (参考) | 0.75 | 1.33 | 1.76 | - |
+| k | z (参考) | 1.09 | 1.67 | 1.53 | - |
+| omega | 全成分 (判定) | 1.30 | 2.35 | 1.81 | ok |
+| omega | x (参考) | 1.10 | 2.35 | 2.13 | - |
+| omega | y (参考) | 1.26 | 1.73 | 1.37 | - |
+| omega | z (参考) | 1.30 | 1.80 | 1.38 | - |
+| Xi | 全成分 (判定) | 0.91 | 1.57 | 1.72 | ok |
+| Xi | x (参考) | 0.87 | 1.50 | 1.71 | - |
+| Xi | y (参考) | 0.86 | 1.57 | 1.82 | - |
+| Xi | z (参考) | 0.91 | 1.35 | 1.48 | - |
+G1-b 誤差比: ok
 VERDICT G1-a (tgv_repeat): PASS
-VERDICT G1-b (tgv_repeat): PASS
+VERDICT G1-b (tgv_repeat): PASS (上限 2·N_max・誤差比 ≤ 2 の両方)
 
 ## 4 量の床 (GPU − CPU double、ε·max|φ|/h 単位、h = 各節点の合併体積^(1/3))
 | 量 | 内部 最大 | 内部 中央値 | 継ぎ目 (member≥2) 最大 | 継ぎ目 中央値 |
@@ -66,33 +83,46 @@ VERDICT G1-b (tgv_repeat): PASS
 | dΩ (GG) | 1.3 | 0.39 | 2.4 | 0.39 |
 | dξ (GG、Y の代理) | 0.9 | 0.23 | 1.6 | 0.24 |
 
-## root 不変性: /tmp/claude-1000/-home-sano-work-forge/4b0c8643-66fb-4fde-8878-7c8a5104c060/scratchpad/g_harness_tgv との比較
+## root 不変性: /home/ubuntu/pgrad6_scratch/g_harness_tgv との比較
 atomicAdd の順序で run ごとに ulp 級の差が出る (同一設定の再実行 tgv_repeat で床を測る)。判定: 全勾配配列で差 ≤ 4ε·max|φ|/h
 | 配列 | 差のある節点 | 最大差 [ε·max|φ|/h] |
 | --- | --- | --- |
 | dUxdx | 0 | 0.00 |
-| dUxdy | 0 | 0.00 |
+| dUxdy | 4 | 0.05 |
 | dUxdz | 0 | 0.00 |
 | dUydx | 0 | 0.00 |
 | dUydy | 0 | 0.00 |
 | dUydz | 0 | 0.00 |
 | dUzdx | 0 | 0.00 |
-| dUzdy | 64 | 0.02 |
-| dUzdz | 8 | 0.01 |
+| dUzdy | 72 | 0.02 |
+| dUzdz | 0 | 0.00 |
 | drodx | 0 | 0.00 |
 | drody | 0 | 0.00 |
 | drodz | 0 | 0.00 |
 | dPdx | 0 | 0.00 |
 | dPdy | 0 | 0.00 |
 | dPdz | 0 | 0.00 |
-| dKdx | 362 | 0.97 |
-| dKdy | 220 | 0.97 |
-| dKdz | 194 | 0.97 |
-| dOmegadx | 304 | 1.69 |
-| dOmegady | 396 | 1.69 |
-| dOmegadz | 258 | 1.69 |
-| dXidx | 298 | 1.05 |
-| dXidy | 378 | 1.05 |
-| dXidz | 200 | 1.05 |
+| dKdx | 230 | 0.97 |
+| dKdy | 226 | 0.97 |
+| dKdz | 118 | 0.97 |
+| dOmegadx | 316 | 1.69 |
+| dOmegady | 226 | 1.69 |
+| dOmegadz | 178 | 1.69 |
+| dXidx | 176 | 1.58 |
+| dXidy | 216 | 1.58 |
+| dXidz | 172 | 1.05 |
   CPU で再構成した root 配列が同一: True
 VERDICT root-order (tgv_repeat): PASS (最大 1.69 ε·max|φ|/h)
+
+## G1 定数場 (GPU、k・ω・ξ = const を焼いて 1 step、plan §6 G1・§5.1 #6c)
+run: /home/ubuntu/pgrad6_scratch/g_harness_tgv_repeat_const
+forge_mtime : 2026-09-26T05:44:54+00:00
+forge_sha256: f0ad00c8b3530576f598f81064cb3aefca98560262536a7c7051ae0d64740a39
+git_head    : bd22376da521335470208b856a4d3ae341adf96b
+判定: 継ぎ目 (member≥2) で max_c |∂φ/∂x_c| ≤ 4ε|φ|/h。単位 ε|φ|/h (節点ごとの h)。対象 = 境界条件の上書きに stencil が触れない節点 (除外数を併記)
+| 場 | φ | 継ぎ目 節点 (除外) | 継ぎ目 最大 [ε|φ|/h] | 内部 節点 (除外) | 内部 最大 [同] (参考) | 判定 |
+| --- | --- | --- | --- | --- | --- | --- |
+| k | 2 | 6146 (0) | 1.57 | 29791 (0) | 0.00 | ok |
+| omega | 100 | 6146 (0) | 1.01 | 29791 (0) | 0.00 | ok |
+| Xi | 0.5 | 6146 (0) | 1.57 | 29791 (0) | 0.00 | ok |
+VERDICT G1 定数場 (tgv_repeat): PASS

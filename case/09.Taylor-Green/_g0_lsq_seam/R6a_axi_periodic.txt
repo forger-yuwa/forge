@@ -1,0 +1,215 @@
+#6a: 軸対称 × 並進周期で 1 step 後の VALUE が旧新で不変 (plan boundary-node-periodic-gradient-fix §5.1 #6a、codex result M1)
+run root: /home/ubuntu/pgrad6_scratch/r6a_axiper_<old|new>_<a|b>
+old_a: forge_sha256: f0505fe8385898a3a5a8438eafb508da9fb67b5fde1045cfcb85950e58c23845 git_head    : bd22376da521335470208b856a4d3ae341adf96b
+new_a: forge_sha256: f0ad00c8b3530576f598f81064cb3aefca98560262536a7c7051ae0d64740a39 git_head    : bd22376da521335470208b856a4d3ae341adf96b
+mesh quality: VERDICT: PASS (AR<= 1000, skew<= 0.90)
+new_a log: [setPeriodicPartner] physID 1 <-> 2: 41 faces, max residual 0 m (face size 0.01581137441 m)
+new_a log: [buildPeriodicNodeGroups] node periodic DOF identification: 41 slave CVs merged into masters (union-find).
+new_a log: [passive] initial total roXi     1.171355910523e-03 (root-only, before the first physical step)
+列: 不一致数 (ビット比較) / 最大絶対差。判定は oo=old_a/old_b と on=old_a/new_a に §6 R3 の規則を当てる。
+NaN/Inf: なし (全 run・res_0/res_1 の全 VALUE)
+
+-- res_1.h5 全 VALUE (88 配列)  [VERDICT 対象]
+array                 old_a/old_b        new_a/new_b        old_a/new_a  判定
+P                    0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Pk_diag              0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+T                    0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Taw_diag             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Ux                   0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Uy                   0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Uz                   0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Xi                   2  5.960e-08       2  5.960e-08       3  5.960e-08  PASS (ノイズ床)
+Y0                   1  1.192e-07       0  0.000e+00       2  1.192e-07  PASS (ノイズ床)
+Y1                   5  3.725e-09       6  3.725e-09       5  3.725e-09  PASS (ノイズ床)
+axisym_divU          0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+cfl                  0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dKdx                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dKdy                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dKdz                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dOmegadx             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dOmegady             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dOmegadz             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dPdx                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dPdy                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dPdz                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dTdx                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dTdy                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dTdz                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUxdx                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUxdy                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUxdz                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUydx                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUydy                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUydz                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUzdx                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUzdy                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUzdz                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dXidx                9  3.338e-05       9  3.338e-05       9  3.338e-05  PASS (ノイズ床)
+dXidy                9  6.866e-05      10  6.056e-05       6  6.866e-05  PASS (ノイズ床)
+dXidz                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+delta_les            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+drodx                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+drody                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+drodz                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dt_local             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+ducros               0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+fd_shield            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+fe_iddes             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+gamma                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+h0                   0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+k                    0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+l_des                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+limiter_P            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+limiter_T            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+limiter_Ux           0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+limiter_Uy           0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+limiter_Uz           0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+limiter_Xi          21  5.364e-07      22  5.364e-07      18  5.364e-07  PASS (ノイズ床)
+limiter_ro           0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+omega                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+passiveFloorCorr_Xi       0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+passiveLimCorr_Xi       0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+rd_des               0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+res_ro             460  2.910e-11     411  2.910e-11     510  2.910e-11  PASS (ノイズ床)
+res_roK              0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+res_roOmega          0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+res_roUx           500  1.192e-07     463  1.192e-07     607  1.192e-07  PASS (ノイズ床)
+res_roUy           639  9.537e-07     406  9.537e-07     540  9.537e-07  PASS (ノイズ床)
+res_roe            523  3.052e-05     398  1.526e-05     512  1.526e-05  PASS (ノイズ床)
+ro                   3  1.192e-07       7  1.192e-07       8  1.192e-07  PASS (ノイズ床)
+roK                  0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+roK_wf               0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+roOmega              0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+roUx                85  1.526e-05     109  1.526e-05     132  1.526e-05  FAIL (不一致数の桁 132 vs 85)
+roUy              1154  1.150e-05     836  1.019e-05    1000  9.686e-06  PASS (ノイズ床)
+roUz                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+roXi                 5  1.192e-07       9  5.960e-08       9  1.192e-07  PASS (ノイズ床)  <- roY/roXi
+roY0                 2  1.192e-07       7  1.192e-07       7  1.192e-07  PASS (ノイズ床)  <- roY/roXi
+roY1                 6  3.725e-09      13  3.725e-09      11  3.725e-09  FAIL (不一致数の桁 11 vs 6)  <- roY/roXi
+roe                 23  3.125e-02      12  3.125e-02      15  3.125e-02  PASS (ノイズ床)
+sonic                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+src_jac_k            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+src_jac_omega        0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+thermCond            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+transport_diag_k       0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+transport_diag_omega       0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+vis_lam              0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+vis_turb             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+volume               0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+wall_dist            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+wf_irep_flag         0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+wf_pk                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+
+-- res_0.h5 全 VALUE (88 配列)  [参考: step 前]
+array                 old_a/old_b        new_a/new_b        old_a/new_a  判定
+P                    0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Pk_diag              0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+T                    0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Taw_diag             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Ux                   0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Uy                   0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Uz                   0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Xi                   0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Y0                   0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+Y1                   0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+axisym_divU          0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+cfl                  0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dKdx                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dKdy                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dKdz                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dOmegadx             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dOmegady             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dOmegadz             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dPdx                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dPdy                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dPdz                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dTdx                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dTdy                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dTdz                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUxdx                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUxdy                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUxdz                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUydx                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUydy                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUydz                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUzdx                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUzdy                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dUzdz                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dXidx                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dXidy                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dXidz                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+delta_les            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+drodx                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+drody                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+drodz                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+dt_local             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+ducros               0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+fd_shield            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+fe_iddes             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+gamma                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+h0                   0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+k                    0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+l_des                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+limiter_P            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+limiter_T            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+limiter_Ux           0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+limiter_Uy           0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+limiter_Uz           0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+limiter_Xi           0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+limiter_ro           0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+omega                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+passiveFloorCorr_Xi       0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+passiveLimCorr_Xi       0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+rd_des               0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+res_ro               0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+res_roK              0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+res_roOmega          0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+res_roUx             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+res_roUy             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+res_roe              0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+ro                   0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+roK                  0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+roK_wf               0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+roOmega              0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+roUx                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+roUy                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+roUz                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+roXi                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS  <- roY/roXi
+roY0                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS  <- roY/roXi
+roY1                 0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS  <- roY/roXi
+roe                  0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+sonic                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+src_jac_k            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+src_jac_omega        0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+thermCond            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+transport_diag_k       0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+transport_diag_omega       0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+vis_lam              0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+vis_turb             0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+volume               0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+wall_dist            0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+wf_irep_flag         0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+wf_pk                0  0.000e+00       0  0.000e+00       0  0.000e+00  PASS
+
+VERDICT #6a (軸対称 × 並進周期、res_1 全 VALUE の旧新): FAIL
+
+## 参考: 反復 run 総当たりの res_1 不一致 (判定なし)。旧 6 本 (old_a,old_b,old_c,old_d,old_e,old_f)・新 6 本 (new_a,new_b,new_c,new_d,new_e,new_f)
+列: 不一致数 min/中央値/max、最大絶対差の max。旧同士でも一致しない配列だけ出す (他は全組ビット一致)
+array                  旧同士 不一致数 (min/med/max)        最大差         新同士 不一致数 (min/med/max)        最大差          旧新 不一致数 (min/med/max)        最大差
+Xi                                      0/4/6  5.960e-08                          2/3/6  5.960e-08                          1/4/6  5.960e-08
+Y0                                      0/2/4  1.192e-07                          0/2/4  1.192e-07                          0/2/4  1.192e-07
+Y1                                      3/5/7  3.725e-09                          0/4/9  3.725e-09                          1/5/8  3.725e-09
+dXidx                                   0/9/9  3.338e-05                          0/0/9  3.338e-05                          0/0/9  3.338e-05
+dXidy                                  0/8/10  6.866e-05                         0/4/10  6.866e-05                         1/6/11  6.866e-05
+limiter_Xi                            0/12/22  5.364e-07                         0/4/22  5.364e-07                         1/8/23  5.364e-07
+res_ro                            330/507/637  2.910e-11                    411/507/660  2.910e-11                    489/620/776  2.910e-11
+res_roUx                          400/628/743  2.384e-07                    463/583/746  2.384e-07                    555/691/932  2.384e-07
+res_roUy                          464/607/681  9.537e-07                    406/538/758  9.537e-07                    515/667/793  9.537e-07
+res_roe                           375/485/589  3.052e-05                    392/472/624  3.052e-05                    492/598/758  3.052e-05
+ro                                     2/6/11  1.192e-07                         4/8/12  1.192e-07                         3/8/12  1.192e-07
+roUx                               77/109/151  1.526e-05                     99/126/159  1.526e-05                    112/134/181  1.526e-05
+roUy                            890/1092/1207  1.150e-05                  834/1054/1268  1.132e-05                  956/1202/1323  1.130e-05
+roXi                                   3/9/14  1.192e-07                         6/9/15  1.192e-07                        6/11/15  1.192e-07
+roY0                                   2/7/10  1.192e-07                         4/8/12  1.192e-07                         3/8/13  1.192e-07
+roY1                                  4/11/16  3.725e-09                        5/11/14  3.725e-09                        7/12/18  3.725e-09
+roe                                  15/18/24  3.125e-02                       11/17/23  3.125e-02                       14/20/28  3.125e-02

@@ -1,0 +1,15 @@
+#6d F1 仮説の切り分け (plan boundary-node-periodic-gradient-fix §5.1 #6d、codex result M5)
+入力: run_0038_r1_gradfix_old_ext/ic_S3_ext.h5 (= run_0036_r1_gradfix_old/res_800000.h5 の保存量 7 配列とビット一致、input_check.txt。sstF1 は入力に無い)
+設定: run_0038 の solverConfig.yaml に nStepOuter 1・outStepInterval 1・turbulence.sstSigmaBlend を明記しただけ。block 128。
+AWS run: ~/forge-pgrad-new/case/39.periodic_hills/_f1split/{old_b1,old_b0,new_b1} (スクラッチ)
+参照: run_0038 延長の step 0 rms_roK = 1.344498855e-06、--from-floor の参照床 (run_0036 末尾 20 % 平均) 3.29e-09
+
+| run | バイナリ・設定 | step 0 rms_roK | ÷ 参照床 | step 0 rms_roOmega | step 0 rms_ro |
+| --- | --- | --- | --- | --- | --- |
+| old_b1 | 旧 1266aba1 (sha256 f0505fe8…)、sstSigmaBlend 1 (既定) | 1.344497832e-06 | 408.7 | 1.441476e-03 | 3.874670e-10 |
+| old_b0 | 旧 1266aba1、sstSigmaBlend 0 | 1.344499765e-06 | 408.7 | 1.438797e-03 | 3.874867e-10 |
+| new_b1 | 新 bd22376d (sha256 f0ad00c8…)、sstSigmaBlend 1 (参考) | 4.996487769e-05 | 15186.9 | 3.076557e-01 | 3.874364e-10 |
+
+判定規則 (§5.1 #6d、測る前に固定): スパイクが sstSigmaBlend 1 側だけ → 仮説支持、両方またはどちらも無し → 原因未特定
+スパイク (参照床の 10 倍超を目安に表示): blend 1 あり / blend 0 あり
+VERDICT F1 仮説: 原因未特定

@@ -12,9 +12,11 @@
 | `G0_translational.txt` / `G0_translational_m1.txt` | 初版の結果 (修正前 `3de26cba` / 修正後 M1) |
 | `gharness.py` | 共通部: h5 読み込み、周期 group の再構成 (面重心 + 並進で相手面を照合、root = 最小 index)、合併 stencil LSQ の double 参照、node GG の float32 再現と double、場の焼き込み、run 作成 (`run_case.sh` を block 128 で起動) |
 | `mkmesh.py` | gmsh 構造格子 → 節点ジッタ (±0.2h、index を周期で折り返したハッシュ = 周期像は同じ量) → node 変換 → `check_mesh_quality.py` |
-| `g_suite.py <variant>` | G0 (解析値) / G2 (CPU double 参照) / G1-a・G1-b (GG) / 4 量の床 を 1 run で測る。変種は下表 |
+| `g_suite.py <variant>` | G0 (解析値) / G2 (CPU double 参照) / G1-a・G1-b (GG、2026-09-26 #6c から誤差比 ≤ 2 も判定) / 4 量の床 を 1 run で測り、GPU 定数場 (k・ω・ξ = const、別 run `g_harness_<variant>_const`) を判定する。変種は下表 |
 | `g0_cpu_cases.py` | G0 の CPU 作用素試験: float32 反例 (root 両順序)、部分 CV の rank 欠損 → 合併で回復、合併後も退化 → 打ち切り参照 |
-| `g2p_jitter.py` | G2′: ジッタ格子 16³/32³/64³ の二次場で次数・継ぎ目/内部比・ゼロ成分、一様 32³ の別行 |
+| `g2p_jitter.py` | G2′: ジッタ格子 16³/32³/64³/128³ の二次場で成分ごと (ゼロ成分含む) の次数・継ぎ目/内部比、一様 32³ の別行 (2026-09-26 #6b で訂正後の基準に揃えた) |
+| `r6a_axi_periodic.py` | #6a: 軸対称 × 並進周期の小メッシュ (61×41) で 2 成分 + 受動トレーサ ξ の 1 step を旧新で比較 (§6 R3 と同じ揺れの規則、`r3_compare.py` の関数を流用) |
+| `R6a_axi_periodic.txt` | #6a の結果 (末尾に反復 12 本の総当たりのノイズ分布、参考) |
 | `f1_read_test.py` | F1 の読み出し (codex m3): 1・2 回目の残差組立で輸送が計算値 F1 を読むか |
 | `G_<variant>.txt` / `G0_cpu_cases.txt` / `G2p_jitter.txt` / `G_f1_read.txt` | 結果 (各ファイル末尾に VERDICT) |
 
@@ -84,3 +86,61 @@
 `g_harness_{tgv,tgv_mirror,tgv_shift,tgv_repeat,tgv_bcswap,jitter32,channel}`、
 `g_harness_g2p_k0.2_N{16,32,64}_j0.2`、`g_harness_g2p_k0.2_N32_j0`、`g_harness_f1_{inf_b0,inf_b1,inf_b1_repeat,tiny_b0,tiny_b1}`、
 メッシュは `g_harness_mesh/{box16_j0.2,box32_j0.2,box64_j0.2,box32_j0,box32_j (jitter32 用),box16_j (動作確認のみ),channel}` (各 `quality.txt` は PASS)。
+
+## §5.1 #6a–#6c (2026-09-26、AWS g5・block 128、新 `bd22376d` sha256 `f0ad00c8…` / 旧 `1266aba1` sha256 `f0505fe8…`)
+
+codex result (M1–M3) を受けた再実行。run はすべて AWS のスクラッチ `~/pgrad6_scratch/` (破棄可):
+`g_harness_{tgv,tgv_mirror,tgv_shift,tgv_repeat,tgv_bcswap,jitter32,channel}` と各 `_const`、`g_harness_g2p_k0.2_N{16,32,64,128}_j0.2`・`_N32_j0`、
+`r6a_prep`・`r6a_axiper_{old,new}_{a..f}`。tgv 系の入力は `lsqseam_m1/Taylor-Green.h5`、jitter32/channel/G2′ 16–64 のメッシュはローカルで作った
+`g_harness_mesh/` をコピーして使った (jitter32・channel は AWS で 1 回変換し直された。品質は再判定して PASS)。
+変換器は AWS g5 で終了時に GPUassert (exit≠0) を出すが出力 h5 は完全 (既知の罠)。`mkmesh.py`・`r6a_axi_periodic.py` はこの終わり方だけを許す。
+
+### #6c: G1-b の自動緩和を削除、誤差比と GPU 定数場を機械判定 (`G_<variant>.txt`)
+
+- G1-b の閾値は $2N_{max}\varepsilon\max|\phi|/h$ のみ (旧 `g_suite.py` の `max(1e-5·S, …)` と n_member 倍を削除)。
+- 誤差比は G1-b 表と同じ量 (全成分の max 誤差、節点ごとの $h$ で正規化) の継ぎ目/内部を場ごとに判定 (≤ 2)。成分ごとの比は参考列。
+- **化学種の代理**: 化学種 ∇Y は出力変数に無いので受動トレーサ ξ で代理する。根拠: `passiveGradient_d_wrapper` (`speciesTransport_d.cu:1220-1235`) は
+  化学種の `speciesGradient_d_wrapper` (`:675-692`) と同じ `species_gradient_d` カーネルを同じ引数規則 (軸対称なら `A_planar`/`s*_planar`、
+  `excludePeriodic = periodicSeamMergeActive(cfg, msh)`、面フラグ `planePeriodic_d`) で呼び、同じ `species_gradient_normalize_d` で割る。
+  継ぎ目の合併は `periodicGradientGather` (`periodicNode_d.cu:184-195`) が `dY{s}d*` と受動種勾配の両方を対象にする。
+
+| 変種 | G0 | G2 | G1-a (最大 [ε·max\|φ\|/h]) | G1-b (最大差/閾値) | G1-b 誤差比 (場ごと、最大) | GPU 定数場 継ぎ目最大 [ε\|φ\|/h] k / ω / ξ | root 順序 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| tgv | PASS | PASS | PASS (1.69) | PASS (0.118) | PASS (1.81、ω) | PASS 1.57 / 1.01 / 1.57 | - |
+| tgv_mirror | PASS | PASS | PASS (1.69) | PASS (0.118) | PASS (1.85、ω) | PASS 1.57 / 1.01 / 1.57 | - |
+| tgv_shift | PASS | PASS | PASS (1.69) | PASS (0.098) | PASS (1.66、ω) | PASS 1.57 / 1.01 / 1.57 | - |
+| tgv_repeat | PASS | PASS | PASS (1.69) | PASS (0.118) | PASS (1.81、ω) | PASS 1.57 / 1.01 / 1.57 | PASS (1.69) |
+| tgv_bcswap | PASS | PASS | PASS (1.69) | PASS (0.118) | PASS (1.81、ω) | PASS 1.57 / 1.01 / 1.57 | PASS (1.69) |
+| jitter32 | PASS | PASS | PASS (1.67) | PASS (0.161) | PASS (1.16、ω) | PASS 2.33 / 3.03 / 2.36 | - |
+| channel | PASS | PASS | PASS (0.86) | PASS (0.151) | PASS (1.03、k) | **FAIL** 1.42 / 1.47 / **5.31** | - |
+
+- 成分ごとの比 (参考、判定外) は tgv 系 5 本の ω の x 成分だけが 2 を超える (2.13–2.15)。他は ≤ 2。
+- channel の定数場 ξ の 5.31 は**壁の節点**で出ている (壁 ∩ 継ぎ目 96 節点 max 5.31、壁で継ぎ目でない 210 節点も max 5.31、
+  壁でない継ぎ目 528 節点 max 0.82、壁でない内部 1155 節点 max 0.99。最大は節点 21 (x 0.778, y 0, z 0、member 2) の y 成分)。
+  k・ω は壁の上書き (ピン) に stencil が触れる節点を除外しているので、壁の節点は判定に入っていない (除外 192 / 598)。
+
+### #6a: 軸対称 × 並進周期 (`R6a_axi_periodic.txt`)
+
+61×41 節点 (品質 PASS)、x 並進周期 (41 面、41 節点を合併)、軸・上面 slip、MIXDRY/H2O + ξ、`speciesFaceReconstruction: 1`、乱流なし、1 step。
+res_0 は 4 run とも全 88 配列ビット一致。res_1 は §6 R3 の規則 (旧同士一致なら旧新も一致 / 旧同士が揺れるなら最大差 ≤ 2 倍かつ不一致数の桁が同じ) で
+**VERDICT FAIL**: roUx (旧同士 85 / 旧新 132、最大差 1.526e-05 で同値) と roY1 (旧同士 6 / 旧新 11、最大差 3.725e-09 で同値) の不一致数の桁が違う。
+他の配列 (roY0・roXi・Y0・Y1・Xi・全勾配・リミタを含む) は規則どおり PASS。最大差はすべての配列で旧同士と同値。
+参考として旧 6・新 6 本の総当たり (旧同士 15 組・新同士 15 組・旧新 36 組) を同ファイル末尾に置いた (判定なし)。
+例: roUx 不一致数 旧同士 77/109/151・新同士 99/126/159・旧新 112/134/181 (min/中央値/max)、roY1 4/11/16・5/11/14・7/12/18、
+dXidx・dXidy の旧新 min は 0 / 1。
+
+
+### #6b: G2′ を訂正後の基準で再判定、ジッタ 128³ を追加 (`G2p_jitter.txt`)
+
+16/32/64 は前回と同じメッシュ (ローカル生成をコピー)、128³ (129³ = 2.1M 節点、品質 PASS) は AWS で生成・変換。κ = 0.2、全水準で全成分が床 (1.7e-6) を超える。
+判定は §5.1 #6b の固定どおり (64→128 の継ぎ目の次数が全成分 ≥ 0.9 かつ 128³ で継ぎ目/内部 ≤ 2、32→64 は補助、16→32 は記録のみ)。
+
+| 対 | φ_x | φ_y | φ_z | ψ_x | ψ_y | ψ_z (ゼロ) | 継ぎ目 最小 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 16→32 (記録) 継ぎ目 / 内部 | 0.952 / 0.727 | 0.499 / 0.811 | 0.897 / 0.864 | 0.641 / 0.778 | 0.577 / 0.879 | 0.849 / 0.730 | 0.499 |
+| 32→64 (補助) | 0.927 / 0.889 | 1.129 / 0.885 | 0.876 / 0.881 | 0.979 / 0.945 | 1.067 / 0.861 | 0.985 / 0.982 | 0.876 |
+| 64→128 (本判定) | 0.936 / 0.885 | **0.855** / 0.976 | **0.869** / 0.939 | 0.969 / 0.825 | 0.911 / 1.000 | 1.009 / 0.961 | **0.855** |
+
+128³ の継ぎ目/内部: 0.77–0.87 (全成分 ≤ 2)。各水準の継ぎ目/内部の最大: 1.00 / 0.95 / 0.85 / 0.87。
+**VERDICT: 判定不能** (64→128 の継ぎ目の次数 最小 0.855 < 0.9、φ_y と φ_z)。内部の次数 (64→128) は 0.825–1.000。
+G2 (GPU − CPU double)/S は 128³ で 9.9e-6 (16/32/64 は 6.6e-7 / 1.8e-6 / 2.8e-6)。一様格子 N=32 の行 (記録) は床以下、ゼロ成分 0。

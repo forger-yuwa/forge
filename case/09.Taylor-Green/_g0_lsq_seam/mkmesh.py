@@ -107,7 +107,10 @@ def _convert(workdir, geo_text, bcond, jitter_fn=None):
     env = dict(os.environ, LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/hdf5/serial:" + os.environ.get("LD_LIBRARY_PATH", ""))
     r = subprocess.run([CONVERTER, "mesh.msh", "mesh.h5"], cwd=workdir, capture_output=True, text=True, env=env)
     open(os.path.join(workdir, "convert.log"), "w").write(r.stdout + r.stderr)
-    if r.returncode != 0 or not os.path.exists(os.path.join(workdir, "mesh.h5")):
+    # AWS g5 の既知の罠: 変換器は終了時の cudaFree で GPUassert (exit≠0) になるが出力 h5 は完全 (memory aws-p1-instance-state)
+    tail = (r.stdout + r.stderr).strip().splitlines()[-1:] or [""]
+    known_exit = "writeInputH5: wrote" in r.stdout and tail[0].startswith("GPUassert")
+    if (r.returncode != 0 and not known_exit) or not os.path.exists(os.path.join(workdir, "mesh.h5")):
         raise SystemExit("convert failed: " + workdir)
     q = subprocess.run(["python3", QUALITY, "mesh.h5"], cwd=workdir, capture_output=True, text=True)
     open(os.path.join(workdir, "quality.txt"), "w").write(q.stdout + q.stderr)

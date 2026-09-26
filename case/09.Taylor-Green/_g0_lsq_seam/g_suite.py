@@ -14,6 +14,10 @@
   LSQ (G0/G2): Ux = 0.5 + w·(0,1,0)、Uy = −0.3 + w·(1,0,0)、Uz = 0.2 + w·(0.3,−0.7,0.5) (斜め)、ρ = 1 (非零定数)
   GG  (G1)   : k = 2 + 0.1 w·(1,2,−1)、ω = 100 + w·(2,−1,3)、ξ (受動トレーサ、化学種 Y と同じ GG カーネル) = 0.5 + 0.02 w·(1,−1,2)
 判定: 状態は res_0.h5 (step 1 の残差組立はこの状態で行う)、勾配は res_1.h5 (k/ω は res_0 では未計算)。
+G1-b (2026-09-26 codex result M3 → §5.1 #6c): 上限は 2·N_max·ε·max|φ|/h のみ (n_member 倍・1e-5·S との max の自動緩和は削除)、
+  継ぎ目/内部の誤差比 ≤ 2 も機械判定に入れる。
+GPU 定数場 (同 #6c): 別 run `g_harness_<variant>_const` で k・ω・ξ = const を焼いて 1 step、継ぎ目の勾配 ≤ 4ε|φ|/h。
+scratch は `--scratch` または環境変数 G_HARNESS_SCRATCH。tgv 系の入力は <scratch>/lsqseam_m1/Taylor-Green.h5。
 """
 import argparse
 import os
@@ -29,8 +33,9 @@ import gharness as G          # noqa: E402
 import mkmesh                 # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SCR_DEFAULT = "/tmp/claude-1000/-home-sano-work-forge/4b0c8643-66fb-4fde-8878-7c8a5104c060/scratchpad"
-TGV_SRC = os.path.join(SCR_DEFAULT, "lsqseam_m1", "Taylor-Green.h5")
+SCR_DEFAULT = os.environ.get("G_HARNESS_SCRATCH",
+                             "/tmp/claude-1000/-home-sano-work-forge/4b0c8643-66fb-4fde-8878-7c8a5104c060/scratchpad")
+TGV_REL = os.path.join("lsqseam_m1", "Taylor-Green.h5")      # scratch からの相対 (AWS でも同じ配置にコピーして使う)
 
 LSQ_FIELDS = {"Ux": (0.5, (0.0, 1.0, 0.0)), "Uy": (-0.3, (1.0, 0.0, 0.0)), "Uz": (0.2, (0.3, -0.7, 0.5))}
 GG_FIELDS = {"k": (2.0, (0.1, 0.2, -0.1), "K", "divide"), "omega": (100.0, (2.0, -1.0, 3.0), "Omega", "divide"),
@@ -68,8 +73,13 @@ def bcond_variant(src, mode):
     return d
 
 
-def prepare(variant, scr):
-    run = os.path.join(scr, "g_harness_" + variant)
+# GPU 定数場 (plan §6 G1「定数場: 継ぎ目 ≤ 4ε|φ|/h」、§5.1 #6c): k・ω・ξ を定数で焼いて 1 step
+CONST_FIELDS = {"k": (2.0, "K"), "omega": (100.0, "Omega"), "Xi": (0.5, "Xi")}
+
+
+def prepare(variant, scr, const=False):
+    run = os.path.join(scr, "g_harness_" + variant + ("_const" if const else ""))
+    TGV_SRC = os.path.join(scr, TGV_REL)
     tgv_bc = os.path.join(HERE, "bcondConfig.yaml")
     visc = 0.0
     if variant.startswith("tgv"):
@@ -78,13 +88,19 @@ def prepare(variant, scr):
             bc = bcond_variant(tgv_bc, "mirror")
         elif variant == "tgv_bcswap":
             bc = bcond_variant(tgv_bc, "swap")
-    elif variant == "jitter32":
-        src, bc, q = mkmesh.make_box_h5(os.path.join(scr, "g_harness_mesh", "box32_j"), 32, 0.2)
+    elif variant in ("jitter32", "channel"):
+        # 既にあるメッシュは作り直さない (本 run と定数場 run、再実行で同じ入力を使う)
+        md = os.path.join(scr, "g_harness_mesh", "box32_j" if variant == "jitter32" else "channel")
+        if os.path.exists(os.path.join(md, "mesh.h5")) and os.path.exists(os.path.join(md, "quality.txt")):
+            src, bc = os.path.join(md, "mesh.h5"), os.path.join(md, "bcondConfig.yaml")
+            q = [l for l in open(os.path.join(md, "quality.txt")).read().splitlines() if "VERDICT" in l][-1]
+        elif variant == "jitter32":
+            src, bc, q = mkmesh.make_box_h5(md, 32, 0.2)
+        else:
+            src, bc, q = mkmesh.make_channel_h5(md)
         print("mesh quality:", q)
-    elif variant == "channel":
-        src, bc, q = mkmesh.make_channel_h5(os.path.join(scr, "g_harness_mesh", "channel"))
-        print("mesh quality:", q)
-        visc = 1.8e-5
+        if variant == "channel":
+            visc = 1.8e-5
     else:
         raise SystemExit("unknown variant " + variant)
     cfg = G.base_solver_cfg(sst=True, tracer=True, visc=visc)
@@ -100,7 +116,7 @@ def prepare(variant, scr):
     for name, (c0, a) in list(LSQ_FIELDS.items()):
         fields[name] = c0 + w @ np.asarray(a)
     for name, (c0, a, _, _) in GG_FIELDS.items():
-        fields[name] = c0 + w @ np.asarray(a)
+        fields[name] = (CONST_FIELDS[name][0] + 0.0 * w[:, 0]) if const else (c0 + w @ np.asarray(a))
     ro = 1.0
     extra = {}
     if variant == "channel":
@@ -233,15 +249,17 @@ def evaluate(variant, run, ref_run=None):
 
     # ---------------- G1 (GG) ----------------
     P("\n## G1: node GG (k, ω は ransGradient、ξ は受動種 = 化学種と同じ species_gradient_d)")
-    P("G1-a: GPU − CPU float32 再現 ≤ 4ε·max|φ|/h。G1-b: GPU − CPU double ≤ max(1e-5·S, 2·N_max·ε·max|φ|/h) "
-      "(継ぎ目で超えたら 2·N_max·n_member)。h = 合併体積^(1/3) (区分内の最小)、N_max = 区分内の節点の面数の最大、"
-      "S = 折返し不連続にも境界条件の上書きにも触れない節点での max|∇φ_ref|。CPU 再現は plan §4.2 どおり周期半割面を除外")
+    P("G1-a: GPU − CPU float32 再現 ≤ 4ε·max|φ|/h。G1-b (plan §6 G1、2026-09-26 codex result M3 で自動緩和を削除): "
+      "GPU − CPU double ≤ 2·N_max·ε·max|φ|/h **かつ** 継ぎ目/内部の誤差比 ≤ 2 (下の「G1-b 誤差比」表。"
+      "内部が厳密 0 の成分は継ぎ目 ≤ 4ε·max|φ|/h)。h = 合併体積^(1/3) (区分内の最小)、N_max = 区分内の節点の面数の最大。"
+      "CPU 再現は plan §4.2 どおり周期半割面を除外")
     P("診断列 (判定外): 「半割面込み」= 周期半割面も面値 φ[ic0] で積算する CPU float32 再現との差 "
       "(GPU の plane_cells では周期半割面の ic1 が ghost なので `excludePeriodic` が効かない仮説の検査)")
     P("| 場 | 区分 | 節点数 | N_max | G1-a 最大差 [ε·max|φ|/h] | G1-b 最大差 [ε·max|φ|/h] | G1-b 閾値 [同] | 判定 a / b | 半割面込み再現との差 [同] |")
     P("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     fc = msh.face_count()
     g1a_ok = g1b_ok = True
+    ratio_rows = {}
     for v, (c0, a, gname, div) in GG_FIELDS.items():
         g = grad(gname)
         c32 = G.gg_merged(msh, s0[v], "f32", div).astype(np.float64)
@@ -262,15 +280,13 @@ def evaluate(variant, run, ref_run=None):
             unit = G.EPS32 * phimax / h
             Nmax = int(fc[sel].max())
             ea, eb = da[sel].max() / unit, db[sel].max() / unit
-            thr_b = max(1e-5 * S / unit, 2.0 * Nmax)
-            note = ""
-            if eb > thr_b and nm > 1:
-                thr_b = max(1e-5 * S / unit, 2.0 * Nmax * nm); note = " (×n_member)"
+            thr_b = 2.0 * Nmax                      # 面数から導く上限のみ (1e-5·S との max・n_member 倍の緩和は削除)
             oka, okb = ea <= 4.0, eb <= thr_b
             g1a_ok &= oka; g1b_ok &= okb
-            P(f"| {v} | {lab} | {sel.sum()} | {Nmax} | {ea:.2f} | {eb:.2f} | {thr_b:.1f}{note} | "
+            P(f"| {v} | {lab} | {sel.sum()} | {Nmax} | {ea:.2f} | {eb:.2f} | {thr_b:.1f} | "
               f"{'ok' if oka else 'NG'} / {'ok' if okb else 'NG'} | {dp[sel].max() / unit:.2f} |")
         floor_rows[{"k": "dK (GG)", "omega": "dΩ (GG)", "Xi": "dξ (GG、Y の代理)"}[v]] = (db, G.EPS32 * phimax / V13)
+        ratio_rows[v] = (np.abs(g - c64) / (G.EPS32 * phimax / V13)[:, None])   # 節点ごとの h で正規化した成分誤差
     # 対の周期半割面の面ベクトル不一致 |S_a+S_b|/|S| と、定数場で継ぎ目に出る GG 勾配の予測 (半割面込み・double)
     from scipy.spatial import cKDTree
     mis = 0.0
@@ -285,9 +301,32 @@ def evaluate(variant, run, ref_run=None):
     P(f"  対の周期半割面の面ベクトル不一致 max|S_a+S_b|/|S_a| = {mis:.2e}。"
       f"定数場 φ≡1 の GG 勾配 (半割面込み、double): 継ぎ目 max {np.abs(cst[msh.nmember > 1]).max() * V13.min():.2e}·φ/h、"
       f"内部 max {np.abs(cst[msh.nmember == 1]).max() * V13.min():.2e}·φ/h")
+    # G1-b 誤差比 (機械判定): 継ぎ目 (member≥2) / 内部 (member 1) の最大誤差の比。誤差は G1-b 表と同じ量
+    # (GPU − CPU double の全成分の最大絶対差) を節点ごとの ε·max|φ|/h (h = 合併体積^(1/3)) で割ったもの
+    # (上の「4 量の床」と同じ正規化)。判定は場ごと: 比 ≤ 2。内部の最大誤差が厳密 0 の場は継ぎ目 ≤ 4 (ε·max|φ|/h)。
+    # 成分ごとの比は参考 (判定外) として併記する。
+    P("\n### G1-b 誤差比 (継ぎ目/内部。判定は場ごと (全成分の max) ≤ 2、内部が厳密 0 なら継ぎ目 ≤ 4ε·max|φ|/h。成分ごとは参考)")
+    P("| 場 | 成分 | 内部 最大 [ε·max|φ|/h] | 継ぎ目 最大 [同] | 継ぎ目/内部 | 判定 |")
+    P("| --- | --- | --- | --- | --- | --- |")
+    seam_ = msh.nmember > 1
+    ratio_ok = True
+    for v, r in ratio_rows.items():
+        ei, es = r[~seam_].max(), r[seam_].max()
+        if ei > 0:
+            rr = es / ei; ok = rr <= 2.0; rs = f"{rr:.2f}"
+        else:
+            ok = es <= 4.0; rs = "内部 0 → 継ぎ目 ≤ 4"
+        ratio_ok &= ok
+        P(f"| {v} | 全成分 (判定) | {ei:.2f} | {es:.2f} | {rs} | {'ok' if ok else 'NG'} |")
+        for ci, cn in enumerate("xyz"):
+            ci_, cs_ = r[~seam_, ci].max(), r[seam_, ci].max()
+            P(f"| {v} | {cn} (参考) | {ci_:.2f} | {cs_:.2f} | {cs_ / ci_ if ci_ > 0 else float('nan'):.2f} | - |")
+    verdict["G1b_ratio"] = ratio_ok
+    g1b_ok = g1b_ok and ratio_ok
+    P(f"G1-b 誤差比: {'ok' if ratio_ok else 'NG'}")
     verdict["G1a"], verdict["G1b"] = g1a_ok, g1b_ok
     P(f"VERDICT G1-a ({variant}): {'PASS' if g1a_ok else 'FAIL'}")
-    P(f"VERDICT G1-b ({variant}): {'PASS' if g1b_ok else 'FAIL'}")
+    P(f"VERDICT G1-b ({variant}): {'PASS' if g1b_ok else 'FAIL'} (上限 2·N_max・誤差比 ≤ 2 の両方)")
 
     # ---------------- 床の表 ----------------
     P("\n## 4 量の床 (GPU − CPU double、ε·max|φ|/h 単位、h = 各節点の合併体積^(1/3))")
@@ -320,18 +359,64 @@ def evaluate(variant, run, ref_run=None):
     return "\n".join(out) + "\n", verdict
 
 
+def evaluate_const(variant, run):
+    """GPU 定数場: k・ω・ξ = const で 1 step、res_1 の勾配を見る。判定: 継ぎ目 (member≥2) の各成分 |∂φ| ≤ 4ε|φ|/h
+    (h = 節点の合併体積^(1/3))。対象は境界条件の上書き (壁の k/ω ピン等) に stencil が触れない節点。内部は参考。"""
+    h5 = os.path.join(run, "mesh.h5")
+    msh = G.Mesh(h5, os.path.join(run, "bcondConfig.yaml"))
+    s0 = G.read_res(os.path.join(run, "res_0.h5"), list(CONST_FIELDS))
+    V13 = np.cbrt(msh.vmerged64)
+    out = []
+    P = out.append
+    P(f"\n## G1 定数場 (GPU、k・ω・ξ = const を焼いて 1 step、plan §6 G1・§5.1 #6c)")
+    P(f"run: {run}")
+    P(G.provenance(run).rstrip())
+    P("判定: 継ぎ目 (member≥2) で max_c |∂φ/∂x_c| ≤ 4ε|φ|/h。単位 ε|φ|/h (節点ごとの h)。"
+      "対象 = 境界条件の上書きに stencil が触れない節点 (除外数を併記)")
+    P("| 場 | φ | 継ぎ目 節点 (除外) | 継ぎ目 最大 [ε|φ|/h] | 内部 節点 (除外) | 内部 最大 [同] (参考) | 判定 |")
+    P("| --- | --- | --- | --- | --- | --- | --- |")
+    names = [f"d{g}d{c}" for _, g in CONST_FIELDS.values() for c in "xyz"]
+    g1 = G.read_res(os.path.join(run, "res_1.h5"), names)
+    ok_all = True
+    seam = msh.nmember > 1
+    for v, (c0, gname) in CONST_FIELDS.items():
+        c32 = np.float32(c0)
+        okv = s0[v] == c32
+        badv = ~okv[msh.inc_j] | ~okv[msh.inc_m]
+        bg = np.zeros(msh.nCells, bool); bg[msh.root[msh.inc_m[badv]]] = True
+        sel = okv & ~bg[msh.root]
+        g = np.stack([g1[f"d{gname}d{c}"] for c in "xyz"], 1).astype(np.float64)
+        r = np.abs(g).max(axis=1) / (G.EPS32 * abs(c0) / V13)
+        es = r[sel & seam].max() if (sel & seam).any() else float("nan")
+        ei = r[sel & ~seam].max() if (sel & ~seam).any() else float("nan")
+        ok = bool((sel & seam).any()) and es <= 4.0
+        ok_all &= ok
+        P(f"| {v} | {c0:g} | {(sel & seam).sum()} ({(seam & ~sel).sum()}) | {es:.2f} | {(sel & ~seam).sum()} ({(~seam & ~sel).sum()}) | "
+          f"{ei:.2f} | {'ok' if ok else 'NG'} |")
+    P(f"VERDICT G1 定数場 ({variant}): {'PASS' if ok_all else 'FAIL'}")
+    return "\n".join(out) + "\n", ok_all
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("variant")
     ap.add_argument("--scratch", default=SCR_DEFAULT)
     ap.add_argument("--eval-only", action="store_true")
+    ap.add_argument("--no-const", action="store_true", help="GPU 定数場の run を省く (旧形式の再評価用)")
     a = ap.parse_args()
     run = os.path.join(a.scratch, "g_harness_" + a.variant)
+    runc = os.path.join(a.scratch, "g_harness_" + a.variant + "_const")
     if not a.eval_only:
         run = prepare(a.variant, a.scratch)
         G.run_forge(run)
+        if not a.no_const:
+            runc = prepare(a.variant, a.scratch, const=True)
+            G.run_forge(runc)
     ref = os.path.join(a.scratch, "g_harness_tgv") if a.variant in ("tgv_bcswap", "tgv_repeat") else None
     txt, v = evaluate(a.variant, run, ref)
+    if not a.no_const:
+        tc, vc = evaluate_const(a.variant, runc)
+        txt += tc
     outp = os.path.join(HERE, f"G_{a.variant}.txt")
     open(outp, "w").write(txt)
     print(txt)
