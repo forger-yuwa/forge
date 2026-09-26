@@ -83,6 +83,39 @@
     "effect_on_reported_quantity": "壁 q_w の float32/FP64 相対差: x 0–1 cm 最大 1.3e-5、1–20 cm 最大 4.8e-5、20–50 cm 最大 4.2e-5。R_A・R_B・D は小数 3 桁まで一致。St 系列は両腕 ALL STEADY",
     "meaning": "残差プラトーは float32 の丸め床。報告量 (St) への影響は 5e-5 以下。T4-0a-0 の収束前提は B (FP64) で満たされ、T4-0a-0 の読みは変わらず判定不能 (壁解像は前縁 0.72 mm で FAIL のまま)"
    }
+  },
+  {
+   "id": "T4-0a-E",
+   "status": "pre_registered",
+   "name": "エネルギー厚さ Re_H 座標での比較 — 未計測の前縁入熱の復元 A/B (方法の感度試験)",
+   "_written": "2026-09-27、この方法での CFD/実験の比較結果を見る前 (codex diagnose 2026-09-27 の提案。G14 の比較座標を Re_H に改める明示的な改訂であり、T4-0a-0 の旧結果とは別の事前登録)",
+   "review": "notes/reviews/2026-09-27-cary-comparison-coordinate-diagnose.md",
+   "run": "run_0004_prec_f64 (全域 FP64、PASS) の全 20 スナップショット。壁解像 FAIL の場なので結果は予備扱い。正式判断は細分化メッシュ (fp_y1_0.35um_nx2800) の場のゲートも要る",
+   "coordinate": "Re_H(x) = ∫₀ˣ q_w ds / [μ_e cp (Tt − Tw)]。CFD は前縁から、実験は Q₀ + 7.30 cm 以降の台形積分。加熱ピークで 0 に戻さない。Re_H,CFD(x_CFD) = Re_H,exp(x_exp) の位置の St で R = St_CFD/St_exp",
+   "q_exp_reduction": "q_w,exp = St_exp ρ∞u∞cp (Taw(r) − Tw)、x < x_b は r = 0.845、x ≥ x_b は 0.89。遷移部も 0.89 とした場合の差は参考表示のみ (判定に使わない)",
+   "x_b_cm": {
+    "Re0.27_Tw0.2": 13.5
+   },
+   "_why_x_b": "この系列の St は 13.02 cm が最小で 13.97 cm から上昇 (Table II)。Table IV の近条件の run の x_b は 11.68–12.70 cm。遷移前 5 点を層流還元と整合させるため 13.02 と 13.97 の間に置いた",
+   "pre_transition_points_cm": [
+    7.3,
+    9.2,
+    10.16,
+    11.11,
+    13.02
+   ],
+   "arms": {
+    "A": "遷移前 5 点の q_w√x の最小係数で q = C/√x 外挿、Q₀ = 2C√(0.073 m)",
+    "B": "同じく最大係数"
+   },
+   "_note_arms": "復元方法の感度試験であって物理的な上下界・信頼区間ではない。実測に近い腕を選ぶ判定にはしない",
+   "compare_points_cm": "T4-0a-0 と同じ 17 点、重み 1/17。点ごとの R が一次結果",
+   "decision": {
+    "method_ok": "全 17 点で |R_B/R_A − 1| ≤ 0.05 → 今回の復元範囲では『前縁欠測が比較を支配する』を退ける",
+    "hold": "1 点でも 0.05 超、または比較座標が CFD の範囲外 → この比較方法の本採用を保留"
+   },
+   "quasisteady": "新座標の 17 点 × 2 腕の St 系列を check_quasisteady にかける (旧座標の ALL STEADY は流用しない)",
+   "not_claimed": "Re_H 座標で R が改善しても SST の正しさの証明ではない (横軸と縦軸が同じ測定に依存)。『同じ積分熱履歴で比較した条件付き予測偏差』として報告する"
   }
  ]
 }
