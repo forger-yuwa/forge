@@ -165,6 +165,7 @@ periodic は DOF 同一視・gradient gather (§discretization.md §4.5) に委�
   合併体積で割った部分寄与を和で合併する。$k,\omega$ は `ransGradient` の直後 (`ransBlendF1` の前) に専用の gather、
   化学種・受動種は `periodicGradientGather` に登録された gather を使う。化学種・受動種は `species_gradient_d` の同じ呼び出し経路。
 - **F1**: `sstF1` は配列確保時に 1 で初期化する (`buildScalarDescs` は副作用なし)。
+- **既知の制約**: 壁の CV は壁半割面を φ[ic0] で積算するので、float32 の格納面ベクトルでは定数場の GG が閉じず、壁節点で約 $5\,\varepsilon|\phi|/h$ の偽勾配が出る (2026-09-26 channel 実測、継ぎ目に依らない)。LSQ 化 (後続 plan) で解消する見込み。
 - **この条件の外** (軸対称×周期、回転周期): スカラー勾配は片側 GG + 半割面込みのまま (既存の未修正挙動で、本修正では不変)。
   回転周期は plan `boundary-node-rotational-periodic` で扱う。
 
