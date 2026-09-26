@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""R1 (plan boundary-node-periodic-gradient-fix §6 R1) の抽出: snapshot 時系列の CSV を作る。
+r"""R1 (plan boundary-node-periodic-gradient-fix §6 R1) の抽出: snapshot 時系列の CSV を作る。
 
     python3 r1_extract.py RUN_DIR [--out r1_series.csv] [--min-step 0]
 
@@ -180,8 +180,44 @@ def seam(f, tol):
         na = np.sqrt(sum(ga[c] ** 2 for c in cols))
         return float(np.sqrt(np.sum(ns ** 2)) / np.sqrt(np.sum(na ** 2)))
 
-    df1 = float(np.max(np.abs(f1_of(gs) - f1_of(ga))))
-    return ratio(GRADU), ratio(GRADK), ratio(GRADW), df1, int(s.sum())
+    d = f1_of(gs) - f1_of(ga)
+    df1 = float(np.max(np.abs(d)))
+    df1_l2 = float(np.sqrt(np.mean(d ** 2)))
+    return ratio(GRADU), ratio(GRADK), ratio(GRADW), df1, int(s.sum()), df1_l2
+
+
+def xseam(f, tol):
+    """[参考列、判定に使わない] x 継ぎ目 (x=0、丘頂) の勾配の大きさを、両隣の列 (x=Δx と x=LX−Δx) の平均と比べる。
+
+    x は一様でない (丘頂) ので z 継ぎ目のような「隣接列と同じはず」は成り立たない。滑らかな場なら中央の列は
+    両隣の平均と 2 次の差しかないので、比は 1 に近いはず (2026-09-26 `diagnostician`: x 継ぎ目も修正対象なので参考に出す)。
+    構造格子の添字は座標から復元する: i = x/Δx、k = z/Δz、列 (i,k) 内は y の昇順で j。z 継ぎ目 (k=0, nz) は除く。
+    """
+    c = f["MESH/COORD"][:].astype(np.float64).reshape(-1, 3)
+    xu = np.unique(np.round(c[:, 0] / H, 6)) * H
+    zu = np.unique(np.round(c[:, 2] / H, 6)) * H
+    nx, nz = len(xu) - 1, len(zu) - 1
+    i = np.rint(c[:, 0] / (xu[1] - xu[0])).astype(int)
+    k = np.rint(c[:, 2] / (zu[1] - zu[0])).astype(int)
+    col = {}
+    for n in np.lexsort((c[:, 1], k, i)):
+        col.setdefault((i[n], k[n]), []).append(n)
+    names = GRADU + GRADK + GRADW
+    g = {nm: f["VALUE/" + nm][:].astype(np.float64) for nm in names}
+    s_idx, l_idx, r_idx = [], [], []
+    for kk in range(1, nz):
+        a0, a1, a2 = col[(0, kk)], col[(1, kk)], col[(nx - 1, kk)]
+        if not (len(a0) == len(a1) == len(a2)):
+            sys.exit("x 継ぎ目の列の節点数が揃わない")
+        s_idx += a0; l_idx += a1; r_idx += a2
+    s_idx, l_idx, r_idx = map(np.array, (s_idx, l_idx, r_idx))
+
+    def ratio(cols):
+        ns = np.sqrt(sum(g[cn][s_idx] ** 2 for cn in cols))
+        nn = 0.5 * (np.sqrt(sum(g[cn][l_idx] ** 2 for cn in cols)) + np.sqrt(sum(g[cn][r_idx] ** 2 for cn in cols)))
+        return float(np.sqrt(np.sum(ns ** 2)) / np.sqrt(np.sum(nn ** 2)))
+
+    return ratio(GRADU), ratio(GRADK), ratio(GRADW)
 
 
 def main():
@@ -205,15 +241,18 @@ def main():
             xh, cf = cf_line(fw, rho_b, u_b, tol)
             cfs = [float(np.interp(x0, xh, cf)) for x0 in XS_CF]
             xr = reattach(xh, cf)
-            ru, rk, rw, df1, nseam = seam(f, tol)
-        rows.append([st] + cfs + [xr, ru, rk, rw, df1])
+            ru, rk, rw, df1, nseam, df1_l2 = seam(f, tol)
+            xu_, xk_, xw_ = xseam(f, tol)
+        rows.append([st] + cfs + [xr, ru, rk, rw, df1, df1_l2, xu_, xk_, xw_])
         brows.append([st, rho_b, u_b, rho_b * u_b * H / MU])
-        print("step %6d  Cf(0.5,2,6)=%+.4e %+.4e %+.4e  x_r/h=%.3f  r(u,k,w)=%.4f %.4f %.4f  dF1=%.3e  (seam pts %d, U_b %.3f)"
-              % (st, cfs[0], cfs[1], cfs[2], xr, ru, rk, rw, df1, nseam, u_b))
+        print("step %6d  Cf(0.5,2,6)=%+.4e %+.4e %+.4e  x_r/h=%.3f  r(u,k,w)=%.4f %.4f %.4f  dF1=%.3e (L2 %.3e)  x-seam r(u,k,w)=%.4f %.4f %.4f  (seam pts %d, U_b %.3f)"
+              % (st, cfs[0], cfs[1], cfs[2], xr, ru, rk, rw, df1, df1_l2, xu_, xk_, xw_, nseam, u_b))
     out = os.path.join(a.run, a.out)
     with open(out, "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["step", "Cf_x05", "Cf_x2", "Cf_x6", "xr_h", "r_gradu", "r_gradk", "r_gradw", "dF1_inf"])
+        # 末尾 4 列は参考列 (判定に使わない): F1 差の L2、x 継ぎ目の比 (xseam の docstring)
+        w.writerow(["step", "Cf_x05", "Cf_x2", "Cf_x6", "xr_h", "r_gradu", "r_gradk", "r_gradw", "dF1_inf",
+                    "dF1_l2", "xr_gradu", "xr_gradk", "xr_gradw"])
         w.writerows(rows)
     with open(os.path.join(a.run, "r1_bulk.csv"), "w", newline="") as fh:
         w = csv.writer(fh)
