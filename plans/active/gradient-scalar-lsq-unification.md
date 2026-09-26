@@ -92,7 +92,10 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 | 2h | 設計 DB | `runner_sern.py` FLAG_POLICY 更新と実効 `scalarGradient` 列 (#6 と同時) | O |
 | 2i | S3 の測定手順 | native・同一 GPU・同一 BLOCKSIZE・ウォームアップ 500 後 2000 step × 3 の中央値、REG/spill | O |
 | 3 (**完了 2026-09-26**、判断: 2026-09-26 `diagnostician`・diff レビューで欠陥なし、periodicGradientGather の登録変更を採用) | 実装 (Phase 1) | §4、§5 の 2。REG 38/39/40/48 (NV 1–4)、spill 0。AWS 最小確認: lsq の線形場誤差 ≤ 丸め床、NS 配列は lsq/gg でビット一致、gg の面寄与ダンプは HEAD と不一致 0 | O |
-| 4 | S0/S1 | ハーネス (AWS) | O |
+| 4 (S0 は測れた範囲 PASS、S1 は tgv の (2) が FAIL → #4a–#4c、2026-09-26) | S0/S1 | ハーネス (AWS)。結果 `case/09.Taylor-Green/_g0_lsq_seam/{S0_*.txt,S0e_case39.txt,S1.txt}` | O |
+| 4a | 出力 hook (判断: 2026-09-26 `diagnostician`、既定 off・出力専用・数値不変) | (a) `FORGE_DUMP_PREGATHER=<path>`: `periodicGradientGather` の直前 (`main.cpp:1304`・`:1477`) に NS 18 本 + dY + dξ/モーメントの局所配列 [nVar][nCells][3] を、`ransGradient` の lsq 分岐では gather 直前の dK/dΩ を非 atomic に書く。gg 経路でも同じ位置で書ける。既存 `FORGE_DUMP_SCALARGRAD` (面寄与) とは別名。(b) `dY{s}d{x,y,z}` と `wall_y_eff` を output の extraFields に登録 (post-gather 値)。**入れた commit で S1(1) (gg 旧 vs 新、4 ケース × 3 本) を再実行して不変を示し、ダンプ有効時に res が変わらないことを 1 ケースで見る** | O |
+| 4b | tgv S1(2) FAIL の判定 A/B (測る前に固定) | gg 3 本・lsq 3 本で pre-gather ダンプを取り、(i) NS 18 配列の gather 前がビット同一か、(ii) 不一致 36 節点の gg・lsq の gather 後の値が member 部分和の float32 順列和の集合に含まれるか。**A**: (i) 同一かつ (ii) 全点で含まれる → 「atomicAdd の順序差」として閉じ、§6 S1 (2) を下記に訂正。**B**: (i) 不一致 → lsq 経路が NS の入力を壊している → 実装を止めて調べる。**B′**: (i) 同一だが (ii) が外れる → gather 以外の非決定源があるので順序差の説明は採らない | O (結論 F) |
+| 4c | Y の未測定項目 (S0-a の Y 5 種、S0-c の dY と dξ のビット一致、チャンク境界 4+1、S0-e の wall_y_eff) | 5 種は case/16 `run_0471` の組 [H2O, N2, O2, AR, CO2] (TP、README:30 で PASS 済み)。Y0 = Y4 = q (ξ と同じ量子化場、q < 0.5)、Y1..Y3 は正の sin 場で Σ = 1 − 2q を double で作ってから量子化。Y4 = ξ でチャンク境界の孤立変数を、Y0 で先頭チャンクを見る。S0-a の参照入力は res_0 の読み戻し (`VALUE/Y{s}`・`Xi`)。追加: Σ_s dY_s = 0 (≤ 4ε Σ\|dY_s\|) を全節点で | O |
 | 5 | S2/S3 | §6 の表 (**すべて AWS**、ユーザ指示で 2D も AWS) | O (結論 F) |
 | 5r | codex result 1 回目 | Phase 1 | F |
 | 6 | 既定の切り替え (Phase 2) | **前提**: 5r が GO、2g 完了、S3 ≤ 5 %。S4、2h、docs、codex result 2 回目 | F |
@@ -107,6 +110,7 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
   - **S0-d 検出力 (負の対照)**: jitter32 で GG 参照との差が 1e-5·S を超える (閾値が GG と LSQ を識別する証拠)。
   - **S0-e BC 後の同値性 (診断)**: channel と case/39 起点で 1 step、applyBconds 直後の k・ω・wall_y_eff の group 内差 == 0 (記録。非零なら F 項目)。
 - **S1 非干渉**: `scalarGradient: gg` で実装前バイナリと全配列が一致 (旧経路の保存、roK/roOmega 初期ミラー追加も含めて)。判定規則 (**測る前の訂正 2026-09-26**、`diagnostician`): 旧同士がビット一致する配列は旧新もビット一致。旧同士でも一致しない配列 (周期 gather の atomicAdd、3 member 以上の group) は、旧 3 本・新 3 本の同一設定反復からノイズ対 (旧旧 3 対・新新 3 対) を取り、旧新 (9 対の最大) が (a) 最大差 ≤ ノイズ対の最大差の 2 倍、(b) 不一致数 ≤ ノイズ対の不一致数の最大の 2 倍。不一致の位置が 3 member 以上の group に限られるかは記録 (判定外)。~~R3 の「不一致数の桁が同じ」規則~~は廃止 (桁境界 8↔12・93↔108 で非決定的に反転する。前提 plan #6a と本 plan の Phase 1 最小確認で再現)。前提 plan の #6a の FAIL 記録は書き換えない。`lsq` で NS の勾配・リミタ配列が `gg` と同じ step でビット一致 (1 step、初回ダンプ)。
+- **S1 (2) の判定手順の訂正 (#4b が A の場合に適用。2026-09-26 `diagnostician`、測定後だが決定的な部分には厳しくする方向)**: NS の勾配・リミタは **gather 前の局所配列でビット一致** (決定的段、必須)。gather 後は 2 member 以下の group はビット一致、3 member 以上は部分和の順列和の集合に含まれる (代替: \|差\| ≤ 4ε Σ\|p\|)。「旧同士がビット一致なら旧新もビット一致」は gather を含む配列には適用しない (一致は scheduling の偶然で配列の性質でない)。tgv の初回 FAIL (dUxdy 36・dUxdz 32、3 member 以上のみ、最大 1.19e-7) は §6.2 に記録として残す。
 - **S2 物理 A/B — 共通規則**: 起点の最終場から `restart_field.py` で gg/lsq の 2 本、同じバイナリ・同じ step 数。収束は (i) `check_convergence` が DIVERGED でなく RISING 列が無いこと (plateau は既知床として可、先例 case/48 `run_0025`)、(ii) 各列の末尾平均が起点の末尾平均の ≤ 1.5 倍 (ピークは除外し、再進入 step を記録)、(iii) 比較量が `check_quasisteady` で STEADY (閾値は表)。~~`--from-floor`~~ は使わない (codex M4: 全期間ピークを見るので作用素切替直後の跳ねで落ち、case/48・case/40 の起点は plateau で参照側が REFUSED)。ただし case/16 `run_0476` は起点が通常判定 PASS なので `--from-floor` を使える。未達なら同一設定で延長 (初回予算は表の step 数)。**物理ゲートは独立の必須条件**。差が上限を超えたら自動不合格にも自動合格にもせず、格子対診断 (両方向・両経路) を回して F 判断 (codex M5: 縮むかだけでは欠陥と離散化差を識別できない)。
 
   | ケース | 起点 (所在・sha256 先頭) | step | 必須ゲート (既存) | 差 lsq−gg の上限 (超えたら格子対 → F) | STEADY 閾値 |
@@ -131,6 +135,7 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 ## 7. 影響範囲
 
 - `solver_density_cuda/cuda_forge/calcGradient_d.cu`、`ransTransport_d.cu`、`speciesTransport_d.cu`、`periodicNode_d.cu`、`input/solverConfig.{hpp,cpp}`。
+- 後続項目 (本 plan では入れない): `periodicGather1ToRoot_d` (`periodicNode_d.cu:57`、atomicAdd) を root スレッドが member を index 順に足す決定的 gather に置き換える。全 node 周期 run が ulp で動くので、別項目として accepted plan の R3 型で検証する。
 - **既存の node SST・化学種再構成・受動種 run の結果が変わる** (勾配作用素の変更)。
 
 ## 8. 完了条件
@@ -142,6 +147,8 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 - [ ] `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-26` — S0 (測れた範囲 PASS) と S1 (tgv の NS 配列で FAIL) の結果を受け、`diagnostician` 判断で出力 hook (#4a)、tgv の決定的 A/B (#4b)、Y の未測定項目 (#4c) を追加。
 
 - `2026-09-26` — Phase 1 実装 (#3・#2b)。diff を `diagnostician` がレビューし欠陥なし。S1 の判定規則を測る前に訂正 (「不一致数の桁」廃止、両側 3 本のノイズ対)。
 
