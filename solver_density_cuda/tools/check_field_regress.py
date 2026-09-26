@@ -56,7 +56,12 @@ def boundary_files(run, step):
     return out
 
 
-def load_boundary(run, step):
+def load_boundary(run, step, exclude=frozenset()):
+    """境界出力を読む。`exclude` は 'ypls' (全境界) か 'wall_4/ypls' (その境界だけ) の集合。
+
+    境界量は BOUNDARY_Q 固定で `--quantities` からは選べない (2026-09-26, codex plan M4)。
+    **意図的に定義を変えた量を非退行判定から外す**ための口。外した量は別ゲートで検査すること。
+    """
     import h5py
     out = {}
     for stem, path in boundary_files(run, step).items():
@@ -64,6 +69,8 @@ def load_boundary(run, step):
             if 'VALUE' not in f:
                 continue
             for q in BOUNDARY_Q:
+                if q in exclude or f'{stem}/{q}' in exclude:
+                    continue
                 if q in f['VALUE']:
                     out[f'{stem}/{q}'] = f['VALUE'][q][()].astype('float64').ravel()
     return out
@@ -132,7 +139,11 @@ def main():
                     help='境界出力ファイル (壁せん断応力・壁熱流束・utau・y+) も比較する。壁経路の回帰では必須')
     ap.add_argument('--zero-scale', type=float, default=1e-20,
                     help='最大絶対値がこれ未満の量は「数値的にゼロ」として判定から外す (既定 1e-20)')
-    ap.add_argument('--quantities', default=None, help='カンマ区切りで上書き')
+    ap.add_argument('--quantities', default=None, help='カンマ区切りで上書き (**体積量のみ**)')
+    ap.add_argument('--exclude-boundary', default='',
+                    help="境界量を判定から外す。カンマ区切りで 'ypls' か 'wall_4/ypls' の形。"
+                         '境界量は BOUNDARY_Q 固定で --quantities では選べないため。'
+                         '**外した量は別ゲートで検査すること** (外した旨は出力に出る)')
     a = ap.parse_args()
 
     cands = list(a.candidate)
@@ -149,7 +160,11 @@ def main():
     data = {r: load(r, step, quantities) for r in runs}
     required = list(explicit or DEFAULT_Q)
     if a.boundary:
-        bnd = {r: load_boundary(r, step) for r in runs}
+        excl_b = {t.strip() for t in a.exclude_boundary.split(',') if t.strip()}
+        if excl_b:
+            print('境界量のうち判定から外したもの: %s  (**別ゲートで検査すること**)'
+                  % ', '.join(sorted(excl_b)))
+        bnd = {r: load_boundary(r, step, exclude=excl_b) for r in runs}
         names = sorted(set().union(*[set(v) for v in bnd.values()])) if bnd else []
         if not names:
             print(f'FAIL: --boundary を指定したが、step {step} の境界出力 (res_<名前>_<physID>_{step}.h5) が無い。'

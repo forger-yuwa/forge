@@ -1240,7 +1240,15 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
                 ((cfg.LESorRANS == 2 && cfg.RANSmodel == 1 && cfg.wallTreatmentSST == 1)
                  || wmlesActiveForBcond(cfg, bc))
                     ? var.c_d["Tau_Wall"] : nullptr,
-                var.c_d["ro"], bc.bvar_d["ypls"]     // 壁解像 y₁⁺ (出力専用)
+                // **y₁⁺ は実効 wallTreatment==0 (壁解像) のときだけ書く** (2026-09-26, codex plan M1)。
+                // このカーネルの起動条件は node && nodeWallStressEdgeKernel && wall_flag だけで
+                // **mode を見ていない**ため、そのまま渡すと mode 1 (壁関数 `ransWallFunction_d.cu:310` の
+                // utau*y/nu) / mode 2 (WMLES `wmlesWallModel_d.cu:230`) が書いた ypls を上書きしてしまう。
+                // それらは別定義で、本カーネルの式と同値ではない。mode 1/2 では nullptr を渡して不変にする。
+                var.c_d["ro"],
+                ((((cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? cfg.wallTreatmentSST
+                    : (wmlesActiveForBcond(cfg, bc) ? 2 : 0)) == 0)
+                     ? bc.bvar_d["ypls"] : nullptr)
             ) ;
         }
         gpuErrchk( cudaPeekAtLastError() );

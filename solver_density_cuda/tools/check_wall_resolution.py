@@ -380,18 +380,26 @@ def main():
         sol_txt = ""
         if sol is not None:
             sv = np.asarray(sol, float)
-            solved = np.isfinite(sv) & (sv > 0.0)
+            # **有効は「有限かつ >= 0」** (2026-09-26, codex plan M3)。番兵は負 (-1) のみ。
+            # `|τ_t|=0` なら y₁⁺=0 は**正当な値**なので、0 を欠損扱いしない
+            # (当初 `> 0` にしていたのは誤り)。
+            solved = np.isfinite(sv) & (sv >= 0.0)
             n_unset = int(np.count_nonzero(~solved))
             if solved.any():
                 cmpmask = solved & good
                 if cmpmask.any():
-                    rel = np.abs(sv[cmpmask] - yp[cmpmask]) / np.maximum(np.abs(yp[cmpmask]), 1e-30)
-                    sol_txt = ("  ; ソルバ ypls との最大相対差 %.2e (%d 点で比較, 未評価/0 が %d 点)"
-                               % (float(np.max(rel)), int(cmpmask.sum()), n_unset))
+                    # ゼロ値には絶対許容が要る (codex plan M3)。相対差だけだと 0 vs 1e-30 が発散する。
+                    dif = np.abs(sv[cmpmask] - yp[cmpmask])
+                    rel = dif / np.maximum(np.abs(yp[cmpmask]), 1e-12)
+                    sol_txt = ("  ; ソルバ ypls との最大相対差 %.2e / 最大絶対差 %.2e"
+                               " (%d 点で比較, 未評価(負) %d 点 = %.1f %%)"
+                               % (float(np.max(rel)), float(np.max(dif)), int(cmpmask.sum()),
+                                  n_unset, 100.0*n_unset/len(sv)))
                 else:
                     sol_txt = "  ; ソルバ ypls と比較できる点が無い"
             else:
-                sol_txt = ("  ; **ソルバ ypls は全点 ≤0 (%d 点) — 出力が壊れている**" % n_unset)
+                sol_txt = ("  ; **ソルバ ypls は全点が未評価/負 (%d 点) — 出力が壊れているか mode 1/2**"
+                           % n_unset)
         print("               評価できた面積割合 %.1f %% ; y1+ > %.3g が %.1f %% ; 最大の位置 index %d%s"
               % (frac, a.target, over, imax, sol_txt))
         worst = max(worst, float(np.nanmax(yp[good])))
