@@ -241,6 +241,11 @@ def main():
             src = rd / suf
             if src.exists():
                 shutil.copy(src, rd / f"{Path(suf).stem}_{tag}{Path(suf).suffix}")
+        # **段の出力を次段の入力へ移す** (codex result M9→M1, 2026-09-26)。
+        # forge は `valueFileName` に書き戻さないので、これが無いと**各段が毎回初期値から**
+        # 独立に走る (実際 run_0049/0060/0063 はそうなっていた。梯子が機能していなかった)。
+        subprocess.run([sys.executable, str(TOOLS / "restart_field.py"),
+                        str(cur), str(rd / "mesh.h5")], check=True)
         mc.seed_turb(rd / "mesh.h5", k_inf, om_inf)
 
 

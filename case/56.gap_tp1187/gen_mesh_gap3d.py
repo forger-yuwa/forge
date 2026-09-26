@@ -138,6 +138,11 @@ def build(a):
     x2vu, x2vd = x2u - r, x2d + r          # その肩
     z1, z2 = 0.5 * W, Zh - 0.5 * W
     y1 = a.y1 * 1e-6 / a.scale
+    # z 方向 (縦すきま側壁) の先頭刻みは y1 と**別に持つ**。両者を縛ると、平板の
+    # 壁解像のために y1 を細かくしたときに Δz_min も細くなり、上端の粗い Δy との比で
+    # AR が倍になる (2026-09-26: y1 16→8 µm で AR max 1283→2585)。壁解像で足りて
+    # いないのは平板 (y 方向) だけなので分離する。
+    z1w = (a.z1 * 1e-6 / a.scale) if a.z1 else y1
 
     for cond, msg in [(a.x_in < xg < xvu, "x_in < -L < xvu"),
                       (xvd < xe < xpe < a.x_out, "xvd < x_dn_end < x_plate_end < x_out"),
@@ -396,10 +401,10 @@ def build(a):
 
     # --- z 方向の層 ---
 
-    lay1 = graded(z1, y1, a.z_ratio, a.dz_gap * 1e-3 / a.scale)[::-1]
+    lay1 = graded(z1, z1w, a.z_ratio, a.dz_gap * 1e-3 / a.scale)[::-1]
     half = graded(0.5 * (z2 - z1), lay1[-1], a.z_ratio, a.dz_far * 1e-3 / a.scale)
     lay2 = half + half[::-1]
-    lay3 = graded(Zh - z2, y1, a.z_ratio, a.dz_gap * 1e-3 / a.scale)
+    lay3 = graded(Zh - z2, z1w, a.z_ratio, a.dz_gap * 1e-3 / a.scale)
 
     def ex(dts, dz, lay):
         return g.extrude(dts, 0, 0, dz, [1] * len(lay), cumfrac(lay), True)
@@ -529,7 +534,9 @@ def main():
     ap.add_argument("--x-in", type=float, default=-0.1724)
     ap.add_argument("--x-plate-end", type=float, default=0.06)
     ap.add_argument("--x-out", type=float, default=0.09)
-    ap.add_argument("--y1", type=float, default=8.0, help="壁第一間隔 [um]")
+    ap.add_argument("--y1", type=float, default=8.0, help="壁第一間隔 (y 方向) [um]")
+    ap.add_argument("--z1", type=float, default=None,
+                    help="縦すきま側壁の第一 dz [um]。省略時は y1 と同じ。y1 を細かくするときはここを据え置くと AR の悪化を避けられる")
     ap.add_argument("--h1", type=float, default=6.0e-4, help="襟の厚さ [m]")
     ap.add_argument("--h2-frac", type=float, default=0.5,
                     help="襟の外側の先頭間隔 / 円弧の分割幅")
