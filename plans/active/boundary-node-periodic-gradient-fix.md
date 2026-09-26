@@ -122,13 +122,18 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | 5b (**完了 2026-09-26**、PASS) | R3 | case/48・case/16・case/44 の勾配配列が旧新ビット同一 (F1 初期化で 1 step 目が変わる run は 2 step 目以降のノイズ床比較) | O |
 | 5c (**実装済 2026-09-26**、G1-a/G1-b PASS、R3 は #5b) | 周期半割面の除外 (§4.2a) | `mesh` に `planePeriodic`、3 カーネルの条件置換。合格: §6 G1-a/G1-b/定数場を 7 run 再実行、R3 ビット同一。`plans/accepted/species-passive-scalar-unification.md` §4.1-5-1 に訂正 1 行 | O (判断: 2026-09-26 `diagnostician`・本 plan で修正) |
 | 5d (**完了 2026-09-26**: R2 収支 成立、R1 延長 限定合格) | R1 延長・R2 収支 (判断: 2026-09-26 `diagnostician`) | R1: 800k 場から `restart_field.py` で +800k step (同一設定・同一閾値、10k–1.6M 全系列 `--tail 0.4`)。なお DRIFTING なら「限定合格 (単調収束中・漸近値・末尾全点で ≤ 0.05)」と書きラベルは変えない。F1 差の L2 と x 継ぎ目の比を参考列に。case/39 の `slauWallNormalChi` 実効値を旧新で控える。R2: 既存 snapshot から $r(t)=(dK/dt+\varepsilon)/(K_0/t_c)$ (測る前に固定: 新は $|r|\le0.05$、旧は $t\lesssim7$ で $r>0$ が持続すれば「継ぎ目由来の注入」、符号不定なら「収支が閉じない」に留める) | O |
-| 6a (**完了 2026-09-26**、§6.2) | codex result M1 | `speciesTransport_d.cu:690,1232` の `excludePeriodic` を `periodicSeamMergeActive` に統一。合格: 軸対称×周期の小メッシュで旧新の 1 step 後 roY/roXi がビット同一。§7 に「軸対称×周期・回転周期のスカラー勾配は片側 GG + 半割面込みのまま (既存の未修正挙動)」 | O |
+| 6a (2026-09-26 実施、massflux のビット一致は検出力不足で #8a へ) | codex result M1 | `speciesTransport_d.cu:690,1232` の `excludePeriodic` を `periodicSeamMergeActive` に統一。合格: 軸対称×周期の小メッシュで旧新の 1 step 後 roY/roXi がビット同一。§7 に「軸対称×周期・回転周期のスカラー勾配は片側 GG + 半割面込みのまま (既存の未修正挙動)」 | O |
 | 6b (**完了 2026-09-26**、§6.2) | codex result M2 | `g2p_jitter.py` を訂正後の基準に揃え、ジッタ 128³ を追加 (AWS)。**測る前に固定**: 最細対 64→128 の継ぎ目の次数 (ゼロ成分含む全成分) ≥ 0.9 かつ 128³ で継ぎ目/内部 ≤ 2。32→64 は補助、16→32 は漸近域外として記録のみ。64→128 が 0.9 未満なら判定不能とし、内部の次数を並べて継ぎ目固有でないことだけ書く | O |
 | 6c (**完了 2026-09-26**、§6.2) | codex result M3 | `g_suite.py` の G1-b から n_member 倍の自動緩和を削除 (上限 $2N_{max}\varepsilon\phi/h$ かつ継ぎ目/内部 ≤ 2 を機械判定)、GPU 定数場 (k・ω・ξ = const、継ぎ目勾配 ≤ 4ε\|φ\|/h) を追加、7 run 再実行 (AWS)。化学種の直接確認は tracer ξ で代理 (根拠: `passiveGradient_d_wrapper` は同じ `species_gradient_d` を同じ excludePeriodic で呼ぶ、`speciesTransport_d.cu:1220-1232`) | O |
-| 6d (**完了 2026-09-26**、§6.2) | codex result M5 | R1 の記述訂正。旧は元 run + 延長を `stage_manifest` で同一実効設定の 1 区間として連結し `--segment` (スパイク込み)。F1 仮説: 同じ restart 入力で旧バイナリ 1 step を `sstSigmaBlend` 0/1 で比較 (スパイクが 1 側だけなら仮説支持、そうでなければ「原因未特定」)。新 dF1_inf の定常性は継続課題 (#7) | O |
+| 6d (連結区間は完了、F1 切り分けは #8d へ) | codex result M5 | R1 の記述訂正。旧は元 run + 延長を `stage_manifest` で同一実効設定の 1 区間として連結し `--segment` (スパイク込み)。F1 仮説: 同じ restart 入力で旧バイナリ 1 step を `sstSigmaBlend` 0/1 で比較 (スパイクが 1 側だけなら仮説支持、そうでなければ「原因未特定」)。新 dF1_inf の定常性は継続課題 (#7) | O |
 | 6e (**完了 2026-09-26**: 判定行を置換、`r2_ke_budget.txt` 更新、診断 ALL HOLD) | codex result M4 | R2 の結論を観測と帰属に限定し、`r2_ke_budget.py` の VERDICT 行を符号条件 (a)(b)(c) に置換、旧 \|r\| ≤ 0.05 行は履歴 | O |
 | 6f (**完了 2026-09-26**: `methods/gradient.md`・§2・`plans/README.md`) | codex result m1 | `methods/gradient.md` を実装後の記述に (欠陥は履歴節)、§2 スコープ、`plans/README.md`、§5.1 #5d、case/09・case/39 の run 表 | O |
-| 6g | codex result 2 回目 | 6a–6f の後。`--focus` 「M1–M5 の閉じ方、R1 の限定合格 + 継続課題の扱い、R2 の観測限定の文言」 | O (結論 F) |
+| 8a | result-2 M1 | 診断ダンプ `FORGE_DUMP_SCALARGRAD=<path>` (既定 off): `species_gradient_d` の初回呼び出しで atomicAdd に渡す同じ値を面ごとの別配列へ非 atomic に書く (ポインタ null で分岐、化学種・受動種の両呼び出し)。R3 (非周期・既定 off) で全場ビット同一を再確認。**3 バイナリ**: 新+ダンプ / 旧 1266aba1+ダンプ / 条件を `periodicNodeActive` に戻した誤り版+ダンプ。**合格 (測る前に固定)**: 軸対称×周期と並進周期の両方で 旧+ダンプ = 新+ダンプ が全面ビット同一、かつ誤り版は軸対称×周期で周期面の寄与が 0 になり差が出る (検出力) | O (判断: 2026-09-26 `diagnostician`、診断ダンプは条件 6 の先例 `FORGE_DUMP_MASSFLUX` と同じ扱い) |
+| 8b | result-2 M2 | G2 参照 (`lsq_seam_ref`、GPU と ≤ 1e-5·S 一致済み) をそのまま使い (新規再実装しない)、32³ ジッタ格子の実在の継ぎ目 group (面 2・辺 4・角 8 member、各 ≥ 2、計 ≥ 6) を無次元形状固定で $h,h/2,h/4$ に縮小、二次場で**全成分の次数 ≥ 0.9**。誤差/h の定数を同形状の内部 stencil と比較して表に。注記: 形状固定では次数はほぼ 1 になり、示すのは合併作用素の 1 次整合。ジッタ系列 (0.855) は判定不能 (診断) として保存 | O |
+| 8c | result-2 M3 | 定数場を 3 区分で機械判定: 壁なし継ぎ目 ≤ 4ε / 壁∩継ぎ目は格納 float32 面ベクトルの閉包 $\Sigma S_f$ (double 和) から作る期待値 $\phi\Sigma S_f/V$ との差 ≤ 4ε / 非継ぎ目壁は同じ参照で報告。壁の絶対定数保存 (5.3ε) は既知制約として §7 と `methods/gradient.md` に | O |
+| 8d | result-2 M4 | `1266aba1` に m3 だけを当てたバイナリ (AWS)、同じ restart 入力 `ic_S3_ext.h5` で 1 step。**規則 (測る前に固定)**: m3 のみ版で rms_roK/床 < 10 → 「F1 初回上書きが原因」、≥ 10 → 「原因未特定 (F1 でない)」 | O |
+| 8e | result-2 m1 | §5.1 #5d の旧記述を履歴化、case/39 README の 800k 行と延長行 (連結区間 PASS)、#7 に追跡先 plan と完了条件 | O |
+| 6g (2 回目は 2026-09-26 実施、NO-GO → #8a–#8e) | codex result 2 回目 | 6a–6f の後。`--focus` 「M1–M5 の閉じ方、R1 の限定合格 + 継続課題の扱い、R2 の観測限定の文言」 | O (結論 F) |
 | 7 | 継続課題 (accepted 後も残す) | 新 R1 の dF1_inf の定常性 (DRIFTING 0.3 %/tail、上限内)。R2 の機構分解 (同一状態の旧新離散残差から KE 仕事を分解) | O |
 | 5 (**完了 2026-09-26**、§6.2。codex result で #6a–#6g を追加) | 検証 R1・R2 | §6 R1・R2 (5a・5b の後)。**区切りで codex** | O (結論 F) |
 | 6 | docs + codex result | `methods/gradient.md` の「修正中」を外す | F |
@@ -157,6 +162,7 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | R2 収支基準 | `2026-09-26` | (本 plan §6.2 R2) | `diagnostician`: 新 $|r|\le0.05$ は数値散逸を見落とした誤指定 | 測定後の訂正として記録し、符号判定 (a)(b)(c) に置換。旧は「注入」と書く (根拠: $K/K_0>1$ と $r>0$ の連続、Π 差し引き後)。0.05 を緩めて通すことはしない。任意で 64³ の新 run で $|r|_{max}$ の格子依存を記録 (§7) |
 | result | `2026-09-26` | [2026-09-26-boundary-node-periodic-gradient-fix-result.md](../../notes/reviews/2026-09-26-boundary-node-periodic-gradient-fix-result.md) | **NO-GO**, C0/M5/m1 (中核実装は支持、accepted 不可) | **全件採用** (2026-09-26 `diagnostician`)。M1 → 化学種・受動種の除外条件を `periodicSeamMergeActive` に統一 (#6a)。M2 → G2′ ゼロ成分 16→32 0.849 未達を戻し、ジッタ 128³ を追加 (#6b)。M3 → G1-b の n_member 自動緩和を削除、比 ≤ 2 と GPU 定数場を機械判定、7 run 再実行 (#6c)。M4 → R2 は観測と帰属に限定し機構語を削除、符号条件は「測定後に追加した診断」(#6e、前回の「注入と書いてよい」を一部撤回)。M5 → 「単調収束中・漸近値」を撤回、旧延長は連結区間で判定、F1 仮説を切り分け (#6d)。m1 → docs・スコープ・README 同期 (#6f)。新の dF1_inf DRIFTING は、(i) 旧連結区間 PASS (ii) F1 切り分け実施 (iii) 上限成立 を満たせば accepted の障害にしない (継続課題として §5.1 に残す) |
 | #6a–#6d の判断 | `2026-09-26` | (本 plan §6.2「codex result 対応」) | `diagnostician`: #6a は規則上 FAIL を記録し決定論的試験で閉じる、#6c は比を場ごと・定数場の壁節点を除外 (定義の補正)、#6b は判定不能で閉じ障害にしない、#6d は継続課題で可 | 採用。#6a の面流束・状態の旧新ビット一致を確認 (`R6a_massflux_bitcheck.txt`)。規則を分布ベースに直す・閾値 4ε を上げる・#6b を粗さで PASS にすることはしない |
+| result (2 回目) | `2026-09-26` | [2026-09-26-boundary-node-periodic-gradient-fix-result-2.md](../../notes/reviews/2026-09-26-boundary-node-periodic-gradient-fix-result-2.md) | **NO-GO**, C0/M4/m1 (中核実装・条件統一・R1/R2 の扱いは支持) | **全件採用** (2026-09-26 `diagnostician`)。M1 → 面寄与ダンプで 3 バイナリ比較 (#8a)。M2 → G2 参照による固定形状縮小試験 (#8b)。M3 → 定数場 3 区分の機械判定 (#8c)、前回の「壁節点を k/ω と同じく除外」は根拠が誤りで撤回。M4 → m3 のみ版で F1 仮説を識別 (#8d)、前回の「F1 仮説は不支持」は識別能力の無い A/B に基づいていたので撤回。m1 → 同期 (#8e)。**accepted の条件を §8 に固定**。**3 回目の運用規則**: Major が §8 の 1–6 の外側 (新しい要求) にあり、中核の符号・適用条件・単位の誤りを示さないなら後続 plan の項目として登録して accepted へ進む。中核の誤りを示す指摘は採用して戻る |
 
 ### 6.2 結果
 
@@ -212,13 +218,13 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
     → 面作用素は同一、場の不一致数の差は atomicAdd 集積順序の統計差。
   - **#6c G1** (7 変種、`G_*.txt`): G0・G2・G1-a・G1-b (上限 $2N_{max}\varepsilon\phi/h$ のみ、自動緩和削除) すべて PASS、G1-b 最大差/閾値 ≤ 0.161。
     **定義の補正 (測定後、理由つき)**: (i) 継ぎ目/内部比は**場ごと** (全成分の最大誤差の比)。一様構造格子では内部の一部成分の誤差が対称性で丸め床になり、成分比は不良条件。成分比 (tgv 系 ω の x 成分 2.13–2.15) は記録のみ。場ごとの比は最大 1.85。
-    (ii) GPU 定数場の「継ぎ目」区分から**壁節点を除外** (k/ω と同じ扱い)。channel の ξ は壁∩継ぎ目 96 点・非継ぎ目壁 210 点とも最大 5.31 ε|φ|/h で同値 = 壁半割面込み GG の既存の閉包床で継ぎ目由来でない。壁でない継ぎ目は 0.82 → PASS。
+    ~~(ii) GPU 定数場の「継ぎ目」区分から**壁節点を除外** (k/ω と同じ扱い)~~ (撤回、codex result-2 M3: k/ω の除外は BC で壊れた stencil で、壁だからではない。#8c で 3 区分判定に置換)。channel の ξ は壁∩継ぎ目 96 点・非継ぎ目壁 210 点とも最大 5.31 ε|φ|/h で同値 = 壁半割面込み GG の既存の閉包床で継ぎ目由来でない。壁でない継ぎ目は 0.82 → PASS。
     ハーネスの `G_channel.txt` の VERDICT 行は壁節点込みの FAIL のまま (判定は本節の区分による)。定数場は他 6 変種 PASS (最大 3.03)。
   - **#6b G2′** (`G2p_jitter.txt`、ジッタ 16/32/64/128³): 継ぎ目の次数 (全成分最小) 16→32 0.499 (記録のみ)、32→64 0.876、**64→128 0.855** → 登録どおり**判定不能**。
     内部の次数 0.825–1.000、128³ の継ぎ目/内部 0.77–0.87 → 継ぎ目は内部より悪くない (次数が 0.9 を跨ぐのはジッタ格子での LSQ 自体の性質)。G2 は 128³ で 9.9e-6·S (閾値 1e-5、余裕 1 %)。accepted の障害にしない。
   - **#6d R1**: 連結区間 (S1→S2→S3_ext を 1 区間、`CONVERGENCE_VERDICT_concat.txt`) 旧 PASS (roK 4.6 桁)・新 PASS (4.3 桁)。
-    F1 切り分け (`_f1split/F1_SPLIT.txt`): 旧バイナリの restart step 0 の rms_roK は sstSigmaBlend 1 / 0 とも床の 408.7 倍 → **F1 仮説は不支持、原因未特定** (旧バイナリ固有の restart スパイク。新バイナリの自場 restart ではスパイクなし)。
-    新の dF1_inf の DRIFTING は継続課題 (#7) とし accepted の障害にしない (条件 (i)(ii)(iii) 成立)。
+    F1 切り分け (`_f1split/F1_SPLIT.txt`): 旧バイナリの restart step 0 の rms_roK は sstSigmaBlend 1 / 0 とも床の 408.7 倍。~~→ F1 仮説は不支持~~ (撤回、codex result-2 M4: 旧版では初回の σ が両条件とも 0.85/0.5 になるので、この A/B は識別能力が無い) → **このA/B では識別不能**、#8d で識別する。
+    新の dF1_inf の DRIFTING は継続課題 (#7) とし accepted の障害にしない (条件 (i)(iii) 成立、(ii) は #8d で完了)。
 
 ## 7. 影響範囲
 
@@ -232,6 +238,16 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 
 ## 8. 完了条件
 
+**accepted の条件 (2026-09-26 `diagnostician` 固定、codex result 3 回目はこの表で採点する)**:
+
+1. 中核: G0 全変種 PASS、G1-a ≤ 4ε、G1-b (上限 $2N_{max}\varepsilon\phi/h$ + 場ごと比 ≤ 2)、定数場 3 区分 (#8c)、G2 ≤ 1e-5·S 全水準。
+2. G2′: 固定形状縮小試験で全成分 ≥ 0.9 (≥ 6 group、#8b)。ジッタ系列は診断として保存 (判定不能ラベルのまま)。
+3. 同一性: R3 (非周期ビット同一)、#8a 面寄与ダンプで 旧+ダンプ = 新+ダンプ (軸対称×周期・並進周期)、誤り版で差が出る。
+4. R1: 旧新とも連結区間 PASS、dF1_inf 以外 STEADY、dF1_inf は上限 0.05 内で継続課題、#8d の結果 (どちらでも) を記録。
+5. R2: 保存上限 4 本 PASS、符号診断は「測定後の診断」と明記、結論は観測と commit 範囲への帰属に限定。
+6. 文書同期 + 既知制約の登録 (壁閉包 5ε、軸対称×周期のスカラー勾配は未合併、ジッタ格子の LSQ 次数は後続 LSQ 化 plan)。
+
+
 - [ ] `methods/gradient.md` の「修正中」を外す
 - [ ] 実装・検証完了 (§6)
 - [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録し、Critical / Major の採否を残作業表に反映済み
@@ -239,6 +255,8 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 - [ ] `plans/active/` → `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-26` — codex result 2 回目 NO-GO (C0/M4/m1) を全件採用 (#8a–#8e)。`diagnostician` の前回判断 2 件 (壁節点除外の根拠、F1 仮説の不支持) を撤回。accepted の条件を §8 に固定。
 
 - `2026-09-26` — codex result 対応 #6a–#6f 完了。#6a は決定論的試験 (面流束ビット一致) で閉じ、#6c は比・定数場区分の定義を補正、#6b は判定不能で閉じた (`diagnostician`)。codex result 2 回目へ。
 
