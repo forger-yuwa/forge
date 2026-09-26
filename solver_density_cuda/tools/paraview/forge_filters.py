@@ -608,7 +608,7 @@ class ForgeSaturation(VTKPythonAlgorithmBase):
             run_dir = self._run_config
             if os.path.isfile(run_dir):
                 run_dir = os.path.dirname(os.path.abspath(run_dir))
-            tools_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            tools_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
             if tools_dir not in sys.path:
                 sys.path.insert(0, tools_dir)
             from forge_species import species_info
