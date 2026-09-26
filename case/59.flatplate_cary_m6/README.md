@@ -17,8 +17,13 @@ forge は理論側に乗る。**このずれが冷壁に特有か (モデル側)
 - **Tw/Tt 0.2–0.7 の 9 系列** (Table II、転記済み `conditions.json`)。自然遷移で、加熱ピーク (遷移終端) は x = 14–35 cm
 - St_∞ = q / (ρ∞ u∞ cp (Taw − Tw))、乱流の回復係数 0.89
 
+## 事前登録
+
+`acceptance.json` (T4-0a-0: 比較点 17 点、原点 A/B、|D|>10 % / <10 % / またぐ の読み方)。結果を見る前に commit `f1e56cac`。
+
 ## 計算 run 一覧
 
 | run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
 |---|---|---|---|
-| (まだ無い) | | | |
+| `run_0001_tw02_re027` | **T4-0a-0** (比較原点だけの A/B)。系列 Re0.27_Tw0.2 (Tw 106.6 K、Re 2.7×10⁵/cm → p∞ 2231 Pa、逆算 Pt 3.59 MPa は原報 3.55 と 1 %)。完全乱流 SST (Tu 0.5 %、μt/μ 10)、メッシュ `fp_y1_1.5um_nx900` (y1 1.5 µm、平板 0.6 m、AR 957・skew 0 で `VERDICT: PASS`)、段階起動 lam→soft→mid→2 次ランプ→本段 20k (cfl 2、relax 0.7、restart_field.py で引き継ぎ全段 `VERDICT: OK`)。AWS `~/forge56` (ソルバは 04531b4 と同一ソース) | 完走・NaN 0。区間 ramp0→main で `NOT CONVERGED (still converging)` (全列 2.0–2.6 dec 低下中) → run_0002 で延長 | active (延長元) |
+| `run_0002_tw02_re027_ext` | run_0001 の res_20000 から `restart_field.py` (`VERDICT: OK`) で本段と同一設定 +40,000 step (出力 2000 毎) | `NOT CONVERGED (stalled/plateau)` (延長区間で 0.1–0.4 dec、roK のみ 2.8)。比較点の St 34 列 `check_quasisteady` **ALL STEADY** (drift 0.0 %、`_st_series.csv`)。壁解像 `--target 1 --over-frac 0` **FAIL** (y1+ 平均 0.541、>1 が面積 0.4 %、最大 3.94 は前縁)。**T4-0a-0**: D = R_B/R_A − 1 = +0.091〜+0.258 (平均 +0.146、15/17 点で >10 %) → 事前登録の読みは**判定不能** (下流 2 点が 10 % 未満)。R_A 平均 1.128 [0.974, 1.338]、R_B 1.288 [1.125, 1.472] | active (解釈は諮問中) |
