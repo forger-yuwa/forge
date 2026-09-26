@@ -8,13 +8,22 @@ plan boundary-cht-axisymmetric-fem2d §6 V-ax1 (事前登録の合格ライン)�
   (b) 独立な辺積分: 半径が変わる辺 3 通り (半径方向・斜め・軸の近く) で Robin 行列・荷重・$A_i^r$・`q_hole` を
       **この評価器の中で独立に取った Gauss–Legendre 積分** ($\int h N_iN_j r\,ds$ 等、5 点 = 9 次まで厳密) と照合、
       相対 ≤1e-13。C++↔Python の一致だけでは共通の誤りを排除できないため
-  (c) 厚肉円筒殻: 内面 $r_1$ に一様熱流束 $q_1$ (荷重 $Q_i=q_1A_i^r$)、外面 $r_2=2r_1$ に Robin。
-      $T(r)=T_c+q_1r_1[1/(hr_2)+\ln(r_2/r)/k]$。半径方向 4/8/16 層で収束率 ≥1.8、16 層で内面温度誤差
-      ≤0.1 % of 殻の温度降下。**平面のまま組むと FAIL すること** (検出力) も確認する。
-      格子は軸方向も同率で細かくする (縦横比固定)。軸方向固定の結果は参考表として出す (判定外)
+  旧 (c) 厚肉円筒殻 (旧パラメータ r1=0.01, r2=0.02, W=0.004, k=15, h=3000, Tc=400, q1=2e5):
+      **旧登録の判定として出す (記録のみ、終了コードに使わない)**。最初の格子 (軸 3 固定・対角交互・
+      半径 4/8/16 層) の次数 ≥1.8 と、改訂登録 (軸 3N/4・同方向対角) の 8→16・16→32 の次数 ≥1.8。
+      縦横比固定・対角交互の結果は「事後選定の格子 (判定に使わない)」として表示のみ。
+  (c‴) 置き換え試験 (新パラメータ r1=0.02, r2=0.06, W=0.01, k=40, h=500, Tc=350, q1=1e5、
+      N=8/16/32/64、軸 nx=round(N W/(r2−r1))、C++ と Python の差 ≤1e-9 K を全対象で合否に含める):
+      実行前の判別 A/B (旧パラメータ・N=8・軸 6・周期、A 同方向 = 0 / B 交互 = ±C a R d/[3(R²−d²/4)]、
+      |差|/(q1 r1 Δx) ≤1e-11) が成立したときだけ走らせる。
+      (c1) 周期端面・同方向対角: 2D = 独立 1D FE 解 ≤1e-8 K、残差 ‖Ku−b‖∞/‖b‖∞ ≤1e-11
+           (C++ tool は周期端面を持たないので `matrix` の組立て行列を Python 側で周期自由度に集約して解く)
+      (c2) 自然端面・交互対角: 次数 16→32・32→64 ≥1.8、N=64 で ≤0.05 % of 殻の温度降下
+      (c3) 自然端面・同方向対角: N=64 で ≤0.1 %、誤差が N とともに単調減少 (次数は判定しない)
+      (c4) 検出力: 平面のまま組むと (c2) の N=64 が FAIL
   (d) 軸対称円板: $x\in[0,t]$, $r\in[r_1,4r_1]$、界面 $x=0$ に一様熱流束、Robin $x=t$。解は $x$ の 1 次関数
       (線形要素で厳密) → 全節点温度誤差 ≤1e-9 K、`q_hole` 節点値 = consistent 積分の厳密値 (相対 ≤1e-12)
-  (e) 収支: 界面入熱 = Robin 持ち去り (`q_hole` の総和) 相対 ≤1e-12、(c)(d) とも
+  (e) 収支: 界面入熱 = Robin 持ち去り (`q_hole` の総和) 相対 ≤1e-12、旧 (c)・(c‴)・(d)
 
 `--base-exe` に変更前のツールを渡すと、**平面 (`--axisym` なし)** の matvec / solve 出力が
 変更後のツールと**バイト一致**することも確認する (V-ax1 追加項目: 平面のビット同一)。
@@ -38,6 +47,8 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from solid_fem2d import Fem2DOperator  # noqa: E402
@@ -45,14 +56,15 @@ from solid_mesh_to_h5 import write_solid_h5  # noqa: E402
 from test_solid_mesh_to_h5 import solve_all  # noqa: E402
 
 FAILS: list[str] = []
+OLD_FAILS: list[str] = []      # 旧 V-ax1(c) 登録の判定 (記録のみ。終了コードに使わない)
 ENV = dict(os.environ)
 ENV.setdefault("LD_LIBRARY_PATH", "/usr/lib/x86_64-linux-gnu/hdf5/serial")
 
 
-def check(name: str, ok: bool, detail: str = ""):
+def check(name: str, ok: bool, detail: str = "", bucket=None):
     print(f"  {'PASS' if ok else 'FAIL'}  {name}" + (f"   {detail}" if detail else ""))
     if not ok:
-        FAILS.append(name)
+        (FAILS if bucket is None else bucket).append(name)
 
 
 # ---------------------------------------------------------------------------
@@ -300,75 +312,292 @@ def test_a_real(exe, td, h5src, shift):
 
 
 # ---------------------------------------------------------------------------
-# (c) 厚肉円筒殻  (e) 収支
+# 円筒殻の共通部品
 # ---------------------------------------------------------------------------
-def test_c(exe, td):
-    print("\n(c) 厚肉円筒殻 (収束率 ≥1.8、16 層で内面誤差 ≤0.1 % of 温度降下) / (e) 収支")
+def shell_h5(td, tag, r1, r2, W, nx, nr, h, Tc, k, diag):
+    """円筒殻 (x∈[0,W], r∈[r1,r2]) の固体 h5 を書く。界面 = 内面 r1、Robin = 外面 r2、端面 x=0,W は自然 (断熱)。"""
+    nodes, tris, E = rect_mesh(0.0, W, r1, r2, nx, nr, diag=diag)
+    h5p = Path(td) / f"shell_{tag}.h5"
+    write_solid_h5(h5p, nodes, tris, E["y0"], E["y1"], [h] * len(E["y1"]), [Tc] * len(E["y1"]),
+                   [300.0], [k], source=f"shell {tag}")
+    return h5p
+
+
+def full_from_lower(Kl, n):
+    """`matrix` 出力の下三角 dict を対称な疎行列にする。"""
+    rows, cols, vals = [], [], []
+    for (i, j), v in Kl.items():
+        rows.append(i); cols.append(j); vals.append(v)
+        if i != j:
+            rows.append(j); cols.append(i); vals.append(v)
+    return sp.csr_matrix((vals, (rows, cols)), shape=(n, n))
+
+
+def iface_load(op, Ar, q1):
+    """界面荷重 Q_i = q1 A_i^r を全節点ベクトルに散らす。"""
+    Q = np.zeros(op.N)
+    Q[op.iface] += q1 * np.asarray(Ar, float)
+    return Q
+
+
+def periodic_map(xy, W):
+    """x=W の節点を同じ r の x=0 の節点に同一視する集約行列 P (N×N_d) を返す。"""
+    tol = 1e-9 * W
+    left = {round(float(y), 12): i for i, (x, y) in enumerate(xy) if abs(x) <= tol}
+    dof = -np.ones(len(xy), int)
+    nd = 0
+    for i, (x, y) in enumerate(xy):
+        if abs(x - W) > tol:
+            dof[i] = nd
+            nd += 1
+    for i, (x, y) in enumerate(xy):
+        if abs(x - W) <= tol:
+            dof[i] = dof[left[round(float(y), 12)]]
+    P = sp.csr_matrix((np.ones(len(xy)), (np.arange(len(xy)), dof)), shape=(len(xy), nd))
+    return P
+
+
+def fe1d(r, r1, r2, nr, k, h, Tc, q1):
+    """独立な 1 次元 FE 解 ((c″) の式): T_N = T_c + q1 r1/(h r2)、
+    T_j − T_{j+1} = q1 r1 Δr / [k (r_j + r_{j+1})/2]。節点の r で値を返す。"""
+    rj = np.linspace(r1, r2, nr + 1)
+    C = q1 * r1
+    T = np.empty(nr + 1)
+    T[nr] = Tc + C / (h * r2)
+    for j in range(nr - 1, -1, -1):
+        T[j] = T[j + 1] + C * (rj[j + 1] - rj[j]) / (k * 0.5 * (rj[j] + rj[j + 1]))
+    jj = np.rint((np.asarray(r) - r1) / ((r2 - r1) / nr)).astype(int)
+    return T[jj]
+
+
+def linres(K, u, rhs):
+    return float(np.max(np.abs(K @ u - rhs)) / np.max(np.abs(rhs)))
+
+
+# ---------------------------------------------------------------------------
+# 旧 (c) 厚肉円筒殻 — 旧登録の判定 (記録のみ。終了コードに使わない)  /  (e) 収支
+# ---------------------------------------------------------------------------
+def test_c_old(exe, td):
+    print("\n旧 (c) 厚肉円筒殻 [旧登録の判定・記録のみ。終了コードには使わない。(e) 収支は終了コードに含める]")
     r1, r2, W = 0.01, 0.02, 0.004
     k, h, Tc, q1 = 15.0, 3000.0, 400.0, 2.0e5
     Tex = lambda r: Tc + q1 * r1 * (1.0 / (h * r2) + np.log(r2 / r) / k)   # noqa: E731
     drop = q1 * r1 * math.log(r2 / r1) / k                                   # 殻の温度降下
-    res = {"axisym": [], "planar": []}
-    bal_worst = 0.0
-    # 格子は**全方向を同率で細かくする** (軸方向 nx = 3/4·nl、セルの縦横比を固定)。
-    # 軸方向を固定して半径方向だけ細かくすると、双対性の評価 (L2 ≲ h_max·エネルギー誤差) で
-    # h_max = Δx が縮まないので 2 次にならない (下の参考表。対角の向きが揃ったメッシュでは 1 次)。
-    for nl in (4, 8, 16):
-        nodes, tris, E = rect_mesh(0.0, W, r1, r2, 3 * nl // 4, nl)
-        h5p = Path(td) / f"shell_{nl}.h5"
-        write_solid_h5(h5p, nodes, tris, E["y0"], E["y1"], [h] * len(E["y1"]), [Tc] * len(E["y1"]),
-                       [300.0], [k], source=f"shell nl={nl}")
-        op = op_from_h5(h5p, axisym=True)
-        Ar = tool(exe, "lumped", h5p, td=td)
-        Qf = q1 * Ar                                          # 界面荷重 Q_i = q1 A_i^r [W/rad]
-        for geom in ("axisym", "planar"):
-            u = tool(exe, "solve", h5p, Qf, axisym=(geom == "axisym"), td=td)
-            r = op.xy[:, 1]
-            e_in = float(np.max(np.abs(u[op.iface] - Tex(r1))))
-            e_all = float(np.max(np.abs(u - Tex(r))))
-            res[geom].append((e_in, e_all))
-            if geom == "axisym":
-                qh = tool(exe, "field", h5p, u, td=td)
-                bal = abs(qh.sum() - Qf.sum()) / abs(Qf.sum())
-                bal_worst = max(bal_worst, bal)
-                # Python オラクルでも同じ問題を解く
-                T_i = op.solve(Qf, iters=30, tol=1e-13)
-                u_py = solve_all(op, T_i)
-                dpy = float(np.max(np.abs(u_py - u)))
-                print(f"    nl={nl:2d}  内面誤差 {e_in:.3e} K  全節点 {e_all:.3e} K  "
-                      f"収支 {bal:.1e}  |C++−Py| {dpy:.1e} K")
-    e_in = [e[0] for e in res["axisym"]]
-    e_all = [e[1] for e in res["axisym"]]
-    rates = [math.log2(e_all[i] / e_all[i + 1]) for i in range(2)]
-    rates_in = [math.log2(e_in[i] / e_in[i + 1]) for i in range(2)]
-    check("(c) 収束率 (全節点 max 誤差)", min(rates) >= 1.8,
-          "誤差 " + " ".join(f"{e:.3e}" for e in e_all) + " K ; rate " + " ".join(f"{x:.2f}" for x in rates)
-          + " (内面 rate " + " ".join(f"{x:.2f}" for x in rates_in) + ")")
-    check("(c) 16 層の内面誤差 ≤0.1 % of 温度降下", e_in[-1] <= 1e-3 * drop,
-          f"{e_in[-1]:.3e} K ≤ {1e-3 * drop:.3e} K (温度降下 {drop:.3f} K, "
-          f"{100 * e_in[-1] / drop:.4f} %)")
-    p_in = res["planar"][-1][0]
-    check("(c) 検出力: 平面のまま組むと FAIL する", p_in > 1e-3 * drop,
-          f"平面で組んだ 16 層の内面誤差 {p_in:.3e} K = {100 * p_in / drop:.1f} % of 温度降下")
-    check("(e) 収支 (c) 界面入熱 = Robin 持ち去り", bal_worst <= 1e-12, f"相対 最大 {bal_worst:.2e}")
 
-    # 参考 (判定しない): 軸方向の分割数を固定して半径方向だけ細かくした場合
-    print("    参考 (判定外): 軸方向 3 分割固定・半径方向 4/8/16/32 層の全節点 max 誤差")
-    for diag in ("alt", "uniform"):
-        es = []
-        for nl in (4, 8, 16, 32):
-            nodes, tris, E = rect_mesh(0.0, W, r1, r2, 3, nl, diag=diag)
-            h5p = Path(td) / f"shellfix_{nl}.h5"
-            write_solid_h5(h5p, nodes, tris, E["y0"], E["y1"], [h] * len(E["y1"]),
-                           [Tc] * len(E["y1"]), [300.0], [k], source=f"shell fixed-x nl={nl}")
+    def run(nx_of, nls, diag, tag, geoms=("axisym",), bal=False, py=False):
+        out = {g: [] for g in geoms}
+        bal_worst = 0.0
+        for nl in nls:
+            h5p = shell_h5(td, f"old_{tag}_{nl}", r1, r2, W, nx_of(nl), nl, h, Tc, k, diag)
+            op = op_from_h5(h5p, axisym=True)
             Ar = tool(exe, "lumped", h5p, td=td)
-            u = tool(exe, "solve", h5p, q1 * Ar, td=td)
-            with h5py.File(h5p, "r") as f:
-                r = np.asarray(f["MESH/COORD"][:, 1], float)
-            es.append(float(np.max(np.abs(u - Tex(r)))))
-        rr = [math.log2(es[i] / es[i + 1]) for i in range(len(es) - 1)]
-        print(f"      対角 {diag:7s}: 誤差 " + " ".join(f"{e:.3e}" for e in es)
-              + " K ; rate " + " ".join(f"{x:.2f}" for x in rr))
+            Qf = q1 * Ar
+            for geom in geoms:
+                u = tool(exe, "solve", h5p, Qf, axisym=(geom == "axisym"), td=td)
+                r = op.xy[:, 1]
+                out[geom].append((float(np.max(np.abs(u[op.iface] - Tex(r1)))),
+                                  float(np.max(np.abs(u - Tex(r))))))
+                if geom == "axisym" and bal:
+                    qh = tool(exe, "field", h5p, u, td=td)
+                    bal_worst = max(bal_worst, abs(qh.sum() - Qf.sum()) / abs(Qf.sum()))
+                if geom == "axisym" and py:
+                    T_i = op.solve(Qf, iters=30, tol=1e-13)
+                    dpy = float(np.max(np.abs(solve_all(op, T_i) - u)))
+                    print(f"    nl={nl:2d}  内面誤差 {out[geom][-1][0]:.3e} K  全節点 {out[geom][-1][1]:.3e} K"
+                          f"  |C++−Py| {dpy:.1e} K")
+        return out, bal_worst
+
+    def rates(es):
+        return [math.log2(es[i] / es[i + 1]) for i in range(len(es) - 1)]
+
+    # 最初の格子 (初稿の判定): 軸方向 3 分割固定・対角交互・半径方向 4/8/16 層
+    print("  最初の格子 (軸 3 固定・対角交互・半径 4/8/16 層) — 旧登録の判定")
+    res, bal_worst = run(lambda nl: 3, (4, 8, 16), "alt", "first", geoms=("axisym", "planar"),
+                         bal=True, py=True)
+    e_all = [e[1] for e in res["axisym"]]
+    e_in = [e[0] for e in res["axisym"]]
+    rr = rates(e_all)
+    check("旧(c) 最初の格子: 収束率 ≥1.8 (全節点 max 誤差)", min(rr) >= 1.8,
+          "誤差 " + " ".join(f"{e:.3e}" for e in e_all) + " K ; rate " + " ".join(f"{x:.2f}" for x in rr),
+          bucket=OLD_FAILS)
+    check("旧(c) 最初の格子: 16 層の内面誤差 ≤0.1 % of 温度降下", e_in[-1] <= 1e-3 * drop,
+          f"{e_in[-1]:.3e} K ({100 * e_in[-1] / drop:.4f} %, 温度降下 {drop:.3f} K)", bucket=OLD_FAILS)
+    p_in = res["planar"][-1][0]
+    check("旧(c) 最初の格子: 検出力 (平面のまま組むと FAIL)", p_in > 1e-3 * drop,
+          f"平面で組んだ 16 層の内面誤差 {p_in:.3e} K = {100 * p_in / drop:.1f} %", bucket=OLD_FAILS)
+    check("(e) 収支 旧(c) 最初の格子 界面入熱 = Robin 持ち去り", bal_worst <= 1e-12,
+          f"相対 最大 {bal_worst:.2e}")
+
+    # 改訂登録 (縦横比固定 軸 3N/4・全節点 max 誤差・両対角): 同方向対角は (c′) B で FAIL
+    print("  改訂登録 (軸 3N/4・同方向対角・半径 4/8/16/32 層) — 8→16・16→32 の次数で判定")
+    res, _ = run(lambda nl: 3 * nl // 4, (4, 8, 16, 32), "uniform", "rev_uni")
+    e_all = [e[1] for e in res["axisym"]]
+    rr = rates(e_all)
+    check("旧(c) 改訂登録 同方向対角: 8→16・16→32 の次数 ≥1.8", min(rr[1:]) >= 1.8,
+          "誤差 " + " ".join(f"{e:.3e}" for e in e_all) + " K ; rate " + " ".join(f"{x:.3f}" for x in rr),
+          bucket=OLD_FAILS)
+
+    # 事後選定の格子 (判定に使わない): 最初の格子の FAIL を見た後に選んだ 軸 3N/4・対角交互
+    res, _ = run(lambda nl: 3 * nl // 4, (4, 8, 16), "alt", "posthoc")
+    e_all = [e[1] for e in res["axisym"]]
+    e_in = [e[0] for e in res["axisym"]]
+    print("    事後選定の格子 (判定に使わない; 軸 3N/4・対角交互・4/8/16 層): 誤差 "
+          + " ".join(f"{e:.3e}" for e in e_all) + " K ; rate " + " ".join(f"{x:.2f}" for x in rates(e_all))
+          + f" ; 16 層の内面 {100 * e_in[-1] / drop:.4f} %")
+
+
+# ---------------------------------------------------------------------------
+# (c‴) 置き換え試験の実行前判別 A/B (旧パラメータ・N=8・軸 6 分割・周期)
+# ---------------------------------------------------------------------------
+def test_c3_precheck(exe, td):
+    """周期自由度に集約した C++ 行列に独立 1D FE 場を代入し、内部節点残差を予測と比べる。
+
+    予測 (面の向きが揃った節点ごとに要素寄与を足した閉形式): A (同方向) = 0、
+    B (交互) = ±C a R d / [3(R² − d²/4)] (C=q1 r1, a=軸刻み, d=半径刻み, R=節点半径)。
+    符号は残差 = K u − b の定義で、4 本の対角が集まる節点 (rect_mesh の (i+j) 偶数) で +、そうでない節点で −。
+    判定: |残差 − 予測| / (q1 r1 a) ≤1e-11。戻り値 True なら (c‴) へ進んでよい。"""
+    print("\n(c‴) 実行前の判別 A/B [旧パラメータ・N=8・軸 6 分割・周期端面・C++ 行列 (matrix) を Python で周期集約]")
+    r1, r2, W = 0.01, 0.02, 0.004
+    k, h, Tc, q1 = 15.0, 3000.0, 400.0, 2.0e5
+    nr, nx = 8, 6
+    a, d, C = W / nx, (r2 - r1) / nr, q1 * r1
+    ok_all = True
+    for lab, diag in (("A 同方向", "uniform"), ("B 交互", "alt")):
+        h5p = shell_h5(td, f"pre_{diag}", r1, r2, W, nx, nr, h, Tc, k, diag)
+        op = op_from_h5(h5p, axisym=True)
+        Kl, _b = tool(exe, "matrix", h5p, np.full(op.N, 300.0), td=td)
+        P = periodic_map(op.xy, W)
+        Kd = (P.T @ full_from_lower(Kl, op.N) @ P).tocsr()
+        # 集約後の各自由度の代表節点 (x<W の節点)
+        rep = np.array([np.flatnonzero((P[:, j].toarray().ravel() > 0) & (op.xy[:, 0] < W - 1e-9 * W))[0]
+                        for j in range(P.shape[1])])
+        xr, rr = op.xy[rep, 0], op.xy[rep, 1]
+        ud = fe1d(rr, r1, r2, nr, k, h, Tc, q1)
+        res = Kd @ ud                                            # 内部節点は b = Q = 0
+        p_i = np.rint(xr / a).astype(int)
+        q_i = np.rint((rr - r1) / d).astype(int)
+        inner = (q_i > 0) & (q_i < nr)
+        if diag == "uniform":
+            pred = np.zeros(len(rep))
+        else:
+            sgn = np.where((p_i + q_i) % 2 == 0, 1.0, -1.0)
+            pred = sgn * C * a * rr * d / (3.0 * (rr ** 2 - d ** 2 / 4.0))
+        dev = float(np.max(np.abs(res[inner] - pred[inner])) / (C * a))
+        ok = dev <= 1e-11
+        ok_all &= ok
+        check(f"(c‴) 判別 {lab}: |残差 − 予測| / (q1 r1 Δx) ≤1e-11", ok,
+              f"内部 {int(inner.sum())} 自由度  max|残差| {np.max(np.abs(res[inner])):.6e} W/rad  "
+              f"max|予測| {np.max(np.abs(pred[inner])):.6e}  max|差| {dev * C * a:.3e} → 正規化 {dev:.3e}")
+    return ok_all
+
+
+# ---------------------------------------------------------------------------
+# (c‴) 置き換え試験 (新パラメータ)  /  (e) 収支
+# ---------------------------------------------------------------------------
+def test_c3(exe, td):
+    print("\n(c‴) 置き換え試験 [新パラメータ r1=0.02 r2=0.06 W=0.01 k=40 h=500 Tc=350 q1=1e5、"
+          "N=8/16/32/64、軸 nx=round(N W/(r2−r1))]")
+    r1, r2, W = 0.02, 0.06, 0.01
+    k, h, Tc, q1 = 40.0, 500.0, 350.0, 1.0e5
+    Tex = lambda r: Tc + q1 * r1 * (1.0 / (h * r2) + np.log(r2 / r) / k)   # noqa: E731
+    drop = q1 * r1 * math.log(r2 / r1) / k
+    Ns = (8, 16, 32, 64)
+    nx_of = lambda N: int(round(N * W / (r2 - r1)))                          # noqa: E731
+    print(f"    殻の温度降下 {drop:.6f} K、軸分割 " + " ".join(str(nx_of(N)) for N in Ns))
+    dcp_worst, bal_worst = 0.0, 0.0
+
+    def rates(es):
+        return [math.log2(es[i] / es[i + 1]) for i in range(len(es) - 1)]
+
+    # (c1) 周期端面・同方向対角: C++ は matrix で組んだ行列を Python で周期集約して直接求解
+    print("  (c1) 周期端面・同方向対角 (C++ は `matrix` の組立て行列を Python 側で周期自由度に集約して求解)")
+    c1_ok = True
+    for N in Ns:
+        h5p = shell_h5(td, f"c1_{N}", r1, r2, W, nx_of(N), N, h, Tc, k, "uniform")
+        op = op_from_h5(h5p, axisym=True)
+        P = periodic_map(op.xy, W)
+        u1 = fe1d(op.xy[:, 1], r1, r2, N, k, h, Tc, q1)
+        out = {}
+        Ar_c = tool(exe, "lumped", h5p, td=td)
+        Kl, bc = tool(exe, "matrix", h5p, np.full(op.N, 300.0), td=td)
+        Kp, bp = op.assemble_full(np.full(op.N, 300.0))
+        for who, K, b, Ar in (("C++", full_from_lower(Kl, op.N), bc, Ar_c), ("Py", Kp, bp, op.area)):
+            Kd = (P.T @ K @ P).tocsc()
+            rhs = P.T @ (b + iface_load(op, Ar, q1))
+            ud = spla.spsolve(Kd, rhs)
+            out[who] = (P @ ud, linres(Kd, ud, rhs))
+        e1 = max(float(np.max(np.abs(out[w][0] - u1))) for w in out)
+        rs = max(out[w][1] for w in out)
+        dcp = float(np.max(np.abs(out["C++"][0] - out["Py"][0])))
+        dcp_worst = max(dcp_worst, dcp)
+        ok = e1 <= 1e-8 and rs <= 1e-11 and dcp <= 1e-9
+        c1_ok &= ok
+        check(f"(c1) N={N:2d}: |2D − 1D FE| ≤1e-8 K・残差 ≤1e-11・|C++−Py| ≤1e-9 K", ok,
+              f"|2D−1D| {e1:.3e} K  残差 {rs:.2e}  |C++−Py| {dcp:.2e} K  (C++ 残差 {out['C++'][1]:.2e} / "
+              f"Py {out['Py'][1]:.2e})")
+
+    # (c2)(c3)(c4) 自然断熱端面: C++ は solve、Python はオラクルの組立てを直接求解
+    def natural(diag, geoms=("axisym",), Nlist=Ns):
+        nonlocal dcp_worst, bal_worst
+        errs = {g: [] for g in geoms}
+        for N in Nlist:
+            h5p = shell_h5(td, f"nat_{diag}_{N}", r1, r2, W, nx_of(N), N, h, Tc, k, diag)
+            op_ax = op_from_h5(h5p, axisym=True)
+            Ar = tool(exe, "lumped", h5p, td=td)
+            Qf = q1 * Ar                                        # 平面で組むときも同じ荷重 [W/rad] を与える
+            r = op_ax.xy[:, 1]
+            for geom in geoms:
+                ax = geom == "axisym"
+                op = op_ax if ax else op_from_h5(h5p, axisym=False)
+                u_c = tool(exe, "solve", h5p, Qf, axisym=ax, td=td)
+                Kl, bc = tool(exe, "matrix", h5p, u_c, axisym=ax, td=td)
+                rhs_c = bc + iface_load(op, Ar, q1)
+                rc = linres(full_from_lower(Kl, op.N), u_c, rhs_c)
+                Kp, bp = op.assemble_full(np.full(op.N, 300.0))
+                rhs_p = bp + iface_load(op, Ar, q1)
+                u_p = spla.spsolve(Kp.tocsc(), rhs_p)
+                rp = linres(Kp, u_p, rhs_p)
+                dcp = float(np.max(np.abs(u_c - u_p)))
+                dcp_worst = max(dcp_worst, dcp)
+                e = float(np.max(np.abs(u_c - Tex(r))))
+                ep = float(np.max(np.abs(u_p - Tex(r))))
+                ipos = int(np.argmax(np.abs(u_c - Tex(r))))
+                errs[geom].append(e)
+                msg = ""
+                if ax:
+                    qh = tool(exe, "field", h5p, u_c, td=td)
+                    bal = abs(qh.sum() - Qf.sum()) / abs(Qf.sum())
+                    bal_worst = max(bal_worst, bal)
+                    msg = f"  収支 {bal:.1e}"
+                print(f"    {geom:6s} 対角 {diag:7s} N={N:2d} nx={nx_of(N):2d}: 全節点 max 誤差 C++ {e:.6e} K "
+                      f"({100 * e / drop:.5f} %) / Py {ep:.6e} K  位置 (x={op.xy[ipos, 0]:.4g}, r={r[ipos]:.4g})"
+                      f"  残差 C++ {rc:.1e} Py {rp:.1e}  |C++−Py| {dcp:.1e} K{msg}")
+        return errs
+
+    print("  (c2) 自然断熱端面・交互対角")
+    e2 = natural("alt")["axisym"]
+    r2s = rates(e2)
+    check("(c2) 次数 16→32 と 32→64 がともに ≥1.8 (全節点 max 誤差)", r2s[1] >= 1.8 and r2s[2] >= 1.8,
+          "誤差 " + " ".join(f"{e:.4e}" for e in e2) + " K ; 次数 " + " ".join(f"{x:.3f}" for x in r2s))
+    check("(c2) N=64 で ≤0.05 % of 殻の温度降下", e2[-1] <= 5e-4 * drop,
+          f"{e2[-1]:.4e} K = {100 * e2[-1] / drop:.5f} % (上限 {5e-4 * drop:.4e} K)")
+
+    print("  (c3) 自然断熱端面・同方向対角 (次数は判定しない — 旧要件からの緩和。二次精度の検証ではない)")
+    e3 = natural("uniform")["axisym"]
+    mono = all(e3[i + 1] < e3[i] for i in range(len(e3) - 1))
+    check("(c3) N=64 で ≤0.1 % of 殻の温度降下", e3[-1] <= 1e-3 * drop,
+          f"{e3[-1]:.4e} K = {100 * e3[-1] / drop:.5f} % (上限 {1e-3 * drop:.4e} K)")
+    check("(c3) 誤差が N とともに単調減少", mono,
+          "誤差 " + " ".join(f"{e:.4e}" for e in e3) + " K ; 次数 (参考・判定しない) "
+          + " ".join(f"{x:.3f}" for x in rates(e3)))
+
+    print("  (c4) 検出力: (c2) の N=64 を平面のまま組む")
+    e4 = natural("alt", geoms=("planar",), Nlist=(64,))["planar"][-1]
+    check("(c4) 平面のまま組むと (c2) の N=64 が FAIL (> 0.05 %)", e4 > 5e-4 * drop,
+          f"平面 {e4:.4e} K = {100 * e4 / drop:.3f} % of 温度降下")
+
+    check("(c‴) 全対象の |C++−Py| ≤1e-9 K (まとめ)", dcp_worst <= 1e-9, f"最大 {dcp_worst:.2e} K")
+    check("(e) 収支 (c‴) 自然端面 界面入熱 = Robin 持ち去り", bal_worst <= 1e-12, f"相対 最大 {bal_worst:.2e}")
 
 
 # ---------------------------------------------------------------------------
@@ -448,26 +677,39 @@ def main():
                     default=["case/58.conjugate_slot/mesh/solid_front_tc300_nl16.h5",
                              "case/53.c3x_vane_cht/mesh/solid_c3x.h5"],
                     help="平面のビット同一と実形状の (a) に使う固体 h5")
+    ap.add_argument("--precheck-only", action="store_true",
+                    help="(c‴) の実行前判別 A/B だけを回す (登録: 置き換え試験より先に実行する)")
     a = ap.parse_args()
     if not Path(a.exe).exists():
         sys.exit(f"[test_solid_fem2d_axisym] {a.exe} が無い (make solid_fem2d_tool)")
     h5s = [p for p in a.planar_h5 if Path(p).exists()]
 
     with tempfile.TemporaryDirectory() as td:
+        if a.precheck_only:
+            ok = test_c3_precheck(a.exe, td)
+            print(f"\nVERDICT (判別 A/B): {'PASS' if ok else 'FAIL — (c‴) を走らせず再調査'}")
+            sys.exit(0 if ok else 1)
         test_b(a.exe, td)
         test_a(a.exe, td)
         for h5 in h5s:
             with h5py.File(h5, "r") as f:
                 ymin, ymax = float(f["MESH/COORD"][:, 1].min()), float(f["MESH/COORD"][:, 1].max())
             test_a_real(a.exe, td, h5, shift=(ymax - ymin) * 0.5 - ymin)
-        test_c(a.exe, td)
+        test_c_old(a.exe, td)
+        # 登録: 判別 A/B が「A = 0・B = 予測式」にならなければ置き換え試験を走らせない
+        if test_c3_precheck(a.exe, td):
+            test_c3(a.exe, td)
+        else:
+            check("(c‴) 置き換え試験", False, "判別 A/B が予測どおりでないため実行しない (再調査)")
         test_d(a.exe, td)
         if a.base_exe:
             test_planar_bits(a.exe, a.base_exe, h5s, td)
         else:
             print("\n(追加) 平面のビット同一: --base-exe 未指定のため省略")
 
-    print(f"\nVERDICT: {'PASS (all)' if not FAILS else 'FAIL: ' + ', '.join(FAILS)}")
+    print(f"\nVERDICT (旧 V-ax1(c) 登録・記録のみ、終了コードに使わない): "
+          f"{'PASS' if not OLD_FAILS else 'FAIL: ' + ', '.join(OLD_FAILS)}")
+    print(f"VERDICT ((a)(b)(c‴)(d)(e)): {'PASS (all)' if not FAILS else 'FAIL: ' + ', '.join(FAILS)}")
     sys.exit(1 if FAILS else 0)
 
 
