@@ -10,6 +10,7 @@ Gate B で条件は固めた。ここは **forge 側で分母 $q_{FP}$ を作る
 (層流 run は実前縁なのでオフセット 0)。
 """
 import argparse, json, math, os, shutil, subprocess, sys
+import numpy as np
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -74,6 +75,40 @@ def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl
     return "\n".join(L) + "\n"
 
 
+def geo_text_ylist(x_in, x_out, x_plate_end, ys, nx_up, nx_pl, nx_buf, bump_pl):
+    """壁法線の節点座標列 `ys` (0 から H まで昇順) をそのまま使う版。
+
+    底辺 3 本を transfinite で割り (既定版と同じ x 分布)、`Extrude ... Layers` の
+    累積高さで y 方向に押し出す。2026-09-26 の平板 A/B (plan #60、codex diagnose 2 回目) で、
+    3D 格子の入口列と同じ y 配列を 2D 平板に与えるために足した。"""
+    ys = np.asarray(ys, dtype=float)
+    H = float(ys[-1])
+    L = []; A = L.append
+    A("// case/56 — 2D 平板 (y 節点列指定)。gen_mesh.py --y-file が生成。")
+    A("Geometry.PointNumbers = 0;  lc = 0.05;")
+    A(f"x_in = {x_in:.9f}; xle = 0.0; xpe = {x_plate_end:.9f}; x_out = {x_out:.9f};")
+    for i, xs in enumerate(("x_in", "xle", "xpe", "x_out"), start=1):
+        A(f"Point({i}) = {{{xs}, 0.0, 0.0, lc}};")
+    for i in range(1, 4):
+        A(f"Line({i}) = {{{i}, {i+1}}};")
+    A(f"Transfinite Line {{1}} = {nx_up} Using Progression 1.06;")
+    A(f"Transfinite Line {{2}} = {nx_pl} Using Bump {bump_pl};")
+    A(f"Transfinite Line {{3}} = {nx_buf} Using Progression 1.03;")
+    n = len(ys) - 1
+    ones = ",".join(["1"] * n)
+    hs = ",".join(f"{v / H:.12f}" for v in ys[1:])
+    A(f"e[] = Extrude {{0, {H:.12f}, 0}} {{ Line{{1, 2, 3}}; Layers{{ {{{ones}}}, {{{hs}}} }}; Recombine; }};")
+    # e[] は各線ごとに [上辺, 面, 側線(終点側), 側線(始点側, 向き負)] の 4 つ (gmsh 4.x で Printf 確認)。
+    # 隣り合う線は側線を共有するので、入口 = 線 1 の始点側、出口 = 線 3 の終点側
+    A('Physical Curve("inlet",  1) = {Abs(e[3])};')
+    A('Physical Curve("outlet", 2) = {e[10]};')
+    A('Physical Curve("top",    3) = {e[0], e[4], e[8]};')
+    A('Physical Curve("plate",  4) = {2};')
+    A('Physical Curve("slip",   5) = {1, 3};')
+    A('Physical Surface("fluid", 8) = {e[1], e[5], e[9]};')
+    return "\n".join(L) + "\n", H
+
+
 def ny_for(y1, H, r):
     return int(math.ceil(math.log(1.0 + H * (r - 1.0) / y1) / math.log(r))) + 1
 
@@ -92,8 +127,27 @@ def main():
     ap.add_argument("--bump-plate", type=float, default=0.15)
     ap.add_argument("--tag", default="fp")
     ap.add_argument("--no-convert", action="store_true")
+    ap.add_argument("--y-file", default=None,
+                    help="壁法線の節点 y 座標列 (1 行 1 値、0 から上端まで昇順)。指定時は --y1/--r-y/--H を使わない")
     a = ap.parse_args()
 
+    MESH.mkdir(exist_ok=True)
+    if a.y_file:
+        ys = np.loadtxt(a.y_file)
+        if ys[0] != 0.0 or np.any(np.diff(ys) <= 0):
+            sys.exit(f"{a.y_file}: 0 から始まる狭義単調増加の列でない")
+        txt, H = geo_text_ylist(a.x_in, a.x_out, a.x_plate_end, ys,
+                                a.nx_up, a.nx_plate, a.nx_buf, a.bump_plate)
+        (MESH / f"{a.tag}.geo").write_text(txt)
+        print(f"[{a.tag}] y 節点列 {a.y_file}: ny = {len(ys)}, y1 = {ys[1]*1e6:.3f} µm, H = {H*1e2:.1f} cm")
+    else:
+        make_progression(a)
+    subprocess.run(["gmsh", "-2", str(MESH / f"{a.tag}.geo"), "-o", str(MESH / f"{a.tag}.msh"),
+                    "-format", "msh41", "-v", "1"], check=True)
+    convert(a)
+
+
+def make_progression(a):
     y1 = a.y1 * 1e-6
     ny = ny_for(y1, a.H, a.r_y)
     lo, hi = 1.001, 1.5
@@ -104,15 +158,15 @@ def main():
             lo = r
         else:
             hi = r
-    MESH.mkdir(exist_ok=True)
     txt = geo_text(a.x_in, a.x_out, a.x_plate_end, a.H, ny, r,
                    a.nx_up, a.nx_plate, a.nx_buf, a.bump_plate)
     (MESH / f"{a.tag}.geo").write_text(txt)
     print(f"[{a.tag}] 平板 {a.x_plate_end*1e2:.0f} cm, H = {a.H*1e2:.0f} cm")
     print(f"        ny = {ny} (y1 = {a.H*(r-1)/(r**(ny-1)-1)*1e6:.3f} µm, r = {r:.5f}), "
           f"節点 ~{(a.nx_up+a.nx_plate+a.nx_buf-2)*ny/1000:.0f}k")
-    subprocess.run(["gmsh", "-2", str(MESH / f"{a.tag}.geo"), "-o", str(MESH / f"{a.tag}.msh"),
-                    "-format", "msh41", "-v", "1"], check=True)
+
+
+def convert(a):
     if a.no_convert:
         return
     conv = MESH / "_conv"; conv.mkdir(exist_ok=True)
