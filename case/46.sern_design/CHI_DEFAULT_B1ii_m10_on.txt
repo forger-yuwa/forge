@@ -1,0 +1,8 @@
+# chi 既定化 B1 (ii) 帯判定 m10_on: 明示 0 = run_0967_chidef_2d_m10_on_flag0/ct.csv / 省略 = run_0968_chidef_2d_m10_on_omit/ct.csv
+末尾 40 % の窓、差区間 I_Δ = [min C1 − max C0, max C1 − min C0]
+C_T             flag0 STEADY       flag1 STEADY       平均差 -0.000280  I_Δ [-0.000359, -0.000213]  許容 ±0.002  → 帯内
+C_T_with_shear  flag0 STEADY       flag1 STEADY       平均差 -0.000092  I_Δ [-0.000168, -0.000026]  許容 ±0.002  → 帯内
+C_L             flag0 STEADY       flag1 STEADY       平均差 +0.001245  I_Δ [+0.000965, +0.001514]  許容 ±0.002  → 帯内
+C_L_with_shear  flag0 STEADY       flag1 STEADY       平均差 +0.001255  I_Δ [+0.000973, +0.001527]  許容 ±0.002  → 帯内
+C_M             flag0 STEADY       flag1 STEADY       平均差 -0.025527  I_Δ [-0.031544, -0.019177]  許容 ±0.05  → 帯内
+全体 (最悪列): 帯内

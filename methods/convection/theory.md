@@ -387,10 +387,10 @@ $$\widehat M_n = \min\Big(1, \frac{\sqrt{\tfrac12(V_{nL}^2+V_{nR}^2)}}{\hat c}\B
 分離してよいのは、**SLAU2 が既に第 3 項から $\chi$ を外している**ため (SLAU 族は「1 つの $\chi$」で閉じた性質に依存しない)。
 本フラグは SLAU / SLAU2 の双方で同じ効果を持つ (どちらも $\dot m$ の $\chi$ だけが変わる)。
 
-**既定 (2026-09-26 ユーザ決定、実装は plan [`convection-slau-wall-normal-chi-default.md`](../../plans/active/convection-slau-wall-normal-chi-default.md))**: 省略時は **auto** — node ∧ `nodeWallDirichlet: 1` ∧ `solver` が SLAU/SLAU2 なら 1、それ以外 0 に解決する。明示 `0` で旧挙動 (演算としてビット同一)、明示 `1` の構成検査は従来どおり。起動ログに実効値と解決理由を 1 行出す。*(実装完了まではコード上の既定は 0)*。**面法線マッハを全面に使った版 (`mSLAU`) には収束悪化と格子感度の報告がある**
+**既定 (2026-09-26 ユーザ決定、実装は plan [`convection-slau-wall-normal-chi-default.md`](../../plans/accepted/convection-slau-wall-normal-chi-default.md))**: 省略時は **auto** — node ∧ `nodeWallDirichlet: 1` ∧ `solver` が SLAU/SLAU2 なら 1、それ以外 0 に解決する。明示 `0` で旧挙動 (演算としてビット同一)、明示 `1` の構成検査は従来どおり。起動ログに実効値と解決理由を 1 行出す。(2026-09-27 に検証完了、B0 ビット不変・B1 通常域/追加域すべて許容内)。**面法線マッハを全面に使った版 (`mSLAU`) には収束悪化と格子感度の報告がある**
 ため ([Furusawa & Kitamura 2023](https://doi.org/10.1002/fld.5183))、本実装は壁隣接面への局所適用に限る。
 **検証範囲**: 非周期・非軸対称の node 生産構成 (case/46・case/48・case/16・SERN 2D)。周期・軸対称は小規模試験のみ (生産規模では未使用)。
-**いつ 1 にするか (適用規則)**: [`procedures/recommended-settings.md`](../../procedures/recommended-settings.md) §1.0a (既定 0、3D 側壁接続のみ 1、新構成は診断可能性の検査 + 3 条件)。
+**いつ 1 にするか (適用規則)**: [`procedures/recommended-settings.md`](../../procedures/recommended-settings.md) §1.0a (既定 auto = 実効 1、旧挙動は 0 明記。診断 3 条件は 0 に落とすかの判断材料)。
 設計判断と検証は [`plans/accepted/convection-slau-wall-normal-chi.md`](../../plans/accepted/convection-slau-wall-normal-chi.md)。
 
 #### 風上化と残差

@@ -1272,6 +1272,8 @@ python3 ../cad/diag_wall_cv_budget.py sern.h5 --ids 153797,153880,189814 \
 
 ## 9. 変更ログ
 
+- `2026-09-27` — ユーザ決定 (2026-09-26) で node の既定を auto = 実効 1 に変更し、検証を完了 (plan [convection-slau-wall-normal-chi-default](convection-slau-wall-normal-chi-default.md))。本 plan の「既定 0」の記述は当時の判断。
+
 - `2026-09-25` (accepted 後、3 件目) — 後継 plan の結果を受けた訂正: (a) flag0 の $C_L$「`DRIFTING`」は $C_T$ 用閾値での判定で、$C_L$ 用閾値 (0.0014/0.0014) では `OSCILLATING` (データは同じ、ラベルの出所の訂正)。(b) #10b の $C_T$ を差区間で再計算して相対 [−0.043 %, −0.020 %]、判定不変。(c) カウル衝撃足は後継 plan で登録条件による同定を m6_on・m4_off で試み**判定保留** (未測定のまま)。
 - `2026-09-25` (accepted 後、2 件目) — **「衝撃足」の誤同定を訂正** (後継 plan codex plan-2 M7)。V3 SERN の衝撃足ノルムと #14 が追っていたのは x≈0 のランプ膨張角 (定義の $\max|dp/dx|$ が圧縮/膨張を区別しない)。定義どおりの計算結果は有効として残し、名前を「膨張角窓の壁圧」に改め、**カウル衝撃足は未測定**に戻した。再同定は後継 [`convection-slau-wall-normal-chi-usage-rule.md`](../accepted/convection-slau-wall-normal-chi-usage-rule.md)。受入の他項目 (case/48・case/16・$C_T$) は影響なし。
 - `2026-09-25` (accepted 後) — #10b の不確かさの式を「両 run の振幅の和」に訂正 (後継 plan の codex plan M7)。再計算 $C_T$ 0.046 % / 衝撃足 0.857 %、判定不変。§5.1 #11 に「既定化しない」判断を記録。

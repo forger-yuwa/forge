@@ -65,13 +65,19 @@ output: {level: 1}                                      # 保存量 + 原始量 
 - 出力は `output: {level: 1}` (既定)。勾配・リミッタ・診断が要る run だけ `level: 2` か `extraFields`。
   全温・全圧は `VALUE/h0` から `tools/total_quantities.py` で作る (AGENTS.md「出力と後処理の原則」)。
 
-### 1.0a 壁隣接面の $\chi$ (`space.slauWallNormalChi`) — 現行 (2026-09-25)
+### 1.0a 壁隣接面の $\chi$ (`space.slauWallNormalChi`) — 現行 (2026-09-27)
 
-**既定 0 のまま。1 にするのは次の構成だけ** (plan [convection-slau-wall-normal-chi-usage-rule](../plans/accepted/convection-slau-wall-normal-chi-usage-rule.md) §4.1、
-前 plan [convection-slau-wall-normal-chi](../plans/accepted/convection-slau-wall-normal-chi.md))。
+**既定は auto = 実効 1** (node ∧ `nodeWallDirichlet: 1` ∧ SLAU/SLAU2 のとき。それ以外は 0。2026-09-26 ユーザ決定、
+plan [convection-slau-wall-normal-chi-default](../plans/accepted/convection-slau-wall-normal-chi-default.md))。**書かない**のが推奨。
+旧挙動 (2026-09-25 以前の結果) の再現だけ `slauWallNormalChi: 0` を明記する (演算はビット同一)。起動ログに実効値と解決理由が 1 行出る。
 
-- **1 にする**: node + `nodeWallDirichlet: 1` の **3D 側壁∩後端面接続構成** (case/46 接続模型・SERN 3D 生産)。flag 0 は壁 CV が排出されて発散する (3 格子とも NaN)。
-- **0 のまま**: 2D 生産・case/16・case/48・周期・軸対称 (周期・軸対称は小規模試験 V6 まで)。
+- **検証 (2026-09-27)**: 省略 (auto 1) と明示 0 を同じ起点から分岐し、SERN 2D 3 作動点の力係数 5 列 (差区間が R5n 帯内)、
+  case/16 SST と凝縮の壁 p/p0 (L∞ ≤ 0.0012 %)・onset (差 0)、case/39 周期丘の下壁 $C_f$ (相対 L2 0.0002 %)・再付着点・継ぎ目比、
+  case/40 軸対称ノズルの $\eta_{CF}$・$\dot m$ (±0.0001 %)・壁 p/p0 (0.38 %) がすべて許容内。3D 接続模型では flag 0 が壁 CV を排出して
+  発散する構成を auto 1 が救う (起点から 8〜14 step で回復)。
+- **周期・軸対称・凝縮も auto に含む** (上の追加域の検証で成立条件と許容を満たした)。回転周期は node では未対応 (起動エラー)。
+- 以下の診断 3 条件は「**0 に落とす/落とさない**」を判断する材料として残す (既定化前の「1 にする条件」を読み替えたもの)。
+
 - **新しい構成で 1 にする条件**: 診断ツール `case/46.sern_design/cad/diag_wall_cv_budget.py` の質量流束が実カーネルと一致する設定であることを
   `case/46.sern_design/cad/diag_applicability.py` で確認し (設定キーの検査 + 同 dump の 1 step `FORGE_DUMP_MASSFLUX` で対象 CV の全接続面を照合)、
   **`convMethod: 0` の起動区間**で次の 3 つがすべて成り立つときだけ:
@@ -328,6 +334,7 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 | `mesh.bndFirstOrder: 1` | **禁止** (粘性応力破壊・疑似 2D で全域に効く) | 段階起動 (§1.2) |
 | `nodeAxisDirichlet` / `nodeMidpointFx` / `nodeValueAtNode` / `nodeReconEdgeMidpoint` / `nodeAxisUrDirichlet` | 廃止 (2026-08-16, 書くと起動エラー) | node は固定スキーム (§1) |
 | `turbulence: {LESorRANS: 2, RANSmodel: 1}` 旧キー体系 | 旧 config に残存 | `turbulence: {model: "sst", ...}` |
+| `space.slauWallNormalChi` 省略 = 0 | **2026-09-25 まで既定** (2026-09-26 から auto = node+nodeWallDirichlet+SLAU で 1、plan [convection-slau-wall-normal-chi-default](../plans/accepted/convection-slau-wall-normal-chi-default.md)) | 旧結果の再現は `slauWallNormalChi: 0` を明記 |
 | node の `mesh.scalarGradient` 省略 = gg | **2026-09-26 まで既定** (2026-09-27 から node の既定は lsq、plan [gradient-scalar-lsq-unification](../plans/accepted/gradient-scalar-lsq-unification.md) #6) | 旧結果の再現は `mesh.scalarGradient: gg` を明記。**切り替え日をまたぐ run は途中から再開せず最初から回し直す** (段の区間判定が gg 段と lsq 段をつなぐため、ユーザ決定 2026-09-27) |
 | `sstOmegaProdFromPk: 0` / `sstSigmaBlend: 0` | 2026-09-08 まで既定 | 既定 1 (旧挙動が要るときだけ 0 明記) |
 | `sstEnergyKSource: 1` / `sstIsotropicStress: 1` (分離型) | 非推奨 (境界未完備・離散保存せず) | 必要なら `sstEnergyIncludesK: 1` (opt-in) |

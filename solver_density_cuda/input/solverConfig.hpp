@@ -512,7 +512,7 @@ public:
     // node × nodeWallDirichlet=1 の壁ノード (u=0) が接線速度の大きい内点と面を共有すると chi=0 になり、
     // 壁 CV への補充経路が消えて排出される (methods/convection/theory.md「既知の限界」)。
     // **圧力束の (1-chi) は変えない** (別作用。plans/accepted/convection-slau-wall-normal-chi.md §4.1)。
-    // 三値 (2026-09-26 ユーザ決定、plans/active/convection-slau-wall-normal-chi-default.md §4.1):
+    // 三値 (2026-09-26 ユーザ決定・2026-09-27 検証完了、plans/accepted/convection-slau-wall-normal-chi-default.md §4.1):
     //   省略 = auto (-1) → 読込後に node ∧ nodeWallDirichlet==1 ∧ solver∈{SLAU,SLAU2} なら 1、それ以外 0 に解決。
     //   明示 0 = 旧挙動 (ビット同一)、明示 1 = 構成を検査して有効化。解決後の値は常に 0 か 1。
     int slauWallNormalChi = -1;

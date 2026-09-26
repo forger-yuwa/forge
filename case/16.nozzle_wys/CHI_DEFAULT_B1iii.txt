@@ -1,0 +1,16 @@
+初回面流束が違う面 627 / 83745
+# case/16 壁圧比較: flag0 = run_0965_chidef_sst_flag0 / 省略 = run_0966_chidef_sst_omit
+[flag0] === run_0965_chidef_sst_flag0/chidef_wallpp0.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[flag0]   pp0_16p4        : tail mean=0.3646  drift=0.0%/tail  fluct=0.0%           STEADY
+[flag0]   pp0_45p6        : tail mean=0.2575  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.257533 (最終比 +0.000 %)] STEADY
+[flag0]   pp0_85          : tail mean=0.1873  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.187353 (最終比 +0.005 %)] STEADY
+[omit] === run_0966_chidef_sst_omit/chidef_wallpp0.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[omit]   pp0_16p4        : tail mean=0.3646  drift=0.0%/tail  fluct=0.0%           STEADY
+[omit]   pp0_45p6        : tail mean=0.2575  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.257535 (最終比 +0.001 %)] STEADY
+[omit]   pp0_85          : tail mean=0.1873  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.187356 (最終比 +0.007 %)] STEADY
+輪郭壁 p/p0 L∞ (x 10–94 mm、最終) = 0.0003 % (許容 0.5 %) → PASS
+3 点 (最終) flag0 / 省略: 16.4 mm 0.36457/0.36457, 45.6 mm 0.25753/0.25753, 85.0 mm 0.18734/0.18734
+VERDICT 量: PASS
+=== run_0965_chidef_sst_flag0  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+=== run_0966_chidef_sst_omit  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+=== run_0966_chidef_sst_omit  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===
