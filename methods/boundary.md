@@ -346,7 +346,8 @@ CHT は流体の壁熱流束と固体の伝導を連立して $T_w(x)$ を決め
 | 時間積分 | **定常陰解法** (`advanceImplicitSteady` → `implicitNonlinearUpdate`)。**dual-time 連成は対象外** (物理時間ステップ境界でのみ更新する別契約として後続) |
 | 固体 | 薄肉シェル (`local1d` / `shell2d`) と一般 2D 領域 (`fem2d`) |
 | 壁種別 | `wall_isothermal` + `ints: {conjugate: 1}`。**新種別を作らない** (種別名は `iso_wall_flag`・温度ピン・粘性壁・壁距離・block-DPLUR のエネルギー行切離しの 5 経路で直書き判定されており、新種別はそこから漏れる) |
-| 対象外 | 表面間放射、非定常 (thin-skin 過渡)、軸対称の面内伝導、壁関数 (`wallTreatmentSST: 1` / `sstEnergyWallFunction: 1`) 併用、接触熱抵抗の同定 |
+| 対象外 | 表面間放射、非定常 (thin-skin 過渡)、**軸対称 (起動時に拒否。下記)**、壁関数 (`wallTreatmentSST: 1` / `sstEnergyWallFunction: 1`) 併用、接触熱抵抗の同定 |
+| 軸対称 | **現状は起動時に拒否** (2026-09-27、全モード)。軸対称メッシュも $z\equiv0$ なので `fem2d` の平面ガードを素通りし、`axisymMethod: 0` の $r$ 重み幾何で `iface_Qf_eff` が [W/rad] になる一方、`local1d` の `iface_q_eff` は平面面積で割り、`fem2d` の固体は平面 [W/m] で組むため、**どちらも節点ごとに $r$ 倍ずれたまま黙って連成していた**。対応は [`plans/active/boundary-cht-axisymmetric-fem2d.md`](../plans/active/boundary-cht-axisymmetric-fem2d.md) (計画中。下の「軸対称の `fem2d` (計画中)」) |
 
 #### 界面量の定義と符号
 
@@ -364,7 +365,7 @@ $$Q_{f,i} \;=\; \sum_{f\in\partial_w} F^{E}_{if} \;-\; C_i \qquad [\mathrm{W}]\;
   - **コンパクト差分形** $k_{\rm eff}(T_1-T_w)/d_1$ (固体向き正) — $D_f$ の推定と精度診断に使う。SU2 CHT の界面転送と同じ形。
   - **再構成勾配形** $k_{\rm eff}\nabla T\cdot\mathbf S$ — `viscousFlux_d.cu` が `qwall` に保存している値。
   - 実測差の例: case/48 `run_0011` の $x\approx0.5$ m で コンパクト 96.184 / 2 次片側 98.820 kW/m² (2.67 %)。
-- 界面の積分 (面積重み、軸対称の $r$ 重み) は **host・double** で行う。
+- 界面の積分 (面積重み) は **host・double** で行う。~~軸対称の $r$ 重み~~ — **未実装だった** (2026-09-27 訂正。軸対称は拒否、下記)。
 - 幾何は **primal facet 単位** (`bc.vizBfaceNodes`) を正本にする。node の合成半割面ベクトルは
   $|\sum_f\mathbf S_f|\ne\sum_f|\mathbf S_f|$ なので**面積として使わない**。
 
@@ -477,7 +478,7 @@ $D_f$ が大きいとき量子化で止まった状態を合格にできる。
   **$Q_f$ は流体側の積分済み荷重 `iface_Qf_eff` $=R^{raw}-F_w-e_wR_\rho$ をそのまま渡す**。
   面積で割って固体側の集中辺長を掛け直すと、両者が違う角で荷重が歪む (Mark II 後縁で +29.9 %)。
   集中辺長は**熱流束に換算する段でだけ**使う。`surfArea` を荷重に使わない (押し出し疑似 2D で奥行きが乗る)。
-  初版は $z\equiv0$ の平面 2D 以外を拒否する。
+  初版は $z\equiv0$ の平面 2D 以外を拒否する。**軸対称も拒否する** ($z\equiv0$ でも $r$ 重みが合わない。上の表)。
 - 行列は SPD なので**下三角バンド Cholesky** (RCM 並べ替えは変換時に済ませる)。
   **分解は `refactorDT` 以内なら再利用する** (上の残差補正形なので固定点は動かない)。
   **直接求解 $Au^{k+1}=b$ のまま再利用してはいけない**: 行列側の $D_f$ や $k_s$ が古いまま右辺だけ新しくなり、
@@ -489,7 +490,14 @@ $D_f$ が大きいとき量子化で止まった状態を合格にできる。
   窓は「$F_N\le\epsilon_{\rm abs}L_i/2$ を全節点で満たす最小 N」で選ぶ (C3X では 21 = 1 周期。周期揺らぎ対策で 42 を採用)。
 - **出力**: 更新ごとに `conjugate_history.csv` (G-if の素材)、流体の出力間隔で `res_solid_<physID>_<step>.h5`+`.xmf`
   (`T` / `k_s` / `q_iface` / `q_hole`) と再開用の `conjugate_state_<physID>.h5`。
-- **起動時に拒否**: 平面 2D 以外、界面節点が流体の壁節点と 1 対 1 でない (**内挿しない**)、Robin 辺が 1 本も無い
+- **軸対称の `fem2d` (計画中、[`plans/active/boundary-cht-axisymmetric-fem2d.md`](../plans/active/boundary-cht-axisymmetric-fem2d.md))**:
+  単位は流体の $r$ 重み幾何 (`axisymMethod: 0`、$2\pi$ を掛けない) に合わせて**ラジアンあたり** [W/rad] で統一する。
+  固体の弱形式は $\int_\Omega k\,\nabla T\cdot\nabla v\,r\,dA + \int_{\Gamma_R} h(T-T_c)v\,r\,ds = \int_{\Gamma_i} q\,v\,r\,ds$ ($r=y\ge0$)。
+  線形三角形では勾配が要素内一定なので剛性は $k_e\,A_e\,\bar r_e\,\nabla N_i\cdot\nabla N_j$ ($\bar r_e$ = 要素重心の $r$) で厳密、
+  Robin 辺は $r$ が辺上線形なので $\frac{hL}{12}\begin{pmatrix}3r_a+r_b & r_a+r_b\\ r_a+r_b & r_a+3r_b\end{pmatrix}$、
+  荷重 $\frac{hT_cL}{6}(2r_a+r_b,\;r_a+2r_b)$、界面の集中量は $A_i^r=\sum_e \frac{L_e}{6}(2r_i+r_j)$ [m²/rad]。
+  **最終積分に $r$ を掛けるだけでは足りない** (要素剛性と Robin 辺の両方に入れる)。流体の積分済み荷重 `iface_Qf_eff` は既に [W/rad]。
+- **起動時に拒否**: 平面 2D 以外、**軸対称 (全モード。上記)**、界面節点が流体の壁節点と 1 対 1 でない (**内挿しない**)、Robin 辺が 1 本も無い
   (定数零空間)、$q_{\rm eff}$ が 1 節点でも非有限、`flux: q_eff` なのに `interfaceDiag != 1`。
 - **判定**: 界面の収束は [`tools/check_cht_interface.py`](../solver_density_cuda/tools/check_cht_interface.py) が
   `conjugate_gate.json` の**事前登録値**で行う (`check_convergence.py` は流体の保存量しか見ない)。

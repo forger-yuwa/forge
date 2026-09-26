@@ -569,6 +569,19 @@ void initConjugateWalls(const solverConfig& cfg, const mesh& msh)
                      "過渡では拘束反力が C = D_t(VE) - R^raw になり、本実装の定常仮定が崩れる。\n";
         exit(EXIT_FAILURE);
     }
+    // **軸対称は全モードで拒否する** (2026-09-27、plan boundary-cht-axisymmetric-fem2d §5.1 #1)。軸対称メッシュも
+    // $z\equiv0$ なので fem2d の平面ガードを素通りする。`axisymMethod: 0` では流体の面積が $r$ 倍
+    // (`variables.cpp` の r 重み幾何) で `ifaceRraw` / `iface_Qf_eff` は $r$ 重み [W/rad] になるが、
+    // `iface_q_eff` はそれを**ホストの平面面積** `msh.planes[].surfArea` で割り (local1d は $q$ が $r$ 倍ずれる)、
+    // `fem2d` は平面 [W/m] の集中辺長で固体を組む (荷重が $r$ 倍ずれる)。どちらも**黙って連成する**。
+    // `axisymMethod: 1` も固体に $r$ 重みが無い点は同じ。固体側の $r$ 重みが入るまで拒否する。
+    if (cfg.isAxisymmetric == 1) {
+        std::cerr << "[conjugateWall] ERROR: in-solver CHT は軸対称 (mesh.isAxisymmetric: 1) に未対応。\n"
+                  << "[conjugateWall]   流体の界面荷重は r 重み [W/rad] だが、local1d の q_eff は平面面積で割り、"
+                     "fem2d の固体は平面 [W/m] で組むため、どちらも節点ごとに r 倍ずれる。"
+                     "plans/active/boundary-cht-axisymmetric-fem2d.md を参照。\n";
+        exit(EXIT_FAILURE);
+    }
     if (cfg.conjugateFlux == "q_eff" && cfg.interfaceDiag != 1) {
         std::cerr << "[conjugateWall] ERROR: conjugate flux=q_eff (既定) は保存形の界面熱量 iface_q_eff を使うので "
                      "output: {interfaceDiag: 1} が要る。\n"
