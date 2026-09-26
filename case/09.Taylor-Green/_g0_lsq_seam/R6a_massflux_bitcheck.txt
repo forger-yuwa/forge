@@ -1,0 +1,11 @@
+# #6a 決定論的試験 (plan boundary-node-periodic-gradient-fix §5.1 #6a、2026-09-26 diagnostician 判断)
+# 軸対称 × 並進周期 (61×41、x 周期 41 節点合併、MIXDRY/H2O + ξ、speciesFaceReconstruction 1)、同一 res_0 入力から 1 step。
+# FORGE_DUMP_MASSFLUX: 初回の面流束 (1 面 1 スレッド・非 atomic) と、そのときカーネルが読んだ状態 (ro,Ux,Uy,Uz,P,sonic)。
+# AWS ~/pgrad6_scratch/r6a_axiper_{mfold,mfnew}、mf_{old,new}.bin[.state]
+old forge_sha256: f0505fe8385898a3a5a8438eafb508da9fb67b5fde1045cfcb85950e58c23845 (1266aba1)
+new forge_sha256: f0ad00c8b3530576f598f81064cb3aefca98560262536a7c7051ae0d64740a39 (bd22376d)
+massflux      : 5104 faces   bit-identical  (NaN 0)
+state (.state): 15006 values bit-identical  (NaN 0)
+diff 1266aba1..bd22376d -- speciesTransport_d.cu: 除外条件の引数 (periodicNodeActive -> periodicSeamMergeActive、nNormalPlanes -> planePeriodic_d) とコメントのみ。
+  軸対称では 旧 = 除外条件が死んでいて除外しない / 新 = periodicSeamMergeActive=false で除外しない -> 同じ経路。
+VERDICT: PASS (面作用素は同一。R3 規則上の FAIL (roUx・roY1 の不一致数の桁) は場の atomicAdd 集積順序の統計差として、この試験で閉じた)

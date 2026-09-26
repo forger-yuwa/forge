@@ -122,10 +122,10 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | 5b (**完了 2026-09-26**、PASS) | R3 | case/48・case/16・case/44 の勾配配列が旧新ビット同一 (F1 初期化で 1 step 目が変わる run は 2 step 目以降のノイズ床比較) | O |
 | 5c (**実装済 2026-09-26**、G1-a/G1-b PASS、R3 は #5b) | 周期半割面の除外 (§4.2a) | `mesh` に `planePeriodic`、3 カーネルの条件置換。合格: §6 G1-a/G1-b/定数場を 7 run 再実行、R3 ビット同一。`plans/accepted/species-passive-scalar-unification.md` §4.1-5-1 に訂正 1 行 | O (判断: 2026-09-26 `diagnostician`・本 plan で修正) |
 | 5d (**完了 2026-09-26**: R2 収支 成立、R1 延長 限定合格) | R1 延長・R2 収支 (判断: 2026-09-26 `diagnostician`) | R1: 800k 場から `restart_field.py` で +800k step (同一設定・同一閾値、10k–1.6M 全系列 `--tail 0.4`)。なお DRIFTING なら「限定合格 (単調収束中・漸近値・末尾全点で ≤ 0.05)」と書きラベルは変えない。F1 差の L2 と x 継ぎ目の比を参考列に。case/39 の `slauWallNormalChi` 実効値を旧新で控える。R2: 既存 snapshot から $r(t)=(dK/dt+\varepsilon)/(K_0/t_c)$ (測る前に固定: 新は $|r|\le0.05$、旧は $t\lesssim7$ で $r>0$ が持続すれば「継ぎ目由来の注入」、符号不定なら「収支が閉じない」に留める) | O |
-| 6a | codex result M1 | `speciesTransport_d.cu:690,1232` の `excludePeriodic` を `periodicSeamMergeActive` に統一。合格: 軸対称×周期の小メッシュで旧新の 1 step 後 roY/roXi がビット同一。§7 に「軸対称×周期・回転周期のスカラー勾配は片側 GG + 半割面込みのまま (既存の未修正挙動)」 | O |
-| 6b | codex result M2 | `g2p_jitter.py` を訂正後の基準に揃え、ジッタ 128³ を追加 (AWS)。**測る前に固定**: 最細対 64→128 の継ぎ目の次数 (ゼロ成分含む全成分) ≥ 0.9 かつ 128³ で継ぎ目/内部 ≤ 2。32→64 は補助、16→32 は漸近域外として記録のみ。64→128 が 0.9 未満なら判定不能とし、内部の次数を並べて継ぎ目固有でないことだけ書く | O |
-| 6c | codex result M3 | `g_suite.py` の G1-b から n_member 倍の自動緩和を削除 (上限 $2N_{max}\varepsilon\phi/h$ かつ継ぎ目/内部 ≤ 2 を機械判定)、GPU 定数場 (k・ω・ξ = const、継ぎ目勾配 ≤ 4ε\|φ\|/h) を追加、7 run 再実行 (AWS)。化学種の直接確認は tracer ξ で代理 (根拠: `passiveGradient_d_wrapper` は同じ `species_gradient_d` を同じ excludePeriodic で呼ぶ、`speciesTransport_d.cu:1220-1232`) | O |
-| 6d | codex result M5 | R1 の記述訂正。旧は元 run + 延長を `stage_manifest` で同一実効設定の 1 区間として連結し `--segment` (スパイク込み)。F1 仮説: 同じ restart 入力で旧バイナリ 1 step を `sstSigmaBlend` 0/1 で比較 (スパイクが 1 側だけなら仮説支持、そうでなければ「原因未特定」)。新 dF1_inf の定常性は継続課題 (#7) | O |
+| 6a (**完了 2026-09-26**、§6.2) | codex result M1 | `speciesTransport_d.cu:690,1232` の `excludePeriodic` を `periodicSeamMergeActive` に統一。合格: 軸対称×周期の小メッシュで旧新の 1 step 後 roY/roXi がビット同一。§7 に「軸対称×周期・回転周期のスカラー勾配は片側 GG + 半割面込みのまま (既存の未修正挙動)」 | O |
+| 6b (**完了 2026-09-26**、§6.2) | codex result M2 | `g2p_jitter.py` を訂正後の基準に揃え、ジッタ 128³ を追加 (AWS)。**測る前に固定**: 最細対 64→128 の継ぎ目の次数 (ゼロ成分含む全成分) ≥ 0.9 かつ 128³ で継ぎ目/内部 ≤ 2。32→64 は補助、16→32 は漸近域外として記録のみ。64→128 が 0.9 未満なら判定不能とし、内部の次数を並べて継ぎ目固有でないことだけ書く | O |
+| 6c (**完了 2026-09-26**、§6.2) | codex result M3 | `g_suite.py` の G1-b から n_member 倍の自動緩和を削除 (上限 $2N_{max}\varepsilon\phi/h$ かつ継ぎ目/内部 ≤ 2 を機械判定)、GPU 定数場 (k・ω・ξ = const、継ぎ目勾配 ≤ 4ε\|φ\|/h) を追加、7 run 再実行 (AWS)。化学種の直接確認は tracer ξ で代理 (根拠: `passiveGradient_d_wrapper` は同じ `species_gradient_d` を同じ excludePeriodic で呼ぶ、`speciesTransport_d.cu:1220-1232`) | O |
+| 6d (**完了 2026-09-26**、§6.2) | codex result M5 | R1 の記述訂正。旧は元 run + 延長を `stage_manifest` で同一実効設定の 1 区間として連結し `--segment` (スパイク込み)。F1 仮説: 同じ restart 入力で旧バイナリ 1 step を `sstSigmaBlend` 0/1 で比較 (スパイクが 1 側だけなら仮説支持、そうでなければ「原因未特定」)。新 dF1_inf の定常性は継続課題 (#7) | O |
 | 6e (**完了 2026-09-26**: 判定行を置換、`r2_ke_budget.txt` 更新、診断 ALL HOLD) | codex result M4 | R2 の結論を観測と帰属に限定し、`r2_ke_budget.py` の VERDICT 行を符号条件 (a)(b)(c) に置換、旧 \|r\| ≤ 0.05 行は履歴 | O |
 | 6f (**完了 2026-09-26**: `methods/gradient.md`・§2・`plans/README.md`) | codex result m1 | `methods/gradient.md` を実装後の記述に (欠陥は履歴節)、§2 スコープ、`plans/README.md`、§5.1 #5d、case/09・case/39 の run 表 | O |
 | 6g | codex result 2 回目 | 6a–6f の後。`--focus` 「M1–M5 の閉じ方、R1 の限定合格 + 継続課題の扱い、R2 の観測限定の文言」 | O (結論 F) |
@@ -156,6 +156,7 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | R1/R2 解釈 | `2026-09-26` | (本 plan §6.2) | `diagnostician`: dF1_inf DRIFTING は 1 回延長、R2 は KE 収支で帰属を確定、抽出の [解釈] 4 点は注記つきで承認 | 採用 (#5d)。R1 の Cf・$x_r$ 変化は「本 plan の修正 (旧新差は本 plan の 7 commit のみ) の効果」と書き「改善」とは書かない。$x_r$ を LES との距離で評価しない。codex result は #5d の後 |
 | R2 収支基準 | `2026-09-26` | (本 plan §6.2 R2) | `diagnostician`: 新 $|r|\le0.05$ は数値散逸を見落とした誤指定 | 測定後の訂正として記録し、符号判定 (a)(b)(c) に置換。旧は「注入」と書く (根拠: $K/K_0>1$ と $r>0$ の連続、Π 差し引き後)。0.05 を緩めて通すことはしない。任意で 64³ の新 run で $|r|_{max}$ の格子依存を記録 (§7) |
 | result | `2026-09-26` | [2026-09-26-boundary-node-periodic-gradient-fix-result.md](../../notes/reviews/2026-09-26-boundary-node-periodic-gradient-fix-result.md) | **NO-GO**, C0/M5/m1 (中核実装は支持、accepted 不可) | **全件採用** (2026-09-26 `diagnostician`)。M1 → 化学種・受動種の除外条件を `periodicSeamMergeActive` に統一 (#6a)。M2 → G2′ ゼロ成分 16→32 0.849 未達を戻し、ジッタ 128³ を追加 (#6b)。M3 → G1-b の n_member 自動緩和を削除、比 ≤ 2 と GPU 定数場を機械判定、7 run 再実行 (#6c)。M4 → R2 は観測と帰属に限定し機構語を削除、符号条件は「測定後に追加した診断」(#6e、前回の「注入と書いてよい」を一部撤回)。M5 → 「単調収束中・漸近値」を撤回、旧延長は連結区間で判定、F1 仮説を切り分け (#6d)。m1 → docs・スコープ・README 同期 (#6f)。新の dF1_inf DRIFTING は、(i) 旧連結区間 PASS (ii) F1 切り分け実施 (iii) 上限成立 を満たせば accepted の障害にしない (継続課題として §5.1 に残す) |
+| #6a–#6d の判断 | `2026-09-26` | (本 plan §6.2「codex result 対応」) | `diagnostician`: #6a は規則上 FAIL を記録し決定論的試験で閉じる、#6c は比を場ごと・定数場の壁節点を除外 (定義の補正)、#6b は判定不能で閉じ障害にしない、#6d は継続課題で可 | 採用。#6a の面流束・状態の旧新ビット一致を確認 (`R6a_massflux_bitcheck.txt`)。規則を分布ベースに直す・閾値 4ε を上げる・#6b を粗さで PASS にすることはしない |
 
 ### 6.2 結果
 
@@ -205,11 +206,28 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 - ~~**R1 (実行中)**: `case/39.periodic_hills/run_0036_r1_gradfix_old` / `run_0037_r1_gradfix_new` (AWS `~/forge-pgrad-new/`)、メッシュ 80×50×30 y1 1.5e-3 h (品質 PASS、AR 149)、
   1 次 SST 定常 (S1 静止スピンアップ 2000 → S2 成形 IC 800k step)。先行 300k の暫定: 収束 PASS 旧新とも、新の Cf_x6・dF1・r_gradk は DRIFTING (単調減衰)。継ぎ目比 旧 r_gradu 2.24 / r_gradk 1.58 / r_gradw 0.50 / dF1 0.55 → 新 1.00 / 0.99 / 1.00 / 0.03。壁解像 局所 y1+ 最大 0.75、超過 0 %。最終判定は 800k の結果で行う。~~ (上の R1 最終で置き換え)
 
+- **codex result 対応 (#6a–#6d、2026-09-26、新 bd22376d sha256 `f0ad00c8…` / 旧 1266aba1、AWS・block 128、commit 9411df0e)**:
+  - **#6a 軸対称×並進周期** (`_g0_lsq_seam/R6a_axi_periodic.txt`): res_0 は 88 配列が 4 run でビット一致。res_1 は R3 規則で **FAIL** (roUx 不一致数 旧同士 85 / 旧新 132、roY1 6 / 11。最大差は旧同士と同値)。
+    規則は書き換えず、**決定論的試験で閉じた** (`R6a_massflux_bitcheck.txt`): 初回面流束 5104 面・カーネルが読んだ状態 15006 値が旧新で**ビット一致**、`speciesTransport_d.cu` の差分は除外条件の引数とコメントのみ。
+    → 面作用素は同一、場の不一致数の差は atomicAdd 集積順序の統計差。
+  - **#6c G1** (7 変種、`G_*.txt`): G0・G2・G1-a・G1-b (上限 $2N_{max}\varepsilon\phi/h$ のみ、自動緩和削除) すべて PASS、G1-b 最大差/閾値 ≤ 0.161。
+    **定義の補正 (測定後、理由つき)**: (i) 継ぎ目/内部比は**場ごと** (全成分の最大誤差の比)。一様構造格子では内部の一部成分の誤差が対称性で丸め床になり、成分比は不良条件。成分比 (tgv 系 ω の x 成分 2.13–2.15) は記録のみ。場ごとの比は最大 1.85。
+    (ii) GPU 定数場の「継ぎ目」区分から**壁節点を除外** (k/ω と同じ扱い)。channel の ξ は壁∩継ぎ目 96 点・非継ぎ目壁 210 点とも最大 5.31 ε|φ|/h で同値 = 壁半割面込み GG の既存の閉包床で継ぎ目由来でない。壁でない継ぎ目は 0.82 → PASS。
+    ハーネスの `G_channel.txt` の VERDICT 行は壁節点込みの FAIL のまま (判定は本節の区分による)。定数場は他 6 変種 PASS (最大 3.03)。
+  - **#6b G2′** (`G2p_jitter.txt`、ジッタ 16/32/64/128³): 継ぎ目の次数 (全成分最小) 16→32 0.499 (記録のみ)、32→64 0.876、**64→128 0.855** → 登録どおり**判定不能**。
+    内部の次数 0.825–1.000、128³ の継ぎ目/内部 0.77–0.87 → 継ぎ目は内部より悪くない (次数が 0.9 を跨ぐのはジッタ格子での LSQ 自体の性質)。G2 は 128³ で 9.9e-6·S (閾値 1e-5、余裕 1 %)。accepted の障害にしない。
+  - **#6d R1**: 連結区間 (S1→S2→S3_ext を 1 区間、`CONVERGENCE_VERDICT_concat.txt`) 旧 PASS (roK 4.6 桁)・新 PASS (4.3 桁)。
+    F1 切り分け (`_f1split/F1_SPLIT.txt`): 旧バイナリの restart step 0 の rms_roK は sstSigmaBlend 1 / 0 とも床の 408.7 倍 → **F1 仮説は不支持、原因未特定** (旧バイナリ固有の restart スパイク。新バイナリの自場 restart ではスパイクなし)。
+    新の dF1_inf の DRIFTING は継続課題 (#7) とし accepted の障害にしない (条件 (i)(ii)(iii) 成立)。
+
 ## 7. 影響範囲
 
 - `solver_density_cuda/cuda_forge/calcGradient_d.cu`、`periodicNode_d.cu`、`ransTransport_d.cu`、`main.cpp`、`mesh/mesh.cpp`。
 - **既存の node 周期 run (case/39、case/09、周期翼列など) の結果は継ぎ目付近で変わる** (修正)。再現には修正前の commit のバイナリが要る。
 - docs: `methods/gradient.md`。
+- 壁半割面込み GG の定数場閉包は float32 で約 5 ε|φ|/h (channel 実測、継ぎ目に依らない) で未対応。
+- ジッタ格子での LSQ 勾配の次数は 0.83–1.0 (内部も同じ) で、0.9 を跨ぐ。後続の LSQ 統一 plan で扱う。
+- 軸対称×周期・回転周期のスカラー勾配は片側 GG + 半割面込みのまま (既存の未修正挙動、本修正で不変)。
 - GG を残す変数 (化学種・受動種・凝縮モーメント) で $N\varepsilon\phi/h$ 床が問題になるなら、$(\phi_f-\phi_i)S_f$ 形を検討する (本 plan では変えない: 全域の GG ビットが変わり R3 の帰属が濁る。k/ω は後続の LSQ 統一 plan で床ごと消え、その plan の §1 にこの床を根拠として引用する)。
 
 ## 8. 完了条件
@@ -221,6 +239,8 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 - [ ] `plans/active/` → `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-26` — codex result 対応 #6a–#6f 完了。#6a は決定論的試験 (面流束ビット一致) で閉じ、#6c は比・定数場区分の定義を補正、#6b は判定不能で閉じた (`diagnostician`)。codex result 2 回目へ。
 
 - `2026-09-26` — codex result NO-GO (C0/M5/m1) を全件採用 (#6a–#6g)。R2 の機構の断定と R1 の「単調収束中」を撤回。
 - `2026-09-26` — R1 延長 (+800k) 完了: 新は dF1_inf のみ DRIFTING 0.3 %/tail で限定合格 ~~、他の R1 基準はすべて成立~~ (旧延長の収束が NOT CONVERGED、#6d)。R2 は KE 収支の符号判定で成立。検証 (§6) は出そろい、codex result 待ち。
