@@ -3,15 +3,15 @@
 ## メタ
 
 - **area**: `convection`
-- **status**: `in_progress`
+- **status**: `done`
 - **related_docs**:
   - [`methods/convection/theory.md`](../../methods/convection/theory.md) (SLAU の $\chi$、「既知の限界」「対策」「既定」節)
   - [`procedures/recommended-settings.md`](../../procedures/recommended-settings.md) §1.0a
 - **related_plans**:
   - [`convection-slau-wall-normal-chi.md`](../accepted/convection-slau-wall-normal-chi.md) (実装と受入)
   - [`convection-slau-wall-normal-chi-usage-rule.md`](../accepted/convection-slau-wall-normal-chi-usage-rule.md) (適用規則。本 plan の決定で §4.1 を置き換える)
-  - [`tooling-nozzle-sern-3d.md`](tooling-nozzle-sern-3d.md) (R5o-chi: 3D 格子収束は委譲先)
-  - [`tooling-nozzle-sern-chain.md`](tooling-nozzle-sern-chain.md) (設計チェーンの runner)
+  - [`tooling-nozzle-sern-3d.md`](../active/tooling-nozzle-sern-3d.md) (R5o-chi: 3D 格子収束は委譲先)
+  - [`tooling-nozzle-sern-chain.md`](../active/tooling-nozzle-sern-chain.md) (設計チェーンの runner)
 - **created**: `2026-09-26`
 - **owner**: `CFD Dev`
 
@@ -62,7 +62,7 @@
   **推定 (`inferred`) の段と確定の段は、値が同じでも連結しない** (由来不明の推定値を既知と自動連結しない)。
 - **旧形式の移行**: `space.slauWallNormalChi: "1"` はその値、キー無しは当時の既定 0 (`legacy`)。
 - `diag_applicability.py` は新エコー (`'slauWallNormalChi' effective: N (...)`) を読み、省略かつエコー無しは実効値未確定で「診断不能」。
-- **制限 (2026-09-27 codex result M3)**: 同じ `cfg_fnv` の起動が複数あると、どの段がどの起動か分からない (旧実装は最後の起動の値で全段を上書きし、同じ YAML の chi [0, 1] を 1 区間にしていた)。暫定対策として、値が食い違う `cfg_fnv` は `ambiguous` にして連結せず、`check_convergence --segment` は判定不能を返す (`test_stage_manifest_wall_normal_chi.py` に反例を追加)。起動との結び付けの本対応は plan [`tooling-stage-manifest-launch-binding`](tooling-stage-manifest-launch-binding.md) (後回し)。運用ルール: **既定変更をまたぐ run は途中から再開しない** (`recommended-settings.md` §1.0a)。
+- **制限 (2026-09-27 codex result M3)**: 同じ `cfg_fnv` の起動が複数あると、どの段がどの起動か分からない (旧実装は最後の起動の値で全段を上書きし、同じ YAML の chi [0, 1] を 1 区間にしていた)。暫定対策として、値が食い違う `cfg_fnv` は `ambiguous` にして連結せず、`check_convergence --segment` は判定不能を返す (`test_stage_manifest_wall_normal_chi.py` に反例を追加)。起動との結び付けの本対応は plan [`tooling-stage-manifest-launch-binding`](../active/tooling-stage-manifest-launch-binding.md) (後回し)。運用ルール: **既定変更をまたぐ run は途中から再開しない** (`recommended-settings.md` §1.0a)。
 
 ### 4.4 ツールと設計チェーン
 
@@ -178,6 +178,7 @@ AWS は他セッションと共有なので起動前に `aws_instance.sh status`
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
 | result | `2026-09-27` | [2026-09-27-convection-slau-wall-normal-chi-default-result.md](../../notes/reviews/2026-09-27-convection-slau-wall-normal-chi-default-result.md) | **NO-GO**, C0/M5/m2 (三値解決とカーネルへの受け渡しは設計どおり。M1 証拠不足・M2 B1-a の等温壁 q_w 未実施・M3 同一設定の起動を区別できない・M4 DB が chi を混ぜる・M5 推奨設定の相反記述、m6 3D runner 来歴、m7 索引) | **全件採用** → §5.1 #11 (対応済み)・#12 (等温壁の壁圧、ユーザ決定「B」で出口角を除外して決着) |
+| result | `2026-09-27` | [2026-09-27-convection-slau-wall-normal-chi-default-result-3.md](../../notes/reviews/2026-09-27-convection-slau-wall-normal-chi-default-result-3.md) | **GO-with-changes**, C0/M0/m1 (result-2 の重大 2 件は解消、保存データの再判定は受入を支持。m1 結果表・run 索引が除外前の FAIL 記録を参照) | **採用・修正済**: §6.2 と case/40 README を最終判定ファイルと全壁点 CSV に向け、除外前記録は履歴と明記。`accepted` へ移動 |
 | result | `2026-09-27` | [2026-09-27-convection-slau-wall-normal-chi-default-result-2.md](../../notes/reviews/2026-09-27-convection-slau-wall-normal-chi-default-result-2.md) | **NO-GO**, C0/M2/m1 (三値解決・来歴選別・残差受入は裏付けあり。M1 前回の修正で `runner_sern._dv` を消していた (形状生成が NameError)、M2 出口角除外後の値を再現できる記録が無い、m3 残作業表の同期漏れ) | **全件採用** → §5.1 #13 (対応済み) |
 | plan | `2026-09-26` | [2026-09-26-convection-slau-wall-normal-chi-default-plan.md](../../notes/reviews/2026-09-26-convection-slau-wall-normal-chi-default-plan.md) | **GO-with-changes**, C0/M7/m1 | **全件採用** (2026-09-26 `diagnostician` 判断)。M1 → forge 自身の起動記録 `forge_launches.jsonl` + manifest v2 (推定と確定を連結しない、旧形式移行) (§4.3)。M2 → runner はキーを書かない (auto) (§4.4)。M3 → metrics/ledger に実効値と `flag_policy`、driver は不一致行を学習から除外 (§4.4)。M4/M5 → ユーザ指示で周期・軸対称・凝縮は**発火するケースで検証** (case/39・case/40・case/16 凝縮)、成立条件と除外処置を事前固定 (§4.6、§6 B1 追加域・対応表)。M6 → case/36・case/44・case/05 を落とし、抽出器・許容・準定常を登録済みのものに (§6)。M7 → 接続模型の救済を受入項目に、利益の記述を限定 (§1、§6 B1 (i))。m8 → cell 等は設定解決の単体確認に (§6 B0) |
 
@@ -191,7 +192,7 @@ AWS は他セッションと共有なので起動前に `aws_instance.sh status`
 | B1 (iii) case/16 SST | PASS (壁 p/p0 L∞ 0.0003 %) | `case/16.nozzle_wys/CHI_DEFAULT_B1iii.txt` |
 | B1-p case/39 周期丘 | PASS | `case/39.periodic_hills/CHI_DEFAULT_B1p.txt` |
 | B1-a case/40 断熱壁 | 量 ①② PASS (③ は等温壁で別途) | `case/40.nozzle_design_tool/CHI_DEFAULT_B1a.txt` |
-| B1-a case/40 等温壁 | 文言どおりは壁 p/p0 L∞ FAIL (出口角 1 点、1.36 %)。**ユーザ決定で出口角を除外して PASS** (0.031 %)、①③ PASS → §5.1 #12 | `CHI_DEFAULT_B1a_isoT{,_ext}.txt` |
+| B1-a case/40 等温壁 | 文言どおりは壁 p/p0 L∞ FAIL (出口角 1 点、1.36 %)。**ユーザ決定で出口角を除外して PASS** (0.031 %)、①③ PASS → §5.1 #12・#13 | **最終判定** `case/40.nozzle_design_tool/CHI_DEFAULT_B1a_isoT_ext_cornerexcl.txt` + 全壁点 `chi_evidence/40/0959_chidef_b1a_isoT_omit_ext/chidef_b1a_wall_all.csv` (除外前の FAIL 記録 `CHI_DEFAULT_B1a_isoT{,_ext}.txt` は履歴) |
 | B1-c case/16 凝縮 | PASS | `case/16.nozzle_wys/CHI_DEFAULT_B1c.txt` |
 一次記録: `case/46.sern_design/chi_evidence/`。
 
@@ -204,13 +205,15 @@ AWS は他セッションと共有なので起動前に `aws_instance.sh status`
 
 ## 8. 完了条件
 
-- [ ] `methods/convection/theory.md` の既定節を実装完了に合わせて更新 (「実装完了までは既定 0」の注記を外す)
-- [ ] 実装・検証完了 (§6 の B0・B1)
-- [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録し、Critical / Major の採否を残作業表に反映済み
-- [ ] `status` を `done` に変更し、§9 に変更ログを記載
-- [ ] `plans/active/` → `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
+- [x] `methods/convection/theory.md` の既定節を実装完了に合わせて更新 (「実装完了までは既定 0」の注記を外す)
+- [x] 実装・検証完了 (§6 の B0・B1)
+- [x] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録し、Critical / Major の採否を残作業表に反映済み
+- [x] `status` を `done` に変更し、§9 に変更ログを記載
+- [x] `plans/active/` → `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-27` — codex result-3 GO-with-changes (C0/M0/m1) を反映。**`done`、`plans/accepted/` へ移動**。残る制限 (起動との厳密な対応付けは `tooling-stage-manifest-launch-binding`、衝撃足の壁圧は未評価、3D の chi 1 での格子収束列は sern-3d R5o-chi) は委譲先に記載済み。
 
 - `2026-09-27` — codex result-2 (NO-GO C0/M2/m1) を全件採用: 前回の修正で消した `_dv` を復元して形状生成の回帰試験を追加、出口角除外の判定を再現可能な形で記録。
 
