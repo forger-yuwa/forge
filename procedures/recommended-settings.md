@@ -88,6 +88,7 @@ plan [convection-slau-wall-normal-chi-default](../plans/accepted/convection-slau
 - **残る制限**:
   - **衝撃がランプに当たる点の壁圧への影響は未評価** (m6_on・m4_off とも登録条件で衝撃足を同定できず判定保留)。衝撃衝突のある構成で
     0/1 の差が問題になりうるときは、その構成で壁圧分布の比較を別途行う。
+  - **軸対称ノズルの出口角 (壁∩出口) の壁圧は 0/1 で ±1 % 程度動く** (case/40 等温壁、他の壁点は ≤ 0.03 %)。出口角の壁圧を評価に使う場合は注意 (2026-09-27、plan §5.1 #12)。
   - 1 の run は SLAU の node カーネルのレジスタ上限に当たりうるので `FORGE_CUDA_BLOCKSIZE=128` (比較する run どうしで揃える)。
 - **旧方針 (2026-09-25〜26、履歴)**: 「既定 0 のまま、1 にするのは 3D 側壁∩後端面接続構成だけ」「2D 生産で 1 にしたときの差は生産許容内だが、
   これは 2D を 0 のままにしてよい根拠であって 1 にしてよい根拠ではない」(plan [convection-slau-wall-normal-chi-usage-rule](../plans/accepted/convection-slau-wall-normal-chi-usage-rule.md))。

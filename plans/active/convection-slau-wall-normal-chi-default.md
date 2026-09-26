@@ -118,7 +118,7 @@ AWS は他セッションと共有なので起動前に `aws_instance.sh status`
 | 8 (**完了 2026-09-27: 3 域とも PASS → auto から除外する域なし**。B1-p case/39 (`run_0952/0953_chidef_b1p_*`、12000 step): 成立条件 = 初回面流束の違う面 3791、周期 group の壁/非壁混在 0、量 = 下壁 Cf(x) 相対 L2 0.0002 %・x_r 差 0・継ぎ目バルク速度比の差 0.0001 %、全量 STEADY、省略側残差 ≤ 2× (`case/39.periodic_hills/CHI_DEFAULT_B1p.txt`)。B1-a case/40 (`run_0954/0955_chidef_b1a_*`): 違う面 371、壁∩軸ノード 0、η_CF・ṁ の差区間 ±0.0001 % 以内、輪郭壁 p/p0 L∞ 0.38 %、③ q_w は断熱壁のため対象外、STEADY、残差 ≤ 2× (`CHI_DEFAULT_B1a.txt`)。B1-c case/16 凝縮 (`run_0963/0964_chidef_b1c_*`、起点 run_0335/res_48000 `aa22ab18…`): 違う面 434、壁 p/p0 L∞ 0.0012 %、onset 22.508/22.508 mm (差 0)、g_exit 0.01085、STEADY (onset の step 0 = restart 入力は g 未計算で非有限のため除外、既存の凝縮系列と同じ流儀)、残差 ≤ 2× (`CHI_DEFAULT_B1c.txt`)。2026-09-27 着手。**B1-p の基準場を `run_0007_coarse_rans` から `run_0039_r1_gradfix_new_ext/res_800000` に変更** (投入前): run_0007 の config は現在黙って無視される旧キー (トップレベル `lowMachPrecond` 等) を含み、run_0039 は同じ粗さ (80×50×30) で 80 万 step・`--from-floor` PASS・全量 STEADY、`slauWallNormalChi: 0` 明示なので §6 の「PASS または plateau + STEADY の基準場」を既に満たす。抽出器 `case/39.periodic_hills/chidef_b1p.py` は結果を見る前に commit。B1-a の基準場は `run_0045/res_12000` (§6 の `res_24000` は通算 step の書き誤り、sha256 `15e47af0…`)) | **B1 追加域** p: case/39 周期丘 / a: case/40 軸対称 / c: case/16 凝縮 | §6 B1-p/a/c。小規模は手元、重ければ AWS | O (結論 F) |
 | ~~9~~ (**済 2026-09-27**: `procedures/recommended-settings.md` §1.0a を「既定 auto = 実効 1、旧挙動は 0 明記、診断 3 条件は 0 に落とす判断材料」に書き換え + §9 に「省略 = 0 (〜2026-09-25)」、`methods/convection/theory.md` の「実装完了までは既定 0」注記を外し検証完了を記載、`solverConfig.hpp` コメント、前 plan 2 本 (accepted) の変更ログに 1 行) | docs (§4.5) | 4 ファイル。`check_plans.py` PASS | O |
 | 11 (codex result 2026-09-27、**全件採用**。数値判断を変えない手続き・ツールの指摘なので親判断で採用) | result 指摘の対応 | M1 証拠: `case/46.sern_design/chi_evidence/` (判定の全出力 `JUDGEMENTS.txt`・sha256 `INDEX.md`・設定・起動記録・派生量 CSV。残差 gzip はワークツリーと AWS のみ) **済**。M2 等温壁の軸対称 A/B: `run_0956/0957_chidef_b1a_isoT_*` (起点 `run_0048/res_12000` `e7dedadf…`、等温壁 1000 K) + 対応表どおり DRIFTING のため 1 回だけ倍延長 `run_0958/0959_*_ext` → **#12**。M3 manifest の曖昧起動を判定不能に **済**。M4 設計 DB の chi ゲート **済**。M5 `recommended-settings.md` §1.0a を現行方針と履歴に分離 **済**。m6 3D runner の来歴 **済**。m7 索引 **済** | O |
-| 12 (**未決・判断待ち 2026-09-27**) | B1-a 等温壁の壁 p/p0 | 延長後: η_CF・ṁ 差区間 ±0.0001 %、q_w 相対 L2 0.12 % (許容 1 %)、全量 STEADY、残差 ≤ 2× は合格。**輪郭壁 p/p0 L∞ 1.36 % (許容 0.5 %) で FAIL**。超過は壁 221 ノード中**出口角 (x = 0.070 m、壁∩出口) の 1 点だけ**で、延長前は −0.74 %、延長後は +1.36 % と符号が反転 (他の 220 点は ≤ 0.031 %)。断熱壁版でも同じ点が最大 (0.38 %)。事前の対応表どおりなら「`isAxisymmetric` を auto→0 の条件に」。出口角を外すかは事前に決めていない (case/16 V3 の出典は x 10–94 mm で両端を除外していた) ので、外して合格にするのは事後の規則変更になる。`CHI_DEFAULT_B1a_isoT{,_ext}.txt` | F |
+| 12 (**決着 2026-09-27 ユーザ決定「B」**: 出口角 (壁∩出口) の 1 点は境界の特殊点として壁 p/p0 の L∞ から外し、**軸対称も auto (1) に含める**。外した後の L∞ は 0.031 % (許容 0.5 %) で、①③ と合わせて B1-a 等温壁は合格。結果を見てからの判断であることを記録する。出口角の値は chi で ±1 % 程度動く (符号も反転) ので、出口角の壁圧を使う評価では注意) | B1-a 等温壁の壁 p/p0 | 延長後: η_CF・ṁ 差区間 ±0.0001 %、q_w 相対 L2 0.12 % (許容 1 %)、全量 STEADY、残差 ≤ 2× は合格。**輪郭壁 p/p0 L∞ 1.36 % (許容 0.5 %) で FAIL**。超過は壁 221 ノード中**出口角 (x = 0.070 m、壁∩出口) の 1 点だけ**で、延長前は −0.74 %、延長後は +1.36 % と符号が反転 (他の 220 点は ≤ 0.031 %)。断熱壁版でも同じ点が最大 (0.38 %)。事前の対応表どおりなら「`isAxisymmetric` を auto→0 の条件に」。出口角を外すかは事前に決めていない (case/16 V3 の出典は x 10–94 mm で両端を除外していた) ので、外して合格にするのは事後の規則変更になる。`CHI_DEFAULT_B1a_isoT{,_ext}.txt` | F |
 | 10 | codex result → accepted | | F |
 
 ## 6. 検証
@@ -189,7 +189,7 @@ AWS は他セッションと共有なので起動前に `aws_instance.sh status`
 | B1 (iii) case/16 SST | PASS (壁 p/p0 L∞ 0.0003 %) | `case/16.nozzle_wys/CHI_DEFAULT_B1iii.txt` |
 | B1-p case/39 周期丘 | PASS | `case/39.periodic_hills/CHI_DEFAULT_B1p.txt` |
 | B1-a case/40 断熱壁 | 量 ①② PASS (③ は等温壁で別途) | `case/40.nozzle_design_tool/CHI_DEFAULT_B1a.txt` |
-| B1-a case/40 等温壁 | **壁 p/p0 L∞ FAIL (出口角 1 点)**、①③ PASS → §5.1 #12 | `CHI_DEFAULT_B1a_isoT{,_ext}.txt` |
+| B1-a case/40 等温壁 | 文言どおりは壁 p/p0 L∞ FAIL (出口角 1 点、1.36 %)。**ユーザ決定で出口角を除外して PASS** (0.031 %)、①③ PASS → §5.1 #12 | `CHI_DEFAULT_B1a_isoT{,_ext}.txt` |
 | B1-c case/16 凝縮 | PASS | `case/16.nozzle_wys/CHI_DEFAULT_B1c.txt` |
 一次記録: `case/46.sern_design/chi_evidence/`。
 
@@ -209,6 +209,8 @@ AWS は他セッションと共有なので起動前に `aws_instance.sh status`
 - [ ] `plans/active/` → `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-27` — §5.1 #12 をユーザ決定「B」で決着 (出口角 1 点を除外、軸対称も auto に含める)。B0・B1 すべて合格。
 
 - `2026-09-27` — codex result 1 回目 NO-GO (C0/M5/m2) を全件採用して対応 (§5.1 #11)。等温壁の軸対称 A/B を追加し、壁 p/p0 が出口角 1 点で許容超過 (§5.1 #12、判断待ち)。
 
