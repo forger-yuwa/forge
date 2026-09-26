@@ -44,7 +44,7 @@ slip:   {physID: 5, kind: slip, outputHDFflg: 0, ints: , floats: }
 """
 
 
-def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl, r_up=1.06, r_buf=1.03):
+def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl, r_up=1.06, r_buf=1.03, split_dn=False):
     L = []; A = L.append
     A("// case/56 — TP-1187 較正パネル相当の 2D 平板 (平面 2D, node)。gen_mesh.py が生成。")
     A("Geometry.PointNumbers = 0;  lc = 0.05;")
@@ -70,7 +70,11 @@ def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl
     A('Physical Curve("outlet", 2) = {10};')
     A('Physical Curve("top",    3) = {4, 5, 6};')
     A('Physical Curve("plate",  4) = {2};')
-    A('Physical Curve("slip",   5) = {1, 3};')
+    if split_dn:   # 下流の slip バッファを別 physID に (wallDistExtraPhysIDs で壁距離に含められるように)
+        A('Physical Curve("slip",   5) = {1};')
+        A('Physical Curve("slip_dn", 7) = {3};')
+    else:
+        A('Physical Curve("slip",   5) = {1, 3};')
     A('Physical Surface("fluid", 8) = {1, 2, 3};')
     return "\n".join(L) + "\n"
 
@@ -127,6 +131,8 @@ def main():
     ap.add_argument("--bump-plate", type=float, default=0.15)
     ap.add_argument("--r-up", type=float, default=1.06, help="助走区間の等比 (既定は従来値)")
     ap.add_argument("--r-buf", type=float, default=1.03, help="出口バッファの等比 (既定は従来値)")
+    ap.add_argument("--split-dn-slip", action="store_true", help="下流 slip バッファを physID 7 に分ける")
+    ap.add_argument("--walldist-extra", default="", help="変換時の mesh.wallDistExtraPhysIDs (例: 7)")
     ap.add_argument("--tag", default="fp")
     ap.add_argument("--no-convert", action="store_true")
     ap.add_argument("--y-file", default=None,
@@ -161,7 +167,7 @@ def make_progression(a):
         else:
             hi = r
     txt = geo_text(a.x_in, a.x_out, a.x_plate_end, a.H, ny, r,
-                   a.nx_up, a.nx_plate, a.nx_buf, a.bump_plate, a.r_up, a.r_buf)
+                   a.nx_up, a.nx_plate, a.nx_buf, a.bump_plate, a.r_up, a.r_buf, a.split_dn_slip)
     (MESH / f"{a.tag}.geo").write_text(txt)
     print(f"[{a.tag}] 平板 {a.x_plate_end*1e2:.0f} cm, H = {a.H*1e2:.0f} cm")
     print(f"        ny = {ny} (y1 = {a.H*(r-1)/(r**(ny-1)-1)*1e6:.3f} µm, r = {r:.5f}), "
@@ -172,8 +178,14 @@ def convert(a):
     if a.no_convert:
         return
     conv = MESH / "_conv"; conv.mkdir(exist_ok=True)
-    (conv / "solverConfig.yaml").write_text(CONV_CFG)
-    (conv / "bcondConfig.yaml").write_text(CONV_BC)
+    cfg = CONV_CFG
+    if getattr(a, "walldist_extra", ""):
+        cfg = cfg.replace('valueFileName: "m.h5"}', f'valueFileName: "m.h5", wallDistExtraPhysIDs: [{a.walldist_extra}]}}')
+    bcs = CONV_BC
+    if getattr(a, "split_dn_slip", False):
+        bcs += "slip_dn: {physID: 7, kind: slip, outputHDFflg: 0, ints: , floats: }\n"
+    (conv / "solverConfig.yaml").write_text(cfg)
+    (conv / "bcondConfig.yaml").write_text(bcs)
     r2 = subprocess.run([str(BUILD / "convertGmshToForge"), str(MESH / f"{a.tag}.msh"), "m.h5"],
                         cwd=conv, env=ENV, capture_output=True, text=True)
     (conv / f"convert_{a.tag}.log").write_text(r2.stdout + r2.stderr)

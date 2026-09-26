@@ -44,16 +44,18 @@ def main():
     print(f"[{run.name}] step {steps[-1]}  (ρVcp)*_l {rvc:.0f} W/m²K  Taw {t3['Taw_K']} K  Tw {su['Tw']} K")
     print("   x [m]   St*_exp    St*_CFD(A 前縁)  R_A     St*_CFD(B トリップ)  R_B")
     RA, RB = [], []
+    def at(xx):   # 範囲外は NaN (np.interp は端点値を黙って返す、codex 2026-09-27)
+        return float(np.interp(xx, ux, St)) if ux.min() <= xx <= ux.max() else float("nan")
     for x, se in pts:
-        sa = np.interp(x, ux, St); sb = np.interp(x - 0.127, ux, St)
+        sa = at(x); sb = at(x - 0.127)
         RA.append(sa / se); RB.append(sb / se)
         print(f"  {x:6.3f}  {se:.3e}   {sa:.3e}      {sa/se:6.3f}   {sb:.3e}          {sb/se:6.3f}")
     RA, RB = np.array(RA), np.array(RB)
-    print(f"  R_A 平均 {RA.mean():.3f} [{RA.min():.3f}, {RA.max():.3f}]   R_B 平均 {RB.mean():.3f} [{RB.min():.3f}, {RB.max():.3f}]")
+    print(f"  R_A 平均 {np.nanmean(RA):.3f} [{np.nanmin(RA):.3f}, {np.nanmax(RA):.3f}]   R_B 平均 {np.nanmean(RB):.3f} [{np.nanmin(RB):.3f}, {np.nanmax(RB):.3f}]")
     # x 対応 ±3 % の感度 (A)
     for f in (0.97, 1.03):
-        r = np.array([np.interp(x * f, ux, St) / se for x, se in pts])
-        print(f"  x × {f}: R_A 平均 {r.mean():.3f}")
+        r = np.array([at(x * f) / se for x, se in pts])
+        print(f"  x × {f}: R_A 平均 {np.nanmean(r):.3f} (範囲外 {int(np.isnan(r).sum())} 点)")
     # パネル平均 (x 1.07–2.46 m) と carpet plot 比較用の q
     m = (ux >= 1.07) & (ux <= 2.46)
     integ = getattr(np, "trapezoid", None) or np.trapz

@@ -1,0 +1,25 @@
+{
+ "_about": "case/60 (D-7275) の事前登録",
+ "gates": [
+  {
+   "id": "T4-0b-WD",
+   "status": "pre_registered",
+   "_written": "2026-09-27、両腕を回す前",
+   "name": "下流 slip を壁距離に含める/含めないだけの A/B (codex diagnose notes/reviews/2026-09-27-t4-0-results-and-gap-handoff-diagnose.md の提案)",
+   "meshes": {
+    "A": "mesh/fp_d7275_y3_A (下流 slip を physID 7 に分割、壁距離は現行と同一)",
+    "B": "mesh/fp_d7275_y3_B (同じ分割 + 変換時 wallDistExtraPhysIDs: [7])",
+    "verified": "節点座標は元の fp_d7275_y3 と両腕とも完全一致、A の wall_dist は元と完全一致、B は x ≥ 2.6 m の 23,840 節点だけ変わる (最大 0.2 m)"
+   },
+   "runs": "run_0002_t26_ext の最終場を restart_field.py --keep-src-dtype で両腕に (壁距離は各メッシュのまま)。同一 FP64 バイナリ・BC・CFL・本段設定、20,000 step、1,000 毎保存",
+   "quantities": "全残差列、固定 10 点の St*_l、位置 II とパネル平均の q_w (d7275_compare.py、範囲外は判定不能)",
+   "decision": {
+    "wd_dominant": "B で未達列の末尾残差が A の 1/10 以下、かつ熱流束差が全比較点で 1 % 以内 → 壁距離の変化が残差プラトーの主因、かつ比較域への影響は 1 % 以内",
+    "not_wd": "残差水準が変わらない → 壁距離単独主因説を退ける",
+    "affects_q": "熱流束差が 1 % を超える比較点がある → 『比較域には効かない』を退ける",
+    "undecided": "過渡が残る → 判別保留"
+   },
+   "note": "1 %・1 桁は今回の判別基準で既存ゲートの代替ではない。B は作用素が変わるので変更前の履歴と連結して収束判定しない"
+  }
+ ]
+}
