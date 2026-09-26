@@ -163,7 +163,8 @@ def main():
         sm.write()
         (rd / "solverConfig.yaml").write_text(CFG.format(**common, **stages[0][1]))
         tool = "restart_field.py" if a.init_same_mesh else "interp_field.py"
-        subprocess.run([sys.executable, str(TOOLS / tool), a.init_from, str(rd / "mesh.h5")],
+        extra = ["--keep-src-dtype"] if a.init_same_mesh else []   # 倍精度の場は倍精度のまま渡す
+        subprocess.run([sys.executable, str(TOOLS / tool)] + extra + [a.init_from, str(rd / "mesh.h5")],
                        env=ENV, check=True)
         (rd / "CONTINUED_FROM").write_text(f"{a.init_from} ({tool})\n")
     else:
