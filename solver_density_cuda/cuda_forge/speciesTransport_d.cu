@@ -10,6 +10,8 @@
 #include "condensationTransport_d.cuh"   // condensationSource_d_wrapper (FCT の凍結ソース)
 
 #include <cmath>
+#include <iostream>
+#include <fstream>
 #include <cstdio>
 #include <cstdlib>
 
@@ -640,7 +642,7 @@ __global__ void species_gradient_d(
     geom_int nCells, geom_int nPlanes, geom_int* plane_cells,
     geom_float* vol, geom_float* fx, geom_float* sx, geom_float* sy, geom_float* sz,
     int nSpecies, flow_float** Y, flow_float** dYdx, flow_float** dYdy, flow_float** dYdz,
-    int excludePeriodic, const unsigned char* planePeriodic)
+    int excludePeriodic, const unsigned char* planePeriodic, flow_float* dumpFace)
 {
     geom_int ip = blockDim.x*blockIdx.x + threadIdx.x;
     if (ip < nPlanes) {
@@ -652,6 +654,10 @@ __global__ void species_gradient_d(
         for (int s = 0; s < nSpecies; ++s) {
             const flow_float Yf = f*Y[s][ic0] + (1.0-f)*Y[s][ic1];
             atomicAdd(&dYdx[s][ic0],  sxx*Yf); atomicAdd(&dYdy[s][ic0],  syy*Yf); atomicAdd(&dYdz[s][ic0],  szz*Yf);
+            if (dumpFace != nullptr) {   // 診断 (FORGE_DUMP_SCALARGRAD): atomicAdd に渡す同じ値を面ごとに非 atomic で書く
+                const size_t o = 3*((size_t)s*nPlanes + ip);
+                dumpFace[o+0] = sxx*Yf; dumpFace[o+1] = syy*Yf; dumpFace[o+2] = szz*Yf;
+            }
             if (ic1 < nCells) { atomicAdd(&dYdx[s][ic1], -sxx*Yf); atomicAdd(&dYdy[s][ic1], -syy*Yf); atomicAdd(&dYdz[s][ic1], -szz*Yf); }
         }
     }
@@ -670,6 +676,42 @@ __global__ void species_gradient_normalize_d(
     }
 }
 
+// 診断ダンプ (env `FORGE_DUMP_SCALARGRAD=<path>`、既定 off。**数値の振る舞いは変えない**)。
+// species_gradient_d が atomicAdd に渡す面寄与 (sx,sy,sz)·φ_f を、化学種・受動種それぞれ**最初の呼び出しだけ**
+// 面ごとの配列 [nVar][nPlanes][3] に非 atomic で書き、raw float で <path>.<tag> へ出す。除外した面は 0 のまま。
+// 場 (res_*.h5) は atomicAdd の集積順序でビット再現しないが、この面寄与は 1 面 1 スレッドなので面レベルで比べられる
+// (plan boundary-node-periodic-gradient-fix §5.1 #8a。先例は convectiveFlux_d.cu の FORGE_DUMP_MASSFLUX)。
+static flow_float* scalarGradDumpBegin(const char* tag, bool& done, int nVar, geom_int nPlanes)
+{
+    if (done) return nullptr;
+    const char* p = std::getenv("FORGE_DUMP_SCALARGRAD");
+    if (!p || !*p || nVar <= 0) return nullptr;
+    done = true;
+    flow_float* d = nullptr;
+    const size_t n = (size_t)3*nVar*nPlanes;
+    gpuErrchk( cudaMalloc((void**)&d, n*sizeof(flow_float)) );
+    gpuErrchk( cudaMemset(d, 0, n*sizeof(flow_float)) );
+    (void)tag;
+    return d;
+}
+
+static void scalarGradDumpEnd(const char* tag, flow_float* d, int nVar, geom_int nPlanes)
+{
+    if (d == nullptr) return;
+    const size_t n = (size_t)3*nVar*nPlanes;
+    std::vector<flow_float> h(n);
+    gpuErrchk( cudaMemcpy(h.data(), d, n*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+    cudaFree(d);
+    const std::string path = std::string(std::getenv("FORGE_DUMP_SCALARGRAD")) + "." + tag;
+    std::ofstream ofs(path, std::ios::binary);
+    if (ofs) {
+        ofs.write(reinterpret_cast<const char*>(h.data()), (std::streamsize)(n*sizeof(flow_float)));
+        std::cout << "[FORGE_DUMP_SCALARGRAD] wrote " << nVar << " x " << nPlanes << " x 3 face contributions to " << path << '\n';
+    } else {
+        std::cout << "[FORGE_DUMP_SCALARGRAD] cannot open " << path << '\n';
+    }
+}
+
 void speciesGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     if (!speciesEnabled(var)) return;
@@ -684,10 +726,13 @@ void speciesGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
     flow_float* gsx = (cfg.isAxisymmetric == 1) ? var.p_d["sx_planar"] : var.p_d["sx"];
     flow_float* gsy = (cfg.isAxisymmetric == 1) ? var.p_d["sy_planar"] : var.p_d["sy"];
     flow_float* gsz = (cfg.isAxisymmetric == 1) ? var.p_d["sz_planar"] : var.p_d["sz"];
+    static bool s_sgDumped = false;
+    flow_float* sgDump = scalarGradDumpBegin("species", s_sgDumped, n, msh.nPlanes);
     species_gradient_d<<<cuda_cfg.dimGrid_plane, cuda_cfg.dimBlock>>>(
         msh.nCells, msh.nPlanes, msh.map_plane_cells_d, gvol, var.p_d["fx"], gsx, gsy, gsz,
         n, g_Y_dev, g_dYdx_dev, g_dYdy_dev, g_dYdz_dev,
-        periodicSeamMergeActive(cfg, msh) ? 1 : 0, msh.planePeriodic_d);
+        periodicSeamMergeActive(cfg, msh) ? 1 : 0, msh.planePeriodic_d, sgDump);
+    scalarGradDumpEnd("species", sgDump, n, msh.nPlanes);
     species_gradient_normalize_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells, gvol, n, g_dYdx_dev, g_dYdy_dev, g_dYdz_dev);
     gpuErrchk( cudaPeekAtLastError() );
@@ -1226,10 +1271,13 @@ void passiveGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
     flow_float* gsx = (cfg.isAxisymmetric == 1) ? var.p_d["sx_planar"] : var.p_d["sx"];
     flow_float* gsy = (cfg.isAxisymmetric == 1) ? var.p_d["sy_planar"] : var.p_d["sy"];
     flow_float* gsz = (cfg.isAxisymmetric == 1) ? var.p_d["sz_planar"] : var.p_d["sz"];
+    static bool s_pgDumped = false;
+    flow_float* pgDump = scalarGradDumpBegin("passive", s_pgDumped, g_nPassive, msh.nPlanes);
     species_gradient_d<<<cuda_cfg.dimGrid_plane, cuda_cfg.dimBlock>>>(
         msh.nCells, msh.nPlanes, msh.map_plane_cells_d, gvol, var.p_d["fx"], gsx, gsy, gsz,
         g_nPassive, g_p_prim_dev, g_p_gx_dev, g_p_gy_dev, g_p_gz_dev,
-        periodicSeamMergeActive(cfg, msh) ? 1 : 0, msh.planePeriodic_d);
+        periodicSeamMergeActive(cfg, msh) ? 1 : 0, msh.planePeriodic_d, pgDump);
+    scalarGradDumpEnd("passive", pgDump, g_nPassive, msh.nPlanes);
     species_gradient_normalize_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells, gvol, g_nPassive, g_p_gx_dev, g_p_gy_dev, g_p_gz_dev);
     gpuErrchk( cudaPeekAtLastError() );
