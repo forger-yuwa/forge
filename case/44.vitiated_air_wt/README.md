@@ -644,6 +644,28 @@ IC は `run_0170` の収束場 (`full` は `tools/convert_species_field.py` で 
 場の差 (ro 3e-5, g L1 1.1e-4) は新バイナリの反復ノイズ (ro 4.6e-6, g L1 1.6e-5; `0199`−`0195`) の 6–7 倍で、モル分率入力の lumped (`run_0197`, 熱力学が MW 1e-8 だけ違う) も同程度の差を示す。
 dry では full − lumped が 2e-6 (ノイズ床)。凝縮 run の差 (床の 6–7 倍) は 5 種輸送 + 凝縮ソースの丸め (凝縮域は onset に指数感度) が候補だが、両 run とも残差 plateau (NOT CONVERGED) なので**差の原因と固定点の同一性は未確定**で、報告量が比較許容差内であることだけを主張する (codex result-5 m1)。新旧バイナリの差 (`0199`/`0195` vs `0170`: ro 1.0e-5) は床の 2 倍 (thermo DB 解決の経路変更に伴う丸め)。step 時間は 2 種 2.45 ms → 5 種 3.01 ms (+23 %)。
 
+### 入口組成を lump モル分率 (bcond `X0/X1`) で与えた再計算 — 現行レシピ, 一様 Tt (2026-09-27, `run_0509`–`0511`)
+
+`run_0120` (一様 Tt 1161 K・非平衡凝縮、入口は質量分率 `Y0/Y1`、cfl 2 / nStepInner 5 / 旧リミッタ既定) の条件を、
+**入口 bcond を lump (MIXDRY / H2O) のモル分率 `X0: 0.939014829007, X1: 0.0609851709927`** (ユーザ指定モル分率 Σ 0.998825 を正規化し、H2O 以外を MIXDRY に束ねた値) で与えて dry / 非平衡 / 平衡の 3 通りで回し直した。
+forge は species_db の MW で Y に換算する (起動ログ `Y_H2O = 0.03769539669` = 従来の質量分率入力と 1e-8 相対で一致)。入口分布なし。
+
+- 問題 YAML: `problem_va3_M4.19_Lc8_{dry,noneq,eq}_lumpX.yaml` (`composition_basis: mole`, `tp_species: {mode: lumped, …, keep: [H2O]}`; eq は `condEquilibrium: 2` = EOS 拘束形)。
+- 生成は `runner_axismach --prepare-only --cfl 6 --implicit-relax 0.7`、段階起動は `run_lumpX_staged.py` (bcond の Y→X 置換、soft 1 次 cfl 0.5 ×3000 → mid 1 次 cfl 1 ×3000 → 本段 2 次 cfl 6 + `implicitRelax 0.7`, `nStepInner 4`, 24000 step; 段間は `restart_field.py` で index コピー、`stage_manifest.json` 付き)。凝縮 run は `output.level 2`。
+- ローカル RTX 3060, `FORGE_CUDA_BLOCKSIZE=256` (既定 512 は node SLAU カーネルのレジスタ上限で起動不能)。メッシュ品質 PASS (AR 10.5 / skew 0.443)。
+- 後処理 `lumpX_series_csv.py` → 各 run の `lumpX_series.csv` / `QUASISTEADY_SERIES_VERDICT.txt`。
+
+| run | 凝縮 | NaN | check_convergence (本段区間 S2_main) | check_quasisteady (ṁ, 出口 M/T, 軸 M) | ṁ 入口/出口 [kg/s] | 出口 M 質量流束平均 / T | 軸 M 出口 / 目標差 max | g max |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `run_0509_va3_M4.19_Lc8_dry_lumpX` | なし | 0 | NOT CONVERGED (全列 2.0–2.8 桁低下後 plateau) | ALL STEADY | 175.475 / 175.481 | 4.18989 / 282.78 K | 4.1910 / 0.00213 | — |
+| `run_0510_va3_M4.19_Lc8_noneq_lumpX` | 非平衡 (Kw1+HK) | 0 | NOT CONVERGED (同上) | ALL STEADY | 175.475 / 175.481 | 4.18989 / 282.78 K | 4.1910 / 0.00213 | 0 |
+| `run_0511_va3_M4.19_Lc8_eq_lumpX` | 平衡 (`condEquilibrium 2`) | 0 | NOT CONVERGED (同上) | ALL STEADY | 175.475 / 175.481 | 4.18989 / 282.78 K | 4.1910 / 0.00213 | 0 |
+| (参考) `run_0120_…_noneq_rerun` | 非平衡, 旧設定 | 0 | NOT CONVERGED | — | 175.476 / 175.482 | 4.18990 / 282.78 K | 4.1906 / 0.00252 | 0 |
+
+所見: 一様 Tt 1161 K では**凝縮しない** (本 run で確認したのは g≡0。S max 0.27 は同条件の `run_0126` の値で、本 run では S を計算していない)。したがって 3 通りの場は同一で、報告量は 5〜6 桁一致。
+凝縮 run の `condLim_0` は全域 1、`condClampCorr_0` は 0。旧 `run_0120` との差は ṁ 6e-6 相対・出口 M 1e-5 で、軸 M の目標差 max が 0.0025 → 0.0021 に変わった。原因は切り分けていない (候補: リミッタ既定の変更 `limiterScaled 1` [2026-09-20]、本段 cfl/relax/nStepInner の差)。
+残差は本段区間で plateau (NOT CONVERGED) なので固定点への収束は主張しない。報告量が STEADY であることだけを根拠にする。
+
 ## 問題定義
 
 | ファイル | R | L_U | L_c | 備考 |
@@ -757,3 +779,4 @@ dry では full − lumped が 2e-6 (ノイズ床)。凝縮 run の差 (床の 6
 | `run_0494_v2_bitcheck` / `run_0495_v2_bitcheck` | **W2 V2: 既定パス不変の確認** (`run_0490_limA_va3` と同一入力を新バイナリで 2 回) | 旧 vs 新 **2.81e-4** < ノイズ床 **3.38e-4** (`roQ0_0`)。状態量は ρ 4.6e-6 / P 6.0e-7 / T 4.3e-6 でいずれもノイズと同桁 | ref (plan §4.24 V2) |
 | `run_0496`〜`run_0504_w1f_*` | **W1f: ② の基準値の restart 依存性を実測** (`venkatK: 0.05`)。連続 4000 vs 分割 2000+2000 を基準値 固定/自動 で比較 (`0497`/`0498`+`0501` vs `0499`/`0500`+`0502`)、さらに基準値 ×2 / ×0.5 の感度 (`0503`/`0504`) | **固定しても縮まない**: 連続 vs 分割が 固定 1.995e-5 / 自動 1.670e-5 (`Uy`) で、auto のドリフト (ρ_ref 相対 8e-5) は forge の restart 非忠実性に埋もれる。**基準値 ×2 でも解は 2.1e-4 しか動かない**。→ codex Major 6 は構造的には正しいが量的に律速でない | ref (plan §4.27) |
 | `run_0505_fx_ctrl_a` / `run_0506_fx_ctrl_b` / `run_0507_fx_half_a` / `run_0508_fx_half_b` | **node 面補間重み `fx=0.5` の回帰** ([plan](../../plans/accepted/discretization-node-face-weight-midpoint.md) §5.1 #2)。`run_0494_v2_bitcheck` と同一入力 (廃止キー `limiterMatchRecon` のみ除去)、対照 2 本 + `FORGE_NODE_FX_HALF=1` 2 本、4000 step | `check_field_regress.py --boundary`: **`VERDICT: PASS`** (最大比 1.88 < 2)。Euler なので `fx` を読む粘性・拡散経路をほぼ通らない = 不変の確認 | active |
+| `run_0509_va3_M4.19_Lc8_dry_lumpX` / `run_0510_va3_M4.19_Lc8_noneq_lumpX` / `run_0511_va3_M4.19_Lc8_eq_lumpX` | **入口を lump モル分率 `X0/X1` で与えた現行レシピ再計算** (dry / 非平衡 / 平衡 EOS 拘束形; 一様 Tt; cfl 6 + relax 0.7, nStepInner 4, 24000 step; `run_lumpX_staged.py`) | 全 NaN 0・品質 PASS・残差 plateau (NOT CONVERGED)・報告量 ALL STEADY; 凝縮しない (g≡0), ṁ 175.48・出口 M 4.1899 (上の「lump モル分率」節) | active |
