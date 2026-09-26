@@ -64,6 +64,17 @@ class _KrgBoth:
         return self.krg.predict(np.atleast_2d(np.asarray(X, dtype=float)))
 
 
+REQUIRED_SCALAR_GRADIENT = "lsq"
+
+
+def _learnable(r: dict) -> bool:
+    """学習に使ってよい行: PASS・現行の flag_policy・全作動点の実効 scalarGradient が lsq。"""
+    if r.get("status") != "PASS" or r.get("flag_policy") != FLAG_POLICY:
+        return False
+    ops = r.get("ops") or {}
+    return bool(ops) and all(o.get("scalar_gradient_effective") == REQUIRED_SCALAR_GRADIENT for o in ops.values())
+
+
 class SernCampaign:
     def __init__(self, base_yaml, campaign_dir, ref=(-0.90, 20.0), seed: int = 0) -> None:
         self.base_yaml = Path(base_yaml); self.dir = Path(campaign_dir); self.dir.mkdir(parents=True, exist_ok=True)
@@ -77,7 +88,10 @@ class SernCampaign:
         _old = sum(1 for r in self.rows if r.get("status") == "PASS" and r.get("flag_policy") != FLAG_POLICY)
         if _old:
             print(f"[campaign] flag_policy が {FLAG_POLICY} でない PASS 行 {_old} 件を学習から除外 "
-                  f"(slauWallNormalChi の既定変更前の評価。plan convection-slau-wall-normal-chi-default §4.4)", flush=True)
+                  f"(既定変更前の評価: slauWallNormalChi 2026-09-26 / scalarGradient 2026-09-27)", flush=True)
+        _nolsq = sum(1 for r in self.rows if r.get("status") == "PASS" and r.get("flag_policy") == FLAG_POLICY and not _learnable(r))
+        if _nolsq:
+            print(f"[campaign] 実効 scalarGradient が全作動点で lsq と確認できない PASS 行 {_nolsq} 件を学習から除外", flush=True)
 
     def _write_problem(self, x, path: Path) -> Path:
         raw = json.loads(json.dumps(self.base_raw))
@@ -166,6 +180,7 @@ class SernCampaign:
                 "step": out.get("step"), "run_dir": str(rd), "sep_frac_ramp": out.get("sep_frac_ramp"), "sep_x_min_ramp": out.get("sep_x_min_ramp"),
                 "forge_rc": out.get("forge_rc"), "gate": g.get("verdict"), "gate_fail_class": g.get("fail_class"),
                 "slau_wall_normal_chi_effective": out.get("slau_wall_normal_chi_effective"), "flag_policy": out.get("flag_policy"),
+                "scalar_gradient_effective": out.get("scalar_gradient_effective"),
                 "residual": g.get("residual", {}).get("verdict"), "objective": g.get("objective"),
                 "steadiness": {k: v.get("verdict") for k, v in g.get("steadiness", {}).get("series", {}).items()}}
 
@@ -233,7 +248,9 @@ class SernCampaign:
     def _XF(self):
         # slauWallNormalChi の既定変更 (2026-09-26) 前後の評価を同じ応答関数として学習しない (plan
         # convection-slau-wall-normal-chi-default §4.4、codex plan M3)。flag_policy の無い旧行と不一致の行は除外する。
-        ok = [r for r in self.rows if r["status"] == "PASS" and r.get("flag_policy") == FLAG_POLICY]
+        # さらに mesh.scalarGradient の node 既定 lsq 化 (2026-09-27) 以降は、**全作動点の実効値が lsq と確認できた行だけ**を使う
+        # (日付の一致だけでは gg 評価・不明が混ざる。codex diagnose 2026-09-27、plan gradient-scalar-lsq-unification #6)。
+        ok = [r for r in self.rows if _learnable(r)]
         X = np.array([r["x"] for r in ok]); F = np.array([[-r["C_T_w"], r["L_ramp"]] for r in ok])
         return X, F
 

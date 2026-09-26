@@ -328,6 +328,7 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 | `mesh.bndFirstOrder: 1` | **禁止** (粘性応力破壊・疑似 2D で全域に効く) | 段階起動 (§1.2) |
 | `nodeAxisDirichlet` / `nodeMidpointFx` / `nodeValueAtNode` / `nodeReconEdgeMidpoint` / `nodeAxisUrDirichlet` | 廃止 (2026-08-16, 書くと起動エラー) | node は固定スキーム (§1) |
 | `turbulence: {LESorRANS: 2, RANSmodel: 1}` 旧キー体系 | 旧 config に残存 | `turbulence: {model: "sst", ...}` |
+| node の `mesh.scalarGradient` 省略 = gg | **2026-09-26 まで既定** (2026-09-27 から node の既定は lsq、plan [gradient-scalar-lsq-unification](../plans/active/gradient-scalar-lsq-unification.md) #6) | 旧結果の再現は `mesh.scalarGradient: gg` を明記。**切り替え日をまたぐ run は途中から再開せず最初から回し直す** (段の区間判定が gg 段と lsq 段をつなぐため、ユーザ決定 2026-09-27) |
 | `sstOmegaProdFromPk: 0` / `sstSigmaBlend: 0` | 2026-09-08 まで既定 | 既定 1 (旧挙動が要るときだけ 0 明記) |
 | `sstEnergyKSource: 1` / `sstIsotropicStress: 1` (分離型) | 非推奨 (境界未完備・離散保存せず) | 必要なら `sstEnergyIncludesK: 1` (opt-in) |
 | 定常 + 陽解法 (`timeIntegration: 3`, `unsteady: 0`) | 非推奨 (局所 dt で不安定) | 陰解法 11 + blockDPLUR、または `unsteady: 1` |

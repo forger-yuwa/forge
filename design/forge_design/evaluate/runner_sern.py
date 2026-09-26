@@ -34,8 +34,26 @@ MESH = "sern.h5"
 
 
 
-# slauWallNormalChi の既定が変わった日 (2026-09-26)。設計 DB で旧既定 (0) の評価と混ぜないための識別子。
-FLAG_POLICY = "2026-09-26"
+# 既定が変わった日。設計 DB で旧既定の評価と混ぜないための識別子。
+#   2026-09-26: slauWallNormalChi の既定 0 → auto (node+SLAU で 1)
+#   2026-09-27: mesh.scalarGradient の node 既定 gg → lsq (plan gradient-scalar-lsq-unification #6)。
+#               日付の一致だけでは旧評価の混入を防げないので、学習側は実効 scalarGradient も見る (codex diagnose 2026-09-27)
+FLAG_POLICY = "2026-09-27"
+
+
+def _last_launch_value(run_dir, key):
+    """forge_launches.jsonl の最後の起動の実効値 (文字列)。無い・読めなければ None (= 不明)。"""
+    p = Path(run_dir) / "forge_launches.jsonl"
+    if not p.exists():
+        return None
+    last = None
+    for line in p.read_text().splitlines():
+        try:
+            v = json.loads(line)[key]
+        except Exception:
+            continue
+        last = str(v)
+    return last
 
 
 def _last_launch_chi(run_dir):
@@ -937,6 +955,8 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     # 実効 slauWallNormalChi と設定方針 (plan convection-slau-wall-normal-chi-default §4.4、codex plan M3)。
     # 起動記録 forge_launches.jsonl の**最後の起動** (本段) の値。記録が無い run (旧バイナリ) は None = 不明。
     out["slau_wall_normal_chi_effective"] = _last_launch_chi(run_dir)
+    # 実効 mesh.scalarGradient (plan gradient-scalar-lsq-unification #6、codex diagnose 2026-09-27)。記録が無ければ None = 不明。
+    out["scalar_gradient_effective"] = _last_launch_value(run_dir, "scalarGradient")
     out["flag_policy"] = FLAG_POLICY
     (out_dir / "metrics.json").write_text(json.dumps(out, indent=1))
     return out

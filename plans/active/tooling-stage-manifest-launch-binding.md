@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `その他` (tooling: `solver_density_cuda/tools/stage_manifest.py`、`main.cpp` の起動記録)
-- **status**: `draft` (§4・§6 確定 2026-09-27、codex plan 段が次)
+- **status**: `draft` (**後回し 2026-09-27 ユーザ決定**: gradient-scalar-lsq の既定化は警告 + 運用ルールで先行。再開時は codex plan 段の Major 4 件を反映してから)
 - **related_docs**:
   - [`procedures/solver-settings.md`](../../procedures/solver-settings.md) (`mesh.scalarGradient` 節、`slauWallNormalChi` の区間の扱い)
   - [`procedures/recommended-settings.md`](../../procedures/recommended-settings.md) §1.0a
@@ -77,7 +77,7 @@
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
-| plan | `2026-09-27` | [2026-09-27-tooling-stage-manifest-launch-binding-plan.md](../../notes/reviews/2026-09-27-tooling-stage-manifest-launch-binding-plan.md) | **GO-with-changes**, C0/M4/m2 (起動 ID 直接対応は支持。M1 段の予定登録と起動後の履歴確定の分離・CSV と sidecar の一組退避、M2 場・境界 HDF5 に launch_id、M3 driver_sern の転記・選別、M4 check_convergence の欠落履歴拒否、m5 旧案の残り、m6 旧テストの整理) | **採否保留 (2026-09-27)**: 採用するとスコープが solver 出力・全 case 生成器・判定ツール・設計 DB に広がるため、進め方をユーザに確認中 |
+| plan | `2026-09-27` | [2026-09-27-tooling-stage-manifest-launch-binding-plan.md](../../notes/reviews/2026-09-27-tooling-stage-manifest-launch-binding-plan.md) | **GO-with-changes**, C0/M4/m2 (起動 ID 直接対応は支持。M1 段の予定登録と起動後の履歴確定の分離・CSV と sidecar の一組退避、M2 場・境界 HDF5 に launch_id、M3 driver_sern の転記・選別、M4 check_convergence の欠落履歴拒否、m5 旧案の残り、m6 旧テストの整理) | **採否保留・plan ごと後回し (2026-09-27 ユーザ決定「B」)**: gradient plan の既定化は本 plan を前提にせず、警告 + 運用ルールで進める。本 plan を再開するときに 4 件の Major を採用して §4–§7 を書き直す |
 
 ## 7. 影響範囲
 

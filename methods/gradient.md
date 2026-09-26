@@ -75,9 +75,9 @@ $$
   既知の負結果があり回帰対照のみ。**推奨は `gradLSQ=2` (係数事前計算 + スペクトル打ち切りフォールバック**、
   [discretization.md §7.3.1](discretization.md#実装))。
   ([plans/active/discretization-lsq-gradient.md](../plans/active/discretization-lsq-gradient.md) §0/§9)。
-- **node のスカラー勾配** ($k,\omega$・化学種 $Y_s$・受動種 $\xi$・凝縮モーメント): 既定は GG
-  (境界半割面を owner 値で積算、軸対称は `A_planar`)。NS の LSQ と同じ事前計算係数に揃える opt-in 経路
-  `mesh.scalarGradient: lsq` は**実装済み・Phase 1 検証済み (既定化は未)** (2026-09-26: S0/S1・S3 PASS、S2 は現行 gg 基準で PASS [旧起点床の基準では未合格の記録あり]、FCT smoke の収支比較は未決。既定は `gg` のまま。[plans/active/gradient-scalar-lsq-unification.md](../plans/active/gradient-scalar-lsq-unification.md))。cell は常に GG (キーは無視)。
+- **node のスカラー勾配** ($k,\omega$・化学種 $Y_s$・受動種 $\xi$・凝縮モーメント): 2026-09-26 までの既定は GG
+  (境界半割面を owner 値で積算、軸対称は `A_planar`)。NS の LSQ と同じ事前計算係数に揃える経路
+  `mesh.scalarGradient` は **2026-09-27 から node の既定が `lsq`** (旧既定 `gg` は明記で再現、Phase 1 検証 (2026-09-26: S0/S1・S3 PASS、S2 は現行 gg 基準で PASS [旧起点床の基準では未合格の記録あり]、FCT smoke の収支差は揺れの範囲 [ユーザ決定])。[plans/active/gradient-scalar-lsq-unification.md](../plans/active/gradient-scalar-lsq-unification.md))。cell は常に GG (キーは無視)。
   LSQ 経路は差分形 $\sum_j c_{ij}(\phi_j-\phi_i)$ で定数場が厳密に 0 (GG は壁節点で float32 の閉包誤差約 $5\,\varepsilon|\phi|/h$)、
   境界は NS と同じ内部隣接のみ、並進周期は NS の合併係数を共有、軸対称×周期・回転周期は片側 (gather しない)。
   既定の生産設定で生きているスカラー勾配は $k,\omega$ だけ (`speciesFaceReconstruction` の既定 0)。

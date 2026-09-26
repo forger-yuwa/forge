@@ -546,9 +546,9 @@ public:
     double gradLSQDegenThresh = 1.0e-2;
 
     // node のスカラー勾配 (k/ω・化学種 Y_s・受動種 ξ・凝縮モーメント) の作用素 (mesh.scalarGradient)。
-    //   "gg" (既定): Green–Gauss (従来どおり、ビット不変)。
-    //   "lsq": NS と同じ事前計算 LSQ 係数 (gradLSQ=2 の cInt、継ぎ目の合併係数を含む) による差分形 gather。
-    // cell は常に "gg" (lsq を書いても警告して gg に解決)。plans/active/gradient-scalar-lsq-unification.md §4.4。
+    //   "lsq" (**node の既定、2026-09-27 から**): NS と同じ事前計算 LSQ 係数 (gradLSQ=2 の cInt、継ぎ目の合併係数を含む) による差分形 gather。
+    //   "gg": Green–Gauss (2026-09-26 までの node の既定。旧結果の再現は明記)。
+    // cell は常に "gg" (lsq を書いても警告して gg に解決)。省略時の解決は solverConfig.cpp。plans/active/gradient-scalar-lsq-unification.md §4.4・#6。
     std::string scalarGradient = "gg";
     std::string scalarGradientReason = "default";   // 起動エコー用 ("default" / "explicit")
 

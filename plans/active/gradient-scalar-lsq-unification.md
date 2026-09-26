@@ -117,7 +117,7 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 | 5m (**完了 2026-09-26: A** — 旧版 `36d8ba03` gg (`run_0960`、sha `29e8f590…`) も現行 gg キー省略 (`run_0961`、実効 gg (default) を確認) も `check_passive_budget --mode fct` が同じ remainder 8.45e-2 で FAIL (閉合 5e-10/−4e-10・総量照合 3.6e-9・有界性 [0, 0.9998] は同水準)。→ 本 plan の commit 群がこの FAIL を初めて生んだ仮説を棄却。lsq の精度ゲートは未合格のまま。測る前に固定、判断: codex (diagnose) 5 `notes/reviews/2026-09-26-gradient-scalar-lsq-phase1-status-diagnose.md`) | FCT smoke の実装直前版 / 現行版 gg | 変更因子はバイナリだけ (`36d8ba03` / `f99f236d`)。`run_0954_sglsq_s2_fct_gg` の開始入力を複製し、**両方とも `scalarGradient` キーを省略** (現行の実効 gg を起動エコーで確認)、nSub 15・dt・IC・BC・GPU・BLOCKSIZE 固定で各 200 物理 step (`run_0960_sglsq_s2_fct_gg_base36d8` / `run_0961_sglsq_s2_fct_gg_nokey`)。同じ checker (`check_passive_budget --mode fct`)・同じ閾値で収支閉合・独立総量照合・remainder・有界性を比較。**A**: 旧版も同じ remainder 項で FAIL → 「本 plan の commit 群が初めてこの FAIL を生んだ」仮説を棄却 (lsq の精度ゲートは未合格のまま)。**B**: 旧版 PASS・現行 FAIL → 既存問題として切り離す判断を棄却し commit 群の共通経路へ戻る。診断列の意味・実効設定が揃わなければ判定不能 (数値の近さで代用しない) | O (結論 F) |
 | 5n (codex result-2、採用。**完了 2026-09-26**) | result-2 の指摘対応 | M1: `stage_manifest.py` は PyYAML が無ければ止まる (**済**、回帰試験 5 例)。M2: 一次記録を `case/09.Taylor-Green/_g0_lsq_seam/s2_evidence/` に回収 (**済**: `JUDGEMENTS.txt` = 元ファイルに対する判定ツールの全出力、`INDEX.md` = 元の残差 CSV の sha256。残差の gzip (59 MB) はリポジトリに入れずワークツリーと AWS に保存)。M3: 本表と §4.4 の 2 段ゲートどおり **plan 全体は `in_progress`**、Phase 1 の判定は §6.1 に記録。m4: 文書・索引・本表の状態を同期 | O |
 | 5o (**決着 2026-09-27 ユーザ決定「a」: 合格**。lsq−gg の remainder 差 +2.8e-12 は gg 同士の揺れ 1.9e-12 と同程度なので「lsq が追加の不合格を作らない」とみなす。許容幅を後から決めた判断であることを記録) | FCT smoke の収支 remainder の比較規則 | 差し替え規則は「lsq の remainder が gg 以下」と書いたが許容幅を決めていなかった。丸め前 remAbs: gg `run_0954` 3.523596956e-06 / lsq `run_0955` 3.523599715e-06 (lsq が +2.8e-12、相対 8e-7)。同じ現行 gg の 2 本 (`run_0954` と `run_0961`) の差は 1.9e-12、nSub 30 の gg/lsq は 3.523593235e-06 / 3.523597981e-06。**文言どおりなら不成立、差は gg 同士の揺れと同程度**。許容幅を後から決めるので、ユーザ判断とする | F |
-| 6 | 既定の切り替え (Phase 2) | **前提**: 5r が GO、2g 完了、S3 ≤ 5 %。S4、2h、docs、codex result 2 回目 | F |
+| 6 (**前提の差し替え 2026-09-27 ユーザ決定「B」**: #2g (起動記録の結び付け) の完了を前提にしない。代わりに (i) node で `scalarGradient` 省略時に既定変更の警告を出す、(ii) **既定切り替え日をまたぐ run は途中から再開せず最初から回し直す**を運用ルールにする (`procedures/solver-settings.md`・`recommended-settings.md` §9)。#2g の本格修正は `tooling-stage-manifest-launch-binding` に残して後回し) | 既定の切り替え (Phase 2) | **前提**: 5r が GO、2g 完了、S3 ≤ 5 %。S4、2h、docs、codex result 2 回目 | F |
 | 7 (**完了 2026-09-26**: `boundary-node-rotational-periodic` §5.1 #0a) | 回転周期 plan への登録 | | O |
 
 ## 6. 検証 (2026-09-26 `diagnostician` 確定、同日 codex plan 対応で改訂。測る前に固定)
@@ -180,6 +180,8 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 - [ ] `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-27` — ユーザ決定「B」: 既定化の前提を #2g 完了から「省略時の警告 + 切り替え日をまたぐ run は最初から回し直す運用ルール」に差し替え。
 
 - `2026-09-27` — #5o をユーザ決定で合格 (FCT smoke の remainder 差は gg 同士の揺れと同程度)。**Phase 1 は全項目合格**、次は Phase 2 の前提 #2g (別 plan 起票)。
 

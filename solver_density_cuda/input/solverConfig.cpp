@@ -245,7 +245,16 @@ void solverConfig::read(std::string fname)
             }
             this->gradLSQ = 2;
         }
-        // スカラー勾配の作用素 (plan gradient-scalar-lsq-unification §4.4)。既定 gg、node のみ lsq を選べる。
+        // スカラー勾配の作用素 (plan gradient-scalar-lsq-unification §4.4・#6)。**2026-09-27 から node の既定は lsq**、cell は常に gg。
+        if (!config["mesh"]["scalarGradient"]) {
+            this->scalarGradient = (this->discretization == "node") ? "lsq" : "gg";
+            if (this->discretization == "node") {
+                // 既定変更の警告 (ユーザ決定「B」の運用ルール): 旧既定 gg で始めた run を途中から再開すると
+                // 段の区間判定が gg 段と lsq 段を 1 区間につなぐので、最初から回し直す。旧挙動は gg を明記。
+                std::cout << "[config] mesh.scalarGradient 省略 → 既定 lsq (2026-09-27 から。それ以前に既定 gg で始めた run を"
+                          << "途中から再開しないこと。旧挙動は mesh.scalarGradient: gg を明記)" << std::endl;
+            }
+        }
         if (config["mesh"]["scalarGradient"]) {
             this->scalarGradient = config["mesh"]["scalarGradient"].as<std::string>();
             if (this->scalarGradient != "gg" && this->scalarGradient != "lsq") {
