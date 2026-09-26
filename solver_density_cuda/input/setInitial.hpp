@@ -192,6 +192,34 @@ void setInitial(solverConfig& cfg , mesh& msh , variables& v)
             v.c["roe"][i]  = P/(gam-1.0) + 0.5*ro*(u*u);
         }
 
+    } else if (cfg.initial == "slot_m2") {
+        // case/58 深いスロットの CHT (V6′, plan boundary-conjugate-heat-transfer §6)。
+        // 入口 inlet_uniformVelocity (ro=0.116144, U=694.38, Ps=10000) と**同じ状態**を一様に置いて
+        // 起動過渡を抑える。**`uniform_p101325_u10` を使ってはいけない**: P が 10 倍・U が 1/70 で入口と
+        // 不整合なため、2000 step で P が 2.18e7 Pa (自由流の 2000 倍)・ro 175 kg/m3 に達し
+        // `rms_roUy` が RISING になった (2026-09-26 実測。AGENTS.md「発散の主因 = 初期値が入口流れと不整合」)。
+        // 空気 CPG (gamma=1.4), Ts=300 K, M=2.0。袋小路のスロットも同じ状態で満たす。
+        flow_float cp  = cfg.cp;
+        flow_float gam = cfg.gamma;
+        flow_float R   = cp*(gam-1.0)/gam;
+
+        flow_float Ps = 10000.0;
+        flow_float Ts = 300.0;
+        flow_float M  = 2.0;
+
+        flow_float ro = Ps/(R*Ts);
+        flow_float c  = sqrt(gam*R*Ts);
+        flow_float u  = c*M;
+
+        for (geom_int i = 0 ; i<msh.nCells ; i++) {
+
+            v.c["ro"][i]   = ro;
+            v.c["roUx"][i] = ro*u;
+            v.c["roUy"][i] = 0.0;
+            v.c["roUz"][i] = 0.0;
+            v.c["roe"][i]  = Ps/(gam-1.0) + 0.5*ro*(u*u);
+        }
+
     } else if (cfg.initial == "laval") {
         flow_float cp  = cfg.cp;
         flow_float gam = cfg.gamma;

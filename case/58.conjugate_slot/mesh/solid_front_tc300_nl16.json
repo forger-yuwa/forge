@@ -1,0 +1,12 @@
+{
+  "_note": "case/58 V6′ スロット前壁の固体帯 (厚さ 0.001 m, 16 層)。背面は h=1e+08 の Robin で Dirichlet 300.0 K を近似 (1/h / (t/k_s) = 5e-07)。両端は未登録 = 断熱。",
+  "mesh_npz": "case/58.conjugate_slot/mesh/solid_front_tc300_nl16.npz",
+  "k_solid": 0.05,
+  "holes": [
+    {
+      "h": 100000000.0,
+      "T_c": 300.0
+    }
+  ],
+  "T_init": 350.0
+}
