@@ -56,7 +56,7 @@
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | 1 (**完了 2026-09-27**、判断: codex (diagnose) `notes/reviews/2026-09-27-stage-manifest-launch-binding-design-diagnose.md`・全件採用: 起動 ID と履歴の直接対応、unknown で連結停止、DB は成果物の起動、完全一致検査) | §4・§6 の確定 | 上位判断 | F |
-| 2 | codex plan 段 | `codex_review.py --stage plan` | F |
+| 2 (**実施 2026-09-27: GO-with-changes C0/M4/m2、採否はスコープ確認待ち**) | codex plan 段 | `codex_review.py --stage plan` | F |
 | 3 | 実装 | §5 の 2・3 | O |
 | 4 | 検証 | §6 の T1–T7 (AWS で実バイナリ 2 種) | O (結論 F) |
 | 5 | codex result 段 | | F |
@@ -77,6 +77,7 @@
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan | `2026-09-27` | [2026-09-27-tooling-stage-manifest-launch-binding-plan.md](../../notes/reviews/2026-09-27-tooling-stage-manifest-launch-binding-plan.md) | **GO-with-changes**, C0/M4/m2 (起動 ID 直接対応は支持。M1 段の予定登録と起動後の履歴確定の分離・CSV と sidecar の一組退避、M2 場・境界 HDF5 に launch_id、M3 driver_sern の転記・選別、M4 check_convergence の欠落履歴拒否、m5 旧案の残り、m6 旧テストの整理) | **採否保留 (2026-09-27)**: 採用するとスコープが solver 出力・全 case 生成器・判定ツール・設計 DB に広がるため、進め方をユーザに確認中 |
 
 ## 7. 影響範囲
 
