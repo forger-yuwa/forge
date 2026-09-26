@@ -9,6 +9,7 @@ test ! -e "$D"
 last=$(ls "$S" | grep -E '^res_[0-9]+\.h5$' | sed 's/res_//;s/\.h5//' | sort -n | tail -1)
 mkdir "$D"
 cp "$S"/{mesh.h5,bcondConfig.yaml,probe.yaml,case_setup.json} "$D"/
+[ -f "$S/species_db.yaml" ] && cp "$S/species_db.yaml" "$D"/   # 多成分 (燃焼ガス) の run に要る
 sed -e "s/nStepOuter: [0-9]*/nStepOuter: $N/" -e "s/outStepInterval: [0-9]*/outStepInterval: $OUT/" "$S/solverConfig.yaml" > "$D/solverConfig.yaml"
 python3 "$ROOT/solver_density_cuda/tools/restart_field.py" --keep-src-dtype "$S/res_$last.h5" "$D/mesh.h5" | tail -1   # FP64 の場は倍精度のまま渡す
 echo "$S/res_$last.h5 (restart_field.py、同一設定 +$N step)" > "$D/CONTINUED_FROM"

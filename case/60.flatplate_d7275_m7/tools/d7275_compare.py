@@ -56,7 +56,9 @@ def main():
         print(f"  x × {f}: R_A 平均 {r.mean():.3f}")
     # パネル平均 (x 1.07–2.46 m) と carpet plot 比較用の q
     m = (ux >= 1.07) & (ux <= 2.46)
-    print(f"  パネル平均 q_w (1.07–2.46 m) = {np.trapezoid(q[m], ux[m]) if hasattr(np, "trapezoid") else np.trapz(q[m], ux[m])/(ux[m][-1]-ux[m][0])/1e3:.2f} kW/m²、位置 II (1.88 m) = {np.interp(1.88, ux, q)/1e3:.2f} kW/m²")
+    integ = getattr(np, "trapezoid", None) or np.trapz
+    q_avg = integ(q[m], ux[m]) / (ux[m][-1] - ux[m][0])
+    print(f"  パネル平均 q_w (1.07–2.46 m) = {q_avg/1e3:.2f} kW/m²、位置 II (1.88 m) = {np.interp(1.88, ux, q)/1e3:.2f} kW/m²")
     if a.series_csv:
         rows = []
         for s in steps:
