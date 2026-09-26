@@ -1,0 +1,241 @@
+起点床: /home/ubuntu/sglsq/s2start/case48_run0005 (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 1.096e-07
+  rms_roK       : 3.660e-05
+  rms_roOmega   : 2.821e+00
+  rms_roUx      : 1.545e-04
+  rms_roUy      : 1.474e-05
+  rms_roe       : 1.324e-01
+  inactive: ['rms_roUz']
+
+=== case/48.flat_plate_cooled_m4/run_0950_sglsq_s2_gg  [last step 23999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor= 1.834 peak/floor=   74.97 @step 1535 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor= 1.809 peak/floor=   73.71 @step 1535 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUy      : tail/floor= 9.116 peak/floor=  144.34 @step 1488 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.868 peak/floor=   77.10 @step 1535 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roK       : tail/floor= 1.220 peak/floor=   48.33 @step 1685 re-entry=4880
+  rms_roOmega   : tail/floor= 0.792 peak/floor=78224.73 @step 0 re-entry=2028
+
+=== case/48.flat_plate_cooled_m4/run_0951_sglsq_s2_lsq  [last step 23999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor= 2.571 peak/floor=   76.91 @step 1537 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor= 2.556 peak/floor=   75.75 @step 1537 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUy      : tail/floor=10.389 peak/floor=  146.36 @step 1481 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 2.681 peak/floor=   79.31 @step 1537 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roK       : tail/floor= 1.275 peak/floor=   48.39 @step 1693 re-entry=22183
+  rms_roOmega   : tail/floor= 0.796 peak/floor=78224.73 @step 0 re-entry=2038
+
+=== case/48.flat_plate_cooled_m4/run_0952_sglsq_s2_gg_ext  [last step 23999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor= 1.849 peak/floor=    2.16 @step 5592 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor= 1.821 peak/floor=    2.11 @step 5592 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUy      : tail/floor= 9.115 peak/floor=   13.95 @step 8889 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.876 peak/floor=    2.18 @step 7984 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roK       : tail/floor= 1.254 peak/floor=    1.78 @step 23146 re-entry=23335
+  rms_roOmega   : tail/floor= 0.794 peak/floor=    1.02 @step 22314 re-entry=never left
+
+=== case/48.flat_plate_cooled_m4/run_0953_sglsq_s2_lsq_ext  [last step 23999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor= 2.544 peak/floor=    3.72 @step 12590 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor= 2.534 peak/floor=    3.71 @step 12590 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUy      : tail/floor=10.385 peak/floor=   15.49 @step 1175 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 2.662 peak/floor=    3.91 @step 12590 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roK       : tail/floor= 1.205 peak/floor=    1.70 @step 14609 re-entry=15838
+  rms_roOmega   : tail/floor= 0.794 peak/floor=    1.04 @step 19090 re-entry=never left
+
+=== case/48.flat_plate_cooled_m4/run_0956_sglsq_s2_gg_chi0  [last step 47999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor= 1.819 peak/floor=   75.97 @step 1540 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor= 1.794 peak/floor=   74.82 @step 1540 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUy      : tail/floor= 9.083 peak/floor=  148.13 @step 1496 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.851 peak/floor=   78.34 @step 1540 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roK       : tail/floor= 1.220 peak/floor=   48.54 @step 1678 re-entry=38571
+  rms_roOmega   : tail/floor= 0.797 peak/floor=78219.23 @step 0 re-entry=2037
+
+OVERALL: CHECK FAILURES ABOVE
+起点床: /home/ubuntu/sglsq/s2start/case40_run0045 (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 1.274e-08
+  rms_roK       : 7.358e-05
+  rms_roOmega   : 7.043e+00
+  rms_roUx      : 3.712e-05
+  rms_roUy      : 6.310e-06
+  rms_roe       : 1.707e-02
+  inactive: ['rms_roUz']
+
+=== case/40.nozzle_design_tool/run_0950_sglsq_s2_gg  [last step 11999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor= 1.601 peak/floor=   67.75 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor= 0.108 peak/floor=   26.27 @step 0 re-entry=215
+  rms_roUy      : tail/floor= 1.514 peak/floor=   70.22 @step 2 re-entry=11959  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.704 peak/floor=   76.38 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roK       : tail/floor= 0.299 peak/floor=   29.82 @step 87 re-entry=1137
+  rms_roOmega   : tail/floor=57.312 peak/floor=48079.75 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+
+=== case/40.nozzle_design_tool/run_0951_sglsq_s2_lsq  [last step 11999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor= 1.557 peak/floor=   67.75 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor= 0.109 peak/floor=   26.27 @step 0 re-entry=215
+  rms_roUy      : tail/floor= 1.560 peak/floor=   70.22 @step 2 re-entry=11999  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.660 peak/floor=   76.38 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roK       : tail/floor= 0.293 peak/floor=   29.76 @step 87 re-entry=1151
+  rms_roOmega   : tail/floor=53.571 peak/floor=48079.75 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+
+=== case/40.nozzle_design_tool/run_0952_sglsq_s2_gg_ext  [last step 11999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor= 1.593 peak/floor=    4.45 @step 7559 re-entry=11997  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor= 0.107 peak/floor=    0.21 @step 498 re-entry=never left
+  rms_roUy      : tail/floor= 1.511 peak/floor=    5.40 @step 910 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.698 peak/floor=    4.70 @step 7559 re-entry=11997  <-- NOT BACK ON FLOOR
+  rms_roK       : tail/floor= 0.296 peak/floor=    0.71 @step 10636 re-entry=never left
+  rms_roOmega   : tail/floor=55.921 peak/floor=  261.68 @step 7559 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+
+=== case/40.nozzle_design_tool/run_0953_sglsq_s2_lsq_ext  [last step 11999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor= 1.603 peak/floor=    4.44 @step 6532 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor= 0.109 peak/floor=    0.21 @step 8981 re-entry=never left
+  rms_roUy      : tail/floor= 1.547 peak/floor=    5.91 @step 8059 re-entry=11997  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.703 peak/floor=    4.62 @step 6532 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roK       : tail/floor= 0.296 peak/floor=    0.79 @step 3590 re-entry=never left
+  rms_roOmega   : tail/floor=56.734 peak/floor=  268.71 @step 6532 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+
+OVERALL: CHECK FAILURES ABOVE
+起点床: case/39.periodic_hills/run_0039_r1_gradfix_new_ext (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 3.837e-10
+  rms_roK       : 2.707e-09
+  rms_roOmega   : 1.243e-03
+  rms_roUx      : 4.132e-08
+  rms_roUy      : 4.600e-08
+  rms_roUz      : 2.915e-08
+  rms_roe       : 1.028e-04
+
+=== case/39.periodic_hills/run_0950_sglsq_s2_gg  [last step 199999]  -> PASS (plateau 許容、末尾平均 ≤ 1.5× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 0.998 peak/floor=    1.01 @step 9678 re-entry=never left
+  rms_roUx      : tail/floor= 0.997 peak/floor=    1.03 @step 44788 re-entry=never left
+  rms_roUy      : tail/floor= 0.998 peak/floor=    1.01 @step 15345 re-entry=never left
+  rms_roUz      : tail/floor= 0.998 peak/floor=    1.03 @step 96120 re-entry=never left
+  rms_roe       : tail/floor= 1.000 peak/floor=    1.01 @step 123401 re-entry=never left
+  rms_roK       : tail/floor= 0.988 peak/floor=    1.02 @step 13771 re-entry=never left
+  rms_roOmega   : tail/floor= 0.999 peak/floor=    1.11 @step 180304 re-entry=never left
+
+=== case/39.periodic_hills/run_0951_sglsq_s2_lsq  [last step 199999]  -> PASS (plateau 許容、末尾平均 ≤ 1.5× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 0.997 peak/floor=    1.01 @step 81569 re-entry=never left
+  rms_roUx      : tail/floor= 0.995 peak/floor=    1.03 @step 25762 re-entry=never left
+  rms_roUy      : tail/floor= 0.998 peak/floor=    1.01 @step 36979 re-entry=never left
+  rms_roUz      : tail/floor= 0.997 peak/floor=    1.03 @step 9430 re-entry=never left
+  rms_roe       : tail/floor= 0.999 peak/floor=    1.01 @step 95116 re-entry=never left
+  rms_roK       : tail/floor= 0.988 peak/floor=    2.37 @step 584 re-entry=2704
+  rms_roOmega   : tail/floor= 0.997 peak/floor=    1.11 @step 121910 re-entry=never left
+
+OVERALL: ALL PASS
+起点床: /home/ubuntu/sglsq/s2start/case16_run0476 (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 4.664e-09
+  rms_roUx      : 1.217e-06
+  rms_roUy      : 1.862e-06
+  rms_roXi      : 4.270e-09
+  rms_roY0      : 2.261e-10
+  rms_roY1      : 2.963e-09
+  rms_roY2      : 1.123e-09
+  rms_roY3      : 5.152e-11
+  rms_roY4      : 3.494e-10
+  rms_roe       : 3.894e-04
+  inactive: ['rms_roUz']
+
+=== case/16.nozzle_wys/run_0950_sglsq_s2_0476_gg  [last step 23999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor=62.805 peak/floor=  169.59 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor=20.701 peak/floor=   82.13 @step 7 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUy      : tail/floor=29.212 peak/floor=  131.61 @step 3 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor=43.475 peak/floor=  113.35 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY0      : tail/floor=27.091 peak/floor=   73.33 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY1      : tail/floor=64.344 peak/floor=  173.74 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY2      : tail/floor=63.039 peak/floor=  170.21 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY3      : tail/floor=63.314 peak/floor=  170.95 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY4      : tail/floor=63.194 peak/floor=  170.63 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roXi      : tail/floor= 3.092 peak/floor=27004.20 @step 8 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+
+=== case/16.nozzle_wys/run_0951_sglsq_s2_0476_lsq  [last step 23999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor=62.657 peak/floor=  169.59 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor=20.652 peak/floor=   82.06 @step 7 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUy      : tail/floor=29.062 peak/floor=  131.62 @step 3 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor=43.371 peak/floor=  113.38 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY0      : tail/floor=27.025 peak/floor=   72.99 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY1      : tail/floor=64.193 peak/floor=  173.75 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY2      : tail/floor=62.891 peak/floor=  170.22 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY3      : tail/floor=63.165 peak/floor=  170.96 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY4      : tail/floor=63.045 peak/floor=  170.64 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roXi      : tail/floor= 3.069 peak/floor=27004.19 @step 8 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+
+=== case/16.nozzle_wys/run_0956_sglsq_s2_0476_gg_cont  [last step 23999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor=62.442 peak/floor=  122.75 @step 3783 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor=20.526 peak/floor=   42.14 @step 12767 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUy      : tail/floor=28.995 peak/floor=   68.06 @step 13984 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor=43.200 peak/floor=   82.27 @step 3783 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY0      : tail/floor=26.933 peak/floor=   52.02 @step 3783 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY1      : tail/floor=63.973 peak/floor=  125.80 @step 3783 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY2      : tail/floor=62.676 peak/floor=  123.25 @step 3783 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY3      : tail/floor=62.949 peak/floor=  123.78 @step 3783 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY4      : tail/floor=62.829 peak/floor=  123.55 @step 3783 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roXi      : tail/floor= 3.073 peak/floor=27004.09 @step 8 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+
+=== case/16.nozzle_wys/run_0957_sglsq_s2_0476_lsq_cont  [last step 23999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor=62.647 peak/floor=  118.67 @step 19237 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor=20.664 peak/floor=   39.75 @step 12515 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUy      : tail/floor=29.125 peak/floor=   67.00 @step 10484 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor=43.368 peak/floor=   80.43 @step 19237 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY0      : tail/floor=27.021 peak/floor=   50.41 @step 19237 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY1      : tail/floor=64.182 peak/floor=  121.61 @step 19237 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY2      : tail/floor=62.881 peak/floor=  119.14 @step 19237 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY3      : tail/floor=63.155 peak/floor=  119.66 @step 19237 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY4      : tail/floor=63.035 peak/floor=  119.44 @step 19237 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roXi      : tail/floor= 3.076 peak/floor=27004.33 @step 8 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+
+OVERALL: CHECK FAILURES ABOVE
+起点床: /home/ubuntu/sglsq/s2start/case16_run0482 (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 4.674e-09
+  rms_roK       : 9.543e-07
+  rms_roOmega   : 1.860e+01
+  rms_roQ0_0    : 2.626e+09
+  rms_roQ1_0    : 2.245e+01
+  rms_roQ2_0    : 3.061e-07
+  rms_roUx      : 1.347e-06
+  rms_roUy      : 1.825e-06
+  rms_roY0      : 4.629e-09
+  rms_roY1      : 5.537e-11
+  rms_roe       : 6.420e-04
+  rms_rog_0     : 1.999e-11
+  inactive: ['rms_roUz']
+
+=== case/16.nozzle_wys/run_0952_sglsq_s2_0482_gg  [last step 47999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor=20.201 peak/floor= 5831.24 @step 78 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor=18.777 peak/floor= 8505.13 @step 39 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUy      : tail/floor= 5.270 peak/floor= 4026.04 @step 98 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 2.115 peak/floor= 1094.03 @step 198 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roK       : tail/floor= 1.071 peak/floor=37050.70 @step 58 re-entry=28577
+  rms_roOmega   : tail/floor=16.443 peak/floor=14573.39 @step 74 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY0      : tail/floor=16.669 peak/floor= 5822.34 @step 78 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY1      : tail/floor=15.434 peak/floor= 5389.13 @step 78 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_rog_0     : tail/floor=31.781 peak/floor=174515.08 @step 24 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roQ2_0    : tail/floor=28.746 peak/floor=629385.51 @step 18 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roQ1_0    : tail/floor=23.978 peak/floor=2205085.14 @step 11 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roQ0_0    : tail/floor=13.350 peak/floor=7547336.85 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+
+=== case/16.nozzle_wys/run_0953_sglsq_s2_0482_lsq  [last step 47999]  -> NOT BACK ON FLOOR (末尾平均 > 1.5× 起点床) ===
+  rms_ro        : tail/floor=20.214 peak/floor= 5831.23 @step 78 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUx      : tail/floor=18.793 peak/floor= 8504.60 @step 39 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUy      : tail/floor= 5.253 peak/floor= 4025.79 @step 98 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 2.118 peak/floor= 1089.07 @step 198 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roK       : tail/floor= 1.072 peak/floor=37051.84 @step 58 re-entry=28501
+  rms_roOmega   : tail/floor=16.321 peak/floor=14575.14 @step 74 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY0      : tail/floor=16.677 peak/floor= 5822.33 @step 78 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roY1      : tail/floor=15.441 peak/floor= 5389.12 @step 78 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_rog_0     : tail/floor=31.789 peak/floor=174515.04 @step 24 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roQ2_0    : tail/floor=28.752 peak/floor=629385.90 @step 18 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roQ1_0    : tail/floor=23.983 peak/floor=2205087.63 @step 11 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+  rms_roQ0_0    : tail/floor=13.350 peak/floor=7547336.85 @step 0 re-entry=not re-entered  <-- NOT BACK ON FLOOR
+
+OVERALL: CHECK FAILURES ABOVE
