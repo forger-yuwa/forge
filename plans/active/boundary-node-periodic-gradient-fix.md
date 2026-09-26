@@ -166,6 +166,15 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
   帰属確認: 同じ入力で `sstSigmaBlend: 0` にすると旧新差は roK 1 点・roOmega 3 点 (旧同士 1/0 点) に消える (スクラッチ `r3b_case48_*`)。
   **未測定**: ∇Y は出力変数に無く直接比較していない (roY の旧新差が旧同士と同水準であることのみ確認)。case/48 は一様 IC のため dP/dT/dρ とリミタは検出力なし。
 
+- **R2 (2026-09-26、AWS g5、旧 `1266aba1` sha256 `f0505fe8…` / 新 `565959c7` sha256 `0bcff10d…`、block 128、`case/09.Taylor-Green/run_0173..0176`、`r2_conservation.txt`)**:
+  32³ node (品質 PASS)、RK4 dt 0.007 × 3572 step (t = 10 t_c)。**4 本とも §6 R2 の保存上限 PASS**、NaN 0。
+  KEEP 非粘性 旧/新: |K/K0−1| ≤ 6.8e-3、|ΔS/S0| ≤ 8.4e-6、運動量 ≤ 1.6e-8、旧新差 max|ΔK/K0| 6.0e-8。
+  SLAU 粘性 (Re 1600、κ は Pr 0.71 から 1.408e-4、`slauWallNormalChi: 0`) 新: 質量 2.3e-8、運動量 1.2e-8、全エネルギー 8.3e-9。
+  **旧新差 (記録のみ)**: max|ΔK/K0| 1.0e-1 (t = 10.85)、最終 4.5e-2、max|Δ(ΔS/S0)| 3.4e-3 — §6 の見込み 1e-3〜1e-2 を超える。
+  観測: 旧 SLAU は t ≲ 7 で K/K0 が 1.02 まで増え ΔS < 0、新は単調減少 (`r2_ke_entropy.png`)。**解釈は未確定** (R1 と合わせて `diagnostician`、条件 7)。
+- **R1 (実行中)**: `case/39.periodic_hills/run_0036_r1_gradfix_old` / `run_0037_r1_gradfix_new` (AWS `~/forge-pgrad-new/`)、メッシュ 80×50×30 y1 1.5e-3 h (品質 PASS、AR 149)、
+  1 次 SST 定常 (S1 静止スピンアップ 2000 → S2 成形 IC 800k step)。先行 300k の暫定: 収束 PASS 旧新とも、新の Cf_x6・dF1・r_gradk は DRIFTING (単調減衰)。継ぎ目比 旧 r_gradu 2.24 / r_gradk 1.58 / r_gradw 0.50 / dF1 0.55 → 新 1.00 / 0.99 / 1.00 / 0.03。壁解像 局所 y1+ 最大 0.75、超過 0 %。最終判定は 800k の結果で行う。
+
 ## 7. 影響範囲
 
 - `solver_density_cuda/cuda_forge/calcGradient_d.cu`、`periodicNode_d.cu`、`ransTransport_d.cu`、`main.cpp`、`mesh/mesh.cpp`。
