@@ -1,0 +1,49 @@
+{
+ "_about": "case/59 (Cary TN D-5863) の事前登録。plan §4.12 T4-0a-0 / §6 G14。**T4-0a-0 の結果を見る前に書いた (2026-09-26)**",
+ "_honesty_rule": "status が pre_registered の項目だけが事前登録。結果を見てから変えたら revisions に残す。",
+ "gates": [
+  {
+   "id": "T4-0a-0",
+   "status": "pre_registered",
+   "name": "比較原点だけの A/B (比較方法の感度)",
+   "run": "run_0001_tw02_re027 (系列 Re0.27_Tw0.2、完全乱流 SST、本段の最終スナップショット)",
+   "St_definition": "St = q_w / (ρ∞ u∞ cp (Taw − Tw))、Taw = T∞(1 + 0.89·(γ−1)/2·M∞²) (Cary と同じ還元)。q_w は res_wall_4 の VALUE/qwall (符号反転)",
+   "arms": {
+    "A": "x_CFD = x_exp (前縁起点)",
+    "B": "x_CFD = x_exp − 22.22 cm (実測の加熱ピーク = 仮想原点)"
+   },
+   "compare_points_cm": [
+    27.94,
+    28.9,
+    29.85,
+    31.75,
+    34.61,
+    35.58,
+    36.51,
+    37.49,
+    38.41,
+    39.38,
+    42.21,
+    43.19,
+    44.13,
+    45.1,
+    46.04,
+    47.0,
+    49.2
+   ],
+   "_why_points": "仮想原点からの Re_v = (x_exp − 22.22 cm)·2.7e5/cm ≥ 1e6 (Cary の乱流比較の適用範囲) を満たす熱電対すべて。欠測は除く",
+   "quantity": "各点の R_arm = St_forge(x_CFD)/St_exp(x_exp)、差 D = R_B/R_A − 1。集約は点の単純平均と最小・最大",
+   "decision": {
+    "D_gt_10pct": "全比較点で |D| > 10 % → 『原点感度は小さい』を棄却。比較座標の定義が結果を支配するので G14 の前に比較座標を固定する",
+    "D_lt_10pct": "全比較点で |D| < 10 % → 原点の影響は小さい (第 1 仮説を棄却)",
+    "mixed": "点によって 10 % をまたぐ → 判定不能 (比較点・座標の再定義は諮ってから)"
+   },
+   "preconditions": [
+    "本段 (区間 ramp0→main) の check_convergence PASS。未達なら延長し、それでも未達なら判別保留",
+    "比較点の St 系列 (qwall) の check_quasisteady STEADY",
+    "check_wall_resolution --target 1 --over-frac 0 (未評価点ゼロ・面積重み確認)。FAIL なら結果は予備扱い",
+    "施設・モデルへの原因帰属はしない"
+   ]
+  }
+ ]
+}
