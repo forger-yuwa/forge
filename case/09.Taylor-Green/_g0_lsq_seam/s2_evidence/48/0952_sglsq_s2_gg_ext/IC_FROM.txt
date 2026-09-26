@@ -1,0 +1,9 @@
+start_run: case/48.flat_plate_cooled_m4/run_0950_sglsq_s2_gg
+res: case/48.flat_plate_cooled_m4/run_0950_sglsq_s2_gg/res_24000.h5
+res_sha256: d093af0a3be724d89c37bbdd01c414d03723d3e8655aa81e8340a14759c722aa
+mesh_sha256 (restart 前、起点の mesh.h5): ddd9c17bce3a70eadbc719f1154e493865fc2802f21925355510d58c2ac5173d
+config changes vs start:
+  - set mesh.scalarGradient: gg (明示)
+  - set time.last.nStepOuter: 24000 -> 24000
+  - set time.outStepInterval: 2000 -> 2000
+check_solver_config rc=0

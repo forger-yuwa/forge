@@ -36,5 +36,21 @@ check("省略 vs 明示 gg → 2 区間 (暫定: 分けすぎる側)", segs(CFG(
 bad1 = CFG("gg") + "space: [unclosed\n"
 bad2 = CFG("lsq") + "space: [unclosed\n"
 check("解析不能な YAML (本文が違う) 2 段 → 2 区間", segs(bad1, bad2) == 2)
+# PyYAML が読めない環境では黙って連結せず止まること (codex result-2 M1)
+import builtins
+_real_import = builtins.__import__
+def _no_yaml(name, *a, **k):
+    if name == "yaml":
+        raise ImportError("simulated")
+    return _real_import(name, *a, **k)
+builtins.__import__ = _no_yaml
+try:
+    stage_key(CFG("gg"), BC)
+    stopped = False
+except SystemExit:
+    stopped = True
+finally:
+    builtins.__import__ = _real_import
+check("PyYAML が無い → 区間判定を止める (黙って連結しない)", stopped)
 print("VERDICT:", "PASS" if fails == 0 else "FAIL (%d)" % fails)
 sys.exit(1 if fails else 0)

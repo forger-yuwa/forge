@@ -1,0 +1,10 @@
+start_run: case/39.periodic_hills/run_0039_r1_gradfix_new_ext
+res: case/39.periodic_hills/run_0039_r1_gradfix_new_ext/res_800000.h5
+res_sha256: 01f90b832f55449891e7a2349f9d41e78376b9dc30ee39a3ec8f4f537ae43006
+mesh_sha256 (起点の hill_r1_80x50x30.h5): 687b4463b875c4d6d4f487b96cae594d41e47f9bda4a2198e2849c2320b43996
+value file (restart 先): ic_S3_ext.h5
+config changes vs start:
+  - set mesh.scalarGradient: gg (明示)
+  - set time.last.nStepOuter: 800000 -> 200000
+  - set time.outStepInterval: 10000 -> 10000
+check_solver_config rc=0

@@ -168,7 +168,9 @@ def _yaml_grab(text, paths):
     try:
         import yaml
     except ImportError:
-        return {}
+        # PyYAML が無いと YAML 側だけにある hard キー (mesh.scalarGradient 等) が消えて段が黙って連結される
+        # (codex 2026-09-26 gradient-scalar-lsq result-2 M1)。区間判定の必須依存として止める。
+        raise SystemExit("stage_manifest: PyYAML が無いので段の区間を判定できない (pip install pyyaml)")
     try:
         doc = yaml.safe_load(text or "")
     except Exception:

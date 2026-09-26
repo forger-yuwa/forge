@@ -1,0 +1,32 @@
+# S2 双子 (plan gradient-scalar-lsq-unification §6)。起点 /home/ubuntu/sglsq/s2start/case16_run0476
+mesh: {discretization: node, isAxisymmetric: 0, nodeWallDirichlet: 1, meshFileName: nozzle_user_2d.h5,
+  valueFileName: nozzle_user_2d.h5}
+gpu: 1
+solver: SLAU
+physProp:
+  thermalMethod: 2
+  viscMethod: 0
+  visc: 0.0
+  thermCond: 0.0
+  cp: 1039.0
+  gamma: 1.4
+  species: [H2O, N2, O2, AR, CO2]
+  speciesDBFile: species_db.yaml
+  thermoHrefTemp: 298.15
+  tracer: exhaust
+time:
+  unsteady: 1
+  dualTime: 1
+  last: {nStepOuter: 200}
+  deltaT: {control: 0, dt: 5.0e-07, cfl: 2.0, cfl_pseudo: 2.0, implicitRelax: 1.0,
+    blockDPLUR: 1, dt_min: 1.0e-08, dt_max: 1.0, detectNaN: 1, passiveScalarScheme: 1,
+    speciesImplicitCoupling: 1, monitorInterval: 10, speciesFaceReconstruction: 2}
+  outStepInterval: 100
+  outStepStart: 0
+  timeIntegration: 11
+  nStepInner: 4
+  nSubIterDualTime: 15
+space: {convMethod: 1, limiter: 2}
+turbulence: {model: none}
+initial: nozzle_wys
+output: {level: 1}

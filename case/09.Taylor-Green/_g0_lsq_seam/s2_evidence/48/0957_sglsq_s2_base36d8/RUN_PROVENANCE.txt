@@ -1,0 +1,8 @@
+date        : 2026-09-26T12:30:22+00:00
+forge_bin   : /home/ubuntu/sglsq/forge_36d8ba03
+forge_mtime : 2026-09-26T12:29:05+00:00
+forge_sha256: 29e8f590766b2bc1b2a1f623c175d2c4554a88cf59043a3e61f174712982855f
+git_head    : f99f236dfc59d8581797d4121e7eb975e36ac3fd
+git_dirty   : 41 件
+host        : ip-172-31-5-94
+'slauWallNormalChi' effective: 1 (auto: node+nodeWallDirichlet+SLAU)  (wall-adjacent faces: mass-flux chi from face-normal Mach)

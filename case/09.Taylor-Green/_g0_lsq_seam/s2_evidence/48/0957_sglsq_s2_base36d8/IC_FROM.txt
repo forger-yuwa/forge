@@ -1,0 +1,10 @@
+start_run: /home/ubuntu/sglsq/s2start/case48_run0005
+res: /home/ubuntu/sglsq/s2start/case48_run0005/res_48000.h5
+res_sha256: 9a9022d1e3988e61bfc84d895c7afdb3c9c1623415535d24ca188ba9f11e2ae5
+mesh_sha256 (起点の mesh.h5): 10a13dd0e9bd2dd0cbb047a95722240b368f885d1deb45f0e90386ba393a3831
+value file (restart 先): mesh.h5
+config changes vs start:
+  - mesh.scalarGradient: 書かない (実装前バイナリ、実効 gg)
+  - set time.last.nStepOuter: 48000 -> 24000
+  - set time.outStepInterval: 4000 -> 2000
+check_solver_config rc=0

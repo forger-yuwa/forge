@@ -1,0 +1,450 @@
+# 判定ツールを元ファイルに対して実行した記録 (plan §6 S2 の差し替え規則、codex result-2 M2)
+
+## case/48.flat_plate_cooled_m4: gg run_0952_sglsq_s2_gg_ext → lsq run_0953_sglsq_s2_lsq_ext
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/48.flat_plate_cooled_m4/run_0952_sglsq_s2_gg_ext case/48.flat_plate_cooled_m4/run_0953_sglsq_s2_lsq_ext
+(rc=1)
+
+=== case/48.flat_plate_cooled_m4/run_0952_sglsq_s2_gg_ext  [last step 23999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=2.11e-07 peak=2.37e-07 fin=2.00e-07 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=2.94e-04 peak=3.26e-04 fin=2.78e-04 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=1.53e-04 peak=2.06e-04 fin=9.61e-05 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=2.59e-01 peak=2.88e-01 fin=2.44e-01 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roK     : init=4.27e-05 peak=6.53e-05 fin=3.70e-05 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=2.34e+00 peak=2.88e+00 fin=2.17e+00 drop= 0.1dec flat     <-- STALLED (plateau)
+
+=== case/48.flat_plate_cooled_m4/run_0953_sglsq_s2_lsq_ext  [last step 23999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=2.88e-07 peak=4.08e-07 fin=2.98e-07 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=4.05e-04 peak=5.73e-04 fin=4.16e-04 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=1.50e-04 peak=2.28e-04 fin=1.48e-04 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=3.64e-01 peak=5.18e-01 fin=3.73e-01 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roK     : init=4.59e-05 peak=6.23e-05 fin=4.94e-05 drop= 0.1dec falling  <-- still converging
+  rms_roOmega : init=2.16e+00 peak=2.93e+00 fin=2.25e+00 drop= 0.1dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_floor_ratio.py --start case/48.flat_plate_cooled_m4/run_0952_sglsq_s2_gg_ext case/48.flat_plate_cooled_m4/run_0953_sglsq_s2_lsq_ext
+(rc=0)
+起点床: case/48.flat_plate_cooled_m4/run_0952_sglsq_s2_gg_ext (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 2.026e-07
+  rms_roK       : 4.589e-05
+  rms_roOmega   : 2.239e+00
+  rms_roUx      : 2.814e-04
+  rms_roUy      : 1.343e-04
+  rms_roe       : 2.483e-01
+  inactive: ['rms_roUz']
+
+=== case/48.flat_plate_cooled_m4/run_0953_sglsq_s2_lsq_ext  [last step 23999]  -> PASS (plateau 許容、末尾平均 ≤ 1.5× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.376 peak/floor=    2.01 @step 12590 re-entry=23999
+  rms_roUx      : tail/floor= 1.392 peak/floor=    2.04 @step 12590 re-entry=23999
+  rms_roUy      : tail/floor= 1.139 peak/floor=    1.70 @step 1175 re-entry=23814
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.419 peak/floor=    2.09 @step 12590 re-entry=not re-entered
+  rms_roK       : tail/floor= 0.961 peak/floor=    1.36 @step 14609 re-entry=never left
+  rms_roOmega   : tail/floor= 1.000 peak/floor=    1.31 @step 19090 re-entry=never left
+
+OVERALL: ALL PASS
+
+
+## case/40.nozzle_design_tool: gg run_0952_sglsq_s2_gg_ext → lsq run_0953_sglsq_s2_lsq_ext
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/40.nozzle_design_tool/run_0952_sglsq_s2_gg_ext case/40.nozzle_design_tool/run_0953_sglsq_s2_lsq_ext
+(rc=1)
+
+=== case/40.nozzle_design_tool/run_0952_sglsq_s2_gg_ext  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=2.59e-08 peak=5.68e-08 fin=1.10e-08 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=4.14e-06 peak=7.83e-06 fin=4.88e-06 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=9.76e-06 peak=3.41e-05 fin=9.58e-06 drop= 0.6dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=3.86e-02 peak=8.02e-02 fin=1.64e-02 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roK     : init=4.54e-05 peak=5.20e-05 fin=2.33e-05 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=6.67e+02 peak=1.84e+03 fin=7.94e+01 drop= 0.7dec flat     <-- STALLED (plateau)
+
+=== case/40.nozzle_design_tool/run_0953_sglsq_s2_lsq_ext  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=2.24e-08 peak=5.66e-08 fin=2.52e-08 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=3.91e-06 peak=7.91e-06 fin=4.21e-06 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=1.10e-05 peak=3.73e-05 fin=8.27e-06 drop= 0.7dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=3.47e-02 peak=7.88e-02 fin=3.21e-02 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roK     : init=1.95e-05 peak=5.80e-05 fin=1.98e-05 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=6.10e+02 peak=1.89e+03 fin=1.66e+02 drop= 0.8dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_floor_ratio.py --start case/40.nozzle_design_tool/run_0952_sglsq_s2_gg_ext case/40.nozzle_design_tool/run_0953_sglsq_s2_lsq_ext
+(rc=0)
+起点床: case/40.nozzle_design_tool/run_0952_sglsq_s2_gg_ext (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 2.030e-08
+  rms_roK       : 2.181e-05
+  rms_roOmega   : 3.938e+02
+  rms_roUx      : 3.965e-06
+  rms_roUy      : 9.532e-06
+  rms_roe       : 2.897e-02
+  inactive: ['rms_roUz']
+
+=== case/40.nozzle_design_tool/run_0953_sglsq_s2_lsq_ext  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 1.5× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.006 peak/floor=    2.79 @step 6532 re-entry=11980
+  rms_roUx      : tail/floor= 1.019 peak/floor=    2.00 @step 8981 re-entry=11992
+  rms_roUy      : tail/floor= 1.024 peak/floor=    3.92 @step 8059 re-entry=11992
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.003 peak/floor=    2.72 @step 6532 re-entry=11980
+  rms_roK       : tail/floor= 0.999 peak/floor=    2.66 @step 3590 re-entry=11815
+  rms_roOmega   : tail/floor= 1.015 peak/floor=    4.81 @step 6532 re-entry=11996
+
+OVERALL: ALL PASS
+
+
+## case/39.periodic_hills: gg run_0950_sglsq_s2_gg → lsq run_0951_sglsq_s2_lsq
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/39.periodic_hills/run_0950_sglsq_s2_gg case/39.periodic_hills/run_0951_sglsq_s2_lsq
+(rc=1)
+
+=== case/39.periodic_hills/run_0950_sglsq_s2_gg  [last step 199999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=3.84e-10 peak=3.86e-10 fin=3.83e-10 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=4.13e-08 peak=4.26e-08 fin=4.09e-08 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=4.60e-08 peak=4.66e-08 fin=4.58e-08 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUz    : init=2.92e-08 peak=3.01e-08 fin=2.90e-08 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roe     : init=1.03e-04 peak=1.04e-04 fin=1.03e-04 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roK     : init=2.67e-09 peak=2.77e-09 fin=2.66e-09 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=1.24e-03 peak=1.38e-03 fin=1.23e-03 drop= 0.0dec flat     <-- STALLED (plateau)
+
+=== case/39.periodic_hills/run_0951_sglsq_s2_lsq  [last step 199999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=3.84e-10 peak=3.86e-10 fin=3.83e-10 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=4.13e-08 peak=4.26e-08 fin=4.11e-08 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=4.60e-08 peak=4.66e-08 fin=4.59e-08 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUz    : init=2.92e-08 peak=2.99e-08 fin=2.88e-08 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roe     : init=1.03e-04 peak=1.04e-04 fin=1.03e-04 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roK     : init=2.99e-09 peak=6.41e-09 fin=2.66e-09 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=1.24e-03 peak=1.39e-03 fin=1.22e-03 drop= 0.0dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_floor_ratio.py --start case/39.periodic_hills/run_0950_sglsq_s2_gg case/39.periodic_hills/run_0951_sglsq_s2_lsq
+(rc=0)
+起点床: case/39.periodic_hills/run_0950_sglsq_s2_gg (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 3.828e-10
+  rms_roK       : 2.675e-09
+  rms_roOmega   : 1.242e-03
+  rms_roUx      : 4.121e-08
+  rms_roUy      : 4.591e-08
+  rms_roUz      : 2.909e-08
+  rms_roe       : 1.028e-04
+
+=== case/39.periodic_hills/run_0951_sglsq_s2_lsq  [last step 199999]  -> PASS (plateau 許容、末尾平均 ≤ 1.5× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 0.999 peak/floor=    1.01 @step 81569 re-entry=never left
+  rms_roUx      : tail/floor= 0.997 peak/floor=    1.03 @step 25762 re-entry=never left
+  rms_roUy      : tail/floor= 1.000 peak/floor=    1.01 @step 36979 re-entry=never left
+  rms_roUz      : tail/floor= 0.999 peak/floor=    1.03 @step 9430 re-entry=never left
+  rms_roe       : tail/floor= 1.000 peak/floor=    1.01 @step 95116 re-entry=never left
+  rms_roK       : tail/floor= 1.000 peak/floor=    2.39 @step 584 re-entry=2762
+  rms_roOmega   : tail/floor= 0.998 peak/floor=    1.12 @step 121910 re-entry=never left
+
+OVERALL: ALL PASS
+
+
+## case/16.nozzle_wys: gg run_0956_sglsq_s2_0476_gg_cont → lsq run_0957_sglsq_s2_0476_lsq_cont
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/16.nozzle_wys/run_0956_sglsq_s2_0476_gg_cont case/16.nozzle_wys/run_0957_sglsq_s2_0476_lsq_cont
+(rc=1)
+
+=== case/16.nozzle_wys/run_0956_sglsq_s2_0476_gg_cont  [last step 23999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=2.88e-07 peak=5.72e-07 fin=2.67e-07 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=2.81e-05 peak=5.13e-05 fin=2.47e-05 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=6.10e-05 peak=1.27e-04 fin=4.93e-05 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.74e-02 peak=3.20e-02 fin=1.56e-02 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=6.03e-09 peak=1.18e-08 fin=5.62e-09 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=1.87e-07 peak=3.73e-07 fin=1.74e-07 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roY2    : init=6.96e-08 peak=1.38e-07 fin=6.46e-08 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roY3    : init=3.21e-09 peak=6.38e-09 fin=2.98e-09 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roY4    : init=2.17e-08 peak=4.32e-08 fin=2.01e-08 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roXi    : init=1.04e-04 peak=1.15e-04 fin=1.29e-08 drop= 3.9dec flat   
+
+=== case/16.nozzle_wys/run_0957_sglsq_s2_0476_lsq_cont  [last step 23999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=2.97e-07 peak=5.53e-07 fin=2.62e-07 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=2.91e-05 peak=4.84e-05 fin=2.45e-05 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=6.26e-05 peak=1.25e-04 fin=5.31e-05 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.73e-02 peak=3.13e-02 fin=1.56e-02 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=6.20e-09 peak=1.14e-08 fin=5.45e-09 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=1.93e-07 peak=3.60e-07 fin=1.70e-07 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roY2    : init=7.17e-08 peak=1.34e-07 fin=6.32e-08 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roY3    : init=3.30e-09 peak=6.16e-09 fin=2.91e-09 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roY4    : init=2.24e-08 peak=4.17e-08 fin=1.97e-08 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roXi    : init=1.04e-04 peak=1.15e-04 fin=1.27e-08 drop= 4.0dec flat   
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_floor_ratio.py --start case/16.nozzle_wys/run_0956_sglsq_s2_0476_gg_cont case/16.nozzle_wys/run_0957_sglsq_s2_0476_lsq_cont
+(rc=0)
+起点床: case/16.nozzle_wys/run_0956_sglsq_s2_0476_gg_cont (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 2.912e-07
+  rms_roUx      : 2.497e-05
+  rms_roUy      : 5.399e-05
+  rms_roXi      : 1.312e-08
+  rms_roY0      : 6.089e-09
+  rms_roY1      : 1.896e-07
+  rms_roY2      : 7.037e-08
+  rms_roY3      : 3.243e-09
+  rms_roY4      : 2.195e-08
+  rms_roe       : 1.682e-02
+  inactive: ['rms_roUz']
+
+=== case/16.nozzle_wys/run_0957_sglsq_s2_0476_lsq_cont  [last step 23999]  -> PASS (plateau 許容、末尾平均 ≤ 1.5× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.003 peak/floor=    1.90 @step 19237 re-entry=23962
+  rms_roUx      : tail/floor= 1.007 peak/floor=    1.94 @step 12515 re-entry=23929
+  rms_roUy      : tail/floor= 1.004 peak/floor=    2.31 @step 10484 re-entry=23965
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.004 peak/floor=    1.86 @step 19237 re-entry=23962
+  rms_roY0      : tail/floor= 1.003 peak/floor=    1.87 @step 19237 re-entry=23962
+  rms_roY1      : tail/floor= 1.003 peak/floor=    1.90 @step 19237 re-entry=23962
+  rms_roY2      : tail/floor= 1.003 peak/floor=    1.90 @step 19237 re-entry=23962
+  rms_roY3      : tail/floor= 1.003 peak/floor=    1.90 @step 19237 re-entry=23962
+  rms_roY4      : tail/floor= 1.003 peak/floor=    1.90 @step 19237 re-entry=23962
+  rms_roXi      : tail/floor= 1.001 peak/floor= 8787.37 @step 8 re-entry=5677
+
+OVERALL: ALL PASS
+
+
+## case/16.nozzle_wys: gg run_0952_sglsq_s2_0482_gg → lsq run_0953_sglsq_s2_0482_lsq
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/16.nozzle_wys/run_0952_sglsq_s2_0482_gg case/16.nozzle_wys/run_0953_sglsq_s2_0482_lsq
+(rc=1)
+
+=== case/16.nozzle_wys/run_0952_sglsq_s2_0482_gg  [last step 47999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.75e-07 peak=2.73e-05 fin=9.94e-08 drop= 2.5dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=3.23e-05 peak=1.15e-02 fin=2.78e-05 drop= 2.7dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=2.81e-05 peak=7.35e-03 fin=1.12e-05 drop= 2.9dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=4.49e-03 peak=7.02e-01 fin=1.27e-03 drop= 2.7dec flat     <-- STALLED (plateau)
+  rms_roK     : init=8.23e-04 peak=3.54e-02 fin=1.01e-06 drop= 4.5dec flat   
+  rms_roOmega : init=5.04e+02 peak=2.71e+05 fin=3.76e+02 drop= 3.0dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=1.53e-07 peak=2.70e-05 fin=7.84e-08 drop= 2.5dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=1.70e-09 peak=2.98e-07 fin=8.68e-10 drop= 2.5dec flat     <-- STALLED (plateau)
+  rms_rog_0   : init=8.68e-10 peak=3.49e-06 fin=6.63e-10 drop= 3.7dec flat   
+  rms_roQ2_0  : init=9.49e-04 peak=1.93e-01 fin=9.19e-06 drop= 4.3dec flat   
+  rms_roQ1_0  : init=4.32e+06 peak=4.95e+07 fin=5.63e+02 drop= 5.0dec flat   
+  rms_roQ0_0  : init=1.98e+16 fin=3.67e+10 drop= 5.7dec flat   
+
+=== case/16.nozzle_wys/run_0953_sglsq_s2_0482_lsq  [last step 47999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.75e-07 peak=2.73e-05 fin=8.58e-08 drop= 2.5dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=3.23e-05 peak=1.15e-02 fin=2.24e-05 drop= 2.7dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=2.81e-05 peak=7.35e-03 fin=7.90e-06 drop= 2.9dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=4.49e-03 peak=6.99e-01 fin=1.24e-03 drop= 2.7dec flat     <-- STALLED (plateau)
+  rms_roK     : init=8.25e-04 peak=3.54e-02 fin=1.03e-06 drop= 4.5dec flat   
+  rms_roOmega : init=5.04e+02 peak=2.71e+05 fin=3.99e+02 drop= 3.0dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=1.53e-07 peak=2.70e-05 fin=6.86e-08 drop= 2.5dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=1.70e-09 peak=2.98e-07 fin=7.60e-10 drop= 2.5dec flat     <-- STALLED (plateau)
+  rms_rog_0   : init=8.68e-10 peak=3.49e-06 fin=5.61e-10 drop= 3.7dec flat   
+  rms_roQ2_0  : init=9.49e-04 peak=1.93e-01 fin=7.75e-06 drop= 4.3dec flat   
+  rms_roQ1_0  : init=4.32e+06 peak=4.95e+07 fin=4.73e+02 drop= 5.0dec flat   
+  rms_roQ0_0  : init=1.98e+16 fin=3.08e+10 drop= 5.7dec flat   
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_floor_ratio.py --start case/16.nozzle_wys/run_0952_sglsq_s2_0482_gg case/16.nozzle_wys/run_0953_sglsq_s2_0482_lsq
+(rc=0)
+起点床: case/16.nozzle_wys/run_0952_sglsq_s2_0482_gg (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 9.441e-08
+  rms_roK       : 1.022e-06
+  rms_roOmega   : 3.059e+02
+  rms_roQ0_0    : 3.506e+10
+  rms_roQ1_0    : 5.383e+02
+  rms_roQ2_0    : 8.799e-06
+  rms_roUx      : 2.529e-05
+  rms_roUy      : 9.619e-06
+  rms_roY0      : 7.717e-08
+  rms_roY1      : 8.546e-10
+  rms_roe       : 1.358e-03
+  rms_rog_0     : 6.352e-10
+  inactive: ['rms_roUz']
+
+=== case/16.nozzle_wys/run_0953_sglsq_s2_0482_lsq  [last step 47999]  -> PASS (plateau 許容、末尾平均 ≤ 1.5× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.001 peak/floor=  288.66 @step 78 re-entry=7161
+  rms_roUx      : tail/floor= 1.001 peak/floor=  452.93 @step 39 re-entry=5195
+  rms_roUy      : tail/floor= 0.997 peak/floor=  763.92 @step 98 re-entry=43704
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.002 peak/floor=  515.02 @step 198 re-entry=24291
+  rms_roK       : tail/floor= 1.001 peak/floor=34606.15 @step 58 re-entry=27713
+  rms_roOmega   : tail/floor= 0.993 peak/floor=  886.42 @step 74 re-entry=47992
+  rms_roY0      : tail/floor= 1.000 peak/floor=  349.30 @step 78 re-entry=35670
+  rms_roY1      : tail/floor= 1.000 peak/floor=  349.17 @step 78 re-entry=35670
+  rms_rog_0     : tail/floor= 1.000 peak/floor= 5491.11 @step 24 re-entry=6595
+  rms_roQ2_0    : tail/floor= 1.000 peak/floor=21894.98 @step 18 re-entry=6144
+  rms_roQ1_0    : tail/floor= 1.000 peak/floor=91962.25 @step 11 re-entry=6144
+  rms_roQ0_0    : tail/floor= 1.000 peak/floor=565363.47 @step 0 re-entry=6144
+
+OVERALL: ALL PASS
+
+
+## case/16 系列の準定常 (plan §6 表の閾値)
+
+$ python3 solver_density_cuda/tools/check_quasisteady.py --series-csv case/16.nozzle_wys/run_0952_sglsq_s2_0482_gg/cond_series.csv --series-cols onset_mm,dev_pct,g_exit,M_exit
+(rc=0)
+
+=== case/16.nozzle_wys/run_0952_sglsq_s2_0482_gg/cond_series.csv  [12 rows, steps 4000..48000]  -> STEADY ===
+  onset_mm        : tail mean=23.23  drift=0.0%/tail  fluct=0.0%            STEADY
+  dev_pct         : tail mean=2.468  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 2.46832 (最終比 +0.000 %)] STEADY
+  g_exit          : tail mean=0.01086  drift=0.0%/tail  fluct=0.0%          STEADY
+  M_exit          : tail mean=1.633  drift=0.0%/tail  fluct=0.0%            STEADY
+
+OVERALL: ALL STEADY
+
+
+$ python3 solver_density_cuda/tools/check_quasisteady.py --series-csv case/16.nozzle_wys/run_0953_sglsq_s2_0482_lsq/cond_series.csv --series-cols onset_mm,dev_pct,g_exit,M_exit
+(rc=0)
+
+=== case/16.nozzle_wys/run_0953_sglsq_s2_0482_lsq/cond_series.csv  [12 rows, steps 4000..48000]  -> STEADY ===
+  onset_mm        : tail mean=23.23  drift=0.0%/tail  fluct=0.0%            STEADY
+  dev_pct         : tail mean=2.468  drift=0.0%/tail  fluct=0.0%            STEADY
+  g_exit          : tail mean=0.01086  drift=0.0%/tail  fluct=0.0%          STEADY
+  M_exit          : tail mean=1.633  drift=0.0%/tail  fluct=0.0%            STEADY
+
+OVERALL: ALL STEADY
+
+
+$ python3 solver_density_cuda/tools/check_quasisteady.py --quantity machmax,pmax case/16.nozzle_wys/run_0956_sglsq_s2_0476_gg_cont
+(rc=0)
+
+=== case/16.nozzle_wys/run_0956_sglsq_s2_0476_gg_cont  [7 snapshots, steps 0..24000]  -> STEADY ===
+  machmax  : tail mean=1.913  drift=0.0%/tail  fluct=0.0%            STEADY
+  pmax     : tail mean=5.882e+04  drift=0.0%/tail  fluct=0.0%        STEADY
+
+OVERALL: ALL STEADY
+
+
+$ python3 solver_density_cuda/tools/check_quasisteady.py --quantity machmax,pmax case/16.nozzle_wys/run_0957_sglsq_s2_0476_lsq_cont
+(rc=0)
+
+=== case/16.nozzle_wys/run_0957_sglsq_s2_0476_lsq_cont  [7 snapshots, steps 0..24000]  -> STEADY ===
+  machmax  : tail mean=1.913  drift=0.0%/tail  fluct=0.0%            STEADY
+  pmax     : tail mean=5.882e+04  drift=0.0%/tail  fluct=0.0%        STEADY
+
+OVERALL: ALL STEADY
+
+
+$ python3 solver_density_cuda/tools/check_quasisteady.py --series-csv case/39.periodic_hills/run_0950_sglsq_s2_gg/r1_series.csv --series-cols Cf_x05,Cf_x2,Cf_x6,xr_h,r_gradu,r_gradk,r_gradw,dF1_inf --drift 0.002 --osc 0.005 --tail 0.4
+(rc=0)
+
+=== case/39.periodic_hills/run_0950_sglsq_s2_gg/r1_series.csv  [20 rows, steps 10000..200000]  -> STEADY ===
+  Cf_x05          : tail mean=-0.007396  drift=0.0%/tail  fluct=0.0%        STEADY
+  Cf_x2           : tail mean=-0.004539  drift=0.0%/tail  fluct=0.0%        STEADY
+  Cf_x6           : tail mean=0.0003935  drift=0.0%/tail  fluct=0.0%        STEADY
+  xr_h            : tail mean=5.034  drift=0.0%/tail  fluct=0.0%            STEADY
+  r_gradu         : tail mean=0.9974  drift=0.0%/tail  fluct=0.0%           STEADY
+  r_gradk         : tail mean=0.9844  drift=0.0%/tail  fluct=0.0%           STEADY
+  r_gradw         : tail mean=1  drift=0.0%/tail  fluct=0.0%                STEADY
+  dF1_inf         : tail mean=0.03343  drift=0.0%/tail  fluct=0.1%          STEADY
+
+OVERALL: ALL STEADY
+
+
+$ python3 solver_density_cuda/tools/check_quasisteady.py --series-csv case/39.periodic_hills/run_0951_sglsq_s2_lsq/r1_series.csv --series-cols Cf_x05,Cf_x2,Cf_x6,xr_h,r_gradu,r_gradk,r_gradw,dF1_inf --drift 0.002 --osc 0.005 --tail 0.4
+(rc=0)
+
+=== case/39.periodic_hills/run_0951_sglsq_s2_lsq/r1_series.csv  [20 rows, steps 10000..200000]  -> STEADY ===
+  Cf_x05          : tail mean=-0.007396  drift=0.0%/tail  fluct=0.0%        STEADY
+  Cf_x2           : tail mean=-0.004538  drift=0.0%/tail  fluct=0.0%        STEADY
+  Cf_x6           : tail mean=0.0003932  drift=0.0%/tail  fluct=0.0%        STEADY
+  xr_h            : tail mean=5.034  drift=0.0%/tail  fluct=0.0%            STEADY
+  r_gradu         : tail mean=0.9974  drift=0.0%/tail  fluct=0.0%           STEADY
+  r_gradk         : tail mean=0.9845  drift=0.0%/tail  fluct=0.0%           STEADY
+  r_gradw         : tail mean=1  drift=0.0%/tail  fluct=0.0%                STEADY
+  dF1_inf         : tail mean=0.03351  drift=0.0%/tail  fluct=0.1%          STEADY
+
+OVERALL: ALL STEADY
+
+
+## FCT smoke の保存収支 (checker 全出力 + 丸め前の remainder)
+
+$ python3 solver_density_cuda/tools/check_passive_budget.py --mode fct case/16.nozzle_wys/run_0954_sglsq_s2_fct_gg
+(rc=1)
+passive budget gate for case/16.nozzle_wys/run_0954_sglsq_s2_fct_gg (mode fct, tol 1e-06, tol_lin 0.0001, required ['roXi'], last record step 200, final step config 200 csv 200, FCT configured True active True)
+  roXi    : total 4.170547481e-05 (initial 3.072817533e-06) floor 7.15e-19 lim 0.00e+00 | fct: dropped rel 8.41e-06 base 7.41e-19 pin 2.75e-11 upper 0.00e+00 remainder 8.45e-02 (in sum 8.45e-02) boundary flux -4.215e-05 closure 3.3e-10 total-vs-increment 3.7e-09 qL res(run max) 9.6e-07 HO res(run max) 4.1e-08 | sum 8.45e-02 -> FAIL(REMAINDER_ABS(8.4e-02>1.2e-05),REMAINDER_SIGNED(-8.4e-02>4.0e-06),SUM>tol(8.4e-02))
+  realizability corrections: nearest-point 0, degenerate->monodisperse 0
+  field res_200.h5: roXi/ro in [0.000e+00, 9.998e-01] (violations <0: 0, >1: 0)
+VERDICT: FAIL
+
+
+$ grep -h 'fctCorr' case/16.nozzle_wys/run_0954_sglsq_s2_fct_gg/forge_run.log | tail -1
+(rc=0)
+[passive]   fctCorr roXi     cumulative: dropped antidiffusion 3.508508874e-10 (rel 8.412586e-06) faces 732658 prelimited 0.000000000e+00 pinCorr 1.146609206e-15 (rel 2.749301e-11) baseViol 3.090904779e-23 (rel 7.411269e-19) bndFluxSigned -4.215121023733e-05 bndDropped 3.786963730e-29 upperViol 0.000000000e+00 (rel 0.000000e+00) | budget: srcHist 0.000000000000e+00 remSigned -3.518553129099e-06 remAbs 3.523596956e-06 (rel 8.448764e-02) increment 3.863265712190e-05 | qL rel-residual interval-max 6.86e-08 run-max 9.64e-07 (sweeps last 4) HO residual rel interval-max 3.79e-08 run-max 4.11e-08 nonfinite 0
+
+
+$ python3 solver_density_cuda/tools/check_passive_budget.py --mode fct case/16.nozzle_wys/run_0955_sglsq_s2_fct_lsq
+(rc=1)
+passive budget gate for case/16.nozzle_wys/run_0955_sglsq_s2_fct_lsq (mode fct, tol 1e-06, tol_lin 0.0001, required ['roXi'], last record step 200, final step config 200 csv 200, FCT configured True active True)
+  roXi    : total 4.170547115e-05 (initial 3.072817533e-06) floor 7.15e-19 lim 0.00e+00 | fct: dropped rel 8.41e-06 base 7.41e-19 pin 5.85e-11 upper 0.00e+00 remainder 8.45e-02 (in sum 8.45e-02) boundary flux -4.215e-05 closure 4.8e-10 total-vs-increment 3.8e-09 qL res(run max) 9.6e-07 HO res(run max) 4.1e-08 | sum 8.45e-02 -> FAIL(REMAINDER_ABS(8.4e-02>1.2e-05),REMAINDER_SIGNED(-8.4e-02>4.0e-06),SUM>tol(8.4e-02))
+  realizability corrections: nearest-point 0, degenerate->monodisperse 0
+  field res_200.h5: roXi/ro in [0.000e+00, 9.998e-01] (violations <0: 0, >1: 0)
+VERDICT: FAIL
+
+
+$ grep -h 'fctCorr' case/16.nozzle_wys/run_0955_sglsq_s2_fct_lsq/forge_run.log | tail -1
+(rc=0)
+[passive]   fctCorr roXi     cumulative: dropped antidiffusion 3.508543545e-10 (rel 8.412670e-06) faces 735604 prelimited 0.000000000e+00 pinCorr 2.439409328e-15 (rel 5.849135e-11) baseViol 3.090828176e-23 (rel 7.411086e-19) bndFluxSigned -4.215121199859e-05 bndDropped 7.211536245e-29 upperViol 0.000000000e+00 (rel 0.000000e+00) | budget: srcHist 0.000000000000e+00 remSigned -3.518558557608e-06 remAbs 3.523599715e-06 (rel 8.448771e-02) increment 3.863265346102e-05 | qL rel-residual interval-max 6.85e-08 run-max 9.64e-07 (sweeps last 4) HO residual rel interval-max 3.90e-08 run-max 4.08e-08 nonfinite 0
+
+
+$ python3 solver_density_cuda/tools/check_passive_budget.py --mode fct case/16.nozzle_wys/run_0958_sglsq_s2_fct_gg_nsub30
+(rc=1)
+passive budget gate for case/16.nozzle_wys/run_0958_sglsq_s2_fct_gg_nsub30 (mode fct, tol 1e-06, tol_lin 0.0001, required ['roXi'], last record step 200, final step config 200 csv 200, FCT configured True active True)
+  roXi    : total 4.170547373e-05 (initial 3.072817533e-06) floor 1.60e-22 lim 0.00e+00 | fct: dropped rel 8.41e-06 base 2.25e-22 pin 2.72e-11 upper 0.00e+00 remainder 8.45e-02 (in sum 8.45e-02) boundary flux -4.215e-05 closure 1.7e-10 total-vs-increment 3.8e-09 qL res(run max) 9.6e-07 HO res(run max) 3.9e-08 | sum 8.45e-02 -> FAIL(REMAINDER_ABS(8.4e-02>1.2e-05),REMAINDER_SIGNED(-8.4e-02>4.0e-06),SUM>tol(8.4e-02))
+  realizability corrections: nearest-point 0, degenerate->monodisperse 0
+  field res_200.h5: roXi/ro in [0.000e+00, 9.998e-01] (violations <0: 0, >1: 0)
+VERDICT: FAIL
+
+
+$ grep -h 'fctCorr' case/16.nozzle_wys/run_0958_sglsq_s2_fct_gg_nsub30/forge_run.log | tail -1
+(rc=0)
+[passive]   fctCorr roXi     cumulative: dropped antidiffusion 3.508555040e-10 (rel 8.412697e-06) faces 831391 prelimited 0.000000000e+00 pinCorr 1.133592164e-15 (rel 2.718090e-11) baseViol 9.389505710e-27 (rel 2.251384e-22) bndFluxSigned -4.215120440042e-05 bndDropped 2.560683208e-29 upperViol 0.000000000e+00 (rel 0.000000e+00) | budget: srcHist 0.000000000000e+00 remSigned -3.518548369009e-06 remAbs 3.523593235e-06 (rel 8.448755e-02) increment 3.863265603831e-05 | qL rel-residual interval-max 6.93e-08 run-max 9.64e-07 (sweeps last 4) HO residual rel interval-max 3.48e-08 run-max 3.92e-08 nonfinite 0
+
+
+$ python3 solver_density_cuda/tools/check_passive_budget.py --mode fct case/16.nozzle_wys/run_0959_sglsq_s2_fct_lsq_nsub30
+(rc=1)
+passive budget gate for case/16.nozzle_wys/run_0959_sglsq_s2_fct_lsq_nsub30 (mode fct, tol 1e-06, tol_lin 0.0001, required ['roXi'], last record step 200, final step config 200 csv 200, FCT configured True active True)
+  roXi    : total 4.170547665e-05 (initial 3.072817533e-06) floor 1.75e-22 lim 0.00e+00 | fct: dropped rel 8.41e-06 base 2.02e-22 pin 5.86e-11 upper 0.00e+00 remainder 8.45e-02 (in sum 8.45e-02) boundary flux -4.215e-05 closure 2.6e-10 total-vs-increment 3.7e-09 qL res(run max) 9.6e-07 HO res(run max) 4.1e-08 | sum 8.45e-02 -> FAIL(REMAINDER_ABS(8.4e-02>1.2e-05),REMAINDER_SIGNED(-8.4e-02>4.0e-06),SUM>tol(8.4e-02))
+  realizability corrections: nearest-point 0, degenerate->monodisperse 0
+  field res_200.h5: roXi/ro in [0.000e+00, 9.998e-01] (violations <0: 0, >1: 0)
+VERDICT: FAIL
+
+
+$ grep -h 'fctCorr' case/16.nozzle_wys/run_0959_sglsq_s2_fct_lsq_nsub30/forge_run.log | tail -1
+(rc=0)
+[passive]   fctCorr roXi     cumulative: dropped antidiffusion 3.508581584e-10 (rel 8.412760e-06) faces 832316 prelimited 0.000000000e+00 pinCorr 2.442840972e-15 (rel 5.857363e-11) baseViol 8.419887356e-27 (rel 2.018892e-22) bndFluxSigned -4.215121137618e-05 bndDropped 1.746459474e-29 upperViol 0.000000000e+00 (rel 0.000000e+00) | budget: srcHist 0.000000000000e+00 remSigned -3.518552425903e-06 remAbs 3.523597981e-06 (rel 8.448766e-02) increment 3.863265896132e-05 | qL rel-residual interval-max 6.87e-08 run-max 9.64e-07 (sweeps last 4) HO residual rel interval-max 3.74e-08 run-max 4.08e-08 nonfinite 0
+
+
+$ python3 solver_density_cuda/tools/check_passive_budget.py --mode fct case/16.nozzle_wys/run_0960_sglsq_s2_fct_gg_base36d8
+(rc=1)
+passive budget gate for case/16.nozzle_wys/run_0960_sglsq_s2_fct_gg_base36d8 (mode fct, tol 1e-06, tol_lin 0.0001, required ['roXi'], last record step 200, final step config 200 csv 200, FCT configured True active True)
+  roXi    : total 4.170547269e-05 (initial 3.072817533e-06) floor 7.15e-19 lim 0.00e+00 | fct: dropped rel 8.41e-06 base 7.41e-19 pin 2.58e-11 upper 0.00e+00 remainder 8.45e-02 (in sum 8.45e-02) boundary flux -4.215e-05 closure 5.1e-10 total-vs-increment 3.6e-09 qL res(run max) 9.6e-07 HO res(run max) 3.9e-08 | sum 8.45e-02 -> FAIL(REMAINDER_ABS(8.4e-02>1.2e-05),REMAINDER_SIGNED(-8.4e-02>4.0e-06),SUM>tol(8.4e-02))
+  realizability corrections: nearest-point 0, degenerate->monodisperse 0
+  field res_200.h5: roXi/ro in [0.000e+00, 9.998e-01] (violations <0: 0, >1: 0)
+VERDICT: FAIL
+
+
+$ grep -h 'fctCorr' case/16.nozzle_wys/run_0960_sglsq_s2_fct_gg_base36d8/forge_run.log | tail -1
+(rc=0)
+[passive]   fctCorr roXi     cumulative: dropped antidiffusion 3.508511787e-10 (rel 8.412593e-06) faces 732530 prelimited 0.000000000e+00 pinCorr 1.077067461e-15 (rel 2.582557e-11) baseViol 3.090878832e-23 (rel 7.411207e-19) bndFluxSigned -4.215121030236e-05 bndDropped 6.467742597e-29 upperViol 0.000000000e+00 (rel 0.000000e+00) | budget: srcHist 0.000000000000e+00 remSigned -3.518555319733e-06 remAbs 3.523596559e-06 (rel 8.448763e-02) increment 3.863265500384e-05 | qL rel-residual interval-max 6.88e-08 run-max 9.64e-07 (sweeps last 4) HO residual rel interval-max 3.94e-08 run-max 3.94e-08 nonfinite 0
+
+
+$ python3 solver_density_cuda/tools/check_passive_budget.py --mode fct case/16.nozzle_wys/run_0961_sglsq_s2_fct_gg_nokey
+(rc=1)
+passive budget gate for case/16.nozzle_wys/run_0961_sglsq_s2_fct_gg_nokey (mode fct, tol 1e-06, tol_lin 0.0001, required ['roXi'], last record step 200, final step config 200 csv 200, FCT configured True active True)
+  roXi    : total 4.170547073e-05 (initial 3.072817533e-06) floor 7.15e-19 lim 0.00e+00 | fct: dropped rel 8.41e-06 base 7.41e-19 pin 2.69e-11 upper 0.00e+00 remainder 8.45e-02 (in sum 8.45e-02) boundary flux -4.215e-05 closure -3.9e-10 total-vs-increment 3.6e-09 qL res(run max) 9.6e-07 HO res(run max) 4.2e-08 | sum 8.45e-02 -> FAIL(REMAINDER_ABS(8.4e-02>1.2e-05),REMAINDER_SIGNED(-8.4e-02>4.0e-06),SUM>tol(8.4e-02))
+  realizability corrections: nearest-point 0, degenerate->monodisperse 0
+  field res_200.h5: roXi/ro in [0.000e+00, 9.998e-01] (violations <0: 0, >1: 0)
+VERDICT: FAIL
+
+
+$ grep -h 'fctCorr' case/16.nozzle_wys/run_0961_sglsq_s2_fct_gg_nokey/forge_run.log | tail -1
+(rc=0)
+[passive]   fctCorr roXi     cumulative: dropped antidiffusion 3.508506799e-10 (rel 8.412582e-06) faces 732636 prelimited 0.000000000e+00 pinCorr 1.120058498e-15 (rel 2.685639e-11) baseViol 3.090860552e-23 (rel 7.411163e-19) bndFluxSigned -4.215120562662e-05 bndDropped 3.552403107e-29 upperViol 0.000000000e+00 (rel 0.000000e+00) | budget: srcHist 0.000000000000e+00 remSigned -3.518552566027e-06 remAbs 3.523595025e-06 (rel 8.448760e-02) increment 3.863265304430e-05 | qL rel-residual interval-max 6.88e-08 run-max 9.64e-07 (sweeps last 4) HO residual rel interval-max 3.78e-08 run-max 4.16e-08 nonfinite 0
+

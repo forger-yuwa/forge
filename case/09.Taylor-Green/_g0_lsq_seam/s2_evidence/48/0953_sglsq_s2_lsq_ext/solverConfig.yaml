@@ -1,0 +1,22 @@
+# S2 双子 (plan gradient-scalar-lsq-unification §6)。起点 case/48.flat_plate_cooled_m4/run_0951_sglsq_s2_lsq
+mesh: {discretization: node, nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: mesh.h5,
+  valueFileName: mesh.h5, scalarGradient: lsq}
+gpu: 1
+solver: SLAU
+physProp: {thermalMethod: 0, viscMethod: 1, visc: 1.8e-05, thermCond: 0.0257, thermCondMethod: 1,
+  prandtlLam: 0.72, cp: 1004.5, gamma: 1.4}
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {nStepOuter: 24000}
+  deltaT: {control: 1, dt: 1e-8, cfl: 2.0, cfl_pseudo: 2.0, implicitRelax: 0.7, blockDPLUR: 1,
+    lowMachPrecond: 0, dt_min: 1e-10, dt_max: 1.0, detectNaN: 1}
+  outStepStart: 0
+  outStepInterval: 2000
+  timeIntegration: 11
+  nStepInner: 5
+space: {convMethod: 1, limiter: 2}
+turbulence: {model: sst, scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1,
+  wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInf: 75.0, omegaInf: 26000.0}
+output: {level: 1}
+initial: uniform_p101325_u10

@@ -1,0 +1,28 @@
+# 周期丘 Re=10595: x/z 周期、y 両壁 = 等温壁 (体積力の仕事を吸熱)
+xlo: {physID: 1, kind: periodic, outputHDFflg: 0, ints: {type: 0, partnerBCID: 2}, floats: {dx: 0.252, dy: 0.0, dz: 0.0}}
+xhi: {physID: 2, kind: periodic, outputHDFflg: 0, ints: {type: 0, partnerBCID: 1}, floats: {dx: -0.252, dy: 0.0, dz: 0.0}}
+
+ylo:
+  physID: 3
+  kind: wall_isothermal
+  outputHDFflg: 1
+  ints:
+  floats:
+    Ux: 0.0
+    Uy: 0.0
+    Uz: 0.0
+    Ts: 300.0
+
+yhi:
+  physID: 4
+  kind: wall_isothermal
+  outputHDFflg: 1
+  ints:
+  floats:
+    Ux: 0.0
+    Uy: 0.0
+    Uz: 0.0
+    Ts: 300.0
+
+zlo: {physID: 5, kind: periodic, outputHDFflg: 0, ints: {type: 0, partnerBCID: 6}, floats: {dx: 0.0, dy: 0.0, dz: 0.126}}
+zhi: {physID: 6, kind: periodic, outputHDFflg: 0, ints: {type: 0, partnerBCID: 5}, floats: {dx: 0.0, dy: 0.0, dz: -0.126}}

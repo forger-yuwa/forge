@@ -1,0 +1,10 @@
+start_run: /home/ubuntu/sglsq/s2start/case16_run0482
+res: None
+res_sha256: -
+mesh_sha256 (restart 前、起点の nozzle_user_2d.h5): 909786ef20c733169788ece5eeae13667b5bdd3760d6339748f79c8eeea9fb22
+config changes vs start:
+  - set mesh.scalarGradient: lsq (明示)
+  - set time.last.nStepOuter: 48000 -> 48000
+  - set time.outStepInterval: 4000 -> 4000
+  - IC: 起点の nozzle_user_2d.h5 の VALUE をそのまま使う (restart なし)
+check_solver_config rc=0

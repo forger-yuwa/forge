@@ -1,0 +1,24 @@
+# S2 双子 (plan gradient-scalar-lsq-unification §6)。起点 case/39.periodic_hills/run_0039_r1_gradfix_new_ext
+mesh: {discretization: node, meshFileName: hill_r1_80x50x30.h5, valueFileName: ic_S3_ext.h5,
+  scalarGradient: gg}
+gpu: 1
+detectNaNInterval: 100
+solver: SLAU
+bodyForce: [400.0, 0.0, 0.0]
+physProp: {thermalMethod: 0, viscMethod: 0, visc: 0.0001617, thermCond: 0.2256, cp: 1004.5,
+  gamma: 1.4}
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {nStepOuter: 200000}
+  deltaT: {control: 1, dt: 1.0e-05, cfl: 2.0, cfl_pseudo: 2.0, blockDPLUR: 1, implicitRelax: 0.5,
+    dt_min: 1.0e-09, dt_max: 1.0, detectNaN: 1}
+  outStepStart: 0
+  outStepInterval: 10000
+  timeIntegration: 11
+  nStepInner: 5
+space: {convMethod: 0, limiter: 2, pRef: 101325.0, slauWallNormalChi: 0}
+turbulence: {model: sst, wallTreatmentSST: 0, scalarDiffusion: 1, dilatationCorrection: 2,
+  katoLaunder: 0, turbulentPrandtl: 0.9, kInit: 1.0, omegaInit: 1000.0}
+output: {level: 2}
+initial: uniform_p101325_u10

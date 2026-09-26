@@ -369,7 +369,7 @@ mesh:
 
 `gg` (既定) / `lsq`。node で $k,\omega$・化学種 $Y_s$・受動種 $\xi$・凝縮モーメントの勾配を、Green–Gauss から
 NS と同じ事前計算 LSQ 係数 (差分形、境界は内部隣接のみ、並進周期は合併係数を共有) に切り替える。cell は常に GG (キーは無視)。
-起動エコー `'scalarGradient' effective: <値> (default|explicit)`。**実装済み・検証未完了** (S2 物理 A/B は条件付き・未合格)
+起動エコー `'scalarGradient' effective: <値> (default|explicit)`。**実装済み・Phase 1 検証済み、既定化は未** (S2 は現行 gg 基準で PASS、FCT smoke の収支比較は未決)
 なので既定は `gg` のまま。生産 run で使う前に plan [`gradient-scalar-lsq-unification.md`](../plans/active/gradient-scalar-lsq-unification.md) §5.1 の状態を確認すること。
 段階起動の途中で gg↔lsq を切り替えた run は、`stage_manifest.py` が別区間として扱う (2026-09-26 以降の manifest)。
 
