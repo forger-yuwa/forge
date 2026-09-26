@@ -17,7 +17,7 @@ Claude Code はプロンプトの作法・禁止事項 (巨大ファイルを読
 ### 1.1 診断・設計判断の諮問 (stage = diagnose, 2026-09-26〜)
 
 plan/result 段レビューとは別に、AGENTS.md「モデル分担とエスカレーション」の 7 条件に当たったときの諮問も codex で回す
-(既定は `diagnostician` = Fable サブエージェント。Fable が usage 上限のとき・`.claude/diagnose-backend.local` が `codex` のときの代替。切り替え条件は AGENTS.md)。ブリーフを `notes/reviews/briefs/<日付>-<slug>.md`
+(既定は `diagnostician` = Fable サブエージェント。Fable が usage 上限のとき・`~/.config/forge/diagnose-backend` が `codex` のときの代替。切り替え条件は AGENTS.md)。ブリーフを `notes/reviews/briefs/<日付>-<slug>.md`
 に書き、`codex_review.py --stage diagnose --brief <brief> [plan] [--extra ...]` を回す。出力は
 `notes/reviews/<日付>-<slug>-diagnose.md` (結論・仮説・判別 A/B の定型)。plan の §6.1 レビュー記録表には書かない
 (`check_plans.py` の plan/result 行とは別物)。痕跡は応答と plan §5.1 の `F` 項目の判断欄に残す。

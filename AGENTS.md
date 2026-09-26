@@ -235,8 +235,8 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
 - **代替: codex 諮問** (`gpt-6-astra`, `model_reasoning_effort=high`)。
   `python3 solver_density_cuda/tools/codex_review.py --stage diagnose --brief <brief.md> [plan]`。
 - **切り替え条件** (どれか 1 つで codex 側を使う):
-  1. リポジトリ直下に `.claude/diagnose-backend.local` があり中身が `codex` (git 追跡外のローカルスイッチ。
-     ユーザが「Fable がいっぱい」と言ったら親が `echo codex > .claude/diagnose-backend.local` で立て、
+  1. `~/.config/forge/diagnose-backend` があり中身が `codex` (リポジトリ外に置いた全ワークツリー共通のスイッチ。
+     ユーザが「Fable がいっぱい」と言ったら親が `echo codex > ~/.config/forge/diagnose-backend` で立て、
      「Fable 戻して」で消す)。**諮る前に毎回このファイルを確認する**。
   2. `diagnostician` の呼び出しが usage 上限・rate limit・overloaded で失敗した (その諮問は codex で回し直し、
      応答に「Fable 不可のため codex で代替」と書く。スイッチは立てない — 恒常化はユーザが決める)。

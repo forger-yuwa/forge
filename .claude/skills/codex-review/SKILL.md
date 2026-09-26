@@ -16,7 +16,7 @@ python3 solver_density_cuda/tools/codex_review.py plans/active/<plan>.md --stage
 python3 solver_density_cuda/tools/codex_review.py plans/active/<plan>.md --stage result --base main
 ```
 
-**診断・設計判断の諮問の代替経路** (既定は `diagnostician` = Fable。Fable がいっぱいのとき・`.claude/diagnose-backend.local` が `codex` のとき) も同じツールで回す:
+**診断・設計判断の諮問の代替経路** (既定は `diagnostician` = Fable。Fable がいっぱいのとき・`~/.config/forge/diagnose-backend` が `codex` のとき) も同じツールで回す:
 
 ```bash
 # ブリーフ: 観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 (run パス・commit・設定差分・判定区間・VERDICT) / 仮説
