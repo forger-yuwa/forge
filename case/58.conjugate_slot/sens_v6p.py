@@ -29,7 +29,7 @@ from eval_v6p import analytic, last_step  # noqa: E402
 def wall(run, step):
     with h5py.File(f"{run}/res_slot_front_5_{step}.h5", "r") as f:
         y = np.asarray(f["MESH/COORD"][:], float).reshape(-1, 3)[:, 1]
-        return y, np.asarray(f["VALUE/Ts"][:], float), np.abs(np.asarray(f["VALUE/iface_q_eff"][:], float))
+        return y, np.asarray(f["VALUE/Ts"][:], float), np.asarray(f["VALUE/iface_q_eff"][:], float)  # 符号を保つ (前壁は +q*)
 
 
 def main():

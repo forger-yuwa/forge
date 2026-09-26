@@ -56,6 +56,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "..", "solver_density_cuda", "tools"))
 from solid_fem2d import Fem2DOperator  # noqa: E402
+from check_cht_interface import load_node_log  # noqa: E402
 
 # --- 問題の定義 (固体 h5 と config と一致させること) ---
 TC, TW2 = 300.0, 500.0          # 冷却剤 (背面 Robin) / 後壁 (固定等温・熱側)
@@ -181,9 +182,13 @@ def main():
             cc = np.asarray(f["MESH/COORD"][:], float).reshape(-1, 3)
             Qf = np.asarray(f["VALUE/iface_Qf_eff"][:], float) if "iface_Qf_eff" in f["VALUE"] else None
             return cc[:, 1], np.asarray(f["VALUE/Ts"][:], float), \
-                   np.abs(np.asarray(f["VALUE/iface_q_eff"][:], float)), Qf
+                   np.asarray(f["VALUE/iface_q_eff"][:], float), Qf
+    # **符号を保つ** (codex result 8 巡目 M1: 絶対値にすると後壁の符号反転を見逃した)。
+    # `iface_q_eff` は流体→壁が正。前壁 (冷) は流体から熱を受けるので +q*、後壁 (熱) は流体へ出すので −q*。
+    # 比較は「熱の流れる向き (後壁→流体→前壁) に正」で揃え、前壁は q_eff、後壁は −q_eff とする。
     y1, Ts1, q1, Qf1 = wall("res_slot_front_5")
-    y2, _, q2, _ = wall("res_slot_back_6")
+    y2, _, q2raw, _ = wall("res_slot_back_6")
+    q2 = -q2raw
     i1 = np.array([np.argmin(np.abs(y1 - b)) for b in band])
     i2 = np.array([np.argmin(np.abs(y2 - b)) for b in band])
     ib = np.array([np.argmin(np.abs(rows - b)) for b in band])
@@ -200,7 +205,7 @@ def main():
     crit = [("(a) T_w1 誤差 [% of 固体上昇]", np.abs(T1 - Tw1s) / drop * 100, a.tol),
             ("(b) q_w1 誤差 [% of q*]", np.abs(Q1 - qs) / qs * 100, a.tol),
             ("(c) q_w2 誤差 [% of q*]", np.abs(Q2 - qs) / qs * 100, a.tol),
-            ("(d) G-cons |q_w1-q_w2| [% of q*]", np.abs(Q1 - Q2) / qs * 100, a.tol),
+            ("(d) G-cons |q_eff,1+q_eff,2| [% of q*]", np.abs(Q1 - Q2) / qs * 100, a.tol),   # 流体柱の符号つき収支
             ("(e) 連成の保存 |Q_sol-Q_f|/A [% of q*]", Econs / qs * 100, a.tol_cons),
             ("(f) 連成の T 連続 [K]", np.abs(tif_i[ib] - T1), a.tol_tc)]
     print(f"\n{'量':<40}{'帯内 max':>11}{'帯平均':>11}{'許容':>9}  判定")
@@ -223,8 +228,11 @@ def main():
     print(f"\n帯を {run}/v6p_band.json に書いた: --band-y {ytop:.9g} {ybot:.9g}")
     fl, fn = f"{run}/conjugate_iface_log_5.csv", f"{run}/conjugate_iface_nodes_5.csv"
     if os.path.exists(fl) and os.path.exists(fn):
-        nd = np.loadtxt(fn, delimiter=",", skiprows=1, ndmin=2)
-        lg = np.loadtxt(fl, delimiter=",", skiprows=1, ndmin=2)
+        from pathlib import Path
+        try:
+            nd, lg, _, _ = load_node_log(Path(run), 5)     # 整合検査つき (G-if と同じ関数)
+        except ValueError as e:
+            print(f"節点ログが不整合なので準定常系列を書かない: {e}"); return 1
         yN, AN = nd[:, 3], nd[:, 4]
         inb = np.where((yN >= ybot - 1e-9) & (yN <= ytop + 1e-9))[0]
         ups = np.unique(lg[:, 0].astype(int))

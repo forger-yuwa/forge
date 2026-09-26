@@ -493,6 +493,16 @@ $D_f$ が大きいとき量子化で止まった状態を合格にできる。
   (定数零空間)、$q_{\rm eff}$ が 1 節点でも非有限、`flux: q_eff` なのに `interfaceDiag != 1`。
 - **判定**: 界面の収束は [`tools/check_cht_interface.py`](../solver_density_cuda/tools/check_cht_interface.py) が
   `conjugate_gate.json` の**事前登録値**で行う (`check_convergence.py` は流体の保存量しか見ない)。
+  **帯を限った判定**: `conjugate: {node_log: 1}` にすると、更新ごとに界面全節点の
+  更新前物理残差 $r_i$ [W/m]・流体荷重 $Q_{f,i}$・壁温の変化 $\Delta T_i$・$T_{w,i}$ を `conjugate_iface_log_<physID>.csv` に、
+  節点の $y_i$・集中辺長 $A_i$ を `conjugate_iface_nodes_<physID>.csv` に書く (host 側の出力のみで更新式は不変)。
+  `check_cht_interface.py --band-y YTOP YBOT` がこれを読み、①②③を**帯内節点だけ**で、④固体内部残差は全域で判定する
+  (結果は `CHT_INTERFACE_BAND_VERDICT.txt`)。節点表の有限性・正の面積、ID の連番・一意性・完全性、更新内の時刻一致、
+  履歴との更新数の一致を検査し、崩れていれば `REFUSED`。全域 max だけを持つ `conjugate_history.csv` では、
+  lip 行のような局所のリップルが深部の判定を支配するため (CHT plan §5.1 #101、`case/58`)。
+  **固体が受け持つ熱の保存検査**は固体の物理作用素から $Q_{\rm sol}=(K_su-b_s)_{\rm iface}$ を組んで $Q_f$ と比べる。
+  固体ダンプの `q_iface` は**流体荷重 $Q_f$ のコピー**なので、これを使うと渡した荷重を渡した荷重と比べることになる
+  (CHT plan §5.1 #100)。
 
 - **再開**: 出力ステップごとに `conjugate_Tw_<physID>.csv` を書く。続きを回すときは
   これを `wall_profile_<physID>.csv` にコピーして `ints: {conjugate: 1, wallProfile: 1}` にすると、

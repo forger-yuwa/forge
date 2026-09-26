@@ -61,24 +61,66 @@ def fail(run: Path, verdict: str, lines: list[str]) -> int:
     return 0 if verdict == "PASS" else 1
 
 
-def band_values(run: Path, pid: int, ytop: float, ybot: float, n_consec: int, n_hist: int):
-    """帯内節点で ① ② ③ を更新ごとに組む。戻り値 (vals dict, lines) か、(None, 理由 lines)。"""
+def load_node_log(run: Path, pid: int):
+    """節点表と節点ログを読み、**整合を全部検査して**から返す (codex result 8 巡目 M2)。
+
+    検査しないと、座標 NaN の節点が帯判定から黙って落ちる・節点 ID の欠け/重複が配列代入で隠れる・
+    更新内で 1 節点だけ別時刻の行が混ざる、がすべて PASS になった (メモリ上の改変で再現済み)。
+    戻り値 (nodes[ni,5], log[:,7], updates[:], ni)。不整合は ValueError (理由つき)。
+    `eval_v6p.py` の準定常系列もこれを使う。"""
     import numpy as np
     fn_nodes = run / f"conjugate_iface_nodes_{pid}.csv"
     fn_log = run / f"conjugate_iface_log_{pid}.csv"
     if not fn_nodes.exists() or not fn_log.exists():
-        return None, [f"  {fn_log.name} / {fn_nodes.name} が無い (conjugate.node_log: 1 で回した run を渡すこと)"]
+        raise ValueError(f"{fn_log.name} / {fn_nodes.name} が無い (conjugate.node_log: 1 で回した run を渡すこと)")
     nd = np.loadtxt(fn_nodes, delimiter=",", skiprows=1, ndmin=2)
+    if nd.shape[1] < 5 or not np.isfinite(nd).all():
+        raise ValueError("節点表に欠損・非有限値がある (座標または面積)")
+    ni = nd.shape[0]
+    if not np.array_equal(nd[:, 0], np.arange(ni)):
+        raise ValueError("節点表の ID が 0..n-1 の連番でない (欠け・重複・非整数)")
+    if not (nd[:, 4] > 0).all():
+        raise ValueError("節点表に面積 A_i <= 0 の節点がある")
+    lg = np.loadtxt(fn_log, delimiter=",", skiprows=1, ndmin=2)
+    if lg.shape[1] < 7 or not np.isfinite(lg).all():
+        raise ValueError("節点ログに欠損・非有限値がある (NaN/Inf)")
+    if not (np.all(lg[:, 0] == np.round(lg[:, 0])) and np.all(lg[:, 2] == np.round(lg[:, 2]))):
+        raise ValueError("節点ログの更新番号・節点 ID が整数でない")
+    upd = lg[:, 0].astype(np.int64)
+    if np.any(np.diff(upd) < 0):
+        raise ValueError("節点ログの更新番号が単調でない (再開で番号が戻った / 追記の混線)")
+    ups, starts, counts = np.unique(upd, return_index=True, return_counts=True)
+    bad = np.where(counts != ni)[0]
+    if len(bad):
+        raise ValueError(f"更新 {ups[bad[0]]} の行数 {counts[bad[0]]} が界面節点数 {ni} と違う")
+    ids = lg[:, 2].astype(np.int64).reshape(len(ups), ni)
+    if not (np.sort(ids, axis=1) == np.arange(ni)).all():
+        raise ValueError("更新内の節点 ID が 0..n-1 をちょうど 1 回ずつ含まない (欠け・重複)")
+    st = lg[:, 1].reshape(len(ups), ni)
+    if not (st == st[:, :1]).all():
+        k = int(np.where(~(st == st[:, :1]).all(axis=1))[0][0])
+        raise ValueError(f"更新 {ups[k]} の中で step が節点ごとに違う (時刻の不一致)")
+    return nd, lg, upd, ni
+
+
+def band_values(run: Path, pid: int, ytop: float, ybot: float, n_consec: int, n_hist: int):
+    """帯内節点で ① ② ③ を更新ごとに組む。戻り値 (vals dict, lines) か、(None, 理由 lines)。"""
+    import numpy as np
+    try:
+        nd, lg, upd, ni = load_node_log(run, pid)
+    except ValueError as e:
+        return None, [f"  {e}"]
     y, A = nd[:, 3], nd[:, 4]
     lo, hi = min(ytop, ybot), max(ytop, ybot)
     inb = (y >= lo - 1e-9) & (y <= hi + 1e-9)       # 帯の端は 1e-9 m に丸めて書かれる
     if not inb.any():
         return None, [f"  帯 y∈[{lo:.6g}, {hi:.6g}] に界面節点が無い"]
-    lg = np.loadtxt(fn_log, delimiter=",", skiprows=1, ndmin=2)
-    if not np.isfinite(lg).all():
-        return None, ["  節点ログに非有限値がある (NaN/Inf)"]
-    upd = lg[:, 0].astype(np.int64)
-    ni = len(y)
+    # **帯の節点集合を評価器の帯と照合する**: 評価器が同じ帯を v6p_band.json に書いていれば行数を比べる
+    bj = run / "v6p_band.json"
+    if bj.exists():
+        b = json.loads(bj.read_text())
+        if abs(b["ytop"] - hi) < 1e-9 and abs(b["ybot"] - lo) < 1e-9 and int(b["rows"]) != int(inb.sum()):
+            return None, [f"  帯内の界面節点 {int(inb.sum())} が評価器の帯の行数 {b['rows']} と違う"]
     ups = np.unique(upd)
     if ups[-1] != n_hist:
         return None, [f"  節点ログの最終更新 {ups[-1]} と履歴の更新数 {n_hist} が食い違う"
@@ -89,8 +131,6 @@ def band_values(run: Path, pid: int, ytop: float, ybot: float, n_consec: int, n_
     out = {"res_abs_Wm2": [], "res_rel": [], "dTw_max": [], "step": []}
     for u in tail_u:
         blk = lg[upd == u]
-        if len(blk) != ni:
-            return None, [f"  更新 {u} の行数 {len(blk)} が界面節点数 {ni} と違う"]
         idx = blk[:, 2].astype(int)
         r = np.empty(ni); Q = np.empty(ni); dT = np.empty(ni)
         r[idx], Q[idx], dT[idx] = blk[:, 3], blk[:, 4], blk[:, 5]
