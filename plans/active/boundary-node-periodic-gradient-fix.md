@@ -120,6 +120,7 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | 5a | G0/G1/G2/G2′ ハーネス | #2 の再現物に加え、G1-a の CPU float32 再現、線形 $Y$ (化学種) を 1 本焼いて床を 1 行記録、float32 反例 (期待 1.000000、root 両順序)、ジッタ格子 (±0.2h、決定論的、周期像は同じ量)、CPU double 参照、F1≠1 入力で 1・2 回目に輸送が読む値。合格: §6 G0/G1/G2/G2′ | O |
 | 5b (**完了 2026-09-26**、PASS) | R3 | case/48・case/16・case/44 の勾配配列が旧新ビット同一 (F1 初期化で 1 step 目が変わる run は 2 step 目以降のノイズ床比較) | O |
 | 5c (**実装済 2026-09-26**、G1-a/G1-b PASS、R3 は #5b) | 周期半割面の除外 (§4.2a) | `mesh` に `planePeriodic`、3 カーネルの条件置換。合格: §6 G1-a/G1-b/定数場を 7 run 再実行、R3 ビット同一。`plans/accepted/species-passive-scalar-unification.md` §4.1-5-1 に訂正 1 行 | O (判断: 2026-09-26 `diagnostician`・本 plan で修正) |
+| 5d (R2 収支は**完了**、R1 延長は実行中) | R1 延長・R2 収支 (判断: 2026-09-26 `diagnostician`) | R1: 800k 場から `restart_field.py` で +800k step (同一設定・同一閾値、10k–1.6M 全系列 `--tail 0.4`)。なお DRIFTING なら「限定合格 (単調収束中・漸近値・末尾全点で ≤ 0.05)」と書きラベルは変えない。F1 差の L2 と x 継ぎ目の比を参考列に。case/39 の `slauWallNormalChi` 実効値を旧新で控える。R2: 既存 snapshot から $r(t)=(dK/dt+\varepsilon)/(K_0/t_c)$ (測る前に固定: 新は $|r|\le0.05$、旧は $t\lesssim7$ で $r>0$ が持続すれば「継ぎ目由来の注入」、符号不定なら「収支が閉じない」に留める) | O |
 | 5 | 検証 R1・R2 | §6 R1・R2 (5a・5b の後)。**区切りで codex** | O (結論 F) |
 | 6 | docs + codex result | `methods/gradient.md` の「修正中」を外す | F |
 
@@ -143,6 +144,8 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | plan (実装レビュー) | `2026-09-26` | [2026-09-26-boundary-node-periodic-gradient-fix-plan-2.md](../../notes/reviews/2026-09-26-boundary-node-periodic-gradient-fix-plan-2.md) | **GO-with-changes**, C0/M2/m2 | **全件採用** (2026-09-26 `diagnostician` 判断)。M1 → 実変位で組む (§4.1、実装済)。M2 → G2′ の誤差床とジッタ格子、R1 の $C_f$/$x_r$ 抽出規則、R2 の保存上限を具体値で固定 (§6)。m3 → F1 初期値を確保時へ (§4.2、実装済)。m4 → G0 再現物の保存 (§5.1 #2・#5a)。順序 G0/G1/G2′/R3 → R1/R2 |
 | G1 閾値の判断 | `2026-09-26` | (本 plan §6 G1、`_g0_lsq_seam/G0_translational_m1.txt`) | `diagnostician`: G1 の 1e-5 は float32 GG の床の見落とし | 採用。GG カーネルは変えない。G1 を G1-a (float32 再現でバグ検出) と G1-b (面数から導いた床) に分割。§1 の「正しい」を合併の意味に限定 |
 | G1-a FAIL の判断 | `2026-09-26` | (本 plan §4.2a、`_g0_lsq_seam/G_tgv.txt` ほか) | `diagnostician`: 前行の「床」判断は誤り。真因は周期半割面除外の死に条件 | 採用。§4.2a の面フラグで修正 (#5c)、G1 を修正後基準に、G2′ ゼロ成分はジッタ格子で次数判定、root 交換は mirror (点反転) で代替 (root は union-find の最小 index で bcond 順に依らない、`mesh.cpp:704-712`) |
+| R1/R2 解釈 | `2026-09-26` | (本 plan §6.2) | `diagnostician`: dF1_inf DRIFTING は 1 回延長、R2 は KE 収支で帰属を確定、抽出の [解釈] 4 点は注記つきで承認 | 採用 (#5d)。R1 の Cf・$x_r$ 変化は「本 plan の修正 (旧新差は本 plan の 7 commit のみ) の効果」と書き「改善」とは書かない。$x_r$ を LES との距離で評価しない。codex result は #5d の後 |
+| R2 収支基準 | `2026-09-26` | (本 plan §6.2 R2) | `diagnostician`: 新 $|r|\le0.05$ は数値散逸を見落とした誤指定 | 測定後の訂正として記録し、符号判定 (a)(b)(c) に置換。旧は「注入」と書く (根拠: $K/K_0>1$ と $r>0$ の連続、Π 差し引き後)。0.05 を緩めて通すことはしない。任意で 64³ の新 run で $|r|_{max}$ の格子依存を記録 (§7) |
 
 ### 6.2 結果
 
@@ -172,6 +175,13 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
   SLAU 粘性 (Re 1600、κ は Pr 0.71 から 1.408e-4、`slauWallNormalChi: 0`) 新: 質量 2.3e-8、運動量 1.2e-8、全エネルギー 8.3e-9。
   **旧新差 (記録のみ)**: max|ΔK/K0| 1.0e-1 (t = 10.85)、最終 4.5e-2、max|Δ(ΔS/S0)| 3.4e-3 — §6 の見込み 1e-3〜1e-2 を超える。
   観測: 旧 SLAU は t ≲ 7 で K/K0 が 1.02 まで増え ΔS < 0、新は単調減少 (`r2_ke_entropy.png`)。**解釈は未確定** (R1 と合わせて `diagnostician`、条件 7)。
+  **KE 収支 (#5d、`case/09.Taylor-Green/r2_ke_budget.{py,csv,txt,png}`)**: $r=(dK/dt-\Pi+\varepsilon)/(K_0/t_c)$ ($\varepsilon$ は解像粘性散逸、$\Pi=\int p\nabla\cdot u$)。
+  新: $r\le-0.0074$ (全時刻負、$t\le7$ は −0.0074〜−0.0447、$|r|_{max}$ 0.0885 @ t≈13 = 散逸ピーク)。旧: $t\le4.5$ で +0.0096〜+0.0118 が連続、$K/K_0$ 最大 1.0187。
+  ~~判定: 新 $|r|\le0.05$~~ → **訂正 (2026-09-26、測定後の訂正であることを明記)**: 当初基準は風上スキーム (SLAU・MUSCL) の数値散逸が $\varepsilon$ に入らないことを見落とした誤指定 (`diagnostician`)。
+  符号で判定し直す: (a) 新 $r\le+0.005$ 全時刻 → 最大 −0.0074 **成立**、(b) $r_{old}-r_{new}>0$ が $t\le7$ の全 snapshot → 最小 +0.0176・平均 +0.0257 **成立**、
+  (c) 旧の $K/K_0>1$ 区間で $r>0$ が連続 ≥ 10 snapshot → 15 連続 **成立**。$|r|$ の大きさはゲートにしない (数値散逸の量は本 plan の対象外)。
+  **解釈 (`diagnostician` 2026-09-26)**: 旧 SLAU 粘性 TGV は継ぎ目由来の非物理なエネルギー注入を持ち、修正後は注入が消えて $r\le0$ (数値散逸のみ)。
+  旧新のバイナリ差は本 plan の 7 commit のみ。「10 % 差」は旧の注入とそれに伴う散逸ピークのずれ。経路 (粘性応力か対流再構成か) は測っていないので書かない。「改善/悪化」とは書かない。
 - **R1 (実行中)**: `case/39.periodic_hills/run_0036_r1_gradfix_old` / `run_0037_r1_gradfix_new` (AWS `~/forge-pgrad-new/`)、メッシュ 80×50×30 y1 1.5e-3 h (品質 PASS、AR 149)、
   1 次 SST 定常 (S1 静止スピンアップ 2000 → S2 成形 IC 800k step)。先行 300k の暫定: 収束 PASS 旧新とも、新の Cf_x6・dF1・r_gradk は DRIFTING (単調減衰)。継ぎ目比 旧 r_gradu 2.24 / r_gradk 1.58 / r_gradw 0.50 / dF1 0.55 → 新 1.00 / 0.99 / 1.00 / 0.03。壁解像 局所 y1+ 最大 0.75、超過 0 %。最終判定は 800k の結果で行う。
 
