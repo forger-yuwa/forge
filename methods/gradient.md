@@ -75,6 +75,14 @@ $$
   既知の負結果があり回帰対照のみ。**推奨は `gradLSQ=2` (係数事前計算 + スペクトル打ち切りフォールバック**、
   [discretization.md §7.3.1](discretization.md#実装))。
   ([plans/active/discretization-lsq-gradient.md](../plans/active/discretization-lsq-gradient.md) §0/§9)。
+- **node のスカラー勾配** ($k,\omega$・化学種 $Y_s$・受動種 $\xi$・凝縮モーメント): 既定は GG
+  (境界半割面を owner 値で積算、軸対称は `A_planar`)。NS の LSQ と同じ事前計算係数に揃える opt-in 経路
+  `mesh.scalarGradient: lsq` を実装中 ([plans/active/gradient-scalar-lsq-unification.md](../plans/active/gradient-scalar-lsq-unification.md))。
+  LSQ 経路は差分形 $\sum_j c_{ij}(\phi_j-\phi_i)$ で定数場が厳密に 0 (GG は壁節点で float32 の閉包誤差約 $5\,\varepsilon|\phi|/h$)、
+  境界は NS と同じ内部隣接のみ、並進周期は NS の合併係数を共有、軸対称×周期・回転周期は片側 (gather しない)。
+  既定の生産設定で生きているスカラー勾配は $k,\omega$ だけ (`speciesFaceReconstruction` の既定 0)。
+- ジッタ格子での LSQ 勾配の最大誤差の次数は 0.8–1.0 (格子ごとに評価点集合と stencil が変わるため)。
+  形状固定の縮小では 1 次整合で、継ぎ目の誤差定数は内部以下 (plan boundary-node-periodic-gradient-fix §6.2 #8b)。欠陥でなく作用素の性質。
 - **GG は非一様メッシュで線形場非厳密**: `fx` 射影補間の GG 勾配は一様直交では線形場を機械精度で
   再現するが、ノードジッタ/三角形/高 AR メッシュでは O(1) の相対勾配誤差が残る
   (30% ジッタ quad で最大 66%、`tools/verify_linear_recon.py` で定量・全 PASS)。

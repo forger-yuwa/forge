@@ -103,6 +103,7 @@ $\nabla u_r=\cos\theta\nabla u_y+\sin\theta\nabla u_z+u_\theta\nabla\theta$、$\
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | ~~1~~ (**済 2026-09-26**: GO-with-changes C0/M7/m2、全件採用) | codex plan 段 | | F |
+| **0a** (2026-09-26 登録、plan gradient-scalar-lsq-unification §5.1 #7 から) | **node + type 1 周期は回転実装まで起動エラーにする** (最優先) | 現状は速度も勾配も回さずに走ってしまう (gradient-scalar-lsq-unification で起動**警告**のみ入れる)。あわせて NS の `periodicGradientGather_d_wrapper` (`periodicNode_d.cu:171-206`) は並進かどうかを判定しないので、回転周期では合併係数の無い片側 LSQ の和 (2 倍の疑い) になっている — 回転の実装で直す | O |
 | **0** (**測定済み 2026-09-26: 2 倍を確認**、§6.2。修正は codex に諮ってから) | **LSQ seam 合算の測定と修正** (§4.0、最優先) | (1) 並進周期 node mesh に線形場を置き 1 step の勾配、seam / 内部の比を記録 (期待: 現行 2.0、修正後 1.0 ± 1e-5)。2 倍が出なければ「確認済み・修正不要」。(2) 修正: 事前計算で $M$ を seam 越しに合算 (`calcGradient_d.cu`、`mesh.cpp`)。(3) 線形場試験 PASS。**区切りで codex** | O (F レビュー) |
 | 2 | 角の簿記・pairing・閉ループ・受付表 + 負例試験 | `mesh.cpp`・`mesh.hpp`・`boundaryCond.cpp` (dtheta を double で)。合格: §6 U0・U1 | O |
 | 3 | 回転の gather / broadcast / ミラー / dq / 勾配 ($M$ の回転を含む) | `periodicNode_d.{cu,cuh}`。合格: V1 (純軸流 free-stream) + V2-i (固定状態の作用素比較)。**区切りで codex** | O (F レビュー) |

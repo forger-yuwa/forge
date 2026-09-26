@@ -667,6 +667,10 @@ float32 格納で解く条件数 2 乗の増幅と、(b) 一部メッシュに�
 
 ##### 7.3.1 `gradLSQ=2`: 係数事前計算 + スペクトル打ち切りフォールバック
 
+> **スカラーへの適用 (実装中、opt-in)**: 係数は幾何のみで変数に依らないので、$k,\omega$・化学種・受動種の勾配も
+> 同じ係数 (継ぎ目の合併済み) で求められる。`mesh.scalarGradient: lsq` (既定 `gg`)、
+> [plans/active/gradient-scalar-lsq-unification.md](../plans/active/gradient-scalar-lsq-unification.md)。
+
 メッシュが静的なら正規方程式の解は**幾何のみの線形演算子**に畳める:
 
 $$
