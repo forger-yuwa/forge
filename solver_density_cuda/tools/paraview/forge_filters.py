@@ -39,7 +39,8 @@ Forge Saturation (凝縮 ON/OFF どちらの run にも使える後処理):
     - `Run Config (solverConfig.yaml path)` に run の solverConfig.yaml を指定すると、`physProp.species` と
       `condensation.condensationSpecies` / `condGasSpecies` (無ければ H2O) から `Y{index}` を名前で解決する
       (tools/forge_species.py)。
-    - 指定しないときは `Vapor Mass Fraction Array` を明示する (空ならエラー)。空気凝縮 (CPG carrier, 配列なし) は
+    - 指定しないときは `Vapor Mass Fraction Array` を明示する。両方空なら上流 reader の入力ファイルと同じ
+      ディレクトリの solverConfig.yaml から同様に解決する (見つからなければエラー)。空気凝縮 (CPG carrier, 配列なし) は
       Vapor Mass Fraction Array を "none" にして Vapor Mass Fraction Constant を使う。
   蒸気分圧 p_v = ro (Y_v − g) R_v T (carrier 形, forge cond_vapor_state と同一)。蒸気配列が無く定数も 0 なら
   純蒸気 (p_v = P)。空気凝縮 (CPG carrier) は Vapor Mass Fraction Constant に condVaporMassFraction (0.7671) を入れる。
@@ -91,6 +92,27 @@ def _attr(ds, assoc):
 def _str_prop(value):
     """stringvector の値を文字列にする。GUI は空欄を None で渡すので "None" にしない。"""
     return "" if value is None else str(value).strip()
+
+
+def _upstream_run_dir(algo):
+    """algo から上流をたどって reader のファイル名を探し、その隣に solverConfig.yaml があればそのディレクトリを返す。"""
+    import os
+    for _ in range(32):
+        if algo is None:
+            return None
+        for getter in ("GetCurrentFileName", "GetFileName"):
+            fn = getattr(algo, getter, None)
+            try:
+                path = fn() if fn else None
+            except Exception:  # vtkFileSeriesReader.GetFileName は index 引数を取る
+                path = None
+            if isinstance(path, str) and path:
+                d = os.path.dirname(os.path.abspath(path))
+                return d if os.path.isfile(os.path.join(d, "solverConfig.yaml")) else None
+        if algo.GetNumberOfInputPorts() == 0 or algo.GetNumberOfInputConnections(0) == 0:
+            return None
+        algo = algo.GetInputAlgorithm(0, 0)
+    return None
 
 
 def _has(ds, assoc, name):
@@ -601,16 +623,20 @@ class ForgeSaturation(VTKPythonAlgorithmBase):
     def RequestData(self, request, inInfo, outInfo):
         inp = vtkDataObject.GetData(inInfo[0])
         out = vtkDataObject.GetData(outInfo)
+        self._input_run_dir = _upstream_run_dir(self.GetInputAlgorithm(0, 0) if self.GetNumberOfInputConnections(0) else None)
         for _, leaf in _leaf_pairs(inp, out):
             if leaf.IsA("vtkDataSet"):
                 self._compute_leaf(leaf)
         return 1
 
     def _resolve_vapor_array(self):
-        """蒸気配列名を決める: Run Config があれば名前解決、無ければ明示配列 (空はエラー)。"none" は配列なし。"""
-        if self._run_config:
+        """蒸気配列名を決める: Run Config → 明示配列 → 入力ファイルと同じディレクトリの solverConfig.yaml の順。
+        どれも無ければエラー。"none" は配列なし。"""
+        run_dir = self._run_config
+        if not run_dir and not self._yv_array:
+            run_dir = getattr(self, "_input_run_dir", None)
+        if run_dir:
             import os, sys
-            run_dir = self._run_config
             if os.path.isfile(run_dir):
                 run_dir = os.path.dirname(os.path.abspath(run_dir))
             tools_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -628,7 +654,8 @@ class ForgeSaturation(VTKPythonAlgorithmBase):
                 return None if self._yv_array.lower() == "none" else self._yv_array
             raise RuntimeError(f"Forge Saturation: {run_dir} に凝縮種/H2O が無い。Vapor Mass Fraction Array を明示すること")
         if not self._yv_array:
-            raise RuntimeError("Forge Saturation: Vapor Mass Fraction Array が空。Run Config (solverConfig.yaml) を指定するか、"
+            raise RuntimeError("Forge Saturation: Vapor Mass Fraction Array が空で、入力ファイルの隣に solverConfig.yaml も無い。"
+                               "Run Config (solverConfig.yaml) を指定するか、"
                                "配列名 (例 Y1) を明示する (Y1 を既定採用しない: 種順序で H2O の index は変わる)。"
                                " 配列を使わない (純蒸気/定数) なら \"none\"")
         return None if self._yv_array.lower() == "none" else self._yv_array
