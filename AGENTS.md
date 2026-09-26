@@ -15,7 +15,7 @@
 | [`procedures/recommended-settings.md`](procedures/recommended-settings.md) | **推奨解析設定の正本** (解析種別ごとの現行レシピ・日付付き・旧設定一覧)。config を組む/点検するときは skill `forge-config` の手順で参照 |
 | [`procedures/solver-settings.md`](procedures/solver-settings.md) | `convMethod` / `limiter` などの数値設定リファレンス |
 | [`procedures/su2-cross-check.md`](procedures/su2-cross-check.md) | 同一メッシュ・同一 BC で SU2 と比較し forge 固有の問題を切り分ける手順 |
-| `.claude/agents/*.md` | モデル固定のサブエージェント定義 (`run-watcher` / `implementer`)。診断・設計判断の諮問は codex (`codex_review.py --stage diagnose`)。分担とエスカレーション条件の正本は本ファイル「[モデル分担とエスカレーション](#モデル分担とエスカレーション-2026-09-22)」 |
+| `.claude/agents/*.md` | モデル固定のサブエージェント定義 (`run-watcher` / `implementer` / `diagnostician`)。`diagnostician` (Fable) が使えないときの代替は codex (`codex_review.py --stage diagnose`)。分担とエスカレーション条件の正本は本ファイル「[モデル分担とエスカレーション](#モデル分担とエスカレーション-2026-09-22)」 |
 | [`procedures/codex-review.md`](procedures/codex-review.md) | 計画立案時・検証結果時の **codex 外部レビュー**の手順 (`codex_review.py`、記録の残し方、指摘の採否ルール)。Claude はプロンプト作法・禁止事項を skill `codex-review` |
 | [`plans/active/tooling-nozzle-sern-chain.md`](plans/active/tooling-nozzle-sern-chain.md) | ⑤ SERN の設計チェーン。起動レシピ (§4.12/§4.16)・収束判定 (§4.16.1)・残作業 (§5.1)。Claude は skill `sern-eval` |
 | [`procedures/inlet-profile.md`](procedures/inlet-profile.md) | 入口に分布 (全温・全圧・組成・k/ω・超音速入口の ρ,U,Ps) を与える手順 (`inletProfile` CSV + `gen_inlet_profile.py`)。Claude は skill `forge-inlet-profile` |
@@ -228,7 +228,20 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
 
 ## モデル分担とエスカレーション (2026-09-22)
 
-**2026-09-26 ユーザ決定: 上位の判断役 (旧 `diagnostician` = Fable サブエージェント) は usage が嵩むため codex (`gpt-6-astra`, `model_reasoning_effort=high`) に置き換えた**。諮問は `python3 solver_density_cuda/tools/codex_review.py --stage diagnose --brief <brief.md> [plan]` で回す (以下「上位」「諮る」はこの codex 諮問を指す)。
+**上位の判断役は 2 系統あり、切り替えて使う (2026-09-26 ユーザ決定)**。以下「上位」「諮る」はどちらかへの諮問を指す。
+
+- **既定: `diagnostician` サブエージェント (Fable)**。
+- **代替: codex 諮問** (`gpt-6-astra`, `model_reasoning_effort=high`)。
+  `python3 solver_density_cuda/tools/codex_review.py --stage diagnose --brief <brief.md> [plan]`。
+- **切り替え条件** (どれか 1 つで codex 側を使う):
+  1. リポジトリ直下に `.claude/diagnose-backend.local` があり中身が `codex` (git 追跡外のローカルスイッチ。
+     ユーザが「Fable がいっぱい」と言ったら親が `echo codex > .claude/diagnose-backend.local` で立て、
+     「Fable 戻して」で消す)。**諮る前に毎回このファイルを確認する**。
+  2. `diagnostician` の呼び出しが usage 上限・rate limit・overloaded で失敗した (その諮問は codex で回し直し、
+     応答に「Fable 不可のため codex で代替」と書く。スイッチは立てない — 恒常化はユーザが決める)。
+  3. ユーザがその場で codex を指定した。
+- ブリーフは両系統で共通 (下記の 5 分割)。codex 側はファイルに書いて渡すので、Fable 側でも同じファイルを
+  `notes/reviews/briefs/` に残しておくと、失敗時にそのまま codex へ回せる。
 
 上位の判断役は高価・低速なので**判断の場面だけ**に使い、実装・run・後処理は下位モデルに寄せる。
 分担の軸は「難しさ」ではなく**「誤りをツールで判定できるか」**である。収束・準定常・メッシュ品質・plan 構造は
@@ -241,7 +254,7 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
 
 | 担当 | 作業 |
 | --- | --- |
-| **上位 (codex astra, effort high)** | plan §4 設計方針・§6 検証計画 / 手順で解けない発散・異常の真因切り分け / codex Critical・Major の採否 / result 段の解釈 / `solver_density_cuda/cuda_forge/` の数値カーネル変更のレビュー |
+| **上位 (既定 Fable `diagnostician` / 代替 codex astra high)** | plan §4 設計方針・§6 検証計画 / 手順で解けない発散・異常の真因切り分け / codex Critical・Major の採否 / result 段の解釈 / `solver_density_cuda/cuda_forge/` の数値カーネル変更のレビュー |
 | **中位 (Opus)** | 既定の主セッション。plan §5.1 に沿った実装、skill 経由の config 組み、メッシュ生成、Python ツール、報告、docs 同期 |
 | **下位 (Sonnet)** | run の準備・NaN 早期確認・終了後の`check_*` 実行・`residual_history.png`・case README の run 一覧同期、コード探索 |
 
@@ -254,7 +267,9 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
   必要な VERDICT・判定区間・対象量が揃うまで、親は結果報告を完了扱いにしない。
 - `implementer` (中位): 主セッションが plan §5.1 の項目を実装させるときに使う。方針は変えさせない。
   項目番号を渡さなければ編集せずに返る。
-- **codex 諮問 (上位)**: 下のエスカレーション条件に当たったら `codex_review.py --stage diagnose` で諮る
+- `diagnostician` (上位・既定。指示上の編集禁止。Edit/Write は持たないが Bash は持つ): 下のエスカレーション条件に当たったら諮る。
+  ブリーフの書き方は次項の codex 諮問と同じ。
+- **codex 諮問 (上位・代替)**: 上の切り替え条件に当たったら `codex_review.py --stage diagnose` で諮る
   (read-only サンドボックス、所要 5〜15 分なので `run_in_background` + timeout 1200 s 以上。難所は `--effort xhigh`)。
   ブリーフは `notes/reviews/briefs/<日付>-<slug>.md` に書き (codex がリポジトリ内で読めるよう、また記録として残すため)、
   関連 plan を位置引数、case README 等を `--extra` で渡す。出力は `notes/reviews/<日付>-<slug>-diagnose.md`。
@@ -271,14 +286,14 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
   (`echo "run_case.sh case/99.claimprobe_child"` を子に打たせて台帳を見る)。
 - **定義はセッション開始時に読み込まれる** (2026-09-22 実測)。`.claude/agents/*.md` を追加・変更したセッションからは
   その定義を呼べない (`Agent type not found`)。新規セッションでは読み込まれ、`run-watcher` = Sonnet 5 /
-  `implementer` = Opus 5 で動くことを確認した (旧 `diagnostician` = Fable 5.1 は 2026-09-26 に廃止)。
+  `implementer` = Opus 5 / `diagnostician` = Fable 5.1 (`model: claude-fable-5-1` は受理される) で動くことを確認した。
   定義を変えたら `claude -p --model haiku` の別プロセスから 1 回呼んで確かめる。
 - **固定コスト**: サブエージェントは 1 回の呼び出しで AGENTS.md・メモリ索引・ツール定義ぶん**約 4.7 万トークン**を読む
   (2026-09-22 実測、`echo` 1 回で 47,499)。codex 諮問も編集単位で細かく回さず、**判断単位にまとめて**回す。
   費用削減は未計測の見立てなので、運用開始後にセッション別の実費で確かめる。
 
 **エスカレーション条件** (「難しいと感じたら」では発火しないので、**外から観測できる行為**で決める)。
-次のいずれかに当たったら codex 諮問 (`--stage diagnose`) に諮ってから先へ進む:
+主セッションが上位モデルでないとき、次のいずれかに当たったら上位 (既定 `diagnostician`、切り替え条件に当たれば codex 諮問) に諮ってから先へ進む:
 
 1. `plans/active/*.md` の §4 設計方針・§6 検証計画を新規に書く、または方針を変える。
 2. [`procedures/divergence-and-startup.md`](procedures/divergence-and-startup.md) の手順で**2 回**対処しても発散・未収束が解けない
@@ -292,14 +307,14 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
 7. **result 段の解釈を確定する前** (VERDICT が出そろい、codex の `--stage result` に回す前)。結果が予想どおりに見えるときも諮る
    (過渡ピークを定常値と、抽出アーチファクトを物理と誤認した実績は「予想どおり」に見える場面で起きた)。
 
-- **痕跡を残す** (run パス明示・VERDICT 貼付と同じ扱い): 条件に当たった応答には「codex (diagnose) に諮った: `notes/reviews/<記録>.md` — 結論 1 行」を書く。
+- **痕跡を残す** (run パス明示・VERDICT 貼付と同じ扱い): 条件に当たった応答には「`diagnostician` に諮った (結論 1 行)」または「codex (diagnose) に諮った: `notes/reviews/<記録>.md` — 結論 1 行」を書く。
   **「諮っていない」は保留の記録であって通過ではない** — 諮るまで、その条件が守る先 (修正の投入・原因の記載・解釈の確定) へ進まない。
   plan §5.1 残作業表の**担当列** (`F` = 上位の判断が要る / `O` = 中位で自走可) を埋め、`F` の項目を完了にするときは
   内容欄に「判断: 日付・結論 1 行」を書く。
 - 諮問の結論は**仮説**であり、提案された A/B を回して確かめる。codex レビュー 2 回 (plan / result 段) は諮問とは別に維持する
   (諮問も codex になったので、同じ論点を諮問とレビューで二度聞くより、諮問は切り分け、レビューは plan 全体の点検と役割を分ける)。
-- 主セッションが Fable でも codex 諮問は省略しない (Fable を判断役に使わないのが 2026-09-26 決定の趣旨)。
-  run と実装の委譲 (下向き) は従来どおり。
+- 主セッション自身が上位モデル (Fable) のときは諮問を省いてよい。ただし codex スイッチが立っているとき
+  (Fable 節約中) は、主セッションが Fable でも判断は codex 諮問に回す。run と実装の委譲 (下向き) は従来どおり。
 - §5.1 を書くときは (諮問の結論を反映する主セッションが)、中位が迷わず実行できる粒度にする (触るファイル・合格条件の VERDICT・回す run)。
   plan がモデル間の受け渡しの仕様である。
 - サブエージェントは Claude Code のみの仕組み。Copilot 側には本節の分担と条件そのものが規範として効く

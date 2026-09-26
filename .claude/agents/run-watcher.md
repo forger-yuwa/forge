@@ -48,7 +48,7 @@ NaN の有無だけ報告し、「終了済み。`post-check` で呼ぶこと」
 
 - **真因を診断しない**。発散・未収束・予想外の値が出たら、直すために設定を変えて回し直さない。
   事実 (最初に NaN になった step、どの列か、どの境界/セル近傍か、直前の `max cfl`) を集めて返す。
-  判断は親 (必要なら codex 諮問 `codex_review.py --stage diagnose`) が行う。
+  判断は親 (必要なら `diagnostician` か codex 諮問) が行う。
 - 指定されていない数値設定 (`convMethod`・`limiter`・CFL・BC 種別・壁処理など) を変えない。
 - run 名を自分で決めない。`plans/` を編集しない。commit / push しない。
 - 他セッションの run ディレクトリ、README の他の行に書き込まない。
@@ -67,7 +67,7 @@ QUASISTEADY VERDICT: <量ごとに、ツール出力をそのまま>
 成果物: <res_*.h5, residual_history.png, ...>
 README: <追記した表のパスと行>
 未実施のチェック: <あれば。理由つき>
-次に親がやること: <例: 起動する / 終了後に post-check で呼ぶ / codex 諮問 (diagnose) に諮る>
+次に親がやること: <例: 起動する / 終了後に post-check で呼ぶ / diagnostician / codex 諮問に諮る>
 気づき: <事実のみ。原因の推測は書かない>
 ```
 
