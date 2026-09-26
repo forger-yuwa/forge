@@ -161,3 +161,12 @@ plan [`gradient-scalar-lsq-unification.md`](../../../plans/active/gradient-scala
 | `pregather_check.py` / `PREGATHER_4b.txt`・`DUMPCHECK_case48.txt` | #4b (gather 前 NS 18 配列のビット同一性と順列和の集合) と、S1 規則の流用によるダンプ非干渉の初回判定 (FAIL 記録) |
 | `dump_recheck.py` / `DUMP_RECHECK_{tgv,case48}.txt` | #4d: E (厳密) / P (順列集合) / N (両側ノイズ) 区分での再判定 (事後規則)。tgv は N の 1 配列が FAIL |
 | `lsq8_run.py` / `DUMP_RECHECK_tgv_lsq8.txt` | #4f: lsq のダンプ無し・有り各 8 本 (ABBA 順) の一度限りの追加試験 → E/P A・N PASS |
+
+### S2 物理 A/B と S3 性能 (2026-09-26、AWS、run は各 case の `run_095x_sglsq_*`)
+
+| ファイル | 内容 |
+| --- | --- |
+| `s2_setup.py` | 起点 run の入力を複製して双子を作る (`mesh.scalarGradient` 明示、`restart_field.py` でビット一致の IC、廃止キー削除・上書き、`check_solver_config.py`、`IC_FROM.txt` に起点 sha256 と設定差) |
+| `s2_twin_diff.py` | 双子の同一 step の場の差 (最大絶対差・相対) と共通ゲート (NaN、ΣY、ξ、モーメント) |
+| `s2_eval_case40.py` | case/40 の η_CF (`thrust_metrics`)・ṁ・壁温の系列と双子差 |
+| `s3_perf.py` / `S3_case{48,39}.txt` | S3: gg/lsq 交互 3 反復の step 時間 (走行中に他の forge が現れたら取り直す)。`S3_case48_contaminated.txt` は重なった無効測定の記録 |
