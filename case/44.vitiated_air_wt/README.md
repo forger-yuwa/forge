@@ -652,6 +652,7 @@ forge は species_db の MW で Y に換算する (起動ログ `Y_H2O = 0.03769
 
 - 問題 YAML: `problem_va3_M4.19_Lc8_{dry,noneq,eq}_lumpX.yaml` (`composition_basis: mole`, `tp_species: {mode: lumped, …, keep: [H2O]}`; eq は `condEquilibrium: 2` = EOS 拘束形)。
 - 生成は `runner_axismach --prepare-only --cfl 6 --implicit-relax 0.7`、段階起動は `run_lumpX_staged.py` (bcond の Y→X 置換、soft 1 次 cfl 0.5 ×3000 → mid 1 次 cfl 1 ×3000 → 本段 2 次 cfl 6 + `implicitRelax 0.7`, `nStepInner 4`, 24000 step; 段間は `restart_field.py` で index コピー、`stage_manifest.json` 付き)。凝縮 run は `output.level 2`。
+  数値設定は recommended-settings §1 (nStepInner 4) と §3 (TP 凝縮: cfl 6〜8 + relax 0.7, 根拠 `run_0181`–`0189`) に従った。同文書 §4 (Euler 設計評価 2026-09-04: cfl 4 / nStepInner 5) とは値が違う (codex 2026-09-27 諮問 Minor の指摘; どちらを Euler×TP に適用するかは未整理)。
 - ローカル RTX 3060, `FORGE_CUDA_BLOCKSIZE=256` (既定 512 は node SLAU カーネルのレジスタ上限で起動不能)。メッシュ品質 PASS (AR 10.5 / skew 0.443)。
 - 後処理 `lumpX_series_csv.py` → 各 run の `lumpX_series.csv` / `QUASISTEADY_SERIES_VERDICT.txt`。
 
