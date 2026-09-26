@@ -451,3 +451,38 @@ def provenance(run_dir):
     if not os.path.exists(p):
         return ""
     return "".join(l for l in open(p) if l.startswith(("forge_sha256", "git_head", "forge_mtime")))
+
+
+# ----------------------------------------------------------------------------------------------------
+# FORGE_DUMP_PREGATHER (plan gradient-scalar-lsq-unification §5.1 #4a) の読み出しと、周期 gather の順列和
+# ----------------------------------------------------------------------------------------------------
+def read_pregather(path_tag):
+    """`<path>.<tag>` と `.names` を読む。戻り値 dict 名前 -> (nCells, 3) float32。"""
+    with open(path_tag + ".names") as fp:
+        nv, nc = map(int, fp.readline().split())
+        names = [l.strip() for l in fp if l.strip()]
+    a = np.fromfile(path_tag, dtype=np.float32).reshape(nv, nc, 3)
+    return {nm: a[i] for i, nm in enumerate(names)}
+
+
+def gather_perm_sums(msh, pre, max_members=8):
+    """周期 gather (`periodicGather1ToRoot_d`: root の値に member を atomicAdd) の結果になりうる float32 値の集合。
+    pre: (nCells, 3) float32 の gather 前配列。戻り値 dict root -> 成分ごとの set (frozenset of float32 bit pattern)。
+    root の値から始め、member を任意の順で float32 で足す (member 同士の順列 (n−1)! 通り)。"""
+    import itertools
+    out = {}
+    for r, mem in msh.groups.items():
+        others = [m for m in mem if m != r]
+        if len(mem) > max_members:
+            continue
+        sets = []
+        for c in range(3):
+            vals = set()
+            for perm in itertools.permutations(others):
+                acc = np.float32(pre[r, c])
+                for m in perm:
+                    acc = np.float32(acc + np.float32(pre[m, c]))
+                vals.add(acc.view(np.uint32).item())
+            sets.append(vals)
+        out[r] = sets
+    return out

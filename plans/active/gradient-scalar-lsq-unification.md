@@ -93,9 +93,9 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 | 2i | S3 の測定手順 | native・同一 GPU・同一 BLOCKSIZE・ウォームアップ 500 後 2000 step × 3 の中央値、REG/spill | O |
 | 3 (**完了 2026-09-26**、判断: 2026-09-26 `diagnostician`・diff レビューで欠陥なし、periodicGradientGather の登録変更を採用) | 実装 (Phase 1) | §4、§5 の 2。REG 38/39/40/48 (NV 1–4)、spill 0。AWS 最小確認: lsq の線形場誤差 ≤ 丸め床、NS 配列は lsq/gg でビット一致、gg の面寄与ダンプは HEAD と不一致 0 | O |
 | 4 (S0 は測れた範囲 PASS、S1 は tgv の (2) が FAIL → #4a–#4c、2026-09-26) | S0/S1 | ハーネス (AWS)。結果 `case/09.Taylor-Green/_g0_lsq_seam/{S0_*.txt,S0e_case39.txt,S1.txt}` | O |
-| 4a | 出力 hook (判断: 2026-09-26 `diagnostician`、既定 off・出力専用・数値不変) | (a) `FORGE_DUMP_PREGATHER=<path>`: `periodicGradientGather` の直前 (`main.cpp:1304`・`:1477`) に NS 18 本 + dY + dξ/モーメントの局所配列 [nVar][nCells][3] を、`ransGradient` の lsq 分岐では gather 直前の dK/dΩ を非 atomic に書く。gg 経路でも同じ位置で書ける。既存 `FORGE_DUMP_SCALARGRAD` (面寄与) とは別名。(b) `dY{s}d{x,y,z}` と `wall_y_eff` を output の extraFields に登録 (post-gather 値)。**入れた commit で S1(1) (gg 旧 vs 新、4 ケース × 3 本) を再実行して不変を示し、ダンプ有効時に res が変わらないことを 1 ケースで見る** | O |
-| 4b | tgv S1(2) FAIL の判定 A/B (測る前に固定) | gg 3 本・lsq 3 本で pre-gather ダンプを取り、(i) NS 18 配列の gather 前がビット同一か、(ii) 不一致 36 節点の gg・lsq の gather 後の値が member 部分和の float32 順列和の集合に含まれるか。**A**: (i) 同一かつ (ii) 全点で含まれる → 「atomicAdd の順序差」として閉じ、§6 S1 (2) を下記に訂正。**B**: (i) 不一致 → lsq 経路が NS の入力を壊している → 実装を止めて調べる。**B′**: (i) 同一だが (ii) が外れる → gather 以外の非決定源があるので順序差の説明は採らない | O (結論 F) |
-| 4c | Y の未測定項目 (S0-a の Y 5 種、S0-c の dY と dξ のビット一致、チャンク境界 4+1、S0-e の wall_y_eff) | 5 種は case/16 `run_0471` の組 [H2O, N2, O2, AR, CO2] (TP、README:30 で PASS 済み)。Y0 = Y4 = q (ξ と同じ量子化場、q < 0.5)、Y1..Y3 は正の sin 場で Σ = 1 − 2q を double で作ってから量子化。Y4 = ξ でチャンク境界の孤立変数を、Y0 で先頭チャンクを見る。S0-a の参照入力は res_0 の読み戻し (`VALUE/Y{s}`・`Xi`)。追加: Σ_s dY_s = 0 (≤ 4ε Σ\|dY_s\|) を全節点で | O |
+| 4a (**実装済・未 commit・レビュー待ち 2026-09-26**: diff `notes/sessions/gradient-scalar-lsq-unification-4a-hook.patch`、作業ツリーに未 commit で残置。S1(1) 再実行 4 ケース PASS。「ダンプ有効で res 不変」は S1 規則の流用で tgv・case48 が FAIL — 合否規則が事前に無かった。判断待ち) | 出力 hook (判断: 2026-09-26 `diagnostician`、既定 off・出力専用・数値不変) | (a) `FORGE_DUMP_PREGATHER=<path>`: `periodicGradientGather` の直前 (`main.cpp:1304`・`:1477`) に NS 18 本 + dY + dξ/モーメントの局所配列 [nVar][nCells][3] を、`ransGradient` の lsq 分岐では gather 直前の dK/dΩ を非 atomic に書く。gg 経路でも同じ位置で書ける。既存 `FORGE_DUMP_SCALARGRAD` (面寄与) とは別名。(b) `dY{s}d{x,y,z}` と `wall_y_eff` を output の extraFields に登録 (post-gather 値)。**入れた commit で S1(1) (gg 旧 vs 新、4 ケース × 3 本) を再実行して不変を示し、ダンプ有効時に res が変わらないことを 1 ケースで見る** | O |
+| 4b (**完了 2026-09-26: A**。gather 前 NS 18 配列は 6 本ビット同一、gather 後の差 (res_0 124・res_1 232 節点、全て 4 member) は全点が部分和の順列和の集合内。`PREGATHER_4b.txt`) | tgv S1(2) FAIL の判定 A/B (測る前に固定) | gg 3 本・lsq 3 本で pre-gather ダンプを取り、(i) NS 18 配列の gather 前がビット同一か、(ii) 不一致 36 節点の gg・lsq の gather 後の値が member 部分和の float32 順列和の集合に含まれるか。**A**: (i) 同一かつ (ii) 全点で含まれる → 「atomicAdd の順序差」として閉じ、§6 S1 (2) を下記に訂正。**B**: (i) 不一致 → lsq 経路が NS の入力を壊している → 実装を止めて調べる。**B′**: (i) 同一だが (ii) が外れる → gather 以外の非決定源があるので順序差の説明は採らない | O (結論 F) |
+| 4c (**完了 2026-09-26: 4 変種 PASS**。`S0Y_*.txt`、`S0e_case39.txt`) | Y の未測定項目 (S0-a の Y 5 種、S0-c の dY と dξ のビット一致、チャンク境界 4+1、S0-e の wall_y_eff) | 5 種は case/16 `run_0471` の組 [H2O, N2, O2, AR, CO2] (TP、README:30 で PASS 済み)。Y0 = Y4 = q (ξ と同じ量子化場、q < 0.5)、Y1..Y3 は正の sin 場で Σ = 1 − 2q を double で作ってから量子化。Y4 = ξ でチャンク境界の孤立変数を、Y0 で先頭チャンクを見る。S0-a の参照入力は res_0 の読み戻し (`VALUE/Y{s}`・`Xi`)。追加: Σ_s dY_s = 0 (≤ 4ε Σ\|dY_s\|) を全節点で | O |
 | 5 | S2/S3 | §6 の表 (**すべて AWS**、ユーザ指示で 2D も AWS) | O (結論 F) |
 | 5r | codex result 1 回目 | Phase 1 | F |
 | 6 | 既定の切り替え (Phase 2) | **前提**: 5r が GO、2g 完了、S3 ≤ 5 %。S4、2h、docs、codex result 2 回目 | F |
@@ -147,6 +147,8 @@ node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2
 - [ ] `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
 
 ## 9. 変更ログ
+
+- `2026-09-26` — #4b = A、#4c PASS、#4a は実装済み・未 commit。hook の diff レビューと「ダンプ有効で res 不変」の判定規則、§6 S1 (2) 訂正の適用可否は上位モデルの上限到達で未決 (引き継ぎ `notes/sessions/2026-09-26-gradient-scalar-lsq-handoff.md`)。
 
 - `2026-09-26` — S0 (測れた範囲 PASS) と S1 (tgv の NS 配列で FAIL) の結果を受け、`diagnostician` 判断で出力 hook (#4a)、tgv の決定的 A/B (#4b)、Y の未測定項目 (#4c) を追加。
 

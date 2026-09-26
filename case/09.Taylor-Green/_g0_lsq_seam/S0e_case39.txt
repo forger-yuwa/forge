@@ -1,11 +1,11 @@
 # S0-e case/39 (plan gradient-scalar-lsq-unification §6 S0-e)
-harness revision: 7ebf6d7 (dirty)
+harness revision: 1a33427 (dirty)
 
 ## S0-e BC 後の周期 group 内の同値性 (診断、case/39 run_0039_r1_gradfix_new_ext res_800000 起点、lsq 1 step)
-run: /home/ubuntu/sglsq/s0/s0e_case39
-forge_mtime : 2026-09-26T09:28:02+00:00
-forge_sha256: 05b42b44f01eff65b56ad1870349c0451746821322b2a349a1abe27c54e5e06a
-git_head    : 7ebf6d7db7e0198e57052952434b7f55020003b6
+run: /home/ubuntu/sglsq/s0h/s0e_case39
+forge_mtime : 2026-09-26T09:53:49+00:00
+forge_sha256: a398afdc2c42b64861ac1efdccbbae5c75f929346a1ae23773095fd8ee56766f
+git_head    : 1a334275e07a5fb75724cfdbb9025b8a771add38
 周期 group 5559 (壁∩継ぎ目の group 218)
 | res | 場 | 区分 | member 節点 | group 内差が非零の member | 最大 |φ_m − φ_root| | 最大 相対 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -17,6 +17,8 @@ git_head    : 7ebf6d7db7e0198e57052952434b7f55020003b6
 | 0 | roK | 壁なし継ぎ目 | 5439 | 0 | 0.000e+00 | 0.00e+00 |
 | 0 | roOmega | 壁∩継ぎ目 | 222 | 0 | 0.000e+00 | 0.00e+00 |
 | 0 | roOmega | 壁なし継ぎ目 | 5439 | 0 | 0.000e+00 | 0.00e+00 |
+| 0 | wall_y_eff | 壁∩継ぎ目 | 222 | 0 | 0.000e+00 | 0.00e+00 |
+| 0 | wall_y_eff | 壁なし継ぎ目 | 5439 | 0 | 0.000e+00 | 0.00e+00 |
 | 1 | k | 壁∩継ぎ目 | 222 | 0 | 0.000e+00 | 0.00e+00 |
 | 1 | k | 壁なし継ぎ目 | 5439 | 0 | 0.000e+00 | 0.00e+00 |
 | 1 | omega | 壁∩継ぎ目 | 222 | 0 | 0.000e+00 | 0.00e+00 |
@@ -25,5 +27,6 @@ git_head    : 7ebf6d7db7e0198e57052952434b7f55020003b6
 | 1 | roK | 壁なし継ぎ目 | 5439 | 0 | 0.000e+00 | 0.00e+00 |
 | 1 | roOmega | 壁∩継ぎ目 | 222 | 0 | 0.000e+00 | 0.00e+00 |
 | 1 | roOmega | 壁なし継ぎ目 | 5439 | 0 | 0.000e+00 | 0.00e+00 |
-wall_y_eff: 出力変数に無い (variables.hpp の output_cellValNames 外) ので測れない (保留)
-S0-e 記録 (case/39 run_0039_r1_gradfix_new_ext res_800000 起点、lsq 1 step): k・ω の group 内差 すべて 0 (判定ではなく記録)
+| 1 | wall_y_eff | 壁∩継ぎ目 | 222 | 0 | 0.000e+00 | 0.00e+00 |
+| 1 | wall_y_eff | 壁なし継ぎ目 | 5439 | 0 | 0.000e+00 | 0.00e+00 |
+S0-e 記録 (case/39 run_0039_r1_gradfix_new_ext res_800000 起点、lsq 1 step): k・ω・wall_y_eff の group 内差 すべて 0 (判定ではなく記録)

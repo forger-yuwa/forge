@@ -1,0 +1,52 @@
+# #4c 化学種 5 種 (H2O, N2, O2, AR, CO2) の Y 項目 (channel、lsq 1 step)
+harness revision: 1a33427 (dirty)
+run: /home/ubuntu/sglsq/s0/s0y_channel
+forge_mtime : 2026-09-26T09:53:49+00:00
+forge_sha256: a398afdc2c42b64861ac1efdccbbae5c75f929346a1ae23773095fd8ee56766f
+git_head    : 1a334275e07a5fb75724cfdbb9025b8a771add38
+起動エコー: 'scalarGradient' effective: lsq (explicit); [FORGE_DUMP_PREGATHER] wrote 6 x 1989 x 3 pre-gather gradients to /home/ubuntu/sglsq/s0/s0y_channel/pregather.init; [FORGE_DUMP_PREGATHER] wrote 5 x 1989 x 3 pre-gather gradients to /home/ubuntu/sglsq/s0/s0y_channel/pregather.species_lsq.loop1; [FORGE_DUMP_PREGATHER] wrote 1 x 1989 x 3 pre-gather gradients to /home/ubuntu/sglsq/s0/s0y_channel/pregather.passive_lsq.loop1; [FORGE_DUMP_PREGATHER] wrote 6 x 1989 x 3 pre-gather gradients to /home/ubuntu/sglsq/s0/s0y_channel/pregather.loop1; [FORGE_DUMP_PREGATHER] wrote 2 x 1989 x 3 pre-gather gradients to /home/ubuntu/sglsq/s0/s0y_channel/pregather.rans.loop1
+NaN/Inf: なし
+res_0 の T: min 300.00 / max 300.00 K、ΣY − 1: max |.| 0.00e+00
+
+## S0-a (Y): res_1 の dY{s} (gather 後) vs 合併 LSQ double (入力 res_0 の Y{s})、≤ 1e-5·S
+| 種 | S | 最大差 | 最大差/S | 判定 |
+| --- | --- | --- | --- | --- |
+| Y0 (H2O) | 0.674 | 4.646e-08 | 6.89e-08 | ok |
+| Y1 (N2) | 0.7477 | 4.075e-08 | 5.45e-08 | ok |
+| Y2 (O2) | 0.6249 | 5.494e-08 | 8.79e-08 | ok |
+| Y3 (AR) | 0.8213 | 6.745e-08 | 8.21e-08 | ok |
+| Y4 (CO2) | 0.674 | 4.646e-08 | 6.89e-08 | ok |
+VERDICT S0-a Y (channel): PASS
+
+## S0-c (dY と dξ): 前提 res_0 で Y0 = Y4 = ξ (ビット)
+res_0 で Y0≠ξ の節点 0、Y4≠ξ の節点 0 (全 1989)
+| 段 | 比較 | 対象節点 | ビット不一致 | 判定 |
+| --- | --- | --- | --- | --- |
+| gather 前 (ダンプ) | dY0 vs dξ | 1989 | 0 | ok |
+| gather 前 (ダンプ) | dY4 vs dξ | 1989 | 0 | ok |
+| gather 後 (res_1) | dY0 vs dξ、member ≤ 2 | 1937 | 0 | ok |
+| gather 後 (res_1) | dY0・dξ、member ≥ 3 は順列和の集合に含まれる | 52 | 集合外 0 (参考: dY0≠dξ の節点 16) | ok |
+| gather 後 (res_1) | dY4 vs dξ、member ≤ 2 | 1937 | 0 | ok |
+| gather 後 (res_1) | dY4・dξ、member ≥ 3 は順列和の集合に含まれる | 52 | 集合外 0 (参考: dY4≠dξ の節点 8) | ok |
+VERDICT S0-c dY・dξ (channel): PASS
+
+## Σ_s dY_s = 0: 全節点・全成分で |Σ dY| ≤ 4ε Σ|dY_s| (res_1、gather 後)
+| 最大 |Σ dY| | 最大 |Σ dY|/(ε Σ|dY|) | 超過 (節点×成分) | 超過の member 数 | 判定 |
+| --- | --- | --- | --- | --- |
+| 8.941e-08 | 1.06 | 0 | [] | ok |
+VERDICT ΣdY (channel): PASS
+
+## S0-e wall_y_eff (記録): res_0 / res_1 の周期 group 内差 (member − root)
+| res | 区分 | member | 非零 | 最大 |差| | 最大 相対 |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 壁∩継ぎ目 | 50 | 0 | 0.000e+00 | 0.00e+00 |
+| 0 | 壁なし継ぎ目 | 275 | 0 | 0.000e+00 | 0.00e+00 |
+| 1 | 壁∩継ぎ目 | 50 | 0 | 0.000e+00 | 0.00e+00 |
+| 1 | 壁なし継ぎ目 | 275 | 0 | 0.000e+00 | 0.00e+00 |
+S0-e wall_y_eff 記録 (channel): すべて 0
+
+## まとめ
+S0-a(Y): True
+S0-c(dY): True
+SumdY: True
+S0-e(wall_y_eff)_nonzero: False

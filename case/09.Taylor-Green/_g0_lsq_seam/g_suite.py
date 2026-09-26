@@ -726,8 +726,8 @@ def s0_eval_e(run, label, h5name=None):
     P("| --- | --- | --- | --- | --- | --- | --- |")
     nz_any = False
     for st in (0, 1):
-        s = G.read_res(os.path.join(run, f"res_{st}.h5"), ["k", "omega", "roK", "roOmega"])
-        for v in ("k", "omega", "roK", "roOmega"):
+        s = G.read_res(os.path.join(run, f"res_{st}.h5"), ["k", "omega", "roK", "roOmega", "wall_y_eff"])
+        for v in ("k", "omega", "roK", "roOmega", "wall_y_eff"):
             if v not in s:
                 continue
             a = s[v].astype(np.float64)
@@ -739,8 +739,9 @@ def s0_eval_e(run, label, h5name=None):
                 nz_any |= nzm > 0
                 rel = (d[m] / np.maximum(np.abs(a[msh.root][m]), 1e-300)).max()
                 P(f"| {st} | {v} | {lab} | {int(m.sum())} | {nzm} | {d[m].max():.3e} | {rel:.2e} |")
-    P("wall_y_eff: 出力変数に無い (variables.hpp の output_cellValNames 外) ので測れない (保留)")
-    P(f"S0-e 記録 ({label}): k・ω の group 内差 {'非零あり' if nz_any else 'すべて 0'} (判定ではなく記録)")
+    if "wall_y_eff" not in s:
+        P("wall_y_eff: res に無い (extraFields 未指定か、#4a 以前のバイナリ)")
+    P(f"S0-e 記録 ({label}): k・ω{'・wall_y_eff' if 'wall_y_eff' in s else ''} の group 内差 {'非零あり' if nz_any else 'すべて 0'} (判定ではなく記録)")
     return "\n".join(out) + "\n", {"S0-e_nonzero": nz_any}
 
 
@@ -755,6 +756,8 @@ def s0e_case39_prepare(scr, src_run):
         if os.path.exists(os.path.join(src_run, f)):
             shutil.copy(os.path.join(src_run, f), run)
     cfg["mesh"]["scalarGradient"] = "lsq"
+    out_cfg = cfg.setdefault("output", {})
+    out_cfg["extraFields"] = list(out_cfg.get("extraFields") or []) + ["wall_y_eff"]   # #4a の extraFields 登録 (post-gather 値)
     cfg["time"]["last"]["nStepOuter"] = 1
     cfg["time"]["outStepStart"] = 0
     cfg["time"]["outStepInterval"] = 1

@@ -1,0 +1,245 @@
+diff --git a/solver_density_cuda/cuda_forge/periodicNode_d.cu b/solver_density_cuda/cuda_forge/periodicNode_d.cu
+index 092e3ee5..235598ac 100644
+--- a/solver_density_cuda/cuda_forge/periodicNode_d.cu
++++ b/solver_density_cuda/cuda_forge/periodicNode_d.cu
+@@ -1,6 +1,10 @@
+ #include <vector>
+ #include <iterator>
+ #include <string>
++#include <set>
++#include <fstream>
++#include <iostream>
++#include <cstdlib>
+ #include "periodicNode_d.cuh"
+ #include "periodicAtomic_d.cuh"
+ #include "calcGradient_d.cuh"   // scalarGradientLsqActive
+@@ -293,3 +297,54 @@ void periodicMirrorDq_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh&
+     gpuErrchk( cudaPeekAtLastError() );
+     gpuErrchkKernelSync();
+ }
++
++void preGatherDump(const std::string& tag, geom_int nCells, const std::vector<std::string>& names,
++                   const std::vector<std::array<const flow_float*, 3>>& grads)
++{
++    const char* p = std::getenv("FORGE_DUMP_PREGATHER");
++    if (!p || !*p || names.empty() || names.size() != grads.size()) return;
++    static std::set<std::string> done;
++    if (!done.insert(tag).second) return;
++    const size_t n = (size_t)nCells;
++    std::vector<flow_float> buf(names.size() * n * 3), tmp(n);
++    for (size_t v = 0; v < names.size(); ++v) {
++        for (int c = 0; c < 3; ++c) {
++            if (grads[v][c] == nullptr) { for (size_t i = 0; i < n; ++i) buf[(v * n + i) * 3 + c] = 0; continue; }
++            gpuErrchk( cudaMemcpy(tmp.data(), grads[v][c], n * sizeof(flow_float), cudaMemcpyDeviceToHost) );
++            for (size_t i = 0; i < n; ++i) buf[(v * n + i) * 3 + c] = tmp[i];
++        }
++    }
++    const std::string path = std::string(p) + "." + tag;
++    std::ofstream ofs(path, std::ios::binary);
++    if (!ofs) { std::cout << "[FORGE_DUMP_PREGATHER] cannot open " << path << '\n'; return; }
++    ofs.write(reinterpret_cast<const char*>(buf.data()), (std::streamsize)(buf.size() * sizeof(flow_float)));
++    std::ofstream nf(path + ".names");
++    nf << names.size() << " " << n << "\n";
++    for (const auto& nm : names) nf << nm << "\n";
++    std::cout << "[FORGE_DUMP_PREGATHER] wrote " << names.size() << " x " << n << " x 3 pre-gather gradients to " << path << '\n';
++}
++
++void preGatherDumpMain(solverConfig& cfg , mesh& msh , variables& var , const char* tag)
++{
++    const char* p = std::getenv("FORGE_DUMP_PREGATHER");
++    if (!p || !*p) return;
++    std::vector<std::string> names;
++    std::vector<std::array<const flow_float*, 3>> g;
++    auto add = [&](const std::string& nm) {
++        auto f = [&](const std::string& k) -> const flow_float* {
++            auto it = var.c_d.find(k); return (it == var.c_d.end()) ? nullptr : it->second; };
++        const flow_float* x = f("d" + nm + "dx");
++        if (x == nullptr) return;
++        names.push_back(nm);
++        g.push_back({x, f("d" + nm + "dy"), f("d" + nm + "dz")});
++    };
++    for (const char* v : {"ro", "Ux", "Uy", "Uz", "P", "T"}) add(v);
++    if (cfg.speciesFaceReconstruction >= 1 && !scalarGradientLsqActive(cfg)) {
++        for (int s = 0; s < var.nSpeciesRegistered; ++s) add("Y" + std::to_string(s));
++        if (cfg.passiveScalarScheme == 1) {
++            if (var.tracerRegistered != 0) add("Xi");
++            for (const auto& nm : var.condMomentConsNames) add(nm.substr(2));
++        }
++    }
++    preGatherDump(tag, msh.nCells, names, g);
++}
+diff --git a/solver_density_cuda/cuda_forge/periodicNode_d.cuh b/solver_density_cuda/cuda_forge/periodicNode_d.cuh
+index 39309c5b..c0394711 100644
+--- a/solver_density_cuda/cuda_forge/periodicNode_d.cuh
++++ b/solver_density_cuda/cuda_forge/periodicNode_d.cuh
+@@ -7,6 +7,10 @@
+ #include "input/solverConfig.hpp"
+ #include "variables.hpp"
+ 
++#include <array>
++#include <string>
++#include <vector>
++
+ // node-centered 周期境界 DOF 同一視 (median-dual M4, §4.5)。
+ // setPeriodicPartner + buildPeriodicNodeGroups で構築した周期ノード group (periodicRoot) に対し、
+ // 保存量残差 res_* を group 全員で足し合わせ、全員へ同じ和を書き戻す (gather + broadcast)。
+@@ -52,3 +56,14 @@ void periodicGatherMaxArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg ,
+ void periodicGatherMinArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a);
+ // 化学種の保存量 roY{s} を root→member でミラー (化学種更新の直後に呼ぶ; §4.1-5)。
+ void periodicMirrorSpeciesState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);
++
++// 診断 (env `FORGE_DUMP_PREGATHER=<path>`、既定 off・出力専用で数値は変えない。plan gradient-scalar-lsq-unification §5.1 #4a)。
++// 周期 gather の**直前**の勾配の局所配列を、tag ごとに最初の 1 回だけ raw float [nVar][nCells][3] (成分 x,y,z が最内) で
++// `<path>.<tag>` に、変数名を `<path>.<tag>.names` (1 行目 "nVar nCells"、以降 1 行 1 名) に書く。D2H は非 atomic の読み出しのみ。
++// env が無いときは何もしない (同期も入れない)。既存の FORGE_DUMP_SCALARGRAD (GG の面寄与) とは別物。
++void preGatherDump(const std::string& tag, geom_int nCells, const std::vector<std::string>& names,
++                   const std::vector<std::array<const flow_float*, 3>>& grads);
++// main の periodicGradientGather 直前 (初期化 "init"・ループ初回 "loop1") 用: NS 6 量 (ro,Ux,Uy,Uz,P,T) × 3 成分と、
++// gg 経路で同じ gather に登録される dY{s}・受動種 (ξ・凝縮モーメント) の勾配。scalarGradient: lsq では dY・受動種は
++// 各 wrapper 内で合併済みなのでここには含めない (wrapper 側で gather 直前に別 tag で書く)。
++void preGatherDumpMain(solverConfig& cfg , mesh& msh , variables& var , const char* tag);
+diff --git a/solver_density_cuda/cuda_forge/ransTransport_d.cu b/solver_density_cuda/cuda_forge/ransTransport_d.cu
+index c48a08fd..cbaec744 100644
+--- a/solver_density_cuda/cuda_forge/ransTransport_d.cu
++++ b/solver_density_cuda/cuda_forge/ransTransport_d.cu
+@@ -233,6 +233,8 @@ void ransGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh,
+             s_ptrHost = h;
+         }
+         lsqScalarGradient_d_wrapper(cuda_cfg, msh, 2, s_ptrDev + 0, s_ptrDev + 2, s_ptrDev + 4, s_ptrDev + 6);
++        preGatherDump("rans.loop1", msh.nCells, {"K", "Omega"},   // 診断 (FORGE_DUMP_PREGATHER、既定 off・出力専用)
++                      {{var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"]}, {var.c_d["dOmegadx"], var.c_d["dOmegady"], var.c_d["dOmegadz"]}});
+         // 継ぎ目: 合併係数の部分和を group で和 → broadcast (GG 経路と同じ述語・同じ専用 gather)。
+         if (periodicSeamMergeActive(cfg, msh)) {
+             for (const char* k : {"dKdx", "dKdy", "dKdz", "dOmegadx", "dOmegady", "dOmegadz"}) {
+@@ -263,6 +265,8 @@ void ransGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh,
+ 
+     gpuErrchk( cudaPeekAtLastError() );
+     gpuErrchkKernelSync();
++    preGatherDump("rans.loop1", msh.nCells, {"K", "Omega"},   // 診断 (FORGE_DUMP_PREGATHER、既定 off・出力専用)
++                  {{var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"]}, {var.c_d["dOmegadx"], var.c_d["dOmegady"], var.c_d["dOmegadz"]}});
+ 
+     // node 周期の継ぎ目: 合併体積で割った部分寄与を group で和 → broadcast (Green–Gauss の合併勾配)。
+     // 以前は periodicGradientGather (main) の後で本関数が作り直していたので、F1 と拡散は片側の勾配を読んでいた
+diff --git a/solver_density_cuda/cuda_forge/speciesTransport_d.cu b/solver_density_cuda/cuda_forge/speciesTransport_d.cu
+index ae66d66c..e87abdd1 100644
+--- a/solver_density_cuda/cuda_forge/speciesTransport_d.cu
++++ b/solver_density_cuda/cuda_forge/speciesTransport_d.cu
+@@ -17,6 +17,7 @@
+ #include <cstdlib>
+ 
+ #include <algorithm>
++#include <array>
+ #include <string>
+ #include <utility>
+ #include <vector>
+@@ -728,6 +729,14 @@ void speciesGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
+     // periodicGradientGather は lsq のとき dY を登録しない (二重合併の回避)。FORGE_DUMP_SCALARGRAD は GG 経路専用。
+     if (scalarGradientLsqActive(cfg)) {
+         lsqScalarGradient_d_wrapper(cuda_cfg, msh, n, g_Y_dev, g_dYdx_dev, g_dYdy_dev, g_dYdz_dev);
++        {   // 診断 (FORGE_DUMP_PREGATHER、既定 off・出力専用): 周期合併の直前の局所配列
++            std::vector<std::string> nm; std::vector<std::array<const flow_float*, 3>> gp;
++            for (int s = 0; s < n; ++s) {
++                const std::string i = std::to_string(s);
++                nm.push_back("Y" + i); gp.push_back({var.c_d["dY"+i+"dx"], var.c_d["dY"+i+"dy"], var.c_d["dY"+i+"dz"]});
++            }
++            preGatherDump("species_lsq.loop1", msh.nCells, nm, gp);
++        }
+         if (periodicSeamMergeActive(cfg, msh)) {
+             for (int s = 0; s < n; ++s) {
+                 const std::string i = std::to_string(s);
+@@ -1284,6 +1293,11 @@ void passiveGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
+     // mesh.scalarGradient: lsq (node のみ)。化学種と同じ扱い (normalize なし、周期合併は periodicSeamMergeActive のときここで)。
+     if (scalarGradientLsqActive(cfg)) {
+         lsqScalarGradient_d_wrapper(cuda_cfg, msh, g_nPassive, g_p_prim_dev, g_p_gx_dev, g_p_gy_dev, g_p_gz_dev);
++        {   // 診断 (FORGE_DUMP_PREGATHER、既定 off・出力専用): 周期合併の直前の局所配列
++            std::vector<std::array<const flow_float*, 3>> gp;
++            for (int q = 0; q < g_nPassive; ++q) gp.push_back({h_p_gx[q], h_p_gy[q], h_p_gz[q]});
++            preGatherDump("passive_lsq.loop1", msh.nCells, g_pPrim, gp);
++        }
+         if (periodicSeamMergeActive(cfg, msh)) {
+             for (int q = 0; q < g_nPassive; ++q) {
+                 periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, h_p_gx[q]);
+diff --git a/solver_density_cuda/main.cpp b/solver_density_cuda/main.cpp
+index 7f7fa916..6e53083f 100755
+--- a/solver_density_cuda/main.cpp
++++ b/solver_density_cuda/main.cpp
+@@ -1301,6 +1301,7 @@ cudaConfig initializeSimulation(
+     applyTracerBoundaries(cfg , cuda_cfg , msh , var);
+     calcGradient_d_wrapper(cfg , cuda_cfg , msh , var);
+     // 初期 setup でも周期勾配 gather を適用 (assembleResidual と整合; res_0 出力と初期診断を正しい合併勾配にする)。
++    preGatherDumpMain(cfg , msh , var , "init");   // 診断 (FORGE_DUMP_PREGATHER、既定 off・出力専用)
+     periodicGradientGather_d_wrapper(cfg , cuda_cfg , msh , var);
+     axisymmetricGeomTerms_d_wrapper(cfg , cuda_cfg , msh , var);
+     updateVariablesOuter(cfg , cuda_cfg , msh , var , mat_ns);
+@@ -1474,6 +1475,7 @@ void assembleResidual(StepContext& s, int stage_index)
+         }
+         // node 周期境界 DOF 同一視 (§4.5 拡張): boundary periodic node の Green-Gauss 勾配を「和→broadcast」で
+         // 厳密合併に直す (calcGradient_b_d で periodic 半割面は除外済み)。2次再構成・粘性の seam 精度向上。
++        preGatherDumpMain(s.cfg , s.msh , s.var , "loop1");   // 診断 (FORGE_DUMP_PREGATHER、初回のみ・出力専用)
+         periodicGradientGather_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+     });
+     s.profiler.measureCuda(ProfileSection::AxisymmetricSource, [&]() {
+diff --git a/solver_density_cuda/output/output.cpp b/solver_density_cuda/output/output.cpp
+index 4570ce72..b34ebb8b 100755
+--- a/solver_density_cuda/output/output.cpp
++++ b/solver_density_cuda/output/output.cpp
+@@ -35,9 +35,19 @@ flow_float outputTimeValue(const solverConfig& cfg, int iStep)
+ // 出力する場の量を config output.level で絞る (procedures/solver-settings.md「output」)。
+ //   level 2: output_cellValNames 全部 (従来)。level 0/1: 下の基本集合 + extraFields を output_cellValNames の順で。
+ //   h0 (全エンタルピー) は level>=1 で合成出力 (Ht [+k]) し、属性 h0_includes_k を付ける。
++// extraFields のうち extraOnly_cellValNames (既定出力に入れない量: wall_y_eff・dY{s}d*) にあるものを末尾に足す。
++static void appendExtraOnly(const solverConfig& cfg, const variables& var, std::list<std::string>& out)
++{
++    for (const auto& n : cfg.outputExtraFields) {
++        if (std::find(var.extraOnly_cellValNames.begin(), var.extraOnly_cellValNames.end(), n) == var.extraOnly_cellValNames.end()) continue;
++        if (std::find(out.begin(), out.end(), n) != out.end() || var.c.count(n) == 0) continue;
++        out.push_back(n);
++    }
++}
++
+ static std::list<std::string> effectiveOutputNames(const solverConfig& cfg, const variables& var)
+ {
+-    if (cfg.outputLevel >= 2) return var.output_cellValNames;
++    if (cfg.outputLevel >= 2) { std::list<std::string> out = var.output_cellValNames; appendExtraOnly(cfg, var, out); return out; }
+     std::vector<std::string> base = {"ro","roUx","roUy","roUz","roe","roK","roOmega"};
+     for (const auto& n : var.speciesVarNames) base.push_back(n);            // roY{s}
+     for (const auto& n : var.condMomentConsNames) base.push_back(n);        // 凝縮モーメント保存量
+@@ -55,8 +65,10 @@ static std::list<std::string> effectiveOutputNames(const solverConfig& cfg, cons
+     for (const auto& n : var.output_cellValNames) {
+         if (std::find(base.begin(), base.end(), n) != base.end()) out.push_back(n);
+     }
++    appendExtraOnly(cfg, var, out);
+     for (const auto& n : cfg.outputExtraFields) {
+-        if (std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), n) == var.output_cellValNames.end()) {
++        if (std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), n) == var.output_cellValNames.end()
++            && std::find(var.extraOnly_cellValNames.begin(), var.extraOnly_cellValNames.end(), n) == var.extraOnly_cellValNames.end()) {
+             static bool warned = false;
+             if (!warned) { std::cerr << "[output] extraFields: '" << n << "' is not an output variable (ignored)\n"; warned = true; }
+         }
+diff --git a/solver_density_cuda/variables.cpp b/solver_density_cuda/variables.cpp
+index d08f909e..fc9611b0 100755
+--- a/solver_density_cuda/variables.cpp
++++ b/solver_density_cuda/variables.cpp
+@@ -76,6 +76,7 @@ void variables::registerSpecies(int nSpecies, int chemistry)
+         // 保存質量分率 roY{s} と原始 Y{s} を HDF5 出力対象に加える (roY はリスタートに必須)。
+         this->output_cellValNames.push_back("roY"+std::to_string(s));
+         this->output_cellValNames.push_back("Y"+std::to_string(s));
++        for (const char* c : {"x", "y", "z"}) this->extraOnly_cellValNames.push_back("dY"+std::to_string(s)+"d"+c);   // extraFields 専用
+     }
+ 
+     // 診断 (FORGE_SPECIES_RAW_DIAG=1): 再正規化前の生更新値 roYraw{s} を出力する (plan species-passive-scalar-unification §6-1 の
+diff --git a/solver_density_cuda/variables.hpp b/solver_density_cuda/variables.hpp
+index c4e4ffad..752513d6 100755
+--- a/solver_density_cuda/variables.hpp
++++ b/solver_density_cuda/variables.hpp
+@@ -222,6 +222,10 @@ public:
+         "dcc"   // dcc: distance between two cell centers
+     };
+ 
++    // output.extraFields で**だけ**出せる量 (level 2 の既定出力には入れないので、既存 run の res_*.h5 の中身は変わらない)。
++    // 化学種の勾配 dY{s}d{x,y,z} は registerSpecies() が足す。値は周期 gather 後。plan gradient-scalar-lsq-unification §5.1 #4a。
++    std::list<std::string> extraOnly_cellValNames = {"wall_y_eff"};
++
+     // 化学種 (M2): registerSpecies() が Y{s} を出力対象に追加するため非 const。
+     std::list<std::string> output_cellValNames =
+     {

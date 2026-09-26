@@ -1,0 +1,147 @@
+# S1 非干渉 (plan gradient-scalar-lsq-unification §6 S1、2026-09-26 訂正規則)
+harness revision: 1a33427 (dirty)
+規則: 旧同士 (3 対) がビット一致の配列は旧新 (9 対) もビット一致。それ以外は旧新の最大差 ≤ ノイズ対 (旧旧 3 + 新新 3) の最大差 × 2 かつ 旧新の不一致数の最大 ≤ ノイズ対の不一致数の最大 × 2。不一致位置が 3 member 以上の group に限られるかは記録 (判定外、tgv のみ)
+
+## case48
+- old: /home/ubuntu/sglsq/s1h/s1_case48_old_a (.._b, .._c) ['forge_sha256: 712141ec6289165b2b4cba1c11111d410f042ff9a45976da2ae581714f24db0c']
+- gg: /home/ubuntu/sglsq/s1h/s1_case48_gg_a (.._b, .._c) ['forge_sha256: a398afdc2c42b64861ac1efdccbbae5c75f929346a1ae23773095fd8ee56766f', "'scalarGradient' effective: gg (default)"]
+- lsq: /home/ubuntu/sglsq/s1h/s1_case48_lsq_a (.._b, .._c) ['forge_sha256: a398afdc2c42b64861ac1efdccbbae5c75f929346a1ae23773095fd8ee56766f', "'scalarGradient' effective: lsq (explicit)"]
+NaN/Inf: なし
+
+### (1) gg: 旧 vs 新
+全 152 配列中 135 配列は全 15 対でビット一致 (表に出さない)
+| res | 配列 | A 同士 (不一致数の最大 / 最大差) | B 同士 | A–B (9 対) | 判定 | 不一致位置 |
+| --- | --- | --- | --- | --- | --- | --- |
+| res_1 | dKdx | n 450 / max 0.0147 | n 484 / max 0.0207 | n 467 / max 0.0207 | PASS | - |
+| res_1 | dKdy | n 90 / max 0.937 | n 102 / max 0.478 | n 101 / max 0.937 | PASS | - |
+| res_1 | dOmegadx | n 521 / max 1.25e+04 | n 567 / max 1.43e+04 | n 563 / max 1.43e+04 | PASS | - |
+| res_1 | dOmegady | n 532 / max 2.1e+06 | n 507 / max 2.1e+06 | n 585 / max 2.1e+06 | PASS | - |
+| res_1 | res_ro | n 303 / max 1.73e-09 | n 281 / max 3.45e-09 | n 315 / max 3.45e-09 | PASS | - |
+| res_1 | res_roK | n 198 / max 3.81e-06 | n 170 / max 1.19e-07 | n 198 / max 3.81e-06 | PASS | - |
+| res_1 | res_roOmega | n 323 / max 0.00195 | n 327 / max 0.000122 | n 363 / max 0.00195 | PASS | - |
+| res_1 | res_roUx | n 314 / max 2.34e-05 | n 289 / max 2.34e-05 | n 315 / max 2.34e-05 | PASS | - |
+| res_1 | res_roUy | n 143 / max 2.81e-06 | n 202 / max 2.81e-06 | n 193 / max 2.81e-06 | PASS | - |
+| res_1 | res_roe | n 320 / max 0.00183 | n 300 / max 0.00183 | n 326 / max 0.00183 | PASS | - |
+| res_1 | ro | n 19 / max 4.8e-05 | n 13 / max 2.69e-05 | n 26 / max 7.16e-05 | PASS | - |
+| res_1 | roOmega | n 1 / max 0.00781 | n 1 / max 0.00781 | n 2 / max 0.00781 | PASS | - |
+| res_1 | roUx | n 71 / max 4.48e-05 | n 60 / max 1.91e-05 | n 74 / max 4.48e-05 | PASS | - |
+| res_1 | roUy | n 9654 / max 8.3e-07 | n 9763 / max 3.36e-07 | n 10112 / max 8.29e-07 | PASS | - |
+| res_1 | roe | n 2 / max 0.0156 | n 0 / max 0 | n 2 / max 0.0156 | PASS | - |
+| res_1 | transport_diag_k | n 16290 / max 4.77e-07 | n 16182 / max 2.38e-07 | n 16739 / max 4.77e-07 | PASS | - |
+| res_1 | transport_diag_omega | n 16324 / max 2.38e-07 | n 15971 / max 2.38e-07 | n 16511 / max 2.38e-07 | PASS | - |
+VERDICT S1 case48 (1) gg: 旧 vs 新: PASS
+
+### (2) NS 勾配・リミタ: 新 gg vs 新 lsq
+全 48 配列中 48 配列は全 15 対でビット一致 (表に出さない)
+| res | 配列 | A 同士 (不一致数の最大 / 最大差) | B 同士 | A–B (9 対) | 判定 | 不一致位置 |
+| --- | --- | --- | --- | --- | --- | --- |
+VERDICT S1 case48 (2) NS 勾配・リミタ: 新 gg vs 新 lsq: PASS
+
+## case16
+- old: /home/ubuntu/sglsq/s1h/s1_case16_old_a (.._b, .._c) ['forge_sha256: 712141ec6289165b2b4cba1c11111d410f042ff9a45976da2ae581714f24db0c']
+- gg: /home/ubuntu/sglsq/s1h/s1_case16_gg_a (.._b, .._c) ['forge_sha256: a398afdc2c42b64861ac1efdccbbae5c75f929346a1ae23773095fd8ee56766f', "'scalarGradient' effective: gg (default)"]
+- lsq: /home/ubuntu/sglsq/s1h/s1_case16_lsq_a (.._b, .._c) ['forge_sha256: a398afdc2c42b64861ac1efdccbbae5c75f929346a1ae23773095fd8ee56766f', "'scalarGradient' effective: lsq (explicit)"]
+NaN/Inf: なし
+
+### (1) gg: 旧 vs 新
+全 160 配列中 148 配列は全 15 対でビット一致 (表に出さない)
+| res | 配列 | A 同士 (不一致数の最大 / 最大差) | B 同士 | A–B (9 対) | 判定 | 不一致位置 |
+| --- | --- | --- | --- | --- | --- | --- |
+| res_1 | Y0 | n 48 / max 1.19e-07 | n 60 / max 1.19e-07 | n 67 / max 1.19e-07 | PASS | - |
+| res_1 | Y1 | n 2206 / max 2.79e-09 | n 2345 / max 2.79e-09 | n 2343 / max 2.79e-09 | PASS | - |
+| res_1 | res_ro | n 12617 / max 1.82e-09 | n 12258 / max 1.82e-09 | n 13126 / max 1.83e-09 | PASS | - |
+| res_1 | res_roUx | n 22970 / max 1.91e-06 | n 22916 / max 1.91e-06 | n 23341 / max 1.91e-06 | PASS | - |
+| res_1 | res_roUy | n 22517 / max 1.91e-06 | n 22184 / max 1.91e-06 | n 22725 / max 1.91e-06 | PASS | - |
+| res_1 | res_roe | n 23189 / max 0.00163 | n 22700 / max 0.00196 | n 23332 / max 0.00196 | PASS | - |
+| res_1 | ro | n 1819 / max 5.96e-08 | n 1843 / max 5.96e-08 | n 1857 / max 5.96e-08 | PASS | - |
+| res_1 | roUx | n 5741 / max 2.29e-05 | n 5479 / max 2.29e-05 | n 6012 / max 2.29e-05 | PASS | - |
+| res_1 | roUy | n 24629 / max 1.06e-05 | n 24868 / max 1.25e-05 | n 25641 / max 1.35e-05 | PASS | - |
+| res_1 | roY0 | n 1806 / max 5.96e-08 | n 1829 / max 5.96e-08 | n 1858 / max 5.96e-08 | PASS | - |
+| res_1 | roY1 | n 2888 / max 1.4e-09 | n 3062 / max 1.4e-09 | n 3054 / max 1.86e-09 | PASS | - |
+| res_1 | roe | n 1323 / max 0.0156 | n 1298 / max 0.0156 | n 1368 / max 0.0156 | PASS | - |
+VERDICT S1 case16 (1) gg: 旧 vs 新: PASS
+
+### (2) NS 勾配・リミタ: 新 gg vs 新 lsq
+全 48 配列中 48 配列は全 15 対でビット一致 (表に出さない)
+| res | 配列 | A 同士 (不一致数の最大 / 最大差) | B 同士 | A–B (9 対) | 判定 | 不一致位置 |
+| --- | --- | --- | --- | --- | --- | --- |
+VERDICT S1 case16 (2) NS 勾配・リミタ: 新 gg vs 新 lsq: PASS
+
+## axi
+- old: /home/ubuntu/sglsq/s1h/s1_axi_old_a (.._b, .._c) ['forge_sha256: 712141ec6289165b2b4cba1c11111d410f042ff9a45976da2ae581714f24db0c']
+- gg: /home/ubuntu/sglsq/s1h/s1_axi_gg_a (.._b, .._c) ['forge_sha256: a398afdc2c42b64861ac1efdccbbae5c75f929346a1ae23773095fd8ee56766f', "'scalarGradient' effective: gg (default)"]
+- lsq: /home/ubuntu/sglsq/s1h/s1_axi_lsq_a (.._b, .._c) ['forge_sha256: a398afdc2c42b64861ac1efdccbbae5c75f929346a1ae23773095fd8ee56766f', "'scalarGradient' effective: lsq (explicit)"]
+NaN/Inf: なし
+
+### (1) gg: 旧 vs 新
+全 160 配列中 148 配列は全 15 対でビット一致 (表に出さない)
+| res | 配列 | A 同士 (不一致数の最大 / 最大差) | B 同士 | A–B (9 対) | 判定 | 不一致位置 |
+| --- | --- | --- | --- | --- | --- | --- |
+| res_1 | Y0 | n 1 / max 1.19e-07 | n 3 / max 1.19e-07 | n 2 / max 1.19e-07 | PASS | - |
+| res_1 | Y1 | n 18 / max 3.73e-09 | n 18 / max 3.73e-09 | n 22 / max 3.73e-09 | PASS | - |
+| res_1 | res_ro | n 926 / max 2.91e-11 | n 727 / max 2.91e-11 | n 944 / max 2.91e-11 | PASS | - |
+| res_1 | res_roUx | n 961 / max 1.19e-07 | n 802 / max 1.19e-07 | n 924 / max 1.19e-07 | PASS | - |
+| res_1 | res_roUy | n 853 / max 4.77e-07 | n 712 / max 4.77e-07 | n 874 / max 4.77e-07 | PASS | - |
+| res_1 | res_roe | n 884 / max 1.53e-05 | n 754 / max 1.53e-05 | n 831 / max 1.53e-05 | PASS | - |
+| res_1 | ro | n 17 / max 1.19e-07 | n 21 / max 1.19e-07 | n 21 / max 1.19e-07 | PASS | - |
+| res_1 | roUx | n 222 / max 1.53e-05 | n 191 / max 1.53e-05 | n 212 / max 1.53e-05 | PASS | - |
+| res_1 | roUy | n 1904 / max 1.6e-05 | n 1648 / max 1.63e-05 | n 1867 / max 1.63e-05 | PASS | - |
+| res_1 | roY0 | n 16 / max 1.19e-07 | n 19 / max 1.19e-07 | n 20 / max 1.19e-07 | PASS | - |
+| res_1 | roY1 | n 28 / max 3.73e-09 | n 32 / max 3.73e-09 | n 35 / max 3.73e-09 | PASS | - |
+| res_1 | roe | n 35 / max 0.0312 | n 31 / max 0.0312 | n 41 / max 0.0312 | PASS | - |
+VERDICT S1 axi (1) gg: 旧 vs 新: PASS
+
+### (2) NS 勾配・リミタ: 新 gg vs 新 lsq
+全 48 配列中 48 配列は全 15 対でビット一致 (表に出さない)
+| res | 配列 | A 同士 (不一致数の最大 / 最大差) | B 同士 | A–B (9 対) | 判定 | 不一致位置 |
+| --- | --- | --- | --- | --- | --- | --- |
+VERDICT S1 axi (2) NS 勾配・リミタ: 新 gg vs 新 lsq: PASS
+
+## tgv
+- old: /home/ubuntu/sglsq/s1h/s1_tgv_old_a (.._b, .._c) ['forge_sha256: 712141ec6289165b2b4cba1c11111d410f042ff9a45976da2ae581714f24db0c']
+- gg: /home/ubuntu/sglsq/s1h/s1_tgv_gg_a (.._b, .._c) ['forge_sha256: a398afdc2c42b64861ac1efdccbbae5c75f929346a1ae23773095fd8ee56766f', "'scalarGradient' effective: gg (default)"]
+- lsq: /home/ubuntu/sglsq/s1h/s1_tgv_lsq_a (.._b, .._c) ['forge_sha256: a398afdc2c42b64861ac1efdccbbae5c75f929346a1ae23773095fd8ee56766f', "'scalarGradient' effective: lsq (explicit)"]
+NaN/Inf: なし
+
+### (1) gg: 旧 vs 新
+全 168 配列中 142 配列は全 15 対でビット一致 (表に出さない)
+| res | 配列 | A 同士 (不一致数の最大 / 最大差) | B 同士 | A–B (9 対) | 判定 | 不一致位置 |
+| --- | --- | --- | --- | --- | --- | --- |
+| res_0 | dUxdx | n 96 / max 1.19e-07 | n 4 / max 5.96e-08 | n 88 / max 1.19e-07 | PASS | ≥3 member のみ |
+| res_1 | Xi | n 4 / max 2.98e-08 | n 3 / max 2.98e-08 | n 4 / max 2.98e-08 | PASS | member [1] |
+| res_1 | dKdx | n 308 / max 1.91e-06 | n 282 / max 1.91e-06 | n 316 / max 1.91e-06 | PASS | member [2, 4] |
+| res_1 | dKdy | n 242 / max 1.91e-06 | n 212 / max 2.86e-06 | n 234 / max 2.86e-06 | PASS | member [2, 4] |
+| res_1 | dKdz | n 186 / max 2.86e-06 | n 178 / max 2.86e-06 | n 206 / max 2.86e-06 | PASS | member [2, 4] |
+| res_1 | dOmegadx | n 308 / max 0.000183 | n 262 / max 0.000122 | n 308 / max 0.000183 | PASS | member [2, 4] |
+| res_1 | dOmegady | n 234 / max 0.000122 | n 260 / max 9.16e-05 | n 260 / max 0.000122 | PASS | member [2, 4] |
+| res_1 | dOmegadz | n 254 / max 0.000183 | n 252 / max 0.000183 | n 290 / max 0.000183 | PASS | member [2, 4] |
+| res_1 | dUxdx | n 184 / max 1.19e-07 | n 104 / max 1.19e-07 | n 192 / max 1.19e-07 | PASS | ≥3 member のみ |
+| res_1 | dUxdz | n 32 / max 2.98e-08 | n 0 / max 0 | n 32 / max 2.98e-08 | PASS | ≥3 member のみ |
+| res_1 | dXidx | n 230 / max 4.77e-07 | n 208 / max 4.77e-07 | n 276 / max 4.77e-07 | PASS | member [2, 4] |
+| res_1 | dXidy | n 274 / max 4.77e-07 | n 198 / max 4.77e-07 | n 274 / max 4.77e-07 | PASS | member [2, 4] |
+| res_1 | dXidz | n 170 / max 4.77e-07 | n 212 / max 4.77e-07 | n 222 / max 4.77e-07 | PASS | member [2, 4] |
+| res_1 | res_ro | n 56 / max 2.98e-08 | n 12 / max 2.98e-08 | n 44 / max 2.98e-08 | PASS | member [1, 2, 4] |
+| res_1 | res_roK | n 707 / max 2.38e-07 | n 689 / max 2.38e-07 | n 699 / max 2.38e-07 | PASS | member [1, 2, 4] |
+| res_1 | res_roOmega | n 566 / max 1.14e-05 | n 481 / max 1.14e-05 | n 567 / max 1.14e-05 | PASS | member [1, 2, 4] |
+| res_1 | res_roUx | n 754 / max 0.000244 | n 659 / max 0.000244 | n 724 / max 0.000244 | PASS | member [1, 2, 4] |
+| res_1 | res_roUy | n 13688 / max 0.000244 | n 13527 / max 0.000244 | n 14125 / max 0.000244 | PASS | member [1, 2, 4] |
+| res_1 | res_roe | n 156 / max 0.0156 | n 48 / max 0.0156 | n 110 / max 0.0156 | PASS | member [1, 2, 4] |
+| res_1 | ro | n 512 / max 2.98e-07 | n 415 / max 2.38e-07 | n 505 / max 2.98e-07 | PASS | member [1, 2] |
+| res_1 | roUx | n 10 / max 9.54e-07 | n 2 / max 9.54e-07 | n 6 / max 9.54e-07 | PASS | member [2, 4] |
+| res_1 | roUy | n 14057 / max 8.36e-08 | n 13708 / max 8.38e-08 | n 14465 / max 8.38e-08 | PASS | member [1, 2, 4, 8] |
+| res_1 | roUz | n 11595 / max 8.38e-08 | n 11123 / max 8.36e-08 | n 11780 / max 8.38e-08 | PASS | member [1, 2, 4, 8] |
+| res_1 | roXi | n 433 / max 2.38e-07 | n 359 / max 2.38e-07 | n 425 / max 2.38e-07 | PASS | member [1, 2] |
+| res_1 | transport_diag_k | n 1307 / max 1.19e-07 | n 1353 / max 1.19e-07 | n 1394 / max 1.19e-07 | PASS | member [1, 2, 4] |
+| res_1 | transport_diag_omega | n 1048 / max 1.19e-07 | n 1053 / max 1.19e-07 | n 1115 / max 1.19e-07 | PASS | member [1, 2, 4] |
+VERDICT S1 tgv (1) gg: 旧 vs 新: PASS
+
+### (2) NS 勾配・リミタ: 新 gg vs 新 lsq
+全 48 配列中 45 配列は全 15 対でビット一致 (表に出さない)
+| res | 配列 | A 同士 (不一致数の最大 / 最大差) | B 同士 | A–B (9 対) | 判定 | 不一致位置 |
+| --- | --- | --- | --- | --- | --- | --- |
+| res_0 | dUxdx | n 4 / max 5.96e-08 | n 172 / max 1.19e-07 | n 172 / max 1.19e-07 | PASS | ≥3 member のみ |
+| res_1 | dUxdx | n 104 / max 1.19e-07 | n 12 / max 1.19e-07 | n 96 / max 1.19e-07 | PASS | ≥3 member のみ |
+| res_1 | dUxdz | n 0 / max 0 | n 4 / max 7.45e-09 | n 32 / max 2.98e-08 | FAIL (旧同士ビット一致・旧新不一致) | ≥3 member のみ |
+VERDICT S1 tgv (2) NS 勾配・リミタ: 新 gg vs 新 lsq: FAIL
+
+VERDICT S1 (全ケース): FAIL
