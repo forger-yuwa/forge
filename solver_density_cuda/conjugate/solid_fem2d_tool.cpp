@@ -3,11 +3,17 @@
 // ソルバ本体に組み込む前に、参照実装 (tools/solid_fem2d.py) と**同じ問題を同じ精度で**
 // 解けることをここで閉じる。突き合わせは tools/test_solid_fem2d_cpp.py が行う。
 //
-//   solid_fem2d_tool info   <solid.h5>
-//   solid_fem2d_tool matvec <solid.h5> <u.txt>  <out.txt>   … K(u) u を書く (a1)
-//   solid_fem2d_tool solve  <solid.h5> <Qf.txt> <out.txt>   … 界面荷重で解いて u を書く (a2)
+//   solid_fem2d_tool [--axisym] info   <solid.h5>
+//   solid_fem2d_tool [--axisym] matvec <solid.h5> <u.txt>  <out.txt>   … K(u) u を書く (a1)
+//   solid_fem2d_tool [--axisym] solve  <solid.h5> <Qf.txt> <out.txt>   … 界面荷重で解いて u を書く (a2)
+//   solid_fem2d_tool [--axisym] matrix <solid.h5> <u.txt>  <out.txt>   … K(u) の下三角 "i j A(i,j)" の後に
+//                                                                        "b i b_i" (Robin 荷重) を書く
+//   solid_fem2d_tool [--axisym] lumped <solid.h5> <out.txt>             … 界面の集中量 (IFACE/NODES 順)
+//   solid_fem2d_tool [--axisym] field  <solid.h5> <u.txt>  <stem>       … writeSolidField で <stem>.h5/.xmf
 //
 // テキストは 1 行 1 値 (倍精度)。`solve` の Qf は **IFACE/NODES の順**、単位は W/m。
+// `--axisym` は r = y の重みを入れる (単位は W/rad。plan boundary-cht-axisymmetric-fem2d §4.2)。
+// 固体 h5 には持たない (content_sha1 を変えない) ので、ここで SolidMesh::axisym を立てる。
 
 #include <algorithm>
 #include <cmath>
@@ -42,25 +48,65 @@ void writeText(const std::string& path, const std::vector<double>& v)
 
 } // namespace
 
-int main(int argc, char** argv)
+int main(int argc0, char** argv0)
 {
+    // `--axisym` はどこに置いてもよい (取り除いて残りを位置引数として読む)
+    bool axisym = false;
+    std::vector<char*> args;
+    for (int i = 0; i < argc0; i++) {
+        if (std::string(argv0[i]) == "--axisym") axisym = true;
+        else args.push_back(argv0[i]);
+    }
+    const int argc = (int)args.size();
+    char** argv = args.data();
     if (argc < 3) {
-        std::cerr << "usage: solid_fem2d_tool info|matvec|solve <solid.h5> [in.txt out.txt]\n";
+        std::cerr << "usage: solid_fem2d_tool [--axisym] info|matvec|solve|matrix|lumped|field "
+                     "<solid.h5> [in.txt out.txt]\n";
         return 1;
     }
     const std::string mode = argv[1];
-    const conjugate::SolidMesh m = conjugate::SolidMesh::read(argv[2]);
+    conjugate::SolidMesh m = conjugate::SolidMesh::read(argv[2]);
+    m.axisym = axisym;
     conjugate::SolidFem2D fem(m);
 
     if (mode == "info") {
-        std::cout << "nodes " << m.nNodes << "  tris " << m.nTris
+        std::cout << (axisym ? "axisym  " : "planar  ") << "nodes " << m.nNodes << "  tris " << m.nTris
                   << "  iface " << m.nIface() << "  robin " << m.robinH.size()
                   << "  bandwidth " << fem.bandwidth() << " (attr " << m.bandwidth << ")\n"
                   << "k_s(300) " << m.kOf(300.0) << "  k_s(900) " << m.kOf(900.0)
                   << "  iface_sha1 " << m.ifaceSha1 << "\n";
         return 0;
     }
+    if (mode == "lumped") {
+        if (argc < 4) { std::cerr << "usage: ... lumped <solid.h5> <out.txt>\n"; return 1; }
+        writeText(argv[3], m.ifaceLumped());
+        return 0;
+    }
     if (argc < 5) { std::cerr << "usage: ... <in.txt> <out.txt>\n"; return 1; }
+
+    if (mode == "matrix" || mode == "field") {
+        const std::vector<double> u = readText(argv[3]);
+        if ((int)u.size() != m.nNodes) {
+            std::cerr << "[solid_fem2d_tool] u の長さ " << u.size() << " != nodes " << m.nNodes << "\n";
+            return 1;
+        }
+        if (mode == "field") {
+            conjugate::writeSolidField(argv[4], m, u, {}, 0.0);
+            return 0;
+        }
+        fem.assemble(u);
+        std::ofstream ofs(argv[4]);
+        ofs << std::setprecision(17) << std::scientific;
+        const int bw = fem.bandwidth();
+        for (int j = 0; j < m.nNodes; j++)
+            for (int i = j; i <= std::min(m.nNodes - 1, j + bw); i++) {
+                const double a = fem.entry(i, j);
+                if (a != 0.0) ofs << i << " " << j << " " << a << "\n";
+            }
+        const std::vector<double>& b = fem.rhs();
+        for (int i = 0; i < m.nNodes; i++) ofs << "b " << i << " " << b[i] << "\n";
+        return 0;
+    }
 
     if (mode == "matvec") {
         const std::vector<double> u = readText(argv[3]);

@@ -110,6 +110,16 @@ std::vector<double> SolidMesh::ifaceLumped() const
     std::vector<int> local(nNodes, -1);
     for (size_t i = 0; i < ifaceNodes.size(); i++) local[ifaceNodes[i]] = (int)i;
     std::vector<double> a(ifaceNodes.size(), 0.0);
+    if (axisym) {
+        // A_i^r = ∫ N_i r ds = L/6 (2 r_i + r_j)   (r = y は辺上で線形なので厳密)
+        for (size_t e = 0; e + 1 < ifaceEdges.size(); e += 2) {
+            const int n0 = ifaceEdges[e], n1 = ifaceEdges[e+1];
+            const double L = std::hypot(x[n1] - x[n0], y[n1] - y[n0]);
+            if (local[n0] >= 0) a[local[n0]] += L / 6.0 * (2.0 * y[n0] + y[n1]);
+            if (local[n1] >= 0) a[local[n1]] += L / 6.0 * (y[n0] + 2.0 * y[n1]);
+        }
+        return a;
+    }
     for (size_t e = 0; e + 1 < ifaceEdges.size(); e += 2) {
         const int n0 = ifaceEdges[e], n1 = ifaceEdges[e+1];
         const double L = std::hypot(x[n1] - x[n0], y[n1] - y[n0]);
@@ -148,6 +158,8 @@ void SolidFem2D::assemble(const std::vector<double>& u,
     factored_ = false;
 
     // ---- 伝導 (線形三角形。要素の k は**節点値の平均** = Python と同一規約) ----
+    // 軸対称は r̄_e (要素重心の y) を掛ける。平面の経路には重みを入れない (ビット同一)。
+    const bool ax = m_.axisym;
     for (int e = 0; e < m_.nTris; e++) {
         const int* t = &m_.tris[3*e];
         const double x0 = m_.x[t[0]], x1 = m_.x[t[1]], x2 = m_.x[t[2]];
@@ -158,7 +170,8 @@ void SolidFem2D::assemble(const std::vector<double>& u,
         const double area = 0.5 * std::fabs(det);
         if (!(area > 0.0)) continue;
         const double kmean = (m_.kOf(u[t[0]]) + m_.kOf(u[t[1]]) + m_.kOf(u[t[2]])) / 3.0;
-        const double f = kmean / (4.0 * area);
+        const double f = ax ? kmean * ((y0 + y1 + y2) / 3.0) / (4.0 * area)
+                            : kmean / (4.0 * area);
         for (int i = 0; i < 3; i++)
             for (int j = 0; j < 3; j++) {
                 if (t[i] < t[j]) continue;                    // 下三角のみ
@@ -172,8 +185,24 @@ void SolidFem2D::assemble(const std::vector<double>& u,
         const double L = std::hypot(m_.x[n1] - m_.x[n0], m_.y[n1] - m_.y[n0]);
         if (!(L > 0.0)) continue;
         const double h = m_.robinH[r], Tc = m_.robinTc[r];
-        const double m2 = h * L / 6.0;
         const int idx[2] = {n0, n1};
+        if (ax) {
+            // M = hL/12 [[3ra+rb, ra+rb],[ra+rb, ra+3rb]],  f = h Tc L/6 (2ra+rb, ra+2rb)
+            const double ra = m_.y[n0], rb = m_.y[n1];
+            const double m12 = h * L / 12.0;
+            const double Me[2][2] = {{m12 * (3.0*ra + rb), m12 * (ra + rb)},
+                                     {m12 * (ra + rb),     m12 * (ra + 3.0*rb)}};
+            const double fe[2] = {h * Tc * L / 6.0 * (2.0*ra + rb), h * Tc * L / 6.0 * (ra + 2.0*rb)};
+            for (int i = 0; i < 2; i++) {
+                for (int j = 0; j < 2; j++) {
+                    if (idx[i] < idx[j]) continue;
+                    at(idx[i], idx[j]) += Me[i][j];
+                }
+                b_[idx[i]] += fe[i];
+            }
+            continue;
+        }
+        const double m2 = h * L / 6.0;
         const double Me[2][2] = {{2.0*m2, 1.0*m2}, {1.0*m2, 2.0*m2}};
         for (int i = 0; i < 2; i++) {
             for (int j = 0; j < 2; j++) {
@@ -302,6 +331,15 @@ void writeSolidField(const std::string& stem, const SolidMesh& m,
         const int n0 = m.robinEdges[2*r], n1 = m.robinEdges[2*r+1];
         const double L = std::hypot(m.x[n1] - m.x[n0], m.y[n1] - m.y[n0]);
         const double h = m.robinH[r], Tc = m.robinTc[r];
+        if (m.axisym) {
+            // 組立てと同じ consistent 行列 M_e (T - Tc) [W/rad] (plan §4.4b)
+            const double ra = m.y[n0], rb = m.y[n1];
+            const double m12 = h * L / 12.0;
+            const double d0 = u[n0] - Tc, d1 = u[n1] - Tc;
+            qh[n0] += m12 * ((3.0*ra + rb) * d0 + (ra + rb) * d1);
+            qh[n1] += m12 * ((ra + rb) * d0 + (ra + 3.0*rb) * d1);
+            continue;
+        }
         qh[n0] += 0.5 * L * h * (u[n0] - Tc);
         qh[n1] += 0.5 * L * h * (u[n1] - Tc);
     }

@@ -41,9 +41,13 @@ class Fem2DOperator:
     iface_edges : 界面の辺 [(n0,n1), ...] (集中長さ = 荷重変換に使う)
     robin_edges : [(n0, n1, h, T_c), ...] 冷却孔など。$h$ [W/m2K], $T_c$ [K]
     k_solid     : 定数 or (T[], k[]) テーブル
+    axisym      : True なら $r=y$ の重みを入れる (軸対称。荷重・熱量は W/rad、集中量は m²/rad)。
+                  plan boundary-cht-axisymmetric-fem2d §4.2。C++ (`SolidMesh::axisym`) と同じ式。
+                  False (既定) は平面で、従来と同じ計算をする
     """
 
-    def __init__(self, nodes, tris, iface_nodes, iface_edges, robin_edges, k_solid):
+    def __init__(self, nodes, tris, iface_nodes, iface_edges, robin_edges, k_solid, axisym=False):
+        self.axisym = bool(axisym)
         self.xy = np.asarray(nodes, float)[:, :2]
         self.tris = np.asarray(tris, int)
         self.iface = np.asarray(iface_nodes, int)
@@ -66,10 +70,30 @@ class Fem2DOperator:
         pos = {int(g): i for i, g in enumerate(self.iface)}
         for (n0, n1) in self.iface_edges:
             L = float(np.linalg.norm(self.xy[n1] - self.xy[n0]))
+            if self.axisym:
+                # A_i^r = ∫ N_i r ds = L/6 (2 r_i + r_j)
+                ra, rb = self.xy[n0, 1], self.xy[n1, 1]
+                for g, w in ((n0, L / 6.0 * (2.0 * ra + rb)), (n1, L / 6.0 * (ra + 2.0 * rb))):
+                    if int(g) in pos:
+                        a[pos[int(g)]] += w
+                continue
             for g in (n0, n1):
                 if int(g) in pos:
                     a[pos[int(g)]] += 0.5 * L
         return a
+
+    def _robin_edge(self, n0, n1, L):
+        """Robin 辺 1 本の (h を除いた) consistent 行列と荷重ベクトル (h T_c を除く)。
+
+        平面: L/6 [[2,1],[1,2]], L/2 (1,1)。
+        軸対称: L/12 [[3ra+rb, ra+rb],[ra+rb, ra+3rb]], L/6 (2ra+rb, ra+2rb)。
+        """
+        if self.axisym:
+            ra, rb = self.xy[n0, 1], self.xy[n1, 1]
+            Me = L / 12.0 * np.array([[3.0 * ra + rb, ra + rb], [ra + rb, ra + 3.0 * rb]])
+            ve = L / 6.0 * np.array([2.0 * ra + rb, ra + 2.0 * rb])
+            return Me, ve
+        return L / 6.0 * np.array([[2.0, 1.0], [1.0, 2.0]]), np.array([L / 2.0, L / 2.0])
 
     def k_of(self, T):
         if isinstance(self.k_solid, tuple):
@@ -90,6 +114,8 @@ class Fem2DOperator:
             if area <= 0:
                 continue
             ke = float(np.mean(k[t])) / (4.0 * area) * (np.outer(b, b) + np.outer(c, c))
+            if self.axisym:
+                ke = ke * float(np.mean(p[:, 1]))          # r̄_e = 要素重心の y
             for i in range(3):
                 for j in range(3):
                     rows.append(t[i]); cols.append(t[j]); vals.append(ke[i, j])
@@ -100,8 +126,15 @@ class Fem2DOperator:
             L = float(np.linalg.norm(self.xy[n1] - self.xy[n0]))
             if L <= 0:
                 continue
-            Me = h * L / 6.0 * np.array([[2.0, 1.0], [1.0, 2.0]])
             idx = [int(n0), int(n1)]
+            if self.axisym:
+                Me, ve = self._robin_edge(idx[0], idx[1], L)
+                for i in range(2):
+                    for j in range(2):
+                        K[idx[i], idx[j]] += h * Me[i, j]
+                    b[idx[i]] += h * Tc * ve[i]
+                continue
+            Me = h * L / 6.0 * np.array([[2.0, 1.0], [1.0, 2.0]])
             for i in range(2):
                 for j in range(2):
                     K[idx[i], idx[j]] += Me[i, j]
@@ -133,12 +166,12 @@ class Fem2DOperator:
                 L = float(np.linalg.norm(self.xy[n1] - self.xy[n0]))
                 if L <= 0:
                     continue
-                Me = L / 6.0 * np.array([[2.0, 1.0], [1.0, 2.0]])
+                Me, ve = self._robin_edge(n0, n1, L)
                 idx = [n0, n1]
                 for i in range(2):
                     for j in range(2):
                         rows.append(idx[i]); cols.append(idx[j]); vals.append(Me[i, j])
-                    v[idx[i]] += L / 2.0
+                    v[idx[i]] += ve[i]
             out.append((sp.csr_matrix((vals, (rows, cols)), shape=(self.N, self.N)), v))
         return K_cond, out
 

@@ -13,6 +13,14 @@
 //   冷却孔は Robin 辺で、**consistent** な辺行列を使う:
 //     M_e = hL/6 [[2,1],[1,2]],   f_e += h T_c L/2  (各節点)
 //
+// 【軸対称 (SolidMesh::axisym = true)】r = y の重みを入れ、単位は**ラジアンあたり** [W/rad]
+//   (流体の axisymMethod: 0 と同じ。2π は掛けない。plan boundary-cht-axisymmetric-fem2d §4.1/§4.2)。
+//     K_e = k_mean r̄_e/(4A) (b b^T + c c^T)           (r̄_e = 要素重心の y。勾配が要素内一定なので厳密)
+//     M_e = hL/12 [[3r_a+r_b, r_a+r_b],[r_a+r_b, r_a+3r_b]],
+//     f_e += h T_c L/6 (2r_a+r_b, r_a+2r_b)             (r は辺上で線形なので厳密)
+//   界面の集中量は A_i^r = Σ L/6 (2r_i + r_j) [m²/rad]、出力 q_hole は M_e (T - T_c) (§4.4b)。
+//   **平面 (axisym = false) は重みを掛けない別経路**で、従来とビット同一。
+//
 // 【解き方】Schur 補元は作らず**全節点系を直接解く** (§4.6a)。
 //   未知数は全節点温度 u なので内部温度が状態になり、k_s(T) の自己整合が
 //   「復元してから組み直す」操作を要さない (plan §5.1 #33 と同型の事故が起きない)。
@@ -23,6 +31,7 @@
 // ============================================================================
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace conjugate {
@@ -45,10 +54,15 @@ struct SolidMesh {
     std::string contentSha1;   // 中身全体 (節点順・接続・物性・冷却条件) のハッシュ
     std::string sourceNpz;
 
+    // 軸対称 (r = y の重み)。**h5 には持たない** (content_sha1 を変えない)。
+    // 読んだ後に呼び出し側が設定する。既定 false = 平面 (単位奥行き)。
+    bool axisym = false;
+
     static SolidMesh read(const std::string& path);   // 読めなければ exit(1)
     double kOf(double T) const;                       // 線形内挿 (両端はクランプ)
     // 界面節点の**集中辺長** [m] (IFACE/NODES の順)。連成荷重は q_eff [W/m2] × これ。
     // **流体側の surfArea を使ってはいけない** (押し出し疑似 2D で奥行きが乗る。§4.6a)。
+    // 軸対称では A_i^r = ∫ N_i r ds [m²/rad]。
     std::vector<double> ifaceLumped() const;
     int nIface() const { return (int)ifaceNodes.size(); }
 };
@@ -78,6 +92,11 @@ public:
     std::vector<double> residual(const std::vector<double>& u);
 
     const std::vector<double>& rhs() const { return b_; }
+    // 組んだ行列 (分解前) の成分 A(i,j)。帯の外は 0 (同値試験用)。
+    double entry(int i, int j) const {
+        if (i < j) std::swap(i, j);
+        return (i - j > bw_) ? 0.0 : at(i, j);
+    }
     int bandwidth() const { return bw_; }
     bool factored() const { return factored_; }
 
@@ -98,6 +117,7 @@ private:
 
 // 固体場を forge と同じ XDMF 規約で書く (plan §4.6a。ParaView で流体と重ねられる)。
 //   VALUE/T (節点温度) / k_s / q_iface (ガス側から受け取った熱 [W/m]) / q_hole (孔が持ち去った熱)
+//   q_hole は平面では集中積分 Lh(T-Tc)/2、軸対称では組立てと同じ consistent 行列 M_e (T-Tc) [W/rad]。
 // `stem` は拡張子なしのパス (`res_solid_1000` → `.h5` と `.xmf` を書く)。
 void writeSolidField(const std::string& stem, const SolidMesh& m,
                      const std::vector<double>& u, const std::vector<double>& qIface,
