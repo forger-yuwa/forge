@@ -1,11 +1,11 @@
 # S3 性能 (case/48.flat_plate_cooled_m4)
 binary: /home/ubuntu/sglsq/forge_f99f236d
 block 128/128、2500 step、step 501–2499 の 1 step 壁時計の平均、gg/lsq 交互 3 反復
-- gg_a: 1.479 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_gg_a
-- lsq_a: 1.498 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_lsq_a
-- lsq_b: 1.495 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_lsq_b
-- gg_b: 1.489 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_gg_b
-- gg_c: 1.481 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_gg_c
-- lsq_c: 1.494 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_lsq_c
-中央値: gg 1.481 / lsq 1.495 ms/step → 比 lsq/gg = 1.0097 (上限 1.05)
+- gg_a: 1.541 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_gg_a
+- lsq_a: 1.537 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_lsq_a
+- lsq_b: 1.532 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_lsq_b
+- gg_b: 1.539 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_gg_b
+- gg_c: 1.599 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_gg_c
+- lsq_c: 1.537 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_lsq_c
+中央値: gg 1.541 / lsq 1.537 ms/step → 比 lsq/gg = 0.9974 (上限 1.05)
 VERDICT S3 (case/48.flat_plate_cooled_m4): PASS

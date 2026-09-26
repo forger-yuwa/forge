@@ -1,11 +1,11 @@
 # S3 性能 (case/39.periodic_hills)
 binary: /home/ubuntu/sglsq/forge_f99f236d
 block 128/128、2500 step、step 501–2499 の 1 step 壁時計の平均、gg/lsq 交互 3 反復
-- gg_a: 2.559 ms/step (n=1999) case/39.periodic_hills/_s3_gg_a
-- lsq_a: 2.591 ms/step (n=1999) case/39.periodic_hills/_s3_lsq_a
-- lsq_b: 2.587 ms/step (n=1999) case/39.periodic_hills/_s3_lsq_b
-- gg_b: 2.541 ms/step (n=1999) case/39.periodic_hills/_s3_gg_b
+- gg_a: 2.579 ms/step (n=1999) case/39.periodic_hills/_s3_gg_a
+- lsq_a: 2.632 ms/step (n=1999) case/39.periodic_hills/_s3_lsq_a
+- lsq_b: 2.592 ms/step (n=1999) case/39.periodic_hills/_s3_lsq_b
+- gg_b: 2.547 ms/step (n=1999) case/39.periodic_hills/_s3_gg_b
 - gg_c: 2.549 ms/step (n=1999) case/39.periodic_hills/_s3_gg_c
-- lsq_c: 2.591 ms/step (n=1999) case/39.periodic_hills/_s3_lsq_c
-中央値: gg 2.549 / lsq 2.591 ms/step → 比 lsq/gg = 1.0165 (上限 1.05)
+- lsq_c: 2.596 ms/step (n=1999) case/39.periodic_hills/_s3_lsq_c
+中央値: gg 2.549 / lsq 2.596 ms/step → 比 lsq/gg = 1.0184 (上限 1.05)
 VERDICT S3 (case/39.periodic_hills): PASS
