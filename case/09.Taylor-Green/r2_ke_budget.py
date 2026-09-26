@@ -12,8 +12,12 @@
   r    = (dK/dt − Π + ε) / (K0/t_c)         (圧縮性の収支。判定はこちら)
 微分は周期 2 次中心差分 (solver の離散化とは別物なので、新でも r は 0 にならない)。dK/dt は snapshot 間の中心差分。
 
-判定 (測る前に固定、plan §5.1 #5d): 新は |r| ≤ 0.05。旧は t ≲ 7 で r > 0 が持続すれば「継ぎ目由来の注入」、
-符号不定なら「収支が閉じない」に留める。
+判定 (plan §6.2 R2):
+  ~~新は |r| ≤ 0.05~~ (測る前に固定したが、ε に入らない風上スキームの数値散逸を見落とした誤指定。2026-09-26 撤回)。
+  **測定後に追加した診断** (保存性ゲートの代替ではない): (a) 新 max r ≤ +0.005、(b) t ≤ 7 で min(r_old − r_new) > 0、
+  (c) 旧の K/K0 > 1 区間で r > 0 が連続 ≥ 10 snapshot。
+  r は本スクリプト独自の中心差分と snapshot 間差分による後処理で、作用素の不一致・時間微分誤差を含む。
+  したがって機構 (どこで何がエネルギーを入れたか) はこの r からは言えない (codex result M4)。
 """
 import argparse
 import glob
@@ -101,9 +105,22 @@ def main():
                 f"t≤7 の r: 平均 {rr[early_i].mean():+.4f} / 正の割合 {np.mean(rr[early_i] > 0):.2f} / "
                 f"min {rr[early_i].min():+.4f} max {rr[early_i].max():+.4f}")
         out.append(line)
-    t_new, _, _, _, _, r_new = res["new"]
-    ok = np.abs(r_new[1:-1]).max() <= 0.05
-    out.append(f"VERDICT (新 |r| ≤ 0.05): {'PASS' if ok else 'FAIL'}")
+    to, Ko, _, _, _, ro = [x[1:-1] for x in res["old"]]
+    tn, Kn_, _, _, _, rn = [x[1:-1] for x in res["new"]]
+    assert np.allclose(to, tn)
+    a_ok = rn.max() <= 0.005
+    early = to <= 7.0
+    b_min = (ro[early] - rn[early]).min()
+    pos = (Ko > 1.0) & (ro > 0)
+    run = best = 0
+    for v in pos:
+        run = run + 1 if v else 0
+        best = max(best, run)
+    out.append(f"診断 (a) 新 max r = {rn.max():+.4f} ≤ +0.005: {'成立' if a_ok else '不成立'}")
+    out.append(f"診断 (b) t≤7 の min(r_old − r_new) = {b_min:+.4f} > 0: {'成立' if b_min > 0 else '不成立'}")
+    out.append(f"診断 (c) 旧 K/K0>1 区間の r>0 最長連続 = {best} snapshot ≥ 10: {'成立' if best >= 10 else '不成立'}")
+    out.append(f"DIAGNOSTIC (測定後に追加、保存性ゲートの代替ではない): {'ALL HOLD' if (a_ok and b_min > 0 and best >= 10) else 'NOT ALL HOLD'}")
+    out.append(f"(撤回した旧基準の値、記録のみ: 新 max|r| = {np.abs(rn).max():.4f})")
     print("\n".join(out))
     if a.csv:
         with open(a.csv, "w") as f:

@@ -153,14 +153,25 @@ $\rho U_*, \rho e, H_t$ の勾配計算用コードは保留 (コメントアウ
 非 periodic の全 bcond について **owner ノードの状態値**を境界面値として加算する (bvar は参照しない)。
 periodic は DOF 同一視・gradient gather (§discretization.md §4.5) に委ね寄与を加えない。
 
-**node × 周期の継ぎ目 (既知の欠陥、修正中: plan [`boundary-node-periodic-gradient-fix.md`](../plans/active/boundary-node-periodic-gradient-fix.md))**:
-継ぎ目で割れた CV の部分勾配は `periodicGradientGather` で**和**を取る。Green–Gauss (合併体積で割った部分寄与) なら和が合併勾配になるが、
-node の既定の **LSQ (`gradLSQ: 2`) では各部分 CV が片側の隣接だけで完全な勾配を解くので、和は線形場で正確に 2 倍**になる
-(2026-09-26 実測、case/09 TGV)。修正は、事前計算で継ぎ目越しの**合併 stencil** の LSQ を組むこと:
-重み $w=1/|\Delta\mathbf x|^2$、同じ物理隣接が両側に現れる継ぎ目接線エッジは配分係数 $\alpha$ (同一隣接で総和 1) で重複を除き、
-$M_r=\sum\alpha w\,\Delta\mathbf x\Delta\mathbf x^{\mathsf T}$、スペクトル打ち切りは $M_r$ に 1 回、各部分 CV の係数 $c=M_r^{+}\alpha w\Delta\mathbf x$ を焼き込む。
-毎 step の gather は和のまま (部分和が合併 LSQ になる)。化学種・受動種・凝縮モーメントの勾配は Green–Gauss なので現行の和が正しい。
-SST の $k,\omega$ 勾配は `ransGradient` が合算の後に作り直していて合算されていない (同 plan で修正)。
+**node × 並進周期の継ぎ目** (plan [`boundary-node-periodic-gradient-fix.md`](../plans/active/boundary-node-periodic-gradient-fix.md))。
+適用条件は `periodicSeamMergeActive` (node ∧ 周期 group あり ∧ 非軸対称 ∧ 周期 bcond がすべて並進 `type: 0`)。以下はすべてこの条件で有効になる。
+
+- **LSQ (`gradLSQ: 2`、NS の原始量)**: 事前計算で継ぎ目越しの**合併 stencil** を組む (`calcGradient_d.cu` の `lsqPre_mergePeriodic`)。
+  group の全部分 CV の incidence を集め、同じ物理隣接 (隣接の `periodicRoot` が一致し、変位が $10^{-4}h_{min}$ 以内) を同値類にまとめて
+  配分係数 $\alpha=1/\text{重複数}$ を決める。行列と係数は**各 incidence の実変位** $d_{mj}$ で組む:
+  $M_r=\sum\alpha_{mj}w_{mj}d_{mj}d_{mj}^{\mathsf T}$ ($w=1/|d|^2$)、スペクトル打ち切りは $M_r$ に 1 回、係数 $c_{mj}=M_{r,\tau}^{+}\alpha_{mj}w_{mj}d_{mj}$。
+  毎 step の `periodicGradientGather` は和のまま (部分和が合併 LSQ になる)。
+- **Green–Gauss (SST の $k,\omega$、化学種、受動種・凝縮モーメント)**: 各部分 CV は**周期半割面を積算しない** (面フラグ `mesh.planePeriodic_d`)。
+  合併体積で割った部分寄与を和で合併する。$k,\omega$ は `ransGradient` の直後 (`ransBlendF1` の前) に専用の gather、
+  化学種・受動種は `periodicGradientGather` に登録された gather を使う。化学種・受動種は `species_gradient_d` の同じ呼び出し経路。
+- **F1**: `sstF1` は配列確保時に 1 で初期化する (`buildScalarDescs` は副作用なし)。
+- **この条件の外** (軸対称×周期、回転周期): スカラー勾配は片側 GG + 半割面込みのまま (既存の未修正挙動で、本修正では不変)。
+  回転周期は plan `boundary-node-rotational-periodic` で扱う。
+
+**履歴 (2026-09-26 まで)**: LSQ は各部分 CV が片側の隣接だけで完全な勾配を解き、和が線形場で正確に 2 倍になっていた (case/09 TGV 実測)。
+SST の $k,\omega$ 勾配は gather の後に `ransGradient` が作り直して合算されていなかった。GG の周期半割面の除外条件 `ic1 < nCells` は、
+周期 bcond にもゴーストが付く (`mesh.cpp`) ため一度も成立せず、継ぎ目に $\phi(S_a+S_b)/V$ の誤差があった。
+
 理論・設計判断は [discretization.md §6.2/§7.2.2](discretization.md#62-弱形式境界-weak-form-boundary) を参照。
 
 ### 並列化メモ

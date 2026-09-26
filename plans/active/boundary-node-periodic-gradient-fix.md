@@ -44,7 +44,8 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 ## 2. スコープ
 
 - **やる**: 合併 stencil の LSQ 係数の事前計算、$k,\omega$ 勾配の合算位置の修正、並進周期での検証 (G0 拡張、二次場、case/39、case/09)。
-- **やらない**: 回転周期 (`boundary-node-rotational-periodic` で本 plan の後に)。Green–Gauss の勾配 (化学種・受動種・凝縮モーメント。現行の和が正しい)。
+- **やる (2026-09-26 追加)**: Green–Gauss のスカラー勾配 ($k,\omega$・化学種・受動種・凝縮モーメント) の周期半割面の除外 (§4.2a。除外条件が死んでいたため)。適用は `periodicSeamMergeActive` のときだけ。
+- **やらない**: 回転周期 (`boundary-node-rotational-periodic` で本 plan の後に)。~~Green–Gauss の勾配 (化学種・受動種・凝縮モーメント。現行の和が正しい)~~ (撤回、§4.2a)。軸対称×周期のスカラー勾配 (片側 GG + 半割面込みのまま、既存の未修正挙動)。
   陰解法の行縮約 (別 plan)。継ぎ目の部分双対面の合併 (並進の押し出しでは部分面が同一平面で差が無い)。
 
 ## 3. 関連 docs と前提
@@ -125,8 +126,8 @@ LSQ の退化方向を 0 にするスペクトル打ち切りで、Green–Gauss
 | 6b | codex result M2 | `g2p_jitter.py` を訂正後の基準に揃え、ジッタ 128³ を追加 (AWS)。**測る前に固定**: 最細対 64→128 の継ぎ目の次数 (ゼロ成分含む全成分) ≥ 0.9 かつ 128³ で継ぎ目/内部 ≤ 2。32→64 は補助、16→32 は漸近域外として記録のみ。64→128 が 0.9 未満なら判定不能とし、内部の次数を並べて継ぎ目固有でないことだけ書く | O |
 | 6c | codex result M3 | `g_suite.py` の G1-b から n_member 倍の自動緩和を削除 (上限 $2N_{max}\varepsilon\phi/h$ かつ継ぎ目/内部 ≤ 2 を機械判定)、GPU 定数場 (k・ω・ξ = const、継ぎ目勾配 ≤ 4ε\|φ\|/h) を追加、7 run 再実行 (AWS)。化学種の直接確認は tracer ξ で代理 (根拠: `passiveGradient_d_wrapper` は同じ `species_gradient_d` を同じ excludePeriodic で呼ぶ、`speciesTransport_d.cu:1220-1232`) | O |
 | 6d | codex result M5 | R1 の記述訂正。旧は元 run + 延長を `stage_manifest` で同一実効設定の 1 区間として連結し `--segment` (スパイク込み)。F1 仮説: 同じ restart 入力で旧バイナリ 1 step を `sstSigmaBlend` 0/1 で比較 (スパイクが 1 側だけなら仮説支持、そうでなければ「原因未特定」)。新 dF1_inf の定常性は継続課題 (#7) | O |
-| 6e | codex result M4 | R2 の結論を観測と帰属に限定し、`r2_ke_budget.py` の VERDICT 行を符号条件 (a)(b)(c) に置換、旧 \|r\| ≤ 0.05 行は履歴 | O |
-| 6f | codex result m1 | `methods/gradient.md` を実装後の記述に (欠陥は履歴節)、§2 スコープ、`plans/README.md`、§5.1 #5d、case/09・case/39 の run 表 | O |
+| 6e (**完了 2026-09-26**: 判定行を置換、`r2_ke_budget.txt` 更新、診断 ALL HOLD) | codex result M4 | R2 の結論を観測と帰属に限定し、`r2_ke_budget.py` の VERDICT 行を符号条件 (a)(b)(c) に置換、旧 \|r\| ≤ 0.05 行は履歴 | O |
+| 6f (**完了 2026-09-26**: `methods/gradient.md`・§2・`plans/README.md`) | codex result m1 | `methods/gradient.md` を実装後の記述に (欠陥は履歴節)、§2 スコープ、`plans/README.md`、§5.1 #5d、case/09・case/39 の run 表 | O |
 | 6g | codex result 2 回目 | 6a–6f の後。`--focus` 「M1–M5 の閉じ方、R1 の限定合格 + 継続課題の扱い、R2 の観測限定の文言」 | O (結論 F) |
 | 7 | 継続課題 (accepted 後も残す) | 新 R1 の dF1_inf の定常性 (DRIFTING 0.3 %/tail、上限内)。R2 の機構分解 (同一状態の旧新離散残差から KE 仕事を分解) | O |
 | 5 (**完了 2026-09-26**、§6.2。codex result で #6a–#6g を追加) | 検証 R1・R2 | §6 R1・R2 (5a・5b の後)。**区切りで codex** | O (結論 F) |
