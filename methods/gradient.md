@@ -153,7 +153,7 @@ $\rho U_*, \rho e, H_t$ の勾配計算用コードは保留 (コメントアウ
 非 periodic の全 bcond について **owner ノードの状態値**を境界面値として加算する (bvar は参照しない)。
 periodic は DOF 同一視・gradient gather (§discretization.md §4.5) に委ね寄与を加えない。
 
-**node × 並進周期の継ぎ目** (plan [`boundary-node-periodic-gradient-fix.md`](../plans/active/boundary-node-periodic-gradient-fix.md))。
+**node × 並進周期の継ぎ目** (plan [`boundary-node-periodic-gradient-fix.md`](../plans/accepted/boundary-node-periodic-gradient-fix.md))。
 適用条件は `periodicSeamMergeActive` (node ∧ 周期 group あり ∧ 非軸対称 ∧ 周期 bcond がすべて並進 `type: 0`)。以下はすべてこの条件で有効になる。
 
 - **LSQ (`gradLSQ: 2`、NS の原始量)**: 事前計算で継ぎ目越しの**合併 stencil** を組む (`calcGradient_d.cu` の `lsqPre_mergePeriodic`)。
@@ -164,10 +164,14 @@ periodic は DOF 同一視・gradient gather (§discretization.md §4.5) に委�
 - **Green–Gauss (SST の $k,\omega$、化学種、受動種・凝縮モーメント)**: 各部分 CV は**周期半割面を積算しない** (面フラグ `mesh.planePeriodic_d`)。
   合併体積で割った部分寄与を和で合併する。$k,\omega$ は `ransGradient` の直後 (`ransBlendF1` の前) に専用の gather、
   化学種・受動種は `periodicGradientGather` に登録された gather を使う。化学種・受動種は `species_gradient_d` の同じ呼び出し経路。
-- **F1**: `sstF1` は配列確保時に 1 で初期化する (`buildScalarDescs` は副作用なし)。
 - **既知の制約**: 壁の CV は壁半割面を φ[ic0] で積算するので、float32 の格納面ベクトルでは定数場の GG が閉じず、壁節点で約 $5\,\varepsilon|\phi|/h$ の偽勾配が出る (2026-09-26 channel 実測、継ぎ目に依らない)。LSQ 化 (後続 plan) で解消する見込み。
 - **この条件の外** (軸対称×周期、回転周期): スカラー勾配は片側 GG + 半割面込みのまま (既存の未修正挙動で、本修正では不変)。
   回転周期は plan `boundary-node-rotational-periodic` で扱う。
+
+**SST の F1 の初期値** (周期に依らず全 SST run): `sstF1` は配列確保時 (`variables.cpp` の `allocVariables`) に 1 で初期化し、`buildScalarDescs` は副作用を持たない。
+2026-09-26 までは `buildScalarDescs` の初回呼び出しが計算済みの F1 を 1 で上書きしていたので、`sstSigmaBlend: 1` (既定) の SST run は**非周期でも初回 step の k/ω が変わる**
+(case/48 で step 1 の roK/roOmega が約 5 万点変化、`sstSigmaBlend: 0` で消えることを確認)。restart 直後の 1 step だけ k の残差が跳ねる現象 (case/39 旧バイナリで床の 408 倍) もこれが原因
+(`1266aba1` + この修正だけの版で 0.99 倍に消えた)。
 
 **履歴 (2026-09-26 まで)**: LSQ は各部分 CV が片側の隣接だけで完全な勾配を解き、和が線形場で正確に 2 倍になっていた (case/09 TGV 実測)。
 SST の $k,\omega$ 勾配は gather の後に `ransGradient` が作り直して合算されていなかった。GG の周期半割面の除外条件 `ic1 < nCells` は、
