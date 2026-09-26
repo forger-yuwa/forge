@@ -7,7 +7,7 @@
 - **related_docs**:
   - [`methods/boundary.md`](../../methods/boundary.md) 「node 壁強境界」「共役熱伝達 (CHT)」
 - **related_plans**:
-  - [`boundary-conjugate-heat-transfer.md`](boundary-conjugate-heat-transfer.md) §5.1 #43 (本計画の発端)
+  - [`boundary-conjugate-heat-transfer.md`](../accepted/boundary-conjugate-heat-transfer.md) §5.1 #43 (本計画の発端)
   - [`architecture-node-boundary-gradient-dof-only.md`](../accepted/architecture-node-boundary-gradient-dof-only.md)
 - **created**: `2026-09-20`
 - **owner**: Claude

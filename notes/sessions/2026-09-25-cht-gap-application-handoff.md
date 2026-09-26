@@ -1,6 +1,6 @@
 # CHT をすきま / 環状キャビティへ適用するか — 受け取る側への受け渡し (2026-09-25)
 
-**正本は [`plans/active/boundary-conjugate-heat-transfer.md`](../../plans/active/boundary-conjugate-heat-transfer.md)
+**正本は [`plans/accepted/boundary-conjugate-heat-transfer.md`](../../plans/accepted/boundary-conjugate-heat-transfer.md)
 §4.11 (受け渡しの誤差幅) と §5.1 #86–#88。本ノートはその写しとポインタである** (AGENTS.md「残作業の正本は plan の §5.1、
 `notes/sessions/` は写しとポインタだけ」)。
 

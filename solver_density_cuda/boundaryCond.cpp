@@ -438,7 +438,7 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
 // 壁温分布プロファイル: `wall_isothermal` の per-face `Ts` を CSV から埋める。
 // `Ts` は valueTypes==1 (起動時に一様値を 1 度入れるだけでカーネルは書き換えない) なので、
 // ここで面ごとに違う値を入れればそのまま効く。CHT の弱連成ループの入口でもある
-// (methods/boundary.md「共役熱伝達 (CHT)」/ plans/active/boundary-conjugate-heat-transfer.md)。
+// (methods/boundary.md「共役熱伝達 (CHT)」/ plans/accepted/boundary-conjugate-heat-transfer.md)。
 void applyWallProfiles(solverConfig& cfg , mesh& msh)
 {
     applyBoundaryProfiles(cfg , msh , "wallProfile" , "wall_profile_" , "applyWallProfiles" , true);

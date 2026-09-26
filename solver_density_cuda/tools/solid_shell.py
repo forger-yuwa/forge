@@ -2,7 +2,7 @@
 r"""CHT の固体側モデル (薄肉シェル)。**未知数はガス側表面温度 $T_w$**。
 
 仕様の正本は methods/boundary.md「共役熱伝達 (CHT)」、設計判断は
-plans/active/boundary-conjugate-heat-transfer.md。ここはその実装。
+plans/accepted/boundary-conjugate-heat-transfer.md。ここはその実装。
 
 ## モデル
 

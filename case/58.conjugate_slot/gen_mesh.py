@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""V6′ — 深いスロットの両側壁を CHT にする 2D ケースのメッシュ生成 (自己完結)。
 
-plan [`boundary-conjugate-heat-transfer.md`](../../plans/active/boundary-conjugate-heat-transfer.md)
+plan [`boundary-conjugate-heat-transfer.md`](../../plans/accepted/boundary-conjugate-heat-transfer.md)
 §6 V6′。**他セッションの資産に依存しない**ことが要件なので、幾何もメッシュも本ファイルで作る。
 
 ## 何を試すケースか

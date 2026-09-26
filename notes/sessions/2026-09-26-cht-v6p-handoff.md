@@ -1,6 +1,8 @@
 # 引き継ぎ: CHT の V6′ を閉じる (2026-09-26)
 
-**残作業の正本は [`plans/active/boundary-conjugate-heat-transfer.md`](../../plans/active/boundary-conjugate-heat-transfer.md)
+> **完了 (2026-09-26)**: V6′ は固定深部帯 211 節点に限って PASS、plan は `plans/accepted/boundary-conjugate-heat-transfer.md` へ移した (§5.1 #100–#104、§6「本計画を閉じる条件」)。以下は着手時の写し。
+
+**残作業の正本は [`plans/accepted/boundary-conjugate-heat-transfer.md`](../../plans/accepted/boundary-conjugate-heat-transfer.md)
 の §5.1 (特に #100 / #101) と §6 V6′。本ノートは写しとポインタだけ**なので、着手前に plan を読むこと。
 
 ## 0. いまどこにいるか

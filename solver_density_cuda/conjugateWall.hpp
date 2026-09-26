@@ -4,7 +4,7 @@
 // 共役熱伝達 (CHT) の界面契約 — **符号・定義の正本**
 //
 // 仕様は methods/boundary.md「共役熱伝達 (CHT)」、設計判断は
-// plans/active/boundary-conjugate-heat-transfer.md (codex plan レビュー 3 巡)。
+// plans/accepted/boundary-conjugate-heat-transfer.md (codex plan レビュー 3 巡)。
 // 散文で符号を守らないこと: ここのコメントと methods/boundary.md が唯一の正本で、
 // 他所は必ずこれを引く。
 //

@@ -1,6 +1,6 @@
 # CHT の一次適用先 — 公知試験データの棚卸し (2026-09-19)
 
-- **目的**: [`plans/active/boundary-conjugate-heat-transfer.md`](../../plans/active/boundary-conjugate-heat-transfer.md) §8-1
+- **目的**: [`plans/accepted/boundary-conjugate-heat-transfer.md`](../../plans/accepted/boundary-conjugate-heat-transfer.md) §8-1
   「一次の適用先をどれにするか」を、**ユーザ指示 (2026-09-19)「公知文献の試験結果があるもの」**に沿って決めるための調査。
 - **結論 (ユーザ指示「超音速系だとなお良い」2026-09-19 を反映)**: 一次適用先は
   **NASA CR-168015 (Hylton et al. 1983 / NTRS 19830020105) のタービン翼**。

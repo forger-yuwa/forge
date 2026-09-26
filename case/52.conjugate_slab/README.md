@@ -1,7 +1,7 @@
 # case/52 共役スラブ (CHT の V1 検証)
 
 **1 次元純伝導の共役解**で、forge (流体) + `solid_shell.py` (固体) の**外部弱連成ループ**を解析解に照合する。
-計画は [`plans/active/boundary-conjugate-heat-transfer.md`](../../plans/active/boundary-conjugate-heat-transfer.md) §6 V1、
+計画は [`plans/accepted/boundary-conjugate-heat-transfer.md`](../../plans/accepted/boundary-conjugate-heat-transfer.md) §6 V1、
 仕様は [`methods/boundary.md`](../../methods/boundary.md)「共役熱伝達 (CHT)」。
 
 ## 問題
@@ -85,7 +85,7 @@ cd su2 && LD_LIBRARY_PATH=<su2>/lib <su2>/bin/SU2_CFD slab_cht.cfg
 | forge 外部ループ (`shell2d`) | 316.265900 | +0.00410 K | **+0.00409 K** |
 
 **登録許容 0.2 % of rise = 0.0325 K に対し、forge の 2 経路とも PASS**
-([plan](../../plans/active/boundary-conjugate-heat-transfer.md) §6 V2、許容の定義は実施前に確定)。
+([plan](../../plans/accepted/boundary-conjugate-heat-transfer.md) §6 V2、許容の定義は実施前に確定)。
 SU2 側は温度分布が厳密に線形 (差 ≤7.4e-8 K)・速度 0・$q$=81.30905 (解析 81.30900 W/m²)。
 
 **罠**: 静止流体では流体の BGS 残差が最初から −23 で既定の収束判定を満たし、**固体が −0.62 のまま

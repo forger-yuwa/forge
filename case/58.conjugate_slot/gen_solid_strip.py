@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""V6′ の固体帯 (スロット前壁の外側 $t$) を作る。
 
-plan [`boundary-conjugate-heat-transfer.md`](../../plans/active/boundary-conjugate-heat-transfer.md) §6 V6′。
+plan [`boundary-conjugate-heat-transfer.md`](../../plans/accepted/boundary-conjugate-heat-transfer.md) §6 V6′。
 `case/48.flat_plate_cooled_m4/gen_solid_strip.py` と**同じ帯トポロジ**:
 
 - **界面** = `outer_edges` (流体の `slot_front` と 1 対 1。**壁ダンプから $y$ を読む** —

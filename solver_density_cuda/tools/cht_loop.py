@@ -2,7 +2,7 @@
 r"""CHT 外部弱連成ループ (Phase 1): forge の壁熱流束 → 固体シェル → `wallProfile` → forge、を反復する。
 
 仕様は methods/boundary.md「共役熱伝達 (CHT)」、設計判断は
-plans/active/boundary-conjugate-heat-transfer.md。固体側は `solid_shell.py`。
+plans/accepted/boundary-conjugate-heat-transfer.md。固体側は `solid_shell.py`。
 
 1 反復 = **forge 1 回** (CFD 評価は高価なので line search はしない)。
 更新は固定点を保存する形 $(A_s+D_f)T^{k+1}=b_s+Q_f(T^k)+D_fT^k$ + Anderson 加速で、

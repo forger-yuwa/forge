@@ -43,7 +43,21 @@ def run(cmd):
     p = subprocess.run(cmd, capture_output=True, text=True)
     out = p.stdout + p.stderr
     v = [l for l in out.splitlines() if l.startswith("VERDICT")]
-    return (v[-1] if v else "(no VERDICT)"), out
+    return (v[-1] if v else "(no VERDICT)"), p.returncode, out
+
+
+# 期待は「判定語」と「終了コード」の組で照合する (codex diagnose 2026-09-26: 「PASS が含まれない」で負例成功と
+# 見なすと、VERDICT の無い異常終了 (例外・import 失敗) まで成功扱いになった)。
+EXPECT_RC = {"PASS": 0, "FAIL": 1, "REFUSED": 1}
+
+
+def verdict_word(v):
+    parts = v.split()
+    return parts[1] if len(parts) >= 2 and parts[0] == "VERDICT:" else None
+
+
+def matches(v, rc, expect):
+    return verdict_word(v) == expect and rc == EXPECT_RC[expect]
 
 
 def edit_csv(path, fn):
@@ -60,16 +74,24 @@ def main():
     step = 100000
     results = []
     with tempfile.TemporaryDirectory() as tmp:
-        def case(name, copy, mutate, tool, expect_pass):
+        def case(name, copy, mutate, tool, expect):
             d = os.path.join(tmp, name)
             clone(a.run, d, copy)
             mutate(d)
             cmd = ([sys.executable, EVAL, d, "--fix-band", *BAND] if tool == "eval"
                    else [sys.executable, GIF, d, "--band-y", *BAND])
-            v, _ = run(cmd)
-            ok = ("PASS" in v) == expect_pass
+            v, rc, _ = run(cmd)
+            ok = matches(v, rc, expect)
             results.append(ok)
-            print(f"[{'OK' if ok else 'NG'}] {name:<34} 期待 {'PASS' if expect_pass else '不合格'}  -> {v}")
+            print(f"[{'OK' if ok else 'NG'}] {name:<34} 期待 {expect} (rc {EXPECT_RC[expect]})  -> {v} (rc {rc})")
+
+        # ---- 試験器自身の自己検査: VERDICT の無い異常終了を「期待どおりの拒否」と取り違えないこと
+        for nm, code in (("自己検査: 例外終了", "raise RuntimeError('boom')"),
+                         ("自己検査: VERDICT 無しで rc=1", "import sys; sys.exit(1)")):
+            v, rc, _ = run([sys.executable, "-c", code])
+            ok = not any(matches(v, rc, e) for e in EXPECT_RC)
+            results.append(ok)
+            print(f"[{'OK' if ok else 'NG'}] {nm:<34} 期待 どの判定にも一致しない  -> {v} (rc {rc})")
 
         def flip_back(d):
             with h5py.File(os.path.join(d, f"res_slot_back_6_{step}.h5"), "r+") as f:
@@ -99,12 +121,12 @@ def main():
 
         wall_b = f"res_slot_back_6_{step}.h5"
         logs = ("conjugate_iface_log_5.csv", "conjugate_iface_nodes_5.csv", "v6p_band.json")
-        case("正例 eval (無改変)", ("v6p_band.json",), lambda d: None, "eval", True)
-        case("正例 G-if (無改変)", logs, lambda d: None, "gif", True)
-        case("M1 後壁 q_eff の符号反転", (wall_b, "v6p_band.json"), flip_back, "eval", False)
-        case("M2 節点 212 の座標 NaN + 残差 1000", logs, nan_coord, "gif", False)
-        case("M2 最終更新で節点 212 だけ step=0", logs, stale_step, "gif", False)
-        case("M2 最終更新で節点 ID 重複", logs, dup_id, "gif", False)
+        case("正例 eval (無改変)", ("v6p_band.json",), lambda d: None, "eval", "PASS")
+        case("正例 G-if (無改変)", logs, lambda d: None, "gif", "PASS")
+        case("M1 後壁 q_eff の符号反転", (wall_b, "v6p_band.json"), flip_back, "eval", "FAIL")
+        case("M2 節点 212 の座標 NaN + 残差 1000", logs, nan_coord, "gif", "REFUSED")
+        case("M2 最終更新で節点 212 だけ step=0", logs, stale_step, "gif", "REFUSED")
+        case("M2 最終更新で節点 ID 重複", logs, dup_id, "gif", "REFUSED")
     n_ok = sum(results)
     print(f"\nVERDICT: {'PASS' if n_ok == len(results) else 'FAIL'} ({n_ok}/{len(results)})")
     return 0 if n_ok == len(results) else 1

@@ -1,6 +1,6 @@
 # 58. 深いスロット片壁の CHT (V6′ — 伝導漸近との照合)
 
-計画: [`plans/active/boundary-conjugate-heat-transfer.md`](../../plans/active/boundary-conjugate-heat-transfer.md) §6 **V6′**
+計画: [`plans/accepted/boundary-conjugate-heat-transfer.md`](../../plans/accepted/boundary-conjugate-heat-transfer.md) §6 **V6′**
 
 **他セッションの資産に依存しない自己完結の CHT 検証**。深いスロットの深部は $Pe\ll1$ で伝導支配になるので、
 **幅方向 1 次元伝導 + 固体の直列抵抗**の解析解に漸近しなければならない。**一様壁温だと漸近解が
@@ -60,4 +60,4 @@ python3 solver_density_cuda/tools/solid_mesh_to_h5.py \
 | `run_0013_v6p_df20_i50_ext394k` / `run_0013_v6p_df5_i200_ext394k` / `run_0013_v6p_df20_i200_ext394k` | **延長判別** (plan §5.1 #102、事前登録)。`run_0012_*_nlog` の最終状態 (流体 `restart_field.py --keep-src-dtype`・壁温 `wall_profile_5.csv`+`wallProfile: 1`・固体 `conjugate_state_5.h5`) から **+294k step (累積 394k)**、他は同一・`outStepInterval` 10000。AWS g5・FP64・`FORGE_CUDA_BLOCKSIZE=128` | 共通帯 211 節点固定。**`20/50`・`5/200` は A** (局所 ALL STEADY・帯内 G-if PASS・(e) 0.0025 / 0.0015 %・基準との温度差 0.0000 %)。**`20/200` は判別未完** (G-if PASS・(e) 0.0278 %・温度差 0.0149 % だが帯上端 5 節点が TRANSIENT-UNSETTLED、基準へ単調に漸近中 −0.014 K)。NaN なし・流体残差 NOT CONVERGED | active |
 | `run_0014_v6p_df20_i200_ext688k` | **`20/200` の再延長** (plan §5.1 #103、事前登録)。`run_0013_v6p_df20_i200_ext394k` の最終状態から計算長だけ +294k (累積 688k) | **登録条件 A**: 固定帯 211 節点適格、(a)〜(f) PASS ((e) 0.0018 %)、局所 211 節点 ALL STEADY、帯内 G-if PASS (① 0.196)、基準との差 温度 0.0004 % / $q$ 0.0017 %。流体残差・全域 G-if は NOT CONVERGED (報告項目) | active |
 
-**判定 (2026-09-26): V6′ PASS (範囲限定)** — V6′ は、全域 FP64・本ケースの固定深部帯 211 節点において、登録した伝導漸近、連成保存性・温度連続、局所準定常、帯内 G-if、および `Df_scale` 5/20 × `interval` 50/200 の感度条件を満たして PASS とするが、流体残差と全域 G-if は NOT CONVERGED であり、全域 CHT 解の収束や固定点の設定非依存を実証したものではない。 根拠: `run_0012_v6p_df5_i50_nlog` (合否・基準) / `run_0013_v6p_{df20_i50,df5_i200}_ext394k` / `run_0014_v6p_df20_i200_ext688k`。経緯は [plan §5.1 #100–#103](../../plans/active/boundary-conjugate-heat-transfer.md)。旧「次」(#101 ①〜④) はすべて完了した: ① (e) を $Q_{\rm sol}=(K_su-b_s)_{\rm iface}$ に訂正、② `conjugate.node_log` + `check_cht_interface.py --band-y`、③ `check_quasisteady.py --series-csv`、④ `sens_v6p.py`。
+**判定 (2026-09-26): V6′ PASS (範囲限定)** — V6′ は、全域 FP64・本ケースの固定深部帯 211 節点において、登録した伝導漸近、連成保存性・温度連続、局所準定常、帯内 G-if、および `Df_scale` 5/20 × `interval` 50/200 の感度条件を満たして PASS とするが、流体残差と全域 G-if は NOT CONVERGED であり、全域 CHT 解の収束や固定点の設定非依存を実証したものではない。 根拠: `run_0012_v6p_df5_i50_nlog` (合否・基準) / `run_0013_v6p_{df20_i50,df5_i200}_ext394k` / `run_0014_v6p_df20_i200_ext688k`。経緯は [plan §5.1 #100–#103](../../plans/accepted/boundary-conjugate-heat-transfer.md)。旧「次」(#101 ①〜④) はすべて完了した: ① (e) を $Q_{\rm sol}=(K_su-b_s)_{\rm iface}$ に訂正、② `conjugate.node_log` + `check_cht_interface.py --band-y`、③ `check_quasisteady.py --series-csv`、④ `sens_v6p.py`。

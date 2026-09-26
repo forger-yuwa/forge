@@ -7,7 +7,7 @@
 - **related_docs**:
   - [`methods/discretization.md`](../../methods/discretization.md) (「node 内部双対面の面補間係数」の節)
   - [`methods/boundary.md`](../../methods/boundary.md) (壁熱流束 `iface_q_eff` の定義)
-- **related_plans**: [`boundary-conjugate-heat-transfer.md`](../active/boundary-conjugate-heat-transfer.md) §5.1 #57–#61 (発見の経緯)、
+- **related_plans**: [`boundary-conjugate-heat-transfer.md`](../accepted/boundary-conjugate-heat-transfer.md) §5.1 #57–#61 (発見の経緯)、
   [`architecture-node-option-consolidation.md`](../active/architecture-node-option-consolidation.md) (`nodeMidpointFx` を撤去した plan。その前提を本 plan が覆す)
 - **created**: `2026-09-21`
 - **owner**: Claude (ユーザ指示「熱流束のガタつきに対処する」)

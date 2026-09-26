@@ -3,7 +3,7 @@
 // ============================================================================
 // CHT Phase 2: 一般 2D 固体 (`fem2d`) の伝導 — **ソルバ内連成の固体側**
 //
-// 仕様は plans/active/boundary-conjugate-heat-transfer.md §4.6a、
+// 仕様は plans/accepted/boundary-conjugate-heat-transfer.md §4.6a、
 // 界面熱量の符号は conjugateWall.hpp、外部ループの参照実装は
 // solver_density_cuda/tools/solid_fem2d.py (**こちらが真値**。移植の同値試験 §6 V4b(a))。
 //

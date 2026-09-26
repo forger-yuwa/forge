@@ -332,7 +332,7 @@ SST automatic wall treatment (`wallTreatmentSST`) とはコードパスが分離
 > **未実装**: ソルバ内の `shell2d` (帯メッシュを `fem2d` に食わせる方針)、dual-time 連成。
 > 検証: 1 次元純伝導の共役解を解析解と照合 (`case/52.conjugate_slab`) — $T_w$ 誤差 0.025 %、
 > 両側 $q$ の不一致 0.0053 % で **PASS**。
-> 設計判断と検証計画は [`plans/active/boundary-conjugate-heat-transfer.md`](../plans/active/boundary-conjugate-heat-transfer.md)
+> 設計判断と検証計画は [`plans/accepted/boundary-conjugate-heat-transfer.md`](../plans/accepted/boundary-conjugate-heat-transfer.md)
 > (codex plan レビュー 3 巡: NO-GO → NO-GO → GO-with-changes、全件採用)。実装時は本節と実装の整合を確認する。
 
 等温壁は $T_w$ を**与件**とするが、すきま・深いキャビティ・冷却壁では $T_w(x)$ は解の一部である。
@@ -423,7 +423,7 @@ conjugate: {mode: local1d, flux: q_eff, thickness: 1.0e-3, k_solid: 0.217, back:
 `interval` step ごとに、**ステップ完了後** (次の残差組立ての前) に壁温を更新する。
 
 **`flux: q_eff` (既定、保存形)** — 上の「界面熱量」で定義した $q_{\rm eff}$ を使い、
-[plan §4.2](../plans/active/boundary-conjugate-heat-transfer.md) の**固定点を保存する形**で解く:
+[plan §4.2](../plans/accepted/boundary-conjugate-heat-transfer.md) の**固定点を保存する形**で解く:
 
 $$(g_s + D_f)\,T_w^{k+1} = g_s T_b + q_{\rm eff}(T_w^k) + D_f\,T_w^k,\qquad
   g_f = \frac{k_{\rm eff}}{d_1},\quad g_s = \frac{1}{R_{\rm tot}},\quad D_f = g_f$$
@@ -435,7 +435,7 @@ $$(g_s + D_f)\,T_w^{k+1} = g_s T_b + q_{\rm eff}(T_w^k) + D_f\,T_w^k,\qquad
 **`flux: q_compact` (旧実装、A/B 専用)** — 抵抗加重平均 $T_w^{new} = (g_f T_1 + g_s T_b)/(g_f+g_s)$
 (SU2 の `AVERAGED_TEMPERATURE` と同型)。これは $q_{\rm compact}$ の固定点であり、**保存形とは一致しない**。
 差は壁半 CV 内の粘性加熱 $\tau\cdot u$ と流動仕事で、第一層厚 $d_1$ に比例する。
-**実測** (`case/48.flat_plate_cooled_m4`, $d_1$=3.0 µm、[plan §5.1 #66](../plans/active/boundary-conjugate-heat-transfer.md)):
+**実測** (`case/48.flat_plate_cooled_m4`, $d_1$=3.0 µm、[plan §5.1 #66](../plans/accepted/boundary-conjugate-heat-transfer.md)):
 同一状態の G-cons が $q_{\rm eff}$ 形の更新では **0.0028 % (PASS)**、$q_{\rm compact}$ 形では **1.77 % (FAIL)**。
 壁温は平均 599.96 → **604.17 K**、前縁の最大 987.1 → **1148.5 K** と動く。
 

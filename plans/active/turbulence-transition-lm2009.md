@@ -7,7 +7,7 @@
 - **related_docs**:
   - [`methods/turbulence/theory.md`](../../methods/turbulence/theory.md) §11 (式・定数・結合・境界条件)
   - [`methods/turbulence/implementation.md`](../../methods/turbulence/implementation.md) (実装節を本 plan の実装時に追加)
-- **related_plans**: [`boundary-conjugate-heat-transfer.md`](boundary-conjugate-heat-transfer.md) (動機: 冷却翼の負圧面層流域で $h$ が +44〜+80 %)
+- **related_plans**: [`boundary-conjugate-heat-transfer.md`](../accepted/boundary-conjugate-heat-transfer.md) (動機: 冷却翼の負圧面層流域で $h$ が +44〜+80 %)
 - **created**: `2026-09-22`
 - **owner**: Claude (ユーザ指示「やるとしたら遷移モデル。一番良いと思った手法で計画を立て、検証を繰り返せ。codex のレビューを受けよ」)
 

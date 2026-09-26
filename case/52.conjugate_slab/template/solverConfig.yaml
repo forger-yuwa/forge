@@ -1,4 +1,4 @@
-# V1: 1 次元純伝導の共役解 (plans/active/boundary-conjugate-heat-transfer.md §6 V1)
+# V1: 1 次元純伝導の共役解 (plans/accepted/boundary-conjugate-heat-transfer.md §6 V1)
 # 静止流体層 (厚さ H=0.01 m, k_f=0.0241 一定) + 固体 (R_s) の直列。
 # 上壁 350 K 固定 / 下壁 = 共役壁 (cht_loop が wallProfile で毎反復更新)。
 mesh: {discretization: "node", meshFileName: "mesh.h5", valueFileName: "mesh.h5"}

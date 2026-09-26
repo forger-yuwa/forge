@@ -153,7 +153,7 @@ $$R_i^{raw} = -\sum_f F_{if} + S_i,\qquad D_t(V_iE_i) = -\sum_f F_{if} + S_i + C
 | 4 | CV/面スキーマと opt-in | §4.4・§4.5。面は `var.p` 系。level 2 では有効化しない |
 | 5 | 解除試験 | §6。(1)–(6) + $\gamma_n$ 丸め限界の事前定義 + 受理経路ごとの非ゼロ試験 + 拒否の起動拒否試験 |
 | 6 | 発注元との受け渡し | 発注元 ([case-hypersonic-gap-heating-validation](case-hypersonic-gap-heating-validation.md) §4.8) の離散収支評価は**本計画の解除試験が通ってから**開始 |
-| 7 | **解除マイルストーン: dual-time** (発注: [boundary-conjugate-heat-transfer](boundary-conjugate-heat-transfer.md) §4.3、CHT の V1 の前提) | 初版は dual-time を拒否している (§2) が、CHT 検証 V1 が dual-time を要する。追加で: **(a) $R^{raw}$ は壁残差射影より前の空間残差と固定** ([`main.cpp`:1814](../../solver_density_cuda/main.cpp) は空間残差の後に BDF 項を足すので、後から `res_roe` を読んでも復元できない)、**(b) 同一評価状態の BDF 係数・履歴・体積から $D_t(VE)$ を作り $C=D_t(VE)-R^{raw}$**、**(c) 蓄積が非零の試験で BDF1/BDF2 の符号と単位を検証** |
+| 7 | **解除マイルストーン: dual-time** (発注: [boundary-conjugate-heat-transfer](../accepted/boundary-conjugate-heat-transfer.md) §4.3、CHT の V1 の前提) | 初版は dual-time を拒否している (§2) が、CHT 検証 V1 が dual-time を要する。追加で: **(a) $R^{raw}$ は壁残差射影より前の空間残差と固定** ([`main.cpp`:1814](../../solver_density_cuda/main.cpp) は空間残差の後に BDF 項を足すので、後から `res_roe` を読んでも復元できない)、**(b) 同一評価状態の BDF 係数・履歴・体積から $D_t(VE)$ を作り $C=D_t(VE)-R^{raw}$**、**(c) 蓄積が非零の試験で BDF1/BDF2 の符号と単位を検証** |
 | 8 | **解除マイルストーン: 周期** (発注: 同上、CHT の V5 = 翼列の前提) | 周期は **root 単位の 1 回集計**とし、部分 CV と壁反力の対応を出力する。軸対称・壁モデルは引き続き対象外 (CHT 側もそれに合わせて合格対象外と宣言済み) |
 | 9 | codex レビュー | plan 2 巡完了 (NO-GO → GO-with-changes)。実装後に `--stage result`。**#7・#8 は CHT plan の 2/3 巡目レビューで要求された追加項目**なので、実装前に本 plan の §2 スコープも更新する |
 

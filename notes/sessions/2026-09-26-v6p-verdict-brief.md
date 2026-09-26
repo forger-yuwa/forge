@@ -13,9 +13,9 @@ AGENTS.md エスカレーション条件 **7** (result 段の解釈を確定す�
 - **float32 の報告 run**: `run_0009_v6p_prod/`
 - **評価器**: `case/58.conjugate_slot/eval_v6p.py` (帯の決定と 6 条件をこれで当てている)
 - **case README**: `case/58.conjugate_slot/README.md` (run 一覧)
-- **plan**: `plans/active/boundary-conjugate-heat-transfer.md` は**丸ごと読まない** (1900 行超)。
+- **plan**: `plans/accepted/boundary-conjugate-heat-transfer.md` は**丸ごと読まない** (1900 行超)。
   §6 V6′ の行とその直後の「登録の修正」ブロック、および §5.1 #97/#98/#99 だけ
-  (`grep -n "V6′" plans/active/boundary-conjugate-heat-transfer.md` で位置を出してから `sed -n`)。
+  (`grep -n "V6′" plans/accepted/boundary-conjugate-heat-transfer.md` で位置を出してから `sed -n`)。
 - **ソルバ**: `solver_density_cuda/conjugateWall.cpp`、`solver_density_cuda/tools/check_cht_interface.py`
 
 ## 1. 事前登録 (結果を見る前に確定。ただし下の「修正」は float32 run を見てから直した)

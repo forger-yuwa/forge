@@ -139,7 +139,7 @@ SU2 v8 の `flow.vtu` は `NumberOfComponents= "3"`(= 後の空白)など属性�
 
 ## CHT (multizone) で突き合わせるとき (2026-09-24 追加)
 
-plan [`boundary-conjugate-heat-transfer`](../plans/active/boundary-conjugate-heat-transfer.md) §6 V2 で実施した手順。
+plan [`boundary-conjugate-heat-transfer`](../plans/accepted/boundary-conjugate-heat-transfer.md) §6 V2 で実施した手順。
 実例は [`case/52.conjugate_slab/su2/`](../case/52.conjugate_slab/su2/) (1 次元純伝導の共役スラブ)。
 
 **構成**: 親 config が `SOLVER= MULTIPHYSICS` + `CONFIG_LIST= (fluid.cfg, solid.cfg)`、

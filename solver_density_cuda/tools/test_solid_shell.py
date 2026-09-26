@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""solid_shell.py の単体検証 (解析解との照合)。
 
-AGENTS.md / plans/active/boundary-conjugate-heat-transfer.md §6 の
+AGENTS.md / plans/accepted/boundary-conjugate-heat-transfer.md §6 の
 「格子収束で連続解析解への接近を調べる試験」と「離散残差の機械精度検査」を**分けて**実施する。
 
   T1 直列抵抗 (機械精度)   : 一様 q・背面等温 → T_w = T_b + q (t/k_s + R_back)。local1d / shell2d 両方。

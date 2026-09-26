@@ -7,7 +7,7 @@
 
 | 対象 | 状態 | 正本 |
 | --- | --- | --- |
-| 外部弱連成 CHT (Phase 1) | **動く**。C3X・Mark II とも 1 パスで収束。固体は報告の公開値だけ (合わせ込みなし、`solid_published.json`) | [`plans/active/boundary-conjugate-heat-transfer.md`](../../plans/active/boundary-conjugate-heat-transfer.md) |
+| 外部弱連成 CHT (Phase 1) | **動く**。C3X・Mark II とも 1 パスで収束。固体は報告の公開値だけ (合わせ込みなし、`solid_published.json`) | [`plans/accepted/boundary-conjugate-heat-transfer.md`](../../plans/accepted/boundary-conjugate-heat-transfer.md) |
 | 公知データ検証 (NASA CR-168015) | **一段落**。C3X run 108 / Mark II run 42、固定壁温と連成の両方 | [`case/53…/README.md`](../../case/53.c3x_vane_cht/README.md), [`case/54…/README.md`](../../case/54.markii_vane_cht/README.md) |
 | SU2 とのコード間照合 | 済 (同一メッシュ・同一節点)。乱流で 2.1 %、遷移モデルどうしで領域平均 −0.4〜+1.4 % | 同上 |
 | 遷移モデル ($\gamma$–$Re_{\theta t}$) | 実装・平板検証・翼への適用まで済み、**2026-09-23 ユーザ判断で凍結** | [`plans/active/turbulence-transition-lm2009.md`](../../plans/active/turbulence-transition-lm2009.md) |
@@ -22,7 +22,7 @@
 
 ### (1) ソルバ内連成 (Phase 2) — 本命 → **着手済み (2026-09-23)**
 
-**範囲はユーザ決定で `fem2d` まで広げた** (plan [§4.6a](../../plans/active/boundary-conjugate-heat-transfer.md))。
+**範囲はユーザ決定で `fem2d` まで広げた** (plan [§4.6a](../../plans/accepted/boundary-conjugate-heat-transfer.md))。
 §4.4c の表と §4.8-3 の「翼は Phase 1 の `fem2d` で扱う」は書き換え済み。設計は `diagnostician` に諮った:
 
 - **Schur は移植しない**。毎更新、固体**全節点系**を自前のバンド Cholesky で 1 回直接解く (LAPACK も Eigen も
