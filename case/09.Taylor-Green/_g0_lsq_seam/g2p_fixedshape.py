@@ -97,10 +97,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scratch", default=SCR)
     ap.add_argument("--mesh", default="box32_j0.2")
+    ap.add_argument("--hess-alt", action="store_true",
+                    help="全成分非零の二次形式 H' を使う (H'_zz=0.3、H'_xy=0.2。H の z 曲率が 0 で角 group の z 誤差が消える対称性を壊す。plan #8b 追試)")
+    ap.add_argument("--out", default="G2p_fixedshape.txt")
     ap.add_argument("--extra-corner-meshes", default="box16_j0.2,box64_j0.2",
                     help="参考 (判定外): 他のジッタ格子の角 group")
     a = ap.parse_args()
     SCR = a.scratch
+    global HESS
+    if a.hess_alt:
+        HESS = KAPPA * np.array([[1.0, 0.2, -0.35], [0.2, 0.5, 0.15], [-0.35, 0.15, 0.3]])
     md = os.path.join(SCR, "g_harness_mesh", a.mesh)
     msh = G.Mesh(os.path.join(md, "mesh.h5"), os.path.join(md, "bcondConfig.yaml"))
     h0 = 2 * np.pi / 32
@@ -108,7 +114,8 @@ def main():
            f"harness revision: {G.git_rev()}",
            f"メッシュ: {md}/mesh.h5 (32³、ジッタ ±0.2h、h = 2π/32 = {h0:.5f})",
            "参照: gharness.lsq_merged_ref (G2 の合併 stencil LSQ の double 参照、GPU と ≤ 1e-5·S で一致済み) をそのまま呼ぶ",
-           f"場: φ = a·x + ½ xᵀH x、原点 = group の root、a = {tuple(A_LIN)}、H = {KAPPA:g}·[[1,0,−0.35],[0,0.5,0.15],[−0.35,0.15,0]]。"
+           f"場: φ = a·x + ½ xᵀH x、原点 = group の root、a = {tuple(A_LIN)}、H = {np.array2string(HESS, precision=3, separator=',')}"
+           + (" (H'、--hess-alt)" if a.hess_alt else "") + "。"
            "解析勾配 (原点) = a。誤差 = 成分ごとの |∇_ref − a|",
            "縮小: 変位 d → s·d (s = 1, 1/2, 1/4、無次元形状固定)。h_s = s·h",
            "",
@@ -227,7 +234,7 @@ def main():
         verdict = ("PASS" if omin_seam >= 0.9 else "FAIL") + f" (継ぎ目の最小次数 {omin_seam:.4f} {'≥' if omin_seam >= 0.9 else '<'} 0.9)"
     out.append(f"\nVERDICT G2′ 固定形状 (面・辺・角 各 ≥ 2、計 ≥ 6、全成分の次数 ≥ 0.9): {verdict}")
     txt = "\n".join(out) + "\n"
-    p = os.path.join(HERE, "G2p_fixedshape.txt")
+    p = os.path.join(HERE, a.out)
     open(p, "w").write(txt)
     print(txt)
     print("->", p)
