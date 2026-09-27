@@ -14,6 +14,8 @@ MW・NASA-9 (修正 Eucken の c_p)・LJ・双極子は実装と同じ共通デ�
   from transport_reference import Reference
   ref = Reference(species=[...], transport={...}, db={...外部 DB (dict) か None})
   out = ref.state(T, X)   # {"mu", "lam", "Xreal", "mu_i", "lam_i", "eta_ij"} (SI)
+  out = ref.state_Y(T, Y) # 輸送種の質量分率から (段 2 #5t2-2: 負値は 0 に切り、X_s = (Y_s/M_s)/Σ(Y/M) を作ってから state)
+輸送種の分子量 (ref.mw[s]) は構成実種の MW と lump 内モル分率から M = Σ x_k M_k として独自に作る (実装の合成 MW を読まない)。
 """
 import math
 import os
@@ -159,9 +161,11 @@ class Reference:
             self.reals.append({"key": key, "sp": sp, "name": name})
             return len(self.reals) - 1, x
 
+        self.mw = []         # 輸送種 s の分子量 [kg/mol] (lump は Σ x_k M_k)
         for s in species:
             if isinstance(s, str):
                 self.expand.append([add(s, 1.0)])
+                self.mw.append(lookup(s)[1]["MW"])
             else:
                 mem = list(s["lump"].items())
                 if s["basis"] == "mole":
@@ -173,6 +177,7 @@ class Reference:
                     y = [v / tot / m for (_, v), m in zip(mem, mw)]
                     xs = [v / sum(y) for v in y]
                 self.expand.append([add(k, x) for (k, _), x in zip(mem, xs)])
+                self.mw.append(sum(x * lookup(k)[1]["MW"] for (k, _), x in zip(mem, xs)))
         for e in self.reals:
             model = None
             for k, v in transport.items():
@@ -251,3 +256,14 @@ class Reference:
             mu += eta[i] * X[i] / sv
             lam += con[i] * X[i] / sc
         return {"mu": mu, "lam": lam, "Xreal": X, "mu_i": list(eta), "lam_i": list(con), "eta_ij": eij}
+
+    def X_from_Y(self, Y):
+        """輸送種の質量分率 → モル分率 (負値は 0 に切る; 和で正規化)。単成分は [1]。"""
+        if len(self.mw) == 1:
+            return [1.0]
+        y = [max(float(v), 0.0) / m for v, m in zip(Y, self.mw)]
+        t = sum(y)
+        return [v / t for v in y]
+
+    def state_Y(self, T, Y):
+        return self.state(T, self.X_from_Y(Y))

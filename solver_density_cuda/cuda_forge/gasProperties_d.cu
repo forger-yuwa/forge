@@ -1,6 +1,25 @@
 #include "gasProperties_d.cuh"
 #include "thermo_d.cuh"
+#include "transportMix_d.cuh"      // 種ごとの輸送物性 (physProp.transport; plan #5t2-2)
 #include "speciesTransport_d.cuh"  // species_roY_device_ptr()
+
+// 種ごとの輸送物性の経路 (physProp.transport があり viscMethod 2) で使うセル組成。
+//   現行 viscMethod 2 と同じ作り方 (Y_s = max(ρY_s/ρ, 0) を和で正規化)。単成分・roY 無しは {1, 0, ...}。
+//   返り値は transport_mix_Y へ渡す種数 (roY 無しは 1 = X {1})。
+__device__ inline int gas_transport_cell_Y(int nSpecies, flow_float* const* roY, const flow_float* ro, geom_int ic, double* Y)
+{
+    if (nSpecies <= 1 || roY == nullptr) {
+        Y[0] = 1.0;
+        for (int s = 1; s < nSpecies && s < THERMO_MAX_SPECIES; s++) Y[s] = 0.0;
+        return 1;
+    }
+    const double ro_d = (double)max(ro[ic], (flow_float)1.0e-30);
+    double ysum = 0.0;
+    for (int s=0;s<nSpecies;s++){ double y=(double)roY[s][ic]/ro_d; if(y<0.0)y=0.0; Y[s]=y; ysum+=y; }
+    const double inv = 1.0/(ysum>1.0e-30?ysum:1.0e-30);
+    for (int s=0;s<nSpecies;s++) Y[s]*=inv;
+    return nSpecies;
+}
 
 __global__ void gasProperties_d
 (
@@ -14,6 +33,9 @@ __global__ void gasProperties_d
 
  // thermally-perfect 化学種データ (kinetic theory 輸送 viscMethod==2 用)
  const SpeciesThermo* sp , int nSpecies , flow_float** roY ,
+
+ // 種ごとの輸送物性 (physProp.transport; transportOn=1 のとき viscMethod 2 は CEA frozen 混合則 transport_mix_Y)
+ int transportOn , TransportTableD ttab ,
 
  // mesh structure
  geom_int nCells_all , geom_int nCells,
@@ -65,6 +87,14 @@ __global__ void gasProperties_d
                 ? vis_lam_array[ic]*cp_array[ic]/prandtlLam
                 : thermCond_const;
 
+        } else if (viscMethod == 2 && transportOn != 0) { // 種ごとの出所 + CEA frozen 混合則 (double 評価・float 格納)
+            double Y[THERMO_MAX_SPECIES];
+            const int nY = gas_transport_cell_Y(nSpecies, roY, ro, ic, Y);
+            double mu, lam;
+            transport_mix_Y(sp, ttab, nY, Y, (double)T[ic], &mu, &lam);
+            vis_lam_array[ic]   = (flow_float)mu;
+            thermCond_array[ic] = (flow_float)lam;
+
         } else if (viscMethod == 2) { // kinetic theory (Chapman-Enskog + Wilke/Mason-Saxena)
             // 組成 Y (単成分 or roY=nullptr のときは Y={1}) を構築し double で評価。
             double Y[THERMO_MAX_SPECIES];
@@ -90,6 +120,7 @@ __global__ void gasProperties_d
 
 void gasProperties_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
 {
+    const TransportTableD* ttab = thermo_transport_table();   // physProp.transport が無ければ nullptr (現行経路)
     gasProperties_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
         cfg.thermalMethod,
         cfg.viscMethod ,
@@ -100,6 +131,9 @@ void gasProperties_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& ms
 
         // 化学種データ (kinetic theory)
         thermo_species_device_ptr() , cfg.nSpecies , species_roY_device_ptr() ,
+
+        // 種ごとの輸送物性 (physProp.transport)
+        ttab ? 1 : 0 , ttab ? *ttab : TransportTableD{0, 0, nullptr, nullptr, nullptr} ,
 
         // mesh structure
         msh.nCells_all , msh.nCells ,
@@ -113,4 +147,56 @@ void gasProperties_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& ms
     ) ;
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+}
+
+
+// -----------------------------------------------------------------------------
+// 試験用 (FORGE_TRANSPORT_PROBE; tests/unit/test_transport_gpu.py)。計算経路からは呼ばない。
+//   セル経路と同じ組成の作り方 (gas_transport_cell_Y) と同じ評価関数 (transport_mix_Y) で、double の μ・λ と
+//   展開後の実種モル分率を全セル (ghost 込み nCells_all) について書き出す。
+// -----------------------------------------------------------------------------
+__global__ void gasPropertiesTransportProbe_d(const SpeciesThermo* sp, int nSpecies, flow_float** roY, TransportTableD ttab,
+                                              geom_int nCells_all, flow_float* ro, flow_float* T,
+                                              double* mu, double* lam, double* Xreal)
+{
+    const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
+    if (ic >= nCells_all) return;
+    double Y[THERMO_MAX_SPECIES];
+    const int nY = gas_transport_cell_Y(nSpecies, roY, ro, ic, Y);
+    transport_mix_Y(sp, ttab, nY, Y, (double)T[ic], &mu[ic], &lam[ic], Xreal + (size_t)ic*ttab.nReal);
+}
+
+// 試験用: 与えた double の輸送種 Y (K×nSpecies, 行優先) と T で同じ評価関数を呼ぶ (float の roY を経由しない比較用)。
+__global__ void gasPropertiesTransportProbeStates_d(const SpeciesThermo* sp, int nSpecies, TransportTableD ttab, int K,
+                                                    const double* Y, const double* T, double* mu, double* lam, double* Xreal)
+{
+    const int k = blockDim.x*blockIdx.x + threadIdx.x;
+    if (k >= K) return;
+    transport_mix_Y(sp, ttab, nSpecies, Y + (size_t)k*nSpecies, T[k], &mu[k], &lam[k], Xreal + (size_t)k*ttab.nReal);
+}
+
+bool gasPropertiesTransportProbe_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
+                                           double* mu_d, double* lam_d, double* Xreal_d)
+{
+    const TransportTableD* ttab = thermo_transport_table();
+    if (ttab == nullptr) return false;
+    gasPropertiesTransportProbe_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
+        thermo_species_device_ptr(), cfg.nSpecies, species_roY_device_ptr(), *ttab,
+        msh.nCells_all, var.c_d["ro"], var.c_d["T"], mu_d, lam_d, Xreal_d);
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchkKernelSync();
+    return true;
+}
+
+bool gasPropertiesTransportProbeStates_d_wrapper(solverConfig& cfg, int K, const double* Y_d, const double* T_d,
+                                                 double* mu_d, double* lam_d, double* Xreal_d)
+{
+    const TransportTableD* ttab = thermo_transport_table();
+    if (ttab == nullptr) return false;
+    const int bs = 128;
+    gasPropertiesTransportProbeStates_d<<<(K + bs - 1)/bs, bs>>>(
+        thermo_species_device_ptr(), cfg.nSpecies, *ttab, K, Y_d, T_d, mu_d, lam_d, Xreal_d);
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchkKernelSync();
+    return true;
 }

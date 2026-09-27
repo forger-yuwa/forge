@@ -5,9 +5,10 @@
 //   種ごとに出所を選ぶ輸送物性 (粘性 μ・熱伝導率 λ) と CEA 形の frozen 混合則 (double)。
 //   plans/active/thermophysics-solver-owned-species-db.md §4.3b・§4.3c・§5.1 #5t2、仕様 methods/thermophysics.md。
 //
-//   **段 1 (#5t2): host だけが使う**。GPU カーネルからはまだ呼ばない (現行カーネルは thermo_d.cuh の
-//   thermo_mu_mix / thermo_lambda_mix のまま)。段 2 で同じ式を GPU から呼べるよう THERMO_HD にしてある。
-//   係数の解決・検査・記録は input/speciesTransportDB.{hpp,cpp}。
+//   host (解決・記録・試験) と GPU (段 2, #5t2-2) が同じ式を使う (THERMO_HD)。GPU では physProp.transport があり
+//   viscMethod 2 のときだけ、セル (gasProperties_d) と壁 (wmlesWallModel_d) が transport_mix_Y を呼ぶ。
+//   書かれていなければ現行 (thermo_d.cuh の thermo_mu_mix / thermo_lambda_mix) のまま。
+//   係数の解決・検査・記録は input/speciesTransportDB.{hpp,cpp}、device への転送は thermo_d.cu (thermo_init_db)。
 //
 //   種ごとのモデル (SpeciesTransportD::model):
 //     CEA      CEA trans.inp の種別フィット ln f = A ln T + B/T + C/T² + D (f: μ [μP]・λ [μW/(cm K)])。
@@ -96,13 +97,31 @@ THERMO_HD int transport_pair_index(int a, int b, int n)
     return a*n - a*(a + 1)/2 + (b - a - 1);
 }
 
+// 温度とその関数 (混合則の 1 回の評価で使い回す; GPU の double の log・除算を減らす #5t2-2)
+struct TransportTemp {
+    double T, lnT, iT;   // T, ln T, 1/T
+};
+
+THERMO_HD TransportTemp transport_temp(double T)
+{
+    TransportTemp t;
+    t.T = T;
+    t.lnT = log(T);
+    t.iT = 1.0/T;
+    return t;
+}
+
 // CEA 形フィットの評価 (単位はフィットの単位のまま)。区間は cea2.f TRANIN と同じ選び方。
-THERMO_HD double transport_fit_eval(const TransportFitD& f, double T)
+THERMO_HD double transport_fit_eval(const TransportFitD& f, const TransportTemp& t)
 {
     int k = f.n - 1;
-    for (int i = 0; i < f.n; ++i) { if (T <= f.Thi[i]) { k = i; break; } }
-    const double lnT = log(T);
-    return exp(f.A[k]*lnT + f.B[k]/T + f.C[k]/(T*T) + f.D[k]);
+    for (int i = 0; i < f.n; ++i) { if (t.T <= f.Thi[i]) { k = i; break; } }
+    return exp(f.A[k]*t.lnT + (f.B[k] + f.C[k]*t.iT)*t.iT + f.D[k]);
+}
+
+THERMO_HD double transport_fit_eval(const TransportFitD& f, double T)
+{
+    return transport_fit_eval(f, transport_temp(T));
 }
 
 // Neufeld (1972) の Ω(2,2)* (double; T* は [0.3, 100] にクランプ済みを渡す)
@@ -145,12 +164,13 @@ THERMO_HD void transport_iapws_h2o(double T, double* mu, double* lam, double* nm
 }
 
 // custom:h2o_iapws_cea_v1 [SI]
-THERMO_HD void transport_h2o_iapws_cea_v1(const SpeciesTransportD& s, double T, double* mu, double* lam)
+THERMO_HD void transport_h2o_iapws_cea_v1(const SpeciesTransportD& s, const TransportTemp& tt, double* mu, double* lam)
 {
+    const double T = tt.T;
     double mI, lI, nm, nl;
     if (T >= TRANSPORT_H2O_BLEND_HI) {
-        *mu  = transport_fit_eval(s.V, T)*TRANSPORT_MICROPOISE_TO_PAS;
-        *lam = transport_fit_eval(s.C, T)*TRANSPORT_CEA_COND_TO_SI;
+        *mu  = transport_fit_eval(s.V, tt)*TRANSPORT_MICROPOISE_TO_PAS;
+        *lam = transport_fit_eval(s.C, tt)*TRANSPORT_CEA_COND_TO_SI;
         return;
     }
     if (T < TRANSPORT_H2O_POWER_BELOW) {
@@ -165,15 +185,21 @@ THERMO_HD void transport_h2o_iapws_cea_v1(const SpeciesTransportD& s, double T, 
     if (T <= TRANSPORT_H2O_BLEND_LO) { *mu = mI; *lam = lI; return; }
     const double s01 = (T - TRANSPORT_H2O_BLEND_LO)/(TRANSPORT_H2O_BLEND_HI - TRANSPORT_H2O_BLEND_LO);
     const double w   = s01*s01*(3.0 - 2.0*s01);
-    const double mC  = transport_fit_eval(s.V, T)*TRANSPORT_MICROPOISE_TO_PAS;
-    const double lC  = transport_fit_eval(s.C, T)*TRANSPORT_CEA_COND_TO_SI;
+    const double mC  = transport_fit_eval(s.V, tt)*TRANSPORT_MICROPOISE_TO_PAS;
+    const double lC  = transport_fit_eval(s.C, tt)*TRANSPORT_CEA_COND_TO_SI;
     *mu  = exp((1.0 - w)*log(mI) + w*log(mC));
     *lam = exp((1.0 - w)*log(lI) + w*log(lC));
 }
 
-// 実種 1 つの μ [Pa s]・λ [W/(m K)]
-THERMO_HD void transport_species(const SpeciesTransportD& s, double T, double* mu, double* lam)
+THERMO_HD void transport_h2o_iapws_cea_v1(const SpeciesTransportD& s, double T, double* mu, double* lam)
 {
+    transport_h2o_iapws_cea_v1(s, transport_temp(T), mu, lam);
+}
+
+// 実種 1 つの μ [Pa s]・λ [W/(m K)]
+THERMO_HD void transport_species(const SpeciesTransportD& s, const TransportTemp& tt, double* mu, double* lam)
+{
+    const double T = tt.T;
     switch (s.model) {
     case TRANSPORT_MODEL_KINETIC: {
         const double m = transport_mu_kinetic(s, T);
@@ -182,18 +208,24 @@ THERMO_HD void transport_species(const SpeciesTransportD& s, double T, double* m
         return;
     }
     case TRANSPORT_MODEL_H2O_IAPWS_CEA_V1:
-        transport_h2o_iapws_cea_v1(s, T, mu, lam);
+        transport_h2o_iapws_cea_v1(s, tt, mu, lam);
         return;
     default:   // CEA / FIT
-        *mu  = transport_fit_eval(s.V, T)*TRANSPORT_MICROPOISE_TO_PAS;
-        *lam = transport_fit_eval(s.C, T)*TRANSPORT_CEA_COND_TO_SI;
+        *mu  = transport_fit_eval(s.V, tt)*TRANSPORT_MICROPOISE_TO_PAS;
+        *lam = transport_fit_eval(s.C, tt)*TRANSPORT_CEA_COND_TO_SI;
         return;
     }
 }
 
-// 相互作用粘性 η_ab [Pa s]。eta_a, eta_b は各種の単成分粘性 [Pa s] (剛体球近似で使う)。
-THERMO_HD double transport_eta_pair(const TransportPairD& p, const SpeciesTransportD* sp, const double* eta, double T)
+THERMO_HD void transport_species(const SpeciesTransportD& s, double T, double* mu, double* lam)
 {
+    transport_species(s, transport_temp(T), mu, lam);
+}
+
+// 相互作用粘性 η_ab [Pa s]。eta_a, eta_b は各種の単成分粘性 [Pa s] (剛体球近似で使う)。
+THERMO_HD double transport_eta_pair(const TransportPairD& p, const SpeciesTransportD* sp, const double* eta, const TransportTemp& tt)
+{
+    const double T = tt.T;
     const SpeciesTransportD& A = sp[p.a];
     const SpeciesTransportD& B = sp[p.b];
     if (p.kind == TRANSPORT_PAIR_CE) {
@@ -202,7 +234,7 @@ THERMO_HD double transport_eta_pair(const TransportPairD& p, const SpeciesTransp
         return TRANSPORT_CE_MU_CONST*sqrt(Mr*T)/(p.sigma_ab*p.sigma_ab*transport_omega22(Ts));
     }
     if (p.kind == TRANSPORT_PAIR_CEA) {
-        return transport_fit_eval(p.V, T)*TRANSPORT_MICROPOISE_TO_PAS;
+        return transport_fit_eval(p.V, tt)*TRANSPORT_MICROPOISE_TO_PAS;
     }
     // 剛体球近似 (cea2.f 5565–5570; i = a, j = b)
     const double ea = eta[p.a], eb = eta[p.b];
@@ -211,34 +243,115 @@ THERMO_HD double transport_eta_pair(const TransportPairD& p, const SpeciesTransp
     return 5.656854*ea*sqrt(B.MW/(A.MW + B.MW))/(d*d);
 }
 
+THERMO_HD double transport_eta_pair(const TransportPairD& p, const SpeciesTransportD* sp, const double* eta, double T)
+{
+    return transport_eta_pair(p, sp, eta, transport_temp(T));
+}
+
 // CEA frozen 混合則。X: 実種のモル分率 (n 個)。pairs: 上三角 n(n-1)/2 個 (transport_pair_index の順)。
 // mu_i, lam_i (任意, nullptr 可): 実種ごとの単成分値の出力。
+//   η_ij は各組 (a<b) を 1 回だけ評価し、φ_ab・φ_ba (ψ も) を両方向の分母へ加える (#5t2-2)。
+//   分母 Σ_j φ_ij X_j の加算順は j = 0..n−1 (自己項 φ_ii X_i は j = i の位置) で、組ごとに再評価していた段 1 の形と同じ。
+//   X_i ≤ 0 の種は分子に入らないので分母も作らない。分母へ入る項が φ·0 だけの組 (相手の X が 0) は η_ij を評価しない
+//   (0 を足すだけなので値は変わらない)。ln T・1/T は 1 回だけ計算して全フィットで使い回す。
 THERMO_HD void transport_mix(const SpeciesTransportD* sp, const TransportPairD* pairs, int n, const double* X, double T,
                              double* mu, double* lam, double* mu_i = nullptr, double* lam_i = nullptr)
 {
+    const TransportTemp tt = transport_temp(T);
     double eta[TRANSPORT_MAX_REAL_SPECIES], con[TRANSPORT_MAX_REAL_SPECIES];
-    for (int i = 0; i < n; ++i) transport_species(sp[i], T, &eta[i], &con[i]);
-    double m = 0.0, l = 0.0;
+    double sv[TRANSPORT_MAX_REAL_SPECIES], sc[TRANSPORT_MAX_REAL_SPECIES];
     for (int i = 0; i < n; ++i) {
+        // X_i = 0 の種の単成分値はどこにも入らない (分子にも、0 でない分母項を持つ組にも) ので評価しない
+        if (X[i] != 0.0 || mu_i || lam_i) transport_species(sp[i], tt, &eta[i], &con[i]);
+        else { eta[i] = 0.0; con[i] = 0.0; }
         if (mu_i)  mu_i[i]  = eta[i];
         if (lam_i) lam_i[i] = con[i];
-        if (!(X[i] > 0.0)) continue;
-        double sv = 0.0, sc = 0.0;
-        for (int j = 0; j < n; ++j) {
-            double phi = 1.0, psi = 1.0;
-            if (j != i) {
-                const int a = (i < j) ? i : j, b = (i < j) ? j : i;
-                const double eij = transport_eta_pair(pairs[transport_pair_index(a, b, n)], sp, eta, T);
-                const double Mi = sp[i].MW, Mj = sp[j].MW;
-                phi = 2.0*Mj*eta[i]/((Mi + Mj)*eij);
-                psi = phi*(1.0 + 2.41*(Mi - Mj)*(Mi - 0.142*Mj)/((Mi + Mj)*(Mi + Mj)));
+        sv[i] = 0.0;
+        sc[i] = 0.0;
+    }
+    for (int a = 0; a < n; ++a) {
+        const bool pa = (X[a] > 0.0);
+        if (pa) { sv[a] += 1.0*X[a]; sc[a] += 1.0*X[a]; }   // φ_aa = ψ_aa = 1 (j = a の位置)
+        for (int b = a + 1; b < n; ++b) {
+            const bool pb = (X[b] > 0.0);
+            const bool ua = pa && X[b] != 0.0;   // 分母 a に 0 でない項が入る
+            const bool ub = pb && X[a] != 0.0;   // 分母 b に 0 でない項が入る
+            if (!ua && !ub) continue;
+            const double eab = transport_eta_pair(pairs[transport_pair_index(a, b, n)], sp, eta, tt);
+            const double Ma = sp[a].MW, Mb = sp[b].MW;
+            const double is = 1.0/(Ma + Mb);
+            const double ie = 1.0/eab;
+            if (ua) {   // i = a, j = b
+                const double phi = 2.0*Mb*eta[a]*is*ie;
+                const double psi = phi*(1.0 + 2.41*(Ma - Mb)*(Ma - 0.142*Mb)*is*is);
+                sv[a] += phi*X[b];
+                sc[a] += psi*X[b];
             }
-            sv += phi*X[j];
-            sc += psi*X[j];
+            if (ub) {   // i = b, j = a
+                const double phi = 2.0*Ma*eta[b]*is*ie;
+                const double psi = phi*(1.0 + 2.41*(Mb - Ma)*(Mb - 0.142*Ma)*is*is);
+                sv[b] += phi*X[a];
+                sc[b] += psi*X[a];
+            }
         }
-        m += eta[i]*X[i]/sv;
-        l += con[i]*X[i]/sc;
+    }
+    double m = 0.0, l = 0.0;
+    for (int i = 0; i < n; ++i) {
+        if (!(X[i] > 0.0)) continue;
+        m += eta[i]*X[i]/sv[i];
+        l += con[i]*X[i]/sc[i];
     }
     *mu = m;
     *lam = l;
 }
+
+// -----------------------------------------------------------------------------
+// GPU で使う表 (thermo_d.cu の thermo_init_db が device へ上げる; 値渡しでカーネルへ)。
+//   expand: 輸送する種 s (physProp.species の順, nTransported 個) × 実種 r の密行列 (行優先)。
+//           値は lump 内モル分率 (lump でない種は 1、含まない実種は 0)。重複実種は同じ列に入る。
+// -----------------------------------------------------------------------------
+struct TransportTableD {
+    int                      nReal;
+    int                      nTransported;
+    const SpeciesTransportD* sp;      // [nReal]
+    const TransportPairD*    pairs;   // [nReal(nReal-1)/2]
+    const double*            expand;  // [nTransported*nReal]
+};
+
+// 輸送種のモル分率 Xs → 実種のモル分率 Xreal (Xreal_r = Σ_s Xs_s·expand[s,r]; 加算順は s 昇順 = host の疎な展開と同じ値)
+THERMO_HD void transport_expand_X(const TransportTableD& t, const double* Xs, double* Xreal)
+{
+    for (int r = 0; r < t.nReal; ++r) Xreal[r] = 0.0;
+    for (int s = 0; s < t.nTransported; ++s) {
+        const double* e = t.expand + s*t.nReal;
+        for (int r = 0; r < t.nReal; ++r) Xreal[r] += Xs[s]*e[r];
+    }
+}
+
+// セル・壁の共通入口 (#5t2-2)。組成は**モル基底で展開**する:
+//   正規化した輸送種 Y (負値は 0 に切る) → 輸送種 X = (Y/M)/Σ(Y/M) (M: 輸送種の分子量 = 熱物性の MW; lump は合成 MW)
+//   → Xreal_r = Σ_s X_s·expand[s,r] → transport_mix (CEA frozen)。
+//   Y を直接展開行列に掛けてはいけない (行列は lump 内モル分率; N2/He lump で X_He 0.6 が 0.887 になる — codex 検算)。
+//   th: 輸送種の熱物性 (MW だけ使う)。nY < 2 (単成分) のときは Y を読まず X = {1}。
+//   Xreal_out (任意): 展開後の実種モル分率 (試験用)。
+THERMO_HD void transport_mix_Y(const SpeciesThermo* th, const TransportTableD& t, int nY, const double* Y, double T,
+                               double* mu, double* lam, double* Xreal_out = nullptr)
+{
+    double Xs[THERMO_MAX_SPECIES];
+    double Xr[TRANSPORT_MAX_REAL_SPECIES];
+    if (nY < 2) {
+        Xs[0] = 1.0;
+        for (int s = 1; s < t.nTransported; ++s) Xs[s] = 0.0;
+    } else {
+        double Yc[THERMO_MAX_SPECIES];
+        for (int s = 0; s < nY; ++s) Yc[s] = (Y[s] > 0.0) ? Y[s] : 0.0;
+        thermo_X_from_Y(th, nY, Yc, Xs);
+    }
+    transport_expand_X(t, Xs, Xr);
+    transport_mix(t.sp, t.pairs, t.nReal, Xr, T, mu, lam);
+    if (Xreal_out) for (int r = 0; r < t.nReal; ++r) Xreal_out[r] = Xr[r];
+}
+
+// device 側の輸送表 (thermo_d.cu が所有; thermo_init_db が physProp.transport を解決した DB から上げる)。
+//   physProp.transport が無い run では nullptr (カーネルは現行の thermo_mu_mix / thermo_lambda_mix を使う)。
+const TransportTableD* thermo_transport_table();

@@ -17,7 +17,8 @@
 //
 //   段 1 の約束: physProp.transport が書かれているときだけ解決し、ResolvedSpeciesDB::transport に入れる
 //   (記録と互換性ハッシュに輸送ブロックを追記; 書かれていない config の記録はバイト不変)。
-//   GPU カーネルはまだこの結果を使わない (段 2)。
+//   段 2 (#5t2-2): thermo_init_db (cuda_forge/thermo_d.cu) が実種表・組の表・展開行列を device へ上げ、viscMethod 2 の
+//   セル・壁が transport_mix_Y で使う (viscMethod 0/1 と physProp.transport の併用は main.cpp が起動を止める)。
 // =============================================================================
 
 #include <string>

@@ -1,4 +1,5 @@
 #include "thermo_d.cuh"
+#include "transportMix_d.cuh"
 #include "input/solverConfig.hpp"
 #include "input/speciesDB.hpp"
 
@@ -36,6 +37,14 @@ std::vector<SpeciesThermo> g_host;   // host 側化学種データ (length = g_n
 SpeciesThermo*             g_dev = nullptr;
 SpeciesThermoF* g_dev_f = nullptr; // device 側コピー
 int                        g_n   = 0;
+
+// 種ごとの輸送物性 (physProp.transport; plan thermophysics-solver-owned-species-db #5t2-2)。
+//   g_trans は device ポインタを持つ host 側の表 (カーネルへ値渡し)。書かれていない run では g_transOn = false。
+SpeciesTransportD* g_trans_sp     = nullptr;
+TransportPairD*    g_trans_pairs  = nullptr;
+double*            g_trans_expand = nullptr;
+TransportTableD    g_trans        = {0, 0, nullptr, nullptr, nullptr};
+bool               g_transOn      = false;
 
 // 内蔵 DB・yaml 上書き・名前解決は host 側 input/speciesDB.cpp (speciesDB_resolve) に集約した
 // (convertGmshToForge も GPU 無しで同じ解決を使う)。ここは device アップロードと datum オフセットだけ。
@@ -100,6 +109,42 @@ void thermo_init_db(solverConfig& cfg)
         THERMO_CUDA_CHECK(cudaMemcpy(g_dev_f, hf.data(), g_n*sizeof(SpeciesThermoF), cudaMemcpyHostToDevice));
     }
 
+    // 種ごとの輸送物性 (physProp.transport があるときだけ; #5t2-2)。実種表・組の表・展開行列 (密, 行 = 輸送種) を上げる。
+    //   上限 (実種 TRANSPORT_MAX_REAL_SPECIES・輸送種 THERMO_MAX_SPECIES) は resolver でも検査済みだが、
+    //   カーネルの固定長配列を越えないことをここでもう一度確かめる。
+    if (g_trans_sp)     { cudaFree(g_trans_sp);     g_trans_sp = nullptr; }
+    if (g_trans_pairs)  { cudaFree(g_trans_pairs);  g_trans_pairs = nullptr; }
+    if (g_trans_expand) { cudaFree(g_trans_expand); g_trans_expand = nullptr; }
+    g_trans   = TransportTableD{0, 0, nullptr, nullptr, nullptr};
+    g_transOn = false;
+    if (db.transport.enabled) {
+        const ResolvedTransport& tr = db.transport;
+        const int nR = tr.nReal();
+        const int nT = static_cast<int>(tr.expand.size());
+        if (nR < 1 || nR > TRANSPORT_MAX_REAL_SPECIES || nT != g_n || nT < 1 || nT > THERMO_MAX_SPECIES
+            || static_cast<int>(tr.pairs.size()) != nR*(nR - 1)/2) {
+            std::cerr << "[thermo_d] transport table out of range: nReal=" << nR << " (max " << TRANSPORT_MAX_REAL_SPECIES
+                      << "), transported=" << nT << " (species " << g_n << ", max " << THERMO_MAX_SPECIES
+                      << "), pairs=" << tr.pairs.size() << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+        std::vector<double> E(static_cast<size_t>(nT)*nR, 0.0);
+        for (int s = 0; s < nT; ++s)
+            for (const auto& e : tr.expand[s]) E[static_cast<size_t>(s)*nR + e.first] += e.second;
+        THERMO_CUDA_CHECK(cudaMalloc((void**)&g_trans_sp, nR*sizeof(SpeciesTransportD)));
+        THERMO_CUDA_CHECK(cudaMemcpy(g_trans_sp, tr.sp.data(), nR*sizeof(SpeciesTransportD), cudaMemcpyHostToDevice));
+        if (!tr.pairs.empty()) {
+            THERMO_CUDA_CHECK(cudaMalloc((void**)&g_trans_pairs, tr.pairs.size()*sizeof(TransportPairD)));
+            THERMO_CUDA_CHECK(cudaMemcpy(g_trans_pairs, tr.pairs.data(), tr.pairs.size()*sizeof(TransportPairD), cudaMemcpyHostToDevice));
+        }
+        THERMO_CUDA_CHECK(cudaMalloc((void**)&g_trans_expand, E.size()*sizeof(double)));
+        THERMO_CUDA_CHECK(cudaMemcpy(g_trans_expand, E.data(), E.size()*sizeof(double), cudaMemcpyHostToDevice));
+        g_trans   = TransportTableD{nR, nT, g_trans_sp, g_trans_pairs, g_trans_expand};
+        g_transOn = true;
+        std::cout << "[thermo_d] transport (physProp.transport) uploaded: " << nR << " real species, "
+                  << tr.pairs.size() << " pairs, expand " << nT << "x" << nR << " (mole basis)" << std::endl;
+    }
+
     std::cout << "[thermo_d] initialized " << g_n << " species:";
     for (const auto& nm : names) std::cout << " " << nm;
     std::cout << std::endl;
@@ -119,3 +164,4 @@ const SpeciesThermo* thermo_species_device_ptr() { return g_dev; }
 const SpeciesThermoF* thermo_species_device_ptr_f() { return g_dev_f; }
 int                  thermo_num_species()        { return g_n; }
 const SpeciesThermo* thermo_species_host()        { return g_host.data(); }
+const TransportTableD* thermo_transport_table()     { return g_transOn ? &g_trans : nullptr; }

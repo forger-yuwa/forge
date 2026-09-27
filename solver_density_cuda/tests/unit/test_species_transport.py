@@ -19,7 +19,7 @@ plans/active/thermophysics-solver-owned-species-db.md §5.1 #5t2 段 1 (合格�
        未知の custom / custom を H2O 以外に / CEA データの無い種で cea / 組成指定の無い builtin で fit / transport_fit の不正
        (区間 4 つ・Tlo≥Thi・C 欠落・未知キー) / LJ を明示しない外部 DB 種で kinetic。拒否漏れ 0 件。
   (C)  (--forge) forge --resolve-species: 記録が schema v2 + transport_compat を持ち Python load_record が互換性ハッシュを再計算できる、
-       輸送指定だけ違う記録の差 (_record_diff) が transport 行を示す、計算の起動は止まる、thermalMethod≠2 と非 mapping は拒否。
+       輸送指定だけ違う記録の差 (_record_diff) が transport 行を示す、viscMethod≠2 では計算の起動が止まる (段 2 #5t2-2)、thermalMethod≠2 と非 mapping は拒否。
   (H)  (--forge と --base-forge) physProp.transport の無い config のハッシュと記録ファイルがバイト不変:
        case/44 run_0509 (4378b7d78339ba27) と内蔵のみ 3 構成。
 規約: [PASS]/[FAIL]、失敗があれば非ゼロ終了。
@@ -396,10 +396,10 @@ def test_forge(a, root):
         bad = os.path.join(root, "resolved_species_edit.yaml")
         open(bad, "w").write(t)
         check(not fs.load_record(bad)["consistent"], "C edited transport line in a record -> load_record reports compat mismatch")
-    # 計算の起動は止める (段 2 まで)
+    # 段 2 (#5t2-2): GPU 経路は viscMethod 2 だけ。雛形 (case/44, viscMethod 0) のままでは記録と計算が食い違うので起動を止める
     p = subprocess.run([a.forge], cwd=d1, capture_output=True, text=True, timeout=120)
-    check(p.returncode != 0 and "GPU transport path is not connected yet" in (p.stderr + p.stdout),
-          "C running the solver with physProp.transport stops before GPU init (stage 1)")
+    check(p.returncode != 0 and "physProp.transport is used only with viscMethod: 2" in (p.stderr + p.stdout),
+          "C running the solver with physProp.transport and viscMethod 0 stops before GPU init (stage 2: viscMethod 2 only)")
     # config の拒否
     d3 = C.make(["N2"], {"N2": "cea"}, extra=[(r"thermalMethod: *2", "thermalMethod: 1")])
     rc3, _, _, err3 = resolve(a.forge, d3)

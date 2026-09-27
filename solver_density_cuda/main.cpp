@@ -1142,6 +1142,162 @@ static void checkInputSpeciesAndWriteRecord(const solverConfig& cfg)
     }
 }
 
+// 試験用 (FORGE_TRANSPORT_PROBE=<states.txt>; plan thermophysics-solver-owned-species-db #5t2-2、tests/unit/test_transport_gpu.py)。
+//   物性だけを評価する CFD 0 step のハーネス: 初期化後、時間更新をせずに
+//     (1) 状態表の (T, ρ, Y) を全セル (ghost 込み nCells_all) と全境界面の解点へ割り当てて float で device に書き、
+//     (2) 実際のセル経路 gasProperties_d_wrapper (vis_lam・thermCond を float で格納) を 1 回、
+//     (3) 同じ組成・評価関数の double 値 (gasPropertiesTransportProbe_d_wrapper) を 1 回、
+//     (4) 壁モデルの物性関数 (wmlesTransportProbe; 全 bcond の境界面) を 1 回、
+//     (5) 状態表の double の Y を float の roY を経由せずに同じ評価関数へ渡す (gasPropertiesTransportProbeStates_d_wrapper)
+//   を行い、device から読み戻した実際の入力 (T・ρ・roY) と出力を <states.txt>.bin に、配置を <states.txt>.json に書いて終了する。
+//   状態の割り当ては pass ごとにずらし、どの状態もセル・ghost・境界面の解点に少なくとも 1 回は乗るようにする。
+//   states.txt: 1 行目 "K nSpecies"、以降 K 行 "T ro Y0 .. Y{n-1}" (Y は輸送種の質量分率)。
+static int runTransportProbe(const char* statesPath, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    std::ifstream in(statesPath);
+    int K = 0, nS = 0;
+    if (!(in >> K >> nS) || K < 1 || nS != cfg.nSpecies) {
+        std::cerr << "[transport-probe] bad states file " << statesPath << " (K=" << K << ", nSpecies=" << nS
+                  << ", config nSpecies=" << cfg.nSpecies << ")" << std::endl;
+        return 2;
+    }
+    std::vector<double> sT(K), sRo(K), sY(static_cast<size_t>(K)*nS);
+    for (int k = 0; k < K; ++k) {
+        in >> sT[k] >> sRo[k];
+        for (int s = 0; s < nS; ++s) in >> sY[static_cast<size_t>(k)*nS + s];
+    }
+    if (!in) { std::cerr << "[transport-probe] states file truncated" << std::endl; return 2; }
+    const TransportTableD* tt = thermo_transport_table();
+    if (tt == nullptr || cfg.viscMethod != 2) {
+        std::cerr << "[transport-probe] requires physProp.transport and viscMethod 2" << std::endl;
+        return 2;
+    }
+    const int nR = tt->nReal;
+    const geom_int nC = msh.nCells, nA = msh.nCells_all, nG = nA - nC;
+    flow_float** roYdev = species_roY_device_ptr();
+    const bool hasRoY = (roYdev != nullptr && nS >= 2);
+    std::vector<flow_float*> roYptr(nS, nullptr);
+    if (hasRoY) for (int s = 0; s < nS; ++s) roYptr[s] = var.c_d["roY" + std::to_string(s)];
+
+    geom_int nWall = 0;
+    for (const auto& bc : msh.bconds) nWall += static_cast<geom_int>(bc.iCells.size());
+    const geom_int M = std::max<geom_int>(1, std::min<geom_int>(nWall, std::max<geom_int>(nG, 1)));
+    const int P = static_cast<int>((K + M - 1)/M);
+
+    const std::string base(statesPath);
+    std::ofstream bin(base + ".bin", std::ios::binary);
+    auto w = [&](const void* p, size_t n) { bin.write(static_cast<const char*>(p), static_cast<std::streamsize>(n)); };
+
+    double *mu_d = nullptr, *lam_d = nullptr, *X_d = nullptr;
+    gpuErrchk(cudaMalloc(&mu_d, nA*sizeof(double)));
+    gpuErrchk(cudaMalloc(&lam_d, nA*sizeof(double)));
+    gpuErrchk(cudaMalloc(&X_d, static_cast<size_t>(nA)*nR*sizeof(double)));
+    std::vector<size_t> wallCounts;
+    for (int p = 0; p < P; ++p) {
+        const geom_int o = static_cast<geom_int>(p)*M;
+        std::vector<int> st(nA);
+        for (geom_int i = 0; i < nC; ++i) st[i] = static_cast<int>((i + o) % K);
+        for (geom_int g = 0; g < nG; ++g) st[nC + g] = static_cast<int>((g + o) % K);
+        geom_int gb = 0;
+        for (const auto& bc : msh.bconds)
+            for (geom_int ic : bc.iCells) { st[ic] = static_cast<int>((gb + o) % K); ++gb; }
+        std::vector<flow_float> hT(nA), hRo(nA), hY(static_cast<size_t>(nA)*(hasRoY ? nS : 0));
+        for (geom_int i = 0; i < nA; ++i) {
+            const int k = st[i];
+            hT[i]  = static_cast<flow_float>(sT[k]);
+            hRo[i] = static_cast<flow_float>(sRo[k]);
+            if (hasRoY)
+                for (int s = 0; s < nS; ++s)
+                    hY[static_cast<size_t>(s)*nA + i] = static_cast<flow_float>(sRo[k]*sY[static_cast<size_t>(k)*nS + s]);
+        }
+        gpuErrchk(cudaMemcpy(var.c_d["T"], hT.data(), nA*sizeof(flow_float), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemcpy(var.c_d["ro"], hRo.data(), nA*sizeof(flow_float), cudaMemcpyHostToDevice));
+        if (hasRoY)
+            for (int s = 0; s < nS; ++s)
+                gpuErrchk(cudaMemcpy(roYptr[s], hY.data() + static_cast<size_t>(s)*nA, nA*sizeof(flow_float), cudaMemcpyHostToDevice));
+        // 出力を NaN で埋めてから評価 (未更新の要素を検出できるように)
+        {
+            std::vector<flow_float> nanf(nA, std::numeric_limits<flow_float>::quiet_NaN());
+            gpuErrchk(cudaMemcpy(var.c_d["vis_lam"], nanf.data(), nA*sizeof(flow_float), cudaMemcpyHostToDevice));
+            gpuErrchk(cudaMemcpy(var.c_d["thermCond"], nanf.data(), nA*sizeof(flow_float), cudaMemcpyHostToDevice));
+            gpuErrchk(cudaMemset(mu_d, 0xff, nA*sizeof(double)));
+            gpuErrchk(cudaMemset(lam_d, 0xff, nA*sizeof(double)));
+            gpuErrchk(cudaMemset(X_d, 0xff, static_cast<size_t>(nA)*nR*sizeof(double)));
+        }
+        gasProperties_d_wrapper(cfg, cuda_cfg, msh, var);                     // 実際のセル経路 (ghost 込み)
+        gasPropertiesTransportProbe_d_wrapper(cfg, cuda_cfg, msh, var, mu_d, lam_d, X_d);
+        WmlesTransportProbeOut wo;
+        wmlesTransportProbe(cfg, cuda_cfg, msh, var, wo);                      // 壁モデルの物性関数
+
+        // 実際に device にある入力と出力を読み戻して書く
+        std::vector<flow_float> rT(nA), rRo(nA), rY(static_cast<size_t>(nA)*(hasRoY ? nS : 0)), rV(nA), rK(nA);
+        std::vector<double> rMu(nA), rLam(nA), rX(static_cast<size_t>(nA)*nR);
+        gpuErrchk(cudaMemcpy(rT.data(), var.c_d["T"], nA*sizeof(flow_float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(rRo.data(), var.c_d["ro"], nA*sizeof(flow_float), cudaMemcpyDeviceToHost));
+        if (hasRoY)
+            for (int s = 0; s < nS; ++s)
+                gpuErrchk(cudaMemcpy(rY.data() + static_cast<size_t>(s)*nA, roYptr[s], nA*sizeof(flow_float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(rV.data(), var.c_d["vis_lam"], nA*sizeof(flow_float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(rK.data(), var.c_d["thermCond"], nA*sizeof(flow_float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(rMu.data(), mu_d, nA*sizeof(double), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(rLam.data(), lam_d, nA*sizeof(double), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(rX.data(), X_d, rX.size()*sizeof(double), cudaMemcpyDeviceToHost));
+        w(st.data(), st.size()*sizeof(int));
+        w(rT.data(), rT.size()*sizeof(flow_float));
+        w(rRo.data(), rRo.size()*sizeof(flow_float));
+        w(rY.data(), rY.size()*sizeof(flow_float));
+        w(rV.data(), rV.size()*sizeof(flow_float));
+        w(rK.data(), rK.size()*sizeof(flow_float));
+        w(rMu.data(), rMu.size()*sizeof(double));
+        w(rLam.data(), rLam.size()*sizeof(double));
+        w(rX.data(), rX.size()*sizeof(double));
+        const size_t nw = wo.cell.size();
+        wallCounts.push_back(nw);
+        w(wo.bcond.data(), nw*sizeof(int));
+        w(wo.cell.data(), nw*sizeof(long long));
+        w(wo.mu_w.data(), nw*sizeof(flow_float));
+        w(wo.lam_w.data(), nw*sizeof(flow_float));
+        w(wo.mu.data(), nw*sizeof(double));
+        w(wo.lam.data(), nw*sizeof(double));
+    }
+    cudaFree(mu_d); cudaFree(lam_d); cudaFree(X_d);
+
+    // (5) double の Y を直接
+    {
+        double *Yd = nullptr, *Td = nullptr, *md = nullptr, *ld = nullptr, *Xd = nullptr;
+        gpuErrchk(cudaMalloc(&Yd, sY.size()*sizeof(double)));
+        gpuErrchk(cudaMalloc(&Td, K*sizeof(double)));
+        gpuErrchk(cudaMalloc(&md, K*sizeof(double)));
+        gpuErrchk(cudaMalloc(&ld, K*sizeof(double)));
+        gpuErrchk(cudaMalloc(&Xd, static_cast<size_t>(K)*nR*sizeof(double)));
+        gpuErrchk(cudaMemcpy(Yd, sY.data(), sY.size()*sizeof(double), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemcpy(Td, sT.data(), K*sizeof(double), cudaMemcpyHostToDevice));
+        gasPropertiesTransportProbeStates_d_wrapper(cfg, K, Yd, Td, md, ld, Xd);
+        std::vector<double> hm(K), hl(K), hx(static_cast<size_t>(K)*nR);
+        gpuErrchk(cudaMemcpy(hm.data(), md, K*sizeof(double), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(hl.data(), ld, K*sizeof(double), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(hx.data(), Xd, hx.size()*sizeof(double), cudaMemcpyDeviceToHost));
+        w(hm.data(), hm.size()*sizeof(double));
+        w(hl.data(), hl.size()*sizeof(double));
+        w(hx.data(), hx.size()*sizeof(double));
+        cudaFree(Yd); cudaFree(Td); cudaFree(md); cudaFree(ld); cudaFree(Xd);
+    }
+    bin.close();
+
+    std::ofstream js(base + ".json");
+    js << "{\"K\": " << K << ", \"nSpecies\": " << nS << ", \"nReal\": " << nR << ", \"nCells\": " << nC
+       << ", \"nCells_all\": " << nA << ", \"hasRoY\": " << (hasRoY ? 1 : 0) << ", \"passes\": " << P
+       << ", \"sizeof_flow_float\": " << sizeof(flow_float) << ", \"wall_counts\": [";
+    for (size_t i = 0; i < wallCounts.size(); ++i) js << (i ? ", " : "") << wallCounts[i];
+    js << "], \"bconds\": [";
+    for (size_t b = 0; b < msh.bconds.size(); ++b)
+        js << (b ? ", " : "") << "{\"physID\": " << msh.bconds[b].physID << ", \"kind\": \"" << msh.bconds[b].bcondKind << "\"}";
+    js << "]}" << std::endl;
+    std::cout << "[transport-probe] wrote " << base << ".bin/.json (K=" << K << ", passes=" << P << ", nCells=" << nC
+              << ", nCells_all=" << nA << ", boundary planes=" << nWall << ", nReal=" << nR << ")" << std::endl;
+    return 0;
+}
+
 // forge --resolve-species: GPU を使わず solverConfig.yaml を読み、解決済み記録を cwd に書いて互換性ハッシュを標準出力の最終行に出す。
 // IC 生成・runner が宛先の物性を得るため (#3b)。記録を既存場へ貼るだけで検証済みにはしない。CPG は終了コード 2。
 static int resolveSpeciesOnly()
@@ -1186,13 +1342,13 @@ cudaConfig initializeSimulation(
     // 化学種 DB の host 側解決 (GPU 非依存; 未知種名はここで exit)。bcond の X{s}→Y{s} 換算と
     // 起動ログ (種表) が使う。thermo_init_db は同じ結果を device へ上げる。
     speciesDB_printTable(cfg, speciesDB_init(cfg));
-    // physProp.transport (種ごとの輸送物性の出所) は段 1 (plan thermophysics-solver-owned-species-db #5t2) では
-    // host の解決・記録だけで、GPU の粘性・熱伝導はまだ現行経路のまま。記録 (輸送ブロック) と実際の計算が食い違う
-    // run を作らないよう、計算の起動は止める (forge --resolve-species は通る)。段 2 で GPU に接続したら外す。
-    if (!cfg.speciesTransport.empty()) {
-        cerr << "[transport] ERROR: physProp.transport is resolved and recorded (forge --resolve-species) but the GPU transport "
-                "path is not connected yet (plan thermophysics-solver-owned-species-db #5t2 stage 2). Remove physProp.transport "
-                "to run with the current transport (viscMethod)." << endl;
+    // physProp.transport (種ごとの輸送物性の出所): 段 2 (plan thermophysics-solver-owned-species-db #5t2-2) で GPU に接続した。
+    // セル (gasProperties_d) と壁 (wmlesWallModel_d) の viscMethod 2 経路だけが新しい μ・λ を使う。viscMethod 0/1 では
+    // μ・λ は定数・Sutherland のままで記録 (輸送ブロック) と実際の計算が食い違うので、その組み合わせは起動を止める。
+    if (!cfg.speciesTransport.empty() && cfg.viscMethod != 2) {
+        cerr << "[transport] ERROR: physProp.transport is used only with viscMethod: 2 (the GPU transport path replaces the "
+                "kinetic-theory mixture). With viscMethod " << cfg.viscMethod << " the recorded transport would not be the one "
+                "computed. Set viscMethod: 2 or remove physProp.transport." << endl;
         std::exit(EXIT_FAILURE);
     }
 
@@ -2234,6 +2390,10 @@ int main(int argc, char** argv) {
     ImplicitDiagLogger implicit_diag_logger;
 
     cudaConfig cuda_cfg = initializeSimulation(cfg, msh, mat_ns, var, fluct, pprobes);
+    // 試験用: 物性だけを評価して終了 (時間更新なし; runTransportProbe の説明)
+    if (const char* e = getenv("FORGE_TRANSPORT_PROBE"); e != nullptr && *e != '\0') {
+        return runTransportProbe(e, cfg, cuda_cfg, msh, var);
+    }
     // 診断 (FORGE_OUT_RESIDUALS=1): 流れ残差場と陰的補正 dq を h5 出力へ追加する
     // (サブ反復収縮の空間局在の測定用。既定 off = 出力不変)。書かれる値は「最終サブ反復・
     // 最終 sweep 時点」の res_* (BDF 項込み R*) と dq_block_new_* (implicitRelax 適用後)。
