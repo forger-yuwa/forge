@@ -85,6 +85,17 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_contactLog,       &clog, sizeof(int)));
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_contactLogThresh, &lth,  sizeof(flow_float)));
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_contactBlend,     &blend,sizeof(flow_float)));
+            if (const char* e = getenv("FORGE_DIAG_FACE_VEL_CELL")) {   // 診断介入 (数値を変える。既定 off)
+                std::string v(e);
+                const size_t c = v.find(':');
+                if (c != std::string::npos) {
+                    const long long fid = std::atoll(v.substr(0, c).c_str()), nid = std::atoll(v.substr(c + 1).c_str());
+                    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_diagVelCellFace, &fid, sizeof(long long)));
+                    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_diagVelCellNode, &nid, sizeof(long long)));
+                    std::cout << "[FORGE_DIAG_FACE_VEL_CELL] **警告: 数値を変える診断介入** 面 " << fid << " の節点 " << nid
+                              << " 側の再構成速度をセル値に戻す (生産で使わない)" << std::endl;
+                }
+            }
             const int brd = ((cfg.badReconDiag > 0) ? 1 : 0);
             const flow_float brro = (flow_float)cfg.roMin, brp = (flow_float)cfg.pMin;
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconDiag,  &brd,  sizeof(int)));

@@ -276,6 +276,11 @@ __global__ void SLAU_d
             }
         }
 
+        // 診断介入 (FORGE_DIAG_FACE_VEL_CELL、既定 off): 指定面の指定節点側の速度だけセル値へ (R5h の 1 変数 A/B)
+        if ((long long)ip == g_diagVelCellFace) {
+            if ((long long)ic0 == g_diagVelCellNode) { Ux_L = Ux[ic0]; Uy_L = Uy[ic0]; Uz_L = Uz[ic0]; }
+            if ((long long)ic1 == g_diagVelCellNode) { Ux_R = Ux[ic1]; Uy_R = Uy[ic1]; Uz_R = Uz[ic1]; }
+        }
         // velocity2_L / h_p はブレンド後に算出 (L 再構成直後から移動)。
         flow_float velocity2_L = Ux_L*Ux_L + Uy_L*Uy_L + Uz_L*Uz_L;
         flow_float velocity2_R = Ux_R*Ux_R + Uy_R*Uy_R + Uz_R*Uz_R;

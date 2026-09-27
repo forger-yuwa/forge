@@ -49,6 +49,10 @@ __device__ const unsigned char* g_ledgerFlag = nullptr;
 __device__ float*        g_ledgerFaceBuf   = nullptr;
 __device__ unsigned int  g_ledgerFaceCount = 0;
 __device__ unsigned int  g_ledgerFaceCap   = 0;
+// 診断介入 (env FORGE_DIAG_FACE_VEL_CELL="<面 ID>:<節点 ID>"、既定 -1 = off でビット不変)。**数値を変える診断**:
+// 指定面の指定節点側の再構成速度 3 成分だけをセル値に戻す (plan tooling-nozzle-sern-3d §5.1 R5h の 1 変数 A/B)。生産で使わない。
+__device__ long long g_diagVelCellFace = -1;
+__device__ long long g_diagVelCellNode = -1;
 // speciesFaceReconstruction==1: Y_s を ρ/Y 勾配 + min(ψ_ρ,ψ_Y) で face へ再構成し thermo/species 流束で
 // 同一 face 組成を使う (proper S2/S3)。wrapper で cfg.speciesFaceReconstruction を設定。
 __device__ int g_speciesFaceRecon = 0;
