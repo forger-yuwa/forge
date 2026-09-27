@@ -33,7 +33,8 @@ forge は密度ベース有限体積で **ゴーストセル方式** を採用�
 | `outlet_statPress` | 静圧固定流出 | $P_R = P_{\text{back}}$ を課し、$\rho$・速度は内部エントロピー＋外向き Riemann 不変量で構成 (亜音速)。逆流時も同じ静圧アンカー |
 | `inlet_Pressure` | 全圧・全温固定流入 | 全条件 ($P_t, T_t$) から内部マッハで $P, T$ を再構成 |
 | `inlet_Pressure_dir` | 方向指定全圧流入 | inlet_Pressure に流入方向ベクトルを併用 |
-| `outflow` | サブソニック流出 | リーマン不変量に基づく Non-reflecting 流出 |
+| `outflow` | 流出 (外挿) | **内部状態の全量コピー** (ゴースト・境界値とも)。外から情報を入れないので超音速流出向け。亜音速や流れが境界に沿う面では外気の状態が伝わらない。旧版の本表は「リーマン不変量に基づく非反射」と書いていたが実装と一致しない (逆流時の全圧分岐は値を計算して捨てる死にコード。2026-09-27 確認) |
+| `farfield` | **特性型の遠方境界** (計画中、plan [`boundary-node-farfield-characteristic.md`](../plans/active/boundary-node-farfield-characteristic.md)) | 法線方向の Riemann 不変量のうち外向きを内部、内向きを自由流から取り、法線速度と音速を組み直す。エントロピー・接線速度・組成・$k,\omega$ は流出なら内部、流入なら自由流。下の「特性型の遠方境界」節 |
 | `periodic` | 周期境界 | 対応するペア面のセル値をコピー (`scheme` 強制なし) |
 
 ### 例: 滑り壁
@@ -121,6 +122,28 @@ incoming/outgoing 特性の捌きは upwind フラックスに委ねる。出口
 流入へ切替えると、剥離域 (壁∩出口コーナー) へ高 stagnation エンタルピを注入し過加圧→発散させる
 (これは `inlet_Pressure` の構成であり出口に流用すべきでない)。乱流スカラー $k,\omega$ は出口で
 ゼロ勾配 (Neumann) であり、逆流時も内部値を再循環させる (固定値注入はしない)。
+
+### 特性型の遠方境界 (`farfield`、計画中)
+
+計算領域を有限で打ち切る外部流の境界に使う (SU2 `MARKER_FAR` と同型、Blazek / Hirsch の Riemann 遠方境界)。
+境界半割面の外向き単位法線 $\hat{\mathbf n}$、内部 (境界節点) 状態を添字 $i$、自由流を $\infty$ として、
+法線速度 $U_{n,i}=\mathbf u_i\cdot\hat{\mathbf n}$、$U_{n,\infty}=\mathbf u_\infty\cdot\hat{\mathbf n}$、
+
+$$
+R^+ = U_{n,i} + \frac{2c_i}{\gamma-1},\qquad R^- = U_{n,\infty} - \frac{2c_\infty}{\gamma-1}
+$$
+
+(超音速流出 $U_n\ge c$ では $R^-$ も内部、超音速流入 $U_n\le -c$ では $R^+$ も自由流)。境界状態は
+
+$$
+U_{n,b} = \tfrac12(R^+ + R^-),\qquad c_b = \tfrac{\gamma-1}{4}(R^+ - R^-),
+$$
+
+流出 ($U_{n,b}>0$) なら $s=s_i$、$\mathbf u_b=\mathbf u_i + (U_{n,b}-U_{n,i})\hat{\mathbf n}$、流入なら $s=s_\infty$、
+$\mathbf u_b=\mathbf u_\infty + (U_{n,b}-U_{n,\infty})\hat{\mathbf n}$ ($s=P/\rho^\gamma$)。
+$\rho_b=(c_b^2/(\gamma s))^{1/(\gamma-1)}$、$P_b=\rho_b c_b^2/\gamma$。組成・$k,\omega$ も流出は内部、流入は自由流 (固定しない)。
+TP (温度依存 $\gamma$) での $\gamma$ の取り方、流入/流出の判定に使う法線速度 (SU2 は自由流の $U_{n,\infty}$) は plan §4 で決める。
+**`slip` との違い**: slip は質量を通さない壁なので、境界に達した波は反射する。**`outflow` との違い**: outflow は外から何も入れない。
 
 ### 周期境界
 
