@@ -26,7 +26,8 @@
     "A_run_0004": "NOT CONVERGED (stalled/plateau)、末尾中央値 rms_ro 1.01e-6 / roUx 2.12e-3 / roe 1.88 / roK 5.44e-2 / roOmega 0.628",
     "B_run_0005": "NOT CONVERGED (stalled/plateau)、末尾中央値 rms_ro 5.77e-7 / roUx 1.29e-3 / roe 1.16 / roK 3.35e-2 / roOmega 0.458 → A の 0.53–0.73 倍 (1/10 に届かない)",
     "q": "q_B/q_A − 1: 比較 10 点で最大 1.9e-7、パネル域全体で最大 2.1e-6。St は両腕 ALL STEADY、R_A 平均 1.313 は両腕で同じ",
-    "meaning": "残差プラトーの主因は下流の壁距離の段差ではない (原因は未特定)。比較量 (St、q) はこの下流の変更に鈍い"
+    "meaning": "残差プラトーの主因は下流の壁距離の段差ではない (原因は未特定)。比較量 (St、q) はこの下流の変更に鈍い",
+    "reading_revised": "codex (2026-09-27 outlet-corner diagnose) により読みを弱める: 『壁距離変更だけでは解消しないが、寄与はある (末尾残差 27–47 % 低下)』"
    }
   },
   {
@@ -51,8 +52,25 @@
     "residual": "末尾 4000 step 中央値 outflow / 基準 run_0002 (時刻が早い) = 0.85 (ro)・0.85 (roUx)・0.85 (roe)。同じ 20k 継続の対照 run_0004_t26_wdA (outlet_statPress) とは 1.00 倍 (1.009e-6 vs 1.008e-6)",
     "residual_location": "outflow でも res_ro・res_roe の二乗和の 100 % が x ≥ 2.6 m",
     "q": "比較 10 点で最大 3.9e-6、パネル域で 4.9e-6",
-    "meaning": "残差プラトーは平板の後ろの出口の角に局在し、壁距離・出口の種類のどちらでも変わらない。比較量は両方の変更に 5e-6 以下しか動かない"
+    "meaning": "残差プラトーは平板の後ろの出口の角に局在し、壁距離・出口の種類のどちらでも変わらない。比較量は両方の変更に 5e-6 以下しか動かない",
+    "reading_revised": "『出口の種類を替えても改善しなかった』に限定する。超音速流出では outlet_statPress の流出分岐も outflow も内部状態の外挿で実質同じ作用なので、出口閉包そのものは除外していない"
    }
+  },
+  {
+   "id": "T4-0b-RELAX",
+   "status": "pre_registered",
+   "_written": "2026-09-27、両腕を回す前",
+   "review": "notes/reviews/2026-09-27-d7275-outlet-corner-plateau-diagnose.md",
+   "name": "implicitRelax 1.0 / 0.5 だけを変える A/B (反復振動か空間離散化かの判別)",
+   "runs": "両腕とも run_0002_t26_ext の最終場から restart_field --keep-src-dtype (元メッシュ fp_d7275_y3、outlet_statPress)。A = implicitRelax 1.0、B = 0.5。他は同一。各 20,000 step、2,000 毎。残差場 res_ro/roUx/roUy/roe/roK/roOmega を出力",
+   "settle_check": "末尾 4,000 step と直前 4,000 step の中央値の差が各未達列で 5 % 以内",
+   "decision": {
+    "iterative": "B の未達残差列がすべて A の 1/10 以下、かつ出口近傍の状態の振れ幅も減衰 → 反復振動説を支持 (定常解不存在の説明を退ける)",
+    "not_iterative": "全未達列と局所振れ幅が A の 0.8–1.2 倍 → 反復振動説を棄却 (空間閉包を候補に残す、確定しない)",
+    "hold": "中間的な改善・列ごとの食い違い・過渡継続は判別保留。1/10 に届かないだけで『効かない』としない"
+   },
+   "local_amplitude": "出口近傍 (x ≥ 2.7 m) の ρ・P・k・ω について、末尾の連続 2 スナップショット (2000 step 間) の相対差の最大と中央値",
+   "note": "判別閾値は G15 の PASS を代替しない。G15 は未達のまま"
   }
  ]
 }
