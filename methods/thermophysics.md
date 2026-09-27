@@ -166,7 +166,7 @@ $$ \mathbf{q} = -k\,\nabla T + \sum_i h_i(T)\,\mathbf{J}_i. $$
 
 #### 内蔵 species DB の一覧と出典
 
-内蔵 species と各定数の一次情報は `builtinDB()` ([`thermo_d.cu:53`](../solver_density_cuda/cuda_forge/thermo_d.cu#L53)) にベタ書きされている。各値の出典は下表の通り (NASA-9 係数 / Lennard-Jones パラメータで出典が異なる)。外部 yaml (`physProp.speciesDBFile`, [`thermo_d.cu:142`](../solver_density_cuda/cuda_forge/thermo_d.cu#L142)) で上書き/追加できる。温度域は全種共通で $T_{\mathrm{lo}}/T_{\mathrm{mid}}/T_{\mathrm{hi}}=200/1000/6000$ K。
+内蔵 species と各定数の一次情報は `speciesDB_builtin()` ([`input/speciesDB.cpp`](../solver_density_cuda/input/speciesDB.cpp)) にベタ書きされている (共通データへ移行中: §1b.1)。各値の出典は下表の通り (NASA-9 係数 / Lennard-Jones パラメータで出典が異なる)。外部 yaml (`physProp.speciesDBFile`, [`thermo_d.cu:142`](../solver_density_cuda/cuda_forge/thermo_d.cu#L142)) で上書き/追加できる。温度域は全種共通で $T_{\mathrm{lo}}/T_{\mathrm{mid}}/T_{\mathrm{hi}}=200/1000/6000$ K。
 
 | species (別名) | MW [kg/mol] | $\sigma_{LJ}$ [Å] | $\varepsilon/k_B$ [K] | NASA-9 出典 | LJ 出典 | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
