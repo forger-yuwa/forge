@@ -122,6 +122,7 @@ $A_{\rm planar}$ で割ると FAIL) を確認する。**2026-09-27: VERDICT PASS
 | `run_0005_annulus_r32s16_w20k` / `run_0006_annulus_r16s16_w20k` | **対処 1** (`divergence-and-startup.md`): `warmup` 200 → **20000** (流体を落ち着かせてから連成)。他は同一 | (実行中) | active |
 | `run_0007_dry_r32x2` / `run_0008_dry_r32x8` | 乾式 1 step (軸 2 / 8 の界面節点の確定) | 壁ダンプ → `mesh/solid_s8_x2.*` / `solid_s32_x8.*`。メッシュ品質 PASS | ref |
 | `run_0009_annulus_r32x2s8_w20k` / `run_0010_annulus_r32x8s32_w20k` / `run_0011_annulus_r32x4s32_w20k` | **連成格子感度 (plan §6 V-ax2 再登録)**: 流体 32×{2,8}・固体 {8,32}×{2,8}、と交差条件 B (流体 32×4・固体 32×4)。`warmup` 20000 | (実行中) | active |
+| `run_0012_vax4_cont_a` / `run_0012_vax4_cont_b` / `run_0012_vax4_half` / `run_0013_vax4_resume` | **V-ax4 再開の連続比較** (plan §6、N = 30000): 連続 2N を同一バイナリで 2 回 (軸対称の ε₀)、N の最終状態から N 継続 (流体 `restart_field.py --keep-src-dtype`・`wall_profile_4.csv`・`conjugate_state_4.h5`)。構成は `run_0005` と同一 | (実行中) | active |
 
 ローカルの起動確認 (2026-09-27、float、各 2 step、`run_9032_smoke_r32` / `run_9016_smoke_r16`) は init・軸対称の固体検査・
 界面の座標一致 (最大ずれ 0 m) を通り rc 0。確認後に破棄した。
