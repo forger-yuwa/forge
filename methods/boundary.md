@@ -132,7 +132,7 @@ plan [`boundary-node-farfield-characteristic.md`](../plans/active/boundary-node-
 外向きに運ばれるものは内部から、内向きのものは自由流から取る。どちらかは**法線方向の Mach 数**で決まる
 (流れ全体の Mach でなく $U_n/c$。境界に沿う流れは全体が超音速でも法線方向には亜音速)。
 
-外向き単位法線 $\hat{\mathbf n}$、内部 (境界節点) を $i$、自由流を $\infty$、$Q_n = \mathbf u_\infty\cdot\hat{\mathbf n}$ とし、判定は $Q_n$ で面ごとに固定する (SU2 と同じ):
+外向き単位法線 $\hat{\mathbf n}$、内部 (境界節点) を $i$、自由流を $\infty$、$Q_n = \mathbf u_\infty\cdot\hat{\mathbf n}$ とし、判定は $Q_n$ と、自由流の実物性で起動時に一度だけ計算した音速 $a_\infty$ で面ごとに固定する (SU2 と同じ。下式の判定の $c_\infty$ は $a_\infty$):
 
 $$
 R^+ = \begin{cases} U_{n,i} + \dfrac{2c_i}{\gamma-1} & Q_n > -c_\infty \\[4pt] U_{n,\infty} + \dfrac{2c_\infty}{\gamma-1} & \text{(超音速流入)}\end{cases}
