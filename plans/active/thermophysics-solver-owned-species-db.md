@@ -212,6 +212,25 @@ physProp:
 | 12 | N2 の潜熱を同方式に統一するかの判断 (未決) | §4.8 末尾・§10。H2O (#10) の後に、統一するか現行 (Lin フィット + 低温外挿) のままにするかをユーザと決める。統一する場合: 液相 = CEA `N2(L)` 77.352 K 点 + 液比熱モデル、L は差。飽和圧の低温再構成・CPG carrier 経路との整合を決めてから。合格: V7 と同じ datum 不変試験 + 現行 Lin フィットとの差を 45–120 K で記録 + 空気凝縮 run (**case/34 Arthur**; plan condensation-air の検証先。旧記載の case/28 は He/空気同軸ジェットで誤り) の onset 変化を記録。**H2O (#10) 完了の阻害条件にしない**。凝縮カーネル変更なので編集前に上位へ諮る | F |
 | 11 | docs 同期 (完了時) | `procedures/solver-settings.md` (`physProp.species` の lump 形、`speciesDBFile` の位置づけ、lump と拡散の制約)、`recommended-settings.md` §3、`design/CAPABILITIES.md` | O |
 
+### 5.2 SERN への連絡事項 (2026-09-27, #9 の SERN 切り替え用)
+
+SERN セッション (`feature/sern-design`) へ渡す内容。変更は `feature/gap-heating-precision` の commit 085e00e1〜5ba303c6。
+
+1. **何が変わったか**: ソルバが config の lump 記法 `physProp.species: [{name: X, lump: {構成種: モル分率}, basis: mole}, ...]` から NASA-9 を起動時に合成する
+   (設計側 `composition.lump_entry` と同式、相対 4e-16)。生成 `species_db.yaml` は不要。ソルバは `resolved_species_<hash>.yaml` を書き res に `species_hash` を付け、
+   起動時に入力場と照合 (不一致で停止、属性なしは過渡期は警告で通る; `FORGE_REQUIRE_VERIFIED_SPECIES=1` で停止)。`restart_field`・`interp_field`・`convert_species_field`・
+   `runner_sern.restart_by_index` は SRC の記録を検証して継承。`forge --resolve-species` で GPU なしに宛先ハッシュ。`runner_sern.prepare` の領域 IC と `warm_from_run` は照合して付与 (実装済み)。
+   後処理は `forge_species.run_thermo` で記録から読む。内蔵データは `solver_density_cuda/data/species/forge_species_v1.yaml` (値不変)。
+2. **SERN で決めること (必須)**: SERN の lump 名 `AIR` がソルバ内蔵の擬似種 `AIR` (cp/R 3.5 一定) と衝突し lump 記法では起動時に拒否される (`speciesDB.cpp:329-334`)。
+   (a) SERN の lump 名を変える (例 `AMB`/`EXT`) か (b) 内蔵 `AIR` を別名に退避するか。種名の変更は meta・後処理・過去 run の restart に効く。
+3. **切り替え作業**: `runner_sern` の config 生成を lump 記法へ (`runner_axismach._apply_gas_to_config`、`composition.solver_species_config`/`physprop_species_flow` が参考)。
+   EXH の構成種 (CO, H2, OH, H, NO, O) はソルバ内蔵に無いので生エントリだけを `species_db_external.yaml` に置く (合成物は置かない)。LJ は現行 `LJ_PARAMS` のまま (CEA ツールの表と 6 種で食い違い、#5 で決定)。
+4. **バイナリ**: lump 記法の config は旧いソルバ・変換器で読めない。`FORGE_BIN` で新ビルドを指定 (runner は同じビルドの変換器 `runner.converter_path()` を使う)。AWS の clone も取り込み・再ビルドが要る。
+5. **既存 run からの継続**: lump 記法では物性が同じでも互換性ハッシュが変わり、旧場からの restart は照合で止まる。移行は明示許可 (`restart_field.py --force-species` かその実行だけ `FORGE_ALLOW_UNVERIFIED_SPECIES=1`) で 1 回。以後は継承される。
+6. **回帰**: 切り替え前後で SERN の代表作動点の推力・モーメントが事前に決めたノイズ床以内 (case/44 では V0 = 3 反復差 ×3 と下限)。
+7. **予告**: 輸送物性 (μ・λ) を CEA `trans.inp` と CEA の frozen 混合則へ寄せる (#5t)。燃焼生成物を含む SERN の NS/SST の結果は変わる見込み。
+8. **取り込み方**: 種 DB 関係の commit だけを `feature/sern-design` に取り込むか main 経由で合わせるかは SERN 側の都合で決める。
+
 ## 6. 検証
 
 事前に決める合格条件 (結果を見てから変えない)。**数値を変える作業 (#6 以降) の前に**、比較の基準 (V0) を固定する:
@@ -278,6 +297,7 @@ physProp:
 ## 10. 未確定事項
 
 - 凝縮域 (200–373.2 K) の希薄水蒸気の μ・λ: CEA `trans.inp` に無く、LJ は 373.2 K で CEA より +31.6 %、CEA 最低区間の外挿は ~219 K 以下で dμ/dT<0。参照データ (IAPWS 等は 200 K での妥当性を確認要)・許容誤差・接続規約を決める (codex diagnose 2026-09-27)。
+  当方の検算 (2026-09-27): CEA 最低区間 (373.2–1073.2 K) を下へ外挿した値を IAPWS の希薄気体項 (粘性 IAPWS 2008 μ₀、熱伝導 IAPWS 2011 λ₀; 公式の適用域は 253.15 K 以上) と比べると、μ は 300 K +1.1 %・273 K +2.6 %・250 K +4.6 %・200 K +12.6 %、**λ は 300 K +12 %・273 K +19 %・250 K +29 %・200 K +83 %** (λ の外挿は ~250 K 以下で T を下げると増える非物理な形)。LJ (現行) は μ で +30 % 前後。373.2 K では CEA と IAPWS が μ −0.4 %・λ +3.6 % で接続できる。混合物への影響は X_H2O に比例して薄まる (凝縮域では蒸気のモル分率は数 % 以下)。
 - N2 の潜熱を H2O と同じ方式 (液相を気相と同じ datum で持ち差で L) に統一するか、現行の L フィット方式のままにするか (2026-09-27 ユーザ「今後判断」)。
   判断材料: H2O (#10) の実装と V7 の結果、現行 N2 方式の既知の不整合 (L フィットが液比熱を暗黙に決める)、空気凝縮 run への影響の見込み。
 
