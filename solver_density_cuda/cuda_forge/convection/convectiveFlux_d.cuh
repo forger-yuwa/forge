@@ -175,3 +175,8 @@ __global__ void AUSMp_UP_d
 );
 
 void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var , matrix& mat_ns);
+
+// 局所帳簿ダンプ (FORGE_DUMP_LEDGER、既定 off・出力専用。plan tooling-nozzle-sern-3d §5.1 R5h)
+void ledgerBeginAssemble(mesh& msh);
+void ledgerCapture(mesh& msh, variables& var, const char* tag, bool residual);
+void ledgerFlushFaces();

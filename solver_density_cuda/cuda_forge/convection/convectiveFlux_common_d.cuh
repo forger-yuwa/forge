@@ -42,6 +42,13 @@ __device__ int g_faceThermoY = 0;
 // 壁法線勾配 (∂φ/∂r Δ) が接線面の面値に混入する。高 AR (y+1) で不安定 (case/43 run_0042 等)。
 // 1 で dc0p = ½(cc1−cc0), dc1p = −½(cc1−cc0)。cell/既定 0 でビット不変。内部面のみ (境界半割面は従来)。
 __device__ int g_reconEdgeMid = 0;
+// 局所帳簿ダンプ (env FORGE_DUMP_LEDGER、既定 off = g_ledgerFlag nullptr でビット不変。出力専用。
+// plan tooling-nozzle-sern-3d §5.1 R5h): 印の付いた節点に接する面の再構成状態・chi・流束を面ごとに記録する。
+#define LEDGER_FACE_NF 40
+__device__ const unsigned char* g_ledgerFlag = nullptr;
+__device__ float*        g_ledgerFaceBuf   = nullptr;
+__device__ unsigned int  g_ledgerFaceCount = 0;
+__device__ unsigned int  g_ledgerFaceCap   = 0;
 // speciesFaceReconstruction==1: Y_s を ρ/Y 勾配 + min(ψ_ρ,ψ_Y) で face へ再構成し thermo/species 流束で
 // 同一 face 組成を使う (proper S2/S3)。wrapper で cfg.speciesFaceReconstruction を設定。
 __device__ int g_speciesFaceRecon = 0;

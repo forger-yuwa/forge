@@ -1423,6 +1423,8 @@ struct StepContext {
 void assembleResidual(StepContext& s, int stage_index)
 {
     (void)stage_index;  // 現状カーネルは stage_index を使わない（dual-time 拡張用に interface 保持）
+    ledgerBeginAssemble(s.msh);   // 診断 (FORGE_DUMP_LEDGER、既定 off・出力専用)
+    ledgerCapture(s.msh , s.var , "entry" , false);
     s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
         updateVariablesInner(s.cfg , s.cuda_cfg , s.msh , s.var , s.mat_ns);
     });
@@ -1464,6 +1466,8 @@ void assembleResidual(StepContext& s, int stage_index)
         applyCondensationBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
         applyTracerBoundaries(s.cfg , s.cuda_cfg , s.msh , s.var);
     });
+    ledgerCapture(s.msh , s.var , "after_eos_bc" , false);   // 診断 (既定 no-op)
+    ledgerCapture(s.msh , s.var , "res_before_conv" , true);
     s.profiler.measureCuda(ProfileSection::CalcGradient, [&]() {
         calcGradient_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         // 多成分 face 整合再構成 (speciesFaceReconstruction==1): ∇Y_s を Green-Gauss で計算。
@@ -1497,6 +1501,8 @@ void assembleResidual(StepContext& s, int stage_index)
         convectiveFlux_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, s.mat_ns);
     });
     captureNodeIsothermalEnergyResidual(s.cfg , s.cuda_cfg , s.msh , s.var , "ifaceRconv");   // 診断 (既定 no-op)
+    ledgerFlushFaces();                                            // 診断 (FORGE_DUMP_LEDGER、既定 no-op)
+    ledgerCapture(s.msh , s.var , "res_after_conv" , true);
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         // k/ω 勾配と F1 を拡散の**前**に評価する (2026-09-08, plan turbulence-sst-consistency-options §2.1):
         // 旧順序 (transport → gradient → source) では拡散の非直交補正と σ ブレンドの F1 が前回評価の値
@@ -1506,6 +1512,7 @@ void assembleResidual(StepContext& s, int stage_index)
         ransTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);
         transitionTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);   // γ / Re_θt の移流拡散 (none で no-op)
     });
+    ledgerCapture(s.msh , s.var , "res_after_rans_transport" , true);   // 診断 (既定 no-op)
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         speciesTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);  // 化学種移流残差
         chemistrySource_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);   // 有限速度化学ソース (ω_s, Q̇, 対角 Jacobian)
@@ -1517,6 +1524,7 @@ void assembleResidual(StepContext& s, int stage_index)
         tracerTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);        // 受動トレーサ移流残差 (node 入口ピン込み)
         passivePinResidual_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 受動種経路: node 入口ピンノードの残差除外 (ソース集計の後)
     });
+    ledgerCapture(s.msh , s.var , "res_after_species" , true);   // 診断 (既定 no-op)
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         transitionSource_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // γ_eff を先に確定 (SST の k 式が同じ反復の値を読む)
         ransSource_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // k/ω 勾配は上 (ransTransport の前) で評価済み
@@ -1527,12 +1535,14 @@ void assembleResidual(StepContext& s, int stage_index)
         bodyForce_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 一様体積力 (bodyForce, off なら no-op)
     });
     captureNodeIsothermalEnergyResidual(s.cfg , s.cuda_cfg , s.msh , s.var , "ifaceRpre");    // 診断 (既定 no-op)
+    ledgerCapture(s.msh , s.var , "res_after_sources" , true);   // 診断 (既定 no-op)
     s.profiler.measureCuda(ProfileSection::ViscousFlux, [&]() {
         viscousFlux_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, s.mat_ns);
     });
     // SU2 流の軸対称対称面 (MARKER_SYM): 軸上 CV の半径方向運動量残差を 0 に射影し roUy=0 を保つ。
     // explicit では ΔroUy=0 になり直接効く (implicit/block-DPLUR では連成 solve が補正を漏らすため Jacobian
     // 整合が別途必要・open issue, docs §7.1)。cell/非軸対称/平面では no-op。
+    ledgerCapture(s.msh , s.var , "res_after_viscous" , true);   // 診断 (既定 no-op)
     zeroAxisRadialResidual_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     // node-centered 壁 Dirichlet: 壁ノードの運動量残差を 0 に射影し u=0 を保つ (壁ゴースト撤廃の代替)。
     // 軸射影の後に置き、コーナー (壁∩軸はまれだが) でも壁 no-slip を最終確定する。cell/非 node では no-op。
@@ -1542,6 +1552,7 @@ void assembleResidual(StepContext& s, int stage_index)
     // 周期 group の保存量残差を全員で足し合わせ全員へ書き戻す。合併体積と合わせ両側部分 CV を 1 CV として
     // 同期更新する (継ぎ目に双対面を作らず、両側内部双対面が res を組む)。cell/非周期では no-op。
     periodicNodeGather_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+    ledgerCapture(s.msh , s.var , "res_final" , true);   // 診断 (既定 no-op): 壁射影・周期合併の後
     // TODO(dual-time): unsteady のとき addUnsteadyTimeTerm(s) で BDF 物理時間項を res_* と
     // 対角に加える。定常では no-op。本体は次フェーズ。
 }

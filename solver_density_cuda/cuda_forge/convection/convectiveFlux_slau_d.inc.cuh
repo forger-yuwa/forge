@@ -635,6 +635,24 @@ __global__ void SLAU_d
             }
         }
 
+        // 局所帳簿ダンプ (FORGE_DUMP_LEDGER、既定 off。出力専用で流束は変えない)
+        if (g_ledgerFlag != nullptr
+            && ((ic0 < nCells && g_ledgerFlag[ic0] != 0) || (ic1 < nCells && g_ledgerFlag[ic1] != 0))) {
+            const unsigned int kL = atomicAdd(&g_ledgerFaceCount, 1u);
+            if (kL < g_ledgerFaceCap) {
+                float* o = g_ledgerFaceBuf + (size_t)kL*LEDGER_FACE_NF;
+                o[0] = __int_as_float((int)ip); o[1] = __int_as_float((int)ic0); o[2] = __int_as_float((int)ic1);
+                o[3] = sxx; o[4] = syy; o[5] = szz; o[6] = sss;
+                o[7] = ro_L; o[8] = ro_R; o[9] = P_L; o[10] = P_R; o[11] = Pf_L; o[12] = Pf_R;
+                o[13] = Ux_L; o[14] = Uy_L; o[15] = Uz_L; o[16] = Ux_R; o[17] = Uy_R; o[18] = Uz_R;
+                o[19] = h_p; o[20] = h_m; o[21] = c_hat; o[22] = M_hat; o[23] = chi; o[24] = chi_mass;
+                o[25] = Vn_p; o[26] = Vn_m; o[27] = p_tilde_r; o[28] = mdot;
+                o[29] = res_ro_temp; o[30] = res_roUx_temp; o[31] = res_roUy_temp; o[32] = res_roUz_temp; o[33] = res_roe_temp;
+                o[34] = __int_as_float(conv_scheme); o[35] = P_del; o[36] = f;
+                o[37] = limiter_ro[ic0]; o[38] = (ic1 < nCells) ? limiter_ro[ic1] : -1.0f; o[39] = limiter_P[ic0];
+            }
+        }
+
         atomicAdd(&res_ro[ic0]  , -res_ro_temp);
         atomicAdd(&res_roUx[ic0], -res_roUx_temp);
         atomicAdd(&res_roUy[ic0], -res_roUy_temp);

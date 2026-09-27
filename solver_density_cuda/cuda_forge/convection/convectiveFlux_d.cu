@@ -1,4 +1,7 @@
 #include <cstdlib>
+#include <cstring>
+#include <algorithm>
+#include <string>
 #include <fstream>
 #include <vector>
 #include <iostream>
@@ -452,4 +455,128 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         }
     }
 
+}
+// =============================================================================
+// 局所帳簿ダンプ (plan tooling-nozzle-sern-3d §5.1 R5h、codex diagnose 2026-09-27)。
+//   FORGE_DUMP_LEDGER=<path>        : 出力先 (CSV)。未設定なら全関数 no-op (解はビット同一)。
+//   FORGE_DUMP_LEDGER_NODES=<a,b,..>: 印を付ける節点 ID (0 始まり)。
+//   FORGE_DUMP_LEDGER_CALLS=<n>     : 記録する assembleResidual の呼び出し数 (既定 2)。
+// 出力専用: 状態・残差をホストへ写して書くだけで、どの配列も書き換えない。
+//   <path>          行 = call,tag,node,field,value (段ごとの状態・残差)
+//   <path>.faces    行 = call + SLAU_d が記録した面の LEDGER_FACE_NF 列 (列名は 1 行目)
+// =============================================================================
+namespace {
+struct LedgerState {
+    bool init = false, on = false;
+    std::string path;
+    std::vector<long long> nodes;
+    unsigned char* flag_d = nullptr;
+    float* buf_d = nullptr;
+    unsigned int cap = 0;
+    int call = 0, maxCalls = 2;
+};
+LedgerState& ledger() { static LedgerState s; return s; }
+}
+
+static void ledgerInitOnce(mesh& msh)
+{
+    LedgerState& L = ledger();
+    if (L.init) return;
+    L.init = true;
+    const char* p = std::getenv("FORGE_DUMP_LEDGER");
+    const char* n = std::getenv("FORGE_DUMP_LEDGER_NODES");
+    if (!p || !*p || !n || !*n) return;
+    L.path = p;
+    if (const char* c = std::getenv("FORGE_DUMP_LEDGER_CALLS")) L.maxCalls = std::max(1, std::atoi(c));
+    std::string s(n);
+    size_t pos = 0;
+    while (pos < s.size()) {
+        size_t q = s.find(',', pos);
+        if (q == std::string::npos) q = s.size();
+        if (q > pos) {
+            const long long id = std::atoll(s.substr(pos, q - pos).c_str());
+            if (id >= 0 && id < (long long)msh.nCells) L.nodes.push_back(id);
+        }
+        pos = q + 1;
+    }
+    if (L.nodes.empty()) { std::cout << "[FORGE_DUMP_LEDGER] 有効な節点が無いので無効\n"; return; }
+    std::vector<unsigned char> flag(msh.nCells, 0);
+    for (long long id : L.nodes) flag[id] = 1;
+    CHECK_CUDA_ERROR(cudaMalloc(&L.flag_d, msh.nCells));
+    CHECK_CUDA_ERROR(cudaMemcpy(L.flag_d, flag.data(), msh.nCells, cudaMemcpyHostToDevice));
+    L.cap = (unsigned int)std::min<size_t>(200000, 64 * L.nodes.size() + 1024);
+    CHECK_CUDA_ERROR(cudaMalloc(&L.buf_d, sizeof(float) * (size_t)L.cap * LEDGER_FACE_NF));
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_ledgerFaceCap, &L.cap, sizeof(unsigned int)));
+    const unsigned int zero = 0;
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_ledgerFaceCount, &zero, sizeof(unsigned int)));
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_ledgerFaceBuf, &L.buf_d, sizeof(float*)));
+    { std::ofstream o(L.path); o << "call,tag,node,field,value\n"; }
+    {
+        std::ofstream o(L.path + ".faces");
+        o << "call,ip,ic0,ic1,sx,sy,sz,ss,ro_L,ro_R,P_L,P_R,Pf_L,Pf_R,Ux_L,Uy_L,Uz_L,Ux_R,Uy_R,Uz_R,h_p,h_m,c_hat,M_hat,chi,chi_mass,"
+             "Vn_p,Vn_m,p_tilde_r,mdot,F_ro,F_roUx,F_roUy,F_roUz,F_roe,conv_scheme,P_del,fx,limiter_ro_0,limiter_ro_1,limiter_P_0\n";
+    }
+    L.on = true;
+    std::cout << "[FORGE_DUMP_LEDGER] " << L.nodes.size() << " 節点に印、最初の " << L.maxCalls
+              << " 回の assembleResidual を " << L.path << " に記録する\n";
+}
+
+void ledgerBeginAssemble(mesh& msh)
+{
+    ledgerInitOnce(msh);
+    LedgerState& L = ledger();
+    if (!L.on) return;
+    ++L.call;
+    // 記録する回だけ SLAU_d の面記録を有効にする (それ以外は nullptr で完全に no-op)
+    const unsigned char* f = (L.call <= L.maxCalls) ? L.flag_d : nullptr;
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_ledgerFlag, &f, sizeof(const unsigned char*)));
+}
+
+void ledgerCapture(mesh& msh, variables& var, const char* tag, bool residual)
+{
+    LedgerState& L = ledger();
+    if (!L.on || L.call > L.maxCalls) return;
+    static const char* stateF[] = {"ro","roUx","roUy","roUz","roe","roK","roOmega","roY0","roY1","T","P","Ux","Uy","Uz","Y0","Y1","Ht","sonic","Rmix"};
+    static const char* resF[]   = {"res_ro","res_roUx","res_roUy","res_roUz","res_roe","res_roK","res_roOmega","res_roY0","res_roY1"};
+    std::ofstream o(L.path, std::ios::app);
+    o.precision(9);
+    const size_t nf = residual ? sizeof(resF)/sizeof(resF[0]) : sizeof(stateF)/sizeof(stateF[0]);
+    for (size_t i = 0; i < nf; ++i) {
+        const char* nm = residual ? resF[i] : stateF[i];
+        auto it = var.c_d.find(nm);
+        if (it == var.c_d.end() || it->second == nullptr) continue;
+        for (long long id : L.nodes) {
+            flow_float v;
+            CHECK_CUDA_ERROR(cudaMemcpy(&v, it->second + id, sizeof(flow_float), cudaMemcpyDeviceToHost));
+            o << L.call << ',' << tag << ',' << id << ',' << nm << ',' << (double)v << '\n';
+        }
+    }
+    (void)msh;
+}
+
+void ledgerFlushFaces()
+{
+    LedgerState& L = ledger();
+    if (!L.on || L.call > L.maxCalls) return;
+    unsigned int cnt = 0;
+    CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&cnt, g_ledgerFaceCount, sizeof(unsigned int)));
+    const unsigned int n = std::min(cnt, L.cap);
+    std::vector<float> buf((size_t)n * LEDGER_FACE_NF);
+    if (n > 0) CHECK_CUDA_ERROR(cudaMemcpy(buf.data(), L.buf_d, sizeof(float) * buf.size(), cudaMemcpyDeviceToHost));
+    std::ofstream o(L.path + ".faces", std::ios::app);
+    o.precision(9);
+    auto asInt = [](float x) { int i; std::memcpy(&i, &x, sizeof(int)); return i; };
+    for (unsigned int k = 0; k < n; ++k) {
+        const float* r = buf.data() + (size_t)k * LEDGER_FACE_NF;
+        o << L.call;
+        for (int j = 0; j < LEDGER_FACE_NF; ++j) {
+            o << ',';
+            if (j == 0 || j == 1 || j == 2 || j == 34) o << asInt(r[j]); else o << (double)r[j];
+        }
+        o << '\n';
+    }
+    if (cnt > L.cap) std::cout << "[FORGE_DUMP_LEDGER] 面バッファ不足: " << cnt << " > " << L.cap << "\n";
+    const unsigned int zero = 0;
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_ledgerFaceCount, &zero, sizeof(unsigned int)));
+    std::cout << "[FORGE_DUMP_LEDGER] call " << L.call << ": " << n << " 面を記録\n";
 }
