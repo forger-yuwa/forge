@@ -34,8 +34,7 @@ CEA の情報はソルバが持ち、モル分率で指定できるようにし�
   - `species_db.yaml` を先に消すこと (照合の仕組みができるまで残す; codex 2026-09-27 諮問)。
   - 内蔵化と同時に CEA の版・MW・外挿規約を変えること (差は別項目で判断する; §5.1 #4)。
   - `full` の強制 (`full|lumped` の選択は前身 plan の既存判断, `thermophysics-cea-mole-fraction-species.md:155`)。
-  - 液相 H2O の物性モデル (密度・表面張力・飽和圧) の変更。**潜熱の気相エンタルピーの出所の統一は後続の別 plan に切り出す** (datum の整合設計が要る; codex plan レビュー M6, §5.1 #10)。
-  - lump と kinetic 混合平均拡散 (`speciesDiffusionMethod: 1`) の併用 (初回は拒否。kinetic 拡散が要るケースは `full` を使う; §4.4)。
+  - 液相 H2O の物性モデル (密度・表面張力・飽和圧・273.15 K 未満/373.15 K 超の延長規約) の変更。
   - 移設と同時に N2 等の 6000–20000 K 区間を有効化すること (外挿規約の変更なので別判断; §5.1 #5)。
 
 ## 3. 関連 docs と前提 (観測事実, 2026-09-27)
@@ -107,8 +106,13 @@ physProp:
 ### 4.4 lump の輸送物性
 
 - lump は構成種の組成を保持し、粘性・熱伝導は**全実種に展開して** Wilke / Mason–Saxena 混合で評価する (lump 内で粘性を作ってさらに混ぜる方式は採らない)。
-- **化学種拡散**: 固定内部組成の lump は、構成実種ごとの拡散速度の違いを表せない。初回は **lump を含む run の化学種拡散を共通 Schmidt 数 (`speciesDiffusionMethod: 0`) に限定**し、
-  lump と kinetic 混合平均拡散 (`1`, 既定) の併用は入力で拒否する (codex plan レビュー M2)。kinetic 拡散が要るケースは `full` を使う。
+- **化学種拡散** (2026-09-27 ユーザ指摘で改訂): これまで lump の LJ は構成種の**質量分率平均** (`composition.py:276`, 根拠の記載なし) で、
+  H2O の混合平均拡散は「H2O と平均 LJ の擬似分子」の二元係数で評価していた。lump の外の種 i と lump の二元拡散係数は、lump の内部組成が固定なら
+  **Blanc の法則 $1/D_{i,\mathrm{lump}}=\sum_{j\in\mathrm{lump}} x_j/D_{ij}$ (x_j は lump 内モル分率) で構成実種から厳密に作れる** (混合平均拡散の式と整合)。
+  平均 LJ との差は H2O–MIXDRY (case/44 va3 組成) で 200 K −1.4 %、300 K −1.2 %、1000 K −0.7 % (Chapman–Enskog + Neufeld Ω の比のみの検算, 当方 2026-09-27)。
+  → lump と kinetic 混合平均拡散 (`speciesDiffusionMethod: 1`, 既定) は**併用可**とし、二元係数を Blanc で作る。失うのは lump **内部**の構成種どうしの差動拡散だけで、
+  これは「lump 内の組成は固定」という lump の定義そのもの (必要なら `full`)。
+  codex plan レビュー M2 の「lump + kinetic を拒否」は、lump 外の種との拡散まで失うとみなした過剰な制約として撤回 (§6.1)。
 - 平均 LJ の擬似分子は廃止する。NS の結果は変わる (codex 検算で粘性 −1 % 級の是正) ので、変更量を記録する (不変を合格条件にしない)。
 
 ### 4.5 `atoms`
@@ -123,6 +127,14 @@ physProp:
 ### 4.7 設計 runner
 
 - `species_db.yaml` を生成しない。problem の組成・lump 指定を §4.2 の config に翻訳するだけにする。設計側 (MOC・IC) の熱物性も共通データを読むので、設計と CFD の熱力学が同じ正本から来る。
+
+### 4.8 潜熱 (凝縮種の液相エンタルピー) — 2026-09-27 ユーザ方針
+
+- 液相は**気相と同じ datum 定数でエンタルピーをシフト**し、気液差 (CEA の H2O と H2O(L) の絶対エンタルピー差) を保つ。潜熱は別に持たず、
+  $L(T)=h_v(T)-h_l(T)$ をその差として作る (気相 $h_v$ は種 DB と**同じ評価・同じ外挿規約**)。これで `h2o_latent` の気相係数の二重ソース (120 K で 2.39 kJ/kg の差) が消える。
+- codex plan レビュー M6 の反例 (sensible の気相から絶対基準の液相を引くと L(300 K) が 2.44 → 15.9 MJ/kg) は、液相に同じシフトを掛けない誤った置換の例であり、本方針では起きない。
+  これを単体試験で固定する (§6 V7: datum を変えても L 不変)。
+- 潜熱を独立の関数として持つ方式 (N2 の CPG 経路の現状: 液比熱が $c_l=c_{p,v}-dL/dT$ で暗黙に決まる) は H2O では採らない。
 
 ## 5. 実装ステップ
 
@@ -142,10 +154,10 @@ physProp:
 | 4 | 共通データ化 (値は変えない) | §4.1。canonical ID・alias・相・利用可否・LJ の有無を持つ表。現行内蔵 7 種 + `SPECIES_NASA9` 11 種を移す (値はそのまま)。合格: 移行前後で全種の係数・MW・区間が**ビット一致** (内蔵と SPECIES_NASA9 の差は差として記録)、`CO`/`Co` を別種として解決、LJ 無し種を輸送に使うと拒否 | O |
 | 5 | CEA 直読みとの差・20000 K 区間 | H2O MW・AR 高温 a0 の寄せ先、LJ の出典、6000–20000 K 区間を有効にするか。値を変えるなら case/44 と #6 の小型ケースの報告量変化を記録 | F |
 | 6 | 区間可変 + 起動時 lump 合成 + config 指定 | §4.2 (全区間 datum・float 表・上限)。合格は §6 V2・V3・V3f | O |
-| 7 | lump の輸送物性展開と拡散制約 | §4.4。合格は §6 V4 | O |
+| 7 | lump の輸送物性展開と Blanc 拡散 | §4.4 (粘性・熱伝導は実種展開、lump を含む二元拡散係数は Blanc)。合格は §6 V4 | O |
 | 8 | Python 共通 API と reader の移行 | §4.6。合格は §6 V6 | O |
 | 9 | 設計 runner の切り替え | §4.7。`species_db.yaml` 生成を止め config に lump を書く。合格は §6 V5・V6 | O |
-| 10 | 潜熱の気相エンタルピー共通化 → **後続 plan** | 本 plan から切り出す。後続 plan で気相の絶対 h の復元、液相との datum 整合、外部 H2O 上書き時の扱い、Python の二相 EOS 複製も含めて定義し、**datum を変えても L が不変**の単体試験を必須にする (codex plan レビュー M6: sensible の気相 h と絶対基準の液相 h を引くと L(300 K) が 2.44 → 15.9 MJ/kg になる反例) | F |
+| 10 | 潜熱: 液相を気相と同じ datum でシフトし差で L を作る | §4.8。`h2o_latent` の H2O 気相再ハードコードを撤去し、液相 H2O(L) (共通データの凝縮相エントリ) に**気相 H2O と同じ datum 定数**を適用して `L = h_v − h_l` を作る (気液差は CEA のまま保たれる)。273.15 K 未満/373.15 K 超の液の延長規約は現行のまま。合格は §6 V7。`cuda_forge` の凝縮カーネル変更なので編集前に上位へ諮る (AGENTS.md エスカレーション 6) | F |
 | 11 | docs 同期 (完了時) | `procedures/solver-settings.md` (`physProp.species` の lump 形、`speciesDBFile` の位置づけ、lump と拡散の制約)、`recommended-settings.md` §3、`design/CAPABILITIES.md` | O |
 
 ## 6. 検証
@@ -164,7 +176,7 @@ physProp:
   datum を全区間に適用したときの h の連続性も同条件で確認。
 - **V3f (float 経路)**: float 表 (`SpeciesThermoF`) の cp/h と e↔T 往復が、既存 `tools/test_thermo_float.cpp` の基準 (`errHyb/T < 3e-8` 等) を区間可変後も満たす。上限超過が起動時に拒否されること。
 - **V4 (輸送物性と拡散)**: lump を含む混合の粘性・熱伝導が、全実種で直接評価した Wilke / Mason–Saxena と機械精度で一致。旧方式 (平均 LJ) との差を 200/300/1000 K で記録。
-  lump + `speciesDiffusionMethod: 1` が入力で拒否されること。lump + Schmidt 拡散で**組成勾配を持つ試験** (2 流入の混合層など小型ケース) を回し、種の質量収支と `Σh_s J_s` のエネルギー収支が閉じること (許容差は判定ツールの既定)。
+  lump を含む二元拡散係数が Blanc の式 (実種の $D_{ij}$ から) と機械精度で一致し、旧方式 (平均 LJ) との差を記録。lump + kinetic 拡散で**組成勾配を持つ試験** (2 流入の混合層など小型ケース) を回し、種の質量収支と `Σh_s J_s` のエネルギー収支が閉じること (許容差は判定ツールの既定)。
 - **V5 (CFD 回帰)**:
   - (i) case/44 va3 M4.19 L_c8 dry を新 config (lump 指定、`species_db.yaml` なし) で回し、固定済み V0 の抽出関数・許容差で旧バイナリの同条件 run と比較。
     これは**準定常回帰** (残差は plateau で NOT CONVERGED のまま; 生の VERDICT を記録し、報告量が `check_quasisteady` STEADY であることを条件にする)。
@@ -174,11 +186,14 @@ physProp:
 - **V6 (DB ファイルなしの一貫経路)**: 新 config で prepare → 段階 restart → `total_quantities.py` → `convert_species_field.py` までを、生成 `species_db.yaml` なしで通す。
   全温・全圧が旧経路と V2 の許容差で一致。SERN runner の段間署名も同じ API で通る。
 
+- **V7 (潜熱の datum 不変性)**: `thermoHrefTemp` を 0 / 298.15 / 任意値に変えても $L(T)$ が 120–400 K の全点で相対 1e-12 以内で不変。
+  新 $L$ と現行 `h2o_latent` の差を 150–373 K で記録 (200 K 以上は係数同一なので丸め程度、200 K 未満は外挿規約の統一分)。凝縮 run (case/44 va3 入口 Tt 分布の noneq) で onset・g の変化量を記録。
+
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
-| plan | 2026-09-27 | [2026-09-27-thermophysics-solver-owned-species-db-plan.md](../../notes/reviews/2026-09-27-thermophysics-solver-owned-species-db-plan.md) | GO-with-changes, C0/M7/m1 | 全件採用。M1 (記録を保存場に結び付け全入口で照合) → §4.3・#3・V1。M2 (lump と kinetic 拡散) → §4.4・#7・V4 (`solverConfig.hpp:579` 既定 1、`thermo_d.cuh:452-462` が LJ 使用を当方で確認)。M3 (canonical ID・相・LJ 有無・AIR 互換) → §4.1・#4。M4 (後処理・restart reader の移行) → §4.6・#8・V6 (`total_quantities.py:119` を当方で確認)。M5 (float 経路・全区間 datum・上限) → §4.2・#6・V3/V3f。M6 (潜熱共通化は datum 設計が要る) → 後続 plan へ切り出し (#10)。M7 (V0 依存・PASS ケース・NS の事前指定) → §6 冒頭・V5。m8 (仕様文書を実装前に) → #2。判断役 (codex) 自身の指摘で却下が無いため、採否の別途諮問は省略 |
+| plan | 2026-09-27 | [2026-09-27-thermophysics-solver-owned-species-db-plan.md](../../notes/reviews/2026-09-27-thermophysics-solver-owned-species-db-plan.md) | GO-with-changes, C0/M7/m1 | 全件採用。M1 (記録を保存場に結び付け全入口で照合) → §4.3・#3・V1。M2 (lump と kinetic 拡散) → 当初採用 (拒否) したが 2026-09-27 ユーザ指摘で**改訂**: lump 外の種との二元係数は Blanc の法則で厳密に作れるので併用可、失うのは lump 内部の差動拡散だけ (§4.4・#7・V4)。M3 (canonical ID・相・LJ 有無・AIR 互換) → §4.1・#4。M4 (後処理・restart reader の移行) → §4.6・#8・V6 (`total_quantities.py:119` を当方で確認)。M5 (float 経路・全区間 datum・上限) → §4.2・#6・V3/V3f。M6 (潜熱共通化は datum 設計が要る) → 当初は後続 plan へ切り出したが、2026-09-27 ユーザ方針 (液相を気相と同じ datum でシフトし差を保つ) で datum 整合が決まったので本 plan の #10・§4.8・V7 に戻す (反例は同じシフトを掛けない置換で、本方針では起きない)。M7 (V0 依存・PASS ケース・NS の事前指定) → §6 冒頭・V5。m8 (仕様文書を実装前に) → #2。判断役 (codex) 自身の指摘で却下が無いため、採否の別途諮問は省略 |
 
 ## 7. 影響範囲
 
@@ -198,5 +213,6 @@ physProp:
 
 ## 9. 変更ログ
 
+- `2026-09-27` — ユーザ指摘で 2 点改訂: (1) lump の拡散は平均 LJ でなく Blanc の法則で二元係数を作り kinetic 拡散と併用可 (M2 の拒否を撤回)、(2) 潜熱は液相を気相と同じ datum でシフトして差で作る (§4.8, 本 plan 内に戻す)。
 - `2026-09-27` — codex plan 段レビュー (GO-with-changes, C0/M7/m1) を全件採用し §2–§6 を改訂。最初の実装は「保存場に結び付いた解決済み記録と全 restart 経路の照合」に限定。潜熱の共通化は後続 plan。
 - `2026-09-27` — 初稿。ユーザ要望と codex diagnose 諮問 (`notes/reviews/2026-09-27-solver-owned-species-db-diagnose.md`) の推奨から起票。
