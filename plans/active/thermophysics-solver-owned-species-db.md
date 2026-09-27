@@ -331,6 +331,7 @@ SERN セッション (`feature/sern-design`) へ渡す内容。変更は `featur
 
 ## 9. 変更ログ
 
+- `2026-09-27` — **作業ブランチを移動**: 並行セッション (D-7275 すきま加熱) が `feature/gap-heating-precision` の同じ作業ツリーで作業中のため、以後の種 DB・輸送の作業は `feature/species-transport` (作業ツリー `/home/sano/work/forge-species`, d8c11f52 から分岐) で行う。既定の切り替え (#3c、`viscMethod: 2` の置き換え) もこのブランチで進め、並行セッションは区切りでマージする。
 - `2026-09-27` — ユーザ決定: `viscMethod: 2` は案 C (置き換えで実装、既定の切り替えは並行セッションの区切りを待つ)。H2O は特別なモデルとして `custom:h2o_iapws_cea_v1` (`custom:` 名前空間 + 版)。
 - `2026-09-27` — 輸送の実装設計を codex diagnose で確認: 合格条件を全 CEA と選択モデルで分ける、ηᵢⱼ の規約、記録の追記条件、3 段の実装順 (#5t2)。`viscMethod: 2` の扱いはユーザ判断待ち。
 - `2026-09-27` — ユーザ決定 (確定): H2O は 600 K 付近でつなぐ (IAPWS ↔ CEA、500–700 K smoothstep)。全温度 IAPWS 案は保証範囲を理由に取り下げ。
