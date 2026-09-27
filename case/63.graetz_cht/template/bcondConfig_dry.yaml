@@ -1,0 +1,9 @@
+# case/63 Graetz。physID は gen_mesh.py の Physical Curve。乾式: 加熱壁は非連成の等温 300 K (=T_in)。
+# 入口の放物速度は本 run で inletProfile CSV から入れる (乾式・変換では一様値のまま)。
+inlet:     {physID: 1, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: ,
+            floats: {ro: 1.176829, Ux: 17.35944, Uy: 0.0, Uz: 0.0, Ps: 101325.0}}
+outlet:    {physID: 2, kind: outlet_statPress, outputHDFflg: 0, ints: , floats: {Ps: 101325.0, Pt: 101500.0, Tt: 300.0}}
+wall_up:   {physID: 3, kind: wall, outputHDFflg: 1, ints: , floats: }
+wall_heat: {physID: 4, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 300.0}}
+wall_down: {physID: 5, kind: wall, outputHDFflg: 1, ints: , floats: }
+axis:      {physID: 6, kind: axis, outputHDFflg: 0, ints: , floats: }
