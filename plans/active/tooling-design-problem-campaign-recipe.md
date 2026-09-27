@@ -151,7 +151,7 @@ forge_design を「ユーザと対話しながら、機種 (風洞 axismach / �
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | 1 | ~~plan 段 codex レビュー~~ | 完了 2026-09-27 (GO-with-changes, C0/M5/m2, 全件採用 → #2–#7 と §4.3/4.4/4.6/4.7/4.8/§6 に反映; §6.1) | O |
-| 2 | V0 ノイズ床の取得 (数値変更の前に) | 現バイナリ・`run_0509` と同じ初期場・実効設定で `run_lumpX_staged.py` 経路を **3 回反復**し、§4.7 の抽出関数 (#4 で作る版) で評価量ごとの差の最大を取る。許容差 = max(反復差の最大 × 3, 量別の絶対下限: ṁ 1e-4 相対・M 1e-5・T 0.01 K)。`run_0509` は「正しい段間移植を行う参照経路」 | O |
+| 2 | ~~V0 ノイズ床の取得~~ | 完了 2026-09-27 (種 DB plan の基準として取得; 抽出は現行 case 側 `lumpX_series_csv.py`、#4 の統一抽出関数ができたら再抽出して併記): `run_0513`–`0515` の 3 反復で許容差 ṁ 1e-4 相対・M 1e-5・T 0.01 K・軸 M 目標差 1e-5 (下限が効く)。詳細は `thermophysics-solver-owned-species-db.md` §6 冒頭 | O |
 | 3 | 熱力学の修正 | §4.6: TP の R を組成から・NS ω 床の T を EOS 整合で復元、γ/cp の参照定数化・fallback 禁止・未使用 `gamma` 引数整理。合格: 熱力学整合性の単体試験 (va3 で R 285.2704、IC 場で逆算 T と `res` の T の差 ≤0.01 K)、CPG / semiperfect / `frozen_tp` の読込試験。NS への影響は旧 run 比の変化量を記録 (不変を合格条件にしない) | O |
 | 4 | 評価量の抽出関数 | §4.7: 軸 M 目標差・軸 M 出口・出口質量流束平均 M/T・ṁ を 1 モジュールに定義 (版付き)。runner の `collect` と case の系列スクリプトをこれに置換。合格: `run_0509` で両旧定義との差を記録し、新定義で `check_quasisteady --series-csv` を再判定 | O |
 | 5 | `run_staged` の段間引き継ぎ修正 | `runner_axismach.py:538-540` を `restart_field.py` に (`run_staged_ns` も確認)。合格: 同一 problem で報告量が #2 の許容差以内、各段で `restart_field.py` のビット一致 PASS、`StageManifest` 出力 | O |

@@ -184,6 +184,8 @@ physProp:
 [`tooling-design-problem-campaign-recipe.md`](tooling-design-problem-campaign-recipe.md) §5.1 #2・#4 の抽出関数・許容差と、**旧バイナリ** (本 plan 着手前の commit で build し sha256 を記録) を固定してから V5 を回す。
 この依存が満たされるまで #6 以降の CFD 比較をしない。
 
+**V0 取得済み (2026-09-27)**: 基準バイナリ `~/forge-ref-bin/species-db-baseline/forge` (sha256 45cf9822…, ソース b04e7de9 と数値的に同一、2026-09-24 01:45 build)、抽出は `case/44.vitiated_air_wt/lumpX_series_csv.py` (版 = commit b04e7de9 時点) の最終スナップショット。`run_0513`–`0515` (run_0509 と同一入力・同一 prepare、md5 一致メッシュ) の 3 反復: ṁ_in 幅 1.1e-6 相対、出口 M 4.8e-7、出口 T 1.2e-4 K、軸 M 出口 1.9e-6、軸 M 目標差 max 6.0e-7 (run_0509 との最大差も同程度)。**許容差 = 反復差 × 3 と下限の大きい方 = ṁ 1e-4 相対・M 1e-5・T 0.01 K・軸 M 目標差 1e-5** (すべて下限が効く)。3 本とも本段区間 NOT CONVERGED (run_0509 と同じ plateau)。
+
 - **V1 (保存場との照合, CFD 0 step)**: codex 諮問の判別 A/B (作成時記録を固定、現在の内蔵 `N2.nasa9_low[2]` を A = 同値 / B = +0.001) に加え、
   (a) 保存場だけを別 run にコピー、(b) 記録ファイルの取り違え、(c) 外部 DB の係数変更、(d) 起動前の宛先解決、を試す。
   合格: A と (d) の一致ケースは許可、B・(a) の不一致・(b)・(c) は**該当係数を示して拒否**、記録の無い旧場は「照合不能」で止まり明示フラグでのみ通る。これを
