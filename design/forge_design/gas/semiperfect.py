@@ -1,7 +1,7 @@
 r"""Semi-perfect (thermally perfect, frozen 組成) 気体モデル — NASA-9 多項式 (CEA)。
 
-forge 本体の内蔵 DB (`solver_density_cuda/cuda_forge/thermo_d.cu::builtinDB`, CEA
-McBride–Gordon 2002 の 2 区間 200–1000–6000 K) と**同一係数**を Python 側に持ち、
+forge 本体の内蔵 DB (`solver_density_cuda/input/speciesDB.cpp::speciesDB_builtin`, CEA
+McBride–Gordon 2002 の 2 区間 200–1000–6000 K) と**同じ共通データ** (`solver_density_cuda/data/species/forge_species_v1.yaml`) を読み、
 設計 (MOC・遷音速・面積比) と CFD (forge TP, `thermalMethod: 1`) の熱力学を一致させる。
 
 **MOC が γ に依存する箇所** (これだけ差し替えれば特性線法は thermally perfect でも成立):
@@ -20,80 +20,55 @@ McBride–Gordon 2002 の 2 区間 200–1000–6000 K) と**同一係数**を P
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 RU = 8.314462618  # J/(mol K)
 
 # NASA-9: cp/R = a0 T^-2 + a1 T^-1 + a2 + a3 T + a4 T^2 + a5 T^3 + a6 T^4
 #         h/(RT) = -a0 T^-2 + a1 ln T / T + a2 + a3 T/2 + a4 T^2/3 + a5 T^3/4 + a6 T^4/5 + a7/T
-# 係数は forge thermo_d.cu builtinDB と同一 (CEA)。
-SPECIES_NASA9 = {
-    "N2": dict(MW=0.0280134,
-               low=[2.210371497e+04, -3.818461820e+02, 6.082738360e+00, -8.530914410e-03,
-                    1.384646189e-05, -9.625793620e-09, 2.519705809e-12, 7.108460860e+02,
-                    -1.076003744e+01],
-               high=[5.877124060e+05, -2.239249073e+03, 6.066949220e+00, -6.139685500e-04,
-                     1.491806679e-07, -1.923105485e-11, 1.061954386e-15, 1.283210415e+04,
-                     -1.586640027e+01]),
-    "O2": dict(MW=0.0319988,
-               low=[-3.425563420e+04, 4.847000970e+02, 1.119010961e+00, 4.293889240e-03,
-                    -6.836300520e-07, -2.023372700e-09, 1.039040018e-12, -3.391454870e+03,
-                    1.849699470e+01],
-               high=[-1.037939022e+06, 2.344830282e+03, 1.819732036e+00, 1.267847582e-03,
-                     -2.188067988e-07, 2.053719572e-11, -8.193467050e-16, -1.689010929e+04,
-                     1.738716506e+01]),
-    "CO2": dict(MW=0.0440095,
-                low=[4.943650540e+04, -6.264116010e+02, 5.301725240e+00, 2.503813816e-03,
-                     -2.127308728e-07, -7.689988780e-10, 2.849677801e-13, -4.528198460e+04,
-                     -7.048279440e+00],
-                high=[1.176962419e+05, -1.788791477e+03, 8.291523190e+00, -9.223156780e-05,
-                      4.863676880e-09, -1.891053312e-12, 6.330036590e-16, -3.908350590e+04,
-                      -2.652669281e+01]),
-    "H2O": dict(MW=0.0180153,
-                low=[-3.947960830e+04, 5.755731020e+02, 9.317826530e-01, 7.222712860e-03,
-                     -7.342557370e-06, 4.955043490e-09, -1.336933246e-12, -3.303974310e+04,
-                     1.724205775e+01],
-                high=[1.034972096e+06, -2.412698562e+03, 4.646110780e+00, 2.291998307e-03,
-                      -6.836830480e-07, 9.426468930e-11, -4.822380530e-15, -1.384286509e+04,
-                      -7.978148510e+00]),
-    "AR": dict(MW=0.039948,
-               low=[0, 0, 2.5, 0, 0, 0, 0, -7.453750000e+02, 4.379674910e+00],
-               high=[0, 0, 2.5, 0, 0, 0, 0, -7.453750000e+02, 4.379674910e+00]),
-    # --- H2-air 燃焼生成物 (SERN ⑤ R3, 2026-09-13): CEA2 thermo.inp (McBride–Gordon 2002) から転記。
-    #     凍結組成の擬似種 (mixture_pseudo_species) に畳むための係数で、forge 内蔵 DB には無い種。
-    "H2": dict(MW=0.00201588,
-               low=[4.078323210e+04, -8.009186040e+02, 8.214702010e+00, -1.269714457e-02, 1.753605076e-05,
-                    -1.202860270e-08, 3.368093490e-12, 2.682484665e+03, -3.043788844e+01],
-               high=[5.608128010e+05, -8.371504740e+02, 2.975364532e+00, 1.252249124e-03, -3.740716190e-07,
-                     5.936625200e-11, -3.606994100e-15, 5.339824410e+03, -2.202774769e+00]),
-    "OH": dict(MW=0.01700734,
-               low=[-1.998858990e+03, 9.300136160e+01, 3.050854229e+00, 1.529529288e-03, -3.157890998e-06,
-                    3.315446180e-09, -1.138762683e-12, 2.991214235e+03, 4.674110790e+00],
-               high=[1.017393379e+06, -2.509957276e+03, 5.116547860e+00, 1.305299930e-04, -8.284322260e-08,
-                     2.006475941e-11, -1.556993656e-15, 2.019640206e+04, -1.101282337e+01]),
-    "H": dict(MW=0.00100794,
-              low=[0.0, 0.0, 2.5, 0.0, 0.0, 0.0, 0.0, 2.547370801e+04, -4.466828530e-01],
-              high=[6.078774250e+01, -1.819354417e-01, 2.500211817e+00, -1.226512864e-07, 3.732876330e-11,
-                    -5.687744560e-15, 3.410210197e-19, 2.547486398e+04, -4.481917770e-01]),
-    "NO": dict(MW=0.0300061,
-               low=[-1.143916503e+04, 1.536467592e+02, 3.431468730e+00, -2.668592368e-03, 8.481399120e-06,
-                    -7.685111050e-09, 2.386797655e-12, 9.098214410e+03, 6.728725490e+00],
-               high=[2.239018716e+05, -1.289651623e+03, 5.433936030e+00, -3.656034900e-04, 9.880966450e-08,
-                     -1.416076856e-11, 9.380184620e-16, 1.750317656e+04, -8.501669090e+00]),
-    "O": dict(MW=0.0159994,
-              low=[-7.953611300e+03, 1.607177787e+02, 1.966226438e+00, 1.013670310e-03, -1.110415423e-06,
-                   6.517507500e-10, -1.584779251e-13, 2.840362437e+04, 8.404241820e+00],
-              high=[2.619020262e+05, -7.298722030e+02, 3.317177270e+00, -4.281334360e-04, 1.036104594e-07,
-                    -9.438304330e-12, 2.725038297e-16, 3.392428060e+04, -6.679585350e-01]),
-    "CO": dict(MW=0.0280101,
-               low=[1.489045326e+04, -2.922285939e+02, 5.724527170e+00, -8.176235030e-03, 1.456903469e-05,
-                    -1.087746302e-08, 3.027941827e-12, -1.303131878e+04, -7.859241350e+00],
-               high=[4.619197250e+05, -1.944704863e+03, 5.916714180e+00, -5.664282830e-04, 1.398814540e-07,
-                     -1.787680361e-11, 9.620935570e-16, -2.466261084e+03, -1.387413108e+01]),
-}
-# Lennard-Jones (σ [Å], ε/k_B [K]; Svehla 1962 / Chemkin transport)。擬似種の輸送係数は質量分率加重 (粗い近似で十分)
-LJ_PARAMS = {"N2": (3.621, 97.53), "O2": (3.458, 107.4), "CO2": (3.763, 244.0), "H2O": (2.605, 572.4), "AR": (3.330, 136.5),
-             "H2": (2.827, 59.7), "OH": (3.147, 79.8), "H": (2.708, 37.0), "NO": (3.492, 116.7), "O": (3.050, 106.7), "CO": (3.690, 91.7)}
+# 係数・MW・LJ・原子組成は共通 species データ (solver_density_cuda/data/species/forge_species_v1.yaml; forge 本体の内蔵 DB と
+# 同じファイル) の legacy_builtin: design の種から作る (plans/active/thermophysics-solver-owned-species-db.md §5.1 #4)。
+# 名前は従来どおり大文字キー (canonical ID `Ar` → `AR`)。canonical ID + 別名表への移行は plan #8。
+# 注: cea_thermo_to_species_db.py はこのファイルをパスで単独 import するので、ここでは相対 import をしない。
+SPECIES_DATA_FILE = Path(__file__).resolve().parents[3] / "solver_density_cuda" / "data" / "species" / "forge_species_v1.yaml"
+SPECIES_DATA_SCHEMA = "forge_species_data_v1"
+
+
+def _load_design_species(path=SPECIES_DATA_FILE):
+    """共通データから (SPECIES_NASA9, LJ_PARAMS, 原子組成) を従来の形・順序・大文字キーで返す。"""
+    import yaml
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or raw.get("schema") != SPECIES_DATA_SCHEMA:
+        raise ValueError(f"{path}: schema が {SPECIES_DATA_SCHEMA} でない")
+    nasa9, lj, atoms = {}, {}, {}
+    for e in raw["species"]:
+        if "design" not in (e.get("legacy_builtin") or []):
+            continue
+        key = str(e["id"]).upper()   # 従来キー (Ar → AR)
+        if key in nasa9:
+            raise ValueError(f"{path}: 従来キー {key} が重複 ({e['id']})")
+        if e.get("phase") != "gas":
+            raise ValueError(f"{path}: {e['id']} の phase {e.get('phase')} は内蔵種に使えない (gas のみ)")
+        iv = e["intervals"]
+        # 設計側は 2 区間 200–1000–6000 K 固定 (T_MID, ResolvedSpeciesDB の既定区切り)。区間可変は plan #6。
+        if len(iv) != 2 or [float(iv[0]["Tlo"]), float(iv[0]["Thi"]), float(iv[1]["Tlo"]), float(iv[1]["Thi"])] \
+                != [200.0, 1000.0, 1000.0, 6000.0]:
+            raise ValueError(f"{path}: {e['id']} の温度区間が 200–1000–6000 K の 2 区間でない")
+        low, high = [float(v) for v in iv[0]["coeffs"]], [float(v) for v in iv[1]["coeffs"]]
+        if len(low) != 9 or len(high) != 9:
+            raise ValueError(f"{path}: {e['id']} の係数は 9 個ずつ必要")
+        nasa9[key] = dict(MW=float(e["MW"]), low=low, high=high)
+        if e.get("LJ") is not None:
+            lj[key] = (float(e["LJ"]["sigma"]), float(e["LJ"]["eps_kB"]))
+        if e.get("atoms") is not None:
+            atoms[key] = dict(e["atoms"])
+    return nasa9, lj, atoms
+
+
+SPECIES_NASA9, LJ_PARAMS, SPECIES_ATOMS = _load_design_species()
+# Lennard-Jones (σ [Å], ε/k_B [K]; Svehla 1962 / Chemkin transport) は LJ_PARAMS。擬似種の輸送係数は質量分率加重 (粗い近似で十分)
 T_MID = 1000.0
 
 

@@ -18,13 +18,11 @@ from pathlib import Path
 
 import numpy as np
 
-from .semiperfect import LJ_PARAMS, RU, SPECIES_NASA9, T_MID
+from .semiperfect import LJ_PARAMS, RU, SPECIES_ATOMS, SPECIES_NASA9, T_MID
 
-# 内蔵 11 種の原子組成 (CEA thermo.inp の元素欄と同じ)。外部 DB は `atoms` キー (cea_thermo_to_species_db.py が書く) を使う。
-BUILTIN_ATOMS = {
-    "N2": {"N": 2}, "O2": {"O": 2}, "CO2": {"C": 1, "O": 2}, "H2O": {"H": 2, "O": 1}, "AR": {"AR": 1},
-    "H2": {"H": 2}, "OH": {"O": 1, "H": 1}, "H": {"H": 1}, "NO": {"N": 1, "O": 1}, "O": {"O": 1}, "CO": {"C": 1, "O": 1},
-}
+# 内蔵 11 種の原子組成 (CEA thermo.inp の元素欄と同じ)。共通データ (semiperfect.SPECIES_DATA_FILE) の atoms から、従来の大文字キーで。
+# 外部 DB は `atoms` キー (cea_thermo_to_species_db.py が書く) を使う。
+BUILTIN_ATOMS = {k: dict(v) for k, v in SPECIES_ATOMS.items()}
 # 元素の原子量 [kg/mol] (元素質量分率の診断用)
 ATOMIC_MW = {"H": 1.00794e-3, "C": 12.0107e-3, "N": 14.0067e-3, "O": 15.9994e-3, "AR": 39.948e-3, "HE": 4.002602e-3}
 

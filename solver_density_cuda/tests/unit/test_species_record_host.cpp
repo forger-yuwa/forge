@@ -8,10 +8,12 @@
 //   (4) 入力場の照合: 一致 → 通す / 属性なし → 照合不能で拒否・env 許可で通して未検証印 / 不一致 → 該当係数を示して拒否 (env でも通さない) /
 //       記録の取り違え (別 run の記録を置く) → 完全性不一致を明示 / 記録なし → 「特定不能」を明示 / 入力の未検証印は継承
 //
-// ビルド/実行:
-//   g++ -O1 -std=c++17 -I solver_density_cuda solver_density_cuda/tests/unit/test_species_record_host.cpp
+// ビルド/実行 (共通データの埋め込みヘッダを先に生成する; plan #4):
+//   cmake -DIN=solver_density_cuda/data/species/forge_species_v1.yaml -DOUT=/tmp/forge_species_gen/forge_species_data.hpp
+//       -P solver_density_cuda/cmake/embed_species_data.cmake
+//   g++ -O1 -std=c++17 -I solver_density_cuda -I /tmp/forge_species_gen solver_density_cuda/tests/unit/test_species_record_host.cpp
 //       solver_density_cuda/input/speciesDB.cpp -lyaml-cpp -o /tmp/test_species_record_host && /tmp/test_species_record_host
-//   (上の 2 行を 1 行につなげて実行)
+//   (それぞれ 2 行を 1 行につなげて実行)
 // 規約: [PASS]/[FAIL] を出し、失敗があれば非ゼロ終了。
 // =============================================================================
 #include "input/speciesDB.hpp"

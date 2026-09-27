@@ -166,7 +166,7 @@ $$ \mathbf{q} = -k\,\nabla T + \sum_i h_i(T)\,\mathbf{J}_i. $$
 
 #### 内蔵 species DB の一覧と出典
 
-内蔵 species と各定数の一次情報は `speciesDB_builtin()` ([`input/speciesDB.cpp`](../solver_density_cuda/input/speciesDB.cpp)) にベタ書きされている (共通データへ移行中: §1b.1)。各値の出典は下表の通り (NASA-9 係数 / Lennard-Jones パラメータで出典が異なる)。外部 yaml (`physProp.speciesDBFile`, [`thermo_d.cu:142`](../solver_density_cuda/cuda_forge/thermo_d.cu#L142)) で上書き/追加できる。温度域は全種共通で $T_{\mathrm{lo}}/T_{\mathrm{mid}}/T_{\mathrm{hi}}=200/1000/6000$ K。
+値の正本は共通データ `solver_density_cuda/data/species/forge_species_v1.yaml` (§1b.1; ビルド時に埋め込み、`speciesDB_builtin()` が構築)。下表の 7 種は同ファイルで `legacy_builtin` に `solver` を含むエントリで、エントリごとの出典 (`source`・`LJ.source`) と CEA `thermo.inp` 直読みとの既知の差 (`deviations`) も同ファイルにある。既知の差は H2O の MW (0.0180153 vs 18.01528 g/mol)、He の MW (0.0040026 vs 4.002602 g/mol)、Ar の高温区間 (単原子理想 vs thermo.inp の a0 = 20.105…) で、寄せ先は plan #5 で決める。設計側だけの 6 種 (H2 OH H NO O CO; SERN の燃焼生成物) も同ファイルにあり、LJ は設計側 `LJ_PARAMS` の値 (CEA 変換ツール `cea_thermo_to_species_db.py` の Cantera 由来表とは H2/H/O/OH/NO/CO で異なる; plan #5)。各値の出典は下表の通り (NASA-9 係数 / Lennard-Jones パラメータで出典が異なる)。外部 yaml (`physProp.speciesDBFile`, [`thermo_d.cu:142`](../solver_density_cuda/cuda_forge/thermo_d.cu#L142)) で上書き/追加できる。温度域は全種共通で $T_{\mathrm{lo}}/T_{\mathrm{mid}}/T_{\mathrm{hi}}=200/1000/6000$ K。
 
 | species (別名) | MW [kg/mol] | $\sigma_{LJ}$ [Å] | $\varepsilon/k_B$ [K] | NASA-9 出典 | LJ 出典 | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -200,6 +200,8 @@ $$ \mathbf{q} = -k\,\nabla T + \sum_i h_i(T)\,\mathbf{J}_i. $$
 - 使用時の拒否: 凝縮相を気相 EOS に使う、LJ の無い種を粘性・熱伝導・拡散に使う。LJ の仮置き (N2 相当) はしない。
 - 現行の `AIR` (cp/R 3.5 一定) は CEA の `Air` と別の互換擬似種として残す。
 - 外部 DB (`speciesDBFile`) による上書き・追加は残す。凝縮 ON のとき、凝縮種の気相エントリを気液ペアの基準が確認できない外部 DB で上書きすることは拒否する。
+
+> **実装済み (2026-09-27, plan #4; 値は移行前の内蔵値のまま)**: 共通データは `solver_density_cuda/data/species/forge_species_v1.yaml` (schema `forge_species_data_v1`)。第一段では移行前の内蔵経路の値 (C++ 内蔵 7 種、設計側 `SPECIES_NASA9` 11 種・`LJ_PARAMS`・原子組成) だけを移した (CEA 全種表への拡張は #5/#6)。C++ はビルド時に `cmake/embed_species_data.cmake` でヘッダへ埋め込み、起動時に yaml-cpp でパースする (実行時にファイルを読まない; ソルバと `convertGmshToForge` は同じ `speciesDB_builtin()`)。Python は `design/forge_design/gas/semiperfect.py` が同じファイルを直接読み、従来の大文字キー (`Ar`→`AR`) で `SPECIES_NASA9`/`LJ_PARAMS`/`SPECIES_ATOMS` を作る。各エントリは canonical ID (大小文字を区別)・別名・相・MW・2 温度区間の NASA-9 係数・LJ (null 可)・元素組成・出典・CEA 直読みとの既知の差 (`deviations`) を持つ。過渡の欄 `legacy_builtin` で、各読み手は移行前と同じ内蔵種の集合だけを読む。名前解決は C++ が完全一致 (外部 DB のキー、canonical ID、別名) → 従来の大小文字無視 (互換)、Python は従来の大文字化のまま。canonical ID への移行と完全一致化は #8、区間可変は #6、LJ の無い種の輸送拒否は #6/#7。移行前後のビット一致は `tests/unit/test_species_data_bitexact.py` (基準 `tests/unit/data/species_builtin_baseline_v0.json`) で確認できる。
 
 #### 1b.2 lump (擬似種) の指定と起動時合成
 

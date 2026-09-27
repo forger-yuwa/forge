@@ -5,9 +5,12 @@
 //       → Y_H2O = 0.03769539643 (rtol 1e-9; 内蔵 MW で再計算した値) と mole↔mass 往復
 //   (3) bcondConfig floats の拒否条件 (X/Y 混在, X の種欠落, 負値, 非有限, 総和 0, 未知 index, Y の負値, |ΣY−1|>1e-3)
 //   (4) 凝縮種の名前→index (ResolvedSpeciesDB::index; solverConfig::read の condensationSpecies と同じ大文字小文字無視の照合)
+//   (5) 共通データの別名 (AR/HE/h2o/WATER/Air/air) が canonical と同値、CO と Co が別種、外部 DB は同じキーだけ上書き (plan #4)
 //
-// ビルド/実行 (単一 TU + speciesDB.cpp):
-//   g++ -O1 -std=c++17 -I solver_density_cuda solver_density_cuda/tests/unit/test_species_db_host.cpp \
+// ビルド/実行 (単一 TU + speciesDB.cpp; 共通データの埋め込みヘッダを先に生成する):
+//   cmake -DIN=solver_density_cuda/data/species/forge_species_v1.yaml -DOUT=/tmp/forge_species_gen/forge_species_data.hpp \
+//       -P solver_density_cuda/cmake/embed_species_data.cmake
+//   g++ -O1 -std=c++17 -I solver_density_cuda -I /tmp/forge_species_gen solver_density_cuda/tests/unit/test_species_db_host.cpp \
 //       solver_density_cuda/input/speciesDB.cpp -lyaml-cpp -o /tmp/test_species_db_host && /tmp/test_species_db_host
 // 規約: [PASS]/[FAIL] を出し、失敗があれば非ゼロ終了。
 // =============================================================================
@@ -137,6 +140,48 @@ int main()
             check(db.index("H2O") == expect && db.index("h2o") == expect,
                   "condensing species index by name (H2O at position " + std::to_string(expect) + ")");
         }
+    }
+
+    // ---- (5) 共通データ (data/species/forge_species_v1.yaml) の別名と大小文字の区別 (plan #4) ----
+    {
+        auto same = [](const SpeciesThermo& a, const SpeciesThermo& b) {
+            bool ok = a.MW == b.MW && a.Tlo == b.Tlo && a.Tmid == b.Tmid && a.Thi == b.Thi
+                      && a.sigma_LJ == b.sigma_LJ && a.eps_kB == b.eps_kB;
+            for (int k = 0; k < 9; ++k) ok = ok && a.low[k] == b.low[k] && a.high[k] == b.high[k];
+            return ok;
+        };
+        const auto b = speciesDB_builtin();
+        check(b.size() == 13, "builtin keys: 7 canonical IDs + 6 aliases (" + std::to_string(b.size()) + ")");
+        const std::vector<std::pair<std::string, std::string>> aliases = {
+            {"AR", "Ar"}, {"HE", "He"}, {"h2o", "H2O"}, {"WATER", "H2O"}, {"Air", "AIR"}, {"air", "AIR"}};
+        for (const auto& a : aliases) {
+            const ResolvedSpeciesDB r = speciesDB_resolve(std::vector<std::string>{a.first}, "");
+            check(b.count(a.first) == 1 && same(b.at(a.first), b.at(a.second)) && same(r.species[0], b.at(a.second))
+                  && r.names[0] == a.first, "alias " + a.first + " -> " + a.second + " (same values; name kept as written)");
+        }
+        check(!speciesDB_builtinDataName().empty() && speciesDB_builtinDataSha256().size() == 64,
+              "embedded data provenance: " + speciesDB_builtinDataName() + " sha256 " + speciesDB_builtinDataSha256().substr(0, 16));
+
+        // 大小文字だけ違う別種 (CEA の CO と Co) を外部 DB で与え、完全一致で別々に解決されること
+        const std::string dbfile = "/tmp/test_species_db_host_co.yaml";
+        {
+            std::ofstream f(dbfile);
+            f << "CO:\n  MW: 0.0280101\n  nasa9_low: [1,2,3,4,5,6,7,8,9]\n  nasa9_high: [1,2,3,4,5,6,7,8,9]\n"
+                 "Co:\n  MW: 0.0589332\n  nasa9_low: [9,8,7,6,5,4,3,2,1]\n  nasa9_high: [9,8,7,6,5,4,3,2,1]\n"
+                 "AR:\n  MW: 0.05\n  nasa9_low: [1,2,3,4,5,6,7,8,9]\n  nasa9_high: [1,2,3,4,5,6,7,8,9]\n";
+        }
+        const ResolvedSpeciesDB rco = speciesDB_resolve({"N2", "CO"}, dbfile);
+        const ResolvedSpeciesDB rCo = speciesDB_resolve({"N2", "Co"}, dbfile);
+        check(rco.MW(1) == 0.0280101 && rco.species[1].low[0] == 1.0 && rCo.MW(1) == 0.0589332 && rCo.species[1].low[0] == 9.0
+              && rco.names[1] == "CO" && rCo.names[1] == "Co", "CO and Co resolve to different species (exact match)");
+        // 外部 DB は同じキーだけを上書きする (従来どおり): AR は file、Ar は内蔵
+        const ResolvedSpeciesDB rAR = speciesDB_resolve({"AR"}, dbfile);
+        const ResolvedSpeciesDB rAr = speciesDB_resolve({"Ar"}, dbfile);
+        check(rAR.source[0] == "file" && rAR.MW(0) == 0.05 && rAr.source[0] == "builtin" && rAr.MW(0) == 0.039948,
+              "speciesDBFile key AR overrides only AR (Ar stays builtin)");
+        // 従来の大小文字無視 (互換) は残る
+        const ResolvedSpeciesDB rci = speciesDB_resolve({"co2", "n2"}, "");
+        check(same(rci.species[0], b.at("CO2")) && same(rci.species[1], b.at("N2")), "legacy case-insensitive fallback (co2, n2)");
     }
 
     std::printf("%s (%d failures)\n", g_fail == 0 ? "ALL PASS" : "FAILED", g_fail);

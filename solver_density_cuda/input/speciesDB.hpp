@@ -3,7 +3,8 @@
 // =============================================================================
 // speciesDB.hpp
 //   化学種熱物性 DB の host 側解決 (GPU 非依存)。
-//   - 内蔵 DB (NASA-9 + Lennard-Jones; 出典は methods/thermophysics.md) に
+//   - 内蔵 DB (NASA-9 + Lennard-Jones; 共通データ data/species/forge_species_v1.yaml をビルド時に埋め込む。
+//     出典は同ファイルと methods/thermophysics.md) に
 //     cfg.speciesDBFile (yaml) を上書き/追加し、cfg.speciesNames の順で解決する。
 //   - thermo_init_db (device アップロード) と convertGmshToForge (GPU 無し) の両方が
 //     同じ関数を使うので、名前→MW の解決結果が solver と変換器で食い違わない。
@@ -31,11 +32,19 @@ struct ResolvedSpeciesDB {
     double MW(int s) const { return species.at(s).MW; }
 };
 
-// 内蔵 DB を返す (キーは内蔵の別名込み: AR/Ar, HE/He, H2O/h2o/WATER, AIR/Air/air)。
+// 内蔵 DB を返す。値は共通データ data/species/forge_species_v1.yaml (ビルド時に埋め込み、起動時に解析) の
+// legacy_builtin: solver の種で、キーは canonical ID と別名の両方 (Ar/AR, He/HE, H2O/h2o/WATER, AIR/Air/air)。
+// 共通データが壊れていれば std::runtime_error。
 std::map<std::string, SpeciesThermo> speciesDB_builtin();
 
+// 埋め込んだ共通データのファイル名と全文の SHA-256 (来歴・ログ用。互換性ハッシュには入れない)。
+const std::string& speciesDB_builtinDataName();
+const std::string& speciesDB_builtinDataSha256();
+
 // names を内蔵 DB + dbFile (空なら内蔵のみ) で解決する。未知種名・不正 DB は std::runtime_error。
-// 名前照合は完全一致を優先し、無ければ大文字小文字無視で照合する。
+// 名前照合: 完全一致 (外部 DB のキー、内蔵の canonical ID と別名; 外部 DB は同じキーだけを上書き) → 無ければ
+// 従来の大小文字無視 (互換; canonical ID への移行と完全一致化は plan #8)。
+// 解決結果の names は config に書いた名前のまま (互換性ハッシュに入る)。
 ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& names, const std::string& dbFile);
 
 // cfg.speciesNames / cfg.speciesDBFile で解決する。calorically-perfect (species 未指定) では N2 ダミー 1 種。
