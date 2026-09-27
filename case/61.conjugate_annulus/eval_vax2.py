@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""V-ax2 同心円環 (ソルバ内連成) の合否を当てる。
 
-plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/active/boundary-cht-axisymmetric-fem2d.md) §6 **V-ax2**。
+plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/accepted/boundary-cht-axisymmetric-fem2d.md) §6 **V-ax2**。
 **閾値・解析解は登録値を引数の既定に固定してあり、結果を見て動かさない**。
 
 ## 解析解 (単位軸長・ラジアンあたり、登録値)

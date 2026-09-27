@@ -1,6 +1,6 @@
 # 62. 同軸円板の軸対称 CHT (V-ax2b — 半径が変わる界面の局所整合)
 
-計画: [`plans/active/boundary-cht-axisymmetric-fem2d.md`](../../plans/active/boundary-cht-axisymmetric-fem2d.md) §6 **V-ax2b** (§5.1 #6)。
+計画: [`plans/accepted/boundary-cht-axisymmetric-fem2d.md`](../../plans/accepted/boundary-cht-axisymmetric-fem2d.md) §6 **V-ax2b** (§5.1 #6)。
 界面・Robin 辺の半径が 4 倍変わるので、plan §3 の「流体の半辺積分と固体の集中量 $\int N_ir\,ds$ の違い」が局所の壁温の歪みとして
 出るならここで出る。**判定基準・パラメータは登録文そのまま**。**FAIL したら荷重の再配分を入れずに止めて諮る** (plan)。
 共通部品は [`../61.conjugate_annulus/axcht.py`](../61.conjugate_annulus/axcht.py) (case/61 と同じ作法)。
@@ -116,7 +116,7 @@ plan の参考予測 (codex の独立計算) 0.9421 / 0.2983 / 0.08796 % と比 
 | `run_0016_ic_A_uniform` / `run_0016_ic_B_conduct` | **初期場 A/B** ([plan](../../plans/active/axisymmetric-graded-grid-static-gas.md) §4.1): `run_0014` の入力で初期保存量場だけを変える (A 一様 325 K / B 純伝導の平衡場、P* 1051.736 Pa、総質量一致)、500 step・毎 step 出力 | step 250–500 の max |U_y| A 21.9 / **B 3.3e-4 m/s**、市松 A 4.5e5 / **B 3.8e-3 W/m²** → **起動非平衡が支配** (H2 支持)。B の |U| はゆっくり増加中。ローカルは res_0・res_500・壁ダンプのみ (中間は AWS で集計) | ref |
 | `run_0017_hold_A_uniform` / `run_0017_hold_B_conduct` | **非連成の静止保持 A/B** ([plan](../../plans/active/axisymmetric-graded-grid-static-gas.md) §5.1 #3): 初期場だけ変えて 20000 step (`warmup` 100000 = 連成しない)、100 step ごと出力 | **判別未了** (登録どおり): A は異常を再現 (1.48 m/s、全系列 DRIFTING)。B は閾値 4 項目・残差 PASS、準定常 5/6 STEADY だが `qerr_cj` (値 5.6e-3 %) が DRIFTING。ローカルは res_0・res_20000・壁ダンプ・`static_hold_series.csv` のみ | ref |
 | `run_0018_hold_B_ext40k` | **静止保持の追加検証** ([plan](../../plans/active/axisymmetric-graded-grid-static-gas.md) §5.1 #3): `run_0017_hold_B_conduct` の step 20000 から同一設定で +20000 (累積 40000、連成しない) | **全条件 PASS**: 閾値 4 項目 (max|U| 5.18e-4 m/s、熱流束誤差 ≤5.7e-3 %、相対圧力差 2.9e-7)、準定常 72 系列 ALL STEADY、残差 PASS (連結 8 桁) → 純伝導 IC なら非一様格子でも静止を保つ。ローカルは res_20000・壁ダンプ・系列 CSV のみ | ref |
-| `run_0019_disk_r32g_condic` | **V-ax2b 非一様 N_r=32 の再登録** ([CHT plan](../../plans/active/boundary-cht-axisymmetric-fem2d.md) §6 V-ax2b): `run_0014` と同一で流体の初期場だけ純伝導 IC (P* 1051.736)。`warmup` 20000・300000 step | **PASS**: 壁温 max 0.0858 % of 降下、G-cons 8.4e-7 %、連成保存 1.7e-10 %、恒等式 0、準定常 ALL STEADY、G-if PASS、流体残差 PASS (約 10 桁)。`series_vax2b.py` VERDICT PASS (一様 32: 0.0477 %、非一様 32: 0.0858 %、比 0.317 / 0.298) | active (本命) |
+| `run_0019_disk_r32g_condic` | **V-ax2b 非一様 N_r=32 の再登録** ([CHT plan](../../plans/accepted/boundary-cht-axisymmetric-fem2d.md) §6 V-ax2b): `run_0014` と同一で流体の初期場だけ純伝導 IC (P* 1051.736)。`warmup` 20000・300000 step | **PASS**: 壁温 max 0.0858 % of 降下、G-cons 8.4e-7 %、連成保存 1.7e-10 %、恒等式 0、準定常 ALL STEADY、G-if PASS、流体残差 PASS (約 10 桁)。`series_vax2b.py` VERDICT PASS (一様 32: 0.0477 %、非一様 32: 0.0858 %、比 0.317 / 0.298) | active (本命) |
 
 ローカルの起動確認 (2026-09-27、float、各 2 step) は 4 本とも init・固体検査・界面の座標一致 (ずれ 0 m) を通り rc 0。
 評価器の経路確認 (`warmup 0`・`interval 1` の 3 step) も通した。いずれも確認後に破棄した。

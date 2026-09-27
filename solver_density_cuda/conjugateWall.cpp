@@ -726,14 +726,14 @@ void initConjugateWalls(const solverConfig& cfg, const mesh& msh)
                       << cfg.axisymMethod << ")。\n"
                       << "[conjugateWall]   axisymMethod: 1 は幾何が平面のまま (1/y はソース項) なので、"
                          "界面荷重が [W/rad] にならず固体 (r 重み) と単位が合わない。"
-                         "plans/active/boundary-cht-axisymmetric-fem2d.md §4.3 を参照。\n";
+                         "plans/accepted/boundary-cht-axisymmetric-fem2d.md §4.3 を参照。\n";
             exit(EXIT_FAILURE);
         }
         if (cfg.conjugateMode != "fem2d") {
             std::cerr << "[conjugateWall] ERROR: in-solver CHT の軸対称は conjugate.mode: fem2d のみ対応 (今回 mode="
                       << cfg.conjugateMode << ")。\n"
                       << "[conjugateWall]   local1d は固体を平面の 1 次元抵抗 t/k_s で扱い、円筒殻の対数抵抗になっていない。"
-                         "plans/active/boundary-cht-axisymmetric-fem2d.md §2 を参照。\n";
+                         "plans/accepted/boundary-cht-axisymmetric-fem2d.md §2 を参照。\n";
             exit(EXIT_FAILURE);
         }
         // 保証範囲 (§4.4): 検証対象は FP64 ビルド。FP32 は受理するが精度は未検証。

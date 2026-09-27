@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""V-ax2 同心円環の流体メッシュ (子午面、node・全四角・一様)。
 
-plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/active/boundary-cht-axisymmetric-fem2d.md) §6 V-ax2。
+plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/accepted/boundary-cht-axisymmetric-fem2d.md) §6 V-ax2。
 
     y=r_b=10 mm ┌──────────────┐ wall_outer (physID 4) = 共役壁 (ints: {conjugate: 1})
                 │  静止ガス     │

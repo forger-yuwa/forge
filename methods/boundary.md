@@ -347,7 +347,7 @@ CHT は流体の壁熱流束と固体の伝導を連立して $T_w(x)$ を決め
 | 固体 | 薄肉シェル (`local1d` / `shell2d`) と一般 2D 領域 (`fem2d`) |
 | 壁種別 | `wall_isothermal` + `ints: {conjugate: 1}`。**新種別を作らない** (種別名は `iso_wall_flag`・温度ピン・粘性壁・壁距離・block-DPLUR のエネルギー行切離しの 5 経路で直書き判定されており、新種別はそこから漏れる) |
 | 対象外 | 表面間放射、非定常 (thin-skin 過渡)、**軸対称の `local1d` と `axisymMethod: 1` (起動時に拒否)**、壁関数 (`wallTreatmentSST: 1` / `sstEnergyWallFunction: 1`) 併用、接触熱抵抗の同定 |
-| 軸対称 | **`axisymMethod: 0` + `mode: fem2d` のみ受理** (2026-09-27)。定常・node・FP64・`axisymMethod: 0`・`mode: fem2d`・`flux: q_eff` の登録円環 / 円板条件で連成精度・保存・定常性を確認した (plan [`boundary-cht-axisymmetric-fem2d.md`](../plans/active/boundary-cht-axisymmetric-fem2d.md) §6 V-ax0〜4)。**非一様格子の円板は純伝導 IC からの起動に限定**、固体単体の収支の 1 項目 (V-ax1 (e)) は明記した例外として受け入れた。FP32 ビルドは受理するが精度は未検証 (起動ログに警告)。`flux: q_compact` は拒否しないが軸対称では検証していない。経緯: 2026-09-27 までは軸対称メッシュ ($z\equiv0$) が平面ガードを素通りし、`fem2d` は荷重が $r$ 倍、`local1d` は `iface_q_eff` が $r$ 倍ずれたまま**黙って連成していた** → いったん全拒否し、下の $r$ 重みを入れて受理条件つきで解除 |
+| 軸対称 | **`axisymMethod: 0` + `mode: fem2d` のみ受理** (2026-09-27)。定常・node・FP64・`axisymMethod: 0`・`mode: fem2d`・`flux: q_eff` の登録円環 / 円板条件で連成精度・保存・定常性を確認した (plan [`boundary-cht-axisymmetric-fem2d.md`](../plans/accepted/boundary-cht-axisymmetric-fem2d.md) §6 V-ax0〜4)。**非一様格子の円板は純伝導 IC からの起動に限定**、固体単体の収支の 1 項目 (V-ax1 (e)) は明記した例外として受け入れた。FP32 ビルドは受理するが精度は未検証 (起動ログに警告)。`flux: q_compact` は拒否しないが軸対称では検証していない。経緯: 2026-09-27 までは軸対称メッシュ ($z\equiv0$) が平面ガードを素通りし、`fem2d` は荷重が $r$ 倍、`local1d` は `iface_q_eff` が $r$ 倍ずれたまま**黙って連成していた** → いったん全拒否し、下の $r$ 重みを入れて受理条件つきで解除 |
 
 #### 界面量の定義と符号
 
@@ -490,7 +490,7 @@ $D_f$ が大きいとき量子化で止まった状態を合格にできる。
   窓は「$F_N\le\epsilon_{\rm abs}L_i/2$ を全節点で満たす最小 N」で選ぶ (C3X では 21 = 1 周期。周期揺らぎ対策で 42 を採用)。
 - **出力**: 更新ごとに `conjugate_history.csv` (G-if の素材)、流体の出力間隔で `res_solid_<physID>_<step>.h5`+`.xmf`
   (`T` / `k_s` / `q_iface` / `q_hole`) と再開用の `conjugate_state_<physID>.h5`。
-- **軸対称の `fem2d`** ([`plans/active/boundary-cht-axisymmetric-fem2d.md`](../plans/active/boundary-cht-axisymmetric-fem2d.md)、2026-09-27 実装):
+- **軸対称の `fem2d`** ([`plans/accepted/boundary-cht-axisymmetric-fem2d.md`](../plans/accepted/boundary-cht-axisymmetric-fem2d.md)、2026-09-27 実装):
   単位は流体の $r$ 重み幾何 (`axisymMethod: 0`、$2\pi$ を掛けない) に合わせて**ラジアンあたり** [W/rad] で統一する。
   固体の弱形式は $\int_\Omega k\,\nabla T\cdot\nabla v\,r\,dA + \int_{\Gamma_R} h(T-T_c)v\,r\,ds = \int_{\Gamma_i} q\,v\,r\,ds$ ($r=y\ge0$)。
   線形三角形では勾配が要素内一定なので剛性は $k_e\,A_e\,\bar r_e\,\nabla N_i\cdot\nabla N_j$ ($\bar r_e$ = 要素重心の $r$) で厳密、

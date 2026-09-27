@@ -206,7 +206,7 @@ def main():
     if a.axisym and a.solid_mode == "fem2d":
         ap.error("--axisym と --solid-mode fem2d の組合せは未対応 (外部ループの fem2d は平面のみ。"
                  "軸対称の fem2d はソルバ内連成 conjugate.mode: fem2d を使う。"
-                 "plans/active/boundary-cht-axisymmetric-fem2d.md §4.4d)")
+                 "plans/accepted/boundary-cht-axisymmetric-fem2d.md §4.4d)")
 
     run = Path(a.run_dir).resolve()
     tpl = Path(a.template).resolve()

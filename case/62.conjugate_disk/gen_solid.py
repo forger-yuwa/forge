@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""V-ax2b 同軸円板の固体 ($x\in[H, H+t]$、$r\in[r_1, r_2]$) を作る。
 
-plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/active/boundary-cht-axisymmetric-fem2d.md) §6 V-ax2b の格子
+plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/accepted/boundary-cht-axisymmetric-fem2d.md) §6 V-ax2b の格子
 (事前固定、plan レビュー M5): 固体は **$x$ 方向 16 層 × $r$ 方向 $N_r$** (界面節点は流体の壁節点と一致)、
 **四角形は左下→右上の対角**で 2 三角形 (`gen_solid_strip.py` の規則)。
 

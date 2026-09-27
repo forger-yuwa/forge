@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""V-ax2 同心円環の固体殻 (r_b ≤ r ≤ r_c) を作る。
 
-plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/active/boundary-cht-axisymmetric-fem2d.md) §6 V-ax2
+plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/accepted/boundary-cht-axisymmetric-fem2d.md) §6 V-ax2
 「固体格子の登録」: `gen_solid_strip.py` の規則 — **$y$ を降順に並べ** (行 j=0 が外面 $r_c$、j=n_s が界面 $r_b$)、
 **各セルで同じ対角 (左上→右下)**。界面節点は**乾式 1 step の壁ダンプ** (`res_wall_outer_4_1.h5`) から取り、
 流体の壁節点と 1 対 1 (角節点の physID 所属を推測しない。case/58 と同じ)。界面の並び i は $x$ 昇順。

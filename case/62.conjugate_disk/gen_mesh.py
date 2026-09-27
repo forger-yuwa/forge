@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""V-ax2b 同軸円板の流体メッシュ (子午面、node・全四角)。
 
-plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/active/boundary-cht-axisymmetric-fem2d.md) §6 V-ax2b。
+plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/accepted/boundary-cht-axisymmetric-fem2d.md) §6 V-ax2b。
 
     r=r_2=20 mm ┌──────────┐ side_r2 (physID 2, slip)
                 │ 静止ガス  │

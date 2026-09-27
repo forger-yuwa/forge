@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""V-ax2b 同軸円板 (ソルバ内連成、半径が変わる界面の局所整合) の合否を当てる。
 
-plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/active/boundary-cht-axisymmetric-fem2d.md) §6 **V-ax2b**。
+plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/accepted/boundary-cht-axisymmetric-fem2d.md) §6 **V-ax2b**。
 **閾値・解析解は登録値を引数の既定に固定してあり、結果を見て動かさない**。
 
 ## 解析解 (解は $x$ の 1 次関数で $r$ に依らない)

@@ -9,7 +9,7 @@
   - [`methods/boundary.md`](../../methods/boundary.md) — slip / 等温壁 (node)
   - [`notes/investigations/node-slip-tangential-density-spurious-flow.md`](../../notes/investigations/node-slip-tangential-density-spurious-flow.md) — **既知の未修正欠陥**: node slip 境界 + 接線密度勾配で市松状の偽接線流
 - **related_plans**:
-  - [`boundary-cht-axisymmetric-fem2d.md`](boundary-cht-axisymmetric-fem2d.md) — **発注元**。§6 V-ax2b の非一様格子がこの障害で未達 (§5.1 #6)
+  - [`boundary-cht-axisymmetric-fem2d.md`](../accepted/boundary-cht-axisymmetric-fem2d.md) — **発注元**。§6 V-ax2b の非一様格子がこの障害で未達 (§5.1 #6)
   - [`axisymmetric-freestream-hoop-gauge.md`](axisymmetric-freestream-hoop-gauge.md) — hoop ソースの自由流保持 (pRef ゲージ・閉包面積)
   - [`discretization-node-boundary-ghostless.md`](discretization-node-boundary-ghostless.md) — slip の作り直し予定 (既知欠陥の恒久修正先)
 - **created**: `2026-09-27`

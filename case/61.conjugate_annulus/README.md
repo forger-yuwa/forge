@@ -1,6 +1,6 @@
 # 61. 同心円環の軸対称 CHT (V-ax2 — 円筒殻の対数抵抗との照合)
 
-計画: [`plans/active/boundary-cht-axisymmetric-fem2d.md`](../../plans/active/boundary-cht-axisymmetric-fem2d.md) §6 **V-ax2** (§5.1 #5)。
+計画: [`plans/accepted/boundary-cht-axisymmetric-fem2d.md`](../../plans/accepted/boundary-cht-axisymmetric-fem2d.md) §6 **V-ax2** (§5.1 #5)。
 case/52 (1 次元静止ガスの CHT) の軸対称版。**判定基準・パラメータは plan §6 V-ax2 の登録文そのまま**で、本 README は
 入力の作り方と数値設定の理由だけを書く。
 
@@ -54,9 +54,9 @@ run 名は親が決める。以下は案。
 
 | run (案) | 目的 | 生成コマンド |
 | --- | --- | --- |
-| `run_0003_annulus_r32s16` | **V-ax2 本体** (流体 32×4・固体 16 層) | `python3 make_run.py cht run_0003_annulus_r32s16 --mesh mesh/annulus_r32_x4.h5 --solid mesh/solid_s16_x4.h5` |
+| `run_0003_annulus_r32s16` (合格構成は `warmup` 20000 の `run_0005_annulus_r32s16_w20k`) | **V-ax2 本体** (流体 32×4・固体 16 層) | `python3 make_run.py cht run_0003_annulus_r32s16 --mesh mesh/annulus_r32_x4.h5 --solid mesh/solid_s16_x4.h5` |
 | `run_0004_annulus_r16s16` | 流体感度 (半径 16) | `python3 make_run.py cht run_0004_annulus_r16s16 --mesh mesh/annulus_r16_x4.h5 --solid mesh/solid_s16_x4.h5` |
-| (保留) | 固体感度 8 / 16 / 32 層 × 軸方向を同率 | **下の「保留」参照 — 系列の組み方が決まるまで作らない** |
+| `run_0009_annulus_r32x2s8_w20k` / `run_0010_annulus_r32x8s32_w20k` / `run_0011_annulus_r32x4s32_w20k` | **連成格子感度** (plan §6 V-ax2 再登録: 流体 32×{2,4,8}・固体 {8,16,32}×{2,4,8}) と**交差条件 B** (流体 32×4・固体 32×4) | `python3 gen_mesh.py --nr 32 --nax {2,8}` → 乾式 `run_0007`/`0008` → `python3 gen_solid.py --wall <乾式>/res_wall_outer_4_1.h5 --ns {8,32}` → `python3 make_run.py cht <run> --mesh mesh/annulus_r32_x{2,8,4}.h5 --solid mesh/solid_s{8_x2,32_x8,32_x4}.h5` (結果は下の run 一覧) |
 
 判定 (各 run の終了後):
 

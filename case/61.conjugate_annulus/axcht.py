@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""軸対称 CHT 検証 (case/61 同心円環・case/62 同軸円板) の共通部品。
 
-plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/active/boundary-cht-axisymmetric-fem2d.md) §6 V-ax2 / V-ax2b。
+plan [`boundary-cht-axisymmetric-fem2d.md`](../../plans/accepted/boundary-cht-axisymmetric-fem2d.md) §6 V-ax2 / V-ax2b。
 case/62 もこのファイルを import する (幾何だけが違い、手順と判定の作法は同じ)。
 
 - 流体メッシュ: gmsh (.geo → msh4.1) → `convertGmshToForge` (node) → **静止・一様 IC をパッチ** (case/52 と同じ作法。
