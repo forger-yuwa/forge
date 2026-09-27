@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `thermophysics`
-- **status**: `draft`
+- **status**: `in_progress`
 - **related_docs**:
   - [`methods/thermophysics.md`](../../methods/thermophysics.md) (種 DB・擬似種・モル分率入力の現在仕様)
   - [`methods/condensation.md`](../../methods/condensation.md) (§潜熱 L(T)、§L(T) が液相の熱力学を決めている)
@@ -166,7 +166,7 @@ physProp:
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | 1 | ~~plan 段 codex レビュー~~ | 完了 2026-09-27 (GO-with-changes, C0/M7/m1, 全件採用 → §2・§3・§4・#2–#11・§6 に反映; §6.1) | O |
-| 2 | 仕様文書の先行更新 | 実装前に `methods/thermophysics.md` へ resolver・canonical ID と alias・記録スキーマ (res 属性のハッシュ)・区間可変の評価・lump の拡散制約の仕様を書く (codex m8; AGENTS.md 開発フロー) | O |
+| 2 | ~~仕様文書の先行更新~~ | 完了 2026-09-27: `methods/thermophysics.md` §1b (共通データ・canonical ID・lump の起動時合成・輸送展開と Blanc・解決済み記録と内容照合) | O |
 | 3 | 保存場に結び付いた記録と全入口の照合 (最初の一歩) | §4.3。`forge_species.py` の内容比較化、ソルバの記録出力と res 属性、起動前解決、全入口の照合。合格は §6 V1 | O |
 | 4 | 共通データ化 (値は変えない) | §4.1。canonical ID・alias・相・利用可否・LJ の有無を持つ表。現行内蔵 7 種 + `SPECIES_NASA9` 11 種を移す (値はそのまま)。合格: 移行前後で全種の係数・MW・区間が**ビット一致** (内蔵と SPECIES_NASA9 の差は差として記録)、`CO`/`Co` を別種として解決、LJ 無し種を輸送に使うと拒否 | O |
 | 5 | CEA 直読みとの差・20000 K 区間 | H2O MW・AR 高温 a0 の寄せ先、LJ の出典、6000–20000 K 区間を有効にするか。値を変えるなら case/44 と #6 の小型ケースの報告量変化を記録 | F |

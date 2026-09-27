@@ -187,6 +187,52 @@ $$ \mathbf{q} = -k\,\nabla T + \sum_i h_i(T)\,\mathbf{J}_i. $$
 
 > 衝突積分の近似式 ($\Omega^{(2,2)*},\Omega^{(1,1)*}$) は Neufeld et al. (1972) 閉形式 (§5c)。理論的背景と全参考文献は 本ドキュメントの「理論」節 を参照。
 
+### 1b. 化学種 DB の解決・lump・記録 — 移行中の仕様 (plan [`thermophysics-solver-owned-species-db`](../plans/active/thermophysics-solver-owned-species-db.md))
+
+> **状態 (2026-09-27)**: 本節は実装前に確定させた仕様 (plan §5.1 #2)。実装済みの項目は各小節に「実装済み」と書く。未記載の項目は現行 (上の「DB 構築・アップロード」、設計側が合成した `species_db.yaml` を `speciesDBFile` で渡す) のまま動いている。
+
+#### 1b.1 熱物性の正本 (共通データ)
+
+- ソルバ配布物に **CEA `thermo.inp` (McBride–Gordon 2002) 由来の全種表**を置き、C++ (ソルバ・変換器) と Python (設計・後処理) が同じファイルを読む。
+  ファイルは版と `thermo.inp` の SHA-256 を持つ。LJ パラメータ (CEA に無い) は出典付きで同じファイルに持つ。
+- 各エントリ: **canonical ID** (CEA の表記、大小文字を区別; 例 `CO` と `Co` は別種)、別名 (明示的な alias 表; `AR`→`Ar`, `WATER`→`H2O` など)、**相** (gas / condensed)、
+  MW、生成エンタルピー、**温度区間の列** (区間数可変、各区間 NASA-9 の 9 係数)、LJ (無ければ「輸送データなし」)、元素組成 (`atoms`; 診断用)。
+- 使用時の拒否: 凝縮相を気相 EOS に使う、LJ の無い種を粘性・熱伝導・拡散に使う。LJ の仮置き (N2 相当) はしない。
+- 現行の `AIR` (cp/R 3.5 一定) は CEA の `Air` と別の互換擬似種として残す。
+- 外部 DB (`speciesDBFile`) による上書き・追加は残す。凝縮 ON のとき、凝縮種の気相エントリを気液ペアの基準が確認できない外部 DB で上書きすることは拒否する。
+
+#### 1b.2 lump (擬似種) の指定と起動時合成
+
+```yaml
+physProp:
+  species:
+    - {name: MIXDRY, lump: {N2: 0.708873, O2: 0.230376, AR: 0.00850387, CO2: 0.0522474}, basis: mole}   # basis: mole | mass
+    - H2O
+```
+
+- lump の中身は構成種と分率 (モル基準または質量基準、lump 内で正規化) で書く。係数はソルバが起動時に合成する。
+- **区間**: 構成種の全区切り温度の和集合で区間を分け、区間ごとに NASA-9 係数を lump 内モル分率 $x_k$ で線形結合する
+  ($c_p/R$, $h/(RT)$, $s/R$ は係数について線形なので、固定組成なら構成種の和と厳密に一致)。端の外挿 (定 $c_p$) も区間として表す。
+- **datum** (`thermoHrefTemp`) は全区間に適用する。float 表 (`SpeciesThermoF`) も同じ区間表から作る。区切り温度での既存の段差 (例: 1000 K で H2O 0.019 J/kg) は保持し、合成・datum で増やさない。
+- 凝縮種は lump に入れられない (独立種として置く)。
+- 上限は「輸送種数」「lump 展開後の実種数」「区間数」を別々に定数で持ち、超過は起動時に拒否する。
+- 起動ログに lump の中身・MW・区間・参照温度での $c_p$, $h$ を出す。
+
+#### 1b.3 lump の輸送物性
+
+- 粘性・熱伝導: lump を構成実種へ展開し、全実種で Wilke / Mason–Saxena 混合を評価する (平均 LJ の擬似分子は使わない)。
+- 化学種拡散 (混合平均): lump の外の種 $i$ と lump の二元係数を Blanc の法則 $1/D_{i,\mathrm{lump}}=\sum_{j\in\mathrm{lump}} x_j/D_{ij}$ で作る。
+  lump 同士・構成実種が重なる場合の式は plan §4.4 で確定してから実装する。補正後の流束は `full` と厳密には一致しない (lump 内組成固定の近似誤差)。
+
+#### 1b.4 解決済み記録と内容照合
+
+- ソルバは使用した全種 (内蔵種・外部 DB・lump とその構成実種を含む) の**解決済み物性**を run ディレクトリへ出力する: 種の順序、canonical ID、出所、MW、区間と係数、LJ、datum、
+  lump の構成と分率、共通データの版とハッシュ。これは**出力 (記録)** であり入力ではない。
+- 記録の正規化した内容から **species ハッシュ** (SHA-256) を作り、記録は `resolved_species_<hash>.yaml` として上書きせずに保存する。**各 `res_*.h5` の属性**にハッシュを書く。
+- 照合は内容 (ハッシュと差分の項目) で行う。`source` (builtin / file) で比較を省略しない。過去の run の署名を現在の内蔵表から作り直さない。
+- 照合する入口: ソルバの `valueFileName` 読み込み、同一メッシュ restart (`restart_field.py`)、補間 (`interp_field.py`)、種変換 (`convert_species_field.py`)、設計 runner の段間引き継ぎ・warm start。
+  不一致は差のある項目 (種・係数) を示して拒否する。ハッシュ属性の無い旧い場は「照合不能」とし、明示的に許可したときだけ通す。
+
 ### 2. 従属変数と温度反転 `cuda_forge/dependentVariables_d.cu`
 
 `dependentVariables_d` に `thermalMethod`・化学種ポインタ・`gam_array/cp_array` を追加。`thermalMethod==2` では:
