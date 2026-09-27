@@ -609,7 +609,18 @@ void initSolidFem2d(const solverConfig& cfg, const mesh& msh, const bcond& bc)
             {
                 const std::string geoNow = stateGeometry(st.mesh), unitNow = stateLoadUnit(st.mesh);
                 const bool hasGeo = f.hasAttribute("geometry");
-                if (!hasGeo) {
+                const bool hasUnit = f.hasAttribute("load_unit");
+                const bool hasCon = f.hasAttribute("state_contract");
+                // **旧状態として受理するのは「3 属性すべて無い、かつ平面」だけ** (codex result 2026-09-27 M1)。
+                // 部分欠落 (例: geometry だけ無く load_unit=W/rad が残る) を旧状態扱いすると、
+                // 単位の違う荷重履歴 SOLID/QBUF を平面として復元しうる。
+                if (!hasGeo || !hasUnit || !hasCon) {
+                    if (hasGeo || hasUnit || hasCon) {
+                        std::cerr << "[conjugateWall] ERROR: " << stateFile << " の識別属性が一部だけある (geometry "
+                                  << (hasGeo ? "有" : "無") << " / load_unit " << (hasUnit ? "有" : "無")
+                                  << " / state_contract " << (hasCon ? "有" : "無") << ")。壊れた状態として再開しない。\n";
+                        exit(EXIT_FAILURE);
+                    }
                     if (st.mesh.axisym) {
                         std::cerr << "[conjugateWall] ERROR: " << stateFile << " に geometry 属性が無い (旧状態)。"
                                      "軸対称 (" << geoNow << ") では平面 [W/m] の状態と区別できないので再開しない。\n";

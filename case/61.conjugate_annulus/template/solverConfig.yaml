@@ -40,7 +40,7 @@ conjugate:
   mode: fem2d
   solid: solid.h5
   flux: q_eff
-  warmup: 200             # case/52 と同じ。IC 325 K は T_w* 323.58 K に近く、最初の荷重は小さい
+  warmup: 20000           # 合格構成 (2026-09-27)。200 は壁温が下がってから上がる静止ガスの過渡を発散検知が誤検知した (README の run 一覧)
   interval: 50            # case/52・case/58 の基準 (K = 50)
   flux_avg: 1             # 静止ガスに周期振動は無い
   Df_scale: 5.0           # case/58 V6′ の合否 run (df5_i50) と同じ。収束は遅くなるが nStepOuter で吸収する

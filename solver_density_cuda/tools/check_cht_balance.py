@@ -93,6 +93,11 @@ def _state_geometry(state, run_isax, run_meth):
         con = fs.attrs.get("state_contract")
     dec = (lambda v: v.decode() if isinstance(v, bytes) else (None if v is None else str(v)))
     geo, unit = dec(geo), dec(unit)
+    present = [x is not None for x in (geo, unit, con)]
+    if any(present) and not all(present):
+        # 部分欠落は旧状態として扱わない (codex result 2026-09-27 M1。C++ の再開と同じ規則)
+        return False, (f"{state.name} の識別属性が一部だけある (geometry={geo!r}, load_unit={unit!r}, "
+                       f"state_contract={con!r})。壊れた状態として判定しない")
     if geo is None:
         if run_isax == 1:
             return False, (f"{state.name} に geometry 属性が無い (旧状態) のに run の solverConfig は軸対称。"
