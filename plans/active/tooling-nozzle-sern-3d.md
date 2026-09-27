@@ -1935,7 +1935,7 @@ R5o-chi の手順どおり切り分けはしない。**新しい列 (g1 `run_097
 | **R5m** | **AR を下げる道の費用を測る (codex plan-2 M6)**。生産条件で `cowl_in` を y⁺ 0.7 にするには `first_wall_frac` 1.6e-04 → **2.3e-05** が要り、AR は 4213 → **~29000**。AR は最長辺/最短辺なので、**遠方の長辺 (下バンドの最粗 y 刻み 1.9–2.3 H、外側 z 0.77 H) を割れば下がる**。節点数と RAM の費用を測り、y⁺≈1 が現実的かを数値で決める。測るまで「不可能」とは言わない | ローカルの AR プローブ (`probe_ar.py` 相当) で先に見積もる |
 | ~~R5l~~ | **完了 (2026-09-20, §4.38)**: `check_wall_resolution.py` が多成分で判定不能になる件を、体積出力の `vis_lam` を優先使用する形で解消。CPG 回帰は一致 | `solver_density_cuda/tools/check_wall_resolution.py` |
 
-| **R5j** | **カウル側端テーパを格子から独立させる (M5)**。`kt = max(k_sw - 2, 0)` が「最後の 2 z-セル」で物理幅を決めており、`nz_in` 25→57 で **0.868 mm → 0.00949 mm (91 倍)**。物理入力に移し、**粗細で輪郭と面積が一致する試験**を足す。有限厚後縁を入れるとベース面積にも及ぶ | `mesh_sern3d.py` L198–206 / `run_sern_mesh3d_tests.py` |
+| ~~**R5j**~~ (**重複行を閉じる 2026-09-27**: 上の行のとおり 2026-09-21 に R5q へ統合済みで、R5q は全ヘキサ接続模型の plan [`tooling-sern-mesh-blocking.md`](tooling-sern-mesh-blocking.md) に移管されている。**現行メッシャ `mesh_sern3d.py` には `sz` テーパが残る**が、生産の格子列 g1–g4 は `nz_in` がすべて 25 なのでテーパ幅は列の中で一定 (格子収束の判定 §4.46 には交絡しない)。`nz_in` を変える比較をするときだけ効く) | **カウル側端テーパを格子から独立させる (M5)**。`kt = max(k_sw - 2, 0)` が「最後の 2 z-セル」で物理幅を決めており、`nz_in` 25→57 で **0.868 mm → 0.00949 mm (91 倍)**。物理入力に移し、**粗細で輪郭と面積が一致する試験**を足す。有限厚後縁を入れるとベース面積にも及ぶ | `mesh_sern3d.py` L198–206 / `run_sern_mesh3d_tests.py` |
 | ~~R5k~~ | **完了 (2026-09-20)**: `sern_gates.py::_solver_floors` が経路を見ずに温度下限を一律 50 K にしていたのを、`thermalMethod`/`condensation` を見て CPG は `tMin` (既定 1e-4 K)、TP/凝縮だけ `DEPVAR_TMIN` 50 K にする形へ修正。`run_0415` が `FLOOR_STUCK` → **`GATES: PASS`** | `design/forge_design/metrics/sern_gates.py` |
 
 | R5c | ~~SST 壁関数の壁モデル渦粘性に上限~~ **優先度低下 (2026-09-20)**: 壁関数を使わない方針になったため。欠陥の記録は §4.25 に残す。将来 `wallTreatmentSST: 1` を復活させるなら必須 |
