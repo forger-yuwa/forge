@@ -22,7 +22,10 @@ SRC/VALUE に同名があればその値をそのまま書き、無ければ DST
 (`species_hash` ほか) と SRC の隣の解決済み記録 (完全性ハッシュ再計算) を検証し、宛先 run (`--dst-run`, 既定は DST の隣) を
 `forge --resolve-species` (`--forge` / `FORGE_BIN`) で解決して互換性ハッシュが一致したときだけ属性を DST に継承する
 (記録も DST の隣へ複製)。不一致は差のある係数を示して**書き込まずに停止** (`--force-species` で属性なしのまま通す)。
-SRC が未検証 (属性なし / `species_input_unverified=1`) なら DST の属性を消す (宛先のハッシュで埋めない)。CPG は対象外。
+SRC が未検証 (属性なし / `species_input_unverified=1`) で宛先が TP (または solverConfig.yaml が無く判定できない) とき・
+宛先を解決できない (旧バイナリ) ときは**既定で書き込まずに停止** (ソルバと同じ規約, #3c)。許可はその実行だけの
+`FORGE_ALLOW_UNVERIFIED_SPECIES=1` か `--force-species` で、そのとき DST の属性は消す (宛先のハッシュで埋めない;
+ソルバ側でも未検証として扱われ、その run にも同じ許可が要る)。CPG は対象外。
 """
 import argparse, os, sys
 import h5py

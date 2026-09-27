@@ -10,7 +10,6 @@ seed run の中身は読むだけで書かない (h5 もリンクせず複製す
 
   (0)  旧場 (属性なし) → 既定で「照合不能」(UNVERIFIABLE) で停止 (非ゼロ終了)。エラー文が IC の作り直しと
        その実行だけの FORGE_ALLOW_UNVERIFIED_SPECIES=1 の 2 通りを案内する (#3c: 既定を厳密へ切り替え)
-  (0t) 撤去した過渡期の環境変数 FORGE_REQUIRE_VERIFIED_SPECIES=0 を立てても停止する (既定を緩める手段が残っていない)
   (0e) 旧場 + FORGE_ALLOW_UNVERIFIED_SPECIES=1 → 通る。res (境界出力を含む) に species_hash / species_record_sha256 /
        species_record_file / species_input_unverified=1、記録ファイルが run に書かれ、Python の再計算 (load_record) と一致
   (R)  `forge --resolve-species` の標準出力最終行 = ソルバ起動時の species_hash
@@ -74,8 +73,11 @@ class Case:
             src = os.path.join(self.a.seed_run, fn)
             if os.path.exists(src):
                 shutil.copy(src, d)
+        # 保存量の複製だけに使う (属性は各試験が stamp() で明示的に書く)。seed の旧場・(0e) の res は未検証なので、#3c 以降の
+        # restart_field は既定で停止する → その実行だけ FORGE_ALLOW_UNVERIFIED_SPECIES=1 で写す (検証済みの SRC なら従来どおり継承)
+        env = dict(os.environ, FORGE_ALLOW_UNVERIFIED_SPECIES="1")
         p = subprocess.run([sys.executable, os.path.join(TOOLS, "restart_field.py"), seed_res or os.path.join(self.a.seed_run, self.a.seed_res),
-                            os.path.join(d, "nozzle.h5")], capture_output=True, text=True)
+                            os.path.join(d, "nozzle.h5")], capture_output=True, text=True, env=env)
         if p.returncode != 0:
             raise SystemExit(f"restart_field failed: {p.stdout}{p.stderr}")
         cfgp = os.path.join(d, "solverConfig.yaml")
@@ -97,7 +99,6 @@ class Case:
         env = dict(os.environ)
         env.setdefault("FORGE_CUDA_BLOCKSIZE", "256")
         env.pop("FORGE_ALLOW_UNVERIFIED_SPECIES", None)
-        env.pop("FORGE_REQUIRE_VERIFIED_SPECIES", None)
         if allow:
             env["FORGE_ALLOW_UNVERIFIED_SPECIES"] = "1"
         env.update(extra_env or {})
@@ -143,11 +144,6 @@ def main():
         check("regenerate the initial field" in out and "FORGE_ALLOW_UNVERIFIED_SPECIES=1" in out
               and "THIS invocation only" in out and "Allowed for this invocation" not in out,
               "(0) the error names both remedies (regenerate the IC / allow this invocation only) and does not claim it was allowed")
-        # (0t) 撤去した過渡期の環境変数では緩まない (#3c 以前は FORGE_REQUIRE_VERIFIED_SPECIES が無ければ警告で通っていた)
-        dt = C.make("old_removed_env")
-        rc, out = C.run(dt, extra_env={"FORGE_REQUIRE_VERIFIED_SPECIES": "0"})
-        check(rc != 0 and "UNVERIFIABLE" in out and not os.path.exists(os.path.join(dt, "res_1.h5")),
-              f"(0t) FORGE_REQUIRE_VERIFIED_SPECIES=0 (removed) does not relax the default -> still stops (rc={rc})")
         # (0e) 旧場 + env
         d1 = C.make("old_env")
         rc, out = C.run(d1, allow=True)

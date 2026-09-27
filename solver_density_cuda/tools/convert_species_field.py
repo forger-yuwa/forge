@@ -38,7 +38,8 @@ plans/active/thermophysics-cea-mole-fraction-species.md §2 (forge 本体) / §4
 - **化学種の属性** (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3b): 入力が属性と検証できる記録を持つときは、
   記録の完全性・SRC run の設定を `forge --resolve-species` で解決したハッシュ = 場の属性、を確かめ、宛先 run を解決して
   変換器が使う宛先の物性 (forge_species.run_thermo の熱物性 + datum) が宛先の記録と一致することを確かめてから、**変換の成功後に宛先のハッシュを付ける**。
-  入力が未検証 (属性なし / `species_input_unverified=1`) なら変換後も未検証 (属性なし)。`--force-species` で検証失敗を無視 (属性なし)。
+  入力が未検証 (属性なし / `species_input_unverified=1`)・宛先を解決できないときは**既定で書き込まずに停止** (ソルバと同じ規約, #3c)。
+  許可はその実行だけの `FORGE_ALLOW_UNVERIFIED_SPECIES=1` か `--force-species` で、そのとき変換後も未検証 (属性なし)。
 - SRC: res_*.h5 (原始量 P,T,Ux,.. + Y{s}) か input h5 (保存量 roY{s})。DST: 同一メッシュ・同一 CV 数の input h5。
   ro/roU/roe/roK/roOmega・凝縮モーメント `rog_*/roQ*_*` (凝縮種が同名のとき) も index コピーする。
 - 両 run dir (`--src-run/--dst-run` 省略時は h5 の隣) の `solverConfig.yaml` と熱物性 (ソルバの記録 `resolved_species_*.yaml`、

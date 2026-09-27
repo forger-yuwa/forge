@@ -700,11 +700,18 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
         # 作動点適用後の組成で擬似種を作る (prepare_info の problem は作動点未適用の YAML なので op を再選択)
         pd_ = load_problem(di["problem"]); select_operating_point(pd_, di["operating_point"]["name"]); gases_d = frozen_gases(pd_)
     # 化学種の属性 (§4.3「種変換」と同じ扱い): roe は目標作動点の物性で作り直すので、入口 (元 res) が検証済みなら
-    # 書き込み後に宛先の記録と照合して付ける。元が未検証なら宛先も未検証 (属性なし)。記録が壊れていれば止める
+    # 書き込み後に宛先の記録と照合して付ける。記録が壊れていれば止める。元が未検証で宛先が TP なら既定で止める
+    # (ソルバと同じ規約, #3c); その実行だけ FORGE_ALLOW_UNVERIFIED_SPECIES=1 で許可したときは宛先も未検証 (属性なし)
     fsp = _forge_species()
     src_state = fsp.source_species_state(res[-1])
     if src_state["state"] == "broken":
         raise ValueError(f"warm_from_run: 元 res の化学種記録を検証できない (照合不能): {src_state['why']}")
+    if gases_d is not None and src_state["state"] in ("none", "unverified"):
+        try:
+            fsp.refuse_unverified("warm_from_run", f"SRC {res[-1]} is unverified ({src_state['why']}) and destination "
+                                                   f"{dst_run_dir} is thermally perfect (frozen_tp)")
+        except fsp.SpeciesCheckError as e:
+            raise ValueError(f"warm_from_run: {e}") from None
     fsp.write_species_attrs(dst_run_dir / MESH, None)
     with h5py.File(res[-1], "r") as src, h5py.File(dst_run_dir / MESH, "r+") as dst:
         n = len(dst["VALUE/ro"])

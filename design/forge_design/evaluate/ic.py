@@ -125,6 +125,8 @@ def stamp_isentropic_ic_species(h5path, run_dir, gas, h_ref_T, species: list, sp
     宛先 run_dir を `forge --resolve-species` で解決し、IC に使った datum (`h_ref_T`)・輸送種の順序 (`species`)・
     組成を作るのに使った MW (`species_MW`)・内部エネルギー式 (`_ic_e_int` と gas.R) が宛先の記録と一致したときだけ
     属性 (`species_input_unverified=0`) を付ける。一致しなければ属性を付けずに `forge_species.SpeciesCheckError`。
+    宛先を解決できない (--resolve-species を持つ forge が無い) ときも既定で SpeciesCheckError (#3c; その実行だけ
+    FORGE_ALLOW_UNVERIFIED_SPECIES=1 なら属性なしで 'unverified')。
     IC の書き込み (と壁速度 0 化など同じ物性での後処理) が終わってから呼ぶ。戻り値: 'verified' | 'cpg' | 'unverified'。"""
     fs = _forge_species()
     Y = list(species_Y) if species_Y is not None else [1.0]

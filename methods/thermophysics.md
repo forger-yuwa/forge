@@ -255,6 +255,12 @@ physProp:
 - 照合は内容 (ハッシュと差分の項目) で行う。`source` (builtin / file) で比較を省略しない。過去の run の署名を現在の内蔵表から作り直さない。
 - 照合する入口: ソルバの `valueFileName` 読み込み、同一メッシュ restart (`restart_field.py`)、補間 (`interp_field.py`)、種変換 (`convert_species_field.py`)、設計 runner の段間引き継ぎ・warm start。
   不一致は差のある項目 (種・係数) を示して拒否する。ハッシュ属性の無い旧い場は「照合不能」とし、明示的に許可したときだけ通す。
+- 既定は**ソルバとツールで同じ** (2026-09-27, plan #3c): 未検証の場 (属性なし / `species_input_unverified=1`)・宛先を解決できない
+  (`forge --resolve-species` を持つバイナリが無い)・記録が壊れている、のいずれも既定で停止する。許可はその実行だけの環境変数
+  `FORGE_ALLOW_UNVERIFIED_SPECIES=1` (未検証・解決不能のみ; ツールでは加えて明示フラグ `--force-species`) で、config キーによる恒常的な許可は無い。
+  ツールが許可して書いた場には属性を付けない (宛先のハッシュで埋めない) ので、その場を読むソルバは再び「照合不能」とし、同じ許可を要する。
+  ソルバ自身が許可して書いた出力は `species_input_unverified=1` を持ち、その出力からの**ソルバの直接の restart** は許可なしで通る
+  (未検証の印を継承)。ツール経由の継承は印付きの場も未検証として停止する。
 
 ### 2. 従属変数と温度反転 `cuda_forge/dependentVariables_d.cu`
 

@@ -44,7 +44,9 @@ Python:
   stamp_new_field(h5, run_dir, names, MW, h_ref_T, mixtures)   # 新規初期場: IC の datum・順序・MW・e(T) が記録と一致したら付与
   plan_inherit(src_h5, dst_run_dir) / commit_inherit(dst_h5, plan)   # restart・補間: SRC の記録を検証し宛先と一致なら継承
   plan_convert(src_h5, dst_run_dir)   # 種変換: 入力を検証し、変換後に変換先のハッシュを付ける
-  未検証の SRC (属性なし / species_input_unverified=1) からは DST の属性を消す (宛先のハッシュで埋めない)。
+  未検証の SRC (属性なし / species_input_unverified=1)・宛先を解決できない (旧バイナリ・solverConfig.yaml なし) は
+  **既定で停止** (ソルバと同じ規約, #3c)。許可はその実行だけの FORGE_ALLOW_UNVERIFIED_SPECIES=1 か --force-species で、
+  許可して通したときは DST に属性を付けない (宛先のハッシュで埋めない; ソルバ側で未検証として扱われる)。
 
 YAML の注意: 種名 `NO` / `N` / `Y` は PyYAML の既定では真偽値になる (design チェーンの古い config は無引用)。
 本モジュールの `load_yaml_str` は真偽値の暗黙解決を外した SafeLoader で読むので `NO` は文字列のまま。
@@ -588,8 +590,10 @@ def compare_signatures(a, b, mw_rtol=1e-9, coef_rtol=1e-12):
 #   新規初期場 (IC 生成)        : stamp_new_field — 宛先を --resolve-species で解決し、IC に使った datum・種順序・MW・
 #                                 エネルギー式が記録と一致したときだけ付ける (一致しなければ属性を付けずに SpeciesCheckError)
 #   コピー・restart・補間        : plan_inherit — SRC の属性と記録 (完全性ハッシュ再計算) を検証し、宛先の互換性ハッシュと
-#                                 一致したときだけ継承。SRC が未検証なら DST の属性を消す (宛先のハッシュで埋めない)
-#   種変換                      : plan_convert — 入力を検証し、変換の成功後に変換先のハッシュを付ける (入力が未検証なら未検証のまま)
+#                                 一致したときだけ継承。SRC が未検証・宛先を解決できないときは既定で停止し (#3c)、
+#                                 許可 (FORGE_ALLOW_UNVERIFIED_SPECIES=1 / --force-species) したときは DST の属性を消す (宛先のハッシュで埋めない)
+#   種変換                      : plan_convert — 入力を検証し、変換の成功後に変換先のハッシュを付ける (入力が未検証なら既定で停止、
+#                                 許可したときは未検証のまま = 属性なし)
 # CPG (thermalMethod≠2) は対象外 (属性を付けない)。
 
 SPECIES_ATTRS = ("species_hash", "species_record_sha256", "species_record_file", "species_input_unverified")
@@ -604,9 +608,35 @@ class SpeciesResolveUnavailable(Exception):
     """宛先の物性を解決できない (--resolve-species 対応の forge が無い・solverConfig.yaml が無い)。"""
 
 
-def strict_species():
-    """FORGE_REQUIRE_VERIFIED_SPECIES=1 (最終方針の先取り): 検証できない状態を警告でなく停止にする。"""
-    return os.environ.get("FORGE_REQUIRE_VERIFIED_SPECIES", "") == "1"
+ALLOW_UNVERIFIED_ENV = "FORGE_ALLOW_UNVERIFIED_SPECIES"
+
+
+def allow_unverified_species():
+    """FORGE_ALLOW_UNVERIFIED_SPECIES=1 (その実行だけの許可; ソルバと同じ環境変数, #3c)。
+    未検証の SRC・宛先を解決できない状態を停止でなく警告にする (不一致・記録の破損は通さない)。"""
+    return os.environ.get(ALLOW_UNVERIFIED_ENV, "") == "1"
+
+
+UNVERIFIED_GUIDANCE = (
+    "  Either:\n"
+    "  (1) regenerate the initial field with a generator that stamps species attributes (it resolves the run with "
+    "forge --resolve-species; give a new binary by --forge or FORGE_BIN), or copy/restart from a stamped field, or\n"
+    "  (2) if you have checked that the field was produced with the same species/datum as the destination, allow it for THIS "
+    "invocation only:  FORGE_ALLOW_UNVERIFIED_SPECIES=1 <tool>   (the destination is written WITHOUT species attributes, "
+    "so the solver run on it also needs FORGE_ALLOW_UNVERIFIED_SPECIES=1).\n"
+    "  If the species set/DB changed, convert the field with tools/convert_species_field.py instead.")
+
+
+def refuse_unverified(tool, msg, force=False):
+    """未検証・解決不能の状態: 既定は SpeciesCheckError (案内 2 通り付き)。FORGE_ALLOW_UNVERIFIED_SPECIES=1 か
+    force (--force-species) なら警告して戻る (呼び出し側は属性を付けずに通す)。"""
+    if allow_unverified_species() or force:
+        how = "FORGE_ALLOW_UNVERIFIED_SPECIES=1" if allow_unverified_species() else "--force-species"
+        print(f"[{tool}] WARNING: {msg}. Allowed for this invocation by {how}; destination written WITHOUT species attributes "
+              "(the solver refuses it unless FORGE_ALLOW_UNVERIFIED_SPECIES=1 is set for that invocation, "
+              "which marks outputs species_input_unverified=1)")
+        return
+    raise SpeciesCheckError(f"{msg}: UNVERIFIED. Refusing (nothing written).\n" + UNVERIFIED_GUIDANCE)
 
 
 def _repo_root():
@@ -773,21 +803,26 @@ def _record_diff(src_rec, dst_rec):
     return bad
 
 
-def _unverified_note(tool, dst_run_dir, why):
+def _check_unverified_src(tool, src_h5, dst_run_dir, st, force=False):
+    """SRC が未検証 (属性なし / species_input_unverified=1) のとき: 宛先が TP (thermalMethod 2) か、solverConfig.yaml が無く
+    CPG か判定できないなら既定で停止 (refuse_unverified)。宛先が CPG なら属性の対象外なので黙って通す。"""
     tm = _config_thermal_method(dst_run_dir) if dst_run_dir else None
-    if tm == 2:
-        print(f"[{tool}] species: SRC is unverified ({why}); destination species attributes removed "
-              "(the solver refuses such a field unless FORGE_ALLOW_UNVERIFIED_SPECIES=1 is set for that invocation, "
-              "which marks outputs species_input_unverified=1)")
+    if tm is not None and tm != 2:
+        return
+    where = (f"destination {dst_run_dir} is thermally perfect (thermalMethod 2)" if tm == 2 else
+             f"destination {dst_run_dir} has no solverConfig.yaml (cannot tell CPG from TP; give --dst-run)")
+    refuse_unverified(tool, f"SRC {src_h5} is unverified ({st['why']}) and {where}", force)
 
 
 def plan_inherit(src_h5, dst_run_dir, forge=None, force=False, tool="restart", inplace=True):
     """コピー・restart・補間の継承判定 (書き込み前に呼ぶ)。返り値 = 書き込み後に DST へ付ける属性 (dict) か None (未検証のまま)。
-    不一致・記録の欠落は SpeciesCheckError (force=True なら警告して None = 属性を付けずに通す)。"""
+    不一致・記録の欠落は SpeciesCheckError (force=True なら警告して None = 属性を付けずに通す)。
+    SRC が未検証で宛先が TP (または判定不能)・宛先を解決できないときも SpeciesCheckError
+    (FORGE_ALLOW_UNVERIFIED_SPECIES=1 か force=True なら警告して None)。"""
     dst_run_dir = os.path.abspath(dst_run_dir)
     st = source_species_state(src_h5)
     if st["state"] in ("none", "unverified"):
-        _unverified_note(tool, dst_run_dir, st["why"])
+        _check_unverified_src(tool, src_h5, dst_run_dir, st, force)
         return None
     if st["state"] == "broken":
         msg = (f"SRC {src_h5} carries species_hash {st['attrs']['species_hash'][:16]} but its record cannot be verified: {st['why']}. "
@@ -801,10 +836,8 @@ def plan_inherit(src_h5, dst_run_dir, forge=None, force=False, tool="restart", i
     try:
         dst = resolve_species(dst_run_dir, forge, inplace=inplace)
     except SpeciesResolveUnavailable as e:
-        msg = f"cannot resolve the destination species ({e}); SRC is verified but the destination cannot be checked"
-        if strict_species():
-            raise SpeciesCheckError(msg + " (FORGE_REQUIRE_VERIFIED_SPECIES=1)")
-        print(f"[{tool}] WARNING: {msg}; destination species attributes removed (unverified)")
+        refuse_unverified(tool, f"cannot resolve the destination species ({e}); SRC is verified but the destination "
+                                "cannot be checked", force)
         return None
     if dst is None:
         msg = f"destination {dst_run_dir} is calorically perfect (thermalMethod != 2) but SRC {src_h5} is a TP field (species_hash {rec['compat_recomputed'][:16]})"
@@ -892,15 +925,14 @@ def check_ic_against_record(rec, h_ref_T, names, MW, mixtures, e_rtol=1e-9):
 def stamp_new_field(h5path, run_dir, names, MW, h_ref_T, mixtures, forge=None, tool="IC"):
     """新規初期場の属性付与 (IC 生成の直後に呼ぶ)。宛先 run_dir を --resolve-species で解決し (記録は run_dir に書かれる)、
     check_ic_against_record が空のときだけ属性 (species_input_unverified=0) を付ける。一致しなければ属性を消して SpeciesCheckError。
-    CPG は属性なし。解決できない (旧バイナリ) ときは属性なしで警告 (FORGE_REQUIRE_VERIFIED_SPECIES=1 なら停止)。返り値 = 状態文字列。"""
+    CPG は属性なし。解決できない (旧バイナリ・solverConfig.yaml なし) ときは属性を消して SpeciesCheckError
+    (FORGE_ALLOW_UNVERIFIED_SPECIES=1 なら警告して属性なしで "unverified")。返り値 = 状態文字列。"""
     run_dir = os.path.abspath(run_dir)
     try:
         dst = resolve_species(run_dir, forge, inplace=True)
     except SpeciesResolveUnavailable as e:
         write_species_attrs(h5path, None)
-        if strict_species():
-            raise SpeciesCheckError(f"[{tool}] cannot stamp the initial field: {e} (FORGE_REQUIRE_VERIFIED_SPECIES=1)")
-        print(f"[{tool}] WARNING: initial field left unverified (no species attributes): {e}")
+        refuse_unverified(tool, f"cannot stamp the initial field {h5path}: {e}")
         return "unverified"
     if dst is None:
         write_species_attrs(h5path, None)
@@ -920,10 +952,11 @@ def stamp_new_field(h5path, run_dir, names, MW, h_ref_T, mixtures, forge=None, t
 
 def plan_convert(src_h5, dst_run_dir, src_run_dir=None, forge=None, force=False, tool="convert", inplace=True):
     """種変換の判定 (書き込み前)。入力を検証し (属性・記録の完全性、SRC config を解決したハッシュ = 場の属性)、
-    変換先を解決する。返り値 = {"attrs": 付ける属性 | None, "dst": resolve 結果 | None}。入力が未検証なら attrs=None。"""
+    変換先を解決する。返り値 = {"attrs": 付ける属性 | None, "dst": resolve 結果 | None}。入力が未検証・解決できないときは
+    既定で SpeciesCheckError、FORGE_ALLOW_UNVERIFIED_SPECIES=1 か force=True なら attrs=None (属性なし)。"""
     st = source_species_state(src_h5)
     if st["state"] in ("none", "unverified"):
-        _unverified_note(tool, dst_run_dir, st["why"])
+        _check_unverified_src(tool, src_h5, os.path.abspath(dst_run_dir), st, force)
         return {"attrs": None, "dst": None}
     if st["state"] == "broken":
         msg = f"SRC {src_h5}: species record cannot be verified: {st['why']} (UNVERIFIABLE)"
@@ -937,10 +970,7 @@ def plan_convert(src_h5, dst_run_dir, src_run_dir=None, forge=None, force=False,
         srcr = resolve_species(src_run_dir, forge, inplace=False)
         dst = resolve_species(dst_run_dir, forge, inplace=inplace)
     except SpeciesResolveUnavailable as e:
-        msg = f"cannot resolve species ({e}); the converted field is left unverified"
-        if strict_species():
-            raise SpeciesCheckError(msg + " (FORGE_REQUIRE_VERIFIED_SPECIES=1)")
-        print(f"[{tool}] WARNING: {msg}")
+        refuse_unverified(tool, f"cannot resolve species ({e}); the converted field cannot be verified", force)
         return {"attrs": None, "dst": None}
     if srcr is None or srcr["hash"] != rec["compat_recomputed"]:
         diff = _record_diff(rec, srcr["record"]) if srcr else ["source run is calorically perfect"]

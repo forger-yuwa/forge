@@ -20,8 +20,10 @@
 - **化学種の属性** (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3b): SRC が属性 (`species_hash` ほか) と
   検証できる解決済み記録を持つときは、宛先 run を `forge --resolve-species` (`--forge` / `FORGE_BIN`) で解決し、互換性ハッシュが
   一致したときだけ属性を DST に継承する (記録も複製)。不一致は差のある係数を示して書き込み前に拒否。上の設定ファイルによる署名照合も
-  続けて行う (トレーサ・種の並びは記録に無いので)。SRC が未検証 (属性なし / `species_input_unverified=1`) なら DST の属性を消し、
-  署名照合で内蔵種が「照合不能」になるだけのときは警告して通す (過渡期の既定; `FORGE_REQUIRE_VERIFIED_SPECIES=1` なら拒否)。
+  続けて行う (トレーサ・種の並びは記録に無いので)。SRC が未検証 (属性なし / `species_input_unverified=1`) で宛先が TP のとき・
+  宛先を解決できない (旧バイナリ) とき・署名照合で内蔵種が「照合不能」になるときは**既定で拒否** (ソルバと同じ規約, #3c)。
+  許可はその実行だけの `FORGE_ALLOW_UNVERIFIED_SPECIES=1` か `--force-species` で、そのとき DST には属性を付けない
+  (ソルバ側でも未検証として扱われ、その run にも同じ許可が要る)。
 
 usage: interp_field.py SRC.h5 DST_input.h5 [--gamma 1.4] [--force-species] [--forge BIN] [--dst-run DIR]
 """
@@ -59,8 +61,8 @@ def check_species_signatures(src_h5, dst_h5, force, record_verified=False, dst_r
     """SRC/DST の隣の run 設定から化学種署名を作って照合する。不一致・解決不能は拒否 (force で警告に降格)。
     照合できたときは SRC 署名を返す (必須データセットの存在検査に使う)。
     内蔵種の係数が設定から分からない「照合不能」だけの場合: record_verified (記録で熱物性を照合済み) なら無視、
-    そうでなければ過渡期の既定で警告して通す (FORGE_REQUIRE_VERIFIED_SPECIES=1 なら拒否)。"""
-    from forge_species import species_signature, compare_signatures, strict_species
+    そうでなければ既定で拒否 (FORGE_ALLOW_UNVERIFIED_SPECIES=1 ならその実行だけ警告して通す; 属性は plan_inherit が付けない)。"""
+    from forge_species import species_signature, compare_signatures, allow_unverified_species, UNVERIFIED_GUIDANCE
     sig = {}
     for tag, h5 in (("SRC", src_h5), ("DST", dst_h5)):
         d = dst_run if (tag == "DST" and dst_run) else os.path.dirname(os.path.abspath(h5))
@@ -78,10 +80,12 @@ def check_species_signatures(src_h5, dst_h5, force, record_verified=False, dst_r
     if unv and not bad and not force:
         if record_verified:
             unv = []
-        elif strict_species():
-            raise SystemExit("[interp_field] REFUSED (FORGE_REQUIRE_VERIFIED_SPECIES=1): " + "; ".join(unv))
+        elif allow_unverified_species():
+            print("[interp_field] WARNING: " + "; ".join(unv) + " — SRC is unverified; allowed for this invocation by "
+                  "FORGE_ALLOW_UNVERIFIED_SPECIES=1, copied fields stay unverified (no species attributes)")
         else:
-            print("[interp_field] WARNING: " + "; ".join(unv) + " — SRC is unverified; copied fields stay unverified")
+            raise SystemExit("[interp_field] REFUSED (nothing written): " + "; ".join(unv)
+                             + " — SRC is unverified (UNVERIFIED).\n" + UNVERIFIED_GUIDANCE)
     if bad:
         msg = ("化学種署名が違う: " + "; ".join(bad) + ". 種の順序/集合/DB が違う場は index コピーできない。"
                " tools/convert_species_field.py SRC_res.h5 DST_input.h5 --meta DST/species_meta.yaml で名前により移す"

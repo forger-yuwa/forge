@@ -11,10 +11,17 @@ SRC の res には「ソルバが書いたのと同じ」属性を付ける (記
        N2.nasa9_low[2] を表示、DST の保存量と属性は書き換わらない (d: 起動前の宛先解決)
   (a)  保存場だけを別ディレクトリへ (記録なし) → 照合不能で停止; --force-species で写すが属性は付かない
   (a)  不一致 + --force-species → 写すが属性は付かない
-  (i)  SRC 属性なし / species_input_unverified=1 → DST の既存属性を消す (species_input_unverified も付けない)
+  (i)  SRC 属性なし / species_input_unverified=1 (宛先 TP) → 既定で停止し DST の保存量・属性は不変 (#3c: ソルバと同じ規約)、
+       案内は「IC を属性を付ける処理で作り直す / その実行だけ FORGE_ALLOW_UNVERIFIED_SPECIES=1」の 2 通り。
+       FORGE_ALLOW_UNVERIFIED_SPECIES=1 / --force-species → 写し、DST の既存属性を消す (species_input_unverified も付けない)
+  (n)  宛先に solverConfig.yaml が無い (CPG か TP か判定できない) + 未検証 SRC → 既定で停止
+  (cpg) 宛先が CPG (thermalMethod 0) + 属性なし SRC → 属性の対象外なので既定で通る (属性なし)
   (x)  interp_field: 宛先が H2O を内蔵 DB で持つ (同一係数) → 記録で照合して継承 (旧: 設定の署名で「照合不能」拒否)
-  (o)  --resolve-species を持たない旧バイナリを FORGE_BIN にしても起動しない (属性なしで警告、FORGE_REQUIRE_VERIFIED_SPECIES=1 は停止)
-  (c)  convert_species_field: 検証済み入力 → 変換後に宛先のハッシュ (記録は宛先 run に書かれ完全性一致)、未検証入力 → 属性なし、
+  (o)  --resolve-species を持たない旧バイナリを FORGE_BIN にしても起動しない。宛先を解決できないので既定で停止 (DST 不変)、
+       FORGE_ALLOW_UNVERIFIED_SPECIES=1 で属性なしで写す (#3c 以前は既定で警告して通していた)。
+       旧バイナリが手元に無ければ --resolve-species の文字列を含まない偽バイナリ (起動されたら印を残すスクリプト) で代える
+  (c)  convert_species_field: 検証済み入力 → 変換後に宛先のハッシュ (記録は宛先 run に書かれ完全性一致)、未検証入力 → 既定で停止
+       (DST 不変)、FORGE_ALLOW_UNVERIFIED_SPECIES=1 で属性なし、
        場の記録と SRC run の設定が違う (N2 low[2]) → 書き込み前に拒否
 規約: [PASS]/[FAIL]、失敗があれば非ゼロ終了。
 """
@@ -63,7 +70,10 @@ def same_values(a, b):
     return a.keys() == b.keys() and all(np.array_equal(a[k], b[k]) for k in a)
 
 
-def tool(name, *args, env_extra=None, drop_env=("FORGE_REQUIRE_VERIFIED_SPECIES",)):
+ALLOW = {"FORGE_ALLOW_UNVERIFIED_SPECIES": "1"}
+
+
+def tool(name, *args, env_extra=None, drop_env=("FORGE_ALLOW_UNVERIFIED_SPECIES",)):
     env = dict(os.environ)
     for k in drop_env:
         env.pop(k, None)
@@ -149,7 +159,7 @@ def main():
         rc, out = tool("restart_field.py", os.path.join(lone, "res_10.h5"), os.path.join(d, "in.h5"), "--force-species")
         check(rc == 0 and attrs(os.path.join(d, "in.h5")) == {}, f"(a) same with --force-species -> copies without attributes (rc={rc})")
 
-        # (i) 未検証の SRC → DST の既存属性を消す
+        # (i) 未検証の SRC → 既定で停止 (DST 不変); 許可 (環境変数 / --force-species) で写し、DST の既存属性を消す
         for unv, label in ((None, "no attributes"), (1, "species_input_unverified=1")):
             s2 = run_dir(f"src_unv{unv}", h5="res_10.h5", ro=ro0)
             if unv is not None:
@@ -157,10 +167,39 @@ def main():
                 shutil.copy(os.path.join(src, r["record_file"]), s2)
             for t in ("restart_field.py", "interp_field.py"):
                 d = run_dir(f"unv{unv}_" + t[:-3])
-                fs.write_species_attrs(os.path.join(d, "in.h5"), src_attrs)      # 古い属性が残っていたとする
-                rc, out = tool(t, os.path.join(s2, "res_10.h5"), os.path.join(d, "in.h5"))
-                check(rc == 0 and attrs(os.path.join(d, "in.h5")) == {},
-                      f"(i) {t}: SRC {label} -> DST attributes removed, no species_input_unverified (rc={rc})", out[-600:])
+                dst = os.path.join(d, "in.h5")
+                fs.write_species_attrs(dst, src_attrs)      # 古い属性が残っていたとする
+                before, at0 = values(dst), attrs(dst)
+                rc, out = tool(t, os.path.join(s2, "res_10.h5"), dst)
+                check(rc != 0 and "REFUSED" in out and "UNVERIFIED" in out and "regenerate the initial field" in out
+                      and "FORGE_ALLOW_UNVERIFIED_SPECIES=1" in out and same_values(before, values(dst)) and attrs(dst) == at0,
+                      f"(i) {t}: SRC {label} -> stops by default, DST values/attributes unchanged, 2-way guidance (rc={rc})",
+                      out[-800:])
+                rc, out = tool(t, os.path.join(s2, "res_10.h5"), dst, env_extra=ALLOW)
+                check(rc == 0 and attrs(dst) == {} and not same_values(before, values(dst))
+                      and "Allowed for this invocation by FORGE_ALLOW_UNVERIFIED_SPECIES=1" in out,
+                      f"(i) {t}: SRC {label} + FORGE_ALLOW_UNVERIFIED_SPECIES=1 -> copies, DST attributes removed, "
+                      f"no species_input_unverified (rc={rc})", out[-600:])
+                fs.write_species_attrs(dst, src_attrs)
+                rc, out = tool(t, os.path.join(s2, "res_10.h5"), dst, "--force-species")
+                check(rc == 0 and attrs(dst) == {}, f"(i) {t}: SRC {label} + --force-species -> copies without attributes (rc={rc})",
+                      out[-600:])
+
+        # (n) 宛先に solverConfig.yaml が無い → CPG か TP か判定できないので既定で停止
+        s2 = os.path.join(root, "src_unvNone", "res_10.h5")
+        nocfg = os.path.join(root, "nocfg"); os.makedirs(nocfg)
+        write_h5(os.path.join(nocfg, "in.h5"), ro1, Y0, T0)
+        before = values(os.path.join(nocfg, "in.h5"))
+        rc, out = tool("restart_field.py", s2, os.path.join(nocfg, "in.h5"))
+        check(rc != 0 and "no solverConfig.yaml" in out and same_values(before, values(os.path.join(nocfg, "in.h5"))),
+              f"(n) restart_field: unverified SRC, destination without solverConfig.yaml -> stops (rc={rc})", out[-600:])
+
+        # (cpg) 宛先が CPG → 属性の対象外。属性なしの SRC から既定で通る
+        dc = run_dir("cpg_dst")
+        open(os.path.join(dc, "solverConfig.yaml"), "w").write(CFG.replace("thermalMethod: 2", "thermalMethod: 0"))
+        rc, out = tool("restart_field.py", s2, os.path.join(dc, "in.h5"))
+        check(rc == 0 and attrs(os.path.join(dc, "in.h5")) == {},
+              f"(cpg) restart_field: SRC without attributes -> CPG destination passes by default (rc={rc})", out[-600:])
 
         # (x) interp_field: 宛先の H2O が内蔵 (同一係数なら同じ互換性ハッシュ) → 記録で照合して継承
         d = run_dir("h2o_builtin", h2o_builtin=True)
@@ -174,25 +213,37 @@ def main():
             check(rc != 0 and "REFUSED" in out,
                   f"(x) interp_field: test DB H2O differs from the built-in ({diff[:2]}) -> refused by record (rc={rc})", out[-600:])
 
-        # (o) 旧バイナリ (--resolve-species なし) を FORGE_BIN にしても起動しない
+        # (o) 旧バイナリ (--resolve-species なし) を FORGE_BIN にしても起動しない。宛先を解決できないので既定で停止
         old = os.path.join(REPO, "solver_density_cuda", "build", "forge")
-        if os.path.exists(old) and not fs.forge_supports_resolve(old):
-            d = run_dir("oldbin")
-            rc, out = tool("restart_field.py", srcres, os.path.join(d, "in.h5"), env_extra={"FORGE_BIN": old})
-            check(rc == 0 and attrs(os.path.join(d, "in.h5")) == {} and "旧バイナリ" in out and not os.path.exists(os.path.join(d, "res_1.h5")),
-                  f"(o) old binary as FORGE_BIN -> not launched; copied without attributes + warning (rc={rc})", out[-600:])
-            rc, out = tool("restart_field.py", srcres, os.path.join(d, "in.h5"),
-                           env_extra={"FORGE_BIN": old, "FORGE_REQUIRE_VERIFIED_SPECIES": "1"}, drop_env=())
-            check(rc != 0 and "REFUSED" in out, f"(o) same with FORGE_REQUIRE_VERIFIED_SPECIES=1 -> refused (rc={rc})", out[-600:])
-        else:
-            print("[SKIP] (o) no old binary at solver_density_cuda/build/forge")
+        marker = os.path.join(root, "old_binary_launched")
+        if not (os.path.exists(old) and not fs.forge_supports_resolve(old)):
+            old = os.path.join(root, "fake_old_forge")     # 起動されたら印を残す偽の旧バイナリ
+            with open(old, "w") as f:
+                f.write(f"#!/bin/sh\ntouch '{marker}'\n")
+            os.chmod(old, 0o755)
+            print(f"[INFO] (o) no old binary at solver_density_cuda/build/forge; using a fake old binary {old}")
+        d = run_dir("oldbin")
+        dst = os.path.join(d, "in.h5")
+        fs.write_species_attrs(dst, src_attrs)
+        before, at0 = values(dst), attrs(dst)
+        rc, out = tool("restart_field.py", srcres, dst, env_extra={"FORGE_BIN": old})
+        check(rc != 0 and "REFUSED" in out and "旧バイナリ" in out and "FORGE_ALLOW_UNVERIFIED_SPECIES=1" in out
+              and same_values(before, values(dst)) and attrs(dst) == at0
+              and not os.path.exists(os.path.join(d, "res_1.h5")) and not os.path.exists(marker),
+              f"(o) old binary as FORGE_BIN -> not launched; destination unresolvable -> stops by default, DST unchanged (rc={rc})",
+              out[-600:])
+        rc, out = tool("restart_field.py", srcres, dst, env_extra=dict(ALLOW, FORGE_BIN=old))
+        check(rc == 0 and attrs(dst) == {} and "旧バイナリ" in out and not os.path.exists(marker),
+              f"(o) same with FORGE_ALLOW_UNVERIFIED_SPECIES=1 -> not launched; copied without attributes + warning (rc={rc})",
+              out[-600:])
 
         # (c) convert_species_field: 検証済み入力 → 宛先のハッシュを付ける / 未検証入力 → 属性なし
         conv = os.path.join(TOOLS, "convert_species_field.py")
 
-        def convert(srcdir, srch5, dstdir, *extra):
+        def convert(srcdir, srch5, dstdir, *extra, env_extra=None):
+            env = dict(os.environ); env.pop("FORGE_ALLOW_UNVERIFIED_SPECIES", None); env.update(env_extra or {})
             p = subprocess.run([sys.executable, conv, srch5, os.path.join(dstdir, "in.h5"), "--meta", os.path.join(dstdir, "species_meta.yaml"),
-                                "--src-meta", os.path.join(srcdir, "species_meta.yaml"), *extra], capture_output=True, text=True)
+                                "--src-meta", os.path.join(srcdir, "species_meta.yaml"), *extra], capture_output=True, text=True, env=env)
             return p.returncode, p.stdout + p.stderr
         d = run_dir("conv_ok")
         rc, out = convert(src, srcres, d)
@@ -205,8 +256,14 @@ def main():
         s3 = run_dir("conv_src_unv", h5="res_10.h5", ro=ro0)
         d = run_dir("conv_unv")
         fs.write_species_attrs(os.path.join(d, "in.h5"), src_attrs)
+        before, at0 = values(os.path.join(d, "in.h5")), attrs(os.path.join(d, "in.h5"))
         rc, out = convert(s3, os.path.join(s3, "res_10.h5"), d)
-        check(rc == 0 and attrs(os.path.join(d, "in.h5")) == {}, f"(c) convert: unverified input -> output unverified (no attributes) (rc={rc})",
+        check(rc != 0 and "REFUSED" in out and "FORGE_ALLOW_UNVERIFIED_SPECIES=1" in out
+              and same_values(before, values(os.path.join(d, "in.h5"))) and attrs(os.path.join(d, "in.h5")) == at0,
+              f"(c) convert: unverified input -> stops by default, DST unchanged (rc={rc})", out[-600:])
+        rc, out = convert(s3, os.path.join(s3, "res_10.h5"), d, env_extra=ALLOW)
+        check(rc == 0 and attrs(os.path.join(d, "in.h5")) == {},
+              f"(c) convert: unverified input + FORGE_ALLOW_UNVERIFIED_SPECIES=1 -> output unverified (no attributes) (rc={rc})",
               out[-600:])
         # 入力の記録と SRC run の設定が違う (場を作った物性と変換器が読む物性が違う) → 拒否
         s4 = run_dir("conv_src_mismatch", h5="res_10.h5", ro=ro0)
