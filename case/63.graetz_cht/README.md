@@ -54,3 +54,4 @@ python3 make_run.py cht run_NNNN_... --mesh mesh/graetz_r16.h5 --solid mesh/soli
 | `run_0004_smoke_walls_{adiab,iso}_r16` | 切り分け: 壁を全部断熱 / 全部等温 (cfl 5) | 断熱は安定 (\|u_r\| 1.3e-3)、等温は崩壊 | 破棄予定 (登録外。同上) |
 | `run_0005_smoke_iso0_cfl{2,1}_r16` | 同 ΔT 0、cfl 2 / 1 (400 step) | どちらも安定 | 破棄予定 (登録外。同上) |
 | `run_0006_smoke_iso10_cfl2_r16` | 評価器の通し確認 (ΔT 10、cfl 2、400 step、未収束) | 評価器が端から端まで動くこと | 破棄予定 (登録外) |
+| `run_0009_ab_cfl2_r64_cht10` / `run_0010_ab_cfl1_r64_cht10` | **起動 A/B** (plan §6 起動設定): AWS FP64・N_r=64・共役 ΔT 10・`cfl_pseudo` 2 / 1、10000 step | 両方破綻せず (ρ・P・T 物理的、界面残差単調減少) → **CFL 2 を採用** (plan §5.1 #5b) | ref (起動設定の根拠) |

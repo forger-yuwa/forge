@@ -252,6 +252,18 @@ def cmd_snap(a):
         rows.append((f"参考: x⁺={p:g} の誤差 (対数補間)", float(e), None))
     flow_checks(hr, st, rows)
     inlet_T_check(cr, st, rows)
+    # 参考 (合否に使わない、plan §6 V-g1): 加熱 run の x=0 断面 T(r) と ellip (Pe 720) の場 T_w − ΔT θ(ξ) の差
+    refp = Path(__file__).resolve().parent / "ref_x0_profile.csv"
+    if refp.exists():
+        rp = np.genfromtxt(refp, delimiter=",", names=True)
+        fh = hr.field(st)
+        x0 = hr.xcols[np.argmin(np.abs(hr.xcols))]
+        i = hr.col[x0]
+        xi = hr.xyz[i, 1] / hr.xyz[i, 1].max()
+        dT = d["tw"][0] - gc.T_IN
+        Tref = d["tw"][0] - dT * np.interp(xi, rp["xi"], rp["theta"])
+        rows.append(("参考: 加熱 x=0 断面 T(r) と ellip の差 max [K]", float(np.abs(fh["T"][i] - Tref).max()), None))
+        rows.append(("V-g1 参考: 入口面 T の 300 K からの平均偏差 [K]", float(fh["T"][hr.col[hr.xcols[0]]].mean() - gc.T_IN), None))
     bad = gate_print(rows)
     print(f"\nVERDICT (閾値のみ; 収束・準定常・G-if は別ツール): {'PASS' if not bad else 'FAIL'}"
           + (f"  ({'; '.join(bad)})" if bad else ""))

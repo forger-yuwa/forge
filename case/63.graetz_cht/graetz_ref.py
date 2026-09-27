@@ -115,7 +115,7 @@ def solve_march(nr, xmax, nx, return_tb=False):
     return np.array(out_x), np.array(out_nu)
 
 
-def solve_ellip(nr, pe, xu, xh, xd, nx_h, nx_u, nx_d):
+def solve_ellip(nr, pe, xu, xh, xd, nx_h, nx_u, nx_d, return_field=False):
     """有限 Pe。x⁺ ∈ [−xu, xh+xd]、加熱区間 [0, xh] は θ_w=0、それ以外の壁は断熱。入口 θ=1、出口は ∂θ/∂x=0。
 
     無次元式: u ∂θ/∂x⁺ = 4 ∇²_ξ θ + (1/Pe²) ∂²θ/∂x⁺²   (x⁺ = x/(D Pe), ξ = r/R)。
@@ -174,6 +174,8 @@ def solve_ellip(nr, pe, xu, xh, xd, nx_h, nx_u, nx_d):
     tb = mixing_cup(th, u, vol)
     g = wall_grad(th, h)
     nu = np.where(heated, -2.0 * g / tb, np.nan)
+    if return_field:
+        return x, nu, tb, xi, th
     return x, nu, tb
 
 
