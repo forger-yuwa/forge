@@ -1885,7 +1885,7 @@ $$ z^{\rm in}_i = \big(\tfrac{W}{2} - \tfrac{t_{sw}(x_i)}{2}\big)\, s_{\rm in},\
 
 | R5c | ~~SST 壁関数の壁モデル渦粘性に上限~~ **優先度低下 (2026-09-20)**: 壁関数を使わない方針になったため。欠陥の記録は §4.25 に残す。将来 `wallTreatmentSST: 1` を復活させるなら必須 |
 | R4d | **幅外を開いた後の遠方境界・領域独立性** (codex M4): `side_far` の slip 固定 (反射) を見直し、生産 TP・SST で $C_L/C_M$ まで含めた領域独立性を測る。許容値を係数ごとに数値で固定 | `r4_domain_study.py` は加速点 Euler・$C_T$ のみ |
-| **R5o-chi** | **R5n 型の格子収束列を `space.slauWallNormalChi: 1` で再取得** (2026-09-25 委譲、元: [`convection-slau-wall-normal-chi-usage-rule.md`](../accepted/convection-slau-wall-normal-chi-usage-rule.md) §5.1 #7)。3D 生産は flag 0 で解を持たず常に flag 1 なので、決めるべきは flag 1 の生産解の格子収束。メッシュ生成コマンドと `FORGE_CUDA_BLOCKSIZE` を run に記録。**3D の固定点 (前 plan V7 のドリフト減衰) も未解決のまま**ここに属する | 許容は §8 (R5n)。前 plan [`convection-slau-wall-normal-chi.md`](../accepted/convection-slau-wall-normal-chi.md) §5.1 #9b・V7 |
+| **R5o-chi** (**2026-09-27 着手、R5s と合わせて実施**: 現行コード (chi 既定 auto = 1 [plan convection-slau-wall-normal-chi-default accepted]・スカラー勾配の node 既定 lsq [plan gradient-scalar-lsq-unification accepted]・R5r のメッシャ修正 `share_cowl_free_edge` 込み) で g3 `problem_3d_prod_m6on_wallres.yaml` と g4 `problem_3d_prod_m6on_g4.yaml` を runner_sern3d で回し直し、g4 は旧 run_0422 と同じく定常化まで継続。判定は §8 の許容 (Δ(g3→g4) C_T・C_L 0.002、C_M 0.05)、GATES (特に旧 g4 の FLOOR_STUCK = 側壁 8 節点の床が消えるか)、`check_quasisteady`。旧列 (run_0418/0422) との差は chi・lsq・メッシャ修正が混ざるので、差が許容を超えたときだけ切り分ける。R5s(1) の旧格子での照合は、旧 run の場が削除済みで床ノード ID が得られないため、新 g4 の床張り付き数で代える) | **R5n 型の格子収束列を `space.slauWallNormalChi: 1` で再取得** (2026-09-25 委譲、元: [`convection-slau-wall-normal-chi-usage-rule.md`](../accepted/convection-slau-wall-normal-chi-usage-rule.md) §5.1 #7)。3D 生産は flag 0 で解を持たず常に flag 1 なので、決めるべきは flag 1 の生産解の格子収束。メッシュ生成コマンドと `FORGE_CUDA_BLOCKSIZE` を run に記録。**3D の固定点 (前 plan V7 のドリフト減衰) も未解決のまま**ここに属する | 許容は §8 (R5n)。前 plan [`convection-slau-wall-normal-chi.md`](../accepted/convection-slau-wall-normal-chi.md) §5.1 #9b・V7 |
 
 ## 6. 検証
 
@@ -1931,6 +1931,8 @@ $\Delta C_L$ はそのまま $\Delta C_M \approx \Delta C_L \times (d/L_{\rm ref
 **将来 $\Delta C_L$ が 0.002 に近い case が出たら 0.06 へ見直すこと**。
 
 ## 9. 変更ログ
+
+- `2026-09-27` — R5o-chi と R5s を合わせて着手 (現行コードで g3/g4 を再取得)。
 
 - `2026-09-22` — **R5r**: CV ごとの閉性検査で、旧メッシャのカウル板の自由な側端に開いた CV (閉性 0.30) を 68 個発見。`dup1` が自由端まで節点を二重化していた。共有に修正 (§4.45)、再現格子で 18 → 0。R5q とは場所が別。CFD での確認は R5s。
 
