@@ -123,6 +123,14 @@ physProp:
 - 方針: μ・λ は CEA `trans.inp` の種別フィットを正本とし、混合は Wilke / Mason–Saxena (CEA に相互作用データがある組はそれを使う)。拡散係数は CEA に無いので LJ (Blanc) のまま。
   NS の結果を変える数値変更なので、実装前に上位へ諮る (#5・#7)。
 - **ユーザ定義の輸送フィット** (2026-09-27 ユーザ承認、codex 諮問中): `species_db.yaml` (外部 DB) と共通データに μ・λ のフィット係数を直接書ける欄を設ける (CEA と同じ形 `ln μ = A lnT + B/T + C/T² + D`、温度区間つき)。解決順は **ユーザ指定フィット → CEA `trans.inp` → LJ (最後の手段)**。拡散係数は LJ (または Schmidt 一定) のまま。
+- **codex diagnose (2026-09-27, [`notes/reviews/2026-09-27-transport-source-design-diagnose.md`](../../notes/reviews/2026-09-27-transport-source-design-diagnose.md))**: 解決順は維持。
+  **混合則も CEA の frozen 混合則全体を採用する** — forge は λ にも粘性用の φ を使う (`thermo_d.cuh:448`) が、CEA は相互作用粘性 ηᵢⱼ から φᵢⱼ = 2Mⱼμᵢ/[(Mᵢ+Mⱼ)ηᵢⱼ] を作り、
+  λ には ψᵢⱼ = φᵢⱼ{1 + 2.41(Mᵢ−Mⱼ)(Mᵢ−0.142Mⱼ)/(Mᵢ+Mⱼ)²} を使う (`cea2.f:5613`; 相互作用データの無い組は CEA と同じ推定。`V3C0` でも ηᵢⱼ は ψ を介して λ に効く)。
+  単成分値を両方 CEA にしても混合則だけで 600 K・X_H2O 0.5 で μ −11.4 %・λ −10.0 % (codex の double 検算; CFD・FCEA2 実行ではない)。
+  比較の正解は FCEA2 の**同一 T・同一気相組成の μ と frozen λ** (平衡反応寄与込みの λ は別物, `cea2.f:5635,5738`)。
+  **H2O の 373.2 K 未満を黙って LJ に切り替えない** (373.2 K で LJ は CEA より +31.6 %; CEA 最低区間の下方外挿は ~218.6 K 以下で dμ/dT<0; CEA 本体も最低区間を外挿する `cea2.f:5466`)。
+  低温は μ・λ 両方の参照データ・許容誤差・接続規約が揃うまで「対応済み」にしない (§10)。拡散係数は LJ を継続し今回は変えない (Sc・Le が変わるのは不整合ではない)。
+  lump は全実種へ展開してから CEA 混合を一度だけ行い、同じ実種が複数 lump に出れば分率を合算。μ・λ ごとの係数・単位・区間・範囲外規約を記録と互換性ハッシュに含める。
 
 ### 4.4 lump の輸送物性
 
@@ -193,6 +201,7 @@ physProp:
 | 3b | ~~引き継ぎ・種変換・IC 生成の入口~~ | 完了 2026-09-27: 共通 API (`tools/forge_species.py` の `find_forge`/`resolve_species`/`plan_inherit`+`commit_inherit`/`check_ic_against_record`/`stamp_new_field`/`plan_convert`)、`restart_field.py`・`interp_field.py`・`convert_species_field.py`・`runner_sern.py` (`restart_by_index`・領域 IC・`warm_from_run`)・`design/forge_design/evaluate/ic.py` (`stamp_isentropic_ic_species`)・`runner_axismach.py` (IC 付与、段間を restart_field へ)。試験 `tests/unit/test_species_attrs_entry.py` (19 項目)・`design/tests/run_species_attrs_ic_tests.py` (7 項目) ALL PASS: V1 (a)(d)(f)、未検証 SRC で DST 属性を消す、`--force-species` は属性なし、種変換。既存試験も PASS。配管 run `case/44.vitiated_air_wt/run_0520_species_attrs_runner` (IC→段間 2 回→本段 60 step で unverified=0、restart_field はビット一致; 同じ場を interp_field で写すと roUx 22950/23725 点で最大 1.4e-5 相対の差)。解釈として決めた点: 宛先を解決できない (旧バイナリ等) ときは過渡期は警告で属性なし・strict で停止 / 属性はあるが記録なし・完全性不一致の SRC は過渡期でも停止 (`--force-species` で属性なし) / SRC 記録を DST の隣へ複製 / interp_field の内蔵種の照合不能は過渡期は警告 (#3a の残課題を解消)。未了: runner 経路 (段の手順が run_0509 と違う) の本段 24000 step の数値基準、`warm_from_run` の実 run、`runner_wt`/`runner.py`/case 内 `gen_*_ic.py` (CPG か範囲外) | O |
 | 4 | ~~共通データ化 (値は変えない)~~ | 完了 2026-09-27: `solver_density_cuda/data/species/forge_species_v1.yaml` (13 種、canonical ID・別名・相・2 区間係数・LJ・元素組成・出典・`deviations`・過渡欄 `legacy_builtin`)、C++ はビルド時埋め込み (`cmake/embed_species_data.cmake`, `speciesDB_builtin()` のハードコード撤去)、Python `semiperfect.py`/`composition.py` は同ファイルを読む (名前は案 (a) のまま)。値のビット一致 `tests/unit/test_species_data_bitexact.py` ALL PASS (98 項目, 変異試験で FAIL を確認)。`--resolve-species` のハッシュは新旧で一致 (case/44 4378b7d78339ba27、内蔵のみ 3 構成) し記録ファイルもバイト一致。既存 species 試験は新バイナリで全 PASS。残: `tools/forge_species.py:69` の `BUILTIN_MW` の写し (#8)、He の atoms を新設 (読み手なし)、既存の `test_solver_config_species.cpp` は fixture の廃止キー `mesh.meshFormat` で FAIL 16 (本件と無関係、未修正) | O |
 | 5 | CEA 直読みとの差・20000 K 区間・LJ の寄せ先 | H2O MW・AR 高温 a0・**He MW (0.0040026 vs 4.002602 g/mol, 相対 5e-7)** の寄せ先、**LJ の出典と寄せ先 (Python `LJ_PARAMS` と `cea_thermo_to_species_db.py` の Cantera 由来表が H2 2.827/59.7 vs 2.920/38.0、H 2.708/37.0 vs 2.050/145.0、O 3.050/106.7 vs 2.750/80.0、OH 3.147/79.8 vs 2.750/80.0、NO 3.492/116.7 vs 3.621/97.53、CO 3.690/91.7 vs 3.650/98.10 で食い違う)**、6000–20000 K 区間を有効にするか、CEA 全種を入れたとき現行 `AIR` の alias `Air` と CEA `Air` の衝突をどう解くか。値を変えるなら case/44 と #6 の小型ケースの報告量変化を記録 。**加えて (2026-09-27 ユーザ方針 §4.3b)**: 輸送物性の正本を CEA `trans.inp` にする設計 — 種別フィットの取り込み、相互作用データの混合則への入れ方、CEA 範囲外 (H2O < 373 K など) と CEA に無い種の扱い、拡散係数 (LJ 継続) との整合、NS 結果の変化量の記録 | F |
+| 5t | 輸送物性の CEA 化 (段階) | codex diagnose の順: ① **混合則の A/B (CFD 0 step)** — 単成分フィット・MW・T・組成を固定し A = 現行 (φ 共用) / B = CEA の ηᵢⱼ・φ・ψ、T = 400/600/1000/2000 K × X_H2O = 0/0.1/0.5/1 の 16 状態を FCEA2 の μ・frozen λ と比較 (A 全点 0.1 % 以内なら「現行で不足」を棄却、A 失敗・B 全点合格なら B 採用、両方失敗なら GPU 実装へ進まない) → ② 共通 resolver と単成分評価 (ユーザ定義フィット → CEA → LJ、単位・区間端・記録) → ③ CEA 混合・lump 展開・CUDA 評価 (独立 double 基準に double ≤1e-12・float ≤1e-5) → ④ 低温 H2O モデル確定後の NS 検証 (収束・準定常 VERDICT 必須) | F |
 | 6a | ~~起動時 lump 合成 + config 指定 (区切りが揃う種のみ)~~ | 完了 2026-09-27: `physProp.species` の mapping 記法 (`input/solverConfig.cpp`, `input/speciesLump.hpp`)、`speciesDB_resolve` での合成・検査 7 種・起動ログ・記録と互換性ハッシュ (lump なしはバイト不変)、Python `forge_species.py` の lump 対応。試験 `tests/unit/test_species_lump_solver.py` ALL PASS (31): **V2 = 生成 DB と係数・MW・LJ 相対 ≤4e-16、cp/h/s° (200–6000 K 1000 点) 相対 ≤8e-16**、既存 config のハッシュ・記録バイト一致、負例すべて拒否。起動確認 `case/44.vitiated_air_wt/run_0521_species_lump_startup` (lump 記法で 200 step、NaN 0)。basis は必須。**lump 記法と外部 DB 版はハッシュが違うので既存場からの restart は照合で止まる — 正しい挙動として採用** (1 ulp の差があり、外部 DB 擬似種の出自は場から確かめられない; 移行は明示許可 1 回)。残: lump の mapping を読めない Python reader (`total_quantities.py`・`convert_species_field.py`・`passive_gate_common.py`・`gen_inlet_profile.py`・`runner_sern._species_signature`・design `probdef`) は #8/#9。過渡期既定で通すときの警告文が環境変数を立てたように読める (#3c で直す) | O |
 | 6b | 区間可変 (区切りの違う種を畳む) | §4.2 の和集合区間。`SpeciesThermo`・float 表・datum の区間可変化。`cuda_forge/thermo_d` の変更なので実装前に上位へ諮る。合格は §6 V3・V3f | F |
 | 7 | lump の輸送物性展開と Blanc 拡散 | §4.4 (粘性・熱伝導は実種展開、lump を含む二元拡散係数は Blanc)。合格は §6 V4 | O |
@@ -268,6 +277,7 @@ physProp:
 
 ## 10. 未確定事項
 
+- 凝縮域 (200–373.2 K) の希薄水蒸気の μ・λ: CEA `trans.inp` に無く、LJ は 373.2 K で CEA より +31.6 %、CEA 最低区間の外挿は ~219 K 以下で dμ/dT<0。参照データ (IAPWS 等は 200 K での妥当性を確認要)・許容誤差・接続規約を決める (codex diagnose 2026-09-27)。
 - N2 の潜熱を H2O と同じ方式 (液相を気相と同じ datum で持ち差で L) に統一するか、現行の L フィット方式のままにするか (2026-09-27 ユーザ「今後判断」)。
   判断材料: H2O (#10) の実装と V7 の結果、現行 N2 方式の既知の不整合 (L フィットが液比熱を暗黙に決める)、空気凝縮 run への影響の見込み。
 
@@ -275,6 +285,7 @@ physProp:
 
 ## 9. 変更ログ
 
+- `2026-09-27` — 輸送の正本設計を codex diagnose で確認: 解決順維持、CEA の frozen 混合則全体を採用、H2O 低温は未決 (§10)、実装順 #5t。
 - `2026-09-27` — #9 (axismach) と #8a 完了 (上表)。**ユーザの目的 (problem のモル分率・lump → config に lump のモル分率、生成 species_db.yaml なし) が case/44 の設計チェーンで実現** (V5・V6 PASS)。SERN は lump 名 AIR の衝突で未切替。
 - `2026-09-27` — #6a 完了 (上表)。
 - `2026-09-27` — #6 を #6a (区切りが揃う種の起動時合成、cuda_forge 不変) と #6b (区間可変) に分割。ユーザの目的 (config に lump の中身をモル分率で書く) を #6a + #8 の一部 + #9 で先に実現する。
