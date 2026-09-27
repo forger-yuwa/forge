@@ -18,6 +18,7 @@
 
 #include "cuda_forge/thermo_d.cuh"   // SpeciesThermo (host では inline 関数のみ)
 #include "input/speciesLump.hpp"     // SpeciesLumpSpec (config の lump 指定)
+#include "input/speciesTransportDB.hpp"   // ResolvedTransport (physProp.transport の解決結果; plan #5t2)
 
 namespace YAML { class Node; }
 class solverConfig;
@@ -36,6 +37,7 @@ struct ResolvedLump {
     std::vector<double>        x;              // lump 内モル分率 (正規化済み; 合成の重み)
     std::vector<SpeciesThermo> memberSpecies;  // 構成種の絶対基準係数 (datum 前)
     std::vector<std::string>   memberSource;   // "builtin" | "file"
+    std::vector<std::string>   memberDbKey;    // 構成種が一致した DB のキー (内蔵の canonical ID・別名、または外部 DB のキー)
 
     bool empty() const { return members.empty(); }
 };
@@ -45,6 +47,8 @@ struct ResolvedSpeciesDB {
     std::vector<SpeciesThermo> species;  // 同順。datum オフセット前の絶対基準係数 (lump は合成後)
     std::vector<std::string>   source;   // 同順。"builtin" | "file" | "lump"
     std::vector<ResolvedLump>  lumps;    // 同順。lump でない種は空
+    std::vector<std::string>   dbKey;    // 同順。一致した DB のキー (lump は空)。輸送の解決 (#5t2) が使う (記録には入れない)
+    ResolvedTransport          transport;   // physProp.transport を書いたときだけ enabled (plan #5t2)
 
     int size() const { return static_cast<int>(names.size()); }
     bool isLump(int s) const { return s >= 0 && s < static_cast<int>(lumps.size()) && !lumps[s].empty(); }
@@ -52,6 +56,10 @@ struct ResolvedSpeciesDB {
     int index(const std::string& name) const;
     double MW(int s) const { return species.at(s).MW; }
 };
+
+// 実種の同一性キー: 内蔵種は canonical ID (別名を完全一致で ID に寄せる)、それ以外は大文字化した名前。
+// lump の構成種の重複検査と輸送の実種の合算 (#5t2) が使う。fromFile: 外部 DB から解決した種か。
+std::string speciesDB_identityKey(const std::string& dbKey, bool fromFile);
 
 // 内蔵 DB を返す。値は共通データ data/species/forge_species_v1.yaml (ビルド時に埋め込み、起動時に解析) の
 // legacy_builtin: solver の種で、キーは canonical ID と別名の両方 (Ar/AR, He/HE, H2O/h2o/WATER, AIR/Air/air)。
@@ -121,6 +129,8 @@ void speciesDB_printTable(const solverConfig& cfg, const ResolvedSpeciesDB& db);
 //   CPG (thermalMethod != 2) は記録・照合の対象外。液相 (凝縮種の液) は #10 まで含めない。
 // =============================================================================
 #define SPECIES_RECORD_SCHEMA "forge_resolved_species_v1"
+// physProp.transport を書いた run の記録 (輸送ブロック transport_compat を追記; plan #5t2)。それ以外は v1 のまま (本文はバイト不変)。
+#define SPECIES_RECORD_SCHEMA_TRANSPORT "forge_resolved_species_v2"
 // 外挿規約 (thermo_d.cuh: 区間外は cp を端でクランプ、h は端の cp で線形外挿、T < Tmid で low 係数)。
 #define SPECIES_RECORD_EXTRAPOLATION "nasa9_2interval; low if T<Tmid; cp clamped at Tlo/Thi; h linear with end cp outside [Tlo,Thi]"
 // datum 規約 (thermo_d.cu: thermoHrefTemp>0 のとき両区間の a7 に -h_abs(Tref)/Ru を加算)。記録の係数は加算前。

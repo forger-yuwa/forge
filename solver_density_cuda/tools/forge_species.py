@@ -245,6 +245,8 @@ def species_signature(run_dir):
 
 # ---- 解決済み記録 (C++ input/speciesDB.{hpp,cpp} と同じ正規化; 変えるときは両方を同時に変えてスキーマ版を上げる) ----
 SPECIES_RECORD_SCHEMA = "forge_resolved_species_v1"
+# physProp.transport を書いた run の記録 (輸送ブロック transport_compat を持つ; plan thermophysics-solver-owned-species-db #5t2)
+SPECIES_RECORD_SCHEMA_TRANSPORT = "forge_resolved_species_v2"
 SPECIES_RECORD_EXTRAPOLATION = "nasa9_2interval; low if T<Tmid; cp clamped at Tlo/Thi; h linear with end cp outside [Tlo,Thi]"
 SPECIES_RECORD_DATUM = ("coefficients are absolute (before datum); runtime adds -h_abs(Tref)/Ru to a7 of every interval "
                         "when thermoHrefTemp>0")
@@ -255,9 +257,10 @@ def _g17(x):
     return "%.17g" % float(x)
 
 
-def compat_text(schema, datum, thermoHrefTemp, extrapolation, species):
+def compat_text(schema, datum, thermoHrefTemp, extrapolation, species, transport_lines=None):
     """互換性ハッシュの正規化テキスト。species は [{name, phase, MW, Tlo, Tmid, Thi, LJ_sigma, LJ_eps_kB, nasa9_low, nasa9_high}]。
-    source・来歴は入れない。C++ speciesDB.cpp compatTextRaw と一字一句同じにすること。"""
+    source・来歴は入れない。C++ speciesDB.cpp compatTextRaw と一字一句同じにすること。
+    transport_lines: 輸送ブロック (記録の transport_compat; physProp.transport を書いた run だけ, #5t2)。C++ が作った行をそのまま末尾に足す。"""
     out = [f"schema: {schema}", f"datum: {datum}", f"thermoHrefTemp: {_g17(thermoHrefTemp)}",
            f"extrapolation: {extrapolation}", f"nSpecies: {len(species)}"]
     def _coeff_lines(tag, e):
@@ -279,6 +282,7 @@ def compat_text(schema, datum, thermoHrefTemp, extrapolation, species):
                 mt = f"{tag}.lump[{k}]"
                 out.append(f"{mt}: name={m['name']} x={_g17(m['x'])}")
                 _coeff_lines(mt, m)
+    out.extend(transport_lines or [])
     return "\n".join(out) + "\n"
 
 
@@ -316,9 +320,11 @@ def load_record(path):
            "compat_hash": str(rec.get("compat_hash", "")), "schema": str(rec.get("schema", "")),
            "datum": str(rec.get("datum", "")), "extrapolation": str(rec.get("extrapolation", "")),
            "thermoHrefTemp": float(rec.get("thermoHrefTemp", 0.0)), "species": species,
+           "transport_compat": [str(x) for x in (rec.get("transport_compat") or [])],
            "provenance": rec.get("provenance") or {}}
     out["compat_recomputed"] = hashlib.sha256(
-        compat_text(out["schema"], out["datum"], out["thermoHrefTemp"], out["extrapolation"], species).encode()).hexdigest()
+        compat_text(out["schema"], out["datum"], out["thermoHrefTemp"], out["extrapolation"], species,
+                    out["transport_compat"]).encode()).hexdigest()
     problems = []
     if out["compat_recomputed"] != out["compat_hash"]:
         problems.append(f"{path}: compat_hash in file {out['compat_hash'][:16]} != recomputed from content {out['compat_recomputed'][:16]}"
@@ -328,8 +334,10 @@ def load_record(path):
         problems.append(f"{path}: file name compat {m.group(1)} != content compat {out['compat_recomputed'][:16]} (mixed-up record)")
     if m and m.group(2) and m.group(2) != out["integrity"][:16]:
         problems.append(f"{path}: file name integrity {m.group(2)} != sha256 of file {out['integrity'][:16]}")
-    if out["schema"] != SPECIES_RECORD_SCHEMA:
-        problems.append(f"{path}: schema {out['schema']!r} (this tool knows {SPECIES_RECORD_SCHEMA!r})")
+    if out["schema"] not in (SPECIES_RECORD_SCHEMA, SPECIES_RECORD_SCHEMA_TRANSPORT):
+        problems.append(f"{path}: schema {out['schema']!r} (this tool knows {SPECIES_RECORD_SCHEMA!r}, {SPECIES_RECORD_SCHEMA_TRANSPORT!r})")
+    elif (out["schema"] == SPECIES_RECORD_SCHEMA_TRANSPORT) != bool(out["transport_compat"]):
+        problems.append(f"{path}: schema {out['schema']!r} and the transport block (transport_compat) do not go together")
     out["problems"] = problems
     out["consistent"] = not problems
     return out
@@ -754,7 +762,15 @@ def place_record(rec, dst_dir):
 def _record_diff(src_rec, dst_rec):
     """2 つの記録の差 (種・係数・datum)。"""
     a, b = signature_from_record(src_rec), signature_from_record(dst_rec)
-    return compare_signatures(a, b)
+    bad = compare_signatures(a, b)
+    # 輸送ブロック (physProp.transport; #5t2): 行単位で最初の差を示す
+    ta, tb = src_rec.get("transport_compat") or [], dst_rec.get("transport_compat") or []
+    if ta != tb:
+        k = 0
+        while k < min(len(ta), len(tb)) and ta[k] == tb[k]:
+            k += 1
+        bad.append(f"transport: SRC {ta[k] if k < len(ta) else '(none)'!r} vs destination {tb[k] if k < len(tb) else '(none)'!r}")
+    return bad
 
 
 def _unverified_note(tool, dst_run_dir, why):

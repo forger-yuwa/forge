@@ -1186,6 +1186,15 @@ cudaConfig initializeSimulation(
     // 化学種 DB の host 側解決 (GPU 非依存; 未知種名はここで exit)。bcond の X{s}→Y{s} 換算と
     // 起動ログ (種表) が使う。thermo_init_db は同じ結果を device へ上げる。
     speciesDB_printTable(cfg, speciesDB_init(cfg));
+    // physProp.transport (種ごとの輸送物性の出所) は段 1 (plan thermophysics-solver-owned-species-db #5t2) では
+    // host の解決・記録だけで、GPU の粘性・熱伝導はまだ現行経路のまま。記録 (輸送ブロック) と実際の計算が食い違う
+    // run を作らないよう、計算の起動は止める (forge --resolve-species は通る)。段 2 で GPU に接続したら外す。
+    if (!cfg.speciesTransport.empty()) {
+        cerr << "[transport] ERROR: physProp.transport is resolved and recorded (forge --resolve-species) but the GPU transport "
+                "path is not connected yet (plan thermophysics-solver-owned-species-db #5t2 stage 2). Remove physProp.transport "
+                "to run with the current transport (viscMethod)." << endl;
+        std::exit(EXIT_FAILURE);
+    }
 
     cout << "Init Thermo DB \n";
     thermo_init_db(cfg);   // NASA-9/LJ 化学種 DB を構築し device へアップロード (thermalMethod==2 用)

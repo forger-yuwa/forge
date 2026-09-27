@@ -241,6 +241,11 @@ SpeciesThermo synthesizeLump(const std::string& name, const std::vector<double>&
 
 } // anonymous namespace
 
+std::string speciesDB_identityKey(const std::string& dbKey, bool fromFile)
+{
+    return memberKey(dbKey, fromFile);
+}
+
 ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, const std::string& dbFile,
                                     const std::vector<SpeciesLumpSpec>& lumps)
 {
@@ -321,6 +326,7 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
             out.species.push_back(it->second);
             out.source.push_back(fromFile.count(it->first) ? "file" : "builtin");
             out.lumps.push_back(ResolvedLump{});
+            out.dbKey.push_back(it->first);
             continue;
         }
         // ---- lump: 検査 → lump 内モル分率 → 合成 ----
@@ -364,6 +370,7 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
             seenKey[key] = mn;
             rl.memberSpecies.push_back(it->second);
             rl.memberSource.push_back(file ? "file" : "builtin");
+            rl.memberDbKey.push_back(it->first);
             sum += v;
         }
         // 温度区切りが揃っていること (区間の和集合で畳むのは plan #6b)
@@ -395,6 +402,7 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
         out.species.push_back(synthesizeLump(nm, rl.x, rl.memberSpecies));
         out.source.push_back("lump");
         out.lumps.push_back(rl);
+        out.dbKey.push_back("");
     }
     for (auto& s : out.species) s.invMW = 1.0/s.MW;
     return out;
@@ -431,6 +439,8 @@ ResolvedSpeciesDB speciesDB_resolve(const solverConfig& cfg)
             }
         }
     }
+    // 種ごとの輸送物性の出所 (physProp.transport; plan #5t2 段 1)。書かれていなければ何もしない (記録・ハッシュは従来のまま)。
+    if (!cfg.speciesTransport.empty()) speciesTransportDB_resolve(db, cfg.speciesTransport, cfg.speciesDBFile);
     return db;
 }
 
@@ -576,6 +586,27 @@ void speciesDB_printTable(const solverConfig& cfg, const ResolvedSpeciesDB& db)
             std::cout << "[species]   condensing species: pure condensible (condGasSpecies=-1)\n";
         }
     }
+    if (db.transport.enabled) {
+        // 種ごとの輸送物性の出所 (physProp.transport; plan #5t2 段 1)。GPU はまだ現行の輸送経路を使う (段 2 で接続)。
+        const ResolvedTransport& tr = db.transport;
+        std::cout << "[species]   transport (physProp.transport; " << TRANSPORT_RECORD_SCHEMA << ", data "
+                  << speciesTransportDB_dataName() << " sha256 " << speciesTransportDB_dataSha256().substr(0, 16)
+                  << ", trans.inp sha256 " << speciesTransportDB_transInpSha256().substr(0, 16) << ")\n";
+        std::cout << "[species]     mixing: " << TRANSPORT_MIXING_RULE << "\n";
+        for (int r = 0; r < tr.nReal(); ++r) {
+            double m3, l3, m10, l10;
+            transport_species(tr.sp[r], 300.0, &m3, &l3);
+            transport_species(tr.sp[r], 1000.0, &m10, &l10);
+            std::cout << "[species]     " << std::setw(2) << r << "  " << std::setw(8) << std::left << tr.realName[r] << std::right
+                      << "  " << tr.modelName[r] << "  (" << tr.dataSource[r] << ")  mu(300K)=" << std::setprecision(6) << m3
+                      << " Pa s, lambda(300K)=" << l3 << " W/(m K), mu(1000K)=" << m10 << ", lambda(1000K)=" << l10 << "\n";
+        }
+        for (int a = 0; a < tr.nReal(); ++a)
+            for (int b = a + 1; b < tr.nReal(); ++b)
+                std::cout << "[species]     eta_ij " << tr.realName[a] << "-" << tr.realName[b] << ": "
+                          << tr.pairSource[transport_pair_index(a, b, tr.nReal())] << "\n";
+        for (const auto& n : tr.notes) std::cout << "[species]     NOTE: " << n << "\n";
+    }
     std::cout << "[species]   tracer: " << (cfg.tracerEnabled() ? cfg.tracer + " (roXi transported; inlet floats Xi)" : "none") << "\n";
 }
 
@@ -701,8 +732,10 @@ void compatLineSpecies(std::ostringstream& o, const std::string& tag, const Spec
 }
 
 // 互換性テキスト本体。書式は tools/forge_species.py compat_text と一字一句同じにすること。
+// transportLines: 輸送ブロック (physProp.transport を書いた run だけ; plan #5t2)。空なら何も足さない (従来とバイト一致)。
 std::string compatTextRaw(const std::string& schema, const std::string& datum, const std::string& extrap,
-                          double Tref, const std::vector<RecordEntry>& es)
+                          double Tref, const std::vector<RecordEntry>& es,
+                          const std::vector<std::string>& transportLines = std::vector<std::string>{})
 {
     std::ostringstream o;
     o << "schema: " << schema << "\n";
@@ -724,7 +757,20 @@ std::string compatTextRaw(const std::string& schema, const std::string& datum, c
             }
         }
     }
+    for (const auto& l : transportLines) o << l << "\n";
     return o.str();
+}
+
+// 記録のスキーマ名 (輸送ブロックがあれば v2)
+const char* recordSchemaOf(const ResolvedSpeciesDB& db)
+{
+    return db.transport.enabled ? SPECIES_RECORD_SCHEMA_TRANSPORT : SPECIES_RECORD_SCHEMA;
+}
+
+const std::vector<std::string>& transportLinesOf(const ResolvedSpeciesDB& db)
+{
+    static const std::vector<std::string> none;
+    return db.transport.enabled ? db.transport.compatLines : none;
 }
 
 std::vector<RecordEntry> entriesOf(const ResolvedSpeciesDB& db)
@@ -795,7 +841,8 @@ std::string speciesDB_sha256Hex(const std::string& bytes)
 
 std::string speciesDB_compatText(const ResolvedSpeciesDB& db, double Tref)
 {
-    return compatTextRaw(SPECIES_RECORD_SCHEMA, SPECIES_RECORD_DATUM, SPECIES_RECORD_EXTRAPOLATION, Tref, entriesOf(db));
+    return compatTextRaw(recordSchemaOf(db), SPECIES_RECORD_DATUM, SPECIES_RECORD_EXTRAPOLATION, Tref, entriesOf(db),
+                         transportLinesOf(db));
 }
 
 std::string speciesDB_compatHash(const ResolvedSpeciesDB& db, double Tref)
@@ -812,7 +859,7 @@ std::string speciesDB_recordText(const ResolvedSpeciesDB& db, double Tref, const
     o << "# compat_hash = SHA-256 of the canonical text rebuilt from schema/datum/thermoHrefTemp/extrapolation/species\n";
     o << "#   (source and provenance excluded; see tools/forge_species.py compat_text).\n";
     o << "# integrity   = SHA-256 of this whole file (res_*.h5 attribute species_record_sha256).\n";
-    o << "schema: " << yq(SPECIES_RECORD_SCHEMA) << "\n";
+    o << "schema: " << yq(recordSchemaOf(db)) << "\n";
     o << "compat_hash: " << yq(speciesDB_compatHash(db, Tref)) << "\n";
     o << "datum: " << yq(SPECIES_RECORD_DATUM) << "\n";
     o << "thermoHrefTemp: " << g17(Tref) << "\n";
@@ -841,10 +888,30 @@ std::string speciesDB_recordText(const ResolvedSpeciesDB& db, double Tref, const
             }
         }
     }
+    if (db.transport.enabled) {
+        // 輸送ブロック (plan #5t2): 互換性ハッシュに入る正規化行をそのまま並べる (記録から同じテキストを再構成できる)。
+        // 種ごとのモデルと係数・η_ij の出所と係数・混合則の版・H2O の接続規約・lump の展開行列を含む。
+        o << "transport_compat:\n";
+        for (const auto& l : db.transport.compatLines) o << "  - " << yq(l) << "\n";
+    }
     o << "provenance:\n";
     o << "  speciesDBFile: " << yq(dbFile) << "\n";
     o << "  input_field: " << yq(inputField) << "\n";
     o << "  input_status: " << yq(inputStatus) << "\n";
+    if (db.transport.enabled) {
+        // 輸送の来歴 (互換性ハッシュには入れない): 埋め込みデータの版と、実種・組ごとのデータの出典
+        const ResolvedTransport& tr = db.transport;
+        o << "  transport_data: " << yq(speciesTransportDB_dataName() + " sha256 " + speciesTransportDB_dataSha256()
+                                        + "; CEA trans.inp sha256 " + speciesTransportDB_transInpSha256()) << "\n";
+        o << "  transport_sources:\n";
+        for (int r = 0; r < tr.nReal(); ++r)
+            o << "    - " << yq("real[" + std::to_string(r) + "] " + tr.realName[r] + " (physProp.transport key '" + tr.realConfigKey[r]
+                                + "'): " + tr.modelName[r] + " -- " + tr.dataSource[r]) << "\n";
+        for (int a = 0; a < tr.nReal(); ++a)
+            for (int b = a + 1; b < tr.nReal(); ++b)
+                o << "    - " << yq("pair[" + std::to_string(a) + "," + std::to_string(b) + "] " + tr.realName[a] + "-" + tr.realName[b]
+                                    + ": " + tr.pairSource[transport_pair_index(a, b, tr.nReal())]) << "\n";
+    }
     return o.str();
 }
 
@@ -901,6 +968,7 @@ std::vector<std::string> speciesDB_diffRecord(const std::string& recordPath, con
     std::vector<RecordEntry> es;
     std::string schema, datum, extrap, hashInFile;
     double TrefRec = 0.0;
+    std::vector<std::string> trLines;   // 輸送ブロック (v2 の記録だけ)
     try {
         schema = root["schema"].as<std::string>();
         datum  = root["datum"].as<std::string>();
@@ -926,17 +994,28 @@ std::vector<std::string> speciesDB_diffRecord(const std::string& recordPath, con
             }
             es.push_back(e);
         }
+        if (root["transport_compat"]) for (const auto& l : root["transport_compat"]) trLines.push_back(l.as<std::string>());
     } catch (const std::exception& e) {
         d.push_back("record " + recordPath + " is malformed: " + e.what());
         return d;
     }
     // 記録の自己整合: 中身から互換ハッシュを作り直して記録内の値と比べる (改竄・取り違えの検出)
-    const std::string rehash = speciesDB_sha256Hex(compatTextRaw(schema, datum, extrap, TrefRec, es));
+    const std::string rehash = speciesDB_sha256Hex(compatTextRaw(schema, datum, extrap, TrefRec, es, trLines));
     if (rehash != hashInFile) {
         d.push_back("record " + recordPath + ": compat_hash in file " + hashInFile.substr(0, 16)
                     + " != recomputed from its content " + rehash.substr(0, 16) + " (edited or corrupted record)");
     }
-    if (schema != SPECIES_RECORD_SCHEMA) d.push_back("schema: field '" + schema + "' vs current '" SPECIES_RECORD_SCHEMA "'");
+    if (schema != recordSchemaOf(db)) d.push_back("schema: field '" + schema + "' vs current '" + recordSchemaOf(db) + "'");
+    {
+        // 輸送ブロック (plan #5t2): 行単位で比べ、最初の差を示す
+        const std::vector<std::string>& cur = transportLinesOf(db);
+        if (trLines != cur) {
+            size_t k = 0;
+            while (k < trLines.size() && k < cur.size() && trLines[k] == cur[k]) ++k;
+            d.push_back("transport: field '" + (k < trLines.size() ? trLines[k] : std::string("(end)")) + "' vs current '"
+                        + (k < cur.size() ? cur[k] : std::string("(end)")) + "'");
+        }
+    }
     if (datum != SPECIES_RECORD_DATUM) d.push_back("datum convention: field '" + datum + "' vs current");
     if (extrap != SPECIES_RECORD_EXTRAPOLATION) d.push_back("extrapolation: field '" + extrap + "' vs current");
     if (TrefRec != Tref) d.push_back("thermoHrefTemp: field " + g17(TrefRec) + " vs current " + g17(Tref));

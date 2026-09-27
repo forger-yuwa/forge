@@ -943,6 +943,24 @@ void solverConfig::read(std::string fname)
             }
             this->nSpecies = static_cast<int>(this->speciesNames.size());
         }
+        // 種ごとの輸送物性の出所 (plan thermophysics-solver-owned-species-db #5t2 段 1)。mapping {種名: モデル名} の構造だけを読み、
+        // 実種との対応・モデル名・データの有無の検査は speciesTransportDB_resolve (speciesDB_resolve から呼ぶ) に置く。
+        this->speciesTransport.clear();
+        if (physProp["transport"]) {
+            const YAML::Node tn = physProp["transport"];
+            if (!tn.IsMap() || tn.size() == 0) {
+                throw std::runtime_error("physProp.transport must be a non-empty mapping {species: model} (models: cea, kinetic, fit, custom:<name>_v<version>).");
+            }
+            if (this->thermalMethod != 2) {
+                throw std::runtime_error("physProp.transport requires thermalMethod: 2 (multi-species thermally-perfect gas).");
+            }
+            for (auto it = tn.begin(); it != tn.end(); ++it) {
+                if (!it->first.IsScalar() || !it->second.IsScalar()) {
+                    throw std::runtime_error("physProp.transport: each entry must be 'species: model' (scalar: scalar).");
+                }
+                this->speciesTransport.emplace_back(it->first.as<std::string>(), it->second.as<std::string>());
+            }
+        }
 
         if (this->isAxisymmetric == 1 &&
             (this->bodyForceX != 0.0 || this->bodyForceY != 0.0 || this->bodyForceZ != 0.0)) {

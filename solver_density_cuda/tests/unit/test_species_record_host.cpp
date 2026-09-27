@@ -12,7 +12,7 @@
 //   cmake -DIN=solver_density_cuda/data/species/forge_species_v1.yaml -DOUT=/tmp/forge_species_gen/forge_species_data.hpp
 //       -P solver_density_cuda/cmake/embed_species_data.cmake
 //   g++ -O1 -std=c++17 -I solver_density_cuda -I /tmp/forge_species_gen solver_density_cuda/tests/unit/test_species_record_host.cpp
-//       solver_density_cuda/input/speciesDB.cpp -lyaml-cpp -o /tmp/test_species_record_host && /tmp/test_species_record_host
+//       solver_density_cuda/input/speciesDB.cpp solver_density_cuda/input/speciesTransportDB.cpp -lyaml-cpp -o /tmp/test_species_record_host && /tmp/test_species_record_host
 //   (それぞれ 2 行を 1 行につなげて実行)
 // 規約: [PASS]/[FAIL] を出し、失敗があれば非ゼロ終了。
 // =============================================================================

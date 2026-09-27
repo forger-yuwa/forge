@@ -3,12 +3,15 @@ project(cuda_forge LANGUAGES CUDA)
 # 共通 species データ (data/species/forge_species_v1.yaml) をヘッダへ埋め込む。
 # input/speciesDB.cpp が起動時にパースする (実行時にファイルを読まない; plans/active/thermophysics-solver-owned-species-db.md #4)。
 set(FORGE_SPECIES_DATA_YAML ${CMAKE_CURRENT_SOURCE_DIR}/../data/species/forge_species_v1.yaml)
+# 輸送データ (CEA trans.inp 由来; tools/cea_trans_to_forge_transport.py) も同じヘッダへ埋め込む (plan #5t2)。
+set(FORGE_TRANSPORT_DATA_YAML ${CMAKE_CURRENT_SOURCE_DIR}/../data/species/forge_transport_v1.yaml)
 set(FORGE_SPECIES_DATA_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 add_custom_command(
     OUTPUT ${FORGE_SPECIES_DATA_GEN_DIR}/forge_species_data.hpp
     COMMAND ${CMAKE_COMMAND} -DIN=${FORGE_SPECIES_DATA_YAML} -DOUT=${FORGE_SPECIES_DATA_GEN_DIR}/forge_species_data.hpp
+            -DTRANS=${FORGE_TRANSPORT_DATA_YAML}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/embed_species_data.cmake
-    DEPENDS ${FORGE_SPECIES_DATA_YAML} ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/embed_species_data.cmake
+    DEPENDS ${FORGE_SPECIES_DATA_YAML} ${FORGE_TRANSPORT_DATA_YAML} ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/embed_species_data.cmake
     COMMENT "Embedding species data ${FORGE_SPECIES_DATA_YAML}"
     VERBATIM)
 
@@ -102,6 +105,8 @@ add_library(cuda_forge STATIC
     thermo_d.cuh
     ../input/speciesDB.cpp
     ../input/speciesDB.hpp
+    ../input/speciesTransportDB.cpp
+    ../input/speciesTransportDB.hpp
     transition_d.cu
     transition_d.cuh
     tracerTransport_d.cu

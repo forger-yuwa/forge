@@ -53,6 +53,7 @@ def dump_cpp(workdir):
     exe = os.path.join(workdir, "dump_species_builtin")
     subprocess.run(["g++", "-O1", "-std=c++17", "-I", SOLVER, *inc,
                     os.path.join(HERE, "dump_species_builtin.cpp"), os.path.join(SOLVER, "input", "speciesDB.cpp"),
+                    os.path.join(SOLVER, "input", "speciesTransportDB.cpp"),   # speciesDB_resolve(cfg) が輸送の解決を呼ぶ (#5t2)
                     "-lyaml-cpp", "-o", exe], check=True)
     out = subprocess.run([exe], check=True, capture_output=True, text=True).stdout
     d = json.loads(out)
