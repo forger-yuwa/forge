@@ -106,6 +106,9 @@ plan の参考予測 (codex の独立計算) 0.9421 / 0.2983 / 0.08796 % と比 
 | `run_0003_dry_r32u` | 同、16×32 | 33 節点 | ref |
 | `run_0004_dry_r32g` | 同、16×32 等比 1.1 | 33 節点 | ref |
 | `run_0005_axisprobe_r16` | 軸負例 1 step (**ローカル float = 恒等式は判定不能**、経路確認のみ) | 床に当たった面 2 (両壁の軸節点)。恒等式 相対 ≤6.1e-8 (float の丸め)、床を外すと 0.375 (検出力あり)。`eval_vax2b.py --identity-only` は REFUSED (FP32) | active (経路確認) |
+| `run_0006_disk_r8u` 〜 `run_0009_disk_r32g` | V-ax2b 系列 (AWS FP64、`warmup: 200`) | r8/r16/r32 一様は step 2050–2150 で**安全停止** (case/61 と同じ誤検知の型: 壁温が下がってから上がる過渡)。**r32 非一様は step 200 の最初の更新で固体が 454.6 K** (範囲外) — 流体が一様 IC のまま連成を始めた起動の罠 (親 plan #99 ⑤ と同型) | 破棄 (対処 1 の根拠) |
+| `run_0010_axisprobe_fp64` | 軸負例 1 step (FP64、`axisRFloor` 5e-4) | **`eval_vax2b.py --identity-only` PASS**: 床に当たった面を含め q_eff·A^r = Q_f 相対 0、raw 1.5e-16、床を外すと 0.375 (検出力あり) | ref |
+| `run_0011_disk_r8u_w20k` 〜 `run_0014_disk_r32g_w20k` | **対処 1**: `warmup` 200 → **20000**。他は同一 | (実行中) | active |
 
 ローカルの起動確認 (2026-09-27、float、各 2 step) は 4 本とも init・固体検査・界面の座標一致 (ずれ 0 m) を通り rc 0。
 評価器の経路確認 (`warmup 0`・`interval 1` の 3 step) も通した。いずれも確認後に破棄した。
