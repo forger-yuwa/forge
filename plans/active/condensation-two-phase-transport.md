@@ -62,8 +62,10 @@
 
 ### 4.1 (A) 気相組成の輸送物性
 
-- `gasProperties_d` (と `wmlesWallModel_d` の壁物性) で、凝縮 carrier (TP) のとき組成を `Y_s^gas = Y_s/(1−g)` (s ≠ 凝縮種), `Y_w^gas = (Y_w − g)/(1−g)` として X を作る。
-- 化学種拡散係数 (混合平均) も同じ気相組成で評価する。CPG carrier (空気) と `viscMethod 0/1` は組成を見ないので変更なし。
+- **2026-09-27 改訂 (輸送物性の作り直し後)**: μ・λ は種ごとの輸送物性 (`viscMethod: 2` + `physProp.transport`; plan `thermophysics-solver-owned-species-db` §4.3c、`feature/species-transport`) になり、セル・壁とも `transport_mix_Y` / 表引き `transport_mix_Y_tab` (`cuda_forge/transportMix_d.cuh`・`transportTables_d.cuh`) が輸送種の Y から組成を作る。旧 Wilke 経路は撤去済み。
+- 凝縮 carrier (TP) のとき、この入口に渡す組成を気相組成にする: `Y_s^gas = Y_s/(1−g)` (s ≠ 凝縮種), `Y_w^gas = (Y_w − g)/(1−g)` (液を除き再正規化)。その後は通常どおり輸送種 X → lump 展開 → CEA 形混合。
+  変更は `gas_transport_cell_Y` (`gasProperties_d.cu`) と壁の組成を作る箇所に限り、`transport_mix_Y` の式は変えない。
+- 化学種拡散係数 (混合平均、`thermo_Dmix_species_f`) も同じ気相組成で評価する。CPG carrier (空気) と `viscMethod 0/1` は組成を見ないので変更なし。
 
 ### 4.2 (B) 拡散作用素の統一
 
@@ -92,7 +94,7 @@
 | 1 | §4 の上位諮問と codex plan 段レビュー | `cuda_forge` の輸送・拡散を変えるので AGENTS.md エスカレーション 1・6。§4.2 の補正速度・エネルギー項の式と §6 の合否を確定してから | F |
 | 1b | 影響の A/B (codex diagnose 2026-09-27) | 共通初期場 = `case/16.nozzle_wys/run_0482_passive_wys_s1_sfr2_c1` の最終保存量 (`restart_field.py` で 2 run に複製)。同じバイナリ・S3・BC・CFL。**変える点は拡散モデルの 1 点**: A = 現行、B = 蒸気の分子+乱流拡散 + 液と Q0/Q1/Q2 の同じ Sc_t による乱流輸送 + 整合したエンタルピー流束 (試験用実装が必要)。4000 step (200 step ごと保存) から、両者が `check_convergence` PASS・報告量 STEADY になるまで延長。測る量: 共通初期場での **EOS に投影した温度変化率 δṪ = (∂T/∂U)(R_B − R_A)/V** (総水分・液の残差も EOS に通す)、定常での共通凝縮域の体積重み **p95\|ΔT\|** (事前判別閾値 1 K)、onset・出口 g・壁圧。試験用実装は `cuda_forge` の変更なので #1 の後 | F |
 | 2 | (C) クランプ量の監視 | ログ常時出力 + 判定。合格: 既存 NS + 凝縮 run (case/16 `run_0483` 系, case/42 `run_0071` 系) の再実行で数値が出て、閾値判定が働く | O |
-| 3 | (A) 気相組成の輸送物性 | §4.1。合格: 単体試験で g=0 のとき現行とビット一致、g>0 で気相組成の Wilke と一致。case/16 NS + 凝縮で μ の変化量を記録 | O |
+| 3 | (A) 気相組成の輸送物性 | §4.1。合格: g=0 のとき現行とビット一致、g>0 で気相組成を渡した独立参照 (`tests/unit/transport_reference.py`) と一致 (float 格納 ≤1e-5)。case/16 NS + 凝縮で μ の変化量を記録 | O |
 | 4 | (B) 拡散作用素の統一 + 液 Sc | §4.2。合格は §6 (実装前に確定) | O |
 | 5 | docs | `methods/condensation.md`・`methods/thermophysics.md`・`procedures/solver-settings.md` | O |
 
@@ -122,6 +124,7 @@
 
 ## 9. 変更ログ
 
+- `2026-09-27` — §4.1 を輸送物性の作り直し後の実装 (`transport_mix_Y`、CEA 形混合、旧 Wilke 撤去) に合わせて改訂。作業は `feature/species-transport` で行う。
 - `2026-09-27` — 流束の実測と codex diagnose (`notes/reviews/2026-09-27-condensation-diffusion-error-diagnose.md`) を反映: 液は拡散していない (旧記述を訂正)、潜熱は EOS で相殺するので流束比から温度影響を読まない、補正は分子流束だけ・乱流は全相共通 Sc_t、有限 Sc_l の整合、影響を測る A/B (#1b)。解析スクリプトの拡散係数の定数誤り (1e4 倍小) を修正 (比には影響なし)。
 - `2026-09-27` — 起票。ユーザ決定: 懸濁効果は無視、μ・λ は気相組成で考慮したい、拡散は将来「蒸気の勾配で分子拡散・液は分子拡散なし (安定化用の微小な液 Sc は選択肢として残す)・乱流は同じ Sc_t」。
   種 DB plan (`thermophysics-solver-owned-species-db.md`) §10 から移管。
