@@ -44,7 +44,7 @@ slip:   {physID: 5, kind: slip, outputHDFflg: 0, ints: , floats: }
 """
 
 
-def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl, r_up=1.06, r_buf=1.03, split_dn=False):
+def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl, r_up=1.06, r_buf=1.03, split_dn=False, wall_dn=False):
     L = []; A = L.append
     A("// case/56 — TP-1187 較正パネル相当の 2D 平板 (平面 2D, node)。gen_mesh.py が生成。")
     A("Geometry.PointNumbers = 0;  lc = 0.05;")
@@ -69,11 +69,15 @@ def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl
     A('Physical Curve("inlet",  1) = {7};')
     A('Physical Curve("outlet", 2) = {10};')
     A('Physical Curve("top",    3) = {4, 5, 6};')
-    A('Physical Curve("plate",  4) = {2};')
-    if split_dn:   # 下流の slip バッファを別 physID に (wallDistExtraPhysIDs で壁距離に含められるように)
+    if wall_dn:    # 下流区間も等温壁 (平板を出口まで延ばす。slip 後流を作らない)
+        A('Physical Curve("plate",  4) = {2, 3};')
+        A('Physical Curve("slip",   5) = {1};')
+    elif split_dn:   # 下流の slip バッファを別 physID に (wallDistExtraPhysIDs で壁距離に含められるように)
+        A('Physical Curve("plate",  4) = {2};')
         A('Physical Curve("slip",   5) = {1};')
         A('Physical Curve("slip_dn", 7) = {3};')
     else:
+        A('Physical Curve("plate",  4) = {2};')
         A('Physical Curve("slip",   5) = {1, 3};')
     A('Physical Surface("fluid", 8) = {1, 2, 3};')
     return "\n".join(L) + "\n"
@@ -132,6 +136,7 @@ def main():
     ap.add_argument("--r-up", type=float, default=1.06, help="助走区間の等比 (既定は従来値)")
     ap.add_argument("--r-buf", type=float, default=1.03, help="出口バッファの等比 (既定は従来値)")
     ap.add_argument("--split-dn-slip", action="store_true", help="下流 slip バッファを physID 7 に分ける")
+    ap.add_argument("--wall-dn", action="store_true", help="下流区間の底辺も平板 (physID 4) にする (平板を出口まで延ばす)")
     ap.add_argument("--walldist-extra", default="", help="変換時の mesh.wallDistExtraPhysIDs (例: 7)")
     ap.add_argument("--tag", default="fp")
     ap.add_argument("--no-convert", action="store_true")
@@ -167,7 +172,7 @@ def make_progression(a):
         else:
             hi = r
     txt = geo_text(a.x_in, a.x_out, a.x_plate_end, a.H, ny, r,
-                   a.nx_up, a.nx_plate, a.nx_buf, a.bump_plate, a.r_up, a.r_buf, a.split_dn_slip)
+                   a.nx_up, a.nx_plate, a.nx_buf, a.bump_plate, a.r_up, a.r_buf, a.split_dn_slip, a.wall_dn)
     (MESH / f"{a.tag}.geo").write_text(txt)
     print(f"[{a.tag}] 平板 {a.x_plate_end*1e2:.0f} cm, H = {a.H*1e2:.0f} cm")
     print(f"        ny = {ny} (y1 = {a.H*(r-1)/(r**(ny-1)-1)*1e6:.3f} µm, r = {r:.5f}), "
