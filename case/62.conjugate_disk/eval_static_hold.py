@@ -52,6 +52,8 @@ def main():
     ap.add_argument("run")
     ap.add_argument("--win0", type=int, default=10000)
     ap.add_argument("--win1", type=int, default=20000)
+    ap.add_argument("--per-node", action="store_true",
+                    help="固定した節点 ID ごとの符号付き熱流束 (両壁の全節点) を系列 CSV に足す (plan §5.1 #3 追加検証)")
     a = ap.parse_args()
     run = a.run.rstrip("/")
     with h5py.File(f"{run}/mesh.h5", "r") as m:
@@ -67,16 +69,22 @@ def main():
         hot, cj = wall(run, "res_wall_hot_3", st), wall(run, "res_wall_cj_4", st)
         if hot is None or cj is None:
             continue
+        extra = []
+        if a.per_node:
+            extra = list(hot[1]) + list(cj[1])          # 壁ダンプの節点順 = 固定した節点 ID
+            nhot, ncj = len(hot[1]), len(cj[1])
         rows.append((st, float(np.hypot(Ux, Uy).max()), float(np.abs(Uy).max()),
                      float((P.max() - P.min()) / ((P * V).sum() / V.sum())),
                      float(checker(*cj)),
                      float(np.abs(np.abs(hot[1]) - Q_REF).max() / Q_REF * 100),
-                     float(np.abs(np.abs(cj[1]) - Q_REF).max() / Q_REF * 100)))
+                     float(np.abs(np.abs(cj[1]) - Q_REF).max() / Q_REF * 100), *extra))
     rows.sort()
     X = np.array(rows)
     cols = ["step", "Umax", "Uymax", "dPrel", "checker", "qerr_hot", "qerr_cj"]
+    if a.per_node:
+        cols += [f"qhot_{i}" for i in range(nhot)] + [f"qcj_{i}" for i in range(ncj)]
     out = f"{run}/static_hold_series.csv"
-    np.savetxt(out, X, delimiter=",", header=",".join(cols), comments="", fmt=["%d"] + ["%.10e"] * 6)
+    np.savetxt(out, X, delimiter=",", header=",".join(cols), comments="", fmt=["%d"] + ["%.10e"] * (len(cols) - 1))
     w = X[(X[:, 0] >= a.win0) & (X[:, 0] <= a.win1)]
     if len(w) == 0:
         raise SystemExit(f"比較窓 {a.win0}–{a.win1} にスナップショットが無い")
@@ -92,7 +100,7 @@ def main():
         print(f"  {'PASS' if ok else 'FAIL'}  {nm:<34} max {v:.4e}  (許容 {tol:g})")
     print(f"  参考: max|U_y| {w[:, 2].max():.4e} m/s、市松 {w[:, 4].max():.4e} W/m²")
     print(f"\n準定常: python3 solver_density_cuda/tools/check_quasisteady.py --series-csv {out} "
-          f"--series-cols Umax,Uymax,dPrel,checker,qerr_hot,qerr_cj --tail 0.5 --drift 0.001 --osc 0.001")
+          f"--series-cols {','.join(cols[1:])} --tail 0.5 --drift 0.001 --osc 0.001")
     print(f"\nVERDICT (閾値のみ): {'PASS' if not bad else 'FAIL'}" + (f"  ({', '.join(bad)})" if bad else ""))
     return 0 if not bad else 1
 
