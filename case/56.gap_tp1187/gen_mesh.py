@@ -44,7 +44,7 @@ slip:   {physID: 5, kind: slip, outputHDFflg: 0, ints: , floats: }
 """
 
 
-def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl, r_up=1.06, r_buf=1.03, split_dn=False, wall_dn=False):
+def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl, r_up=1.06, r_buf=1.03, split_dn=False, wall_dn=False, top_layers=0):
     L = []; A = L.append
     A("// case/56 — TP-1187 較正パネル相当の 2D 平板 (平面 2D, node)。gen_mesh.py が生成。")
     A("Geometry.PointNumbers = 0;  lc = 0.05;")
@@ -66,9 +66,32 @@ def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl
     for k in range(1, 4):
         A(f"Curve Loop({k}) = {{{k}, {7+k}, -{3+k}, -{6+k}}};")
         A(f"Plane Surface({k}) = {{{k}}};  Transfinite Surface {{{k}}};  Recombine Surface {{{k}}};")
-    A('Physical Curve("inlet",  1) = {7};')
-    A('Physical Curve("outlet", 2) = {10};')
-    A('Physical Curve("top",    3) = {4, 5, 6};')
+    if top_layers > 0:
+        # 既存の y 分布をそのまま残し、上端から同じ等比で top_layers 層を別ブロックとして積む
+        # (下のブロックの節点位置は変えない。2026-09-27 codex diagnose: 高さだけを変える A/B)
+        h_last = H * (r_y - 1.0) * r_y ** (ny - 2) / (r_y ** (ny - 1) - 1.0)
+        H2 = H + h_last * r_y * (r_y ** top_layers - 1.0) / (r_y - 1.0)
+        A(f"H2 = {H2:.12f};")
+        for i, xs in enumerate(("x_in", "xle", "xpe", "x_out"), start=9):
+            A(f"Point({i}) = {{{xs}, H2, 0.0, lc}};")
+        for i in range(11, 14):
+            A(f"Line({i}) = {{{i-2}, {i-1}}};")          # 11..13 新しい上辺
+        for i, (b, t) in enumerate(zip(range(5, 9), range(9, 13)), start=14):
+            A(f"Line({i}) = {{{b}, {t}}};")              # 14..17 上ブロックの縦線
+        A(f"Transfinite Line {{14, 15, 16, 17}} = {top_layers + 1} Using Progression {r_y:.8f};")
+        A(f"Transfinite Line {{11}} = {nx_up} Using Progression {r_up};")
+        A(f"Transfinite Line {{12}} = {nx_pl} Using Bump {bump_pl};")
+        A(f"Transfinite Line {{13}} = {nx_buf} Using Progression {r_buf};")
+        for k in range(1, 4):
+            A(f"Curve Loop({k+3}) = {{{k+3}, {14+k}, -{10+k}, -{13+k}}};")
+            A(f"Plane Surface({k+3}) = {{{k+3}}};  Transfinite Surface {{{k+3}}};  Recombine Surface {{{k+3}}};")
+        A('Physical Curve("inlet",  1) = {7, 14};')
+        A('Physical Curve("outlet", 2) = {10, 17};')
+        A('Physical Curve("top",    3) = {11, 12, 13};')
+    else:
+        A('Physical Curve("inlet",  1) = {7};')
+        A('Physical Curve("outlet", 2) = {10};')
+        A('Physical Curve("top",    3) = {4, 5, 6};')
     if wall_dn:    # 下流区間も等温壁 (平板を出口まで延ばす。slip 後流を作らない)
         A('Physical Curve("plate",  4) = {2, 3};')
         A('Physical Curve("slip",   5) = {1};')
@@ -79,7 +102,7 @@ def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl
     else:
         A('Physical Curve("plate",  4) = {2};')
         A('Physical Curve("slip",   5) = {1, 3};')
-    A('Physical Surface("fluid", 8) = {1, 2, 3};')
+    A(f'Physical Surface("fluid", 8) = {{{"1, 2, 3, 4, 5, 6" if top_layers > 0 else "1, 2, 3"}}};')
     return "\n".join(L) + "\n"
 
 
@@ -137,6 +160,7 @@ def main():
     ap.add_argument("--r-buf", type=float, default=1.03, help="出口バッファの等比 (既定は従来値)")
     ap.add_argument("--split-dn-slip", action="store_true", help="下流 slip バッファを physID 7 に分ける")
     ap.add_argument("--wall-dn", action="store_true", help="下流区間の底辺も平板 (physID 4) にする (平板を出口まで延ばす)")
+    ap.add_argument("--top-layers", type=int, default=0, help="既存の y 分布の上に同じ等比で積む層数 (高さだけを変える A/B 用)")
     ap.add_argument("--walldist-extra", default="", help="変換時の mesh.wallDistExtraPhysIDs (例: 7)")
     ap.add_argument("--tag", default="fp")
     ap.add_argument("--no-convert", action="store_true")
@@ -146,6 +170,9 @@ def main():
 
     MESH.mkdir(exist_ok=True)
     if a.y_file:
+        # --y-file 経路は x 方向の等比 (1.06/1.03) と BC 割り当てが固定。黙って無視しないよう拒否する (codex 2026-09-27)
+        if a.wall_dn or a.top_layers or a.split_dn_slip or a.r_up != 1.06 or a.r_buf != 1.03:
+            sys.exit("--y-file は --wall-dn/--top-layers/--split-dn-slip/--r-up/--r-buf に対応していない")
         ys = np.loadtxt(a.y_file)
         if ys[0] != 0.0 or np.any(np.diff(ys) <= 0):
             sys.exit(f"{a.y_file}: 0 から始まる狭義単調増加の列でない")
@@ -172,7 +199,7 @@ def make_progression(a):
         else:
             hi = r
     txt = geo_text(a.x_in, a.x_out, a.x_plate_end, a.H, ny, r,
-                   a.nx_up, a.nx_plate, a.nx_buf, a.bump_plate, a.r_up, a.r_buf, a.split_dn_slip, a.wall_dn)
+                   a.nx_up, a.nx_plate, a.nx_buf, a.bump_plate, a.r_up, a.r_buf, a.split_dn_slip, a.wall_dn, a.top_layers)
     (MESH / f"{a.tag}.geo").write_text(txt)
     print(f"[{a.tag}] 平板 {a.x_plate_end*1e2:.0f} cm, H = {a.H*1e2:.0f} cm")
     print(f"        ny = {ny} (y1 = {a.H*(r-1)/(r**(ny-1)-1)*1e6:.3f} µm, r = {r:.5f}), "
