@@ -10,6 +10,9 @@ Eckert の式は D-7275 p.14 (ref. 12 = Kays) の乱流の関係:
 
 forge の St*_l は q_w / [(ρVcp)*_l (Taw − Tw)]、Taw = 1728 K (Table III)、Tw = 300 K (run)。
 感度として (a) T* を Tw = 300 K から自前で組み直した場合、(b) 乱流起点をトリップ位置 (12.7 cm) にした場合も出す。
+(c) --forge-props (forge の run の場から取った T* での μ・cp・Pr、`{"600": {"mu":..,"cp":..,"Pr":..}}`) を渡すと、
+Eckert の q を forge 自身の輸送物性 (kinetic theory、Pr ≈ 0.745) で組み、forge の q_w と直接比べる (2026-09-27 追加:
+Python 側の気体モデルの Pr* 0.6905 は forge の Pr 0.745 と違い、Eckert の値が約 5 % 変わる)。
 """
 import argparse, json, sys
 from pathlib import Path
@@ -30,6 +33,8 @@ def main():
     ap.add_argument("plate_h5")
     ap.add_argument("--json", default=None)
     ap.add_argument("--tw", type=float, default=300.0)
+    ap.add_argument("--forge-props", default=None, help="forge の場から取った T* での μ・cp・Pr (JSON)")
+    ap.add_argument("--case-setup", default=None, help="run の case_setup.json (p∞・U∞・R)。--forge-props と併用")
     a = ap.parse_args()
     d = json.loads((CASE / "digitize_d7275_fig20_test26.json").read_text())
     t2, t3 = d["test26_table"]["TableII"], d["test26_table"]["TableIII"]
@@ -85,6 +90,14 @@ def main():
     sel = (ux > 0.05)
     fe_curve = St_f[sel] / eck(R_f[sel])
     summ["forge_over_eck_x"] = {f"{xx:.1f}": float(np.interp(xx, ux[sel], fe_curve)) for xx in (0.2, 0.5, 1.0, 1.5, 2.0, 2.5)}
+    if a.forge_props and a.case_setup:
+        FP = json.loads(Path(a.forge_props).read_text()); cs = json.loads(Path(a.case_setup).read_text())
+        for key, fp in FP.items():
+            Ts = float(key); rho = cs["p_inf"] / (cs["R"] * Ts); U = cs["U_inf"]
+            qE = lambda xx: 0.0296 * fp["Pr"] ** (-2 / 3) * (rho * U * xx / fp["mu"]) ** -0.2 * rho * U * fp["cp"] * (Taw - a.tw)
+            rr = np.interp(xs, ux, qx) / qE(xs)
+            summ[f"forge_over_eck_forgeprops_T{key}"] = dict(Pr=fp["Pr"], mu=fp["mu"], cp=fp["cp"], mean=float(rr.mean()),
+                                                             min=float(rr.min()), max=float(rr.max()))
     print("\n" + json.dumps(summ, ensure_ascii=False, indent=1))
     if a.json:
         step = max(1, len(ux) // 400)

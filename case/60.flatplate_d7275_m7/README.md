@@ -46,3 +46,5 @@ T4-0a (case/59、Cary) の比較方法が固まってから計算する。
 ## Eckert 参照温度法との比較 (2026-09-27)
 
 `tools/eckert_compare.py` (論文 p.14 の乱流の式 St*ₗ = 0.0296·Pr*^(−2/3)·R*ₗ^(−1/5)、Table III の換算係数、Pr*(600 K) = 0.6905) で `run_0002_t26_ext` の壁熱流束 (step 60000) を実験点と同じ座標に置いた。比較 10 点で **forge/Eckert 0.969–1.009 (平均 0.991)**、**実験/Eckert 0.700–0.777 (平均 0.755)**、forge/実験 1.313。感度: 乱流起点をトリップにすると forge/Eckert 0.976・実験/Eckert 0.744、T* を Tw 300 K から組み直すと forge/Eckert 1.001。forge/Eckert は前縁近くで 1 を下回る (x 0.2 m で 0.89)。まとめのページ: https://claude.ai/artifact/W6RzaLpfYWGopBEdLd8aDx (非公開)。
+
+**訂正 (同日)**: 上の forge/Eckert 0.991 は Eckert に比較用の Python 気体モデル (case/56 `gas_htst`) の Pr*(600 K) = 0.6905 を入れた値。forge 自身の輸送物性 (kinetic theory、`run_0002_t26_ext/res_60000.h5` の `vis_lam`・`thermCond` から T* ±2 K の中央値: μ* 2.95e-5 Pa·s、Pr* 0.7446、`forge_props_run0002_Tstar.json`) で Eckert の q を組むと **forge/Eckert 1.060 (1.036–1.080)**、T* 594 K で 1.054。同じ Python 物性で q を直接組むと 1.020。→ forge/Eckert は Eckert に入れる物性で 0.99〜1.06。実験/Eckert (0.755) と forge/実験 (1.313) は同じ換算係数で割るので変わらない。初版ページは物性の表を持たず、この違いに気づかなかった (ユーザ指摘で `forge-report` skill に物性の表を追加)。ページは v2 で解析条件・物性・判定ゲートを追加して差し替え。
