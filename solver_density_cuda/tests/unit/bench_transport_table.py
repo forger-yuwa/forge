@@ -4,10 +4,12 @@
   (新物性時間 − 旧物性時間)/旧 step 時間 ≤ 0.10   (実種 n = 5・12 で判定、32 は記録のみ)
   同じ入力・GPU・ビルド条件で、暖機後 300 step × 5 反復。反復ごとの比の最大値で判定。
 
-  python3 solver_density_cuda/tests/unit/bench_transport_table.py --forge BIN [--reps 5] [--steps 300] [--warm 20] [--keep]
+  python3 solver_density_cuda/tests/unit/bench_transport_table.py --forge BIN [--legacy-forge OLD_BIN] [--reps 5] [--steps 300] [--warm 20] [--keep]
 
-各構成を 3 通りで回す (同じバイナリ・同じ初期場・FORGE_PROFILE=1・FORGE_CUDA_BLOCKSIZE=256):
-  legacy : physProp.transport なし (viscMethod 2 の従来の Wilke 経路) = 「旧」
+各構成を 3 通りで回す (同じ初期場・FORGE_PROFILE=1・FORGE_CUDA_BLOCKSIZE=256):
+  legacy : physProp.transport なし (viscMethod 2 の従来の Wilke 経路) = 「旧」。**2026-09-27 に旧経路を計算から外した
+           (plan §4.3c 案 C; 新バイナリでは viscMethod 2 + transport なしは起動時エラー) ので、`--legacy-forge` に置き換え前
+           (e2daaba8 まで) のバイナリを渡す** (同じビルド条件で作ったもの)。legacy を測らないなら `--variants table,double`
   table  : physProp.transport あり、表引き (既定) = 「新」
   double : physProp.transport あり、FORGE_TRANSPORT_TABLE=0 (段 2 の double 評価; 記録のみ)
 暖機の除外: 同じ入力で nStep = warm と warm + steps の 2 本を回し、FORGE_PROFILE の区間合計の差を steps で割る
@@ -87,6 +89,7 @@ def parse_profile(log):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--forge", required=True)
+    ap.add_argument("--legacy-forge", default="", help="legacy (旧 kinetic 経路) を回す置き換え前のバイナリ")
     ap.add_argument("--seed-run", default="")
     ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--steps", type=int, default=300)
@@ -96,6 +99,12 @@ def main():
     ap.add_argument("--keep", action="store_true")
     a = ap.parse_args()
     a.forge = os.path.abspath(a.forge)
+    if "legacy" in a.variants.split(","):
+        if not a.legacy_forge:
+            print("[FAIL] variant legacy needs --legacy-forge OLD_BIN (viscMethod 2 without physProp.transport is refused by the "
+                  "current binary since 2026-09-27); or pass --variants table,double")
+            return 1
+        a.legacy_forge = os.path.abspath(a.legacy_forge)
     if not a.seed_run:
         for c in (os.path.join(tg.REPO, SEED_REL), os.path.join(os.path.dirname(tg.REPO), "forge", SEED_REL)):
             if os.path.exists(os.path.join(c, "res_24000.h5")):
@@ -152,9 +161,12 @@ def main():
                     e = dict(os.environ)
                     e["FORGE_PROFILE"] = "1"
                     e["FORGE_CUDA_BLOCKSIZE"] = "256"
+                    # 試験用に組んだ init.h5 は species 属性を持たない (#3c 以降の既定は停止) のでこの実行だけ許可する
+                    e["FORGE_ALLOW_UNVERIFIED_SPECIES"] = "1"
                     if var == "double":
                         e["FORGE_TRANSPORT_TABLE"] = "0"
-                    r = subprocess.run([a.forge], cwd=d, env=e, capture_output=True, text=True, timeout=3600)
+                    binp = a.legacy_forge if var == "legacy" else a.forge
+                    r = subprocess.run([binp], cwd=d, env=e, capture_output=True, text=True, timeout=3600)
                     open(os.path.join(d, "forge.log"), "w").write(r.stdout + r.stderr)
                     if r.returncode != 0 or "Profiled steps" not in r.stdout:
                         print(f"[FAIL] {name} {var} rep {rep} n {nst}: rc {r.returncode}\n{(r.stdout + r.stderr)[-2000:]}")

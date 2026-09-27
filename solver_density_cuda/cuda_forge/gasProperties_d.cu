@@ -5,7 +5,7 @@
 #include "speciesTransport_d.cuh"  // species_roY_device_ptr()
 
 // 種ごとの輸送物性の経路 (physProp.transport があり viscMethod 2) で使うセル組成。
-//   現行 viscMethod 2 と同じ作り方 (Y_s = max(ρY_s/ρ, 0) を和で正規化)。単成分・roY 無しは {1, 0, ...}。
+//   旧 kinetic 経路 (撤去済み) と同じ作り方 (Y_s = max(ρY_s/ρ, 0) を和で正規化)。単成分・roY 無しは {1, 0, ...}。
 //   返り値は transport_mix_Y へ渡す種数 (roY 無しは 1 = X {1})。
 __device__ inline int gas_transport_cell_Y(int nSpecies, flow_float* const* roY, const flow_float* ro, geom_int ic, double* Y)
 {
@@ -35,13 +35,13 @@ __global__ void gasProperties_d
 (
  // gas properties
  int thermalMethod , int viscMethod ,
- // 層流熱伝導モデル: 0=一定 / 1=constant-Pr (k=μ(T)·cp/Pr_lam)。viscMethod 0/1 で有効 (2 は kinetic theory が λ を持つ)。
+ // 層流熱伝導モデル: 0=一定 / 1=constant-Pr (k=μ(T)·cp/Pr_lam)。viscMethod 0/1 で有効 (2 は種ごとの輸送物性が λ を持つ)。
  int thermCondMethod , flow_float prandtlLam ,
 
  // gas properties
  flow_float gamma , flow_float cp , flow_float visc_lam, flow_float thermCond_const,
 
- // thermally-perfect 化学種データ (kinetic theory 輸送 viscMethod==2 用)
+ // thermally-perfect 化学種データ (種ごとの輸送物性 viscMethod==2 用)
  const SpeciesThermo* sp , int nSpecies , flow_float** roY ,
 
  // 種ごとの輸送物性 (physProp.transport; transportOn=1 のとき viscMethod 2 は CEA frozen 混合則 transport_mix_Y)
@@ -106,31 +106,14 @@ __global__ void gasProperties_d
             thermCond_array[ic] = (flow_float)lam;
 
         } else if (viscMethod == 2 && transportOn != 0) { // 種ごとの出所 + CEA frozen 混合則 (double 評価・float 格納)
+            // viscMethod 2 は physProp.transport 必須 (main.cpp が起動時に検査)。旧 kinetic 経路 (thermo_mu_mix /
+            // thermo_lambda_mix の Wilke 共用 φ) は計算から外した (plan §4.3c 案 C)。
             double Y[THERMO_MAX_SPECIES];
             const int nY = gas_transport_cell_Y(nSpecies, roY, ro, ic, Y);
             double mu, lam;
             transport_mix_Y(sp, ttab, nY, Y, (double)T[ic], &mu, &lam);
             vis_lam_array[ic]   = (flow_float)mu;
             thermCond_array[ic] = (flow_float)lam;
-
-        } else if (viscMethod == 2) { // kinetic theory (Chapman-Enskog + Wilke/Mason-Saxena)
-            // 組成 Y (単成分 or roY=nullptr のときは Y={1}) を構築し double で評価。
-            double Y[THERMO_MAX_SPECIES];
-            double X[THERMO_MAX_SPECIES];
-            const double ro_d = (double)max(ro[ic], (flow_float)1.0e-30);
-            if (nSpecies <= 1 || roY == nullptr) {
-                Y[0] = 1.0f;
-            } else {
-                double ysum = 0.0;
-                for (int s=0;s<nSpecies;s++){ double y=(double)roY[s][ic]/ro_d; if(y<0.0)y=0.0; Y[s]=y; ysum+=y; }
-                const double inv = 1.0/(ysum>1.0e-30?ysum:1.0e-30);
-                for (int s=0;s<nSpecies;s++) Y[s]*=inv;
-            }
-            const int n = (nSpecies >= 1) ? nSpecies : 1;
-            thermo_X_from_Y(sp, n, Y, X);
-            const double Td = (double)T[ic];
-            vis_lam_array[ic]   = (flow_float)thermo_mu_mix(sp, n, X, Td);
-            thermCond_array[ic] = (flow_float)thermo_lambda_mix(sp, n, X, Td);
         }
     }
 }
@@ -138,7 +121,7 @@ __global__ void gasProperties_d
 
 void gasProperties_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
 {
-    const TransportTableD* ttab = thermo_transport_table();   // physProp.transport が無ければ nullptr (現行経路)
+    const TransportTableD* ttab = thermo_transport_table();   // physProp.transport が無ければ nullptr (viscMethod 0/1)
     gasProperties_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
         cfg.thermalMethod,
         cfg.viscMethod ,
@@ -147,7 +130,7 @@ void gasProperties_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& ms
         // gas properties
         cfg.gamma , cfg.cp , cfg.visc, cfg.thermCond,
 
-        // 化学種データ (kinetic theory)
+        // 化学種データ
         thermo_species_device_ptr() , cfg.nSpecies , species_roY_device_ptr() ,
 
         // 種ごとの輸送物性 (physProp.transport)

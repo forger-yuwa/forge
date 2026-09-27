@@ -6,9 +6,9 @@
 
 case/44 va3 dry lumpX の problem で `runner_axismach.prepare` (prepare-only 相当) を一時ディレクトリに作り、
   (f-A) 宛先 thermoHrefTemp 298.15、IC の h_ref_T = 298.15 → IC に属性 (species_input_unverified=0) が付き、
-        FORGE_REQUIRE_VERIFIED_SPECIES=1 でソルバが「species_hash matches」で 1 step 走り、res_1 も species_input_unverified=0
+        既定 (環境変数なし) のソルバが「species_hash matches」で 1 step 走り、res_1 も species_input_unverified=0
   (f-B) 同じ宛先で IC の h_ref_T だけ 0 → IC 生成 (stamp) が datum 不一致でエラー、属性は付かない。
-        FORGE_REQUIRE_VERIFIED_SPECIES=1 のソルバは UNVERIFIABLE で起動前に停止
+        既定のソルバは UNVERIFIABLE で起動前に停止 (#3c で属性なしは既定で停止; 以前は FORGE_REQUIRE_VERIFIED_SPECIES=1 で先取りしていた)
   (MW)  組成を作った MW が記録と違う (MIXDRY ×(1+1e-6)) → エラー・属性なし
   (ord) 輸送種の順序が記録と違う → エラー・属性なし
   (e)   照合関数のエネルギー式: IC と同じ datum シフト → 問題なし、シフトを落とした e(T) → 内部エネルギー不一致を検出
@@ -44,13 +44,11 @@ def attrs(h5):
         return {k: (f.attrs[k].decode() if isinstance(f.attrs[k], bytes) else f.attrs[k]) for k in f.attrs if k.startswith("species")}
 
 
-def run_forge(forge, d, strict=True):
+def run_forge(forge, d):
     env = dict(os.environ)
     env.setdefault("FORGE_CUDA_BLOCKSIZE", "256")
     env.pop("FORGE_ALLOW_UNVERIFIED_SPECIES", None)
-    env.pop("FORGE_REQUIRE_VERIFIED_SPECIES", None)
-    if strict:
-        env["FORGE_REQUIRE_VERIFIED_SPECIES"] = "1"
+    env.pop("FORGE_REQUIRE_VERIFIED_SPECIES", None)   # 撤去済み (#3c)。残っていても効かないが試験の前提を明確にする
     cfg = (Path(d) / "solverConfig.yaml").read_text()
     cfg = re.sub(r"nStepOuter: *\d+", "nStepOuter: 1", cfg)
     cfg = re.sub(r"outStepInterval: *\d+", "outStepInterval: 1", cfg)
@@ -83,7 +81,7 @@ def main():
               and (dA / str(atA.get("species_record_file"))).exists(), str({k: str(v)[:16] for k, v in atA.items()}))
         rc, out = run_forge(os.environ["FORGE_BIN"], dA)
         at1 = attrs(dA / "res_1.h5") if (dA / "res_1.h5").exists() else {}
-        check("(f-A) solver (FORGE_REQUIRE_VERIFIED_SPECIES=1) starts verified, res_1 species_input_unverified=0",
+        check("(f-A) solver (default) starts verified, res_1 species_input_unverified=0",
               rc == 0 and "species_hash matches" in out and at1.get("species_input_unverified") == 0, f"rc={rc}")
 
         # (f-B) 同じ宛先 (thermoHrefTemp 298.15) で IC の h_ref_T だけ 0
@@ -108,7 +106,7 @@ def main():
         check("(f-B) IC h_ref_T=0 vs destination thermoHrefTemp 298.15 -> IC generation error, no attributes",
               "datum" in err and attrs(dB / "nozzle.h5") == {}, err.strip().splitlines()[-1] if err else "no error raised")
         rc, out = run_forge(os.environ["FORGE_BIN"], dB)
-        check("(f-B) solver (FORGE_REQUIRE_VERIFIED_SPECIES=1) stops before computing (UNVERIFIABLE)",
+        check("(f-B) solver (default) stops before computing (UNVERIFIABLE)",
               rc != 0 and "UNVERIFIABLE" in out and not (dB / "res_1.h5").exists(), f"rc={rc}")
 
         # (MW) / (ord): 組成を作った MW・順序が記録と違う

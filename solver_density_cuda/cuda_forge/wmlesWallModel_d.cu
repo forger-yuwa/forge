@@ -21,8 +21,8 @@ namespace {
 constexpr flow_float kSmall = static_cast<flow_float>(1.0e-12);
 
 // 壁温 T_w での層流物性 (μ, λ, cp, R)。gasProperties_d (セル評価) と同式で壁温評価する。
-//   viscMethod 0: 定数 / 1: Sutherland (熱伝導は定数) / 2: kinetic theory (Chapman-Enskog+Wilke)、
-//   ただし physProp.transport があれば (transportOn=1) viscMethod 2 はセルと同じ transport_mix_Y (種ごとの出所 + CEA frozen)。
+//   viscMethod 0: 定数 / 1: Sutherland (熱伝導は定数) / 2: 種ごとの輸送物性 (physProp.transport 必須; transportOn=1)、
+//   セルと同じ transport_mix_Y (種ごとの出所 + CEA frozen; 表があれば表引き)。
 //   thermalMethod 2 (TP): NASA 多項式 (組成 Y は呼び出し側で正規化済み)。それ以外 (CPG): 定数 γ, cp。
 //   nY: Y の有効な種数 (roY 無し・単成分は 1)。transport 経路だけが使う。
 __device__ inline void wmles_wall_props(
@@ -58,17 +58,13 @@ __device__ inline void wmles_wall_props(
         transport_mix_Y_tab(sp, ttab, nY, rY, (float)Tw, &mu, &lam);
         mu_w  = (flow_float)mu;
         lam_w = (flow_float)lam;
-    } else if (transportOn != 0) {  // 種ごとの出所 + CEA frozen 混合則 (セルと同じ関数; double 評価・float 格納)
+    } else {  // 種ごとの出所 + CEA frozen 混合則 (セルと同じ関数; double 評価・float 格納)
+        // viscMethod 2 は physProp.transport 必須 (main.cpp が起動時に検査) なので transportOn=1。
+        // 旧 kinetic 経路 (thermo_mu_mix / thermo_lambda_mix の Wilke 共用 φ) は計算から外した (plan §4.3c 案 C)。
         double mu, lam;
         transport_mix_Y(sp, ttab, nY, Y, (double)Tw, &mu, &lam);
         mu_w  = (flow_float)mu;
         lam_w = (flow_float)lam;
-    } else {                        // kinetic theory
-        double X[THERMO_MAX_SPECIES];
-        thermo_X_from_Y(sp, n, Y, X);
-        const double Twd = (double)Tw;
-        mu_w  = (flow_float)thermo_mu_mix(sp, n, X, Twd);
-        lam_w = (flow_float)thermo_lambda_mix(sp, n, X, Twd);
     }
 }
 

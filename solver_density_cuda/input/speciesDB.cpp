@@ -1084,10 +1084,14 @@ bool speciesDB_checkInputField(const ResolvedSpeciesDB& db, double Tref,
         }
         msg = "input field '" + fieldPath + "' has no species_hash attribute: UNVERIFIABLE (the species properties that "
               "produced this field are unknown; fields written before species records existed, or initial fields not yet "
-              "stamped by their generator).\n"
-              "  - If you have checked that the field was produced with the same species/datum as this run, allow it for THIS "
-              "invocation only:  FORGE_ALLOW_UNVERIFIED_SPECIES=1 forge   (not a config key; outputs are marked species_input_unverified=1)\n"
-              "  - If the species set/DB changed, convert the field with tools/convert_species_field.py.";
+              "stamped by their generator). Refusing to start. Either:\n"
+              "  (1) regenerate the initial field with a generator that stamps species attributes (it resolves this run with "
+              "forge --resolve-species and writes species_hash; copies/restarts made with tools/restart_field.py or "
+              "tools/interp_field.py from a stamped field inherit them), or\n"
+              "  (2) if you have checked that the field was produced with the same species/datum as this run, allow it for THIS "
+              "invocation only:  FORGE_ALLOW_UNVERIFIED_SPECIES=1 forge   (not a config key; outputs are marked "
+              "species_input_unverified=1 and restarts from them inherit the mark).\n"
+              "  If the species set/DB changed, convert the field with tools/convert_species_field.py instead.";
         return false;
     }
     if (fieldHash == own) {

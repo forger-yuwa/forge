@@ -12,7 +12,7 @@
 
 - 比熱 $c_p(T)$ を温度依存とする (**NASA-9 多項式**, CEA 準拠)。
 - 複数化学種の質量分率 $Y_s$ を輸送し、混合物性を **ideal-gas mixing** で評価する。
-- 粘性・熱伝導率・質量拡散係数を **kinetic theory** (Chapman-Enskog) で評価する。
+- 粘性・熱伝導率は種ごとに指定した出所 (`physProp.transport`: `cea` / `kinetic` / `fit` / `custom:…`) の単成分値を CEA 形 frozen 混合則で混合して評価する (`viscMethod: 2`; 2026-09-27〜)。質量拡散係数は kinetic theory (Chapman-Enskog, lump は Blanc) のまま。
 
 `thermalMethod==0` (CPG) は完全に保持し、`thermalMethod==2` で本モデルを有効化する。
 
@@ -97,7 +97,7 @@ $$ \Big(\tfrac{V}{\Delta\tau}+\!\sum_f \tfrac{\max(\dot m_f,0)}{\rho}\Big)\,\del
 
 化学種拡散 ($\mathbf J_s$, §5) の非対角は省いて点陰的のまま残す (拡散は剛性が低く、定常 ($\mathcal R\to0$) では $\delta\to0$ ゆえ収束先は不変)。完全結合 (5+$N$ ブロック) は最も根本的だが、まず緩和整合で「緩和率の統一だけで安定 $\Delta\tau$ 上限が上がるか」を切り分ける。実装は 本ドキュメントの「実装」節。
 
-### 4. kinetic theory による輸送係数
+### 4. kinetic theory による輸送係数 (`kinetic` 出所と拡散係数)
 
 #### 4.1 純成分 (Chapman-Enskog)
 
@@ -110,6 +110,8 @@ $$ \mu_s = 2.6693\times10^{-6}\,\frac{\sqrt{W_s[\mathrm{g/mol}]\,T}}{\sigma_s^2\
 $$ D_{ij} = 1.8583\times10^{-7}\,\frac{\sqrt{T^3\,(1/W_i+1/W_j)}}{P\,\sigma_{ij}^2\,\Omega^{(1,1)*}(T^*_{ij})}, \qquad \sigma_{ij}=\tfrac12(\sigma_i+\sigma_j),\ \varepsilon_{ij}=\sqrt{\varepsilon_i\varepsilon_j}. $$
 
 #### 4.2 混合則
+
+> **2026-09-27 以降、μ・λ の混合は下の Wilke/Mason–Saxena (φ を μ と λ で共用) ではなく CEA 形 frozen 混合則 (ηᵢⱼ から φᵢⱼ、λ には ψᵢⱼ; §1b.3b・plan thermophysics-solver-owned-species-db §4.3c) を使う。下の Wilke 式は旧 `viscMethod: 2` の記録として残す。旧結果の再現は e2daaba8 までのバイナリで行う。混合平均拡散 $D_{i,mix}$ は現行。**
 
 粘性は Wilke、熱伝導率は Wassiljewa/Mason-Saxena:
 
@@ -369,7 +371,11 @@ L/R 状態の `roe_L/Ht_L/ca_L` (および R 側) を NASA で再構成。Roe �
   `speciesRenormalize_d` が $\rho Y_s\ge0$ にクランプし $\sum_s\rho Y_s=\rho$ へ再スケール
   ($\sum_s Y_s=1$)。`roY{s}N/M` は `speciesUpdateOuter/Inner` が D2D copy で NS の N/M に同期。
 
-### 5c. 輸送係数 — kinetic theory (M3) `cuda_forge/thermo_d.cuh` + `gasProperties_d.cu`
+### 5c. 輸送係数 — 種ごとの輸送物性 (`viscMethod==2`, `physProp.transport` 必須)
+
+> `thermalMethod==2` で `viscMethod==2` を選ぶと、実種ごとに指定した出所の μᵢ・λᵢ を CEA 形 frozen 混合則で per-cell に評価する (`transportMix_d.cuh`・既定は表引き `transportTables_d.cuh`、`FORGE_TRANSPORT_TABLE=0` で double 評価)。`physProp.transport` が無い `viscMethod: 2` は起動時エラー (2026-09-27、旧 kinetic 経路は撤去)。以下の M3 の記述 (Wilke/Mason–Saxena、`thermo_mu_mix`) は旧経路の記録。
+
+#### (旧) kinetic theory (M3) `cuda_forge/thermo_d.cuh` + `gasProperties_d.cu`
 
 `thermalMethod==2` で `viscMethod==2` を選ぶと、混合粘性 $\mu$ と熱伝導率 $\lambda$ を
 Chapman-Enskog + Wilke/Mason-Saxena で per-cell に評価する (LJ パラメータ `sigma_LJ`,`eps_kB` を使用)。

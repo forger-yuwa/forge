@@ -8,7 +8,9 @@
 seed の res を `restart_field.py` で nozzle.h5 に写して **1 step** だけ回す (拒否される場合は GPU 計算に入る前に終了する)。
 seed run の中身は読むだけで書かない (h5 もリンクせず複製する)。
 
-  (0)  旧場 (属性なし) → 「照合不能」(UNVERIFIABLE) で停止 (非ゼロ終了)
+  (0)  旧場 (属性なし) → 既定で「照合不能」(UNVERIFIABLE) で停止 (非ゼロ終了)。エラー文が IC の作り直しと
+       その実行だけの FORGE_ALLOW_UNVERIFIED_SPECIES=1 の 2 通りを案内する (#3c: 既定を厳密へ切り替え)
+  (0t) 撤去した過渡期の環境変数 FORGE_REQUIRE_VERIFIED_SPECIES=0 を立てても停止する (既定を緩める手段が残っていない)
   (0e) 旧場 + FORGE_ALLOW_UNVERIFIED_SPECIES=1 → 通る。res (境界出力を含む) に species_hash / species_record_sha256 /
        species_record_file / species_input_unverified=1、記録ファイルが run に書かれ、Python の再計算 (load_record) と一致
   (R)  `forge --resolve-species` の標準出力最終行 = ソルバ起動時の species_hash
@@ -91,15 +93,14 @@ class Case:
                 yaml.safe_dump(db, f, sort_keys=False)
         return d
 
-    def run(self, d, allow=False, strict=True):
+    def run(self, d, allow=False, extra_env=None):
         env = dict(os.environ)
         env.setdefault("FORGE_CUDA_BLOCKSIZE", "256")
         env.pop("FORGE_ALLOW_UNVERIFIED_SPECIES", None)
         env.pop("FORGE_REQUIRE_VERIFIED_SPECIES", None)
         if allow:
             env["FORGE_ALLOW_UNVERIFIED_SPECIES"] = "1"
-        if strict:   # 最終方針 (属性なしは停止) を試す。過渡期の既定 (警告で通す) は strict=False
-            env["FORGE_REQUIRE_VERIFIED_SPECIES"] = "1"
+        env.update(extra_env or {})
         p = subprocess.run([self.a.forge], cwd=d, capture_output=True, text=True, env=env)
         with open(os.path.join(d, "forge_run.log"), "w") as f:
             f.write(p.stdout + "\n--- stderr ---\n" + p.stderr)
@@ -138,16 +139,15 @@ def main():
         d0 = C.make("old")
         rc, out = C.run(d0)
         check(rc != 0 and "UNVERIFIABLE" in out and not os.path.exists(os.path.join(d0, "res_1.h5")),
-              f"(0) old field without attributes -> UNVERIFIABLE, stops (rc={rc})")
-        # (0t) 旧場・過渡期の既定 (strict なし) → 警告して通り、未検証の印が付く
-        dt = C.make("old_transitional")
-        rc, out = C.run(dt, strict=False)
-        rt = os.path.join(dt, "res_1.h5")
-        okt = rc == 0 and os.path.exists(rt)
-        if okt:
-            with h5py.File(rt, "r") as f:
-                okt = int(f.attrs.get("species_input_unverified", 0)) == 1
-        check(okt, f"(0t) old field, transitional default -> runs with species_input_unverified=1 (rc={rc})")
+              f"(0) old field without attributes -> UNVERIFIABLE, stops by default (rc={rc})")
+        check("regenerate the initial field" in out and "FORGE_ALLOW_UNVERIFIED_SPECIES=1" in out
+              and "THIS invocation only" in out and "Allowed for this invocation" not in out,
+              "(0) the error names both remedies (regenerate the IC / allow this invocation only) and does not claim it was allowed")
+        # (0t) 撤去した過渡期の環境変数では緩まない (#3c 以前は FORGE_REQUIRE_VERIFIED_SPECIES が無ければ警告で通っていた)
+        dt = C.make("old_removed_env")
+        rc, out = C.run(dt, extra_env={"FORGE_REQUIRE_VERIFIED_SPECIES": "0"})
+        check(rc != 0 and "UNVERIFIABLE" in out and not os.path.exists(os.path.join(dt, "res_1.h5")),
+              f"(0t) FORGE_REQUIRE_VERIFIED_SPECIES=0 (removed) does not relax the default -> still stops (rc={rc})")
         # (0e) 旧場 + env
         d1 = C.make("old_env")
         rc, out = C.run(d1, allow=True)
@@ -157,6 +157,8 @@ def main():
         if not ok:
             print(out[-3000:])
             raise _Abort()
+        check("Allowed for this invocation by FORGE_ALLOW_UNVERIFIED_SPECIES=1" in out,
+              "(0e) the warning says it was allowed by the env var that was actually set")
         at = attrs(r1)
         check(at.get("species_input_unverified") == 1 and len(at.get("species_hash", "")) == 64,
               f"(0e) res_1.h5 carries species_hash and species_input_unverified=1: {at}")

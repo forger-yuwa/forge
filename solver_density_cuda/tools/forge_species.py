@@ -777,7 +777,8 @@ def _unverified_note(tool, dst_run_dir, why):
     tm = _config_thermal_method(dst_run_dir) if dst_run_dir else None
     if tm == 2:
         print(f"[{tool}] species: SRC is unverified ({why}); destination species attributes removed "
-              "(the solver warns and marks outputs species_input_unverified=1; FORGE_REQUIRE_VERIFIED_SPECIES=1 stops it)")
+              "(the solver refuses such a field unless FORGE_ALLOW_UNVERIFIED_SPECIES=1 is set for that invocation, "
+              "which marks outputs species_input_unverified=1)")
 
 
 def plan_inherit(src_h5, dst_run_dir, forge=None, force=False, tool="restart", inplace=True):

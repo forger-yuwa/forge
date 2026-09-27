@@ -191,6 +191,24 @@ checkpoint には受動種の流束形履歴 (`/CHECKPOINT/<cons>_fctG`, `_fctH`
 凝縮モーメントの実現可能性 (許容領域 $x\le1,\ x^2\le y\le\sqrt x$; $x=Q_1/(Q_0r)$, $y=Q_2/(Q_0r^2)$) は更新後に最近点射影 (退化は単分散再初期化) で保証し、作動数と成分別収支を monitor に出す。
 注意: 受動種/化学種の拡散は `viscMethod != 0` のときだけ加わる (viscMethod 0 は定数粘性ではなく「拡散なし」扱い; 化学種と同じ規約)。
 
+## physProp.viscMethod — 層流の粘性・熱伝導 (2026-09-27 `viscMethod: 2` を置き換え)
+
+| 値 | μ・λ | 備考 |
+| --- | --- | --- |
+| `0` | 定数 (`visc`, `thermCond` / `thermCondMethod: 1` なら k=μ·cp/`prandtlLam`) | 受動種・化学種の拡散は加わらない (上の注意) |
+| `1` | 空気の Sutherland (熱伝導は `thermCondMethod` で選択) | 組成に依らない。CPG・TP どちらでも可 |
+| `2` | 種ごとの輸送物性 (`physProp.transport` 必須、CEA 形 frozen 混合則) | `thermalMethod: 2` のみ。[plan §4.3c](../plans/active/thermophysics-solver-owned-species-db.md) |
+
+- **`viscMethod: 2` は `physProp.transport` (実種ごとの出所 `cea` / `kinetic` / `fit` / `custom:<名前>_v<版>`、lump は構成実種ごと) が無いと
+  起動時エラー**。以前の `viscMethod: 2` (LJ + Chapman–Enskog の種別値を Wilke の φ で混合し、λ にも同じ φ を使う kinetic 経路) は
+  計算から外した。空気の Sutherland で足りるなら `viscMethod: 1` にする。逆に `physProp.transport` を `viscMethod ≠ 2` と併用するのも起動拒否
+  (記録と計算が食い違うため)。
+- **旧 `viscMethod: 2` の結果を再現するときは旧バイナリで回す** (置き換え前の `e2daaba8` までのコミットでビルドしたもの)。
+  新バイナリには旧経路へ戻す設定・環境変数は無い。
+- 表引き: `physProp.transport` の μ・λ は既定で ln T の区分 3 次表を float で引く。`FORGE_TRANSPORT_TABLE=0` はその実行だけ同じモデルの
+  double 評価に戻す (性能比較・切り分け用; 旧 kinetic 経路には戻らない)。
+- `visc` は `viscMethod: 2` でも dt と陰解法対角の剛性見積りに使われるので残す。
+
 ## physProp.chemistry — 有限速度化学 (H₂ 燃焼・ノズル化学非平衡)
 
 多成分 TP (`thermalMethod: 2`, `species` ≥2 種) に化学反応ソース項を加える。理論・実装は
@@ -238,7 +256,11 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
     種を変えるなら `tools/convert_species_field.py`)。**属性が無い場は「照合不能」で拒否**する。確認済みなら**その実行だけ**
     `FORGE_ALLOW_UNVERIFIED_SPECIES=1 forge` で通せる (出力に `species_input_unverified=1` が付き、以後の restart に継承される)。
     **config キーでの恒常的な許可は無い** (生成 config に埋め込まない)。
-    **過渡期 (#3b 完了まで) の既定**: IC 生成側がまだ属性を付けないので、属性なしの場は**警告して未検証の印を付けて通す** (係数不一致は常に停止)。最終方針 (属性なしも停止) は `FORGE_REQUIRE_VERIFIED_SPECIES=1` で先取りでき、#3b 完了時に既定をこちらへ切り替える。
+    **属性なしの場は既定で停止する** (2026-09-27 #3c で過渡期の既定を終了。過渡期用の `FORGE_REQUIRE_VERIFIED_SPECIES` はソルバから撤去し、
+    立てても何も変わらない)。停止したら (1) 属性を付ける生成処理で IC を作り直す (IC 生成は `forge --resolve-species` で宛先を解決して
+    `species_hash` を付ける; 付いた場から `restart_field.py` / `interp_field.py` で作った場は属性を継承する) か、(2) 同じ種・datum で作った場だと
+    確認できているなら**その実行だけ** `FORGE_ALLOW_UNVERIFIED_SPECIES=1 forge` で通す (起動ログの警告は環境変数で許可された旨を示し、
+    出力に `species_input_unverified=1` が付く)。種・DB が変わった場は `convert_species_field.py`。
   - `forge --resolve-species`: GPU を使わず `solverConfig.yaml` を解決して記録を書き、互換性ハッシュを**標準出力の最終行**に出して終了
     (CPG は終了コード 2)。記録を既存の場へ貼っても検証済みにはならない。
 - **`thermoHrefTemp: 298.15` を必ず指定する** (反応熱は sensible datum の残差項 $\dot Q=-\sum_s h^{abs}_s(T_{ref})\dot\omega_s$ として入る。絶対 datum (0) でも動くが陰解法は不安定)。

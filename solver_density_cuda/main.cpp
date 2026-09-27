@@ -1110,13 +1110,10 @@ static void checkInputSpeciesAndWriteRecord(const solverConfig& cfg)
         std::cerr << "[species] cannot read attributes of " << cfg.valueFileName << ": " << e.what() << std::endl;
         std::exit(EXIT_FAILURE);
     }
+    // 属性なしの場は既定で停止する (plan thermophysics-solver-owned-species-db #3c)。許可はその実行だけの
+    // FORGE_ALLOW_UNVERIFIED_SPECIES=1 のみ (出力に未検証の印)。係数不一致は常に停止 (allow は不一致を通さない)。
     const char* env = std::getenv("FORGE_ALLOW_UNVERIFIED_SPECIES");
-    // 過渡期 (plan thermophysics-solver-owned-species-db #3b 完了まで): IC 生成側がまだ属性を付けないので、
-    // 属性なしの場は既定で「警告 + 未検証の印」で通す。係数不一致は常に停止 (allow は不一致を通さない)。
-    // FORGE_REQUIRE_VERIFIED_SPECIES=1 で最終方針 (属性なしも停止) を先取りできる。#3b 完了時に既定を厳密へ切り替える。
-    const char* strictEnv = std::getenv("FORGE_REQUIRE_VERIFIED_SPECIES");
-    const bool strict = (strictEnv != nullptr && std::string(strictEnv) == "1");
-    const bool allow = (env != nullptr && std::string(env) == "1") || !strict;
+    const bool allow = (env != nullptr && std::string(env) == "1");
     std::vector<std::string> dirs;
     {
         std::filesystem::path d = std::filesystem::path(cfg.valueFileName).parent_path();
@@ -1453,6 +1450,17 @@ cudaConfig initializeSimulation(
         cerr << "[transport] ERROR: physProp.transport is used only with viscMethod: 2 (the GPU transport path replaces the "
                 "kinetic-theory mixture). With viscMethod " << cfg.viscMethod << " the recorded transport would not be the one "
                 "computed. Set viscMethod: 2 or remove physProp.transport." << endl;
+        std::exit(EXIT_FAILURE);
+    }
+    // viscMethod 2 は種ごとの輸送物性 (physProp.transport 必須、CEA 形 frozen 混合則) に置き換えた (plan §4.3c 案 C)。
+    // 旧 kinetic 経路 (LJ + Chapman-Enskog、Wilke の φ を μ と λ で共用) は計算から外したので、指定なしは起動を止める。
+    // 旧結果の再現は旧バイナリで行う (procedures/solver-settings.md)。
+    if (cfg.viscMethod == 2 && cfg.speciesTransport.empty()) {
+        cerr << "[transport] ERROR: viscMethod: 2 requires physProp.transport (the transport model of every real species, "
+                "e.g. physProp: {thermalMethod: 2, viscMethod: 2, transport: {N2: cea, O2: cea, H2O: custom:h2o_iapws_cea_v1}}; "
+                "models: cea, kinetic, fit, custom:<name>_v<version>; thermalMethod: 2 only). The former kinetic-theory "
+                "mixture (Wilke phi shared by mu and lambda) has been removed. If air Sutherland viscosity is enough, use "
+                "viscMethod: 1. To reproduce old viscMethod 2 results, run the old binary." << endl;
         std::exit(EXIT_FAILURE);
     }
 

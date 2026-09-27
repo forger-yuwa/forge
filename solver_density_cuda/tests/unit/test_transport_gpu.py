@@ -22,7 +22,12 @@ forge を FORGE_TRANSPORT_PROBE=<states.txt> で起動する (main.cpp runTransp
   範囲: 単成分 (roY 無し)・重複 lump・実種 12 と上限 32・ゼロ分率、T = 200/253.15/400/500/600/700/1000/2000 K と
        各フィット・接続・NASA 区間の境界 (境界そのものと両隣の float)。
   (B)  (--base-forge) physProp.transport なしでは同一の固定入力 (seed の保存量; res_0 の T・ρ・roY がビット一致することを
-       確認してから) で vis_lam・thermCond が旧バイナリとビット一致 (viscMethod 2 の多成分・単成分、viscMethod 1)。
+       確認してから) で vis_lam・thermCond が旧バイナリとビット一致 (viscMethod 1 の多成分 2 構成、viscMethod 0)。
+  (B2) viscMethod 2 + physProp.transport なし (多成分・単成分) は起動時エラー (res_0 を書かない)。
+       2026-09-27 に viscMethod 2 を種ごとの輸送物性へ置き換え (plan §4.3c 案 C)、旧 kinetic 経路 (Wilke 共用 φ) を計算から
+       外したので、以前の「viscMethod 2 の transport なしが旧バイナリとビット一致」はこの期待に変えた。
+  seed の nozzle.h5 は species 属性を持たない (記録導入前の場) ので、すべての実行に FORGE_ALLOW_UNVERIFIED_SPECIES=1 を付ける
+  (#3c 以降、属性なしの場は既定で停止する)。
 
 表引き (#5t2-3, 既定で有効; codex diagnose notes/reviews/2026-09-27-transport-tables-diagnose.md の事前固定条件):
   セル・ghost・壁の格納値 (S) は表引きの float 経路になる。ULP 条件は外し (新 float 経路に旧 double の基準を課さない)、
@@ -247,6 +252,7 @@ class Runner:
 
     def env(self):
         e = dict(os.environ)
+        e["FORGE_ALLOW_UNVERIFIED_SPECIES"] = "1"   # seed の場は species 属性なし (#3c 以降は既定で停止)
         if self.a.blocksize:
             e["FORGE_CUDA_BLOCKSIZE"] = str(self.a.blocksize)
         return e
@@ -753,12 +759,24 @@ def ab_select(R, work):
 
 
 # ------------------------------------------------------------------ (B) 既定経路のビット一致
+def legacy_visc2_refused(R, a):
+    """(B2) viscMethod 2 + transport なしは起動時エラー (旧 kinetic 経路は撤去; plan §4.3c 案 C)。"""
+    for tag, species in (("builtin N2/H2O/O2/AR/CO2", ["N2", "H2O", "O2", "AR", "CO2"]), ("builtin N2 single", ["N2"])):
+        d = R.make("visc2_notransport_" + tag.split(",")[0].replace(" ", "_").replace("/", "-"), species, None, visc=2, nstep=0)
+        r = subprocess.run([a.forge], cwd=d, env=R.env(), capture_output=True, text=True, timeout=600)
+        out = r.stdout + r.stderr
+        open(os.path.join(d, "forge.log"), "w").write(out)
+        check(r.returncode != 0 and "viscMethod: 2 requires physProp.transport" in out and "viscMethod: 1" in out
+              and not os.path.exists(os.path.join(d, "res_0.h5")),
+              f"B2 {tag}, viscMethod 2 without physProp.transport: refused at startup (rc={r.returncode})")
+
+
 def bit_identity(R, a):
+    # viscMethod 2 (transport なし) は起動時エラーになったので比較から外し (B2)、viscMethod 1 を 2 構成と viscMethod 0 を比べる
     cases = [
-        ("seed MIXDRY/H2O ext DB, viscMethod 2", dict(species=["MIXDRY", "H2O"], transport=None, keep_db_of_seed=True, visc=2)),
-        ("builtin N2/H2O/O2/AR/CO2, viscMethod 2", dict(species=["N2", "H2O", "O2", "AR", "CO2"], transport=None, visc=2)),
-        ("builtin N2 single, viscMethod 2", dict(species=["N2"], transport=None, visc=2)),
         ("seed MIXDRY/H2O ext DB, viscMethod 1", dict(species=["MIXDRY", "H2O"], transport=None, keep_db_of_seed=True, visc=1)),
+        ("builtin N2/H2O/O2/AR/CO2, viscMethod 1", dict(species=["N2", "H2O", "O2", "AR", "CO2"], transport=None, visc=1)),
+        ("seed MIXDRY/H2O ext DB, viscMethod 0", dict(species=["MIXDRY", "H2O"], transport=None, keep_db_of_seed=True, visc=0)),
     ]
     for tag, kw in cases:
         outs = []
@@ -894,6 +912,9 @@ def main():
         lay32, _ = table_singles(R, "real32", sp32, tr32, db32)
         if lay32:
             table_mix_grid(R, "real32", sp32, tr32, [c1, c2], lay32, db32, stride=a.stride32)
+
+    # ---- viscMethod 2 + transport なしは起動時エラー ----
+    legacy_visc2_refused(R, a)
 
     # ---- 既定経路のビット一致 ----
     if a.base_forge:
