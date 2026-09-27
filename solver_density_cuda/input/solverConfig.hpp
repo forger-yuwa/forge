@@ -1,6 +1,7 @@
 #pragma once
 
 #include "flowFormat.hpp"
+#include "speciesLump.hpp"   // SpeciesLumpSpec (同じディレクトリ)
 
 #include <iostream>
 #include <string>
@@ -575,6 +576,7 @@ public:
     // 多成分 thermally-perfect gas (thermalMethod==2)。calorically-perfect 経路では未使用。
     int nSpecies = 1;                          // 化学種数 (既定 1 = 単成分)
     std::vector<std::string> speciesNames;     // 混合を構成する化学種名。順序が index s を定義
+    std::vector<SpeciesLumpSpec> speciesLumps; // physProp.species のうち lump (擬似種) で書いた要素 (起動時に合成; plan thermophysics-solver-owned-species-db #6a)
     std::string speciesDBFile = "";            // 任意: NASA-9/LJ 係数の外部 DB (yaml)。空なら内蔵 DB
     int speciesDiffusionMethod = 1;            // 0: 定数 Schmidt, 1: kinetic theory 混合平均拡散
     // TP の温度反転をハイブリッド (float Newton + double 1 段研磨, thermo_T_from_e_hybrid) にする。0: 従来 double Newton。

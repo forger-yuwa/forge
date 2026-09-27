@@ -90,7 +90,15 @@ def species_info(run_dir):
     cfg = load_yaml_str(cfg_path)
     pp = cfg.get("physProp") or {}
     tm = int(pp.get("thermalMethod", 0))
-    names = [str(s) for s in (pp.get("species") or [])]
+    names, lumps = [], {}
+    for s in (pp.get("species") or []):
+        if isinstance(s, dict):
+            # lump (擬似種, plan #6a): {name, lump: {構成種: 分率}, basis: mole|mass}。係数はソルバが起動時に合成する。
+            names.append(str(s["name"]))
+            lumps[str(s["name"])] = {"basis": str(s.get("basis", "")),
+                                     "members": {str(k): float(v) for k, v in (s.get("lump") or {}).items()}}
+        else:
+            names.append(str(s))
     if tm == 2 and not names:
         names = ["N2"]                      # solverConfig.cpp の既定 (単成分 N2)
     db = None
@@ -101,16 +109,31 @@ def species_info(run_dir):
             db = load_yaml_str(p) or {}
         else:
             raise FileNotFoundError(f"speciesDBFile {p} が無い")
-    MW = {}
-    for n in names:
+    def _mw(n):
         e = _find_ci(db, n) if db else None
         if e is not None and "MW" in e:
-            MW[n] = float(e["MW"])
+            return float(e["MW"])
+        mw = _find_ci(BUILTIN_MW, n)
+        if mw is None:
+            raise KeyError(f"species {n}: MW が species_db.yaml にも内蔵表にも無い")
+        return float(mw)
+
+    MW = {}
+    for n in names:
+        if n in lumps:
+            # lump の MW = Σ x_k M_k (ソルバの合成と同じ式; x は lump 内で正規化したモル分率)。正本はソルバの記録 (resolved_species_*.yaml)。
+            lp = lumps[n]
+            mws = {k: _mw(k) for k in lp["members"]}
+            tot = sum(lp["members"].values())
+            if lp["basis"] == "mass":
+                nmol = {k: v / tot / mws[k] for k, v in lp["members"].items()}
+                den = sum(nmol.values())
+                x = {k: v / den for k, v in nmol.items()}
+            else:
+                x = {k: v / tot for k, v in lp["members"].items()}
+            MW[n] = sum(x[k] * mws[k] for k in x)
         else:
-            mw = _find_ci(BUILTIN_MW, n)
-            if mw is None:
-                raise KeyError(f"species {n}: MW が species_db.yaml にも内蔵表にも無い")
-            MW[n] = float(mw)
+            MW[n] = _mw(n)
     index = {n: i for i, n in enumerate(names)}
     meta_path = os.path.join(run_dir, "species_meta.yaml")
     meta = load_yaml_str(meta_path) if os.path.exists(meta_path) else None
@@ -166,6 +189,7 @@ def species_info(run_dir):
         "thermoHrefTemp": float(pp.get("thermoHrefTemp", 0.0)),
         "speciesDBFile": db_file,
         "meta": meta,
+        "lumps": lumps,                     # lump 名 → {basis, members: {構成種: config の分率}} (plan #6a)
     }
 
 
@@ -205,8 +229,9 @@ def species_signature(run_dir):
         else:
             # 内蔵種: 係数を Python 側で作り直さない (plan §4.3「過去 run の署名を現在の内蔵表から再生成しない」)。
             # 比較は「照合不能」になる。内容で照合するにはソルバの解決済み記録 (signature_from_record) を使う。
+            # lump (plan #6a) も同じ: 合成係数はソルバの記録にだけある。
             species[n] = {"MW": info["MW"][n], "Tlo": None, "Tmid": None, "Thi": None, "LJ_sigma": None, "LJ_eps_kB": None,
-                          "nasa9_low": None, "nasa9_high": None, "source": "builtin"}
+                          "nasa9_low": None, "nasa9_high": None, "source": "lump" if n in info["lumps"] else "builtin"}
     return {"run_dir": run_dir, "thermalMethod": info["thermalMethod"], "names": list(info["names"]),
             "MW": [info["MW"][n] for n in info["names"]], "thermoHrefTemp": info["thermoHrefTemp"],
             "tracer": info["tracer"], "species": species, "speciesDBFile": info["speciesDBFile"]}
@@ -229,14 +254,33 @@ def compat_text(schema, datum, thermoHrefTemp, extrapolation, species):
     source・来歴は入れない。C++ speciesDB.cpp compatTextRaw と一字一句同じにすること。"""
     out = [f"schema: {schema}", f"datum: {datum}", f"thermoHrefTemp: {_g17(thermoHrefTemp)}",
            f"extrapolation: {extrapolation}", f"nSpecies: {len(species)}"]
+    def _coeff_lines(tag, e):
+        out.append(f"{tag}.MW: {_g17(e['MW'])}")
+        out.append(f"{tag}.T: {_g17(e['Tlo'])} {_g17(e['Tmid'])} {_g17(e['Thi'])}")
+        out.append(f"{tag}.LJ: {_g17(e['LJ_sigma'])} {_g17(e['LJ_eps_kB'])}")
+        out.append(f"{tag}.low: " + " ".join(_g17(x) for x in e["nasa9_low"]))
+        out.append(f"{tag}.high: " + " ".join(_g17(x) for x in e["nasa9_high"]))
+
     for i, e in enumerate(species):
-        out.append(f"species[{i}]: name={e['name']} phase={e['phase']}")
-        out.append(f"species[{i}].MW: {_g17(e['MW'])}")
-        out.append(f"species[{i}].T: {_g17(e['Tlo'])} {_g17(e['Tmid'])} {_g17(e['Thi'])}")
-        out.append(f"species[{i}].LJ: {_g17(e['LJ_sigma'])} {_g17(e['LJ_eps_kB'])}")
-        out.append(f"species[{i}].low: " + " ".join(_g17(x) for x in e["nasa9_low"]))
-        out.append(f"species[{i}].high: " + " ".join(_g17(x) for x in e["nasa9_high"]))
+        tag = f"species[{i}]"
+        out.append(f"{tag}: name={e['name']} phase={e['phase']}")
+        _coeff_lines(tag, e)
+        # lump (plan #6a) だけ追記する: 合成規約・構成種の名前・lump 内モル分率 x・構成種の係数。basis・入力の分率・source は入れない。
+        lump = e.get("lump")
+        if lump:
+            out.append(f"{tag}.lump: n={len(lump['members'])} synthesis={lump['synthesis']}")
+            for k, m in enumerate(lump["members"]):
+                mt = f"{tag}.lump[{k}]"
+                out.append(f"{mt}: name={m['name']} x={_g17(m['x'])}")
+                _coeff_lines(mt, m)
     return "\n".join(out) + "\n"
+
+
+def _record_coeffs(n):
+    """記録の 1 種 (または lump 構成種) の係数ブロック。"""
+    return {"MW": float(n["MW"]), "Tlo": float(n["Tlo"]), "Tmid": float(n["Tmid"]), "Thi": float(n["Thi"]),
+            "LJ_sigma": float(n["LJ_sigma"]), "LJ_eps_kB": float(n["LJ_eps_kB"]),
+            "nasa9_low": [float(x) for x in n["nasa9_low"]], "nasa9_high": [float(x) for x in n["nasa9_high"]]}
 
 
 def load_record(path):
@@ -249,10 +293,19 @@ def load_record(path):
     rec = yaml.load(raw.decode("utf-8"), Loader=_StrSafeLoader) or {}
     species = []
     for n in rec.get("species") or []:
-        species.append({"name": str(n["name"]), "phase": str(n["phase"]), "source": str(n.get("source", "")),
-                        "MW": float(n["MW"]), "Tlo": float(n["Tlo"]), "Tmid": float(n["Tmid"]), "Thi": float(n["Thi"]),
-                        "LJ_sigma": float(n["LJ_sigma"]), "LJ_eps_kB": float(n["LJ_eps_kB"]),
-                        "nasa9_low": [float(x) for x in n["nasa9_low"]], "nasa9_high": [float(x) for x in n["nasa9_high"]]})
+        e = {"name": str(n["name"]), "phase": str(n["phase"]), "source": str(n.get("source", ""))}
+        e.update(_record_coeffs(n))
+        if n.get("lump"):
+            # lump (plan #6a): 合成後の係数 (上) に加えて構成 (basis・入力の分率・lump 内モル分率 x) と構成種の係数
+            lp = n["lump"]
+            members = []
+            for m in lp.get("members") or []:
+                mm = {"name": str(m["name"]), "source": str(m.get("source", "")),
+                      "fraction_input": float(m["fraction_input"]), "x": float(m["x"])}
+                mm.update(_record_coeffs(m))
+                members.append(mm)
+            e["lump"] = {"basis": str(lp.get("basis", "")), "synthesis": str(lp.get("synthesis", "")), "members": members}
+        species.append(e)
     out = {"path": os.path.abspath(path), "integrity": hashlib.sha256(raw).hexdigest(),
            "compat_hash": str(rec.get("compat_hash", "")), "schema": str(rec.get("schema", "")),
            "datum": str(rec.get("datum", "")), "extrapolation": str(rec.get("extrapolation", "")),
@@ -333,6 +386,30 @@ def required_conserved(sig):
     return req
 
 
+def _compare_lumps(n, la, lb, coef_rtol):
+    """lump の構成の差 (有無・合成規約・構成種の名前と順序・モル分率 x・構成種の MW/区間/LJ/係数)。記録由来の署名だけが持つ。"""
+    if not la and not lb:
+        return []
+    if bool(la) != bool(lb):
+        return [f"{n}: lump on side {'A' if la else 'B'} only"]
+    bad = []
+    if la["synthesis"] != lb["synthesis"]:
+        bad.append(f"{n}.lump.synthesis {la['synthesis']!r} vs {lb['synthesis']!r}")
+    na, nb = [m["name"] for m in la["members"]], [m["name"] for m in lb["members"]]
+    if na != nb:
+        return bad + [f"{n}.lump members {na} vs {nb}"]
+    for ma, mb in zip(la["members"], lb["members"]):
+        t = f"{n}.lump.{ma['name']}"
+        for k in ("x", "MW", "Tlo", "Tmid", "Thi", "LJ_sigma", "LJ_eps_kB"):
+            if ma[k] != mb[k]:
+                bad.append(f"{t}.{k} {ma[k]!r} vs {mb[k]!r}")
+        for k in ("nasa9_low", "nasa9_high"):
+            for i, (x, y) in enumerate(zip(ma[k], mb[k])):
+                if abs(x - y) > coef_rtol * max(abs(x), abs(y), 1e-300):
+                    bad.append(f"{t}.{k}[{i}] {x!r} vs {y!r}")
+    return bad
+
+
 def compare_signatures(a, b, mw_rtol=1e-9, coef_rtol=1e-12):
     """2 つの署名の不一致を説明文字列の list で返す (空 = 一致)。**内容で比較する** (plan §4.3):
     種名・順序、MW、NASA-9 両温度域の全係数 (rel 1e-12)、Tlo/Tmid/Thi、LJ、thermoHrefTemp、tracer (両方が持つとき)。
@@ -362,6 +439,7 @@ def compare_signatures(a, b, mw_rtol=1e-9, coef_rtol=1e-12):
                 for i, (x, y) in enumerate(zip(sa[k], sb[k])):
                     if abs(x - y) > coef_rtol * max(abs(x), abs(y), 1e-300):
                         bad.append(f"{n}.{k}[{i}] {x!r} vs {y!r}")
+            bad += _compare_lumps(n, sa.get("lump"), sb.get("lump"), coef_rtol)
     if a["thermoHrefTemp"] != b["thermoHrefTemp"]:
         bad.append(f"thermoHrefTemp {a['thermoHrefTemp']} vs {b['thermoHrefTemp']}")
     if "tracer" in a and "tracer" in b and (a["tracer"] or None) != (b["tracer"] or None):

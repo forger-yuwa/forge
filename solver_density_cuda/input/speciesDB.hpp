@@ -17,16 +17,37 @@
 #include <map>
 
 #include "cuda_forge/thermo_d.cuh"   // SpeciesThermo (host では inline 関数のみ)
+#include "input/speciesLump.hpp"     // SpeciesLumpSpec (config の lump 指定)
 
 namespace YAML { class Node; }
 class solverConfig;
 
+// lump (擬似種) の合成規約 (記録と互換性ハッシュに入る; plan thermophysics-solver-owned-species-db §4.2 #6a)。
+//   NASA-9 係数と MW は lump 内モル分率 x_k の線形結合 (固定組成なら cp/h/s° は構成種の和と厳密に一致)。
+//   LJ は**暫定**で質量分率の単純平均 (設計側 composition.lump_entry と同じ; plan #7 で実種展開に置き換える)。
+//   構成種の温度区切り (Tlo/Tmid/Thi) がすべて同じ場合だけ合成する (区切りの違う種は plan #6b)。
+#define SPECIES_LUMP_SYNTHESIS "nasa9 and MW mole-fraction weighted (equal breakpoints only); LJ mass-fraction mean (provisional, plan #7)"
+
+// 解決済み lump の中身 (lump でない種は members が空)。
+struct ResolvedLump {
+    std::string                basis;          // config の basis ("mole" | "mass")
+    std::vector<std::string>   members;        // 構成種名 (config に書いた綴り・順序)
+    std::vector<double>        input;          // config に書いた分率そのまま
+    std::vector<double>        x;              // lump 内モル分率 (正規化済み; 合成の重み)
+    std::vector<SpeciesThermo> memberSpecies;  // 構成種の絶対基準係数 (datum 前)
+    std::vector<std::string>   memberSource;   // "builtin" | "file"
+
+    bool empty() const { return members.empty(); }
+};
+
 struct ResolvedSpeciesDB {
     std::vector<std::string>   names;    // cfg.speciesNames の順 (index s を定義)
-    std::vector<SpeciesThermo> species;  // 同順。datum オフセット前の絶対基準係数
-    std::vector<std::string>   source;   // 同順。"builtin" | "file"
+    std::vector<SpeciesThermo> species;  // 同順。datum オフセット前の絶対基準係数 (lump は合成後)
+    std::vector<std::string>   source;   // 同順。"builtin" | "file" | "lump"
+    std::vector<ResolvedLump>  lumps;    // 同順。lump でない種は空
 
     int size() const { return static_cast<int>(names.size()); }
+    bool isLump(int s) const { return s >= 0 && s < static_cast<int>(lumps.size()) && !lumps[s].empty(); }
     // 種名 → index。大文字小文字を無視 (無ければ -1)。
     int index(const std::string& name) const;
     double MW(int s) const { return species.at(s).MW; }
@@ -47,7 +68,16 @@ const std::string& speciesDB_builtinDataSha256();
 // 解決結果の names は config に書いた名前のまま (互換性ハッシュに入る)。
 ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& names, const std::string& dbFile);
 
-// cfg.speciesNames / cfg.speciesDBFile で解決する。calorically-perfect (species 未指定) では N2 ダミー 1 種。
+// lump 指定付きの解決 (names に lump の名前も含む; lumps[i].name が names のどれかに一致する)。
+//   lump の構成種は内蔵 DB + dbFile から上と同じ規則で解決し、起動時に 1 種へ合成する (SPECIES_LUMP_SYNTHESIS)。
+//   拒否 (std::runtime_error): 分率が非正・非有限、構成種が空・重複・未知、lump 名が内蔵種/外部 DB の種名と衝突 (大小文字無視)、
+//   basis が mole|mass 以外、構成種の温度区切りが揃わない (plan #6b が必要)。分率の総和が 1 から 1e-3 以上外れたら警告して正規化。
+//   凝縮種を構成種に入れる検査は cfg を受ける版 (speciesDB_resolve(cfg)) が行う。
+ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& names, const std::string& dbFile,
+                                    const std::vector<SpeciesLumpSpec>& lumps);
+
+// cfg.speciesNames / cfg.speciesLumps / cfg.speciesDBFile で解決する。calorically-perfect (species 未指定) では N2 ダミー 1 種。
+// 凝縮 ON (condensation: 1) で凝縮種を lump の構成種に入れていたら拒否する。
 ResolvedSpeciesDB speciesDB_resolve(const solverConfig& cfg);
 
 // cfg.read() 直後に呼び、解決結果をプロセス内に保持する (thermo_init_db / readBcondConfig が参照)。
@@ -71,7 +101,8 @@ std::vector<double> speciesMassToMole(const std::vector<double>& Y, const std::v
 std::vector<double> bcondSpeciesMassFractions(const YAML::Node& floats, const ResolvedSpeciesDB& db,
                                               const std::string& bname);
 
-// 起動ログ: 種表 (name, MW, source) と凝縮種・トレーサの状態。
+// 起動ログ: 種表 (name, MW, source) と凝縮種・トレーサの状態。lump は中身 (分率)・MW・LJ (暫定)・
+// 参照温度 (298.15/1000/2000 K) での cp・h (datum 前の絶対基準) も出す。
 void speciesDB_printTable(const solverConfig& cfg, const ResolvedSpeciesDB& db);
 
 // =============================================================================
@@ -79,6 +110,8 @@ void speciesDB_printTable(const solverConfig& cfg, const ResolvedSpeciesDB& db);
 // 仕様 methods/thermophysics.md §1b.4)。
 //   - 互換性ハッシュ: 種の順序・名前・相・MW・datum 適用前 (絶対基準) の全係数と温度区間・外挿規約・LJ・
 //     thermoHrefTemp と datum 規約・スキーマ版を speciesDB_compatText で正規化 (浮動小数は %.17g) した文字列の SHA-256。
+//     lump は合成後の値に加えて、合成規約・構成種の名前・lump 内モル分率 (正規化済み)・構成種の MW・区間・LJ・係数を入れる
+//     (#6a)。basis と config に書いた分率そのもの・source は記録にだけ書く。lump の無い DB のテキストは #6a 前とバイト一致。
 //     source (builtin/file)・ファイルパスは入れない (来歴として記録にだけ書く)。
 //   - 完全性ハッシュ: 記録ファイル resolved_species_<互換16桁>[_<完全性16桁>].yaml 全文の SHA-256。
 //   - 各 res_*.h5 (境界出力を含む) のルート属性: species_hash (互換性, 全長) / species_record_sha256 (完全性) /

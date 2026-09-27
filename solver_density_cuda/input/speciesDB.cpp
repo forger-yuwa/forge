@@ -188,6 +188,62 @@ const std::string& speciesDB_builtinDataSha256()
 
 ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, const std::string& dbFile)
 {
+    return speciesDB_resolve(namesIn, dbFile, std::vector<SpeciesLumpSpec>{});
+}
+
+namespace {
+
+// 構成種の重複検査用のキー: 内蔵種は canonical ID (別名・大小文字違いを同一視)、それ以外は大文字化した名前。
+std::string memberKey(const std::string& resolvedKey, bool fromFile)
+{
+    if (!fromFile) {
+        for (const auto& e : builtinEntries()) {
+            if (e.id == resolvedKey) return e.id;
+            for (const auto& a : e.aliases) if (a == resolvedKey) return e.id;
+        }
+    }
+    return toUpper(resolvedKey);
+}
+
+std::string breakpoints(const SpeciesThermo& s)
+{
+    std::ostringstream o;
+    o << std::setprecision(17) << s.Tlo << "/" << s.Tmid << "/" << s.Thi;
+    return o.str();
+}
+
+// lump を合成する (plan thermophysics-solver-owned-species-db §4.2 #6a; 式は設計側 composition.lump_entry と同じ)。
+//   x_k: lump 内モル分率 (mole は正規化、mass は Y_k/M_k を正規化)
+//   MW  = Σ x_k M_k、NASA-9 係数 = Σ x_k a_k (両区間。係数に線形なので cp/R, h/RT, s°/R は構成種のモル加重和と厳密に一致)
+//   LJ  = Σ Y_k σ_k, Σ Y_k ε_k (Y_k = x_k M_k / MW)。**暫定**: 設計側の現行規約に合わせただけで根拠は無い。
+//         plan #7 で粘性・熱伝導は実種展開、拡散は Blanc の法則に置き換える。
+SpeciesThermo synthesizeLump(const std::string& name, const std::vector<double>& x, const std::vector<SpeciesThermo>& m)
+{
+    SpeciesThermo s{};
+    s.Tlo = m[0].Tlo; s.Tmid = m[0].Tmid; s.Thi = m[0].Thi;
+    double MW = 0.0;
+    for (size_t k = 0; k < m.size(); ++k) MW += x[k]*m[k].MW;
+    if (!(MW > 0.0) || !std::isfinite(MW)) throw std::runtime_error("[speciesDB] lump '" + name + "': synthesized MW is not positive");
+    s.MW = MW;
+    for (int i = 0; i < 9; ++i) { s.low[i] = 0.0; s.high[i] = 0.0; }
+    double sig = 0.0, eps = 0.0;
+    for (size_t k = 0; k < m.size(); ++k) {
+        for (int i = 0; i < 9; ++i) { s.low[i] += x[k]*m[k].low[i]; s.high[i] += x[k]*m[k].high[i]; }
+        const double Yk = x[k]*m[k].MW/MW;
+        sig += Yk*m[k].sigma_LJ;
+        eps += Yk*m[k].eps_kB;
+    }
+    s.sigma_LJ = sig; s.eps_kB = eps;
+    s.h_datum = 0.0;
+    s.invMW = 1.0/MW;
+    return s;
+}
+
+} // anonymous namespace
+
+ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, const std::string& dbFile,
+                                    const std::vector<SpeciesLumpSpec>& lumps)
+{
     std::map<std::string, SpeciesThermo> db = speciesDB_builtin();
     std::map<std::string, bool> fromFile;   // 上書き/追加された種名
 
@@ -234,22 +290,111 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
                                  + " exceeds THERMO_MAX_SPECIES=" + std::to_string(THERMO_MAX_SPECIES));
     }
 
+    auto notFound = [&](const std::string& nm, const std::string& what) {
+        std::string avail;
+        for (const auto& kv : db) avail += (avail.empty() ? "" : " ") + kv.first;
+        return std::runtime_error("[speciesDB] " + what + " '" + nm + "' not found in built-in DB nor speciesDBFile"
+                                  + (dbFile.empty() ? std::string("") : " '" + dbFile + "'")
+                                  + " (available: " + avail + ")");
+    };
+
+    // lump 指定の対応付け (lump 名は names にちょうど 1 回現れる)
+    std::map<std::string, const SpeciesLumpSpec*> lumpOf;
+    for (const auto& lp : lumps) {
+        if (lumpOf.count(lp.name)) throw std::runtime_error("[speciesDB] lump '" + lp.name + "' is defined twice in physProp.species");
+        if (std::find(names.begin(), names.end(), lp.name) == names.end()) {
+            throw std::runtime_error("[speciesDB] lump '" + lp.name + "' is not in the species list");
+        }
+        lumpOf[lp.name] = &lp;
+    }
+
     ResolvedSpeciesDB out;
     for (const auto& nm : names) {
         if (out.index(nm) >= 0) {
             throw std::runtime_error("[speciesDB] species '" + nm + "' is listed twice in physProp.species");
         }
-        auto it = findSpecies(db, nm);
-        if (it == db.end()) {
-            std::string avail;
-            for (const auto& kv : db) avail += (avail.empty() ? "" : " ") + kv.first;
-            throw std::runtime_error("[speciesDB] species '" + nm + "' not found in built-in DB nor speciesDBFile"
-                                     + (dbFile.empty() ? std::string("") : " '" + dbFile + "'")
-                                     + " (available: " + avail + ")");
+        auto lit = lumpOf.find(nm);
+        if (lit == lumpOf.end()) {
+            auto it = findSpecies(db, nm);
+            if (it == db.end()) throw notFound(nm, "species");
+            out.names.push_back(nm);
+            out.species.push_back(it->second);
+            out.source.push_back(fromFile.count(it->first) ? "file" : "builtin");
+            out.lumps.push_back(ResolvedLump{});
+            continue;
+        }
+        // ---- lump: 検査 → lump 内モル分率 → 合成 ----
+        const SpeciesLumpSpec& lp = *lit->second;
+        const std::string where = "[speciesDB] lump '" + nm + "'";
+        {
+            auto ct = findSpecies(db, nm);
+            if (ct != db.end()) {
+                throw std::runtime_error(where + ": the name collides with " + std::string(fromFile.count(ct->first) ? "speciesDBFile" : "built-in")
+                                         + " species '" + ct->first + "' (names are matched case-insensitively); choose another lump name");
+            }
+        }
+        if (lp.basis != "mole" && lp.basis != "mass") {
+            throw std::runtime_error(where + ": basis must be 'mole' or 'mass' (got '" + lp.basis + "')");
+        }
+        if (lp.members.empty() || lp.members.size() != lp.fractions.size()) {
+            throw std::runtime_error(where + ": needs at least one constituent with a fraction");
+        }
+        ResolvedLump rl;
+        rl.basis = lp.basis;
+        rl.members = lp.members;
+        rl.input = lp.fractions;
+        std::map<std::string, std::string> seenKey;   // 重複検査 (内蔵の別名・大小文字違いを同一視)
+        double sum = 0.0;
+        for (size_t k = 0; k < lp.members.size(); ++k) {
+            const std::string& mn = lp.members[k];
+            const double v = lp.fractions[k];
+            if (!std::isfinite(v) || !(v > 0.0)) {
+                std::ostringstream o;
+                o << where << ": fraction of '" << mn << "' must be positive and finite (got " << std::setprecision(17) << v << ")";
+                throw std::runtime_error(o.str());
+            }
+            auto it = findSpecies(db, mn);
+            if (it == db.end()) throw notFound(mn, "lump '" + nm + "' constituent");
+            const bool file = fromFile.count(it->first) > 0;
+            const std::string key = memberKey(it->first, file);
+            auto sk = seenKey.find(key);
+            if (sk != seenKey.end()) {
+                throw std::runtime_error(where + ": constituent '" + mn + "' is the same species as '" + sk->second + "' (listed twice)");
+            }
+            seenKey[key] = mn;
+            rl.memberSpecies.push_back(it->second);
+            rl.memberSource.push_back(file ? "file" : "builtin");
+            sum += v;
+        }
+        // 温度区切りが揃っていること (区間の和集合で畳むのは plan #6b)
+        for (size_t k = 1; k < rl.memberSpecies.size(); ++k) {
+            const SpeciesThermo& a = rl.memberSpecies[0];
+            const SpeciesThermo& b = rl.memberSpecies[k];
+            if (a.Tlo != b.Tlo || a.Tmid != b.Tmid || a.Thi != b.Thi) {
+                throw std::runtime_error(where + ": constituents have different temperature breakpoints ('" + lp.members[0] + "' "
+                                         + breakpoints(a) + " K vs '" + lp.members[k] + "' " + breakpoints(b) + " K). "
+                                         "Lumps whose constituents have different Tlo/Tmid/Thi need variable temperature intervals "
+                                         "(plan thermophysics-solver-owned-species-db #6b, not implemented yet); keep such species as separate species.");
+            }
+        }
+        if (std::fabs(sum - 1.0) >= 1.0e-3) {
+            std::cerr << where << " WARNING: " << lp.basis << " fractions sum to " << std::setprecision(10) << sum
+                      << " (differs from 1 by >= 1e-3); normalized within the lump" << std::endl;
+        }
+        // lump 内モル分率
+        const size_t nm_ = lp.members.size();
+        rl.x.assign(nm_, 0.0);
+        if (lp.basis == "mole") {
+            for (size_t k = 0; k < nm_; ++k) rl.x[k] = lp.fractions[k]/sum;
+        } else {
+            double den = 0.0;
+            for (size_t k = 0; k < nm_; ++k) { rl.x[k] = (lp.fractions[k]/sum)/rl.memberSpecies[k].MW; den += rl.x[k]; }
+            for (size_t k = 0; k < nm_; ++k) rl.x[k] /= den;
         }
         out.names.push_back(nm);
-        out.species.push_back(it->second);
-        out.source.push_back(fromFile.count(it->first) ? "file" : "builtin");
+        out.species.push_back(synthesizeLump(nm, rl.x, rl.memberSpecies));
+        out.source.push_back("lump");
+        out.lumps.push_back(rl);
     }
     for (auto& s : out.species) s.invMW = 1.0/s.MW;
     return out;
@@ -257,7 +402,36 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
 
 ResolvedSpeciesDB speciesDB_resolve(const solverConfig& cfg)
 {
-    return speciesDB_resolve(cfg.speciesNames, cfg.speciesDBFile);
+    ResolvedSpeciesDB db = speciesDB_resolve(cfg.speciesNames, cfg.speciesDBFile, cfg.speciesLumps);
+    // 凝縮種は lump に入れられない (独立種として置く; methods/thermophysics.md §1b.2)。
+    // 凝縮種名は solverConfig::read が condensationSpecies / condGasSpecies / 単成分 TP から解決済み (condGasSpeciesName)。
+    if (cfg.condensation == 1) {
+        std::vector<std::string> cond;
+        if (!cfg.condGasSpeciesName.empty()) cond.push_back(cfg.condGasSpeciesName);
+        if (!cfg.condensationSpecies.empty()) cond.push_back(cfg.condensationSpecies);
+        auto keyOf = [&](const std::string& n) {
+            // 内蔵種は canonical ID (H2O/WATER, Ar/AR を同一視)、それ以外は大文字化
+            const std::string up = toUpper(n);
+            for (const auto& e : builtinEntries()) {
+                if (toUpper(e.id) == up) return e.id;
+                for (const auto& a : e.aliases) if (toUpper(a) == up) return e.id;
+            }
+            return up;
+        };
+        for (int s = 0; s < db.size(); ++s) {
+            if (!db.isLump(s)) continue;
+            for (const auto& mn : db.lumps[s].members) {
+                for (const auto& c : cond) {
+                    if (keyOf(mn) == keyOf(c)) {
+                        throw std::runtime_error("[speciesDB] lump '" + db.names[s] + "': constituent '" + mn
+                                                 + "' is the condensing species (condensation: 1, '" + c
+                                                 + "'); a condensing species cannot be lumped — list it as a separate species");
+                    }
+                }
+            }
+        }
+    }
+    return db;
 }
 
 const ResolvedSpeciesDB& speciesDB_init(const solverConfig& cfg)
@@ -372,6 +546,28 @@ void speciesDB_printTable(const solverConfig& cfg, const ResolvedSpeciesDB& db)
         std::cout << "[species]   " << std::setw(2) << s << "  " << std::setw(8) << std::left << db.names[s] << std::right
                   << "  MW=" << std::setprecision(10) << db.MW(s) << "  " << db.source[s] << "\n";
     }
+    // lump (擬似種) の中身と合成結果 (h は datum 適用前の絶対基準; thermoHrefTemp>0 なら thermo_init_db が全種同じ規約で移す)
+    for (int s = 0; s < db.size(); ++s) {
+        if (!db.isLump(s)) continue;
+        const ResolvedLump& l = db.lumps[s];
+        const SpeciesThermo& sp = db.species[s];
+        std::cout << "[species]   lump " << db.names[s] << " (basis " << l.basis << "; synthesized at startup: " << SPECIES_LUMP_SYNTHESIS << ")\n";
+        for (size_t k = 0; k < l.members.size(); ++k) {
+            std::cout << "[species]     " << std::setw(8) << std::left << l.members[k] << std::right
+                      << "  input=" << std::setprecision(17) << l.input[k]
+                      << "  x=" << std::setprecision(17) << l.x[k]
+                      << "  MW=" << std::setprecision(10) << l.memberSpecies[k].MW << "  " << l.memberSource[k] << "\n";
+        }
+        std::cout << "[species]     MW=" << std::setprecision(17) << sp.MW << " kg/mol, T breakpoints "
+                  << sp.Tlo << "/" << sp.Tmid << "/" << sp.Thi << " K\n";
+        std::cout << "[species]     LJ sigma=" << std::setprecision(17) << sp.sigma_LJ << " A eps/kB=" << sp.eps_kB
+                  << " K (PROVISIONAL: mass-fraction mean of constituents, as the design-side generator; to be replaced by"
+                  << " constituent expansion / Blanc diffusion in plan #7)\n";
+        for (double T : {298.15, 1000.0, 2000.0}) {
+            std::cout << "[species]     T=" << std::setprecision(6) << T << " K: cp=" << std::setprecision(10) << thermo_cp_mass(sp, T)
+                      << " J/(kg K), h_abs=" << thermo_h_mass(sp, T) << " J/kg\n";
+        }
+    }
     if (cfg.condensation == 1) {
         if (cfg.condGasSpecies >= 0 && cfg.condGasSpecies < db.size()) {
             std::cout << "[species]   condensing species: " << db.names[cfg.condGasSpecies]
@@ -474,12 +670,35 @@ std::string yq(const std::string& s)
     return o + "\"";
 }
 
+// lump の構成種 1 つ (互換性テキストの材料)
+struct RecordLumpMember {
+    std::string   name;
+    double        x;      // lump 内モル分率 (正規化済み)
+    SpeciesThermo sp;     // 構成種の絶対基準係数
+};
+
 // 記録 1 種分 (互換性テキストの材料)
 struct RecordEntry {
     std::string   name;
     std::string   phase;
     SpeciesThermo sp;
+    bool          isLump = false;
+    std::string   synthesis;                  // lump の合成規約 (SPECIES_LUMP_SYNTHESIS)
+    std::vector<RecordLumpMember> members;    // lump の構成種
 };
+
+void compatLineSpecies(std::ostringstream& o, const std::string& tag, const SpeciesThermo& s)
+{
+    o << tag << ".MW: " << g17(s.MW) << "\n";
+    o << tag << ".T: " << g17(s.Tlo) << " " << g17(s.Tmid) << " " << g17(s.Thi) << "\n";
+    o << tag << ".LJ: " << g17(s.sigma_LJ) << " " << g17(s.eps_kB) << "\n";
+    o << tag << ".low:";
+    for (int k = 0; k < 9; ++k) o << " " << g17(s.low[k]);
+    o << "\n";
+    o << tag << ".high:";
+    for (int k = 0; k < 9; ++k) o << " " << g17(s.high[k]);
+    o << "\n";
+}
 
 // 互換性テキスト本体。書式は tools/forge_species.py compat_text と一字一句同じにすること。
 std::string compatTextRaw(const std::string& schema, const std::string& datum, const std::string& extrap,
@@ -492,17 +711,18 @@ std::string compatTextRaw(const std::string& schema, const std::string& datum, c
     o << "extrapolation: " << extrap << "\n";
     o << "nSpecies: " << es.size() << "\n";
     for (size_t i = 0; i < es.size(); ++i) {
-        const SpeciesThermo& s = es[i].sp;
-        o << "species[" << i << "]: name=" << es[i].name << " phase=" << es[i].phase << "\n";
-        o << "species[" << i << "].MW: " << g17(s.MW) << "\n";
-        o << "species[" << i << "].T: " << g17(s.Tlo) << " " << g17(s.Tmid) << " " << g17(s.Thi) << "\n";
-        o << "species[" << i << "].LJ: " << g17(s.sigma_LJ) << " " << g17(s.eps_kB) << "\n";
-        o << "species[" << i << "].low:";
-        for (int k = 0; k < 9; ++k) o << " " << g17(s.low[k]);
-        o << "\n";
-        o << "species[" << i << "].high:";
-        for (int k = 0; k < 9; ++k) o << " " << g17(s.high[k]);
-        o << "\n";
+        const std::string tag = "species[" + std::to_string(i) + "]";
+        o << tag << ": name=" << es[i].name << " phase=" << es[i].phase << "\n";
+        compatLineSpecies(o, tag, es[i].sp);
+        // lump だけ追記する (lump の無い DB のテキストは #6a 前とバイト一致)。basis・入力の分率・source は入れない。
+        if (es[i].isLump) {
+            o << tag << ".lump: n=" << es[i].members.size() << " synthesis=" << es[i].synthesis << "\n";
+            for (size_t k = 0; k < es[i].members.size(); ++k) {
+                const std::string mt = tag + ".lump[" + std::to_string(k) + "]";
+                o << mt << ": name=" << es[i].members[k].name << " x=" << g17(es[i].members[k].x) << "\n";
+                compatLineSpecies(o, mt, es[i].members[k].sp);
+            }
+        }
     }
     return o.str();
 }
@@ -510,8 +730,46 @@ std::string compatTextRaw(const std::string& schema, const std::string& datum, c
 std::vector<RecordEntry> entriesOf(const ResolvedSpeciesDB& db)
 {
     std::vector<RecordEntry> es;
-    for (int s = 0; s < db.size(); ++s) es.push_back({db.names[s], "gas", db.species[s]});   // 液相は #10 まで含めない
+    for (int s = 0; s < db.size(); ++s) {
+        RecordEntry e;
+        e.name = db.names[s]; e.phase = "gas"; e.sp = db.species[s];   // 液相は #10 まで含めない
+        if (db.isLump(s)) {
+            const ResolvedLump& l = db.lumps[s];
+            e.isLump = true;
+            e.synthesis = SPECIES_LUMP_SYNTHESIS;
+            for (size_t k = 0; k < l.members.size(); ++k) e.members.push_back({l.members[k], l.x[k], l.memberSpecies[k]});
+        }
+        es.push_back(e);
+    }
     return es;
+}
+
+// 記録の係数ブロック (種・構成種で共通)。indent は行頭の空白。
+void recordSpeciesBlock(std::ostringstream& o, const std::string& indent, const SpeciesThermo& sp)
+{
+    o << indent << "MW: " << g17(sp.MW) << "\n";
+    o << indent << "Tlo: " << g17(sp.Tlo) << "\n";
+    o << indent << "Tmid: " << g17(sp.Tmid) << "\n";
+    o << indent << "Thi: " << g17(sp.Thi) << "\n";
+    o << indent << "LJ_sigma: " << g17(sp.sigma_LJ) << "\n";
+    o << indent << "LJ_eps_kB: " << g17(sp.eps_kB) << "\n";
+    o << indent << "nasa9_low: [";
+    for (int k = 0; k < 9; ++k) o << (k ? ", " : "") << g17(sp.low[k]);
+    o << "]\n";
+    o << indent << "nasa9_high: [";
+    for (int k = 0; k < 9; ++k) o << (k ? ", " : "") << g17(sp.high[k]);
+    o << "]\n";
+}
+
+// 記録の 1 種 (YAML ノード) から係数を読む
+void readRecordSpecies(const YAML::Node& n, const std::string& what, SpeciesThermo& s)
+{
+    s = SpeciesThermo{};
+    s.MW = n["MW"].as<double>();
+    s.Tlo = n["Tlo"].as<double>(); s.Tmid = n["Tmid"].as<double>(); s.Thi = n["Thi"].as<double>();
+    s.sigma_LJ = n["LJ_sigma"].as<double>(); s.eps_kB = n["LJ_eps_kB"].as<double>();
+    if (!read9(n["nasa9_low"], s.low) || !read9(n["nasa9_high"], s.high))
+        throw std::runtime_error("species '" + what + "' lacks 9 nasa9 coefficients");
 }
 
 bool readFileBytes(const std::string& path, std::string& out)
@@ -566,18 +824,22 @@ std::string speciesDB_recordText(const ResolvedSpeciesDB& db, double Tref, const
         o << "    name: " << yq(db.names[s]) << "\n";
         o << "    phase: \"gas\"\n";
         o << "    source: " << yq(db.source[s]) << "\n";
-        o << "    MW: " << g17(sp.MW) << "\n";
-        o << "    Tlo: " << g17(sp.Tlo) << "\n";
-        o << "    Tmid: " << g17(sp.Tmid) << "\n";
-        o << "    Thi: " << g17(sp.Thi) << "\n";
-        o << "    LJ_sigma: " << g17(sp.sigma_LJ) << "\n";
-        o << "    LJ_eps_kB: " << g17(sp.eps_kB) << "\n";
-        o << "    nasa9_low: [";
-        for (int k = 0; k < 9; ++k) o << (k ? ", " : "") << g17(sp.low[k]);
-        o << "]\n";
-        o << "    nasa9_high: [";
-        for (int k = 0; k < 9; ++k) o << (k ? ", " : "") << g17(sp.high[k]);
-        o << "]\n";
+        recordSpeciesBlock(o, "    ", sp);
+        if (db.isLump(s)) {
+            // lump: 上の係数は起動時に合成した値。構成 (config の basis と分率、正規化したモル分率) と構成種の係数を書く。
+            const ResolvedLump& l = db.lumps[s];
+            o << "    lump:\n";
+            o << "      basis: " << yq(l.basis) << "\n";
+            o << "      synthesis: " << yq(SPECIES_LUMP_SYNTHESIS) << "\n";
+            o << "      members:\n";
+            for (size_t k = 0; k < l.members.size(); ++k) {
+                o << "        - name: " << yq(l.members[k]) << "\n";
+                o << "          source: " << yq(l.memberSource[k]) << "\n";
+                o << "          fraction_input: " << g17(l.input[k]) << "\n";
+                o << "          x: " << g17(l.x[k]) << "\n";
+                recordSpeciesBlock(o, "          ", l.memberSpecies[k]);
+            }
+        }
     }
     o << "provenance:\n";
     o << "  speciesDBFile: " << yq(dbFile) << "\n";
@@ -649,13 +911,19 @@ std::vector<std::string> speciesDB_diffRecord(const std::string& recordPath, con
             RecordEntry e;
             e.name  = n["name"].as<std::string>();
             e.phase = n["phase"].as<std::string>();
-            SpeciesThermo& s = e.sp;
-            s = SpeciesThermo{};
-            s.MW = n["MW"].as<double>();
-            s.Tlo = n["Tlo"].as<double>(); s.Tmid = n["Tmid"].as<double>(); s.Thi = n["Thi"].as<double>();
-            s.sigma_LJ = n["LJ_sigma"].as<double>(); s.eps_kB = n["LJ_eps_kB"].as<double>();
-            if (!read9(n["nasa9_low"], s.low) || !read9(n["nasa9_high"], s.high))
-                throw std::runtime_error("species '" + e.name + "' lacks 9 nasa9 coefficients");
+            readRecordSpecies(n, e.name, e.sp);
+            if (n["lump"]) {
+                const YAML::Node l = n["lump"];
+                e.isLump = true;
+                e.synthesis = l["synthesis"].as<std::string>();
+                for (const auto& m : l["members"]) {
+                    RecordLumpMember mm;
+                    mm.name = m["name"].as<std::string>();
+                    mm.x = m["x"].as<double>();
+                    readRecordSpecies(m, e.name + "." + mm.name, mm.sp);
+                    e.members.push_back(mm);
+                }
+            }
             es.push_back(e);
         }
     } catch (const std::exception& e) {
@@ -682,19 +950,38 @@ std::vector<std::string> speciesDB_diffRecord(const std::string& recordPath, con
         d.push_back("species list/order: field [" + a + "] vs current [" + b + "]");
         return d;
     }
-    for (int s = 0; s < db.size(); ++s) {
-        const SpeciesThermo& f = es[s].sp;
-        const SpeciesThermo& c = db.species[s];
-        const std::string& n = db.names[s];
+    const std::vector<RecordEntry> cur = entriesOf(db);
+    auto cmpSpecies = [&](const std::string& n, const SpeciesThermo& f, const SpeciesThermo& c) {
         auto cmp = [&](const std::string& key, double a, double b) {
             if (a != b) d.push_back(n + "." + key + ": field " + g17(a) + " vs current " + g17(b));
         };
-        if (es[s].phase != "gas") d.push_back(n + ".phase: field " + es[s].phase + " vs current gas");
         cmp("MW", f.MW, c.MW);
         cmp("Tlo", f.Tlo, c.Tlo); cmp("Tmid", f.Tmid, c.Tmid); cmp("Thi", f.Thi, c.Thi);
         cmp("LJ_sigma", f.sigma_LJ, c.sigma_LJ); cmp("LJ_eps_kB", f.eps_kB, c.eps_kB);
         for (int k = 0; k < 9; ++k) cmp("nasa9_low[" + std::to_string(k) + "]", f.low[k], c.low[k]);
         for (int k = 0; k < 9; ++k) cmp("nasa9_high[" + std::to_string(k) + "]", f.high[k], c.high[k]);
+    };
+    for (int s = 0; s < db.size(); ++s) {
+        const std::string& n = db.names[s];
+        if (es[s].phase != "gas") d.push_back(n + ".phase: field " + es[s].phase + " vs current gas");
+        cmpSpecies(n, es[s].sp, db.species[s]);
+        // lump の構成 (有無・合成規約・構成種の名前と順序・モル分率・構成種の係数)
+        if (es[s].isLump != cur[s].isLump) {
+            d.push_back(n + ": field is " + (es[s].isLump ? "a lump" : "not a lump") + " vs current " + (cur[s].isLump ? "a lump" : "not a lump"));
+            continue;
+        }
+        if (!cur[s].isLump) continue;
+        if (es[s].synthesis != cur[s].synthesis) d.push_back(n + ".lump.synthesis: field '" + es[s].synthesis + "' vs current '" + cur[s].synthesis + "'");
+        std::string a, b;
+        for (const auto& m : es[s].members) a += (a.empty() ? "" : ",") + m.name;
+        for (const auto& m : cur[s].members) b += (b.empty() ? "" : ",") + m.name;
+        if (a != b) { d.push_back(n + ".lump members: field [" + a + "] vs current [" + b + "]"); continue; }
+        for (size_t k = 0; k < cur[s].members.size(); ++k) {
+            const std::string mn = n + ".lump." + cur[s].members[k].name;
+            if (es[s].members[k].x != cur[s].members[k].x)
+                d.push_back(mn + ".x: field " + g17(es[s].members[k].x) + " vs current " + g17(cur[s].members[k].x));
+            cmpSpecies(mn, es[s].members[k].sp, cur[s].members[k].sp);
+        }
     }
     return d;
 }

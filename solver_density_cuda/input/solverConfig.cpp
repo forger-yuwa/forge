@@ -902,7 +902,45 @@ void solverConfig::read(std::string fname)
         // 多成分 thermally-perfect gas 設定 (任意, thermalMethod==2 で使用)
         if (physProp["species"]) {
             this->speciesNames.clear();
-            for (const auto& sn : physProp["species"]) this->speciesNames.push_back(sn.as<std::string>());
+            this->speciesLumps.clear();
+            // 要素は文字列 (種名) か mapping {name, lump: {構成種: 分率, ...}, basis: mole|mass} (lump = 擬似種;
+            // 係数は起動時に speciesDB_resolve が合成する。plan thermophysics-solver-owned-species-db §4.2 #6a)。
+            // ここでは構造だけを読み、分率の検査・正規化・構成種の解決は speciesDB_resolve に置く (単体試験と同じ経路)。
+            for (const auto& sn : physProp["species"]) {
+                if (sn.IsScalar()) { this->speciesNames.push_back(sn.as<std::string>()); continue; }
+                if (!sn.IsMap()) throw std::runtime_error("physProp.species: each entry must be a species name or a mapping {name, lump, basis}.");
+                SpeciesLumpSpec lp;
+                for (auto it = sn.begin(); it != sn.end(); ++it) {
+                    const std::string k = it->first.as<std::string>();
+                    if (k != "name" && k != "lump" && k != "basis") {
+                        throw std::runtime_error("physProp.species: unknown key '" + k + "' in a lump entry (allowed: name, lump, basis).");
+                    }
+                }
+                if (!sn["name"] || !sn["name"].IsScalar()) throw std::runtime_error("physProp.species: a lump entry needs 'name'.");
+                lp.name = sn["name"].as<std::string>();
+                const YAML::Node lm = sn["lump"];
+                if (!lm || !lm.IsMap() || lm.size() == 0) {
+                    throw std::runtime_error("physProp.species: lump '" + lp.name + "' needs a non-empty mapping 'lump: {species: fraction, ...}'.");
+                }
+                // basis は必須 (設計側 problem の composition_basis は既定 mass なので、省略時の既定を置くと取り違えやすい)
+                if (!sn["basis"] || !sn["basis"].IsScalar()) {
+                    throw std::runtime_error("physProp.species: lump '" + lp.name + "' needs 'basis: mole' or 'basis: mass'.");
+                }
+                lp.basis = sn["basis"].as<std::string>();
+                for (auto it = lm.begin(); it != lm.end(); ++it) {
+                    const std::string mn = it->first.as<std::string>();
+                    double v;
+                    try {
+                        v = it->second.as<double>();
+                    } catch (const std::exception&) {
+                        throw std::runtime_error("physProp.species: lump '" + lp.name + "' fraction of '" + mn + "' is not a number.");
+                    }
+                    lp.members.push_back(mn);
+                    lp.fractions.push_back(v);
+                }
+                this->speciesNames.push_back(lp.name);
+                this->speciesLumps.push_back(lp);
+            }
             this->nSpecies = static_cast<int>(this->speciesNames.size());
         }
 
