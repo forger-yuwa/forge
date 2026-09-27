@@ -6,7 +6,9 @@
 //   plans/active/thermophysics-solver-owned-species-db.md §4.3b・§4.3c・§5.1 #5t2、仕様 methods/thermophysics.md。
 //
 //   host (解決・記録・試験) と GPU (段 2, #5t2-2) が同じ式を使う (THERMO_HD)。GPU では physProp.transport があり
-//   viscMethod 2 のときだけ、セル (gasProperties_d) と壁 (wmlesWallModel_d) が transport_mix_Y を呼ぶ。
+//   viscMethod 2 のときだけ、セル (gasProperties_d) と壁 (wmlesWallModel_d) が輸送物性をこの経路で作る:
+//   既定は表引き (float; transportTables_d.cuh の transport_mix_Y_tab, #5t2-3)、表の範囲外 (150–15000 K の外) と
+//   FORGE_TRANSPORT_TABLE=0 のときはここの double 評価 transport_mix_Y。
 //   書かれていなければ現行 (thermo_d.cuh の thermo_mu_mix / thermo_lambda_mix) のまま。
 //   係数の解決・検査・記録は input/speciesTransportDB.{hpp,cpp}、device への転送は thermo_d.cu (thermo_init_db)。
 //
@@ -306,9 +308,55 @@ THERMO_HD void transport_mix(const SpeciesTransportD* sp, const TransportPairD* 
 }
 
 // -----------------------------------------------------------------------------
+// 表引き (float) の device 側の見え方 (#5t2-3; 評価・構築は transportTables_d.cuh、転送は thermo_d.cu)。
+//   各実種の ln μᵢ・ln λᵢ と各組 (CE・CEA 相互作用) の ln ηᵢⱼ を、式の区間境界で分割した区間ごとに
+//   ln T 等間隔の 3 次 Hermite で持つ。1 小区間の係数: f ≈ f0·exp(c1 u + c2 u² + c3 u³), u ∈ [0,1]。
+// -----------------------------------------------------------------------------
+struct alignas(16) TransportHermiteF {
+    float f0, c1, c2, c3;
+};
+
+// 分割区間 1 つ。区間の所属は元の T と元の境界値で決め (float の ln T では選ばない; codex 2026-09-27)、
+//   Tupper = この区間に属する最大の float T (境界の所属規約 T ≤ b / T < b を float の閾値に写したもの)。
+struct TransportSegF {
+    double lnTa;     // 区間左端の ln T
+    double invH;     // 小区間数 / (ln Tb − ln Ta)
+    float  Tupper;   // この区間に属する最大の float T (最後の区間は表の上端)
+    int    off;      // 係数配列での最初の小区間の番号
+    int    m;        // 小区間数
+    int    pad;
+};
+
+// 表 1 つ = 連続した分割区間 [seg0, seg0 + nseg)。nseg = 0 は表なし (剛体球の組は実行時に種別表の μ から作る)。
+struct TransportTabRefF {
+    int seg0, nseg;
+};
+
+// 組 (a < b) ごとの混合則の定数 (host で double から作って float に丸める)
+struct TransportPairMixF {
+    float kab, kba;         // 2 M_b/(M_a+M_b), 2 M_a/(M_a+M_b)   (φ_ab = kab η_a/η_ab, φ_ba = kba η_b/η_ab)
+    float gab, gba;         // ψ/φ = 1 + 2.41 (M_i−M_j)(M_i−0.142 M_j)/(M_i+M_j)²  (i→j = a→b, b→a)
+    float rsC, rsRatio;     // 剛体球: 5.656854 √(M_b/(M_a+M_b)), √(M_b/M_a)
+};
+
+struct TransportTablesF {
+    int valid = 0;                          // 0: 表なし (段 2 の double 評価だけ)
+    float Tmin = 0.0f, Tmax = 0.0f;         // 表の範囲 (float T がこの閉区間にあれば表; 外は double 評価へ委譲)
+    const TransportSegF*     seg     = nullptr;
+    const TransportHermiteF* spc     = nullptr;   // 実種: 小区間ごとに (μ, λ) の 2 組
+    const TransportHermiteF* pairc   = nullptr;   // 組: 小区間ごとに η の 1 組
+    const TransportTabRefF*  spTab   = nullptr;   // [nReal]
+    const TransportTabRefF*  pairTab = nullptr;   // [nReal(nReal-1)/2]
+    const TransportPairMixF* pm      = nullptr;   // [nReal(nReal-1)/2]
+    const float*             invMWs  = nullptr;   // [nTransported] 輸送種の 1/M [mol/kg]
+    const float*             expandF = nullptr;   // [nTransported*nReal] 展開行列 (float)
+};
+
+// -----------------------------------------------------------------------------
 // GPU で使う表 (thermo_d.cu の thermo_init_db が device へ上げる; 値渡しでカーネルへ)。
 //   expand: 輸送する種 s (physProp.species の順, nTransported 個) × 実種 r の密行列 (行優先)。
 //           値は lump 内モル分率 (lump でない種は 1、含まない実種は 0)。重複実種は同じ列に入る。
+//   tab:    表引き (#5t2-3)。tab.valid = 0 なら段 2 の double 評価 (transport_mix_Y) だけ。
 // -----------------------------------------------------------------------------
 struct TransportTableD {
     int                      nReal;
@@ -316,6 +364,7 @@ struct TransportTableD {
     const SpeciesTransportD* sp;      // [nReal]
     const TransportPairD*    pairs;   // [nReal(nReal-1)/2]
     const double*            expand;  // [nTransported*nReal]
+    TransportTablesF         tab;
 };
 
 // 輸送種のモル分率 Xs → 実種のモル分率 Xreal (Xreal_r = Σ_s Xs_s·expand[s,r]; 加算順は s 昇順 = host の疎な展開と同じ値)

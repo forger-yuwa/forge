@@ -1,6 +1,7 @@
 #include "gasProperties_d.cuh"
 #include "thermo_d.cuh"
 #include "transportMix_d.cuh"      // 種ごとの輸送物性 (physProp.transport; plan #5t2-2)
+#include "transportTables_d.cuh"   // 同・表引き (float; plan #5t2-3)
 #include "speciesTransport_d.cuh"  // species_roY_device_ptr()
 
 // 種ごとの輸送物性の経路 (physProp.transport があり viscMethod 2) で使うセル組成。
@@ -18,6 +19,15 @@ __device__ inline int gas_transport_cell_Y(int nSpecies, flow_float* const* roY,
     for (int s=0;s<nSpecies;s++){ double y=(double)roY[s][ic]/ro_d; if(y<0.0)y=0.0; Y[s]=y; ysum+=y; }
     const double inv = 1.0/(ysum>1.0e-30?ysum:1.0e-30);
     for (int s=0;s<nSpecies;s++) Y[s]*=inv;
+    return nSpecies;
+}
+
+// 表引き (#5t2-3) のセル組成: 輸送種の ρY_s をそのまま float で渡す (負値の切り捨てと正規化は transport_mix_Y_tab が
+//   X_s ∝ max(ρY_s, 0)/M_s で行う; 段 2 の Y の正規化は X の正規化で打ち消されるので同じ式)。単成分・roY 無しは 1。
+__device__ inline int gas_transport_cell_rY(int nSpecies, flow_float* const* roY, geom_int ic, float* rY)
+{
+    if (nSpecies <= 1 || roY == nullptr) { rY[0] = 1.0f; return 1; }
+    for (int s = 0; s < nSpecies; s++) rY[s] = (float)roY[s][ic];
     return nSpecies;
 }
 
@@ -86,6 +96,14 @@ __global__ void gasProperties_d
             thermCond_array[ic] = (thermCondMethod == 1)
                 ? vis_lam_array[ic]*cp_array[ic]/prandtlLam
                 : thermCond_const;
+
+        } else if (viscMethod == 2 && transportOn != 0 && ttab.tab.valid != 0) { // 同・表引き (float; 範囲外は double へ委譲)
+            float rY[THERMO_MAX_SPECIES];
+            const int nY = gas_transport_cell_rY(nSpecies, roY, ic, rY);
+            float mu, lam;
+            transport_mix_Y_tab(sp, ttab, nY, rY, (float)T[ic], &mu, &lam);
+            vis_lam_array[ic]   = (flow_float)mu;
+            thermCond_array[ic] = (flow_float)lam;
 
         } else if (viscMethod == 2 && transportOn != 0) { // 種ごとの出所 + CEA frozen 混合則 (double 評価・float 格納)
             double Y[THERMO_MAX_SPECIES];
@@ -196,6 +214,51 @@ bool gasPropertiesTransportProbeStates_d_wrapper(solverConfig& cfg, int K, const
     const int bs = 128;
     gasPropertiesTransportProbeStates_d<<<(K + bs - 1)/bs, bs>>>(
         thermo_species_device_ptr(), cfg.nSpecies, *ttab, K, Y_d, T_d, mu_d, lam_d, Xreal_d);
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchkKernelSync();
+    return true;
+}
+
+// 試験用 (#5t2-3): 与えた輸送種 Y (double、K×nSpecies) を float に丸め、T を float に丸めて表引きの経路 (transport_mix_Y_tab) を呼ぶ。
+//   表が無ければ false。
+__global__ void gasPropertiesTransportProbeStatesTab_d(const SpeciesThermo* sp, int nSpecies, TransportTableD ttab, int K,
+                                                       const double* Y, const double* T, float* mu, float* lam)
+{
+    const int k = blockDim.x*blockIdx.x + threadIdx.x;
+    if (k >= K) return;
+    float rY[THERMO_MAX_SPECIES];
+    for (int s = 0; s < nSpecies; ++s) rY[s] = (float)Y[(size_t)k*nSpecies + s];
+    transport_mix_Y_tab(sp, ttab, nSpecies >= 2 ? nSpecies : 1, rY, (float)T[k], &mu[k], &lam[k]);
+}
+
+bool gasPropertiesTransportProbeStatesTab_d_wrapper(solverConfig& cfg, int K, const double* Y_d, const double* T_d,
+                                                    float* mu_d, float* lam_d)
+{
+    const TransportTableD* ttab = thermo_transport_table();
+    if (ttab == nullptr || ttab->tab.valid == 0) return false;
+    const int bs = 128;
+    gasPropertiesTransportProbeStatesTab_d<<<(K + bs - 1)/bs, bs>>>(
+        thermo_species_device_ptr(), cfg.nSpecies, *ttab, K, Y_d, T_d, mu_d, lam_d);
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchkKernelSync();
+    return true;
+}
+
+// 試験用 (#5t2-3, FORGE_TRANSPORT_TABLE_PROBE): 表の単体値。kind 0: 実種 idx の (μ, λ)、kind 1: 組 idx の (η, 0)。
+__global__ void transportTableSingles_d(TransportTableD ttab, int N, const int* kind, const int* idx, const float* T,
+                                        float* v0, float* v1)
+{
+    const int k = blockDim.x*blockIdx.x + threadIdx.x;
+    if (k >= N) return;
+    transport_tab_single(ttab, kind[k], idx[k], T[k], &v0[k], &v1[k]);
+}
+
+bool transportTableSingles_d_wrapper(int N, const int* kind_d, const int* idx_d, const float* T_d, float* v0_d, float* v1_d)
+{
+    const TransportTableD* ttab = thermo_transport_table();
+    if (ttab == nullptr || ttab->tab.valid == 0) return false;
+    const int bs = 128;
+    transportTableSingles_d<<<(N + bs - 1)/bs, bs>>>(*ttab, N, kind_d, idx_d, T_d, v0_d, v1_d);
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
     return true;

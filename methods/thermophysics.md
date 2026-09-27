@@ -234,6 +234,17 @@ physProp:
 - 化学種拡散 (混合平均): lump の外の種 $i$ と lump の二元係数を Blanc の法則 $1/D_{i,\mathrm{lump}}=\sum_{j\in\mathrm{lump}} x_j/D_{ij}$ で作る。
   lump 同士・構成実種が重なる場合の式は plan §4.4 で確定してから実装する。補正後の流束は `full` と厳密には一致しない (lump 内組成固定の近似誤差)。
 
+#### 1b.3b 輸送物性の表引き (float) — 実装済み (2026-09-27, plan #5t2-3)
+
+`physProp.transport` を書いた run では、セル (`gasProperties_d`) と壁 (`wmlesWallModel_d`) の μ・λ を表から引く (`cuda_forge/transportTables_d.cuh`)。表は起動時に host で double から作り device に置く。
+- 対象: 各実種の $\ln\mu_i$・$\ln\lambda_i$ と、組 $\ln\eta_{ij}$ のうち二元 Chapman–Enskog と CEA 相互作用のもの。剛体球近似の組は実行時に種別表の $\mu$ から作る。
+- 分割: 式が切り替わる温度 (CEA・fit の区間境界、H2O の 253.15/500/700 K、$T^*$ のクランプ点 $0.3\varepsilon$・$100\varepsilon$、修正 Eucken の $c_p$ の NASA $T_{lo}/T_{mid}/T_{hi}$) で分割し、各分割区間を $\Delta\ln T\le 1/256$ で刻む。
+- 補間: 小区間ごとに両端の値と $d\ln f/d\ln T$ から 3 次 Hermite ($f\approx f_0\exp(c_1u+c_2u^2+c_3u^3)$)。右区間の左端も右側の式で評価する。
+- 区間の選択は元の $T$ と元の境界値 (現行の所属規約) で行い、float の $\ln T$ では選ばない (999.99994/1000/1000.00006 K の float $\ln T$ は同値)。
+- 範囲 150–15000 K、範囲外は double 評価へ委譲 (端値クランプなし)。精度は独立 double 参照に対し単体 4.7e-7・混合 4.1e-7 以内 (基準 2e-6/1e-5)。
+- 性能 (RTX 3060, 23725 CV): 物性時間は実種 5/12/32 で 0.049/0.20/1.34 ms (従来の Wilke 経路 0.062/0.31/0.44 ms、double 評価 0.43/3.05/20.5 ms)。メモリは実種 12 で 0.76 MB。`FORGE_TRANSPORT_TABLE=0` で double 評価に戻せる。
+- 新しい μ・λ は粘性・熱流束、SST・遷移・スカラー拡散、定数 Sc の化学種・受動種拡散、軸対称ソース、CHT、SST 壁関数の局所 Pr、乱流粘性・壁 ω が読む。**CFL の粘性項 (`setDT_d`) と陰解法の粘性対角 (`timeIntegration_d`) は定数 `physProp.visc` のまま** (剛性の見積りで流束の値ではない)。SST 壁関数の回復係数も `prandtlLam` のまま。
+
 #### 1b.4 解決済み記録と内容照合
 
 - ソルバは使用した全種 (内蔵種・外部 DB・lump とその構成実種を含む) の**解決済み物性**を run ディレクトリへ出力する: 種の順序、canonical ID、出所、MW、区間と係数、LJ、datum、

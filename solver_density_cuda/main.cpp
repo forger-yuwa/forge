@@ -76,6 +76,7 @@
 
 #include "cuda_forge/fluct_variables_d.cuh"
 #include "cuda_forge/gasProperties_d.cuh"
+#include "cuda_forge/transportTables_d.cuh"   // 表引きの試験ハーネス (FORGE_TRANSPORT_TABLE_PROBE; #5t2-3)
 #include "cuda_forge/thermo_d.cuh"
 
 #include "probe/point_probes.cuh"
@@ -1148,7 +1149,8 @@ static void checkInputSpeciesAndWriteRecord(const solverConfig& cfg)
 //     (2) 実際のセル経路 gasProperties_d_wrapper (vis_lam・thermCond を float で格納) を 1 回、
 //     (3) 同じ組成・評価関数の double 値 (gasPropertiesTransportProbe_d_wrapper) を 1 回、
 //     (4) 壁モデルの物性関数 (wmlesTransportProbe; 全 bcond の境界面) を 1 回、
-//     (5) 状態表の double の Y を float の roY を経由せずに同じ評価関数へ渡す (gasPropertiesTransportProbeStates_d_wrapper)
+//     (5) 状態表の double の Y を float の roY を経由せずに同じ評価関数へ渡す (gasPropertiesTransportProbeStates_d_wrapper)、
+//     (6) 表引き (#5t2-3) があれば、同じ Y・T を float に丸めて表引きの経路へ渡す (gasPropertiesTransportProbeStatesTab_d_wrapper)
 //   を行い、device から読み戻した実際の入力 (T・ρ・roY) と出力を <states.txt>.bin に、配置を <states.txt>.json に書いて終了する。
 //   状態の割り当ては pass ごとにずらし、どの状態もセル・ghost・境界面の解点に少なくとも 1 回は乗るようにする。
 //   states.txt: 1 行目 "K nSpecies"、以降 K 行 "T ro Y0 .. Y{n-1}" (Y は輸送種の質量分率)。
@@ -1181,8 +1183,20 @@ static int runTransportProbe(const char* statesPath, solverConfig& cfg, cudaConf
 
     geom_int nWall = 0;
     for (const auto& bc : msh.bconds) nWall += static_cast<geom_int>(bc.iCells.size());
-    const geom_int M = std::max<geom_int>(1, std::min<geom_int>(nWall, std::max<geom_int>(nG, 1)));
-    const int P = static_cast<int>((K + M - 1)/M);
+    // 境界面の解点は bcond をまたいで重複しうる (角のセル) ので、重複を除いた列に状態を割り当てる
+    // (重複を数えると後の割り当てが先を上書きし、状態点が境界に乗らないことがある)。
+    std::vector<geom_int> wallCellsU;
+    {
+        std::vector<char> seen(nA, 0);
+        for (const auto& bc : msh.bconds)
+            for (geom_int ic : bc.iCells) if (!seen[ic]) { seen[ic] = 1; wallCellsU.push_back(ic); }
+    }
+    const geom_int nWallU = static_cast<geom_int>(wallCellsU.size());
+    const geom_int M = std::max<geom_int>(1, std::min<geom_int>(nWallU, std::max<geom_int>(nG, 1)));
+    // FORGE_TRANSPORT_PROBE_NOCELLS=1: セル・ghost・壁の pass を省き、状態表の (5)(6) だけ評価する (大量の状態点の照合用)
+    const char* noCellsEnv = getenv("FORGE_TRANSPORT_PROBE_NOCELLS");
+    const bool noCells = (noCellsEnv != nullptr && std::string(noCellsEnv) == "1");
+    const int P = noCells ? 0 : static_cast<int>((K + M - 1)/M);
 
     const std::string base(statesPath);
     std::ofstream bin(base + ".bin", std::ios::binary);
@@ -1198,9 +1212,7 @@ static int runTransportProbe(const char* statesPath, solverConfig& cfg, cudaConf
         std::vector<int> st(nA);
         for (geom_int i = 0; i < nC; ++i) st[i] = static_cast<int>((i + o) % K);
         for (geom_int g = 0; g < nG; ++g) st[nC + g] = static_cast<int>((g + o) % K);
-        geom_int gb = 0;
-        for (const auto& bc : msh.bconds)
-            for (geom_int ic : bc.iCells) { st[ic] = static_cast<int>((gb + o) % K); ++gb; }
+        for (geom_int q = 0; q < nWallU; ++q) st[wallCellsU[q]] = static_cast<int>((q + o) % K);
         std::vector<flow_float> hT(nA), hRo(nA), hY(static_cast<size_t>(nA)*(hasRoY ? nS : 0));
         for (geom_int i = 0; i < nA; ++i) {
             const int k = st[i];
@@ -1282,12 +1294,33 @@ static int runTransportProbe(const char* statesPath, solverConfig& cfg, cudaConf
         w(hx.data(), hx.size()*sizeof(double));
         cudaFree(Yd); cudaFree(Td); cudaFree(md); cudaFree(ld); cudaFree(Xd);
     }
+    // (6) 表引き (#5t2-3) があれば、同じ状態表の Y・T を float に丸めて表引きの経路を呼ぶ (float の μ・λ)
+    const bool hasTab = (tt->tab.valid != 0);
+    if (hasTab) {
+        double *Yd = nullptr, *Td = nullptr;
+        float *md = nullptr, *ld = nullptr;
+        gpuErrchk(cudaMalloc(&Yd, sY.size()*sizeof(double)));
+        gpuErrchk(cudaMalloc(&Td, K*sizeof(double)));
+        gpuErrchk(cudaMalloc(&md, K*sizeof(float)));
+        gpuErrchk(cudaMalloc(&ld, K*sizeof(float)));
+        gpuErrchk(cudaMemcpy(Yd, sY.data(), sY.size()*sizeof(double), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemcpy(Td, sT.data(), K*sizeof(double), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemset(md, 0xff, K*sizeof(float)));
+        gpuErrchk(cudaMemset(ld, 0xff, K*sizeof(float)));
+        gasPropertiesTransportProbeStatesTab_d_wrapper(cfg, K, Yd, Td, md, ld);
+        std::vector<float> hm(K), hl(K);
+        gpuErrchk(cudaMemcpy(hm.data(), md, K*sizeof(float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(hl.data(), ld, K*sizeof(float), cudaMemcpyDeviceToHost));
+        w(hm.data(), hm.size()*sizeof(float));
+        w(hl.data(), hl.size()*sizeof(float));
+        cudaFree(Yd); cudaFree(Td); cudaFree(md); cudaFree(ld);
+    }
     bin.close();
 
     std::ofstream js(base + ".json");
     js << "{\"K\": " << K << ", \"nSpecies\": " << nS << ", \"nReal\": " << nR << ", \"nCells\": " << nC
        << ", \"nCells_all\": " << nA << ", \"hasRoY\": " << (hasRoY ? 1 : 0) << ", \"passes\": " << P
-       << ", \"sizeof_flow_float\": " << sizeof(flow_float) << ", \"wall_counts\": [";
+       << ", \"sizeof_flow_float\": " << sizeof(flow_float) << ", \"table\": " << (hasTab ? 1 : 0) << ", \"wall_counts\": [";
     for (size_t i = 0; i < wallCounts.size(); ++i) js << (i ? ", " : "") << wallCounts[i];
     js << "], \"bconds\": [";
     for (size_t b = 0; b < msh.bconds.size(); ++b)
@@ -1295,6 +1328,77 @@ static int runTransportProbe(const char* statesPath, solverConfig& cfg, cudaConf
     js << "]}" << std::endl;
     std::cout << "[transport-probe] wrote " << base << ".bin/.json (K=" << K << ", passes=" << P << ", nCells=" << nC
               << ", nCells_all=" << nA << ", boundary planes=" << nWall << ", nReal=" << nR << ")" << std::endl;
+    return 0;
+}
+
+// 試験用 (FORGE_TRANSPORT_TABLE_PROBE=<points.txt>; plan thermophysics-solver-owned-species-db #5t2-3、tests/unit/test_transport_gpu.py)。
+//   輸送表の単体値を GPU で評価して終了する (時間更新なし)。points.txt: 1 行目 N、以降 N 行 "kind idx T"
+//   (kind 0: 実種 idx の μ・λ、kind 1: 組 idx の η; T は float に丸めて使う)。出力: <points.txt>.bin (float v0[N], v1[N]) と
+//   <points.txt>.json (表の範囲・各表の分割区間 [Ta, Tb, 小区間数, 所属の閾値 Tupper]・組の種類・メモリ量)。
+static int runTransportTableProbe(const char* path)
+{
+    const TransportTableD* tt = thermo_transport_table();
+    const TransportTablesHost* H = thermo_transport_tables_host();
+    if (tt == nullptr || H == nullptr) {
+        std::cerr << "[transport-table-probe] requires physProp.transport with tables enabled" << std::endl;
+        return 2;
+    }
+    std::ifstream in(path);
+    long long N = 0;
+    if (!(in >> N) || N < 0) { std::cerr << "[transport-table-probe] bad points file " << path << std::endl; return 2; }
+    std::vector<int> kind(N), idx(N);
+    std::vector<float> T(N);
+    for (long long k = 0; k < N; ++k) { double t; in >> kind[k] >> idx[k] >> t; T[k] = static_cast<float>(t); }
+    if (!in) { std::cerr << "[transport-table-probe] points file truncated" << std::endl; return 2; }
+    std::vector<float> v0(N, 0.0f), v1(N, 0.0f);
+    if (N > 0) {
+        int *kd = nullptr, *id = nullptr;
+        float *Td = nullptr, *a = nullptr, *b = nullptr;
+        gpuErrchk(cudaMalloc(&kd, N*sizeof(int)));
+        gpuErrchk(cudaMalloc(&id, N*sizeof(int)));
+        gpuErrchk(cudaMalloc(&Td, N*sizeof(float)));
+        gpuErrchk(cudaMalloc(&a, N*sizeof(float)));
+        gpuErrchk(cudaMalloc(&b, N*sizeof(float)));
+        gpuErrchk(cudaMemcpy(kd, kind.data(), N*sizeof(int), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemcpy(id, idx.data(), N*sizeof(int), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemcpy(Td, T.data(), N*sizeof(float), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemset(a, 0xff, N*sizeof(float)));
+        gpuErrchk(cudaMemset(b, 0xff, N*sizeof(float)));
+        transportTableSingles_d_wrapper(static_cast<int>(N), kd, id, Td, a, b);
+        gpuErrchk(cudaMemcpy(v0.data(), a, N*sizeof(float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(v1.data(), b, N*sizeof(float), cudaMemcpyDeviceToHost));
+        cudaFree(kd); cudaFree(id); cudaFree(Td); cudaFree(a); cudaFree(b);
+    }
+    const std::string base(path);
+    {
+        std::ofstream bin(base + ".bin", std::ios::binary);
+        bin.write(reinterpret_cast<const char*>(v0.data()), static_cast<std::streamsize>(N*sizeof(float)));
+        bin.write(reinterpret_cast<const char*>(v1.data()), static_cast<std::streamsize>(N*sizeof(float)));
+    }
+    std::ofstream js(base + ".json");
+    js << std::setprecision(17);
+    const int nR = tt->nReal;
+    js << "{\"N\": " << N << ", \"nReal\": " << nR << ", \"Tmin\": " << static_cast<double>(H->Tmin)
+       << ", \"Tmax\": " << static_cast<double>(H->Tmax) << ", \"bytes\": " << H->bytes() << ", \"tables\": [";
+    const int nTab = static_cast<int>(H->segLo.size());
+    for (int t = 0; t < nTab; ++t) {
+        const TransportTabRefF& r = (t < nR) ? H->spTab[t] : H->pairTab[t - nR];
+        js << (t ? ", " : "") << "{\"kind\": " << (t < nR ? 0 : 1) << ", \"idx\": " << (t < nR ? t : t - nR);
+        if (t >= nR) {
+            const TransportPairD& p = speciesDB_current()->transport.pairs[t - nR];
+            js << ", \"a\": " << p.a << ", \"b\": " << p.b << ", \"pair_kind\": " << p.kind;
+        }
+        js << ", \"segs\": [";
+        for (int k = 0; k < r.nseg; ++k) {
+            const TransportSegF& g = H->seg[r.seg0 + k];
+            js << (k ? ", " : "") << "[" << H->segLo[t][k] << ", " << H->segHi[t][k] << ", " << g.m << ", "
+               << static_cast<double>(g.Tupper) << "]";
+        }
+        js << "]}";
+    }
+    js << "]}" << std::endl;
+    std::cout << "[transport-table-probe] wrote " << base << ".bin/.json (N=" << N << ", tables=" << nTab
+              << ", bytes=" << H->bytes() << ")" << std::endl;
     return 0;
 }
 
@@ -2393,6 +2497,9 @@ int main(int argc, char** argv) {
     // 試験用: 物性だけを評価して終了 (時間更新なし; runTransportProbe の説明)
     if (const char* e = getenv("FORGE_TRANSPORT_PROBE"); e != nullptr && *e != '\0') {
         return runTransportProbe(e, cfg, cuda_cfg, msh, var);
+    }
+    if (const char* e = getenv("FORGE_TRANSPORT_TABLE_PROBE"); e != nullptr && *e != '\0') {
+        return runTransportTableProbe(e);
     }
     // 診断 (FORGE_OUT_RESIDUALS=1): 流れ残差場と陰的補正 dq を h5 出力へ追加する
     // (サブ反復収縮の空間局在の測定用。既定 off = 出力不変)。書かれる値は「最終サブ反復・

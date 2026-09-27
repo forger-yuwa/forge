@@ -23,6 +23,20 @@ forge を FORGE_TRANSPORT_PROBE=<states.txt> で起動する (main.cpp runTransp
        各フィット・接続・NASA 区間の境界 (境界そのものと両隣の float)。
   (B)  (--base-forge) physProp.transport なしでは同一の固定入力 (seed の保存量; res_0 の T・ρ・roY がビット一致することを
        確認してから) で vis_lam・thermCond が旧バイナリとビット一致 (viscMethod 2 の多成分・単成分、viscMethod 1)。
+
+表引き (#5t2-3, 既定で有効; codex diagnose notes/reviews/2026-09-27-transport-tables-diagnose.md の事前固定条件):
+  セル・ghost・壁の格納値 (S) は表引きの float 経路になる。ULP 条件は外し (新 float 経路に旧 double の基準を課さない)、
+  独立 double 参照と ≤1e-5 で判定する。(D) の double 評価は範囲外の委譲先として残るので同じ基準で照合を続ける。
+  (T1) 単体: 各表 (実種の μ・λ、CE・CEA 相互作用の組の η、剛体球の組は種別表の μ から実行時) を FORGE_TRANSPORT_TABLE_PROBE で
+       GPU 評価し、実際の float T を独立参照へ渡して相対 ≤2e-6。検査点は各小区間の 17 等分点 (ln T で等分、float に丸め)、
+       全境界 (参照側で独立に列挙: フィット区間・H2O 接続点・T* クランプ点 0.3ε/100ε・NASA Tlo/Tmid/Thi) の直前・直後 8 個の float、
+       表範囲外。表の分割区間の端が参照側の境界をすべて含むことも確かめる。NaN/Inf・非正・未更新 0 件。
+  (T2) 混合: 同じ Y・T を float に丸めて表引き経路へ渡した μ・λ (状態表 (6)) が独立 double 参照と ≤1e-5。
+       T は全境界 ±8 float・表範囲外・小区間の 17 等分点 (小区間は間引き: 各分割区間の最初と最後は必ず、他は stride ごと)。
+  (F)  全 CEA 指定の N2–H2O 16 状態 (T 400/600/1000/2000 K × X_H2O 0/0.1/0.5/1) を表引き経路で FCEA2 (frozen) と ≤0.1 %。
+  (AB) 区間選択の判別 (単成分 fit、1000 K 以下 μ 1e-5・超過 1.01e-5 Pa s、λ 0.02/0.0202): 1000 K と両隣の float で、
+       A = float の ln T で選ぶ (host ハーネス transport_table_ab_host.cpp にだけある) は不合格、
+       B = 元の T で選ぶ (ソルバ; host 同関数と GPU 0 step の両方) は合格が期待。
 規約: [PASS]/[FAIL]、失敗があれば非ゼロ終了。
 """
 import argparse, json, math, os, shutil, subprocess, sys, tempfile
@@ -111,12 +125,23 @@ def fit_edges(ref):
                 for r in sp["fit"][kind]:
                     E |= {float(r[0]), float(r[1])}
         if m == "kinetic":
-            E |= {sp["Tlo"], sp["Tmid"], sp["Thi"]}
+            E |= {sp["Tlo"], sp["Tmid"], sp["Thi"], 0.3 * sp["eps"], 100.0 * sp["eps"]}
+    return sorted(E | set(pair_edges(ref).get("all", [])))
+
+
+def pair_edges(ref):
+    """組ごとの境界 (参照側で独立に列挙)。戻り値 {(a, b): [...], "all": [...]}。剛体球は境界なし。"""
+    out, allE = {}, set()
     n = len(ref.reals)
     for a in range(n):
         for b in range(a + 1, n):
             A, B = ref.reals[a], ref.reals[b]
+            E = set()
             if A["model"] == "kinetic" and B["model"] == "kinetic":
+                eps = math.sqrt(A["sp"]["eps"] * B["sp"]["eps"])
+                E |= {0.3 * eps, 100.0 * eps}
+                out[(a, b)] = sorted(E)
+                allE |= E
                 continue
             if A["trans"] and B["trans"]:
                 for k in ((A["trans"], B["trans"]), (B["trans"], A["trans"])):
@@ -124,15 +149,56 @@ def fit_edges(ref):
                         for lo, hi, _ in TR[k]["V"]:
                             E |= {lo, hi}
                         break
+            out[(a, b)] = sorted(E)
+            allE |= E
+    out["all"] = sorted(allE)
+    return out
+
+
+def species_edges(ref, r):
+    """実種 r の境界 (参照側で独立に列挙)。"""
+    e = ref.reals[r]
+    m, sp = e["model"], e["sp"]
+    E = set()
+    if m in ("cea", "custom:h2o_iapws_cea_v1"):
+        for kind in ("V", "C"):
+            for lo, hi, _ in TR[(e["trans"], "")][kind]:
+                E |= {lo, hi}
+    if m == "custom:h2o_iapws_cea_v1":
+        E |= {253.15, 500.0, 700.0}
+    if m == "fit":
+        for kind in ("V", "C"):
+            for row in sp["fit"][kind]:
+                E |= {float(row[0]), float(row[1])}
+    if m == "kinetic":
+        E |= {sp["Tlo"], sp["Tmid"], sp["Thi"], 0.3 * sp["eps"], 100.0 * sp["eps"]}
     return sorted(E)
 
 
+OUT_OF_RANGE = [60.0, 120.0, 149.9, 15000.5, 16000.0, 20000.0]   # 表の範囲 [150, 15000] K の外 (double 評価へ委譲)
+NEAR = 8   # 境界の直前・直後に取る float の個数
+T_LO, T_HI = 50.0, 30000.0   # 検査する T の範囲 (表の範囲外を含む)
+
+
+def around(b, k=NEAR):
+    """b を float に丸めた値と、その直前・直後 k 個の float。"""
+    fb = np.float32(b)
+    out = [float(fb)]
+    lo = hi = fb
+    for _ in range(k):
+        lo = np.nextafter(lo, np.float32(-np.inf))
+        hi = np.nextafter(hi, np.float32(np.inf))
+        out += [float(lo), float(hi)]
+    return out
+
+
 def t_list(ref):
-    T = {f32(t) for t in BASE_T}
-    for b in fit_edges(ref):
-        fb = np.float32(b)
-        T |= {float(fb), float(np.nextafter(fb, np.float32(-np.inf))), float(np.nextafter(fb, np.float32(np.inf)))}
-    return sorted(T)
+    T = {f32(t) for t in BASE_T} | {f32(t) for t in OUT_OF_RANGE} | {f32(150.0), f32(15000.0)}
+    for b in fit_edges(ref) + [150.0, 15000.0]:
+        if b > 0:
+            T |= set(around(b))
+    # 50 K 未満は物理的に使わない (T* クランプ点 0.3ε は数 K になりうるが、CEA フィットの C/T² が参照側で桁あふれする)
+    return sorted(t for t in T if T_LO <= t <= T_HI)
 
 
 # ------------------------------------------------------------------ run の準備と実行
@@ -185,19 +251,40 @@ class Runner:
             e["FORGE_CUDA_BLOCKSIZE"] = str(self.a.blocksize)
         return e
 
-    def probe(self, d, states, nS):
-        p = os.path.join(d, "states.txt")
+    def probe(self, d, states, nS, nocells=False, name="states.txt"):
+        p = os.path.join(d, name)
         with open(p, "w") as f:
             f.write(f"{len(states)} {nS}\n")
             for T, ro, Y in states:
                 f.write(" ".join("%.17g" % v for v in [T, ro] + list(Y)) + "\n")
         e = self.env()
         e["FORGE_TRANSPORT_PROBE"] = p
-        r = subprocess.run([self.a.forge], cwd=d, env=e, capture_output=True, text=True, timeout=600)
+        if nocells:
+            e["FORGE_TRANSPORT_PROBE_NOCELLS"] = "1"
+        r = subprocess.run([self.a.forge], cwd=d, env=e, capture_output=True, text=True, timeout=1800)
         open(os.path.join(d, "forge_probe.log"), "w").write(r.stdout + r.stderr)
         if r.returncode != 0:
             return None, (r.stdout + r.stderr)[-3000:]
         return read_probe(p), ""
+
+    def table_probe(self, d, points, name="points.txt"):
+        """FORGE_TRANSPORT_TABLE_PROBE: points = [(kind, idx, T)]。戻り値 (layout, v0, v1)。"""
+        p = os.path.join(d, name)
+        with open(p, "w") as f:
+            f.write(f"{len(points)}\n")
+            for k, i, T in points:
+                f.write(f"{k} {i} {T:.9g}\n")
+        e = self.env()
+        e["FORGE_TRANSPORT_TABLE_PROBE"] = p
+        r = subprocess.run([self.a.forge], cwd=d, env=e, capture_output=True, text=True, timeout=1800)
+        open(os.path.join(d, "forge_table_probe.log"), "a").write(r.stdout + r.stderr)
+        if r.returncode != 0:
+            return None, None, None, (r.stdout + r.stderr)[-3000:]
+        lay = json.load(open(p + ".json"))
+        buf = np.fromfile(p + ".bin", dtype=np.float32)
+        N = lay["N"]
+        assert buf.size == 2 * N, (buf.size, N)
+        return lay, buf[:N], buf[N:], ""
 
 
 def read_probe(path):
@@ -233,6 +320,9 @@ def read_probe(path):
         q["wlam"] = take(np.float64, nw)
         passes.append(q)
     s = {"mu": take(np.float64, K), "lam": take(np.float64, K), "X": take(np.float64, K * nR).reshape(K, nR)}
+    if h.get("table", 0):
+        s["tmu"] = take(np.float32, K)
+        s["tlam"] = take(np.float32, K)
     assert off[0] == len(buf), (off[0], len(buf))
     return {"h": h, "passes": passes, "states": s}
 
@@ -339,9 +429,24 @@ def run_config(R, tag, species, transport, comps, db=None, ro=0.37, T_override=N
           f"{tag}: D double vs independent reference: cell mu {worst['cell_mu']:.2e} lam {worst['cell_lam']:.2e}, "
           f"ghost mu {worst['ghost_mu']:.2e} lam {worst['ghost_lam']:.2e}, wall mu {worst['wall_mu']:.2e} lam {worst['wall_lam']:.2e}, "
           f"double-Y states mu {s_em:.2e} lam {s_el:.2e}; |X - Xref| cell {worst['cell_X']:.2e} states {s_ex:.2e} (<= 1e-12)")
-    check(max(worst["fcell_mu"], worst["fcell_lam"], worst["fwall_mu"], worst["fwall_lam"]) <= 1e-5 and ulp_worst <= 2,
-          f"{tag}: S float storage vs independent double reference: vis_lam {worst['fcell_mu']:.2e} thermCond {worst['fcell_lam']:.2e} "
-          f"(cells+ghosts), wall mu_w {worst['fwall_mu']:.2e} lam_w {worst['fwall_lam']:.2e} (<= 1e-5); max ULP vs float(ref) {ulp_worst} (<= 2)")
+    tab = bool(h.get("table", 0))
+    check(max(worst["fcell_mu"], worst["fcell_lam"], worst["fwall_mu"], worst["fwall_lam"]) <= 1e-5 and (tab or ulp_worst <= 2),
+          f"{tag}: S float storage ({'table' if tab else 'double'} path) vs independent double reference: vis_lam {worst['fcell_mu']:.2e} "
+          f"thermCond {worst['fcell_lam']:.2e} (cells+ghosts), wall mu_w {worst['fwall_mu']:.2e} lam_w {worst['fwall_lam']:.2e} (<= 1e-5); "
+          f"max ULP vs float(ref) {ulp_worst}" + (" (recorded; the table path is judged by 1e-5 only)" if tab else " (<= 2)"))
+    if tab:
+        tm, tl = out["states"]["tmu"], out["states"]["tlam"]
+        t_em = t_el = 0.0
+        tbad = 0
+        for k, (T, _, Y) in enumerate(states):
+            # 表引き経路の実際の入力: T と Y を float に丸めたもの
+            r = ref.state_Y(f32(T), [f32(y) for y in Y])
+            t_em = max(t_em, float(rel(tm[k], r["mu"])))
+            t_el = max(t_el, float(rel(tl[k], r["lam"])))
+            tbad += int(not (np.isfinite(tm[k]) and tm[k] > 0 and np.isfinite(tl[k]) and tl[k] > 0))
+        check(t_em <= 1e-5 and t_el <= 1e-5 and tbad == 0,
+              f"{tag}: T2 table path, float-rounded state inputs ({K} states): mu {t_em:.2e} lam {t_el:.2e} (<= 1e-5); "
+              f"NaN/Inf/non-positive/non-updated {tbad}")
     allk = set(range(K))
     check(bad == 0 and cov["cell"] == allk and cov["ghost"] == allk and cov["wall"] == allk,
           f"{tag}: U non-updated/NaN/Inf/non-positive {bad}; every state on cells/ghosts/boundary points "
@@ -381,6 +486,270 @@ def compare(tagA, A, tagB, B, pairs, tol_double=1e-12, tol_float=1e-5):
     check(n > 0 and em <= tol_double and el <= tol_double and ex <= tol_double and fm <= tol_float and fl <= tol_float,
           f"AB {tagA} vs {tagB} ({n} states): double input mu {em:.2e} lam {el:.2e} |dX| {ex:.2e} (<= {tol_double:g}); "
           f"via separately float-rounded roY mu {fm:.2e} lam {fl:.2e} (<= {tol_float:g})")
+
+
+# ------------------------------------------------------------------ 表引き (#5t2-3)
+def fit_breaks(ivs):
+    """区間の列 [(lo, hi, ...)] の内側の継ぎ目 (最後の区間の hi は外挿なので含めない)。"""
+    his = sorted(float(v[1]) for v in ivs)
+    return his[:-1]
+
+
+def species_breaks(ref, r):
+    """実種 r の式が切り替わる温度 (参照側で独立に列挙; 表の分割区間の端が含むべきもの)。"""
+    e = ref.reals[r]
+    m, sp = e["model"], e["sp"]
+    B = set()
+    if m in ("cea", "custom:h2o_iapws_cea_v1"):
+        for kind in ("V", "C"):
+            B |= set(fit_breaks(TR[(e["trans"], "")][kind]))
+    if m == "custom:h2o_iapws_cea_v1":
+        B |= {253.15, 500.0, 700.0}
+    if m == "fit":
+        for kind in ("V", "C"):
+            B |= set(fit_breaks(sp["fit"][kind]))
+    if m == "kinetic":
+        B |= {sp["Tlo"], sp["Tmid"], sp["Thi"], 0.3 * sp["eps"], 100.0 * sp["eps"]}
+    return sorted(B)
+
+
+def pair_breaks(ref, a, b):
+    A, B = ref.reals[a], ref.reals[b]
+    kind = ref.eta_pair(a, b, 1000.0, [1e-5] * len(ref.reals))[1]
+    if kind == "ce":
+        eps = math.sqrt(A["sp"]["eps"] * B["sp"]["eps"])
+        return kind, [0.3 * eps, 100.0 * eps]
+    if kind == "cea":
+        for k in ((A["trans"], B["trans"]), (B["trans"], A["trans"])):
+            if k in TR and TR[k]["V"]:
+                return kind, fit_breaks(TR[k]["V"])
+    return kind, []
+
+
+def grid_points(segs, stride=1):
+    """分割区間 [[Ta, Tb, m, Tupper], ...] の小区間ごとの 17 等分点 (ln T で等分、float に丸め)。
+    stride > 1 のときは各分割区間の最初・最後の小区間と stride ごとの小区間だけ。"""
+    T = []
+    for Ta, Tb, m, _ in segs:
+        la, lb = math.log(Ta), math.log(Tb)
+        h = (lb - la) / m
+        js = range(m) if stride <= 1 else sorted({0, m - 1} | set(range(0, m, stride)))
+        for j in js:
+            for q in range(17):
+                T.append(f32(math.exp(la + (j + q / 16.0) * h)))
+    return T
+
+
+PAIR_KIND = {1: "ce", 2: "cea", 3: "rigid"}
+
+
+def table_singles(R, tag, species, transport, db=None):
+    """T1: 各表の単体値 (GPU, 表引き) を独立参照と比べる。戻り値: 表の配置 (layout) と参照。"""
+    ref = Reference(species, transport, db)
+    d = R.make(tag + "_tab", species, transport, db)
+    lay, _, _, err = R.table_probe(d, [], name="layout.txt")
+    if lay is None:
+        check(False, f"{tag}: T1 table probe failed: {err}")
+        return None, ref
+    n = lay["nReal"]
+    tabs = lay["tables"]
+    npair = n * (n - 1) // 2
+    ok_layout = (n == len(ref.reals) and len(tabs) == n + npair)
+    # 分割区間の端が参照側の境界をすべて含むか (150 < b < 15000)
+    missing = []
+    kind_mismatch = []
+    ends_of = {}
+    for t in tabs:
+        ends = set()
+        for Ta, Tb, _, _ in t["segs"]:
+            ends |= {Ta, Tb}
+        ends_of[(t["kind"], t["idx"])] = ends
+        if t["kind"] == 0:
+            br = species_breaks(ref, t["idx"])
+        else:
+            rk, br = pair_breaks(ref, t["a"], t["b"])
+            if PAIR_KIND[t["pair_kind"]] != rk:
+                kind_mismatch.append((t["a"], t["b"], PAIR_KIND[t["pair_kind"]], rk))
+            if rk == "rigid":
+                br = []
+        for b in br:
+            if 150.0 < b < 15000.0 and not any(abs(b - e) <= 1e-12 * b for e in ends):
+                missing.append((t["kind"], t["idx"], b))
+    check(ok_layout and not missing and not kind_mismatch,
+          f"{tag}: T1 layout: {n} species tables + {sum(1 for t in tabs if t['kind'] == 1 and t['segs'])} tabulated pairs "
+          f"({sum(1 for t in tabs if t['kind'] == 1 and not t['segs'])} rigid-sphere), T in [{lay['Tmin']:.9g}, {lay['Tmax']:.9g}], "
+          f"{lay['bytes']} bytes; independent breakpoints missing from segment ends {missing[:4]} (0), pair kind mismatch {kind_mismatch[:3]} (0)")
+    points = []
+    npts = {"grid": 0, "edge": 0, "out": 0}
+    for t in tabs:
+        k, i = t["kind"], t["idx"]
+        if k == 0:
+            segs, br = t["segs"], species_breaks(ref, i)
+        else:
+            rk, br = pair_breaks(ref, t["a"], t["b"])
+            segs = t["segs"] if t["segs"] else tabs[t["a"]]["segs"]   # 剛体球は種 a の格子で検査
+            if rk == "rigid":
+                br = species_breaks(ref, t["a"]) + species_breaks(ref, t["b"])
+        g = grid_points(segs)
+        e = [x for b in br + [150.0, 15000.0] if b > 0 for x in around(b) if T_LO <= x <= T_HI]
+        o = [f32(x) for x in OUT_OF_RANGE]
+        npts["grid"] += len(g)
+        npts["edge"] += len(e)
+        npts["out"] += len(o)
+        points += [(k, i, T) for T in g + e + o]
+    lay2, v0, v1, err = R.table_probe(d, points)
+    if lay2 is None:
+        check(False, f"{tag}: T1 table probe failed: {err}")
+        return lay, ref
+    worst = {"mu": 0.0, "lam": 0.0, "eta": 0.0, "eta_rigid": 0.0}
+    where = {}
+    bad = 0
+    cache = {}
+
+    def sp_ref(r, T):
+        key = (r, T)
+        if key not in cache:
+            cache[key] = ref.species(r, T)
+        return cache[key]
+
+    for (k, i, T), a, b in zip(points, v0, v1):
+        if k == 0:
+            m, l = sp_ref(i, T)
+            bad += int(not (np.isfinite(a) and a > 0 and np.isfinite(b) and b > 0))
+            for nm, got, want in (("mu", a, m), ("lam", b, l)):
+                e = float(rel(got, want))
+                if e > worst[nm]:
+                    worst[nm], where[nm] = e, (i, T)
+        else:
+            t = tabs[n + i]
+            eta = [0.0] * n
+            eta[t["a"]] = sp_ref(t["a"], T)[0]
+            eta[t["b"]] = sp_ref(t["b"], T)[0]
+            want, rk = ref.eta_pair(t["a"], t["b"], T, eta)
+            bad += int(not (np.isfinite(a) and a > 0))
+            nm = "eta_rigid" if rk == "rigid" else "eta"
+            e = float(rel(a, want))
+            if e > worst[nm]:
+                worst[nm], where[nm] = e, (t["a"], t["b"], T)
+    check(max(worst.values()) <= 2e-6 and bad == 0,
+          f"{tag}: T1 single values vs independent reference ({len(points)} points: 17/sub-interval {npts['grid']}, "
+          f"boundaries +-{NEAR} floats {npts['edge']}, out of range {npts['out']}): mu {worst['mu']:.2e} lam {worst['lam']:.2e} "
+          f"eta(CE/CEA) {worst['eta']:.2e} eta(rigid, from table mu) {worst['eta_rigid']:.2e} (<= 2e-6) at {where}; "
+          f"NaN/Inf/non-positive/non-updated {bad}")
+    return lay, ref
+
+
+def table_mix_grid(R, tag, species, transport, comps, lay, db=None, stride=1, ro=0.37):
+    """T2: 小区間の 17 等分点 (間引き stride)・境界 ±8 float・範囲外で、表引き経路の混合値を独立参照と比べる。"""
+    ref = Reference(species, transport, db)
+    Ts = set(t_list(ref))
+    for t in lay["tables"]:
+        if t["kind"] == 0:
+            Ts |= set(grid_points(t["segs"], stride))
+    Ts = sorted(Ts)
+    states = []
+    for X in comps:
+        w = [x * m for x, m in zip(X, ref.mw)]
+        Y = [v / sum(w) for v in w]
+        states += [(T, ro, Y) for T in Ts]
+    d = R.make(tag + "_mixgrid", species, transport, db)
+    out, err = R.probe(d, states, len(species), nocells=True)
+    if out is None:
+        check(False, f"{tag}: T2 grid probe failed: {err}")
+        return
+    tm, tl = out["states"]["tmu"], out["states"]["tlam"]
+    em = el = 0.0
+    wm = None
+    bad = 0
+    for k, (T, _, Y) in enumerate(states):
+        r = ref.state_Y(f32(T), [f32(y) for y in Y])
+        e1, e2 = float(rel(tm[k], r["mu"])), float(rel(tl[k], r["lam"]))
+        if max(e1, e2) > max(em, el):
+            wm = (T, [round(y, 4) for y in Y[:4]])
+        em, el = max(em, e1), max(el, e2)
+        bad += int(not (np.isfinite(tm[k]) and tm[k] > 0 and np.isfinite(tl[k]) and tl[k] > 0))
+    check(em <= 1e-5 and el <= 1e-5 and bad == 0,
+          f"{tag}: T2 mixture on the grid ({len(comps)} compositions x {len(Ts)} T = {len(states)} states; sub-interval stride {stride}): "
+          f"mu {em:.2e} lam {el:.2e} (<= 1e-5) worst at {wm}; NaN/Inf/non-positive/non-updated {bad}")
+
+
+def fcea_via_table(R, work):
+    """F: 全 CEA 指定の N2–H2O 16 状態を表引き経路で FCEA2 (frozen) と比べる。"""
+    try:
+        from test_species_transport import run_fcea, CEA
+    except Exception as ex:  # noqa: BLE001
+        check(False, f"F cannot import run_fcea: {ex}")
+        return
+    if not os.path.exists(os.path.join(CEA, "FCEA2")):
+        check(False, "F FCEA2 not found at .venv-cea/nasa_cea/FCEA2")
+        return
+    fc = run_fcea(os.path.join(work, "fcea_table"))
+    ref = Reference(["N2", "H2O"], {"N2": "cea", "H2O": "cea"})
+    states, rows = [], []
+    for xw, pts in fc.items():
+        X = [1.0 - xw, xw]
+        w = [x * m for x, m in zip(X, ref.mw)]
+        Y = [v / sum(w) for v in w]
+        for T, v, c in pts:
+            states.append((T, 1.0, Y))
+            rows.append((xw, T, v * 1e-4, c * 1e-1))
+    d = R.make("fcea_table", ["N2", "H2O"], {"N2": "cea", "H2O": "cea"})
+    out, err = R.probe(d, states, 2, nocells=True)
+    if out is None:
+        check(False, f"F probe failed: {err}")
+        return
+    wm = wl = 0.0
+    for k, (xw, T, mu, lam) in enumerate(rows):
+        em, el = out["states"]["tmu"][k] / mu - 1.0, out["states"]["tlam"][k] / lam - 1.0
+        wm, wl = max(wm, abs(em)), max(wl, abs(el))
+        print(f"       X_H2O {xw:4.2f} T {T:6.0f}  mu {100 * em:+.4f} %  lam {100 * el:+.4f} %  (table path)")
+    check(len(rows) == 16 and wm <= 1e-3 and wl <= 1e-3,
+          f"F all-CEA N2-H2O 16 states, table path vs FCEA2: max |mu| {100 * wm:.4f} %, max |lam| {100 * wl:.4f} % (<= 0.1 %)")
+
+
+STEP_DB = None
+
+
+def step_db():
+    n2 = n2_thermo()
+    ln = math.log
+    return {"XSTEP": {"MW": 0.028, "Tlo": 200.0, "Tmid": 1000.0, "Thi": 6000.0,
+                      "nasa9_low": n2["intervals"][0]["coeffs"], "nasa9_high": n2["intervals"][1]["coeffs"],
+                      "LJ_sigma": 3.6, "LJ_eps_kB": 97.0,
+                      "transport_fit": {"V": [[150.0, 1000.0, 0.0, 0.0, 0.0, ln(100.0)], [1000.0, 20000.0, 0.0, 0.0, 0.0, ln(101.0)]],
+                                        "C": [[150.0, 1000.0, 0.0, 0.0, 0.0, ln(200.0)], [1000.0, 20000.0, 0.0, 0.0, 0.0, ln(202.0)]]}}}
+
+
+def ab_select(R, work):
+    """AB: 区間選択だけを変える判別 (A = float ln T / B = 元の T)。"""
+    db = step_db()
+    ref = Reference(["XSTEP"], {"XSTEP": "fit"}, db)
+    exe = os.path.join(work, "transport_table_ab_host")
+    r = subprocess.run(["g++", "-O1", "-std=c++17", "-Wno-unknown-pragmas", "-I", SOLVER,
+                        os.path.join(HERE, "transport_table_ab_host.cpp"), "-o", exe], capture_output=True, text=True)
+    if r.returncode != 0:
+        check(False, f"AB host harness build failed: {r.stderr[-2000:]}")
+        return
+    o = json.loads(subprocess.run([exe], capture_output=True, text=True).stdout)
+    eA = eB = 0.0
+    for p in o["points"]:
+        T = p["T"]
+        m, l = ref.species(0, T)
+        a = max(float(rel(p["muA"], m)), float(rel(p["lamA"], l)))
+        b = max(float(rel(p["muB"], m)), float(rel(p["lamB"], l)))
+        eA, eB = max(eA, a), max(eB, b)
+        print(f"       T {T:.9g} K (float ln T {p['lnT_float']:.9g}): ref mu {m:.6e}; A mu {p['muA']:.6e} ({a:.2e}), B mu {p['muB']:.6e} ({b:.2e})")
+    # GPU (0 step): ソルバの表引き (B) を同じ点で
+    d = R.make("ab_step_fit", ["XSTEP"], {"XSTEP": "fit"}, db)
+    Ts = [p["T"] for p in o["points"]]
+    lay, v0, v1, err = R.table_probe(d, [(0, 0, T) for T in Ts])
+    eG = float("inf")
+    if lay is not None:
+        eG = max(max(float(rel(v0[k], ref.species(0, T)[0])), float(rel(v1[k], ref.species(0, T)[1]))) for k, T in enumerate(Ts))
+    check(eA > 2e-6 and eB <= 2e-6 and eG <= 2e-6,
+          f"AB interval selection (single fit, 1 % step at 1000 K; 1000 K and neighbouring floats): "
+          f"A (float ln T) max {eA:.2e} -> {'FAIL as expected' if eA > 2e-6 else 'passes (hypothesis refuted)'}; "
+          f"B (original T) host {eB:.2e}, GPU 0-step {eG:.2e} (<= 2e-6)")
 
 
 # ------------------------------------------------------------------ (B) 既定経路のビット一致
@@ -429,6 +798,9 @@ def main():
     ap.add_argument("--seed-run", default="")
     ap.add_argument("--blocksize", type=int, default=256)
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--skip-table", action="store_true", help="表引きの試験 (T1/T2/F/AB) を省く")
+    ap.add_argument("--stride12", type=int, default=4, help="T2 の実種 12 で 17 等分点を取る小区間の間引き")
+    ap.add_argument("--stride32", type=int, default=32, help="T2 の実種 32 で 17 等分点を取る小区間の間引き")
     a = ap.parse_args()
     a.forge = os.path.abspath(a.forge)
     if a.base_forge:
@@ -504,6 +876,24 @@ def main():
     r32 = run_config(R, "real32", sp32, tr32, [c1, c2], db=db32)
     if r32:
         check(len(r32.real) == 32, f"real32: real species {len(r32.real)} == 32 (TRANSPORT_MAX_REAL_SPECIES)")
+
+    # ---- 表引き (#5t2-3) ----
+    if not a.skip_table:
+        ab_select(R, root)
+        fcea_via_table(R, root)
+        layA, _ = table_singles(R, "A_full_N2_He", ["N2", "He"], trNHe)
+        if layA:
+            table_mix_grid(R, "A_full_N2_He", ["N2", "He"], trNHe, compsA, layA, ro=1.0)
+        table_singles(R, "single_N2_cea", ["N2"], {"N2": "cea"})
+        layH, _ = table_singles(R, "single_H2O_custom", ["H2O"], {"H2O": "custom:h2o_iapws_cea_v1"})
+        if layH:
+            table_mix_grid(R, "single_H2O_custom", ["H2O"], {"H2O": "custom:h2o_iapws_cea_v1"}, [[1.0]], layH)
+        lay12, _ = table_singles(R, "real12", sp12, tr12, db12)
+        if lay12:
+            table_mix_grid(R, "real12", sp12, tr12, comps12, lay12, db12, stride=a.stride12)
+        lay32, _ = table_singles(R, "real32", sp32, tr32, db32)
+        if lay32:
+            table_mix_grid(R, "real32", sp32, tr32, [c1, c2], lay32, db32, stride=a.stride32)
 
     # ---- 既定経路のビット一致 ----
     if a.base_forge:

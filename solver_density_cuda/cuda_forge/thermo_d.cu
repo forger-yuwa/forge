@@ -1,5 +1,6 @@
 #include "thermo_d.cuh"
 #include "transportMix_d.cuh"
+#include "transportTables_d.cuh"
 #include "input/solverConfig.hpp"
 #include "input/speciesDB.hpp"
 
@@ -45,6 +46,20 @@ TransportPairD*    g_trans_pairs  = nullptr;
 double*            g_trans_expand = nullptr;
 TransportTableD    g_trans        = {0, 0, nullptr, nullptr, nullptr};
 bool               g_transOn      = false;
+// 表引き (#5t2-3)。host 側の表 (記録・試験用に保持) と device 側の配列。
+TransportTablesHost g_tabHost;
+std::vector<void*>  g_tabDev;
+
+template <class T>
+const T* thermo_upload_vec(const std::vector<T>& v)
+{
+    if (v.empty()) return nullptr;
+    void* d = nullptr;
+    THERMO_CUDA_CHECK(cudaMalloc(&d, v.size()*sizeof(T)));
+    THERMO_CUDA_CHECK(cudaMemcpy(d, v.data(), v.size()*sizeof(T), cudaMemcpyHostToDevice));
+    g_tabDev.push_back(d);
+    return static_cast<const T*>(d);
+}
 
 // 内蔵 DB・yaml 上書き・名前解決は host 側 input/speciesDB.cpp (speciesDB_resolve) に集約した
 // (convertGmshToForge も GPU 無しで同じ解決を使う)。ここは device アップロードと datum オフセットだけ。
@@ -115,6 +130,9 @@ void thermo_init_db(solverConfig& cfg)
     if (g_trans_sp)     { cudaFree(g_trans_sp);     g_trans_sp = nullptr; }
     if (g_trans_pairs)  { cudaFree(g_trans_pairs);  g_trans_pairs = nullptr; }
     if (g_trans_expand) { cudaFree(g_trans_expand); g_trans_expand = nullptr; }
+    for (void* p : g_tabDev) cudaFree(p);
+    g_tabDev.clear();
+    g_tabHost = TransportTablesHost{};
     g_trans   = TransportTableD{0, 0, nullptr, nullptr, nullptr};
     g_transOn = false;
     if (db.transport.enabled) {
@@ -143,6 +161,38 @@ void thermo_init_db(solverConfig& cfg)
         g_transOn = true;
         std::cout << "[thermo_d] transport (physProp.transport) uploaded: " << nR << " real species, "
                   << tr.pairs.size() << " pairs, expand " << nT << "x" << nR << " (mole basis)" << std::endl;
+
+        // 表引き (#5t2-3): 既定で使う。FORGE_TRANSPORT_TABLE=0 のときだけ段 2 の double 評価のまま (性能比較・切り分け用)。
+        const char* tabEnv = std::getenv("FORGE_TRANSPORT_TABLE");
+        if (tabEnv != nullptr && std::string(tabEnv) == "0") {
+            std::cout << "[thermo_d] transport tables disabled (FORGE_TRANSPORT_TABLE=0): double evaluation" << std::endl;
+        } else {
+            std::vector<double> MWs(nT);
+            for (int s = 0; s < nT; ++s) MWs[s] = g_host[s].MW;
+            if (!transport_tables_build_host(tr.sp, tr.pairs, MWs, E, g_tabHost)) {
+                std::cerr << "[thermo_d] ERROR: transport table build failed: " << g_tabHost.error << std::endl;
+                std::exit(EXIT_FAILURE);
+            }
+            TransportTablesF& t = g_trans.tab;
+            t.valid   = 1;
+            t.Tmin    = g_tabHost.Tmin;
+            t.Tmax    = g_tabHost.Tmax;
+            t.seg     = thermo_upload_vec(g_tabHost.seg);
+            t.spc     = thermo_upload_vec(g_tabHost.spc);
+            t.pairc   = thermo_upload_vec(g_tabHost.pairc);
+            t.spTab   = thermo_upload_vec(g_tabHost.spTab);
+            t.pairTab = thermo_upload_vec(g_tabHost.pairTab);
+            t.pm      = thermo_upload_vec(g_tabHost.pm);
+            t.invMWs  = thermo_upload_vec(g_tabHost.invMWs);
+            t.expandF = thermo_upload_vec(g_tabHost.expandF);
+            int nTabPairs = 0;
+            for (const auto& r : g_tabHost.pairTab) nTabPairs += (r.nseg > 0) ? 1 : 0;
+            std::cout << "[thermo_d] transport tables (float, ln T Hermite): T in [" << t.Tmin << ", " << t.Tmax
+                      << "] K (outside: double), " << nR << " species + " << nTabPairs << " tabulated pairs ("
+                      << (tr.pairs.size() - nTabPairs) << " rigid-sphere at run time), " << g_tabHost.seg.size()
+                      << " segments, " << (g_tabHost.spc.size()/2 + g_tabHost.pairc.size()) << " sub-intervals, "
+                      << g_tabHost.bytes() << " bytes" << std::endl;
+        }
     }
 
     std::cout << "[thermo_d] initialized " << g_n << " species:";
@@ -165,3 +215,4 @@ const SpeciesThermoF* thermo_species_device_ptr_f() { return g_dev_f; }
 int                  thermo_num_species()        { return g_n; }
 const SpeciesThermo* thermo_species_host()        { return g_host.data(); }
 const TransportTableD* thermo_transport_table()     { return g_transOn ? &g_trans : nullptr; }
+const TransportTablesHost* thermo_transport_tables_host() { return (g_transOn && g_trans.tab.valid) ? &g_tabHost : nullptr; }

@@ -4,6 +4,7 @@
 #include "cuda_forge/wallLaw_d.cuh"
 #include "cuda_forge/thermo_d.cuh"
 #include "cuda_forge/transportMix_d.cuh"   // 種ごとの輸送物性 (physProp.transport; plan #5t2-2)
+#include "cuda_forge/transportTables_d.cuh"  // 同・表引き (float; plan #5t2-3)
 #include "cuda_forge/speciesTransport_d.cuh"  // species_roY_device_ptr()
 #include "cuda_forge/nodeWallDirichlet_d.cuh"  // pinWallNodeTemperature_bcond (状態層・共有)
 
@@ -50,6 +51,13 @@ __device__ inline void wmles_wall_props(
         const flow_float Smu = 111.0;
         mu_w  = mu0*pow(Tw/T0, static_cast<flow_float>(3.0/2.0))*(T0+Smu)/(Tw+Smu);
         lam_w = thermCond_const;
+    } else if (transportOn != 0 && ttab.tab.valid != 0) {   // 同・表引き (セルと同じ関数; float。範囲外は double へ委譲)
+        float rY[THERMO_MAX_SPECIES];
+        for (int k = 0; k < nY; ++k) rY[k] = (float)Y[k];
+        float mu, lam;
+        transport_mix_Y_tab(sp, ttab, nY, rY, (float)Tw, &mu, &lam);
+        mu_w  = (flow_float)mu;
+        lam_w = (flow_float)lam;
     } else if (transportOn != 0) {  // 種ごとの出所 + CEA frozen 混合則 (セルと同じ関数; double 評価・float 格納)
         double mu, lam;
         transport_mix_Y(sp, ttab, nY, Y, (double)Tw, &mu, &lam);
