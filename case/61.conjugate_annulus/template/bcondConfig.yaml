@@ -1,0 +1,6 @@
+# case/61 V-ax2。physID は gen_mesh.py の Physical Curve。
+# wall_outer (4) が唯一の共役壁。Ts 325 は**初期値** (固体の初期温度もこの値になる: initSolidFem2d)。
+end_x0:     {physID: 1, kind: slip, outputHDFflg: 0, ints: , floats: }
+end_xL:     {physID: 2, kind: slip, outputHDFflg: 0, ints: , floats: }
+wall_inner: {physID: 3, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 350.0}}
+wall_outer: {physID: 4, kind: wall_isothermal, outputHDFflg: 1, ints: {conjugate: 1}, floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 325.0}}

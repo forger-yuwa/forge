@@ -1,0 +1,5 @@
+# case/62 軸負例。r=0 は axis。両壁とも非連成の等温 (1 step 目から Q_f が 0 でないよう 350 / 300 K)。
+axis:     {physID: 1, kind: axis, outputHDFflg: 0, ints: , floats: }
+side_r2:  {physID: 2, kind: slip, outputHDFflg: 0, ints: , floats: }
+wall_hot: {physID: 3, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 350.0}}
+wall_cj:  {physID: 4, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 300.0}}

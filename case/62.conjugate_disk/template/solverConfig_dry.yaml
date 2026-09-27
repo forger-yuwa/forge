@@ -1,0 +1,37 @@
+# case/62 V-ax2b — **乾式 1 step** (共役なし)。wall_cj の壁ダンプから界面節点を確定させるためだけ。変換にも使う。
+# 数値設定は本 run (template/solverConfig.yaml) と同じ。差は nStepOuter 1・outStepInterval 1・conjugate ブロック無し。
+mesh: {discretization: "node", nodeWallDirichlet: 1, isAxisymmetric: 1, axisymMethod: 0,
+       meshFileName: "mesh.h5", valueFileName: "mesh.h5"}
+gpu: 1
+detectNaN: 1
+detectNaNInterval: 100
+solver: "SLAU"
+physProp:
+  thermalMethod: 0
+  viscMethod: 0          # 定数 visc / thermCond (解析解の k_f を厳密にする)
+  thermCondMethod: 0
+  visc: 1.81e-5
+  thermCond: 0.0241
+  cp: 1004.5
+  gamma: 1.4
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {nStepOuter: 1}
+  deltaT: {control: 1, dt: 1.0e-8, cfl: 5.0, cfl_pseudo: 5.0, blockDPLUR: 1, implicitRelax: 0.5,
+           dt_min: 1.0e-11, dt_max: 1.0}
+  outStepStart: 0
+  outStepInterval: 1
+  timeIntegration: 11
+  nStepInner: 5
+space:
+  convMethod: 1
+  limiter: 2
+  # リミッタの基準値を固定する (再開しても作用素が変わらない。V-ax4 と同じ扱い)。値は r8 一様の乾式 (静止 325 K・p0) の自動値。
+  # 系列 (8/16/32/非一様) と軸負例で同じ値を使う
+  limiterRoRef: 0.01086303964
+  limiterPRef: 1015.685644
+  limiterARef: 361.7917356
+turbulence: {model: "none"}
+output: {level: 1, interfaceDiag: 1}
+initial: "uniform_p101325_u10"   # 変換器用の名前。VALUE は gen_mesh.py が静止 325 K にパッチ済み
