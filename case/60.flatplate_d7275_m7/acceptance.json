@@ -219,8 +219,30 @@
     "whole_domain": "全域の RMS 履歴 B/A (末尾 1k): ro 0.96、roUx 0.99、roUy 1.05、roe 0.98、roY 0.96、roK 0.77、roOmega 0.39 → 全域の流れ・化学種の床は float 経路では変わらない。両腕とも check_convergence NOT CONVERGED (stalled/plateau)",
     "local_amplitude": "固定節点 (100 step 毎、step 4000–5000) の振幅/平均: 壁列の roOmega は一部の点で B が 1/20–1/30 (8e-8 → 2–4e-9)、他の点と ro・P・roK は同程度、自由流 3 点はすべて同程度 (1e-7 前後)",
     "new_observation": "自由流域の |res_ro| / (ρ U √vol) は中央値 1.2e-8、90 % 点 5.3e-8 (B の最終場) — float32 の丸め水準。変換済みメッシュ h5 の MESH/COORD と CELLS/volume は float32 (FP64 ビルドは flow_float・geom_float とも double だが、読み込む幾何は float32 で書かれている)。仮説 (未確認): 自由流域の床は float32 で保存された幾何 (面ベクトルの閉包誤差) による",
-    "q": "比較域 (1.07–2.55 m) の壁 q_w の B/A−1: 最大 9.2e-7、平均 6.0e-8。R_A 平均 1.313 は同じ"
+    "q": "比較域 (1.07–2.55 m) の壁 q_w の B/A−1: 最大 9.2e-7、平均 6.0e-8。R_A 平均 1.313 は同じ",
+    "reading_final": "codex diagnose 2026-09-27-d7275-thermofloat-result で限定: 棄却できるのは『thermoFloat で切り替わるセル側 (組成・密度逆数・比熱比・温度反転) の float 経路が自由流域の床の主因』まで。SLAU の面エンタルピー (thermo_h_mix_f、Y・T を float に落として評価) は両腕とも float のまま。第一内部列の流れの改善 (roUy 0.028・roe 0.042) は最終 1 枚の領域別集計による観測で、持続する改善としては未確定。ω・k は判別保留",
+    "retracted": "『自由流域の床は float32 で保存された幾何の閉包誤差』仮説 (new_observation) は撤回: codex が check_dual_closure.py で fp_d7275_y3_wall_top8.h5 を測り 閉性 |ΣS|/Σ|S| median 0・max 2.2e-10 (PASS)、自由流域 131,488 CV で ΣS≠0 は 0 個。AWS 入力と SHA-256 一致 (4cfe615a…)。ソルバは PLANES/surfVect を直接読むので座標・体積の dtype では閉包由来の残差を説明できない"
    }
+  },
+  {
+   "id": "T4-0b-HF",
+   "status": "pre_registered",
+   "_written": "2026-09-27、run を回す前 (codex diagnose 2026-09-27-d7275-thermofloat-result の提案を採用)",
+   "name": "SLAU の面エンタルピー評価だけを float / double に切り替える継続 A/B (両腕 thermoFloat 0)",
+   "change": "B のバイナリは ~/forge56-double (4687c3c、全域 FP64) の複製で、convectiveFlux_slau_d.inc.cuh の多成分 TP 分岐の 2 行 h_p/h_m = thermo_h_mix_f(spf, …) を同じ面状態 Y・T で thermo_h_mix(sp, …) (double 係数・double 評価) に置き換えただけ。差分は case/60/tools/hface_double.patch。A は既存の ~/forge56-double。面状態の作り方・再構成・化学種拡散・陰解法・単一成分分岐・境界流束は不変。診断用で既定値変更の提案ではない",
+   "common": "run_0018_t26_tf0_ext の最終場 (res_5000) から restart_field.py --keep-src-dtype (12 量ビット一致)、メッシュ fp_d7275_y3_wall_top8、両腕 thermoFloat 0、BC・DB・CFL・緩和・内反復・extraFields・FORGE_OMEGA_BUDGET=1 を固定",
+   "arms": {
+    "A": "run_0019_t26_hf_f (面エンタルピー float、対照)",
+    "B": "run_0020_t26_hf_d (面エンタルピー double)"
+   },
+   "steps": "各 5,000 step。場は step 3000–5000 を 100 毎 (領域別指標の時系列を取る)。点プローブは 1 step 毎 (末尾の連続反復の振幅。出力 6 桁の分解能 ~1e-6 は記録する)。3–4k と 4–5k の領域別指標の中央値が 5 % 超動けば各 10,000 まで一度延長、それでも動けば判別保留",
+   "metrics": "全残差列、自由流域 (y 0.03–0.79) と第一内部列の成分別 √Σres² の時系列 (100 step 毎)、固定節点の ρ・P・k・ω、比較点 St・位置 II・パネル平均 q_w",
+   "decision": {
+    "support": "B の自由流域の流れ・化学種残差が A の 1/10 以下かつ局所振幅も減る → 面エンタルピー量子化が自由流域の床の主因という説を支持",
+    "reject": "過渡が落ち着いても 0.8–1.2 倍に残る → 主因説を棄却",
+    "partial": "成分限定の改善はその成分に限定。中間値・過渡継続は保留"
+   },
+   "stop_rule": "追跡はこの A/B 一つで区切る。棄却・保留なら追加の手当てを連鎖させず、『G15 未達の探索結果として他項目へ進む』提案をユーザに出す (codex)。比較量の不変を反復誤差の上限や『既知の数値床』の証明に使わない。G15 の合格判定とは分ける"
   }
  ]
 }

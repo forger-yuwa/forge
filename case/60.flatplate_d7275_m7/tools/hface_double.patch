@@ -1,0 +1,14 @@
+--- /tmp/slau_orig.cuh	2026-09-27 04:21:37.414031929 +0000
++++ cuda_forge/convection/convectiveFlux_slau_d.inc.cuh	2026-09-27 04:21:37.430801587 +0000
+@@ -393,8 +393,9 @@
+                 }
+                 const flow_float Tl = P_L/(ro_L*RgL);
+                 const flow_float Tr = P_R/(ro_R*RgR);
+-                h_p = thermo_h_mix_f(spf, nSpecies, YL, Tl) + 0.5f*velocity2_L;
+-                h_m = thermo_h_mix_f(spf, nSpecies, YR, Tr) + 0.5f*velocity2_R;
++                // 診断 (case/60 T4-0b-HF): 面エンタルピーを double 係数・double 評価にする (同じ面状態 Y・T)
++                h_p = (flow_float)thermo_h_mix(sp, nSpecies, YL, (double)Tl) + 0.5f*velocity2_L;
++                h_m = (flow_float)thermo_h_mix(sp, nSpecies, YR, (double)Tr) + 0.5f*velocity2_R;
+             } else {
+                 const flow_float Rg = spf[0].R;
+                 flow_float RgL1 = Rg, RgR1 = Rg;
