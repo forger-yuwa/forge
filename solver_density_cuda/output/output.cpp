@@ -408,7 +408,14 @@ void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var ,
                 vtemp.resize(bc.planes_local.size());
                 copy(dv.second.begin(), dv.second.begin()+bc.planes_local.size(), vtemp.begin());
             }
-            file.createDataSet("/VALUE/"+dv.first , vtemp);
+            auto dsDiag = file.createDataSet("/VALUE/"+dv.first , vtemp);
+            // `axisymMethod != 0` の軸対称では界面熱量の 3 量は NaN (未検証)。**値だけでなく属性で識別**できるようにする
+            // (plan boundary-cht-axisymmetric-fem2d §4.3・§6 V-ax0。後処理が NaN を 0 や欠損と取り違えないため)。
+            if (cfg.isAxisymmetric == 1 && cfg.axisymMethod != 0 &&
+                (dv.first == "iface_q_eff" || dv.first == "iface_q_eff_raw" || dv.first == "iface_Qf_eff")) {
+                const std::string why = "unverified: axisymMethod != 0 (planar geometry with 1/y source); value is NaN";
+                dsDiag.createAttribute<std::string>("status", HighFive::DataSpace::From(why)).write(why);
+            }
         }
 
 //
