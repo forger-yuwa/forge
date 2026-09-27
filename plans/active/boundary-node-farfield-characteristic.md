@@ -19,137 +19,136 @@ C_L が 7.1e-4、C_M が 0.021 動いた (許容 5e-4 / 5e-3 を超過。3.42 H 
 
 ## 2. スコープ
 
-- **やる**: node・密度ベース・SLAU/ROE 共通の境界半割面流束に渡す境界状態 (`bvar`) を作るカーネル、CPG と TP (単一・多成分)、
-  SST の $k,\omega$、化学種、陽解法・block-DPLUR。runner の `side_far` / `top_out` を切替可能にする。
-- **やらない**: cell 方式 (使わない方針)、凝縮・トレーサ・遷移モデルとの併用 (起動時に拒否)、動的格子、
-  粘性の遠方境界流束 (現行の非壁境界と同じく 0)、陰解法の境界 Jacobian の厳密化 (現行の ghostless 対角のまま)。
+**2026-09-27 ユーザ決定: 「レビューどおり全部やる」** (汎用の遠方境界として受理できる水準まで検証する。SERN 用に絞る案は採らない)。
+
+- **やる**: node・密度ベース・**SLAU/SLAU2** の境界半割面流束 (専用カーネル)、CPG と TP (単一・多成分 lump)、SST の $k,\omega$ (`sstEnergyIncludesK` 両設定)、化学種、
+  定常 (陽解法・block-DPLUR) と非定常 (dual-time)。面流束の診断ダンプ。runner の `side_far` / `top_out` 切替。
+- **やらない (起動時に拒否し、拒否試験を置く)**: cell 方式、ROE/HLLE/KEEP (初版は SLAU 系のみ)、凝縮・トレーサ・受動種・遷移モデル、軸対称、周期と同じ節点を共有する配置、
+  動的格子。粘性の遠方境界流束は 0 (現行の非壁境界と同じ)。陰解法の境界 Jacobian は現行の ghostless 対角 A⁺ のまま (近似前処理)。
 
 ## 3. 関連 docs と前提
 
 - 理論は [`methods/boundary.md`](../../methods/boundary.md) 「特性型の遠方境界」。参照実装は SU2 `CEulerSolver::BC_Far_Field`
-  (`.external/su2-src/SU2_CFD/src/solvers/CEulerSolver.cpp:4822`)。
-- node の境界流束は種別によらず `bvar` (rob, Uxb/Uyb/Uzb, roeb, Psb) を R 状態として組む
-  (`convectiveFlux_boundary_d.inc.cuh:113-118`、質量流束も R 状態から 193 行)。したがって本 BC は `bvar` を整合的に埋めればよい。
-- 既存の `outlet_statPress` が同じ特性構成 (外向き Riemann + 内部エントロピー、TP は `gamma_cell[ic]`) を持つ (`boundaryCond_d.cu:576-629`)。
-- 化学種・受動種・トレーサ・凝縮の境界は名前が `inlet_` で始まるかで分岐し、RANS は明示リスト (`ransBoundary_d.cu:254-290`、
-  未知の種別は**何もしない**)。
+  (`.external/su2-src/SU2_CFD/src/solvers/CEulerSolver.cpp:4822`): 特性で境界状態を構成し、**内部状態と構成状態を数値流束 (近似 Riemann) に渡す**。
+- 既存の node 境界流束 `convectiveFlux_boundary_d` は、質量流束を R 状態から作り、流出時の運動量・エネルギーを内部状態で風上化する簡略形で、
+  node 境界半割面のスカラー移流は常に内部値を使う (§4.0)。**本 BC はこれらを使わず専用の経路を持つ**。
+- 化学種等の境界は `inlet_` 接頭辞、RANS は明示リスト (未知の種別は何もしない) で分岐する。
 
 ## 4. 設計方針
 
-**改訂 (2026-09-27、codex plan 段 NO-GO C1/M6/m1 を全件採用)**: 「境界状態 `bvar` を埋めれば既存の境界流束がそのまま使える」という初稿の前提は誤り
-(下の 4.0)。`farfield` は **同一評価時点の境界状態から、保存量 5 成分・化学種・k/ω の面流束をすべて自前で組む** node 専用の境界にする。
+改訂履歴: 初稿 → plan 段 NO-GO (C1/M6/m1、全件採用) → plan-2 NO-GO (C0/M5/m2、全件採用: 本版)。
 
 ### 4.0 既存経路の事実 (コードで確認、2026-09-27)
 
-- 境界流束 `convectiveFlux_boundary_d` は、質量流束は境界状態 (R) から作るが、**流出時の運動量・エネルギーは内部速度・内部全エンタルピーで風上化**する
-  (`convectiveFlux_boundary_d.inc.cuh:192` 以降)。構成状態の物理流束 $F(U_b)$ ではない (codex の数値例: エネルギー流束で −4.45 %)。
-- node 境界半割面のスカラー移流は、流入・流出によらず**内部節点の値**を使う (`scalarTransport_d.cu:166` の `ext_is_self`、`passiveKernels_d.cuh` の `nodeBnd`)。
-  既存の入口で組成・k/ω が入るのは節点ピンのおかげ。→ ゴーストを埋めても外の値は運ばれない。
-- スカラー境界処理 (`applySpeciesBoundaries` 等) は対流流束より前に呼ばれる (`main.cpp:1458`) ので、そこで `massflux` を読むと前回評価の値になる。
-- SST 全エネルギー (`sstEnergyIncludesK`) の境界 k は `inlet` 接頭辞のときだけ bvar、他は内部値 (`convectiveFlux_d.cu:413`)。
+- `convectiveFlux_boundary_d.inc.cuh:192` 以降: 質量流束は境界状態 (R)、流出時の運動量・エネルギーは内部状態で風上化。構成状態の物理流束でも近似 Riemann 流束でもない。
+- node 境界半割面のスカラー移流は流入・流出によらず内部節点の値 (`scalarTransport_d.cu:166` `ext_is_self`、`passiveKernels_d.cuh` `nodeBnd`)。入口で組成が入るのは節点ピンによる。
+- スカラー境界処理は対流流束より前 (`main.cpp:1458`)。SST 全エネルギーの境界 k は `inlet` 接頭辞のときだけ bvar (`convectiveFlux_d.cu:413`)。
+- SST の k 式には体積ソース $(P_k-D_k)V$ がある (`ransSource_d.cu:210, 248`)。`sstEnergyIncludesK` でも保存配列 `roe` は平均流エネルギーで、全エネルギーは `roe + roK`。
 
 ### 4.1 入力
 
 `bcondConfig.yaml`: `{kind: farfield, floats: {ro, Ux, Uy, Uz, Ps, k, omega, Y0, ...}}` = 自由流 (`inlet_uniformVelocity` と同じキー)。多成分は `Y{s}`/`X{s}` 必須、RANS は `k`, `omega` 必須。
-`valueTypesOfBC["farfield"]` を新設し、自由流の値 (type 1) と組み立てた境界状態 (別名の bvar) を分けて持つ (自由流を上書きしない)。
+`valueTypesOfBC["farfield"]` を新設し、自由流の値 (type 1) と構成した境界状態 (別名の bvar) を分けて持つ。
 
-### 4.2 境界状態の構成 (frozen-γ 契約)
+### 4.2 境界状態の構成 (SU2 と同じ判定、frozen-γ 契約)
 
-1 境界半割面 = 1 スレッド、`ic` = 境界節点 (内部状態)、$\hat{\mathbf n}$ = 外向き単位法線。
+1 境界半割面 = 1 スレッド、`ic` = 境界節点、$\hat{\mathbf n}$ = 外向き単位法線。
 
-- **γ の契約**: 面ごとに**単一の $\gamma^*$ = 内部の $\gamma_i$** (CPG は `cfg.gamma`、TP は `gamma_cell[ic]` = frozen $\gamma_{mix}$) を使い、**音速・Riemann 不変量・エントロピー・$\rho,P$ の復元をすべて $\gamma^*$ で**行う:
-  $c_i=\sqrt{\gamma^*P_i/\rho_i}$、$c_\infty=\sqrt{\gamma^*P_\infty/\rho_\infty}$ (自由流の音速も $\gamma^*$ で作る)、$s=P/\rho^{\gamma^*}$。
-  熱力学的な内部エネルギーだけは TP の実物性で作る ($T_b=P_b/(\rho_b R_{mix}(Y_b))$ → `thermo_state_at_T`)。
-  この近似の誤差は V1 では検出できない (一様流では $\gamma_i=\gamma_\infty$) ので、**V2b (内外の温度・組成が違う流入/流出)** で許容を決める。
-  SERN 側方の実測範囲 (run_0986 の遠方面 51,143 節点、瞬時値): $Y_{EXH}$ 0–0.128、T 176–597 K、$\gamma$ 1.372–1.405。
-- **分岐の決定表** (評価状態を明記、優先順に上から):
+- **γ の契約**: 面ごとに単一の $\gamma^*$ = 内部の $\gamma_i$ (CPG は `cfg.gamma`、TP は `gamma_cell[ic]`)。音速・Riemann 不変量・エントロピー・$\rho,P$ の復元をすべて $\gamma^*$ で行う
+  ($c_i=\sqrt{\gamma^*P_i/\rho_i}$、$c_\infty=\sqrt{\gamma^*P_\infty/\rho_\infty}$、$s=\rho^{\gamma^*}/P$ [SU2 の定義])。内部エネルギーだけ TP の実物性 ($T_b=P_b/(\rho_bR_{mix}(Y_b))$ → `thermo_state_at_T`)。
+  誤差は V2d (独立参照解) で測る。
+- **判定は自由流の法線速度 $Q_n=U_{n,\infty}$ だけで行う** (面ごとに固定 = 時間で切り替わらない。plan-2 M1: 内部側の量で分岐すると音速付近・流向反転で流束が不連続になる):
+  - $R^+$: $Q_n > -c_\infty$ なら $U_{n,i}+2c_i/(\gamma^*-1)$、それ以外 (超音速流入) は $U_{n,\infty}+2c_\infty/(\gamma^*-1)$。
+  - $R^-$: $Q_n > c_\infty$ (超音速流出) なら $U_{n,i}-2c_i/(\gamma^*-1)$、それ以外は $U_{n,\infty}-2c_\infty/(\gamma^*-1)$。
+  - $U_{n,b}=(R^++R^-)/2$、$c_b=(\gamma^*-1)(R^+-R^-)/4$。
+  - $Q_n>0$ (流出面): 接線速度・$s$・組成・$k,\omega$ は内部。$Q_n\le0$ (流入面・平行面): 自由流。
+  - $\rho_b=(s\,c_b^2/\gamma^*)^{1/(\gamma^*-1)}$、$P_b=\rho_bc_b^2/\gamma^*$。
+  - $c_b\le0$ または非有限: その面を内部状態 ($U_b=U_i$) に置換し、面 ID・理由を診断カウンタに記録 (**検証の評価区間では発動 0 を要求**)。
+- **平行面で境界に達したプルーム** (SERN 側方): $Q_n=0$ なので構成状態の $s$・組成は自由流だが、面流束は下の近似 Riemann 流束で**質量流束の符号で風上化**されるので、
+  流出する内部の組成・エンタルピーは内部値のまま出る。
 
-| 条件 (評価に使う量) | 境界状態 |
-| --- | --- |
-| 内部が非有限・$\rho_i\le0$・$P_i\le0$ | 起動中なら拒否、走行中は診断カウンタ + 自由流状態 (面数をログ) |
-| $M_{n,i}=U_{n,i}/c_i \ge 1$ **かつ** $M_{n,\infty}=U_{n,\infty}/c_\infty \ge 1$ | 超音速流出: 全量内部 |
-| $M_{n,i}\le -1$ **かつ** $M_{n,\infty}\le -1$ | 超音速流入: 全量自由流 |
-| それ以外 (分類が食い違う場合を含む) | 亜音速の式: $R^+=U_{n,i}+2c_i/(\gamma^*-1)$、$R^-=U_{n,\infty}-2c_\infty/(\gamma^*-1)$、$U_{n,b}=(R^++R^-)/2$、$c_b=(\gamma^*-1)(R^+-R^-)/4$ |
-| 亜音速で $R^+-R^-\le 0$ ($c_b\le0$、大膨張) | 診断カウンタ + $c_b=\max(c_b, 10^{-3}\min(c_i,c_\infty))$ ではなく**全量内部に落とす** (音速を捏造しない) |
+### 4.3 面流束 (farfield 専用カーネル `farfield_flux_d`)
 
-  亜音速の続き: **流入/流出は $U_{n,b}$ の符号**で決める (SU2 は $U_{n,\infty}$。側方で $U_{n,\infty}=0$ だと常に流入扱いになり、境界に達したプルームのエントロピー・組成を自由流で置換する)。
-  流出 ($U_{n,b}>0$): $s=s_i$、接線速度・組成・k/ω は内部。流入 ($U_{n,b}\le0$): $s=s_\infty$、接線速度・組成・k/ω は自由流。
-  $\rho_b=(c_b^2/(\gamma^*s))^{1/(\gamma^*-1)}$、$P_b=\rho_bc_b^2/\gamma^*$。
-- 単体試験 (ホスト側で同じ関数を呼ぶ): codex の反例 ($\gamma$ 1.4、$c_i=c_\infty=1$、$U_{n,i}=2$、$U_{n,\infty}=0.5$ → 亜音速式 $U_{n,b}=1.25$、$c_b=1.15$)、
-  音速通過 ($M_{n,i}$ 0.99/1.01)、流向反転 ($U_{n,b}$ ±ε)、$c_b\le0$。
-
-### 4.3 面流束 (farfield 専用分岐)
-
-- 構成状態 $U_b=(\rho_b,\mathbf u_b,P_b,H_b,Y_b,k_b,\omega_b)$ の**物理流束**を面流束にする:
-  $\dot m=\rho_bU_{n,b}|S|$、運動量 $\dot m\,\mathbf u_b + (P_b-p_{ref})\mathbf S$、エネルギー $\dot m H_b$、化学種 $\dot m Y_b$、$k,\omega$ も $\dot m k_b$ 等。
-  (上の分岐で「流出なら内部の値、流入なら自由流の値」になっているので、これが風上化に当たる。)
-- 実装: `convectiveFlux_boundary_d` に farfield 分岐を足すのではなく、**`farfield_flux_d` を別カーネル**にする (既存境界のコードを触らない = V0)。
-  同じカーネルが `massflux[ip]` と、スカラー用の面値 (面ごとの $Y_b$, $k_b$, $\omega_b$) を書く。
-- スカラー移流: node 境界半割面の `ext_is_self` / `nodeBnd` 経路に、**farfield 面だけ面値配列を読む**分岐を足す
-  (面フラグ配列で判定。既存の面は従来どおり内部値 = ビット不変)。一次輸送 (`scalarTransport_d.cu`) と S3 経路 (`passiveKernels_d.cuh`、化学種) の両方。
-  呼び出し順は対流流束 → スカラー移流なので、同じ評価時点の $\dot m$ と面値を使う (境界処理での `massflux` 読みはしない)。
-- `sstEnergyIncludesK`: エネルギー流束の $H^*$ と圧力の $p^*$ に、**スカラー流束と同じ $k_b$** を使う。
-- ピン (`scalarDirichletPin`) はしない。凝縮・トレーサ・受動種・遷移モデル・軸対称・周期との併用は初版では起動時に拒否。
+- 面流束 = **SLAU/SLAU2 の数値流束 $F(U_L=U_i, U_R=U_b)$** (1 次、再構成なし)。内部面の `SLAU_d` と同じ式 ($\dot m$ の圧力差項・$\chi$・$\tilde p$) を、
+  L/R の状態を引数に取る `__device__` 関数として切り出して使う (内部面の `SLAU_d` は従来のまま = ビット不変。切り出し関数は同じ式の複製で、V0u で内部面の値と一致を確認)。
+  TP の面エンタルピーは L/R それぞれの組成・温度で NASA (内部面と同じ `thermo_h_mix_f`)。
+- 同じカーネルが `massflux[ip]` と、スカラーの面値 (質量流束の符号で風上: $\dot m>0$ なら内部、$\dot m<0$ なら $U_b$ の $Y,k,\omega$) を書く。
+- スカラー移流: node 境界半割面の `ext_is_self` / `nodeBnd` 経路に、**farfield 面だけ面値配列を読む**分岐 (面フラグで判定、既存面はビット不変)。一次輸送と S3 (化学種) の両経路。
+  呼び出し順は対流流束 → スカラー移流 = 同じ評価時点。
+- `sstEnergyIncludesK`: $H^*=H+\tfrac53k$、$p^*=p+\tfrac23\rho k$ の $k$ を L = 内部 $k_i$、R = $U_b$ の $k_b$ として SLAU に渡す。スカラー $k$ の面値も同じ $k_b$/$k_i$ を同じ風上で使う。
+- ピンしない。
+- **面流束の診断ダンプ** (plan-2 M5): env `FORGE_DUMP_FARFIELD=<path>` で、farfield 面ごとに (面 ID、評価回、$\dot m$、運動量 3、エネルギー、化学種、$k,\omega$ の面流束、構成状態、置換フラグ) を書く。
+  収支検証 (V2b) と SERN の境界帳簿はこのダンプを積分する (所有節点の値から流束を組み直さない)。
 
 ### 4.4 その他
 
-- ディスパッチ・読込 (`boundaryCond.{hpp,cpp}`): `farfield` を追加し、Y/X と k/omega の読込・検査を「入口または farfield」に広げる (`inletCornerWall` の再割当は入口専用のまま)。
-- 陰解法: 境界半割面は現行の ghostless 対角 A⁺ のまま (初版)。安定性は V2 の陽解法/block-DPLUR 両方で確かめる。
-- 既存境界の経路は変えない (V0)。
-- runner: `evaluate.side_far_kind` / `top_out_kind` に `farfield` を追加し、`top_out_kind: outflow` が slip に落ちる不具合も直す。生成 YAML の実効 BC を照合する。
+- ディスパッチ・読込 (`boundaryCond.{hpp,cpp}`): `farfield` を追加、Y/X と k/omega の読込・検査を「入口または farfield」に広げる (`inletCornerWall` は入口専用のまま)。§2 の非対応構成は起動時に拒否。
+- 陰解法: 境界半割面は現行の ghostless 対角 A⁺ のまま。
+- runner: `evaluate.side_far_kind` / `top_out_kind` に `farfield`、`top_out_kind: outflow` が slip に落ちる不具合も直す。生成 YAML の実効 BC を照合する試験。
 
 ## 5. 実装ステップ
 
 1. `boundaryCond.{hpp,cpp}`: `valueTypesOfBC["farfield"]`・読込・ディスパッチ・起動時の拒否。
-2. `cuda_forge/boundaryCond_d.cu`: 境界状態の構成 (§4.2、ホスト/デバイス共通の関数にして単体試験から呼ぶ)。
-3. `cuda_forge/convection/`: `farfield_flux_d` (§4.3)、`convectiveFlux_d.cu` の境界ループで farfield 面をこちらへ振る。
-4. `cuda_forge/scalarTransport_d.cu`・`passiveKernels_d.cuh`・`speciesTransport_d.cu`・`ransBoundary_d.cu`: farfield 面の面値読み、k/ω の分岐。
-5. `design/forge_design/evaluate/runner_sern3d.py`・`metrics/sern_momentum.py` (`OPEN_KINDS`)。
-6. docs: `methods/boundary.md` (計画中 → 実装済み)、`procedures/recommended-settings.md` の境界の節。
+2. 境界状態の構成を `__host__ __device__` 関数に (§4.2)。ホスト単体試験から呼ぶ。
+3. SLAU の面流束を L/R 状態を取る `__device__` 関数として複製し、`farfield_flux_d` を書く (§4.3)。`convectiveFlux_d.cu` の境界ループで farfield 面を振り分ける。
+4. スカラー: `scalarTransport_d.cu`・`passiveKernels_d.cuh`・`speciesTransport_d.cu` の farfield 面値分岐、`ransBoundary_d.cu` に farfield (何もしない分岐を明示)。
+5. 診断ダンプ `FORGE_DUMP_FARFIELD`、収支の積分ツール `solver_density_cuda/tools/farfield_balance.py`。
+6. 独立参照解: `solver_density_cuda/tools/ref1d_euler_tp.py` (1 次元 Euler 有限体積、HLLC、NASA-9 lump 物性、長い領域 = 境界の影響が評価窓に届かない)。
+7. runner (`runner_sern3d.py`)・`sern_momentum.py` (farfield 面は診断ダンプを使う)。
+8. docs: `methods/boundary.md` (計画中 → 実装済み、ディスパッチ表)、`procedures/recommended-settings.md`。
 
 ### 5.1 残作業 (優先順)
 
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
-| 1 | ~~codex plan 段レビュー~~ **済 (2026-09-27 NO-GO C1/M6/m1、全件採用で §4/§6 を改訂)** | C1 → §4.3 スカラー面値経路、M2 → §4.3 `farfield_flux_d`、M3 → §4.2 決定表と単体試験、M4 → §4.2 γ 契約と V2b、M5 → §4.3 k 整合、M6 → §6 V1/V2 追加、M7 → §6 V3 再設計、m8 → §6 V0 | F |
-| 1b | ~~codex plan 段 再レビュー (plan-2)~~ **済 NO-GO C0/M5/m2 (2026-09-27)** — 採否は §6.1。**検証範囲をユーザ判断待ち** | 改訂版 §4/§6 | F |
-| 2 | 実装 (§5 の 1–4) | ビルド (AWS)、単体試験、V0 | O |
-| 3 | 検証 V1–V2 (AWS、軽量) | §6 の合格条件 | O |
-| 4 | SERN V3 (AWS) | §6 の合格条件。R4d の結論へ反映 | O |
+| 1 | ~~codex plan 段レビュー~~ **済 (2026-09-27 NO-GO C1/M6/m1、全件採用)** | | F |
+| 1b | ~~plan-2~~ **済 (2026-09-27 NO-GO C0/M5/m2、全件採用で本版)** | M1 → §4.2 (判定を $Q_n$ に固定) + §4.3 (近似 Riemann 流束)、M2 → V2d、M3 → V2b、M4 → V2a、M5 → §4.3 ダンプ、m6 → V3 の位置付け、m7 → §2/§3 統一・拒否試験・置換 0 回 | F |
+| 1c | codex plan 段 plan-3 | 本版の §4/§6 | F |
+| 2 | 実装 (§5 の 1–5)、V0・V0u | AWS でビルド | O |
+| 3 | 独立参照解 (§5 の 6) と V1–V2 | AWS | O |
+| 4 | SERN V3 | AWS。R4d へ反映 (restart は `r4d_common_restart.py` 型の index コピー、メッシュ品質、判定区間、case README の run 索引) | O |
 | 5 | codex result 段 → accepted | | F |
 
 ## 6. 検証
 
-すべて AWS で回す (ローカルは使わない)。合否は事前に固定する。判定ツールは `check_convergence.py` (判定区間を明記) と
-`check_quasisteady.py`、原本 (`CONVERGENCE_VERDICT.txt`・判定出力) を run に残す。未収束 (NOT CONVERGED) の run は「感度診断」用途に限る。
+すべて AWS。合否は実行前に固定。判定区間を明記し `check_convergence.py`・`check_quasisteady.py` の出力原本を run に残す。
+**置換 (§4.2 の $c_b\le0$ 等) は各試験の評価区間で 0 回**を必要条件とする。
+V1–V2 は**境界機能の受入れ**、V3 は**SERN での配置 (側方幅) の採否**。
 
-- **V0 既存境界の不変**: farfield を含まない既存構成 (run_0971 設定) で、同一初期状態からの**初回面流束 `massflux` と状態ダンプ**
-  (`FORGE_DUMP_MASSFLUX`) が変更前バイナリとビット一致。更新後の保存量は旧バイナリの反復実行 (3 回) の再現性幅以内。
-- **V0u 単体試験** (§4.2 の決定表): 反例・音速通過・流向反転・$c_b\le0$ で期待どおりの分岐と有限値。
-- **V1 自由流保持**: 一様流の 3D hex 直方体 (z 3 層以上)、全境界 farfield (または入口 1 面 + 他 farfield)、陰解法、2000 step。
-  (a) CPG M 0.5、(b) TP 2 種 lump (SERN 外気) M 6、(c) (b) を面に対し 30° 傾ける。
-  合格: 全節点で $|P/P_\infty-1|,|\rho/\rho_\infty-1|,|\mathbf u-\mathbf u_\infty|/|\mathbf u_\infty|\le10^{-5}$、$|Y-Y_\infty|\le10^{-6}$。
-- **V2a 亜音速の微小音響パルス (反射率)**: 3D 薄板チャネル (z 3 層以上)、一様流 M 0.3、中央にガウス型の微小圧力パルス (振幅 1e-3 P∞)、
-  一方の端を farfield、比較に 3 倍長の領域 (反射が評価時間内に戻らない)。評価点の圧力履歴から入射と反射を時間窓で分離し、
-  **反射振幅/入射振幅 ≤ 0.05** (slip は ≈1、outflow も同時に測って記録)。SLAU と ROE、陽解法と block-DPLUR の 4 組合せで。
-- **V2b 内外で状態が違う流入/流出**: 同じチャネルで、領域内部を $Y$・T・k・ω が自由流と異なる状態 (Y 0.13、T 600 K、k・ω を 10 倍) にして
-  (i) 流出、(ii) 流入 (自由流が境界から入る向き) を回す。合格: 境界面流束と体積積分の時間変化の収支 (質量・全エネルギー・化学種・k) が
-  相対 1e-4 以内で閉じる、(ii) で内部が自由流の値へ置き換わる (定常後 $|Y-Y_\infty|\le10^{-4}$)、NaN・床到達なし。
-- **V2c 超音速の斜め衝撃波**: 3D 薄板、M 2.5、半角 10° ウェッジ、衝撃が上側境界に当たる配置。上側境界 (A) slip / (B) farfield / (C) 上方に 2 倍広げた
-  slip (共通領域の格子は同一、`z_append` 型の追加)。評価線 = ウェッジ下流の壁面、定常後。合格: $\max|p_B-p_C|\le0.02\,\Delta p_{shock}$ かつ A は 0.1 Δp 以上
-  (試験が反射を検出できること)。
-- **V3 SERN 側方 (R4d)**:
-  - **V3a 同一格子の対照**: g3・遠方面 2.50 H、同一新バイナリで `side_far` だけ slip ↔ farfield (top_out 等は同一、生成 YAML で照合)。run_0986 最終場から各 20000 step。
-    R4d と同じ ε・D・窓条件。これは「BC の差」の測定で、合否でなく記録。
-  - **V3b farfield の幅系列**: farfield のまま遠方面 2.50 / 3.42 / 4.35 H (`z_append`)。**合格 = farfield で隣り合う幅の D ≤ ε が 2.50→3.42 から成立する**
-    (= farfield なら 2.50 H で領域独立)。slip の幅系列 (run_0986/0988/0989/0990) との比較は参考値 (両者とも無限遠との一致ではない)。
+- **V0 既存境界の不変**: farfield を含まない構成 (run_0971 設定) で、同一初期状態からの初回 `massflux` と状態ダンプが変更前バイナリとビット一致。更新後保存量は旧バイナリ 3 回反復の再現性幅以内。
+- **V0u 単体試験** (ホスト): (i) 決定表の各分岐、(ii) **連続性**: $U_{n,i}$ を ±1 付近・0 付近で 1e-6 刻みに振り、面流束 5 成分の変化が入力変化に比例 (隣接点の差 ≤ 1e-4 × 流束規模) — plan-2 M1 の反例 ($U_{n,\infty}=2$、$U_{n,i}$ 0.999999/1.000001) を含む、
+  (iii) 極限: 超音速流出で $F=F(U_i)$、超音速流入で $F=F(U_\infty)$ (相対 1e-6)、(iv) 切り出した SLAU 関数が内部面 `SLAU_d` と同じ入力で同じ流束 (相対 1e-6)、
+  (v) 非対応構成の起動拒否 (cell・ROE・凝縮・トレーサ・遷移・軸対称・周期共有) がそれぞれエラー終了。
+- **V1 自由流保持** (定常、block-DPLUR): 一様流の 3D hex 直方体 (z 3 層以上)、全境界 farfield、2000 step。(a) CPG M 0.5、(b) TP 2 種 lump (SERN 外気) M 6、(c) (b) を面に 30° 傾ける、
+  (d) (b) + SST。合格: 全節点で $|P/P_\infty-1|,|\rho/\rho_\infty-1|,|\mathbf u-\mathbf u_\infty|/|\mathbf u_\infty|\le10^{-5}$、$|Y-Y_\infty|\le10^{-6}$、$k,\omega$ 相対 $10^{-5}$。
+- **V2a 音響反射 (非定常 dual-time)**: 3D 薄板チャネル (z 3 層以上、長さ 1 m、Δx 5 mm)。
+  - 本試験: 一様流 M 0.3 (CPG、空気)、ガウス圧力パルス (振幅 1e-3 P∞、半値幅 40 mm = 8 セル以上)、下流端 farfield。参照 = 同じ背景流で長さ 3 m (反射が評価窓内に戻らない)。
+    評価点 = 下流端から 0.2 m 上流、評価窓 = 入射パルス通過後から 0.8 m / (c−u) までの反射到達時刻窓。**反射振幅 (参照との差の最大) ≤ 0.05 × 入射振幅**。
+  - 対照 (試験が反射を検出できること): M 0 (静止) で下流端 slip → 反射 ≥ 0.9 × 入射。
+  - 時間積分: `unsteady: 1`・dual-time、物理 CFL ≤ 1 (音響)、内部反復は内部残差 3 桁低下または 30 回、Δt・内部反復・観測窓は run に記録。
+  - SLAU と SLAU2 の両方。
+- **V2b 保存収支** (定常、block-DPLUR): V1 の箱で内部を自由流と異なる状態 (Y 0.13、T 600 K、k・ω 10 倍) から始め、(i) 流出配置、(ii) 流入配置、`sstEnergyIncludesK` 0/1 の 4 本。
+  - **離散恒等式 (毎評価)**: 全節点の対流残差の和 = −(farfield 面流束の和) (内部面は相殺)。診断ダンプ (§4.3) と帳簿ダンプ (`FORGE_DUMP_LEDGER`、全節点に印) で照合、相対 1e-6 (float32 の和の丸め幅以内)。
+  - **定常後の全体収支**: 質量・運動量・全エネルギー (`sstEnergyIncludesK` 1 は `roe+roK`)・化学種: $\sum$ 面流束 = 0、$k$・$\omega$: $\sum$ 面流束 + $\sum$ 体積ソース (帳簿の段別残差から) = 0。
+    規格化分母は流入側の面流束の絶対和。**相対 1e-4 以内**。
+  - (ii) で内部が自由流へ置き換わること ($|Y-Y_\infty|\le10^{-4}$)。
+- **V2c 超音速の斜め衝撃波** (定常): 3D 薄板、M 2.5、半角 10° ウェッジ、衝撃が上側境界に当たる配置。上側境界 (A) slip / (B) farfield / (C) 上方に、反射衝撃が評価線の下流端より後ろに着く高さまで広げた slip
+  (共通領域の格子は同一、`z_append` 型)。評価線 = ウェッジ下流の壁面、全線。合格: $\max|p_B-p_C|\le0.02\,\Delta p_{shock}$ かつ A は 0.1 Δp 以上。
+- **V2d TP 近似の独立参照** (非定常): 1 次元問題を独立コード `ref1d_euler_tp.py` (HLLC、NASA-9 lump、長い領域) と forge の薄板 (境界 = farfield) で解く:
+  (i) 内部 T 600 K・Y_EXH 0.13 の塊が自由流 (T 220 K、Y 0) に流されて境界から出ていく (流出、M 0.5)、(ii) 同じ塊に対し自由流が境界から流入する向き、(iii) 単成分 TP、(iv) CPG。
+  比較量 = 境界から 5 セル内側の P・u・T の時系列 (評価窓は参照側で境界の影響が届かない時間)。**$|P-P_{ref}|/\Delta P_{scale}\le 0.02$、$|u-u_{ref}|/c\le0.01$** ($\Delta P_{scale}$ = 塊が作る圧力擾乱の最大)。
+- **V3 SERN での配置 (側方幅)**: 境界機能の受入れ (V1–V2 合格) の後。g3、同一新バイナリ。
+  - V3a 同一格子の対照: 遠方面 2.50 H で `side_far` のみ slip ↔ farfield (他の BC は生成 YAML で照合)。run_0986 最終場から各 20000 step (同一格子 restart)。R4d と同じ ε・D・窓条件で差を**記録** (合否なし)。
+  - V3b farfield の幅系列: 2.50 / 3.42 / 4.35 H (`z_append`、restart は `r4d_common_restart.py` 型、メッシュ品質 PASS)。
+    **採否**: 隣り合う幅の D ≤ ε (C_T・C_T_with_shear・C_L 5e-4、C_M 5e-3) が成立する最小の幅を「farfield での必要幅」とする。結論は「試験した幅系列で許容内」に限定し、無限遠との一致とは言わない。
+  - SERN の帳簿 (C_T 等の境界寄与を使う場合) は診断ダンプの面流束を使う。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
 | plan | 2026-09-27 | [2026-09-27-boundary-node-farfield-characteristic-plan.md](../../notes/reviews/2026-09-27-boundary-node-farfield-characteristic-plan.md) | NO-GO, C1/M6/m1 | **全件採用** (C1・M2 はコードで再確認: `scalarTransport_d.cu:166` の `ext_is_self`、`convectiveFlux_boundary_d.inc.cuh` の流出時内部風上)。§4 を「面流束を自前で組む専用境界」に改訂、§6 に V0u/V2a–c/V3a–b。§5.1 #1 |
-| plan | 2026-09-27 | [2026-09-27-boundary-node-farfield-characteristic-plan-2.md](../../notes/reviews/2026-09-27-boundary-node-farfield-characteristic-plan-2.md) | NO-GO, C0/M5/m2 | 構造 (専用流束 + 同時刻スカラー面値) は妥当。M1 (超音速切替で流束が不連続: 入力差 2e-6 で P_b 2.09 倍) → 採用予定: SU2 と同じく内部状態と構成状態を既存の近似 Riemann 流束 (SLAU) に渡して面流束を作る。M2–M5・m6–m7 (TP の独立参照解、SST ソース込みの収支、dual-time の音響試験、面流束ダンプでの収支) → 採用予定。**範囲をユーザ判断待ち (2026-09-27)** |
+| plan | 2026-09-27 | [2026-09-27-boundary-node-farfield-characteristic-plan-2.md](../../notes/reviews/2026-09-27-boundary-node-farfield-characteristic-plan-2.md) | NO-GO, C0/M5/m2 | 構造 (専用流束 + 同時刻スカラー面値) は妥当。**全件採用 (2026-09-27、ユーザ決定「レビューどおり全部やる」)**: M1 → §4.2 判定を自由流 $Q_n$ に固定 + §4.3 近似 Riemann (SLAU) 流束、M2 → V2d (独立 1D 参照)、M3 → V2b (離散恒等式 + SST ソース込み全体収支)、M4 → V2a (dual-time、長領域参照、M0 の slip 対照)、M5 → §4.3 面流束ダンプ、m6 → V3 を配置の採否に、m7 → §2/§3 統一・拒否試験・置換 0 回 |
 
 ## 7. 影響範囲
 
@@ -169,5 +168,6 @@ C_L が 7.1e-4、C_M が 0.021 動いた (許容 5e-4 / 5e-3 を超過。3.42 H 
 
 ## 9. 変更ログ
 
+- `2026-09-27` — plan-2 NO-GO (C0/M5/m2) を全件採用し全面改訂 (ユーザ決定: 検証はレビューどおり全部)。
 - `2026-09-27` — codex plan 段 NO-GO (C1/M6/m1) を全件採用し §4/§6 を改訂。
 - `2026-09-27` — 初稿 (ユーザ「遠方境界入れたらすっきりかもね。やってみますか」)。`methods/boundary.md` に理論節を追加し、`outflow` の説明 (実装は全量コピー) を訂正。

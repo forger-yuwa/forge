@@ -126,24 +126,36 @@ incoming/outgoing 特性の捌きは upwind フラックスに委ねる。出口
 ### 特性型の遠方境界 (`farfield`、計画中)
 
 計算領域を有限で打ち切る外部流の境界に使う (SU2 `MARKER_FAR` と同型、Blazek / Hirsch の Riemann 遠方境界)。
-境界半割面の外向き単位法線 $\hat{\mathbf n}$、内部 (境界節点) 状態を添字 $i$、自由流を $\infty$ として、
-法線速度 $U_{n,i}=\mathbf u_i\cdot\hat{\mathbf n}$、$U_{n,\infty}=\mathbf u_\infty\cdot\hat{\mathbf n}$、
+plan [`boundary-node-farfield-characteristic.md`](../plans/active/boundary-node-farfield-characteristic.md)。
+
+**考え方**: 境界の法線方向に運ばれる 5 つの量 (音響の Riemann 不変量 $R^\pm$、エントロピー、接線速度 2 成分) のうち、
+外向きに運ばれるものは内部から、内向きのものは自由流から取る。どちらかは**法線方向の Mach 数**で決まる
+(流れ全体の Mach でなく $U_n/c$。境界に沿う流れは全体が超音速でも法線方向には亜音速)。
+
+外向き単位法線 $\hat{\mathbf n}$、内部 (境界節点) を $i$、自由流を $\infty$、$Q_n = \mathbf u_\infty\cdot\hat{\mathbf n}$ とし、判定は $Q_n$ で面ごとに固定する (SU2 と同じ):
 
 $$
-R^+ = U_{n,i} + \frac{2c_i}{\gamma-1},\qquad R^- = U_{n,\infty} - \frac{2c_\infty}{\gamma-1}
+R^+ = \begin{cases} U_{n,i} + \dfrac{2c_i}{\gamma-1} & Q_n > -c_\infty \\[4pt] U_{n,\infty} + \dfrac{2c_\infty}{\gamma-1} & \text{(超音速流入)}\end{cases}
+\qquad
+R^- = \begin{cases} U_{n,i} - \dfrac{2c_i}{\gamma-1} & Q_n > c_\infty\ \text{(超音速流出)} \\[4pt] U_{n,\infty} - \dfrac{2c_\infty}{\gamma-1} & \text{それ以外}\end{cases}
 $$
 
-(超音速流出 $U_n\ge c$ では $R^-$ も内部、超音速流入 $U_n\le -c$ では $R^+$ も自由流)。境界状態は
-
 $$
-U_{n,b} = \tfrac12(R^+ + R^-),\qquad c_b = \tfrac{\gamma-1}{4}(R^+ - R^-),
+U_{n,b} = \tfrac12(R^+ + R^-),\qquad c_b = \tfrac{\gamma-1}{4}(R^+ - R^-).
 $$
 
-流出 ($U_{n,b}>0$) なら $s=s_i$、$\mathbf u_b=\mathbf u_i + (U_{n,b}-U_{n,i})\hat{\mathbf n}$、流入なら $s=s_\infty$、
-$\mathbf u_b=\mathbf u_\infty + (U_{n,b}-U_{n,\infty})\hat{\mathbf n}$ ($s=P/\rho^\gamma$)。
-$\rho_b=(c_b^2/(\gamma s))^{1/(\gamma-1)}$、$P_b=\rho_b c_b^2/\gamma$。組成・$k,\omega$ も流出は内部、流入は自由流 (固定しない)。
-TP (温度依存 $\gamma$) での $\gamma$ の取り方、流入/流出の判定に使う法線速度 (SU2 は自由流の $U_{n,\infty}$) は plan §4 で決める。
-**`slip` との違い**: slip は質量を通さない壁なので、境界に達した波は反射する。**`outflow` との違い**: outflow は外から何も入れない。
+$Q_n>0$ (流出面) ではエントロピー $s=\rho^\gamma/P$・接線速度・組成・$k,\omega$ を内部から、$Q_n\le0$ (流入面・平行面) では自由流から取り、
+$\rho_b=(s\,c_b^2/\gamma)^{1/(\gamma-1)}$、$P_b=\rho_bc_b^2/\gamma$ で境界状態 $U_b$ を作る。
+
+**面流束は $U_b$ の物理流束でなく、内部状態 $U_i$ と $U_b$ を左右に置いた近似 Riemann 流束 (SLAU)** とする (SU2 と同じ)。
+境界状態の構成に分岐があっても、流束は風上化で連続になる。平行面 ($Q_n=0$) に達した内部の流れ (例: 横に広がるプルーム) は、
+構成状態が自由流側でも、質量流束の符号で風上化されるので内部の組成・エンタルピーのまま出ていく。
+化学種・$k,\omega$ の面値も同じ質量流束の符号で風上化する (ピンはしない)。
+
+TP (温度依存 $\gamma$) では面ごとに単一の $\gamma^*=\gamma_i$ (frozen) で上の式を評価し、内部エネルギーだけ実物性で求める。
+
+**`slip` との違い**: slip は質量を通さない壁 (法線速度 0 を強制) なので、境界に達した波は反射する。
+**`outflow` との違い**: outflow は全部を内部から取り、外から何も入れない。正しいのは法線方向に超音速で流出する面 ($M_n\ge1$) だけ。
 
 ### 周期境界
 
