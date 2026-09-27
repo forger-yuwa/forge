@@ -38,6 +38,9 @@ class SernMesh3DParams:
     nz_out: int = 17         # z ∈ (W/2, Z_far]
     W: float = 2.0           # ノズル幅 / H (全幅)
     Z_ext: float = 1.5       # 側壁外側の空間 / H
+    # 領域感度試験用 (plan sern-3d §5.1 R4d、codex diagnose 2026-09-27): z = W/2 + Z_ext の外側へ z_append / H だけ
+    # **最外セルと同じ間隔で**節点列を足す。既存の z 分布 (共通領域の座標・接続) は変えない。0 = 足さない (既定・挙動不変)
+    z_append: float = 0.0
     L_sw: float | None = None  # 側壁の x 範囲 (None → L_cowl)
     # カウル板の自由な側端 (z = W/2、側壁が終わった x > L_sw) の節点を上下で共有する。False は 2026-09-22 以前の挙動 (A/B 用):
     # 端の節点まで二重化していたので、双子の双対 CV が互いの間の面を欠いて**閉じていなかった** (|ΣS|/Σ|S| = 0.30 が
@@ -168,6 +171,10 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
         s_out = _radial_fracs(prm.nz_out, min(prm.first_z_frac / prm.Z_ext, 0.5 / (prm.nz_out - 1)))
         z_out = hw + prm.Z_ext * (1.0 - s_out[::-1])   # 側壁側が細かい
         zs = np.concatenate([z_in, z_out[1:]])
+        if prm.z_append > 0.0:
+            dz = float(zs[-1] - zs[-2])
+            n_app = int(np.ceil(prm.z_append / dz - 1e-9))
+            zs = np.concatenate([zs, zs[-1] + dz * np.arange(1, n_app + 1)])
     else:
         zs = z_in                                        # 外側空間なし: z = W/2 が遠方境界 (側壁 = 境界壁)
     nz = len(zs); k_sw = prm.nz_in - 1

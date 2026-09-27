@@ -225,5 +225,24 @@ try:      # 急なブレンドは skew を生むので生成を失敗させる
     check("xblend: 急なブレンドは生成を失敗させる", False, "例外が出なかった")
 except ValueError as e:
     check("xblend: 急なブレンドは生成を失敗させる", "急すぎる" in str(e))
+# z_append (plan sern-3d §5.1 R4d、codex diagnose 2026-09-27): 共通領域の座標・接続を保ったまま側方の外側にだけ節点列を足す
+coords, hexes, _B0z, info, _ = generate_sern_mesh3d(d, prm)   # 基準 (上の試験で coords が別格子に書き換わるので取り直す)
+_ca, _ha, _Ba, _ia, _ = generate_sern_mesh3d(d, replace(prm, z_append=0.0))
+check("z_append 0: 既定と座標・hex がビット一致", np.array_equal(_ca, coords) and np.array_equal(np.asarray(_ha), np.asarray(hexes)))
+_cz, _hz, _Bz, _iz, _ = generate_sern_mesh3d(d, replace(prm, z_append=0.75))
+_zf0 = float(info["Z_far"]); _zf1 = float(_iz["Z_far"])
+_set1 = {tuple(r) for r in _cz.tolist()}
+check("z_append: 既存の全節点座標が拡張後にもそのまま在る", all(tuple(r) in _set1 for r in coords.tolist()))
+_hz_arr = np.asarray(_hz); _in = np.all(_cz[_hz_arr][:, :, 2] <= _zf0 + 1e-12, axis=1)
+check("z_append: 既存領域の hex 数が不変", int(_in.sum()) == len(hexes), f"{int(_in.sum())} vs {len(hexes)}")
+_dz0 = float(np.diff(np.unique(np.round(coords[:, 2], 12)))[-1])
+check("z_append: 遠方境界が 0.75 以上外へ、追加間隔は最外セルと同じ", _zf1 - _zf0 >= 0.75 - 1e-9 and _zf1 - _zf0 < 0.75 + _dz0 + 1e-9,
+      f"Z_far {_zf0:.4f} -> {_zf1:.4f} (dz {_dz0:.4f})")
+_nz_, _mz, _ez = closure(_hz, _Bz)
+check("z_append: 境界の閉性", _mz == 0 and _ez == 0, f"missing {_mz} extra {_ez}")
+_sf = PHYS_SERN3D["side_far"]
+_sfn = np.unique(np.asarray([n for f in _Bz[_sf] for n in f])) if isinstance(_Bz, dict) and _sf in _Bz else None
+if _sfn is not None:
+    check("z_append: side_far は新しい遠方面 (z = Z_far) だけ", np.allclose(_cz[_sfn, 2], _zf1))
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)
