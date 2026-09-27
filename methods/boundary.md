@@ -125,34 +125,33 @@ incoming/outgoing 特性の捌きは upwind フラックスに委ねる。出口
 
 ### 特性型の遠方境界 (`farfield`、計画中)
 
-計算領域を有限で打ち切る外部流の境界に使う (SU2 `MARKER_FAR` と同型、Blazek / Hirsch の Riemann 遠方境界)。
-plan [`boundary-node-farfield-characteristic.md`](../plans/active/boundary-node-farfield-characteristic.md)。
+計算領域を有限で打ち切る外部流の境界に使う。plan [`boundary-node-farfield-characteristic.md`](../plans/active/boundary-node-farfield-characteristic.md)。
 
-**考え方**: 境界の法線方向に運ばれる 5 つの量 (音響の Riemann 不変量 $R^\pm$、エントロピー、接線速度 2 成分) のうち、
+**考え方**: 境界の法線方向に運ばれる量 (音響の特性振幅 2 つ、エントロピー、接線速度 2 成分) のうち、
 外向きに運ばれるものは内部から、内向きのものは自由流から取る。どちらかは**法線方向の Mach 数**で決まる
 (流れ全体の Mach でなく $U_n/c$。境界に沿う流れは全体が超音速でも法線方向には亜音速)。
 
-外向き単位法線 $\hat{\mathbf n}$、内部 (境界節点) を $i$、自由流を $\infty$、$Q_n = \mathbf u_\infty\cdot\hat{\mathbf n}$ とし、判定は $Q_n$ と、自由流の実物性で起動時に一度だけ計算した音速 $a_\infty$ で面ごとに固定する (SU2 と同じ。下式の判定の $c_\infty$ は $a_\infty$):
+外向き単位法線 $\hat{\mathbf n}$、内部 (境界節点) を $i$、自由流を $\infty$、$Q_n=\mathbf u_\infty\cdot\hat{\mathbf n}$。
+
+1. **面の分類 (面ごとに固定)**: 自由流の実物性で起動時に一度だけ計算した音速 $a_\infty$ を使い、$Q_n\ge a_\infty$ は超音速流出面 ($U_b=U_i$)、
+   $Q_n\le -a_\infty$ は超音速流入面 ($U_b=U_\infty$)、それ以外は亜音速面。
+2. **亜音速面の音響部**: 境界節点の局所状態で線形化した特性振幅 $w^\pm=P\pm ZU_n$ ($Z=\rho_ic_i$) の外向き $w^+$ を内部、内向き $w^-$ を自由流から取る
+   (Whitfield–Janus、Blazek 8.2 節):
 
 $$
-R^+ = \begin{cases} U_{n,i} + \dfrac{2c_i}{\gamma-1} & Q_n > -c_\infty \\[4pt] U_{n,\infty} + \dfrac{2c_\infty}{\gamma-1} & \text{(超音速流入)}\end{cases}
-\qquad
-R^- = \begin{cases} U_{n,i} - \dfrac{2c_i}{\gamma-1} & Q_n > c_\infty\ \text{(超音速流出)} \\[4pt] U_{n,\infty} - \dfrac{2c_\infty}{\gamma-1} & \text{それ以外}\end{cases}
+P_b=\tfrac12(P_i+P_\infty)+\tfrac12 Z\,(U_{n,i}-U_{n,\infty}),\qquad
+U_{n,b}=\tfrac12(U_{n,i}+U_{n,\infty})+\frac{P_i-P_\infty}{2Z}.
 $$
 
-$$
-U_{n,b} = \tfrac12(R^+ + R^-),\qquad c_b = \tfrac{\gamma-1}{4}(R^+ - R^-).
-$$
+3. **エントロピー部**: 実際の流向 ($U_{n,b}$ の符号) で側を選ぶ。流出なら内部、流入なら自由流の密度・接線速度・組成・$k,\omega$ を使い、
+   $\rho_b=\rho_{\mathrm s}+(P_b-P_{\mathrm s})/c_i^2$。
+4. **面流束**: $U_b$ の物理流束でなく、内部状態 $U_i$ と $U_b$ を左右に置いた近似 Riemann 流束 (SLAU)。化学種・$k,\omega$ の面値も同じ質量流束の符号で風上化する (ピンはしない)。
 
-$Q_n>0$ (流出面) ではエントロピー $s=\rho^\gamma/P$・接線速度・組成・$k,\omega$ を内部から、$Q_n\le0$ (流入面・平行面) では自由流から取り、
-$\rho_b=(s\,c_b^2/\gamma)^{1/(\gamma-1)}$、$P_b=\rho_bc_b^2/\gamma$ で境界状態 $U_b$ を作る。
+**Riemann 不変量 $U_n\pm2c/(\gamma-1)$ を内部と外気から混ぜる方式 (SU2 `BC_Far_Field` 等) を採らない理由**: 圧力・速度が同じで温度だけ違う流れ
+(接触波。例: 高温のプルームが境界に達する) を通すと、内外の音速の差が境界の速度・圧力に入り、存在しない音響擾乱を作る。
+局所線形化の特性振幅なら、$P_i=P_\infty$・$U_{n,i}=U_{n,\infty}$ のとき流出で $U_b=U_i$ となり擾乱を出さない。
 
-**面流束は $U_b$ の物理流束でなく、内部状態 $U_i$ と $U_b$ を左右に置いた近似 Riemann 流束 (SLAU)** とする (SU2 と同じ)。
-境界状態の構成に分岐があっても、流束は風上化で連続になる。平行面 ($Q_n=0$) に達した内部の流れ (例: 横に広がるプルーム) は、
-構成状態が自由流側でも、質量流束の符号で風上化されるので内部の組成・エンタルピーのまま出ていく。
-化学種・$k,\omega$ の面値も同じ質量流束の符号で風上化する (ピンはしない)。
-
-TP (温度依存 $\gamma$) では面ごとに単一の $\gamma^*=\gamma_i$ (frozen) で上の式を評価し、内部エネルギーだけ実物性で求める。
+TP (温度依存 $\gamma$) では面ごとに $\gamma^*=\gamma_i$ (frozen) で $c_i$ を作り、内部エネルギーだけ実物性で求める。
 
 **`slip` との違い**: slip は質量を通さない壁 (法線速度 0 を強制) なので、境界に達した波は反射する。
 **`outflow` との違い**: outflow は全部を内部から取り、外から何も入れない。正しいのは法線方向に超音速で流出する面 ($M_n\ge1$) だけ。
