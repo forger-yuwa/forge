@@ -8,7 +8,9 @@ run 直下の `res_<step>.h5` (場) と `res_wall_hot_3_<step>.h5` / `res_wall_c
     Uymax     : max|U_y| [m/s]
     dPrel     : (P_max − P_min) / <P>_V   (<P>_V は双対体積 × 双対重心 r の重み平均)
     checker   : 冷却壁 (x=H) の iface_q_eff の市松振幅 [W/m²] (内部壁節点の値と左右隣接からの r 線形補間値の差の max)
-    qerr_hot / qerr_cj : 全壁節点の |q_eff| と伝導基準 120.5 W/m² の差の max [% of 基準]
+    qerr_hot / qerr_cj : 全壁節点の **符号つき** q_eff と伝導基準の差の max [% of 120.5 W/m²]。
+                         `iface_q_eff` は流体→壁が正なので、期待値は加熱壁 (x=0) −120.5、冷却側の共役壁 (x=H) +120.5
+                         (2026-09-27 plan レビュー M1: 絶対値で比べると熱の向きが逆でも合格していた)
 
 を系列 CSV (`static_hold_series.csv`) に書き、最終比較窓 (step 10000–20000) で
 
@@ -30,6 +32,7 @@ import h5py
 import numpy as np
 
 Q_REF = 0.0241 * (350.0 - 325.0) / 0.005      # 120.5 W/m²
+Q_HOT, Q_CJ = -Q_REF, +Q_REF                  # 符号つき期待値 (流体→壁が正)
 
 
 def checker(r, q):
@@ -76,8 +79,8 @@ def main():
         rows.append((st, float(np.hypot(Ux, Uy).max()), float(np.abs(Uy).max()),
                      float((P.max() - P.min()) / ((P * V).sum() / V.sum())),
                      float(checker(*cj)),
-                     float(np.abs(np.abs(hot[1]) - Q_REF).max() / Q_REF * 100),
-                     float(np.abs(np.abs(cj[1]) - Q_REF).max() / Q_REF * 100), *extra))
+                     float(np.abs(hot[1] - Q_HOT).max() / Q_REF * 100),
+                     float(np.abs(cj[1] - Q_CJ).max() / Q_REF * 100), *extra))
     rows.sort()
     X = np.array(rows)
     cols = ["step", "Umax", "Uymax", "dPrel", "checker", "qerr_hot", "qerr_cj"]
@@ -89,8 +92,8 @@ def main():
     if len(w) == 0:
         raise SystemExit(f"比較窓 {a.win0}–{a.win1} にスナップショットが無い")
     crit = [("max|U| [m/s]", w[:, 1].max(), 1e-3),
-            ("全壁熱流束誤差 hot [% of 120.5]", w[:, 5].max(), 0.5),
-            ("全壁熱流束誤差 cj [% of 120.5]", w[:, 6].max(), 0.5),
+            ("全壁熱流束誤差 hot (符号つき、期待 −120.5) [%]", w[:, 5].max(), 0.5),
+            ("全壁熱流束誤差 cj (符号つき、期待 +120.5) [%]", w[:, 6].max(), 0.5),
             ("相対圧力差 (Pmax−Pmin)/<P>", w[:, 3].max(), 1e-4)]
     print(f"=== 静止保持: {run}  ({len(X)} スナップショット、窓 {a.win0}–{a.win1} に {len(w)}) ===")
     bad = []
