@@ -19,8 +19,8 @@
 //     H2O_IAPWS_CEA_V1  (config 名 custom:h2o_iapws_cea_v1) H2O 専用:
 //              T ≤ 500 K は IAPWS 希薄気体 (粘性 IAPWS 2008 μ₀、熱伝導 IAPWS 2011 λ₀)、T ≥ 700 K は CEA (上の CEA 式)、
 //              500 < T < 700 K は ln μ・ln λ を smoothstep w = 3s² − 2s³ (s = (T−500)/200) で IAPWS → CEA。
-//              150 K 未満は 150 K での対数勾配 n = d ln f/d ln T に合わせた冪 f(150)(T/150)^n (C¹)。
-//              253.15 K 未満は IAPWS の公式適用域外 (起動ログに出す)。
+//              253.15 K (IAPWS の公式適用域の下端) 未満は、253.15 K での IAPWS の対数勾配 n = d ln f/d ln T に合わせた冪
+//              f(253.15)(T/253.15)^n (C¹; n は式から計算、μ ≈ 0.749・λ ≈ 0.975)。IAPWS μ₀ は 202 K で最小・134 K に極があり、式のままの外挿は非物理 (2026-09-27 ユーザ決定)。
 //   相互作用粘性 η_ij (TransportPairD::kind; 規約は対称):
 //     両種が KINETIC → 二元 Chapman–Enskog (σ_ij = (σ_i+σ_j)/2, ε_ij = √(ε_i ε_j), 換算質量 2M_iM_j/(M_i+M_j); 極性補正なし)
 //     それ以外 → CEA trans.inp の相互作用フィット、無ければ CEA の剛体球近似 (cea2.f 行 5565–5570)。
@@ -55,7 +55,7 @@
 #define TRANSPORT_H2O_TC          647.096   // IAPWS 臨界温度 [K]
 #define TRANSPORT_H2O_BLEND_LO    500.0     // これ以下は IAPWS
 #define TRANSPORT_H2O_BLEND_HI    700.0     // これ以上は CEA
-#define TRANSPORT_H2O_POWER_BELOW 150.0     // これ未満は冪外挿
+#define TRANSPORT_H2O_POWER_BELOW 253.15    // これ未満は冪外挿 (IAPWS の公式適用域の下端)
 #define TRANSPORT_H2O_IAPWS_TMIN  253.15    // IAPWS の公式適用域の下端 (ログのみ)
 
 // CEA 形フィット (1 物性ぶん)。行 k: Tlo[k] ≤ T ≤ Thi[k] で ln f = A ln T + B/T + C/T² + D。

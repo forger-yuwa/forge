@@ -32,7 +32,7 @@
 #define TRANSPORT_ETA_IJ_RULE    "v1: both kinetic -> binary Chapman-Enskog (sigma=(si+sj)/2, eps=sqrt(ei ej), no polar term); else CEA trans.inp interaction; else CEA rigid sphere (cea2.f 5565-5570, i=a j=b)"
 #define TRANSPORT_FIT_RULE       "ln f = A lnT + B/T + C/T^2 + D; V: f=eta[microPoise], C: f=lambda[microW/(cm K)]; interval = first with T<=Thi else last (cea2.f TRANIN kt)"
 #define TRANSPORT_KINETIC_RULE   "mu=2.6693e-6 sqrt(M[g/mol] T)/(sigma^2 Omega22), Neufeld 1972 Omega22 with T* clamped to [0.3,100], Brokaw polar +0.2 delta*^2/T* (delta*=mu_d^2/(2 eps sigma^3), CGS); lambda=mu(cp+1.25 R) (modified Eucken)"
-#define TRANSPORT_H2O_V1_RULE    "custom:h2o_iapws_cea_v1: T<=500 IAPWS dilute (mu0 IAPWS 2008 H=1.67752,2.20462,0.6366564,-0.241605; lambda0 IAPWS 2011 L=2.443221e-3,1.323095e-2,6.770357e-3,-3.454586e-3,4.096266e-4; Tc=647.096); T>=700 CEA; 500<T<700 ln f=(1-w)ln f_IAPWS+w ln f_CEA, w=3s^2-2s^3, s=(T-500)/200; T<150 f(150)(T/150)^n, n=dln f/dln T of IAPWS at 150; IAPWS formal range T>=253.15"
+#define TRANSPORT_H2O_V1_RULE    "custom:h2o_iapws_cea_v1: T<=500 IAPWS dilute (mu0 IAPWS 2008 H=1.67752,2.20462,0.6366564,-0.241605; lambda0 IAPWS 2011 L=2.443221e-3,1.323095e-2,6.770357e-3,-3.454586e-3,4.096266e-4; Tc=647.096); T>=700 CEA; 500<T<700 ln f=(1-w)ln f_IAPWS+w ln f_CEA, w=3s^2-2s^3, s=(T-500)/200; T<253.15 f(253.15)(T/253.15)^n, n=dln f/dln T of IAPWS at 253.15 (IAPWS formal range T>=253.15)"
 
 struct ResolvedTransport {
     bool enabled = false;                          // physProp.transport が書かれていたとき true

@@ -345,9 +345,8 @@ void speciesTransportDB_resolve(ResolvedSpeciesDB& db, const std::vector<std::pa
             src = "trans.inp " + te->id + " (" + te->reference + ")";
             if (d.model == TRANSPORT_MODEL_H2O_IAPWS_CEA_V1) {
                 src = "IAPWS 2008/2011 dilute gas below 500 K + " + src + " above 700 K";
-                tr.notes.push_back(nm + " (custom:h2o_iapws_cea_v1): IAPWS dilute-gas formulas are used as is down to 150 K; "
-                                   "below 253.15 K this is outside their formal range (IAPWS 2008/2011: 253.15-1173.15 K); "
-                                   "below 150 K a power law matched to the 150 K log-slope (C1)");
+                tr.notes.push_back(nm + " (custom:h2o_iapws_cea_v1): IAPWS dilute-gas formulas are used within their formal range (253.15-1173.15 K) up to 500 K; "
+                                   "below 253.15 K (outside their formal range) a power law matched to the IAPWS log-slope at 253.15 K (C1; the formulas themselves are non-monotonic there)");
             } else {
                 const double lo = std::min(d.V.Tlo[0], d.C.Tlo[0]), hi = std::max(d.V.Thi[d.V.n - 1], d.C.Thi[d.C.n - 1]);
                 char rng[96];

@@ -7,7 +7,7 @@
     (CEA の kt と連続な区間で同じ; 試験で区間の連続性を確認する)
   - 混合則は CEA の式を g/mol で書き直したもの (cea2.f TRANP)、剛体球近似は cea2.f 5565–5570
   - IAPWS 希薄気体 (2008 粘性 μ₀・2011 熱伝導 λ₀) の係数は h2o_blend_and_lambda.py と同じ値、
-    150 K の対数勾配は S'(Tb) を別の形で微分して求める
+    253.15 K の対数勾配は S'(Tb) を別の形で微分して求める
 MW・NASA-9 (修正 Eucken の c_p)・LJ・双極子は実装と同じ共通データ (forge_species_v1.yaml) か、試験の外部 DB から取る
 (MW は実装と同じ値にそろえる: H2O 18.0153 g/mol; codex diagnose 2026-09-27 の指摘)。
 
@@ -96,9 +96,9 @@ def h2o_iapws_cea_v1(T):
     cl = lambda t: fit(TR[("H2O", "")]["C"], t) * 1e-4
     if T >= 700.0:
         return cm(T), cl(T)
-    if T < 150.0:
-        nm, nl = _loglog_slope(H_IAPWS, 150.0), _loglog_slope(L_IAPWS, 150.0)
-        return iapws_mu(150.0) * (T / 150.0)**nm, iapws_lam(150.0) * (T / 150.0)**nl
+    if T < 253.15:
+        nm, nl = _loglog_slope(H_IAPWS, 253.15), _loglog_slope(L_IAPWS, 253.15)
+        return iapws_mu(253.15) * (T / 253.15)**nm, iapws_lam(253.15) * (T / 253.15)**nl
     if T <= 500.0:
         return iapws_mu(T), iapws_lam(T)
     s = (T - 500.0) / 200.0

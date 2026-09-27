@@ -13,8 +13,8 @@ plans/active/thermophysics-solver-owned-species-db.md §5.1 #5t2 段 1 (合格�
   (AB) 400 K 純 H2O で出所だけ cea / custom:h2o_iapws_cea_v1 に変え、それぞれ CEA 値 (μ 1.32788714104e−5・λ 0.0270414202095)・
        IAPWS 値 (μ 1.33545407126e−5・λ 0.0264314431570) と一致 (codex の独立計算値; 12 桁で与えられているので許容は
        max(1e-12, 与えられた桁の丸め幅) で、独立参照とは ≤1e-12)。両者が同値なら分岐が効いていない不良。
-  (J)  H2O custom の 500 K・700 K・150 K で、左右極限の値の相対差 ≤1e-12、無次元勾配 T·d ln f/dT の差 ≤1e-10 (μ・λ)。
-       極限値は nextafter の両側、勾配は各側の 7 点片側差分 (h: 150 K で 0.05 K、500/700 K で 1 K)。
+  (J)  H2O custom の 500 K・700 K・253.15 K で、左右極限の値の相対差 ≤1e-12、無次元勾配 T·d ln f/dT の差 ≤1e-10 (μ・λ)。
+       極限値は nextafter の両側、勾配は各側の 7 点片側差分 (h: 253.15 K で 0.05 K、500/700 K で 1 K)。
   (N)  拒否: 未指定種 (単独・lump 構成種) / lump 名をキーに / 未知の種 / 同じ実種に 2 回 (AR と Ar) / 未知モデル (大文字 CEA 含む) /
        未知の custom / custom を H2O 以外に / CEA データの無い種で cea / 組成指定の無い builtin で fit / transport_fit の不正
        (区間 4 つ・Tlo≥Thi・C 欠落・未知キー) / LJ を明示しない外部 DB 種で kinetic。拒否漏れ 0 件。
@@ -146,7 +146,7 @@ def test_fcea(D, work):
 
 
 # ---------------------------------------------------------------- (R)
-T_GRID = [100.0, 149.9, 150.0, 200.0, 253.15, 300.0, 373.2, 400.0, 499.99, 500.0, 500.01, 600.0, 699.99, 700.0, 1000.0,
+T_GRID = [100.0, 149.9, 150.0, 200.0, 253.1, 253.15, 300.0, 373.2, 400.0, 499.99, 500.0, 500.01, 600.0, 699.99, 700.0, 1000.0,
           1073.2, 2000.0, 5000.0, 6000.0, 12000.0, 20000.0]
 
 
@@ -260,10 +260,10 @@ def test_joins(D):
         A, B, C, _ = next(r for r in rows if r[0] <= T <= r[1])[2]
         return A - B / T - 2 * C / T**2
 
-    expect = {150.0: (_loglog_slope(H_IAPWS, 150.0), _loglog_slope(L_IAPWS, 150.0)),
+    expect = {253.15: (_loglog_slope(H_IAPWS, 253.15), _loglog_slope(L_IAPWS, 253.15)),
               500.0: (_loglog_slope(H_IAPWS, 500.0), _loglog_slope(L_IAPWS, 500.0)),
               700.0: (cea_slope(ceaV, 700.0), cea_slope(ceaC, 700.0))}
-    for T0, h in ((150.0, 0.05), (500.0, 1.0), (700.0, 1.0)):
+    for T0, h in ((253.15, 0.05), (500.0, 1.0), (700.0, 1.0)):
         lo, hi = math.nextafter(T0, 0.0), math.nextafter(T0, math.inf)
         (ml, ll), (mr, lr) = vals([lo, hi])
         dv = max(rel(ml, mr), rel(ll, lr))
