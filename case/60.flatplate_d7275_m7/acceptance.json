@@ -194,7 +194,7 @@
   },
   {
    "id": "T4-0b-TF",
-   "status": "pre_registered",
+   "status": "outcome_recorded",
    "_written": "2026-09-27、run を回す前 (codex diagnose 2026-09-27-d7275-height-ab-result の提案を採用)",
    "name": "physProp.thermoFloat 1 / 0 だけを変える継続 A/B (FP64 ビルドに残る float 熱力学経路の寄与)",
    "common": "run_0014_t26_h079 の最終場 (res_20000) から restart_field.py --keep-src-dtype (12 量ビット一致)、メッシュ fp_d7275_y3_wall_top8、BC・物性 DB・SST・CFL・緩和・内反復・バイナリ (~/forge56-double、4687c3c) を固定。両腕とも thermoFloat を明記。FORGE_OMEGA_BUDGET=1、extraFields は両腕同一 (残差場 res_* に res_roY0–4 を追加、omg_prod・omg_dest・omg_cross・omg_trans)",
@@ -209,7 +209,18 @@
     "reject": "切替過渡が落ち着いても対象残差と局所振幅が A の 0.8–1.2 倍 → 主因説を棄却",
     "partial": "流れだけ改善して ω が残れば、改善の帰属を流れに限定する。中間結果は保留"
    },
-   "note": "診断条件であり G15 の代替合格条件にしない。G15 は未達のまま。低下桁数を稼ぐ目的の再初期化・別方程式の段の連結・未収束 run の参照床化はしない (codex Major)"
+   "note": "診断条件であり G15 の代替合格条件にしない。G15 は未達のまま。低下桁数を稼ぐ目的の再初期化・別方程式の段の連結・未収束 run の参照床化はしない (codex Major)",
+   "outcome": {
+    "date": "2026-09-27",
+    "runs": "case/60.flatplate_d7275_m7/run_0015_t26_tf1 → run_0017_t26_tf1_ext (A)、run_0016_t26_tf0 → run_0018_t26_tf0_ext (B)。各 5k + 延長 5k (5k で k/ω の窓間中央値が 5 % 超動いたため事前登録どおり)",
+    "window_at_10k": "流れ・化学種の窓間中央値変化 ≤ 1.1 % (落ち着いた)。B の roOmega −7.7 %・roK −6.9 % はまだ動く → ω・k は事前登録どおり判別保留",
+    "free_stream": "自由流域 (y 0.03–0.79) の √Σres² B/A = 0.91–1.05 (流れ・化学種・k・ω 全成分) → 読み = float 熱力学経路が自由流域の床の主因という説を棄却 (0.8–1.2 倍)",
+    "first_row": "第一内部列 (y = 3 µm) の √Σres² B/A: roUy 0.028、roe 0.042、ro 0.10、roY0/1/4 0.10–0.11、roY3 0.13、roY2 0.20、roUx 0.48、roOmega 0.46、roK 0.84。ω 収支 (A の res_roOmega 上位 5 点): trans ≈ dest ≈ 6.0–6.5e8 の相殺残りが A ±0.8–1.3e2 (相対 ~2e-7) → B ±1.5e-3–3.1 → 第一内部列の流れ (roUy・roe) には float 経路の寄与が大きい。ω は B でも他の節点が残り 0.46 倍、しかも下降中なので判別保留",
+    "whole_domain": "全域の RMS 履歴 B/A (末尾 1k): ro 0.96、roUx 0.99、roUy 1.05、roe 0.98、roY 0.96、roK 0.77、roOmega 0.39 → 全域の流れ・化学種の床は float 経路では変わらない。両腕とも check_convergence NOT CONVERGED (stalled/plateau)",
+    "local_amplitude": "固定節点 (100 step 毎、step 4000–5000) の振幅/平均: 壁列の roOmega は一部の点で B が 1/20–1/30 (8e-8 → 2–4e-9)、他の点と ro・P・roK は同程度、自由流 3 点はすべて同程度 (1e-7 前後)",
+    "new_observation": "自由流域の |res_ro| / (ρ U √vol) は中央値 1.2e-8、90 % 点 5.3e-8 (B の最終場) — float32 の丸め水準。変換済みメッシュ h5 の MESH/COORD と CELLS/volume は float32 (FP64 ビルドは flow_float・geom_float とも double だが、読み込む幾何は float32 で書かれている)。仮説 (未確認): 自由流域の床は float32 で保存された幾何 (面ベクトルの閉包誤差) による",
+    "q": "比較域 (1.07–2.55 m) の壁 q_w の B/A−1: 最大 9.2e-7、平均 6.0e-8。R_A 平均 1.313 は同じ"
+   }
   }
  ]
 }
