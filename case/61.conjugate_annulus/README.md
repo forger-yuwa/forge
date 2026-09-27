@@ -120,6 +120,8 @@ $A_{\rm planar}$ で割ると FAIL) を確認する。**2026-09-27: VERDICT PASS
 | `run_0002_dry_r16` | 乾式 1 step (流体 16×4)。壁節点の座標は `run_0001` と同一 → 固体 `solid_s16_x4` を共用 | `res_wall_outer_4_1.h5` | ref |
 | `run_0003_annulus_r32s16` / `run_0004_annulus_r16s16` | V-ax2 本体 / 流体感度 (AWS g5・FP64、`warmup: 200`) | **安全停止** (step 5050 / 2450): 「max|dTw| が 10 更新以上連続で増加」。**誤検知** — 平均壁温が 324.9 → 322.28 K (step ≈4000) に下がってから上がる**静止ガスの熱伝導の過渡**で、底の後の再加速を、登録 `dT_K` 2e-3 K を床とする発散検知が拾った (`conjugateWall.cpp` の累積増幅判定) | 破棄 (対処 1 の根拠) |
 | `run_0005_annulus_r32s16_w20k` / `run_0006_annulus_r16s16_w20k` | **対処 1** (`divergence-and-startup.md`): `warmup` 200 → **20000** (流体を落ち着かせてから連成)。他は同一 | (実行中) | active |
+| `run_0007_dry_r32x2` / `run_0008_dry_r32x8` | 乾式 1 step (軸 2 / 8 の界面節点の確定) | 壁ダンプ → `mesh/solid_s8_x2.*` / `solid_s32_x8.*`。メッシュ品質 PASS | ref |
+| `run_0009_annulus_r32x2s8_w20k` / `run_0010_annulus_r32x8s32_w20k` / `run_0011_annulus_r32x4s32_w20k` | **連成格子感度 (plan §6 V-ax2 再登録)**: 流体 32×{2,8}・固体 {8,32}×{2,8}、と交差条件 B (流体 32×4・固体 32×4)。`warmup` 20000 | (実行中) | active |
 
 ローカルの起動確認 (2026-09-27、float、各 2 step、`run_9032_smoke_r32` / `run_9016_smoke_r16`) は init・軸対称の固体検査・
 界面の座標一致 (最大ずれ 0 m) を通り rc 0。確認後に破棄した。
