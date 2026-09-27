@@ -2,6 +2,7 @@
 #include <cstdio>
 #include "output.hpp"
 #include "conjugateWall.hpp"
+#include "input/speciesDB.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -20,6 +21,20 @@
 using HighFive::File;
 
 namespace {
+
+// 化学種の解決済み記録をルート属性に書く (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3a)。
+//   species_hash (互換性ハッシュ) / species_record_sha256 (記録全文) / species_record_file / species_input_unverified。
+//   記録が無い (CPG) ときは何も書かない。
+void writeSpeciesAttributes(File& file)
+{
+    const SpeciesRecordInfo* rec = speciesDB_currentRecord();
+    if (rec == nullptr) return;
+    file.createAttribute<std::string>("species_hash", HighFive::DataSpace::From(rec->compatHash)).write(rec->compatHash);
+    file.createAttribute<std::string>("species_record_sha256", HighFive::DataSpace::From(rec->recordSha256)).write(rec->recordSha256);
+    file.createAttribute<std::string>("species_record_file", HighFive::DataSpace::From(rec->recordFile)).write(rec->recordFile);
+    const int unv = rec->inputUnverified;
+    file.createAttribute<int>("species_input_unverified", HighFive::DataSpace::From(unv)).write(unv);
+}
 
 flow_float outputTimeValue(const solverConfig& cfg, int iStep)
 {
@@ -104,6 +119,7 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
     ofstream ofsH5(fnameH5);
 
     File file(fnameH5, File::ReadWrite | File::Truncate);
+    writeSpeciesAttributes(file);
 
     // write mesh structure
     vector<geom_float> COORD;
@@ -328,6 +344,7 @@ void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var ,
         ofstream ofsH5(fnameH5);
 
         File file(fnameH5, File::ReadWrite | File::Truncate);
+        writeSpeciesAttributes(file);
 
         // write boundary
         vector<geom_float> COORD;

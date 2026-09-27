@@ -229,6 +229,18 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
   |ΣY−1|>1e-3 はエラー (以前は黙って通した; 未指定種は従来どおり `Y0=1`, 他 0)。起動ログに入口ごとの Y と X (MW から逆算) が出るので
   ここで桁を確認する。`initial` (IC) は文字列のまま; 組成付き IC と `inletProfile` CSV は生成ツール側で Y に換算する
   (`gen_inlet_profile.py --X`, [procedures/inlet-profile.md](inlet-profile.md))。
+- **化学種の解決済み記録と入力場の照合** (TP `thermalMethod: 2` のみ、2026-09-27、[plan §4.3 #3a](../plans/active/thermophysics-solver-owned-species-db.md))。
+  - 起動時に使用した全種の物性 (順序・名前・MW・datum 前の絶対係数と温度区間・LJ・`thermoHrefTemp`・来歴) を run ディレクトリへ
+    `resolved_species_<互換ハッシュ16桁>.yaml` として書く (**出力=記録であり入力ではない**; 同名で来歴だけ違えば `_<完全性16桁>` 付きの別名)。
+    各 `res_*.h5` (境界出力を含む) のルート属性に `species_hash` (互換性ハッシュ; `source` とパスは含まない)・`species_record_sha256` (記録全文)・
+    `species_record_file`・`species_input_unverified` が付く。Python からは `tools/forge_species.py` の `load_record` / `find_record`。
+  - `valueFileName` に `species_hash` があり自分と違えば**起動を拒否**し、入力側の記録が見つかれば差のある種・係数を表示する (許可手段なし;
+    種を変えるなら `tools/convert_species_field.py`)。**属性が無い場は「照合不能」で拒否**する。確認済みなら**その実行だけ**
+    `FORGE_ALLOW_UNVERIFIED_SPECIES=1 forge` で通せる (出力に `species_input_unverified=1` が付き、以後の restart に継承される)。
+    **config キーでの恒常的な許可は無い** (生成 config に埋め込まない)。
+    **過渡期 (#3b 完了まで) の既定**: IC 生成側がまだ属性を付けないので、属性なしの場は**警告して未検証の印を付けて通す** (係数不一致は常に停止)。最終方針 (属性なしも停止) は `FORGE_REQUIRE_VERIFIED_SPECIES=1` で先取りでき、#3b 完了時に既定をこちらへ切り替える。
+  - `forge --resolve-species`: GPU を使わず `solverConfig.yaml` を解決して記録を書き、互換性ハッシュを**標準出力の最終行**に出して終了
+    (CPG は終了コード 2)。記録を既存の場へ貼っても検証済みにはならない。
 - **`thermoHrefTemp: 298.15` を必ず指定する** (反応熱は sensible datum の残差項 $\dot Q=-\sum_s h^{abs}_s(T_{ref})\dot\omega_s$ として入る。絶対 datum (0) でも動くが陰解法は不安定)。
 - 機構に現れる種は `species` に全て含めること (無ければ起動時エラー)。`species` にだけある種は不活性として扱う。
 - 熱力学 DB は `tools/cea_thermo_to_species_db.py thermo.inp --species ...` で CEA から生成する (ラジカルは内蔵 DB に無い)。

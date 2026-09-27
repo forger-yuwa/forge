@@ -175,7 +175,8 @@ physProp:
 | --- | --- | --- | --- |
 | 1 | ~~plan 段 codex レビュー~~ | 完了 2026-09-27 (GO-with-changes, C0/M7/m1, 全件採用 → §2・§3・§4・#2–#11・§6 に反映; §6.1) | O |
 | 2 | ~~仕様文書の先行更新~~ | 完了 2026-09-27: `methods/thermophysics.md` §1b (共通データ・canonical ID・lump の起動時合成・輸送展開と Blanc・解決済み記録と内容照合) | O |
-| 3a | 記録・互換性ハッシュ・resolve-only・ソルバ入口 | §4.3。C++: 互換性/完全性ハッシュ、`resolved_species_*.yaml`、res 属性、resolve-only モード、`valueFileName` の照合 (未検証は既定拒否・呼び出し単位の許可)。Python: `forge_species.py` の内容比較化と記録の検証。合格は §6 V1 の A・B・(b)・(c)・旧場 | O |
+| 3a | ~~記録・互換性ハッシュ・resolve-only・ソルバ入口~~ | 完了 2026-09-27: C++ (`input/speciesDB.{cpp,hpp}` の SHA-256・互換テキスト %.17g・記録・`diffRecord`・入口照合、`main.cpp` の `--resolve-species` と `valueFileName` 照合、`output/output.cpp` の res 属性 4 つ)、Python `forge_species.py` の内容比較 (builtin 省略・source 拒否を撤廃)。試験 `tests/unit/test_species_record_host.cpp` (29 項目)・`test_forge_species_record.py`・`test_species_record_solver.py` (17 項目) ALL PASS: V1 の A・B・(b)・(c)・旧場・source 差・resolve 一致。数値不変: `case/44.vitiated_air_wt/run_0516`–`0519` (基準/新バイナリ各 2 回, 200 step) `check_field_regress` PASS (比 ≤1.27)。**過渡期の既定**: 属性なしの場は警告 + `species_input_unverified=1` で通す (並行セッションの TP run の継続を止めないため)。`FORGE_REQUIRE_VERIFIED_SPECIES=1` で最終方針 (停止) を先取り。**#3b 完了時に既定を厳密へ切り替える** (#3c)。残る過渡の影響: `interp_field.py` は記録のない内蔵種を含む TP run 同士で unverifiable REFUSED (`--force-species` で通る) | O |
+| 3c | 未検証の既定を厳密へ切り替え | #3b 完了後、`main.cpp` の既定を「属性なしは停止」に (環境変数 `FORGE_REQUIRE_VERIFIED_SPECIES` を撤去し `FORGE_ALLOW_UNVERIFIED_SPECIES` だけ残す)。`procedures/solver-settings.md` と試験 (0t) を更新 | O |
 | 3b | 引き継ぎ・種変換・IC 生成の入口 | `restart_field.py`・`interp_field.py`・`runner_sern.py` `restart_by_index`・`convert_species_field.py`、設計側 IC 生成 (`design/forge_design/evaluate/ic.py` ほか runner) が §4.3 の付与責任で属性を扱う。case 内の個別 IC スクリプトは移行まで呼び出し単位の許可で動かす。合格は §6 V1 の (a)・(d)・(f) | O |
 | 4 | 共通データ化 (値は変えない) | §4.1。canonical ID・alias・相・利用可否・LJ の有無を持つ表。現行内蔵 7 種 + `SPECIES_NASA9` 11 種を移す (値はそのまま)。合格: 移行前後で全種の係数・MW・区間が**ビット一致** (内蔵と SPECIES_NASA9 の差は差として記録)、`CO`/`Co` を別種として解決、LJ 無し種を輸送に使うと拒否 | O |
 | 5 | CEA 直読みとの差・20000 K 区間 | H2O MW・AR 高温 a0 の寄せ先、LJ の出典、6000–20000 K 区間を有効にするか。値を変えるなら case/44 と #6 の小型ケースの報告量変化を記録 | F |
@@ -259,6 +260,7 @@ physProp:
 
 ## 9. 変更ログ
 
+- `2026-09-27` — #3a 実装・検証 (上表)。並行セッション (case/56 TP) の継続を止めないよう、属性なしの場は #3b 完了まで警告で通す過渡期の既定にした (係数不一致は常に停止)。
 - `2026-09-27` — #3 の委譲で implementer が「属性の無い場を拒否すると新規 TP 初期場も全部止まる」穴を発見 (編集なし)。codex diagnose で補強した案 A を採用し §4.3・#3a/#3b・V1 (f) を改訂。V0 取得済み (§6 冒頭)。
 - `2026-09-27` — codex plan 段レビュー 2 回目 (改訂 3 点, GO-with-changes C0/M5/m1) を全件採用。凝縮域の輸送物性で液を蒸気扱いしている件を §10 に追加 (ユーザ判断待ち)。
 - `2026-09-27` — N2 の統一はユーザが保留に戻した (「変えなくてもいいのかな、今後判断」)。§4.8・#12 を「判断」項目に、§10 未確定事項に追加。

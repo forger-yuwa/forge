@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <cmath>
 #include <iomanip>
 #include <stdio.h>                                                                                       
@@ -1080,6 +1081,97 @@ static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
     std::cout << "[dual-time] history NOT restored (" << why << "): all systems start from P=PP=current, first physical step is BDF1\n";
 }
 
+// 化学種 datum の有効温度 (thermo_init_db と同じ条件: thermoHrefTemp>0 のときだけ datum を適用)
+static double speciesRecordTref(const solverConfig& cfg)
+{
+    return (cfg.thermoHrefTemp > 0.0) ? cfg.thermoHrefTemp : 0.0;
+}
+
+// valueFileName の species_hash 属性を照合し、run ディレクトリ (cwd) に解決済み記録を書く。
+//   属性あり: 互換性ハッシュが一致 → 通す / 不一致 → 差を示して終了 (許可手段なし)。
+//   属性なし: 照合不能として終了。その実行だけ FORGE_ALLOW_UNVERIFIED_SPECIES=1 で通し、出力に未検証の印を付ける。
+//   CPG (thermalMethod != 2) は対象外。
+static void checkInputSpeciesAndWriteRecord(const solverConfig& cfg)
+{
+    if (cfg.thermalMethod != 2) return;
+    const ResolvedSpeciesDB* db = speciesDB_current();
+    if (db == nullptr) db = &speciesDB_init(cfg);
+    const double Tref = speciesRecordTref(cfg);
+
+    std::string fieldHash, fieldRecordSha;
+    int fieldUnverified = -1;
+    try {
+        HighFive::File f(cfg.valueFileName, HighFive::File::ReadOnly);
+        if (f.hasAttribute("species_hash"))          f.getAttribute("species_hash").read(fieldHash);
+        if (f.hasAttribute("species_record_sha256")) f.getAttribute("species_record_sha256").read(fieldRecordSha);
+        if (f.hasAttribute("species_input_unverified")) f.getAttribute("species_input_unverified").read(fieldUnverified);
+    } catch (const std::exception& e) {
+        std::cerr << "[species] cannot read attributes of " << cfg.valueFileName << ": " << e.what() << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+    const char* env = std::getenv("FORGE_ALLOW_UNVERIFIED_SPECIES");
+    // 過渡期 (plan thermophysics-solver-owned-species-db #3b 完了まで): IC 生成側がまだ属性を付けないので、
+    // 属性なしの場は既定で「警告 + 未検証の印」で通す。係数不一致は常に停止 (allow は不一致を通さない)。
+    // FORGE_REQUIRE_VERIFIED_SPECIES=1 で最終方針 (属性なしも停止) を先取りできる。#3b 完了時に既定を厳密へ切り替える。
+    const char* strictEnv = std::getenv("FORGE_REQUIRE_VERIFIED_SPECIES");
+    const bool strict = (strictEnv != nullptr && std::string(strictEnv) == "1");
+    const bool allow = (env != nullptr && std::string(env) == "1") || !strict;
+    std::vector<std::string> dirs;
+    {
+        std::filesystem::path d = std::filesystem::path(cfg.valueFileName).parent_path();
+        dirs.push_back(d.empty() ? std::string(".") : d.string());
+        dirs.push_back(".");
+    }
+    std::string status, msg;
+    int unverified = 0;
+    const bool ok = speciesDB_checkInputField(*db, Tref, fieldHash, fieldRecordSha, fieldUnverified, cfg.valueFileName,
+                                              dirs, allow, status, unverified, msg);
+    if (!ok) {
+        std::cerr << "[species] ERROR: " << msg << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+    std::cout << "[species] " << (unverified ? "WARNING: " : "") << msg << "\n";
+    try {
+        const SpeciesRecordInfo rec = speciesDB_writeRecord(*db, Tref, cfg.speciesDBFile, cfg.valueFileName, status, unverified, ".");
+        speciesDB_setCurrentRecord(rec);
+        std::cout << "[species] species_hash " << rec.compatHash << " (record " << rec.recordFile
+                  << ", sha256 " << rec.recordSha256.substr(0, 16) << ", input " << status << ")" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+}
+
+// forge --resolve-species: GPU を使わず solverConfig.yaml を読み、解決済み記録を cwd に書いて互換性ハッシュを標準出力の最終行に出す。
+// IC 生成・runner が宛先の物性を得るため (#3b)。記録を既存場へ貼るだけで検証済みにはしない。CPG は終了コード 2。
+static int resolveSpeciesOnly()
+{
+    std::streambuf* orig = std::cout.rdbuf(std::cerr.rdbuf());   // ログは stderr へ、stdout はハッシュだけ
+    int rc = 0;
+    std::string hash;
+    try {
+        solverConfig cfg;
+        cfg.read("solverConfig.yaml");
+        if (cfg.thermalMethod != 2) {
+            std::cerr << "[species] thermalMethod != 2 (calorically perfect): no species record / hash" << std::endl;
+            rc = 2;
+        } else {
+            const ResolvedSpeciesDB& db = speciesDB_init(cfg);
+            speciesDB_printTable(cfg, db);
+            const SpeciesRecordInfo rec = speciesDB_writeRecord(db, speciesRecordTref(cfg), cfg.speciesDBFile, "",
+                                                                "not_checked_resolve_only", 0, ".");
+            std::cerr << "[species] record " << rec.recordFile << " (sha256 " << rec.recordSha256 << ")" << std::endl;
+            hash = rec.compatHash;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[species] resolve failed: " << e.what() << std::endl;
+        rc = 1;
+    }
+    std::cout.rdbuf(orig);
+    if (rc == 0) std::cout << hash << std::endl;
+    return rc;
+}
+
 cudaConfig initializeSimulation(
     solverConfig& cfg,
     mesh& msh,
@@ -1188,6 +1280,10 @@ cudaConfig initializeSimulation(
     condensationInit_d(cfg , var);
     // 受動種 (トレーサ + 凝縮モーメント) の device ポインタ配列 (passiveScalarScheme 1 の化学種経路用; 0 では表だけ)。
     passiveInit_d(cfg , var);
+
+    // 入力場の化学種照合と解決済み記録 (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3a)。
+    // TP (thermalMethod 2) だけが対象。数値には触れない (記録と照合のみ)。
+    checkInputSpeciesAndWriteRecord(cfg);
 
     cout << "Read Initial Values \n";
     var.readValueHDF5(cfg.valueFileName , msh, cfg.kInit, cfg.omegaInit);
@@ -2113,7 +2209,11 @@ void advanceOneStep(
 
 }
 
-int main(void) {
+int main(int argc, char** argv) {
+    // --resolve-species: 化学種の解決済み記録だけ書いて終了 (GPU 不使用; plan thermophysics-solver-owned-species-db §4.3)
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--resolve-species") return resolveSpeciesOnly();
+    }
     RuntimeProfiler profiler;
 
     solverConfig cfg;

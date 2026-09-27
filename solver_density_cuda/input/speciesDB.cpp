@@ -6,7 +6,11 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -346,4 +350,400 @@ void speciesDB_printTable(const solverConfig& cfg, const ResolvedSpeciesDB& db)
         }
     }
     std::cout << "[species]   tracer: " << (cfg.tracerEnabled() ? cfg.tracer + " (roXi transported; inlet floats Xi)" : "none") << "\n";
+}
+
+// =============================================================================
+// 解決済み記録と内容照合 (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3a)
+// =============================================================================
+namespace {
+
+// ---- SHA-256 (FIPS 180-4)。外部ライブラリに依存しない (変換器・単体試験も同じ TU を単独でビルドする) ----
+struct Sha256 {
+    uint32_t h[8];
+    unsigned char buf[64];
+    uint64_t len = 0;
+    size_t   nbuf = 0;
+    static uint32_t rotr(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
+    Sha256() {
+        const uint32_t h0[8] = {0x6a09e667u,0xbb67ae85u,0x3c6ef372u,0xa54ff53au,0x510e527fu,0x9b05688cu,0x1f83d9abu,0x5be0cd19u};
+        for (int i = 0; i < 8; ++i) h[i] = h0[i];
+    }
+    void block(const unsigned char* p) {
+        static const uint32_t k[64] = {
+            0x428a2f98u,0x71374491u,0xb5c0fbcfu,0xe9b5dba5u,0x3956c25bu,0x59f111f1u,0x923f82a4u,0xab1c5ed5u,
+            0xd807aa98u,0x12835b01u,0x243185beu,0x550c7dc3u,0x72be5d74u,0x80deb1feu,0x9bdc06a7u,0xc19bf174u,
+            0xe49b69c1u,0xefbe4786u,0x0fc19dc6u,0x240ca1ccu,0x2de92c6fu,0x4a7484aau,0x5cb0a9dcu,0x76f988dau,
+            0x983e5152u,0xa831c66du,0xb00327c8u,0xbf597fc7u,0xc6e00bf3u,0xd5a79147u,0x06ca6351u,0x14292967u,
+            0x27b70a85u,0x2e1b2138u,0x4d2c6dfcu,0x53380d13u,0x650a7354u,0x766a0abbu,0x81c2c92eu,0x92722c85u,
+            0xa2bfe8a1u,0xa81a664bu,0xc24b8b70u,0xc76c51a3u,0xd192e819u,0xd6990624u,0xf40e3585u,0x106aa070u,
+            0x19a4c116u,0x1e376c08u,0x2748774cu,0x34b0bcb5u,0x391c0cb3u,0x4ed8aa4au,0x5b9cca4fu,0x682e6ff3u,
+            0x748f82eeu,0x78a5636fu,0x84c87814u,0x8cc70208u,0x90befffau,0xa4506cebu,0xbef9a3f7u,0xc67178f2u};
+        uint32_t w[64];
+        for (int i = 0; i < 16; ++i)
+            w[i] = (uint32_t(p[4*i]) << 24) | (uint32_t(p[4*i+1]) << 16) | (uint32_t(p[4*i+2]) << 8) | uint32_t(p[4*i+3]);
+        for (int i = 16; i < 64; ++i) {
+            const uint32_t s0 = rotr(w[i-15], 7) ^ rotr(w[i-15], 18) ^ (w[i-15] >> 3);
+            const uint32_t s1 = rotr(w[i-2], 17) ^ rotr(w[i-2], 19) ^ (w[i-2] >> 10);
+            w[i] = w[i-16] + s0 + w[i-7] + s1;
+        }
+        uint32_t a=h[0], b=h[1], c=h[2], d=h[3], e=h[4], f=h[5], g=h[6], hh=h[7];
+        for (int i = 0; i < 64; ++i) {
+            const uint32_t S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+            const uint32_t ch = (e & f) ^ (~e & g);
+            const uint32_t t1 = hh + S1 + ch + k[i] + w[i];
+            const uint32_t S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+            const uint32_t mj = (a & b) ^ (a & c) ^ (b & c);
+            const uint32_t t2 = S0 + mj;
+            hh = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+        }
+        h[0]+=a; h[1]+=b; h[2]+=c; h[3]+=d; h[4]+=e; h[5]+=f; h[6]+=g; h[7]+=hh;
+    }
+    void update(const unsigned char* p, size_t n) {
+        len += n;
+        while (n > 0) {
+            const size_t t = std::min(n, size_t(64) - nbuf);
+            std::copy(p, p + t, buf + nbuf);
+            nbuf += t; p += t; n -= t;
+            if (nbuf == 64) { block(buf); nbuf = 0; }
+        }
+    }
+    std::string hex() {
+        const uint64_t bits = len * 8;
+        const unsigned char pad = 0x80;
+        update(&pad, 1);
+        const unsigned char zero = 0;
+        while (nbuf != 56) update(&zero, 1);
+        unsigned char lb[8];
+        for (int i = 0; i < 8; ++i) lb[i] = static_cast<unsigned char>(bits >> (56 - 8*i));
+        update(lb, 8);
+        static const char* hx = "0123456789abcdef";
+        std::string out;
+        for (int i = 0; i < 8; ++i)
+            for (int j = 28; j >= 0; j -= 4) out.push_back(hx[(h[i] >> j) & 0xf]);
+        return out;
+    }
+};
+
+// %.17g (C の printf と Python の '%.17g' % x は同じ文字列を返す; 往復で double がビット一致する)
+std::string g17(double v)
+{
+    char b[64];
+    std::snprintf(b, sizeof(b), "%.17g", v);
+    return b;
+}
+
+// YAML の二重引用符文字列 (\ と " をエスケープ)
+std::string yq(const std::string& s)
+{
+    std::string o = "\"";
+    for (char c : s) {
+        if (c == '\\' || c == '"') o.push_back('\\');
+        o.push_back(c);
+    }
+    return o + "\"";
+}
+
+// 記録 1 種分 (互換性テキストの材料)
+struct RecordEntry {
+    std::string   name;
+    std::string   phase;
+    SpeciesThermo sp;
+};
+
+// 互換性テキスト本体。書式は tools/forge_species.py compat_text と一字一句同じにすること。
+std::string compatTextRaw(const std::string& schema, const std::string& datum, const std::string& extrap,
+                          double Tref, const std::vector<RecordEntry>& es)
+{
+    std::ostringstream o;
+    o << "schema: " << schema << "\n";
+    o << "datum: " << datum << "\n";
+    o << "thermoHrefTemp: " << g17(Tref) << "\n";
+    o << "extrapolation: " << extrap << "\n";
+    o << "nSpecies: " << es.size() << "\n";
+    for (size_t i = 0; i < es.size(); ++i) {
+        const SpeciesThermo& s = es[i].sp;
+        o << "species[" << i << "]: name=" << es[i].name << " phase=" << es[i].phase << "\n";
+        o << "species[" << i << "].MW: " << g17(s.MW) << "\n";
+        o << "species[" << i << "].T: " << g17(s.Tlo) << " " << g17(s.Tmid) << " " << g17(s.Thi) << "\n";
+        o << "species[" << i << "].LJ: " << g17(s.sigma_LJ) << " " << g17(s.eps_kB) << "\n";
+        o << "species[" << i << "].low:";
+        for (int k = 0; k < 9; ++k) o << " " << g17(s.low[k]);
+        o << "\n";
+        o << "species[" << i << "].high:";
+        for (int k = 0; k < 9; ++k) o << " " << g17(s.high[k]);
+        o << "\n";
+    }
+    return o.str();
+}
+
+std::vector<RecordEntry> entriesOf(const ResolvedSpeciesDB& db)
+{
+    std::vector<RecordEntry> es;
+    for (int s = 0; s < db.size(); ++s) es.push_back({db.names[s], "gas", db.species[s]});   // 液相は #10 まで含めない
+    return es;
+}
+
+bool readFileBytes(const std::string& path, std::string& out)
+{
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    out = ss.str();
+    return true;
+}
+
+std::unique_ptr<SpeciesRecordInfo> g_record;   // ソルバ起動時の記録 (出力属性用)
+
+} // anonymous namespace
+
+std::string speciesDB_sha256Hex(const std::string& bytes)
+{
+    Sha256 h;
+    h.update(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size());
+    return h.hex();
+}
+
+std::string speciesDB_compatText(const ResolvedSpeciesDB& db, double Tref)
+{
+    return compatTextRaw(SPECIES_RECORD_SCHEMA, SPECIES_RECORD_DATUM, SPECIES_RECORD_EXTRAPOLATION, Tref, entriesOf(db));
+}
+
+std::string speciesDB_compatHash(const ResolvedSpeciesDB& db, double Tref)
+{
+    return speciesDB_sha256Hex(speciesDB_compatText(db, Tref));
+}
+
+std::string speciesDB_recordText(const ResolvedSpeciesDB& db, double Tref, const std::string& dbFile,
+                                 const std::string& inputField, const std::string& inputStatus)
+{
+    std::ostringstream o;
+    o << "# forge resolved species record: OUTPUT (provenance), not an input.\n";
+    o << "# plans/active/thermophysics-solver-owned-species-db.md 4.3 / methods/thermophysics.md 1b.4\n";
+    o << "# compat_hash = SHA-256 of the canonical text rebuilt from schema/datum/thermoHrefTemp/extrapolation/species\n";
+    o << "#   (source and provenance excluded; see tools/forge_species.py compat_text).\n";
+    o << "# integrity   = SHA-256 of this whole file (res_*.h5 attribute species_record_sha256).\n";
+    o << "schema: " << yq(SPECIES_RECORD_SCHEMA) << "\n";
+    o << "compat_hash: " << yq(speciesDB_compatHash(db, Tref)) << "\n";
+    o << "datum: " << yq(SPECIES_RECORD_DATUM) << "\n";
+    o << "thermoHrefTemp: " << g17(Tref) << "\n";
+    o << "extrapolation: " << yq(SPECIES_RECORD_EXTRAPOLATION) << "\n";
+    o << "species:\n";
+    for (int s = 0; s < db.size(); ++s) {
+        const SpeciesThermo& sp = db.species[s];
+        o << "  - index: " << s << "\n";
+        o << "    name: " << yq(db.names[s]) << "\n";
+        o << "    phase: \"gas\"\n";
+        o << "    source: " << yq(db.source[s]) << "\n";
+        o << "    MW: " << g17(sp.MW) << "\n";
+        o << "    Tlo: " << g17(sp.Tlo) << "\n";
+        o << "    Tmid: " << g17(sp.Tmid) << "\n";
+        o << "    Thi: " << g17(sp.Thi) << "\n";
+        o << "    LJ_sigma: " << g17(sp.sigma_LJ) << "\n";
+        o << "    LJ_eps_kB: " << g17(sp.eps_kB) << "\n";
+        o << "    nasa9_low: [";
+        for (int k = 0; k < 9; ++k) o << (k ? ", " : "") << g17(sp.low[k]);
+        o << "]\n";
+        o << "    nasa9_high: [";
+        for (int k = 0; k < 9; ++k) o << (k ? ", " : "") << g17(sp.high[k]);
+        o << "]\n";
+    }
+    o << "provenance:\n";
+    o << "  speciesDBFile: " << yq(dbFile) << "\n";
+    o << "  input_field: " << yq(inputField) << "\n";
+    o << "  input_status: " << yq(inputStatus) << "\n";
+    return o.str();
+}
+
+SpeciesRecordInfo speciesDB_writeRecord(const ResolvedSpeciesDB& db, double Tref, const std::string& dbFile,
+                                        const std::string& inputField, const std::string& inputStatus,
+                                        int inputUnverified, const std::string& dir)
+{
+    namespace fs = std::filesystem;
+    SpeciesRecordInfo r;
+    const std::string text = speciesDB_recordText(db, Tref, dbFile, inputField, inputStatus);
+    r.compatHash = speciesDB_compatHash(db, Tref);
+    r.recordSha256 = speciesDB_sha256Hex(text);
+    r.inputUnverified = inputUnverified;
+    const std::string base  = "resolved_species_" + r.compatHash.substr(0, 16);
+    // 同名があって全文一致ならそのまま、違えば完全性ハッシュ付きの別名 (既存は上書きしない)
+    for (const std::string& name : {base + ".yaml", base + "_" + r.recordSha256.substr(0, 16) + ".yaml"}) {
+        const fs::path p = fs::path(dir) / name;
+        std::string old;
+        if (fs::exists(p)) {
+            if (readFileBytes(p.string(), old) && old == text) { r.recordFile = name; return r; }
+            if (name == base + ".yaml") {
+                // 名前は同じ互換ハッシュでも来歴 (input_status 等) が違う正常な場合と、取り違えの場合がある。後者は警告。
+                const std::string oldSha = speciesDB_sha256Hex(old);
+                std::vector<std::string> d = speciesDB_diffRecord(p.string(), db, Tref);
+                if (!d.empty()) {
+                    std::cerr << "[species] WARNING: existing record " << p.string() << " (sha256 " << oldSha.substr(0, 16)
+                              << ") does not match its name / the current species (" << d.front() << "); writing a separate record\n";
+                }
+                continue;
+            }
+            throw std::runtime_error("[species] record " + p.string() + " exists with different content (integrity collision?)");
+        }
+        std::ofstream f(p, std::ios::binary);
+        if (!f) throw std::runtime_error("[species] cannot write record " + p.string());
+        f << text;
+        f.close();
+        if (!f) throw std::runtime_error("[species] failed to write record " + p.string());
+        r.recordFile = name;
+        return r;
+    }
+    throw std::runtime_error("[species] could not place record " + base);
+}
+
+std::vector<std::string> speciesDB_diffRecord(const std::string& recordPath, const ResolvedSpeciesDB& db, double Tref)
+{
+    std::vector<std::string> d;
+    YAML::Node root;
+    try {
+        root = YAML::LoadFile(recordPath);
+    } catch (const std::exception& e) {
+        d.push_back("record " + recordPath + " is not readable YAML: " + e.what());
+        return d;
+    }
+    std::vector<RecordEntry> es;
+    std::string schema, datum, extrap, hashInFile;
+    double TrefRec = 0.0;
+    try {
+        schema = root["schema"].as<std::string>();
+        datum  = root["datum"].as<std::string>();
+        extrap = root["extrapolation"].as<std::string>();
+        hashInFile = root["compat_hash"].as<std::string>();
+        TrefRec = root["thermoHrefTemp"].as<double>();
+        for (const auto& n : root["species"]) {
+            RecordEntry e;
+            e.name  = n["name"].as<std::string>();
+            e.phase = n["phase"].as<std::string>();
+            SpeciesThermo& s = e.sp;
+            s = SpeciesThermo{};
+            s.MW = n["MW"].as<double>();
+            s.Tlo = n["Tlo"].as<double>(); s.Tmid = n["Tmid"].as<double>(); s.Thi = n["Thi"].as<double>();
+            s.sigma_LJ = n["LJ_sigma"].as<double>(); s.eps_kB = n["LJ_eps_kB"].as<double>();
+            if (!read9(n["nasa9_low"], s.low) || !read9(n["nasa9_high"], s.high))
+                throw std::runtime_error("species '" + e.name + "' lacks 9 nasa9 coefficients");
+            es.push_back(e);
+        }
+    } catch (const std::exception& e) {
+        d.push_back("record " + recordPath + " is malformed: " + e.what());
+        return d;
+    }
+    // 記録の自己整合: 中身から互換ハッシュを作り直して記録内の値と比べる (改竄・取り違えの検出)
+    const std::string rehash = speciesDB_sha256Hex(compatTextRaw(schema, datum, extrap, TrefRec, es));
+    if (rehash != hashInFile) {
+        d.push_back("record " + recordPath + ": compat_hash in file " + hashInFile.substr(0, 16)
+                    + " != recomputed from its content " + rehash.substr(0, 16) + " (edited or corrupted record)");
+    }
+    if (schema != SPECIES_RECORD_SCHEMA) d.push_back("schema: field '" + schema + "' vs current '" SPECIES_RECORD_SCHEMA "'");
+    if (datum != SPECIES_RECORD_DATUM) d.push_back("datum convention: field '" + datum + "' vs current");
+    if (extrap != SPECIES_RECORD_EXTRAPOLATION) d.push_back("extrapolation: field '" + extrap + "' vs current");
+    if (TrefRec != Tref) d.push_back("thermoHrefTemp: field " + g17(TrefRec) + " vs current " + g17(Tref));
+    std::vector<std::string> nf, nc;
+    for (const auto& e : es) nf.push_back(e.name);
+    nc = db.names;
+    if (nf != nc) {
+        std::string a, b;
+        for (const auto& x : nf) a += (a.empty() ? "" : ",") + x;
+        for (const auto& x : nc) b += (b.empty() ? "" : ",") + x;
+        d.push_back("species list/order: field [" + a + "] vs current [" + b + "]");
+        return d;
+    }
+    for (int s = 0; s < db.size(); ++s) {
+        const SpeciesThermo& f = es[s].sp;
+        const SpeciesThermo& c = db.species[s];
+        const std::string& n = db.names[s];
+        auto cmp = [&](const std::string& key, double a, double b) {
+            if (a != b) d.push_back(n + "." + key + ": field " + g17(a) + " vs current " + g17(b));
+        };
+        if (es[s].phase != "gas") d.push_back(n + ".phase: field " + es[s].phase + " vs current gas");
+        cmp("MW", f.MW, c.MW);
+        cmp("Tlo", f.Tlo, c.Tlo); cmp("Tmid", f.Tmid, c.Tmid); cmp("Thi", f.Thi, c.Thi);
+        cmp("LJ_sigma", f.sigma_LJ, c.sigma_LJ); cmp("LJ_eps_kB", f.eps_kB, c.eps_kB);
+        for (int k = 0; k < 9; ++k) cmp("nasa9_low[" + std::to_string(k) + "]", f.low[k], c.low[k]);
+        for (int k = 0; k < 9; ++k) cmp("nasa9_high[" + std::to_string(k) + "]", f.high[k], c.high[k]);
+    }
+    return d;
+}
+
+bool speciesDB_checkInputField(const ResolvedSpeciesDB& db, double Tref,
+                               const std::string& fieldHash, const std::string& fieldRecordSha, int fieldUnverified,
+                               const std::string& fieldPath, const std::vector<std::string>& searchDirs,
+                               bool allowUnverified, std::string& inputStatus, int& inputUnverified, std::string& msg)
+{
+    namespace fs = std::filesystem;
+    const std::string own = speciesDB_compatHash(db, Tref);
+    msg.clear();
+    if (fieldHash.empty()) {
+        if (allowUnverified) {
+            inputStatus = "unverified_env";
+            inputUnverified = 1;
+            msg = "input field '" + fieldPath + "' has no species_hash attribute (UNVERIFIED: cannot check which species "
+                  "properties produced it). Allowed for this invocation by FORGE_ALLOW_UNVERIFIED_SPECIES=1; "
+                  "outputs carry species_input_unverified=1.";
+            return true;
+        }
+        msg = "input field '" + fieldPath + "' has no species_hash attribute: UNVERIFIABLE (the species properties that "
+              "produced this field are unknown; fields written before species records existed, or initial fields not yet "
+              "stamped by their generator).\n"
+              "  - If you have checked that the field was produced with the same species/datum as this run, allow it for THIS "
+              "invocation only:  FORGE_ALLOW_UNVERIFIED_SPECIES=1 forge   (not a config key; outputs are marked species_input_unverified=1)\n"
+              "  - If the species set/DB changed, convert the field with tools/convert_species_field.py.";
+        return false;
+    }
+    if (fieldHash == own) {
+        inputUnverified = (fieldUnverified == 1) ? 1 : 0;
+        inputStatus = inputUnverified ? "unverified_inherited" : "verified";
+        msg = "input field species_hash matches (" + own.substr(0, 16) + ")"
+              + std::string(inputUnverified ? "; the input itself descends from an unverified start (mark inherited)" : "");
+        return true;
+    }
+    std::ostringstream o;
+    o << "input field '" << fieldPath << "' was produced with different species properties:\n"
+      << "  field species_hash   " << fieldHash << "\n"
+      << "  current species_hash " << own << "\n";
+    // 入力側の記録を探して差を出す (完全性ハッシュが属性と一致するものだけ信用する)
+    std::string found;
+    std::vector<std::string> badIntegrity;
+    const std::string prefix = "resolved_species_" + fieldHash.substr(0, std::min<size_t>(16, fieldHash.size()));
+    for (const auto& dir : searchDirs) {
+        std::error_code ec;
+        if (!fs::is_directory(dir, ec)) continue;
+        for (const auto& ent : fs::directory_iterator(dir, ec)) {
+            const std::string fn = ent.path().filename().string();
+            if (fn.rfind(prefix, 0) != 0 || ent.path().extension() != ".yaml") continue;
+            std::string bytes;
+            if (!readFileBytes(ent.path().string(), bytes)) continue;
+            if (!fieldRecordSha.empty() && speciesDB_sha256Hex(bytes) == fieldRecordSha) { found = ent.path().string(); break; }
+            badIntegrity.push_back(ent.path().string());
+        }
+        if (!found.empty()) break;
+    }
+    if (!found.empty()) {
+        o << "  differences (field record " << found << " vs current):\n";
+        for (const auto& x : speciesDB_diffRecord(found, db, Tref)) o << "    " << x << "\n";
+    } else if (!badIntegrity.empty()) {
+        o << "  record file(s) for the field hash exist but their integrity SHA-256 does not match the field attribute "
+          << "species_record_sha256 (" << fieldRecordSha.substr(0, 16) << "): mixed-up or edited record; the coefficient differences cannot be identified:\n";
+        for (const auto& x : badIntegrity) o << "    " << x << "\n";
+    } else {
+        o << "  no record file " << prefix << "*.yaml found next to the input field or in the run directory; "
+          << "the coefficient differences cannot be identified.\n";
+    }
+    o << "  Refusing to start (a mismatch is never allowed by FORGE_ALLOW_UNVERIFIED_SPECIES). "
+      << "Use the matching species DB / thermoHrefTemp, or convert the field with tools/convert_species_field.py.";
+    msg = o.str();
+    return false;
+}
+
+void speciesDB_setCurrentRecord(const SpeciesRecordInfo& rec)
+{
+    g_record = std::make_unique<SpeciesRecordInfo>(rec);
+}
+
+const SpeciesRecordInfo* speciesDB_currentRecord()
+{
+    return g_record.get();
 }

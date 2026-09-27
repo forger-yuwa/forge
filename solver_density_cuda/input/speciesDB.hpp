@@ -64,3 +64,62 @@ std::vector<double> bcondSpeciesMassFractions(const YAML::Node& floats, const Re
 
 // 起動ログ: 種表 (name, MW, source) と凝縮種・トレーサの状態。
 void speciesDB_printTable(const solverConfig& cfg, const ResolvedSpeciesDB& db);
+
+// =============================================================================
+// 解決済み記録と内容照合 (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3a;
+// 仕様 methods/thermophysics.md §1b.4)。
+//   - 互換性ハッシュ: 種の順序・名前・相・MW・datum 適用前 (絶対基準) の全係数と温度区間・外挿規約・LJ・
+//     thermoHrefTemp と datum 規約・スキーマ版を speciesDB_compatText で正規化 (浮動小数は %.17g) した文字列の SHA-256。
+//     source (builtin/file)・ファイルパスは入れない (来歴として記録にだけ書く)。
+//   - 完全性ハッシュ: 記録ファイル resolved_species_<互換16桁>[_<完全性16桁>].yaml 全文の SHA-256。
+//   - 各 res_*.h5 (境界出力を含む) のルート属性: species_hash (互換性, 全長) / species_record_sha256 (完全性) /
+//     species_record_file / species_input_unverified (0|1)。
+//   - Python 側の再計算は tools/forge_species.py (compat_text / load_record)。書式を変えるときは両方を同時に変え、
+//     スキーマ版 (SPECIES_RECORD_SCHEMA) を上げる。
+//   CPG (thermalMethod != 2) は記録・照合の対象外。液相 (凝縮種の液) は #10 まで含めない。
+// =============================================================================
+#define SPECIES_RECORD_SCHEMA "forge_resolved_species_v1"
+// 外挿規約 (thermo_d.cuh: 区間外は cp を端でクランプ、h は端の cp で線形外挿、T < Tmid で low 係数)。
+#define SPECIES_RECORD_EXTRAPOLATION "nasa9_2interval; low if T<Tmid; cp clamped at Tlo/Thi; h linear with end cp outside [Tlo,Thi]"
+// datum 規約 (thermo_d.cu: thermoHrefTemp>0 のとき両区間の a7 に -h_abs(Tref)/Ru を加算)。記録の係数は加算前。
+#define SPECIES_RECORD_DATUM "coefficients are absolute (before datum); runtime adds -h_abs(Tref)/Ru to a7 of every interval when thermoHrefTemp>0"
+
+struct SpeciesRecordInfo {
+    std::string compatHash;     // 互換性ハッシュ (64 桁 hex)
+    std::string recordSha256;   // 記録ファイル全文の SHA-256 (64 桁 hex)
+    std::string recordFile;     // 記録ファイル名 (run ディレクトリ相対)
+    int         inputUnverified = 0;   // 1: 未検証の入力場から開始した (env 許可または入力の印を継承)
+};
+
+// SHA-256 (hex 小文字 64 桁)。
+std::string speciesDB_sha256Hex(const std::string& bytes);
+
+// 互換性ハッシュの元になる正規化テキスト。Tref は有効な datum 温度 (thermoHrefTemp>0 ならその値、それ以外は 0)。
+std::string speciesDB_compatText(const ResolvedSpeciesDB& db, double Tref);
+std::string speciesDB_compatHash(const ResolvedSpeciesDB& db, double Tref);
+
+// 記録ファイルの全文。inputStatus は来歴 (verified / unverified_env / unverified_inherited / not_checked_resolve_only)。
+std::string speciesDB_recordText(const ResolvedSpeciesDB& db, double Tref, const std::string& dbFile,
+                                 const std::string& inputField, const std::string& inputStatus);
+
+// 記録を dir に書く。同名があり全文が一致すればそのまま使い、違えば resolved_species_<互換16>_<完全性16>.yaml に書く
+// (既存ファイルは上書きしない)。書き込み失敗は std::runtime_error。
+SpeciesRecordInfo speciesDB_writeRecord(const ResolvedSpeciesDB& db, double Tref, const std::string& dbFile,
+                                        const std::string& inputField, const std::string& inputStatus,
+                                        int inputUnverified, const std::string& dir);
+
+// 入力場の照合。thermalMethod==2 のときだけ呼ぶ。属性の値 (無ければ空文字 / -1) を受け取り、
+//   一致 → true (inputStatus を設定)、不一致・照合不能 → メッセージを msg に入れて false。
+//   allowUnverified (env FORGE_ALLOW_UNVERIFIED_SPECIES=1) は属性なしの場だけを通す (不一致は通さない)。
+//   searchDirs から入力側の記録 (resolved_species_<互換16>*.yaml; 完全性ハッシュが属性と一致するもの) を探し、見つかれば種・キー単位の差を msg に入れる。
+bool speciesDB_checkInputField(const ResolvedSpeciesDB& db, double Tref,
+                               const std::string& fieldHash, const std::string& fieldRecordSha, int fieldUnverified,
+                               const std::string& fieldPath, const std::vector<std::string>& searchDirs,
+                               bool allowUnverified, std::string& inputStatus, int& inputUnverified, std::string& msg);
+
+// 記録ファイル (path) と db の種・キー単位の差 (空なら差なし)。記録の完全性・互換性ハッシュの自己整合も検査して差に含める。
+std::vector<std::string> speciesDB_diffRecord(const std::string& recordPath, const ResolvedSpeciesDB& db, double Tref);
+
+// ソルバが起動時に書いた記録 (出力 h5 の属性用)。未設定 (CPG・resolve 前) は nullptr。
+void speciesDB_setCurrentRecord(const SpeciesRecordInfo& rec);
+const SpeciesRecordInfo* speciesDB_currentRecord();
