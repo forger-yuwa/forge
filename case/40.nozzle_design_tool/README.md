@@ -236,3 +236,4 @@ cell/node とも約−240K (1186/1196K)。判別実験 D2 で forge `wallTreatme
 ③ **`thermCondMethod: 1`** (constant-Pr: k=μ(T)cp/prandtlLam, 既定 0=従来) を追加 —
 スモーク (scratchpad D4) で壁温 −25K シフト (SU2 の逆向き +14.7K と符号整合、主因でないことも一致)。
 
+> **2026-09-27 AWS 後片付け**: 本表の `run_095x`/`run_096x` (`*_sglsq_*`・`*_chidef_*`) は判定・証拠の取り込み後に AWS 上の場 h5・面流束ダンプを削除 (設定・残差・判定出力は AWS に残し、一次記録は `case/09.Taylor-Green/_g0_lsq_seam/s2_evidence/`・`case/46.sern_design/chi_evidence/`)。

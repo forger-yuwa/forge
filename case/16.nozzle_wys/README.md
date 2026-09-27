@@ -643,3 +643,5 @@ run keeper: run_0121/0126 (inviscid), run_0131/0136 (SST), run_0141/0145 (CPG ho
 keeper: run_0161/0163/0165 (TP 新, cfl2/20/100)・run_0166 (CPG 回帰)。図: 各 `residual_history.png`。
 IC: `gen_ic_isentropic_cpg.py` + `cpg_to_tpN2_roe.py`。実装: `cuda_forge/eos_jacobian_d.cuh`,
 `timeIntegration_d.cu`, 検証 `tools/test_eos_jacobian.cpp`。
+
+> **2026-09-27 AWS 後片付け**: 本表の `run_095x`/`run_096x` (`*_sglsq_*`・`*_chidef_*`) は判定・証拠の取り込み後に AWS 上の場 h5・面流束ダンプを削除 (設定・残差・判定出力は AWS に残し、一次記録は `case/09.Taylor-Green/_g0_lsq_seam/s2_evidence/`・`case/46.sern_design/chi_evidence/`)。
