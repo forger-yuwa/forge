@@ -151,7 +151,7 @@
   },
   {
    "id": "T4-0b-H",
-   "status": "pre_registered",
+   "status": "outcome_recorded",
    "_written": "2026-09-27、run を回す前 (codex diagnose 2026-09-27-d7275-top-corner-shock の提案を採用)",
    "name": "上端 slip の位置だけを変える A/B (H 0.5 m → 0.794506 m、既存格子の上に同じ等比で 8 層を積む)",
    "mesh": {
@@ -169,7 +169,26 @@
     "reject": "B で上端から圧力擾乱が離れても、同じ指標が A の 0.8–1.2 倍に残る → 上端近接主因説を棄却",
     "hold": "中間的改善・残差の移動・過渡継続は判別保留。k/ω の未収束は別途残し、流れ残差の改善で免除しない"
    },
-   "note": "1/10 は診断上の支持条件に限る。G15 の代替合格条件は置かない。G15 は B 自身の同一設定区間の check_convergence PASS・St の check_quasisteady・壁解像で判定する。run_0012 (未収束) を合格済みの参照床に使わない"
+   "note": "1/10 は診断上の支持条件に限る。G15 の代替合格条件は置かない。G15 は B 自身の同一設定区間の check_convergence PASS・St の check_quasisteady・壁解像で判定する。run_0012 (未収束) を合格済みの参照床に使わない",
+   "outcome": {
+    "date": "2026-09-27",
+    "runs": {
+     "A": "case/60.flatplate_d7275_m7/run_0013_t26_h05",
+     "B": "case/60.flatplate_d7275_m7/run_0014_t26_h079"
+    },
+    "window": "12–16k→16–20k の中央値変化は A ≤ 1.7 %、B ≤ 2.1 % (5 % 未満) → 延長せず 16–20k で判定",
+    "reading_mechanical": "support (上端近接説を支持) — 諮問前の機械的な読み。解釈の確定は codex diagnose (AGENTS 条件 7) の後",
+    "evidence": {
+     "old_top_region": "旧上端付近 (x 2.6–2.8、y 0.45–0.50) の √Σres² B/A: ro 6.6e-4、roUx 7.6e-4、roUy 9.2e-4、roe 5.3e-3、roK 8.8e-4、roOmega 7.0e-4 (すべて 1/10 以下)",
+     "local_amplitude": "点プローブ (10 step 毎、末尾 4k) の P 振幅/平均: 旧上端直下 3 点で A 3.8e-5–1.5e-4 → B 0 (出力 6 桁の分解能 ~1e-6 以下)。プローブ 5 (y 0.60) は A では領域外で上端角の最近傍になるので比較しない",
+     "migration": "B の残りの流れ残差は局在せず、自由流域 y 0.03–0.8 m に x 全域で薄く分布 (res_ro の二乗和: y 0.5–0.7 が 43 %、0.7–0.75 が 23 %、0.03–0.5 が 31 %)。全域 √Σres² B/A = ro 0.032、roUx 0.042、roUy 0.022、roe 0.10、roK 0.20 → 同水準の残差の移動はない。比較域の流れ残差は B が A の 1.4–2.0 倍 (絶対値は A の旧上端の 1/100 以下)",
+     "history_rms": "16–20k の √Σres² B/A: ro 0.025、roUx 0.032、roUy 0.017、roe 0.080、roY 0.025、roK 0.17、roOmega 0.995"
+    },
+    "not_resolved_items": "rms_roOmega は A・B とも 0.6 前後で横ばい (B/A 0.995)。res_roOmega の 99.99999 % は壁の第一内部節点列 (y = 3 µm) で、平板全長の個別の節点 (x 0.72、0.90、1.26、2.75、2.78 m など) に散在 — 上端とは無関係。Cary の PASS run (case/59 run_0005) も rms_roOmega の最終値は 3.0e-1 (ただし 2e8 から 8.7 dec 低下)",
+    "own_convergence": "B 自身: check_convergence NOT CONVERGED (stalled/plateau)、流れ・化学種 1.7–2.3 dec (この run の開始値から)、roK 5.1 dec、roOmega 1.8 dec → G15 の収束ゲートは未達のまま",
+    "q": "比較域 (1.07–2.55 m) の壁 q_w の B/A−1 は最大 1.5e-6、R_A 平均 1.313 は同じ。St 10 点 A・B とも check_quasisteady ALL STEADY",
+    "deviation": "点プローブは T・P・U のみで ρ・k・ω の時系列は取れていない (codex 提案との差)"
+   }
   }
  ]
 }
