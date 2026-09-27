@@ -140,6 +140,26 @@ class Problem:
                                       self.condensing_species, condensation=cond_on)
 
     @property
+    def gas_transport(self) -> dict | None:
+        """`gas.transport` ({大文字の実種名: 輸送モデル}, 無ければ None; plan thermophysics-solver-owned-species-db #9b)。
+        構造・モデル名・custom の対象種・重複だけを見る。実種との突き合わせは `transport_for_ns`。"""
+        from .gas.composition import parse_gas_transport
+        return parse_gas_transport(self.raw.get("gas", {}).get("transport"))
+
+    @property
+    def uses_tp_cfd(self) -> bool:
+        """CFD を多成分 TP (thermalMethod 2) で回す問題か (semiperfect かつ `evaluate.cfd_gas` が cpg でない)。"""
+        return self.is_semiperfect and str(self.evaluate.get("cfd_gas", "same")) != "cpg"
+
+    def transport_for_ns(self, layout=None) -> dict | None:
+        """NS/SST config の `physProp.transport` ({実種: モデル}, 輸送種の実種順)。TP の CFD では必須で、無い・漏れ・余分は
+        必要な実種と書き方の例つきで ValueError。TP でない (CPG・`cfd_gas: cpg`) なら None (従来どおり Sutherland)。"""
+        if not self.uses_tp_cfd:
+            return None
+        from .gas.composition import resolve_transport
+        return resolve_transport(layout if layout is not None else self.species_layout(), self.gas_transport, required=True)
+
+    @property
     def is_semiperfect(self) -> bool:
         return str(self.raw.get("gas", {}).get("model", "cpg")) == "semiperfect"
 
@@ -211,12 +231,22 @@ def _validate(p: Problem) -> None:
                 errs.append(f"gas.composition_basis '{p.composition_basis}' は未知 (mass | mole)")
             p.gas_composition
             if p.evaluate.get("cfd_gas", "same") != "cpg":
-                p.species_layout()
+                layout = p.species_layout()
+                # gas.transport (#9b): 書いたなら lump 構成種を含む全実種が必須・余分な種名は不可 (Euler だけの問題でも)。
+                # 書いていないことのエラーは NS/SST の config を作る時点 (Problem.transport_for_ns)
+                if "transport" in gs:
+                    from .gas.composition import resolve_transport
+                    resolve_transport(layout, p.gas_transport, required=False)
+            elif "transport" in gs:
+                p.gas_transport          # cfd_gas: cpg では使わない (構造だけ検査)
         except (ValueError, KeyError, FileNotFoundError) as ex:
             errs.append(f"gas: {ex}")
     elif "composition_basis" in gs or "species_db" in gs or "condensing_species" in gs:
         if str(gs.get("model", "cpg")) not in ("semiperfect", "frozen_tp"):
             errs.append("gas.composition_basis / species_db / condensing_species は gas.model semiperfect | frozen_tp でのみ有効")
+    if "transport" in gs and str(gs.get("model", "cpg")) != "semiperfect":
+        # frozen_tp (SERN) は runner が lump 記法に未切替 (plan §5.2) で、合成済み擬似種に実種の輸送モデルを当てられない
+        errs.append("gas.transport は gas.model semiperfect でのみ有効 (cpg は Sutherland、frozen_tp は未対応)")
     # dv の bound 検査
     for name, d in p.dv.items():
         if isinstance(d, dict) and not d.get("fixed", False):

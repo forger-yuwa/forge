@@ -91,12 +91,16 @@ def _gam_or_gas(p: Problem):
     return p.gas_model if p.is_semiperfect else p.gamma
 
 
-def _apply_gas_to_config(cfg: str, p: Problem, run_dir) -> str:
+def _apply_gas_to_config(cfg: str, p: Problem, run_dir, viscous: bool = False) -> str:
     """semi-perfect のとき forge config を TP (thermalMethod 2) に書き換える。cpg なら無変更。
     `physProp.species` には種名と lump の構成 (構成種と全桁の lump 内モル分率, basis: mole) だけを書き、lump の係数は
     ソルバが起動時に合成する (plan thermophysics-solver-owned-species-db §4.7 #9; 合成済み擬似種の species_db.yaml は作らない)。
     ソルバ内蔵で解決できない実種 (外部 DB `gas.species_db` 由来など) があるときだけ、その生エントリを
-    species_db_external.yaml に置いて speciesDBFile で渡す。設計 (MOC) と CFD は同じ共通データの係数を使う。"""
+    species_db_external.yaml に置いて speciesDBFile で渡す。設計 (MOC) と CFD は同じ共通データの係数を使う。
+    `viscous=True` (NS/SST の config) では種ごとの輸送物性を使う: `viscMethod: 1` (空気の Sutherland) を `viscMethod: 2` に、
+    `gas.transport` を実種ごとの `physProp.transport` にする (plan thermophysics-solver-owned-species-db #9b; `gas.transport` 必須)。
+    `thermCondMethod` は viscMethod 2 では読まれないので落とす。`visc` (dt と陰解法対角の剛性見積り) と必須キーの `thermCond`、
+    `prandtlLam` (SST 壁関数の回復係数) は残す。Euler (`viscous=False`) と CPG の config は従来と同じ。"""
     # 切り分け用: evaluate.axisym_method で CPG でも SU2 流軸対称に切替可
     if int(p.evaluate.get("axisym_method", 0)) == 1:
         cfg = cfg.replace("isAxisymmetric: 1", "isAxisymmetric: 1, axisymMethod: 1", 1)
@@ -111,7 +115,8 @@ def _apply_gas_to_config(cfg: str, p: Problem, run_dir) -> str:
     layout = p.species_layout()
     species_list = list(layout.species)
     items, external = solver_species_config(layout)
-    write_species_meta(layout, run_dir)
+    transport = p.transport_for_ns(layout) if viscous else None
+    write_species_meta(layout, run_dir, transport)
     db_key = ""
     if external:
         (Path(run_dir) / "species_db_external.yaml").write_text(species_db_raw_yaml(external))
@@ -135,6 +140,17 @@ def _apply_gas_to_config(cfg: str, p: Problem, run_dir) -> str:
                       % (p.cp, p.gamma, sp_txt, db_key, href), 1)
     if f"species: {sp_txt}" not in cfg:
         raise RuntimeError("_apply_gas_to_config: physProp の書き換えに失敗 (テンプレート変更?)")
+    if transport is not None:
+        from ..gas.composition import physprop_transport_flow
+        n_vm = cfg.count("viscMethod: 1,")
+        n_tcm = cfg.count(", thermCondMethod: 1")
+        if n_vm != 1 or n_tcm > 1:
+            raise RuntimeError(f"_apply_gas_to_config: NS の physProp が想定外 (viscMethod: 1 が {n_vm} 個; テンプレート変更?)")
+        cfg = cfg.replace("viscMethod: 1,", "viscMethod: 2,", 1).replace(", thermCondMethod: 1", "", 1)
+        tr_txt = physprop_transport_flow(transport)
+        cfg = cfg.replace(f"species: {sp_txt}{db_key}, ", f"species: {sp_txt}{db_key},\n           transport: {tr_txt}, ", 1)
+        if f"transport: {tr_txt}" not in cfg:
+            raise RuntimeError("_apply_gas_to_config: physProp.transport の書き込みに失敗 (テンプレート変更?)")
     # 凝縮 (evaluate.condensation: dict) — forge の condensation ブロックをそのまま通す
     cond = p.evaluate.get("condensation")
     if cond:
@@ -694,6 +710,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
         raise ValueError("runner_axismach は wind_tunnel_axisym_axismach 専用")
+    # 種ごとの輸送物性 (#9b): TP の NS は gas.transport 必須。run dir を作る前・設計チェーンの前に検査する
+    transport = p.transport_for_ns()
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=False)
     d = design_chain(p)
@@ -820,7 +838,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     if q.returncode != 0:
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
     # node/SST 変換 (config を先に書く — wall_dist は no-slip 壁で作られる)
-    cfg_ns = _apply_gas_to_config(_config_sst_node(p, n, out_int, cfl_main), p, run_dir)
+    cfg_ns = _apply_gas_to_config(_config_sst_node(p, n, out_int, cfl_main), p, run_dir, viscous=True)
     if implicit_relax is not None:
         # 陰解法の緩和 (cfl 6 + implicitRelax 0.7 が生産推奨: case/45 run_0018)。deltaT ブロックに挿入
         cfg_ns = cfg_ns.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
@@ -881,6 +899,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "wall_thermal": p.wall_thermal,
             "ic_from": str(ic_from) if ic_from else None,
             "mesh": {"ni": mp.ni, "nj": mp.nj, "wall_first_frac": mp.wall_first_frac}}
+    if transport is not None:
+        # 来歴: 種ごとの輸送物性の指定 (solverConfig の physProp.transport と同じ; 解決結果はソルバの resolved_species 記録)
+        info["transport"] = {"source": "gas.transport", "viscMethod": 2, "models": transport}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 

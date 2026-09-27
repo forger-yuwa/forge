@@ -574,10 +574,14 @@ def write_species_files(layout: SpeciesLayout, run_dir) -> None:
     (rd / "species_meta.yaml").write_text(yaml.safe_dump(species_meta(layout), sort_keys=False, allow_unicode=True))
 
 
-def write_species_meta(layout: SpeciesLayout, run_dir) -> None:
-    """`species_meta.yaml` だけを書く (機械可読メタ; 熱物性の係数は入れない)。"""
+def write_species_meta(layout: SpeciesLayout, run_dir, transport: dict | None = None) -> None:
+    """`species_meta.yaml` だけを書く (機械可読メタ; 熱物性の係数は入れない)。`transport` ({実種: モデル}) があれば
+    来歴として `transport` を追記する (無ければ従来と同じ内容)。"""
     import yaml
-    (Path(run_dir) / "species_meta.yaml").write_text(yaml.safe_dump(species_meta(layout), sort_keys=False, allow_unicode=True))
+    meta = species_meta(layout)
+    if transport is not None:
+        meta["transport"] = {"source": "gas.transport", "viscMethod": 2, "models": dict(transport)}
+    (Path(run_dir) / "species_meta.yaml").write_text(yaml.safe_dump(meta, sort_keys=False, allow_unicode=True))
 
 
 # ---------------------------------------------------------------- ソルバ config の lump 記法 (plan thermophysics-solver-owned-species-db §4.7 #9)
@@ -634,6 +638,86 @@ def physprop_species_flow(items) -> str:
         else:
             out.append(f'"{it}"')
     return "[" + ", ".join(out) + "]"
+
+
+# ---------------------------------------------------------------- 種ごとの輸送物性の指定 (plan thermophysics-solver-owned-species-db #9b)
+
+# ソルバ (speciesTransportDB.cpp の kModels) と同じ綴り。モデル名は大小文字を区別する (ソルバも区別する)
+TRANSPORT_MODELS = ("cea", "kinetic", "fit")
+TRANSPORT_CUSTOM = {"custom:h2o_iapws_cea_v1": "H2O"}   # custom モデル → 対象の実種 (設計側の名前)
+
+
+def parse_gas_transport(raw) -> dict | None:
+    """problem YAML の `gas.transport: {実種: モデル}` を {大文字の種名: モデル} に正規化する (無ければ None)。
+    構造・モデル名・custom の対象種・重複 (`Ar` と `AR` など大小文字違い) をここで拒否する。
+    種名は設計側の従来規則 (大文字化) で持ち、config にも同じ綴りで書く (`physProp.species` の lump 構成種と同じ綴り;
+    ソルバは大小文字無視で照合する)。"""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError("gas.transport は空でない mapping {実種: モデル}")
+    out = {}
+    for k, v in raw.items():
+        name = _check_name_key(k)
+        if name in out:
+            raise ValueError(f"gas.transport: 種 {name} が 2 回指定されている (大小文字違いも同じ種)")
+        if not isinstance(v, str):
+            raise ValueError(f"gas.transport.{name}: モデルは文字列 ({v!r})")
+        if v in TRANSPORT_CUSTOM:
+            if name != TRANSPORT_CUSTOM[v]:
+                raise ValueError(f"gas.transport.{name}: {v} は {TRANSPORT_CUSTOM[v]} 専用")
+        elif v not in TRANSPORT_MODELS:
+            raise ValueError(f"gas.transport.{name}: モデル '{v}' は未知 "
+                             f"({' | '.join(TRANSPORT_MODELS + tuple(TRANSPORT_CUSTOM))})")
+        out[name] = v
+    return out
+
+
+def transport_real_species(layout: SpeciesLayout) -> list:
+    """輸送指定が要る実種 (lump は構成種へ展開、輸送種の順序、重複なし)。ソルバの lump 展開と同じ集合。"""
+    out = []
+    for s in layout.species:
+        for k in (layout.lumps[s]["members"] if s in layout.lumps else [s]):
+            if k not in out:
+                out.append(k)
+    return out
+
+
+def transport_example(reals: list) -> str:
+    """指定漏れのエラー文に添える書き方の例 (H2O は custom:h2o_iapws_cea_v1、他は cea)。"""
+    ex = ", ".join(f"{k}: {'custom:h2o_iapws_cea_v1' if k == 'H2O' else 'cea'}" for k in reals)
+    return f"gas:\n  transport: {{{ex}}}"
+
+
+def resolve_transport(layout: SpeciesLayout, transport: dict | None, required: bool) -> dict | None:
+    """`parse_gas_transport` の結果を輸送種配置の実種と突き合わせ、実種の順序の {実種: モデル} を返す。
+    指定があれば全実種が必須 (漏れ・余分はエラー)。指定が無く `required` なら、必要な実種と書き方の例を示してエラー。"""
+    reals = transport_real_species(layout)
+    if transport is None:
+        if required:
+            raise ValueError("semiperfect TP の NS/SST は種ごとの輸送物性 (viscMethod 2 + physProp.transport) を使うので "
+                             f"gas.transport が必要。実種 {reals} のそれぞれにモデル "
+                             f"({' | '.join(TRANSPORT_MODELS + tuple(TRANSPORT_CUSTOM))}) を書く。例:\n"
+                             + transport_example(reals))
+        return None
+    extra = [k for k in transport if k not in reals]
+    missing = [k for k in reals if k not in transport]
+    if extra or missing:
+        msg = []
+        if missing:
+            msg.append(f"指定の無い実種 {missing}")
+        if extra:
+            lumps = [k for k in extra if k in layout.lumps]
+            msg.append(f"この問題の輸送種に無い種 {extra}"
+                       + (f" (lump {lumps} は構成種ごとに書く)" if lumps else ""))
+        raise ValueError(f"gas.transport: {'; '.join(msg)} (必要な実種 = lump 構成種を含む {reals})。例:\n"
+                         + transport_example(reals))
+    return {k: transport[k] for k in reals}
+
+
+def physprop_transport_flow(transport: dict) -> str:
+    """`physProp.transport` の flow 表記。種名・モデル名とも引用符付き (NO の真偽値化・`custom:` の `:` 対策)。"""
+    return "{" + ", ".join(f'"{k}": "{v}"' for k, v in transport.items()) + "}"
 
 
 def species_db_raw_yaml(entries: dict) -> str:
