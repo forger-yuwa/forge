@@ -220,13 +220,34 @@ void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variable
                      && (bc.bcondKind == "wall_isothermal")
                      && (itFw != bc.bvar.end() && (geom_int)itFw->second.size() >= nbp)
                      && (weakIso || (itRr != bc.bvar.end() && (geom_int)itRr->second.size() >= nbp));
-    if (hasEff) {
+    // ---- 軸対称 (plan boundary-cht-axisymmetric-fem2d §4.3) ----
+    // `axisymMethod: 0` では流体の面ベクトル・面積がデバイス側で r 倍 (`variables.cpp`) なので、
+    // `ifaceRraw` / `ifaceFw` / `iface_Qf_eff` は [W/rad]。熱流束の分母も**流体面の r 重み面積**
+    // |S_f| max(r_f, r_floor) (r_f = 面重心の y、床は variables.cpp と同じ) にする。
+    // ホストの `surfArea` は平面のまま (r を掛けるのはデバイス配列だけ) なので、ここで掛ける。
+    // `axisymMethod: 1` は幾何が平面のまま (1/y はソース項) で、界面残差の意味が別物になる。
+    // 検証していないので q_eff / q_eff_raw / Qf_eff を**有効な値として出さない** (NaN のまま)。
+    const bool axiR = (cfg.isAxisymmetric == 1 && cfg.axisymMethod == 0);
+    const bool axiUnverified = (cfg.isAxisymmetric == 1 && cfg.axisymMethod != 0);
+    const double rFloorAx = (cfg.axisRFloor > (flow_float)0.0) ? (double)cfg.axisRFloor : 1.0e-20;
+    if (hasEff && axiUnverified) {                 // 値を作る対象の壁 (等温壁) だけ知らせる
+        static std::set<int> warned;
+        if (warned.insert(bc.physID).second)
+            std::cout << "[interfaceDiag] physID=" << bc.physID << " (" << bc.physName << "): "
+                      << "axisymMethod " << cfg.axisymMethod << " の iface_q_eff / iface_q_eff_raw / iface_Qf_eff は"
+                         "未検証 (幾何が平面のまま) なので NaN を出す。" << std::endl;
+    }
+    if (hasEff && !axiUnverified) {
         const bool hasPer = !msh.periodicRoot.empty();
         for (geom_int ib = 0; ib < nbp; ib++) {
             const geom_int ic = bc.iCells[ib];
             if (hasPer && ic < (geom_int)msh.periodicRoot.size() && msh.periodicRoot[ic] != ic) continue;
             const geom_int ip = bc.iPlanes[ib];
-            const double area = (double)msh.planes[ip].surfArea;
+            double area = (double)msh.planes[ip].surfArea;
+            if (axiR) {
+                const double rf = (double)msh.planes[ip].centCoords[1];
+                area *= (rf > rFloorAx) ? rf : rFloorAx;
+            }
             if (!(area > 0.0)) continue;
             const double Fw   = (double)itFw->second[ib];    // 壁面が res_roe に入れた寄与
             const double Rraw = weakIso ? 0.0                // 弱形式: 拘束が無いので C=0
@@ -396,6 +417,86 @@ double backResistance(const solverConfig& cfg)
     return 0.0;                                   // isothermal
 }
 
+// ---- 再開状態の契約 (plan boundary-cht-axisymmetric-fem2d §4.4c) ----
+// `content_sha1` は幾何方式を含まないので、同じ固体で平面 [W/m] の荷重履歴 `SOLID/QBUF` を
+// 軸対称 [W/rad] として復元できてしまう。状態に幾何方式と荷重の単位を書き、再開時に一致を要求する。
+// 版番号は属性の無い旧状態 (= 1 相当) と区別するために 2 から始める。
+constexpr int kStateContract = 2;
+inline std::string stateGeometry(const conjugate::SolidMesh& m) { return m.axisym ? "axisym0" : "planar"; }
+inline std::string stateLoadUnit(const conjugate::SolidMesh& m) { return m.axisym ? "W/rad" : "W/m"; }
+
+// 流体の軸対称 r 床 (`variables.cpp` の axisymMethod 0 と同じ定義)。
+inline double axisRFloorOf(const solverConfig& cfg)
+{
+    return (cfg.axisRFloor > (flow_float)0.0) ? (double)cfg.axisRFloor : 1.0e-20;
+}
+
+// 軸対称の固体の幾何検査 (§4.4)。合わなければ止める (黙って組まない)。
+//   - 固体節点に r<0
+//   - 界面節点の半径 r_i ≤ r_floor (軸上)。**A_i^r>0 は判定にならない** (軸上端点でも L/6>0)
+//   - 連結成分ごとの Robin 拘束 Σ h L r̄ > 0 (剛性単独は半正定値。軸上だけに Robin 辺がある成分は零空間)
+// 固体**内部**の軸上節点 (r=0) は許す (要素重心は r>0)。
+void checkAxisymSolid(const solverConfig& cfg, const conjugate::SolidMesh& m, int physID)
+{
+    const double rFloor = axisRFloorOf(cfg);
+    int nNeg = 0, firstNeg = -1;
+    for (int i = 0; i < m.nNodes; i++)
+        if (m.y[i] < 0.0) { if (nNeg == 0) firstNeg = i; ++nNeg; }
+    if (nNeg > 0) {
+        std::cerr << "[conjugateWall] ERROR: physID " << physID << ": 軸対称の固体に r = y < 0 の節点が "
+                  << nNeg << " 個ある (最初: 節点 " << firstNeg << ", r = " << m.y[firstNeg] << " m)。\n"
+                  << "[conjugateWall]   軸対称の半径は y ≥ 0 (軸は x 軸)。固体メッシュを y ≥ 0 側に置くこと。\n";
+        exit(EXIT_FAILURE);
+    }
+
+    int nAxis = 0, firstAxis = -1;
+    for (int i = 0; i < m.nIface(); i++)
+        if (!(m.y[m.ifaceNodes[i]] > rFloor)) { if (nAxis == 0) firstAxis = i; ++nAxis; }
+    if (nAxis > 0) {
+        const int nd = m.ifaceNodes[firstAxis];
+        std::cerr << "[conjugateWall] ERROR: physID " << physID << ": 軸対称の界面節点 " << nAxis
+                  << " 個が軸上 (r ≤ r_floor = " << rFloor << " m)。最初: 界面節点 " << firstAxis
+                  << " (" << m.x[nd] << ", " << m.y[nd] << ")。\n"
+                  << "[conjugateWall]   軸上では流体の面積が r 床で潰れ、界面の熱流束が定義できない "
+                     "(plan boundary-cht-axisymmetric-fem2d §4.4)。\n";
+        exit(EXIT_FAILURE);
+    }
+
+    // 連結成分 (三角形の接続と Robin 辺で結ぶ)。
+    std::vector<int> par(m.nNodes);
+    for (int i = 0; i < m.nNodes; i++) par[i] = i;
+    auto find = [&par](int a) { while (par[a] != a) { par[a] = par[par[a]]; a = par[a]; } return a; };
+    auto unite = [&](int a, int b) { a = find(a); b = find(b); if (a != b) par[a] = b; };
+    for (int e = 0; e < m.nTris; e++) {
+        const int* t = &m.tris[3*e];
+        unite(t[0], t[1]); unite(t[1], t[2]);
+    }
+    for (size_t r = 0; r + 1 < m.robinEdges.size(); r += 2) unite(m.robinEdges[r], m.robinEdges[r+1]);
+    std::map<int, double> robinOf;                 // 成分の根 -> Σ h L r̄
+    for (int i = 0; i < m.nNodes; i++) robinOf.emplace(find(i), 0.0);
+    for (size_t r = 0; r < m.robinH.size(); r++) {
+        const int n0 = m.robinEdges[2*r], n1 = m.robinEdges[2*r+1];
+        const double L = std::hypot(m.x[n1] - m.x[n0], m.y[n1] - m.y[n0]);
+        robinOf[find(n0)] += m.robinH[r] * L * 0.5 * (m.y[n0] + m.y[n1]);
+    }
+    int nFree = 0, rootFree = -1;
+    for (const auto& kv : robinOf)
+        if (!(kv.second > 0.0)) { if (nFree == 0) rootFree = kv.first; ++nFree; }
+    if (nFree > 0) {
+        int cnt = 0;
+        for (int i = 0; i < m.nNodes; i++) if (find(i) == rootFree) ++cnt;
+        std::cerr << "[conjugateWall] ERROR: physID " << physID << ": 軸対称の固体に Robin 拘束の無い連結成分が "
+                  << nFree << " 個ある (" << robinOf.size() << " 成分中。例: 節点 " << rootFree << " を含む "
+                  << cnt << " 節点の成分で Σ h L r̄ = " << robinOf[rootFree] << ")。\n"
+                  << "[conjugateWall]   剛性だけでは温度が定まらない (軸上だけに Robin 辺がある成分も同じ)。"
+                     "各成分に r > 0 の Robin 辺を持たせること。\n";
+        exit(EXIT_FAILURE);
+    }
+    std::cout << "[conjugateWall] physID " << physID << ": 軸対称の固体検査 OK (" << m.nNodes << " 節点, "
+              << m.nIface() << " 界面節点, 連結成分 " << robinOf.size() << ", r_floor " << rFloor << " m)"
+              << std::endl;
+}
+
 } // namespace
 
 // mode: fem2d の起動時準備 — 固体を読み、流体の壁節点と **座標一致で 1 対 1** に結ぶ。
@@ -404,6 +505,13 @@ void initSolidFem2d(const solverConfig& cfg, const mesh& msh, const bcond& bc)
 {
     SolidState& st = solidStates()[bc.physID];
     st.mesh = conjugate::SolidMesh::read(cfg.conjugateSolidFile);
+    // 軸対称 (受理条件は initConjugateWalls で検査済み = axisymMethod 0) では r = y の重みを入れる。
+    // 集中量と組立ての両方が読むので、ifaceLumped() と SolidFem2D の構築より前に立てる。平面では何もしない。
+    const bool axisym = (cfg.isAxisymmetric == 1 && cfg.axisymMethod == 0);
+    if (axisym) {
+        st.mesh.axisym = true;
+        checkAxisymSolid(cfg, st.mesh, bc.physID);
+    }
     st.fem.reset(new conjugate::SolidFem2D(st.mesh));
     st.lumped = st.mesh.ifaceLumped();
 
@@ -496,6 +604,33 @@ void initSolidFem2d(const solverConfig& cfg, const mesh& msh, const bcond& bc)
                              "別の固体の状態から再開しようとしている。\n";
                 exit(EXIT_FAILURE);
             }
+            // **幾何方式と荷重単位の照合** (plan boundary-cht-axisymmetric-fem2d §4.4c)。
+            // 属性の無い旧状態は、平面なら従来どおり受理 (既存 run の再開を壊さない)、軸対称なら拒否。
+            {
+                const std::string geoNow = stateGeometry(st.mesh), unitNow = stateLoadUnit(st.mesh);
+                const bool hasGeo = f.hasAttribute("geometry");
+                if (!hasGeo) {
+                    if (st.mesh.axisym) {
+                        std::cerr << "[conjugateWall] ERROR: " << stateFile << " に geometry 属性が無い (旧状態)。"
+                                     "軸対称 (" << geoNow << ") では平面 [W/m] の状態と区別できないので再開しない。\n";
+                        exit(EXIT_FAILURE);
+                    }
+                } else {
+                    std::string geo, unit;
+                    int contract = -1;
+                    f.getAttribute("geometry").read(geo);
+                    if (f.hasAttribute("load_unit")) f.getAttribute("load_unit").read(unit);
+                    if (f.hasAttribute("state_contract")) f.getAttribute("state_contract").read(contract);
+                    if (geo != geoNow || unit != unitNow || contract != kStateContract) {
+                        std::cerr << "[conjugateWall] ERROR: " << stateFile << " の構成が今回と違う: 状態 geometry="
+                                  << geo << " load_unit=" << (unit.empty() ? "(無し)" : unit)
+                                  << " state_contract=" << contract << " / 今回 geometry=" << geoNow
+                                  << " load_unit=" << unitNow << " state_contract=" << kStateContract << "。\n"
+                                  << "[conjugateWall]   幾何方式の違う荷重履歴 (SOLID/QBUF) を復元しない。\n";
+                        exit(EXIT_FAILURE);
+                    }
+                }
+            }
             std::vector<double> u0;
             f.getDataSet("SOLID/T").read(u0);
             if ((int)u0.size() != st.mesh.nNodes) {
@@ -569,18 +704,33 @@ void initConjugateWalls(const solverConfig& cfg, const mesh& msh)
                      "過渡では拘束反力が C = D_t(VE) - R^raw になり、本実装の定常仮定が崩れる。\n";
         exit(EXIT_FAILURE);
     }
-    // **軸対称は全モードで拒否する** (2026-09-27、plan boundary-cht-axisymmetric-fem2d §5.1 #1)。軸対称メッシュも
-    // $z\equiv0$ なので fem2d の平面ガードを素通りする。`axisymMethod: 0` では流体の面積が $r$ 倍
-    // (`variables.cpp` の r 重み幾何) で `ifaceRraw` / `iface_Qf_eff` は $r$ 重み [W/rad] になるが、
-    // `iface_q_eff` はそれを**ホストの平面面積** `msh.planes[].surfArea` で割り (local1d は $q$ が $r$ 倍ずれる)、
-    // `fem2d` は平面 [W/m] の集中辺長で固体を組む (荷重が $r$ 倍ずれる)。どちらも**黙って連成する**。
-    // `axisymMethod: 1` も固体に $r$ 重みが無い点は同じ。固体側の $r$ 重みが入るまで拒否する。
+    // **軸対称の受理条件** (plan boundary-cht-axisymmetric-fem2d §4.4)。受理は
+    // `isAxisymmetric: 1` かつ `axisymMethod: 0` かつ `mode: fem2d` だけ。
+    //   - `axisymMethod: 1` は幾何が平面のまま (`variables.cpp`) で、界面残差の単位が別物になる。
+    //   - `local1d` は薄肉の対数抵抗化をしていない (固体を平面 1 次元で扱う)。
+    // 固体側の幾何 (r<0・界面の軸上節点・Robin の無い連結成分) は initSolidFem2d で検査する。
     if (cfg.isAxisymmetric == 1) {
-        std::cerr << "[conjugateWall] ERROR: in-solver CHT は軸対称 (mesh.isAxisymmetric: 1) に未対応。\n"
-                  << "[conjugateWall]   流体の界面荷重は r 重み [W/rad] だが、local1d の q_eff は平面面積で割り、"
-                     "fem2d の固体は平面 [W/m] で組むため、どちらも節点ごとに r 倍ずれる。"
-                     "plans/active/boundary-cht-axisymmetric-fem2d.md を参照。\n";
-        exit(EXIT_FAILURE);
+        if (cfg.axisymMethod != 0) {
+            std::cerr << "[conjugateWall] ERROR: in-solver CHT は軸対称では mesh.axisymMethod: 0 のみ対応 (今回 "
+                      << cfg.axisymMethod << ")。\n"
+                      << "[conjugateWall]   axisymMethod: 1 は幾何が平面のまま (1/y はソース項) なので、"
+                         "界面荷重が [W/rad] にならず固体 (r 重み) と単位が合わない。"
+                         "plans/active/boundary-cht-axisymmetric-fem2d.md §4.3 を参照。\n";
+            exit(EXIT_FAILURE);
+        }
+        if (cfg.conjugateMode != "fem2d") {
+            std::cerr << "[conjugateWall] ERROR: in-solver CHT の軸対称は conjugate.mode: fem2d のみ対応 (今回 mode="
+                      << cfg.conjugateMode << ")。\n"
+                      << "[conjugateWall]   local1d は固体を平面の 1 次元抵抗 t/k_s で扱い、円筒殻の対数抵抗になっていない。"
+                         "plans/active/boundary-cht-axisymmetric-fem2d.md §2 を参照。\n";
+            exit(EXIT_FAILURE);
+        }
+        // 保証範囲 (§4.4): 検証対象は FP64 ビルド。FP32 は受理するが精度は未検証。
+        std::cout << "[conjugateWall] 軸対称 fem2d (axisymMethod: 0, 固体は r 重み [W/rad]) を受理した。"
+                  << " 保証範囲: 定常・node・axisymMethod 0・fem2d・FP64 ビルドを検証対象とする。" << std::endl;
+        if (sizeof(flow_float) < sizeof(double))
+            std::cout << "[conjugateWall] WARNING: 軸対称 fem2d の検証は FP64 のみ (このビルドは flow_float = float。"
+                         "FP32 は未検証)。" << std::endl;
     }
     if (cfg.conjugateFlux == "q_eff" && cfg.interfaceDiag != 1) {
         std::cerr << "[conjugateWall] ERROR: conjugate flux=q_eff (既定) は保存形の界面熱量 iface_q_eff を使うので "
@@ -1097,6 +1247,10 @@ void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
                     f.createAttribute("q_filled", (int)st.qFilled);
                     f.createAttribute("n_update", (int)st.nUpdate);
                     f.createAttribute("flux_avg", (int)std::max(1, cfg.conjugateFluxAvg));
+                    // 再開の照合用 (§4.4c)。content_sha1 は幾何方式を含まないので別に書く。
+                    f.createAttribute("geometry", stateGeometry(st.mesh));
+                    f.createAttribute("load_unit", stateLoadUnit(st.mesh));
+                    f.createAttribute("state_contract", kStateContract);
                 } catch (const std::exception& e) {
                     std::cerr << "[conjugateWall] WARNING: conjugate_state を書けない: "
                               << e.what() << "\n";

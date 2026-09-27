@@ -100,6 +100,10 @@ void checkWallTemperatureSharing(const solverConfig& cfg, const mesh& msh);
 //
 // 初版の制限 (いずれも起動時に拒否): node 以外、dual-time、`mode != local1d`、背面断熱、
 // `flux: q_eff` で `interfaceDiag != 1`。
+// 軸対称 (`mesh.isAxisymmetric: 1`) は `axisymMethod: 0` かつ `mode: fem2d` のみ受理し、固体は r 重み
+// [W/rad] で組む。`axisymMethod: 1`・`local1d`・固体節点の r<0・界面の軸上節点・Robin の無い連結成分は拒否
+// (plan boundary-cht-axisymmetric-fem2d §4.4)。再開状態には `geometry` / `load_unit` / `state_contract` を書き、
+// 再開時に一致を要求する (§4.4c)。
 // 面内伝導が要る場合は外部ループ (tools/cht_loop.py + solid_shell.py) を使う。
 // 界面の収束判定 (G-if) の素材は run 直下の `conjugate_history.csv` に出る
 // (step, physID, Tw 統計, max|dTw|, 未緩和の界面残差 res_abs_Wm2 / res_max_W / res_rel, q_total)。

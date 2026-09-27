@@ -200,6 +200,13 @@ def main():
                     help="D_f 初期値の安全率 (過大なら遅いだけ、過小だと発散しうる)")
     ap.add_argument("--axisym", action="store_true")
     a = ap.parse_args()
+    # 外部ループの軸対称 fem2d は対応しない (plan boundary-cht-axisymmetric-fem2d §4.4d)。
+    # `--axisym` は shell2d にしか渡らず、fem2d の作用素は平面 [W/m] のまま組まれて荷重が r 倍ずれる。
+    # 軸対称の fem2d はソルバ内連成 (`conjugate: {mode: fem2d}` + mesh.axisymMethod: 0) を使う。
+    if a.axisym and a.solid_mode == "fem2d":
+        ap.error("--axisym と --solid-mode fem2d の組合せは未対応 (外部ループの fem2d は平面のみ。"
+                 "軸対称の fem2d はソルバ内連成 conjugate.mode: fem2d を使う。"
+                 "plans/active/boundary-cht-axisymmetric-fem2d.md §4.4d)")
 
     run = Path(a.run_dir).resolve()
     tpl = Path(a.template).resolve()

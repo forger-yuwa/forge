@@ -55,6 +55,69 @@ def _dump_area(coords, faces):
     return a
 
 
+STATE_CONTRACT = 2       # conjugateWall.cpp の kStateContract と同じ
+
+
+def _run_axisym(src):
+    """run の solverConfig.yaml から (isAxisymmetric, axisymMethod) を読む (無ければ (0, 0))。"""
+    cfgp = src / "solverConfig.yaml"
+    if not cfgp.exists():
+        return 0, 0
+    try:
+        import yaml
+        cfg = yaml.safe_load(cfgp.read_text()) or {}
+    except Exception:
+        return 0, 0
+    msh = cfg.get("mesh") or {}
+    pp = cfg.get("physProp") or {}
+    # 正本は mesh 節、physProp 節は後方互換 (solverConfig.cpp と同じ優先順)
+    isax = int(msh.get("isAxisymmetric", pp.get("isAxisymmetric", 0)) or 0)
+    meth = int(msh.get("axisymMethod", pp.get("axisymMethod", 0)) or 0)
+    return isax, meth
+
+
+def _state_geometry(state, run_isax, run_meth):
+    """固体状態の `geometry` 属性から軸対称かを決める (plan boundary-cht-axisymmetric-fem2d §4.4c/§4.4d)。
+
+    戻り値 (axisym, 拒否理由 or None)。状態が無ければ run の config だけで決める
+    (ソルバ内連成で状態が無い場合の拒否は後段が出す)。
+    """
+    run_ax0 = (run_isax == 1 and run_meth == 0)
+    if run_isax == 1 and run_meth != 0:
+        return False, f"run が axisymMethod {run_meth} (軸対称 CHT は axisymMethod 0 のみ。§4.3)"
+    if state is None or not state.exists():
+        return run_ax0, None
+    with h5py.File(state, "r") as fs:
+        geo = fs.attrs.get("geometry")
+        unit = fs.attrs.get("load_unit")
+        con = fs.attrs.get("state_contract")
+    dec = (lambda v: v.decode() if isinstance(v, bytes) else (None if v is None else str(v)))
+    geo, unit = dec(geo), dec(unit)
+    if geo is None:
+        if run_isax == 1:
+            return False, (f"{state.name} に geometry 属性が無い (旧状態) のに run の solverConfig は軸対称。"
+                           "平面 [W/m] の状態と区別できない")
+        return False, None                        # 平面の旧状態は従来どおり
+    expect = {"planar": "W/m", "axisym0": "W/rad"}
+    if geo not in expect:
+        return False, f"{state.name} の geometry={geo!r} を解釈できない"
+    if unit != expect[geo]:
+        return False, f"{state.name} の load_unit={unit!r} が geometry={geo} ({expect[geo]}) と合わない"
+    if con is None or int(con) != STATE_CONTRACT:
+        return False, f"{state.name} の state_contract={con} (期待 {STATE_CONTRACT})"
+    if (geo == "axisym0") != run_ax0:
+        return False, (f"{state.name} の geometry={geo} が run の solverConfig "
+                       f"(isAxisymmetric={run_isax}, axisymMethod={run_meth}) と合わない")
+    return geo == "axisym0", None
+
+
+def _refuse(run, msg):
+    print(f"=== G-cons: {run.name} -> REFUSED ===")
+    print(f"  {msg}")
+    print("\nVERDICT: REFUSED")
+    return 1
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run_dir")
@@ -92,6 +155,10 @@ def main():
     n_nan = int(np.sum(~np.isfinite(q)))
 
     if a.solid_mode == "local1d":
+        # 軸対称の local1d はソルバが拒否する構成 (plan boundary-cht-axisymmetric-fem2d §4.4)。
+        # 下の面積は平面の線分長なので、軸対称 run に当てると r 倍ずれた収支で判定してしまう。
+        if _run_axisym(src)[0] == 1:
+            return _refuse(run, "run の solverConfig が軸対称 (isAxisymmetric: 1)。local1d の収支は平面面積で組むので判定しない")
         # ---- ソルバ内連成 (`conjugate: {mode: local1d, ...}`) ----
         # 固体は節点ごとに独立な直列抵抗 $R_{\rm tot}=t/k_s+R_{\rm back}$ なので、
         # 固体が持ち去る熱は $\sum_i (T_{w,i}-T_b)/R_{\rm tot}\cdot A_i$。
@@ -141,6 +208,17 @@ def main():
             pass
     if a.solid is None and not insolver_probe:
         sys.exit("--solid-mode fem2d には --solid が要る (ソルバ内連成の run なら不要)")
+    # **幾何方式は固体状態の `geometry` 属性で決める** (plan boundary-cht-axisymmetric-fem2d §4.4d)。
+    # 幾何方式なしで作用素を組むと、軸対称の解析温度に対し Robin 放熱を 50 倍に出す (0.0919 vs 1.837e-3 W/rad)。
+    # 属性が無い旧状態は、run が平面なら従来どおり平面、軸対称なら REFUSED。run の config と食い違っても REFUSED。
+    run_isax, run_meth = _run_axisym(src)
+    axisym, why = _state_geometry((src / f"conjugate_state_{a.phys_id}.h5") if insolver_probe else None,
+                                  run_isax, run_meth)
+    if why:
+        return _refuse(run, why)
+    if axisym and not insolver_probe:
+        return _refuse(run, "軸対称の外部ループ (--solid JSON) の fem2d は未対応 (cht_loop.py も拒否する。§4.4d)")
+    unit = "W/rad" if axisym else "W/m"
     if a.solid is not None:
         spec = json.loads(Path(a.solid).read_text())
         op, perm = build_fem2d(spec, coords)
@@ -161,7 +239,7 @@ def main():
         robin_h = [(int(x), int(y), float(hh), float(tt))
                    for (x, y), hh, tt in zip(re_h, rh_h, rt_h)]
         op = Fem2DOperator(nodes_h, tris_h, ifn_h, [tuple(e) for e in ife_h], robin_h,
-                           (kT_h, kV_h) if len(kT_h) > 1 else float(kV_h[0]))
+                           (kT_h, kV_h) if len(kT_h) > 1 else float(kV_h[0]), axisym=axisym)
         # 壁ダンプ順 -> 界面節点順
         W = np.asarray(coords, float)[:, :2]
         perm = np.array([int(np.argmin(np.hypot(*(W - p).T))) for p in op.coords[:, :2]], int)
@@ -269,7 +347,14 @@ def main():
             rtc = np.asarray(fh["ROBIN/TC"][:], float)
         u_h5 = np.asarray(u_raw, float)          # h5 (RCM) 順のまま使う
         L = np.hypot(xy[re_[:, 1], 0] - xy[re_[:, 0], 0], xy[re_[:, 1], 1] - xy[re_[:, 0], 1])
-        Q_solid_direct = float(np.sum(rh * L * (0.5 * (u_h5[re_[:, 0]] + u_h5[re_[:, 1]]) - rtc)))
+        if axisym:
+            # 組立てと同じ consistent 行列 M_e (T - Tc) の総和 (plan §4.2/§4.4b):
+            #   Σ_e hL/6 [(2r_a + r_b)(T_a - Tc) + (r_a + 2r_b)(T_b - Tc)]   [W/rad]
+            ra, rb = xy[re_[:, 0], 1], xy[re_[:, 1], 1]
+            da, db = u_h5[re_[:, 0]] - rtc, u_h5[re_[:, 1]] - rtc
+            Q_solid_direct = float(np.sum(rh * L / 6.0 * ((2.0*ra + rb) * da + (ra + 2.0*rb) * db)))
+        else:
+            Q_solid_direct = float(np.sum(rh * L * (0.5 * (u_h5[re_[:, 0]] + u_h5[re_[:, 1]]) - rtc)))
         solid_src = f"conjugate_state (step {st_step}) + solid.h5 の Robin 辺"
         direct = True
         # **時刻の一致を要求する** (4 巡目 M1: 壁が 960 step 古い組合せを PASS にしていた)。
@@ -325,13 +410,17 @@ def main():
     print(f"=== G-cons: {run.name}  ({dump.name}, flux={key}"
           f"{', 積分済み荷重' if Qdirect is not None else ''}) ===")
     print(f"  固体状態の出所      : {solid_src}")
-    print(f"  流体側  sum Q_f     = {sum_Qf:14.4f} W/m   (sum |Q_f| = {sum_absQf:.4f})")
-    print(f"  固体側  Q_solid     = {Q_solid:14.4f} W/m   (孔 Robin の持ち去り)")
-    print(f"  不釣合い eps        = {eps:14.4f} W/m")
+    if axisym:
+        print(f"  幾何                : 軸対称 (axisym0, r 重み。単位はラジアンあたり)")
+    # 軸対称の荷重は [W/rad] で小さい (V-ax2 で 1.8e-3) ので指数表示にする。平面の表示は従来どおり。
+    ff, fs = ("14.6e", ".6e") if axisym else ("14.4f", ".4f")
+    print(f"  流体側  sum Q_f     = {sum_Qf:{ff}} {unit}   (sum |Q_f| = {sum_absQf:{fs}})")
+    print(f"  固体側  Q_solid     = {Q_solid:{ff}} {unit}   (孔 Robin の持ち去り)")
+    print(f"  不釣合い eps        = {eps:{ff}} {unit}")
     print(f"  規格化  eps/denom   = {100*rel:14.4f} %     (denom = max(sum|Q_f|, q_floor={a.q_floor}))")
     print(f"  NaN 節点            = {n_nan} / {len(q)}"
           + ("   <-- 適用範囲外の構成 (methods/boundary.md)" if n_nan else ""))
-    print(f"  許容                : rel <= {100*a.tol_rel:.3f} % かつ abs <= {tol_abs} W/m")
+    print(f"  許容                : rel <= {100*a.tol_rel:.3f} % かつ abs <= {tol_abs} {unit}")
     print(f"VERDICT: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 
