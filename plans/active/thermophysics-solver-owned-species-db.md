@@ -262,6 +262,14 @@ SERN セッション (`feature/sern-design`) へ渡す内容。変更は `featur
 7. **予告**: 輸送物性 (μ・λ) を CEA `trans.inp` と CEA の frozen 混合則へ寄せる (#5t)。燃焼生成物を含む SERN の NS/SST の結果は変わる見込み。
 8. **取り込み方**: 種 DB 関係の commit だけを `feature/sern-design` に取り込むか main 経由で合わせるかは SERN 側の都合で決める。
 
+### 5.3 gap-heating セッション (`feature/gap-heating-precision`) との合流準備 (2026-09-27)
+
+- **git 上の衝突なし**: merge-base `d8c11f52` 以降、gap 側 3 commit (case/60・notes・plan) と本ブランチ 20 commit に共通ファイルなし (`git merge-tree` で無衝突を確認)。
+- **実行時の非互換 (合流前に gap 側で対応が要る)**: case/50・55・56 の run config は `viscMethod: 2` + `species: [N2, O2, CO2, H2O, AR]` + `speciesDBFile` で **`physProp.transport` が無い** → 本ブランチのバイナリでは起動時エラー (§4.3c 案 C)。
+  追記する指定: `physProp.transport: {N2: cea, O2: cea, CO2: cea, AR: cea, H2O: "custom:h2o_iapws_cea_v1"}`。
+- **結果が変わる**: 混合則が Wilke 共用 φ → CEA frozen (λ は ψ) になり、種別 μ・λ も CEA/IAPWS に変わる。gap 側の熱流束・Eckert 比の既報値は旧物性に基づくので、合流後の run は「物性変更による差」を分けて記録する (旧 run の再現が要るなら合流前のバイナリを残す)。変化量はその mixture・温度域で gap 側が合流時に見積もる。
+- **合流の時期**: gap 側の区切り (ユーザ判断) を待つ。本ブランチから gap 側の config は書き換えない (並行セッションの run を触らない)。
+
 ## 6. 検証
 
 事前に決める合格条件 (結果を見てから変えない)。**数値を変える作業 (#6 以降) の前に**、比較の基準 (V0) を固定する:
