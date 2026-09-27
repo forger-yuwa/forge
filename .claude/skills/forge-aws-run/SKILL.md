@@ -23,6 +23,9 @@ description: 共有 AWS GPU インスタンスで forge の run を投入・継�
 - 起動後に `RUN_PROVENANCE.txt` の `forge_bin` を確認する (倍精度ビルドなど別バイナリを使うとき)。
 - 別バイナリ (例: 全域 FP64) は同じ commit の worktree を作り、`flowFormat.hpp` の typedef だけを変えて native build する。
   サブモジュール (HighFive 等) は元の checkout のものをシンボリックリンクで流用する。
+- 既存のビルド済みツリーを複製して別バイナリを作るときは `build/` を持ち込まず新規に cmake する (CMakeCache が元の絶対パスを指す)。
+  AWS では `-DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=86 -DCMAKE_CXX_FLAGS="-I/usr/local/cuda/include -I/usr/local/cuda/include/cccl"` が要る
+  (CXX_FLAGS が無いと `speciesDB.cpp` 等で `vector_types.h: No such file` になる)。元の CMakeCache と CMAKE_CXX_FLAGS を突き合わせて確認する。
 
 ## 3. 継続・引き継ぎ (restart)
 
@@ -32,6 +35,9 @@ description: 共有 AWS GPU インスタンスで forge の run を投入・継�
   → 事前に src の `roY*` データセットを dst に作っておく (値は restart_field が上書きする)。
 - 継続先には `species_db.yaml` も複製する (忘れると forge が `failed to read speciesDBFile` で起動しない)。
 - 継続は新しい run ディレクトリで行い、既存 run を上書きしない。収束判定は同一設定なら接続区間で行う (作用素が変わったら接続しない)。
+- **保存量がビット一致でも再開直後に残差が跳ねる** (2026-09-27 case/60: rms_ro 6.8e-12 → 最大 5.5e-9 → 数千 step で戻る)。保存量以外の状態は移らない。
+  延長 run の窓間変化・低下桁数にはこの戻りが入るので、A/B の両腕を同じ回数だけ再開して揃え、延長区間だけの判定では跳ねから測っていることを明記する。
+- 上に層を積んだだけのメッシュ (節点座標が完全一致) へ場を移すときは interp_field でなく、座標一致でビット単位コピーする (case/60 `tools/stack_init.py`)。
 
 ## 4. 待ち合わせ (完了通知を取りこぼさない)
 
@@ -43,6 +49,7 @@ description: 共有 AWS GPU インスタンスで forge の run を投入・継�
 - **ssh の失敗 (接続不可・インスタンス停止) はそれ自体を事象として即座に抜けて知らせる**。空の結果で回り続けると、
   idle 自動停止に気づかず 2 時間待つ (2026-09-27)。
 - ssh の終了コードで接続失敗を判定するときは、リモート側のコマンド列の末尾に `; true` を付ける (`grep -c` は 0 件で終了コード 1 を返し、接続失敗と区別できなくなる)。ssh 自体の失敗は 255。
+- **ssh の終了コードで接続失敗を判定するときは、リモート側のコマンドの終了コードと混ぜない**。`grep -c` は 0 件で終了コード 1 を返すので、`ssh ... "grep -c ERROR log"` を `|| { echo SSH FAIL; break; }` で受けると、エラー 0 件 = 正常なのに「接続失敗」でループを抜ける (2026-09-27: 実行中の run を完了扱いで判定した)。リモート側は `if grep -q ...; then echo ERR; else echo WAIT; fi` のように**常に 0 で終わる**形にして状態を文字列で返す。
 - ループには上限と「タイムアウトした」出力を付ける。1 本終わるごとに抜ける形にして、終わった run から順に判定する。
 - 実行中のシェルスクリプト (バッチ) を編集しない — bash は逐次読みなので再開位置がずれる。変えたいなら次の投入で。
 
