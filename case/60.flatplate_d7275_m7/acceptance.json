@@ -128,7 +128,7 @@
   },
   {
    "id": "T4-0b-WALL",
-   "status": "pre_registered",
+   "status": "outcome_recorded",
    "_written": "2026-09-27、run を回す前 (T4-0b-EXT の next_proposal をユーザ承認「そのやり方でOK」)",
    "name": "平板 (等温壁 300 K) を出口 x = 2.8 m まで延ばし、平板の後ろの slip 後流を無くす",
    "mesh": "fp_d7275_y3_wall: fp_d7275_y3 と形状・分割が同一 (.geo の Physical 行以外は diff なし)。下流 2.6–2.8 m の底辺を slip (physID 5) → plate (physID 4) に付け替えるだけ。壁距離はこの区間も壁として計算される。check_mesh_quality PASS",
@@ -138,7 +138,15 @@
     "not_resolved": "1/10 に届かない → 残差場の所在を見て報告し、上位に諮る (AGENTS 条件 2 が既に成立しているので次の修正は諮ってから)",
     "q": "比較 10 点の St が run_0002 と全点 1 % 以内 → 比較量は下流 BC に鈍い (比較域の終端 2.46 m と平板端 2.6 m は 0.14 m 離れている) / 1 % 超ならその差を報告し、壁を延ばした値を採る (試験の模型は平板端が比較域より下流にあり、後流の影響はないため)"
    },
-   "note": "d7275_compare.py は壁出力の x 範囲で内挿範囲を決めるので、x × 1.03 の感度で 2.6 m を越える点がこの run だけ範囲内になる。比較 10 点 (x ≤ 2.46 m) には影響しない"
+   "note": "d7275_compare.py は壁出力の x 範囲で内挿範囲を決めるので、x × 1.03 の感度で 2.6 m を越える点がこの run だけ範囲内になる。比較 10 点 (x ≤ 2.46 m) には影響しない",
+   "outcome": {
+    "date": "2026-09-27",
+    "run": "case/60.flatplate_d7275_m7/run_0012_t26_wall",
+    "reading": "not_resolved — check_convergence NOT CONVERGED (stalled/plateau: 流れ・化学種 2.0–2.7 dec で横ばい、k/ω は 6.5–7.4 dec で下降中)。step 16–20k の残差は対照 run_0009 の 0.26–0.29 倍 (ro・roUx・roe・roY)、roUy 0.94 倍、roOmega 2.8 倍 → 1/10 に届かない",
+    "residual_location": "slip 後流の残差は消えた。残る流れ残差 (res_ro・roUx・roUy・roe) の 99.7–99.9 % は上端 slip (y 0.45–0.50 m) の出口直前 x 2.70–2.81 m、最大 (2.758, 0.500)。壁近傍・比較域は ≤0.1 %。前縁衝撃波 (約 9.5°) は x = 2.8 m で y ≈ 0.47 (P > 1.01 p∞) に達しており、上端 slip∩出口の角にちょうど掛かる (延長前の brief の H1 と整合)。res_roOmega の 75 % は延長した壁の第一層 (x ≥ 2.6、y < 1 mm) だが roOmega 残差は下降中",
+    "q": "比較 10 点の St は run_0002 と表示桁で一致、R_A 平均 1.313 [1.266, 1.442]、パネル平均 q_w 89.02 kW/m²、位置 II 87.80 kW/m² → 比較量は下流 BC に鈍い。St 10 点 check_quasisteady ALL STEADY",
+    "correction": "事前登録の注記『比較 10 点 (x ≤ 2.46 m)』は誤り。最下流の比較点は x = 2.546 m (平板端 2.6 m の 5.4 cm 上流)。それでも St は変わらなかった"
+   }
   }
  ]
 }
