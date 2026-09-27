@@ -33,6 +33,13 @@ Python:
   find_record(h5, dirs)        # 属性の完全性ハッシュに一致する記録を h5 の隣 (と dirs) から探す
   signature_from_record(rec)   # 記録から compare_signatures 用の署名 (全種の係数込み)
 
+  入口での属性の扱い (#3b; 属性はその保存量を生成した処理が付ける):
+  resolve_species(run_dir)     # `forge --resolve-species` (FORGE_BIN / --forge; GPU 不要) で宛先の互換性ハッシュと記録を得る
+  stamp_new_field(h5, run_dir, names, MW, h_ref_T, mixtures)   # 新規初期場: IC の datum・順序・MW・e(T) が記録と一致したら付与
+  plan_inherit(src_h5, dst_run_dir) / commit_inherit(dst_h5, plan)   # restart・補間: SRC の記録を検証し宛先と一致なら継承
+  plan_convert(src_h5, dst_run_dir)   # 種変換: 入力を検証し、変換後に変換先のハッシュを付ける
+  未検証の SRC (属性なし / species_input_unverified=1) からは DST の属性を消す (宛先のハッシュで埋めない)。
+
 YAML の注意: 種名 `NO` / `N` / `Y` は PyYAML の既定では真偽値になる (design チェーンの古い config は無引用)。
 本モジュールの `load_yaml_str` は真偽値の暗黙解決を外した SafeLoader で読むので `NO` は文字列のまま。
 """
@@ -360,6 +367,372 @@ def compare_signatures(a, b, mw_rtol=1e-9, coef_rtol=1e-12):
     if "tracer" in a and "tracer" in b and (a["tracer"] or None) != (b["tracer"] or None):
         bad.append(f"physProp.tracer {a['tracer']} vs {b['tracer']}")
     return bad
+
+
+# ---- 入口での属性の付与・継承 (plans/active/thermophysics-solver-owned-species-db.md §4.3「ハッシュは誰が付けるか」, #3b) ----
+# 属性は**その保存量を実際に生成した処理**が付ける:
+#   新規初期場 (IC 生成)        : stamp_new_field — 宛先を --resolve-species で解決し、IC に使った datum・種順序・MW・
+#                                 エネルギー式が記録と一致したときだけ付ける (一致しなければ属性を付けずに SpeciesCheckError)
+#   コピー・restart・補間        : plan_inherit — SRC の属性と記録 (完全性ハッシュ再計算) を検証し、宛先の互換性ハッシュと
+#                                 一致したときだけ継承。SRC が未検証なら DST の属性を消す (宛先のハッシュで埋めない)
+#   種変換                      : plan_convert — 入力を検証し、変換の成功後に変換先のハッシュを付ける (入力が未検証なら未検証のまま)
+# CPG (thermalMethod≠2) は対象外 (属性を付けない)。
+
+SPECIES_ATTRS = ("species_hash", "species_record_sha256", "species_record_file", "species_input_unverified")
+_RESOLVE_FLAG = b"--resolve-species"
+
+
+class SpeciesCheckError(Exception):
+    """化学種の照合で止めるべき状態 (不一致・記録の欠落/改竄・IC の物性が宛先と違う)。"""
+
+
+class SpeciesResolveUnavailable(Exception):
+    """宛先の物性を解決できない (--resolve-species 対応の forge が無い・solverConfig.yaml が無い)。"""
+
+
+def strict_species():
+    """FORGE_REQUIRE_VERIFIED_SPECIES=1 (最終方針の先取り): 検証できない状態を警告でなく停止にする。"""
+    return os.environ.get("FORGE_REQUIRE_VERIFIED_SPECIES", "") == "1"
+
+
+def _repo_root():
+    return os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
+
+def forge_supports_resolve(path):
+    """forge バイナリが --resolve-species を持つか (旧バイナリは引数を無視して**計算を始めてしまう**ので起動前に確かめる)。"""
+    try:
+        with open(path, "rb") as f:
+            prev = b""
+            while True:
+                chunk = f.read(1 << 22)
+                if not chunk:
+                    return False
+                if _RESOLVE_FLAG in prev[-len(_RESOLVE_FLAG):] + chunk:
+                    return True
+                prev = chunk
+    except OSError:
+        return False
+
+
+def find_forge(forge=None):
+    """--resolve-species を持つ forge を返す: 明示指定 > 環境変数 FORGE_BIN > solver_density_cuda/build/forge。
+    明示指定・FORGE_BIN が対応していなければ例外 (黙って別のバイナリに落とさない)。既定のバイナリが旧版なら None。"""
+    for label, cand in (("--forge", forge), ("FORGE_BIN", os.environ.get("FORGE_BIN"))):
+        if cand:
+            cand = os.path.abspath(cand)
+            if not os.path.exists(cand):
+                raise SpeciesResolveUnavailable(f"{label}={cand} が無い")
+            if not forge_supports_resolve(cand):
+                raise SpeciesResolveUnavailable(f"{label}={cand} は --resolve-species を持たない旧バイナリ")
+            return cand
+    default = os.path.join(_repo_root(), "solver_density_cuda", "build", "forge")
+    return default if (os.path.exists(default) and forge_supports_resolve(default)) else None
+
+
+def _config_thermal_method(run_dir):
+    p = os.path.join(run_dir, "solverConfig.yaml")
+    if not os.path.exists(p):
+        return None
+    return int(((load_yaml_str(p) or {}).get("physProp") or {}).get("thermalMethod", 0))
+
+
+def resolve_species(run_dir, forge=None, inplace=True):
+    """run_dir の solverConfig.yaml を `forge --resolve-species` で解決する (GPU 不要)。
+    inplace=True: run_dir に記録を書く (宛先 run 用。属性の species_record_file がその隣で引けるように)。
+    inplace=False: solverConfig.yaml と speciesDBFile を一時ディレクトリへ複製して解決する (SRC 側・dry-run 用; 元 run を書き換えない)。
+    返り値: None (CPG) | {hash, record_file, record_path, record (load_record), run_dir}。
+    解決できないときは SpeciesResolveUnavailable、解決が失敗したときは SpeciesCheckError。"""
+    import shutil, subprocess, tempfile
+    run_dir = os.path.abspath(run_dir)
+    tm = _config_thermal_method(run_dir)
+    if tm is None:
+        raise SpeciesResolveUnavailable(f"{run_dir}/solverConfig.yaml が無い (宛先の物性を解決できない)")
+    if tm != 2:
+        return None
+    exe = find_forge(forge)
+    if exe is None:
+        raise SpeciesResolveUnavailable("--resolve-species を持つ forge が無い (--forge か FORGE_BIN で新しいバイナリを指定する; "
+                                        "既定の solver_density_cuda/build/forge は旧版)")
+    tmp = None
+    cwd = run_dir
+    if not inplace:
+        tmp = tempfile.mkdtemp(prefix="forge_resolve_")
+        cfg = load_yaml_str(os.path.join(run_dir, "solverConfig.yaml")) or {}
+        dbf = (cfg.get("physProp") or {}).get("speciesDBFile")
+        depth = 0
+        if dbf and not os.path.isabs(dbf):
+            parts = os.path.normpath(dbf).split(os.sep)
+            depth = sum(1 for x in parts if x == "..")
+        cwd = os.path.join(tmp, *(["d"] * depth), "run")     # 相対パス ../x.yaml も一時ディレクトリ内で解決させる
+        os.makedirs(cwd)
+        shutil.copy(os.path.join(run_dir, "solverConfig.yaml"), cwd)
+        if dbf:
+            src = dbf if os.path.isabs(dbf) else os.path.join(run_dir, dbf)
+            if os.path.exists(src) and not os.path.isabs(dbf):
+                dst = os.path.normpath(os.path.join(cwd, dbf))
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy(src, dst)
+    try:
+        p = subprocess.run([exe, "--resolve-species"], cwd=cwd, capture_output=True, text=True)
+        if p.returncode == 2 and "thermalMethod != 2" in p.stderr:
+            return None
+        lines = p.stdout.strip().splitlines()
+        h = lines[-1].strip() if lines else ""
+        m = re.search(r"\[species\] record (\S+) \(sha256 ([0-9a-f]{64})\)", p.stderr)
+        if p.returncode != 0 or not re.fullmatch(r"[0-9a-f]{64}", h) or not m:
+            raise SpeciesCheckError(f"forge --resolve-species failed in {run_dir} (rc={p.returncode}): {p.stderr.strip()[-800:]}")
+        rec = load_record(os.path.join(cwd, m.group(1)))
+        if not rec["consistent"] or rec["compat_recomputed"] != h or rec["integrity"] != m.group(2):
+            raise SpeciesCheckError(f"resolve-only record for {run_dir} is inconsistent: {rec['problems']}")
+        out = {"hash": h, "record_file": m.group(1), "record": rec, "run_dir": run_dir,
+               "record_path": os.path.join(cwd, m.group(1)) if inplace else None, "forge": exe}
+        return out
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def write_species_attrs(h5path, attrs):
+    """h5 のルート属性 4 つを消し、attrs (dict) があれば書く。attrs=None は「未検証のまま」(ソルバが警告/停止で扱う)。
+    h5path は開いた h5py.File (書き込み可) でもよい。"""
+    import contextlib
+    import h5py
+    cm = contextlib.nullcontext(h5path) if isinstance(h5path, h5py.File) else h5py.File(h5path, "r+")
+    with cm as f:
+        for k in SPECIES_ATTRS:
+            if k in f.attrs:
+                del f.attrs[k]
+        if attrs:
+            for k in SPECIES_ATTRS[:3]:
+                f.attrs[k] = str(attrs[k])
+            f.attrs.create("species_input_unverified", int(attrs.get("species_input_unverified", 0)), dtype="int32")
+
+
+def source_species_state(h5path, dirs=None):
+    """保存場の属性と記録の状態: {state: none|unverified|verified|broken, attrs, record, why}。
+    none = 属性なし (旧場・CPG・未認証の初期場)、unverified = species_input_unverified=1、
+    broken = 属性はあるが記録が無い/完全性ハッシュが合わない (照合不能: 取り違え・改竄を区別できない)。"""
+    at = field_species_attrs(h5path)
+    if not at["species_hash"]:
+        return {"state": "none", "attrs": at, "record": None, "why": f"{h5path} has no species_hash attribute"}
+    if at["species_input_unverified"] == 1:
+        return {"state": "unverified", "attrs": at, "record": None,
+                "why": f"{h5path} descends from an unverified start (species_input_unverified=1)"}
+    rec, why = find_record(h5path, dirs)
+    if rec is None or not rec["consistent"]:
+        return {"state": "broken", "attrs": at, "record": rec,
+                "why": (why if rec is None else "; ".join(rec["problems"]))}
+    return {"state": "verified", "attrs": at, "record": rec, "why": why}
+
+
+def place_record(rec, dst_dir):
+    """SRC の記録を宛先ディレクトリへ複製する (上書きしない)。同名で中身が違えば `<互換16>_<完全性16>` の名前にする。返り値 = ファイル名。"""
+    import shutil
+    base = os.path.basename(rec["path"])
+    alt = f"resolved_species_{rec['compat_recomputed'][:16]}_{rec['integrity'][:16]}.yaml"
+    for name in (base, alt):
+        p = os.path.join(dst_dir, name)
+        if os.path.abspath(p) == os.path.abspath(rec["path"]):
+            return name
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                if hashlib.sha256(f.read()).hexdigest() == rec["integrity"]:
+                    return name
+            continue
+        shutil.copyfile(rec["path"], p)
+        return name
+    raise SpeciesCheckError(f"cannot place record {rec['path']} in {dst_dir}: {base} and {alt} exist with different content")
+
+
+def _record_diff(src_rec, dst_rec):
+    """2 つの記録の差 (種・係数・datum)。"""
+    a, b = signature_from_record(src_rec), signature_from_record(dst_rec)
+    return compare_signatures(a, b)
+
+
+def _unverified_note(tool, dst_run_dir, why):
+    tm = _config_thermal_method(dst_run_dir) if dst_run_dir else None
+    if tm == 2:
+        print(f"[{tool}] species: SRC is unverified ({why}); destination species attributes removed "
+              "(the solver warns and marks outputs species_input_unverified=1; FORGE_REQUIRE_VERIFIED_SPECIES=1 stops it)")
+
+
+def plan_inherit(src_h5, dst_run_dir, forge=None, force=False, tool="restart", inplace=True):
+    """コピー・restart・補間の継承判定 (書き込み前に呼ぶ)。返り値 = 書き込み後に DST へ付ける属性 (dict) か None (未検証のまま)。
+    不一致・記録の欠落は SpeciesCheckError (force=True なら警告して None = 属性を付けずに通す)。"""
+    dst_run_dir = os.path.abspath(dst_run_dir)
+    st = source_species_state(src_h5)
+    if st["state"] in ("none", "unverified"):
+        _unverified_note(tool, dst_run_dir, st["why"])
+        return None
+    if st["state"] == "broken":
+        msg = (f"SRC {src_h5} carries species_hash {st['attrs']['species_hash'][:16]} but its record cannot be verified: {st['why']}. "
+               "UNVERIFIABLE (照合不能): the coefficient differences cannot be identified. Keep the record resolved_species_*.yaml "
+               "next to the field, or use --force-species (copies without species attributes)")
+        if force:
+            print(f"[{tool}] WARNING (--force-species): {msg}")
+            return None
+        raise SpeciesCheckError(msg)
+    rec = st["record"]
+    try:
+        dst = resolve_species(dst_run_dir, forge, inplace=inplace)
+    except SpeciesResolveUnavailable as e:
+        msg = f"cannot resolve the destination species ({e}); SRC is verified but the destination cannot be checked"
+        if strict_species():
+            raise SpeciesCheckError(msg + " (FORGE_REQUIRE_VERIFIED_SPECIES=1)")
+        print(f"[{tool}] WARNING: {msg}; destination species attributes removed (unverified)")
+        return None
+    if dst is None:
+        msg = f"destination {dst_run_dir} is calorically perfect (thermalMethod != 2) but SRC {src_h5} is a TP field (species_hash {rec['compat_recomputed'][:16]})"
+        if force:
+            print(f"[{tool}] WARNING (--force-species): {msg}")
+            return None
+        raise SpeciesCheckError(msg)
+    if dst["hash"] != rec["compat_recomputed"]:
+        diff = _record_diff(rec, dst["record"])
+        msg = (f"species mismatch: SRC {src_h5} species_hash {rec['compat_recomputed'][:16]} (record {os.path.basename(rec['path'])}) "
+               f"!= destination {dst_run_dir} species_hash {dst['hash'][:16]} (forge --resolve-species)\n"
+               + "".join(f"    {x}\n" for x in (diff or ["(no coefficient difference found; schema/datum text differs)"]))
+               + "  Use the matching species DB / thermoHrefTemp, or tools/convert_species_field.py")
+        if force:
+            print(f"[{tool}] WARNING (--force-species): {msg}\n  -> copying WITHOUT species attributes")
+            return None
+        raise SpeciesCheckError(msg)
+    print(f"[{tool}] species: SRC record {os.path.basename(rec['path'])} verified (integrity {rec['integrity'][:16]}), "
+          f"destination species_hash {dst['hash'][:16]} (forge --resolve-species) matches -> inherit")
+    return {"species_hash": rec["compat_recomputed"], "species_record_sha256": rec["integrity"],
+            "species_record_file": None, "species_input_unverified": 0, "_record": rec, "_dst_dir": dst_run_dir}
+
+
+def commit_inherit(dst_h5, plan):
+    """plan_inherit の結果を書き込み後に DST へ付ける (plan=None なら属性を消す)。記録は DST の隣へ複製する。"""
+    if plan is None:
+        write_species_attrs(dst_h5, None)
+        return None
+    path = dst_h5.filename if hasattr(dst_h5, "filename") else dst_h5
+    name = place_record(plan["_record"], os.path.dirname(os.path.abspath(path)))
+    attrs = {k: plan[k] for k in SPECIES_ATTRS}
+    attrs["species_record_file"] = name
+    write_species_attrs(dst_h5, attrs)
+    return attrs
+
+
+def record_energy_gas(rec):
+    """記録の係数 (絶対基準) と datum でソルバと同じ e(T) を評価する _TPGas (total_quantities.py) を返す。"""
+    from total_quantities import _TPGas
+    db = {e["name"]: {"MW": e["MW"], "Tlo": e["Tlo"], "Tmid": e["Tmid"], "Thi": e["Thi"],
+                      "nasa9_low": e["nasa9_low"], "nasa9_high": e["nasa9_high"]} for e in rec["species"]}
+    return _TPGas(db, [e["name"] for e in rec["species"]], rec["thermoHrefTemp"])
+
+
+def check_ic_against_record(rec, h_ref_T, names, MW, mixtures, e_rtol=1e-9):
+    """IC 生成に使った熱物性が宛先の記録と一致するか。返り値 = 問題の list (空なら一致)。
+    h_ref_T: IC の datum (None/≤0 は絶対基準 0)、names/MW: IC が組成を作るのに使った輸送種の順序と MW、
+    mixtures: [(label, Y (輸送種順の質量分率), R_ic, e_fn)] — e_fn(T ndarray) は IC が roe に使った内部エネルギー [J/kg]。"""
+    import numpy as np
+    probs = []
+    href = float(h_ref_T) if (h_ref_T is not None and float(h_ref_T) > 0.0) else 0.0
+    if href != rec["thermoHrefTemp"]:
+        probs.append(f"datum: IC h_ref_T {href!r} != destination thermoHrefTemp {rec['thermoHrefTemp']!r}")
+    rnames = [e["name"] for e in rec["species"]]
+    if [str(n).upper() for n in names] != [n.upper() for n in rnames]:   # ソルバは現状大小文字を同一視 (speciesDB.cpp; #4 で canonical ID 化)
+        probs.append(f"species order: IC {list(names)} != destination {rnames}")
+        return probs
+    for n, m, e in zip(names, MW, rec["species"]):
+        if abs(float(m) - e["MW"]) > 1e-12 * e["MW"]:
+            probs.append(f"MW[{n}]: IC {float(m)!r} != destination {e['MW']!r}")
+    if probs:
+        return probs
+    gas = record_energy_gas(rec)
+    Tlo = max(e["Tlo"] for e in rec["species"]); Thi = min(e["Thi"] for e in rec["species"])
+    T = np.array([t for t in (210.0, 300.0, 600.0, 999.0, 1001.0, 1500.0, 3000.0, 5000.0) if Tlo <= t <= Thi])
+    for label, Y, R_ic, e_fn in mixtures:
+        Y = [float(y) for y in Y]
+        if len(Y) != len(names):
+            probs.append(f"{label}: composition length {len(Y)} != species {len(names)}")
+            continue
+        R_rec = gas.Rmix(Y)
+        if abs(float(R_ic) - R_rec) > 1e-10 * R_rec:
+            probs.append(f"{label}: gas constant IC {float(R_ic)!r} != destination {R_rec!r}")
+        e_rec = gas.h(Y, T) - R_rec * T
+        e_ic = np.asarray(e_fn(T), dtype=float).reshape(-1)
+        tol = e_rtol * (np.abs(e_rec) + R_rec * T + 1.0e3)
+        bad = np.abs(e_ic - e_rec) > tol
+        if bad.any():
+            i = int(np.argmax(np.abs(e_ic - e_rec)))
+            probs.append(f"{label}: internal energy IC {e_ic[i]:.9e} != destination {e_rec[i]:.9e} J/kg at T={T[i]:g} K "
+                         f"(diff {e_ic[i] - e_rec[i]:.3e})")
+    return probs
+
+
+def stamp_new_field(h5path, run_dir, names, MW, h_ref_T, mixtures, forge=None, tool="IC"):
+    """新規初期場の属性付与 (IC 生成の直後に呼ぶ)。宛先 run_dir を --resolve-species で解決し (記録は run_dir に書かれる)、
+    check_ic_against_record が空のときだけ属性 (species_input_unverified=0) を付ける。一致しなければ属性を消して SpeciesCheckError。
+    CPG は属性なし。解決できない (旧バイナリ) ときは属性なしで警告 (FORGE_REQUIRE_VERIFIED_SPECIES=1 なら停止)。返り値 = 状態文字列。"""
+    run_dir = os.path.abspath(run_dir)
+    try:
+        dst = resolve_species(run_dir, forge, inplace=True)
+    except SpeciesResolveUnavailable as e:
+        write_species_attrs(h5path, None)
+        if strict_species():
+            raise SpeciesCheckError(f"[{tool}] cannot stamp the initial field: {e} (FORGE_REQUIRE_VERIFIED_SPECIES=1)")
+        print(f"[{tool}] WARNING: initial field left unverified (no species attributes): {e}")
+        return "unverified"
+    if dst is None:
+        write_species_attrs(h5path, None)
+        return "cpg"
+    probs = check_ic_against_record(dst["record"], h_ref_T, names, MW, mixtures)
+    if probs:
+        write_species_attrs(h5path, None)
+        raise SpeciesCheckError(f"[{tool}] the initial field was generated with thermophysics that differ from the destination "
+                                f"{run_dir} (species_hash {dst['hash'][:16]}); no species attributes attached:\n"
+                                + "".join(f"    {x}\n" for x in probs))
+    write_species_attrs(h5path, {"species_hash": dst["hash"], "species_record_sha256": dst["record"]["integrity"],
+                                 "species_record_file": dst["record_file"], "species_input_unverified": 0})
+    print(f"[{tool}] species: initial field stamped with species_hash {dst['hash'][:16]} (record {dst['record_file']}; "
+          f"datum {dst['record']['thermoHrefTemp']:g} K, species {list(names)})")
+    return "verified"
+
+
+def plan_convert(src_h5, dst_run_dir, src_run_dir=None, forge=None, force=False, tool="convert", inplace=True):
+    """種変換の判定 (書き込み前)。入力を検証し (属性・記録の完全性、SRC config を解決したハッシュ = 場の属性)、
+    変換先を解決する。返り値 = {"attrs": 付ける属性 | None, "dst": resolve 結果 | None}。入力が未検証なら attrs=None。"""
+    st = source_species_state(src_h5)
+    if st["state"] in ("none", "unverified"):
+        _unverified_note(tool, dst_run_dir, st["why"])
+        return {"attrs": None, "dst": None}
+    if st["state"] == "broken":
+        msg = f"SRC {src_h5}: species record cannot be verified: {st['why']} (UNVERIFIABLE)"
+        if force:
+            print(f"[{tool}] WARNING (--force-species): {msg}")
+            return {"attrs": None, "dst": None}
+        raise SpeciesCheckError(msg)
+    rec = st["record"]
+    src_run_dir = os.path.abspath(src_run_dir or os.path.dirname(os.path.abspath(src_h5)))
+    try:
+        srcr = resolve_species(src_run_dir, forge, inplace=False)
+        dst = resolve_species(dst_run_dir, forge, inplace=inplace)
+    except SpeciesResolveUnavailable as e:
+        msg = f"cannot resolve species ({e}); the converted field is left unverified"
+        if strict_species():
+            raise SpeciesCheckError(msg + " (FORGE_REQUIRE_VERIFIED_SPECIES=1)")
+        print(f"[{tool}] WARNING: {msg}")
+        return {"attrs": None, "dst": None}
+    if srcr is None or srcr["hash"] != rec["compat_recomputed"]:
+        diff = _record_diff(rec, srcr["record"]) if srcr else ["source run is calorically perfect"]
+        msg = (f"SRC {src_h5} species_hash {rec['compat_recomputed'][:16]} != the source run config {src_run_dir} "
+               f"({srcr['hash'][:16] if srcr else 'CPG'}); the converter would read the field with other properties:\n"
+               + "".join(f"    {x}\n" for x in diff))
+        if force:
+            print(f"[{tool}] WARNING (--force-species): {msg}")
+            return {"attrs": None, "dst": None}
+        raise SpeciesCheckError(msg)
+    if dst is None:
+        return {"attrs": None, "dst": None}
+    print(f"[{tool}] species: SRC record verified ({rec['compat_recomputed'][:16]} = source config); destination resolved {dst['hash'][:16]}")
+    return {"attrs": {"species_hash": dst["hash"], "species_record_sha256": dst["record"]["integrity"],
+                      "species_record_file": dst["record_file"], "species_input_unverified": 0}, "dst": dst}
 
 
 def main():

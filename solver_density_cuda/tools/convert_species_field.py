@@ -35,6 +35,10 @@ plans/active/thermophysics-cea-mole-fraction-species.md §2 (forge 本体) / §4
   destination DB + 二相 EOS で `roe` を反転した T と source T の差 (乾き・湿潤の全セル, `--T-tol` 既定 0.05 K)、roXi/ρ ∈ [0,1]。
 失敗系の試験: tests/unit/test_convert_species_field_fail.py。
 
+- **化学種の属性** (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3b): 入力が属性と検証できる記録を持つときは、
+  記録の完全性・SRC run の設定を `forge --resolve-species` で解決したハッシュ = 場の属性、を確かめ、宛先 run を解決して
+  変換器が使う宛先の物性 (species_db.yaml + datum) が宛先の記録と一致することを確かめてから、**変換の成功後に宛先のハッシュを付ける**。
+  入力が未検証 (属性なし / `species_input_unverified=1`) なら変換後も未検証 (属性なし)。`--force-species` で検証失敗を無視 (属性なし)。
 - SRC: res_*.h5 (原始量 P,T,Ux,.. + Y{s}) か input h5 (保存量 roY{s})。DST: 同一メッシュ・同一 CV 数の input h5。
   ro/roU/roe/roK/roOmega・凝縮モーメント `rog_*/roQ*_*` (凝縮種が同名のとき) も index コピーする。
 - 両 run dir (`--src-run/--dst-run` 省略時は h5 の隣) の `solverConfig.yaml` + `species_db.yaml` が必須: **トレーサの有無と必須保存量
@@ -50,6 +54,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from total_quantities import _TPGas  # noqa: E402
 from forge_species import species_info, load_yaml_str, species_signature, required_conserved  # noqa: E402
+import forge_species as fsp  # noqa: E402
 
 
 def _up(s):
@@ -358,6 +363,8 @@ def main():
     ap.add_argument("--src-sum-tol", type=float, default=1e-4, help="source の |ΣY−1| の許容 (これを超える source は壊れているとみなす)")
     ap.add_argument("--drop-moments", action="store_true", help="destination が凝縮 OFF のとき source の液相モーメントを捨てる (既定は拒否)")
     ap.add_argument("--dry-run", action="store_true", help="書き込まず検査だけ")
+    ap.add_argument("--forge", help="--resolve-species を持つ forge (既定: FORGE_BIN, solver_density_cuda/build/forge)")
+    ap.add_argument("--force-species", action="store_true", help="入力の化学種記録の検証失敗を無視する (変換後は属性なし = 未検証)")
     a = ap.parse_args()
 
     src_run = a.src_run or os.path.dirname(os.path.abspath(a.src))
@@ -367,6 +374,26 @@ def main():
     print(f"[convert] mode={a.mode}  source {src['names']}  ->  destination {dst['names']}")
     gs, gd = gas_for(src), gas_for(dst)
     eos_s, eos_d = eos_for(src), eos_for(dst)
+    # 化学種の属性 (§4.3): 入力の検証と宛先の解決 (書き込み前)。付ける属性は変換の成功後に書く
+    try:
+        species_plan = fsp.plan_convert(a.src, dst_run, src_run_dir=src_run, forge=a.forge, force=a.force_species,
+                                        tool="convert", inplace=not a.dry_run)
+    except fsp.SpeciesCheckError as e:
+        raise SystemExit(f"[convert] REFUSED (nothing written): {e}")
+    if species_plan["attrs"] is not None:
+        # 変換器が宛先の roe を作る/検査する物性 (species_db.yaml + thermoHrefTemp) がソルバの解決結果と同じか
+        drec = species_plan["dst"]["record"]
+        if gd is None:
+            probs = ["destination species_db.yaml could not be read by the converter"]
+        else:
+            nd_ = len(dst["names"])
+            mixes = [(f"species {nm}", [1.0 if j == i else 0.0 for j in range(nd_)], gd.R[i],
+                      (lambda T, _i=i: gd.h([1.0 if j == _i else 0.0 for j in range(nd_)], T) - gd.R[_i] * T))
+                     for i, nm in enumerate(dst["names"])]
+            probs = fsp.check_ic_against_record(drec, dst["Tref"], dst["names"], [float(sp_["MW"]) for sp_ in gd.sp], mixes)
+        if probs:
+            raise SystemExit("[convert] REFUSED (nothing written): the converter's destination thermophysics differ from "
+                             f"the destination record (forge --resolve-species):\n" + "".join(f"    {x}\n" for x in probs))
 
     # ---- source 読込 (必須データセットの存在を先に検査; codex result-2 M2) ----
     ns = len(src["names"])
@@ -653,6 +680,7 @@ def main():
 
     # ---- 書き込み (同一メッシュ index コピー; 全検査通過後にだけ既存データセットを削除/再作成) ----
     with h5py.File(a.dst, "r+") as d:
+        fsp.write_species_attrs(d, None)          # 書き込み途中で失敗しても古い属性が残らないように先に消す
         for k in list(d["VALUE"].keys()):
             if (k.startswith("roY") and k[3:].isdigit()) or k.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")) or k == "roXi":
                 del d["VALUE/" + k]
@@ -663,7 +691,10 @@ def main():
             else:
                 d.create_dataset(ds, data=v)
         moved = list(out)
+        fsp.write_species_attrs(d, species_plan["attrs"])
     print(f"[convert] wrote {a.dst}: {moved}")
+    print("[convert] species attributes: " + (f"destination species_hash {species_plan['attrs']['species_hash'][:16]} "
+          "(species_input_unverified=0)" if species_plan["attrs"] else "none (input unverified -> output unverified)"))
     print("[convert] SUMMARY: all checks passed (finite, ρ>0, ΣY, " + ("T, roXi range; reinit: composition re-initialized)" if lossy else "real-species mass, total water, T, roXi range)"))
 
 

@@ -17,10 +17,19 @@ SRC/VALUE に同名があればその値をそのまま書き、無ければ DST
 最後に「SRC と DST が保存量でビット一致すること」を検査し、しなければ**失敗させる**。
 
 メッシュが違うとき (解像度変更・quad↔tri) は本ツールでなく `interp_field.py` を使う。
+
+**化学種の属性** (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3b): 書き込み前に SRC の属性
+(`species_hash` ほか) と SRC の隣の解決済み記録 (完全性ハッシュ再計算) を検証し、宛先 run (`--dst-run`, 既定は DST の隣) を
+`forge --resolve-species` (`--forge` / `FORGE_BIN`) で解決して互換性ハッシュが一致したときだけ属性を DST に継承する
+(記録も DST の隣へ複製)。不一致は差のある係数を示して**書き込まずに停止** (`--force-species` で属性なしのまま通す)。
+SRC が未検証 (属性なし / `species_input_unverified=1`) なら DST の属性を消す (宛先のハッシュで埋めない)。CPG は対象外。
 """
-import argparse, sys
+import argparse, os, sys
 import h5py
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import forge_species as fsp  # noqa: E402
 
 KEEP_FROM_DST = {"wall_dist"}
 
@@ -31,7 +40,20 @@ ap.add_argument("--dry-run", action="store_true", help="書かずに何が起き
 ap.add_argument("--keep-src-dtype", action="store_true",
                 help="DST のデータセットを SRC の型で作り直す (倍精度 res → 倍精度 seed)。"
                      "**FP64 ビルドは倍精度の入力をそのまま読める** ので、倍精度の場を種にするときはこれを使う")
+ap.add_argument("--dst-run", help="宛先 run ディレクトリ (solverConfig.yaml の場所; 既定: DST h5 の隣)")
+ap.add_argument("--forge", help="--resolve-species を持つ forge (既定: FORGE_BIN, solver_density_cuda/build/forge)")
+ap.add_argument("--force-species", action="store_true",
+                help="化学種の不一致・記録の欠落でも保存量を写す (属性は付けない = 未検証のまま)")
 a = ap.parse_args()
+
+# --- 化学種: SRC の記録を検証し、宛先を解決して継承できるか決める (書き込み前; §4.3) ---
+try:
+    species_plan = fsp.plan_inherit(a.src, a.dst_run or os.path.dirname(os.path.abspath(a.dst)), forge=a.forge,
+                                    force=a.force_species, tool="restart_field", inplace=not a.dry_run)
+except fsp.SpeciesCheckError as e:
+    sys.exit(f"[restart_field] REFUSED (nothing written): {e}")
+if not a.dry_run:
+    fsp.write_species_attrs(a.dst, None)      # 書き込み途中で失敗しても古い属性が残らないように先に消す
 
 with h5py.File(a.src, "r") as s, h5py.File(a.dst, "r" if a.dry_run else "r+") as d:
     if "VALUE" not in s or "VALUE" not in d:
@@ -103,5 +125,7 @@ with h5py.File(a.src, "r") as s, h5py.File(a.dst, "r" if a.dry_run else "r+") as
               f"**倍精度の場を種にするなら --keep-src-dtype を使うこと**:")
         for n, rel in narrowed:
             print(f"    {n:<10} 相対 {rel:.3e}")
+    fsp.commit_inherit(d, species_plan)
+    print(f"species 属性  : {'継承 (species_input_unverified=0)' if species_plan else 'なし (未検証のまま)'}")
     print(f"VERDICT: OK ({len(moved)} 量を移した"
           f"{'、うち ' + str(len(narrowed)) + ' 量は型の縮小で丸めあり' if narrowed else '、SRC とビット一致'})")

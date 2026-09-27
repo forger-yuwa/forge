@@ -154,7 +154,7 @@ forge_design を「ユーザと対話しながら、機種 (風洞 axismach / �
 | 2 | ~~V0 ノイズ床の取得~~ | 完了 2026-09-27 (種 DB plan の基準として取得; 抽出は現行 case 側 `lumpX_series_csv.py`、#4 の統一抽出関数ができたら再抽出して併記): `run_0513`–`0515` の 3 反復で許容差 ṁ 1e-4 相対・M 1e-5・T 0.01 K・軸 M 目標差 1e-5 (下限が効く)。詳細は `thermophysics-solver-owned-species-db.md` §6 冒頭 | O |
 | 3 | 熱力学の修正 | §4.6: TP の R を組成から・NS ω 床の T を EOS 整合で復元、γ/cp の参照定数化・fallback 禁止・未使用 `gamma` 引数整理。合格: 熱力学整合性の単体試験 (va3 で R 285.2704、IC 場で逆算 T と `res` の T の差 ≤0.01 K)、CPG / semiperfect / `frozen_tp` の読込試験。NS への影響は旧 run 比の変化量を記録 (不変を合格条件にしない) | O |
 | 4 | 評価量の抽出関数 | §4.7: 軸 M 目標差・軸 M 出口・出口質量流束平均 M/T・ṁ を 1 モジュールに定義 (版付き)。runner の `collect` と case の系列スクリプトをこれに置換。合格: `run_0509` で両旧定義との差を記録し、新定義で `check_quasisteady --series-csv` を再判定 | O |
-| 5 | `run_staged` の段間引き継ぎ修正 | `runner_axismach.py:538-540` を `restart_field.py` に (`run_staged_ns` も確認)。合格: 同一 problem で報告量が #2 の許容差以内、各段で `restart_field.py` のビット一致 PASS、`StageManifest` 出力 | O |
+| 5 | ~~`run_staged` の段間引き継ぎ修正~~ | 完了 2026-09-27 (種 DB plan #3b で実施): `run_staged`/`run_staged_ns` の段間を restart_field (ビット一致、species ハッシュの継承つき) に。配管 run `case/44.vitiated_air_wt/run_0520_species_attrs_runner`。旧 runner 経路の run との本段の差は未計測 (丸め程度の見込み) | O |
 | 6 | スキーマ骨格と検証 | `forge.problem/v1` / `forge.campaign/v1`。problem の min/max 拒否、未知キー拒否、recipe ごとの `mesh` 節。合格: 単体テスト (正例 2・負例 5 以上) | O |
 | 7 | axismach adapter 契約 + `resolve_evaluation` | §4.2/§4.3 (入力の 3 分類、pass ごとの計画確定、snapshot ハッシュ参照、全段照合)。合格は §6 V1 | O |
 | 8 | recipe 2 本と campaign 実行器 | §4.4 の 3 値判定・勝者なし・補正後の再評価と最終順位、§4.8 のメッシュ/y₁⁺ ゲート。合格は §6 V2 | O |

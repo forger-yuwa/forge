@@ -24,6 +24,7 @@ from ..meshing.mesh_sern import PHYS_SERN, SernMeshParams, generate_sern_mesh, w
 from ..metrics.sern_forces import force_history, write_force_history_csv
 from ..metrics.sern_gates import evaluate_gates, forge_rc_from_log
 from ..probdef import Problem, dv_value, load_problem
+from .ic import _forge_species
 
 # リポジトリ位置から導く (AWS など別マシンでも動くように。FORGE_ROOT で上書き可)
 FORGE_ROOT = Path(os.environ.get("FORGE_ROOT", Path(__file__).resolve().parents[3]))
@@ -459,6 +460,20 @@ def paste_region_ic(h5path, y_mid, y_top, scale: float, st: dict, gamma: float, 
         write_ic_arrays(f["/VALUE"], arrays); return n
 
 
+def stamp_region_ic_species(h5path, run_dir, st: dict, gases: dict | None) -> str | None:
+    """新規初期場 (paste_region_ic) に化学種の属性を付ける (frozen_tp のみ; plan thermophysics-solver-owned-species-db §4.3 #3b)。
+    IC が roe を作った排気・外気のガス (datum・輸送種組成・R・e_sens) を宛先の `forge --resolve-species` の記録と照合し、
+    一致したときだけ付ける (違えば forge_species.SpeciesCheckError)。cpg は何もしない。"""
+    if gases is None or st.get("gas_model") != "frozen_tp":
+        return None
+    L = gases["layout"]
+    species = list(L.species)
+    mixes = [("exhaust", st["exhaust"]["Y"], gases["exhaust"].R, gases["exhaust"].e_sens),
+             ("external", st["ext"]["Y"], gases["ext"].R, gases["ext"].e_sens)]
+    return _forge_species().stamp_new_field(h5path, run_dir, species, [float(L.entries[k].MW) for k in species],
+                                            gases["href_T"], mixes, tool="paste_region_ic")
+
+
 def convert_mesh(run_dir, msh: str, out: str) -> None:
     """gmsh msh → forge h5。**exit code で判定しない**: 一部の環境 (AWS g5 / CUDA 13) で converter は
     h5 を書き切ってから終了時に `GPUassert: invalid argument` を出して非零で抜ける (既知・無害)。
@@ -540,6 +555,7 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     n_moc = paste_region_ic(run_dir / MESH, y_mid, y_top, H, st, p.gamma,
                            kern=(kern if _ic == "moc" else None),
                            gas=((_gs or {}).get("exhaust")))
+    stamp_region_ic_species(run_dir / MESH, run_dir, st, _gs)     # 新規初期場の化学種属性 (TP のみ)
     ex = st["exhaust"]
     F_ideal_nd, M_e_id = ideal_thrust(p, st)
     info = {"problem": str(problem_path), "run_dir": str(run_dir), "nsteps": n, "H_m": H, "states": st, "gas_model": st["gas_model"],
@@ -629,6 +645,13 @@ def restart_by_index(res_h5, mesh_h5) -> None:
     ノードに写す → 排気側の壁ノードが外部流の圧力を持ち 2 次で発散した (interp_field の全 134 station で誤写像を確認)。"""
     check_species_compatible(Path(res_h5).parent, Path(mesh_h5).parent, "restart_by_index")
     sig = _species_signature(Path(mesh_h5).parent)
+    # 化学種の属性 (§4.3): SRC の記録を検証し、宛先を --resolve-species で解決して一致なら継承 (不一致は書き込み前に停止)
+    fsp = _forge_species()
+    try:
+        species_plan = fsp.plan_inherit(res_h5, Path(mesh_h5).parent, tool="restart_by_index")
+    except fsp.SpeciesCheckError as e:
+        raise ValueError(f"restart_by_index: {e}") from None
+    fsp.write_species_attrs(mesh_h5, None)
     with h5py.File(res_h5, "r") as src, h5py.File(mesh_h5, "r+") as dst:
         n = len(dst["VALUE/ro"])
         if sig is not None:
@@ -642,6 +665,7 @@ def restart_by_index(res_h5, mesh_h5) -> None:
                         dst["VALUE"].create_dataset(k, data=np.asarray(src["VALUE"][k][:], dtype=np.float32))
                     continue
                 dst["VALUE"][k][:] = src["VALUE"][k][:]
+        fsp.commit_inherit(dst, species_plan)
 
 
 def warm_from_run(dst_run_dir, src_run_dir) -> dict:
@@ -674,6 +698,13 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
         check_species_compatible(src_run_dir, dst_run_dir, "warm_from_run", allow_db_change=True)   # codex result M3
         # 作動点適用後の組成で擬似種を作る (prepare_info の problem は作動点未適用の YAML なので op を再選択)
         pd_ = load_problem(di["problem"]); select_operating_point(pd_, di["operating_point"]["name"]); gases_d = frozen_gases(pd_)
+    # 化学種の属性 (§4.3「種変換」と同じ扱い): roe は目標作動点の物性で作り直すので、入口 (元 res) が検証済みなら
+    # 書き込み後に宛先の記録と照合して付ける。元が未検証なら宛先も未検証 (属性なし)。記録が壊れていれば止める
+    fsp = _forge_species()
+    src_state = fsp.source_species_state(res[-1])
+    if src_state["state"] == "broken":
+        raise ValueError(f"warm_from_run: 元 res の化学種記録を検証できない (照合不能): {src_state['why']}")
+    fsp.write_species_attrs(dst_run_dir / MESH, None)
     with h5py.File(res[-1], "r") as src, h5py.File(dst_run_dir / MESH, "r+") as dst:
         n = len(dst["VALUE/ro"])
         if len(src["VALUE/ro"]) != n:
@@ -722,7 +753,14 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
         if "roK" in src["VALUE"] and "roK" in dst["VALUE"]:
             dst["VALUE/roK"][:] = src["VALUE/roK"][:] * (s_ro * s_u * s_u)
             dst["VALUE/roOmega"][:] = src["VALUE/roOmega"][:] * (s_ro * s_u)
-    return {"src": str(src_run_dir), "s_ro": s_ro, "s_u": s_u, "s_P": s_P, "gamma": [g_s, g_d]}
+    species = "unverified"
+    if gases_d is not None and src_state["state"] == "verified":
+        tg = gases_d["transported"]; Ld = gases_d["layout"]; names = list(Ld.species)
+        mixes = [(f"species {k}", [1.0 if j == i else 0.0 for j in range(len(names))], g.R, g.e_sens)
+                 for i, (k, g) in enumerate(zip(names, tg))]
+        species = fsp.stamp_new_field(dst_run_dir / MESH, dst_run_dir, names, [float(Ld.entries[k].MW) for k in names],
+                                      gases_d["href_T"], mixes, tool="warm_from_run")
+    return {"src": str(src_run_dir), "s_ro": s_ro, "s_u": s_u, "s_P": s_P, "gamma": [g_s, g_d], "species_attrs": species}
 
 
 def run_forge(run_dir) -> int:

@@ -5,8 +5,21 @@ case/29.bell_vs_conical/mesh/set_isentropic_ic.py と同方式だが、contour C
 """
 from __future__ import annotations
 
+import os
+import sys
+from pathlib import Path
+
 import h5py
 import numpy as np
+
+
+def _forge_species():
+    """solver_density_cuda/tools/forge_species.py (化学種の解決済み記録・属性の共通 API)。"""
+    tools = str(Path(os.environ.get("FORGE_ROOT", Path(__file__).resolve().parents[3])) / "solver_density_cuda" / "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import forge_species
+    return forge_species
 
 
 def area_ratio(M, g):
@@ -65,10 +78,7 @@ def paste_isentropic_ic(h5path, wall, scale, Pt, Tt, gamma, cp,
             ro = P / (R_gas * T)
             gam_loc = gas.gamma(T)
             u = M * np.sqrt(gam_loc * R_gas * T)
-            e_int = gas.h_mass(T) - R_gas * T                 # TP 内部エネルギー
-            if h_ref_T is not None and h_ref_T > 0.0:
-                # forge の thermoHrefTemp と同じ sensible datum (h(T_ref)=0)。基準が食い違うと step 0 で T が跳ぶ
-                e_int = e_int - float(gas.h_mass(h_ref_T)[0])
+            e_int = _ic_e_int(gas, T, h_ref_T)                # TP 内部エネルギー (stamp_isentropic_ic_species が同じ式を照合する)
             roe = ro * e_int + 0.5 * ro * u * u
         else:
             M = invert_area_ratio(AR, xn >= x_thr, g)
@@ -97,6 +107,31 @@ def paste_isentropic_ic(h5path, wall, scale, Pt, Tt, gamma, cp,
                 f.create_dataset(f"/VALUE/{name}", data=v32)
     ie = int(np.argmax(xn))
     return {"M_exit_1d": float(M[ie]), "P_exit_1d": float(P[ie]), "T_exit_1d": float(T[ie])}
+
+def _ic_e_int(gas, T, h_ref_T):
+    """semi-perfect IC の内部エネルギー e(T)=h(T)−RT [J/kg]。h_ref_T>0 なら forge の thermoHrefTemp と同じ
+    sensible datum (h(T_ref)=0)。基準が食い違うと step 0 で T が跳ぶ。"""
+    e_int = gas.h_mass(T) - gas.R * np.asarray(T, dtype=float)
+    if h_ref_T is not None and h_ref_T > 0.0:
+        e_int = e_int - float(np.ravel(gas.h_mass(np.array([float(h_ref_T)])))[0])
+    return e_int
+
+
+def stamp_isentropic_ic_species(h5path, run_dir, gas, h_ref_T, species: list, species_MW: list,
+                                species_Y: list | None = None, forge=None) -> str:
+    """`paste_isentropic_ic` (semi-perfect) で作った新規初期場に化学種の属性を付ける (plans/active/
+    thermophysics-solver-owned-species-db.md §4.3「新規初期場 = IC 生成処理」, #3b)。
+
+    宛先 run_dir を `forge --resolve-species` で解決し、IC に使った datum (`h_ref_T`)・輸送種の順序 (`species`)・
+    組成を作るのに使った MW (`species_MW`)・内部エネルギー式 (`_ic_e_int` と gas.R) が宛先の記録と一致したときだけ
+    属性 (`species_input_unverified=0`) を付ける。一致しなければ属性を付けずに `forge_species.SpeciesCheckError`。
+    IC の書き込み (と壁速度 0 化など同じ物性での後処理) が終わってから呼ぶ。戻り値: 'verified' | 'cpg' | 'unverified'。"""
+    fs = _forge_species()
+    Y = list(species_Y) if species_Y is not None else [1.0]
+    mixes = [("inflow", Y, gas.R, lambda T: _ic_e_int(gas, T, h_ref_T))]
+    return fs.stamp_new_field(h5path, run_dir, list(species), list(species_MW), h_ref_T, mixes, forge=forge,
+                              tool="paste_isentropic_ic")
+
 
 def _invert_area_ratio_gas(AR, supersonic, gas):
     """A/A* → M (ガスモデルのテーブル、超音速/亜音速枝)。"""

@@ -39,7 +39,7 @@ from ..geometry.wall_axismach import (AxisMachCFDWall, area_ratio_isentropic,
                                       wall_qa)
 from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
-from .ic import paste_isentropic_ic
+from .ic import paste_isentropic_ic, stamp_isentropic_ic_species
 from .runner import FORGE_BUILD, FORGE_TOOLS, PROBE_STUB, _ENV, run_forge
 from .runner_wt import (_bcond, _config_euler, _config_euler_node,
                         _config_sst_node)
@@ -156,6 +156,29 @@ def _tp_species_Y(p: Problem):
     if layout.n == 1:
         return None
     return layout.Y_transport("inflow")
+
+
+def _stamp_ic_species(p: Problem, run_dir) -> str | None:
+    """新規初期場 (paste_isentropic_ic) に化学種の属性を付ける (TP のときだけ; plan thermophysics-solver-owned-species-db
+    §4.3 #3b)。IC と同じ gas・datum・輸送種の順序と MW を宛先の `forge --resolve-species` の記録と照合し、違えば例外で止める。"""
+    if not p.is_semiperfect or str(p.evaluate.get("cfd_gas", "same")) == "cpg":
+        return None
+    layout = p.species_layout()
+    species = list(layout.species)
+    return stamp_isentropic_ic_species(Path(run_dir) / "nozzle.h5", run_dir, p.gas_model,
+                                       float(p.evaluate.get('thermo_href_temp', 298.15)), species,
+                                       [float(layout.entries[s].MW) for s in species], _tp_species_Y(p))
+
+
+def _restart_same_mesh(res_h5, mesh_h5) -> None:
+    """同一メッシュの段間引き継ぎ: `restart_field.py` (保存量の index コピー、SRC とビット一致を検査; 化学種の属性を継承)。
+    `interp_field.py` (cross-mesh 用) は原始量から保存量を組み直すので同一メッシュには使わない (AGENTS.md「メッシュ変更後の restart」)。"""
+    r = subprocess.run([sys.executable, str(FORGE_TOOLS / "restart_field.py"), str(res_h5), str(mesh_h5)],
+                       env=_ENV, capture_output=True, text=True)
+    with (Path(mesh_h5).parent / "restart_field.log").open("a") as f:
+        f.write(r.stdout + r.stderr)
+    if r.returncode != 0:
+        raise RuntimeError(f"restart_field.py が失敗 ({res_h5} -> {mesh_h5}):\n{r.stdout[-2000:]}{r.stderr[-2000:]}")
 
 
 def _species_info(p: Problem) -> dict | None:
@@ -487,6 +510,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
                         gas=(None if str(p.evaluate.get('cfd_gas', 'same')) == 'cpg' else p.gas_model),
                         h_ref_T=float(p.evaluate.get('thermo_href_temp', 298.15)),
                         species_Y=_tp_species_Y(p))
+    _stamp_ic_species(p, run_dir)          # 新規初期場の化学種属性 (ic_from ならこの後 interp_field が継承/消去を決める)
     if ic_from is not None:
         src = sorted(Path(ic_from).glob("res_[0-9]*.h5"),
                      key=lambda f: int("".join(c for c in f.stem if c.isdigit())))[-1]
@@ -535,9 +559,7 @@ def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, 
                      key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res or int("".join(c for c in res[-1].stem if c.isdigit())) < nsteps:
             raise RuntimeError(f"{label} 段が失敗 (発散切り分けは res_nan_*.h5 を見る)")
-        subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"),
-                        str(res[-1]), str(run_dir / mesh_h5)],
-                       env=_ENV, check=True, capture_output=True, text=True)
+        _restart_same_mesh(res[-1], run_dir / mesh_h5)      # 同一メッシュ: index コピー (旧: interp_field.py)
         for f in run_dir.glob("res_*"):
             f.unlink()
 
@@ -802,6 +824,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                         gas=(None if str(p.evaluate.get('cfd_gas', 'same')) == 'cpg' else p.gas_model),
                         h_ref_T=float(p.evaluate.get('thermo_href_temp', 298.15)),
                         species_Y=_tp_species_Y(p))
+    _stamp_ic_species(p, run_dir)          # 新規初期場の化学種属性 (ic_from ならこの後 interp_field が継承/消去を決める)
     if ic_from is not None:
         src = sorted(Path(ic_from).glob("res_[0-9]*.h5"),
                      key=lambda f: int("".join(c for c in f.stem if c.isdigit())))[-1]
@@ -875,9 +898,7 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
                      key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res or int("".join(c for c in res[-1].stem if c.isdigit())) < nsteps:
             raise RuntimeError(f"段階起動が失敗 (rc={rc}, res={res[-1].name if res else None})")
-        subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"),
-                        str(res[-1]), str(run_dir / "nozzle.h5")],
-                       env=_ENV, check=True, capture_output=True, text=True)
+        _restart_same_mesh(res[-1], run_dir / "nozzle.h5")    # 同一メッシュ: index コピー (旧: interp_field.py)
         for f in run_dir.glob("res_*"):
             f.unlink()
 
