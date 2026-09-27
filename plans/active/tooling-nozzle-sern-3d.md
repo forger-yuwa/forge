@@ -1842,6 +1842,44 @@ $$ z^{\rm in}_i = \big(\tfrac{W}{2} - \tfrac{t_{sw}(x_i)}{2}\big)\, s_{\rm in},\
 `run_0402` の開いた CV のうち側壁タグに属するのは 2 個だけ。**この修正で R5q が直るとは言えない**。ただし自由端の 68 CV は質量・運動量の偽の湧き出しなので、
 力の係数への影響は測り直す必要がある (R5s)。g4 (`run_0422`) の格子で床ノードと開いた CV が重なるかも、同じツールで確かめる (格子は AWS 上)。
 
+### 4.46 R5o-chi + R5s: 現行コードで g3/g4 を取り直した (2026-09-27)
+
+**条件**: 現行コード (chi 既定 auto = 1・スカラー勾配 node 既定 lsq・R5r のメッシャ修正込み、バイナリ `2fa3826c`、
+`FORGE_CUDA_BLOCKSIZE=128`)。起動エコーで両 run とも `slauWallNormalChi` 1 (auto)・`scalarGradient` lsq (default) を確認。
+g3 は旧 `run_0418` と同じ本段 20000 step、g4 は旧 `run_0421`→`run_0422` と同じ本段 20000 + 継続 40000 step。
+継続は `restart_field.py` (9 量ビット一致) で同一設定のまま。
+
+| run | 内容 |
+| --- | --- |
+| `case/46.sern_design/run_0969_3d_g3_chidef` → `run_0971_3d_g3_chidef_cont16k` | g3 段階起動 + 本段 4000 → +16000 (本段計 20000) |
+| `case/46.sern_design/run_0970_3d_g4_chidef` → `run_0972_3d_g4_chidef_cont40k` | g4 段階起動 + 本段 20000 → +40000 |
+
+**力係数** (最終 step。`check_quasisteady` は両 run とも 4 量 **STEADY**。振幅: g3 `C_T_with_shear` 2.2e-6 / `C_M` 9.0e-4、
+g4 `C_T_with_shear` 1.9e-6 / `C_M` 3.4e-4):
+
+| | 新 g3 `run_0971` | 新 g4 `run_0972` | **Δ (g3→g4)** | §8 許容 | 判定 | 旧 Δ (`run_0418`→`run_0422`) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `C_T` | 0.8892245 | 0.8891100 | **−0.00011** | 0.002 | ✅ | −0.00013 |
+| `C_T_with_shear` | 0.8705591 | 0.8703353 | **−0.00022** | 0.002 | ✅ | −0.00024 |
+| `C_L` | 0.0625997 | 0.0639807 | **+0.00138** | 0.002 | ✅ | +0.00145 |
+| `C_M` | −1.6444370 | −1.6849318 | **−0.04049** | 0.05 | ✅ | −0.04173 |
+| `C_T_friction` | −0.0186653 | −0.0187747 | −0.00011 | — | — | −0.00011 |
+
+**GATES**: 新 g3 `PASS`、新 g4 `PASS` (**`floors` 全項目 0**: ρ ≤ 1e-4 が 0 ノード、ρ min 2.45e-3、P min 801 Pa、T min 94.7 K)。
+旧 g4 `run_0422` は同じ段数で `FAIL FLOOR_STUCK` (側壁の壁ノード 8 個が ρ 床 1e-4) だった。
+新 g4 は本段 20000 step の時点でも床 0 (旧 g4 は同時点で 13 ノード)。
+**床が消えた理由は切り分けていない** (chi 既定化・lsq 化・R5r のメッシャ修正を同時に入れている)。R5s(1) (旧格子で床ノードと開いた CV の重なり) は
+旧 run の場が削除済みのため、この床張り付き数の比較で代えた。
+
+**旧列との差** (同じ格子・同じ段数、chi・lsq・メッシャ修正の合算): g3 は `C_T` −0.00005 / `C_T_with_shear` +0.00002 / `C_L` +0.00014 / `C_M` −0.0029、
+g4 は `C_T` −0.00003 / `C_T_with_shear` +0.00004 / `C_L` +0.00007 / `C_M` −0.0017。いずれも §8 の許容の 1/10 以下なので、
+R5o-chi の手順どおり切り分けはしない。
+
+**残差**: `check_convergence` は両 run とも **NOT CONVERGED** (プラトー。g4 継続区間の低下 0.2–0.7 dec、rising なし)。旧 run と同じ性質で、
+**3D の固定点 (前 plan V7) は未解決のまま**。上の判定は §8 の許容と準定常 (STEADY) によるもので、残差の収束は主張しない。
+
+**壁解像は測り直していない** (格子は旧列と同じ。y⁺ は §4.42 の値が目安)。R5s(2) の g1 の取り直しは未実施。
+
 ## 5. 実装ステップ
 
 本体 plan §5 の R4 系を引き継ぐ。着手順は §4.15.3 末尾 (codex plan-3 の指定):
@@ -1870,7 +1908,7 @@ $$ z^{\rm in}_i = \big(\tfrac{W}{2} - \tfrac{t_{sw}(x_i)}{2}\big)\, s_{\rm in},\
 
 | **R5q** | **別 plan へ移管 (2026-09-21, codex plan NO-GO + 方式相談を受けて)**。§4.44 の「座標だけ動かす」設計は**撤回**。接合部のトポロジ (露出カウル側端の壁・側壁下端のノード定義・`ext_top`/`vehicle_side` の座標写像・`L_sw` の物理 station 化・厚み 0 の互換分岐・`half_W_m` と入口項の帳簿・新モード試験一式) を明示設計する**新 plan** を立てる。方式は ~~(a) 自作メッシャ改修で確定~~ **保留に戻した (2026-09-21)**: ユーザから「フィレットを付けてメッシングすることも想定」との要件が後出しで出た。codex 相談はフィレット無しの前提だった。**輪郭面内 (x–y) のフィレットは自作で可** (`ramp_fillet` 実績) だが、**断面内 (y–z) の隅フィレット (側壁×ランプ/カウルの接合隅) はテンソル積構造が壊れ O グリッド等のマルチブロックが要る** = 自作の優位が消える。第三案 **gmsh-OCC + Python API** (msh4.1→`convertGmshToForge` の既存 node 経路に乗る) も候補に追加。論点は y⁺≈1 の 3D 境界層を接合隅で積めるか (case/49 で tet+VL は系統細分不可の実績) と node の混合要素可否。~~フィレットの種類をユーザに確認中~~ → **ユーザ回答 (2026-09-21): 側壁×ランプ/カウルの隅の丸めを含む**。codex 再相談の結果 **(d) gmsh Python API 全ヘキサ・マルチブロック**を推奨 (記録 `2026-09-21-codex-mesh-approach-2.md`)。主方向 x の transfinite ブロック列、側壁終端は専用 3D 接続ブロック、露出カウル側端は独立した物理壁、壁が終わっても格子帯を潰さない。**最初の実証 = 側壁終端を含む 3D 接続模型 (第一層 4 µm・約 40 層、3 解像度、無人)**。ユーザの方式決定待ち。**本 plan の 3D 受理は「厚さ 0 交線に床張り付き 12 ノード / 320 万節点、格子細分で悪化」を既知の限界として明記して締める** | 新 plan (未作成) |
 | ~~R5r~~ (済 2026-09-22: §4.45。格子の段階で確認。開いた CV 18 → 0、`VERDICT: PASS`) | **旧メッシャ: カウル板の自由端の二重節点を共有にする** | `share_cowl_free_edge` (既定 True)。回帰試験 4 件追加 |
-| **R5s** | **R5r の修正の CFD への効き目を測る (AWS)** | (1) `check_dual_closure.py` を g4 `run_0422/sern.h5` に掛け、R5q の床ノード 12 個が開いた CV と重なるかを見る。(2) g1 (`problem_3d_prod_m6on_g1.yaml`) を修正後の格子で回し直し、C_T・C_L・C_M と ρ min の差を出す。差が許容 (0.002 / 0.002 / 0.05) を超えるなら g 系列を取り直す |
+| **R5s** (**(1) は 2026-09-27 に代替で済** §4.46: 新 g4 の床張り付き 0。**(2) g1 の取り直しは未**) | **R5r の修正の CFD への効き目を測る (AWS)** | (1) `check_dual_closure.py` を g4 `run_0422/sern.h5` に掛け、R5q の床ノード 12 個が開いた CV と重なるかを見る。(2) g1 (`problem_3d_prod_m6on_g1.yaml`) を修正後の格子で回し直し、C_T・C_L・C_M と ρ min の差を出す。差が許容 (0.002 / 0.002 / 0.05) を超えるなら g 系列を取り直す |
 
 | ~~R5j~~ | **R5q に統合 (2026-09-21)**: カウル側端テーパ `sz` を廃すことで、「最後の 2 z-セル」で物理幅が決まる問題 (`nz_in` 25→57 で 0.868 → 0.00949 mm、91 倍) が消える | §4.44-3 |
 
@@ -1885,7 +1923,7 @@ $$ z^{\rm in}_i = \big(\tfrac{W}{2} - \tfrac{t_{sw}(x_i)}{2}\big)\, s_{\rm in},\
 
 | R5c | ~~SST 壁関数の壁モデル渦粘性に上限~~ **優先度低下 (2026-09-20)**: 壁関数を使わない方針になったため。欠陥の記録は §4.25 に残す。将来 `wallTreatmentSST: 1` を復活させるなら必須 |
 | R4d | **幅外を開いた後の遠方境界・領域独立性** (codex M4): `side_far` の slip 固定 (反射) を見直し、生産 TP・SST で $C_L/C_M$ まで含めた領域独立性を測る。許容値を係数ごとに数値で固定 | `r4_domain_study.py` は加速点 Euler・$C_T$ のみ |
-| **R5o-chi** (**2026-09-27 着手、R5s と合わせて実施**: 現行コード (chi 既定 auto = 1 [plan convection-slau-wall-normal-chi-default accepted]・スカラー勾配の node 既定 lsq [plan gradient-scalar-lsq-unification accepted]・R5r のメッシャ修正 `share_cowl_free_edge` 込み) で g3 `problem_3d_prod_m6on_wallres.yaml` と g4 `problem_3d_prod_m6on_g4.yaml` を runner_sern3d で回し直し、g4 は旧 run_0422 と同じく定常化まで継続。判定は §8 の許容 (Δ(g3→g4) C_T・C_L 0.002、C_M 0.05)、GATES (特に旧 g4 の FLOOR_STUCK = 側壁 8 節点の床が消えるか)、`check_quasisteady`。旧列 (run_0418/0422) との差は chi・lsq・メッシャ修正が混ざるので、差が許容を超えたときだけ切り分ける。R5s(1) の旧格子での照合は、旧 run の場が削除済みで床ノード ID が得られないため、新 g4 の床張り付き数で代える) | **R5n 型の格子収束列を `space.slauWallNormalChi: 1` で再取得** (2026-09-25 委譲、元: [`convection-slau-wall-normal-chi-usage-rule.md`](../accepted/convection-slau-wall-normal-chi-usage-rule.md) §5.1 #7)。3D 生産は flag 0 で解を持たず常に flag 1 なので、決めるべきは flag 1 の生産解の格子収束。メッシュ生成コマンドと `FORGE_CUDA_BLOCKSIZE` を run に記録。**3D の固定点 (前 plan V7 のドリフト減衰) も未解決のまま**ここに属する | 許容は §8 (R5n)。前 plan [`convection-slau-wall-normal-chi.md`](../accepted/convection-slau-wall-normal-chi.md) §5.1 #9b・V7 |
+| ~~**R5o-chi**~~ (**完了 2026-09-27 (§4.46)**: 新 g3 `run_0971`/新 g4 `run_0972` とも `GATES: PASS`・4 量 STEADY、Δ(g3→g4) `C_T` −0.00011 / `C_T_with_shear` −0.00022 / `C_L` +0.00138 / `C_M` −0.04049 で**全て §8 許容内**、旧 g4 の FLOOR_STUCK は**床 0 に** (理由は未切り分け)。旧列との差は許容の 1/10 以下。残差はプラトー (V7 は未解決)。当初の範囲: 現行コード (chi 既定 auto = 1 [plan convection-slau-wall-normal-chi-default accepted]・スカラー勾配の node 既定 lsq [plan gradient-scalar-lsq-unification accepted]・R5r のメッシャ修正 `share_cowl_free_edge` 込み) で g3 `problem_3d_prod_m6on_wallres.yaml` と g4 `problem_3d_prod_m6on_g4.yaml` を runner_sern3d で回し直し、g4 は旧 run_0422 と同じく定常化まで継続。判定は §8 の許容 (Δ(g3→g4) C_T・C_L 0.002、C_M 0.05)、GATES (特に旧 g4 の FLOOR_STUCK = 側壁 8 節点の床が消えるか)、`check_quasisteady`。旧列 (run_0418/0422) との差は chi・lsq・メッシャ修正が混ざるので、差が許容を超えたときだけ切り分ける。R5s(1) の旧格子での照合は、旧 run の場が削除済みで床ノード ID が得られないため、新 g4 の床張り付き数で代える) | **R5n 型の格子収束列を `space.slauWallNormalChi: 1` で再取得** (2026-09-25 委譲、元: [`convection-slau-wall-normal-chi-usage-rule.md`](../accepted/convection-slau-wall-normal-chi-usage-rule.md) §5.1 #7)。3D 生産は flag 0 で解を持たず常に flag 1 なので、決めるべきは flag 1 の生産解の格子収束。メッシュ生成コマンドと `FORGE_CUDA_BLOCKSIZE` を run に記録。**3D の固定点 (前 plan V7 のドリフト減衰) も未解決のまま**ここに属する | 許容は §8 (R5n)。前 plan [`convection-slau-wall-normal-chi.md`](../accepted/convection-slau-wall-normal-chi.md) §5.1 #9b・V7 |
 
 ## 6. 検証
 
