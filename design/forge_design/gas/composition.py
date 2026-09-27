@@ -574,6 +574,88 @@ def write_species_files(layout: SpeciesLayout, run_dir) -> None:
     (rd / "species_meta.yaml").write_text(yaml.safe_dump(species_meta(layout), sort_keys=False, allow_unicode=True))
 
 
+def write_species_meta(layout: SpeciesLayout, run_dir) -> None:
+    """`species_meta.yaml` だけを書く (機械可読メタ; 熱物性の係数は入れない)。"""
+    import yaml
+    (Path(run_dir) / "species_meta.yaml").write_text(yaml.safe_dump(species_meta(layout), sort_keys=False, allow_unicode=True))
+
+
+# ---------------------------------------------------------------- ソルバ config の lump 記法 (plan thermophysics-solver-owned-species-db §4.7 #9)
+
+def solver_builtin_names() -> set:
+    """ソルバの内蔵 DB (共通データ `legacy_builtin: solver` の種) が解決できる名前 (ID と別名、大文字化)。
+    ソルバは現状、名前を大小文字無視で引く (speciesDB.cpp; canonical ID 化は plan #8)。"""
+    import yaml
+    from .semiperfect import SPECIES_DATA_FILE
+    raw = yaml.safe_load(Path(SPECIES_DATA_FILE).read_text(encoding="utf-8"))
+    out = set()
+    for e in raw["species"]:
+        if "solver" in (e.get("legacy_builtin") or []):
+            out.add(str(e["id"]).upper())
+            out.update(str(a).upper() for a in (e.get("aliases") or []))
+    return out
+
+
+def solver_species_config(layout: SpeciesLayout) -> tuple:
+    """輸送種配置をソルバ config に翻訳する。返り値 (items, external):
+    items    = `physProp.species` の要素 (lump は {"name", "lump": {構成種: lump 内モル分率 (全桁)}, "basis": "mole"}、他は種名)。
+               lump の係数はソルバが起動時に合成する (合成済み擬似種の NASA-9 は run に書かない)。
+    external = `speciesDBFile` に置く実種の**生の**エントリ {種名: SpeciesEntry} (合成値は含まない)。ソルバ内蔵で解決できない種、
+               および外部 DB (`gas.species_db`) 由来で内蔵値を上書きしている種 (輸送種と lump の構成種) だけ。空なら DB ファイル不要。"""
+    builtin = solver_builtin_names()
+    external = {}
+
+    def _need(name):
+        e = layout.db[name]
+        if e.source != BUILTIN_SOURCE or str(name).upper() not in builtin:
+            external[e.name] = e
+
+    items = []
+    for s in layout.species:
+        if s in layout.lumps:
+            members = layout.lumps[s]["members"]
+            for k in members:
+                _need(k)
+            items.append({"name": s, "lump": {k: float(v) for k, v in members.items()}, "basis": "mole"})
+        else:
+            _need(s)
+            items.append(s)
+    return items, external
+
+
+def physprop_species_flow(items) -> str:
+    """`solver_species_config` の items を solverConfig.yaml の flow 表記にする。種名は引用符付き (NO/N/Y の真偽値化を防ぐ)、
+    分率は repr (double の全桁; ソルバの合成が設計側の値とビット単位で同じ入力を受け取る)。"""
+    out = []
+    for it in items:
+        if isinstance(it, dict):
+            lump = ", ".join(f'"{k}": {float(v)!r}' for k, v in it["lump"].items())
+            out.append(f'{{name: "{it["name"]}", lump: {{{lump}}}, basis: {it["basis"]}}}')
+        else:
+            out.append(f'"{it}"')
+    return "[" + ", ".join(out) + "]"
+
+
+def species_db_raw_yaml(entries: dict) -> str:
+    """実種の生エントリ (内蔵に無い / 外部 DB 由来) の speciesDBFile テキスト。合成済み擬似種は受け付けない。"""
+    out = ["# 実種の生エントリ (CEA 由来の係数そのまま; lump の合成はソルバが起動時に行う)。"
+           "plans/active/thermophysics-solver-owned-species-db.md §4.7"]
+    for name, e in entries.items():
+        if e.lump_of:
+            raise ValueError(f"species_db_raw_yaml: {name} は合成済み擬似種 (生エントリでない)")
+        out.append(f'"{name}":')
+        for k, v in e.to_db_dict().items():
+            if isinstance(v, list):
+                out.append(f"  {k}:")
+                out += [f"  - {_fmt(x)}" for x in v]
+            else:
+                out.append(f"  {k}: {_fmt(v)}")
+        if e.atoms:
+            out.append("  atoms: {" + ", ".join(f"{a}: {n:g}" for a, n in e.atoms.items()) + "}")
+        out.append(f"  # source: {e.source}")
+    return "\n".join(out) + "\n"
+
+
 def _exhaust_fraction_spec(layout: SpeciesLayout) -> dict | None:
     """排気率 ξ の取り方 (メタに保存): tracer なら `Xi` (primitive) / `roXi`、無ければ純粋な流入元ラベルの輸送種 `Y{i}`。"""
     if "inflow" not in layout.streams or "external" not in layout.streams:

@@ -40,7 +40,7 @@ from ..geometry.wall_axismach import (AxisMachCFDWall, area_ratio_isentropic,
 from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
 from .ic import paste_isentropic_ic, stamp_isentropic_ic_species
-from .runner import FORGE_BUILD, FORGE_TOOLS, PROBE_STUB, _ENV, run_forge
+from .runner import FORGE_TOOLS, PROBE_STUB, _ENV, converter_path, run_forge
 from .runner_wt import (_bcond, _config_euler, _config_euler_node,
                         _config_sst_node)
 
@@ -92,9 +92,11 @@ def _gam_or_gas(p: Problem):
 
 
 def _apply_gas_to_config(cfg: str, p: Problem, run_dir) -> str:
-    """semi-perfect のとき forge config を **単一擬似種 TP** (thermalMethod 2) に書き換え、
-    NASA-9 混合擬似種を run_dir/species_db.yaml へ出す。cpg なら無変更。
-    設計 (MOC) と同一係数の熱力学で CFD が回る (forge 内蔵 DB と同じ CEA 値)。"""
+    """semi-perfect のとき forge config を TP (thermalMethod 2) に書き換える。cpg なら無変更。
+    `physProp.species` には種名と lump の構成 (構成種と全桁の lump 内モル分率, basis: mole) だけを書き、lump の係数は
+    ソルバが起動時に合成する (plan thermophysics-solver-owned-species-db §4.7 #9; 合成済み擬似種の species_db.yaml は作らない)。
+    ソルバ内蔵で解決できない実種 (外部 DB `gas.species_db` 由来など) があるときだけ、その生エントリを
+    species_db_external.yaml に置いて speciesDBFile で渡す。設計 (MOC) と CFD は同じ共通データの係数を使う。"""
     # 切り分け用: evaluate.axisym_method で CPG でも SU2 流軸対称に切替可
     if int(p.evaluate.get("axisym_method", 0)) == 1:
         cfg = cfg.replace("isAxisymmetric: 1", "isAxisymmetric: 1, axisymMethod: 1", 1)
@@ -102,13 +104,19 @@ def _apply_gas_to_config(cfg: str, p: Problem, run_dir) -> str:
         # cfd_gas: cpg = 設計は semi-perfect のまま CFD だけ CPG(γ*, cp 参照値) で回す
         # (TP × node 軸対称の forge 側発散 [case/42 run_0001] の回避。相対比較には十分)
         return cfg
-    from ..gas.composition import write_species_files
+    from ..gas.composition import (physprop_species_flow, solver_species_config, species_db_raw_yaml,
+                                   write_species_meta)
     # 統一スキーマ (plan thermophysics-cea-mole-fraction-species §4.5): evaluate.tp_species {mode: full|lumped, lumps, keep}
-    # (旧 pseudo / split_h2o は別名) を解決済み DB で輸送種配置に解決し、species_db.yaml (由来コメント付き) + species_meta.yaml を書く
+    # (旧 pseudo / split_h2o は別名) を解決済み DB で輸送種配置に解決し、config の species (lump 記法) と species_meta.yaml を書く
     layout = p.species_layout()
     species_list = list(layout.species)
-    write_species_files(layout, run_dir)
-    # thermalMethod 0 → 2、species/speciesDBFile を physProp に追加 (cp/gamma は参照値のまま
+    items, external = solver_species_config(layout)
+    write_species_meta(layout, run_dir)
+    db_key = ""
+    if external:
+        (Path(run_dir) / "species_db_external.yaml").write_text(species_db_raw_yaml(external))
+        db_key = ', speciesDBFile: "species_db_external.yaml"'
+    # thermalMethod 0 → 2、species (/speciesDBFile) を physProp に追加 (cp/gamma は参照値のまま
     # 残すが TP では NASA-9 が優先される)
     cfg = cfg.replace("thermalMethod: 0", "thermalMethod: 2", 1)
     # [2026-08-16] nodeAxisDirichlet は撤去済み (node は軸ノードを DOF として解く整合セットが常時 ON、
@@ -121,10 +129,10 @@ def _apply_gas_to_config(cfg: str, p: Problem, run_dir) -> str:
     # (case/42 run_0020–0025 で切り分け: 一定 cp 種/陽解法は完走、実 NASA-9 + 陰解法だけ発散、
     #  thermoHrefTemp 298.15 で完走)。IC の roe も同じ datum で作る (paste_isentropic_ic の h_ref)。
     href = float(p.evaluate.get("thermo_href_temp", 298.15))
-    sp_txt = "[" + ", ".join(f'"{k}"' for k in species_list) + "]"   # 引用符付き: NO/N/Y は無引用だと YAML 1.1 で真偽値になる (codex result M1)
+    sp_txt = physprop_species_flow(items)   # 引用符付き: NO/N/Y は無引用だと YAML 1.1 で真偽値になる (codex result M1)
     cfg = cfg.replace("cp: %s, gamma: %s}" % (p.cp, p.gamma),
-                      "cp: %s, gamma: %s,\n           species: %s, speciesDBFile: \"species_db.yaml\", thermoHrefTemp: %s}"
-                      % (p.cp, p.gamma, sp_txt, href), 1)
+                      "cp: %s, gamma: %s,\n           species: %s%s, thermoHrefTemp: %s}"
+                      % (p.cp, p.gamma, sp_txt, db_key, href), 1)
     if f"species: {sp_txt}" not in cfg:
         raise RuntimeError("_apply_gas_to_config: physProp の書き換えに失敗 (テンプレート変更?)")
     # 凝縮 (evaluate.condensation: dict) — forge の condensation ブロックをそのまま通す
@@ -486,7 +494,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     # 品質検査は cell 変換の一時コピー (品質ツールは node CONNE 非対応)
     (run_dir / "solverConfig.yaml").write_text(
         _apply_gas_to_config(_config_euler(p, n, out_int, 4.0, 1), p, run_dir))
-    subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"],
+    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
                             "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
@@ -503,7 +511,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     if implicit_relax is not None:
         cfg_e = cfg_e.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
     (run_dir / "solverConfig.yaml").write_text(cfg_e)
-    subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
+    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
                         float(p.spec["Pt"]), float(p.spec["Tt"]), p.gamma, p.cp,
@@ -801,7 +809,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     # 品質は cell 変換コピーで検査 (品質ツールは node CONNE 非対応)
     (run_dir / "solverConfig.yaml").write_text(
         _apply_gas_to_config(_config_euler(p, n, out_int, 4.0, 1), p, run_dir))
-    subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"],
+    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
                             "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
@@ -817,7 +825,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         # 陰解法の緩和 (cfl 6 + implicitRelax 0.7 が生産推奨: case/45 run_0018)。deltaT ブロックに挿入
         cfg_ns = cfg_ns.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
     (run_dir / "solverConfig.yaml").write_text(cfg_ns)
-    subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
+    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
                         float(p.spec["Pt"]), float(p.spec["Tt"]), p.gamma, p.cp,

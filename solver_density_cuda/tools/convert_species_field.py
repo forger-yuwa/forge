@@ -25,7 +25,7 @@ plans/active/thermophysics-cea-mole-fraction-species.md §2 (forge 本体) / §4
   - source が res (T あり) なら T はソルバの値。input h5 (T なし) なら **ソルバと同じ二相 EOS** で `roe` から反転する:
     e = e_gas(Y_total, T) + g (R_w T − L(T)) (carrier 形, condensationEOS_d.cuh `cond_T_from_e_carrier`)、pure TP は
     e = e_v(T) + g R_mix T − g L(T) (`cond_T_from_e_onetemp`)。L(T) は condensationProperties_d.cuh の `h2o_latent` / `n2_latent` を移植。
-  - DB (`species_db.yaml`) / datum (`thermoHrefTemp`) / 種集合が変わるときは `roe += ρ [e_gas,dst(Y_dst,T) − e_gas,src(Y_src,T)]`
+  - DB (熱物性; `forge_species.run_thermo` = ソルバの解決済み記録か従来の speciesDBFile) / datum (`thermoHrefTemp`) / 種集合が変わるときは `roe += ρ [e_gas,dst(Y_dst,T) − e_gas,src(Y_src,T)]`
     (差分形; 液相項 g(R_w T−L) は不変なので湿潤セルでも正しい)。
 検査 (**1 つでも破れば書き込まず失敗終了**; NaN は必ず失敗になるよう有限性を先に見る, codex result-2 M3):
   source の必須データセット (ro, roUx/Ux, roUy, roUz, roe, roY{s}/Y{s} 全種, tracer なら roXi/Xi) の存在、ρ>0 と全保存量・組成・
@@ -37,11 +37,13 @@ plans/active/thermophysics-cea-mole-fraction-species.md §2 (forge 本体) / §4
 
 - **化学種の属性** (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3b): 入力が属性と検証できる記録を持つときは、
   記録の完全性・SRC run の設定を `forge --resolve-species` で解決したハッシュ = 場の属性、を確かめ、宛先 run を解決して
-  変換器が使う宛先の物性 (species_db.yaml + datum) が宛先の記録と一致することを確かめてから、**変換の成功後に宛先のハッシュを付ける**。
+  変換器が使う宛先の物性 (forge_species.run_thermo の熱物性 + datum) が宛先の記録と一致することを確かめてから、**変換の成功後に宛先のハッシュを付ける**。
   入力が未検証 (属性なし / `species_input_unverified=1`) なら変換後も未検証 (属性なし)。`--force-species` で検証失敗を無視 (属性なし)。
 - SRC: res_*.h5 (原始量 P,T,Ux,.. + Y{s}) か input h5 (保存量 roY{s})。DST: 同一メッシュ・同一 CV 数の input h5。
   ro/roU/roe/roK/roOmega・凝縮モーメント `rog_*/roQ*_*` (凝縮種が同名のとき) も index コピーする。
-- 両 run dir (`--src-run/--dst-run` 省略時は h5 の隣) の `solverConfig.yaml` + `species_db.yaml` が必須: **トレーサの有無と必須保存量
+- 両 run dir (`--src-run/--dst-run` 省略時は h5 の隣) の `solverConfig.yaml` と熱物性 (ソルバの記録 `resolved_species_*.yaml`、
+  無ければ従来の `speciesDBFile`、それも無ければ `forge --resolve-species`) が必須。lump 記法の種は `species_meta.yaml` が無くても
+  記録の lump 構成から展開する: **トレーサの有無と必須保存量
   (`forge_species.required_conserved`) は config から決める**。`species_meta.yaml` は lump の展開・流れ組成・exhaust_fraction に使い、
   config と species の名前/順序または tracer.enabled が矛盾すれば書き込み前に拒否する (codex result-3 M1)。destination config が
   `tracer: exhaust` なら source の `roXi` を必ず持ち越す (conserve) か ρ·ξ で再生成する (reinit)。書き込む配列は 1 つの dict にまとめ、
@@ -185,8 +187,9 @@ def _invert_checked(fails, label, gas, Y, e, T0, g, eos):
 
 
 # ----------------------------------------------------------------------------- 配置の読込
-def load_layout(meta_path, run_dir, label):
-    """{names, expansion, streams, condensing, tracer, MW, db, Tref, condModel, condGasIndex, condensation, has_cfg}。"""
+def load_layout(meta_path, run_dir, label, h5=None):
+    """{names, expansion, streams, condensing, tracer, MW, db, Tref, condModel, condGasIndex, condensation, has_cfg}。
+    熱物性 (db, Tref) は forge_species.run_thermo (h5 の属性が指す記録 > run dir の記録 > speciesDBFile > --resolve-species)。"""
     meta = load_yaml_str(meta_path) if meta_path else None
     has_cfg = bool(run_dir) and os.path.exists(os.path.join(run_dir, "solverConfig.yaml"))
     if not has_cfg:
@@ -206,9 +209,17 @@ def load_layout(meta_path, run_dir, label):
     names = [_up(s) for s in (meta["species"] if meta else info["names"])]
     if info and [_up(s) for s in info["names"]] != names:
         raise SystemExit(f"{label}: species_meta.yaml の species {names} と solverConfig.yaml の physProp.species {info['names']} が矛盾する (REFUSED)")
+    # 熱物性 (plan thermophysics-solver-owned-species-db #8): species_db.yaml を前提にしない
+    th = None; th_why = None
+    try:
+        th = fsp.run_thermo(run_dir, res_path=h5)
+    except ValueError as e:
+        th_why = str(e)
     exp = {}
     for s in names:
         row = (meta or {}).get("expansion", {}).get(s) if meta else None
+        if row is None and th is not None:
+            row = fsp.lump_mass_expansion(th, s)     # config の lump 記法 (記録の lump 内モル分率と構成種 MW から)
         if row is None:
             row = {s: 1.0}
         exp[s] = {_up(k): float(v) for k, v in row.items()}
@@ -237,11 +248,12 @@ def load_layout(meta_path, run_dir, label):
         cfg = load_yaml_str(os.path.join(run_dir, "solverConfig.yaml"))
         pp = cfg.get("physProp") or {}
         Tref = float(pp.get("thermoHrefTemp", 0.0))
-        db_file = pp.get("speciesDBFile")
-        if db_file:
-            p = db_file if os.path.isabs(db_file) else os.path.join(run_dir, db_file)
-            if os.path.exists(p):
-                db = {_up(k): v for k, v in (load_yaml_str(p) or {}).items()}
+        if th is not None:
+            db = {_up(k): v for k, v in th["species"].items()}
+            Tref = float(th["thermoHrefTemp"])
+            print(f"[convert] {label} thermophysics: {th['source']} ({th['how']})")
+        elif int(pp.get("thermalMethod", 0)) == 2:
+            print(f"[convert] {label} thermophysics: unavailable ({th_why})")
         condensation = bool(info["condensation"]); condModel = int(info["condModel"])
         condGasIndex = info["condensing_index"]
     return {"names": names, "expansion": exp, "streams": streams, "stream_Y": stream_Y, "xi_spec": xi_spec,
@@ -369,8 +381,8 @@ def main():
 
     src_run = a.src_run or os.path.dirname(os.path.abspath(a.src))
     dst_run = a.dst_run or os.path.dirname(os.path.abspath(a.dst))
-    src = load_layout(a.src_meta, src_run, "source")
-    dst = load_layout(a.meta, dst_run, "destination")
+    src = load_layout(a.src_meta, src_run, "source", h5=a.src)
+    dst = load_layout(a.meta, dst_run, "destination", h5=a.dst)
     print(f"[convert] mode={a.mode}  source {src['names']}  ->  destination {dst['names']}")
     gs, gd = gas_for(src), gas_for(dst)
     eos_s, eos_d = eos_for(src), eos_for(dst)
@@ -381,10 +393,10 @@ def main():
     except fsp.SpeciesCheckError as e:
         raise SystemExit(f"[convert] REFUSED (nothing written): {e}")
     if species_plan["attrs"] is not None:
-        # 変換器が宛先の roe を作る/検査する物性 (species_db.yaml + thermoHrefTemp) がソルバの解決結果と同じか
+        # 変換器が宛先の roe を作る/検査する物性 (run_thermo の熱物性 + thermoHrefTemp) がソルバの解決結果と同じか
         drec = species_plan["dst"]["record"]
         if gd is None:
-            probs = ["destination species_db.yaml could not be read by the converter"]
+            probs = ["destination thermophysics could not be resolved by the converter"]
         else:
             nd_ = len(dst["names"])
             mixes = [(f"species {nm}", [1.0 if j == i else 0.0 for j in range(nd_)], gd.R[i],
@@ -501,7 +513,7 @@ def main():
         print(f"[convert] source T を SRC DB {'+ 二相 EOS' if eos_s is not None else '(乾き)'} で反転: "
               f"{Tsrc.min():.2f}..{Tsrc.max():.2f} K (湿潤セル {int((g_src > 0).sum())})")
     elif Tsrc is None:
-        raise SystemExit("source が input h5 で T が無く、source の species_db.yaml も読めない (--src-run)")
+        raise SystemExit("source が input h5 で T が無く、source の熱物性 (記録 / speciesDBFile) も解決できない (--src-run)")
 
     # ---- 移送 ----
     xi, xi_how = stream_fraction(src, Ysrc, roXi, ro)
@@ -598,7 +610,7 @@ def main():
     do_rec = (a.reconstruct_roe == "always") or (a.reconstruct_roe == "auto" and (differs or a.mode == "reinit" or (moments and not moments_out)))
     if do_rec:
         if gd is None:
-            raise SystemExit("roe 再構成に destination の species_db.yaml が要る (--dst-run)")
+            raise SystemExit("roe 再構成に destination の熱物性 (記録 / speciesDBFile) が要る (--dst-run)")
         Yl = list(Ydst); Rd = gd.Rmix(Yl)
         e_dst = gd.h(Yl, Tsrc) - Rd * Tsrc
         if gs is not None and roe is not None and (moments_out or not moments):
@@ -620,7 +632,7 @@ def main():
     _check_finite(fails, "roe_out", roe_out)
     _check_finite(fails, "T (source)", Tsrc)
     if gd is None:
-        fails.append("destination の species_db.yaml が読めず T 保存を検査できない")
+        fails.append("destination の熱物性が解決できず T 保存を検査できない")
     elif not fails:
         Tchk = _invert_checked(fails, "destination roe の反転", gd, list(Ydst), roe_out / ro - ke, Tsrc, g_dst, eos_d)
         _check_finite(fails, "T (destination)", Tchk)
@@ -702,7 +714,7 @@ def _db_differs(src, dst):
     if src["Tref"] != dst["Tref"]:
         return True, f"thermoHrefTemp {src['Tref']} -> {dst['Tref']}"
     if src["db"] is None or dst["db"] is None:
-        return True, "species_db.yaml が片方で読めない"
+        return True, "熱物性が片方で解決できない"
     if src["names"] != dst["names"]:
         return True, "species set/order changed"
     for n in dst["names"]:

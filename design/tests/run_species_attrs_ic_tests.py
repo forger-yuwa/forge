@@ -90,8 +90,10 @@ def main():
         design = RA.design_chain(p)
         wall, scale = design["wall"], float(p.spec["r_throat"])
         dB = root / "B"; dB.mkdir()
-        for fn in ("solverConfig.yaml", "bcondConfig.yaml", "species_db.yaml", "species_meta.yaml", "probe.yaml", "nozzle.h5"):
+        for fn in ("solverConfig.yaml", "bcondConfig.yaml", "species_meta.yaml", "probe.yaml", "nozzle.h5"):
             shutil.copy(dA / fn, dB / fn)
+        for fn in dA.glob("species_db*.yaml"):      # 外部 DB の生エントリがあるときだけ (lump は config に書く; plan #9)
+            shutil.copy(fn, dB / fn.name)
         for fn in dA.glob("resolved_species_*.yaml"):
             shutil.copy(fn, dB / fn.name)
         L = p.species_layout(); species = list(L.species); MW = [float(L.entries[s].MW) for s in species]

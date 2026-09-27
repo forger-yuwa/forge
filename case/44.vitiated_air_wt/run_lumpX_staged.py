@@ -5,7 +5,7 @@
 
 run dir は `runner_axismach --prepare-only --cfl 6 --implicit-relax 0.7` で作ったもの。
 - 入口 bcond の Y0/Y1 (質量分率) を lump (MIXDRY/H2O) のモル分率 X0/X1 に置き換える
-  (値は prepare_info.json の正規化済みモル分率。forge が species_db の MW で Y に換算する)。
+  (値は prepare_info.json の正規化済みモル分率。forge が解決済み物性 (lump はソルバが合成) の MW で Y に換算する)。
 - 段階起動 (recommended-settings §1.2): S0_soft (1 次, cfl 0.5, nStepInner 10, 3000) →
   S1_mid (1 次, cfl 1.0, nStepInner 10, 3000) → S2_main (2 次, cfl 6 + implicitRelax 0.7, nStepInner 4)。
 - 段間は同一メッシュなので restart_field.py (保存量の index コピー)。runner の run_staged は

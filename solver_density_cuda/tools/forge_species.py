@@ -33,6 +33,12 @@ Python:
   find_record(h5, dirs)        # 属性の完全性ハッシュに一致する記録を h5 の隣 (と dirs) から探す
   signature_from_record(rec)   # 記録から compare_signatures 用の署名 (全種の係数込み)
 
+  熱物性の読み出し (#8/#9; species_db.yaml を前提にしない):
+  run_thermo(run_dir, res_path)   # 種ごとの係数・MW・区間・LJ・datum・lump 構成。res の属性が指す記録 > run dir の記録 >
+                                  # 従来の speciesDBFile > forge --resolve-species の順 (source="record"|"speciesDBFile" で限定)
+  thermo_gas(th, names)           # その物性の凍結組成混合 _TPGas (total_quantities.py と同じ範囲外規約)
+  lump_mass_expansion(th, name)   # lump の lump 内質量分率 {構成種: y}
+
   入口での属性の扱い (#3b; 属性はその保存量を生成した処理が付ける):
   resolve_species(run_dir)     # `forge --resolve-species` (FORGE_BIN / --forge; GPU 不要) で宛先の互換性ハッシュと記録を得る
   stamp_new_field(h5, run_dir, names, MW, h_ref_T, mixtures)   # 新規初期場: IC の datum・順序・MW・e(T) が記録と一致したら付与
@@ -374,6 +380,128 @@ def signature_from_record(rec):
             "MW": [e["MW"] for e in rec["species"]], "thermoHrefTemp": rec["thermoHrefTemp"],
             "species": {e["name"]: dict(e) for e in rec["species"]}, "compat_hash": rec["compat_recomputed"],
             "speciesDBFile": (rec["provenance"] or {}).get("speciesDBFile")}
+
+
+def _thermo_entry(e):
+    """記録の種 / speciesDBFile のエントリ → run_thermo の種エントリ (絶対基準の係数; datum は thermoHrefTemp で別に持つ)。"""
+    out = {"MW": float(e["MW"]), "Tlo": float(e.get("Tlo", 200.0)), "Tmid": float(e.get("Tmid", 1000.0)),
+           "Thi": float(e.get("Thi", 6000.0)),
+           # LJ の既定値は C++ speciesDB_resolve の speciesDBFile 読込と同じ (3.6 Å / 97 K)
+           "LJ_sigma": float(e.get("LJ_sigma", 3.6)), "LJ_eps_kB": float(e.get("LJ_eps_kB", 97.0)),
+           "nasa9_low": [float(x) for x in e["nasa9_low"]], "nasa9_high": [float(x) for x in e["nasa9_high"]],
+           "lump": e.get("lump")}
+    if len(out["nasa9_low"]) != 9 or len(out["nasa9_high"]) != 9:
+        raise ValueError("nasa9 係数が 9 個でない")
+    return out
+
+
+def _thermo_from_record(rec, how):
+    return {"source": "record", "how": how, "path": rec["path"], "names": [e["name"] for e in rec["species"]],
+            "thermoHrefTemp": rec["thermoHrefTemp"], "compat_hash": rec["compat_recomputed"],
+            "species": {e["name"]: _thermo_entry(e) for e in rec["species"]}}
+
+
+def run_thermo(run_dir, res_path=None, source="auto", forge=None):
+    """run の熱物性を 1 か所で読む (plans/active/thermophysics-solver-owned-species-db.md §4.6, #8)。後処理・種変換・入口分布・
+    設計 runner の署名はこれを使い、`species_db.yaml` の存在を前提にしない。
+    返り値: {source: record|speciesDBFile|resolve, how, path, names (physProp.species の順), thermoHrefTemp, compat_hash (記録のときだけ),
+             species: {name: {MW, Tlo, Tmid, Thi, LJ_sigma, LJ_eps_kB, nasa9_low, nasa9_high (絶対基準), lump (記録の lump 構成 | None)}}}。
+    source="auto" の優先順:
+      (1) res_path の属性が指すソルバの解決済み記録 (完全性ハッシュを検証; 場を作った物性そのもの)
+      (2) run_dir の記録 resolved_species_*.yaml のうち、種名・順序・thermoHrefTemp が solverConfig.yaml と同じもの (互換性ハッシュが 1 通りのとき)
+      (3) 従来の speciesDBFile (記録の無い旧 run。config の全種が DB に必要; lump 記法は読めない)
+      (4) `forge --resolve-species` (一時ディレクトリで解決; 記録がまだ無い prepare 直後の run)
+    source="record" は (1)(2)(4) だけ、source="speciesDBFile" は (3) だけ (旧経路との照合用)。
+    CPG (thermalMethod≠2) は None。どれでも解決できなければ ValueError。"""
+    run_dir = os.path.abspath(run_dir)
+    if source not in ("auto", "record", "speciesDBFile"):
+        raise ValueError(f"run_thermo: source {source!r} は未知 (auto | record | speciesDBFile)")
+    info = species_info_config(run_dir)
+    if info["thermalMethod"] != 2:
+        return None
+    names = info["names"]
+    up = [n.upper() for n in names]
+    notes = []
+    if source in ("auto", "record"):
+        if res_path is not None:
+            st = source_species_state(res_path)
+            if st["state"] == "verified":
+                return _thermo_from_record(st["record"], f"attributes of {os.path.basename(res_path)}")
+            if st["state"] == "broken":
+                print(f"[forge_species] warning: {res_path}: species record cannot be verified ({st['why']}); "
+                      "falling back to the run directory", file=sys.stderr)
+            notes.append(f"{os.path.basename(res_path)}: {st['state']}")
+        recs = {}
+        for fn in sorted(os.listdir(run_dir)):
+            if not re.match(r"resolved_species_[0-9a-f]{16}(?:_[0-9a-f]{16})?\.yaml$", fn):
+                continue
+            rec = load_record(os.path.join(run_dir, fn))
+            if not rec["consistent"]:
+                continue
+            if [e["name"].upper() for e in rec["species"]] != up or rec["thermoHrefTemp"] != info["thermoHrefTemp"]:
+                continue
+            recs.setdefault(rec["compat_recomputed"], rec)
+        if len(recs) == 1:
+            return _thermo_from_record(next(iter(recs.values())), "the only matching record in the run directory")
+        notes.append(f"{len(recs)} matching record(s) in {run_dir}")
+    if source in ("auto", "speciesDBFile") and info["speciesDBFile"]:
+        p = info["speciesDBFile"] if os.path.isabs(info["speciesDBFile"]) else os.path.join(run_dir, info["speciesDBFile"])
+        db = {str(k): v for k, v in (load_yaml_str(p) or {}).items()}
+        missing = [n for n in names if _find_ci(db, n) is None]
+        if not missing:
+            return {"source": "speciesDBFile", "how": "speciesDBFile (no solver record)", "path": p, "names": list(names),
+                    "thermoHrefTemp": info["thermoHrefTemp"], "compat_hash": None,
+                    "species": {n: _thermo_entry(_find_ci(db, n)) for n in names}}
+        notes.append(f"speciesDBFile {os.path.basename(p)} lacks {missing}")
+    elif source == "speciesDBFile":
+        raise ValueError(f"{run_dir}: physProp.speciesDBFile が無い (source=speciesDBFile)")
+    if source in ("auto", "record"):
+        try:
+            r = resolve_species(run_dir, forge, inplace=False)
+        except (SpeciesResolveUnavailable, SpeciesCheckError) as e:
+            notes.append(f"resolve-only unavailable: {e}")
+        else:
+            if r is not None:
+                th = _thermo_from_record(r["record"], "forge --resolve-species (temporary)")
+                th["source"] = "resolve"; th["path"] = None
+                return th
+    raise ValueError(f"{run_dir}: 熱物性を解決できない (species {names}): " + "; ".join(notes))
+
+
+def species_info_config(run_dir):
+    """solverConfig.yaml だけから種の名前・lump・thermalMethod・thermoHrefTemp・speciesDBFile を返す (DB は読まない)。"""
+    cfg = load_yaml_str(os.path.join(run_dir, "solverConfig.yaml")) or {}
+    pp = cfg.get("physProp") or {}
+    tm = int(pp.get("thermalMethod", 0))
+    names = [str(s["name"]) if isinstance(s, dict) else str(s) for s in (pp.get("species") or [])]
+    if tm == 2 and not names:
+        names = ["N2"]
+    return {"thermalMethod": tm, "names": names, "thermoHrefTemp": float(pp.get("thermoHrefTemp", 0.0)),
+            "speciesDBFile": pp.get("speciesDBFile")}
+
+
+def thermo_gas(th, names=None):
+    """run_thermo の結果から、ソルバと同じ範囲外規約の凍結組成混合 _TPGas (total_quantities.py) を作る。names 省略時は th の順序。
+    名前は大小文字を無視して引く (ソルバの解決と同じ)。"""
+    from total_quantities import _TPGas
+    names = list(names) if names is not None else list(th["names"])
+    db = {}
+    for n in names:
+        e = _find_ci(th["species"], n)
+        if e is None:
+            raise KeyError(f"species {n} が解決済み熱物性 ({th['source']}: {th['names']}) に無い")
+        db[n] = e
+    return _TPGas(db, names, th["thermoHrefTemp"])
+
+
+def lump_mass_expansion(th, name):
+    """lump の構成を lump 内質量分率 {構成種: y} で返す (記録の lump 内モル分率 x と構成種 MW から y = x M / Σ x M)。lump でなければ None。"""
+    e = _find_ci(th["species"], name)
+    lp = (e or {}).get("lump")
+    if not lp:
+        return None
+    den = sum(m["x"] * m["MW"] for m in lp["members"])
+    return {m["name"]: m["x"] * m["MW"] / den for m in lp["members"]}
 
 
 def required_conserved(sig):

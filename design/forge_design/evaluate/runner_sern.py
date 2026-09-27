@@ -573,7 +573,7 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
 
 
 def _species_signature(run_dir) -> dict | None:
-    """run dir の輸送種の署名を**実 config + 解決済み DB** から作る (codex result-2 M2): 種順序・MW・両区間 NASA-9 係数・
+    """run dir の輸送種の署名を**実 config + 解決済み熱物性** (forge_species.run_thermo) から作る (codex result-2 M2): 種順序・MW・両区間 NASA-9 係数・
     温度区切り・thermoHrefTemp・tracer 設定。`species_meta.yaml` があれば順序の矛盾を拒否。CPG (thermalMethod≠2) は None。
     TP なのに config/DB が読めなければ ValueError (照合不能)。"""
     from ..gas.composition import load_species_meta, load_yaml_str
@@ -584,19 +584,20 @@ def _species_signature(run_dir) -> dict | None:
     cfg = load_yaml_str(cfgp.read_text()); pp = cfg.get("physProp", {})
     if int(pp.get("thermalMethod", 0)) != 2:
         return None
-    names = [str(k).upper() for k in (pp.get("species") or ["N2"])]
-    dbp = rd / str(pp.get("speciesDBFile") or "species_db.yaml")
-    if not dbp.exists():
-        raise ValueError(f"{rd}: speciesDBFile {dbp.name} が無く種配置を照合できない")
-    db = load_yaml_str(dbp.read_text()) or {}
-    dbu = {str(k).upper(): v for k, v in db.items()}
+    names = [(str(k["name"]) if isinstance(k, dict) else str(k)).upper() for k in (pp.get("species") or ["N2"])]
+    # 熱物性は共通の読み出し forge_species.run_thermo (plan thermophysics-solver-owned-species-db #8): ソルバの解決済み記録 >
+    # 従来の speciesDBFile > forge --resolve-species。lump 記法 ({name, lump, basis}) の config も読める
+    try:
+        th = _forge_species().run_thermo(rd)
+    except ValueError as e:
+        raise ValueError(f"{rd}: 熱物性を解決できず種配置を照合できない ({e})") from None
+    if [str(k).upper() for k in th["names"]] != names:
+        raise ValueError(f"{rd}: 解決済み熱物性の種 {th['names']} が {cfgp.name} の {names} と違う")
     ents = {}
-    for k in names:
-        if k not in dbu:
-            raise ValueError(f"{rd}: 種 {k} が {dbp.name} に無い")
-        e = dbu[k]
-        ents[k] = {"MW": float(e["MW"]), "low": [float(v) for v in e["nasa9_low"]], "high": [float(v) for v in e["nasa9_high"]],
-                   "ranges": [float(e.get("Tlo", 200.0)), float(e.get("Tmid", 1000.0)), float(e.get("Thi", 6000.0))]}
+    for k, n in zip(names, th["names"]):
+        e = th["species"][n]
+        ents[k] = {"MW": float(e["MW"]), "low": list(e["nasa9_low"]), "high": list(e["nasa9_high"]),
+                   "ranges": [float(e["Tlo"]), float(e["Tmid"]), float(e["Thi"])]}
     meta = load_species_meta(rd)
     if meta is not None and [str(k).upper() for k in meta["species"]] != names:
         raise ValueError(f"{rd}: species_meta.yaml の種順序 {meta['species']} が solverConfig の {names} と矛盾")
