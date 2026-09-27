@@ -5,6 +5,7 @@ name: vitair_wt_m419_R2_LU6_Lc8_ns
 type: wind_tunnel_axisym_axismach
 gas:
   model: semiperfect
+  transport: {H2O: custom:h2o_iapws_cea_v1, N2: cea, O2: cea, AR: cea, CO2: cea}   # 2026-09-27: 種ごとの輸送物性 (viscMethod 2 既定; plan thermophysics-solver-owned-species-db §4.3c)。H2O は IAPWS/CEA つなぎ
   species:
     H2O: 0.0286647
     N2: 0.6732631
