@@ -217,6 +217,7 @@ $q=(350-300)/(H/k_f+t/k_s)$、$T_w=T_c+q\,t/k_s$。**界面・Robin 辺の半径
 ### V-ax4 再開と評価器 (plan レビュー M3/M4)
 
 - V-ax2 の構成で **連続 2N step と N step + 再開 N step** の最終界面壁温の差 ≤ max(2$\epsilon_0$, 1e-9 K) ($\epsilon_0$ は V-ax3 と同じ同一バイナリ反復のノイズ床)
+  **具体化 (2026-09-27、結果の前)**: 構成 = `case/61` 本体 (流体 32×4・固体 16 層・`warmup` 20000)、**N = 30000** (warmup 20000 + 連成 10000 = 更新 200 回)。連続 2N を**同一バイナリで 2 回** (`run_0012_vax4_cont_a` / `_b`) → **軸対称の ε₀** = 2 本の最終界面壁温の差の max。N (`run_0012_vax4_half`) の最終状態 (流体 `restart_field.py --keep-src-dtype`・壁温 `wall_profile_4.csv`・固体 `conjugate_state_4.h5`) から N 継続 (`run_0013_vax4_resume`)。比較量 = 最終界面壁温 (全界面節点の max)、合格 = |再開 − 連続 a| ≤ max(2ε₀, 1e-9 K)。
 - 平面で書いた状態から軸対称 run を起動 → 拒否、属性の無い旧状態で軸対称起動 → 拒否、軸対称の状態で平面起動 → 拒否
 - `check_cht_balance.py` を V-ax2 の出力に当てて G-cons が ≤0.5 % で PASS、`geometry` 属性を平面に書き換えた状態では REFUSED
 - `cht_loop.py --axisym --solid-mode fem2d` が拒否される
