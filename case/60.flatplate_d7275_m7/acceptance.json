@@ -226,7 +226,7 @@
   },
   {
    "id": "T4-0b-HF",
-   "status": "pre_registered",
+   "status": "outcome_recorded",
    "_written": "2026-09-27、run を回す前 (codex diagnose 2026-09-27-d7275-thermofloat-result の提案を採用)",
    "name": "SLAU の面エンタルピー評価だけを float / double に切り替える継続 A/B (両腕 thermoFloat 0)",
    "change": "B のバイナリは ~/forge56-double (4687c3c、全域 FP64) の複製で、convectiveFlux_slau_d.inc.cuh の多成分 TP 分岐の 2 行 h_p/h_m = thermo_h_mix_f(spf, …) を同じ面状態 Y・T で thermo_h_mix(sp, …) (double 係数・double 評価) に置き換えただけ。差分は case/60/tools/hface_double.patch。A は既存の ~/forge56-double。面状態の作り方・再構成・化学種拡散・陰解法・単一成分分岐・境界流束は不変。診断用で既定値変更の提案ではない",
@@ -242,7 +242,20 @@
     "reject": "過渡が落ち着いても 0.8–1.2 倍に残る → 主因説を棄却",
     "partial": "成分限定の改善はその成分に限定。中間値・過渡継続は保留"
    },
-   "stop_rule": "追跡はこの A/B 一つで区切る。棄却・保留なら追加の手当てを連鎖させず、『G15 未達の探索結果として他項目へ進む』提案をユーザに出す (codex)。比較量の不変を反復誤差の上限や『既知の数値床』の証明に使わない。G15 の合格判定とは分ける"
+   "stop_rule": "追跡はこの A/B 一つで区切る。棄却・保留なら追加の手当てを連鎖させず、『G15 未達の探索結果として他項目へ進む』提案をユーザに出す (codex)。比較量の不変を反復誤差の上限や『既知の数値床』の証明に使わない。G15 の合格判定とは分ける",
+   "outcome": {
+    "date": "2026-09-27",
+    "runs": "A: case/60.flatplate_d7275_m7/run_0019_t26_hf_f → run_0021_t26_hf_f_ext、B: run_0020_t26_hf_d → run_0022_t26_hf_d_ext (各 5k + 延長 5k。5k で B の領域別指標が 5 % 超動いたため事前登録どおり延長)",
+    "free_stream": "自由流域の √Σres² B/A (領域別時系列、各窓 11 枚の中央値): 5k 時点 ro 1.16e-3、roUx 8.7e-4、roUy 1.25e-3、roe 3.4e-4、roY 1.16e-3、roOmega 4.9e-3、roK 0.12 / 10k 時点 ro 1.17e-3、roUx 8.9e-4、roUy 1.2e-3、roe 3.5e-4、roY 1.17e-3、roOmega 5.7e-3、roK 0.16",
+    "window_change": "10k の窓間変化 (3–4k → 4–5k): A ≤ 0.8 % (横ばい)、B −13.5〜−30 % (まだ下降)。字面どおりでは事前登録の『それでも動けば判別保留』に当たる。ただし動いているのは B が A からさらに離れる方向で、B/A は 5k・10k で同じ 1e-3 水準",
+    "restart_transient": "延長の再開直後に両腕とも残差が跳ねた (B の rms_ro 6.8e-12 → 最大 5.5e-9 → 末尾 6.1e-12、A 6.15e-9 → 8.2e-9)。restart_field は保存量ビット一致なので、保存量以外の状態 (乱流粘性・陰解法の内部量など) が再開で失われる影響と見られる (未確認)。B の 10k の窓間変化にはこの戻りが入っている",
+    "history": "全域 RMS 履歴 (延長の 4–5k) B/A: ro 1.3e-3、roUx 1.0e-3、roUy 1.2e-3、roe 4.1e-4、roY 1.3e-3、roK 0.23、roOmega 0.53。B の rms_ro 末尾は 5k 時点 6.8e-12、10k 時点 6.1e-12",
+    "first_row": "第一内部列の B/A (10k): roUy 0.072、ro 0.18、roY 0.19–0.33、roK 0.24、roe 0.34、roUx 0.41、roOmega 0.58 — 1/10 に届くのは roUy のみ。ω は B で窓間 +0.6 % (横ばい、~80)",
+    "convergence": "check_convergence: A NOT CONVERGED (全列横ばい)、B NOT CONVERGED (流れ・化学種 falling、roOmega stalled/plateau)。延長区間だけで判定しているので低下桁数は再開の跳ねから測っている",
+    "probe": "点プローブ (1 step 毎、出力 6 桁) では両腕とも振幅がほぼ分解能 (~1e-6) 以下で差は読めない",
+    "reading_mechanical": "自由流域: B/A ~1e-3 (1/10 を 2 桁下回る) で局所振幅は分解能以下 → 支持側だが、B の窓間変化が 5 % 超のため字面では判別保留。第一内部列の ω は面エンタルピーでは変わらない。解釈の確定は codex diagnose (条件 7) の後",
+    "q": "比較域 (1.07–2.55 m) の壁 q_w の B/A−1: 最大 4.4e-7、平均 −1.7e-7。R_A 平均 1.313 は同じ"
+   }
   }
  ]
 }
