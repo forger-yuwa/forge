@@ -203,6 +203,10 @@ physProp:
   「CEA の 77.352 K 点を基準に、液の比熱モデル (現 `condN2LiquidCp` 2000 J/kg/K、63–77 K 実測 ≈2.0 kJ/kg/K) で積分」する形になる。
   現行の Lin 2014 の L フィット (`n2_latent`) と低温線形外挿 (`condN2LatentLowT`)、飽和圧の Clausius–Clapeyron 再構成 (`condN2PsatLowT`) との整合、
   CPG carrier 経路 (`thermalMethod 0`, 空気凝縮) での datum の扱いを決める必要がある。
+- **湿り場の変換 (codex diagnose 2026-09-27, `notes/reviews/2026-09-27-h2o-latent-datum-diagnose.md`)**: `convert_species_field.py` の補正 `roe += ρ(e_gas,dst − e_gas,src)` (`:617-619`) は液相項を含まない。
+  L が変わると `g(R_wT − L)` (`:124-127`) が変わるので、補正を `Δ(roe) = ρ{Δe_gas + g_dst(R_w,dst T − L_dst) − g_src(R_w,src T − L_src)}` にし、**液相モデルだけが違う**場合も再構成を発火させる。
+  SRC/DST の二相 EOS はそれぞれの解決済み記録から作る。旧記録に液相情報が無ければ現在の resolver で補完せず、旧モデル (現行 `h2o_latent`) を明示指定する移行手順か拒否にする。
+  潜熱の差 (150 K で ΔL −465.9 J/kg) は「統一分として記録するだけ」にしない — 場の変換の正しさは別に試験する。
 - 本 plan の範囲では N2 の現行 L・飽和圧・CPG 経路を**保持**し、#10 の共通化 (ディスパッチ変更) で N2 の結果が変わらないことだけ確認する (2 回目 m6)。
 
 ## 5. 実装ステップ
@@ -239,7 +243,7 @@ physProp:
 | 8a | ~~reader の移行 (記録から読む)~~ | 完了 2026-09-27: 共通読み出し `forge_species.run_thermo` (res 属性の記録 → run の記録 → `speciesDBFile` → `--resolve-species`)、`total_quantities.py`・`convert_species_field.py`・`gen_inlet_profile.py`・`runner_sern._species_signature` を移行。V6 PASS (下の #9) | O |
 | 8 | Python 共通 API の残り、canonical ID への移行 | 残り: `forge_species.species_info` の lump MW (`BUILTIN_MW` の写し)・`species_signature` (lump を照合不能扱い)・`interp_field` の署名。 §4.6。加えて (2026-09-27): Python の種名の大文字化をやめ canonical ID + alias 表へ、C++ `ResolvedSpeciesDB::index()` (`speciesDB.cpp:79-85`, 大小文字無視; 重複検査 `:210` も使う) の完全一致化と、tracer・凝縮種など名前で引く箇所の影響調査。**互換性ハッシュには config の名前がそのまま入る (`speciesDB.cpp:461`) ので、canonical 化で既存記録と不一致にならない規約 (ハッシュには canonical ID を入れ、既存記録は移行ツールで読み替え等) を設計してから**。合格は §6 V6 | O |
 | 9 | ~~設計 runner の切り替え~~ (axismach 完了、SERN 未) | 完了 2026-09-27 (axismach): `_apply_gas_to_config` は `physProp.species` を lump 記法 (全桁の正規化モル分率) で書き **`species_db.yaml` を作らない**。内蔵に無い種・外部 DB (`gas.species_db`) が内蔵値を上書きする種だけ生エントリを `species_db_external.yaml` に置く (合成物は置かない)。変換器は `FORGE_BIN` と同じビルドのもの (`runner.converter_path()`)。**V5 (i)** `case/44.vitiated_air_wt/run_0522_species_nodb_lumpX_v5` (ref): V0 (run_0509/0513–0515) との最大差 ṁ_in 6.1e-7 相対・ṁ_out 2.6e-7・出口 M 9.5e-7・出口 T 1.2e-4 K・軸 M 出口 **8.6e-6 (許容 1e-5, 反復差の約 4.5 倍; 原因未切り分け)**・軸 M 目標差 3.6e-7 → 許容内。本段区間 NOT CONVERGED (plateau, run_0509 と同型)・series ALL STEADY、NaN 0、メッシュ PASS。**V6**: DB ファイルなしで prepare → 段間 restart_field (記録継承) → 本段 → `total_quantities` (旧経路比 T0 1.2e-15・P0 2.6e-14) → lump→full5 変換 `run_0523_species_nodb_full5_convert` (ρY 保存差 0、変換後 200 step で照合一致・NaN 0) → `gen_inlet_profile` (CSV バイト一致)。**SERN は未切替**: SERN の lump 名 `AIR` がソルバ内蔵の擬似種 `AIR` と衝突し起動時に拒否される (`speciesDB.cpp:329-334`)。lump 名の変更か内蔵 `AIR` の扱い (#5 の Air 衝突と同根) を決めてから | O |
-| 10 | 潜熱: 液相を気相と同じ datum でシフトし差で L を作る | §4.8。`h2o_latent` の H2O 気相再ハードコードを撤去し、液相 H2O(L) (共通データの凝縮相エントリ) に**気相 H2O と同じ datum 定数**を適用して `L = h_v − h_l` を作る (気液差は CEA のまま保たれる)。273.15 K 未満/373.15 K 超の液の延長規約は現行のまま。**移行対象**: 潜熱表生成・範囲外退避・二相熱容量/音速 (`dL/dT`)・面流束・二相反転・Python `convert_species_field.py` の潜熱 (§4.8)。外部 DB の気液ペア契約と拒否。合格は §6 V7・V1 (液相だけ変えた restart の拒否)。`cuda_forge` の凝縮カーネル変更なので編集前に上位へ諮る (AGENTS.md エスカレーション 6) | F |
+| 10 | 潜熱: 液相を気相と同じ datum でシフトし差で L を作る | §4.8。`h2o_latent` の H2O 気相再ハードコードを撤去し、液相 H2O(L) (共通データの凝縮相エントリ) に**気相 H2O と同じ datum 定数**を適用して `L = h_v − h_l` を作る (気液差は CEA のまま保たれる)。273.15 K 未満/373.15 K 超の液の延長規約は現行のまま。**移行対象**: 潜熱表生成・範囲外退避・二相熱容量/音速 (`dL/dT`)・面流束・二相反転・Python `convert_species_field.py` の潜熱 (§4.8)。外部 DB の気液ペア契約と拒否。合格は §6 V7・V1 (液相だけ変えた restart の拒否)。判断: 2026-09-27 codex diagnose (`notes/reviews/2026-09-27-h2o-latent-datum-diagnose.md`) — 同 datum・同 MW の設計は採用、Python 変換式に液相項の差を入れる (§4.8, V7(e′))、表分割は判定で決める (V7(c′))。実装可 | O |
 | 12 | N2 の潜熱を同方式に統一するかの判断 (未決) | §4.8 末尾・§10。H2O (#10) の後に、統一するか現行 (Lin フィット + 低温外挿) のままにするかをユーザと決める。統一する場合: 液相 = CEA `N2(L)` 77.352 K 点 + 液比熱モデル、L は差。飽和圧の低温再構成・CPG carrier 経路との整合を決めてから。合格: V7 と同じ datum 不変試験 + 現行 Lin フィットとの差を 45–120 K で記録 + 空気凝縮 run (**case/34 Arthur**; plan condensation-air の検証先。旧記載の case/28 は He/空気同軸ジェットで誤り) の onset 変化を記録。**H2O (#10) 完了の阻害条件にしない**。凝縮カーネル変更なので編集前に上位へ諮る | F |
 | 11 | docs 同期 (完了時) | `procedures/solver-settings.md` (`physProp.species` の lump 形、`speciesDBFile` の位置づけ、lump と拡散の制約)、`recommended-settings.md` §3、`design/CAPABILITIES.md` | O |
 
@@ -305,8 +309,10 @@ SERN セッション (`feature/sern-design`) へ渡す内容。変更は `featur
 - **V7 (潜熱)** — double 試験の許容差 1e-12 は double に限る:
   - (a) datum 不変性: 下記。(b) **既知の気液差**: 298.15 K の L が CEA の H2O と H2O(L) の絶対エンタルピー差と一致 (datum 不変性とは別に組合せの正しさを見る)。
   - (c) float: `condFloat=0/1` の L・`dL/dT` が区切り両側・表範囲外で既存 `tests/unit/test_cond_float.cpp` の基準 (L 相対 2e-6 ほか, `:64`) を満たし、湿潤反転試験 (`:195`) が通る。
+  - (c′) 200 K (気相の区間境界) とその両隣の float、境界を含む表小区間で L と `|ΔL′| ≤ 2e-4|L′| + 0.1 J/(kg·K)` を直接判定 (`test_cond_float.cpp:50-58` の接続点除外に頼らない)。表の分割は必須としない (気相の外挿は h・h′ 連続) — 判定で決める。
   - (d) `g>0` の場で保存エネルギーを datum 変換した後、T・P・二相音速が保たれる。(e) 湿り場の種変換・restart 前後で T とエネルギーが整合。
-  - (f) 湿潤回帰の基準 run・onset の定義・g の報告量を**実装前に固定**し (候補: case/44 va3 入口 Tt 分布 noneq の `run_0127` 系; `run_0510` は g≡0 なので不可)、系列を `check_quasisteady --series-csv` で判定する。
+  - (e′) **気相同一・L だけ異なる変換の 0 step A/B** (diagnose): 150 K・N2/H2O 0.95/0.05・g 0.01 の固定状態で、A = 気相差のみの現行式 (補正 0・T −0.005802 K を再現)、B = 気液を含む全差で補正 +4.6592 J/kg。**B の合格: 補正誤差 ≤1e-6 J/kg、T 相対誤差 ≤1e-8**。旧記録 (液相情報なし) からの変換は移行手順か拒否。
+  - (f) 湿潤回帰の基準 run (正確な run パス・バイナリ・判定区間)・onset の抽出定義・g の報告量・記録する変化量を**実装前に固定**し (不変を合格にしない) (候補: case/44 va3 入口 Tt 分布 noneq の `run_0127` 系; `run_0510` は g≡0 なので不可)、系列を `check_quasisteady --series-csv` で判定する。
 - (旧 V7 の datum 不変性) `thermoHrefTemp` を 0 / 298.15 / 任意値に変えても $L(T)$ が 120–400 K の全点で相対 1e-12 以内で不変。
   新 $L$ と現行 `h2o_latent` の差を 150–373 K で記録 (200 K 以上は係数同一なので丸め程度、200 K 未満は外挿規約の統一分)。凝縮 run (case/44 va3 入口 Tt 分布の noneq) で onset・g の変化量を記録。
 
@@ -348,6 +354,7 @@ SERN セッション (`feature/sern-design`) へ渡す内容。変更は `featur
 
 ## 9. 変更ログ
 
+- `2026-09-27` — #10 を codex diagnose に諮問 (`notes/reviews/2026-09-27-h2o-latent-datum-diagnose.md`): 湿り場変換の液相項補正を §4.8 に追加、V7(c′)(e′)(f) を具体化、#10 を実装可 (O) に。
 - `2026-09-27` — #3c 残を実装: Python ツールも既定で厳密 (未検証 SRC・宛先解決不能・記録破損で停止、許可はその実行だけ、許可時は属性なし)。設計 runner の TP 準備は `FORGE_BIN` (`--resolve-species` 対応バイナリ) が必須になった。残: 印付きの場の扱いのソルバ/ツール不一致 (#3c 行)。
 - `2026-09-27` — #3c と案 C の既定切り替えを実装 (`feature/species-transport`): 属性なしの場は既定で停止; `viscMethod: 2` は `physProp.transport` 必須 (無ければ起動時エラー、旧 kinetic 経路をセル・壁から削除)。`viscMethod: 0/1` と transport ありは 0 step で旧バイナリとビット一致。影響: transport なしの `viscMethod: 2` の config (case/05・27・28・50・55・56) はこのブランチのバイナリでは起動しない (旧結果は e2daaba8 までのビルドで再現)。
 - `2026-09-27` — 既存の semiperfect NS 問題 YAML 22 件に `gas.transport` を追記 (N2/O2/AR/CO2 は cea、H2O は custom:h2o_iapws_cea_v1)。
