@@ -34,13 +34,14 @@ Transfinite Line{{1}} = {nr} + 1;
 EXTRUDE = """o{k}[] = Extrude {{{L}, 0, 0}} {{ Line{{{src}}}; Layers{{ {{{ones}}}, {{{fr}}} }}; Recombine; }};
 """
 GEO_TAIL = """// Extrude の戻り値は向き付き (負号あり) なので Abs() を取る (負のまま渡すと変換器が physID を負で読む)
-// o{{k}}[0] = 押し出し先の半径線、[1] = 面、[2] = 点 1 側 (軸)、[3] = 点 2 側 (壁)
+// o{{k}}[0] = 押し出し先の半径線、[1] = 面、[2] = 点 2 側 (壁 r=R)、[3] = 点 1 側 (軸 r=0)
+// (2026-09-27 乾式の壁ダンプ座標で確認: 逆に書いた初版は壁が y=0 に出た。確認は乾式 1 step の壁ダンプで行う: check_dry.py)
 Physical Curve("inlet",     1) = {{1}};
 Physical Curve("outlet",    2) = {{Abs(o3[0])}};
-Physical Curve("wall_up",   3) = {{Abs(o1[3])}};
-Physical Curve("wall_heat", 4) = {{Abs(o2[3])}};
-Physical Curve("wall_down", 5) = {{Abs(o3[3])}};
-Physical Curve("axis",      6) = {{Abs(o1[2]), Abs(o2[2]), Abs(o3[2])}};
+Physical Curve("wall_up",   3) = {{Abs(o1[2])}};
+Physical Curve("wall_heat", 4) = {{Abs(o2[2])}};
+Physical Curve("wall_down", 5) = {{Abs(o3[2])}};
+Physical Curve("axis",      6) = {{Abs(o1[3]), Abs(o2[3]), Abs(o3[3])}};
 Physical Surface("fluid",   7) = {{o1[1], o2[1], o3[1]}};
 Mesh.MshFileVersion = 4.1;
 """

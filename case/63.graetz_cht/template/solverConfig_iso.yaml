@@ -1,4 +1,4 @@
-# case/63 Graetz — 変換と乾式 1 step 用 (共役なし)。数値設定は本 run (solverConfig_iso/cht.yaml) と同じ、差は nStepOuter・出力間隔・conjugate 無し。
+# case/63 Graetz — 非連成の等温壁 (§6 G1)。bcond の wall_heat Ts = T_in + ΔT は make_run.py が書く。
 # 物性は plan §4.1 の登録値 (Re 1000・Pr 0.72・M 0.05、graetz_common.py と一致させる)。
 mesh: {discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, isAxisymmetric: 1, axisymMethod: 0,
        meshFileName: "mesh.h5", valueFileName: "mesh.h5"}
@@ -17,16 +17,20 @@ physProp:
 time:
   unsteady: 0
   dualTime: 0
-  last: {nStepOuter: 1}
+  last: {nStepOuter: 60000}
   deltaT: {control: 1, dt: 1.0e-5, cfl: 2.0, cfl_pseudo: 2.0, blockDPLUR: 1, implicitRelax: 0.7,
            dt_min: 1.0e-11, dt_max: 1.0}
   outStepStart: 0
-  outStepInterval: 1
+  outStepInterval: 2010   # 連成間隔 50 の倍数にしない (更新周期内の位相を採取: plan §6 V-g0)
   timeIntegration: 11
   nStepInner: 4
 space:
   convMethod: 1
   limiter: 2
+  # リミッタの基準値を固定する (N_r=16 乾式の自動値。延長で再開しても作用素が変わらない。3 格子で共通の値にする)
+  limiterRoRef: 1.183182264
+  limiterPRef: 101871.9869
+  limiterARef: 347.1886975
 turbulence: {model: "none"}
 output: {level: 1, interfaceDiag: 1}
-initial: "uniform_p101325_u10"   # 変換器用の名前。VALUE は make_run.py が Poiseuille IC にパッチする
+initial: "uniform_p101325_u10"   # VALUE は make_run.py が Poiseuille IC にパッチ済み

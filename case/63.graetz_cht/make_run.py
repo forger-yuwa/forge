@@ -82,6 +82,7 @@ def main():
     ap.add_argument("--solid", default=None)
     ap.add_argument("--dT", type=float, default=0.0, help="T_c − T_in [K] (iso は壁温、cht は Robin の外温)")
     ap.add_argument("--nstep", type=int, default=None)
+    ap.add_argument("--cfl", type=float, default=None, help="cfl / cfl_pseudo を差し替え (起動 A/B 用。既定はテンプレートの 2)")
     ap.add_argument("--note", default="")
     a = ap.parse_args()
     run = Path(a.run)
@@ -98,6 +99,10 @@ def main():
         cfg, n = re.subn(r"last: \{nStepOuter: \d+\}", f"last: {{nStepOuter: {a.nstep}}}", cfg)
         if n != 1:
             raise SystemExit("nStepOuter を差し替えられない")
+    if a.cfl is not None:
+        cfg, n = re.subn(r"cfl: [0-9.]+, cfl_pseudo: [0-9.]+,", f"cfl: {a.cfl}, cfl_pseudo: {a.cfl},", cfg)
+        if n != 1:
+            raise SystemExit("cfl を差し替えられない")
     (run / "solverConfig.yaml").write_text(cfg)
     shutil.copy(tdir / "probe.yaml", run / "probe.yaml")
     shutil.copy(a.mesh, run / "mesh.h5")
@@ -110,15 +115,25 @@ def main():
         pout=gc.P_OUT, ptb=gc.P_OUT + 0.5 * gc.RHO * gc.U_M ** 2, tin=gc.T_IN,
         heat_ints="{conjugate: 1}" if a.kind == "cht" else "", tw=tw))
     prov = [f"mesh.h5  <- {a.mesh} (sha256 {axcht.sha256(a.mesh)}; VALUE を Poiseuille IC にパッチ)",
+            f"cfl_pseudo {a.cfl if a.cfl is not None else 'テンプレート既定'}",
             f"kind {a.kind}, dT {a.dT} K (T_w/T_c {tw} K), IC p {pmin:.3f}..{pmax:.3f} Pa, ro {romin:.6f}..{romax:.6f}",
             f"inlet_profile_1.csv: 放物 Ux (U_m {gc.U_M:.6f}), ro {ro_in:.8f}, Ps {p_in:.4f}",
             gc.summary()]
     if a.kind == "cht":
+        # 固体の外面温度はソルバが solid.h5 の ROBIN/TC から読む (solidFem2d.cpp)。ΔT と食い違う固体を拒否する
+        # (2026-09-27 codex plan レビュー m5)
+        with h5py.File(a.solid, "r") as sf:
+            tc = np.asarray(sf["ROBIN/TC"][:], float)
+            ks = np.asarray(sf["SOLID/K_V"][:], float)
+        if not np.allclose(tc, tw, rtol=0, atol=1e-9):
+            shutil.rmtree(run)
+            raise SystemExit(f"solid.h5 の ROBIN/TC ({tc.min()}..{tc.max()} K) が T_in+ΔT = {tw} K と違う (ΔT を取り違えた固体?)")
         shutil.copy(a.solid, run / "solid.h5")
         gj = Path(str(a.solid)[:-3] + ".grid.json")
         if gj.exists():
             shutil.copy(gj, run / "solid.grid.json")
-        prov.append(f"solid.h5 <- {a.solid} (sha256 {axcht.sha256(a.solid)})")
+        prov.append(f"solid.h5 <- {a.solid} (sha256 {axcht.sha256(a.solid)}; 読み出した ROBIN/TC {tc.min():.9g}..{tc.max():.9g} K, "
+                    f"k_s {ks.tolist()})")
     if a.note:
         prov.append(f"note: {a.note}")
     (run / "RUN_INPUTS.txt").write_text("\n".join(prov) + "\n")

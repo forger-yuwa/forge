@@ -83,7 +83,7 @@ def wall_grad(theta, h):
     return (3 * theta[..., -1] - 4 * theta[..., -2] + theta[..., -3]) / (2 * h)
 
 
-def solve_march(nr, xmax, nx):
+def solve_march(nr, xmax, nx, return_tb=False):
     """Pe→∞。無次元式 u (∂θ/∂x⁺) = 4 ∇²_ξ θ  (x⁺ = x/(D Pe), ξ = r/R: α ∂²/∂r² → 4/(D²) ...)。"""
     xi, h, vol, L = radial_ops(nr)
     u = 2.0 * (1.0 - xi ** 2)
@@ -94,7 +94,7 @@ def solve_march(nr, xmax, nx):
     # x⁺ は入口近傍を細かく: 対数刻み
     xs = np.concatenate([[0.0], np.geomspace(1e-7, xmax, nx)])
     th = np.ones(m)
-    out_nu, out_x = [], []
+    out_nu, out_x, out_tb = [], [], []
     for k in range(1, len(xs)):
         dx = xs[k] - xs[k - 1]
         A = (M - 0.5 * dx * 4.0 * Lf).tocsc()
@@ -109,7 +109,9 @@ def solve_march(nr, xmax, nx):
         tb = mixing_cup(full, u, vol)
         g = wall_grad(full, h)          # ∂θ/∂ξ
         nu = -2.0 * g / tb              # Nu = q D/(k ΔT_b) = −(∂θ/∂ξ)·(D/R)/θ_b
-        out_x.append(xs[k]); out_nu.append(nu)
+        out_x.append(xs[k]); out_nu.append(nu); out_tb.append(tb)
+    if return_tb:
+        return np.array(out_x), np.array(out_nu), np.array(out_tb)
     return np.array(out_x), np.array(out_nu)
 
 

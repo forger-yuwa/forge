@@ -1,0 +1,13 @@
+合成 run: /tmp/claude-1000/-home-sano-work-forge/478a8ef8-f433-4b8a-a16b-5ed20aff6356/scratchpad/evtest3  (Pe 720.000000、ドリフト節点 x⁺ 0.05498)
+  ok  正常 (snap)                          判定 PASS      rc 0  (期待 PASS/0) 基準解そのものの合成データ
+  ok  正常 (series)                        判定 PASS      rc 0  (期待 PASS/0) 6 スナップショット同一
+  ok  q の符号反転                            判定 FAIL      rc 1  (期待 FAIL/1) Nu が負
+  ok  x⁺ の原点を入口に                         判定 FAIL      rc 1  (期待 FAIL/1) 10 mm のずれ = x⁺ 0.0069
+  ok  Pe を 2 倍                           判定 FAIL      rc 1  (期待 FAIL/1) 
+  ok  窓内 iface_ok=0                      判定 REFUSED   rc 2  (期待 REFUSED/2) 
+  ok  壁ダンプの節点欠損                          判定 REFUSED   rc 2  (期待 REFUSED/2) 
+  ok  対照と同じ run を加熱として渡す                 判定 FAIL      rc 1  (期待 FAIL/1) 分母 0 → 非有限
+  ok  観測 4 点を避けた局所ドリフト 1 %               判定 FAIL      rc 1  (期待 FAIL/1) 
+  ok  正常 run の窓内 max|err| = 2.48e-09 (期待 < 1e-6)
+
+VERDICT: PASS  (10/10)
