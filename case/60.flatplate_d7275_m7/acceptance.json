@@ -187,8 +187,29 @@
     "not_resolved_items": "rms_roOmega は A・B とも 0.6 前後で横ばい (B/A 0.995)。res_roOmega の 99.99999 % は壁の第一内部節点列 (y = 3 µm) で、平板全長の個別の節点 (x 0.72、0.90、1.26、2.75、2.78 m など) に散在 — 上端とは無関係。Cary の PASS run (case/59 run_0005) も rms_roOmega の最終値は 3.0e-1 (ただし 2e8 から 8.7 dec 低下)",
     "own_convergence": "B 自身: check_convergence NOT CONVERGED (stalled/plateau)、流れ・化学種 1.7–2.3 dec (この run の開始値から)、roK 5.1 dec、roOmega 1.8 dec → G15 の収束ゲートは未達のまま",
     "q": "比較域 (1.07–2.55 m) の壁 q_w の B/A−1 は最大 1.5e-6、R_A 平均 1.313 は同じ。St 10 点 A・B とも check_quasisteady ALL STEADY",
-    "deviation": "点プローブは T・P・U のみで ρ・k・ω の時系列は取れていない (codex 提案との差)"
+    "deviation": "点プローブは T・P・U のみで ρ・k・ω の時系列は取れていない (codex 提案との差)",
+    "reading_final": "限定して支持 (codex diagnose 2026-09-27-d7275-height-ab-result): 流れ残差 (ro・roUx・roUy・roe) と圧力振幅について上端近接説を支持。未取得項目あり — 旧上端域の化学種残差 (res_roY は出力していない) と ρ・k・ω の時系列は無いので、事前登録の全項目を満たしたとは言わない。比較域の流れ残差の増加 (1.4–2.0 倍) は絶対量が小さく読みを覆さない",
+    "retracted": "『全域 FP64 なので丸め床ではない』(T4-0b 系の記述) を撤回: 生成設定は thermalMethod 2 で thermoFloat 未指定 → 既定 1 (forge_run.log に 'hybrid float Newton + double polish')、組成・密度逆数・比熱比の float 経路が FP64 ビルドでも残る。Cary の ω 残差 0.3 は今回の 0.6 の許容根拠にしない (残差は無次元化されておらず、Cary は thermalMethod 0)"
    }
+  },
+  {
+   "id": "T4-0b-TF",
+   "status": "pre_registered",
+   "_written": "2026-09-27、run を回す前 (codex diagnose 2026-09-27-d7275-height-ab-result の提案を採用)",
+   "name": "physProp.thermoFloat 1 / 0 だけを変える継続 A/B (FP64 ビルドに残る float 熱力学経路の寄与)",
+   "common": "run_0014_t26_h079 の最終場 (res_20000) から restart_field.py --keep-src-dtype (12 量ビット一致)、メッシュ fp_d7275_y3_wall_top8、BC・物性 DB・SST・CFL・緩和・内反復・バイナリ (~/forge56-double、4687c3c) を固定。両腕とも thermoFloat を明記。FORGE_OMEGA_BUDGET=1、extraFields は両腕同一 (残差場 res_* に res_roY0–4 を追加、omg_prod・omg_dest・omg_cross・omg_trans)",
+   "arms": {
+    "A": "run_0015_t26_tf1 (thermoFloat: 1、対照)",
+    "B": "run_0016_t26_tf0 (thermoFloat: 0)"
+   },
+   "steps": "各 5,000 step。場は step 4000–5000 を 100 毎 (固定節点の ρ・P・k・ω 時系列を倍精度で取る) + 点プローブ 10 step 毎 (T・P、6 桁)。3–4k と 4–5k の対象指標の中央値が 5 % 超動けば各 10,000 まで延長、それでも動けば判別保留",
+   "metrics": "全残差列 (RMS と √Σres²)、自由流域 (y 0.03–0.79) と第一内部列 (y = 3 µm) の成分別 √Σres² (化学種含む)、固定節点の ρ・P・k・ω の 100 step 毎時系列の振幅、第一内部列の ω 収支 omg_trans + omg_prod − omg_dest + omg_cross、St 10 点",
+   "decision": {
+    "support": "B の対象残差 (自由流域の流れ・化学種、第一内部列の ω) が A の 1/10 以下、かつ局所振幅が減少 → float 熱力学経路が床の主因という説を支持",
+    "reject": "切替過渡が落ち着いても対象残差と局所振幅が A の 0.8–1.2 倍 → 主因説を棄却",
+    "partial": "流れだけ改善して ω が残れば、改善の帰属を流れに限定する。中間結果は保留"
+   },
+   "note": "診断条件であり G15 の代替合格条件にしない。G15 は未達のまま。低下桁数を稼ぐ目的の再初期化・別方程式の段の連結・未収束 run の参照床化はしない (codex Major)"
   }
  ]
 }
