@@ -112,7 +112,7 @@ C_L が 7.1e-4、C_M が 0.021 動いた (許容 5e-4 / 5e-3 を超過。3.42 H 
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | 1 | ~~codex plan 段レビュー~~ **済 (2026-09-27 NO-GO C1/M6/m1、全件採用で §4/§6 を改訂)** | C1 → §4.3 スカラー面値経路、M2 → §4.3 `farfield_flux_d`、M3 → §4.2 決定表と単体試験、M4 → §4.2 γ 契約と V2b、M5 → §4.3 k 整合、M6 → §6 V1/V2 追加、M7 → §6 V3 再設計、m8 → §6 V0 | F |
-| 1b | codex plan 段 再レビュー (plan-2) | 改訂版 §4/§6 | F |
+| 1b | ~~codex plan 段 再レビュー (plan-2)~~ **済 NO-GO C0/M5/m2 (2026-09-27)** — 採否は §6.1。**検証範囲をユーザ判断待ち** | 改訂版 §4/§6 | F |
 | 2 | 実装 (§5 の 1–4) | ビルド (AWS)、単体試験、V0 | O |
 | 3 | 検証 V1–V2 (AWS、軽量) | §6 の合格条件 | O |
 | 4 | SERN V3 (AWS) | §6 の合格条件。R4d の結論へ反映 | O |
@@ -149,6 +149,7 @@ C_L が 7.1e-4、C_M が 0.021 動いた (許容 5e-4 / 5e-3 を超過。3.42 H 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
 | plan | 2026-09-27 | [2026-09-27-boundary-node-farfield-characteristic-plan.md](../../notes/reviews/2026-09-27-boundary-node-farfield-characteristic-plan.md) | NO-GO, C1/M6/m1 | **全件採用** (C1・M2 はコードで再確認: `scalarTransport_d.cu:166` の `ext_is_self`、`convectiveFlux_boundary_d.inc.cuh` の流出時内部風上)。§4 を「面流束を自前で組む専用境界」に改訂、§6 に V0u/V2a–c/V3a–b。§5.1 #1 |
+| plan | 2026-09-27 | [2026-09-27-boundary-node-farfield-characteristic-plan-2.md](../../notes/reviews/2026-09-27-boundary-node-farfield-characteristic-plan-2.md) | NO-GO, C0/M5/m2 | 構造 (専用流束 + 同時刻スカラー面値) は妥当。M1 (超音速切替で流束が不連続: 入力差 2e-6 で P_b 2.09 倍) → 採用予定: SU2 と同じく内部状態と構成状態を既存の近似 Riemann 流束 (SLAU) に渡して面流束を作る。M2–M5・m6–m7 (TP の独立参照解、SST ソース込みの収支、dual-time の音響試験、面流束ダンプでの収支) → 採用予定。**範囲をユーザ判断待ち (2026-09-27)** |
 
 ## 7. 影響範囲
 
