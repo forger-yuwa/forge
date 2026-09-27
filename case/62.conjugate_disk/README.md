@@ -97,7 +97,7 @@ plan の参考予測 (codex の独立計算) 0.9421 / 0.2983 / 0.08796 % と比 
 **これは荷重移送だけの試験で、連成計算の予測ではない** (登録文どおり)。判別 A/B (合成荷重 $q_*A_i^r$ を $A^r$ で割る / $A_{\rm planar}$ で割る) は
 固体側・流体側とも A PASS・B FAIL。
 
-**合格構成 (2026-09-27)**: `template/solverConfig.yaml` の `warmup` は 20000。**非一様格子 (`r32_g1p1`) は流体の初期場を純伝導 IC にして回す** (`run_0019_disk_r32g_condic`。`run_0016_ic_B_conduct/mesh.h5` の VALUE を使う。一様 IC からは偽流れの状態に居座る — [流体側 plan](../../plans/active/axisymmetric-graded-grid-static-gas.md) で未解決)。
+**合格構成 (2026-09-27)**: `template/solverConfig.yaml` の `warmup` は 20000。**非一様格子 (`r32_g1p1`) は流体の初期場を純伝導 IC にして回す** (`run_0019_disk_r32g_condic`。`run_0016_ic_B_conduct/mesh.h5` の VALUE を使う。一様 IC からは大きな起動過渡が 20000 step でも減衰中 (2026-09-27 訂正: 以前「居座る」と書いたのは誤判断) — [流体側 plan](../../plans/active/axisymmetric-graded-grid-static-gas.md) で未解決)。
 
 ## 計算 run 一覧
 
