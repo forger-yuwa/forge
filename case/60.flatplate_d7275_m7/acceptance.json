@@ -28,6 +28,23 @@
     "q": "q_B/q_A − 1: 比較 10 点で最大 1.9e-7、パネル域全体で最大 2.1e-6。St は両腕 ALL STEADY、R_A 平均 1.313 は両腕で同じ",
     "meaning": "残差プラトーの主因は下流の壁距離の段差ではない (原因は未特定)。比較量 (St、q) はこの下流の変更に鈍い"
    }
+  },
+  {
+   "id": "T4-0b-OUT",
+   "status": "pre_registered",
+   "_written": "2026-09-27、run を回す前",
+   "name": "出口の種類だけを outlet_statPress → outflow に変える A/B",
+   "why": "残差場 (run_0007_t26_resmap2、FORGE_OUT_RESIDUALS) で res_ro/roUx/roe の二乗和の 99.99–100 % が平板の後ろ (x ≥ 2.6 m) にあり、最大は出口∩上端 slip と出口∩下流 slip の角。比較域 (1.07–2.46 m) は 0.00 %。現行レシピ (procedures/recommended-settings.md:74, :306) は超音速 node 出口を outflow とする",
+   "runs": {
+    "baseline": "run_0002_t26_ext (outlet_statPress Ps = p∞、末尾 4000 step の残差中央値を基準)",
+    "B": "run_0008_t26_outflow: run_0002 の最終場から restart_field --keep-src-dtype、出口だけ kind: outflow、他は同一、20,000 step、2000 毎、残差場も出力"
+   },
+   "decision": {
+    "outlet_cause": "B の末尾 4000 step の rms_ro・roUx・roe の中央値が基準の 1/10 以下 → 出口境界が残差プラトーの主因",
+    "not_outlet": "1/10 に届かない → 出口の種類単独主因説を退ける",
+    "q": "比較 10 点の q_w の差が全点で 1 % 以内 → 比較量は出口の扱いに鈍い / 1 % 超 → 鈍いとは言わない"
+   },
+   "note": "判別基準は今回のもので G15 の合否基準ではない。B は作用素が変わるので基準の履歴と連結して収束判定しない"
   }
  ]
 }
