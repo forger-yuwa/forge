@@ -117,7 +117,7 @@ $$\int_\Omega k\,\nabla T\cdot\nabla v\,r\,dA \;+\; \int_{\Gamma_R} h\,(T-T_c)\,
 2. `conjugate/solidFem2d.{hpp,cpp}` — 重み ($r$) を持たせ、剛性・Robin・集中量に適用。`solid_fem2d_tool` に軸対称フラグ
 3. `tools/solid_fem2d.py` / `test_solid_fem2d_cpp.py` — オラクルと突き合わせ
 4. `conjugateWall.cpp` — 拒否を §4.4 の受理条件に置き換え、`fillInterfaceDiagnostics` の分母を §4.3 に
-5. `case/59.conjugate_annulus/` — 同心円環の検証ケース (メッシュ生成・固体生成・評価器)
+5. `case/61.conjugate_annulus/` — 同心円環の検証ケース (メッシュ生成・固体生成・評価器)
 6. `methods/boundary.md` を「計画中」から現行仕様へ
 
 ### 5.1 残作業 (優先順)
@@ -128,7 +128,7 @@ $$\int_\Omega k\,\nabla T\cdot\nabla v\,r\,dA \;+\; \int_{\Gamma_R} h\,(T-T_c)\,
 | 2 | **§4 / §6 を上位に諮る** | 判断: 2026-09-27、codex (diagnose) に諮った: [`notes/reviews/2026-09-27-cht-axisym-design-diagnose.md`](../../notes/reviews/2026-09-27-cht-axisym-design-diagnose.md) — Critical 0 / Major 5 / Minor 1、**全件採用・却下 0** → §3・§4.3・§4.4・§4.4b・§6・§8 を改訂。次は codex plan レビュー | F。**plan レビュー (2026-09-27、GO-with-changes C0/M5/m1) も全件採用** → §4.4・§4.4c・§4.4d・§6 (V-ax2 の収束判定・`iface_q_eff`、V-ax2b の格子、V-ax4) | F |
 | 3 | 固体の $r$ 重み (C++ + オラクル) + 出力熱量 | §5 ステップ 2–3 と §4.4b。合格: §6 V-ax1 (a)〜(e) | O<br>**実装済み (2026-09-27、`implementer`)**: `solidFem2d.{hpp,cpp}` (`SolidMesh::axisym`、h5 と `content_sha1` は不変)、`solid_fem2d_tool` (`--axisym`、試験用モード `matrix`/`lumped`/`field`)、`solid_fem2d.py` (`axisym=False`)、新規 [`test_solid_fem2d_axisym.py`](../../solver_density_cuda/tools/test_solid_fem2d_axisym.py)。**V-ax1 (a)(b)(d)(e) は PASS、(c) は下記のとおり FAIL を残す**: (b) 独立な Gauss–Legendre 辺積分と ≤4.3e-16、(a) C++↔Python K 3.1e-16 / 解 1.5e-10 K、(d) 円板 4.2e-12 K、(e) 収支 2.1e-13。**平面のビット同一**: C++ 内部状態 (組立て・分解・解・h5 出力)・CLI・Python オラクルとも一致。既存の `test_solid_fem2d_cpp.py`・`test_solid_fem2d.py` PASS。<br>**要判断 (条件 3/4、隠さず書く)**: **(c) 厚肉円筒殻は、最初の格子 (軸方向 3 分割固定・半径方向 4/8/16 層・対角交互) で収束率 1.40 / 1.58 → FAIL**。**FAIL を見た後に**格子を「縦横比固定 (軸方向も同率で細分)」に変えて 1.95 / 1.97・16 層で内面誤差 0.026 % → PASS。**§6 V-ax1(c) は格子を登録していなかった**。参考: 軸方向固定・対角が全セルで揃った格子では**1 次 (1.02 / 1.02 / 1.03、32 層で誤差 0.069 K = 降下の 0.075 %)**、対角交互は 32 層で 1.84。`implementer` の見立て: 平面なら線形解が厳密に出るので、この 1 次は $r$ 重みで初めて出る。軸方向固定で縦横比が際限なく増える格子系列は準一様でなく、標準の誤差評価の前提から外れる。**ノズル壁は軸方向に長く半径方向に薄い層になりやすいので、生産メッシュ (と V-ax2 の固体格子) の設計に効きうる** (未検証)。→ codex (diagnose) に諮った: [`notes/reviews/2026-09-27-cht-axisym-vax1c-grid-diagnose.md`](../../notes/reviews/2026-09-27-cht-axisym-vax1c-grid-diagnose.md) — **判断: 2026-09-27、全件採用 (Major 3)**。① **最初の格子の FAIL を正式に残す** (格子未登録は仕様不足だが、得た不合格を無効にしない)。縦横比固定の結果は「**事後に選んだ格子で閾値を満たした**」と別判定で記録し、同じ結果の再実行を事前登録された独立検証として扱わない → **V-ax1 の包括的 PASS は保留**。② 「非準一様で超収束が崩れた」は**未確認** (試験の注記は L2 評価から断定していたが、判定量は全節点最大誤差) → 下の A/B で確かめる。③ V-ax2 の固体格子感度を必須化 (§6 V-ax2 に登録)。AR 上限・対角交互化を必須にする根拠は今は無い |
 | 4 | 受理条件・`iface_q_eff` の分母 (method 0 限定)・method 1 の無効化 | §5 ステップ 4、§4.3・§4.4。合格: §6 V-ax0 | O <br>**実装済み (2026-09-27、`implementer`)**: `initConjugateWalls` を §4.4 の受理条件に (method≠0・local1d は固有メッセージで拒否、FP32 では「検証は FP64 のみ」を WARNING)、`checkAxisymSolid` (r<0 節点・界面節点 r≤r_floor・Robin の無い連結成分を union-find で検出)、`fillInterfaceDiagnostics` の分母を method 0 で surfArea·max(r_f, r_floor) (double)、method≠0 は NaN と「未検証」ログ。**V-ax0 (ローカル 1〜3 step)**: 負例 5 件すべて rc=1・固有メッセージ、受理 (case/58 を y+0.05 m に平行移動した入力) は起動・壁一致 1.8e-9 m・2 step rc=0、method 1 + interfaceDiag で NaN 321/321。恒等式 |q_eff·A^r−Qf|/|Qf| 1.3e-7 (float 格納精度、平面 9.5e-8)。**未了**: 界面の軸上**辺**の負例 (端点と同じ分岐を通るが未試験)、method 1 の h5 属性 (出力は `output.cpp` で範囲外)、`flux: q_compact` の軸対称は拒否していない (次元は [W/rad] で整合) | O |
-| 5 | 同心円環 (`case/59`) と判定 | §5 ステップ 5。合格: §6 V-ax2 | O |
+| 5 | 同心円環 (`case/61`) と判定 | §5 ステップ 5。合格: §6 V-ax2 | O |
 | 6 | 同軸円板 (半径が変わる界面) | 合格: §6 V-ax2b。**FAIL なら止めて諮る** | O→F |
 | 7 | 既存の軸対称 `interfaceDiag` 報告値の洗い出し | `grep` で `isAxisymmetric: 1` かつ `interfaceDiag: 1` の run と、`iface_q_eff` を読むツール・報告を列挙。誤っていた値の撤回要否を決める (§8-1) | O→F<br>**結果 (2026-09-27、ローカル)**: `/home/sano/work/forge*` の全ワークツリーの `case/*/run_*/solverConfig*.yaml` で **`isAxisymmetric: 1` かつ `interfaceDiag` を持つ run は 0 件**。`iface_q_eff` を読むツール・評価器は `check_cht_balance.py`・`mms_face_weight.py`・`test_solid_fem2d_cpp.py`・case/53 の報告ツール群・case/58 の評価器で、**すべて平面ケース**。→ **ローカルの証拠では撤回すべき報告値は無い**。**AWS は自動停止中で未確認** — 次にインスタンスを使うときに `~/forge*/case` を同じ条件で grep して本行を閉じる |
 | 8 | 平面の回帰 | 合格: §6 V-ax3 | O |
@@ -143,7 +143,7 @@ $$\int_\Omega k\,\nabla T\cdot\nabla v\,r\,dA \;+\; \int_{\Gamma_R} h\,(T-T_c)\,
 
 ### V-ax0 起動時検査 (負例、各 1 step)
 
-`case/59` の受理入力を 1 か所ずつ変える: `axisymMethod: 1` / `mode: local1d` / 固体節点 1 つを $r<0$ / **界面の軸上端点のみ** / **界面の軸上辺** /
+`case/61` の受理入力を 1 か所ずつ変える: `axisymMethod: 1` / `mode: local1d` / 固体節点 1 つを $r<0$ / **界面の軸上端点のみ** / **界面の軸上辺** /
 Robin を持たない連結成分。すべて rc≠0 と固有メッセージ。受理入力は起動する。`axisymMethod: 1` + `interfaceDiag: 1` (CHT なし) で
 `iface_q_eff` が NaN・属性「未検証」になることも確認する。
 
@@ -181,7 +181,7 @@ Robin を持たない連結成分。すべて rc≠0 と固有メッセージ。
   Robin $x=t$。解は $x$ の 1 次関数で $r$ に依らない (線形要素で厳密) → **全節点温度の誤差 ≤1e-9 K**、`q_hole` の節点値 = consistent 積分の厳密値 (≤1e-12)
 - (e) 収支: 界面入熱 = Robin 持ち去り (相対 ≤1e-12)、(c)(d) とも
 
-### V-ax2 ソルバ内連成 — 同心円環 (`case/59.conjugate_annulus/run_*_annulus`)
+### V-ax2 ソルバ内連成 — 同心円環 (`case/61.conjugate_annulus/run_*_annulus`)
 
 case/52 の軸対称版。**幾何・物性 (登録値)**: 静止ガス $r_a$=5 mm ≤ $r$ ≤ $r_b$=10 mm、$k_f$=0.0241 W/mK 一定 (`viscMethod: 0`・`thermCondMethod: 0`)、
 $p_0$=1013.25 Pa (case/52 と同じく緩和を速める)、内壁 $r_a$ 等温 $T_a$=350 K (非連成)、外壁 $r_b$ = 共役壁、固体殻 $r_b$ ≤ $r$ ≤ $r_c$=20 mm、
@@ -204,7 +204,7 @@ $q_*=Q'/r_b$=91.86 W/m²。**節点荷重の総和との比較は $Q'L_x$ = 1.83
 - **感度 (改訂 2026-09-27、codex diagnose)**: 固体は**対角規則を `gen_solid_strip.py` の規則に固定して明記**し、**接線 (軸) と法線 (半径) の両方向を細分化する 3 段以上の系列** (半径方向 8/16/32 層 × 軸方向を同率) を回す。**共通位置で比較した界面温度の差が最後の細分化で 0.023581 K (= 0.1 % of 降下) 以下**。流体は半径方向 16/32 で同じ許容
 - **`iface_q_eff` の値** (plan レビュー M2): 全界面節点で $|q_{\rm eff}-q_*|\le$ 0.5 % of $q_*$、`iface_q_eff_raw` も同じ。`fem2d` は積分済み荷重を使うので**壁温・収支はこの誤りを検出しない** — 分母が平面のままだと値は $r_b$ = 0.01 倍 (0.9186 W/m²) になる
 
-### V-ax2b ソルバ内連成 — 同軸円板 (半径が変わる界面の局所整合)
+### V-ax2b ソルバ内連成 — 同軸円板 (半径が変わる界面の局所整合、`case/62.conjugate_disk`)
 
 静止ガス層 $x\in[0,H]$ ($H$=5 mm)、$r\in[r_1,r_2]$=[5, 20] mm (軸を含まない、$r$ 端は slip)、$x=0$ 等温 350 K、$x=H$ = 共役壁、
 固体 $x\in[H,H+t]$ ($t$=5 mm、$k_s$=0.027)、$x=H+t$ Robin ($h$=1e8、$T_c$=300 K)。解は $x$ の 1 次関数で**$r$ に依らない**:
@@ -240,7 +240,7 @@ $q=(350-300)/(H/k_f+t/k_s)$、$T_w=T_c+q\,t/k_s$。**界面・Robin 辺の半径
 - `solver_density_cuda/conjugate/solidFem2d.{hpp,cpp}`、`conjugate/solid_fem2d_tool.cpp`、`conjugateWall.cpp`
 - `solver_density_cuda/tools/solid_fem2d.py`、`test_solid_fem2d_cpp.py`、**`check_cht_balance.py`** ($r$ 重み・状態照合)、**`cht_loop.py`** (軸対称 `fem2d` の拒否)、`check_cht_interface.py` (必要なら)
 - 再開状態 `conjugate_state_<physID>.h5` の属性 (`geometry`・`load_unit`・`state_contract`)
-- 新規 `case/59.conjugate_annulus/`
+- 新規 `case/61.conjugate_annulus/`
 - 平面 2D の既存ケース (case/48・52・53・54・58) は §4.2 の設計で不変 (V-ax3 で確認)
 - `methods/boundary.md`、`methods/index.md`
 
@@ -251,6 +251,7 @@ $q=(350-300)/(H/k_f+t/k_s)$、$T_w=T_c+q\,t/k_s$。**界面・Robin 辺の半径
 
 ## 9. 変更ログ
 
+- `2026-09-27` — ケース番号を `case/61.conjugate_annulus` / `case/62.conjugate_disk` に変更 (59・60 は別セッションが使用中)。判定基準は不変。
 - `2026-09-27` — plan レビューの採否を codex (diagnose) で確認、反映の誤り 2 件 (負例の面積比・解除条件) を訂正して `status: in_progress`。
 - `2026-09-27` — codex plan レビュー (GO-with-changes, C0/M5/m1) を全件採用 (§4.4c 再開契約・§4.4d 評価器と外部ループ・V-ax4 追加、V-ax2 の収束判定を一様 IC の単一区間に、V-ax2b の格子を事前固定)。
 - `2026-09-27` — codex (diagnose) の Major 5 / Minor 1 を全件採用して §3・§4・§6・§8 を改訂 (軸上判定を半径の直接検査に、診断の分母を method 0 限定、出力熱量の consistent 化、半径が変わる辺の独立試験と同軸円板、準定常を温度降下基準に、G-if の登録値、平面回帰の許容を事前固定)。
