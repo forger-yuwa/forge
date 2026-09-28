@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `boundary`
-- **status**: `draft`
+- **status**: `in_progress`
 - **related_docs**:
   - [`methods/boundary.md`](../../methods/boundary.md) 「特性型の遠方境界 (`farfield`)」
 - **related_plans**: [`tooling-nozzle-sern-3d.md`](tooling-nozzle-sern-3d.md) §5.1 R4d (動機)
@@ -104,7 +104,7 @@ plan-7 の反例 (M1: 高温の内部を出ていく音響が外気そのまま�
   (HLLC の星状態の質量流束は $\rho_*S_*$ なので、スカラー $\dot m\,\phi_{\text{風上}}$ は HLLC の多成分拡張 [星状態で $Y$ を保存] と同じ。)
 - 同じカーネルが `massflux[ip]` と、スカラーの面値配列を書く。スカラー移流は node 境界半割面の `ext_is_self` / `nodeBnd` 経路に、**farfield 面だけ面値配列を読む**分岐
   (面フラグで判定、既存面はビット不変)。一次輸送と S3 (化学種) の両経路。呼び出し順は対流流束 → スカラー移流 = 同じ評価時点。
-- `sstEnergyIncludesK`: エネルギー・圧力に $k$ を含める経路では、L = $k_i$、R = $k_\infty$ で $E^*=E+\rho k$、$p^*=p+\tfrac23\rho k$ として HLLC に渡す。スカラー $k$ の面値も同じ $\dot m$ の符号。
+- `sstEnergyIncludesK`: エネルギー・圧力に $k$ を含める経路では、**L = $k_i$、R = 混合・置換後の外側状態の $k_R$** (§4.2。帯の外では $k_\infty$) で $E^*=E+\rho k$、$p^*=p+\tfrac23\rho k$ として HLLC に渡す。移流する $k$ の面値 (流入時) も同じ $k_R$ (plan-10 M1: 右側のエネルギーを $k_\infty$ で作ると混合帯でエネルギー流束が 3.4 % ずれる)。
 - ピンしない。非有限の流束はその面の流束を 0 にして面 ID・理由を診断カウンタへ (**検証の評価区間では 0 回**)。
 - **面流束の診断ダンプ** (plan-2 M5): env `FORGE_DUMP_FARFIELD=<path>` で、farfield 面ごとに (面 ID、評価回、$\dot m$、運動量 3、エネルギー、化学種、$k,\omega$ の面流束、面積ベクトル $\mathbf S$、圧力基準 `pRef`)。
   運動量は残差に投入した $p-p_{ref}$ 基準のまま書き、SERN 帳簿 (外気圧 $p_a$ 基準) へ渡すときは $(p_{ref}-p_a)\mathbf S$ を加える (plan-3 m7)。
@@ -141,7 +141,7 @@ plan-7 の反例 (M1: 高温の内部を出ていく音響が外気そのまま�
 | 1h | ~~plan-7~~ **済 (2026-09-28 NO-GO C0/M2/m1、全件採用、試作で対策を確認)** | | F |
 | 1i | ~~plan-8~~ **済 (2026-09-28 NO-GO C0/M3/m1、全件採用、試作で確認)** | | F |
 | 1k | ~~plan-9~~ **済 (2026-09-28 NO-GO C0/M2/m1、全件採用、試作で確認)** | | F |
-| 1l | codex plan 段 plan-10 | 本版 | F |
+| 1l | ~~plan-10~~ **済 (2026-09-28 GO-with-changes C0/M2/m1、全件採用)** → 実装着手可 (V0h ホストゲートから) | | F |
 | 1j | V0h ホストゲート (TP 拡張) | 本体実装の前 | O |
 | 2 | 実装 (§5 の 1–5)、V0・V0u | AWS でビルド | O |
 | 3 | 独立参照解 (§5 の 6) と V1–V2 | AWS | O |
@@ -157,7 +157,7 @@ V1–V2 は**境界機能の受入れ**、V3 は**SERN での配置 (側方幅) 
 - **V0 既存境界の不変**: farfield を含まない構成 (run_0971 設定) で、同一初期状態からの初回 `massflux` と状態ダンプが変更前バイナリとビット一致。更新後保存量は旧バイナリ 3 回反復の再現性幅以内。
 - **V0h ホストゲート (本体実装の前、plan-7 推奨)**: `farfield_proto1d.py` を TP (単成分・多成分 lump、既存 `FrozenGas`) に拡張し、§4.2 の表の全項目 + V2d-2 (TP の高温内部を出ていく音響、反射 ≤ 5 %) + 波速順序・星状態の妥当性・退避 0 を確認してから CUDA に進む。
 - **V0p TP の保存形混合 (前提、境界と無関係)** (plan-6 M2): 単一 CV に高温側 (T 600 K、Y 0.13) と外気 (T 220 K、Y 0) の保存量を 0.9:0.1 で混ぜ、EOS から復元した圧力の誤差を記録する (期待 +0.65 %)。これは境界の合否に入れず、V2d の「長領域自身の誤差」の説明に使う。
-- **V0u 単体試験** (ホスト、HLLC の `__host__ __device__` 関数): (i) **連続性**: $U_{n,i}$・$\rho_i$・$P_i$・接線速度を、法線 Mach ±1・0 付近で 1e-6 刻みに掃引し、面流束 5 成分・スカラー面流束の隣接点の差 ≤ 1e-4 × 流束規模 (plan-2〜5 の反例入力をすべて含む)、(ii) **接触波**: CPG と TP で P・$U_n$ 同じ・T 600/220 K・Y 0.13/0 の内部/外気、流出と流入の両方で面流束 = 風上側の物理流束 (相対 1e-6)、(iii) **流向の全組合せ**: $Q_n$ の符号 × 実際の $\dot m$ の符号 × ゼロ通過で、$\dot m<0$ のスカラー面値が外側状態の値 (帯の外では外気値)・$\dot m>0$ で内部値、(iii'') **真空と float32** (plan-9 M1): 真空の反例と、速度 ($U_{n,i}$ −3〜3、$U_{n,\infty}$ −3〜10)・密度比・圧力比の独立掃引を float64 と float32 で行い、非有限 0・外側状態の負値 0 を確認、真空置換と HLL 退避の回数を別々に記録 (有限であることと置換が無いことを分けて判定)、(iii''') **混合帯の逆流**: 内部 $(1,0.95,1/\gamma,Y\,0.13)$・自由流 $(10,-3,10/\gamma,Y\,0)$ で、流入の種の面値が外側状態の $Y_R$ (0.065) と一致すること、TP・SST (k 込み) でも同じ、(iv) 一様 ($U_i=U_\infty$) で $F_{num}=F(U)$ (相対 1e-6)、(v) 非対応構成の起動拒否 (cell・ROE・凝縮・トレーサ・遷移・軸対称・周期共有) がそれぞれエラー終了。
+- **V0u 単体試験** (ホスト、HLLC の `__host__ __device__` 関数): (i) **連続性**: $U_{n,i}$・$\rho_i$・$P_i$・接線速度を、法線 Mach ±1・0 付近で 1e-6 刻みに掃引し、面流束 5 成分・スカラー面流束の隣接点の差 ≤ 1e-4 × 流束規模 (plan-2〜5 の反例入力をすべて含む)、(ii) **接触波**: CPG と TP で P・$U_n$ 同じ・T 600/220 K・Y 0.13/0 の内部/外気、流出と流入の両方で面流束 = 風上側の物理流束 (相対 1e-6)、(iii) **流向の全組合せ**: $Q_n$ の符号 × 実際の $\dot m$ の符号 × ゼロ通過で、$\dot m<0$ のスカラー面値が外側状態の値 (帯の外では外気値)・$\dot m>0$ で内部値、(iii'') **真空と float32** (plan-9 M1): 真空の反例と、速度 ($U_{n,i}$ −3〜3、$U_{n,\infty}$ −3〜10)・密度比・圧力比の独立掃引を float64 と float32 で行い、非有限 0・外側状態の負値 0 を確認、真空置換と HLL 退避の回数を別々に記録 (有限であることと置換が無いことを分けて判定)、(iii''') **混合帯の逆流**: 内部 $(1,0.95,1/\gamma,Y\,0.13)$・自由流 $(10,-3,10/\gamma,Y\,0)$ で、流入の種の面値が外側状態の $Y_R$ (0.065) と一致すること、TP・SST (k 込み) でも同じ。`sstEnergyIncludesK: 1` で $k_i=0.14$、$k_\infty=0.01$ を与え、運動量・全エネルギー・$\rho k$ の流束が同じ $k_R$ (0.075) から作られていること (plan-10 M1)、(iv) 一様 ($U_i=U_\infty$) で $F_{num}=F(U)$ (相対 1e-6)、(v) 非対応構成の起動拒否 (cell・ROE・凝縮・トレーサ・遷移・軸対称・周期共有) がそれぞれエラー終了。
 - **V0k CUDA 一致**: 同じ入力を GPU カーネルに与え、ホストの HLLC 関数と面流束が相対 1e-6 で一致。
 - **V1 自由流保持** (定常、block-DPLUR): 一様流の 3D hex 直方体 (z 3 層以上)、全境界 farfield、2000 step。(a) CPG M 0.5、(b) TP 2 種 lump (SERN 外気) M 6、(c) (b) を面に 30° 傾ける、
   (d) (b) + SST。合格 (a)–(c): 全節点で $|P/P_\infty-1|,|\rho/\rho_\infty-1|,|\mathbf u-\mathbf u_\infty|/|\mathbf u_\infty|\le10^{-5}$、$|Y-Y_\infty|\le10^{-6}$。(d) は **一様状態での輸送残差の打消し**だけを見る (plan-3 M3: SST は一様流でも消滅項 $-\beta^*\rho k\omega$、$-\beta\rho\omega^2$ があり一様値は保たれない): 初回評価で帳簿ダンプの段別残差のうち対流 + $k,\omega$ 輸送の寄与が全節点で、保存量ごとの規模 (その節点に接する面流束の絶対和) の 1e-5 以下 ($\rho,\rho\mathbf u,\rho E$ は各流束、$k$ は $\dot m k_\infty$、$\omega$ は $\dot m\omega_\infty$。plan-4 m5)。ソース込みの時間発展は V2b で見る。
@@ -171,6 +171,7 @@ V1–V2 は**境界機能の受入れ**、V3 は**SERN での配置 (側方幅) 
   - **離散恒等式 (毎評価)**: 全節点の対流残差の和 = −(farfield 面流束の和) (内部面は相殺)。診断ダンプ (§4.3) と帳簿ダンプ (`FORGE_DUMP_LEDGER`、全節点に印) で照合。**判定 (plan-4 m5)**: |差| ≤ 1e-5 × (その保存量の全面流束の絶対和) (正味和で割らない。float32 の atomicAdd 積算の丸め幅を含む。ホスト集計は double)。
   - **定常後の全体収支** (plan-3 M4): 各保存量で残差の正本を $R=-\sum_{faces}F+\sum_{nodes}S$ (外向き流束は残差に $-F$、生成ソースは $+S$) とし、定常で $R\to0$ を見る。$S$ は $k,\omega$ の体積ソース (帳簿の段別残差 `res_after_sources` − `res_after_species`) で、他の保存量は 0。`sstEnergyIncludesK: 1` の全エネルギーは `res_roe` が既に全エネルギーの残差なので **`res_roK` を足さない** ([`turbulence-sst-energy-includes-k.md`](../accepted/turbulence-sst-energy-includes-k.md) §分割保持)。規格化は**事前登録した非零の代表量** (ゼロ成分を落とさない): 質量・化学種 $\rho_\infty|\mathbf u_\infty|A$、運動量 $(\rho_\infty|\mathbf u_\infty|^2+P_\infty)A$、エネルギー $\rho_\infty|\mathbf u_\infty|H_\infty A$、$k$ $\rho_\infty|\mathbf u_\infty|k_\infty A$、$\omega$ $\rho_\infty|\mathbf u_\infty|\omega_\infty A$ ($A$ = farfield 面の総面積)。**$|R|$/代表量 ≤ 1e-4** を全成分に。
   - (ii) で内部が自由流へ置き換わること ($|Y-Y_\infty|\le10^{-4}$)。
+  - **化学種の 2 経路** (plan-10 M2): 流入・流出の両配置を `speciesFaceReconstruction: 0` (一次輸送) と `2` (S3、`convMethod ≥ 1`・`speciesImplicitCoupling: 1`) の両方で回し、実効設定を run に保存する。各経路で、流入組成が外側状態の値であること、Σ種流束 = 質量流束 (相対 1e-6)、残差との離散恒等式を確認する (一次経路だけ直した実装を通さないため)。
 - **V2f 自由流分類と局所流況が違う面** (plan-5 M2): V1 の箱で、自由流は面から超音速流出 ($Q_n=2a_\infty$) だが、内部の初期状態を局所に逆流 ($U_{n,i}=-0.2a$) させた帯を置く。合格 (plan-6 M3): **実際の $\dot m<0$ の面**で化学種面値が外気値・$\dot m>0$ の面で内部値 (内部速度の符号ではなく流束の符号で判定)、NaN・置換 0、定常後は自由流へ戻る。逆流帯の強さは、HLLC で実際に $\dot m<0$ になる面が生じることをホスト関数で事前に確かめて決める。
 - **V2e 時間積分経路の網羅** (plan-3 M6): V1(b) と V2b(i) を **定常陽解法** でも回す (合格条件は同じ)。V2a の本試験に SST を足し、dual-time で `sstEnergyIncludesK` 0/1 の両方 (反射 ≤ 0.05、NaN・置換 0)。
 - **V2c 超音速の斜め衝撃波** (定常): 3D 薄板、M 2.5、半角 10° ウェッジ、衝撃が上側境界に当たる配置。上側境界 (A) slip / (B) farfield / (C) 上方に、反射衝撃が評価線の下流端より後ろに着く高さまで広げた slip
@@ -199,6 +200,7 @@ V1–V2 は**境界機能の受入れ**、V3 は**SERN での配置 (側方幅) 
 | plan | 2026-09-28 | [2026-09-28-boundary-node-farfield-characteristic-plan-7.md](../../notes/reviews/2026-09-28-boundary-node-farfield-characteristic-plan-7.md) | NO-GO, C0/M2/m1 | **全件採用**。M1 (外気そのままの外側状態は、高温の内部を出ていく音響を 24–33 % 反射) → §4.2 外側状態の音響部を境界節点の $Z$ で線形化した特性量に (試作で 0.03–0.15 %)、V0h ホストゲートに TP 版を追加。M2 (音速の算術平均の波速で $S_*>S_R$・流束の跳び) → Davis 波速 + 順序・星密度の検査 + HLL 退避と計数 (試作の極端な比の掃引で退避 0・跳びなし)。m3 → §7・methods の同期 |
 | plan | 2026-09-28 | [2026-09-28-boundary-node-farfield-characteristic-plan-8.md](../../notes/reviews/2026-09-28-boundary-node-farfield-characteristic-plan-8.md) | NO-GO, C0/M3/m1 | **全件採用、試作で対策を確認**: M1 (線形 $w^\pm$ で負圧・NaN) → TRRS (内部エントロピー) で常に正、M2 (内部超音速流出でも外気で流束が 19 % 変わる) → 内部 $M_{n,i}\ge1$ で $U_R=U_i$ に滑らかに寄せ最後に適用、M3 (自由流の超音速流入判定で跳び 0.215) → 滑らかな重み、m4 → §5.1 #1g と README を同期 |
 | plan | 2026-09-28 | [2026-09-28-boundary-node-farfield-characteristic-plan-9.md](../../notes/reviews/2026-09-28-boundary-node-farfield-characteristic-plan-9.md) | NO-GO, C0/M2/m1 | **全件採用、試作で確認**: M1 (TRRS も真空生成で非正、試作のクランプは float32 で NaN・未計数) → 真空判定 $B\le10^{-3}(c_i+c_{po})$ で $U_R=U_i$ に置換して計数・V0u(iii'') に float32 と独立掃引、M2 (混合変数が未定義で EOS とスカラーの状態が分離) → 原始変数 $(\rho,\mathbf u,P,Y,k,\omega)$ を同じ重みで混合・流入スカラーは $\phi_R$・V0u(iii''')、m3 → methods 一覧表を同期 |
+| plan | 2026-09-28 | [2026-09-28-boundary-node-farfield-characteristic-plan-10.md](../../notes/reviews/2026-09-28-boundary-node-farfield-characteristic-plan-10.md) | **GO-with-changes**, C0/M2/m1 | **全件採用**: M1 → §4.3 の SST 右状態を混合後の $k_R$ に統一・V0u(iii''') に k 込みの照合、M2 → V2b に `speciesFaceReconstruction` 0/2 の両経路、m3 → methods・説明ページの非反射の主張を「法線方向の小振幅音波」に限定し、斜入射の線形反射係数 $(1-\cos\theta)/(1+\cos\theta)$ (45° で約 17 %) を明記。codex はホストで反射率・独立掃引を再現 |
 
 ## 7. 影響範囲
 
@@ -221,6 +223,7 @@ V1–V2 は**境界機能の受入れ**、V3 は**SERN での配置 (側方幅) 
 
 ## 9. 変更ログ
 
+- `2026-09-28` — plan-10 **GO-with-changes** (C0/M2/m1) を全件採用。SST の右状態を混合後の $k_R$ に、化学種の一次・S3 両経路を V2b に、非反射の主張を法線方向に限定 (斜入射 45° で線形理論でも約 17 %)。status を in_progress へ。
 - `2026-09-28` — plan-9 NO-GO (C0/M2/m1) を全件採用。真空・近真空は $U_R=U_i$ に置換して計数、混合は原始変数を同じ重みで、流入スカラーは混合後の外側状態の値。試作に float32 と独立掃引のゲートを追加し合格。
 - `2026-09-28` — plan-8 NO-GO (C0/M3/m1) を全件採用。外側状態の音響部を TRRS (内部エントロピー、常に正) に、超音速の境目を滑らかな重み (内部の超音速流出を優先) に。試作で plan-8 の全ゲート合格。
 - `2026-09-28` — plan-7 NO-GO (C0/M2/m1) を全件採用。外側状態の音響部を境界節点の $Z$ で線形化した特性量、密度・組成は常に自由流側、波速は Davis + 検査 + HLL 退避。試作で全項目合格。「ゴースト」の表記を node の弱形式の外側状態に改めた (ユーザ指摘)。
