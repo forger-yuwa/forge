@@ -34,7 +34,7 @@ forge は密度ベース有限体積で **ゴーストセル方式** を採用�
 | `inlet_Pressure` | 全圧・全温固定流入 | 全条件 ($P_t, T_t$) から内部マッハで $P, T$ を再構成 |
 | `inlet_Pressure_dir` | 方向指定全圧流入 | inlet_Pressure に流入方向ベクトルを併用 |
 | `outflow` | 流出 (外挿) | **内部状態の全量コピー** (ゴースト・境界値とも)。外から情報を入れないので超音速流出向け。亜音速や流れが境界に沿う面では外気の状態が伝わらない。旧版の本表は「リーマン不変量に基づく非反射」と書いていたが実装と一致しない (逆流時の全圧分岐は値を計算して捨てる死にコード。2026-09-27 確認) |
-| `farfield` | **遠方境界** (計画中、plan [`boundary-node-farfield-characteristic.md`](../plans/active/boundary-node-farfield-characteristic.md)) | 境界半割面の外側状態を特性で作り (圧力・法線速度は境界節点の $\rho c$ で線形化、密度・組成・$k,\omega$ は自由流)、境界面だけ HLLC で解く。下の「遠方境界」節 |
+| `farfield` | **遠方境界** (計画中、plan [`boundary-node-farfield-characteristic.md`](../plans/active/boundary-node-farfield-characteristic.md)) | 境界半割面の外側状態を作り (圧力・法線速度は内部エントロピーの 2 膨張波近似 [真空は内部状態に置換]、密度・組成・$k,\omega$ は自由流、超音速の境目は原始変数の滑らかな混合)、境界面だけ HLLC で解く。下の「遠方境界」節 |
 | `periodic` | 周期境界 | 対応するペア面のセル値をコピー (`scheme` 強制なし) |
 
 ### 例: 滑り壁
@@ -139,9 +139,9 @@ P_R=\left[\frac{c_i+c_{po}-\tfrac{\gamma-1}{2}(U_{n,\infty}-U_{n,i})}{c_iP_i^{-z
 U_{n,R}=U_{n,i}+\frac{2c_i}{\gamma-1}\Big(1-(P_R/P_i)^z\Big).
 $$
 
-  常に正で、小振幅では線形の特性量 $w^\pm=P\pm\rho_ic_iU_n$ (外向き $w^+$ は内部、内向き $w^-$ は自由流) に一致する。
+  分子が正なら正 (外気と内部が法線方向に音速の数倍で離れて真空ができる面は、外側状態を内部状態に置き換えて数える)。小振幅では線形の特性量 $w^\pm=P\pm\rho_ic_iU_n$ (外向き $w^+$ は内部、内向き $w^-$ は自由流) に一致する。
 - 密度 (自由流のエントロピーで $P_R$ から)・接線速度・組成・$k,\omega$ は常に自由流側。
-- 超音速の境目は滑らかな重み (帯幅 0.1) でつなぐ: 自由流の法線 Mach が −1 以下なら $U_R=U_\infty$、内部の法線 Mach が 1 以上なら $U_R=U_i$ (こちらを優先。内部の特性がすべて外向きなら外の情報は入らない)。
+- 超音速の境目は滑らかな重み (帯幅 0.1、原始変数 $\rho,\mathbf u,P,Y,k,\omega$ を同じ重みで混ぜる。流入時に運ぶスカラーも混ぜた後の値) でつなぐ: 自由流の法線 Mach が −1 以下なら $U_R=U_\infty$、内部の法線 Mach が 1 以上なら $U_R=U_i$ (こちらを優先。内部の特性がすべて外向きなら外の情報は入らない)。
 
 **面流束**: $\mathbf F=\mathbf F_{\mathrm{HLLC}}(U_i,U_R;\hat{\mathbf n})|S|$ (境界面だけ HLLC、内部面は SLAU)。波速は Davis ($S_L=\min(U_{n,L}-c_L,U_{n,R}-c_R)$、$S_R=\max(U_{n,L}+c_L,U_{n,R}+c_R)$)、
 $S_L\le S_*\le S_R$ と星状態の密度 $>0$ を検査し、外れたら HLL に退避する。化学種・$k,\omega$ は同じ質量流束の符号で風上化する (ピンなし)。

@@ -154,33 +154,46 @@ def smooth01(x):
     return t * t * (3.0 - 2.0 * t)
 
 
-def charghost2_state(ri, ui, pi, rinf, uinf, pinf, band=0.1):
-    """plan-8 対策版の外側状態。
-    (1) 圧力・法線速度: 内部のエントロピーのまま、内部 (外向き特性) と擬似外側 (P∞, u∞) の間の 2 膨張波近似 (TRRS)。常に P>0、小振幅で線形式 w± = P ± Z u に一致。
-    (2) 密度・組成: 自由流のエントロピーで P_R から。
-    (3) 内部の法線 Mach が 1 に近づくと外側状態を内部状態へ滑らかに寄せる (M_i >= 1 で U_R = U_i → F = F(U_i))。
-    (4) 自由流の法線 Mach が −1 に近づくと外側状態を自由流へ滑らかに寄せる (Q_n/a∞ <= −1 で U_R = U_∞)。"""
-    z = (G - 1) / (2 * G)
-    ci = np.sqrt(G * pi / ri)
-    si = pi / ri ** G                                   # 内部エントロピー
-    rpo = (pinf / si) ** (1.0 / G)                      # 擬似外側: P∞ で内部エントロピーの密度
-    cpo = np.sqrt(G * pinf / rpo)
-    num = ci + cpo - 0.5 * (G - 1) * (uinf - ui)
-    num = np.maximum(num, 1e-12 * (ci + cpo))           # 真空生成は起きない範囲 (検査で数える)
-    ps = (num / (ci / pi ** z + cpo / pinf ** z)) ** (1.0 / z)
-    us = ui + 2 * ci / (G - 1) * (1 - (ps / pi) ** z)   # 左 (内部) 側の膨張/圧縮の関係 (2 膨張波近似)
-    rb = rinf * (ps / pinf) ** (1.0 / G)
+def charghost2_state(ri, ui, pi, rinf, uinf, pinf, band=0.1, Yi=None, Yinf=None):
+    """plan-8/9 対策版の外側状態 (原始変数 ρ, u, P, [Y] を同じ重みで混ぜる)。
+    (1) 圧力・法線速度: 内部のエントロピーのまま、内部と擬似外側 (P∞, u∞) の間の 2 膨張波近似 (TRRS)。
+        分子 B = c_i + c_po − (γ−1)/2 (u∞ − u_i) ≤ δ (真空・近真空) なら、その面は U_R = U_i (内部の物理流束) にして VACUUM に数える。
+    (2) 密度・組成: 自由流のエントロピー・組成で P_R から。
+    (3) 自由流の法線 Mach が −1 に近づくと自由流へ、(4) 内部の法線 Mach が 1 に近づくと内部へ滑らかに寄せる ((4) を最後 = 優先)。
+    返り値: (ρ_R, u_R, P_R, Y_R)。Y_R は流入時に運ぶスカラーの面値 (EOS が参照する状態と同じ)。"""
+    dt = np.asarray(ri).dtype.type
+    if not issubclass(dt, np.floating):                 # 整数入力は float64 に (γ が丸められないように)
+        dt = np.float64
+        ri, ui, pi, rinf, uinf, pinf = (np.asarray(v, dtype=dt) for v in (ri, ui, pi, rinf, uinf, pinf))
+    one, two, half = dt(1), dt(2), dt(0.5)
+    g = dt(G); z = (g - one) / (two * g)
+    ci = np.sqrt(g * pi / ri)
+    si = pi / ri ** g
+    rpo = (pinf / si) ** (one / g)
+    cpo = np.sqrt(g * pinf / rpo)
+    B = ci + cpo - half * (g - one) * (uinf - ui)
+    vac = B <= dt(1e-3) * (ci + cpo)
+    Bs = np.where(vac, ci + cpo, B)                     # 真空の面は後で U_i に置換 (ここは NaN を避けるだけ)
+    ps = (Bs / (ci / pi ** z + cpo / pinf ** z)) ** (one / z)
+    us = ui + two * ci / (g - one) * (one - (ps / pi) ** z)
+    rb = rinf * (ps / pinf) ** (one / g)
     ub, pb = us, ps
-    # (4) 自由流の超音速流入へ寄せる
-    ainf = np.sqrt(G * pinf / rinf); Mq = uinf / ainf
-    wq = smooth01(((-1 + band) - Mq) / band)
-    rb = (1 - wq) * rb + wq * rinf; ub = (1 - wq) * ub + wq * uinf; pb = (1 - wq) * pb + wq * pinf
-    # (3) 内部の超音速流出へ寄せる (最後に適用 = 優先: 内部の特性がすべて外向きなら外の情報は入らない)
+    if Yi is None: Yi = np.zeros_like(ri)
+    if Yinf is None: Yinf = np.zeros_like(ri)
+    yb = Yinf * np.ones_like(ri)
+    ainf = np.sqrt(g * pinf / rinf); Mq = uinf / ainf
+    wq = smooth01(((-one + dt(band)) - Mq) / dt(band)).astype(dt)
+    rb = (one - wq) * rb + wq * rinf; ub = (one - wq) * ub + wq * uinf; pb = (one - wq) * pb + wq * pinf; yb = (one - wq) * yb + wq * Yinf
     Mi = ui / ci
-    wi = smooth01((Mi - (1 - band)) / band)
-    rb = (1 - wi) * rb + wi * ri; ub = (1 - wi) * ub + wi * ui; pb = (1 - wi) * pb + wi * pi
-    return rb, ub, pb
+    wi = smooth01((Mi - (one - dt(band))) / dt(band)).astype(dt)
+    rb = (one - wi) * rb + wi * ri; ub = (one - wi) * ub + wi * ui; pb = (one - wi) * pb + wi * pi; yb = (one - wi) * yb + wi * Yi
+    bad = vac | ~(np.isfinite(rb) & np.isfinite(pb) & (rb > 0) & (pb > 0))
+    VACUUM["n"] += int(np.sum(bad))
+    rb = np.where(bad, ri, rb); ub = np.where(bad, ui, ub); pb = np.where(bad, pi, pb); yb = np.where(bad, Yi, yb)
+    return rb, ub, pb, yb
 
+
+VACUUM = {"n": 0}
 
 def bflux(kind, ri, ui, pi, rinf, uinf, pinf):
     if kind == "slau_ghost": return slau(ri, ui, pi, rinf, uinf, pinf)
@@ -194,7 +207,7 @@ def bflux(kind, ri, ui, pi, rinf, uinf, pinf):
         rb, ub, pb = charghost_state(ri, ui, pi, rinf, uinf, pinf)
         return hllc_davis(ri, ui, pi, rb, ub, pb)
     if kind == "charghost2_hllcd":
-        rb, ub, pb = charghost2_state(ri, ui, pi, rinf, uinf, pinf)
+        rb, ub, pb, _ = charghost2_state(ri, ui, pi, rinf, uinf, pinf)
         return hllc_davis(ri, ui, pi, rb, ub, pb)
     if kind == "slip":
         return slau(ri, ui, pi, ri, -ui, pi)
@@ -338,6 +351,28 @@ def main():
         uu = np.arange(0.8, 1.2, 1e-5); o = np.ones_like(uu)
         F = bflux(k, o, uu, P0 * o, o, 0 * o, P0 * o)
         print(f"  [{k}] 内部 M 0.8→1.2 (1e-5 刻み) 隣接差 max / 規模: {np.max(np.abs(np.diff(F, axis=1)) / np.max(np.abs(F), axis=1, keepdims=True)):.2e}")
+    print("\n== T7 plan-9 のゲート (charghost2_hllcd)")
+    for dt in (np.float64, np.float32):
+        FALLBACK["n"] = 0; VACUUM["n"] = 0
+        # 反例: u_i −0.9, u∞ 10 (真空生成)
+        a = lambda v: np.array([v], dtype=dt)
+        rb, ub, pb, _ = charghost2_state(a(1), a(-0.9), a(P0), a(1), a(10), a(P0))
+        F = hllc_davis(a(1), a(-0.9), a(P0), rb, ub, pb)
+        print(f"  [{dt.__name__}] 真空の反例 (u_i −0.9, u∞ 10): 外側状態 ρ {rb[0]:.3g} P {pb[0]:.3g}、流束有限 {bool(np.all(np.isfinite(F)))}、真空置換 {VACUUM['n']}、HLL 退避 {FALLBACK['n']}")
+        # 独立掃引: 速度 u_i, u∞ ∈ [-3, 10]、密度比 0.1/1/10、圧力比 0.1/1/10
+        uu_i = np.linspace(-3, 3, 31); uu_o = np.linspace(-3, 10, 53); rr = np.array([0.1, 1.0, 10.0]); pp = np.array([0.1, 1.0, 10.0])
+        A, Bv, R, P = np.meshgrid(uu_i, uu_o, rr, pp, indexing="ij")
+        FALLBACK["n"] = 0; VACUUM["n"] = 0
+        o = np.ones(A.size, dtype=dt)
+        rb, ub, pb, _ = charghost2_state(o, A.ravel().astype(dt), (P0 * o).astype(dt), R.ravel().astype(dt), Bv.ravel().astype(dt), (P0 * P.ravel()).astype(dt))
+        F = hllc_davis(o, A.ravel().astype(dt), (P0 * o).astype(dt), rb, ub, pb)
+        print(f"  [{dt.__name__}] 独立掃引 {A.size} 点: 非有限 {int(np.sum(~np.isfinite(F)))}、真空置換 {VACUUM['n']}、HLL 退避 {FALLBACK['n']}、外側状態の ρ,P ≤ 0: {int(np.sum((rb <= 0) | (pb <= 0)))}")
+    # 混合帯の逆流例 (plan-9 M2): 内部 (1, 0.95, 1/γ, Y 0.13)、自由流 (10, −3, 10/γ, Y 0)
+    VACUUM["n"] = 0
+    a = lambda v: np.array([v], dtype=float)
+    rb, ub, pb, yb = charghost2_state(a(1), a(0.95), a(P0), a(10), a(-3), a(10 * P0), Yi=a(0.13), Yinf=a(0.0))
+    F = hllc_davis(a(1), a(0.95), a(P0), rb, ub, pb)
+    print(f"  混合帯の例: 外側 (ρ {rb[0]:.4g}, u {ub[0]:.4g}, P {pb[0]:.4g}, Y {yb[0]:.4g})、質量流束 {F[0,0]:+.5g} → 流入なので種の面値 = 外側の Y {yb[0]:.4g} (EOS と同じ状態)")
     print("\n== T3 接触波 (温度 2.7 倍の塊が右端から流出、M 0.3): 観測点 |P − P∞|/P∞ の最大")
     for dx in (5e-3, 2.5e-3):
         print(f"  Δx {dx:.2e}  " + "  ".join(f"{k}:{contact(k, dx):.2e}" for k in kinds))
