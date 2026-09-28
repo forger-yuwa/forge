@@ -1,5 +1,8 @@
 // test_cond_corr_reasons.cu — 凝縮の理由別の補正量監視 (plans/active/condensation-two-phase-transport.md §4.3, §5.1 #2) の単体試験。
 //   build: nvcc --expt-relaxed-constexpr -I. -o test_cond_corr_reasons tests/unit/test_cond_corr_reasons.cu
+//   (plan #10 以降: H2O の潜熱に共通データの気液ペアが要るので、-I <solver_density_cuda> -I <埋め込みヘッダの生成先> と
+//    solver_density_cuda/input/speciesDB.cpp solver_density_cuda/input/speciesTransportDB.cpp -lyaml-cpp を足す;
+//    生成は tests/unit/cond_latent_test_helper.cuh 冒頭)
 //   実現可能性クランプ (double / float 実体) と Q1/Q2 射影を、計上先あり (reasons) となし (nullptr) で同じ入力に掛け、
 //   (1) 書き込み値 (rog, Q0..Q2, 診断) がビット一致 (計上は振る舞いを変えない)、
 //   (2) 理由別の計上値が手計算と一致 (蒸気上限違反・負値 floor・射影・液滴消滅・制限前の最小蒸気分率・体積の重み) を確かめる。
@@ -10,6 +13,7 @@
 #include <cuda_runtime.h>
 #include "flowFormat.hpp"
 #include "cuda_forge/thermo_d.cuh"
+#include "tests/unit/cond_latent_test_helper.cuh"   // H2O 潜熱の気液ペア (plan thermophysics-solver-owned-species-db #10)
 namespace {
 #include "cuda_forge/condensationSourceKernels_d.cuh"
 }
@@ -26,7 +30,7 @@ static bool near(double a, double b, double rt) { return std::fabs(a - b) <= rt*
 
 int main()
 {
-    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0; o.h2oLatent=cond_test_latent_ref(0.0, true);
     const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o);
     CondTablesHost ht; cond_tables_build_host(cp, ht); const CondTablesF tb = cond_tables_upload(ht);
     const double T = 250.0, ro = 1.0, rho_l = cond_rho_cond(cp, T);

@@ -252,6 +252,13 @@ SPECIES_RECORD_SCHEMA_TRANSPORT = "forge_resolved_species_v2"
 SPECIES_RECORD_EXTRAPOLATION = "nasa9_2interval; low if T<Tmid; cp clamped at Tlo/Thi; h linear with end cp outside [Tlo,Thi]"
 SPECIES_RECORD_DATUM = ("coefficients are absolute (before datum); runtime adds -h_abs(Tref)/Ru to a7 of every interval "
                         "when thermoHrefTemp>0")
+# 凝縮種の液相 (気液ペア; plan thermophysics-solver-owned-species-db #10)。C++ speciesDB.hpp SPECIES_CONDENSED_* と一字一句同じ。
+SPECIES_CONDENSED_EXTENSION = ("h_l: NASA-9 on [Tlo,Thi]; T<Tlo: h(Tlo)-cp_l*(Tlo-T) with cp_l=(h(Tlo+0.5)-h(Tlo-0.5+1e-9))/1; "
+                               "T>Thi: h(Thi); mass basis = paired gas MW")
+SPECIES_CONDENSED_LATENT = ("L=h_v-h_l clamped to [1.5e6,3.5e6] J/kg; h_v = paired gas species (same coefficients, intervals, "
+                            "extrapolation and datum as the species DB)")
+SPECIES_CONDENSED_DATUM = ("liquid h gets the same constant Ru*da7/MW as the paired gas (da7=-h_abs,gas(Tref)/Ru) when thermoHrefTemp>0 "
+                           "(coefficients recorded before datum)")
 
 
 def _g17(x):
@@ -259,10 +266,24 @@ def _g17(x):
     return "%.17g" % float(x)
 
 
-def compat_text(schema, datum, thermoHrefTemp, extrapolation, species, transport_lines=None):
+def condensed_compat_lines(c):
+    """凝縮種の液相 (記録の condensed[0]) の互換性行。C++ speciesDB.cpp condensedCompatLines と一字一句同じ。c が None なら空。"""
+    if not c:
+        return []
+    t = "condensed[0]"
+    return [f"{t}: name={c['name']} phase=condensed pair_of={c['pair_of']} gas_index={int(c['gas_index'])}",
+            f"{t}.MW: {_g17(c['MW'])}",
+            f"{t}.T: {_g17(c['Tlo'])} {_g17(c['Thi'])}",
+            f"{t}.coeffs: " + " ".join(_g17(x) for x in c["nasa9"]),
+            f"{t}.extension: below={c['extension']['below']} above={c['extension']['above']}",
+            f"{t}.rule: {c['rule']}", f"{t}.latent: {c['latent']}", f"{t}.datum: {c['datum']}"]
+
+
+def compat_text(schema, datum, thermoHrefTemp, extrapolation, species, transport_lines=None, condensed=None):
     """互換性ハッシュの正規化テキスト。species は [{name, phase, MW, Tlo, Tmid, Thi, LJ_sigma, LJ_eps_kB, nasa9_low, nasa9_high}]。
     source・来歴は入れない。C++ speciesDB.cpp compatTextRaw と一字一句同じにすること。
-    transport_lines: 輸送ブロック (記録の transport_compat; physProp.transport を書いた run だけ, #5t2)。C++ が作った行をそのまま末尾に足す。"""
+    transport_lines: 輸送ブロック (記録の transport_compat; physProp.transport を書いた run だけ, #5t2)。C++ が作った行をそのまま末尾に足す。
+    condensed: 凝縮種の液相 (記録の condensed[0]; 凝縮 ON・H2O の run だけ, #10)。種の後・輸送の前に condensed_compat_lines を足す。"""
     out = [f"schema: {schema}", f"datum: {datum}", f"thermoHrefTemp: {_g17(thermoHrefTemp)}",
            f"extrapolation: {extrapolation}", f"nSpecies: {len(species)}"]
     def _coeff_lines(tag, e):
@@ -284,8 +305,20 @@ def compat_text(schema, datum, thermoHrefTemp, extrapolation, species, transport
                 mt = f"{tag}.lump[{k}]"
                 out.append(f"{mt}: name={m['name']} x={_g17(m['x'])}")
                 _coeff_lines(mt, m)
+    out.extend(condensed_compat_lines(condensed))
     out.extend(transport_lines or [])
     return "\n".join(out) + "\n"
+
+
+def _record_condensed(n):
+    """記録の condensed[0] (凝縮種の液相; #10)。"""
+    ex = n.get("extension") or {}
+    return {"name": str(n["name"]), "phase": str(n.get("phase", "condensed")), "source": str(n.get("source", "")),
+            "pair_of": str(n["pair_of"]), "gas_index": int(n["gas_index"]), "gas_name": str(n.get("gas_name", "")),
+            "MW": float(n["MW"]), "Tlo": float(n["Tlo"]), "Thi": float(n["Thi"]),
+            "nasa9": [float(x) for x in n["nasa9"]],
+            "extension": {"below": str(ex.get("below", "")), "above": str(ex.get("above", ""))},
+            "rule": str(n["rule"]), "latent": str(n["latent"]), "datum": str(n["datum"])}
 
 
 def _record_coeffs(n):
@@ -324,10 +357,20 @@ def load_record(path):
            "thermoHrefTemp": float(rec.get("thermoHrefTemp", 0.0)), "species": species,
            "transport_compat": [str(x) for x in (rec.get("transport_compat") or [])],
            "provenance": rec.get("provenance") or {}}
+    problems = []
+    # 凝縮種の液相 (#10)。無い記録は凝縮 OFF か #10 以前 (潜熱モデルが記録されていない)。
+    out["condensed"] = None
+    cl = rec.get("condensed")
+    if cl:
+        try:
+            if not isinstance(cl, list) or len(cl) != 1:
+                raise ValueError("condensed must be a list of one entry")
+            out["condensed"] = _record_condensed(cl[0])
+        except (KeyError, TypeError, ValueError) as e:
+            problems.append(f"{path}: malformed condensed block ({e})")
     out["compat_recomputed"] = hashlib.sha256(
         compat_text(out["schema"], out["datum"], out["thermoHrefTemp"], out["extrapolation"], species,
-                    out["transport_compat"]).encode()).hexdigest()
-    problems = []
+                    out["transport_compat"], out["condensed"]).encode()).hexdigest()
     if out["compat_recomputed"] != out["compat_hash"]:
         problems.append(f"{path}: compat_hash in file {out['compat_hash'][:16]} != recomputed from content {out['compat_recomputed'][:16]}"
                         " (edited or corrupted record)")
@@ -408,14 +451,17 @@ def _thermo_entry(e):
 def _thermo_from_record(rec, how):
     return {"source": "record", "how": how, "path": rec["path"], "names": [e["name"] for e in rec["species"]],
             "thermoHrefTemp": rec["thermoHrefTemp"], "compat_hash": rec["compat_recomputed"],
-            "species": {e["name"]: _thermo_entry(e) for e in rec["species"]}}
+            "species": {e["name"]: _thermo_entry(e) for e in rec["species"]},
+            # 凝縮種の液相 (#10; 凝縮 ON・H2O の記録だけ。無ければ None = 凝縮 OFF か #10 以前で潜熱モデルが記録されていない)
+            "condensed": rec.get("condensed")}
 
 
 def run_thermo(run_dir, res_path=None, source="auto", forge=None):
     """run の熱物性を 1 か所で読む (plans/active/thermophysics-solver-owned-species-db.md §4.6, #8)。後処理・種変換・入口分布・
     設計 runner の署名はこれを使い、`species_db.yaml` の存在を前提にしない。
     返り値: {source: record|speciesDBFile|resolve, how, path, names (physProp.species の順), thermoHrefTemp, compat_hash (記録のときだけ),
-             species: {name: {MW, Tlo, Tmid, Thi, LJ_sigma, LJ_eps_kB, nasa9_low, nasa9_high (絶対基準), lump (記録の lump 構成 | None)}}}。
+             species: {name: {MW, Tlo, Tmid, Thi, LJ_sigma, LJ_eps_kB, nasa9_low, nasa9_high (絶対基準), lump (記録の lump 構成 | None)}},
+             condensed: 凝縮種の液相 (記録の condensed[0]; #10) | None (凝縮 OFF・#10 以前の記録・speciesDBFile)}。
     source="auto" の優先順:
       (1) res_path の属性が指すソルバの解決済み記録 (完全性ハッシュを検証; 場を作った物性そのもの)
       (2) run_dir の記録 resolved_species_*.yaml のうち、種名・順序・thermoHrefTemp が solverConfig.yaml と同じもの (互換性ハッシュが 1 通りのとき)
@@ -461,7 +507,8 @@ def run_thermo(run_dir, res_path=None, source="auto", forge=None):
         if not missing:
             return {"source": "speciesDBFile", "how": "speciesDBFile (no solver record)", "path": p, "names": list(names),
                     "thermoHrefTemp": info["thermoHrefTemp"], "compat_hash": None,
-                    "species": {n: _thermo_entry(_find_ci(db, n)) for n in names}}
+                    "species": {n: _thermo_entry(_find_ci(db, n)) for n in names},
+                    "condensed": None}   # speciesDBFile は液相 (潜熱モデル) を持たない (#10)
         notes.append(f"speciesDBFile {os.path.basename(p)} lacks {missing}")
     elif source == "speciesDBFile":
         raise ValueError(f"{run_dir}: physProp.speciesDBFile が無い (source=speciesDBFile)")
@@ -800,6 +847,14 @@ def _record_diff(src_rec, dst_rec):
         while k < min(len(ta), len(tb)) and ta[k] == tb[k]:
             k += 1
         bad.append(f"transport: SRC {ta[k] if k < len(ta) else '(none)'!r} vs destination {tb[k] if k < len(tb) else '(none)'!r}")
+    # 凝縮種の液相 (#10): 正規化行で最初の差を示す (液相だけ違う restart も差として出す)
+    ca, cb = condensed_compat_lines(src_rec.get("condensed")), condensed_compat_lines(dst_rec.get("condensed"))
+    if ca != cb:
+        k = 0
+        while k < min(len(ca), len(cb)) and ca[k] == cb[k]:
+            k += 1
+        bad.append(f"condensed (liquid phase / latent heat): SRC {ca[k] if k < len(ca) else '(none)'!r} vs destination "
+                   f"{cb[k] if k < len(cb) else '(none)'!r}")
     return bad
 
 
@@ -950,10 +1005,13 @@ def stamp_new_field(h5path, run_dir, names, MW, h_ref_T, mixtures, forge=None, t
     return "verified"
 
 
-def plan_convert(src_h5, dst_run_dir, src_run_dir=None, forge=None, force=False, tool="convert", inplace=True):
+def plan_convert(src_h5, dst_run_dir, src_run_dir=None, forge=None, force=False, tool="convert", inplace=True, legacy_latent=False):
     """種変換の判定 (書き込み前)。入力を検証し (属性・記録の完全性、SRC config を解決したハッシュ = 場の属性)、
     変換先を解決する。返り値 = {"attrs": 付ける属性 | None, "dst": resolve 結果 | None}。入力が未検証・解決できないときは
-    既定で SpeciesCheckError、FORGE_ALLOW_UNVERIFIED_SPECIES=1 か force=True なら attrs=None (属性なし)。"""
+    既定で SpeciesCheckError、FORGE_ALLOW_UNVERIFIED_SPECIES=1 か force=True なら attrs=None (属性なし)。
+    legacy_latent (convert_species_field.py --src-latent legacy-v0; plan #10 の移行手順): SRC の記録が液相 (condensed) を持たない
+    #10 以前の H2O 凝縮 run で、SRC config を今の forge で解決した差が**液相の追加だけ** (記録 + 今の液相行 = 今のハッシュ) なら、
+    潜熱モデル以外は検証済みとして通す (潜熱は呼び手が旧モデルで読む)。"""
     st = source_species_state(src_h5)
     if st["state"] in ("none", "unverified"):
         _check_unverified_src(tool, src_h5, os.path.abspath(dst_run_dir), st, force)
@@ -972,8 +1030,20 @@ def plan_convert(src_h5, dst_run_dir, src_run_dir=None, forge=None, force=False,
     except SpeciesResolveUnavailable as e:
         refuse_unverified(tool, f"cannot resolve species ({e}); the converted field cannot be verified", force)
         return {"attrs": None, "dst": None}
+    if srcr is not None and srcr["hash"] != rec["compat_recomputed"] and legacy_latent and rec.get("condensed") is None \
+            and (srcr["record"] or {}).get("condensed") is not None:
+        h2 = hashlib.sha256(compat_text(rec["schema"], rec["datum"], rec["thermoHrefTemp"], rec["extrapolation"], rec["species"],
+                                        rec["transport_compat"], srcr["record"]["condensed"]).encode()).hexdigest()
+        if h2 == srcr["hash"]:
+            print(f"[{tool}] species: SRC record {rec['compat_recomputed'][:16]} verified except the latent-heat model "
+                  f"(record written before plan #10 has no liquid phase; the source config now resolves to {srcr['hash'][:16]} "
+                  "only by adding it). The source latent heat is read with the legacy model (--src-latent legacy-v0).")
+            rec = dict(rec, compat_recomputed=srcr["hash"])
     if srcr is None or srcr["hash"] != rec["compat_recomputed"]:
         diff = _record_diff(rec, srcr["record"]) if srcr else ["source run is calorically perfect"]
+        if srcr is not None and rec.get("condensed") is None and (srcr["record"] or {}).get("condensed") is not None:
+            diff.append("the SRC record has no liquid phase (written before plan #10): if the field was produced by a forge "
+                        "before #10, convert it with --src-latent legacy-v0 (migration; the old h2o_latent is used for the source)")
         msg = (f"SRC {src_h5} species_hash {rec['compat_recomputed'][:16]} != the source run config {src_run_dir} "
                f"({srcr['hash'][:16] if srcr else 'CPG'}); the converter would read the field with other properties:\n"
                + "".join(f"    {x}\n" for x in diff))

@@ -2,6 +2,7 @@
 
 #include <cuda_runtime.h>
 #include <math.h>   // host コンパイル時の pow/log/exp/sqrt (device は組込み)
+#include "thermo_d.cuh"   // SpeciesThermo / thermo_h_mass (H2O 潜熱の気相 = 種 DB と同じ評価; plan thermophysics-solver-owned-species-db #10)
 
 // 非平衡凝縮: 凝縮種ごとの物性相関 (飽和蒸気圧・凝縮相密度・潜熱・表面張力)。
 // 物性評価は exp/log で桁が飛ぶため内部は **double** で計算する (flow_float が float でも安全)。
@@ -28,6 +29,30 @@ enum CondPropModel {
     COND_MODEL_H2O = 1,   // Phase 3
 };
 
+// H2O の潜熱モデル = 気液ペア (plans/active/thermophysics-solver-owned-species-db.md §4.8, #10; methods/condensation.md §4.3)。
+//   L(T) = h_v(T) − h_l(T)。h_v はペアの気相種そのもの (種 DB の係数・区間・外挿規約、datum オフセット焼き込み後 =
+//   thermo_init_db が device に上げる係数と同一)、h_l は共通データの液相 H2O(L) を気相と同じ MW で質量換算し**気相と同じ datum 定数** (R_u Δa7/MW) を足す。
+//   起動時に host (condensationTransport_d.cu cond_latent_pair_for) が種 DB の解決結果から cond_latent_pair_make で作り、
+//   host 側と device 側に 1 つずつ置いて **ポインタ** (CondLatentRef) で渡す。気相係数のハードコードは持たない。
+//   値渡しにしないのは、係数 ~40 double を kernel のローカル構造体に持つとレジスタが溢れるため
+//   (実測: dependentVariables_d REG 126→166、512 スレッド/ブロックの上限 128 を超えて起動不能になる)。
+struct CondLatentPair {
+    int           valid = 0;   // 1: 構築済み。0: 未構築 → H2O の cond_latent は NaN (種 DB を経ない L は作らない)
+    SpeciesThermo gas;         // ペアの気相 (datum 焼き込み後)
+    double liq[8];             // 液相 NASA-9 a0..a7 (絶対基準のまま; h だけなので a8 は持たない)
+    double liqTlo, liqThi;     // 液相フィットの区間 [K] (H2O(L): 273.15–373.15)
+    double liqMW;              // 質量換算の MW (= gas.MW; 共通データで一致を検査済み)
+    double liqR;               // R_u/liqMW [J/(kg K)]
+    double hShift;             // 気相と同じ datum オフセット [J/kg] = R_u Δa7/MW (Tref=0 なら 0)。h_l = h_l,abs + hShift
+    double hlLo, cplLo, hlHi;  // 延長規約の前計算 (絶対基準) [J/kg, J/(kg K)]: h_l(Tlo)、T<Tlo の一定 c_p,l (1 K 差分)、h_l(Thi) (T>Thi は頭打ち)
+};
+// 気液ペアへの参照。host コード (表の生成・起動ログ・単体試験) は h を、kernel は d (device メモリ) を読む。
+// どちらかが nullptr のまま H2O の潜熱を評価すると NaN (設定漏れを露呈させる)。
+struct CondLatentRef {
+    const CondLatentPair* h = nullptr;
+    const CondLatentPair* d = nullptr;
+};
+
 // 凝縮種の物性パラメータ (device へ value 渡しできる POD)。
 struct CondSpeciesProps {
     int    model;   // CondPropModel
@@ -43,6 +68,7 @@ struct CondSpeciesProps {
     int    psatLowT;     // 1: 50 K 未満の飽和圧 C–C 外挿を新 L(T) の積分で再構成 (既定), 0: 旧 (L_poly(50) 一定の C–C; 診断用)
     double liquidCp;     // 液 N2 の比熱 c_l [J/(kg K)] (線形外挿の傾き c_p,v − c_l に使う; 既定 2000)
     int    gasKgasModel; // 成長則の気相熱伝導率: 0=N2 (n2_kgas), 1=空気 Sutherland (CPG carrier 空気)
+    CondLatentRef lat;   // H2O の潜熱 (気液ペアへの参照; #10)。N2 では未使用
 };
 
 // kernel に値渡しする物性オプション (config 由来)。condProps_make() で CondSpeciesProps に反映する。
@@ -53,6 +79,7 @@ struct CondPropOpts {
     int    gasKgasModel;
     double sigmaScale;
     double Yw;           // CPG carrier 形の凝縮種質量分率 (condVaporMassFraction; <=0 で pure)
+    CondLatentRef h2oLatent;    // H2O の潜熱モデル (cond_prop_opts が種 DB から設定; 未設定なら H2O の L は NaN)
 };
 
 // N2 既定パラメータ。R=296.8, γ=1.4 → cv=R/(γ-1)=742, cp=γcv=1038.8。
@@ -220,48 +247,125 @@ __host__ __device__ inline double h2o_rho_cond(double T)
     return r;
 }
 
-// 水 蒸発潜熱 L(T) [J/kg] = h_v(T) − h_l(T) を **CEA (NASA-9) の気相 H2O と液相 H2O(L) の全エンタルピー差**で作る
-// (2026-08-18, ユーザ指示「CEA 式で L を逆算」)。
-//   h_v: forge 種 DB と同じ CEA McBride–Gordon 2002 の H2O 200–1000 K 係数 (thermo_d.cu)。
-//   h_l: CEA thermo.inp の H2O(L) 273.15–373.15 K 係数 (Cox 1989 / Haar 1984)。**273.15 K 未満は CEA に液相フィットが無く
-//        (CEA は氷 H2O(cr))、多項式外挿は 250 K 以下で発散 (cp_l 230 K で 10 kJ/kgK, 200 K で 50 kJ/kgK) するので、
-//        h_l を 273.15 K の値と勾配 cp_l(273.15)=4228 J/kgK で線形外挿**する (過冷却水の標準的な扱い、cp_l 一定)。
-//   旧線形フィット 3.1485e6−2370 T は本構成と 250 K で 0.3 %、273 K で 0.05 % 一致していた (等価だったことの確認)。
+// 水 蒸発潜熱 L(T) [J/kg] = h_v(T) − h_l(T) = **気相 H2O と液相 H2O(L) の全エンタルピー差** (CEA の絶対基準のペア)。
+//   2026-08-18 のユーザ指示「CEA 式で L を逆算」を、2026-09-27 に種 DB の気液ペアへ移した
+//   (plans/active/thermophysics-solver-owned-species-db.md §4.8, #10; 旧実装は気相 H2O の 200–1000 K 係数を再ハードコードし、
+//    200 K 未満へ多項式のまま外挿・1000 K で頭打ちしていた。種 DB は 200 K 未満を c_p(200 K) 一定の線形外挿にするので
+//    120 K で −2.39 kJ/kg、150 K で −0.47 kJ/kg、200 K 以上は丸め程度で変わる)。
+//   h_v: ペアの気相種 = 種 DB と同じ係数・区間・外挿規約・datum (thermo_h_mass そのもの)。
+//   h_l: 共通データの H2O(L) 273.15–373.15 K 係数 (CEA; Cox 1989 / Haar 1984) を気相と同じ MW で質量換算し、気相と同じ datum 定数を足す。
+//        **273.15 K 未満は CEA に液相フィットが無く** (CEA は氷 H2O(cr))、多項式外挿は 250 K 以下で発散 (cp_l 230 K で 10 kJ/kgK,
+//        200 K で 50 kJ/kgK) するので、h_l(273.15) から cp_l ≈ 4228 J/kgK (1 K 差分) 一定で線形外挿する (過冷却水の標準的な扱い)。
+//        373.15 K 超は h_l(373.15) で頭打ち (従来と同じ延長規約)。
+//   評価温度の下限は COND_T_PROP_FLOOR (45 K; 他の凝縮物性と同じ入力クランプ、NaN もここに落ちる)。L は [1.5, 3.5] MJ/kg にクランプ。
 //   L(250 K)=2.563 MJ/kg, L(273.15)=2.501 MJ/kg。氷 (昇華熱 2.835 MJ/kg) は使わない (飽和線も過冷却液 Murphy–Koop で統一)。
-__host__ __device__ inline double h2o_nasa9_h_mass(const double* a, double T)
+//   datum 不変性 (thermoHrefTemp を変えても L が不変) と既知の気液差は tests/unit/test_cond_latent_pair.cu。
+
+// 液相の NASA-9 h [J/kg] (絶対基準)。H2O(L) の係数は a0=1.3e9, a1=−2.4e7 と大きく項どうしが強く打ち消すので、演算順は
+// #10 以前の h2o_latent (h2o_nasa9_h_mass) と同じにする (液相部分は旧実装とビット一致; 丸めの再配置で ~5e-4 J/kg 動くのを避ける)。
+__host__ __device__ inline double cond_liquid_h_abs_poly(const double* a, double R, double T)
 {
-    // NASA-9: h/(RT) = -a1/T² + a2 lnT/T + a3 + a4 T/2 + a5 T²/3 + a6 T³/4 + a7 T⁴/5 + b1/T ; R_w = 8.314462618/0.0180153
-    const double Rw = 8.314462618/0.0180153;
     const double hRT = -a[0]/(T*T) + a[1]*log(T)/T + a[2] + a[3]*T/2.0 + a[4]*T*T/3.0
                      + a[5]*T*T*T/4.0 + a[6]*T*T*T*T/5.0 + a[7]/T;
-    return hRT*Rw*T;
+    return hRT*R*T;
 }
-__host__ __device__ inline double h2o_latent(double T)
+
+// 気液ペアを作る (host/device 共用; 起動時に 1 回)。gasAbs・liqAbs は datum 前の絶対基準。Tref>0 なら thermo_init_db と
+// 同じ演算で気相の両区間の a7 に Δa7 = −h_abs,gas(Tref)/Ru を足し (device の種 DB 係数とビット一致)、液相には**同じ定数**
+// R_u Δa7/MW を h に足す (a7 に Δa7 を足すのと数学的に同じ。液相多項式の打ち消しの丸めを datum から切り離すため、係数は絶対基準のまま)。
+__host__ __device__ inline CondLatentPair cond_latent_pair_make(const SpeciesThermo& gasAbs, const double* liqAbs,
+                                                                double liqTlo, double liqThi, double Tref)
 {
-    // 気相 H2O (CEA, 200–1000 K 区間; 1000 K 超は本用途で不要だが単調に外挿される)
-    const double ag[8] = {-3.947960830e+04, 5.755731020e+02, 9.317826530e-01, 7.222712860e-03,
-                          -7.342557370e-06, 4.955043490e-09,-1.336933246e-12,-3.303974310e+04};
-    // 液相 H2O(L) (CEA, 273.15–373.15 K 区間)
-    const double al[8] = { 1.326371304e+09,-2.448295388e+07, 1.879428776e+05,-7.678995050e+02,
-                           1.761556813e+00,-2.151167128e-03, 1.092570813e-06, 1.101760476e+08};
-    const double Tf = 273.15;
-    double Tg = (T > COND_T_PROP_FLOOR) ? T : COND_T_PROP_FLOOR;
-    if (Tg > 1000.0) Tg = 1000.0;
-    const double hv = h2o_nasa9_h_mass(ag, Tg);
-    double hl;
-    if (Tg >= Tf) {
-        const double Tl = (Tg < 373.15) ? Tg : 373.15;
-        hl = h2o_nasa9_h_mass(al, Tl);
-    } else {
-        // 273.15 K 未満: cp_l(273.15) 一定で線形外挿 (過冷却水)
-        const double h0  = h2o_nasa9_h_mass(al, Tf);
-        const double cpl = (h2o_nasa9_h_mass(al, Tf + 0.5) - h2o_nasa9_h_mass(al, Tf - 0.5 + 1.0e-9))/1.0;  // ≈4228 J/kgK
-        hl = h0 - cpl*(Tf - Tg);
+    CondLatentPair p;
+    p.valid = 1;
+    p.gas = gasAbs;
+    p.gas.invMW = 1.0/p.gas.MW;
+    double da7 = 0.0;
+    if (Tref > 0.0) {
+        const double h_ref = thermo_h_molar(gasAbs, Tref);   // 移動前の絶対 h [J/mol] (thermo_init_db と同じ)
+        da7 = -h_ref / THERMO_RU;
+        p.gas.low[7]  += da7;
+        p.gas.high[7] += da7;
+        p.gas.h_datum  = h_ref;
     }
-    double L = hv - hl;
+    for (int k = 0; k < 8; ++k) p.liq[k] = liqAbs[k];
+    p.liqTlo = liqTlo; p.liqThi = liqThi; p.liqMW = gasAbs.MW;
+    p.liqR   = THERMO_RU/p.liqMW;
+    p.hShift = THERMO_RU*da7/p.liqMW;
+    p.hlLo  = cond_liquid_h_abs_poly(p.liq, p.liqR, liqTlo);
+    p.cplLo = (cond_liquid_h_abs_poly(p.liq, p.liqR, liqTlo + 0.5) - cond_liquid_h_abs_poly(p.liq, p.liqR, liqTlo - 0.5 + 1.0e-9))/1.0;   // ≈4228 J/kgK (従来と同じ 1 K 差分)
+    p.hlHi  = cond_liquid_h_abs_poly(p.liq, p.liqR, liqThi);
+    return p;
+}
+
+// 気相 h_v(T) [J/kg]: thermo_h_mass (thermo_d.cuh) と同じ式・同じ分岐 (T<Tmid で low、[Tlo,Thi] の外は端の c_p で線形外挿)。
+//   thermo_pick_coeffs のポインタ選択を kernel 内のローカル構造体に使うとローカルメモリへ落ちる (dependentVariables_d で
+//   REG 126→178・STACK 360→1608 を実測) ので、係数を値で選ぶ。thermo_h_mass とのビット一致は tests/unit/test_cond_latent_pair.cu。
+__host__ __device__ inline double cond_gas_h_molar_clamped(const SpeciesThermo& sp, double Tc)
+{
+    const bool lo = (Tc < sp.Tmid);
+    const double a0 = lo ? sp.low[0] : sp.high[0], a1 = lo ? sp.low[1] : sp.high[1];
+    const double a2 = lo ? sp.low[2] : sp.high[2], a3 = lo ? sp.low[3] : sp.high[3];
+    const double a4 = lo ? sp.low[4] : sp.high[4], a5 = lo ? sp.low[5] : sp.high[5];
+    const double a6 = lo ? sp.low[6] : sp.high[6], a7 = lo ? sp.low[7] : sp.high[7];
+    const double Ti  = 1.0/Tc;
+    const double Ti2 = Ti*Ti;
+    const double lnT = log(Tc);
+    const double hRT = -a0*Ti2 + a1*lnT*Ti + a2
+                     + a3*Tc/2.0 + a4*Tc*Tc/3.0 + a5*Tc*Tc*Tc/4.0
+                     + a6*Tc*Tc*Tc*Tc/5.0 + a7*Ti;
+    return THERMO_RU * Tc * hRT;
+}
+__host__ __device__ inline double cond_gas_cp_molar_clamped(const SpeciesThermo& sp, double Tc)
+{
+    const bool lo = (Tc < sp.Tmid);
+    const double a0 = lo ? sp.low[0] : sp.high[0], a1 = lo ? sp.low[1] : sp.high[1];
+    const double a2 = lo ? sp.low[2] : sp.high[2], a3 = lo ? sp.low[3] : sp.high[3];
+    const double a4 = lo ? sp.low[4] : sp.high[4], a5 = lo ? sp.low[5] : sp.high[5];
+    const double a6 = lo ? sp.low[6] : sp.high[6];
+    const double Ti  = 1.0/Tc;
+    const double Ti2 = Ti*Ti;
+    return THERMO_RU * ( a0*Ti2 + a1*Ti + a2
+                       + a3*Tc + a4*Tc*Tc + a5*Tc*Tc*Tc + a6*Tc*Tc*Tc*Tc );
+}
+__host__ __device__ inline double cond_gas_h_mass(const SpeciesThermo& sp, double T)
+{
+    double h;
+    if (T < sp.Tlo)      h = cond_gas_h_molar_clamped(sp, sp.Tlo) + cond_gas_cp_molar_clamped(sp, sp.Tlo)*(T - sp.Tlo);
+    else if (T > sp.Thi) h = cond_gas_h_molar_clamped(sp, sp.Thi) + cond_gas_cp_molar_clamped(sp, sp.Thi)*(T - sp.Thi);
+    else                 h = cond_gas_h_molar_clamped(sp, T);
+    return h / sp.MW;
+}
+
+// 液相 h_l(T) [J/kg] (延長規約込み、気相と同じ datum オフセット hShift を足す)
+__host__ __device__ inline double cond_liquid_h_mass(const CondLatentPair& p, double T)
+{
+    double h;
+    if (T < p.liqTlo)      h = p.hlLo - p.cplLo*(p.liqTlo - T);
+    else if (T > p.liqThi) h = p.hlHi;
+    else                   h = cond_liquid_h_abs_poly(p.liq, p.liqR, T);
+    return h + p.hShift;
+}
+
+__host__ __device__ inline double h2o_latent_pair(const CondLatentPair& p, double T)
+{
+    if (!p.valid) return NAN;   // 種 DB を経ない潜熱は作らない (起動時の設定漏れを NaN で露呈させる)
+    const double Tg = (T > COND_T_PROP_FLOOR) ? T : COND_T_PROP_FLOOR;
+    const double hv = cond_gas_h_mass(p.gas, Tg);   // 種 DB と同じ評価 (= thermo_h_mass; 200 K 未満は c_p(200 K) 一定の線形外挿)
+    double L = hv - cond_liquid_h_mass(p, Tg);
     if (L < 1.5e6) L = 1.5e6;
     if (L > 3.5e6) L = 3.5e6;
     return L;
+}
+// 参照から評価 (host は r.h、device は r.d)。
+__host__ __device__ inline double h2o_latent(const CondLatentRef& r, double T)
+{
+#ifdef __CUDA_ARCH__
+    const CondLatentPair* p = r.d;
+#else
+    const CondLatentPair* p = r.h;
+#endif
+    return (p != nullptr) ? h2o_latent_pair(*p, T) : NAN;
 }
 
 // 水 表面張力 σ(T) [N/m] — IAPWS 形を過冷却へ外挿 (Tc=647.096K)。
@@ -298,7 +402,7 @@ __host__ __device__ inline double cond_rho_cond(const CondSpeciesProps& s, doubl
 }
 __host__ __device__ inline double cond_latent(const CondSpeciesProps& s, double T)
 {
-    return (s.model == COND_MODEL_H2O) ? h2o_latent(T) : n2_latent_ex(T, s.latentLowT, s.liquidCp);
+    return (s.model == COND_MODEL_H2O) ? h2o_latent(s.lat, T) : n2_latent_ex(T, s.latentLowT, s.liquidCp);
 }
 __host__ __device__ inline double cond_sigma(const CondSpeciesProps& s, double T)
 {
@@ -347,6 +451,7 @@ __host__ __device__ inline CondSpeciesProps condProps_H2O()
     s.M  = 0.0180153;
     s.sigmaScale = 1.0;
     s.latentLowT = 1; s.psatLowT = 1; s.liquidCp = 2000.0; s.gasKgasModel = 0;   // H2O では未使用
+    // 潜熱の気液ペアへの参照 s.lat は未設定 (nullptr → L は NaN)。種 DB から作ったもの (CondPropOpts::h2oLatent) を condProps_make で入れる。
     return s;
 }
 
@@ -355,5 +460,6 @@ __host__ __device__ inline CondSpeciesProps condProps_make(int model, const Cond
 {
     CondSpeciesProps s = (model == COND_MODEL_H2O) ? condProps_H2O() : condProps_N2();
     s.sigmaScale = o.sigmaScale; s.latentLowT = o.latentLowT; s.psatLowT = o.psatLowT; s.liquidCp = o.liquidCp; s.gasKgasModel = o.gasKgasModel;
+    if (model == COND_MODEL_H2O) s.lat = o.h2oLatent;   // 潜熱の気液ペア (#10)
     return s;
 }

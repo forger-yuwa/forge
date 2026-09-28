@@ -11,7 +11,10 @@
 #include "scalarTransport_d.cuh"
 #include "passiveTransport_d.cuh"   // passiveScalarScheme 1: 化学種経路の受動種として移流・更新
 
+#include "input/speciesDB.hpp"   // 潜熱の気液ペア (speciesDB_current()->condensed; plan #10)
+
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -19,6 +22,51 @@
 static flow_float** g_rog_dev = nullptr;
 static CondTablesF g_condTables;   // float 経路の物性表 (condensationInit_d で構築)
 static int          g_nCond   = 0;
+
+CondLatentRef cond_latent_pair_for(const solverConfig& cfg)
+{
+    if (!(cfg.condensation == 1 && cfg.condModel == COND_MODEL_H2O)) return CondLatentRef{};
+    static bool           built = false, checked = false;
+    static CondLatentPair cached;
+    static CondLatentRef  ref;
+    if (!built) {
+        const ResolvedSpeciesDB* db = speciesDB_current();
+        if (!db) db = &speciesDB_init(cfg);
+        const ResolvedCondensed& c = db->condensed;
+        if (!c.enabled) {
+            std::fprintf(stderr, "[cond] ERROR: condensation of H2O needs the liquid phase H2O(L) paired with the gas in the species DB "
+                                 "(speciesDB_resolve did not attach it; plan thermophysics-solver-owned-species-db #10)\n");
+            std::exit(EXIT_FAILURE);
+        }
+        // datum は thermo_init_db と同じ条件 (TP かつ thermoHrefTemp>0) で、気相・液相に同じ Δa7 を掛ける
+        const double Tref = (cfg.thermalMethod == 2 && cfg.thermoHrefTemp > 0.0) ? cfg.thermoHrefTemp : 0.0;
+        cached = cond_latent_pair_make(c.gas, c.coeffs, c.Tlo, c.Thi, Tref);
+        CondLatentPair* dev = nullptr;   // device 側の複製 (プロセス終了まで保持)
+        gpuErrchk( cudaMalloc((void**)&dev, sizeof(CondLatentPair)) );
+        gpuErrchk( cudaMemcpy(dev, &cached, sizeof(CondLatentPair), cudaMemcpyHostToDevice) );
+        ref.h = &cached; ref.d = dev;
+        built = true;
+        const std::string where = (c.gasIndex >= 0) ? "species " + std::to_string(c.gasIndex) : std::string("built-in, not in the species list");
+        std::printf("[cond] H2O latent heat L = h_v - h_l (plan #10): gas '%s' (%s), liquid %s %.2f-%.2f K, datum Tref=%g K;"
+                    " L(150/200/250/300 K) = %.1f / %.1f / %.1f / %.1f J/kg\n",
+                    c.gasName.c_str(), where.c_str(), c.name.c_str(), c.Tlo, c.Thi, Tref,
+                    h2o_latent_pair(cached, 150.0), h2o_latent_pair(cached, 200.0), h2o_latent_pair(cached, 250.0), h2o_latent_pair(cached, 300.0));
+    }
+    // 気相が種 DB の device 係数 (thermo_init_db が datum を焼き込んだもの) とビット一致することを 1 回確かめる (TP のみ)
+    const int gi = speciesDB_current() ? speciesDB_current()->condensed.gasIndex : -1;
+    if (!checked && cfg.thermalMethod == 2 && gi >= 0 && gi < thermo_num_species() && thermo_species_host() != nullptr) {
+        const SpeciesThermo& g = thermo_species_host()[gi];
+        bool same = (g.MW == cached.gas.MW && g.Tlo == cached.gas.Tlo && g.Tmid == cached.gas.Tmid && g.Thi == cached.gas.Thi);
+        for (int k = 0; k < 9; ++k) same = same && (g.low[k] == cached.gas.low[k]) && (g.high[k] == cached.gas.high[k]);
+        if (!same) {
+            std::fprintf(stderr, "[cond] ERROR: the gas of the H2O latent-heat pair differs from species %d of the species DB after the datum "
+                                 "offset (the latent heat must use the same evaluation as the species DB; plan #10)\n", gi);
+            std::exit(EXIT_FAILURE);
+        }
+        checked = true;
+    }
+    return ref;
+}
 
 namespace {
 

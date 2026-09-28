@@ -24,9 +24,15 @@ plans/active/thermophysics-cea-mole-fraction-species.md §2 (forge 本体) / §4
 エネルギーと温度:
   - source が res (T あり) なら T はソルバの値。input h5 (T なし) なら **ソルバと同じ二相 EOS** で `roe` から反転する:
     e = e_gas(Y_total, T) + g (R_w T − L(T)) (carrier 形, condensationEOS_d.cuh `cond_T_from_e_carrier`)、pure TP は
-    e = e_v(T) + g R_mix T − g L(T) (`cond_T_from_e_onetemp`)。L(T) は condensationProperties_d.cuh の `h2o_latent` / `n2_latent` を移植。
-  - DB (熱物性; `forge_species.run_thermo` = ソルバの解決済み記録か従来の speciesDBFile) / datum (`thermoHrefTemp`) / 種集合が変わるときは `roe += ρ [e_gas,dst(Y_dst,T) − e_gas,src(Y_src,T)]`
-    (差分形; 液相項 g(R_w T−L) は不変なので湿潤セルでも正しい)。
+    e = e_v(T) + g R_mix T − g L(T) (`cond_T_from_e_onetemp`)。N2 の L(T) は condensationProperties_d.cuh の `n2_latent` を移植、
+    H2O の L(T) は **run の解決済み記録の気液ペア** (condensed: 液相 H2O(L) とペアの気相種; plan thermophysics-solver-owned-species-db #10)
+    から `h2o_latent(CondLatentPair)` と同式で作る。記録に液相が無い湿り場 (#10 以前の H2O 凝縮 run) は潜熱モデルが分からないので
+    **既定で拒否**し、旧モデル (#10 以前の `h2o_latent`: 気相 H2O 200–1000 K 係数の多項式外挿・1000 K 頭打ち) で作った場と
+    確かめたときだけ `--src-latent legacy-v0` で明示する (移行手順)。
+  - DB (熱物性; `forge_species.run_thermo` = ソルバの解決済み記録か従来の speciesDBFile) / datum (`thermoHrefTemp`) / 種集合 /
+    **液相 (潜熱モデル)** が変わるときは差分形で
+    `roe += ρ {e_gas,dst(Y_dst,T) − e_gas,src(Y_src,T) + g_dst(R_dst T − L_dst(T)) − g_src(R_src T − L_src(T))}`
+    (R は carrier 形で R_w、pure 形で R_mix; codex diagnose 2026-09-27: 液相項を入れないと L だけ変わる変換で補正が欠落する)。
 検査 (**1 つでも破れば書き込まず失敗終了**; NaN は必ず失敗になるよう有限性を先に見る, codex result-2 M3):
   source の必須データセット (ro, roUx/Ux, roUy, roUz, roe, roY{s}/Y{s} 全種, tracer なら roXi/Xi) の存在、ρ>0 と全保存量・組成・
   T (source/destination) の有限性、組成の非負 (Y < −1e-9 は拒否、|Y| < 1e-9 は 0 にクリップして件数を報告)、|ΣY_src−1| ≤ 1e-4、
@@ -55,7 +61,7 @@ import numpy as np, h5py
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from total_quantities import _TPGas  # noqa: E402
+from total_quantities import _TPGas, RU  # noqa: E402
 from forge_species import species_info, load_yaml_str, species_signature, required_conserved  # noqa: E402
 import forge_species as fsp  # noqa: E402
 
@@ -77,8 +83,10 @@ def _h2o_nasa9_h_mass(a, T):
     return hRT * Rw * T
 
 
-def h2o_latent(T):
-    """condensationProperties_d.cuh h2o_latent の移植 (CEA 気相 H2O − 液相 H2O(L), 273.15 K 未満は cp_l 一定外挿, [1.5e6, 3.5e6] クランプ)。"""
+def h2o_latent_legacy_v0(T):
+    """**旧モデル** (plan thermophysics-solver-owned-species-db #10 以前のソルバの h2o_latent) の移植。移行専用 (--src-latent legacy-v0)。
+    気相 H2O の 200–1000 K 係数を再ハードコードし、[45, 1000] K にクランプして多項式のまま評価 (200 K 未満も多項式外挿)、
+    液相 H2O(L) は 273.15 K 未満 cp_l 一定外挿・373.15 K 超頭打ち、[1.5e6, 3.5e6] クランプ。"""
     ag = np.array([-3.947960830e+04, 5.755731020e+02, 9.317826530e-01, 7.222712860e-03,
                    -7.342557370e-06, 4.955043490e-09, -1.336933246e-12, -3.303974310e+04])
     al = np.array([1.326371304e+09, -2.448295388e+07, 1.879428776e+05, -7.678995050e+02,
@@ -95,6 +103,53 @@ def h2o_latent(T):
     return np.clip(hv - hl, 1.5e6, 3.5e6)
 
 
+LEGACY_LATENT_KEY = ("legacy-v0: h2o_latent before plan thermophysics-solver-owned-species-db #10",)
+
+
+class H2OLatentPair:
+    """記録の気液ペア (plan thermophysics-solver-owned-species-db #10) による H2O の潜熱。
+    condensationProperties_d.cuh h2o_latent_pair と同式: L = h_v − h_l を [1.5e6, 3.5e6] にクランプ、評価温度の下限 45 K。
+    h_v はペアの気相種 (記録の係数; _TPGas と同じ区間・外挿規約)、h_l は記録の液相 (condensed[0]) を気相と同じ MW で質量換算し、
+    273.15 K 未満は h(Tlo) から c_p,l = h(Tlo+0.5) − h(Tlo−0.5+1e-9) 一定、373.15 K 超は h(Thi) で頭打ち。
+    datum (thermoHrefTemp) は気液に同じ定数を掛けるので差 L には効かない (ここでは両方とも絶対基準で評価する)。"""
+    def __init__(self, gas, cond):
+        import forge_species as _fsp
+        if (cond["extension"]["below"], cond["extension"]["above"]) != ("linear_cp_fd_at_Tlo", "hold_at_Thi") \
+                or cond["rule"] != _fsp.SPECIES_CONDENSED_EXTENSION or cond["latent"] != _fsp.SPECIES_CONDENSED_LATENT:
+            raise SystemExit(f"REFUSED: 記録の液相 {cond['name']} の延長規約/潜熱規約がこの変換器の実装と違う "
+                             f"({cond['extension']}, rule {cond['rule']!r}); 同じ版の tools を使うこと")
+        if float(cond["MW"]) != float(gas["MW"]):
+            raise SystemExit(f"REFUSED: 記録の液相 {cond['name']} の MW {cond['MW']} がペアの気相 MW {gas['MW']} と違う")
+        self.gas = gas; self.MW = float(gas["MW"])
+        self.a = np.asarray(cond["nasa9"][:8], float); self.Tlo = float(cond["Tlo"]); self.Thi = float(cond["Thi"])
+        self._g = _TPGas({"G": gas}, ["G"], 0.0)
+        self.hlLo = self._hl_poly(self.Tlo)
+        self.cpl = (self._hl_poly(self.Tlo + 0.5) - self._hl_poly(self.Tlo - 0.5 + 1.0e-9)) / 1.0
+        self.hlHi = self._hl_poly(self.Thi)
+        self.key = tuple(_fsp.condensed_compat_lines(cond)) + (repr([gas["MW"], gas["Tlo"], gas["Tmid"], gas["Thi"],
+                                                                     list(gas["nasa9_low"]), list(gas["nasa9_high"])]),)
+
+    def _hl_poly(self, T):
+        a = self.a; T = np.asarray(T, float)
+        hRT = (-a[0] / (T * T) + a[1] * np.log(T) / T + a[2] + a[3] * T / 2.0 + a[4] * T * T / 3.0
+               + a[5] * T * T * T / 4.0 + a[6] * T * T * T * T / 5.0 + a[7] / T)
+        return hRT * (RU / self.MW) * T   # ソルバ cond_liquid_h_abs_poly と同じ演算順 (液相多項式は打ち消しが強く、順序で ~1e-11 相対ずれる)
+
+    def h_liquid(self, T):
+        T = np.asarray(T, float)
+        return np.where(T < self.Tlo, self.hlLo - self.cpl * (self.Tlo - T),
+                        np.where(T > self.Thi, self.hlHi, self._hl_poly(np.clip(T, self.Tlo, self.Thi))))
+
+    def h_vapor(self, T):
+        T = np.asarray(T, float)
+        return self._g._props(self.gas, np.atleast_1d(T).ravel())[1].reshape(T.shape)   # _TPGas は 1 次元配列を取る
+
+    def __call__(self, T):
+        Tg = np.maximum(np.asarray(T, float), COND_T_PROP_FLOOR)
+        L = np.clip(self.h_vapor(Tg) - self.h_liquid(Tg), 1.5e6, 3.5e6)
+        return float(L) if L.shape == () else L
+
+
 def n2_latent_poly(T):
     Tcl = np.clip(np.asarray(T, float), COND_T_PROP_FLOOR, 126.192 - 0.5)
     p1, p2, p3, p4, p5 = -2.137e-8, 7.18e-6, -9.142e-4, 0.05069, -0.809
@@ -109,22 +164,45 @@ def n2_latent_ex(T, lowT=1, cl=2000.0):
 
 
 class CondEOS:
-    """凝縮種の二相 EOS 定数 (condProps_H2O / condProps_N2 と同じ R) と潜熱。carrier=True で cond_T_from_e_carrier 形。"""
-    def __init__(self, condModel, carrier, latentLowT=1, liquidCp=2000.0):
+    """凝縮種の二相 EOS 定数 (condProps_H2O / condProps_N2 と同じ R) と潜熱。carrier=True で cond_T_from_e_carrier 形。
+    H2O の潜熱は h2o_latent (H2OLatentPair = 記録の気液ペア, または移行用の h2o_latent_legacy_v0) を渡す。None は「潜熱モデル不明」で、
+    液相 g>0 のセルで評価しようとすると拒否する (#10 以前の記録の湿り場; --src-latent legacy-v0 で明示)。"""
+    def __init__(self, condModel, carrier, latentLowT=1, liquidCp=2000.0, h2o_latent=None, h2o_latent_key=None, why_unknown=None):
         self.model = int(condModel); self.carrier = bool(carrier)
         self.Rw = 461.5 if self.model == 1 else 296.8
         self.latentLowT = latentLowT; self.liquidCp = liquidCp
+        self.h2o_latent = h2o_latent; self.why_unknown = why_unknown
+        # 潜熱モデルの同一性 (変換で液相モデルだけ違うかの判定; N2 はソルバ内蔵の固定式)
+        self.latent_key = ("n2", self.carrier, latentLowT, liquidCp) if self.model != 1 else h2o_latent_key
 
     def latent(self, T):
         if self.model == 1:
-            return h2o_latent(T)
+            if self.h2o_latent is None:
+                raise SystemExit(f"REFUSED: H2O の潜熱モデルが分からない湿り場 ({self.why_unknown})。"
+                                 "#10 (種 DB の気液ペア) 以前の run の場なら、旧モデルで作った場と確かめたうえで "
+                                 "--src-latent legacy-v0 を付けて変換する (移行手順)")
+            return self.h2o_latent(T)
         # carrier N2 は n2_latent_ex、pure onetemp は旧多項式 n2_latent (ソルバと同じ)
         return n2_latent_ex(T, self.latentLowT, self.liquidCp) if self.carrier else n2_latent_poly(T)
 
     def e_liquid_term(self, T, g, Rmix):
-        """e_mix − e_gas: carrier は g(R_w T − L), pure onetemp は g(R_mix T − L)。"""
+        """e_mix − e_gas: carrier は g(R_w T − L), pure onetemp は g(R_mix T − L)。g が全セル 0 なら潜熱を評価しない。"""
+        g = np.asarray(g, float)
+        if not np.any(g != 0.0):
+            return np.zeros(np.broadcast(np.asarray(T, float), g).shape)
         R = self.Rw if self.carrier else Rmix
         return g * (R * T - self.latent(T))
+
+
+def roe_delta_per_mass(gs, gd, Ys, Yd, T, g_src, g_dst, eos_s, eos_d):
+    """差分形の保存エネルギー補正 Δ(roe)/ρ = e_gas,dst(Y_dst,T) − e_gas,src(Y_src,T) + 液相項_dst − 液相項_src
+    (液相項 = g(R T − L(T)); codex diagnose 2026-09-27)。気相と液相の両方を SRC/DST それぞれのモデルで評価するので、
+    DB/datum/種集合の変更と液相 (潜熱) モデルだけの変更の両方を正しく移す。"""
+    Rs, Rd = gs.Rmix(Ys), gd.Rmix(Yd)
+    de = (gd.h(Yd, T) - Rd * T) - (gs.h(Ys, T) - Rs * T)
+    ls = eos_s.e_liquid_term(T, g_src, Rs) if eos_s is not None else 0.0
+    ld = eos_d.e_liquid_term(T, g_dst, Rd) if eos_d is not None else 0.0
+    return de + ld - ls
 
 
 T_MIN, T_MAX = 50.0, 6000.0   # dependentVariables_d.cu DEPVAR_TMIN/TMAX
@@ -188,9 +266,11 @@ def _invert_checked(fails, label, gas, Y, e, T0, g, eos):
 
 
 # ----------------------------------------------------------------------------- 配置の読込
-def load_layout(meta_path, run_dir, label, h5=None):
-    """{names, expansion, streams, condensing, tracer, MW, db, Tref, condModel, condGasIndex, condensation, has_cfg}。
-    熱物性 (db, Tref) は forge_species.run_thermo (h5 の属性が指す記録 > run dir の記録 > speciesDBFile > --resolve-species)。"""
+def load_layout(meta_path, run_dir, label, h5=None, forge=None, resolve_latent=False):
+    """{names, expansion, streams, condensing, tracer, MW, db, Tref, condModel, condGasIndex, condensation, has_cfg, h2o_latent, ...}。
+    熱物性 (db, Tref) は forge_species.run_thermo (h5 の属性が指す記録 > run dir の記録 > speciesDBFile > --resolve-species)。
+    H2O の潜熱 (plan #10) は熱物性の記録の液相 (condensed) から作る。resolve_latent=True (宛先) で記録に液相が無い (speciesDBFile 経由) ときは
+    `forge --resolve-species` の記録から液相を取り、ペアの気相が熱物性と同一なことを確かめて使う (宛先はこれから今のソルバで回すため)。"""
     meta = load_yaml_str(meta_path) if meta_path else None
     has_cfg = bool(run_dir) and os.path.exists(os.path.join(run_dir, "solverConfig.yaml"))
     if not has_cfg:
@@ -257,17 +337,49 @@ def load_layout(meta_path, run_dir, label, h5=None):
             print(f"[convert] {label} thermophysics: unavailable ({th_why})")
         condensation = bool(info["condensation"]); condModel = int(info["condModel"])
         condGasIndex = info["condensing_index"]
+    # H2O の潜熱 (plan #10): 解決済み記録の気液ペア (condensed) から作る。記録に液相が無ければ潜熱モデルは不明 (None)。
+    h2o_lat = None; h2o_key = None; lat_why = None
+    if condensation and condModel == 1:
+        c = th.get("condensed") if th is not None else None
+        if c is None and resolve_latent and db is not None:
+            try:
+                r = fsp.resolve_species(run_dir, forge, inplace=False)
+            except (fsp.SpeciesResolveUnavailable, fsp.SpeciesCheckError) as e:
+                r = None; lat_why = f"{label}: 記録に液相が無く --resolve-species もできない ({e})"
+            rc = (r or {}).get("record") or {}
+            if rc.get("condensed") is not None:
+                gi = int(rc["condensed"]["gas_index"])
+                ge = rc["species"][gi] if 0 <= gi < len(rc["species"]) else None
+                ga = db.get(names[gi]) if 0 <= gi < len(names) else None
+                same = ge is not None and ga is not None and all(
+                    np.array_equal(np.asarray(ge[k], float), np.asarray(ga[k], float)) for k in ("MW", "Tlo", "Tmid", "Thi", "nasa9_low", "nasa9_high"))
+                if not same:
+                    raise SystemExit(f"REFUSED: {label}: 熱物性 ({th['how'] if th else '?'}) のペアの気相が --resolve-species の記録と違う; 潜熱の気液ペアを組めない")
+                c = rc["condensed"]
+                print(f"[convert] {label} liquid phase taken from forge --resolve-species (the thermophysics source {th['source']} has none)")
+        if c is not None:
+            gi = int(c["gas_index"])
+            if not (0 <= gi < len(names)) or db is None or names[gi] not in db:
+                raise SystemExit(f"{label}: 記録の液相 {c['name']} のペアの気相 (gas_index {gi}) が種リスト {names} に無い")
+            h2o_lat = H2OLatentPair(db[names[gi]], c); h2o_key = h2o_lat.key
+            print(f"[convert] {label} H2O latent heat: pair {c['name']} + gas {names[gi]} from the record "
+                  f"(L(150/250/300 K) = {h2o_lat(150.0):.1f} / {h2o_lat(250.0):.1f} / {h2o_lat(300.0):.1f} J/kg)")
+        else:
+            lat_why = lat_why or (f"{label}: 熱物性 {th['source'] + ' (' + th['how'] + ')' if th is not None else '(解決できない)'} に液相 (condensed) が無い"
+                       " = plan #10 以前の記録か speciesDBFile")
     return {"names": names, "expansion": exp, "streams": streams, "stream_Y": stream_Y, "xi_spec": xi_spec,
             "condensing": cond, "tracer": tracer, "MW": MW, "sig": sig, "required": required_conserved(sig),
             "db": db, "Tref": Tref, "run_dir": run_dir, "condModel": condModel, "condGasIndex": condGasIndex,
-            "condensation": condensation, "has_cfg": has_cfg}
+            "condensation": condensation, "has_cfg": has_cfg, "label": label,
+            "h2o_latent": h2o_lat, "h2o_latent_key": h2o_key, "latent_why": lat_why}
 
 
 def eos_for(layout):
     """layout の凝縮設定から CondEOS (凝縮 OFF なら None)。carrier = condGasSpecies>=0。"""
     if not layout["condensation"]:
         return None
-    return CondEOS(layout["condModel"], carrier=(layout["condGasIndex"] is not None))
+    return CondEOS(layout["condModel"], carrier=(layout["condGasIndex"] is not None), h2o_latent=layout["h2o_latent"],
+                   h2o_latent_key=layout["h2o_latent_key"], why_unknown=layout["latent_why"])
 
 
 def gas_for(layout):
@@ -378,19 +490,33 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="書き込まず検査だけ")
     ap.add_argument("--forge", help="--resolve-species を持つ forge (既定: FORGE_BIN, solver_density_cuda/build/forge)")
     ap.add_argument("--force-species", action="store_true", help="入力の化学種記録の検証失敗を無視する (変換後は属性なし = 未検証)")
+    ap.add_argument("--src-latent", choices=["record", "legacy-v0"], default="record",
+                    help="source の H2O 潜熱モデル。record (既定): source の解決済み記録の気液ペア (plan #10)。"
+                         "legacy-v0: #10 以前のソルバの h2o_latent (記録に液相が無い湿り場の移行専用; 記録に液相があれば拒否)")
     a = ap.parse_args()
 
     src_run = a.src_run or os.path.dirname(os.path.abspath(a.src))
     dst_run = a.dst_run or os.path.dirname(os.path.abspath(a.dst))
     src = load_layout(a.src_meta, src_run, "source", h5=a.src)
-    dst = load_layout(a.meta, dst_run, "destination", h5=a.dst)
+    dst = load_layout(a.meta, dst_run, "destination", h5=a.dst, forge=a.forge, resolve_latent=True)
     print(f"[convert] mode={a.mode}  source {src['names']}  ->  destination {dst['names']}")
     gs, gd = gas_for(src), gas_for(dst)
+    if a.src_latent == "legacy-v0":
+        # 移行手順 (plan #10): 記録に液相が無い H2O 湿り場を、#10 以前の潜熱モデルで作った場として読む (明示指定のときだけ)
+        if not (src["condensation"] and src["condModel"] == 1):
+            raise SystemExit("REFUSED: --src-latent legacy-v0 は source が H2O 凝縮 (condModel 1) の run のときだけ使う")
+        if src["h2o_latent"] is not None:
+            raise SystemExit("REFUSED: --src-latent legacy-v0 だが source の記録は液相 (気液ペア) を持つ; 旧モデルの指定は記録と矛盾する")
+        src["h2o_latent"] = h2o_latent_legacy_v0; src["h2o_latent_key"] = LEGACY_LATENT_KEY; src["latent_why"] = None
+        print("[convert] source H2O latent heat: legacy-v0 (h2o_latent before plan #10; explicit --src-latent migration)")
+    if dst["condensation"] and dst["condModel"] == 1 and dst["h2o_latent"] is None:
+        raise SystemExit(f"REFUSED: destination の H2O 潜熱モデルが無い ({dst['latent_why']}); 宛先は #10 以降の forge "
+                         "(--resolve-species) で解決した記録が要る")
     eos_s, eos_d = eos_for(src), eos_for(dst)
     # 化学種の属性 (§4.3): 入力の検証と宛先の解決 (書き込み前)。付ける属性は変換の成功後に書く
     try:
         species_plan = fsp.plan_convert(a.src, dst_run, src_run_dir=src_run, forge=a.forge, force=a.force_species,
-                                        tool="convert", inplace=not a.dry_run)
+                                        tool="convert", inplace=not a.dry_run, legacy_latent=(a.src_latent == "legacy-v0"))
     except fsp.SpeciesCheckError as e:
         raise SystemExit(f"[convert] REFUSED (nothing written): {e}")
     if species_plan["attrs"] is not None:
@@ -607,7 +733,7 @@ def main():
         roXi_out = np.clip(roXi_out, 0.0, ro)
 
     # ---- roe ----
-    differs, why = _db_differs(src, dst)
+    differs, why = _db_differs(src, dst, eos_s, eos_d)
     do_rec = (a.reconstruct_roe == "always") or (a.reconstruct_roe == "auto" and (differs or a.mode == "reinit" or (moments and not moments_out)))
     if do_rec:
         if gd is None:
@@ -615,8 +741,8 @@ def main():
         Yl = list(Ydst); Rd = gd.Rmix(Yl)
         e_dst = gd.h(Yl, Tsrc) - Rd * Tsrc
         if gs is not None and roe is not None and (moments_out or not moments):
-            Ys = list(Ysrc); e_src = gs.h(Ys, Tsrc) - gs.Rmix(Ys) * Tsrc
-            roe_new = roe + ro * (e_dst - e_src); how = "差分形 roe += ρ[e_gas,dst(T) − e_gas,src(T)] (液相項不変)"
+            roe_new = roe + ro * roe_delta_per_mass(gs, gd, list(Ysrc), Yl, Tsrc, g_src, g_dst, eos_s, eos_d)
+            how = "差分形 roe += ρ{e_gas,dst(T) − e_gas,src(T) + g_dst(R T − L_dst) − g_src(R T − L_src)}"
         else:
             liq = eos_d.e_liquid_term(Tsrc, g_dst, Rd) if eos_d is not None else 0.0
             roe_new = ro * (e_dst + liq + ke); how = "完全再構成 ρ(e_gas,dst(T) + 液相項 + u²/2)"
@@ -711,7 +837,13 @@ def main():
     print("[convert] SUMMARY: all checks passed (finite, ρ>0, ΣY, " + ("T, roXi range; reinit: composition re-initialized)" if lossy else "real-species mass, total water, T, roXi range)"))
 
 
-def _db_differs(src, dst):
+def _db_differs(src, dst, eos_s=None, eos_d=None):
+    # 液相 (潜熱モデル) だけの違いも再構成を発火させる (plan #10; codex diagnose 2026-09-27)
+    ks = eos_s.latent_key if eos_s is not None else None
+    kd = eos_d.latent_key if eos_d is not None else None
+    if (eos_s is not None or eos_d is not None) and ks != kd:
+        return True, "liquid phase / latent heat model differs (" + ("unknown" if ks is None else str(ks[0])[:60]) + " -> " \
+            + ("unknown" if kd is None else str(kd[0])[:60]) + ")"
     if src["Tref"] != dst["Tref"]:
         return True, f"thermoHrefTemp {src['Tref']} -> {dst['Tref']}"
     if src["db"] is None or dst["db"] is None:

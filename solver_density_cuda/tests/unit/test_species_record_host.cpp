@@ -42,13 +42,13 @@ static std::string readAll(const fs::path& p)
     return ss.str();
 }
 
-// 内蔵 N2 を外部 DB 形式で書く (low[2] に dlow2 を足す)
-static void writeN2Db(const fs::path& p, double dlow2)
+// 内蔵種 name を外部 DB 形式で書く (low[2] に dlow2 を足す)
+static void writeSpeciesDb(const fs::path& p, const std::string& name, double dlow2)
 {
-    const auto b = speciesDB_builtin().at("N2");
+    const auto b = speciesDB_builtin().at(name);
     std::ofstream f(p);
     char buf[64];
-    f << "N2:\n";
+    f << name << ":\n";
     std::snprintf(buf, sizeof(buf), "%.17g", b.MW); f << "  MW: " << buf << "\n";
     std::snprintf(buf, sizeof(buf), "%.17g", b.sigma_LJ); f << "  LJ_sigma: " << buf << "\n";
     std::snprintf(buf, sizeof(buf), "%.17g", b.eps_kB); f << "  LJ_eps_kB: " << buf << "\n";
@@ -59,6 +59,7 @@ static void writeN2Db(const fs::path& p, double dlow2)
     for (int k = 0; k < 9; ++k) { std::snprintf(buf, sizeof(buf), "%.17g", b.high[k]); f << (k ? ", " : "") << buf; }
     f << "]\n";
 }
+static void writeN2Db(const fs::path& p, double dlow2) { writeSpeciesDb(p, "N2", dlow2); }
 
 int main()
 {
@@ -160,6 +161,73 @@ int main()
         bool self = false;
         for (const auto& x : d) if (has(x, "recomputed")) self = true;
         check(self, "edited record -> compat_hash self-consistency mismatch");
+    }
+
+    // ---- (5) 凝縮種の液相 (気液ペア; plan #10, §6 V1(e)) ----
+    {
+        ResolvedSpeciesDB dbC = speciesDB_resolve({"N2", "H2O"}, "");
+        speciesDB_attachCondensed(dbC, "H2O(L)", "H2O", true);
+        check(dbC.condensed.enabled && dbC.condensed.gasIndex == 1 && dbC.condensed.name == "H2O(L)" && dbC.condensed.pairOf == "H2O",
+              "attach H2O(L): enabled, paired with species 1 (H2O)");
+        check(dbC.condensed.MW == dbC.species[1].MW && dbC.condensed.Tlo == 273.15 && dbC.condensed.Thi == 373.15
+              && dbC.condensed.coeffs[0] == 1.326371304e+09 && dbC.condensed.coeffs[8] == -9.779700970e+05,
+              "H2O(L) from the common data: MW = gas MW, 273.15-373.15 K, CEA coefficients (a0, a8)");
+        const std::string hC = speciesDB_compatHash(dbC, 298.15);
+        check(hC != hB && has(speciesDB_compatText(dbC, 298.15), "condensed[0]: name=H2O(L) phase=condensed pair_of=H2O gas_index=1"),
+              "liquid phase enters the compat text/hash");
+        check(!has(speciesDB_compatText(dbB, 298.15), "condensed"), "condensation OFF: no liquid lines (text unchanged)");
+        const fs::path runC = tmp / "runC", runL = tmp / "runL";
+        fs::create_directories(runC); fs::create_directories(runL);
+        const SpeciesRecordInfo rC = speciesDB_writeRecord(dbC, 298.15, "", "nozzle.h5", "verified", 0, runC.string());
+        const std::string tC = readAll(runC / rC.recordFile);
+        check(has(tC, "condensed:\n  - name: \"H2O(L)\"") && has(tC, "nasa9: [1326371304,"), "record has the condensed block with coefficients");
+        check(speciesDB_diffRecord((runC / rC.recordFile).string(), dbC, 298.15).empty(), "diffRecord(record with liquid, same db) empty (self-consistent)");
+        {
+            const auto d = speciesDB_diffRecord((runC / rC.recordFile).string(), dbB, 298.15);
+            bool hit = false; for (const auto& x : d) if (has(x, "condensed")) hit = true;
+            check(hit, "record with liquid vs condensation OFF -> 'condensed' difference");
+            const auto d2 = speciesDB_diffRecord((runA / rA.recordFile).string(), dbC, 298.15);
+            bool hit2 = false; for (const auto& x : d2) if (has(x, "record written before plan #10")) hit2 = true;
+            check(hit2, "pre-#10 record (no liquid) vs current with liquid -> 'latent-heat model is not recorded'");
+        }
+        // V1(e): 液相エントリだけ変えた → ハッシュ不一致・差は液相の係数だけ・入力場の照合で拒否
+        ResolvedSpeciesDB dbL = dbC;
+        dbL.condensed.coeffs[2] += 1.0e-3;
+        check(speciesDB_compatHash(dbL, 298.15) != hC, "V1(e): liquid coefficient only -> different compat hash");
+        {
+            const auto d = speciesDB_diffRecord((runC / rC.recordFile).string(), dbL, 298.15);
+            check(d.size() == 1 && has(d.front(), "condensed H2O(L).nasa9[2]"),
+                  "V1(e): diffRecord shows only condensed H2O(L).nasa9[2]" + (d.empty() ? std::string() : ": " + d.front()));
+            std::string st2, msg2; int unv2 = -1;
+            check(!speciesDB_checkInputField(dbL, 298.15, hC, rC.recordSha256, 0, "c.h5", {runC.string()}, true, st2, unv2, msg2)
+                  && has(msg2, "condensed H2O(L).nasa9[2]"), "V1(e): restart with only the liquid phase changed -> refused, coefficient shown (env does not allow)");
+        }
+        // 気液ペアの基準契約: 外部 DB の気相 H2O が内蔵と同一なら通し、1 bit でも違えば拒否
+        const fs::path h2oSame = tmp / "h2o_same.yaml", h2oMod = tmp / "h2o_mod.yaml";
+        writeSpeciesDb(h2oSame, "H2O", 0.0);
+        writeSpeciesDb(h2oMod, "H2O", 1.0e-3);
+        {
+            ResolvedSpeciesDB dF = speciesDB_resolve({"N2", "H2O"}, h2oSame.string());
+            bool ok = true; std::string what;
+            try { speciesDB_attachCondensed(dF, "H2O(L)", "H2O", true); } catch (const std::exception& e) { ok = false; what = e.what(); }
+            check(ok && dF.source[1] == "file" && speciesDB_compatHash(dF, 298.15) == hC,
+                  "pair contract: external DB gas H2O identical to the built-in pair -> allowed, same hash" + (ok ? std::string() : ": " + what));
+            ResolvedSpeciesDB dM = speciesDB_resolve({"N2", "H2O"}, h2oMod.string());
+            ok = true; what.clear();
+            try { speciesDB_attachCondensed(dM, "H2O(L)", "H2O", true); } catch (const std::exception& e) { ok = false; what = e.what(); }
+            check(!ok && has(what, "nasa9_low[2]") && has(what, "speciesDBFile"), "pair contract: external DB gas H2O low[2] +0.001 -> refused with the key");
+            std::printf("---- message (pair contract) ----\n%s\n---------------------\n", what.c_str());
+        }
+        {
+            ResolvedSpeciesDB dN = speciesDB_resolve({"N2"}, "");
+            bool ok = true;
+            try { speciesDB_attachCondensed(dN, "H2O(L)", "", true); } catch (const std::exception&) { ok = false; }
+            check(!ok, "TP without the gas pair H2O in the species list -> refused");
+            ResolvedSpeciesDB dP = speciesDB_resolve({"N2"}, h2oMod.string());
+            speciesDB_attachCondensed(dP, "H2O(L)", "", false);
+            check(dP.condensed.enabled && dP.condensed.gasIndex == -1 && dP.condensed.gas.low[2] == speciesDB_builtin().at("H2O").low[2],
+                  "CPG (requireInList=false): built-in gas pair, not the species list / external DB");
+        }
     }
 
     fs::remove_all(tmp);

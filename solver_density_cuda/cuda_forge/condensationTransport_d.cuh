@@ -24,6 +24,11 @@ void condensationInit_d(solverConfig& cfg, variables& var);
 flow_float** cond_rog_device_ptr();
 const CondTablesF& cond_tables_device();   // condensationInit_d が構築 (valid=0 なら float 経路は使わない)
 
+// H2O の潜熱の気液ペア (plans/active/thermophysics-solver-owned-species-db.md §4.8, #10)。凝縮 ON・condModel 1 のときだけ
+// 種 DB の解決結果 (speciesDB_current().condensed: ペアの気相種と共通データの H2O(L)) と datum (thermoHrefTemp, TP のみ) から
+// 1 回だけ作り、host と device に 1 つずつ置いて参照を返す (キャッシュ)。それ以外は空の参照 (N2 と凝縮 OFF は使わない)。
+CondLatentRef cond_latent_pair_for(const solverConfig& cfg);
+
 // config → kernel 値渡しの凝縮物性オプション (plans/accepted/condensation-air.md, condensation-kantrowitz-carrier.md)
 inline CondPropOpts cond_prop_opts(const solverConfig& cfg)
 {
@@ -31,6 +36,7 @@ inline CondPropOpts cond_prop_opts(const solverConfig& cfg)
     o.latentLowT = cfg.condN2LatentLowT; o.psatLowT = cfg.condN2PsatLowT; o.liquidCp = cfg.condN2LiquidCp;
     o.gasKgasModel = (cfg.condVaporMassFraction > 0.0) ? 1 : 0;   // CPG carrier (空気) は空気 Sutherland
     o.sigmaScale = cfg.condSigmaScale; o.Yw = cfg.condVaporMassFraction;
+    o.h2oLatent = cond_latent_pair_for(cfg);
     return o;
 }
 int          cond_num_species();

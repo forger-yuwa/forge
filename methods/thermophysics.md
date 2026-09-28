@@ -262,6 +262,24 @@ physProp:
   ソルバ自身が許可して書いた出力は `species_input_unverified=1` を持ち、その出力からの**ソルバの直接の restart** は許可なしで通る
   (未検証の印を継承)。ツール経由の継承は印付きの場も未検証として停止する。
 
+#### 1b.5 凝縮種の液相 (気液ペア) と潜熱 — 実装済み (2026-09-28, plan #10)
+
+- 共通データに液相 `H2O(L)` (`phase: condensed`, `pair_of: "H2O"`, CEA `thermo.inp` の 273.15–373.15 K 区間, `extension: {below: linear_cp_fd_at_Tlo, above: hold_at_Thi}`) を置く。
+  内蔵の気相種ではない (`legacy_builtin: []`)。MW は気相 H2O と同じ値を持ち、ソルバが一致を検査する (気液は同じ MW で質量換算する契約)。
+- 凝縮 ON かつ `condModel: 1` のとき、`speciesDB_resolve(cfg)` が液相をペアの気相種と組にして `ResolvedSpeciesDB::condensed` に付ける。
+  TP ではペアの気相が種リストに要り (無ければ拒否)、CPG は内蔵の気相 H2O を使う。
+  **気液ペアの基準契約**: 外部 DB (`speciesDBFile`) の気相 H2O が内蔵のペアと MW・区切り・両区間の係数で 1 bit でも違えば凝縮 ON で拒否する
+  (同一なら通す; 生成 `species_db.yaml` の H2O は内蔵と同じ値)。
+- 潜熱 $L(T)=h_v(T)-h_l(T)$ ([`condensation.md`](condensation.md) の潜熱の節): $h_v$ は**種 DB の気相そのもの** (同じ係数・区間・外挿規約、datum を焼き込んだ device 係数とビット一致)、
+  $h_l$ は液相の絶対基準の係数を気相 MW で質量換算し、**気相と同じ datum 定数** $R_u\Delta a_7/M$ ($\Delta a_7=-h_{abs,gas}(T_{ref})/R_u$) を足す。
+  datum を変えても $L$ は相対 $\sim10^{-15}$ で不変 (液相係数は $a_0=1.3\times10^9$ と大きく打ち消しが強いので、$\Delta a_7$ を係数に焼き込まず定数で足す)。
+- 記録と互換性ハッシュ: 液相があるときだけ、互換性テキストの種の後に `condensed[0]` の行 (名前・ペア・`gas_index`・MW・区間・9 係数 (datum 前)・延長規約・潜熱規約・datum 規約) を足し、
+  記録に `condensed:` ブロックを書く。**凝縮 OFF の記録はバイト不変** (スキーマ名も変えない)。液相だけ違う場の restart は差 (`condensed H2O(L).nasa9[k]` 等) を示して拒否する。
+  液相の無い #10 以前の記録は「潜熱モデルが記録されていない」と表示する。
+- 湿り場の種変換 (`convert_species_field.py`): 潜熱は記録の液相から作り、差分形の補正を
+  $\Delta(\rho e)=\rho\{\Delta e_{gas}+g_{dst}(R\,T-L_{dst})-g_{src}(R\,T-L_{src})\}$ にする (液相モデルだけの違いでも再構成する)。
+  記録に液相が無い湿り場 (#10 以前) は既定で拒否し、旧モデルで作った場と確かめたときだけ `--src-latent legacy-v0` (旧 `h2o_latent`) で移す。
+
 ### 2. 従属変数と温度反転 `cuda_forge/dependentVariables_d.cu`
 
 `dependentVariables_d` に `thermalMethod`・化学種ポインタ・`gam_array/cp_array` を追加。`thermalMethod==2` では:

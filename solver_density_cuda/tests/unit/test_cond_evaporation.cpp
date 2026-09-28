@@ -6,18 +6,22 @@
 //   (Q1^2<=Q0Q2, 全モーメント同時消滅)、(3) 消滅 r30<2rmin、(4) λ_min/dT_max 律速、
 //   (5) Kelvin on/off の質量収支差、を確認する。
 //   build: nvcc -x cu --expt-relaxed-constexpr -o test_cond_evap tests/unit/test_cond_evaporation.cpp
+//   (plan #10 以降: H2O の潜熱に共通データの気液ペアが要るので、-I <solver_density_cuda> -I <埋め込みヘッダの生成先> と
+//    solver_density_cuda/input/speciesDB.cpp solver_density_cuda/input/speciesTransportDB.cpp -lyaml-cpp を足す;
+//    生成は tests/unit/cond_latent_test_helper.cuh 冒頭)
 //          (または g++ -x c++ -DCUDA_HOST_ONLY ... は __host__ __device__ 修飾のため nvcc 推奨)
 // =============================================================================
 #include <cstdio>
 #include <cmath>
 #include "../../cuda_forge/condensationSource_d.cuh"
+#include "tests/unit/cond_latent_test_helper.cuh"   // H2O 潜熱の気液ペア (plan thermophysics-solver-owned-species-db #10)
 
 static int nfail = 0;
 #define CHECK(cond, msg) do { if (!(cond)) { std::printf("  FAIL: %s\n", msg); ++nfail; } else { std::printf("  ok  : %s\n", msg); } } while(0)
 
 int main()
 {
-    const CondSpeciesProps cp = condProps_H2O();
+    const CondSpeciesProps cp = cond_test_props_H2O(false);
     const double Rw = cp.R;
     // 場: T=290K, S=0.7 (run_0065 圧縮帯相当), キャリア ρ=0.28 (P≈23 kPa)
     const double T = 290.0, S = 0.7, rod = 0.28;

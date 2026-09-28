@@ -7,10 +7,14 @@
 //     (3) 緩和形 cond_equilibrium_delta を反復した固定点と g が一致 (同じ平衡)
 //     (4) g_guess の初期値によらず同じ解、単調性 (e_in を下げると g 増)
 //   build: nvcc -x cu --expt-relaxed-constexpr -I solver_density_cuda -o test_cond_eq_eos tests/unit/test_cond_equilibrium_eos.cpp
+//   (plan #10 以降: H2O の潜熱に共通データの気液ペアが要るので、-I <solver_density_cuda> -I <埋め込みヘッダの生成先> と
+//    solver_density_cuda/input/speciesDB.cpp solver_density_cuda/input/speciesTransportDB.cpp -lyaml-cpp を足す;
+//    生成は tests/unit/cond_latent_test_helper.cuh 冒頭)
 // =============================================================================
 #include <cstdio>
 #include <cmath>
 #include "../../cuda_forge/condensationEOS_d.cuh"
+#include "tests/unit/cond_latent_test_helper.cuh"   // H2O 潜熱の気液ペア (plan thermophysics-solver-owned-species-db #10)
 
 static int nfail = 0;
 #define CHECK(cond, msg) do { if (!(cond)) { std::printf("  FAIL: %s\n", msg); ++nfail; } else { std::printf("  ok  : %s\n", msg); } } while(0)
@@ -35,7 +39,7 @@ int main()
     const int nSp = 2;
     const double Y[2] = { 0.9713353, 0.0286647 };   // 旧条件の H2O 質量分率
     const double Yw = Y[1];
-    const CondSpeciesProps cprops = condProps_H2O();
+    const CondSpeciesProps cprops = cond_test_props_H2O(false);
     const double Rw = cprops.R;
     const double Rmix = thermo_R_mix(sp, nSp, Y);
     const double Tmin = 50.0, Tmax = 6000.0;

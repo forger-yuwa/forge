@@ -8,12 +8,16 @@
 //   (d) mode 0/1 と sigmaScale 1.0 で旧関数値とビット同一 (mode 1 の旧式を再実装して比較)
 //   (e) 同じ入力を device で評価し host double と一致 (1e-12)
 //   build: nvcc --expt-relaxed-constexpr -I. -o test_kwc tests/unit/test_cond_kantrowitz_carrier.cu
+//   (plan #10 以降: H2O の潜熱に共通データの気液ペアが要るので、-I <solver_density_cuda> -I <埋め込みヘッダの生成先> と
+//    solver_density_cuda/input/speciesDB.cpp solver_density_cuda/input/speciesTransportDB.cpp -lyaml-cpp を足す;
+//    生成は tests/unit/cond_latent_test_helper.cuh 冒頭)
 // =============================================================================
 #include <cstdio>
 #include <cmath>
 #include <vector>
 #include "../../cuda_forge/condensationSource_d.cuh"
 #include "../../cuda_forge/thermo_d.cuh"
+#include "tests/unit/cond_latent_test_helper.cuh"   // H2O 潜熱の気液ペア (plan thermophysics-solver-owned-species-db #10)
 
 static int nfail = 0;
 static void check(const char* name, double a, double b, double tol) {
@@ -62,7 +66,7 @@ __global__ void theta_dev(CondSpeciesProps cp, double T, double lnS, int mode, d
 }
 
 int main() {
-    const CondSpeciesProps h2o = condProps_H2O();
+    const CondSpeciesProps h2o = cond_test_props_H2O(true);
     SpeciesThermo sp[2] = { makeSp(0.0280134, N2_lo, N2_hi), makeSp(0.0180153, H2O_lo, H2O_hi) };
     const double gv = h2o.cp/h2o.cv;
     printf("== (a) pure-vapor limits ==\n");

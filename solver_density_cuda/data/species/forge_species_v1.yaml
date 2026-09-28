@@ -25,6 +25,11 @@
 #               区間は連続 (前の Thi = 次の Tlo)。SpeciesThermo が 2 区間固定なので現状は全種 2 区間 (区間可変は #6)。
 #   LJ          {sigma [Å], eps_kB [K], dipole [D] (任意; 極性分子の双極子モーメント), source} または null
 #               (輸送データなし; 輸送に使うときの拒否は #6/#7)。dipole は physProp.transport の kinetic (Brokaw の極性補正) だけが読む (#5t2)
+#   pair_of     (phase: condensed のみ) 気液ペアの気相種の canonical ID。液相は気相と同じ MW で質量換算し、
+#               気相と同じ datum オフセット (定数 R_u Δa7/MW, Δa7 = −h_abs,gas(Tref)/R_u) を足して L = h_v − h_l を作る (plan #10)
+#   extension   (phase: condensed のみ) 区間外の延長規約 {below, above}。現在の実装が受け付けるのは
+#               below: linear_cp_fd_at_Tlo (T<Tlo は h(Tlo) から一定 c_p,l = h(Tlo+0.5) − h(Tlo−0.5+1e-9) [1 K の差分] で線形)、
+#               above: hold_at_Thi (T>Thi は h(Thi) で頭打ち)
 #   atoms       元素組成 {元素: 個数} (診断用) または null (擬似種)
 #   source      エントリの出典 (thermo = NASA-9 係数、MW)
 #   deviations  CEA thermo.inp 直読みとの既知の差 (無ければ省略)
@@ -110,6 +115,25 @@ species:
     atoms: {H: 2, O: 1}
     source: {thermo: "CEA thermo.inp 転記 (2 区間; 係数は thermo.inp と一致)。非平衡凝縮 (Wyslouzil) のキャリア + 凝縮種"}
     deviations: ["MW 0.0180153 は thermo.inp 18.01528 g/mol の丸め (相対 1.1e-6)。寄せ先は plan #5"]
+
+  # 凝縮相 (液)。気相 H2O とペアで潜熱 L(T) = h_v(T) − h_l(T) を作る (plan thermophysics-solver-owned-species-db §4.8, #10)。
+  # 内蔵の気相種ではない (legacy_builtin は空)。ソルバは凝縮 ON (condModel 1) のときだけ使う。
+  - id: "H2O(L)"
+    aliases: []
+    phase: condensed
+    legacy_builtin: []
+    pair_of: "H2O"
+    MW: 0.0180153
+    intervals:
+      - Tlo: 273.15
+        Thi: 373.15
+        coeffs: [1.326371304e+09, -2.448295388e+07, 1.879428776e+05, -7.678995050e+02, 1.761556813e+00,
+                 -2.151167128e-03, 1.092570813e-06, 1.101760476e+08, -9.779700970e+05]
+    extension: {below: linear_cp_fd_at_Tlo, above: hold_at_Thi}
+    LJ: null
+    atoms: {H: 2, O: 1}
+    source: {thermo: "CEA thermo.inp 転記 (H2O(L) の最初の区間 273.15–373.15 K; Cox 1989 / Haar 1984。373.15–600 K 区間は使わない)"}
+    deviations: ["MW は気相 H2O と同じ 0.0180153 (thermo.inp 18.01528 g/mol の丸め)。気液ペアは同じ MW で質量換算する契約 (ソルバが一致を検査)"]
 
   - id: "Ar"
     aliases: ["AR"]

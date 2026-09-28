@@ -42,6 +42,28 @@ struct ResolvedLump {
     bool empty() const { return members.empty(); }
 };
 
+// 凝縮種の液相 (気液ペア; plan thermophysics-solver-owned-species-db §4.8, #10; 仕様 methods/thermophysics.md §1b.5)。
+//   共通データの phase: condensed エントリ (現在は H2O(L) だけ) を、ペアの気相種 (解決済み) と組にして持つ。
+//   潜熱 L(T) = h_v(T) − h_l(T): h_v はペアの気相種そのもの (種 DB と同じ係数・区間・外挿規約・datum)、
+//   h_l はこの液相係数 (絶対基準) を**気相と同じ MW** で質量換算し、**気相と同じ datum オフセット** (定数 R_u Δa7/MW) を足す。
+//   凝縮 ON かつ condModel 1 (H2O) のときだけ enabled (凝縮 OFF の記録・互換性ハッシュはバイト不変)。
+//   規約文字列は互換性ハッシュに入る (tools/forge_species.py と一字一句同じにする)。
+#define SPECIES_CONDENSED_EXTENSION "h_l: NASA-9 on [Tlo,Thi]; T<Tlo: h(Tlo)-cp_l*(Tlo-T) with cp_l=(h(Tlo+0.5)-h(Tlo-0.5+1e-9))/1; T>Thi: h(Thi); mass basis = paired gas MW"
+#define SPECIES_CONDENSED_LATENT    "L=h_v-h_l clamped to [1.5e6,3.5e6] J/kg; h_v = paired gas species (same coefficients, intervals, extrapolation and datum as the species DB)"
+#define SPECIES_CONDENSED_DATUM     "liquid h gets the same constant Ru*da7/MW as the paired gas (da7=-h_abs,gas(Tref)/Ru) when thermoHrefTemp>0 (coefficients recorded before datum)"
+struct ResolvedCondensed {
+    bool          enabled = false;
+    std::string   name;              // 共通データの canonical ID ("H2O(L)")
+    std::string   pairOf;            // 共通データで宣言したペアの気相 canonical ID ("H2O")
+    int           gasIndex = -1;     // ペアの気相種の physProp.species での index (CPG など種リストに無いときは -1 = 内蔵の気相を使う)
+    std::string   gasName;           // 同上の種名 (config の綴り; -1 のときは pairOf)
+    SpeciesThermo gas{};             // ペアの気相種の絶対基準係数 (datum 前; gasIndex>=0 なら db.species[gasIndex] と同一)
+    double        MW = 0.0;          // 質量換算に使う MW (= 気相 MW; 共通データで一致を検査)
+    double        Tlo = 0.0, Thi = 0.0;   // 液相フィットの区間 [K]
+    double        coeffs[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};   // 液相の NASA-9 a0..a8 (絶対基準, datum 前)
+    std::string   below, above;      // 延長規約 (共通データの extension; 実装が受け付ける値のみ)
+};
+
 struct ResolvedSpeciesDB {
     std::vector<std::string>   names;    // cfg.speciesNames の順 (index s を定義)
     std::vector<SpeciesThermo> species;  // 同順。datum オフセット前の絶対基準係数 (lump は合成後)
@@ -49,6 +71,7 @@ struct ResolvedSpeciesDB {
     std::vector<ResolvedLump>  lumps;    // 同順。lump でない種は空
     std::vector<std::string>   dbKey;    // 同順。一致した DB のキー (lump は空)。輸送の解決 (#5t2) が使う (記録には入れない)
     ResolvedTransport          transport;   // physProp.transport を書いたときだけ enabled (plan #5t2)
+    ResolvedCondensed          condensed;   // 凝縮 ON・condModel 1 (H2O) のときだけ enabled (plan #10)
 
     int size() const { return static_cast<int>(names.size()); }
     bool isLump(int s) const { return s >= 0 && s < static_cast<int>(lumps.size()) && !lumps[s].empty(); }
@@ -86,7 +109,15 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& names, const
 
 // cfg.speciesNames / cfg.speciesLumps / cfg.speciesDBFile で解決する。calorically-perfect (species 未指定) では N2 ダミー 1 種。
 // 凝縮 ON (condensation: 1) で凝縮種を lump の構成種に入れていたら拒否する。
+// 凝縮 ON かつ condModel 1 (H2O) では液相 H2O(L) を気液ペアとして付ける (speciesDB_attachCondensed; 契約違反は拒否)。
 ResolvedSpeciesDB speciesDB_resolve(const solverConfig& cfg);
+
+// 共通データの凝縮相エントリ id (例 "H2O(L)") を db に気液ペアとして付ける (plan #10, §4.8 気液ペアの基準契約)。
+//   gasName: ペアの気相種の physProp.species 名 (空なら db から pair_of と同一の種を探す)。
+//   requireInList: true (TP) ならペアの気相種が db の種リストに無いと拒否、false (CPG) なら内蔵の気相を使う (gasIndex=-1)。
+//   拒否 (std::runtime_error): 共通データに id が無い・相が condensed でない・pair_of の気相が内蔵に無い・MW 不一致・延長規約が未知、
+//   ペアの気相種が lump、**外部 DB (speciesDBFile) の気相種の係数・MW・区間が内蔵のペアと 1 bit でも違う** (整合を確かめられない上書き)。
+void speciesDB_attachCondensed(ResolvedSpeciesDB& db, const std::string& id, const std::string& gasName, bool requireInList);
 
 // cfg.read() 直後に呼び、解決結果をプロセス内に保持する (thermo_init_db / readBcondConfig が参照)。
 // 失敗はメッセージを出して exit する。
@@ -126,7 +157,10 @@ void speciesDB_printTable(const solverConfig& cfg, const ResolvedSpeciesDB& db);
 //     species_record_file / species_input_unverified (0|1)。
 //   - Python 側の再計算は tools/forge_species.py (compat_text / load_record)。書式を変えるときは両方を同時に変え、
 //     スキーマ版 (SPECIES_RECORD_SCHEMA) を上げる。
-//   CPG (thermalMethod != 2) は記録・照合の対象外。液相 (凝縮種の液) は #10 まで含めない。
+//   CPG (thermalMethod != 2) は記録・照合の対象外。
+//   液相 (凝縮種の液; #10): db.condensed が enabled のときだけ、互換性テキストの種の後に condensed[0] の行
+//   (名前・ペア・MW・区間・係数 (datum 前)・延長規約・潜熱規約・datum 規約) を足し、記録に condensed: ブロックを書く
+//   (lump と同じく追記だけなのでスキーマ名は変えない; 凝縮 OFF の記録はバイト不変)。
 // =============================================================================
 #define SPECIES_RECORD_SCHEMA "forge_resolved_species_v1"
 // physProp.transport を書いた run の記録 (輸送ブロック transport_compat を追記; plan #5t2)。それ以外は v1 のまま (本文はバイト不変)。
