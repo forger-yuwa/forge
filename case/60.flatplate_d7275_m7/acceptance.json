@@ -276,7 +276,12 @@
     "uncertainty": "読み取り ±0.4 %〜±1 % (重なり点)、局所 T の Table III との差 −4 %、2D・入口モデル (前縁衝撃波なし) は記録"
    },
    "also": "Eckert (Table III の T* 627.8 K、Pr* は forge の物性と比較用 Python 物性の 2 通り) に対する forge・実験の比も試験 26 と同じ方法で出す",
-   "gates": "check_convergence (--segment、本段)、St 11 点の check_quasisteady、check_wall_resolution (目標 y1+ ≤ 1)、メッシュ品質。収束が試験 26 と同様に未達なら、その事実と残差の所在・比較量の変化を報告し、条件付き扱いはユーザ判断 (試験 26 の決定を自動で流用しない)"
+   "gates": "check_convergence (--segment、本段)、St 11 点の check_quasisteady、check_wall_resolution (目標 y1+ ≤ 1)、メッシュ品質。収束が試験 26 と同様に未達なら、その事実と残差の所在・比較量の変化を報告し、条件付き扱いはユーザ判断 (試験 26 の決定を自動で流用しない)",
+   "interim": {
+    "date": "2026-09-28",
+    "run_0023_t28": "check_convergence --segment (本段) PASS (4.0–4.6 dec)。St 11 点の check_quasisteady は NOT ALL STEADY — 上流 3 点 STEADY (単調増加・漸近)、下流 8 点 TRANSIENT-UNSETTLED/DRIFTING (step 10k で St ≈ 0.4–0.7e-3 の層流水準から上昇、50k→60k でも最下流 +2.4 %)。check_wall_resolution FAIL (y1+ 平均 0.894、p99 1.183、>1 が 14.8 %)。暫定 R28 = 1.377 [1.321, 1.450] (R_B 1.393)、R28/R26 = 1.042 — St が未だ上昇中なので読みに使わない",
+    "followup": "AGENTS の手順どおり: (A) run_0024_t28_ext = 同一メッシュで restart_field --keep-src-dtype +60k (準定常の確認)、(B) run_0025_t28_y2 = 第一層 2 µm のメッシュ fp_d7275_y2_wall_top8 (AR 最大 1281、構造格子の境界層セルなので AR ≤ 5000 の例外で PASS) へ interp_field で移して 60k (壁解像)。判定の基準 (|R28/R26 − 1| ≤ 0.10) は変えない。読みは St が STEADY になった run で行う"
+   }
   }
  ],
  "_G15_user_decision_2026-09-27": "ユーザ決定「1」: G15 試験 26 の収束の前提ゲートを条件付きで満たした扱いにし、R (平均 1.313) を報告する。注記: check_convergence 未達、残差床は比較域の外、比較域 q は 9 通りの変更で max|Δq/q| ≤ 5e-6。反復誤差上限の証明ではない"
