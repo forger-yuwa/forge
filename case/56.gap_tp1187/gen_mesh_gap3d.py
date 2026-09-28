@@ -39,6 +39,7 @@ skew 外れ 4 セル (0.01 %) の SOFT-PASS で、**谷を x=±W/2 の鉛直線�
 ## 既知の簡略 (照合量への影響を README/plan に書くこと)
 
 1. **縦すきまの口にエッジ半径を付けていない** (z=W/2, z=Zh-W/2 は鋭いエッジ)。
+   → 2026-09-29: `--long-edge-radius` (生成後のメッシュ変形) で入れられる。既定 0 は従来と同一。
    横すきま側の半径 r=0.25 cm は入れてある (TC 93/94 がその上に乗る)。縦すきま側を
    丸めるには断面が z 依存で変形するので別設計が要る。影響は縦すきまの取り込み流量を
    **過小**に見積もる方向 → 衝突加熱は下振れ。
@@ -123,6 +124,90 @@ def cumfrac(d):
 
 def sc(n, s):
     return max(3, int(round((n - 1) * s)) + 1)
+
+
+def long_edge_morph(xyz, a, geo):
+    """縦すきま口の縁に半径 R の円弧を入れるメッシュ変形 (plan §5.1 #60、2026-09-29)。
+
+    各 x の (z, y) 断面で、タイル側の円弧中心 Oc = (zc ± R, y_top(x) − R) からの放射線に沿って
+    L 字の壁 (タイル上面 y = y_top と縦すきま側壁 z = zc) を円弧へ写す。放射線が L 字の壁を
+    出る距離 ρ_w = R / max(|u_y|, |u_z|)、壁の移動量 δ = ρ_w − R (≥ 0、角で (√2−1)R)。
+    内部の節点は同じ放射線に沿って δ·g(d/d_max) だけ Oc へ寄せる (d = 壁からの距離、
+    g = 1 − 3s² + 2s³ で g'(0) = 0 → 壁際の刻みは 1 次まで保たれる)。対象は放射線の角度が
+    タイル上面と側壁の間 (90°〜180°、下流側は鏡映) の節点だけで、両端で δ = 0 なので連続。
+    z の変位は対称面 (z = 0 / Zh) で 0 になるよう、すきま側 (|z − 対称面| < W/2) で線形に絞る。
+    半径 R(x) はタイル上面が平らな区間で全半径、横すきまの円弧区間と閉じた端で 0 へ線形に漸減
+    (タイルの鉛直の角は鋭いまま)。x は動かさない。
+    """
+    import numpy as np
+    R0, W, r, Zh, dmax_f = a.long_edge_radius, a.w, a.r, a.zhalf, a.long_edge_dmax
+    x, y, z = xyz[:, 0].copy(), xyz[:, 1].copy(), xyz[:, 2].copy()
+
+    def arc_top(xx, xc, sgn):
+        # 横すきまの円弧 (中心 (xc, −r)) 上のタイル上面の高さ
+        return -r + np.sqrt(np.clip(r * r - (xx - xc) ** 2, 0.0, None))
+
+    def taper(xx, x0, x1):
+        # x0 で 0、x1 で 1 (線形)
+        return np.clip((xx - x0) / (x1 - x0), 0.0, 1.0)
+
+    def apply(mask_x, ytop, Rx, zc, side):
+        # side = +1: タイルは z > zc (上流縦すきま、対称面 z = 0) / −1: タイルは z < zc (下流、対称面 z = Zh)
+        m = mask_x & (Rx > 1e-12)
+        if not m.any():
+            return 0
+        Ocz = zc + side * Rx; Ocy = ytop - Rx
+        vz = (z - Ocz) * side * -1.0          # すきま側を正に取る (side=+1 なら zc − z 方向)
+        vy = y - Ocy
+        m &= (vz >= 0.0) & (vy >= 0.0)
+        rho = np.hypot(vz, vy)
+        m &= rho > 1e-15
+        idx = np.where(m)[0]
+        if len(idx) == 0:
+            return 0
+        uz, uy = vz[idx] / rho[idx], vy[idx] / rho[idx]
+        Ri = Rx[idx]
+        rho_w = Ri / np.maximum(np.maximum(uy, uz), 1e-12)
+        d = rho[idx] - rho_w
+        if (d < -1e-9 * np.maximum(Ri, 1e-9)).any():
+            raise SystemExit(f"morph: 固体側に節点がある ({int((d < -1e-9).sum())} 点)")
+        delta = rho_w - Ri
+        s = np.clip(d / (dmax_f * Ri), 0.0, 1.0)
+        g = 1.0 - 3.0 * s * s + 2.0 * s ** 3
+        shift = delta * g
+        # 放射線に沿って Oc へ寄せる (すきま側を正に取った座標で −shift·u)
+        dz_gap = -shift * uz                  # すきま側座標での変位
+        dy = -shift * uy
+        dz = dz_gap * side * -1.0             # 実座標へ戻す
+        # 対称面で z 変位を 0 に: すきま側 (対称面〜zc) の節点は |z − 対称面| / (W/2) で絞る
+        zsym = 0.0 if side > 0 else Zh
+        fz = np.clip(np.abs(z[idx] - zsym) / (0.5 * W), 0.0, 1.0)
+        on_gap_side = (z[idx] - zc) * side < 0.0
+        dz = np.where(on_gap_side, dz * fz, dz)
+        z[idx] += dz; y[idx] += dy
+        return len(idx)
+
+    g_ = geo
+    # --- 上流縦すきま: タイルは z > W/2、x ∈ [x_a, xu] ---
+    xu, xvu = g_["xu"], g_["xvu"]
+    if g_["open"]:
+        x2d, x2vd = g_["x2d"], g_["x2vd"]
+        m = (x >= x2d) & (x <= xu)
+        ytop = np.where(x < x2vd, arc_top(x, x2vd, 1), np.where(x > xvu, arc_top(x, xvu, 1), 0.0))
+        Rx = R0 * np.minimum(taper(x, x2d, x2vd), taper(-x, -xu, -xvu))
+    else:
+        xg = g_["xg"]
+        m = (x >= xg) & (x <= xu)
+        ytop = np.where(x > xvu, arc_top(x, xvu, 1), 0.0)
+        Rx = R0 * np.minimum(taper(x, xg, xg + R0), taper(-x, -xu, -xvu))
+    n1 = apply(m, ytop, Rx, 0.5 * W, +1)
+    # --- 下流縦すきま: タイルは z < Zh − W/2、x ∈ [xd, xe] ---
+    xd, xvd, xe = g_["xd"], g_["xvd"], g_["xe"]
+    m = (x >= xd) & (x <= xe)
+    ytop = np.where(x < xvd, arc_top(x, xvd, 1), 0.0)
+    Rx = R0 * np.minimum(taper(x, xd, xvd), taper(-x, -xe, -(xe - R0)))
+    n2 = apply(m, ytop, Rx, Zh - 0.5 * W, -1)
+    return np.column_stack([x, y, z]), n1, n2
 
 
 def build(a):
@@ -311,6 +396,10 @@ def build(a):
     r_top = solve_r(h2, H - h, n_top)
     rt = solve_r(y1, D, n_dep)
 
+    # 深さ方向の等比: 上 → 下の線は dep_coef、下 → 上の線は向きを逆にした −dep_coef
+    # (どちらも口側が細かくなる)。dep_coef = 1 は従来と同一。
+    dep_up = a.dep_coef if a.dep_coef == 1.0 else -a.dep_coef
+
     def tc(nm, n, **kw):
         g.mesh.setTransfiniteCurve(C[nm], n, **kw)
     rad = ["r_in", "r_su", "r_bu", "r_bd", "r_sd", "r_e", "r_pe", "r_ou"]
@@ -326,8 +415,10 @@ def build(a):
     if OPEN:
         for nm in ("arc2_u", "arc2_d", "oarc2_u", "oarc2_d"):
             tc(nm, n_arc)
-        for nm in ("w2_u", "w2_d", "ow2_u", "ow2_d"):
+        for nm in ("w2_u", "ow2_u"):            # 上 → 下の向き
             tc(nm, n_dep, meshType="Progression", coef=a.dep_coef)
+        for nm in ("w2_d", "ow2_d"):            # 下 → 上の向き: 逆向きにして口側を細かく
+            tc(nm, n_dep, meshType="Progression", coef=dep_up)
         for nm in ("floor2", "ofloor2", "core_top2"):
             tc(nm, n_core, meshType="Bump", coef=0.35)
         for nm in ("v_v2u", "v_v2d"):
@@ -341,10 +432,12 @@ def build(a):
         tc(nm, n_buf, meshType="Progression", coef=1.05)
     for nm in ("arc_u", "arc_d", "oarc_u", "oarc_d"):
         tc(nm, n_arc)
-    for nm in ("w_u", "w_d", "ow_u", "ow_d"):
+    for nm in ("w_u", "ow_u"):
         tc(nm, n_dep, meshType="Progression", coef=a.dep_coef)
+    for nm in ("w_d", "ow_d"):
+        tc(nm, n_dep, meshType="Progression", coef=dep_up)
     if not OPEN:
-        tc("tr_l", n_dep, meshType="Progression", coef=a.dep_coef)
+        tc("tr_l", n_dep, meshType="Progression", coef=dep_up)
     for nm in ("floor", "ofloor"):
         tc(nm, n_core, meshType="Bump", coef=0.35)
     if a.valley_arc:
@@ -449,7 +542,7 @@ def build(a):
     s_t3 = g.addPlaneSurface([g.addCurveLoop([d_f, d_r, -c_pd, -c_ad, -c_wd])])
     g.synchronize()
     g.mesh.setTransfiniteCurve(d_f, n_arc + n_dn0 - 1, meshType="Progression", coef=1.02)
-    g.mesh.setTransfiniteCurve(d_r, n_dep, meshType="Progression", coef=a.dep_coef)
+    g.mesh.setTransfiniteCurve(d_r, n_dep, meshType="Progression", coef=dep_up)
     g.mesh.setTransfiniteSurface(s_t3, "Left", [q_bd, q_eD, q_e, q_sd])
     g.mesh.setRecombine(2, s_t3)
     g.synchronize()
@@ -493,6 +586,19 @@ def build(a):
             sys.exit(f"境界 {names[k]} に面が 1 つも分類されなかった")
         gmsh.model.addPhysicalGroup(2, tags, k, names[k])
     gmsh.model.addPhysicalGroup(3, [t for _, t in gmsh.model.getEntities(3)], 8, "fluid")
+
+    # --- 縦すきま口の円弧 (メッシュ変形)。境界の分類は変形前の座標で済ませてある ---
+    if a.long_edge_radius > 0.0:
+        tags_n, crd, _ = gmsh.model.mesh.getNodes()
+        xyz = np.asarray(crd, dtype=float).reshape(-1, 3)
+        geo = dict(open=OPEN, xu=xu, xvu=xvu, xd=xd, xvd=xvd, xe=xe, xg=xg,
+                   x2d=(x2d if OPEN else None), x2vd=(x2vd if OPEN else None))
+        new_xyz, n1, n2 = long_edge_morph(xyz, a, geo)
+        moved = np.where(np.any(np.abs(new_xyz - xyz) > 0.0, axis=1))[0]
+        for i in moved:
+            gmsh.model.mesh.setNode(int(tags_n[i]), new_xyz[i].tolist(), [])
+        print(f"  縦すきま口の円弧 R={a.long_edge_radius*1e3:.2f} mm: 変形した節点 {len(moved):,} "
+              f"(上流 {n1:,} / 下流 {n2:,})、最大移動 {np.abs(new_xyz - xyz).max()*1e3:.3f} mm")
 
     gmsh.model.mesh.renumberNodes(); gmsh.model.mesh.renumberElements()
     MESH.mkdir(exist_ok=True)
@@ -559,6 +665,10 @@ def main():
     ap.add_argument("--vout-transfinite", action="store_true",
                     help="谷の上も構造格子にする (既定は非構造+recombine)")
     ap.add_argument("--scale", type=float, default=1.0)
+    ap.add_argument("--long-edge-radius", type=float, default=0.0,
+                    help="縦すきま口の縁の半径 [m] (0 = 鋭い角、実寸は 2.5e-3)。生成後のメッシュ変形で入れる")
+    ap.add_argument("--long-edge-dmax", type=float, default=4.0,
+                    help="変形が 0 に戻る壁からの距離 (半径の倍数)")
     ap.add_argument("--tag", default="gap3d")
     ap.add_argument("--no-convert", action="store_true")
     a = ap.parse_args()
