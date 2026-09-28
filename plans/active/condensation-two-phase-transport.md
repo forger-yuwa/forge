@@ -113,8 +113,8 @@
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | 1 | §4・§6 の確定 | codex plan 段 (NO-GO C1/M6/m1) を全件採用して改訂 → codex diagnose (2026-09-27) の更新契約・§6 の指摘も全件反映済み。**判断: 2026-09-27 更新は保存形後退 Euler の固定点を契約とし、#4 は §6 の 3 セル判別を最初の合格条件にする**。残: 反映版の再諮問は #4 の単体試験結果と合わせて行う (判断単位でまとめる)。実装前に `methods/condensation.md` へ §4.2 の式を書く | F |
-| 2 | (C) 理由別の補正量監視 | §4.3。合格: 現行バイナリで case/16 `run_0483` 系の再実行 (AWS) で各理由の区間値・累積が出る。これを基準値として記録 | O |
-| 3 | (A) 気相組成の輸送物性 | §4.1。**表引き (`gas_transport_cell_rY`)・直接評価 (`gas_transport_cell_Y`)・壁 (`wmlesWallModel_d`)・probe・拡散係数が同じ気相組成関数を通る** (codex M3)。合格: §6 の物性項 | O |
+| 2 | (C) 理由別の補正量監視 | §4.3。合格: 現行バイナリで case/16 `run_0483` 系の再実行 (AWS) で各理由の区間値・累積が出る。これを基準値として記録 実装 2026-09-28 (計上のみ・場はビット一致, `tests/unit/test_cond_corr_reasons.cu` PASS)。**残**: ログ本体の実行確認と基準値取得 (AWS)、renorm 比は float 丸めで常時 WARN の見込み → 基準取得で閾値を決める、`passiveScalarScheme 0` の増分制限は n/a | O |
+| 3 | (A) 気相組成の輸送物性 | §4.1。**表引き (`gas_transport_cell_rY`)・直接評価 (`gas_transport_cell_Y`)・壁 (`wmlesWallModel_d`)・probe・拡散係数が同じ気相組成関数を通る** (codex M3)。合格: §6 の物性項 実装 2026-09-28 (`cuda_forge/gasPhaseComposition_d.cuh` を全経路で共有)。試験 `tests/unit/test_transport_gas_phase.py`: G0 ビット一致・G1 double 2.7e-15/float 2.3e-7 PASS、**G2 拡散係数 FAIL** (最大 2.93e-4 > 1e-5; ほぼ純粋点 X=0.9999 だけ。既存 `thermo_Dmix_species_f` の `1−X_i` 桁落ち ε₃₂/(1−X_i) どおり、1−X≥1e-2 では 7e-7)。対処は上位諮問中 (エスカレーション 3) | O |
 | 4 | (B) 二相拡散の単体試験用実装 | §4.2。合格: §6 の単体・保存・非負・面恒等式 (すべて事前固定の数値) | F (カーネル変更前に諮る, エスカレーション 6) |
 | 1b | 影響の A/B | 共通初期場 = `case/16.nozzle_wys/run_0482_passive_wys_s1_sfr2_c1` (本体ワークツリー側) の最終保存量を `restart_field.py` で 2 run に複製。同じバイナリ・S3・BC・CFL で A = 現行、B = §4.2。報告量 (onset 位置・出口 g・壁圧・壁熱流束) を `check_quasisteady.py --series-csv` 用に 200 step ごと CSV 化 (抽出スクリプトを先に作る)。両者 `check_convergence` PASS・報告量 STEADY まで延長。記録: 共通初期場での EOS 投影 δṪ、定常の共通凝縮域 p95\|ΔT\| (1 K は影響の大小の分類で合否ではない)。AWS | O (解釈は F, エスカレーション 7) |
 | 5 | 回帰 | g=0・凝縮なし・Euler はビット一致。node 周期 (case/09) と軸対称 (case/44 NS 凝縮 1 本) で起動・NaN なし・監視値 | O |
@@ -157,6 +157,8 @@
 
 ## 9. 変更ログ
 
+- `2026-09-28` — #3 (A) 実装: 気相組成関数を表引き・直接評価・壁 (WMLES)・probe・拡散係数で共有 (TP carrier 凝縮のときだけ有効)。G0 (g=0 で旧バイナリと probe 出力バイト一致, 凝縮 OFF/ON × 表引き ON/OFF)・G1 (湿潤セル・壁 double 2.7e-15, float 2.3e-7, 判別 0.14–0.20) PASS。G2 (拡散係数) は既存 float 式の桁落ちで純粋に近い点だけ FAIL (§5.1 #3)。既存 `test_transport_gpu.py` 69 PASS。
+- `2026-09-28` — #2 (C) 実装: 実現可能性クランプ・射影・再正規化に理由別計上 (`COND_REASON_*`) と `[cond-corr]` ログ (区間値・累積・総液量比・WARN 1e-6; 累積は restart で 0 から)。計上あり/なしで書き込み値ビット一致。ログ実行確認と基準値は AWS で未実施。
 - `2026-09-27` — codex diagnose (`notes/reviews/2026-09-27-condensation-transport-redesign-diagnose.md`) を反映: 更新の契約 (保存形後退 Euler の固定点、点対角は前処理)、§6 の許容・3 セル判別・エネルギー試験の条件。
 - `2026-09-27` — codex plan 段レビュー (NO-GO, C1/M6/m1) を全件採用して §4.2–§6 を改訂 (§6.1)。§4.1 の変更対象を表引き経路を含む全経路に拡大。
 - `2026-09-27` — §4.1 を輸送物性の作り直し後の実装 (`transport_mix_Y`、CEA 形混合、旧 Wilke 撤去) に合わせて改訂。作業は `feature/species-transport` で行う。

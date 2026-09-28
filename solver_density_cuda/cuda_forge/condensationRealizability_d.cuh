@@ -7,6 +7,8 @@
 #include "cuda_forge/condensationEOS_d.cuh"      // cond_clamp_vapor_pressure
 #include "cuda_forge/condensationSourceF_d.cuh"  // float 実体の表評価 (cond_tab_*)
 
+#include "cuda_forge/condensationCorrReasons_d.cuh"   // 理由別の補正量監視 (COND_REASON_*; 計上のみ)
+
 
 // モーメント実現可能性の射影 (plan §4.7 v5, codex plan-5 M3/M4, plan-6 M3): 無次元 x = Q1/(Q0 r), y = Q2/(Q0 r²), r = (Q3/Q0)^{1/3}。
 
@@ -105,13 +107,21 @@ __global__ void cond_realizability_clamp_d(
     flow_float* diagCorrG, flow_float* diagCorrQ,   // 補正量の記録 (nullptr 可): |Δρg|/ρ [質量分率] の累積, Q の最大相対補正 (codex result M2)
     int* realizViol,                                // [0] 最近点射影の作動数, [1] 退化の単分散再初期化数 (nullptr 可; plan species-passive-scalar-unification §4.7 v5)
     double* budget, const geom_int* root, const geom_float* vol,   // 成分別収支 [g,Q0,Q1,Q2]×(符号付き, 絶対)·V (root のみ; nullptr 可)
-    int doProject)                                  // 1: 実現可能性射影も行う (定常/RK の各 step; dual-time は sub-iter 内 0 で step 末尾に project_only を呼ぶ)
+    int doProject,                                  // 1: 実現可能性射影も行う (定常/RK の各 step; dual-time は sub-iter 内 0 で step 末尾に project_only を呼ぶ)
+    double* reasons = nullptr)                      // 理由別の補正量 (COND_REASON_*; nullptr 可。計上のみ)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     // 実現可能性 g<=Y_w: TP carrier は roY_w (輸送), CPG carrier (空気) は定数 opts.Yw, pure は 0.99
     const flow_float gmax = (roY_w != nullptr) ? roY_w[ic] : ((opts.Yw > 0.0) ? (flow_float)opts.Yw*ro[ic] : (flow_float)0.99*ro[ic]);
     const flow_float r_in = rog[ic], q0_in = roQ0[ic], q1_in = roQ1[ic], q2_in = roQ2[ic];
+    double* rs = (reasons != nullptr && (root == nullptr || root[ic] == ic)) ? reasons : nullptr;
+    const double Vr = (vol != nullptr) ? (double)vol[ic] : 1.0;
+    {
+        const bool have_yv = (roY_w != nullptr) || (opts.Yw > 0.0);
+        const double rod = ((double)ro[ic] > 1.0e-20) ? (double)ro[ic] : 1.0e-20;
+        cond_reason_pre(rs, Vr, (double)r_in, (double)gmax, have_yv, ((double)gmax - (double)r_in)/rod);
+    }
     flow_float r = r_in;
     if (r < (flow_float)0.0) r = (flow_float)0.0;
     if (r > gmax)            r = gmax;
@@ -119,6 +129,7 @@ __global__ void cond_realizability_clamp_d(
     if (roQ0[ic] < (flow_float)0.0) roQ0[ic] = (flow_float)0.0;
     if (roQ1[ic] < (flow_float)0.0) roQ1[ic] = (flow_float)0.0;
     if (roQ2[ic] < (flow_float)0.0) roQ2[ic] = (flow_float)0.0;
+    const flow_float q1_pre = roQ1[ic], q2_pre = roQ2[ic];   // 射影の計上用 (理由別監視)
     // 実現可能性の射影 (cond_realizability_project; plan §4.7 v5)。Q0>0, g>0 のみ。(Q0, g) は保存し Q1, Q2 だけ動かす。
     // Q0=0 または g=0 で他が正の「塵」は下の消滅規則 (S≤1) に任せる (核生成域は触らない)。
     {
@@ -145,6 +156,7 @@ __global__ void cond_realizability_clamp_d(
             }
         }
     }
+    cond_reason_proj(rs, Vr, (double)q1_pre, (double)q2_pre, (double)roQ1[ic], (double)roQ2[ic]);
     auto record = [&]() {
         if (diagCorrG == nullptr) return;
         const double rod0 = (double)ro[ic] > 1.0e-20 ? (double)ro[ic] : 1.0e-20;
@@ -184,6 +196,7 @@ __global__ void cond_realizability_clamp_d(
         remove = (r30 < 2.0*rmin);
     }
     if (remove) {
+        if (rs != nullptr && rog[ic] > (flow_float)0.0) { atomicAdd(&rs[COND_REASON_RM_SUM], (double)rog[ic]*Vr); atomicAdd(&rs[COND_REASON_RM_N], 1.0); }
         rog[ic] = (flow_float)0.0; roQ0[ic] = (flow_float)0.0;
         roQ1[ic] = (flow_float)0.0; roQ2[ic] = (flow_float)0.0;
     }
@@ -198,12 +211,20 @@ __global__ void cond_realizability_clamp_f_d(
     int evap, float Rw, float rmin, float g_rm, float Yw_const,
     flow_float* T, flow_float* P, CondTablesF tb, CondSpeciesProps cpd,
     flow_float* diagCorrG, flow_float* diagCorrQ, int* realizViol,
-    double* budget, const geom_int* root, const geom_float* vol, int doProject)
+    double* budget, const geom_int* root, const geom_float* vol, int doProject,
+    double* reasons = nullptr)   // 理由別の補正量 (COND_REASON_*; nullptr 可。計上のみ)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     const flow_float gmax = (roY_w != nullptr) ? roY_w[ic] : ((Yw_const > 0.0f) ? Yw_const*ro[ic] : 0.99f*ro[ic]);
     const flow_float r_in = rog[ic], q0_in = roQ0[ic], q1_in = roQ1[ic], q2_in = roQ2[ic];
+    double* rs = (reasons != nullptr && (root == nullptr || root[ic] == ic)) ? reasons : nullptr;
+    const double Vr = (vol != nullptr) ? (double)vol[ic] : 1.0;
+    {
+        const bool have_yv = (roY_w != nullptr) || (Yw_const > 0.0f);
+        const double rod = ((double)ro[ic] > 1.0e-20) ? (double)ro[ic] : 1.0e-20;
+        cond_reason_pre(rs, Vr, (double)r_in, (double)gmax, have_yv, ((double)gmax - (double)r_in)/rod);
+    }
     flow_float r = r_in;
     if (r < 0.0f) r = 0.0f;
     if (r > gmax) r = gmax;
@@ -211,6 +232,7 @@ __global__ void cond_realizability_clamp_f_d(
     if (roQ0[ic] < 0.0f) roQ0[ic] = 0.0f;
     if (roQ1[ic] < 0.0f) roQ1[ic] = 0.0f;
     if (roQ2[ic] < 0.0f) roQ2[ic] = 0.0f;
+    const flow_float q1_pre = roQ1[ic], q2_pre = roQ2[ic];   // 射影の計上用 (理由別監視)
     {   // 実現可能性の射影 (double 実体と同じ規則; ρ_l は表 [範囲外は double 関数]; 射影は double で評価)
         const float q0 = roQ0[ic];
         if (q0 > 0.0f && r > 0.0f) {
@@ -234,6 +256,7 @@ __global__ void cond_realizability_clamp_f_d(
             }
         }
     }
+    cond_reason_proj(rs, Vr, (double)q1_pre, (double)q2_pre, (double)roQ1[ic], (double)roQ2[ic]);
     auto record = [&]() {
         if (diagCorrG == nullptr) return;
         const float rod0 = ro[ic] > 1.0e-20f ? ro[ic] : 1.0e-20f;
@@ -272,7 +295,10 @@ __global__ void cond_realizability_clamp_f_d(
         const float r30 = cbrtf(g/((4.0f/3.0f)*COND_PI_F*rho_l*q0/rod));
         remove = (r30 < 2.0f*rmin);
     }
-    if (remove) { rog[ic] = 0.0f; roQ0[ic] = 0.0f; roQ1[ic] = 0.0f; roQ2[ic] = 0.0f; }
+    if (remove) {
+        if (rs != nullptr && rog[ic] > 0.0f) { atomicAdd(&rs[COND_REASON_RM_SUM], (double)rog[ic]*Vr); atomicAdd(&rs[COND_REASON_RM_N], 1.0); }
+        rog[ic] = 0.0f; roQ0[ic] = 0.0f; roQ1[ic] = 0.0f; roQ2[ic] = 0.0f;
+    }
     record();
 }
 
@@ -281,7 +307,8 @@ __global__ void cond_realizability_clamp_f_d(
 __global__ void cond_realizability_project_only_d(
     geom_int nCells, flow_float* ro, flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
     int condModel, flow_float* T, CondPropOpts opts, int useTab, CondTablesF tb,
-    flow_float* diagCorrQ, int* realizViol, double* budget, const geom_int* root, const geom_float* vol)
+    flow_float* diagCorrQ, int* realizViol, double* budget, const geom_int* root, const geom_float* vol,
+    double* reasons = nullptr)   // 理由別の補正量 (射影; nullptr 可。計上のみ)
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -306,6 +333,8 @@ __global__ void cond_realizability_project_only_d(
         roQ1[ic] = (flow_float)q1n; roQ2[ic] = (flow_float)q2n;
     }
     if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
+    if (reasons != nullptr && (root == nullptr || root[ic] == ic))
+        cond_reason_proj(reasons, (vol != nullptr) ? (double)vol[ic] : 1.0, (double)q1_in, (double)q2_in, (double)roQ1[ic], (double)roQ2[ic]);
     if (diagCorrQ != nullptr) {
         double rq = 0.0;
         const double d1 = fabs((double)roQ1[ic] - (double)q1_in)/fmax(fabs((double)q1_in), 1.0e-30), d2 = fabs((double)roQ2[ic] - (double)q2_in)/fmax(fabs((double)q2_in), 1.0e-30);

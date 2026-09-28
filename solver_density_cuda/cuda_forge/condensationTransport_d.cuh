@@ -49,6 +49,13 @@ int  condRealizViolReadReset(int* degenerate = nullptr);   // 戻り値: 最近�
 void condensationRealizabilityProject_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);   // Q1/Q2 だけの射影 (EOS 後)
 double* condClampBudget(int s);                    // 種 s の成分別収支スロット (device, 8 doubles)
 std::vector<double> condClampBudgetTotals(int nSpecies);   // [s*8 + 2k(+1)]: g,Q0,Q1,Q2 の符号付き/絶対 ∫Δq dV (全期間)
+// 理由別の補正量監視 (plan condensation-two-phase-transport §4.3, #2): 種 s の device スロット (COND_REASON_N doubles;
+// 配置は condensationRealizability_d.cuh の COND_REASON_*)。凝縮なし・s 範囲外は nullptr。
+double* condCorrReasons(int s);
+// 化学種再正規化 (species_renormalize_d) に渡す計上先: TP carrier の凝縮 run なら種 0 のスロットと凝縮種 index (*iw)、それ以外は nullptr・-1。
+double* condCorrReasonsForRenormalize(const solverConfig& cfg, variables& var, int* iw);
+// 理由別の補正量を monitorInterval ごとに 1 行/種で出す (区間値 + 累積 + 総液量比; 数値補正が総液量比 1e-6 超なら WARN)。凝縮なしは no-op。
+void condCorrectionLog_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int iStep);
 
 // 凝縮モーメント移流残差を組み立てる (res_/transport_diag/src_jac をゼロ初期化してから集計)。
 void condensationTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);

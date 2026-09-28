@@ -324,6 +324,10 @@ def read_probe(path):
         q["wlam_f"] = take(np.float32, nw)
         q["wmu"] = take(np.float64, nw)
         q["wlam"] = take(np.float64, nw)
+        if h.get("hasLiq", 0):   # 凝縮 carrier の気相組成の試験 (test_transport_gas_phase.py): 液・P・分子拡散係数
+            q["rog"] = take(np.float32, nA)
+            q["P"] = take(np.float32, nA)
+            q["D"] = take(np.float32, nA * nS).reshape(nS, nA)
         passes.append(q)
     s = {"mu": take(np.float64, K), "lam": take(np.float64, K), "X": take(np.float64, K * nR).reshape(K, nR)}
     if h.get("table", 0):

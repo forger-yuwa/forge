@@ -8,6 +8,8 @@
 #include "periodicNode_d.cuh"            // node 周期の gather/mirror (化学種 DPLUR dq・EOS クロス項・受動種)
 #include "passiveFct_d.cuh"              // dual-time 物理 step 末尾の保存的 FCT 補正 (§4.7)
 #include "condensationTransport_d.cuh"   // condensationSource_d_wrapper (FCT の凍結ソース)
+#include "condensationCorrReasons_d.cuh"   // COND_REASON_* / cond_atomic_max_double (再正規化の理由別監視)
+#include "gasPhaseComposition_d.cuh"     // 凝縮 carrier の気相組成 (拡散係数の組成; plan condensation-two-phase-transport §4.1)
 
 #include <cmath>
 #include <cstdio>
@@ -150,11 +152,14 @@ __global__ void species_pin_residual_d(
 }
 
 // 実現可能性 + 再正規化: 各 ρY_s>=0 にクランプ後、Σ_s ρY_s = ρ となるよう再スケール (ΣY_s=1)。
+// reasons (nullptr 可): 凝縮 carrier の理由別監視 (plan condensation-two-phase-transport §4.3)。凝縮種 iw の ρY_w に掛かった補正
+//   Σ|Δ(ρY_w)|V・max|係数−1|・変化ノード数を計上する (root のみ; 算術と書き込み値は変えない)。
 __global__ void species_renormalize_d(
     geom_int nCells,
     int nSpecies,
     flow_float** roY,
-    flow_float* ro)
+    flow_float* ro,
+    double* reasons, int iw, const geom_float* vol, const geom_int* root)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic < nCells) {
@@ -166,9 +171,33 @@ __global__ void species_renormalize_d(
             sum += (double)v;
         }
         const double factor = (double)ro[ic] / (sum > (double)kSmall ? sum : (double)kSmall);
+        const flow_float yw_in = (reasons != nullptr && iw >= 0) ? roY[iw][ic] : (flow_float)0.0;   // クランプ前の値ではなく ≥0 化後
         for (int s = 0; s < nSpecies; s++) {
             roY[s][ic] = (flow_float)((double)roY[s][ic] * factor);
         }
+        if (reasons != nullptr && iw >= 0 && (root == nullptr || root[ic] == ic)) {
+            const double d = fabs((double)roY[iw][ic] - (double)yw_in);
+            cond_atomic_max_double(&reasons[COND_REASON_RN_MAX], fabs(factor - 1.0));
+            if (d > 0.0) {
+                atomicAdd(&reasons[COND_REASON_RN_SUM], d*((vol != nullptr) ? (double)vol[ic] : 1.0));
+                atomicAdd(&reasons[COND_REASON_RN_N], 1.0);
+            }
+        }
+    }
+}
+
+// 化学種拡散係数に渡す組成 (plan condensation-two-phase-transport §4.1): 総組成 Yf (正規化済み) から、同じ正規化の単位の
+//   液 gl (= g/ΣY) を凝縮種から除いた気相組成のモル分率 X (gas_phase_composition; X の正規化が 1−g の再正規化を兼ねる)。
+//   液なし (iw < 0 / gl ≤ 0) は Yf の X そのもの (現行とビット一致)。流束の駆動勾配と補正の Yf は変えない (§4.2 は別項目)。
+__device__ inline void species_transport_X_f(const SpeciesThermoF* sp, int n, const flow_float* Yf, int iw, flow_float gl, flow_float* X)
+{
+    if (iw >= 0 && gl > 0.0f) {
+        flow_float Yg[THERMO_MAX_SPECIES];
+        for (int s = 0; s < n; ++s) Yg[s] = Yf[s];
+        gas_phase_composition(Yg, iw, gl);
+        thermo_X_from_Y_f(sp, n, Yg, X);
+    } else {
+        thermo_X_from_Y_f(sp, n, Yf, X);
     }
 }
 
@@ -188,7 +217,8 @@ __global__ void species_diffusion_d(
     flow_float* ro, flow_float* T, flow_float* P, flow_float* vis_lam, flow_float* vis_turb,
     flow_float* res_roe,
     int diffMethod, flow_float Sc, flow_float Sc_t,
-    int isNode, flow_float** dYdx, flow_float** dYdy, flow_float** dYdz)
+    int isNode, flow_float** dYdx, flow_float** dYdy, flow_float** dYdz,
+    GasPhaseLiquid liq)   // 凝縮 carrier の液 (拡散係数は気相組成で評価; 液なしは {nullptr, -1})
 {
     // 面ループは float32 で評価する (係数は SpeciesThermoF, 評価点は従来どおり面状態 T_f/P_f/Y_f。
     // 離散式は不変, plan performance-3d-node-sst-speedup §4.2-2)。旧 double 版は FP64 パイプ律速で
@@ -242,7 +272,10 @@ __global__ void species_diffusion_d(
     }
     const flow_float yinv = 1.0f/(ysum>1.0e-30f?ysum:1.0e-30f);
     for (int s=0;s<nSpecies;s++) Yf[s]*=yinv;
-    thermo_X_from_Y_f(sp, nSpecies, Yf, X);
+    // 拡散係数の組成は気相組成 (面の液 g_f = f g0 + (1−f) g1 を Yf と同じ正規化の単位で)
+    const flow_float gl_f = (liq.iw >= 0 && liq.rog != nullptr)
+        ? (f*liq.rog[ic0]*inv_ro0 + g*liq.rog[ic1]*inv_ro1)*yinv : 0.0f;
+    species_transport_X_f(sp, nSpecies, Yf, liq.iw, gl_f, X);
 
     const flow_float mu_face  = f*vis_lam[ic0]  + g*vis_lam[ic1];
     const flow_float mut_face = f*vis_turb[ic0] + g*vis_turb[ic1];
@@ -821,11 +854,42 @@ void speciesTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
             var.c_d["ro"], var.c_d["T"], var.c_d["P"], var.c_d["vis_lam"], var.c_d["vis_turb"],
             var.c_d["res_roe"],
             cfg.speciesDiffusionMethod, cfg.Sc, cfg.Sc_t,
-            (cfg.discretization == "node") ? 1 : 0, g_dYdx_dev, g_dYdy_dev, g_dYdz_dev);
+            (cfg.discretization == "node") ? 1 : 0, g_dYdx_dev, g_dYdy_dev, g_dYdz_dev,
+            gasPhaseLiquid(cfg, var));
     }
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+}
+
+// 試験用 (FORGE_TRANSPORT_PROBE; tests/unit/test_transport_gpu.py)。計算経路からは呼ばない。
+//   セル ic を面の両側に置いた (f = 1) ときの species_diffusion_d と同じ組成 (clip → 正規化 → 気相組成 species_transport_X_f) と
+//   同じ関数 thermo_Dmix_species_f で、分子拡散係数 D_s (乱流分を含まない) を全セル (ghost 込み) について書く。D は [s*nCells_all + ic]。
+__global__ void species_Dmix_probe_d(geom_int nCells_all, const SpeciesThermoF* sp, int nSpecies, flow_float** roY,
+                                     const flow_float* ro, const flow_float* T, const flow_float* P, GasPhaseLiquid liq, float* D)
+{
+    const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells_all) return;
+    const flow_float inv_ro = 1.0f/max(ro[ic], (flow_float)1.0e-30f);
+    flow_float Yf[THERMO_MAX_SPECIES], X[THERMO_MAX_SPECIES];
+    flow_float ysum = 0.0f;
+    for (int s = 0; s < nSpecies; s++) { flow_float y = roY[s][ic]*inv_ro; if (y < 0.0f) y = 0.0f; Yf[s] = y; ysum += y; }
+    const flow_float yinv = 1.0f/(ysum>1.0e-30f?ysum:1.0e-30f);
+    for (int s = 0; s < nSpecies; s++) Yf[s] *= yinv;
+    const flow_float gl = (liq.iw >= 0 && liq.rog != nullptr) ? liq.rog[ic]*inv_ro*yinv : 0.0f;
+    species_transport_X_f(sp, nSpecies, Yf, liq.iw, gl, X);
+    for (int s = 0; s < nSpecies; s++) D[(size_t)s*nCells_all + ic] = thermo_Dmix_species_f(sp, nSpecies, X, s, T[ic], P[ic]);
+}
+
+bool speciesDmixProbe_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, float* D_d)
+{
+    if (!speciesEnabled(var) || g_roY_dev == nullptr) return false;
+    species_Dmix_probe_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
+        msh.nCells_all, thermo_species_device_ptr_f(), g_nSpecies, g_roY_dev,
+        var.c_d["ro"], var.c_d["T"], var.c_d["P"], gasPhaseLiquid(cfg, var), D_d);
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchkKernelSync();
+    return true;
 }
 
 void speciesTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
@@ -856,11 +920,14 @@ void speciesRenormalize_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
         gpuErrchk( cudaMemcpy(it->second, var.c_d["roY"+std::to_string(s)], (size_t)msh.nCells_all*sizeof(flow_float), cudaMemcpyDeviceToDevice) );
     }
 
+    int iwRn = -1;
+    double* reasonsRn = condCorrReasonsForRenormalize(cfg, var, &iwRn);   // 凝縮 carrier の理由別監視 (計上のみ)
     species_renormalize_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells,
         g_nSpecies,
         g_roY_dev,
-        var.c_d["ro"]);
+        var.c_d["ro"],
+        reasonsRn, iwRn, var.c_d["volume"], passive_periodic_root(cfg, msh));
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

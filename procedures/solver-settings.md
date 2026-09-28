@@ -189,6 +189,8 @@ S3 は凝縮の固定点を動かす (onset が case/44 で +0.18 r_t、Wysłouz
 **非定常 (dual-time) の合否**は `python3 solver_density_cuda/tools/check_passive_budget.py <run_dir>` (monitor の `[passive]` 積算 [floor / limCorr / FCT の基点逸脱・ピン交換 / 実現可能性クランプの成分別 |Δ|] を総量比 1e-6 で PASS/FAIL) で判定する。
 checkpoint には受動種の流束形履歴 (`/CHECKPOINT/<cons>_fctG`, `_fctH`, `passive_fctMeff`) が入り、FCT 有効時の restart はこれが揃わないと全系 BDF1 から再開する。
 凝縮モーメントの実現可能性 (許容領域 $x\le1,\ x^2\le y\le\sqrt x$; $x=Q_1/(Q_0r)$, $y=Q_2/(Q_0r^2)$) は更新後に最近点射影 (退化は単分散再初期化) で保証し、作動数と成分別収支を monitor に出す。
+凝縮 run (受動種経路の有無を問わず) は monitorInterval ごとに `[cond-corr]` 行で理由別の補正量 (蒸気上限違反・負値 floor・増分制限・受動種 floor・射影・化学種再正規化・液滴消滅) の区間値と累積を総液量比で出し、液滴消滅以外が比 1e-6 を超えると `WARN` を出す。累積は restart で 0 から ([methods/condensation.md](../methods/condensation.md) 実装 §4c)。
+TP carrier の凝縮 run では `viscMethod 2` の μ・λ と化学種拡散係数を気相組成 (液を除いた組成) で評価する (同 §7b)。
 注意: 受動種/化学種の拡散は `viscMethod != 0` のときだけ加わる (viscMethod 0 は定数粘性ではなく「拡散なし」扱い; 化学種と同じ規約)。
 
 ## physProp.viscMethod — 層流の粘性・熱伝導 (2026-09-27 `viscMethod: 2` を置き換え)

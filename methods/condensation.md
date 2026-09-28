@@ -855,6 +855,12 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
 3. **診断**: `condLim_<s>` = $\theta_u$ (収束時 ≈1 を確認する)、`condClampCorr_<s>` = このステップの**全**硬クランプによる $|\Delta\rho g|/\rho$ の累積
    [質量分率] (更新 floor + 実現可能性クランプ $g\le Y_w$ / $0.99$ + 液滴消滅)、`condClampCorrQ_<s>` = $Q_0..Q_2$ の最大相対補正 (負値 floor は 1)。収束時に
    凝縮域で 0 であること (乾きセルの数値塵 $Q\to0^-$ の floor は $g=0$ なら無害) を確認する。
+   **理由別の補正量 (2026-09-28, plan [condensation-two-phase-transport](../plans/active/condensation-two-phase-transport.md) §4.3)**: 凝縮 run では monitorInterval ごとに
+   `[cond-corr]` 行を種ごとに出す。理由は蒸気上限違反 ($g>Y_w$, `capViol`; 作動ノード数と**制限前の最小蒸気分率** $(\rho Y_w-\rho g)/\rho$)、負値 floor (`negFloor`)、
+   増分制限 (`incrLimit` = 受動種経路の $\theta_u/\theta_b$ が $\rho g$ から切った量)、受動種の硬い floor (`passFloor`)、モーメント射影 (`proj`, $|\Delta\rho Q_1|,|\Delta\rho Q_2|$)、
+   化学種再正規化が凝縮種 $\rho Y_w$ に掛けた補正 (`renorm`, $\sum|\Delta\rho Y_w|V$ と $\max|f-1|$)、液滴消滅 (`removal`, 物理)。各々の区間値 (前回ログからの差) と累積
+   (プロセス開始から; **restart で 0 から**) を総液量 $\sum\rho gV$ 比 (射影は $\sum\rho Q_{1,2}V$ 比; 総量 0 のときは絶対量で比は「非 0 なら 1」) で出し、
+   液滴消滅以外の区間値が比 $10^{-6}$ を超えると `[cond-corr] WARN` を出す。計上だけで、クランプの算術・書き込み値は変えない (`tests/unit/test_cond_corr_reasons.cu`)。
 4. **設定**: `condDgMaxStep` (既定 5e-3) / `condDTmaxStep` (既定 1 K) / `condLimiterMode` (1: 更新クランプ [既定], 0: 旧・残差 θ [A/B 用])。
    **新経路は `condEquilibrium 0` (非平衡) のみ** (平衡形 1/2 は従来の更新のまま)。**RK 陽解法 (`timeIntegration` 1/3/4) では起動時に自動で 0 に降格**する (未制限残差の累積バッファを持つため)。dual-time は `passiveScalarScheme 1`
    (モーメントに BDF 物理時間項; F-cf8 → plan species-passive-scalar-unification §4.4) で有効 (旧経路 0 では従来どおり降格)。
@@ -1026,6 +1032,12 @@ Phase 2 の二相 EOS による気相逆結合 ($p$ が $g$ 依存) は密結合
 [plans/accepted/tooling-nozzle-tp-split-h2o-condensation.md](../plans/accepted/tooling-nozzle-tp-split-h2o-condensation.md)
 (Wyslouzil fig3 で N₂ 擬似種 + H₂O が既存 `[N2, H2O]` CPG 結果を再現、イソブタン M4.2 H₂O 5 %)。
 気相 thermo の低温側は forge の `Tlo` クランプ (cp 凍結) が効く。
+
+**輸送物性は気相組成で評価する (2026-09-28, plan [condensation-two-phase-transport](../plans/active/condensation-two-phase-transport.md) §4.1)**: TP carrier
+(`condGasSpecies` ≥ 0) の凝縮 run では、μ・λ (`viscMethod 2` の `transport_mix_Y` / 表引き、セル・壁 WMLES) と化学種の混合平均拡散係数
+(`thermo_Dmix_species_f`) に渡す組成から液を除く: $Y_s^{gas}=Y_s/(1-g)$ ($s\ne w$)、$Y_w^{gas}=\max(Y_w-g,0)/(1-g)$ (1 つの関数
+`gas_phase_composition` を全経路が通る; $1-g$ の正規化は各入口の既存の正規化が行う)。液滴の懸濁効果 (粘性増加・有効熱伝導) は無視 ($\phi\sim10^{-6}$)。
+液 0・凝縮 OFF は現行とビット一致。CPG carrier・pure 凝縮・`viscMethod 0/1` は変わらない。拡散流束の駆動勾配 ($\nabla Y_w$) は未変更 (§4.2 は別項目)。
 
 ### 8. 精度・無次元化 (Phase 2)
 
