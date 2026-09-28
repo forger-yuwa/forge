@@ -147,6 +147,41 @@ def charghost_state(ri, ui, pi, rinf, uinf, pinf):
     return np.where(supin, rinf, rb), np.where(supin, uinf, ub), np.where(supin, pinf, pb)
 
 
+
+def smooth01(x):
+    """0 (x<=0) から 1 (x>=1) へ C1 でつなぐ。"""
+    t = np.clip(x, 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def charghost2_state(ri, ui, pi, rinf, uinf, pinf, band=0.1):
+    """plan-8 対策版の外側状態。
+    (1) 圧力・法線速度: 内部のエントロピーのまま、内部 (外向き特性) と擬似外側 (P∞, u∞) の間の 2 膨張波近似 (TRRS)。常に P>0、小振幅で線形式 w± = P ± Z u に一致。
+    (2) 密度・組成: 自由流のエントロピーで P_R から。
+    (3) 内部の法線 Mach が 1 に近づくと外側状態を内部状態へ滑らかに寄せる (M_i >= 1 で U_R = U_i → F = F(U_i))。
+    (4) 自由流の法線 Mach が −1 に近づくと外側状態を自由流へ滑らかに寄せる (Q_n/a∞ <= −1 で U_R = U_∞)。"""
+    z = (G - 1) / (2 * G)
+    ci = np.sqrt(G * pi / ri)
+    si = pi / ri ** G                                   # 内部エントロピー
+    rpo = (pinf / si) ** (1.0 / G)                      # 擬似外側: P∞ で内部エントロピーの密度
+    cpo = np.sqrt(G * pinf / rpo)
+    num = ci + cpo - 0.5 * (G - 1) * (uinf - ui)
+    num = np.maximum(num, 1e-12 * (ci + cpo))           # 真空生成は起きない範囲 (検査で数える)
+    ps = (num / (ci / pi ** z + cpo / pinf ** z)) ** (1.0 / z)
+    us = ui + 2 * ci / (G - 1) * (1 - (ps / pi) ** z)   # 左 (内部) 側の膨張/圧縮の関係 (2 膨張波近似)
+    rb = rinf * (ps / pinf) ** (1.0 / G)
+    ub, pb = us, ps
+    # (4) 自由流の超音速流入へ寄せる
+    ainf = np.sqrt(G * pinf / rinf); Mq = uinf / ainf
+    wq = smooth01(((-1 + band) - Mq) / band)
+    rb = (1 - wq) * rb + wq * rinf; ub = (1 - wq) * ub + wq * uinf; pb = (1 - wq) * pb + wq * pinf
+    # (3) 内部の超音速流出へ寄せる (最後に適用 = 優先: 内部の特性がすべて外向きなら外の情報は入らない)
+    Mi = ui / ci
+    wi = smooth01((Mi - (1 - band)) / band)
+    rb = (1 - wi) * rb + wi * ri; ub = (1 - wi) * ub + wi * ui; pb = (1 - wi) * pb + wi * pi
+    return rb, ub, pb
+
+
 def bflux(kind, ri, ui, pi, rinf, uinf, pinf):
     if kind == "slau_ghost": return slau(ri, ui, pi, rinf, uinf, pinf)
     if kind == "hllc_ghost": return hllc(ri, ui, pi, rinf, uinf, pinf)
@@ -157,6 +192,9 @@ def bflux(kind, ri, ui, pi, rinf, uinf, pinf):
     if kind == "hllcd_ghost": return hllc_davis(ri, ui, pi, rinf, uinf, pinf)
     if kind == "charghost_hllcd":
         rb, ub, pb = charghost_state(ri, ui, pi, rinf, uinf, pinf)
+        return hllc_davis(ri, ui, pi, rb, ub, pb)
+    if kind == "charghost2_hllcd":
+        rb, ub, pb = charghost2_state(ri, ui, pi, rinf, uinf, pinf)
         return hllc_davis(ri, ui, pi, rb, ub, pb)
     if kind == "slip":
         return slau(ri, ui, pi, ri, -ui, pi)
@@ -243,7 +281,7 @@ def contact(kind, dx):
 
 
 def main():
-    kinds = ["slau_ghost", "hllc_ghost", "roe_ghost", "char_hllc", "char_slau", "hllcd_ghost", "charghost_hllcd"]
+    kinds = ["hllc_ghost", "charghost_hllcd", "charghost2_hllcd"]
     print("== T2 超音速流出の極限 (U_i u=2, U_inf u=3): 面流束 / 内部の物理流束 − 1")
     one = np.array([1.0]); Fi = phys_flux(one, 2 * one, P0 * one)[:, 0]
     for k in kinds:
@@ -263,14 +301,43 @@ def main():
     print(f"  対照 T5 (M 0、右端 slip): {acoustic('slip', 0.0, 2.5e-3) * 100:.1f}%")
     print("\n== T1b 高温の内部を出ていく音響 (codex plan-7 M1: T 600/220、u 0.5)")
     for dx in (5e-3, 2.5e-3, 1.25e-3):
-        print(f"  Δx {dx:.2e}  " + "  ".join(f"{k}:{acoustic_hot(k, dx) * 100:6.2f}%" for k in ("hllc_ghost", "hllcd_ghost", "charghost_hllcd")))
+        print(f"  Δx {dx:.2e}  " + "  ".join(f"{k}:{acoustic_hot(k, dx) * 100:6.2f}%" for k in ("hllc_ghost", "charghost_hllcd", "charghost2_hllcd")))
     print("\n== T4b 共通速度を加えた掃引 (内 T 10 倍・P 1e4 倍の極端な比、codex plan-7 M2 型) : 隣接差の最大 / 規模、HLL 退避回数")
-    for k in ("hllcd_ghost", "charghost_hllcd"):
+    for k in ("charghost_hllcd", "charghost2_hllcd"):
         FALLBACK["n"] = 0
         uu = np.arange(-3.0, 3.0, 1e-4); o = np.ones_like(uu)
         F = bflux(k, 0.1 * o, uu, 1e4 * P0 * o, 1e-4 * o, uu, 1e-3 * P0 * o)
         jump = np.max(np.abs(np.diff(F, axis=1)), axis=1) / (np.max(np.abs(F), axis=1) + 1e-30)
         print(f"  {k:16s} " + "  ".join(f"{j:.1e}" for j in jump) + f"  退避 {FALLBACK['n']}  有限 {bool(np.all(np.isfinite(F)))}")
+    print("\n== T6 plan-8 の反例とゲート (CPG)")
+    one = np.array([1.0])
+    for k in ("charghost_hllcd", "charghost2_hllcd"):
+        FALLBACK["n"] = 0
+        F1 = bflux(k, one, -0.9 * one, P0 * one, one, 0.9 * one, P0 * one)[:, 0]
+        print(f"  [{k}] M1 反例 (u_i −0.9, u∞ +0.9): 流束 {F1}, 有限 {bool(np.all(np.isfinite(F1)))}, 退避 {FALLBACK['n']}")
+        # 正値性掃引: u_i, u∞ ∈ [-0.99, 0.99]、P 比 0.1〜10
+        uu = np.linspace(-0.99, 0.99, 91); pr = np.array([0.1, 1.0, 10.0])
+        U1, U2, PR = np.meshgrid(uu, uu, pr, indexing="ij"); o = np.ones_like(U1)
+        FALLBACK["n"] = 0
+        F = bflux(k, o.ravel(), U1.ravel(), (P0 * PR).ravel(), o.ravel(), U2.ravel(), P0 * o.ravel())
+        print(f"  [{k}] 正値性掃引 {U1.size} 点: 非有限 {int(np.sum(~np.isfinite(F)))}, 退避 {FALLBACK['n']}")
+        # M2: 内部 u 1.1 固定、自由流 u を −2..2 と P∞ を 0.2..5 倍に振る → F(U_i) との差
+        Fi = phys_flux(one, 1.1 * one, P0 * one)[:, 0]
+        ua = np.linspace(-2, 2, 81); pa = np.array([0.2, 1.0, 5.0]); UA, PA = np.meshgrid(ua, pa, indexing="ij")
+        F = bflux(k, np.ones(UA.size), 1.1 * np.ones(UA.size), P0 * np.ones(UA.size), np.ones(UA.size), UA.ravel(), (P0 * PA).ravel())
+        err = np.max(np.abs(F / Fi[:, None] - 1))
+        print(f"  [{k}] M2 内部 M 1.1 で外気を掃引: max|F/F(U_i) − 1| = {err:.2e}")
+        # M3: Q_n/a∞ を −1 の両側で 1e-8 刻み、運動量流束の差
+        d = []
+        for h in (1e-4, 1e-6, 1e-8):
+            Fa = bflux(k, one, -0.3 * one, 1.2 * P0 * one, one, (-1 - h) * one, P0 * one)[:, 0]
+            Fb = bflux(k, one, -0.3 * one, 1.2 * P0 * one, one, (-1 + h) * one, P0 * one)[:, 0]
+            d.append(np.max(np.abs(Fa - Fb)))
+        print(f"  [{k}] M3 Q_n/a∞ = −1 ± h (h 1e-4/1e-6/1e-8) の流束差 max: " + " / ".join(f"{x:.2e}" for x in d))
+        # 内部 M ≈ 1 の連続性 (流出側)
+        uu = np.arange(0.8, 1.2, 1e-5); o = np.ones_like(uu)
+        F = bflux(k, o, uu, P0 * o, o, 0 * o, P0 * o)
+        print(f"  [{k}] 内部 M 0.8→1.2 (1e-5 刻み) 隣接差 max / 規模: {np.max(np.abs(np.diff(F, axis=1)) / np.max(np.abs(F), axis=1, keepdims=True)):.2e}")
     print("\n== T3 接触波 (温度 2.7 倍の塊が右端から流出、M 0.3): 観測点 |P − P∞|/P∞ の最大")
     for dx in (5e-3, 2.5e-3):
         print(f"  Δx {dx:.2e}  " + "  ".join(f"{k}:{contact(k, dx):.2e}" for k in kinds))
