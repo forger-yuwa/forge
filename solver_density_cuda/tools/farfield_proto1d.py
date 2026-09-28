@@ -107,6 +107,46 @@ def char_state(ri, ui, pi, rinf, uinf, pinf):
     return rb, ub, pb
 
 
+FALLBACK = {"n": 0}
+
+
+def hll_flux(rL, uL, pL, rR, uR, pR, SL, SR):
+    FL = phys_flux(rL, uL, pL); FR = phys_flux(rR, uR, pR)
+    UL = prim2cons(rL, uL, pL); UR = prim2cons(rR, uR, pR)
+    Fm = (SR * FL - SL * FR + SL * SR * (UR - UL)) / (SR - SL)
+    return np.where(SL >= 0, FL, np.where(SR <= 0, FR, Fm))
+
+
+def hllc_davis(rL, uL, pL, rR, uR, pR):
+    """HLLC、波速は各側の u ± c から直接 (Davis、EOS に依らない)。S* ∉ [SL, SR] か星密度 ≤ 0 なら HLL に退避して数える。"""
+    cL = np.sqrt(G * pL / rL); cR = np.sqrt(G * pR / rR)
+    SL = np.minimum(uL - cL, uR - cR); SR = np.maximum(uL + cL, uR + cR)
+    Sm = (pR - pL + rL * uL * (SL - uL) - rR * uR * (SR - uR)) / (rL * (SL - uL) - rR * (SR - uR))
+    rsL = rL * (SL - uL) / (SL - Sm); rsR = rR * (SR - uR) / (SR - Sm)
+    bad = ~((SL <= Sm) & (Sm <= SR) & (rsL > 0) & (rsR > 0) & np.isfinite(Sm))
+    FALLBACK["n"] += int(np.sum(bad))
+    FL = phys_flux(rL, uL, pL); FR = phys_flux(rR, uR, pR)
+    UL = prim2cons(rL, uL, pL); UR = prim2cons(rR, uR, pR)
+
+    def star(r, u, p, S, U):
+        f = r * (S - u) / (S - Sm)
+        return np.stack([f, f * Sm, f * (U[2] / r + (Sm - u) * (Sm + p / (r * (S - u))))])
+    Fc = np.where(SL >= 0, FL, np.where(Sm >= 0, FL + SL * (star(rL, uL, pL, SL, UL) - UL),
+                  np.where(SR > 0, FR + SR * (star(rR, uR, pR, SR, UR) - UR), FR)))
+    return np.where(bad, hll_flux(rL, uL, pL, rR, uR, pR, SL, SR), Fc)
+
+
+def charghost_state(ri, ui, pi, rinf, uinf, pinf):
+    """外側の状態: 圧力・法線速度は境界節点の Z = ρ_i c_i で線形化した特性量 (外向き w+ は内部、内向き w- は外気)、
+    密度 (エントロピー)・接線速度・組成は常に外気側。超音速流入面 (Q_n ≤ -a∞) は外気そのもの。"""
+    ci = np.sqrt(G * pi / ri); Z = ri * ci; ainf = np.sqrt(G * pinf / rinf)
+    pb = 0.5 * (pi + pinf) + 0.5 * Z * (ui - uinf)
+    ub = 0.5 * (ui + uinf) + (pi - pinf) / (2 * Z)
+    rb = rinf * np.maximum(pb / pinf, 1e-12) ** (1.0 / G)       # 外気のエントロピーで
+    supin = uinf <= -ainf
+    return np.where(supin, rinf, rb), np.where(supin, uinf, ub), np.where(supin, pinf, pb)
+
+
 def bflux(kind, ri, ui, pi, rinf, uinf, pinf):
     if kind == "slau_ghost": return slau(ri, ui, pi, rinf, uinf, pinf)
     if kind == "hllc_ghost": return hllc(ri, ui, pi, rinf, uinf, pinf)
@@ -114,6 +154,10 @@ def bflux(kind, ri, ui, pi, rinf, uinf, pinf):
     if kind in ("char_hllc", "char_slau"):
         rb, ub, pb = char_state(ri, ui, pi, rinf, uinf, pinf)
         return (hllc if kind == "char_hllc" else slau)(ri, ui, pi, rb, ub, pb)
+    if kind == "hllcd_ghost": return hllc_davis(ri, ui, pi, rinf, uinf, pinf)
+    if kind == "charghost_hllcd":
+        rb, ub, pb = charghost_state(ri, ui, pi, rinf, uinf, pinf)
+        return hllc_davis(ri, ui, pi, rb, ub, pb)
     if kind == "slip":
         return slau(ri, ui, pi, ri, -ui, pi)
     raise ValueError(kind)
@@ -172,6 +216,21 @@ def acoustic(kind, M, dx, amp=1e-3, left_kind=None):
     return np.max(np.abs(pa - pl_i)) / A
 
 
+def acoustic_hot(kind, dx, amp=1e-3):
+    """codex plan-7 M1 の設定: 内部 ρ = 220/600 (温度 600/220 倍)、P = P∞、u = 0.5 (内外)、内部音速に整合する右向き純音波。"""
+    uinf = 0.5; rh = 220.0 / 600.0; ch = np.sqrt(G * P0 / rh)
+    sig = 0.04 / 2.3548
+
+    def init(x):
+        pp = amp * P0 * np.exp(-0.5 * ((x - 0.5) / sig) ** 2)
+        return rh + pp / ch ** 2, uinf + pp / (rh * ch), P0 + pp
+    t_end = 0.5 / (0.5 + ch) + 0.4 / max(ch - 0.5, 1e-3) + 0.1
+    ts, pa = run(kind, -1.0, 1.0, dx, init, t_end, 0.8, uinf)
+    tl, pl = run(kind, -1.0, 3.0, dx, init, t_end, 0.8, uinf)
+    pl_i = np.interp(ts, tl, pl)
+    return np.max(np.abs(pa - pl_i)) / np.max(np.abs(pl - P0))
+
+
 def contact(kind, dx):
     uinf = 0.3
     sig = 0.1 / 2.3548
@@ -184,7 +243,7 @@ def contact(kind, dx):
 
 
 def main():
-    kinds = ["slau_ghost", "hllc_ghost", "roe_ghost", "char_hllc", "char_slau"]
+    kinds = ["slau_ghost", "hllc_ghost", "roe_ghost", "char_hllc", "char_slau", "hllcd_ghost", "charghost_hllcd"]
     print("== T2 超音速流出の極限 (U_i u=2, U_inf u=3): 面流束 / 内部の物理流束 − 1")
     one = np.array([1.0]); Fi = phys_flux(one, 2 * one, P0 * one)[:, 0]
     for k in kinds:
@@ -202,6 +261,16 @@ def main():
             row = "  ".join(f"{k}:{acoustic(k, M, dx) * 100:6.2f}%" for k in kinds)
             print(f"  M {M:.1f} Δx {dx:.2e}  {row}")
     print(f"  対照 T5 (M 0、右端 slip): {acoustic('slip', 0.0, 2.5e-3) * 100:.1f}%")
+    print("\n== T1b 高温の内部を出ていく音響 (codex plan-7 M1: T 600/220、u 0.5)")
+    for dx in (5e-3, 2.5e-3, 1.25e-3):
+        print(f"  Δx {dx:.2e}  " + "  ".join(f"{k}:{acoustic_hot(k, dx) * 100:6.2f}%" for k in ("hllc_ghost", "hllcd_ghost", "charghost_hllcd")))
+    print("\n== T4b 共通速度を加えた掃引 (内 T 10 倍・P 1e4 倍の極端な比、codex plan-7 M2 型) : 隣接差の最大 / 規模、HLL 退避回数")
+    for k in ("hllcd_ghost", "charghost_hllcd"):
+        FALLBACK["n"] = 0
+        uu = np.arange(-3.0, 3.0, 1e-4); o = np.ones_like(uu)
+        F = bflux(k, 0.1 * o, uu, 1e4 * P0 * o, 1e-4 * o, uu, 1e-3 * P0 * o)
+        jump = np.max(np.abs(np.diff(F, axis=1)), axis=1) / (np.max(np.abs(F), axis=1) + 1e-30)
+        print(f"  {k:16s} " + "  ".join(f"{j:.1e}" for j in jump) + f"  退避 {FALLBACK['n']}  有限 {bool(np.all(np.isfinite(F)))}")
     print("\n== T3 接触波 (温度 2.7 倍の塊が右端から流出、M 0.3): 観測点 |P − P∞|/P∞ の最大")
     for dx in (5e-3, 2.5e-3):
         print(f"  Δx {dx:.2e}  " + "  ".join(f"{k}:{contact(k, dx):.2e}" for k in kinds))

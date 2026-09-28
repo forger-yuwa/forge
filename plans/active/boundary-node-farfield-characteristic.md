@@ -50,36 +50,46 @@ C_L が 7.1e-4、C_M が 0.021 動いた (許容 5e-4 / 5e-3 を超過。3.42 H 
 `bcondConfig.yaml`: `{kind: farfield, floats: {ro, Ux, Uy, Uz, Ps, k, omega, Y0, ...}}` = 自由流 (`inlet_uniformVelocity` と同じキー)。多成分は `Y{s}`/`X{s}` 必須、RANS は `k`, `omega` 必須。
 `valueTypesOfBC["farfield"]` を新設し、自由流の値 (type 1) と構成した境界状態 (別名の bvar) を分けて持つ。
 
-### 4.2 方式: 外側に自由流を置き、境界面だけ HLLC で解く (2026-09-28、ホスト 1D 試作で決定)
+### 4.2 方式: 境界半割面の外側状態を特性で作り、境界面だけ HLLC で解く (2026-09-28、ホスト 1D 試作で決定)
 
-**経緯**: 初稿〜plan-6 の机上レビューで、(a) Riemann 不変量の混合は接触波で擾乱、(b) 局所線形化の特性組み立ては流向選択が流束と自己整合せず跳ぶ、
-(c) 自由流ゴースト + SLAU は超音速流出でも外側に影響され、音響反射 14–18 % と指摘された。机上の反復をやめ、ホスト 1D 試作
-[`solver_density_cuda/tools/farfield_proto1d.py`](../../solver_density_cuda/tools/farfield_proto1d.py) で 5 候補を比較した (node の境界半 CV、内部 SLAU + MUSCL、RK3、CPG):
+**用語 (node 方式)**: node にはゴーストセル (値を持つ外側の計算点) は無い。境界節点そのものが自由度で、境界に接する半分の双対 CV を持つ。
+本 BC は、境界半割面の近似 Riemann 問題に渡す**外側状態 $U_R$** を流束計算のその場で作るだけで (弱形式、SU2 の vertex 型遠方境界と同じ)、値を保持・更新する点は作らない。
+スカラーもゴーストでなく面ごとの値の配列で渡す。既存の node 境界も同じく、境界節点の値と外側状態 (`bvar`) から半割面の流束を作っている。
 
-| 候補 | 超音速流出の極限 (面流束/内部物理流束−1) | 連続性 (1e-4 刻みの隣接差/規模) | 音響反射 M 0 (Δx 5 / 2.5 / 1.25 mm) | 音響反射 M 0.3 | 接触波 (T 2.7 倍の塊の流出、\|ΔP\|/P) |
-| --- | --- | --- | --- | --- | --- |
-| 自由流ゴースト + SLAU | **+25 %** | 1e-4 | **61 / 70 / 78 %** | **12 / 15 / 17 %** | 2e-14 |
-| **自由流ゴースト + HLLC** | **0** | 1e-4 | **0.50 / 0.24 / 0.08 %** | **0.15 / 0.09 / 0.04 %** | 2e-14 |
-| 自由流ゴースト + Roe | 0 | 1e-4 | 0.50 / 0.24 / 0.08 % | 0.15 / 0.09 / 0.04 % | 2e-14 |
-| 特性組み立て + HLLC | 0 | **跳び 0.14** | 0.52 / 0.26 / 0.10 % | 0.14 / 0.08 / 0.02 % | 2e-14 |
-| 特性組み立て + SLAU | 0 | **跳び 0.26** | 2.3 / 1.4 / 0.75 % | 0.16 / 0.09 / 0.03 % | 2e-14 |
+**経緯**: 初稿〜plan-6 の机上レビューで (a) Riemann 不変量の混合は接触波で擾乱、(b) 局所線形化の特性組み立てで密度・組成の側を流向で切り替えると流束が跳ぶ、
+(c) 外側に自由流をそのまま置いて SLAU で解くと超音速流出でも外側に影響され音響反射 14–18 %、と指摘された。ホスト 1D 試作
+[`solver_density_cuda/tools/farfield_proto1d.py`](../../solver_density_cuda/tools/farfield_proto1d.py) (node の境界半 CV、内部 SLAU + MUSCL、RK3、CPG) で候補を比較し、
+plan-7 の反例 (M1: 高温の内部を出ていく音響が外気そのままだと 24–33 % 反射 / M2: 音速の算術平均の波速で HLLC の波速順序が壊れる) も試作に入れた:
 
-対照: M 0 で右端 slip の反射 95.7 % (試験が反射を検出できる)。これはホスト試作の結果で、forge 本体の run ではない。
+| 外側状態 + 面流束 | 超音速流出の極限 | 連続性 (1e-4 刻み) | 音響反射 一様 M 0 (Δx 5/2.5/1.25 mm) | 一様 M 0.3 | **高温内部 (T 600/220、u 0.5)** | 接触波 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 外気そのまま + SLAU | **+25 %** | 滑らか | **61 / 70 / 78 %** | **12 / 15 / 17 %** | — | 擾乱 2e-14 |
+| 外気そのまま + HLLC (Roe 平均の波速) | 0 | 滑らか | 0.50 / 0.24 / 0.08 % | 0.15 / 0.09 / 0.04 % | **24 / 30 / 33 %** | 2e-14 |
+| 外気そのまま + HLLC (Davis 波速) | 0 | 滑らか | 0.51 / 0.26 / 0.10 % | 0.14 / 0.08 / 0.02 % | **31 / 38 / 43 %** | 2e-14 |
+| 特性組み立て (側を流向で切替) + HLLC | 0 | **跳び 0.14** | 0.52 / 0.26 / 0.10 % | 0.14 / 0.08 / 0.02 % | — | 2e-14 |
+| **特性外側状態 (下記) + HLLC (Davis 波速)** | **0** | **滑らか** | **0.52 / 0.26 / 0.10 %** | **0.14 / 0.08 / 0.02 %** | **0.15 / 0.08 / 0.03 %** | **2e-14** |
 
-→ **境界半割面の流束だけ HLLC (Toro、波速は Davis–Einfeldt: $S_L=\min(u_{n,L}-c_L,\tilde u-\tilde c)$、$S_R=\max(u_{n,R}+c_R,\tilde u+\tilde c)$、Roe 平均)**、
-**L = 内部 (境界節点) の状態 $U_i$、R = 自由流 $U_\infty$ をそのまま** (組み立てない)。内部面は SLAU のまま。
+対照: M 0 で右端 slip の反射 95.7 % (試験が反射を検出できる)。極端な比 (内部 P 1e4 倍・T 10 倍) に共通速度 −3〜3 を加えた掃引でも、採用案は隣接差 ≤ 1e-6、HLL 退避 0、全て有限。
+これはホスト試作の結果で、forge 本体の run ではない。
 
-- 流向・超音速/亜音速は HLLC が局所の波速で振り分ける。超音速流出 ($S_L\ge0$) では面流束 = 内部の物理流束 (厳密)。流束は入力に対して連続。
-- **TP**: HLLC は $\rho,\ \mathbf u,\ P,\ E,\ c$ だけで組めるので、L/R それぞれ実物性の $c$ (TP は `sonic`)・$E$ を使う。$\tilde c$ は Roe 平均の $\tilde H$ から $\sqrt{(\tilde\gamma-1)(\tilde H-\tilde u^2/2)}$ でなく、
-  **$\tilde c = \tfrac12(c_L+c_R)$** (EOS に依らない。波速の見積もりだけに使う) とする。
-- **自由流の状態** $U_\infty$ (ρ, u, P, Y, T, E, c) は起動時に bcond の floats から実物性で一度だけ計算して bvar に持つ。
-- **既知の限界** (plan-6 M2): TP 多成分では、温度・組成の違う気体の保存形の混合だけで圧力が 0.5–0.65 % ずれる (境界と無関係の既存の性質)。境界の試験とは分けて判定する (§6 V0p・V2d)。
+→ **採用: 外側状態 $U_R$ を次で作り、面流束 = $\mathbf F_{\mathrm{HLLC}}(U_L=U_i,U_R)$**:
+
+- **圧力・法線速度 (音響部)**: 境界節点の局所インピーダンス $Z=\rho_ic_i$ で線形化した特性量。外向き $w^+=P+ZU_n$ は内部、内向き $w^-=P-ZU_n$ は自由流:
+  $P_R=\tfrac12(P_i+P_\infty)+\tfrac12Z(U_{n,i}-U_{n,\infty})$、$U_{n,R}=\tfrac12(U_{n,i}+U_{n,\infty})+(P_i-P_\infty)/(2Z)$。
+  外向きの音波は内部の $Z$ のまま素通りする (外気の $\rho c$ との差で反射しない。plan-7 M1 の対策)。
+- **密度 (エントロピー)・接線速度・組成・$k,\omega$**: **常に自由流側** ($\rho_R=\rho_\infty(P_R/P_\infty)^{1/\gamma_\infty}$、TP は自由流の組成・エントロピーで $P_R$ から等エントロピーに)。
+  流出か流入かは HLLC の接触波速度 $S_*$ の符号が選ぶので、側を切り替える分岐が無い (連続。plan-4/5 の跳びの原因を除去)。
+- **超音速流入面** ($Q_n\le-a_\infty$、面ごとに固定): $U_R=U_\infty$ そのもの。超音速流出は HLLC が $S_L\ge0$ で内部の物理流束を返すので特別扱い不要。
+- **波速 (plan-7 M2)**: Davis: $S_L=\min(U_{n,L}-c_L,U_{n,R}-c_R)$、$S_R=\max(U_{n,L}+c_L,U_{n,R}+c_R)$ (各側の実物性の $c$。EOS に依らない)。
+  $S_L\le S_*\le S_R$ と星状態の密度 $>0$ を毎回検査し、外れたら **HLL** (同じ $S_L,S_R$) に退避して面 ID を数える (**評価区間では 0 回**)。有限でも検査する。
+- **TP**: $P,\rho,E,c$ は各側の実物性 (内部は `sonic`・EOS、自由流側は起動時に計算)。$P_R$ からの $\rho_R$ は自由流の組成で等エントロピー (frozen の $\gamma_\infty$ で近似し、V2d で誤差を測る)。
+- **既知の限界** (plan-6 M2): TP 多成分では温度・組成の違う気体の保存形の混合だけで圧力が 0.5–0.65 % ずれる (境界と無関係)。境界の試験とは分けて判定する (§6 V0p・V2d)。
 
 ### 4.3 面流束 (farfield 専用カーネル `farfield_flux_d`)
 
-- 面流束 = $\mathbf F_{\mathrm{HLLC}}(U_L=U_i, U_R=U_\infty;\hat{\mathbf n})|S|$ (1 次、再構成なし)。3D では法線成分で HLLC を解き、接線速度は星状態で各側の値を保つ (Toro 10.4)。
+- 面流束 = $\mathbf F_{\mathrm{HLLC}}(U_L=U_i, U_R;\hat{\mathbf n})|S|$ ($U_R$ は §4.2、1 次、再構成なし)。3D では法線成分で HLLC を解き、接線速度は星状態で各側の値を保つ (Toro 10.4)。
   HLLC を L/R 状態を引数に取る **`__host__ __device__` の純粋関数**にする (GPU 配列・診断・残差加算は外側)。
-- 化学種・$k,\omega$: HLLC の質量流束の符号 (= 接触波速度 $S_*$ の符号) で風上化: $\dot m>0$ なら内部値、$\dot m<0$ なら $Y_\infty,k_\infty,\omega_\infty$。
+- 化学種・$k,\omega$: HLLC の質量流束の符号 (= 接触波速度 $S_*$ の符号) で風上化: $\dot m>0$ なら内部値、$\dot m<0$ なら $Y_\infty,k_\infty,\omega_\infty$ ($U_R$ の組成と同じ)。
   (HLLC の星状態の質量流束は $\rho_*S_*$ なので、スカラー $\dot m\,\phi_{\text{風上}}$ は HLLC の多成分拡張 [星状態で $Y$ を保存] と同じ。)
 - 同じカーネルが `massflux[ip]` と、スカラーの面値配列を書く。スカラー移流は node 境界半割面の `ext_is_self` / `nodeBnd` 経路に、**farfield 面だけ面値配列を読む**分岐
   (面フラグで判定、既存面はビット不変)。一次輸送と S3 (化学種) の両経路。呼び出し順は対流流束 → スカラー移流 = 同じ評価時点。
@@ -117,7 +127,9 @@ C_L が 7.1e-4、C_M が 0.021 動いた (許容 5e-4 / 5e-3 を超過。3.42 H 
 | 1e | ~~plan-5~~ **済 (2026-09-27 NO-GO C0/M2/m3、全件採用)** | | F |
 | 1f | ~~plan-6~~ **済 (2026-09-27 NO-GO C0/M3/m1、全件採用)** | | F |
 | 1g | ~~ホスト 1D 試作で境界流束の候補を比較~~ **済 (2026-09-28): 自由流ゴースト + HLLC が全項目合格 → §4.2 に採用** (plan-6 M1) | `solver_density_cuda/tools/farfield_proto1d.py`: node 境界半 CV を持つ 1D Euler (CPG、内部 2 次 MUSCL・境界 1 次、RK3)。候補 = (a) 自由流ゴースト + SLAU、(b) 自由流ゴースト + HLLC、(c) 局所線形化の特性振幅で組み立て + HLLC、(d) 同 + SLAU。測る量 = (1) 音響反射率 (M 0 / 0.3、長領域との差、Δx 3 水準)、(2) 超音速流出の極限 (外側状態を変えても流束が内部の物理流束に一致)、(3) 接触波 (P・u 同じで T 違い) の擾乱、(4) 流向反転・音速通過の連続性。合格 = (1) ≤ 5 %、(2) 相対 1e-6、(3) 圧力擾乱 ≤ 1e-4 P∞、(4) 流束の跳びなし。結果で §4 を決め直し、plan-7 に回す | F/O |
-| 1h | codex plan 段 plan-7 | 1g の結果で決めた §4 | F |
+| 1h | ~~plan-7~~ **済 (2026-09-28 NO-GO C0/M2/m1、全件採用、試作で対策を確認)** | | F |
+| 1i | codex plan 段 plan-8 | 本版 | F |
+| 1j | V0h ホストゲート (TP 拡張) | 本体実装の前 | O |
 | 2 | 実装 (§5 の 1–5)、V0・V0u | AWS でビルド | O |
 | 3 | 独立参照解 (§5 の 6) と V1–V2 | AWS | O |
 | 4 | SERN V3 | AWS。R4d へ反映 (restart は `r4d_common_restart.py` 型の index コピー、メッシュ品質、判定区間、case README の run 索引) | O |
@@ -130,6 +142,7 @@ C_L が 7.1e-4、C_M が 0.021 動いた (許容 5e-4 / 5e-3 を超過。3.42 H 
 V1–V2 は**境界機能の受入れ**、V3 は**SERN での配置 (側方幅) の採否**。
 
 - **V0 既存境界の不変**: farfield を含まない構成 (run_0971 設定) で、同一初期状態からの初回 `massflux` と状態ダンプが変更前バイナリとビット一致。更新後保存量は旧バイナリ 3 回反復の再現性幅以内。
+- **V0h ホストゲート (本体実装の前、plan-7 推奨)**: `farfield_proto1d.py` を TP (単成分・多成分 lump、既存 `FrozenGas`) に拡張し、§4.2 の表の全項目 + V2d-2 (TP の高温内部を出ていく音響、反射 ≤ 5 %) + 波速順序・星状態の妥当性・退避 0 を確認してから CUDA に進む。
 - **V0p TP の保存形混合 (前提、境界と無関係)** (plan-6 M2): 単一 CV に高温側 (T 600 K、Y 0.13) と外気 (T 220 K、Y 0) の保存量を 0.9:0.1 で混ぜ、EOS から復元した圧力の誤差を記録する (期待 +0.65 %)。これは境界の合否に入れず、V2d の「長領域自身の誤差」の説明に使う。
 - **V0u 単体試験** (ホスト、HLLC の `__host__ __device__` 関数): (i) **連続性**: $U_{n,i}$・$\rho_i$・$P_i$・接線速度を、法線 Mach ±1・0 付近で 1e-6 刻みに掃引し、面流束 5 成分・スカラー面流束の隣接点の差 ≤ 1e-4 × 流束規模 (plan-2〜5 の反例入力をすべて含む)、(ii) **接触波**: CPG と TP で P・$U_n$ 同じ・T 600/220 K・Y 0.13/0 の内部/外気、流出と流入の両方で面流束 = 風上側の物理流束 (相対 1e-6)、(iii) **流向の全組合せ**: $Q_n$ の符号 × 実際の $\dot m$ の符号 × ゼロ通過で、$\dot m<0$ のスカラー面値が外気値・$\dot m>0$ で内部値、(iv) 一様 ($U_i=U_\infty$) で $F_{num}=F(U)$ (相対 1e-6)、(v) 非対応構成の起動拒否 (cell・ROE・凝縮・トレーサ・遷移・軸対称・周期共有) がそれぞれエラー終了。
 - **V0k CUDA 一致**: 同じ入力を GPU カーネルに与え、ホストの HLLC 関数と面流束が相対 1e-6 で一致。
@@ -170,13 +183,17 @@ V1–V2 は**境界機能の受入れ**、V3 は**SERN での配置 (側方幅) 
 | plan | 2026-09-27 | [2026-09-27-boundary-node-farfield-characteristic-plan-4.md](../../notes/reviews/2026-09-27-boundary-node-farfield-characteristic-plan-4.md) | NO-GO, C0/M3/m2 | **全件採用**: M1 → §4.2 を局所線形化の特性振幅 (Whitfield–Janus/Blazek) に変更・V0u(vi)・V2d-2 のパルスなし対照、M2 → エントロピー部を実際の流向 ($U_{n,b}$、食い違い時は $\dot m$) で選択・V0u(vii)、M3 → V3b の採否を全広幅と比較、m4 → 明示 $Y,T$ の熱物性関数・V0u(viii)、m5 → 規格化の保存量別・絶対和 |
 | plan | 2026-09-27 | [2026-09-27-boundary-node-farfield-characteristic-plan-5.md](../../notes/reviews/2026-09-27-boundary-node-farfield-characteristic-plan-5.md) | NO-GO, C0/M2/m3 | **全件採用**: M1 (密度側の選び直しが SLAU の $\dot m$ と自己整合しない)・M2 (固定の超音速分類が局所逆流の情報を失う) → §4.2 を「外側に自由流をそのまま置き SLAU で解く」に変更 (組み立て・分類を撤去)、V0u(i)(iii)・V2f。m3 → 流束関数を `__host__ __device__` に・V0k、m4 → 帳簿ダンプ拡張、m5 → V3b の最大幅規則 |
 | plan | 2026-09-27 | [2026-09-27-boundary-node-farfield-characteristic-plan-6.md](../../notes/reviews/2026-09-27-boundary-node-farfield-characteristic-plan-6.md) | NO-GO, C0/M3/m1 | **全件採用**。M1 (自由流ゴースト + SLAU は超音速流出でも外側速度が流束を 25 % 変え、1D 線形化で音響反射 14–18 % [格子細分で下がらない]) → 境界だけ HLLC を候補にし、**全体実装の前にホストの 1D 試作で候補を比較** (§5.1 #1g)。M2 (TP 多成分の保存形混合で圧力 +0.5〜0.65 %、境界と無関係の既存性質) → V0u に単一 CV 更新 + EOS 復元の前提試験、V2d で長領域自身の誤差と短領域の追加誤差を分離。M3 → V2f の判定対象を「実際の ṁ<0 の面」に。m4 → §5・§6・methods・README の同期 |
+| plan | 2026-09-28 | [2026-09-28-boundary-node-farfield-characteristic-plan-7.md](../../notes/reviews/2026-09-28-boundary-node-farfield-characteristic-plan-7.md) | NO-GO, C0/M2/m1 | **全件採用**。M1 (外気そのままの外側状態は、高温の内部を出ていく音響を 24–33 % 反射) → §4.2 外側状態の音響部を境界節点の $Z$ で線形化した特性量に (試作で 0.03–0.15 %)、V0h ホストゲートに TP 版を追加。M2 (音速の算術平均の波速で $S_*>S_R$・流束の跳び) → Davis 波速 + 順序・星密度の検査 + HLL 退避と計数 (試作の極端な比の掃引で退避 0・跳びなし)。m3 → §7・methods の同期 |
 
 ## 7. 影響範囲
 
-- `solver_density_cuda/boundaryCond.{hpp,cpp}`、`cuda_forge/boundaryCond_d.cu`、`cuda_forge/speciesTransport_d.cu`、`cuda_forge/ransBoundary_d.cu`
-- `design/forge_design/evaluate/runner_sern3d.py`、`design/forge_design/metrics/sern_momentum.py` (`OPEN_KINDS`)
-- 既存ケース: 変更なし (新種別を書かなければビット不変、V0)
-- docs: `methods/boundary.md`、`methods/index.md` (見出しのみ)、`procedures/recommended-settings.md`
+- ソルバ: `solver_density_cuda/boundaryCond.{hpp,cpp}`、`cuda_forge/boundaryCond_d.cu` (自由流状態の起動時計算)、`cuda_forge/convection/convectiveFlux_d.cu` (境界ループの振り分け)、
+  新規 `cuda_forge/convection/farfieldFlux_d.inc.cuh` (HLLC・外側状態・`farfield_flux_d`)、`cuda_forge/scalarTransport_d.cu`・`cuda_forge/passiveKernels_d.cuh`・`cuda_forge/speciesTransport_d.cu` (farfield 面値)、
+  `cuda_forge/ransBoundary_d.cu`、`cuda_forge/convection/convectiveFlux_d.cu` の帳簿ダンプ拡張。
+- ツール: `solver_density_cuda/tools/farfield_proto1d.py` (ホスト試作・ゲート)、`farfield_balance.py`、`ref1d_euler_tp.py`。
+- 設計側: `design/forge_design/evaluate/runner_sern3d.py`、`design/forge_design/metrics/sern_momentum.py`。
+- 既存ケース: 変更なし (新種別を書かなければ既存経路はビット不変、V0)。
+- docs: `methods/boundary.md` (一覧表・理論節・ディスパッチ表)、`methods/index.md` (見出しのみ)、`procedures/recommended-settings.md`。
 
 ## 8. 完了条件
 
@@ -189,6 +206,7 @@ V1–V2 は**境界機能の受入れ**、V3 は**SERN での配置 (側方幅) 
 
 ## 9. 変更ログ
 
+- `2026-09-28` — plan-7 NO-GO (C0/M2/m1) を全件採用。外側状態の音響部を境界節点の $Z$ で線形化した特性量、密度・組成は常に自由流側、波速は Davis + 検査 + HLL 退避。試作で全項目合格。「ゴースト」の表記を node の弱形式の外側状態に改めた (ユーザ指摘)。
 - `2026-09-28` — ホスト 1D 試作で 5 候補を比較し、自由流ゴースト + 境界面だけ HLLC に決定 (§4.2 の表)。§5・§6 を同期 (V0p・V2d の判定分離・V2f の判定対象)。
 - `2026-09-28` — plan-6 NO-GO (C0/M3/m1) を全件採用。机上の反復をやめ、ホスト 1D 試作で境界流束の候補を比較してから §4 を決める (§5.1 #1g)。
 - `2026-09-27` — plan-5 NO-GO (C0/M2/m3) を全件採用。境界状態の組み立てをやめ、外側に自由流を置いて SLAU で解く方式に変更 (frozen-γ も不要に)。
