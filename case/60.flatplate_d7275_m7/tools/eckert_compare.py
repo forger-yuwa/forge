@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""D-7275 試験 26: forge・実験・Eckert 参照温度法を同じ座標 (St*_l vs R*_l) で並べる (case/60)。
+"""D-7275 試験 26・28: forge・実験・Eckert 参照温度法を同じ座標 (St*_l vs R*_l) で並べる (case/60)。
 
-    python3 tools/eckert_compare.py PLATE_H5 [--json out.json]
+    python3 tools/eckert_compare.py PLATE_H5 [--test 26|28] [--x-map tc|R] [--json out.json]
+
+2026-09-28: 試験 28 (Fig 19(c)) に対応。実験点の x は既定で Table I の熱電対位置 (--x-map tc、d7275_compare と同じ)。
+実験の St*/R* は原報の値のまま、forge は x での値を R*_l = Rfac·x の座標に置く。
 
 Eckert の式は D-7275 p.14 (ref. 12 = Kays) の乱流の関係:
     St*_l = 0.0296 · Pr*^(−2/3) · (R*_l)^(−1/5)
@@ -34,10 +37,13 @@ def main():
     ap.add_argument("--json", default=None)
     ap.add_argument("--tw", type=float, default=300.0)
     ap.add_argument("--forge-props", default=None, help="forge の場から取った T* での μ・cp・Pr (JSON)")
-    ap.add_argument("--case-setup", default=None, help="run の case_setup.json (p∞・U∞・R)。--forge-props と併用")
+    ap.add_argument("--case-setup", default=None, help="run の case_setup.json (p・U・R、試験 28 は inlet_local)。--forge-props と併用")
+    ap.add_argument("--test", type=int, default=26, choices=(26, 28))
+    ap.add_argument("--x-map", choices=("tc", "R"), default="tc")
     a = ap.parse_args()
-    d = json.loads((CASE / "digitize_d7275_fig20_test26.json").read_text())
-    t2, t3 = d["test26_table"]["TableII"], d["test26_table"]["TableIII"]
+    fn = {26: "digitize_d7275_fig20_test26.json", 28: "digitize_d7275_fig19c_test28.json"}[a.test]
+    d = json.loads((CASE / fn).read_text())
+    t2, t3 = d[f"test{a.test}_table"]["TableII"], d[f"test{a.test}_table"]["TableIII"]
     gas = _m.Gas(htst(float(t2["Tt_K"])))
     Rfac = t3["RstarLl_over_RLinf"] * t2["Re_inf_per_m"]           # R*_l = Rfac · x
     rvc = t3["rhoVcp_star_l_over_inf"] * t2["rhoVcp_inf_kW_m2K"] * 1e3
@@ -60,22 +66,22 @@ def main():
     St_f = qx / (rvc * (Taw - a.tw))
     R_f = Rfac * ux
 
-    pts = [(p["R_star_l"], p["St_star_l"]) for p in d["points"]]
+    pts = [(p["R_star_l"], p["St_star_l"], (p["x_sharp_m"] if a.x_map == "tc" else p["R_star_l"] / Rfac)) for p in d["points"]]
     rows = []
     print(f"Pr*({Tstar:.0f} K) = {Pr_s:.4f}   (ρVcp)*_l = {rvc:.0f} W/m²K   R*_l = {Rfac:.4e}·x   Taw {Taw} K  Tw {a.tw} K")
     print(f"{'x[m]':>6} {'R*_l':>10} {'St_exp':>9} {'St_Eck':>9} {'St_forge':>9} {'exp/Eck':>8} {'forge/Eck':>9} {'forge/exp':>9}")
-    for R, se in pts:
-        xx = R / Rfac
+    for R, se, xx in pts:
         sf = float(np.interp(xx, ux, St_f))
-        sE = eck(R)
+        sE = eck(R)                 # 実験点の R* (原報) での Eckert — 実験/Eckert に使う
+        sEx = eck(Rfac * xx)        # forge を置いた x での Eckert — forge/Eckert に使う
         # 感度 (b): 乱流起点をトリップ (x − 0.127) にした Eckert
         sEb = eck(Rfac * (xx - 0.127))
-        rows.append(dict(x=xx, R=R, St_exp=se, St_eck=sE, St_eck_trip=sEb, St_forge=sf))
-        print(f"{xx:6.3f} {R:10.3e} {se:9.3e} {sE:9.3e} {sf:9.3e} {se/sE:8.3f} {sf/sE:9.3f} {sf/se:9.3f}")
+        rows.append(dict(x=xx, R=R, St_exp=se, St_eck=sE, St_eck_x=sEx, St_eck_trip=sEb, St_forge=sf))
+        print(f"{xx:6.3f} {R:10.3e} {se:9.3e} {sE:9.3e} {sf:9.3e} {se/sE:8.3f} {sf/sEx:9.3f} {sf/se:9.3f}")
     r = lambda k1, k2: np.array([row[k1] / row[k2] for row in rows])
     summ = dict(
         exp_over_eck=dict(mean=float(r("St_exp", "St_eck").mean()), min=float(r("St_exp", "St_eck").min()), max=float(r("St_exp", "St_eck").max())),
-        forge_over_eck=dict(mean=float(r("St_forge", "St_eck").mean()), min=float(r("St_forge", "St_eck").min()), max=float(r("St_forge", "St_eck").max())),
+        forge_over_eck=dict(mean=float(r("St_forge", "St_eck_x").mean()), min=float(r("St_forge", "St_eck_x").min()), max=float(r("St_forge", "St_eck_x").max())),
         forge_over_exp=dict(mean=float(r("St_forge", "St_exp").mean()), min=float(r("St_forge", "St_exp").min()), max=float(r("St_forge", "St_exp").max())),
         forge_over_eck_trip=dict(mean=float(r("St_forge", "St_eck_trip").mean())),
         exp_over_eck_trip=dict(mean=float(r("St_exp", "St_eck_trip").mean())),
@@ -93,7 +99,8 @@ def main():
     if a.forge_props and a.case_setup:
         FP = json.loads(Path(a.forge_props).read_text()); cs = json.loads(Path(a.case_setup).read_text())
         for key, fp in FP.items():
-            Ts = float(key); rho = cs["p_inf"] / (cs["R"] * Ts); U = cs["U_inf"]
+            loc = cs.get("inlet_local") or dict(p=cs["p_inf"], U=cs["U_inf"])
+            Ts = float(key); rho = loc["p"] / (cs["R"] * Ts); U = loc["U"]
             qE = lambda xx: 0.0296 * fp["Pr"] ** (-2 / 3) * (rho * U * xx / fp["mu"]) ** -0.2 * rho * U * fp["cp"] * (Taw - a.tw)
             rr = np.interp(xs, ux, qx) / qE(xs)
             summ[f"forge_over_eck_forgeprops_T{key}"] = dict(Pr=fp["Pr"], mu=fp["mu"], cp=fp["cp"], mean=float(rr.mean()),
