@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""case/63 Graetz の流体メッシュ (子午面、node・全四角・構造)。
 
-plan [`boundary-cht-axisymmetric-graetz.md`](../../plans/active/boundary-cht-axisymmetric-graetz.md) §4.1・§5 #4。
+plan [`boundary-cht-axisymmetric-graetz.md`](../../plans/accepted/boundary-cht-axisymmetric-graetz.md) §4.1・§5 #4。
 
     r=R ┌─ wall_up (3) ─┬──── wall_heat (4, 共役 / 等温) ────┬─ wall_down (5) ─┐
         │ inlet (1)    │                                     │                 │ outlet (2)

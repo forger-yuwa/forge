@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""case/63 Graetz の run ディレクトリを組む (実行はしない)。
 
-plan [`boundary-cht-axisymmetric-graetz.md`](../../plans/active/boundary-cht-axisymmetric-graetz.md) §6。
+plan [`boundary-cht-axisymmetric-graetz.md`](../../plans/accepted/boundary-cht-axisymmetric-graetz.md) §6。
 
     kind = dry : 乾式 1 step (加熱壁は非連成の等温 T_in。共役壁の節点確定と起動確認用)
     kind = iso : 非連成の等温壁 T_w = T_in + ΔT (§6 の G1)

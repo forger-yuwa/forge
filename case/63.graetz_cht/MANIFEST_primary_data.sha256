@@ -180,3 +180,8 @@ e3824b9b6c6bd03b6415a693339a1b1d59d040c7566ea4c9e9e32cfce98b5ee9  run_0024_g2_dT
 4480d3539cc616b044a0781f9948788db5a244907a9e3ab07db2be60d0e0edc3  run_0024_g2_dT10_r64_ext/conjugate_state_4.h5
 9576ea378cbe26cd41f6aff0ca5d9c90a7d99812c5ed5f7877b1c81798cf6e0b  run_0024_g2_dT10_r64_ext/mesh.h5
 e76f31de729e7393aa6ffbbbff08de3e5043ad0b69136b4bc1efdcdefeb1b348  run_0024_g2_dT10_r64_ext/solid.h5
+# 再検証の限界 (2026-09-29 codex disposition M4): 中間スナップショットが無いので、全節点の準定常性・u_it・温度診断の時系列は
+# 元の場から再抽出できない (保存済みの EVAL_SERIES.txt・*_QS.txt・graetz_*series*.csv に依存)。G-if の節点別判定も同様
+# (CHT_INTERFACE_VERDICT.txt に依存)。手元で再実行して保存判定と一致を確認したもの (2026-09-29、HEAD 671cfceb):
+#   check_convergence.py run_0011〜run_0024 (14 本、gunzip -k した residual_history.csv) → 全 PASS、保存 CONVERGENCE_CHECK.txt と一致
+#   eval_graetz.py snap run_0016/0014・run_0020/0019・run_0024/0023 (3 対) → graetz_nu_600000.csv の Nu がビット一致

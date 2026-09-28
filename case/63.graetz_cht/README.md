@@ -1,6 +1,6 @@
 # 63. 軸対称 CHT の流れあり検証 — 管内層流の Graetz 問題 (壁温一様)
 
-計画: [`plans/active/boundary-cht-axisymmetric-graetz.md`](../../plans/active/boundary-cht-axisymmetric-graetz.md)。
+計画: [`plans/accepted/boundary-cht-axisymmetric-graetz.md`](../../plans/accepted/boundary-cht-axisymmetric-graetz.md) (**done 2026-09-29、ユーザ決定による例外閉鎖**: 対照差し引き局所 Nu は古典 Graetz と 3 格子で最大 0.82 % 以内、前提検査 V-g1 は FAIL 保持。範囲は plan §1「完了の範囲」)。
 **判定基準・パラメータは plan §6 の登録文そのまま**で、本 README は入力の作り方と run の所在だけを書く。
 
 ## 幾何と条件 (登録値、plan §4.1)
@@ -59,3 +59,6 @@ python3 make_run.py cht run_NNNN_... --mesh mesh/graetz_r16.h5 --solid mesh/soli
 | `run_0023_g2_dT0_r64_ext` / `run_0024_g2_dT10_r64_ext` | N_r 64 の延長 (plan §5.1 #6e): `run_0021`/`0022` の step 600000 から再開 (流体ビット一致・壁温・固体状態)、+600000 step | ALL STEADY (u_it 8.2e-8)、G-if/G-cons PASS、V-g3 PASS (`CMP_Vg3_ext.txt`) | active |
 
 **AWS 上の保存 (2026-09-29 に削減)**: `~/forge-graetz/case/63.graetz_cht/run_*` は各 run の最終ステップの場・壁・固体ダンプと `conjugate_state_4.h5` だけを残し、中間スナップショットと `conjugate_iface_log_4.csv` は削除、`residual_history.csv` は gzip。判定の出力 (`*.txt`・`graetz_*.csv`・`momentum_balance_series.csv`) は手元に回収済み。
+| (診断) `run_0014_g2_dT0_r32` の `MOMENTUM_BALANCE.txt` ほか (`0015`/`0016` も) / `TEMP_REPRODUCE.txt` | 運動量収支 A/B (plan §5.1 #6c: B が 4.9e-5 で閉じ、欠落項の説明を支持) / 温度再現 A/B (#6g: **判定不能** — x=0 の後処理不確かさ 2.84e-3 K > 1.67e-3 K、1 枚のみ。旧出力 `TEMP_REPRODUCE_v1_withdrawn.txt` は撤回) | — | ref |
+
+**一次データ**: 最終場・固体・再開状態・圧縮残差 (466 MB) を手元の各 run に回収し、`MANIFEST_primary_data.sha256` に台帳 (181 ファイル、再検証の限界も記載)。

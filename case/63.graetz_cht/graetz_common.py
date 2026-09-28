@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""case/63 Graetz (軸対称 CHT・流れあり) の共通定数と部品。
 
-plan [`boundary-cht-axisymmetric-graetz.md`](../../plans/active/boundary-cht-axisymmetric-graetz.md) §4。
+plan [`boundary-cht-axisymmetric-graetz.md`](../../plans/accepted/boundary-cht-axisymmetric-graetz.md) §4。
 case/61 の `axcht.py` (変換・固体帯・壁ダンプ・固体 Q_sol) を import して流用する。
 """
 from __future__ import annotations

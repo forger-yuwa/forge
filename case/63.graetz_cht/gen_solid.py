@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""case/63 Graetz の固体殻 (R ≤ r ≤ R + t、加熱区間 0 ≤ x ≤ L_heat だけ)。
 
-plan [`boundary-cht-axisymmetric-graetz.md`](../../plans/active/boundary-cht-axisymmetric-graetz.md) §4.4。
+plan [`boundary-cht-axisymmetric-graetz.md`](../../plans/accepted/boundary-cht-axisymmetric-graetz.md) §4.4。
 case/61 `gen_solid.py` と同じ帯トポロジ (行 j=0 が外面 r = R+t、j = n_s が界面 r = R、界面の並び i は x 昇順、
 対角は左上→右下)。界面節点は**乾式 1 step の壁ダンプ** `res_wall_heat_4_1.h5` の座標そのもの (流体の壁節点と 1 対 1)。
 
