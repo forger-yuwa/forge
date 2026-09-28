@@ -46,8 +46,13 @@ def main():
     ap.add_argument("--l-long", type=float, default=15.24e-2)
     ap.add_argument("--depth", type=float, default=6.35e-2)
     ap.add_argument("--n", type=int, default=120, help="断面の格子の各方向の点数")
+    ap.add_argument("--wall-r", type=float, default=None,
+                    help="その run の縦すきま口の実際の半径 [m] (鋭い腕 0、丸み腕 2.5e-3)。P1 面のうち"
+                         "タイル上面 (固体) に当たる点の流束を 0 にするのに使う。省略時は mesh 名から推定しない → 必須")
     ap.add_argument("--k", type=int, default=8)
     a = ap.parse_args()
+    if a.wall_r is None:
+        raise SystemExit("--wall-r (その run の縦すきま口の半径) を指定する")
     run = Path(a.run)
     steps = sorted(int(re.search(r"res_(\d+)\.h5$", f).group(1)) for f in glob.glob(str(run / "res_[0-9]*.h5")))
     step = a.step if a.step is not None else steps[-1]
@@ -84,7 +89,14 @@ def main():
     r_, u_, h_ = sample(P)
     dA = (xs[1] - xs[0]) * (zs[1] - zs[0])
     mdot = r_ * (-u_[:, 1])                       # すきまへ入る向きを正
-    out["P1_mouth"] = dict(m_in=float(mdot[mdot > 0].sum() * dA), m_out=float(-mdot[mdot < 0].sum() * dA),
+    # 固体面の除外 (codex 2026-09-29 Minor: 近傍補間は壁の不透過を保証せず、鋭い腕で P1 流入質量の 1.04 % が
+    # 固体上面を通る偽の流入だった)。y = 0 の面がタイル上面 (固体) に当たるのは、上面が平らな区間
+    # x ∈ [x2vd, xvu] で z ≥ W/2 + R_arm のところ。横すきまの円弧区間では上面が y < 0 なので面は流体。
+    xvu_, x2vd_ = xu - a.r, x2d + a.r            # 生成器と同じ (x2vd = x2d + r、xvu = xu − r)
+    solid = (P[:, 0] >= x2vd_) & (P[:, 0] <= xvu_) & (P[:, 2] >= 0.5 * W + a.wall_r - 1e-12)
+    mdot = np.where(solid, 0.0, mdot)
+    n_solid = int(solid.sum())
+    out["P1_mouth"] = dict(n_solid_points_zeroed=n_solid, m_in=float(mdot[mdot > 0].sum() * dA), m_out=float(-mdot[mdot < 0].sum() * dA),
                            H_in=float((mdot * (h_ - hw))[mdot > 0].sum() * dA),
                            H_out=float(-(mdot * (h_ - hw))[mdot < 0].sum() * dA))
     # P2: x = 0、y ∈ [−D, 0]、z ∈ [0, zmax]
