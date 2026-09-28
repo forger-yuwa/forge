@@ -107,7 +107,9 @@ SLAU の質量流束の符号と自己整合しない入力があり (plan-5 M1:
 | 1c | ~~plan-3~~ **済 (2026-09-27 NO-GO C0/M6/m1、全件採用)** | | F |
 | 1d | ~~plan-4~~ **済 (2026-09-27 NO-GO C0/M3/m2、全件採用)** | | F |
 | 1e | ~~plan-5~~ **済 (2026-09-27 NO-GO C0/M2/m3、全件採用)** | | F |
-| 1f | codex plan 段 plan-6 | 本版 (自由流ゴースト + SLAU) | F |
+| 1f | ~~plan-6~~ **済 (2026-09-27 NO-GO C0/M3/m1、全件採用)** | | F |
+| 1g | **ホスト 1D 試作で境界流束の候補を比較** (plan-6 M1、2026-09-28 着手) | `solver_density_cuda/tools/farfield_proto1d.py`: node 境界半 CV を持つ 1D Euler (CPG、内部 2 次 MUSCL・境界 1 次、RK3)。候補 = (a) 自由流ゴースト + SLAU、(b) 自由流ゴースト + HLLC、(c) 局所線形化の特性振幅で組み立て + HLLC、(d) 同 + SLAU。測る量 = (1) 音響反射率 (M 0 / 0.3、長領域との差、Δx 3 水準)、(2) 超音速流出の極限 (外側状態を変えても流束が内部の物理流束に一致)、(3) 接触波 (P・u 同じで T 違い) の擾乱、(4) 流向反転・音速通過の連続性。合格 = (1) ≤ 5 %、(2) 相対 1e-6、(3) 圧力擾乱 ≤ 1e-4 P∞、(4) 流束の跳びなし。結果で §4 を決め直し、plan-7 に回す | F/O |
+| 1h | codex plan 段 plan-7 | 1g の結果で決めた §4 | F |
 | 2 | 実装 (§5 の 1–5)、V0・V0u | AWS でビルド | O |
 | 3 | 独立参照解 (§5 の 6) と V1–V2 | AWS | O |
 | 4 | SERN V3 | AWS。R4d へ反映 (restart は `r4d_common_restart.py` 型の index コピー、メッシュ品質、判定区間、case README の run 索引) | O |
@@ -158,6 +160,7 @@ V1–V2 は**境界機能の受入れ**、V3 は**SERN での配置 (側方幅) 
 | plan | 2026-09-27 | [2026-09-27-boundary-node-farfield-characteristic-plan-3.md](../../notes/reviews/2026-09-27-boundary-node-farfield-characteristic-plan-3.md) | NO-GO, C0/M6/m1 | **全件採用**: M1 → §4.2 判定用 $a_\infty$ を自由流の実物性で固定・V0u(iii')、M2 → V0u(iii) 構成状態と数値流束の極限を分離、M3 → V1(d) を輸送残差の打消しに、M4 → V2b の符号・代表量・res_roK、M5 → V2d-1/2 と誤差予算、M6 → nSub 倍・Δt 半減、V2e、m7 → §4.3 ダンプの圧力基準 |
 | plan | 2026-09-27 | [2026-09-27-boundary-node-farfield-characteristic-plan-4.md](../../notes/reviews/2026-09-27-boundary-node-farfield-characteristic-plan-4.md) | NO-GO, C0/M3/m2 | **全件採用**: M1 → §4.2 を局所線形化の特性振幅 (Whitfield–Janus/Blazek) に変更・V0u(vi)・V2d-2 のパルスなし対照、M2 → エントロピー部を実際の流向 ($U_{n,b}$、食い違い時は $\dot m$) で選択・V0u(vii)、M3 → V3b の採否を全広幅と比較、m4 → 明示 $Y,T$ の熱物性関数・V0u(viii)、m5 → 規格化の保存量別・絶対和 |
 | plan | 2026-09-27 | [2026-09-27-boundary-node-farfield-characteristic-plan-5.md](../../notes/reviews/2026-09-27-boundary-node-farfield-characteristic-plan-5.md) | NO-GO, C0/M2/m3 | **全件採用**: M1 (密度側の選び直しが SLAU の $\dot m$ と自己整合しない)・M2 (固定の超音速分類が局所逆流の情報を失う) → §4.2 を「外側に自由流をそのまま置き SLAU で解く」に変更 (組み立て・分類を撤去)、V0u(i)(iii)・V2f。m3 → 流束関数を `__host__ __device__` に・V0k、m4 → 帳簿ダンプ拡張、m5 → V3b の最大幅規則 |
+| plan | 2026-09-27 | [2026-09-27-boundary-node-farfield-characteristic-plan-6.md](../../notes/reviews/2026-09-27-boundary-node-farfield-characteristic-plan-6.md) | NO-GO, C0/M3/m1 | **全件採用**。M1 (自由流ゴースト + SLAU は超音速流出でも外側速度が流束を 25 % 変え、1D 線形化で音響反射 14–18 % [格子細分で下がらない]) → 境界だけ HLLC を候補にし、**全体実装の前にホストの 1D 試作で候補を比較** (§5.1 #1g)。M2 (TP 多成分の保存形混合で圧力 +0.5〜0.65 %、境界と無関係の既存性質) → V0u に単一 CV 更新 + EOS 復元の前提試験、V2d で長領域自身の誤差と短領域の追加誤差を分離。M3 → V2f の判定対象を「実際の ṁ<0 の面」に。m4 → §5・§6・methods・README の同期 |
 
 ## 7. 影響範囲
 
@@ -177,6 +180,7 @@ V1–V2 は**境界機能の受入れ**、V3 は**SERN での配置 (側方幅) 
 
 ## 9. 変更ログ
 
+- `2026-09-28` — plan-6 NO-GO (C0/M3/m1) を全件採用。机上の反復をやめ、ホスト 1D 試作で境界流束の候補を比較してから §4 を決める (§5.1 #1g)。
 - `2026-09-27` — plan-5 NO-GO (C0/M2/m3) を全件採用。境界状態の組み立てをやめ、外側に自由流を置いて SLAU で解く方式に変更 (frozen-γ も不要に)。
 - `2026-09-27` — plan-4 NO-GO (C0/M3/m2) を全件採用。境界閉包を Riemann 不変量の混合から局所線形化の特性振幅に変更 (接触波で擾乱を出さない)。
 - `2026-09-27` — plan-3 NO-GO (C0/M6/m1) を全件採用 (判定用音速の固定、合格条件の修正)。
