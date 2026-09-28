@@ -263,7 +263,7 @@
   },
   {
    "id": "T4-0b-T28",
-   "status": "pre_registered",
+   "status": "outcome_recorded",
    "_written": "2026-09-28、run を回す前 (ユーザ承認「おねがい」、試験 28 = G15 のもう一方)",
    "name": "D-7275 試験 28 (α 9.8°、Tt 1817 K、M∞ 6.60、p∞ 2.144 kPa) — 斜め衝撃波の背後の平板で forge と実験の関係 (試験 26 で約 1.32 倍) が保たれるか",
    "model": "平板の縁の局所状態を平板に平行な一様入口にする (前縁の衝撃波は解かない。鋭い前縁なので前縁近傍以外への影響は小さいと見る、未確認)。局所状態は forge と同じ燃焼ガスモデルの熱的完全気体の斜め衝撃波 (θ 9.8°): T_l 348.65 K、U_l 1923.95 m/s、p_l 8451 Pa、ρ_l 0.0819 kg/m³、M_l 5.11、β 16.53° (Table III は p_l 8412 Pa (+0.5 %)・T_l 363.3 K (−4.0 %))。入口乱流 Tu 0.5 %・μt/μ 10 を局所状態で",
@@ -281,6 +281,21 @@
     "date": "2026-09-28",
     "run_0023_t28": "check_convergence --segment (本段) PASS (4.0–4.6 dec)。St 11 点の check_quasisteady は NOT ALL STEADY — 上流 3 点 STEADY (単調増加・漸近)、下流 8 点 TRANSIENT-UNSETTLED/DRIFTING (step 10k で St ≈ 0.4–0.7e-3 の層流水準から上昇、50k→60k でも最下流 +2.4 %)。check_wall_resolution FAIL (y1+ 平均 0.894、p99 1.183、>1 が 14.8 %)。暫定 R28 = 1.377 [1.321, 1.450] (R_B 1.393)、R28/R26 = 1.042 — St が未だ上昇中なので読みに使わない",
     "followup": "AGENTS の手順どおり: (A) run_0024_t28_ext = 同一メッシュで restart_field --keep-src-dtype +60k (準定常の確認)、(B) run_0025_t28_y2 = 第一層 2 µm のメッシュ fp_d7275_y2_wall_top8 (AR 最大 1281、構造格子の境界層セルなので AR ≤ 5000 の例外で PASS) へ interp_field で移して 60k (壁解像)。判定の基準 (|R28/R26 − 1| ≤ 0.10) は変えない。読みは St が STEADY になった run で行う"
+   },
+   "outcome": {
+    "date": "2026-09-29",
+    "primary_run": "case/60.flatplate_d7275_m7/run_0025_t28_y2 (第一層 2 µm、run_0023 の最終場から interp_field、60k)",
+    "gates": {
+     "convergence": "run_0025: check_convergence PASS (流れ 3.5–4.3 dec、k 5.9、ω 7.7 dec、この run の開始値から)。run_0023 本段 (--segment) も PASS",
+     "quasisteady": "run_0025: St 11 点 ALL STEADY (step 10k–60k)。run_0024 (3 µm、+60k 延長) も ALL STEADY — run_0023 の DRIFTING は延長で解消",
+     "wall_resolution": "run_0025: FAIL (y1+ 平均 0.598、p99 0.791、>1 は 0.3 % = 前縁 index 0 の特異点のみ)。run_0024 (3 µm) は >1 が 14.8 % (平均 0.895)",
+     "mesh": "fp_d7275_y2_wall_top8: AR 最大 1281 (構造格子の境界層セル、skew 0) → AR 緩和 (≤5000) で PASS"
+    },
+    "R28": "run_0025 (2 µm): R_A 平均 1.411 [1.355, 1.491]、R_B (トリップ起点) 1.427、x ±3 % で 1.405–1.417。run_0024 (3 µm): 1.380 [1.325, 1.459]",
+    "grid": "第一層 3 → 2 µm で St が比較域一様に +2.2〜2.4 % (y1+ 0.9 → 0.6)。2 水準の差であって格子収束の証明ではない",
+    "reading_mechanical": "R28/R26 = 1.411/1.321 = 1.068 (3 µm では 1.045) → |R28/R26 − 1| ≤ 0.10 → 事前登録の読み『衝撃波の背後でも forge と実験の関係 (約 1.3〜1.4 倍) は変わらない』。解釈の確定は上位の諮問後 (AGENTS 条件 7)",
+    "eckert": "試験 28 (T* 627.8 K): 実験/Eckert 0.701 [0.679, 0.740]、forge/Eckert 0.992 [0.968, 1.016] (Python 物性 Pr* 0.691) / 1.048 [1.023, 1.073] (forge 物性 Pr* 0.746、μ* 3.06e-5)。試験 26 (実験/Eckert 0.755、forge/Eckert 0.99/1.06) と同じ構図",
+    "q": "forge q_w: パネル平均 242.9 kW/m²、位置 II 239.7 kW/m² (Tw 300 K)"
    }
   }
  ],
