@@ -1,4 +1,4 @@
-合成 run: /tmp/claude-1000/-home-sano-work-forge/478a8ef8-f433-4b8a-a16b-5ed20aff6356/scratchpad/evtest3  (Pe 720.000000、ドリフト節点 x⁺ 0.05498)
+合成 run: /tmp/claude-1000/-home-sano-work-forge/478a8ef8-f433-4b8a-a16b-5ed20aff6356/scratchpad/evtest4  (Pe 720.000000、ドリフト節点 x⁺ 0.05498)
   ok  正常 (snap)                          判定 PASS      rc 0  (期待 PASS/0) 基準解そのものの合成データ
   ok  正常 (series)                        判定 PASS      rc 0  (期待 PASS/0) 6 スナップショット同一
   ok  q の符号反転                            判定 FAIL      rc 1  (期待 FAIL/1) Nu が負

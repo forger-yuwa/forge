@@ -30,6 +30,8 @@ import h5py
 import numpy as np
 from scipy.integrate import simpson
 
+_trapz = getattr(np, "trapezoid", None) or np.trapz   # numpy 2 は trapz を削除 (AWS で落ちた 2026-09-28)
+
 import graetz_common as gc
 import graetz_ref
 
@@ -56,7 +58,7 @@ def ref_nu_segment(xlo, xhi, xnode):
     # 対数刻みの点列で台形積分 (x⁺ → 0 の q ∝ x^{-1/3} は可積分。区間に 0 を含むなら 1e-9 から)
     g = np.geomspace(max(lo, 1e-9), hi, 400)
     qg = np.interp(np.log(g), np.log(xs), q)
-    qbar = np.trapz(qg, g) / (xhi - xlo)            # 区間全体 (加熱外は 0) の平均
+    qbar = _trapz(qg, g) / (xhi - xlo)            # 区間全体 (加熱外は 0) の平均
     tbn = np.interp(np.log(max(xnode, 1e-9)), np.log(xs), tb)
     return qbar / tbn
 
@@ -290,7 +292,7 @@ def cmd_series(a):
         for p in PTS:
             for key in ("nu", "num", "den"):
                 vals.append(float(np.interp(np.log(p), np.log(xp[m]), d[key][m])))
-        Q = float(np.trapz(d["num"], d["x"]) * gc.R)
+        Q = float(_trapz(d["num"], d["x"]) * gc.R)
         rows.append([st] + vals + [Q])
         pern.append(np.concatenate([[st], d["nu"][Wfix], d["num"][Wfix], d["den"][Wfix]]))
         v0 = []
