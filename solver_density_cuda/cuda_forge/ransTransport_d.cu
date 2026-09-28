@@ -120,6 +120,8 @@ std::array<ScalarTransportDesc, 2> buildScalarDescs(variables& var, const solver
     }};
     d[0].sigma2 = static_cast<flow_float>(1.0);   d[0].F1 = F1;
     d[1].sigma2 = static_cast<flow_float>(0.856); d[1].F1 = F1;
+    d[0].ext_face = farfieldFaceScalar("k");       // 遠方境界 farfield 面の流入値 (無ければ nullptr)
+    d[1].ext_face = farfieldFaceScalar("omega");
     return d;
 }
 

@@ -13,7 +13,8 @@ __global__ void scalar_advection_first_order_d(
     flow_float* ro,
     flow_float* massflux,
     flow_float* res_rho_phi,
-    flow_float* transport_diag)
+    flow_float* transport_diag,
+    const flow_float* ext_face)
 {
     geom_int ih = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -28,7 +29,10 @@ __global__ void scalar_advection_first_order_d(
         // 境界ノード ic0 自身の値 (BC が Dirichlet/壁ではそこへピン、Neumann はゼロ勾配で
         // 境界値=ic0 値) を使い、ghost phi[ic1] への依存を断つ (cell は従来どおり ghost)。
         flow_float phi_ext = phi[ic1];
-        if (isNode != 0 && ic1 >= nCells) phi_ext = phi[ic0];
+        if (isNode != 0 && ic1 >= nCells) {
+            phi_ext = phi[ic0];
+            if (ext_face != nullptr) { const flow_float v = ext_face[ip]; if (isfinite(v)) phi_ext = v; }   // farfield 面
+        }
         const flow_float phi_upwind = (mdot >= 0.0f) ? phi[ic0] : phi_ext;
         const flow_float flux = mdot * phi_upwind;
 
@@ -149,6 +153,7 @@ struct MultiScalarPtrs {
     flow_float  sigmaLam[SCALAR_MULTI_MAX];
     flow_float* F1[SCALAR_MULTI_MAX];
     int         diffusion[SCALAR_MULTI_MAX];
+    const flow_float* ext[SCALAR_MULTI_MAX];   // farfield 面の値 (nullptr 可)
 };
 
 template<int N>
@@ -170,7 +175,8 @@ __global__ void scalar_advection_multi_d(
     #pragma unroll
     for (int s = 0; s < N; ++s) {
         const flow_float p0 = P.phi[s][ic0];
-        const flow_float phi_ext = ext_is_self ? p0 : P.phi[s][ic1];
+        flow_float phi_ext = ext_is_self ? p0 : P.phi[s][ic1];
+        if (ext_is_self && P.ext[s] != nullptr) { const flow_float v = P.ext[s][ip]; if (isfinite(v)) phi_ext = v; }   // farfield 面
         const flow_float flux = mdot * ((mdot >= 0.0f) ? p0 : phi_ext);
         if (in0) { atomicAdd(&P.res[s][ic0], -flux); atomicAdd(&P.diag[s][ic0], d0); }
         if (in1) { atomicAdd(&P.res[s][ic1],  flux); atomicAdd(&P.diag[s][ic1], d1); }
@@ -312,7 +318,8 @@ void scalarTransportResidual_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
         var.c_d["ro"],
         var.p_d["massflux"],
         desc.res_rho_phi,
-        desc.transport_diag);
+        desc.transport_diag,
+        desc.ext_face);
 
     if (cfg.scalarDiffusion == 1 && desc.diffusion == 1) {
         scalar_diffusion_first_order_d<<<dimGrid_normal_halo , cuda_cfg.dimBlock>>>(
@@ -364,6 +371,7 @@ void scalarTransportResidualMulti_d(solverConfig& cfg, cudaConfig& cuda_cfg, mes
         P.phi[s] = descs[s].phi; P.res[s] = descs[s].res_rho_phi; P.diag[s] = descs[s].transport_diag;
         P.sigma[s] = descs[s].sigma; P.sigma2[s] = descs[s].sigma2; P.F1[s] = descs[s].F1; P.sigmaLam[s] = descs[s].sigma_lam;
         P.diffusion[s] = (cfg.scalarDiffusion == 1 && descs[s].diffusion == 1) ? 1 : 0;
+        P.ext[s] = descs[s].ext_face;
         anyDiff = anyDiff || (P.diffusion[s] != 0);
     }
     #define FORGE_SCALAR_ADV_ARGS msh.nCells, msh.nNormal_halo_Planes, isNode, msh.normal_halo_planes_d, msh.map_plane_cells_d, var.c_d["ro"], var.p_d["massflux"], P

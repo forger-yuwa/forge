@@ -108,6 +108,25 @@ struct bcondConfFormat{
 
           }},
 
+          // 遠方境界 (node 専用、plan boundary-node-farfield-characteristic): floats は自由流 (入口と同じキー)。
+          // 流束は convectiveFlux の farfield_flux_d (外側状態 + HLLC) が作り、bvar は自由流のまま保持する。
+          {"farfield", {
+              {"ro"  ,1},
+              {"roUx",0},
+              {"roUy",0},
+              {"roUz",0},
+              {"roe" ,0},
+              {"Ux"  ,1},
+              {"Uy"  ,1},
+              {"Uz"  ,1},
+              {"Tt"  ,0},
+              {"Pt"  ,0},
+              {"Ts"  ,0},
+              {"Ps"  ,1},
+              {"k"   ,1},
+              {"omega",1},
+          }},
+
           {"inlet_fluctVelocity", { 
               {"ro"  ,1},
               {"roUx",0},

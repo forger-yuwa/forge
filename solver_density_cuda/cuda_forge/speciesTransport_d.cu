@@ -631,7 +631,7 @@ void speciesAdvectionFaceY_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
     species_advection_faceY_d<<<dimGrid_nh, cuda_cfg.dimBlock>>>(
         msh.nCells, msh.nNormal_halo_Planes, msh.normal_halo_planes_d, msh.map_plane_cells_d,
         var.c_d["ro"], var.p_d["massflux"], g_nSpecies, g_Yface_dev, g_resroY_dev, g_transdiag_dev,
-        (cfg.discretization == "node") ? 1 : 0, g_roY_dev, g_nSpecies);
+        (cfg.discretization == "node") ? 1 : 0, g_roY_dev, g_nSpecies, farfieldFaceYDevice());
     gpuErrchk( cudaPeekAtLastError() );
 }
 
@@ -873,7 +873,10 @@ void speciesTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
     } else {
         // 化学種の 1 次風上移流を最大 4 種ずつ 1 面ループで融合 (massflux・ρ の読みを共有)。
         std::vector<ScalarTransportDesc> descs;
-        for (int s = 0; s < var.nSpeciesRegistered; s++) descs.push_back(buildSpeciesDesc(var, s));
+        for (int s = 0; s < var.nSpeciesRegistered; s++) {
+            descs.push_back(buildSpeciesDesc(var, s));
+            descs.back().ext_face = farfieldFaceScalar("Y" + std::to_string(s));   // farfield 面の流入組成 (無ければ nullptr)
+        }
         scalarTransportResidualMulti_d(cfg, cuda_cfg, msh, var, descs.data(), (int)descs.size());
     }
 

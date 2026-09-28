@@ -180,3 +180,5 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
 void ledgerBeginAssemble(mesh& msh);
 void ledgerCapture(mesh& msh, variables& var, const char* tag, bool residual);
 void ledgerFlushFaces();
+
+#include "cuda_forge/convection/farfieldFace.hpp"   // 遠方境界 farfield の面の値配列

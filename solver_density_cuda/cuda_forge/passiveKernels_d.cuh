@@ -12,7 +12,8 @@ __global__ void species_advection_faceY_d(
     flow_float* ro, flow_float* massflux, int nSpecies, flow_float* Yface,
     flow_float** res_roY, flow_float** transport_diag,
     int isNode, flow_float** roY,
-    int stride)   // Yface の面ストライド (化学種 = nSpecies; 受動種は部分範囲を Yface+q0, stride=nPassive で呼ぶ)
+    int stride,   // Yface の面ストライド (化学種 = nSpecies; 受動種は部分範囲を Yface+q0, stride=nPassive で呼ぶ)
+    flow_float* const* ffY = nullptr)   // 遠方境界 farfield の面の値 (化学種ごと、farfield 以外は NaN、nullptr = 無し)
 {
     geom_int ih = blockDim.x*blockIdx.x + threadIdx.x;
     if (ih < nNormalHaloPlanes) {
@@ -26,9 +27,13 @@ __global__ void species_advection_faceY_d(
         // 未書込 (stale)。node は ghost を読まない設計なので、境界ノード ic0 自身の組成を面組成に使う。
         const bool nodeBnd = (isNode != 0 && ic1 >= nCells);
         for (int s = 0; s < nSpecies; ++s) {
-            const flow_float Yf = nodeBnd
+            flow_float Yf = nodeBnd
                 ? (roY[s][ic0] / max(ro[ic0], (flow_float)1.0e-30))
                 : Yface[(size_t)ip*stride + s];     // 内部面 upwind は convectiveFlux 側で確定済み
+            if (nodeBnd && ffY != nullptr && mdot < (flow_float)0.0) {   // farfield 面の流入は外側状態の組成
+                const flow_float v = ffY[s][ip];
+                if (isfinite(v)) Yf = v;
+            }
             const flow_float flux = mdot * Yf;
             if (ic0 < nCells) { atomicAdd(&res_roY[s][ic0], -flux); atomicAdd(&transport_diag[s][ic0], d0); }
             if (ic1 < nCells) { atomicAdd(&res_roY[s][ic1],  flux); atomicAdd(&transport_diag[s][ic1], d1); }

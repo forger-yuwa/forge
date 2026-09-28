@@ -1,4 +1,6 @@
 #include <cstdlib>
+#include <limits>
+#include <set>
 #include <cstring>
 #include <algorithm>
 #include <string>
@@ -17,6 +19,7 @@
 
 #include <stdexcept>
 #include "convectiveFlux_slau_d.inc.cuh"
+#include "farfieldFlux_d.inc.cuh"          // 遠方境界 farfield (node、plan boundary-node-farfield-characteristic)
 
 #include "legacy/convectiveFlux_ausm_keep_d.inc.cuh"
 
@@ -36,6 +39,139 @@
 
 
 
+
+// ---- 遠方境界 farfield の面の値配列 (plan boundary-node-farfield-characteristic §4.3) ----
+// 化学種・k・ω の輸送カーネルが、farfield の境界半割面で流入 (質量流束 < 0) のときに運ぶ外側状態の値。
+// 面 (plane) ごとの配列で、farfield 以外の面は NaN (= 使わない。既存の境界はビット不変)。
+namespace {
+struct FfFaceArrays {
+    bool init = false;
+    std::vector<flow_float*> Y;       // 化学種ごと
+    flow_float** Ydev = nullptr;      // デバイス上のポインタ配列 (S3 カーネル用)
+    flow_float* k = nullptr;
+    flow_float* om = nullptr;
+    geom_int nPlanes = 0;
+};
+FfFaceArrays& ffFace() { static FfFaceArrays a; return a; }
+
+void ffFaceAlloc(solverConfig& cfg, mesh& msh)
+{
+    FfFaceArrays& A = ffFace();
+    if (A.init) return;
+    A.init = true;
+    bool any = false;
+    for (auto& bc : msh.bconds) any = any || (bc.bcondKind == "farfield");
+    if (!any) return;
+    // 周期境界と節点を共有する farfield は初版の対象外 (plan §2)。起動時に拒否する
+    {
+        std::vector<char> per((size_t)msh.nCells + 1, 0);
+        for (auto& bc : msh.bconds) if (bc.bcondKind == "periodic") for (auto c : bc.iCells) if (c >= 0 && (size_t)c < per.size()) per[c] = 1;
+        for (auto& bc : msh.bconds) {
+            if (bc.bcondKind != "farfield") continue;
+            for (auto c : bc.iCells) if (c >= 0 && (size_t)c < per.size() && per[c]) {
+                std::cerr << "Error: farfield (physID " << bc.physID << ") の節点 " << c << " が周期境界と共有されている (plan boundary-node-farfield-characteristic §2: 初版は非対応)" << std::endl;
+                std::exit(EXIT_FAILURE);
+            }
+        }
+    }
+    A.nPlanes = msh.nPlanes;
+    std::vector<flow_float> nanv((size_t)msh.nPlanes, std::numeric_limits<flow_float>::quiet_NaN());
+    auto mk = [&]() {
+        flow_float* d = nullptr;
+        CHECK_CUDA_ERROR(cudaMalloc(&d, sizeof(flow_float) * (size_t)msh.nPlanes));
+        CHECK_CUDA_ERROR(cudaMemcpy(d, nanv.data(), sizeof(flow_float) * (size_t)msh.nPlanes, cudaMemcpyHostToDevice));
+        return d;
+    };
+    const int nY = (cfg.thermalMethod == 2 && cfg.nSpecies >= 2) ? cfg.nSpecies : 0;
+    for (int sp = 0; sp < nY; ++sp) A.Y.push_back(mk());
+    if (nY > 0) {
+        CHECK_CUDA_ERROR(cudaMalloc(&A.Ydev, sizeof(flow_float*) * (size_t)nY));
+        CHECK_CUDA_ERROR(cudaMemcpy(A.Ydev, A.Y.data(), sizeof(flow_float*) * (size_t)nY, cudaMemcpyHostToDevice));
+    }
+    if (cfg.LESorRANS == 2 && cfg.RANSmodel == 1) { A.k = mk(); A.om = mk(); }
+    std::cout << "[farfield] 面の値配列を確保 (化学種 " << nY << "、k/ω " << (A.k ? "あり" : "なし") << "、" << msh.nPlanes << " 面)" << std::endl;
+}
+}  // namespace
+
+flow_float* farfieldFaceScalar(const std::string& name)
+{
+    FfFaceArrays& A = ffFace();
+    if (!A.init) return nullptr;
+    if (name == "k") return A.k;
+    if (name == "omega") return A.om;
+    if (name.size() > 1 && name[0] == 'Y') {
+        const int sp = std::atoi(name.c_str() + 1);
+        if (sp >= 0 && sp < (int)A.Y.size()) return A.Y[sp];
+    }
+    return nullptr;
+}
+
+flow_float** farfieldFaceYDevice() { return ffFace().Ydev; }
+
+static void farfieldFlux_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, bcond& bc, mesh& msh, variables& var, int sstEnergyK)
+{
+    ffFaceAlloc(cfg, msh);
+    FfFaceArrays& A = ffFace();
+    const int nY = (cfg.thermalMethod == 2 && cfg.nSpecies >= 2) ? cfg.nSpecies : 0;
+    FfGas gas{cfg.thermalMethod, (double)cfg.gamma, (double)cfg.cp, thermo_species_device_ptr(), cfg.nSpecies};
+    FfInf inf{};
+    auto hv = [&](const char* nm, double dflt) -> double {
+        auto it = bc.bvar.find(nm);
+        return (it != bc.bvar.end() && !it->second.empty()) ? (double)it->second[0] : dflt;
+    };
+    inf.r = hv("ro", 0.0); inf.u[0] = hv("Ux", 0.0); inf.u[1] = hv("Uy", 0.0); inf.u[2] = hv("Uz", 0.0); inf.p = hv("Ps", 0.0);
+    inf.k = hv("k", 0.0); inf.om = hv("omega", 0.0);
+    for (int sp = 0; sp < nY; ++sp) inf.Y[sp] = hv(("Y" + std::to_string(sp)).c_str(), sp == 0 ? 1.0 : 0.0);
+    static bool s_logged = false;
+    if (!s_logged) {
+        s_logged = true;
+        std::cout << "[farfield] physID " << bc.physID << ": 自由流 ρ " << inf.r << ", u (" << inf.u[0] << ", " << inf.u[1] << ", " << inf.u[2]
+                  << "), P " << inf.p << ", k " << inf.k << ", ω " << inf.om << std::endl;
+    }
+    const bool rans = (cfg.LESorRANS == 2 && cfg.RANSmodel == 1);
+    // 診断ダンプ (env FORGE_DUMP_FARFIELD=<path>、既定 off。出力専用): 最初の呼び出しで面ごとの流束・外側状態を書く
+    static std::set<int> s_dumped;   // physID ごとに最初の呼び出しだけ書く
+    float* dumpBuf = nullptr;
+    const char* dumpPath = std::getenv("FORGE_DUMP_FARFIELD");
+    const size_t nb = bc.iPlanes.size();
+    if (dumpPath && *dumpPath && s_dumped.count(bc.physID) == 0 && nb > 0) {
+        CHECK_CUDA_ERROR(cudaMalloc(&dumpBuf, sizeof(float) * nb * FF_DUMP_NF));
+    }
+    farfield_flux_d<<<cuda_cfg.dimGrid_bplane, cuda_cfg.dimBlock>>>(
+        (geom_int)nb, bc.map_bplane_plane_d, bc.map_bplane_cell_d,
+        var.p_d["sx"], var.p_d["sy"], var.p_d["sz"], var.p_d["ss"],
+        var.c_d["ro"], var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["P"],
+        (nY > 0) ? species_roY_device_ptr() : nullptr,
+        rans ? var.c_d["k"] : nullptr, rans ? var.c_d["omega"] : nullptr,
+        gas, inf, (flow_float)cfg.pRef, sstEnergyK,
+        var.c_d["res_ro"], var.c_d["res_roUx"], var.c_d["res_roUy"], var.c_d["res_roUz"], var.c_d["res_roe"],
+        var.p_d["massflux"], A.Ydev, A.k, A.om, dumpBuf);
+    gpuErrchk( cudaPeekAtLastError() );
+    if (dumpBuf != nullptr) {
+        gpuErrchkKernelSync();
+        std::vector<float> h(nb * FF_DUMP_NF);
+        CHECK_CUDA_ERROR(cudaMemcpy(h.data(), dumpBuf, sizeof(float) * h.size(), cudaMemcpyDeviceToHost));
+        CHECK_CUDA_ERROR(cudaFree(dumpBuf));
+        std::ofstream o(std::string(dumpPath) + "." + std::to_string(bc.physID) + ".csv");
+        o << "ip,ic,nx,ny,nz,S,F_ro,F_roUx,F_roUy,F_roUz,F_roe,R_ro,R_Ux,R_Uy,R_Uz,R_P,R_k,R_om,R_Y0,vacuum,hll,pRef,c_i,c_R\n";
+        o.precision(9);
+        for (size_t b = 0; b < nb; ++b) {
+            for (int q = 0; q < FF_DUMP_NF; ++q) o << (q ? "," : "") << (double)h[b * FF_DUMP_NF + q];
+            o << "\n";
+        }
+        std::cout << "[FORGE_DUMP_FARFIELD] physID " << bc.physID << ": " << nb << " 面を書いた" << std::endl;
+    }
+    s_dumped.insert(bc.physID);
+    // 退避・置換の計数 (累積。増えたときだけ表示)
+    static unsigned long long s_hll = 0, s_vac = 0;
+    unsigned long long hll = 0, vac = 0;
+    CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&hll, g_ffHll, sizeof(unsigned long long)));
+    CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&vac, g_ffVac, sizeof(unsigned long long)));
+    if (hll != s_hll || vac != s_vac) {
+        std::cout << "[farfield] 累積: HLL 退避 " << hll << " 面・回、真空/非物理の置換 " << vac << " 面・回 (評価区間では 0 が合格条件)" << std::endl;
+        s_hll = hll; s_vac = vac;
+    }
+}
 
 void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var , matrix& mat_ns)
 {
@@ -355,6 +491,10 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             continue;
         }
         if (skipBoundaryFluxKernel) {
+            continue;
+        }
+        if (bc.bcondKind == "farfield") {   // 遠方境界: 専用の HLLC 流束 (既存の境界流束は通らない)
+            farfieldFlux_d_wrapper(cfg, cuda_cfg, bc, msh, var, sstEnergyK ? 1 : 0);
             continue;
         }
         convectiveFlux_boundary_d<<<cuda_cfg.dimGrid_bplane , cuda_cfg.dimBlock>>> (

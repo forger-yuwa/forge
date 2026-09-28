@@ -28,6 +28,10 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
     const auto isInletKind = [](const std::string& kind) {
         return kind.rfind("inlet_", 0) == 0;
     };
+    // 自由流の状態 (組成 Y/X・k・ω) を floats に持つ種別: 入口と遠方境界 farfield
+    const auto hasFreestreamState = [&](const std::string& kind) {
+        return isInletKind(kind) || kind == "farfield";
+    };
 
     std::string bcondConfigFileName  = "bcondConfig.yaml";
 
@@ -71,7 +75,7 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
             // Y{s} に換算して inputFloats (flow_float) へ入れる。X/Y 混在・負値・非有限・総和 0・未知 index・
             // X 指定時の種欠落・|ΣY−1|>1e-3 はエラー (plans/active/thermophysics-cea-mole-fraction-species.md §4.3)。
             // どちらも無ければ空 (後段で既定補完 Y0=1)。X{s} キーは bvar に流さず消す。
-            if (cfg.nSpecies >= 2 && isInletKind(kind)) {
+            if (cfg.nSpecies >= 2 && hasFreestreamState(kind)) {
                 const ResolvedSpeciesDB* db = speciesDB_current();
                 if (db == nullptr) db = &speciesDB_init(cfg);
                 if (db->size() != cfg.nSpecies) {
@@ -104,7 +108,7 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
             bcf.inputFloats = inputFloats_temp;
             bcf.outputHDFflg = outputHDFflg_temp;
 
-            if (cfg.LESorRANS == 2 && isInletKind(kind)) {
+            if (cfg.LESorRANS == 2 && hasFreestreamState(kind)) {
                 const bool hasK = inputFloats_temp.find("k") != inputFloats_temp.end();
                 const bool hasOmega = inputFloats_temp.find("omega") != inputFloats_temp.end();
                 if (!hasK || !hasOmega) {
@@ -168,7 +172,7 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
         // 与える。inlet_* 種別に対して Y0..Y{n-1} を type-1 (uniform float read) として
         // 動的登録する。既存の単成分入口 config (Y 未指定) を壊さないよう、未指定なら
         // Y0=1, それ以外=0 を既定値とする (= 第 1 化学種のみの単成分入口)。
-        if (cfg.nSpecies >= 2 && isInletKind(bcf.kind)) {
+        if (cfg.nSpecies >= 2 && hasFreestreamState(bcf.kind)) {
             for (int s = 0; s < cfg.nSpecies; s++) {
                 const std::string yname = "Y" + std::to_string(s);
                 bc.valueTypes[yname] = 1;             // uniform float read
@@ -194,11 +198,28 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
         bc.bcondInitVariables(cfg.gpu); // allocate and set boundary variables
     }
 
+    // 遠方境界 farfield の対応範囲 (plan boundary-node-farfield-characteristic §2)。外は起動時に拒否する。
+    for (const bcond& bc : bconds) {
+        if (bc.bcondKind != "farfield") continue;
+        std::string why;
+        if (cfg.discretization != "node") why = "mesh.discretization: node のみ対応";
+        else if (!(cfg.solver == "SLAU" || cfg.solver == "SLAU2")) why = "solver は SLAU / SLAU2 のみ対応";
+        else if (cfg.condensation != 0) why = "凝縮 (physProp.condensation) とは併用できない";
+        else if (cfg.tracerEnabled()) why = "トレーサ (physProp.tracer) とは併用できない";
+        else if (cfg.transitionEnabled()) why = "遷移モデルとは併用できない";
+        else if (cfg.isAxisymmetric != 0) why = "軸対称とは併用できない";
+        if (!why.empty()) {
+            cerr << "Error: boundary '" << bc.physName << "' (physID " << bc.physID << ", kind farfield): " << why
+                 << " (plan boundary-node-farfield-characteristic §2)" << endl;
+            exit(EXIT_FAILURE);
+        }
+    }
+
     // 起動ログ: 入口組成 (Y と、MW から戻した X) とトレーサ入口値。多成分でなければ出さない。
     if (cfg.nSpecies >= 2 || cfg.tracerEnabled()) {
         const ResolvedSpeciesDB* db = speciesDB_current();
         for (const bcond& bc : bconds) {
-            if (!isInletKind(bc.bcondKind)) continue;
+            if (!hasFreestreamState(bc.bcondKind)) continue;
             if (cfg.nSpecies >= 2 && db != nullptr && db->size() == cfg.nSpecies) {
                 std::vector<double> Y(cfg.nSpecies), MW(cfg.nSpecies);
                 for (int s = 0; s < cfg.nSpecies; ++s) {
@@ -466,6 +487,7 @@ void applyBconds(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variable
             else if (bc.bcondKind == "inlet_Pressure_dir") { inlet_Pressure_dir_d_wrapper(cfg , cuda_cfg , bc , msh , var , mat_p); }
             else if (bc.bcondKind == "outflow") { outflow_d_wrapper(cfg , cuda_cfg , bc , msh , var , mat_p); }
             else if (bc.bcondKind == "periodic") { periodic_d_wrapper(cfg , cuda_cfg , bc , msh , var , mat_p); }
+            else if (bc.bcondKind == "farfield") { /* 流束は convectiveFlux の farfield_flux_d が作る。bvar は自由流のまま (node はゴーストを読まない) */ }
         }
         gpuErrchk( cudaPeekAtLastError() );
         gpuErrchkKernelSync();
