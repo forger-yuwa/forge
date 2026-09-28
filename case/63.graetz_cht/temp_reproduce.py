@@ -211,6 +211,15 @@ def run_ab(run: Path, last: int):
     print(f"  B 再現 (分布・幅とも ≤ {TOL} K): {okB}   A 再現: {okA}")
     print(f"  角の壁温段差 {L[12]:.4f} K → 合成試験の比 0.048 K/K から角の効果の見積もり ≈ {0.048*L[12]:.1e} K")
     print(f"  参考: 末尾 {len(R)} 枚で B の最大差の変動 {np.ptp(R[:,5]):.2e} K、保存場の幅の変動 {np.ptp(R[:,1]):.2e} K")
+    # 前提 (result レビュー M2・M3、2026-09-29): 登録の枚数 (--last) がそろい、x=0 の後処理不確かさが上限以下のときだけ仮説判定する
+    uncx0 = 2.84e-3      # temp_reproduce_x0_uncertainty.py: N_r=32 の x=0 内部節点 (壁の隣) の |T_32 − T_128|
+    if len(R) < last:
+        print(f"VERDICT: 判定不能 (スナップショット {len(R)} 枚 < 登録 {last} 枚)   系列 → {out}")
+        return 2
+    if uncx0 > UNC:
+        print(f"VERDICT: 判定不能 (x=0 の後処理不確かさ {uncx0:.2e} K > 上限 {UNC:.2e} K)。参考: A/B の幅の差 "
+              f"{abs(L[3]-L[2]):.3f} K は不確かさの {abs(L[3]-L[2])/uncx0:.0f} 倍   系列 → {out}")
+        return 2
     if okB and not okA:
         v = "第 1 仮説を支持 (A で再現せず B で再現)"
     elif not okB:
