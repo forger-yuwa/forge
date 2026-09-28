@@ -277,14 +277,14 @@ def cmd_series(a):
     common = sorted(set(hr.steps()) & set(cr.steps()))
     if len(common) < 4:
         refuse(f"共通スナップショットが {len(common)} 個しかない")
-    rows, rows0, pern = [], [], []
-    Wfix = None
+    rows, rows0, pern, pern0 = [], [], [], []
+    # 窓内の節点集合は**最終スナップショット (判定に使う状態) の Pe** で固定し、全時刻で同じ節点を追う。
+    # 初版は最初のスナップショットの Pe で決めていて、snap と節点数が食い違った (2026-09-28 codex diagnose)
+    dlast = nu_profile(hr, cr, common[-1])
+    Wfix = (dlast["xp"] >= a.win_lo) & (dlast["xp"] <= a.win_hi)
     for st in common:
         d = nu_profile(hr, cr, st)
         xp = d["xp"]
-        W = (xp >= a.win_lo) & (xp <= a.win_hi)
-        if Wfix is None:
-            Wfix = W.copy()                               # 窓内の節点集合は最初のスナップショットで固定 (以後同じ節点を追う)
         if (~d["ok"][Wfix]).any():
             refuse(f"step {st}: 窓内に iface_ok = 0 の節点")
         m = xp > 0
@@ -300,6 +300,7 @@ def cmd_series(a):
             v0.append(float(np.interp(np.log(p), np.log(xp[m]), d["q0"][m])))
             v0.append(float(np.interp(np.log(p), np.log(xp[m]), (d["tw0"] - d["tb0"])[m])))
         rows0.append([st] + v0)
+        pern0.append(np.concatenate([[st], d["q0"][Wfix], (d["tw0"] - d["tb0"])[Wfix]]))
     cols = ["step"] + [f"{k}_{p:g}" for p in PTS for k in ("nu", "num", "den")] + ["Qnet"]
     out = Path(a.heated) / "graetz_series.csv"
     np.savetxt(out, np.array(rows), delimiter=",", comments="", header=",".join(cols),
@@ -312,6 +313,11 @@ def cmd_series(a):
     nW = int(Wfix.sum())
     colsN = ["step"] + [f"nu_n{i}" for i in range(nW)] + [f"num_n{i}" for i in range(nW)] + [f"den_n{i}" for i in range(nW)]
     P = np.array(pern)
+    # 対照 run の全節点 (q0・Tw0−Tb0。plan §6 V-g0: 対照も全節点で準定常)
+    cols0N = ["step"] + [f"q0_n{i}" for i in range(int(Wfix.sum()))] + [f"dTwb0_n{i}" for i in range(int(Wfix.sum()))]
+    out0N = Path(a.control) / "graetz_control_series_nodes.csv"
+    np.savetxt(out0N, np.array(pern0), delimiter=",", comments="", header=",".join(cols0N),
+               fmt=["%d"] + ["%.12e"] * (len(cols0N) - 1))
     outN = Path(a.heated) / "graetz_series_nodes.csv"
     np.savetxt(outN, P, delimiter=",", comments="", header=",".join(colsN), fmt=["%d"] + ["%.12e"] * (len(colsN) - 1))
     # 末尾半分 (スナップショット数) の各節点の Nu の (max−min)/|mean|
@@ -324,6 +330,7 @@ def cmd_series(a):
     print(f"準定常 (加熱・4 点): {tool} --series-csv {out} --series-cols {','.join(cols[1:])} --tail 0.5 --drift 0.001 --osc 0.001")
     print(f"準定常 (加熱・全節点): {tool} --series-csv {outN} --series-cols {','.join(colsN[1:])} --tail 0.5 --drift 0.001 --osc 0.001")
     print(f"準定常 (対照): {tool} --series-csv {out0} --series-cols {','.join(cols0[1:])} --tail 0.5 --drift 0.001 --osc 0.001")
+    print(f"準定常 (対照・全節点): {tool} --series-csv {out0N} --series-cols {','.join(cols0N[1:])} --tail 0.5 --drift 0.001 --osc 0.001")
     # 反復の不確かさ u_it (plan §4.6): 単調な節点は check_quasisteady と同じ漸近値推定の |最終/漸近 − 1|、
     # 単調でない節点は末尾変動。末尾変動 (ゲート) とは別の量 (単調な残存過渡は末尾変動が小さくても漸近値から離れうる)
     steps_arr = P[:, 0]
