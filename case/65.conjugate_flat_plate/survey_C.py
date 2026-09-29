@@ -23,7 +23,7 @@ k_f, cp, rho, mu = 5.700284e-2, 1004.5, 1.176829, 4.085818e-5     # case/63 と�
 U = 0.1 * 347.1887                                                 # M 0.1
 nu = mu / rho
 
-def run(bL, ks_ratio, ReL=1e4, h_back=1e8, Th=1.0, nx_scale=1.0, ny_f=48, ny_s=16):
+def run(bL, ks_ratio, ReL=1e4, h_back=1e8, Th=1.0, nx_scale=1.0, ny_f=48, ny_s=16, solid_axial=1.0):
     L = ReL * nu / U; b = bL * L; k_s = ks_ratio * k_f
     dx0 = 0.004 * L / nx_scale
     xs = np.concatenate([cr.graded(-0.5 * L, 0.0, int(30 * nx_scale), dx0, toward_a=False),
@@ -49,7 +49,7 @@ def run(bL, ks_ratio, ReL=1e4, h_back=1e8, Th=1.0, nx_scale=1.0, ny_f=48, ny_s=1
             f, fp, _ = BL.sol(eta)
             u[i, j] = U * fp; v[i, j] = 0.5 * np.sqrt(nu * U / x) * (eta * fp - f)
     rob = lambda xm, y: (h_back, Th) if (0 <= xm <= L and abs(y + b) < 1e-15) else None
-    P = cr.Problem(xs, ys, mat, k_f, k_s, cp, False, 0.0, ro=np.full((nx, ny), rho), u=u, v=v, robin=rob)
+    P = cr.Problem(xs, ys, mat, k_f, k_s, cp, False, 0.0, ro=np.full((nx, ny), rho), u=u, v=v, robin=rob, solid_axial=solid_axial)
     T = P.solve()
     plate = (xs >= 0) & (xs <= L)
     dTs = T[plate, 0] - T[plate, js]                                # 裏面 − 界面
@@ -61,7 +61,7 @@ def run(bL, ks_ratio, ReL=1e4, h_back=1e8, Th=1.0, nx_scale=1.0, ny_f=48, ny_s=1
     Qtot = P.robin_heat()
     win = (xs >= 0.2 * L) & (xs <= 0.9 * L)
     return dict(L=L, b=b, k_s=k_s, Ti_win=(T[win, js].min(), T[win, js].max()), dTs_win=(dTs[(xs[plate] >= 0.2 * L) & (xs[plate] <= 0.9 * L)].min(), dTs.max()),
-                Qax_max=np.abs(Qax_p).max() / Qtot, Qtot=Qtot)
+                Qax_max=np.abs(Qax_p).max() / Qtot, Qtot=Qtot, xs=xs, Ti=T[:, js], qwin=win)
 
 if __name__ == "__main__":
     print(f"Blasius f''(0) = {fpp0:.6f} (文献 0.332057)")

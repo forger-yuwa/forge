@@ -31,7 +31,8 @@ FLUID, SOLID, VOID = 0, 1, 2
 
 class Problem:
     def __init__(self, xs, ys, mat, k_f, k_s, cp, axisym, T_in, ro=None, u=None, v=None, source=None,
-                 robin=None, wall_dirichlet=None, j_wall=None, top_dirichlet=None):
+                 robin=None, wall_dirichlet=None, j_wall=None, top_dirichlet=None, source_solid=None,
+                 solid_axial=1.0, exact_boundary=None):
         self.xs, self.ys = np.asarray(xs, float), np.asarray(ys, float)
         self.nx, self.ny = len(xs), len(ys)
         self.mat = np.asarray(mat)                          # (nx-1, ny-1)
@@ -43,6 +44,9 @@ class Problem:
         self.S = z if source is None else source
         self.robin, self.wall_dirichlet, self.j_wall = robin, wall_dirichlet, j_wall
         self.top_dirichlet = top_dirichlet
+        self.Ss = z if source_solid is None else source_solid       # 固体の体積源 (製造解の試験用)
+        self.solid_axial = solid_axial                              # 固体の x 方向伝導の倍率 (0 で軸方向伝導なし: 診断用)
+        self.exact_boundary = exact_boundary                        # f(x, y): 外周の全節点を Dirichlet (製造解の試験用)
 
     def kcell(self, i, j):
         if i < 0 or j < 0 or i >= self.nx - 1 or j >= self.ny - 1:
@@ -81,6 +85,8 @@ class Problem:
                 if not active[i, j]:
                     add(p, p, 1.0); b[p] = self.T_in; continue
                 # 入口: 流体だけに囲まれた節点は Dirichlet
+                if self.exact_boundary is not None and (i in (0, nx - 1) or j == ny - 1 or (j == 0 and not self.axisym)):
+                    add(p, p, 1.0); b[p] = self.exact_boundary(xs[i], ys[j]); continue
                 if i == 0 and fluidnode[i, j] and all(
                         self.kcell(i + di, j + dj) in (None, self.k_f) and
                         (self.kcell(i + di, j + dj) is None or self.mat[i + di, j + dj] == FLUID)
@@ -108,6 +114,8 @@ class Problem:
                             if k is None:
                                 continue
                             y0, y1 = (0.5 * (ys[j - 1] + ys[j]), ys[j]) if cj == j - 1 else (ys[j], 0.5 * (ys[j] + ys[j + 1]))
+                            if self.mat[ci, cj] == SOLID:
+                                k = k * self.solid_axial
                             G += k * abs(y1 - y0) * self.rw(0.5 * (y0 + y1)) / dx
                     else:                                        # y 方向の辺
                         cj = min(j, jj); dy = abs(ys[jj] - ys[j]); ymid = 0.5 * (ys[j] + ys[jj])
@@ -133,22 +141,24 @@ class Problem:
                     # 対流 (保存形 + 発散補正): Σ_面 c_p m_f (T_f − T_p)。m_f は双対セルの面を通る質量流束 (流体部分)、
                     # T_f は x 面が 2 次風上 (直線外挿)、y 面が中心。発散 0 の流れでは Σ c_p m_f T_f と同値で、熱収支が離散的に閉じる。
                     cp = self.cp
-                    def hfluid(ci_list):
-                        hs = 0.0
+                    def afluid(ci_list):
+                        """x 面の流体部分の面積 ∫ r dr (軸対称) / 高さ (平面)。軸の双対セルでも有限 (Δr²/8)。
+                        初版は高さ × r(y_j) で、軸上 (r=0) の軸方向対流が消えていた (2026-09-29 codex plan レビュー M1)。"""
+                        As = 0.0
                         for cj in (j - 1, j):
                             if 0 <= cj < ny - 1 and any(0 <= ci < nx - 1 and self.mat[ci, cj] == FLUID for ci in ci_list):
                                 y0, y1 = (0.5 * (ys[j - 1] + ys[j]), ys[j]) if cj == j - 1 else (ys[j], 0.5 * (ys[j] + ys[j + 1]))
-                                hs += abs(y1 - y0)
-                        return hs
+                                As += abs(y1 - y0) * self.rw(0.5 * (y0 + y1))
+                        return As
                     for side in (1, -1):                               # x 面 (i+1/2 と i−1/2)
                         ii = i + side
                         if not (0 <= ii < nx):
                             continue
                         ci = min(i, ii)
-                        H = hfluid([ci])
-                        if H == 0.0:
+                        Af = afluid([ci])
+                        if Af == 0.0:
                             continue
-                        m = 0.5 * (self.ro[i, j] * self.u[i, j] + self.ro[ii, j] * self.u[ii, j]) * H * self.rw(ys[j]) * side
+                        m = 0.5 * (self.ro[i, j] * self.u[i, j] + self.ro[ii, j] * self.u[ii, j]) * Af * side
                         if m == 0.0:
                             continue
                         xf = 0.5 * (xs[i] + xs[ii])
@@ -178,6 +188,16 @@ class Problem:
                         a[idx(i, jj)] = a.get(idx(i, jj), 0.0) + 0.5 * cp * m
                         a[p] = a.get(p, 0.0) + 0.5 * cp * m - cp * m
                     b[p] += self.S[i, j] * Vf
+                Vs = 0.0
+                for di in (-1, 0):
+                    for dj in (-1, 0):
+                        ci, cj = i + di, j + dj
+                        if 0 <= ci < nx - 1 and 0 <= cj < ny - 1 and self.mat[ci, cj] == SOLID:
+                            xa, xb = (0.5 * (xs[i - 1] + xs[i]), xs[i]) if di == -1 else (xs[i], 0.5 * (xs[i] + xs[i + 1]))
+                            ya, yb = (0.5 * (ys[j - 1] + ys[j]), ys[j]) if dj == -1 else (ys[j], 0.5 * (ys[j] + ys[j + 1]))
+                            Vs += abs(xb - xa) * abs(yb - ya) * self.rw(0.5 * (ya + yb))
+                if Vs > 0:
+                    b[p] += self.Ss[i, j] * Vs
                 # Robin: 外周の辺 (空セルか領域外に面する辺) の固体側
                 if self.robin is not None:
                     for dj in (1, -1):                          # 上下の外周 (y 方向の境界)
@@ -306,8 +326,45 @@ def selftest():
     e3 = np.abs(T[heat, 40] - 1.0).max()
     print(f"(iii) k_s→大: 加熱区間の界面温度と T_c の差 max = {e3:.2e} (許容 1e-3)  {'ok' if e3 < 1e-3 else 'NG'}")
     ok &= e3 < 1e-3
+    ok &= mms(True) & mms(False)
     print("VERDICT:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
+
+
+def mms(axisym):
+    """製造解 (2 材料・有限の固体抵抗・v ≠ 0・体積源あり・軸を含む)。誤差が格子の倍増で約 1/4 (2 次) に減ること。
+    流体 0 ≤ y ≤ 1、固体 1 ≤ y ≤ 1.5、x ∈ [0, 1]。T = F(x) g(y)、F = 1 + x − x²/2、
+    g_f = 1 + a y² (軸で対称)、g_s = g_f(1) + (k_f/k_s) g_f'(1) (y − 1) (界面で温度・熱流束が連続)。
+    u = 1 − y²、v = 0.3 y (1 − y) (流体)、ρ = c_p = 1、k_f 0.1、k_s 0.5。境界 (x 両端・上端、平面では下端も) は厳密解の Dirichlet。"""
+    kf, ks, a = 0.1, 0.5, 0.8
+    F = lambda x: 1 + x - x * x / 2; Fx = lambda x: 1 - x; Fxx = -1.0
+    gf = lambda y: 1 + a * y * y; gfy = lambda y: 2 * a * y
+    gs = lambda y: gf(1.0) + (kf / ks) * gfy(1.0) * (y - 1.0)
+    def Tex(x, y): return F(x) * (gf(y) if y <= 1.0 + 1e-14 else gs(y))
+    errs = []
+    for n in (8, 16, 32):
+        xs = np.linspace(0, 1, 2 * n + 1)
+        ys = np.concatenate([np.linspace(0, 1, n + 1), np.linspace(1, 1.5, n // 2 + 1)[1:]])
+        mat = np.full((len(xs) - 1, len(ys) - 1), FLUID); mat[:, n:] = SOLID
+        X, Y = np.meshgrid(xs, ys, indexing="ij")
+        fl = Y <= 1.0 + 1e-14
+        u = np.where(fl, 1 - Y ** 2, 0.0); v = np.where(fl, 0.3 * Y * (1 - Y), 0.0)
+        rw = Y if axisym else np.ones_like(Y)
+        # 流体の源: u T_x + v T_y − k_f ∇²T  (軸対称 ∇² = T_xx + T_yy + T_y / y、y→0 は 2 T_yy)
+        Tf_x = Fx(X) * gf(Y); Tf_y = F(X) * gfy(Y); lap_f = Fxx * gf(Y) + F(X) * 2 * a + (F(X) * 2 * a if axisym else 0.0)
+        Sf = u * Tf_x + v * Tf_y - kf * lap_f
+        gsyy = 0.0; gsy = (kf / ks) * gfy(1.0)
+        lap_s = Fxx * np.vectorize(gs)(Y) + F(X) * gsyy + (F(X) * gsy / np.where(Y > 0, Y, 1.0) if axisym else 0.0)
+        Ss = -ks * lap_s
+        P = Problem(xs, ys, mat, kf, ks, 1.0, axisym, 0.0, ro=np.ones_like(X), u=u, v=v, source=np.where(fl, Sf, 0.0),
+                    source_solid=np.where(Y >= 1.0 - 1e-14, Ss, 0.0), exact_boundary=Tex)   # 界面の行にも固体側の源を与える (双対セルの固体半分)
+        T = P.solve()
+        E = np.abs(T - np.vectorize(Tex)(X, Y)).max()
+        errs.append(E)
+    r1, r2 = errs[0] / errs[1], errs[1] / errs[2]
+    good = r2 > 3.0
+    print(f"(mms {'軸対称' if axisym else '平面'}) 2 材料・v≠0・源あり: max 誤差 {errs[0]:.2e} / {errs[1]:.2e} / {errs[2]:.2e}、比 {r1:.2f} / {r2:.2f} (最後の比 > 3 で 2 次)  {'ok' if good else 'NG'}")
+    return good
 
 
 if __name__ == "__main__":
