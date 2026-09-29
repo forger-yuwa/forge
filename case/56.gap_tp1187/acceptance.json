@@ -581,7 +581,7 @@
   {
    "date": "2026-09-29",
    "id": "T4-3D-CFL",
-   "status": "pre_registered",
+   "status": "outcome_recorded",
    "why": "codex diagnose 2026-09-29-tp1187-radius-ab-result の (d): 半径の定量判定の前に、有限 cfl_pseudo による反復誤差への感度を切り分ける",
    "ab": {
     "common": "run_0070_L15_v3_r25_ext の最終場 (丸み付き L15) から restart_field (extend_run.py) で 2 本。メッシュ・バイナリ・BC・SST・観測演算・implicitRelax 1.0・nStepInner 4 を固定",
@@ -595,7 +595,34 @@
     "undetermined": "5〜10 % の差、または整定しない → 判別不能",
     "note": "両腕で振動が残っても自励振動の確認とはしない"
    },
-   "not_now": "配列全体への拡張・すきま幅・SST の変更はこの結果を見るまでしない"
+   "not_now": "配列全体への拡張・すきま幅・SST の変更はこの結果を見るまでしない",
+   "outcome": {
+    "date": "2026-09-29",
+    "runs": "case/56.gap_tp1187/run_0071_L15_r25_cfl15 (cfl 1.5、10k) / run_0072_L15_r25_cfl05 (cfl 0.5、30k)、どちらも run_0070 の最終場からビット一致",
+    "gates": "両腕 check_convergence NOT CONVERGED (stalled/plateau、この run の区間)。TC90–95 の観測系列は両腕 STEADY (drift ≤ 0.2 %/tail)。全列では NOT ALL STEADY (深部 TC87–89 等)",
+    "q_hat_step_kW": {
+     "cfl15": [
+      22.26,
+      45.49,
+      74.87,
+      92.05,
+      99.15,
+      94.17
+     ],
+     "cfl05": [
+      22.29,
+      45.55,
+      74.96,
+      92.16,
+      99.26,
+      94.27
+     ],
+     "max_rel_diff": "0.2 %"
+    },
+    "supply": "P1 流入 H 35.46 / 35.49 W、P2 流入 H 19.53 / 19.57 W (n 80、--wall-r 2.5e-3)。差 ≤ 0.2 %",
+    "reading": "reject — 両腕が整定し TC90–95 の q̂ が全点 5 % 以内 (0.1〜0.2 %) → 現在の CFL が比較値に大きな誤差を残す仮説を退ける。次の候補 (口・円弧付近の壁解像と空間離散化誤差) が残る",
+    "note": "run_0070 の TC90 の未整定 (+2.8 %) は延長で 21.7 → 22.3 kW/m² に整定。T4-3D-RADIUS の B/A は TC90 で 2.2 のまま"
+   }
   }
  ]
 }
