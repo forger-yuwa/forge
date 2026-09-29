@@ -1,0 +1,236 @@
+import base64, pathlib
+D = pathlib.Path(__file__).parent
+def img(name):
+    return "data:image/png;base64," + base64.b64encode((D / name).read_bytes()).decode()
+def fig(n, name, cap, alt):
+    return f'''<figure id="fig{n}"><button class="zoom" type="button" data-src="{img(name)}" aria-label="Figure {n} を原寸で開く"><img src="{img(name)}" alt="{alt}"></button>
+<figcaption><b>Figure {n}.</b> {cap}</figcaption></figure>'''
+P = "case/63.graetz_cht"
+def chip(s):
+    cls = {"PASS": "ok", "FAIL": "ng", "判定不能": "und", "保留解消 → PASS": "ok", "報告": "info"}.get(s, "info")
+    return f'<span class="chip {cls}">{s}</span>'
+
+gates = [
+ ("メッシュ品質", "mesh/graetz_r16/32/64.h5", "使用メッシュ全体", "check_mesh_quality.py mesh/graetz_rN.h5 (AR ≤ 1000, skew ≤ 0.9、緩和なし)", "PASS ×3 (AR 最大 32.0、skew 0.000)", "PASS", "品質は判定を制約しない"),
+ ("流体の収束", "run_0011〜run_0024 (14 本)", "各 run の単一区間 (0〜600000)。N_r 64 延長は延長区間", "check_convergence.py &lt;run&gt;", "14 本とも PASS (converged)、全列 3.8〜13.7 桁低下", "PASS", "手元で gz 残差から再実行して一致 (2026-09-29)"),
+ ("準定常 (加熱 4 点・加熱全節点・対照全節点)", "N_r 16/32 の 6 対、N_r 64 延長 1 対", "末尾半分 25 枚 (N_r 64 は延長区間)", "check_quasisteady.py --series-csv … --tail 0.5 --drift 0.001 --osc 0.001", "ALL STEADY (全系列)。延長前の N_r 64 は NOT ALL STEADY", "PASS", "中間場を削除済みのため系列の再抽出は不可 (保存記録に依存)"),
+ ("末尾変動 / 反復の不確かさ u_it", "同上", "末尾半分", "eval_graetz.py series (許容 3e-4)", "u_it ≤ 1.8e-5 (N_r 16/32)、8.2e-8 (N_r 64 延長)", "PASS", "比較 (V-g3/g4/g5・固体層) の前提を満たす"),
+ ("G-if (界面の収束)", "共役 11 本", "全更新、連続 80 回", "check_cht_interface.py --eps-abs 1.0 --eps-rel 1e-3 --dt-k 1e-3 --tol-solid 1e-9 --n-consec 80", "PASS ×11 (run_0016 で ① 1.3e-6 W/m²・③ 2.0e-12 K)", "PASS", "界面ログ削除済みのため節点別の独立再検証は不可"),
+ ("G-cons (固体収支)", "共役 11 本", "最終スナップショット", "check_cht_balance.py --q-floor 0.084 --tol-rel 1e-3 --tol-abs 8.4e-5", "PASS ×11 (run_0016 で 9.8e-10 W/rad)", "PASS", "—"),
+ ("V-g1 ① 圧力勾配 vs 8μŪ/R²", "ΔT 10 の加熱 run", "加熱区間 [0.25, 0.75] L、軸上の回帰", "eval_graetz.py snap (許容 2 %)", "2.25 % (ΔT 0 / 5 / 10 で 0.68 / 1.47 / 2.25 %)", "FAIL", "例外閉鎖の対象。原因は運動量収支で説明 (Figure 6)"),
+ ("V-g1 ② 対照 x=0 断面の温度幅", "対照 run (ΔT 0)", "最終スナップショット", "eval_graetz.py snap (許容 0.05 K)", "0.138 K (入口面は 0.008 K)", "FAIL", "例外閉鎖の対象。原因診断は判定不能 (Figure 7)"),
+ ("V-g2 主判定", "N_r 32 (run_0016 − run_0014)", "窓 x⁺ 3e-3〜0.1", "eval_graetz.py snap (窓 2 %、[0.03, 0.1] 1 %)", "0.773 % / 0.773 %", "PASS", "数値閾値の通過。V-g1 FAIL のため検証全体の合格ではない"),
+ ("V-g3 格子間差", "N_r 16/32/64 延長", "4 観測点と共通 78 節点", "compare_nu.py grid", "|e16−e32| > |e32−e64| を全点で満たし、最小差 6.7e-5 > u_it", "保留解消 → PASS", "観測次数は参考 (漸近域の確認ではない)"),
+ ("V-g4 共役 vs 等温壁", "run_0016 vs run_0013", "窓", "compare_nu.py pair --tol 0.003", "0.030 %", "PASS", "有限壁抵抗の物理差を含む差。連成の誤差ではない"),
+ ("V-g5 ΔT 5 vs 10", "run_0015 vs run_0016", "窓", "compare_nu.py pair --tol 0.005", "0.141 %", "PASS", "温度振幅への感度。振幅に共通する有限 M の偏差は制限しない"),
+ ("固体 16 層 vs 8 層", "run_0018 vs run_0016", "窓", "compare_nu.py pair --tol 0.0005", "2.9e-7", "PASS", "—"),
+ ("運動量収支の診断 (#6c)", "run_0014/15/16", "区間 x 43〜130 mm", "momentum_balance.py (不一致 ≤ 0.1 %、抽出不確かさ ≤ 1/3)", "不一致 4.7〜4.9e-5、抽出 ≤ 3.4e-6", "PASS", "登録の判定文で「参照式の欠落項」を支持"),
+ ("温度再現の診断 (#6g)", "run_0014", "最終 1 枚 (登録は 25 枚)", "temp_reproduce.py run (分布・幅 ≤ 0.005 K、不確かさ ≤ 1.67e-3 K)", "B の分布差 0.0014 K。x=0 の不確かさ 2.84e-3 K > 上限", "判定不能", "原因は確定しない。旧出力の「支持」は撤回"),
+ ("評価器の負例試験", "test_eval_graetz.py", "合成データ 10 ケース", "python3 test_eval_graetz.py", "10/10 (符号反転・原点取り違え・Pe 2 倍・節点欠損 ほか)", "PASS", "—"),
+ ("基準解の自己検査", "graetz_ref.py", "—", "graetz_ref.py --selftest", "Nu∞ 誤差 1.2e-5、固有値は文献と 2e-7", "PASS", "空間離散化は文献固有値で独立に確認"),
+]
+grows = "\n".join(f"<tr><td>{a}</td><td><code>{b}</code></td><td>{c}</td><td><code>{d}</code></td><td>{e}</td><td>{chip(f)}</td><td>{g}</td></tr>" for a,b,c,d,e,f,g in gates)
+
+html = f'''<title>軸対称 CHT Graetz 検証</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* 技術報告: 1 段組・左寄せの読み物。熱の赤銅をアクセント、青みの灰を中立色に */
+:root {{
+  --bg: #f7f8f9; --panel: #ffffff; --fg: #1d2329; --muted: #5a6570; --rule: #d9dee3;
+  --accent: #a8432a; --ok: #1f7a4a; --ng: #b3261e; --und: #8a5a00; --info: #3b5b7a;
+  --ok-bg: #e3f2e9; --ng-bg: #fbe4e2; --und-bg: #fbf0d9; --info-bg: #e5edf5;
+  --body: "IBM Plex Sans JP", "Noto Sans JP", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
+}}
+@media (prefers-color-scheme: dark) {{ :root:not([data-theme="light"]) {{
+  --bg: #14181c; --panel: #1b2025; --fg: #e3e7ea; --muted: #9aa5ae; --rule: #2f363d;
+  --accent: #e08466; --ok: #6fcf97; --ng: #f28b82; --und: #f2c46d; --info: #9cc3e6;
+  --ok-bg: #16311f; --ng-bg: #3a1c1a; --und-bg: #362a12; --info-bg: #182a3a; color-scheme: dark; }} }}
+:root[data-theme="dark"] {{
+  --bg: #14181c; --panel: #1b2025; --fg: #e3e7ea; --muted: #9aa5ae; --rule: #2f363d;
+  --accent: #e08466; --ok: #6fcf97; --ng: #f28b82; --und: #f2c46d; --info: #9cc3e6;
+  --ok-bg: #16311f; --ng-bg: #3a1c1a; --und-bg: #362a12; --info-bg: #182a3a; color-scheme: dark; }}
+body {{ background: var(--bg); color: var(--fg); font: 15px/1.75 var(--body); }}
+.wrap {{ max-width: 980px; margin: 0 auto; padding-inline: 20px; padding-block: 32px 64px; display: grid; gap: 28px; }}
+header {{ display: grid; gap: 6px; border-bottom: 2px solid var(--accent); padding-bottom: 16px; }}
+.eyebrow {{ font: 500 12px var(--mono); letter-spacing: .06em; color: var(--muted); text-transform: uppercase; }}
+h1 {{ font-size: 28px; line-height: 1.3; margin: 0; text-wrap: balance; }}
+h2 {{ font-size: 20px; margin: 0 0 8px; text-wrap: balance; border-left: 4px solid var(--accent); padding-left: 10px; }}
+h3 {{ font-size: 16px; margin: 18px 0 6px; }}
+p {{ margin: 0 0 10px; max-width: 70ch; }}
+.meta {{ font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 18px; }}
+.lead {{ background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 16px 18px; }}
+section {{ display: grid; gap: 10px; min-width: 0; }}
+code {{ font: 12.5px var(--mono); overflow-wrap: anywhere; }}
+.tbl {{ overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); }}
+table {{ border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }}
+th, td {{ text-align: left; vertical-align: top; padding: 7px 10px; border-bottom: 1px solid var(--rule); }}
+th {{ font-weight: 600; color: var(--muted); background: var(--bg); white-space: nowrap; }}
+tr:last-child td {{ border-bottom: 0; }}
+.chip {{ display: inline-block; font: 600 11.5px var(--mono); padding: 1px 8px; border-radius: 999px; white-space: nowrap; }}
+.ok {{ color: var(--ok); background: var(--ok-bg); }} .ng {{ color: var(--ng); background: var(--ng-bg); }}
+.und {{ color: var(--und); background: var(--und-bg); }} .info {{ color: var(--info); background: var(--info-bg); }}
+.eq {{ font: 500 15px var(--mono); background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 8px 14px; overflow-x: auto; max-width: 100%; }}
+figure {{ margin: 6px 0; display: grid; gap: 6px; }}
+.zoom {{ padding: 8px; border: 1px solid var(--rule); border-radius: 6px; background: #fff; cursor: zoom-in; }}
+.zoom:focus-visible {{ outline: 2px solid var(--accent); outline-offset: 2px; }}
+.zoom img {{ display: block; width: 100%; height: auto; }}
+figcaption {{ font-size: 13px; color: var(--muted); max-width: 90ch; }}
+.two {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }}
+.box {{ background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 16px; min-width: 0; }}
+.box h3 {{ margin-top: 0; }}
+ul {{ margin: 0; padding-left: 1.2em; }} li {{ margin: 3px 0; }}
+dialog {{ padding: 0; border: 0; max-width: 96vw; max-height: 94vh; background: #fff; }}
+dialog img {{ display: block; max-width: 96vw; max-height: 90vh; }}
+dialog::backdrop {{ background: rgba(0,0,0,.7); }}
+.close {{ position: absolute; top: 6px; right: 8px; font: 600 13px var(--body); padding: 4px 10px; border-radius: 4px; border: 1px solid #999; background: #fff; color: #222; cursor: pointer; }}
+footer {{ font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 12px; }}
+@media (prefers-reduced-motion: reduce) {{ * {{ scroll-behavior: auto; }} }}
+</style>
+<div class="wrap">
+<header>
+  <div class="eyebrow">forge · case/63.graetz_cht · plan boundary-cht-axisymmetric-graetz</div>
+  <h1>軸対称 CHT の流れあり検証 — 管内層流の Graetz 問題</h1>
+  <div class="meta"><span>2026-09-29</span><span>ブランチ <code>feature/cht-axisym-graetz</code> (<code>ca81c8ea</code>、main 未マージ)</span><span>状態 {chip("報告")} ユーザ決定による例外閉鎖</span></div>
+</header>
+
+<div class="lead">
+<p><b>結論</b>: 管内層流の Graetz 問題 (次節で説明) を使いました。登録した条件 (node・FP64・M 0.05・Re 1000・Pr 0.72) で、流れのある軸対称 CHT (管 + 固体殻、軸を含む) の<b>対照差し引き局所 Nu</b> は、評価窓 x⁺ 3e-3〜0.1 で古典 Graetz 解から 3 格子とも最大 <b>0.82 %</b> 以内でした (許容 2 %)。壁温を固体越しに決める共役計算と、壁温を直接与える非連成計算の差は 0.03 %、細かい格子ほど格子間の差は減りました。<b>最大の限界</b>: 流れの前提を確かめる登録検査 V-g1 の 2 項目が FAIL のままで、ユーザ決定により例外として閉じています。検証全体の合格ではありません。また、対照を差し引いた量の検証なので、<b>絶対熱流束の精度は保証しません</b>。</p>
+</div>
+
+<section id="what">
+<h2>何を検証したか</h2>
+<h3>Graetz 問題</h3>
+<p>円管の中を、速度分布がすでに放物線にそろった層流 (十分発達した流れ) が、一様な温度 T<sub>in</sub> で流れてきます。ある位置 (x = 0) から先の管壁を一定温度 T<sub>w</sub> に保つと、ガスは壁から温められ、温められた層が下流ほど厚くなります (Figure 1)。この問題を Graetz 問題と呼び、1883 年に Graetz が解析解 (固有関数の無限級数) を与えました。物性一定・軸方向の熱伝導なし・粘性発熱なしが前提です。この理想化した条件で「位置ごとに熱がどれだけ伝わりやすいか」を予測した曲線を、比較の基準に使います。</p>
+{fig(1, "figS_problem.png", "Graetz 問題の模式図 (管の断面の上下両側を描いた。計算は軸対称なので上半分だけを解く)。壁から熱 q<sub>w</sub> が入り、温められた層が下流へ厚くなる。今回の計算では、壁の温度を直接与えず、壁の外側に固体殻を付けて、その外面を T<sub>c</sub> に保った (共役熱伝達)。", "Graetz 問題の模式図")}
+<h3>局所ヌセルト数 Nu の定義</h3>
+<p>壁のある位置 x で、壁からガスへの熱流束 q<sub>w</sub>、壁温 T<sub>w</sub>、その断面の混合平均温度 T<sub>b</sub> (流量で重み付けした平均温度) を使って</p>
+<p class="eq">Nu(x) = q<sub>w</sub> D / ( k ( T<sub>w</sub> − T<sub>b</sub> ) )</p>
+<p>と定義します。D は管の直径 (2 mm)、k はガスの熱伝導率です。このページでは <b>壁からガスへ向かう熱流束を正</b> とします (forge の出力 <code>iface_q_eff</code> と評価 CSV の列 <code>q</code> は逆向きが正なので、q<sub>w</sub> = −<code>q</code>)。熱伝達率 h = q<sub>w</sub>/(T<sub>w</sub> − T<sub>b</sub>) を無次元にしたもので、加熱開始点の直後は大きく (温められた層が薄いので熱がよく伝わる)、下流では一定値 3.657 に近づきます。混合平均温度は T<sub>b</sub> = ∫ρ u T r dr / ∫ρ u r dr です。</p>
+<h3>横軸 x⁺</h3>
+<p>Graetz 解は、加熱開始点からの距離 x を x⁺ = x / (D Pe) で無次元にすると、流速や物性によらず 1 本の曲線 Nu(x⁺) になります。Pe = Re Pr (ペクレ数、今回 720) は、流れが熱を運ぶ強さと熱伝導の強さの比です。今回の加熱区間 172.8 mm は x⁺ = 0.12 にあたり、評価に使った窓 x⁺ = 0.003〜0.1 は、加熱開始点から下流方向へ約 4.37〜145.6 mm の範囲です (実測の Pe = 728 で換算)。</p>
+<h3>ΔT と、対照 run を差し引く理由</h3>
+<p><b>ΔT = T<sub>c</sub> − T<sub>in</sub></b> は、固体殻の外面の温度と入口ガスの温度の差、つまり加熱の強さです。本番では ΔT = 10 K (T<sub>c</sub> = 310 K、入口 300 K) を主に使い、ΔT = 5 K と ΔT = 0 も回しました。</p>
+<p>forge は圧縮性のソルバなので、Graetz 解が無視している<b>粘性による発熱と、圧力が下がることによる冷却</b>が入ります。そのため、加熱していない ΔT = 0 の run でも、壁とガスの間にわずかな熱流束と温度差が生じます (Figure 4 の灰色の線)。そこで同じ格子の ΔT = 0 の run (<b>対照 run</b>) を用意し、熱流束と温度差のそれぞれについて「加熱 run − 対照 run」の差を取ってから Nu を作りました (Nu 同士を引いているのではありません)。</p>
+<p class="eq">Nu<sub>Δ</sub> = ( q<sub>w</sub> − q<sub>w,0</sub> ) D / ( k [ ( T<sub>w</sub> − T<sub>b</sub> ) − ( T<sub>w,0</sub> − T<sub>b,0</sub> ) ] )　(添字 0 が対照 run)</p>
+<p><b>数値例</b> (N<sub>r</sub> = 32、x⁺ = 0.0995、<code>run_0016_g2_dT10_r32/graetz_nu_600000.csv</code>): 壁からガスへの熱流束は加熱 run が 194.095 W/m²、対照 run が −5.232 W/m² なので、差は 199.328 W/m²。壁温 − 混合平均温度は 2.093252 K と 0.169078 K なので、差は 1.924174 K。Nu<sub>Δ</sub> = 199.328 × 0.002 / (0.05700284 × 1.924174) ≈ 3.635 で、この節点の Graetz 基準値 3.658 より 0.64 % 小さい。</p>
+<p><b>この差し引きで何が言えて、何が言えないか</b>: 流れ・物性・発熱項が 2 つの run で共通なら、温度の方程式は温度について線形なので、差を取れば共通の項は消えます。しかし今回の 2 つの run は、加熱で密度が変わるぶん流れも少し違うので、<b>共通の効果を完全に消せたとは保証できません</b>。このページで検証しているのは、この差し引きで定義した Nu<sub>Δ</sub> です。ΔT = 5 K と 10 K の差 0.141 % (V-g5) は加熱の強さへの感度で、消し残しの上限ではありません。</p>
+</section>
+
+<section id="analysis-conditions">
+<h2>解析条件</h2>
+<h3>(a) 解析領域</h3>
+<p>半径 R 1 mm の円管の子午面を解きます。上流 10 mm は断熱壁で、放物速度のまま流れ込みます。x=0 から 172.8 mm (x⁺ 0.12) の加熱区間の外側に固体殻が付いていて、その外面は Robin 条件で T_c に保たれます。下流 10 mm は再び断熱壁です。軸 (r=0) を領域に含みます。</p>
+{fig(2, "fig1_domain.png", f"解析領域と境界パッチ。<code>{P}/run_0016_g2_dT10_r32/mesh.h5</code> (<code>MESH/COORD</code>、<code>BCONDS/&lt;physID&gt;/vizBfaceNodes</code>) と <code>solid.h5</code> から描画。(a) は縦方向を約 40 倍に拡大。(b) は x=0 付近を実寸で拡大し、流体の四角格子 (灰) と固体の三角格子 (薄赤) を重ねた。", "円管の子午面の解析領域図と x=0 付近の拡大")}
+<h3>(b) 境界条件</h3>
+<p>値は各 run の実行時入力 <code>bcondConfig.yaml</code> から転記しました。加熱区間の条件は run の種類で変わります。</p>
+<div class="tbl"><table><thead><tr><th>physID</th><th>境界名</th><th>課した条件 (kind)</th><th>値</th><th>分布の参照先</th></tr></thead><tbody>
+<tr><td>1</td><td>inlet</td><td><code>inlet_uniformVelocity</code> + <code>inletProfile</code></td><td>u = 2U_m(1 − r²/R²)、U_m 17.359 m/s。ρ 1.18954 kg/m³・Ps 102419 Pa (入口圧と 300 K に整合するエントロピー)</td><td><code>inlet_profile_1.csv</code> (Figure 3a)</td></tr>
+<tr><td>2</td><td>outlet</td><td><code>outlet_statPress</code></td><td>Ps 101325 Pa (逆流用 Pt 101502 Pa・Tt 300 K)</td><td>一様</td></tr>
+<tr><td>3</td><td>wall_up</td><td><code>wall</code> (断熱 no-slip)</td><td>—</td><td>—</td></tr>
+<tr><td>4</td><td>wall_heat</td><td>共役 (G2): <code>wall_isothermal</code> + <code>conjugate: 1</code>、固体外面 Robin h 1e8 W/m²K・T_c = 300 + ΔT<br>非連成 (G1): <code>wall_isothermal</code> T_w = 300 + ΔT</td><td>ΔT = 0 / 5 / 10 K</td><td>共役の界面温度 (Figure 3b)</td></tr>
+<tr><td>5</td><td>wall_down</td><td><code>wall</code> (断熱 no-slip)</td><td>—</td><td>—</td></tr>
+<tr><td>6</td><td>axis</td><td><code>axis</code></td><td>u_r = 0 ピン</td><td>—</td></tr>
+</tbody></table></div>
+{fig(3, "fig2_bc.png", f"課した境界条件の分布。(a) 入口の速度: 指定値 (<code>{P}/run_0016_g2_dT10_r32/inlet_profile_1.csv</code>) と、入口面の節点で実現した値 (<code>res_600000.h5</code>)。(b) 管の内壁の温度 (固体と流体の界面の温度、<code>res_wall_heat_4_600000.h5</code> の <code>iface_Tw_bc</code>) から T<sub>c</sub> を引いた値。T<sub>c</sub> は固体殻の外側に置いた Robin 条件の外部温度で、h = 1e8 W/m²K と大きいので外面温度はほぼ T<sub>c</sub> になる。赤 (加熱 run_0016) の負の値は、内壁が T<sub>c</sub> より低いことを表す (−30 mK なら約 309.970 K)。熱が固体を通って流れる分だけ温度が下がり、熱流束が大きい加熱開始点ほどずれが大きい。全節点での最大は 33.5 mK (ΔT の 0.33 %、x = 0 の節点。対数軸なので図では x = 0 を省いた)。灰 (対照 run_0014) はほぼ 0 で、+0.02〜+0.41 mK とわずかに正。<b>旧版のこの図で赤い線が「ふた山」に見えたのは横軸のせい</b>: 旧版は 1 mm まで線形・その先は対数という切り替え軸で、x = 1 mm の切り替え点で曲線が折れて 2 つの弧に見えた。データ自体の極値は加熱区間の終端近く (x = 170.8 mm) の小さな 1 つだけで、温度の山が 2 つあるわけではない (同じ 235 節点を 2 通りの横軸で描いて確認)。Graetz 解が仮定する壁温一様からのずれはこの程度で、影響は V-g4 (等温壁の run との差 0.03 %) で見ている", "入口速度分布と壁温のずれ")}
+<h3>(c) 数値設定</h3>
+<div class="tbl"><table><tbody>
+<tr><th>次元・幾何</th><td>2D 軸対称 (<code>isAxisymmetric: 1</code>、<code>axisymMethod: 0</code> = r 重み)、軸を含む</td></tr>
+<tr><th>離散化</th><td>node (median-dual)、SLAU、<code>convMethod: 1</code> (2 次) + Venkatakrishnan (<code>limiter: 2</code>、基準値は固定)</td></tr>
+<tr><th>時間積分</th><td>定常陰解法 (<code>timeIntegration: 11</code>、block-DPLUR)、<code>cfl_pseudo</code> 2 (起動 A/B run_0009/0010 で決定)、<code>implicitRelax</code> 0.7、<code>nStepInner</code> 4、600000 step (N_r 64 は +600000)</td></tr>
+<tr><th>乱流</th><td>なし (層流)</td></tr>
+<tr><th>連成</th><td><code>conjugate: mode fem2d</code>、<code>flux: q_eff</code>、<code>warmup</code> 5000、<code>interval</code> 50、<code>Df_scale</code> 5</td></tr>
+<tr><th>初期値</th><td>Poiseuille (放物速度・線形圧力・300 K) を VALUE にパッチ。固体は共役壁の Ts から</td></tr>
+<tr><th>格子</th><td>N_r = 16 / 32 / 64 (半径一様、軸方向も入れ子で細分)、節点 2499 / 9669 / 38025、x=0 の第一セル幅 41 / 20 / 10 µm、Δr 62.5 / 31.3 / 15.6 µm。固体は半径 8 層 (感度 16 層)</td></tr>
+<tr><th>ビルド</th><td>FP64 (<code>flowFormat.hpp</code> を double に)、commit <code>86115cb1</code>、<code>FORGE_CUDA_BLOCKSIZE=128</code>、AWS g5</td></tr>
+</tbody></table></div>
+<h3>(d) 物性</h3>
+<p>Re と Pr を固定するための定数物性です (実在の空気ではありません)。値は <code>solverConfig.yaml</code> の <code>physProp</code> から転記しました。</p>
+<div class="tbl"><table><tbody>
+<tr><th>気体・状態方程式</th><td>単一成分の熱量的完全気体 (<code>thermalMethod: 0</code>)、c_p 1004.5 J/kgK、γ 1.4、R 287.0 J/kgK</td></tr>
+<tr><th>輸送物性</th><td>定数 (<code>viscMethod: 0</code>、<code>thermCondMethod: 0</code>): μ 4.085818e-5 Pa·s、k_f 5.700284e-2 W/mK → Pr 0.72</td></tr>
+<tr><th>代表値</th><td>T_in 300 K、p ≈ 101325 Pa、ρ 1.1768 kg/m³、U_m 17.36 m/s (M 0.05)、Re_D 1000、Pe 720 (実測 728)</td></tr>
+<tr><th>固体</th><td>k_s 100 W/mK (一定)、厚さ 0.5 mm。定常なので比熱・密度は使わない</td></tr>
+<tr><th>比較相手</th><td>古典 Graetz は非圧縮・定数物性・散逸なし。forge との違い (有限 M の散逸・圧力仕事、ΔT による密度変化、軸方向伝導) は、ΔT 0 の対照 run を差し引くことと誤差予算で扱う</td></tr>
+</tbody></table></div>
+<h3>(e) ゲート</h3>
+<p>FAIL と判定不能も含め、登録した判定をすべて載せています。制約欄には、その判定が結論をどこまで縛るかを書きました。</p>
+<div class="tbl"><table><thead><tr><th>判定</th><th>対象</th><th>区間</th><th>コマンド・許容</th><th>出力</th><th>VERDICT</th><th>制約</th></tr></thead><tbody>
+{grows}
+</tbody></table></div>
+</section>
+
+<section id="results">
+<h2>結果</h2>
+<h3>差し引きの中身</h3>
+<p>Figure 4 は N<sub>r</sub> = 32 の加熱 run と対照 run の生の値です (縦軸は壁からガスへを正)。熱流束は対照 run の方が 1〜3 % の大きさで、向きが逆 (ガスから壁へ) です。壁温と混合平均温度の差は、下流の x⁺ = 0.1 で対照 run が 0.17 K あり、加熱 run の 2.1 K に対して 8 % になります。差し引かないと、下流ほど Nu が大きくずれます。</p>
+{fig(4, "figD_subtract.png", f"Nu の分子 (a) と分母 (b) の中身。<code>{P}/run_0016_g2_dT10_r32/graetz_nu_600000.csv</code> の列 <code>q, q0, Tw, Tb, Tw0, Tb0</code> (加熱 run_0016、対照 run_0014、step 600000)。(a) は縦軸が ±10 W/m² より外で対数。", "加熱 run と対照 run の熱流束と温度差")}
+<h3>局所 Nu と古典 Graetz 解</h3>
+<p>差し引いた Nu を、古典 Graetz 解 (<code>graetz_ref.py</code>、forge と独立に解いたもの) と比べました。比べ方をそろえるため、基準の側も各壁節点が受け持つ区間で熱流束を平均しています。3 格子とも窓全体で誤差は負で、大きさは 1 % 以内に収まっています。</p>
+{fig(5, "fig3_nu.png", f"局所 Nu (上) と基準との差 (下)。<code>{P}/run_0020_g2_dT10_r16</code>・<code>run_0016_g2_dT10_r32</code>・<code>run_0024_g2_dT10_r64_ext</code> の <code>graetz_nu_600000.csv</code> (各対照 run_0019 / 0014 / 0023 で差し引き、step 600000)。基準の曲線は <code>graetz_ref.py</code> の march (nr 400)。薄青が判定窓。窓の外の入口近く (x⁺ &lt; 1e-3) の大きな負の誤差と、加熱区間の終端 (x⁺ 0.12) の跳ねは判定に使っていない。", "局所ヌセルト数と誤差の格子 3 水準比較")}
+<div class="tbl"><table><thead><tr><th>格子</th><th>窓内の節点の最大誤差 (判定値)</th><th>参考: x⁺ 3e-3</th><th>1e-2</th><th>3e-2</th><th>0.1</th><th>run (加熱 / 対照)</th></tr></thead><tbody>
+<tr><td>N_r 16</td><td>0.807 %</td><td>−0.559 %</td><td>−0.296 %</td><td>−0.366 %</td><td>−0.812 %</td><td><code>run_0020 / run_0019</code></td></tr>
+<tr><td>N_r 32</td><td>0.773 %</td><td>−0.450 %</td><td>−0.314 %</td><td>−0.340 %</td><td>−0.659 %</td><td><code>run_0016 / run_0014</code></td></tr>
+<tr><td>N_r 64</td><td>0.813 %</td><td>−0.415 %</td><td>−0.308 %</td><td>−0.356 %</td><td>−0.535 %</td><td><code>run_0024 / run_0023</code> (延長後)</td></tr>
+</tbody></table></div>
+<p>参考の列は指定位置での対数補間値で、窓の外の節点も補間に使うので、判定値 (窓内の節点の最大) を超えることがあります (N<sub>r</sub> 16 の x⁺ 0.1 で −0.812 %)。</p>
+<p>有限 Pe (軸方向伝導) によるモデル差は窓の下端で 0.11 %、x⁺ ≥ 0.03 では 0.004 % 以下です (基準解の A/B)。そのため x⁺ 0.1 付近の −0.5〜−0.8 % は、有限 Pe では説明できません。細分化で減ってはいますが、その減り方は遅く (観測次数 0.3)、原因はまだ特定していません。</p>
+<h3>V-g1 ①: 圧力勾配が Poiseuille の式より大きい理由</h3>
+{fig(6, "fig4_momentum.png", f"区間 x 43〜130 mm の運動量収支の内訳。<code>{P}/run_0014 / 0015 / 0016</code> の <code>momentum_balance_series.csv</code> (step 600000)。実測した壁せん断と運動量流束を入れた収支は、圧力力の 0.005 % で閉じた (登録基準 0.1 %)。Poiseuille の式との差は、加熱と膨張による加速 (青) と、壁せん断が放物線の値を超える分 (橙) の和になっている。値は末尾窓 (step 312260〜600000 の 25 枚の後半) の平均で、収支の不一致には平均 ± 振幅を添えた (準定常判定は不一致だけ OSCILLATING、振幅は圧力力の 4e-8 程度)。登録検査 V-g1 ① は軸上の圧力の回帰で判定した別の指標なので、その許容線はこの図に描いていない。", "運動量収支の内訳")}
+<h3>V-g1 ②: 対照 run の x=0 断面の温度非一様</h3>
+{fig(7, "fig5_temp.png", f"対照 run (<code>{P}/run_0014_g2_dT0_r32/res_600000.h5</code>) の x=0 断面の温度と、流れ場を固定して温度だけを独立に解き直した結果。A は粘性散逸と圧力仕事を入れない場合、B は入れた場合。B は保存場を 0.0014 K で再現したが、判定位置 x=0 の後処理の不確かさ (2.8e-3 K) が登録上限を超えたので、正式判定は判定不能。", "x=0 断面の温度分布の再現")}
+</section>
+
+<section>
+<h2>特定できたこと・できなかったこと</h2>
+<div class="two">
+<div class="box"><h3>特定できた</h3><ul>
+<li>対照差し引き局所 Nu と古典 Graetz 解の差は、窓全体で 3 格子とも 0.82 % 以内。</li>
+<li>共役と非連成の等温壁の差は 0.03 %。固体の層数 (8 と 16) の差は 3e-7。</li>
+<li>圧力勾配のずれ (V-g1 ①) は、加熱による加速と壁せん断のずれで説明できる (収支は 0.005 % で閉じた)。</li>
+<li>強制形の等温壁は、細かいセルでは <code>cfl_pseudo</code> 5 だと起動直後に崩れる (2 で安定)。</li>
+</ul></div>
+<div class="box"><h3>特定できなかった</h3><ul>
+<li>対照 run の温度非一様 (V-g1 ②) の原因。散逸・圧力仕事の有無で温度幅が大きく変わることは補助計算で見えたが、不確かさが基準を超えた。</li>
+<li>x⁺ 0.1 付近の −0.5〜−0.8 % の由来 (格子・有限 M・差し引きの非線形のどれか)。</li>
+<li>絶対熱流束の精度 (共通の加算誤差は差し引きで消えるため)。</li>
+<li>節点別の G-if と系列の再抽出 (中間場・界面ログを削除したため、保存済みの記録に依存する)。</li>
+</ul></div>
+</div>
+</section>
+
+<section>
+<h2>訂正と撤回の記録</h2>
+<ul>
+<li><b>版 2 での改訂</b> (2026-09-29、ユーザの質問と codex のレビュー <code>notes/reviews/2026-09-29-graetz-report-review-diagnose.md</code> を受けて): 「何を検証したか」の節 (Graetz 問題・Nu の定義・x⁺・ΔT・対照差し引き) と Figure 1・4 を追加。版 1 の差し引きの説明「どちらの run にも同じように入る」「加熱によって生じた分だけ」は保証できないので撤回し、「この差し引きで定義した Nu<sub>Δ</sub> を検証した」に改めた。版 1 の壁温の図 (現 Figure 3b) は横軸の切り替えで曲線が折れて「ふた山」に見えたので、x⁺ の対数軸に変えた (データの極値は 1 つ)。壁温のずれの最大を 32 → 33.5 mK に訂正 (x = 0 の節点を含める)。運動量収支の図は末尾窓の平均に変え、別指標の 2 % の線を外した。</li>
+<li><b>温度再現の判定を撤回</b> (2026-09-29): ツールの初版は「第 1 仮説を支持」と出しましたが、正式判定は判定不能です。使えたスナップショットが 1 枚しかなく (登録は 25 枚)、x=0 の不確かさも上限を超えました。旧出力は <code>run_0014_g2_dT0_r32/TEMP_REPRODUCE_v1_withdrawn.txt</code> に撤回注記つきで残しています。根拠は result レビュー <code>notes/reviews/2026-09-29-boundary-cht-axisymmetric-graetz-result.md</code> の M2・M3。</li>
+<li><b>「対照も全節点 ALL STEADY」を訂正</b> (2026-09-28): 当初の評価器は、対照の系列を 4 点しか出していませんでした。直して再評価し、N_r 16/32 は ALL STEADY と確認しました (<code>notes/reviews/2026-09-28-graetz-result-vg1-fail-diagnose.md</code>)。</li>
+<li><b>「0.8 % 以内」を「0.82 % 以内」に訂正</b>: N_r 64 の最大は 0.813 % でした (<code>notes/reviews/2026-09-29-graetz-result-interpretation-diagnose.md</code>)。</li>
+<li><b>一次データの削除</b>: ディスク削減で、中間スナップショットと界面ログを診断の登録前に消していました。残した最終場・圧縮残差は <code>{P}/MANIFEST_primary_data.sha256</code> にハッシュ付きで記録し、手元で判定を再実行して一致を確認しています。</li>
+</ul>
+</section>
+
+<section>
+<h2>成果物</h2>
+<ul>
+<li>plan: <code>plans/accepted/boundary-cht-axisymmetric-graetz.md</code> (§1 完了の範囲、§5.1 #6〜#6g に結果、§6.1 にレビュー記録)</li>
+<li>run 一覧: <code>{P}/README.md</code> (本番 <code>run_0011</code>〜<code>run_0024</code>、起動 A/B <code>run_0009</code>/<code>0010</code>)</li>
+<li>判定出力: 各 run の <code>CONVERGENCE_CHECK.txt</code>・<code>EVAL_SNAP.txt</code>・<code>EVAL_SERIES.txt</code>・<code>CHT_*_VERDICT.txt</code>、比較 <code>CMP_Vg3_ext.txt</code>・<code>CMP_Vg4.txt</code>・<code>CMP_Vg5.txt</code>・<code>CMP_solid.txt</code></li>
+<li>codex: 諮問 5 回、plan レビュー (GO-with-changes)、result レビュー (NO-GO、全件採用して例外閉鎖)。記録は <code>notes/reviews/2026-09-2*-graetz*</code></li>
+</ul>
+</section>
+
+<footer>run の索引の正本は <code>{P}/README.md</code> の「計算 run 一覧」です。このページは 2026-09-29 時点のスナップショットです。図はクリックすると原寸で開きます。</footer>
+</div>
+<dialog id="lb" aria-label="図の拡大"><button class="close" type="button" id="lbc">閉じる</button><img id="lbi" alt=""></dialog>
+<script>
+(function(){{
+  var d=document.getElementById('lb'), im=document.getElementById('lbi');
+  document.querySelectorAll('.zoom').forEach(function(b){{ b.addEventListener('click', function(){{ im.src=b.dataset.src; im.alt=b.querySelector('img').alt; if(d.showModal) d.showModal(); }}); }});
+  document.getElementById('lbc').addEventListener('click', function(){{ d.close(); }});
+  d.addEventListener('click', function(e){{ if(e.target===d) d.close(); }});
+}})();
+</script>
+'''
+(D / "graetz-report.html").write_text(html)
+print(len(html))
