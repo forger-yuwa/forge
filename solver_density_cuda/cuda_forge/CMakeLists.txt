@@ -118,7 +118,8 @@ add_library(cuda_forge STATIC
 )
 
 
-target_include_directories(cuda_forge PRIVATE .. ${CMAKE_CURRENT_SOURCE_DIR} ${FORGE_SPECIES_DATA_GEN_DIR} )
+# speciesDB.cpp (C++) は flowFormat.hpp 経由で CUDA のヘッダ (vector_types.h) を読むので、forge・変換器と同じく CUDA の include を足す
+target_include_directories(cuda_forge PRIVATE .. ${CMAKE_CURRENT_SOURCE_DIR} ${FORGE_SPECIES_DATA_GEN_DIR} ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 
 # Inherit CUDA_ARCHITECTURES from the top-level CMakeLists.txt.
 if(CMAKE_CUDA_ARCHITECTURES)
