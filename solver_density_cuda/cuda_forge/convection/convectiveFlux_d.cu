@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <limits>
 #include <set>
+#include <map>
 #include <cstring>
 #include <algorithm>
 #include <string>
@@ -129,12 +130,15 @@ static void farfieldFlux_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, bcon
                   << "), P " << inf.p << ", k " << inf.k << ", ω " << inf.om << std::endl;
     }
     const bool rans = (cfg.LESorRANS == 2 && cfg.RANSmodel == 1);
-    // 診断ダンプ (env FORGE_DUMP_FARFIELD=<path>、既定 off。出力専用): 最初の呼び出しで面ごとの流束・外側状態を書く
-    static std::set<int> s_dumped;   // physID ごとに最初の呼び出しだけ書く
+    // 診断ダンプ (env FORGE_DUMP_FARFIELD=<path>、既定 off。出力専用): 最初の呼び出し (FORGE_DUMP_FARFIELD_CALLS=n なら最初の n 回)
+    // で面ごとの流束・外側状態を書く。1 回目は <path>.<physID>.csv、2 回目以降は <path>.<physID>.<回>.csv
+    static std::map<int, int> s_calls;   // physID ごとの呼び出し回数 (= assembleResidual の回数)
+    const int call = ++s_calls[bc.physID];
+    static const int s_maxCalls = [] { const char* c = std::getenv("FORGE_DUMP_FARFIELD_CALLS"); return c ? std::max(1, std::atoi(c)) : 1; }();
     float* dumpBuf = nullptr;
     const char* dumpPath = std::getenv("FORGE_DUMP_FARFIELD");
     const size_t nb = bc.iPlanes.size();
-    if (dumpPath && *dumpPath && s_dumped.count(bc.physID) == 0 && nb > 0) {
+    if (dumpPath && *dumpPath && call <= s_maxCalls && nb > 0) {
         CHECK_CUDA_ERROR(cudaMalloc(&dumpBuf, sizeof(float) * nb * FF_DUMP_NF));
     }
     farfield_flux_d<<<cuda_cfg.dimGrid_bplane, cuda_cfg.dimBlock>>>(
@@ -152,16 +156,15 @@ static void farfieldFlux_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, bcon
         std::vector<float> h(nb * FF_DUMP_NF);
         CHECK_CUDA_ERROR(cudaMemcpy(h.data(), dumpBuf, sizeof(float) * h.size(), cudaMemcpyDeviceToHost));
         CHECK_CUDA_ERROR(cudaFree(dumpBuf));
-        std::ofstream o(std::string(dumpPath) + "." + std::to_string(bc.physID) + ".csv");
+        std::ofstream o(std::string(dumpPath) + "." + std::to_string(bc.physID) + (call > 1 ? "." + std::to_string(call) : std::string()) + ".csv");
         o << "ip,ic,nx,ny,nz,S,F_ro,F_roUx,F_roUy,F_roUz,F_roe,R_ro,R_Ux,R_Uy,R_Uz,R_P,R_k,R_om,R_Y0,vacuum,hll,pRef,c_i,c_R\n";
         o.precision(9);
         for (size_t b = 0; b < nb; ++b) {
             for (int q = 0; q < FF_DUMP_NF; ++q) o << (q ? "," : "") << (double)h[b * FF_DUMP_NF + q];
             o << "\n";
         }
-        std::cout << "[FORGE_DUMP_FARFIELD] physID " << bc.physID << ": " << nb << " 面を書いた" << std::endl;
+        if (call == 1) std::cout << "[FORGE_DUMP_FARFIELD] physID " << bc.physID << ": " << nb << " 面を書いた (最初の " << s_maxCalls << " 回)" << std::endl;
     }
-    s_dumped.insert(bc.physID);
     // 退避・置換の計数 (累積。増えたときだけ表示)
     static unsigned long long s_hll = 0, s_vac = 0;
     unsigned long long hll = 0, vac = 0;
