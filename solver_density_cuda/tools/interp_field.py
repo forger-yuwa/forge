@@ -32,24 +32,32 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from res_h5_to_vtu import parse_conne
 
 
-def centroids(f):
+def is_3d(f):
+    """格子が 3D か。z の異なる値が 3 つ以上あれば 3D (疑似 2D の押し出しは z が 2 層なので 2D として x,y だけで照合する)。
+    2026-09-27 修正: 以前は常に x,y だけで最近傍を取っていたので、3D では z を無視した別の節点の値を貼っていた
+    (case/46 run_0987: 共通領域で座標が完全一致する節点の ro が最大 55 倍違った。plan tooling-nozzle-sern-3d §5.1 R4d)。"""
+    z = np.array(f["MESH/COORD"]).reshape(-1, 3)[:, 2]
+    return np.unique(np.round(z, 12)).size >= 3
+
+
+def centroids(f, nd=2):
     # DOF の代表座標。node (median-dual) では値数=節点数なので MESH/COORD (節点座標)
     # を最優先する — CELLS/centCoords (双対 CV 重心) は高 AR の μm 級壁 CV で節点から
     # ±100 μm 級に外れ (壁 CV の重心が域外に出る例あり)、最近傍照会に使うと近壁 IC が
     # src の壁値/内部値を交互に拾う市松になる (case/40 y+1 node で発散種になった実害)。
-    coord = np.array(f["MESH/COORD"]).reshape(-1, 3)[:, :2]
+    coord = np.array(f["MESH/COORD"]).reshape(-1, 3)[:, :nd]
     if "VALUE/ro" in f and f["VALUE/ro"].shape[0] == coord.shape[0]:
         return coord
     # cell: 入力 h5 は /CELLS/centCoords を持つのでそれを優先 (res_*.h5 は CONNE 経路)
     if "CELLS/centCoords" in f:
-        return np.array(f["CELLS/centCoords"]).reshape(-1, 3)[:, :2]
+        return np.array(f["CELLS/centCoords"]).reshape(-1, 3)[:, :nd]
     nc = f["VALUE/ro"].shape[0]
     if nc == coord.shape[0]:
         # node-centered res (median-dual): 値の位置はノード座標そのもの
         # (MESH/CONNE は可視化用 primal トポロジで parse できない)
         return coord
     conn, offs, _ = parse_conne(np.array(f["MESH/CONNE"]), nc)
-    c = np.zeros((nc, 2)); s = 0
+    c = np.zeros((nc, nd)); s = 0
     for i, o in enumerate(offs):
         c[i] = coord[conn[s:o]].mean(axis=0); s = o
     return c
@@ -141,8 +149,15 @@ def main():
 
     check_required_datasets(a.src, src_sig)
 
+    with h5py.File(a.src, "r") as s, h5py.File(a.dst, "r") as d0:
+        s3, d3 = is_3d(s), is_3d(d0)
+    if s3 and not d3:
+        raise SystemExit("[interp_field] REFUSED: SRC が 3D で DST が 2D (断面の取り出しは本ツールの対象外)")
+    # 3D→3D は x,y,z。2D→2D と 2D→3D (2D 場のスパン方向への押し出し、case/18 run_0035 の DES 初期場) は x,y
+    nd = 3 if (s3 and d3) else 2
+    print(f"[interp_field] 最近傍の照合座標: {'x,y,z (3D)' if nd == 3 else ('x,y (2D 場を 3D へ押し出し)' if d3 else 'x,y (2D / 疑似 2D)')}")
     with h5py.File(a.src, "r") as s:
-        cs = centroids(s); V = s["VALUE"]
+        cs = centroids(s, nd); V = s["VALUE"]
         if "P" in V and "Ux" in V:            # res (primitives)
             ro = np.array(V["ro"]); P = np.array(V["P"])
             Ux = np.array(V["Ux"]); Uy = np.array(V["Uy"]); Uz = np.array(V["Uz"])
@@ -192,8 +207,9 @@ def main():
     tree = cKDTree(cs)
     fsp.write_species_attrs(a.dst, None)      # 書き込み途中で失敗しても古い属性が残らないように先に消す
     with h5py.File(a.dst, "r+") as d:
-        cd = centroids(d)
-        _, idx = tree.query(cd)
+        cd = centroids(d, nd)
+        dist, idx = tree.query(cd)
+        print(f"[interp_field] 最近傍距離: max {float(dist.max()):.3e}, 0 の DST 節点 {int((dist == 0).sum())} / {len(dist)}")
         moved = []
         for name, arr in fields.items():
             ds = "VALUE/"+name
