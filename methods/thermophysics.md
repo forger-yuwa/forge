@@ -121,6 +121,8 @@ $$ \mu_{\mathrm{mix}} = \sum_i \frac{X_i \mu_i}{\sum_j X_j \phi_{ij}}, \quad k_{
 
 $$ D_{i,\mathrm{mix}} = \frac{1-X_i}{\sum_{j\ne i} X_j/D_{ij}}. $$
 
+実装 (`thermo_Dmix_species_f`) は分子を $1-X_i$ でなく同値の $\sum_{j\ne i} X_j$ として分母と同じループで積む (2026-09-30)。$X_i\to1$ で $1-X_i$ の引き算が float で桁落ちし (微量 $10^{-6}$ で相対 7 %、$10^{-8}$ で $O(1)$)、補数形では分子・分母が同じ小さな和になり二成分で厳密に $D_{12}$ を返す。判別試験 `tests/unit/test_dmix_complement.py`、経緯は plan [`condensation-two-phase-transport`](../plans/active/condensation-two-phase-transport.md) §5.1 #3b。
+
 ### 5. 化学種拡散とエネルギー結合
 
 化学種拡散流束は $\mathbf{J}_i = -\rho D_{i,\mathrm{mix}} \nabla Y_i$。混合平均は $\sum_i \mathbf{J}_i\ne 0$ となるため、補正速度で $\sum_i \mathbf{J}_i=0$ を担保する (定数 Schmidt 数フォールバックも用意)。エネルギー方程式には**化学種拡散によるエンタルピー輸送** $\sum_i h_i \mathbf{J}_i$ を熱伝導 $-k\nabla T$ に加える:
