@@ -24,6 +24,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [boundary-cht-conjugate-flat-plate.md](active/boundary-cht-conjugate-flat-plate.md) | `boundary` | **共役平板の検証 (C1/C2) — 前提ゲート FAIL の原因切り分けと再判定** (2026-09-30 起票, draft): 主判定 6 本 PASS だが流体収束・G-if が FAIL (界面残差が板の端に集中、細格子で悪化)。原因未確定のまま発注元 plan から分割。case/65 |
 | [boundary-cht-conjugate-benchmarks.md](active/boundary-cht-conjugate-benchmarks.md) | `boundary` | **固体が効く共役熱伝達の検証** (2026-09-29 起票, draft): A 厚肉管の共役 Graetz (軸対称、壁の軸方向伝導で上流まで予熱) と C 共役平板 (平面、Luikov 型)。流速場を与えた共役伝熱を一つの系で解く独立参照解と照合。前身 [Graetz](accepted/boundary-cht-axisymmetric-graetz.md) は固体がほぼ等温で共役の中身を試せていなかった。case/64・65 |
 | [tooling-convergence-and-wall-resolution-gates.md](active/tooling-convergence-and-wall-resolution-gates.md) | `tooling` | **収束判定と壁解像判定の恒久対応** (2026-09-19 起票, in_progress): 段階起動 run で本段単独/全段連結のどちらも誤判定になる問題に `check_convergence.py` の**判定区間**認識を入れる。ソルバの `ypls` は `ρu_τ·dcc/μ` で **node では壁ノードが壁面に乗り退化**し 1 桁小さく出るため、第一内部ノード基準の `y₁⁺` を出す `check_wall_resolution.py` を新設し AGENTS.md に貼付義務を追加。`check_quasisteady.py --series-csv` の欠損・非有限も FAIL 化。case/49 の codex result レビュー M3/M4/M9 をリポジトリ全体に格上げしたもの |
 | [tooling-energy-balance-diagnostics.md](active/tooling-energy-balance-diagnostics.md) | `tooling / architecture (output)` | **エネルギー収支診断の出力** (2026-09-19 起票, in_progress; **Phase 2 = ソルバ内 `fem2d` 連成まで実装済み・C3X で全登録項目 PASS**, 2026-09-23): 拘束前 `res_roe` と CV 境界のエネルギー数値流束が未登録で出せず、壁熱量を**離散スキームの言葉で**検算できない。opt-in 診断として出力し、1D 熱伝導で機械精度で閉じることを解除試験にする。発注元は [case-hypersonic-gap-heating-validation](active/case-hypersonic-gap-heating-validation.md) |
