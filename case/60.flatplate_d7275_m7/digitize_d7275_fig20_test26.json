@@ -1,0 +1,89 @@
+{
+ "_source": "TN D-7275 Fig 20 の □ (Tt 1867 K, α 0 = 試験 26、フェンス・0.24 cm トリップ付き)。PyMuPDF 3 倍描画 (表示 1540 幅) で軸目盛を読み、データ域を 10 倍で再描画して点中心を読んだ (2026-09-27)",
+ "axes": {
+  "x": "R*_l (Eckert 参照温度・局所条件基準の Re_x)",
+  "y": "N*_St,l (参照温度・局所条件基準)",
+  "calib_display_px": {
+   "x_1e6": 555,
+   "x_1e7": 1148,
+   "y_1e-3": 790,
+   "y_1e-2": 197
+  }
+ },
+ "reading_uncertainty": "軸目盛 ±3 px・点中心 ±5 px (拡大前換算 ±0.5 px) → St で約 ±1.3 %、R で約 ±1.2 %",
+ "points": [
+  {
+   "R_star_l": 980000.0,
+   "St_star_l": 0.0017641
+  },
+  {
+   "R_star_l": 1086000.0,
+   "St_star_l": 0.0017762
+  },
+  {
+   "R_star_l": 1186000.0,
+   "St_star_l": 0.0017849
+  },
+  {
+   "R_star_l": 1405000.0,
+   "St_star_l": 0.0016913
+  },
+  {
+   "R_star_l": 1516000.0,
+   "St_star_l": 0.0017029
+  },
+  {
+   "R_star_l": 1630000.0,
+   "St_star_l": 0.001678
+  },
+  {
+   "R_star_l": 1744000.0,
+   "St_star_l": 0.0016342
+  },
+  {
+   "R_star_l": 1857000.0,
+   "St_star_l": 0.0016406
+  },
+  {
+   "R_star_l": 1983000.0,
+   "St_star_l": 0.00155
+  },
+  {
+   "R_star_l": 2180000.0,
+   "St_star_l": 0.0014316
+  }
+ ],
+ "note": "局所条件 (T_l, p_l, T*) と St の換算係数は Table III。forge との比較には St*_l を q_w に戻す換算が要る (試験 26 の Table III 行)",
+ "test26_table": {
+  "_source": "TN D-7275 Table II (試験条件) と Table III (局所条件・換算係数) の試験 26 行 (2026-09-27、2.5 倍描画から転記)",
+  "TableII": {
+   "Tt_K": 1867,
+   "Pt_MPa": 18.06,
+   "pt_prime_kPa": 124.1,
+   "p_inf_kPa": 2.117,
+   "Re_inf_per_m": 4757000.0,
+   "rhoVcp_inf_kW_m2K": 68.89,
+   "M_inf": 6.64,
+   "alpha_deg": 0,
+   "leading_edge": "sharp",
+   "fence": "attached",
+   "trip_cm": 0.24
+  },
+  "TableIII": {
+   "T_l_K": 228.3,
+   "p_l_kPa": 2.117,
+   "Taw_K": 1728,
+   "T_star_K": 600.0,
+   "RLl_over_RLinf": 1.0,
+   "rhoVcp_l_over_inf": 1.0,
+   "RstarLl_over_RLinf": 0.18,
+   "rhoVcp_star_l_over_inf": 0.413
+  }
+ },
+ "conversion": {
+  "q": "q = St*_l · (ρVcp)*_l · (Taw − Tw)、(ρVcp)*_l = 0.413 × 68.89 = 28.45 kW/m²K",
+  "x": "x = R*_l / (0.180 × 4.757e6 /m) = R*_l / 8.563e5 [m] (x は鈍い前縁の先端基準 — 鋭い前縁は鈍い前縁の半径ぶん短い、p.5)",
+  "inconsistency": "この換算で最下流点が 2.55 m になり、パネル最後の熱電対 x = 2.465 m (Table I) より 3 % 下流。係数 0.180 の丸め (3 桁) か読み取りの系統ずれ。x 対応は ±3 % の不確かさとして扱う",
+  "Tw": "試験時の壁温は表に無い (『ほぼ室温で投入』、Tw/Tt≈0.2)。St は (Taw − Tw) で割っているので比較は St で行う"
+ }
+}

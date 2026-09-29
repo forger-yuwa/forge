@@ -478,14 +478,21 @@ $n_1=1.48654237,\ n_2=-0.280476066,\ n_3=0.0894143085,\ n_4=-0.119879866$。
 
 #### 潜熱 $L(T)$
 
-**H₂O (2026-08-18 更新)**: $L(T)=h_v(T)-h_l(T)$ を **CEA (NASA-9) の気相 H₂O と液相 H₂O(L) の全エンタルピー差**として作る
-(`h2o_latent`, `condensationProperties_d.cuh`)。$h_v$ は forge 種 DB と同じ CEA 2002 の H₂O 200–1000 K 係数、$h_l$ は CEA
-`thermo.inp` の H₂O(L) 273.15–373.15 K 係数 (Cox 1989 / Haar 1984)。両方とも**生成エンタルピー込みの絶対値**で評価するので
-差は datum に依らず、forge の sensible-enthalpy シフト (`thermoHrefTemp`) の影響を受けない (CEA 内での気液差をそのまま保つ)。
+**H₂O (2026-08-18 更新、2026-09-28 に種 DB の気液ペアへ移行)**: $L(T)=h_v(T)-h_l(T)$ を**気相 H₂O と液相 H₂O(L) の全エンタルピー差**
+(CEA の絶対基準のペア) として作る (`h2o_latent`, `condensationProperties_d.cuh`; plan
+[thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §4.8, #10; 仕様 [thermophysics.md](thermophysics.md) §1b.5)。
+$h_v$ は**種 DB の気相 H₂O そのもの** (同じ係数・区間・外挿規約・datum; 200 K 未満は $c_p(200\,\mathrm K)$ 一定の線形外挿)、
+$h_l$ は共通データの H₂O(L) 273.15–373.15 K 係数 (CEA `thermo.inp`; Cox 1989 / Haar 1984) を気相と同じ MW で質量換算し、
+**気相と同じ datum 定数**を足す。気相係数のハードコードは持たない (起動時に種 DB から作り、kernel へはポインタで渡す)。
+差は datum に依らない (`thermoHrefTemp` を 0 / 298.15 / 1234.5 K に変えても 120–400 K で相対 $\le2\times10^{-15}$; `tests/unit/test_cond_latent_pair.cu`)。
 **273.15 K 未満は CEA に液相フィットが無い** (CEA は氷 H₂O(cr) に切替) — H₂O(L) 多項式の外挿は 250 K 以下で発散する
-($c_{p,l}$ 230 K で 10 kJ/kgK) ため、$h_l$ を 273.15 K の値と勾配 $c_{p,l}(273.15)=4228$ J/kgK で線形外挿する (過冷却水の標準的扱い)。
-値: $L$(273.15)=2.501, $L$(250)=2.556, $L$(230)=2.603, $L$(200)=2.674 MJ/kg。旧線形フィット $3.1485\times10^6-2370T$ は
-この構成と <0.05 % で一致していた (等価; case/44 M4.75 で T 差 0.002 K, g 差 1e-4)。氷 (昇華熱 2.835 MJ/kg) は使わず、
+($c_{p,l}$ 230 K で 10 kJ/kgK) ため、$h_l$ を 273.15 K の値と勾配 $c_{p,l}(273.15)\approx4228$ J/kgK (1 K 差分) で線形外挿する (過冷却水の標準的扱い)。
+373.15 K 超は $h_l(373.15)$ で頭打ち。$L$ は [1.5, 3.5] MJ/kg にクランプ、評価温度の下限 45 K。
+値: $L$(273.15)=2.501, $L$(250)=2.556, $L$(230)=2.603, $L$(200)=2.674 MJ/kg、$L$(298.15)=2.44258 MJ/kg (thermo.inp の係数と相対 $8\times10^{-16}$、
+ヘッダの生成エンタルピー差より 9.06 J/kg 小さい = NASA フィットの再現誤差)。
+**#10 前との差**: 200 K 以上は丸め程度 (相対 $\le3\times10^{-15}$)、200 K 未満は外挿規約の統一分で 199 K −0.074、190 K −8.55、180 K −40.7、
+150 K −465.9、120 K −2387 J/kg (旧は気相多項式を 200 K 未満へそのまま外挿していた)。湿り場の変換は §thermophysics 1b.5 の式で液相項の差も移す。
+旧線形フィット $3.1485\times10^6-2370T$ はこの構成と <0.05 % で一致していた (等価; case/44 M4.75 で T 差 0.002 K, g 差 1e-4)。氷 (昇華熱 2.835 MJ/kg) は使わず、
 飽和線も過冷却液 (Murphy–Koop) で統一している。
 
 N2 は従来どおり Lin 2014 のフィット (`n2_latent`)。
@@ -855,6 +862,12 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
 3. **診断**: `condLim_<s>` = $\theta_u$ (収束時 ≈1 を確認する)、`condClampCorr_<s>` = このステップの**全**硬クランプによる $|\Delta\rho g|/\rho$ の累積
    [質量分率] (更新 floor + 実現可能性クランプ $g\le Y_w$ / $0.99$ + 液滴消滅)、`condClampCorrQ_<s>` = $Q_0..Q_2$ の最大相対補正 (負値 floor は 1)。収束時に
    凝縮域で 0 であること (乾きセルの数値塵 $Q\to0^-$ の floor は $g=0$ なら無害) を確認する。
+   **理由別の補正量 (2026-09-28, plan [condensation-two-phase-transport](../plans/active/condensation-two-phase-transport.md) §4.3)**: 凝縮 run では monitorInterval ごとに
+   `[cond-corr]` 行を種ごとに出す。理由は蒸気上限違反 ($g>Y_w$, `capViol`; 作動ノード数と**制限前の最小蒸気分率** $(\rho Y_w-\rho g)/\rho$)、負値 floor (`negFloor`)、
+   増分制限 (`incrLimit` = 受動種経路の $\theta_u/\theta_b$ が $\rho g$ から切った量)、受動種の硬い floor (`passFloor`)、モーメント射影 (`proj`, $|\Delta\rho Q_1|,|\Delta\rho Q_2|$)、
+   化学種再正規化が凝縮種 $\rho Y_w$ に掛けた補正 (`renorm`, $\sum|\Delta\rho Y_w|V$ と $\max|f-1|$)、液滴消滅 (`removal`, 物理)。各々の区間値 (前回ログからの差) と累積
+   (プロセス開始から; **restart で 0 から**) を総液量 $\sum\rho gV$ 比 (射影は $\sum\rho Q_{1,2}V$ 比; 総量 0 のときは絶対量で比は「非 0 なら 1」) で出し、
+   液滴消滅以外の区間値が比 $10^{-6}$ を超えると `[cond-corr] WARN` を出す。計上だけで、クランプの算術・書き込み値は変えない (`tests/unit/test_cond_corr_reasons.cu`)。
 4. **設定**: `condDgMaxStep` (既定 5e-3) / `condDTmaxStep` (既定 1 K) / `condLimiterMode` (1: 更新クランプ [既定], 0: 旧・残差 θ [A/B 用])。
    **新経路は `condEquilibrium 0` (非平衡) のみ** (平衡形 1/2 は従来の更新のまま)。**RK 陽解法 (`timeIntegration` 1/3/4) では起動時に自動で 0 に降格**する (未制限残差の累積バッファを持つため)。dual-time は `passiveScalarScheme 1`
    (モーメントに BDF 物理時間項; F-cf8 → plan species-passive-scalar-unification §4.4) で有効 (旧経路 0 では従来どおり降格)。
@@ -1026,6 +1039,12 @@ Phase 2 の二相 EOS による気相逆結合 ($p$ が $g$ 依存) は密結合
 [plans/accepted/tooling-nozzle-tp-split-h2o-condensation.md](../plans/accepted/tooling-nozzle-tp-split-h2o-condensation.md)
 (Wyslouzil fig3 で N₂ 擬似種 + H₂O が既存 `[N2, H2O]` CPG 結果を再現、イソブタン M4.2 H₂O 5 %)。
 気相 thermo の低温側は forge の `Tlo` クランプ (cp 凍結) が効く。
+
+**輸送物性は気相組成で評価する (2026-09-28, plan [condensation-two-phase-transport](../plans/active/condensation-two-phase-transport.md) §4.1)**: TP carrier
+(`condGasSpecies` ≥ 0) の凝縮 run では、μ・λ (`viscMethod 2` の `transport_mix_Y` / 表引き、セル・壁 WMLES) と化学種の混合平均拡散係数
+(`thermo_Dmix_species_f`) に渡す組成から液を除く: $Y_s^{gas}=Y_s/(1-g)$ ($s\ne w$)、$Y_w^{gas}=\max(Y_w-g,0)/(1-g)$ (1 つの関数
+`gas_phase_composition` を全経路が通る; $1-g$ の正規化は各入口の既存の正規化が行う)。液滴の懸濁効果 (粘性増加・有効熱伝導) は無視 ($\phi\sim10^{-6}$)。
+液 0・凝縮 OFF は現行とビット一致。CPG carrier・pure 凝縮・`viscMethod 0/1` は変わらない。拡散流束の駆動勾配 ($\nabla Y_w$) は未変更 (§4.2 は別項目)。
 
 ### 8. 精度・無次元化 (Phase 2)
 

@@ -1,5 +1,8 @@
 // test_cond_limiter_steady.cu — 凝縮ソースの Δτ 不変性と更新クランプの単体試験 (plans/active/condensation-source-limiter-steady.md §5-6)。
 //   build: nvcc --expt-relaxed-constexpr -I. -o test_cond_limiter_steady tests/unit/test_cond_limiter_steady.cu
+//   (plan #10 以降: H2O の潜熱に共通データの気液ペアが要るので、-I <solver_density_cuda> -I <埋め込みヘッダの生成先> と
+//    solver_density_cuda/input/speciesDB.cpp solver_density_cuda/input/speciesTransportDB.cpp -lyaml-cpp を足す;
+//    生成は tests/unit/cond_latent_test_helper.cuh 冒頭)
 //   (a) condLimiterMode 1: 状態を固定して dt_local を 1e-7 / 1e-3 に振っても、double / float 実体とも res_* と sj_* が
 //       ビット一致する (凝縮・蒸発・枯渇を含む H2O carrier と N2 pure の格子)。mode 0 では少なくとも 1 セルで差が出る (旧挙動の確認)。
 //   (b) 更新クランプ kernel: 上限内 θ_u=1 で増分不変、(c) 潜熱 ΔT 超過で 4 本同率縮小、(d) 残差 0 で無作用、
@@ -11,6 +14,7 @@
 #include <cuda_runtime.h>
 #include "flowFormat.hpp"
 #include "cuda_forge/thermo_d.cuh"
+#include "tests/unit/cond_latent_test_helper.cuh"   // H2O 潜熱の気液ペア (plan thermophysics-solver-owned-species-db #10)
 namespace {
 #include "cuda_forge/condensationSourceKernels_d.cuh"
 }
@@ -35,7 +39,7 @@ struct Outs { std::vector<flow_float> rr, r0, r1, r2, sg, s1, dL; };
 static Outs run_source(int model, int carrier, const std::vector<State>& st, int useFloat, int limiterMode, double dtval, int evap)
 {
     const int n = (int)st.size();
-    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0; o.h2oLatent=cond_test_latent_ref(0.0, true);
     const CondSpeciesProps cp = condProps_make(model, o);
     CondTablesHost ht; cond_tables_build_host(cp, ht); const CondTablesF tb = cond_tables_upload(ht);
     const double N2lo[9]={2.210371497e+04,-3.818461820e+02,6.082738360e+00,-8.530914410e-03,1.384646189e-05,-9.625793620e-09,2.519705809e-12,7.108460860e+02,-1.076003744e+01};
@@ -112,7 +116,7 @@ static void run_limiter(const std::vector<Cell>& cs, int carrier, std::vector<do
     auto zeros=[&](){ return up(z); };
     flow_float *sjg=zeros(),*sj2=zeros(),*sj1=zeros(),*sj0=zeros(),*tdg=zeros(),*td2=zeros(),*td1=zeros(),*td0=zeros();
     flow_float *og=zeros(),*o2=zeros(),*o1=zeros(),*o0=zeros(),*lim=zeros(),*cor=zeros(),*corQ=zeros();
-    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0; o.h2oLatent=cond_test_latent_ref(0.0, true);
     cond_moment_update_limited_d<<<(n+127)/128,128>>>(n, ddt, dvol, dro, carrier ? dYw : nullptr, 0.0, dT, nullptr, nullptr, 1220.7f, 1.315f,
         COND_MODEL_H2O, o, 5.0e-3, 1.0, 0.5, dNg, dNQ2, dNQ1, dNQ0, drg, drQ2, drQ1, drQ0, sjg, sj2, sj1, sj0, tdg, td2, td1, td0, og, o2, o1, o0, lim, cor, corQ);
     cudaError_t e = cudaDeviceSynchronize(); if (e != cudaSuccess) { printf("CUDA error %s\n", cudaGetErrorString(e)); ++g_fail; }
@@ -194,7 +198,7 @@ __global__ void evap_rate_f_kernel(CondSpeciesPropsF cp, CondTablesF tb, float T
 // ---- (g) 蒸発ソース (一様 ṙ 形) の値そのものを多分散モーメントで検証 (codex result M4) ----
 static void test_evap_source_values()
 {
-    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0; o.h2oLatent=cond_test_latent_ref(0.0, true);
     const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o);
     const double T = 250.0, rod = 0.1, Yw = 0.0377, S = 0.5;
     const double pv = S*cond_psat(cp, T), rho_l = cond_rho_cond(cp, T);
@@ -228,7 +232,7 @@ static void test_evap_source_values()
 // 上流は dry (φ_in=0) なので凝縮域では流入希釈と成長が釣り合う非自明な固定点になる。
 static void test_one_cell_fixed_point()
 {
-    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0; o.h2oLatent=cond_test_latent_ref(0.0, true);
     const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o);
     CondTablesHost ht; cond_tables_build_host(cp, ht); const CondTablesF tb = cond_tables_upload(ht); (void)tb;
     const double N2lo[9]={2.210371497e+04,-3.818461820e+02,6.082738360e+00,-8.530914410e-03,1.384646189e-05,-9.625793620e-09,2.519705809e-12,7.108460860e+02,-1.076003744e+01};
@@ -304,7 +308,7 @@ static void test_one_cell_fixed_point()
 //      通して蒸発し続け、g≤g_rm で消滅クランプが確定すること (旧 r30<2 r_min→S=0 では止まっていた)。
 static void test_small_droplet_evaporates()
 {
-    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0; o.h2oLatent=cond_test_latent_ref(0.0, true);
     const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o);
     CondTablesHost ht; cond_tables_build_host(cp, ht); const CondTablesF tb = cond_tables_upload(ht);
     const double N2lo[9]={2.210371497e+04,-3.818461820e+02,6.082738360e+00,-8.530914410e-03,1.384646189e-05,-9.625793620e-09,2.519705809e-12,7.108460860e+02,-1.076003744e+01};
@@ -366,7 +370,7 @@ static void test_small_droplet_evaporates()
 static void test_realizability_projection()
 {
     printf("[l] moment realizability minimal correction (x=Q1/(Q0 r), y=Q2/(Q0 r^2), r=(Q3/Q0)^(1/3))\n");
-    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0; o.h2oLatent=cond_test_latent_ref(0.0, true);
     const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o);
     const double T = 250.0, rho_l = cond_rho_cond(cp, T), ro = 1.0;
     const double Q0 = 1.0e14, r = 5.0e-8;
@@ -473,7 +477,7 @@ int main()
 {
     test_realizability_projection();
     // (a) Δτ 不変性: H2O carrier (T × S × Q0 × g) と N2 pure
-    { std::vector<State> st; CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    { std::vector<State> st; CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0; o.h2oLatent=cond_test_latent_ref(0.0, true);
       const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o); const double Yw = 0.0377, Rw = cp.R, Rmix = 285.0;
       for (double T = 220.0; T <= 290.0; T += 10.0) for (double S : {0.5, 0.99, 1.01, 2.0, 30.0})
         for (double q0 : {0.0, 1.0e13, 1.0e16}) for (double g : {0.0, 1.0e-5, 1.0e-2, 0.03}) for (double rb : {1.0e-8, 1.0e-7}) {
@@ -486,7 +490,7 @@ int main()
           st.push_back({T, ro*Rmix*T, ro, Yw, g, 1.0e16, 1.0e9, 1.0e2}); }
       printf("== (a) H2O TP carrier: %zu states ==\n", st.size());
       test_dt_invariance("H2O", COND_MODEL_H2O, 1, st); }
-    { std::vector<State> st; CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    { std::vector<State> st; CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0; o.h2oLatent=cond_test_latent_ref(0.0, true);
       const CondSpeciesProps cp = condProps_make(COND_MODEL_N2, o);
       for (double T = 40.0; T <= 100.0; T += 10.0) for (double S : {0.5, 0.99, 1.1, 10.0})
         for (double q0 : {0.0, 1.0e15}) for (double g : {0.0, 1.0e-3, 5.0e-2}) for (double rb : {3.0e-8, 5.0e-7}) {

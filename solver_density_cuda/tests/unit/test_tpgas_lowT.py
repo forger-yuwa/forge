@@ -176,7 +176,9 @@ def main():
             src = os.path.join(root, f"src_{int(T)}"); dst = os.path.join(root, f"dst_{int(T)}")
             p = subprocess.run([sys.executable, os.path.join(TOOLS, "convert_species_field.py"), os.path.join(src, "in.h5"), os.path.join(dst, "in.h5"),
                                 "--meta", os.path.join(dst, "species_meta.yaml"), "--src-meta", os.path.join(src, "species_meta.yaml"), "--mode", "reinit"],
-                               capture_output=True, text=True)
+                               capture_output=True, text=True,
+                               # 合成の 1 セル入力は化学種属性を持たない (未検証): #3c 以降の変換器は既定で停止するので、その実行だけ許可する
+                               env=dict(os.environ, FORGE_ALLOW_UNVERIFIED_SPECIES="1"))
             ok_rc = p.returncode == 0
             with h5py.File(os.path.join(dst, "in.h5")) as f:
                 ro = float(f["VALUE/ro"][0]); roe = float(f["VALUE/roe"][0]); Yw = [float(f["VALUE/roY0"][0]) / ro, float(f["VALUE/roY1"][0]) / ro]

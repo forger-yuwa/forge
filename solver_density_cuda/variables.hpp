@@ -24,6 +24,16 @@ public:
     std::map<std::string, flow_float*> c_d; // device cell variables
     std::map<std::string, flow_float*> p_d; // device plane variables
 
+    // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.3)。
+    // c_d は flow_float* のマップなので double を入れられない → **型付きの専用領域**として持つ。
+    // 並びは {ro, roUx, roUy, roUz, roe}。**内点 CV (nCells) だけ**確保する (commit が動かすのは内点のみ)。
+    // qAccumulatorFP64 == 0 のときは確保しない (OFF 経路は一切変わらない)。
+    double* qacc_d[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+    int*    qaccAdopt_d = nullptr;   // reconcile が発火したセル数 (monitorInterval ごとにログへ)
+    void allocQAccumulator(geom_int nCells);              // 確保 + 現在の Q から初期化
+    void initQAccumulatorFromQ(geom_int nCells);          // Q (float32) → Qacc (FP64)
+    void freeQAccumulator();
+
 
     // 化学種輸送 (M2): registerSpecies() で 1 化学種ごとの保存量/派生量を末尾に追加するため
     // 非 const とする。registerSpecies は変数構築後 allocVariables 前に 1 度だけ呼ぶ。

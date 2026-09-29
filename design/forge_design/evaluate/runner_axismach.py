@@ -39,8 +39,8 @@ from ..geometry.wall_axismach import (AxisMachCFDWall, area_ratio_isentropic,
                                       wall_qa)
 from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
-from .ic import paste_isentropic_ic
-from .runner import FORGE_BUILD, FORGE_TOOLS, PROBE_STUB, _ENV, run_forge
+from .ic import paste_isentropic_ic, stamp_isentropic_ic_species
+from .runner import FORGE_TOOLS, PROBE_STUB, _ENV, converter_path, run_forge
 from .runner_wt import (_bcond, _config_euler, _config_euler_node,
                         _config_sst_node)
 
@@ -91,10 +91,16 @@ def _gam_or_gas(p: Problem):
     return p.gas_model if p.is_semiperfect else p.gamma
 
 
-def _apply_gas_to_config(cfg: str, p: Problem, run_dir) -> str:
-    """semi-perfect のとき forge config を **単一擬似種 TP** (thermalMethod 2) に書き換え、
-    NASA-9 混合擬似種を run_dir/species_db.yaml へ出す。cpg なら無変更。
-    設計 (MOC) と同一係数の熱力学で CFD が回る (forge 内蔵 DB と同じ CEA 値)。"""
+def _apply_gas_to_config(cfg: str, p: Problem, run_dir, viscous: bool = False) -> str:
+    """semi-perfect のとき forge config を TP (thermalMethod 2) に書き換える。cpg なら無変更。
+    `physProp.species` には種名と lump の構成 (構成種と全桁の lump 内モル分率, basis: mole) だけを書き、lump の係数は
+    ソルバが起動時に合成する (plan thermophysics-solver-owned-species-db §4.7 #9; 合成済み擬似種の species_db.yaml は作らない)。
+    ソルバ内蔵で解決できない実種 (外部 DB `gas.species_db` 由来など) があるときだけ、その生エントリを
+    species_db_external.yaml に置いて speciesDBFile で渡す。設計 (MOC) と CFD は同じ共通データの係数を使う。
+    `viscous=True` (NS/SST の config) では種ごとの輸送物性を使う: `viscMethod: 1` (空気の Sutherland) を `viscMethod: 2` に、
+    `gas.transport` を実種ごとの `physProp.transport` にする (plan thermophysics-solver-owned-species-db #9b; `gas.transport` 必須)。
+    `thermCondMethod` は viscMethod 2 では読まれないので落とす。`visc` (dt と陰解法対角の剛性見積り) と必須キーの `thermCond`、
+    `prandtlLam` (SST 壁関数の回復係数) は残す。Euler (`viscous=False`) と CPG の config は従来と同じ。"""
     # 切り分け用: evaluate.axisym_method で CPG でも SU2 流軸対称に切替可
     if int(p.evaluate.get("axisym_method", 0)) == 1:
         cfg = cfg.replace("isAxisymmetric: 1", "isAxisymmetric: 1, axisymMethod: 1", 1)
@@ -102,13 +108,20 @@ def _apply_gas_to_config(cfg: str, p: Problem, run_dir) -> str:
         # cfd_gas: cpg = 設計は semi-perfect のまま CFD だけ CPG(γ*, cp 参照値) で回す
         # (TP × node 軸対称の forge 側発散 [case/42 run_0001] の回避。相対比較には十分)
         return cfg
-    from ..gas.composition import write_species_files
+    from ..gas.composition import (physprop_species_flow, solver_species_config, species_db_raw_yaml,
+                                   write_species_meta)
     # 統一スキーマ (plan thermophysics-cea-mole-fraction-species §4.5): evaluate.tp_species {mode: full|lumped, lumps, keep}
-    # (旧 pseudo / split_h2o は別名) を解決済み DB で輸送種配置に解決し、species_db.yaml (由来コメント付き) + species_meta.yaml を書く
+    # (旧 pseudo / split_h2o は別名) を解決済み DB で輸送種配置に解決し、config の species (lump 記法) と species_meta.yaml を書く
     layout = p.species_layout()
     species_list = list(layout.species)
-    write_species_files(layout, run_dir)
-    # thermalMethod 0 → 2、species/speciesDBFile を physProp に追加 (cp/gamma は参照値のまま
+    items, external = solver_species_config(layout)
+    transport = p.transport_for_ns(layout) if viscous else None
+    write_species_meta(layout, run_dir, transport)
+    db_key = ""
+    if external:
+        (Path(run_dir) / "species_db_external.yaml").write_text(species_db_raw_yaml(external))
+        db_key = ', speciesDBFile: "species_db_external.yaml"'
+    # thermalMethod 0 → 2、species (/speciesDBFile) を physProp に追加 (cp/gamma は参照値のまま
     # 残すが TP では NASA-9 が優先される)
     cfg = cfg.replace("thermalMethod: 0", "thermalMethod: 2", 1)
     # [2026-08-16] nodeAxisDirichlet は撤去済み (node は軸ノードを DOF として解く整合セットが常時 ON、
@@ -121,12 +134,23 @@ def _apply_gas_to_config(cfg: str, p: Problem, run_dir) -> str:
     # (case/42 run_0020–0025 で切り分け: 一定 cp 種/陽解法は完走、実 NASA-9 + 陰解法だけ発散、
     #  thermoHrefTemp 298.15 で完走)。IC の roe も同じ datum で作る (paste_isentropic_ic の h_ref)。
     href = float(p.evaluate.get("thermo_href_temp", 298.15))
-    sp_txt = "[" + ", ".join(f'"{k}"' for k in species_list) + "]"   # 引用符付き: NO/N/Y は無引用だと YAML 1.1 で真偽値になる (codex result M1)
+    sp_txt = physprop_species_flow(items)   # 引用符付き: NO/N/Y は無引用だと YAML 1.1 で真偽値になる (codex result M1)
     cfg = cfg.replace("cp: %s, gamma: %s}" % (p.cp, p.gamma),
-                      "cp: %s, gamma: %s,\n           species: %s, speciesDBFile: \"species_db.yaml\", thermoHrefTemp: %s}"
-                      % (p.cp, p.gamma, sp_txt, href), 1)
+                      "cp: %s, gamma: %s,\n           species: %s%s, thermoHrefTemp: %s}"
+                      % (p.cp, p.gamma, sp_txt, db_key, href), 1)
     if f"species: {sp_txt}" not in cfg:
         raise RuntimeError("_apply_gas_to_config: physProp の書き換えに失敗 (テンプレート変更?)")
+    if transport is not None:
+        from ..gas.composition import physprop_transport_flow
+        n_vm = cfg.count("viscMethod: 1,")
+        n_tcm = cfg.count(", thermCondMethod: 1")
+        if n_vm != 1 or n_tcm > 1:
+            raise RuntimeError(f"_apply_gas_to_config: NS の physProp が想定外 (viscMethod: 1 が {n_vm} 個; テンプレート変更?)")
+        cfg = cfg.replace("viscMethod: 1,", "viscMethod: 2,", 1).replace(", thermCondMethod: 1", "", 1)
+        tr_txt = physprop_transport_flow(transport)
+        cfg = cfg.replace(f"species: {sp_txt}{db_key}, ", f"species: {sp_txt}{db_key},\n           transport: {tr_txt}, ", 1)
+        if f"transport: {tr_txt}" not in cfg:
+            raise RuntimeError("_apply_gas_to_config: physProp.transport の書き込みに失敗 (テンプレート変更?)")
     # 凝縮 (evaluate.condensation: dict) — forge の condensation ブロックをそのまま通す
     cond = p.evaluate.get("condensation")
     if cond:
@@ -156,6 +180,29 @@ def _tp_species_Y(p: Problem):
     if layout.n == 1:
         return None
     return layout.Y_transport("inflow")
+
+
+def _stamp_ic_species(p: Problem, run_dir) -> str | None:
+    """新規初期場 (paste_isentropic_ic) に化学種の属性を付ける (TP のときだけ; plan thermophysics-solver-owned-species-db
+    §4.3 #3b)。IC と同じ gas・datum・輸送種の順序と MW を宛先の `forge --resolve-species` の記録と照合し、違えば例外で止める。"""
+    if not p.is_semiperfect or str(p.evaluate.get("cfd_gas", "same")) == "cpg":
+        return None
+    layout = p.species_layout()
+    species = list(layout.species)
+    return stamp_isentropic_ic_species(Path(run_dir) / "nozzle.h5", run_dir, p.gas_model,
+                                       float(p.evaluate.get('thermo_href_temp', 298.15)), species,
+                                       [float(layout.entries[s].MW) for s in species], _tp_species_Y(p))
+
+
+def _restart_same_mesh(res_h5, mesh_h5) -> None:
+    """同一メッシュの段間引き継ぎ: `restart_field.py` (保存量の index コピー、SRC とビット一致を検査; 化学種の属性を継承)。
+    `interp_field.py` (cross-mesh 用) は原始量から保存量を組み直すので同一メッシュには使わない (AGENTS.md「メッシュ変更後の restart」)。"""
+    r = subprocess.run([sys.executable, str(FORGE_TOOLS / "restart_field.py"), str(res_h5), str(mesh_h5)],
+                       env=_ENV, capture_output=True, text=True)
+    with (Path(mesh_h5).parent / "restart_field.log").open("a") as f:
+        f.write(r.stdout + r.stderr)
+    if r.returncode != 0:
+        raise RuntimeError(f"restart_field.py が失敗 ({res_h5} -> {mesh_h5}):\n{r.stdout[-2000:]}{r.stderr[-2000:]}")
 
 
 def _species_info(p: Problem) -> dict | None:
@@ -463,7 +510,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     # 品質検査は cell 変換の一時コピー (品質ツールは node CONNE 非対応)
     (run_dir / "solverConfig.yaml").write_text(
         _apply_gas_to_config(_config_euler(p, n, out_int, 4.0, 1), p, run_dir))
-    subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"],
+    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
                             "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
@@ -480,13 +527,14 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     if implicit_relax is not None:
         cfg_e = cfg_e.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
     (run_dir / "solverConfig.yaml").write_text(cfg_e)
-    subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
+    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
                         float(p.spec["Pt"]), float(p.spec["Tt"]), p.gamma, p.cp,
                         gas=(None if str(p.evaluate.get('cfd_gas', 'same')) == 'cpg' else p.gas_model),
                         h_ref_T=float(p.evaluate.get('thermo_href_temp', 298.15)),
                         species_Y=_tp_species_Y(p))
+    _stamp_ic_species(p, run_dir)          # 新規初期場の化学種属性 (ic_from ならこの後 interp_field が継承/消去を決める)
     if ic_from is not None:
         src = sorted(Path(ic_from).glob("res_[0-9]*.h5"),
                      key=lambda f: int("".join(c for c in f.stem if c.isdigit())))[-1]
@@ -535,9 +583,7 @@ def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, 
                      key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res or int("".join(c for c in res[-1].stem if c.isdigit())) < nsteps:
             raise RuntimeError(f"{label} 段が失敗 (発散切り分けは res_nan_*.h5 を見る)")
-        subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"),
-                        str(res[-1]), str(run_dir / mesh_h5)],
-                       env=_ENV, check=True, capture_output=True, text=True)
+        _restart_same_mesh(res[-1], run_dir / mesh_h5)      # 同一メッシュ: index コピー (旧: interp_field.py)
         for f in run_dir.glob("res_*"):
             f.unlink()
 
@@ -664,6 +710,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
         raise ValueError("runner_axismach は wind_tunnel_axisym_axismach 専用")
+    # 種ごとの輸送物性 (#9b): TP の NS は gas.transport 必須。run dir を作る前・設計チェーンの前に検査する
+    transport = p.transport_for_ns()
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=False)
     d = design_chain(p)
@@ -779,7 +827,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     # 品質は cell 変換コピーで検査 (品質ツールは node CONNE 非対応)
     (run_dir / "solverConfig.yaml").write_text(
         _apply_gas_to_config(_config_euler(p, n, out_int, 4.0, 1), p, run_dir))
-    subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"],
+    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
                             "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
@@ -790,18 +838,19 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     if q.returncode != 0:
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
     # node/SST 変換 (config を先に書く — wall_dist は no-slip 壁で作られる)
-    cfg_ns = _apply_gas_to_config(_config_sst_node(p, n, out_int, cfl_main), p, run_dir)
+    cfg_ns = _apply_gas_to_config(_config_sst_node(p, n, out_int, cfl_main), p, run_dir, viscous=True)
     if implicit_relax is not None:
         # 陰解法の緩和 (cfl 6 + implicitRelax 0.7 が生産推奨: case/45 run_0018)。deltaT ブロックに挿入
         cfg_ns = cfg_ns.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
     (run_dir / "solverConfig.yaml").write_text(cfg_ns)
-    subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
+    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
                         float(p.spec["Pt"]), float(p.spec["Tt"]), p.gamma, p.cp,
                         gas=(None if str(p.evaluate.get('cfd_gas', 'same')) == 'cpg' else p.gas_model),
                         h_ref_T=float(p.evaluate.get('thermo_href_temp', 298.15)),
                         species_Y=_tp_species_Y(p))
+    _stamp_ic_species(p, run_dir)          # 新規初期場の化学種属性 (ic_from ならこの後 interp_field が継承/消去を決める)
     if ic_from is not None:
         src = sorted(Path(ic_from).glob("res_[0-9]*.h5"),
                      key=lambda f: int("".join(c for c in f.stem if c.isdigit())))[-1]
@@ -850,6 +899,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "wall_thermal": p.wall_thermal,
             "ic_from": str(ic_from) if ic_from else None,
             "mesh": {"ni": mp.ni, "nj": mp.nj, "wall_first_frac": mp.wall_first_frac}}
+    if transport is not None:
+        # 来歴: 種ごとの輸送物性の指定 (solverConfig の physProp.transport と同じ; 解決結果はソルバの resolved_species 記録)
+        info["transport"] = {"source": "gas.transport", "viscMethod": 2, "models": transport}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 
@@ -875,9 +927,7 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
                      key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res or int("".join(c for c in res[-1].stem if c.isdigit())) < nsteps:
             raise RuntimeError(f"段階起動が失敗 (rc={rc}, res={res[-1].name if res else None})")
-        subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"),
-                        str(res[-1]), str(run_dir / "nozzle.h5")],
-                       env=_ENV, check=True, capture_output=True, text=True)
+        _restart_same_mesh(res[-1], run_dir / "nozzle.h5")    # 同一メッシュ: index コピー (旧: interp_field.py)
         for f in run_dir.glob("res_*"):
             f.unlink()
 

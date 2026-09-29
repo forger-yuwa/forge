@@ -267,10 +267,16 @@ Docker 経由 (`./tools/run_paraview_gui.sh`) の ParaView は Python 3.10 な�
 | `subcooling` | 過冷却度 $T_{sat}-T$ [K] (正 = 過冷却、負 = 過熱) |
 | `p_sat_ice`, `S_ice`, `T_sat_ice`, `subcooling_ice` | `Compute Ice (H2O)` ON のとき、氷基準 (Murphy & Koop ice 式) の同量 |
 
-プロパティ: `Species` (H2O / N2)、`Vapor Mass Fraction Array` (既定 `Y1` = TP `split_h2o` の H2O)、
+プロパティ: `Species` (H2O / N2)、`Run Config (solverConfig.yaml path)`、`Vapor Mass Fraction Array`、
 `Liquid Mass Fraction Array` (既定 `g_0`、無ければ 0)、`Vapor Mass Fraction Constant` (蒸気配列が無い run 用。
 空気凝縮 CPG carrier は `condVaporMassFraction` の 0.7671 を入れる)、N2 の低温整合オプション (`condN2PsatLowT` /
 `condN2LatentLowT` / `condN2LiquidCp` に対応)。
+
+蒸気配列 `Y{index}` は `Y1` を既定採用しない (種順序で H2O の index が変わる)。次の順で決める:
+(1) `Run Config` を指定すればその `solverConfig.yaml` から凝縮種 (無ければ H2O) の index を名前で解決、
+(2) `Vapor Mass Fraction Array` を明示すればそれ (`none` で配列なし・定数を使う)、
+(3) どちらも空なら、上流 reader の入力ファイル (`res_*.xmf`) と同じディレクトリの `solverConfig.yaml` から自動解決。
+run ディレクトリの xmf を開くなら何も入れずに Apply でよい。見つからなければエラーで止まる。
 
 検算: case/44 `run_0123_va3_M4.19_Lc8_noneq_inletTt_cont/res_12000.xmf` (node TP split_h2o, 非平衡凝縮 ON) で
 `supersaturation` は forge の `condS_0` と相対 2e-6、`T_sat` は `condTsat_0` と 3e-5 K で一致 (pvpython 検証、2026-09-15)。
@@ -355,7 +361,11 @@ python3 solver_density_cuda/tools/interp_field.py <past_run>/res_NNNN.h5 <new_ru
 - 保存量 (ro,roUx,roUy,roUz,roe)・乱流 (roK,roOmega)・スカラー輸送 (roY*) を移植。
 - **wall_dist は移植しない** (新メッシュで convert 時に計算された値を使う; 別メッシュの距離は不整合)。
 - SRC は res (primitives) でも入力 h5 (conserved) でも可。scipy `cKDTree` 最近傍。
-- 同一メッシュ内での restart (背圧変更など) は同ケースの `restart_field.py` を使う。
+- 同一メッシュ内での restart (背圧変更など) は **`solver_density_cuda/tools/restart_field.py`** を使う
+  (`res_*.h5` の保存量を index コピーし、SRC とビット一致することを検査して VERDICT を出す)。
+  **`interp_field.py` は同一メッシュに使わない** — cross-mesh 用で原始量から保存量を組み直すため、
+  `roUx = ρ·Ux` の丸めで元の保存量に戻らない (2026-09-23, case/56 で `roUy` が最大 1.6 % ずれた)。
+  `case/*/restart_field.py` の古い実装も原始量から組み直すので使わないこと。
 
 ## メッシュ品質チェック (計算前・必須)
 

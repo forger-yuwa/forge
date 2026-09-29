@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """interp_field.py のトレーサ転送回帰 (codex result-5 M1): 元 res に原始量 Xi しか無いとき ρ·Xi を roXi として転送する。
 usage: python3 tests/unit/test_interp_field_tracer.py  (tools/ の interp_field.py を subprocess で実行)"""
-import subprocess, sys, tempfile
+import os, subprocess, sys, tempfile
 from pathlib import Path
 import h5py, numpy as np
 HERE = Path(__file__).resolve().parents[2] / "tools"
@@ -27,8 +27,20 @@ with tempfile.TemporaryDirectory() as td:
         mesh(f); V = f.create_group("VALUE"); ro = np.ones(n)
         for k in ("ro", "roUx", "roUy", "roUz", "roe"): V[k] = ro.astype(np.float32)
         V["roY0"] = ro.astype(np.float32); V["roXi"] = (0.8 * ro).astype(np.float32)
-    r = subprocess.run([sys.executable, str(HERE / "interp_field.py"), str(td / "src" / "res_10.h5"), str(td / "dst" / "mesh.h5")], capture_output=True, text=True)
-    check("interp_field (res に Xi のみ): 終了コード 0", r.returncode == 0, (r.stdout + r.stderr)[-200:].replace("\n", " | "))
+    # 合成の res は化学種属性を持たない (未検証)。#3c 以降のツールは既定で停止するので、まずそれを確かめ、
+    # 本題のトレーサ転送はその実行だけの許可 FORGE_ALLOW_UNVERIFIED_SPECIES=1 で回す (宛先は属性なしのまま)
+    args = [sys.executable, str(HERE / "interp_field.py"), str(td / "src" / "res_10.h5"), str(td / "dst" / "mesh.h5")]
+    env = dict(os.environ); env.pop("FORGE_ALLOW_UNVERIFIED_SPECIES", None)
+    r = subprocess.run(args, capture_output=True, text=True, env=env)
+    with h5py.File(td / "dst" / "mesh.h5") as f:
+        xi0 = f["VALUE/roXi"][:] / f["VALUE/ro"][:]
+    check("interp_field (属性なしの SRC, 既定): 停止し宛先を書き換えない", r.returncode != 0 and "REFUSED" in r.stdout + r.stderr
+          and np.allclose(xi0, 0.8, atol=1e-6), (r.stdout + r.stderr)[-200:].replace("\n", " | "))
+    env["FORGE_ALLOW_UNVERIFIED_SPECIES"] = "1"
+    r = subprocess.run(args, capture_output=True, text=True, env=env)
+    check("interp_field (res に Xi のみ, FORGE_ALLOW_UNVERIFIED_SPECIES=1): 終了コード 0", r.returncode == 0, (r.stdout + r.stderr)[-200:].replace("\n", " | "))
+    with h5py.File(td / "dst" / "mesh.h5") as f:
+        check("interp_field: 許可して通した宛先に化学種属性が無い", not any(k.startswith("species") for k in f.attrs), str(list(f.attrs)))
     with h5py.File(td / "dst" / "mesh.h5") as f:
         xi = f["VALUE/roXi"][:] / f["VALUE/ro"][:]
         check("interp_field: 宛先の roXi/ρ = 0.3 (ρ·Xi で転送)", np.allclose(xi, 0.3, atol=1e-6), f"{xi[0]:.6f}")

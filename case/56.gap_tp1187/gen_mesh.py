@@ -10,6 +10,7 @@ Gate B で条件は固めた。ここは **forge 側で分母 $q_{FP}$ を作る
 (層流 run は実前縁なのでオフセット 0)。
 """
 import argparse, json, math, os, shutil, subprocess, sys
+import numpy as np
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -43,7 +44,7 @@ slip:   {physID: 5, kind: slip, outputHDFflg: 0, ints: , floats: }
 """
 
 
-def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl):
+def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl, r_up=1.06, r_buf=1.03, split_dn=False, wall_dn=False, top_layers=0):
     L = []; A = L.append
     A("// case/56 — TP-1187 較正パネル相当の 2D 平板 (平面 2D, node)。gen_mesh.py が生成。")
     A("Geometry.PointNumbers = 0;  lc = 0.05;")
@@ -59,19 +60,84 @@ def geo_text(x_in, x_out, x_plate_end, H, ny, r_y, nx_up, nx_pl, nx_buf, bump_pl
     for i, (b, t) in enumerate(zip(range(1, 5), range(5, 9)), start=7):
         A(f"Line({i}) = {{{b}, {t}}};")              # 7..10 縦線
     A(f"Transfinite Line {{7, 8, 9, 10}} = {ny} Using Progression {r_y:.8f};")
-    A(f"Transfinite Line {{1, 4}} = {nx_up} Using Progression 1.06;")
+    A(f"Transfinite Line {{1, 4}} = {nx_up} Using Progression {r_up};")
     A(f"Transfinite Line {{2, 5}} = {nx_pl} Using Bump {bump_pl};")
-    A(f"Transfinite Line {{3, 6}} = {nx_buf} Using Progression 1.03;")
+    A(f"Transfinite Line {{3, 6}} = {nx_buf} Using Progression {r_buf};")
     for k in range(1, 4):
         A(f"Curve Loop({k}) = {{{k}, {7+k}, -{3+k}, -{6+k}}};")
         A(f"Plane Surface({k}) = {{{k}}};  Transfinite Surface {{{k}}};  Recombine Surface {{{k}}};")
-    A('Physical Curve("inlet",  1) = {7};')
-    A('Physical Curve("outlet", 2) = {10};')
-    A('Physical Curve("top",    3) = {4, 5, 6};')
+    if top_layers > 0:
+        # 既存の y 分布をそのまま残し、上端から同じ等比で top_layers 層を別ブロックとして積む
+        # (下のブロックの節点位置は変えない。2026-09-27 codex diagnose: 高さだけを変える A/B)
+        h_last = H * (r_y - 1.0) * r_y ** (ny - 2) / (r_y ** (ny - 1) - 1.0)
+        H2 = H + h_last * r_y * (r_y ** top_layers - 1.0) / (r_y - 1.0)
+        A(f"H2 = {H2:.12f};")
+        for i, xs in enumerate(("x_in", "xle", "xpe", "x_out"), start=9):
+            A(f"Point({i}) = {{{xs}, H2, 0.0, lc}};")
+        for i in range(11, 14):
+            A(f"Line({i}) = {{{i-2}, {i-1}}};")          # 11..13 新しい上辺
+        for i, (b, t) in enumerate(zip(range(5, 9), range(9, 13)), start=14):
+            A(f"Line({i}) = {{{b}, {t}}};")              # 14..17 上ブロックの縦線
+        A(f"Transfinite Line {{14, 15, 16, 17}} = {top_layers + 1} Using Progression {r_y:.8f};")
+        A(f"Transfinite Line {{11}} = {nx_up} Using Progression {r_up};")
+        A(f"Transfinite Line {{12}} = {nx_pl} Using Bump {bump_pl};")
+        A(f"Transfinite Line {{13}} = {nx_buf} Using Progression {r_buf};")
+        for k in range(1, 4):
+            A(f"Curve Loop({k+3}) = {{{k+3}, {14+k}, -{10+k}, -{13+k}}};")
+            A(f"Plane Surface({k+3}) = {{{k+3}}};  Transfinite Surface {{{k+3}}};  Recombine Surface {{{k+3}}};")
+        A('Physical Curve("inlet",  1) = {7, 14};')
+        A('Physical Curve("outlet", 2) = {10, 17};')
+        A('Physical Curve("top",    3) = {11, 12, 13};')
+    else:
+        A('Physical Curve("inlet",  1) = {7};')
+        A('Physical Curve("outlet", 2) = {10};')
+        A('Physical Curve("top",    3) = {4, 5, 6};')
+    if wall_dn:    # 下流区間も等温壁 (平板を出口まで延ばす。slip 後流を作らない)
+        A('Physical Curve("plate",  4) = {2, 3};')
+        A('Physical Curve("slip",   5) = {1};')
+    elif split_dn:   # 下流の slip バッファを別 physID に (wallDistExtraPhysIDs で壁距離に含められるように)
+        A('Physical Curve("plate",  4) = {2};')
+        A('Physical Curve("slip",   5) = {1};')
+        A('Physical Curve("slip_dn", 7) = {3};')
+    else:
+        A('Physical Curve("plate",  4) = {2};')
+        A('Physical Curve("slip",   5) = {1, 3};')
+    A(f'Physical Surface("fluid", 8) = {{{"1, 2, 3, 4, 5, 6" if top_layers > 0 else "1, 2, 3"}}};')
+    return "\n".join(L) + "\n"
+
+
+def geo_text_ylist(x_in, x_out, x_plate_end, ys, nx_up, nx_pl, nx_buf, bump_pl):
+    """壁法線の節点座標列 `ys` (0 から H まで昇順) をそのまま使う版。
+
+    底辺 3 本を transfinite で割り (既定版と同じ x 分布)、`Extrude ... Layers` の
+    累積高さで y 方向に押し出す。2026-09-26 の平板 A/B (plan #60、codex diagnose 2 回目) で、
+    3D 格子の入口列と同じ y 配列を 2D 平板に与えるために足した。"""
+    ys = np.asarray(ys, dtype=float)
+    H = float(ys[-1])
+    L = []; A = L.append
+    A("// case/56 — 2D 平板 (y 節点列指定)。gen_mesh.py --y-file が生成。")
+    A("Geometry.PointNumbers = 0;  lc = 0.05;")
+    A(f"x_in = {x_in:.9f}; xle = 0.0; xpe = {x_plate_end:.9f}; x_out = {x_out:.9f};")
+    for i, xs in enumerate(("x_in", "xle", "xpe", "x_out"), start=1):
+        A(f"Point({i}) = {{{xs}, 0.0, 0.0, lc}};")
+    for i in range(1, 4):
+        A(f"Line({i}) = {{{i}, {i+1}}};")
+    A(f"Transfinite Line {{1}} = {nx_up} Using Progression 1.06;")
+    A(f"Transfinite Line {{2}} = {nx_pl} Using Bump {bump_pl};")
+    A(f"Transfinite Line {{3}} = {nx_buf} Using Progression 1.03;")
+    n = len(ys) - 1
+    ones = ",".join(["1"] * n)
+    hs = ",".join(f"{v / H:.12f}" for v in ys[1:])
+    A(f"e[] = Extrude {{0, {H:.12f}, 0}} {{ Line{{1, 2, 3}}; Layers{{ {{{ones}}}, {{{hs}}} }}; Recombine; }};")
+    # e[] は各線ごとに [上辺, 面, 側線(終点側), 側線(始点側, 向き負)] の 4 つ (gmsh 4.x で Printf 確認)。
+    # 隣り合う線は側線を共有するので、入口 = 線 1 の始点側、出口 = 線 3 の終点側
+    A('Physical Curve("inlet",  1) = {Abs(e[3])};')
+    A('Physical Curve("outlet", 2) = {e[10]};')
+    A('Physical Curve("top",    3) = {e[0], e[4], e[8]};')
     A('Physical Curve("plate",  4) = {2};')
     A('Physical Curve("slip",   5) = {1, 3};')
-    A('Physical Surface("fluid", 8) = {1, 2, 3};')
-    return "\n".join(L) + "\n"
+    A('Physical Surface("fluid", 8) = {e[1], e[5], e[9]};')
+    return "\n".join(L) + "\n", H
 
 
 def ny_for(y1, H, r):
@@ -90,10 +156,38 @@ def main():
     ap.add_argument("--nx-plate", type=int, default=901)
     ap.add_argument("--nx-buf", type=int, default=41)
     ap.add_argument("--bump-plate", type=float, default=0.15)
+    ap.add_argument("--r-up", type=float, default=1.06, help="助走区間の等比 (既定は従来値)")
+    ap.add_argument("--r-buf", type=float, default=1.03, help="出口バッファの等比 (既定は従来値)")
+    ap.add_argument("--split-dn-slip", action="store_true", help="下流 slip バッファを physID 7 に分ける")
+    ap.add_argument("--wall-dn", action="store_true", help="下流区間の底辺も平板 (physID 4) にする (平板を出口まで延ばす)")
+    ap.add_argument("--top-layers", type=int, default=0, help="既存の y 分布の上に同じ等比で積む層数 (高さだけを変える A/B 用)")
+    ap.add_argument("--walldist-extra", default="", help="変換時の mesh.wallDistExtraPhysIDs (例: 7)")
     ap.add_argument("--tag", default="fp")
     ap.add_argument("--no-convert", action="store_true")
+    ap.add_argument("--y-file", default=None,
+                    help="壁法線の節点 y 座標列 (1 行 1 値、0 から上端まで昇順)。指定時は --y1/--r-y/--H を使わない")
     a = ap.parse_args()
 
+    MESH.mkdir(exist_ok=True)
+    if a.y_file:
+        # --y-file 経路は x 方向の等比 (1.06/1.03) と BC 割り当てが固定。黙って無視しないよう拒否する (codex 2026-09-27)
+        if a.wall_dn or a.top_layers or a.split_dn_slip or a.r_up != 1.06 or a.r_buf != 1.03:
+            sys.exit("--y-file は --wall-dn/--top-layers/--split-dn-slip/--r-up/--r-buf に対応していない")
+        ys = np.loadtxt(a.y_file)
+        if ys[0] != 0.0 or np.any(np.diff(ys) <= 0):
+            sys.exit(f"{a.y_file}: 0 から始まる狭義単調増加の列でない")
+        txt, H = geo_text_ylist(a.x_in, a.x_out, a.x_plate_end, ys,
+                                a.nx_up, a.nx_plate, a.nx_buf, a.bump_plate)
+        (MESH / f"{a.tag}.geo").write_text(txt)
+        print(f"[{a.tag}] y 節点列 {a.y_file}: ny = {len(ys)}, y1 = {ys[1]*1e6:.3f} µm, H = {H*1e2:.1f} cm")
+    else:
+        make_progression(a)
+    subprocess.run(["gmsh", "-2", str(MESH / f"{a.tag}.geo"), "-o", str(MESH / f"{a.tag}.msh"),
+                    "-format", "msh41", "-v", "1"], check=True)
+    convert(a)
+
+
+def make_progression(a):
     y1 = a.y1 * 1e-6
     ny = ny_for(y1, a.H, a.r_y)
     lo, hi = 1.001, 1.5
@@ -104,20 +198,26 @@ def main():
             lo = r
         else:
             hi = r
-    MESH.mkdir(exist_ok=True)
     txt = geo_text(a.x_in, a.x_out, a.x_plate_end, a.H, ny, r,
-                   a.nx_up, a.nx_plate, a.nx_buf, a.bump_plate)
+                   a.nx_up, a.nx_plate, a.nx_buf, a.bump_plate, a.r_up, a.r_buf, a.split_dn_slip, a.wall_dn, a.top_layers)
     (MESH / f"{a.tag}.geo").write_text(txt)
     print(f"[{a.tag}] 平板 {a.x_plate_end*1e2:.0f} cm, H = {a.H*1e2:.0f} cm")
     print(f"        ny = {ny} (y1 = {a.H*(r-1)/(r**(ny-1)-1)*1e6:.3f} µm, r = {r:.5f}), "
           f"節点 ~{(a.nx_up+a.nx_plate+a.nx_buf-2)*ny/1000:.0f}k")
-    subprocess.run(["gmsh", "-2", str(MESH / f"{a.tag}.geo"), "-o", str(MESH / f"{a.tag}.msh"),
-                    "-format", "msh41", "-v", "1"], check=True)
+
+
+def convert(a):
     if a.no_convert:
         return
     conv = MESH / "_conv"; conv.mkdir(exist_ok=True)
-    (conv / "solverConfig.yaml").write_text(CONV_CFG)
-    (conv / "bcondConfig.yaml").write_text(CONV_BC)
+    cfg = CONV_CFG
+    if getattr(a, "walldist_extra", ""):
+        cfg = cfg.replace('valueFileName: "m.h5"}', f'valueFileName: "m.h5", wallDistExtraPhysIDs: [{a.walldist_extra}]}}')
+    bcs = CONV_BC
+    if getattr(a, "split_dn_slip", False):
+        bcs += "slip_dn: {physID: 7, kind: slip, outputHDFflg: 0, ints: , floats: }\n"
+    (conv / "solverConfig.yaml").write_text(cfg)
+    (conv / "bcondConfig.yaml").write_text(bcs)
     r2 = subprocess.run([str(BUILD / "convertGmshToForge"), str(MESH / f"{a.tag}.msh"), "m.h5"],
                         cwd=conv, env=ENV, capture_output=True, text=True)
     (conv / f"convert_{a.tag}.log").write_text(r2.stdout + r2.stderr)

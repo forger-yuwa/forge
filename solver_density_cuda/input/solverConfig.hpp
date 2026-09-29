@@ -1,11 +1,13 @@
 #pragma once
 
 #include "flowFormat.hpp"
+#include "speciesLump.hpp"   // SpeciesLumpSpec (同じディレクトリ)
 
 #include <iostream>
 #include <string>
 #include <vector>
 #include <map>
+#include <utility>
 
 #include "yaml-cpp/yaml.h"
 #include <stdexcept>
@@ -96,6 +98,12 @@ public:
     // blockDPLUR==1 専用・lowMachPrecond>=2 とは併用不可 (config 検証で拒否)。
     // plans/active/time_integration-line-implicit.md
     int lineImplicit = 0;
+    // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.3)。
+    // 1: Q (ro..roe) の正本を内点 CV だけの FP64 配列に置き、commit を Qacc += dq (FP64) で行う。
+    //    Q 自体は float32 のまま全カーネルが読む。step 末尾の reconcile で、FP32 の別 writer が
+    //    書き換えたセルだけ Qacc を追従させる。**残余ゼロなら OFF とビット同一**。
+    // 既定 0: 対応経路 (timeIntegration 11 && unsteady 0) 以外は起動時に拒否する。
+    int qAccumulatorFP64 = 0;
     // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md)。lineImplicit==1 専用。
     int lineKFreeze = 0;              // 1: dual-time サブ反復間で K/diag/LU を凍結 (subiter 0 のみ構築)
     int lineViscCoupling = 0;         // 1: line 面にスカラー粘性結合 K+=α·I (対角 2α→α)
@@ -583,6 +591,10 @@ public:
     // 多成分 thermally-perfect gas (thermalMethod==2)。calorically-perfect 経路では未使用。
     int nSpecies = 1;                          // 化学種数 (既定 1 = 単成分)
     std::vector<std::string> speciesNames;     // 混合を構成する化学種名。順序が index s を定義
+    std::vector<SpeciesLumpSpec> speciesLumps; // physProp.species のうち lump (擬似種) で書いた要素 (起動時に合成; plan thermophysics-solver-owned-species-db #6a)
+    // physProp.transport: 実種 (lump は構成種名) ごとの輸送物性の出所 {種名: cea|kinetic|fit|custom:<名前>_v<版>} を書いた順で
+    // (plan thermophysics-solver-owned-species-db #5t2)。空なら従来経路。解決・検査は speciesTransportDB_resolve。
+    std::vector<std::pair<std::string, std::string>> speciesTransport;
     std::string speciesDBFile = "";            // 任意: NASA-9/LJ 係数の外部 DB (yaml)。空なら内蔵 DB
     int speciesDiffusionMethod = 1;            // 0: 定数 Schmidt, 1: kinetic theory 混合平均拡散
     // TP の温度反転をハイブリッド (float Newton + double 1 段研磨, thermo_T_from_e_hybrid) にする。0: 従来 double Newton。

@@ -172,7 +172,7 @@ __global__ void ROE_d
             ca_L  = sqrt(max(ga*P_L/ro_L, small_a2));
             // 非平衡凝縮 (二相): roe/Ht を二相に補正 (差 g(cpT-L)/質量)。g_total==nullptr で従来。
             if (g_total != nullptr) {
-                const CondSpeciesProps cprC = (condModel == 1) ? condProps_H2O() : condProps_N2();
+                const CondSpeciesProps cprC = (condModel == 1) ? cnd.cprops : condProps_N2();   // H2O は種 DB の気液ペア入り (cnd.cprops; plan #10)、N2 は従来の既定物性
                 const flow_float dL0 = g_total[ic0]*(cp_cpg*T_cell[ic0] - (flow_float)cond_latent(cprC, (double)T_cell[ic0]));
                 roe_L += ro_L*dL0;  Ht_L += dL0;
             }
@@ -203,7 +203,7 @@ __global__ void ROE_d
             Ht_R  = roe_R/ro_R + P_R/ro_R;
             ca_R  = sqrt(max(ga*P_R/ro_R, small_a2));
             if (g_total != nullptr) {
-                const CondSpeciesProps cprC = (condModel == 1) ? condProps_H2O() : condProps_N2();
+                const CondSpeciesProps cprC = (condModel == 1) ? cnd.cprops : condProps_N2();   // H2O は種 DB の気液ペア入り (cnd.cprops; plan #10)、N2 は従来の既定物性
                 const flow_float dR0 = g_total[ic1]*(cp_cpg*T_cell[ic1] - (flow_float)cond_latent(cprC, (double)T_cell[ic1]));
                 roe_R += ro_R*dR0;  Ht_R += dR0;
             }

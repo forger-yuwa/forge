@@ -3,6 +3,9 @@
 //   Level1: ||LR-I||, ||RΛL - A_FD||/||A_FD||  (CPG/TP, 複数温度/Mach/法線)
 //   Level2: A+ + A- = A,  法線反転  A_{-n}^+ = -A_n^- ,  A_{-n}^- = -A_n^+
 // ビルド: g++ -O2 -I solver_density_cuda solver_density_cuda/tools/test_eos_jacobian.cpp -o /tmp/teij
+//   (plan #10 以降: H2O の潜熱に共通データの気液ペアが要るので、-I <solver_density_cuda> -I <埋め込みヘッダの生成先> と
+//    solver_density_cuda/input/speciesDB.cpp solver_density_cuda/input/speciesTransportDB.cpp -lyaml-cpp を足す;
+//    生成は tests/unit/cond_latent_test_helper.cuh 冒頭)
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -10,6 +13,7 @@
 #include "../cuda_forge/eos_jacobian_d.cuh"
 #include "../cuda_forge/block_dplur_jacobian_d.cuh"  // Level3: 実カーネル関数 accumulate_split_jacobian_cf
 #include "../cuda_forge/condensationEOS_d.cuh"        // mode 2: 一温度二相 EOS (固定 g,Y) の frozen 音速/κ
+#include "tests/unit/cond_latent_test_helper.cuh"   // H2O 潜熱の気液ペア (plan thermophysics-solver-owned-species-db #10)
 
 static SpeciesThermo mkN2(){
     const double lo[9]={2.210371497e+04,-3.818461820e+02,6.082738360e+00,-8.530914410e-03,1.384646189e-05,-9.625793620e-09,2.519705809e-12,7.108460860e+02,-1.076003744e+01};
@@ -33,7 +37,7 @@ static SpeciesThermo mkH2O(){
 static SpeciesThermo SP2[2] = {mkN2(), mkH2O()};
 static const double Y2[2] = {0.98905, 0.01095};
 static const double G_FIX = 0.0090;          // 液相質量分率 (固定)
-static const CondSpeciesProps H2O = condProps_H2O();
+static const CondSpeciesProps H2O = cond_test_props_H2O(false);
 
 struct Prim { double ro,ux,uy,uz,P,T,c,h,Ht,kappa,chi,e; };
 

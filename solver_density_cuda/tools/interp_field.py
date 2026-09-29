@@ -17,7 +17,15 @@
   (solverConfig/species_db が無い・種名が DB に無い) ときも既定でエラー**。種を変える restart は `tools/convert_species_field.py`
   (擬似種の展開・名前で移す) を使う。`--force-species` で照合を無視できる (自己責任)。
 
-usage: interp_field.py SRC.h5 DST_input.h5 [--gamma 1.4] [--force-species]
+- **化学種の属性** (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3b): SRC が属性 (`species_hash` ほか) と
+  検証できる解決済み記録を持つときは、宛先 run を `forge --resolve-species` (`--forge` / `FORGE_BIN`) で解決し、互換性ハッシュが
+  一致したときだけ属性を DST に継承する (記録も複製)。不一致は差のある係数を示して書き込み前に拒否。上の設定ファイルによる署名照合も
+  続けて行う (トレーサ・種の並びは記録に無いので)。SRC が未検証 (属性なし / `species_input_unverified=1`) で宛先が TP のとき・
+  宛先を解決できない (旧バイナリ) とき・署名照合で内蔵種が「照合不能」になるときは**既定で拒否** (ソルバと同じ規約, #3c)。
+  許可はその実行だけの `FORGE_ALLOW_UNVERIFIED_SPECIES=1` か `--force-species` で、そのとき DST には属性を付けない
+  (ソルバ側でも未検証として扱われ、その run にも同じ許可が要る)。
+
+usage: interp_field.py SRC.h5 DST_input.h5 [--gamma 1.4] [--force-species] [--forge BIN] [--dst-run DIR]
 """
 import argparse, sys, os
 import numpy as np, h5py
@@ -57,13 +65,15 @@ def centroids(f, nd=2):
     return c
 
 
-def check_species_signatures(src_h5, dst_h5, force):
+def check_species_signatures(src_h5, dst_h5, force, record_verified=False, dst_run=None):
     """SRC/DST の隣の run 設定から化学種署名を作って照合する。不一致・解決不能は拒否 (force で警告に降格)。
-    照合できたときは SRC 署名を返す (必須データセットの存在検査に使う)。"""
-    from forge_species import species_signature, compare_signatures
+    照合できたときは SRC 署名を返す (必須データセットの存在検査に使う)。
+    内蔵種の係数が設定から分からない「照合不能」だけの場合: record_verified (記録で熱物性を照合済み) なら無視、
+    そうでなければ既定で拒否 (FORGE_ALLOW_UNVERIFIED_SPECIES=1 ならその実行だけ警告して通す; 属性は plan_inherit が付けない)。"""
+    from forge_species import species_signature, compare_signatures, allow_unverified_species, UNVERIFIED_GUIDANCE
     sig = {}
     for tag, h5 in (("SRC", src_h5), ("DST", dst_h5)):
-        d = os.path.dirname(os.path.abspath(h5))
+        d = dst_run if (tag == "DST" and dst_run) else os.path.dirname(os.path.abspath(h5))
         try:
             sig[tag] = species_signature(d)
         except Exception as e:   # noqa: BLE001
@@ -73,6 +83,17 @@ def check_species_signatures(src_h5, dst_h5, force):
             print("[interp_field] WARNING (--force-species): " + msg)
             return None
     bad = compare_signatures(sig["SRC"], sig["DST"])
+    unv = [x for x in bad if "unverifiable" in x]
+    bad = [x for x in bad if "unverifiable" not in x]
+    if unv and not bad and not force:
+        if record_verified:
+            unv = []
+        elif allow_unverified_species():
+            print("[interp_field] WARNING: " + "; ".join(unv) + " — SRC is unverified; allowed for this invocation by "
+                  "FORGE_ALLOW_UNVERIFIED_SPECIES=1, copied fields stay unverified (no species attributes)")
+        else:
+            raise SystemExit("[interp_field] REFUSED (nothing written): " + "; ".join(unv)
+                             + " — SRC is unverified (UNVERIFIED).\n" + UNVERIFIED_GUIDANCE)
     if bad:
         msg = ("化学種署名が違う: " + "; ".join(bad) + ". 種の順序/集合/DB が違う場は index コピーできない。"
                " tools/convert_species_field.py SRC_res.h5 DST_input.h5 --meta DST/species_meta.yaml で名前により移す"
@@ -114,11 +135,21 @@ def main():
     ap.add_argument("src"); ap.add_argument("dst")
     ap.add_argument("--gamma", type=float, default=1.4)
     ap.add_argument("--force-species", action="store_true",
-                    help="SRC/DST の physProp.species が違っても index で貼る (通常は convert_species_field.py を使う)")
+                    help="SRC/DST の physProp.species が違っても index で貼る (通常は convert_species_field.py を使う)。属性は付けない")
+    ap.add_argument("--forge", help="--resolve-species を持つ forge (既定: FORGE_BIN, solver_density_cuda/build/forge)")
+    ap.add_argument("--dst-run", help="宛先 run ディレクトリ (solverConfig.yaml の場所; 既定: DST h5 の隣)")
     a = ap.parse_args(); g = a.gamma
+    import forge_species as fsp
+
+    # 化学種の属性 (§4.3): SRC の記録を検証し、宛先を --resolve-species で解決して継承できるか決める (書き込み前)
+    try:
+        species_plan = fsp.plan_inherit(a.src, a.dst_run or os.path.dirname(os.path.abspath(a.dst)), forge=a.forge,
+                                        force=a.force_species, tool="interp_field")
+    except fsp.SpeciesCheckError as e:
+        raise SystemExit(f"[interp_field] REFUSED (nothing written): {e}")
 
     # 化学種署名の照合 (名前・順序・MW・NASA-9 係数・温度区切り・datum・tracer)。解決不能も既定でエラー (codex 2026-09-16 M3 / result-2 M2)。
-    src_sig = check_species_signatures(a.src, a.dst, a.force_species)
+    src_sig = check_species_signatures(a.src, a.dst, a.force_species, record_verified=species_plan is not None, dst_run=a.dst_run)
 
     check_required_datasets(a.src, src_sig)
 
@@ -178,6 +209,7 @@ def main():
             raise SystemExit(f"[interp_field] REFUSED: 転送配列に必須の保存量が無い: {lack}")
 
     tree = cKDTree(cs)
+    fsp.write_species_attrs(a.dst, None)      # 書き込み途中で失敗しても古い属性が残らないように先に消す
     with h5py.File(a.dst, "r+") as d:
         cd = centroids(d, nd)
         dist, idx = tree.query(cd)
@@ -192,7 +224,9 @@ def main():
                 # 初期化し、carrier では rog<=roY_w のクランプで液相が消える: codex 2026-09-16 result M2)。
                 # forge は VALUE/<consName> が存在すれば読む (無ければ 0 = dry restart)。2026-08-18 / 2026-09-16
                 d.create_dataset(ds, data=arr[idx].astype(d["VALUE/ro"].dtype)); moved.append(name+"(new)")
+        fsp.commit_inherit(d, species_plan)
         print(f"interp {a.src} -> {a.dst}: {len(cd)} dst cells, moved {moved} (wall_dist kept)")
+        print(f"[interp_field] species attributes: {'inherited (species_input_unverified=0)' if species_plan else 'none (unverified)'}")
 
 
 if __name__ == "__main__":

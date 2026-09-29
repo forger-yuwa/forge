@@ -1,5 +1,8 @@
 // test_cond_float.cpp — 凝縮経路 float 化の host 単体検証 (plans/active/condensation-float-speedup.md §4.3)。
 //   build: nvcc -x cu --expt-relaxed-constexpr -I. -o test_cond_float tests/unit/test_cond_float.cpp
+//   (plan #10 以降: H2O の潜熱に共通データの気液ペアが要るので、-I <solver_density_cuda> -I <埋め込みヘッダの生成先> と
+//    solver_density_cuda/input/speciesDB.cpp solver_density_cuda/input/speciesTransportDB.cpp -lyaml-cpp を足す;
+//    生成は tests/unit/cond_latent_test_helper.cuh 冒頭)
 // (1) 物性表 vs double 関数: 0.01 K 刻み全域 (接続点・床・臨界直下を含む)。
 //     許容 (plan §4.3 v2): ln p_sat 絶対 ≤ 2e-6 + 1.5e-7·|ln p| (|ln p|~20–50 では float の表現限界 6e-8·|ln p| が支配),
 //     L/ρ_l/k_gas/μ_gas 相対 ≤2e-6 (H2O の L は凝縮が起き得る T ≤ 400 K で厳密、それ以上は L 床 1.5 MJ/kg の折れ点 (~968 K) を含むので ≤1e-4),
@@ -11,6 +14,7 @@
 #include "cuda_forge/condensationTables_d.cuh"
 #include "cuda_forge/condensationSourceF_d.cuh"
 #include "cuda_forge/condensationEOS_d.cuh"
+#include "tests/unit/cond_latent_test_helper.cuh"   // H2O 潜熱の気液ペア (plan thermophysics-solver-owned-species-db #10)
 #include <cstdlib>
 
 static int g_fail = 0;
@@ -188,6 +192,7 @@ static void test_inversion()
     for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); s.low[7] += -hr/THERMO_RU; s.high[7] += -hr/THERMO_RU; }
     std::vector<SpeciesThermoF> spf = { toF(sp[0]), toF(sp[1]) };
     CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    o.h2oLatent = cond_test_latent_ref(298.15, false);
     const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o);
     CondTablesHost ht; cond_tables_build_host(cp, ht); const CondTablesF tb = cond_tables_view_host(ht);
     const double Rw = cp.R;
@@ -235,6 +240,7 @@ int main()
 {
     printf("== (1) property tables vs double ==\n");
     CondPropOpts o; o.latentLowT = 1; o.psatLowT = 1; o.liquidCp = 2000.0; o.gasKgasModel = 0; o.sigmaScale = 1.0; o.Yw = 0.0;
+    o.h2oLatent = cond_test_latent_ref(0.0, false);
     test_tables("N2 (default)", condProps_make(COND_MODEL_N2, o), 15.0, 140.0);
     CondPropOpts o2 = o; o2.latentLowT = 0; o2.psatLowT = 0; o2.gasKgasModel = 1; o2.sigmaScale = 1.03;
     test_tables("N2 (old lowT, air kgas, sigma x1.03)", condProps_make(COND_MODEL_N2, o2), 15.0, 140.0);

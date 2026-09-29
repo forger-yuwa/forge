@@ -469,18 +469,22 @@ THERMO_HD float thermo_Dbinary(const SpeciesThermo& a, const SpeciesThermo& b, d
 }
 
 // 混合平均拡散係数 D_i [m²/s] (M4): D_i = (1-X_i)/Σ_{j≠i} X_j/D_ij。
+//   分子 1−X_i は分母と同じループで積む補数形 Σ_{j≠i} X_j で評価する (plan condensation-two-phase-transport §5.1 #3b)。
+//   X_i → 1 で 1−X_i は丸め済みの X_i からの引き算になり、ΣX の丸め誤差 (~ε₃₂) を小さい Σ_{j≠i} X_j/D_ij で割って
+//   相対 ε₃₂/(1−X_i) に増幅する (微量 1e-8 で O(1))。補数形なら分子・分母が同じ小さい量を持ち、二成分は組成によらず D_12 に一致する。
 THERMO_HD float thermo_Dmix_species(const SpeciesThermo* sp, int n, const double* X,
                                     int i, double T, double P)
 {
     if (n == 1) return 0.0f;
-    float denom = 0.0f;
+    float numer = 0.0f, denom = 0.0f;
     for (int j=0;j<n;j++) {
         if (j==i) continue;
         const float Dij = thermo_Dbinary(sp[i], sp[j], T, P);
+        numer += (float)X[j];
         denom += (float)X[j]/(Dij > 1.0e-30f ? Dij : 1.0e-30f);
     }
     if (denom < 1.0e-30f) return thermo_Dbinary(sp[i], sp[i], T, P);
-    return (1.0f - (float)X[i])/denom;
+    return numer/denom;
 }
 
 // float32 の cp+h 融合評価と Newton 温度反転 (plan performance-3d-node-sst-speedup §4.2-3)。
@@ -566,14 +570,15 @@ THERMO_HD float thermo_Dbinary_f(const SpeciesThermoF& a, const SpeciesThermoF& 
 THERMO_HD float thermo_Dmix_species_f(const SpeciesThermoF* sp, int n, const float* X, int i, float T, float P)
 {
     if (n == 1) return 0.0f;
-    float denom = 0.0f;
+    float numer = 0.0f, denom = 0.0f;   // 分子 1−X_i は補数形 Σ_{j≠i} X_j (thermo_Dmix_species の注記; §5.1 #3b)
     for (int j=0;j<n;j++) {
         if (j==i) continue;
         const float Dij = thermo_Dbinary_f(sp[i], sp[j], T, P);
+        numer += X[j];
         denom += X[j]/(Dij > 1.0e-30f ? Dij : 1.0e-30f);
     }
     if (denom < 1.0e-30f) return thermo_Dbinary_f(sp[i], sp[i], T, P);
-    return (1.0f - X[i])/denom;
+    return numer/denom;
 }
 
 // -----------------------------------------------------------------------------

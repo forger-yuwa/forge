@@ -1,0 +1,6 @@
+problem case=mix_0 tp t,k=400,600,1000,2000 p,bar=1
+reac
+  name=N2 moles=1.0000000000
+only N2
+output siunits transport
+end

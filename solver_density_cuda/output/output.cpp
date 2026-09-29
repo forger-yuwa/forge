@@ -2,6 +2,7 @@
 #include <cstdio>
 #include "output.hpp"
 #include "conjugateWall.hpp"
+#include "input/speciesDB.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -21,6 +22,20 @@ using HighFive::File;
 
 namespace {
 
+// 化学種の解決済み記録をルート属性に書く (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3a)。
+//   species_hash (互換性ハッシュ) / species_record_sha256 (記録全文) / species_record_file / species_input_unverified。
+//   記録が無い (CPG) ときは何も書かない。
+void writeSpeciesAttributes(File& file)
+{
+    const SpeciesRecordInfo* rec = speciesDB_currentRecord();
+    if (rec == nullptr) return;
+    file.createAttribute<std::string>("species_hash", HighFive::DataSpace::From(rec->compatHash)).write(rec->compatHash);
+    file.createAttribute<std::string>("species_record_sha256", HighFive::DataSpace::From(rec->recordSha256)).write(rec->recordSha256);
+    file.createAttribute<std::string>("species_record_file", HighFive::DataSpace::From(rec->recordFile)).write(rec->recordFile);
+    const int unv = rec->inputUnverified;
+    file.createAttribute<int>("species_input_unverified", HighFive::DataSpace::From(unv)).write(unv);
+}
+
 flow_float outputTimeValue(const solverConfig& cfg, int iStep)
 {
     if (cfg.unsteady == 1) {
@@ -35,43 +50,49 @@ flow_float outputTimeValue(const solverConfig& cfg, int iStep)
 // 出力する場の量を config output.level で絞る (procedures/solver-settings.md「output」)。
 //   level 2: output_cellValNames 全部 (従来)。level 0/1: 下の基本集合 + extraFields を output_cellValNames の順で。
 //   h0 (全エンタルピー) は level>=1 で合成出力 (Ht [+k]) し、属性 h0_includes_k を付ける。
-// extraFields のうち extraOnly_cellValNames (既定出力に入れない量: wall_y_eff・dY{s}d*) にあるものを末尾に足す。
-static void appendExtraOnly(const solverConfig& cfg, const variables& var, std::list<std::string>& out)
-{
-    for (const auto& n : cfg.outputExtraFields) {
-        if (std::find(var.extraOnly_cellValNames.begin(), var.extraOnly_cellValNames.end(), n) == var.extraOnly_cellValNames.end()) continue;
-        if (std::find(out.begin(), out.end(), n) != out.end() || var.c.count(n) == 0) continue;
-        out.push_back(n);
-    }
-}
-
+// extraFields は確保済みの cell 変数なら何でも末尾に足す (extraOnly_cellValNames の wall_y_eff・dY{s}d* もこれで出る)。
 static std::list<std::string> effectiveOutputNames(const solverConfig& cfg, const variables& var)
 {
-    if (cfg.outputLevel >= 2) { std::list<std::string> out = var.output_cellValNames; appendExtraOnly(cfg, var, out); return out; }
-    std::vector<std::string> base = {"ro","roUx","roUy","roUz","roe","roK","roOmega"};
-    for (const auto& n : var.speciesVarNames) base.push_back(n);            // roY{s}
-    for (const auto& n : var.condMomentConsNames) base.push_back(n);        // 凝縮モーメント保存量
-    if (var.tracerRegistered != 0) base.push_back("roXi");                  // 受動トレーサ保存量 (restart 用)
-    if (var.transitionRegistered != 0) { base.push_back("roGamma"); base.push_back("roReth"); }   // 遷移モデル保存量 (restart 用)
-    if (cfg.outputLevel >= 1) {
-        if (var.tracerRegistered != 0) base.push_back("Xi");
-        if (var.transitionRegistered != 0) { for (const char* n : {"gammaTr","reTheta","gammaEff"}) base.push_back(n); }
-        for (const char* n : {"P","T","Ux","Uy","Uz","k","omega","sonic","vis_lam","vis_turb","wall_dist"}) base.push_back(n);
-        for (const auto& n : var.speciesVarNames) base.push_back(n.substr(2));   // Y{s}
-        for (const auto& n : var.condMomentConsNames) base.push_back(n.substr(2));
+    // level 2 は output_cellValNames 全部、level 0/1 は基本集合。
+    // **extraFields はどの level でも効く** (2026-09-24, codex result m1): 以前は level>=2 で
+    // 即 return していたため、下の「確保済み変数を出力する」処理へ到達せず、`level: 2` の run では
+    // `res_ro` などを指定しても黙って出なかった。
+    std::vector<std::string> base;
+    if (cfg.outputLevel >= 2) {
+        for (const auto& n : var.output_cellValNames) base.push_back(n);
+    } else {
+        for (const char* n : {"ro","roUx","roUy","roUz","roe","roK","roOmega"}) base.push_back(n);
+        for (const auto& n : var.speciesVarNames) base.push_back(n);            // roY{s}
+        for (const auto& n : var.condMomentConsNames) base.push_back(n);        // 凝縮モーメント保存量
+        if (var.tracerRegistered != 0) base.push_back("roXi");                  // 受動トレーサ保存量 (restart 用)
+        if (var.transitionRegistered != 0) { base.push_back("roGamma"); base.push_back("roReth"); }   // 遷移モデル保存量 (restart 用)
+        if (cfg.outputLevel >= 1) {
+            if (var.tracerRegistered != 0) base.push_back("Xi");
+            if (var.transitionRegistered != 0) { for (const char* n : {"gammaTr","reTheta","gammaEff"}) base.push_back(n); }
+            for (const char* n : {"P","T","Ux","Uy","Uz","k","omega","sonic","vis_lam","vis_turb","wall_dist"}) base.push_back(n);
+            for (const auto& n : var.speciesVarNames) base.push_back(n.substr(2));   // Y{s}
+            for (const auto& n : var.condMomentConsNames) base.push_back(n.substr(2));
+        }
     }
     for (const auto& n : cfg.outputExtraFields) base.push_back(n);
+
     std::list<std::string> out;
     for (const auto& n : var.output_cellValNames) {
         if (std::find(base.begin(), base.end(), n) != base.end()) out.push_back(n);
     }
-    appendExtraOnly(cfg, var, out);
+    // **extraFields は確保済みの cell 変数なら何でも出せる** (2026-09-24)。
+    // 以前は `output_cellValNames` に入っているものしか受け付けず、`res_ro` のように
+    // `cellValNames` には在って出力候補に入っていない診断量を**指定しても黙って無視**していた。
+    // 丸めの内訳を場で測るのに残差そのものが要る (plan time_integration-fp64-accumulator §5.1 S6)。
     for (const auto& n : cfg.outputExtraFields) {
-        if (std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), n) == var.output_cellValNames.end()
-            && std::find(var.extraOnly_cellValNames.begin(), var.extraOnly_cellValNames.end(), n) == var.extraOnly_cellValNames.end()) {
-            static bool warned = false;
-            if (!warned) { std::cerr << "[output] extraFields: '" << n << "' is not an output variable (ignored)\n"; warned = true; }
+        if (std::find(out.begin(), out.end(), n) != out.end()) continue;
+        if (std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), n) != var.output_cellValNames.end()) continue;
+        if (var.c.count(n) != 0 || var.c_d.count(n) != 0) {
+            out.push_back(n);   // 確保済みの診断量 (res_* など)
+            continue;
         }
+        static bool warned = false;
+        if (!warned) { std::cerr << "[output] extraFields: '" << n << "' は確保されていない変数なので無視する\n"; warned = true; }
     }
     return out;
 }
@@ -99,6 +120,7 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
     ofstream ofsH5(fnameH5);
 
     File file(fnameH5, File::ReadWrite | File::Truncate);
+    writeSpeciesAttributes(file);
 
     // write mesh structure
     vector<geom_float> COORD;
@@ -334,6 +356,7 @@ void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var ,
             file.createAttribute<int>("step", HighFive::DataSpace::From(iStep)).write(iStep);
             file.createAttribute<int>("step_abs", HighFive::DataSpace::From(sabs)).write(sabs);
         }
+        writeSpeciesAttributes(file);
 
         // write boundary
         vector<geom_float> COORD;

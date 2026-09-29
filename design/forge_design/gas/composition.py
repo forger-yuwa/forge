@@ -18,13 +18,11 @@ from pathlib import Path
 
 import numpy as np
 
-from .semiperfect import LJ_PARAMS, RU, SPECIES_NASA9, T_MID
+from .semiperfect import LJ_PARAMS, RU, SPECIES_ATOMS, SPECIES_NASA9, T_MID
 
-# 内蔵 11 種の原子組成 (CEA thermo.inp の元素欄と同じ)。外部 DB は `atoms` キー (cea_thermo_to_species_db.py が書く) を使う。
-BUILTIN_ATOMS = {
-    "N2": {"N": 2}, "O2": {"O": 2}, "CO2": {"C": 1, "O": 2}, "H2O": {"H": 2, "O": 1}, "AR": {"AR": 1},
-    "H2": {"H": 2}, "OH": {"O": 1, "H": 1}, "H": {"H": 1}, "NO": {"N": 1, "O": 1}, "O": {"O": 1}, "CO": {"C": 1, "O": 1},
-}
+# 内蔵 11 種の原子組成 (CEA thermo.inp の元素欄と同じ)。共通データ (semiperfect.SPECIES_DATA_FILE) の atoms から、従来の大文字キーで。
+# 外部 DB は `atoms` キー (cea_thermo_to_species_db.py が書く) を使う。
+BUILTIN_ATOMS = {k: dict(v) for k, v in SPECIES_ATOMS.items()}
 # 元素の原子量 [kg/mol] (元素質量分率の診断用)
 ATOMIC_MW = {"H": 1.00794e-3, "C": 12.0107e-3, "N": 14.0067e-3, "O": 15.9994e-3, "AR": 39.948e-3, "HE": 4.002602e-3}
 
@@ -574,6 +572,172 @@ def write_species_files(layout: SpeciesLayout, run_dir) -> None:
     rd = Path(run_dir)
     (rd / "species_db.yaml").write_text(species_db_yaml(layout))
     (rd / "species_meta.yaml").write_text(yaml.safe_dump(species_meta(layout), sort_keys=False, allow_unicode=True))
+
+
+def write_species_meta(layout: SpeciesLayout, run_dir, transport: dict | None = None) -> None:
+    """`species_meta.yaml` だけを書く (機械可読メタ; 熱物性の係数は入れない)。`transport` ({実種: モデル}) があれば
+    来歴として `transport` を追記する (無ければ従来と同じ内容)。"""
+    import yaml
+    meta = species_meta(layout)
+    if transport is not None:
+        meta["transport"] = {"source": "gas.transport", "viscMethod": 2, "models": dict(transport)}
+    (Path(run_dir) / "species_meta.yaml").write_text(yaml.safe_dump(meta, sort_keys=False, allow_unicode=True))
+
+
+# ---------------------------------------------------------------- ソルバ config の lump 記法 (plan thermophysics-solver-owned-species-db §4.7 #9)
+
+def solver_builtin_names() -> set:
+    """ソルバの内蔵 DB (共通データ `legacy_builtin: solver` の種) が解決できる名前 (ID と別名、大文字化)。
+    ソルバは現状、名前を大小文字無視で引く (speciesDB.cpp; canonical ID 化は plan #8)。"""
+    import yaml
+    from .semiperfect import SPECIES_DATA_FILE
+    raw = yaml.safe_load(Path(SPECIES_DATA_FILE).read_text(encoding="utf-8"))
+    out = set()
+    for e in raw["species"]:
+        if "solver" in (e.get("legacy_builtin") or []):
+            out.add(str(e["id"]).upper())
+            out.update(str(a).upper() for a in (e.get("aliases") or []))
+    return out
+
+
+def solver_species_config(layout: SpeciesLayout) -> tuple:
+    """輸送種配置をソルバ config に翻訳する。返り値 (items, external):
+    items    = `physProp.species` の要素 (lump は {"name", "lump": {構成種: lump 内モル分率 (全桁)}, "basis": "mole"}、他は種名)。
+               lump の係数はソルバが起動時に合成する (合成済み擬似種の NASA-9 は run に書かない)。
+    external = `speciesDBFile` に置く実種の**生の**エントリ {種名: SpeciesEntry} (合成値は含まない)。ソルバ内蔵で解決できない種、
+               および外部 DB (`gas.species_db`) 由来で内蔵値を上書きしている種 (輸送種と lump の構成種) だけ。空なら DB ファイル不要。"""
+    builtin = solver_builtin_names()
+    external = {}
+
+    def _need(name):
+        e = layout.db[name]
+        if e.source != BUILTIN_SOURCE or str(name).upper() not in builtin:
+            external[e.name] = e
+
+    items = []
+    for s in layout.species:
+        if s in layout.lumps:
+            members = layout.lumps[s]["members"]
+            for k in members:
+                _need(k)
+            items.append({"name": s, "lump": {k: float(v) for k, v in members.items()}, "basis": "mole"})
+        else:
+            _need(s)
+            items.append(s)
+    return items, external
+
+
+def physprop_species_flow(items) -> str:
+    """`solver_species_config` の items を solverConfig.yaml の flow 表記にする。種名は引用符付き (NO/N/Y の真偽値化を防ぐ)、
+    分率は repr (double の全桁; ソルバの合成が設計側の値とビット単位で同じ入力を受け取る)。"""
+    out = []
+    for it in items:
+        if isinstance(it, dict):
+            lump = ", ".join(f'"{k}": {float(v)!r}' for k, v in it["lump"].items())
+            out.append(f'{{name: "{it["name"]}", lump: {{{lump}}}, basis: {it["basis"]}}}')
+        else:
+            out.append(f'"{it}"')
+    return "[" + ", ".join(out) + "]"
+
+
+# ---------------------------------------------------------------- 種ごとの輸送物性の指定 (plan thermophysics-solver-owned-species-db #9b)
+
+# ソルバ (speciesTransportDB.cpp の kModels) と同じ綴り。モデル名は大小文字を区別する (ソルバも区別する)
+TRANSPORT_MODELS = ("cea", "kinetic", "fit")
+TRANSPORT_CUSTOM = {"custom:h2o_iapws_cea_v1": "H2O"}   # custom モデル → 対象の実種 (設計側の名前)
+
+
+def parse_gas_transport(raw) -> dict | None:
+    """problem YAML の `gas.transport: {実種: モデル}` を {大文字の種名: モデル} に正規化する (無ければ None)。
+    構造・モデル名・custom の対象種・重複 (`Ar` と `AR` など大小文字違い) をここで拒否する。
+    種名は設計側の従来規則 (大文字化) で持ち、config にも同じ綴りで書く (`physProp.species` の lump 構成種と同じ綴り;
+    ソルバは大小文字無視で照合する)。"""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError("gas.transport は空でない mapping {実種: モデル}")
+    out = {}
+    for k, v in raw.items():
+        name = _check_name_key(k)
+        if name in out:
+            raise ValueError(f"gas.transport: 種 {name} が 2 回指定されている (大小文字違いも同じ種)")
+        if not isinstance(v, str):
+            raise ValueError(f"gas.transport.{name}: モデルは文字列 ({v!r})")
+        if v in TRANSPORT_CUSTOM:
+            if name != TRANSPORT_CUSTOM[v]:
+                raise ValueError(f"gas.transport.{name}: {v} は {TRANSPORT_CUSTOM[v]} 専用")
+        elif v not in TRANSPORT_MODELS:
+            raise ValueError(f"gas.transport.{name}: モデル '{v}' は未知 "
+                             f"({' | '.join(TRANSPORT_MODELS + tuple(TRANSPORT_CUSTOM))})")
+        out[name] = v
+    return out
+
+
+def transport_real_species(layout: SpeciesLayout) -> list:
+    """輸送指定が要る実種 (lump は構成種へ展開、輸送種の順序、重複なし)。ソルバの lump 展開と同じ集合。"""
+    out = []
+    for s in layout.species:
+        for k in (layout.lumps[s]["members"] if s in layout.lumps else [s]):
+            if k not in out:
+                out.append(k)
+    return out
+
+
+def transport_example(reals: list) -> str:
+    """指定漏れのエラー文に添える書き方の例 (H2O は custom:h2o_iapws_cea_v1、他は cea)。"""
+    ex = ", ".join(f"{k}: {'custom:h2o_iapws_cea_v1' if k == 'H2O' else 'cea'}" for k in reals)
+    return f"gas:\n  transport: {{{ex}}}"
+
+
+def resolve_transport(layout: SpeciesLayout, transport: dict | None, required: bool) -> dict | None:
+    """`parse_gas_transport` の結果を輸送種配置の実種と突き合わせ、実種の順序の {実種: モデル} を返す。
+    指定があれば全実種が必須 (漏れ・余分はエラー)。指定が無く `required` なら、必要な実種と書き方の例を示してエラー。"""
+    reals = transport_real_species(layout)
+    if transport is None:
+        if required:
+            raise ValueError("semiperfect TP の NS/SST は種ごとの輸送物性 (viscMethod 2 + physProp.transport) を使うので "
+                             f"gas.transport が必要。実種 {reals} のそれぞれにモデル "
+                             f"({' | '.join(TRANSPORT_MODELS + tuple(TRANSPORT_CUSTOM))}) を書く。例:\n"
+                             + transport_example(reals))
+        return None
+    extra = [k for k in transport if k not in reals]
+    missing = [k for k in reals if k not in transport]
+    if extra or missing:
+        msg = []
+        if missing:
+            msg.append(f"指定の無い実種 {missing}")
+        if extra:
+            lumps = [k for k in extra if k in layout.lumps]
+            msg.append(f"この問題の輸送種に無い種 {extra}"
+                       + (f" (lump {lumps} は構成種ごとに書く)" if lumps else ""))
+        raise ValueError(f"gas.transport: {'; '.join(msg)} (必要な実種 = lump 構成種を含む {reals})。例:\n"
+                         + transport_example(reals))
+    return {k: transport[k] for k in reals}
+
+
+def physprop_transport_flow(transport: dict) -> str:
+    """`physProp.transport` の flow 表記。種名・モデル名とも引用符付き (NO の真偽値化・`custom:` の `:` 対策)。"""
+    return "{" + ", ".join(f'"{k}": "{v}"' for k, v in transport.items()) + "}"
+
+
+def species_db_raw_yaml(entries: dict) -> str:
+    """実種の生エントリ (内蔵に無い / 外部 DB 由来) の speciesDBFile テキスト。合成済み擬似種は受け付けない。"""
+    out = ["# 実種の生エントリ (CEA 由来の係数そのまま; lump の合成はソルバが起動時に行う)。"
+           "plans/active/thermophysics-solver-owned-species-db.md §4.7"]
+    for name, e in entries.items():
+        if e.lump_of:
+            raise ValueError(f"species_db_raw_yaml: {name} は合成済み擬似種 (生エントリでない)")
+        out.append(f'"{name}":')
+        for k, v in e.to_db_dict().items():
+            if isinstance(v, list):
+                out.append(f"  {k}:")
+                out += [f"  - {_fmt(x)}" for x in v]
+            else:
+                out.append(f"  {k}: {_fmt(v)}")
+        if e.atoms:
+            out.append("  atoms: {" + ", ".join(f"{a}: {n:g}" for a, n in e.atoms.items()) + "}")
+        out.append(f"  # source: {e.source}")
+    return "\n".join(out) + "\n"
 
 
 def _exhaust_fraction_spec(layout: SpeciesLayout) -> dict | None:

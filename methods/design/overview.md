@@ -57,6 +57,10 @@ v2 Euler 帰還 [凍結特性線マップ] → v3 NS トレース) で決まる�
 読込時検証: ($D_e$, $r^*$, $M_d$) の独立指定は 2 つまで (過拘束はエラー)、dv の bound、
 Bézier 自由度勘定の整合。
 
+> **移行中 (2026-09-27, plan [`tooling-design-problem-campaign-recipe`](../../plans/active/tooling-design-problem-campaign-recipe.md))**:
+> 探索範囲 (dv の min/max)・目的・制約・評価手順 (Euler / δ\* NS) の選択は `campaign.yaml` へ移し、problem には基準値と作る物の物理条件だけを置く。
+> 現状の axismach では dv の min/max は探索に使われず (範囲検査のみ)、設計が成立する範囲は runner が自分で計算して検査している。
+
 ## ジオメトリ (区分構成)
 
 壁は上流から: 入口配管 → 収縮 (Bell–Mehta 5 次) → 曲率ブレンド → 上流円弧 $R_u$ →

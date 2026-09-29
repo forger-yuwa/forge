@@ -1,0 +1,6 @@
+source: /VIZMESH/CONNE (primal cells of a node-converted mesh, 216650 cells)
+mode: 2D (x-y projection)
+cells: 216650
+aspect ratio : max=533.6  p99=179.0  mean=15.8  >1000: 0 (0.00%)
+skewness     : max=0.000  p99=0.000  mean=0.000  >0.90: 0 (0.00%)
+VERDICT: PASS (AR<= 1000, skew<= 0.90)

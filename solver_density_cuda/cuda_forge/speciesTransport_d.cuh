@@ -51,6 +51,10 @@ void speciesPinResidual_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
 // 粘性 (viscMethod!=0) かつ nSpecies>=2 のとき M4 の Fick 拡散 + ΣJ=0 補正 + エンタルピー拡散も加える。
 void speciesTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 
+// 試験用 (FORGE_TRANSPORT_PROBE): Fick 拡散と同じ組成 (凝縮 carrier は気相組成) と thermo_Dmix_species_f で、セルごとの
+// 分子拡散係数 D_s を D_d[s*nCells_all + ic] に書く (化学種なしは false)。
+bool speciesDmixProbe_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, float* D_d);
+
 // TP 多成分気体の組成-エネルギー整合補正 (speciesTimeIntegration 直後に呼ぶ)。
 // roe[ic] += Σ_s (roY_s[ic] - roYN_s[ic]) * h_s(T[ic]) により組成変化に伴う roe ずれを補正し、
 // speciesPrimitive (Newton 反転) が発散しないようにする。thermalMethod!=2 / 単成分では no-op。

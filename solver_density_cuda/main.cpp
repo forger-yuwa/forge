@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <cmath>
 #include <iomanip>
 #include <stdio.h>                                                                                       
@@ -57,6 +58,7 @@
 #include "cuda_forge/condensationTransport_d.cuh"
 #include "cuda_forge/tracerTransport_d.cuh"
 #include "cuda_forge/passiveTransport_d.cuh"
+#include "cuda_forge/gasPhaseComposition_d.cuh"   // gasPhaseLiquid (transport probe の液)
 #include <highfive/H5File.hpp>
 #include "input/speciesDB.hpp"
 #include "cuda_forge/viscousFlux_d.cuh"
@@ -75,11 +77,13 @@
 
 #include "cuda_forge/fluct_variables_d.cuh"
 #include "cuda_forge/gasProperties_d.cuh"
+#include "cuda_forge/transportTables_d.cuh"   // 表引きの試験ハーネス (FORGE_TRANSPORT_TABLE_PROBE; #5t2-3)
 #include "cuda_forge/thermo_d.cuh"
 
 #include "probe/point_probes.cuh"
 #include "cuda_forge/setDT_d.cuh"
 #include "cuda_forge/periodicNode_d.cuh"
+#include "cuda_forge/qAccumulator.hpp"
 
 #include <cuda_runtime.h>
 #include <sys/stat.h>
@@ -1116,6 +1120,398 @@ static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
     std::cout << "[dual-time] history NOT restored (" << why << "): all systems start from P=PP=current, first physical step is BDF1\n";
 }
 
+// 化学種 datum の有効温度 (thermo_init_db と同じ条件: thermoHrefTemp>0 のときだけ datum を適用)
+static double speciesRecordTref(const solverConfig& cfg)
+{
+    return (cfg.thermoHrefTemp > 0.0) ? cfg.thermoHrefTemp : 0.0;
+}
+
+// valueFileName の species_hash 属性を照合し、run ディレクトリ (cwd) に解決済み記録を書く。
+//   属性あり: 互換性ハッシュが一致 → 通す / 不一致 → 差を示して終了 (許可手段なし)。
+//   属性なし: 照合不能として終了。その実行だけ FORGE_ALLOW_UNVERIFIED_SPECIES=1 で通し、出力に未検証の印を付ける。
+//   CPG (thermalMethod != 2) は対象外。
+static void checkInputSpeciesAndWriteRecord(const solverConfig& cfg)
+{
+    if (cfg.thermalMethod != 2) return;
+    const ResolvedSpeciesDB* db = speciesDB_current();
+    if (db == nullptr) db = &speciesDB_init(cfg);
+    const double Tref = speciesRecordTref(cfg);
+
+    std::string fieldHash, fieldRecordSha;
+    int fieldUnverified = -1;
+    try {
+        HighFive::File f(cfg.valueFileName, HighFive::File::ReadOnly);
+        if (f.hasAttribute("species_hash"))          f.getAttribute("species_hash").read(fieldHash);
+        if (f.hasAttribute("species_record_sha256")) f.getAttribute("species_record_sha256").read(fieldRecordSha);
+        if (f.hasAttribute("species_input_unverified")) f.getAttribute("species_input_unverified").read(fieldUnverified);
+    } catch (const std::exception& e) {
+        std::cerr << "[species] cannot read attributes of " << cfg.valueFileName << ": " << e.what() << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+    // 属性なしの場は既定で停止する (plan thermophysics-solver-owned-species-db #3c)。許可はその実行だけの
+    // FORGE_ALLOW_UNVERIFIED_SPECIES=1 のみ (出力に未検証の印)。係数不一致は常に停止 (allow は不一致を通さない)。
+    const char* env = std::getenv("FORGE_ALLOW_UNVERIFIED_SPECIES");
+    const bool allow = (env != nullptr && std::string(env) == "1");
+    std::vector<std::string> dirs;
+    {
+        std::filesystem::path d = std::filesystem::path(cfg.valueFileName).parent_path();
+        dirs.push_back(d.empty() ? std::string(".") : d.string());
+        dirs.push_back(".");
+    }
+    std::string status, msg;
+    int unverified = 0;
+    const bool ok = speciesDB_checkInputField(*db, Tref, fieldHash, fieldRecordSha, fieldUnverified, cfg.valueFileName,
+                                              dirs, allow, status, unverified, msg);
+    if (!ok) {
+        std::cerr << "[species] ERROR: " << msg << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+    std::cout << "[species] " << (unverified ? "WARNING: " : "") << msg << "\n";
+    try {
+        const SpeciesRecordInfo rec = speciesDB_writeRecord(*db, Tref, cfg.speciesDBFile, cfg.valueFileName, status, unverified, ".");
+        speciesDB_setCurrentRecord(rec);
+        std::cout << "[species] species_hash " << rec.compatHash << " (record " << rec.recordFile
+                  << ", sha256 " << rec.recordSha256.substr(0, 16) << ", input " << status << ")" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+}
+
+// 試験用 (FORGE_TRANSPORT_PROBE=<states.txt>; plan thermophysics-solver-owned-species-db #5t2-2、tests/unit/test_transport_gpu.py)。
+//   物性だけを評価する CFD 0 step のハーネス: 初期化後、時間更新をせずに
+//     (1) 状態表の (T, ρ, Y) を全セル (ghost 込み nCells_all) と全境界面の解点へ割り当てて float で device に書き、
+//     (2) 実際のセル経路 gasProperties_d_wrapper (vis_lam・thermCond を float で格納) を 1 回、
+//     (3) 同じ組成・評価関数の double 値 (gasPropertiesTransportProbe_d_wrapper) を 1 回、
+//     (4) 壁モデルの物性関数 (wmlesTransportProbe; 全 bcond の境界面) を 1 回、
+//     (5) 状態表の double の Y を float の roY を経由せずに同じ評価関数へ渡す (gasPropertiesTransportProbeStates_d_wrapper)、
+//     (6) 表引き (#5t2-3) があれば、同じ Y・T を float に丸めて表引きの経路へ渡す (gasPropertiesTransportProbeStatesTab_d_wrapper)
+//   を行い、device から読み戻した実際の入力 (T・ρ・roY) と出力を <states.txt>.bin に、配置を <states.txt>.json に書いて終了する。
+//   状態の割り当ては pass ごとにずらし、どの状態もセル・ghost・境界面の解点に少なくとも 1 回は乗るようにする。
+//   states.txt: 1 行目 "K nSpecies"、以降 K 行 "T ro Y0 .. Y{n-1}" (Y は輸送種の質量分率)。
+//   凝縮 carrier の気相組成の試験 (plan condensation-two-phase-transport §4.1, #3): 1 行目を "K nSpecies 1" にすると各行の末尾に
+//   液の質量分率 g を読み、rog_0 = ρg を全セルに書く (TP carrier の凝縮 run でなければエラー)。このとき pass ごとに
+//   読み戻した rog・P と、化学種拡散と同じ組成・関数の分子拡散係数 D_s (speciesDmixProbe_d_wrapper) も書き、
+//   (5)(6) は同じ g で気相組成にしてから評価する。
+static int runTransportProbe(const char* statesPath, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    std::ifstream in(statesPath);
+    int K = 0, nS = 0, nLiq = 0;
+    {
+        std::string head;
+        std::getline(in, head);
+        std::istringstream hs(head);
+        hs >> K >> nS;
+        if (!(hs >> nLiq)) nLiq = 0;
+    }
+    if (K < 1 || nS != cfg.nSpecies || nLiq < 0 || nLiq > 1) {
+        std::cerr << "[transport-probe] bad states file " << statesPath << " (K=" << K << ", nSpecies=" << nS
+                  << ", config nSpecies=" << cfg.nSpecies << ", nLiq=" << nLiq << ")" << std::endl;
+        return 2;
+    }
+    const GasPhaseLiquid liq = gasPhaseLiquid(cfg, var);
+    const bool hasLiq = (nLiq == 1);
+    if (hasLiq && liq.iw < 0) {
+        std::cerr << "[transport-probe] liquid column given but the run is not a TP-carrier condensation run" << std::endl;
+        return 2;
+    }
+    std::vector<double> sT(K), sRo(K), sY(static_cast<size_t>(K)*nS), sG(hasLiq ? K : 0);
+    for (int k = 0; k < K; ++k) {
+        in >> sT[k] >> sRo[k];
+        for (int s = 0; s < nS; ++s) in >> sY[static_cast<size_t>(k)*nS + s];
+        if (hasLiq) in >> sG[k];
+    }
+    if (!in) { std::cerr << "[transport-probe] states file truncated" << std::endl; return 2; }
+    const TransportTableD* tt = thermo_transport_table();
+    if (tt == nullptr || cfg.viscMethod != 2) {
+        std::cerr << "[transport-probe] requires physProp.transport and viscMethod 2" << std::endl;
+        return 2;
+    }
+    const int nR = tt->nReal;
+    const geom_int nC = msh.nCells, nA = msh.nCells_all, nG = nA - nC;
+    flow_float** roYdev = species_roY_device_ptr();
+    const bool hasRoY = (roYdev != nullptr && nS >= 2);
+    std::vector<flow_float*> roYptr(nS, nullptr);
+    if (hasRoY) for (int s = 0; s < nS; ++s) roYptr[s] = var.c_d["roY" + std::to_string(s)];
+
+    geom_int nWall = 0;
+    for (const auto& bc : msh.bconds) nWall += static_cast<geom_int>(bc.iCells.size());
+    // 境界面の解点は bcond をまたいで重複しうる (角のセル) ので、重複を除いた列に状態を割り当てる
+    // (重複を数えると後の割り当てが先を上書きし、状態点が境界に乗らないことがある)。
+    std::vector<geom_int> wallCellsU;
+    {
+        std::vector<char> seen(nA, 0);
+        for (const auto& bc : msh.bconds)
+            for (geom_int ic : bc.iCells) if (!seen[ic]) { seen[ic] = 1; wallCellsU.push_back(ic); }
+    }
+    const geom_int nWallU = static_cast<geom_int>(wallCellsU.size());
+    const geom_int M = std::max<geom_int>(1, std::min<geom_int>(nWallU, std::max<geom_int>(nG, 1)));
+    // FORGE_TRANSPORT_PROBE_NOCELLS=1: セル・ghost・壁の pass を省き、状態表の (5)(6) だけ評価する (大量の状態点の照合用)
+    const char* noCellsEnv = getenv("FORGE_TRANSPORT_PROBE_NOCELLS");
+    const bool noCells = (noCellsEnv != nullptr && std::string(noCellsEnv) == "1");
+    const int P = noCells ? 0 : static_cast<int>((K + M - 1)/M);
+
+    const std::string base(statesPath);
+    std::ofstream bin(base + ".bin", std::ios::binary);
+    auto w = [&](const void* p, size_t n) { bin.write(static_cast<const char*>(p), static_cast<std::streamsize>(n)); };
+
+    double *mu_d = nullptr, *lam_d = nullptr, *X_d = nullptr;
+    gpuErrchk(cudaMalloc(&mu_d, nA*sizeof(double)));
+    gpuErrchk(cudaMalloc(&lam_d, nA*sizeof(double)));
+    gpuErrchk(cudaMalloc(&X_d, static_cast<size_t>(nA)*nR*sizeof(double)));
+    std::vector<size_t> wallCounts;
+    for (int p = 0; p < P; ++p) {
+        const geom_int o = static_cast<geom_int>(p)*M;
+        std::vector<int> st(nA);
+        for (geom_int i = 0; i < nC; ++i) st[i] = static_cast<int>((i + o) % K);
+        for (geom_int g = 0; g < nG; ++g) st[nC + g] = static_cast<int>((g + o) % K);
+        for (geom_int q = 0; q < nWallU; ++q) st[wallCellsU[q]] = static_cast<int>((q + o) % K);
+        std::vector<flow_float> hT(nA), hRo(nA), hY(static_cast<size_t>(nA)*(hasRoY ? nS : 0)), hG(hasLiq ? nA : 0);
+        for (geom_int i = 0; i < nA; ++i) {
+            const int k = st[i];
+            hT[i]  = static_cast<flow_float>(sT[k]);
+            hRo[i] = static_cast<flow_float>(sRo[k]);
+            if (hasLiq) hG[i] = static_cast<flow_float>(sRo[k]*sG[k]);
+            if (hasRoY)
+                for (int s = 0; s < nS; ++s)
+                    hY[static_cast<size_t>(s)*nA + i] = static_cast<flow_float>(sRo[k]*sY[static_cast<size_t>(k)*nS + s]);
+        }
+        gpuErrchk(cudaMemcpy(var.c_d["T"], hT.data(), nA*sizeof(flow_float), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemcpy(var.c_d["ro"], hRo.data(), nA*sizeof(flow_float), cudaMemcpyHostToDevice));
+        if (hasRoY)
+            for (int s = 0; s < nS; ++s)
+                gpuErrchk(cudaMemcpy(roYptr[s], hY.data() + static_cast<size_t>(s)*nA, nA*sizeof(flow_float), cudaMemcpyHostToDevice));
+        if (hasLiq) gpuErrchk(cudaMemcpy(var.c_d["rog_0"], hG.data(), nA*sizeof(flow_float), cudaMemcpyHostToDevice));
+        // 出力を NaN で埋めてから評価 (未更新の要素を検出できるように)
+        {
+            std::vector<flow_float> nanf(nA, std::numeric_limits<flow_float>::quiet_NaN());
+            gpuErrchk(cudaMemcpy(var.c_d["vis_lam"], nanf.data(), nA*sizeof(flow_float), cudaMemcpyHostToDevice));
+            gpuErrchk(cudaMemcpy(var.c_d["thermCond"], nanf.data(), nA*sizeof(flow_float), cudaMemcpyHostToDevice));
+            gpuErrchk(cudaMemset(mu_d, 0xff, nA*sizeof(double)));
+            gpuErrchk(cudaMemset(lam_d, 0xff, nA*sizeof(double)));
+            gpuErrchk(cudaMemset(X_d, 0xff, static_cast<size_t>(nA)*nR*sizeof(double)));
+        }
+        gasProperties_d_wrapper(cfg, cuda_cfg, msh, var);                     // 実際のセル経路 (ghost 込み)
+        gasPropertiesTransportProbe_d_wrapper(cfg, cuda_cfg, msh, var, mu_d, lam_d, X_d);
+        WmlesTransportProbeOut wo;
+        wmlesTransportProbe(cfg, cuda_cfg, msh, var, wo);                      // 壁モデルの物性関数
+
+        // 実際に device にある入力と出力を読み戻して書く
+        std::vector<flow_float> rT(nA), rRo(nA), rY(static_cast<size_t>(nA)*(hasRoY ? nS : 0)), rV(nA), rK(nA);
+        std::vector<double> rMu(nA), rLam(nA), rX(static_cast<size_t>(nA)*nR);
+        gpuErrchk(cudaMemcpy(rT.data(), var.c_d["T"], nA*sizeof(flow_float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(rRo.data(), var.c_d["ro"], nA*sizeof(flow_float), cudaMemcpyDeviceToHost));
+        if (hasRoY)
+            for (int s = 0; s < nS; ++s)
+                gpuErrchk(cudaMemcpy(rY.data() + static_cast<size_t>(s)*nA, roYptr[s], nA*sizeof(flow_float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(rV.data(), var.c_d["vis_lam"], nA*sizeof(flow_float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(rK.data(), var.c_d["thermCond"], nA*sizeof(flow_float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(rMu.data(), mu_d, nA*sizeof(double), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(rLam.data(), lam_d, nA*sizeof(double), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(rX.data(), X_d, rX.size()*sizeof(double), cudaMemcpyDeviceToHost));
+        w(st.data(), st.size()*sizeof(int));
+        w(rT.data(), rT.size()*sizeof(flow_float));
+        w(rRo.data(), rRo.size()*sizeof(flow_float));
+        w(rY.data(), rY.size()*sizeof(flow_float));
+        w(rV.data(), rV.size()*sizeof(flow_float));
+        w(rK.data(), rK.size()*sizeof(flow_float));
+        w(rMu.data(), rMu.size()*sizeof(double));
+        w(rLam.data(), rLam.size()*sizeof(double));
+        w(rX.data(), rX.size()*sizeof(double));
+        const size_t nw = wo.cell.size();
+        wallCounts.push_back(nw);
+        w(wo.bcond.data(), nw*sizeof(int));
+        w(wo.cell.data(), nw*sizeof(long long));
+        w(wo.mu_w.data(), nw*sizeof(flow_float));
+        w(wo.lam_w.data(), nw*sizeof(flow_float));
+        w(wo.mu.data(), nw*sizeof(double));
+        w(wo.lam.data(), nw*sizeof(double));
+        if (hasLiq) {
+            // 液 (読み戻し)・P (拡散係数の入力)・分子拡散係数 D_s (Fick 拡散と同じ組成・関数)
+            std::vector<flow_float> rG(nA), rP(nA);
+            std::vector<float> rD(static_cast<size_t>(nA)*nS, std::numeric_limits<float>::quiet_NaN());
+            float* D_d = nullptr;
+            gpuErrchk(cudaMalloc(&D_d, rD.size()*sizeof(float)));
+            gpuErrchk(cudaMemcpy(D_d, rD.data(), rD.size()*sizeof(float), cudaMemcpyHostToDevice));
+            speciesDmixProbe_d_wrapper(cfg, cuda_cfg, msh, var, D_d);
+            gpuErrchk(cudaMemcpy(rD.data(), D_d, rD.size()*sizeof(float), cudaMemcpyDeviceToHost));
+            cudaFree(D_d);
+            gpuErrchk(cudaMemcpy(rG.data(), var.c_d["rog_0"], nA*sizeof(flow_float), cudaMemcpyDeviceToHost));
+            gpuErrchk(cudaMemcpy(rP.data(), var.c_d["P"], nA*sizeof(flow_float), cudaMemcpyDeviceToHost));
+            w(rG.data(), rG.size()*sizeof(flow_float));
+            w(rP.data(), rP.size()*sizeof(flow_float));
+            w(rD.data(), rD.size()*sizeof(float));
+        }
+    }
+    cudaFree(mu_d); cudaFree(lam_d); cudaFree(X_d);
+
+    // (5) double の Y を直接
+    {
+        double *Yd = nullptr, *Td = nullptr, *md = nullptr, *ld = nullptr, *Xd = nullptr, *Gd = nullptr;
+        if (hasLiq) {
+            gpuErrchk(cudaMalloc(&Gd, K*sizeof(double)));
+            gpuErrchk(cudaMemcpy(Gd, sG.data(), K*sizeof(double), cudaMemcpyHostToDevice));
+        }
+        gpuErrchk(cudaMalloc(&Yd, sY.size()*sizeof(double)));
+        gpuErrchk(cudaMalloc(&Td, K*sizeof(double)));
+        gpuErrchk(cudaMalloc(&md, K*sizeof(double)));
+        gpuErrchk(cudaMalloc(&ld, K*sizeof(double)));
+        gpuErrchk(cudaMalloc(&Xd, static_cast<size_t>(K)*nR*sizeof(double)));
+        gpuErrchk(cudaMemcpy(Yd, sY.data(), sY.size()*sizeof(double), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemcpy(Td, sT.data(), K*sizeof(double), cudaMemcpyHostToDevice));
+        gasPropertiesTransportProbeStates_d_wrapper(cfg, K, Yd, Gd, liq.iw, Td, md, ld, Xd);
+        std::vector<double> hm(K), hl(K), hx(static_cast<size_t>(K)*nR);
+        gpuErrchk(cudaMemcpy(hm.data(), md, K*sizeof(double), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(hl.data(), ld, K*sizeof(double), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(hx.data(), Xd, hx.size()*sizeof(double), cudaMemcpyDeviceToHost));
+        w(hm.data(), hm.size()*sizeof(double));
+        w(hl.data(), hl.size()*sizeof(double));
+        w(hx.data(), hx.size()*sizeof(double));
+        cudaFree(Yd); cudaFree(Td); cudaFree(md); cudaFree(ld); cudaFree(Xd); cudaFree(Gd);
+    }
+    // (6) 表引き (#5t2-3) があれば、同じ状態表の Y・T を float に丸めて表引きの経路を呼ぶ (float の μ・λ)
+    const bool hasTab = (tt->tab.valid != 0);
+    if (hasTab) {
+        double *Yd = nullptr, *Td = nullptr, *Gd = nullptr;
+        float *md = nullptr, *ld = nullptr;
+        if (hasLiq) {
+            gpuErrchk(cudaMalloc(&Gd, K*sizeof(double)));
+            gpuErrchk(cudaMemcpy(Gd, sG.data(), K*sizeof(double), cudaMemcpyHostToDevice));
+        }
+        gpuErrchk(cudaMalloc(&Yd, sY.size()*sizeof(double)));
+        gpuErrchk(cudaMalloc(&Td, K*sizeof(double)));
+        gpuErrchk(cudaMalloc(&md, K*sizeof(float)));
+        gpuErrchk(cudaMalloc(&ld, K*sizeof(float)));
+        gpuErrchk(cudaMemcpy(Yd, sY.data(), sY.size()*sizeof(double), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemcpy(Td, sT.data(), K*sizeof(double), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemset(md, 0xff, K*sizeof(float)));
+        gpuErrchk(cudaMemset(ld, 0xff, K*sizeof(float)));
+        gasPropertiesTransportProbeStatesTab_d_wrapper(cfg, K, Yd, Gd, liq.iw, Td, md, ld);
+        std::vector<float> hm(K), hl(K);
+        gpuErrchk(cudaMemcpy(hm.data(), md, K*sizeof(float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(hl.data(), ld, K*sizeof(float), cudaMemcpyDeviceToHost));
+        w(hm.data(), hm.size()*sizeof(float));
+        w(hl.data(), hl.size()*sizeof(float));
+        cudaFree(Yd); cudaFree(Td); cudaFree(md); cudaFree(ld); cudaFree(Gd);
+    }
+    bin.close();
+
+    std::ofstream js(base + ".json");
+    js << "{\"K\": " << K << ", \"nSpecies\": " << nS << ", \"nReal\": " << nR << ", \"nCells\": " << nC
+       << ", \"nCells_all\": " << nA << ", \"hasRoY\": " << (hasRoY ? 1 : 0) << ", \"passes\": " << P
+       << ", \"sizeof_flow_float\": " << sizeof(flow_float) << ", \"table\": " << (hasTab ? 1 : 0)
+       << ", \"hasLiq\": " << (hasLiq ? 1 : 0) << ", \"iw\": " << liq.iw << ", \"wall_counts\": [";
+    for (size_t i = 0; i < wallCounts.size(); ++i) js << (i ? ", " : "") << wallCounts[i];
+    js << "], \"bconds\": [";
+    for (size_t b = 0; b < msh.bconds.size(); ++b)
+        js << (b ? ", " : "") << "{\"physID\": " << msh.bconds[b].physID << ", \"kind\": \"" << msh.bconds[b].bcondKind << "\"}";
+    js << "]}" << std::endl;
+    std::cout << "[transport-probe] wrote " << base << ".bin/.json (K=" << K << ", passes=" << P << ", nCells=" << nC
+              << ", nCells_all=" << nA << ", boundary planes=" << nWall << ", nReal=" << nR << ")" << std::endl;
+    return 0;
+}
+
+// 試験用 (FORGE_TRANSPORT_TABLE_PROBE=<points.txt>; plan thermophysics-solver-owned-species-db #5t2-3、tests/unit/test_transport_gpu.py)。
+//   輸送表の単体値を GPU で評価して終了する (時間更新なし)。points.txt: 1 行目 N、以降 N 行 "kind idx T"
+//   (kind 0: 実種 idx の μ・λ、kind 1: 組 idx の η; T は float に丸めて使う)。出力: <points.txt>.bin (float v0[N], v1[N]) と
+//   <points.txt>.json (表の範囲・各表の分割区間 [Ta, Tb, 小区間数, 所属の閾値 Tupper]・組の種類・メモリ量)。
+static int runTransportTableProbe(const char* path)
+{
+    const TransportTableD* tt = thermo_transport_table();
+    const TransportTablesHost* H = thermo_transport_tables_host();
+    if (tt == nullptr || H == nullptr) {
+        std::cerr << "[transport-table-probe] requires physProp.transport with tables enabled" << std::endl;
+        return 2;
+    }
+    std::ifstream in(path);
+    long long N = 0;
+    if (!(in >> N) || N < 0) { std::cerr << "[transport-table-probe] bad points file " << path << std::endl; return 2; }
+    std::vector<int> kind(N), idx(N);
+    std::vector<float> T(N);
+    for (long long k = 0; k < N; ++k) { double t; in >> kind[k] >> idx[k] >> t; T[k] = static_cast<float>(t); }
+    if (!in) { std::cerr << "[transport-table-probe] points file truncated" << std::endl; return 2; }
+    std::vector<float> v0(N, 0.0f), v1(N, 0.0f);
+    if (N > 0) {
+        int *kd = nullptr, *id = nullptr;
+        float *Td = nullptr, *a = nullptr, *b = nullptr;
+        gpuErrchk(cudaMalloc(&kd, N*sizeof(int)));
+        gpuErrchk(cudaMalloc(&id, N*sizeof(int)));
+        gpuErrchk(cudaMalloc(&Td, N*sizeof(float)));
+        gpuErrchk(cudaMalloc(&a, N*sizeof(float)));
+        gpuErrchk(cudaMalloc(&b, N*sizeof(float)));
+        gpuErrchk(cudaMemcpy(kd, kind.data(), N*sizeof(int), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemcpy(id, idx.data(), N*sizeof(int), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemcpy(Td, T.data(), N*sizeof(float), cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMemset(a, 0xff, N*sizeof(float)));
+        gpuErrchk(cudaMemset(b, 0xff, N*sizeof(float)));
+        transportTableSingles_d_wrapper(static_cast<int>(N), kd, id, Td, a, b);
+        gpuErrchk(cudaMemcpy(v0.data(), a, N*sizeof(float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(v1.data(), b, N*sizeof(float), cudaMemcpyDeviceToHost));
+        cudaFree(kd); cudaFree(id); cudaFree(Td); cudaFree(a); cudaFree(b);
+    }
+    const std::string base(path);
+    {
+        std::ofstream bin(base + ".bin", std::ios::binary);
+        bin.write(reinterpret_cast<const char*>(v0.data()), static_cast<std::streamsize>(N*sizeof(float)));
+        bin.write(reinterpret_cast<const char*>(v1.data()), static_cast<std::streamsize>(N*sizeof(float)));
+    }
+    std::ofstream js(base + ".json");
+    js << std::setprecision(17);
+    const int nR = tt->nReal;
+    js << "{\"N\": " << N << ", \"nReal\": " << nR << ", \"Tmin\": " << static_cast<double>(H->Tmin)
+       << ", \"Tmax\": " << static_cast<double>(H->Tmax) << ", \"bytes\": " << H->bytes() << ", \"tables\": [";
+    const int nTab = static_cast<int>(H->segLo.size());
+    for (int t = 0; t < nTab; ++t) {
+        const TransportTabRefF& r = (t < nR) ? H->spTab[t] : H->pairTab[t - nR];
+        js << (t ? ", " : "") << "{\"kind\": " << (t < nR ? 0 : 1) << ", \"idx\": " << (t < nR ? t : t - nR);
+        if (t >= nR) {
+            const TransportPairD& p = speciesDB_current()->transport.pairs[t - nR];
+            js << ", \"a\": " << p.a << ", \"b\": " << p.b << ", \"pair_kind\": " << p.kind;
+        }
+        js << ", \"segs\": [";
+        for (int k = 0; k < r.nseg; ++k) {
+            const TransportSegF& g = H->seg[r.seg0 + k];
+            js << (k ? ", " : "") << "[" << H->segLo[t][k] << ", " << H->segHi[t][k] << ", " << g.m << ", "
+               << static_cast<double>(g.Tupper) << "]";
+        }
+        js << "]}";
+    }
+    js << "]}" << std::endl;
+    std::cout << "[transport-table-probe] wrote " << base << ".bin/.json (N=" << N << ", tables=" << nTab
+              << ", bytes=" << H->bytes() << ")" << std::endl;
+    return 0;
+}
+
+// forge --resolve-species: GPU を使わず solverConfig.yaml を読み、解決済み記録を cwd に書いて互換性ハッシュを標準出力の最終行に出す。
+// IC 生成・runner が宛先の物性を得るため (#3b)。記録を既存場へ貼るだけで検証済みにはしない。CPG は終了コード 2。
+static int resolveSpeciesOnly()
+{
+    std::streambuf* orig = std::cout.rdbuf(std::cerr.rdbuf());   // ログは stderr へ、stdout はハッシュだけ
+    int rc = 0;
+    std::string hash;
+    try {
+        solverConfig cfg;
+        cfg.read("solverConfig.yaml");
+        if (cfg.thermalMethod != 2) {
+            std::cerr << "[species] thermalMethod != 2 (calorically perfect): no species record / hash" << std::endl;
+            rc = 2;
+        } else {
+            const ResolvedSpeciesDB& db = speciesDB_init(cfg);
+            speciesDB_printTable(cfg, db);
+            const SpeciesRecordInfo rec = speciesDB_writeRecord(db, speciesRecordTref(cfg), cfg.speciesDBFile, "",
+                                                                "not_checked_resolve_only", 0, ".");
+            std::cerr << "[species] record " << rec.recordFile << " (sha256 " << rec.recordSha256 << ")" << std::endl;
+            hash = rec.compatHash;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[species] resolve failed: " << e.what() << std::endl;
+        rc = 1;
+    }
+    std::cout.rdbuf(orig);
+    if (rc == 0) std::cout << hash << std::endl;
+    return rc;
+}
+
 cudaConfig initializeSimulation(
     solverConfig& cfg,
     mesh& msh,
@@ -1131,6 +1527,26 @@ cudaConfig initializeSimulation(
     // 化学種 DB の host 側解決 (GPU 非依存; 未知種名はここで exit)。bcond の X{s}→Y{s} 換算と
     // 起動ログ (種表) が使う。thermo_init_db は同じ結果を device へ上げる。
     speciesDB_printTable(cfg, speciesDB_init(cfg));
+    // physProp.transport (種ごとの輸送物性の出所): 段 2 (plan thermophysics-solver-owned-species-db #5t2-2) で GPU に接続した。
+    // セル (gasProperties_d) と壁 (wmlesWallModel_d) の viscMethod 2 経路だけが新しい μ・λ を使う。viscMethod 0/1 では
+    // μ・λ は定数・Sutherland のままで記録 (輸送ブロック) と実際の計算が食い違うので、その組み合わせは起動を止める。
+    if (!cfg.speciesTransport.empty() && cfg.viscMethod != 2) {
+        cerr << "[transport] ERROR: physProp.transport is used only with viscMethod: 2 (the GPU transport path replaces the "
+                "kinetic-theory mixture). With viscMethod " << cfg.viscMethod << " the recorded transport would not be the one "
+                "computed. Set viscMethod: 2 or remove physProp.transport." << endl;
+        std::exit(EXIT_FAILURE);
+    }
+    // viscMethod 2 は種ごとの輸送物性 (physProp.transport 必須、CEA 形 frozen 混合則) に置き換えた (plan §4.3c 案 C)。
+    // 旧 kinetic 経路 (LJ + Chapman-Enskog、Wilke の φ を μ と λ で共用) は計算から外したので、指定なしは起動を止める。
+    // 旧結果の再現は旧バイナリで行う (procedures/solver-settings.md)。
+    if (cfg.viscMethod == 2 && cfg.speciesTransport.empty()) {
+        cerr << "[transport] ERROR: viscMethod: 2 requires physProp.transport (the transport model of every real species, "
+                "e.g. physProp: {thermalMethod: 2, viscMethod: 2, transport: {N2: cea, O2: cea, H2O: custom:h2o_iapws_cea_v1}}; "
+                "models: cea, kinetic, fit, custom:<name>_v<version>; thermalMethod: 2 only). The former kinetic-theory "
+                "mixture (Wilke phi shared by mu and lambda) has been removed. If air Sutherland viscosity is enough, use "
+                "viscMethod: 1. To reproduce old viscMethod 2 results, run the old binary." << endl;
+        std::exit(EXIT_FAILURE);
+    }
 
     cout << "Init Thermo DB \n";
     thermo_init_db(cfg);   // NASA-9/LJ 化学種 DB を構築し device へアップロード (thermalMethod==2 用)
@@ -1226,6 +1642,10 @@ cudaConfig initializeSimulation(
     // 受動種 (トレーサ + 凝縮モーメント) の device ポインタ配列 (passiveScalarScheme 1 の化学種経路用; 0 では表だけ)。
     passiveInit_d(cfg , var);
 
+    // 入力場の化学種照合と解決済み記録 (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3a)。
+    // TP (thermalMethod 2) だけが対象。数値には触れない (記録と照合のみ)。
+    checkInputSpeciesAndWriteRecord(cfg);
+
     cout << "Read Initial Values \n";
     var.readValueHDF5(cfg.valueFileName , msh, cfg.kInit, cfg.omegaInit);
 
@@ -1308,6 +1728,14 @@ cudaConfig initializeSimulation(
     periodicGradientGather_d_wrapper(cfg , cuda_cfg , msh , var);
     axisymmetricGeomTerms_d_wrapper(cfg , cuda_cfg , msh , var);
     updateVariablesOuter(cfg , cuda_cfg , msh , var , mat_ns);
+    // FP64 正本は **updateVariablesOuter の後**に「確保 → 初期化」を**隣接させて**置く (§5.1 S1a)。
+    // ここより前 (周期ミラー :1221・初期ピン) に置くと、それらの初期射影が Qacc に入らない。
+    // **離すと壊れる**: 以前は確保を main() 側に置いていたため初期化が先に走って no-op になり、
+    // Qacc=0 のまま commit されて ro≈0 → step 4 で発散した (2026-09-23, run_0023_g1_on)。
+    if (cfg.qAccumulatorFP64 == 1) {
+        var.allocQAccumulator(msh.nCells);
+        var.initQAccumulatorFromQ(msh.nCells);
+    }
     speciesUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // roY{s}N/M ベースライン
     condensationUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // 液相モーメント N/M ベースライン
     tracerUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // トレーサ N/M ベースライン
@@ -1874,6 +2302,17 @@ void advanceImplicitSteady(StepContext& s)
     s.profiler.measureWall(ProfileSection::UpdateOuter, [&]() {
         updateVariablesOuter(s.cfg , s.cuda_cfg , s.msh , s.var , s.mat_ns);
     });
+    // FP64 影アキュムレータの**計器**: reconcile が採用したセル数 (§4.4)。
+    // 「上書き型の writer に書き換えられた保存量の数」であり、run ごとに**期待値を事前登録して
+    // 突き合わせる** (case/56 なら等温壁ノード数、case/09 や case/44 なら 0)。
+    // 期待を超える = 棚卸しできていない writer がいる、という意味なので計器として出す。
+    if (s.cfg.qAccumulatorFP64 == 1 && s.var.qaccAdopt_d != nullptr
+        && s.iStep % s.cfg.monitorInterval == 0) {
+        const int nAdopt = qaccReadAdoptCounter(s.var.qaccAdopt_d);
+        printf("[qAccumulatorFP64] step %d: reconcile 採用 %d (= 上書き型 writer が触った保存量の数)\n",
+               s.iStep + 1, nAdopt);
+        qaccResetAdoptCounter(s.var.qaccAdopt_d);
+    }
     s.profiler.measureWall(ProfileSection::WriteOutputs, [&]() {
         writeStepOutputs(s.cfg , s.cuda_cfg , s.msh , s.var , s.pprobes , s.iStep+1);
     });
@@ -2163,7 +2602,11 @@ void advanceOneStep(
 
 }
 
-int main(void) {
+int main(int argc, char** argv) {
+    // --resolve-species: 化学種の解決済み記録だけ書いて終了 (GPU 不使用; plan thermophysics-solver-owned-species-db §4.3)
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--resolve-species") return resolveSpeciesOnly();
+    }
     RuntimeProfiler profiler;
 
     solverConfig cfg;
@@ -2175,6 +2618,13 @@ int main(void) {
     ImplicitDiagLogger implicit_diag_logger;
 
     cudaConfig cuda_cfg = initializeSimulation(cfg, msh, mat_ns, var, fluct, pprobes);
+    // 試験用: 物性だけを評価して終了 (時間更新なし; runTransportProbe の説明)
+    if (const char* e = getenv("FORGE_TRANSPORT_PROBE"); e != nullptr && *e != '\0') {
+        return runTransportProbe(e, cfg, cuda_cfg, msh, var);
+    }
+    if (const char* e = getenv("FORGE_TRANSPORT_TABLE_PROBE"); e != nullptr && *e != '\0') {
+        return runTransportTableProbe(e);
+    }
     // 診断 (FORGE_OUT_RESIDUALS=1): 流れ残差場と陰的補正 dq を h5 出力へ追加する
     // (サブ反復収縮の空間局在の測定用。既定 off = 出力不変)。書かれる値は「最終サブ反復・
     // 最終 sweep 時点」の res_* (BDF 項込み R*) と dq_block_new_* (implicitRelax 適用後)。
@@ -2195,6 +2645,70 @@ int main(void) {
             var.output_cellValNames.push_back(n);
         printf("[FORGE_RESID_SNAP] subiter-0 residual/dq snapshots added to h5 outputs\n");
     }
+    // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.4)。
+    // **非対応の経路で明示 ON されたら黙って劣化させず拒否する** (累積が消える経路があるため)。
+    if (cfg.qAccumulatorFP64 == 1) {
+        // **v1a の対応範囲** (§5.1 S1a)。どれも原理的な制限ではなく「まだ Qacc を扱っていない」だけで、
+        // S1b-①〜④ で順に外す。**黙って劣化させるくらいなら拒否する** (codex plan M5)。
+        const char* why = nullptr;
+        // **検証済みの経路だけ通す** (2026-09-24, codex result-2 M5)。
+        // 以前は node / GPU の検査が無く、**cell も CPU 経路も素通り**していた。
+        // CPU の commit (`update.cpp` の applyScalarImplicitCorrection 等) は FP32 のままなので、
+        // `gpu != 1` で ON にすると device 正本だけ確保されて一切使われない。
+        // cell はユーザ方針で使わない (AGENTS.md / [[user-prefers-node-base]]) ため**未検証**。
+        if (cfg.gpu != 1)
+            why = "GPU 経路 (gpu=1) のみ対応 (CPU の commit は FP32 のまま)";
+        else if (cfg.discretization != "node")
+            why = "node のみ対応 (cell は未検証。ユーザ方針で cell は使わない)";
+        else if (cfg.timeIntegration != 11)
+            why = "v1a は timeIntegration=11 のみ (陽解法 tI 1/4 は S1b-④、tI 3 は凸結合なので Qacc_N/Qacc_M が要る)";
+        else if (cfg.unsteady != 0)
+            why = "v1a は unsteady=0 のみ (dual-time は QaccN/QaccNN の shift が要る。陽解法 unsteady は S1b-④)";
+        else if (cfg.isAxisymmetric != 0)
+            // enforceAxisSymmetry は commit の**基準** roeN/roUyN を射影する (axisymmetricSource_d.cu:312-323)。
+            // Qacc は Q_N を読まないので、その射影を Qacc に当てるまでは対応できない。
+            why = "node 軸対称は S1b-① 待ち (軸ピンが commit の基準 roeN/roUyN を射影するため)";
+        else if (cfg.sstEnergyIncludesK != 0)
+            // ransTransport_d.cu:175 は roe への**増分**なので、Qacc にも同じ増分を当てる必要がある。
+            why = "sstEnergyIncludesK=1 は S1b-② 待ち (roe への増分を Qacc にも当てる必要がある)";
+        else if (msh.nPeriodicMembers > 0)
+            // periodicNode_d.cu:119 は FP32 値だけを root→member に配るので、member の Qacc の
+            // 下位ビットが root と食い違ったまま残る (値が一致すると reconcile も発火しない)。
+            why = "node 周期は S1b-③ 待ち (root→member ミラーが FP32 値だけを配るため)";
+        if (why != nullptr) {
+            fprintf(stderr, "[qAccumulatorFP64] 拒否: %s\n", why);
+            fprintf(stderr, "[qAccumulatorFP64] v1a の対応: GPU・node・timeIntegration=11 && unsteady=0、block/scalar DPLUR、"
+                            "軸対称なし、周期なし、sstEnergyIncludesK=0\n");
+            exit(1);
+        }
+        // 確保と初期化は initializeSimulation の中 (updateVariablesOuter の直後) で隣接して行う。
+        // ここでは**それが済んでいることを確かめるだけ**にする (黙って未初期化のまま進ませない)。
+        if (var.qacc_d[0] == nullptr) {
+            fprintf(stderr, "[qAccumulatorFP64] 内部エラー: 正本が確保されていない "
+                            "(initializeSimulation での確保・初期化が走っていない)\n");
+            exit(1);
+        }
+        printf("[qAccumulatorFP64] 有効: 保存量 5 本の正本を FP64 に置く (内点 %ld CV)\n", (long)msh.nCells);
+        // **対象は流れの 5 本だけ**。乱流・化学種・凝縮モーメント・受動種・遷移モデルの保存量は
+        // **float32 のまま**で、commit の丸めを受ける経路に残る。拒否はしない (case/56 では
+        // 全域 FP64 ビルドと物理量が 0.00-3.77 % で一致しており実害が出ていない) が、
+        // **混在していることを黙らせない** (2026-09-24)。横展開は
+        // plans/active/time_integration-fp64-accumulator-rollout.md。
+        {
+            std::vector<std::string> notAcc;
+            if (cfg.LESorRANS == 2) notAcc.push_back("乱流 (roK, roOmega)");
+            if (cfg.nSpecies > 1)   notAcc.push_back("化学種 (roY*)");
+            if (var.condMomentConsNames.size() > 0) notAcc.push_back("凝縮モーメント");
+            if (var.tracerRegistered != 0)     notAcc.push_back("受動トレーサ (roXi)");
+            if (var.transitionRegistered != 0) notAcc.push_back("遷移モデル (roGamma, roReth)");
+            if (!notAcc.empty()) {
+                printf("[qAccumulatorFP64] **注意**: 次は FP64 正本を持たない (float32 のまま):");
+                for (size_t i = 0; i < notAcc.size(); ++i) printf("%s %s", i ? " /" : "", notAcc[i].c_str());
+                printf("\n[qAccumulatorFP64]   流れの保存量だけが累積される混在状態になる。\n");
+            }
+        }
+    }
+
     // line-implicit (plans/active/time_integration-line-implicit.md): 壁法線ラインを構築。
     // blockDPLUR==1 専用・完全前処理 (lowMachPrecond>=2) とは併用不可。
     if (cfg.lineImplicit == 1) {
@@ -2221,9 +2735,14 @@ int main(void) {
         monitor.report(iStep);
         // 受動種経路の補正収支 (floor による保存量補正の体積積分; monitorInterval ごと)。scheme 0 / 受動種なしでは no-op。
         if (iStep % cfg.monitorInterval == 0) passiveFloorCorrLog_d_wrapper(cfg, cuda_cfg, msh, var, iStep);
+        // 凝縮の理由別の補正量 (plan condensation-two-phase-transport §4.3; 凝縮なしは no-op)
+        if (iStep % cfg.monitorInterval == 0) condCorrectionLog_d_wrapper(cfg, cuda_cfg, msh, var, iStep);
     }
     // 終了時に受動種の収支を必ず出す (最終 step が monitorInterval に乗らないと末尾の補正が記録されない; plan-8 M1)
-    if (cfg.mainLoopCount() > 0 && ((cfg.mainLoopCount() - 1) % cfg.monitorInterval) != 0) passiveFloorCorrLog_d_wrapper(cfg, cuda_cfg, msh, var, cfg.mainLoopCount() - 1);
+    if (cfg.mainLoopCount() > 0 && ((cfg.mainLoopCount() - 1) % cfg.monitorInterval) != 0) {
+        passiveFloorCorrLog_d_wrapper(cfg, cuda_cfg, msh, var, cfg.mainLoopCount() - 1);
+        condCorrectionLog_d_wrapper(cfg, cuda_cfg, msh, var, cfg.mainLoopCount() - 1);
+    }
 
     limiterDiag_finalize(cfg);   // 有界性診断の末尾取りこぼしを回収して累計を確定 (plan §4.35)
 

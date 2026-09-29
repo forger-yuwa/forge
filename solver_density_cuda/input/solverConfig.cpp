@@ -364,6 +364,11 @@ void solverConfig::read(std::string fname)
         this->implicitRelax = getOptionalValidatedValue<double>(deltaT, "implicitRelax", 1.0, "time.deltaT");
         this->updateGuardAlpha = getOptionalValidatedValue<flow_float>(deltaT, "updateGuardAlpha", 0.0, "time.deltaT");
         this->lineImplicit = getOptionalValidatedValue<int>(deltaT, "lineImplicit", 0, "time.deltaT");
+        // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md)。
+        this->qAccumulatorFP64 = getOptionalValidatedValue<int>(deltaT, "qAccumulatorFP64", 0, "time.deltaT");
+        if (this->qAccumulatorFP64 != 0 && this->qAccumulatorFP64 != 1) {
+            throw std::runtime_error("Key 'qAccumulatorFP64' in 'time.deltaT' must be 0 or 1.");
+        }
         this->blockDPLURDiagCache = getOptionalValidatedValue<int>(deltaT, "blockDPLURDiagCache", 0, "time.deltaT");
         this->blockDPLURDqPack = getOptionalValidatedValue<int>(deltaT, "blockDPLURDqPack", 0, "time.deltaT");
         // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md):
@@ -964,8 +969,64 @@ void solverConfig::read(std::string fname)
         // 多成分 thermally-perfect gas 設定 (任意, thermalMethod==2 で使用)
         if (physProp["species"]) {
             this->speciesNames.clear();
-            for (const auto& sn : physProp["species"]) this->speciesNames.push_back(sn.as<std::string>());
+            this->speciesLumps.clear();
+            // 要素は文字列 (種名) か mapping {name, lump: {構成種: 分率, ...}, basis: mole|mass} (lump = 擬似種;
+            // 係数は起動時に speciesDB_resolve が合成する。plan thermophysics-solver-owned-species-db §4.2 #6a)。
+            // ここでは構造だけを読み、分率の検査・正規化・構成種の解決は speciesDB_resolve に置く (単体試験と同じ経路)。
+            for (const auto& sn : physProp["species"]) {
+                if (sn.IsScalar()) { this->speciesNames.push_back(sn.as<std::string>()); continue; }
+                if (!sn.IsMap()) throw std::runtime_error("physProp.species: each entry must be a species name or a mapping {name, lump, basis}.");
+                SpeciesLumpSpec lp;
+                for (auto it = sn.begin(); it != sn.end(); ++it) {
+                    const std::string k = it->first.as<std::string>();
+                    if (k != "name" && k != "lump" && k != "basis") {
+                        throw std::runtime_error("physProp.species: unknown key '" + k + "' in a lump entry (allowed: name, lump, basis).");
+                    }
+                }
+                if (!sn["name"] || !sn["name"].IsScalar()) throw std::runtime_error("physProp.species: a lump entry needs 'name'.");
+                lp.name = sn["name"].as<std::string>();
+                const YAML::Node lm = sn["lump"];
+                if (!lm || !lm.IsMap() || lm.size() == 0) {
+                    throw std::runtime_error("physProp.species: lump '" + lp.name + "' needs a non-empty mapping 'lump: {species: fraction, ...}'.");
+                }
+                // basis は必須 (設計側 problem の composition_basis は既定 mass なので、省略時の既定を置くと取り違えやすい)
+                if (!sn["basis"] || !sn["basis"].IsScalar()) {
+                    throw std::runtime_error("physProp.species: lump '" + lp.name + "' needs 'basis: mole' or 'basis: mass'.");
+                }
+                lp.basis = sn["basis"].as<std::string>();
+                for (auto it = lm.begin(); it != lm.end(); ++it) {
+                    const std::string mn = it->first.as<std::string>();
+                    double v;
+                    try {
+                        v = it->second.as<double>();
+                    } catch (const std::exception&) {
+                        throw std::runtime_error("physProp.species: lump '" + lp.name + "' fraction of '" + mn + "' is not a number.");
+                    }
+                    lp.members.push_back(mn);
+                    lp.fractions.push_back(v);
+                }
+                this->speciesNames.push_back(lp.name);
+                this->speciesLumps.push_back(lp);
+            }
             this->nSpecies = static_cast<int>(this->speciesNames.size());
+        }
+        // 種ごとの輸送物性の出所 (plan thermophysics-solver-owned-species-db #5t2 段 1)。mapping {種名: モデル名} の構造だけを読み、
+        // 実種との対応・モデル名・データの有無の検査は speciesTransportDB_resolve (speciesDB_resolve から呼ぶ) に置く。
+        this->speciesTransport.clear();
+        if (physProp["transport"]) {
+            const YAML::Node tn = physProp["transport"];
+            if (!tn.IsMap() || tn.size() == 0) {
+                throw std::runtime_error("physProp.transport must be a non-empty mapping {species: model} (models: cea, kinetic, fit, custom:<name>_v<version>).");
+            }
+            if (this->thermalMethod != 2) {
+                throw std::runtime_error("physProp.transport requires thermalMethod: 2 (multi-species thermally-perfect gas).");
+            }
+            for (auto it = tn.begin(); it != tn.end(); ++it) {
+                if (!it->first.IsScalar() || !it->second.IsScalar()) {
+                    throw std::runtime_error("physProp.transport: each entry must be 'species: model' (scalar: scalar).");
+                }
+                this->speciesTransport.emplace_back(it->first.as<std::string>(), it->second.as<std::string>());
+            }
         }
 
         if (this->isAxisymmetric == 1 &&

@@ -32,6 +32,19 @@ FORGE_BUILD = FORGE_ROOT / "solver_density_cuda" / "build"
 _ENV = dict(os.environ, LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/hdf5/serial")
 
 
+def converter_path() -> Path:
+    """convertGmshToForge の場所: 環境変数 FORGE_CONVERTER > FORGE_BIN (run_case.sh が使う forge) と同じビルドの変換器 >
+    solver_density_cuda/build。変換器も solverConfig.yaml を読むので、forge と同じビルドのものを使う
+    (lump 記法の physProp.species は plan thermophysics-solver-owned-species-db #6a 以降の変換器でないと読めない)。"""
+    cand = os.environ.get("FORGE_CONVERTER")
+    if cand:
+        return Path(cand)
+    fb = os.environ.get("FORGE_BIN")
+    if fb and (Path(fb).parent / "convertGmshToForge").exists():
+        return Path(fb).parent / "convertGmshToForge"
+    return FORGE_BUILD / "convertGmshToForge"
+
+
 def build_wall(p: Problem) -> tuple:
     g = p.geometry
     theta_a = np.deg2rad(dv_value(p, "theta_a_deg"))
