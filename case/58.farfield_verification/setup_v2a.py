@@ -7,7 +7,7 @@ dual-time (timeIntegration 11 + dualTime 1、物理 dt 固定)。
 リミッタの基準値 (L_ref・ρ・P・a) は自由流で固定する: 既定の自動決定は領域の対角長と初期場の平均を使うので、短・長の領域で
 離散化が変わり、その差 (入射パルス通過時に約 1 %) が反射と区別できなくなる (2026-09-29 run_0020/0021 で確認)。
   python3 setup_v2a.py RUN --len 1|3 --mach 0.3 --end farfield|slip [--solver SLAU|SLAU2] [--dt 5e-6] [--nsub 20]
-         [--tend 3.0e-3] [--cflp 12] [--bin DIR]
+         [--tend 3.0e-3] [--cflp 12] [--sst K OMEGA [--ek 0|1]] [--bin DIR]
 """
 import argparse, math, os, subprocess, sys
 import h5py, numpy as np
@@ -20,6 +20,8 @@ def main():
     ap.add_argument("run"); ap.add_argument("--len", type=float, required=True); ap.add_argument("--mach", type=float, required=True)
     ap.add_argument("--end", choices=("farfield", "slip"), required=True); ap.add_argument("--solver", default="SLAU")
     ap.add_argument("--dt", type=float, default=5e-6); ap.add_argument("--nsub", type=int, default=20)
+    ap.add_argument("--sst", nargs=2, type=float, metavar=("K", "OMEGA"), default=None)
+    ap.add_argument("--ek", type=int, default=0)
     ap.add_argument("--tend", type=float, default=3.0e-3); ap.add_argument("--cflp", type=float, default=12.0)
     ap.add_argument("--bin", default=os.path.expanduser("~/forge-pgrad-new/solver_density_cuda/build-ff"))
     a = ap.parse_args()
@@ -32,6 +34,8 @@ def main():
     P, T, gam, cp = 101325.0, 300.0, 1.4, 1004.5
     R = cp - cp / gam; ro = P / (R * T); c = math.sqrt(gam * R * T); U = a.mach * c
     steps = int(math.ceil(a.tend / a.dt))
+    turb = ('{model: "sst", scalarDiffusion: 1, dilatationCorrection: 0, katoLaunder: 0, wallTreatmentSST: 0, sstEnergyIncludesK: %d}' % a.ek
+            if a.sst else '{model: "none"}')
     open(os.path.join(run, "solverConfig.yaml"), "w").write(f"""mesh: {{discretization: "node", nodeWallDirichlet: 1, meshFileName: "chan.h5", valueFileName: "chan.h5"}}
 gpu: 1
 solver: "{a.solver}"
@@ -47,10 +51,10 @@ time:
   timeIntegration: 11
   nStepInner: 5
 space: {{convMethod: 1, limiter: 2, pRef: {P}, limiterRefLength: 1.0, limiterRoRef: {ro!r}, limiterPRef: {P!r}, limiterARef: {c!r}}}
-turbulence: {{model: "none"}}
+turbulence: {turb}
 initial: "uniform_p101325_u10"
 """)
-    fl = f"ro: {ro!r}, Ux: {U!r}, Uy: 0.0, Uz: 0.0, Ps: {P!r}"
+    fl = f"ro: {ro!r}, Ux: {U!r}, Uy: 0.0, Uz: 0.0, Ps: {P!r}" + (f", k: {a.sst[0]!r}, omega: {a.sst[1]!r}" if a.sst else "")
     kinds = {1: ("xmin", "farfield"), 2: ("xmax", a.end), 3: ("ymin", "slip"), 4: ("ymax", "slip"), 5: ("zmin", "slip"), 6: ("zmax", "slip")}
     lines = []
     for p, (nm, k) in kinds.items():
@@ -75,11 +79,17 @@ initial: "uniform_p101325_u10"
         pp = delta * np.exp(-0.5 * ((x - x0) / sig) ** 2)
         rr = ro + pp / c ** 2; uu = U + pp / (ro * c); PP = P + pp
         e = PP / ((gam - 1.0) * rr)
-        vals = {"ro": rr, "roUx": rr * uu, "roUy": 0.0 * rr, "roUz": 0.0 * rr, "roe": rr * (e + 0.5 * uu * uu)}
+        kk0 = a.sst[0] if a.sst else 0.0
+        vals = {"ro": rr, "roUx": rr * uu, "roUy": 0.0 * rr, "roUz": 0.0 * rr, "roe": rr * (e + 0.5 * uu * uu + (kk0 if a.ek else 0.0))}
+        if a.sst:
+            vals.update({"roK": rr * a.sst[0], "roOmega": rr * a.sst[1]})
         for kk, v in vals.items():
-            V[kk][...] = v.astype(V[kk].dtype)
+            if kk in V:
+                V[kk][...] = v.astype(V[kk].dtype)
+            else:
+                V.create_dataset(kk, data=v.astype(V["ro"].dtype))
     open(os.path.join(run, "IC_FROM.txt"), "w").write(
-        f"V2a 音響: L {a.len} m、M {a.mach}、右端 {a.end}、{a.solver}、dt {a.dt}、nSub {a.nsub}、cfl_pseudo {a.cflp}、"
+        f"V2a 音響: L {a.len} m、M {a.mach}、右端 {a.end}、{a.solver}、SST {a.sst} ek {a.ek}、dt {a.dt}、nSub {a.nsub}、cfl_pseudo {a.cflp}、"
         f"パルス δ {delta} Pa・FWHM {fwhm} m・中心 {x0} m (右向き単純波)、背景 ρ {ro:.6g} c {c:.6g} U {U:.6g}\n")
     print(f"prepared {run}: nx {nx}, steps {steps}, acoustic CFL {(c + U) * a.dt / dx:.3f}")
 

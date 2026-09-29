@@ -7,9 +7,9 @@ import sys
 import numpy as np
 
 
-def main():
-    out = sys.argv[1]; nx, ny, nz = (int(v) for v in sys.argv[2:5]); Lx, Ly, Lz = (float(v) for v in sys.argv[5:8])
-    xs, ys, zs = np.linspace(0, Lx, nx + 1), np.linspace(0, Ly, ny + 1), np.linspace(0, Lz, nz + 1)
+def write_hex_msh(out, nx, ny, nz, coord, bbox):
+    """構造 hex 格子を書く。coord(i, j, k) -> (x, y, z)、bbox = (Lx, Ly, Lz) (Entities の包絡に使うだけ)"""
+    Lx, Ly, Lz = bbox
     nid = lambda i, j, k: 1 + i + (nx + 1) * (j + (ny + 1) * k)
     hexes = [[nid(i, j, k), nid(i + 1, j, k), nid(i + 1, j + 1, k), nid(i, j + 1, k),
               nid(i, j, k + 1), nid(i + 1, j, k + 1), nid(i + 1, j + 1, k + 1), nid(i, j + 1, k + 1)]
@@ -43,7 +43,8 @@ def main():
         for k in range(nz + 1):
             for j in range(ny + 1):
                 for i in range(nx + 1):
-                    w.write(f"{xs[i]:.17g} {ys[j]:.17g} {zs[k]:.17g}\n")
+                    x, y, z = coord(i, j, k)
+                    w.write(f"{x:.17g} {y:.17g} {z:.17g}\n")
         w.write(f"$EndNodes\n$Elements\n7 {nQ + nC} 1 {nQ + nC}\n")
         eid = 1
         for p in range(1, 7):
@@ -55,6 +56,12 @@ def main():
             w.write(f"{eid} " + " ".join(map(str, h)) + "\n"); eid += 1
         w.write("$EndElements\n")
     print(f"wrote {out}: {nN} nodes, {nC} hex, {nQ} boundary quads")
+
+
+def main():
+    out = sys.argv[1]; nx, ny, nz = (int(v) for v in sys.argv[2:5]); Lx, Ly, Lz = (float(v) for v in sys.argv[5:8])
+    xs, ys, zs = np.linspace(0, Lx, nx + 1), np.linspace(0, Ly, ny + 1), np.linspace(0, Lz, nz + 1)
+    write_hex_msh(out, nx, ny, nz, lambda i, j, k: (xs[i], ys[j], zs[k]), (Lx, Ly, Lz))
 
 
 if __name__ == "__main__":
