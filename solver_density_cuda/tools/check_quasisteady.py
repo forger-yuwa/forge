@@ -279,6 +279,8 @@ def classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps, allow_nonfin
     st, vt = s[-k:], v[-k:]
     mean = float(np.mean(vt))
     # abs_scale: 変動を系列の平均でなく登録尺度で測る (平均 0 近傍の系列で相対変動が発散しないため。--abs-scale)
+    if abs_scale is not None and not (np.isfinite(abs_scale) and abs_scale > 0):
+        raise SystemExit(f"--abs-scale は正の有限値でなければならない ({abs_scale})")
     scale = float(abs_scale) if abs_scale is not None else max(abs(mean), 1e-30)
     span = float(vt.max() - vt.min())
     fluct = span / scale

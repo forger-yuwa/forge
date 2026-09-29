@@ -92,7 +92,12 @@ def main():
     print(f"=== 準定常 {a.case} ({pc.CASE}) {run}  スナップショット {len(steps)} 枚 (step {steps[0]}–{steps[-1]})、"
           f"評価窓内の全節点 {nT} (期待集合と一致)、系列 {out.name}")
     ok = True
-    for cols, D, nm, tag in ((colsT, Dt, "温度", "T"), (colsQ, Dq, "熱流束・積分量・固体の効果", "q")):
+    # 閾値は量ごとに「比較許容の 1/5」(2026-09-30 disposition M3): 温度 0.002、熱流束 A 0.004 / C 0.006、
+    # 積分量 Q_up/Q_tot 0.001 (許容 0.005)、固体の厚さ方向差 (規格化) 0.002 (許容 1 %)、軸方向熱量 0.001 (許容 0.005)
+    groups = ((colsT, Dt, "温度", "T"), (colsQ[:nT], Dq, "熱流束", "q"),
+              (["integral"], 0.001 if a.case == "A" else Dq, "積分量", "I"),
+              (["dTs_norm"], 0.002, "固体の厚さ方向の温度差", "S"), (["Qax_frac"], 0.001 if a.case == "A" else 0.006, "固体の軸方向熱量", "X"))
+    for cols, D, nm, tag in groups:
         p = subprocess.run([sys.executable, str(TOOL), "--series-csv", str(out), "--series-cols", ",".join(cols), "--tail", "0.5",
                             "--drift", str(D), "--osc", str(D), "--abs-scale", "1"], capture_output=True, text=True)
         o = p.stdout + p.stderr

@@ -5,9 +5,9 @@ forge の run の最終スナップショットの流れ場 (ρ・u・v・p) を
 **主参照**と、forge の界面温度 T_i・界面熱流束 q_i (= −`iface_q_eff`、流体へ向かう熱を正) を壁節点で比べる。
 
 主参照の不確かさ U (§4.6) = (a) 参照格子の細分化 (forge 格子を 1 回・2 回 2 等分した 2 水準の差) + (b) 写像 (双線形 ↔ 3 次) の差
-+ (c) 散逸・圧力仕事の微分 (2 次 ↔ 3 次スプライン) の差 + (d) 領域の切断 (A: 参照の入口を x = −60R に切り上げ、
-その列の forge の温度を Dirichlet に。C: 参照の上端を 2/3 H に下げて断熱) の差 + (e) 界面熱流束の取り出し (固体側片側差分 2 次 ↔ 3 次) の差。
-(d) は初版で「同じ領域なので差を生まない」として省いていたが、登録 (plan §4.6) どおり評価する (2026-09-30 codex diagnose M1)。
++ (c) 散逸・圧力仕事の微分 (2 次 ↔ 3 次スプライン) の差 + (e) 界面熱流束の取り出し (固体側片側差分 2 次 ↔ 3 次) の差。
+(d) 上流を 1.5 倍に延ばした参照の変化は **U に入れず別掲** する (2026-09-30 disposition M2 (ii)、plan §4.6 の事後改訂):
+forge と参照は同一の有限領域・BC を解いており、延長は問題そのもの (入口位置・固体端面・源項の範囲) を変える。
 A の温度は加熱区間・予熱域に加えて**全長の壁節点**でも判定する (M2)。熱流束は登録どおり加熱区間と予熱域 (−40R ≤ x < 0) の別判定。
 各項目の判定を**すべて**表示し、総合は FAIL が 1 つでもあれば「FAIL (一部判定不能)」のように併記する (M3)。
 合否は |観測差| + U ≤ 許容、U > 許容/3 なら判定不能 (終了コード 2)。
@@ -258,9 +258,12 @@ def main():
     Tc_, qc_ = wall_vals("cubic"); Ts_, qs_ = wall_vals("spline"); _, q3 = wall_vals(("grid", L), "q3")
     uT = np.abs(Tr - TrP) + np.abs(Tc_ - T1) + np.abs(Ts_ - T1)
     uq = np.abs(qr - qrP) + np.abs(qc_ - q1) + np.abs(qs_ - q1) + np.abs(q3 - qr)
+    # (d) 上流延長 (−120R) の差は**比較の U に入れない** (2026-09-30 disposition M2 (ii) — 事後改訂): forge と参照は同一の有限領域・
+    # 同一 BC の問題を解いており、延長は入口位置・固体端面・源項の範囲を変える「問題定義の感度」。別掲する。
+    ext_sens = None
     if a.case == "A":
         Te_, qe_ = wall_vals("ext")
-        uT = uT + np.abs(Te_ - T1); uq = uq + np.abs(qe_ - q1)
+        ext_sens = (np.abs(Te_ - T1), np.abs(qe_ - q1))
     Tf, qf = W["Tw"], W["q"]
     # forge の固体
     xs_s, ys_s, Ts_f, Qtot_f = solid_from_dump(run, st, pid, k_s_reg)
@@ -281,7 +284,8 @@ def main():
         rv = {key: ratio(wall_vals(key)[1], variants[key]["Qtot"]) for key in variants}
         r_r = rv[("grid", L)]
         U_r = (abs(rv[("grid", L)] - rv[("grid", L - 1)]) + abs(rv["cubic"] - rv[("grid", 1)]) + abs(rv["spline"] - rv[("grid", 1)])
-               + abs(rv["ext"] - rv[("grid", 1)]) + abs(ratio(q3, base["Qtot"]) - r_r))
+               + abs(ratio(q3, base["Qtot"]) - r_r))
+        ext_ratio = abs(rv["ext"] - rv[("grid", 1)])
         rows.append(("上流へ回り込む熱 Q_up/Q_tot の差 (絶対)", abs(r_f - r_r), U_r, 0.005))
         info = (f"壁温上昇 (参照、長さ平均) {rise:.4f} K、q_o {qo:.2f} W/m²、Q_tot forge {Qtot_f:.6e} / 参照 {base['Qtot']:.6e} W/rad、"
                 f"Q_up/Q_tot forge {r_f:.5f} / 参照 {r_r:.5f}")
@@ -299,7 +303,6 @@ def main():
     dTs_r, Qax_r = si[("grid", L)]
     def U_of(j):
         u = abs(si[("grid", L)][j] - si[("grid", L - 1)][j]) + abs(si["cubic"][j] - si[("grid", 1)][j]) + abs(si["spline"][j] - si[("grid", 1)][j])
-        if "ext" in si: u += abs(si["ext"][j] - si[("grid", 1)][j])
         return u
     eff = [("固体の厚さ方向の温度差 ΔT_s [K]", dTs_f, dTs_r, U_of(0), tolT_abs),
            ("固体の軸方向熱量 max|Q_ax|/Q_tot", Qax_f, Qax_r, U_of(1), tolI)]
@@ -321,6 +324,10 @@ def main():
         good = np.isfinite(vf) and vf >= 5 * U and vf > tol
         bad |= not good
         print(f"  {'PASS' if good else 'FAIL'}  {nm:<34} forge {vf:.4e} / 参照 {vr:.4e}、U {U:.3e} (効果/U {vf/max(U,1e-300):.1f})、許容幅 {tol:.3e} (効果/許容 {vf/tol:.1f})")
+    if ext_sens is not None:
+        print(f"  --- 別掲 (比較の U に含めない): 上流を 1.5 倍に延ばしたときの参照の変化 (問題定義の感度)")
+        print(f"      壁温 max {ext_sens[0].max():.4e} K ({ext_sens[0].max()/rise*100:.3f} % of 上昇)、q_i max {ext_sens[1].max()/qo*100:.3f} % of q_o、"
+              f"Q_up/Q_tot {ext_ratio:.3e}")
     out = run / f"eval_conj_{st}_L{L}.csv"
     np.savetxt(out, np.c_[xw, Tf, Tr, qf, qr, uT, uq], delimiter=",", comments="",
                header=f"x,T_forge,T_ref,q_forge,q_ref,U_T,U_q  # levels {L}", fmt="%.10e")
