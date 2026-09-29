@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+r"""case/64 (A) と case/65 (C) の評価器 (plan `boundary-cht-conjugate-benchmarks.md` §4.1・§4.6・§4.7)。
+
+forge の run の最終スナップショットの流れ場 (ρ・u・v・p) を固定し、`conjugate_ref.Problem` で流体と固体の温度を独立に解き直した
+**主参照**と、forge の界面温度 T_i・界面熱流束 q_i (= −`iface_q_eff`、流体へ向かう熱を正) を壁節点で比べる。
+
+主参照の不確かさ U (§4.6) = (a) 参照格子の細分化 (forge 格子を 1 回・2 回 2 等分した 2 水準の差) + (b) 写像 (双線形 ↔ 3 次) の差
++ (c) 散逸・圧力仕事の微分 (2 次 ↔ 3 次スプライン) の差 + (e) 界面熱流束の取り出し (固体側片側差分 2 次 ↔ 3 次) の差。
+(d) 領域の切断は forge と参照が同じ領域・境界条件を使うので差を生まない (比較の外)。
+合否は |観測差| + U ≤ 許容、U > 許容/3 なら判定不能 (終了コード 2)。
+
+    python3 eval_conj.py A <run>          # case/64
+    python3 eval_conj.py C <run>          # case/65
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+import h5py
+import numpy as np
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE)); sys.path.insert(0, str(HERE.parent / "65.conjugate_flat_plate"))
+import conjugate_ref as cr  # noqa: E402
+
+trap = getattr(np, "trapezoid", None) or np.trapz
+
+
+def refuse(msg):
+    print(f"REFUSED: {msg}\nVERDICT: REFUSED"); sys.exit(2)
+
+
+def last_step(run):
+    s = [int(m.group(1)) for p in run.glob("res_[0-9]*.h5") for m in [re.match(r"res_(\d+)\.h5$", p.name)] if m]
+    if not s: refuse("res_*.h5 が無い")
+    return max(s)
+
+
+def load(run, st, wall_name):
+    with h5py.File(run / "mesh.h5", "r") as m:
+        xyz = np.asarray(m["MESH/COORD"][:], float).reshape(-1, 3)
+    with h5py.File(run / f"res_{st}.h5", "r") as h:
+        F = {k: np.asarray(h["VALUE"][k][:], float) for k in ("ro", "Ux", "Uy", "P", "T")}
+    for k, v in F.items():
+        if not np.isfinite(v).all(): refuse(f"{k} に非有限値")
+    xr, yr = np.round(xyz[:, 0], 10), np.round(xyz[:, 1], 10)
+    xs, ys = np.unique(xr), np.unique(yr)
+    if len(xs) * len(ys) != len(xyz): refuse("流体の節点がテンソル格子でない")
+    ix = np.searchsorted(xs, xr); iy = np.searchsorted(ys, yr)
+    G = {}
+    for k, v in F.items():
+        a = np.full((len(xs), len(ys)), np.nan); a[ix, iy] = v; G[k] = a
+    with h5py.File(run / f"res_{wall_name}_{st}.h5", "r") as w:
+        c = np.asarray(w["MESH/COORD"][:], float).reshape(-1, 3)
+        q = -np.asarray(w["VALUE/iface_q_eff"][:], float); tw = np.asarray(w["VALUE/iface_Tw_bc"][:], float)
+        ok = np.asarray(w["VALUE/iface_ok"][:], float)
+    o = np.argsort(c[:, 0])
+    return np.asarray(xs, float), np.asarray(ys, float), G, dict(x=c[o, 0], y=c[o, 1], q=q[o], Tw=tw[o], ok=ok[o])
+
+
+def load_fields_only(run, st):
+    """合成試験用: 壁ダンプ無しで流体場だけ読む。"""
+    with h5py.File(run / "mesh.h5", "r") as m:
+        xyz = np.asarray(m["MESH/COORD"][:], float).reshape(-1, 3)
+    with h5py.File(run / f"res_{st}.h5", "r") as h:
+        F = {k: np.asarray(h["VALUE"][k][:], float) for k in ("ro", "Ux", "Uy", "P", "T")}
+    xr, yr = np.round(xyz[:, 0], 10), np.round(xyz[:, 1], 10)
+    xs, ys = np.unique(xr), np.unique(yr); ix = np.searchsorted(xs, xr); iy = np.searchsorted(ys, yr)
+    G = {}
+    for k, v in F.items():
+        a = np.full((len(xs), len(ys)), np.nan); a[ix, iy] = v; G[k] = a
+    return xs, ys, G, None
+
+
+def bisect(a, k):
+    for _ in range(k):
+        a = np.sort(np.concatenate([a, 0.5 * (a[1:] + a[:-1])]))
+    return a
+
+
+def build(case, xs_f, ys_f, G, k, method="linear", deriv="o2", pc=None):
+    """forge の流体格子 (xs_f, ys_f) を k 回 2 等分した参照格子に固体を足して Problem を作る。"""
+    gc = pc.gc
+    xs = bisect(xs_f, k); yfl = bisect(ys_f, k)
+    if case == "A":
+        ns_f = len(ys_f) - 1                                           # 固体は流体と同じ半径間隔 (gen_solid の既定)
+        ysol = np.linspace(pc.R, pc.R_O, ns_f * 2 ** k + 1)[1:]
+        ys = np.concatenate([yfl, ysol]); jw = len(yfl) - 1
+        mat = np.full((len(xs) - 1, len(ys) - 1), cr.FLUID); mat[:, jw:] = cr.SOLID
+        axisym = True; k_s = pc.KS_RATIO[pc.CASE] * gc.K_F
+        rob = lambda xm, y: (pc.H_O, gc.T_IN + pc.DT_C) if (-1e-12 <= xm <= pc.L_HEAT + 1e-9 and abs(y - ys[-1]) < 1e-12) else None
+        fl_rows = slice(0, jw + 1)
+    else:
+        ns_f = len(ys_f) - 1
+        ysol = np.linspace(-pc.B, 0.0, ns_f * 2 ** k + 1)[:-1]
+        ys = np.concatenate([ysol, yfl]); jw = len(ysol)
+        mat = np.full((len(xs) - 1, len(ys) - 1), cr.FLUID)
+        for i in range(len(xs) - 1):
+            xm = 0.5 * (xs[i] + xs[i + 1]); mat[i, :jw] = cr.SOLID if (0 <= xm <= pc.L) else cr.VOID
+        axisym = False; k_s = pc.KS_RATIO[pc.CASE] * gc.K_F
+        rob = lambda xm, y: (pc.H_BACK, gc.T_IN + pc.DT_H) if (0 <= xm <= pc.L and abs(y - ys[0]) < 1e-15) else None
+        fl_rows = slice(jw, len(ys))
+    nx, ny = len(xs), len(ys)
+    Fm = {kk: cr.map_field(xs_f, ys_f, G[kk], xs, yfl, method) for kk in ("ro", "Ux", "Uy", "P", "T")}
+    ro = np.ones((nx, ny)); u = np.zeros((nx, ny)); v = np.zeros((nx, ny)); S = np.zeros((nx, ny))
+    ro[:, fl_rows] = Fm["ro"]; u[:, fl_rows] = Fm["Ux"]; v[:, fl_rows] = Fm["Uy"]
+    phi, work = cr.flow_source(xs, yfl, Fm["ro"], Fm["Ux"], Fm["Uy"], Fm["P"], gc.MU, axisym, deriv=deriv)
+    S[:, fl_rows] = phi + work
+    P = cr.Problem(xs, ys, mat, gc.K_F, k_s, gc.CP, axisym, 0.0, ro=ro, u=u, v=v, source=S, robin=rob)
+    # 入口は forge の入口列の温度分布 (流体部分) を Dirichlet に: T_in を行ごとに
+    Tin_col = np.full(ny, gc.T_IN); Tin_col[fl_rows] = Fm["T"][0]
+    P.T_in_profile = Tin_col
+    return P, xs, ys, jw, k_s
+
+
+def _solve_rowwise(P, prof):
+    """入口 Dirichlet を行ごとの値 (forge の入口列の温度) にして解く。"""
+    P.inlet_profile = prof
+    return P.solve()
+
+
+def interface_q(P, T, jw, k_s, case, order):
+    ys = P.ys
+    if case == "A":                                                # 固体は r > R (上側)。流体へ = k_s ∂T/∂r|_{R+}
+        h = ys[jw + 1] - ys[jw]
+        d = (-3 * T[:, jw] + 4 * T[:, jw + 1] - T[:, jw + 2]) / (2 * h) if order == 2 else \
+            (-11 * T[:, jw] + 18 * T[:, jw + 1] - 9 * T[:, jw + 2] + 2 * T[:, jw + 3]) / (6 * h)
+        return k_s * d
+    h = ys[jw] - ys[jw - 1]                                        # 固体は y < 0 (下側)。流体へ = −k_s ∂T/∂y|_{0−}
+    d = (3 * T[:, jw] - 4 * T[:, jw - 1] + T[:, jw - 2]) / (2 * h) if order == 2 else \
+        (11 * T[:, jw] - 18 * T[:, jw - 1] + 9 * T[:, jw - 2] - 2 * T[:, jw - 3]) / (6 * h)
+    return -k_s * d
+
+
+def metrics(case, pc, xs, T, q, jw, xw=None):
+    gc = pc.gc
+    Ti = T[:, jw]
+    if case == "A":
+        heat = (xs >= -1e-12) & (xs <= pc.L_HEAT + 1e-9)
+        rise = trap(Ti[heat] - gc.T_IN, xs[heat]) / pc.L_HEAT
+        return dict(rise=rise, Ti=Ti, q=q)
+    win = (xs >= 0.2 * pc.L - 1e-12) & (xs <= 0.9 * pc.L + 1e-12)
+    return dict(theta=(Ti - gc.T_IN) / pc.DT_H, q=q, qmean=trap(q[win], xs[win]) / (xs[win][-1] - xs[win][0]))
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("case", choices=["A", "C"]); ap.add_argument("run")
+    ap.add_argument("--levels", type=int, default=2, help="参照格子の細分回数の最大 (登録 2 → 3 水準: 0,1,2)")
+    a = ap.parse_args()
+    run = Path(a.run)
+    txt = (run / "RUN_INPUTS.txt").read_text()
+    m = re.search(r"kind cht (A1|A2|C1|C2)", txt)
+    if not m: refuse("RUN_INPUTS.txt に kind cht A1/A2/C1/C2 が無い")
+    cname = m.group(1)
+    if a.case == "A":
+        import pipe_common as pc
+    else:
+        import plate_common as pc
+    pc.CASE = cname
+    gc = pc.gc
+    st = last_step(run)
+    xs_f, ys_f, G, W = load(run, st, "wall_3" if a.case == "A" else "plate_5")
+    if (W["ok"] != 1).any(): refuse("iface_ok = 0 の壁節点がある")
+    xw = W["x"]
+    # 主参照 (3 水準) と感度
+    res = {}
+    for k in range(a.levels + 1):
+        P, xs, ys, jw, k_s = build(a.case, xs_f, ys_f, G, k, pc=pc)
+        T = _solve_rowwise(P, P.T_in_profile)
+        res[("grid", k)] = (xs, T, interface_q(P, T, jw, k_s, a.case, 2), jw, P, k_s)
+    P, xs1, ys1, jw1, k_s = build(a.case, xs_f, ys_f, G, 1, method="cubic", pc=pc); T = _solve_rowwise(P, P.T_in_profile)
+    res["cubic"] = (xs1, T, interface_q(P, T, jw1, k_s, a.case, 2), jw1, P, k_s)
+    P, xs1, ys1, jw1, k_s = build(a.case, xs_f, ys_f, G, 1, deriv="spline", pc=pc); T = _solve_rowwise(P, P.T_in_profile)
+    res["spline"] = (xs1, T, interface_q(P, T, jw1, k_s, a.case, 2), jw1, P, k_s)
+
+    def at_wall(key):
+        xs, T, q, jw, P, _ = res[key]
+        idx = [int(np.argmin(np.abs(xs - x))) for x in xw]
+        if max(abs(xs[i] - x) for i, x in zip(idx, xw)) > 1e-9: refuse("参照格子に forge の壁節点の x が無い")
+        return T[idx, jw], q[idx]
+    Tr, qr = at_wall(("grid", a.levels))
+    Tr1, qr1 = at_wall(("grid", a.levels - 1))
+    Tc_, qc_ = at_wall("cubic"); Ts_, qs_ = at_wall("spline")
+    T1, q1 = at_wall(("grid", 1))
+    xsL, TL, _, jwL, PL, ksL = res[("grid", a.levels)]
+    q3 = interface_q(PL, TL, jwL, ksL, a.case, 3)[[int(np.argmin(np.abs(xsL - x))) for x in xw]]
+    uT = np.abs(Tr - Tr1) + np.abs(Tc_ - T1) + np.abs(Ts_ - T1)
+    uq = np.abs(qr - qr1) + np.abs(qc_ - q1) + np.abs(qs_ - q1) + np.abs(q3 - qr)
+    Tf, qf = W["Tw"], W["q"]
+    rows = []
+    if a.case == "A":
+        heat = (xw >= -1e-12) & (xw <= pc.L_HEAT + 1e-9); pre = (xw < 0) & (xw >= -40 * pc.R)
+        rise = trap(Tr[heat] - gc.T_IN, xw[heat]) / pc.L_HEAT
+        Qtot = PL.robin_heat(); qo = Qtot / (pc.R_O * pc.L_HEAT)
+        def region(mask, nm):
+            dT = np.abs(Tf[mask] - Tr[mask]) / rise; UT = uT[mask] / rise
+            dq = np.abs(qf[mask] - qr[mask]) / qo; Uq = uq[mask] / qo
+            rows.append((f"温度 (T_i−T_in) {nm}: max |Δ|/上昇", dT.max(), UT.max(), 0.01))
+            rows.append((f"熱流束 q_i {nm}: max |Δ|/q_o", dq.max(), Uq.max(), 0.02))
+        region(heat, "加熱区間"); region(pre, "予熱域 (−40R ≤ x < 0)")
+        up = xw <= 0
+        Qu_f = pc.R * trap(qf[up], xw[up]) / Qtot; Qu_r = pc.R * trap(qr[up], xw[up]) / Qtot
+        Qu_u = pc.R * trap(uq[up], xw[up]) / Qtot
+        rows.append(("上流へ回り込む熱 Q_up/Q_tot の差 (絶対)", abs(Qu_f - Qu_r), Qu_u, 0.005))
+        info = f"壁温上昇 (参照、長さ平均) {rise:.4f} K、q_o {qo:.2f} W/m²、Q_up/Q_tot forge {Qu_f:.4f} / 参照 {Qu_r:.4f}"
+    else:
+        win = (xw >= 0.2 * pc.L - 1e-12) & (xw <= 0.9 * pc.L + 1e-12)
+        th_f = (Tf - gc.T_IN) / pc.DT_H; th_r = (Tr - gc.T_IN) / pc.DT_H; Uth = uT / pc.DT_H
+        qm = trap(qr[win], xw[win]) / (xw[win][-1] - xw[win][0])
+        rows.append(("界面温度 θ_i: 窓内 max |Δθ|", np.abs(th_f - th_r)[win].max(), Uth[win].max(), 0.01))
+        rows.append(("熱流束 q_i: 窓内 max |Δ|/窓内平均", (np.abs(qf - qr)[win] / qm).max(), (uq[win] / qm).max(), 0.03))
+        info = f"窓内 θ_i 参照 {th_r[win].min():.4f}…{th_r[win].max():.4f}、q 平均 {qm:.2f} W/m²"
+    print(f"=== {a.case} ({cname}) {run}  step {st}、壁節点 {len(xw)}、参照 {a.levels + 1} 水準")
+    print(f"  {info}")
+    bad = und = False
+    for nm, d, U, tol in rows:
+        if U > tol / 3:
+            v = "判定不能"; und = True
+        elif d + U <= tol:
+            v = "PASS"
+        else:
+            v = "FAIL"; bad = True
+        print(f"  {v:5s} {nm:<42} 差 {d:.4e} + U {U:.4e}  (許容 {tol:g}、U 上限 {tol/3:.3g})")
+    np.savetxt(run / f"eval_conj_{st}.csv", np.c_[xw, Tf, Tr, qf, qr, uT, uq], delimiter=",", comments="",
+               header="x,T_forge,T_ref,q_forge,q_ref,U_T,U_q", fmt="%.10e")
+    verdict = "判定不能" if und else ("FAIL" if bad else "PASS")
+    print(f"VERDICT: {verdict}")
+    return 2 if und else (1 if bad else 0)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

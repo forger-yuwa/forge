@@ -91,7 +91,8 @@ class Problem:
                         self.kcell(i + di, j + dj) in (None, self.k_f) and
                         (self.kcell(i + di, j + dj) is None or self.mat[i + di, j + dj] == FLUID)
                         for di in (-1, 0) for dj in (-1, 0)):
-                    add(p, p, 1.0); b[p] = self.T_in; continue
+                    prof = getattr(self, "inlet_profile", None)
+                    add(p, p, 1.0); b[p] = self.T_in if prof is None else prof[j]; continue
                 if i == nx - 1:
                     add(p, p, 1.0); add(p, idx(i - 1, j), -1.0); continue
                 if self.wall_dirichlet is not None and j == self.j_wall:
