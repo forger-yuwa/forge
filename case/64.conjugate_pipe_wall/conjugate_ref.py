@@ -327,6 +327,7 @@ def selftest():
     print(f"(iii) k_s→大: 加熱区間の界面温度と T_c の差 max = {e3:.2e} (許容 1e-3)  {'ok' if e3 < 1e-3 else 'NG'}")
     ok &= e3 < 1e-3
     ok &= mms(True) & mms(False)
+    ok &= test_dissipation_axis()
     print("VERDICT:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -365,6 +366,62 @@ def mms(axisym):
     good = r2 > 3.0
     print(f"(mms {'軸対称' if axisym else '平面'}) 2 材料・v≠0・源あり: max 誤差 {errs[0]:.2e} / {errs[1]:.2e} / {errs[2]:.2e}、比 {r1:.2f} / {r2:.2f} (最後の比 > 3 で 2 次)  {'ok' if good else 'NG'}")
     return good
+
+
+
+
+# ------------------------------------------------------------------ forge の流れ場を固定した主参照 (plan §4.1・§4.6)
+def flow_source(xs, ys, ro, u, v, p, mu, axisym, deriv="o2"):
+    """節点場 (nx, ny) から散逸 Φ と圧力仕事 u p_x + v p_y を作る。deriv: "o2" (np.gradient 2 次) / "spline" (3 次スプライン微分)。
+    軸対称の周方向項 τ_θθ v/r は軸上で極限 ∂v/∂r を使う。"""
+    if deriv == "o2":
+        g = lambda f, ax: np.gradient(f, xs if ax == 0 else ys, axis=ax, edge_order=2)
+    else:
+        from scipy.interpolate import RectBivariateSpline
+        def g(f, ax):
+            sp_ = RectBivariateSpline(xs, ys, f, kx=3, ky=3, s=0)
+            return sp_(xs, ys, dx=1 if ax == 0 else 0, dy=1 if ax == 1 else 0)
+    ux, uy, vx, vy, px, py = g(u, 0), g(u, 1), g(v, 0), g(v, 1), g(p, 0), g(p, 1)
+    Y = np.broadcast_to(ys, u.shape)
+    if axisym:
+        vr = np.where(Y > 0, v / np.where(Y > 0, Y, 1.0), vy)
+    else:
+        vr = np.zeros_like(v)
+    div = ux + vy + vr
+    txx = 2 * mu * ux - 2 / 3 * mu * div
+    tyy = 2 * mu * vy - 2 / 3 * mu * div
+    ttt = 2 * mu * vr - 2 / 3 * mu * div
+    txy = mu * (uy + vx)
+    phi = txx * ux + tyy * vy + (ttt * vr if axisym else 0.0) + txy * (uy + vx)
+    return phi, u * px + v * py
+
+
+def map_field(xs_src, ys_src, F_src, xs_dst, ys_dst, method="linear"):
+    """テンソル格子の節点場を別のテンソル格子へ写す (linear: 双線形、cubic: 3 次スプライン)。"""
+    if method == "linear":
+        from scipy.interpolate import RegularGridInterpolator
+        it = RegularGridInterpolator((xs_src, ys_src), F_src, method="linear", bounds_error=False, fill_value=None)
+        X, Y = np.meshgrid(xs_dst, ys_dst, indexing="ij")
+        return it(np.stack([X.ravel(), Y.ravel()], -1)).reshape(X.shape)
+    from scipy.interpolate import RectBivariateSpline
+    return RectBivariateSpline(xs_src, ys_src, F_src, kx=3, ky=3, s=0)(xs_dst, ys_dst)
+
+
+def test_dissipation_axis():
+    """散逸の軸上極限: Poiseuille u = 2U(1 − r²/R²)・線形圧力で Φ = μ (du/dr)² = 16 μ U² r²/R⁴、圧力仕事 = u dp/dx。"""
+    R, U, mu, G = 1e-3, 17.0, 4e-5, -5000.0
+    xs = np.linspace(0, 0.01, 41); ys = np.linspace(0, R, 33)
+    X, Y = np.meshgrid(xs, ys, indexing="ij")
+    u = 2 * U * (1 - (Y / R) ** 2); v = np.zeros_like(u); p = 1e5 + G * X
+    ok = True
+    for d in ("o2", "spline"):
+        phi, w = flow_source(xs, ys, np.ones_like(u), u, v, p, mu, True, deriv=d)
+        ex = 16 * mu * U ** 2 * Y ** 2 / R ** 4
+        e1 = np.abs(phi - ex).max() / ex.max(); e2 = np.abs(w - u * G).max() / np.abs(u * G).max()
+        good = e1 < 5e-3 and e2 < 1e-9
+        ok &= good
+        print(f"(散逸の軸上極限, 微分 {d}) Φ の相対誤差 max {e1:.2e}、軸上の Φ {phi[:, 0].max():.2e} (厳密 0)、圧力仕事 {e2:.2e}  {'ok' if good else 'NG'}")
+    return ok
 
 
 if __name__ == "__main__":

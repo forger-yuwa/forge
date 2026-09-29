@@ -1,0 +1,32 @@
+# case/65 共役平板 — 変換と乾式 1 step 用 (共役なし、平面)。
+# 物性は plan §4.1 の登録値 (Re 1000・Pr 0.72・M 0.05、graetz_common.py と一致させる)。
+mesh: {discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, isAxisymmetric: 0,
+       meshFileName: "mesh.h5", valueFileName: "mesh.h5"}
+gpu: 1
+detectNaN: 1
+detectNaNInterval: 100
+solver: "SLAU"
+physProp:
+  thermalMethod: 0
+  viscMethod: 0          # 定数 visc / thermCond (Re・Pr を厳密に固定する)
+  thermCondMethod: 0
+  visc: 4.085818e-05
+  thermCond: 5.700284e-02
+  cp: 1004.5
+  gamma: 1.4
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {nStepOuter: 1}
+  deltaT: {control: 1, dt: 1.0e-5, cfl: 2.0, cfl_pseudo: 2.0, blockDPLUR: 1, implicitRelax: 0.7,
+           dt_min: 1.0e-11, dt_max: 1.0}
+  outStepStart: 0
+  outStepInterval: 1
+  timeIntegration: 11
+  nStepInner: 4
+space:
+  convMethod: 1
+  limiter: 2
+turbulence: {model: "none"}
+output: {level: 1, interfaceDiag: 1}
+initial: "uniform_p101325_u10"   # 変換器用の名前。VALUE は make_run.py が Poiseuille IC にパッチする

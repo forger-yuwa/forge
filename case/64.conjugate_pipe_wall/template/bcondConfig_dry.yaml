@@ -1,0 +1,5 @@
+# case/64 厚肉管。physID は gen_mesh.py の Physical Curve。乾式: 壁は非連成の等温 300 K (=T_in)。
+inlet:  {physID: 1, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , floats: {ro: 1.176829, Ux: 17.35944, Uy: 0.0, Uz: 0.0, Ps: 101325.0}}
+outlet: {physID: 2, kind: outlet_statPress, outputHDFflg: 0, ints: , floats: {Ps: 101325.0, Pt: 101500.0, Tt: 300.0}}
+wall:   {physID: 3, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 300.0}}
+axis:   {physID: 4, kind: axis, outputHDFflg: 0, ints: , floats: }
