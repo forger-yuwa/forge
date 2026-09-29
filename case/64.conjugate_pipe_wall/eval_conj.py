@@ -5,8 +5,11 @@ forge の run の最終スナップショットの流れ場 (ρ・u・v・p) を
 **主参照**と、forge の界面温度 T_i・界面熱流束 q_i (= −`iface_q_eff`、流体へ向かう熱を正) を壁節点で比べる。
 
 主参照の不確かさ U (§4.6) = (a) 参照格子の細分化 (forge 格子を 1 回・2 回 2 等分した 2 水準の差) + (b) 写像 (双線形 ↔ 3 次) の差
-+ (c) 散逸・圧力仕事の微分 (2 次 ↔ 3 次スプライン) の差 + (e) 界面熱流束の取り出し (固体側片側差分 2 次 ↔ 3 次) の差。
-(d) 領域の切断は forge と参照が同じ領域・境界条件を使うので差を生まない (比較の外)。
++ (c) 散逸・圧力仕事の微分 (2 次 ↔ 3 次スプライン) の差 + (d) 領域の切断 (A: 参照の入口を x = −60R に切り上げ、
+その列の forge の温度を Dirichlet に。C: 参照の上端を 2/3 H に下げて断熱) の差 + (e) 界面熱流束の取り出し (固体側片側差分 2 次 ↔ 3 次) の差。
+(d) は初版で「同じ領域なので差を生まない」として省いていたが、登録 (plan §4.6) どおり評価する (2026-09-30 codex diagnose M1)。
+A の温度は加熱区間・予熱域に加えて**全長の壁節点**でも判定する (M2)。熱流束は登録どおり加熱区間と予熱域 (−40R ≤ x < 0) の別判定。
+各項目の判定を**すべて**表示し、総合は FAIL が 1 つでもあれば「FAIL (一部判定不能)」のように併記する (M3)。
 合否は |観測差| + U ≤ 許容、U > 許容/3 なら判定不能 (終了コード 2)。
 
     python3 eval_conj.py A <run>          # case/64
@@ -81,10 +84,14 @@ def bisect(a, k):
     return a
 
 
-def build(case, xs_f, ys_f, G, k, method="linear", deriv="o2", pc=None):
+def build(case, xs_f, ys_f, G, k, method="linear", deriv="o2", pc=None, cut=False):
     """forge の流体格子 (xs_f, ys_f) を k 回 2 等分した参照格子に固体を足して Problem を作る。"""
     gc = pc.gc
     xs = bisect(xs_f, k); yfl = bisect(ys_f, k)
+    if cut and case == "A":                                           # 領域切断の感度: 入口を x = −60R に
+        xs = xs[xs >= -60 * pc.R - 1e-12]
+    if cut and case == "C":                                           # 上端を 2/3 H に
+        yfl = yfl[yfl <= (2.0 / 3.0) * ys_f[-1] + 1e-15]
     if case == "A":
         ns_f = len(ys_f) - 1                                           # 固体は流体と同じ半径間隔 (gen_solid の既定)
         ysol = np.linspace(pc.R, pc.R_O, ns_f * 2 ** k + 1)[1:]
@@ -176,32 +183,40 @@ def main():
     res["cubic"] = (xs1, T, interface_q(P, T, jw1, k_s, a.case, 2), jw1, P, k_s)
     P, xs1, ys1, jw1, k_s = build(a.case, xs_f, ys_f, G, 1, deriv="spline", pc=pc); T = _solve_rowwise(P, P.T_in_profile)
     res["spline"] = (xs1, T, interface_q(P, T, jw1, k_s, a.case, 2), jw1, P, k_s)
+    P, xs1, ys1, jw1, k_s = build(a.case, xs_f, ys_f, G, 1, cut=True, pc=pc); T = _solve_rowwise(P, P.T_in_profile)
+    res["cut"] = (xs1, T, interface_q(P, T, jw1, k_s, a.case, 2), jw1, P, k_s)
 
-    def at_wall(key):
+    def at_wall(key, allow_missing=False):
         xs, T, q, jw, P, _ = res[key]
         idx = [int(np.argmin(np.abs(xs - x))) for x in xw]
-        if max(abs(xs[i] - x) for i, x in zip(idx, xw)) > 1e-9: refuse("参照格子に forge の壁節点の x が無い")
-        return T[idx, jw], q[idx]
+        miss = np.array([abs(xs[i] - x) > 1e-9 for i, x in zip(idx, xw)])
+        if miss.any() and not allow_missing: refuse("参照格子に forge の壁節点の x が無い")
+        Tv, qv = T[idx, jw].astype(float), q[idx].astype(float)
+        Tv[miss] = np.nan; qv[miss] = np.nan
+        return Tv, qv
     Tr, qr = at_wall(("grid", a.levels))
     Tr1, qr1 = at_wall(("grid", a.levels - 1))
     Tc_, qc_ = at_wall("cubic"); Ts_, qs_ = at_wall("spline")
     T1, q1 = at_wall(("grid", 1))
     xsL, TL, _, jwL, PL, ksL = res[("grid", a.levels)]
     q3 = interface_q(PL, TL, jwL, ksL, a.case, 3)[[int(np.argmin(np.abs(xsL - x))) for x in xw]]
-    uT = np.abs(Tr - Tr1) + np.abs(Tc_ - T1) + np.abs(Ts_ - T1)
-    uq = np.abs(qr - qr1) + np.abs(qc_ - q1) + np.abs(qs_ - q1) + np.abs(q3 - qr)
+    Tk_, qk_ = at_wall("cut", allow_missing=True)                 # 切断で外れた節点 (A の x < −60R) は 0 扱い
+    dT_cut = np.nan_to_num(np.abs(Tk_ - T1)); dq_cut = np.nan_to_num(np.abs(qk_ - q1))
+    uT = np.abs(Tr - Tr1) + np.abs(Tc_ - T1) + np.abs(Ts_ - T1) + dT_cut
+    uq = np.abs(qr - qr1) + np.abs(qc_ - q1) + np.abs(qs_ - q1) + np.abs(q3 - qr) + dq_cut
     Tf, qf = W["Tw"], W["q"]
     rows = []
     if a.case == "A":
         heat = (xw >= -1e-12) & (xw <= pc.L_HEAT + 1e-9); pre = (xw < 0) & (xw >= -40 * pc.R)
         rise = trap(Tr[heat] - gc.T_IN, xw[heat]) / pc.L_HEAT
         Qtot = PL.robin_heat(); qo = Qtot / (pc.R_O * pc.L_HEAT)
-        def region(mask, nm):
+        def region(mask, nm, with_q=True):
             dT = np.abs(Tf[mask] - Tr[mask]) / rise; UT = uT[mask] / rise
-            dq = np.abs(qf[mask] - qr[mask]) / qo; Uq = uq[mask] / qo
             rows.append((f"温度 (T_i−T_in) {nm}: max |Δ|/上昇", dT.max(), UT.max(), 0.01))
-            rows.append((f"熱流束 q_i {nm}: max |Δ|/q_o", dq.max(), Uq.max(), 0.02))
-        region(heat, "加熱区間"); region(pre, "予熱域 (−40R ≤ x < 0)")
+            if with_q:                                             # 熱流束の登録は加熱区間と予熱域の別判定だけ (§6)
+                dq = np.abs(qf[mask] - qr[mask]) / qo; Uq = uq[mask] / qo
+                rows.append((f"熱流束 q_i {nm}: max |Δ|/q_o", dq.max(), Uq.max(), 0.02))
+        region(heat, "加熱区間"); region(pre, "予熱域 (−40R ≤ x < 0)"); region(np.ones_like(heat), "全長", with_q=False)
         up = xw <= 0
         Qu_f = pc.R * trap(qf[up], xw[up]) / Qtot; Qu_r = pc.R * trap(qr[up], xw[up]) / Qtot
         Qu_u = pc.R * trap(uq[up], xw[up]) / Qtot
@@ -227,9 +242,9 @@ def main():
         print(f"  {v:5s} {nm:<42} 差 {d:.4e} + U {U:.4e}  (許容 {tol:g}、U 上限 {tol/3:.3g})")
     np.savetxt(run / f"eval_conj_{st}.csv", np.c_[xw, Tf, Tr, qf, qr, uT, uq], delimiter=",", comments="",
                header="x,T_forge,T_ref,q_forge,q_ref,U_T,U_q", fmt="%.10e")
-    verdict = "判定不能" if und else ("FAIL" if bad else "PASS")
+    verdict = ("FAIL (一部判定不能)" if und else "FAIL") if bad else ("判定不能" if und else "PASS")
     print(f"VERDICT: {verdict}")
-    return 2 if und else (1 if bad else 0)
+    return 1 if bad else (2 if und else 0)
 
 
 if __name__ == "__main__":

@@ -34,6 +34,14 @@ def synth(d: Path, mod=None):
     xs_f, ys_f, G, _ = ev.load_fields_only(d, 100)
     P, xs, ys, jw, k_s = ev.build("A", xs_f, ys_f, G, 2, pc=pc)
     T = ev._solve_rowwise(P, P.T_in_profile); q = ev.interface_q(P, T, jw, k_s, "A", 2)
+    # 流れ場の温度も参照解の値で書き直す (領域切断の感度が入口温度を流れ場から取るので、合成場を自己無撞着にする)
+    ix = [int(np.argmin(np.abs(xs - xv))) for xv in xs_f]; iy = [int(np.argmin(np.abs(ys - yv))) for yv in ys_f]
+    Tf = T[np.ix_(ix, iy)]
+    with h5py.File(MESH, "r") as m:
+        xyz2 = np.asarray(m["MESH/COORD"][:], float).reshape(-1, 3)
+    jx = np.searchsorted(xs_f, np.round(xyz2[:, 0], 10)); jy = np.searchsorted(ys_f, np.round(xyz2[:, 1], 10))
+    with h5py.File(d / "res_100.h5", "a") as h:
+        del h["VALUE/T"]; h.create_dataset("VALUE/T", data=Tf[jx, jy])
     with h5py.File(DRY, "r") as w:
         c = np.asarray(w["MESH/COORD"][:], float); conne = np.asarray(w["MESH/CONNE"][:])
     cx = c.reshape(-1, 3)[:, 0]
