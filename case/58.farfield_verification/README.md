@@ -52,3 +52,10 @@ V1 の `check_convergence.py` は NOT CONVERGED (全列が丸め床で横ばい)
 | `run_0094_v2c_B_fromC` / `run_0095_v2c_A_fromC` / `run_0096_v2c_C_cont` | V2c: C の最終場から 6000 step 継続 | 角は 3 本とも C の値 (離散定常解が 2 つ)。B vs C 全線 0.0210 Δp (出口端)、除くと 0.0080 | active |
 | `run_0070`–`run_0084_v2d_*` | V2d: cpg / tp1 / tp2 × (接触波 短/長、音響 パルスなし/短/長) | 接触波 3 物性 PASS。パルスなし tp1 1.64 Pa・tp2 2.49 Pa → **FAIL (保持)**、cpg PASS。反射 0.07–0.23 % (隔離試験になっていない) (`V2D_VERDICT.txt`) | active |
 | `run_0085_v2d_tp2_ac_nopulse_long` / `run_0086_*_lefthot` / `run_0087_*_lefthot` | V2d 診断: 長領域のパルスなし、左端を高温にしたパルスなし | 長 2.4888 Pa (短と同じ)、左端高温 0.0000 Pa | active |
+| `run_0097_v2c_resab_fromU` / `run_0098_v2c_resab_fromC` | V2c 絶対残差 A/B (同じ B 格子に 2 つの最終場、1 評価、帳簿全節点) | 圧縮角 ≤ 5.2e-7 (両状態)、凸角近傍 4.6e-3 / 7.3e-3 (`V2C_RESAB_VERDICT.txt`、射影あり版は `_proj`) | active |
+| `run_0100`–`run_0102_v2c2_*` | V2c 形状 v2 (ランプを出口まで)、cfl 1、6000 step | A・B が step 691 / 640 で発散、C 完走 | 破棄予定 |
+| `run_0103_v2c2_B_dbg` / `run_0104_v2c2_B_cfl05` | v2 B の発散位置の特定 (20 step 出力) / cfl 0.5・3000 step | 下流ランプ下面 x 1.5–1.7 から / 2.5 桁でプラトー | 破棄予定 |
+| `run_0105_v2c2_A_cfl05` / `run_0106_v2c2_B_cfl05` / `run_0107_v2c2_C_cfl05` | v2 系列 (i)、cfl 0.5、12000 step | A 発散 (step 10570)、B・C 2.5 桁プラトー・壁圧変動 0.002 Δp → 判定不能 | active |
+| `run_0110`–`run_0122_v2d2_*` | V2d-2 隔離試験 (左端高温) dt 8.8e-7 (+ tp2 dt/2) | パルスなし・反射 PASS、時間精度 1.13 % FAIL (`V2D2_VERDICT.txt`) | active |
+| `run_0130`–`run_0142_v2d2_*_dt2` / `_dt4` | 同 dt 4.4e-7 (+ tp2 2.2e-7) | 判定 PASS、時間精度 2.18 % (dt 細分で悪化) (`V2D2_DT2_VERDICT.txt`) | active |
+| `ref1d/` | 独立参照 1D (`ref1d_euler_tp.py`) Δx 5 mm | 参照自身が未収束 (記録用、中断) | active |

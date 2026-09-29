@@ -87,3 +87,15 @@ elif mode == "acoustic_win":
     print(f"{s} vs {l}: c_i {ci:.5g} u {U:.5g}、入射窓 [{t_inc - w_inc:.3e}, {t_inc + w_inc:.3e}] 振幅 {A:.4g} Pa、"
           f"反射到達窓 [{t_ref - w_ref:.3e}, {t_ref + w_ref:.3e}] max|ΔP| {d.max():.4g} Pa → 反射率 {d.max() / A:.4%}")
     print(f"VERDICT: {'PASS' if d.max() / A <= 0.05 else 'FAIL'} (≤ 5 %)")
+elif mode == "same":
+    # 時間精度: 2 run の評価点 P の差の最大 / 入射振幅 (長領域の入射窓の振幅、P∞ = 2851 Pa) ≤ 0.01
+    a, b, l = sys.argv[2], sys.argv[3], sys.argv[4]
+    info = open(f"{l}/IC_FROM.txt").read()
+    U = float(_re.search(r"U ([-0-9.eE+]+) \(dir", info).group(1)); ci = float(_re.search(r"内部 T [0-9.]+ Y [0-9.]+ c ([0-9.eE+]+)", info).group(1))
+    sig = 0.04 / (2.0 * np.sqrt(2.0 * np.log(2.0))); t_inc = 0.4 / (ci + U); w_inc = 3 * sig / (ci + U)
+    tl, Pl, _ = probe(l); A = np.max(np.abs(Pl[(tl >= t_inc - w_inc) & (tl <= t_inc + w_inc)] - P0))
+    ta, Pa, _ = probe(a); tb, Pb, _ = probe(b)
+    tm = min(ta[-1], tb[-1]); k = ta <= tm
+    d = np.abs(Pa[k] - np.interp(ta[k], tb, Pb))
+    print(f"{a} vs {b}: max|ΔP| {d.max():.4g} Pa (t {ta[k][d.argmax()]:.4e}) / 入射振幅 {A:.4g} Pa = {d.max() / A:.3%}")
+    print(f"VERDICT: {'PASS' if d.max() / A <= 0.01 else 'FAIL'} (≤ 1 %)")
