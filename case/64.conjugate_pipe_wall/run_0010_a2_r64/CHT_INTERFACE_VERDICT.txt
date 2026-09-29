@@ -1,0 +1,10 @@
+=== G-if: run_0010_a2_r64 -> PASS ===
+  physID 3: 更新 11900 回、末尾 80 回で判定 (step 596000 .. 599950)
+  OK  ① res_abs_Wm2 [W/m2]   max 3.5740e-05  <= 1.0000e+00
+  OK  ② res_rel              max 1.1153e-07  <= 1.0000e-03
+  OK  ③ dTw_max [K]          max 1.9537e-09  <= 5.0000e-04
+  OK  ④ res_solid [W/m]      max 7.9964e-14  <= 1.0000e-09
+  Tw_mean 末尾 304.7735 K (窓内の振れ 2.00e-08 K)
+  q_total 末尾 -0.0232 W/m (窓内の振れ 2.52e-09)
+
+VERDICT: PASS

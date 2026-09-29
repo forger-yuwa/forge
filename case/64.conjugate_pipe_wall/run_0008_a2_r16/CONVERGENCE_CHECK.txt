@@ -1,0 +1,9 @@
+
+=== run_0008_a2_r16  [last step 32300]  -> NOT CONVERGED (still converging — run more steps) ===
+  rms_ro      : init=4.21e-11 peak=2.67e-08 fin=3.37e-11 drop= 2.9dec falling  <-- still converging
+  rms_roUx    : init=1.03e-09 peak=1.40e-07 fin=4.90e-09 drop= 1.2dec falling  <-- still converging
+  rms_roUy    : init=1.01e-08 peak=6.76e-06 fin=1.45e-09 drop= 3.3dec falling
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.23e-05 peak=5.78e-03 fin=9.98e-06 drop= 2.8dec falling  <-- still converging
+
+OVERALL: CHECK FAILURES ABOVE

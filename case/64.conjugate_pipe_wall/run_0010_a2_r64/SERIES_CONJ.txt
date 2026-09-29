@@ -1,0 +1,4 @@
+=== 準定常 A run_0010_a2_r64  スナップショット 50 枚 (step 12010–600000)、窓の温度節点 327、熱流束節点 285
+  PASS  温度: OVERALL: ALL STEADY  (非 STEADY 0 / 327 系列、drift/osc 0.002)
+  PASS  熱流束・積分量: OVERALL: ALL STEADY  (非 STEADY 0 / 286 系列、drift/osc 0.004)
+VERDICT: PASS

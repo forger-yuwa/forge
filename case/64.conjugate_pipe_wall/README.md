@@ -12,3 +12,6 @@
 | --- | --- | --- | --- |
 | `run_0001_dry_r16` / `run_0002_dry_r32` / `run_0003_dry_r64` | 乾式 1 step (壁 300 K 等温)。壁ダンプ = 固体界面節点の出所 (ローカル float) | 壁が r=R、全長、`iface_ok` 全 1 | ref (固体の入力) |
 | `run_0004_smoke_a1_r16` | 評価器の通し確認 (ローカル float、A1、6000 step、未収束) | 評価器が動くこと | 破棄予定 (登録外) |
+| `run_0005_a1_r16` / `run_0006_a1_r32` / `run_0007_a1_r64` | **本番 A1** (AWS FP64、600000 step) | 前提ゲート全 PASS。主判定 r16 判定不能 / r32・r64 PASS (`EVAL_CONJ.txt`) | active |
+| `run_0008_a2_r16` | 本番 A2 r16 | step 32300 で連成の安全停止 (max\|dTw\| の 10 更新連続増) | ref (失敗の記録) |
+| `run_0009_a2_r32` / `run_0010_a2_r64` / `run_0011_a2_r16_df20` | 本番 A2 (r16 は Df_scale 20 で再走) | 前提ゲート全 PASS。主判定 r16 判定不能 / r32・r64 PASS | active |

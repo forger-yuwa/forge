@@ -1,0 +1,9 @@
+
+=== run_0009_c2_n32  [last step 599999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.62e-06 peak=3.36e-06 fin=5.09e-08 drop= 1.9dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=5.76e-03 fin=5.07e-07 drop= 4.1dec flat   
+  rms_roUy    : init=1.43e-05 peak=8.52e-04 fin=7.50e-06 drop= 2.1dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=3.60e-01 peak=8.32e-01 fin=1.58e-02 drop= 1.8dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE

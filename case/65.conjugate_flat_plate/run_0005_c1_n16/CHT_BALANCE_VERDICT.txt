@@ -1,0 +1,9 @@
+=== G-cons: run_0005_c1_n16  (res_plate_5_600000.h5, flux=iface_q_eff, 積分済み荷重) ===
+  固体状態の出所      : conjugate_state (step 600000) + solid.h5 の Robin 辺
+  流体側  sum Q_f     =       -14.9292 W/m   (sum |Q_f| = 14.9292)
+  固体側  Q_solid     =       -14.9291 W/m   (孔 Robin の持ち去り)
+  不釣合い eps        =         0.0002 W/m
+  規格化  eps/denom   =         0.0013 %     (denom = max(sum|Q_f|, q_floor=14.929051853241045))
+  NaN 節点            = 0 / 41
+  許容                : rel <= 0.100 % かつ abs <= 0.014929051853241046 W/m
+VERDICT: PASS

@@ -1,0 +1,10 @@
+=== G-cons: run_0011_a2_r16_df20  (res_wall_3_600000.h5, flux=iface_q_eff, 積分済み荷重) ===
+  固体状態の出所      : conjugate_state (step 600000) + solid.h5 の Robin 辺
+  幾何                : 軸対称 (axisym0, r 重み。単位はラジアンあたり)
+  流体側  sum Q_f     =  -2.312805e-02 W/rad   (sum |Q_f| = 2.316431e-02)
+  固体側  Q_solid     =  -2.312805e-02 W/rad   (孔 Robin の持ち去り)
+  不釣合い eps        =   4.603734e-12 W/rad
+  規格化  eps/denom   =         0.0000 %     (denom = max(sum|Q_f|, q_floor=0.023128049476415627))
+  NaN 節点            = 0 / 128
+  許容                : rel <= 0.100 % かつ abs <= 2.3128049476415626e-05 W/rad
+VERDICT: PASS

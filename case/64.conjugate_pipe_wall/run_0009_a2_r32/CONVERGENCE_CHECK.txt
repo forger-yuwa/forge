@@ -1,0 +1,9 @@
+
+=== run_0009_a2_r32  [last step 599999]  -> PASS (converged) ===
+  rms_ro      : init=1.08e-11 peak=5.04e-09 fin=1.22e-20 drop=11.2dec falling
+  rms_roUx    : init=2.69e-10 peak=2.66e-08 fin=7.85e-19 drop=10.3dec falling
+  rms_roUy    : init=4.11e-09 peak=1.27e-06 fin=5.42e-18 drop=11.1dec falling
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=3.19e-06 peak=1.10e-03 fin=3.62e-15 drop=11.1dec falling
+
+OVERALL: ALL PASS
