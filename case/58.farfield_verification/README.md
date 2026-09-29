@@ -11,6 +11,9 @@ node 用の特性型遠方境界 `farfield` (外側状態 = TRRS + 滑らかな�
 - `v0u_reject.py`: V0u (v) 非対応構成の起動拒否 (7 構成 + 対照)
 - `setup_v2a.py` / `eval_v2a.py`: V2a 音響反射 (薄板チャネル、dual-time、プローブ時系列の短−長差)。リミッタ基準値は自由流で固定
 - `setup_v2b.py` / `eval_v2b.py`: V2b 保存収支 (帳簿全節点 + 面ダンプ、最終場 restart の 1 評価 `_bal`)・V2f 局所逆流
+- `setup_v2c.py` / `eval_v2c.py`: V2c 斜め衝撃波 (M2.5・10° ランプ、上面 A slip / B farfield / C 高い slip)
+- `v2c_operator_ab.py setup|compare|fromC`: V2c の角の切り分け (同一状態での 1 評価の作用素照合、C の最終場からの継続)
+- `setup_v2d.py` / `eval_v2d.py`: V2d 接触波・TP 音響 (cpg / tp1 単成分 / tp2 多成分、`--left-hot` は左端流入の接触面を消す診断)
 - `eval_v1d.py RUN`: V1 (d) の判定 (帳簿ダンプ全節点で、対流と k・ω 輸送の残差 / 接する面流束の絶対和 ≤ 1e-5)。
   run は `FORGE_DUMP_LEDGER=ledger.csv FORGE_DUMP_LEDGER_CALLS=1 FORGE_DUMP_LEDGER_NODES=<全節点> FORGE_DUMP_FARFIELD=ffdump` で回す
 
@@ -39,3 +42,13 @@ V1 の `check_convergence.py` は NOT CONVERGED (全列が丸め床で横ばい)
 | `run_0032_v2b_obl_ek0` / `run_0033_v2b_obl_ek1` (+ `_bal`) | V2b 流入配置 (3 面から斜め流入) | 同上 PASS。残差 4.4 桁低下で float 床 | active |
 | `run_0034_v2b_x_sfr2` / `run_0035_v2b_obl_sfr2` (+ `_bal`) | V2b 化学種 S3 経路 (speciesFaceReconstruction 2) | 同上 PASS | active |
 | `run_0036_v2f` (+ `_bal`) | V2f: 自由流 +x M2、x ≥ 0.8 m 帯を U_x −0.95a・Y 0.13 | 評価 1 で xmax 169 面が ṁ<0・外側組成 = 外気、恒等式 3 評価とも一致 → PASS (`V2F_VERDICT.txt`) | active |
+| `run_0050_v2e_v1b_expl` | V2e: V1(b) を定常陽解法 (RK3、局所 dt、CFL 0.8) で 4000 step | ずれ 8.7e-6 → PASS (`V2E_VERDICT.txt`) | active |
+| `run_0051_v2e_v2b_x_expl` (+ `_bal`) | V2e: V2b(i) を定常陽解法で 12000 step | 恒等式・全体収支・置換 PASS、残差 5.7 桁低下 | active |
+| `run_0052`–`run_0055_v2e_v2a_sst_ek*` | V2e: V2a + SST (k 1、ω 1e5)、sstEnergyIncludesK 0/1、短/長 | 反射 0.12 % (ek0)・0.33 % (ek1) → PASS | active |
+| `run_0060`–`run_0062_v2c_*` | V2c 初版 (ランプが出口まで) | A が流路閉塞で発散 (試験形状の不備) | 破棄予定 |
+| `run_0063_v2c_A` / `run_0064_v2c_B` / `run_0065_v2c_C` | V2c: ランプ 0.2–0.7 m、一様 IC から 6000 step | B vs C 0.087 Δp (角 x 0.21) → **FAIL (保持)**。A vs C 2.61 Δp (`V2C_VERDICT.txt`) | active |
+| `run_0066_v2c_B_cfl05` / `run_0067_v2c_C_cfl05` / `run_0068_v2c_B_rep` | V2c 診断: cfl 0.5・変換やり直し | 角の値は不変 | 破棄予定 |
+| `run_0092_v2c_opab_low` / `run_0093_v2c_opab_high` | V2c 作用素 A/B (C 最終場を座標対応で与えた 1 評価) | 局所作用素は同一 (差 ≤ 8e-8、`V2C_OPAB_VERDICT.txt`) | active |
+| `run_0094_v2c_B_fromC` / `run_0095_v2c_A_fromC` / `run_0096_v2c_C_cont` | V2c: C の最終場から 6000 step 継続 | 角は 3 本とも C の値 (離散定常解が 2 つ)。B vs C 全線 0.0210 Δp (出口端)、除くと 0.0080 | active |
+| `run_0070`–`run_0084_v2d_*` | V2d: cpg / tp1 / tp2 × (接触波 短/長、音響 パルスなし/短/長) | 接触波 3 物性 PASS。パルスなし tp1 1.64 Pa・tp2 2.49 Pa → **FAIL (保持)**、cpg PASS。反射 0.07–0.23 % (隔離試験になっていない) (`V2D_VERDICT.txt`) | active |
+| `run_0085_v2d_tp2_ac_nopulse_long` / `run_0086_*_lefthot` / `run_0087_*_lefthot` | V2d 診断: 長領域のパルスなし、左端を高温にしたパルスなし | 長 2.4888 Pa (短と同じ)、左端高温 0.0000 Pa | active |

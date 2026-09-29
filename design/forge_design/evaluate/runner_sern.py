@@ -255,6 +255,13 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     if _wnc is not None and int(_wnc) not in (0, 1):
         raise ValueError(f"mesh.slau_wall_normal_chi must be 0 or 1 (or omitted for auto): {_wnc}")
     _wnc_key = ", slauWallNormalChi: 0" if (_wnc is not None and int(_wnc) == 0) else ""
+    # `evaluate.limiter_ref: {length, ro, p, a}` (2026-09-29): リミッタ基準値の明示固定。既定 (キーなし) は forge が
+    # 領域の対角長と初期場の平均から自動で決めるので、**領域の大きさを変える比較 (幅系列) では離散化そのものが変わる**
+    # (plan boundary-node-farfield-characteristic §5.1 #3 の V2a で確認)。幅系列では全幅で同じ値を書く。
+    _lr = p.evaluate.get("limiter_ref")
+    if _lr is not None:
+        _wnc_key += (f", limiterRefLength: {float(_lr['length'])!r}, limiterRoRef: {float(_lr['ro'])!r}, "
+                     f"limiterPRef: {float(_lr['p'])!r}, limiterARef: {float(_lr['a'])!r}")
     ir = p.evaluate.get("implicit_relax")
     _relax = f", implicitRelax: {float(ir)}" if ir is not None else ""
     pm = p.evaluate.get("p_min")

@@ -49,6 +49,25 @@ def _bcond_config(p, st):
             return f"{name}: {{physID: {P[name]}, kind: outflow, outputHDFflg: 0, ints: , floats: }}\n"
         return f"{name}: {{physID: {P[name]}, kind: outlet_statPress, outputHDFflg: 0, ints: , floats: {{Ps: {en['P']:.6g}, Pt: {en['P']:.6g}, Tt: {en['T']:.6g}}}}}\n"
 
+    def farfield(name, s):
+        # 特性型の遠方境界 (plan boundary-node-farfield-characteristic)。自由流 = 外気 (入口 inlet_ext と同じ状態)
+        return (f"{name}: {{physID: {P[name]}, kind: farfield, outputHDFflg: 0, ints: , "
+                f"floats: {{ro: {s['ro']:.9g}, Ux: {s['u']:.9g}, Uy: 0.0, Uz: 0.0, Ps: {s['P']:.9g}, k: {s['k']:.9g}, omega: {s['omega']:.9g}{R2.inlet_species_floats(s)}}}}}\n")
+
+    def simple(name, kind):
+        return f"{name}: {{physID: {P[name]}, kind: {kind}, outputHDFflg: 0, ints: , floats: }}\n"
+
+    # `evaluate.side_far_kind`: slip (既定) / farfield。`evaluate.top_out_kind`: outlet (既定 = outlet_kind に従う) / slip / farfield。
+    # 旧実装は top_out_kind が outlet 以外なら何でも slip にしていた (outflow と書いても slip になる)。未知の値はエラーにする
+    _sfk = str(p.evaluate.get("side_far_kind", "slip"))
+    _tok = str(p.evaluate.get("top_out_kind", "outlet"))
+    if _sfk not in ("slip", "farfield"):
+        raise ValueError(f"evaluate.side_far_kind は slip / farfield: {_sfk}")
+    if _tok not in ("outlet", "slip", "farfield"):
+        raise ValueError(f"evaluate.top_out_kind は outlet / slip / farfield: {_tok}")
+    top_line = outlet("top_out") if _tok == "outlet" else (farfield("top_out", en) if _tok == "farfield" else simple("top_out", "slip"))
+    side_line = farfield("side_far", en) if _sfk == "farfield" else simple("side_far", "slip")
+
     def wall(name, kind=None):
         # 物理壁は 2D と同じく `spec.wall_thermal` を単一ソースにする (断熱 wall / 等温 wall_isothermal+Ts)。
         # ここを直書きしていたため、生産 YAML が等温 1000 K を指定しても 3D は断熱で回っていた
@@ -57,10 +76,9 @@ def _bcond_config(p, st):
             return f"{name}: {{physID: {P[name]}, kind: {kind}, outputHDFflg: 1, ints: , floats: }}\n"
         return f"{name}: {p.wall_bcond_line(model == 'euler', phys_id=P[name], output=1)}\n"
     return (inlet("inlet_nozzle", ex) + inlet("inlet_ext", en) + outlet("outlet") + wall("ramp") + wall("cowl_in") + wall("cowl_out")
-            + outlet("bottom") + (outlet("top_out") if p.evaluate.get("top_out_kind", "outlet") == "outlet"
-                                  else f"top_out: {{physID: {P['top_out']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n")
+            + outlet("bottom") + top_line
             + f"sym: {{physID: {P['sym']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
-            + f"side_far: {{physID: {P['side_far']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
+            + side_line
             + wall("sidewall_in") + wall("sidewall_out")
             # R4c/R4e: 機体側面 (z = W/2, x ≤ L_ramp) と機体ベース (x = L_ramp, 幅内)。
             # ダクト側壁とは別タグ・別帳簿。**上面・側面・ベースは同一の等温壁で揃える** (codex plan-3 M4)
