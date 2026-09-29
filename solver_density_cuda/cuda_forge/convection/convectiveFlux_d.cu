@@ -613,7 +613,7 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
 // =============================================================================
 // 局所帳簿ダンプ (plan tooling-nozzle-sern-3d §5.1 R5h、codex diagnose 2026-09-27)。
 //   FORGE_DUMP_LEDGER=<path>        : 出力先 (CSV)。未設定なら全関数 no-op (解はビット同一)。
-//   FORGE_DUMP_LEDGER_NODES=<a,b,..>: 印を付ける節点 ID (0 始まり)。
+//   FORGE_DUMP_LEDGER_NODES=<a,b,..>: 印を付ける節点 ID (0 始まり)。all で全節点。
 //   FORGE_DUMP_LEDGER_CALLS=<n>     : 記録する assembleResidual の呼び出し数 (既定 2)。
 // 出力専用: 状態・残差をホストへ写して書くだけで、どの配列も書き換えない。
 //   <path>          行 = call,tag,node,field,value (段ごとの状態・残差)
@@ -644,6 +644,10 @@ static void ledgerInitOnce(mesh& msh)
     if (const char* c = std::getenv("FORGE_DUMP_LEDGER_CALLS")) L.maxCalls = std::max(1, std::atoi(c));
     std::string s(n);
     size_t pos = 0;
+    if (s == "all") {   // 全節点 (環境変数に全 ID を並べると ARG_MAX を超える)
+        for (long long id = 0; id < (long long)msh.nCells; ++id) L.nodes.push_back(id);
+        pos = s.size();
+    }
     while (pos < s.size()) {
         size_t q = s.find(',', pos);
         if (q == std::string::npos) q = s.size();
