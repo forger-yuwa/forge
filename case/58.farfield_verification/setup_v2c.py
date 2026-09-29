@@ -16,7 +16,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from make_box_msh import write_hex_msh  # noqa: E402
 
-XC, XE, TH, LX, HA, NX, JA, DZ, NZ = 0.2, 0.7, math.radians(10.0), 1.2, 0.3, 240, 60, 0.005, 3
+# 形状 v1 (既定): ランプ 0.2–0.7 m → 水平、H_A 0.3、L 1.2 (凸角 x 0.7 で残差が停滞した、§5.1 #3c)
+# 形状 v2: ランプを出口まで (凸角なし)、H_A 0.5、L 1.8、C は H 1.1 (流路閉塞を避ける: 出口流路 0.218 m > 臨界 0.19 m)
+GEOM = {"v1": dict(XE=0.7, LX=1.2, HA=0.3, JA=60, JC=100), "v2": dict(XE=1.8, LX=1.8, HA=0.5, JA=100, JC=120)}
+XC, TH, DZ, NZ = 0.2, math.radians(10.0), 0.005, 3
+XE, LX, HA, JA, JC_C = 0.7, 1.2, 0.3, 60, 100
+
+
+def use_geom(g):
+    global XE, LX, HA, JA, JC_C
+    d = GEOM[g]; XE, LX, HA, JA, JC_C = d["XE"], d["LX"], d["HA"], d["JA"], d["JC"]
 
 
 def yb(x):
@@ -27,11 +36,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run"); ap.add_argument("--case", choices=("A", "B", "C"), required=True)
     ap.add_argument("--steps", type=int, default=6000); ap.add_argument("--cfl", type=float, default=1.0)
+    ap.add_argument("--geom", choices=("v1", "v2"), default="v1"); ap.add_argument("--out-int", type=int, default=None)
     ap.add_argument("--bin", default=os.path.expanduser("~/forge-pgrad-new/solver_density_cuda/build-ff"))
     a = ap.parse_args()
     run = a.run
+    use_geom(a.geom)
+    NX = int(round(LX / 0.005))
     os.makedirs(run)
-    JC = 100 if a.case == "C" else 0
+    JC = JC_C if a.case == "C" else 0
     ny = JA + JC
     xs = np.linspace(0.0, LX, NX + 1)
 
@@ -52,7 +64,7 @@ time:
   last: {{nStepOuter: {a.steps}}}
   deltaT: {{control: 1, dt: 1e-8, cfl: {a.cfl}, cfl_pseudo: {a.cfl}, dt_min: 1e-12, dt_max: 1.0, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}}
   outStepStart: 0
-  outStepInterval: {max(a.steps // 6, 1)}
+  outStepInterval: {a.out_int or max(a.steps // 6, 1)}
   timeIntegration: 11
   nStepInner: 5
 space: {{convMethod: 1, limiter: 2, pRef: {P}, limiterRefLength: 1.0, limiterRoRef: {ro!r}, limiterPRef: {P!r}, limiterARef: {c!r}}}
@@ -75,7 +87,8 @@ initial: "uniform_p101325_u10"
         vals = {"ro": ro, "roUx": ro * U, "roUy": 0.0, "roUz": 0.0, "roe": ro * (e + 0.5 * U * U)}
         for kk, v in vals.items():
             V[kk][...] = np.full(n, v, dtype=V[kk].dtype)
-    open(os.path.join(run, "IC_FROM.txt"), "w").write(f"V2c case {a.case}: 一様 M {M} (ρ {ro:.6g}、U {U:.6g})、上面 {top}、H {HA + JC * DZ} m\n")
+    open(os.path.join(run, "GEOM.txt"), "w").write(f"{a.geom}\n")
+    open(os.path.join(run, "IC_FROM.txt"), "w").write(f"V2c geom {a.geom} case {a.case}: 一様 M {M} (ρ {ro:.6g}、U {U:.6g})、上面 {top}、H {HA + JC * DZ} m\n")
     print(f"prepared {run}: case {a.case}, nodes ≈ {(NX + 1) * (ny + 1) * (NZ + 1)}")
 
 

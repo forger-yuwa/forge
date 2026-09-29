@@ -89,10 +89,10 @@ def compare():
                 sc["ro"][c] += abs(ro * un); sc["roe"][c] += abs(ro * H * un)
                 for d, q in enumerate(("roUx", "roUy", "roUz")):
                     sc[q][c] += abs(ro * u[d] * un) + abs(P - P_REF) * abs(S[d])
-        print(f"{run}: 内部面 {len(seen)}、境界半割面を持つ節点 {len(bpl)} (うち slip {len(slipn)}、運動量は接線成分で判定)")
+        print(f"{run}: 内部面 {len(seen)}、境界半割面を持つ節点 {len(bpl)} (うち slip {len(slipn)}、運動量は{'接線成分 (--proj)' if PROJ else '射影なしの全成分'}で判定)")
         # slip 面を持つ節点は運動量残差から壁法線成分 (面ごとの法線、Gram–Schmidt) を除く: 更新時に射影で捨てられる成分なので収束の指標でない
         Rm = np.stack([np.array([res["res_" + q].get(i, np.nan) for i in range(n)]) for q in ("roUx", "roUy", "roUz")], 1)
-        for c, dct in slipn.items():
+        for c, dct in (slipn.items() if PROJ else []):
             basis = []
             for v in dct.values():
                 w = v / np.linalg.norm(v)
@@ -115,16 +115,19 @@ def compare():
             w = int(np.nanargmax(r))
             corner = (xyz[:, 0] >= 0.195) & (xyz[:, 0] <= 0.23) & (xyz[:, 1] <= 0.01)
             exitb = (xyz[:, 0] >= 1.195) & (xyz[:, 1] <= 0.09)
+            convex = (xyz[:, 0] >= 0.69) & (xyz[:, 0] <= 0.76) & (xyz[:, 1] <= 0.1)
             nbad = int(np.sum(r > 1e-5))
             ok &= nbad == 0 and np.all(np.isfinite(R))
             top = np.argsort(-np.nan_to_num(r))[:3]
             w = int(np.nanargmax(r))
-            print(f"  {q:5s}: max |R|/Σ|F| {r[w]:.3e} (x {xyz[w,0]:.3f} y {xyz[w,1]:.4f})、> 1e-5 の節点 {nbad}、角 {np.nanmax(r[corner]):.2e}、出口下端 {np.nanmax(r[exitb]):.2e}、非有限 {int(np.sum(~np.isfinite(R)))}、上位 {[(round(float(xyz[t,0]),3), round(float(xyz[t,1]),4), round(float(xyz[t,2]),3), f'{r[t]:.1e}') for t in top]}")
+            print(f"  {q:5s}: max |R|/Σ|F| {r[w]:.3e} (x {xyz[w,0]:.3f} y {xyz[w,1]:.4f})、> 1e-5 の節点 {nbad}、圧縮角 {np.nanmax(r[corner]):.2e}、凸角近傍 {np.nanmax(r[convex]):.2e}、出口下端 {np.nanmax(r[exitb]):.2e}、非有限 {int(np.sum(~np.isfinite(R)))}、上位 {[(round(float(xyz[t,0]),3), round(float(xyz[t,1]),4), round(float(xyz[t,2]),3), f'{r[t]:.1e}') for t in top]}")
         print(f"  → {'全項目 ≤ 1e-5' if ok else '閾値超えあり'}")
         ok_all &= ok
     print("VERDICT: " + ("両状態とも全節点で ≤ 1e-5 → 残差を残した停止の仮説を棄却 (異なる離散平衡の候補として扱う)" if ok_all
                          else "少なくとも片方が閾値超え → 「二つとも離散定常解」を棄却し、非零残差が更新されない箇所を追う"))
 
+
+PROJ = "--proj" in sys.argv   # 既定は射影しない (codex diagnose 3 回目: slip は弱形式でソルバは法線残差を捨てない。旧版は射影していた)
 
 if __name__ == "__main__":
     {"setup": setup, "compare": compare}[sys.argv[1]]()

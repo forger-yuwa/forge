@@ -72,7 +72,9 @@ def main():
     if a.test == "contact":
         U = a.dir * 0.5 * c0; umax = abs(U) + max(c0, ci); tend = (0.475 + 0.15) / abs(U); probes = {"eval": 0.975 if a.dir > 0 else 0.025}
     else:
-        U = 0.3 * ci; umax = U + ci; tend = 0.4 / (U + ci) + 0.2 / (ci - U) + 0.15 / (ci - U); probes = {"eval": 0.8, "mid": 0.4}
+        # 終了時刻 = 反射到達窓の末尾 (t_ref + 3σ/(c−u)) + 余裕 0.02 m/(c−u)。旧式 (0.4/(c+u) + 0.35/(c−u)) は窓を覆わなかった (codex diagnose 3 回目)
+        U = 0.3 * ci; umax = U + ci; sig_a = 0.04 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
+        tend = 0.6 / (ci + U) + 0.2 / (ci - U) + (3.0 * sig_a + 0.02) / (ci - U); probes = {"eval": 0.8, "mid": 0.4}
     dt = a.cfl_ac * dx / umax
     steps = int(math.ceil(tend / dt))
     if a.gas == "cpg":

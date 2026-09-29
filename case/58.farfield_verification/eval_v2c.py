@@ -4,10 +4,11 @@
 Δp_shock = 斜め衝撃波理論 (M 2.5、θ 10°、γ 1.4) の p2 − p1。各 run の最終 res_*.h5 を使う。
   python3 eval_v2c.py RUN_A RUN_B RUN_C
 """
-import glob, math, re, sys
+import glob, math, os, re, sys
 import h5py, numpy as np
 
-XC, XE, TH, DZ = 0.2, 0.7, math.radians(10.0), 0.005
+XC, TH, DZ = 0.2, math.radians(10.0), 0.005
+XE_OF = {"v1": 0.7, "v2": 1.8}
 
 
 def oblique(M, th, g=1.4):
@@ -28,7 +29,8 @@ def ramp_p(run):
     with h5py.File(last) as f:
         P = f["VALUE/P"][:].astype(float)
         nonfin = sum(int(np.sum(~np.isfinite(f["VALUE"][k][:]))) for k in f["VALUE"].keys())
-    ybx = (np.clip(xyz[:, 0], XC, XE) - XC) * math.tan(TH)
+    g = open(run + "/GEOM.txt").read().strip() if os.path.exists(run + "/GEOM.txt") else "v1"
+    ybx = (np.clip(xyz[:, 0], XC, XE_OF[g]) - XC) * math.tan(TH)
     sel = (np.abs(xyz[:, 1] - ybx) < 1e-6) & (np.abs(xyz[:, 2] - DZ) < 1e-6) & (xyz[:, 0] >= XC - 1e-9)
     x = xyz[sel, 0]; o = np.argsort(x)
     return st, np.round(x[o], 6), P[sel][o], nonfin
