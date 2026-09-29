@@ -156,7 +156,7 @@ plan-7 の反例 (M1: 高温の内部を出ていく音響が外気そのまま�
 | 4a | **V3 初期場履歴 A/B** (codex 2026-09-29): 2.50 H・g3・farfield、同一バイナリ・BC・基準値・CFL、変えるのは初期保存量だけ。A = `run_0996` 最終場から同一格子 restart、B = `run_0994` (3.42 H farfield) 最終場を 2.50 H の共通領域へ制限 (座標 + 境界タグ [side_far 除く] で対応、保存量を直接コピー)。各 20000 step・500 出力、末尾 10000 step で全 4 量、窓条件未達なら各 +20000。**事前閾値 τ = 0.2ε**: 全量 D_IC ≤ τ → 二履歴間の影響は τ 以下 (初期場依存の仮説をその精度で棄却)、いずれかで \|Δ平均\| − a_A − a_B > τ → 初期場依存を採用、その中間・準定常未達は判定不能。V3 の許容値は変えない。**投入 (2026-09-29)**: A `case/46.sern_design/run_0997_ff_v3ic_A_from2p50` (run_0996 res_20000)、B `run_0998_ff_v3ic_B_from3p42` (`r4d_common_restrict.py` で run_0994 res_20000 を 2.50 H へ切り出し、1,920,103 節点ビット一致)。設定・BC 同一。判定は `v3_farfield_eval.py --pair A B --tau 0.2` | AWS | O |
 | 4b | ~~`v3_farfield_eval.py --pair` に窓条件・標本数・有限性を必要条件として組み込む (codex 2026-09-29 M)~~ **済 (2026-09-29)**: 満たさない組は「判定不能」で終了コード 2 (run_0993 の組で確認)、`--tau` で閾値を X·ε に | 手元 | O |
 | 4c | 生産切替の前提: 最終 BC (side_far farfield)・同じリミッタ基準値で g3/g4 (必要なら g1) の格子差 G を取り直し R4d の G + D を評価 (codex 2026-09-29 M、生産切替はユーザ判断) | AWS | F |
-| 4d | SERN 帳簿 (`design/forge_design/metrics/sern_momentum.py`) を farfield の診断面流束 (FORGE_DUMP_FARFIELD、圧力基準補正込み) で組む (§5 の未完了項目、codex 2026-09-29 M) | 手元 | O |
+| 4d | **(優先度低、生産切替の前提ではない)** 運動量収支の検算ツール `design/forge_design/metrics/sern_momentum.py` を farfield の診断面流束 (FORGE_DUMP_FARFIELD、圧力基準補正込み) で組む (§5 の未完了項目、codex 2026-09-29 M)。**注記 (2026-09-29 ユーザ指摘で整理)**: C_T・C_L・C_M は `runner_sern3d.forces3d` のノズル壁面 (幅内ランプ・カウル内外・ダクト側壁) の積分 + 入口運動量で、遠方境界の面は使わない → farfield 化で推力の算出は変わらない。`sern_momentum.py` はランナーから呼ばれない手動の検算 (壁積分の範囲・符号・面積の誤り検出) で、farfield の run では閉じないだけ。C_T はノズル単品のグロス推力 (簡略化した箱形機体の外部流中)。機体込みの正味性能は実機形状が無いので見積もらない (機体面の力は C_T_vehicle 等の別枠で参考値) | 手元 | O |
 | 5 | codex result 段 → accepted | | F |
 
 ## 6. 検証
