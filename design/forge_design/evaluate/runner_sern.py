@@ -116,8 +116,9 @@ def select_operating_point(p: Problem, op: str | None) -> dict:
             "inflow": dict(p.spec["inflow"]), "gas": {"gamma": p.gamma, "cp": p.cp, "composition": p.raw.get("gas", {}).get("exhaust_composition")}}
 
 
-# --- R3: 凍結組成 TP (排気 = CEA 凍結組成の擬似種 EXH, 外気 = 空気 AIR) ------------------------------------
-SPECIES_ORDER = ("EXH", "AIR")     # 旧既定 (evaluate.tp_species 省略時の別名 = lumps {EXH: stream inflow, AIR: stream external})
+# --- R3: 凍結組成 TP (排気 = CEA 凍結組成の lump EXH, 外気 = 空気の lump AMB) ------------------------------------
+# 外気 lump は 2026-09-30 に AIR → AMB へ改名 (ソルバ内蔵の擬似種 AIR と衝突するため。plan tooling-nozzle-sern-chain R8)。順序は不変
+SPECIES_ORDER = ("EXH", "AMB")     # 既定 (evaluate.tp_species 省略時の別名 = lumps {EXH: stream inflow, AMB: stream external})
 
 
 def frozen_gases(p: Problem) -> dict | None:
@@ -125,7 +126,7 @@ def frozen_gases(p: Problem) -> dict | None:
     "transported": [FrozenGas (輸送種ごと)]}。cpg なら None。
     排気組成は作動点 `gas.composition` (select_operating_point が `gas.exhaust_composition` に写す) のモル分率、
     外気は `spec.external.composition` (モル分率) があればそれ、無ければ乾燥空気。
-    輸送種の配置は統一スキーマ `evaluate.tp_species` (省略時 = 旧 `[EXH, AIR]` = 流れごとの lump; `{mode: full}` で実種の和集合、
+    輸送種の配置は統一スキーマ `evaluate.tp_species` (省略時 = `[EXH, AMB]` = 流れごとの lump; `{mode: full}` で実種の和集合、
     このとき排気率は受動スカラ `roXi` で輸送) を流れ {inflow, external} で解決する (plan cea-mole-fraction §4.5)。"""
     if not p.is_frozen_tp:
         return None
@@ -136,10 +137,11 @@ def frozen_gases(p: Problem) -> dict | None:
         raise ValueError("gas.model: frozen_tp には gas.exhaust_composition か operating_points[].gas.composition (モル分率) が要る")
     db = p.species_db
     ext_comp = p.spec["external"].get("composition")
+    from ..gas.frozen import AIR_MOLE
     exh = FrozenGas.from_mole(comp, "EXH", href, db)
-    ext = FrozenGas.from_mole(ext_comp, "AIR", href, db) if ext_comp else FrozenGas.air(href, db)
+    ext = FrozenGas.from_mole(ext_comp if ext_comp else AIR_MOLE, "AMB", href, db)
     ev = dict(p.evaluate)
-    ev.setdefault("tp_species", ["EXH", "AIR"])
+    ev.setdefault("tp_species", ["EXH", "AMB"])
     layout = resolve_species_layout(parse_tp_species(ev), {"inflow": exh.Y, "external": ext.Y}, db,
                                     condensing_species=None, condensation=False)
     transported = []
@@ -150,11 +152,16 @@ def frozen_gases(p: Problem) -> dict | None:
 
 
 def write_species_db(p: Problem, run_dir, gases: dict | None) -> None:
-    """輸送種の `species_db.yaml` (由来コメント付き) と `species_meta.yaml` を run dir に書く (cpg なら何も書かない)。"""
+    """`species_meta.yaml` を run dir に書く (cpg なら何も書かない)。lump の熱物性はソルバが起動時に合成するので
+    合成済み擬似種の `species_db.yaml` は書かない (2026-09-30、plan thermophysics-solver-owned-species-db §5.2 / SERN R8)。
+    ソルバ内蔵で解決できない実種 (外部 DB 由来など) があるときだけ、その生エントリを `species_db_external.yaml` に書く。"""
     if gases is None:
         return
-    from ..gas.composition import write_species_files
-    write_species_files(gases["layout"], run_dir)
+    from ..gas.composition import solver_species_config, species_db_raw_yaml, write_species_meta
+    _, external = solver_species_config(gases["layout"])
+    write_species_meta(gases["layout"], run_dir, None)
+    if external:
+        (Path(run_dir) / "species_db_external.yaml").write_text(species_db_raw_yaml(external))
 
 
 def gas_states(p: Problem) -> dict:
@@ -274,12 +281,15 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     # 生産 YAML は mesh.node_inlet_corner_wall: 1 (角ノードの壁圧 1.75 p_in 対策; plans/active/boundary-node-inlet-corner-wall.md)
     if disc == "node" and int(p.mesh.get("node_inlet_corner_wall", 0)):
         node_keys += ", nodeInletCornerWall: 1"
-    # R3 (frozen_tp): 排気 EXH / 空気 AIR の 2 擬似種 TP。thermoHrefTemp (sensible datum) は陰解法の χ_eos 桁違い対策で必須
+    # R3 (frozen_tp): 排気 EXH / 外気 AMB の 2 lump TP。thermoHrefTemp (sensible datum) は陰解法の χ_eos 桁違い対策で必須
     # ([[isobutane-wt-semiperfect]] / runner_axismach と同じ)。IC の roe も同じ基準で組む (paste_region_ic)
+    # physProp.species は lump 記法 ({name, lump: {構成種: モル分率}, basis: mole}) で、NASA-9 はソルバが起動時に合成する (R8)
     if p.is_frozen_tp:
+        from ..gas.composition import physprop_species_flow, solver_species_config
         gases = frozen_gases(p); L = gases["layout"]
-        _sp = ", ".join(f'"{k}"' for k in L.species)   # 引用符付き (NO/N/Y の真偽値化を防ぐ; codex result M1)
-        _tp = f", species: [{_sp}], speciesDBFile: \"species_db.yaml\", thermoHrefTemp: {gases['href_T']}"
+        items, external = solver_species_config(L)
+        _db = ', speciesDBFile: "species_db_external.yaml"' if external else ""
+        _tp = f", species: {physprop_species_flow(items)}{_db}, thermoHrefTemp: {gases['href_T']}"
         if L.tracer:
             _tp += ", tracer: exhaust"
         _tm = 2
@@ -578,7 +588,7 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     cfg = _solver_config(p, n, out_int, cfl, st["ext"]["P"])
     (run_dir / "bcondConfig.yaml").write_text(_bcond_config(p, st))
     (run_dir / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
-    write_species_db(p, run_dir, frozen_gases(p))     # R3: 擬似種 EXH / AIR の NASA-9 (cpg なら何も書かない)
+    write_species_db(p, run_dir, frozen_gases(p))     # R3: species_meta.yaml (lump の NASA-9 はソルバが合成、cpg なら何も書かない)
     disc = p.mesh.get("discretization", "cell")
     # 品質ゲートは primal (cell) 変換で
     (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"')
@@ -779,10 +789,10 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
             P = (g_s - 1.0) * (roe - 0.5 * sum(m * m for m in mom) / np.maximum(ro, 1e-30))
             roe_n = P * s_P / (g_d - 1.0) + 0.5 * sum(m * m for m in mom_n) / np.maximum(ro_n, 1e-30)
         else:
-            # frozen_tp (R3): 圧力は出力の P を相似スケール、組成 (Y_EXH, Y_AIR) は場のまま持ち越し、
+            # frozen_tp (R3): 圧力は出力の P を相似スケール、組成 (Y_EXH, Y_AMB) は場のまま持ち越し、
             # T' = P'/(ρ' R_mix(Y)) と目標作動点の擬似種 (排気組成が違う) で roe' = ρ'(Σ Y_s e_sens,s(T') + ½|u'|²) を組み直す
             # 組成の再初期化 (codex result-2 M1): 元の組成は排気率 ξ 以外捨て、**目標作動点**の入口ベクトルから
-            # Y_t = ξ Y_in^dst + (1−ξ) Y_ext^dst を組む (lumped [EXH, AIR] では Y_EXH の持ち越しと同値、full / lumped+keep では
+            # Y_t = ξ Y_in^dst + (1−ξ) Y_ext^dst を組む (lumped [EXH, AMB] では Y_EXH の持ち越しと同値、full / lumped+keep では
             # 実種分率が新作動点の排気組成に変わる)。ξ は元 run の exhaust_fraction (tracer なら roXi/ρ、無ければ流入元ラベル種)
             from ..gas.composition import exhaust_fraction, reinit_transport_vector
             tg = gases_d["transported"]; Ld = gases_d["layout"]; names = list(Ld.species)

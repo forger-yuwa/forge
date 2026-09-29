@@ -6,7 +6,7 @@ plan `plans/active/thermophysics-cea-mole-fraction-species.md` §4.1–4.5 の�
   `cea_thermo_to_species_db.py` の出力) を上書きした 1 つの DB。名前・MW・2 温度域係数・温度区切り・LJ・原子組成・出典を持ち、
   換算・MOC 熱力学・擬似種生成・IC・`species_db.yaml` 出力の**すべて**がこれを使う (codex M1)。
 - **mole_to_mass / mass_to_mole**: $Y_k = X_k M_k/\sum_j X_j M_j$。SERN の `frozen.mole_to_mass` はここへ委譲。
-- **SpeciesLayout / resolve_species_layout**: `evaluate.tp_species: {mode, lumps, keep}` (旧 `pseudo` / `split_h2o` / `[EXH, AIR]` は
+- **SpeciesLayout / resolve_species_layout**: `evaluate.tp_species: {mode, lumps, keep}` (旧 `pseudo` / `split_h2o` / `[EXH, AMB]` は
   別名変換) を、流れ (ノズルは 1 流れ、SERN は排気/外気) ごとの質量配分で輸送種順序・入口ベクトル・lump の展開行列に解決する。
   未配分・二重配分・空 lump・名前衝突・凝縮種が keep に無い等は入力段階で拒否 (codex M2/M3)。
 - **species_db_yaml / species_meta**: forge `speciesDBFile` (由来コメント付き) と機械可読メタ (`species_meta.yaml`, codex M5)。
@@ -285,7 +285,9 @@ def parse_tp_species(evaluate: dict) -> dict:
     - 省略 / `pseudo` → `{mode: lumped, lumps: {MIX: {from: composition}}, keep: []}`
     - `split_h2o` → `{mode: lumped, lumps: {MIXDRY: {from: composition, exclude: [keep...]}}, keep: [tp_keep_species|H2O]}`
     - `full` → `{mode: full, keep: []}`
-    - `[EXH, AIR]` (SERN) → `{mode: lumped, lumps: {EXH: {from: stream, stream: inflow}, AIR: {from: stream, stream: external}}}`
+    - `[EXH, AMB]` (SERN) → `{mode: lumped, lumps: {EXH: {from: stream, stream: inflow}, AMB: {from: stream, stream: external}}}`
+      (外気 lump は 2026-09-30 に `AIR` → `AMB` へ改名: ソルバ内蔵の擬似種 `AIR` (cp/R 3.5) と名前が衝突し lump 記法で起動を拒否されるため。
+       旧名 `[EXH, AIR]` は理由を示して拒否する)
     文字列/リスト形式と `tp_lump` の併用、mapping と `tp_keep_species` の併用は競合として拒否。"""
     ev = evaluate or {}
     ts = ev.get("tp_species", "pseudo")
@@ -319,13 +321,16 @@ def parse_tp_species(evaluate: dict) -> dict:
         return out
     if isinstance(ts, (list, tuple)):
         names = [_check_name_key(k) for k in ts]
-        if names != ["EXH", "AIR"]:
-            raise ValueError(f"evaluate.tp_species のリスト形式は [EXH, AIR] のみ ({names})")
+        if names == ["EXH", "AIR"]:
+            raise ValueError("evaluate.tp_species: 外気 lump の名前は AMB に改名した ([EXH, AMB])。AIR はソルバ内蔵の擬似種 "
+                             "(cp/R 3.5 一定) と衝突し、lump 記法では起動時に拒否される (2026-09-30)")
+        if names != ["EXH", "AMB"]:
+            raise ValueError(f"evaluate.tp_species のリスト形式は [EXH, AMB] のみ ({names})")
         if tl is not None or keep_old is not None:
-            raise ValueError("evaluate.tp_species: [EXH, AIR] と tp_lump / tp_keep_species は併用不可")
+            raise ValueError("evaluate.tp_species: [EXH, AMB] と tp_lump / tp_keep_species は併用不可")
         return {"mode": "lumped", "keep": [],
                 "lumps": {"EXH": {"from": "stream", "stream": "inflow", "exclude": []},
-                          "AIR": {"from": "stream", "stream": "external", "exclude": []}}}
+                          "AMB": {"from": "stream", "stream": "external", "exclude": []}}}
     ts = str(ts).lower()
     if ts == "pseudo":
         if tl is not None:
@@ -344,7 +349,7 @@ def parse_tp_species(evaluate: dict) -> dict:
                 raise ValueError("evaluate.tp_lump.keep と tp_keep_species は併用不可")
             name = _check_name_key(tl.get("name", name)); keep = [_check_name_key(k) for k in tl.get("keep", keep)]
         return {"mode": "lumped", "lumps": {name: {"from": "composition", "stream": None, "exclude": list(keep)}}, "keep": keep}
-    raise ValueError(f"evaluate.tp_species '{ts}' は未知 (full | lumped | pseudo | split_h2o | [EXH, AIR] | mapping)")
+    raise ValueError(f"evaluate.tp_species '{ts}' は未知 (full | lumped | pseudo | split_h2o | [EXH, AMB] | mapping)")
 
 
 @dataclass
@@ -755,7 +760,7 @@ def _exhaust_fraction_spec(layout: SpeciesLayout) -> dict | None:
 
 def exhaust_fraction(run_dir) -> dict:
     """共通アクセサ (codex 再レビュー M1/M2, result M8): run dir の `species_meta.yaml` から排気率 ξ の配列名を返す
-    ({"kind": "tracer"|"species", "array": "Xi"|"Y{i}", "conserved": ...})。lumped [EXH, AIR] なら Y0、full や lumped+keep なら Xi。"""
+    ({"kind": "tracer"|"species", "array": "Xi"|"Y{i}", "conserved": ...})。lumped [EXH, AMB] なら Y0、full や lumped+keep なら Xi。"""
     meta = load_species_meta(run_dir)
     if meta is None:
         raise FileNotFoundError(f"{run_dir}: species_meta.yaml が無い (旧 run)")

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """⑤ SERN R3: 凍結組成 TP 擬似種 (gas/frozen.py) と runner の物性配管の単体テスト。"""
 import json
+import os
 import sys
 from pathlib import Path
 import numpy as np
@@ -69,7 +70,7 @@ if yml.exists():
         p = load_problem(yml); R.select_operating_point(p, op); st = R.gas_states(p)
         q = st["q_inf"]
         check(f"frozen_tp {op}: 外部動圧 ½ρu² = 71850 Pa ± 0.2 %", abs(q / 71850.0 - 1.0) < 2e-3, f"{q:.0f} Pa, ρ∞ {st['ext']['ro']:.4f}, u∞ {st['ext']['u']:.1f}")
-        check(f"frozen_tp {op}: 入口 Y=[1,0], 外気 Y=[0,1], 擬似種 [EXH, AIR]", st["exhaust"]["Y"] == [1.0, 0.0] and st["ext"]["Y"] == [0.0, 1.0] and st["species"] == ["EXH", "AIR"])
+        check(f"frozen_tp {op}: 入口 Y=[1,0], 外気 Y=[0,1], lump [EXH, AMB]", st["exhaust"]["Y"] == [1.0, 0.0] and st["ext"]["Y"] == [0.0, 1.0] and st["species"] == ["EXH", "AMB"])
         F_nd, M_e = R.ideal_thrust(p, st)
         check(f"frozen_tp {op}: 理想推力 F/(p_in H) 有限・出口 M > 入口 M", np.isfinite(F_nd) and M_e > st["exhaust"]["M"], f"F {F_nd:.3f}, M_e {M_e:.3f}")
     p = load_problem(yml); R.select_operating_point(p, "m6_on"); st = R.gas_states(p)
@@ -78,7 +79,9 @@ if yml.exists():
     check("region_ic_arrays (frozen): roe = ρ(h_sens − RT) + ½ρu², roY0 = ρ (排気側)", abs(ic["roe"][0] - st["exhaust"]["ro"] * (gx.e_sens(st["exhaust"]["T"])[0] + 0.5 * st["exhaust"]["u"] ** 2)) < 1e-6 * abs(ic["roe"][0])
           and ic["roY0"][0] == st["exhaust"]["ro"] and ic["roY1"][0] == 0.0 and ic["roY0"][1] == 0.0 and ic["roY1"][1] == st["ext"]["ro"])
     cfg = R._solver_config(p, 100, 10, 0.5, 1000.0)
-    check("solverConfig (frozen): thermalMethod 2 + species [\"EXH\", \"AIR\"] (引用符付き) + thermoHrefTemp", "thermalMethod: 2" in cfg and 'species: ["EXH", "AIR"]' in cfg and "thermoHrefTemp: 298.15" in cfg)
+    check("solverConfig (frozen): thermalMethod 2 + lump 記法 species [{name: \"EXH\", lump, basis: mole}, {name: \"AMB\", ...}] + thermoHrefTemp (2026-09-30 R8)",
+          "thermalMethod: 2" in cfg and 'species: [{name: "EXH", lump: {' in cfg and '{name: "AMB", lump: {' in cfg and "basis: mole" in cfg
+          and 'speciesDBFile: "species_db.yaml"' not in cfg and "thermoHrefTemp: 298.15" in cfg)
     bc = R._bcond_config(p, st)
     check("bcondConfig (frozen): 入口 Y0/Y1 が排気 (1,0)・外気 (0,1)", "Y0: 1, Y1: 0" in bc.split("inlet_nozzle")[1].split("\n")[0] and "Y0: 0, Y1: 1" in bc.split("inlet_ext")[1].split("\n")[0])
     # cpg 側は無変更 (回帰)
@@ -121,22 +124,24 @@ if yml.exists():
     e_sum = sum(y * gg.e_sens(Tq)[0] for y, gg in zip(st["exhaust"]["Y"], g["transported"])); e_ref = g["exhaust"].e_sens(Tq)[0]
     check("full m6_on: Σ Y_s e_sens,s(T) = 排気 e_sens(T)", abs(e_sum / e_ref - 1) < 1e-12, f"{e_sum:.6e} vs {e_ref:.6e}")
     # lumped + keep [H2O]: EXH = 1 − Y_H2O、m4_off (H2O 無し) でも配置が同じ
-    tp = {"mode": "lumped", "lumps": {"EXH": {"from": "stream", "stream": "inflow"}, "AIR": {"from": "stream", "stream": "external"}}, "keep": ["H2O"]}
+    tp = {"mode": "lumped", "lumps": {"EXH": {"from": "stream", "stream": "inflow"}, "AMB": {"from": "stream", "stream": "external"}}, "keep": ["H2O"]}
     p = load_problem(yml); p.evaluate["tp_species"] = tp; R.select_operating_point(p, "m6_on"); st = R.gas_states(p)
-    check("lumped+keep m6_on: [EXH, AIR, H2O], 排気 [0.7589, 0, 0.2411], **tracer 有り** (Y_EXH<1 で流入元ラベルにならない; codex result M8)", st["species"] == ["EXH", "AIR", "H2O"] and abs(st["exhaust"]["Y"][2] - 0.2411091186) < 1e-9 and st["tracer"] and st["exhaust"]["Xi"] == 1.0)
+    check("lumped+keep m6_on: [EXH, AMB, H2O], 排気 [0.7589, 0, 0.2411], **tracer 有り** (Y_EXH<1 で流入元ラベルにならない; codex result M8)", st["species"] == ["EXH", "AMB", "H2O"] and abs(st["exhaust"]["Y"][2] - 0.2411091186) < 1e-9 and st["tracer"] and st["exhaust"]["Xi"] == 1.0)
     from forge_design.gas.composition import species_meta as _smeta, _exhaust_fraction_spec
     g2 = R.frozen_gases(p)
     check("lumped+keep: species_meta.exhaust_fraction = tracer Xi", _smeta(g2["layout"])["exhaust_fraction"] == {"kind": "tracer", "array": "Xi", "conserved": "roXi"})
     p_al = load_problem(yml); R.select_operating_point(p_al, "m6_on"); g_al = R.frozen_gases(p_al)
-    check("別名 [EXH, AIR]: exhaust_fraction = species Y0 (EXH), tracer 無し", _exhaust_fraction_spec(g_al["layout"]) == {"kind": "species", "array": "Y0", "conserved": "roY0", "species": "EXH"} and not g_al["layout"].tracer)
+    check("別名 [EXH, AMB]: exhaust_fraction = species Y0 (EXH), tracer 無し", _exhaust_fraction_spec(g_al["layout"]) == {"kind": "species", "array": "Y0", "conserved": "roY0", "species": "EXH"} and not g_al["layout"].tracer)
     p = load_problem(yml); p.evaluate["tp_species"] = tp; R.select_operating_point(p, "m4_off"); st4 = R.gas_states(p)
-    check("lumped+keep m4_off: 同じ配置 [EXH, AIR, H2O] で Y_H2O = 0", st4["species"] == ["EXH", "AIR", "H2O"] and st4["exhaust"]["Y"] == [1.0, 0.0, 0.0])
+    check("lumped+keep m4_off: 同じ配置 [EXH, AMB, H2O] で Y_H2O = 0", st4["species"] == ["EXH", "AMB", "H2O"] and st4["exhaust"]["Y"] == [1.0, 0.0, 0.0])
     # restart_by_index / warm_from_same_mesh: 全 roY + roXi を引き継ぐ (codex M4 の既存バグ修正)
+    # 試験用の合成場には種の属性が無い。種の照合は既定で停止する (2026-09-30 マージ後) ので、この区間だけ許可する
+    os.environ["FORGE_ALLOW_UNVERIFIED_SPECIES"] = "1"
     with tempfile.TemporaryDirectory() as td:
         # restart 照合は実 config + DB の署名 (codex result-2 M2): 元/先とも TP 2 種 + tracer の config を置く
         _db = ('"EXH":\n  MW: 0.0244\n  nasa9_low: [0,0,3.5,0,0,0,0,-1000,5]\n  nasa9_high: [0,0,3.5,0,0,0,0,-1000,5]\n'
-               '"AIR":\n  MW: 0.0289\n  nasa9_low: [0,0,3.5,0,0,0,0,-1000,5]\n  nasa9_high: [0,0,3.5,0,0,0,0,-1000,5]\n')
-        _cfg = 'physProp: {thermalMethod: 2, species: ["EXH", "AIR"], speciesDBFile: "species_db.yaml", thermoHrefTemp: 298.15, tracer: exhaust}\n'
+               '"AMB":\n  MW: 0.0289\n  nasa9_low: [0,0,3.5,0,0,0,0,-1000,5]\n  nasa9_high: [0,0,3.5,0,0,0,0,-1000,5]\n')
+        _cfg = 'physProp: {thermalMethod: 2, species: ["EXH", "AMB"], speciesDBFile: "species_db.yaml", thermoHrefTemp: 298.15, tracer: exhaust}\n'
         for sub in ("src", "dst"):
             (Path(td) / sub).mkdir(); (Path(td) / sub / "solverConfig.yaml").write_text(_cfg); (Path(td) / sub / "species_db.yaml").write_text(_db)
         src = Path(td) / "src" / "res.h5"; dst = Path(td) / "dst" / "sern.h5"
@@ -163,7 +168,7 @@ if yml.exists():
             R.check_species_compatible(Path(td) / "src", notr); check("署名: トレーサ設定の違いを検出", False)
         except ValueError as ex:
             check("署名: トレーサ設定の違いを検出", "トレーサ" in str(ex))
-        (notr / "species_meta.yaml").write_text("species: [AIR, EXH]\n")
+        (notr / "species_meta.yaml").write_text("species: [AMB, EXH]\n")
         try:
             R._species_signature(notr); check("署名: species_meta と config の順序矛盾を拒否", False)
         except ValueError as ex:

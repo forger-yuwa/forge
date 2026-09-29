@@ -164,12 +164,17 @@ with tempfile.TemporaryDirectory() as td:
 # SERN 型: 流れ lump + keep の質量配分 (codex M3): 純排気でも Y_EXH = 1 − Y_H2O
 x_m6 = {"N2": 0.63890, "H2O": 0.32695, "H2": 0.01251, "AR": 0.00767, "OH": 0.00604, "O2": 0.00398, "NO": 0.00206, "H": 0.00125, "O": 0.00037, "CO2": 0.00021, "CO": 0.00005}
 Y6 = C.mole_to_mass(x_m6, db); Yair = C.mole_to_mass({"N2": 0.78084, "O2": 0.20946, "AR": 0.00934}, db)
-Ls = C.resolve_species_layout(C.parse_tp_species({"tp_species": {"mode": "lumped", "lumps": {"EXH": {"from": "stream", "stream": "inflow"}, "AIR": {"from": "stream", "stream": "external"}}, "keep": ["H2O"]}}),
+Ls = C.resolve_species_layout(C.parse_tp_species({"tp_species": {"mode": "lumped", "lumps": {"EXH": {"from": "stream", "stream": "inflow"}, "AMB": {"from": "stream", "stream": "external"}}, "keep": ["H2O"]}}),
                               {"inflow": Y6, "external": Yair}, db)
-_chk("SERN lumped+keep: 輸送種 [EXH, AIR, H2O], 排気入口 [1−Y_H2O, 0, Y_H2O] (0.2411)", Ls.species == ["EXH", "AIR", "H2O"] and abs(Ls.Y_transport("inflow")[2] - 0.2411091186) < 1e-9 and abs(Ls.Y_transport("inflow")[0] - (1 - 0.2411091186)) < 1e-9 and Ls.Y_transport("external") == [0.0, 1.0, 0.0])
+_chk("SERN lumped+keep: 輸送種 [EXH, AMB, H2O], 排気入口 [1−Y_H2O, 0, Y_H2O] (0.2411)", Ls.species == ["EXH", "AMB", "H2O"] and abs(Ls.Y_transport("inflow")[2] - 0.2411091186) < 1e-9 and abs(Ls.Y_transport("inflow")[0] - (1 - 0.2411091186)) < 1e-9 and Ls.Y_transport("external") == [0.0, 1.0, 0.0])
 _chk("SERN lumped+keep: EXH の lump 内組成に H2O が無い (二重計上なし)", "H2O" not in Ls.lumps["EXH"]["members"])
-La = C.resolve_species_layout(C.parse_tp_species({"tp_species": ["EXH", "AIR"]}), {"inflow": Y6, "external": Yair}, db)
-_chk("SERN 別名 [EXH, AIR]: 輸送種 [EXH, AIR], 入口 [1,0]/[0,1], トレーサ無し", La.species == ["EXH", "AIR"] and La.Y_transport("inflow") == [1.0, 0.0] and La.Y_transport("external") == [0.0, 1.0] and not La.tracer)
+La = C.resolve_species_layout(C.parse_tp_species({"tp_species": ["EXH", "AMB"]}), {"inflow": Y6, "external": Yair}, db)
+try:
+    C.parse_tp_species({"tp_species": ["EXH", "AIR"]}); _old_rejected = False
+except ValueError as e:
+    _old_rejected = "AMB" in str(e)
+_chk("SERN 旧名 [EXH, AIR] は改名 (AMB) を示して拒否 (ソルバ内蔵の擬似種 AIR と衝突、2026-09-30)", _old_rejected)
+_chk("SERN 別名 [EXH, AMB]: 輸送種 [EXH, AMB], 入口 [1,0]/[0,1], トレーサ無し", La.species == ["EXH", "AMB"] and La.Y_transport("inflow") == [1.0, 0.0] and La.Y_transport("external") == [0.0, 1.0] and not La.tracer)
 Lf2 = C.resolve_species_layout(C.parse_tp_species({"tp_species": "full"}), {"inflow": Y6, "external": Yair}, db)
 _chk("SERN full: 輸送種 = 排気 ∪ 外気 (11 種), トレーサ有り, 各流れの入口ベクトル和 1", Lf2.n == 11 and Lf2.tracer and all(abs(sum(Lf2.Y_transport(s)) - 1) < 1e-12 for s in ("inflow", "external")))
 # 元素質量分率の診断
