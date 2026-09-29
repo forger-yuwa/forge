@@ -31,8 +31,8 @@ def main():
     s = open(os.path.join(a.dst, "solverConfig.yaml")).read()
     s = re.sub(r"nStepOuter: \d+", "nStepOuter: 20000", s)
     s = re.sub(r"outStepInterval: \d+", "outStepInterval: 500", s)
-    assert "limiterRefLength" not in s
-    s = s.replace("venkatK: 0.05}", f"venkatK: 0.05, {LIM}}}")
+    if "limiterRefLength" not in s:   # 延長 (V3 の run 自身が元) なら既に入っている
+        s = s.replace("venkatK: 0.05}", f"venkatK: 0.05, {LIM}}}")
     assert LIM in s, "space 行の書き換えに失敗"
     open(os.path.join(a.dst, "solverConfig.yaml"), "w").write(s)
     b = open(os.path.join(a.dst, "bcondConfig.yaml")).read().splitlines()
