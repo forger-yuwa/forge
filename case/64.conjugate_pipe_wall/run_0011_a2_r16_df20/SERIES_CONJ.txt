@@ -1,4 +1,4 @@
-=== 準定常 A run_0011_a2_r16_df20  スナップショット 50 枚 (step 12010–600000)、窓の温度節点 82、熱流束節点 72
-  PASS  温度: OVERALL: ALL STEADY  (非 STEADY 0 / 82 系列、drift/osc 0.002)
-  PASS  熱流束・積分量: OVERALL: ALL STEADY  (非 STEADY 0 / 73 系列、drift/osc 0.004)
+=== 準定常 A run_0011_a2_r16_df20  スナップショット 50 枚 (step 12010–600000)、窓の温度節点 128、熱流束節点 128
+  PASS  温度: 最大 1.243e-11 (drift 8.595e-12、変動 1.243e-11)  (閾値超え 0 / 128 系列、D 0.002)
+  PASS  熱流束・積分量: 最大 2.825e-11 (drift 1.545e-11、変動 2.825e-11)  (閾値超え 0 / 129 系列、D 0.004)
 VERDICT: PASS

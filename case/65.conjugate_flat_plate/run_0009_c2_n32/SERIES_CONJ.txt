@@ -1,4 +1,4 @@
 === 準定常 C run_0009_c2_n32  スナップショット 50 枚 (step 12010–600000)、窓の温度節点 38、熱流束節点 38
-  PASS  温度: OVERALL: ALL STEADY  (非 STEADY 0 / 38 系列、drift/osc 0.002)
-  PASS  熱流束・積分量: OVERALL: ALL STEADY  (非 STEADY 0 / 39 系列、drift/osc 0.006)
+  PASS  温度: 最大 3.194e-07 (drift 3.750e-08、変動 3.194e-07)  (閾値超え 0 / 38 系列、D 0.002)
+  PASS  熱流束・積分量: 最大 1.114e-04 (drift 1.577e-05、変動 1.114e-04)  (閾値超え 0 / 39 系列、D 0.006)
 VERDICT: PASS
