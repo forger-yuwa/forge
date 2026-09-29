@@ -84,14 +84,17 @@ def bisect(a, k):
     return a
 
 
-def build(case, xs_f, ys_f, G, k, method="linear", deriv="o2", pc=None, cut=False):
+def build(case, xs_f, ys_f, G, k, method="linear", deriv="o2", pc=None, extend=False):
     """forge の流体格子 (xs_f, ys_f) を k 回 2 等分した参照格子に固体を足して Problem を作る。"""
     gc = pc.gc
     xs = bisect(xs_f, k); yfl = bisect(ys_f, k)
-    if cut and case == "A":                                           # 領域切断の感度: 入口を x = −60R に
-        xs = xs[xs >= -60 * pc.R - 1e-12]
-    if cut and case == "C":                                           # 上端を 2/3 H に
-        yfl = yfl[yfl <= (2.0 / 3.0) * ys_f[-1] + 1e-15]
+    n_ext = 0
+    if extend and case == "A":                                        # 登録 (§4.6 (d)): 上流を 1.5 倍 (−80R → −120R) に延ばす
+        dx0 = xs[1] - xs[0]
+        xe = np.arange(xs[0] - dx0, -120 * pc.R - 1e-12, -dx0)[::-1]
+        n_ext = len(xe); xs = np.concatenate([xe, xs])
+    if extend and case == "C":
+        raise SystemExit("C の領域延長は後継 plan で扱う")
     if case == "A":
         ns_f = len(ys_f) - 1                                           # 固体は流体と同じ半径間隔 (gen_solid の既定)
         ysol = np.linspace(pc.R, pc.R_O, ns_f * 2 ** k + 1)[1:]
@@ -111,7 +114,13 @@ def build(case, xs_f, ys_f, G, k, method="linear", deriv="o2", pc=None, cut=Fals
         rob = lambda xm, y: (pc.H_BACK, gc.T_IN + pc.DT_H) if (0 <= xm <= pc.L and abs(y - ys[0]) < 1e-15) else None
         fl_rows = slice(jw, len(ys))
     nx, ny = len(xs), len(ys)
-    Fm = {kk: cr.map_field(xs_f, ys_f, G[kk], xs, yfl, method) for kk in ("ro", "Ux", "Uy", "P", "T")}
+    Fm = {kk: cr.map_field(xs_f, ys_f, G[kk], xs[n_ext:], yfl, method) for kk in ("ro", "Ux", "Uy", "P", "T")}
+    if n_ext:
+        # 延長部の固定流れ場: forge の入口列の ρ・u・v・T をそのまま延ばし、圧力は入口の勾配で線形に延ばす (十分発達した流れ)
+        dpdx = (Fm["P"][1] - Fm["P"][0]) / (xs[n_ext + 1] - xs[n_ext])
+        for kk in ("ro", "Ux", "Uy", "T"):
+            Fm[kk] = np.concatenate([np.repeat(Fm[kk][:1], n_ext, axis=0), Fm[kk]])
+        Fm["P"] = np.concatenate([Fm["P"][0][None, :] + dpdx[None, :] * (xs[:n_ext, None] - xs[n_ext]), Fm["P"]])
     ro = np.ones((nx, ny)); u = np.zeros((nx, ny)); v = np.zeros((nx, ny)); S = np.zeros((nx, ny))
     ro[:, fl_rows] = Fm["ro"]; u[:, fl_rows] = Fm["Ux"]; v[:, fl_rows] = Fm["Uy"]
     phi, work = cr.flow_source(xs, yfl, Fm["ro"], Fm["Ux"], Fm["Uy"], Fm["P"], gc.MU, axisym, deriv=deriv)
@@ -153,6 +162,42 @@ def metrics(case, pc, xs, T, q, jw, xw=None):
     return dict(theta=(Ti - gc.T_IN) / pc.DT_H, q=q, qmean=trap(q[win], xs[win]) / (xs[win][-1] - xs[win][0]))
 
 
+def expected_wall_x(case, xs_f, ys_f, pc):
+    """メッシュから決まる評価対象の壁節点の x (A: r = R の全節点、C: y = 0 かつ 0 ≤ x ≤ L)。"""
+    if case == "A":
+        return xs_f.copy()
+    return xs_f[(xs_f >= -1e-12) & (xs_f <= pc.L + 1e-9)]
+
+
+def solid_from_dump(run, st, pid, k_s):
+    """forge の固体ダンプ (テンソル格子の帯) から (x, y, T[nx, ny]) と外面 Robin 入熱 |Σ q_hole|。"""
+    with h5py.File(run / "solid.h5", "r") as f:
+        C = np.asarray(f["MESH/COORD"][:], float)
+    with h5py.File(run / f"res_solid_{pid}_{st}.h5", "r") as f:
+        Tn = np.asarray(f["VALUE/T"][:], float); qh = float(np.asarray(f["VALUE/q_hole"][:], float).sum())
+    if not (np.isfinite(Tn).all() and np.isfinite(qh)): refuse("固体ダンプに非有限値")
+    xr, yr = np.round(C[:, 0], 10), np.round(C[:, 1], 10)
+    xs, ys = np.unique(xr), np.unique(yr)
+    if len(xs) * len(ys) != len(C): refuse("固体がテンソル格子でない")
+    Tg = np.full((len(xs), len(ys)), np.nan); Tg[np.searchsorted(xs, xr), np.searchsorted(ys, yr)] = Tn
+    if np.isnan(Tg).any(): refuse("固体の温度を格子に並べられない")
+    return xs, ys, Tg, abs(qh)
+
+
+def solid_indicators(case, pc, xs, ys_s, Ts, k_s, Qtot):
+    """固体の効果: 加熱区間 (A) / 評価窓 (C) の厚さ方向の温度差の最大と、軸方向熱量の最大 / Q_tot。
+    ys_s・Ts は固体部分だけ (A: r = R → r_o、C: y = −b → 0)。"""
+    Tx = np.gradient(Ts, xs, axis=0)
+    w = ys_s if case == "A" else np.ones_like(ys_s)
+    Qax = np.array([-trap(k_s * Tx[i] * w, ys_s) for i in range(len(xs))])
+    if case == "A":
+        sel = (xs >= -1e-12) & (xs <= pc.L_HEAT + 1e-9)
+    else:
+        sel = (xs >= 0.2 * pc.L - 1e-12) & (xs <= 0.9 * pc.L + 1e-12)
+    dTs = np.abs(Ts[:, -1] - Ts[:, 0])[sel].max()
+    return float(dTs), float(np.abs(Qax[sel]).max() / Qtot)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("case", choices=["A", "C"]); ap.add_argument("run")
@@ -169,80 +214,118 @@ def main():
         import plate_common as pc
     pc.CASE = cname
     gc = pc.gc
+    pid = 3 if a.case == "A" else 5
     st = last_step(run)
     xs_f, ys_f, G, W = load(run, st, "wall_3" if a.case == "A" else "plate_5")
-    if (W["ok"] != 1).any(): refuse("iface_ok = 0 の壁節点がある")
     xw = W["x"]
-    # 主参照 (3 水準) と感度
-    res = {}
-    for k in range(a.levels + 1):
-        P, xs, ys, jw, k_s = build(a.case, xs_f, ys_f, G, k, pc=pc)
+    exp = expected_wall_x(a.case, xs_f, ys_f, pc)
+    if len(xw) != len(np.unique(np.round(xw, 10))): refuse("壁ダンプの節点に重複")
+    if len(xw) != len(exp) or not np.allclose(xw, exp, rtol=0, atol=1e-9): refuse(f"壁ダンプの節点 ({len(xw)}) が期待集合 ({len(exp)}) と一致しない")
+    if (W["ok"] != 1).any(): refuse("iface_ok = 0 の壁節点がある")
+    for kk in ("q", "Tw"):
+        if not np.isfinite(W[kk]).all(): refuse(f"壁ダンプの {kk} に非有限値")
+    k_s_reg = pc.KS_RATIO[cname] * gc.K_F
+    # ---- 参照の各変種 (§4.6)
+    variants = {}
+    def run_variant(key, **kw):
+        P, xs, ys, jw, k_s = build(a.case, xs_f, ys_f, G, kw.pop("k"), pc=pc, **kw)
         T = _solve_rowwise(P, P.T_in_profile)
-        res[("grid", k)] = (xs, T, interface_q(P, T, jw, k_s, a.case, 2), jw, P, k_s)
-    P, xs1, ys1, jw1, k_s = build(a.case, xs_f, ys_f, G, 1, method="cubic", pc=pc); T = _solve_rowwise(P, P.T_in_profile)
-    res["cubic"] = (xs1, T, interface_q(P, T, jw1, k_s, a.case, 2), jw1, P, k_s)
-    P, xs1, ys1, jw1, k_s = build(a.case, xs_f, ys_f, G, 1, deriv="spline", pc=pc); T = _solve_rowwise(P, P.T_in_profile)
-    res["spline"] = (xs1, T, interface_q(P, T, jw1, k_s, a.case, 2), jw1, P, k_s)
-    P, xs1, ys1, jw1, k_s = build(a.case, xs_f, ys_f, G, 1, cut=True, pc=pc); T = _solve_rowwise(P, P.T_in_profile)
-    res["cut"] = (xs1, T, interface_q(P, T, jw1, k_s, a.case, 2), jw1, P, k_s)
+        variants[key] = dict(P=P, xs=xs, ys=ys, jw=jw, k_s=k_s, T=T, q2=interface_q(P, T, jw, k_s, a.case, 2),
+                             q3=interface_q(P, T, jw, k_s, a.case, 3), Qtot=abs(P.robin_heat()))
+    for k in range(a.levels + 1):
+        run_variant(("grid", k), k=k)
+    run_variant("cubic", k=1, method="cubic"); run_variant("spline", k=1, deriv="spline")
+    if a.case == "A":
+        run_variant("ext", k=1, extend=True)
 
-    def at_wall(key, allow_missing=False):
-        xs, T, q, jw, P, _ = res[key]
+    def wall_vals(key, qkey="q2"):
+        V = variants[key]; xs = V["xs"]
         idx = [int(np.argmin(np.abs(xs - x))) for x in xw]
-        miss = np.array([abs(xs[i] - x) > 1e-9 for i, x in zip(idx, xw)])
-        if miss.any() and not allow_missing: refuse("参照格子に forge の壁節点の x が無い")
-        Tv, qv = T[idx, jw].astype(float), q[idx].astype(float)
-        Tv[miss] = np.nan; qv[miss] = np.nan
-        return Tv, qv
-    Tr, qr = at_wall(("grid", a.levels))
-    Tr1, qr1 = at_wall(("grid", a.levels - 1))
-    Tc_, qc_ = at_wall("cubic"); Ts_, qs_ = at_wall("spline")
-    T1, q1 = at_wall(("grid", 1))
-    xsL, TL, _, jwL, PL, ksL = res[("grid", a.levels)]
-    q3 = interface_q(PL, TL, jwL, ksL, a.case, 3)[[int(np.argmin(np.abs(xsL - x))) for x in xw]]
-    Tk_, qk_ = at_wall("cut", allow_missing=True)                 # 切断で外れた節点 (A の x < −60R) は 0 扱い
-    dT_cut = np.nan_to_num(np.abs(Tk_ - T1)); dq_cut = np.nan_to_num(np.abs(qk_ - q1))
-    uT = np.abs(Tr - Tr1) + np.abs(Tc_ - T1) + np.abs(Ts_ - T1) + dT_cut
-    uq = np.abs(qr - qr1) + np.abs(qc_ - q1) + np.abs(qs_ - q1) + np.abs(q3 - qr) + dq_cut
+        if max(abs(xs[i] - x) for i, x in zip(idx, xw)) > 1e-9: refuse("参照格子に forge の壁節点の x が無い")
+        return V["T"][idx, V["jw"]], V[qkey][idx]
+
+    def ratio(q, Qtot):
+        up = xw <= 0
+        return pc.R * trap(q[up], xw[up]) / Qtot
+
+    def solid_ind(key):
+        V = variants[key]
+        sl = slice(V["jw"], None) if a.case == "A" else slice(0, V["jw"] + 1)
+        return solid_indicators(a.case, pc, V["xs"], V["ys"][sl], V["T"][:, sl], V["k_s"], V["Qtot"])
+
+    L = a.levels
+    Tr, qr = wall_vals(("grid", L)); TrP, qrP = wall_vals(("grid", L - 1)); T1, q1 = wall_vals(("grid", 1))
+    Tc_, qc_ = wall_vals("cubic"); Ts_, qs_ = wall_vals("spline"); _, q3 = wall_vals(("grid", L), "q3")
+    uT = np.abs(Tr - TrP) + np.abs(Tc_ - T1) + np.abs(Ts_ - T1)
+    uq = np.abs(qr - qrP) + np.abs(qc_ - q1) + np.abs(qs_ - q1) + np.abs(q3 - qr)
+    if a.case == "A":
+        Te_, qe_ = wall_vals("ext")
+        uT = uT + np.abs(Te_ - T1); uq = uq + np.abs(qe_ - q1)
     Tf, qf = W["Tw"], W["q"]
+    # forge の固体
+    xs_s, ys_s, Ts_f, Qtot_f = solid_from_dump(run, st, pid, k_s_reg)
+    dTs_f, Qax_f = solid_indicators(a.case, pc, xs_s, ys_s if a.case == "A" else ys_s, Ts_f, k_s_reg, Qtot_f)
     rows = []
     if a.case == "A":
         heat = (xw >= -1e-12) & (xw <= pc.L_HEAT + 1e-9); pre = (xw < 0) & (xw >= -40 * pc.R)
+        base = variants[("grid", L)]
         rise = trap(Tr[heat] - gc.T_IN, xw[heat]) / pc.L_HEAT
-        Qtot = PL.robin_heat(); qo = Qtot / (pc.R_O * pc.L_HEAT)
+        qo = base["Qtot"] / (pc.R_O * pc.L_HEAT)
         def region(mask, nm, with_q=True):
-            dT = np.abs(Tf[mask] - Tr[mask]) / rise; UT = uT[mask] / rise
-            rows.append((f"温度 (T_i−T_in) {nm}: max |Δ|/上昇", dT.max(), UT.max(), 0.01))
-            if with_q:                                             # 熱流束の登録は加熱区間と予熱域の別判定だけ (§6)
-                dq = np.abs(qf[mask] - qr[mask]) / qo; Uq = uq[mask] / qo
-                rows.append((f"熱流束 q_i {nm}: max |Δ|/q_o", dq.max(), Uq.max(), 0.02))
+            rows.append((f"温度 (T_i−T_in) {nm}: max |Δ|/上昇", (np.abs(Tf - Tr)[mask] / rise).max(), (uT[mask] / rise).max(), 0.01))
+            if with_q:
+                rows.append((f"熱流束 q_i {nm}: max |Δ|/q_o", (np.abs(qf - qr)[mask] / qo).max(), (uq[mask] / qo).max(), 0.02))
         region(heat, "加熱区間"); region(pre, "予熱域 (−40R ≤ x < 0)"); region(np.ones_like(heat), "全長", with_q=False)
-        up = xw <= 0
-        Qu_f = pc.R * trap(qf[up], xw[up]) / Qtot; Qu_r = pc.R * trap(qr[up], xw[up]) / Qtot
-        Qu_u = pc.R * trap(uq[up], xw[up]) / Qtot
-        rows.append(("上流へ回り込む熱 Q_up/Q_tot の差 (絶対)", abs(Qu_f - Qu_r), Qu_u, 0.005))
-        info = f"壁温上昇 (参照、長さ平均) {rise:.4f} K、q_o {qo:.2f} W/m²、Q_up/Q_tot forge {Qu_f:.4f} / 参照 {Qu_r:.4f}"
+        # Q_up/Q_tot: forge は forge の総入熱、参照は各変種の総入熱で割る (M1)
+        r_f = ratio(qf, Qtot_f)
+        rv = {key: ratio(wall_vals(key)[1], variants[key]["Qtot"]) for key in variants}
+        r_r = rv[("grid", L)]
+        U_r = (abs(rv[("grid", L)] - rv[("grid", L - 1)]) + abs(rv["cubic"] - rv[("grid", 1)]) + abs(rv["spline"] - rv[("grid", 1)])
+               + abs(rv["ext"] - rv[("grid", 1)]) + abs(ratio(q3, base["Qtot"]) - r_r))
+        rows.append(("上流へ回り込む熱 Q_up/Q_tot の差 (絶対)", abs(r_f - r_r), U_r, 0.005))
+        info = (f"壁温上昇 (参照、長さ平均) {rise:.4f} K、q_o {qo:.2f} W/m²、Q_tot forge {Qtot_f:.6e} / 参照 {base['Qtot']:.6e} W/rad、"
+                f"Q_up/Q_tot forge {r_f:.5f} / 参照 {r_r:.5f}")
+        tolT_abs, tolI = 0.01 * rise, 0.005
     else:
         win = (xw >= 0.2 * pc.L - 1e-12) & (xw <= 0.9 * pc.L + 1e-12)
-        th_f = (Tf - gc.T_IN) / pc.DT_H; th_r = (Tr - gc.T_IN) / pc.DT_H; Uth = uT / pc.DT_H
+        th_f = (Tf - gc.T_IN) / pc.DT_H; th_r = (Tr - gc.T_IN) / pc.DT_H
         qm = trap(qr[win], xw[win]) / (xw[win][-1] - xw[win][0])
-        rows.append(("界面温度 θ_i: 窓内 max |Δθ|", np.abs(th_f - th_r)[win].max(), Uth[win].max(), 0.01))
+        rows.append(("界面温度 θ_i: 窓内 max |Δθ|", np.abs(th_f - th_r)[win].max(), (uT / pc.DT_H)[win].max(), 0.01))
         rows.append(("熱流束 q_i: 窓内 max |Δ|/窓内平均", (np.abs(qf - qr)[win] / qm).max(), (uq[win] / qm).max(), 0.03))
         info = f"窓内 θ_i 参照 {th_r[win].min():.4f}…{th_r[win].max():.4f}、q 平均 {qm:.2f} W/m²"
-    print(f"=== {a.case} ({cname}) {run}  step {st}、壁節点 {len(xw)}、参照 {a.levels + 1} 水準")
+        tolT_abs, tolI = 0.01 * pc.DT_H, 0.03
+    # 固体の効果 (§4.4・§6): 効果 ≥ 5U かつ効果 > 許容幅
+    si = {key: solid_ind(key) for key in variants}
+    dTs_r, Qax_r = si[("grid", L)]
+    def U_of(j):
+        u = abs(si[("grid", L)][j] - si[("grid", L - 1)][j]) + abs(si["cubic"][j] - si[("grid", 1)][j]) + abs(si["spline"][j] - si[("grid", 1)][j])
+        if "ext" in si: u += abs(si["ext"][j] - si[("grid", 1)][j])
+        return u
+    eff = [("固体の厚さ方向の温度差 ΔT_s [K]", dTs_f, dTs_r, U_of(0), tolT_abs),
+           ("固体の軸方向熱量 max|Q_ax|/Q_tot", Qax_f, Qax_r, U_of(1), tolI)]
+    print(f"=== {a.case} ({cname}) {run}  step {st}、壁節点 {len(xw)} (期待集合と一致)、参照 {L + 1} 水準")
     print(f"  {info}")
     bad = und = False
     for nm, d, U, tol in rows:
-        if U > tol / 3:
+        if not (np.isfinite(d) and np.isfinite(U)):
+            v = "判定不能"; und = True
+        elif U > tol / 3:
             v = "判定不能"; und = True
         elif d + U <= tol:
             v = "PASS"
         else:
             v = "FAIL"; bad = True
         print(f"  {v:5s} {nm:<42} 差 {d:.4e} + U {U:.4e}  (許容 {tol:g}、U 上限 {tol/3:.3g})")
-    np.savetxt(run / f"eval_conj_{st}.csv", np.c_[xw, Tf, Tr, qf, qr, uT, uq], delimiter=",", comments="",
-               header="x,T_forge,T_ref,q_forge,q_ref,U_T,U_q", fmt="%.10e")
+    print("  --- 固体が効いていることの確認 (効果 ≥ 5U かつ 効果 > 許容幅)")
+    for nm, vf, vr, U, tol in eff:
+        good = np.isfinite(vf) and vf >= 5 * U and vf > tol
+        bad |= not good
+        print(f"  {'PASS' if good else 'FAIL'}  {nm:<34} forge {vf:.4e} / 参照 {vr:.4e}、U {U:.3e} (効果/U {vf/max(U,1e-300):.1f})、許容幅 {tol:.3e} (効果/許容 {vf/tol:.1f})")
+    out = run / f"eval_conj_{st}_L{L}.csv"
+    np.savetxt(out, np.c_[xw, Tf, Tr, qf, qr, uT, uq], delimiter=",", comments="",
+               header=f"x,T_forge,T_ref,q_forge,q_ref,U_T,U_q  # levels {L}", fmt="%.10e")
     verdict = ("FAIL (一部判定不能)" if und else "FAIL") if bad else ("判定不能" if und else "PASS")
+    print(f"  CSV {out.name}")
     print(f"VERDICT: {verdict}")
     return 1 if bad else (2 if und else 0)
 

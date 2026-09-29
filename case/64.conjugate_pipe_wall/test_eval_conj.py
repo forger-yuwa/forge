@@ -42,6 +42,12 @@ def synth(d: Path, mod=None):
     jx = np.searchsorted(xs_f, np.round(xyz2[:, 0], 10)); jy = np.searchsorted(ys_f, np.round(xyz2[:, 1], 10))
     with h5py.File(d / "res_100.h5", "a") as h:
         del h["VALUE/T"]; h.create_dataset("VALUE/T", data=Tf[jx, jy])
+    # 固体ダンプ: 参照解の固体温度を solid.h5 の節点へ (帯の節点は参照格子に含まれる)、外面入熱 = 参照の Robin 入熱
+    with h5py.File(SOLID, "r") as sf:
+        Cs = np.asarray(sf["MESH/COORD"][:], float)
+    si = [int(np.argmin(np.abs(xs - xv))) for xv in Cs[:, 0]]; sj = [int(np.argmin(np.abs(ys - yv))) for yv in Cs[:, 1]]
+    with h5py.File(d / "res_solid_3_100.h5", "w") as h:
+        h.create_dataset("VALUE/T", data=T[si, sj]); h.create_dataset("VALUE/q_hole", data=np.array([-P.robin_heat()]))
     with h5py.File(DRY, "r") as w:
         c = np.asarray(w["MESH/COORD"][:], float); conne = np.asarray(w["MESH/CONNE"][:])
     cx = c.reshape(-1, 3)[:, 0]

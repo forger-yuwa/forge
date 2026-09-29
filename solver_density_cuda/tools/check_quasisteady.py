@@ -255,7 +255,7 @@ def make_q_asym(cc):
     return f
 
 
-def classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps, allow_nonfinite=False):
+def classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps, allow_nonfinite=False, abs_scale=None):
     """**非有限値を黙って落とさない**。既定では 1 つでもあれば NONFINITE を返す。
 
     旧実装は `np.isfinite` で落としてから判定していたため、`[1,1,1,1,1,NaN]` が `STEADY` に
@@ -277,7 +277,9 @@ def classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps, allow_nonfin
         return 'TRANSIENT-UNSETTLED', f"only {n} snapshot(s) (<{min_snaps})", None
     k = max(3, int(math.ceil(tail_frac * n)))
     st, vt = s[-k:], v[-k:]
-    mean = float(np.mean(vt)); scale = max(abs(mean), 1e-30)
+    mean = float(np.mean(vt))
+    # abs_scale: 変動を系列の平均でなく登録尺度で測る (平均 0 近傍の系列で相対変動が発散しないため。--abs-scale)
+    scale = float(abs_scale) if abs_scale is not None else max(abs(mean), 1e-30)
     span = float(vt.max() - vt.min())
     fluct = span / scale
     # 末尾の線形トレンド (傾き×幅 / 平均)
@@ -338,7 +340,7 @@ def _monotone_limit(s, v, frac=0.5, min_pts=5):
 SEV = {'STEADY': 0, 'OSCILLATING': 1, 'TRANSIENT-UNSETTLED': 2, 'DRIFTING': 3, 'NONFINITE': 4}
 
 
-def classify_series(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps):
+def classify_series(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps, abs_scale=None):
     """classify の非有限値を **黙って落とさない** 版 (CSV 系列モード / 外部呼び出し用)。
     classify は NaN を除いて判定するので、[1,1,1,NaN] のような発散末尾を STEADY にしてしまう
     (case/46 の `steadiness` で実害: codex 指摘 2026-09-09)。ここでは非有限値が 1 つでもあれば
@@ -348,10 +350,10 @@ def classify_series(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps):
     if bad:
         return 'NONFINITE', f"{bad}/{len(v)} non-finite value(s) in series", None
     # classify 側でも step の非有限を拒否する (2026-09-19: step 全点 NaN で STEADY になっていた)
-    return classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps)
+    return classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps, abs_scale=abs_scale)
 
 
-def analyze_series_csv(path, cols, tail_frac, drift_tol, osc_tol, min_snaps):
+def analyze_series_csv(path, cols, tail_frac, drift_tol, osc_tol, min_snaps, abs_scale=None):
     """`step` 列を持つ CSV の指定列を classify_series で判定する。戻り値は worst の SEV。"""
     import csv
     with open(path) as fh:
@@ -366,7 +368,7 @@ def analyze_series_csv(path, cols, tail_frac, drift_tol, osc_tol, min_snaps):
     worst = 0; lines = []
     for c in cols:
         vals = [float(r[c]) if r[c] not in ('', 'None') else float('nan') for r in rows]
-        verdict, detail, _ = classify_series(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps)
+        verdict, detail, _ = classify_series(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps, abs_scale=abs_scale)
         worst = max(worst, SEV[verdict])
         lines.append(f"  {c:16s}: {detail:55s} {verdict}")
     overall = [k for k, vv in SEV.items() if vv == worst][0]
@@ -543,6 +545,8 @@ def main():
     ap.add_argument('--drift', type=float, default=0.05, help='max fractional trend across tail for STEADY')
     ap.add_argument('--osc', type=float, default=0.10, help='max fractional fluctuation across tail for STEADY')
     ap.add_argument('--min-snaps', type=int, default=4, help='min snapshots required to judge')
+    ap.add_argument('--abs-scale', type=float, default=None,
+                    help='--series-csv で drift/fluct を系列の平均でなくこの尺度で割る (登録尺度で規格化済みの系列なら 1)')
     args = ap.parse_args()
     want = [q.strip() for q in args.quantity.split(',') if q.strip()]
     worst = 0
@@ -550,7 +554,7 @@ def main():
         if not args.series_cols:
             ap.error('--series-csv には --series-cols が必要')
         cols = [c.strip() for c in args.series_cols.split(',') if c.strip()]
-        worst = max(worst, analyze_series_csv(args.series_csv, cols, args.tail, args.drift, args.osc, args.min_snaps))
+        worst = max(worst, analyze_series_csv(args.series_csv, cols, args.tail, args.drift, args.osc, args.min_snaps, abs_scale=args.abs_scale))
     elif not args.run_dirs:
         ap.error('run_dir か --series-csv を指定すること')
     for rd in args.run_dirs:

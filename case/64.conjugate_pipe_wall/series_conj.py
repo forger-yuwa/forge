@@ -8,9 +8,9 @@ r"""case/64 (A)・case/65 (C) の準定常の系列 (plan `boundary-cht-conjugat
   A: 温度 (T_i − T_in)/上昇 (加熱区間の長さ平均)、q_i/q_o (q_o = 加熱区間の外面から入る熱流束の平均、固体ダンプの q_hole から)。
   C: θ_i = (T_i − T_∞)/(T_h − T_∞)、q_i/(窓内平均)。
 - 窓: A は**全長の壁節点**、C は x/L ∈ [0.2, 0.9]。熱流束も**窓内の全節点** (2026-09-30 codex diagnose M2: 初版は |q| < 5 % の節点を外していた)。
-- 判定: 各系列を登録尺度で規格化したうえで、末尾半分の (i) 線形トレンドの幅 |傾き × 区間| と (ii) 変動幅 max − min を、
-  **系列の平均でなく登録尺度 (=1) に対して** D と比べる (平均 0 近傍の節点で相対変動が発散しないため。check_quasisteady の
-  drift/fluct の分母を登録尺度に置き換えたもの)。閾値 D = 比較許容の 1/5: A 温度 0.002・q 0.004、C θ 0.002・q 0.006。
+- 判定: 登録尺度で規格化した系列を正式ツール `check_quasisteady.py --abs-scale 1` に渡す (drift/fluct の分母を系列の平均でなく登録尺度にする。
+  平均 0 近傍の節点で相対変動が発散しないため)。系列・座標・尺度の非有限・0、壁節点の欠落・重複は REFUSED (2026-09-30 result レビュー M3)。
+  固体の効果 (厚さ方向の温度差・軸方向熱量) の時系列も含める (M5)。閾値 D = 比較許容の 1/5: A 温度 0.002・q 0.004、C θ 0.002・q 0.006。
 
     python3 series_conj.py A <run>
     python3 series_conj.py C <run>
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -36,28 +37,36 @@ def main():
     ap.add_argument("case", choices=["A", "C"]); ap.add_argument("run")
     a = ap.parse_args()
     run = Path(a.run)
+    import eval_conj as ev
     if a.case == "A":
         import pipe_common as pc
-        wall = "wall_3"; solid_pid = 3
+        wall = "wall_3"; pid = 3
     else:
         import plate_common as pc
-        wall = "plate_5"; solid_pid = 5
-    gc = pc.gc
+        wall = "plate_5"; pid = 5
+    pc.CASE = re.search(r"kind cht (A1|A2|C1|C2)", (run / "RUN_INPUTS.txt").read_text()).group(1)
+    gc = pc.gc; k_s = pc.KS_RATIO[pc.CASE] * gc.K_F
     steps = sorted(int(m.group(1)) for p in run.glob(f"res_{wall}_*.h5") for m in [re.match(rf"res_{wall}_(\d+)\.h5$", p.name)] if m)
     if len(steps) < 8:
-        print(f"REFUSED: スナップショット {len(steps)} 枚 (< 8)\nVERDICT: REFUSED"); return 2
+        ev.refuse(f"スナップショット {len(steps)} 枚 (< 8)")
+    # 期待節点集合 (メッシュから) と照合 (2026-09-30 result レビュー M3)
+    xs_f, ys_f, _, _ = ev.load_fields_only(run, steps[-1])
+    exp = ev.expected_wall_x(a.case, xs_f, ys_f, pc)
     def wall_at(st):
         with h5py.File(run / f"res_{wall}_{st}.h5", "r") as w:
             c = np.asarray(w["MESH/COORD"][:], float).reshape(-1, 3)
             q = -np.asarray(w["VALUE/iface_q_eff"][:], float); T = np.asarray(w["VALUE/iface_Tw_bc"][:], float)
-        o = np.argsort(c[:, 0]); return c[o, 0], T[o], q[o]
+        o = np.argsort(c[:, 0]); x = c[o, 0]
+        if len(x) != len(np.unique(np.round(x, 10))): ev.refuse(f"step {st}: 壁ダンプの節点に重複")
+        if len(x) != len(exp) or not np.allclose(x, exp, rtol=0, atol=1e-9): ev.refuse(f"step {st}: 壁ダンプの節点が期待集合と一致しない")
+        if not (np.isfinite(T).all() and np.isfinite(q).all()): ev.refuse(f"step {st}: 壁ダンプに非有限値")
+        return x, T[o], q[o]
     x, Tl, ql = wall_at(steps[-1])
+    xs_s, ys_s, Ts_l, Qtot_l = ev.solid_from_dump(run, steps[-1], pid, k_s)
     if a.case == "A":
         win = np.ones_like(x, bool); heat = (x >= -1e-12) & (x <= pc.L_HEAT + 1e-9)
         tscale = trap(Tl[heat] - gc.T_IN, x[heat]) / pc.L_HEAT
-        with h5py.File(run / f"res_solid_{solid_pid}_{steps[-1]}.h5", "r") as s:
-            qhole = float(np.asarray(s["VALUE/q_hole"][:], float).sum())
-        qscale = abs(qhole) / (pc.R_O * pc.L_HEAT)            # per rad の熱量 / 外面の長さ (per rad)
+        qscale = Qtot_l / (pc.R_O * pc.L_HEAT)
         tnorm = lambda T: (T - gc.T_IN) / tscale
         Dt, Dq = 0.002, 0.004
     else:
@@ -65,34 +74,34 @@ def main():
         qscale = trap(ql[win], x[win]) / (x[win][-1] - x[win][0])
         tnorm = lambda T: (T - gc.T_IN) / pc.DT_H
         Dt, Dq = 0.002, 0.006
-    qsel = win.copy()
+    for nm, v in (("温度の尺度", tscale if a.case == "A" else pc.DT_H), ("熱流束の尺度", qscale)):
+        if not (np.isfinite(v) and abs(v) > 0): ev.refuse(f"{nm}が 0 または非有限 ({v})")
     rows = []
     for st in steps:
         xx, T, q = wall_at(st)
-        if not np.allclose(xx, x): print("REFUSED: 壁節点が時刻で違う\nVERDICT: REFUSED"); return 2
-        integ = (pc.R * trap(q[x <= 0], x[x <= 0]) if a.case == "A" else trap(q[win], x[win]) / (x[win][-1] - x[win][0])) / (qscale * (pc.R_O * pc.L_HEAT if a.case == "A" else 1.0))
-        rows.append(np.concatenate([[st], tnorm(T[win]), q[qsel] / qscale, [integ]]))
+        xs_s2, ys_s2, Ts, Qtot = ev.solid_from_dump(run, st, pid, k_s)
+        dTs, Qax = ev.solid_indicators(a.case, pc, xs_s2, ys_s2, Ts, k_s, Qtot)
+        integ = (pc.R * trap(q[x <= 0], x[x <= 0]) / Qtot) if a.case == "A" else trap(q[win], x[win]) / (x[win][-1] - x[win][0]) / qscale
+        rows.append(np.concatenate([[st], tnorm(T[win]), q[win] / qscale, [integ, dTs / (tscale if a.case == "A" else pc.DT_H), Qax]]))
     R = np.array(rows)
-    nT, nQ = int(win.sum()), int(qsel.sum())
-    colsT = [f"T_n{i}" for i in range(nT)]; colsQ = [f"q_n{i}" for i in range(nQ)]
-    out = run / "series_conj.csv"
-    np.savetxt(out, R, delimiter=",", comments="", header=",".join(["step"] + colsT + colsQ + ["integral"]), fmt=["%d"] + ["%.12e"] * (nT + nQ + 1))
-    res = []
-    tail = R[len(R) // 2:]
-    st_t = tail[:, 0]
-    def judge(block, D, nm):
-        span = st_t.max() - st_t.min()
-        slope = np.polyfit(st_t, block, 1)[0] if len(st_t) > 1 else np.zeros(block.shape[1])
-        drift = np.abs(slope * span); fl = np.ptp(block, axis=0)
-        worst = float(max(drift.max(), fl.max())); nbad = int(((drift > D) | (fl > D)).sum())
-        return (nm, D, f"最大 {worst:.3e} (drift {drift.max():.3e}、変動 {fl.max():.3e})", nbad, block.shape[1], nbad == 0)
-    res.append(judge(tail[:, 1:1 + nT], Dt, "温度"))
-    res.append(judge(tail[:, 1 + nT:], Dq, "熱流束・積分量"))
-    print(f"=== 準定常 {a.case} {run}  スナップショット {len(steps)} 枚 (step {steps[0]}–{steps[-1]})、窓の温度節点 {nT}、熱流束節点 {nQ}")
+    if not np.isfinite(R).all(): ev.refuse("系列に非有限値")
+    nT = int(win.sum())
+    colsT = [f"T_n{i}" for i in range(nT)]; colsQ = [f"q_n{i}" for i in range(nT)] + ["integral", "dTs_norm", "Qax_frac"]
+    out = run / "series_conj_allnodes.csv"
+    np.savetxt(out, R, delimiter=",", comments="", header=",".join(["step"] + colsT + colsQ), fmt=["%d"] + ["%.12e"] * (2 * nT + 3))
+    print(f"=== 準定常 {a.case} ({pc.CASE}) {run}  スナップショット {len(steps)} 枚 (step {steps[0]}–{steps[-1]})、"
+          f"評価窓内の全節点 {nT} (期待集合と一致)、系列 {out.name}")
     ok = True
-    for nm, D, ov, nbad, n, good in res:
+    for cols, D, nm, tag in ((colsT, Dt, "温度", "T"), (colsQ, Dq, "熱流束・積分量・固体の効果", "q")):
+        p = subprocess.run([sys.executable, str(TOOL), "--series-csv", str(out), "--series-cols", ",".join(cols), "--tail", "0.5",
+                            "--drift", str(D), "--osc", str(D), "--abs-scale", "1"], capture_output=True, text=True)
+        o = p.stdout + p.stderr
+        (run / f"series_conj_QS_{tag}.txt").write_text(o)
+        ov = [l for l in o.splitlines() if "OVERALL" in l or "->" in l]
+        nbad = sum(1 for l in o.splitlines() if re.search(r"DRIFTING|OSCILLATING|TRANSIENT|NONFINITE", l))
+        good = p.returncode == 0 and nbad == 0 and any("STEADY" in l for l in ov)
         ok &= good
-        print(f"  {'PASS' if good else 'FAIL'}  {nm}: {ov}  (閾値超え {nbad} / {n} 系列、D {D})")
+        print(f"  {'PASS' if good else 'FAIL'}  {nm}: check_quasisteady --abs-scale 1 --drift/--osc {D} → 非 STEADY {nbad} / {len(cols)} 系列 (rc {p.returncode})")
     print(f"VERDICT: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 1
 
