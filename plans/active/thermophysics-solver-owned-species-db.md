@@ -247,24 +247,22 @@ physProp:
 | 12 | N2 の潜熱を同方式に統一するかの判断 (未決) | §4.8 末尾・§10。H2O (#10) の後に、統一するか現行 (Lin フィット + 低温外挿) のままにするかをユーザと決める。統一する場合: 液相 = CEA `N2(L)` 77.352 K 点 + 液比熱モデル、L は差。飽和圧の低温再構成・CPG carrier 経路との整合を決めてから。合格: V7 と同じ datum 不変試験 + 現行 Lin フィットとの差を 45–120 K で記録 + 空気凝縮 run (**case/34 Arthur**; plan condensation-air の検証先。旧記載の case/28 は He/空気同軸ジェットで誤り) の onset 変化を記録。**H2O (#10) 完了の阻害条件にしない**。凝縮カーネル変更なので編集前に上位へ諮る | F |
 | 11 | docs 同期 (完了時) | `procedures/solver-settings.md` (`physProp.species` の lump 形、`speciesDBFile` の位置づけ、lump と拡散の制約)、`recommended-settings.md` §3、`design/CAPABILITIES.md` | O |
 
-### 5.2 SERN への連絡事項 (2026-09-27, #9 の SERN 切り替え用)
+### 5.2 SERN への連絡事項 (2026-09-27 起票, 2026-09-30 改訂: 案 (a) で決定)
 
-SERN セッション (`feature/sern-design`) へ渡す内容。変更は `feature/gap-heating-precision` の commit 085e00e1〜5ba303c6。
+SERN セッション (`feature/sern-design`) へ渡す内容。変更は `feature/species-transport` (HEAD 8077e509 時点)。**2026-09-30 ユーザ決定: 名前の衝突は (a) SERN の lump 名を変える** (内蔵 `AIR` は既存 config が使うので残す)。
 
-1. **何が変わったか**: ソルバが config の lump 記法 `physProp.species: [{name: X, lump: {構成種: モル分率}, basis: mole}, ...]` から NASA-9 を起動時に合成する
-   (設計側 `composition.lump_entry` と同式、相対 4e-16)。生成 `species_db.yaml` は不要。ソルバは `resolved_species_<hash>.yaml` を書き res に `species_hash` を付け、
-   起動時に入力場と照合 (不一致で停止、属性なしは過渡期は警告で通る; `FORGE_REQUIRE_VERIFIED_SPECIES=1` で停止)。`restart_field`・`interp_field`・`convert_species_field`・
-   `runner_sern.restart_by_index` は SRC の記録を検証して継承。`forge --resolve-species` で GPU なしに宛先ハッシュ。`runner_sern.prepare` の領域 IC と `warm_from_run` は照合して付与 (実装済み)。
-   後処理は `forge_species.run_thermo` で記録から読む。内蔵データは `solver_density_cuda/data/species/forge_species_v1.yaml` (値不変)。
-2. **SERN で決めること (必須)**: SERN の lump 名 `AIR` がソルバ内蔵の擬似種 `AIR` (cp/R 3.5 一定) と衝突し lump 記法では起動時に拒否される (`speciesDB.cpp:329-334`)。
-   (a) SERN の lump 名を変える (例 `AMB`/`EXT`) か (b) 内蔵 `AIR` を別名に退避するか。種名の変更は meta・後処理・過去 run の restart に効く。
-3. **切り替え作業**: `runner_sern` の config 生成を lump 記法へ (`runner_axismach._apply_gas_to_config`、`composition.solver_species_config`/`physprop_species_flow` が参考)。
-   EXH の構成種 (CO, H2, OH, H, NO, O) はソルバ内蔵に無いので生エントリだけを `species_db_external.yaml` に置く (合成物は置かない)。LJ は現行 `LJ_PARAMS` のまま (CEA ツールの表と 6 種で食い違い、#5 で決定)。
-4. **バイナリ**: lump 記法の config は旧いソルバ・変換器で読めない。`FORGE_BIN` で新ビルドを指定 (runner は同じビルドの変換器 `runner.converter_path()` を使う)。AWS の clone も取り込み・再ビルドが要る。
-5. **既存 run からの継続**: lump 記法では物性が同じでも互換性ハッシュが変わり、旧場からの restart は照合で止まる。移行は明示許可 (`restart_field.py --force-species` かその実行だけ `FORGE_ALLOW_UNVERIFIED_SPECIES=1`) で 1 回。以後は継承される。
-6. **回帰**: 切り替え前後で SERN の代表作動点の推力・モーメントが事前に決めたノイズ床以内 (case/44 では V0 = 3 反復差 ×3 と下限)。
-7. **予告**: 輸送物性 (μ・λ) を CEA `trans.inp` と CEA の frozen 混合則へ寄せる (#5t)。燃焼生成物を含む SERN の NS/SST の結果は変わる見込み。
-8. **取り込み方**: 種 DB 関係の commit だけを `feature/sern-design` に取り込むか main 経由で合わせるかは SERN 側の都合で決める。
+1. **lump 名の変更 (決定)**: SERN の外気 lump `AIR` を **`EXT`** (external stream) に改名する。内蔵擬似種 `AIR` (cp/R 3.5 一定) と衝突し、lump 記法では起動時に拒否されるため (`speciesDB.cpp:329-334` 付近)。
+   対象: `runner_sern.py` の `SPECIES_ORDER`・`tp_species` 既定 (`:88,110`)・`FrozenGas.from_mole(..., "AIR", ...)` (`:108`)・段間継承のコメント/式 (`:729-732`)、meta、後処理 (`plot_sern*.py` 等の種名参照)、problem YAML に `AIR` と書いた箇所。順序 (`EXH`, `EXT`) は変えない。
+2. **何が変わったか**: ソルバが config の lump 記法 `physProp.species: [{name: X, lump: {構成種: モル分率}, basis: mole}, ...]` から NASA-9 を起動時に合成する。生成 `species_db.yaml` は不要 (EXH の構成種 CO/H2/OH/H/NO/O も内蔵データにある — 外部 DB が要るのは内蔵に無い種だけ)。
+   ソルバは `resolved_species_<hash>.yaml` を書き、res に `species_hash` を付け、起動時に入力場と照合する。**未検証 (属性なし) の場は既定で停止** (ソルバ・Python ツールとも)。許可はその実行だけ `FORGE_ALLOW_UNVERIFIED_SPECIES=1` か `--force-species` (許可して書いた場は属性なし)。`FORGE_REQUIRE_VERIFIED_SPECIES` は撤去済み。
+   `forge --resolve-species` で GPU なしに宛先ハッシュ。後処理は `forge_species.run_thermo` で記録から読む。
+3. **輸送物性 (必須)**: `viscMethod: 2` は `physProp.transport` (実種ごとの μ・λ の出所) が必須になり、無ければ起動時エラー。混合則は CEA frozen。設計 runner は semi-perfect TP の NS/SST で `viscMethod: 2` を既定にし、problem YAML に **`gas.transport`** が要る。
+   SERN の実種 (N2, O2, AR, CO2, H2O, CO, H2, OH, H, NO, O) は、H2O を `custom:h2o_iapws_cea_v1`、他を `cea` にする (いずれも CEA trans.inp のデータあり)。書き方は case/44 の problem YAML を参照。現行 `viscMethod: 1` (空気 Sutherland) からは **NS/SST の結果が変わる**。
+4. **切り替え作業**: `runner_sern` の config 生成を lump 記法へ (`runner_axismach._apply_gas_to_config`、`composition.solver_species_config`/`physprop_species_flow` が参考)。`write_species_db` (`:528`) の擬似種 NASA-9 書き出しはやめる。
+5. **バイナリ**: lump 記法・`physProp.transport` の config は旧いソルバ・変換器で読めない。`FORGE_BIN` で新ビルドを指定 (TP の準備で必須; runner は同じビルドの変換器を使う)。AWS の clone も取り込み・再ビルドが要る。
+6. **既存 run からの継続**: 改名と lump 記法で互換性ハッシュが変わるので、旧場からの restart は照合で止まる。種の順序が同じ (EXH, 外気) なので、移行は `restart_field.py --force-species` (またはその実行だけ `FORGE_ALLOW_UNVERIFIED_SPECIES=1`) で**1 回だけ**行い、以後は新しい記録で継承する。
+7. **回帰**: 切り替え前後の比較は 2 段に分ける。(i) 改名 + lump 記法のみ (輸送は旧のまま比較できる構成で) で、代表作動点の推力・モーメントが事前に決めたノイズ床以内。(ii) 輸送物性の切り替え (`viscMethod: 2` + transport) は結果が変わる前提で、変化量を記録する (不変を合格にしない)。
+8. **取り込み方**: 種 DB・輸送関係の commit だけを `feature/sern-design` に取り込むか main 経由で合わせるかは SERN 側の都合で決める。凝縮関係 (潜熱 #10・気相組成の輸送) は SERN が凝縮 OFF なら影響しない。
 
 ### 5.3 gap-heating セッション (`feature/gap-heating-precision`) との合流準備 (2026-09-27)
 
@@ -354,6 +352,7 @@ SERN セッション (`feature/sern-design`) へ渡す内容。変更は `featur
 
 ## 9. 変更ログ
 
+- `2026-09-30` — ユーザ決定: SERN の lump 名衝突は案 (a) (SERN 側を `EXT` に改名)。§5.2 を現状 (厳密化・輸送物性必須) に合わせて改訂。
 - `2026-09-28` — #10 実装 (§5.1 #10 行)。振る舞いの変化: H2O の L が 200 K 未満で変わる (150 K −466 J/kg)、旧 H2O 凝縮 TP 場の restart は拒否 (移行 `--src-latent legacy-v0`)、CPG の H2O 凝縮は記録を持たないので 200 K 未満の L が黙って変わる、凝縮 ON で外部 DB の気相 H2O が内蔵と違えば起動拒否。
 - `2026-09-27` — #10 を codex diagnose に諮問 (`notes/reviews/2026-09-27-h2o-latent-datum-diagnose.md`): 湿り場変換の液相項補正を §4.8 に追加、V7(c′)(e′)(f) を具体化、#10 を実装可 (O) に。
 - `2026-09-27` — #3c 残を実装: Python ツールも既定で厳密 (未検証 SRC・宛先解決不能・記録破損で停止、許可はその実行だけ、許可時は属性なし)。設計 runner の TP 準備は `FORGE_BIN` (`--resolve-species` 対応バイナリ) が必須になった。残: 印付きの場の扱いのソルバ/ツール不一致 (#3c 行)。
