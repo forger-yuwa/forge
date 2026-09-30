@@ -8,7 +8,7 @@
   - [`methods/boundary.md`](../../methods/boundary.md) — 共役壁 (`fem2d`)、slip 境界 (node)
   - [`notes/investigations/node-slip-tangential-density-spurious-flow.md`](../../notes/investigations/node-slip-tangential-density-spurious-flow.md) — 既知の未修正欠陥 (node slip + 接線方向の密度勾配で偽の流れ)
 - **related_plans**:
-  - [`boundary-cht-conjugate-benchmarks.md`](boundary-cht-conjugate-benchmarks.md) — **発注元**。C をここから分割 (2026-09-30)。登録条件 (§4.3・§4.5・§4.6・§4.7・§6) はそちらの文をそのまま引き継ぐ
+  - [`boundary-cht-conjugate-benchmarks.md`](../accepted/boundary-cht-conjugate-benchmarks.md) — **発注元**。C をここから分割 (2026-09-30)。登録条件 (§4.3・§4.5・§4.6・§4.7・§6) はそちらの文をそのまま引き継ぐ
 - **created**: `2026-09-30`
 - **owner**: `sano`
 

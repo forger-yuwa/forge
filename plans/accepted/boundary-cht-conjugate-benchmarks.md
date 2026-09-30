@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `boundary`
-- **status**: `in_progress` (2026-09-30: **A と C を分割**。この plan は A (厚肉管) の部分結果を result レビューに回す。C は後継 plan [`boundary-cht-conjugate-flat-plate.md`](boundary-cht-conjugate-flat-plate.md) に未完了のまま移した)
+- **status**: `done` (2026-09-30: **A の限定結果で閉鎖** — 事後改訂した比較条件 (§4.6)・FP64・node・流れ場固定。A と C を分割し、C は後継 plan [`boundary-cht-conjugate-flat-plate.md`](../active/boundary-cht-conjugate-flat-plate.md) に未完了のまま移した。**事前登録の総合 PASS ではない**)
 - **related_docs**:
   - [`methods/boundary.md`](../../methods/boundary.md) — 共役壁 (`conjugate: mode fem2d`、平面・軸対称 r 重み)
 - **related_plans**:
@@ -26,10 +26,7 @@ forge と独立な参照解と比べて検証する。2 つのケースを置く
 
 **分割 (2026-09-30、codex diagnose [`notes/reviews/2026-09-30-conjugate-benchmarks-closure-diagnose.md`](../../notes/reviews/2026-09-30-conjugate-benchmarks-closure-diagnose.md))**:
 §1 の完了条件は両ケースの成立だったが、C は前提ゲート (流体収束・G-if) が FAIL のまま原因が未確定なので、**C を後継 plan に登録条件・失敗結果・完了条件ごと移し**、この plan は **A の限定された部分結果**で閉じる。
-**分割を事前登録の総合 PASS に読み替えない**。A の結論 (予定): 「**FP64・node・forge の流れ場を固定した伝熱問題**として、固体の軸方向伝導と熱抵抗が効く軸対称の共役伝熱
-(上流へ 15 % / 35 % の熱が壁を伝って回り込む) で、forge の界面温度・熱流束・積分量は独立参照解と N_r 32 (A1・A2) と 64 (A1) で登録許容内。
-A2 r64 は Q_up/Q_tot だけ判定不能 (領域切断の U)。最も粗い N_r 16 は A1・A2 とも不合格項目あり — A1・A2 とも参照格子だけを 1 段細分しても不合格が残り、
-forge の粗格子誤差が主因と強く示唆される (A1 の加熱区間の温度差は 1.19 → 0.30 → 0.075 %、全長では 1.22 → 0.34 → 0.13 %)。代表格子の選定は事後」。
+**分割を事前登録の総合 PASS に読み替えない**。A の結論 (2026-09-30 確定、評価版 `70b155cd`): 「**FP64・node・forge の流れ場を固定した伝熱問題**として、固体の軸方向伝導と熱抵抗が効く軸対称の共役伝熱 (上流へ 15 % / 35 % の熱が壁を伝って回り込む) で、**§4.6 の事後改訂 (上流延長の感度を U から外して別記) を含む同一有限領域の比較条件**のもと、forge の界面温度・熱流束・積分量・固体の効果は N_r 32・64 (A1・A2 とも) で全項目許容内。最も粗い N_r 16 は A1・A2 とも `FAIL (一部判定不能)`。参照を 4 水準に 1 段細分しても不確かさ込みで FAIL が残る。A1 は差単独でも許容超 (加熱区間の温度 1.25 %)、A2 は差単独では許容内 (熱流束 1.875 % < 2 %) で U を足して超える — forge の粗格子誤差の寄与を示唆するが、参照側の寄与は排除していない (A2 の加熱区間の熱流束の差は r16→32→64 で 1.78 → 0.44 → 0.11 %)。代表格子の選定は事後」。以前の版 (A2 r64 の Q_up を判定不能とした等) は §5.1 #6b・#6c に履歴として残す。
 float32、流れ場自体の正しさ、共役伝熱一般への拡張はしない。
 
 ## 2. スコープ
@@ -137,14 +134,15 @@ float32、流れ場自体の正しさ、共役伝熱一般への拡張はしな�
 | 1b | ~~設計の諮問~~ | 判断: 2026-09-29 codex diagnose ([`notes/reviews/2026-09-29-conjugate-benchmarks-design-diagnose.md`](../../notes/reviews/2026-09-29-conjugate-benchmarks-design-diagnose.md)) C0/M6/m1 — **全件採用**: 巨大 T_c の Robin 代用は固体温度ガードで拒否される → 有限 Robin 加熱 (§3・§4.2)。主判定の参照解は forge の流れ場 + 散逸・圧力仕事を固定して共役温度を解く、対照差し引きは使わない (§4.1・§4.4)。固体の効果は厚さ方向温度差と軸方向熱量を別々に登録 (§4.4)。A は L_h/R・上下流長・Bi_o・(T_c−T_in)/T_in、C は b/L を登録 (§4.2・§4.3)。参照格子 3 水準・合否は「観測差 + 不確かさ ≤ 許容幅」(§4.1)。Q_up の定義 (§4.2) | F |
 | 3 | ~~参照解~~ | 済 (2026-09-29): 自己検査 3 項目 + 製造解 2 次収束 + **散逸の軸上極限** (Φ の相対誤差 2e-15、軸上 0) PASS。主参照 `eval_conj.py` (forge の最終場を 3 水準の参照格子に写し、§4.6 の U = 格子 + 写像 + 微分 + 熱流束の取り出し) | O |
 | 3b | ~~パラメータの選定~~ | 済 (2026-09-29 再選定、plan レビュー M2/M3/m6 反映): §4.5 の A1・A2・C1・C2 | O |
-| 3c | 実行・評価条件の固定 | **進捗 (2026-09-29)**: 入力一式 (case/64 `gen_mesh/gen_solid/make_run`・case/65 同) — 格子 3 水準とも品質 PASS (A: AR 31、C: AR 150)、乾式で壁の帰属を確認、固体は A の Robin を加熱区間の辺だけに。評価器の負例 `test_eval_conj.py` **4/4 PASS** (参照解そのもの PASS、熱流束の符号反転・界面温度 +1 K は FAIL、`iface_ok`=0 は REFUSED)。C の経路もローカルのスモークで確認。G-if はテンプレートに `eps_abs_Wm2` 1.0・`dT_K` 5e-4。残: 準定常の系列を作る評価 (§4.7) | O |
+| 3c | ~~実行・評価条件の固定~~ | **進捗 (2026-09-29)**: 入力一式 (case/64 `gen_mesh/gen_solid/make_run`・case/65 同) — 格子 3 水準とも品質 PASS (A: AR 31、C: AR 150)、乾式で壁の帰属を確認、固体は A の Robin を加熱区間の辺だけに。評価器の負例 `test_eval_conj.py` **4/4 PASS** (参照解そのもの PASS、熱流束の符号反転・界面温度 +1 K は FAIL、`iface_ok`=0 は REFUSED)。C の経路もローカルのスモークで確認。G-if はテンプレートに `eps_abs_Wm2` 1.0・`dT_K` 5e-4。準定常の系列評価 (§4.7) も済 (`series_conj.py`、§5.1 #7b) | O |
 | 4 | case/64 (A) | 格子・固体 (全長)・run 生成・評価器・負例 | O |
 | 5 | case/65 (C) | 同上 (平面、前縁、Blasius との前提検査) | O |
 | 6 | run | **結果 (2026-09-30、AWS FP64 `86115cb1` のバイナリ、評価器 `44f416b0`、各 600000 step 単一区間)**。run は case/64 `run_0005`〜`0007` (A1 r16/32/64)・`0009`/`0010` (A2 r32/64)・`0011_a2_r16_df20`、case/65 `run_0005`〜`0007` (C1 n16/32/64)・`0008`〜`0010` (C2)。**A2 r16 (`run_0008_a2_r16`) は step 32300 で連成の安全停止** (max\|dTw\| が 10 更新連続増 6.1e-4 → 1.3e-3 K。壁温 308.268 K で落ち着いていた) → 発散手順の対処 1 で `Df_scale` 5→20 の `run_0011` を回し完走 (固定点は D_f に依らない)。<br>**前提ゲート**: A の 6 本は収束・準定常 (全節点)・G-if・G-cons すべて PASS。**C の 6 本は準定常 PASS・G-cons PASS だが、流体の収束 NOT CONVERGED (stalled: rms_roe 1.4 桁で横ばい) と G-if NOT CONVERGED** (① res_abs 5.8 W/m² > 1.0、④ res_solid 1.9e-9 > 1e-9)。揺れの位置は後縁のすぐ下流 (x 10.1〜10.7 mm) の slip 境界 (最後の 2 枚で P 3 Pa・T 3e-3 K)、前縁上流の slip 節点に法線速度 0.72 m/s — **既知の未修正欠陥 (node slip + 接線方向の密度勾配で偽の流れ) と同じ形** (原因は未確定)。評価窓内の界面温度の揺れは 2e-6 K。<br>**主判定 (`eval_conj.py`、|差| + U ≤ 許容)**: A1 r16 **判定不能** (温度 1.19 % FAIL・熱流束 U 1.1 % > 上限)、A1 r32 **PASS** (温度 0.30 %、q 1.02 %、Q_up 0.07 %)、A1 r64 **PASS** (0.075 %、0.26 %、0.03 %)、A2 r16 (df20) **判定不能** (q 1.78 % FAIL、Q_up U 超過)、A2 r32 **PASS** (0.09 %、0.44 %、0.12 %)、A2 r64 **PASS** (0.02 %、0.11 %、0.05 %)。C1 n16/32/64・C2 n16/32/64 **すべて PASS** (C1 n64: θ 6.1e-4・q 0.10 %、C2 n64: θ 1.3e-4・q 0.38 %)。A の温度差は格子倍増ごとに約 1/4 (1.19 → 0.30 → 0.075 %)。forge の Q_up/Q_tot は A1 15.3 %・A2 34.6 % (参照 15.4 %・34.6 %) で固体の効果は forge でも出ている。**登録の曖昧さ**: §6 は「forge の格子は各 3 水準」とだけ書き、どの格子で合否を決めるかを書いていなかった。**解釈は codex diagnose に諮る** (条件 3・7) | O→F |
 | 6b | 結果の諮問 (1 回目) と再評価 | 判断: 2026-09-30 codex diagnose ([`notes/reviews/2026-09-30-conjugate-benchmarks-results-diagnose.md`](../../notes/reviews/2026-09-30-conjugate-benchmarks-results-diagnose.md)) C0/M4/m1 — **全件採用**: (M1) 登録した領域切断の U を評価器に追加 (A: 参照の入口を −60R、C: 上端を 2/3 H)。(M2) A の温度は全長でも判定、準定常は全節点 (熱流束の小さい節点も除外しない。変動は登録尺度で測る)。(M3) r16 は「不合格項目あり、一部判定不能」と書く。代表格子の選定は事後であり事前登録の総合 PASS に遡及させない。(M4) **C は (a) 判定不能として保留** (G-if の細格子悪化: n64 で res_abs 678 W/m² — 私の「約 5.8 W/m²」の要約は n32 の値で細格子の悪化を隠していた)。(m) A2 r16 の Df_scale 20 は変更履歴つきの別 run として使用、同一格子の Df 5 収束対照は無い。<br>**再評価 (2026-09-30、評価器 `6721bf73`)**: A1 r32・A2 r32・A1 r64 **全項目 PASS** (全長温度含む)。A2 r64 は Q_up のみ判定不能 (差 4.8e-4 + U 2.4e-3、U 上限 1.67e-3 超 — 領域切断の U が支配)。A1 r16 **FAIL (一部判定不能)**、A2 r16 **FAIL (一部判定不能)**。**A/B (A1 r16 の参照格子だけ 1 段細分、`ab_levels3/`)**: U は上限内に下がり FAIL が残る (温度 1.25 %+U 0.12 %) → 登録の判別文「U が上限内まで下がっても不合格が残る → 参照解の解像不足だけで説明できる、を棄却」→ r16 の不合格は forge の粗格子誤差 (forge 自身の格子間差は共通節点で 0.072 → 0.018 K、比 4.06)。準定常 (全節点、登録尺度) は A・C 12 本すべて PASS。**C の界面残差の位置**: n64 は前縁の直後 x/L 0.004〜0.015 (最大 678 W/m²)、n32 は後縁 x/L 1.0 (5.8 W/m²)。評価窓内の最大は 0.14〜0.15 W/m² (G-if 許容 1.0 内)。C の主判定は 6 本 PASS だが前提ゲートは FAIL のまま | F |
 | 6c | 閉じ方の諮問・A2 r16 の A/B・固体の効果 | 判断: 2026-09-30 codex diagnose ([closure](../../notes/reviews/2026-09-30-conjugate-benchmarks-closure-diagnose.md)) C0/M3/m1 — **全件採用**: A の結論を FP64・node・流れ場固定に限定、A2 r16 の原因帰属は A/B で確認、A/C 分割・C は後継 plan、「全節点」は「評価窓内の全節点」、「約 1/4」は加熱区間の温度差に限定。**A2 r16 の A/B** (`ab_levels3/EVAL_CONJ_a2_r16_levels3.txt`、参照格子だけ 1 段細分): U は上限内 (0.23 %) で熱流束 FAIL が残る (1.88 % + 0.23 % > 2 %) → 「参照を 1 段細分すれば不合格が解消する」を棄却、粗格子誤差説を補強。**forge 側の固体の効果** (`SOLID_EFFECT.txt`): A1 r32/r64 で ΔT_s 2.380/2.388 K (参照 2.388/2.390)、軸方向熱量 15.2/15.3 % of Q_tot (参照 15.3/15.3 %)。A2 r32/r64 で ΔT_s 0.259/0.259 K、軸方向熱量 34.5/34.5 % (参照 34.6/34.6 %) — 固体の効果は主判定の許容より 1〜2 桁大きい | F |
 | 7 | 結果の解釈 | 条件 7 で諮った (#6b・#6c)。A の result レビューへ | F |
-| 7b | result レビュー (1 回目) の採否と修正 | 判断: 2026-09-30 codex disposition ([`2026-09-30-conjugate-A-result-disposition-diagnose.md`](../../notes/reviews/2026-09-30-conjugate-A-result-disposition-diagnose.md)) — M1・M3〜M5・m6 **採用**、M2 は旧評価への指摘を採用し延長差を U に含める処置は**却下** ((ii)、§4.6 の事後改訂)。**修正済み** (`2e593c68`): Q_up/Q_tot は forge・参照それぞれの総入熱で割る比、U は各変種の比の差 (M1)。準定常は正式ツール `check_quasisteady.py --abs-scale 1` (新オプション、正の有限値のみ受理) に接続し、NaN・壁節点の欠落・重複・尺度 0 を REFUSED (`test_series_conj.py` 5/5)、閾値は量ごとに許容の 1/5 (温度 0.002、q 0.004、Q_up 0.001、ΔT_s 0.002、Q_ax 0.001) (M3)。固体の効果の U を参照の変種から出し「効果 ≥ 5U かつ効果 > 許容幅」を判定 (M5)、私の「許容より 1〜2 桁大きい」は A2 の ΔT_s で誤り (3.3 倍) と訂正。評価器は期待節点集合と照合、成果物名に水準数 (`eval_conj_<st>_L<n>.csv`)。**再評価済み** (AWS、評価版 `70b155cd`、2026-09-30): 主判定 `EVAL_CONJ_L2.txt` は r32・r64 の A1/A2 4 本が全項目 PASS (全長温度・Q_up/Q_tot・固体の効果ゲートを含む)、r16 は A1 `FAIL (一部判定不能)` (加熱区間温度 差 0.0119 > 許容 0.01 等)、A2 (`run_0011`) `FAIL (一部判定不能)` (加熱区間 q 差 0.0178 + U 0.0053 > 0.02)。3 水準参照 (`ab_levels3/*_L3.txt`) でも r16 は 2 本とも FAIL のまま (U が縮んでも差が許容を超える) → r16 の不合格は**参照側でなく forge の粗格子誤差**と読む。準定常 `SERIES_CONJ_ALLNODES.txt` は 6 本とも PASS (評価窓内の全節点・固体指標を含む)。延長区間の源項 A/B (`ab_ext/`) は D_B/D_A = 0.025 (A1 r32)・0.111 (A2 r32) で「延長区間の源項が主因」を支持。固体の効果 (r32): A1 ΔT_s forge 2.380 / 参照 2.388 K、Q_ax/Q_tot 0.152 / 0.153、A2 ΔT_s 0.2588 / 0.2594 K、Q_ax/Q_tot 0.345 / 0.346。一次データ (最終場・壁/固体ダンプ・`residual_history.csv.gz`・全系列・評価出力) を手元に回収し、台帳 `case/64.conjugate_pipe_wall/MANIFEST_primary_data_A.sha256` (AWS で作成 2048 件、手元回収分 249 件を照合 OK。中間スナップショットは AWS のみ) (M4)。文書同期 (m6): case/64 README・`methods/boundary/` の CHT 節。**残**: result レビュー 2 回目 | O |
+| 7b | result レビュー (1 回目) の採否と修正 | 判断: 2026-09-30 codex disposition ([`2026-09-30-conjugate-A-result-disposition-diagnose.md`](../../notes/reviews/2026-09-30-conjugate-A-result-disposition-diagnose.md)) — M1・M3〜M5・m6 **採用**、M2 は旧評価への指摘を採用し延長差を U に含める処置は**却下** ((ii)、§4.6 の事後改訂)。**修正済み** (`2e593c68`): Q_up/Q_tot は forge・参照それぞれの総入熱で割る比、U は各変種の比の差 (M1)。準定常は正式ツール `check_quasisteady.py --abs-scale 1` (新オプション、正の有限値のみ受理) に接続し、NaN・壁節点の欠落・重複・尺度 0 を REFUSED (`test_series_conj.py` 5/5)、閾値は量ごとに許容の 1/5 (温度 0.002、q 0.004、Q_up 0.001、ΔT_s 0.002、Q_ax 0.001) (M3)。固体の効果の U を参照の変種から出し「効果 ≥ 5U かつ効果 > 許容幅」を判定 (M5)、私の「許容より 1〜2 桁大きい」は A2 の ΔT_s で誤り (3.3 倍) と訂正。評価器は期待節点集合と照合、成果物名に水準数 (`eval_conj_<st>_L<n>.csv`)。**再評価済み** (AWS、評価版 `70b155cd`、2026-09-30): 主判定 `EVAL_CONJ_L2.txt` は r32・r64 の A1/A2 4 本が全項目 PASS (全長温度・Q_up/Q_tot・固体の効果ゲートを含む)、r16 は A1 `FAIL (一部判定不能)` (加熱区間温度 差 0.0119 > 許容 0.01 等)、A2 (`run_0011`) `FAIL (一部判定不能)` (加熱区間 q 差 0.0178 + U 0.0053 > 0.02)。参照を 4 水準に細分した再判定 (`ab_levels3/*_L3.txt`。`L2` = 3 水準、`L3` = 4 水準) でも r16 は 2 本とも FAIL のまま。~~r16 の不合格は参照側でなく forge の粗格子誤差と読む~~ (result レビュー 2 回目 M1 で撤回: A2 は差 1.875 % 単独では許容内で U 0.225 % を足して超える。forge の粗格子誤差の寄与を示唆するが参照側の寄与は排除していない)。準定常 `SERIES_CONJ_ALLNODES.txt` は 6 本とも PASS (評価窓内の全節点・固体指標を含む)。延長区間の源項 A/B (`ab_ext/`) は D_B/D_A = 0.025 (A1 r32)・0.111 (A2 r32) で「延長区間の源項が主因」を支持。固体の効果 (r32): A1 ΔT_s forge 2.380 / 参照 2.388 K、Q_ax/Q_tot 0.152 / 0.153、A2 ΔT_s 0.2588 / 0.2594 K、Q_ax/Q_tot 0.345 / 0.346。一次データ (最終場・壁/固体ダンプ・`residual_history.csv.gz`・全系列・評価出力) を手元に回収し、台帳 `case/64.conjugate_pipe_wall/MANIFEST_primary_data_A.sha256` (AWS で作成 2048 件、手元回収分 249 件を照合 OK。中間スナップショットは AWS のみ) (M4)。文書同期 (m6): case/64 README・`methods/boundary/` の CHT 節。result レビュー 2 回目は §5.1 #7c | O |
+| 7c | result レビュー (2 回目) の採否と閉鎖 | 判断: 2026-09-30 codex diagnose ([`2026-09-30-conjugate-A-result2-disposition-diagnose.md`](../../notes/reviews/2026-09-30-conjugate-A-result2-disposition-diagnose.md)) — 追加計算なしで M1・m2・m3 **全件採用**、A の限定結果として accepted。M1: A2 r16 の原因帰属を「示唆」に弱め FAIL は維持 (§1)。m2: A2 r16 の安全停止を「偽発火」と書かない — `Df_scale` 5 で更新量の連続増大を検知して停止 (`run_0008` は step 32300 で NOT CONVERGED)、`Df_scale` 20 の別 run で収束、同一格子の Df 5 収束対照は無い (`methods/boundary.md`)。m3: §1 を最新評価に、参照水準数の誤記 (L3 = 4 水準)、README の「登録文そのまま」、#3c、§6.1、§8、§9、plans/README、A/C 相互リンクを同期 | F |
 | 8 | 文献値 | 論文入手後に Faghri & Sparrow / Luikov の値と照合 (任意) | O |
 
 ## 6. 検証 (事前登録の骨子 — 数値は §5.1 #3b のあとに確定し、plan レビューに回す)
@@ -162,6 +160,9 @@ float32、流れ場自体の正しさ、共役伝熱一般への拡張はしな�
 | --- | --- | --- | --- | --- |
 | plan | `2026-09-29` | [`2026-09-29-boundary-cht-conjugate-benchmarks-plan.md`](../../notes/reviews/2026-09-29-boundary-cht-conjugate-benchmarks-plan.md) | GO-with-changes, C0/M5/m2 | **全件採用 (対案どおり)**。codex が参照計算で数値の根拠を再現しており却下の余地が無い。M1 → 軸の対流面積を修正、製造解試験を追加 (§4.5)。M2 → 積分端・長さ平均を修正して再選定 (§4.5)。M3 → h_o・T_c 固定で k_s だけ変える (§4.5)。M4 → 不確かさの手順 (§4.6)、散逸の軸上極限の試験 (§5.1 #3)。M5 → 実行・評価条件の固定 (§4.7、§5.1 #3c)。m6 → C2 の軸方向伝導は窓内のあり/なし差で判定 (§4.5)。m7 → 目的・完了条件の文面 (§1・§4.1) |
 
+| result | `2026-09-30` | [`2026-09-30-boundary-cht-conjugate-benchmarks-result.md`](../../notes/reviews/2026-09-30-boundary-cht-conjugate-benchmarks-result.md) | NO-GO, C0/M5/m1 | 採否は codex diagnose ([disposition](../../notes/reviews/2026-09-30-conjugate-A-result-disposition-diagnose.md)) — M1・M3〜M5・m6 採用、M2 は延長差を U に含める処置のみ却下 (§4.6 事後改訂)。§5.1 #7b |
+| result | `2026-09-30` | [`2026-09-30-boundary-cht-conjugate-benchmarks-result-2.md`](../../notes/reviews/2026-09-30-boundary-cht-conjugate-benchmarks-result-2.md) | GO-with-changes, C0/M1/m2 | 全件採用 (codex diagnose [result2 disposition](../../notes/reviews/2026-09-30-conjugate-A-result2-disposition-diagnose.md))。M1 → A2 r16 の原因断定を撤回し「示唆」に、m2 → 「偽発火」削除、m3 → 文書同期。§5.1 #7c |
+
 ## 7. 影響範囲
 
 - 新規: case/64・case/65、参照解ツール。ソルバ・既定値は変えない。
@@ -169,13 +170,17 @@ float32、流れ場自体の正しさ、共役伝熱一般への拡張はしな�
 
 ## 8. 完了条件
 
-- [ ] 関連 `methods/` の検証範囲を更新済み
-- [ ] §6 の run と VERDICT
-- [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録し、Critical / Major の採否を残作業表に反映済み
-- [ ] `status` を `done`、§9 に変更ログ、`accepted/` へ移動、[`plans/README.md`](../README.md) 同期
+- [x] 関連 `methods/` の検証範囲を更新済み (`methods/boundary.md` 軸対称行、A のみ)
+- [x] §6 の run と VERDICT (A のみ。C は後継 plan で未完了)
+- [x] codex レビュー (`plan` 1 回・`result` 2 回) を §6.1 に記録し、Critical / Major の採否を残作業表に反映済み
+- [x] `status` を `done`、§9 に変更ログ、`accepted/` へ移動、[`plans/README.md`](../README.md) 同期
 
 ## 9. 変更ログ
 
+- `2026-09-30` — **A の限定結果で閉鎖、accepted へ移動**。result レビュー 2 回目 (GO-with-changes C0/M1/m2) を codex diagnose の採否で全件採用: A2 r16 の原因断定を撤回、「偽発火」を削除、文書同期。C は後継 plan で継続。
+- `2026-09-30` — 本番 6 本を評価版 `70b155cd` で再評価 (r32・r64 全項目 PASS、r16 FAIL (一部判定不能)、準定常 6 本 PASS)、一次データ台帳 `MANIFEST_primary_data_A.sha256`、延長区間の源項 A/B。
+- `2026-09-30` — result レビュー 1 回目 (NO-GO C0/M5/m1) の採否と評価器の修正、§4.6 の事後改訂。
+- `2026-09-30` — A/C 分割 (C を後継 plan へ)、結果の諮問 2 回。
 - `2026-09-29` — codex plan レビュー (GO-with-changes C0/M5/m2) を全件採用。参照解の軸修正と製造解、条件の再選定、不確かさ手順、実行・評価条件を登録。
 - `2026-09-29` — codex diagnose (C0/M6/m1) を全件採用して §3・§4・§6 を改訂。
 - `2026-09-29` — 初稿 (ユーザ指示「A と C をやろう」)。
