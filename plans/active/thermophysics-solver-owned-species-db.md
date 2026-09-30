@@ -253,7 +253,7 @@ SERN セッション (`feature/sern-design`) へ渡す内容。変更は `featur
 
 1. **lump 名の変更 (決定)**: SERN の外気 lump `AIR` を **`AMB`** (ambient; 外気の物理的な意味。内蔵種・別名と衝突しないことを確認済み 2026-09-30) に改名する。内蔵擬似種 `AIR` (cp/R 3.5 一定) と衝突し、lump 記法では起動時に拒否されるため (`speciesDB.cpp:329-334` 付近)。
    対象: `runner_sern.py` の `SPECIES_ORDER`・`tp_species` 既定 (`:88,110`)・`FrozenGas.from_mole(..., "AIR", ...)` (`:108`)・段間継承のコメント/式 (`:729-732`)、meta、後処理 (`plot_sern*.py` 等の種名参照)、problem YAML に `AIR` と書いた箇所。順序 (`EXH`, `AMB`) は変えない。
-2. **何が変わったか**: ソルバが config の lump 記法 `physProp.species: [{name: X, lump: {構成種: モル分率}, basis: mole}, ...]` から NASA-9 を起動時に合成する。生成 `species_db.yaml` は不要 (EXH の構成種 CO/H2/OH/H/NO/O も内蔵データにある — 外部 DB が要るのは内蔵に無い種だけ)。
+2. **何が変わったか**: ソルバが config の lump 記法 `physProp.species: [{name: X, lump: {構成種: モル分率}, basis: mole}, ...]` から NASA-9 を起動時に合成する。合成済み擬似種の `species_db.yaml` は不要。~~EXH の構成種 CO/H2/OH/H/NO/O も内蔵データにある~~ → **訂正 (2026-09-30, SERN セッション指摘)**: 6 種は共通データにあるが `legacy_builtin: [design]` のみで、ソルバの内蔵 (`speciesDB.cpp:118`, `legacy_builtin: solver` だけ読む) には入らない。生の係数を `species_db_external.yaml` で渡す (axis-Mach ランナーと同じ形; SERN は `5eee3ff2` でこの形に実装済み)。当初の誤りは輸送データ (`forge_transport_v1.yaml`) だけを確認して熱物性側を見なかったため。
    ソルバは `resolved_species_<hash>.yaml` を書き、res に `species_hash` を付け、起動時に入力場と照合する。**未検証 (属性なし) の場は既定で停止** (ソルバ・Python ツールとも)。許可はその実行だけ `FORGE_ALLOW_UNVERIFIED_SPECIES=1` か `--force-species` (許可して書いた場は属性なし)。`FORGE_REQUIRE_VERIFIED_SPECIES` は撤去済み。
    `forge --resolve-species` で GPU なしに宛先ハッシュ。後処理は `forge_species.run_thermo` で記録から読む。
 3. **輸送物性 (必須)**: `viscMethod: 2` は `physProp.transport` (実種ごとの μ・λ の出所) が必須になり、無ければ起動時エラー。混合則は CEA frozen。設計 runner は semi-perfect TP の NS/SST で `viscMethod: 2` を既定にし、problem YAML に **`gas.transport`** が要る。
@@ -352,6 +352,7 @@ SERN セッション (`feature/sern-design`) へ渡す内容。変更は `featur
 
 ## 9. 変更ログ
 
+- `2026-09-30` — §5.2 項 2 を訂正: EXH の構成種 6 種はソルバ内蔵でない (legacy_builtin: design のみ)、外部 DB で渡す。
 - `2026-09-30` — ユーザ決定: SERN の lump 名衝突は案 (a) (SERN 側を `AMB` に改名; 当初案 `EXT` から同日ユーザ指定で変更)。§5.2 を現状 (厳密化・輸送物性必須) に合わせて改訂。
 - `2026-09-28` — #10 実装 (§5.1 #10 行)。振る舞いの変化: H2O の L が 200 K 未満で変わる (150 K −466 J/kg)、旧 H2O 凝縮 TP 場の restart は拒否 (移行 `--src-latent legacy-v0`)、CPG の H2O 凝縮は記録を持たないので 200 K 未満の L が黙って変わる、凝縮 ON で外部 DB の気相 H2O が内蔵と違えば起動拒否。
 - `2026-09-27` — #10 を codex diagnose に諮問 (`notes/reviews/2026-09-27-h2o-latent-datum-diagnose.md`): 湿り場変換の液相項補正を §4.8 に追加、V7(c′)(e′)(f) を具体化、#10 を実装可 (O) に。
