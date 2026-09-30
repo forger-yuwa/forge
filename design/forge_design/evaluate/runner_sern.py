@@ -157,9 +157,11 @@ def write_species_db(p: Problem, run_dir, gases: dict | None) -> None:
     ソルバ内蔵で解決できない実種 (外部 DB 由来など) があるときだけ、その生エントリを `species_db_external.yaml` に書く。"""
     if gases is None:
         return
-    from ..gas.composition import solver_species_config, species_db_raw_yaml, write_species_meta
+    from ..gas.composition import resolve_transport, solver_species_config, species_db_raw_yaml, write_species_meta
     _, external = solver_species_config(gases["layout"])
-    write_species_meta(gases["layout"], run_dir, None)
+    tr = (resolve_transport(gases["layout"], p.gas_transport, required=True)
+          if p.raw.get("gas", {}).get("transport") is not None else None)
+    write_species_meta(gases["layout"], run_dir, tr)
     if external:
         (Path(run_dir) / "species_db_external.yaml").write_text(species_db_raw_yaml(external))
 
@@ -299,8 +301,20 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
         phys = f"physProp: {{thermalMethod: {_tm}, viscMethod: 0, visc: 0.0, thermCond: 0.0, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}}}"
         turb = 'turbulence: {model: "none"}'
     else:
-        phys = (f"physProp: {{thermalMethod: {_tm}, viscMethod: 1, visc: 1.8e-5, thermCond: 0.0257, "
-                f"thermCondMethod: 1, prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}}}")
+        # 輸送物性 (R8 段 (ii)、2026-09-30): frozen_tp で problem に `gas.transport` ({実種: モデル}) があるときだけ、
+        # 実種ごとの輸送物性 (viscMethod 2 + physProp.transport、混合則 CEA frozen) にする。無ければ従来どおり
+        # viscMethod 1 (空気の Sutherland) — 既存の run と同じ config。thermCondMethod は viscMethod 2 では読まれないので落とす。
+        # visc (dt と陰解法対角の剛性見積り)・thermCond (必須キー)・prandtlLam (SST 壁関数の回復係数) は残す (runner_axismach と同じ)
+        _transport = None
+        if p.is_frozen_tp and p.raw.get("gas", {}).get("transport") is not None:
+            from ..gas.composition import physprop_transport_flow, resolve_transport
+            _transport = resolve_transport(frozen_gases(p)["layout"], p.gas_transport, required=True)
+        if _transport is not None:
+            phys = (f"physProp: {{thermalMethod: {_tm}, viscMethod: 2, visc: 1.8e-5, thermCond: 0.0257, "
+                    f"prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}, transport: {physprop_transport_flow(_transport)}}}")
+        else:
+            phys = (f"physProp: {{thermalMethod: {_tm}, viscMethod: 1, visc: 1.8e-5, thermCond: 0.0257, "
+                    f"thermCondMethod: 1, prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}}}")
         # 壁処理は**既定 0 (低 Re 壁解像)**。node の SST 壁関数は使わない方針 (2026-09-20)。
         # 壁関数を使うには問題 YAML に `evaluate.wall_treatment_sst: 1` を明示し、理由を run の README に書くこと。
         _wts = int(p.evaluate.get("wall_treatment_sst", 0))

@@ -244,9 +244,10 @@ def _validate(p: Problem) -> None:
     elif "composition_basis" in gs or "species_db" in gs or "condensing_species" in gs:
         if str(gs.get("model", "cpg")) not in ("semiperfect", "frozen_tp"):
             errs.append("gas.composition_basis / species_db / condensing_species は gas.model semiperfect | frozen_tp でのみ有効")
-    if "transport" in gs and str(gs.get("model", "cpg")) != "semiperfect":
-        # frozen_tp (SERN) は runner が lump 記法に未切替 (plan §5.2) で、合成済み擬似種に実種の輸送モデルを当てられない
-        errs.append("gas.transport は gas.model semiperfect でのみ有効 (cpg は Sutherland、frozen_tp は未対応)")
+    if "transport" in gs and str(gs.get("model", "cpg")) not in ("semiperfect", "frozen_tp"):
+        # frozen_tp (SERN) は 2026-09-30 に lump 記法へ切り替えた (R8) ので、lump の構成実種に輸送モデルを当てられる。
+        # 実種との突き合わせは runner_sern (frozen_gases の layout で resolve_transport)
+        errs.append("gas.transport は gas.model semiperfect | frozen_tp でのみ有効 (cpg は Sutherland)")
     # dv の bound 検査
     for name, d in p.dv.items():
         if isinstance(d, dict) and not d.get("fixed", False):

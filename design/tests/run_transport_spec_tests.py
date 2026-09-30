@@ -124,7 +124,21 @@ rejects("未知の custom", lambda: load_problem(with_transport(NS42, dict(GOOD,
 rejects("同じ種を大小文字違いで 2 回", lambda: load_problem(with_transport(NS42, dict(GOOD, o2="cea"), "dup")), must=("2 回",))
 rejects("空の mapping", lambda: load_problem(with_transport(NS42, {}, "empty")), must=("空でない",))
 rejects("gas.model cpg で gas.transport", lambda: load_problem(with_transport(CPG41, {"N2": "cea"}, "cpgtr")),
-        must=("semiperfect でのみ有効",))
+        must=("semiperfect | frozen_tp でのみ有効",))
+# frozen_tp (SERN、2026-09-30 に lump 記法へ切り替え = R8) は gas.transport を受け付け、NS の config が viscMethod 2 + transport になる
+try:
+    from forge_design.evaluate import runner_sern as _R2
+    _ps = load_problem(ROOT / "case/46.sern_design/problem_moo_frozen_tp_cycle3op_transport.yaml")
+    _R2.design_snapshot(_ps); _R2.select_operating_point(_ps, "m6_on")
+    _cfg = _R2._solver_config(_ps, 10, 10, 1.0, 2851.0)
+    _ok = ("viscMethod: 2" in _cfg and 'transport: {"N2": "cea", "H2O": "custom:h2o_iapws_cea_v1"' in _cfg
+           and "thermCondMethod" not in _cfg)
+    _p0 = load_problem(ROOT / "case/46.sern_design/problem_moo_frozen_tp_cycle3op.yaml")
+    _R2.design_snapshot(_p0); _R2.select_operating_point(_p0, "m6_on")
+    _ok = _ok and "viscMethod: 1" in _R2._solver_config(_p0, 10, 10, 1.0, 2851.0)
+    _chk("frozen_tp (SERN): gas.transport があれば viscMethod 2 + 全実種の transport、無ければ viscMethod 1 のまま", _ok)
+except Exception as e:
+    _chk(f"frozen_tp (SERN) の gas.transport ({e})", False)
 
 import shutil  # noqa: E402
 shutil.rmtree(TMP, ignore_errors=True)
