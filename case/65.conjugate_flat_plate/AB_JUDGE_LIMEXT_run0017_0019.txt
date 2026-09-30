@@ -1,0 +1,23 @@
+=== B3 延長の判定  A=run_0017_lim_c1_n64_lim2 [8000,12000)  B=run_0018_lim_c1_n64_lim0+run_0019_lim0ext_c1_n64 累計 [36000,48000)
+  区間平均 (A は 1 区間、B は 3 区間):
+    rms_ro    A 3.658e-09 | B 1.917e-11 1.473e-11 1.185e-11  B/A 0.0052/0.0040/0.0032  (1/10 閾値 3.658e-10)
+    rms_roUx  A 4.095e-08 | B 1.170e-08 1.000e-08 8.703e-09  B/A 0.2858/0.2443/0.2125  (1/10 閾値 4.095e-09)
+    rms_roUy  A 5.493e-07 | B 3.413e-09 2.416e-09 1.901e-09  B/A 0.0062/0.0044/0.0035  (1/10 閾値 5.493e-08)
+    rms_roe   A 1.121e-03 | B 5.628e-06 4.294e-06 3.405e-06  B/A 0.0050/0.0038/0.0030  (1/10 閾値 1.121e-04)
+    down_P    A 1.141e-03 | B 8.663e-06 5.361e-06 4.513e-06  B/A 0.0076/0.0047/0.0040  (1/10 閾値 1.141e-04)
+  領域別の残差二乗和 (区間ごと、絶対値と割合):
+    res_ro    [le 3.90e-16 (2%), te 3.72e-16 (2%), other 2.36e-14 (97%)] [le 1.77e-16 (1%), te 1.88e-16 (1%), other 1.42e-14 (97%)] [le 1.45e-16 (2%), te 1.15e-16 (1%), other 9.24e-15 (97%)]
+    res_roUx  [le 9.71e-12 (0%), te 7.23e-11 (1%), other 8.55e-09 (99%)] [le 5.78e-12 (0%), te 3.88e-11 (1%), other 6.25e-09 (99%)] [le 3.74e-12 (0%), te 2.74e-11 (1%), other 4.73e-09 (99%)]
+    res_roUy  [le 1.08e-11 (1%), te 1.14e-11 (2%), other 7.24e-10 (97%)] [le 2.51e-12 (1%), te 4.08e-12 (1%), other 3.69e-10 (98%)] [le 1.70e-12 (1%), te 3.71e-12 (2%), other 2.28e-10 (98%)]
+    res_roe   [le 3.53e-05 (2%), te 3.37e-05 (2%), other 2.03e-03 (97%)] [le 1.60e-05 (1%), te 1.56e-05 (1%), other 1.21e-03 (97%)] [le 1.31e-05 (2%), te 9.47e-06 (1%), other 7.73e-04 (97%)]
+  check_convergence (run_0018 + run_0019 連結、limiter 0 の同一設定区間):
+      rms_ro      : init=7.36e-08 fin=1.59e-11 drop= 3.7dec falling
+      rms_roUx    : init=3.25e-06 peak=5.22e-06 fin=7.57e-09 drop= 2.7dec falling  <-- still converging
+      rms_roUy    : init=3.20e-06 peak=1.23e-05 fin=1.62e-09 drop= 3.7dec falling
+      rms_roUz    : all-zero (inactive, skip)
+      rms_roe     : init=2.02e-02 fin=4.80e-06 drop= 3.7dec falling
+    
+    OVERALL: CHECK FAILURES ABOVE
+  check_quasisteady (下流 slip の P、延長 run の後半、閾値 0.002): OVERALL: ALL STEADY (rc 0)
+  check_quasisteady (界面 q、延長 run の後半、閾値 0.006): OVERALL: ALL STEADY (rc 0)
+VERDICT: 判定不能 (未達: rms_roUx、なお変化中)
