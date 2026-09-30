@@ -41,6 +41,17 @@ $$ \frac{S^{\circ}_s}{R_u} = -\frac{a_0}{2} T^{-2} - a_1 T^{-1} + a_2 \ln T + a_
 積分定数 $a_7,a_8$ により、エンタルピーは**標準生成エンタルピーを含む絶対エンタルピー基準**となる。係数は温度区間で切り替える (区間数は種ごとに 1〜3 = `THERMO_MAX_INTERVALS`; 現在の内蔵 7 種は 2 区間 200/1000/6000 K、CEA の多くの気相種は 200/1000/6000/20000 K の 3 区間)。
 区間 $k$ は $T_k\le T<T_{k+1}$ (**区切りちょうどは上の区間**、最後の区間は $T_{\mathrm{hi}}$ を含む) で、2 区間では従来の「$T<T_{\mathrm{mid}}$ で低温側」と同じ (plan thermophysics-solver-owned-species-db #13-1)。範囲外は端でクランプし、エンタルピーは $h(T)\approx h(T_c)+c_p(T_c)(T-T_c)$ と線形外挿して衝撃波での暴走を防ぐ。
 
+**6000 K 超の float 精度 (既知の限界; plan thermophysics-solver-owned-species-db §6 V3/V3f の再スコープ, 2026-10-01)**: CEA の第 3 区間 (6000–20000 K) の係数は
+$a_0\sim 8\times10^8$、$a_7\sim 5\times10^6$ のように大きく、$h/(RT)$ の各項が打ち消し合う (比 ~100)。このため double でも 1 回の評価で $h$ に
+~1e-6 J/kg の丸めが出る (N2 18660 K で 1.2e-6 J/kg; lump 合成の検証は同じ係数の long double 評価と比べる)。float の面経路
+(`thermo_h_mix_f`, SLAU の面エンタルピー・化学種拡散の $h_s$) では影響がさらに大きく、CEA 3 区間の N2 で 6000 K 超の $h$ の誤差は
+相対 最大 5.5e-5・絶対 最大 ~530 J/kg ($\Delta h/(c_pT)\approx 5\times10^{-5}$) になる (6000 K 以下は絶対 ~1.4 J/kg、$\Delta h/(c_pT)\approx 7\times10^{-7}$)。
+混合では相対 0.7e-5〜3.5e-5 (`tools/test_thermo_float.cpp` の info 列)。
+セルの温度反転は double の研磨段を通るので、6000 K 超でも $|T-T_{\mathrm{ref}}|/T<3\times10^{-8}$ を保つ (warm start 時)。ただし区切り温度そのもの
+(1000・6000 K) では、係数の段差 (CEA N2 は 6000 K で 0.29 J/kg) の分だけ誤差が $\Delta h_{\mathrm{step}}/(c_vT)$ 増える。冷間開始 (50.1 K) から 1 回の呼び出しで
+届くのは ~6500 K まで。6000 K 超の面流束の精度は float 表のこの丸めで決まるので、6000 K を超える流れで面の $h$ を精密に扱うには double 評価が要る
+(現状の既存ケースは 6000 K を超えない)。
+
 質量基準は $c_{p,s}=C_{p,s}/W_s$、$h_s=H_s/W_s$。
 
 ##### エンタルピー基準オフセット (sensible-enthalpy datum, 非反応流)

@@ -4,6 +4,7 @@
 //   (C) G1-c = §6 V3: 区切りの違う種を畳んだ lump (区切りの和集合) が、構成種ごとの質量分率加重和と 100–20000 K の全点
 //       (各区切り温度そのものと ±1e-9 K、構成種の外挿域 (< Tlo・> Thi) を含む) で相対 1e-12 かつ絶対 cp 1e-9 J/(kg K)・
 //       h 1e-6 J/kg・s° 1e-9 J/(kg K) 以内 (h の相対は範囲の max|h| で規格化; test_species_lump_solver.py と同じ)。datum 0 / 298.15 K。
+//       6000 K 超 (第 3 区間を持つ種) の絶対許容は同じ係数の long double 評価との差 (合成だけの誤差) で判定する (plan §6 V3 の再スコープ 2026-10-01)。
 //       区切りでの h・cp の段差 (上の区間 − 下の区間を同じ T で評価) は、構成種の段差の加重和からの増分が同じ絶対許容差以内。
 //       試験種: CEA thermo.inp の N2 3 区間 (200/1000/6000/20000; 外部 DB)、Tmid 1500 の 2 区間種、Tlo 298.15 の種
 //       (N2 の係数を 298.15/1000/6000/20000 に置いた 3 区間型と、298.15/1000/6000 の 2 区間型)、CEA の e- (298.15–20000, 3 区間)。
@@ -144,31 +145,62 @@ static void checkLump(const ResolvedSpeciesDB& db, int li, const std::string& ta
         for (int k = 0; k <= lump.nInt; ++k) brk.push_back(thermo_bound(lump, k));
         for (const auto& x : m) for (int k = 0; k <= x.nInt; ++k) brk.push_back(thermo_bound(x, k));
         for (double b : brk) { Ts.insert(b); Ts.insert(b - 1e-9); Ts.insert(b + 1e-9); }
-        double hmax = 0.0, synH = 0.0, synCp = 0.0, noiseH = 0.0;
+        // 判定の分け方 (plan §6 V3 の再スコープ 2026-10-01, diagnostician; 事前固定):
+        //   (a) T <= 6000 K: double 同士 (lump の double 評価 vs 構成種の double 評価の加重和) で相対 1e-12・絶対 cp 1e-9 / h 1e-6 / s° 1e-9。
+        //   (b) T > 6000 K で第 3 区間を持つ種 (lump か構成種の Thi > 6000 K) のとき: 相対 1e-12 (h は範囲 max|h| 規格化) は double 同士のまま、
+        //       絶対は**同じ係数の long double 評価**どうしの差 (合成だけの誤差) で |dh| <= 1e-6・|dcp| <= 1e-9・|ds°| <= 1e-9。
+        //       double 同士の |dh| と単種の double 丸め (|double - long double|) は info (合否に使わない)。
+        //   第 3 区間を持たない lump (Thi <= 6000 K) は 6000 K 超も外挿域として (a) で判定する (再スコープの対象外)。
+        bool hi3 = lump.Thi > 6000.0;
+        for (const auto& x : m) hi3 = hi3 || x.Thi > 6000.0;
+        double hmax = 0.0;
         for (double T : Ts) hmax = std::max(hmax, std::fabs(thermo_h_mass(lump, T)));
-        double wcp = 0, wh = 0, ws = 0, acp = 0, ah = 0, as = 0, Tah = 0;
+        double wcp = 0, wh = 0, ws = 0;                    // 相対 (全点)
+        double acp = 0, ah = 0, as = 0, Tah = 0;           // 絶対 double 同士 (a の点)
+        double lcp = 0, lh = 0, ls = 0, Tlh = 0;           // 絶対 long double 同士 = 合成だけの誤差 (b の点)
+        double ihDD = 0, iRound = 0, TiR = 0;              // info (b の点): double 同士の |dh|、単種の double 丸め |h_double - h_ld|
+        size_t na = 0, nb = 0;
         for (double T : Ts) {
             double cp = 0, h = 0, s = 0;
             for (size_t k = 0; k < m.size(); ++k) { cp += Y[k]*thermo_cp_mass(m[k], T); h += Y[k]*thermo_h_mass(m[k], T); s += Y[k]*thermo_s0_mass(m[k], T); }
             const double cpl = thermo_cp_mass(lump, T), hl = thermo_h_mass(lump, T), sl = thermo_s0_mass(lump, T);
-            {   // 参考: long double 評価 (合成の誤差だけ) と、lump 単体の double 評価の丸め
+            wcp = std::max(wcp, std::fabs(cpl - cp)/std::fabs(cp));
+            wh  = std::max(wh,  std::fabs(hl - h)/hmax);
+            ws  = std::max(ws,  std::fabs(sl - s)/std::fabs(s));
+            if (!(hi3 && T > 6000.0)) {
+                ++na;
+                acp = std::max(acp, std::fabs(cpl - cp));
+                if (std::fabs(hl - h) > ah) { ah = std::fabs(hl - h); Tah = T; }
+                as  = std::max(as,  std::fabs(sl - s));
+            } else {
+                ++nb;
                 long double c, hh, ss, cS = 0, hS = 0, sS = 0;
-                for (size_t k = 0; k < m.size(); ++k) { evalLD(m[k], T, &c, &hh, &ss); cS += Y[k]*c; hS += Y[k]*hh; sS += Y[k]*ss; }
+                for (size_t k = 0; k < m.size(); ++k) {
+                    evalLD(m[k], T, &c, &hh, &ss); cS += Y[k]*c; hS += Y[k]*hh; sS += Y[k]*ss;
+                    const double r = (double)std::fabs((long double)thermo_h_mass(m[k], T) - hh);
+                    if (r > iRound) { iRound = r; TiR = T; }
+                }
                 evalLD(lump, T, &c, &hh, &ss);
-                synH = std::max(synH, (double)std::fabs(hh - hS)); synCp = std::max(synCp, (double)std::fabs(c - cS));
-                noiseH = std::max(noiseH, (double)std::fabs((long double)hl - hh));
+                lcp = std::max(lcp, (double)std::fabs(c - cS));
+                if ((double)std::fabs(hh - hS) > lh) { lh = (double)std::fabs(hh - hS); Tlh = T; }
+                ls  = std::max(ls,  (double)std::fabs(ss - sS));
+                ihDD = std::max(ihDD, std::fabs(hl - h));
+                const double r = (double)std::fabs((long double)hl - hh);
+                if (r > iRound) { iRound = r; TiR = T; }
             }
-            wcp = std::max(wcp, std::fabs(cpl - cp)/std::fabs(cp)); acp = std::max(acp, std::fabs(cpl - cp));
-            wh  = std::max(wh,  std::fabs(hl - h)/hmax);            if (std::fabs(hl - h) > ah) { ah = std::fabs(hl - h); Tah = T; }
-            ws  = std::max(ws,  std::fabs(sl - s)/std::fabs(s));    as  = std::max(as,  std::fabs(sl - s));
         }
-        char b[512];
-        std::snprintf(b, sizeof(b), "%s datum %g: lump = sum of constituents over %zu points 100-20000 K (breakpoints +-1e-9 K): "
-                      "rel cp %.2e h %.2e s %.2e (<=1e-12), abs cp %.2e h %.2e (at %.6g K) s %.2e (<=1e-9/1e-6/1e-9)",
-                      tag.c_str(), Tref, Ts.size(), wcp, wh, ws, acp, ah, Tah, as);
+        char b[640];
+        std::snprintf(b, sizeof(b), "%s datum %g: lump = sum of constituents, %zu points 100-20000 K (breakpoints +-1e-9 K): "
+                      "rel cp %.2e h %.2e s %.2e (<=1e-12); (a) %zu pts%s double vs double abs cp %.2e h %.2e (at %.6g K) s %.2e (<=1e-9/1e-6/1e-9)",
+                      tag.c_str(), Tref, Ts.size(), wcp, wh, ws, na, hi3 ? " T<=6000 K" : " (no 3rd interval: all T)", acp, ah, Tah, as);
         check(wcp <= 1e-12 && wh <= 1e-12 && ws <= 1e-12 && acp <= 1e-9 && ah <= 1e-6 && as <= 1e-9, b);
-        std::printf("       (info) synthesis-only error (long double evaluation of the same coefficients): |dh| %.2e J/kg, |dcp| %.2e J/(kg K);"
-                    " double rounding of the lump evaluation itself up to %.2e J/kg\n", synH, synCp, noiseH);
+        if (hi3) {
+            std::snprintf(b, sizeof(b), "%s datum %g: (b) %zu pts T>6000 K synthesis-only error (long double of the same coefficients): "
+                          "|dcp| %.2e |dh| %.2e (at %.6g K) |ds| %.2e (<=1e-9/1e-6/1e-9)", tag.c_str(), Tref, nb, lcp, lh, Tlh, ls);
+            check(lcp <= 1e-9 && lh <= 1e-6 && ls <= 1e-9, b);
+            std::printf("       (info, T>6000 K) double vs double |dh| %.2e J/kg; single-species double rounding |h_double - h_longdouble| up to %.2e J/kg (at %.6g K)\n",
+                        ihDD, iRound, TiR);
+        }
         // 区切りでの段差の増分
         double dJh = 0, dJcp = 0, maxJ = 0;
         for (int k = 0; k + 1 < lump.nInt; ++k) {

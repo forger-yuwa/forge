@@ -3,6 +3,12 @@
 // 使用 DB (MIXDRY=N2 係数 / H2O / AIR / HE)・組成端点・微量成分・50–6000 K・区間境界・外挿・datum 有無で測る。
 // 区間可変 (plan thermophysics-solver-owned-species-db #13-1 G1-d): CEA の 3 区間 N2/O2 (200/1000/6000/20000) を含む組成を 20000 K まで
 // (反転の上限 T_max も 20000 K; 6000 K の区切りの前後・20000 K 端を含む) 同じ判定で測る。
+// 判定の再スコープ (plan §6 V3f, 2026-10-01 diagnostician; 事前固定):
+//   (i)  冷間開始 (50.1 K) と T_max 開始は目標 T <= 6000 K に限る (1 呼び出しの到達上限 50.1·1.5^12 ≈ 6500 K の設計値)。
+//        T > 6000 K の目標は warm start 3 通り (0.9T・1.1T・300 K) で判定。errHyb/T < 3e-8 は不変。
+//   (ii) 区切り温度そのもの (組成のいずれかの種の内側の区切り; 1000 K・6000 K) では許容を 3e-8 + Δh_step/(c_v·T)
+//        (Δh_step = 係数から計算した両側の混合 h の差 (上の区間 − 下の区間, 同じ T)、c_v はその点の混合 c_v)。区切り以外は 3e-8。
+//   info (合否にしない): 6000 K 超での float 面経路 thermo_h_mix_f の h 相対誤差 (double 評価比) の最大 hF/h>6k。
 // ビルド: g++ -O2 -I solver_density_cuda solver_density_cuda/tools/test_thermo_float.cpp -o /tmp/tthf && /tmp/tthf
 #include <cstdio>
 #include <cmath>
@@ -11,6 +17,17 @@
 #include <algorithm>
 #include "../cuda_forge/thermo_d.cuh"
 
+// 区間 k の係数で強制評価した h [J/mol] (区切りでの段差用)
+static double h_molar_k(const SpeciesThermo& s, int k, double T){
+    const double* a=s.coef[k]; const double Ti=1.0/T, lnT=log(T);
+    return THERMO_RU*T*(-a[0]*Ti*Ti + a[1]*lnT*Ti + a[2] + a[3]*T/2.0 + a[4]*T*T/3.0 + a[5]*T*T*T/4.0 + a[6]*T*T*T*T/5.0 + a[7]*Ti);
+}
+// 組成 Y の混合 h の区切り段差 Δh_step [J/kg] (T がどの種の内側の区切りでもなければ 0)
+static double h_step_mix(const std::vector<SpeciesThermo>& sp, const std::vector<double>& Y, double T, bool* isBrk){
+    double d=0.0; *isBrk=false;
+    for (size_t i=0;i<sp.size();++i) for (int k=0;k+1<sp[i].nInt;++k) if (sp[i].Tbrk[k]==T) { *isBrk=true; d+=Y[i]*(h_molar_k(sp[i],k+1,T)-h_molar_k(sp[i],k,T))/sp[i].MW; }
+    return fabs(d);
+}
 static SpeciesThermo mk3(double MW,double sig,double eps,const double a[3][9]){
     SpeciesThermo s; s.MW=MW; s.sigma_LJ=sig; s.eps_kB=eps; s.h_datum=0.0; s.invMW=1.0/MW;
     const double Tb[4]={200.0,1000.0,6000.0,20000.0}; thermo_set_intervals(s,3,Tb,a); return s;
@@ -51,7 +68,7 @@ int main(){
     // T_max を超える e は反転不能 (クランプ) なので範囲内のみ。<200 K は低温端の線形外挿 (反転可)。
     const double Tlist_edges[] = {50,60,100,150,199.9,200,200.1,250,298.15,300,400,600,800,950,999.9,1000,1000.1,1200,1500,2000,3000,4000,5000,5900,5999,6000,
                                   6000.1,6500,7000,8000,10000,12000,15000,18000,19000,19999,20000};
-    printf("%-30s %-6s %9s %9s %9s %9s %9s %9s %9s %6s\n","mix","datum","errF[K]","errF/T","errD[K]","errHyb/T","driftH/T","driftD/T","driftF/T","itF");
+    printf("%-30s %-6s %9s %9s %9s %9s %9s %9s %9s %9s %6s\n","mix","datum","errF[K]","errF/T","errD[K]","errHyb/T","hyb/tol","driftH/T","driftD/T","driftF/T","itF");
     // errF/errD: 厳密参照 (double Newton, tol 1e-9, 60 反復) に対する float 版 / 生産 double 版 (tol 1e-3+1e-6T) の誤差
     int fails=0;
     for (int datum=0; datum<2; ++datum) {
@@ -65,6 +82,8 @@ int main(){
             for (int i=0;i<n;i++) spf[i]=toF(sp[i]);
             double maxdT=0, maxrel=0, maxres=0, maxdrift=0, maxdh=0, maxdTrelT=0, maxresRelT=0, maxHyb=0, maxdriftD=0, maxdriftF=0; int itFmax=0, itDmax=0;
             double hybT=0, hybG=0;   // errHyb/T の最悪点 (T, 初期値) — 20000 K までの 3 区間種で原因を切り分けるため (#13-1 G1-d)
+            double maxRatio=0, ratT=0, ratTol=0;   // (errHyb/T)/許容 の最大 (許容は点ごと; 再スコープ (ii))
+            double maxHF=-1;                       // info: 6000 K 超の thermo_h_mix_f 相対誤差 (-1 = 該当点なし)
             const double TM = m.Tmax;
             for (double T : Tlist_edges) {
                 if (T > TM) continue;
@@ -72,7 +91,17 @@ int main(){
                 double cpd, hd; thermo_cph_mix(sp.data(), n, m.Y.data(), T, &cpd, &hd);
                 const double R=thermo_R_mix(sp.data(),n,m.Y.data()); const double e=hd-R*T;
                 // 反転 (double, warm start は T の 0.9 倍・1.1 倍・300K の 3 通り)
-                for (double g : {0.9*T, 1.1*T, 300.0, 50.1, TM}) {
+                // 再スコープ (ii): 区切りそのものの許容
+                bool isBrk=false; double tolT=3.0e-8;
+                { const double dstep=h_step_mix(sp,m.Y,T,&isBrk);
+                  if (isBrk) { double cpb,hb; thermo_cph_mix(sp.data(),n,m.Y.data(),T,&cpb,&hb); const double cvb=cpb-thermo_R_mix(sp.data(),n,m.Y.data()); tolT += dstep/(cvb*T); } }
+                // info: float 面経路の h (6000 K 超)
+                if (T > 6000.0) { const float Tf32=(float)T; double cpr,hr; thermo_cph_mix(sp.data(),n,m.Y.data(),(double)Tf32,&cpr,&hr);
+                  const float hF=thermo_h_mix_f(spf.data(),n,Yf.data(),Tf32); maxHF=std::max(maxHF, fabs((double)hF-hr)/fabs(hr)); }
+                // 再スコープ (i): 冷間開始 (50.1 K) と T_max 開始は目標 <= 6000 K のみ、6000 K 超は warm start 3 通り
+                std::vector<double> starts = {0.9*T, 1.1*T, 300.0};
+                if (T <= 6000.0) { starts.push_back(50.1); starts.push_back(TM); }
+                for (double g : starts) {
                     const double Td = thermo_T_from_e(sp.data(), n, m.Y.data(), e, g, 50.0, TM);
                     int itF=0;
                     const float Tf = thermo_T_from_e_f(spf.data(), n, Yf.data(), (float)e, (float)g, 50.0f, (float)TM, &itF);
@@ -92,6 +121,7 @@ int main(){
                     // ハイブリッド (float 8 反復 + double 研磨 1 段) の誤差
                     { double cpH,hH,TfH; const double Th=thermo_T_from_e_hybrid(sp.data(),spf.data(),n,m.Y.data(),Yf.data(),e,g,50.0,TM,&cpH,&hH,&TfH,12);
                       if (fabs(Th-Tref)/Tref > maxHyb) { maxHyb=fabs(Th-Tref)/Tref; hybT=T; hybG=g; }
+                      if (fabs(Th-Tref)/Tref/tolT > maxRatio) { maxRatio=fabs(Th-Tref)/Tref/tolT; ratT=T; ratTol=tolT; }
                       // 再格納ドリフト (本番 dependentVariables と同じ経路): h(T)=h(T_f)+cp·(T−T_f) から e_mix を組み、
                       // roe=ρ(e_mix+ek) を **float に格納**して読み戻し、e=roe/ρ−ek を float→double で再反転する。
                       // 反復 (10 回) で T が漂わないこと・有限であることを合否に含める (codex result-2 m5)。
@@ -124,11 +154,12 @@ int main(){
             // 再格納ドリフト (10 往復, float 格納込み) は float の e 分解能 (ulp/e ≈ 6e-8 → ΔT/T ≈ 3e-8·(e/(cv T)) ≲ 1e-7) の範囲: < 3e-7·T。
             // abs datum (thermoHrefTemp 無し) は本番でハイブリッドを使わない (自動で double 反転) ので、ドリフトは参考値扱い。
             // ドリフトは float 格納そのものに由来する (従来 double 反転でも同程度)。判定: ハイブリッドのドリフトが double 反転の 2 倍 + 1e-8 以内。
-            const bool ok = (maxHyb < 3.0e-8) && (datum == 0 || maxdrift <= 2.0*maxdriftD + 1.0e-8);
+            const bool ok = (maxRatio < 1.0) && (datum == 0 || maxdrift <= 2.0*maxdriftD + 1.0e-8);   // errHyb/T < 許容 (区切り以外 3e-8)
             if (!ok) fails++;
-            printf("%-30s %-6s %9.2e %9.2e %9.2e %9.2e %9.2e %9.2e %9.2e %6d %s  (errHyb worst at T=%g, start %g)\n", m.name.c_str(), datum?"298K":"abs", maxdT, maxdTrelT, maxrel, maxHyb, maxdrift, maxdriftD, maxdriftF, itFmax, ok?"OK":"FAIL", hybT, hybG);
+            char hfs[32]; if (maxHF<0) snprintf(hfs,sizeof(hfs),"-"); else snprintf(hfs,sizeof(hfs),"%.2e",maxHF);
+            printf("%-30s %-6s %9.2e %9.2e %9.2e %9.2e %9.2e %9.2e %9.2e %9.2e %6d %s  (errHyb worst at T=%g, start %g; worst ratio at T=%g tol %.3e; info hF/h>6k %s)\n", m.name.c_str(), datum?"298K":"abs", maxdT, maxdTrelT, maxrel, maxHyb, maxRatio, maxdrift, maxdriftD, maxdriftF, itFmax, ok?"OK":"FAIL", hybT, hybG, ratT, ratTol, hfs);
         }
     }
-    printf("VERDICT: %s (fails=%d; 判定 errHyb/T < 3e-8 [float の T 格納分解能未満] かつ float 格納 roe 10 往復のハイブリッド反転ドリフト driftH/T が従来 double 反転 driftD/T の 2 倍+1e-8 以内; driftF は純 float 反転の参考値)\n", fails?"FAIL":"PASS", fails);
+    printf("VERDICT: %s (fails=%d; 判定 errHyb/T < 3e-8 [float の T 格納分解能未満; 区切りそのものは 3e-8+Δh_step/(c_v T), 6000 K 超は warm start のみ] かつ float 格納 roe 10 往復のハイブリッド反転ドリフト driftH/T が従来 double 反転 driftD/T の 2 倍+1e-8 以内; driftF は純 float 反転の参考値)\n", fails?"FAIL":"PASS", fails);
     return fails?1:0;
 }
