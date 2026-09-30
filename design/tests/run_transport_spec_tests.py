@@ -133,10 +133,24 @@ try:
     _cfg = _R2._solver_config(_ps, 10, 10, 1.0, 2851.0)
     _ok = ("viscMethod: 2" in _cfg and 'transport: {"N2": "cea", "H2O": "custom:h2o_iapws_cea_v1"' in _cfg
            and "thermCondMethod" not in _cfg)
-    _p0 = load_problem(ROOT / "case/46.sern_design/problem_moo_frozen_tp_cycle3op.yaml")
+    # 生産 YAML は 2026-10-01 から gas.transport あり。無い場合の既定 (viscMethod 1) は transport を外した複製で見る
+    _raw0 = yaml.safe_load((ROOT / "case/46.sern_design/problem_moo_frozen_tp_cycle3op.yaml").read_text())
+    _raw0["gas"].pop("transport", None)
+    _p0f = TMP / "sern_no_transport.yaml"; _p0f.write_text(yaml.safe_dump(_raw0, sort_keys=False, allow_unicode=True))
+    _p0 = load_problem(_p0f)
     _R2.design_snapshot(_p0); _R2.select_operating_point(_p0, "m6_on")
     _ok = _ok and "viscMethod: 1" in _R2._solver_config(_p0, 10, 10, 1.0, 2851.0)
     _chk("frozen_tp (SERN): gas.transport があれば viscMethod 2 + 全実種の transport、無ければ viscMethod 1 のまま", _ok)
+    # 作動点ごとに実種へ絞る (2026-10-01): 生産 YAML は全作動点の和集合を書き、m4_off (燃料なし) では N2/O2/AR/CO2 の 4 種だけ
+    _pm = load_problem(ROOT / "case/46.sern_design/problem_moo_frozen_tp_cycle3op.yaml")
+    _R2.design_snapshot(_pm); _R2.select_operating_point(_pm, "m4_off")
+    _tr = _R2.frozen_transport(_pm, _R2.frozen_gases(_pm)["layout"])
+    _chk("frozen_tp (SERN): 作動点 m4_off では transport を実種 {N2, O2, AR, CO2} に絞る", sorted(_tr) == ["AR", "CO2", "N2", "O2"])
+    _raw = yaml.safe_load((ROOT / "case/46.sern_design/problem_moo_frozen_tp_cycle3op.yaml").read_text())
+    _raw["gas"]["transport"].pop("H2")
+    _pb = TMP / "sern_missing_h2.yaml"; _pb.write_text(yaml.safe_dump(_raw, sort_keys=False, allow_unicode=True))
+    _pp = load_problem(_pb); _R2.design_snapshot(_pp); _R2.select_operating_point(_pp, "m6_on")
+    rejects("frozen_tp (SERN): 作動点の実種 (H2) の書き漏れは拒否", lambda: _R2.frozen_transport(_pp, _R2.frozen_gases(_pp)["layout"]), must=("H2",))
 except Exception as e:
     _chk(f"frozen_tp (SERN) の gas.transport ({e})", False)
 

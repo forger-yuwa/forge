@@ -151,16 +151,25 @@ def frozen_gases(p: Problem) -> dict | None:
     return {"exhaust": exh, "ext": ext, "href_T": href, "layout": layout, "db": db, "transported": transported}
 
 
+def frozen_transport(p: Problem, layout) -> dict:
+    """frozen_tp の `gas.transport` をこの作動点の実種に絞って照合する ({実種: モデル}、実種の順)。
+    SERN は作動点で排気の構成種が変わる (m4_off は燃料なしで N2/O2/AR/CO2 だけ) ので、YAML には全作動点の実種の和集合を書き、
+    ここで作動点に無い種を落とす。作動点の実種の書き漏れはエラー (resolve_transport, required=True)。2026-10-01 (R8)。"""
+    from ..gas.composition import resolve_transport, transport_real_species
+    reals = set(transport_real_species(layout))
+    sub = {k: v for k, v in (p.gas_transport or {}).items() if k in reals}
+    return resolve_transport(layout, sub, required=True)
+
+
 def write_species_db(p: Problem, run_dir, gases: dict | None) -> None:
     """`species_meta.yaml` を run dir に書く (cpg なら何も書かない)。lump の熱物性はソルバが起動時に合成するので
     合成済み擬似種の `species_db.yaml` は書かない (2026-09-30、plan thermophysics-solver-owned-species-db §5.2 / SERN R8)。
     ソルバ内蔵で解決できない実種 (外部 DB 由来など) があるときだけ、その生エントリを `species_db_external.yaml` に書く。"""
     if gases is None:
         return
-    from ..gas.composition import resolve_transport, solver_species_config, species_db_raw_yaml, write_species_meta
+    from ..gas.composition import solver_species_config, species_db_raw_yaml, write_species_meta
     _, external = solver_species_config(gases["layout"])
-    tr = (resolve_transport(gases["layout"], p.gas_transport, required=True)
-          if p.raw.get("gas", {}).get("transport") is not None else None)
+    tr = frozen_transport(p, gases["layout"]) if p.raw.get("gas", {}).get("transport") is not None else None
     write_species_meta(gases["layout"], run_dir, tr)
     if external:
         (Path(run_dir) / "species_db_external.yaml").write_text(species_db_raw_yaml(external))
@@ -307,8 +316,8 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
         # visc (dt と陰解法対角の剛性見積り)・thermCond (必須キー)・prandtlLam (SST 壁関数の回復係数) は残す (runner_axismach と同じ)
         _transport = None
         if p.is_frozen_tp and p.raw.get("gas", {}).get("transport") is not None:
-            from ..gas.composition import physprop_transport_flow, resolve_transport
-            _transport = resolve_transport(frozen_gases(p)["layout"], p.gas_transport, required=True)
+            from ..gas.composition import physprop_transport_flow
+            _transport = frozen_transport(p, frozen_gases(p)["layout"])
         if _transport is not None:
             phys = (f"physProp: {{thermalMethod: {_tm}, viscMethod: 2, visc: 1.8e-5, thermCond: 0.0257, "
                     f"prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}, transport: {physprop_transport_flow(_transport)}}}")

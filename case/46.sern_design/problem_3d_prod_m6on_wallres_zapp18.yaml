@@ -10,9 +10,12 @@
 name: sern_3d_prod_m6on_wallres_zapp18
 type: sern_2d
 gas:                       # **生産条件** (2026-09-20, R5i / codex plan-2 M1): 2D 生産 YAML と同一。
-                           # 排気 = CEA 凍結組成の擬似種 EXH (thermalMethod 2)、外気 = 空気 AIR。
+                           # 排気 = CEA 凍結組成の擬似種 EXH (thermalMethod 2)、外気 = 空気の lump AMB (2026-09-30 に AIR から改名)。
                            # 設計点は m6_on の凍結 γ(T3)/cp(T3)。旧 3D YAML は `model` 省略で CPG になっていた
   model: frozen_tp
+  # 種ごとの輸送物性 (2026-10-01 生産に採用、plan tooling-nozzle-sern-chain R8): viscMethod 2 + physProp.transport (混合則 CEA frozen)。
+  # 全作動点の lump 構成実種の和集合を書く (runner が作動点ごとに絞る)。H2O は IAPWS/CEA つなぎ、他は CEA
+  transport: {N2: cea, H2O: custom:h2o_iapws_cea_v1, H2: cea, AR: cea, OH: cea, O2: cea, "NO": cea, H: cea, O: cea, CO2: cea, CO: cea}
   thermo_href_temp: 298.15
   gamma: 1.2470
   cp: 1718.5
