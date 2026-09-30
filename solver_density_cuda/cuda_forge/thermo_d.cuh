@@ -3,7 +3,7 @@
 // =============================================================================
 // thermo_d.cuh
 //   多成分 thermally-perfect gas の熱力学コア。
-//   - 比熱 cp(T) は NASA-9 係数多項式 (CEA 準拠, McBride-Gordon 2002, 2 温度域)。
+//   - 比熱 cp(T) は NASA-9 係数多項式 (CEA 準拠, McBride-Gordon 2002, 種ごとに 1〜THERMO_MAX_INTERVALS 温度区間)。
 //   - 混合則は ideal-gas mixing (質量重み cp/h、モル重み M)。
 //   - エネルギーは NASA 絶対エンタルピー基準 (生成エンタルピー込み)。
 //
@@ -34,30 +34,87 @@
 // コンパイル時の最大化学種数 (DB 容量の上限)
 #define THERMO_MAX_SPECIES 16
 
-// 1 化学種の NASA-9 係数 (2 温度域) と Lennard-Jones パラメータ。
+// 1 化学種あたりの NASA-9 温度区間数の上限 (plan thermophysics-solver-owned-species-db §4.9, #13-1)。
+// CEA thermo.inp の気相は 200–1000–6000–20000 K の 3 区間まで。lump の合成 (区切りの和集合) を含め、超えたら起動時に拒否する。
+#define THERMO_MAX_INTERVALS 3
+
+// 1 化学種の NASA-9 係数 (nInt 温度区間, 1 <= nInt <= THERMO_MAX_INTERVALS) と Lennard-Jones パラメータ。
 // 係数配列 a[0..8] の規約:
 //   cp/R = a0/T^2 + a1/T + a2 + a3 T + a4 T^2 + a5 T^3 + a6 T^4
 //   h/RT = -a0/T^2 + a1 ln(T)/T + a2 + a3 T/2 + a4 T^2/3 + a5 T^3/4 + a6 T^4/5 + a7/T
 //   s/R  = -a0/(2T^2) - a1/T + a2 ln(T) + a3 T + a4 T^2/2 + a5 T^3/3 + a6 T^4/4 + a8
+// 区間の選択 (thermo_interval): 区間 k は Tbrk[k-1] <= T < Tbrk[k] (区切りちょうどは上の区間; 最後の区間は Thi を含む)。
+//   2 区間では従来の「T < Tmid で low、それ以外 high」と同じ (Tbrk[0] = Tmid, coef[0] = low, coef[1] = high)。
+//   [Tlo, Thi] の外は従来どおり端でクランプ (cp) / 端の cp で線形外挿 (h, s°)。
+// 値は thermo_set_intervals / thermo_set_nasa9_2 で入れる (Tlo・Thi・Tbrk・nInt の整合を保つため)。
 struct SpeciesThermo {
     double MW;        // 分子量 [kg/mol]
     double sigma_LJ;  // Lennard-Jones 衝突直径 [Angstrom] (kinetic theory 輸送用)
     double eps_kB;    // Lennard-Jones ポテンシャル深さ ε/kB [K]
-    double Tlo;       // 低温端 [K]
-    double Tmid;      // 温度域境界 [K]
-    double Thi;       // 高温端 [K]
-    double low[9];    // Tlo  <= T <  Tmid の係数
-    double high[9];   // Tmid <= T <= Thi  の係数
+    double Tlo;       // 低温端 [K] (区間 0 の下端)
+    double Thi;       // 高温端 [K] (区間 nInt-1 の上端)
+    int    nInt;      // 温度区間数 (1..THERMO_MAX_INTERVALS)
+    double Tbrk[THERMO_MAX_INTERVALS-1];   // 区間の内側の区切り [K] (Tbrk[k-1] が区間 k-1 と k の境; nInt-1 個が有効、残りは +inf)
+    double coef[THERMO_MAX_INTERVALS][9];  // 区間 k の係数 (nInt 個が有効、残りは最後の区間の写し)
     double h_datum;   // sensible datum で係数から除いた絶対エンタルピー h_abs(Tref) [J/mol] (既定 0)。
                       // 反応流の反応熱 Q̇=−Σ(h_datum/W)ω と平衡定数 (H_abs=h+h_datum) が使う。
     double invMW;     // 1/MW (ハイブリッド温度反転の研磨段で除算を避ける。thermo_init_db が設定、既定 0=未設定)
 };
 
+// 区間の境界 (k = 0..nInt): 0 は Tlo、nInt は Thi、その間は Tbrk[k-1]。
+THERMO_HD double thermo_bound(const SpeciesThermo& sp, int k)
+{
+    return (k <= 0) ? sp.Tlo : (k >= sp.nInt ? sp.Thi : sp.Tbrk[k-1]);
+}
+
+// 区間と係数を入れる (host 構築用)。Tb[0..nInt] は境界 (Tb[0]=Tlo, Tb[nInt]=Thi)、a[k] は区間 k の 9 係数。
+// 未使用の区切りは +inf、未使用の係数は最後の区間の写しにする: 区間選択 (thermo_interval) が nInt を読まずに済み
+// (レジスタ節約; #13-1 G1-e)、有限の T は未使用の区間を選ばず、NaN は写しの行 = 最後の区間と同じ値 (NaN) になる。
+// 記録・比較・直列化は nInt 個だけを使う。nInt の範囲検査は呼び出し側 (speciesDB) が行う。
+THERMO_HD void thermo_set_intervals(SpeciesThermo& s, int nInt, const double* Tb, const double (*a)[9])
+{
+    s.nInt = nInt;
+    s.Tlo = Tb[0];
+    s.Thi = Tb[nInt];
+    for (int k = 0; k < THERMO_MAX_INTERVALS - 1; ++k) s.Tbrk[k] = (k + 1 < nInt) ? Tb[k+1] : (double)INFINITY;
+    for (int k = 0; k < THERMO_MAX_INTERVALS; ++k) {
+        const int r = (k < nInt) ? k : nInt - 1;
+        for (int i = 0; i < 9; ++i) s.coef[k][i] = a[r][i];
+    }
+}
+
+// 2 区間 (従来の Tlo/Tmid/Thi・low/high) で入れる。
+THERMO_HD void thermo_set_nasa9_2(SpeciesThermo& s, double Tlo, double Tmid, double Thi,
+                                  const double low[9], const double high[9])
+{
+    const double Tb[3] = {Tlo, Tmid, Thi};
+    double a[2][9];
+    for (int i = 0; i < 9; ++i) { a[0][i] = low[i]; a[1][i] = high[i]; }
+    thermo_set_intervals(s, 2, Tb, a);
+}
+
+// MW・区間 (数と境界)・有効な全区間の係数がビット一致するか (LJ・datum・invMW は見ない)。
+THERMO_HD bool thermo_same_coeffs(const SpeciesThermo& a, const SpeciesThermo& b)
+{
+    if (a.MW != b.MW || a.nInt != b.nInt || a.Tlo != b.Tlo || a.Thi != b.Thi) return false;
+    for (int k = 0; k + 1 < a.nInt; ++k) if (a.Tbrk[k] != b.Tbrk[k]) return false;
+    for (int k = 0; k < a.nInt; ++k)
+        for (int i = 0; i < 9; ++i) if (a.coef[k][i] != b.coef[k][i]) return false;
+    return true;
+}
+
+// datum: 全区間の a7 に同じ定数を足す (h に一定のオフセット R_u·Δa7 を与え、区切りでの段差を変えない)。
+// 未使用の行 (最後の区間の写し) にも同じ値を足して写しのままにする。
+THERMO_HD void thermo_add_a7(SpeciesThermo& s, double da7)
+{
+    for (int k = 0; k < THERMO_MAX_INTERVALS; ++k) s.coef[k][7] += da7;
+}
+
 // -----------------------------------------------------------------------------
 // float32 ミラー (面ごとの熱力学評価用, plan performance-3d-node-sst-speedup §4.2-2)。
 //   面ループ (SLAU の h_mix(Y_f,T_f), 化学種拡散の h_s(T_f)・D_s(T_f,P_f,X_f)) で double 版を呼ぶと
 //   CC 8.6 では FP64 パイプ (FP32 の 1/64) が律速になる。係数は double の SpeciesThermo から
-//   1 度だけ float へ焼き込み (datum オフセット込み)、クランプ・外挿の分岐は double 版と同一にする。
+//   1 度だけ float へ焼き込み (datum オフセット込み)、クランプ・外挿・区間選択の分岐は double 版と同一にする。
 //   セルごとの Newton 反転 (thermo_T_from_e) や初期条件は引き続き double 版を使う。
 // -----------------------------------------------------------------------------
 #define THERMO_RU_F 8.314462618f
@@ -67,14 +124,57 @@ struct SpeciesThermoF {
     float R;          // Ru/MW [J/(kg K)]
     float sigma_LJ;   // [Angstrom]
     float eps_kB;     // [K]
-    float Tlo, Tmid, Thi;
-    float low[9];
-    float high[9];
+    float Tlo, Thi;
+    int   nInt;
+    float Tbrk[THERMO_MAX_INTERVALS-1];
+    float coef[THERMO_MAX_INTERVALS][9];
 };
 
+// double の SpeciesThermo から float ミラーを作る (datum 焼き込み後の係数をそのまま float へ)。
+THERMO_HD SpeciesThermoF thermo_to_float(const SpeciesThermo& s)
+{
+    SpeciesThermoF f;
+    f.MW = (float)s.MW; f.invMW = (float)(1.0/s.MW); f.R = (float)(THERMO_RU/s.MW);
+    f.sigma_LJ = (float)s.sigma_LJ; f.eps_kB = (float)s.eps_kB;
+    f.Tlo = (float)s.Tlo; f.Thi = (float)s.Thi; f.nInt = s.nInt;
+    for (int k = 0; k < THERMO_MAX_INTERVALS - 1; ++k) f.Tbrk[k] = (float)s.Tbrk[k];
+    for (int k = 0; k < THERMO_MAX_INTERVALS; ++k)
+        for (int i = 0; i < 9; ++i) f.coef[k][i] = (float)s.coef[k][i];
+    return f;
+}
+
+// 区間の選択 (クランプ済み温度 Tc)。区切りちょうどは上の区間。未使用の区切りは +inf なので有限の Tc では選ばれない。
+// 比較は !(Tc < 区切り) なので NaN は最後の行 (未使用の行は最後の区間の写し; 従来の (Tc < Tmid) ? low : high と同じく
+// 結果は NaN のまま伝わる)。
+THERMO_HD int thermo_interval_f(const SpeciesThermoF& sp, float Tc)
+{
+    int k = 0;
+    #pragma unroll
+    for (int j = 1; j < THERMO_MAX_INTERVALS; ++j)
+        if (!(Tc < sp.Tbrk[j-1])) k = j;
+    return k;
+}
 THERMO_HD const float* thermo_pick_coeffs_f(const SpeciesThermoF& sp, float Tc)
 {
-    return (Tc < sp.Tmid) ? sp.low : sp.high;
+    return sp.coef[thermo_interval_f(sp, Tc)];
+}
+// 係数 a を与えた評価 (区間が分かっている端 Tlo/Thi の外挿で使う)
+THERMO_HD float thermo_cp_molar_coef_f(const float* a, float Tc)
+{
+    const float Ti  = 1.0f/Tc;
+    const float Ti2 = Ti*Ti;
+    return THERMO_RU_F * ( a[0]*Ti2 + a[1]*Ti + a[2]
+                         + a[3]*Tc + a[4]*Tc*Tc + a[5]*Tc*Tc*Tc + a[6]*Tc*Tc*Tc*Tc );
+}
+THERMO_HD float thermo_h_molar_coef_f(const float* a, float Tc)
+{
+    const float Ti  = 1.0f/Tc;
+    const float Ti2 = Ti*Ti;
+    const float lnT = logf(Tc);
+    const float hRT = -a[0]*Ti2 + a[1]*lnT*Ti + a[2]
+                    + a[3]*Tc/2.0f + a[4]*Tc*Tc/3.0f + a[5]*Tc*Tc*Tc/4.0f
+                    + a[6]*Tc*Tc*Tc*Tc/5.0f + a[7]*Ti;
+    return THERMO_RU_F * Tc * hRT;
 }
 THERMO_HD float thermo_cp_molar_clamped_f(const SpeciesThermoF& sp, float Tc)
 {
@@ -104,14 +204,18 @@ THERMO_HD float thermo_cp_molar_f(const SpeciesThermoF& sp, float T)
 }
 THERMO_HD float thermo_h_molar_f(const SpeciesThermoF& sp, float T)
 {
+    // 端の区間は選択するまでもなく決まる (Tlo は区間 0、Thi は区間 nInt-1: 区切りは Tlo < Tbrk < Thi)。
+    // 係数を直接渡す (区間選択を経由すると device の FMA 縮約が 2 区間固定版と変わり、float h が 1 ulp ずれた; #13-1 G1-b)。
     if (T < sp.Tlo) {
-        const float h0  = thermo_h_molar_clamped_f(sp, sp.Tlo);
-        const float cp0 = thermo_cp_molar_clamped_f(sp, sp.Tlo);
+        const float* a = sp.coef[0];
+        const float h0  = thermo_h_molar_coef_f(a, sp.Tlo);
+        const float cp0 = thermo_cp_molar_coef_f(a, sp.Tlo);
         return h0 + cp0*(T - sp.Tlo);
     }
     if (T > sp.Thi) {
-        const float h1  = thermo_h_molar_clamped_f(sp, sp.Thi);
-        const float cp1 = thermo_cp_molar_clamped_f(sp, sp.Thi);
+        const float* a = sp.coef[sp.nInt - 1];
+        const float h1  = thermo_h_molar_coef_f(a, sp.Thi);
+        const float cp1 = thermo_cp_molar_coef_f(a, sp.Thi);
         return h1 + cp1*(T - sp.Thi);
     }
     return thermo_h_molar_clamped_f(sp, T);
@@ -143,10 +247,21 @@ THERMO_HD void thermo_X_from_Y_f(const SpeciesThermoF* sp, int n, const float* Y
 // エンタルピーは線形外挿 (h(T) ~ h(Tc) + cp(Tc)(T-Tc)) して衝撃波での暴走を防ぐ。
 // -----------------------------------------------------------------------------
 
+// 区間の選択 (クランプ済み温度 Tc)。区切りちょうどは上の区間、NaN は最後の行 (thermo_interval_f と同じ規約)。
+// 呼び出し側で区間番号を nInt と比べない (NaN では nInt-1 を超えうるが、その行は最後の区間の写し)。
+THERMO_HD int thermo_interval(const SpeciesThermo& sp, double Tc)
+{
+    int k = 0;
+    #pragma unroll
+    for (int j = 1; j < THERMO_MAX_INTERVALS; ++j)
+        if (!(Tc < sp.Tbrk[j-1])) k = j;
+    return k;
+}
+
 // 係数選択 (クランプ済み温度 Tc に対応する係数配列を返す)
 THERMO_HD const double* thermo_pick_coeffs(const SpeciesThermo& sp, double Tc)
 {
-    return (Tc < sp.Tmid) ? sp.low : sp.high;
+    return sp.coef[thermo_interval(sp, Tc)];
 }
 
 // cp_molar [J/(mol·K)] (クランプ温度で評価)

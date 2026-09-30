@@ -38,7 +38,8 @@ $$ \frac{H_s}{R_u T} = -a_0 T^{-2} + a_1 \frac{\ln T}{T} + a_2 + \frac{a_3}{2} T
 
 $$ \frac{S^{\circ}_s}{R_u} = -\frac{a_0}{2} T^{-2} - a_1 T^{-1} + a_2 \ln T + a_3 T + \frac{a_4}{2} T^2 + \frac{a_5}{3} T^3 + \frac{a_6}{4} T^4 + a_8 $$
 
-積分定数 $a_7,a_8$ により、エンタルピーは**標準生成エンタルピーを含む絶対エンタルピー基準**となる。係数は 2 温度域 ($T_{\mathrm{lo}}\le T<T_{\mathrm{mid}}$ と $T_{\mathrm{mid}}\le T\le T_{\mathrm{hi}}$、標準は 200/1000/6000 K) で切り替える。範囲外は端でクランプし、エンタルピーは $h(T)\approx h(T_c)+c_p(T_c)(T-T_c)$ と線形外挿して衝撃波での暴走を防ぐ。
+積分定数 $a_7,a_8$ により、エンタルピーは**標準生成エンタルピーを含む絶対エンタルピー基準**となる。係数は温度区間で切り替える (区間数は種ごとに 1〜3 = `THERMO_MAX_INTERVALS`; 現在の内蔵 7 種は 2 区間 200/1000/6000 K、CEA の多くの気相種は 200/1000/6000/20000 K の 3 区間)。
+区間 $k$ は $T_k\le T<T_{k+1}$ (**区切りちょうどは上の区間**、最後の区間は $T_{\mathrm{hi}}$ を含む) で、2 区間では従来の「$T<T_{\mathrm{mid}}$ で低温側」と同じ (plan thermophysics-solver-owned-species-db #13-1)。範囲外は端でクランプし、エンタルピーは $h(T)\approx h(T_c)+c_p(T_c)(T-T_c)$ と線形外挿して衝撃波での暴走を防ぐ。
 
 質量基準は $c_{p,s}=C_{p,s}/W_s$、$h_s=H_s/W_s$。
 
@@ -146,7 +147,11 @@ $$ \mathbf{q} = -k\,\nabla T + \sum_i h_i(T)\,\mathbf{J}_i. $$
 ### 1. 熱力学モジュール `cuda_forge/thermo_d.{cuh,cu}`
 
 #### データ構造
-`SpeciesThermo` (POD): 分子量 `MW` [kg/mol]、Lennard-Jones パラメータ `sigma_LJ` [Å]・`eps_kB` [K]、温度域 `Tlo/Tmid/Thi`、NASA-9 係数 `low[9]/high[9]`。
+`SpeciesThermo` (POD): 分子量 `MW` [kg/mol]、Lennard-Jones パラメータ `sigma_LJ` [Å]・`eps_kB` [K]、温度域の端 `Tlo/Thi`、区間数 `nInt` (1..`THERMO_MAX_INTERVALS`=3)、
+内側の区切り `Tbrk[THERMO_MAX_INTERVALS-1]`、NASA-9 係数 `coef[THERMO_MAX_INTERVALS][9]` (区間可変, plan #13-1)。値は `thermo_set_intervals` / `thermo_set_nasa9_2` で入れ、
+未使用の区切りは +inf・未使用の係数行は最後の区間の写しにする (区間選択 `thermo_interval` が `nInt` を読まずに済み、NaN は最後の区間と同じく NaN を返す)。
+datum は `thermo_add_a7` で全区間の $a_7$ に同じ定数を足す。float ミラー `SpeciesThermoF` は `thermo_to_float` で同じ区間表から作る。
+2 区間の種の評価は区間可変の前とビット一致 (host・device、double・float; `tests/unit/test_thermo_intervals_bitexact.cu`)。
 
 #### device/host 共通関数 (`__host__ __device__`, 内部 double)
 - `thermo_cp_molar / thermo_h_molar` — NASA-9 評価。範囲クランプ + エンタルピー線形外挿。
@@ -224,11 +229,14 @@ physProp:
 - 上限は「輸送種数」「lump 展開後の実種数」「区間数」を別々に定数で持ち、超過は起動時に拒否する。
 - 起動ログに lump の中身・MW・区間・参照温度での $c_p$, $h$ を出す。
 
-> **実装状況 (2026-09-27, plan #6a)**: 構成種の温度区切り (Tlo/Tmid/Thi) がすべて同じ場合に限り実装済み (`input/speciesDB.cpp` の `speciesDB_resolve`)。
+> **実装状況 (2026-09-27, plan #6a; 区切りの違う構成種は 2026-10-01 #13-1)**: `input/speciesDB.cpp` の `speciesDB_resolve`。構成種の区間がすべて同じなら同じ区間で畳み
+> (合成規約 `SPECIES_LUMP_SYNTHESIS`、#6a と同じ演算・同じ記録)、違えば区切りの和集合で畳む (`SPECIES_LUMP_SYNTHESIS_UNION`; 構成種が自分の $[T_{lo},T_{hi}]$ の外に
+> ある区間ではその外挿 ($c_p/R=a_2$ 一定、$a_7=h(T_b)/R-a_2T_b$、$a_8=s(T_b)/R-a_2\ln T_b$) を 1 区間として足す)。和集合が 3 区間を超える lump
+> (例: 200 K 始まりの種と 298.15 K 始まりの 3 区間種) は起動時に拒否する。構成種ごとの加重和との一致は `tests/unit/test_thermo_intervals_host.cpp` (V3)。
 > `basis` は必須 (`mole` | `mass`)。分率は lump 内で正規化し、総和が 1 から 1e-3 以上ずれたら警告、非正・非有限はエラー。構成種は内蔵 DB と `speciesDBFile` から通常の種と同じ規則で解決する。
 > 重複 (別名・大小文字違いを含む)・未知の種・lump 名と内蔵種/外部 DB 種名の衝突 (大小文字無視)・凝縮 ON での凝縮種の混入は起動時に拒否する。
 > 合成は $x_k$ でモル加重して $M=\sum x_k M_k$、NASA-9 両区間の係数を $\sum x_k a_k$ (設計側 `composition.lump_entry` と同式; case/44 va3 で生成 DB と相対 4e-16)。
-> LJ は**暫定**で質量分率平均 $\sigma=\sum Y_k\sigma_k$, $\varepsilon=\sum Y_k\varepsilon_k$ (§1b.3 の実種展開・Blanc 拡散は plan #7)。datum は合成後の lump を 1 種として従来どおり適用する。区切りの違う構成種は「plan #6b が必要」として拒否する。
+> LJ は**暫定**で質量分率平均 $\sigma=\sum Y_k\sigma_k$, $\varepsilon=\sum Y_k\varepsilon_k$ (§1b.3 の実種展開・Blanc 拡散は plan #7)。datum は合成後の lump を 1 種として従来どおり適用する。
 > 解決済み記録には lump の basis・入力の分率・正規化モル分率・構成種の係数を書き、互換性ハッシュには合成規約・構成種名・正規化モル分率・構成種の MW/区間/LJ/係数を入れる (basis と入力の分率は入れない)。
 > lump を使わない config のハッシュは変わらない。外部 DB で与えた同じ擬似種とはハッシュが異なるので、既存場からの restart は照合で止まる (移行は明示許可で 1 回行う)。
 
@@ -242,7 +250,7 @@ physProp:
 
 `physProp.transport` を書いた run では、セル (`gasProperties_d`) と壁 (`wmlesWallModel_d`) の μ・λ を表から引く (`cuda_forge/transportTables_d.cuh`)。表は起動時に host で double から作り device に置く。
 - 対象: 各実種の $\ln\mu_i$・$\ln\lambda_i$ と、組 $\ln\eta_{ij}$ のうち二元 Chapman–Enskog と CEA 相互作用のもの。剛体球近似の組は実行時に種別表の $\mu$ から作る。
-- 分割: 式が切り替わる温度 (CEA・fit の区間境界、H2O の 253.15/500/700 K、$T^*$ のクランプ点 $0.3\varepsilon$・$100\varepsilon$、修正 Eucken の $c_p$ の NASA $T_{lo}/T_{mid}/T_{hi}$) で分割し、各分割区間を $\Delta\ln T\le 1/256$ で刻む。
+- 分割: 式が切り替わる温度 (CEA・fit の区間境界、H2O の 253.15/500/700 K、$T^*$ のクランプ点 $0.3\varepsilon$・$100\varepsilon$、修正 Eucken の $c_p$ の NASA $T_{lo}$・全区切り・$T_{hi}$ (区間可変, #13-1)) で分割し、各分割区間を $\Delta\ln T\le 1/256$ で刻む。
 - 補間: 小区間ごとに両端の値と $d\ln f/d\ln T$ から 3 次 Hermite ($f\approx f_0\exp(c_1u+c_2u^2+c_3u^3)$)。右区間の左端も右側の式で評価する。
 - 区間の選択は元の $T$ と元の境界値 (現行の所属規約) で行い、float の $\ln T$ では選ばない (999.99994/1000/1000.00006 K の float $\ln T$ は同値)。
 - 範囲 150–15000 K、範囲外は double 評価へ委譲 (端値クランプなし)。精度は独立 double 参照に対し単体 4.7e-7・混合 4.1e-7 以内 (基準 2e-6/1e-5)。
@@ -254,6 +262,13 @@ physProp:
 - ソルバは使用した全種 (内蔵種・外部 DB・lump とその構成実種を含む) の**解決済み物性**を run ディレクトリへ出力する: 種の順序、canonical ID、出所、MW、区間と係数、LJ、datum、
   lump の構成と分率、共通データの版とハッシュ。これは**出力 (記録)** であり入力ではない。
 - 記録の正規化した内容から **species ハッシュ** (SHA-256) を作り、記録は `resolved_species_<hash>.yaml` として上書きせずに保存する。**各 `res_*.h5` の属性**にハッシュを書く。
+- **区間可変 (plan #13-1)**: `nInt == 2` の種は記録・互換性テキストとも従来の書式 (`Tlo/Tmid/Thi`, `nasa9_low/nasa9_high`; テキストは `T: Tlo Tmid Thi` と `low:`/`high:`) のまま。
+  それ以外の種は記録に `Tbounds: [Tlo, 区切り..., Thi]` と `nasa9_intervals: [[a0..a8] x nInt]`、テキストに `T:` の全境界と `coef[k]:` の行を書く。
+  記録に `nInt != 2` の種 (lump の構成種を含む) が 1 つでもあるときだけ schema を `forge_resolved_species_v1_nint` (輸送ブロック付きは `_v2_nint`)、
+  外挿規約を区間可変の文字列 (`SPECIES_RECORD_EXTRAPOLATION_NINT`: 区間 $k$ は $T_k\le T<T_{k+1}$、区切りは上の区間) にする。
+  2 区間だけの記録はバイト不変 (case/44 run_0509 の互換性ハッシュ 4378b7d78339ba27 のまま)。外部 DB (`speciesDBFile`) も同じキー (`Tbounds`/`nasa9_intervals`) で区間可変の種を書ける
+  (2 区間の書式と混ぜると拒否、4 区間以上・非単調も起動時に拒否)。Python の鏡像は `tools/forge_species.py` (`nasa9_intervals()`・`compat_text`・`load_record`) と
+  `tools/total_quantities.py` の `_TPGas`。
 - 照合は内容 (ハッシュと差分の項目) で行う。`source` (builtin / file) で比較を省略しない。過去の run の署名を現在の内蔵表から作り直さない。
 - 照合する入口: ソルバの `valueFileName` 読み込み、同一メッシュ restart (`restart_field.py`)、補間 (`interp_field.py`)、種変換 (`convert_species_field.py`)、設計 runner の段間引き継ぎ・warm start。
   不一致は差のある項目 (種・係数) を示して拒否する。ハッシュ属性の無い旧い場は「照合不能」とし、明示的に許可したときだけ通す。

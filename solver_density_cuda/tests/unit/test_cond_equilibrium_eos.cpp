@@ -21,16 +21,16 @@ static int nfail = 0;
 
 // NASA-9 (CEA) 係数: H2O と、MIXDRY 代わりに N2 (組成の詳細は本テストの目的に無関係)。
 static SpeciesThermo makeN2() {
-    SpeciesThermo s{}; s.MW = 0.0280134; s.sigma_LJ = 3.621; s.eps_kB = 97.53; s.Tlo = 200; s.Tmid = 1000; s.Thi = 6000;
+    SpeciesThermo s{}; s.MW = 0.0280134; s.sigma_LJ = 3.621; s.eps_kB = 97.53;
     const double lo[9] = {2.210371497e+04,-3.818461820e+02,6.082738360e+00,-8.530914410e-03,1.384646189e-05,-9.625793620e-09,2.519705809e-12,7.108460860e+02,-1.076003744e+01};
     const double hi[9] = {5.877124060e+05,-2.239249073e+03,6.066949220e+00,-6.139685500e-04,1.491806679e-07,-1.923105485e-11,1.061954386e-15,1.283210415e+04,-1.586640027e+01};
-    for (int i=0;i<9;i++){ s.low[i]=lo[i]; s.high[i]=hi[i]; } return s;
+    thermo_set_nasa9_2(s, 200.0, 1000.0, 6000.0, lo, hi); return s;
 }
 static SpeciesThermo makeH2O() {
-    SpeciesThermo s{}; s.MW = 0.0180153; s.sigma_LJ = 2.605; s.eps_kB = 572.4; s.Tlo = 200; s.Tmid = 1000; s.Thi = 6000;
+    SpeciesThermo s{}; s.MW = 0.0180153; s.sigma_LJ = 2.605; s.eps_kB = 572.4;
     const double lo[9] = {-3.947960830e+04,5.755731020e+02,9.317826530e-01,7.222712860e-03,-7.342557370e-06,4.955043490e-09,-1.336933246e-12,-3.303974310e+04,1.724205775e+01};
     const double hi[9] = {1.034972096e+06,-2.412698562e+03,4.646110780e+00,2.291998307e-03,-6.836830480e-07,9.426468930e-11,-4.822380530e-15,-1.384286509e+04,-7.978148510e+00};
-    for (int i=0;i<9;i++){ s.low[i]=lo[i]; s.high[i]=hi[i]; } return s;
+    thermo_set_nasa9_2(s, 200.0, 1000.0, 6000.0, lo, hi); return s;
 }
 
 int main()

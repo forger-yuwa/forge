@@ -29,8 +29,8 @@ static std::vector<SpeciesThermo> loadSpeciesDB(const std::string& path, const s
         if (!s) { fprintf(stderr, "species %s not in %s\n", nm.c_str(), path.c_str()); exit(1); }
         SpeciesThermo sp{};
         sp.MW = s["MW"].as<double>(); sp.sigma_LJ = s["LJ_sigma"].as<double>(); sp.eps_kB = s["LJ_eps_kB"].as<double>();
-        sp.Tlo = s["Tlo"].as<double>(); sp.Tmid = s["Tmid"].as<double>(); sp.Thi = s["Thi"].as<double>();
-        for (int i = 0; i < 9; ++i) { sp.low[i] = s["nasa9_low"][i].as<double>(); sp.high[i] = s["nasa9_high"][i].as<double>(); }
+        { double lo[9], hi[9]; for (int i = 0; i < 9; ++i) { lo[i] = s["nasa9_low"][i].as<double>(); hi[i] = s["nasa9_high"][i].as<double>(); }
+          thermo_set_nasa9_2(sp, s["Tlo"].as<double>(), s["Tmid"].as<double>(), s["Thi"].as<double>(), lo, hi); }
         sp.h_datum = 0.0;
         out.push_back(sp);
     }
@@ -41,7 +41,7 @@ static void applyDatum(std::vector<SpeciesThermo>& sp, double Tref)
 {
     for (auto& s : sp) {
         const double h_ref = thermo_h_molar(s, Tref);
-        s.low[7] += -h_ref / THERMO_RU; s.high[7] += -h_ref / THERMO_RU; s.h_datum = h_ref;
+        thermo_add_a7(s, -h_ref / THERMO_RU); s.h_datum = h_ref;
     }
 }
 

@@ -271,7 +271,7 @@ __host__ __device__ inline double cond_liquid_h_abs_poly(const double* a, double
 }
 
 // 気液ペアを作る (host/device 共用; 起動時に 1 回)。gasAbs・liqAbs は datum 前の絶対基準。Tref>0 なら thermo_init_db と
-// 同じ演算で気相の両区間の a7 に Δa7 = −h_abs,gas(Tref)/Ru を足し (device の種 DB 係数とビット一致)、液相には**同じ定数**
+// 同じ演算で気相の全区間の a7 に Δa7 = −h_abs,gas(Tref)/Ru を足し (device の種 DB 係数とビット一致)、液相には**同じ定数**
 // R_u Δa7/MW を h に足す (a7 に Δa7 を足すのと数学的に同じ。液相多項式の打ち消しの丸めを datum から切り離すため、係数は絶対基準のまま)。
 __host__ __device__ inline CondLatentPair cond_latent_pair_make(const SpeciesThermo& gasAbs, const double* liqAbs,
                                                                 double liqTlo, double liqThi, double Tref)
@@ -284,8 +284,7 @@ __host__ __device__ inline CondLatentPair cond_latent_pair_make(const SpeciesThe
     if (Tref > 0.0) {
         const double h_ref = thermo_h_molar(gasAbs, Tref);   // 移動前の絶対 h [J/mol] (thermo_init_db と同じ)
         da7 = -h_ref / THERMO_RU;
-        p.gas.low[7]  += da7;
-        p.gas.high[7] += da7;
+        thermo_add_a7(p.gas, da7);   // 全区間 (thermo_init_db と同じ)
         p.gas.h_datum  = h_ref;
     }
     for (int k = 0; k < 8; ++k) p.liq[k] = liqAbs[k];
@@ -298,16 +297,25 @@ __host__ __device__ inline CondLatentPair cond_latent_pair_make(const SpeciesThe
     return p;
 }
 
-// 気相 h_v(T) [J/kg]: thermo_h_mass (thermo_d.cuh) と同じ式・同じ分岐 (T<Tmid で low、[Tlo,Thi] の外は端の c_p で線形外挿)。
+// 気相 h_v(T) [J/kg]: thermo_h_mass (thermo_d.cuh) と同じ式・同じ分岐 (区間は thermo_interval と同じ規約
+//   (区切りちょうどは上の区間)、[Tlo,Thi] の外は端の c_p で線形外挿)。
 //   thermo_pick_coeffs のポインタ選択を kernel 内のローカル構造体に使うとローカルメモリへ落ちる (dependentVariables_d で
-//   REG 126→178・STACK 360→1608 を実測) ので、係数を値で選ぶ。thermo_h_mass とのビット一致は tests/unit/test_cond_latent_pair.cu。
+//   REG 126→178・STACK 360→1608 を実測) ので、係数を値で選ぶ (区間番号 k の 3 択。THERMO_MAX_INTERVALS=3 に合わせる)。
+//   thermo_h_mass とのビット一致は tests/unit/test_cond_latent_pair.cu。
+#if THERMO_MAX_INTERVALS != 3
+#error "cond_gas_coef assumes THERMO_MAX_INTERVALS == 3 (select by value)"
+#endif
+__host__ __device__ inline double cond_gas_coef(const SpeciesThermo& sp, int k, int i)
+{
+    return (k == 0) ? sp.coef[0][i] : ((k == 1) ? sp.coef[1][i] : sp.coef[2][i]);
+}
 __host__ __device__ inline double cond_gas_h_molar_clamped(const SpeciesThermo& sp, double Tc)
 {
-    const bool lo = (Tc < sp.Tmid);
-    const double a0 = lo ? sp.low[0] : sp.high[0], a1 = lo ? sp.low[1] : sp.high[1];
-    const double a2 = lo ? sp.low[2] : sp.high[2], a3 = lo ? sp.low[3] : sp.high[3];
-    const double a4 = lo ? sp.low[4] : sp.high[4], a5 = lo ? sp.low[5] : sp.high[5];
-    const double a6 = lo ? sp.low[6] : sp.high[6], a7 = lo ? sp.low[7] : sp.high[7];
+    const int k = thermo_interval(sp, Tc);
+    const double a0 = cond_gas_coef(sp, k, 0), a1 = cond_gas_coef(sp, k, 1);
+    const double a2 = cond_gas_coef(sp, k, 2), a3 = cond_gas_coef(sp, k, 3);
+    const double a4 = cond_gas_coef(sp, k, 4), a5 = cond_gas_coef(sp, k, 5);
+    const double a6 = cond_gas_coef(sp, k, 6), a7 = cond_gas_coef(sp, k, 7);
     const double Ti  = 1.0/Tc;
     const double Ti2 = Ti*Ti;
     const double lnT = log(Tc);
@@ -318,11 +326,11 @@ __host__ __device__ inline double cond_gas_h_molar_clamped(const SpeciesThermo& 
 }
 __host__ __device__ inline double cond_gas_cp_molar_clamped(const SpeciesThermo& sp, double Tc)
 {
-    const bool lo = (Tc < sp.Tmid);
-    const double a0 = lo ? sp.low[0] : sp.high[0], a1 = lo ? sp.low[1] : sp.high[1];
-    const double a2 = lo ? sp.low[2] : sp.high[2], a3 = lo ? sp.low[3] : sp.high[3];
-    const double a4 = lo ? sp.low[4] : sp.high[4], a5 = lo ? sp.low[5] : sp.high[5];
-    const double a6 = lo ? sp.low[6] : sp.high[6];
+    const int k = thermo_interval(sp, Tc);
+    const double a0 = cond_gas_coef(sp, k, 0), a1 = cond_gas_coef(sp, k, 1);
+    const double a2 = cond_gas_coef(sp, k, 2), a3 = cond_gas_coef(sp, k, 3);
+    const double a4 = cond_gas_coef(sp, k, 4), a5 = cond_gas_coef(sp, k, 5);
+    const double a6 = cond_gas_coef(sp, k, 6);
     const double Ti  = 1.0/Tc;
     const double Ti2 = Ti*Ti;
     return THERMO_RU * ( a0*Ti2 + a1*Ti + a2

@@ -79,7 +79,7 @@ int main()
         ResolvedSpeciesDB db3 = speciesDB_resolve({"MIXDRY", "H2O", "N2"}, dbfile);
         check(db3.size() == 3 && db3.source[0] == "file" && db3.source[1] == "file" && db3.source[2] == "builtin",
               "speciesDBFile overlay: MIXDRY/H2O from file, N2 builtin");
-        check(std::fabs(db3.MW(0) - 0.0298687837) < 1e-15 && db3.species[1].low[0] == 1.0, "file entries override builtin coefficients");
+        check(std::fabs(db3.MW(0) - 0.0298687837) < 1e-15 && db3.species[1].coef[0][0] == 1.0, "file entries override builtin coefficients");
     }
 
     // ---- (2) X→Y 換算 (va3) ----
@@ -145,10 +145,7 @@ int main()
     // ---- (5) 共通データ (data/species/forge_species_v1.yaml) の別名と大小文字の区別 (plan #4) ----
     {
         auto same = [](const SpeciesThermo& a, const SpeciesThermo& b) {
-            bool ok = a.MW == b.MW && a.Tlo == b.Tlo && a.Tmid == b.Tmid && a.Thi == b.Thi
-                      && a.sigma_LJ == b.sigma_LJ && a.eps_kB == b.eps_kB;
-            for (int k = 0; k < 9; ++k) ok = ok && a.low[k] == b.low[k] && a.high[k] == b.high[k];
-            return ok;
+            return thermo_same_coeffs(a, b) && a.sigma_LJ == b.sigma_LJ && a.eps_kB == b.eps_kB;
         };
         const auto b = speciesDB_builtin();
         check(b.size() == 13, "builtin keys: 7 canonical IDs + 6 aliases (" + std::to_string(b.size()) + ")");
@@ -172,7 +169,7 @@ int main()
         }
         const ResolvedSpeciesDB rco = speciesDB_resolve({"N2", "CO"}, dbfile);
         const ResolvedSpeciesDB rCo = speciesDB_resolve({"N2", "Co"}, dbfile);
-        check(rco.MW(1) == 0.0280101 && rco.species[1].low[0] == 1.0 && rCo.MW(1) == 0.0589332 && rCo.species[1].low[0] == 9.0
+        check(rco.MW(1) == 0.0280101 && rco.species[1].coef[0][0] == 1.0 && rCo.MW(1) == 0.0589332 && rCo.species[1].coef[0][0] == 9.0
               && rco.names[1] == "CO" && rCo.names[1] == "Co", "CO and Co resolve to different species (exact match)");
         // 外部 DB は同じキーだけを上書きする (従来どおり): AR は file、Ar は内蔵
         const ResolvedSpeciesDB rAR = speciesDB_resolve({"AR"}, dbfile);

@@ -16,7 +16,9 @@
   (H)   文字列リストの config は互換性ハッシュ・記録とも不変: --base-forge (本変更前のバイナリ) と新バイナリで
         case/44 run_0509 (外部 DB; 4378b7d78339ba27) と内蔵のみ 3 構成のハッシュと記録ファイルがバイト一致。
   (L)   run_0509 の config を lump 記法 (speciesDBFile なし) にすると --resolve-species が通り、ハッシュは外部 DB 版と違う (構成情報が入るため)。
-  (N)   拒否: 区切りの違う構成種 (外部 DB で Tmid=1500 の試験種) / 凝縮種を lump に入れる / lump 名の衝突 (内蔵・外部 DB・大小文字違い) /
+  (B6)  区切りの違う構成種 (外部 DB で Tmid=1500 の試験種) は区切りの和集合で合成される (#6b → #13-1; 以前は拒否): 区切り 200/1000/1500/6000、
+        合成規約は和集合の文字列、記録の schema は forge_resolved_species_v1_nint (値の検査は test_thermo_intervals_host.cpp の V3)。
+  (N)   拒否: 凝縮種を lump に入れる / lump 名の衝突 (内蔵・外部 DB・大小文字違い) /
         分率 0・負・非有限 / basis なし・未知 / 未知の構成種 / 構成種の重複 (別名 AR と Ar) / lump に未知キー。
         分率の総和が 1 から外れると警告して通る。
 規約: [PASS]/[FAIL]、失敗があれば非ゼロ終了。
@@ -260,8 +262,14 @@ def main():
                             "nasa9_low": n2["intervals"][0]["coeffs"], "nasa9_high": n2["intervals"][1]["coeffs"]},
                "TESTGAS": {"MW": n2["MW"], "LJ_sigma": 3.621, "LJ_eps_kB": 97.53,
                            "nasa9_low": n2["intervals"][0]["coeffs"], "nasa9_high": n2["intervals"][1]["coeffs"]}}
-        expect_fail("different breakpoints (external TMID1500, Tmid 1500 K)",
-                    "[" + flow_lump("MIXDRY", {"N2": 0.8, "TMID1500": 0.2}, "mole") + ", H2O]", "#6b", db=tdb)
+        # B6: 区切りの違う構成種は和集合で合成 (#13-1)
+        db6 = C.make(RUN0510, "[" + flow_lump("MIXDRY", {"N2": 0.8, "TMID1500": 0.2}, "mole") + ", H2O]", db=tdb)
+        rc6, _, rec6, err6 = C.resolve(db6)
+        m6 = rec6["species"][0] if rec6 is not None else {}
+        check(rc6 == 0 and m6.get("Tbounds") == [200.0, 1000.0, 1500.0, 6000.0] and "union" in m6.get("lump", {}).get("synthesis", "")
+              and rec6["schema"] == fs.SPECIES_RECORD_SCHEMA_NINT and rec6["consistent"],
+              "B6 different breakpoints (external TMID1500, Tmid 1500 K) -> synthesized over the union 200/1000/1500/6000"
+              + ("" if rc6 == 0 else f" rc={rc6} err={err6[-600:]}"))
         expect_fail("condensing species H2O inside the lump (condensation: 1)",
                     "[" + flow_lump("MIXDRY", {"N2": 0.9, "H2O": 0.1}, "mole") + ", H2O]", "condensing species")
         expect_fail("condensing species via alias WATER inside the lump",

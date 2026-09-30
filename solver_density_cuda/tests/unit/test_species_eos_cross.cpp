@@ -18,8 +18,7 @@
 // NASA-9 (低 200-1000K / 高 1000-6000K)。O2/N2 は gen_ternary_ic.py と同一。
 static SpeciesThermo makeSp(double MW, const double lo[9], const double hi[9]) {
     SpeciesThermo s{}; s.MW = MW; s.sigma_LJ = 3.6; s.eps_kB = 97.0;
-    s.Tlo = 200.0; s.Tmid = 1000.0; s.Thi = 6000.0;
-    for (int i = 0; i < 9; ++i) { s.low[i] = lo[i]; s.high[i] = hi[i]; }
+    thermo_set_nasa9_2(s, 200.0, 1000.0, 6000.0, lo, hi);
     return s;
 }
 static const double O2_lo[9] = {-3.425563420e4,4.847000970e2,1.119010961,4.293889240e-3,-6.836300520e-7,-2.023372700e-9,1.039040018e-12,-3.391454870e3,1.849699470e1};

@@ -64,7 +64,7 @@ static double legacy_h2o_latent_v0(double T)
 static SpeciesThermo with_datum(SpeciesThermo s, double Tref)
 {
     s.invMW = 1.0/s.MW;
-    if (Tref > 0.0) { const double h_ref = thermo_h_molar(s, Tref); const double da7 = -h_ref/THERMO_RU; s.low[7] += da7; s.high[7] += da7; s.h_datum = h_ref; }
+    if (Tref > 0.0) { const double h_ref = thermo_h_molar(s, Tref); const double da7 = -h_ref/THERMO_RU; thermo_add_a7(s, da7); s.h_datum = h_ref; }
     return s;
 }
 
@@ -112,8 +112,7 @@ int main()
         for (double Tref : {0.0, 298.15}) {
             const SpeciesThermo g = with_datum(db.species[1], Tref);
             const CondLatentPair p = cond_test_latent_pair(Tref);
-            bool same = (g.MW == p.gas.MW && g.Tlo == p.gas.Tlo && g.Tmid == p.gas.Tmid && g.Thi == p.gas.Thi);
-            for (int k = 0; k < 9; ++k) same = same && g.low[k] == p.gas.low[k] && g.high[k] == p.gas.high[k];
+            bool same = thermo_same_coeffs(g, p.gas);
             if (!same) ++nbad;
             std::vector<double> Ts;
             for (double T = 50.0; T <= 6500.0; T += 0.37) Ts.push_back(T);

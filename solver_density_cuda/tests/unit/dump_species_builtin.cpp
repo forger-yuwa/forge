@@ -23,11 +23,23 @@ static void hexArr(const double* a, int n)
 
 static void entry(const SpeciesThermo& s)
 {
-    std::printf("{\"MW\": \"%a\", \"Tlo\": \"%a\", \"Tmid\": \"%a\", \"Thi\": \"%a\", \"LJ_sigma\": \"%a\", \"LJ_eps_kB\": \"%a\", \"low\": ",
-                s.MW, s.Tlo, s.Tmid, s.Thi, s.sigma_LJ, s.eps_kB);
-    hexArr(s.low, 9);
-    std::printf(", \"high\": ");
-    hexArr(s.high, 9);
+    if (s.nInt == 2) {
+        // 2 区間は #13-1 前と同じ JSON (基準 data/species_builtin_baseline.json と比較する)
+        std::printf("{\"MW\": \"%a\", \"Tlo\": \"%a\", \"Tmid\": \"%a\", \"Thi\": \"%a\", \"LJ_sigma\": \"%a\", \"LJ_eps_kB\": \"%a\", \"low\": ",
+                    s.MW, s.Tlo, s.Tbrk[0], s.Thi, s.sigma_LJ, s.eps_kB);
+        hexArr(s.coef[0], 9);
+        std::printf(", \"high\": ");
+        hexArr(s.coef[1], 9);
+        std::printf("}");
+        return;
+    }
+    // 区間可変 (plan #13-1): 全境界と区間ごとの係数
+    double Tb[THERMO_MAX_INTERVALS + 1];
+    for (int k = 0; k <= s.nInt; ++k) Tb[k] = thermo_bound(s, k);
+    std::printf("{\"MW\": \"%a\", \"Tbounds\": ", s.MW);
+    hexArr(Tb, s.nInt + 1);
+    std::printf(", \"LJ_sigma\": \"%a\", \"LJ_eps_kB\": \"%a\"", s.sigma_LJ, s.eps_kB);
+    for (int k = 0; k < s.nInt; ++k) { std::printf(", \"coef%d\": ", k); hexArr(s.coef[k], 9); }
     std::printf("}");
 }
 

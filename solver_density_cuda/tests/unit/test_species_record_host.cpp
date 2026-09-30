@@ -54,9 +54,9 @@ static void writeSpeciesDb(const fs::path& p, const std::string& name, double dl
     std::snprintf(buf, sizeof(buf), "%.17g", b.eps_kB); f << "  LJ_eps_kB: " << buf << "\n";
     f << "  Tlo: 200.0\n  Tmid: 1000.0\n  Thi: 6000.0\n";
     f << "  nasa9_low: [";
-    for (int k = 0; k < 9; ++k) { std::snprintf(buf, sizeof(buf), "%.17g", b.low[k] + (k == 2 ? dlow2 : 0.0)); f << (k ? ", " : "") << buf; }
+    for (int k = 0; k < 9; ++k) { std::snprintf(buf, sizeof(buf), "%.17g", b.coef[0][k] + (k == 2 ? dlow2 : 0.0)); f << (k ? ", " : "") << buf; }
     f << "]\n  nasa9_high: [";
-    for (int k = 0; k < 9; ++k) { std::snprintf(buf, sizeof(buf), "%.17g", b.high[k]); f << (k ? ", " : "") << buf; }
+    for (int k = 0; k < 9; ++k) { std::snprintf(buf, sizeof(buf), "%.17g", b.coef[1][k]); f << (k ? ", " : "") << buf; }
     f << "]\n";
 }
 static void writeN2Db(const fs::path& p, double dlow2) { writeSpeciesDb(p, "N2", dlow2); }
@@ -225,7 +225,7 @@ int main()
             check(!ok, "TP without the gas pair H2O in the species list -> refused");
             ResolvedSpeciesDB dP = speciesDB_resolve({"N2"}, h2oMod.string());
             speciesDB_attachCondensed(dP, "H2O(L)", "", false);
-            check(dP.condensed.enabled && dP.condensed.gasIndex == -1 && dP.condensed.gas.low[2] == speciesDB_builtin().at("H2O").low[2],
+            check(dP.condensed.enabled && dP.condensed.gasIndex == -1 && dP.condensed.gas.coef[0][2] == speciesDB_builtin().at("H2O").coef[0][2],
                   "CPG (requireInList=false): built-in gas pair, not the species list / external DB");
         }
     }

@@ -35,22 +35,38 @@ def _nasa9(a, T):
 
 
 class _TPGas:
-    """種エントリ {MW, Tlo, Tmid, Thi, nasa9_low, nasa9_high} (記録 / speciesDBFile; forge_species.run_thermo) の凍結組成混合。質量基準の h, cp, s° (datum: thermoHrefTemp)。
+    """種エントリ {MW, Tlo, Tmid, Thi, nasa9_low, nasa9_high} または区間可変 {MW, Tbounds, nasa9_intervals} (記録 / speciesDBFile;
+    forge_species.run_thermo) の凍結組成混合。質量基準の h, cp, s° (datum: thermoHrefTemp)。
     範囲外の扱いはソルバ (cuda_forge/thermo_d.cuh thermo_cp_molar / thermo_h_molar / thermo_s0_mass) と同じ:
     種ごとの Tlo/Thi の外では cp を端の値で固定し、h は線形外挿 h(T)=h(Tb)+cp(Tb)(T−Tb)、s° は s°(Tb)+cp(Tb) ln(T/Tb)。
-    係数は T<Tmid で low、それ以外 high (thermo_pick_coeffs)。codex 2026-09-16 result-3 M2。"""
+    係数は区間 k = Tb[k] <= T < Tb[k+1] (区切りちょうどは上の区間; 2 区間では T<Tmid で low、それ以外 high = thermo_pick_coeffs)。
+    codex 2026-09-16 result-3 M2、区間可変は plan thermophysics-solver-owned-species-db #13-1。"""
     def __init__(self, db, names, Tref):
         self.sp = [db[n] for n in names]; self.R = [RU / s["MW"] for s in self.sp]; self.Tref = Tref
         self.href = [self._h1(s, np.array([Tref]))[0] if Tref > 0 else 0.0 for s in self.sp]
 
     @staticmethod
-    def _bounds(s):
-        return float(s.get("Tlo", 200.0)), float(s.get("Tmid", 1000.0)), float(s.get("Thi", 6000.0))
+    def _intervals(s):
+        """(境界 [Tlo, 区切り..., Thi], 係数 ndarray (nInt, 9))。2 区間の書式は区切りの既定値 200/1000/6000 K (C++ 外部 DB 読込と同じ)。"""
+        if s.get("nasa9_intervals") is not None:
+            return [float(x) for x in s["Tbounds"]], np.asarray(s["nasa9_intervals"], float)
+        Tb = [float(s.get("Tlo", 200.0)), float(s.get("Tmid", 1000.0)), float(s.get("Thi", 6000.0))]
+        return Tb, np.asarray([s["nasa9_low"], s["nasa9_high"]], float)
+
+    @classmethod
+    def _bounds(cls, s):
+        Tb = cls._intervals(s)[0]
+        return Tb[0], Tb[-1]
 
     def _coef(self, s, T):
-        lo, hi = np.asarray(s["nasa9_low"], float), np.asarray(s["nasa9_high"], float)
-        Tmid = self._bounds(s)[1]
-        return np.where((T < Tmid)[:, None], lo, hi)
+        Tb, co = self._intervals(s)
+        if len(co) == 2:
+            return np.where((T < Tb[1])[:, None], co[0], co[1])
+        # 区切り Tb[1..n-1] のうち !(T < 区切り) の数 = 区間番号 (NaN は最後の区間; C++ thermo_interval と同じ)
+        k = np.zeros(np.shape(T), dtype=int)
+        for b in Tb[1:-1]:
+            k += ~(T < b)
+        return co[k]
 
     def _raw(self, s, Tc):
         """クランプ済み温度での (cp, h, s°) [質量基準] (thermo_*_clamped)。"""
@@ -61,7 +77,7 @@ class _TPGas:
     def _props(self, s, T):
         """範囲クランプ + 外挿込みの (cp, h, s°) [質量基準] (thermo_cp_molar / thermo_h_molar / thermo_s0_mass と同式)。"""
         T = np.asarray(T, dtype=np.float64)
-        Tlo, _, Thi = self._bounds(s)
+        Tlo, Thi = self._bounds(s)
         Tc = np.clip(T, Tlo, Thi)
         cp, h, s0 = self._raw(s, Tc)
         out = (T < Tlo) | (T > Thi)

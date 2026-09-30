@@ -126,8 +126,12 @@ class H2OLatentPair:
         self.hlLo = self._hl_poly(self.Tlo)
         self.cpl = (self._hl_poly(self.Tlo + 0.5) - self._hl_poly(self.Tlo - 0.5 + 1.0e-9)) / 1.0
         self.hlHi = self._hl_poly(self.Thi)
-        self.key = tuple(_fsp.condensed_compat_lines(cond)) + (repr([gas["MW"], gas["Tlo"], gas["Tmid"], gas["Thi"],
-                                                                     list(gas["nasa9_low"]), list(gas["nasa9_high"])]),)
+        _Tb, _co = _fsp.nasa9_intervals(gas)
+        if len(_co) == 2:   # 2 区間は #13-1 前と同じキー
+            self.key = tuple(_fsp.condensed_compat_lines(cond)) + (repr([gas["MW"], gas["Tlo"], gas["Tmid"], gas["Thi"],
+                                                                         list(gas["nasa9_low"]), list(gas["nasa9_high"])]),)
+        else:
+            self.key = tuple(_fsp.condensed_compat_lines(cond)) + (repr([gas["MW"], list(_Tb), [list(a) for a in _co]]),)
 
     def _hl_poly(self, T):
         a = self.a; T = np.asarray(T, float)
@@ -351,8 +355,8 @@ def load_layout(meta_path, run_dir, label, h5=None, forge=None, resolve_latent=F
                 gi = int(rc["condensed"]["gas_index"])
                 ge = rc["species"][gi] if 0 <= gi < len(rc["species"]) else None
                 ga = db.get(names[gi]) if 0 <= gi < len(names) else None
-                same = ge is not None and ga is not None and all(
-                    np.array_equal(np.asarray(ge[k], float), np.asarray(ga[k], float)) for k in ("MW", "Tlo", "Tmid", "Thi", "nasa9_low", "nasa9_high"))
+                same = ge is not None and ga is not None and float(ge["MW"]) == float(ga["MW"]) \
+                    and fsp.nasa9_intervals(ge) == fsp.nasa9_intervals(ga)   # 区間 (数・境界) と全係数 (#13-1)
                 if not same:
                     raise SystemExit(f"REFUSED: {label}: 熱物性 ({th['how'] if th else '?'}) のペアの気相が --resolve-species の記録と違う; 潜熱の気液ペアを組めない")
                 c = rc["condensed"]
@@ -854,9 +858,15 @@ def _db_differs(src, dst, eos_s=None, eos_d=None):
         a, b = src["db"].get(n), dst["db"].get(n)
         if a is None or b is None:
             return True, f"{n} not in one DB"
-        for k in ("MW", "nasa9_low", "nasa9_high", "Tmid"):
-            if not np.array_equal(np.asarray(a[k], float), np.asarray(b[k], float)):
-                return True, f"{n}.{k} differs"
+        if not np.array_equal(np.asarray(a["MW"], float), np.asarray(b["MW"], float)):
+            return True, f"{n}.MW differs"
+        (Ta, ca), (Tb_, cb) = fsp.nasa9_intervals(a), fsp.nasa9_intervals(b)
+        if len(ca) == 2 and len(cb) == 2:
+            for k in ("nasa9_low", "nasa9_high", "Tmid"):
+                if not np.array_equal(np.asarray(a[k], float), np.asarray(b[k], float)):
+                    return True, f"{n}.{k} differs"
+        elif (Ta, ca) != (Tb_, cb):
+            return True, f"{n}: temperature intervals or coefficients differ ({len(ca)} vs {len(cb)} intervals)"
     return False, "same DB and datum"
 
 
