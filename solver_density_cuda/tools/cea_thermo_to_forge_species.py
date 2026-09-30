@@ -1,0 +1,512 @@
+#!/usr/bin/env python3
+"""CEA `thermo.inp` → forge 共通データ形式 (forge_species_data) の種エントリを作る生成器 (段 0 は監査の dry run のみ)。
+
+plans/active/thermophysics-solver-owned-species-db.md §4.9・§5.1 #13-0。仕様 methods/thermophysics.md。
+
+  python3 solver_density_cuda/tools/cea_thermo_to_forge_species.py --thermo PATH/thermo.inp --audit [--audit-out FILE.md]
+      [--sern-root /home/sano/work/forge-sern-design]
+
+- 段 0 (#13-0) は `--audit` で監査表 (Markdown) を出すだけ。共通データ (`data/species/forge_species_v1.yaml`) は書き換えない。
+  YAML の書き出しは段 2 で使う関数 `dump_entries_yaml` として持つ (CLI からは呼ばない)。
+- 入力の読み方 (thermo.inp の NASA-9 固定桁; McBride, Zehe, Gordon NASA/TP-2002-211556 App. A):
+    記録 1 行目   種名 (1–24 桁; 空白を含まない) + 注記
+    記録 2 行目   区間数 [0:2]・参照日付コード [3:9]・元素 5 組 × (記号 2 + 個数 6) [10:50]・相 [50:52] (0 = 気相)・
+                  MW [g/mol] [52:65]・Hf(298.15) [J/mol] (気相) / H(298.15) (凝縮相) [65:80]
+    区間ごとに 3 行: Tlo [0:11]・Thi [11:22]・…/ a0..a4 (16 桁 × 5)/ a5, a6, (空), b1, b2 (16 桁 × 5; Fortran D 指数)
+    区間数 0 (反応物専用) は 3 行目に温度と H(298.15) の 1 行だけ。
+  forge の係数並び a0..a8 = CEA の a1..a7, b1, b2 (既存 `cea_thermo_to_species_db.py` と同じ)。
+- 数値の変換: 係数は 16 桁欄を D→E にして Python float (最近接丸め)。MW は欄の文字列に `e-3` を付けて float にする
+  (g/mol → kg/mol を 10 進のまま行い、`x * 1e-3` の二重丸めを避ける)。
+- 名前は大小文字を区別する (`CO` と `Co` は別種; plan §4.9)。
+"""
+import argparse
+import hashlib
+import math
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SOLVER = os.path.normpath(os.path.join(HERE, ".."))
+REPO = os.path.normpath(os.path.join(SOLVER, ".."))
+DEFAULT_THERMO = os.path.join(REPO, ".venv-cea", "nasa_cea", "thermo.inp")
+DEFAULT_SPECIES = os.path.join(SOLVER, "data", "species", "forge_species_v1.yaml")
+DEFAULT_TRANSPORT = os.path.join(SOLVER, "data", "species", "forge_transport_v1.yaml")
+RU = 8.314462618            # J/(mol K); cuda_forge/thermo_d.cuh THERMO_RU と同じ
+STD_BOUNDS = (200.0, 1000.0, 6000.0, 20000.0)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# パーサ
+# ---------------------------------------------------------------------------------------------------------------
+def _f16(s):
+    """Fortran D 指数の 16 桁欄 → float。空欄は 0.0。"""
+    t = s.strip()
+    if not t:
+        return 0.0
+    return float(t.replace("D", "E").replace("d", "e"))
+
+
+def _atoms(hdr):
+    """元素 5 組 (記号 2 桁 + 個数 6 桁)。記号は thermo.inp の表記のまま (例 'AR', 'CO' = コバルト)。個数 0 は除く。"""
+    out = {}
+    for k in range(5):
+        fld = hdr[10 + 8 * k:18 + 8 * k]
+        sym, cnt = fld[:2].strip(), fld[2:].strip()
+        if not sym:
+            continue
+        try:
+            n = float(cnt) if cnt else 0.0
+        except ValueError:
+            continue
+        if n != 0.0:
+            out[sym] = n
+    return out
+
+
+def parse_thermo_inp(path):
+    """thermo.inp を記録の列 (ファイル順) に読む。各記録は dict:
+    name, section ('products'|'reactants'), phase (int; 0 = 気相), MW_str (g/mol の欄文字列), MW_gmol, Hf, atoms,
+    date, comment, intervals [(Tlo, Thi, [a0..a8]), ...]。"""
+    lines = open(path, encoding="latin-1").read().splitlines()
+    i = 0
+    while i < len(lines) and not lines[i].lower().startswith("thermo"):
+        i += 1
+    i += 2                                   # "thermo" 行と全体の温度域行
+    recs = []
+    section = "products"
+    while i < len(lines):
+        L = lines[i]
+        if L.upper().startswith("END PRODUCTS"):
+            section = "reactants"
+            i += 1
+            continue
+        if L.upper().startswith("END REACTANTS"):
+            break
+        if not L.strip() or L.startswith("!"):
+            i += 1
+            continue
+        name = L[:24].split()[0]
+        comment = L[18:].strip()
+        hdr = lines[i + 1]
+        n_int = int(hdr[0:2])
+        mw_str = hdr[52:65].strip()
+        rec = {"name": name, "section": section, "phase": int(hdr[50:52]), "MW_str": mw_str,
+               "MW_gmol": float(mw_str), "Hf": float(hdr[65:80]), "atoms": _atoms(hdr), "date": hdr[3:9].strip(),
+               "comment": comment, "intervals": []}
+        i += 2
+        if n_int == 0:
+            i += 1
+        for _ in range(n_int):
+            rng, c1, c2 = lines[i], lines[i + 1], lines[i + 2]
+            Tlo, Thi = float(rng[0:11]), float(rng[11:22])
+            a = [_f16(c1[k * 16:(k + 1) * 16]) for k in range(5)]
+            a += [_f16(c2[0:16]), _f16(c2[16:32]), _f16(c2[48:64]), _f16(c2[64:80])]
+            rec["intervals"].append((Tlo, Thi, a))
+            i += 3
+        recs.append(rec)
+    return recs
+
+
+def sha256_file(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# forge 共通データ形式のエントリ (段 2 で使う)
+# ---------------------------------------------------------------------------------------------------------------
+def mw_kg(rec):
+    """g/mol の欄文字列を 10 進のまま kg/mol に (x * 1e-3 の二重丸めを避ける)。"""
+    return float(rec["MW_str"] + "e-3")
+
+
+def to_forge_entry(rec):
+    """1 記録 → forge_species_data のエントリ dict (LJ・aliases・pair_of などの手保守欄は付けない)。区間は CEA のまま。"""
+    return {
+        "id": rec["name"],
+        "aliases": [],
+        "phase": "gas" if rec["phase"] == 0 else "condensed",
+        "MW": mw_kg(rec),
+        "intervals": [{"Tlo": lo, "Thi": hi, "coeffs": list(a)} for lo, hi, a in rec["intervals"]],
+        "LJ": None,
+        "atoms": dict(rec["atoms"]) or None,
+        "source": {"thermo": f"CEA thermo.inp ({rec['date']}; {rec['comment']})"},
+    }
+
+
+def dump_entries_yaml(entries, out):
+    """エントリ列を forge_species_data の `species:` 以下の形で書く (数値は repr = double の往復が一致する最短表記)。"""
+    w = out.write
+    for e in entries:
+        w(f'  - id: "{e["id"]}"\n')
+        w("    aliases: [" + ", ".join(f'"{a}"' for a in e["aliases"]) + "]\n")
+        w(f"    phase: {e['phase']}\n")
+        w(f"    MW: {e['MW']!r}\n")
+        w("    intervals:\n")
+        for iv in e["intervals"]:
+            w(f"      - Tlo: {iv['Tlo']!r}\n        Thi: {iv['Thi']!r}\n")
+            w("        coeffs: [" + ", ".join(repr(v) for v in iv["coeffs"]) + "]\n")
+        w("    LJ: null\n")
+        if e["atoms"]:
+            w("    atoms: {" + ", ".join(f"{k}: {v!r}" for k, v in e["atoms"].items()) + "}\n")
+        else:
+            w("    atoms: null\n")
+        w(f'    source: {{thermo: "{e["source"]["thermo"]}"}}\n')
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# NASA-9 評価 (double; ソルバ不使用。区間の選び方は T < 区間上端 の最初の区間、範囲外は端の区間で外挿)
+# ---------------------------------------------------------------------------------------------------------------
+def _pick(intervals, T):
+    for lo, hi, a in intervals:
+        if T < hi:
+            return a
+    return intervals[-1][2]
+
+
+def cp_R(intervals, T):
+    a = _pick(intervals, T)
+    return a[0] / T**2 + a[1] / T + a[2] + a[3] * T + a[4] * T**2 + a[5] * T**3 + a[6] * T**4
+
+
+def h_RT(intervals, T):
+    a = _pick(intervals, T)
+    return (-a[0] / T**2 + a[1] * math.log(T) / T + a[2] + a[3] * T / 2 + a[4] * T**2 / 3 + a[5] * T**3 / 4
+            + a[6] * T**4 / 5 + a[7] / T)
+
+
+def s_R(intervals, T):
+    a = _pick(intervals, T)
+    return (-a[0] / (2 * T**2) - a[1] / T + a[2] * math.log(T) + a[3] * T + a[4] * T**2 / 2 + a[5] * T**3 / 3
+            + a[6] * T**4 / 4 + a[8])
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# 監査
+# ---------------------------------------------------------------------------------------------------------------
+def _load_yaml(path):
+    import yaml
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def _cur_intervals(e):
+    return [(float(iv["Tlo"]), float(iv["Thi"]), [float(v) for v in iv["coeffs"]]) for iv in e["intervals"]]
+
+
+def _rel(a, b):
+    if a == b:
+        return 0.0
+    return abs(a - b) / max(abs(a), abs(b))
+
+
+def _fmt_T(x):
+    return f"{x:.10g}"
+
+
+def compare_coeffs(cur_iv, cea_iv):
+    """現行区間 (n 区間) と CEA の先頭 n 区間を区間ごとに比較。返り値: [(区間番号, 境界一致, ビット一致数/9, 最大相対差, 最大の係数)]。"""
+    out = []
+    for k, (lo, hi, a) in enumerate(cur_iv):
+        if k >= len(cea_iv):
+            out.append((k, False, 0, float("nan"), "-"))
+            continue
+        clo, chi, ca = cea_iv[k]
+        nbit = sum(1 for x, y in zip(a, ca) if x == y)
+        rels = [_rel(x, y) for x, y in zip(a, ca)]
+        j = max(range(9), key=lambda m: rels[m])
+        out.append((k, (lo, hi) == (clo, chi), nbit, rels[j], f"a{j}: {a[j]!r} vs {ca[j]!r}" if rels[j] > 0 else ""))
+    return out
+
+
+def delta_props(cur_iv, cur_mw, cea_iv, cea_mw, T_lo=200.0, T_hi=6000.0, dT=1.0):
+    """200 ≤ T < 6000 K を dT 刻み (+ 区切り直下/直上) で走査し、max |Δcp|/cp、max |Δh| [J/kg]、max |Δs°| [J/(kg K)] を返す。
+    h, s° は各側の MW で質量あたりに換算 (MW 差の効果を含む)。区切り 1000 K は両側 (999.999, 1000) を含む。
+    T = 6000 K ちょうどは含めない: 現行 (2 区間) は上端を閉区間で高温区間、CEA 3 区間は 6000 K が第 3 区間の下端になり、
+    どちらを取るかは段 1 の区間選択の規約で決まる (その段差は `boundary_jumps` で別に出す)。"""
+    Ts = [T_lo + k * dT for k in range(int((T_hi - T_lo) / dT))]      # T_hi 自体は含めない (区間端の規約に依存するため別表)
+    Ts += [999.999, 1000.0, 1000.001, 5999.999]
+    best = {"cp": (0.0, None), "h": (0.0, None), "s": (0.0, None), "h_sens": (0.0, None)}
+    Rc, Rn = RU / cur_mw, RU / cea_mw
+    hc298, hn298 = h_RT(cur_iv, 298.15) * 298.15 * Rc, h_RT(cea_iv, 298.15) * 298.15 * Rn
+    for T in Ts:
+        cpc, cpn = cp_R(cur_iv, T) * Rc, cp_R(cea_iv, T) * Rn
+        hc, hn = h_RT(cur_iv, T) * T * Rc, h_RT(cea_iv, T) * T * Rn
+        sc, sn = s_R(cur_iv, T) * Rc, s_R(cea_iv, T) * Rn
+        vals = {"cp": abs(cpn - cpc) / abs(cpc), "h": abs(hn - hc), "s": abs(sn - sc),
+                "h_sens": abs((hn - hn298) - (hc - hc298))}
+        for k, v in vals.items():
+            if v > best[k][0]:
+                best[k] = (v, T)
+    return best
+
+
+def boundary_jumps(intervals):
+    """区間境界ごとの (T, cp/R 段差, h/RT 段差, s/R 段差) = 上側区間 − 下側区間 (同じ T で評価)。"""
+    out = []
+    for k in range(len(intervals) - 1):
+        T = intervals[k][1]
+        lo, hi = [intervals[k]], [intervals[k + 1]]
+        out.append((T, cp_R(hi, T) - cp_R(lo, T), h_RT(hi, T) - h_RT(lo, T), s_R(hi, T) - s_R(lo, T)))
+    return out
+
+
+def audit(thermo_path, species_path, transport_path, sern_root=None):
+    recs = parse_thermo_inp(thermo_path)
+    by_name = {}
+    dup = []
+    for r in recs:
+        if r["name"] in by_name:
+            dup.append(r["name"])
+        by_name.setdefault(r["name"], r)
+    prod = [r for r in recs if r["section"] == "products"]
+    tr = _load_yaml(transport_path)
+    sd = _load_yaml(species_path)
+    tr_ids = [str(s["id"]) for s in tr["species"]]
+    cur = {str(e["id"]): e for e in sd["species"]}
+
+    W = []
+    p = W.append
+    p(f"- thermo.inp: `{thermo_path}` (SHA-256 `{sha256_file(thermo_path)}`), 記録 {len(recs)} "
+      f"(products {len(prod)}, reactants {len(recs) - len(prod)})、完全同名の重複記録 {len(dup)} {dup if dup else ''}")
+    p(f"- 輸送データ: `{os.path.relpath(transport_path, REPO)}` {len(tr_ids)} 種、共通データ: `{os.path.relpath(species_path, REPO)}` "
+      f"{len(cur)} 種")
+    p("- 区間の選び方 (§6 の Δ): `T < Thi` の最初の区間 (ソルバの `Tc < Tmid ? low : high` と同じく境界ちょうどは上側)。"
+      f"R_u = {RU} J/(mol K) (`THERMO_RU`)。ソルバは使わない (Python double)")
+    p("")
+
+    # ---- 1. trans 66 種と thermo.inp の同名
+    have = [s for s in tr_ids if s in by_name]
+    miss = [s for s in tr_ids if s not in by_name]
+    p("## 1. 輸送 66 種と thermo.inp の同名 (大小文字区別)")
+    p("")
+    p(f"- 輸送データの種 {len(tr_ids)}、うち thermo.inp に同名あり **{len(have)}**、無し **{len(miss)}**: "
+      + ", ".join(f"`{s}`" for s in miss))
+    for s in miss:
+        ci = [r["name"] for r in recs if r["name"].upper() == s.upper()]
+        p(f"  - `{s}`: 大小文字を無視した一致 {ci if ci else 'なし'}")
+    sec = [s for s in have if by_name[s]["section"] != "products"]
+    cond = [s for s in have if by_name[s]["phase"] != 0]
+    p(f"- 同名の記録が reactants 節にしか無い種: {sec if sec else 'なし'}。凝縮相 (phase ≠ 0) の同名: {cond if cond else 'なし'}")
+    p("")
+
+    # ---- 2. 区間数・区切り・MW
+    p(f"## 2. 同名 {len(have)} 種の区間数・区切り温度・MW")
+    p("")
+    from collections import Counter
+    cnt = Counter(len(by_name[s]["intervals"]) for s in have)
+    p("- 区間数の内訳: " + ", ".join(f"{k} 区間 {v} 種" for k, v in sorted(cnt.items())))
+    nonstd = []
+    for s in have:
+        b = [by_name[s]["intervals"][0][0]] + [iv[1] for iv in by_name[s]["intervals"]]
+        if any(abs(x - STD_BOUNDS[k]) > 1e-9 for k, x in enumerate(b) if k < len(STD_BOUNDS)) or len(b) > 4:
+            nonstd.append((s, b))
+        # 区間の連続性
+        ivs = by_name[s]["intervals"]
+        for k in range(len(ivs) - 1):
+            if ivs[k][1] != ivs[k + 1][0]:
+                nonstd.append((s, f"不連続 {ivs[k][1]} → {ivs[k + 1][0]}"))
+    p("- 境界が 200/1000/6000/20000 の前方一致でない種: "
+      + ("; ".join(f"`{s}` {b}" for s, b in nonstd) if nonstd else "なし"))
+    p("")
+    p("- 右 2 列は区間境界での段差 (上側区間 − 下側区間を同じ T で評価): `Δcp/R` と `Δh/RT`、境界ごとに `/` で区切る。")
+    p("")
+    p("| # | 種 | 区間数 | 区切り温度 [K] | MW [g/mol] (欄) | 相 | 日付コード | 境界の Δcp/R | 境界の Δh/RT |")
+    p("|---|---|---|---|---|---|---|---|---|")
+    for k, s in enumerate(have, 1):
+        r = by_name[s]
+        b = [r["intervals"][0][0]] + [iv[1] for iv in r["intervals"]]
+        j = boundary_jumps(r["intervals"])
+        p(f"| {k} | `{s}` | {len(r['intervals'])} | {'–'.join(_fmt_T(x) for x in b)} | {r['MW_str']} | {r['phase']} | {r['date']} "
+          f"| {' / '.join(f'{x[1]:.1e}' for x in j)} | {' / '.join(f'{x[2]:.1e}' for x in j)} |")
+    p("")
+
+    # ---- 3. 既存 7 種 (AIR 除く) + H2O(L)
+    solver7 = [i for i, e in cur.items() if "solver" in (e.get("legacy_builtin") or [])]
+    targets3 = [i for i in solver7 if i != "AIR"] + ["H2O(L)"]
+    p("## 3. 内蔵 (`legacy_builtin: solver`) 種と `H2O(L)`: 現行共通データ vs thermo.inp")
+    p("")
+    p(f"- `legacy_builtin: solver` の種: {solver7}。`AIR` は CEA に同名が無く (CEA は `Air`, reactants 節) 対象外。")
+    p("- 係数は区間ごとに 9 個のビット一致数と最大相対差。現行の区間数 vs CEA の区間数も示す (現行は先頭 n 区間と比べる)。")
+    p("")
+    p("| 種 | 現行区間数 / CEA | MW 現行 [kg/mol] | MW CEA (欄 e-3) | MW 相対差 | 区間 | 境界一致 | ビット一致 | 最大相対差 | 最大の係数 |")
+    p("|---|---|---|---|---|---|---|---|---|---|")
+    for s in targets3:
+        e, r = cur[s], by_name[s]
+        civ = _cur_intervals(e)
+        mwc, mwn = float(e["MW"]), mw_kg(r)
+        for (k, bnd, nbit, mr, worst) in compare_coeffs(civ, r["intervals"]):
+            head = (f"`{s}` | {len(civ)} / {len(r['intervals'])} | {mwc!r} | {mwn!r} | {_rel(mwc, mwn):.2e}"
+                    if k == 0 else " | | | | ")
+            p(f"| {head} | {k} ({_fmt_T(civ[k][0])}–{_fmt_T(civ[k][1])}) | {'yes' if bnd else 'NO'} | {nbit}/9 | {mr:.3e} | {worst} |")
+    p("")
+    # Ar 高温区間の詳細
+    ar = by_name["Ar"]
+    p("### 3a. `Ar` 高温区間 (1000–6000 K) の係数")
+    p("")
+    p("| 係数 | 現行 | thermo.inp |")
+    p("|---|---|---|")
+    for j in range(9):
+        p(f"| a{j} | {_cur_intervals(cur['Ar'])[1][2][j]!r} | {ar['intervals'][1][2][j]!r} |")
+    p("")
+    if len(ar["intervals"]) > 2:
+        lo, hi, a = ar["intervals"][2]
+        p(f"- thermo.inp の第 3 区間 {lo:g}–{hi:g} K (現行データに無い): a = {a}")
+        p("")
+
+    # ---- 4. 6 種と SERN 外部 DB
+    six = ["CO", "H2", "OH", "H", "NO", "O"]
+    p("## 4. `CO/H2/OH/H/NO/O`: 現行共通データ・SERN 外部 DB vs thermo.inp")
+    p("")
+    p("| 種 | 現行区間数 / CEA | MW 現行 | MW CEA | MW 相対差 | 区間 | 境界一致 | ビット一致 | 最大相対差 | 最大の係数 |")
+    p("|---|---|---|---|---|---|---|---|---|---|")
+    for s in six:
+        e, r = cur[s], by_name[s]
+        civ = _cur_intervals(e)
+        mwc, mwn = float(e["MW"]), mw_kg(r)
+        for (k, bnd, nbit, mr, worst) in compare_coeffs(civ, r["intervals"]):
+            head = (f"`{s}` | {len(civ)} / {len(r['intervals'])} | {mwc!r} | {mwn!r} | {_rel(mwc, mwn):.2e}"
+                    if k == 0 else " | | | | ")
+            p(f"| {head} | {k} ({_fmt_T(civ[k][0])}–{_fmt_T(civ[k][1])}) | {'yes' if bnd else 'NO'} | {nbit}/9 | {mr:.3e} | {worst} |")
+    p("")
+    if sern_root:
+        p("### 4a. SERN の外部 DB (`species_db_external.yaml`) の中身")
+        p("")
+        p(sern_external_section(sern_root, six, by_name, cur))
+        p("")
+
+    # ---- 5. 大小文字だけ違う名前
+    p("## 5. 大小文字だけ違う名前の組 (thermo.inp 全体)")
+    p("")
+    groups = {}
+    for r in recs:
+        groups.setdefault(r["name"].upper(), [])
+        if r["name"] not in groups[r["name"].upper()]:
+            groups[r["name"].upper()].append(r["name"])
+    coll = {k: v for k, v in groups.items() if len(v) > 1}
+    p(f"- 組の数: {len(coll)}")
+    p("")
+    p("| 大文字化 | thermo.inp の名前 (節・相) | 輸送 66 種に含まれる名前 |")
+    p("|---|---|---|")
+    for k, v in sorted(coll.items()):
+        desc = ", ".join(f"`{n}` ({by_name[n]['section'][0]}, {by_name[n]['phase']})" for n in v)
+        p(f"| {k} | {desc} | {', '.join(f'`{n}`' for n in v if n in tr_ids) or '—'} |")
+    inset = [v for v in coll.values() if sum(1 for n in v if n in have) > 1]
+    p("")
+    p(f"- 同名 {len(have)} 種の**範囲内**で大小文字だけ違う組: {inset if inset else 'なし'}")
+    touch = [v for v in coll.values() if any(n in have for n in v)]
+    p(f"- {len(have)} 種のどれかを含む組 (相手は範囲外): {touch if touch else 'なし'}")
+    # 現行の別名と thermo.inp 名の衝突
+    ali = []
+    for i, e in cur.items():
+        for a in (e.get("aliases") or []):
+            hit = [r["name"] for r in recs if r["name"].upper() == str(a).upper()]
+            if hit:
+                ali.append(f"`{i}` の別名 `{a}` ↔ thermo.inp {hit}")
+    p("- 現行共通データの別名と thermo.inp の名前の大小文字無視一致: " + ("; ".join(ali) if ali else "なし"))
+    p("")
+
+    # ---- 6. Δ 概算
+    p("## 6. 段 3 の予測の根拠: 既存 (`legacy_builtin: solver`, `AIR` 除く) を CEA 化したときの差 (200–6000 K)")
+    p("")
+    p("- 走査は 200 ≤ T < 6000 K (1 K 刻み + 999.999/1000/1000.001/5999.999 K)。6000 K ちょうどは区間選択の規約次第なので下の別表。")
+    p("- 現行 (区間・MW) と CEA (全区間・MW 欄) を質量あたりで比較。`Δh` は絶対 (a7 込み)、`Δ(h−h298)` は 298.15 K 基準の顕熱差、"
+      "`Δs°` は J/(kg K)。括弧内は最大を与えた T [K]。")
+    p("")
+    p("| 種 | max \\|Δcp\\|/cp | max \\|Δh\\| [J/kg] | max \\|Δ(h−h298)\\| [J/kg] | max \\|Δs°\\| [J/(kg K)] |")
+    p("|---|---|---|---|---|")
+    for s in [i for i in solver7 if i != "AIR"]:
+        b = delta_props(_cur_intervals(cur[s]), float(cur[s]["MW"]), by_name[s]["intervals"], mw_kg(by_name[s]))
+        p(f"| `{s}` | {b['cp'][0]:.3e} ({_fmt_T(b['cp'][1]) if b['cp'][1] else '-'}) "
+          f"| {b['h'][0]:.3e} ({_fmt_T(b['h'][1]) if b['h'][1] else '-'}) "
+          f"| {b['h_sens'][0]:.3e} ({_fmt_T(b['h_sens'][1]) if b['h_sens'][1] else '-'}) "
+          f"| {b['s'][0]:.3e} ({_fmt_T(b['s'][1]) if b['s'][1] else '-'}) |")
+    p("")
+    p("- 6000 K ちょうど: 現行は高温区間 (閉区間)。CEA 3 区間の種で第 3 区間を選んだときの段差 (第 3 − 第 2 区間):")
+    p("")
+    p("| 種 | Δcp/R @6000 | Δh/RT @6000 | Δs°/R @6000 | Δh [J/kg] @6000 |")
+    p("|---|---|---|---|---|")
+    for s in [i for i in solver7 if i != "AIR"]:
+        ivs = by_name[s]["intervals"]
+        if len(ivs) < 3:
+            p(f"| `{s}` | (CEA も 2 区間: 段差なし) | | | |")
+            continue
+        T, dcp, dh, ds = boundary_jumps(ivs)[1]
+        p(f"| `{s}` | {dcp:.2e} | {dh:.2e} | {ds:.2e} | {dh * T * RU / mw_kg(by_name[s]):.3e} |")
+    # 参考: MW だけ変えた場合 (係数は現行) — H2O / He の MW 効果の切り分け
+    p("")
+    p("- 参考 (MW だけ CEA、係数は現行): " + "; ".join(
+        f"`{s}` Δcp/cp {delta_props(_cur_intervals(cur[s]), float(cur[s]['MW']), _cur_intervals(cur[s]), mw_kg(by_name[s]))['cp'][0]:.3e}"
+        for s in ["H2O", "He"]))
+    # 参考: H2O(L) (273.15–373.15 K) の MW 効果
+    e = cur["H2O(L)"]
+    r = by_name["H2O(L)"]
+    mwc, mwn = float(e["MW"]), mw_kg(r)
+    p(f"- 参考 `H2O(L)`: MW {mwc!r} → {mwn!r} (相対 {_rel(mwc, mwn):.2e}); 係数は上の 3 の表のとおり")
+    return "\n".join(W) + "\n"
+
+
+def sern_external_section(sern_root, six, by_name, cur):
+    """SERN 設計ワークツリーの生成元 (design/forge_design/gas) を import し、ソルバ内蔵で解決できない 6 種について
+    runner が書く `species_db_external.yaml` のテキストを生成元の関数そのもの (`species_db_raw_yaml`) で作って照合する。"""
+    import importlib
+    import yaml
+    out = []
+    design = os.path.join(sern_root, "design")
+    sys.path.insert(0, design)
+    try:
+        comp = importlib.import_module("forge_design.gas.composition")
+        sp = importlib.import_module("forge_design.gas.semiperfect")
+    finally:
+        sys.path.pop(0)
+    builtin = comp.solver_builtin_names()
+    db = comp.ResolvedSpeciesDB.builtin()
+    ext = {s: db.entries[s] for s in six if s in db.entries and s.upper() not in builtin}
+    text = comp.species_db_raw_yaml(ext)
+    raw = yaml.safe_load(text)
+    out.append(f"- 生成元: `{sern_root}` (`design/forge_design/gas/composition.py` `species_db_raw_yaml`、"
+               f"データは `{os.path.relpath(str(sp.SPECIES_DATA_FILE), sern_root)}` の `legacy_builtin: design`; "
+               f"SHA-256 `{sha256_file(str(sp.SPECIES_DATA_FILE))}`)。実 run の `species_db_external.yaml` はワークツリー内に無かった"
+               "ので、runner と同じ関数でテキストを作って読み戻した。")
+    out.append(f"- ソルバ内蔵で解決できないとして外部 DB に出る種: {list(ext)}")
+    out.append("")
+    out.append("| 種 | 外部 DB vs 現行共通データ (MW・18 係数・区切り) | 外部 DB vs thermo.inp 先頭 2 区間 (ビット一致 / 最大相対差) | LJ 外部 DB (σ, ε) |")
+    out.append("|---|---|---|---|")
+    for s in ext:
+        e = raw[s]
+        ext_iv = [(float(e["Tlo"]), float(e["Tmid"]), [float(v) for v in e["nasa9_low"]]),
+                  (float(e["Tmid"]), float(e["Thi"]), [float(v) for v in e["nasa9_high"]])]
+        civ = _cur_intervals(cur[s])
+        same_cur = (float(e["MW"]) == float(cur[s]["MW"]) and ext_iv == civ)
+        cmp = compare_coeffs(ext_iv, by_name[s]["intervals"])
+        nb = sum(c[2] for c in cmp)
+        mr = max(c[3] for c in cmp)
+        out.append(f"| `{s}` | {'ビット一致' if same_cur else '不一致'} | {nb}/18, {mr:.2e}; MW 相対 {_rel(float(e['MW']), mw_kg(by_name[s])):.2e} "
+                   f"| ({e['LJ_sigma']}, {e['LJ_eps_kB']}) |")
+    return "\n".join(out)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--thermo", default=DEFAULT_THERMO, help="CEA thermo.inp (既定: <repo>/.venv-cea/nasa_cea/thermo.inp)")
+    ap.add_argument("--species-data", default=DEFAULT_SPECIES, help="現行の共通データ (比較対象; 書き換えない)")
+    ap.add_argument("--transport-data", default=DEFAULT_TRANSPORT, help="輸送データ (種の一覧)")
+    ap.add_argument("--audit", action="store_true", help="監査表 (Markdown) を出す (段 0)")
+    ap.add_argument("--audit-out", help="監査表の出力先 (既定: 標準出力)")
+    ap.add_argument("--sern-root", help="SERN 設計ワークツリー (外部 DB の生成元を import して照合; 読むだけ)")
+    a = ap.parse_args()
+    if not os.path.exists(a.thermo):
+        raise SystemExit(f"thermo.inp が無い: {a.thermo} (--thermo で指定)")
+    if not a.audit:
+        raise SystemExit("段 0 (#13-0) は --audit のみ (共通データの書き出しは段 2)")
+    text = audit(a.thermo, a.species_data, a.transport_data, a.sern_root)
+    if a.audit_out:
+        with open(a.audit_out, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"wrote {a.audit_out}")
+    else:
+        sys.stdout.write(text)
+
+
+if __name__ == "__main__":
+    main()
