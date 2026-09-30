@@ -10,7 +10,7 @@ forge は毎 step `res_<N>.h5` (流体) と `res_plate_5_<N>.h5` (壁、`iface_q
 
 - 処理するのは「次の step のファイルが出来た」か「forge が終わった」step だけ (書きかけを読まない)。
 - `--keep-every` の倍数の step と最初・最後の step は全場を残す (後で場を確かめるため)。
-- 出力: `<run>/ab_series.npz` (step、流体 P/T/Uy [step, 124]、界面 q/Tw [step, 161]、節点 ID・座標)。
+- 出力: `<run>/ab_series.npz` (step、流体の `--fields` [step, 124]、界面 q/Tw [step, 161]、節点 ID・座標)。
   1000 step ごとに書き直す (途中で落ちても残る)。同じ step の欠落・重複は REFUSED。
 """
 from __future__ import annotations
@@ -43,6 +43,7 @@ def forge_running(run):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run"); ap.add_argument("--until", type=int, required=True); ap.add_argument("--keep-every", type=int, default=2000)
+    ap.add_argument("--fields", default="P,T,Uy", help="流体節点で採る VALUE 名 (カンマ区切り)。B2′ は P,T,Uy,Ux,ro,dt_local,limiter_ro,limiter_Ux,limiter_Uy,limiter_P,limiter_T")
     a = ap.parse_args()
     run = Path(a.run)
     while not (run / "res_0.h5").exists():
@@ -52,14 +53,16 @@ def main():
     order = [k for k in ("le", "te", "up", "down", "le_in", "te_in", "up_in", "down_in")]
     ids = np.concatenate([sets[k] for k in order])
     groups = np.concatenate([[k] * len(sets[k]) for k in order])
-    steps, P, T, U, Q, TW = [], [], [], [], [], []
+    fields = a.fields.split(",")
+    steps, Q, TW = [], [], []
+    FV = {k: [] for k in fields}
     wx = None
     n = 0
     out = run / "ab_series.npz"
 
     def save():
-        np.savez(out, step=np.array(steps), P=np.array(P), T=np.array(T), Uy=np.array(U), q=np.array(Q), Tw=np.array(TW),
-                 node_id=ids, group=groups, wall_x=wx)
+        np.savez(out, step=np.array(steps), q=np.array(Q), Tw=np.array(TW), node_id=ids, group=groups, wall_x=wx,
+                 **{k: np.array(v) for k, v in FV.items()})
 
     while n <= a.until:
         f, w = run / f"res_{n}.h5", run / f"res_plate_5_{n}.h5"
@@ -71,7 +74,10 @@ def main():
             time.sleep(0.5)
             continue
         with h5py.File(f, "r") as r:
-            v = {q: np.asarray(r[f"VALUE/{q}"][:], float)[ids] for q in ("P", "T", "Uy")}
+            miss = [k for k in fields if f"VALUE/{k}" not in r]
+            if miss:
+                refuse(f"step {n}: 出力に {miss} が無い (extraFields を確認)")
+            v = {q: np.asarray(r[f"VALUE/{q}"][:], float)[ids] for q in fields}
         if n > 0:
             with h5py.File(w, "r") as h:
                 c = np.asarray(h["MESH/COORD"][:], float).reshape(-1, 3)
@@ -85,7 +91,9 @@ def main():
         if not all(np.isfinite(x).all() for x in v.values()) or (q is not None and not (np.isfinite(q).all() and np.isfinite(tw).all())):
             refuse(f"step {n}: 非有限値")
         if n > 0:
-            steps.append(n); P.append(v["P"]); T.append(v["T"]); U.append(v["Uy"]); Q.append(q); TW.append(tw)
+            steps.append(n); Q.append(q); TW.append(tw)
+            for k in fields:
+                FV[k].append(v[k])
         keep = n == 0 or n == a.until or n % a.keep_every == 0
         if not keep:
             for p in (f, w, f.with_suffix(".xmf"), w.with_suffix(".xmf"), run / f"res_solid_5_{n}.h5", run / f"res_solid_5_{n}.xmf"):
