@@ -381,6 +381,7 @@ SERN セッション (`feature/sern-design`) へ渡す内容。変更は `featur
 
 ## 9. 変更ログ
 
+- `2026-10-01` — #13-3 実装 (案 B、未完了): 12 種 (N2/O2/CO2/Ar/He/H2O/CO/H2/OH/H/NO/O) を CEA thermo.inp そのものに (生成器 `--write` で手保守エントリも同期、`--check` (d) 315 係数 PASS)、H2O(L) MW 0.01801528、設計側は先頭 2 区間 + T>6000 K で raise、`solver_builtin_names()` 全気相種。合格条件 (1)(2)(5)(6) PASS、(4) は IC ρ ≤1.2e-7・Y_H2O ≤1.2e-6 (V0 メッシュ使用で Ar 由来の IC 変化 0)。**判断待ち 2 件**: (3) 設計 vs ソルバ cp 1.37e-15 > 4e-16 (原因は Python と C++ の評価順序; ソルバ順の Python は 0; 段 3 前から存在)、run_0510 型 (凝縮 ON・外部 DB の旧 MW H2O) が気液ペア検査で起動拒否。ハッシュ旧→新: V5(i) run_0522 config bdbe1ef0ff9afbc6→276f21e875b0f8e7、SERN regress_full m6_on ff57c6ef1fdf15c2→28834c8ae07252e8 (外部 DB なし)、run_0509 (全外部 DB) 4378b7d78339ba27 不変。
 - `2026-10-01` — #3d 追加: 印付きの場の継承をツールとソルバで揃える (SERN 指摘; §5.2 の「1 回だけ移行」は現状誤り)。
 - `2026-10-01` — #13-3 事前確認 (T_max 固定・Δ 表予測内) と方針の穴 (設計側 2 区間必須で import 失敗) を diagnostician に諮問 → 案 B (設計側は先頭 2 区間 + T>6000 K で raise、`solver_builtin_names` を全気相種に)、追加の合格条件 (1)–(6) と SERN への連絡事項を #13-3 に。
 - `2026-10-01` — #13-1 完了: G1-e を片側 4 反復で再判定し PASS (2×2 の FAIL は群内の床の過小標本; 群内 L∞ 最大値 ro 1.87e-6 → 4.51e-6)。run は `case/44.vitiated_air_wt/run_0524`〜`0531` (AWS)。

@@ -2,7 +2,7 @@
 // test_species_db_host.cpp — 化学種 DB の host 側解決 (input/speciesDB.cpp) の単体試験 (GPU 不要)
 //   (1) 内蔵 DB の MW (N2 / H2O) と名前解決 (完全一致・大文字小文字無視・未知種名の拒否・yaml 上書きの source)
 //   (2) X→Y 換算: va3 組成 (X: H2O 6.09135e-2, N2 6.64860e-1, O2 2.16072e-1, AR 7.97588e-3, CO2 4.90034e-2, Σ≠1)
-//       → Y_H2O = 0.03769539643 (rtol 1e-9; 内蔵 MW で再計算した値) と mole↔mass 往復
+//       → Y_H2O = 0.03769535616 (rtol 1e-9; 内蔵 MW で再計算した値。段 3 (#13-3) 前は H2O MW 0.0180153 で 0.03769539643) と mole↔mass 往復
 //   (3) bcondConfig floats の拒否条件 (X/Y 混在, X の種欠落, 負値, 非有限, 総和 0, 未知 index, Y の負値, |ΣY−1|>1e-3)
 //   (4) 凝縮種の名前→index (ResolvedSpeciesDB::index; solverConfig::read の condensationSpecies と同じ大文字小文字無視の照合)
 //   (5) 共通データの別名 (AR/HE/h2o/WATER/Air/air) が canonical と同値、CO と Co が別種、外部 DB は同じキーだけ上書き (plan #4)
@@ -50,14 +50,15 @@ int main()
         ResolvedSpeciesDB db = speciesDB_resolve({"N2", "H2O"}, "");
         check(db.size() == 2, "resolve builtin [N2,H2O] -> 2 species");
         check(std::fabs(db.MW(0) - 0.0280134) < 1e-15, "builtin N2 MW = 0.0280134");
-        check(std::fabs(db.MW(1) - 0.0180153) < 1e-15, "builtin H2O MW = 0.0180153");
+        // 段 3 (#13-3, 2026-10-01) から CEA thermo.inp そのもの (18.01528 g/mol; 旧値 0.0180153 は丸め)
+        check(std::fabs(db.MW(1) - 0.01801528) < 1e-15, "builtin H2O MW = 0.01801528 (CEA)");
         check(db.source[0] == "builtin" && db.source[1] == "builtin", "source = builtin");
         check(db.index("H2O") == 1 && db.index("h2o") == 1 && db.index("N2") == 0 && db.index("XX") == -1,
               "index(): exact + case-insensitive lookup, -1 for unknown");
 
         ResolvedSpeciesDB db2 = speciesDB_resolve({"Ar", "co2", "he"}, "");
         check(db2.size() == 3 && std::fabs(db2.MW(0) - 0.039948) < 1e-15 && std::fabs(db2.MW(1) - 0.0440095) < 1e-15
-              && std::fabs(db2.MW(2) - 0.0040026) < 1e-15, "aliases / case-insensitive builtin names (Ar, co2, he)");
+              && std::fabs(db2.MW(2) - 0.004002602) < 1e-15, "aliases / case-insensitive builtin names (Ar, co2, he; He MW = CEA 0.004002602 from #13-3)");
 
         bool thrown = false;
         try { (void)speciesDB_resolve({"N2", "XENON"}, ""); } catch (const std::exception&) { thrown = true; }
@@ -89,10 +90,11 @@ int main()
         std::vector<double> MW(5);
         for (int s = 0; s < 5; ++s) MW[s] = db.MW(s);
         const std::vector<double> Y = speciesMoleToMass(X, MW);
-        // 期待値は内蔵 MW (H2O 0.0180153, N2 0.0280134, O2 0.0319988, AR 0.039948, CO2 0.0440095) で
-        // Y_k = X_k M_k / Σ X_j M_j を倍精度で再計算した値 (plan §6 (b) の 0.03769539643 と一致)。
-        const double Yh2o_expected = 0.03769539643469918;
-        check(std::fabs(Y[0] - Yh2o_expected) / Yh2o_expected < 1e-9, "va3: Y_H2O = 0.03769539643 (rtol 1e-9)");
+        // 期待値は内蔵 MW (H2O 0.01801528, N2 0.0280134, O2 0.0319988, AR 0.039948, CO2 0.0440095) で
+        // Y_k = X_k M_k / Σ X_j M_j を倍精度で再計算した値。段 3 (#13-3) で H2O MW が CEA の 18.01528 g/mol に変わったので
+        // plan §6 (b) の 0.03769539643 (旧 MW 0.0180153) から 0.03769535616 に (相対 −1.07e-6 = MW 差 −1.11e-6 × (1 − Y_H2O))。
+        const double Yh2o_expected = 0.03769535616397925;
+        check(std::fabs(Y[0] - Yh2o_expected) / Yh2o_expected < 1e-9, "va3: Y_H2O = 0.03769535616 (rtol 1e-9)");
         double sum = 0.0; for (double v : Y) sum += v;
         check(std::fabs(sum - 1.0) < 1e-14, "va3: sum(Y) = 1 (input sum X = 0.998825 is normalized)");
         const std::vector<double> Xb = speciesMassToMole(Y, MW);
@@ -128,7 +130,7 @@ int main()
         Y = bcondSpeciesMassFractions(YAML::Load("{Pt: 1.0, Tt: 300.0}"), db, "in");
         check(Y.empty(), "neither X nor Y -> empty (caller applies default Y0=1)");
         Y = bcondSpeciesMassFractions(YAML::Load("{X0: 0.5, X1: 0.5}"), db, "in");
-        check(Y.size() == 2 && std::fabs(Y[0] - 0.0280134 / (0.0280134 + 0.0180153)) < 1e-14, "X 50/50 -> Y by MW ratio");
+        check(Y.size() == 2 && std::fabs(Y[0] - 0.0280134 / (0.0280134 + 0.01801528)) < 1e-14, "X 50/50 -> Y by MW ratio");
     }
 
     // ---- (4) 凝縮種の名前→index ----

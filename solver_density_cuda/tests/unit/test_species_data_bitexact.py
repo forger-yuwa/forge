@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """共通 species データ化 (plans/active/thermophysics-solver-owned-species-db.md §5.1 #4) の値のビット一致試験。
 
-移行前に固定した基準 (`tests/unit/data/species_builtin_baseline_v0.json`) と、現在のソースの値を 16 進浮動小数で比べる。
+基準 (`tests/unit/data/species_builtin_baseline_v1.json`) と、現在のソースの値を 16 進浮動小数で比べる。
+基準は段 3 (#13-3, 2026-10-01) で v0 (移行前に固定した値) から v1 (既存種を CEA thermo.inp そのものにした値) へ明示的に張り替えた。
+v0 は削除せず、(T) で「v0 → 現在」の差が段 3 の想定 (Δ 表) どおりであることを毎回確かめる。
 
 - C++: `tests/unit/dump_species_builtin.cpp` を `input/speciesDB.cpp` とビルドして実行し、
   `speciesDB_builtin()` の全キー (別名込み)・名前解決 (config の綴りと大小文字違い)・内蔵種だけの互換性ハッシュを比べる。
@@ -17,9 +19,25 @@
        dump を作り、非ゼロ終了とメッセージ ("differs only in letter case") を確認する (負例 1 件)。
   (E4) LJ: null の内蔵種は kinetic 輸送と LJ の混合平均拡散に使うと拒否、LJ のある種・拡散を使わない設定は通る (dump の lj_use)。
 
+- #13-3 (既存種の CEA 化, 2026-10-01) の張り替え検査 (T): v0 → 現在の差分は次だけ。
+  C++ 内蔵 (v0 の 13 キー): N2・O2・CO2 は MW・先頭 2 区間の区切りと全係数がビット一致 (第 3 区間 6000–20000 K が増えるだけ)、
+  H2O (h2o・WATER) は MW だけ、He (HE) は MW と第 3 区間、Ar (AR) は第 2 区間の係数と第 3 区間、AIR (Air・air) は不変。
+  変わった種の 200 ≤ T < 6000 K の max |Δcp|/cp・|Δh|・|Δs°| が段 3 の Δ 表 (plan #13-3 の事前確認) と相対 1e-3 で一致。
+  Python (SPECIES_NASA9・builtin_db) は H2O の MW と AR の high だけが変わり、LJ_PARAMS・T_MID・BUILTIN_ATOMS は不変。
+  互換性ハッシュは AIR だけの組 (air|*) が不変、他は全部変わる (旧→新を表示)。
+- #13-3 の設計側 (plan #13-3 の追加合格条件 (1)–(3)):
+  (D1) 設計側 5 モジュール (gas.semiperfect・gas.composition・gas.frozen・probdef・evaluate.ic) が段 3 のデータで import でき、
+       `_load_design_species` (import 時に走る読み込み) は 1 区間の種・非標準の区切りの種を ValueError で拒否する (負例 2 件)。
+  (D2) 内蔵種の cp/h/s° は 6000.0001 K で例外、5999.9999 K で値を返す (lump も同じ)。T < 200 K は従来どおり
+       (cp は 200 K の値、h は 200 K から線形、s° は対数)。
+  (D3) 設計側 11 種と `--eval` のソルバ値 (thermo_cp_mass / thermo_h_mass / thermo_s0_mass) が V2 格子
+       (200–6000 K の 1000 点 + 999.99994/1000/1000.00006/5999.9999 K; 1000 点の端点 6000 K は除く) で相対 ≤4e-16
+       (V2 と同じく cp・s° は点ごと、h は格子上の max|h| に対する相対)。6000 K ちょうどの差は info
+       (3 区間の種はソルバが第 3 区間を選ぶので #13-0 (6) の境界段差になる)。
+
 使い方:
   python3 solver_density_cuda/tests/unit/test_species_data_bitexact.py            # 比較 (ALL PASS / FAIL)
-  python3 solver_density_cuda/tests/unit/test_species_data_bitexact.py --write-baseline   # 基準の作成 (移行前に 1 回だけ; 既存は上書きしない)
+  python3 solver_density_cuda/tests/unit/test_species_data_bitexact.py --write-baseline   # 基準 v1 の作成 (既存は上書きしない)
 規約: [PASS]/[FAIL] を出し、失敗があれば非ゼロ終了。
 """
 import argparse
@@ -32,7 +50,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 SOLVER = os.path.normpath(os.path.join(HERE, "..", ".."))
 REPO = os.path.dirname(SOLVER)
-BASELINE = os.path.join(HERE, "data", "species_builtin_baseline_v0.json")
+BASELINE = os.path.join(HERE, "data", "species_builtin_baseline_v1.json")      # 段 3 (#13-3) 以降の基準
+BASELINE_V0 = os.path.join(HERE, "data", "species_builtin_baseline_v0.json")   # 移行前の値 (張り替え検査 (T) だけが読む)
 EMBED_SCRIPT = os.path.join(SOLVER, "cmake", "embed_species_data.cmake")
 DATA_FILE = os.path.join(SOLVER, "data", "species", "forge_species_v1.yaml")
 
@@ -67,9 +86,14 @@ def build_dump(workdir, data_file=DATA_FILE, tag="gen"):
     return exe
 
 
+DUMP_EXE = None
+
+
 def dump_cpp(workdir):
     """dump_species_builtin を現在のソースでビルドして JSON を返す (C の %a を float.hex に揃える)。"""
+    global DUMP_EXE
     exe = build_dump(workdir)
+    DUMP_EXE = exe
     out = subprocess.run([exe], check=True, capture_output=True, text=True).stdout
     d = json.loads(out)
 
@@ -209,6 +233,194 @@ def check_case_collision(workdir):
     check(ok, f"(E3) CO と Co が並ぶ共通データは起動を拒否 (rc {r.returncode}): {tail[0].strip()[:200] if tail else msg[-200:]}")
 
 
+# 段 3 の Δ 表 (plan #13-3 の事前確認; 200 ≤ T < 6000 K, 1 K 刻み + 区切り直前直後, 質量あたり):
+#   種: (max |Δcp|/cp, max |Δh| [J/kg], max |Δs°| [J/(kg K)])
+DELTA_TABLE = {"N2": (0.0, 0.0, 0.0), "O2": (0.0, 0.0, 0.0), "CO2": (0.0, 0.0, 0.0),
+               "H2O": (1.110e-06, 1.510e+01, 2.024e-02), "Ar": (4.870e-07, 7.314e-02, 1.266e-05),
+               "He": (4.997e-07, 1.480e+01, 2.354e-02)}
+V0_ALIAS = {"AR": "Ar", "HE": "He", "WATER": "H2O", "h2o": "H2O", "Air": "AIR", "air": "AIR"}
+
+
+def _ivs(e):
+    """dump の 1 エントリ (hex) → (MW, [(Tlo, Thi, [a0..a8]), ...]) (2 区間の書式と区間可変の書式の両方)。"""
+    f = float.fromhex
+    if "Tbounds" in e:
+        b = [f(x) for x in e["Tbounds"]]
+        return f(e["MW"]), [(b[k], b[k + 1], [f(x) for x in e[f"coef{k}"]]) for k in range(len(b) - 1)]
+    return f(e["MW"]), [(f(e["Tlo"]), f(e["Tmid"]), [f(x) for x in e["low"]]), (f(e["Tmid"]), f(e["Thi"]), [f(x) for x in e["high"]])]
+
+
+def check_v0_transition(v0, cur):
+    """(T) 基準 v0 → 現在の差分が段 3 の想定どおり (docstring)。"""
+    sys.path.insert(0, os.path.join(SOLVER, "tools"))
+    from cea_thermo_to_forge_species import delta_props
+    b0, bc = v0["cpp"]["builtin"], cur["cpp"]["builtin"]
+    expect = {"N2": set(), "O2": set(), "CO2": set(), "H2O": {"MW"}, "He": {"MW"}, "Ar": {"iv1"}, "AIR": set()}
+    rows = []
+    for k in b0:
+        sid = V0_ALIAS.get(k, k)
+        if k not in bc:
+            check(False, f"(T) cpp.builtin.{k}: 現在の内蔵に無い")
+            continue
+        (m0, iv0), (mc, ivc) = _ivs(b0[k]), _ivs(bc[k])
+        diff = set()
+        if m0.hex() != mc.hex():
+            diff.add("MW")
+        for n in range(2):
+            if [iv0[n][0], iv0[n][1]] != [ivc[n][0], ivc[n][1]] or [x.hex() for x in iv0[n][2]] != [x.hex() for x in ivc[n][2]]:
+                diff.add(f"iv{n}")
+        extra = [(lo, hi) for lo, hi, _ in ivc[2:]]
+        lj = (b0[k]["LJ_sigma"], b0[k]["LJ_eps_kB"]) == (bc[k]["LJ_sigma"], bc[k]["LJ_eps_kB"])
+        want_extra = [] if sid == "AIR" or sid == "H2O" else [(6000.0, 20000.0)]
+        ok = diff == expect[sid] and extra == want_extra and lj and len(iv0) == 2
+        check(ok, f"(T) cpp.builtin.{k} ({sid}): 先頭 2 区間・MW の変化 {sorted(diff) or 'なし'} (想定 {sorted(expect[sid]) or 'なし'})、"
+                  f"追加区間 {extra} (想定 {want_extra})、LJ {'不変' if lj else '変化'}")
+        if k == sid and sid in DELTA_TABLE:
+            got = delta_props(iv0, m0, ivc, mc)
+            g = (got["cp"][0], got["h"][0], got["s"][0])
+            exp = DELTA_TABLE[sid]
+            ok = all((e == 0.0 and x == 0.0) or (e != 0.0 and abs(x - e) <= 1e-3 * e) for x, e in zip(g, exp))
+            rows.append(sid)
+            check(ok, f"(T) {sid}: 200 ≤ T < 6000 K の max |Δcp|/cp {g[0]:.3e}・|Δh| {g[1]:.3e} J/kg・|Δs°| {g[2]:.3e} J/(kg K)"
+                      f" = Δ 表 ({exp[0]:.3e}, {exp[1]:.3e}, {exp[2]:.3e}; 相対 1e-3)")
+    check(sorted(rows) == sorted(DELTA_TABLE), f"(T) Δ 表の全種 {sorted(DELTA_TABLE)} を照合した")
+    # Python: H2O の MW と AR の high だけが変わる
+    allowed = {("H2O", "MW"), ("AR", "high")}
+    for tag in ("SPECIES_NASA9", "builtin_db"):
+        p0, pc = dict((x[0], x[1]) for x in v0["py"][tag]), dict((x[0], x[1]) for x in cur["py"][tag])
+        check(list(p0) == list(pc), f"(T) py.{tag}: キーと順序が v0 と同じ")
+        d = {(k, f) for k in p0 for f in p0[k] if p0[k][f] != pc.get(k, {}).get(f)}
+        check(d == allowed, f"(T) py.{tag}: v0 からの変化 {sorted(d)} = 想定 {sorted(allowed)}")
+    for tag in ("LJ_PARAMS", "T_MID", "BUILTIN_ATOMS"):
+        check(v0["py"][tag] == cur["py"][tag], f"(T) py.{tag}: v0 と同じ")
+    h0, hc = v0["cpp"]["compat_hash"], cur["cpp"]["compat_hash"]
+    for k in h0:
+        same = h0[k] == hc.get(k)
+        want_same = k.startswith("air|")
+        check(same == want_same, f"(T) compat_hash[{k}]: {h0[k][:16]} → {str(hc.get(k))[:16]} ({'不変' if same else '変化'}; "
+                                 f"想定 {'不変' if want_same else '変化'})")
+
+
+def check_design_side(workdir):
+    """(D1)–(D3) (docstring)。"""
+    import importlib
+    import math
+    import yaml
+    sys.path.insert(0, os.path.join(REPO, "design"))
+    mods = ["forge_design.gas.semiperfect", "forge_design.gas.composition", "forge_design.gas.frozen",
+            "forge_design.probdef", "forge_design.evaluate.ic"]
+    bad = []
+    for m in mods:
+        try:
+            importlib.import_module(m)
+        except Exception as ex:   # noqa: BLE001 — 失敗の中身を出す
+            bad.append(f"{m}: {ex}")
+    check(not bad, f"(D1) 設計側 {len(mods)} モジュールが段 3 のデータで import できる" + (f" — {bad}" if bad else ""))
+    import forge_design.gas.semiperfect as sp
+    import forge_design.gas.composition as comp
+    raw = yaml.safe_load(open(DATA_FILE, encoding="utf-8"))
+    n2 = next(e for e in raw["species"] if str(e["id"]) == "N2")
+    check(len(n2["intervals"]) == 3 and sp.SPECIES_NASA9["N2"]["low"] == [float(x) for x in n2["intervals"][0]["coeffs"]]
+          and sp.SPECIES_NASA9["N2"]["high"] == [float(x) for x in n2["intervals"][1]["coeffs"]],
+          "(D1) N2 (共通データ 3 区間) の設計側 low/high = 先頭 2 区間")
+    for tag, edit in (("1 区間の種", lambda e: e.__setitem__("intervals", e["intervals"][:1])),
+                      ("非標準の区切り (1000→1500 K)", lambda e: (e["intervals"][0].__setitem__("Thi", 1500.0),
+                                                                e["intervals"][1].__setitem__("Tlo", 1500.0)))):
+        r2 = yaml.safe_load(open(DATA_FILE, encoding="utf-8"))
+        edit(next(e for e in r2["species"] if str(e["id"]) == "N2"))
+        path = os.path.join(workdir, "design_neg.yaml")
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(r2, f, allow_unicode=True)
+        try:
+            sp._load_design_species(path)
+            msg, ok = "通った", False
+        except ValueError as ex:
+            msg, ok = str(ex).split(": ", 1)[-1][:120], True
+        check(ok, f"(D1) 負例 {tag}: 設計側の読み込みが ValueError ({msg})")
+    # (D2) 6000 K 超のガード・200 K 未満の扱い
+    db = comp.ResolvedSpeciesDB.builtin()
+    e = db["N2"]
+    raised = []
+    for fn in (db.species_cp_R, db.species_h_RT, db.species_s0_R):
+        try:
+            fn(e, 6000.0001)
+        except ValueError:
+            raised.append(fn.__name__)
+    vals = [float(fn(e, 5999.9999)[0]) for fn in (db.species_cp_R, db.species_h_RT, db.species_s0_R)]
+    check(len(raised) == 3 and all(math.isfinite(v) for v in vals),
+          f"(D2) 内蔵種 N2 の cp/h/s° は 6000.0001 K で例外 {raised}、5999.9999 K で値 {[f'{v:.6g}' for v in vals]}")
+    L = comp.lump_entry("MIXT", {"N2": 0.7, "O2": 0.3}, db)
+    try:
+        db.species_cp_R(L, 6000.0001)
+        ok = False
+    except ValueError:
+        ok = True
+    check(ok and L.T_eval_max == sp.DESIGN_T_MAX, f"(D2) 内蔵種の lump も 6000.0001 K で例外 (T_eval_max {L.T_eval_max})")
+    try:
+        sp.check_design_T([300.0, 6000.0001], "IC")
+        ok = False
+    except ValueError:
+        ok = True
+    sp.check_design_T([200.0, 6000.0], "IC")
+    check(ok, "(D2) evaluate/ic.py が使う check_design_T は 6000.0001 K で例外、6000 K ちょうどは通す")
+    lo = [float(x) for x in n2["intervals"][0]["coeffs"]]
+    T = 150.0
+    cp200, h200 = float(sp._cp_R_raw(lo, 200.0)), float(sp._h_RT_raw(lo, 200.0)) * 200.0
+    s200 = None
+    from forge_design.gas.frozen import _s0_R_raw
+    s200 = float(_s0_R_raw(__import__("numpy").asarray(lo), 200.0))
+    got = (float(db.species_cp_R(e, T)[0]), float(db.species_h_RT(e, T)[0]) * T, float(db.species_s0_R(e, T)[0]))
+    exp = (cp200, h200 + cp200 * (T - 200.0), s200 + cp200 * math.log(T / 200.0))
+    rel = max(abs(g - x) / abs(x) for g, x in zip(got, exp))
+    check(rel <= 4e-16, f"(D2) T < 200 K (150 K) は従来どおり cp 固定・h 線形・s° 対数 (相対 {rel:.1e})")
+    # (D3) 設計側 vs ソルバ
+    names = list(sp.SPECIES_NASA9)
+    # V2 格子の 1000 点 (200–6000 K の等分) の端点 6000 K ちょうどは区間選択の規約で決まる点なので厳密比較から外し、下の info に回す
+    grid = [200.0 + (6000.0 - 200.0) * k / 999 for k in range(999)] + [999.99994, 1000.0, 1000.00006, 5999.9999]
+    out = subprocess.run([DUMP_EXE, "--eval", ",".join(names)] + [repr(t) for t in grid + [6000.0]],
+                         check=True, capture_output=True, text=True).stdout
+    sol = {k: [[float.fromhex(x) for x in row] for row in v] for k, v in json.loads(out).items()}
+    RUv = sp.RU
+    worst, info6000 = (0.0, None), []
+    for k in names:
+        ek = db[k]
+        Ta = __import__("numpy").asarray(grid + [6000.0])
+        cp = db.species_cp_R(ek, Ta[:-1]) * RUv / ek.MW
+        h = db.species_h_RT(ek, Ta[:-1]) * RUv * Ta[:-1] / ek.MW
+        s0 = db.species_s0_R(ek, Ta[:-1]) * RUv / ek.MW
+        # 相対の取り方は V2 (test_species_lump_solver.py) と同じ: cp・s° は点ごと、h は格子上の max|h| で割る
+        # (絶対エンタルピーは 0 を横切るので点ごとの相対は丸めの桁を表さない)
+        hscale = max(max(abs(x) for x in h), max(abs(r_[1]) for r_ in sol[k][:len(grid)]))
+        for i in range(len(grid)):
+            for q, (d, c) in enumerate(zip((cp[i], h[i], s0[i]), sol[k][i])):
+                den = hscale if q == 1 else max(abs(d), abs(c))
+                r = 0.0 if d == c else abs(d - c) / den
+                if r > worst[0]:
+                    worst = (r, (k, ("cp", "h", "s0")[q], grid[i]))
+        # 6000 K ちょうど (設計側は第 2 区間の上端で評価できる; ソルバは 3 区間の種で第 3 区間)
+        dh = float(db.species_h_RT(ek, 6000.0)[0]) * RUv * 6000.0 / ek.MW - sol[k][-1][1]
+        info6000.append(f"{k} {dh:+.3e}")
+    check(worst[0] <= 4e-16, f"(D3) 設計側 {len(names)} 種 vs ソルバ (V2 格子 {len(grid)} 点) の cp/h/s° 相対差の最大 {worst[0]:.2e} "
+                             f"@ {worst[1]} (許容 4e-16)")
+    print("[INFO] (D3) 6000 K ちょうどの h 差 (設計 − ソルバ) [J/kg]: " + ", ".join(info6000))
+    # 差の出所の切り分け: 同じ係数を**ソルバと同じ演算順** (RU*(a0*Ti2 + a1*Ti + ... + a6*T*T*T*T))/MW で Python 評価すると
+    # ソルバの cp と一致するか (一致すれば差は設計側 `_cp_R_raw` の演算順 (a0/T**2, a5*T**3 …) による丸めだけ)
+    np_ = __import__("numpy")
+    Ta = np_.asarray(grid)
+    ro = 0.0
+    for k in names:
+        ek = db[k]
+        a_ = np_.where((Ta < ek.Tmid)[:, None], np_.asarray(ek.low), np_.asarray(ek.high))
+        Ti = 1.0 / Ta
+        Ti2 = Ti * Ti
+        cps = RUv * (a_[:, 0] * Ti2 + a_[:, 1] * Ti + a_[:, 2] + a_[:, 3] * Ta + a_[:, 4] * Ta * Ta + a_[:, 5] * Ta * Ta * Ta
+                     + a_[:, 6] * Ta * Ta * Ta * Ta) / ek.MW
+        ref = np_.asarray([r_[0] for r_ in sol[k][:len(grid)]])
+        ro = max(ro, float(np_.max(np_.abs(cps - ref) / np_.abs(ref))))
+    print(f"[INFO] (D3) 同じ係数をソルバと同じ演算順で Python 評価した cp とソルバ cp の相対差の最大 {ro:.2e} "
+          "(0 なら上の差は設計側の演算順による丸め; 段 3 のデータとは無関係)")
+
+
 def compare(tag, base, cur):
     if isinstance(base, dict) and isinstance(cur, dict):
         ok = list(base) == list(cur)
@@ -236,9 +448,10 @@ def main():
         cur = {"cpp": dump_cpp(td), "py": dump_py()}
         if not a.write_baseline:
             check_case_collision(td)
+            check_design_side(td)
     if a.write_baseline:
         if os.path.exists(BASELINE):
-            raise SystemExit(f"{BASELINE} exists; refusing to overwrite the pre-migration baseline")
+            raise SystemExit(f"{BASELINE} exists; refusing to overwrite the baseline")
         os.makedirs(os.path.dirname(BASELINE), exist_ok=True)
         with open(BASELINE, "w") as f:
             json.dump(cur, f, indent=1)
@@ -247,6 +460,8 @@ def main():
         return
     with open(BASELINE) as f:
         base = json.load(f)
+    with open(BASELINE_V0) as f:
+        check_v0_transition(json.load(f), cur)
     # #13-2: 内蔵が共通データの全気相種に広がったので、キー集合の完全一致でなく (E1)(E2) で見る
     compare_extended(base, cur)
     check_lj_use(cur)

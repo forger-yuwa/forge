@@ -6,7 +6,7 @@
 `forge --resolve-species` (と起動時の拒否を見るための素の `forge`) だけを使う (計算はしない)。seed run は config を読むだけ。
 
   (F)  G1-f: 3 区間種 (CEA thermo.inp の N2 3 区間 200/1000/6000/20000 を外部 DB の Tbounds/nasa9_intervals で与える) と
-       区切りの違う lump (O2 + Tmid 1500 の試験種 → 和集合 200/1000/1500/6000) を含む config で、ソルバが書いた記録を Python が読み
+       区切りの違う lump (2 区間の O2 (外部 DB の O2C2; 内蔵 O2 は段 3 から 3 区間) + Tmid 1500 の試験種 → 和集合 200/1000/1500/6000) を含む config で、ソルバが書いた記録を Python が読み
        (load_record)、互換性ハッシュの再計算がソルバの値と一致、schema = forge_resolved_species_v1_nint・外挿規約 = 区間可変。
        記録を署名にして比べると同一なら差なし、第 3 区間の係数を 1 つ変えると N2C3.nasa9_intervals[2][0] を示す。
   (T)  Python の _TPGas (total_quantities.py) が 3 区間種・和集合 lump をソルバと同じ規約で評価する: 独立に書いた参照
@@ -53,6 +53,11 @@ def test_db():
         "TMID1500": {"MW": 0.0280134, "LJ_sigma": 3.621, "LJ_eps_kB": 97.53, "Tlo": 200.0, "Tmid": 1500.0, "Thi": 6000.0,
                      "nasa9_low": N2C[0], "nasa9_high": N2C[1]},
         "N2T298": {"MW": 0.0280134, "LJ_sigma": 3.621, "LJ_eps_kB": 97.53, "Tbounds": [298.15, 1000.0, 6000.0, 20000.0], "nasa9_intervals": N2C},
+        # 2 区間 (200/1000/6000) の O2 (CEA の先頭 2 区間)。段 3 (#13-3) から内蔵 O2 は CEA そのもの (3 区間 …6000/20000) なので、
+        # 内蔵 O2 と TMID1500 の lump は和集合 200/1000/1500/6000/20000 = 4 区間で拒否される (正しい)。F の和集合 lump は
+        # 区切り 200/1000/1500/6000 を作るのが目的なので、2 区間の O2 を外部 DB で与える
+        "O2C2": {"MW": 0.0319988, "LJ_sigma": 3.458, "LJ_eps_kB": 107.4, "Tlo": 200.0, "Tmid": 1000.0, "Thi": 6000.0,
+                 "nasa9_low": O2C[0], "nasa9_high": O2C[1]},
     }
 
 
@@ -119,7 +124,7 @@ def main():
     C = Ctx(a, root)
     try:
         db = test_db()
-        lump = "{name: LMP, lump: {O2: 0.3, TMID1500: 0.7}, basis: mole}"
+        lump = "{name: LMP, lump: {O2C2: 0.3, TMID1500: 0.7}, basis: mole}"
         # ---- F ----
         d = C.make(f"[{lump}, N2C3, H2O]", db=db)
         rc, h, rec, err = C.resolve(d)

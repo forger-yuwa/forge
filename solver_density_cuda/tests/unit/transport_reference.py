@@ -110,16 +110,20 @@ def h2o_iapws_cea_v1(T):
 
 
 def _builtin():
+    """共通データの全気相種 (ソルバの内蔵と同じ集合; #13-2)。NASA-9 は全区間 (1〜3 区間; #13-3/#13-5(c)) を持つ。
+    LJ: null の種は sigma/eps を None にする (kinetic に使うと参照側でも失敗する)。"""
     raw = yaml.safe_load(open(SPECIES_DATA, encoding="utf-8"))
     out, alias = {}, {}
     for e in raw["species"]:
-        if "solver" not in (e.get("legacy_builtin") or []):
+        if e.get("phase") != "gas":
             continue
         iv = e["intervals"]
-        out[e["id"]] = {"MW": float(e["MW"]), "Tlo": iv[0]["Tlo"], "Tmid": iv[0]["Thi"], "Thi": iv[1]["Thi"],
-                        "low": [float(x) for x in iv[0]["coeffs"]], "high": [float(x) for x in iv[1]["coeffs"]],
-                        "sigma": float(e["LJ"]["sigma"]), "eps": float(e["LJ"]["eps_kB"]),
-                        "dipole": float(e["LJ"].get("dipole", 0.0)), "file": False}
+        lj = e.get("LJ") or {}
+        out[e["id"]] = {"MW": float(e["MW"]),
+                        "bounds": [float(iv[0]["Tlo"])] + [float(x["Thi"]) for x in iv],
+                        "coefs": [[float(x) for x in v["coeffs"]] for v in iv],
+                        "sigma": (float(lj["sigma"]) if lj else None), "eps": (float(lj["eps_kB"]) if lj else None),
+                        "dipole": float(lj.get("dipole", 0.0)), "file": False}
         alias[e["id"]] = e["id"]
         for a in e.get("aliases") or []:
             alias[a] = e["id"]
@@ -130,8 +134,15 @@ BUILTIN, ALIAS = _builtin()
 
 
 def cp_mass(sp, T):
-    Tc = min(max(T, sp["Tlo"]), sp["Thi"])
-    a = sp["low"] if Tc < sp["Tmid"] else sp["high"]
+    """修正 Eucken の c_p (質量あたり)。範囲外は端でクランプ (cp 一定)。区間は「区切りちょうどは上の区間」
+    (ソルバ `thermo_d.cuh` thermo_interval と同じ規約; 6000 K 超の 3 区間種は第 3 区間を使う)。"""
+    b = sp["bounds"]
+    Tc = min(max(T, b[0]), b[-1])
+    k = 0
+    for j in range(1, len(b) - 1):
+        if not Tc < b[j]:
+            k = j
+    a = sp["coefs"][k]
     return RU / sp["MW"] * (a[0] / Tc**2 + a[1] / Tc + a[2] + a[3] * Tc + a[4] * Tc**2 + a[5] * Tc**3 + a[6] * Tc**4)
 
 
@@ -145,9 +156,10 @@ class Reference:
         def lookup(name):
             if name in db:
                 e = db[name]
-                return name.upper(), {"MW": float(e["MW"]), "Tlo": float(e.get("Tlo", 200.0)), "Tmid": float(e.get("Tmid", 1000.0)),
-                                      "Thi": float(e.get("Thi", 6000.0)), "low": [float(x) for x in e["nasa9_low"]],
-                                      "high": [float(x) for x in e["nasa9_high"]], "sigma": float(e.get("LJ_sigma", 3.6)),
+                return name.upper(), {"MW": float(e["MW"]),
+                                      "bounds": [float(e.get("Tlo", 200.0)), float(e.get("Tmid", 1000.0)), float(e.get("Thi", 6000.0))],
+                                      "coefs": [[float(x) for x in e["nasa9_low"]], [float(x) for x in e["nasa9_high"]]],
+                                      "sigma": float(e.get("LJ_sigma", 3.6)),
                                       "eps": float(e.get("LJ_eps_kB", 97.0)), "dipole": float(e.get("LJ_dipole", 0.0)),
                                       "file": True, "fit": e.get("transport_fit"), "dbkey": name}
             cid = ALIAS[name]

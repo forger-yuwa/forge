@@ -96,8 +96,9 @@ if yml.exists():
     R.select_operating_point(p10, "m10_on"); L10 = R.frozen_gases(p10)["layout"]
     Yt = reinit_transport_vector(np.array([1.0, 0.0, 0.5]), L10)
     iH2O, iH2 = L10.index("H2O"), L10.index("H2")
-    check("reinit (full m10_on): ξ=1 で目標排気組成 H2O 0.24881767 / H2 0.01383296", abs(Yt[iH2O][0] - 0.24881767) < 1e-7 and abs(Yt[iH2][0] - 0.01383296) < 1e-7, f"{Yt[iH2O][0]:.8f} / {Yt[iH2][0]:.8f}")
-    check("reinit: ξ=0 で外気組成 (H2O 0), ξ=0.5 で中間, 各点 ΣY=1", abs(Yt[iH2O][1]) < 1e-12 and abs(Yt[iH2O][2] - 0.5 * 0.24881767) < 1e-7 and all(abs(sum(v[k] for v in Yt) - 1) < 1e-12 for k in range(3)))
+    # 段 3 (#13-3) で H2O MW が CEA の 0.01801528 に (旧 0.0180153 では H2O 0.24881767 / H2 0.01383296)
+    check("reinit (full m10_on): ξ=1 で目標排気組成 H2O 0.24881746 / H2 0.01383297", abs(Yt[iH2O][0] - 0.24881746) < 1e-7 and abs(Yt[iH2][0] - 0.01383297) < 1e-7, f"{Yt[iH2O][0]:.8f} / {Yt[iH2][0]:.8f}")
+    check("reinit: ξ=0 で外気組成 (H2O 0), ξ=0.5 で中間, 各点 ΣY=1", abs(Yt[iH2O][1]) < 1e-12 and abs(Yt[iH2O][2] - 0.5 * 0.24881746) < 1e-7 and all(abs(sum(v[k] for v in Yt) - 1) < 1e-12 for k in range(3)))
 
 # --- 統一 tp_species スキーマ (plan thermophysics-cea-mole-fraction-species §4.5 / §6 SERN, 2026-09-16) ---
 if yml.exists():
@@ -123,7 +124,7 @@ if yml.exists():
     # lumped + keep [H2O]: EXH = 1 − Y_H2O、m4_off (H2O 無し) でも配置が同じ
     tp = {"mode": "lumped", "lumps": {"EXH": {"from": "stream", "stream": "inflow"}, "AIR": {"from": "stream", "stream": "external"}}, "keep": ["H2O"]}
     p = load_problem(yml); p.evaluate["tp_species"] = tp; R.select_operating_point(p, "m6_on"); st = R.gas_states(p)
-    check("lumped+keep m6_on: [EXH, AIR, H2O], 排気 [0.7589, 0, 0.2411], **tracer 有り** (Y_EXH<1 で流入元ラベルにならない; codex result M8)", st["species"] == ["EXH", "AIR", "H2O"] and abs(st["exhaust"]["Y"][2] - 0.2411091186) < 1e-9 and st["tracer"] and st["exhaust"]["Xi"] == 1.0)
+    check("lumped+keep m6_on: [EXH, AIR, H2O], 排気 [0.7589, 0, 0.2411], **tracer 有り** (Y_EXH<1 で流入元ラベルにならない; codex result M8)", st["species"] == ["EXH", "AIR", "H2O"] and abs(st["exhaust"]["Y"][2] - 0.2411089155) < 1e-9 and st["tracer"] and st["exhaust"]["Xi"] == 1.0)
     from forge_design.gas.composition import species_meta as _smeta, _exhaust_fraction_spec
     g2 = R.frozen_gases(p)
     check("lumped+keep: species_meta.exhaust_fraction = tracer Xi", _smeta(g2["layout"])["exhaust_fraction"] == {"kind": "tracer", "array": "Xi", "conserved": "roXi"})

@@ -13,13 +13,18 @@ plans/active/thermophysics-solver-owned-species-db.md §4.9・§5.1 #13-0 (監�
   の行の間) だけを置き換える。対象は輸送データ (trans.inp 由来 66 種) と thermo.inp に同名 (大小文字区別) がある種のうち、
   生成ブロックの外 (手保守のエントリ: 既存 7 種・`H2O(L)`・CO/H2/OH/H/NO/O) に無いもの。`e-` は除外 (区切り 298.15 K; §4.9)、
   CEA の `Air` (reactants 節) は輸送データに無いので対象外。区間は CEA の区間数・区切りのまま (1〜3 区間)。
-  手保守のエントリは一字も変えない (既存 7 種を CEA そのものへ寄せるのは段 3)。
+  段 3 (#13-3) から `--write` は手保守のエントリも同期する: thermo.inp に同名の気相がある種 (N2/O2/CO2/H2O/Ar/He/
+  CO/H2/OH/H/NO/O) の `MW:` 行と `intervals:` 節を thermo.inp そのもの (区間数・区切り・係数・MW) に置き換え、凝縮相
+  (`H2O(L)`) は係数を変えず `MW:` だけを気液ペアの気相種と同じ値にする。手保守の欄 (aliases・LJ・legacy_builtin・source・
+  deviations・pair_of・extension・コメント) は書き換えない。CEA に同名の無い `AIR` (擬似種) はそのまま。
 - LJ は CEA に無い。出典は 1 つに固定する: `cea_thermo_to_species_db.py` の `LJ` 表 (Cantera h2o2.yaml / gri30.yaml の
   transport 値)。表に無い種は `LJ: null` (輸送データなし; kinetic 輸送・LJ 混合平均拡散に使うとソルバが起動時に拒否する)。
   双極子はこの表に無いので書かない。
 - `--check` は (a) 輸送データと thermo.inp に同名の全種 (`e-` を含む) を `to_forge_entry` → `dump_entries_yaml` → YAML 読み戻しで
   区間・全係数・MW が thermo.inp のパース値とビット一致、(b) 共通データの生成ブロックが今の生成結果と文字列一致、
-  (c) 生成ブロックの各エントリの区間・係数・MW が thermo.inp とビット一致、を見て、不一致があれば非ゼロ終了する。
+  (c) 生成ブロックの各エントリの区間・係数・MW が thermo.inp とビット一致、(d) 手保守のエントリのうち thermo.inp に同名の
+  気相がある種の区間・係数・MW が thermo.inp とビット一致、凝縮相の MW が気液ペアの気相種とビット一致、手保守テキストが
+  同期結果と文字列一致、を見て、不一致があれば非ゼロ終了する。
 - 入力の読み方 (thermo.inp の NASA-9 固定桁; McBride, Zehe, Gordon NASA/TP-2002-211556 App. A):
     記録 1 行目   種名 (1–24 桁; 空白を含まない) + 注記
     記録 2 行目   区間数 [0:2]・参照日付コード [3:9]・元素 5 組 × (記号 2 + 個数 6) [10:50]・相 [50:52] (0 = 気相)・
@@ -251,12 +256,77 @@ def generated_entries(thermo_path, species_path, transport_path):
     return ents, buf.getvalue(), names, by
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# 段 3 (#13-3): 手保守のエントリの MW・区間を CEA そのものへ (手保守の欄は残す)
+# ---------------------------------------------------------------------------------------------------------------
+def _gas_records(recs):
+    """名前 → products 節・気相 (phase 0) の最初の記録。"""
+    by = {}
+    for r in recs:
+        if r["section"] == "products" and r["phase"] == 0:
+            by.setdefault(r["name"], r)
+    return by
+
+
+def _manual_blocks(text):
+    """手保守のテキスト → (行の列, [(id, 開始行, 終了行 [排他])]) (`  - id: "X"` から次のエントリの直前まで)。"""
+    lines = text.splitlines(keepends=True)
+    starts = [k for k, L in enumerate(lines) if L.startswith("  - id: ")]
+    out = []
+    for n, k in enumerate(starts):
+        end = starts[n + 1] if n + 1 < len(starts) else len(lines)
+        out.append((str(_load_yaml_text(lines[k].strip()[2:])["id"]), k, end))
+    return lines, out
+
+
+def _intervals_lines(intervals):
+    """区間列を手保守エントリの書式 (6 字下げ) で書く。数値は生成ブロックと同じ `_num`。"""
+    out = ["    intervals:\n"]
+    for lo, hi, a in intervals:
+        out.append(f"      - Tlo: {_num(lo)}\n        Thi: {_num(hi)}\n")
+        out.append("        coeffs: [" + ", ".join(_num(v) for v in a) + "]\n")
+    return out
+
+
+def sync_manual_text(pre, by):
+    """手保守のテキスト (生成ブロックの BEGIN マーカまで) の、CEA に同名 (気相) がある種の `MW:` 行と `intervals:` 節を
+    thermo.inp の値そのもの (区間数・区切り・係数・MW) に置き換える。それ以外の欄 (aliases・LJ・legacy_builtin・source・
+    deviations・コメント) は一字も変えない。凝縮相 (`pair_of` を持つ) は係数を変えず、`MW:` だけを気液ペアの気相種と同じ値にする
+    (気液ペアは同じ MW で質量換算する契約; ソルバが起動時に一致を検査する)。戻り値 (新テキスト, 置き換えた種の列)。"""
+    lines, blocks = _manual_blocks(pre)
+    ents = {str(e["id"]): e for e in (_load_yaml_text(pre + "\n").get("species") or [])}
+    done = []
+    for sid, k0, k1 in reversed(blocks):
+        e = ents[sid]
+        blk = lines[k0:k1]
+        mw = [n for n, L in enumerate(blk) if L.startswith("    MW: ")]
+        if e.get("phase") == "gas" and sid in by:
+            r = by[sid]
+            iv = [n for n, L in enumerate(blk) if L.startswith("    intervals:")]
+            if len(mw) != 1 or len(iv) != 1 or not mw[0] < iv[0]:
+                raise SystemExit(f"手保守エントリ {sid}: MW / intervals の行が 1 つずつ (MW が先) でない")
+            n1 = iv[0] + 1
+            while n1 < len(blk) and blk[n1].startswith("      "):
+                n1 += 1
+            blk = blk[:iv[0]] + _intervals_lines(r["intervals"]) + blk[n1:]
+            blk[mw[0]] = f"    MW: {_num(mw_kg(r))}\n"
+            done.append(sid)
+        elif e.get("phase") == "condensed" and e.get("pair_of") in by:
+            if len(mw) != 1:
+                raise SystemExit(f"手保守エントリ {sid}: MW の行が 1 つでない")
+            blk[mw[0]] = f"    MW: {_num(mw_kg(by[e['pair_of']]))}\n"
+            done.append(sid)
+        lines[k0:k1] = blk
+    return "".join(lines), list(reversed(done))
+
+
 def write_generated(thermo_path, species_path, transport_path):
     ents, body, _, _ = generated_entries(thermo_path, species_path, transport_path)
     pre, _, post = split_generated(open(species_path, encoding="utf-8").read())
+    pre, synced = sync_manual_text(pre, _gas_records(parse_thermo_inp(thermo_path)))
     with open(species_path, "w", encoding="utf-8") as f:
         f.write(pre + body + post)
-    print(f"wrote {len(ents)} generated entries to {species_path}")
+    print(f"wrote {len(ents)} generated entries to {species_path}; hand-maintained entries synced to CEA: {synced}")
 
 
 def _iv_of(e):
@@ -305,6 +375,23 @@ def check_generated(thermo_path, species_path, transport_path):
     bad = [str(e["id"]) for e in got if not same_as_cea(e, by.get(str(e["id"])))]
     ck(not bad and len(got) == len(ents),
        f"(c) 共通データの生成ブロック {len(got)} 種の区間・全係数・MW が thermo.inp とビット一致" + (f" — 不一致 {bad}" if bad else ""))
+    # (d) 手保守のエントリ (段 3): CEA に同名 (気相) がある種は区間・全係数・MW が thermo.inp とビット一致、
+    #     凝縮相は MW が気液ペアの気相種とビット一致、手保守テキストが同期結果と文字列一致 (--write 済み)
+    pre, _, _ = split_generated(open(species_path, encoding="utf-8").read())
+    gas = _gas_records(parse_thermo_inp(thermo_path))
+    man = _load_yaml_text(pre + "\n").get("species") or []
+    mid = {str(e["id"]): e for e in man}
+    same = [str(e["id"]) for e in man if e.get("phase") == "gas" and str(e["id"]) in gas]
+    bad = [s for s in same if not same_as_cea(mid[s], gas[s])]
+    nint = [len(gas[s]["intervals"]) for s in same]
+    ck(not bad, f"(d) 手保守 {len(man)} 種のうち CEA と同名の気相 {len(same)} 種 {same} (2 区間 {nint.count(2)}, 3 区間 "
+       f"{nint.count(3)}) の区間・全係数 ({sum(9 * n for n in nint)} 個)・MW が thermo.inp とビット一致" + (f" — 不一致 {bad}" if bad else ""))
+    liq = [e for e in man if e.get("phase") == "condensed"]
+    bad = [str(e["id"]) for e in liq if not (e.get("pair_of") in mid and _bits_equal(e["MW"], mid[e["pair_of"]]["MW"]))]
+    ck(not bad, f"(d) 凝縮相 {[str(e['id']) for e in liq]} の MW が気液ペアの気相種とビット一致" + (f" — 不一致 {bad}" if bad else ""))
+    ck(sync_manual_text(pre, gas)[0] == pre, "(d) 手保守のテキストが CEA 同期の結果と文字列一致 (--write 済み)")
+    other = [str(e["id"]) for e in man if str(e["id"]) not in same and e.get("phase") == "gas"]
+    print(f"[INFO] 手保守で CEA に同名の気相が無い種 (係数はそのまま): {other}")
     lj = [str(e["id"]) for e in got if e.get("LJ")]
     print(f"[INFO] 生成ブロック: LJ あり {len(lj)} 種 ({', '.join(lj)}), LJ: null {len(got) - len(lj)} 種; "
           f"除外 {list(EXCLUDED)}; 手保守 (生成ブロック外) で CEA と同名 {[s for s in names if s not in EXCLUDED and s not in {str(e['id']) for e in got}]}")
@@ -646,12 +733,12 @@ def sern_external_section(sern_root, six, by_name, cur):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--thermo", default=DEFAULT_THERMO, help="CEA thermo.inp (既定: <repo>/.venv-cea/nasa_cea/thermo.inp)")
-    ap.add_argument("--species-data", default=DEFAULT_SPECIES, help="共通データ (--audit/--check は読むだけ、--write は生成ブロックを書き換える)")
+    ap.add_argument("--species-data", default=DEFAULT_SPECIES, help="共通データ (--audit/--check は読むだけ、--write は生成ブロックと手保守エントリの MW・区間を書き換える)")
     ap.add_argument("--transport-data", default=DEFAULT_TRANSPORT, help="輸送データ (種の一覧)")
     ap.add_argument("--audit", action="store_true", help="監査表 (Markdown) を出す (段 0)")
     ap.add_argument("--audit-out", help="監査表の出力先 (既定: 標準出力)")
     ap.add_argument("--write", action="store_true", help="共通データの生成ブロックを書き換える (段 2)")
-    ap.add_argument("--check", action="store_true", help="往復のビット一致と生成ブロックの一致を検査する (段 2)")
+    ap.add_argument("--check", action="store_true", help="往復のビット一致と生成ブロック・手保守エントリの一致を検査する (段 2・3)")
     ap.add_argument("--sern-root", help="SERN 設計ワークツリー (外部 DB の生成元を import して照合; 読むだけ)")
     a = ap.parse_args()
     if not os.path.exists(a.thermo):

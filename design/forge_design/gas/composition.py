@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .semiperfect import LJ_PARAMS, RU, SPECIES_ATOMS, SPECIES_NASA9, T_MID
+from .semiperfect import DESIGN_T_MAX, LJ_PARAMS, RU, SPECIES_ATOMS, SPECIES_NASA9, T_MID, check_design_T
 
 # 内蔵 11 種の原子組成 (CEA thermo.inp の元素欄と同じ)。共通データ (semiperfect.SPECIES_DATA_FILE) の atoms から、従来の大文字キーで。
 # 外部 DB は `atoms` キー (cea_thermo_to_species_db.py が書く) を使う。
@@ -53,6 +53,8 @@ class SpeciesEntry:
     lump_of: dict | None = None     # 擬似種: {構成種: lump 内モル分率}
     lump_mass: dict | None = None   # 擬似種: {構成種: lump 内質量分率}
     Hf298: float | None = None      # J/mol (参考)
+    T_eval_max: float | None = None # 評価の上限 [K] (内蔵種とその lump: semiperfect.DESIGN_T_MAX = 6000 K; 超えたら例外)。
+                                    # None は上限なし (外部 DB の生エントリ: 従来どおり Thi の外は線形外挿)。plan #13-3
 
     def to_db_dict(self) -> dict:
         d = {"MW": float(self.MW), "LJ_sigma": float(self.LJ_sigma), "LJ_eps_kB": float(self.LJ_eps_kB),
@@ -78,7 +80,7 @@ class ResolvedSpeciesDB:
             lj = LJ_PARAMS.get(k, (3.621, 97.53))
             ents[k] = SpeciesEntry(k, float(sp["MW"]), [float(v) for v in sp["low"]], [float(v) for v in sp["high"]],
                                    LJ_sigma=float(lj[0]), LJ_eps_kB=float(lj[1]), atoms=dict(BUILTIN_ATOMS.get(k, {})),
-                                   source=BUILTIN_SOURCE)
+                                   source=BUILTIN_SOURCE, T_eval_max=DESIGN_T_MAX)
         return cls(ents)
 
     @classmethod
@@ -148,10 +150,16 @@ class ResolvedSpeciesDB:
         lo, hi = np.asarray(e.low, float), np.asarray(e.high, float)
         return np.where((Tc < e.Tmid)[..., None], lo, hi)
 
+    @staticmethod
+    def _check_T(e: SpeciesEntry, T):
+        # 内蔵種 (と内蔵種の lump) は 6000 K 超を評価しない (共通データの第 3 区間を持たず、第 2 区間を外挿しないため; #13-3)
+        if e.T_eval_max is not None and np.nanmax(T) > e.T_eval_max:
+            check_design_T(T, f"species {e.name}")
+
     @classmethod
     def species_cp_R(cls, e: SpeciesEntry, T):
         from .semiperfect import _cp_R_raw
-        T = np.atleast_1d(np.asarray(T, dtype=float)); Tc = np.clip(T, e.Tlo, e.Thi)
+        T = np.atleast_1d(np.asarray(T, dtype=float)); cls._check_T(e, T); Tc = np.clip(T, e.Tlo, e.Thi)
         a = cls._coef_at(e, Tc)
         return _cp_R_raw(np.moveaxis(a, -1, 0), Tc)
 
@@ -159,7 +167,7 @@ class ResolvedSpeciesDB:
     def species_h_RT(cls, e: SpeciesEntry, T):
         """h/(R T): 範囲内は多項式、範囲外は h(Tb) + cp(Tb)(T−Tb) を R T で割ったもの。"""
         from .semiperfect import _cp_R_raw, _h_RT_raw
-        T = np.atleast_1d(np.asarray(T, dtype=float)); Tc = np.clip(T, e.Tlo, e.Thi)
+        T = np.atleast_1d(np.asarray(T, dtype=float)); cls._check_T(e, T); Tc = np.clip(T, e.Tlo, e.Thi)
         a = np.moveaxis(cls._coef_at(e, Tc), -1, 0)
         h_R = _h_RT_raw(a, Tc) * Tc + _cp_R_raw(a, Tc) * (T - Tc)     # h/R [K]; 範囲内は第 2 項 0
         return h_R / np.maximum(T, 1e-30)
@@ -169,7 +177,7 @@ class ResolvedSpeciesDB:
         """s°/R (1 bar): 範囲外は s°(Tb) + cp(Tb) ln(T/Tb)。"""
         from .semiperfect import _cp_R_raw
         from .frozen import _s0_R_raw
-        T = np.atleast_1d(np.asarray(T, dtype=float)); Tc = np.clip(T, e.Tlo, e.Thi)
+        T = np.atleast_1d(np.asarray(T, dtype=float)); cls._check_T(e, T); Tc = np.clip(T, e.Tlo, e.Thi)
         a = np.moveaxis(cls._coef_at(e, Tc), -1, 0)
         return _s0_R_raw(a, Tc) + _cp_R_raw(a, Tc) * np.log(np.maximum(T, 1e-30) / Tc)
 
@@ -272,10 +280,12 @@ def lump_entry(name: str, Y_members: dict, db: ResolvedSpeciesDB) -> SpeciesEntr
             atoms[el] = atoms.get(el, 0.0) + w * n
     sig = sum(y * db[k].LJ_sigma for k, y in Y.items()); eps = sum(y * db[k].LJ_eps_kB for k, y in Y.items())
     X = mass_to_mole(Y, db)
+    lim = [db[k].T_eval_max for k in Y if db[k].T_eval_max is not None]   # 構成種の評価上限を引き継ぐ (#13-3)
     return SpeciesEntry(name, float(MW_mix), [float(v) for v in low], [float(v) for v in high],
                         LJ_sigma=float(sig), LJ_eps_kB=float(eps), atoms=atoms,
                         source=f"lumped from {list(Y)} (mass-fraction linear mixing of NASA-9)",
-                        lump_of={k: float(v) for k, v in X.items()}, lump_mass={k: float(v) for k, v in Y.items()})
+                        lump_of={k: float(v) for k, v in X.items()}, lump_mass={k: float(v) for k, v in Y.items()},
+                        T_eval_max=(min(lim) if lim else None))
 
 
 # ---------------------------------------------------------------- 統一スキーマ
@@ -587,14 +597,16 @@ def write_species_meta(layout: SpeciesLayout, run_dir, transport: dict | None = 
 # ---------------------------------------------------------------- ソルバ config の lump 記法 (plan thermophysics-solver-owned-species-db §4.7 #9)
 
 def solver_builtin_names() -> set:
-    """ソルバの内蔵 DB (共通データ `legacy_builtin: solver` の種) が解決できる名前 (ID と別名、大文字化)。
+    """ソルバの内蔵 DB が解決できる名前 (ID と別名、大文字化)。ソルバは #13-2 (2026-10-01) から共通データの `phase: gas` の
+    全エントリ (CEA 由来 61 種 + 擬似種 AIR) を内蔵種にするので、ここも `legacy_builtin` で絞らず全気相種を返す
+    (plan thermophysics-solver-owned-species-db #13-5(b), 段 3 と同じ commit 列)。内蔵で解決できる実種は外部 DB に書かない。
     ソルバは現状、名前を大小文字無視で引く (speciesDB.cpp; canonical ID 化は plan #8)。"""
     import yaml
     from .semiperfect import SPECIES_DATA_FILE
     raw = yaml.safe_load(Path(SPECIES_DATA_FILE).read_text(encoding="utf-8"))
     out = set()
     for e in raw["species"]:
-        if "solver" in (e.get("legacy_builtin") or []):
+        if e.get("phase") == "gas":
             out.add(str(e["id"]).upper())
             out.update(str(a).upper() for a in (e.get("aliases") or []))
     return out

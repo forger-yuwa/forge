@@ -42,22 +42,42 @@ static std::string readAll(const fs::path& p)
     return ss.str();
 }
 
-// 内蔵種 name を外部 DB 形式で書く (low[2] に dlow2 を足す)
+// 内蔵種 name を外部 DB 形式で書く (第 1 区間の a2 に dlow2 を足す)。2 区間の種は従来の書式 (Tlo/Tmid/Thi, nasa9_low/high)、
+// それ以外 (段 3 #13-3 から N2 などは CEA の 3 区間) は区間可変の書式 (Tbounds, nasa9_intervals) で全区間を書く。
 static void writeSpeciesDb(const fs::path& p, const std::string& name, double dlow2)
 {
     const auto b = speciesDB_builtin().at(name);
     std::ofstream f(p);
     char buf[64];
+    auto row = [&](int j) {
+        f << "[";
+        for (int k = 0; k < 9; ++k) {
+            std::snprintf(buf, sizeof(buf), "%.17g", b.coef[j][k] + (j == 0 && k == 2 ? dlow2 : 0.0));
+            f << (k ? ", " : "") << buf;
+        }
+        f << "]";
+    };
     f << name << ":\n";
     std::snprintf(buf, sizeof(buf), "%.17g", b.MW); f << "  MW: " << buf << "\n";
     std::snprintf(buf, sizeof(buf), "%.17g", b.sigma_LJ); f << "  LJ_sigma: " << buf << "\n";
     std::snprintf(buf, sizeof(buf), "%.17g", b.eps_kB); f << "  LJ_eps_kB: " << buf << "\n";
-    f << "  Tlo: 200.0\n  Tmid: 1000.0\n  Thi: 6000.0\n";
-    f << "  nasa9_low: [";
-    for (int k = 0; k < 9; ++k) { std::snprintf(buf, sizeof(buf), "%.17g", b.coef[0][k] + (k == 2 ? dlow2 : 0.0)); f << (k ? ", " : "") << buf; }
-    f << "]\n  nasa9_high: [";
-    for (int k = 0; k < 9; ++k) { std::snprintf(buf, sizeof(buf), "%.17g", b.coef[1][k]); f << (k ? ", " : "") << buf; }
-    f << "]\n";
+    if (b.nInt == 2) {
+        f << "  Tlo: 200.0\n  Tmid: 1000.0\n  Thi: 6000.0\n";
+        f << "  nasa9_low: "; row(0);
+        f << "\n  nasa9_high: "; row(1);
+        f << "\n";
+        return;
+    }
+    f << "  Tbounds: [";
+    for (int k = 0; k <= b.nInt; ++k) { std::snprintf(buf, sizeof(buf), "%.17g", thermo_bound(b, k)); f << (k ? ", " : "") << buf; }
+    f << "]\n  nasa9_intervals:\n";
+    for (int j = 0; j < b.nInt; ++j) { f << "    - "; row(j); f << "\n"; }
+}
+
+// 内蔵 N2 の第 1 区間 a2 の差分キー (2 区間なら従来名、区間可変なら nasa9_intervals[0][2]; forge_species / speciesDB_diffRecord と同じ規約)
+static std::string n2Low2Key()
+{
+    return speciesDB_builtin().at("N2").nInt == 2 ? "N2.nasa9_low[2]" : "N2.nasa9_intervals[0][2]";
 }
 static void writeN2Db(const fs::path& p, double dlow2) { writeSpeciesDb(p, "N2", dlow2); }
 
@@ -111,8 +131,8 @@ int main()
         check(d.empty(), "diffRecord(record, same db) empty");
         const auto dm = speciesDB_diffRecord((runA / rA.recordFile).string(), dbM, 298.15);
         bool hit = false;
-        for (const auto& x : dm) if (has(x, "N2.nasa9_low[2]")) hit = true;
-        check(dm.size() == 1 && hit, "diffRecord shows only N2.nasa9_low[2]" + (dm.empty() ? std::string() : ": " + dm.front()));
+        for (const auto& x : dm) if (has(x, n2Low2Key())) hit = true;
+        check(dm.size() == 1 && hit, "diffRecord shows only " + n2Low2Key() + (dm.empty() ? std::string() : ": " + dm.front()));
     }
     const SpeciesRecordInfo rM = speciesDB_writeRecord(dbM, 298.15, dbMod.string(), "", "not_checked_resolve_only", 0, runM.string());
 
@@ -133,7 +153,7 @@ int main()
     // B/(c): 外部 DB で N2 low[2] +0.001 の run が A の場を読む → 拒否、該当係数を表示
     const bool okB = speciesDB_checkInputField(dbM, 298.15, hB, rA.recordSha256, 0, (runA / "res_100.h5").string(),
                                                {runA.string(), runM.string()}, false, st, unv, msg);
-    check(!okB && has(msg, "N2.nasa9_low[2]"), "B/(c): modified N2 low[2] -> refused with coefficient shown");
+    check(!okB && has(msg, n2Low2Key()), "B/(c): modified N2 low[2] -> refused with coefficient shown (" + n2Low2Key() + ")");
     std::printf("---- message (B) ----\n%s\n---------------------\n", msg.c_str());
     check(!speciesDB_checkInputField(dbM, 298.15, hB, rA.recordSha256, 0, "x.h5", dirsA, true, st, unv, msg),
           "mismatch is not allowed by env");
@@ -147,15 +167,16 @@ int main()
     {
         const auto d = speciesDB_diffRecord((runX / rA.recordFile).string(), dbB, 298.15);
         bool self = false;
-        for (const auto& x : d) if (has(x, "compat_hash") || has(x, "nasa9_low[2]")) self = true;
+        for (const auto& x : d) if (has(x, "compat_hash") || has(x, n2Low2Key())) self = true;
         check(self, "(b): swapped record content differs from the name/species");
     }
     // 記録内容の改竄 (係数を書き換えて compat_hash はそのまま) → 自己整合の不一致
     {
         std::string t = readAll(runA / rA.recordFile);
-        const std::string key = "nasa9_low: [";
+        // 最初の係数の行 (N2: 2 区間なら "nasa9_low: [", 段 3 から 3 区間なので nasa9_intervals の "      - [") の先頭係数の頭に 1 を足す
+        const std::string key = speciesDB_builtin().at("N2").nInt == 2 ? "nasa9_low: [" : "      - [";
         const size_t p = t.find(key);
-        t.insert(p + key.size(), "1");   // 先頭係数の頭に 1 を足す
+        t.insert(p + key.size(), "1");
         std::ofstream(runX / "edited.yaml", std::ios::binary) << t;
         const auto d = speciesDB_diffRecord((runX / "edited.yaml").string(), dbB, 298.15);
         bool self = false;

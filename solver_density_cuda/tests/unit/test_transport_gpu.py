@@ -22,7 +22,9 @@ forge を FORGE_TRANSPORT_PROBE=<states.txt> で起動する (main.cpp runTransp
   範囲: 単成分 (roY 無し)・重複 lump・実種 12 と上限 32・ゼロ分率、T = 200/253.15/400/500/600/700/1000/2000 K と
        各フィット・接続・NASA 区間の境界 (境界そのものと両隣の float)。
   (B)  (--base-forge) physProp.transport なしでは同一の固定入力 (seed の保存量; res_0 の T・ρ・roY がビット一致することを
-       確認してから) で vis_lam・thermCond が旧バイナリとビット一致 (viscMethod 1 の多成分 2 構成、viscMethod 0)。
+       確認してから) で vis_lam・thermCond が旧バイナリとビット一致 (viscMethod 1 の多成分 3 構成、viscMethod 0)。
+       旧バイナリと互換性ハッシュが違う構成 (段 3 #13-3 前のバイナリと内蔵 H2O/AR を含む構成) はビット一致を求めず差を記録し、
+       経路の同一性は熱物性が不変な構成 (seed の外部 DB、内蔵 N2/O2/CO2) で見る。
   (B2) viscMethod 2 + physProp.transport なし (多成分・単成分) は起動時エラー (res_0 を書かない)。
        2026-09-27 に viscMethod 2 を種ごとの輸送物性へ置き換え (plan §4.3c 案 C)、旧 kinetic 経路 (Wilke 共用 φ) を計算から
        外したので、以前の「viscMethod 2 の transport なしが旧バイナリとビット一致」はこの期待に変えた。
@@ -129,8 +131,8 @@ def fit_edges(ref):
             for kind in ("V", "C"):
                 for r in sp["fit"][kind]:
                     E |= {float(r[0]), float(r[1])}
-        if m == "kinetic":
-            E |= {sp["Tlo"], sp["Tmid"], sp["Thi"], 0.3 * sp["eps"], 100.0 * sp["eps"]}
+        if m == "kinetic":   # NASA-9 の全区間境界 (transport_reference の bounds; 段 3 #13-3 から 3 区間の種は 6000/20000 K も)
+            E |= set(sp["bounds"]) | {0.3 * sp["eps"], 100.0 * sp["eps"]}
     return sorted(E | set(pair_edges(ref).get("all", [])))
 
 
@@ -176,7 +178,7 @@ def species_edges(ref, r):
             for row in sp["fit"][kind]:
                 E |= {float(row[0]), float(row[1])}
     if m == "kinetic":
-        E |= {sp["Tlo"], sp["Tmid"], sp["Thi"], 0.3 * sp["eps"], 100.0 * sp["eps"]}
+        E |= set(sp["bounds"]) | {0.3 * sp["eps"], 100.0 * sp["eps"]}
     return sorted(E)
 
 
@@ -519,7 +521,7 @@ def species_breaks(ref, r):
         for kind in ("V", "C"):
             B |= set(fit_breaks(sp["fit"][kind]))
     if m == "kinetic":
-        B |= {sp["Tlo"], sp["Tmid"], sp["Thi"], 0.3 * sp["eps"], 100.0 * sp["eps"]}
+        B |= set(sp["bounds"]) | {0.3 * sp["eps"], 100.0 * sp["eps"]}
     return sorted(B)
 
 
@@ -780,13 +782,18 @@ def bit_identity(R, a):
     cases = [
         ("seed MIXDRY/H2O ext DB, viscMethod 1", dict(species=["MIXDRY", "H2O"], transport=None, keep_db_of_seed=True, visc=1)),
         ("builtin N2/H2O/O2/AR/CO2, viscMethod 1", dict(species=["N2", "H2O", "O2", "AR", "CO2"], transport=None, visc=1)),
+        # 段 3 (#13-3) で熱物性が不変な内蔵種だけの構成 (N2/O2/CO2 は 200–6000 K で Δ 0; 第 3 区間が増えただけ)
+        # 互換性ハッシュは第 3 区間の分だけ変わるが、値 (T・μ・λ) はビット一致を求める
+        ("builtin N2/O2/CO2, viscMethod 1", dict(species=["N2", "O2", "CO2"], transport=None, visc=1, values_unchanged=True)),
         ("seed MIXDRY/H2O ext DB, viscMethod 0", dict(species=["MIXDRY", "H2O"], transport=None, keep_db_of_seed=True, visc=0)),
     ]
     for tag, kw in cases:
-        outs = []
+        outs, hashes = [], []
         for which, binp in (("new", a.forge), ("old", a.base_forge)):
             d = R.make("bit_" + which + "_" + tag.split(",")[0].replace(" ", "_").replace("/", "-"), kw["species"], None,
                        visc=kw["visc"], keep_db_of_seed=kw.get("keep_db_of_seed", False), nstep=0)
+            rr = subprocess.run([binp, "--resolve-species"], cwd=d, env=R.env(), capture_output=True, text=True, timeout=600)
+            hashes.append((rr.stdout.strip().splitlines() or [""])[-1])
             r = subprocess.run([binp], cwd=d, env=R.env(), capture_output=True, text=True, timeout=600)
             open(os.path.join(d, "forge.log"), "w").write(r.stdout + r.stderr)
             f = os.path.join(d, "res_0.h5")
@@ -808,6 +815,16 @@ def bit_identity(R, a):
         nd = {k: int(np.count_nonzero(np.frombuffer(n[k].tobytes(), np.uint8) != np.frombuffer(o[k].tobytes(), np.uint8)))
               for k in outk} if have else {}
         rng = f"vis_lam [{n['vis_lam'].min():.4g}, {n['vis_lam'].max():.4g}]" if have else ""
+        if hashes[0] != hashes[1] and not kw.get("values_unchanged", False):
+            # 旧バイナリと熱物性データが違う (段 3 #13-3 の前後: 内蔵 H2O の MW・AR の第 2 区間)。同じ保存量から温度反転した T が変わるので
+            # ビット一致は求めず、差を記録する (経路の同一性は熱物性が不変な構成でビット一致を見る)
+            drel = {k: float(np.max(np.abs(n[k].astype(np.float64) - o[k].astype(np.float64)) / np.abs(o[k].astype(np.float64))))
+                    for k in ["T"] + outk} if have else {}
+            check(have and set(n) == set(o),
+                  f"B {tag}: species data differ from the base binary (compat {hashes[1][:16]} -> {hashes[0][:16]}, #13-3); "
+                  f"no bit identity required — max rel diff {', '.join(f'{k} {v:.2e}' for k, v in drel.items())}; "
+                  f"differing bytes {nd} over {len(n['T'])} CVs")
+            continue
         check(same_in and have and all(v == 0 for v in nd.values()),
               f"B {tag}: inputs {inputs} bit-identical {same_in}; vis_lam/thermCond differing bytes {nd} over {len(n['T'])} CVs ({rng})")
 

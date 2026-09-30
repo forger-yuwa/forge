@@ -66,6 +66,13 @@ static void writeDb(const fs::path& p, bool withBad = false)
     // Tmid 1500 の 2 区間型 (区切り以外は N2 の係数; 1500 K に段差がある)
     f << "TMID1500:\n  MW: 0.0280134\n  LJ_sigma: 3.621\n  LJ_eps_kB: 97.53\n  Tlo: 200.0\n  Tmid: 1500.0\n  Thi: 6000.0\n"
       << "  nasa9_low: " << arr(N2a[0], 9) << "\n  nasa9_high: " << arr(N2a[1], 9) << "\n";
+    // 2 区間 200/1000/6000 の N2・O2 (内蔵の先頭 2 区間の写し)。段 3 (#13-3) から内蔵 N2/O2/AR は CEA そのもの (3 区間) なので、
+    // 「区切りの違う 2 区間種と畳む」試験には 2 区間の写しを外部 DB で与える (内蔵そのものの lump は V2-type の case で見る)
+    for (const char* nm : {"N2", "O2"}) {
+        const SpeciesThermo b = speciesDB_builtin().at(nm);
+        f << nm << "B2:\n  MW: " << g17(b.MW) << "\n  LJ_sigma: " << g17(b.sigma_LJ) << "\n  LJ_eps_kB: " << g17(b.eps_kB)
+          << "\n  Tlo: 200.0\n  Tmid: 1000.0\n  Thi: 6000.0\n  nasa9_low: " << arr(b.coef[0], 9) << "\n  nasa9_high: " << arr(b.coef[1], 9) << "\n";
+    }
     // CEA の e- (298.15/1000/6000/20000; 3 区間とも同じ係数)
     f << "Eminus:\n  MW: 5.48579903e-07\n  LJ_sigma: 3.0\n  LJ_eps_kB: 10.0\n  Tbounds: [298.15, 1000.0, 6000.0, 20000.0]\n  nasa9_intervals:\n";
     for (int k = 0; k < 3; ++k) f << "    - " << arr(Ea, 9) << "\n";
@@ -243,11 +250,12 @@ int main(int argc, char** argv)
     // ---- (C) V3: 区切りの違う種を畳む ----
     struct LumpCase { std::string tag; std::vector<std::string> mem; std::vector<double> fr; std::string synth; int n; };
     const std::vector<LumpCase> cases = {
-        {"V3 N2(builtin 2-int) + N2CEA3 (3-int 200/1000/6000/20000)", {"N2", "N2CEA3"}, {0.6, 0.4}, SPECIES_LUMP_SYNTHESIS_UNION, 3},
-        {"V3 O2 + TMID1500 (Tmid 1000 vs 1500)", {"O2", "TMID1500"}, {0.3, 0.7}, SPECIES_LUMP_SYNTHESIS_UNION, 3},
-        {"V3 O2 + N2T298B (Tlo 200 vs 298.15)", {"O2", "N2T298B"}, {0.5, 0.5}, SPECIES_LUMP_SYNTHESIS_UNION, 3},
+        {"V3 N2B2 (2-int) + N2CEA3 (3-int 200/1000/6000/20000)", {"N2B2", "N2CEA3"}, {0.6, 0.4}, SPECIES_LUMP_SYNTHESIS_UNION, 3},
+        {"V3 O2B2 + TMID1500 (Tmid 1000 vs 1500)", {"O2B2", "TMID1500"}, {0.3, 0.7}, SPECIES_LUMP_SYNTHESIS_UNION, 3},
+        {"V3 O2B2 + N2T298B (Tlo 200 vs 298.15)", {"O2B2", "N2T298B"}, {0.5, 0.5}, SPECIES_LUMP_SYNTHESIS_UNION, 3},
         {"V3 N2T298 + Eminus (equal breakpoints 298.15/1000/6000/20000)", {"N2T298", "Eminus"}, {0.999, 0.001}, SPECIES_LUMP_SYNTHESIS, 3},
-        {"V2-type N2 + O2 + AR (builtin, equal breakpoints)", {"N2", "O2", "AR"}, {0.78, 0.21, 0.01}, SPECIES_LUMP_SYNTHESIS, 2},
+        // 内蔵そのもの: 段 3 (#13-3) から 3 区間 200/1000/6000/20000 で揃う (以前は 2 区間)
+        {"V2-type N2 + O2 + AR (builtin, equal breakpoints 200/1000/6000/20000)", {"N2", "O2", "AR"}, {0.78, 0.21, 0.01}, SPECIES_LUMP_SYNTHESIS, 3},
     };
     for (const auto& c : cases) {
         SpeciesLumpSpec lp; lp.name = "LMP"; lp.basis = "mole"; lp.members = c.mem; lp.fractions = c.fr;
@@ -263,7 +271,7 @@ int main(int argc, char** argv)
 
     // ---- (F) G1-f: 記録の書き → 読み → 再ハッシュ ----
     {
-        SpeciesLumpSpec lp; lp.name = "LMP"; lp.basis = "mole"; lp.members = {"O2", "TMID1500"}; lp.fractions = {0.3, 0.7};
+        SpeciesLumpSpec lp; lp.name = "LMP"; lp.basis = "mole"; lp.members = {"O2B2", "TMID1500"}; lp.fractions = {0.3, 0.7};
         const ResolvedSpeciesDB r = speciesDB_resolve({"LMP", "N2CEA3", "H2O"}, db.string(), {lp});
         for (double Tref : {0.0, 298.15}) {
             const fs::path d = dir / ("rec_nint_" + std::to_string(static_cast<int>(Tref)));
@@ -298,7 +306,7 @@ int main(int argc, char** argv)
             check(self && coef, "G1-f C++: edited 3rd-interval coefficient -> self-consistency broken and N2CEA3.nasa9_intervals[2][0] shown");
         }
         // 2 区間だけの記録: 従来の schema・外挿規約、本文に区間可変の行が無い
-        const ResolvedSpeciesDB r2 = speciesDB_resolve({"N2", "H2O", "TMID1500"}, db.string());
+        const ResolvedSpeciesDB r2 = speciesDB_resolve({"N2B2", "H2O", "TMID1500"}, db.string());   // 内蔵 N2 は段 3 から 3 区間
         const std::string ct2 = speciesDB_compatText(r2, 298.15);
         check(has(ct2, "schema: " SPECIES_RECORD_SCHEMA "\n") && has(ct2, "extrapolation: " SPECIES_RECORD_EXTRAPOLATION "\n")
               && !has(ct2, "coef[") && !has(ct2, "_nint"), "G1-f C++: 2-interval-only record keeps schema v1 and the 2-interval convention");

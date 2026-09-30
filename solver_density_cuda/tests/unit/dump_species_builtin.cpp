@@ -5,6 +5,8 @@
 //   (b) 名前解決 speciesDB_resolve({name}, "") の結果 (config が使う綴りと大小文字違い)
 //   (c) 内蔵種だけの互換性ハッシュ (thermoHrefTemp 0 / 298.15)
 //   (d) LJ: null の内蔵種 (#13-2) を kinetic 輸送・LJ の混合平均拡散に使ったときの起動時の可否
+//   `--eval N2,O2,... T1 T2 ...`: 内蔵種 (生の係数; datum なし) の cp_mass・h_mass・s0_mass を各 T で評価して JSON に書く
+//   (#13-3 の設計側 vs ソルバの照合; `thermo_d.cuh` の thermo_cp_mass / thermo_h_mass / thermo_s0_mass をそのまま使う)。
 //   比較と基準の保存は tests/unit/test_species_data_bitexact.py が行う (ここは出力だけ)。
 //
 // ビルド: test_species_data_bitexact.py がビルドする (共通データの埋め込みヘッダの生成を含む)。
@@ -14,6 +16,7 @@
 #include "input/solverConfig.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -46,8 +49,34 @@ static void entry(const SpeciesThermo& s)
     std::printf("}");
 }
 
-int main()
+static int evalMode(int argc, char** argv)
 {
+    const auto db = speciesDB_builtin();
+    std::vector<std::string> names;
+    for (std::string list = argv[2], tok; !list.empty();) {
+        const size_t c = list.find(',');
+        tok = list.substr(0, c);
+        names.push_back(tok);
+        list = (c == std::string::npos) ? "" : list.substr(c + 1);
+    }
+    std::vector<double> Ts;
+    for (int i = 3; i < argc; ++i) Ts.push_back(std::strtod(argv[i], nullptr));
+    std::printf("{\n");
+    for (size_t k = 0; k < names.size(); ++k) {
+        const SpeciesThermo& s = db.at(names[k]);
+        std::printf("%s  \"%s\": [", k ? ",\n" : "", names[k].c_str());
+        for (size_t i = 0; i < Ts.size(); ++i)
+            std::printf("%s[\"%a\", \"%a\", \"%a\"]", i ? ", " : "",
+                        thermo_cp_mass(s, Ts[i]), thermo_h_mass(s, Ts[i]), thermo_s0_mass(s, Ts[i]));
+        std::printf("]");
+    }
+    std::printf("\n}\n");
+    return 0;
+}
+
+int main(int argc, char** argv)
+{
+    if (argc >= 3 && std::string(argv[1]) == "--eval") return evalMode(argc, argv);
     const auto db = speciesDB_builtin();
     std::printf("{\n\"builtin\": {\n");
     bool first = true;

@@ -1,7 +1,7 @@
 r"""Semi-perfect (thermally perfect, frozen 組成) 気体モデル — NASA-9 多項式 (CEA)。
 
 forge 本体の内蔵 DB (`solver_density_cuda/input/speciesDB.cpp::speciesDB_builtin`, CEA
-McBride–Gordon 2002 の 2 区間 200–1000–6000 K) と**同じ共通データ** (`solver_density_cuda/data/species/forge_species_v1.yaml`) を読み、
+McBride–Gordon 2002 thermo.inp そのもの; 設計側はその先頭 2 区間 200–1000–6000 K だけを持つ) と**同じ共通データ** (`solver_density_cuda/data/species/forge_species_v1.yaml`) を読み、
 設計 (MOC・遷音速・面積比) と CFD (forge TP, `thermalMethod: 1`) の熱力学を一致させる。
 
 **MOC が γ に依存する箇所** (これだけ差し替えれば特性線法は thermally perfect でも成立):
@@ -36,8 +36,20 @@ SPECIES_DATA_FILE = Path(__file__).resolve().parents[3] / "solver_density_cuda" 
 SPECIES_DATA_SCHEMA = "forge_species_data_v1"
 
 
+# 設計側の温度域 (plan thermophysics-solver-owned-species-db §5.1 #13-3, 2026-10-01 決定 案 B)。共通データの種は
+# CEA thermo.inp そのもの (200–1000–6000 K の 2 区間、または 6000–20000 K を足した 3 区間) で、設計側は**先頭 2 区間だけ**を持つ。
+# 6000 K 超を第 2 区間の外挿で黙って評価しない: 内蔵種の cp/h/s° を T > DESIGN_T_MAX で評価すると例外
+# (composition.ResolvedSpeciesDB.species_* と evaluate/ic.py)。ソルバの温度反転も 6000 K でクランプする
+# (`cuda_forge/dependentVariables_d.cu` DEPVAR_TMAX)。T < 200 K の扱い (端で cp 固定・h 線形) は従来どおり。
+DESIGN_T_BOUNDS = (200.0, 1000.0, 6000.0)
+DESIGN_T_MAX = DESIGN_T_BOUNDS[-1]
+_DESIGN_T_BOUNDS_3 = DESIGN_T_BOUNDS + (20000.0,)
+
+
 def _load_design_species(path=SPECIES_DATA_FILE):
-    """共通データから (SPECIES_NASA9, LJ_PARAMS, 原子組成) を従来の形・順序・大文字キーで返す。"""
+    """共通データから (SPECIES_NASA9, LJ_PARAMS, 原子組成) を従来の形・順序・大文字キーで返す。
+    区間は [200,1000],[1000,6000] (+ 任意の [6000,20000]) だけを受け、先頭 2 区間を low/high に取る (第 3 区間は捨てる)。
+    それ以外の区間構成 (1 区間・非標準の区切り) は ValueError。"""
     import yaml
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     if not isinstance(raw, dict) or raw.get("schema") != SPECIES_DATA_SCHEMA:
@@ -52,10 +64,11 @@ def _load_design_species(path=SPECIES_DATA_FILE):
         if e.get("phase") != "gas":
             raise ValueError(f"{path}: {e['id']} の phase {e.get('phase')} は内蔵種に使えない (gas のみ)")
         iv = e["intervals"]
-        # 設計側は 2 区間 200–1000–6000 K 固定 (T_MID, ResolvedSpeciesDB の既定区切り)。区間可変は plan #6。
-        if len(iv) != 2 or [float(iv[0]["Tlo"]), float(iv[0]["Thi"]), float(iv[1]["Tlo"]), float(iv[1]["Thi"])] \
-                != [200.0, 1000.0, 1000.0, 6000.0]:
-            raise ValueError(f"{path}: {e['id']} の温度区間が 200–1000–6000 K の 2 区間でない")
+        # 設計側は 2 区間 200–1000–6000 K (T_MID, ResolvedSpeciesDB の既定区切り)。CEA の第 3 区間 6000–20000 K は持たない。
+        bounds = [float(iv[0]["Tlo"])] + [float(v["Thi"]) for v in iv]
+        contiguous = all(float(iv[k]["Tlo"]) == float(iv[k - 1]["Thi"]) for k in range(1, len(iv)))
+        if not contiguous or tuple(bounds) not in (DESIGN_T_BOUNDS, _DESIGN_T_BOUNDS_3):
+            raise ValueError(f"{path}: {e['id']} の温度区間 {bounds} が 200–1000–6000 K (+ 任意の 6000–20000 K) でない")
         low, high = [float(v) for v in iv[0]["coeffs"]], [float(v) for v in iv[1]["coeffs"]]
         if len(low) != 9 or len(high) != 9:
             raise ValueError(f"{path}: {e['id']} の係数は 9 個ずつ必要")
@@ -65,6 +78,14 @@ def _load_design_species(path=SPECIES_DATA_FILE):
         if e.get("atoms") is not None:
             atoms[key] = dict(e["atoms"])
     return nasa9, lj, atoms
+
+
+def check_design_T(T, what="") -> None:
+    """内蔵種 (共通データの先頭 2 区間) を T > DESIGN_T_MAX で評価しようとしたら例外 (第 2 区間を外挿しない; §5.1 #13-3)。"""
+    Tmax = float(np.nanmax(np.asarray(T, dtype=float))) if np.size(T) else -np.inf
+    if Tmax > DESIGN_T_MAX:
+        raise ValueError(f"{what}: T = {Tmax!r} K は設計側の温度域 (≤ {DESIGN_T_MAX} K) を超える。"
+                         "内蔵種は CEA の先頭 2 区間だけを持ち、6000 K 超を外挿しない (plan thermophysics-solver-owned-species-db #13-3)")
 
 
 SPECIES_NASA9, LJ_PARAMS, SPECIES_ATOMS = _load_design_species()
