@@ -364,6 +364,10 @@ void speciesTransportDB_resolve(ResolvedSpeciesDB& db, const std::vector<std::pa
                 }
                 if (e["LJ_dipole"]) dip = e["LJ_dipole"].as<double>();
             } else {
+                if (!speciesDB_hasLJ(rs.thermo)) {   // 内蔵の LJ: null 種 (#13-2)
+                    throw std::runtime_error(where + ": built-in species '" + nm + "' has no Lennard-Jones data (LJ: null in "
+                                             + speciesDB_builtinDataName() + "); choose cea or fit for it, or give LJ_sigma/LJ_eps_kB in speciesDBFile");
+                }
                 auto it = builtinDipoles().find(rs.identity);
                 if (it != builtinDipoles().end()) dip = it->second;
             }

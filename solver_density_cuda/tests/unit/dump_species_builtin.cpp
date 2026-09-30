@@ -4,11 +4,14 @@
 //   (a) speciesDB_builtin() の全キー (別名込み) の MW・温度区切り・LJ・全係数
 //   (b) 名前解決 speciesDB_resolve({name}, "") の結果 (config が使う綴りと大小文字違い)
 //   (c) 内蔵種だけの互換性ハッシュ (thermoHrefTemp 0 / 298.15)
+//   (d) LJ: null の内蔵種 (#13-2) を kinetic 輸送・LJ の混合平均拡散に使ったときの起動時の可否
 //   比較と基準の保存は tests/unit/test_species_data_bitexact.py が行う (ここは出力だけ)。
 //
 // ビルド: test_species_data_bitexact.py がビルドする (共通データの埋め込みヘッダの生成を含む)。
 // =============================================================================
 #include "input/speciesDB.hpp"
+#include "input/speciesTransportDB.hpp"
+#include "input/solverConfig.hpp"
 
 #include <cstdio>
 #include <string>
@@ -81,6 +84,48 @@ int main()
         const ResolvedSpeciesDB r = speciesDB_resolve(set, "");
         std::printf("%s  \"%s|0\": \"%s\",\n  \"%s|298.15\": \"%s\"", first ? "" : ",\n",
                     key.c_str(), speciesDB_compatHash(r, 0.0).c_str(), key.c_str(), speciesDB_compatHash(r, 298.15).c_str());
+        first = false;
+    }
+    std::printf("\n},\n\"lj_use\": {\n");
+    // (d) LJ: null の内蔵種 (#13-2) を LJ を読む使い方に回したときの起動時の可否 ("ok" / "rejected: <メッセージ>")。
+    //     kinetic 輸送 (speciesTransportDB_resolve) と LJ の混合平均拡散 (speciesDB_resolve(cfg); 化学種 2 以上・viscMethod != 0・
+    //     speciesDiffusionMethod 1)。test_species_data_bitexact.py が期待と照合する。
+    auto verdict = [](auto&& fn) -> std::string {
+        try { fn(); return "ok"; } catch (const std::exception& e) {
+            std::string m = e.what(), o;
+            for (char c : m) { if (c == '"' || c == '\\') o += '\\'; o += c; }
+            return "rejected: " + o;
+        }
+    };
+    auto kinetic = [&](const std::string& nm) {
+        return verdict([&] {
+            ResolvedSpeciesDB r = speciesDB_resolve(std::vector<std::string>{"N2", nm}, "");
+            speciesTransportDB_resolve(r, {{"N2", "cea"}, {nm, "kinetic"}}, "");
+        });
+    };
+    auto diffusion = [&](const std::vector<std::string>& names, const std::vector<SpeciesLumpSpec>& lumps, int visc, int diff) {
+        return verdict([&] {
+            solverConfig cfg;
+            cfg.thermalMethod = 2; cfg.speciesNames = names; cfg.speciesLumps = lumps;
+            cfg.nSpecies = static_cast<int>(names.size()); cfg.viscMethod = visc; cfg.speciesDiffusionMethod = diff;
+            (void)speciesDB_resolve(cfg);
+        });
+    };
+    SpeciesLumpSpec mixKr;
+    mixKr.name = "MIXKR"; mixKr.basis = "mole"; mixKr.members = {"N2", "Kr"}; mixKr.fractions = {0.5, 0.5};
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"kinetic Kr (LJ null)", kinetic("Kr")},
+        {"kinetic N (LJ from the Cantera table)", kinetic("N")},
+        {"kinetic O2", kinetic("O2")},
+        {"diffusion N2+Kr visc1 diff1", diffusion({"N2", "Kr"}, {}, 1, 1)},
+        {"diffusion N2+Kr visc1 diff0", diffusion({"N2", "Kr"}, {}, 1, 0)},
+        {"diffusion N2+Kr visc0 diff1", diffusion({"N2", "Kr"}, {}, 0, 1)},
+        {"diffusion MIXKR(N2,Kr)+O2 visc1 diff1", diffusion({"MIXKR", "O2"}, {mixKr}, 1, 1)},
+        {"diffusion N2+N visc1 diff1", diffusion({"N2", "N"}, {}, 1, 1)},
+    };
+    first = true;
+    for (const auto& c : cases) {
+        std::printf("%s  \"%s\": \"%s\"", first ? "" : ",\n", c.first.c_str(), c.second.c_str());
         first = false;
     }
     std::printf("\n}\n}\n");

@@ -89,9 +89,13 @@ struct ResolvedSpeciesDB {
 std::string speciesDB_identityKey(const std::string& dbKey, bool fromFile);
 
 // 内蔵 DB を返す。値は共通データ data/species/forge_species_v1.yaml (ビルド時に埋め込み、起動時に解析) の
-// legacy_builtin: solver の種で、キーは canonical ID と別名の両方 (Ar/AR, He/HE, H2O/h2o/WATER, AIR/Air/air)。
-// 共通データが壊れていれば std::runtime_error。
+// phase: gas の全エントリ (plan #13-2; 以前は legacy_builtin: solver の 7 種だけ) で、キーは canonical ID と別名の両方
+// (Ar/AR, He/HE, H2O/h2o/WATER, AIR/Air/air)。共通データが壊れている・名前が大小文字無視で重複していれば std::runtime_error。
+// LJ: null (輸送データなし) の種は sigma_LJ = eps_kB = 0 (speciesDB_hasLJ が false)。
 std::map<std::string, SpeciesThermo> speciesDB_builtin();
+
+// LJ パラメータを持つか (内蔵の LJ: null 種と、LJ の無い構成種を含む lump は false)。
+inline bool speciesDB_hasLJ(const SpeciesThermo& s) { return s.sigma_LJ > 0.0 && s.eps_kB > 0.0; }
 
 // 埋め込んだ共通データのファイル名と全文の SHA-256 (来歴・ログ用。互換性ハッシュには入れない)。
 const std::string& speciesDB_builtinDataName();

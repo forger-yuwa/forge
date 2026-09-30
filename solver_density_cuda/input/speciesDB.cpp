@@ -99,8 +99,9 @@ int fractionIndex(const std::string& key, char prefix)
 std::unique_ptr<ResolvedSpeciesDB> g_current;   // speciesDB_init の保持先
 
 // ---- 共通 species データ (埋め込み YAML) の解析 ----
-//   スキーマは data/species/forge_species_v1.yaml の冒頭。#4 (値は変えない) では legacy_builtin に solver を含む
-//   エントリだけを内蔵種とする (移行前のハードコード 7 種と同じ集合)。
+//   スキーマは data/species/forge_species_v1.yaml の冒頭。phase: gas の全エントリを内蔵種とする (plan #13-2; #4〜#13-1 は
+//   legacy_builtin に solver を含む 7 種だけだった。legacy_builtin は履歴の欄として残り、ここでは読まない)。
+//   phase: condensed は parseCondensedData が読む (気液ペアの液相)。
 #define FORGE_SPECIES_DATA_SCHEMA "forge_species_data_v1"
 
 struct BuiltinEntry {
@@ -123,22 +124,30 @@ std::vector<BuiltinEntry> parseBuiltinData()
     }
     if (!root["species"] || !root["species"].IsSequence()) throw std::runtime_error(where + ": 'species' list is missing");
     std::vector<BuiltinEntry> out;
-    std::map<std::string, std::string> seen;   // 名前 (ID と別名) → 所有 ID。完全一致で重複を拒否
+    // 名前 (ID と別名) の一意性: 完全一致の重複は拒否、大小文字だけ違う名前も別のエントリどうしなら拒否する (plan §4.9)。
+    // 名前解決 (findSpecies) は完全一致の次に大小文字無視で引くので、ここで一意でないと引く先が決まらない
+    // (thermo.inp には CO/Co・CS2/Cs2 などが実在する)。同じエントリ内の大小文字違い (H2O/h2o, AIR/Air/air) は許す。
+    std::map<std::string, std::string> seen;     // 名前 → 所有 ID (完全一致)
+    std::map<std::string, std::string> seenCI;   // 大文字化した名前 → 最初の綴り (所有 ID は seen から)
     for (const auto& n : root["species"]) {
         const std::string id = n["id"].as<std::string>();
         auto claim = [&](const std::string& nm) {
             auto it = seen.find(nm);
             if (it != seen.end()) throw std::runtime_error(where + ": name '" + nm + "' is used by both '" + it->second + "' and '" + id + "'");
+            auto ci = seenCI.find(toUpper(nm));
+            if (ci != seenCI.end() && seen[ci->second] != id) {
+                throw std::runtime_error(where + ": name '" + nm + "' of '" + id + "' differs only in letter case from '" + ci->second + "' of '"
+                                         + seen[ci->second] + "' (names are looked up case-insensitively, so they must be unique ignoring case)");
+            }
             seen[nm] = id;
+            if (ci == seenCI.end()) seenCI[toUpper(nm)] = nm;
         };
         claim(id);
         std::vector<std::string> aliases;
         if (n["aliases"]) for (const auto& a : n["aliases"]) { aliases.push_back(a.as<std::string>()); claim(aliases.back()); }
-        bool solver = false;
-        if (n["legacy_builtin"]) for (const auto& t : n["legacy_builtin"]) solver = solver || (t.as<std::string>() == "solver");
-        if (!solver) continue;
         const std::string phase = n["phase"] ? n["phase"].as<std::string>() : "";
-        if (phase != "gas") throw std::runtime_error(where + ": '" + id + "' phase '" + phase + "' (only gas is supported as a built-in species)");
+        if (phase == "condensed") continue;   // 液相は parseCondensedData
+        if (phase != "gas") throw std::runtime_error(where + ": '" + id + "' phase '" + phase + "' (gas or condensed)");
         const YAML::Node iv = n["intervals"];
         // 区間可変 (1..THERMO_MAX_INTERVALS; plan #13-1)。上限を超える種は起動時に拒否する。
         if (!iv || !iv.IsSequence() || iv.size() < 1) {
@@ -163,12 +172,18 @@ std::vector<BuiltinEntry> parseBuiltinData()
         }
         const double MW = n["MW"].as<double>();
         if (!(MW > 0.0) || !std::isfinite(MW)) throw std::runtime_error(where + ": '" + id + "' has invalid MW");
-        // LJ: null は「輸送データなし」。内蔵種での扱い (輸送に使うと拒否) は plan #6/#7 なので、現時点では内蔵種に置かない。
+        // LJ: null は「輸送データなし」: sigma_LJ = eps_kB = 0 で置き (speciesDB_hasLJ が false)、LJ を読む使い方
+        // (physProp.transport の kinetic、LJ の混合平均拡散) は起動時に拒否する (speciesTransportDB_resolve / speciesDB_resolve(cfg))。
         const YAML::Node lj = n["LJ"];
-        if (!lj || lj.IsNull()) {
-            throw std::runtime_error(where + ": '" + id + "' has no LJ data (LJ: null); built-in species without transport data are not supported yet (plan #6/#7)");
+        double sigma = 0.0, eps = 0.0;
+        if (lj && !lj.IsNull()) {
+            if (!lj.IsMap() || !lj["sigma"] || !lj["eps_kB"]) throw std::runtime_error(where + ": '" + id + "' LJ needs sigma and eps_kB (or LJ: null)");
+            sigma = lj["sigma"].as<double>(); eps = lj["eps_kB"].as<double>();
+            if (!(sigma > 0.0) || !(eps > 0.0) || !std::isfinite(sigma) || !std::isfinite(eps)) {
+                throw std::runtime_error(where + ": '" + id + "' has invalid LJ parameters");
+            }
         }
-        out.push_back({id, aliases, makeSpecies(MW, lj["sigma"].as<double>(), lj["eps_kB"].as<double>(), nInt, Tb.data(), a)});
+        out.push_back({id, aliases, makeSpecies(MW, sigma, eps, nInt, Tb.data(), a)});
     }
     return out;
 }
@@ -181,7 +196,7 @@ const std::vector<BuiltinEntry>& builtinEntries()
 }
 
 // ---- 共通データの凝縮相エントリ (phase: condensed; plan #10 §4.8) ----
-//   内蔵の気相種 (legacy_builtin: solver) とは別に読む。気液ペアの気相 (pair_of) は内蔵の気相種でなければならない。
+//   内蔵の気相種 (phase: gas) とは別に読む。気液ペアの気相 (pair_of) は内蔵の気相種でなければならない。
 #define SPECIES_CONDENSED_BELOW "linear_cp_fd_at_Tlo"   // 実装が受け付ける延長規約 (condensationProperties_d.cuh cond_latent_pair_make)
 #define SPECIES_CONDENSED_ABOVE "hold_at_Thi"
 
@@ -243,8 +258,8 @@ int ResolvedSpeciesDB::index(const std::string& name) const
 
 std::map<std::string, SpeciesThermo> speciesDB_builtin()
 {
-    // 共通データ (data/species/forge_species_v1.yaml, ビルド時に埋め込み) の solver 集合を、canonical ID と
-    // 別名の両方をキーにして返す (移行前のハードコード表と同じキー集合・同じ値; tests/unit/test_species_data_bitexact.py)。
+    // 共通データ (data/species/forge_species_v1.yaml, ビルド時に埋め込み) の気相種を、canonical ID と別名の両方をキーにして返す
+    // (移行前の 7 種は同じキー・同じ値のまま、#13-2 で CEA 由来の種が加わった; tests/unit/test_species_data_bitexact.py)。
     std::map<std::string, SpeciesThermo> db;
     for (const auto& e : builtinEntries()) {
         db[e.id] = e.sp;
@@ -368,11 +383,15 @@ SpeciesThermo synthesizeLump(const std::string& name, const std::vector<double>&
     }
     thermo_set_intervals(s, static_cast<int>(Tb.size()) - 1, Tb.data(), a);
     double sig = 0.0, eps = 0.0;
+    bool allLJ = true;
     for (size_t k = 0; k < m.size(); ++k) {
         const double Yk = x[k]*m[k].MW/MW;
         sig += Yk*m[k].sigma_LJ;
         eps += Yk*m[k].eps_kB;
+        allLJ = allLJ && speciesDB_hasLJ(m[k]);
     }
+    // LJ の無い構成種 (内蔵の LJ: null 種) を含む lump は LJ なし (0) にする (平均に 0 を混ぜた値を使わせない; #13-2)
+    if (!allLJ) { sig = 0.0; eps = 0.0; }
     s.sigma_LJ = sig; s.eps_kB = eps;
     s.h_datum = 0.0;
     s.invMW = 1.0/MW;
@@ -596,6 +615,18 @@ ResolvedSpeciesDB speciesDB_resolve(const solverConfig& cfg)
     // CPG (thermalMethod != 2) は種 DB に H2O が無いので共通データの内蔵気相を使う。凝縮 OFF・N2 では何もしない (記録はバイト不変)。
     if (cfg.condensation == 1 && cfg.condModel == 1) {
         speciesDB_attachCondensed(db, "H2O(L)", cfg.thermalMethod == 2 ? cfg.condGasSpeciesName : std::string(), cfg.thermalMethod == 2);
+    }
+    // LJ の無い種 (内蔵の LJ: null 種・それを含む lump; #13-2) は LJ の混合平均拡散 (speciesTransport_d の M4: 化学種 2 以上・
+    // viscMethod != 0・speciesDiffusionMethod 1 で thermo_Dmix_species_f が σ・ε を読む) に使えない。起動時に止める。
+    if (cfg.nSpecies >= 2 && cfg.viscMethod != 0 && cfg.speciesDiffusionMethod == 1) {
+        std::string miss;
+        for (int s = 0; s < db.size(); ++s) if (!speciesDB_hasLJ(db.species[s])) miss += (miss.empty() ? "" : ", ") + db.names[s];
+        if (!miss.empty()) {
+            throw std::runtime_error("[speciesDB] species " + miss + " have no Lennard-Jones data (LJ: null in the built-in species data, "
+                                     "or a lump with such a constituent), but the kinetic-theory mixture diffusion (physProp.speciesDiffusionMethod 1, "
+                                     "the default with viscMethod != 0) needs sigma/eps. Use speciesDiffusionMethod: 0 (constant Schmidt number), "
+                                     "or give LJ_sigma/LJ_eps_kB for them in speciesDBFile.");
+        }
     }
     // 種ごとの輸送物性の出所 (physProp.transport; plan #5t2 段 1)。書かれていなければ何もしない (記録・ハッシュは従来のまま)。
     if (!cfg.speciesTransport.empty()) speciesTransportDB_resolve(db, cfg.speciesTransport, cfg.speciesDBFile);

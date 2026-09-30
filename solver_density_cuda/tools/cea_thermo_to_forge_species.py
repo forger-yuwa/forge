@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
-"""CEA `thermo.inp` → forge 共通データ形式 (forge_species_data) の種エントリを作る生成器 (段 0 は監査の dry run のみ)。
+"""CEA `thermo.inp` → forge 共通データ形式 (forge_species_data) の種エントリを作る生成器。
 
-plans/active/thermophysics-solver-owned-species-db.md §4.9・§5.1 #13-0。仕様 methods/thermophysics.md。
+plans/active/thermophysics-solver-owned-species-db.md §4.9・§5.1 #13-0 (監査)・#13-2 (生成と内蔵拡大)。仕様 methods/thermophysics.md。
 
   python3 solver_density_cuda/tools/cea_thermo_to_forge_species.py --thermo PATH/thermo.inp --audit [--audit-out FILE.md]
       [--sern-root /home/sano/work/forge-sern-design]
+  python3 solver_density_cuda/tools/cea_thermo_to_forge_species.py --thermo PATH/thermo.inp --write    # 生成ブロックを書き換える
+  python3 solver_density_cuda/tools/cea_thermo_to_forge_species.py --thermo PATH/thermo.inp --check    # 往復のビット一致を検査
 
-- 段 0 (#13-0) は `--audit` で監査表 (Markdown) を出すだけ。共通データ (`data/species/forge_species_v1.yaml`) は書き換えない。
-  YAML の書き出しは段 2 で使う関数 `dump_entries_yaml` として持つ (CLI からは呼ばない)。
+- 段 0 (#13-0) の `--audit` は監査表 (Markdown) を出すだけ。共通データは書き換えない。
+- 段 2 (#13-2) の `--write` は共通データ (`data/species/forge_species_v1.yaml`) の**生成ブロック** (`GENERATED_BEGIN`〜`GENERATED_END`
+  の行の間) だけを置き換える。対象は輸送データ (trans.inp 由来 66 種) と thermo.inp に同名 (大小文字区別) がある種のうち、
+  生成ブロックの外 (手保守のエントリ: 既存 7 種・`H2O(L)`・CO/H2/OH/H/NO/O) に無いもの。`e-` は除外 (区切り 298.15 K; §4.9)、
+  CEA の `Air` (reactants 節) は輸送データに無いので対象外。区間は CEA の区間数・区切りのまま (1〜3 区間)。
+  手保守のエントリは一字も変えない (既存 7 種を CEA そのものへ寄せるのは段 3)。
+- LJ は CEA に無い。出典は 1 つに固定する: `cea_thermo_to_species_db.py` の `LJ` 表 (Cantera h2o2.yaml / gri30.yaml の
+  transport 値)。表に無い種は `LJ: null` (輸送データなし; kinetic 輸送・LJ 混合平均拡散に使うとソルバが起動時に拒否する)。
+  双極子はこの表に無いので書かない。
+- `--check` は (a) 輸送データと thermo.inp に同名の全種 (`e-` を含む) を `to_forge_entry` → `dump_entries_yaml` → YAML 読み戻しで
+  区間・全係数・MW が thermo.inp のパース値とビット一致、(b) 共通データの生成ブロックが今の生成結果と文字列一致、
+  (c) 生成ブロックの各エントリの区間・係数・MW が thermo.inp とビット一致、を見て、不一致があれば非ゼロ終了する。
 - 入力の読み方 (thermo.inp の NASA-9 固定桁; McBride, Zehe, Gordon NASA/TP-2002-211556 App. A):
     記録 1 行目   種名 (1–24 桁; 空白を含まない) + 注記
     記録 2 行目   区間数 [0:2]・参照日付コード [3:9]・元素 5 組 × (記号 2 + 個数 6) [10:50]・相 [50:52] (0 = 気相)・
@@ -113,45 +125,190 @@ def sha256_file(path):
 
 
 # ---------------------------------------------------------------------------------------------------------------
-# forge 共通データ形式のエントリ (段 2 で使う)
+# forge 共通データ形式のエントリ
 # ---------------------------------------------------------------------------------------------------------------
 def mw_kg(rec):
     """g/mol の欄文字列を 10 進のまま kg/mol に (x * 1e-3 の二重丸めを避ける)。"""
     return float(rec["MW_str"] + "e-3")
 
 
-def to_forge_entry(rec):
-    """1 記録 → forge_species_data のエントリ dict (LJ・aliases・pair_of などの手保守欄は付けない)。区間は CEA のまま。"""
+def to_forge_entry(rec, lj=None):
+    """1 記録 → forge_species_data のエントリ dict (aliases・pair_of などの手保守欄は付けない)。区間は CEA のまま。
+    lj: {sigma, eps_kB, source} または None (輸送データなし)。"""
     return {
         "id": rec["name"],
         "aliases": [],
         "phase": "gas" if rec["phase"] == 0 else "condensed",
         "MW": mw_kg(rec),
         "intervals": [{"Tlo": lo, "Thi": hi, "coeffs": list(a)} for lo, hi, a in rec["intervals"]],
-        "LJ": None,
+        "LJ": lj,
         "atoms": dict(rec["atoms"]) or None,
         "source": {"thermo": f"CEA thermo.inp ({rec['date']}; {rec['comment']})"},
     }
 
 
+def _num(v):
+    """double を YAML の数値として書く。repr (往復が一致する最短表記) に、指数表記で小数点が無いときだけ '.0' を足す
+    (PyYAML は YAML 1.1 の規則で '1e-05' を文字列に読むため。'1.0e-05' は同じ double)。"""
+    r = repr(float(v))
+    if "e" in r and "." not in r:
+        m, e = r.split("e")
+        r = f"{m}.0e{e}"
+    return r
+
+
+def _yq(s):
+    """YAML の二重引用符文字列 (\\ と " だけをエスケープ)。"""
+    return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def dump_entries_yaml(entries, out):
-    """エントリ列を forge_species_data の `species:` 以下の形で書く (数値は repr = double の往復が一致する最短表記)。"""
+    """エントリ列を forge_species_data の `species:` 以下の形で書く (数値は `_num` = double の往復が一致する最短表記)。"""
     w = out.write
     for e in entries:
-        w(f'  - id: "{e["id"]}"\n')
-        w("    aliases: [" + ", ".join(f'"{a}"' for a in e["aliases"]) + "]\n")
+        w(f'  - id: {_yq(e["id"])}\n')
+        w("    aliases: [" + ", ".join(_yq(a) for a in e["aliases"]) + "]\n")
         w(f"    phase: {e['phase']}\n")
-        w(f"    MW: {e['MW']!r}\n")
+        w(f"    MW: {_num(e['MW'])}\n")
         w("    intervals:\n")
         for iv in e["intervals"]:
-            w(f"      - Tlo: {iv['Tlo']!r}\n        Thi: {iv['Thi']!r}\n")
-            w("        coeffs: [" + ", ".join(repr(v) for v in iv["coeffs"]) + "]\n")
-        w("    LJ: null\n")
+            w(f"      - Tlo: {_num(iv['Tlo'])}\n        Thi: {_num(iv['Thi'])}\n")
+            w("        coeffs: [" + ", ".join(_num(v) for v in iv["coeffs"]) + "]\n")
+        lj = e.get("LJ")
+        if lj:
+            w(f"    LJ: {{sigma: {_num(lj['sigma'])}, eps_kB: {_num(lj['eps_kB'])}, source: {_yq(lj['source'])}}}\n")
+        else:
+            w("    LJ: null\n")
         if e["atoms"]:
-            w("    atoms: {" + ", ".join(f"{k}: {v!r}" for k, v in e["atoms"].items()) + "}\n")
+            w("    atoms: {" + ", ".join(f"{k}: {_num(v)}" for k, v in e["atoms"].items()) + "}\n")
         else:
             w("    atoms: null\n")
-        w(f'    source: {{thermo: "{e["source"]["thermo"]}"}}\n')
+        w(f'    source: {{thermo: {_yq(e["source"]["thermo"])}}}\n')
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# 段 2 (#13-2): 共通データの生成ブロック
+# ---------------------------------------------------------------------------------------------------------------
+GENERATED_BEGIN = "  # ---- BEGIN generated by tools/cea_thermo_to_forge_species.py --write"
+GENERATED_END = "  # ---- END generated by tools/cea_thermo_to_forge_species.py"
+EXCLUDED = ("e-",)          # 区切り 298.15 K (非標準) で内蔵から除外 (plan §4.9)
+LJ_SOURCE = "Cantera h2o2.yaml / gri30.yaml transport (tools/cea_thermo_to_species_db.py の LJ 表)"
+
+
+def _lj_table():
+    """LJ の出典 (1 つに固定): cea_thermo_to_species_db.py の LJ 表と別名表をそのまま使う (写さない)。"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_cea_thermo_to_species_db", os.path.join(HERE, "cea_thermo_to_species_db.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m.LJ, m.ALIAS
+
+
+def lj_for(name, table, alias):
+    """種名 → LJ エントリ ({sigma, eps_kB, source}) または None。引き方は cea_thermo_to_species_db.py の to_entry と同じ。"""
+    key = alias.get(name, name.upper() if name.upper() in table else name)
+    if key not in table:
+        return None
+    sig, eps = table[key]
+    return {"sigma": float(sig), "eps_kB": float(eps), "source": LJ_SOURCE}
+
+
+def _load_yaml_text(text):
+    import yaml
+    return yaml.safe_load(text) or {}
+
+
+def target_names(recs, transport_path):
+    """輸送データの種のうち thermo.inp に同名 (大小文字区別) がある種 (輸送データの順) と、名前 → 記録 (最初の記録)。"""
+    by = {}
+    for r in recs:
+        by.setdefault(r["name"], r)
+    tr_ids = [str(s["id"]) for s in _load_yaml_text(open(transport_path, encoding="utf-8").read())["species"]]
+    return [s for s in tr_ids if s in by], by
+
+
+def split_generated(text):
+    """共通データのテキスト → (前, 生成ブロックの中身, 後)。マーカ行は前・後に含める。マーカが無い・重複は例外。"""
+    lines = text.splitlines(keepends=True)
+    b = [k for k, L in enumerate(lines) if L.startswith(GENERATED_BEGIN)]
+    e = [k for k, L in enumerate(lines) if L.startswith(GENERATED_END)]
+    if len(b) != 1 or len(e) != 1 or not b[0] < e[0]:
+        raise SystemExit(f"共通データに生成ブロックのマーカ (BEGIN {len(b)} 個, END {len(e)} 個) が 1 組ない")
+    return "".join(lines[:b[0] + 1]), "".join(lines[b[0] + 1:e[0]]), "".join(lines[e[0]:])
+
+
+def generated_entries(thermo_path, species_path, transport_path):
+    """生成ブロックに入れるエントリ列 (手保守のエントリに無い種だけ) とその YAML テキスト、対象名、名前 → 記録。"""
+    import io
+    recs = parse_thermo_inp(thermo_path)
+    names, by = target_names(recs, transport_path)
+    pre, _, post = split_generated(open(species_path, encoding="utf-8").read())
+    manual = {str(e["id"]) for e in (_load_yaml_text(pre + post).get("species") or [])}
+    table, alias = _lj_table()
+    ents = [to_forge_entry(by[s], lj_for(s, table, alias)) for s in names if s not in manual and s not in EXCLUDED]
+    buf = io.StringIO()
+    dump_entries_yaml(ents, buf)
+    return ents, buf.getvalue(), names, by
+
+
+def write_generated(thermo_path, species_path, transport_path):
+    ents, body, _, _ = generated_entries(thermo_path, species_path, transport_path)
+    pre, _, post = split_generated(open(species_path, encoding="utf-8").read())
+    with open(species_path, "w", encoding="utf-8") as f:
+        f.write(pre + body + post)
+    print(f"wrote {len(ents)} generated entries to {species_path}")
+
+
+def _iv_of(e):
+    return [(iv["Tlo"], iv["Thi"], list(iv["coeffs"])) for iv in e["intervals"]]
+
+
+def _bits_equal(a, b):
+    """float の列・入れ子をビットで比較 (型も float であること; YAML が文字列・整数に読んだら不一致)。"""
+    if isinstance(a, (list, tuple)):
+        return isinstance(b, (list, tuple)) and len(a) == len(b) and all(_bits_equal(x, y) for x, y in zip(a, b))
+    return isinstance(a, float) and isinstance(b, float) and a.hex() == b.hex()
+
+
+def check_generated(thermo_path, species_path, transport_path):
+    """往復のビット一致 (a)(b)(c) (docstring)。失敗数を返す。"""
+    import io
+    fail = 0
+
+    def ck(ok, what):
+        nonlocal fail
+        print(("[PASS] " if ok else "[FAIL] ") + what)
+        fail += 0 if ok else 1
+
+    ents, body, names, by = generated_entries(thermo_path, species_path, transport_path)
+    table, alias = _lj_table()
+
+    def same_as_cea(e, r):
+        return (r is not None and _bits_equal(e["MW"], mw_kg(r))
+                and _bits_equal(_iv_of(e), [(lo, hi, a) for lo, hi, a in r["intervals"]]))
+
+    # (a) 同名の全種 (e- を含む) を書いて読み戻す
+    buf = io.StringIO()
+    dump_entries_yaml([to_forge_entry(by[s], lj_for(s, table, alias)) for s in names], buf)
+    back = _load_yaml_text("species:\n" + buf.getvalue())["species"]
+    bad = [s for s, e in zip(names, back) if str(e["id"]) != s or not same_as_cea(e, by[s])]
+    nint = [len(by[s]["intervals"]) for s in names]
+    ck(len(back) == len(names) and not bad,
+       f"(a) 往復: 輸送データ ∩ thermo.inp の {len(names)} 種 (2 区間 {nint.count(2)}, 3 区間 {nint.count(3)}, 他 "
+       f"{len(nint) - nint.count(2) - nint.count(3)}) の区間・全係数 ({sum(9 * n for n in nint)} 個)・MW が thermo.inp とビット一致"
+       + (f" — 不一致 {bad}" if bad else ""))
+    # (b) 共通データの生成ブロック = 今の生成結果
+    _, cur_body, _ = split_generated(open(species_path, encoding="utf-8").read())
+    ck(cur_body == body, f"(b) 共通データの生成ブロック ({len(ents)} 種) が生成結果と文字列一致")
+    # (c) 共通データの生成ブロックを YAML として読み、thermo.inp と比較
+    got = _load_yaml_text("species:\n" + cur_body).get("species") or []
+    bad = [str(e["id"]) for e in got if not same_as_cea(e, by.get(str(e["id"])))]
+    ck(not bad and len(got) == len(ents),
+       f"(c) 共通データの生成ブロック {len(got)} 種の区間・全係数・MW が thermo.inp とビット一致" + (f" — 不一致 {bad}" if bad else ""))
+    lj = [str(e["id"]) for e in got if e.get("LJ")]
+    print(f"[INFO] 生成ブロック: LJ あり {len(lj)} 種 ({', '.join(lj)}), LJ: null {len(got) - len(lj)} 種; "
+          f"除外 {list(EXCLUDED)}; 手保守 (生成ブロック外) で CEA と同名 {[s for s in names if s not in EXCLUDED and s not in {str(e['id']) for e in got}]}")
+    return fail
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -489,16 +646,25 @@ def sern_external_section(sern_root, six, by_name, cur):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--thermo", default=DEFAULT_THERMO, help="CEA thermo.inp (既定: <repo>/.venv-cea/nasa_cea/thermo.inp)")
-    ap.add_argument("--species-data", default=DEFAULT_SPECIES, help="現行の共通データ (比較対象; 書き換えない)")
+    ap.add_argument("--species-data", default=DEFAULT_SPECIES, help="共通データ (--audit/--check は読むだけ、--write は生成ブロックを書き換える)")
     ap.add_argument("--transport-data", default=DEFAULT_TRANSPORT, help="輸送データ (種の一覧)")
     ap.add_argument("--audit", action="store_true", help="監査表 (Markdown) を出す (段 0)")
     ap.add_argument("--audit-out", help="監査表の出力先 (既定: 標準出力)")
+    ap.add_argument("--write", action="store_true", help="共通データの生成ブロックを書き換える (段 2)")
+    ap.add_argument("--check", action="store_true", help="往復のビット一致と生成ブロックの一致を検査する (段 2)")
     ap.add_argument("--sern-root", help="SERN 設計ワークツリー (外部 DB の生成元を import して照合; 読むだけ)")
     a = ap.parse_args()
     if not os.path.exists(a.thermo):
         raise SystemExit(f"thermo.inp が無い: {a.thermo} (--thermo で指定)")
+    if a.write:
+        write_generated(a.thermo, a.species_data, a.transport_data)
+        return
+    if a.check:
+        fail = check_generated(a.thermo, a.species_data, a.transport_data)
+        print("ALL PASS" if fail == 0 else f"FAIL ({fail})")
+        sys.exit(1 if fail else 0)
     if not a.audit:
-        raise SystemExit("段 0 (#13-0) は --audit のみ (共通データの書き出しは段 2)")
+        raise SystemExit("--audit / --write / --check のどれかを指定する")
     text = audit(a.thermo, a.species_data, a.transport_data, a.sern_root)
     if a.audit_out:
         with open(a.audit_out, "w", encoding="utf-8") as f:

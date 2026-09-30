@@ -38,7 +38,7 @@ $$ \frac{H_s}{R_u T} = -a_0 T^{-2} + a_1 \frac{\ln T}{T} + a_2 + \frac{a_3}{2} T
 
 $$ \frac{S^{\circ}_s}{R_u} = -\frac{a_0}{2} T^{-2} - a_1 T^{-1} + a_2 \ln T + a_3 T + \frac{a_4}{2} T^2 + \frac{a_5}{3} T^3 + \frac{a_6}{4} T^4 + a_8 $$
 
-積分定数 $a_7,a_8$ により、エンタルピーは**標準生成エンタルピーを含む絶対エンタルピー基準**となる。係数は温度区間で切り替える (区間数は種ごとに 1〜3 = `THERMO_MAX_INTERVALS`; 現在の内蔵 7 種は 2 区間 200/1000/6000 K、CEA の多くの気相種は 200/1000/6000/20000 K の 3 区間)。
+積分定数 $a_7,a_8$ により、エンタルピーは**標準生成エンタルピーを含む絶対エンタルピー基準**となる。係数は温度区間で切り替える (区間数は種ごとに 1〜3 = `THERMO_MAX_INTERVALS`; 移行前からの内蔵 7 種と CO/H2/OH/H/NO/O は 2 区間 200/1000/6000 K、CEA から生成した内蔵種 (2026-10-01, plan #13-2) は CEA の区間のまま 200/1000/6000 K の 2 区間か 200/1000/6000/20000 K の 3 区間)。
 区間 $k$ は $T_k\le T<T_{k+1}$ (**区切りちょうどは上の区間**、最後の区間は $T_{\mathrm{hi}}$ を含む) で、2 区間では従来の「$T<T_{\mathrm{mid}}$ で低温側」と同じ (plan thermophysics-solver-owned-species-db #13-1)。範囲外は端でクランプし、エンタルピーは $h(T)\approx h(T_c)+c_p(T_c)(T-T_c)$ と線形外挿して衝撃波での暴走を防ぐ。
 
 **6000 K 超の float 精度 (既知の限界; plan thermophysics-solver-owned-species-db §6 V3/V3f の再スコープ, 2026-10-01)**: CEA の第 3 区間 (6000–20000 K) の係数は
@@ -172,7 +172,7 @@ datum は `thermo_add_a7` で全区間の $a_7$ に同じ定数を足す。float
 - `thermo_T_from_h` — 比エンタルピーからの反転 (Roe 平均状態の有効 γ 用)。
 
 #### DB 構築・アップロード (`thermo_d.cu`)
-- 内蔵 DB に代表化学種 (N2/O2/Ar/CO2/He/AIR) の NASA-9 + LJ を保持。
+- 内蔵 DB は共通データの全気相種 (下の「内蔵 species DB の一覧と出典」; 2026-10-01 から 61 種) の NASA-9 + LJ (LJ の無い種あり) を保持。
 - `thermo_init_db(cfg)`: `cfg.speciesNames` 順に host 配列を構築し、`cfg.speciesDBFile` (yaml) があれば上書き、device global memory (`cudaMalloc`) へアップロード。
 - アクセサ `thermo_species_device_ptr()` / `thermo_num_species()` / `thermo_species_host()`。化学種データは translation unit をまたぐため `__constant__` ではなく device pointer をカーネル引数で渡す (`-rdc` 非依存)。
 - `main.cpp` の `initializeSimulation` で `cfg.read()` 直後に `thermo_init_db(cfg)` を呼ぶ。
@@ -186,7 +186,9 @@ datum は `thermo_add_a7` で全区間の $a_7$ に同じ定数を足す。float
 
 #### 内蔵 species DB の一覧と出典
 
-値の正本は共通データ `solver_density_cuda/data/species/forge_species_v1.yaml` (§1b.1; ビルド時に埋め込み、`speciesDB_builtin()` が構築)。下表の 7 種は同ファイルで `legacy_builtin` に `solver` を含むエントリで、エントリごとの出典 (`source`・`LJ.source`) と CEA `thermo.inp` 直読みとの既知の差 (`deviations`) も同ファイルにある。既知の差は H2O の MW (0.0180153 vs 18.01528 g/mol)、He の MW (0.0040026 vs 4.002602 g/mol)、Ar の高温区間 (単原子理想 vs thermo.inp の a0 = 20.105…) で、寄せ先は plan #5 で決める。設計側だけの 6 種 (H2 OH H NO O CO; SERN の燃焼生成物) も同ファイルにあり、LJ は設計側 `LJ_PARAMS` の値 (CEA 変換ツール `cea_thermo_to_species_db.py` の Cantera 由来表とは H2/H/O/OH/NO/CO で異なる; plan #5)。各値の出典は下表の通り (NASA-9 係数 / Lennard-Jones パラメータで出典が異なる)。外部 yaml (`physProp.speciesDBFile`, [`thermo_d.cu:142`](../solver_density_cuda/cuda_forge/thermo_d.cu#L142)) で上書き/追加できる。温度域は全種共通で $T_{\mathrm{lo}}/T_{\mathrm{mid}}/T_{\mathrm{hi}}=200/1000/6000$ K。
+値の正本は共通データ `solver_density_cuda/data/species/forge_species_v1.yaml` (§1b.1; ビルド時に埋め込み、`speciesDB_builtin()` が構築)。**内蔵種は同ファイルの `phase: gas` の全エントリ** (2026-10-01, plan #13-2; それ以前は下表の 7 種 = `legacy_builtin` に `solver` を含むエントリだけ)。内訳は (a) 下表の 7 種、(b) CO/H2/OH/H/NO/O (SERN の燃焼生成物; 2 区間、LJ は設計側 `LJ_PARAMS`)、(c) **CEA 生成ブロック 48 種** (下記)。下表の 7 種はエントリごとの出典 (`source`・`LJ.source`) と CEA `thermo.inp` 直読みとの既知の差 (`deviations`) も同ファイルにある。既知の差は H2O の MW (0.0180153 vs 18.01528 g/mol)、He の MW (0.0040026 vs 4.002602 g/mol)、Ar の高温区間 (単原子理想 vs thermo.inp の a0 = 20.105…) で、寄せ先は plan #5 で決める。設計側だけの 6 種 (H2 OH H NO O CO; SERN の燃焼生成物) も同ファイルにあり、LJ は設計側 `LJ_PARAMS` の値 (CEA 変換ツール `cea_thermo_to_species_db.py` の Cantera 由来表とは H2/H/O/OH/NO/CO で異なる; plan #5)。各値の出典は下表の通り (NASA-9 係数 / Lennard-Jones パラメータで出典が異なる)。外部 yaml (`physProp.speciesDBFile`, [`thermo_d.cu:142`](../solver_density_cuda/cuda_forge/thermo_d.cu#L142)) で上書き/追加できる。(a)(b) の温度域は $T_{\mathrm{lo}}/T_{\mathrm{mid}}/T_{\mathrm{hi}}=200/1000/6000$ K (CEA の 3 区間へ寄せるのは plan #13-3)。
+
+**CEA 生成ブロック (c)** (2026-10-01, plan #13-2): 同ファイル末尾の `BEGIN generated`〜`END generated` の間は `tools/cea_thermo_to_forge_species.py --write` が CEA `thermo.inp` から生成する (手で編集しない; `--check` で往復のビット一致を検査)。対象は輸送データ (CEA `trans.inp` 由来 66 種) のうち `thermo.inp` に同名 (大小文字区別) があり (a)(b) に無い 48 種 (例 `CH4`・`C2H2,acetylene`・`N`・`NH3`・`Kr`・`Xe`・`SF6`)。区間数・区切り・係数・MW は `thermo.inp` のまま (2 区間 38 種・3 区間 10 種)。`e-` (区切り 298.15 K) は除外、CEA の `Air` (reactants 節) は取り込まない (空気は `AIR` か lump)。`trans.inp` にある CFC 5 種 (`CCLF3` など) は `thermo.inp` に無いので熱物性なし。LJ は CEA に無く、出典を `tools/cea_thermo_to_species_db.py` の LJ 表 (Cantera h2o2.yaml / gri30.yaml の transport 値) の 1 つに固定した: 表にある `N`・`NH3`・`NO2`・`N2O` の 4 種だけが LJ を持ち (双極子なし)、他の 44 種は `LJ: null`。**LJ: null の種は LJ を読む使い方で起動を拒否する**: `physProp.transport` の `kinetic` (`cea`・`fit` は使える)、LJ の混合平均拡散 (化学種 2 以上・`viscMethod` ≠ 0・`speciesDiffusionMethod` 1 = 既定。構成種に LJ: null を含む lump も同じ)。名前 (ID と別名) は大小文字を無視しても全エントリで一意でなければ起動を拒否する (`thermo.inp` には `CO`/`Co` などが実在; 名前解決が完全一致の次に大小文字無視で引くため)。
 
 | species (別名) | MW [kg/mol] | $\sigma_{LJ}$ [Å] | $\varepsilon/k_B$ [K] | NASA-9 出典 | LJ 出典 | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -221,7 +223,7 @@ datum は `thermo_add_a7` で全区間の $a_7$ に同じ定数を足す。float
 - 現行の `AIR` (cp/R 3.5 一定) は CEA の `Air` と別の互換擬似種として残す。
 - 外部 DB (`speciesDBFile`) による上書き・追加は残す。凝縮 ON のとき、凝縮種の気相エントリを気液ペアの基準が確認できない外部 DB で上書きすることは拒否する。
 
-> **実装済み (2026-09-27, plan #4; 値は移行前の内蔵値のまま)**: 共通データは `solver_density_cuda/data/species/forge_species_v1.yaml` (schema `forge_species_data_v1`)。第一段では移行前の内蔵経路の値 (C++ 内蔵 7 種、設計側 `SPECIES_NASA9` 11 種・`LJ_PARAMS`・原子組成) だけを移した (CEA 全種表への拡張は #5/#6)。C++ はビルド時に `cmake/embed_species_data.cmake` でヘッダへ埋め込み、起動時に yaml-cpp でパースする (実行時にファイルを読まない; ソルバと `convertGmshToForge` は同じ `speciesDB_builtin()`)。Python は `design/forge_design/gas/semiperfect.py` が同じファイルを直接読み、従来の大文字キー (`Ar`→`AR`) で `SPECIES_NASA9`/`LJ_PARAMS`/`SPECIES_ATOMS` を作る。各エントリは canonical ID (大小文字を区別)・別名・相・MW・2 温度区間の NASA-9 係数・LJ (null 可)・元素組成・出典・CEA 直読みとの既知の差 (`deviations`) を持つ。過渡の欄 `legacy_builtin` で、各読み手は移行前と同じ内蔵種の集合だけを読む。名前解決は C++ が完全一致 (外部 DB のキー、canonical ID、別名) → 従来の大小文字無視 (互換)、Python は従来の大文字化のまま。canonical ID への移行と完全一致化は #8、区間可変は #6、LJ の無い種の輸送拒否は #6/#7。移行前後のビット一致は `tests/unit/test_species_data_bitexact.py` (基準 `tests/unit/data/species_builtin_baseline_v0.json`) で確認できる。
+> **実装済み (2026-09-27, plan #4; 値は移行前の内蔵値のまま)**: 共通データは `solver_density_cuda/data/species/forge_species_v1.yaml` (schema `forge_species_data_v1`)。第一段では移行前の内蔵経路の値 (C++ 内蔵 7 種、設計側 `SPECIES_NASA9` 11 種・`LJ_PARAMS`・原子組成) だけを移した (CEA 全種表への拡張は #5/#6)。C++ はビルド時に `cmake/embed_species_data.cmake` でヘッダへ埋め込み、起動時に yaml-cpp でパースする (実行時にファイルを読まない; ソルバと `convertGmshToForge` は同じ `speciesDB_builtin()`)。Python は `design/forge_design/gas/semiperfect.py` が同じファイルを直接読み、従来の大文字キー (`Ar`→`AR`) で `SPECIES_NASA9`/`LJ_PARAMS`/`SPECIES_ATOMS` を作る。各エントリは canonical ID (大小文字を区別)・別名・相・MW・2 温度区間の NASA-9 係数・LJ (null 可)・元素組成・出典・CEA 直読みとの既知の差 (`deviations`) を持つ。過渡の欄 `legacy_builtin` で、各読み手は移行前と同じ内蔵種の集合だけを読む (**2026-10-01 (#13-2) からソルバはこの欄で絞らず全気相種を読む**; Python の `SPECIES_NASA9` と `composition.solver_builtin_names` は今も欄で絞る)。名前解決は C++ が完全一致 (外部 DB のキー、canonical ID、別名) → 従来の大小文字無視 (互換)、Python は従来の大文字化のまま。canonical ID への移行と完全一致化は #8、区間可変は #6、LJ の無い種の輸送拒否は #6/#7。移行前後のビット一致は `tests/unit/test_species_data_bitexact.py` (基準 `tests/unit/data/species_builtin_baseline_v0.json`) で確認できる。
 
 #### 1b.2 lump (擬似種) の指定と起動時合成
 

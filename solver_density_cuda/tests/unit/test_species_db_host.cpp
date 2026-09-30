@@ -148,7 +148,9 @@ int main()
             return thermo_same_coeffs(a, b) && a.sigma_LJ == b.sigma_LJ && a.eps_kB == b.eps_kB;
         };
         const auto b = speciesDB_builtin();
-        check(b.size() == 13, "builtin keys: 7 canonical IDs + 6 aliases (" + std::to_string(b.size()) + ")");
+        // #13-2: 内蔵は共通データの全気相種 = 61 ID (移行前の 7 種 + CO/H2/OH/H/NO/O + CEA 生成ブロック 48 種) + 別名 6
+        check(b.size() == 67 && b.count("Kr") == 1 && b.count("C2H2,acetylene") == 1 && b.count("e-") == 0 && b.count("H2O(L)") == 0,
+              "builtin keys: 61 gas IDs + 6 aliases, no e-/H2O(L) (" + std::to_string(b.size()) + ")");
         const std::vector<std::pair<std::string, std::string>> aliases = {
             {"AR", "Ar"}, {"HE", "He"}, {"h2o", "H2O"}, {"WATER", "H2O"}, {"Air", "AIR"}, {"air", "AIR"}};
         for (const auto& a : aliases) {
