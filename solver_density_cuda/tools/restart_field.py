@@ -26,6 +26,8 @@ SRC が未検証 (属性なし / `species_input_unverified=1`) で宛先が TP (
 宛先を解決できない (旧バイナリ) ときは**既定で書き込まずに停止** (ソルバと同じ規約, #3c)。許可はその実行だけの
 `FORGE_ALLOW_UNVERIFIED_SPECIES=1` か `--force-species` で、そのとき DST の属性は消す (宛先のハッシュで埋めない;
 ソルバ側でも未検証として扱われ、その run にも同じ許可が要る)。CPG は対象外。
+ただし印付きの SRC (`species_input_unverified=1`) で `species_hash` = 宛先ハッシュなら、ソルバ (入力場照合の一致分岐) と同じく
+許可なしで通し、DST に同じハッシュと印を継承する (#3d; 印は消さない)。ハッシュ不一致の印付きは上と同じく停止。
 """
 import argparse, os, sys
 import h5py
@@ -129,6 +131,6 @@ with h5py.File(a.src, "r") as s, h5py.File(a.dst, "r" if a.dry_run else "r+") as
         for n, rel in narrowed:
             print(f"    {n:<10} 相対 {rel:.3e}")
     fsp.commit_inherit(d, species_plan)
-    print(f"species 属性  : {'継承 (species_input_unverified=0)' if species_plan else 'なし (未検証のまま)'}")
+    print(f"species 属性  : {('継承 (species_input_unverified=%d)' % species_plan['species_input_unverified']) if species_plan else 'なし (未検証のまま)'}")
     print(f"VERDICT: OK ({len(moved)} 量を移した"
           f"{'、うち ' + str(len(narrowed)) + ' 量は型の縮小で丸めあり' if narrowed else '、SRC とビット一致'})")

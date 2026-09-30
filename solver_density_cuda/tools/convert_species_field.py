@@ -46,6 +46,8 @@ plans/active/thermophysics-cea-mole-fraction-species.md §2 (forge 本体) / §4
   変換器が使う宛先の物性 (forge_species.run_thermo の熱物性 + datum) が宛先の記録と一致することを確かめてから、**変換の成功後に宛先のハッシュを付ける**。
   入力が未検証 (属性なし / `species_input_unverified=1`)・宛先を解決できないときは**既定で書き込まずに停止** (ソルバと同じ規約, #3c)。
   許可はその実行だけの `FORGE_ALLOW_UNVERIFIED_SPECIES=1` か `--force-species` で、そのとき変換後も未検証 (属性なし)。
+  ただし印付きの入力 (`species_input_unverified=1`) で場の `species_hash` = SRC run の設定を解決したハッシュなら、ソルバと同じく
+  許可なしで通し、変換後に宛先のハッシュと印 (`species_input_unverified=1`) を付ける (#3d)。
 - SRC: res_*.h5 (原始量 P,T,Ux,.. + Y{s}) か input h5 (保存量 roY{s})。DST: 同一メッシュ・同一 CV 数の input h5。
   ro/roU/roe/roK/roOmega・凝縮モーメント `rog_*/roQ*_*` (凝縮種が同名のとき) も index コピーする。
 - 両 run dir (`--src-run/--dst-run` 省略時は h5 の隣) の `solverConfig.yaml` と熱物性 (ソルバの記録 `resolved_species_*.yaml`、
@@ -837,7 +839,8 @@ def main():
         fsp.write_species_attrs(d, species_plan["attrs"])
     print(f"[convert] wrote {a.dst}: {moved}")
     print("[convert] species attributes: " + (f"destination species_hash {species_plan['attrs']['species_hash'][:16]} "
-          "(species_input_unverified=0)" if species_plan["attrs"] else "none (input unverified -> output unverified)"))
+          f"(species_input_unverified={species_plan['attrs']['species_input_unverified']})" if species_plan["attrs"]
+          else "none (input unverified -> output unverified)"))
     print("[convert] SUMMARY: all checks passed (finite, ρ>0, ΣY, " + ("T, roXi range; reinit: composition re-initialized)" if lossy else "real-species mass, total water, T, roXi range)"))
 
 

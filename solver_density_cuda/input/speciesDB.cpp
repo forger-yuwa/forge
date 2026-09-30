@@ -672,12 +672,13 @@ std::string canonicalKeyCI(const std::string& n)
     return up;
 }
 
-// 気液ペアの基準契約: 熱力学に効く値 (MW・区間・全区間の 9 係数) の最初の差 (空 = 一致)。LJ・datum・invMW は見ない。
-std::string firstThermoDiff(const SpeciesThermo& a, const SpeciesThermo& b)
+// 気液ペアの基準契約: 熱力学に効く値 (MW・区間・全区間の 9 係数) の最初の差 (key 空 = 一致)。LJ・datum・invMW は見ない。
+struct FirstThermoDiff { std::string key, a, b; };
+FirstThermoDiff firstThermoDiff(const SpeciesThermo& a, const SpeciesThermo& b)
 {
-    std::string r;
+    FirstThermoDiff r;
     thermoDiff(a, b, false, [&](const std::string& key, const std::string& x, const std::string& y) {
-        if (r.empty()) r = key + " " + x + " vs built-in " + y;
+        if (r.key.empty()) r = {key, x, y};
     });
     return r;
 }
@@ -726,13 +727,26 @@ void speciesDB_attachCondensed(ResolvedSpeciesDB& db, const std::string& id, con
         }
         // 気液ペアの基準契約 (§4.8, 2 回目 M2): 液相 H2O(L) は内蔵の気相 H2O と同じ絶対基準 (CEA) のペア。外部 DB が気相を
         // 上書きしていても値が内蔵と完全に同じなら整合を確かめられるので通し、違えば拒否する (L がその差だけずれるため)。
-        const std::string diff = firstThermoDiff(db.species[gi], ge->sp);
-        if (!diff.empty()) {
-            throw std::runtime_error(where + ": the condensing gas '" + db.names[gi] + "' comes from " + (file ? "speciesDBFile" : db.source[gi])
-                                     + " and differs from the built-in gas '" + ce->pairOf + "' that the liquid phase pairs with (" + diff
-                                     + "). The latent heat L = h_v - h_l needs the gas and liquid on the same absolute (CEA) basis; "
-                                     "a gas entry that cannot be checked against the pair is refused with condensation ON "
-                                     "(remove the gas override from speciesDBFile, or give it exactly the built-in coefficients and MW).");
+        // 拒否は属性の未検証とは別物 (物性の契約) なので FORGE_ALLOW_UNVERIFIED_SPECIES / --force-species では通さない
+        // (この検査は起動直後の speciesDB_init で走り、入力場の照合より前)。移行先は 2 つ (#13-3 判断 (b), 2026-10-01)。
+        const FirstThermoDiff diff = firstThermoDiff(db.species[gi], ge->sp);
+        if (!diff.key.empty()) {
+            const std::string src = file ? "speciesDBFile" : db.source[gi];
+            throw std::runtime_error(where + ": the condensing gas '" + db.names[gi] + "' comes from " + src
+                                     + " and differs from the built-in gas '" + ce->pairOf + "' that the liquid phase pairs with:\n"
+                                     + "    " + db.names[gi] + "." + diff.key + ": " + src + " " + diff.a + " vs built-in " + diff.b + "\n"
+                                     + "  The latent heat L = h_v - h_l needs the gas and liquid on the same absolute (CEA) basis, so a gas "
+                                     "entry that differs from the pair is refused with condensation ON. This is a property contract, not an "
+                                     "unverified field: FORGE_ALLOW_UNVERIFIED_SPECIES=1 / --force-species do not bypass it.\n"
+                                     "  Migrate the config by either:\n"
+                                     "    (1) removing '" + db.names[gi] + "' from speciesDBFile (the built-in '" + ce->pairOf
+                                     + "' is used; the record shows source: builtin), or\n"
+                                     "    (2) writing physProp.species in lump notation ([{name: <lump>, lump: {<species>: <mole fraction>, ...}, "
+                                     "basis: mole}, " + db.names[gi] + "]) without speciesDBFile (the lump is synthesised at startup and '"
+                                     + ce->pairOf + "' is built-in).\n"
+                                     "  Fields written with the old entry carry another species_hash: continue from them with "
+                                     "tools/convert_species_field.py (or tools/restart_field.py --force-species, then "
+                                     "FORGE_ALLOW_UNVERIFIED_SPECIES=1 for that solver run).");
         }
         c.gasIndex = gi; c.gasName = db.names[gi]; c.gas = db.species[gi];
     }

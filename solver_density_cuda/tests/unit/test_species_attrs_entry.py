@@ -11,9 +11,16 @@ SRC の res には「ソルバが書いたのと同じ」属性を付ける (記
        N2.nasa9_low[2] を表示、DST の保存量と属性は書き換わらない (d: 起動前の宛先解決)
   (a)  保存場だけを別ディレクトリへ (記録なし) → 照合不能で停止; --force-species で写すが属性は付かない
   (a)  不一致 + --force-species → 写すが属性は付かない
-  (i)  SRC 属性なし / species_input_unverified=1 (宛先 TP) → 既定で停止し DST の保存量・属性は不変 (#3c: ソルバと同じ規約)、
+  (i)  SRC 属性なし (宛先 TP) → 既定で停止し DST の保存量・属性は不変 (#3c: ソルバと同じ規約)、
        案内は「IC を属性を付ける処理で作り直す / その実行だけ FORGE_ALLOW_UNVERIFIED_SPECIES=1」の 2 通り。
        FORGE_ALLOW_UNVERIFIED_SPECIES=1 / --force-species → 写し、DST の既存属性を消す (species_input_unverified も付けない)
+  (m)  印付きの SRC (species_input_unverified=1、species_hash = 宛先ハッシュ; ソルバが許可付きの実行で書く場と同じ属性) →
+       許可なしで通り、DST に同じハッシュと印 (species_input_unverified=1) を継承 (#3d: ソルバの fieldHash == own 分岐と同じ規則)。
+       許可 (環境変数 / --force-species) を付けても印は消えない。SRC の記録が隣に無くても宛先の記録で通る (ソルバも記録を見ない)。
+       継承した DST からもう一度 restart_field → 許可なしで通り印を保持。
+       印付き + ハッシュ不一致 (宛先 DB の N2 low[2] +0.001) → 既定で停止 (DST 不変)
+  (p)  宛先が凝縮 ON で外部 DB の気相 H2O が内蔵と違う (旧 MW 0.0180153) → 気液ペアの契約で --resolve-species が失敗し、
+       検証済み SRC に --force-species / FORGE_ALLOW_UNVERIFIED_SPECIES=1 を付けても停止 (DST 不変、H2O.MW と移行先 2 つを表示)
   (n)  宛先に solverConfig.yaml が無い (CPG か TP か判定できない) + 未検証 SRC → 既定で停止
   (cpg) 宛先が CPG (thermalMethod 0) + 属性なし SRC → 属性の対象外なので既定で通る (属性なし)
   (x)  interp_field: 宛先が H2O を内蔵 DB で持つ (同一係数) → 記録で照合して継承 (旧: 設定の署名で「照合不能」拒否)
@@ -22,7 +29,9 @@ SRC の res には「ソルバが書いたのと同じ」属性を付ける (記
        旧バイナリが手元に無ければ --resolve-species の文字列を含まない偽バイナリ (起動されたら印を残すスクリプト) で代える
   (c)  convert_species_field: 検証済み入力 → 変換後に宛先のハッシュ (記録は宛先 run に書かれ完全性一致)、未検証入力 → 既定で停止
        (DST 不変)、FORGE_ALLOW_UNVERIFIED_SPECIES=1 で属性なし、
-       場の記録と SRC run の設定が違う (N2 low[2]) → 書き込み前に拒否
+       場の記録と SRC run の設定が違う (N2 low[2]) → 書き込み前に拒否。
+       印付き入力 (ハッシュ = SRC config) → 許可なしで変換し宛先のハッシュと印 (species_input_unverified=1)、
+       印付き入力で SRC config が違う (N2 low[2]) → 既定で停止
 規約: [PASS]/[FAIL]、失敗があれば非ゼロ終了。
 """
 import argparse, hashlib, os, shutil, subprocess, sys, tempfile
@@ -160,7 +169,7 @@ def main():
         check(rc == 0 and attrs(os.path.join(d, "in.h5")) == {}, f"(a) same with --force-species -> copies without attributes (rc={rc})")
 
         # (i) 未検証の SRC → 既定で停止 (DST 不変); 許可 (環境変数 / --force-species) で写し、DST の既存属性を消す
-        for unv, label in ((None, "no attributes"), (1, "species_input_unverified=1")):
+        for unv, label in ((None, "no attributes"),):
             s2 = run_dir(f"src_unv{unv}", h5="res_10.h5", ro=ro0)
             if unv is not None:
                 fs.write_species_attrs(os.path.join(s2, "res_10.h5"), dict(src_attrs, species_input_unverified=1))
@@ -184,6 +193,63 @@ def main():
                 rc, out = tool(t, os.path.join(s2, "res_10.h5"), dst, "--force-species")
                 check(rc == 0 and attrs(dst) == {}, f"(i) {t}: SRC {label} + --force-species -> copies without attributes (rc={rc})",
                       out[-600:])
+
+        # (m) 印付きの SRC でハッシュ一致 → 許可なしで通り印を継承 (#3d; ソルバの fieldHash == own 分岐と同じ規則)
+        sm = run_dir("src_marked", h5="res_10.h5", ro=ro0)
+        smres = os.path.join(sm, "res_10.h5")
+        fs.write_species_attrs(smres, dict(src_attrs, species_input_unverified=1))
+        shutil.copy(os.path.join(src, r["record_file"]), sm)
+        for t in ("restart_field.py", "interp_field.py"):
+            for extra, env_extra, how, tag in (((), None, "no permission", "none"), ((), ALLOW, "FORGE_ALLOW_UNVERIFIED_SPECIES=1", "env"),
+                                               (("--force-species",), None, "--force-species", "force")):
+                d = run_dir(f"marked_{t[:-3]}_{tag}")
+                dst = os.path.join(d, "in.h5")
+                before = values(dst)
+                rc, out = tool(t, smres, dst, *extra, env_extra=env_extra)
+                at = attrs(dst)
+                rec, why = fs.find_record(dst)
+                check(rc == 0 and at.get("species_hash") == r["hash"] and at.get("species_input_unverified") == 1
+                      and rec is not None and not same_values(before, values(dst)),
+                      f"(m) {t}: marked SRC, same hash, {how} -> copies, DST keeps hash and mark (species_input_unverified=1) (rc={rc})",
+                      out[-800:])
+        # 継承した DST (印付き) から、もう一度 restart_field (許可なし) → 通り印を保持
+        d1 = os.path.join(root, "marked_restart_field_none")
+        d2 = run_dir("marked_chain2")
+        rc, out = tool("restart_field.py", os.path.join(d1, "in.h5"), os.path.join(d2, "in.h5"))
+        at = attrs(os.path.join(d2, "in.h5"))
+        check(rc == 0 and at.get("species_hash") == r["hash"] and at.get("species_input_unverified") == 1,
+              f"(m) restart_field from the inherited (marked) DST, no permission -> passes, mark kept (rc={rc})", out[-600:])
+        # SRC の記録が隣に無い印付きの場 → 宛先の記録 (同じハッシュ) で通る
+        lonem = os.path.join(root, "lone_marked"); os.makedirs(lonem); shutil.copy(smres, lonem)
+        d = run_dir("marked_lone_dst")
+        rc, out = tool("restart_field.py", os.path.join(lonem, "res_10.h5"), os.path.join(d, "in.h5"))
+        at = attrs(os.path.join(d, "in.h5"))
+        rec, why = fs.find_record(os.path.join(d, "in.h5"))
+        check(rc == 0 and at.get("species_hash") == r["hash"] and at.get("species_input_unverified") == 1 and rec is not None,
+              f"(m) marked SRC without its record next to it -> passes with the destination record, mark kept (rc={rc})", out[-600:])
+        # 印付き + ハッシュ不一致 → 既定で停止 (DST 不変)
+        for t in ("restart_field.py", "interp_field.py"):
+            d = run_dir("marked_bump_" + t[:-3], bump=True)
+            dst = os.path.join(d, "in.h5")
+            fs.write_species_attrs(dst, src_attrs)
+            before, at0 = values(dst), attrs(dst)
+            rc, out = tool(t, smres, dst)
+            check(rc != 0 and "REFUSED" in out and "N2.nasa9_low[2]" in out and same_values(before, values(dst)) and attrs(dst) == at0,
+                  f"(m) {t}: marked SRC, destination hash differs (N2 low[2]) -> stops, DST unchanged (rc={rc})", out[-800:])
+
+        # (p) 宛先が凝縮 ON で外部 DB の気相 H2O が内蔵と違う → 許可 (--force-species / 環境変数) でも通らない
+        dp = run_dir("pair_dst")
+        open(os.path.join(dp, "solverConfig.yaml"), "a").write(
+            "condensation: {condensation: 1, nCondSpecies: 1, condModel: 1, condGasSpecies: 1, condensationSpecies: H2O}\n")
+        dst = os.path.join(dp, "in.h5")
+        before, at0 = values(dst), attrs(dst)
+        for extra, env_extra, how in ((("--force-species",), None, "--force-species"), ((), ALLOW, "FORGE_ALLOW_UNVERIFIED_SPECIES=1"),
+                                      (("--force-species",), ALLOW, "both")):
+            rc, out = tool("restart_field.py", srcres, dst, *extra, env_extra=env_extra)
+            check(rc != 0 and "H2O.MW: speciesDBFile" in out and "removing 'H2O' from speciesDBFile" in out and "lump notation" in out
+                  and same_values(before, values(dst)) and attrs(dst) == at0,
+                  f"(p) restart_field: destination condensation ON with an external gas H2O (old MW) + {how} -> refused, DST unchanged (rc={rc})",
+                  out[-900:])
 
         # (n) 宛先に solverConfig.yaml が無い → CPG か TP か判定できないので既定で停止
         s2 = os.path.join(root, "src_unvNone", "res_10.h5")
@@ -265,6 +331,24 @@ def main():
         check(rc == 0 and attrs(os.path.join(d, "in.h5")) == {},
               f"(c) convert: unverified input + FORGE_ALLOW_UNVERIFIED_SPECIES=1 -> output unverified (no attributes) (rc={rc})",
               out[-600:])
+        # 印付き入力 (ハッシュ = SRC config) → 許可なしで変換し、宛先のハッシュと印を付ける (#3d)
+        d = run_dir("conv_marked")
+        rc, out = convert(sm, smres, d)
+        at = attrs(os.path.join(d, "in.h5"))
+        rec, why = fs.find_record(os.path.join(d, "in.h5"))
+        check(rc == 0 and at.get("species_input_unverified") == 1 and rec is not None and rec["compat_recomputed"] == at.get("species_hash"),
+              f"(c) convert: marked input (hash = source config) -> destination hash with the mark (species_input_unverified=1) (rc={rc})",
+              out[-800:])
+        # 印付き入力で SRC config が違う (N2 low[2]) → 既定で停止
+        s5 = run_dir("conv_src_marked_mis", h5="res_10.h5", ro=ro0)
+        shutil.copy(os.path.join(src, r["record_file"]), s5)
+        fs.write_species_attrs(os.path.join(s5, "res_10.h5"), dict(src_attrs, species_input_unverified=1))
+        bump_db(s5)
+        d = run_dir("conv_marked_mis_dst")
+        before = values(os.path.join(d, "in.h5"))
+        rc, out = convert(s5, os.path.join(s5, "res_10.h5"), d)
+        check(rc != 0 and "REFUSED" in out and "N2.nasa9_low[2]" in out and same_values(before, values(os.path.join(d, "in.h5"))),
+              f"(c) convert: marked input whose hash != source config (N2 low[2]) -> stops before writing (rc={rc})", out[-800:])
         # 入力の記録と SRC run の設定が違う (場を作った物性と変換器が読む物性が違う) → 拒否
         s4 = run_dir("conv_src_mismatch", h5="res_10.h5", ro=ro0)
         shutil.copy(os.path.join(src, r["record_file"]), s4)

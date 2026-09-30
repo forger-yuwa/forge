@@ -47,6 +47,8 @@ Python:
   未検証の SRC (属性なし / species_input_unverified=1)・宛先を解決できない (旧バイナリ・solverConfig.yaml なし) は
   **既定で停止** (ソルバと同じ規約, #3c)。許可はその実行だけの FORGE_ALLOW_UNVERIFIED_SPECIES=1 か --force-species で、
   許可して通したときは DST に属性を付けない (宛先のハッシュで埋めない; ソルバ側で未検証として扱われる)。
+  例外は印付きの SRC (species_input_unverified=1) で species_hash = 宛先ハッシュのとき: ソルバ (speciesDB_checkInputField の
+  fieldHash == own 分岐) と同じく許可なしで通し、DST に同じハッシュと印を継承する (#3d; 印は消さない)。
 
 YAML の注意: 種名 `NO` / `N` / `Y` は PyYAML の既定では真偽値になる (design チェーンの古い config は無引用)。
 本モジュールの `load_yaml_str` は真偽値の暗黙解決を外した SafeLoader で読むので `NO` は文字列のまま。
@@ -761,6 +763,8 @@ def compare_signatures(a, b, mw_rtol=1e-9, coef_rtol=1e-12):
 #                                 許可 (FORGE_ALLOW_UNVERIFIED_SPECIES=1 / --force-species) したときは DST の属性を消す (宛先のハッシュで埋めない)
 #   種変換                      : plan_convert — 入力を検証し、変換の成功後に変換先のハッシュを付ける (入力が未検証なら既定で停止、
 #                                 許可したときは未検証のまま = 属性なし)
+# 印付き (species_input_unverified=1) の SRC は、ハッシュが宛先 (種変換は SRC config) と一致すれば許可なしで通し印を継承する
+#                                 (ソルバの fieldHash == own 分岐と同じ; #3d)。不一致は上と同じく未検証として停止。
 # CPG (thermalMethod≠2) は対象外 (属性を付けない)。
 
 SPECIES_ATTRS = ("species_hash", "species_record_sha256", "species_record_file", "species_input_unverified")
@@ -892,7 +896,10 @@ def resolve_species(run_dir, forge=None, inplace=True):
         h = lines[-1].strip() if lines else ""
         m = re.search(r"\[species\] record (\S+) \(sha256 ([0-9a-f]{64})\)", p.stderr)
         if p.returncode != 0 or not re.fullmatch(r"[0-9a-f]{64}", h) or not m:
-            raise SpeciesCheckError(f"forge --resolve-species failed in {run_dir} (rc={p.returncode}): {p.stderr.strip()[-800:]}")
+            err = p.stderr.strip()
+            k = err.rfind("[speciesDB]")      # 種 DB の拒否文 (差のキー・両値・移行先) は切り詰めずに全文を出す
+            raise SpeciesCheckError(f"forge --resolve-species failed in {run_dir} (rc={p.returncode}): "
+                                    f"{err[k:] if k >= 0 else err[-800:]}")
         rec = load_record(os.path.join(cwd, m.group(1)))
         if not rec["consistent"] or rec["compat_recomputed"] != h or rec["integrity"] != m.group(2):
             raise SpeciesCheckError(f"resolve-only record for {run_dir} is inconsistent: {rec['problems']}")
@@ -989,14 +996,59 @@ def _check_unverified_src(tool, src_h5, dst_run_dir, st, force=False):
     refuse_unverified(tool, f"SRC {src_h5} is unverified ({st['why']}) and {where}", force)
 
 
+def _marked_src_record(src_h5, h):
+    """印付き SRC の記録 (完全性・互換性ハッシュとも属性に一致するものだけ)。無ければ None (ソルバも印付きの一致では記録を見ない)。"""
+    rec, _why = find_record(src_h5)
+    return rec if (rec is not None and rec["consistent"] and rec["compat_recomputed"] == h) else None
+
+
+def _plan_inherit_marked(src_h5, dst_run_dir, st, forge, force, tool, inplace):
+    """印付きの SRC (species_hash あり・species_input_unverified=1) の継承判定。ソルバの規則 (speciesDB_checkInputField の
+    fieldHash == own 分岐: 属性のハッシュが自分のハッシュと等しければ許可なしで通し、入力の印を出力に継承) と同じにする (#3d)。
+    一致: 許可不要で宛先に同じハッシュと印 (species_input_unverified=1) を付ける。記録は SRC の記録が引ければそれ、無ければ宛先の
+    --resolve-species の記録 (同じハッシュ)。不一致・宛先を解決できない・宛先が判定不能は従来どおり未検証として停止
+    (FORGE_ALLOW_UNVERIFIED_SPECIES=1 / force で属性なし)。宛先が CPG なら従来どおり属性なしで通す。"""
+    tm = _config_thermal_method(dst_run_dir)
+    if tm is not None and tm != 2:
+        return None
+    if tm is None:
+        _check_unverified_src(tool, src_h5, dst_run_dir, st, force)
+        return None
+    h = st["attrs"]["species_hash"]
+    try:
+        dst = resolve_species(dst_run_dir, forge, inplace=inplace)
+    except SpeciesResolveUnavailable as e:
+        refuse_unverified(tool, f"SRC {src_h5} is unverified ({st['why']}) and the destination species cannot be resolved ({e})", force)
+        return None
+    if dst is None:          # tm == 2 を見た後なので通常は来ない
+        return None
+    rec = _marked_src_record(src_h5, h)
+    if dst["hash"] != h:
+        diff = _record_diff(rec, dst["record"]) if rec is not None else ["(SRC record not found; coefficient differences cannot be identified)"]
+        refuse_unverified(tool, f"SRC {src_h5} is unverified ({st['why']}) and its species_hash {h[:16]} != destination {dst_run_dir} "
+                                f"species_hash {dst['hash'][:16]} (forge --resolve-species):\n"
+                          + "".join(f"    {x}\n" for x in (diff or ["(no coefficient difference found; schema/datum text differs)"])), force)
+        return None
+    use = rec if rec is not None else dst["record"]
+    print(f"[{tool}] species: SRC species_hash {h[:16]} = destination species_hash {dst['hash'][:16]} (forge --resolve-species); "
+          f"SRC descends from an unverified start -> inherit the hash and the mark (species_input_unverified=1; record "
+          f"{'of SRC' if rec is not None else 'of the destination'} {os.path.basename(use['path'])})")
+    return {"species_hash": h, "species_record_sha256": use["integrity"],
+            "species_record_file": None, "species_input_unverified": 1, "_record": use, "_dst_dir": dst_run_dir}
+
+
 def plan_inherit(src_h5, dst_run_dir, forge=None, force=False, tool="restart", inplace=True):
     """コピー・restart・補間の継承判定 (書き込み前に呼ぶ)。返り値 = 書き込み後に DST へ付ける属性 (dict) か None (未検証のまま)。
     不一致・記録の欠落は SpeciesCheckError (force=True なら警告して None = 属性を付けずに通す)。
     SRC が未検証で宛先が TP (または判定不能)・宛先を解決できないときも SpeciesCheckError
-    (FORGE_ALLOW_UNVERIFIED_SPECIES=1 か force=True なら警告して None)。"""
+    (FORGE_ALLOW_UNVERIFIED_SPECIES=1 か force=True なら警告して None)。
+    ただし印付きの SRC (species_input_unverified=1) で SRC の species_hash = 宛先ハッシュなら許可なしで通し、
+    宛先に同じハッシュと印を継承する (ソルバ speciesDB_checkInputField の fieldHash == own 分岐と同じ規則; #3d)。"""
     dst_run_dir = os.path.abspath(dst_run_dir)
     st = source_species_state(src_h5)
-    if st["state"] in ("none", "unverified"):
+    if st["state"] == "unverified":
+        return _plan_inherit_marked(src_h5, dst_run_dir, st, forge, force, tool, inplace)
+    if st["state"] == "none":
         _check_unverified_src(tool, src_h5, dst_run_dir, st, force)
         return None
     if st["state"] == "broken":
@@ -1124,15 +1176,54 @@ def stamp_new_field(h5path, run_dir, names, MW, h_ref_T, mixtures, forge=None, t
     return "verified"
 
 
+def _plan_convert_marked(src_h5, dst_run_dir, src_run_dir, st, forge, force, tool, inplace):
+    """印付き入力の種変換 (#3d)。場の species_hash が SRC config の解決ハッシュと等しければ許可なしで通し、変換先のハッシュに
+    印 (species_input_unverified=1) を付ける。不一致・解決不能は従来どおり未検証として停止 (許可で属性なし)。
+    宛先が CPG なら従来どおり属性なし。"""
+    dst_run_dir = os.path.abspath(dst_run_dir)
+    tm = _config_thermal_method(dst_run_dir)
+    if tm is not None and tm != 2:
+        return {"attrs": None, "dst": None}
+    if tm is None:
+        _check_unverified_src(tool, src_h5, dst_run_dir, st, force)
+        return {"attrs": None, "dst": None}
+    h = st["attrs"]["species_hash"]
+    src_run_dir = os.path.abspath(src_run_dir or os.path.dirname(os.path.abspath(src_h5)))
+    try:
+        srcr = resolve_species(src_run_dir, forge, inplace=False)
+        dst = resolve_species(dst_run_dir, forge, inplace=inplace)
+    except SpeciesResolveUnavailable as e:
+        refuse_unverified(tool, f"SRC {src_h5} is unverified ({st['why']}) and species cannot be resolved ({e})", force)
+        return {"attrs": None, "dst": None}
+    if srcr is None or srcr["hash"] != h:
+        rec = _marked_src_record(src_h5, h)
+        diff = (_record_diff(rec, srcr["record"]) if (rec is not None and srcr is not None) else
+                ["source run is calorically perfect"] if srcr is None else
+                ["(SRC record not found; coefficient differences cannot be identified)"])
+        refuse_unverified(tool, f"SRC {src_h5} is unverified ({st['why']}) and its species_hash {h[:16]} != the source run config "
+                                f"{src_run_dir} ({srcr['hash'][:16] if srcr else 'CPG'}):\n" + "".join(f"    {x}\n" for x in diff), force)
+        return {"attrs": None, "dst": None}
+    if dst is None:
+        return {"attrs": None, "dst": None}
+    print(f"[{tool}] species: SRC species_hash {h[:16]} = source config (descends from an unverified start); "
+          f"destination resolved {dst['hash'][:16]} -> output keeps the mark (species_input_unverified=1)")
+    return {"attrs": {"species_hash": dst["hash"], "species_record_sha256": dst["record"]["integrity"],
+                      "species_record_file": dst["record_file"], "species_input_unverified": 1}, "dst": dst}
+
+
 def plan_convert(src_h5, dst_run_dir, src_run_dir=None, forge=None, force=False, tool="convert", inplace=True, legacy_latent=False):
     """種変換の判定 (書き込み前)。入力を検証し (属性・記録の完全性、SRC config を解決したハッシュ = 場の属性)、
     変換先を解決する。返り値 = {"attrs": 付ける属性 | None, "dst": resolve 結果 | None}。入力が未検証・解決できないときは
     既定で SpeciesCheckError、FORGE_ALLOW_UNVERIFIED_SPECIES=1 か force=True なら attrs=None (属性なし)。
     legacy_latent (convert_species_field.py --src-latent legacy-v0; plan #10 の移行手順): SRC の記録が液相 (condensed) を持たない
     #10 以前の H2O 凝縮 run で、SRC config を今の forge で解決した差が**液相の追加だけ** (記録 + 今の液相行 = 今のハッシュ) なら、
-    潜熱モデル以外は検証済みとして通す (潜熱は呼び手が旧モデルで読む)。"""
+    潜熱モデル以外は検証済みとして通す (潜熱は呼び手が旧モデルで読む)。
+    印付きの入力 (species_input_unverified=1) は、場の species_hash = SRC config を解決したハッシュ (変換器が場を読む物性) なら
+    許可なしで通し、変換後に変換先のハッシュと印を付ける (ソルバの fieldHash == own 分岐と同じ規則; #3d)。"""
     st = source_species_state(src_h5)
-    if st["state"] in ("none", "unverified"):
+    if st["state"] == "unverified":
+        return _plan_convert_marked(src_h5, dst_run_dir, src_run_dir, st, forge, force, tool, inplace)
+    if st["state"] == "none":
         _check_unverified_src(tool, src_h5, os.path.abspath(dst_run_dir), st, force)
         return {"attrs": None, "dst": None}
     if st["state"] == "broken":

@@ -12,6 +12,8 @@ seed run の中身は読むだけで書かない (h5 もリンクせず複製す
        その実行だけの FORGE_ALLOW_UNVERIFIED_SPECIES=1 の 2 通りを案内する (#3c: 既定を厳密へ切り替え)
   (0e) 旧場 + FORGE_ALLOW_UNVERIFIED_SPECIES=1 → 通る。res (境界出力を含む) に species_hash / species_record_sha256 /
        species_record_file / species_input_unverified=1、記録ファイルが run に書かれ、Python の再計算 (load_record) と一致
+  (0r) (0e) の res (印付き) を restart_field.py で**許可なしに**写す → 通り、DST に同じ species_hash と印 (species_input_unverified=1)
+       (#3d: ツールもソルバの fieldHash == own 分岐と同じ規則)。その場を既定 (環境変数なし) のソルバで 1 step → 通り、出力も印を継承
   (R)  `forge --resolve-species` の標準出力最終行 = ソルバ起動時の species_hash
   (A)  同一 config で作った res を restart_field.py で写し属性をコピー (unverified=0) → 通る、出力 unverified=0
   (Ai) 同上で入力 unverified=1 → 通る、出力に未検証の印を継承
@@ -170,6 +172,24 @@ def main():
         check(rec is not None and rec["consistent"] and rec["compat_recomputed"] == H
               and rec["provenance"].get("input_status") == "unverified_env",
               f"(0e) record found and verified by Python (integrity + recomputed compat hash): {why}")
+        # (0r) 印付きの res → restart_field (許可なし) → 印を継承 → 既定のソルバで 1 step (#3d)
+        dr = os.path.join(root, "old_env_restart")
+        os.makedirs(dr)
+        for fn in ("solverConfig.yaml", "bcondConfig.yaml", "species_db.yaml", "species_meta.yaml", "probe.yaml", "nozzle.h5"):
+            if os.path.exists(os.path.join(d1, fn)):
+                shutil.copy(os.path.join(d1, fn), dr)
+        env = dict(os.environ); env.pop("FORGE_ALLOW_UNVERIFIED_SPECIES", None)
+        p = subprocess.run([sys.executable, os.path.join(TOOLS, "restart_field.py"), r1, os.path.join(dr, "nozzle.h5"), "--forge", a.forge],
+                           capture_output=True, text=True, env=env)
+        atr = attrs(os.path.join(dr, "nozzle.h5"))
+        check(p.returncode == 0 and atr.get("species_hash") == H and atr.get("species_input_unverified") == 1,
+              f"(0r) restart_field from the marked res without permission -> passes, hash and mark inherited (rc={p.returncode}, {atr})")
+        if p.returncode != 0:
+            print((p.stdout + p.stderr)[-2000:])
+        rc, out = C.run(dr)
+        atr1 = attrs(os.path.join(dr, "res_1.h5")) if rc == 0 else {}
+        check(rc == 0 and "species_hash matches" in out and atr1.get("species_input_unverified") == 1 and atr1.get("species_hash") == H,
+              f"(0r) default solver (no env) on the inherited field -> runs, output keeps the mark (rc={rc}, {atr1.get('species_input_unverified')})")
         # (R) resolve-only
         dR = C.make("resolve")
         rc, h = C.resolve(dR)

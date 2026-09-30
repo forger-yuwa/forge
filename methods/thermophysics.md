@@ -289,8 +289,12 @@ physProp:
   (`forge --resolve-species` を持つバイナリが無い)・記録が壊れている、のいずれも既定で停止する。許可はその実行だけの環境変数
   `FORGE_ALLOW_UNVERIFIED_SPECIES=1` (未検証・解決不能のみ; ツールでは加えて明示フラグ `--force-species`) で、config キーによる恒常的な許可は無い。
   ツールが許可して書いた場には属性を付けない (宛先のハッシュで埋めない) ので、その場を読むソルバは再び「照合不能」とし、同じ許可を要する。
-  ソルバ自身が許可して書いた出力は `species_input_unverified=1` を持ち、その出力からの**ソルバの直接の restart** は許可なしで通る
-  (未検証の印を継承)。ツール経由の継承は印付きの場も未検証として停止する。
+  ソルバ自身が許可して書いた出力は自分のハッシュと `species_input_unverified=1` (印) を持つ。**印付きの場の継承はソルバとツールで同じ規則**
+  (2026-10-01, plan #3d): 場の `species_hash` = 宛先のハッシュ (ソルバは自分の互換性ハッシュ、restart/補間ツールは宛先を `forge --resolve-species`
+  で解決したハッシュ、種変換は SRC run の設定を解決したハッシュ) なら許可なしで通し、出力に同じ印を継承する (ソルバは
+  `speciesDB_checkInputField` の `fieldHash == own` 分岐、ツールは `forge_species._plan_inherit_marked` / `_plan_convert_marked`)。
+  記録は照合に使わない (ツールは SRC の隣に記録があればそれを、無ければ宛先の解決記録を DST の隣に置く)。印付きでもハッシュが違えば停止する。
+  印は許可を付けても消えない。したがって「属性なしの場を 1 回だけ許可して印付きにする → 以後は許可なしで継承」が成り立つ。
 
 #### 1b.5 凝縮種の液相 (気液ペア) と潜熱 — 実装済み (2026-09-28, plan #10)
 
@@ -299,7 +303,11 @@ physProp:
 - 凝縮 ON かつ `condModel: 1` のとき、`speciesDB_resolve(cfg)` が液相をペアの気相種と組にして `ResolvedSpeciesDB::condensed` に付ける。
   TP ではペアの気相が種リストに要り (無ければ拒否)、CPG は内蔵の気相 H2O を使う。
   **気液ペアの基準契約**: 外部 DB (`speciesDBFile`) の気相 H2O が内蔵のペアと MW・区切り・両区間の係数で 1 bit でも違えば凝縮 ON で拒否する
-  (同一なら通す; 生成 `species_db.yaml` の H2O は内蔵と同じ値)。
+  (同一なら通す; 生成 `species_db.yaml` の H2O は内蔵と同じ値)。拒否文は種名・最初に違うキー・両値 (例 `H2O.MW: speciesDBFile 0.0180153… vs built-in 0.01801528…`)
+  と移行先 2 つ (外部 DB から H2O を外して内蔵を使う / lump 記法にして `speciesDBFile` をやめる) を示す。これは物性の契約で場の未検証とは別なので
+  `FORGE_ALLOW_UNVERIFIED_SPECIES=1`・`--force-species` では通らない (起動直後の種 DB 解決で止まり、`--resolve-species` を使うツールも同じ所で止まる)。
+  段 3 (plan #13-3) で内蔵 H2O の MW が CEA の 0.01801528 になったので、#9 以前の runner が旧 MW 0.0180153 の H2O を外部 DB に写した凝縮 config
+  (例 case/44 run_0510) はこの拒否に当たる (凝縮 OFF の run_0509 は対象外でハッシュ不変)。
 - 潜熱 $L(T)=h_v(T)-h_l(T)$ ([`condensation.md`](condensation.md) の潜熱の節): $h_v$ は**種 DB の気相そのもの** (同じ係数・区間・外挿規約、datum を焼き込んだ device 係数とビット一致)、
   $h_l$ は液相の絶対基準の係数を気相 MW で質量換算し、**気相と同じ datum 定数** $R_u\Delta a_7/M$ ($\Delta a_7=-h_{abs,gas}(T_{ref})/R_u$) を足す。
   datum を変えても $L$ は相対 $\sim10^{-15}$ で不変 (液相係数は $a_0=1.3\times10^9$ と大きく打ち消しが強いので、$\Delta a_7$ を係数に焼き込まず定数で足す)。
