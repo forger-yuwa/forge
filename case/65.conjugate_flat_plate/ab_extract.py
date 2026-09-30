@@ -27,6 +27,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from ab_series import node_sets, refuse  # noqa: E402
+import plate_common as pc  # noqa: E402
 
 
 def forge_running(run):
@@ -44,6 +45,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run"); ap.add_argument("--until", type=int, required=True); ap.add_argument("--keep-every", type=int, default=2000)
     ap.add_argument("--fields", default="P,T,Uy", help="流体節点で採る VALUE 名 (カンマ区切り)。B2′ は P,T,Uy,Ux,ro,dt_local,limiter_ro,limiter_Ux,limiter_Uy,limiter_P,limiter_T")
+    ap.add_argument("--region-stats", action="store_true",
+                    help="B3: 全域の res_ro/res_roUx/res_roUy/res_roe の領域別二乗和を毎 step、limiter_ro/Ux/Uy/P と res² の節点ごとの統計 (最終 1/3 区間) を保存")
     a = ap.parse_args()
     run = Path(a.run)
     while not (run / "res_0.h5").exists():
@@ -59,10 +62,30 @@ def main():
     wx = None
     n = 0
     out = run / "ab_series.npz"
+    RES = ("res_ro", "res_roUx", "res_roUy", "res_roe")
+    LIM = ("limiter_ro", "limiter_Ux", "limiter_Uy", "limiter_P")
+    RS = []
+    if a.region_stats:
+        with h5py.File(run / "res_0.h5", "r") as r:
+            cc = np.asarray(r["MESH/COORD"][:], float).reshape(-1, 3)
+        xl, yl = cc[:, 0] / pc.L, cc[:, 1] / pc.L
+        near = yl <= 0.05 + 1e-12
+        reg_le = near & (xl >= -0.1 - 1e-9) & (xl <= 0.02 + 1e-9)
+        reg_te = near & (xl >= 0.98 - 1e-9) & (xl <= 1.1 + 1e-9)
+        regions = np.stack([reg_le, reg_te, ~(reg_le | reg_te)])
+        nn = len(xl)
+        t0 = a.until - a.until // 3          # 最終 1/3 区間の開始
+        acc = {"res2": np.zeros((len(RES), nn)), "lim_s": np.zeros((len(LIM), nn)), "lim_ss": np.zeros((len(LIM), nn)), "cnt": 0}
 
     def save():
+        extra = {}
+        if a.region_stats:
+            extra = {"region_res2": np.array(RS), "region_names": np.array(["le", "te", "other"]), "region_count": regions.sum(axis=1),
+                     "res_names": np.array(RES), "lim_names": np.array(LIM), "n_nodes": nn,
+                     "tail_res2_sum": acc["res2"], "tail_lim_sum": acc["lim_s"], "tail_lim_sumsq": acc["lim_ss"], "tail_count": acc["cnt"],
+                     "coord": cc}
         np.savez(out, step=np.array(steps), q=np.array(Q), Tw=np.array(TW), node_id=ids, group=groups, wall_x=wx,
-                 **{k: np.array(v) for k, v in FV.items()})
+                 **{k: np.array(v) for k, v in FV.items()}, **extra)
 
     while n <= a.until:
         f, w = run / f"res_{n}.h5", run / f"res_plate_5_{n}.h5"
@@ -78,6 +101,17 @@ def main():
             if miss:
                 refuse(f"step {n}: 出力に {miss} が無い (extraFields を確認)")
             v = {q: np.asarray(r[f"VALUE/{q}"][:], float)[ids] for q in fields}
+            if a.region_stats and n > 0:
+                miss = [k for k in RES + LIM if f"VALUE/{k}" not in r]
+                if miss:
+                    refuse(f"step {n}: 出力に {miss} が無い (extraFields を確認)")
+                r2 = np.array([np.asarray(r[f"VALUE/{k}"][:], float) ** 2 for k in RES])
+                if not np.isfinite(r2).all():
+                    refuse(f"step {n}: 残差場に非有限値")
+                RS.append(np.array([[r2[j][m].sum() for m in regions] for j in range(len(RES))]))
+                if n > t0:
+                    lm = np.array([np.asarray(r[f"VALUE/{k}"][:], float) for k in LIM])
+                    acc["res2"] += r2; acc["lim_s"] += lm; acc["lim_ss"] += lm ** 2; acc["cnt"] += 1
         if n > 0:
             with h5py.File(w, "r") as h:
                 c = np.asarray(h["MESH/COORD"][:], float).reshape(-1, 3)
