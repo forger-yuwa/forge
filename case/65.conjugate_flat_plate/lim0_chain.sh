@@ -58,15 +58,19 @@ gates() { # $1 run dir, $2 tol_solid
   local r=$1 tol=$2
   python3 $T/plot_residual.py $r/residual_history.csv -o $r/residual_history.png > /dev/null 2>&1
   python3 ~/forge-graetz/case/64.conjugate_pipe_wall/series_conj.py C $r > $r/SERIES_CONJ.txt 2>&1
-  { echo "### 登録式の tol_solid $tol (plan §4.6、事後改訂)"; python3 $T/check_cht_interface.py $r --phys-id 5 --eps-abs 1.0 --eps-rel 1e-3 --dt-k 5e-4 --tol-solid $tol --n-consec 80;
-    echo; echo "### 旧転記値 tol_solid 1e-9 (併記)"; python3 $T/check_cht_interface.py $r --phys-id 5 --eps-abs 1.0 --eps-rel 1e-3 --dt-k 5e-4 --tol-solid 1e-9 --n-consec 80; } > $r/CHT_INTERFACE_VERDICT.txt 2>&1
+  # check_cht_interface.py は run ディレクトリに CHT_INTERFACE_VERDICT.txt を自分で書く。旧閾値を先に回して別名で保存し、
+  # 登録式の閾値で正本を書く (2026-10-01 result レビュー m4。初回のチェーンは 2 回目が 1 回目を上書きしていた)
+  python3 $T/check_cht_interface.py $r --phys-id 5 --eps-abs 1.0 --eps-rel 1e-3 --dt-k 5e-4 --tol-solid 1e-9 --n-consec 80 > /dev/null 2>&1
+  cp $r/CHT_INTERFACE_VERDICT.txt $r/CHT_INTERFACE_VERDICT_old_tol1e-9.txt
+  python3 $T/check_cht_interface.py $r --phys-id 5 --eps-abs 1.0 --eps-rel 1e-3 --dt-k 5e-4 --tol-solid $tol --n-consec 80 > /dev/null 2>&1
+  sed -i "1i # 登録式の tol_solid $tol (plan §4.6、事後改訂)。旧転記値 1e-9 の結果は CHT_INTERFACE_VERDICT_old_tol1e-9.txt" $r/CHT_INTERFACE_VERDICT.txt
   local Qt=$(python3 -c "
 import h5py,glob,re,numpy as np
 f=sorted(glob.glob('$r/res_solid_5_*.h5'),key=lambda s:int(re.search(r'_(\d+)\.h5',s).group(1)))[-1]
 print(abs(float(np.asarray(h5py.File(f,'r')['VALUE/q_hole'][:]).sum())))")
   python3 $T/check_cht_balance.py $r --solid-mode fem2d --phys-id 5 --phys-name plate --q-floor $Qt --tol-rel 1e-3 --tol-abs $(python3 -c "print($Qt*1e-3)") > $r/CHT_BALANCE_VERDICT.txt 2>&1
   (cd $C; python3 ../64.conjugate_pipe_wall/eval_conj.py C $r > $r/EVAL_CONJ.txt 2>&1; echo "rc=$?" >> $r/EVAL_CONJ.txt)
-  log "  $(basename $r): conv [$(grep -o '\-> [A-Za-z ()/—-]*' $r/CONVERGENCE_CHECK.txt | head -1)] | series [$(grep VERDICT $r/SERIES_CONJ.txt | tail -1)] | G-if 登録 [$(grep VERDICT $r/CHT_INTERFACE_VERDICT.txt | head -1)] 旧 [$(grep VERDICT $r/CHT_INTERFACE_VERDICT.txt | tail -1)] | G-cons [$(grep -E 'VERDICT|REFUSED' $r/CHT_BALANCE_VERDICT.txt | tail -1)] | 主判定 [$(grep VERDICT $r/EVAL_CONJ.txt | tail -1)]"
+  log "  $(basename $r): conv [$(grep -o '\-> [A-Za-z ()/—-]*' $r/CONVERGENCE_CHECK.txt | head -1)] | series [$(grep VERDICT $r/SERIES_CONJ.txt | tail -1)] | G-if 登録 [$(grep VERDICT $r/CHT_INTERFACE_VERDICT.txt)] 旧 [$(grep VERDICT $r/CHT_INTERFACE_VERDICT_old_tol1e-9.txt)] | G-cons [$(grep -E 'VERDICT|REFUSED' $r/CHT_BALANCE_VERDICT.txt | tail -1)] | 主判定 [$(grep VERDICT $r/EVAL_CONJ.txt | tail -1)]"
 }
 
 runone() { # $1 新 run 名, $2 元 run, $3 元 step, $4 tol_solid, $5 nStepOuter の元の値, $6 説明
