@@ -17,6 +17,7 @@ MW・NASA-9 (修正 Eucken の c_p)・LJ・双極子は実装と同じ共通デ�
   out = ref.state_Y(T, Y) # 輸送種の質量分率から (段 2 #5t2-2: 負値は 0 に切り、X_s = (Y_s/M_s)/Σ(Y/M) を作ってから state)
   Reference(..., lj_source=[...])   # 内蔵種の LJ を physProp.ljSource と同じ規則 (先頭から探す) で選ぶ (#14; 既定 [gri30, svehla1962])
   set_lj_source([...])              # 以後の Reference の既定 (試験を集合ごとに回すため; None で既定に戻す)
+  双極子は種の LJ を解決した集合の potential が stockmayer のときだけ使う (lj12-6 = svehla1962 は δ* = 0; #14-L1b)。
 輸送種の分子量 (ref.mw[s]) は構成実種の MW と lump 内モル分率から M = Σ x_k M_k として独自に作る (実装の合成 MW を読まない)。
 """
 import math
@@ -133,6 +134,8 @@ def _builtin():
 
 
 BUILTIN, ALIAS = _builtin()
+# 集合のポテンシャル形 (共通データのトップレベル lj_sets; #14-L1b)。双極子は stockmayer の集合で解決した種にだけ適用する
+LJ_SET_POTENTIAL = {s: d["potential"] for s, d in (yaml.safe_load(open(SPECIES_DATA, encoding="utf-8")).get("lj_sets") or {}).items()}
 LJ_SOURCE_DEFAULT = ("gri30", "svehla1962")   # ソルバの既定 (physProp.ljSource 無指定; plan §4.10)
 _LJ_SOURCE = None
 
@@ -184,8 +187,10 @@ class Reference:
                                       "eps": float(e.get("LJ_eps_kB", 97.0)), "dipole": float(e.get("LJ_dipole", 0.0)),
                                       "file": True, "fit": e.get("transport_fit"), "dbkey": name}
             cid = ALIAS[name]
-            sig, eps, _ = builtin_lj(cid, lj_source)
-            return cid, dict(BUILTIN[cid], dbkey=cid, sigma=sig, eps=eps)
+            sig, eps, ljset = builtin_lj(cid, lj_source)
+            # 双極子の適用規則 (plan §4.10, #14-L1b): stockmayer の集合 (gri30・legacy_v1) だけ。lj12-6 (svehla1962) は δ* = 0
+            dip = BUILTIN[cid]["dipole"] if LJ_SET_POTENTIAL.get(ljset) == "stockmayer" else 0.0
+            return cid, dict(BUILTIN[cid], dbkey=cid, sigma=sig, eps=eps, dipole=dip, lj_set=ljset)
 
         def add(name, x):
             key, sp = lookup(name)

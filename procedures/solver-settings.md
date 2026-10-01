@@ -270,7 +270,8 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
     (ただし互換性ハッシュには LJ の値が入るので、値が変わる種を含む config はハッシュが変わる)。
   - どの集合にも無い種を LJ を読む使い方に回すと、種名と探した集合を示して起動時エラー。空リスト・未知の集合名・重複もエラー。
   - 解決結果は起動ログ (`[species]   LJ sets searched ...` と種ごとの集合・値) と解決済み記録の `provenance.lj_source`・`lj_resolved` に出る
-    (互換性ハッシュには値だけが入り、集合名は入らない)。双極子 (H2O・NH3) は集合に依らない種レベルの値。
+    (互換性ハッシュには値だけが入り、集合名は入らない)。双極子 (H2O・NH3) は種レベルの値だが、`kinetic` で適用するのは
+    `stockmayer` の集合 (`gri30`・`legacy_v1`) で解決した種だけ。`svehla1962` (`lj12-6`) で解決した種には適用しない (起動ログに NOTE; #14-L1b)。
 - **化学種の解決済み記録と入力場の照合** (TP `thermalMethod: 2` のみ、2026-09-27、[plan §4.3 #3a](../plans/active/thermophysics-solver-owned-species-db.md))。
   - 起動時に使用した全種の物性 (順序・名前・MW・datum 前の絶対係数と温度区間・LJ・`thermoHrefTemp`・来歴) を run ディレクトリへ
     `resolved_species_<互換ハッシュ16桁>.yaml` として書く (**出力=記録であり入力ではない**; 同名で来歴だけ違えば `_<完全性16桁>` 付きの別名)。

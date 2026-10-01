@@ -266,6 +266,8 @@ def lj_for(name, table, alias):
 GRI30_NAME = {"AR": "Ar", "C2H2": "C2H2,acetylene"}       # gri30.yaml の名前 → 共通データの id (完全一致・大小文字無視で決まらないもの)
 SVEHLA_NAME = {"Air": "AIR", "C2H2": "C2H2,acetylene"}    # Svehla の分子名 → 共通データの id (同上)
 LJ_SET_ORDER = ("legacy_v1", "gri30", "svehla1962")        # LJ_sets の書き出し順
+# 集合のポテンシャル形 (plan §4.10 「双極子の適用規則」, #14-L1b)。共通データのトップレベル lj_sets (手保守) がこれと一致することを --check が見る
+LJ_SET_POTENTIAL = {"legacy_v1": "stockmayer", "gri30": "stockmayer", "svehla1962": "lj12-6"}
 
 
 def map_name(name, ids, explicit):
@@ -600,6 +602,9 @@ def check_generated(thermo_path, species_path, transport_path, gri30_path):
             if (want is None) != (have is None) or (want and not _bits_equal([float(have["sigma"]), float(have["eps_kB"])],
                                                                              [want["sigma"], want["eps_kB"]])):
                 bad.append(f"{i}.{k}")
+    defs = _load_yaml_text(open(species_path, encoding="utf-8").read()).get("lj_sets") or {}
+    pot = {k: (v or {}).get("potential") for k, v in defs.items()}
+    ck(pot == LJ_SET_POTENTIAL, f"(e) トップレベル lj_sets の potential {pot} = {LJ_SET_POTENTIAL} (#14-L1b)")
     ng, ns = sum(1 for i in ids if "gri30" in sets[i]), sum(1 for i in ids if "svehla1962" in sets[i])
     ck(not bad, f"(e) 全気相 {len(ids)} 種の LJ_sets.gri30 ({ng} 種)・svehla1962 ({ns} 種) が gri30.yaml・Svehla 転記とビット一致"
        + (f" — 不一致 {bad}" if bad else ""))

@@ -100,6 +100,13 @@ std::string speciesDB_identityKey(const std::string& dbKey, bool fromFile);
 //   legacy_v1   #14 前の内蔵値の凍結 (旧 run の再現用)
 // 既定 (physProp.ljSource 無指定) は {gri30, svehla1962} (2026-10-01 ユーザ決定)。
 const std::vector<std::string>& speciesDB_ljSetNames();
+// 集合のポテンシャル形 (共通データのトップレベル lj_sets.<集合>.potential; plan §4.10 「双極子の適用規則」, #14-L1b)。
+//   stockmayer: σ/ε は非極性部で、種レベルの dipole を kinetic の Brokaw 補正に使う (gri30・legacy_v1)。
+//   lj12-6    : 粘性フィットの有効 σ/ε (極性を含む)。dipole は適用しない (δ* = 0; svehla1962)。
+// 内蔵の集合でない名前 ("speciesDBFile"・"none"・"lump") は空文字列。
+#define SPECIES_LJ_POTENTIAL_STOCKMAYER "stockmayer"
+#define SPECIES_LJ_POTENTIAL_LJ126      "lj12-6"
+const std::string& speciesDB_ljSetPotential(const std::string& set);
 const std::vector<std::string>& speciesDB_ljSourceDefault();
 // ljSource の検査 (空 = 既定に置き換えて返す)。空でないのに要素が無い・未知の集合名・重複は std::runtime_error。
 std::vector<std::string> speciesDB_checkLjSource(const std::vector<std::string>& ljSource);

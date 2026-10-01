@@ -35,9 +35,11 @@
 #                 gri30       GRI-Mech 3.0 の transport (Cantera 同梱 gri30.yaml; 生成器 --write が書く)
 #                 svehla1962  Svehla 1962 (NASA TR R-132) Table I(a) (2 本独立の転記; 希ガスは粘性フィット行; 生成器 --write が書く)
 #               ソルバは physProp.ljSource (順序付きの集合名リスト; 既定 [gri30, svehla1962]) の先頭から探して最初にある集合の値を使う。
+#               集合ごとのポテンシャル形 (stockmayer / lj12-6) はトップレベルの lj_sets (下) に書く (#14-L1b)。
 #               source は互換性ハッシュに入らない (値だけが入る)。
-#   dipole      {value [D], source} (任意; 極性分子の双極子モーメント)。LJ の集合から切り離した種レベルの値で (どの集合を選んでも同じ値)、
-#               physProp.transport の kinetic (Brokaw の極性補正) だけが読む (#5t2)。gri30 に双極子がある種は生成器が書く (手保守の種は一致を検査)
+#   dipole      {value [D], source} (任意; 極性分子の双極子モーメント)。LJ の集合から切り離した種レベルの分子定数で、
+#               physProp.transport の kinetic (Brokaw の極性補正) だけが読む (#5t2)。適用は種の LJ を解決した集合の potential が
+#               stockmayer のときだけ (lj12-6 の集合では δ* = 0; #14-L1b)。gri30 に双極子がある種は生成器が書く (手保守の種は一致を検査)
 #   pair_of     (phase: condensed のみ) 気液ペアの気相種の canonical ID。液相は気相と同じ MW で質量換算し、
 #               気相と同じ datum オフセット (定数 R_u Δa7/MW, Δa7 = −h_abs,gas(Tref)/R_u) を足して L = h_v − h_l を作る (plan #10)
 #   extension   (phase: condensed のみ) 区間外の延長規約 {below, above}。現在の実装が受け付けるのは
@@ -64,6 +66,15 @@ provenance:
     legacy_v1: "#14 前の内蔵値の凍結。種ごとの実際の出典は各エントリの LJ_sets.legacy_v1.source (2026-10-01 監査: N2/O2/CO2/H2O/Ar/NH3/NO2 は GRI-Mech 3.0、CO/H2/OH/H/NO/O/He/AIR は Svehla 1962 Table I(a)、N/N2O は両者同値; notes/investigations/2026-10-01-svehla1962-lj/)"
     gri30: "GRI-Mech Version 3.0 7/30/99  CHEMKIN-II format の transport (Cantera 同梱 gri30.yaml; ck2yaml (Cantera 2.5.0) が gri30.inp, gri30_thermo.dat, gri30_tran.dat から変換; sha256 06650b1e0ee0012f)"
     svehla1962: "Svehla 1962 (NASA TR R-132, NTRS 19630012982) Table I(a), 2 本独立の転記 56 分子が全値一致 (A sha256 3fb75028d57e6cdf, B 365f7fa88e7fbff3, 頁 05cd7b4b01f7f5b1; notes/investigations/2026-10-01-svehla1962-lj/)。希ガスは粘性フィット行"
+
+# LJ 集合の定義 (plan §4.10 「双極子の適用規則」, #14-L1b; 手保守)。各集合は potential を必ず持つ (無い・未知の値は起動時に拒否):
+#   stockmayer  σ/ε は非極性部。種レベルの dipole を Brokaw の極性補正に使う (gri30・legacy_v1)
+#   lj12-6      粘性フィットの有効 σ/ε (極性を含む)。dipole は適用しない (δ* = 0; svehla1962)
+# 適用は physProp.transport の kinetic の μ・λ だけ。CE の η_ij と D_ij は従来どおり極性補正なし (双極子を読まない)。
+lj_sets:
+  gri30: {potential: stockmayer}
+  svehla1962: {potential: lj12-6}
+  legacy_v1: {potential: stockmayer}
 
 species:
   - id: "N2"
