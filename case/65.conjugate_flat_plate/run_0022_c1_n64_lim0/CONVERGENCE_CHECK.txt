@@ -1,0 +1,9 @@
+
+=== /home/ubuntu/forge-graetz/case/65.conjugate_flat_plate/run_0022_c1_n64_lim0  [last step 149999]  -> PASS (converged) ===
+  rms_ro      : init=7.37e-08 fin=2.58e-13 drop= 5.2dec falling
+  rms_roUx    : init=3.25e-06 peak=5.26e-06 fin=4.79e-10 drop= 3.9dec falling
+  rms_roUy    : init=3.45e-06 peak=1.34e-05 fin=4.58e-11 drop= 5.2dec falling
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=2.03e-02 fin=6.81e-08 drop= 5.3dec falling
+
+OVERALL: ALL PASS

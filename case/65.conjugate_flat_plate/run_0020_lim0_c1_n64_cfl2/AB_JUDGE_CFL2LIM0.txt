@@ -1,0 +1,12 @@
+=== cfl 判別 (limiter 0、cfl_pseudo 2)  run_0020_lim0_c1_n64_cfl2  2000 step × 3
+  残差の区間平均:
+    rms_ro    9.610e-12 7.219e-12 5.326e-12  (run_0019 最終 1.185e-11)
+    rms_roUx  7.134e-09 5.561e-09 4.261e-09  (run_0019 最終 8.703e-09)
+    rms_roUy  1.348e-09 8.859e-10 6.715e-10  (run_0019 最終 1.901e-09)
+    rms_roe   2.760e-06 2.041e-06 1.466e-06  (run_0019 最終 3.405e-06)
+  PASS  条件 2: 4 列が 3 区間で厳密減少
+  PASS  条件 3: 最終区間 ≤ run_0019 最終区間 (rms_ro 0.449, rms_roUx 0.490, rms_roUy 0.353, rms_roe 0.430)
+  FAIL  条件 4: 上流 slip の P 2.909e-06 (≤ 3.378e-05), 前縁帯の界面 q 1.921e-05 (≤ 1.139e-02), 下流 slip の P 1.993e-06 (≤ 1.354e-04)、上流 P の最大ピーク 周期 2000.0 step・パワー比 0.624 (< 0.5)
+  PASS  条件 1: NaN/Inf なし
+VERDICT: cfl 0.5 採用 (cfl 2 の条件を満たさない)
+DECISION: cfl_pseudo=0.5

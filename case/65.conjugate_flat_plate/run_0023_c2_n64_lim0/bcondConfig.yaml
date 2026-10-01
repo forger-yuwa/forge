@@ -1,0 +1,7 @@
+# case/65 (cht C2)。make_run.py が生成。
+inlet:     {physID: 1, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , floats: {ro: 1.176829268, Ux: 34.71887095, Uy: 0.0, Uz: 0.0, Ps: 101325}}
+outlet:    {physID: 2, kind: outlet_statPress, outputHDFflg: 0, ints: , floats: {Ps: 101325, Pt: 102034.275, Tt: 300.6}}
+top:       {physID: 3, kind: slip, outputHDFflg: 0, ints: , floats: }
+slip_up:   {physID: 4, kind: slip, outputHDFflg: 0, ints: , floats: }
+plate:     {physID: 5, kind: wall_isothermal, outputHDFflg: 1, ints: {conjugate: 1, wallProfile: 1}, floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 300.0}}
+slip_down: {physID: 6, kind: slip, outputHDFflg: 0, ints: , floats: }

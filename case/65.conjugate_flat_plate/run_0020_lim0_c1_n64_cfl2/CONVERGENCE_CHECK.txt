@@ -1,0 +1,9 @@
+
+=== /home/ubuntu/forge-graetz/case/65.conjugate_flat_plate/run_0020_lim0_c1_n64_cfl2  [last step 5999]  -> NOT CONVERGED (still converging — run more steps) ===
+  rms_ro      : init=1.59e-11 peak=1.74e-11 fin=5.24e-12 drop= 0.5dec falling  <-- still converging
+  rms_roUx    : init=7.57e-09 peak=8.11e-09 fin=3.80e-09 drop= 0.3dec falling  <-- still converging
+  rms_roUy    : init=1.61e-09 peak=2.13e-09 fin=5.43e-10 drop= 0.5dec falling  <-- still converging
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=4.80e-06 peak=5.21e-06 fin=1.44e-06 drop= 0.5dec falling  <-- still converging
+
+OVERALL: CHECK FAILURES ABOVE

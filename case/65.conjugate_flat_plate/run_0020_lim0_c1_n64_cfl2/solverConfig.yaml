@@ -1,0 +1,48 @@
+# case/65 共役平板 — 共役 (C1/C2)。板 solid.h5 (下面 Robin T_h)。bcond の plate は ints {conjugate: 1}。平面。
+# 物性は plan §4.1 の登録値 (Re 1000・Pr 0.72・M 0.05、graetz_common.py と一致させる)。
+mesh: {discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, isAxisymmetric: 0,
+       meshFileName: "mesh.h5", valueFileName: "mesh.h5"}
+gpu: 1
+detectNaN: 1
+detectNaNInterval: 100
+solver: "SLAU"
+physProp:
+  thermalMethod: 0
+  viscMethod: 0          # 定数 visc / thermCond (Re・Pr を厳密に固定する)
+  thermCondMethod: 0
+  visc: 4.085818e-05
+  thermCond: 5.700284e-02
+  cp: 1004.5
+  gamma: 1.4
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {nStepOuter: 6000}
+  deltaT: {control: 1, dt: 1.0e-5, cfl: 2.0, cfl_pseudo: 2.0, blockDPLUR: 1, implicitRelax: 0.7,
+           dt_min: 1.0e-11, dt_max: 1.0}
+  outStepStart: 0
+  outStepInterval: 1
+  timeIntegration: 11
+  nStepInner: 4
+space:
+  convMethod: 1
+  limiter: 0
+  # リミッタの基準値を固定する (N_r=16 乾式の自動値。延長で再開しても作用素が変わらない。3 格子で共通の値にする)
+  limiterRoRef: 1.183182264
+  limiterPRef: 101871.9869
+  limiterARef: 347.1886975
+turbulence: {model: "none"}
+output: {level: 1, interfaceDiag: 1, extraFields: [dt_local, limiter_ro, limiter_Ux, limiter_Uy, limiter_P, res_ro, res_roUx, res_roUy, res_roe]}
+conjugate:
+  mode: fem2d
+  solid: solid.h5
+  flux: q_eff
+  warmup: 900000
+  interval: 50            # 親 plan の基準
+  flux_avg: 1
+  Df_scale: 5.0           # 親 plan (case/58 V6′ 合否 run・case/61/62) と同じ初期設定。安定性は未確認 (plan §4.4)
+  refactorDT: 1.0
+  node_log: 1             # 界面全節点の毎更新ログ (準定常の系列・G-if の素材)
+  # G-if の登録値 (plan §4.7: 窓内の q_i ~1e3 W/m² の 0.1 %、dT_K は T_h − T_∞ 10 K の 5e-5)
+  gate: {eps_abs_Wm2: 1.0, eps_rel: 1.0e-3, dT_K: 5.0e-4, tol_solid: 1.0e-9, n_consec: 80}   # plan §4.7
+initial: "uniform_p101325_u10"   # VALUE は make_run.py が Poiseuille IC にパッチ済み

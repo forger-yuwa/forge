@@ -1,0 +1,10 @@
+=== G-if: run_0025_c2_n16_lim0 -> NOT CONVERGED ===
+  physID 5: 更新 3000 回、末尾 80 回で判定 (step 146000 .. 149950)
+  OK  ① res_abs_Wm2 [W/m2]   max 8.7233e-06  <= 1.0000e+00
+  OK  ② res_rel              max 1.7461e-09  <= 1.0000e-03
+  OK  ③ dTw_max [K]          max 2.4613e-10  <= 5.0000e-04
+  NG  ④ res_solid [W/m]      max 1.8626e-09  <= 1.0000e-09
+  Tw_mean 末尾 308.8376 K (窓内の振れ 0.00e+00 K)
+  q_total 末尾 -29.0336 W/m (窓内の振れ 8.10e-08)
+
+VERDICT: NOT CONVERGED

@@ -1,0 +1,7 @@
+forge_bin /home/ubuntu/forge-graetz/solver_density_cuda/.build-native/relwithdebinfo/forge
+md5 159220e4f9a06ca94df76abc78c49f66
+solver commit 86115cb1 (FP64 build)
+tree db1caf4 Adopt limiter 0 as the post-hoc plate setting and pre-register the cfl check and re-run chain
+restart from run_0019_lim0ext_c1_n64 res_36000.h5 (累計 48000) + conjugate_state_5.h5、固定壁温、limiter 0、cfl_pseudo 2.0、6000 step、毎 step 抜き出し
+FORGE_CUDA_BLOCKSIZE=128
+Thu Oct  1 12:28:50 UTC 2026

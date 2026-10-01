@@ -1,0 +1,11 @@
+# 登録式の tol_solid 1.610e-06 (plan §4.6、事後改訂)。旧転記値 1e-9 の結果は CHT_INTERFACE_VERDICT_old_tol1e-9.txt
+=== G-if: run_0027_c2_n32_lim0 -> PASS ===
+  physID 5: 更新 3000 回、末尾 80 回で判定 (step 146000 .. 149950)
+  OK  ① res_abs_Wm2 [W/m2]   max 2.3012e-05  <= 1.0000e+00
+  OK  ② res_rel              max 4.1123e-09  <= 1.0000e-03
+  OK  ③ dTw_max [K]          max 3.8295e-10  <= 5.0000e-04
+  OK  ④ res_solid [W/m]      max 1.8626e-09  <= 1.6100e-06
+  Tw_mean 末尾 308.8333 K (窓内の振れ 0.00e+00 K)
+  q_total 末尾 -29.2881 W/m (窓内の振れ 2.92e-07)
+
+VERDICT: PASS

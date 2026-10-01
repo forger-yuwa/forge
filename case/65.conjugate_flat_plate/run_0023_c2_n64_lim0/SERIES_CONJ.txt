@@ -1,0 +1,7 @@
+=== 準定常 C (C2) /home/ubuntu/forge-graetz/case/65.conjugate_flat_plate/run_0023_c2_n64_lim0  スナップショット 13 枚 (step 12010–150000)、評価窓内の全節点 77 (期待集合と一致)、系列 series_conj_allnodes.csv
+  PASS  温度: check_quasisteady --abs-scale 1 --drift/--osc 0.002 → 非 STEADY 0 / 77 系列 (rc 0)
+  PASS  熱流束: check_quasisteady --abs-scale 1 --drift/--osc 0.006 → 非 STEADY 0 / 77 系列 (rc 0)
+  PASS  積分量: check_quasisteady --abs-scale 1 --drift/--osc 0.006 → 非 STEADY 0 / 1 系列 (rc 0)
+  PASS  固体の厚さ方向の温度差: check_quasisteady --abs-scale 1 --drift/--osc 0.002 → 非 STEADY 0 / 1 系列 (rc 0)
+  PASS  固体の軸方向熱量: check_quasisteady --abs-scale 1 --drift/--osc 0.006 → 非 STEADY 0 / 1 系列 (rc 0)
+VERDICT: PASS
