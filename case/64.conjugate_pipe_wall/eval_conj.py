@@ -322,6 +322,10 @@ def main():
     print("  --- 固体が効いていることの確認 (効果 ≥ 5U かつ 効果 > 許容幅)")
     for nm, vf, vr, U, tol in eff:
         good = np.isfinite(vf) and vf >= 5 * U and vf > tol
+        # 発注元 plan §6: 「C1 の軸方向熱量は許容と同程度なので、軸方向伝導の判定は C2 だけで行う」(登録文どおり、C1 は参考表示)
+        if cname == "C1" and "軸方向" in nm:
+            print(f"  参考  {nm:<34} forge {vf:.4e} / 参照 {vr:.4e}、U {U:.3e} (効果/U {vf/max(U,1e-300):.1f})、許容幅 {tol:.3e} (効果/許容 {vf/tol:.1f}) — C1 は判定しない (§6)")
+            continue
         bad |= not good
         print(f"  {'PASS' if good else 'FAIL'}  {nm:<34} forge {vf:.4e} / 参照 {vr:.4e}、U {U:.3e} (効果/U {vf/max(U,1e-300):.1f})、許容幅 {tol:.3e} (効果/許容 {vf/tol:.1f})")
     if ext_sens is not None:
