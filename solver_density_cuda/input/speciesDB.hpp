@@ -26,8 +26,11 @@ class solverConfig;
 // lump (擬似種) の合成規約 (記録と互換性ハッシュに入る; plan thermophysics-solver-owned-species-db §4.2 #6a)。
 //   NASA-9 係数と MW は lump 内モル分率 x_k の線形結合 (固定組成なら cp/h/s° は構成種の和と厳密に一致)。
 //   LJ は**暫定**で質量分率の単純平均 (設計側 composition.lump_entry と同じ; plan #7 で実種展開に置き換える)。
-//   構成種の温度区切り (Tlo/Tmid/Thi) がすべて同じ場合だけ合成する (区切りの違う種は plan #6b)。
+//   構成種の温度区間がすべて同じなら同じ区間で畳む (SPECIES_LUMP_SYNTHESIS; #6a の lump はこの規約のまま = 記録・ハッシュ不変)。
+//   違えば区切りの和集合で畳み、構成種が自分の [Tlo,Thi] の外にある区間ではその外挿 (cp 一定・h 線形・s° 対数) を NASA-9 の 1 区間として足す
+//   (SPECIES_LUMP_SYNTHESIS_UNION; plan #6b → #13-1)。和集合の区間数が THERMO_MAX_INTERVALS を超えたら拒否。
 #define SPECIES_LUMP_SYNTHESIS "nasa9 and MW mole-fraction weighted (equal breakpoints only); LJ mass-fraction mean (provisional, plan #7)"
+#define SPECIES_LUMP_SYNTHESIS_UNION "nasa9 and MW mole-fraction weighted over the union of the constituents' breakpoints (outside its own [Tlo,Thi] a constituent contributes its extrapolation: cp constant, h linear, s0 logarithmic); LJ mass-fraction mean (provisional, plan #7)"
 
 // 解決済み lump の中身 (lump でない種は members が空)。
 struct ResolvedLump {
@@ -36,6 +39,7 @@ struct ResolvedLump {
     std::vector<double>        input;          // config に書いた分率そのまま
     std::vector<double>        x;              // lump 内モル分率 (正規化済み; 合成の重み)
     std::vector<SpeciesThermo> memberSpecies;  // 構成種の絶対基準係数 (datum 前)
+    std::string                synthesis;      // 合成規約 (SPECIES_LUMP_SYNTHESIS | SPECIES_LUMP_SYNTHESIS_UNION; 記録・互換性ハッシュに入る)
     std::vector<std::string>   memberSource;   // "builtin" | "file"
     std::vector<std::string>   memberDbKey;    // 構成種が一致した DB のキー (内蔵の canonical ID・別名、または外部 DB のキー)
 
@@ -85,9 +89,13 @@ struct ResolvedSpeciesDB {
 std::string speciesDB_identityKey(const std::string& dbKey, bool fromFile);
 
 // 内蔵 DB を返す。値は共通データ data/species/forge_species_v1.yaml (ビルド時に埋め込み、起動時に解析) の
-// legacy_builtin: solver の種で、キーは canonical ID と別名の両方 (Ar/AR, He/HE, H2O/h2o/WATER, AIR/Air/air)。
-// 共通データが壊れていれば std::runtime_error。
+// phase: gas の全エントリ (plan #13-2; 以前は legacy_builtin: solver の 7 種だけ) で、キーは canonical ID と別名の両方
+// (Ar/AR, He/HE, H2O/h2o/WATER, AIR/Air/air)。共通データが壊れている・名前が大小文字無視で重複していれば std::runtime_error。
+// LJ: null (輸送データなし) の種は sigma_LJ = eps_kB = 0 (speciesDB_hasLJ が false)。
 std::map<std::string, SpeciesThermo> speciesDB_builtin();
+
+// LJ パラメータを持つか (内蔵の LJ: null 種と、LJ の無い構成種を含む lump は false)。
+inline bool speciesDB_hasLJ(const SpeciesThermo& s) { return s.sigma_LJ > 0.0 && s.eps_kB > 0.0; }
 
 // 埋め込んだ共通データのファイル名と全文の SHA-256 (来歴・ログ用。互換性ハッシュには入れない)。
 const std::string& speciesDB_builtinDataName();
@@ -102,7 +110,7 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& names, const
 // lump 指定付きの解決 (names に lump の名前も含む; lumps[i].name が names のどれかに一致する)。
 //   lump の構成種は内蔵 DB + dbFile から上と同じ規則で解決し、起動時に 1 種へ合成する (SPECIES_LUMP_SYNTHESIS)。
 //   拒否 (std::runtime_error): 分率が非正・非有限、構成種が空・重複・未知、lump 名が内蔵種/外部 DB の種名と衝突 (大小文字無視)、
-//   basis が mole|mass 以外、構成種の温度区切りが揃わない (plan #6b が必要)。分率の総和が 1 から 1e-3 以上外れたら警告して正規化。
+//   basis が mole|mass 以外、構成種の区切りの和集合が THERMO_MAX_INTERVALS 区間を超える。分率の総和が 1 から 1e-3 以上外れたら警告して正規化。
 //   凝縮種を構成種に入れる検査は cfg を受ける版 (speciesDB_resolve(cfg)) が行う。
 ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& names, const std::string& dbFile,
                                     const std::vector<SpeciesLumpSpec>& lumps);
@@ -167,6 +175,13 @@ void speciesDB_printTable(const solverConfig& cfg, const ResolvedSpeciesDB& db);
 #define SPECIES_RECORD_SCHEMA_TRANSPORT "forge_resolved_species_v2"
 // 外挿規約 (thermo_d.cuh: 区間外は cp を端でクランプ、h は端の cp で線形外挿、T < Tmid で low 係数)。
 #define SPECIES_RECORD_EXTRAPOLATION "nasa9_2interval; low if T<Tmid; cp clamped at Tlo/Thi; h linear with end cp outside [Tlo,Thi]"
+// 区間可変 (plan #13-1, §4.9): 記録に nInt != 2 の種 (lump の構成種を含む) が 1 つでもあるときだけ、schema と外挿規約を下の別値にする
+// (nInt == 2 だけの記録は schema・外挿規約・本文とも #13-1 前とバイト一致)。区間 k は Tb[k] <= T < Tb[k+1] (区切りちょうどは上の区間、
+// 最後の区間は Thi を含む)。2 区間では上の「T < Tmid で low」と同じ。本文は nInt != 2 の種だけ T: に全境界・coef[k] の行、
+// 記録は Tbounds / nasa9_intervals のキー (外部 DB の区間可変の書式と同じ)。
+#define SPECIES_RECORD_SCHEMA_NINT "forge_resolved_species_v1_nint"
+#define SPECIES_RECORD_SCHEMA_TRANSPORT_NINT "forge_resolved_species_v2_nint"
+#define SPECIES_RECORD_EXTRAPOLATION_NINT "nasa9_ninterval; interval k if Tb[k]<=T<Tb[k+1] (a breakpoint belongs to the upper interval, the last interval includes Thi); cp clamped at Tlo/Thi; h linear with end cp outside [Tlo,Thi]"
 // datum 規約 (thermo_d.cu: thermoHrefTemp>0 のとき両区間の a7 に -h_abs(Tref)/Ru を加算)。記録の係数は加算前。
 #define SPECIES_RECORD_DATUM "coefficients are absolute (before datum); runtime adds -h_abs(Tref)/Ru to a7 of every interval when thermoHrefTemp>0"
 

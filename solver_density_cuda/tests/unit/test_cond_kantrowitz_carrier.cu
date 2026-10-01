@@ -27,8 +27,8 @@ static void check(const char* name, double a, double b, double tol) {
 }
 static void checkb(const char* name, bool ok) { if (!ok) ++nfail; printf("  [%s] %s\n", ok ? "PASS" : "FAIL", name); }
 static SpeciesThermo makeSp(double MW, const double lo[9], const double hi[9]) {
-    SpeciesThermo s{}; s.MW = MW; s.sigma_LJ = 3.6; s.eps_kB = 97.0; s.Tlo = 200.0; s.Tmid = 1000.0; s.Thi = 6000.0;
-    for (int i = 0; i < 9; ++i) { s.low[i] = lo[i]; s.high[i] = hi[i]; } return s;
+    SpeciesThermo s{}; s.MW = MW; s.sigma_LJ = 3.6; s.eps_kB = 97.0;
+    thermo_set_nasa9_2(s, 200.0, 1000.0, 6000.0, lo, hi); return s;
 }
 static const double N2_lo[9] = {2.210371497e4,-3.818461820e2,6.082738360,-8.530914410e-3,1.384646189e-5,-9.625793620e-9,2.519705809e-12,7.108460860e2,-1.076003744e1};
 static const double N2_hi[9] = {5.877124060e5,-2.239249073e3,6.066949220,-6.139685500e-4,1.491806679e-7,-1.923105485e-11,1.061954386e-15,1.283210415e4,-1.586640027e1};

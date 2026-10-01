@@ -34,6 +34,18 @@ N2_HIGH = [5.877124060e+05, -2.239249073e+03, 6.066949220e+00, -6.139685500e-04,
            1.061954386e-15, 1.283210415e+04, -1.586640027e+01]
 
 
+def _builtin_n2_intervals():
+    """内蔵 N2 の区間 (共通データ; 段 3 #13-3 から CEA そのものの 3 区間 200–1000–6000–20000 K)。先頭 2 区間は N2_LOW/N2_HIGH と同値。"""
+    import yaml
+    path = os.path.join(HERE, "..", "..", "data", "species", "forge_species_v1.yaml")
+    e = next(x for x in yaml.safe_load(open(path, encoding="utf-8"))["species"] if str(x["id"]) == "N2")
+    return [float(e["intervals"][0]["Tlo"])] + [float(v["Thi"]) for v in e["intervals"]], \
+        [[float(c) for c in v["coeffs"]] for v in e["intervals"]]
+
+
+N2_TB, N2_IV = _builtin_n2_intervals()
+
+
 def sig(source, low2=None):
     lo = list(N2_LOW)
     if low2 is not None:
@@ -70,11 +82,13 @@ def write_case(d, db_low2=None):
     os.makedirs(d, exist_ok=True)
     db = ""
     if db_low2 is not None:
-        lo = list(N2_LOW); lo[2] = db_low2
+        # 外部 DB に内蔵 N2 と同じ区間 (段 3 から 3 区間; 区間可変の書式 Tbounds/nasa9_intervals) を書き、第 1 区間の a2 だけ差し替える
+        iv = [list(v) for v in N2_IV]; iv[0][2] = db_low2
         with open(os.path.join(d, "species_db.yaml"), "w") as f:
-            f.write("N2:\n  MW: 0.0280134\n  LJ_sigma: 3.621\n  LJ_eps_kB: 97.53\n  Tlo: 200.0\n  Tmid: 1000.0\n  Thi: 6000.0\n")
-            f.write("  nasa9_low: [" + ", ".join("%.17g" % x for x in lo) + "]\n")
-            f.write("  nasa9_high: [" + ", ".join("%.17g" % x for x in N2_HIGH) + "]\n")
+            f.write("N2:\n  MW: 0.0280134\n  LJ_sigma: 3.621\n  LJ_eps_kB: 97.53\n")
+            f.write("  Tbounds: [" + ", ".join("%.17g" % x for x in N2_TB) + "]\n  nasa9_intervals:\n")
+            for v in iv:
+                f.write("    - [" + ", ".join("%.17g" % x for x in v) + "]\n")
         db = ', speciesDBFile: "species_db.yaml"'
     # 構成は case/44 run_0509 の solverConfig.yaml (実在の有効な config) から種と DB だけを差し替えたもの
     with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
@@ -112,8 +126,9 @@ def test_records(forge):
         check([s["source"] for s in ra["species"]] == ["builtin", "builtin"], "record keeps source as provenance")
         rm = fs.load_record(recM)
         bad = fs.compare_signatures(fs.signature_from_record(ra), fs.signature_from_record(rm))
-        check(bad == ["N2.nasa9_low[2] 6.0827383600000003 vs 6.0837383600000004"] or
-              (len(bad) == 1 and bad[0].startswith("N2.nasa9_low[2]")), f"record-based comparison shows N2.nasa9_low[2]: {bad}")
+        # 段 3 (#13-3) から内蔵 N2 は 3 区間なので、差のキーは区間可変の名前 nasa9_intervals[0][2] (2 区間なら nasa9_low[2])
+        check(len(bad) == 1 and bad[0].startswith("N2.nasa9_intervals[0][2] 6.08273836"),
+              f"record-based comparison shows N2.nasa9_intervals[0][2]: {bad}")
         # (b) 取り違え: M の記録を A の記録名で置く
         X = os.path.join(tmp, "X"); os.makedirs(X)
         swapped = os.path.join(X, os.path.basename(recA))
@@ -126,7 +141,9 @@ def test_records(forge):
             t = f.read()
         edited = os.path.join(X, "edited.yaml")
         with open(edited, "w") as f:
-            f.write(t.replace("nasa9_low: [", "nasa9_low: [1", 1))
+            # 最初の区間可変の係数行 (N2 の第 1 区間 a0 = 22103.71497) を 122103.71497 に (段 3 から N2 は 3 区間で nasa9_intervals 書式)
+            assert "      - [22103.714970000001, " in t
+            f.write(t.replace("      - [22103.714970000001, ", "      - [122103.714970000001, ", 1))
         re_ = fs.load_record(edited)
         check(not re_["consistent"] and any("recomputed" in p for p in re_["problems"]), f"edited record detected: {re_['problems']}")
     finally:

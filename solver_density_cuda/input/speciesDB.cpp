@@ -25,20 +25,40 @@ namespace {
 
 // 内蔵 DB の 1 種を構築する。
 // NASA-9 係数 (a0..a8): cp/R = a0/T^2 + a1/T + a2 + a3 T + a4 T^2 + a5 T^3 + a6 T^4
-// MW [kg/mol], sigma_LJ [Angstrom], eps_kB [K]。
+// MW [kg/mol], sigma_LJ [Angstrom], eps_kB [K]。Tb[0..nInt] は区間の境界、a[k] は区間 k の係数 (区間可変, plan #13-1)。
 // 値は共通データ data/species/forge_species_v1.yaml から (各 species・各定数の出典は同ファイルの source/LJ.source と
 // methods/thermophysics.md 「内蔵 species DB の一覧と出典」)。
-SpeciesThermo makeSpecies(double MW, double sigma, double eps_kB,
-                          double Tlo, double Tmid, double Thi,
-                          const double low[9], const double high[9])
+SpeciesThermo makeSpecies(double MW, double sigma, double eps_kB, int nInt, const double* Tb, const double (*a)[9])
 {
-    SpeciesThermo s;
+    SpeciesThermo s{};
     s.MW = MW; s.sigma_LJ = sigma; s.eps_kB = eps_kB;
-    s.Tlo = Tlo; s.Tmid = Tmid; s.Thi = Thi;
-    for (int i=0;i<9;i++){ s.low[i]=low[i]; s.high[i]=high[i]; }
+    thermo_set_intervals(s, nInt, Tb, a);
     s.h_datum = 0.0;
     s.invMW = 1.0/MW;
     return s;
+}
+
+// 区間の境界 (Tlo, 区切り..., Thi) を double の列で返す。
+std::vector<double> boundsOf(const SpeciesThermo& s)
+{
+    std::vector<double> b;
+    for (int k = 0; k <= s.nInt; ++k) b.push_back(thermo_bound(s, k));
+    return b;
+}
+
+// 区間数・境界の検査 (空 = 正常)。1 <= nInt <= THERMO_MAX_INTERVALS、境界は有限・正・狭義単調増加。
+std::string intervalProblem(int nInt, const std::vector<double>& Tb)
+{
+    if (nInt < 1 || nInt > THERMO_MAX_INTERVALS) {
+        return "has " + std::to_string(nInt) + " temperature intervals; the solver supports 1 to "
+               + std::to_string(THERMO_MAX_INTERVALS) + " (THERMO_MAX_INTERVALS)";
+    }
+    if (static_cast<int>(Tb.size()) != nInt + 1) return "needs " + std::to_string(nInt + 1) + " interval bounds";
+    for (int k = 0; k <= nInt; ++k) {
+        if (!std::isfinite(Tb[k]) || !(Tb[k] > 0.0)) return "has a non-positive or non-finite interval bound";
+        if (k > 0 && !(Tb[k-1] < Tb[k])) return "intervals must be contiguous and increasing";
+    }
+    return "";
 }
 
 // yaml ノードから 9 係数を読む
@@ -79,8 +99,9 @@ int fractionIndex(const std::string& key, char prefix)
 std::unique_ptr<ResolvedSpeciesDB> g_current;   // speciesDB_init の保持先
 
 // ---- 共通 species データ (埋め込み YAML) の解析 ----
-//   スキーマは data/species/forge_species_v1.yaml の冒頭。#4 (値は変えない) では legacy_builtin に solver を含む
-//   エントリだけを内蔵種とする (移行前のハードコード 7 種と同じ集合)。
+//   スキーマは data/species/forge_species_v1.yaml の冒頭。phase: gas の全エントリを内蔵種とする (plan #13-2; #4〜#13-1 は
+//   legacy_builtin に solver を含む 7 種だけだった。legacy_builtin は履歴の欄として残り、ここでは読まない)。
+//   phase: condensed は parseCondensedData が読む (気液ペアの液相)。
 #define FORGE_SPECIES_DATA_SCHEMA "forge_species_data_v1"
 
 struct BuiltinEntry {
@@ -103,44 +124,66 @@ std::vector<BuiltinEntry> parseBuiltinData()
     }
     if (!root["species"] || !root["species"].IsSequence()) throw std::runtime_error(where + ": 'species' list is missing");
     std::vector<BuiltinEntry> out;
-    std::map<std::string, std::string> seen;   // 名前 (ID と別名) → 所有 ID。完全一致で重複を拒否
+    // 名前 (ID と別名) の一意性: 完全一致の重複は拒否、大小文字だけ違う名前も別のエントリどうしなら拒否する (plan §4.9)。
+    // 名前解決 (findSpecies) は完全一致の次に大小文字無視で引くので、ここで一意でないと引く先が決まらない
+    // (thermo.inp には CO/Co・CS2/Cs2 などが実在する)。同じエントリ内の大小文字違い (H2O/h2o, AIR/Air/air) は許す。
+    std::map<std::string, std::string> seen;     // 名前 → 所有 ID (完全一致)
+    std::map<std::string, std::string> seenCI;   // 大文字化した名前 → 最初の綴り (所有 ID は seen から)
     for (const auto& n : root["species"]) {
         const std::string id = n["id"].as<std::string>();
         auto claim = [&](const std::string& nm) {
             auto it = seen.find(nm);
             if (it != seen.end()) throw std::runtime_error(where + ": name '" + nm + "' is used by both '" + it->second + "' and '" + id + "'");
+            auto ci = seenCI.find(toUpper(nm));
+            if (ci != seenCI.end() && seen[ci->second] != id) {
+                throw std::runtime_error(where + ": name '" + nm + "' of '" + id + "' differs only in letter case from '" + ci->second + "' of '"
+                                         + seen[ci->second] + "' (names are looked up case-insensitively, so they must be unique ignoring case)");
+            }
             seen[nm] = id;
+            if (ci == seenCI.end()) seenCI[toUpper(nm)] = nm;
         };
         claim(id);
         std::vector<std::string> aliases;
         if (n["aliases"]) for (const auto& a : n["aliases"]) { aliases.push_back(a.as<std::string>()); claim(aliases.back()); }
-        bool solver = false;
-        if (n["legacy_builtin"]) for (const auto& t : n["legacy_builtin"]) solver = solver || (t.as<std::string>() == "solver");
-        if (!solver) continue;
         const std::string phase = n["phase"] ? n["phase"].as<std::string>() : "";
-        if (phase != "gas") throw std::runtime_error(where + ": '" + id + "' phase '" + phase + "' (only gas is supported as a built-in species)");
+        if (phase == "condensed") continue;   // 液相は parseCondensedData
+        if (phase != "gas") throw std::runtime_error(where + ": '" + id + "' phase '" + phase + "' (gas or condensed)");
         const YAML::Node iv = n["intervals"];
-        // SpeciesThermo は 2 区間固定 (区間可変は plan #6)。
-        if (!iv || !iv.IsSequence() || iv.size() != 2) {
-            throw std::runtime_error(where + ": '" + id + "' must have exactly 2 temperature intervals (variable intervals are plan #6)");
+        // 区間可変 (1..THERMO_MAX_INTERVALS; plan #13-1)。上限を超える種は起動時に拒否する。
+        if (!iv || !iv.IsSequence() || iv.size() < 1) {
+            throw std::runtime_error(where + ": '" + id + "' needs a list of temperature intervals");
         }
-        double lo[9], hi[9];
-        if (!read9(iv[0]["coeffs"], lo) || !read9(iv[1]["coeffs"], hi)) {
-            throw std::runtime_error(where + ": '" + id + "' needs 9 NASA-9 coefficients per interval");
+        const int nInt = static_cast<int>(iv.size());
+        if (nInt > THERMO_MAX_INTERVALS) throw std::runtime_error(where + ": '" + id + "' " + intervalProblem(nInt, {}));
+        double a[THERMO_MAX_INTERVALS][9];
+        std::vector<double> Tb;
+        for (int k = 0; k < nInt; ++k) {
+            if (!read9(iv[k]["coeffs"], a[k])) {
+                throw std::runtime_error(where + ": '" + id + "' needs 9 NASA-9 coefficients per interval");
+            }
+            const double lo = iv[k]["Tlo"].as<double>(), hi = iv[k]["Thi"].as<double>();
+            if (k == 0) Tb.push_back(lo);
+            else if (lo != Tb.back()) throw std::runtime_error(where + ": '" + id + "' intervals must be contiguous and increasing");
+            Tb.push_back(hi);
         }
-        const double Tlo = iv[0]["Tlo"].as<double>(), Tmid = iv[0]["Thi"].as<double>();
-        const double Tmid2 = iv[1]["Tlo"].as<double>(), Thi = iv[1]["Thi"].as<double>();
-        if (!(Tlo < Tmid && Tmid == Tmid2 && Tmid < Thi)) {
-            throw std::runtime_error(where + ": '" + id + "' intervals must be contiguous and increasing");
+        {
+            const std::string bad = intervalProblem(nInt, Tb);
+            if (!bad.empty()) throw std::runtime_error(where + ": '" + id + "' " + bad);
         }
         const double MW = n["MW"].as<double>();
         if (!(MW > 0.0) || !std::isfinite(MW)) throw std::runtime_error(where + ": '" + id + "' has invalid MW");
-        // LJ: null は「輸送データなし」。内蔵種での扱い (輸送に使うと拒否) は plan #6/#7 なので、現時点では内蔵種に置かない。
+        // LJ: null は「輸送データなし」: sigma_LJ = eps_kB = 0 で置き (speciesDB_hasLJ が false)、LJ を読む使い方
+        // (physProp.transport の kinetic、LJ の混合平均拡散) は起動時に拒否する (speciesTransportDB_resolve / speciesDB_resolve(cfg))。
         const YAML::Node lj = n["LJ"];
-        if (!lj || lj.IsNull()) {
-            throw std::runtime_error(where + ": '" + id + "' has no LJ data (LJ: null); built-in species without transport data are not supported yet (plan #6/#7)");
+        double sigma = 0.0, eps = 0.0;
+        if (lj && !lj.IsNull()) {
+            if (!lj.IsMap() || !lj["sigma"] || !lj["eps_kB"]) throw std::runtime_error(where + ": '" + id + "' LJ needs sigma and eps_kB (or LJ: null)");
+            sigma = lj["sigma"].as<double>(); eps = lj["eps_kB"].as<double>();
+            if (!(sigma > 0.0) || !(eps > 0.0) || !std::isfinite(sigma) || !std::isfinite(eps)) {
+                throw std::runtime_error(where + ": '" + id + "' has invalid LJ parameters");
+            }
         }
-        out.push_back({id, aliases, makeSpecies(MW, lj["sigma"].as<double>(), lj["eps_kB"].as<double>(), Tlo, Tmid, Thi, lo, hi)});
+        out.push_back({id, aliases, makeSpecies(MW, sigma, eps, nInt, Tb.data(), a)});
     }
     return out;
 }
@@ -153,7 +196,7 @@ const std::vector<BuiltinEntry>& builtinEntries()
 }
 
 // ---- 共通データの凝縮相エントリ (phase: condensed; plan #10 §4.8) ----
-//   内蔵の気相種 (legacy_builtin: solver) とは別に読む。気液ペアの気相 (pair_of) は内蔵の気相種でなければならない。
+//   内蔵の気相種 (phase: gas) とは別に読む。気液ペアの気相 (pair_of) は内蔵の気相種でなければならない。
 #define SPECIES_CONDENSED_BELOW "linear_cp_fd_at_Tlo"   // 実装が受け付ける延長規約 (condensationProperties_d.cuh cond_latent_pair_make)
 #define SPECIES_CONDENSED_ABOVE "hold_at_Thi"
 
@@ -215,8 +258,8 @@ int ResolvedSpeciesDB::index(const std::string& name) const
 
 std::map<std::string, SpeciesThermo> speciesDB_builtin()
 {
-    // 共通データ (data/species/forge_species_v1.yaml, ビルド時に埋め込み) の solver 集合を、canonical ID と
-    // 別名の両方をキーにして返す (移行前のハードコード表と同じキー集合・同じ値; tests/unit/test_species_data_bitexact.py)。
+    // 共通データ (data/species/forge_species_v1.yaml, ビルド時に埋め込み) の気相種を、canonical ID と別名の両方をキーにして返す
+    // (移行前の 7 種は同じキー・同じ値のまま、#13-2 で CEA 由来の種が加わった; tests/unit/test_species_data_bitexact.py)。
     std::map<std::string, SpeciesThermo> db;
     for (const auto& e : builtinEntries()) {
         db[e.id] = e.sp;
@@ -244,6 +287,8 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
 
 namespace {
 
+std::string g17(double v);   // 下の「解決済み記録」節で定義 (%.17g)
+
 // 構成種の重複検査用のキー: 内蔵種は canonical ID (別名・大小文字違いを同一視)、それ以外は大文字化した名前。
 std::string memberKey(const std::string& resolvedKey, bool fromFile)
 {
@@ -259,31 +304,94 @@ std::string memberKey(const std::string& resolvedKey, bool fromFile)
 std::string breakpoints(const SpeciesThermo& s)
 {
     std::ostringstream o;
-    o << std::setprecision(17) << s.Tlo << "/" << s.Tmid << "/" << s.Thi;
+    o << std::setprecision(17);
+    for (int k = 0; k <= s.nInt; ++k) o << (k ? "/" : "") << thermo_bound(s, k);
     return o.str();
+}
+
+// 区間の境界と数が完全に同じか
+bool sameIntervals(const SpeciesThermo& a, const SpeciesThermo& b)
+{
+    if (a.nInt != b.nInt) return false;
+    for (int k = 0; k <= a.nInt; ++k) if (thermo_bound(a, k) != thermo_bound(b, k)) return false;
+    return true;
+}
+
+// 構成種 m の [Tlo,Thi] の外 (below: T<Tlo、それ以外 T>Thi) の延長 (cp 一定・h 線形・s° 対数; thermo_d.cuh の外挿) を
+// NASA-9 の 1 区間として表す: cp/R = a2、h/RT = a2 + a7/T、s/R = a2 ln T + a8。端の値は thermo_*_clamped と同じ評価。
+void extensionCoeffs(const SpeciesThermo& m, bool below, double a[9])
+{
+    const double Tb = below ? m.Tlo : m.Thi;
+    const double cpR = thermo_cp_molar_clamped(m, Tb)/THERMO_RU;
+    const double hR  = thermo_h_molar_clamped(m, Tb)/THERMO_RU;
+    const double sR  = thermo_s_molar_clamped(m, Tb)/THERMO_RU;
+    for (int i = 0; i < 9; ++i) a[i] = 0.0;
+    a[2] = cpR;
+    a[7] = hR - cpR*Tb;
+    a[8] = sR - cpR*std::log(Tb);
 }
 
 // lump を合成する (plan thermophysics-solver-owned-species-db §4.2 #6a; 式は設計側 composition.lump_entry と同じ)。
 //   x_k: lump 内モル分率 (mole は正規化、mass は Y_k/M_k を正規化)
-//   MW  = Σ x_k M_k、NASA-9 係数 = Σ x_k a_k (両区間。係数に線形なので cp/R, h/RT, s°/R は構成種のモル加重和と厳密に一致)
+//   MW  = Σ x_k M_k、NASA-9 係数 = Σ x_k a_k (区間ごと。係数に線形なので cp/R, h/RT, s°/R は構成種のモル加重和と厳密に一致)
 //   LJ  = Σ Y_k σ_k, Σ Y_k ε_k (Y_k = x_k M_k / MW)。**暫定**: 設計側の現行規約に合わせただけで根拠は無い。
 //         plan #7 で粘性・熱伝導は実種展開、拡散は Blanc の法則に置き換える。
-SpeciesThermo synthesizeLump(const std::string& name, const std::vector<double>& x, const std::vector<SpeciesThermo>& m)
+//   区切り: 構成種の区間がすべて同じなら同じ区間で畳む (SPECIES_LUMP_SYNTHESIS; #6a と同じ演算)。違えば区切りの和集合で畳み
+//   (SPECIES_LUMP_SYNTHESIS_UNION; plan #6b → #13-1)、構成種が自分の [Tlo,Thi] の外にある和集合区間では外挿 (extensionCoeffs) を
+//   その区間の係数として足す (lump の外挿も構成種の外挿の和と一致する)。和集合の区間数が THERMO_MAX_INTERVALS を超えたら拒否。
+//   synthesis に使った規約文字列を返す (記録・互換性ハッシュに入る)。
+SpeciesThermo synthesizeLump(const std::string& name, const std::vector<double>& x, const std::vector<SpeciesThermo>& m,
+                             std::string& synthesis)
 {
     SpeciesThermo s{};
-    s.Tlo = m[0].Tlo; s.Tmid = m[0].Tmid; s.Thi = m[0].Thi;
     double MW = 0.0;
     for (size_t k = 0; k < m.size(); ++k) MW += x[k]*m[k].MW;
     if (!(MW > 0.0) || !std::isfinite(MW)) throw std::runtime_error("[speciesDB] lump '" + name + "': synthesized MW is not positive");
     s.MW = MW;
-    for (int i = 0; i < 9; ++i) { s.low[i] = 0.0; s.high[i] = 0.0; }
+    bool same = true;
+    for (size_t k = 1; k < m.size(); ++k) same = same && sameIntervals(m[0], m[k]);
+    double a[THERMO_MAX_INTERVALS][9] = {};
+    std::vector<double> Tb;
+    if (same) {
+        synthesis = SPECIES_LUMP_SYNTHESIS;
+        Tb = boundsOf(m[0]);
+        for (size_t k = 0; k < m.size(); ++k)
+            for (int j = 0; j < m[0].nInt; ++j)
+                for (int i = 0; i < 9; ++i) a[j][i] += x[k]*m[k].coef[j][i];
+    } else {
+        synthesis = SPECIES_LUMP_SYNTHESIS_UNION;
+        for (const auto& mk : m) for (double b : boundsOf(mk)) Tb.push_back(b);
+        std::sort(Tb.begin(), Tb.end());
+        Tb.erase(std::unique(Tb.begin(), Tb.end()), Tb.end());
+        const int nU = static_cast<int>(Tb.size()) - 1;
+        if (nU > THERMO_MAX_INTERVALS) {
+            std::string lst;
+            for (size_t k = 0; k < Tb.size(); ++k) lst += (k ? "/" : "") + g17(Tb[k]);
+            throw std::runtime_error("[speciesDB] lump '" + name + "': the union of the constituents' temperature breakpoints (" + lst
+                                     + " K) makes " + std::to_string(nU) + " intervals, more than THERMO_MAX_INTERVALS="
+                                     + std::to_string(THERMO_MAX_INTERVALS) + "; keep such species as separate species.");
+        }
+        for (int j = 0; j < nU; ++j) {
+            for (size_t k = 0; k < m.size(); ++k) {
+                double ak[9];
+                if (Tb[j+1] <= m[k].Tlo)     extensionCoeffs(m[k], true, ak);
+                else if (Tb[j] >= m[k].Thi)  extensionCoeffs(m[k], false, ak);
+                else { const double* c = m[k].coef[thermo_interval(m[k], Tb[j])]; for (int i = 0; i < 9; ++i) ak[i] = c[i]; }
+                for (int i = 0; i < 9; ++i) a[j][i] += x[k]*ak[i];
+            }
+        }
+    }
+    thermo_set_intervals(s, static_cast<int>(Tb.size()) - 1, Tb.data(), a);
     double sig = 0.0, eps = 0.0;
+    bool allLJ = true;
     for (size_t k = 0; k < m.size(); ++k) {
-        for (int i = 0; i < 9; ++i) { s.low[i] += x[k]*m[k].low[i]; s.high[i] += x[k]*m[k].high[i]; }
         const double Yk = x[k]*m[k].MW/MW;
         sig += Yk*m[k].sigma_LJ;
         eps += Yk*m[k].eps_kB;
+        allLJ = allLJ && speciesDB_hasLJ(m[k]);
     }
+    // LJ の無い構成種 (内蔵の LJ: null 種) を含む lump は LJ なし (0) にする (平均に 0 を混ぜた値を使わせない; #13-2)
+    if (!allLJ) { sig = 0.0; eps = 0.0; }
     s.sigma_LJ = sig; s.eps_kB = eps;
     s.h_datum = 0.0;
     s.invMW = 1.0/MW;
@@ -318,12 +426,36 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
             sp.MW       = s["MW"]       ? s["MW"].as<double>()       : 0.0;
             sp.sigma_LJ = s["LJ_sigma"] ? s["LJ_sigma"].as<double>() : 3.6;
             sp.eps_kB   = s["LJ_eps_kB"]? s["LJ_eps_kB"].as<double>(): 97.0;
-            sp.Tlo      = s["Tlo"]      ? s["Tlo"].as<double>()      : 200.0;
-            sp.Tmid     = s["Tmid"]     ? s["Tmid"].as<double>()     : 1000.0;
-            sp.Thi      = s["Thi"]      ? s["Thi"].as<double>()      : 6000.0;
-            double lo[9], hi[9];
-            if (read9(s["nasa9_low"], lo) && read9(s["nasa9_high"], hi)) {
-                for (int i=0;i<9;i++){ sp.low[i]=lo[i]; sp.high[i]=hi[i]; }
+            const std::string w = "[speciesDB] species '" + name + "' in DB file '" + dbFile + "'";
+            bool ok = false;
+            if (s["Tbounds"] || s["nasa9_intervals"]) {
+                // 区間可変の書式 (plan #13-1; 解決済み記録の nInt != 2 の種と同じキー): Tbounds [Tlo, 区切り..., Thi] と
+                // nasa9_intervals [[a0..a8] x nInt]。2 区間の書式 (Tlo/Tmid/Thi, nasa9_low/nasa9_high) と混ぜられない。
+                if (s["nasa9_low"] || s["nasa9_high"] || s["Tmid"] || s["Tlo"] || s["Thi"]) {
+                    throw std::runtime_error(w + ": Tbounds/nasa9_intervals cannot be mixed with Tlo/Tmid/Thi/nasa9_low/nasa9_high");
+                }
+                const YAML::Node tb = s["Tbounds"], iv = s["nasa9_intervals"];
+                if (!tb || !tb.IsSequence() || !iv || !iv.IsSequence()) throw std::runtime_error(w + ": needs both Tbounds and nasa9_intervals lists");
+                const int nInt = static_cast<int>(iv.size());
+                std::vector<double> Tb;
+                for (const auto& v : tb) Tb.push_back(v.as<double>());
+                const std::string bad = intervalProblem(nInt, Tb);
+                if (!bad.empty()) throw std::runtime_error(w + " " + bad);
+                double a[THERMO_MAX_INTERVALS][9];
+                for (int k = 0; k < nInt; ++k)
+                    if (!read9(iv[k], a[k])) throw std::runtime_error(w + ": nasa9_intervals[" + std::to_string(k) + "] needs 9 coefficients");
+                thermo_set_intervals(sp, nInt, Tb.data(), a);
+                ok = true;
+            } else {
+                double lo[9], hi[9];
+                if (read9(s["nasa9_low"], lo) && read9(s["nasa9_high"], hi)) {
+                    thermo_set_nasa9_2(sp, s["Tlo"]  ? s["Tlo"].as<double>()  : 200.0,
+                                           s["Tmid"] ? s["Tmid"].as<double>() : 1000.0,
+                                           s["Thi"]  ? s["Thi"].as<double>()  : 6000.0, lo, hi);
+                    ok = true;
+                }
+            }
+            if (ok) {
                 if (!(sp.MW > 0.0) || !std::isfinite(sp.MW)) {
                     throw std::runtime_error("[speciesDB] species '" + name + "' has invalid MW in DB file '" + dbFile + "'");
                 }
@@ -333,7 +465,7 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
                 fromFile[name] = true;
             } else {
                 std::cerr << "[speciesDB] species '" << name
-                          << "' in DB file lacks valid nasa9_low/nasa9_high (need 9 coeffs); ignored" << std::endl;
+                          << "' in DB file lacks valid nasa9_low/nasa9_high (need 9 coeffs) or Tbounds/nasa9_intervals; ignored" << std::endl;
             }
         }
     }
@@ -424,17 +556,6 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
             rl.memberDbKey.push_back(it->first);
             sum += v;
         }
-        // 温度区切りが揃っていること (区間の和集合で畳むのは plan #6b)
-        for (size_t k = 1; k < rl.memberSpecies.size(); ++k) {
-            const SpeciesThermo& a = rl.memberSpecies[0];
-            const SpeciesThermo& b = rl.memberSpecies[k];
-            if (a.Tlo != b.Tlo || a.Tmid != b.Tmid || a.Thi != b.Thi) {
-                throw std::runtime_error(where + ": constituents have different temperature breakpoints ('" + lp.members[0] + "' "
-                                         + breakpoints(a) + " K vs '" + lp.members[k] + "' " + breakpoints(b) + " K). "
-                                         "Lumps whose constituents have different Tlo/Tmid/Thi need variable temperature intervals "
-                                         "(plan thermophysics-solver-owned-species-db #6b, not implemented yet); keep such species as separate species.");
-            }
-        }
         if (std::fabs(sum - 1.0) >= 1.0e-3) {
             std::cerr << where << " WARNING: " << lp.basis << " fractions sum to " << std::setprecision(10) << sum
                       << " (differs from 1 by >= 1e-3); normalized within the lump" << std::endl;
@@ -450,7 +571,7 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
             for (size_t k = 0; k < nm_; ++k) rl.x[k] /= den;
         }
         out.names.push_back(nm);
-        out.species.push_back(synthesizeLump(nm, rl.x, rl.memberSpecies));
+        out.species.push_back(synthesizeLump(nm, rl.x, rl.memberSpecies, rl.synthesis));
         out.source.push_back("lump");
         out.lumps.push_back(rl);
         out.dbKey.push_back("");
@@ -495,6 +616,18 @@ ResolvedSpeciesDB speciesDB_resolve(const solverConfig& cfg)
     if (cfg.condensation == 1 && cfg.condModel == 1) {
         speciesDB_attachCondensed(db, "H2O(L)", cfg.thermalMethod == 2 ? cfg.condGasSpeciesName : std::string(), cfg.thermalMethod == 2);
     }
+    // LJ の無い種 (内蔵の LJ: null 種・それを含む lump; #13-2) は LJ の混合平均拡散 (speciesTransport_d の M4: 化学種 2 以上・
+    // viscMethod != 0・speciesDiffusionMethod 1 で thermo_Dmix_species_f が σ・ε を読む) に使えない。起動時に止める。
+    if (cfg.nSpecies >= 2 && cfg.viscMethod != 0 && cfg.speciesDiffusionMethod == 1) {
+        std::string miss;
+        for (int s = 0; s < db.size(); ++s) if (!speciesDB_hasLJ(db.species[s])) miss += (miss.empty() ? "" : ", ") + db.names[s];
+        if (!miss.empty()) {
+            throw std::runtime_error("[speciesDB] species " + miss + " have no Lennard-Jones data (LJ: null in the built-in species data, "
+                                     "or a lump with such a constituent), but the kinetic-theory mixture diffusion (physProp.speciesDiffusionMethod 1, "
+                                     "the default with viscMethod != 0) needs sigma/eps. Use speciesDiffusionMethod: 0 (constant Schmidt number), "
+                                     "or give LJ_sigma/LJ_eps_kB for them in speciesDBFile.");
+        }
+    }
     // 種ごとの輸送物性の出所 (physProp.transport; plan #5t2 段 1)。書かれていなければ何もしない (記録・ハッシュは従来のまま)。
     if (!cfg.speciesTransport.empty()) speciesTransportDB_resolve(db, cfg.speciesTransport, cfg.speciesDBFile);
     return db;
@@ -502,7 +635,31 @@ ResolvedSpeciesDB speciesDB_resolve(const solverConfig& cfg)
 
 namespace {
 
-std::string g17(double v);   // 下の「解決済み記録」節で定義 (%.17g)
+// 熱物性 (MW・区間・係数; withLJ なら LJ も) の差を従来の順序 (MW, 区間, LJ, 係数) で emit(key, a の値, b の値) に渡す。
+// 2 区間同士は #13-1 前と同じキー名 (Tlo/Tmid/Thi, nasa9_low[k]/nasa9_high[k])、それ以外は nInt / Tbounds[k] / nasa9_intervals[j][k]。
+template <class Emit>
+void thermoDiff(const SpeciesThermo& a, const SpeciesThermo& b, bool withLJ, Emit emit)
+{
+    auto d = [&](const std::string& key, double x, double y) { if (x != y) emit(key, g17(x), g17(y)); };
+    const bool two = (a.nInt == 2 && b.nInt == 2);
+    d("MW", a.MW, b.MW);
+    if (two) {
+        d("Tlo", a.Tlo, b.Tlo); d("Tmid", a.Tbrk[0], b.Tbrk[0]); d("Thi", a.Thi, b.Thi);
+    } else if (a.nInt != b.nInt) {
+        emit("nInt", std::to_string(a.nInt) + " (" + breakpoints(a) + " K)", std::to_string(b.nInt) + " (" + breakpoints(b) + " K)");
+    } else {
+        for (int k = 0; k <= a.nInt; ++k) d("Tbounds[" + std::to_string(k) + "]", thermo_bound(a, k), thermo_bound(b, k));
+    }
+    if (withLJ) { d("LJ_sigma", a.sigma_LJ, b.sigma_LJ); d("LJ_eps_kB", a.eps_kB, b.eps_kB); }
+    if (two) {
+        for (int k = 0; k < 9; ++k) d("nasa9_low[" + std::to_string(k) + "]", a.coef[0][k], b.coef[0][k]);
+        for (int k = 0; k < 9; ++k) d("nasa9_high[" + std::to_string(k) + "]", a.coef[1][k], b.coef[1][k]);
+    } else if (a.nInt == b.nInt) {
+        for (int j = 0; j < a.nInt; ++j)
+            for (int k = 0; k < 9; ++k)
+                d("nasa9_intervals[" + std::to_string(j) + "][" + std::to_string(k) + "]", a.coef[j][k], b.coef[j][k]);
+    }
+}
 
 // 内蔵種の canonical ID (別名・大小文字違いを同一視)。内蔵に無ければ大文字化した名前。
 std::string canonicalKeyCI(const std::string& n)
@@ -515,19 +672,14 @@ std::string canonicalKeyCI(const std::string& n)
     return up;
 }
 
-// 気液ペアの基準契約: 熱力学に効く値 (MW・区切り・両区間の 9 係数) の最初の差 (空 = 一致)。LJ・datum・invMW は見ない。
-std::string firstThermoDiff(const SpeciesThermo& a, const SpeciesThermo& b)
+// 気液ペアの基準契約: 熱力学に効く値 (MW・区間・全区間の 9 係数) の最初の差 (key 空 = 一致)。LJ・datum・invMW は見ない。
+struct FirstThermoDiff { std::string key, a, b; };
+FirstThermoDiff firstThermoDiff(const SpeciesThermo& a, const SpeciesThermo& b)
 {
-    auto d = [](const std::string& key, double x, double y) {
-        return (x == y) ? std::string() : key + " " + g17(x) + " vs built-in " + g17(y);
-    };
-    std::string r;
-    if (!(r = d("MW", a.MW, b.MW)).empty()) return r;
-    if (!(r = d("Tlo", a.Tlo, b.Tlo)).empty()) return r;
-    if (!(r = d("Tmid", a.Tmid, b.Tmid)).empty()) return r;
-    if (!(r = d("Thi", a.Thi, b.Thi)).empty()) return r;
-    for (int k = 0; k < 9; ++k) if (!(r = d("nasa9_low[" + std::to_string(k) + "]", a.low[k], b.low[k])).empty()) return r;
-    for (int k = 0; k < 9; ++k) if (!(r = d("nasa9_high[" + std::to_string(k) + "]", a.high[k], b.high[k])).empty()) return r;
+    FirstThermoDiff r;
+    thermoDiff(a, b, false, [&](const std::string& key, const std::string& x, const std::string& y) {
+        if (r.key.empty()) r = {key, x, y};
+    });
     return r;
 }
 
@@ -575,13 +727,26 @@ void speciesDB_attachCondensed(ResolvedSpeciesDB& db, const std::string& id, con
         }
         // 気液ペアの基準契約 (§4.8, 2 回目 M2): 液相 H2O(L) は内蔵の気相 H2O と同じ絶対基準 (CEA) のペア。外部 DB が気相を
         // 上書きしていても値が内蔵と完全に同じなら整合を確かめられるので通し、違えば拒否する (L がその差だけずれるため)。
-        const std::string diff = firstThermoDiff(db.species[gi], ge->sp);
-        if (!diff.empty()) {
-            throw std::runtime_error(where + ": the condensing gas '" + db.names[gi] + "' comes from " + (file ? "speciesDBFile" : db.source[gi])
-                                     + " and differs from the built-in gas '" + ce->pairOf + "' that the liquid phase pairs with (" + diff
-                                     + "). The latent heat L = h_v - h_l needs the gas and liquid on the same absolute (CEA) basis; "
-                                     "a gas entry that cannot be checked against the pair is refused with condensation ON "
-                                     "(remove the gas override from speciesDBFile, or give it exactly the built-in coefficients and MW).");
+        // 拒否は属性の未検証とは別物 (物性の契約) なので FORGE_ALLOW_UNVERIFIED_SPECIES / --force-species では通さない
+        // (この検査は起動直後の speciesDB_init で走り、入力場の照合より前)。移行先は 2 つ (#13-3 判断 (b), 2026-10-01)。
+        const FirstThermoDiff diff = firstThermoDiff(db.species[gi], ge->sp);
+        if (!diff.key.empty()) {
+            const std::string src = file ? "speciesDBFile" : db.source[gi];
+            throw std::runtime_error(where + ": the condensing gas '" + db.names[gi] + "' comes from " + src
+                                     + " and differs from the built-in gas '" + ce->pairOf + "' that the liquid phase pairs with:\n"
+                                     + "    " + db.names[gi] + "." + diff.key + ": " + src + " " + diff.a + " vs built-in " + diff.b + "\n"
+                                     + "  The latent heat L = h_v - h_l needs the gas and liquid on the same absolute (CEA) basis, so a gas "
+                                     "entry that differs from the pair is refused with condensation ON. This is a property contract, not an "
+                                     "unverified field: FORGE_ALLOW_UNVERIFIED_SPECIES=1 / --force-species do not bypass it.\n"
+                                     "  Migrate the config by either:\n"
+                                     "    (1) removing '" + db.names[gi] + "' from speciesDBFile (the built-in '" + ce->pairOf
+                                     + "' is used; the record shows source: builtin), or\n"
+                                     "    (2) writing physProp.species in lump notation ([{name: <lump>, lump: {<species>: <mole fraction>, ...}, "
+                                     "basis: mole}, " + db.names[gi] + "]) without speciesDBFile (the lump is synthesised at startup and '"
+                                     + ce->pairOf + "' is built-in).\n"
+                                     "  Fields written with the old entry carry another species_hash: continue from them with "
+                                     "tools/convert_species_field.py (or tools/restart_field.py --force-species, then "
+                                     "FORGE_ALLOW_UNVERIFIED_SPECIES=1 for that solver run).");
         }
         c.gasIndex = gi; c.gasName = db.names[gi]; c.gas = db.species[gi];
     }
@@ -705,7 +870,7 @@ void speciesDB_printTable(const solverConfig& cfg, const ResolvedSpeciesDB& db)
         if (!db.isLump(s)) continue;
         const ResolvedLump& l = db.lumps[s];
         const SpeciesThermo& sp = db.species[s];
-        std::cout << "[species]   lump " << db.names[s] << " (basis " << l.basis << "; synthesized at startup: " << SPECIES_LUMP_SYNTHESIS << ")\n";
+        std::cout << "[species]   lump " << db.names[s] << " (basis " << l.basis << "; synthesized at startup: " << l.synthesis << ")\n";
         for (size_t k = 0; k < l.members.size(); ++k) {
             std::cout << "[species]     " << std::setw(8) << std::left << l.members[k] << std::right
                       << "  input=" << std::setprecision(17) << l.input[k]
@@ -713,7 +878,7 @@ void speciesDB_printTable(const solverConfig& cfg, const ResolvedSpeciesDB& db)
                       << "  MW=" << std::setprecision(10) << l.memberSpecies[k].MW << "  " << l.memberSource[k] << "\n";
         }
         std::cout << "[species]     MW=" << std::setprecision(17) << sp.MW << " kg/mol, T breakpoints "
-                  << sp.Tlo << "/" << sp.Tmid << "/" << sp.Thi << " K\n";
+                  << breakpoints(sp) << " K\n";
         std::cout << "[species]     LJ sigma=" << std::setprecision(17) << sp.sigma_LJ << " A eps/kB=" << sp.eps_kB
                   << " K (PROVISIONAL: mass-fraction mean of constituents, as the design-side generator; to be replaced by"
                   << " constituent expansion / Blanc diffusion in plan #7)\n";
@@ -869,17 +1034,29 @@ struct RecordEntry {
     std::vector<RecordLumpMember> members;    // lump の構成種
 };
 
+// nInt == 2 の種は #13-1 前と一字一句同じ行 (T: Tlo Tmid Thi / low / high)。それ以外は T: に全境界、区間ごとに coef[k] の行
+// (その記録は schema・外挿規約の文字列も別値になる: recordSchemaOf / recordExtrapolationOf)。
 void compatLineSpecies(std::ostringstream& o, const std::string& tag, const SpeciesThermo& s)
 {
     o << tag << ".MW: " << g17(s.MW) << "\n";
-    o << tag << ".T: " << g17(s.Tlo) << " " << g17(s.Tmid) << " " << g17(s.Thi) << "\n";
+    o << tag << ".T:";
+    for (int k = 0; k <= s.nInt; ++k) o << " " << g17(thermo_bound(s, k));
+    o << "\n";
     o << tag << ".LJ: " << g17(s.sigma_LJ) << " " << g17(s.eps_kB) << "\n";
-    o << tag << ".low:";
-    for (int k = 0; k < 9; ++k) o << " " << g17(s.low[k]);
-    o << "\n";
-    o << tag << ".high:";
-    for (int k = 0; k < 9; ++k) o << " " << g17(s.high[k]);
-    o << "\n";
+    if (s.nInt == 2) {
+        o << tag << ".low:";
+        for (int k = 0; k < 9; ++k) o << " " << g17(s.coef[0][k]);
+        o << "\n";
+        o << tag << ".high:";
+        for (int k = 0; k < 9; ++k) o << " " << g17(s.coef[1][k]);
+        o << "\n";
+        return;
+    }
+    for (int j = 0; j < s.nInt; ++j) {
+        o << tag << ".coef[" << j << "]:";
+        for (int k = 0; k < 9; ++k) o << " " << g17(s.coef[j][k]);
+        o << "\n";
+    }
 }
 
 // 互換性テキスト本体。書式は tools/forge_species.py compat_text と一字一句同じにすること。
@@ -939,10 +1116,28 @@ std::vector<std::string> condensedCompatLines(const ResolvedCondensed& c,
     return v;
 }
 
-// 記録のスキーマ名 (輸送ブロックがあれば v2)
-const char* recordSchemaOf(const ResolvedSpeciesDB& db)
+// 記録に nInt != 2 の種 (lump の構成種を含む) が 1 つでもあるか (plan #13-1: そのときだけ schema・外挿規約が別値)
+bool hasNonTwoInterval(const ResolvedSpeciesDB& db)
 {
-    return db.transport.enabled ? SPECIES_RECORD_SCHEMA_TRANSPORT : SPECIES_RECORD_SCHEMA;
+    for (int s = 0; s < db.size(); ++s) {
+        if (db.species[s].nInt != 2) return true;
+        if (db.isLump(s)) for (const auto& m : db.lumps[s].memberSpecies) if (m.nInt != 2) return true;
+    }
+    return false;
+}
+
+// 記録のスキーマ名 (輸送ブロックがあれば v2; nInt != 2 の種があれば区間可変の別名)
+std::string recordSchemaOf(const ResolvedSpeciesDB& db)
+{
+    const bool nint = hasNonTwoInterval(db);
+    if (db.transport.enabled) return nint ? SPECIES_RECORD_SCHEMA_TRANSPORT_NINT : SPECIES_RECORD_SCHEMA_TRANSPORT;
+    return nint ? SPECIES_RECORD_SCHEMA_NINT : SPECIES_RECORD_SCHEMA;
+}
+
+// 外挿・区間選択の規約文字列 (nInt != 2 の種があれば区間可変の規約)
+const char* recordExtrapolationOf(const ResolvedSpeciesDB& db)
+{
+    return hasNonTwoInterval(db) ? SPECIES_RECORD_EXTRAPOLATION_NINT : SPECIES_RECORD_EXTRAPOLATION;
 }
 
 const std::vector<std::string>& transportLinesOf(const ResolvedSpeciesDB& db)
@@ -960,7 +1155,7 @@ std::vector<RecordEntry> entriesOf(const ResolvedSpeciesDB& db)
         if (db.isLump(s)) {
             const ResolvedLump& l = db.lumps[s];
             e.isLump = true;
-            e.synthesis = SPECIES_LUMP_SYNTHESIS;
+            e.synthesis = l.synthesis;
             for (size_t k = 0; k < l.members.size(); ++k) e.members.push_back({l.members[k], l.x[k], l.memberSpecies[k]});
         }
         es.push_back(e);
@@ -969,31 +1164,61 @@ std::vector<RecordEntry> entriesOf(const ResolvedSpeciesDB& db)
 }
 
 // 記録の係数ブロック (種・構成種で共通)。indent は行頭の空白。
+// nInt == 2 は #13-1 前と同じキー (Tlo/Tmid/Thi, nasa9_low/nasa9_high)。それ以外は Tbounds と nasa9_intervals (外部 DB と同じキー)。
 void recordSpeciesBlock(std::ostringstream& o, const std::string& indent, const SpeciesThermo& sp)
 {
     o << indent << "MW: " << g17(sp.MW) << "\n";
-    o << indent << "Tlo: " << g17(sp.Tlo) << "\n";
-    o << indent << "Tmid: " << g17(sp.Tmid) << "\n";
-    o << indent << "Thi: " << g17(sp.Thi) << "\n";
+    if (sp.nInt == 2) {
+        o << indent << "Tlo: " << g17(sp.Tlo) << "\n";
+        o << indent << "Tmid: " << g17(sp.Tbrk[0]) << "\n";
+        o << indent << "Thi: " << g17(sp.Thi) << "\n";
+    } else {
+        o << indent << "Tbounds: [";
+        for (int k = 0; k <= sp.nInt; ++k) o << (k ? ", " : "") << g17(thermo_bound(sp, k));
+        o << "]\n";
+    }
     o << indent << "LJ_sigma: " << g17(sp.sigma_LJ) << "\n";
     o << indent << "LJ_eps_kB: " << g17(sp.eps_kB) << "\n";
-    o << indent << "nasa9_low: [";
-    for (int k = 0; k < 9; ++k) o << (k ? ", " : "") << g17(sp.low[k]);
-    o << "]\n";
-    o << indent << "nasa9_high: [";
-    for (int k = 0; k < 9; ++k) o << (k ? ", " : "") << g17(sp.high[k]);
-    o << "]\n";
+    if (sp.nInt == 2) {
+        o << indent << "nasa9_low: [";
+        for (int k = 0; k < 9; ++k) o << (k ? ", " : "") << g17(sp.coef[0][k]);
+        o << "]\n";
+        o << indent << "nasa9_high: [";
+        for (int k = 0; k < 9; ++k) o << (k ? ", " : "") << g17(sp.coef[1][k]);
+        o << "]\n";
+    } else {
+        o << indent << "nasa9_intervals:\n";
+        for (int j = 0; j < sp.nInt; ++j) {
+            o << indent << "  - [";
+            for (int k = 0; k < 9; ++k) o << (k ? ", " : "") << g17(sp.coef[j][k]);
+            o << "]\n";
+        }
+    }
 }
 
-// 記録の 1 種 (YAML ノード) から係数を読む
+// 記録の 1 種 (YAML ノード) から係数を読む (2 区間の書式と区間可変の書式の両方)
 void readRecordSpecies(const YAML::Node& n, const std::string& what, SpeciesThermo& s)
 {
     s = SpeciesThermo{};
     s.MW = n["MW"].as<double>();
-    s.Tlo = n["Tlo"].as<double>(); s.Tmid = n["Tmid"].as<double>(); s.Thi = n["Thi"].as<double>();
     s.sigma_LJ = n["LJ_sigma"].as<double>(); s.eps_kB = n["LJ_eps_kB"].as<double>();
-    if (!read9(n["nasa9_low"], s.low) || !read9(n["nasa9_high"], s.high))
+    if (n["Tbounds"]) {
+        std::vector<double> Tb;
+        for (const auto& v : n["Tbounds"]) Tb.push_back(v.as<double>());
+        const YAML::Node iv = n["nasa9_intervals"];
+        const int nInt = (iv && iv.IsSequence()) ? static_cast<int>(iv.size()) : 0;
+        const std::string bad = intervalProblem(nInt, Tb);
+        if (!bad.empty()) throw std::runtime_error("species '" + what + "' " + bad);
+        double a[THERMO_MAX_INTERVALS][9];
+        for (int k = 0; k < nInt; ++k)
+            if (!read9(iv[k], a[k])) throw std::runtime_error("species '" + what + "' lacks 9 nasa9 coefficients in interval " + std::to_string(k));
+        thermo_set_intervals(s, nInt, Tb.data(), a);
+        return;
+    }
+    double lo[9], hi[9];
+    if (!read9(n["nasa9_low"], lo) || !read9(n["nasa9_high"], hi))
         throw std::runtime_error("species '" + what + "' lacks 9 nasa9 coefficients");
+    thermo_set_nasa9_2(s, n["Tlo"].as<double>(), n["Tmid"].as<double>(), n["Thi"].as<double>(), lo, hi);
 }
 
 bool readFileBytes(const std::string& path, std::string& out)
@@ -1019,7 +1244,7 @@ std::string speciesDB_sha256Hex(const std::string& bytes)
 
 std::string speciesDB_compatText(const ResolvedSpeciesDB& db, double Tref)
 {
-    return compatTextRaw(recordSchemaOf(db), SPECIES_RECORD_DATUM, SPECIES_RECORD_EXTRAPOLATION, Tref, entriesOf(db),
+    return compatTextRaw(recordSchemaOf(db), SPECIES_RECORD_DATUM, recordExtrapolationOf(db), Tref, entriesOf(db),
                          transportLinesOf(db), condensedCompatLines(db.condensed));
 }
 
@@ -1041,7 +1266,7 @@ std::string speciesDB_recordText(const ResolvedSpeciesDB& db, double Tref, const
     o << "compat_hash: " << yq(speciesDB_compatHash(db, Tref)) << "\n";
     o << "datum: " << yq(SPECIES_RECORD_DATUM) << "\n";
     o << "thermoHrefTemp: " << g17(Tref) << "\n";
-    o << "extrapolation: " << yq(SPECIES_RECORD_EXTRAPOLATION) << "\n";
+    o << "extrapolation: " << yq(recordExtrapolationOf(db)) << "\n";
     o << "species:\n";
     for (int s = 0; s < db.size(); ++s) {
         const SpeciesThermo& sp = db.species[s];
@@ -1055,7 +1280,7 @@ std::string speciesDB_recordText(const ResolvedSpeciesDB& db, double Tref, const
             const ResolvedLump& l = db.lumps[s];
             o << "    lump:\n";
             o << "      basis: " << yq(l.basis) << "\n";
-            o << "      synthesis: " << yq(SPECIES_LUMP_SYNTHESIS) << "\n";
+            o << "      synthesis: " << yq(l.synthesis) << "\n";
             o << "      members:\n";
             for (size_t k = 0; k < l.members.size(); ++k) {
                 o << "        - name: " << yq(l.members[k]) << "\n";
@@ -1237,7 +1462,7 @@ std::vector<std::string> speciesDB_diffRecord(const std::string& recordPath, con
         }
     }
     if (datum != SPECIES_RECORD_DATUM) d.push_back("datum convention: field '" + datum + "' vs current");
-    if (extrap != SPECIES_RECORD_EXTRAPOLATION) d.push_back("extrapolation: field '" + extrap + "' vs current");
+    if (extrap != recordExtrapolationOf(db)) d.push_back("extrapolation: field '" + extrap + "' vs current '" + recordExtrapolationOf(db) + "'");
     if (TrefRec != Tref) d.push_back("thermoHrefTemp: field " + g17(TrefRec) + " vs current " + g17(Tref));
     {
         // 凝縮種の液相 (plan #10): 有無・名前・ペア・MW・区間・係数・延長規約・規約文字列
@@ -1274,14 +1499,9 @@ std::vector<std::string> speciesDB_diffRecord(const std::string& recordPath, con
     }
     const std::vector<RecordEntry> cur = entriesOf(db);
     auto cmpSpecies = [&](const std::string& n, const SpeciesThermo& f, const SpeciesThermo& c) {
-        auto cmp = [&](const std::string& key, double a, double b) {
-            if (a != b) d.push_back(n + "." + key + ": field " + g17(a) + " vs current " + g17(b));
-        };
-        cmp("MW", f.MW, c.MW);
-        cmp("Tlo", f.Tlo, c.Tlo); cmp("Tmid", f.Tmid, c.Tmid); cmp("Thi", f.Thi, c.Thi);
-        cmp("LJ_sigma", f.sigma_LJ, c.sigma_LJ); cmp("LJ_eps_kB", f.eps_kB, c.eps_kB);
-        for (int k = 0; k < 9; ++k) cmp("nasa9_low[" + std::to_string(k) + "]", f.low[k], c.low[k]);
-        for (int k = 0; k < 9; ++k) cmp("nasa9_high[" + std::to_string(k) + "]", f.high[k], c.high[k]);
+        thermoDiff(f, c, true, [&](const std::string& key, const std::string& x, const std::string& y) {
+            d.push_back(n + "." + key + ": field " + x + " vs current " + y);
+        });
     };
     for (int s = 0; s < db.size(); ++s) {
         const std::string& n = db.names[s];

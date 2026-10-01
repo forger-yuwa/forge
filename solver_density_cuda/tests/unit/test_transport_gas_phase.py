@@ -47,8 +47,36 @@ def rel(a, b):
     return np.abs(a - b) / np.maximum(np.maximum(np.abs(a), np.abs(b)), 1e-300)
 
 
-def make(R, tag, species, transport, cond, keep_db=False, db=None):
+_H2O_MW = {}
+
+
+def builtin_h2o_mw(R, exe):
+    """exe の内蔵気相 H2O の MW (--resolve-species の記録から)。段 3 (#13-3) で CEA の 0.01801528 に変わった (旧 0.0180153)。"""
+    if exe not in _H2O_MW:
+        d = R.make("h2o_mw", ["H2O"], None, visc=0)
+        r = subprocess.run([exe, "--resolve-species"], cwd=d, env=R.env(), capture_output=True, text=True, timeout=600)
+        rec = [f for f in os.listdir(d) if f.startswith("resolved_species_")]
+        assert r.returncode == 0 and rec, r.stdout + r.stderr
+        _H2O_MW[exe] = float(yaml.safe_load(open(os.path.join(d, rec[0])))["species"][0]["MW"])
+    return _H2O_MW[exe]
+
+
+def seed_db_paired(seed_db, mw):
+    """seed の外部 DB の H2O の MW を内蔵の値にした写し。凝縮 ON では気液ペアの契約 (気相 H2O = 内蔵とビット一致) が要る。
+    seed (case/44 run_0509) の外部 H2O は段 3 (#13-3) 前の内蔵 H2O と同じ係数・MW だったので、段 3 後のバイナリでは MW だけ差し替える
+    (係数は段 3 でも不変; 差し替え後に内蔵と一致しなければソルバが起動時に拒否する)。"""
+    db = json.loads(json.dumps(seed_db))
+    db["H2O"]["MW"] = float(mw)
+    return db
+
+
+def make(R, tag, species, transport, cond, keep_db=False, db=None, h2o_pair_mw=None):
     d = R.make(tag, species, transport, db=db, keep_db_of_seed=keep_db)
+    if cond and keep_db and h2o_pair_mw is not None:
+        dbp = os.path.join(d, "species_db.yaml")
+        paired = seed_db_paired(yaml.safe_load(open(dbp)), h2o_pair_mw)
+        with open(dbp, "w") as f:
+            yaml.safe_dump(paired, f, sort_keys=False)
     p = os.path.join(d, "solverConfig.yaml")
     cfg = yaml.safe_load(open(p))
     if cond:
@@ -128,9 +156,11 @@ def g0_bit_identity(R, a, species, transport, ref, keep_db):
     for cond in (False, True):
         for table in (True, False):
             tag = f"G0 cond {'ON (rog=0)' if cond else 'OFF'}, table {'ON' if table else 'OFF'}"
-            outs = []
+            outs, mws = [], []
             for which, exe in (("new", a.forge), ("old", a.base_forge)):
-                d = make(R, f"g0_{which}_c{int(cond)}_t{int(table)}", species, transport, cond, keep_db=keep_db)
+                mws.append(builtin_h2o_mw(R, exe))
+                d = make(R, f"g0_{which}_c{int(cond)}_t{int(table)}", species, transport, cond, keep_db=keep_db,
+                         h2o_pair_mw=mws[-1])
                 o, b, err = probe(R, exe, d, states, len(species), False, table=table)
                 if o is None:
                     check(False, f"{tag}: {which} probe failed: {err}")
@@ -142,6 +172,13 @@ def g0_bit_identity(R, a, species, transport, ref, keep_db):
             (on, bn), (oo, bo) = outs
             nd = int(np.count_nonzero(np.frombuffer(bn, np.uint8) != np.frombuffer(bo, np.uint8))) if len(bn) == len(bo) else -1
             h = on["h"]
+            if cond and keep_db and mws[0] != mws[1]:
+                # 凝縮 ON は外部 H2O を各バイナリの内蔵 H2O に合わせる (気液ペアの契約) ので、内蔵 H2O の MW が違うバイナリ同士
+                # (段 3 #13-3 の前後) は入力が違う → ビット一致は求めず差の件数を記録する
+                check(len(bn) == len(bo) and h.get("hasLiq", 0) == 0,
+                      f"{tag}: built-in H2O MW differs between binaries ({mws[1]!r} -> {mws[0]!r}, #13-3); no bit identity required, "
+                      f"differing bytes {nd} of {len(bn)}")
+                continue
             check(len(bn) == len(bo) and nd == 0 and h.get("hasLiq", 0) == 0,
                   f"{tag}: probe output bytes new vs old {len(bn)}/{len(bo)}, differing {nd} "
                   f"(cells+ghosts {h['nCells_all']}, passes {h['passes']}, table {h['table']}, iw {h.get('iw')})")
@@ -158,7 +195,7 @@ def g1(R, a, tag, species, transport, ref, keep_db, dsp=None, db=None):
         for f in fr:
             for T in T_LIST:
                 states.append((T, 0.37, Y, f * Y[iw]))
-    d = make(R, "g1_" + tag, species, transport, True, keep_db=keep_db, db=db)
+    d = make(R, "g1_" + tag, species, transport, True, keep_db=keep_db, db=db, h2o_pair_mw=builtin_h2o_mw(R, a.forge))
     out, _, err = probe(R, a.forge, d, states, len(species), True)
     if out is None:
         check(False, f"G1 {tag}: probe failed: {err}")
@@ -287,7 +324,8 @@ def main():
     root = tempfile.mkdtemp(prefix="transport_gas_phase_")
     print(f"work dir: {root}\nseed: {a.seed_run}\nforge: {a.forge}\nbase: {a.base_forge or '(none)'}", flush=True)
     R = tg.Runner(a, root)
-    seed_db = yaml.safe_load(open(os.path.join(a.seed_run, "species_db.yaml")))
+    # 外部 H2O の MW は --forge の内蔵 H2O に揃える (凝縮 ON の気液ペア; G1 とその参照が同じ値を使う)
+    seed_db = seed_db_paired(yaml.safe_load(open(os.path.join(a.seed_run, "species_db.yaml"))), builtin_h2o_mw(R, a.forge))
 
     # (a) 外部 DB (LJ 既知) — G0・G1・G2
     spA = ["MIXDRY", "H2O"]

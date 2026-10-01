@@ -121,7 +121,9 @@ def main():
     if exe is None:
         check(False, "harness build")
         return 1
-    seed_db = yaml.safe_load(open(os.path.join(a.seed_run, "species_db.yaml")))
+    R = tg.Runner(a, root)
+    # 外部 H2O の MW は --forge の内蔵 H2O に揃える (凝縮 ON の気液ペア; 段 3 #13-3 で内蔵が CEA の MW に)
+    seed_db = gp.seed_db_paired(yaml.safe_load(open(os.path.join(a.seed_run, "species_db.yaml"))), gp.builtin_h2o_mw(R, a.forge))
     spA = ["MIXDRY", "H2O"]
     trA = {"MIXDRY": "kinetic", "H2O": "custom:h2o_iapws_cea_v1"}
     refA = Reference(spA, trA, seed_db)
@@ -132,7 +134,6 @@ def main():
     iw = 1
 
     # ------------------------------------------------------------------ (G2) 既存 G2 の状態
-    R = tg.Runner(a, root)
     comps = [[0.99, 0.01], [0.94, 0.06], [0.6, 0.4]]
     fr = [0.0, 0.3, 0.9, 0.99, 1.0, 1.2]
     states = [(T, 0.37, gp.y_of_x(refA, X), f * gp.y_of_x(refA, X)[iw]) for X in comps for f in fr for T in gp.T_LIST]
@@ -140,7 +141,7 @@ def main():
     for which, exe_f in (("new", a.forge), ("old", a.base_forge)):
         if not exe_f:
             continue
-        d = gp.make(R, f"g2_{which}", spA, trA, True, keep_db=True)
+        d = gp.make(R, f"g2_{which}", spA, trA, True, keep_db=True, h2o_pair_mw=gp.builtin_h2o_mw(R, exe_f))
         out, _, err = gp.probe(R, exe_f, d, states, 2, True)
         if out is None:
             check(False, f"G2 {which}: probe failed: {err}")

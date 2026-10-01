@@ -56,8 +56,7 @@ CondLatentRef cond_latent_pair_for(const solverConfig& cfg)
     const int gi = speciesDB_current() ? speciesDB_current()->condensed.gasIndex : -1;
     if (!checked && cfg.thermalMethod == 2 && gi >= 0 && gi < thermo_num_species() && thermo_species_host() != nullptr) {
         const SpeciesThermo& g = thermo_species_host()[gi];
-        bool same = (g.MW == cached.gas.MW && g.Tlo == cached.gas.Tlo && g.Tmid == cached.gas.Tmid && g.Thi == cached.gas.Thi);
-        for (int k = 0; k < 9; ++k) same = same && (g.low[k] == cached.gas.low[k]) && (g.high[k] == cached.gas.high[k]);
+        const bool same = thermo_same_coeffs(g, cached.gas);
         if (!same) {
             std::fprintf(stderr, "[cond] ERROR: the gas of the H2O latent-heat pair differs from species %d of the species DB after the datum "
                                  "offset (the latent heat must use the same evaluation as the species DB; plan #10)\n", gi);

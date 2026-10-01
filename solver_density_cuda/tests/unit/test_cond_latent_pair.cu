@@ -9,7 +9,9 @@
 //        |ΔL'| ≤ 2e-4|L'| + 0.1 J/(kg K) を直接判定 (test_cond_float.cpp の接続点除外に頼らない)
 //   (d)  g>0 の場で保存エネルギーを datum 変換 (0 → 298.15 K) した後、二相 EOS の反転 T・P・二相音速が保たれる
 //   (新旧) 新 L と #10 以前の h2o_latent (試験内に移植) の差を 150–373.15 K で表にし、200 K 以上は丸め程度 (相対 1e-12)、
-//        150 K で −465.920 J/kg (codex diagnose の検算値) を確かめる
+//        150 K で −465.920 J/kg (codex diagnose の検算値) を確かめる。段 3 (#13-3) で H2O の MW が CEA の 0.01801528 に変わった
+//        (旧 0.0180153; #10 以前の h2o_latent も旧 MW) ので、比較は新 L に MW の比 (新/旧) を掛けて行い (L·MW = 気液のモル差は不変)、
+//        MW による差そのもの (相対 −1.11e-6) は表に出す
 //   (未設定) 気液ペアの無い H2O の cond_latent は NaN、device でも host と同じ値
 //
 // ビルド/実行 (共通データの埋め込みヘッダを先に生成; tests/unit/cond_latent_test_helper.cuh):
@@ -28,6 +30,9 @@
 #include "cuda_forge/condensationEOS_d.cuh"
 
 static int g_fail = 0;
+// H2O の MW: 段 3 (#13-3) から CEA thermo.inp そのもの (18.01528 g/mol)。#10 以前の h2o_latent と #13-3 前の内蔵は 0.0180153
+static const double MW_H2O_CEA = 0.01801528;
+static const double MW_H2O_OLD = 0.0180153;
 static void check(bool ok, const char* what, double val, double tol)
 {
     printf("  [%s] %-88s worst=%.3e tol=%.1e\n", ok ? "PASS" : "FAIL", what, val, tol);
@@ -64,7 +69,7 @@ static double legacy_h2o_latent_v0(double T)
 static SpeciesThermo with_datum(SpeciesThermo s, double Tref)
 {
     s.invMW = 1.0/s.MW;
-    if (Tref > 0.0) { const double h_ref = thermo_h_molar(s, Tref); const double da7 = -h_ref/THERMO_RU; s.low[7] += da7; s.high[7] += da7; s.h_datum = h_ref; }
+    if (Tref > 0.0) { const double h_ref = thermo_h_molar(s, Tref); const double da7 = -h_ref/THERMO_RU; thermo_add_a7(s, da7); s.h_datum = h_ref; }
     return s;
 }
 
@@ -112,8 +117,7 @@ int main()
         for (double Tref : {0.0, 298.15}) {
             const SpeciesThermo g = with_datum(db.species[1], Tref);
             const CondLatentPair p = cond_test_latent_pair(Tref);
-            bool same = (g.MW == p.gas.MW && g.Tlo == p.gas.Tlo && g.Tmid == p.gas.Tmid && g.Thi == p.gas.Thi);
-            for (int k = 0; k < 9; ++k) same = same && g.low[k] == p.gas.low[k] && g.high[k] == p.gas.high[k];
+            bool same = thermo_same_coeffs(g, p.gas);
             if (!same) ++nbad;
             std::vector<double> Ts;
             for (double T = 50.0; T <= 6500.0; T += 0.37) Ts.push_back(T);
@@ -136,7 +140,7 @@ int main()
                                4.955043490e-09, -1.336933246e-12, -3.303974310e+04};
         const double liq[8] = {1.326371304e+09, -2.448295388e+07, 1.879428776e+05, -7.678995050e+02, 1.761556813e+00,
                                -2.151167128e-03, 1.092570813e-06, 1.101760476e+08};
-        const double T = 298.15, MW = 0.0180153;
+        const double T = 298.15, MW = MW_H2O_CEA;   // thermo.inp の H2O 記録の MW 欄 18.01528 g/mol (#13-3)
         auto hmol = [](const double* a, double T) {
             return 8.314462618*T*(-a[0]/(T*T) + a[1]*log(T)/T + a[2] + a[3]*T/2 + a[4]*T*T/3 + a[5]*T*T*T/4 + a[6]*T*T*T*T/5 + a[7]/T);
         };
@@ -144,6 +148,7 @@ int main()
         double worst = 0.0;
         for (double Tref : {0.0, 298.15}) worst = fmax(worst, fabs(h2o_latent_pair(cond_test_latent_pair(Tref), T) - Lref)/Lref);
         check(worst <= 1e-12, "L(298.15) vs thermo.inp H2O - H2O(L) (independent literals; Tref 0 and 298.15)", worst, 1e-12);
+        check(speciesDB_builtin().at("H2O").MW == MW_H2O_CEA, "built-in gas H2O MW == 0.01801528 (CEA, #13-3)", 0.0, 0.0);
         const double LHf = (-241826.0 + 285830.0)/MW;
         printf("      info: L(298.15) = %.6f J/kg; header Hf difference (-241826 + 285830 J/mol)/MW = %.6f J/kg (diff %.3f J/kg = NASA fit reproduction)\n",
                h2o_latent_pair(p0, T), LHf, h2o_latent_pair(p0, T) - LHf);
@@ -151,18 +156,25 @@ int main()
 
     // ---------------------------------------------------------------- (新旧) 現行 h2o_latent との差
     printf("== new L vs pre-#10 h2o_latent (150-373.15 K) ==\n");
-    printf("      %8s %16s %16s %14s\n", "T [K]", "L_new [J/kg]", "L_old [J/kg]", "dL [J/kg]");
+    printf("      %8s %16s %16s %14s %16s %14s\n", "T [K]", "L_new [J/kg]", "L_old [J/kg]", "dL [J/kg]", "L_new*MWn/MWo", "dL(MW-scaled)");
     {
+        const double sMW = MW_H2O_CEA/MW_H2O_OLD;   // 段 3 の MW 変更だけを戻す (L·MW はモル差で MW に依らない)
         double worstHi = 0.0;
         for (double T : {120.0, 150.0, 160.0, 170.0, 180.0, 190.0, 195.0, 199.0, 199.9, 200.0, 200.1, 210.0, 230.0, 250.0, 273.15, 298.15, 300.0, 350.0, 373.15}) {
             const double Ln = h2o_latent_pair(p0, T), Lo = legacy_h2o_latent_v0(T);
-            printf("      %8.2f %16.6f %16.6f %14.6f\n", T, Ln, Lo, Ln - Lo);
-            if (T >= 200.0) worstHi = fmax(worstHi, fabs(Ln - Lo)/Lo);
+            printf("      %8.2f %16.6f %16.6f %14.6f %16.6f %14.6f\n", T, Ln, Lo, Ln - Lo, Ln*sMW, Ln*sMW - Lo);
+            if (T >= 200.0) worstHi = fmax(worstHi, fabs(Ln*sMW - Lo)/Lo);
         }
-        for (double T = 200.0; T <= 373.15 + 1e-9; T += 0.05) worstHi = fmax(worstHi, fabs(h2o_latent_pair(p0, T) - legacy_h2o_latent_v0(T))/legacy_h2o_latent_v0(T));
-        check(worstHi <= 1e-12, "200-373.15 K: same coefficients -> rounding only (rel, every 0.05 K)", worstHi, 1e-12);
-        const double d150 = h2o_latent_pair(p0, 150.0) - legacy_h2o_latent_v0(150.0);
-        check(fabs(d150 - (-465.9201)) <= 1e-3, "dL(150 K) = -465.9201 J/kg (codex diagnose check value)", fabs(d150 - (-465.9201)), 1e-3);
+        for (double T = 200.0; T <= 373.15 + 1e-9; T += 0.05)
+            worstHi = fmax(worstHi, fabs(h2o_latent_pair(p0, T)*sMW - legacy_h2o_latent_v0(T))/legacy_h2o_latent_v0(T));
+        check(worstHi <= 1e-12, "200-373.15 K: same coefficients -> rounding only (rel, every 0.05 K; new L scaled by MW_CEA/MW_old, #13-3)", worstHi, 1e-12);
+        const double d150 = h2o_latent_pair(p0, 150.0)*sMW - legacy_h2o_latent_v0(150.0);
+        check(fabs(d150 - (-465.9201)) <= 1e-3, "dL(150 K) = -465.9201 J/kg (codex diagnose check value; MW-scaled)", fabs(d150 - (-465.9201)), 1e-3);
+        double dmw = 0.0;
+        for (double T = 200.0; T <= 373.15 + 1e-9; T += 0.05)
+            dmw = fmax(dmw, fabs(h2o_latent_pair(p0, T)/legacy_h2o_latent_v0(T) - 1.0 - (1.0/sMW - 1.0)));
+        printf("      info: the #13-3 MW change alone moves L by a factor MW_old/MW_CEA - 1 = %+.6e (200-373.15 K: new/old - 1 matches it within %.1e)\n",
+               1.0/sMW - 1.0, dmw);
     }
 
     // ---------------------------------------------------------------- (c') float 表 (200 K 近傍)

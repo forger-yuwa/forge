@@ -16,7 +16,9 @@
   (H)   文字列リストの config は互換性ハッシュ・記録とも不変: --base-forge (本変更前のバイナリ) と新バイナリで
         case/44 run_0509 (外部 DB; 4378b7d78339ba27) と内蔵のみ 3 構成のハッシュと記録ファイルがバイト一致。
   (L)   run_0509 の config を lump 記法 (speciesDBFile なし) にすると --resolve-species が通り、ハッシュは外部 DB 版と違う (構成情報が入るため)。
-  (N)   拒否: 区切りの違う構成種 (外部 DB で Tmid=1500 の試験種) / 凝縮種を lump に入れる / lump 名の衝突 (内蔵・外部 DB・大小文字違い) /
+  (B6)  区切りの違う構成種 (外部 DB で Tmid=1500 の試験種) は区切りの和集合で合成される (#6b → #13-1; 以前は拒否): 区切り 200/1000/1500/6000、
+        合成規約は和集合の文字列、記録の schema は forge_resolved_species_v1_nint (値の検査は test_thermo_intervals_host.cpp の V3)。
+  (N)   拒否: 凝縮種を lump に入れる / lump 名の衝突 (内蔵・外部 DB・大小文字違い) /
         分率 0・負・非有限 / basis なし・未知 / 未知の構成種 / 構成種の重複 (別名 AR と Ar) / lump に未知キー。
         分率の総和が 1 から外れると警告して通る。
 規約: [PASS]/[FAIL]、失敗があれば非ゼロ終了。
@@ -53,9 +55,20 @@ def rel(a, b):
     return abs(a - b) / max(abs(a), abs(b), 1e-300)
 
 
-# ---- NASA-9 (thermo_d.cuh と同じ式; T<Tmid で low。評価範囲 200–6000 K は外挿域を含まない) ----
+# ---- NASA-9 (thermo_d.cuh と同じ式; 区間 k = Tb[k] <= T < Tb[k+1] (区切りちょうどは上)。評価範囲 200–6000 K は外挿域を含まない) ----
+def ivs(e):
+    """記録 / 外部 DB のエントリ → (境界 [Tlo, 区切り..., Thi], 係数の列)。2 区間の書式と区間可変の書式 (#13-1) の両方。"""
+    if "Tbounds" in e:
+        return [float(x) for x in e["Tbounds"]], [[float(c) for c in r] for r in e["nasa9_intervals"]]
+    return [float(e["Tlo"]), float(e["Tmid"]), float(e["Thi"])], [[float(c) for c in e["nasa9_low"]], [float(c) for c in e["nasa9_high"]]]
+
+
 def _coef(e, T):
-    return np.where(T[:, None] < e["Tmid"], np.asarray(e["nasa9_low"])[None, :], np.asarray(e["nasa9_high"])[None, :])
+    Tb, co = ivs(e)
+    k = np.zeros(len(T), dtype=int)
+    for j in range(1, len(co)):
+        k = np.where(T >= Tb[j], j, k)
+    return np.asarray(co)[k]
 
 
 def cp_mass(e, T):
@@ -159,9 +172,21 @@ def main():
         ty = sum(Y.values())
         Yn = {k: v / ty for k, v in Y.items()}
         gen = yaml.load(open(os.path.join(RUN0510, "species_db.yaml")).read(), Loader=fs._StrSafeLoader)["MIXDRY"]
-        ref = {"MW": float(gen["MW"]), "Tmid": float(gen["Tmid"]), "LJ_sigma": float(gen["LJ_sigma"]), "LJ_eps_kB": float(gen["LJ_eps_kB"]),
+        ref = {"MW": float(gen["MW"]), "Tlo": float(gen["Tlo"]), "Tmid": float(gen["Tmid"]), "Thi": float(gen["Thi"]),
+               "LJ_sigma": float(gen["LJ_sigma"]), "LJ_eps_kB": float(gen["LJ_eps_kB"]),
                "nasa9_low": [float(x) for x in gen["nasa9_low"]], "nasa9_high": [float(x) for x in gen["nasa9_high"]]}
+        # 段 3 (#13-3): run_0510 の生成 DB は段 3 前のデータ (Ar の第 2 区間 = 単原子理想の低温係数の流用、第 3 区間なし) で作った。
+        # 内蔵が CEA そのものになったので、参照の第 2 区間に Ar の差 x_Ar (a_Ar,CEA − a_Ar,旧) を足し (NASA-9 はモル分率加重で厳密に混合)、
+        # 第 3 区間は構成種の CEA 第 3 区間のモル分率加重和を独立に作る。N2/O2/CO2 の先頭 2 区間は段 3 で不変。
+        spd = {str(e["id"]): e for e in yaml.safe_load(open(os.path.join(REPO, "solver_density_cuda", "data", "species",
+                                                                         "forge_species_v1.yaml")))["species"]}
+        canon = {"AR": "Ar"}
+        ar = spd["Ar"]["intervals"]
+        dAr = [float(n_) - float(o_) for n_, o_ in zip(ar[1]["coeffs"], ar[0]["coeffs"])]   # 旧第 2 区間 = 第 1 区間の係数
+        ref["nasa9_high"] = [h_ + Xn["AR"] * d_ for h_, d_ in zip(ref["nasa9_high"], dAr)]
+        ref3 = [sum(Xn[k] * float(spd[canon.get(k, k)]["intervals"][2]["coeffs"][i]) for k in Xn) for i in range(9)]
         T = np.linspace(200.0, 6000.0, 1000)
+        T6 = T[:-1]   # 6000 K ちょうどは区間選択の規約で決まる点 (段 3 で第 3 区間になる) なので 2 区間の参照との比較から外す
 
         # ---- V2 ----
         d = C.make(RUN0510, "[" + flow_lump("MIXDRY", Xn, "mole") + ", H2O]")
@@ -172,14 +197,19 @@ def main():
             print(err[-2000:])
             raise SystemExit(1)
         mix = rec["species"][0]
+        mTb, mco = ivs(mix)
+        rTb, rco = ivs(ref)
         worst = max([rel(mix[k], ref[k]) for k in ("MW", "LJ_sigma", "LJ_eps_kB")]
-                    + [rel(x, y) for k in ("nasa9_low", "nasa9_high") for x, y in zip(mix[k], ref[k])])
-        check(worst <= 1e-12, f"V2 MIXDRY coefficients/MW/LJ vs run_0510 species_db.yaml: max rel {worst:.2e} (<= 1e-12)")
+                    + [rel(x, y) for j in range(2) for x, y in zip(mco[j], rco[j])])
+        check(worst <= 1e-12, f"V2 MIXDRY coefficients (first 2 intervals)/MW/LJ vs run_0510 species_db.yaml + x_Ar·Δa_Ar (#13-3): "
+                              f"max rel {worst:.2e} (<= 1e-12)")
+        w3 = max(rel(x, y) for x, y in zip(mco[2], ref3)) if len(mco) == 3 else float("inf")
+        check(w3 <= 1e-12, f"V2 MIXDRY 3rd interval 6000–20000 K = Σ x_k a_k,CEA (#13-3): max rel {w3:.2e} (<= 1e-12)")
         for k in ("MW", "LJ_sigma", "LJ_eps_kB"):
             print(f"       {k}: solver {mix[k]!r} generated {ref[k]!r} rel {rel(mix[k], ref[k]):.2e}")
-        check(mix["Tlo"] == 200.0 and mix["Tmid"] == 1000.0 and mix["Thi"] == 6000.0, "V2 MIXDRY breakpoints 200/1000/6000")
+        check(mTb == [200.0, 1000.0, 6000.0, 20000.0], f"V2 MIXDRY breakpoints 200/1000/6000/20000 (#13-3; constituents are CEA 3-interval): {mTb}")
         compare_props(lambda t: (cp_mass(mix, t), h_mass(mix, t), s0_mass(mix, t)),
-                      lambda t: (cp_mass(ref, t), h_mass(ref, t), s0_mass(ref, t)), "V2 cp/h/s0 solver lump vs generated", T)
+                      lambda t: (cp_mass(ref, t), h_mass(ref, t), s0_mass(ref, t)), "V2 cp/h/s0 solver lump vs generated (+x_Ar·Δa_Ar)", T6)
         # V2i: 構成種の質量分率加重和 (独立検算)
         mem = mix["lump"]["members"]
         Yk = [m["x"] * m["MW"] / mix["MW"] for m in mem]
@@ -214,7 +244,8 @@ def main():
         else:
             mm = recm["species"][0]
             w = max([rel(mm[k], mix[k]) for k in ("MW", "LJ_sigma", "LJ_eps_kB")]
-                    + [rel(x, y) for k in ("nasa9_low", "nasa9_high") for x, y in zip(mm[k], mix[k])])
+                    + [rel(x, y) for ra, rb in zip(ivs(mm)[1], ivs(mix)[1]) for x, y in zip(ra, rb)]
+                    + ([0.0] if ivs(mm)[0] == ivs(mix)[0] else [float("inf")]))
             check(rcm == 0 and w <= 1e-12 and recm["species"][0]["lump"]["basis"] == "mass",
                   f"M basis: mass (Y from prepare_info) -> same synthesized MIXDRY as mole basis: max rel {w:.2e}")
 
@@ -234,7 +265,17 @@ def main():
                 rcb, hb, recb, _ = C.resolve(db_, exe=os.path.abspath(a.base_forge))
                 same = (rcn == 0 and rcb == 0 and hn == hb and recn is not None and recb is not None
                         and open(recn["path"], "rb").read() == open(recb["path"], "rb").read())
-                check(same, f"H {tag}: hash {hn[:16]} and record bytes identical to base binary ({hb[:16]})")
+                if tag.startswith("case44"):
+                    # 外部 DB だけで種が決まる config は段 3 (#13-3) でも不変
+                    check(same, f"H {tag}: hash {hn[:16]} and record bytes identical to base binary ({hb[:16]})")
+                else:
+                    # 内蔵種の config は段 3 で内蔵が CEA そのものになったので、段 3 前のバイナリとはハッシュが違うのが正しい
+                    # (--base-forge が段 3 後のバイナリなら従来どおりバイト一致を求める)
+                    base_pre13_3 = rcb == 0 and recb is not None and any(
+                        e.get("name") == "N2" and "Tbounds" not in e for e in recb["species"])
+                    ok = (rcn == 0 and rcb == 0 and hn != hb) if base_pre13_3 else same
+                    check(ok, f"H {tag}: hash {hb[:16]} -> {hn[:16]} ("
+                              + ("changed by #13-3, base binary is pre-#13-3" if base_pre13_3 else "identical to base binary") + ")")
 
         # ---- L: run_0509 を lump 記法に ----
         X9 = json.load(open(os.path.join(RUN0509, "prepare_info.json")))["species"]["X"]
@@ -256,12 +297,21 @@ def main():
 
         n2 = yaml.safe_load(open(os.path.join(REPO, "solver_density_cuda", "data", "species", "forge_species_v1.yaml")))["species"][0]
         assert n2["id"] == "N2"
-        tdb = {"TMID1500": {"MW": n2["MW"], "LJ_sigma": 3.621, "LJ_eps_kB": 97.53, "Tlo": 200.0, "Tmid": 1500.0, "Thi": 6000.0,
+        tdb = {"N2B2": {"MW": n2["MW"], "LJ_sigma": 3.621, "LJ_eps_kB": 97.53, "Tlo": 200.0, "Tmid": 1000.0, "Thi": 6000.0,
+                        "nasa9_low": n2["intervals"][0]["coeffs"], "nasa9_high": n2["intervals"][1]["coeffs"]},
+               "TMID1500": {"MW": n2["MW"], "LJ_sigma": 3.621, "LJ_eps_kB": 97.53, "Tlo": 200.0, "Tmid": 1500.0, "Thi": 6000.0,
                             "nasa9_low": n2["intervals"][0]["coeffs"], "nasa9_high": n2["intervals"][1]["coeffs"]},
                "TESTGAS": {"MW": n2["MW"], "LJ_sigma": 3.621, "LJ_eps_kB": 97.53,
                            "nasa9_low": n2["intervals"][0]["coeffs"], "nasa9_high": n2["intervals"][1]["coeffs"]}}
-        expect_fail("different breakpoints (external TMID1500, Tmid 1500 K)",
-                    "[" + flow_lump("MIXDRY", {"N2": 0.8, "TMID1500": 0.2}, "mole") + ", H2O]", "#6b", db=tdb)
+        # B6: 区切りの違う構成種は和集合で合成 (#13-1)。内蔵 N2 は段 3 (#13-3) から 3 区間 (…6000/20000) で TMID1500 との和集合が
+        # 4 区間になり拒否されるので、2 区間の N2 (N2B2, 内蔵の先頭 2 区間) を外部 DB で与える
+        db6 = C.make(RUN0510, "[" + flow_lump("MIXDRY", {"N2B2": 0.8, "TMID1500": 0.2}, "mole") + ", H2O]", db=tdb)
+        rc6, _, rec6, err6 = C.resolve(db6)
+        m6 = rec6["species"][0] if rec6 is not None else {}
+        check(rc6 == 0 and m6.get("Tbounds") == [200.0, 1000.0, 1500.0, 6000.0] and "union" in m6.get("lump", {}).get("synthesis", "")
+              and rec6["schema"] == fs.SPECIES_RECORD_SCHEMA_NINT and rec6["consistent"],
+              "B6 different breakpoints (external TMID1500, Tmid 1500 K) -> synthesized over the union 200/1000/1500/6000"
+              + ("" if rc6 == 0 else f" rc={rc6} err={err6[-600:]}"))
         expect_fail("condensing species H2O inside the lump (condensation: 1)",
                     "[" + flow_lump("MIXDRY", {"N2": 0.9, "H2O": 0.1}, "mole") + ", H2O]", "condensing species")
         expect_fail("condensing species via alias WATER inside the lump",

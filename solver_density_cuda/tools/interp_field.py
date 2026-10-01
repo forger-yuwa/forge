@@ -23,7 +23,8 @@
   続けて行う (トレーサ・種の並びは記録に無いので)。SRC が未検証 (属性なし / `species_input_unverified=1`) で宛先が TP のとき・
   宛先を解決できない (旧バイナリ) とき・署名照合で内蔵種が「照合不能」になるときは**既定で拒否** (ソルバと同じ規約, #3c)。
   許可はその実行だけの `FORGE_ALLOW_UNVERIFIED_SPECIES=1` か `--force-species` で、そのとき DST には属性を付けない
-  (ソルバ側でも未検証として扱われ、その run にも同じ許可が要る)。
+  (ソルバ側でも未検証として扱われ、その run にも同じ許可が要る)。ただし印付きの SRC (`species_input_unverified=1`) で
+  `species_hash` = 宛先ハッシュなら、ソルバと同じく許可なしで通し DST に同じハッシュと印を継承する (#3d)。
 
 usage: interp_field.py SRC.h5 DST_input.h5 [--gamma 1.4] [--force-species] [--forge BIN] [--dst-run DIR]
 """
@@ -226,7 +227,7 @@ def main():
                 d.create_dataset(ds, data=arr[idx].astype(d["VALUE/ro"].dtype)); moved.append(name+"(new)")
         fsp.commit_inherit(d, species_plan)
         print(f"interp {a.src} -> {a.dst}: {len(cd)} dst cells, moved {moved} (wall_dist kept)")
-        print(f"[interp_field] species attributes: {'inherited (species_input_unverified=0)' if species_plan else 'none (unverified)'}")
+        print(f"[interp_field] species attributes: {('inherited (species_input_unverified=%d)' % species_plan['species_input_unverified']) if species_plan else 'none (unverified)'}")
 
 
 if __name__ == "__main__":

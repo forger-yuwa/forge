@@ -26,12 +26,10 @@ static int g_fail = 0;
 template <class T> static T* up(const std::vector<T>& v) { T* d = nullptr; cudaMalloc((void**)&d, v.size()*sizeof(T)); cudaMemcpy(d, v.data(), v.size()*sizeof(T), cudaMemcpyHostToDevice); return d; }
 template <class T> static std::vector<T> down(const T* d, size_t n) { std::vector<T> v(n); cudaMemcpy(v.data(), d, n*sizeof(T), cudaMemcpyDeviceToHost); return v; }
 static SpeciesThermo mk(double MW,double sig,double eps,const double lo[9],const double hi[9]){
-    SpeciesThermo s; s.MW=MW; s.sigma_LJ=sig; s.eps_kB=eps; s.Tlo=200.0; s.Tmid=1000.0; s.Thi=6000.0; s.h_datum=0.0; s.invMW=1.0/MW;
-    for(int i=0;i<9;i++){ s.low[i]=lo[i]; s.high[i]=hi[i]; } return s; }
+    SpeciesThermo s; s.MW=MW; s.sigma_LJ=sig; s.eps_kB=eps; s.h_datum=0.0; s.invMW=1.0/MW;
+    thermo_set_nasa9_2(s, 200.0, 1000.0, 6000.0, lo, hi); return s; }
 static SpeciesThermoF toF(const SpeciesThermo& s){
-    SpeciesThermoF f; f.MW=(float)s.MW; f.invMW=(float)(1.0/s.MW); f.R=(float)(THERMO_RU/s.MW);
-    f.sigma_LJ=(float)s.sigma_LJ; f.eps_kB=(float)s.eps_kB; f.Tlo=(float)s.Tlo; f.Tmid=(float)s.Tmid; f.Thi=(float)s.Thi;
-    for(int k=0;k<9;k++){ f.low[k]=(float)s.low[k]; f.high[k]=(float)s.high[k]; } return f; }
+    return thermo_to_float(s); }
 struct State { double T, P, ro, Yw, g, q0, q1, q2; };
 
 // ---- (a) Δτ 不変性 ----
@@ -47,7 +45,7 @@ static Outs run_source(int model, int carrier, const std::vector<State>& st, int
     const double H2Olo[9]={-3.947960830e+04,5.755731020e+02,9.317826530e-01,7.222712860e-03,-7.342557370e-06,4.955043490e-09,-1.336933246e-12,-3.303974310e+04,1.724205775e+01};
     const double H2Ohi[9]={1.034972096e+06,-2.412698562e+03,4.646110780e+00,2.291998307e-03,-6.836830480e-07,9.426468930e-11,-4.822380530e-15,-1.384286509e+04,-7.978148510e+00};
     std::vector<SpeciesThermo> sp = { mk(0.0280134,3.621,97.53,N2lo,N2hi), mk(0.0180153,2.605,572.4,H2Olo,H2Ohi) };
-    for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); s.low[7] += -hr/THERMO_RU; s.high[7] += -hr/THERMO_RU; }
+    for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); thermo_add_a7(s, -hr/THERMO_RU); }
     std::vector<SpeciesThermoF> spf = { toF(sp[0]), toF(sp[1]) };
     const int nSp = 2, cgs = 1;
     std::vector<flow_float> T(n),P(n),ro(n),cpc(n),Rm(n),roY0(n),roY1(n),rog(n),q0(n),q1(n),q2(n),vol(n,1.0e-9f),dt(n,(flow_float)dtval);
@@ -240,7 +238,7 @@ static void test_one_cell_fixed_point()
     const double H2Olo[9]={-3.947960830e+04,5.755731020e+02,9.317826530e-01,7.222712860e-03,-7.342557370e-06,4.955043490e-09,-1.336933246e-12,-3.303974310e+04,1.724205775e+01};
     const double H2Ohi[9]={1.034972096e+06,-2.412698562e+03,4.646110780e+00,2.291998307e-03,-6.836830480e-07,9.426468930e-11,-4.822380530e-15,-1.384286509e+04,-7.978148510e+00};
     std::vector<SpeciesThermo> sp = { mk(0.0280134,3.621,97.53,N2lo,N2hi), mk(0.0180153,2.605,572.4,H2Olo,H2Ohi) };
-    for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); s.low[7] += -hr/THERMO_RU; s.high[7] += -hr/THERMO_RU; }
+    for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); thermo_add_a7(s, -hr/THERMO_RU); }
     SpeciesThermo* dsp = up(sp);
     printf("  (h) setup ok\n"); fflush(stdout);
     const double T = 232.0, Yw = 0.0377, S = 20.0, Rw = cp.R, Rmix = 285.0;
@@ -316,7 +314,7 @@ static void test_small_droplet_evaporates()
     const double H2Olo[9]={-3.947960830e+04,5.755731020e+02,9.317826530e-01,7.222712860e-03,-7.342557370e-06,4.955043490e-09,-1.336933246e-12,-3.303974310e+04,1.724205775e+01};
     const double H2Ohi[9]={1.034972096e+06,-2.412698562e+03,4.646110780e+00,2.291998307e-03,-6.836830480e-07,9.426468930e-11,-4.822380530e-15,-1.384286509e+04,-7.978148510e+00};
     std::vector<SpeciesThermo> sp = { mk(0.0280134,3.621,97.53,N2lo,N2hi), mk(0.0180153,2.605,572.4,H2Olo,H2Ohi) };
-    for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); s.low[7] += -hr/THERMO_RU; s.high[7] += -hr/THERMO_RU; }
+    for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); thermo_add_a7(s, -hr/THERMO_RU); }
     std::vector<SpeciesThermoF> spf = { toF(sp[0]), toF(sp[1]) };
     SpeciesThermo* dsp = up(sp); SpeciesThermoF* dspf = up(spf);
     const double T = 250.0, Yw = 0.0377, S = 0.5, Rw = cp.R, g0 = 1.0e-5;

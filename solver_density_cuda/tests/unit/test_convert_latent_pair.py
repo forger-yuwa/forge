@@ -8,6 +8,9 @@
 (2) V7(e′) 0 step A/B (codex diagnose 2026-09-27): 150 K, N2/H2O 0.95/0.05 (総質量分率), g 0.01, 気相同一・L だけ異なる
     (SRC = #10 以前の h2o_latent, DST = 気液ペア)。A = 気相差だけの旧式 → 補正 0、宛先 EOS で反転した T − 150 = −0.005802 K を再現。
     B = 気液を含む全差 (roe_delta_per_mass) → 補正 +4.6592 J/kg。**B の合格: 独立な二相エネルギー評価との補正誤差 ≤1e-6 J/kg、T 相対誤差 ≤1e-8**
+    段 3 (#13-3) で H2O の MW が CEA の 0.01801528 に変わり (旧 0.0180153; #10 以前の h2o_latent も旧 MW)、新 L が 150 K で +3.101 J/kg
+    (相対 +1.11e-6) 動いたので、アンカーは codex の値をその分だけ動かした値 (補正 +4.6282 J/kg = 0.01 × 462.819 J/kg,
+    T − 150 = −0.005802 × 4.6282/4.6592 K) にした。MW を戻した差 (datum・延長規約だけの差) は test_cond_latent_pair.cu が −465.920 J/kg で見る
 (3) V7(e): 同じ潜熱モデルで datum (thermoHrefTemp 0 → 298.15) と種の順序を変える湿り場の変換で T が保たれる (相対 ≤1e-8)
 (4) 潜熱モデル不明 (記録に液相なし) の湿りセルは拒否、乾いたセルは通す。液相モデルだけの違いで再構成が発火する (_db_differs)
 (5) 端から端 (forge --resolve-species を使う; 無ければ SKIP): #10 以前の記録 (液相なし) で印を付けた H2O 湿り場を、同じ config の宛先へ変換する
@@ -31,6 +34,9 @@ import convert_species_field as csf  # noqa: E402
 from total_quantities import _TPGas, RU  # noqa: E402
 
 DATA = os.path.join(SOLVER, "data", "species", "forge_species_v1.yaml")
+# 150 K・g 0.01 の補正 g (L_old − L_new) のアンカー [J/kg]: codex diagnose 2026-09-27 の 4.6592 (旧 MW) を、段 3 (#13-3) の H2O MW 変更で
+# 新 L が動いた分 (test_cond_latent_pair.cu の表: 150 K の L_new − L_old = −462.819076 J/kg) に合わせた値
+CORR_150 = 0.01 * 462.819076
 g_fail = 0
 
 
@@ -98,8 +104,9 @@ def unit_tests():
     Ts = np.arange(120.0, 400.0 + 1e-9, 0.25)
     worst = max(abs(pair(np.array([T]))[0] - ref_latent(DB["H2O"], cond, T)) / ref_latent(DB["H2O"], cond, T) for T in Ts)
     check(worst <= 1e-12, "(1) Python pair vs independent L = h_v - h_l, 120-400 K every 0.25 K (rel)", worst, 1e-12)
-    # ソルバ (C++) の値 (tests/unit/test_cond_latent_pair.cu の表, 小数 6 桁)
-    cxx = {120.0: 2864570.940375, 150.0: 2793256.307606, 250.0: 2555665.244644, 298.15: 2442581.404111}
+    # ソルバ (C++) の値 (tests/unit/test_cond_latent_pair.cu の表 L_new, 小数 6 桁)。段 3 (#13-3) の H2O MW 変更後の値
+    # (変更前: 120 K 2864570.940375, 150 K 2793256.307606, 250 K 2555665.244644, 298.15 K 2442581.404111; 相対 +1.11e-6)
+    cxx = {120.0: 2864574.120533, 150.0: 2793259.408592, 250.0: 2555668.081863, 298.15: 2442584.115788}
     wc = max(abs(pair(np.array([T]))[0] - v) for T, v in cxx.items())
     check(wc <= 1.0e-6, "(1) Python pair vs solver h2o_latent (C++ table, 6 decimals) [J/kg]", wc, 1e-6)
 
@@ -115,14 +122,18 @@ def unit_tests():
     # A: 気相差だけ (旧式) → 補正 0
     dA = (gas.h(Y, T0) - Rm * T0) - (gas.h(Y, T0) - Rm * T0)
     TA = csf.T_from_e(gas, Y, e_src + dA, T0, g=g, eos=eos_d)
-    check(abs(dA[0]) == 0.0 and abs((TA[0] - 150.0) - (-0.005802)) <= 5e-7,
-          f"(2) A (gas-only formula): correction {dA[0]:.1f} J/kg, T - 150 = {TA[0] - 150.0:.7f} K (expect -0.005802)", abs((TA[0] - 150.0) + 0.005802), 5e-7)
+    # 期待値: codex の −0.005802 K (旧 MW) を、補正量の比 4.6282/4.6592 (段 3 の MW 由来の ΔL) で動かしたもの
+    TA_exp = -0.005802 * CORR_150 / 4.6592
+    check(abs(dA[0]) == 0.0 and abs((TA[0] - 150.0) - TA_exp) <= 5e-7,
+          f"(2) A (gas-only formula): correction {dA[0]:.1f} J/kg, T - 150 = {TA[0] - 150.0:.7f} K (expect {TA_exp:.7f})",
+          abs((TA[0] - 150.0) - TA_exp), 5e-7)
     # B: 気液を含む全差
     dB = csf.roe_delta_per_mass(gas, gas, Y, Y, T0, g, g, eos_s, eos_d)
     Lold = csf.h2o_latent_legacy_v0(150.0); Lnew = ref_latent(DB["H2O"], cond, 150.0)
     dRef = (0.01 * (461.5 * 150.0 - Lnew)) - (0.01 * (461.5 * 150.0 - Lold))   # 独立な二相エネルギー評価の差 (気相は同一)
-    check(abs(dB[0] - dRef) <= 1e-6 and abs(dRef - 4.6592) <= 5e-5,
-          f"(2) B (gas + liquid): correction {dB[0]:.7f} J/kg vs independent {dRef:.7f} (codex 4.6592)", abs(dB[0] - dRef), 1e-6)
+    check(abs(dB[0] - dRef) <= 1e-6 and abs(dRef - CORR_150) <= 5e-5,
+          f"(2) B (gas + liquid): correction {dB[0]:.7f} J/kg vs independent {dRef:.7f} (anchor {CORR_150:.4f} = codex 4.6592 moved by the #13-3 MW)",
+          abs(dB[0] - dRef), 1e-6)
     TB = csf.T_from_e(gas, Y, e_src + dB, T0, g=g, eos=eos_d)
     check(abs(TB[0] - 150.0) / 150.0 <= 1e-8, f"(2) B: T after conversion = {TB[0]:.10f} K (relative error)", abs(TB[0] - 150.0) / 150.0, 1e-8)
     check(abs(dB[0] - dA[0]) > 1.0, "(2) A and B differ (the liquid term is what the old formula dropped)", abs(dB[0] - dA[0]))
@@ -172,7 +183,7 @@ def make_run(d):
     open(os.path.join(d, "solverConfig.yaml"), "w").write(CFG)
     meta = {"mode": "full", "species": ["N2", "H2O"], "keep": [], "condensing_species": "H2O", "condensing_index": 1,
             "tracer": {"enabled": False, "name": None, "definition": None}, "lumps": {},
-            "expansion": {"N2": {"N2": 1.0}, "H2O": {"H2O": 1.0}}, "streams": {}, "MW": {"N2": 0.0280134, "H2O": 0.0180153}}
+            "expansion": {"N2": {"N2": 1.0}, "H2O": {"H2O": 1.0}}, "streams": {}, "MW": {"N2": 0.0280134, "H2O": 0.01801528}}
     yaml.safe_dump(meta, open(os.path.join(d, "species_meta.yaml"), "w"), sort_keys=False)
 
 
@@ -258,7 +269,7 @@ def e2e_tests(forge):
         werr = float(np.max(np.abs(de - expect) / q))
         print("      written Δ(roe)/ρ [J/kg]: " + ", ".join(f"{x:.4f}" for x in de) + "  expected g(L_old−L_new): " + ", ".join(f"{x:.4f}" for x in expect))
         check(werr <= 1.0, "(5) written roe moved by g(L_old - L_new) within the write-dtype quantisation (max |err|/quantum)", werr, 1.0)
-        check(abs(expect[0] - 4.6592) < 1e-4, f"(5) 150 K, g 0.01 cell: expected correction {expect[0]:.4f} J/kg (codex 4.6592)")
+        check(abs(expect[0] - CORR_150) < 1e-4, f"(5) 150 K, g 0.01 cell: expected correction {expect[0]:.4f} J/kg (anchor {CORR_150:.4f}; codex 4.6592 before #13-3)")
         hs = at.get("species_hash"); hs = hs.decode() if isinstance(hs, bytes) else hs
         check(hs == h_new, f"(5) destination stamped with the current (liquid-phase) species hash {str(hs)[:16]}")
         # 記録に液相がある場で legacy-v0 → 拒否

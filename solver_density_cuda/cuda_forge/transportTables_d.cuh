@@ -265,7 +265,7 @@ inline double transport_tab_cp_mass_forced(const SpeciesThermo& sp, double T, do
     double Tc = T, Tcs = Tsel;
     if (Tsel < sp.Tlo) { Tc = sp.Tlo; Tcs = sp.Tlo; }
     if (Tsel > sp.Thi) { Tc = sp.Thi; Tcs = sp.Thi; }
-    const double* a = (Tcs < sp.Tmid) ? sp.low : sp.high;
+    const double* a = sp.coef[thermo_interval(sp, Tcs)];   // 区間は Tsel (元の T) で選ぶ (thermo_pick_coeffs と同じ規約)
     const double Ti = 1.0/Tc, Ti2 = Ti*Ti;
     const double cpm = THERMO_RU*(a[0]*Ti2 + a[1]*Ti + a[2] + a[3]*Tc + a[4]*Tc*Tc + a[5]*Tc*Tc*Tc + a[6]*Tc*Tc*Tc*Tc);
     return cpm/sp.MW;
@@ -343,7 +343,8 @@ inline std::vector<TransportTabBound> transport_tab_species_bounds(const Species
     case TRANSPORT_MODEL_KINETIC:
         transport_tab_Tstar_bounds(s.eps_kB, B);
         B.push_back({s.thermo.Tlo, 0, 0});    // T < Tlo は c_p を Tlo でクランプ
-        B.push_back({s.thermo.Tmid, 0, 1});   // T < Tmid が low の係数
+        for (int k = 0; k + 1 < s.thermo.nInt; ++k)
+            B.push_back({s.thermo.Tbrk[k], 0, 1});   // T < Tbrk[k] が区間 k の係数 (区切りちょうどは上の区間; 区間可変 #13-1)
         B.push_back({s.thermo.Thi, 1, 0});    // T > Thi は c_p を Thi でクランプ
         break;
     case TRANSPORT_MODEL_H2O_IAPWS_CEA_V1:

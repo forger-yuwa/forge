@@ -12,13 +12,19 @@ seed run の中身は読むだけで書かない (h5 もリンクせず複製す
        その実行だけの FORGE_ALLOW_UNVERIFIED_SPECIES=1 の 2 通りを案内する (#3c: 既定を厳密へ切り替え)
   (0e) 旧場 + FORGE_ALLOW_UNVERIFIED_SPECIES=1 → 通る。res (境界出力を含む) に species_hash / species_record_sha256 /
        species_record_file / species_input_unverified=1、記録ファイルが run に書かれ、Python の再計算 (load_record) と一致
+  (0r) (0e) の res (印付き) を restart_field.py で**許可なしに**写す → 通り、DST に同じ species_hash と印 (species_input_unverified=1)
+       (#3d: ツールもソルバの fieldHash == own 分岐と同じ規則)。その場を既定 (環境変数なし) のソルバで 1 step → 通り、出力も印を継承
   (R)  `forge --resolve-species` の標準出力最終行 = ソルバ起動時の species_hash
   (A)  同一 config で作った res を restart_field.py で写し属性をコピー (unverified=0) → 通る、出力 unverified=0
   (Ai) 同上で入力 unverified=1 → 通る、出力に未検証の印を継承
   (B)  外部 DB の MIXDRY nasa9_low[2] +0.001 → 停止し MIXDRY.nasa9_low[2] を表示。env を付けても停止
   (c)  種 [N2, H2O] の場 (resolve-only の記録で属性を付けた試験用の場) に外部 DB で N2 nasa9_low[2] +0.001 → 停止し N2.nasa9_low[2] を表示
   (b)  記録の取り違え (入力場の記録名に別 run の記録を置く) → 完全性ハッシュ不一致を表示して停止; Python find_record も検出
-  (S)  source だけ違う (seed の外部 DB にある H2O を外して内蔵の同一係数にする) → 互換性ハッシュ一致で通る (記録の source は builtin)
+  (S)  source だけ違う (外部 DB に内蔵と同一係数の H2O を置いた場 → H2O を外して内蔵にする) → 互換性ハッシュ一致で通る (記録の source は builtin)。
+       段 3 (#13-3) 前は seed の外部 DB の H2O がそのまま内蔵と同一係数だったが、段 3 で内蔵 H2O の MW が CEA の 0.01801528 に
+       なったので、同一係数の H2O は内蔵の記録から作る
+  (S3) 段 3 の旧記録からの継続: seed の場 (外部 DB の H2O は旧 MW 0.0180153) を、H2O を外した config (内蔵 = CEA の MW) で読む
+       → 係数不一致で停止し H2O.MW を示す (env でも通さない; 移行は convert_species_field.py / restart_field.py --force-species)
 規約: [PASS]/[FAIL]、失敗があれば非ゼロ終了。
 """
 import argparse, os, re, shutil, subprocess, sys, tempfile
@@ -166,6 +172,24 @@ def main():
         check(rec is not None and rec["consistent"] and rec["compat_recomputed"] == H
               and rec["provenance"].get("input_status") == "unverified_env",
               f"(0e) record found and verified by Python (integrity + recomputed compat hash): {why}")
+        # (0r) 印付きの res → restart_field (許可なし) → 印を継承 → 既定のソルバで 1 step (#3d)
+        dr = os.path.join(root, "old_env_restart")
+        os.makedirs(dr)
+        for fn in ("solverConfig.yaml", "bcondConfig.yaml", "species_db.yaml", "species_meta.yaml", "probe.yaml", "nozzle.h5"):
+            if os.path.exists(os.path.join(d1, fn)):
+                shutil.copy(os.path.join(d1, fn), dr)
+        env = dict(os.environ); env.pop("FORGE_ALLOW_UNVERIFIED_SPECIES", None)
+        p = subprocess.run([sys.executable, os.path.join(TOOLS, "restart_field.py"), r1, os.path.join(dr, "nozzle.h5"), "--forge", a.forge],
+                           capture_output=True, text=True, env=env)
+        atr = attrs(os.path.join(dr, "nozzle.h5"))
+        check(p.returncode == 0 and atr.get("species_hash") == H and atr.get("species_input_unverified") == 1,
+              f"(0r) restart_field from the marked res without permission -> passes, hash and mark inherited (rc={p.returncode}, {atr})")
+        if p.returncode != 0:
+            print((p.stdout + p.stderr)[-2000:])
+        rc, out = C.run(dr)
+        atr1 = attrs(os.path.join(dr, "res_1.h5")) if rc == 0 else {}
+        check(rc == 0 and "species_hash matches" in out and atr1.get("species_input_unverified") == 1 and atr1.get("species_hash") == H,
+              f"(0r) default solver (no env) on the inherited field -> runs, output keeps the mark (rc={rc}, {atr1.get('species_input_unverified')})")
         # (R) resolve-only
         dR = C.make("resolve")
         rc, h = C.resolve(dR)
@@ -200,16 +224,24 @@ def main():
         with open(os.path.join(dN, recN), "rb") as f:
             import hashlib
             shaN = hashlib.sha256(f.read()).hexdigest()
-        builtinN2 = {e["name"]: e for e in fs.load_record(os.path.join(dN, recN))["species"]}["N2"]
-        n2db = {k: builtinN2[k] for k in ("MW", "LJ_sigma", "LJ_eps_kB", "Tlo", "Tmid", "Thi", "nasa9_low", "nasa9_high")}
-        n2db["nasa9_low"] = list(n2db["nasa9_low"]); n2db["nasa9_low"][2] += 0.001
+        recNsp = {e["name"]: e for e in fs.load_record(os.path.join(dN, recN))["species"]}
+        builtinN2 = recNsp["N2"]
+        if "Tbounds" in builtinN2:   # 段 3 (#13-3) から内蔵 N2 は CEA の 3 区間 → 外部 DB も区間可変の書式で全区間を書く
+            n2db = {k: builtinN2[k] for k in ("MW", "LJ_sigma", "LJ_eps_kB", "Tbounds")}
+            n2db["nasa9_intervals"] = [list(r_) for r_ in builtinN2["nasa9_intervals"]]
+            n2db["nasa9_intervals"][0][2] += 0.001
+            n2key = "N2.nasa9_intervals[0][2]"
+        else:
+            n2db = {k: builtinN2[k] for k in ("MW", "LJ_sigma", "LJ_eps_kB", "Tlo", "Tmid", "Thi", "nasa9_low", "nasa9_high")}
+            n2db["nasa9_low"] = list(n2db["nasa9_low"]); n2db["nasa9_low"][2] += 0.001
+            n2key = "N2.nasa9_low[2]"
         dc = C.make("c_N2", species=["N2", "H2O"], db_edit=lambda db: {"N2": n2db})
         stamp(os.path.join(dc, "nozzle.h5"), {"species_hash": hN, "species_record_sha256": shaN, "species_record_file": recN,
                                               "species_input_unverified": 0})
         shutil.copy(os.path.join(dN, recN), dc)
         rc, out = C.run(dc)
         diffs = re.findall(r"^ +(\S+): field .* vs current .*$", out, re.M)
-        check(rc != 0 and diffs == ["N2.nasa9_low[2]"], f"(c) external DB N2 nasa9_low[2] +0.001 -> stops, only N2.nasa9_low[2] shown: {diffs}")
+        check(rc != 0 and diffs == [n2key], f"(c) external DB N2 low[2] +0.001 -> stops, only {n2key} shown: {diffs}")
         # (b) 記録の取り違え: 入力場の記録名に別 run (MIXDRY 変更 config の resolve-only) の記録を置く
         dX = C.make("b_swap_src", db_edit=bump_low2("MIXDRY", 0.001))
         C.resolve(dX)
@@ -228,13 +260,44 @@ def main():
         def drop_h2o(db):
             db.pop("H2O", None)
             return db
+        # 内蔵と同一係数の H2O を外部 DB に置いた場を作る (記録は resolve-only で書き、場に属性を付ける)
+        h2o_b = recNsp["H2O"]
+        h2o_db = {k: h2o_b[k] for k in ("MW", "LJ_sigma", "LJ_eps_kB", "Tlo", "Tmid", "Thi", "nasa9_low", "nasa9_high")}
+
+        def h2o_as_builtin(db):
+            db["H2O"] = dict(h2o_db)
+            return db
+        dS0 = C.make("S_src", db_edit=h2o_as_builtin)
+        rc, hS0 = C.resolve(dS0)
+        recS0 = [f for f in os.listdir(dS0) if f.startswith("resolved_species_")][0]
+        with open(os.path.join(dS0, recS0), "rb") as f:
+            shaS0 = hashlib.sha256(f.read()).hexdigest()
+        check({e["name"]: e["source"] for e in fs.load_record(os.path.join(dS0, recS0))["species"]}.get("H2O") == "file",
+              "(S) source record: H2O comes from the external DB (file) with the built-in coefficients")
         dS = C.make("S", seed_res=r1, db_edit=drop_h2o)
-        stamp(os.path.join(dS, "nozzle.h5"), at, unverified=0)
+        stamp(os.path.join(dS, "nozzle.h5"), {"species_hash": hS0, "species_record_sha256": shaS0, "species_record_file": recS0,
+                                              "species_input_unverified": 0})
+        shutil.copy(os.path.join(dS0, recS0), dS)
         rc, out = C.run(dS)
         recS = fs.find_record(os.path.join(dS, "res_1.h5"))[0] if rc == 0 else None
         check(rc == 0 and "species_hash matches" in out and recS is not None
               and {e["name"]: e["source"] for e in recS["species"]}.get("H2O") == "builtin",
               f"(S) source-only difference (H2O file -> builtin, same coefficients) -> same compat hash, runs (rc={rc})")
+        # (S3) 段 3 の旧記録からの継続: seed の場 (外部 DB の H2O = 旧 MW) を内蔵 H2O (CEA の MW) の config で読む → 停止、H2O.MW を示す
+        dS3 = C.make("S3", seed_res=r1, db_edit=drop_h2o)
+        stamp(os.path.join(dS3, "nozzle.h5"), at, unverified=0)
+        shutil.copy(os.path.join(d1, at["species_record_file"]), dS3)
+        rc, out = C.run(dS3)
+        diffs = re.findall(r"^ +(\S+): field .* vs current .*$", out, re.M)
+        seed_mw = float(yaml.safe_load(open(os.path.join(a.seed_run, "species_db.yaml")))["H2O"]["MW"])
+        want = ["H2O.MW"] if seed_mw != float(h2o_db["MW"]) else []
+        check(rc != 0 and want and diffs == want and not os.path.exists(os.path.join(dS3, "res_1.h5")),
+              f"(S3) stage-3 continuation: seed field (external H2O MW {seed_mw!r}) read with the built-in H2O "
+              f"(MW {float(h2o_db['MW'])!r}) -> stops (rc={rc}), differences {diffs}")
+        m = re.search(r"^ +H2O\.MW.*$", out, re.M)
+        print("       " + (m.group(0).strip() if m else "(no line)"))
+        rc, out = C.run(dS3, allow=True)
+        check(rc != 0 and "never allowed" in out, f"(S3) the stage-3 mismatch is not allowed by FORGE_ALLOW_UNVERIFIED_SPECIES (rc={rc})")
     except _Abort:
         pass
     finally:

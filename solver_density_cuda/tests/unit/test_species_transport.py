@@ -320,8 +320,10 @@ def test_negative(D):
     check(missed == 0, f"N rejection misses: {missed} / {len(cases)}")
     # 正例: 書かなければ従来どおり (輸送ブロックなし・schema v1)
     d = D.run({"species": ["N2", "H2O"], "states": []})
-    check(d["ok"] and not d["transport_enabled"] and '"forge_resolved_species_v1"' in d["record"] and "transport_compat" not in d["record"],
-          "N without physProp.transport: no transport block, record schema v1")
+    # schema は v1 (段 3 #13-3 から内蔵 N2 が CEA の 3 区間なので区間可変の v1_nint)。輸送の無い記録は v2 (輸送) にならない
+    check(d["ok"] and not d["transport_enabled"] and re.search(r'"forge_resolved_species_v1(_nint)?"', d["record"]) is not None
+          and "transport_compat" not in d["record"],
+          "N without physProp.transport: no transport block, record schema v1 (v1_nint with 3-interval N2)")
 
 
 # ---------------------------------------------------------------- (C)/(H)
@@ -378,8 +380,9 @@ def test_forge(a, root):
     rc, h, path, err = resolve(a.forge, d1)
     rec = fs.load_record(path) if path else None
     ok = (rc == 0 and rec is not None and rec["consistent"] and rec["compat_recomputed"] == h
-          and rec["schema"] == "forge_resolved_species_v2" and any(l.startswith("transport.expand[0]") for l in rec["transport_compat"]))
-    check(ok, f"C --resolve-species with physProp.transport: schema v2, transport_compat {len(rec['transport_compat']) if rec else 0} lines, "
+          and rec["schema"] == ("forge_resolved_species_v2_nint" if any("Tbounds" in e for e in rec["species"]) else "forge_resolved_species_v2")
+          and any(l.startswith("transport.expand[0]") for l in rec["transport_compat"]))
+    check(ok, f"C --resolve-species with physProp.transport: schema v2 (v2_nint with the 3-interval MIXDRY, #13-3), transport_compat {len(rec['transport_compat']) if rec else 0} lines, "
               f"Python load_record recomputes the hash ({h[:16]})" + ("" if ok else err[-1500:]))
     check("[species]   transport (physProp.transport" in err and "custom:h2o_iapws_cea_v1" in err and "outside their formal range" in err,
           "C startup log shows the transport table and the IAPWS range note")
@@ -426,7 +429,17 @@ def test_forge(a, root):
             shutil.copytree(dd, db_, ignore=shutil.ignore_patterns("resolved_species_*"))
             rcb, hb, pb, _ = resolve(a.base_forge, db_)
             same = rcn == 0 and rcb == 0 and hn == hb and pn and pb and open(pn, "rb").read() == open(pb, "rb").read()
-            check(same, f"H {tag}: hash {hn[:16]} and record bytes identical to base binary ({hb[:16]})")
+            if tag.startswith("case44"):
+                # 外部 DB だけで種が決まる config は段 3 (#13-3) でも不変
+                check(same, f"H {tag}: hash {hn[:16]} and record bytes identical to base binary ({hb[:16]})")
+            else:
+                # 内蔵種の config は段 3 で内蔵が CEA そのものになったので、段 3 前のバイナリとはハッシュが違うのが正しい
+                # (--base-forge が段 3 後のバイナリなら従来どおりバイト一致を求める)
+                base_pre13_3 = rcb == 0 and pb is not None and any(
+                    e.get("name") == "N2" and "Tbounds" not in e for e in fs.load_record(pb)["species"])
+                ok = (rcn == 0 and rcb == 0 and hn != hb) if base_pre13_3 else same
+                check(ok, f"H {tag}: hash {hb[:16]} -> {hn[:16]} ("
+                          + ("changed by #13-3, base binary is pre-#13-3" if base_pre13_3 else "identical to base binary") + ")")
         else:
             print(f"[SKIP] H {tag}: --base-forge not given")
 

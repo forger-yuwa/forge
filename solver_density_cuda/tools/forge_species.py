@@ -47,11 +47,13 @@ Python:
   未検証の SRC (属性なし / species_input_unverified=1)・宛先を解決できない (旧バイナリ・solverConfig.yaml なし) は
   **既定で停止** (ソルバと同じ規約, #3c)。許可はその実行だけの FORGE_ALLOW_UNVERIFIED_SPECIES=1 か --force-species で、
   許可して通したときは DST に属性を付けない (宛先のハッシュで埋めない; ソルバ側で未検証として扱われる)。
+  例外は印付きの SRC (species_input_unverified=1) で species_hash = 宛先ハッシュのとき: ソルバ (speciesDB_checkInputField の
+  fieldHash == own 分岐) と同じく許可なしで通し、DST に同じハッシュと印を継承する (#3d; 印は消さない)。
 
 YAML の注意: 種名 `NO` / `N` / `Y` は PyYAML の既定では真偽値になる (design チェーンの古い config は無引用)。
 本モジュールの `load_yaml_str` は真偽値の暗黙解決を外した SafeLoader で読むので `NO` は文字列のまま。
 """
-import argparse, hashlib, json, os, re, sys
+import argparse, hashlib, json, math, os, re, sys
 import yaml
 
 
@@ -226,14 +228,14 @@ def species_signature(run_dir):
     species = {}
     for n in info["names"]:
         e = _find_ci(db, n)
-        if e is not None and "nasa9_low" in e and "nasa9_high" in e:
-            lo, hi = [float(x) for x in e["nasa9_low"]], [float(x) for x in e["nasa9_high"]]
-            if len(lo) != 9 or len(hi) != 9:
-                raise ValueError(f"{run_dir}: species_db.yaml {n} の nasa9 係数が 9 個でない")
+        if e is not None and (("nasa9_low" in e and "nasa9_high" in e) or "nasa9_intervals" in e):
+            try:
+                ent = _thermo_entry(e)
+            except (KeyError, TypeError, ValueError) as ex:
+                raise ValueError(f"{run_dir}: species_db.yaml {n}: {ex}")
             # LJ の既定値は C++ speciesDB_resolve と同じ (3.6 Å / 97 K)
-            species[n] = {"MW": float(e["MW"]), "Tlo": float(e.get("Tlo", 200.0)), "Tmid": float(e.get("Tmid", 1000.0)),
-                          "Thi": float(e.get("Thi", 6000.0)), "LJ_sigma": float(e.get("LJ_sigma", 3.6)),
-                          "LJ_eps_kB": float(e.get("LJ_eps_kB", 97.0)), "nasa9_low": lo, "nasa9_high": hi, "source": "file"}
+            species[n] = {k: v for k, v in ent.items() if k != "lump"}
+            species[n]["source"] = "file"
         else:
             # 内蔵種: 係数を Python 側で作り直さない (plan §4.3「過去 run の署名を現在の内蔵表から再生成しない」)。
             # 比較は「照合不能」になる。内容で照合するにはソルバの解決済み記録 (signature_from_record) を使う。
@@ -250,6 +252,14 @@ SPECIES_RECORD_SCHEMA = "forge_resolved_species_v1"
 # physProp.transport を書いた run の記録 (輸送ブロック transport_compat を持つ; plan thermophysics-solver-owned-species-db #5t2)
 SPECIES_RECORD_SCHEMA_TRANSPORT = "forge_resolved_species_v2"
 SPECIES_RECORD_EXTRAPOLATION = "nasa9_2interval; low if T<Tmid; cp clamped at Tlo/Thi; h linear with end cp outside [Tlo,Thi]"
+# 区間可変 (plan thermophysics-solver-owned-species-db #13-1, §4.9)。記録に nInt != 2 の種 (lump の構成種を含む) があるときだけ
+# schema と外挿規約がこの別値になる (C++ speciesDB.hpp SPECIES_RECORD_*_NINT と一字一句同じ)。nInt == 2 だけの記録は従来とバイト一致。
+SPECIES_RECORD_SCHEMA_NINT = "forge_resolved_species_v1_nint"
+SPECIES_RECORD_SCHEMA_TRANSPORT_NINT = "forge_resolved_species_v2_nint"
+SPECIES_RECORD_EXTRAPOLATION_NINT = ("nasa9_ninterval; interval k if Tb[k]<=T<Tb[k+1] (a breakpoint belongs to the upper interval, "
+                                     "the last interval includes Thi); cp clamped at Tlo/Thi; h linear with end cp outside [Tlo,Thi]")
+# 1 種あたりの温度区間数の上限 (C++ THERMO_MAX_INTERVALS)
+THERMO_MAX_INTERVALS = 3
 SPECIES_RECORD_DATUM = ("coefficients are absolute (before datum); runtime adds -h_abs(Tref)/Ru to a7 of every interval "
                         "when thermoHrefTemp>0")
 # 凝縮種の液相 (気液ペア; plan thermophysics-solver-owned-species-db #10)。C++ speciesDB.hpp SPECIES_CONDENSED_* と一字一句同じ。
@@ -266,6 +276,50 @@ def _g17(x):
     return "%.17g" % float(x)
 
 
+def nasa9_intervals(e):
+    """種エントリ → (境界 [Tlo, 区切り..., Thi], 区間ごとの係数 [[a0..a8], ...])。
+    2 区間の書式 (Tlo/Tmid/Thi, nasa9_low/nasa9_high) と区間可変の書式 (Tbounds, nasa9_intervals; #13-1) の両方を読む。
+    区間 k は Tb[k] <= T < Tb[k+1] (区切りちょうどは上の区間) — C++ thermo_interval と同じ規約。"""
+    if e.get("nasa9_intervals") is not None:
+        return [float(x) for x in e["Tbounds"]], [[float(x) for x in a] for a in e["nasa9_intervals"]]
+    return ([float(e["Tlo"]), float(e["Tmid"]), float(e["Thi"])],
+            [[float(x) for x in e["nasa9_low"]], [float(x) for x in e["nasa9_high"]]])
+
+
+def check_intervals(Tb, coefs, what):
+    """区間数 (1..THERMO_MAX_INTERVALS)・境界 (有限・正・狭義増加)・係数 9 個を検査 (C++ intervalProblem と同じ)。不正は ValueError。"""
+    n = len(coefs)
+    if n < 1 or n > THERMO_MAX_INTERVALS:
+        raise ValueError(f"{what}: has {n} temperature intervals; the solver supports 1 to {THERMO_MAX_INTERVALS} (THERMO_MAX_INTERVALS)")
+    if len(Tb) != n + 1:
+        raise ValueError(f"{what}: needs {n + 1} interval bounds")
+    for k, b in enumerate(Tb):
+        if not math.isfinite(b) or not b > 0.0:
+            raise ValueError(f"{what}: has a non-positive or non-finite interval bound")
+        if k > 0 and not Tb[k - 1] < b:
+            raise ValueError(f"{what}: intervals must be contiguous and increasing")
+    for a in coefs:
+        if len(a) != 9:
+            raise ValueError(f"{what}: nasa9 係数が 9 個でない")
+
+
+def _interval_fields(Tb, coefs):
+    """(境界, 係数) → 種エントリの係数欄。2 区間は従来のキー (Tlo/Tmid/Thi, nasa9_low/nasa9_high)、それ以外は Tlo/Thi と
+    Tbounds/nasa9_intervals (Tmid・nasa9_low・nasa9_high は持たない)。"""
+    if len(coefs) == 2:
+        return {"Tlo": Tb[0], "Tmid": Tb[1], "Thi": Tb[2], "nasa9_low": list(coefs[0]), "nasa9_high": list(coefs[1])}
+    return {"Tlo": Tb[0], "Thi": Tb[-1], "Tbounds": list(Tb), "nasa9_intervals": [list(a) for a in coefs]}
+
+
+def _has_coeffs(e):
+    """係数を持つ (記録 / speciesDBFile 由来) か。記録の無い内蔵種は None。"""
+    return e.get("nasa9_low") is not None or e.get("nasa9_intervals") is not None
+
+
+def _nint(e):
+    return len(nasa9_intervals(e)[1])
+
+
 def condensed_compat_lines(c):
     """凝縮種の液相 (記録の condensed[0]) の互換性行。C++ speciesDB.cpp condensedCompatLines と一字一句同じ。c が None なら空。"""
     if not c:
@@ -280,18 +334,25 @@ def condensed_compat_lines(c):
 
 
 def compat_text(schema, datum, thermoHrefTemp, extrapolation, species, transport_lines=None, condensed=None):
-    """互換性ハッシュの正規化テキスト。species は [{name, phase, MW, Tlo, Tmid, Thi, LJ_sigma, LJ_eps_kB, nasa9_low, nasa9_high}]。
+    """互換性ハッシュの正規化テキスト。species は [{name, phase, MW, Tlo, Tmid, Thi, LJ_sigma, LJ_eps_kB, nasa9_low, nasa9_high}]
+    (nInt != 2 の種は Tbounds・nasa9_intervals; #13-1)。
     source・来歴は入れない。C++ speciesDB.cpp compatTextRaw と一字一句同じにすること。
     transport_lines: 輸送ブロック (記録の transport_compat; physProp.transport を書いた run だけ, #5t2)。C++ が作った行をそのまま末尾に足す。
     condensed: 凝縮種の液相 (記録の condensed[0]; 凝縮 ON・H2O の run だけ, #10)。種の後・輸送の前に condensed_compat_lines を足す。"""
     out = [f"schema: {schema}", f"datum: {datum}", f"thermoHrefTemp: {_g17(thermoHrefTemp)}",
            f"extrapolation: {extrapolation}", f"nSpecies: {len(species)}"]
     def _coeff_lines(tag, e):
+        # nInt == 2 は #13-1 前と一字一句同じ (T: Tlo Tmid Thi / low / high)。それ以外は T: に全境界、区間ごとに coef[k]
+        Tb, co = nasa9_intervals(e)
         out.append(f"{tag}.MW: {_g17(e['MW'])}")
-        out.append(f"{tag}.T: {_g17(e['Tlo'])} {_g17(e['Tmid'])} {_g17(e['Thi'])}")
+        out.append(f"{tag}.T: " + " ".join(_g17(x) for x in Tb))
         out.append(f"{tag}.LJ: {_g17(e['LJ_sigma'])} {_g17(e['LJ_eps_kB'])}")
-        out.append(f"{tag}.low: " + " ".join(_g17(x) for x in e["nasa9_low"]))
-        out.append(f"{tag}.high: " + " ".join(_g17(x) for x in e["nasa9_high"]))
+        if len(co) == 2:
+            out.append(f"{tag}.low: " + " ".join(_g17(x) for x in co[0]))
+            out.append(f"{tag}.high: " + " ".join(_g17(x) for x in co[1]))
+        else:
+            for j, a in enumerate(co):
+                out.append(f"{tag}.coef[{j}]: " + " ".join(_g17(x) for x in a))
 
     for i, e in enumerate(species):
         tag = f"species[{i}]"
@@ -322,10 +383,26 @@ def _record_condensed(n):
 
 
 def _record_coeffs(n):
-    """記録の 1 種 (または lump 構成種) の係数ブロック。"""
-    return {"MW": float(n["MW"]), "Tlo": float(n["Tlo"]), "Tmid": float(n["Tmid"]), "Thi": float(n["Thi"]),
-            "LJ_sigma": float(n["LJ_sigma"]), "LJ_eps_kB": float(n["LJ_eps_kB"]),
-            "nasa9_low": [float(x) for x in n["nasa9_low"]], "nasa9_high": [float(x) for x in n["nasa9_high"]]}
+    """記録の 1 種 (または lump 構成種) の係数ブロック (2 区間の書式と区間可変の書式 Tbounds/nasa9_intervals の両方)。"""
+    out = {"MW": float(n["MW"]), "LJ_sigma": float(n["LJ_sigma"]), "LJ_eps_kB": float(n["LJ_eps_kB"])}
+    if n.get("Tbounds") is not None:
+        Tb, co = [float(x) for x in n["Tbounds"]], [[float(x) for x in a] for a in (n.get("nasa9_intervals") or [])]
+        check_intervals(Tb, co, f"species '{n.get('name', '?')}'")
+    else:
+        Tb, co = nasa9_intervals(n)
+    out.update(_interval_fields(Tb, co))
+    return out
+
+
+def record_has_nonstandard_intervals(species):
+    """記録の種 (lump の構成種を含む) に nInt != 2 があるか (schema・外挿規約の別値の条件; C++ hasNonTwoInterval)。"""
+    for e in species:
+        if _nint(e) != 2:
+            return True
+        for m in ((e.get("lump") or {}).get("members") or []):
+            if _nint(m) != 2:
+                return True
+    return False
 
 
 def load_record(path):
@@ -379,10 +456,19 @@ def load_record(path):
         problems.append(f"{path}: file name compat {m.group(1)} != content compat {out['compat_recomputed'][:16]} (mixed-up record)")
     if m and m.group(2) and m.group(2) != out["integrity"][:16]:
         problems.append(f"{path}: file name integrity {m.group(2)} != sha256 of file {out['integrity'][:16]}")
-    if out["schema"] not in (SPECIES_RECORD_SCHEMA, SPECIES_RECORD_SCHEMA_TRANSPORT):
-        problems.append(f"{path}: schema {out['schema']!r} (this tool knows {SPECIES_RECORD_SCHEMA!r}, {SPECIES_RECORD_SCHEMA_TRANSPORT!r})")
-    elif (out["schema"] == SPECIES_RECORD_SCHEMA_TRANSPORT) != bool(out["transport_compat"]):
-        problems.append(f"{path}: schema {out['schema']!r} and the transport block (transport_compat) do not go together")
+    known = (SPECIES_RECORD_SCHEMA, SPECIES_RECORD_SCHEMA_TRANSPORT, SPECIES_RECORD_SCHEMA_NINT, SPECIES_RECORD_SCHEMA_TRANSPORT_NINT)
+    if out["schema"] not in known:
+        problems.append(f"{path}: schema {out['schema']!r} (this tool knows {', '.join(repr(k) for k in known)})")
+    else:
+        if (out["schema"] in (SPECIES_RECORD_SCHEMA_TRANSPORT, SPECIES_RECORD_SCHEMA_TRANSPORT_NINT)) != bool(out["transport_compat"]):
+            problems.append(f"{path}: schema {out['schema']!r} and the transport block (transport_compat) do not go together")
+        # 区間可変 (#13-1): nInt != 2 の種があるときだけ *_nint と区間可変の外挿規約
+        nint = record_has_nonstandard_intervals(species)
+        if (out["schema"] in (SPECIES_RECORD_SCHEMA_NINT, SPECIES_RECORD_SCHEMA_TRANSPORT_NINT)) != nint:
+            problems.append(f"{path}: schema {out['schema']!r} and the species temperature intervals "
+                            f"({'some' if nint else 'no'} species with nInt != 2) do not go together")
+        if out["extrapolation"] != (SPECIES_RECORD_EXTRAPOLATION_NINT if nint else SPECIES_RECORD_EXTRAPOLATION):
+            problems.append(f"{path}: extrapolation convention {out['extrapolation']!r} does not match the species temperature intervals")
     out["problems"] = problems
     out["consistent"] = not problems
     return out
@@ -437,14 +523,24 @@ def signature_from_record(rec):
 
 def _thermo_entry(e):
     """記録の種 / speciesDBFile のエントリ → run_thermo の種エントリ (絶対基準の係数; datum は thermoHrefTemp で別に持つ)。"""
-    out = {"MW": float(e["MW"]), "Tlo": float(e.get("Tlo", 200.0)), "Tmid": float(e.get("Tmid", 1000.0)),
-           "Thi": float(e.get("Thi", 6000.0)),
-           # LJ の既定値は C++ speciesDB_resolve の speciesDBFile 読込と同じ (3.6 Å / 97 K)
-           "LJ_sigma": float(e.get("LJ_sigma", 3.6)), "LJ_eps_kB": float(e.get("LJ_eps_kB", 97.0)),
-           "nasa9_low": [float(x) for x in e["nasa9_low"]], "nasa9_high": [float(x) for x in e["nasa9_high"]],
-           "lump": e.get("lump")}
-    if len(out["nasa9_low"]) != 9 or len(out["nasa9_high"]) != 9:
-        raise ValueError("nasa9 係数が 9 個でない")
+    # LJ の既定値は C++ speciesDB_resolve の speciesDBFile 読込と同じ (3.6 Å / 97 K)
+    out = {"MW": float(e["MW"]), "LJ_sigma": float(e.get("LJ_sigma", 3.6)), "LJ_eps_kB": float(e.get("LJ_eps_kB", 97.0))}
+    if e.get("nasa9_intervals") is not None or e.get("Tbounds") is not None:
+        # 区間可変の書式 (#13-1; C++ の外部 DB 読込と同じ: 2 区間の書式と混ぜない)
+        if any(k in e for k in ("nasa9_low", "nasa9_high", "Tmid")):
+            raise ValueError("Tbounds/nasa9_intervals cannot be mixed with Tlo/Tmid/Thi/nasa9_low/nasa9_high")
+        Tb = [float(x) for x in (e.get("Tbounds") or [])]
+        co = [[float(x) for x in a] for a in (e.get("nasa9_intervals") or [])]
+    else:
+        # 2 区間 (区切りの既定値は C++ の外部 DB 読込と同じ 200/1000/6000 K)
+        Tb = [float(e.get("Tlo", 200.0)), float(e.get("Tmid", 1000.0)), float(e.get("Thi", 6000.0))]
+        co = [[float(x) for x in e["nasa9_low"]], [float(x) for x in e["nasa9_high"]]]
+        if len(co[0]) != 9 or len(co[1]) != 9:
+            raise ValueError("nasa9 係数が 9 個でない")
+    if len(co) != 2:
+        check_intervals(Tb, co, "species entry")
+    out.update(_interval_fields(Tb, co))
+    out["lump"] = e.get("lump")
     return out
 
 
@@ -460,7 +556,8 @@ def run_thermo(run_dir, res_path=None, source="auto", forge=None):
     """run の熱物性を 1 か所で読む (plans/active/thermophysics-solver-owned-species-db.md §4.6, #8)。後処理・種変換・入口分布・
     設計 runner の署名はこれを使い、`species_db.yaml` の存在を前提にしない。
     返り値: {source: record|speciesDBFile|resolve, how, path, names (physProp.species の順), thermoHrefTemp, compat_hash (記録のときだけ),
-             species: {name: {MW, Tlo, Tmid, Thi, LJ_sigma, LJ_eps_kB, nasa9_low, nasa9_high (絶対基準), lump (記録の lump 構成 | None)}},
+             species: {name: {MW, Tlo, Tmid, Thi, LJ_sigma, LJ_eps_kB, nasa9_low, nasa9_high (絶対基準; nInt != 2 の種は Tlo/Thi と
+                              Tbounds・nasa9_intervals — nasa9_intervals() で読む), lump (記録の lump 構成 | None)}},
              condensed: 凝縮種の液相 (記録の condensed[0]; #10) | None (凝縮 OFF・#10 以前の記録・speciesDBFile)}。
     source="auto" の優先順:
       (1) res_path の属性が指すソルバの解決済み記録 (完全性ハッシュを検証; 場を作った物性そのもの)
@@ -585,13 +682,46 @@ def _compare_lumps(n, la, lb, coef_rtol):
         return bad + [f"{n}.lump members {na} vs {nb}"]
     for ma, mb in zip(la["members"], lb["members"]):
         t = f"{n}.lump.{ma['name']}"
-        for k in ("x", "MW", "Tlo", "Tmid", "Thi", "LJ_sigma", "LJ_eps_kB"):
-            if ma[k] != mb[k]:
-                bad.append(f"{t}.{k} {ma[k]!r} vs {mb[k]!r}")
-        for k in ("nasa9_low", "nasa9_high"):
-            for i, (x, y) in enumerate(zip(ma[k], mb[k])):
+        if ma["x"] != mb["x"]:
+            bad.append(f"{t}.x {ma['x']!r} vs {mb['x']!r}")
+        bad += _compare_thermo(t, ma, mb, coef_rtol, mw_exact=True)
+    return bad
+
+
+def _compare_thermo(t, sa, sb, coef_rtol, mw_exact=False):
+    """1 種の MW (mw_exact のとき)・区間・LJ・係数の差 (2 区間同士は従来のキー名 Tlo/Tmid/Thi・nasa9_low[i]/nasa9_high[i]、
+    それ以外は nInt / Tbounds[k] / nasa9_intervals[j][i]; #13-1)。"""
+    bad = []
+    Ta, ca = nasa9_intervals(sa)
+    Tb_, cb = nasa9_intervals(sb)
+    two = len(ca) == 2 and len(cb) == 2
+    keys = ["MW"] if mw_exact else []
+    if two:
+        keys += ["Tlo", "Tmid", "Thi"]
+    keys += ["LJ_sigma", "LJ_eps_kB"]
+    if not two:
+        if len(ca) != len(cb):
+            bad.append(f"{t}.nInt {len(ca)} ({'/'.join(_g17(x) for x in Ta)} K) vs {len(cb)} ({'/'.join(_g17(x) for x in Tb_)} K)")
+        else:
+            for k, (x, y) in enumerate(zip(Ta, Tb_)):
+                if x != y:
+                    bad.append(f"{t}.Tbounds[{k}] {x!r} vs {y!r}")
+    for k in keys:
+        if sa.get(k) is None or sb.get(k) is None:
+            continue
+        if sa[k] != sb[k]:
+            bad.append(f"{t}.{k} {sa[k]!r} vs {sb[k]!r}")
+    if two:
+        pairs = [("nasa9_low", ca[0], cb[0]), ("nasa9_high", ca[1], cb[1])]
+        for k, xa, xb in pairs:
+            for i, (x, y) in enumerate(zip(xa, xb)):
                 if abs(x - y) > coef_rtol * max(abs(x), abs(y), 1e-300):
                     bad.append(f"{t}.{k}[{i}] {x!r} vs {y!r}")
+    elif len(ca) == len(cb):
+        for j, (xa, xb) in enumerate(zip(ca, cb)):
+            for i, (x, y) in enumerate(zip(xa, xb)):
+                if abs(x - y) > coef_rtol * max(abs(x), abs(y), 1e-300):
+                    bad.append(f"{t}.nasa9_intervals[{j}][{i}] {x!r} vs {y!r}")
     return bad
 
 
@@ -610,20 +740,12 @@ def compare_signatures(a, b, mw_rtol=1e-9, coef_rtol=1e-12):
             sa, sb = a["species"][n], b["species"][n]
             if abs(sa["MW"] - sb["MW"]) > mw_rtol * max(abs(sa["MW"]), abs(sb["MW"]), 1e-300):
                 bad.append(f"MW[{n}] {sa['MW']!r} vs {sb['MW']!r}")
-            if sa.get("nasa9_low") is None or sb.get("nasa9_low") is None:
-                side = " / ".join(t for t, x in (("A", sa), ("B", sb)) if x.get("nasa9_low") is None)
+            if not _has_coeffs(sa) or not _has_coeffs(sb):
+                side = " / ".join(t for t, x in (("A", sa), ("B", sb)) if not _has_coeffs(x))
                 bad.append(f"{n}: unverifiable (照合不能) — coefficients unknown on side {side} "
                            "(built-in species without a solver record resolved_species_*.yaml)")
                 continue
-            for k in ("Tlo", "Tmid", "Thi", "LJ_sigma", "LJ_eps_kB"):
-                if sa.get(k) is None or sb.get(k) is None:
-                    continue
-                if sa[k] != sb[k]:
-                    bad.append(f"{n}.{k} {sa[k]!r} vs {sb[k]!r}")
-            for k in ("nasa9_low", "nasa9_high"):
-                for i, (x, y) in enumerate(zip(sa[k], sb[k])):
-                    if abs(x - y) > coef_rtol * max(abs(x), abs(y), 1e-300):
-                        bad.append(f"{n}.{k}[{i}] {x!r} vs {y!r}")
+            bad += _compare_thermo(n, sa, sb, coef_rtol)
             bad += _compare_lumps(n, sa.get("lump"), sb.get("lump"), coef_rtol)
     if a["thermoHrefTemp"] != b["thermoHrefTemp"]:
         bad.append(f"thermoHrefTemp {a['thermoHrefTemp']} vs {b['thermoHrefTemp']}")
@@ -641,6 +763,8 @@ def compare_signatures(a, b, mw_rtol=1e-9, coef_rtol=1e-12):
 #                                 許可 (FORGE_ALLOW_UNVERIFIED_SPECIES=1 / --force-species) したときは DST の属性を消す (宛先のハッシュで埋めない)
 #   種変換                      : plan_convert — 入力を検証し、変換の成功後に変換先のハッシュを付ける (入力が未検証なら既定で停止、
 #                                 許可したときは未検証のまま = 属性なし)
+# 印付き (species_input_unverified=1) の SRC は、ハッシュが宛先 (種変換は SRC config) と一致すれば許可なしで通し印を継承する
+#                                 (ソルバの fieldHash == own 分岐と同じ; #3d)。不一致は上と同じく未検証として停止。
 # CPG (thermalMethod≠2) は対象外 (属性を付けない)。
 
 SPECIES_ATTRS = ("species_hash", "species_record_sha256", "species_record_file", "species_input_unverified")
@@ -772,7 +896,10 @@ def resolve_species(run_dir, forge=None, inplace=True):
         h = lines[-1].strip() if lines else ""
         m = re.search(r"\[species\] record (\S+) \(sha256 ([0-9a-f]{64})\)", p.stderr)
         if p.returncode != 0 or not re.fullmatch(r"[0-9a-f]{64}", h) or not m:
-            raise SpeciesCheckError(f"forge --resolve-species failed in {run_dir} (rc={p.returncode}): {p.stderr.strip()[-800:]}")
+            err = p.stderr.strip()
+            k = err.rfind("[speciesDB]")      # 種 DB の拒否文 (差のキー・両値・移行先) は切り詰めずに全文を出す
+            raise SpeciesCheckError(f"forge --resolve-species failed in {run_dir} (rc={p.returncode}): "
+                                    f"{err[k:] if k >= 0 else err[-800:]}")
         rec = load_record(os.path.join(cwd, m.group(1)))
         if not rec["consistent"] or rec["compat_recomputed"] != h or rec["integrity"] != m.group(2):
             raise SpeciesCheckError(f"resolve-only record for {run_dir} is inconsistent: {rec['problems']}")
@@ -869,14 +996,59 @@ def _check_unverified_src(tool, src_h5, dst_run_dir, st, force=False):
     refuse_unverified(tool, f"SRC {src_h5} is unverified ({st['why']}) and {where}", force)
 
 
+def _marked_src_record(src_h5, h):
+    """印付き SRC の記録 (完全性・互換性ハッシュとも属性に一致するものだけ)。無ければ None (ソルバも印付きの一致では記録を見ない)。"""
+    rec, _why = find_record(src_h5)
+    return rec if (rec is not None and rec["consistent"] and rec["compat_recomputed"] == h) else None
+
+
+def _plan_inherit_marked(src_h5, dst_run_dir, st, forge, force, tool, inplace):
+    """印付きの SRC (species_hash あり・species_input_unverified=1) の継承判定。ソルバの規則 (speciesDB_checkInputField の
+    fieldHash == own 分岐: 属性のハッシュが自分のハッシュと等しければ許可なしで通し、入力の印を出力に継承) と同じにする (#3d)。
+    一致: 許可不要で宛先に同じハッシュと印 (species_input_unverified=1) を付ける。記録は SRC の記録が引ければそれ、無ければ宛先の
+    --resolve-species の記録 (同じハッシュ)。不一致・宛先を解決できない・宛先が判定不能は従来どおり未検証として停止
+    (FORGE_ALLOW_UNVERIFIED_SPECIES=1 / force で属性なし)。宛先が CPG なら従来どおり属性なしで通す。"""
+    tm = _config_thermal_method(dst_run_dir)
+    if tm is not None and tm != 2:
+        return None
+    if tm is None:
+        _check_unverified_src(tool, src_h5, dst_run_dir, st, force)
+        return None
+    h = st["attrs"]["species_hash"]
+    try:
+        dst = resolve_species(dst_run_dir, forge, inplace=inplace)
+    except SpeciesResolveUnavailable as e:
+        refuse_unverified(tool, f"SRC {src_h5} is unverified ({st['why']}) and the destination species cannot be resolved ({e})", force)
+        return None
+    if dst is None:          # tm == 2 を見た後なので通常は来ない
+        return None
+    rec = _marked_src_record(src_h5, h)
+    if dst["hash"] != h:
+        diff = _record_diff(rec, dst["record"]) if rec is not None else ["(SRC record not found; coefficient differences cannot be identified)"]
+        refuse_unverified(tool, f"SRC {src_h5} is unverified ({st['why']}) and its species_hash {h[:16]} != destination {dst_run_dir} "
+                                f"species_hash {dst['hash'][:16]} (forge --resolve-species):\n"
+                          + "".join(f"    {x}\n" for x in (diff or ["(no coefficient difference found; schema/datum text differs)"])), force)
+        return None
+    use = rec if rec is not None else dst["record"]
+    print(f"[{tool}] species: SRC species_hash {h[:16]} = destination species_hash {dst['hash'][:16]} (forge --resolve-species); "
+          f"SRC descends from an unverified start -> inherit the hash and the mark (species_input_unverified=1; record "
+          f"{'of SRC' if rec is not None else 'of the destination'} {os.path.basename(use['path'])})")
+    return {"species_hash": h, "species_record_sha256": use["integrity"],
+            "species_record_file": None, "species_input_unverified": 1, "_record": use, "_dst_dir": dst_run_dir}
+
+
 def plan_inherit(src_h5, dst_run_dir, forge=None, force=False, tool="restart", inplace=True):
     """コピー・restart・補間の継承判定 (書き込み前に呼ぶ)。返り値 = 書き込み後に DST へ付ける属性 (dict) か None (未検証のまま)。
     不一致・記録の欠落は SpeciesCheckError (force=True なら警告して None = 属性を付けずに通す)。
     SRC が未検証で宛先が TP (または判定不能)・宛先を解決できないときも SpeciesCheckError
-    (FORGE_ALLOW_UNVERIFIED_SPECIES=1 か force=True なら警告して None)。"""
+    (FORGE_ALLOW_UNVERIFIED_SPECIES=1 か force=True なら警告して None)。
+    ただし印付きの SRC (species_input_unverified=1) で SRC の species_hash = 宛先ハッシュなら許可なしで通し、
+    宛先に同じハッシュと印を継承する (ソルバ speciesDB_checkInputField の fieldHash == own 分岐と同じ規則; #3d)。"""
     dst_run_dir = os.path.abspath(dst_run_dir)
     st = source_species_state(src_h5)
-    if st["state"] in ("none", "unverified"):
+    if st["state"] == "unverified":
+        return _plan_inherit_marked(src_h5, dst_run_dir, st, forge, force, tool, inplace)
+    if st["state"] == "none":
         _check_unverified_src(tool, src_h5, dst_run_dir, st, force)
         return None
     if st["state"] == "broken":
@@ -932,8 +1104,7 @@ def commit_inherit(dst_h5, plan):
 def record_energy_gas(rec):
     """記録の係数 (絶対基準) と datum でソルバと同じ e(T) を評価する _TPGas (total_quantities.py) を返す。"""
     from total_quantities import _TPGas
-    db = {e["name"]: {"MW": e["MW"], "Tlo": e["Tlo"], "Tmid": e["Tmid"], "Thi": e["Thi"],
-                      "nasa9_low": e["nasa9_low"], "nasa9_high": e["nasa9_high"]} for e in rec["species"]}
+    db = {e["name"]: dict({"MW": e["MW"]}, **_interval_fields(*nasa9_intervals(e))) for e in rec["species"]}
     return _TPGas(db, [e["name"] for e in rec["species"]], rec["thermoHrefTemp"])
 
 
@@ -1005,15 +1176,54 @@ def stamp_new_field(h5path, run_dir, names, MW, h_ref_T, mixtures, forge=None, t
     return "verified"
 
 
+def _plan_convert_marked(src_h5, dst_run_dir, src_run_dir, st, forge, force, tool, inplace):
+    """印付き入力の種変換 (#3d)。場の species_hash が SRC config の解決ハッシュと等しければ許可なしで通し、変換先のハッシュに
+    印 (species_input_unverified=1) を付ける。不一致・解決不能は従来どおり未検証として停止 (許可で属性なし)。
+    宛先が CPG なら従来どおり属性なし。"""
+    dst_run_dir = os.path.abspath(dst_run_dir)
+    tm = _config_thermal_method(dst_run_dir)
+    if tm is not None and tm != 2:
+        return {"attrs": None, "dst": None}
+    if tm is None:
+        _check_unverified_src(tool, src_h5, dst_run_dir, st, force)
+        return {"attrs": None, "dst": None}
+    h = st["attrs"]["species_hash"]
+    src_run_dir = os.path.abspath(src_run_dir or os.path.dirname(os.path.abspath(src_h5)))
+    try:
+        srcr = resolve_species(src_run_dir, forge, inplace=False)
+        dst = resolve_species(dst_run_dir, forge, inplace=inplace)
+    except SpeciesResolveUnavailable as e:
+        refuse_unverified(tool, f"SRC {src_h5} is unverified ({st['why']}) and species cannot be resolved ({e})", force)
+        return {"attrs": None, "dst": None}
+    if srcr is None or srcr["hash"] != h:
+        rec = _marked_src_record(src_h5, h)
+        diff = (_record_diff(rec, srcr["record"]) if (rec is not None and srcr is not None) else
+                ["source run is calorically perfect"] if srcr is None else
+                ["(SRC record not found; coefficient differences cannot be identified)"])
+        refuse_unverified(tool, f"SRC {src_h5} is unverified ({st['why']}) and its species_hash {h[:16]} != the source run config "
+                                f"{src_run_dir} ({srcr['hash'][:16] if srcr else 'CPG'}):\n" + "".join(f"    {x}\n" for x in diff), force)
+        return {"attrs": None, "dst": None}
+    if dst is None:
+        return {"attrs": None, "dst": None}
+    print(f"[{tool}] species: SRC species_hash {h[:16]} = source config (descends from an unverified start); "
+          f"destination resolved {dst['hash'][:16]} -> output keeps the mark (species_input_unverified=1)")
+    return {"attrs": {"species_hash": dst["hash"], "species_record_sha256": dst["record"]["integrity"],
+                      "species_record_file": dst["record_file"], "species_input_unverified": 1}, "dst": dst}
+
+
 def plan_convert(src_h5, dst_run_dir, src_run_dir=None, forge=None, force=False, tool="convert", inplace=True, legacy_latent=False):
     """種変換の判定 (書き込み前)。入力を検証し (属性・記録の完全性、SRC config を解決したハッシュ = 場の属性)、
     変換先を解決する。返り値 = {"attrs": 付ける属性 | None, "dst": resolve 結果 | None}。入力が未検証・解決できないときは
     既定で SpeciesCheckError、FORGE_ALLOW_UNVERIFIED_SPECIES=1 か force=True なら attrs=None (属性なし)。
     legacy_latent (convert_species_field.py --src-latent legacy-v0; plan #10 の移行手順): SRC の記録が液相 (condensed) を持たない
     #10 以前の H2O 凝縮 run で、SRC config を今の forge で解決した差が**液相の追加だけ** (記録 + 今の液相行 = 今のハッシュ) なら、
-    潜熱モデル以外は検証済みとして通す (潜熱は呼び手が旧モデルで読む)。"""
+    潜熱モデル以外は検証済みとして通す (潜熱は呼び手が旧モデルで読む)。
+    印付きの入力 (species_input_unverified=1) は、場の species_hash = SRC config を解決したハッシュ (変換器が場を読む物性) なら
+    許可なしで通し、変換後に変換先のハッシュと印を付ける (ソルバの fieldHash == own 分岐と同じ規則; #3d)。"""
     st = source_species_state(src_h5)
-    if st["state"] in ("none", "unverified"):
+    if st["state"] == "unverified":
+        return _plan_convert_marked(src_h5, dst_run_dir, src_run_dir, st, forge, force, tool, inplace)
+    if st["state"] == "none":
         _check_unverified_src(tool, src_h5, os.path.abspath(dst_run_dir), st, force)
         return {"attrs": None, "dst": None}
     if st["state"] == "broken":

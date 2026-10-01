@@ -249,6 +249,13 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
   |ΣY−1|>1e-3 はエラー (以前は黙って通した; 未指定種は従来どおり `Y0=1`, 他 0)。起動ログに入口ごとの Y と X (MW から逆算) が出るので
   ここで桁を確認する。`initial` (IC) は文字列のまま; 組成付き IC と `inletProfile` CSV は生成ツール側で Y に換算する
   (`gen_inlet_profile.py --X`, [procedures/inlet-profile.md](inlet-profile.md))。
+- **内蔵の化学種** (2026-10-01, [plan #13-2](../plans/active/thermophysics-solver-owned-species-db.md)): `physProp.species` の名前は共通データ
+  `solver_density_cuda/data/species/forge_species_v1.yaml` の**全気相種 61 種** (移行前からの N2/O2/CO2/H2O/Ar/He/AIR、CO/H2/OH/H/NO/O、
+  CEA `thermo.inp` から生成した 48 種 — 例 `CH4`・`C2H2,acetylene`・`N`・`NH3`・`Kr`・`Xe`) で `speciesDBFile` なしに解決できる。一覧と出典は
+  [methods/thermophysics.md](../methods/thermophysics.md)「内蔵 species DB の一覧と出典」。`e-` と CEA の `Air` は内蔵に無い (`Air`/`air` は擬似種 `AIR` の別名)。
+  生成 48 種の多くは **LJ を持たない**: `physProp.transport` で `kinetic` を指定する、または LJ の混合平均拡散 (化学種 2 以上・`viscMethod` ≠ 0・
+  `speciesDiffusionMethod: 1` = 既定) に使うと起動時エラー (`cea`/`fit` か `speciesDiffusionMethod: 0`、または `speciesDBFile` で LJ を与える)。
+  `speciesDBFile` による上書き・追加は従来どおり (同じキーだけ上書き)。既存 config の解決結果・互換性ハッシュは変わらない。
 - **化学種の解決済み記録と入力場の照合** (TP `thermalMethod: 2` のみ、2026-09-27、[plan §4.3 #3a](../plans/active/thermophysics-solver-owned-species-db.md))。
   - 起動時に使用した全種の物性 (順序・名前・MW・datum 前の絶対係数と温度区間・LJ・`thermoHrefTemp`・来歴) を run ディレクトリへ
     `resolved_species_<互換ハッシュ16桁>.yaml` として書く (**出力=記録であり入力ではない**; 同名で来歴だけ違えば `_<完全性16桁>` 付きの別名)。
@@ -265,18 +272,24 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
     出力に `species_input_unverified=1` が付く)。種・DB が変わった場は `convert_species_field.py`。
   - **引き継ぎツールも同じ規約** (2026-09-27 #3c 残)。`restart_field.py` / `interp_field.py` / `convert_species_field.py` と設計 runner の
     IC 付与・段間継承 (`runner_axismach` の `_restart_same_mesh`・`runner_sern` の `restart_by_index` / `warm_from_run`) は、
-    SRC が未検証 (属性なし / `species_input_unverified=1`) で宛先が TP のとき・宛先の `solverConfig.yaml` が無く CPG か TP か判定できないとき・
+    SRC が未検証 (属性なし / ハッシュが宛先と違う `species_input_unverified=1`; 一致する印付きは下記) で宛先が TP のとき・宛先の `solverConfig.yaml` が無く CPG か TP か判定できないとき・
     宛先を解決できない (`--resolve-species` を持つ forge が無い = 旧バイナリ; `--forge` / `FORGE_BIN` で新しいバイナリを渡す) とき・
     記録が壊れているときに**既定で書き込まずに停止**し、ソルバと同じ 2 通り (IC を属性を付ける処理で作り直す / その実行だけ許可) を案内する。
     許可は**その実行だけ** `FORGE_ALLOW_UNVERIFIED_SPECIES=1 python3 tools/restart_field.py ...` か各ツールの `--force-species`
     (記録の破損・係数不一致を通すのは `--force-species` だけ; 環境変数は未検証・解決不能だけを通す)。**許可して通した宛先には属性を付けない**ので、
     その場から起動するソルバにも同じ許可が要る。検証済みの SRC からの継承は従来どおり (宛先を解決して互換性ハッシュが一致すれば属性と記録を継承)。
+    **印付きの場 (`species_input_unverified=1`) はソルバと同じ規則** (2026-10-01 #3d): 場の `species_hash` が宛先のハッシュ (種変換は SRC run の設定の
+    ハッシュ) と一致すれば許可なしで通し、宛先に同じハッシュと印を継承する (印は消さない)。一致しなければ停止。
+    したがって属性なしの旧場の移行は「その実行だけ `FORGE_ALLOW_UNVERIFIED_SPECIES=1 forge` で 1 回回す (出力が印付きになる) → 以後は許可なし」で済む。
     宛先が CPG なら対象外。過渡期の `FORGE_REQUIRE_VERIFIED_SPECIES` はツールからも撤去した。
+  - **凝縮 ON の気液ペア検査** (2026-10-01 #13-3): 外部 DB の気相 H2O が内蔵と違う (例: #9 以前の runner が写した旧 MW 0.0180153 の H2O) と
+    起動を拒否し、キーと両値・移行先 (外部 DB から H2O を外す / lump 記法で `speciesDBFile` をやめる) を示す。`FORGE_ALLOW_UNVERIFIED_SPECIES=1`・
+    `--force-species` では通らない。その config の旧場からの継続は `convert_species_field.py` (種の物性が変わるため)。
   - `forge --resolve-species`: GPU を使わず `solverConfig.yaml` を解決して記録を書き、互換性ハッシュを**標準出力の最終行**に出して終了
     (CPG は終了コード 2)。記録を既存の場へ貼っても検証済みにはならない。
 - **`thermoHrefTemp: 298.15` を必ず指定する** (反応熱は sensible datum の残差項 $\dot Q=-\sum_s h^{abs}_s(T_{ref})\dot\omega_s$ として入る。絶対 datum (0) でも動くが陰解法は不安定)。
 - 機構に現れる種は `species` に全て含めること (無ければ起動時エラー)。`species` にだけある種は不活性として扱う。
-- 熱力学 DB は `tools/cea_thermo_to_species_db.py thermo.inp --species ...` で CEA から生成する (ラジカルは内蔵 DB に無い)。
+- 熱力学 DB は `tools/cea_thermo_to_species_db.py thermo.inp --species ...` で CEA から生成する (内蔵 DB は H・O・OH・H2 までは持つが HO2・H2O2 などは無い; 下の「内蔵の化学種」)。
 - 出力: `chemQdot` [W/m³], `chemTau` [s] (=1/max|∂ω_s/∂ρY_s|、化学時間の目安。`dt` や `cfl_pseudo` の妥当性判断に使う)。
 - 検証: `case/35.uniform_periodic_box/run_0049_node_h2_ignition` (0-D 着火 vs Cantera)。
 

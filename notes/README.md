@@ -13,6 +13,7 @@
 
 | ノート | area | 概要 |
 | --- | --- | --- |
+| [2026-09-30-cea-thermo-builtin-audit.md](investigations/2026-09-30-cea-thermo-builtin-audit.md) | `thermophysics` | CEA thermo.inp の熱物性をソルバ内蔵にする前の監査: trans 66 種のうち thermo.inp に 61 種 (5 CFC 無し)、2 区間 39・3 区間 22、非標準境界は `e-` のみ、既存 7 種と H2O(L) の CEA 化 Δ (H2O・He は MW 由来で \|Δh\| ~15 J/kg、Ar 0.073 J/kg)。判断は plan [thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §5.1 #13 (2026-09-30) |
 | [config-key-inventory-2026-09-18.md](investigations/config-key-inventory-2026-09-18.md) | `config / tooling` | solverConfig の全キーを完全修飾パスで棚卸しした表 (live な値キー 167 / 拒否専用 12 / 起動時拒否 8 / 節 10)。全 worktree の run config 4063 本での記載数・非既定数と、文書での言及先。判断は plan [config-key-pruning](../plans/accepted/config-key-pruning.md) 側 (2026-09-18) |
 | [2026-09-22-mms-node-face-weight.md](investigations/2026-09-22-mms-node-face-weight.md) | `discretization` | node 拡散演算子の収束次数を製造解で測定 (曲面・AR 700・成長率 1.1/1.2、4 水準)。`fx=0.5` は温度も壁面熱流束も $p=2.00$、幾何重みは壁面熱流束で 1.69–1.86 に落ちる。判断は plan [discretization-node-face-weight-midpoint](../plans/accepted/discretization-node-face-weight-midpoint.md) (2026-09-22) |
 | [chemistry-finite-rate-h2-survey.md](investigations/chemistry-finite-rate-h2-survey.md) | `thermophysics / chemistry` | 有限速度化学 (H₂ 燃焼・ノズル上流の化学非平衡) 導入の文献調査と方針: 機構選定 (Jachimowski→Burke)、剛性処理 (decoupled point-implicit 種ブロック)、sensible datum + 反応熱陽注入、Phase 0–4 計画と検証 (Cantera/CEA/Burrows–Kurkov) (2026-09-04) |

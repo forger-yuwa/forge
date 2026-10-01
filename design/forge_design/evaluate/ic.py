@@ -171,7 +171,7 @@ def cpg_field_to_tp(src_h5, dst_h5, species_names: list, Y: list, cp_cpg: float,
     低温は forge と同じ Tlo クランプ (cp 凍結・h 線形接続) を適用する。
     戻り: 診断 (T 範囲、Y 範囲)。"""
     import shutil
-    from ..gas.semiperfect import RU, SPECIES_NASA9, _cp_R_raw, _h_RT_raw
+    from ..gas.semiperfect import DESIGN_T_BOUNDS, RU, SPECIES_NASA9, _cp_R_raw, _h_RT_raw, check_design_T
     shutil.copy(src_h5, dst_h5)
     names = [n.upper() for n in species_names]
 
@@ -180,11 +180,13 @@ def cpg_field_to_tp(src_h5, dst_h5, species_names: list, Y: list, cp_cpg: float,
             e = db[name]
             return (float(e["MW"]), np.asarray(e["nasa9_low"], float), np.asarray(e["nasa9_high"], float),
                     float(e.get("Tlo", 200.0)), float(e.get("Tmid", 1000.0)), float(e.get("Thi", 6000.0)))
-        sp = SPECIES_NASA9[name]
-        return (float(sp["MW"]), np.asarray(sp["low"], float), np.asarray(sp["high"], float), 200.0, 1000.0, 6000.0)
+        sp = SPECIES_NASA9[name]      # 内蔵種: 共通データの先頭 2 区間 (6000 K 超は評価しない; plan #13-3)
+        return (float(sp["MW"]), np.asarray(sp["low"], float), np.asarray(sp["high"], float), *DESIGN_T_BOUNDS)
 
     def h_mass(name, T):
         MW, lo, hi, Tlo, Tmid, Thi = _entry(name)
+        if not (db is not None and name in db):
+            check_design_T(T, f"IC {name}")
         R = RU / MW
         T = np.asarray(T, dtype=float)
         Tc = np.clip(T, Tlo, Thi)
