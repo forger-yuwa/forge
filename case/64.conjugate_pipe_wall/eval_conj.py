@@ -96,8 +96,9 @@ def build(case, xs_f, ys_f, G, k, method="linear", deriv="o2", pc=None, extend=F
     ymap, n_ext_y = yfl, 0
     if extend and case == "C":                                        # 登録 (§4.6 (d)): 上境界を 1.5 倍に (後継 plan §4.6.2 M2、A と同じ作法)
         dy = yfl[-1] - yfl[-2]
-        ye = np.arange(yfl[-1] + dy, 1.5 * pc.H_TOP + 1e-12, dy)
-        n_ext_y = len(ye); yfl = np.concatenate([yfl, ye])
+        n_ext_y = max(1, int(np.ceil((1.5 * pc.H_TOP - yfl[-1]) / dy - 1e-9)))   # 端点を登録の 1.5·H_TOP に一致させる (result レビュー 2 回目 m1)
+        ye = np.linspace(yfl[-1], 1.5 * pc.H_TOP, n_ext_y + 1)[1:]
+        yfl = np.concatenate([yfl, ye])
     if case == "A":
         ns_f = len(ys_f) - 1                                           # 固体は流体と同じ半径間隔 (gen_solid の既定)
         ysol = np.linspace(pc.R, pc.R_O, ns_f * 2 ** k + 1)[1:]
@@ -362,7 +363,7 @@ def main():
         uyt = variants["ext"]["P"].uy_top
         print(f"  --- 別掲 (比較の U に含めない): 上境界を 1.5 倍に延ばしたときの参照の変化 (問題定義の感度、後継 plan §4.6.2 M2)")
         print(f"      θ_i 窓内 max {(ext_sens[0][win] / pc.DT_H).max():.4e} (許容の 1/3 = 3.3e-3)、q_i 窓内 max {(ext_sens[1][win]).max()/qm:.4e} of q_mean (許容の 1/3 = 1e-2)、"
-              f"上端行の max|Uy| {uyt:.3e} m/s ({uyt/pc.U_INF:.2e} U∞)")
+              f"上端行の max|Uy| {uyt:.3e} m/s ({uyt/pc.U_INF:.2e} U∞)、延長後の上端 {variants['ext']['ys'][-1]/pc.H_TOP:.6f} H_TOP")
     if ext_sens is not None and a.case == "A":
         print(f"  --- 別掲 (比較の U に含めない): 上流を 1.5 倍に延ばしたときの参照の変化 (問題定義の感度)")
         print(f"      壁温 max {ext_sens[0].max():.4e} K ({ext_sens[0].max()/rise*100:.3f} % of 上昇)、q_i max {ext_sens[1].max()/qo*100:.3f} % of q_o、"
