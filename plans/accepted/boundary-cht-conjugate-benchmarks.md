@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `boundary`
-- **status**: `done` (2026-09-30: **A の限定結果で閉鎖** — 事後改訂した比較条件 (§4.6)・FP64・node・流れ場固定。A と C を分割し、C は後継 plan [`boundary-cht-conjugate-flat-plate.md`](../accepted/boundary-cht-conjugate-flat-plate.md) に未完了のまま移した (2026-10-01、後継で limiter 0 の事後改訂設定による n32・n64 の限定結果として閉鎖)。**事前登録の総合 PASS ではない**)
+- **status**: `done` (2026-09-30: **A の限定結果で閉鎖** — 事後改訂した比較条件 (§4.6)・FP64・node・流れ場固定。A と C を分割し、C は後継 plan [`boundary-cht-conjugate-flat-plate.md`](../accepted/boundary-cht-conjugate-flat-plate.md) に未完了のまま移した (2026-10-01、後継で limiter 0 の事後改訂設定による n32・n64 の限定結果として閉鎖。C2 n16 は FAIL、登録設定の 6 本は判定不能)。**事前登録の総合 PASS ではない**)
 - **related_docs**:
   - [`methods/boundary.md`](../../methods/boundary.md) — 共役壁 (`conjugate: mode fem2d`、平面・軸対称 r 重み)
 - **related_plans**:

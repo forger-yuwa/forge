@@ -1,6 +1,6 @@
 # 65. 共役平板 (C1/C2) — 厚さ方向の抵抗 (C1) と板の軸方向伝導 (C2) が効く共役熱伝達
 
-計画: [`plans/accepted/boundary-cht-conjugate-benchmarks.md`](../../plans/accepted/boundary-cht-conjugate-benchmarks.md) (§4.3・§4.5・§4.7)。原因切り分けは後継 [`plans/accepted/boundary-cht-conjugate-flat-plate.md`](../../plans/accepted/boundary-cht-conjugate-flat-plate.md)。判定基準は plan の登録文そのまま。
+計画: [`plans/accepted/boundary-cht-conjugate-benchmarks.md`](../../plans/accepted/boundary-cht-conjugate-benchmarks.md) (§4.3・§4.5・§4.7)。原因切り分けは後継 [`plans/accepted/boundary-cht-conjugate-flat-plate.md`](../../plans/accepted/boundary-cht-conjugate-flat-plate.md)。判定基準は発注元 plan の登録文に、後継 plan §4.6・§4.6.1・§4.6.2 の事後改訂 (limiter 0・cfl 0.5・同一格子 restart・④ tol_solid の訂正・C1 の軸方向熱量を参考表示・C2 の固体効果を登録量 Δθ_ax で判定・n16 の参照 4 水準) を加えたもの。**結論は n32・n64 の限定結果** (後継 plan §1)。
 
 - 流体: 一様流 M 0.1、Re_L 1e4 (L 10 mm)、定数物性 (Pr 0.72)、平面 2D。前縁の上流 L/2 と後縁の下流 L/2 は slip、上境界 (6δ) は slip。
 - 固体: 板 0 ≤ x ≤ L、−b ≤ y ≤ 0 (b/L 0.2)、k_s/k_f 10 (C1) / 100 (C2)、下面 Robin h 1e8・T_h 310 K、両端面は断熱。
