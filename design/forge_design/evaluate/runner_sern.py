@@ -659,7 +659,7 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
 
 
 def _species_signature(run_dir) -> dict | None:
-    """run dir の輸送種の署名を**実 config + 解決済み熱物性** (forge_species.run_thermo) から作る (codex result-2 M2): 種順序・MW・両区間 NASA-9 係数・
+    """run dir の輸送種の署名を**実 config + 解決済み熱物性** (forge_species.run_thermo) から作る (codex result-2 M2): 種順序・MW・全区間の NASA-9 係数・
     温度区切り・thermoHrefTemp・tracer 設定。`species_meta.yaml` があれば順序の矛盾を拒否。CPG (thermalMethod≠2) は None。
     TP なのに config/DB が読めなければ ValueError (照合不能)。"""
     from ..gas.composition import load_species_meta, load_yaml_str
@@ -682,8 +682,9 @@ def _species_signature(run_dir) -> dict | None:
     ents = {}
     for k, n in zip(names, th["names"]):
         e = th["species"][n]
-        ents[k] = {"MW": float(e["MW"]), "low": list(e["nasa9_low"]), "high": list(e["nasa9_high"]),
-                   "ranges": [float(e["Tlo"]), float(e["Tmid"]), float(e["Thi"])]}
+        # 2 区間 (Tlo/Tmid/Thi, nasa9_low/high) と区間可変 (Tbounds, nasa9_intervals; 種 DB 段 3 の解決済み記録) の両方を読む
+        Tb, co = _forge_species().nasa9_intervals(e)
+        ents[k] = {"MW": float(e["MW"]), "coefs": co, "ranges": Tb}
     meta = load_species_meta(rd)
     if meta is not None and [str(k).upper() for k in meta["species"]] != names:
         raise ValueError(f"{rd}: species_meta.yaml の種順序 {meta['species']} が solverConfig の {names} と矛盾")
@@ -709,11 +710,11 @@ def check_species_compatible(src_run_dir, dst_run_dir, what: str = "restart", al
             ea, eb = a["entries"][k], b["entries"][k]
             if abs(ea["MW"] / eb["MW"] - 1.0) > 1e-9:
                 raise ValueError(f"{what}: 種 {k} の MW が違う ({ea['MW']} / {eb['MW']}) — DB が異なる")
-            for rng in ("low", "high"):
-                if any(abs(x - y) > 1e-12 * max(abs(x), abs(y), 1.0) for x, y in zip(ea[rng], eb[rng])):
-                    raise ValueError(f"{what}: 種 {k} の NASA-9 係数 ({rng}) が違う — DB が異なる")
             if ea["ranges"] != eb["ranges"]:
                 raise ValueError(f"{what}: 種 {k} の温度区切りが違う ({ea['ranges']} / {eb['ranges']})")
+            for i, (ca, cb) in enumerate(zip(ea["coefs"], eb["coefs"])):
+                if any(abs(x - y) > 1e-12 * max(abs(x), abs(y), 1.0) for x, y in zip(ca, cb)):
+                    raise ValueError(f"{what}: 種 {k} の NASA-9 係数 (区間 {i}) が違う — DB が異なる")
     if abs(a["href"] - b["href"]) > 1e-9:
         raise ValueError(f"{what}: thermoHrefTemp が違う ({a['href']} / {b['href']})")
     if a["tracer"] != b["tracer"]:

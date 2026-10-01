@@ -179,6 +179,21 @@ if yml.exists():
             R._species_signature(nocfg); check("署名: config 無しは照合不能としてエラー", False)
         except ValueError:
             check("署名: config 無しは照合不能としてエラー", True)
+        # 区間可変の書式 (Tbounds + nasa9_intervals; 種 DB 段 3 の解決済み記録と同じ形) も読む (2026-10-01 R9: 段間継承が KeyError で止まった)
+        _a = "[0,0,3.5,0,0,0,0,-1000,5]"
+        _dbn = "".join(f'"{n}":\n  MW: {mw}\n  Tbounds: [200, 1000, 6000, 20000]\n  nasa9_intervals: [{_a}, {_a}, {_a}]\n' for n, mw in (("EXH", 0.0244), ("AMB", 0.0289)))
+        for sub, db_txt in (("n3a", _dbn), ("n3b", _dbn), ("n3c", _dbn.replace(f"{_a}]\n", "[0,0,4.5,0,0,0,0,-1000,5]]\n", 1)),
+                            ("n3d", _dbn.replace("6000, 20000", "6000, 25000", 1))):
+            (Path(td) / sub).mkdir(); (Path(td) / sub / "solverConfig.yaml").write_text(_cfg); (Path(td) / sub / "species_db.yaml").write_text(db_txt)
+        try:
+            R.check_species_compatible(Path(td) / "n3a", Path(td) / "n3b"); check("署名 (3 区間): 同じ DB は通す", True)
+        except ValueError as ex:
+            check("署名 (3 区間): 同じ DB は通す", False, str(ex)[:80])
+        for sub, word, label in (("n3c", "区間 2", "第 3 区間の係数の摂動を検出"), ("n3d", "温度区切り", "温度区切りの違いを検出")):
+            try:
+                R.check_species_compatible(Path(td) / "n3a", Path(td) / sub); check(f"署名 (3 区間): {label}", False)
+            except ValueError as ex:
+                check(f"署名 (3 区間): {label}", word in str(ex), str(ex)[:60])
         from forge_design.evaluate import runner_sern3d as R3
         run3 = Path(td) / "run3"; run3.mkdir(); (run3 / R3.MESH).write_bytes(Path(dst).read_bytes())
         (run3 / "solverConfig.yaml").write_text(_cfg); (run3 / "species_db.yaml").write_text(_db)
