@@ -57,7 +57,7 @@ def common_entries():
         e = sp[i]; iv = e["intervals"]
         return {"MW": float(e["MW"]), "Tlo": float(iv[0]["Tlo"]), "Tmid": float(iv[0]["Thi"]), "Thi": float(iv[1]["Thi"]),
                 "nasa9_low": [float(x) for x in iv[0]["coeffs"]], "nasa9_high": [float(x) for x in iv[1]["coeffs"]],
-                "LJ_sigma": float(e["LJ"]["sigma"]), "LJ_eps_kB": float(e["LJ"]["eps_kB"])}
+                "LJ_sigma": float(e["LJ_sets"]["legacy_v1"]["sigma"]), "LJ_eps_kB": float(e["LJ_sets"]["legacy_v1"]["eps_kB"])}
     L = sp["H2O(L)"]
     cond = {"name": "H2O(L)", "phase": "condensed", "pair_of": str(L["pair_of"]), "gas_index": 1, "gas_name": "H2O",
             "MW": float(L["MW"]), "Tlo": float(L["intervals"][0]["Tlo"]), "Thi": float(L["intervals"][0]["Thi"]),

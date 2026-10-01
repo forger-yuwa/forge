@@ -3,6 +3,11 @@
 plans/active/thermophysics-solver-owned-species-db.md §5.1 #5t2 段 1 (合格条件は実装前に固定したもの)。
 
   python3 solver_density_cuda/tests/unit/test_species_transport.py [--forge BIN] [--base-forge BASE_BIN] [--case44 DIR] [--keep]
+      [--lj-source gri30,svehla1962]
+
+  --lj-source: 内蔵種の LJ の集合リスト (physProp.ljSource; plan §4.10 #14)。host ドライバの spec・forge の config・独立参照に
+       同じリストを渡して全試験を回す (省略時はソルバの既定 [gri30, svehla1962] で、config にも書かない)。#14-L1 (iv) は集合ごとに回す。
+       (R) で LJ の無い種を kinetic にする組 (その集合に無い種) は、ドライバと参照の両方が拒否することを確かめる。
 
   (G)  生成データ forge_transport_v1.yaml が trans.inp からの再生成と一字一句同じ (生成器 --check)。trans.inp の区間が連続
        (参照側の区間の選び方 = mixing_ab.py 流と実装側 = CEA の kt が同じになる条件)。
@@ -18,10 +23,16 @@ plans/active/thermophysics-solver-owned-species-db.md §5.1 #5t2 段 1 (合格�
   (N)  拒否: 未指定種 (単独・lump 構成種) / lump 名をキーに / 未知の種 / 同じ実種に 2 回 (AR と Ar) / 未知モデル (大文字 CEA 含む) /
        未知の custom / custom を H2O 以外に / CEA データの無い種で cea / 組成指定の無い builtin で fit / transport_fit の不正
        (区間 4 つ・Tlo≥Thi・C 欠落・未知キー) / LJ を明示しない外部 DB 種で kinetic。拒否漏れ 0 件。
+  (P)  双極子の適用規則 (#14-L1b, plan §4.10): (1) 集合の potential (gri30/legacy_v1 stockmayer、svehla1962 lj12-6)、potential の無い集合は
+       解決を拒否、記録の lj_resolved に potential。(2) 純 H2O kinetic 400 K: [gri30]/[legacy_v1] は 1.844 D を適用し独立参照と ≤1e-12、
+       [svehla1962] は σ 2.641/ε 809.1・δ* 0 の 12-6 で独立参照と ≤1e-12 (起動ログの NOTE と記録に「not applied」)、変異試験
+       (svehla1962 を stockmayer と偽った共通データ) の μ が規則適用時と ≥0.5 % 違う。(3) 同じ変異で N2–H2O の D_ij がビット一致。
   (C)  (--forge) forge --resolve-species: 記録が schema v2 + transport_compat を持ち Python load_record が互換性ハッシュを再計算できる、
        輸送指定だけ違う記録の差 (_record_diff) が transport 行を示す、viscMethod≠2 では計算の起動が止まる (段 2 #5t2-2)、thermalMethod≠2 と非 mapping は拒否。
   (H)  (--forge と --base-forge) physProp.transport の無い config のハッシュと記録ファイルがバイト不変:
-       case/44 run_0509 (4378b7d78339ba27) と内蔵のみ 3 構成。
+       case/44 run_0509 (4378b7d78339ba27) と内蔵のみ 3 構成。#14-L1 から記録の provenance に LJ の出所 (lj_source・lj_resolved) が
+       増えたので、旧バイナリとの比較はその 2 欄を除いた本文で行う。--lj-source で LJ の値が旧バイナリと違う構成は、ハッシュが違い、
+       記録の差が LJ だけであることを確かめる。
 規約: [PASS]/[FAIL]、失敗があれば非ゼロ終了。
 """
 import argparse, json, math, os, re, shutil, subprocess, sys, tempfile
@@ -35,11 +46,12 @@ TOOLS = os.path.join(SOLVER, "tools")
 sys.path.insert(0, HERE)
 sys.path.insert(0, TOOLS)
 import forge_species as fs          # noqa: E402
-from transport_reference import Reference, TR, iapws_mu, iapws_lam, _loglog_slope, H_IAPWS, L_IAPWS  # noqa: E402
+from transport_reference import Reference, TR, iapws_mu, iapws_lam, _loglog_slope, H_IAPWS, L_IAPWS, set_lj_source  # noqa: E402
 
 FCEA_DIR = os.path.join(REPO, "notes", "investigations", "2026-09-27-cea-vs-forge-properties", "fcea_mix")
 CEA = os.path.join(REPO, ".venv-cea", "nasa_cea")
 FAIL = 0
+LJ_SOURCE = None   # --lj-source (None = ソルバの既定、config に書かない)
 
 
 def check(ok, what):
@@ -54,16 +66,20 @@ def rel(a, b):
 
 
 class Driver:
-    def __init__(self, work):
-        gen = os.path.join(work, "gen")
-        subprocess.run(["cmake", f"-DIN={os.path.join(SOLVER, 'data', 'species', 'forge_species_v1.yaml')}",
+    def __init__(self, work, data_file=None, tag=""):
+        """data_file: 埋め込む共通データ (既定は本物; #14-L1b の負例・変異試験は書き換えた写し)。"""
+        gen = os.path.join(work, "gen" + tag)
+        data_file = data_file or os.path.join(SOLVER, 'data', 'species', 'forge_species_v1.yaml')
+        subprocess.run(["cmake", f"-DIN={data_file}",
+                        f"-DTRANS={os.path.join(SOLVER, 'data', 'species', 'forge_transport_v1.yaml')}",
                         f"-DOUT={os.path.join(gen, 'forge_species_data.hpp')}", "-P",
                         os.path.join(SOLVER, "cmake", "embed_species_data.cmake")], check=True, capture_output=True)
-        self.exe = os.path.join(work, "transport_eval_host")
+        self.exe = os.path.join(work, "transport_eval_host" + tag)
         subprocess.run(["g++", "-O1", "-std=c++17", "-Wno-unknown-pragmas", "-I", SOLVER, "-I", gen,
                         os.path.join(HERE, "transport_eval_host.cpp"), os.path.join(SOLVER, "input", "speciesDB.cpp"),
                         os.path.join(SOLVER, "input", "speciesTransportDB.cpp"), "-lyaml-cpp", "-o", self.exe], check=True)
-        self.work = work
+        self.work = os.path.join(work, "runs" + tag)
+        os.makedirs(self.work, exist_ok=True)
         self.n = 0
 
     def run(self, spec, db=None):
@@ -71,6 +87,8 @@ class Driver:
         d = os.path.join(self.work, f"d{self.n:03d}")
         os.makedirs(d)
         spec = dict(spec)
+        if LJ_SOURCE is not None and "ljSource" not in spec:
+            spec["ljSource"] = list(LJ_SOURCE)
         if db is not None:
             with open(os.path.join(d, "db.yaml"), "w") as f:
                 yaml.safe_dump(db, f, sort_keys=False)
@@ -79,7 +97,10 @@ class Driver:
         with open(p, "w") as f:
             yaml.safe_dump(spec, f, sort_keys=False)
         r = subprocess.run([self.exe, p], capture_output=True, text=True)
-        return json.loads(r.stdout)
+        try:
+            return json.loads(r.stdout)
+        except json.JSONDecodeError:
+            return {"ok": False, "error": (r.stdout + r.stderr)[-2000:]}
 
 
 def n2_db_entry(**extra):
@@ -184,10 +205,16 @@ def test_reference(D):
     ]
     for tag, spec, db, Xs in cases:
         d = D.run({**spec, "states": [{"T": T, "X": X} for X in Xs for T in T_GRID]}, db=db)
+        ref = Reference(spec["species"], spec["transport"], db)
+        nolj = [e["name"] for e in ref.reals if e["model"] == "kinetic" and e["sp"]["sigma"] is None]
+        if nolj:
+            # --lj-source の集合に無い種を kinetic にした組: ドライバ (実装) も拒否するはず
+            ok = (not d.get("ok")) and all(f"'{n}' has no Lennard-Jones data" in d.get("error", "") for n in nolj[:1])
+            check(ok, f"R {tag}: kinetic species {nolj} have no LJ in {LJ_SOURCE}: driver rejects ({d.get('error', 'ok')[:160]})")
+            continue
         if not d.get("ok"):
             check(False, f"R {tag}: driver failed: {d.get('error')}")
             continue
-        ref = Reference(spec["species"], spec["transport"], db)
         worst, where, k = 0.0, "", 0
         for X in Xs:
             for T in T_GRID:
@@ -326,6 +353,95 @@ def test_negative(D):
           "N without physProp.transport: no transport block, record schema v1 (v1_nint with 3-interval N2)")
 
 
+# ---------------------------------------------------------------- (P) 双極子の適用規則 (#14-L1b)
+def _data_variant(work, name, edit):
+    """共通データの写しのトップレベル lj_sets を edit(defs) で書き換えたファイル (行単位; 他は一字も変えない)。"""
+    src = os.path.join(SOLVER, "data", "species", "forge_species_v1.yaml")
+    lines = open(src, encoding="utf-8").read().splitlines(keepends=True)
+    k = next(i for i, L in enumerate(lines) if L.startswith("lj_sets:"))
+    e = k + 1
+    while e < len(lines) and lines[e].startswith("  "):
+        e += 1
+    defs = {L.split(":")[0].strip(): L for L in lines[k + 1:e]}
+    defs = edit(defs)
+    out = os.path.join(work, name)
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("".join(lines[:k + 1] + list(defs.values()) + lines[e:]))
+    return out
+
+
+def test_dipole_rule(D, work):
+    """§5.1 #14-L1b の合格 (1)(2)(3) (plan §4.10 「双極子の適用規則」)。"""
+    pot = yaml.safe_load(open(os.path.join(SOLVER, "data", "species", "forge_species_v1.yaml")))["lj_sets"]
+    want = {"gri30": "stockmayer", "legacy_v1": "stockmayer", "svehla1962": "lj12-6"}
+    got = {k: v.get("potential") for k, v in pot.items()}
+    check(got == want, f"P (1) LJ set potentials in the common data: {got}")
+    # (1) 負例: svehla1962 の potential を消した共通データでは起動 (解決) を拒否
+    bad = _data_variant(work, "data_no_potential.yaml",
+                        lambda d: dict(d, svehla1962="  svehla1962: {}\n"))
+    Dn = Driver(work, bad, "_nopot")
+    r = Dn.run({"species": ["H2O"], "transport": {"H2O": "kinetic"}, "states": []})
+    check((not r.get("ok")) and "LJ set 'svehla1962' has no potential" in r.get("error", ""),
+          f"P (1) a set without potential is refused at startup: {r.get('error', 'ok')[:200]}")
+    # 記録の lj_resolved にも potential が出る
+    r = D.run({"species": ["N2", "H2O"], "transport": {"N2": "kinetic", "H2O": "kinetic"}, "states": [], "ljSource": ["svehla1962"]})
+    check(r.get("ok") and 'potential: "lj12-6"' in r["record"], "P (1) the record's lj_resolved carries the potential (lj12-6 for svehla1962)")
+    # (2) 純 H2O kinetic 400 K
+    T = [400.0]
+    out = {}
+    for src in (["gri30"], ["svehla1962"], ["legacy_v1"]):
+        r = D.run({"species": ["H2O"], "transport": {"H2O": "kinetic"}, "states": [{"T": t_, "X": [1.0]} for t_ in T], "ljSource": src})
+        ref = Reference(["H2O"], {"H2O": "kinetic"}, lj_source=src).state(400.0, [1.0])
+        out[src[0]] = (r, ref)
+        if not r.get("ok"):
+            check(False, f"P (2) [{src[0]}] driver failed: {r.get('error')}")
+            continue
+        st = r["states"][0]
+        e = max(rel(st["mu"], ref["mu"]), rel(st["lam"], ref["lam"]))
+        kin = [l for l in r["compat_lines"] if l.startswith("transport.real[") and ".kinetic:" in l][0]
+        print(f"       [{src[0]}] {kin}")
+        print(f"       [{src[0]}] mu {st['mu']!r} lam {st['lam']!r}; source {r['data_source'][0]}")
+        if src[0] == "svehla1962":
+            ok = (e <= 1e-12 and r["dipole_debye"] == [0.0] and r["delta_star"] == [0.0] and "sigma=2.641 eps_kB=809.10000000000002" in kin
+                  and any("NOT applied" in n for n in r["notes"])
+                  and re.search(r"potential lj12-6, dipole 1\.844\d* D not applied", r["data_source"][0]) is not None)
+            check(ok, f"P (2) [svehla1962] 400 K pure H2O kinetic: sigma 2.641/eps 809.1, delta* 0, dipole not applied (note + record); "
+                      f"vs independent 12-6 CE reference max rel {e:.2e} (<= 1e-12)")
+        else:
+            ok = e <= 1e-12 and r["dipole_debye"] == [1.844] and r["delta_star"][0] > 0.0 and "potential stockmayer" in r["data_source"][0]
+            check(ok, f"P (2) [{src[0]}] 400 K pure H2O kinetic: dipole 1.844 D applied (delta* {r['delta_star'][0]:.6g}); "
+                      f"vs independent reference max rel {e:.2e} (<= 1e-12)")
+    if all(out[k][0].get("ok") for k in ("gri30", "legacy_v1")):
+        a, b = out["gri30"][0]["states"][0], out["legacy_v1"][0]["states"][0]
+        check(a["mu"] == b["mu"] and a["lam"] == b["lam"],
+              "P (2) [gri30] and [legacy_v1] give bit-identical H2O mu/lam (same sigma/eps and both Stockmayer with 1.844 D)")
+    # 変異試験: svehla1962 を stockmayer と偽った共通データ (= 双極子を強制) の μ と、規則適用時の μ の差
+    mut = _data_variant(work, "data_svehla_stockmayer.yaml",
+                        lambda d: dict(d, svehla1962="  svehla1962: {potential: stockmayer}\n"))
+    Dm = Driver(work, mut, "_mut")
+    spec = {"species": ["N2", "H2O"], "transport": {"N2": "kinetic", "H2O": "kinetic"}, "ljSource": ["svehla1962"],
+            "states": [{"T": t_, "X": x} for t_ in (300.0, 400.0, 1000.0, 2000.0) for x in ([0.0, 1.0], [0.5, 0.5])]}
+    rm, rr = Dm.run({**spec, "species": ["H2O"], "transport": {"H2O": "kinetic"}, "states": [{"T": 400.0, "X": [1.0]}]}), out["svehla1962"][0]
+    if rm.get("ok") and rr.get("ok"):
+        dmu = rm["states"][0]["mu"] / rr["states"][0]["mu"] - 1.0
+        dla = rm["states"][0]["lam"] / rr["states"][0]["lam"] - 1.0
+        check(abs(dmu) >= 5e-3 and rm["dipole_debye"] == [1.844],
+              f"P (2) mutation (dipole forced on svehla1962): 400 K pure H2O mu differs by {100 * dmu:+.4f} % (>= 0.5 %), lam {100 * dla:+.4f} %")
+    else:
+        check(False, f"P (2) mutation driver failed: {rm.get('error')}")
+    # (3) H2O–N2 の D_ij は双極子の適用有無で変わらない (同一集合 svehla1962、規則 vs 変異)
+    a, b = D.run(spec), Dm.run(spec)
+    if a.get("ok") and b.get("ok"):
+        da = [s["D_ij"] for s in a["states"]]
+        db_ = [s["D_ij"] for s in b["states"]]
+        mu_diff = max(rel(x["mu"], y["mu"]) for x, y in zip(a["states"], b["states"]))
+        check(da == db_ and len(da) == 8 and a["dipole_debye"] != b["dipole_debye"],
+              f"P (3) N2-H2O D_ij bit-identical with and without the dipole applied (svehla1962; 4 T x 2 X; "
+              f"dipole {a['dipole_debye']} vs {b['dipole_debye']}, mixture mu differs up to {mu_diff:.2e})")
+    else:
+        check(False, f"P (3) driver failed: {a.get('error')} / {b.get('error')}")
+
+
 # ---------------------------------------------------------------- (C)/(H)
 class Cfg:
     def __init__(self, root, seed):
@@ -350,6 +466,7 @@ class Cfg:
                 yaml.safe_dump(db, f, sort_keys=False)
         for pat, rep in (extra or []):
             t = re.sub(pat, rep, t)
+        t = with_lj_source(t)
         with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
             f.write(t)
         return d
@@ -358,9 +475,36 @@ class Cfg:
         self.n += 1
         d = os.path.join(self.root, f"c{self.n:02d}")
         os.makedirs(d)
-        shutil.copy(os.path.join(self.seed, "solverConfig.yaml"), d)
+        t = with_lj_source(open(os.path.join(self.seed, "solverConfig.yaml")).read())
+        with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
+            f.write(t)
         shutil.copy(os.path.join(self.seed, "species_db.yaml"), d)
         return d
+
+
+def with_lj_source(t):
+    """config のテキストに physProp.ljSource を足す (--lj-source のときだけ; thermoHrefTemp の前)。"""
+    if LJ_SOURCE is None:
+        return t
+    t2, k = re.subn(r"thermoHrefTemp:", "ljSource: " + json.dumps(list(LJ_SOURCE)) + ", thermoHrefTemp:", t, count=1)
+    assert k == 1
+    return t2
+
+
+def strip_lj_provenance(text):
+    """記録本文から provenance の lj_source / lj_resolved (#14-L1 で増えた来歴) を除く (旧バイナリの記録と比べるため)。"""
+    out, skip = [], False
+    for L in text.splitlines(keepends=True):
+        if L.startswith("  lj_source:"):
+            continue
+        if L.startswith("  lj_resolved:"):
+            skip = True
+            continue
+        if skip and L.startswith("    - "):
+            continue
+        skip = False
+        out.append(L)
+    return "".join(out)
 
 
 def resolve(exe, d):
@@ -428,10 +572,19 @@ def test_forge(a, root):
             db_ = dd + "_base"
             shutil.copytree(dd, db_, ignore=shutil.ignore_patterns("resolved_species_*"))
             rcb, hb, pb, _ = resolve(a.base_forge, db_)
-            same = rcn == 0 and rcb == 0 and hn == hb and pn and pb and open(pn, "rb").read() == open(pb, "rb").read()
+            same = (rcn == 0 and rcb == 0 and hn == hb and pn and pb
+                    and strip_lj_provenance(open(pn).read()) == strip_lj_provenance(open(pb).read()))
+            if rcn == 0 and rcb == 0 and pn and pb:
+                rn, rb = fs.load_record(pn), fs.load_record(pb)
+                ljdiff = [x for x in fs._record_diff(rb, rn)]
+                if ljdiff and all(".LJ_" in x for x in ljdiff):
+                    # --lj-source で LJ の値だけが旧バイナリと違う構成: ハッシュが違い、差は LJ だけ (#14-L1)
+                    check(hn != hb, f"H {tag}: only LJ values differ from the base binary under ljSource {LJ_SOURCE} "
+                                    f"({len(ljdiff)} keys, e.g. {ljdiff[0]}) -> hash {hb[:16]} -> {hn[:16]}")
+                    continue
             if tag.startswith("case44"):
                 # 外部 DB だけで種が決まる config は段 3 (#13-3) でも不変
-                check(same, f"H {tag}: hash {hn[:16]} and record bytes identical to base binary ({hb[:16]})")
+                check(same, f"H {tag}: hash {hn[:16]} and record bytes (without the #14-L1 LJ provenance) identical to base binary ({hb[:16]})")
             else:
                 # 内蔵種の config は段 3 で内蔵が CEA そのものになったので、段 3 前のバイナリとはハッシュが違うのが正しい
                 # (--base-forge が段 3 後のバイナリなら従来どおりバイト一致を求める)
@@ -439,7 +592,8 @@ def test_forge(a, root):
                     e.get("name") == "N2" and "Tbounds" not in e for e in fs.load_record(pb)["species"])
                 ok = (rcn == 0 and rcb == 0 and hn != hb) if base_pre13_3 else same
                 check(ok, f"H {tag}: hash {hb[:16]} -> {hn[:16]} ("
-                          + ("changed by #13-3, base binary is pre-#13-3" if base_pre13_3 else "identical to base binary") + ")")
+                          + ("changed by #13-3, base binary is pre-#13-3" if base_pre13_3
+                             else "identical to base binary, record without the #14-L1 LJ provenance") + ")")
         else:
             print(f"[SKIP] H {tag}: --base-forge not given")
 
@@ -451,7 +605,13 @@ def main():
     ap.add_argument("--case44", default=os.path.join(REPO, "case", "44.vitiated_air_wt", "run_0509_va3_M4.19_Lc8_dry_lumpX"),
                     help="solverConfig.yaml と species_db.yaml の雛形 (読むだけ)")
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--lj-source", default=None, help="内蔵種の LJ の集合リスト (カンマ区切り; 省略はソルバの既定で config に書かない)")
     a = ap.parse_args()
+    global LJ_SOURCE
+    if a.lj_source:
+        LJ_SOURCE = tuple(s for s in a.lj_source.split(",") if s)
+        set_lj_source(LJ_SOURCE)
+        print(f"ljSource: {list(LJ_SOURCE)}")
     root = tempfile.mkdtemp(prefix="forge_species_transport_")
     try:
         D = Driver(root)
@@ -461,6 +621,7 @@ def main():
         test_ab(D)
         test_joins(D)
         test_negative(D)
+        test_dipole_rule(D, root)
         if a.forge:
             a.forge = os.path.abspath(a.forge)
             if a.base_forge:

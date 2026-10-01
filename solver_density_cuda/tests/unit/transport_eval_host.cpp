@@ -9,9 +9,11 @@
 //       transport: {N2: cea, H2O: cea}             # physProp.transport と同じ
 //       speciesDBFile: path                        # 任意
 //       thermoHrefTemp: 0                          # 任意 (互換性ハッシュ用)
+//       ljSource: [gri30, svehla1962]              # 任意 (physProp.ljSource と同じ; 無指定は既定; plan #14)
 //       states: [{T: 400, X: [0.5, 0.5]}, ...]     # X は physProp.species の順のモル分率
 //   出力 (stdout, 1 行の JSON): {"ok": true, "real": [...], "model": [...], "pair_kind": [...], "compat_hash": ..., "compat_lines": [...],
-//                                "record": "<記録全文>", "states": [{"T", "mu", "lam", "Xreal", "mu_i", "lam_i", "eta_ij"}]}
+//                                "record": "<記録全文>", "notes": [...], "data_source": [...], "dipole_debye": [...],
+//                                "states": [{"T", "mu", "lam", "Xreal", "mu_i", "lam_i", "eta_ij", "D_ij" (輸送種の上三角, 101325 Pa)}]}
 //   失敗: {"ok": false, "error": "..."} を出して終了コード 2。
 //
 // ビルド (共通データの埋め込みヘッダを先に生成; test_species_transport.py が行う):
@@ -83,7 +85,9 @@ int main(int argc, char** argv)
         const std::string dbFile = spec["speciesDBFile"] ? spec["speciesDBFile"].as<std::string>() : "";
         const double Tref = spec["thermoHrefTemp"] ? spec["thermoHrefTemp"].as<double>() : 0.0;
 
-        ResolvedSpeciesDB db = speciesDB_resolve(names, dbFile, lumps);
+        std::vector<std::string> ljSource;
+        if (spec["ljSource"]) for (const auto& s : spec["ljSource"]) ljSource.push_back(s.as<std::string>());
+        ResolvedSpeciesDB db = speciesDB_resolve(names, dbFile, lumps, ljSource);
         speciesTransportDB_resolve(db, tspec, dbFile);
         const ResolvedTransport& tr = db.transport;
 
@@ -102,6 +106,8 @@ int main(int argc, char** argv)
             o += ", \"delta_star\": " + jarr(tr.sp, [](const SpeciesTransportD& s) { return jnum(s.deltaStar); });
             o += ", \"compat_lines\": " + jarr(tr.compatLines, js);
             o += ", \"notes\": " + jarr(tr.notes, js);
+            o += ", \"data_source\": " + jarr(tr.dataSource, js);
+            o += ", \"dipole_debye\": " + jarr(tr.dipoleDebye, jnum);
             o += ", \"states\": [";
             bool first = true;
             for (const auto& st : spec["states"]) {
@@ -116,9 +122,13 @@ int main(int argc, char** argv)
                 for (int a = 0; a < n; ++a)
                     for (int b = a + 1; b < n; ++b)
                         eij.push_back(transport_eta_pair(tr.pairs[transport_pair_index(a, b, n)], tr.sp.data(), mi.data(), T));
+                // 輸送種どうしの二元拡散係数 (M4 の thermo_Dbinary; 101325 Pa)。双極子を読まないことの確認用 (#14-L1b)
+                std::vector<double> dij;
+                for (int a = 0; a < db.size(); ++a)
+                    for (int b = a + 1; b < db.size(); ++b) dij.push_back(thermo_Dbinary(db.species[a], db.species[b], T, 101325.0));
                 o += std::string(first ? "" : ", ") + "{\"T\": " + jnum(T) + ", \"mu\": " + jnum(mu) + ", \"lam\": " + jnum(lam)
                      + ", \"Xreal\": " + jarr(Xr, jnum) + ", \"mu_i\": " + jarr(mi, jnum) + ", \"lam_i\": " + jarr(li, jnum)
-                     + ", \"eta_ij\": " + jarr(eij, jnum) + "}";
+                     + ", \"eta_ij\": " + jarr(eij, jnum) + ", \"D_ij\": " + jarr(dij, jnum) + "}";
                 first = false;
             }
             o += "]";

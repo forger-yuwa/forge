@@ -15,6 +15,9 @@ MW・NASA-9 (修正 Eucken の c_p)・LJ・双極子は実装と同じ共通デ�
   ref = Reference(species=[...], transport={...}, db={...外部 DB (dict) か None})
   out = ref.state(T, X)   # {"mu", "lam", "Xreal", "mu_i", "lam_i", "eta_ij"} (SI)
   out = ref.state_Y(T, Y) # 輸送種の質量分率から (段 2 #5t2-2: 負値は 0 に切り、X_s = (Y_s/M_s)/Σ(Y/M) を作ってから state)
+  Reference(..., lj_source=[...])   # 内蔵種の LJ を physProp.ljSource と同じ規則 (先頭から探す) で選ぶ (#14; 既定 [gri30, svehla1962])
+  set_lj_source([...])              # 以後の Reference の既定 (試験を集合ごとに回すため; None で既定に戻す)
+  双極子は種の LJ を解決した集合の potential が stockmayer のときだけ使う (lj12-6 = svehla1962 は δ* = 0; #14-L1b)。
 輸送種の分子量 (ref.mw[s]) は構成実種の MW と lump 内モル分率から M = Σ x_k M_k として独自に作る (実装の合成 MW を読まない)。
 """
 import math
@@ -111,19 +114,19 @@ def h2o_iapws_cea_v1(T):
 
 def _builtin():
     """共通データの全気相種 (ソルバの内蔵と同じ集合; #13-2)。NASA-9 は全区間 (1〜3 区間; #13-3/#13-5(c)) を持つ。
-    LJ: null の種は sigma/eps を None にする (kinetic に使うと参照側でも失敗する)。"""
+    LJ は集合ごと (LJ_sets; 解決は lookup 時に lj_source で)、双極子は種レベルの dipole.value (集合に依らない)。
+    どの集合にも無い種は sigma/eps を None にする (kinetic に使うと参照側でも失敗する)。"""
     raw = yaml.safe_load(open(SPECIES_DATA, encoding="utf-8"))
     out, alias = {}, {}
     for e in raw["species"]:
         if e.get("phase") != "gas":
             continue
         iv = e["intervals"]
-        lj = e.get("LJ") or {}
         out[e["id"]] = {"MW": float(e["MW"]),
                         "bounds": [float(iv[0]["Tlo"])] + [float(x["Thi"]) for x in iv],
                         "coefs": [[float(x) for x in v["coeffs"]] for v in iv],
-                        "sigma": (float(lj["sigma"]) if lj else None), "eps": (float(lj["eps_kB"]) if lj else None),
-                        "dipole": float(lj.get("dipole", 0.0)), "file": False}
+                        "lj_sets": {s: (float(v["sigma"]), float(v["eps_kB"])) for s, v in (e.get("LJ_sets") or {}).items()},
+                        "dipole": float((e.get("dipole") or {}).get("value", 0.0)), "file": False}
         alias[e["id"]] = e["id"]
         for a in e.get("aliases") or []:
             alias[a] = e["id"]
@@ -131,6 +134,26 @@ def _builtin():
 
 
 BUILTIN, ALIAS = _builtin()
+# 集合のポテンシャル形 (共通データのトップレベル lj_sets; #14-L1b)。双極子は stockmayer の集合で解決した種にだけ適用する
+LJ_SET_POTENTIAL = {s: d["potential"] for s, d in (yaml.safe_load(open(SPECIES_DATA, encoding="utf-8")).get("lj_sets") or {}).items()}
+LJ_SOURCE_DEFAULT = ("gri30", "svehla1962")   # ソルバの既定 (physProp.ljSource 無指定; plan §4.10)
+_LJ_SOURCE = None
+
+
+def set_lj_source(lj_source):
+    """以後の Reference の既定の LJ 集合リスト (None = LJ_SOURCE_DEFAULT)。"""
+    global _LJ_SOURCE
+    _LJ_SOURCE = None if lj_source is None else tuple(lj_source)
+
+
+def builtin_lj(cid, lj_source=None):
+    """内蔵種 cid の (sigma, eps, 集合名) を lj_source の先頭から探す。どの集合にも無ければ (None, None, "none")。"""
+    src = tuple(lj_source) if lj_source is not None else (_LJ_SOURCE or LJ_SOURCE_DEFAULT)
+    for s in src:
+        if s in BUILTIN[cid]["lj_sets"]:
+            sig, eps = BUILTIN[cid]["lj_sets"][s]
+            return sig, eps, s
+    return None, None, "none"
 
 
 def cp_mass(sp, T):
@@ -147,8 +170,9 @@ def cp_mass(sp, T):
 
 
 class Reference:
-    def __init__(self, species, transport, db=None):
-        """species: physProp.species (str か {name, lump, basis})、transport: {キー: モデル}、db: 外部 DB (dict)。"""
+    def __init__(self, species, transport, db=None, lj_source=None):
+        """species: physProp.species (str か {name, lump, basis})、transport: {キー: モデル}、db: 外部 DB (dict)、
+        lj_source: 内蔵種の LJ 集合リスト (None = set_lj_source の値、それも無ければ [gri30, svehla1962])。"""
         db = db or {}
         self.reals = []      # [{key, sp, model, trans}]
         self.expand = []     # 種 s → [(r, x)]
@@ -163,7 +187,10 @@ class Reference:
                                       "eps": float(e.get("LJ_eps_kB", 97.0)), "dipole": float(e.get("LJ_dipole", 0.0)),
                                       "file": True, "fit": e.get("transport_fit"), "dbkey": name}
             cid = ALIAS[name]
-            return cid, dict(BUILTIN[cid], dbkey=cid)
+            sig, eps, ljset = builtin_lj(cid, lj_source)
+            # 双極子の適用規則 (plan §4.10, #14-L1b): stockmayer の集合 (gri30・legacy_v1) だけ。lj12-6 (svehla1962) は δ* = 0
+            dip = BUILTIN[cid]["dipole"] if LJ_SET_POTENTIAL.get(ljset) == "stockmayer" else 0.0
+            return cid, dict(BUILTIN[cid], dbkey=cid, sigma=sig, eps=eps, dipole=dip, lj_set=ljset)
 
         def add(name, x):
             key, sp = lookup(name)

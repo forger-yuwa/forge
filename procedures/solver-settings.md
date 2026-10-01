@@ -256,6 +256,22 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
   生成 48 種の多くは **LJ を持たない**: `physProp.transport` で `kinetic` を指定する、または LJ の混合平均拡散 (化学種 2 以上・`viscMethod` ≠ 0・
   `speciesDiffusionMethod: 1` = 既定) に使うと起動時エラー (`cea`/`fit` か `speciesDiffusionMethod: 0`、または `speciesDBFile` で LJ を与える)。
   `speciesDBFile` による上書き・追加は従来どおり (同じキーだけ上書き)。既存 config の解決結果・互換性ハッシュは変わらない。
+  (LJ の有無は次項の `physProp.ljSource` で決まる。既定でどの集合にも LJ が無いのは D2・D2O・H6F6・N2O4 の 4 種。)
+- **`physProp.ljSource`** (2026-10-01, [plan §4.10 #14](../plans/active/thermophysics-solver-owned-species-db.md)): 内蔵種の Lennard-Jones パラメータ
+  (σ, ε/k_B) を探す**集合の順序付きリスト**。先頭から探して最初にある集合の値を使う。lump の構成種も同じリストで解決し、
+  `speciesDBFile` の種はそのファイルの LJ が優先 (リストに関係なし)。
+  - 集合: `gri30` (GRI-Mech 3.0 の transport; Cantera 同梱 `gri30.yaml`)、`svehla1962` (Svehla 1962 NASA TR R-132 Table I(a); 希ガスは粘性フィット行)、
+    `legacy_v1` (#14 前の内蔵値の凍結 — GRI と Svehla の混在; 旧 run の再現用)。
+  - **既定 (無指定) は `[gri30, svehla1962]`** (2026-10-01 ユーザ決定)。#14 前の値に対して変わるのは H2・OH・H・O・NO・CO (GRI 値へ) と、
+    以前 LJ が無かった CEA 生成種 (GRI か Svehla の値が入る)。N2/O2/CO2/H2O/Ar/He/AIR/N/NH3/NO2/N2O は値が同じ。
+  - 旧 run を同じ物性で再現・継続するときは `physProp: {..., ljSource: [legacy_v1]}` を明示する (#14 前と同じ互換性ハッシュ)。
+  - 効くのは LJ を読む経路だけ: LJ の混合平均拡散 (化学種 2 以上・`viscMethod` ≠ 0・`speciesDiffusionMethod: 1`) の D_ij と、
+    `physProp.transport` の `kinetic` の μ・λ。Euler (`viscMethod: 0`)・`cea`/`fit` 輸送・定数 Schmidt 数の run では値は使われない
+    (ただし互換性ハッシュには LJ の値が入るので、値が変わる種を含む config はハッシュが変わる)。
+  - どの集合にも無い種を LJ を読む使い方に回すと、種名と探した集合を示して起動時エラー。空リスト・未知の集合名・重複もエラー。
+  - 解決結果は起動ログ (`[species]   LJ sets searched ...` と種ごとの集合・値) と解決済み記録の `provenance.lj_source`・`lj_resolved` に出る
+    (互換性ハッシュには値だけが入り、集合名は入らない)。双極子 (H2O・NH3) は種レベルの値だが、`kinetic` で適用するのは
+    `stockmayer` の集合 (`gri30`・`legacy_v1`) で解決した種だけ。`svehla1962` (`lj12-6`) で解決した種には適用しない (起動ログに NOTE; #14-L1b)。
 - **化学種の解決済み記録と入力場の照合** (TP `thermalMethod: 2` のみ、2026-09-27、[plan §4.3 #3a](../plans/active/thermophysics-solver-owned-species-db.md))。
   - 起動時に使用した全種の物性 (順序・名前・MW・datum 前の絶対係数と温度区間・LJ・`thermoHrefTemp`・来歴) を run ディレクトリへ
     `resolved_species_<互換ハッシュ16桁>.yaml` として書く (**出力=記録であり入力ではない**; 同名で来歴だけ違えば `_<完全性16桁>` 付きの別名)。

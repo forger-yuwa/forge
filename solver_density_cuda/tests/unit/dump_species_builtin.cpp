@@ -4,7 +4,9 @@
 //   (a) speciesDB_builtin() の全キー (別名込み) の MW・温度区切り・LJ・全係数
 //   (b) 名前解決 speciesDB_resolve({name}, "") の結果 (config が使う綴りと大小文字違い)
 //   (c) 内蔵種だけの互換性ハッシュ (thermoHrefTemp 0 / 298.15)
-//   (d) LJ: null の内蔵種 (#13-2) を kinetic 輸送・LJ の混合平均拡散に使ったときの起動時の可否
+//   (d) LJ の無い内蔵種 (#13-2; #14 からはどの LJ 集合にも無い種) を kinetic 輸送・LJ の混合平均拡散に使ったときの起動時の可否
+//   `--lj-source a,b,...` (先頭に置く): (a)(b)(c) の内蔵種の LJ を physProp.ljSource と同じ規則で解決する (#14; 無指定は既定
+//   [gri30, svehla1962])。基準 (#14 前) との比較は `--lj-source legacy_v1` で行う。(d) は常に既定。
 //   `--eval N2,O2,... T1 T2 ...`: 内蔵種 (生の係数; datum なし) の cp_mass・h_mass・s0_mass を各 T で評価して JSON に書く
 //   (#13-3 の設計側 vs ソルバの照合; `thermo_d.cuh` の thermo_cp_mass / thermo_h_mass / thermo_s0_mass をそのまま使う)。
 //   比較と基準の保存は tests/unit/test_species_data_bitexact.py が行う (ここは出力だけ)。
@@ -77,7 +79,15 @@ static int evalMode(int argc, char** argv)
 int main(int argc, char** argv)
 {
     if (argc >= 3 && std::string(argv[1]) == "--eval") return evalMode(argc, argv);
-    const auto db = speciesDB_builtin();
+    std::vector<std::string> ljSource;   // 空 = 既定
+    if (argc >= 3 && std::string(argv[1]) == "--lj-source") {
+        for (std::string list = argv[2]; !list.empty();) {
+            const size_t c = list.find(',');
+            ljSource.push_back(list.substr(0, c));
+            list = (c == std::string::npos) ? "" : list.substr(c + 1);
+        }
+    }
+    const auto db = speciesDB_builtin(ljSource);
     std::printf("{\n\"builtin\": {\n");
     bool first = true;
     for (const auto& kv : db) {
@@ -94,7 +104,7 @@ int main(int argc, char** argv)
     for (const auto& n : names) {
         std::printf("%s  \"%s\": ", first ? "" : ",\n", n.c_str());
         try {
-            const ResolvedSpeciesDB r = speciesDB_resolve(std::vector<std::string>{n}, "");
+            const ResolvedSpeciesDB r = speciesDB_resolve(std::vector<std::string>{n}, "", {}, ljSource);
             std::printf("{\"source\": \"%s\", \"entry\": ", r.source[0].c_str());
             entry(r.species[0]);
             std::printf("}");
@@ -110,13 +120,14 @@ int main(int argc, char** argv)
     for (const auto& set : sets) {
         std::string key;
         for (const auto& n : set) key += (key.empty() ? "" : ",") + n;
-        const ResolvedSpeciesDB r = speciesDB_resolve(set, "");
+        const ResolvedSpeciesDB r = speciesDB_resolve(set, "", {}, ljSource);
         std::printf("%s  \"%s|0\": \"%s\",\n  \"%s|298.15\": \"%s\"", first ? "" : ",\n",
                     key.c_str(), speciesDB_compatHash(r, 0.0).c_str(), key.c_str(), speciesDB_compatHash(r, 298.15).c_str());
         first = false;
     }
     std::printf("\n},\n\"lj_use\": {\n");
-    // (d) LJ: null の内蔵種 (#13-2) を LJ を読む使い方に回したときの起動時の可否 ("ok" / "rejected: <メッセージ>")。
+    // (d) LJ の無い内蔵種 (#13-2) を LJ を読む使い方に回したときの起動時の可否 ("ok" / "rejected: <メッセージ>")。
+    //     #14 から LJ は既定 [gri30, svehla1962] で解決するので、どの集合にも無い種は D2 (Kr は Svehla 1962 にある)。
     //     kinetic 輸送 (speciesTransportDB_resolve) と LJ の混合平均拡散 (speciesDB_resolve(cfg); 化学種 2 以上・viscMethod != 0・
     //     speciesDiffusionMethod 1)。test_species_data_bitexact.py が期待と照合する。
     auto verdict = [](auto&& fn) -> std::string {
@@ -140,17 +151,19 @@ int main(int argc, char** argv)
             (void)speciesDB_resolve(cfg);
         });
     };
-    SpeciesLumpSpec mixKr;
-    mixKr.name = "MIXKR"; mixKr.basis = "mole"; mixKr.members = {"N2", "Kr"}; mixKr.fractions = {0.5, 0.5};
+    SpeciesLumpSpec mixD2;
+    mixD2.name = "MIXD2"; mixD2.basis = "mole"; mixD2.members = {"N2", "D2"}; mixD2.fractions = {0.5, 0.5};
     const std::vector<std::pair<std::string, std::string>> cases = {
-        {"kinetic Kr (LJ null)", kinetic("Kr")},
-        {"kinetic N (LJ from the Cantera table)", kinetic("N")},
+        {"kinetic D2 (no LJ set)", kinetic("D2")},
+        {"kinetic Kr (svehla1962)", kinetic("Kr")},
+        {"kinetic N (gri30)", kinetic("N")},
         {"kinetic O2", kinetic("O2")},
-        {"diffusion N2+Kr visc1 diff1", diffusion({"N2", "Kr"}, {}, 1, 1)},
-        {"diffusion N2+Kr visc1 diff0", diffusion({"N2", "Kr"}, {}, 1, 0)},
-        {"diffusion N2+Kr visc0 diff1", diffusion({"N2", "Kr"}, {}, 0, 1)},
-        {"diffusion MIXKR(N2,Kr)+O2 visc1 diff1", diffusion({"MIXKR", "O2"}, {mixKr}, 1, 1)},
+        {"diffusion N2+D2 visc1 diff1", diffusion({"N2", "D2"}, {}, 1, 1)},
+        {"diffusion N2+D2 visc1 diff0", diffusion({"N2", "D2"}, {}, 1, 0)},
+        {"diffusion N2+D2 visc0 diff1", diffusion({"N2", "D2"}, {}, 0, 1)},
+        {"diffusion MIXD2(N2,D2)+O2 visc1 diff1", diffusion({"MIXD2", "O2"}, {mixD2}, 1, 1)},
         {"diffusion N2+N visc1 diff1", diffusion({"N2", "N"}, {}, 1, 1)},
+        {"diffusion N2+Kr visc1 diff1", diffusion({"N2", "Kr"}, {}, 1, 1)},
     };
     first = true;
     for (const auto& c : cases) {

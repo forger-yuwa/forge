@@ -104,10 +104,48 @@ std::unique_ptr<ResolvedSpeciesDB> g_current;   // speciesDB_init の保持先
 //   phase: condensed は parseCondensedData が読む (気液ペアの液相)。
 #define FORGE_SPECIES_DATA_SCHEMA "forge_species_data_v1"
 
+// LJ パラメータの出典別の集合 (共通データの LJ_sets; plan §4.10, #14)。physProp.ljSource はこの名前の順序付きリスト。
+const char* const kLjSetNames[] = {"gri30", "svehla1962", "legacy_v1"};
+
+// 集合のポテンシャル形 (共通データのトップレベル lj_sets.<集合>.potential; plan §4.10 「双極子の適用規則」, #14-L1b)。
+// 全集合に必須で、stockmayer か lj12-6 でなければ起動時に拒否する (parseBuiltinData から呼ぶ)。
+std::map<std::string, std::string> parseLjSetPotentials(const YAML::Node& root, const std::string& where)
+{
+    std::map<std::string, std::string> out;
+    const YAML::Node defs = root["lj_sets"];
+    if (!defs || !defs.IsMap()) {
+        throw std::runtime_error(where + ": top-level 'lj_sets' (the definition of each LJ set with its potential) is missing (plan #14-L1b)");
+    }
+    for (const char* s : kLjSetNames) {
+        const YAML::Node d = defs[s];
+        if (!d || !d.IsMap() || !d["potential"]) {
+            throw std::runtime_error(where + ": LJ set '" + std::string(s) + "' has no potential (lj_sets." + s
+                                     + ".potential: stockmayer | lj12-6 is required; plan #14-L1b)");
+        }
+        const std::string p = d["potential"].as<std::string>();
+        if (p != SPECIES_LJ_POTENTIAL_STOCKMAYER && p != SPECIES_LJ_POTENTIAL_LJ126) {
+            throw std::runtime_error(where + ": LJ set '" + std::string(s) + "' has an unknown potential '" + p + "' (stockmayer | lj12-6)");
+        }
+        out[s] = p;
+    }
+    for (auto it = defs.begin(); it != defs.end(); ++it) {
+        const std::string s = it->first.as<std::string>();
+        if (!out.count(s)) throw std::runtime_error(where + ": lj_sets defines an unknown LJ set '" + s + "'");
+    }
+    return out;
+}
+
+std::map<std::string, std::string>& ljSetPotentials()
+{
+    static std::map<std::string, std::string> m;   // parseBuiltinData が埋める
+    return m;
+}
+
 struct BuiltinEntry {
     std::string              id;        // canonical ID (大小文字を区別)
     std::vector<std::string> aliases;   // 完全一致の別名
-    SpeciesThermo            sp;
+    SpeciesThermo            sp;        // LJ は 0 (解決は ljSource ごとに speciesDB_builtin(ljSource) が行う)
+    std::map<std::string, std::pair<double, double>> ljSets;   // 集合名 → (sigma [Å], eps_kB [K])
 };
 
 std::vector<BuiltinEntry> parseBuiltinData()
@@ -123,6 +161,7 @@ std::vector<BuiltinEntry> parseBuiltinData()
         throw std::runtime_error(where + ": schema must be '" FORGE_SPECIES_DATA_SCHEMA "'");
     }
     if (!root["species"] || !root["species"].IsSequence()) throw std::runtime_error(where + ": 'species' list is missing");
+    ljSetPotentials() = parseLjSetPotentials(root, where);
     std::vector<BuiltinEntry> out;
     // 名前 (ID と別名) の一意性: 完全一致の重複は拒否、大小文字だけ違う名前も別のエントリどうしなら拒否する (plan §4.9)。
     // 名前解決 (findSpecies) は完全一致の次に大小文字無視で引くので、ここで一意でないと引く先が決まらない
@@ -172,18 +211,27 @@ std::vector<BuiltinEntry> parseBuiltinData()
         }
         const double MW = n["MW"].as<double>();
         if (!(MW > 0.0) || !std::isfinite(MW)) throw std::runtime_error(where + ": '" + id + "' has invalid MW");
-        // LJ: null は「輸送データなし」: sigma_LJ = eps_kB = 0 で置き (speciesDB_hasLJ が false)、LJ を読む使い方
-        // (physProp.transport の kinetic、LJ の混合平均拡散) は起動時に拒否する (speciesTransportDB_resolve / speciesDB_resolve(cfg))。
-        const YAML::Node lj = n["LJ"];
-        double sigma = 0.0, eps = 0.0;
-        if (lj && !lj.IsNull()) {
-            if (!lj.IsMap() || !lj["sigma"] || !lj["eps_kB"]) throw std::runtime_error(where + ": '" + id + "' LJ needs sigma and eps_kB (or LJ: null)");
-            sigma = lj["sigma"].as<double>(); eps = lj["eps_kB"].as<double>();
-            if (!(sigma > 0.0) || !(eps > 0.0) || !std::isfinite(sigma) || !std::isfinite(eps)) {
-                throw std::runtime_error(where + ": '" + id + "' has invalid LJ parameters");
+        // LJ は出典別の集合 LJ_sets {集合名: {sigma, eps_kB, source}} (plan §4.10, #14)。{} (どの集合にも無い) は「輸送データなし」:
+        // sigma_LJ = eps_kB = 0 で置き (speciesDB_hasLJ が false)、LJ を読む使い方 (physProp.transport の kinetic、LJ の混合平均拡散)
+        // は起動時に拒否する (speciesTransportDB_resolve / speciesDB_resolve(cfg))。#14 前の単一の LJ 欄は受け付けない。
+        if (n["LJ"]) throw std::runtime_error(where + ": '" + id + "' has the old 'LJ' key; LJ parameters are 'LJ_sets: {<set>: {sigma, eps_kB, source}}' (plan #14)");
+        const YAML::Node ls = n["LJ_sets"];
+        if (!ls || !ls.IsMap()) throw std::runtime_error(where + ": '" + id + "' needs 'LJ_sets' (a mapping; {} = no LJ data)");
+        std::map<std::string, std::pair<double, double>> sets;
+        for (auto it = ls.begin(); it != ls.end(); ++it) {
+            const std::string set = it->first.as<std::string>();
+            if (std::find(std::begin(kLjSetNames), std::end(kLjSetNames), set) == std::end(kLjSetNames)) {
+                throw std::runtime_error(where + ": '" + id + "' has an unknown LJ set '" + set + "'");
             }
+            const YAML::Node lj = it->second;
+            if (!lj.IsMap() || !lj["sigma"] || !lj["eps_kB"]) throw std::runtime_error(where + ": '" + id + "' LJ_sets." + set + " needs sigma and eps_kB");
+            const double sigma = lj["sigma"].as<double>(), eps = lj["eps_kB"].as<double>();
+            if (!(sigma > 0.0) || !(eps > 0.0) || !std::isfinite(sigma) || !std::isfinite(eps)) {
+                throw std::runtime_error(where + ": '" + id + "' has invalid LJ parameters in LJ_sets." + set);
+            }
+            sets[set] = {sigma, eps};
         }
-        out.push_back({id, aliases, makeSpecies(MW, sigma, eps, nInt, Tb.data(), a)});
+        out.push_back({id, aliases, makeSpecies(MW, 0.0, 0.0, nInt, Tb.data(), a), sets});
     }
     return out;
 }
@@ -256,14 +304,88 @@ int ResolvedSpeciesDB::index(const std::string& name) const
     return -1;
 }
 
+const std::vector<std::string>& speciesDB_ljSetNames()
+{
+    static const std::vector<std::string> v(std::begin(kLjSetNames), std::end(kLjSetNames));
+    return v;
+}
+
+const std::vector<std::string>& speciesDB_ljSourceDefault()
+{
+    // 既定 (2026-10-01 ユーザ決定, plan §4.10): GRI-Mech 3.0 を先に、無い種は Svehla 1962
+    static const std::vector<std::string> v = {"gri30", "svehla1962"};
+    return v;
+}
+
+const std::string& speciesDB_ljSetPotential(const std::string& set)
+{
+    static const std::string none;
+    builtinEntries();   // 共通データの解析 (集合の定義もここで読む)
+    auto it = ljSetPotentials().find(set);
+    return it != ljSetPotentials().end() ? it->second : none;
+}
+
+std::vector<std::string> speciesDB_checkLjSource(const std::vector<std::string>& ljSource)
+{
+    if (ljSource.empty()) return speciesDB_ljSourceDefault();
+    std::string avail;
+    for (const auto& s : speciesDB_ljSetNames()) avail += (avail.empty() ? "" : ", ") + s;
+    for (size_t k = 0; k < ljSource.size(); ++k) {
+        const std::string& s = ljSource[k];
+        if (std::find(speciesDB_ljSetNames().begin(), speciesDB_ljSetNames().end(), s) == speciesDB_ljSetNames().end()) {
+            throw std::runtime_error("[speciesDB] physProp.ljSource: unknown LJ set '" + s + "' (available: " + avail + ")");
+        }
+        for (size_t j = 0; j < k; ++j) {
+            if (ljSource[j] == s) throw std::runtime_error("[speciesDB] physProp.ljSource: LJ set '" + s + "' is listed twice");
+        }
+    }
+    return ljSource;
+}
+
+namespace {
+// v[i] (範囲外は "unknown": speciesDB_resolve を通らずに組んだ ResolvedSpeciesDB でも記録・表示できるように)
+std::string atOr(const std::vector<std::string>& v, size_t i)
+{
+    return i < v.size() ? v[i] : std::string("unknown");
+}
+
+std::string listText(const std::vector<std::string>& v)
+{
+    std::string o = "[";
+    for (size_t k = 0; k < v.size(); ++k) o += (k ? ", " : "") + v[k];
+    return o + "]";
+}
+} // anonymous namespace
+
 std::map<std::string, SpeciesThermo> speciesDB_builtin()
+{
+    return speciesDB_builtin(std::vector<std::string>{});
+}
+
+std::map<std::string, SpeciesThermo> speciesDB_builtin(const std::vector<std::string>& ljSourceIn,
+                                                       std::map<std::string, std::string>* ljSet)
 {
     // 共通データ (data/species/forge_species_v1.yaml, ビルド時に埋め込み) の気相種を、canonical ID と別名の両方をキーにして返す
     // (移行前の 7 種は同じキー・同じ値のまま、#13-2 で CEA 由来の種が加わった; tests/unit/test_species_data_bitexact.py)。
+    // LJ は ljSource の先頭から探して最初にある集合の値 (plan §4.10, #14)。どの集合にも無ければ 0 ("none")。
+    const std::vector<std::string> ljSource = speciesDB_checkLjSource(ljSourceIn);
     std::map<std::string, SpeciesThermo> db;
     for (const auto& e : builtinEntries()) {
-        db[e.id] = e.sp;
-        for (const auto& a : e.aliases) db[a] = e.sp;
+        SpeciesThermo sp = e.sp;
+        std::string set = "none";
+        for (const auto& s : ljSource) {
+            auto it = e.ljSets.find(s);
+            if (it == e.ljSets.end()) continue;
+            sp.sigma_LJ = it->second.first; sp.eps_kB = it->second.second;
+            set = s;
+            break;
+        }
+        db[e.id] = sp;
+        for (const auto& a : e.aliases) db[a] = sp;
+        if (ljSet) {
+            (*ljSet)[e.id] = set;
+            for (const auto& a : e.aliases) (*ljSet)[a] = set;
+        }
     }
     return db;
 }
@@ -408,7 +530,15 @@ std::string speciesDB_identityKey(const std::string& dbKey, bool fromFile)
 ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, const std::string& dbFile,
                                     const std::vector<SpeciesLumpSpec>& lumps)
 {
-    std::map<std::string, SpeciesThermo> db = speciesDB_builtin();
+    return speciesDB_resolve(namesIn, dbFile, lumps, std::vector<std::string>{});
+}
+
+ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, const std::string& dbFile,
+                                    const std::vector<SpeciesLumpSpec>& lumps, const std::vector<std::string>& ljSourceIn)
+{
+    const std::vector<std::string> ljSource = speciesDB_checkLjSource(ljSourceIn);
+    std::map<std::string, std::string> ljSetOf;   // 内蔵のキー → 解決した LJ 集合
+    std::map<std::string, SpeciesThermo> db = speciesDB_builtin(ljSource, &ljSetOf);
     std::map<std::string, bool> fromFile;   // 上書き/追加された種名
 
     // 外部 DB ファイルがあれば内蔵 DB を上書き/追加
@@ -497,6 +627,12 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
     }
 
     ResolvedSpeciesDB out;
+    out.ljSource = ljSource;
+    auto ljSetOfKey = [&](const std::string& key) -> std::string {
+        if (fromFile.count(key)) return "speciesDBFile";
+        auto it = ljSetOf.find(key);
+        return it != ljSetOf.end() ? it->second : "none";
+    };
     for (const auto& nm : names) {
         if (out.index(nm) >= 0) {
             throw std::runtime_error("[speciesDB] species '" + nm + "' is listed twice in physProp.species");
@@ -510,6 +646,7 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
             out.source.push_back(fromFile.count(it->first) ? "file" : "builtin");
             out.lumps.push_back(ResolvedLump{});
             out.dbKey.push_back(it->first);
+            out.ljSet.push_back(ljSetOfKey(it->first));
             continue;
         }
         // ---- lump: 検査 → lump 内モル分率 → 合成 ----
@@ -554,6 +691,7 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
             rl.memberSpecies.push_back(it->second);
             rl.memberSource.push_back(file ? "file" : "builtin");
             rl.memberDbKey.push_back(it->first);
+            rl.memberLjSet.push_back(ljSetOfKey(it->first));
             sum += v;
         }
         if (std::fabs(sum - 1.0) >= 1.0e-3) {
@@ -575,6 +713,7 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
         out.source.push_back("lump");
         out.lumps.push_back(rl);
         out.dbKey.push_back("");
+        out.ljSet.push_back("lump");
     }
     for (auto& s : out.species) s.invMW = 1.0/s.MW;
     return out;
@@ -582,7 +721,7 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& namesIn, con
 
 ResolvedSpeciesDB speciesDB_resolve(const solverConfig& cfg)
 {
-    ResolvedSpeciesDB db = speciesDB_resolve(cfg.speciesNames, cfg.speciesDBFile, cfg.speciesLumps);
+    ResolvedSpeciesDB db = speciesDB_resolve(cfg.speciesNames, cfg.speciesDBFile, cfg.speciesLumps, cfg.ljSource);
     // 凝縮種は lump に入れられない (独立種として置く; methods/thermophysics.md §1b.2)。
     // 凝縮種名は solverConfig::read が condensationSpecies / condGasSpecies / 単成分 TP から解決済み (condGasSpeciesName)。
     if (cfg.condensation == 1) {
@@ -620,11 +759,23 @@ ResolvedSpeciesDB speciesDB_resolve(const solverConfig& cfg)
     // viscMethod != 0・speciesDiffusionMethod 1 で thermo_Dmix_species_f が σ・ε を読む) に使えない。起動時に止める。
     if (cfg.nSpecies >= 2 && cfg.viscMethod != 0 && cfg.speciesDiffusionMethod == 1) {
         std::string miss;
-        for (int s = 0; s < db.size(); ++s) if (!speciesDB_hasLJ(db.species[s])) miss += (miss.empty() ? "" : ", ") + db.names[s];
+        for (int s = 0; s < db.size(); ++s) {
+            if (speciesDB_hasLJ(db.species[s])) continue;
+            std::string m = db.names[s];
+            if (db.isLump(s)) {   // どの構成種に LJ が無いか
+                std::string mm;
+                for (size_t k = 0; k < db.lumps[s].members.size(); ++k)
+                    if (!speciesDB_hasLJ(db.lumps[s].memberSpecies[k])) mm += (mm.empty() ? "" : ", ") + db.lumps[s].members[k];
+                m += " (lump constituent " + mm + ")";
+            }
+            miss += (miss.empty() ? "" : ", ") + m;
+        }
         if (!miss.empty()) {
-            throw std::runtime_error("[speciesDB] species " + miss + " have no Lennard-Jones data (LJ: null in the built-in species data, "
-                                     "or a lump with such a constituent), but the kinetic-theory mixture diffusion (physProp.speciesDiffusionMethod 1, "
-                                     "the default with viscMethod != 0) needs sigma/eps. Use speciesDiffusionMethod: 0 (constant Schmidt number), "
+            throw std::runtime_error("[speciesDB] species " + miss + " have no Lennard-Jones data in any of the LJ sets searched "
+                                     "(physProp.ljSource " + listText(db.ljSource) + (cfg.ljSource.empty() ? " (default)" : "")
+                                     + "; built-in data " + std::string(kForgeSpeciesDataName) + "), but the kinetic-theory mixture diffusion "
+                                     "(physProp.speciesDiffusionMethod 1, the default with viscMethod != 0) needs sigma/eps. Add an LJ set that has "
+                                     "them to physProp.ljSource, use speciesDiffusionMethod: 0 (constant Schmidt number), "
                                      "or give LJ_sigma/LJ_eps_kB for them in speciesDBFile.");
         }
     }
@@ -864,6 +1015,20 @@ void speciesDB_printTable(const solverConfig& cfg, const ResolvedSpeciesDB& db)
     for (int s = 0; s < db.size(); ++s) {
         std::cout << "[species]   " << std::setw(2) << s << "  " << std::setw(8) << std::left << db.names[s] << std::right
                   << "  MW=" << std::setprecision(10) << db.MW(s) << "  " << db.source[s] << "\n";
+    }
+    // LJ の出所 (physProp.ljSource; plan §4.10, #14)。内蔵種は先頭から探して最初にあった集合、lump は構成種ごと。
+    std::cout << "[species]   LJ sets searched (physProp.ljSource" << (cfg.ljSource.empty() ? ", default" : "") << "): "
+              << listText(db.ljSource) << "\n";
+    auto ljLine = [](const std::string& tag, const std::string& set, const SpeciesThermo& sp) {
+        const std::string& pot = speciesDB_ljSetPotential(set);
+        std::cout << "[species]     LJ " << std::setw(16) << std::left << tag << std::right << " " << std::setw(13) << std::left << set
+                  << std::right << (pot.empty() ? std::string("") : " (" + pot + ")")
+                  << " sigma=" << g17(sp.sigma_LJ) << " A eps/kB=" << g17(sp.eps_kB) << " K\n";
+    };
+    for (int s = 0; s < db.size(); ++s) {
+        if (!db.isLump(s)) { ljLine(db.names[s], atOr(db.ljSet, s), db.species[s]); continue; }
+        const ResolvedLump& l = db.lumps[s];
+        for (size_t k = 0; k < l.members.size(); ++k) ljLine(db.names[s] + "." + l.members[k], atOr(l.memberLjSet, k), l.memberSpecies[k]);
     }
     // lump (擬似種) の中身と合成結果 (h は datum 適用前の絶対基準; thermoHrefTemp>0 なら thermo_init_db が全種同じ規約で移す)
     for (int s = 0; s < db.size(); ++s) {
@@ -1323,6 +1488,23 @@ std::string speciesDB_recordText(const ResolvedSpeciesDB& db, double Tref, const
     o << "  speciesDBFile: " << yq(dbFile) << "\n";
     o << "  input_field: " << yq(inputField) << "\n";
     o << "  input_status: " << yq(inputStatus) << "\n";
+    // LJ の出所 (plan §4.10, #14; 互換性ハッシュには入れない: ハッシュは値 (species の LJ_sigma/LJ_eps_kB) だけを見る)。
+    // 種 (lump は構成種) ごとに解決した集合 (speciesDBFile = 外部 DB、none = どの集合にも無い) と値。
+    o << "  lj_source: [";
+    for (size_t k = 0; k < db.ljSource.size(); ++k) o << (k ? ", " : "") << yq(db.ljSource[k]);
+    o << "]\n";
+    o << "  lj_resolved:\n";
+    auto ljRec = [&](const std::string& tag, const std::string& set, const SpeciesThermo& sp) {
+        const std::string& pot = speciesDB_ljSetPotential(set);   // 内蔵の集合だけ (外部 DB・none は空)
+        o << "    - {species: " << yq(tag) << ", set: " << yq(set);
+        if (!pot.empty()) o << ", potential: " << yq(pot);
+        o << ", sigma: " << g17(sp.sigma_LJ) << ", eps_kB: " << g17(sp.eps_kB) << "}\n";
+    };
+    for (int s = 0; s < db.size(); ++s) {
+        if (!db.isLump(s)) { ljRec(db.names[s], atOr(db.ljSet, s), db.species[s]); continue; }
+        const ResolvedLump& l = db.lumps[s];
+        for (size_t k = 0; k < l.members.size(); ++k) ljRec(db.names[s] + "." + l.members[k], atOr(l.memberLjSet, k), l.memberSpecies[k]);
+    }
     if (db.transport.enabled) {
         // 輸送の来歴 (互換性ハッシュには入れない): 埋め込みデータの版と、実種・組ごとのデータの出典
         const ResolvedTransport& tr = db.transport;

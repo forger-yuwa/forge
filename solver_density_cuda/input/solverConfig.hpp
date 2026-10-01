@@ -596,6 +596,9 @@ public:
     // (plan thermophysics-solver-owned-species-db #5t2)。空なら従来経路。解決・検査は speciesTransportDB_resolve。
     std::vector<std::pair<std::string, std::string>> speciesTransport;
     std::string speciesDBFile = "";            // 任意: NASA-9/LJ 係数の外部 DB (yaml)。空なら内蔵 DB
+    // physProp.ljSource: 内蔵種の LJ パラメータの集合を探す順 (plan thermophysics-solver-owned-species-db §4.10, #14)。
+    // 空 = 既定 {gri30, svehla1962} (speciesDB_ljSourceDefault)。集合名の検査は speciesDB_checkLjSource (speciesDB_resolve から)。
+    std::vector<std::string> ljSource;
     int speciesDiffusionMethod = 1;            // 0: 定数 Schmidt, 1: kinetic theory 混合平均拡散
     // TP の温度反転をハイブリッド (float Newton + double 1 段研磨, thermo_T_from_e_hybrid) にする。0: 従来 double Newton。
     // **既定 1** (ユーザ決定 2026-09-12)。thermoHrefTemp>0 が前提: 明示 1 で datum 無しはエラー、既定のまま datum 無しなら 0 に落として警告。

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .semiperfect import DESIGN_T_MAX, LJ_PARAMS, RU, SPECIES_ATOMS, SPECIES_NASA9, T_MID, check_design_T
+from .semiperfect import DESIGN_T_MAX, LJ_PARAMS, RU, SPECIES_ATOMS, SPECIES_NASA9, T_MID, check_design_T, lj_params
 
 # 内蔵 11 種の原子組成 (CEA thermo.inp の元素欄と同じ)。共通データ (semiperfect.SPECIES_DATA_FILE) の atoms から、従来の大文字キーで。
 # 外部 DB は `atoms` キー (cea_thermo_to_species_db.py が書く) を使う。
@@ -74,10 +74,12 @@ class ResolvedSpeciesDB:
         self.entries = dict(entries)
 
     @classmethod
-    def builtin(cls) -> "ResolvedSpeciesDB":
+    def builtin(cls, lj_source=None) -> "ResolvedSpeciesDB":
+        """内蔵種。LJ は lj_source (None = 既定 [gri30, svehla1962]; ソルバの physProp.ljSource と同じ規則; plan #14) で解決。"""
         ents = {}
+        ljp = LJ_PARAMS if lj_source is None else lj_params(lj_source)
         for k, sp in SPECIES_NASA9.items():
-            lj = LJ_PARAMS.get(k, (3.621, 97.53))
+            lj = ljp.get(k, (3.621, 97.53))
             ents[k] = SpeciesEntry(k, float(sp["MW"]), [float(v) for v in sp["low"]], [float(v) for v in sp["high"]],
                                    LJ_sigma=float(lj[0]), LJ_eps_kB=float(lj[1]), atoms=dict(BUILTIN_ATOMS.get(k, {})),
                                    source=BUILTIN_SOURCE, T_eval_max=DESIGN_T_MAX)

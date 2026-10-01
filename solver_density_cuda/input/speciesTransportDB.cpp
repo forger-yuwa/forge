@@ -112,15 +112,15 @@ const TransData& transData()
     return d;
 }
 
-// 内蔵種の双極子モーメント [D] (共通データの LJ.dipole; 無ければ 0)
+// 内蔵種の双極子モーメント [D] (共通データの種レベルの dipole.value; LJ の集合とは切り離した値 (plan §4.10, #14)。無ければ 0)
 const std::map<std::string, double>& builtinDipoles()
 {
     static const std::map<std::string, double> m = [] {
         std::map<std::string, double> out;
         const YAML::Node root = YAML::Load(kForgeSpeciesDataYaml);
         for (const auto& n : root["species"]) {
-            const YAML::Node lj = n["LJ"];
-            if (lj && lj.IsMap() && lj["dipole"]) out[n["id"].as<std::string>()] = lj["dipole"].as<double>();
+            const YAML::Node d = n["dipole"];
+            if (d && d.IsMap() && d["value"]) out[n["id"].as<std::string>()] = d["value"].as<double>();
         }
         return out;
     }();
@@ -181,6 +181,7 @@ struct RealSp {
     bool                     fromFile = false;
     SpeciesThermo            thermo{};
     std::string              thermoFrom; // "species[s]" / "species[s].lump[k]"
+    std::string              ljSet;      // LJ を解決した集合 (ResolvedSpeciesDB::ljSet; 外部 DB は "speciesDBFile")
 };
 
 const char* kModels = "cea, kinetic, fit, custom:h2o_iapws_cea_v1";
@@ -217,7 +218,7 @@ void speciesTransportDB_resolve(ResolvedSpeciesDB& db, const std::vector<std::pa
     tr.enabled = true;
     tr.expand.resize(db.size());
     auto addReal = [&](int s, const std::string& spelling, const std::string& key, bool file, const SpeciesThermo& th,
-                       const std::string& from, double x) {
+                       const std::string& from, double x, const std::string& ljSet) {
         const std::string id = speciesDB_identityKey(key, file);
         int r = -1;
         for (int q = 0; q < static_cast<int>(reals.size()); ++q) {
@@ -225,7 +226,7 @@ void speciesTransportDB_resolve(ResolvedSpeciesDB& db, const std::vector<std::pa
         }
         if (r < 0) {
             RealSp rs;
-            rs.identity = id; rs.dbKey = key; rs.fromFile = file; rs.thermo = th; rs.thermoFrom = from;
+            rs.identity = id; rs.dbKey = key; rs.fromFile = file; rs.thermo = th; rs.thermoFrom = from; rs.ljSet = ljSet;
             reals.push_back(rs);
             r = static_cast<int>(reals.size()) - 1;
         }
@@ -238,10 +239,12 @@ void speciesTransportDB_resolve(ResolvedSpeciesDB& db, const std::vector<std::pa
             const ResolvedLump& l = db.lumps[s];
             for (size_t k = 0; k < l.members.size(); ++k) {
                 addReal(s, l.members[k], l.memberDbKey[k], l.memberSource[k] == "file", l.memberSpecies[k],
-                        "species[" + std::to_string(s) + "].lump[" + std::to_string(k) + "]", l.x[k]);
+                        "species[" + std::to_string(s) + "].lump[" + std::to_string(k) + "]", l.x[k],
+                        k < l.memberLjSet.size() ? l.memberLjSet[k] : std::string("unknown"));
             }
         } else {
-            addReal(s, db.names[s], db.dbKey[s], db.source[s] == "file", db.species[s], "species[" + std::to_string(s) + "]", 1.0);
+            addReal(s, db.names[s], db.dbKey[s], db.source[s] == "file", db.species[s], "species[" + std::to_string(s) + "]", 1.0,
+                    static_cast<size_t>(s) < db.ljSet.size() ? db.ljSet[s] : std::string("unknown"));
         }
     }
     const int n = static_cast<int>(reals.size());
@@ -323,6 +326,7 @@ void speciesTransportDB_resolve(ResolvedSpeciesDB& db, const std::vector<std::pa
         transName[r] = te ? te->id : "";
         std::string src;
         double dip = 0.0;
+        std::string ljNote;   // kinetic の LJ の集合・ポテンシャル形 (来歴; 互換性ハッシュには入れない)
         if (model == "cea" || model == "custom:h2o_iapws_cea_v1") {
             if (model == "custom:h2o_iapws_cea_v1") {
                 if (rs.identity != "H2O") {
@@ -364,12 +368,29 @@ void speciesTransportDB_resolve(ResolvedSpeciesDB& db, const std::vector<std::pa
                 }
                 if (e["LJ_dipole"]) dip = e["LJ_dipole"].as<double>();
             } else {
-                if (!speciesDB_hasLJ(rs.thermo)) {   // 内蔵の LJ: null 種 (#13-2)
-                    throw std::runtime_error(where + ": built-in species '" + nm + "' has no Lennard-Jones data (LJ: null in "
-                                             + speciesDB_builtinDataName() + "); choose cea or fit for it, or give LJ_sigma/LJ_eps_kB in speciesDBFile");
+                if (!speciesDB_hasLJ(rs.thermo)) {   // どの LJ 集合にも無い内蔵種 (#13-2, #14)
+                    std::string sets;
+                    for (const auto& s : db.ljSource) sets += (sets.empty() ? "" : ", ") + s;
+                    throw std::runtime_error(where + ": built-in species '" + nm + "' has no Lennard-Jones data in any of the LJ sets searched "
+                                             "(physProp.ljSource [" + sets + "]; " + speciesDB_builtinDataName()
+                                             + "); add an LJ set that has it to physProp.ljSource, choose cea or fit for it, or give LJ_sigma/LJ_eps_kB in speciesDBFile");
+                }
+                // 双極子の適用規則 (plan §4.10, #14-L1b): 種の LJ を解決した集合の potential が stockmayer のときだけ
+                // 種レベルの dipole を Brokaw 補正に使う。lj12-6 (svehla1962: 粘性フィットの有効 σ/ε が極性を含む) は δ* = 0。
+                const std::string& pot = speciesDB_ljSetPotential(rs.ljSet);
+                if (pot.empty()) {
+                    throw std::runtime_error(where + ": built-in species '" + nm + "' resolved its LJ from '" + rs.ljSet
+                                             + "', which has no potential definition (plan #14-L1b)");
                 }
                 auto it = builtinDipoles().find(rs.identity);
-                if (it != builtinDipoles().end()) dip = it->second;
+                const double dipSpecies = (it != builtinDipoles().end()) ? it->second : 0.0;
+                if (pot == SPECIES_LJ_POTENTIAL_STOCKMAYER) {
+                    dip = dipSpecies;
+                } else if (dipSpecies > 0.0) {
+                    tr.notes.push_back(nm + " (kinetic): LJ from " + rs.ljSet + " (" + pot + ", effective sigma/eps fitted to viscosity, "
+                                       "polarity included); the dipole " + g17(dipSpecies) + " D is NOT applied (delta* = 0; plan #14-L1b)");
+                }
+                ljNote = " (set " + rs.ljSet + ", potential " + pot + (dipSpecies > 0.0 && dip == 0.0 ? ", dipole " + g17(dipSpecies) + " D not applied" : "") + ")";
             }
             d.sigma_LJ = rs.thermo.sigma_LJ;
             d.eps_kB = rs.thermo.eps_kB;
@@ -380,7 +401,8 @@ void speciesTransportDB_resolve(ResolvedSpeciesDB& db, const std::vector<std::pa
             const double mu_d = dip*1.0e-18, sig = d.sigma_LJ*1.0e-8;
             d.deltaStar = mu_d*mu_d/(2.0*d.eps_kB*1.380649e-16*sig*sig*sig);
             src = std::string(rs.fromFile ? "speciesDBFile" : "built-in") + " LJ sigma=" + g17(d.sigma_LJ) + " eps/kB=" + g17(d.eps_kB)
-                  + (dip > 0.0 ? " dipole=" + g17(dip) + " D" : "");
+                  + (dip > 0.0 ? " dipole=" + g17(dip) + " D" : "")
+                  + (rs.fromFile ? std::string(dip > 0.0 ? " (Stockmayer: LJ_dipole given)" : "") : ljNote);
         } else if (model == "fit") {
             d.model = TRANSPORT_MODEL_FIT;
             const YAML::Node e = dbEntry(rs);

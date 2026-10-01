@@ -14,7 +14,8 @@
   (R)   記録: lump の構成 (構成種名・basis・入力分率・正規化モル分率・構成種の係数) が出ている、Python load_record の再計算が
         記録の互換性ハッシュと一致、記録の x を 1 つ書き換えると compare_signatures が該当構成種を示す。
   (H)   文字列リストの config は互換性ハッシュ・記録とも不変: --base-forge (本変更前のバイナリ) と新バイナリで
-        case/44 run_0509 (外部 DB; 4378b7d78339ba27) と内蔵のみ 3 構成のハッシュと記録ファイルがバイト一致。
+        case/44 run_0509 (外部 DB; 4378b7d78339ba27) と内蔵のみ 3 構成のハッシュと記録ファイルがバイト一致
+        (#14-L1 から記録の provenance に LJ の出所 lj_source・lj_resolved が増えたので、その 2 欄を除いた本文で比べる)。
   (L)   run_0509 の config を lump 記法 (speciesDBFile なし) にすると --resolve-species が通り、ハッシュは外部 DB 版と違う (構成情報が入るため)。
   (B6)  区切りの違う構成種 (外部 DB で Tmid=1500 の試験種) は区切りの和集合で合成される (#6b → #13-1; 以前は拒否): 区切り 200/1000/1500/6000、
         合成規約は和集合の文字列、記録の schema は forge_resolved_species_v1_nint (値の検査は test_thermo_intervals_host.cpp の V3)。
@@ -152,6 +153,22 @@ def flow_lump(name, fr, basis):
     return "{name: %s, lump: {%s}, basis: %s}" % (name, ", ".join(f"{k}: {v!r}" for k, v in fr.items()), basis)
 
 
+def strip_lj_provenance(text):
+    """記録本文から provenance の lj_source / lj_resolved (#14-L1 で増えた来歴) を除く (旧バイナリの記録と比べるため)。"""
+    out, skip = [], False
+    for L in text.splitlines(keepends=True):
+        if L.startswith("  lj_source:"):
+            continue
+        if L.startswith("  lj_resolved:"):
+            skip = True
+            continue
+        if skip and L.startswith("    - "):
+            continue
+        skip = False
+        out.append(L)
+    return "".join(out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--forge", default=os.environ.get("FORGE_BIN"))
@@ -264,10 +281,10 @@ def main():
                 shutil.copytree(dd, db_, ignore=shutil.ignore_patterns("resolved_species_*"))
                 rcb, hb, recb, _ = C.resolve(db_, exe=os.path.abspath(a.base_forge))
                 same = (rcn == 0 and rcb == 0 and hn == hb and recn is not None and recb is not None
-                        and open(recn["path"], "rb").read() == open(recb["path"], "rb").read())
+                        and strip_lj_provenance(open(recn["path"]).read()) == strip_lj_provenance(open(recb["path"]).read()))
                 if tag.startswith("case44"):
                     # 外部 DB だけで種が決まる config は段 3 (#13-3) でも不変
-                    check(same, f"H {tag}: hash {hn[:16]} and record bytes identical to base binary ({hb[:16]})")
+                    check(same, f"H {tag}: hash {hn[:16]} and record bytes (without the #14-L1 LJ provenance) identical to base binary ({hb[:16]})")
                 else:
                     # 内蔵種の config は段 3 で内蔵が CEA そのものになったので、段 3 前のバイナリとはハッシュが違うのが正しい
                     # (--base-forge が段 3 後のバイナリなら従来どおりバイト一致を求める)
@@ -275,7 +292,8 @@ def main():
                         e.get("name") == "N2" and "Tbounds" not in e for e in recb["species"])
                     ok = (rcn == 0 and rcb == 0 and hn != hb) if base_pre13_3 else same
                     check(ok, f"H {tag}: hash {hb[:16]} -> {hn[:16]} ("
-                              + ("changed by #13-3, base binary is pre-#13-3" if base_pre13_3 else "identical to base binary") + ")")
+                              + ("changed by #13-3, base binary is pre-#13-3" if base_pre13_3
+                                 else "identical to base binary, record without the #14-L1 LJ provenance") + ")")
 
         # ---- L: run_0509 を lump 記法に ----
         X9 = json.load(open(os.path.join(RUN0509, "prepare_info.json")))["species"]["X"]

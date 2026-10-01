@@ -31,9 +31,18 @@ v0 は削除せず、(T) で「v0 → 現在」の差が段 3 の想定 (Δ 表)
   (D2) 内蔵種の cp/h/s° は 6000.0001 K で例外、5999.9999 K で値を返す (lump も同じ)。T < 200 K は従来どおり
        (cp は 200 K の値、h は 200 K から線形、s° は対数)。
   (D3) 設計側 11 種と `--eval` のソルバ値 (thermo_cp_mass / thermo_h_mass / thermo_s0_mass) が V2 格子
-       (200–6000 K の 1000 点 + 999.99994/1000/1000.00006/5999.9999 K; 1000 点の端点 6000 K は除く) で相対 ≤4e-16
+       (200–6000 K の 1000 点 + 999.99994/1000/1000.00006/5999.9999 K; 1000 点の端点 6000 K は除く) で相対 ≤1e-14
+       (#13-3 判断で 4e-16 から再定義; 差は設計側とソルバの演算順による丸め)
        (V2 と同じく cp・s° は点ごと、h は格子上の max|h| に対する相対)。6000 K ちょうどの差は info
        (3 区間の種はソルバが第 3 区間を選ぶので #13-0 (6) の境界段差になる)。
+
+- #14 (LJ の出典を選択可能に, 2026-10-01; plan §4.10) の扱い:
+  基準 v1・v0 は #14 前の値なので、基準との比較は C++ を `--lj-source legacy_v1`、Python を `lj_params(["legacy_v1"])` /
+  `ResolvedSpeciesDB.builtin(["legacy_v1"])` で出して行う (legacy_v1 = #14 前の値の凍結なので基準とビット一致するはず)。
+  (L1) 既定 [gri30, svehla1962]・[gri30]・[svehla1962]・[legacy_v1] のそれぞれで、C++ 内蔵の全キーの LJ が共通データの
+       LJ_sets を先頭から探した値 (どの集合にも無ければ 0) とビット一致し、LJ 以外 (MW・区間・係数) は legacy_v1 の dump と同一。
+  (L2) Python の LJ_PARAMS = lj_params(既定) = 共通データを既定の順に探した値、builtin() の LJ も同じ。
+  (E4) は #14 から既定の LJ で見る: どの集合にも無い種 D2 は拒否、Kr (svehla1962)・N (gri30) は通る。
 
 使い方:
   python3 solver_density_cuda/tests/unit/test_species_data_bitexact.py            # 比較 (ALL PASS / FAIL)
@@ -89,12 +98,15 @@ def build_dump(workdir, data_file=DATA_FILE, tag="gen"):
 DUMP_EXE = None
 
 
-def dump_cpp(workdir):
-    """dump_species_builtin を現在のソースでビルドして JSON を返す (C の %a を float.hex に揃える)。"""
+def dump_cpp(workdir, lj_source=("legacy_v1",)):
+    """dump_species_builtin を現在のソースでビルドして JSON を返す (C の %a を float.hex に揃える)。
+    lj_source: 内蔵種の LJ の集合リスト (既定は基準と比べる legacy_v1; None はソルバの既定)。"""
     global DUMP_EXE
-    exe = build_dump(workdir)
-    DUMP_EXE = exe
-    out = subprocess.run([exe], check=True, capture_output=True, text=True).stdout
+    if DUMP_EXE is None:
+        DUMP_EXE = build_dump(workdir)
+    exe = DUMP_EXE
+    args = [] if lj_source is None else ["--lj-source", ",".join(lj_source)]
+    out = subprocess.run([exe] + args, check=True, capture_output=True, text=True).stdout
     d = json.loads(out)
 
     def norm(e):
@@ -108,19 +120,20 @@ def dump_cpp(workdir):
     return d
 
 
-def dump_py():
+def dump_py(lj_source=("legacy_v1",)):
+    """設計側の値。LJ は lj_source で解決 (基準と比べるのは legacy_v1; #14)。"""
     sys.path.insert(0, os.path.join(REPO, "design"))
     import forge_design.gas.semiperfect as sp
     import forge_design.gas.composition as comp
     out = {
         "SPECIES_NASA9": [[k, {kk: ([hx(x) for x in vv] if isinstance(vv, list) else hx(vv)) for kk, vv in e.items()}]
                           for k, e in sp.SPECIES_NASA9.items()],
-        "LJ_PARAMS": [[k, [hx(x) for x in v]] for k, v in sp.LJ_PARAMS.items()],
+        "LJ_PARAMS": [[k, [hx(x) for x in v]] for k, v in sp.lj_params(lj_source).items()],
         "T_MID": hx(sp.T_MID),
         "BUILTIN_ATOMS": [[k, [[a, type(n).__name__, repr(n)] for a, n in v.items()]] for k, v in comp.BUILTIN_ATOMS.items()],
         "builtin_db": [],
     }
-    for k, e in comp.ResolvedSpeciesDB.builtin().entries.items():
+    for k, e in comp.ResolvedSpeciesDB.builtin(lj_source).entries.items():
         out["builtin_db"].append([k, {
             "name": e.name, "MW": hx(e.MW), "low": [hx(x) for x in e.low], "high": [hx(x) for x in e.high],
             "T": [hx(e.Tlo), hx(e.Tmid), hx(e.Thi)], "LJ": [hx(e.LJ_sigma), hx(e.LJ_eps_kB)],
@@ -128,8 +141,9 @@ def dump_py():
     return out
 
 
-def data_gas_entries():
-    """共通データの気相エントリ (Python double) を、dump の JSON と同じ正規化 (float.hex) で {id: エントリ} と {別名: id} にする。"""
+def data_gas_entries(lj_source=("legacy_v1",)):
+    """共通データの気相エントリ (Python double) を、dump の JSON と同じ正規化 (float.hex) で {id: エントリ} と {別名: id} にする。
+    LJ は LJ_sets を lj_source の先頭から探した値 (どの集合にも無ければ 0)。"""
     import yaml
     raw = yaml.safe_load(open(DATA_FILE, encoding="utf-8"))
     ents, alias = {}, {}
@@ -137,7 +151,8 @@ def data_gas_entries():
         if e.get("phase") != "gas":
             continue
         iv = e["intervals"]
-        lj = e.get("LJ") or {}
+        sets = e.get("LJ_sets") or {}
+        lj = next((sets[s] for s in lj_source if s in sets), {})
         sig, eps = float(lj.get("sigma", 0.0)), float(lj.get("eps_kB", 0.0))
         bounds = [float(iv[0]["Tlo"])] + [float(x["Thi"]) for x in iv]
         if len(iv) == 2:
@@ -152,6 +167,38 @@ def data_gas_entries():
         for a in e.get("aliases") or []:
             alias[str(a)] = str(e["id"])
     return ents, alias
+
+
+def check_lj_sets(legacy):
+    """(L1)(L2) 集合リストごとの LJ の解決 (docstring)。legacy: --lj-source legacy_v1 の dump (基準と比べたもの)。"""
+    lb = legacy["cpp"]["builtin"]
+    for src in (None, ("gri30",), ("svehla1962",), ("legacy_v1",), ("svehla1962", "gri30")):
+        cur = dump_cpp(None, src)["builtin"]
+        ents, alias = data_gas_entries(src or ("gri30", "svehla1962"))
+        bad_lj = [k for k in cur if (cur[k]["LJ_sigma"], cur[k]["LJ_eps_kB"]) != (ents[alias.get(k, k)]["LJ_sigma"], ents[alias.get(k, k)]["LJ_eps_kB"])]
+        strip = lambda e: {kk: v for kk, v in e.items() if kk not in ("LJ_sigma", "LJ_eps_kB")}
+        bad_other = [k for k in cur if k not in lb or strip(cur[k]) != strip(lb[k])]
+        n0 = sum(1 for k in cur if float.fromhex(cur[k]["LJ_sigma"]) == 0.0)
+        tag = "既定 [gri30, svehla1962]" if src is None else str(list(src))
+        check(not bad_lj and not bad_other and set(cur) == set(lb),
+              f"(L1) ljSource {tag}: C++ 内蔵 {len(cur)} キーの LJ が共通データの LJ_sets を先頭から探した値とビット一致 (LJ なし {n0} キー)、"
+              f"LJ 以外は legacy_v1 の dump と同一" + (f" — LJ 不一致 {bad_lj[:8]} / 他の差 {bad_other[:8]}" if bad_lj or bad_other else ""))
+    sys.path.insert(0, os.path.join(REPO, "design"))
+    import forge_design.gas.semiperfect as sp
+    import forge_design.gas.composition as comp
+    import yaml
+    raw = yaml.safe_load(open(DATA_FILE, encoding="utf-8"))
+    want = {}
+    for e in raw["species"]:
+        if "design" in (e.get("legacy_builtin") or []):
+            sets = e.get("LJ_sets") or {}
+            hit = next((sets[s] for s in ("gri30", "svehla1962") if s in sets), None)
+            if hit:
+                want[str(e["id"]).upper()] = (float(hit["sigma"]), float(hit["eps_kB"]))
+    b = comp.ResolvedSpeciesDB.builtin()
+    ok = (sp.LJ_PARAMS == sp.lj_params() == sp.lj_params(["gri30", "svehla1962"]) == want
+          and all((b[k].LJ_sigma, b[k].LJ_eps_kB) == want[k] for k in want))
+    check(ok, f"(L2) Python LJ_PARAMS = lj_params(既定) = 共通データを [gri30, svehla1962] の順に探した値 ({len(want)} 種)、builtin() の LJ も同じ")
 
 
 def compare_extended(base, cur):
@@ -193,14 +240,16 @@ def check_lj_use(cur):
     """(E4) LJ: null の内蔵種の使用可否。"""
     lu = cur["cpp"].get("lj_use", {})
     expect = {
-        "kinetic Kr (LJ null)": "rejected: .*no Lennard-Jones data",
-        "kinetic N (LJ from the Cantera table)": "ok",
+        "kinetic D2 (no LJ set)": r"rejected: .*'D2' has no Lennard-Jones data in any of the LJ sets searched \(physProp.ljSource \[gri30, svehla1962\]",
+        "kinetic Kr (svehla1962)": "ok",
+        "kinetic N (gri30)": "ok",
         "kinetic O2": "ok",
-        "diffusion N2+Kr visc1 diff1": "rejected: .*Kr have no Lennard-Jones data",
-        "diffusion N2+Kr visc1 diff0": "ok",
-        "diffusion N2+Kr visc0 diff1": "ok",
-        "diffusion MIXKR(N2,Kr)+O2 visc1 diff1": "rejected: .*MIXKR have no Lennard-Jones data",
+        "diffusion N2+D2 visc1 diff1": r"rejected: .*species D2 have no Lennard-Jones data in any of the LJ sets searched \(physProp.ljSource \[gri30, svehla1962\]",
+        "diffusion N2+D2 visc1 diff0": "ok",
+        "diffusion N2+D2 visc0 diff1": "ok",
+        "diffusion MIXD2(N2,D2)+O2 visc1 diff1": r"rejected: .*MIXD2 \(lump constituent D2\) have no Lennard-Jones data",
         "diffusion N2+N visc1 diff1": "ok",
+        "diffusion N2+Kr visc1 diff1": "ok",
     }
     import re
     for k, pat in expect.items():
@@ -400,8 +449,10 @@ def check_design_side(workdir):
         # 6000 K ちょうど (設計側は第 2 区間の上端で評価できる; ソルバは 3 区間の種で第 3 区間)
         dh = float(db.species_h_RT(ek, 6000.0)[0]) * RUv * 6000.0 / ek.MW - sol[k][-1][1]
         info6000.append(f"{k} {dh:+.3e}")
-    check(worst[0] <= 4e-16, f"(D3) 設計側 {len(names)} 種 vs ソルバ (V2 格子 {len(grid)} 点) の cp/h/s° 相対差の最大 {worst[0]:.2e} "
-                             f"@ {worst[1]} (許容 4e-16)")
+    # 許容は #13-3 の判断 (2026-10-01 diagnostician) で 1e-14 に再定義 (旧 4e-16 は同じ演算順どうしの比較の値の誤用;
+    # 設計側とソルバの演算順の違いによる丸めは下の INFO で切り分ける)
+    check(worst[0] <= 1e-14, f"(D3) 設計側 {len(names)} 種 vs ソルバ (V2 格子 {len(grid)} 点) の cp/h/s° 相対差の最大 {worst[0]:.2e} "
+                             f"@ {worst[1]} (許容 1e-14)")
     print("[INFO] (D3) 6000 K ちょうどの h 差 (設計 − ソルバ) [J/kg]: " + ", ".join(info6000))
     # 差の出所の切り分け: 同じ係数を**ソルバと同じ演算順** (RU*(a0*Ti2 + a1*Ti + ... + a6*T*T*T*T))/MW で Python 評価すると
     # ソルバの cp と一致するか (一致すれば差は設計側 `_cp_R_raw` の演算順 (a0/T**2, a5*T**3 …) による丸めだけ)
@@ -445,10 +496,11 @@ def main():
     ap.add_argument("--write-baseline", action="store_true", help="基準 JSON を書く (既存なら拒否)")
     a = ap.parse_args()
     with tempfile.TemporaryDirectory() as td:
-        cur = {"cpp": dump_cpp(td), "py": dump_py()}
+        cur = {"cpp": dump_cpp(td), "py": dump_py()}   # 基準 (#14 前) と比べる値: LJ は legacy_v1 で解決
         if not a.write_baseline:
             check_case_collision(td)
             check_design_side(td)
+            check_lj_sets(cur)
     if a.write_baseline:
         if os.path.exists(BASELINE):
             raise SystemExit(f"{BASELINE} exists; refusing to overwrite the baseline")

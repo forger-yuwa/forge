@@ -42,6 +42,7 @@ struct ResolvedLump {
     std::string                synthesis;      // 合成規約 (SPECIES_LUMP_SYNTHESIS | SPECIES_LUMP_SYNTHESIS_UNION; 記録・互換性ハッシュに入る)
     std::vector<std::string>   memberSource;   // "builtin" | "file"
     std::vector<std::string>   memberDbKey;    // 構成種が一致した DB のキー (内蔵の canonical ID・別名、または外部 DB のキー)
+    std::vector<std::string>   memberLjSet;    // 構成種の LJ の出所 (ResolvedSpeciesDB::ljSet と同じ値; plan #14)
 
     bool empty() const { return members.empty(); }
 };
@@ -74,6 +75,11 @@ struct ResolvedSpeciesDB {
     std::vector<std::string>   source;   // 同順。"builtin" | "file" | "lump"
     std::vector<ResolvedLump>  lumps;    // 同順。lump でない種は空
     std::vector<std::string>   dbKey;    // 同順。一致した DB のキー (lump は空)。輸送の解決 (#5t2) が使う (記録には入れない)
+    // LJ の出所 (plan §4.10, #14): 内蔵種は physProp.ljSource の先頭から探して最初にあった集合名 (gri30 / svehla1962 / legacy_v1)、
+    // どの集合にも無ければ "none" (sigma_LJ = eps_kB = 0)、外部 DB の種は "speciesDBFile"、lump は "lump" (構成種は ResolvedLump::memberLjSet)。
+    // 記録の provenance に書く (互換性ハッシュには値だけが入り、集合名は入らない)。
+    std::vector<std::string>   ljSet;
+    std::vector<std::string>   ljSource; // 解決に使った physProp.ljSource (無指定なら既定 speciesDB_ljSourceDefault())
     ResolvedTransport          transport;   // physProp.transport を書いたときだけ enabled (plan #5t2)
     ResolvedCondensed          condensed;   // 凝縮 ON・condModel 1 (H2O) のときだけ enabled (plan #10)
 
@@ -88,11 +94,31 @@ struct ResolvedSpeciesDB {
 // lump の構成種の重複検査と輸送の実種の合算 (#5t2) が使う。fromFile: 外部 DB から解決した種か。
 std::string speciesDB_identityKey(const std::string& dbKey, bool fromFile);
 
+// LJ パラメータの集合 (共通データの LJ_sets; plan §4.10, #14)。physProp.ljSource はこの名前の順序付きリスト (先頭から探す)。
+//   gri30       GRI-Mech 3.0 の transport (Cantera 同梱 gri30.yaml)
+//   svehla1962  Svehla 1962 (NASA TR R-132) Table I(a) (希ガスは粘性フィット行)
+//   legacy_v1   #14 前の内蔵値の凍結 (旧 run の再現用)
+// 既定 (physProp.ljSource 無指定) は {gri30, svehla1962} (2026-10-01 ユーザ決定)。
+const std::vector<std::string>& speciesDB_ljSetNames();
+// 集合のポテンシャル形 (共通データのトップレベル lj_sets.<集合>.potential; plan §4.10 「双極子の適用規則」, #14-L1b)。
+//   stockmayer: σ/ε は非極性部で、種レベルの dipole を kinetic の Brokaw 補正に使う (gri30・legacy_v1)。
+//   lj12-6    : 粘性フィットの有効 σ/ε (極性を含む)。dipole は適用しない (δ* = 0; svehla1962)。
+// 内蔵の集合でない名前 ("speciesDBFile"・"none"・"lump") は空文字列。
+#define SPECIES_LJ_POTENTIAL_STOCKMAYER "stockmayer"
+#define SPECIES_LJ_POTENTIAL_LJ126      "lj12-6"
+const std::string& speciesDB_ljSetPotential(const std::string& set);
+const std::vector<std::string>& speciesDB_ljSourceDefault();
+// ljSource の検査 (空 = 既定に置き換えて返す)。空でないのに要素が無い・未知の集合名・重複は std::runtime_error。
+std::vector<std::string> speciesDB_checkLjSource(const std::vector<std::string>& ljSource);
+
 // 内蔵 DB を返す。値は共通データ data/species/forge_species_v1.yaml (ビルド時に埋め込み、起動時に解析) の
 // phase: gas の全エントリ (plan #13-2; 以前は legacy_builtin: solver の 7 種だけ) で、キーは canonical ID と別名の両方
 // (Ar/AR, He/HE, H2O/h2o/WATER, AIR/Air/air)。共通データが壊れている・名前が大小文字無視で重複していれば std::runtime_error。
-// LJ: null (輸送データなし) の種は sigma_LJ = eps_kB = 0 (speciesDB_hasLJ が false)。
+// LJ は ljSource (空 = 既定 {gri30, svehla1962}) の先頭から探して最初にある集合の値 (plan #14)。どの集合にも無い種は
+// sigma_LJ = eps_kB = 0 (speciesDB_hasLJ が false)。ljSet があればキー → 解決した集合名 ("none" = どの集合にも無い) を入れる。
 std::map<std::string, SpeciesThermo> speciesDB_builtin();
+std::map<std::string, SpeciesThermo> speciesDB_builtin(const std::vector<std::string>& ljSource,
+                                                       std::map<std::string, std::string>* ljSet = nullptr);
 
 // LJ パラメータを持つか (内蔵の LJ: null 種と、LJ の無い構成種を含む lump は false)。
 inline bool speciesDB_hasLJ(const SpeciesThermo& s) { return s.sigma_LJ > 0.0 && s.eps_kB > 0.0; }
@@ -114,8 +140,14 @@ ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& names, const
 //   凝縮種を構成種に入れる検査は cfg を受ける版 (speciesDB_resolve(cfg)) が行う。
 ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& names, const std::string& dbFile,
                                     const std::vector<SpeciesLumpSpec>& lumps);
+// 上と同じで、内蔵種の LJ を ljSource (physProp.ljSource; 空 = 既定 {gri30, svehla1962}) の先頭から探して解決する (plan #14)。
+//   lump の構成種も同じリストで解決する。外部 DB (speciesDBFile) の種は従来どおりそのファイルの LJ (集合に関係なく優先)。
+//   どの集合にも無い内蔵種は LJ なし (0) で通し、LJ を読む使い方 (kinetic 輸送・LJ の混合平均拡散) で拒否する (種名と探した集合を示す)。
+ResolvedSpeciesDB speciesDB_resolve(const std::vector<std::string>& names, const std::string& dbFile,
+                                    const std::vector<SpeciesLumpSpec>& lumps, const std::vector<std::string>& ljSource);
 
-// cfg.speciesNames / cfg.speciesLumps / cfg.speciesDBFile で解決する。calorically-perfect (species 未指定) では N2 ダミー 1 種。
+// cfg.speciesNames / cfg.speciesLumps / cfg.speciesDBFile / cfg.ljSource (内蔵種の LJ の集合; plan #14) で解決する。
+// calorically-perfect (species 未指定) では N2 ダミー 1 種。
 // 凝縮 ON (condensation: 1) で凝縮種を lump の構成種に入れていたら拒否する。
 // 凝縮 ON かつ condModel 1 (H2O) では液相 H2O(L) を気液ペアとして付ける (speciesDB_attachCondensed; 契約違反は拒否)。
 ResolvedSpeciesDB speciesDB_resolve(const solverConfig& cfg);
@@ -160,6 +192,8 @@ void speciesDB_printTable(const solverConfig& cfg, const ResolvedSpeciesDB& db);
 //     lump は合成後の値に加えて、合成規約・構成種の名前・lump 内モル分率 (正規化済み)・構成種の MW・区間・LJ・係数を入れる
 //     (#6a)。basis と config に書いた分率そのもの・source は記録にだけ書く。lump の無い DB のテキストは #6a 前とバイト一致。
 //     source (builtin/file)・ファイルパスは入れない (来歴として記録にだけ書く)。
+//     LJ は解決後の値 (sigma/eps) だけが入り、集合名 (physProp.ljSource・種ごとの解決集合) は入れない (値が同じなら同じハッシュ;
+//     plan §4.10 #14)。集合名は記録の provenance.lj_source / lj_resolved (種 (lump は構成種) ごとの集合と値) にだけ書く。
 //   - 完全性ハッシュ: 記録ファイル resolved_species_<互換16桁>[_<完全性16桁>].yaml 全文の SHA-256。
 //   - 各 res_*.h5 (境界出力を含む) のルート属性: species_hash (互換性, 全長) / species_record_sha256 (完全性) /
 //     species_record_file / species_input_unverified (0|1)。

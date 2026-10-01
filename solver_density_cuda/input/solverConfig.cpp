@@ -1059,6 +1059,19 @@ void solverConfig::read(std::string fname)
             }
         }
         if (physProp["speciesDBFile"])          this->speciesDBFile = physProp["speciesDBFile"].as<std::string>();
+        // 内蔵種の LJ の集合を探す順 (plan thermophysics-solver-owned-species-db #14)。構造 (文字列の列) だけを読み、
+        // 集合名の検査 (未知・重複) は speciesDB_checkLjSource に置く (speciesDB_resolve から; 単体試験と同じ経路)。
+        this->ljSource.clear();
+        if (physProp["ljSource"]) {
+            const YAML::Node ls = physProp["ljSource"];
+            if (!ls.IsSequence() || ls.size() == 0) {
+                throw std::runtime_error("physProp.ljSource must be a non-empty list of LJ set names (e.g. [gri30, svehla1962]; sets: gri30, svehla1962, legacy_v1).");
+            }
+            for (const auto& s : ls) {
+                if (!s.IsScalar()) throw std::runtime_error("physProp.ljSource: each entry must be an LJ set name (gri30, svehla1962, legacy_v1).");
+                this->ljSource.push_back(s.as<std::string>());
+            }
+        }
         if (physProp["speciesDiffusionMethod"]) this->speciesDiffusionMethod = physProp["speciesDiffusionMethod"].as<int>();
         if (physProp["thermoHrefTemp"])         this->thermoHrefTemp = physProp["thermoHrefTemp"].as<double>();
         const bool thermoFloatExplicit = static_cast<bool>(physProp["thermoFloat"]);

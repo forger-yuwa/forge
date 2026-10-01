@@ -192,6 +192,10 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 ```
 
 - **`thermoHrefTemp: 298.15` は必須** (絶対基準 h では χ_eos が桁違いになり TP×node 軸対称が発散 [isobutane-wt-semiperfect])。
+- **LJ パラメータの出典 `physProp.ljSource` は書かない (既定 `[gri30, svehla1962]`)** — 現行 (2026-10-01, plan
+  [thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §4.10 #14)。#14 前の run を同じ物性で
+  再現・継続するときだけ `ljSource: [legacy_v1]` を明示する (旧既定 = §9)。既定変更の影響 (H2・OH・H・O・NO・CO の LJ が GRI 値に) の
+  確認は plan #14-L2 で進行中。
 - 種 DB は `forge_design.gas.semiperfect.mixture_pseudo_species_split` (乾き空気を擬似種 MIXDRY にまとめ H2O を残す)。
 - TP 陰解法の `cfl_pseudo` は 0.5〜2 から上げる (H2O 生成エンタルピーの増幅で上限が低い)。**`implicitRelax: 0.7` を付ければ 6〜8 まで可**
   (2026-09-16 case/44 va3 M4.19 node Euler 軸対称 TP 2 種 + 非平衡凝縮 `run_0181`–`0189`: cfl 6/8 + relax 0.7 は乾き一様場からの起動でも安定で場・残差床が cfl 2 と同じ;
@@ -344,9 +348,11 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 | `output` 未指定 = 全量出力 | 2026-09-08 まで | `output.level` 既定 1 (全量は `level: 2`) |
 | k/ω 拡散の絶対ゼロ割ガード 1e-12 [m³] | バグ (2026-09-08 修正) | 相対ガード (コード側、キー無し) |
 | `wall_dist` を双対重心から測る変換 | バグ (2026-09-08 修正) | ノード座標 (コード側) |
+| 内蔵種の LJ = #14 前の単一の値 (GRI-Mech 3.0 と Svehla 1962 の混在、`physProp.ljSource` 無し) | 2026-10-01 まで既定 | 既定 `[gri30, svehla1962]` (書かない)。旧 run の再現・継続だけ `ljSource: [legacy_v1]` |
 
 ## 変更ログ
 
+- `2026-10-01` — §3 に LJ の出典 `physProp.ljSource` (既定 `[gri30, svehla1962]`、旧 run の再現は `[legacy_v1]`) を追加、§9 に旧既定 (plan [thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §4.10 #14)。
 - `2026-09-25` — §1.0a に `space.slauWallNormalChi` の適用規則 (3D 側壁接続のみ 1、新構成は診断可能性の検査 + 3 条件) を追加 (plan [convection-slau-wall-normal-chi-usage-rule](../plans/accepted/convection-slau-wall-normal-chi-usage-rule.md))。
 - `2026-09-22` — §2.1 遷移モデル (γ–Re_θt, `turbulence.transition: lm2009`) のレシピを追加 (plan [turbulence-transition-lm2009](../plans/active/turbulence-transition-lm2009.md))。
 - `2026-09-17` — §6 に dual-time の内部反復レシピを追加 (`cfl_pseudo` 12–20 + `nSubIterDualTime` 10–20 + 緩和なし; 擬似 CFL に安定限界が見つからず、必要な nSub は `cfl_pseudo` で決まる)。定常の `implicitRelax 0.7` は据え置き。投入前チェック `check_solver_config.py` を追加。
