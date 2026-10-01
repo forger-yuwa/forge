@@ -5,3 +5,5 @@
 - 表に無い: D2, D2O, (HF)6, N2O4, NO2。
 - 希ガス (Ar, He, Kr, Ne, Xe) は表に 2 行ある: 粘性データへのフィット (methods 1/2) と熱伝導データへのフィット (methods 3/4; 頁 24)。転記 CSV は粘性フィット行。熱伝導フィット行: Ar 3.408/119.9、He 2.608/10.22、Kr 3.690/164.7、Ne 2.764/40.2、Xe 4.082/206.9。
 - 用途と判断は plan [thermophysics-solver-owned-species-db](../../../plans/active/thermophysics-solver-owned-species-db.md) §4.10・§5.1 #14。
+- 頁参照: `svehla1962_table1a_pages.csv` (分子 → 印刷頁; 頁画像から 2026-10-01 に読み取り)。生成器 `tools/cea_thermo_to_forge_species.py --write/--check` が転記 2 本の全値一致とこの頁参照の網羅を検査してから、共通データの `LJ_sets.svehla1962` に `source: "Svehla 1962 Table I(a) p.NN"` として書く (plan §5.1 #14-L1)。
+- 既定変更 (legacy_v1 → [gri30, svehla1962]) の D_ij・kinetic μ/λ の Δ 表: `delta_table.md` (生成 `delta_table.py`; #14-L1 (vi))。

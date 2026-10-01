@@ -4,6 +4,10 @@ plans/active/thermophysics-solver-owned-species-db.md §5.1 #5t2-2 (合格条件
 notes/reviews/2026-09-27-transport-stage2-gpu-diagnose.md)。
 
   python3 solver_density_cuda/tests/unit/test_transport_gpu.py --forge BIN [--base-forge OLD_BIN] [--seed-run DIR] [--keep]
+      [--lj-source gri30,svehla1962]
+
+  --lj-source: 内蔵種の LJ の集合リスト (physProp.ljSource; plan §4.10 #14)。全 run の config と独立参照に同じリストを渡す
+       (省略時はソルバの既定 [gri30, svehla1962] で config に書かない)。#14-L1 (iv) は集合ごとに回す。
 
 forge を FORGE_TRANSPORT_PROBE=<states.txt> で起動する (main.cpp runTransportProbe)。初期化後、時間更新をせずに
 状態表の (T, ρ, Y) を全セル (ghost 込み nCells_all) と全境界面の解点へ float で書き、実際のセル経路 (gasProperties_d)・
@@ -56,7 +60,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SOLVER = os.path.normpath(os.path.join(HERE, "..", ".."))
 REPO = os.path.normpath(os.path.join(SOLVER, ".."))
 sys.path.insert(0, HERE)
-from transport_reference import Reference, TR  # noqa: E402
+from transport_reference import Reference, TR, set_lj_source  # noqa: E402
 
 SEED_REL = os.path.join("case", "44.vitiated_air_wt", "run_0509_va3_M4.19_Lc8_dry_lumpX")
 BASE_T = [200.0, 253.15, 400.0, 500.0, 600.0, 700.0, 1000.0, 2000.0]
@@ -237,6 +241,9 @@ class Runner:
             ph["speciesDBFile"] = "db.yaml"
         if transport:
             ph["transport"] = transport
+        ph.pop("ljSource", None)
+        if getattr(self.a, "lj_source", None):
+            ph["ljSource"] = list(self.a.lj_source)
         cfg["time"]["last"]["nStepOuter"] = nstep
         cfg["time"]["outStepInterval"] = 1000000
         cfg["output"] = {"level": 1, "extraFields": ["vis_lam", "thermCond", "T"]}
@@ -344,9 +351,34 @@ class Result:
     pass
 
 
+REFUSED_NO_LJ = object()   # run_config の戻り値: LJ が無く起動拒否を確かめた構成 (#14-L1; 比較は SKIP)
+
+
+def refused_without_lj(R, tag, species, transport, db, ref):
+    """--lj-source の集合に LJ の無い内蔵種がある構成で、LJ を読む使い方になるもの: forge が起動時に拒否することを確かめて True を返す
+    (参照側も LJ なし。#14-L1)。R.make の既定 viscMethod 2 では化学種 2 以上なら LJ の混合平均拡散 (speciesDiffusionMethod 1) が
+    全実種の LJ を読む (先に検査される)、単成分なら kinetic の種だけ。該当しなければ False (通常どおり試験する)。"""
+    nolj = [e["name"] for e in ref.reals if e["sp"]["sigma"] is None]
+    nolj_kin = [e["name"] for e in ref.reals if e["model"] == "kinetic" and e["sp"]["sigma"] is None]
+    if len(species) >= 2 and nolj:
+        needle, what = "have no Lennard-Jones data in any of the LJ sets searched", f"species {nolj} (mixture-averaged diffusion)"
+    elif nolj_kin:
+        needle, what = f"'{nolj_kin[0]}' has no Lennard-Jones data", f"kinetic species {nolj_kin}"
+    else:
+        return False
+    d = R.make(tag + "_nolj", species, transport, db)
+    r = subprocess.run([R.a.forge, "--resolve-species"], cwd=d, env=R.env(), capture_output=True, text=True, timeout=600)
+    msg = r.stderr + r.stdout
+    check(r.returncode != 0 and needle in msg,
+          f"{tag}: {what} have no LJ in ljSource {list(R.a.lj_source or [])}: forge refuses at startup (rc={r.returncode})")
+    return True
+
+
 def run_config(R, tag, species, transport, comps, db=None, ro=0.37, T_override=None):
     """comps: 輸送種のモル分率の組の列。戻り値: 状態ごとの double (状態表経由) とセル経路 (float roY 経由) の値。"""
     ref = Reference(species, transport, db)
+    if refused_without_lj(R, tag, species, transport, db, ref):
+        return REFUSED_NO_LJ
     nS = len(species)
     Ts = T_override if T_override is not None else t_list(ref)
     states, keys = [], []
@@ -474,7 +506,10 @@ def run_config(R, tag, species, transport, comps, db=None, ro=0.37, T_override=N
 def compare(tagA, A, tagB, B, pairs, tol_double=1e-12, tol_float=1e-5):
     """同じ物理組成の 2 構成を突き合わせる。pairs: [(A の組成番号, B の組成番号)]、温度は同じ値どうし。
     X は実種名で並べ替えて比べる。double 入力 (状態表) は ≤tol_double、別々に float 化した roY 経由のセル値は ≤tol_float。"""
-    if A is None or B is None:
+    if A is REFUSED_NO_LJ and B is REFUSED_NO_LJ:
+        print(f"[SKIP] AB {tagA} vs {tagB}: both configurations refused for missing LJ under the --lj-source (checked above)")
+        return
+    if A is None or B is None or A is REFUSED_NO_LJ or B is REFUSED_NO_LJ:
         check(False, f"AB {tagA} vs {tagB}: missing run")
         return
     ia = {k: i for i, k in enumerate(A.keys)}
@@ -558,6 +593,8 @@ PAIR_KIND = {1: "ce", 2: "cea", 3: "rigid"}
 def table_singles(R, tag, species, transport, db=None):
     """T1: 各表の単体値 (GPU, 表引き) を独立参照と比べる。戻り値: 表の配置 (layout) と参照。"""
     ref = Reference(species, transport, db)
+    if refused_without_lj(R, tag + "_tab", species, transport, db, ref):
+        return None, ref
     d = R.make(tag + "_tab", species, transport, db)
     lay, _, _, err = R.table_probe(d, [], name="layout.txt")
     if lay is None:
@@ -840,7 +877,11 @@ def main():
     ap.add_argument("--skip-table", action="store_true", help="表引きの試験 (T1/T2/F/AB) を省く")
     ap.add_argument("--stride12", type=int, default=4, help="T2 の実種 12 で 17 等分点を取る小区間の間引き")
     ap.add_argument("--stride32", type=int, default=32, help="T2 の実種 32 で 17 等分点を取る小区間の間引き")
+    ap.add_argument("--lj-source", default=None, help="内蔵種の LJ の集合リスト (カンマ区切り; 省略はソルバの既定で config に書かない)")
     a = ap.parse_args()
+    if a.lj_source:
+        a.lj_source = tuple(s for s in a.lj_source.split(",") if s)
+        set_lj_source(a.lj_source)
     a.forge = os.path.abspath(a.forge)
     if a.base_forge:
         a.base_forge = os.path.abspath(a.base_forge)
@@ -853,7 +894,7 @@ def main():
         print("[FAIL] seed run with nozzle.h5 not found (--seed-run)")
         return 1
     root = tempfile.mkdtemp(prefix="transport_gpu_")
-    print(f"work dir: {root}\nseed: {a.seed_run}\nforge: {a.forge}", flush=True)
+    print(f"work dir: {root}\nseed: {a.seed_run}\nforge: {a.forge}\nljSource: {list(a.lj_source) if a.lj_source else 'default'}", flush=True)
     R = Runner(a, root)
 
     # ---- 判別 A/B (T 400 K, ρ 1, 両実種 cea) ----
@@ -866,14 +907,14 @@ def main():
     B = run_config(R, "B_lump_N2He_plus_He", [L, "He"], trNHe, compsB, ro=1.0)
     Ar = run_config(R, "A_rev_He_N2", ["He", "N2"], {"He": "cea", "N2": "cea"}, [[0.6, 0.4], [0.0, 1.0]], ro=1.0)
     Br = run_config(R, "B_rev_He_plus_lump", ["He", Lr], {"He": "cea", "N2": "cea"}, [[0.2, 0.8]], ro=1.0)
-    if B is not None:
+    if B is not None and B is not REFUSED_NO_LJ:
         k = B.keys.index((0, f32(400.0)))
         xhe = dict(zip(B.real, B.sX[k]))["He"]
         cA = A.cell.get((0, f32(400.0))) if A else None
         cB = B.cell.get((0, f32(400.0)))
         check(abs(xhe - 0.6) <= 1e-12,
               f"AB B at 400 K: expanded X_He {xhe:.15f} (mole basis 0.6; mass-basis mix-up would give 0.887308)")
-        if A is not None and cA and cB:
+        if A is not None and A is not REFUSED_NO_LJ and cA and cB:
             print(f"       400 K: A mu {cA[0]:.12e} lam {cA[1]:.12e} / B mu {cB[0]:.12e} lam {cB[1]:.12e}")
     # A (X_N2 0.4, X_He 0.6) ↔ B (X_L 0.8, X_He 0.2) は組成 0 どうし、純 He は A の 2 と B の 1
     compare("A", A, "B", B, [(0, 0)])
@@ -895,7 +936,7 @@ def main():
     comps12 = [[0.30, 0.20, 0.10, 0.05, 0.15, 0.08, 0.07, 0.05],
                [0.50, 0.00, 0.10, 0.00, 0.15, 0.00, 0.25, 0.00]]   # ゼロ分率を含む
     r12 = run_config(R, "real12", sp12, tr12, comps12, db=db12)
-    if r12:
+    if r12 and r12 is not REFUSED_NO_LJ:
         check(len(r12.real) == 12, f"real12: real species {len(r12.real)} == 12 ({r12.real})")
 
     # ---- 実種 32 (上限; 2 lump + 単独 9 種、N2 は lump と単独に重複) ----
@@ -913,7 +954,7 @@ def main():
     c2 = [0.0] * nsp
     c2[0], c2[2], c2[5], c2[nsp - 1] = 0.4, 0.3, 0.2, 0.1        # LB と多くの単独種がゼロ
     r32 = run_config(R, "real32", sp32, tr32, [c1, c2], db=db32)
-    if r32:
+    if r32 and r32 is not REFUSED_NO_LJ:
         check(len(r32.real) == 32, f"real32: real species {len(r32.real)} == 32 (TRANSPORT_MAX_REAL_SPECIES)")
 
     # ---- 表引き (#5t2-3) ----

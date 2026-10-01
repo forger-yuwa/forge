@@ -112,15 +112,15 @@ const TransData& transData()
     return d;
 }
 
-// 内蔵種の双極子モーメント [D] (共通データの LJ.dipole; 無ければ 0)
+// 内蔵種の双極子モーメント [D] (共通データの種レベルの dipole.value; LJ の集合とは切り離した値 (plan §4.10, #14)。無ければ 0)
 const std::map<std::string, double>& builtinDipoles()
 {
     static const std::map<std::string, double> m = [] {
         std::map<std::string, double> out;
         const YAML::Node root = YAML::Load(kForgeSpeciesDataYaml);
         for (const auto& n : root["species"]) {
-            const YAML::Node lj = n["LJ"];
-            if (lj && lj.IsMap() && lj["dipole"]) out[n["id"].as<std::string>()] = lj["dipole"].as<double>();
+            const YAML::Node d = n["dipole"];
+            if (d && d.IsMap() && d["value"]) out[n["id"].as<std::string>()] = d["value"].as<double>();
         }
         return out;
     }();
@@ -364,9 +364,12 @@ void speciesTransportDB_resolve(ResolvedSpeciesDB& db, const std::vector<std::pa
                 }
                 if (e["LJ_dipole"]) dip = e["LJ_dipole"].as<double>();
             } else {
-                if (!speciesDB_hasLJ(rs.thermo)) {   // 内蔵の LJ: null 種 (#13-2)
-                    throw std::runtime_error(where + ": built-in species '" + nm + "' has no Lennard-Jones data (LJ: null in "
-                                             + speciesDB_builtinDataName() + "); choose cea or fit for it, or give LJ_sigma/LJ_eps_kB in speciesDBFile");
+                if (!speciesDB_hasLJ(rs.thermo)) {   // どの LJ 集合にも無い内蔵種 (#13-2, #14)
+                    std::string sets;
+                    for (const auto& s : db.ljSource) sets += (sets.empty() ? "" : ", ") + s;
+                    throw std::runtime_error(where + ": built-in species '" + nm + "' has no Lennard-Jones data in any of the LJ sets searched "
+                                             "(physProp.ljSource [" + sets + "]; " + speciesDB_builtinDataName()
+                                             + "); add an LJ set that has it to physProp.ljSource, choose cea or fit for it, or give LJ_sigma/LJ_eps_kB in speciesDBFile");
                 }
                 auto it = builtinDipoles().find(rs.identity);
                 if (it != builtinDipoles().end()) dip = it->second;

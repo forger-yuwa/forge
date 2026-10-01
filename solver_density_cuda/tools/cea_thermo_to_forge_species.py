@@ -17,9 +17,20 @@ plans/active/thermophysics-solver-owned-species-db.md §4.9・§5.1 #13-0 (監�
   CO/H2/OH/H/NO/O) の `MW:` 行と `intervals:` 節を thermo.inp そのもの (区間数・区切り・係数・MW) に置き換え、凝縮相
   (`H2O(L)`) は係数を変えず `MW:` だけを気液ペアの気相種と同じ値にする。手保守の欄 (aliases・LJ・legacy_builtin・source・
   deviations・pair_of・extension・コメント) は書き換えない。CEA に同名の無い `AIR` (擬似種) はそのまま。
-- LJ は CEA に無い。出典は 1 つに固定する: `cea_thermo_to_species_db.py` の `LJ` 表 (Cantera h2o2.yaml / gri30.yaml の
-  transport 値)。表に無い種は `LJ: null` (輸送データなし; kinetic 輸送・LJ 混合平均拡散に使うとソルバが起動時に拒否する)。
-  双極子はこの表に無いので書かない。
+- LJ は CEA に無い。共通データは出典別の集合 `LJ_sets` を持つ (plan §4.10, #14)。`legacy_v1` (#14 前の値の凍結) は
+  `cea_thermo_to_species_db.py` の `LJ` 表 (#13-2 で埋めた値) をそのまま使い、種ごとの実際の出典を `LEGACY_V1_SOURCE` に書く
+  (2026-10-01 の監査で表の値が GRI-Mech 3.0 と Svehla 1962 の混在と分かった)。表に無い種は `LJ_sets: {}`
+  (輸送データなし; kinetic 輸送・LJ 混合平均拡散に使うとソルバが起動時に拒否する)。
+  #14-L1 から `--write` は全気相種 (手保守・生成ブロックとも) の `gri30`・`svehla1962` 集合を書く:
+    gri30       Cantera 同梱 `gri30.yaml` (GRI-Mech 3.0 の transport; ck2yaml が gri30_tran.dat から変換) の diameter・well-depth。
+                名前の対応は完全一致 → 大小文字無視で一意 → 明示の表 (`GRI30_NAME`: AR→Ar, C2H2→C2H2,acetylene)。
+                YAML 1.1 の真偽値 (NO) を避けるため BaseLoader で読む。双極子 (dipole) は種レベルの `dipole` に書く
+                (手保守の種は手の値と一致することだけを検査する)。
+    svehla1962  Svehla 1962 (NASA TR R-132) Table I(a) の 2 本独立の転記 CSV (notes/investigations/2026-10-01-svehla1962-lj/)。
+                生成時に 2 本の全値の一致と、全分子の頁参照 (svehla1962_table1a_pages.csv) を検査する。希ガスは粘性フィット行
+                (転記 CSV の行)。名前の対応は gri30 と同じ規則 (明示の表 `SVEHLA_NAME`: Air→AIR, C2H2→C2H2,acetylene)。
+  手保守エントリでは `LJ_sets:` の中の `gri30:`・`svehla1962:` の行と、provenance の `lj_sets.gri30`・`lj_sets.svehla1962` の行だけを
+  書き換える (`legacy_v1:` と `dipole:` は手保守)。
 - `--check` は (a) 輸送データと thermo.inp に同名の全種 (`e-` を含む) を `to_forge_entry` → `dump_entries_yaml` → YAML 読み戻しで
   区間・全係数・MW が thermo.inp のパース値とビット一致、(b) 共通データの生成ブロックが今の生成結果と文字列一致、
   (c) 生成ブロックの各エントリの区間・係数・MW が thermo.inp とビット一致、(d) 手保守のエントリのうち thermo.inp に同名の
@@ -48,6 +59,20 @@ REPO = os.path.normpath(os.path.join(SOLVER, ".."))
 DEFAULT_THERMO = os.path.join(REPO, ".venv-cea", "nasa_cea", "thermo.inp")
 DEFAULT_SPECIES = os.path.join(SOLVER, "data", "species", "forge_species_v1.yaml")
 DEFAULT_TRANSPORT = os.path.join(SOLVER, "data", "species", "forge_transport_v1.yaml")
+SVEHLA_DIR = os.path.join(REPO, "notes", "investigations", "2026-10-01-svehla1962-lj")
+DEFAULT_SVEHLA = (os.path.join(SVEHLA_DIR, "svehla1962_table1a_transcriptA.csv"),
+                  os.path.join(SVEHLA_DIR, "svehla1962_table1a_transcriptB.csv"))
+DEFAULT_SVEHLA_PAGES = os.path.join(SVEHLA_DIR, "svehla1962_table1a_pages.csv")
+
+
+def default_gri30():
+    """Cantera 同梱 gri30.yaml (このワークツリーの .venv-chem、無ければ隣の forge ワークツリーの .venv-chem)。"""
+    import glob
+    for root in (REPO, os.path.join(os.path.dirname(REPO), "forge")):
+        hit = sorted(glob.glob(os.path.join(root, ".venv-chem", "lib", "python3*", "site-packages", "cantera", "data", "gri30.yaml")))
+        if hit:
+            return hit[-1]
+    return None
 RU = 8.314462618            # J/(mol K); cuda_forge/thermo_d.cuh THERMO_RU と同じ
 STD_BOUNDS = (200.0, 1000.0, 6000.0, 20000.0)
 
@@ -137,16 +162,17 @@ def mw_kg(rec):
     return float(rec["MW_str"] + "e-3")
 
 
-def to_forge_entry(rec, lj=None):
+def to_forge_entry(rec, lj=None, dipole=None):
     """1 記録 → forge_species_data のエントリ dict (aliases・pair_of などの手保守欄は付けない)。区間は CEA のまま。
-    lj: {sigma, eps_kB, source} または None (輸送データなし)。"""
+    lj: LJ_sets {集合名: {sigma, eps_kB, source}} (空 / None は輸送データなし)。"""
     return {
         "id": rec["name"],
         "aliases": [],
         "phase": "gas" if rec["phase"] == 0 else "condensed",
         "MW": mw_kg(rec),
         "intervals": [{"Tlo": lo, "Thi": hi, "coeffs": list(a)} for lo, hi, a in rec["intervals"]],
-        "LJ": lj,
+        "LJ_sets": dict(lj or {}),
+        "dipole": dipole,
         "atoms": dict(rec["atoms"]) or None,
         "source": {"thermo": f"CEA thermo.inp ({rec['date']}; {rec['comment']})"},
     }
@@ -179,11 +205,15 @@ def dump_entries_yaml(entries, out):
         for iv in e["intervals"]:
             w(f"      - Tlo: {_num(iv['Tlo'])}\n        Thi: {_num(iv['Thi'])}\n")
             w("        coeffs: [" + ", ".join(_num(v) for v in iv["coeffs"]) + "]\n")
-        lj = e.get("LJ")
-        if lj:
-            w(f"    LJ: {{sigma: {_num(lj['sigma'])}, eps_kB: {_num(lj['eps_kB'])}, source: {_yq(lj['source'])}}}\n")
+        sets = e.get("LJ_sets") or {}
+        if sets:
+            w("    LJ_sets:\n")
+            for k, lj in sets.items():
+                w(f"      {k}: {{sigma: {_num(lj['sigma'])}, eps_kB: {_num(lj['eps_kB'])}, source: {_yq(lj['source'])}}}\n")
         else:
-            w("    LJ: null\n")
+            w("    LJ_sets: {}\n")
+        if e.get("dipole"):
+            w(_dipole_line(e["dipole"]["value"], e["dipole"]["source"]))
         if e["atoms"]:
             w("    atoms: {" + ", ".join(f"{k}: {_num(v)}" for k, v in e["atoms"].items()) + "}\n")
         else:
@@ -197,7 +227,17 @@ def dump_entries_yaml(entries, out):
 GENERATED_BEGIN = "  # ---- BEGIN generated by tools/cea_thermo_to_forge_species.py --write"
 GENERATED_END = "  # ---- END generated by tools/cea_thermo_to_forge_species.py"
 EXCLUDED = ("e-",)          # 区切り 298.15 K (非標準) で内蔵から除外 (plan §4.9)
-LJ_SOURCE = "Cantera h2o2.yaml / gri30.yaml transport (tools/cea_thermo_to_species_db.py の LJ 表)"
+_GRI = "GRI-Mech 3.0 transport (gri30_tran.dat; Cantera 同梱 gri30.yaml と同値)"
+_SV = "Svehla 1962 (NASA TR R-132) Table I(a)"
+# legacy_v1 (#14 前の値の凍結) の種ごとの実際の出典 (2026-10-01 監査: gri30.yaml と Svehla 1962 の転記
+# notes/investigations/2026-10-01-svehla1962-lj/ と再照合)。値は cea_thermo_to_species_db.py の LJ 表のまま。
+# 表から値を取る種でここに無いものは --write/--check で止める (出典を書かずに値を入れない)。
+LEGACY_V1_SOURCE = {
+    "N": f"{_SV} p.23 (gri30.yaml も同値)。#13-2 で cea_thermo_to_species_db.py の LJ 表から",
+    "NH3": f"{_GRI} (Svehla 1962 は 2.900/558.3)。#13-2 で cea_thermo_to_species_db.py の LJ 表から",
+    "NO2": f"{_GRI} (Svehla 1962 Table I(a) に無い)。#13-2 で cea_thermo_to_species_db.py の LJ 表から",
+    "N2O": f"{_SV} p.23 (gri30.yaml も同値)。#13-2 で cea_thermo_to_species_db.py の LJ 表から",
+}
 
 
 def _lj_table():
@@ -210,12 +250,144 @@ def _lj_table():
 
 
 def lj_for(name, table, alias):
-    """種名 → LJ エントリ ({sigma, eps_kB, source}) または None。引き方は cea_thermo_to_species_db.py の to_entry と同じ。"""
+    """種名 → LJ_sets ({"legacy_v1": {sigma, eps_kB, source}} または {})。引き方は cea_thermo_to_species_db.py の to_entry と同じ。"""
     key = alias.get(name, name.upper() if name.upper() in table else name)
     if key not in table:
-        return None
+        return {}
+    if name not in LEGACY_V1_SOURCE:
+        raise SystemExit(f"{name}: LJ 表に値があるが LEGACY_V1_SOURCE に出典が無い (出典を書かずに値を入れない)")
     sig, eps = table[key]
-    return {"sigma": float(sig), "eps_kB": float(eps), "source": LJ_SOURCE}
+    return {"legacy_v1": {"sigma": float(sig), "eps_kB": float(eps), "source": LEGACY_V1_SOURCE[name]}}
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# #14-L1: LJ の集合 gri30 / svehla1962 (plan §4.10)
+# ---------------------------------------------------------------------------------------------------------------
+GRI30_NAME = {"AR": "Ar", "C2H2": "C2H2,acetylene"}       # gri30.yaml の名前 → 共通データの id (完全一致・大小文字無視で決まらないもの)
+SVEHLA_NAME = {"Air": "AIR", "C2H2": "C2H2,acetylene"}    # Svehla の分子名 → 共通データの id (同上)
+LJ_SET_ORDER = ("legacy_v1", "gri30", "svehla1962")        # LJ_sets の書き出し順
+
+
+def map_name(name, ids, explicit):
+    """外部の名前 → 共通データの id (明示の表 → 完全一致 → 大小文字無視で一意)。無ければ None。"""
+    if name in explicit:
+        return explicit[name]
+    if name in ids:
+        return name
+    hit = [i for i in ids if i.upper() == name.upper()]
+    if len(hit) > 1:
+        raise SystemExit(f"{name}: 大小文字無視で共通データの id が 1 つに決まらない {hit}")
+    return hit[0] if hit else None
+
+
+def load_svehla(paths=DEFAULT_SVEHLA, pages_path=DEFAULT_SVEHLA_PAGES):
+    """転記 CSV 2 本を読み、全分子・全値 (文字列) の一致を検査して {分子: (sigma, eps_kB, 頁)} と来歴を返す。"""
+    import csv
+    rows = []
+    for p in paths:
+        with open(p, newline="", encoding="utf-8") as f:
+            rows.append({r["molecule"]: (r["sigma_A"], r["eps_over_k_K"]) for r in csv.DictReader(f)})
+    a, b = rows
+    if a != b:
+        diff = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
+        raise SystemExit(f"Svehla 転記 2 本が一致しない ({len(diff)} 分子: {diff[:10]})")
+    with open(pages_path, newline="", encoding="utf-8") as f:
+        pages = {r["molecule"]: int(r["page"]) for r in csv.DictReader(f)}
+    if set(pages) != set(a):
+        raise SystemExit(f"Svehla の頁参照が転記と一致しない: {sorted(set(pages) ^ set(a))}")
+    out = {m: (float(s), float(e), pages[m]) for m, (s, e) in a.items()}
+    prov = (f"Svehla 1962 (NASA TR R-132, NTRS 19630012982) Table I(a), 2 本独立の転記 {len(a)} 分子が全値一致 "
+            f"(A sha256 {sha256_file(paths[0])[:16]}, B {sha256_file(paths[1])[:16]}, 頁 {sha256_file(pages_path)[:16]}; "
+            f"notes/investigations/2026-10-01-svehla1962-lj/)。希ガスは粘性フィット行")
+    return out, prov
+
+
+def load_gri30(path):
+    """Cantera gri30.yaml の transport → {名前: (diameter, well-depth, dipole または None)} と来歴。BaseLoader (NO を真偽値にしない)。"""
+    import yaml
+    with open(path, encoding="utf-8") as f:
+        raw = yaml.load(f, Loader=yaml.BaseLoader)
+    out = {}
+    for s in raw["species"]:
+        tr = s.get("transport") or {}
+        if "diameter" not in tr or "well-depth" not in tr:
+            continue
+        out[str(s["name"])] = (float(tr["diameter"]), float(tr["well-depth"]), float(tr["dipole"]) if "dipole" in tr else None)
+    desc = str(raw.get("description", "")).splitlines()[0].strip()
+    prov = (f"{desc} の transport (Cantera 同梱 gri30.yaml; ck2yaml (Cantera {raw.get('cantera-version', '?')}) が "
+            f"{', '.join(raw.get('input-files') or [])} から変換; sha256 {sha256_file(path)[:16]})")
+    return out, prov
+
+
+def lj_sets_for_ids(ids, gri30_path, svehla_paths=DEFAULT_SVEHLA, pages_path=DEFAULT_SVEHLA_PAGES):
+    """共通データの id 列 → ({id: {"gri30": {...}, "svehla1962": {...}}}, {id: gri30 の dipole}, 来歴 {集合: 文字列}, 照合の情報)。"""
+    sv, sv_prov = load_svehla(svehla_paths, pages_path)
+    gr, gr_prov = load_gri30(gri30_path)
+    sets, dip = {i: {} for i in ids}, {}
+    info = {"svehla_unmapped": [], "gri30_unmapped": []}
+    for m, (s, e, p) in sv.items():
+        i = map_name(m, ids, SVEHLA_NAME)
+        if i is None:
+            info["svehla_unmapped"].append(m)
+            continue
+        note = f"Svehla 1962 Table I(a) p.{p}" + ("" if m == i else f" ({m})")
+        sets[i]["svehla1962"] = {"sigma": s, "eps_kB": e, "source": note}
+    for n, (s, e, d) in gr.items():
+        i = map_name(n, ids, GRI30_NAME)
+        if i is None:
+            info["gri30_unmapped"].append(n)
+            continue
+        sets[i]["gri30"] = {"sigma": s, "eps_kB": e, "source": "GRI-Mech 3.0 (Cantera gri30.yaml)" + ("" if n == i else f" ({n})")}
+        if d is not None:
+            dip[i] = d
+    return sets, dip, {"gri30": gr_prov, "svehla1962": sv_prov}, info
+
+
+def _lj_line(k, lj):
+    return f"      {k}: {{sigma: {_num(lj['sigma'])}, eps_kB: {_num(lj['eps_kB'])}, source: {_yq(lj['source'])}}}\n"
+
+
+def _dipole_line(value, source):
+    return f"    dipole: {{value: {_num(value)}, source: {_yq(source)}}}\n"
+
+
+DIPOLE_SOURCE_GRI30 = "GRI-Mech 3.0 (Cantera gri30.yaml)。physProp.transport の kinetic (Brokaw の極性補正) だけが読む (#5t2)"
+
+
+def sync_lj_text(pre, sets, prov):
+    """手保守のテキストの各エントリの `LJ_sets:` の gri30・svehla1962 行と、provenance の lj_sets の gri30・svehla1962 行を
+    生成結果に置き換える (legacy_v1 の行・dipole・他の欄は一字も変えない)。戻り値 (新テキスト, 書き換えたエントリ)。"""
+    lines, blocks = _manual_blocks(pre)
+    done = []
+    for sid, k0, k1 in reversed(blocks):
+        blk = lines[k0:k1]
+        ls = [n for n, L in enumerate(blk) if L.startswith("    LJ_sets:")]
+        if len(ls) != 1:
+            raise SystemExit(f"手保守エントリ {sid}: LJ_sets の行が 1 つでない")
+        n0 = ls[0]
+        n1 = n0 + 1
+        while n1 < len(blk) and blk[n1].startswith("      "):
+            n1 += 1
+        keep = [L for L in blk[n0 + 1:n1] if L.startswith("      legacy_v1:")]
+        others = [L for L in blk[n0 + 1:n1] if not L.startswith(("      legacy_v1:", "      gri30:", "      svehla1962:"))]
+        if others:
+            raise SystemExit(f"手保守エントリ {sid}: LJ_sets に未知の行 {others}")
+        new = keep + [_lj_line(k, sets.get(sid, {})[k]) for k in LJ_SET_ORDER[1:] if k in sets.get(sid, {})]
+        blk = blk[:n0] + (["    LJ_sets:\n"] + new if new else ["    LJ_sets: {}\n"]) + blk[n1:]
+        done.append(sid)
+        lines[k0:k1] = blk
+    text = "".join(lines)
+    # provenance の lj_sets (legacy_v1 は手保守)
+    pl = text.splitlines(keepends=True)
+    k = [n for n, L in enumerate(pl) if L.startswith("  lj_sets:")]
+    if len(k) != 1:
+        raise SystemExit("provenance に lj_sets の行が 1 つでない")
+    n1 = k[0] + 1
+    while n1 < len(pl) and pl[n1].startswith("    "):
+        n1 += 1
+    keep = [L for L in pl[k[0] + 1:n1] if L.startswith("    legacy_v1:")]
+    pl = pl[:k[0] + 1] + keep + [f"    {s}: {_yq(prov[s])}\n" for s in LJ_SET_ORDER[1:]] + pl[n1:]
+    return "".join(pl), list(reversed(done))
 
 
 def _load_yaml_text(text):
@@ -242,15 +414,38 @@ def split_generated(text):
     return "".join(lines[:b[0] + 1]), "".join(lines[b[0] + 1:e[0]]), "".join(lines[e[0]:])
 
 
-def generated_entries(thermo_path, species_path, transport_path):
-    """生成ブロックに入れるエントリ列 (手保守のエントリに無い種だけ) とその YAML テキスト、対象名、名前 → 記録。"""
+def lj_context(thermo_path, species_path, transport_path, gri30_path):
+    """全気相種 (手保守 + 生成ブロック) の id と、その LJ 集合 (gri30・svehla1962)・gri30 の双極子・来歴・照合の情報。"""
+    recs = parse_thermo_inp(thermo_path)
+    names, _ = target_names(recs, transport_path)
+    pre, _, post = split_generated(open(species_path, encoding="utf-8").read())
+    man = _load_yaml_text(pre + post).get("species") or []
+    manual = {str(e["id"]) for e in man}
+    ids = [str(e["id"]) for e in man if e.get("phase") == "gas"] + [s for s in names if s not in manual and s not in EXCLUDED]
+    if gri30_path is None or not os.path.exists(gri30_path):
+        raise SystemExit(f"gri30.yaml が無い: {gri30_path} (--gri30 で Cantera 同梱の gri30.yaml を指定)")
+    sets, dip, prov, info = lj_sets_for_ids(ids, gri30_path)
+    return ids, sets, dip, prov, info
+
+
+def generated_entries(thermo_path, species_path, transport_path, gri30_path):
+    """生成ブロックに入れるエントリ列 (手保守のエントリに無い種だけ) とその YAML テキスト、対象名、名前 → 記録。
+    LJ_sets は legacy_v1 (LJ 表) + gri30 + svehla1962、gri30 に双極子があれば種レベルの dipole (#14-L1)。"""
     import io
     recs = parse_thermo_inp(thermo_path)
     names, by = target_names(recs, transport_path)
     pre, _, post = split_generated(open(species_path, encoding="utf-8").read())
     manual = {str(e["id"]) for e in (_load_yaml_text(pre + post).get("species") or [])}
     table, alias = _lj_table()
-    ents = [to_forge_entry(by[s], lj_for(s, table, alias)) for s in names if s not in manual and s not in EXCLUDED]
+    _, sets, dip, _, _ = lj_context(thermo_path, species_path, transport_path, gri30_path)
+    ents = []
+    for s in names:
+        if s in manual or s in EXCLUDED:
+            continue
+        lj = dict(lj_for(s, table, alias))
+        lj.update({k: sets[s][k] for k in LJ_SET_ORDER[1:] if k in sets[s]})
+        d = {"value": dip[s], "source": DIPOLE_SOURCE_GRI30} if s in dip else None
+        ents.append(to_forge_entry(by[s], lj, d))
     buf = io.StringIO()
     dump_entries_yaml(ents, buf)
     return ents, buf.getvalue(), names, by
@@ -320,13 +515,16 @@ def sync_manual_text(pre, by):
     return "".join(lines), list(reversed(done))
 
 
-def write_generated(thermo_path, species_path, transport_path):
-    ents, body, _, _ = generated_entries(thermo_path, species_path, transport_path)
+def write_generated(thermo_path, species_path, transport_path, gri30_path):
+    ents, body, _, _ = generated_entries(thermo_path, species_path, transport_path, gri30_path)
+    _, sets, _, prov, _ = lj_context(thermo_path, species_path, transport_path, gri30_path)
     pre, _, post = split_generated(open(species_path, encoding="utf-8").read())
     pre, synced = sync_manual_text(pre, _gas_records(parse_thermo_inp(thermo_path)))
+    pre, lj_synced = sync_lj_text(pre, sets, prov)
     with open(species_path, "w", encoding="utf-8") as f:
         f.write(pre + body + post)
-    print(f"wrote {len(ents)} generated entries to {species_path}; hand-maintained entries synced to CEA: {synced}")
+    print(f"wrote {len(ents)} generated entries to {species_path}; hand-maintained entries synced to CEA: {synced}; "
+          f"LJ sets gri30/svehla1962 synced: {lj_synced}")
 
 
 def _iv_of(e):
@@ -340,7 +538,7 @@ def _bits_equal(a, b):
     return isinstance(a, float) and isinstance(b, float) and a.hex() == b.hex()
 
 
-def check_generated(thermo_path, species_path, transport_path):
+def check_generated(thermo_path, species_path, transport_path, gri30_path):
     """往復のビット一致 (a)(b)(c) (docstring)。失敗数を返す。"""
     import io
     fail = 0
@@ -350,8 +548,7 @@ def check_generated(thermo_path, species_path, transport_path):
         print(("[PASS] " if ok else "[FAIL] ") + what)
         fail += 0 if ok else 1
 
-    ents, body, names, by = generated_entries(thermo_path, species_path, transport_path)
-    table, alias = _lj_table()
+    ents, body, names, by = generated_entries(thermo_path, species_path, transport_path, gri30_path)
 
     def same_as_cea(e, r):
         return (r is not None and _bits_equal(e["MW"], mw_kg(r))
@@ -359,7 +556,7 @@ def check_generated(thermo_path, species_path, transport_path):
 
     # (a) 同名の全種 (e- を含む) を書いて読み戻す
     buf = io.StringIO()
-    dump_entries_yaml([to_forge_entry(by[s], lj_for(s, table, alias)) for s in names], buf)
+    dump_entries_yaml([to_forge_entry(by[s]) for s in names], buf)   # (a) は熱物性の往復だけを見る (LJ は (b) が見る)
     back = _load_yaml_text("species:\n" + buf.getvalue())["species"]
     bad = [s for s, e in zip(names, back) if str(e["id"]) != s or not same_as_cea(e, by[s])]
     nint = [len(by[s]["intervals"]) for s in names]
@@ -390,10 +587,35 @@ def check_generated(thermo_path, species_path, transport_path):
     bad = [str(e["id"]) for e in liq if not (e.get("pair_of") in mid and _bits_equal(e["MW"], mid[e["pair_of"]]["MW"]))]
     ck(not bad, f"(d) 凝縮相 {[str(e['id']) for e in liq]} の MW が気液ペアの気相種とビット一致" + (f" — 不一致 {bad}" if bad else ""))
     ck(sync_manual_text(pre, gas)[0] == pre, "(d) 手保守のテキストが CEA 同期の結果と文字列一致 (--write 済み)")
+    # (e) #14-L1: LJ 集合 gri30・svehla1962 (Svehla 転記 2 本の全値一致と頁参照は load_svehla が検査、不一致なら SystemExit)
+    ids, sets, dip, prov, info = lj_context(thermo_path, species_path, transport_path, gri30_path)
+    ck(sync_lj_text(pre, sets, prov)[0] == pre, "(e) 手保守の LJ_sets の gri30・svehla1962 行と provenance が生成結果と文字列一致 (--write 済み)")
+    allent = {str(e["id"]): e for e in (_load_yaml_text(pre + "\n").get("species") or []) + got}
+    bad = []
+    for i in ids:
+        cur = allent[i].get("LJ_sets") or {}
+        for k in LJ_SET_ORDER[1:]:
+            want = sets[i].get(k)
+            have = cur.get(k)
+            if (want is None) != (have is None) or (want and not _bits_equal([float(have["sigma"]), float(have["eps_kB"])],
+                                                                             [want["sigma"], want["eps_kB"]])):
+                bad.append(f"{i}.{k}")
+    ng, ns = sum(1 for i in ids if "gri30" in sets[i]), sum(1 for i in ids if "svehla1962" in sets[i])
+    ck(not bad, f"(e) 全気相 {len(ids)} 種の LJ_sets.gri30 ({ng} 種)・svehla1962 ({ns} 種) が gri30.yaml・Svehla 転記とビット一致"
+       + (f" — 不一致 {bad}" if bad else ""))
+    # 双極子: gri30 の値 = 共通データの種レベルの dipole (手保守の種も含む)、gri30 に無い種に dipole があれば手保守として表示
+    dbad = [i for i in ids if i in dip and float((allent[i].get("dipole") or {}).get("value", -1.0)) != dip[i]]
+    ck(not dbad, f"(e) gri30 の双極子 {', '.join(f'{i} {v}' for i, v in dip.items())} D が共通データの種レベル dipole と一致"
+       + (f" — 不一致 {dbad}" if dbad else ""))
+    extra = [i for i in ids if allent[i].get("dipole") and i not in dip]
+    none = [i for i in ids if not (allent[i].get("LJ_sets") or {})]
+    only_legacy = [i for i in ids if set(allent[i].get("LJ_sets") or {}) == {"legacy_v1"}]
+    print(f"[INFO] LJ: どの集合にも無い種 {none}; legacy_v1 だけの種 {only_legacy}; gri30 に無い dipole {extra}; "
+          f"共通データに無い Svehla 分子 {info['svehla_unmapped']}; 共通データに無い gri30 種 {len(info['gri30_unmapped'])}")
     other = [str(e["id"]) for e in man if str(e["id"]) not in same and e.get("phase") == "gas"]
     print(f"[INFO] 手保守で CEA に同名の気相が無い種 (係数はそのまま): {other}")
-    lj = [str(e["id"]) for e in got if e.get("LJ")]
-    print(f"[INFO] 生成ブロック: LJ あり {len(lj)} 種 ({', '.join(lj)}), LJ: null {len(got) - len(lj)} 種; "
+    lj = [str(e["id"]) for e in got if (e.get("LJ_sets") or {}).get("legacy_v1")]
+    print(f"[INFO] 生成ブロック: legacy_v1 あり {len(lj)} 種 ({', '.join(lj)}), なし {len(got) - len(lj)} 種; "
           f"除外 {list(EXCLUDED)}; 手保守 (生成ブロック外) で CEA と同名 {[s for s in names if s not in EXCLUDED and s not in {str(e['id']) for e in got}]}")
     return fail
 
@@ -740,14 +962,15 @@ def main():
     ap.add_argument("--write", action="store_true", help="共通データの生成ブロックを書き換える (段 2)")
     ap.add_argument("--check", action="store_true", help="往復のビット一致と生成ブロック・手保守エントリの一致を検査する (段 2・3)")
     ap.add_argument("--sern-root", help="SERN 設計ワークツリー (外部 DB の生成元を import して照合; 読むだけ)")
+    ap.add_argument("--gri30", default=default_gri30(), help="Cantera 同梱 gri30.yaml (LJ 集合 gri30 の入力; --write/--check)")
     a = ap.parse_args()
     if not os.path.exists(a.thermo):
         raise SystemExit(f"thermo.inp が無い: {a.thermo} (--thermo で指定)")
     if a.write:
-        write_generated(a.thermo, a.species_data, a.transport_data)
+        write_generated(a.thermo, a.species_data, a.transport_data, a.gri30)
         return
     if a.check:
-        fail = check_generated(a.thermo, a.species_data, a.transport_data)
+        fail = check_generated(a.thermo, a.species_data, a.transport_data, a.gri30)
         print("ALL PASS" if fail == 0 else f"FAIL ({fail})")
         sys.exit(1 if fail else 0)
     if not a.audit:

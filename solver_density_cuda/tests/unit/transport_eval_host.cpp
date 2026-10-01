@@ -9,6 +9,7 @@
 //       transport: {N2: cea, H2O: cea}             # physProp.transport と同じ
 //       speciesDBFile: path                        # 任意
 //       thermoHrefTemp: 0                          # 任意 (互換性ハッシュ用)
+//       ljSource: [gri30, svehla1962]              # 任意 (physProp.ljSource と同じ; 無指定は既定; plan #14)
 //       states: [{T: 400, X: [0.5, 0.5]}, ...]     # X は physProp.species の順のモル分率
 //   出力 (stdout, 1 行の JSON): {"ok": true, "real": [...], "model": [...], "pair_kind": [...], "compat_hash": ..., "compat_lines": [...],
 //                                "record": "<記録全文>", "states": [{"T", "mu", "lam", "Xreal", "mu_i", "lam_i", "eta_ij"}]}
@@ -83,7 +84,9 @@ int main(int argc, char** argv)
         const std::string dbFile = spec["speciesDBFile"] ? spec["speciesDBFile"].as<std::string>() : "";
         const double Tref = spec["thermoHrefTemp"] ? spec["thermoHrefTemp"].as<double>() : 0.0;
 
-        ResolvedSpeciesDB db = speciesDB_resolve(names, dbFile, lumps);
+        std::vector<std::string> ljSource;
+        if (spec["ljSource"]) for (const auto& s : spec["ljSource"]) ljSource.push_back(s.as<std::string>());
+        ResolvedSpeciesDB db = speciesDB_resolve(names, dbFile, lumps, ljSource);
         speciesTransportDB_resolve(db, tspec, dbFile);
         const ResolvedTransport& tr = db.transport;
 

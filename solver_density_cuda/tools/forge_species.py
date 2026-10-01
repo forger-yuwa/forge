@@ -408,7 +408,9 @@ def record_has_nonstandard_intervals(species):
 def load_record(path):
     """解決済み記録を読み、自己整合を検証して返す。
     返り値: {path, integrity (全文 SHA-256), compat_hash (記録内の値), compat_recomputed (中身から再計算), consistent (bool),
-             problems (list), schema, datum, extrapolation, thermoHrefTemp, species [..., source], provenance}。
+             problems (list), schema, datum, extrapolation, thermoHrefTemp, species [..., source], provenance,
+             lj_source (list; #14 前の記録は None), lj_resolved ({種名 (lump は "LUMP.構成種"): (集合, σ, ε)}; 同じく None)}。
+    LJ の出所 (plan §4.10, #14) は provenance にあり互換性ハッシュには入らない。あれば値が species の LJ と一致することを検査する。
     ファイル名の互換 16 桁と中身の互換ハッシュが違う・記録内の値と再計算が違う、は problems に入る (取り違え・改竄)。"""
     with open(path, "rb") as f:
         raw = f.read()
@@ -469,6 +471,27 @@ def load_record(path):
                             f"({'some' if nint else 'no'} species with nInt != 2) do not go together")
         if out["extrapolation"] != (SPECIES_RECORD_EXTRAPOLATION_NINT if nint else SPECIES_RECORD_EXTRAPOLATION):
             problems.append(f"{path}: extrapolation convention {out['extrapolation']!r} does not match the species temperature intervals")
+    # LJ の出所 (#14-L1; provenance.lj_source / lj_resolved)。値は species (lump は構成種) の LJ_sigma/LJ_eps_kB と同じはず
+    prov = out["provenance"]
+    out["lj_source"] = [str(s) for s in prov["lj_source"]] if "lj_source" in prov else None
+    out["lj_resolved"] = None
+    if "lj_resolved" in prov:
+        try:
+            out["lj_resolved"] = {str(r["species"]): (str(r["set"]), float(r["sigma"]), float(r["eps_kB"])) for r in prov["lj_resolved"] or []}
+        except (KeyError, TypeError, ValueError) as e:
+            problems.append(f"{path}: malformed provenance.lj_resolved ({e})")
+    if out["lj_resolved"] is not None:
+        want = {}
+        for e in species:
+            if e.get("lump"):
+                for m in e["lump"]["members"]:
+                    want[f"{e['name']}.{m['name']}"] = (m["LJ_sigma"], m["LJ_eps_kB"])
+            else:
+                want[e["name"]] = (e["LJ_sigma"], e["LJ_eps_kB"])
+        got = {k: (v[1], v[2]) for k, v in out["lj_resolved"].items()}
+        if got != want:
+            bad = sorted(k for k in set(got) | set(want) if got.get(k) != want.get(k))
+            problems.append(f"{path}: provenance.lj_resolved does not match the species LJ values ({bad[:5]})")
     out["problems"] = problems
     out["consistent"] = not problems
     return out

@@ -46,8 +46,30 @@ DESIGN_T_MAX = DESIGN_T_BOUNDS[-1]
 _DESIGN_T_BOUNDS_3 = DESIGN_T_BOUNDS + (20000.0,)
 
 
+# LJ パラメータの集合 (共通データの LJ_sets; plan thermophysics-solver-owned-species-db §4.10, #14)。ソルバの physProp.ljSource と
+# 同じ規則 (順序付きの集合名リストの先頭から探す) の Python 鏡像。既定はソルバと同じ [gri30, svehla1962] (2026-10-01 ユーザ決定)。
+LJ_SET_NAMES = ("gri30", "svehla1962", "legacy_v1")
+LJ_SOURCE_DEFAULT = ("gri30", "svehla1962")
+
+
+def check_lj_source(lj_source=None) -> tuple:
+    """ljSource の検査 (None = 既定)。空・未知の集合名・重複は ValueError (ソルバ speciesDB_checkLjSource と同じ)。"""
+    if lj_source is None:
+        return LJ_SOURCE_DEFAULT
+    src = tuple(str(s) for s in lj_source)
+    if not src:
+        raise ValueError("ljSource が空 (集合名を 1 つ以上: gri30, svehla1962, legacy_v1)")
+    for k, s in enumerate(src):
+        if s not in LJ_SET_NAMES:
+            raise ValueError(f"ljSource: 未知の LJ 集合 {s!r} (gri30, svehla1962, legacy_v1)")
+        if s in src[:k]:
+            raise ValueError(f"ljSource: LJ 集合 {s!r} が 2 回ある")
+    return src
+
+
 def _load_design_species(path=SPECIES_DATA_FILE):
-    """共通データから (SPECIES_NASA9, LJ_PARAMS, 原子組成) を従来の形・順序・大文字キーで返す。
+    """共通データから (SPECIES_NASA9, LJ_SETS, 原子組成) を従来の形・順序・大文字キーで返す。
+    LJ_SETS は {従来キー: {集合名: (σ, ε/k_B)}} (どの集合にも無い種は空 dict)。
     区間は [200,1000],[1000,6000] (+ 任意の [6000,20000]) だけを受け、先頭 2 区間を low/high に取る (第 3 区間は捨てる)。
     それ以外の区間構成 (1 区間・非標準の区切り) は ValueError。"""
     import yaml
@@ -73,8 +95,8 @@ def _load_design_species(path=SPECIES_DATA_FILE):
         if len(low) != 9 or len(high) != 9:
             raise ValueError(f"{path}: {e['id']} の係数は 9 個ずつ必要")
         nasa9[key] = dict(MW=float(e["MW"]), low=low, high=high)
-        if e.get("LJ") is not None:
-            lj[key] = (float(e["LJ"]["sigma"]), float(e["LJ"]["eps_kB"]))
+        # LJ は出典別の集合 LJ_sets (plan §4.10, #14)。解決は lj_params (ljSource の先頭から探す)
+        lj[key] = {s: (float(v["sigma"]), float(v["eps_kB"])) for s, v in (e.get("LJ_sets") or {}).items()}
         if e.get("atoms") is not None:
             atoms[key] = dict(e["atoms"])
     return nasa9, lj, atoms
@@ -88,8 +110,25 @@ def check_design_T(T, what="") -> None:
                          "内蔵種は CEA の先頭 2 区間だけを持ち、6000 K 超を外挿しない (plan thermophysics-solver-owned-species-db #13-3)")
 
 
-SPECIES_NASA9, LJ_PARAMS, SPECIES_ATOMS = _load_design_species()
-# Lennard-Jones (σ [Å], ε/k_B [K]; Svehla 1962 / Chemkin transport) は LJ_PARAMS。擬似種の輸送係数は質量分率加重 (粗い近似で十分)
+SPECIES_NASA9, LJ_SETS, SPECIES_ATOMS = _load_design_species()
+
+
+def lj_params(lj_source=None) -> dict:
+    """{従来キー: (σ [Å], ε/k_B [K])}: 各種の LJ を ljSource (None = 既定 [gri30, svehla1962]) の先頭から探して最初にある集合の値。
+    どの集合にも無い種は含めない (ソルバは LJ なしとして LJ を読む使い方で拒否する)。"""
+    src = check_lj_source(lj_source)
+    out = {}
+    for k, sets in LJ_SETS.items():
+        for s in src:
+            if s in sets:
+                out[k] = sets[s]
+                break
+    return out
+
+
+# Lennard-Jones (σ [Å], ε/k_B [K]) は LJ_PARAMS (既定の ljSource [gri30, svehla1962] で解決; ソルバの既定と同じ)。
+# 擬似種の輸送係数は質量分率加重 (粗い近似で十分)
+LJ_PARAMS = lj_params()
 T_MID = 1000.0
 
 

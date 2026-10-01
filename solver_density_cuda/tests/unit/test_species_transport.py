@@ -3,6 +3,11 @@
 plans/active/thermophysics-solver-owned-species-db.md §5.1 #5t2 段 1 (合格条件は実装前に固定したもの)。
 
   python3 solver_density_cuda/tests/unit/test_species_transport.py [--forge BIN] [--base-forge BASE_BIN] [--case44 DIR] [--keep]
+      [--lj-source gri30,svehla1962]
+
+  --lj-source: 内蔵種の LJ の集合リスト (physProp.ljSource; plan §4.10 #14)。host ドライバの spec・forge の config・独立参照に
+       同じリストを渡して全試験を回す (省略時はソルバの既定 [gri30, svehla1962] で、config にも書かない)。#14-L1 (iv) は集合ごとに回す。
+       (R) で LJ の無い種を kinetic にする組 (その集合に無い種) は、ドライバと参照の両方が拒否することを確かめる。
 
   (G)  生成データ forge_transport_v1.yaml が trans.inp からの再生成と一字一句同じ (生成器 --check)。trans.inp の区間が連続
        (参照側の区間の選び方 = mixing_ab.py 流と実装側 = CEA の kt が同じになる条件)。
@@ -21,7 +26,9 @@ plans/active/thermophysics-solver-owned-species-db.md §5.1 #5t2 段 1 (合格�
   (C)  (--forge) forge --resolve-species: 記録が schema v2 + transport_compat を持ち Python load_record が互換性ハッシュを再計算できる、
        輸送指定だけ違う記録の差 (_record_diff) が transport 行を示す、viscMethod≠2 では計算の起動が止まる (段 2 #5t2-2)、thermalMethod≠2 と非 mapping は拒否。
   (H)  (--forge と --base-forge) physProp.transport の無い config のハッシュと記録ファイルがバイト不変:
-       case/44 run_0509 (4378b7d78339ba27) と内蔵のみ 3 構成。
+       case/44 run_0509 (4378b7d78339ba27) と内蔵のみ 3 構成。#14-L1 から記録の provenance に LJ の出所 (lj_source・lj_resolved) が
+       増えたので、旧バイナリとの比較はその 2 欄を除いた本文で行う。--lj-source で LJ の値が旧バイナリと違う構成は、ハッシュが違い、
+       記録の差が LJ だけであることを確かめる。
 規約: [PASS]/[FAIL]、失敗があれば非ゼロ終了。
 """
 import argparse, json, math, os, re, shutil, subprocess, sys, tempfile
@@ -35,11 +42,12 @@ TOOLS = os.path.join(SOLVER, "tools")
 sys.path.insert(0, HERE)
 sys.path.insert(0, TOOLS)
 import forge_species as fs          # noqa: E402
-from transport_reference import Reference, TR, iapws_mu, iapws_lam, _loglog_slope, H_IAPWS, L_IAPWS  # noqa: E402
+from transport_reference import Reference, TR, iapws_mu, iapws_lam, _loglog_slope, H_IAPWS, L_IAPWS, set_lj_source  # noqa: E402
 
 FCEA_DIR = os.path.join(REPO, "notes", "investigations", "2026-09-27-cea-vs-forge-properties", "fcea_mix")
 CEA = os.path.join(REPO, ".venv-cea", "nasa_cea")
 FAIL = 0
+LJ_SOURCE = None   # --lj-source (None = ソルバの既定、config に書かない)
 
 
 def check(ok, what):
@@ -71,6 +79,8 @@ class Driver:
         d = os.path.join(self.work, f"d{self.n:03d}")
         os.makedirs(d)
         spec = dict(spec)
+        if LJ_SOURCE is not None:
+            spec["ljSource"] = list(LJ_SOURCE)
         if db is not None:
             with open(os.path.join(d, "db.yaml"), "w") as f:
                 yaml.safe_dump(db, f, sort_keys=False)
@@ -184,10 +194,16 @@ def test_reference(D):
     ]
     for tag, spec, db, Xs in cases:
         d = D.run({**spec, "states": [{"T": T, "X": X} for X in Xs for T in T_GRID]}, db=db)
+        ref = Reference(spec["species"], spec["transport"], db)
+        nolj = [e["name"] for e in ref.reals if e["model"] == "kinetic" and e["sp"]["sigma"] is None]
+        if nolj:
+            # --lj-source の集合に無い種を kinetic にした組: ドライバ (実装) も拒否するはず
+            ok = (not d.get("ok")) and all(f"'{n}' has no Lennard-Jones data" in d.get("error", "") for n in nolj[:1])
+            check(ok, f"R {tag}: kinetic species {nolj} have no LJ in {LJ_SOURCE}: driver rejects ({d.get('error', 'ok')[:160]})")
+            continue
         if not d.get("ok"):
             check(False, f"R {tag}: driver failed: {d.get('error')}")
             continue
-        ref = Reference(spec["species"], spec["transport"], db)
         worst, where, k = 0.0, "", 0
         for X in Xs:
             for T in T_GRID:
@@ -350,6 +366,7 @@ class Cfg:
                 yaml.safe_dump(db, f, sort_keys=False)
         for pat, rep in (extra or []):
             t = re.sub(pat, rep, t)
+        t = with_lj_source(t)
         with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
             f.write(t)
         return d
@@ -358,9 +375,36 @@ class Cfg:
         self.n += 1
         d = os.path.join(self.root, f"c{self.n:02d}")
         os.makedirs(d)
-        shutil.copy(os.path.join(self.seed, "solverConfig.yaml"), d)
+        t = with_lj_source(open(os.path.join(self.seed, "solverConfig.yaml")).read())
+        with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
+            f.write(t)
         shutil.copy(os.path.join(self.seed, "species_db.yaml"), d)
         return d
+
+
+def with_lj_source(t):
+    """config のテキストに physProp.ljSource を足す (--lj-source のときだけ; thermoHrefTemp の前)。"""
+    if LJ_SOURCE is None:
+        return t
+    t2, k = re.subn(r"thermoHrefTemp:", "ljSource: " + json.dumps(list(LJ_SOURCE)) + ", thermoHrefTemp:", t, count=1)
+    assert k == 1
+    return t2
+
+
+def strip_lj_provenance(text):
+    """記録本文から provenance の lj_source / lj_resolved (#14-L1 で増えた来歴) を除く (旧バイナリの記録と比べるため)。"""
+    out, skip = [], False
+    for L in text.splitlines(keepends=True):
+        if L.startswith("  lj_source:"):
+            continue
+        if L.startswith("  lj_resolved:"):
+            skip = True
+            continue
+        if skip and L.startswith("    - "):
+            continue
+        skip = False
+        out.append(L)
+    return "".join(out)
 
 
 def resolve(exe, d):
@@ -428,10 +472,19 @@ def test_forge(a, root):
             db_ = dd + "_base"
             shutil.copytree(dd, db_, ignore=shutil.ignore_patterns("resolved_species_*"))
             rcb, hb, pb, _ = resolve(a.base_forge, db_)
-            same = rcn == 0 and rcb == 0 and hn == hb and pn and pb and open(pn, "rb").read() == open(pb, "rb").read()
+            same = (rcn == 0 and rcb == 0 and hn == hb and pn and pb
+                    and strip_lj_provenance(open(pn).read()) == strip_lj_provenance(open(pb).read()))
+            if rcn == 0 and rcb == 0 and pn and pb:
+                rn, rb = fs.load_record(pn), fs.load_record(pb)
+                ljdiff = [x for x in fs._record_diff(rb, rn)]
+                if ljdiff and all(".LJ_" in x for x in ljdiff):
+                    # --lj-source で LJ の値だけが旧バイナリと違う構成: ハッシュが違い、差は LJ だけ (#14-L1)
+                    check(hn != hb, f"H {tag}: only LJ values differ from the base binary under ljSource {LJ_SOURCE} "
+                                    f"({len(ljdiff)} keys, e.g. {ljdiff[0]}) -> hash {hb[:16]} -> {hn[:16]}")
+                    continue
             if tag.startswith("case44"):
                 # 外部 DB だけで種が決まる config は段 3 (#13-3) でも不変
-                check(same, f"H {tag}: hash {hn[:16]} and record bytes identical to base binary ({hb[:16]})")
+                check(same, f"H {tag}: hash {hn[:16]} and record bytes (without the #14-L1 LJ provenance) identical to base binary ({hb[:16]})")
             else:
                 # 内蔵種の config は段 3 で内蔵が CEA そのものになったので、段 3 前のバイナリとはハッシュが違うのが正しい
                 # (--base-forge が段 3 後のバイナリなら従来どおりバイト一致を求める)
@@ -439,7 +492,8 @@ def test_forge(a, root):
                     e.get("name") == "N2" and "Tbounds" not in e for e in fs.load_record(pb)["species"])
                 ok = (rcn == 0 and rcb == 0 and hn != hb) if base_pre13_3 else same
                 check(ok, f"H {tag}: hash {hb[:16]} -> {hn[:16]} ("
-                          + ("changed by #13-3, base binary is pre-#13-3" if base_pre13_3 else "identical to base binary") + ")")
+                          + ("changed by #13-3, base binary is pre-#13-3" if base_pre13_3
+                             else "identical to base binary, record without the #14-L1 LJ provenance") + ")")
         else:
             print(f"[SKIP] H {tag}: --base-forge not given")
 
@@ -451,7 +505,13 @@ def main():
     ap.add_argument("--case44", default=os.path.join(REPO, "case", "44.vitiated_air_wt", "run_0509_va3_M4.19_Lc8_dry_lumpX"),
                     help="solverConfig.yaml と species_db.yaml の雛形 (読むだけ)")
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--lj-source", default=None, help="内蔵種の LJ の集合リスト (カンマ区切り; 省略はソルバの既定で config に書かない)")
     a = ap.parse_args()
+    global LJ_SOURCE
+    if a.lj_source:
+        LJ_SOURCE = tuple(s for s in a.lj_source.split(",") if s)
+        set_lj_source(LJ_SOURCE)
+        print(f"ljSource: {list(LJ_SOURCE)}")
     root = tempfile.mkdtemp(prefix="forge_species_transport_")
     try:
         D = Driver(root)
