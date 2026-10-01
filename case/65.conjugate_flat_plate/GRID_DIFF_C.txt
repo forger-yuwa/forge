@@ -1,0 +1,6 @@
+C1
+  run_0024_c1_n16_lim0 → run_0026_c1_n32_lim0: 共通節点 19、max|Δq|/q̄ 0.527 %、max|ΔT| 2.697e-02 K
+  run_0026_c1_n32_lim0 → run_0022_c1_n64_lim0: 共通節点 38、max|Δq|/q̄ 0.112 %、max|ΔT| 5.965e-03 K
+C2
+  run_0025_c2_n16_lim0 → run_0027_c2_n32_lim0: 共通節点 19、max|Δq|/q̄ 1.600 %、max|ΔT| 1.681e-02 K
+  run_0027_c2_n32_lim0 → run_0023_c2_n64_lim0: 共通節点 38、max|Δq|/q̄ 0.355 %、max|ΔT| 3.544e-03 K

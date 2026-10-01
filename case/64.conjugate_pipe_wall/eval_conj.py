@@ -84,7 +84,7 @@ def bisect(a, k):
     return a
 
 
-def build(case, xs_f, ys_f, G, k, method="linear", deriv="o2", pc=None, extend=False):
+def build(case, xs_f, ys_f, G, k, method="linear", deriv="o2", pc=None, extend=False, solid_axial=1.0):
     """forge の流体格子 (xs_f, ys_f) を k 回 2 等分した参照格子に固体を足して Problem を作る。"""
     gc = pc.gc
     xs = bisect(xs_f, k); yfl = bisect(ys_f, k)
@@ -93,8 +93,11 @@ def build(case, xs_f, ys_f, G, k, method="linear", deriv="o2", pc=None, extend=F
         dx0 = xs[1] - xs[0]
         xe = np.arange(xs[0] - dx0, -120 * pc.R - 1e-12, -dx0)[::-1]
         n_ext = len(xe); xs = np.concatenate([xe, xs])
-    if extend and case == "C":
-        raise SystemExit("C の領域延長は後継 plan で扱う")
+    ymap, n_ext_y = yfl, 0
+    if extend and case == "C":                                        # 登録 (§4.6 (d)): 上境界を 1.5 倍に (後継 plan §4.6.2 M2、A と同じ作法)
+        dy = yfl[-1] - yfl[-2]
+        ye = np.arange(yfl[-1] + dy, 1.5 * pc.H_TOP + 1e-12, dy)
+        n_ext_y = len(ye); yfl = np.concatenate([yfl, ye])
     if case == "A":
         ns_f = len(ys_f) - 1                                           # 固体は流体と同じ半径間隔 (gen_solid の既定)
         ysol = np.linspace(pc.R, pc.R_O, ns_f * 2 ** k + 1)[1:]
@@ -114,7 +117,13 @@ def build(case, xs_f, ys_f, G, k, method="linear", deriv="o2", pc=None, extend=F
         rob = lambda xm, y: (pc.H_BACK, gc.T_IN + pc.DT_H) if (0 <= xm <= pc.L and abs(y - ys[0]) < 1e-15) else None
         fl_rows = slice(jw, len(ys))
     nx, ny = len(xs), len(ys)
-    Fm = {kk: cr.map_field(xs_f, ys_f, G[kk], xs[n_ext:], yfl, method) for kk in ("ro", "Ux", "Uy", "P", "T")}
+    Fm = {kk: cr.map_field(xs_f, ys_f, G[kk], xs[n_ext:], ymap, method) for kk in ("ro", "Ux", "Uy", "P", "T")}
+    uy_top = None
+    if n_ext_y:
+        # 延長部の固定流れ場: forge の上端の行の ρ・u・v・P・T をそのまま y 方向に繰り返す (源項は延長後の場から同じ flow_source で作る)
+        uy_top = float(np.abs(Fm["Uy"][:, -1]).max())
+        for kk in Fm:
+            Fm[kk] = np.concatenate([Fm[kk], np.repeat(Fm[kk][:, -1:], n_ext_y, axis=1)], axis=1)
     if n_ext:
         # 延長部の固定流れ場: forge の入口列の ρ・u・v・T をそのまま延ばし、圧力は入口の勾配で線形に延ばす (十分発達した流れ)
         dpdx = (Fm["P"][1] - Fm["P"][0]) / (xs[n_ext + 1] - xs[n_ext])
@@ -125,7 +134,8 @@ def build(case, xs_f, ys_f, G, k, method="linear", deriv="o2", pc=None, extend=F
     ro[:, fl_rows] = Fm["ro"]; u[:, fl_rows] = Fm["Ux"]; v[:, fl_rows] = Fm["Uy"]
     phi, work = cr.flow_source(xs, yfl, Fm["ro"], Fm["Ux"], Fm["Uy"], Fm["P"], gc.MU, axisym, deriv=deriv)
     S[:, fl_rows] = phi + work
-    P = cr.Problem(xs, ys, mat, gc.K_F, k_s, gc.CP, axisym, 0.0, ro=ro, u=u, v=v, source=S, robin=rob)
+    P = cr.Problem(xs, ys, mat, gc.K_F, k_s, gc.CP, axisym, 0.0, ro=ro, u=u, v=v, source=S, robin=rob, solid_axial=solid_axial)
+    P.uy_top = uy_top
     # 入口は forge の入口列の温度分布 (流体部分) を Dirichlet に: T_in を行ごとに
     Tin_col = np.full(ny, gc.T_IN); Tin_col[fl_rows] = Fm["T"][0]
     P.T_in_profile = Tin_col
@@ -235,8 +245,11 @@ def main():
     for k in range(a.levels + 1):
         run_variant(("grid", k), k=k)
     run_variant("cubic", k=1, method="cubic"); run_variant("spline", k=1, deriv="spline")
-    if a.case == "A":
-        run_variant("ext", k=1, extend=True)
+    run_variant("ext", k=1, extend=True)
+    if a.case == "C":                                                  # 後継 plan §4.6.2 M1: 軸方向伝導なしの参照 (solid_axial=0)
+        run_variant(("noax", a.levels), k=a.levels, solid_axial=0.0); run_variant(("noax", a.levels - 1), k=a.levels - 1, solid_axial=0.0)
+        run_variant(("noax", 1), k=1, solid_axial=0.0)
+        run_variant("noax_cubic", k=1, method="cubic", solid_axial=0.0); run_variant("noax_spline", k=1, deriv="spline", solid_axial=0.0)
 
     def wall_vals(key, qkey="q2"):
         V = variants[key]; xs = V["xs"]
@@ -260,10 +273,8 @@ def main():
     uq = np.abs(qr - qrP) + np.abs(qc_ - q1) + np.abs(qs_ - q1) + np.abs(q3 - qr)
     # (d) 上流延長 (−120R) の差は**比較の U に入れない** (2026-09-30 disposition M2 (ii) — 事後改訂): forge と参照は同一の有限領域・
     # 同一 BC の問題を解いており、延長は入口位置・固体端面・源項の範囲を変える「問題定義の感度」。別掲する。
-    ext_sens = None
-    if a.case == "A":
-        Te_, qe_ = wall_vals("ext")
-        ext_sens = (np.abs(Te_ - T1), np.abs(qe_ - q1))
+    Te_, qe_ = wall_vals("ext")
+    ext_sens = (np.abs(Te_ - T1), np.abs(qe_ - q1))
     Tf, qf = W["Tw"], W["q"]
     # forge の固体
     xs_s, ys_s, Ts_f, Qtot_f = solid_from_dump(run, st, pid, k_s_reg)
@@ -304,8 +315,9 @@ def main():
     def U_of(j):
         u = abs(si[("grid", L)][j] - si[("grid", L - 1)][j]) + abs(si["cubic"][j] - si[("grid", 1)][j]) + abs(si["spline"][j] - si[("grid", 1)][j])
         return u
-    eff = [("固体の厚さ方向の温度差 ΔT_s [K]", dTs_f, dTs_r, U_of(0), tolT_abs),
-           ("固体の軸方向熱量 max|Q_ax|/Q_tot", Qax_f, Qax_r, U_of(1), tolI)]
+    eff = [("固体の厚さ方向の温度差 ΔT_s [K]", dTs_f, dTs_r, U_of(0), tolT_abs)]
+    if a.case == "A":
+        eff.append(("固体の軸方向熱量 max|Q_ax|/Q_tot", Qax_f, Qax_r, U_of(1), tolI))
     print(f"=== {a.case} ({cname}) {run}  step {st}、壁節点 {len(xw)} (期待集合と一致)、参照 {L + 1} 水準")
     print(f"  {info}")
     bad = und = False
@@ -328,7 +340,30 @@ def main():
             continue
         bad |= not good
         print(f"  {'PASS' if good else 'FAIL'}  {nm:<34} forge {vf:.4e} / 参照 {vr:.4e}、U {U:.3e} (効果/U {vf/max(U,1e-300):.1f})、許容幅 {tol:.3e} (効果/許容 {vf/tol:.1f})")
-    if ext_sens is not None:
+    if a.case == "C":
+        # 後継 plan §4.6.2 M1: 登録量 (発注元 §4.5 C2 行) = 評価窓内の軸方向伝導あり/なしの θ_i 差。C2 はゲート、C1 は参考
+        def dth(ka, kn):
+            Ta_, qa_ = wall_vals(ka); Tn_, qn_ = wall_vals(kn)
+            return float((np.abs(Ta_ - Tn_)[win] / pc.DT_H).max()), float((np.abs(qa_ - qn_)[win]).max() / qm)
+        dL, dqL = dth(("grid", L), ("noax", L)); dLm, _ = dth(("grid", L - 1), ("noax", L - 1)); d1, _ = dth(("grid", 1), ("noax", 1))
+        dc, _ = dth("cubic", "noax_cubic"); ds, _ = dth("spline", "noax_spline")
+        U_ax = abs(dL - dLm) + abs(dc - d1) + abs(ds - d1)
+        Tn, _ = wall_vals(("noax", L)); th_n = (Tn - gc.T_IN) / pc.DT_H
+        D_f = float(np.abs(th_f - th_n)[win].max()); U_th = float((uT / pc.DT_H)[win].max())
+        good = np.isfinite(dL) and dL >= 5 * U_ax and dL > 0.01
+        tag = ("PASS" if good else "FAIL") if cname == "C2" else "参考"
+        if cname == "C2":
+            bad |= not good
+        print(f"  {tag:5s} 軸方向伝導あり/なしの θ_i 差 (参照)       Δθ_ax {dL:.4e}、U_ax {U_ax:.3e} (効果/U {dL/max(U_ax,1e-300):.1f})、許容幅 0.01 (効果/許容 {dL/0.01:.2f})"
+              + ("" if cname == "C2" else " — C1 は判定しない (§6)"))
+        print(f"  報告  forge と「なし」参照の距離 D_f {D_f:.4e} (主判定の U_θ {U_th:.3e}、D_f − U_θ {D_f - U_th:.4e})")
+        print(f"  参考  あり/なしの q 差 max/q_mean {dqL:.4e}、固体の軸方向熱量 max|Q_ax|/Q_tot forge {Qax_f:.4e} / 参照 {Qax_r:.4e} (U {U_of(1):.3e})")
+    if ext_sens is not None and a.case == "C":
+        uyt = variants["ext"]["P"].uy_top
+        print(f"  --- 別掲 (比較の U に含めない): 上境界を 1.5 倍に延ばしたときの参照の変化 (問題定義の感度、後継 plan §4.6.2 M2)")
+        print(f"      θ_i 窓内 max {(ext_sens[0][win] / pc.DT_H).max():.4e} (許容の 1/3 = 3.3e-3)、q_i 窓内 max {(ext_sens[1][win]).max()/qm:.4e} of q_mean (許容の 1/3 = 1e-2)、"
+              f"上端行の max|Uy| {uyt:.3e} m/s ({uyt/pc.U_INF:.2e} U∞)")
+    if ext_sens is not None and a.case == "A":
         print(f"  --- 別掲 (比較の U に含めない): 上流を 1.5 倍に延ばしたときの参照の変化 (問題定義の感度)")
         print(f"      壁温 max {ext_sens[0].max():.4e} K ({ext_sens[0].max()/rise*100:.3f} % of 上昇)、q_i max {ext_sens[1].max()/qo*100:.3f} % of q_o、"
               f"Q_up/Q_tot {ext_ratio:.3e}")
