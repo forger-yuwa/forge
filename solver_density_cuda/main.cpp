@@ -1890,6 +1890,7 @@ void assembleResidual(StepContext& s, int stage_index)
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         condensationTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);  // 液相モーメント移流残差 (Phase 1)
         condensationSource_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 核生成+成長ソース (Phase 2)
+        condThetaScan_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, 0);       // θ_src の全評価を覆う集計 (#1b-pre; 計上のみ)
         tracerTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);        // 受動トレーサ移流残差 (node 入口ピン込み)
         passivePinResidual_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 受動種経路: node 入口ピンノードの残差除外 (ソース集計の後)
         // 二相拡散 (#4e) は化学種の残差へ condensationTransport の中で足すので、化学種のピン除去をもう一度掛ける (周期集約の前)。
@@ -2174,6 +2175,9 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
         } else {
             condensationTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
         }
+        // 更新の θ (二相の非分割更新 / 更新クランプ θ_u) の全更新を覆う集計 (#1b-pre; 計上のみ)。θ を書かない経路では呼ばない。
+        if (twoPhase || (s.cfg.timeIntegration == 11 && s.cfg.condLimiterMode == 1 && s.cfg.condEquilibrium == 0))
+            condThetaScan_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, 1);
         condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // φ=ρφ/ρ (出力/次残差用に同期)
         // 受動トレーサ (segregated point-implicit)。tracer 無効で no-op。
         tracerUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
@@ -2686,7 +2690,7 @@ int main(int argc, char** argv) {
     passiveRecordInitialTotals_d_wrapper(cfg, cuda_cfg, msh, var);   // 収支の独立照合の始点 (計算開始前の総量)
     // 二相拡散 (#4f (4)): 収束受入の独立残差監査。開始時に r0 を記録し、終了時に格納状態から組み直して判定する (無効構成は no-op)。
     auto twoPhaseAudit = [&](int iStepAudit, bool final) {
-        if (!condTwoPhaseDiffusionActive(cfg)) return;
+        if (!condResidualAuditActive(cfg)) return;
         StepContext sa{cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger, iStepAudit};
         assembleResidual(sa, 1);
         twoPhaseAudit_d_wrapper(cfg, cuda_cfg, msh, var, iStepAudit, final);

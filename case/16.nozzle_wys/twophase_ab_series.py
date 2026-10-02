@@ -28,6 +28,10 @@
   g_cond0_vmean   : M0 上の体積重み平均 g。
   gmax            : 全域の g 最大。
   nonfinite       : 読んだ量 (P, T, ro, Ux, Uy, g_0) の非有限値の数 (判定列に入れない; 監視用)。
+  検査列 (#1b-pre (5); 定常性の判定ではなく各スナップショットで 0 / 非負であることを直接見る):
+  nonfinite_cons  : 全保存量 (VALUE の ro, roUx, roUy, roUz, roe, roK, roOmega, roY*, rog_*, roQ*_* のうち存在するもの) の非有限値の数。
+  min_rv / min_rg / min_rQ2 / min_rQ1 / min_rQ0 : 蒸気 ρY_w − ρg (w = condGasSpecies)・液 ρg・各 ρQ の全節点最小 (float の格納値を double で差)。
+  neg_rv / neg_rg / neg_rQ : 同じ量が負の節点数 (Q は 3 本の合計)。受入には 0 を要求する (plan §5.1 #1b)。
 壁熱流束の列は作らない (上記のとおり出力が無く、断熱壁で 0)。
 
 使い方の例 (判定は check_quasisteady.py。許容は事前登録で決める):
@@ -40,7 +44,9 @@ import h5py, numpy as np, yaml
 HERE = os.path.dirname(os.path.abspath(__file__))
 P0 = 59070.0                     # 入口全圧 [Pa] (run_0482 bcondConfig inlet Pt)
 COLS = ["step", "onset_c_g1e4_mm", "onset_c_g1e3_mm", "g_exit_mw", "g_exit_c", "pw_mean_x10", "pw21", "pw42", "pw52",
-        "dev_pct", "Tw_mean_x10_K", "T_cond0_vmean_K", "g_cond0_vmean", "gmax", "nonfinite"]
+        "dev_pct", "Tw_mean_x10_K", "T_cond0_vmean_K", "g_cond0_vmean", "gmax", "nonfinite",
+        "nonfinite_cons", "min_rv", "min_rg", "min_rQ2", "min_rQ1", "min_rQ0", "neg_rv", "neg_rg", "neg_rQ"]
+CONS_FIXED = ("ro", "roUx", "roUy", "roUz", "roe", "roK", "roOmega")
 
 _exp = np.genfromtxt(os.path.join(HERE, "wyslouzil_fig3_pp0.csv"), delimiter=",", skip_header=1)[:, :3]
 XE = _exp[:, 0]*10.0             # [mm]
@@ -125,11 +131,27 @@ def load_mask(path, gmin):
     return g0 > gmin
 
 
-def read(fn):
+def is_conserved(k):
+    return k in CONS_FIXED or (k.startswith("roY") and k[3:].isdigit()) or k.startswith("rog_") or \
+        (k.startswith("roQ") and "_" in k and k[3:k.index("_")].isdigit())
+
+
+def read(fn, iw=1):
     with h5py.File(fn, "r") as f:
         V = f["VALUE"]
         d = {k: np.asarray(V[k], np.float64) for k in ("P", "T", "ro", "Ux", "Uy", "g_0", "wall_dist", "volume") if k in V}
         d["coord"] = np.asarray(f["MESH/COORD"])
+        cons = [k for k in V if is_conserved(k)]
+        d["nonfinite_cons"] = sum(int(np.count_nonzero(~np.isfinite(np.asarray(V[k])))) for k in cons)
+        d["n_cons"] = len(cons)
+        need = [f"roY{iw}", "rog_0", "roQ2_0", "roQ1_0", "roQ0_0"]
+        miss = [k for k in need if k not in V]
+        if miss:
+            sys.exit(f"{fn}: VALUE/{miss} が無い (非負の検査列を作れない; output.level 2 で出る)")
+        # float の格納値をそのまま double に上げて差を取る (蒸気 = 総水分 − 液)
+        rw, rg = np.asarray(V[f"roY{iw}"], np.float64), np.asarray(V["rog_0"], np.float64)
+        d["rv"] = rw - rg; d["rg"] = rg
+        d["rQ"] = [np.asarray(V[k], np.float64) for k in ("roQ2_0", "roQ1_0", "roQ0_0")]
     for k in ("P", "T", "ro", "Ux", "Uy", "g_0", "volume"):
         if k not in d:
             sys.exit(f"{fn}: VALUE/{k} が無い (output.level 2 か extraFields に {k} を入れる)")
@@ -161,7 +183,21 @@ def metrics(d, geo, mask0):
         Tw_mean_x10_K=float(Twi[SEL10].mean()),
         T_cond0_vmean_K=float(np.sum(T[mask0]*m0v)/np.sum(m0v)) if m0v.sum() > 0 else np.nan,
         g_cond0_vmean=float(np.sum(g[mask0]*m0v)/np.sum(m0v)) if m0v.sum() > 0 else np.nan,
-        gmax=float(np.max(g)), nonfinite=nonfin)
+        gmax=float(np.max(g)), nonfinite=nonfin,
+        nonfinite_cons=d.get("nonfinite_cons", np.nan),
+        min_rv=float(np.min(d["rv"])), min_rg=float(np.min(d["rg"])),
+        min_rQ2=float(np.min(d["rQ"][0])), min_rQ1=float(np.min(d["rQ"][1])), min_rQ0=float(np.min(d["rQ"][2])),
+        neg_rv=int(np.count_nonzero(d["rv"] < 0)), neg_rg=int(np.count_nonzero(d["rg"] < 0)),
+        neg_rQ=int(sum(np.count_nonzero(q < 0) for q in d["rQ"])))
+
+
+def cond_gas_species(run):
+    """run の solverConfig の condensation.condGasSpecies (総水分の化学種 index)。"""
+    cfg = yaml.safe_load(open(os.path.join(run, "solverConfig.yaml")))
+    iw = (cfg.get("condensation") or {}).get("condGasSpecies", 1)
+    if not isinstance(iw, int):
+        sys.exit(f"{run}: condensation.condGasSpecies が整数でない ({iw!r}; 名前指定は未対応)")
+    return iw
 
 
 def setup(run, mask_from=None, gmin_mask=1e-6, first=None):
@@ -169,7 +205,7 @@ def setup(run, mask_from=None, gmin_mask=1e-6, first=None):
     fs = res_files(run)
     if not fs:
         sys.exit(f"{run}: res_*.h5 が無い")
-    d0 = read(first or fs[0][1])
+    d0 = read(first or fs[0][1], cond_gas_species(run))
     if "wall_dist" not in d0:
         with h5py.File(value_file(run), "r") as f:
             d0["wall_dist"] = np.asarray(f["VALUE/wall_dist"], np.float64)
@@ -189,8 +225,9 @@ def main():
     a = ap.parse_args()
     fs, geo, mask0, coord0 = setup(a.run, a.mask_from, a.gmin_mask)
     rows = []
+    iw = cond_gas_species(a.run)
     for st, fn in fs:
-        d = read(fn)
+        d = read(fn, iw)
         if not np.array_equal(d["coord"], coord0):
             sys.exit(f"{fn}: MESH/COORD が他のスナップショットと違う")
         m = metrics(d, geo, mask0)
@@ -198,6 +235,13 @@ def main():
     out = a.out or os.path.join(a.run, "twophase_series.csv")
     np.savetxt(out, np.array(rows, dtype=float), delimiter=",", header=",".join(COLS), comments="", fmt="%.9g")
     print(f"{out}  ({len(rows)} rows, steps {fs[0][0]}..{fs[-1][0]}; M0 = {int(mask0.sum())} nodes)")
+    arr = np.array(rows, dtype=float)
+    ci = {c: i for i, c in enumerate(COLS)}
+    bad = int(np.sum(arr[:, ci["nonfinite_cons"]] != 0) + np.sum(arr[:, ci["neg_rv"]] != 0)
+              + np.sum(arr[:, ci["neg_rg"]] != 0) + np.sum(arr[:, ci["neg_rQ"]] != 0))
+    print(f"検査列 (全スナップショット): 保存量の非有限 最大 {int(arr[:, ci['nonfinite_cons']].max())}・"
+          f"負の節点 蒸気 {int(arr[:, ci['neg_rv']].max())} 液 {int(arr[:, ci['neg_rg']].max())} Q {int(arr[:, ci['neg_rQ']].max())} (最大値)、"
+          f"min ρv {arr[:, ci['min_rv']].min():.3e} ρg {arr[:, ci['min_rg']].min():.3e} → {'OK' if bad == 0 else 'NG (' + str(bad) + ' スナップショット·項目)'}")
 
 
 if __name__ == "__main__":

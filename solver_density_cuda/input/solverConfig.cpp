@@ -1154,6 +1154,8 @@ void solverConfig::read(std::string fname)
             if (this->condTwoPhaseDiffusion != 0 && this->condTwoPhaseDiffusion != 1) throw std::runtime_error("Key 'condTwoPhaseDiffusion' in 'condensation' must be 0 (off) or 1 (two-phase diffusion, steady only).");
             this->condTwoPhaseRelax = getOptionalValidatedValue<double>(cond, "condTwoPhaseRelax", 1.0, "condensation");
             if (!(this->condTwoPhaseRelax > 0.0) || this->condTwoPhaseRelax > 1.0) throw std::runtime_error("Key 'condTwoPhaseRelax' in 'condensation' must be in (0, 1].");
+            this->condAuditResidual = getOptionalValidatedValue<int>(cond, "condAuditResidual", 0, "condensation");
+            if (this->condAuditResidual != 0 && this->condAuditResidual != 1) throw std::runtime_error("Key 'condAuditResidual' in 'condensation' must be 0 or 1.");
             this->condEquilibrium = getOptionalValidatedValue<int>(cond, "condEquilibrium", 0, "condensation");
             this->condFloat = getOptionalValidatedValue<int>(cond, "condFloat", 1, "condensation");
             if (this->condFloat != 0 && this->condFloat != 1) throw std::runtime_error("Key 'condFloat' in 'condensation' must be 0 or 1.");

@@ -2,6 +2,10 @@
 """二相拡散 A/B (plan condensation-two-phase-transport §5.1 #1b) の差を出す (記録用; 合否は付けない)。
 
     python3 twophase_ab_compare.py RUN_A RUN_B [--step N] [--gmin 1e-6] [--out PREFIX]
+    python3 twophase_ab_compare.py RUN_A RUN_B --series CSV [--gmin 1e-6]
+      -> 両 run に共通の全出力 step について 1. の統計を 1 行ずつ (check_quasisteady.py --series-csv 用; #1b-pre (4))。
+         列: step, n_common, vol_common, dT_p50_K, dT_p95_K, dT_p99_K, dT_max_K, dT_mean_signed_K, vol_onlyA, vol_onlyB
+         (C が空の step は分位点・平均を NaN にする — check_quasisteady は非有限を判定不能として拒否する)。
 
 出すもの (同じ step のスナップショット同士。既定は両 run に共通の最大 step):
   1. 共通凝縮域 C = {g_A > gmin かつ g_B > gmin の節点} (既定 gmin 1e-6) での |ΔT| = |T_B − T_A| の体積重み分位点
@@ -40,6 +44,46 @@ def wquantile(x, w, q):
     return float(x[np.searchsorted(c, q*c[-1], side="left")])
 
 
+SERIES_COLS = ["step", "n_common", "vol_common", "dT_p50_K", "dT_p95_K", "dT_p99_K", "dT_max_K", "dT_mean_signed_K",
+               "vol_onlyA", "vol_onlyB"]
+
+
+def region_stats(da, db, gmin):
+    """共通凝縮域 C の |ΔT| 統計と片側凝縮体積 (1. と時系列で同じ関数)。"""
+    vol = da["volume"]
+    ga, gb = da["g_0"], db["g_0"]
+    cm = (ga > gmin) & (gb > gmin)
+    onlyA = (ga > gmin) & ~(gb > gmin); onlyB = (gb > gmin) & ~(ga > gmin)
+    dT = db["T"] - da["T"]
+    r = dict(cm=cm, onlyA=onlyA, onlyB=onlyB, dT=dT, n_common=int(cm.sum()), vol_common=float(vol[cm].sum()),
+             vol_onlyA=float(vol[onlyA].sum()), vol_onlyB=float(vol[onlyB].sum()))
+    if cm.sum() == 0:
+        r.update(p50=np.nan, p95=np.nan, p99=np.nan, dmax=np.nan, mean_signed=np.nan, imax=-1)
+    else:
+        x, w = np.abs(dT[cm]), vol[cm]
+        r.update(p50=wquantile(x, w, 0.50), p95=wquantile(x, w, 0.95), p99=wquantile(x, w, 0.99), dmax=float(x.max()),
+                 mean_signed=float(np.sum(dT[cm]*w)/np.sum(w)), imax=int(np.where(cm)[0][np.argmax(x)]))
+    return r
+
+
+def write_series(a, fa, fb, common):
+    rows = []
+    coord0 = None
+    for st in common:
+        da, db = S.read(fa[st], S.cond_gas_species(a.run_a)), S.read(fb[st], S.cond_gas_species(a.run_b))
+        if coord0 is None:
+            coord0 = da["coord"]
+        if not (np.array_equal(da["coord"], coord0) and np.array_equal(db["coord"], coord0)):
+            sys.exit(f"step {st}: MESH/COORD が違う")
+        r = region_stats(da, db, a.gmin)
+        rows.append([st, r["n_common"], r["vol_common"], r["p50"], r["p95"], r["p99"], r["dmax"], r["mean_signed"],
+                     r["vol_onlyA"], r["vol_onlyB"]])
+    np.savetxt(a.series, np.array(rows, dtype=float), delimiter=",", header=",".join(SERIES_COLS), comments="", fmt="%.9g")
+    print(f"{a.series}  ({len(rows)} rows, steps {common[0]}..{common[-1]})")
+    print("判定例: python3 solver_density_cuda/tools/check_quasisteady.py --series-csv " + a.series +
+          " --series-cols dT_p95_K,dT_p99_K,dT_max_K,dT_mean_signed_K,vol_onlyA,vol_onlyB --tail 0.5 --drift 0.0001 --osc 0.0001 --min-snaps 21")
+
+
 def same_values(f1, f2):
     with h5py.File(f1, "r") as a, h5py.File(f2, "r") as b:
         va, vb = a["VALUE"], b["VALUE"]
@@ -55,12 +99,16 @@ def main():
     ap.add_argument("--step", type=int, default=None, help="比べる step (既定: 両 run に共通の最大 step)")
     ap.add_argument("--gmin", type=float, default=1e-6, help="共通凝縮域の g 閾値 (既定 1e-6)")
     ap.add_argument("--out", default=None, help="表を PREFIX.md にも書く")
+    ap.add_argument("--series", default=None, help="共通の全 step の統計を CSV に書く (check_quasisteady --series-csv 用)")
     a = ap.parse_args()
 
     fa = dict(S.res_files(a.run_a)); fb = dict(S.res_files(a.run_b))
     common = sorted(set(fa) & set(fb))
     if not common:
         sys.exit("両 run に共通の step の res_*.h5 が無い")
+    if a.series:
+        write_series(a, fa, fb, common)
+        return
     st = a.step if a.step is not None else common[-1]
     if st not in fa or st not in fb:
         sys.exit(f"step {st} が両方に無い (共通: {common[:3]}..{common[-3:]})")
@@ -72,7 +120,7 @@ def main():
     # 初期場の同一性 (A・B の valueFileName)
     ok_ic, why_ic = same_values(S.value_file(a.run_a), S.value_file(a.run_b))
     _, geo, mask0, coord0 = S.setup(a.run_a, None, 1e-6, first=fa[st])
-    da, db = S.read(fa[st]), S.read(fb[st])
+    da, db = S.read(fa[st], S.cond_gas_species(a.run_a)), S.read(fb[st], S.cond_gas_species(a.run_b))
     if not (np.array_equal(da["coord"], coord0) and np.array_equal(db["coord"], coord0)):
         sys.exit("A と B の MESH/COORD が違う (同一メッシュの A/B ではない)")
 
@@ -85,9 +133,8 @@ def main():
     # 1. 共通凝縮域の |ΔT|
     vol = da["volume"]
     ga, gb = da["g_0"], db["g_0"]
-    cm = (ga > a.gmin) & (gb > a.gmin)
-    onlyA = (ga > a.gmin) & ~(gb > a.gmin); onlyB = (gb > a.gmin) & ~(ga > a.gmin)
-    dT = db["T"] - da["T"]
+    R = region_stats(da, db, a.gmin)
+    cm, onlyA, onlyB, dT = R["cm"], R["onlyA"], R["onlyB"], R["dT"]
     out("")
     out(f"## 1. 共通凝縮域 C (g_A > {a.gmin:g} かつ g_B > {a.gmin:g}) の温度差 ΔT = T_B − T_A")
     out(f"- C: {int(cm.sum())} 節点, 体積 {vol[cm].sum():.6e} (全体の {vol[cm].sum()/vol.sum()*100:.2f} %)")
@@ -96,9 +143,7 @@ def main():
         out("- C が空 (比較不能)")
     else:
         x, w = np.abs(dT[cm]), vol[cm]
-        p50, p95, p99 = (wquantile(x, w, q) for q in (0.50, 0.95, 0.99))
-        mean_signed = float(np.sum(dT[cm]*w)/np.sum(w))
-        imax = np.where(cm)[0][np.argmax(x)]
+        p50, p95, p99, mean_signed, imax = R["p50"], R["p95"], R["p99"], R["mean_signed"], R["imax"]
         out("")
         out("| 量 | 値 [K] |")
         out("| --- | --- |")

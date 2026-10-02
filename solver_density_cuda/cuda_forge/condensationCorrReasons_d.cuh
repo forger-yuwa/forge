@@ -18,7 +18,21 @@
 #define COND_REASON_RN_SUM   10   // 化学種再正規化が凝縮種 ρY_w に掛けた補正: Σ |Δ(ρY_w)| V (species_renormalize_d)
 #define COND_REASON_RN_MAX   11   //   max |係数 − 1| (区間値)
 #define COND_REASON_RN_N     12   //   ρY_w が変わったノード数
-#define COND_REASON_N        16
+// #1b-pre (plan §5.1): 再正規化の成分別補正と係数偏差の累積、θ (更新) と θ_src (ソース) の全更新を覆う集計 (計上のみ)。
+#define COND_REASON_RN_MAXC  13   // 再正規化の max |係数 − 1| (累積; ログで戻さない)
+#define COND_REASON_RNG_SUM  14   // 再正規化が液 ρg に掛けた補正 Σ |Δ(ρg)| V (二相拡散の経路だけ; 既定経路は液に掛けないので 0)
+#define COND_REASON_RNQ2_SUM 15   //   同 ρQ2
+#define COND_REASON_RNQ1_SUM 16   //   同 ρQ1
+#define COND_REASON_RNQ0_SUM 17   //   同 ρQ0
+#define COND_REASON_TU_N     18   // 更新の制限 θ (θ_u / 二相の θ) < 1 のセル·更新数 (累積)
+#define COND_REASON_TU_MIN   19   //   θ の最小 (区間値, 初期 1)
+#define COND_REASON_TU_LAST  20   //   直近の 1 更新での θ<1 のセル数 (更新ごとに 0 から)
+#define COND_REASON_TU_CALLS 21   //   更新の回数 (累積)
+#define COND_REASON_TS_N     22   // ソースの蒸気枯渇律速 θ_src < 1 のセル·評価数 (累積)
+#define COND_REASON_TS_MIN   23   //   θ_src の最小 (区間値, 初期 1)
+#define COND_REASON_TS_LAST  24   //   直近の 1 評価での θ_src<1 のセル数
+#define COND_REASON_TS_CALLS 25   //   ソース評価の回数 (累積)
+#define COND_REASON_N        32
 
 #if defined(__CUDACC__)
 __device__ inline void cond_atomic_min_double(double* a, double v)

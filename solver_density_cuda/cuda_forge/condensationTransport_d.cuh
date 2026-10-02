@@ -49,6 +49,14 @@ inline bool condTwoPhaseDiffusionActive(const solverConfig& cfg)
     return cfg.condTwoPhaseDiffusion == 1 && cfg.condensation == 1 && cfg.nCondSpecies >= 1 && cfg.thermalMethod == 2
         && cfg.condGasSpecies >= 0 && cfg.nSpecies >= 2 && cfg.viscMethod != 0;
 }
+// 収束受入の独立残差監査を行う構成か (#4f (4) / #1b-pre (1))。二相拡散が働く run は新作用素、condAuditResidual 1 の
+// TP carrier 凝縮 run (二相拡散 OFF) は旧作用素を監査する。
+inline bool condResidualAuditActive(const solverConfig& cfg)
+{
+    if (condTwoPhaseDiffusionActive(cfg)) return true;
+    return cfg.condAuditResidual == 1 && cfg.condensation == 1 && cfg.nCondSpecies == 1 && cfg.thermalMethod == 2
+        && cfg.condGasSpecies >= 0 && cfg.nSpecies >= 2;
+}
 // 二相拡散の起動時検査とログ (main が bcond 読込後に 1 回呼ぶ)。併用不可の設定は理由を出して終了する。
 void condTwoPhaseDiffusionValidate(const solverConfig& cfg);
 // 蒸気の残差 res_roYv = res_roY_w − res_rog (監視・residual_history の rms_roYv 列; 周期集約の後に呼ぶ)。
@@ -61,6 +69,8 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
 void twoPhaseHoldWater_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 // 二相更新の監視 (θ・保留量・状態補正) を 1 行出す (condCorrectionLog から monitorInterval ごと)。
 void twoPhaseUpdateLog(solverConfig& cfg, int iStep);
+// θ の全更新を覆う集計 (#1b-pre (3)): kind 0 = θ_src (condensationSource の直後), 1 = 更新の θ (モーメント更新の直後)。計上だけ。
+void condThetaScan_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int kind);
 
 // 原始量 φ = ρφ/ρ を全セル (ghost 含む) について更新する。スカラ移流の上流値に使う。
 void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);

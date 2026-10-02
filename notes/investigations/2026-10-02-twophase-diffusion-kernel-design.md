@@ -745,3 +745,55 @@ res_2 は新 vs 旧と旧 vs 旧 (同じバイナリの 2 回) で同じ 83 デ�
 ### 15.5 回帰 (新キー OFF)
 
 `test_transport_gas_phase.py --base-forge <b900550c>` ALL PASS (G0 4 構成バイト一致)。twoPhaseDiffusion_d.cuh のテンプレート化と面入力の切り出しの後も T1〜T3 の数値は不変。
+
+## 16. #1b-pre 計測手段 (2026-10-02; HEAD `84af890c` + 未 commit)
+
+裁定: [`notes/reviews/2026-10-02-twophase-1b-preregistration-diagnose.md`](../reviews/2026-10-02-twophase-1b-preregistration-diagnose.md) (全件採用; plan §5.1 #1b/#1b-pre 行)。
+ビルドは `.build-native/transport-s3` をクリーンビルド (solverConfig.hpp に `condAuditResidual` を足したため; 1 分 50 秒、エラー 0)。確認はすべて 0/2 step (run_0482 入力の複製、種 DB の H2O を内蔵へ)。
+
+### 16.1 (1) A (旧作用素) の独立残差監査 — opt-in `condensation.condAuditResidual: 1`
+
+- 二相拡散 OFF で `condAuditResidual 1` の TP carrier 凝縮 run は、§15.4 と同じ監査を**旧作用素**で行う: 化学種は現行 `species_diffusion_d` の式
+  (総組成 Y の ρ_f(D_s + D_t) Fick、面の算術平均 Y_f で ΣJ=0 補正; 係数 ρ_f・D_s・D_t は本番と同じ float の評価順、Y の差と流束・補正は double)、
+  液とモーメントは移流のみ、蒸気の流束は総水分の流束 (液は拡散しない)。A を新作用素で評価することはしない。キー ON の run は従来どおり新作用素。既定 0 では監査しない。
+- **自己検査 (合格)**: 2 step の A (キー OFF + 監査) で max|r_double − r_float|/(ε·max A) が開始時 ≤0.601、終了時 ≤0.630 (全成分: roY0, w, v, g, Q2, Q1, Q0; 基準 ≤1)。
+  判定は NOT CONVERGED (2 step; 正しく未収束を返す)。
+- 既定 (キー OFF・監査 0) のビット一致: `test_transport_gas_phase.py` G0 4 構成バイト一致 (最終ビルドで再確認)、2 step の res_0 は旧バイナリと全 120 データセット一致、
+  res_1/res_2 の不一致データセット数は旧 vs 旧と同じ 26/83 (atomicAdd、判別不能)、`residual_history.csv` の列見出しは同一、`[twophase-audit]` 行は出ない。
+
+### 16.2 (2) 再正規化の成分別・係数偏差 (区間・累積)
+
+`[cond-corr]   species s renorm components (rel = own total)` 行を monitorInterval ごとに追加: 区間の max|f−1| と累積の max|f−1|、
+|Δ(ρY_w)|・|Δρg|・|ΔQ2|・|ΔQ1|・|ΔQ0| (Σ|Δ|V) の区間値と累積、区間値の相対 (**各成分の自分の総量**で割る; 既存の `renorm` は総液量で割っていた)。
+既定経路は液・Q に係数を掛けないので 0 を出す (実測 0)。実測 (2 step, ほぼ乾いた初期場、判定外):
+- B (キー ON): max|f−1| 7.87e-5 / 6.15e-5 (step 1/2)、相対 ρY_w 2.3e-7 / 1.9e-7、ρg 1.1e-7 / 1.4e-7、Q2 1.2e-7、Q1 1.2e-7、Q0 1.3e-7 / 1.6e-7。
+- A (キー OFF): max|f−1| 7.87e-5 / 4.28e-5、液・Q は 0。
+- 局所の係数偏差 (7.9e-5) と体積積分の相対補正 (~1e-7) は 2.5 桁違う — どちらで許容を書くかで判定が変わる。既存の `renorm` 行の「総液量比」は乾いた場で 0.4 (B, step 1) と意味を持たない。
+
+### 16.3 (3) θ・θ_src の全更新を覆う集計
+
+`[cond-corr]   species s theta over all updates` 行: 区間の「更新の θ<1 のセル·更新数 / 更新回数 / 直近の更新の θ<1 セル数 / 最小 θ」と
+「θ_src<1 のセル·評価数 / 評価回数 / 直近 / 最小」、累積。θ は更新カーネルが全セルに書く `condLim_s` を更新の直後に、θ_src はソースカーネルが全セルに書く値を
+ソースの直後に数える (計上のみ; root のみ)。θ を書かない経路 (陽解法・dual-time・`condLimiterMode 0`・平衡形) では更新の θ は数えない。
+監査の assembleResidual も θ_src の評価として数える (開始時 1 回・終了時 1 回; 例: B の step 1 は評価 2 回)。
+既存の補正 (蒸気上限・負値床・射影・消滅・増分制限・受動種 floor・Qcut・vround) はもともと全呼び出しを積算していたので変えていない。
+実測 (2 step): A step 2 で更新の θ<1 24 セル (最小 3.65e-5)、B step 2 で 22 セル (最小 4.18e-5、`[twophase]` 行と一致)、θ_src<1 は 0。
+
+### 16.4 (4)(5) A/B スクリプト
+
+- `twophase_ab_compare.py RUN_A RUN_B --series CSV`: 共通の全出力 step で共通凝縮域の n・体積・p50/p95/p99/max |ΔT|・符号付き平均 ΔT・片側凝縮体積 (A のみ/B のみ) を 1 行ずつ。
+  C が空の step は統計を NaN (check_quasisteady は判定不能として拒否)。単一時刻の表 (既定) も同じ関数 `region_stats` を通す。
+- `twophase_ab_series.py`: 検査列 `nonfinite_cons` (全保存量 ro, roUx/y/z, roe, roK, roOmega, roY*, rog_*, roQ*_* の非有限数)・`min_rv/min_rg/min_rQ2/min_rQ1/min_rQ0`・
+  `neg_rv/neg_rg/neg_rQ` を追加し、終了時に全スナップショットの最大を 1 行で出す (蒸気は float 格納値を double に上げた ρY_w − ρg; w は solverConfig の condGasSpecies)。
+- 動作確認 (scratch の 2 step run): 検査列 非有限 0・負 0・min ρv 1.39e-3。時系列は乾いた場で C が空 (NaN) → `--gmin 1e-20` で機構を確認 (step 2: p95 4.7e-4 K、符号付き平均 −1.5e-4 K)。
+
+### 16.5 再正規化の許容の定義案 (上位の確定待ち; 本メモは提案のみ)
+
+前提: 再正規化は ΣρY = ρ への射影で、係数 f = ρ/ΣρY_s を化学種 (B では液・Q にも) に掛ける。定常の固定点では化学種の増分と流れの δρ が 0 なので、
+f − 1 は格納 float の丸め (ρY_s を float に戻すときの丸めと n_s 項の和) だけになり、|f − 1| ≲ (n_s/2 + 1) ε₃₂ 程度。成分 q の補正は Δq = (f − 1) q なので、
+各成分の自分の総量で割った相対補正は max|f − 1| で上から抑えられる (成分ごとの値は「再正規化以外の経路で液・Q が動いていない」ことの照合になる)。
+**案**: 末尾 10 % の全更新 (区間の集計がその窓を覆うように monitorInterval を取る) で
+1. 局所の係数偏差 max_i |f_i − 1| ≤ 2 n_s ε₃₂ (n_s = 化学種数; case/16 は 2 → 4.8e-7)、
+2. 成分ごとの相対補正 Σ|Δq|V / Σ q V ≤ 2 n_s ε₃₂ (q = ρY_w, ρg, ρQ2, ρQ1, ρQ0; 総量 0 の成分は絶対量 0)。総液量で割った値は使わない。
+係数偏差が下がらない (流れの連続の式と化学種の増分の不一致が残る) run は未収束として扱う。2 step の実測 (7.9e-5 / 1e-7) はこの案より桁で大きいが、
+過渡の値で、収束時の値は #1b の run でしか得られない。閾値を観測値から決めない (diagnose 論点 3)。

@@ -200,6 +200,10 @@ CPG carrier・pure 凝縮・`viscMethod 0` では不活性 (ログに理由、�
 蒸気・液・Q の増分の緩和 (前処理の後・制限の前)。#4c の 1D 試験では大きな擬似刻みで核生成の Q0 が周期運動になり ω 0.5 で収束した (高 CFL は保証外)。
 計算開始時と終了時に `[twophase-audit]` 行 (格納状態から化学種・蒸気・液・Q の残差を double で組み直した成分ごとの比と、終了時の `VERDICT: PASS | NOT CONVERGED`; エネルギーは対象外) が出る。収束を受け入れる根拠はこの VERDICT と check_convergence の両方。`residual_history.csv` に `rms_roYv` (蒸気の残差 R_w − R_g) が加わり、`check_convergence.py` の検査対象に入る (`rms_roY` 接頭辞)。monitor に `[twophase]` 行 (θ<1 のセル数・最小 θ・保留量・状態補正)。
 既定 0 の run の結果・列構成は変わらない。
+**`condensation.condAuditResidual`** (既定 0, 2026-10-02, #1b-pre): `1` で二相拡散 OFF の TP carrier 凝縮 run でも、現行の作用素 (化学種の Fick 拡散、液・Q は移流のみ) を
+格納状態から double で組み直す `[twophase-audit]` を開始時・終了時に出す (A/B の A 側の受入用; 二相拡散 ON の run は常に新作用素で監査)。結果は変えない。
+凝縮 run の `[cond-corr]` には `renorm components` 行 (再正規化の max|f−1| と ρY_w・ρg・Q2・Q1・Q0 の補正量; 相対は各成分の自分の総量) と
+`theta over all updates` 行 (更新の θ<1 と θ_src<1 のセル数を全更新で積算; 区間・累積・直近の更新) が加わる (2026-10-02)。
 注意: 受動種/化学種の拡散は `viscMethod != 0` のときだけ加わる (viscMethod 0 は定数粘性ではなく「拡散なし」扱い; 化学種と同じ規約)。
 
 ## physProp.viscMethod — 層流の粘性・熱伝導 (2026-09-27 `viscMethod: 2` を置き換え)

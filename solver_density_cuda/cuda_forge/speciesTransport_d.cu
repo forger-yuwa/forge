@@ -179,6 +179,7 @@ __global__ void species_renormalize_d(
         if (reasons != nullptr && iw >= 0 && (root == nullptr || root[ic] == ic)) {
             const double d = fabs((double)roY[iw][ic] - (double)yw_in);
             cond_atomic_max_double(&reasons[COND_REASON_RN_MAX], fabs(factor - 1.0));
+            cond_atomic_max_double(&reasons[COND_REASON_RN_MAXC], fabs(factor - 1.0));   // 累積 (#1b-pre)
             if (d > 0.0) {
                 atomicAdd(&reasons[COND_REASON_RN_SUM], d*((vol != nullptr) ? (double)vol[ic] : 1.0));
                 atomicAdd(&reasons[COND_REASON_RN_N], 1.0);
@@ -2136,9 +2137,17 @@ __global__ void species_renormalize_liquid_d(
     const double factor = (double)ro[ic] / (sum > (double)kSmall ? sum : (double)kSmall);
     const flow_float yw_in = (reasons != nullptr && iw >= 0) ? roY[iw][ic] : (flow_float)0.0;
     for (int s = 0; s < nSpecies; s++) roY[s][ic] = (flow_float)((double)roY[s][ic] * factor);
-    for (int m = 0; m < 1 + TP_NQ; ++m) rophi[m][ic] = (flow_float)((double)rophi[m][ic] * factor);
+    double dl[1 + TP_NQ];
+    for (int m = 0; m < 1 + TP_NQ; ++m) { const flow_float in_ = rophi[m][ic]; rophi[m][ic] = (flow_float)((double)in_ * factor); dl[m] = fabs((double)rophi[m][ic] - (double)in_); }
     if (reasons != nullptr && iw >= 0 && (root == nullptr || root[ic] == ic)) {
         const double d = fabs((double)roY[iw][ic] - (double)yw_in);
+        const double Vc = (vol != nullptr) ? (double)vol[ic] : 1.0;
+        // 成分別の補正量 (#1b-pre): 液と Q にも同じ係数を掛けた量
+        if (dl[0] > 0.0) atomicAdd(&reasons[COND_REASON_RNG_SUM], dl[0]*Vc);
+        if (dl[1] > 0.0) atomicAdd(&reasons[COND_REASON_RNQ2_SUM], dl[1]*Vc);
+        if (dl[2] > 0.0) atomicAdd(&reasons[COND_REASON_RNQ1_SUM], dl[2]*Vc);
+        if (dl[3] > 0.0) atomicAdd(&reasons[COND_REASON_RNQ0_SUM], dl[3]*Vc);
+        cond_atomic_max_double(&reasons[COND_REASON_RN_MAXC], fabs(factor - 1.0));
         cond_atomic_max_double(&reasons[COND_REASON_RN_MAX], fabs(factor - 1.0));
         if (d > 0.0) {
             atomicAdd(&reasons[COND_REASON_RN_SUM], d*((vol != nullptr) ? (double)vol[ic] : 1.0));
@@ -2198,7 +2207,7 @@ __global__ void twophase_audit_face_d(
     flow_float* ro, flow_float* T, flow_float* P, flow_float* vis_lam, flow_float* vis_turb,
     int diffMethod, flow_float Sc, flow_float Sc_t, int isNode, CondSpeciesProps cprops,
     const flow_float* massflux, const flow_float* Yface, const flow_float* Pface, int nPassive, int q0,
-    int NQ, double* r, double* A)
+    int NQ, double* r, double* A, int oldOp, int visc, GasPhaseLiquid liq)
 {
     const geom_int ih = blockDim.x * blockIdx.x + threadIdx.x;
     if (ih >= nNormalHaloPlanes) return;
@@ -2225,6 +2234,59 @@ __global__ void twophase_audit_face_d(
         add(nSpecies + 1 + m, -mdot*Pf);
     }
     add(nSpecies, -mdot*(Yw_f - g_f));   // 蒸気
+    if (oldOp) {
+        // 旧作用素 (二相拡散 OFF; #1b-pre (1)): species_diffusion_d の式 — 総組成 Y_s を ρ_f(D_s + D_t) で Fick 拡散、面の算術平均 Y_f で ΣJ=0 補正。
+        //   液とモーメントは拡散しない。係数 (ρ_f, D_s, D_t) は本番と同じ float の評価順で作り、Y の差と流束・補正は double。
+        if (visc == 0) return;
+        if (isNode != 0 && (c0 >= nCells || c1 >= nCells)) return;
+        const flow_float f = fx[ip];
+        const flow_float sxx = sx[ip], syy = sy[ip], szz = sz[ip], sss = ss[ip];
+        const flow_float dccx = ccx[c1] - ccx[c0], dccy = ccy[c1] - ccy[c0], dccz = ccz[c1] - ccz[c0];
+        const flow_float dcc  = sqrtf(dccx*dccx + dccy*dccy + dccz*dccz);
+        const flow_float denom = dccx*sxx + dccy*syy + dccz*szz;
+        const flow_float Dsafe = (fabsf(denom) < 1.0e-30f) ? ((denom>=0.0f)?1.0e-30f:-1.0e-30f) : denom;
+        const flow_float delta = dcc * sss * sss / Dsafe;
+        const flow_float ro0 = max(ro[c0], (flow_float)1.0e-30f), ro1 = max(ro[c1], (flow_float)1.0e-30f);
+        const flow_float inv_ro0 = 1.0f/ro0, inv_ro1 = 1.0f/ro1;
+        const flow_float g = 1.0f - f;
+        const flow_float ro_face = f*ro0 + g*ro1;
+        const flow_float T_face  = f*T[c0] + g*T[c1];
+        const flow_float P_face  = f*P[c0] + g*P[c1];
+        flow_float Yf[THERMO_MAX_SPECIES], X[THERMO_MAX_SPECIES], Ys0[THERMO_MAX_SPECIES], Ys1[THERMO_MAX_SPECIES];
+        flow_float ysum = 0.0f;
+        for (int s = 0; s < nSpecies; s++) {
+            Ys0[s] = roY[s][c0]*inv_ro0; Ys1[s] = roY[s][c1]*inv_ro1;
+            flow_float y = f*Ys0[s] + g*Ys1[s];
+            if (y < 0.0f) y = 0.0f; Yf[s] = y; ysum += y;
+        }
+        const flow_float yinv = 1.0f/(ysum>1.0e-30f?ysum:1.0e-30f);
+        for (int s = 0; s < nSpecies; s++) Yf[s] *= yinv;
+        const flow_float gl_f = (liq.iw >= 0 && liq.rog != nullptr) ? (f*liq.rog[c0]*inv_ro0 + g*liq.rog[c1]*inv_ro1)*yinv : 0.0f;
+        species_transport_X_f(sp, nSpecies, Yf, liq.iw, gl_f, X);
+        const flow_float mu_face  = f*vis_lam[c0]  + g*vis_lam[c1];
+        const flow_float mut_face = f*vis_turb[c0] + g*vis_turb[c1];
+        const flow_float Dt = (mut_face > 0.0f) ? mut_face/(ro_face*Sc_t) : 0.0f;
+        const double geo = (double)delta/(double)dcc;
+        // 駆動差と補正は double (格納 ρY を double に上げる)
+        const double r0d = (double)ro0, r1d = (double)ro1;
+        double Js[THERMO_MAX_SPECIES], sumJ = 0.0, Yd[THERMO_MAX_SPECIES], ys = 0.0;
+        for (int s = 0; s < nSpecies; s++) {
+            flow_float D = (diffMethod == 1) ? thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face) : mu_face/(ro_face*Sc);
+            D += Dt;
+            const flow_float roD = ro_face*D;   // 係数 (本番と同じ float)
+            const double y0 = (double)roY[s][c0]/r0d, y1 = (double)roY[s][c1]/r1d;
+            Js[s] = (double)roD*(y1 - y0)*geo;
+            sumJ += Js[s];
+            double y = (double)f*y0 + (1.0 - (double)f)*y1; if (y < 0.0) y = 0.0; Yd[s] = y; ys += y;
+        }
+        const double yi = 1.0/(ys > 1.0e-30 ? ys : 1.0e-30);
+        for (int s = 0; s < nSpecies; s++) {
+            const double Jc = Js[s] - Yd[s]*yi*sumJ;
+            add(s, Jc);
+            if (s == iw) add(nSpecies, Jc);   // 蒸気 = 総水分 (液は拡散しない)
+        }
+        return;
+    }
     // 拡散 (格納値を double に上げて同じ式)
     TpFaceIn in; geom_int ic0, ic1;
     if (!tp_build_face_in(nCells, ip, plane_cells, ccx, ccy, ccz, fx, sx, sy, sz, ss, sp, nSpecies, iw,
@@ -2267,7 +2329,8 @@ __global__ void twophase_audit_cell_d(geom_int nCells, int nSpecies, int iw, flo
 
 void twoPhaseAudit_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int iStep, bool final)
 {
-    if (!condTwoPhaseDiffusionActive(cfg) || !speciesEnabled(var) || g_roY_dev == nullptr || g_qMom0 < 0) return;
+    if (!condResidualAuditActive(cfg) || !speciesEnabled(var) || g_roY_dev == nullptr || g_qMom0 < 0) return;
+    const int oldOp = condTwoPhaseDiffusionActive(cfg) ? 0 : 1;   // 二相拡散 OFF の run は旧作用素を監査する (#1b-pre (1))
     const bool s3 = (cfg.speciesFaceReconstruction >= 2 && g_Yface_dev != nullptr && g_Pface_dev != nullptr
                      && (cfg.solver == "SLAU" || cfg.solver == "SLAU2"));
     if (!s3) { printf("[twophase-audit] step %d: skipped — the audit re-evaluates the S3 face-value advection only (speciesFaceReconstruction 2 with SLAU)\n", iStep); return; }
@@ -2286,7 +2349,8 @@ void twoPhaseAudit_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh,
         thermo_species_device_ptr_f(), n, iw, g_roY_dev, g_p_rophi_dev + g_qMom0,
         var.c_d["ro"], var.c_d["T"], var.c_d["P"], var.c_d["vis_lam"], var.c_d["vis_turb"],
         cfg.speciesDiffusionMethod, cfg.Sc, cfg.Sc_t, (cfg.discretization == "node") ? 1 : 0, cprops,
-        var.p_d["massflux"], g_Yface_dev, g_Pface_dev, g_nPassive, g_qMom0, NQ, r, A);
+        var.p_d["massflux"], g_Yface_dev, g_Pface_dev, g_nPassive, g_qMom0, NQ, r, A,
+        oldOp, (cfg.viscMethod != 0) ? 1 : 0, gasPhaseLiquid(cfg, var));
     twophase_audit_cell_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(msh.nCells, n, iw, g_resroY_dev, g_p_res_dev + g_qMom0, NQ, 0, r, A, F);
     gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
     // ソースだけを同じソースカーネルで組み直す (モーメント残差を 0 にしてから; 状態・温度は assembleResidual のまま)
@@ -2308,8 +2372,8 @@ void twoPhaseAudit_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh,
     if (r0.size() != (size_t)NQ) r0.assign(NQ, -1.0);
     long npin = 0; for (geom_int c = 0; c < msh.nCells; ++c) if (pin[c] == 1.0f) ++npin;
     bool pass = true, nonfinite = false;
-    printf("[twophase-audit] step %d %s: double re-evaluation from the stored state (EOS via assembleResidual, face fluxes in double, source per cell; energy not covered); pinned nodes excluded %ld\n",
-           iStep, final ? "(final state)" : "(initial state: r0)", npin);
+    printf("[twophase-audit] step %d %s: %s operator, double re-evaluation from the stored state (EOS via assembleResidual, face fluxes in double, source per cell; energy not covered); pinned nodes excluded %ld\n",
+           iStep, final ? "(final state)" : "(initial state: r0)", oldOp ? "existing (key off: species Fick, liquid/moments advected only)" : "two-phase (key on)", npin);
     for (int q = 0; q < NQ; ++q) {
         double mr = 0.0, mA = 0.0, md = 0.0;
         for (geom_int c = 0; c < msh.nCells; ++c) {

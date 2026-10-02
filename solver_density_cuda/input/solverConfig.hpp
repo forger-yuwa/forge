@@ -650,7 +650,10 @@ public:
     // 気相内の分子拡散 (z 基準・風上補正) + 全輸送量共通の乱流拡散を面流束 1 回で組み、蒸気/液を非分割で更新する。定常専用初版
     // (dual-time・陽解法・speciesImplicitCoupling 2・passiveScalarScheme 0 とは併用不可、起動時に拒否)。0 で現行経路 (既定・ビット不変)。
     int    condTwoPhaseDiffusion = 0;
-    double condTwoPhaseRelax     = 1.0;   // 非分割更新の緩和 ω (前処理の後・制限の前で蒸気・液・Q の全増分に掛ける; 0 < ω ≤ 1)
+    double condTwoPhaseRelax     = 1.0;
+    // 収束受入の独立残差監査 (#1b-pre (1)): 1 で二相拡散が OFF の run でも旧作用素 (現行の化学種拡散・液とモーメントは移流のみ) を
+    // double で組み直して開始時・終了時に [twophase-audit] を出す (TP carrier 凝縮のみ)。0 で出さない (既定・ビット不変)。二相拡散 ON の run は常に監査する。
+    int    condAuditResidual     = 0;   // 非分割更新の緩和 ω (前処理の後・制限の前で蒸気・液・Q の全増分に掛ける; 0 < ω ≤ 1)
     // 平衡凝縮 (plans/accepted/condensation-equilibrium.md): 核生成・成長を経ず各セルで p_v=p_sat(T) の g_eq へ緩和。
     int    condEquilibrium = 0;   // 0: 非平衡 (既定) / 1: 平衡凝縮・緩和形 (ソース S_g=αρΔ/dt, モーメント Q0-Q2 ソース 0)
                                   // / 2: 平衡凝縮・EOS 拘束形 (dependentVariables で (T,g) 同時反転し rog へ射影、rog 輸送は凍結;

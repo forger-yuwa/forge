@@ -226,9 +226,11 @@ static int g_condReasons_last_step = 0;
 static void condReasonsResetInterval(int n)
 {
     for (int s = 0; s < n; ++s) {
-        const double init[2] = {1.0e300, 0.0};
+        const double init[3] = {1.0e300, 0.0, 1.0};
         gpuErrchk( cudaMemcpy(g_condReasons_dev + (size_t)s*COND_REASON_N + COND_REASON_VMIN,   &init[0], sizeof(double), cudaMemcpyHostToDevice) );
         gpuErrchk( cudaMemcpy(g_condReasons_dev + (size_t)s*COND_REASON_N + COND_REASON_RN_MAX, &init[1], sizeof(double), cudaMemcpyHostToDevice) );
+        gpuErrchk( cudaMemcpy(g_condReasons_dev + (size_t)s*COND_REASON_N + COND_REASON_TU_MIN, &init[2], sizeof(double), cudaMemcpyHostToDevice) );
+        gpuErrchk( cudaMemcpy(g_condReasons_dev + (size_t)s*COND_REASON_N + COND_REASON_TS_MIN, &init[2], sizeof(double), cudaMemcpyHostToDevice) );
     }
 }
 double* condCorrReasons(int s)
@@ -571,7 +573,7 @@ void condensationUpdateInner_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, 
 // -----------------------------------------------------------------------------
 namespace {
 __global__ void cond_liquid_totals_d(geom_int nCells, const flow_float* rog, const flow_float* q1, const flow_float* q2,
-                                     const geom_float* vol, const geom_int* root, double* out)
+                                     const geom_float* vol, const geom_int* root, double* out, const flow_float* q0, const flow_float* rYw)
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -580,6 +582,22 @@ __global__ void cond_liquid_totals_d(geom_int nCells, const flow_float* rog, con
     if (rog[ic] != (flow_float)0.0) atomicAdd(&out[0], (double)rog[ic]*V);
     if (q1[ic]  != (flow_float)0.0) atomicAdd(&out[1], (double)q1[ic]*V);
     if (q2[ic]  != (flow_float)0.0) atomicAdd(&out[2], (double)q2[ic]*V);
+    if (q0[ic]  != (flow_float)0.0) atomicAdd(&out[3], (double)q0[ic]*V);   // 再正規化の Q0 補正の分母 (#1b-pre)
+    if (rYw != nullptr && rYw[ic] != (flow_float)0.0) atomicAdd(&out[4], (double)rYw[ic]*V);   // 同 ρY_w (自分の総量で割る)
+}
+
+// θ の全更新を覆う集計 (#1b-pre (3)): セル配列 theta (condLim_s) の θ<1 のセル数・最小を区間・累積の reason スロットへ (root のみ; 計上だけ)。
+__global__ void cond_theta_scan_d(geom_int nCells, const flow_float* theta, const geom_int* root, double* rs, int slotN, int slotMin, int slotLast, int slotCalls)
+{
+    const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic == 0) atomicAdd(&rs[slotCalls], 1.0);
+    if (ic >= nCells) return;
+    if (root != nullptr && root[ic] != ic) return;
+    const double t = (double)theta[ic];
+    if (t < 1.0 || !(t == t)) {
+        atomicAdd(&rs[slotN], 1.0); atomicAdd(&rs[slotLast], 1.0);
+        cond_atomic_min_double(&rs[slotMin], (t == t) ? t : -1.0);   // NaN は −1 として残す
+    }
 }
 }  // namespace
 
@@ -596,17 +614,19 @@ void condCorrectionLog_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
     static std::vector<double> s_pst_last;
     if (s_pst_last.size() != pst.size()) s_pst_last.assign(pst.size(), 0.0);
     static double* tot_d = nullptr;
-    if (tot_d == nullptr) gpuErrchk( cudaMalloc((void**)&tot_d, 3*sizeof(double)) );
+    if (tot_d == nullptr) gpuErrchk( cudaMalloc((void**)&tot_d, 5*sizeof(double)) );
     const geom_int* root = periodicNodeActive(cfg, msh) ? msh.periodicRoot_d : nullptr;
     const int nstep = std::max(1, (iStep + 1) - g_condReasons_last_step);
     for (int s = 0; s < nsp && s < g_condReasons_n; ++s) {
         const std::string i = std::to_string(s);
-        gpuErrchk( cudaMemset(tot_d, 0, 3*sizeof(double)) );
+        gpuErrchk( cudaMemset(tot_d, 0, 5*sizeof(double)) );
+        flow_float* rYwTot = (cfg.condGasSpecies >= 0 && cfg.thermalMethod == 2 && var.c_d.count("roY" + std::to_string(cfg.condGasSpecies)))
+                             ? var.c_d["roY" + std::to_string(cfg.condGasSpecies)] : nullptr;
         cond_liquid_totals_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
-            msh.nCells, var.c_d["rog_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i], var.c_d["volume"], root, tot_d);
+            msh.nCells, var.c_d["rog_"+i], var.c_d["roQ1_"+i], var.c_d["roQ2_"+i], var.c_d["volume"], root, tot_d, var.c_d["roQ0_"+i], rYwTot);
         gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
-        double tot[3] = {0.0, 0.0, 0.0};
-        gpuErrchk( cudaMemcpy(tot, tot_d, 3*sizeof(double), cudaMemcpyDeviceToHost) );
+        double tot[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+        gpuErrchk( cudaMemcpy(tot, tot_d, 5*sizeof(double), cudaMemcpyDeviceToHost) );
         const double* c = cur.data() + (size_t)s*COND_REASON_N;
         const double* l = g_condReasons_last.data() + (size_t)s*COND_REASON_N;
         auto relz = [](double v, double t) { return (t > 0.0) ? v/t : (v > 0.0 ? 1.0 : 0.0); };
@@ -650,6 +670,24 @@ void condCorrectionLog_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
                c[COND_REASON_NEG_SUM], relz(c[COND_REASON_NEG_SUM], tot[0]), plC, pfC,
                c[COND_REASON_PQ1_SUM], c[COND_REASON_PQ2_SUM], c[COND_REASON_P_N],
                c[COND_REASON_RN_SUM], c[COND_REASON_RN_N], c[COND_REASON_RM_SUM], relz(c[COND_REASON_RM_SUM], tot[0]), c[COND_REASON_RM_N]);
+        // #1b-pre (2)(3): 再正規化の成分別補正・係数偏差 (区間・累積) と θ・θ_src の全更新を覆う集計
+        {
+            auto I = [&](int k) { return c[k] - l[k]; };
+            // rel は各成分の自分の総量 (ΣρY_w V, Σρg V, ΣρQ_n V) で割る (上の renorm の rel は総液量で割った従来の値)
+            printf("[cond-corr]   species %d renorm components (rel = own total) | interval: max|f-1| %.3e, |dRhoYw| %.3e (rel %.3e) |dRhog| %.3e (rel %.3e)"
+                   " |dQ2| %.3e (rel %.3e) |dQ1| %.3e (rel %.3e) |dQ0| %.3e (rel %.3e)"
+                   " | cumulative: max|f-1| %.3e, |dRhoYw| %.9e |dRhog| %.9e |dQ2| %.9e |dQ1| %.9e |dQ0| %.9e\n",
+                   s, c[COND_REASON_RN_MAX], rnI, relz(rnI, tot[4]), I(COND_REASON_RNG_SUM), relz(I(COND_REASON_RNG_SUM), tot[0]),
+                   I(COND_REASON_RNQ2_SUM), relz(I(COND_REASON_RNQ2_SUM), tot[2]), I(COND_REASON_RNQ1_SUM), relz(I(COND_REASON_RNQ1_SUM), tot[1]),
+                   I(COND_REASON_RNQ0_SUM), relz(I(COND_REASON_RNQ0_SUM), tot[3]),
+                   c[COND_REASON_RN_MAXC], c[COND_REASON_RN_SUM], c[COND_REASON_RNG_SUM], c[COND_REASON_RNQ2_SUM], c[COND_REASON_RNQ1_SUM], c[COND_REASON_RNQ0_SUM]);
+            printf("[cond-corr]   species %d theta over all updates | interval: update theta<1 %.0f cell-updates in %.0f updates (last update %.0f cells) min %.6g"
+                   " | source theta_src<1 %.0f cell-evals in %.0f evals (last eval %.0f cells) min %.6g"
+                   " | cumulative: update theta<1 %.0f in %.0f updates, theta_src<1 %.0f in %.0f evals\n",
+                   s, I(COND_REASON_TU_N), I(COND_REASON_TU_CALLS), c[COND_REASON_TU_LAST], c[COND_REASON_TU_MIN],
+                   I(COND_REASON_TS_N), I(COND_REASON_TS_CALLS), c[COND_REASON_TS_LAST], c[COND_REASON_TS_MIN],
+                   c[COND_REASON_TU_N], c[COND_REASON_TU_CALLS], c[COND_REASON_TS_N], c[COND_REASON_TS_CALLS]);
+        }
         // WARN: 液滴消滅以外の数値補正の区間値が総液量比 1e-6 超
         const double thr = 1.0e-6;
         struct { const char* name; double rel; } chk[] = {
@@ -673,6 +711,12 @@ void condCorrectionLog_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
 // -----------------------------------------------------------------------------
 void condTwoPhaseDiffusionValidate(const solverConfig& cfg)
 {
+    if (cfg.condAuditResidual == 1 && cfg.condTwoPhaseDiffusion == 0) {
+        if (condResidualAuditActive(cfg))
+            std::printf("[twophase-audit] condAuditResidual 1: the existing operator (species Fick diffusion; liquid and moments advected only) is re-evaluated in double at start and end\n");
+        else
+            std::printf("[twophase-audit] condAuditResidual 1 is inactive: needs TP carrier condensation (condGasSpecies >= 0, thermalMethod 2, nCondSpecies 1)\n");
+    }
     if (cfg.condTwoPhaseDiffusion == 0) return;
     auto fail = [](const std::string& why) {
         std::fprintf(stderr, "Configuration Error: condensation.condTwoPhaseDiffusion 1 %s (plan condensation-two-phase-transport #4e: steady-only first version)\n", why.c_str());
@@ -834,4 +878,21 @@ void twoPhaseUpdateLog(solverConfig& cfg, int iStep)
     gpuErrchk( cudaMemset(g_tp_stats_dev, 0, 8*sizeof(double)) );
     const int one = 1000000000;
     gpuErrchk( cudaMemcpy(g_tp_thetaMin_dev, &one, sizeof(int), cudaMemcpyHostToDevice) );
+}
+
+// θ の全更新を覆う集計 (#1b-pre (3))。kind 0 = ソースの θ_src (condensationSource の直後; condLim_ はソースが全セルで書く),
+// kind 1 = 更新の θ (θ_u の受動種更新クランプか二相の非分割更新の直後; condLim_ を更新カーネルが全セルで書く)。計上だけ。
+void condThetaScan_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int kind)
+{
+    if (!condensationEnabled(var)) return;
+    for (int s = 0; s < var.nCondSpeciesRegistered; ++s) {
+        double* rs = condCorrReasons(s);
+        if (rs == nullptr) continue;
+        const int sN = kind ? COND_REASON_TU_N : COND_REASON_TS_N, sMin = kind ? COND_REASON_TU_MIN : COND_REASON_TS_MIN;
+        const int sLast = kind ? COND_REASON_TU_LAST : COND_REASON_TS_LAST, sCalls = kind ? COND_REASON_TU_CALLS : COND_REASON_TS_CALLS;
+        gpuErrchk( cudaMemset(rs + sLast, 0, sizeof(double)) );
+        cond_theta_scan_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(msh.nCells, var.c_d["condLim_" + std::to_string(s)],
+            periodicNodeActive(cfg, msh) ? msh.periodicRoot_d : nullptr, rs, sN, sMin, sLast, sCalls);
+    }
+    gpuErrchk( cudaPeekAtLastError() );
 }
