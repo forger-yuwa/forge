@@ -4,6 +4,7 @@
 #include "condensationRealizability_d.cuh"
 #include "periodicNode_d.cuh"   // periodicNodeActive (実現可能性収支の root)
 #include <algorithm>   // cond_realizability_clamp_d (double; 単体試験と共用)
+#include <iterator>    // std::back_inserter (二相更新の診断 CSV)
 #include "condensationSource_d.cuh"   // COND_PI, 物性 (消滅クランプ)
 #include "condensationEOS_d.cuh"
 #include "condensationSourceF_d.cuh"   // float 実体 (clamp の表評価)      // cond_clamp_vapor_pressure (蒸発塵判定の蒸気分圧)
@@ -768,7 +769,8 @@ __global__ void twophase_vl_update_d(
     flow_float* sj_g, flow_float* sj_Q2, flow_float* sj_Q1, flow_float* sj_Q0,
     flow_float* td_g, flow_float* td_Q2, flow_float* td_Q1, flow_float* td_Q0,
     flow_float* diagLim, flow_float* diagCorrG, flow_float* diagCorrQ,
-    double* stats, int* thetaMin, double* limStats_g, const geom_int* root)
+    double* stats, int* thetaMin, double* limStats_g, const geom_int* root,
+    double* diag)   // 診断 (condTwoPhaseDiag; nullptr で書かない): TPD_* 列 × nCells
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -794,6 +796,13 @@ __global__ void twophase_vl_update_d(
     }
     TpCellOut o;
     tp_vl_update(c, o);
+    if (diag != nullptr) {   // 更新前の格納値・制限前増分・θ を決めた制限・Q の残差 (読むだけ)
+        const size_t n = (size_t)nCells;
+        diag[0*n + ic] = (double)c.rYw - (double)c.rg; diag[1*n + ic] = (double)c.rg;
+        diag[2*n + ic] = o.dv; diag[3*n + ic] = o.dg;
+        for (int m = 0; m < TP_NQ; ++m) { diag[(4 + m)*n + ic] = o.dq[m]; diag[(8 + m)*n + ic] = c.RQ[m]; }
+        diag[7*n + ic] = (double)o.reason; diag[11*n + ic] = o.theta;
+    }
     roYw[ic] = o.rYw; g[ic] = o.rg; Q2[ic] = o.rQ[0]; Q1[ic] = o.rQ[1]; Q0[ic] = o.rQ[2];
     diagLim[ic] = (flow_float)o.theta;
     const double rod = (double)ro[ic];
@@ -815,6 +824,60 @@ __global__ void twophase_vl_update_d(
 
 static double* g_tp_stats_dev = nullptr;
 static int*    g_tp_thetaMin_dev = nullptr;
+
+// ---- 診断 (condTwoPhaseDiag, #1b-r1; 読むだけ) ----
+// セル列 (double × nCells): 0 ρv (更新前), 1 ρg (更新前), 2 δρv, 3 δρg, 4–6 δρQ2/Q1/Q0 (制限前・緩和後), 7 制限 (0 なし, 1 蒸気非負, 2 液非負, 3 dg_max, 4 dT_max),
+//   8–10 Q2/Q1/Q0 の残差 (更新に入った全残差), 11 θ, 12 f−1 (再正規化), 13 Δ(ρY_w) (再正規化), 14 Δ(ρg) (再正規化)
+#define TPD_NCOL 15
+#define TPD_REC  (2 + TPD_NCOL)   // 記録: 更新番号, セル, 上の 15 列
+#define TPD_WINDOW 200
+static double* g_tpd_cell = nullptr;    // TPD_NCOL × nCells
+static double* g_tpd_rec = nullptr;     // TPD_REC × cap
+static unsigned long long* g_tpd_n = nullptr;
+static int*    g_tpd_hit = nullptr;     // [0,n) θ<1 / [n,2n) θ=0 が区間内にあったセル (固有セル数)
+static int*    g_tpd_cnt = nullptr;     // 区間の固有セル数 (2)
+static size_t  g_tpd_cap = 0, g_tpd_nupd = 0, g_tpd_nupd_log = 0, g_tpd_ncells = 0;
+static bool tpdOn(const solverConfig& cfg) { return cfg.condTwoPhaseDiag != 0 && condTwoPhaseDiffusionActive(cfg); }
+double* twoPhaseDiagRenormPtr() { return (g_tpd_cell != nullptr) ? g_tpd_cell + 12*g_tpd_ncells : nullptr; }
+static void tpdAlloc(geom_int nCells)
+{
+    if (g_tpd_cell != nullptr) return;
+    g_tpd_ncells = (size_t)nCells;
+    g_tpd_cap = 400000;   // 記録の上限 (超えた分は数えるだけ; 終了時に報告)
+    gpuErrchk( cudaMalloc((void**)&g_tpd_cell, TPD_NCOL*g_tpd_ncells*sizeof(double)) );
+    gpuErrchk( cudaMemset(g_tpd_cell, 0, TPD_NCOL*g_tpd_ncells*sizeof(double)) );
+    gpuErrchk( cudaMalloc((void**)&g_tpd_rec, TPD_REC*g_tpd_cap*sizeof(double)) );
+    gpuErrchk( cudaMalloc((void**)&g_tpd_n, sizeof(unsigned long long)) ); gpuErrchk( cudaMemset(g_tpd_n, 0, sizeof(unsigned long long)) );
+    gpuErrchk( cudaMalloc((void**)&g_tpd_hit, 2*g_tpd_ncells*sizeof(int)) ); gpuErrchk( cudaMemset(g_tpd_hit, 0, 2*g_tpd_ncells*sizeof(int)) );
+    gpuErrchk( cudaMalloc((void**)&g_tpd_cnt, 2*sizeof(int)) );
+}
+namespace {
+__global__ void tpd_collect_d(geom_int nCells, const double* cell, const geom_int* root, int mode, int inWindow, double upd,
+                              double* rec, unsigned long long* nrec, unsigned long long cap, int* hit)
+{
+    const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    if (root != nullptr && root[ic] != ic) return;
+    const size_t n = (size_t)nCells;
+    const double th = cell[11*n + ic];
+    if (th < 1.0) hit[ic] = 1;
+    if (th == 0.0) hit[n + ic] = 1;
+    const bool sel = (mode == 1) ? (th == 0.0) : (th < 1.0);
+    if (!inWindow || !sel) return;
+    const unsigned long long k = atomicAdd(nrec, 1ULL);
+    if (k >= cap) return;
+    double* r = rec + (size_t)k*TPD_REC;
+    r[0] = upd; r[1] = (double)ic;
+    for (int j = 0; j < TPD_NCOL; ++j) r[2 + j] = cell[(size_t)j*n + ic];
+}
+__global__ void tpd_count_d(geom_int nCells, int* hit, int* cnt)
+{
+    const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    if (hit[ic]) { atomicAdd(&cnt[0], 1); hit[ic] = 0; }
+    if (hit[nCells + ic]) { atomicAdd(&cnt[1], 1); hit[nCells + ic] = 0; }
+}
+}  // namespace
 static void twoPhaseStatsAlloc()
 {
     if (g_tp_stats_dev != nullptr) return;
@@ -845,6 +908,7 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
 {
     if (!condTwoPhaseDiffusionActive(cfg) || !condensationEnabled(var)) return;
     twoPhaseStatsAlloc();
+    if (tpdOn(cfg)) tpdAlloc(msh.nCells);
     const std::string w = "roY" + std::to_string(cfg.condGasSpecies);
     const std::string g = "rog_0", Q2 = "roQ2_0", Q1 = "roQ1_0", Q0 = "roQ0_0";
     const int q0 = passive_moment_index0();
@@ -858,11 +922,20 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
         var.c_d["src_jac_g_0"], var.c_d["src_jac_Q2_0"], var.c_d["src_jac_Q1_0"], var.c_d["src_jac_Q0_0"],
         var.c_d["transport_diag_g_0"], var.c_d["transport_diag_Q2_0"], var.c_d["transport_diag_Q1_0"], var.c_d["transport_diag_Q0_0"],
         var.c_d["condLim_0"], var.c_d["condClampCorr_0"], var.c_d["condClampCorrQ_0"],
-        g_tp_stats_dev, g_tp_thetaMin_dev, passive_lim_stats_ptr(q0), passive_periodic_root(cfg, msh));
+        g_tp_stats_dev, g_tp_thetaMin_dev, passive_lim_stats_ptr(q0), passive_periodic_root(cfg, msh),
+        g_tpd_cell);
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
     // 再正規化 (係数を液・Q にも) → 受動種の最後の砦 (floor と収支の記録; 通常は無作用) → 周期ミラー
     speciesRenormalizeTwoPhase_d_wrapper(cfg, cuda_cfg, msh, var);
+    if (g_tpd_cell != nullptr) {   // 診断: 末尾 200 更新の θ = 0 (θ < 1) セルを記録、区間の固有セルの印 (読むだけ)
+        const size_t N = (size_t)std::max(0, cfg.mainLoopCount());
+        const int inWindow = (g_tpd_nupd + TPD_WINDOW >= N) ? 1 : 0;
+        tpd_collect_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(msh.nCells, g_tpd_cell, passive_periodic_root(cfg, msh), cfg.condTwoPhaseDiag,
+            inWindow, (double)g_tpd_nupd, g_tpd_rec, g_tpd_n, (unsigned long long)g_tpd_cap, g_tpd_hit);
+        gpuErrchk( cudaPeekAtLastError() );
+        ++g_tpd_nupd;
+    }
     passiveBounds_d_wrapper(cfg, cuda_cfg, msh, var, q0, (int)var.condMomentConsNames.size(), true);
     passiveMirrorPeriodic_d_wrapper(cfg, cuda_cfg, msh, var);
 }
@@ -876,6 +949,19 @@ void twoPhaseUpdateLog(solverConfig& cfg, int iStep)
     printf("[twophase] step %d interval | updates %.0f | theta<1 cells %.0f (theta=0 %.0f) min theta %.6f | withheld vapour %.3e liquid %.3e"
            " | state corrections Qcut %.3e vround %.3e\n",
            iStep + 1, st[6], st[2], st[3], (st[2] > 0.0) ? tmin*1.0e-9 : 1.0, st[0], st[1], st[4], st[5]);
+    if (g_tpd_cell != nullptr) {   // 診断: θ 制限の頻度を更新数で正規化し、区間の固有セル数を出す (#1b-r1)
+        const size_t nu = g_tpd_nupd - g_tpd_nupd_log;
+        int cnt[2] = {0, 0};
+        gpuErrchk( cudaMemset(g_tpd_cnt, 0, 2*sizeof(int)) );
+        tpd_count_d<<<(unsigned)((g_tpd_ncells + 255)/256), 256>>>((geom_int)g_tpd_ncells, g_tpd_hit, g_tpd_cnt);
+        gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+        gpuErrchk( cudaMemcpy(cnt, g_tpd_cnt, 2*sizeof(int), cudaMemcpyDeviceToHost) );
+        const double d = (nu > 0) ? (double)nu : 1.0;
+        printf("[twophase-diag] step %d interval %zu updates | theta<1: %.0f cell-updates = %.3f cells per update, %d unique cells"
+               " | theta=0: %.0f cell-updates = %.3f cells per update, %d unique cells\n",
+               iStep + 1, nu, st[2], st[2]/d, cnt[0], st[3], st[3]/d, cnt[1]);
+        g_tpd_nupd_log = g_tpd_nupd;
+    }
     gpuErrchk( cudaMemset(g_tp_stats_dev, 0, 8*sizeof(double)) );
     const int one = 1000000000;
     gpuErrchk( cudaMemcpy(g_tp_thetaMin_dev, &one, sizeof(int), cudaMemcpyHostToDevice) );
@@ -896,4 +982,92 @@ void condThetaScan_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh,
             periodicNodeActive(cfg, msh) ? msh.periodicRoot_d : nullptr, rs, sN, sMin, sLast, sCalls);
     }
     gpuErrchk( cudaPeekAtLastError() );
+}
+
+// 終了時: 末尾 200 更新の θ = 0 (mode 2 は θ < 1) のセル記録を集計して CSV に書く (#1b-r1; 読むだけ)。
+//   twophase_diag_theta0_cells.csv (mode 2 は theta_lt1): 頻度順の上位 500 セル。twophase_diag_theta0_summary.csv: 窓全体の要約 (key,value)。
+void twoPhaseDiagWrite(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    (void)cuda_cfg;
+    if (g_tpd_cell == nullptr) return;
+    unsigned long long nrec = 0;
+    gpuErrchk( cudaMemcpy(&nrec, g_tpd_n, sizeof(nrec), cudaMemcpyDeviceToHost) );
+    const size_t nk = (size_t)std::min<unsigned long long>(nrec, g_tpd_cap);
+    std::vector<double> rec(nk*TPD_REC);
+    if (nk) gpuErrchk( cudaMemcpy(rec.data(), g_tpd_rec, nk*TPD_REC*sizeof(double), cudaMemcpyDeviceToHost) );
+    const size_t nC = g_tpd_ncells;
+    std::vector<flow_float> cx(nC), cy(nC), cz(nC);
+    gpuErrchk( cudaMemcpy(cx.data(), var.c_d["ccx"], nC*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(cy.data(), var.c_d["ccy"], nC*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(cz.data(), var.c_d["ccz"], nC*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+    const size_t N = g_tpd_nupd, w0 = (N > TPD_WINDOW) ? N - TPD_WINDOW : 0, W = N - w0;
+    const char* tag = (cfg.condTwoPhaseDiag == 2) ? "theta_lt1" : "theta0";
+    // 更新ごとのセル集合 (持続性) とセルごとの集計
+    std::vector<std::vector<long>> setByUpd(W);
+    struct Agg { long n = 0, first = -1, last = -1, cur = 0, best = 0, persist = 0; long reason[5] = {0,0,0,0,0}; const double* lastRec = nullptr; };
+    std::vector<Agg> agg(nC);
+    // 記録は更新番号の順に並ぶとは限らない (atomicAdd) ので更新番号で並べ直す
+    std::vector<size_t> ord(nk); for (size_t k = 0; k < nk; ++k) ord[k] = k;
+    std::sort(ord.begin(), ord.end(), [&](size_t a, size_t b) { const double* ra = &rec[a*TPD_REC]; const double* rb = &rec[b*TPD_REC];
+        return (ra[0] != rb[0]) ? ra[0] < rb[0] : ra[1] < rb[1]; });
+    long reasonTot[5] = {0,0,0,0,0};
+    for (size_t k : ord) {
+        const double* r = &rec[k*TPD_REC];
+        const long u = (long)r[0], c = (long)r[1];
+        if (u < (long)w0 || c < 0 || (size_t)c >= nC) continue;
+        setByUpd[(size_t)u - w0].push_back(c);
+        Agg& a = agg[(size_t)c];
+        if (a.last == u - 1) { ++a.cur; ++a.persist; } else a.cur = 1;
+        a.best = std::max(a.best, a.cur);
+        if (a.first < 0) a.first = u;
+        a.last = u; ++a.n; a.lastRec = r;
+        const int rs = (int)r[2 + 7]; if (rs >= 0 && rs < 5) { ++a.reason[rs]; ++reasonTot[rs]; }
+    }
+    // 連続する更新でセル集合がどれだけ重なるか: mean_n |S_n ∩ S_{n−1}| / |S_n| (S_n 非空の n だけ)
+    double pers = 0.0; long npers = 0; size_t maxPer = 0; long tot = 0;
+    for (size_t i = 0; i < W; ++i) {
+        std::sort(setByUpd[i].begin(), setByUpd[i].end());
+        maxPer = std::max(maxPer, setByUpd[i].size()); tot += (long)setByUpd[i].size();
+        if (i > 0 && !setByUpd[i].empty()) {
+            std::vector<long> inter;
+            std::set_intersection(setByUpd[i].begin(), setByUpd[i].end(), setByUpd[i-1].begin(), setByUpd[i-1].end(), std::back_inserter(inter));
+            pers += (double)inter.size()/(double)setByUpd[i].size(); ++npers;
+        }
+    }
+    std::vector<size_t> cells;
+    for (size_t c = 0; c < nC; ++c) if (agg[c].n > 0) cells.push_back(c);
+    std::sort(cells.begin(), cells.end(), [&](size_t a, size_t b) { return agg[a].n != agg[b].n ? agg[a].n > agg[b].n : a < b; });
+    long nge90 = 0; for (size_t c : cells) if (W > 0 && (double)agg[c].n >= 0.9*(double)W) ++nge90;
+    const std::string fc = std::string("twophase_diag_") + tag + "_cells.csv", fs = std::string("twophase_diag_") + tag + "_summary.csv";
+    if (FILE* f = std::fopen(fc.c_str(), "w")) {
+        std::fprintf(f, "rank,cell,x,y,z,n_updates,freq,first_update,last_update,max_consecutive,n_consecutive_with_previous,"
+                        "reason_vapour_nonneg,reason_liquid_nonneg,reason_dg_max,reason_dT_max,reason_none,"
+                        "rv_pre,rg_pre,d_rv,d_rg,d_rQ2,d_rQ1,d_rQ0,res_Q2,res_Q1,res_Q0,theta,renorm_f_minus_1,renorm_d_rYw,renorm_d_rg\n");
+        const size_t top = std::min<size_t>(cells.size(), 500);
+        for (size_t i = 0; i < top; ++i) {
+            const size_t c = cells[i]; const Agg& a = agg[c]; const double* r = a.lastRec + 2;
+            std::fprintf(f, "%zu,%zu,%.9g,%.9g,%.9g,%ld,%.6g,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,"
+                            "%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e\n",
+                         i + 1, c, cx[c], cy[c], cz[c], a.n, (W ? (double)a.n/(double)W : 0.0), a.first, a.last, a.best, a.persist,
+                         a.reason[1], a.reason[2], a.reason[3], a.reason[4], a.reason[0],
+                         r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[8], r[9], r[10], r[11], r[12], r[13], r[14]);
+        }
+        std::fclose(f);
+    }
+    if (FILE* f = std::fopen(fs.c_str(), "w")) {
+        std::fprintf(f, "key,value\n");
+        std::fprintf(f, "selection,%s\nwindow_first_update,%zu\nwindow_updates,%zu\ntotal_updates,%zu\nrecords,%llu\nrecords_dropped,%llu\n",
+                     tag, w0, W, N, nrec, (nrec > g_tpd_cap) ? nrec - g_tpd_cap : 0ULL);
+        std::fprintf(f, "cell_updates,%ld\nunique_cells,%zu\nmean_cells_per_update,%.6g\nmax_cells_per_update,%zu\n",
+                     tot, cells.size(), W ? (double)tot/(double)W : 0.0, maxPer);
+        std::fprintf(f, "mean_fraction_also_in_previous_update,%.6g\ncells_in_ge_90pct_of_updates,%ld\n", npers ? pers/(double)npers : 0.0, nge90);
+        std::fprintf(f, "reason_vapour_nonneg,%ld\nreason_liquid_nonneg,%ld\nreason_dg_max,%ld\nreason_dT_max,%ld\nreason_none,%ld\n",
+                     reasonTot[1], reasonTot[2], reasonTot[3], reasonTot[4], reasonTot[0]);
+        std::fprintf(f, "rows_in_cells_csv,%zu\n", std::min<size_t>(cells.size(), 500));
+        std::fclose(f);
+    }
+    printf("[twophase-diag] wrote %s and %s (window %zu of %zu updates, %ld cell-updates, %zu unique cells, mean %.3f per update, persistence %.3f, records dropped %llu)\n",
+           fc.c_str(), fs.c_str(), W, N, tot, cells.size(), W ? (double)tot/(double)W : 0.0, npers ? pers/(double)npers : 0.0,
+           (nrec > g_tpd_cap) ? nrec - g_tpd_cap : 0ULL);
+    fflush(stdout);
 }

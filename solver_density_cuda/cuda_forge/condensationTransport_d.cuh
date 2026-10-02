@@ -69,6 +69,10 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
 void twoPhaseHoldWater_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 // 二相更新の監視 (θ・保留量・状態補正) を 1 行出す (condCorrectionLog から monitorInterval ごと)。
 void twoPhaseUpdateLog(solverConfig& cfg, int iStep);
+// 二相更新の診断 (condTwoPhaseDiag, #1b-r1; 読むだけ)。twoPhaseDiagRenormPtr: 再正規化がセルごとの f−1・Δ(ρY_w)・Δ(ρg) を書く先 (無効なら nullptr)。
+// twoPhaseDiagWrite: 終了時に末尾 200 更新の θ = 0 (または θ < 1) のセルを CSV に書く (run ディレクトリ)。
+double* twoPhaseDiagRenormPtr();
+void    twoPhaseDiagWrite(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 // θ の全更新を覆う集計 (#1b-pre (3)): kind 0 = θ_src (condensationSource の直後), 1 = 更新の θ (モーメント更新の直後)。計上だけ。
 void condThetaScan_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int kind);
 

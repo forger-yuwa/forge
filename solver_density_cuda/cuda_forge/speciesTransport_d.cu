@@ -2140,11 +2140,12 @@ __global__ void twophase_diffusion_d(
 // (plan §4.2「化学種の再正規化で ρY_w に掛けた係数を ρg と Q にも」; 現行は液更新の前に水だけ再正規化される)。
 __global__ void species_renormalize_liquid_d(
     geom_int nCells, int nSpecies, flow_float** roY, flow_float* ro,
-    double* reasons, int iw, const geom_float* vol, const geom_int* root, flow_float** rophi, double* rnAcc)
+    double* reasons, int iw, const geom_float* vol, const geom_int* root, flow_float** rophi, double* rnAcc,
+    double* diagRn)   // 診断 (condTwoPhaseDiag; nullptr で書かない): [ic] f−1, [nCells+ic] Δ(ρY_w), [2nCells+ic] Δ(ρg)
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
-    const double qw_m = (rnAcc != nullptr && iw >= 0) ? (double)roY[iw][ic] : 0.0;   // 再正規化の直前 (負値の 0 化の前)
+    const double qw_m = ((rnAcc != nullptr || diagRn != nullptr) && iw >= 0) ? (double)roY[iw][ic] : 0.0;   // 再正規化の直前 (負値の 0 化の前)
     double sum = 0.0;
     for (int s = 0; s < nSpecies; s++) {
         flow_float v = roY[s][ic];
@@ -2157,6 +2158,11 @@ __global__ void species_renormalize_liquid_d(
     for (int s = 0; s < nSpecies; s++) roY[s][ic] = (flow_float)((double)roY[s][ic] * factor);
     double dl[1 + TP_NQ], qin[1 + TP_NQ];
     for (int m = 0; m < 1 + TP_NQ; ++m) { const flow_float in_ = rophi[m][ic]; qin[m] = (double)in_; rophi[m][ic] = (flow_float)((double)in_ * factor); dl[m] = fabs((double)rophi[m][ic] - (double)in_); }
+    if (diagRn != nullptr) {
+        diagRn[ic] = factor - 1.0;
+        diagRn[(size_t)nCells + ic] = (iw >= 0) ? ((double)roY[iw][ic] - qw_m) : 0.0;
+        diagRn[2*(size_t)nCells + ic] = (double)rophi[0][ic] - qin[0];
+    }
     if (reasons != nullptr && iw >= 0 && (root == nullptr || root[ic] == ic)) {
         const double d = fabs((double)roY[iw][ic] - (double)yw_in);
         const double Vc = (vol != nullptr) ? (double)vol[ic] : 1.0;
@@ -2208,7 +2214,7 @@ void speciesRenormalizeTwoPhase_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cf
     double* rnAcc = (reasonsRn != nullptr) ? rngBegin() : nullptr;
     species_renormalize_liquid_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells, g_nSpecies, g_roY_dev, var.c_d["ro"],
-        reasonsRn, iwRn, var.c_d["volume"], passive_periodic_root(cfg, msh), g_p_rophi_dev + g_qMom0, rnAcc);
+        reasonsRn, iwRn, var.c_d["volume"], passive_periodic_root(cfg, msh), g_p_rophi_dev + g_qMom0, rnAcc, twoPhaseDiagRenormPtr());
     if (rnAcc != nullptr) rngEnd(cuda_cfg);
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

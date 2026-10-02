@@ -839,3 +839,28 @@ A = 毎更新ログ / B = 10 更新ごとログ。末尾窓は [90,100)。
 - A (キー OFF + 監査): 区間 C_w 2.285e-7 → 1.904e-7、液・Q 0、max|f−1| 7.87e-5 → 4.28e-5、FINAL 窓 [1,2) VERDICT FAIL (max|f−1| > κ; 過渡なので想定どおり)。
 - B (キー ON): C_w 2.28e-7 / 1.90e-7、C_g 1.13e-7 / 1.38e-7、C_Q 1.18–1.57e-7、max|f−1| 同上、FINAL FAIL。
 - 既定 (キー OFF・監査 0): `test_transport_gas_phase.py` G0 4 構成バイト一致、2 step res_0 は旧バイナリと 120/120 一致 (ログに `[renorm-gate]` 行が加わるだけ)。
+
+## 18. #1b-r1 診断の計測 (2026-10-02; HEAD `b0fc8dcb` + 未 commit; 数値は不変)
+
+裁定: [`notes/reviews/2026-10-02-twophase-1b-4k-result-diagnose.md`](../reviews/2026-10-02-twophase-1b-4k-result-diagnose.md) (plan §5.1 #1b-r1 行)。
+キー `condensation.condTwoPhaseDiag` (既定 0 = 出さない; 1 = θ = 0 のセル、2 = θ < 1 のセル [機構確認用])。二相拡散が働く run だけ。クリーンビルド (solverConfig.hpp を変えた)。
+
+- `tp_vl_update` (`twoPhaseDiffusion_d.cuh`) の出力 `TpCellOut` に制限前 (緩和後) の増分 dv・dg・dq と θ を決めた制限 `reason`
+  (0 なし, 1 蒸気の非負, 2 液の非負, 3 dg_max, 4 dT_max; θ の値は従来と同じ fmin の列で決まる) を足した。数値は不変 (単体試験 T3 は 69 / 911 反復・同じ不動点のまま)。
+- キー ON のとき更新カーネルがセルごとに 更新前の ρv・ρg、制限前増分 δρv・δρg・δρQ2/Q1/Q0、制限、Q2/Q1/Q0 の残差 (更新に入った全残差)、θ を、
+  再正規化カーネルが f−1・Δ(ρY_w)・Δ(ρg) (直後 − 直前) を書き、更新の直後に末尾 200 更新 (実更新数基準) の該当セルを記録する (上限 40 万記録; 超えた分は数えて報告)。
+- 終了時 (時間ループの後) に run ディレクトリへ:
+  - `twophase_diag_theta0_cells.csv` (キー 2 は `theta_lt1`): 頻度順の上位 500 セル。列
+    `rank,cell,x,y,z,n_updates,freq,first_update,last_update,max_consecutive,n_consecutive_with_previous,reason_vapour_nonneg,reason_liquid_nonneg,reason_dg_max,reason_dT_max,reason_none,rv_pre,rg_pre,d_rv,d_rg,d_rQ2,d_rQ1,d_rQ0,res_Q2,res_Q1,res_Q0,theta,renorm_f_minus_1,renorm_d_rYw,renorm_d_rg`
+    (freq = n_updates / 窓の更新数、値の列はそのセルの窓内最後の記録、x,y,z はセル (双対) 重心)。
+  - `twophase_diag_theta0_summary.csv` (key,value): `selection, window_first_update, window_updates, total_updates, records, records_dropped, cell_updates, unique_cells,
+    mean_cells_per_update, max_cells_per_update, mean_fraction_also_in_previous_update` (連続する更新のセル集合の重なり |S_n ∩ S_{n−1}|/|S_n| の平均 = 同じセルの持続),
+    `cells_in_ge_90pct_of_updates, reason_* (5), rows_in_cells_csv`。
+- 区間ごと (monitorInterval) に頻度を更新数で正規化した行:
+  `[twophase-diag] step S interval K updates | theta<1: X cell-updates = Y cells per update, U unique cells | theta=0: X cell-updates = Y cells per update, U unique cells`
+  (#1b の初回結果の「θ<1 7.3e4」は区間内のセル×更新数で、固有セル数ではない)。
+- (3) 終了時の独立残差監査は成分ごとに絶対値 `max|r|`・`max A`・`r0` と比 `ratio` を出している (変更なし; 例は §15.4 の行)。
+- 確認 (2 step, run_0482 入力の複製): キー 2 で θ<1 の 22 セルを記録 (全部 液の非負で ρg ~1e-39 の非正規数の液、Q 残差 1e-34〜1e-16)、CSV 2 本と `[twophase-diag]` 行を確認。
+  キー 1 は θ = 0 が無く 0 行 (要約は出る)。キー 0 (二相 ON) の `[...]` 行は前のビルドと数値を除いて同一の構成 (値の差は atomicAdd の run 間ゆらぎ)、
+  キー OFF の既定は `test_transport_gas_phase.py` G0 4 構成バイト一致、単体試験 `test_twophase_kernel.cu` ALL PASS。
+- ついでに直したもの: solverConfig.hpp の ω のコメントが `condAuditResidual` の行に付いていた (コメントのみ; 6a7a865d 以前の自分の編集の誤り)。

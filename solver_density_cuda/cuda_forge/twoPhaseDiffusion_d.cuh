@@ -143,6 +143,9 @@ struct TpCellOut {
     double theta;
     double withheld_v, withheld_g;   // (1−θ)|δ|
     double qcut, vround;             // 状態を書き換えた補正 (Q の非負化、丸めによる蒸気の負)
+    // 診断 (condTwoPhaseDiag, #1b-r1; 読むだけ): 制限前 (緩和後) の増分と θ を決めた制限
+    float  dv, dg, dq[TP_NQ];
+    int    reason;                   // 0 = 制限なし (θ=1), 1 = 蒸気の非負, 2 = 液の非負, 3 = dg_max, 4 = dT_max
 };
 
 // thetaRound: θ (double) を float にするときの丸め。1 = 切り上がったら 0 側の隣の float へ (安全側; 既定)、0 = 最近接 (#4e; 判別用)。
@@ -161,16 +164,20 @@ TP_HD inline void tp_vl_update(const TpCellIn& c, TpCellOut& o, int thetaRound =
     if (c.omega != 1.0f) { dv *= c.omega; dg *= c.omega; for (int m = 0; m < TP_NQ; ++m) dq[m] *= c.omega; }
     // θ_thr (全増分に対する閾値) と θ_vg (蒸気・液の非負; 蒸気は更新前の ρv)
     double th = 1.0;
+    int reason = 0;   // 診断のみ: θ を下げた制限 (同値は後の制限)。θ の値は従来と同じ fmin の列で決まる
     const double rho = (double)c.rho;
     const double adg = (rho > 0.0) ? fabs((double)dg)/rho : 0.0;
     if (adg > 0.0) {
+        if (c.dg_max/adg < th) reason = 3;
         th = fmin(th, c.dg_max/adg);
         const double adT = adg*c.L/c.cveff;
-        if (adT > 0.0) th = fmin(th, c.dT_max/adT);
+        if (adT > 0.0) { if (c.dT_max/adT <= th && c.dT_max/adT < 1.0) reason = 4; th = fmin(th, c.dT_max/adT); }
     }
     const double rvs = (double)c.rYw - (double)c.rg;
-    if ((double)dv < 0.0) th = fmin(th, rvs/(-(double)dv));
-    if ((double)dg < 0.0) th = fmin(th, (double)c.rg/(-(double)dg));
+    if ((double)dv < 0.0) { const double t = rvs/(-(double)dv); if (t <= th && t < 1.0) reason = 1; th = fmin(th, t); }
+    if ((double)dg < 0.0) { const double t = (double)c.rg/(-(double)dg); if (t <= th && t < 1.0) reason = 2; th = fmin(th, t); }
+    o.dv = dv; o.dg = dg; for (int m = 0; m < TP_NQ; ++m) o.dq[m] = dq[m];
+    o.reason = reason;
     if (!(th > 0.0)) th = 0.0;   // NaN も 0 (動かさない; 残差が下がらないことで監視に出る)
     float Th = (float)th;
     if (thetaRound != 0 && (double)Th > th) Th = nextafterf(Th, 0.0f);   // 共通の実効 θ を安全側へ (θ_vg の境界を越えない)
