@@ -43,7 +43,8 @@ static const double DX = 0.5e-3;
 static double CFL = 5.0;   // 判定は 5 (§10.1)。感度 (判定外) で 50・500 も回す
 static const double RHO = 0.360648, U = 369.99, MUT = 1.825e-5, SCT = 0.9, DMOL = 9.0e-5;   // DMOL: N2–H2O, 23.8 kPa, 221 K の目安 (一定)
 static const double T_IN = 221.350, YW_IN = 0.01095, G_IN = 1.190e-6, Q0_IN = 8.6487e15, Q1_IN = 1.8865e7, Q2_IN = 6.3338e-2;
-static const double DG_MAX = 5.0e-3, DT_MAX = 1.0;   // B_LIMITS (forge 既定 condDgMaxStep / condDTmaxStep)
+static const double DG_MAX = 5.0e-3;   // B_LIMITS (forge 既定 condDgMaxStep)
+static double DT_MAX = 1.0;            // forge 既定 condDTmaxStep。#4d の制限作動 A/B だけが 0.01 K に替える
 static const double EPS32 = 1.1920928955078125e-7;
 enum { K_N2 = 0, K_W, K_L, K_Q0, K_Q1, K_Q2, K_E, NVAR };   // 格納変数 (ρY_N2, ρY_w, ρg, ρQ0, ρQ1, ρQ2, ρE)
 static const char* VNAME[] = {"N2", "w", "l", "Q0", "Q1", "Q2", "E"};
@@ -77,7 +78,7 @@ static double e_of_T(const Ctx& c, double rN2, double rYw, double rg, double T)
 }
 
 // ------------------------------------------------------------------ ソース (float カーネル本体の写し)
-struct Src { float Sg, SQ0, SQ1, SQ2, sjg, sjq1, theta; float dSg_drv, dSg_drg; bool evap; };
+struct Src { float Sg, SQ0, SQ1, SQ2, sjg, sjq1, theta; float dSg_drv, dSg_drg; bool evap; bool oot; };   // oot: 物性表の範囲外 (未対応 → FAIL)
 static Src cond_source_cell_f(const Ctx& c, float rod, float Td, float rYw, float rog, float q0, float q1, float q2, bool jac2)
 {
     Src o{}; o.theta = 1.0f;
@@ -97,7 +98,7 @@ static Src cond_source_cell_f(const Ctx& c, float rod, float Td, float rYw, floa
     const float lnS = (pv > 0.0f) ? (logf(pv) - cond_tab_lnpsat_f(c.tb, Td)) : -1.0e30f;
     CondNucCarrierF car; car.a_v = 1.0f; car.carrierSum = 0.0f; car.cvv_tilde = c.cpf.cv*c.cpf.M/COND_RU_F;
     const int kw = 1, growth = 0; const float gyarC = 3.18f;
-    if (!(Td >= c.tb.Tmin && Td + 0.1f <= c.tb.TwetMax)) { fprintf(stderr, "T out of table %g\n", Td); return o; }
+    if (!(Td >= c.tb.Tmin && Td + 0.1f <= c.tb.TwetMax)) { o.oot = true; return o; }   // ゼロソースで続けず、呼び出し側が FAIL にする (#4d)
     if (!(lnS > 0.0f) && g <= 0.0f && q0 <= 1.0e-30f) return o;   // dry
     if (g > 0.0f && !(lnS > 0.0f)) {
         // 蒸発 (limiterMode 1: 率形)
@@ -268,7 +269,36 @@ struct RunOut {
     double ulp_max[NVAR + 1] = {}; double frac_sub_half = 0.0; bool stagnate = false;
     int realiz_viol = 0; double g_out = 0, S_out = 0, T_out = 0, x_onset = -1; double sumY_err = 0;
     std::vector<std::string> hist;
+    // #4d: 補正は更新ごとに記録し、実際に行った更新数の末尾 10 % (切り上げ、最低 1) で集計する
+    std::vector<double> qcut_it, vround_it; int tail_n = 0;
+    int theta_lt1_updates = 0, theta_last_it = -1;   // θ<1 のセルがあった更新の数・最後にあった更新
+    // #4d: 非有限値・表範囲外は集計で落とさず、検出した時点で打ち切って FAIL
+    long oot = 0; std::string bad;
 };
+// 合否 (§10.2 + #4d): 収束 (独立残差比 ≤1、全成分有限)・非負・末尾 10 % の補正 0・最後の θ と θ_src が 1・非有限/表範囲外なし
+static bool accept(const RunOut& x)
+{
+    if (!x.converged || !x.bad.empty() || x.oot != 0) return false;
+    for (int q = 0; q <= NVAR; ++q) if (!std::isfinite(x.comp_ratio[q]) || x.comp_ratio[q] > 1.0) return false;
+    return x.min_rv >= 0 && x.min_rg >= 0 && x.min_Q >= 0 && x.qcut_last10 == 0 && x.vround_last10 == 0
+        && x.theta_src_final_lt1 == 0 && x.theta_final_lt1 == 0;
+}
+
+// 組み立て結果の検査 (#4d): 表範囲外のセル・非有限の残差/尺度/ソースを見つけたら ro.bad に記録して false
+static bool scan_assembled(const Assembled& A_, const char* where, int it, RunOut& ro)
+{
+    char b[192];
+    for (int i = 0; i < NC; ++i) {
+        const Src& s = A_.src[i];
+        if (s.oot) { ++ro.oot; snprintf(b, sizeof b, "%s: 物性表の範囲外 (セル %d, 反復 %d)", where, i, it); ro.bad = b; return false; }
+        const float sv[] = {s.Sg, s.SQ0, s.SQ1, s.SQ2, s.sjg, s.sjq1, s.theta, s.dSg_drv, s.dSg_drg};
+        for (float v_ : sv) if (!std::isfinite(v_)) { snprintf(b, sizeof b, "%s: 非有限のソース (セル %d, 反復 %d)", where, i, it); ro.bad = b; return false; }
+        for (int q = 0; q <= NVAR; ++q)
+            if (!std::isfinite(A_.r[q][i]) || !std::isfinite(A_.A[q][i]) || !std::isfinite(A_.diag[q][i])) {
+                snprintf(b, sizeof b, "%s: 非有限の残差/尺度 %s (セル %d, 反復 %d)", where, q == K_V ? "v" : VNAME[q], i, it); ro.bad = b; return false; }
+    }
+    return true;
+}
 
 template <typename F>
 static RunOut run(const Ctx& c, const RunOpt& o)
@@ -293,12 +323,13 @@ static RunOut run(const Ctx& c, const RunOpt& o)
         // EOS (格納値から double Newton) — 反復の T と独立残差の T は同じ定義
         for (int i = 0; i < NC; ++i) {
             bool ok; T[i] = eos_T(c, (double)st.v[K_N2][i], (double)st.v[K_W][i], (double)st.v[K_L][i], (double)st.v[K_E][i], T[i], &ok);
-            if (!ok) { printf("  EOS failed cell %d it %d\n", i, it); ro.iters = it; return ro; }
+            if (!ok || !std::isfinite(T[i])) { char b[128]; snprintf(b, sizeof b, "EOS 失敗/非有限 T (セル %d, 反復 %d)", i, it); ro.bad = b; ro.iters = it; return ro; }
         }
         // 独立残差 (float64 で組み直し; 停止判定)
         State<double> s64; for (int q = 0; q < NVAR; ++q) for (int i = 0; i < NC; ++i) s64.v[q][i] = (double)st.v[q][i];
         State<double> in64; for (auto& v_ : in64.v) v_.assign(1, 0.0); for (int q = 0; q < NVAR; ++q) in64.v[q][0] = (double)inlet.v[q][0];
         Assembled a64; assemble<double>(c, s64, T, in64, a64, false);
+        if (!scan_assembled(a64, "独立残差", it, ro)) { ro.iters = it; return ro; }
         bool pass = true; double rmax = 0.0;
         for (int q : qlist) {
             double m = 0.0, Am = 0.0; for (int i = 0; i < NC; ++i) { m = std::max(m, fabs(a64.r[q][i])); Am = std::max(Am, a64.A[q][i]); }
@@ -306,7 +337,7 @@ static RunOut run(const Ctx& c, const RunOpt& o)
             const double tol = std::max(1e-7*r0[q], 6.0*EPS32*Am);
             const double ratio = (tol > 0) ? m/tol : (m == 0 ? 0.0 : INFINITY);
             ro.comp_ratio[q] = ratio; rmax = std::max(rmax, ratio);
-            if (ratio > 1.0) pass = false;
+            if (!(ratio <= 1.0)) pass = false;   // NaN も不合格側へ
         }
         ro.ratio_max = rmax;
         if (it % 100 == 0 || pass || it == o.cap) {
@@ -318,9 +349,10 @@ static RunOut run(const Ctx& c, const RunOpt& o)
         if (it == o.cap) { ro.iters = it; break; }
         // 反復の残差 (精度 F) と前処理
         assemble<F>(c, st, T, inlet, a, o.jac2);
+        if (!scan_assembled(a, "反復残差", it, ro)) { ro.iters = it; return ro; }
         bool allSub = true; int nsub = 0, ntot = 0; int thetaLastLt1 = 0;
         double ul[NVAR + 1] = {};
-        const bool tail = (it >= (int)(0.9*o.cap));
+        double qcut_this = 0.0, vround_this = 0.0;
         for (int i = 0; i < NC; ++i) {
             const Src& s = a.src[i];
             const F Mf = F(M);
@@ -361,18 +393,23 @@ static RunOut run(const Ctx& c, const RunOpt& o)
             if ((double)d[K_L] < 0) th = std::min(th, (double)st.v[K_L][i]/(-(double)d[K_L]));
             th = std::max(th, 0.0);
             const F Th = F(th);
+            {   // 増分・θ の非有限 (#4d)
+                bool fin = std::isfinite(th);
+                for (int q = 0; q <= NVAR; ++q) if (q != K_W && !std::isfinite((double)d[q])) fin = false;
+                if (!fin) { char b[128]; snprintf(b, sizeof b, "非有限の増分/θ (セル %d, 反復 %d)", i, it); ro.bad = b; ro.iters = it; return ro; }
+            }
             ro.theta_min = std::min(ro.theta_min, th); if (th < 1.0) ++ro.theta_lt1;
             ro.theta_src_min = std::min(ro.theta_src_min, (double)s.theta);
             ro.withheld_v += (1.0 - th)*fabs((double)d[K_V]); ro.withheld_g += (1.0 - th)*fabs((double)d[K_L]);
             // Q: 共通 θ と成分ごとの非負化
             for (int q : {K_Q0, K_Q1, K_Q2}) {
                 F dq = Th*d[q]; F nq = st.v[q][i] + dq;
-                if (nq < F(0)) { ro.qcut += -(double)nq; if (tail) ro.qcut_last10 += -(double)nq; dq = -st.v[q][i]; }
+                if (nq < F(0)) { ro.qcut += -(double)nq; qcut_this += -(double)nq; dq = -st.v[q][i]; }
                 d[q] = dq;
             }
             const F gnew = st.v[K_L][i] + Th*d[K_L];
             F wnew = st.v[K_W][i] + (Th*d[K_V] + Th*d[K_L]);
-            if (wnew - gnew < F(0)) { ro.vround += (double)(gnew - wnew); if (tail) ro.vround_last10 += (double)(gnew - wnew); wnew = gnew; }
+            if (wnew - gnew < F(0)) { ro.vround += (double)(gnew - wnew); vround_this += (double)(gnew - wnew); wnew = gnew; }
             // ULP の記録 (commit 前の値基準)
             const F dw = wnew - st.v[K_W][i], dgc = gnew - st.v[K_L][i];
             auto rec = [&](int q, F incr, F x) { const double u = (double)ulp_of<F>(x); const double r_ = (u > 0) ? fabs((double)incr)/u : 0.0;
@@ -384,6 +421,8 @@ static RunOut run(const Ctx& c, const RunOpt& o)
             st.v[K_L][i] = gnew; st.v[K_W][i] = wnew;
             st.v[K_N2][i] += d[K_N2]; st.v[K_E][i] += d[K_E];
             for (int q : {K_Q0, K_Q1, K_Q2}) st.v[q][i] += d[q];
+            for (int q = 0; q < NVAR; ++q) if (!std::isfinite((double)st.v[q][i])) {   // 状態の非有限 (#4d)
+                char b[128]; snprintf(b, sizeof b, "非有限の状態 %s (セル %d, 反復 %d)", VNAME[q], i, it); ro.bad = b; ro.iters = it; return ro; }
             ro.min_rv = std::min(ro.min_rv, (double)(st.v[K_W][i] - st.v[K_L][i]));
             ro.min_rg = std::min(ro.min_rg, (double)st.v[K_L][i]);
             for (int q : {K_Q0, K_Q1, K_Q2}) ro.min_Q = std::min(ro.min_Q, (double)st.v[q][i]);
@@ -394,12 +433,22 @@ static RunOut run(const Ctx& c, const RunOpt& o)
         subHalfStreak = allSub ? subHalfStreak + 1 : 0;
         ro.stagnate = (subHalfStreak >= 100);
         ro.theta_final_lt1 = thetaLastLt1;   // 最後に行った更新の θ<1 セル数 (次の反復で収束したら、これが最終の更新)
+        if (thetaLastLt1 > 0) { ++ro.theta_lt1_updates; ro.theta_last_it = it; }
+        ro.qcut_it.push_back(qcut_this); ro.vround_it.push_back(vround_this);
+    }
+    // 補正の末尾 10 % 集計 (実際に行った更新数が基準; 上限 o.cap ではない)
+    {
+        const int n = (int)ro.qcut_it.size();
+        ro.tail_n = std::max(1, (int)std::ceil(0.1*n));
+        ro.qcut_last10 = ro.vround_last10 = 0.0;
+        for (int k = std::max(0, n - ro.tail_n); k < n; ++k) { ro.qcut_last10 += ro.qcut_it[k]; ro.vround_last10 += ro.vround_it[k]; }
     }
     // 最終状態の監視
     {
         Assembled af; State<double> s64; for (int q = 0; q < NVAR; ++q) for (int i = 0; i < NC; ++i) s64.v[q][i] = (double)st.v[q][i];
         State<double> in64; for (auto& v_ : in64.v) v_.assign(1, 0.0); for (int q = 0; q < NVAR; ++q) in64.v[q][0] = (double)inlet.v[q][0];
         assemble<double>(c, s64, T, in64, af, false);
+        if (!scan_assembled(af, "最終状態", ro.iters, ro)) return ro;
         for (int i = 0; i < NC; ++i) {
             if (af.src[i].theta < 1.0f) ++ro.theta_src_final_lt1;
             const double rhol = cond_rho_cond(c.cp, T[i]);
@@ -423,18 +472,18 @@ template <typename F>
 static RunOut report(const Ctx& c, const RunOpt& o, bool judged)
 {
     const RunOut r = run<F>(c, o);
-    const bool ok = r.converged && r.min_rv >= 0 && r.min_rg >= 0 && r.qcut_last10 == 0 && r.vround_last10 == 0 && r.theta_src_final_lt1 == 0 && r.theta_final_lt1 == 0;
-    char b[2048];
+    const bool ok = accept(r);
+    char b[2400];
     snprintf(b, sizeof b,
-        "%s: %s (反復 %d / 上限 %d)、独立残差の最大比 %.3f [N2 %.2f w %.2f v %.2f l %.2f Q0 %.2f Q1 %.2f Q2 %.2f E %.2f]、"
+        "%s: %s%s%s (反復 %d / 上限 %d)、独立残差の最大比 %.3f [N2 %.2f w %.2f v %.2f l %.2f Q0 %.2f Q1 %.2f Q2 %.2f E %.2f]、"
         "min ρv %.3e・ρg %.3e・ρQ %.3e、θ 最小 %.3f (θ<1 のセル·反復 %ld、最後の更新で θ<1 のセル %d)、θ_src 最小 %.3f (最終で <1 のセル %d)、"
-        "保留 Σ(1−θ)|δ| 蒸気 %.2e / 液 %.2e、状態補正 Q_cut %.2e (最後 10%% %.2e)・v_round %.2e (最後 10%% %.2e)、"
+        "θ<1 のあった更新 %d (最後 反復 %d)、保留 Σ(1−θ)|δ| 蒸気 %.2e / 液 %.2e、状態補正 Q_cut %.2e (末尾 %d 更新 %.2e)・v_round %.2e (同 %.2e)、"
         "最終反復の増分/ULP 最大 [w %.2g l %.2g N2 %.2g Q0 %.2g Q1 %.2g Q2 %.2g E %.2g]・0.5 ULP 未満の割合 %.2f%s、"
         "実現可能性違反 %d、出口 g %.4e・S %.3g・T %.2f K、g > 1e-4 の位置 %.2f mm、|ΣρY−ρ|/ρ %.1e",
-        o.tag, r.converged ? "収束" : "上限到達", r.iters, o.cap, r.ratio_max,
+        o.tag, r.converged ? "収束" : (r.bad.empty() ? "上限到達" : "打ち切り"), r.bad.empty() ? "" : " — ", r.bad.c_str(), r.iters, o.cap, r.ratio_max,
         r.comp_ratio[K_N2], r.comp_ratio[K_W], r.comp_ratio[K_V], r.comp_ratio[K_L], r.comp_ratio[K_Q0], r.comp_ratio[K_Q1], r.comp_ratio[K_Q2], r.comp_ratio[K_E],
         r.min_rv, r.min_rg, r.min_Q, r.theta_min, r.theta_lt1, r.theta_final_lt1, r.theta_src_min, r.theta_src_final_lt1,
-        r.withheld_v, r.withheld_g, r.qcut, r.qcut_last10, r.vround, r.vround_last10,
+        r.theta_lt1_updates, r.theta_last_it, r.withheld_v, r.withheld_g, r.qcut, r.tail_n, r.qcut_last10, r.vround, r.vround_last10,
         r.ulp_max[K_W], r.ulp_max[K_L], r.ulp_max[K_N2], r.ulp_max[K_Q0], r.ulp_max[K_Q1], r.ulp_max[K_Q2], r.ulp_max[K_E],
         r.frac_sub_half, r.stagnate ? " (最後 100 反復すべて 0.5 ULP 未満 = 格納丸めによる停滞)" : "",
         r.realiz_viol, r.g_out, r.S_out, r.T_out, r.x_onset*1e3, r.sumY_err);
@@ -482,7 +531,7 @@ int main(int argc, char** argv)
     }
     CFL = 5.0;
     // 比較条件 (§10.4)
-    auto pass = [](const RunOut& x) { return x.converged && x.min_rv >= 0 && x.min_rg >= 0 && x.qcut_last10 == 0 && x.vround_last10 == 0 && x.theta_src_final_lt1 == 0 && x.theta_final_lt1 == 0; };
+    auto pass = [](const RunOut& x) { return accept(x); };
     int ia;
     const bool p10 = pass(r[0][0]), p05 = pass(r[1][0]);
     if (p10 && !(r[0][0].qcut + r[0][0].vround > 0 && p05)) ia = 0; else if (p05) ia = 1; else ia = -1;
@@ -494,6 +543,26 @@ int main(int argc, char** argv)
     else if (pd && p2) printf("[判定] 2×2 連成 (ω=%.1f): 両方合格 → 必須にしない (反復 対角 %d / 2×2 %d)\n", om[ib], r[ib][0].iters, r[ib][1].iters);
     else if (pd && !p2) printf("[判定] 2×2 連成 (ω=%.1f): 対角 合格・2×2 不合格 → 2×2 は採らない\n", om[ib]);
     else printf("[判定] 2×2 連成 (ω=%.1f): 両方不合格 → 上位へ\n", om[ib]);
+    // #4d 制限作動 A/B (変更は DT_MAX だけ; 同じ初期値・CFL 5・ω 1・対角・上限 cap)
+    {
+        printf("\n=== #4d 制限作動 A/B (DT_MAX のみ変更; float32, CFL %.0f, ω 1, 対角, 上限 %d) ===\n", CFL, cap);
+        RunOut ab[2]; const double dtm[2] = {1.0, 0.01};
+        for (int k = 0; k < 2; ++k) {
+            DT_MAX = dtm[k];
+            char tag[128]; snprintf(tag, sizeof tag, "A/B %s: DT_MAX %.2g K", k ? "B" : "A", dtm[k]);
+            RunOpt o{1.0, false, cap, tag};
+            ab[k] = report<float>(c, o, true);
+        }
+        DT_MAX = 1.0;
+        const bool pA = accept(ab[0]), pB = accept(ab[1]), actB = ab[1].theta_lt1 > 0;
+        if (!ab[1].bad.empty() || !ab[0].bad.empty()) printf("[判定] A/B: 打ち切り (A %s / B %s) → 判定不能\n", ab[0].bad.empty() ? "-" : ab[0].bad.c_str(), ab[1].bad.empty() ? "-" : ab[1].bad.c_str());
+        else if (!actB) printf("[判定] A/B: B で θ が常に 1 → 判別不成立 (θ_src の作動検証にもならない)\n");
+        else if (pA && pB) printf("[判定] A/B: A・B とも達成、B で θ<1 %ld セル·反復 → 当該条件で更新制限が反復を妨げる懸念を除外\n", ab[1].theta_lt1);
+        else if (pA && !pB) printf("[判定] A/B: A だけ達成 → 制限・commit を調べる\n");
+        else printf("[判定] A/B: A 不達成 (A %s / B %s) → 規則の想定外、上位へ\n", pA ? "合格" : "不合格", pB ? "合格" : "不合格");
+        if (ab[1].bad.empty() && !actB) { printf("[FAIL] B で θ<1 が発生しない (判別不成立)\n"); ++g_fail; }
+        printf("[INFO] B の θ_src 最小 %.3f (θ_src<1 は蒸気枯渇でしか起きない; DT_MAX は θ_src に作用しない)\n", ab[1].theta_src_min);
+    }
     printf("\n%s\n", g_fail ? "FAIL あり" : "ALL PASS");
     return g_fail ? 1 : 0;
 }
