@@ -69,9 +69,12 @@ $\delta$ は変数そのものの次元 ($\rho$ なら kg/m³、$P$ なら Pa) �
 - **変数ごとに効き方が桁違いになる**。同じ $\epsilon^2$ を $\Delta\rho \sim O(0.1)$ と
   $\Delta P \sim O(10^5)$ に当てるので、片方では無リミット・片方では通常動作になる。
 
-SU2 が同じ形の式で壊れないのは、**解を無次元化して解いている**ため $\delta$ が $O(1)$ だからである
-(`Common/src/CConfig.cpp:5021` `RefElemLength = 1.0`, `VENKAT_LIMITER_COEFF = 0.05` → $\epsilon^2 = 1.25\times10^{-4}$)。
-forge は SI 次元のまま解くので同じ式が成立しない。
+SU2 の Venkatakrishnan の $\epsilon^2$ は**領域で一定の定数** $(K\,L)^3$ で、局所のセル寸法に依らない
+(`SU2_CFD/include/limiters/CLimiterDetails.hpp`、`Common/src/CConfig.cpp:5021` `RefElemLength = 1.0`、
+`VENKAT_LIMITER_COEFF = 0.05` → $\epsilon^2 = 1.25\times10^{-4}$)。**SU2 の既定は次元付き (SI) で解く**
+(`REF_DIMENSIONALIZATION` の既定は `DIMENSIONAL`、`CConfig.cpp:1511`) ので、SU2 でも変数ごとの効き方は次元で変わる。
+(2026-10-03 訂正: 以前ここに「SU2 は無次元化して解くので壊れない」と書いていたが、既定については誤り。
+調査 `notes/investigations/limiter-unstructured-convergence-survey.md` §2.1。)
 
 #### 無次元化 Venkatakrishnan (`space.limiterScaled: 1`, **既定**)
 
@@ -95,7 +98,10 @@ $$
   (読むと $\epsilon^2=0$ になり `venkatK` が効かなくなる)。
 - $L_\mathrm{ref}$: `limiterRefLength`。0 ならメッシュ境界箱の対角。
 
-**`space.venkatK` の既定は経路で変わる**: `limiterScaled: 1` なら **0.05** (SU2 既定と同値)、`0` なら 1.0。
+**`space.venkatK` の既定は経路で変わる**: `limiterScaled: 1` なら **0.05** (SU2 既定と**数値は同じだが ε の定義が違う**)、`0` なら 1.0。
+forge の $\hat\epsilon^2=(K h_i/L_\mathrm{ref})^3$ は局所寸法 $h_i$ で縮むので、細かい壁近傍セルでは極端に小さくなる
+(case/16 の入口列で $\hat\epsilon\approx5\times10^{-8}$。SU2 を無次元化して回した場合の相対 ε 約 0.011 の 2×10⁵ 分の 1。
+plan [limiter-inlet-column-oscillation](../plans/active/limiter-inlet-column-oscillation.md) §4.5)。
 **旧経路の K は `limiterFunctions_d.cuh` で `1.f` 固定**なので、`limiterScaled: 0` では `venkatK` を変えても効かない。
 K=1.0 は Sod で全変数を悪化させる
 (密度の近傍逸脱が K=1.0 で 86674 面側、K=0.05 で **0**)。SERN でも K=1.0 は $\rho$ 797 / $U_y$ 1777 に対し
