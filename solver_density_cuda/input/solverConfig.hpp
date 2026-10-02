@@ -660,6 +660,9 @@ public:
     // 二相の非分割更新の増分の作り方 (#4g)。0: 点対角 (既定)、1: 化学種・受動種と同じ緩和整合 scalar-DPLUR (右辺は全残差、対角は点対角と同じ分母、
     // 非対角は流入質量流束、ゼロ開始で nStepInner 回 sweep、ω = implicitRelax; 最終増分に condTwoPhaseRelax、その後 θ・commit・再正規化は同じ)。
     int    condTwoPhaseSolver    = 0;
+    // 二相の非分割更新の蒸気・液の非負制限 θ_vg (#4h)。1: 掛ける (既定・従来)。0: 外す (θ = θ_thr だけ; commit は総水分だけ下限 0、液は後段で
+    // 固定した総水分に対して 0 ≤ ρg ≤ ρY_w に射影; 診断用 opt-in)。
+    int    condTwoPhaseNonnegLimit = 1;
     // 平衡凝縮 (plans/accepted/condensation-equilibrium.md): 核生成・成長を経ず各セルで p_v=p_sat(T) の g_eq へ緩和。
     int    condEquilibrium = 0;   // 0: 非平衡 (既定) / 1: 平衡凝縮・緩和形 (ソース S_g=αρΔ/dt, モーメント Q0-Q2 ソース 0)
                                   // / 2: 平衡凝縮・EOS 拘束形 (dependentVariables で (T,g) 同時反転し rog へ射影、rog 輸送は凍結;

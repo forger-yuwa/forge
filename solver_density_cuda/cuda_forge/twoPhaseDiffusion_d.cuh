@@ -140,6 +140,9 @@ struct TpCellIn {
     // #4g (condTwoPhaseSolver 1): 緩和整合 scalar-DPLUR が作った増分 (蒸気, 液, Q2, Q1, Q0)。useInc 0 なら点対角で作る (従来)。
     int   useInc;
     float inc[2 + TP_NQ];
+    // #4h (condTwoPhaseNonnegLimit 0 で 1): 共通 θ から蒸気・液の非負制限 θ_vg を外す (θ = θ_thr だけ)。commit は vround (ρY_w = ρg) を使わず
+    // 総水分だけ 0 に下限を掛け、液は後段 (再正規化 → 受動種の床 → 実現可能性クランプ) で固定した総水分に対して 0 ≤ ρg ≤ ρY_w に射影する。0 は従来どおり。
+    int   noNonneg;
 };
 
 // 前処理の分母 (点対角と DPLUR で同じ値): 蒸気 V/Δτ + D_v、液 V/Δτ + D_g + V sj_g、Q V/Δτ + D_Q + V sj_Q。
@@ -156,6 +159,8 @@ struct TpCellOut {
     double theta;
     double withheld_v, withheld_g;   // (1−θ)|δ|
     double qcut, vround;             // 状態を書き換えた補正 (Q の非負化、丸めによる蒸気の負)
+    double qc[TP_NQ];                // Q の非負化の成分別の量 (#4h の補正計測; qcut はその和で次元の違う量を足している)
+    double wfloor;                   // #4h: 総水分の下限 (ρY_w < 0 → 0) で足した量 (noNonneg のときだけ)
     // 診断 (condTwoPhaseDiag, #1b-r1; 読むだけ): 制限前 (緩和後) の増分と θ を決めた制限
     float  dv, dg, dq[TP_NQ];
     int    reason;                   // 0 = 制限なし (θ=1), 1 = 蒸気の非負, 2 = 液の非負, 3 = dg_max, 4 = dT_max
@@ -193,8 +198,10 @@ TP_HD inline void tp_vl_update(const TpCellIn& c, TpCellOut& o, int thetaRound =
         if (adT > 0.0) { if (c.dT_max/adT <= th && c.dT_max/adT < 1.0) reason = 4; th = fmin(th, c.dT_max/adT); }
     }
     const double rvs = (double)c.rYw - (double)c.rg;
-    if ((double)dv < 0.0) { const double t = rvs/(-(double)dv); if (t <= th && t < 1.0) reason = 1; th = fmin(th, t); }
-    if ((double)dg < 0.0) { const double t = (double)c.rg/(-(double)dg); if (t <= th && t < 1.0) reason = 2; th = fmin(th, t); }
+    if (c.noNonneg == 0) {   // 蒸気・液の非負制限 θ_vg (#4h の 0 では外す)
+        if ((double)dv < 0.0) { const double t = rvs/(-(double)dv); if (t <= th && t < 1.0) reason = 1; th = fmin(th, t); }
+        if ((double)dg < 0.0) { const double t = (double)c.rg/(-(double)dg); if (t <= th && t < 1.0) reason = 2; th = fmin(th, t); }
+    }
     o.dv = dv; o.dg = dg; for (int m = 0; m < TP_NQ; ++m) o.dq[m] = dq[m];
     o.reason = reason;
     if (!(th > 0.0)) th = 0.0;   // NaN も 0 (動かさない; 残差が下がらないことで監視に出る)
@@ -203,15 +210,20 @@ TP_HD inline void tp_vl_update(const TpCellIn& c, TpCellOut& o, int thetaRound =
     o.theta = th;
     o.withheld_v = (1.0 - th)*fabs((double)dv);
     o.withheld_g = (1.0 - th)*fabs((double)dg);
-    o.qcut = 0.0; o.vround = 0.0;
+    o.qcut = 0.0; o.vround = 0.0; o.wfloor = 0.0;
     for (int m = 0; m < TP_NQ; ++m) {
         float d = Th*dq[m];
         const float nq = c.rQ[m] + d;
-        if (nq < 0.0f) { o.qcut += -(double)nq; d = -c.rQ[m]; }
+        o.qc[m] = 0.0;
+        if (nq < 0.0f) { o.qcut += -(double)nq; o.qc[m] = -(double)nq; d = -c.rQ[m]; }
         o.rQ[m] = c.rQ[m] + d;
     }
     const float gnew = c.rg + Th*dg;
     float wnew = c.rYw + (Th*dv + Th*dg);
-    if (wnew - gnew < 0.0f) { o.vround += (double)(gnew - wnew); wnew = gnew; }
+    if (c.noNonneg == 0) {
+        if (wnew - gnew < 0.0f) { o.vround += (double)(gnew - wnew); wnew = gnew; }
+    } else if (wnew < 0.0f) {   // #4h: 総水分だけ下限 (液は削らない; 後段で総水分に対して射影)
+        o.wfloor = -(double)wnew; wnew = 0.0f;
+    }
     o.rg = gnew; o.rYw = wnew;
 }

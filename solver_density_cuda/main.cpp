@@ -2198,6 +2198,7 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
         if (twoPhase || (s.cfg.timeIntegration == 11 && s.cfg.condLimiterMode == 1 && s.cfg.condEquilibrium == 0))
             condThetaScan_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, 1);
         condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // φ=ρφ/ρ (出力/次残差用に同期)
+        if (twoPhase) twoPhaseCorrGateEnd();   // #4h: この更新の補正計測を閉じる (実現可能性クランプの後)
         // 受動トレーサ (segregated point-implicit)。tracer 無効で no-op。
         tracerUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         tracerTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
@@ -2732,6 +2733,7 @@ int main(int argc, char** argv) {
 
     twoPhaseDiagWrite(cfg, cuda_cfg, msh, var);   // 二相更新の診断 CSV (condTwoPhaseDiag; 無効なら no-op)
     renormGateLog(cfg, cfg.mainLoopCount(), true);   // 再正規化の受入ゲート: 末尾 ceil(0.1N) 更新の max と VERDICT (#1b-pre)
+    twoPhaseCorrGateLog(cfg, cfg.mainLoopCount(), true);   // 二相の補正ゲート: 末尾 ceil(0.1N) 更新の max と VERDICT (#4h)
     twoPhaseAudit(cfg.mainLoopCount(), true);   // 最終の格納状態 (出力は書き終えている)
     limiterDiag_finalize(cfg);   // 有界性診断の末尾取りこぼしを回収して累計を確定 (plan §4.35)
 

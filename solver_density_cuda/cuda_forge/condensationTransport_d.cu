@@ -293,6 +293,7 @@ void condensationRealizabilityProject_d_wrapper(solverConfig& cfg, cudaConfig& c
     gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
 }
 
+static double* tcArmedAcc();   // #4h の補正計測 (定義は後段; 二相の更新から実現可能性クランプまでの間だけ非 null)
 void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     (void)cfg;
@@ -318,7 +319,7 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
                 var.c_d["T"], var.c_d["P"], g_condTables, cprops,
                 var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i], condRealizViolCounter(),
                 condClampBudget(s), periodicNodeActive(cfg, msh) ? msh.periodicRoot_d : nullptr, var.c_d["volume"], doProject,
-                condCorrReasons(s));
+                condCorrReasons(s), (s == 0) ? tcArmedAcc() : nullptr);
         } else
         cond_realizability_clamp_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells, var.c_d["ro"], roY_w,
@@ -701,6 +702,7 @@ void condCorrectionLog_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
     }
     twoPhaseUpdateLog(cfg, iStep);   // 二相拡散の非分割更新の監視 (#4e; 無効構成は no-op)
     renormGateLog(cfg, iStep, false);   // 再正規化の受入ゲート: 前回ログからの全更新の max (#1b-pre)
+    twoPhaseCorrGateLog(cfg, iStep, false);   // 二相の補正ゲート: 前回ログからの全更新の max (#4h)
     g_condReasons_last = cur;
     if (passive) s_pst_last = pst;
     g_condReasons_last_step = iStep + 1;
@@ -745,6 +747,9 @@ void condTwoPhaseDiffusionValidate(const solverConfig& cfg)
                 cfg.condTwoPhaseRelax, cfg.condDgMaxStep, cfg.condDTmaxStep, cfg.condGasSpecies);
     if (cfg.discretization != "node")
         std::printf("[twophase] WARNING: cell discretization is unverified for two-phase diffusion (only the code path was reviewed)\n");
+    std::printf("[twophase] condTwoPhaseNonnegLimit %d (%s)\n", cfg.condTwoPhaseNonnegLimit,
+                cfg.condTwoPhaseNonnegLimit == 1 ? "vapour/liquid non-negativity in the common theta" :
+                "theta = threshold limits only; commit floors total water at 0 and liquid is projected to 0 <= rhog <= rhoYw downstream (diagnostic opt-in)");
     std::printf("[twophase] condTwoPhaseSolver %d (%s); effective implicitRelax %.6g, nStepInner %d, scalarCflMax %.6g (dt_local scale %.6g), condTwoPhaseRelax %.6g\n",
                 cfg.condTwoPhaseSolver, cfg.condTwoPhaseSolver == 1 ? "matched scalar-DPLUR: R = full residuals, D = point-diagonal denominators, advective inflow off-diagonal, zero start"
                                                                     : "point-diagonal",
@@ -775,14 +780,15 @@ __global__ void twophase_vl_update_d(
     flow_float* diagLim, flow_float* diagCorrG, flow_float* diagCorrQ,
     double* stats, int* thetaMin, double* limStats_g, const geom_int* root,
     double* diag,   // 診断 (condTwoPhaseDiag; nullptr で書かない): TPD_* 列 × nCells
-    const flow_float* inc, geom_int nIncStride)   // #4g: DPLUR の増分 [q*nIncStride + ic] (q = 蒸気, 液, Q2, Q1, Q0); nullptr なら点対角
+    const flow_float* inc, geom_int nIncStride,   // #4g: DPLUR の増分 [q*nIncStride + ic] (q = 蒸気, 液, Q2, Q1, Q0); nullptr なら点対角
+    int noNonneg, double* tcAcc)   // #4h: 非負制限 θ_vg を外す / 補正計測 (段 0 = commit 内の補正と分母; nullptr で計測しない)
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     const double v = (double)vol[ic];
     const double dt = (double)(dt_local[ic]*dtScale);
     TpCellIn c;
-    c.useInc = 0;
+    c.useInc = 0; c.noNonneg = noNonneg;
     c.M = (float)(v/fmax(dt, 1.0e-30)); c.V = (float)v;
     c.Rw = res_w[ic]; c.Rg = res_g[ic]; c.RQ[0] = res_Q2[ic]; c.RQ[1] = res_Q1[ic]; c.RQ[2] = res_Q0[ic];
     c.Dv = td_w[ic]; c.Dg = td_g[ic]; c.DQ[0] = td_Q2[ic]; c.DQ[1] = td_Q1[ic]; c.DQ[2] = td_Q0[ic];
@@ -803,6 +809,13 @@ __global__ void twophase_vl_update_d(
     if (inc != nullptr) { c.useInc = 1; for (int q = 0; q < 2 + TP_NQ; ++q) c.inc[q] = inc[(size_t)q*nIncStride + ic]; }
     TpCellOut o;
     tp_vl_update(c, o);
+    if (tcAcc != nullptr && (root == nullptr || root[ic] == ic)) {   // #4h: 段 0 (commit 内) の補正 [w,v,g,Q2,Q1,Q0] と分母 (更新開始時の格納値 ≥ 0)
+        const double cw = o.vround + o.wfloor;   // vround (ρY_w を ρg へ) と総水分の下限: どちらも総水分と蒸気が同じ量だけ動く
+        if (cw != 0.0) { atomicAdd(&tcAcc[0*6 + 0], cw*v); atomicAdd(&tcAcc[0*6 + 1], cw*v); }
+        for (int m = 0; m < TP_NQ; ++m) if (o.qc[m] != 0.0) atomicAdd(&tcAcc[0*6 + 3 + m], o.qc[m]*v);
+        const double den[6] = {(double)c.rYw, (double)c.rYw - (double)c.rg, (double)c.rg, (double)c.rQ[0], (double)c.rQ[1], (double)c.rQ[2]};
+        for (int k = 0; k < 6; ++k) if (den[k] != 0.0) atomicAdd(&tcAcc[30 + k], den[k]*v);
+    }
     if (diag != nullptr) {   // 更新前の格納値・制限前増分・θ を決めた制限・Q の残差 (読むだけ)
         const size_t n = (size_t)nCells;
         diag[0*n + ic] = (double)c.rYw - (double)c.rg; diag[1*n + ic] = (double)c.rg;
@@ -828,6 +841,7 @@ __global__ void twophase_vl_update_d(
         }
         if (o.qcut > 0.0) atomicAdd(&stats[4], o.qcut*v);
         if (o.vround > 0.0) atomicAdd(&stats[5], o.vround*v);
+        if (o.wfloor > 0.0) atomicAdd(&stats[7], o.wfloor*v);   // #4h: 総水分の下限 (noNonneg のときだけ非零)
         atomicAdd(&stats[6], 1.0);
     }
 }
@@ -926,6 +940,87 @@ static const flow_float* twoPhaseDPLURIncrement(solverConfig& cfg, cudaConfig& c
 
 static double* g_tp_stats_dev = nullptr;
 static int*    g_tp_thetaMin_dev = nullptr;
+
+// ---- #4h: 二相の更新ごと・成分ごとの補正計測 (計上のみ) ----
+//   acc[a*6 + k] = Σ_i |Δq_k| V (段 a: 0 commit 内 [vround・総水分の下限・Q の非負化], 1 受動種の床, 2 実現可能性クランプの下限/上限, 3 モーメント射影,
+//   4 液滴消滅 [物理; ゲート外])、acc[30 + k] = Σ_i q_k^開始 V (更新開始時の格納値; 蒸気は ρY_w − ρg)。成分 k = [ρY_w, ρv, ρg, ρQ2, ρQ1, ρQ0]。
+//   C_q,n = acc/den (分母 0 は分子 0 なら 0、分子 > 0 なら +inf)。履歴 1 更新 = 段×成分の 30 + 段 0–3 の合計 6。再正規化は [renorm-gate] で別。
+#define TC_NS 5
+#define TC_ENTRY (TC_NS*6 + 6)
+static double* g_tc_acc = nullptr;
+static double* g_tc_hist = nullptr;
+static size_t  g_tc_cap = 0, g_tc_n = 0, g_tc_logged = 0;
+static bool    g_tc_armed = false;
+namespace {
+__global__ void tc_finalize_d(const double* acc, double* e)
+{
+    if (blockIdx.x != 0 || threadIdx.x != 0) return;
+    for (int k = 0; k < 6; ++k) {
+        const double den = acc[30 + k];
+        double tot = 0.0;
+        for (int a = 0; a < TC_NS; ++a) {
+            const double num = acc[a*6 + k];
+            e[a*6 + k] = (den == 0.0) ? ((num == 0.0) ? 0.0 : INFINITY) : num/den;
+            if (a < 4) tot += num;
+        }
+        e[TC_NS*6 + k] = (den == 0.0) ? ((tot == 0.0) ? 0.0 : INFINITY) : tot/den;
+    }
+}
+}  // namespace
+static double* tcArm()
+{
+    if (g_tc_acc == nullptr) gpuErrchk( cudaMalloc((void**)&g_tc_acc, 36*sizeof(double)) );
+    if (g_tc_n + 1 > g_tc_cap) {
+        const size_t cap = std::max<size_t>(1024, 2*g_tc_cap);
+        double* h = nullptr; gpuErrchk( cudaMalloc((void**)&h, cap*TC_ENTRY*sizeof(double)) );
+        if (g_tc_hist != nullptr) { gpuErrchk( cudaMemcpy(h, g_tc_hist, g_tc_n*TC_ENTRY*sizeof(double), cudaMemcpyDeviceToDevice) ); cudaFree(g_tc_hist); }
+        g_tc_hist = h; g_tc_cap = cap;
+    }
+    gpuErrchk( cudaMemset(g_tc_acc, 0, 36*sizeof(double)) );
+    g_tc_armed = true;
+    return g_tc_acc;
+}
+static double* tcArmedAcc() { return g_tc_armed ? g_tc_acc : nullptr; }
+void twoPhaseCorrGateEnd()
+{
+    if (!g_tc_armed) return;
+    tc_finalize_d<<<1, 1>>>(g_tc_acc, g_tc_hist + g_tc_n*TC_ENTRY);
+    gpuErrchk( cudaPeekAtLastError() );
+    ++g_tc_n; g_tc_armed = false;
+}
+void twoPhaseCorrGateLog(const solverConfig& cfg, int iStep, bool final)
+{
+    if (g_tc_hist == nullptr || !condTwoPhaseDiffusionActive(cfg)) return;
+    const size_t n = g_tc_n;
+    const size_t b = final ? ((n == 0) ? 0 : n - (size_t)std::ceil(0.1*(double)n)) : g_tc_logged;
+    if (!final) g_tc_logged = n;
+    std::vector<double> h((n - b)*TC_ENTRY);
+    if (n > b) gpuErrchk( cudaMemcpy(h.data(), g_tc_hist + b*TC_ENTRY, h.size()*sizeof(double), cudaMemcpyDeviceToHost) );
+    double mx[TC_ENTRY]; for (int j = 0; j < TC_ENTRY; ++j) mx[j] = 0.0;
+    long nonfin = 0;
+    for (size_t u = 0; u < n - b; ++u) for (int j = 0; j < TC_ENTRY; ++j) {
+        const double v = h[u*TC_ENTRY + j];
+        if (!std::isfinite(v)) { if (j < 4*6 || j >= TC_NS*6) ++nonfin; mx[j] = v; continue; }
+        if (std::isfinite(mx[j]) && v > mx[j]) mx[j] = v;
+    }
+    const double kappa = 2.0*(double)cfg.nSpecies*1.1920928955078125e-7;
+    const double* T = mx + TC_NS*6;
+    char head[160];
+    if (final) std::snprintf(head, sizeof(head), "[twophase-corr-gate] FINAL step %d window: last %zu of %zu updates [%zu,%zu)", iStep, n - b, n, b, n);
+    else       std::snprintf(head, sizeof(head), "[twophase-corr-gate] step %d interval: %zu updates [%zu,%zu)", iStep + 1, n - b, b, n);
+    printf("%s | max_n C_q (stages commit+floor+clamp+projection): rhoYw %.6e rhov %.6e rhog %.6e rhoQ2 %.6e rhoQ1 %.6e rhoQ0 %.6e | kappa %.7e | nonfinite %ld",
+           head, T[0], T[1], T[2], T[3], T[4], T[5], kappa, nonfin);
+    if (final) {
+        bool pass = (n > b) && nonfin == 0;
+        for (int k = 0; k < 6; ++k) pass = pass && (T[k] <= kappa);
+        printf(" | VERDICT: %s\n", pass ? "PASS" : "FAIL");
+    } else printf("\n");
+    static const char* SN[TC_NS] = {"commit", "passive_floor", "clamp", "projection", "removal(physical, not gated)"};
+    for (int a = 0; a < TC_NS; ++a)
+        printf("[twophase-corr-gate]   stage %-28s max_n C: rhoYw %.3e rhov %.3e rhog %.3e rhoQ2 %.3e rhoQ1 %.3e rhoQ0 %.3e\n",
+               SN[a], mx[a*6 + 0], mx[a*6 + 1], mx[a*6 + 2], mx[a*6 + 3], mx[a*6 + 4], mx[a*6 + 5]);
+    fflush(stdout);
+}
 
 // ---- 診断 (condTwoPhaseDiag, #1b-r1; 読むだけ) ----
 // セル列 (double × nCells): 0 ρv (更新前), 1 ρg (更新前), 2 δρv, 3 δρg, 4–6 δρQ2/Q1/Q0 (制限前・緩和後), 7 制限 (0 なし, 1 蒸気非負, 2 液非負, 3 dg_max, 4 dT_max),
@@ -1176,6 +1271,7 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
     const std::string g = "rog_0", Q2 = "roQ2_0", Q1 = "roQ1_0", Q0 = "roQ0_0";
     const int q0 = passive_moment_index0();
     const flow_float* inc = (cfg.condTwoPhaseSolver == 1) ? twoPhaseDPLURIncrement(cfg, cuda_cfg, msh, var) : nullptr;   // #4g
+    double* tcAcc = tcArm();   // #4h: この更新の補正計測を開始 (実現可能性クランプの後で twoPhaseCorrGateEnd)
     twophase_vl_update_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
         msh.nCells, var.c_d["dt_local"], scalarDtScale(cfg), var.c_d["volume"], var.c_d["ro"], var.c_d["T"],
         var.c_d["cp"], var.c_d["Rmix"], cfg.condModel, cond_prop_opts(cfg), cfg.condDgMaxStep, cfg.condDTmaxStep, (flow_float)cfg.condTwoPhaseRelax,
@@ -1187,7 +1283,7 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
         var.c_d["transport_diag_g_0"], var.c_d["transport_diag_Q2_0"], var.c_d["transport_diag_Q1_0"], var.c_d["transport_diag_Q0_0"],
         var.c_d["condLim_0"], var.c_d["condClampCorr_0"], var.c_d["condClampCorrQ_0"],
         g_tp_stats_dev, g_tp_thetaMin_dev, passive_lim_stats_ptr(q0), passive_periodic_root(cfg, msh),
-        g_tpd_cell, inc, msh.nCells_all);
+        g_tpd_cell, inc, msh.nCells_all, (cfg.condTwoPhaseNonnegLimit == 0) ? 1 : 0, tcAcc);
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
     // 再正規化 (係数を液・Q にも) → 受動種の最後の砦 (floor と収支の記録; 通常は無作用) → 周期ミラー
@@ -1200,7 +1296,7 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
         gpuErrchk( cudaPeekAtLastError() );
         ++g_tpd_nupd;
     }
-    passiveBounds_d_wrapper(cfg, cuda_cfg, msh, var, q0, (int)var.condMomentConsNames.size(), true);
+    passiveBounds_d_wrapper(cfg, cuda_cfg, msh, var, q0, (int)var.condMomentConsNames.size(), true, tcAcc);
     passiveMirrorPeriodic_d_wrapper(cfg, cuda_cfg, msh, var);
 }
 
@@ -1211,8 +1307,10 @@ void twoPhaseUpdateLog(solverConfig& cfg, int iStep)
     gpuErrchk( cudaMemcpy(st, g_tp_stats_dev, 8*sizeof(double), cudaMemcpyDeviceToHost) );
     gpuErrchk( cudaMemcpy(&tmin, g_tp_thetaMin_dev, sizeof(int), cudaMemcpyDeviceToHost) );
     printf("[twophase] step %d interval | updates %.0f | theta<1 cells %.0f (theta=0 %.0f) min theta %.6f | withheld vapour %.3e liquid %.3e"
-           " | state corrections Qcut %.3e vround %.3e\n",
+           " | state corrections Qcut %.3e vround %.3e",
            iStep + 1, st[6], st[2], st[3], (st[2] > 0.0) ? tmin*1.0e-9 : 1.0, st[0], st[1], st[4], st[5]);
+    if (cfg.condTwoPhaseNonnegLimit == 0) printf(" total-water floor %.3e (non-negativity theta off)", st[7]);   // #4h
+    printf("\n");
     if (g_tpd_cell != nullptr) {   // 診断: θ 制限の頻度を更新数で正規化し、区間の固有セル数を出す (#1b-r1)
         const size_t nu = g_tpd_nupd - g_tpd_nupd_log;
         int cnt[2] = {0, 0};

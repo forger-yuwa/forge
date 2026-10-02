@@ -73,6 +73,9 @@ void twoPhaseUpdateLog(solverConfig& cfg, int iStep);
 // twoPhaseDiagWrite: 終了時に末尾 200 更新の θ = 0 (または θ < 1) のセルを CSV に書く (run ディレクトリ)。
 double* twoPhaseDiagRenormPtr();
 bool    twoPhaseDiagInWindow(const solverConfig& cfg);   // 診断の窓 (末尾 200 更新) の更新か (次に行う更新の番号で)
+// #4h: 二相の更新ごと・成分ごとの補正計測。End は実現可能性クランプの後 (更新を閉じて履歴へ)、Log は区間 (false) / 末尾窓 ceil(0.1N) と κ の VERDICT (true)。
+void    twoPhaseCorrGateEnd();
+void    twoPhaseCorrGateLog(const solverConfig& cfg, int iStep, bool final);
 void    twoPhaseDiagWrite(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 // θ の全更新を覆う集計 (#1b-pre (3)): kind 0 = θ_src (condensationSource の直後), 1 = 更新の θ (モーメント更新の直後)。計上だけ。
 void condThetaScan_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int kind);

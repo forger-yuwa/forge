@@ -956,3 +956,66 @@ T3 の 1D では DPLUR の非対角は 1 次風上の流入 ṁ/ρ_左 で、本
 共通初期場 run_0482 res_48000 (prepare_twophase_ab.sh と同じ複製手順)、両側 `condTwoPhaseDiffusion: 1`・`condTwoPhaseRelax: 1`・`implicitRelax` は run_0482 の値 (1.0)・
 `nStepInner` も同じ (5)、A = `condTwoPhaseSolver: 0`、B = `condTwoPhaseSolver: 1` (変えるのはこのキーだけ)、各 2000 step、同じビルドで両方。
 窓の計測は `condTwoPhaseDiag: 1` (または 3) を両側に。起動ログの `[twophase] condTwoPhaseSolver` 行で実効の ω・sweep 数・scalarCflMax を確かめる。
+
+## 21. #4h 非負制限 θ を外す opt-in (2026-10-02; HEAD `db2a8e94` + 未 commit)
+
+裁定: [`notes/reviews/2026-10-02-twophase-drop-nonneg-theta-diagnose.md`](../reviews/2026-10-02-twophase-drop-nonneg-theta-diagnose.md) (plan §5.1 #4h 行)。
+キー `condensation.condTwoPhaseNonnegLimit` (1 = 従来 [既定], 0 = 外す)。クリーンビルド。
+
+### 21.1 実装
+
+- `tp_vl_update` (`twoPhaseDiffusion_d.cuh`): `TpCellIn.noNonneg` (= キー 0; memset の 0 は従来) のとき θ = θ_thr (dg_max・dT_max は残す) で θ_vg を掛けない。
+  commit は `vround` (ρY_w = ρg) を使わず、総水分だけ 0 に下限 (`o.wfloor`; :226)。液 ρg は負でもそのまま渡し、後段で固定した総水分に対して射影する:
+  再正規化 (係数 > 0、符号を保つ) → 受動種の床 `passive_bounds_d` (ρg・ρQ ≥ 0) → 周期ミラー → `condensationPrimitive_d_wrapper` の実現可能性クランプ
+  (`r = clamp(r, 0, ρY_w)`、Q ≥ 0、モーメント射影、液滴消滅)。キー 1 の経路は分岐の外で不変 (単体: T3 69/911・DPLUR 32/907 と #4g (1) のビット一致は従来どおり)。
+- Q の非負化は成分別の量 `o.qc[3]` も出す (既存 `qcut` は次元の違う Q の和なので計測に使わない)。
+- **更新ごと・成分ごとの補正計測** `[twophase-corr-gate]` (二相拡散 ON の run すべて; 計上のみ): q ∈ {ρY_w, ρv, ρg, ρQ2, ρQ1, ρQ0}、
+  段 a = 0 commit 内 (vround・総水分の下限・Q の非負化)、1 受動種の床、2 実現可能性クランプの下限/上限 (液は総水分固定なので蒸気も同量)、3 モーメント射影、4 液滴消滅 (物理; ゲート外)。
+  各段の実際の格納値の差 |Δq|V を double で (段をまたいで相殺しない; 同じ変化を 2 段で数えない)、分母は更新開始時の格納値 Σq^開始 V (≥0; 蒸気は ρY_w − ρg)。
+  C_q,n = Σ_a≤3 |Δ|V / 分母 (分母 0 は分子 0 なら 0、分子 > 0 は +inf)、非有限は不合格。区間行と終了時の末尾窓 (実更新数 N の最後の ceil(0.1N)) の max と κ = 2n_sε₃₂ の VERDICT、
+  段ごとの max も 1 行ずつ。計測の入口: 更新カーネル (段 0 と分母)、`passive_bounds_d` (段 1; 追加引数)、`cond_realizability_clamp_f_d` (段 2–4; 追加引数; condFloat 1 の経路のみ)。
+  閉じるのはクランプの後 (`main.cpp` の `twoPhaseCorrGateEnd`)。再正規化は `[renorm-gate]` で別 (その分母も負の試行値を使わないよう max(q⁻, 0) に直した — キー 1 は q⁻ ≥ 0 で不変)。
+- 起動ログ `[twophase] condTwoPhaseNonnegLimit N (...)`、`[twophase]` 区間行にキー 0 のとき総水分の下限の量。
+
+### 21.2 負値の消費経路 (コード確認; キー 0)
+
+更新から次の物理評価まで (定常 `implicitNonlinearUpdate`):
+1. `twophase_vl_update_d` (`condensationTransport_d.cu:1275`): ρY_w ≥ 0 (下限)、ρQ ≥ 0 (成分別の非負化)、ρg は負になり得る。
+2. `speciesRenormalizeTwoPhase_d_wrapper` (`:1290`): 化学種の負値 0 化 (`speciesTransport_d.cu:2153`) と係数 f > 0 の乗算だけ — ρg の符号は変わらず、物理評価はしない。
+3. `passiveBounds_d_wrapper` (`:1299`): ρg < 0 → 0、ρQ < 0 → 0。
+4. `periodicMirrorSpeciesState` → `speciesPrimitive` (`main.cpp:2192` 付近; Y = ρY/ρ の除算だけ) → `condensationPrimitive_d_wrapper` (`main.cpp:2200`):
+   実現可能性クランプ `r = max(r, 0); r = min(r, ρY_w)` (`condensationRealizability_d.cuh:232-233`; 総水分 ≥ 0 は 1. の下限と f > 0 で成立)、Q の下限・射影・消滅、
+   その後 primitive φ = ρφ/ρ を ghost 込み全セルで (`condensationTransport_d.cu:289-291`)。→ ここで 0 ≤ ρg ≤ ρY_w、ρQ ≥ 0、蒸気 ≥ 0。
+5. 次の `assembleResidual`: `speciesPrimitive`・`condensationPrimitive` (`main.cpp:1823-1824`, クランプは冪等) → EOS `dependentVariables` (`main.cpp:1828`; しかも g_liq は
+   `dependentVariables_d.cu:124-131` で 0 ≤ g ≤ Y_w に制限済み — `cond_twophase_resid` 自体は g を非負化しない [`condensationEOS_d.cuh:351`] が、渡る g は非負)
+   → 物性 `gasProperties_d_wrapper` (`main.cpp:1832`; 気相組成 `gas_phase_composition` は液 ≤ 0 を無視・蒸気を 0 で下限 [`gasPhaseComposition_d.cuh:16-18`])
+   → 境界 `applySpeciesBoundaries`/`applyCondensationBoundaries` (`main.cpp:1842-1843`; Neumann は内点の値の複製、入口は Dirichlet 0) → 勾配・`convectiveFlux_d_wrapper`
+   (`main.cpp:1875`; 受動種 S3 面値は下限 0 でクリップ [`convectiveFlux_slau_d.inc.cuh:603`]) → 二相拡散 (`main.cpp:1893`; 格納値を直接使う — 4. で非負)
+   → ソース (`main.cpp:1894`; float カーネルは g を [0, Y_w] に制限 [`condensationSourceKernels_d.cuh:331-334`]、`cond_vapor_state_f` は Y_w − g を下限 0 [`condensationSourceF_d.cuh:68`])。
+- **結論**: キー 0 で負の ρg が存在するのは 1.〜3. の間 (再正規化の乗算だけが読む) で、物理評価 (EOS・核生成/成長/蒸発・物性・移流拡散) には 4. のクランプ後の非負状態と
+  primitive/ghost が渡る。dual-time・陽解法では二相拡散を起動時に拒否しているので、この経路だけ。修正は不要だった。
+- 限定: 段 2–4 の計測は float の実現可能性クランプ (condFloat 1, 既定) だけ。condFloat 0 ではクランプは働くが計測が抜ける (ゲートは過小)。
+
+### 21.3 単体 (`tests/unit/test_twophase_kernel.cu`, GPU; ALL PASS 22)
+
+- キー 1 の不変: T3 点対角 69 / 911 反復・出口 g 2.603278e-3 / 2.603268e-3、#4g (1) のビット一致 (2 万セル 0 件) と (3)(4) は前回と同じ値。
+- (a) codex の反例 (θ_thr = 1, ρY_w 0.01, ρg 0.0099, δρv −0.0002, δρg 0; 本番の更新 → `passive_bounds_d` → `cond_realizability_clamp_f_d` を GPU で):
+  - キー 1: θ 0.5、ρY_w 0.0099・ρg 0.0099 (非負 θ で半分止まる、補正 0)。
+  - キー 0: θ 1、commit 後 ρY_w 0.0098 (= 試行値、vround 0・下限 0)・ρg 0.0099 → クランプ後 ρY_w 0.0098・ρg 0.0098・ρv 0。**総水分は増えない** (試行値のまま)、
+    液の上限クランプの補正 C_g = 1.01e-2 (κ を大きく超える — この例ではゲートは不合格になる、計測が補正を拾うことの確認)。
+- (b) T3 1D、DPLUR 5 sweep、キー 0 (後段の床・上限を 1D に写して計上): 1 K で 32 反復・最大比 0.981、0.01 K で 907 反復・0.333、非負・最後の θ/θ_src 解除、
+  末尾 10 % の C は全成分 0 (≤ κ)。この 1D では θ_vg が一度も作動しないので、キー 0 と 1 は同じ反復・同じ出口 g (判別力なし; 記録)。
+- `test_renorm_gate.cu` ALL PASS (分母の修正後)。
+
+### 21.4 ソルバでの確認 (2 step, run_0482 入力の複製)
+
+- キー 0 + DPLUR: 終了 0、起動行と `[twophase-corr-gate]` 行を確認。step 1 は Q2・Q1 の C が inf (開始時の総量 0 の状態で射影が Q1・Q2 を動かした — 規則どおり不合格)、
+  step 2: projection 段 Q2 7.66e-3・Q1 7.50e-3 が支配 (既存のモーメント射影で、キー 1 でも同じく働く)、受動種の床 ρg 1.5e-31、commit Q2 2.1e-38。FINAL VERDICT FAIL (2 step の過渡)。
+- キー 1: `[...]` 行は新しい起動行・ゲート行を除いて前のビルドと数値以外同一。キー OFF の既定は G0 4 構成バイト一致。
+
+### 21.5 case/16 A/B (AWS; plan #4h 行)
+
+共通初期場 run_0482 res_48000、両側 二相拡散 ON・`condTwoPhaseSolver: 1` (DPLUR)・`condTwoPhaseRelax: 1`・同じビルド、A = `condTwoPhaseNonnegLimit: 1`、
+B = `condTwoPhaseNonnegLimit: 0` (変えるのはこのキーだけ)、各 2000 step、窓 1800–1999 (`condTwoPhaseDiag: 1` か 3 を両側)。
+判定に使う出力: 終了時の `[twophase-corr-gate] FINAL ... VERDICT` (段ごとの行も)、`[renorm-gate] FINAL`、`[twophase-audit]` の成分別 max|r|、`twophase_diag_*`。
+注意: モーメント射影の段 (Q1・Q2) は既存の補正で A でも働くので、plan の「補正 max_n C ≤ κ」はこの段で両側とも超え得る — 結果の解釈は上位へ。

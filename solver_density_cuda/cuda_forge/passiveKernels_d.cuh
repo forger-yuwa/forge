@@ -47,7 +47,8 @@ __global__ void species_advection_faceY_d(
 // member を数えると合併 CV が二重計上される)。クランプ自体は全ノードに掛ける (member は後段のミラーで root に揃う)。
 __global__ void passive_bounds_d(
     geom_int nCells, flow_float* rophi, int upperIsRho, flow_float* ro, geom_float* vol,
-    flow_float* corrCell, double* stats, const geom_int* root)
+    flow_float* corrCell, double* stats, const geom_int* root,
+    double* tcAcc = nullptr, int tcComp = -1)   // #4h の補正計測 (二相の更新ごと; 段 1 = 受動種の床): 成分 tcComp に |Δ|V、液 (2) なら蒸気 (1) にも
 {
     const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     double lo = 0.0, hi = 0.0, ab = 0.0, tot = 0.0;
@@ -68,6 +69,10 @@ __global__ void passive_bounds_d(
             }
         }
         if (count) tot = (double)v*V;
+        if (tcAcc != nullptr && tcComp >= 0 && count && d != 0.0) {
+            atomicAdd(&tcAcc[1*6 + tcComp], fabs(d)*V);
+            if (tcComp == 2) atomicAdd(&tcAcc[1*6 + 1], fabs(d)*V);   // 液の床は総水分を変えないので蒸気が同じ量だけ変わる
+        }
     }
     // block 縮約 → 1 block 1 回の atomicAdd (double)。
     __shared__ double sh[4][32];

@@ -37,7 +37,9 @@ __device__ inline void rng_accumulate(double* acc, const double* qm, const doubl
     for (int k = 0; k < RNG_NC; ++k) {
         const double d = fabs(qp[k] - qm[k]);
         if (d != 0.0 || !(d == d)) atomicAdd(&acc[k], d*V);
-        if (qm[k] != 0.0 || !(qm[k] == qm[k])) atomicAdd(&acc[RNG_NC + k], qm[k]*V);
+        // 分母は負の試行値を使わない (#4h: 非負制限を外すと再正規化の直前の ρg が負になり得る; NaN は残す)
+        const double qd = (qm[k] < 0.0) ? 0.0 : qm[k];
+        if (qd != 0.0 || !(qd == qd)) atomicAdd(&acc[RNG_NC + k], qd*V);
     }
     rng_atomic_max_double(&acc[2*RNG_NC], fdev);
 }

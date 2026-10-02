@@ -12,6 +12,8 @@
 #include "tests/unit/test_twophase_real_source.cpp"
 #undef main
 #include "cuda_forge/twoPhaseDiffusion_d.cuh"
+#include "cuda_forge/passiveKernels_d.cuh"          // passive_bounds_d (#4h の下流の床)
+#include "cuda_forge/condensationRealizability_d.cuh"   // cond_realizability_clamp_f_d (#4h の液の射影)
 #include <random>
 
 #define CK(x) do { cudaError_t e_ = (x); if (e_ != cudaSuccess) { printf("CUDA error %s at %s:%d\n", cudaGetErrorString(e_), __FILE__, __LINE__); exit(2); } } while (0)
@@ -488,7 +490,11 @@ static void test_T2_energy(const Ctx& c)
 
 // ------------------------------------------------------------------ T3 1D 問題 (#4c/#4d) を GPU の面流束・更新で回す (受入 2)
 // 移流・ソース・独立残差 (停止)・N2/E の更新はハーネスのまま。拡散 (面流束と対角) と蒸気・液・Q の更新だけ GPU。
-static RunOut run_gpu(const Ctx& c, double omega, int cap, int sweeps = 0)
+// #4h: 非負制限を外した更新の後段 (本番の受動種の床 → 実現可能性クランプの下限/上限) を 1D で写す (float; 射影・消滅はこの 1D に無い)。
+//   段ごとの補正 |Δ|V (成分 w, v, g, Q2, Q1, Q0) を更新開始時の格納値の総量で割って、更新ごとの C を返す (本番 [twophase-corr-gate] と同じ定義)。
+struct TcUpd { double C[6]; };
+static std::vector<TcUpd> g_t3_tc;
+static RunOut run_gpu(const Ctx& c, double omega, int cap, int sweeps = 0, int noNonneg = 0)
 {
     RunOut ro;
     State<float> st, inlet; for (auto& a : inlet.v) a.assign(1, 0.0f);
@@ -600,7 +606,24 @@ static RunOut run_gpu(const Ctx& c, double omega, int cap, int sweeps = 0)
             }
             for (int i = 0; i < NC; ++i) { ci[i].useInc = 1; for (int q = 0; q < 5; ++q) ci[i].inc[q] = a[q*NC + i]; }
         }
+        for (int i = 0; i < NC; ++i) ci[i].noNonneg = noNonneg;
         G.cells(ci, co);
+        if (noNonneg) {   // 後段: 液と Q の床 (受動種の床) → 液の上限 ρg ≤ ρY_w (実現可能性クランプ; 総水分は固定)。補正を段ごとに計上
+            double num[6] = {0, 0, 0, 0, 0, 0}, den[6] = {0, 0, 0, 0, 0, 0};
+            for (int i = 0; i < NC; ++i) {
+                TpCellOut& o = co[i];
+                const double d0[6] = {ci[i].rYw, (double)ci[i].rYw - ci[i].rg, ci[i].rg, ci[i].rQ[0], ci[i].rQ[1], ci[i].rQ[2]};
+                for (int k = 0; k < 6; ++k) den[k] += d0[k]*DX;
+                num[0] += (o.vround + o.wfloor)*DX; num[1] += (o.vround + o.wfloor)*DX;
+                for (int m = 0; m < 3; ++m) num[3 + m] += o.qc[m]*DX;
+                float g = o.rg; if (g < 0.0f) { num[2] += -(double)g*DX; num[1] += -(double)g*DX; g = 0.0f; }
+                for (int m = 0; m < 3; ++m) if (o.rQ[m] < 0.0f) { num[3 + m] += -(double)o.rQ[m]*DX; o.rQ[m] = 0.0f; }
+                if (g > o.rYw) { num[2] += (double)(g - o.rYw)*DX; num[1] += (double)(g - o.rYw)*DX; g = o.rYw; }
+                o.rg = g;
+            }
+            TcUpd t; for (int k = 0; k < 6; ++k) t.C[k] = (den[k] == 0.0) ? (num[k] == 0.0 ? 0.0 : INFINITY) : num[k]/den[k];
+            g_t3_tc.push_back(t);
+        }
         double qcut_this = 0, vround_this = 0; int thetaLastLt1 = 0;
         for (int i = 0; i < NC; ++i) {
             const TpCellOut& o = co[i];
@@ -868,6 +891,68 @@ static void test_4g_T3(const Ctx& c, int cap)
     DT_MAX = 1.0;
 }
 
+// ------------------------------------------------------------------ #4h 非負制限 θ_vg を外す (condTwoPhaseNonnegLimit 0)
+static void test_4h(const Ctx& c, int cap)
+{
+    printf("\n=== #4h (a) codex の反例 (θ_thr = 1, ρY_w 0.01, ρg 0.0099, δρv −0.0002, δρg 0): 本番の更新 → 受動種の床 → 実現可能性クランプ (GPU) ===\n");
+    TpCellIn in; memset(&in, 0, sizeof in);
+    in.M = 1.0f; in.V = 1.0f; in.rho = 1.0f; in.omega = 1.0f; in.dg_max = 1e30; in.dT_max = 1e30; in.L = 2.5e6; in.cveff = 1000.0;
+    in.rYw = 0.01f; in.rg = 0.0099f; in.useInc = 1; in.inc[0] = -0.0002f; in.inc[1] = 0.0f;
+    for (int mode = 0; mode < 2; ++mode) {
+        TpCellIn ci = in; ci.noNonneg = mode;   // 0: 従来 (キー 1)、1: 非負制限なし (キー 0)
+        std::vector<TpCellIn> v1(1, ci); std::vector<TpCellOut> o1; G.cells(v1, o1);
+        const TpCellOut o = o1[0];
+        // 後段 (本番のカーネルをそのまま): 受動種の床 (液) → 実現可能性クランプ (evap 0, 射影 1)
+        float h[7] = {1.0f /*ro*/, o.rYw, o.rg, o.rQ[2] /*Q0*/, o.rQ[1] /*Q1*/, o.rQ[0] /*Q2*/, 230.0f /*T*/};
+        float* d; CK(cudaMalloc(&d, sizeof h)); CK(cudaMemcpy(d, h, sizeof h, cudaMemcpyHostToDevice));
+        double* acc; CK(cudaMalloc(&acc, 36*sizeof(double))); CK(cudaMemset(acc, 0, 36*sizeof(double)));
+        geom_float vol = 1.0; geom_float* dv; CK(cudaMalloc(&dv, sizeof vol)); CK(cudaMemcpy(dv, &vol, sizeof vol, cudaMemcpyHostToDevice));
+        double* st; CK(cudaMalloc(&st, 8*sizeof(double))); CK(cudaMemset(st, 0, 8*sizeof(double)));
+        passive_bounds_d<<<1, 1>>>(1, d + 2, 0, d, dv, nullptr, st, nullptr, acc, 2);
+        CondTablesF tbz{};
+        cond_realizability_clamp_f_d<<<1, 1>>>(1, d, d + 1, d + 2, d + 3, d + 4, d + 5, 0, (float)c.Rw, 1e-9f, 5e-7f, 0.0f, d + 6, d + 6, tbz, c.cp,
+                                               nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 1, nullptr, acc);
+        CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
+        float r[7]; CK(cudaMemcpy(r, d, sizeof r, cudaMemcpyDeviceToHost));
+        double ha[36]; CK(cudaMemcpy(ha, acc, sizeof ha, cudaMemcpyDeviceToHost));
+        const double w0 = in.rYw, g0 = in.rg, wtrial = (double)in.rYw + (double)in.inc[0];
+        const double cw = (o.vround + o.wfloor)/w0, cgFloor = ha[1*6 + 2]/g0, cgClamp = ha[2*6 + 2]/g0;
+        char m[480];
+        snprintf(m, sizeof m, "%s: θ %.6g、commit 後 ρY_w %.7g ρg %.7g (vround %.2e、総水分の下限 %.2e)、後段の後 ρY_w %.7g ρg %.7g ρv %.3e、"
+                 "総水分 初期比 %+.4e (試行 %.7g)、補正 C: 総水分 commit %.3e、液 床 %.3e・上限 %.3e",
+                 mode ? "キー 0 (非負制限なし)" : "キー 1 (従来)", o.theta, (double)o.rYw, (double)o.rg, o.vround, o.wfloor, (double)r[1], (double)r[2],
+                 (double)r[1] - (double)r[2], ((double)r[1] - w0)/w0, wtrial, cw, cgFloor, cgClamp);
+        // 判定: 総水分は commit の試行値 (float の格納値) から後段で変わらない (増やさない)・vround を使わない・0 ≤ ρg ≤ ρY_w
+        if (mode == 1) verdict(r[1] == o.rYw && o.rYw <= in.rYw && o.vround == 0.0 && r[2] >= 0.0f && r[2] <= r[1],
+                               (std::string("#4h (a) ") + m + " — 総水分を増やさない・0 ≤ ρg ≤ ρY_w").c_str());
+        else printf("[INFO] #4h (a) %s\n", m);
+        cudaFree(d); cudaFree(acc); cudaFree(dv); cudaFree(st);
+    }
+    printf("\n=== #4h (b) T3 の 1D 問題を DPLUR (5 sweep) + キー 0 で (float32, CFL 5, 上限 %d; 後段の床・上限を 1D に写して補正を計上) ===\n", cap);
+    const double kappa = 4.0*EPS32;
+    for (double dtm : {1.0, 0.01}) {
+        DT_MAX = dtm;
+        g_t3_tc.clear();
+        const RunOut k1 = run_gpu(c, 1.0, cap, 5, 0);
+        g_t3_tc.clear();
+        const RunOut d = run_gpu(c, 1.0, cap, 5, 1);
+        long negs = (d.min_rv < 0) + (d.min_rg < 0) + (d.min_Q < 0);
+        bool fin = d.bad.empty(); for (int q = 0; q <= NVAR; ++q) fin = fin && std::isfinite(d.comp_ratio[q]);
+        const size_t N = g_t3_tc.size(), W = (N == 0) ? 0 : (size_t)std::ceil(0.1*(double)N);
+        double mx[6] = {0, 0, 0, 0, 0, 0}; bool cfin = true;
+        for (size_t u = N - W; u < N; ++u) for (int k = 0; k < 6; ++k) { const double v = g_t3_tc[u].C[k]; if (!std::isfinite(v)) cfin = false; else mx[k] = std::max(mx[k], v); }
+        bool cok = cfin && W > 0; for (int k = 0; k < 6; ++k) cok = cok && (mx[k] <= kappa);
+        const bool ok = d.converged && fin && d.ratio_max <= 1.0 && negs == 0 && d.theta_final_lt1 == 0 && d.theta_src_final_lt1 == 0 && cok;
+        char m[640];
+        snprintf(m, sizeof m, "#4h (b) DT_MAX %.2g K キー 0: %s 反復 %d (キー 1 は %d)、独立残差の最大比 %.3f、min ρv %.2e ρg %.2e ρQ %.2e、最後の θ<1 %d・θ_src<1 %d、θ<1 のセル·反復 %ld、"
+                 "末尾 %zu/%zu 更新の max C [w %.2e v %.2e g %.2e Q2 %.2e Q1 %.2e Q0 %.2e] (κ %.3e)、出口 g %.6e (キー 1 %.6e)",
+                 dtm, d.converged ? "収束" : (d.bad.empty() ? "上限到達" : d.bad.c_str()), d.iters, k1.iters, d.ratio_max, d.min_rv, d.min_rg, d.min_Q,
+                 d.theta_final_lt1, d.theta_src_final_lt1, d.theta_lt1, W, N, mx[0], mx[1], mx[2], mx[3], mx[4], mx[5], kappa, d.g_out, k1.g_out);
+        verdict(ok, m);
+    }
+    DT_MAX = 1.0;
+}
+
 int main(int argc, char** argv)
 {
     const bool quick = (argc > 1 && !strcmp(argv[1], "--quick"));
@@ -904,6 +989,7 @@ int main(int argc, char** argv)
     test_T3(c, quick ? 3000 : 20000);
     test_4g_unit();
     test_4g_T3(c, quick ? 3000 : 20000);
+    test_4h(c, quick ? 3000 : 20000);
     printf("\n%s\n", g_fail ? "FAIL あり" : "ALL PASS");
     return g_fail ? 1 : 0;
 }

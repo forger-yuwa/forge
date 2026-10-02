@@ -1483,7 +1483,7 @@ void passiveLimitIncrement_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
     gpuErrchkKernelSync();
 }
 
-void passiveBounds_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int q0, int nq, bool record)
+void passiveBounds_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int q0, int nq, bool record, double* tcAcc)
 {
     (void)cfg;
     const geom_int* root = passive_periodic_root(cfg, msh);
@@ -1497,7 +1497,8 @@ void passiveBounds_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh,
         if (record) gpuErrchk( cudaMemset(g_p_stats_dev + (size_t)q*8 + 3, 0, sizeof(double)) );   // 総量は最新値
         passive_bounds_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
             msh.nCells, h_p_rophi[q], (q == g_qTracer) ? 1 : 0, var.c_d["ro"], var.c_d["volume"],
-            record ? h_p_corr[q] : nullptr, record ? g_p_stats_dev + (size_t)q*8 : s_scratch, root);
+            record ? h_p_corr[q] : nullptr, record ? g_p_stats_dev + (size_t)q*8 : s_scratch, root,
+            tcAcc, (tcAcc != nullptr && g_qMom0 >= 0 && q >= g_qMom0 && q < g_qMom0 + 4) ? 2 + (q - g_qMom0) : -1);
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

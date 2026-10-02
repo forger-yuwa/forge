@@ -203,6 +203,9 @@ CPG carrier・pure 凝縮・`viscMethod 0` では不活性 (ログに理由、�
 **`condensation.condTwoPhaseSolver`** (既定 0, 2026-10-02, #4g): 二相拡散の蒸気・液・Q の増分の作り方。0 = 点対角、1 = 化学種・受動種と同じ緩和整合 scalar-DPLUR
 (右辺は全残差、対角は点対角と同じ分母、非対角は流入質量流束、ゼロ開始で `nStepInner` 回、ω = `implicitRelax`; その後 `condTwoPhaseRelax`・θ・commit・再正規化は同じ)。
 1 sweep・ω 1 では点対角とビット一致。起動時に `[twophase] condTwoPhaseSolver` 行で実効の implicitRelax・nStepInner・scalarCflMax を出す。
+**`condensation.condTwoPhaseNonnegLimit`** (既定 1, 2026-10-02, #4h; 診断用 opt-in): 0 で二相の非分割更新の共通 θ から蒸気・液の非負制限を外す (θ = dg_max・dT_max だけ)。
+commit は総水分だけ 0 に下限を掛け (`vround` を使わない)、液は再正規化 → 受動種の床 → 実現可能性クランプで固定した総水分に対して 0 ≤ ρg ≤ ρY_w に射影する。
+二相拡散 ON の run は更新ごと・成分ごと (ρY_w, ρv, ρg, ρQ2, ρQ1, ρQ0) の補正を `[twophase-corr-gate]` (区間と末尾 ceil(0.1N) 更新の max、κ = 2n_sε₃₂ の VERDICT、段ごとの行) に出す。
 **`condensation.condAuditResidual`** (既定 0, 2026-10-02, #1b-pre): `1` で二相拡散 OFF の TP carrier 凝縮 run でも、現行の作用素 (化学種の Fick 拡散、液・Q は移流のみ) を
 格納状態から double で組み直す `[twophase-audit]` を開始時・終了時に出す (A/B の A 側の受入用; 二相拡散 ON の run は常に新作用素で監査)。結果は変えない。
 凝縮 run の `[cond-corr]` には `renorm components` 行 (再正規化の max|f−1| と ρY_w・ρg・Q2・Q1・Q0 の補正量; 相対は各成分の自分の総量) と

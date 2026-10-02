@@ -1158,6 +1158,8 @@ void solverConfig::read(std::string fname)
             if (this->condAuditResidual != 0 && this->condAuditResidual != 1) throw std::runtime_error("Key 'condAuditResidual' in 'condensation' must be 0 or 1.");
             this->condTwoPhaseSolver = getOptionalValidatedValue<int>(cond, "condTwoPhaseSolver", 0, "condensation");
             if (this->condTwoPhaseSolver != 0 && this->condTwoPhaseSolver != 1) throw std::runtime_error("Key 'condTwoPhaseSolver' in 'condensation' must be 0 (point-diagonal) or 1 (matched scalar-DPLUR).");
+            this->condTwoPhaseNonnegLimit = getOptionalValidatedValue<int>(cond, "condTwoPhaseNonnegLimit", 1, "condensation");
+            if (this->condTwoPhaseNonnegLimit != 0 && this->condTwoPhaseNonnegLimit != 1) throw std::runtime_error("Key 'condTwoPhaseNonnegLimit' in 'condensation' must be 1 (vapour/liquid non-negativity in theta; default) or 0 (theta = threshold limits only).");
             this->condTwoPhaseDiag = getOptionalValidatedValue<int>(cond, "condTwoPhaseDiag", 0, "condensation");
             if (this->condTwoPhaseDiag < 0 || this->condTwoPhaseDiag > 3) throw std::runtime_error("Key 'condTwoPhaseDiag' in 'condensation' must be 0, 1 (theta = 0 cells), 2 (theta < 1 cells) or 3 (theta = 0 cells + float/double assembly A/B).");
             this->condEquilibrium = getOptionalValidatedValue<int>(cond, "condEquilibrium", 0, "condensation");
