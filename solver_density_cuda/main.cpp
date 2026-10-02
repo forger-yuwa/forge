@@ -2104,7 +2104,7 @@ static void pdeInit(StepContext& s)
     g_pde.inS.assign(s.msh.nCells_all, 0); long nS = 0;
     for (geom_int i = 0; i < s.msh.nCells; ++i) if (cx[i] < g_pde.xmax) { g_pde.inS[i] = 1; ++nS; }
     g_pde.csv.open("psi_dualeval.csv");
-    g_pde.csv << "step,var,nS,S_A,S_BmA,S_ApmA,all_A,all_BmA,all_ApmA,psi_maxdiff_S,cons_changed_B_Ap,cons_changed_Ap_A\n";
+    g_pde.csv << "step,var,nS,S_A,S_BmA,S_ApmA,all_A,all_BmA,all_ApmA,psi_maxdiff_S,cons_changed_B_Ap,cons_changed_Ap_A,detail_B_Ap,detail_Ap_A\n";
     printf("[psi-dualeval] ON: save psi at iStep %d, dual evaluation for iStep %d..%d, xmax %.6g m, %ld nodes in S\n",
            g_pde.n0, g_pde.n0 + 1, g_pde.n1, (double)g_pde.xmax, nS);
 }
@@ -2122,10 +2122,24 @@ static std::map<std::string, std::vector<flow_float>> pdeCopy(StepContext& s, co
         gpuErrchk( cudaMemcpy(v.data(), s.var.c_d[k], v.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) ); }
     return m;
 }
-static long pdeConsDiff(const std::map<std::string, std::vector<flow_float>>& a, const std::map<std::string, std::vector<flow_float>>& b)
+// 変わった配列の数を返し、変わった配列ごとに 名前:変化節点数:最大相対差 を detail に足す (前提検査の中身を残す)
+static long pdeConsDiff(const std::map<std::string, std::vector<flow_float>>& a, const std::map<std::string, std::vector<flow_float>>& b,
+                        std::string* detail = nullptr)
 {
     long n = 0;
-    for (auto& kv : a) n += (std::memcmp(kv.second.data(), b.at(kv.first).data(), kv.second.size()*sizeof(flow_float)) != 0);
+    for (auto& kv : a) {
+        const auto& x = kv.second; const auto& y = b.at(kv.first);
+        if (std::memcmp(x.data(), y.data(), x.size()*sizeof(flow_float)) == 0) continue;
+        ++n;
+        if (detail) {
+            long cnt = 0; double mrel = 0.0; long imax = -1;
+            for (size_t i = 0; i < x.size(); ++i) if (x[i] != y[i]) {
+                ++cnt; const double r = std::fabs((double)x[i]-y[i]) / std::max(std::fabs((double)x[i]), 1e-30);
+                if (r > mrel) { mrel = r; imax = (long)i; } }
+            char buf[160]; std::snprintf(buf, sizeof(buf), "%s%s:%ld:%.3e@%ld", detail->empty() ? "" : ";", kv.first.c_str(), cnt, mrel, imax);
+            *detail += buf;
+        }
+    }
     return n;
 }
 static std::vector<std::string> pdeConsKeys(StepContext& s)
@@ -2138,7 +2152,7 @@ static std::vector<std::string> pdeConsKeys(StepContext& s)
 
 // 通常組立 A の前に呼ぶ。B・A' を組んで保持し、A の後に pdeAfterA で比較する。
 static std::map<std::string, std::vector<flow_float>> g_pdeB, g_pdeAp, g_pdeConsAp;
-static long g_pdeConsBAp = 0; static double g_pdePsiMaxDiff = 0.0;
+static long g_pdeConsBAp = 0; static double g_pdePsiMaxDiff = 0.0; static std::string g_pdeDetBAp;
 static bool pdeBeforeA(StepContext& s)
 {
     pdeInit(s);
@@ -2163,7 +2177,7 @@ static bool pdeBeforeA(StepContext& s)
     assembleResidual(s, 1);                                   // A'
     g_pdeAp = pdeCopy(s, resKeys);
     g_pdeConsAp = pdeCopy(s, consKeys);
-    g_pdeConsBAp = pdeConsDiff(consB, g_pdeConsAp);
+    g_pdeDetBAp.clear(); g_pdeConsBAp = pdeConsDiff(consB, g_pdeConsAp, &g_pdeDetBAp);
     return true;
 }
 static void pdeAfterA(StepContext& s, bool active)
@@ -2177,7 +2191,7 @@ static void pdeAfterA(StepContext& s, bool active)
     if (!active) return;
     const auto resKeys = pdeKeys(s, "res_"); const auto consKeys = pdeConsKeys(s);
     const auto A = pdeCopy(s, resKeys); const auto consA = pdeCopy(s, consKeys);
-    const long consApA = pdeConsDiff(g_pdeConsAp, consA);
+    std::string detApA; const long consApA = pdeConsDiff(g_pdeConsAp, consA, &detApA);
     long nS = 0; for (geom_int i = 0; i < s.msh.nCells; ++i) nS += g_pde.inS[i];
     for (auto& k : resKeys) {
         const auto& a = A.at(k); const auto& b = g_pdeB.at(k); const auto& ap = g_pdeAp.at(k);
@@ -2189,7 +2203,7 @@ static void pdeAfterA(StepContext& s, bool active)
         }
         g_pde.csv << s.iStep << "," << k << "," << nS << "," << std::sqrt(sA) << "," << std::sqrt(sB) << "," << std::sqrt(sAp) << ","
                   << std::sqrt(gA) << "," << std::sqrt(gB) << "," << std::sqrt(gAp) << "," << g_pdePsiMaxDiff << ","
-                  << g_pdeConsBAp << "," << consApA << "\n";
+                  << g_pdeConsBAp << "," << consApA << ",\"" << g_pdeDetBAp << "\",\"" << detApA << "\"\n";
     }
     g_pde.csv.flush();
 }
