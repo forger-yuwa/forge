@@ -2711,6 +2711,7 @@ int main(int argc, char** argv) {
         condCorrectionLog_d_wrapper(cfg, cuda_cfg, msh, var, cfg.mainLoopCount() - 1);
     }
 
+    renormGateLog(cfg, cfg.mainLoopCount(), true);   // 再正規化の受入ゲート: 末尾 ceil(0.1N) 更新の max と VERDICT (#1b-pre)
     twoPhaseAudit(cfg.mainLoopCount(), true);   // 最終の格納状態 (出力は書き終えている)
     limiterDiag_finalize(cfg);   // 有界性診断の末尾取りこぼしを回収して累計を確定 (plan §4.35)
 

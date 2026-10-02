@@ -94,6 +94,9 @@ void speciesRenormalizeTwoPhase_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cf
 // 収束受入の独立残差監査 (#4f (4)): 呼び出し側が assembleResidual を回した直後に呼ぶ。二相系の各成分を double で組み直して判定し
 // [twophase-audit] 行に出す (final=false で r0 を記録、true で VERDICT)。res_rog/Q はソースだけの値に置き換わる (次の組立てで戻る)。
 void twoPhaseAudit_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int iStep, bool final);
+// 再正規化の受入ゲート (#1b-pre): 更新ごとの成分別相対補正 C_q,n と局所係数偏差の max を、区間 (final=false; 前回ログからの全更新) と
+// 末尾窓 (final=true; 実更新数 N の最後の ceil(0.1N) 更新、κ = 2 n_s ε₃₂ で VERDICT) で [renorm-gate] 行に出す。TP carrier 凝縮のみ。
+void renormGateLog(const solverConfig& cfg, int iStep, bool final);
 
 // RK ステップ/ステージ始点の保存 (roY{s}N / roY{s}M)。NS の updateVariablesOuter/Inner に対応。
 void speciesUpdateOuter_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);

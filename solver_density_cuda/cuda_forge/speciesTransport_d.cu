@@ -11,6 +11,7 @@
 #include "condensationCorrReasons_d.cuh"   // COND_REASON_* / cond_atomic_max_double (再正規化の理由別監視)
 #include "gasPhaseComposition_d.cuh"     // 凝縮 carrier の気相組成 (拡散係数の組成; plan condensation-two-phase-transport §4.1)
 #include "twoPhaseDiffusion_d.cuh"      // 二相拡散の面流束 (plan condensation-two-phase-transport §4.2, #4e)
+#include "renormGate_d.cuh"              // 再正規化の受入ゲートの計測 (#1b-pre)
 
 #include <cmath>
 #include <cstdio>
@@ -20,6 +21,11 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+// 再正規化の受入ゲート (#1b-pre): 更新ごとの集計バッファと履歴 (定義は本ファイル末尾)
+static double* rngBegin();                 // 1 更新の集計を 0 にして返す (履歴の容量も確保)
+static void    rngEnd(cudaConfig& cuda_cfg); // 1 更新の集計を履歴の 1 行にする
+static flow_float** rngMomentPtrs();       // 液・Q の device ポインタ配列 (順序 g, Q2, Q1, Q0; 無ければ nullptr)
 
 namespace {
 
@@ -160,10 +166,12 @@ __global__ void species_renormalize_d(
     int nSpecies,
     flow_float** roY,
     flow_float* ro,
-    double* reasons, int iw, const geom_float* vol, const geom_int* root)
+    double* reasons, int iw, const geom_float* vol, const geom_int* root,
+    double* rnAcc, flow_float** rophiRO)   // 受入ゲートの計測 (#1b-pre; nullptr で計測しない)。rophiRO: 液・Q (読むだけ; この経路は液に掛けない)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic < nCells) {
+        const double qw_m = (rnAcc != nullptr && iw >= 0) ? (double)roY[iw][ic] : 0.0;   // 再正規化の直前 (負値の 0 化の前)
         double sum = 0.0;
         for (int s = 0; s < nSpecies; s++) {
             flow_float v = roY[s][ic];
@@ -180,6 +188,12 @@ __global__ void species_renormalize_d(
             const double d = fabs((double)roY[iw][ic] - (double)yw_in);
             cond_atomic_max_double(&reasons[COND_REASON_RN_MAX], fabs(factor - 1.0));
             cond_atomic_max_double(&reasons[COND_REASON_RN_MAXC], fabs(factor - 1.0));   // 累積 (#1b-pre)
+            if (rnAcc != nullptr && rophiRO != nullptr) {
+                double qm[RNG_NC], qp[RNG_NC];
+                qm[0] = qw_m; qp[0] = (double)roY[iw][ic];
+                for (int m = 0; m < RNG_NC - 1; ++m) { qm[1+m] = (double)rophiRO[m][ic]; qp[1+m] = qm[1+m]; }   // 液・Q は変えない
+                rng_accumulate(rnAcc, qm, qp, (vol != nullptr) ? (double)vol[ic] : 1.0, fabs(factor - 1.0));
+            }
             if (d > 0.0) {
                 atomicAdd(&reasons[COND_REASON_RN_SUM], d*((vol != nullptr) ? (double)vol[ic] : 1.0));
                 atomicAdd(&reasons[COND_REASON_RN_N], 1.0);
@@ -926,12 +940,15 @@ void speciesRenormalize_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
 
     int iwRn = -1;
     double* reasonsRn = condCorrReasonsForRenormalize(cfg, var, &iwRn);   // 凝縮 carrier の理由別監視 (計上のみ)
+    flow_float** mom = (reasonsRn != nullptr) ? rngMomentPtrs() : nullptr;
+    double* rnAcc = (mom != nullptr) ? rngBegin() : nullptr;   // 受入ゲートの計測 (TP carrier 凝縮のみ; 計上だけ)
     species_renormalize_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells,
         g_nSpecies,
         g_roY_dev,
         var.c_d["ro"],
-        reasonsRn, iwRn, var.c_d["volume"], passive_periodic_root(cfg, msh));
+        reasonsRn, iwRn, var.c_d["volume"], passive_periodic_root(cfg, msh), rnAcc, mom);
+    if (rnAcc != nullptr) rngEnd(cuda_cfg);
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
@@ -2123,10 +2140,11 @@ __global__ void twophase_diffusion_d(
 // (plan §4.2「化学種の再正規化で ρY_w に掛けた係数を ρg と Q にも」; 現行は液更新の前に水だけ再正規化される)。
 __global__ void species_renormalize_liquid_d(
     geom_int nCells, int nSpecies, flow_float** roY, flow_float* ro,
-    double* reasons, int iw, const geom_float* vol, const geom_int* root, flow_float** rophi)
+    double* reasons, int iw, const geom_float* vol, const geom_int* root, flow_float** rophi, double* rnAcc)
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
+    const double qw_m = (rnAcc != nullptr && iw >= 0) ? (double)roY[iw][ic] : 0.0;   // 再正規化の直前 (負値の 0 化の前)
     double sum = 0.0;
     for (int s = 0; s < nSpecies; s++) {
         flow_float v = roY[s][ic];
@@ -2137,8 +2155,8 @@ __global__ void species_renormalize_liquid_d(
     const double factor = (double)ro[ic] / (sum > (double)kSmall ? sum : (double)kSmall);
     const flow_float yw_in = (reasons != nullptr && iw >= 0) ? roY[iw][ic] : (flow_float)0.0;
     for (int s = 0; s < nSpecies; s++) roY[s][ic] = (flow_float)((double)roY[s][ic] * factor);
-    double dl[1 + TP_NQ];
-    for (int m = 0; m < 1 + TP_NQ; ++m) { const flow_float in_ = rophi[m][ic]; rophi[m][ic] = (flow_float)((double)in_ * factor); dl[m] = fabs((double)rophi[m][ic] - (double)in_); }
+    double dl[1 + TP_NQ], qin[1 + TP_NQ];
+    for (int m = 0; m < 1 + TP_NQ; ++m) { const flow_float in_ = rophi[m][ic]; qin[m] = (double)in_; rophi[m][ic] = (flow_float)((double)in_ * factor); dl[m] = fabs((double)rophi[m][ic] - (double)in_); }
     if (reasons != nullptr && iw >= 0 && (root == nullptr || root[ic] == ic)) {
         const double d = fabs((double)roY[iw][ic] - (double)yw_in);
         const double Vc = (vol != nullptr) ? (double)vol[ic] : 1.0;
@@ -2149,6 +2167,12 @@ __global__ void species_renormalize_liquid_d(
         if (dl[3] > 0.0) atomicAdd(&reasons[COND_REASON_RNQ0_SUM], dl[3]*Vc);
         cond_atomic_max_double(&reasons[COND_REASON_RN_MAXC], fabs(factor - 1.0));
         cond_atomic_max_double(&reasons[COND_REASON_RN_MAX], fabs(factor - 1.0));
+        if (rnAcc != nullptr) {
+            double qm[RNG_NC], qp[RNG_NC];
+            qm[0] = qw_m; qp[0] = (double)roY[iw][ic];
+            for (int m = 0; m < RNG_NC - 1; ++m) { qm[1+m] = qin[m]; qp[1+m] = (double)rophi[m][ic]; }
+            rng_accumulate(rnAcc, qm, qp, Vc, fabs(factor - 1.0));
+        }
         if (d > 0.0) {
             atomicAdd(&reasons[COND_REASON_RN_SUM], d*((vol != nullptr) ? (double)vol[ic] : 1.0));
             atomicAdd(&reasons[COND_REASON_RN_N], 1.0);
@@ -2181,9 +2205,11 @@ void speciesRenormalizeTwoPhase_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cf
     if (!speciesEnabled(var) || g_roY_dev == nullptr || g_qMom0 < 0) return;
     int iwRn = -1;
     double* reasonsRn = condCorrReasonsForRenormalize(cfg, var, &iwRn);
+    double* rnAcc = (reasonsRn != nullptr) ? rngBegin() : nullptr;
     species_renormalize_liquid_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells, g_nSpecies, g_roY_dev, var.c_d["ro"],
-        reasonsRn, iwRn, var.c_d["volume"], passive_periodic_root(cfg, msh), g_p_rophi_dev + g_qMom0);
+        reasonsRn, iwRn, var.c_d["volume"], passive_periodic_root(cfg, msh), g_p_rophi_dev + g_qMom0, rnAcc);
+    if (rnAcc != nullptr) rngEnd(cuda_cfg);
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
 }
@@ -2396,5 +2422,58 @@ void twoPhaseAudit_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh,
     }
     if (final) printf("[twophase-audit] VERDICT: %s (component ratios max|r| / max(1e-7 r0, 6 eps max A); non-finite %s)\n",
                       (pass && !nonfinite) ? "PASS" : "NOT CONVERGED", nonfinite ? "yes" : "no");
+    fflush(stdout);
+}
+
+// =============================================================================
+// 再正規化の受入ゲートの計測 (#1b-pre; codex diagnose 2026-10-02 final)。更新ごとの C_q,n と F_n を device の履歴に積み、
+// ログ (区間) と終了時 (末尾窓) は履歴から集計する (renormGate_d.cuh)。プロセス内の更新だけを数える (restart で 0 から)。
+// =============================================================================
+static double* g_rng_acc = nullptr;
+static double* g_rng_hist = nullptr;
+static size_t  g_rng_cap = 0, g_rng_n = 0, g_rng_logged = 0;
+
+static flow_float** rngMomentPtrs() { return (g_qMom0 >= 0 && g_p_rophi_dev != nullptr) ? g_p_rophi_dev + g_qMom0 : nullptr; }
+static double* rngBegin()
+{
+    if (g_rng_acc == nullptr) gpuErrchk( cudaMalloc((void**)&g_rng_acc, RNG_ACC*sizeof(double)) );
+    if (g_rng_n + 1 > g_rng_cap) {
+        const size_t cap = std::max<size_t>(1024, 2*g_rng_cap);
+        double* h = nullptr;
+        gpuErrchk( cudaMalloc((void**)&h, cap*RNG_ENTRY*sizeof(double)) );
+        if (g_rng_hist != nullptr) {
+            gpuErrchk( cudaMemcpy(h, g_rng_hist, g_rng_n*RNG_ENTRY*sizeof(double), cudaMemcpyDeviceToDevice) );
+            cudaFree(g_rng_hist);
+        }
+        g_rng_hist = h; g_rng_cap = cap;
+    }
+    gpuErrchk( cudaMemset(g_rng_acc, 0, RNG_ACC*sizeof(double)) );
+    return g_rng_acc;
+}
+static void rngEnd(cudaConfig& cuda_cfg)
+{
+    (void)cuda_cfg;
+    rng_finalize_d<<<1, 1>>>(g_rng_acc, g_rng_hist + g_rng_n*RNG_ENTRY);
+    gpuErrchk( cudaPeekAtLastError() );
+    ++g_rng_n;
+}
+
+void renormGateLog(const solverConfig& cfg, int iStep, bool final)
+{
+    if (g_rng_hist == nullptr) return;
+    const size_t n = g_rng_n;
+    const size_t b = final ? rng_final_window_begin(n) : g_rng_logged;
+    if (!final) g_rng_logged = n;
+    std::vector<double> h(n*RNG_ENTRY, 0.0);
+    if (n > b) gpuErrchk( cudaMemcpy(h.data() + b*RNG_ENTRY, g_rng_hist + b*RNG_ENTRY, (n - b)*RNG_ENTRY*sizeof(double), cudaMemcpyDeviceToHost) );
+    const RngWindow w = rng_window_max(h, b, n);
+    const double kappa = rng_kappa(cfg.nSpecies);
+    char head[160];
+    if (final) std::snprintf(head, sizeof(head), "[renorm-gate] FINAL step %d window: last %zu of %zu updates [%zu,%zu)", iStep, n - b, n, b, n);
+    else       std::snprintf(head, sizeof(head), "[renorm-gate] step %d interval: %zu updates [%zu,%zu)", iStep + 1, n - b, b, n);
+    printf("%s | max_n C_q: rhoYw %.6e rhog %.6e rhoQ2 %.6e rhoQ1 %.6e rhoQ0 %.6e | max_n max|f-1| %.6e | kappa %.7e | nonfinite %ld",
+           head, w.C[0], w.C[1], w.C[2], w.C[3], w.C[4], w.F, kappa, w.nonfinite);
+    if (final) printf(" | VERDICT: %s\n", rng_judge(w, kappa) ? "PASS" : "FAIL");
+    else printf("\n");
     fflush(stdout);
 }

@@ -204,6 +204,9 @@ CPG carrier・pure 凝縮・`viscMethod 0` では不活性 (ログに理由、�
 格納状態から double で組み直す `[twophase-audit]` を開始時・終了時に出す (A/B の A 側の受入用; 二相拡散 ON の run は常に新作用素で監査)。結果は変えない。
 凝縮 run の `[cond-corr]` には `renorm components` 行 (再正規化の max|f−1| と ρY_w・ρg・Q2・Q1・Q0 の補正量; 相対は各成分の自分の総量) と
 `theta over all updates` 行 (更新の θ<1 と θ_src<1 のセル数を全更新で積算; 区間・累積・直近の更新) が加わる (2026-10-02)。
+TP carrier 凝縮 run は再正規化の受入ゲート `[renorm-gate]` を出す: 区間 (前回ログからの全更新) と終了時の末尾窓 (実更新数 N の最後の ceil(0.1N) 更新) について、
+更新ごとの成分別相対補正 C_q,n = Σ|q⁺−q⁻|V/Σq⁻V (ρY_w, ρg, ρQ2, ρQ1, ρQ0) と局所係数偏差 max|f−1| の max、終了時は κ = 2 n_s ε₃₂ で `VERDICT`。
+`renorm components` 行は記録用 (ゲートではない)。
 注意: 受動種/化学種の拡散は `viscMethod != 0` のときだけ加わる (viscMethod 0 は定数粘性ではなく「拡散なし」扱い; 化学種と同じ規約)。
 
 ## physProp.viscMethod — 層流の粘性・熱伝導 (2026-09-27 `viscMethod: 2` を置き換え)

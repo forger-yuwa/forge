@@ -797,3 +797,45 @@ f − 1 は格納 float の丸め (ρY_s を float に戻すときの丸めと n
 2. 成分ごとの相対補正 Σ|Δq|V / Σ q V ≤ 2 n_s ε₃₂ (q = ρY_w, ρg, ρQ2, ρQ1, ρQ0; 総量 0 の成分は絶対量 0)。総液量で割った値は使わない。
 係数偏差が下がらない (流れの連続の式と化学種の増分の不一致が残る) run は未収束として扱う。2 step の実測 (7.9e-5 / 1e-7) はこの案より桁で大きいが、
 過渡の値で、収束時の値は #1b の run でしか得られない。閾値を観測値から決めない (diagnose 論点 3)。
+
+## 17. 再正規化ゲートの計り方の修正 (2026-10-02; HEAD `56b9f752` + 未 commit)
+
+裁定: [`notes/reviews/2026-10-02-twophase-1b-final-diagnose.md`](../reviews/2026-10-02-twophase-1b-final-diagnose.md) (plan §5.1 #1b-pre 行の定義)。§16.2 の「区間累積の Σ|Δq|V を現在総量で割る」は却下 (窓長に比例する)。
+
+### 17.1 実装
+
+- `cuda_forge/renormGate_d.cuh` (新規; ソルバと単体試験が共有): 更新 n (再正規化の 1 回の呼び出し) ごと・成分 q ∈ {ρY_w, ρg, ρQ2, ρQ1, ρQ0} ごとに
+  C_q,n = Σ|q⁺ − q⁻|V / Σq⁻V (q⁻・q⁺ は再正規化の直前 [負値の 0 化の前]・直後の格納値を double に上げたもの、root のみ) と F_n = max_i |f_i − 1| を作る。
+  分母 0 は分子 0 なら C = 0、分子 > 0 なら C = +inf。非有限はそのまま。履歴は device に 1 更新 6 double で積む (容量は倍々)。
+- 判定 (host `rng_window_max` / `rng_judge`): 実更新数 N の最後の ceil(0.1N) 更新の max_n C_q,n と max_n F_n が全部有限かつ ≤ κ = 2 n_s ε₃₂。窓は履歴から取るのでログの区切りに依らない。
+- 計測は既定経路 (`species_renormalize_d`; 液・Q は変えないので C = 0 を記録) と二相経路 (`species_renormalize_liquid_d`) の両方。TP carrier 凝縮 run だけ。算術と書き込み値は不変。
+- ログ (書式):
+  - 区間 (monitorInterval ごと、前回ログからの全更新):
+    `[renorm-gate] step S interval: K updates [a,b) | max_n C_q: rhoYw X rhog X rhoQ2 X rhoQ1 X rhoQ0 X | max_n max|f-1| X | kappa X | nonfinite K`
+  - 終了時 (main の時間ループの後):
+    `[renorm-gate] FINAL step S window: last W of N updates [N-W,N) | max_n C_q: rhoYw X rhog X rhoQ2 X rhoQ1 X rhoQ0 X | max_n max|f-1| X | kappa X | nonfinite K | VERDICT: PASS|FAIL`
+  - §16.2 の行は `[cond-corr]   species s renorm components [record only: sums since last log / current own total; the gate is [renorm-gate]] ...` に名前を変えて残す (記録のみ)。
+- 更新の数はこのプロセスの再正規化呼び出し数 (restart で 0 から)。
+
+### 17.2 集計間隔の不変性 (`tests/unit/test_renorm_gate.cu`, GPU、同じ 100 更新の合成列、κ = 4.7683716e-7)
+
+再正規化の写し (係数を化学種と液・Q に掛けて float に戻す) を毎更新 ±1 ULP 乱した入力に掛け、本番と同じ `rng_accumulate`・`rng_finalize_d`・`rng_window_max`・`rng_judge` で
+A = 毎更新ログ / B = 10 更新ごとログ。末尾窓は [90,100)。
+
+| 例 | A / B の判定 | 末尾窓の max C (w / g / Q1) | max\|f−1\| | 却下された計り方 [g] A / B |
+| --- | --- | --- | --- | --- |
+| (a) 丸め規模 | PASS / PASS | 7.4e-8 / 5.5e-8 / 7.4e-8 | 1.20e-7 | 5.3e-8 / 5.4e-7 |
+| (b) 窓内の更新 95 だけ ρY_w ×(1+1e-3) | FAIL / FAIL | 1.09e-5 / 1.09e-5 / 1.09e-5 | 1.11e-5 | 5.6e-8 / 1.14e-5 |
+| (c) 窓外の更新 50 だけ同じ | PASS / PASS | 6.7e-8 / 5.5e-8 / 6.9e-8 | 1.24e-7 | 5.3e-8 / 5.4e-7 |
+| (d) 液・Q の総量 0 | PASS / PASS | 7.4e-8 / 0 / 0 | 1.20e-7 | 0 / 0 |
+| (e) 最終更新に NaN | FAIL / FAIL | NaN (非有限 6) | NaN | — |
+| (f) 分母 0・分子 1e-30 | FAIL (C = inf) | | | |
+
+全例で A と B の末尾窓の値・判定がビット単位で一致 (ALL PASS)。却下された計り方は同じ列で A/B が 10 倍違い、(b) では A (最後の区間 = 更新 99 だけ) が窓内の超過を見落とす。
+初回の試験は (b) の乱れを ρY_w ×(1+1e-5) にして f−1 ≈ 1e-7 (< κ) しか作れず「期待 FAIL」が PASS になった (試験の作り方の誤り) → 1e-3 に直した。(e) の A/B 一致の比較が NaN ≠ NaN で偽になった点も直した。
+
+### 17.3 ソルバでの確認 (2 step, run_0482 入力の複製; 判定外)
+
+- A (キー OFF + 監査): 区間 C_w 2.285e-7 → 1.904e-7、液・Q 0、max|f−1| 7.87e-5 → 4.28e-5、FINAL 窓 [1,2) VERDICT FAIL (max|f−1| > κ; 過渡なので想定どおり)。
+- B (キー ON): C_w 2.28e-7 / 1.90e-7、C_g 1.13e-7 / 1.38e-7、C_Q 1.18–1.57e-7、max|f−1| 同上、FINAL FAIL。
+- 既定 (キー OFF・監査 0): `test_transport_gas_phase.py` G0 4 構成バイト一致、2 step res_0 は旧バイナリと 120/120 一致 (ログに `[renorm-gate]` 行が加わるだけ)。
