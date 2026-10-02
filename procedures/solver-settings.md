@@ -191,6 +191,15 @@ checkpoint には受動種の流束形履歴 (`/CHECKPOINT/<cons>_fctG`, `_fctH`
 凝縮モーメントの実現可能性 (許容領域 $x\le1,\ x^2\le y\le\sqrt x$; $x=Q_1/(Q_0r)$, $y=Q_2/(Q_0r^2)$) は更新後に最近点射影 (退化は単分散再初期化) で保証し、作動数と成分別収支を monitor に出す。
 凝縮 run (受動種経路の有無を問わず) は monitorInterval ごとに `[cond-corr]` 行で理由別の補正量 (蒸気上限違反・負値 floor・増分制限・受動種 floor・射影・化学種再正規化・液滴消滅) の区間値と累積を総液量比で出し、液滴消滅以外が比 1e-6 を超えると `WARN` を出す。累積は restart で 0 から ([methods/condensation.md](../methods/condensation.md) 実装 §4c)。
 TP carrier の凝縮 run では `viscMethod 2` の μ・λ と化学種拡散係数を気相組成 (液を除いた組成) で評価する (同 §7b)。
+**二相拡散 `condensation.condTwoPhaseDiffusion`** (既定 0, 2026-10-02, opt-in・CFD 未検証; plan condensation-two-phase-transport #4e, methods/condensation.md 実装 §7c):
+`1` で TP carrier 凝縮 (`condGasSpecies` ≥ 0) の NS run に、気相内の分子拡散 (気相基準 z・風上の補正) と全輸送量 (化学種・液 g・Q2/Q1/Q0) 共通の乱流混合 μ_t/Sc_t を
+1 回の面流束で足し (エネルギーに Σh_k J_k + h_v J_w − L J_l)、蒸気と液を非分割で更新する (増分は点対角、制限は `condDgMaxStep`/`condDTmaxStep` と蒸気・液の非負)。
+**定常専用**: dual-time・陽解法・`speciesImplicitCoupling 2`・`passiveScalarScheme 0`・`condEquilibrium` ≠ 0・`condLimiterMode 0`・`nCondSpecies` ≠ 1 とは起動時にエラー終了。
+CPG carrier・pure 凝縮・`viscMethod 0` では不活性 (ログに理由、現行経路)。cell は未検証 (WARNING)。
+蒸気・液・Q は `passiveImplicitCoupling`/`speciesImplicitCoupling` の DPLUR ではなく点対角で更新する (非水種は従来どおり)。`condTwoPhaseRelax` (既定 1, 0 < ω ≤ 1) は
+蒸気・液・Q の増分の緩和 (前処理の後・制限の前)。#4c の 1D 試験では大きな擬似刻みで核生成の Q0 が周期運動になり ω 0.5 で収束した (高 CFL は保証外)。
+`residual_history.csv` に `rms_roYv` (蒸気の残差 R_w − R_g) が加わり、`check_convergence.py` の検査対象に入る (`rms_roY` 接頭辞)。monitor に `[twophase]` 行 (θ<1 のセル数・最小 θ・保留量・状態補正)。
+既定 0 の run の結果・列構成は変わらない。
 注意: 受動種/化学種の拡散は `viscMethod != 0` のときだけ加わる (viscMethod 0 は定数粘性ではなく「拡散なし」扱い; 化学種と同じ規約)。
 
 ## physProp.viscMethod — 層流の粘性・熱伝導 (2026-09-27 `viscMethod: 2` を置き換え)

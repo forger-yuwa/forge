@@ -41,6 +41,27 @@ inline CondPropOpts cond_prop_opts(const solverConfig& cfg)
 }
 int          cond_num_species();
 
+// 二相拡散 (condTwoPhaseDiffusion; plan condensation-two-phase-transport §4.2, #4e) が実際に働く構成か (cfg だけで決まる)。
+// TP carrier の凝縮 (condGasSpecies ≥ 0、多成分 TP) かつ粘性あり。CPG carrier・pure 凝縮・Euler・凝縮 OFF は false (現行経路)。
+// 併用不可の設定 (dual-time 等) は main の起動時検査が拒否する。
+inline bool condTwoPhaseDiffusionActive(const solverConfig& cfg)
+{
+    return cfg.condTwoPhaseDiffusion == 1 && cfg.condensation == 1 && cfg.nCondSpecies >= 1 && cfg.thermalMethod == 2
+        && cfg.condGasSpecies >= 0 && cfg.nSpecies >= 2 && cfg.viscMethod != 0;
+}
+// 二相拡散の起動時検査とログ (main が bcond 読込後に 1 回呼ぶ)。併用不可の設定は理由を出して終了する。
+void condTwoPhaseDiffusionValidate(const solverConfig& cfg);
+// 蒸気の残差 res_roYv = res_roY_w − res_rog (監視・residual_history の rms_roYv 列; 周期集約の後に呼ぶ)。
+void twoPhaseVaporResidual_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+// 非分割更新 (定常; 設計メモ §6.1 の vl_limit_commit)。化学種の更新 (水は commit しない) と流れの更新の後、
+// 凝縮モーメントの N 退避 (condensationUpdateOuter) の後に呼ぶ。液 ρg・Q と総水分 ρY_w を commit し、再正規化 (係数を液・Q にも) と
+// 受動種の最後の砦 (floor の記録)・周期ミラーまで行う。化学種の周期ミラーと Y の同期は呼び出し側。
+void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+// 化学種の更新が commit した水 ρY_w を更新前 (roY_w^N) に戻す (水は twoPhaseUpdate が蒸気 + 液から commit する)。
+void twoPhaseHoldWater_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+// 二相更新の監視 (θ・保留量・状態補正) を 1 行出す (condCorrectionLog から monitorInterval ごと)。
+void twoPhaseUpdateLog(solverConfig& cfg, int iStep);
+
 // 原始量 φ = ρφ/ρ を全セル (ghost 含む) について更新する。スカラ移流の上流値に使う。
 void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 

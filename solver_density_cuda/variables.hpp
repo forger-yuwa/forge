@@ -333,6 +333,8 @@ public:
     // cellValNames / c / c_d へ追加し roXi, Xi を出力対象にする。allocVariables より前に 1 度だけ呼ぶ。
     // enabled == 0 のときは何もしない。
     void registerTracer(int enabled);
+    // 二相拡散 (condTwoPhaseDiffusion, #4e) の蒸気残差 res_roYv (residual_history の rms_roYv 列)。enabled==0 で no-op。
+    void registerTwoPhaseVaporResidual(int enabled);
 
     void allocVariables(const int &useGPU , mesh& msh);
 

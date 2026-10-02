@@ -210,6 +210,10 @@ std::vector<std::string> residualEquationNames(const solverConfig& cfg)
             names.emplace_back(name);
         }
     }
+    // 二相拡散 (#4e) の蒸気残差 rms_roYv = rms(res_roY_w − res_rog_0) (新キー ON の構成だけ; 既定の列構成は不変)。
+    if (condTwoPhaseDiffusionActive(cfg)) {
+        names.emplace_back("roYv");
+    }
 
     return names;
 }
@@ -1557,6 +1561,8 @@ cudaConfig initializeSimulation(
                  << " condN2LatentLowT=" << cfg.condN2LatentLowT << " condN2PsatLowT=" << cfg.condN2PsatLowT << " condN2LiquidCp=" << cfg.condN2LiquidCp << "\n";
         }
         cfg.condSonicModel = resolved;
+        // 二相拡散 (condTwoPhaseDiffusion, #4e): 定常専用初版。dual-time 等の併用不可は理由を出して終了、対象外の構成は不活性をログに出す。
+        condTwoPhaseDiffusionValidate(cfg);
         // CPG carrier 形 (空気の N2 選択凝縮) の境界受付範囲 (plans/accepted/condensation-air.md §4.1; codex 2026-09-13 M3):
         //   ghost/ピンを単相 EOS で再構成する境界 (wall, wall_isothermal, inlet_Pressure, outflow, periodic 等) は未対応。
         //   出口 outlet_statPress は超音速全量外挿のときだけ整合 (実行時条件) → 後処理 onset_analysis.py --series の u_n/c>1 で確認する。
@@ -1586,6 +1592,7 @@ cudaConfig initializeSimulation(
 
     // 非平衡凝縮モーメント変数を登録 (allocVariables より前)。condensation==0 では no-op。
     var.registerCondensation(cfg.nCondSpecies);
+    var.registerTwoPhaseVaporResidual(condTwoPhaseDiffusionActive(cfg) ? 1 : 0);   // 二相拡散の蒸気残差 res_roYv (#4e)
 
     // 受動トレーサ roXi を登録 (allocVariables より前)。physProp.tracer 未指定では no-op。
     var.registerTracer(cfg.tracerEnabled() ? 1 : 0);
@@ -1885,6 +1892,8 @@ void assembleResidual(StepContext& s, int stage_index)
         condensationSource_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 核生成+成長ソース (Phase 2)
         tracerTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);        // 受動トレーサ移流残差 (node 入口ピン込み)
         passivePinResidual_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 受動種経路: node 入口ピンノードの残差除外 (ソース集計の後)
+        // 二相拡散 (#4e) は化学種の残差へ condensationTransport の中で足すので、化学種のピン除去をもう一度掛ける (周期集約の前)。
+        if (condTwoPhaseDiffusionActive(s.cfg)) speciesPinResidual_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);
     });
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         transitionSource_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // γ_eff を先に確定 (SST の k 式が同じ反復の値を読む)
@@ -1911,6 +1920,8 @@ void assembleResidual(StepContext& s, int stage_index)
     // 周期 group の保存量残差を全員で足し合わせ全員へ書き戻す。合併体積と合わせ両側部分 CV を 1 CV として
     // 同期更新する (継ぎ目に双対面を作らず、両側内部双対面が res を組む)。cell/非周期では no-op。
     periodicNodeGather_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+    // 二相拡散 (#4e) の蒸気残差 res_roYv = res_roY_w − res_rog_0 (監視; 周期集約の後の確定残差から)。無効構成は no-op。
+    twoPhaseVaporResidual_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     // TODO(dual-time): unsteady のとき addUnsteadyTimeTerm(s) で BDF 物理時間項を res_* と
     // 対角に加える。定常では no-op。本体は次フェーズ。
 }
@@ -2125,6 +2136,9 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
     // speciesImplicitCoupling==1: 緩和整合 scalar-DPLUR (流れ block と同一 dt/implicitRelax/nStepInner sweep)。
     //                          =0: 従来 segregated 点陰的 forward-Euler (既定・ビット不変)。
     // freezeSpecies 時は化学種更新を完全にスキップ (ρY_s 凍結)。EOS は凍結 ρY/ρ で評価される。
+    // 二相拡散 (condTwoPhaseDiffusion, #4e): 水 ρY_w は化学種の更新で commit せず、液・Q と一緒に非分割更新 (蒸気/液の増分) で commit し、
+    // その後に再正規化 (係数を液・Q にも) する (plan condensation-two-phase-transport §4.2、設計メモ §6.1・§14)。化学種凍結時は現行経路。
+    const bool twoPhase = condTwoPhaseDiffusionActive(s.cfg) && !freezeSpecies;
     if (!freezeSpecies) {
         s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
             if (eosCoupled) {
@@ -2137,9 +2151,13 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
                     speciesTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
                 }
             }
-            speciesRenormalize_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
-            periodicMirrorSpeciesState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // node 周期: 化学種状態を root→member (§4.1-5)
-            speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // Y=roY/ρ (出力/次残差用に同期)
+            if (twoPhase) {
+                twoPhaseHoldWater_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 水は更新前に戻す (液の後で commit)
+            } else {
+                speciesRenormalize_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+                periodicMirrorSpeciesState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // node 周期: 化学種状態を root→member (§4.1-5)
+                speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // Y=roY/ρ (出力/次残差用に同期)
+            }
         });
     }
 
@@ -2148,7 +2166,14 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
     // condensation==0 で no-op。
     s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
         condensationUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // ro*_N = ro*_M = ro*
-        condensationTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
+        if (twoPhase) {
+            // 蒸気・液・Q の非分割更新 → 再正規化 (係数を液・Q にも) → 受動種の砦・周期ミラー (wrapper 内)。化学種の周期ミラーと Y の同期はここ。
+            twoPhaseUpdate_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            periodicMirrorSpeciesState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        } else {
+            condensationTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
+        }
         condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // φ=ρφ/ρ (出力/次残差用に同期)
         // 受動トレーサ (segregated point-implicit)。tracer 無効で no-op。
         tracerUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);

@@ -86,6 +86,11 @@ void speciesEOSFinalCommit_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
 
 // 化学種の実現可能性・再正規化: ρY_s>=0 にクランプし Σ_s ρY_s = ρ となるよう再スケール (ΣY_s=1)。
 void speciesRenormalize_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+// 二相拡散 (plan condensation-two-phase-transport §4.2, #4e; condTwoPhaseDiffusionActive の構成だけ):
+//   twoPhaseDiffusion_d_wrapper: 面流束を 1 回組み、化学種・液 ρg・Q・エネルギーの残差と点対角に足す (凝縮モーメントの残差ゼロ化の後に呼ぶ)。
+//   speciesRenormalizeTwoPhase_d_wrapper: speciesRenormalize と同じ係数 ρ/ΣρY を液 ρg・Q にも掛ける (非分割更新の commit の後に呼ぶ)。
+void twoPhaseDiffusion_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+void speciesRenormalizeTwoPhase_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 
 // RK ステップ/ステージ始点の保存 (roY{s}N / roY{s}M)。NS の updateVariablesOuter/Inner に対応。
 void speciesUpdateOuter_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);

@@ -646,6 +646,11 @@ public:
     int    condLimiterMode = 1;      // 1: θ は更新量 Δ(ρφ) のクランプのみ (残差は Δτ 非依存の瞬間速度; 既定), 0: 旧 (残差に θ; A/B 用)
     double condDgMaxStep   = 5.0e-3; // 1 更新あたりの |Δg| 上限 (質量分率)
     double condDTmaxStep   = 1.0;    // 1 更新あたりの潜熱 |ΔT| 上限 [K]
+    // 二相拡散 (plans/active/condensation-two-phase-transport.md §4.2, #4e; methods/condensation.md §7c)。TP carrier 凝縮 (condGasSpecies ≥ 0) で
+    // 気相内の分子拡散 (z 基準・風上補正) + 全輸送量共通の乱流拡散を面流束 1 回で組み、蒸気/液を非分割で更新する。定常専用初版
+    // (dual-time・陽解法・speciesImplicitCoupling 2・passiveScalarScheme 0 とは併用不可、起動時に拒否)。0 で現行経路 (既定・ビット不変)。
+    int    condTwoPhaseDiffusion = 0;
+    double condTwoPhaseRelax     = 1.0;   // 非分割更新の緩和 ω (前処理の後・制限の前で蒸気・液・Q の全増分に掛ける; 0 < ω ≤ 1)
     // 平衡凝縮 (plans/accepted/condensation-equilibrium.md): 核生成・成長を経ず各セルで p_v=p_sat(T) の g_eq へ緩和。
     int    condEquilibrium = 0;   // 0: 非平衡 (既定) / 1: 平衡凝縮・緩和形 (ソース S_g=αρΔ/dt, モーメント Q0-Q2 ソース 0)
                                   // / 2: 平衡凝縮・EOS 拘束形 (dependentVariables で (T,g) 同時反転し rog へ射影、rog 輸送は凍結;

@@ -180,6 +180,16 @@ static std::list<std::string> condMomentCellVarNames(const std::string& consName
     };
 }
 
+void variables::registerTwoPhaseVaporResidual(int enabled)
+{
+    if (enabled == 0) return;
+    // 蒸気の残差 R_v = R_w − R_g (監視のみ; HDF5 には出さない)。plans/active/condensation-two-phase-transport.md §5.1 #4e
+    const std::string name = "res_roYv";
+    this->cellValNames.push_back(name);
+    this->c.emplace(name, std::vector<flow_float>{});
+    this->c_d.emplace(name, nullptr);
+}
+
 void variables::registerCondensation(int nCondSpecies)
 {
     if (nCondSpecies <= 0) {
