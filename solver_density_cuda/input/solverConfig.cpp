@@ -1157,7 +1157,7 @@ void solverConfig::read(std::string fname)
             this->condAuditResidual = getOptionalValidatedValue<int>(cond, "condAuditResidual", 0, "condensation");
             if (this->condAuditResidual != 0 && this->condAuditResidual != 1) throw std::runtime_error("Key 'condAuditResidual' in 'condensation' must be 0 or 1.");
             this->condTwoPhaseDiag = getOptionalValidatedValue<int>(cond, "condTwoPhaseDiag", 0, "condensation");
-            if (this->condTwoPhaseDiag < 0 || this->condTwoPhaseDiag > 2) throw std::runtime_error("Key 'condTwoPhaseDiag' in 'condensation' must be 0, 1 (theta = 0 cells) or 2 (theta < 1 cells).");
+            if (this->condTwoPhaseDiag < 0 || this->condTwoPhaseDiag > 3) throw std::runtime_error("Key 'condTwoPhaseDiag' in 'condensation' must be 0, 1 (theta = 0 cells), 2 (theta < 1 cells) or 3 (theta = 0 cells + float/double assembly A/B).");
             this->condEquilibrium = getOptionalValidatedValue<int>(cond, "condEquilibrium", 0, "condensation");
             this->condFloat = getOptionalValidatedValue<int>(cond, "condFloat", 1, "condensation");
             if (this->condFloat != 0 && this->condFloat != 1) throw std::runtime_error("Key 'condFloat' in 'condensation' must be 0 or 1.");

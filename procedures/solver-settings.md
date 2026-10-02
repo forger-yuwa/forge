@@ -211,6 +211,9 @@ TP carrier 凝縮 run は再正規化の受入ゲート `[renorm-gate]` を出�
 (`2` = θ < 1) について、セル ID・座標・更新前の ρv/ρg・制限前増分・θ を決めた制限・Q 残差・再正規化の f−1 と前後差を記録し、終了時に
 `twophase_diag_theta0_cells.csv` (頻度順上位 500) と `twophase_diag_theta0_summary.csv` (固有セル数・更新あたり件数・持続性・制限理由の内訳) を書く。
 区間ごとに `[twophase-diag]` 行 (θ 制限のセル×更新数を更新数で割った値と固有セル数) を出す。
+`3` (#1b-r2) は 1 に加えて、窓内の各更新で同じ状態・面値・係数・ソース値の double 組立 B (状態は書かない) を作り、乾燥停止セルと成分ごとの残差最大セルについて
+R_g の移流/拡散/ソース内訳・前処理分母・組立 A/B の残差・制限理由を `twophase_diag3_cells.csv`、停止集合内外の Q 残差比較を `twophase_diag3_qcompare.csv`、
+plan #1b-r2 の判定規則を機械的に当てた要約を `twophase_diag3_summary.csv` に書く。cells CSV の値の列は窓内最大 |値| とその更新番号 (最後の記録は `last_update_*`)。
 注意: 受動種/化学種の拡散は `viscMethod != 0` のときだけ加わる (viscMethod 0 は定数粘性ではなく「拡散なし」扱い; 化学種と同じ規約)。
 
 ## physProp.viscMethod — 層流の粘性・熱伝導 (2026-09-27 `viscMethod: 2` を置き換え)

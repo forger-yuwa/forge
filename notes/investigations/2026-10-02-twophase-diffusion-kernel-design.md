@@ -864,3 +864,54 @@ A = 毎更新ログ / B = 10 更新ごとログ。末尾窓は [90,100)。
   キー 1 は θ = 0 が無く 0 行 (要約は出る)。キー 0 (二相 ON) の `[...]` 行は前のビルドと数値を除いて同一の構成 (値の差は atomicAdd の run 間ゆらぎ)、
   キー OFF の既定は `test_transport_gas_phase.py` G0 4 構成バイト一致、単体試験 `test_twophase_kernel.cu` ALL PASS。
 - ついでに直したもの: solverConfig.hpp の ω のコメントが `condAuditResidual` の行に付いていた (コメントのみ; 6a7a865d 以前の自分の編集の誤り)。
+
+## 19. #1b-r2 診断: 乾燥停止セルと残差最大セルの float/double 組立 A/B (2026-10-02; HEAD `3e877c03` + 未 commit; 数値は不変)
+
+裁定: [`notes/reviews/2026-10-02-twophase-relax-result-diagnose.md`](../reviews/2026-10-02-twophase-relax-result-diagnose.md) (plan §5.1 #1b-r2 行)。
+キー `condensation.condTwoPhaseDiag: 3` (= 1 の θ=0 記録 + 本節の A/B)。クリーンビルド (solverConfig.hpp の注釈・検査範囲を変えた)。
+
+### 19.1 仕組み
+
+- **組立 A** = 本番の float 組立 (更新に使う; 変えない)。**組立 B** = 窓 (末尾 200 更新) の各更新で `assembleResidual` の直後・更新の前に、
+  同じ格納状態・面値 (massflux・S3 面組成)・係数・ソース値から二相系の各成分 (化学種・w・v・g・Q2/Q1/Q0) の残差を面ごとに double で組む (監査と同じカーネル)。
+  液 R_g は移流・拡散・ソースの内訳も持つ。ソース値はソースカーネルが書く 14 配列を退避 → モーメント残差 0 → ソース → 退避値を戻す、で得る。
+  B は終了時の独立残差監査と同じ定義の残差 (EOS は直前の assembleResidual)。
+- **B が状態を書かないことの確認**: 試験フック `FORGE_TPD3_VERIFY=1` で B の前後の全セル配列 (ghost 込み 304 本) をバイト比較 → 2 更新とも 0 本変化。
+- 各更新で記録するセル: 乾燥停止 (θ = 0 かつ更新前 ρg = 0; 入口ピン除外) の全セルと、成分 w・v・g・Q2・Q1・Q0 ごとの B の |r| 最大セル。
+- 許容 tol_q は終了時監査と同じ max(1e-7·r0_q, 6ε₃₂·max_i A_q,i) (r0 = 開始時監査; 既存の許容は変えない)。局所の誤差尺度は 6ε₃₂·(セルの Σ|項|)。
+- **判定の操作化** (plan の規則を機械的に; 上位の確認対象):
+  - 停止セル × 更新ごと: R_g,A ≥ 0 → `not_liquid_negative`、R_g,A < 0 かつ R_g,B ≥ 0 → `float_rounding_trigger`、R_g,B < 0 かつ |R_g,B| > 局所誤差 → `discrete_term_negative`
+    (最も負の項 [移流/拡散/ソース] を数える)、その他 → `indeterminate`。
+  - 全体: discrete が 1 件でもあれば `discrete_terms_create_the_negative`、rounding だけなら `float_assembly_rounding_triggers_the_stop`、rounding と indeterminate の混在 `mixed_rounding_and_indeterminate`、
+    indeterminate だけなら `indeterminate`、停止セルなし `no_dry_stop_cells`。
+  - 直接支配説: その更新で Q2・Q1・Q0 すべてについて B の |r| 最大セルが停止集合の外 かつ 集合内の |r_Q| ≤ tol_Q なら「棄却」。全更新で棄却なら
+    `direct_dominance_rejected_in_all_updates` (一部 / なし も区別)。
+- 既存の診断 CSV (§18 の cells) を直した: 値の列は「最後の記録」でなく、各列の窓内最大 |値| (符号付き) とその更新番号 (`winmaxabs_<col>`, `winmaxabs_<col>_update`)。
+  最後の記録は `last_update_*` の名前で 3 列だけ残す。
+
+### 19.2 出力 (run ディレクトリ, 終了時)
+
+- `twophase_diag3_cells.csv`: `update,cell,x,y,group,in_stop_set,theta,limit_reason,rv_pre,rg_pre,Rg_A_float,Rg_B_double,Rg_B_advection,Rg_B_diffusion,Rg_source,
+  Rg_local_scale,Rg_local_error_bound,precond_denom_g,d_rg_prelimit,Rv_A_float,Rv_B_double,precond_denom_v,Rw_A_float,Rw_B_double,RQ2_A_float,RQ2_B_double,
+  RQ1_A_float,RQ1_B_double,RQ0_A_float,RQ0_B_double,precond_denom_Q2,precond_denom_Q1,precond_denom_Q0,tol_g,tol_Q2,tol_Q1,tol_Q0,stop_class,Rg_AB_gap,Rg_AB_gap_over_error_bound`
+  (group = `stop_dry_theta0` / `max_w` / `max_v` / `max_g` / `max_Q2` / `max_Q1` / `max_Q0`; limit_reason 0 なし 1 蒸気非負 2 液非負 3 dg_max 4 dT_max; 分母は V/Δτ + 輸送対角 + V·sj)。
+- `twophase_diag3_qcompare.csv` (更新ごと): `update,n_stop,` と Q2/Q1/Q0 それぞれ `maxin_*,maxout_*,tol_*,maxin_over_tol_*,maxout_over_tol_*,argmax_cell_*,argmax_in_stop_*`、`direct_dominance_rejected`。
+- `twophase_diag3_summary.csv` (key,value): `updates, first_update, last_update, stop_cell_updates, class_* (4), discrete_negative_most_negative_term_{advection,diffusion,source},
+  min_Rg_B_among_discrete_negative, verdict_sign_rule, stop_rows_AB_gap_exceeds_local_error_bound, updates_direct_dominance_rejected, verdict_direct_dominance`。
+- 加えて mode 1 と同じ `twophase_diag_theta0_cells.csv` / `_summary.csv` (時点を揃えた集計に直したもの) と `[twophase-diag]` 行。
+
+### 19.3 確認 (2 step, run_0482 入力の複製; 判定外)
+
+- 2 更新とも窓内。乾燥停止セルは無し (`no_dry_stop_cells`)、直接支配説は 2/2 更新で棄却 (停止集合が空なので自明)。
+- A と B の一致 (残差最大セル): R_g 6.454625279e-9 / 6.454625524e-9 (差 2.4e-16、局所誤差 6.8e-15)、R_Q0 1.632364856e17 / 1.632364721e17 (float の 1 ULP 程度)。
+- 分類経路の試験 (試験フック `FORGE_TPD3_STOPSET=lt1` で θ < 1 の 22 セルを停止集合扱い): 全 22 件 `discrete_term_negative`、最も負の項は移流
+  (例 セル 14533: R_g,A −7.187e-38, R_g,B −7.094e-38, 移流 −7.198e-38, 拡散 +9.3e-40, ソース +1.1e-40, ρg 1.2e-39)。
+  **観察**: この 22 件では |R_g,A − R_g,B| が局所誤差尺度 6ε·Σ|項| の 915〜17843 倍 — 項 (ṁ·g_f ~1e-40) が float の非正規数域で相対精度を失うため。
+  局所誤差尺度は非正規数域の項を前提にしていないので、`Rg_AB_gap_over_error_bound` と `stop_rows_AB_gap_exceeds_local_error_bound` を出して見えるようにした
+  (B は double なので B の符号の判定には影響しないが、「A の誤差で説明できるか」の読みには効く)。
+- 数値の不変: 二相 ON・diag 0 の `[...]` 行は前のビルドと数値以外同一、`test_twophase_kernel.cu` ALL PASS、キー OFF の既定は G0 4 構成バイト一致。
+
+### 19.4 AWS での使い方
+
+run_0510 (緩和 0.5) の solverConfig.yaml の `condensation` に `condTwoPhaseDiag: 3` を足すだけ (他は同じ)。窓は実更新数の末尾 200 更新
+(2000 step なら更新 1800–1999; 2200 step なら 2000–2199)。試験フックの環境変数は付けない。B の組立は窓内だけ (各更新でセル配列を host へ ~12 MB 転送)。

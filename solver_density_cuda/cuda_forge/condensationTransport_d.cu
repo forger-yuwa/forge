@@ -802,6 +802,10 @@ __global__ void twophase_vl_update_d(
         diag[2*n + ic] = o.dv; diag[3*n + ic] = o.dg;
         for (int m = 0; m < TP_NQ; ++m) { diag[(4 + m)*n + ic] = o.dq[m]; diag[(8 + m)*n + ic] = c.RQ[m]; }
         diag[7*n + ic] = (double)o.reason; diag[11*n + ic] = o.theta;
+        // #1b-r2: 更新に入った float の全残差 (組立 A) と前処理の分母
+        diag[15*n + ic] = c.Rw; diag[16*n + ic] = c.Rg;
+        diag[17*n + ic] = (double)(c.M + c.Dv); diag[18*n + ic] = (double)(c.M + c.Dg + c.V*c.sjg);
+        for (int m = 0; m < TP_NQ; ++m) diag[(19 + m)*n + ic] = (double)(c.M + c.DQ[m] + c.V*c.sjQ[m]);
     }
     roYw[ic] = o.rYw; g[ic] = o.rg; Q2[ic] = o.rQ[0]; Q1[ic] = o.rQ[1]; Q0[ic] = o.rQ[2];
     diagLim[ic] = (flow_float)o.theta;
@@ -827,8 +831,9 @@ static int*    g_tp_thetaMin_dev = nullptr;
 
 // ---- 診断 (condTwoPhaseDiag, #1b-r1; 読むだけ) ----
 // セル列 (double × nCells): 0 ρv (更新前), 1 ρg (更新前), 2 δρv, 3 δρg, 4–6 δρQ2/Q1/Q0 (制限前・緩和後), 7 制限 (0 なし, 1 蒸気非負, 2 液非負, 3 dg_max, 4 dT_max),
-//   8–10 Q2/Q1/Q0 の残差 (更新に入った全残差), 11 θ, 12 f−1 (再正規化), 13 Δ(ρY_w) (再正規化), 14 Δ(ρg) (再正規化)
-#define TPD_NCOL 15
+//   8–10 Q2/Q1/Q0 の残差 (更新に入った全残差), 11 θ, 12 f−1 (再正規化), 13 Δ(ρY_w) (再正規化), 14 Δ(ρg) (再正規化),
+//   15 R_w (float 組立 A), 16 R_g (A), 17 前処理の分母 蒸気 V/Δτ + D_v, 18 液 V/Δτ + D_g + V sj_g, 19–21 Q2/Q1/Q0 の分母 (#1b-r2)
+#define TPD_NCOL 22
 #define TPD_REC  (2 + TPD_NCOL)   // 記録: 更新番号, セル, 上の 15 列
 #define TPD_WINDOW 200
 static double* g_tpd_cell = nullptr;    // TPD_NCOL × nCells
@@ -838,6 +843,12 @@ static int*    g_tpd_hit = nullptr;     // [0,n) θ<1 / [n,2n) θ=0 が区間内
 static int*    g_tpd_cnt = nullptr;     // 区間の固有セル数 (2)
 static size_t  g_tpd_cap = 0, g_tpd_nupd = 0, g_tpd_nupd_log = 0, g_tpd_ncells = 0;
 static bool tpdOn(const solverConfig& cfg) { return cfg.condTwoPhaseDiag != 0 && condTwoPhaseDiffusionActive(cfg); }
+// 診断の窓 (末尾 TPD_WINDOW 更新) に入っているか: 次に行う更新の番号 g_tpd_nupd で判定 (組立 B は更新の前に呼ぶので同じ番号)
+bool twoPhaseDiagInWindow(const solverConfig& cfg)
+{
+    const size_t N = (size_t)std::max(0, cfg.mainLoopCount());
+    return tpdOn(cfg) && (g_tpd_nupd + TPD_WINDOW >= N);
+}
 double* twoPhaseDiagRenormPtr() { return (g_tpd_cell != nullptr) ? g_tpd_cell + 12*g_tpd_ncells : nullptr; }
 static void tpdAlloc(geom_int nCells)
 {
@@ -862,7 +873,7 @@ __global__ void tpd_collect_d(geom_int nCells, const double* cell, const geom_in
     const double th = cell[11*n + ic];
     if (th < 1.0) hit[ic] = 1;
     if (th == 0.0) hit[n + ic] = 1;
-    const bool sel = (mode == 1) ? (th == 0.0) : (th < 1.0);
+    const bool sel = (mode == 2) ? (th < 1.0) : (th == 0.0);   // 1, 3: θ = 0、2: θ < 1
     if (!inWindow || !sel) return;
     const unsigned long long k = atomicAdd(nrec, 1ULL);
     if (k >= cap) return;
@@ -878,6 +889,160 @@ __global__ void tpd_count_d(geom_int nCells, int* hit, int* cnt)
     if (hit[nCells + ic]) { atomicAdd(&cnt[1], 1); hit[nCells + ic] = 0; }
 }
 }  // namespace
+
+// ---- #1b-r2 (condTwoPhaseDiag 3): 組立 A (float, 更新に使用) と B (double, 診断) の比較 (host; 窓内の各更新) ----
+struct TpbRow {   // 記録したセル 1 つ (更新ごと)
+    long upd, cell; double x, y; int group; int inStop; double th; int reason;
+    double rv, rg, RgA, RgB, RgAdv, RgDif, RgSrc, RgScaleLocal, RgErr, denG, dRg, RvA, RvB, denV, RwA, RwB;
+    double RQA[3], RQB[3], denQ[3], tol[4]; int cls;
+};
+struct TpbUpd { long upd; long nStop; double maxIn[3], maxOut[3], tol[3]; long argmax[3]; int argInStop[3]; int reject; };
+static std::vector<TpbRow> g_tpb_rows;
+static std::vector<TpbUpd> g_tpb_upd;
+static bool g_tpb_skip_noted = false;
+static const char* TPB_GROUP[] = {"stop_dry_theta0", "max_w", "max_v", "max_g", "max_Q2", "max_Q1", "max_Q0"};
+static const char* TPB_CLASS[] = {"n/a", "float_rounding_trigger", "discrete_term_negative", "indeterminate", "not_liquid_negative"};
+static void tpdBProcess(solverConfig& cfg, mesh& msh, variables& var, size_t upd)
+{
+    const double *rBd, *ABd, *brkd; int NQ = 0;
+    if (!twoPhaseDiagBGet(&rBd, &ABd, &brkd, &NQ)) {
+        if (!g_tpb_skip_noted) { printf("[twophase-diag] condTwoPhaseDiag 3: assembly B unavailable (needs S3 face values with SLAU, non-periodic) — A/B rows skipped\n"); g_tpb_skip_noted = true; }
+        return;
+    }
+    const size_t nc = (size_t)msh.nCells; const int ns = var.nSpeciesRegistered, iw = cfg.condGasSpecies;
+    static std::vector<double> rB, AB, brk, cell; static std::vector<flow_float> pin, cx, cy;
+    rB.resize(nc*NQ); AB.resize(nc*NQ); brk.resize(nc*3); cell.resize(TPD_NCOL*nc);
+    gpuErrchk( cudaMemcpy(rB.data(), rBd, nc*NQ*sizeof(double), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(AB.data(), ABd, nc*NQ*sizeof(double), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(brk.data(), brkd, nc*3*sizeof(double), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(cell.data(), g_tpd_cell, TPD_NCOL*nc*sizeof(double), cudaMemcpyDeviceToHost) );
+    if (pin.size() != nc) {
+        cx.resize(nc); cy.resize(nc);
+        gpuErrchk( cudaMemcpy(cx.data(), var.c_d["ccx"], nc*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+        gpuErrchk( cudaMemcpy(cy.data(), var.c_d["ccy"], nc*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+        pin.assign(nc, 0.0f);
+        auto itp = var.c_d.find("scalarDirichletPin");
+        if (cfg.discretization == "node" && itp != var.c_d.end() && itp->second != nullptr)
+            gpuErrchk( cudaMemcpy(pin.data(), itp->second, nc*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+    }
+    auto C = [&](int col, size_t c) { return cell[(size_t)col*nc + c]; };
+    const int qc[6] = {iw, ns, ns + 1, ns + 2, ns + 3, ns + 4};   // w, v, g, Q2, Q1, Q0
+    const double eps = 1.1920928955078125e-7;
+    const std::vector<double>& r0 = twoPhaseAuditR0();
+    double tol[6]; long amax[6]; double vmax[6];
+    for (int k = 0; k < 6; ++k) {
+        double mA = 0.0; amax[k] = -1; vmax[k] = -1.0;
+        for (size_t c = 0; c < nc; ++c) {
+            if (pin[c] == 1.0f) continue;
+            const double a = AB[c*NQ + qc[k]], v = std::fabs(rB[c*NQ + qc[k]]);
+            if (a > mA) mA = a;
+            if (v > vmax[k] || !(v == v)) { vmax[k] = v; amax[k] = (long)c; }
+        }
+        const double rr = (r0.size() == (size_t)NQ && r0[qc[k]] >= 0.0) ? 1.0e-7*r0[qc[k]] : 0.0;
+        tol[k] = std::max(rr, 6.0*eps*mA);   // 監査と同じ許容 (変更しない)
+    }
+    std::vector<char> inS(nc, 0); long nS = 0;
+    // 乾燥停止: θ = 0 かつ更新前 ρg = 0。試験用 FORGE_TPD3_STOPSET=lt1 は θ < 1 の全セルを停止集合にする (分類の経路を短い run で通すためだけ)
+    static const bool lt1 = (std::getenv("FORGE_TPD3_STOPSET") != nullptr && std::string(std::getenv("FORGE_TPD3_STOPSET")) == "lt1");
+    for (size_t c = 0; c < nc; ++c) if (pin[c] != 1.0f && (lt1 ? (C(11, c) < 1.0) : (C(11, c) == 0.0 && C(1, c) == 0.0))) { inS[c] = 1; ++nS; }
+    TpbUpd u{}; u.upd = (long)upd; u.nStop = nS; u.reject = 1;
+    for (int m = 0; m < 3; ++m) {
+        const int q = qc[3 + m];
+        double mi = 0.0, mo = 0.0;
+        for (size_t c = 0; c < nc; ++c) { if (pin[c] == 1.0f) continue; const double v = std::fabs(rB[c*NQ + q]); if (inS[c]) mi = std::max(mi, v); else mo = std::max(mo, v); }
+        u.maxIn[m] = mi; u.maxOut[m] = mo; u.tol[m] = tol[3 + m]; u.argmax[m] = amax[3 + m];
+        u.argInStop[m] = (amax[3 + m] >= 0 && inS[(size_t)amax[3 + m]]) ? 1 : 0;
+        if (u.argInStop[m] || !(mi <= tol[3 + m])) u.reject = 0;   // 直接支配説の棄却: 最大セルが集合外 かつ 集合内の Q 残差が許容以下 (全 Q)
+    }
+    g_tpb_upd.push_back(u);
+    auto addRow = [&](size_t c, int group) {
+        TpbRow r{}; r.upd = (long)upd; r.cell = (long)c; r.x = cx[c]; r.y = cy[c]; r.group = group; r.inStop = inS[c];
+        r.th = C(11, c); r.reason = (int)C(7, c); r.rv = C(0, c); r.rg = C(1, c);
+        r.RgA = C(16, c); r.RgB = rB[c*NQ + ns + 1]; r.RgAdv = brk[c*3 + 0]; r.RgDif = brk[c*3 + 1]; r.RgSrc = brk[c*3 + 2];
+        r.RgScaleLocal = AB[c*NQ + ns + 1]; r.RgErr = 6.0*eps*r.RgScaleLocal;
+        r.denG = C(18, c); r.dRg = C(3, c); r.RvA = (double)(float)((float)C(15, c) - (float)C(16, c)); r.RvB = rB[c*NQ + ns]; r.denV = C(17, c);
+        r.RwA = C(15, c); r.RwB = rB[c*NQ + iw];
+        for (int m = 0; m < 3; ++m) { r.RQA[m] = C(8 + m, c); r.RQB[m] = rB[c*NQ + ns + 2 + m]; r.denQ[m] = C(19 + m, c); }
+        r.tol[0] = tol[2]; r.tol[1] = tol[3]; r.tol[2] = tol[4]; r.tol[3] = tol[5];
+        if (group == 0) {   // 乾燥停止セルの判別 (plan #1b-r2 の規則を機械化; 局所演算誤差の尺度は監査と同じ 6ε × セルの Σ|項|)
+            if (!(r.RgA < 0.0)) r.cls = 4;
+            else if (r.RgB >= 0.0) r.cls = 1;                                   // A で負・B で非負
+            else if (std::fabs(r.RgB) > r.RgErr) r.cls = 2;                      // B でも負で局所演算誤差を超える
+            else r.cls = 3;                                                      // 誤差範囲で符号不定
+        }
+        g_tpb_rows.push_back(r);
+    };
+    for (size_t c = 0; c < nc; ++c) if (inS[c]) addRow(c, 0);
+    for (int k = 0; k < 6; ++k) if (amax[k] >= 0) addRow((size_t)amax[k], 1 + k);
+}
+
+static void tpdBWrite(solverConfig& cfg)
+{
+    (void)cfg;
+    if (g_tpb_upd.empty()) return;
+    if (FILE* f = std::fopen("twophase_diag3_cells.csv", "w")) {
+        std::fprintf(f, "update,cell,x,y,group,in_stop_set,theta,limit_reason,rv_pre,rg_pre,Rg_A_float,Rg_B_double,Rg_B_advection,Rg_B_diffusion,Rg_source,"
+                        "Rg_local_scale,Rg_local_error_bound,precond_denom_g,d_rg_prelimit,Rv_A_float,Rv_B_double,precond_denom_v,Rw_A_float,Rw_B_double,"
+                        "RQ2_A_float,RQ2_B_double,RQ1_A_float,RQ1_B_double,RQ0_A_float,RQ0_B_double,precond_denom_Q2,precond_denom_Q1,precond_denom_Q0,"
+                        "tol_g,tol_Q2,tol_Q1,tol_Q0,stop_class,Rg_AB_gap,Rg_AB_gap_over_error_bound\n");
+        for (const TpbRow& r : g_tpb_rows)
+            std::fprintf(f, "%ld,%ld,%.9g,%.9g,%s,%d,%.9e,%d,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,"
+                            "%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%s,%.9e,%.6e\n",
+                         r.upd, r.cell, r.x, r.y, TPB_GROUP[r.group], r.inStop, r.th, r.reason, r.rv, r.rg, r.RgA, r.RgB, r.RgAdv, r.RgDif, r.RgSrc,
+                         r.RgScaleLocal, r.RgErr, r.denG, r.dRg, r.RvA, r.RvB, r.denV, r.RwA, r.RwB,
+                         r.RQA[0], r.RQB[0], r.RQA[1], r.RQB[1], r.RQA[2], r.RQB[2], r.denQ[0], r.denQ[1], r.denQ[2],
+                         r.tol[0], r.tol[1], r.tol[2], r.tol[3], (r.group == 0) ? TPB_CLASS[r.cls] : "n/a",
+                         std::fabs(r.RgA - r.RgB), (r.RgErr > 0.0) ? std::fabs(r.RgA - r.RgB)/r.RgErr : (r.RgA == r.RgB ? 0.0 : INFINITY));
+        std::fclose(f);
+    }
+    if (FILE* f = std::fopen("twophase_diag3_qcompare.csv", "w")) {
+        std::fprintf(f, "update,n_stop,maxin_Q2,maxout_Q2,tol_Q2,maxin_over_tol_Q2,maxout_over_tol_Q2,argmax_cell_Q2,argmax_in_stop_Q2,"
+                        "maxin_Q1,maxout_Q1,tol_Q1,maxin_over_tol_Q1,maxout_over_tol_Q1,argmax_cell_Q1,argmax_in_stop_Q1,"
+                        "maxin_Q0,maxout_Q0,tol_Q0,maxin_over_tol_Q0,maxout_over_tol_Q0,argmax_cell_Q0,argmax_in_stop_Q0,direct_dominance_rejected\n");
+        for (const TpbUpd& u : g_tpb_upd) {
+            std::fprintf(f, "%ld,%ld", u.upd, u.nStop);
+            for (int m = 0; m < 3; ++m)
+                std::fprintf(f, ",%.9e,%.9e,%.9e,%.6e,%.6e,%ld,%d", u.maxIn[m], u.maxOut[m], u.tol[m],
+                             (u.tol[m] > 0.0) ? u.maxIn[m]/u.tol[m] : NAN, (u.tol[m] > 0.0) ? u.maxOut[m]/u.tol[m] : NAN, u.argmax[m], u.argInStop[m]);
+            std::fprintf(f, ",%d\n", u.reject);
+        }
+        std::fclose(f);
+    }
+    // 判定の要約 (plan #1b-r2 の規則を機械的に適用; 規則の操作化は設計メモ §19)
+    long cls[5] = {0, 0, 0, 0, 0}, nStopRows = 0, dom[3] = {0, 0, 0}, rej = 0, gapExceed = 0;   // gapExceed: |A−B| が局所の誤差尺度を超えた停止行 (float の非正規数域の項など)
+    double minRgB = 0.0;
+    for (const TpbRow& r : g_tpb_rows) {
+        if (r.group != 0) continue;
+        ++nStopRows; ++cls[r.cls];
+        if (std::fabs(r.RgA - r.RgB) > r.RgErr) ++gapExceed;
+        if (r.cls == 2) {   // B でも負: 最も負の項
+            const double t[3] = {r.RgAdv, r.RgDif, r.RgSrc}; int k = 0; for (int j = 1; j < 3; ++j) if (t[j] < t[k]) k = j; ++dom[k];
+            minRgB = std::min(minRgB, r.RgB);
+        }
+    }
+    for (const TpbUpd& u : g_tpb_upd) rej += u.reject;
+    const char* vs;
+    if (nStopRows == 0) vs = "no_dry_stop_cells";
+    else if (cls[2] > 0) vs = "discrete_terms_create_the_negative";
+    else if (cls[1] > 0 && cls[3] == 0) vs = "float_assembly_rounding_triggers_the_stop";
+    else if (cls[1] > 0) vs = "mixed_rounding_and_indeterminate";
+    else vs = "indeterminate";
+    const long W = (long)g_tpb_upd.size();
+    const char* vd = (rej == W) ? "direct_dominance_rejected_in_all_updates" : (rej == 0 ? "direct_dominance_not_rejected_in_any_update" : "direct_dominance_rejected_in_some_updates");
+    if (FILE* f = std::fopen("twophase_diag3_summary.csv", "w")) {
+        std::fprintf(f, "key,value\nupdates,%ld\nfirst_update,%ld\nlast_update,%ld\nstop_cell_updates,%ld\n", W, g_tpb_upd.front().upd, g_tpb_upd.back().upd, nStopRows);
+        std::fprintf(f, "class_float_rounding_trigger,%ld\nclass_discrete_term_negative,%ld\nclass_indeterminate,%ld\nclass_not_liquid_negative,%ld\n", cls[1], cls[2], cls[3], cls[4]);
+        std::fprintf(f, "discrete_negative_most_negative_term_advection,%ld\ndiscrete_negative_most_negative_term_diffusion,%ld\ndiscrete_negative_most_negative_term_source,%ld\n", dom[0], dom[1], dom[2]);
+        std::fprintf(f, "min_Rg_B_among_discrete_negative,%.9e\nverdict_sign_rule,%s\n", minRgB, vs);
+        std::fprintf(f, "stop_rows_AB_gap_exceeds_local_error_bound,%ld\n", gapExceed);
+        std::fprintf(f, "updates_direct_dominance_rejected,%ld\nverdict_direct_dominance,%s\n", rej, vd);
+        std::fclose(f);
+    }
+    printf("[twophase-diag] wrote twophase_diag3_cells.csv, twophase_diag3_qcompare.csv, twophase_diag3_summary.csv (%ld updates, %ld stop cell-updates;"
+           " classes rounding %ld / discrete %ld / indeterminate %ld; %s; direct dominance rejected in %ld of %ld updates)\n",
+           W, nStopRows, cls[1], cls[2], cls[3], vs, rej, W);
+    fflush(stdout);
+}
 static void twoPhaseStatsAlloc()
 {
     if (g_tp_stats_dev != nullptr) return;
@@ -929,8 +1094,8 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
     // 再正規化 (係数を液・Q にも) → 受動種の最後の砦 (floor と収支の記録; 通常は無作用) → 周期ミラー
     speciesRenormalizeTwoPhase_d_wrapper(cfg, cuda_cfg, msh, var);
     if (g_tpd_cell != nullptr) {   // 診断: 末尾 200 更新の θ = 0 (θ < 1) セルを記録、区間の固有セルの印 (読むだけ)
-        const size_t N = (size_t)std::max(0, cfg.mainLoopCount());
-        const int inWindow = (g_tpd_nupd + TPD_WINDOW >= N) ? 1 : 0;
+        const int inWindow = twoPhaseDiagInWindow(cfg) ? 1 : 0;
+        if (inWindow && cfg.condTwoPhaseDiag == 3) tpdBProcess(cfg, msh, var, g_tpd_nupd);   // #1b-r2: 組立 A/B の比較 (host; 読むだけ)
         tpd_collect_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(msh.nCells, g_tpd_cell, passive_periodic_root(cfg, msh), cfg.condTwoPhaseDiag,
             inWindow, (double)g_tpd_nupd, g_tpd_rec, g_tpd_n, (unsigned long long)g_tpd_cap, g_tpd_hit);
         gpuErrchk( cudaPeekAtLastError() );
@@ -1002,9 +1167,14 @@ void twoPhaseDiagWrite(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, varia
     gpuErrchk( cudaMemcpy(cz.data(), var.c_d["ccz"], nC*sizeof(flow_float), cudaMemcpyDeviceToHost) );
     const size_t N = g_tpd_nupd, w0 = (N > TPD_WINDOW) ? N - TPD_WINDOW : 0, W = N - w0;
     const char* tag = (cfg.condTwoPhaseDiag == 2) ? "theta_lt1" : "theta0";
+    if (cfg.condTwoPhaseDiag == 3) tpdBWrite(cfg);   // #1b-r2 の CSV と判定の要約
     // 更新ごとのセル集合 (持続性) とセルごとの集計
     std::vector<std::vector<long>> setByUpd(W);
-    struct Agg { long n = 0, first = -1, last = -1, cur = 0, best = 0, persist = 0; long reason[5] = {0,0,0,0,0}; const double* lastRec = nullptr; };
+    // 窓内の最大 |値| と、その更新番号 (列ごと) を持つ。値の列は「最後の記録」ではない (codex 2026-10-02 relax-result: 最後の記録を代表値と読んだ誤り)。
+    static const int KCOL[] = {2, 3, 4, 5, 6, 8, 9, 10, 12, 13, 14, 15, 16};   // d_rv d_rg d_rQ2 d_rQ1 d_rQ0 res_Q2 res_Q1 res_Q0 f-1 renorm_dYw renorm_dg Rw_A Rg_A
+    static const int NK = (int)(sizeof(KCOL)/sizeof(KCOL[0]));
+    struct Agg { long n = 0, first = -1, last = -1, cur = 0, best = 0, persist = 0; long reason[5] = {0,0,0,0,0}; const double* lastRec = nullptr;
+                 double mx[NK] = {}; long mxUpd[NK] = {}; bool any[NK] = {}; };
     std::vector<Agg> agg(nC);
     // 記録は更新番号の順に並ぶとは限らない (atomicAdd) ので更新番号で並べ直す
     std::vector<size_t> ord(nk); for (size_t k = 0; k < nk; ++k) ord[k] = k;
@@ -1021,6 +1191,11 @@ void twoPhaseDiagWrite(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, varia
         a.best = std::max(a.best, a.cur);
         if (a.first < 0) a.first = u;
         a.last = u; ++a.n; a.lastRec = r;
+        for (int j = 0; j < NK; ++j) {   // 符号付きの値を、|値| が窓内最大になった更新で持つ (同値は早い更新)
+            const double v = r[2 + KCOL[j]];
+            if (!a.any[j] || std::fabs(v) > std::fabs(a.mx[j]) || (!(v == v) && a.mx[j] == a.mx[j])) { a.mx[j] = v; a.mxUpd[j] = u; }   // 記録は更新順なので同値は早い更新
+            a.any[j] = true;
+        }
         const int rs = (int)r[2 + 7]; if (rs >= 0 && rs < 5) { ++a.reason[rs]; ++reasonTot[rs]; }
     }
     // 連続する更新でセル集合がどれだけ重なるか: mean_n |S_n ∩ S_{n−1}| / |S_n| (S_n 非空の n だけ)
@@ -1041,16 +1216,18 @@ void twoPhaseDiagWrite(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, varia
     const std::string fc = std::string("twophase_diag_") + tag + "_cells.csv", fs = std::string("twophase_diag_") + tag + "_summary.csv";
     if (FILE* f = std::fopen(fc.c_str(), "w")) {
         std::fprintf(f, "rank,cell,x,y,z,n_updates,freq,first_update,last_update,max_consecutive,n_consecutive_with_previous,"
-                        "reason_vapour_nonneg,reason_liquid_nonneg,reason_dg_max,reason_dT_max,reason_none,"
-                        "rv_pre,rg_pre,d_rv,d_rg,d_rQ2,d_rQ1,d_rQ0,res_Q2,res_Q1,res_Q0,theta,renorm_f_minus_1,renorm_d_rYw,renorm_d_rg\n");
+                        "reason_vapour_nonneg,reason_liquid_nonneg,reason_dg_max,reason_dT_max,reason_none");
+        static const char* KN[] = {"d_rv","d_rg","d_rQ2","d_rQ1","d_rQ0","res_Q2","res_Q1","res_Q0","renorm_f_minus_1","renorm_d_rYw","renorm_d_rg","Rw_A","Rg_A"};
+        for (int j = 0; j < NK; ++j) std::fprintf(f, ",winmaxabs_%s,winmaxabs_%s_update", KN[j], KN[j]);
+        std::fprintf(f, ",last_update_rv_pre,last_update_rg_pre,last_update_theta\n");
         const size_t top = std::min<size_t>(cells.size(), 500);
         for (size_t i = 0; i < top; ++i) {
             const size_t c = cells[i]; const Agg& a = agg[c]; const double* r = a.lastRec + 2;
-            std::fprintf(f, "%zu,%zu,%.9g,%.9g,%.9g,%ld,%.6g,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,"
-                            "%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e,%.9e\n",
+            std::fprintf(f, "%zu,%zu,%.9g,%.9g,%.9g,%ld,%.6g,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld",
                          i + 1, c, cx[c], cy[c], cz[c], a.n, (W ? (double)a.n/(double)W : 0.0), a.first, a.last, a.best, a.persist,
-                         a.reason[1], a.reason[2], a.reason[3], a.reason[4], a.reason[0],
-                         r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[8], r[9], r[10], r[11], r[12], r[13], r[14]);
+                         a.reason[1], a.reason[2], a.reason[3], a.reason[4], a.reason[0]);
+            for (int j = 0; j < NK; ++j) std::fprintf(f, ",%.9e,%ld", a.mx[j], a.mxUpd[j]);
+            std::fprintf(f, ",%.9e,%.9e,%.9e\n", r[0], r[1], r[11]);
         }
         std::fclose(f);
     }

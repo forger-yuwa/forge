@@ -2239,7 +2239,8 @@ __global__ void twophase_audit_face_d(
     flow_float* ro, flow_float* T, flow_float* P, flow_float* vis_lam, flow_float* vis_turb,
     int diffMethod, flow_float Sc, flow_float Sc_t, int isNode, CondSpeciesProps cprops,
     const flow_float* massflux, const flow_float* Yface, const flow_float* Pface, int nPassive, int q0,
-    int NQ, double* r, double* A, int oldOp, int visc, GasPhaseLiquid liq)
+    int NQ, double* r, double* A, int oldOp, int visc, GasPhaseLiquid liq,
+    double* brk = nullptr)   // #1b-r2: 液 R_g の内訳 [c*3+0] 移流, [c*3+1] 拡散 (セルへ入る向き; nullptr で書かない)
 {
     const geom_int ih = blockDim.x * blockIdx.x + threadIdx.x;
     if (ih >= nNormalHaloPlanes) return;
@@ -2264,6 +2265,10 @@ __global__ void twophase_audit_face_d(
         const double Pf = nodeBnd ? (double)(rophi[m][c0]*inv0) : (double)Pface[(size_t)ip*nPassive + q0 + m];
         if (m == 0) g_f = Pf;
         add(nSpecies + 1 + m, -mdot*Pf);
+        if (m == 0 && brk != nullptr) {
+            if (c0 < nCells) atomicAdd(&brk[(size_t)c0*3 + 0], -mdot*Pf);
+            if (c1 < nCells) atomicAdd(&brk[(size_t)c1*3 + 0],  mdot*Pf);
+        }
     }
     add(nSpecies, -mdot*(Yw_f - g_f));   // 蒸気
     if (oldOp) {
@@ -2315,7 +2320,7 @@ __global__ void twophase_audit_face_d(
         for (int s = 0; s < nSpecies; s++) {
             const double Jc = Js[s] - Yd[s]*yi*sumJ;
             add(s, Jc);
-            if (s == iw) add(nSpecies, Jc);   // 蒸気 = 総水分 (液は拡散しない)
+            if (s == iw) add(nSpecies, Jc);   // 蒸気 = 総水分 (液は拡散しない; 内訳の拡散は 0)
         }
         return;
     }
@@ -2335,6 +2340,10 @@ __global__ void twophase_audit_face_d(
     add(nSpecies, o.Jv);
     add(nSpecies + 1, o.Jl);
     for (int m = 0; m < TP_NQ; ++m) add(nSpecies + 2 + m, o.JQ[m]);
+    if (brk != nullptr) {
+        if (c0 < nCells) atomicAdd(&brk[(size_t)c0*3 + 1],  o.Jl);
+        if (c1 < nCells) atomicAdd(&brk[(size_t)c1*3 + 1], -o.Jl);
+    }
 }
 
 // mode 0: float の確定残差 (assembleResidual の結果; 比較用) を F に写す。mode 1: res_* に入れたソースだけの値を r・A に足す。
@@ -2358,6 +2367,9 @@ __global__ void twophase_audit_cell_d(geom_int nCells, int nSpecies, int iw, flo
     }
 }
 }  // namespace
+
+static std::vector<double> g_tpAuditR0;   // 開始時の監査の max|r| (成分ごと; 未取得は −1)
+const std::vector<double>& twoPhaseAuditR0() { return g_tpAuditR0; }
 
 void twoPhaseAudit_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int iStep, bool final)
 {
@@ -2400,7 +2412,7 @@ void twoPhaseAudit_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh,
     if (cfg.discretization == "node" && itp != var.c_d.end() && itp->second != nullptr)
         gpuErrchk( cudaMemcpy(pin.data(), itp->second, msh.nCells*sizeof(flow_float), cudaMemcpyDeviceToHost) );
     const double eps = 1.1920928955078125e-7;
-    static std::vector<double> r0;
+    std::vector<double>& r0 = g_tpAuditR0;
     if (r0.size() != (size_t)NQ) r0.assign(NQ, -1.0);
     long npin = 0; for (geom_int c = 0; c < msh.nCells; ++c) if (pin[c] == 1.0f) ++npin;
     bool pass = true, nonfinite = false;
@@ -2482,4 +2494,69 @@ void renormGateLog(const solverConfig& cfg, int iStep, bool final)
     if (final) printf(" | VERDICT: %s\n", rng_judge(w, kappa) ? "PASS" : "FAIL");
     else printf("\n");
     fflush(stdout);
+}
+
+// =============================================================================
+// #1b-r2 診断の組立 B (condTwoPhaseDiag 3; 読むだけ)。assembleResidual の直後 (更新の前) に呼ぶ。
+//   同じ格納状態・面値 (massflux・S3 面組成)・係数・ソース値から、二相系の各成分の残差を面ごとに double で組む (監査と同じカーネル)。
+//   ソース値は同じソースカーネルの値を使うため、ソースが書く 14 配列 (モーメント残差 4・src_jac 4・診断 6) を退避 → 残差を 0 にして
+//   ソースだけを組む → 退避した値をそのまま戻す。更新が使う組立 A (float の残差・src_jac・状態) はビット単位で変わらない。
+//   この時点の B は終了時の独立残差監査 (EOS は直前の assembleResidual) と同じ定義の残差である。
+// =============================================================================
+static double *g_tpB_r = nullptr, *g_tpB_A = nullptr, *g_tpB_brk = nullptr;
+static flow_float* g_tpB_save = nullptr;
+static size_t g_tpB_cells = 0; static int g_tpB_NQ = 0;
+namespace {
+__global__ void tpB_source_add_d(geom_int nCells, int nSpecies, flow_float** res_phi, int NQ, double* r, double* A, double* brk)
+{
+    const geom_int c = blockDim.x * blockIdx.x + threadIdx.x;
+    if (c >= nCells) return;
+    const size_t b = (size_t)c*NQ;
+    for (int m = 0; m < 1 + TP_NQ; ++m) { const double S = (double)res_phi[m][c]; r[b + nSpecies + 1 + m] += S; A[b + nSpecies + 1 + m] += fabs(S); }
+    const double Sg = (double)res_phi[0][c];
+    r[b + nSpecies] -= Sg; A[b + nSpecies] += fabs(Sg);
+    brk[(size_t)c*3 + 2] = Sg;
+}
+}  // namespace
+void twoPhaseDiagB_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    if (!condTwoPhaseDiffusionActive(cfg) || cfg.condTwoPhaseDiag != 3 || g_roY_dev == nullptr || g_qMom0 < 0) return;
+    if (!(cfg.speciesFaceReconstruction >= 2 && g_Yface_dev != nullptr && g_Pface_dev != nullptr && (cfg.solver == "SLAU" || cfg.solver == "SLAU2"))
+        || periodicNodeActive(cfg, msh)) { g_tpB_NQ = 0; return; }   // 監査と同じ対象範囲
+    const int n = g_nSpecies, iw = cfg.condGasSpecies, NQ = n + 5;
+    const size_t nc = (size_t)msh.nCells;
+    if (g_tpB_r == nullptr) {
+        gpuErrchk( cudaMalloc((void**)&g_tpB_r, nc*NQ*sizeof(double)) ); gpuErrchk( cudaMalloc((void**)&g_tpB_A, nc*NQ*sizeof(double)) );
+        gpuErrchk( cudaMalloc((void**)&g_tpB_brk, nc*3*sizeof(double)) ); gpuErrchk( cudaMalloc((void**)&g_tpB_save, nc*14*sizeof(flow_float)) );
+        g_tpB_cells = nc; g_tpB_NQ = NQ;
+    }
+    gpuErrchk( cudaMemset(g_tpB_r, 0, nc*NQ*sizeof(double)) ); gpuErrchk( cudaMemset(g_tpB_A, 0, nc*NQ*sizeof(double)) );
+    gpuErrchk( cudaMemset(g_tpB_brk, 0, nc*3*sizeof(double)) );
+    const CondSpeciesProps cprops = condProps_make(cfg.condModel, cond_prop_opts(cfg));
+    dim3 dimGrid_nh = dim3(ceil(msh.nNormal_halo_Planes / (flow_float)cuda_cfg.blocksize));
+    twophase_audit_face_d<<<dimGrid_nh, cuda_cfg.dimBlock>>>(
+        msh.nCells, msh.nNormal_halo_Planes, msh.normal_halo_planes_d, msh.map_plane_cells_d,
+        var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"], var.p_d["fx"], var.p_d["sx"], var.p_d["sy"], var.p_d["sz"], var.p_d["ss"],
+        thermo_species_device_ptr_f(), n, iw, g_roY_dev, g_p_rophi_dev + g_qMom0,
+        var.c_d["ro"], var.c_d["T"], var.c_d["P"], var.c_d["vis_lam"], var.c_d["vis_turb"],
+        cfg.speciesDiffusionMethod, cfg.Sc, cfg.Sc_t, (cfg.discretization == "node") ? 1 : 0, cprops,
+        var.p_d["massflux"], g_Yface_dev, g_Pface_dev, g_nPassive, g_qMom0, NQ, g_tpB_r, g_tpB_A,
+        0, (cfg.viscMethod != 0) ? 1 : 0, gasPhaseLiquid(cfg, var), g_tpB_brk);
+    gpuErrchk( cudaPeekAtLastError() );
+    // ソース値: ソースが書く 14 配列を退避 → モーメント残差 0 → ソース → 足す → 戻す
+    const char* names[14] = {"res_rog_0", "res_roQ0_0", "res_roQ1_0", "res_roQ2_0", "src_jac_g_0", "src_jac_Q0_0", "src_jac_Q1_0", "src_jac_Q2_0",
+                             "condS_0", "condDrdt_0", "condR30_0", "condTsat_0", "condTheta_0", "condLim_0"};
+    for (int k = 0; k < 14; ++k) gpuErrchk( cudaMemcpy(g_tpB_save + (size_t)k*nc, var.c_d[names[k]], nc*sizeof(flow_float), cudaMemcpyDeviceToDevice) );
+    for (int k = 0; k < 4; ++k) gpuErrchk( cudaMemset(var.c_d[names[k]], 0, nc*sizeof(flow_float)) );
+    condensationSource_d_wrapper(cfg, cuda_cfg, msh, var);
+    tpB_source_add_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(msh.nCells, n, g_p_res_dev + g_qMom0, NQ, g_tpB_r, g_tpB_A, g_tpB_brk);
+    gpuErrchk( cudaPeekAtLastError() );
+    for (int k = 0; k < 14; ++k) gpuErrchk( cudaMemcpy(var.c_d[names[k]], g_tpB_save + (size_t)k*nc, nc*sizeof(flow_float), cudaMemcpyDeviceToDevice) );
+    gpuErrchkKernelSync();
+}
+bool twoPhaseDiagBGet(const double** r, const double** A, const double** brk, int* NQ)
+{
+    if (g_tpB_NQ == 0 || g_tpB_r == nullptr) return false;
+    *r = g_tpB_r; *A = g_tpB_A; *brk = g_tpB_brk; *NQ = g_tpB_NQ;
+    return true;
 }

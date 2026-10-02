@@ -14,6 +14,8 @@
 #include <time.h>
 #include <limits>
 #include <cstdio>
+#include <map>
+#include <cstring>
 
 #include "flowFormat.hpp"
 #include "mesh/mesh.hpp"
@@ -2080,6 +2082,23 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
 {
     assembleResidual(s, 1);
     logResidualSnapshot(s, inner_index);
+    // #1b-r2 診断 (condTwoPhaseDiag 3, 窓内だけ): 同じ状態・面値・係数・ソース値の double 組立 B (状態・組立 A は不変; 読むだけ)
+    if (s.cfg.condTwoPhaseDiag == 3 && twoPhaseDiagInWindow(s.cfg)) {
+        // 試験用 FORGE_TPD3_VERIFY=1: 組立 B の前後で全セル配列 (ghost 込み) をバイト比較し、B が状態を書かないことを確かめる
+        const bool verify = (std::getenv("FORGE_TPD3_VERIFY") != nullptr);
+        std::map<std::string, std::vector<flow_float>> before;
+        if (verify) for (auto& kv : s.var.c_d) if (kv.second) { auto& v = before[kv.first]; v.resize(s.msh.nCells_all);
+            gpuErrchk( cudaMemcpy(v.data(), kv.second, v.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) ); }
+        twoPhaseDiagB_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        if (verify) {
+            long nArr = 0, nDiff = 0; std::string first;
+            for (auto& kv : before) { std::vector<flow_float> a(kv.second.size());
+                gpuErrchk( cudaMemcpy(a.data(), s.var.c_d[kv.first], a.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) ); ++nArr;
+                if (std::memcmp(a.data(), kv.second.data(), a.size()*sizeof(flow_float)) != 0) { ++nDiff; if (first.empty()) first = kv.first; } }
+            printf("[twophase-diag] verify step %d: %ld cell arrays compared byte-wise before/after assembly B, %ld changed%s%s\n",
+                   s.iStep + 1, nArr, nDiff, nDiff ? " (first: " : "", nDiff ? (first + ")").c_str() : "");
+        }
+    }
     // 定常 (unsteady==0) implicit では dt_local=cfl_pseudo·dx/λ で cfg.dt が打ち消され、dt 適応も表示も
     // monitorInterval ごとで足りる (per-step host 同期を回避)。dt 適応と表示は同一 (monitor 時のみ host 読み)。
     // unsteady でここに来る経路は無い (implicit unsteady は dual-time) が、防御的に毎ステップ adapt にする。
