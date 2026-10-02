@@ -10,6 +10,7 @@
 > 各計画の完了ログや起票履歴に出てくる `.github/plans/<name>.md` という記述は、**現在の root
 > `plans/{active,accepted,archived}/<name>.md`** を指す (移行済み)。履歴の文言はそのまま残してあるので、
 | [`limiter-config-simplify.md`](active/limiter-config-simplify.md) | limiter | リミッタの config 表面を最小化し、ψ 凍結の要否を決める (複雑化を止める判断) |
+| [`limiter-inlet-column-oscillation.md`](active/limiter-inlet-column-oscillation.md) | limiter | case/16 の残差の床 (リミッタ既定で 20 倍) が入口 2 列のリミッタ係数の揺れに集中する原因の調査 (2026-10-03 起票) |
 > 当時の記録として読むこと。
 
 ライフサイクルは**フォルダ移動**で表す (ファイル名は固定し、移動でリンクを壊さない)。
