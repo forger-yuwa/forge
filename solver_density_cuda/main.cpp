@@ -1746,6 +1746,9 @@ cudaConfig initializeSimulation(
                   << " L_ref=" << cfg.limiterRefLength
                   << " K=" << cfg.venkatK << " h_i=" << (cfg.limiterLengthFromArea ? "sqrt(A_planar)" : "cbrt(volume)")
                   << std::endl;
+        if (cfg.limiterEpsConst > 0.0)
+            std::cout << "[limiter] 試験: 領域一定 eps_hat=" << cfg.limiterEpsConst
+                      << " (limiterEpsConst; K・L_ref・h_i は ε̂ に使わない。plan limiter-inlet-column-oscillation §5.1 #8)" << std::endl;
         if (roAuto || pAuto || aAuto) {
             std::cout << "[limiter] 警告: 基準値が自動決定なので、この run は**開始場に依存する作用素**である"
                       << " (分割実行が連続実行と一致しない)。固定するには solverConfig.yaml の space へ次をそのまま貼ること"

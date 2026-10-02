@@ -638,6 +638,11 @@ void solverConfig::read(std::string fname)
             throw std::runtime_error("Key 'venkatK' in 'space' must be > 0.");
         }
         this->limiterRefLength = getOptionalValidatedValue<double>(space, "limiterRefLength", 0.0, "space");
+        // 試験用の領域一定 ε̂ (plan limiter-inlet-column-oscillation §5.1 #8)。既定 0 = 無効 (現行の局所 h_i 依存の式)。
+        this->limiterEpsConst = getOptionalValidatedValue<double>(space, "limiterEpsConst", 0.0, "space");
+        if (this->limiterEpsConst < 0.0) throw std::runtime_error("Key 'limiterEpsConst' in 'space' must be >= 0 (0 = off).");
+        if (this->limiterEpsConst > 0.0 && this->limiterScaled != 1)
+            throw std::runtime_error("Key 'limiterEpsConst' in 'space' requires 'limiterScaled: 1'.");
 
         // 基準値の明示指定 (codex plan-3 Major 6)。0 = 起動時に初期場から自動決定。
         this->limiterRoRef = getOptionalValidatedValue<double>(space, "limiterRoRef", 0.0, "space");

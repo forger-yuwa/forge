@@ -292,6 +292,9 @@ public:
     int limiterScaled = 0;
     double venkatK = 1.0;             // Venkatakrishnan の K (SU2 の VENKAT_LIMITER_COEFF 相当。既定は現行の 1.0)
     double limiterRefLength = 0.0;    // 無次元化の基準長 [m]。0 = メッシュ境界箱の対角から自動
+    // 試験用 (plan limiter-inlet-column-oscillation §5.1 #8、既定 0 = 無効): >0 なら limiterScaled 1 の ε̂ を
+    // 局所寸法に依らない**領域一定**の値にする (ε̂² = limiterEpsConst²)。venkatK・limiterRefLength は使わない。
+    double limiterEpsConst = 0.0;
     // 無次元化の基準。**明示指定 (>0) が最優先**、0 のときだけ起動時に初期場から決める。
     // 自動のままだと restart のたびに値が変わり「同じ設定の分割実行」が同じ作用素にならない
     // (codex plan-3 Major 6)。分割実行を連続実行に一致させたいときは run config に固定値を書く。

@@ -119,7 +119,7 @@ __global__ void limiter_psi_merged_d
             // 変数ごとの固定参照で無次元化してから Venkatakrishnan (通常経路 limiter_r1_fused5_d と同式)
             const flow_float inv = (flow_float)1.0/qRef;
             const flow_float hi  = (lenArea != 0) ? sqrtf(A_planar[ic0]) : cbrtf(volume);
-            const flow_float e2  = eps2Coef * hi*hi*hi;
+            const flow_float e2  = (eps2Coef < (flow_float)0.0) ? -eps2Coef : eps2Coef * hi*hi*hi;   // 負 = 領域一定 ε̂² (limiterEpsConst)
             l = venkata_limiter_scaled(dp_max*inv, dp_min*inv, delta_m*inv, e2);
         } else if (limiter_scheme == 1) {
             l = barth_Jespersen_limiter(dp_max, dp_min, delta_m, volume);
