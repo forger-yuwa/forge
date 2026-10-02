@@ -35,6 +35,8 @@ PYTHONPATH=. .venv-opt/bin/python -m forge_design.evaluate.runner_sern \
 
 ## 計算 run 一覧
 
+> **AWS の全場削除 (2026-10-03、ディスク逼迫でユーザ指示)**: `~/forge-pgrad-new` と `~/forge-r8` の case/46 run から全場 (`res_<n>.h5`)・段出力・`sern.h5`/`sern.msh` を削除 (case/58 と合わせて 39.8 GB)。残したもの: 力係数・残差の CSV、VERDICT、`metrics.json`、config、壁面出力の時系列。最終場と `sern.h5` を残したのは継続の起点 `run_1017_ff4f_g3_2p50` (g3)・`run_1021_ff4f_g4_2p50_cont20k` (g4)・`run_0971`/`0972`/`0973` (g3/g4/g1 の旧系列) だけ。他の run の場が要るときは起点から回し直す。
+
 > **2026-09-26 (ユーザ指示・AWS 容量逼迫)**: AWS `~/forge-sern/case/46.sern_design/` の run 系ディレクトリの `*.h5` / `*.xmf` (29.6 GB) を削除した (`mesh/`・`cad/` の原本は残す)。各 run には config・`CONVERGENCE_VERDICT.txt`・`forge_run.log`・probe・CSV などの記録だけが残る。下表の「res_*.h5 を読む」手順は再実行が必要。
 
 | run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |

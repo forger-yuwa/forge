@@ -22,6 +22,8 @@ V1 の `check_convergence.py` は NOT CONVERGED (全列が丸め床で横ばい)
 
 ## 計算 run 一覧
 
+> **AWS の全場削除 (2026-10-03、ディスク逼迫でユーザ指示)**: `~/forge-pgrad-new/case/58` の run から中間の全場を削除 (各 run の最終場は残す。case/46 と合わせて 39.8 GB)。残したもの: 力係数・残差の CSV、VERDICT、`metrics.json`、config、壁面出力の時系列。
+
 | run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
 | --- | --- | --- | --- |
 | `run_0001_v1a` | V1(a) CPG M0.5、2000 step、block-DPLUR | 最大ずれ dρ 7.5e-7・dP 3.1e-7・du 6.7e-7 → **PASS**。置換・退避 0 | active |
