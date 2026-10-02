@@ -42,8 +42,9 @@ numpy で参照実装し、§6 の事前固定の数値で判定する。カー�
                           float32・upwind・6ε・持ち越しなし・同じ前処理 (line)・同じ初期値・1000 更新・上限 3000。A・B は同じ停止成分 (k, v, w, l, Q, E)。
                           停止判定の残差を float32 で見る版と float64 で再評価する版の両方。見る量: 再正規化前の全量誤差・原方程式残差 (float64)・
                           上限・最小蒸気・θ・補正量。判定規則: A 合格・B 不合格 → 写像、両者合格 → 除外、両者不合格 → 停止則。
-  S9 相変化ソースの反復 (§5.1 #4b) B に GrowthSource (簡易成長則) と移流 ṁ (ρ の更新 = 基点 φⁿρ_new) とソース Jacobian (蒸気・液 2×2) を入れて
-                          収束・保存 (Σρ, ΣρY_w, ΣρY_k, ΣρE)・非負を見る。
+  S9 人工問題の混合精度試験 (§5.1 #4b; 実 condFloat ではない) B に GrowthSource (簡易成長則, float64 評価) と移流 ṁ (基点 φⁿρ_new) と
+                          ソース Jacobian (蒸気・液 2×2) を入れて収束・保存・非負を見る。float32 の FAIL は記録として保持 (初版の停止条件にしない)。
+  実ソースとの接続は C++ の tests/unit/test_twophase_real_source.cpp (§5.1 #4c)。
   S10 θ=0 の停止           蒸気 0 で凝縮を要求する状態: 状態は動かないが原方程式残差は 0 でなく、停止判定は上限到達 (FAIL) にする。
   S11 反例を B で           両セル g=0・D 比 100 を新経路 B で、緩和 1 / 0.5 (緩和は前処理の後・limiter の前)。
   補正の面 z の既定は upwind (codex diagnose 2026-10-02 ① で採用)。mean は現行 species_diffusion_d と同じ比較用。
@@ -1079,6 +1080,7 @@ def full_residuals(st, st_n, pb, T, M, dt, corr="upwind", T64=None):
 
 
 ORIG_KEYS = ("k", "w", "l", "Q", "E")
+AUDIT_KEYS = ("k", "v", "w", "l", "Q", "E")   # 独立残差の監査は蒸気 v = r_w − r_l を含める (codex diagnose 2026-10-02 4b Minor)
 
 
 def orig_scales(st_n, pb, T, M, floor_eps, corr="upwind"):
@@ -1086,14 +1088,16 @@ def orig_scales(st_n, pb, T, M, floor_eps, corr="upwind"):
     s64 = cast_state(st_n, np.float64)
     M64 = np.asarray(M, np.float64)
     r0, F0, _, _, _ = full_residuals(s64, s64, pb, T, M64, np.float64, corr=corr)
-    fl = {"k": s64["rY"], "w": s64["rYw"], "l": s64["rg"], "Q": s64["rQ"], "E": s64["rE"]}
+    r0 = dict(r0)
+    r0["v"] = r0["w"] - r0["l"]
+    fl = {"k": s64["rY"], "v": s64["rYw"] - s64["rg"], "w": s64["rYw"], "l": s64["rg"], "Q": s64["rQ"], "E": s64["rE"]}
     fl = {k: floor_eps * EPS32 * float(np.max(np.abs(M64 * v))) for k, v in fl.items()}
     if "q_abs" in F0:   # E は面のエンタルピー流束の大きさの床も (be_solve / be_solve_B の停止と同じ定義)
         qa = np.zeros(pb.N)
         np.add.at(qa, pb.L, F0["q_abs"])
         np.add.at(qa, pb.R, F0["q_abs"])
         fl["E"] += floor_eps * EPS32 * float(np.max(qa))
-    return {k: float(np.max(np.abs(v))) for k, v in r0.items() if k in ORIG_KEYS}, fl
+    return {k: float(np.max(np.abs(v))) for k, v in r0.items() if k in AUDIT_KEYS}, fl
 
 
 def orig_residual_ratio(st, st_n, pb, T, M, r0, fl, tol=1e-7, corr="upwind"):
@@ -1101,8 +1105,9 @@ def orig_residual_ratio(st, st_n, pb, T, M, r0, fl, tol=1e-7, corr="upwind"):
     更新量ゼロ (θ=0 の停止) を残差合格の代用にしないための判定。"""
     s64, n64 = cast_state(st, np.float64), cast_state(st_n, np.float64)
     r, _, _, _, _ = full_residuals(s64, n64, pb, T, np.asarray(M, np.float64), np.float64, corr=corr)
+    r["v"] = r["w"] - r["l"]
     out = {}
-    for k in ORIG_KEYS:
+    for k in AUDIT_KEYS:
         if k not in r:
             continue
         den = max(tol * r0.get(k, 0.0), fl[k])
@@ -1469,8 +1474,8 @@ def series_with_residual(path, st0, pb, M, dt, nstep, T0, fe=6.0, maxit=3000, co
 
 def conservation_report(st, t0, V):
     t = totals(st, V)
-    rel = {k: (t[k] - t0[k]) / abs(t0[k]) for k in t0 if k not in ("rE", "absE", "rv", "rg") and t0[k] != 0}
-    zero = {k: abs(t[k] - t0[k]) for k in t0 if k not in ("rE", "absE", "rv", "rg") and t0[k] == 0}
+    rel = {k: (t[k] - t0[k]) / abs(t0[k]) for k in t0 if k not in ("rE", "absE", "rv") and t0[k] != 0}      # 液 rg も集計に含める (4b Minor)
+    zero = {k: abs(t[k] - t0[k]) for k in t0 if k not in ("rE", "absE", "rv") and t0[k] == 0}
     eE = abs(t["rE"] - t0["rE"]) / t0["absE"] if t0["absE"] > 0 else 0.0
     return rel, zero, eE, t
 
@@ -1560,7 +1565,9 @@ def source_problem(N=12):
 
 
 def test_source_iteration(quick):
-    print("\n=== S9 B の反復試験: 実際の相変化ソース (成長則 GrowthSource) + ρ の更新 (移流 ṁ, φ_N δρ) + ソース Jacobian ===")
+    print("\n=== S9 人工問題の混合精度試験 (実 condFloat ソースではない): 簡易成長則 GrowthSource (float64 評価) + ρ の更新 (移流 ṁ, φ_N δρ) + ソース Jacobian ===")
+    info("S9 は codex diagnose 2026-10-02 (4b) で「人工問題の混合精度試験」と記録し直した。float32 の FAIL は保持するが、定常専用の初版の停止条件にはしない。"
+         "パラメータ探索は打ち切り (実ソースの接続は tests/unit/test_twophase_real_source.cpp, §5.1 #4c)")
     nstep = 50 if quick else 200
     info("S9 条件: 12 セル閉じた箱、N2 + H2O (NASA-9)、左半分 230 K 過飽和 (Y_v 1e-3, g 0)・右半分 260 K 未飽和 (g 1e-3, Y_v 5e-4)、"
          "乱流 Γ 1e-4・分子 D 2.2e-5、ṁ_f = 7.2e-3·sin(πx/L)·cos(2πn/50) kg/m²/s (ρ が ±1 割程度往復)、τ = 1e-3 s、Δt = 2e-3 s、"
@@ -1585,7 +1592,7 @@ def test_source_iteration(quick):
             cap = s.get("cap", 0)
             ok = cap == 0 and worst <= 1e-6 and out["vmin"] >= 0 and out["gmin"] >= 0 and out["n_bad"] == 0
             g_end = st["rg"].astype(np.float64) / st["rho"].astype(np.float64)
-            line = (f"S9 [{dtn}, 緩和 {relax}, 前処理 {'蒸気・液 2×2 連成' if sblock else '対角のみ'}, θ_vg の距離 ×{frac}, 床 {'6ε·(M+対角)' if fdiag else '6ε·M'}, {nst} 更新] 上限到達 {cap}、最大反復 {out['nit_max']}、原方程式残差の最大比 {out['ratio_max']:.3f} (>1 のステップ {out['n_bad']})、"
+            line = (f"S9 (人工・混合精度) [{dtn}, 緩和 {relax}, 前処理 {'蒸気・液 2×2 連成' if sblock else '対角のみ'}, θ_vg の距離 ×{frac}, 床 {'6ε·(M+対角)' if fdiag else '6ε·M'}, {nst} 更新] 上限到達 {cap}、最大反復 {out['nit_max']}、原方程式残差の最大比 {out['ratio_max']:.3f} (>1 のステップ {out['n_bad']})、"
                     f"保存 {', '.join(f'{k} {v:+.1e}' for k, v in cons.items())}、min ρv {out['vmin']:.3e}、min ρg {out['gmin']:.3e}、"
                     f"θ 最小 {s.get('theta_min', 1.0):.3f}・θ<1 のセル·反復 {s.get('theta_lt1', 0)}、Q_cut {s.get('Q_cut', 0):.1e}、v_round {s.get('v_round', 0):.1e}、"
                     f"θ=0 のステップ {len(out['theta0'])}、終状態 g {np.nanmin(g_end):.2e}–{np.nanmax(g_end):.2e}・T {np.nanmin(out['T']):.1f}–{np.nanmax(out['T']):.1f} K")
