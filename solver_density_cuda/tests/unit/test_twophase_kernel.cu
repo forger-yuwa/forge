@@ -488,7 +488,7 @@ static void test_T2_energy(const Ctx& c)
 
 // ------------------------------------------------------------------ T3 1D 問題 (#4c/#4d) を GPU の面流束・更新で回す (受入 2)
 // 移流・ソース・独立残差 (停止)・N2/E の更新はハーネスのまま。拡散 (面流束と対角) と蒸気・液・Q の更新だけ GPU。
-static RunOut run_gpu(const Ctx& c, double omega, int cap)
+static RunOut run_gpu(const Ctx& c, double omega, int cap, int sweeps = 0)
 {
     RunOut ro;
     State<float> st, inlet; for (auto& a : inlet.v) a.assign(1, 0.0f);
@@ -582,6 +582,23 @@ static RunOut run_gpu(const Ctx& c, double omega, int cap)
             const double gg = (double)st.v[K_L][i]/RHO;
             cc.L = cond_latent(c.cp, T[i]);
             cc.cveff = cpm - thermo_R_mix(c.sp, 2, Yd) + gg*(c.Rw - (cond_latent(c.cp, T[i] + 0.1) - cond_latent(c.cp, T[i] - 0.1))/0.2);
+        }
+        if (sweeps > 0) {   // #4g: 緩和整合 scalar-DPLUR の増分 (本番と同じ tp_denoms / tp_dplur_solve; 非対角は 1 次風上の流入 ṁ/ρ_左、ω = implicitRelax = 1)
+            std::vector<float> R5(5*NC), D5(5*NC), a(5*NC, 0.0f), b(5*NC, 0.0f);
+            for (int i = 0; i < NC; ++i) {
+                float Dd[5]; tp_denoms(ci[i], Dd);
+                const float Rr[5] = {ci[i].Rw - ci[i].Rg, ci[i].Rg, ci[i].RQ[0], ci[i].RQ[1], ci[i].RQ[2]};
+                for (int q = 0; q < 5; ++q) { R5[q*NC + i] = Rr[q]; D5[q*NC + i] = Dd[q]; }
+            }
+            const float off = mdot/rho;
+            for (int k = 0; k < sweeps; ++k) {
+                for (int i = 0; i < NC; ++i) for (int q = 0; q < 5; ++q) {
+                    const float nb = (i > 0) ? off*a[q*NC + i - 1] : 0.0f;
+                    b[q*NC + i] = tp_dplur_solve(1.0f, R5[q*NC + i], nb, D5[q*NC + i]);
+                }
+                std::swap(a, b);
+            }
+            for (int i = 0; i < NC; ++i) { ci[i].useInc = 1; for (int q = 0; q < 5; ++q) ci[i].inc[q] = a[q*NC + i]; }
         }
         G.cells(ci, co);
         double qcut_this = 0, vround_this = 0; int thetaLastLt1 = 0;
@@ -763,6 +780,94 @@ static void test_4f_box(bool quick)
     verdict(em <= 1e-6 && rm <= 1.0 && caps == 0 && minrv >= 0.0, m);
 }
 
+// ------------------------------------------------------------------ #4g (1): R = 0 で全増分・補正 0、1 sweep・ω 1 で点対角とビット一致
+__global__ void k_dplur1(int n, TpCellIn* in)
+{
+    const int i = blockIdx.x*blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    TpCellIn c = in[i];
+    float D[5]; tp_denoms(c, D);
+    const float R[5] = {c.Rw - c.Rg, c.Rg, c.RQ[0], c.RQ[1], c.RQ[2]};
+    for (int q = 0; q < 5; ++q) c.inc[q] = tp_dplur_solve(1.0f, R[q], 0.0f, D[q]);   // ゼロ開始の 1 sweep (近傍の δ = 0)
+    c.useInc = 1;
+    in[i] = c;
+}
+static bool same_out(const TpCellOut& a, const TpCellOut& b)
+{
+    return !memcmp(&a.rYw, &b.rYw, sizeof(float)) && !memcmp(&a.rg, &b.rg, sizeof(float)) && !memcmp(a.rQ, b.rQ, sizeof(a.rQ))
+        && a.theta == b.theta && a.qcut == b.qcut && a.vround == b.vround && !memcmp(&a.dv, &b.dv, sizeof(float)) && !memcmp(&a.dg, &b.dg, sizeof(float))
+        && !memcmp(a.dq, b.dq, sizeof(a.dq)) && a.reason == b.reason;
+}
+static void test_4g_unit()
+{
+    printf("\n=== #4g (1) DPLUR の単体: R = 0 で増分・補正 0、1 sweep・ω 1 で点対角とビット一致 (GPU, 乱数 2 万セル) ===\n");
+    std::mt19937_64 rng(20261004); std::uniform_real_distribution<double> U(0.0, 1.0);
+    const int n = 20000;
+    std::vector<TpCellIn> base(n);
+    for (int i = 0; i < n; ++i) {
+        TpCellIn& c = base[i]; memset(&c, 0, sizeof c);
+        c.M = (float)(1e-3 + U(rng)); c.V = (float)(1e-9 + 1e-6*U(rng)); c.rho = (float)(0.1 + U(rng));
+        c.Rw = (float)((U(rng) - 0.5)*1e-6); c.Rg = (float)((U(rng) - 0.5)*1e-7); for (int m = 0; m < 3; ++m) c.RQ[m] = (float)((U(rng) - 0.5)*pow(10.0, 4*m));
+        c.Dv = (float)U(rng); c.Dg = (float)U(rng); c.sjg = (float)(U(rng)*1e3); for (int m = 0; m < 3; ++m) { c.DQ[m] = (float)U(rng); c.sjQ[m] = (float)(U(rng)*1e3); }
+        c.rg = (U(rng) < 0.3) ? 0.0f : (float)(1e-3*U(rng)); c.rYw = c.rg + ((U(rng) < 0.2) ? 0.0f : (float)(1e-2*U(rng)));
+        for (int m = 0; m < 3; ++m) c.rQ[m] = (U(rng) < 0.3) ? 0.0f : (float)pow(10.0, 4*m)*(float)U(rng);
+        c.omega = (U(rng) < 0.5) ? 1.0f : 0.5f; c.dg_max = 5e-3; c.dT_max = (U(rng) < 0.5) ? 1.0 : 0.01; c.L = 2.5e6; c.cveff = 1000.0;
+    }
+    // 非零残差: 点対角 vs DPLUR 1 sweep
+    std::vector<TpCellOut> oP, oD;
+    G.cells(base, oP);
+    TpCellIn* d; CK(cudaMalloc(&d, n*sizeof(TpCellIn))); CK(cudaMemcpy(d, base.data(), n*sizeof(TpCellIn), cudaMemcpyHostToDevice));
+    k_dplur1<<<(n + 127)/128, 128>>>(n, d); CK(cudaDeviceSynchronize());
+    std::vector<TpCellIn> dp(n); CK(cudaMemcpy(dp.data(), d, n*sizeof(TpCellIn), cudaMemcpyDeviceToHost));
+    G.cells(dp, oD);
+    long diff = 0, thlt1 = 0; for (int i = 0; i < n; ++i) { if (!same_out(oP[i], oD[i])) ++diff; if (oP[i].theta < 1.0) ++thlt1; }
+    char m[256]; snprintf(m, sizeof m, "#4g (1) 非零残差 %d セル (θ<1 %ld): 1 sweep・ω 1 の DPLUR と点対角の出力 (状態・θ・補正・増分・制限) が異なるセル %ld", n, thlt1, diff);
+    verdict(diff == 0, m);
+    // R = 0
+    for (auto& c : base) { c.Rw = c.Rg = 0.0f; for (int m2 = 0; m2 < 3; ++m2) c.RQ[m2] = 0.0f; }
+    CK(cudaMemcpy(d, base.data(), n*sizeof(TpCellIn), cudaMemcpyHostToDevice));
+    k_dplur1<<<(n + 127)/128, 128>>>(n, d); CK(cudaDeviceSynchronize());
+    CK(cudaMemcpy(dp.data(), d, n*sizeof(TpCellIn), cudaMemcpyDeviceToHost));
+    G.cells(dp, oD);
+    long bad = 0;
+    for (int i = 0; i < n; ++i) {
+        const TpCellOut& o = oD[i]; const TpCellIn& c = dp[i];
+        bool z = (o.dv == 0.0f && o.dg == 0.0f && o.dq[0] == 0.0f && o.dq[1] == 0.0f && o.dq[2] == 0.0f && o.qcut == 0.0 && o.vround == 0.0 && o.theta == 1.0
+                  && !memcmp(&o.rg, &c.rg, 4) && !memcmp(&o.rYw, &c.rYw, 4) && !memcmp(o.rQ, c.rQ, sizeof(o.rQ)));
+        for (int q = 0; q < 5; ++q) z = z && (c.inc[q] == 0.0f);
+        if (!z) ++bad;
+    }
+    snprintf(m, sizeof m, "#4g (1) R = 0 の %d セル: 増分・補正が 0 でない、または状態が変わったセル %ld", n, bad);
+    verdict(bad == 0, m);
+    cudaFree(d);
+}
+
+static void test_4g_T3(const Ctx& c, int cap)
+{
+    printf("\n=== #4g (3)(4) T3 の 1D 問題を DPLUR (5 sweep, ω = implicitRelax = 1, condTwoPhaseRelax 1) で (float32, CFL 5, 上限 %d) ===\n", cap);
+    for (double dtm : {1.0, 0.01}) {
+        DT_MAX = dtm;
+        const RunOut h = run<float>(c, RunOpt{1.0, false, cap, "host 点対角"});
+        const RunOut d = run_gpu(c, 1.0, cap, 5);
+        long negs = (d.min_rv < 0) + (d.min_rg < 0) + (d.min_Q < 0);
+        bool fin = d.bad.empty(); for (int q = 0; q <= NVAR; ++q) fin = fin && std::isfinite(d.comp_ratio[q]);
+        const bool ok3 = d.converged && fin && d.ratio_max <= 1.0 && negs == 0 && d.qcut_last10 == 0 && d.vround_last10 == 0
+                         && d.theta_final_lt1 == 0 && d.theta_src_final_lt1 == 0 && (dtm >= 1.0 || d.theta_lt1 > 0);
+        const double dg = fabs(d.g_out - h.g_out)/h.g_out, dT = fabs(d.T_out - h.T_out);
+        char m[640];
+        snprintf(m, sizeof m, "#4g (3) DT_MAX %.2g K DPLUR: %s 反復 %d、独立残差の最大比 %.3f [w %.2f v %.2f l %.2f Q0 %.2f Q1 %.2f Q2 %.2f E %.2f]、min ρv %.2e ρg %.2e ρQ %.2e、"
+                 "末尾 10%% の Qcut/vround %.1e/%.1e、最後の θ<1 %d・θ_src<1 %d、θ<1 のセル·反復 %ld (θ 最小 %.3f)%s",
+                 dtm, d.converged ? "収束" : (d.bad.empty() ? "上限到達" : d.bad.c_str()), d.iters, d.ratio_max, d.comp_ratio[K_W], d.comp_ratio[K_V], d.comp_ratio[K_L],
+                 d.comp_ratio[K_Q0], d.comp_ratio[K_Q1], d.comp_ratio[K_Q2], d.comp_ratio[K_E], d.min_rv, d.min_rg, d.min_Q, d.qcut_last10, d.vround_last10,
+                 d.theta_final_lt1, d.theta_src_final_lt1, d.theta_lt1, d.theta_min, (dtm < 1.0 && d.theta_lt1 == 0) ? " — θ<1 が起きない (判別不成立)" : "");
+        verdict(ok3, m);
+        snprintf(m, sizeof m, "#4g (4) DT_MAX %.2g K: 出口 g %.6e / 点対角 %.6e (相対 %.1e ≤ 1e-4)、出口 T %.4f / %.4f K (差 %.1e ≤ 0.01)、反復 DPLUR %d / 点対角 %d (記録のみ)",
+                 dtm, d.g_out, h.g_out, dg, d.T_out, h.T_out, dT, d.iters, h.iters);
+        verdict(dg <= 1e-4 && dT <= 0.01, m);
+    }
+    DT_MAX = 1.0;
+}
+
 int main(int argc, char** argv)
 {
     const bool quick = (argc > 1 && !strcmp(argv[1], "--quick"));
@@ -797,6 +902,8 @@ int main(int argc, char** argv)
     test_T2_energy(c);
     test_4f_theta();
     test_T3(c, quick ? 3000 : 20000);
+    test_4g_unit();
+    test_4g_T3(c, quick ? 3000 : 20000);
     printf("\n%s\n", g_fail ? "FAIL あり" : "ALL PASS");
     return g_fail ? 1 : 0;
 }

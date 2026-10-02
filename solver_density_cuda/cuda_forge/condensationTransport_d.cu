@@ -745,7 +745,11 @@ void condTwoPhaseDiffusionValidate(const solverConfig& cfg)
                 cfg.condTwoPhaseRelax, cfg.condDgMaxStep, cfg.condDTmaxStep, cfg.condGasSpecies);
     if (cfg.discretization != "node")
         std::printf("[twophase] WARNING: cell discretization is unverified for two-phase diffusion (only the code path was reviewed)\n");
-    if (cfg.passiveImplicitCoupling == 1 || cfg.speciesImplicitCoupling == 1)
+    std::printf("[twophase] condTwoPhaseSolver %d (%s); effective implicitRelax %.6g, nStepInner %d, scalarCflMax %.6g (dt_local scale %.6g), condTwoPhaseRelax %.6g\n",
+                cfg.condTwoPhaseSolver, cfg.condTwoPhaseSolver == 1 ? "matched scalar-DPLUR: R = full residuals, D = point-diagonal denominators, advective inflow off-diagonal, zero start"
+                                                                    : "point-diagonal",
+                (double)cfg.implicitRelax, cfg.nStepInner, (double)cfg.scalarCflMax, (double)scalarDtScale(cfg), cfg.condTwoPhaseRelax);
+    if (cfg.condTwoPhaseSolver == 0 && (cfg.passiveImplicitCoupling == 1 || cfg.speciesImplicitCoupling == 1))
         std::printf("[twophase] note: vapour, liquid and moments use the point-diagonal preconditioner (passiveImplicitCoupling / speciesImplicitCoupling "
                     "DPLUR is not used for them); the other species keep their update\n");
 }
@@ -770,13 +774,15 @@ __global__ void twophase_vl_update_d(
     flow_float* td_g, flow_float* td_Q2, flow_float* td_Q1, flow_float* td_Q0,
     flow_float* diagLim, flow_float* diagCorrG, flow_float* diagCorrQ,
     double* stats, int* thetaMin, double* limStats_g, const geom_int* root,
-    double* diag)   // 診断 (condTwoPhaseDiag; nullptr で書かない): TPD_* 列 × nCells
+    double* diag,   // 診断 (condTwoPhaseDiag; nullptr で書かない): TPD_* 列 × nCells
+    const flow_float* inc, geom_int nIncStride)   // #4g: DPLUR の増分 [q*nIncStride + ic] (q = 蒸気, 液, Q2, Q1, Q0); nullptr なら点対角
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     const double v = (double)vol[ic];
     const double dt = (double)(dt_local[ic]*dtScale);
     TpCellIn c;
+    c.useInc = 0;
     c.M = (float)(v/fmax(dt, 1.0e-30)); c.V = (float)v;
     c.Rw = res_w[ic]; c.Rg = res_g[ic]; c.RQ[0] = res_Q2[ic]; c.RQ[1] = res_Q1[ic]; c.RQ[2] = res_Q0[ic];
     c.Dv = td_w[ic]; c.Dg = td_g[ic]; c.DQ[0] = td_Q2[ic]; c.DQ[1] = td_Q1[ic]; c.DQ[2] = td_Q0[ic];
@@ -794,6 +800,7 @@ __global__ void twophase_vl_update_d(
         const double dL = (cond_latent(cprops, Td + 0.1) - cond_latent(cprops, Td - 0.1))/0.2;
         c.L = L; c.cveff = fmax(cvg + g_old*(cprops.R - dL), 1.0e-2*cvg);
     }
+    if (inc != nullptr) { c.useInc = 1; for (int q = 0; q < 2 + TP_NQ; ++q) c.inc[q] = inc[(size_t)q*nIncStride + ic]; }
     TpCellOut o;
     tp_vl_update(c, o);
     if (diag != nullptr) {   // 更新前の格納値・制限前増分・θ を決めた制限・Q の残差 (読むだけ)
@@ -825,6 +832,97 @@ __global__ void twophase_vl_update_d(
     }
 }
 }  // namespace
+
+// ---- #4g: 二相の蒸気・液・Q の緩和整合 scalar-DPLUR (condTwoPhaseSolver 1) ----
+//   右辺 R = (R_v = R_w − R_g, R_g, R_Q2, R_Q1, R_Q0) (拡散・ソース込みの全残差; 周期集約済み)、対角 D は点対角と同じ分母 (tp_denoms)、
+//   非対角は既存の species_dplur_sweep_d と同じ流入質量流束 inflow/ρ_nbr (基準 roN)。ゼロ開始で nStepInner 回 δ ← ω D⁻¹(R + N δ) (ω = implicitRelax)。
+//   入口ピンは行を δ = 0 に拘束、周期は非対角の集約と sweep ごとの δ の broadcast (化学種と同じ)。sweep 中にクリップ・EOS/ソース再評価はしない。
+namespace {
+__global__ void tp_dplur_prep_d(geom_int nCells, geom_int nAll, flow_float* dt_local, flow_float dtScale, geom_float* vol,
+    flow_float* res_w, flow_float* res_g, flow_float* res_Q2, flow_float* res_Q1, flow_float* res_Q0,
+    flow_float* td_w, flow_float* td_g, flow_float* td_Q2, flow_float* td_Q1, flow_float* td_Q0,
+    flow_float* sj_g, flow_float* sj_Q2, flow_float* sj_Q1, flow_float* sj_Q0, flow_float* R, flow_float* D)
+{
+    const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    const double v = (double)vol[ic];
+    const double dt = (double)(dt_local[ic]*dtScale);
+    TpCellIn c;   // 更新カーネルと同じ作り方 (M・V・分母がビット単位で同じになる)
+    c.M = (float)(v/fmax(dt, 1.0e-30)); c.V = (float)v;
+    c.Dv = td_w[ic]; c.Dg = td_g[ic]; c.DQ[0] = td_Q2[ic]; c.DQ[1] = td_Q1[ic]; c.DQ[2] = td_Q0[ic];
+    c.sjg = sj_g[ic]; c.sjQ[0] = sj_Q2[ic]; c.sjQ[1] = sj_Q1[ic]; c.sjQ[2] = sj_Q0[ic];
+    float Dd[2 + TP_NQ]; tp_denoms(c, Dd);
+    const size_t n = (size_t)nAll;
+    R[0*n + ic] = res_w[ic] - res_g[ic];   // 全残差変換 (更新カーネルと同じ float の減算)
+    R[1*n + ic] = res_g[ic]; R[2*n + ic] = res_Q2[ic]; R[3*n + ic] = res_Q1[ic]; R[4*n + ic] = res_Q0[ic];
+    for (int q = 0; q < 2 + TP_NQ; ++q) D[(size_t)q*n + ic] = Dd[q];
+}
+// 非対角 (species_dplur_neighbor_d と同じ式) を 5 量まとめて
+__global__ void tp_dplur_nb_d(geom_int nCells, geom_int nAll, geom_int* plane_cells, geom_int* cell_planes_index, geom_int* cell_planes,
+    flow_float* massflux, flow_float* roN, const flow_float* dq_old, const flow_float* pin, flow_float* nb)
+{
+    const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    const size_t n = (size_t)nAll;
+    if (pin != nullptr && pin[ic] == (flow_float)1.0) { for (int q = 0; q < 2 + TP_NQ; ++q) nb[q*n + ic] = 0.0; return; }
+    flow_float acc[2 + TP_NQ] = {0.0, 0.0, 0.0, 0.0, 0.0};
+    for (geom_int po = cell_planes_index[ic]; po < cell_planes_index[ic + 1]; ++po) {
+        const geom_int ip = cell_planes[po];
+        const geom_int ic0 = plane_cells[2*ip + 0], ic1 = plane_cells[2*ip + 1];
+        const geom_int other = (ic0 == ic) ? ic1 : ic0;
+        const flow_float mdot = massflux[ip];
+        const flow_float inflow = (ic0 == ic) ? max(-mdot, (flow_float)0.0) : max(mdot, (flow_float)0.0);
+        if (other < nCells) {
+            const flow_float off = inflow/max(roN[other], (flow_float)1.0e-30);
+            for (int q = 0; q < 2 + TP_NQ; ++q) acc[q] += off*dq_old[q*n + other];
+        }
+    }
+    for (int q = 0; q < 2 + TP_NQ; ++q) nb[q*n + ic] = acc[q];
+}
+__global__ void tp_dplur_solve_d(geom_int nCells, geom_int nAll, flow_float omega, const flow_float* R, const flow_float* D, const flow_float* nb,
+    const flow_float* pin, flow_float* dq_new)
+{
+    const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ic >= nCells) return;
+    const size_t n = (size_t)nAll;
+    const bool pinned = (pin != nullptr && pin[ic] == (flow_float)1.0);
+    for (int q = 0; q < 2 + TP_NQ; ++q)
+        dq_new[q*n + ic] = pinned ? (flow_float)0.0 : tp_dplur_solve(omega, R[q*n + ic], nb[q*n + ic], D[q*n + ic]);
+}
+}  // namespace
+static flow_float *g_tpdp_R = nullptr, *g_tpdp_D = nullptr, *g_tpdp_nb = nullptr, *g_tpdp_a = nullptr, *g_tpdp_b = nullptr;
+// 増分を作って返す ([q*nCells_all + ic])。
+static const flow_float* twoPhaseDPLURIncrement(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    const size_t n = (size_t)msh.nCells_all, bytes = 5*n*sizeof(flow_float);
+    if (g_tpdp_R == nullptr) {
+        gpuErrchk( cudaMalloc((void**)&g_tpdp_R, bytes) ); gpuErrchk( cudaMalloc((void**)&g_tpdp_D, bytes) ); gpuErrchk( cudaMalloc((void**)&g_tpdp_nb, bytes) );
+        gpuErrchk( cudaMalloc((void**)&g_tpdp_a, bytes) ); gpuErrchk( cudaMalloc((void**)&g_tpdp_b, bytes) );
+    }
+    const std::string w = "roY" + std::to_string(cfg.condGasSpecies);
+    tp_dplur_prep_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(msh.nCells, msh.nCells_all, var.c_d["dt_local"], scalarDtScale(cfg), var.c_d["volume"],
+        var.c_d["res_"+w], var.c_d["res_rog_0"], var.c_d["res_roQ2_0"], var.c_d["res_roQ1_0"], var.c_d["res_roQ0_0"],
+        var.c_d["transport_diag_Y" + std::to_string(cfg.condGasSpecies)], var.c_d["transport_diag_g_0"], var.c_d["transport_diag_Q2_0"],
+        var.c_d["transport_diag_Q1_0"], var.c_d["transport_diag_Q0_0"],
+        var.c_d["src_jac_g_0"], var.c_d["src_jac_Q2_0"], var.c_d["src_jac_Q1_0"], var.c_d["src_jac_Q0_0"], g_tpdp_R, g_tpdp_D);
+    gpuErrchk( cudaMemset(g_tpdp_a, 0, bytes) ); gpuErrchk( cudaMemset(g_tpdp_b, 0, bytes) );
+    flow_float* pin = (cfg.discretization == "node") ? var.c_d["scalarDirichletPin"] : nullptr;
+    flow_float* roRef = var.c_d["roN"];   // 定常 (dual-time は起動時に拒否)
+    const bool per = periodicNodeActive(cfg, msh);
+    flow_float* oldq = g_tpdp_a; flow_float* newq = g_tpdp_b;
+    const int nSweep = std::max(1, cfg.nStepInner);
+    for (int k = 0; k < nSweep; ++k) {
+        tp_dplur_nb_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(msh.nCells, msh.nCells_all, msh.map_plane_cells_d,
+            msh.map_cell_planes_index_d, msh.map_cell_planes_d, var.p_d["massflux"], roRef, oldq, pin, g_tpdp_nb);
+        if (per) for (int q = 0; q < 5; ++q) periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, g_tpdp_nb + (size_t)q*n);   // 合併 CV の非対角
+        tp_dplur_solve_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(msh.nCells, msh.nCells_all, cfg.implicitRelax, g_tpdp_R, g_tpdp_D,
+            g_tpdp_nb, pin, newq);
+        std::swap(oldq, newq);
+        if (per) for (int q = 0; q < 5; ++q) periodicBroadcastArray_d_wrapper(cfg, cuda_cfg, msh, oldq + (size_t)q*n);   // 周期 δ の整合
+    }
+    gpuErrchk( cudaPeekAtLastError() );
+    return oldq;
+}
 
 static double* g_tp_stats_dev = nullptr;
 static int*    g_tp_thetaMin_dev = nullptr;
@@ -1077,6 +1175,7 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
     const std::string w = "roY" + std::to_string(cfg.condGasSpecies);
     const std::string g = "rog_0", Q2 = "roQ2_0", Q1 = "roQ1_0", Q0 = "roQ0_0";
     const int q0 = passive_moment_index0();
+    const flow_float* inc = (cfg.condTwoPhaseSolver == 1) ? twoPhaseDPLURIncrement(cfg, cuda_cfg, msh, var) : nullptr;   // #4g
     twophase_vl_update_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
         msh.nCells, var.c_d["dt_local"], scalarDtScale(cfg), var.c_d["volume"], var.c_d["ro"], var.c_d["T"],
         var.c_d["cp"], var.c_d["Rmix"], cfg.condModel, cond_prop_opts(cfg), cfg.condDgMaxStep, cfg.condDTmaxStep, (flow_float)cfg.condTwoPhaseRelax,
@@ -1088,7 +1187,7 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
         var.c_d["transport_diag_g_0"], var.c_d["transport_diag_Q2_0"], var.c_d["transport_diag_Q1_0"], var.c_d["transport_diag_Q0_0"],
         var.c_d["condLim_0"], var.c_d["condClampCorr_0"], var.c_d["condClampCorrQ_0"],
         g_tp_stats_dev, g_tp_thetaMin_dev, passive_lim_stats_ptr(q0), passive_periodic_root(cfg, msh),
-        g_tpd_cell);
+        g_tpd_cell, inc, msh.nCells_all);
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
     // 再正規化 (係数を液・Q にも) → 受動種の最後の砦 (floor と収支の記録; 通常は無作用) → 周期ミラー

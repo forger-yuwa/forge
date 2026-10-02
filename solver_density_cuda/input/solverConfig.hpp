@@ -657,6 +657,9 @@ public:
     // 二相の非分割更新の診断 (#1b-r1; 読むだけ・数値は不変)。1: 末尾 200 更新で θ = 0 のセルを記録し終了時に CSV、区間ごとに θ 制限の頻度を更新数で正規化した行。
     // 2: 同じことを θ < 1 のセルで (機構確認用)。3: 1 に加えて組立 A (float) と診断の double 組立 B の比較 (#1b-r2)。0: 出さない (既定)。二相拡散が働く run だけ。
     int    condTwoPhaseDiag      = 0;
+    // 二相の非分割更新の増分の作り方 (#4g)。0: 点対角 (既定)、1: 化学種・受動種と同じ緩和整合 scalar-DPLUR (右辺は全残差、対角は点対角と同じ分母、
+    // 非対角は流入質量流束、ゼロ開始で nStepInner 回 sweep、ω = implicitRelax; 最終増分に condTwoPhaseRelax、その後 θ・commit・再正規化は同じ)。
+    int    condTwoPhaseSolver    = 0;
     // 平衡凝縮 (plans/accepted/condensation-equilibrium.md): 核生成・成長を経ず各セルで p_v=p_sat(T) の g_eq へ緩和。
     int    condEquilibrium = 0;   // 0: 非平衡 (既定) / 1: 平衡凝縮・緩和形 (ソース S_g=αρΔ/dt, モーメント Q0-Q2 ソース 0)
                                   // / 2: 平衡凝縮・EOS 拘束形 (dependentVariables で (T,g) 同時反転し rog へ射影、rog 輸送は凍結;

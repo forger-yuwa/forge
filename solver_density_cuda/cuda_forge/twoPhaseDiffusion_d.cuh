@@ -137,7 +137,20 @@ struct TpCellIn {
     float omega;                 // 緩和 (condTwoPhaseRelax)
     double dg_max, dT_max;       // condDgMaxStep / condDTmaxStep
     double L, cveff;             // 潜熱と有効定積比熱 (θ の ΔT 換算; 既存の更新クランプと同じ式で呼び出し側が作る)
+    // #4g (condTwoPhaseSolver 1): 緩和整合 scalar-DPLUR が作った増分 (蒸気, 液, Q2, Q1, Q0)。useInc 0 なら点対角で作る (従来)。
+    int   useInc;
+    float inc[2 + TP_NQ];
 };
+
+// 前処理の分母 (点対角と DPLUR で同じ値): 蒸気 V/Δτ + D_v、液 V/Δτ + D_g + V sj_g、Q V/Δτ + D_Q + V sj_Q。
+TP_HD inline void tp_denoms(const TpCellIn& c, float D[2 + TP_NQ])
+{
+    D[0] = c.M + c.Dv;
+    D[1] = c.M + c.Dg + c.V*c.sjg;
+    for (int m = 0; m < TP_NQ; ++m) D[2 + m] = c.M + c.DQ[m] + c.V*c.sjQ[m];
+}
+// 緩和整合 scalar-DPLUR の 1 セルの解 (species_dplur_sweep_d / species_dplur_solve_d と同じ式): δ = ω (R + N_adv δ_old) / D。
+TP_HD inline float tp_dplur_solve(float omega, float R, float nb, float D) { return omega*(R + nb)/D; }
 struct TpCellOut {
     float rYw, rg, rQ[TP_NQ];
     double theta;
@@ -157,10 +170,16 @@ struct TpCellOut {
 TP_HD inline void tp_vl_update(const TpCellIn& c, TpCellOut& o, int thetaRound = TP_THETA_ROUND_DEFAULT)
 {
     const float rv = c.Rw - c.Rg;                      // 全残差変換 (float の減算)
-    float dv = rv/(c.M + c.Dv);
-    float dg = c.Rg/(c.M + c.Dg + c.V*c.sjg);
-    float dq[TP_NQ];
-    for (int m = 0; m < TP_NQ; ++m) dq[m] = c.RQ[m]/(c.M + c.DQ[m] + c.V*c.sjQ[m]);
+    float dv, dg, dq[TP_NQ];
+    if (c.useInc != 0) {   // #4g: DPLUR の増分 (同じ全残差・同じ分母から sweep で作ったもの)
+        dv = c.inc[0]; dg = c.inc[1];
+        for (int m = 0; m < TP_NQ; ++m) dq[m] = c.inc[2 + m];
+    } else {
+        float D[2 + TP_NQ]; tp_denoms(c, D);
+        dv = rv/D[0];
+        dg = c.Rg/D[1];
+        for (int m = 0; m < TP_NQ; ++m) dq[m] = c.RQ[m]/D[2 + m];
+    }
     if (c.omega != 1.0f) { dv *= c.omega; dg *= c.omega; for (int m = 0; m < TP_NQ; ++m) dq[m] *= c.omega; }
     // θ_thr (全増分に対する閾値) と θ_vg (蒸気・液の非負; 蒸気は更新前の ρv)
     double th = 1.0;

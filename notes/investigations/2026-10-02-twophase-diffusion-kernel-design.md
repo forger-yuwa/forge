@@ -915,3 +915,44 @@ A = 毎更新ログ / B = 10 更新ごとログ。末尾窓は [90,100)。
 
 run_0510 (緩和 0.5) の solverConfig.yaml の `condensation` に `condTwoPhaseDiag: 3` を足すだけ (他は同じ)。窓は実更新数の末尾 200 更新
 (2000 step なら更新 1800–1999; 2200 step なら 2000–2199)。試験フックの環境変数は付けない。B の組立は窓内だけ (各更新でセル配列を host へ ~12 MB 転送)。
+
+## 20. #4g 二相更新の緩和整合 scalar-DPLUR (2026-10-02; HEAD `d81cb7f7` + 未 commit)
+
+裁定: [`notes/reviews/2026-10-02-twophase-dplur-diagnose.md`](../reviews/2026-10-02-twophase-dplur-diagnose.md) (plan §5.1 #4g 行の形・単体条件 (1)–(4) を事前固定)。
+キー `condensation.condTwoPhaseSolver` (0 = 点対角 [既定], 1 = 緩和整合 scalar-DPLUR)。クリーンビルド (solverConfig.hpp)。
+
+### 20.1 実装 (形は plan どおり; 変えていない)
+
+- 右辺 R = (R_v = R_w − R_g [更新カーネルと同じ float の減算], R_g, R_Q2, R_Q1, R_Q0) — 拡散・ソース込み・周期集約済みの全残差。
+- 対角 D = 点対角と同じ分母 (`tp_denoms`: V/Δτ + transport_diag + V·src_jac、蒸気は transport_diag_Y_w; M・V の作り方も更新カーネルと同じ)。
+- 非対角は既存 `species_dplur_sweep_d`/`species_dplur_neighbor_d` と同じ流入質量流束 inflow/max(ρ_nbr(roN), 1e-30) だけ (拡散の非対角なし)。
+- ゼロ開始で `nStepInner` 回 δ ← ω (R + N δ_old)/D (`tp_dplur_solve`; ω = `implicitRelax`; (1−ω)δ 項なし)。入口ピン行は δ = 0 (近傍和も 0)、node 周期は近傍和の集約と sweep ごとの δ の broadcast (化学種と同じ)。
+  sweep 中のクリップ・EOS/ソース再評価なし。最終増分を `tp_vl_update` (useInc) に渡し、`condTwoPhaseRelax` を 1 回、その後 θ・安全側丸め・commit・再正規化は従来どおり。
+- 起動ログ: `[twophase] condTwoPhaseSolver N (...); effective implicitRelax X, nStepInner K, scalarCflMax Y (dt_local scale Z), condTwoPhaseRelax W`
+  (二相拡散 ON の run に 1 行増える; キー OFF の run には出ない)。
+
+### 20.2 単体 (`tests/unit/test_twophase_kernel.cu`, GPU; 事前固定の条件)
+
+| 条件 | 実測 | 判定 |
+| --- | --- | --- |
+| (1) 非零残差 2 万セル (θ<1 4688 セルを含む) で 1 sweep・ω 1 の DPLUR と点対角 | 状態・θ・補正・増分・制限理由がビット一致しないセル 0 | PASS |
+| (1) R = 0 の 2 万セル | 増分・補正が 0 でない、または状態が変わったセル 0 | PASS |
+| (2) T1・T2 (§14.2・§15) | T1 ≤0.175、T2 (i)(ii)・非負・3 セル 1 更新・#4f (2) 1000 更新 (総量 ≤4.2e-7、上限 0)・エネルギーすべて従来値で PASS | PASS |
+| (3) T3 DT_MAX 1 K, DPLUR 5 sweep | 32 反復で収束、独立残差の最大比 0.981 (l)、非有限・負 0、末尾 10 % の Qcut/vround 0、最後の θ<1・θ_src<1 0 | PASS |
+| (3) T3 DT_MAX 0.01 K | 907 反復、最大比 0.333、θ<1 9875 セル·反復 (θ 最小 0.007) で途中作動・最後は解除 | PASS |
+| (4) 点対角の受入済み解との差 | 1 K: 出口 g 2.603302e-3 vs 2.603278e-3 (相対 9.2e-6)、T 差 6.9e-4 K / 0.01 K: g 相対 6.7e-6、T 差 2.7e-7 K | PASS |
+| (記録) 反復数 | DPLUR 32 / 点対角 69 (1 K)、907 / 911 (0.01 K) | — |
+
+T3 の 1D では DPLUR の非対角は 1 次風上の流入 ṁ/ρ_左 で、本番と同じ `tp_denoms`・`tp_dplur_solve` を使う (sweep の組立てだけ試験側)。点対角の T3 は 69 / 911 反復・同じ不動点のまま (ヘッダの分母の切り出しで点対角の数値は変わっていない)。
+
+### 20.3 ソルバでの確認 (2 step, run_0482 入力の複製)
+
+- `condTwoPhaseSolver 1`: 終了 0、NaN なし、起動ログ `effective implicitRelax 1, nStepInner 5, scalarCflMax -1 (dt_local scale 1)`、step 2 で θ<1 24 セル、`rms_roYv` 1.9e-9。
+- `condTwoPhaseSolver 0`: `[...]` 行は前のビルドと数値以外同一 (新しい起動行 1 行を除く)。
+- キー OFF の既定: `test_transport_gas_phase.py` G0 4 構成バイト一致。
+
+### 20.4 case/16 A/B (AWS; plan #4g 行の 1 組)
+
+共通初期場 run_0482 res_48000 (prepare_twophase_ab.sh と同じ複製手順)、両側 `condTwoPhaseDiffusion: 1`・`condTwoPhaseRelax: 1`・`implicitRelax` は run_0482 の値 (1.0)・
+`nStepInner` も同じ (5)、A = `condTwoPhaseSolver: 0`、B = `condTwoPhaseSolver: 1` (変えるのはこのキーだけ)、各 2000 step、同じビルドで両方。
+窓の計測は `condTwoPhaseDiag: 1` (または 3) を両側に。起動ログの `[twophase] condTwoPhaseSolver` 行で実効の ω・sweep 数・scalarCflMax を確かめる。
