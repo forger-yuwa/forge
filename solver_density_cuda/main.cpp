@@ -2077,10 +2077,129 @@ static void pinRowDiagnosticState(StepContext& s, int m)
     std::cout << os.str() << "\n";
 }
 
+// ---- limiter-inlet-column-oscillation §5.1 #5b' (診断専用・既定 off) ------------------------------------------------
+// FORGE_DIAG_PSI_DUALEVAL="N0,N1": 外反復 N0 (0 始まりの iStep) の通常組立の後に流れ 5 変数の ψ を保存し、
+// N0 < iStep <= N1 の各外反復で、通常の組立 A の前に
+//   B  = 入口集合 (ccx < FORGE_DIAG_PSI_XMAX [m]、省略時は全節点) だけ保存 ψ に差し替えた組立
+//   A' = 差し替えなしの組立 (再評価の再現誤差 = atomicAdd の雑音の基準)
+// を組み、res_* の差を psi_dualeval.csv に書く。状態の更新には A だけを使う。
+// 組立を重ねても保存量が変わらないこと (壁射影等が冪等) を B 後と A' 後・A 後のバイト比較で検査し、CSV に残す。
+struct PsiDualEval {
+    bool on = false; int n0 = -1, n1 = -1; flow_float xmax = (flow_float)1e30; bool saved = false;
+    std::vector<char> inS; std::ofstream csv;
+};
+static PsiDualEval g_pde;
+
+static void pdeInit(StepContext& s)
+{
+    static bool done = false; if (done) return; done = true;
+    const char* e = std::getenv("FORGE_DIAG_PSI_DUALEVAL"); if (!e) return;
+    if (std::sscanf(e, "%d,%d", &g_pde.n0, &g_pde.n1) != 2 || g_pde.n0 < 0 || g_pde.n1 <= g_pde.n0) {
+        std::cerr << "[psi-dualeval] FORGE_DIAG_PSI_DUALEVAL must be \"N0,N1\" with 0 <= N0 < N1\n"; exit(EXIT_FAILURE);
+    }
+    if (const char* x = std::getenv("FORGE_DIAG_PSI_XMAX")) g_pde.xmax = (flow_float)std::atof(x);
+    g_pde.on = true;
+    std::vector<flow_float> cx(s.msh.nCells_all);
+    gpuErrchk( cudaMemcpy(cx.data(), s.var.c_d["ccx"], cx.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+    g_pde.inS.assign(s.msh.nCells_all, 0); long nS = 0;
+    for (geom_int i = 0; i < s.msh.nCells; ++i) if (cx[i] < g_pde.xmax) { g_pde.inS[i] = 1; ++nS; }
+    g_pde.csv.open("psi_dualeval.csv");
+    g_pde.csv << "step,var,nS,S_A,S_BmA,S_ApmA,all_A,all_BmA,all_ApmA,psi_maxdiff_S,cons_changed_B_Ap,cons_changed_Ap_A\n";
+    printf("[psi-dualeval] ON: save psi at iStep %d, dual evaluation for iStep %d..%d, xmax %.6g m, %ld nodes in S\n",
+           g_pde.n0, g_pde.n0 + 1, g_pde.n1, (double)g_pde.xmax, nS);
+}
+
+static std::vector<std::string> pdeKeys(StepContext& s, const char* prefix)
+{
+    std::vector<std::string> k;
+    for (auto& kv : s.var.c_d) if (kv.second && kv.first.rfind(prefix, 0) == 0) k.push_back(kv.first);
+    return k;
+}
+static std::map<std::string, std::vector<flow_float>> pdeCopy(StepContext& s, const std::vector<std::string>& keys)
+{
+    std::map<std::string, std::vector<flow_float>> m;
+    for (auto& k : keys) { auto& v = m[k]; v.resize(s.msh.nCells_all);
+        gpuErrchk( cudaMemcpy(v.data(), s.var.c_d[k], v.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) ); }
+    return m;
+}
+static long pdeConsDiff(const std::map<std::string, std::vector<flow_float>>& a, const std::map<std::string, std::vector<flow_float>>& b)
+{
+    long n = 0;
+    for (auto& kv : a) n += (std::memcmp(kv.second.data(), b.at(kv.first).data(), kv.second.size()*sizeof(flow_float)) != 0);
+    return n;
+}
+static std::vector<std::string> pdeConsKeys(StepContext& s)
+{
+    std::vector<std::string> k = {"ro","roUx","roUy","roUz","roe","roK","roOmega"};
+    for (auto& kv : s.var.c_d) if (kv.second && (kv.first.rfind("roY", 0) == 0 || kv.first.rfind("rog_", 0) == 0 || kv.first.rfind("roQ", 0) == 0)) k.push_back(kv.first);
+    std::vector<std::string> out; for (auto& x : k) if (s.var.c_d.count(x) && s.var.c_d[x]) out.push_back(x);
+    return out;
+}
+
+// 通常組立 A の前に呼ぶ。B・A' を組んで保持し、A の後に pdeAfterA で比較する。
+static std::map<std::string, std::vector<flow_float>> g_pdeB, g_pdeAp, g_pdeConsAp;
+static long g_pdeConsBAp = 0; static double g_pdePsiMaxDiff = 0.0;
+static bool pdeBeforeA(StepContext& s)
+{
+    pdeInit(s);
+    if (!g_pde.on || !g_pde.saved || s.iStep <= g_pde.n0 || s.iStep > g_pde.n1) return false;
+    const auto resKeys = pdeKeys(s, "res_"); const auto consKeys = pdeConsKeys(s);
+    limiterPsiOverride(true);
+    assembleResidual(s, 1);                                   // B
+    limiterPsiOverride(false);
+    g_pdeB = pdeCopy(s, resKeys);
+    // 差し替えが実際に効いたか: S の ψ が保存値と一致すること
+    g_pdePsiMaxDiff = 0.0;
+    {
+        const char* ln[5] = {"limiter_ro","limiter_Ux","limiter_Uy","limiter_Uz","limiter_P"};
+        for (int k = 0; k < 5; ++k) {
+            std::vector<flow_float> a(s.msh.nCells_all), b(s.msh.nCells_all);
+            gpuErrchk( cudaMemcpy(a.data(), s.var.c_d[ln[k]], a.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+            gpuErrchk( cudaMemcpy(b.data(), limiterPsiSaved(k), b.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+            for (geom_int i = 0; i < s.msh.nCells; ++i) if (g_pde.inS[i]) g_pdePsiMaxDiff = std::max(g_pdePsiMaxDiff, (double)std::fabs(a[i]-b[i]));
+        }
+    }
+    const auto consB = pdeCopy(s, consKeys);
+    assembleResidual(s, 1);                                   // A'
+    g_pdeAp = pdeCopy(s, resKeys);
+    g_pdeConsAp = pdeCopy(s, consKeys);
+    g_pdeConsBAp = pdeConsDiff(consB, g_pdeConsAp);
+    return true;
+}
+static void pdeAfterA(StepContext& s, bool active)
+{
+    if (!g_pde.on) return;
+    if (s.iStep == g_pde.n0 && !g_pde.saved) {               // 通常組立 A の ψ を保存
+        limiterPsiSave(s.cfg, s.msh, s.var, g_pde.xmax); g_pde.saved = true;
+        printf("[psi-dualeval] psi saved at iStep %d\n", s.iStep);
+        return;
+    }
+    if (!active) return;
+    const auto resKeys = pdeKeys(s, "res_"); const auto consKeys = pdeConsKeys(s);
+    const auto A = pdeCopy(s, resKeys); const auto consA = pdeCopy(s, consKeys);
+    const long consApA = pdeConsDiff(g_pdeConsAp, consA);
+    long nS = 0; for (geom_int i = 0; i < s.msh.nCells; ++i) nS += g_pde.inS[i];
+    for (auto& k : resKeys) {
+        const auto& a = A.at(k); const auto& b = g_pdeB.at(k); const auto& ap = g_pdeAp.at(k);
+        double sA=0, sB=0, sAp=0, gA=0, gB=0, gAp=0;
+        for (geom_int i = 0; i < s.msh.nCells; ++i) {
+            const double da = a[i], db = (double)b[i]-a[i], dp = (double)ap[i]-a[i];
+            gA += da*da; gB += db*db; gAp += dp*dp;
+            if (g_pde.inS[i]) { sA += da*da; sB += db*db; sAp += dp*dp; }
+        }
+        g_pde.csv << s.iStep << "," << k << "," << nS << "," << std::sqrt(sA) << "," << std::sqrt(sB) << "," << std::sqrt(sAp) << ","
+                  << std::sqrt(gA) << "," << std::sqrt(gB) << "," << std::sqrt(gAp) << "," << g_pdePsiMaxDiff << ","
+                  << g_pdeConsBAp << "," << consApA << "\n";
+    }
+    g_pde.csv.flush();
+}
+
 // 残差 1 回構築 → 局所擬似時間 dτ → 古典 DPLUR 線形解 → Q への commit。
 void implicitNonlinearUpdate(StepContext& s, int inner_index)
 {
+    const bool pdeActive = pdeBeforeA(s);   // §5.1 #5b' 診断 (既定 off)
     assembleResidual(s, 1);
+    pdeAfterA(s, pdeActive);
     logResidualSnapshot(s, inner_index);
     // #1b-r2 診断 (condTwoPhaseDiag 3, 窓内だけ): 同じ状態・面値・係数・ソース値の double 組立 B (状態・組立 A は不変; 読むだけ)
     if (s.cfg.condTwoPhaseDiag == 3 && twoPhaseDiagInWindow(s.cfg)) {
