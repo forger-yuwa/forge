@@ -19,18 +19,26 @@ numpy で参照実装し、§6 の事前固定の数値で判定する。カー�
   再正規化の係数は ρg と Q にも掛ける。実現可能性クランプ (0 ≤ ρg ≤ ρY_w, Q ≥ 0, ρY ≥ 0) は保険として最後に掛け、補正量を数える。
 
 試験 (plan §6 の事前固定の数値; 判定語 [PASS]/[FAIL]、[INFO] は判定外の記録):
-  S1 分子流束の構造 (i)  三成分 (等分子量, z = [0.2,0.3,0.5], 二元 D_12/D_13/D_23 = [1,2,3]e-5 → 混合平均) の気相一様・∇g = 0.1 で
-                          |j_k| ≤ 1e-6·ρ_g·max D·|∇g| (float64 / float32)。旧案 (−ρD_k∇Y_k + 気相補正) の偽流束 ~1.3e-7 m/s を併記。
+  S1 分子流束の構造 (i)  三成分 (等分子量, z = [0.2,0.3,0.5]) の気相一様・∇g = 0.1。S1a = 作用素 (D_k = [1,2,3]e-5 を固定、plan §6 の字義)、
+                          S1b = 係数 (二元 D_12/D_13/D_23 = [1,2,3]e-5 の混合平均; 手計算と照合) とその係数での作用素。各々 3 つの許容に分ける
+                          (§5.1 #4a (3)): 厳密入力 float64 は 1e-6·ρ_g·max D·|∇g|、入力量子化 (格納 float32 を float64 で評価) は ε₃₂ の誤差伝播
+                          の許容 + 物理の許容、演算誤差 (float32 − 同じ格納入力の float64) は演算の誤差伝播の許容 (s1_tolerances)。旧案は FAIL すること。
   S2 面恒等式 (ii)       ランダム面で |Σ_気相 j_k| ≤ 8ε₃₂ Σ|j_k⁰|、|J_w − J_v − J_l| ≤ 8ε₃₂(|J_w|+|J_v|+|J_l|) (float32 で計算、float64 で評価)。
   S3 3 セル判別         閉じた直列 3 セル、ρ=V=Δt=1、乱流係数 1、分子・移流・相変化なし、g=[0.1,0.2,0.2]、Y_w=g+0.1。
                           A = 点対角 1 回更新、B = 解き切った後退 Euler (BE 残差 ≤1e-7 相対)。B: 総液量・各種総量の相対変化 ≤1e-6
                           (1・1000 更新、再正規化・クランプ前、float64 集計)、全セル ρv ≥ 0、|ΣρY − ρ| ≤ 8ε₃₂ρ。規則: A FAIL・B PASS で契約を支持。
+                          float32 の B は停止則ごとに累積 ≤1e-6・**反復上限到達なし** で判定 (§5.1 #4a (2))。
   S4 非負               2 セル例 (蒸気 0、Y_w = g = 0.1/0.2、面係数・V/Δτ = 1) の解き切った更新で ρv ≥ 0 (クランプ 0)。
-                          蒸気 0 近傍のランダム 1D 100 セル × 10⁴ 擬似反復でクランプ補正量 0。
+                          蒸気 0 近傍のランダム 1D 100 セル × 10⁴ 擬似反復でクランプ補正量 0。補正の面 z の反例 (両セル g = 0, D 比 100) で
+                          風上 z の非負と反復の収束を記録 (§5.1 #4a (5))。
   S5 保存               閉じた箱・拡散単独の解き切った物理時間更新 1000 回で Σ ρY_k V・Σ ρg V・Σ ρQ V 相対 ≤1e-6、Σ ρE V は初期 Σ|ρE|V
-                          分母で ≤1e-6、初期総量 0 の量は絶対 ≤1e-12。
+                          分母で ≤1e-6、初期総量 0 の量は絶対 ≤1e-12。float32 は停止則ごと (上限到達は FAIL)。
   S6 エネルギー         分子拡散 0・総組成一様・乱流のみ・g のみ勾配の 1D で、1 更新の温度変化の EOS 接線投影が −R_wT r_g Δt/(ρ c_v,eff) と ≤1 %
                           (有限更新の温度比較は +1e-3 K)。判別: 潜熱流束なし / エネルギーだけ潜熱 (液を拡散しない) は FAIL すること。
+  S7 固定点判別         ρ=V=1、ρY_w=0.3、ρg=0.1、R_wᵗʳ=0、R_gᵗʳ=−0.02、S=+0.02、P_v=3、P_g=2、Q 残差 0 で 1 擬似更新 (float32/float64)。
+                          A = P1 (輸送とソースを別の前処理で分割)、B = 非分割の全残差 R_v = R_w − R_g。同じ limiter・commit (vl_limit_commit)。
+                          合格: A が ΔρY_w ≈ −0.003333 動き、B は全増分・補正が厳密に 0 (§5.1 #4a (1))。
+  be_solve が反復上限で返った更新は「解き切っていない」= FAIL (codex diagnose 2026-10-02 ④)。
 """
 import argparse, math, os, sys
 
@@ -156,7 +164,8 @@ class Problem:
     """閉じた 1D 列 (N セル, 内部面 N−1)。face 係数 a (=A/d), Γ (=μ_t/Sc_t)、分子は二元 D 行列 × スケール molc (=0 で分子なし)。
     気相種は [非水 0..K-1, 蒸気] の順。MW は分子量 (X の換算)。"""
 
-    def __init__(self, N, a, Gam, Dbin, MW, V, molc=1.0, thermo=None):
+    def __init__(self, N, a, Gam, Dbin, MW, V, molc=1.0, thermo=None, Dfixed=None):
+        self.Dfixed = None if Dfixed is None else np.asarray(Dfixed, float)   # 種ごとの D_k を直接与える (混合平均しない作用素試験)
         self.N, self.a, self.Gam = N, np.asarray(a, float), np.asarray(Gam, float)
         self.Dbin, self.MW, self.V, self.molc, self.thermo = np.asarray(Dbin, float), np.asarray(MW, float), np.asarray(V, float), molc, thermo
         self.L = np.arange(N - 1)
@@ -199,7 +208,10 @@ def fluxes(st, T, pb, dt, corr="mean", order="vapor", design="new", energy="full
     zf = half * (z[:, L] + z[:, R])
     Xf = (zf / pb.MW.astype(dt)[:, None])
     Xf = Xf / Xf.sum(axis=0)
-    Df = mixavg_D(Xf, pb.Dbin * pb.molc) if pb.molc > 0 else np.zeros_like(Xf)
+    if pb.Dfixed is not None:
+        Df = np.broadcast_to(pb.Dfixed.astype(dt)[:, None], Xf.shape).copy()
+    else:
+        Df = mixavg_D(Xf, pb.Dbin * pb.molc) if pb.molc > 0 else np.zeros_like(Xf)
     if design == "new":
         rhog_f = half * (rhog[L] + rhog[R])
         j0 = -rhog_f * Df * (z[:, R] - z[:, L]) * a
@@ -249,6 +261,17 @@ def fluxes(st, T, pb, dt, corr="mean", order="vapor", design="new", energy="full
         if energy in ("full", "latent_only"):
             q = q - th.lat.L(Tf) * Jl.astype(np.float64)
         out["q"] = q.astype(dt)
+        # 丸めの尺度 (停止の床用): 生成エンタルピー込みの h は大きいので、q の打ち消し前の大きさ
+        qa = np.abs(th.v.h(Tf)) * (np.abs(Jw) + np.abs(Jv) + np.abs(Jl)).astype(np.float64) + np.abs(th.lat.L(Tf)) * np.abs(Jl).astype(np.float64)
+        for k, sp in enumerate(th.nw):
+            qa = qa + np.abs(sp.h(Tf)) * np.abs(Jk[k]).astype(np.float64)
+        # 流束の被演算子の丸め (例: 一様な Y_w の J_w = J_v + J_l は丸め程度だが、h_v ~ 1e7 J/kg を掛けると効く)
+        Ga = (G * a).astype(np.float64)
+        ops = np.abs(Yw[L]) + np.abs(Yw[R]) + np.abs(g[L]) + np.abs(g[R])
+        qa = qa + np.abs(th.v.h(Tf)) * Ga * ops.astype(np.float64)
+        for k, sp in enumerate(th.nw):
+            qa = qa + np.abs(sp.h(Tf)) * Ga * (np.abs(Yk[k][L]) + np.abs(Yk[k][R])).astype(np.float64)
+        out["q_abs"] = qa
     return out
 
 
@@ -385,37 +408,109 @@ def be_residual_norms(st, st_n, Rr, M, has_energy):
     return {k: float(np.max(np.abs(v.astype(np.float64)))) for k, v in r.items()}
 
 
+def be_residual_sums(st, st_n, pb, T, M, corr, order, energy, has_energy):
+    """成分ごと (各種・蒸気・液・各 Q・E) の (|Σ_i r_i|, Σ_i |M ρφ_i|, sqrt(Σ_i (M ρφ_i)²))。格納値を float64 にして評価する。"""
+    s64, n64 = cast_state(st, np.float64), cast_state(st_n, np.float64)
+    M64 = np.asarray(M, np.float64)
+    R = residuals(fluxes(s64, T, pb, np.float64, corr=corr, order=order, energy=energy), pb, np.float64)
+    rv, rvn = s64["rYw"] - s64["rg"], n64["rYw"] - n64["rg"]
+    out = []
+
+    def add(r, x):
+        out.append((abs(float(np.sum(r))), float(np.sum(np.abs(M64 * x))), float(np.sqrt(np.sum((M64 * x) ** 2)))))
+    for k in range(s64["rY"].shape[0]):
+        add(R["k"][k] - M64 * (s64["rY"][k] - n64["rY"][k]), s64["rY"][k])
+    add(R["v"] - M64 * (rv - rvn), rv)
+    add(R["l"] - M64 * (s64["rg"] - n64["rg"]), s64["rg"])
+    for k in range(s64["rQ"].shape[0]):
+        add(R["Q"][k] - M64 * (s64["rQ"][k] - n64["rQ"][k]), s64["rQ"][k])
+    if has_energy:
+        add(R["E"] - M64 * (s64["rE"] - n64["rE"]), s64["rE"])
+    return out
+
+
 def be_solve(st_n, pb, M, dt, T0=None, tol=1e-7, maxit=20000, corr="mean", order="vapor",
-             vars_mode="vl", writeback="increment", energy="full", stats=None, floor_eps=16.0, precond="point"):
+             vars_mode="vl", writeback="increment", energy="full", stats=None, floor_eps=16.0, precond="point",
+             check="state", damp=1.0, sum_tol=None, sum_q=None, carry=None):
     """解き切った後退 Euler: 点対角を前処理にした固定点反復を BE 残差 ≤ tol × (反復開始時の残差) まで (成分ごと)。
-    成分ごとに丸め床 16ε·max|M ρφ| (ε はその精度の machine eps) 以下も収束とみなす (開始時の残差自体が丸め程度の成分
-    — 例: 一様な蒸気の ρY_w − ρg — は相対基準が意味を持たないため)。床で止めた回数は stats['floor']。"""
+    成分ごとに丸め床 floor_eps·ε·max|M ρφ| 以下も収束とみなす (開始時の残差自体が丸め程度の成分 — 例: 一様な蒸気の
+    ρY_w − ρg — は相対基準が意味を持たないため)。check='f64' は停止判定の残差を格納値から float64 で評価し直す
+    (更新は dt のまま)。damp は増分の緩和係数 (1 = 緩和なし)。
+    sum_tol (保存を見た停止): 停止にさらに |Σ_i r_q,i| ≤ sum_tol·Σ_i |M ρφ_q,i| (成分ごと, 格納値から float64 で評価) を課す。
+    BE 残差の和はそのステップの総量変化そのもの (Σ_i R_i = 0) なので、これが 1 ステップの保存誤差を直接抑える。
+    sum_q (量子化尺度の保存停止): |Σ_i r_q,i| ≤ sum_q·ε·sqrt(Σ_i (M ρφ_q,i)²) — 残した残差の和を格納値の丸めの酔歩と同じ大きさまで下げる
+    (それより下は格納の丸めで決まり反復では下げられない)。
+    carry (残差の持ち越し; 停止則ではなく離散式の変更): 前ステップで解き残した BE 残差 (成分ごとの float64 配列) を今ステップの右辺に足す。
+    累積の保存誤差が最後のステップの残差だけになる (telescoping)。終了時の残差は stats['r_final'] に返す。
+    **反復上限で返った解は「解き切っていない」**: stats['cap'] を数え、info['capped'] = True を返す。呼び出し側はそれを FAIL として扱う
+    (codex diagnose 2026-10-02 ④)。stats: 'conv' (相対基準で停止), 'floor' (丸め床で停止), 'cap' (上限)。"""
+    if stats is None:
+        stats = {}
     has_energy = pb.thermo is not None and T0 is not None
     st = copy_state(st_n)
     T = T0
     r0 = None
+    hist = []
     for it in range(maxit):
         if has_energy:
             T = pb.thermo.T_from_state(st, T)
         F = fluxes(st, T, pb, dt, corr=corr, order=order, energy=energy)
         Rr = residuals(F, pb, dt)
-        nr = be_residual_norms(st, st_n, Rr, M, has_energy)
+        if carry is not None:
+            for k_ in carry:
+                Rr[k_] = Rr[k_] + carry[k_].astype(dt)
+        if check == "f64" or carry is not None:
+            st64, st64n = cast_state(st, np.float64), cast_state(st_n, np.float64)
+            R64 = residuals(fluxes(st64, T, pb, np.float64, corr=corr, order=order, energy=energy), pb, np.float64)
+            if carry is not None:
+                for k_ in carry:
+                    R64[k_] = R64[k_] + carry[k_]
+            nr = be_residual_norms(st64, st64n, R64, np.asarray(M, np.float64), has_energy)
+            M64 = np.asarray(M, np.float64)
+            rf = {"k": R64["k"] - M64 * (st64["rY"] - st64n["rY"]), "l": R64["l"] - M64 * (st64["rg"] - st64n["rg"]),
+                  "v": R64["v"] - M64 * ((st64["rYw"] - st64["rg"]) - (st64n["rYw"] - st64n["rg"])),
+                  "Q": R64["Q"] - M64 * (st64["rQ"] - st64n["rQ"])}
+            if has_energy:
+                rf["E"] = R64["E"] - M64 * (st64["rE"] - st64n["rE"])
+            stats["r_final"] = rf
+        else:
+            nr = be_residual_norms(st, st_n, Rr, M, has_energy)
+        hist.append(nr)
         if r0 is None:
             r0 = nr
             fl = {k: floor_eps * float(np.finfo(dt).eps) * float(np.max(np.abs((M * v).astype(np.float64))))
                   for k, v in (("k", st["rY"]), ("v", st["rYw"] - st["rg"]), ("l", st["rg"]), ("Q", st["rQ"]), ("E", st["rE"]))}
+            if has_energy and "q_abs" in F:   # エネルギーは面のエンタルピー流束の打ち消し前の大きさも尺度に入れる
+                qa = np.zeros(pb.N)
+                np.add.at(qa, pb.L, F["q_abs"])
+                np.add.at(qa, pb.R, F["q_abs"])
+                fl["E"] = fl["E"] + floor_eps * float(np.finfo(dt).eps) * float(np.max(qa))
         rel = max((nr[k] / r0[k]) if r0[k] > 0 else (0.0 if nr[k] == 0 else math.inf) for k in nr)
-        if rel <= tol:
+        sum_ok = True
+        if sum_tol is not None or sum_q is not None:
+            sums = be_residual_sums(st, st_n, pb, T, M, corr, order, energy, has_energy)
+            if sum_tol is not None:
+                sum_ok = all(a <= sum_tol * b for a, b, _ in sums)
+            if sum_q is not None:
+                sum_ok = sum_ok and all(a <= sum_q * float(np.finfo(dt).eps) * q2 for a, _, q2 in sums)
+        if rel <= tol and sum_ok:
+            stats["conv"] = stats.get("conv", 0) + 1
             return st, T, it, rel
-        if all(nr[k] <= max(tol * r0[k], fl[k]) for k in nr):
-            if stats is not None:
-                stats["floor"] = stats.get("floor", 0) + 1
+        if sum_ok and all(nr[k] <= max(tol * r0[k], fl[k]) for k in nr):
+            stats["floor"] = stats.get("floor", 0) + 1
             return st, T, it, rel
         d = diagonals(st, F, pb, dt, corr=corr)
         if precond == "line":
-            st = line_update(st, st_n, Rr, d, M, pb, dt, writeback, has_energy)
+            new = line_update(st, st_n, Rr, d, M, pb, dt, writeback, has_energy)
         else:
-            st = jacobi_update(st, st_n, Rr, d, M, dt, vars_mode, writeback, has_energy)
+            new = jacobi_update(st, st_n, Rr, d, M, dt, vars_mode, writeback, has_energy)
+        if damp != 1.0:
+            w = dt(damp)
+            for k in ("rY", "rYw", "rg", "rQ", "rE"):
+                new[k] = st[k] + w * (new[k] - st[k])
+        st = new
+    stats["cap"] = stats.get("cap", 0) + 1
+    stats["last_hist"] = hist
     return st, T, maxit, rel
 
 
@@ -459,41 +554,80 @@ def totals(st, V):
 
 
 # ===================================================================== S1 分子流束の構造 (i)
-def test_structure(quick):
-    print("\n=== S1 分子流束の構造 (i): 三成分・気相一様・g のみ勾配 ===")
-    Dbin = np.array([[0, 1, 2], [1, 0, 3], [2, 3, 0]], float) * 1e-5   # D_12, D_13, D_23
-    MW = np.array([0.028, 0.028, 0.028])
-    zg = np.array([0.2, 0.3, 0.5])     # [非水 0, 非水 1, 蒸気]
+def s1_tolerances(st32, pb, rho_f_g, Dk):
+    """入力量子化と演算誤差の許容 (面ごと・種ごと; 1 面問題)。z_k = ρY_k/(ρ−ρg) を Σz で正規化した値の 1 次の誤差伝播:
+      入力量子化 (格納 float32 の各入力 x に |δx| ≤ ε/2·|x|): |δz_k| ≤ ε z_k c_q,  c_q = 1 + (ρ+ρg)/ρ_g  (分子・分母と Σz の正規化)
+      演算 (同じ格納入力を float32 で計算): |δz_k| ≤ ε z_k c_a,  c_a = 3 + n_G  (減算・除算・n_G 項の和・正規化の除算)
+      流束: A_k = ρ_g,f D_k a (|δz_k,L| + |δz_k,R|)、補正込みで tol_k = A_k + z_f,k Σ_j A_j (補正前の j⁰ の誤差が補正項に入る分)。
+    物理の許容 (1e-6 ρ_g maxD |∇g|) とは別に足す (codex diagnose 2026-10-02 ④: 入力量子化と演算誤差を分ける)。"""
+    s64 = cast_state(st32, np.float64)
+    z, rhog, _ = gas_composition(s64, np.float64)
+    nG = z.shape[0]
+    a = float(pb.a[0])
+    cq = 1.0 + (s64["rho"] + s64["rg"]) / rhog
+    out = {}
+    for name, c in (("q", cq), ("a", np.full(2, 3.0 + nG))):
+        A = rho_f_g * Dk * a * EPS32 * (z[:, 0] * c[0] + z[:, 1] * c[1])
+        zf = 0.5 * (z[:, 0] + z[:, 1])
+        out[name] = A + zf * A.sum()
+    return out
+
+
+def s1_case(dx, gL, Dbin, Dfixed, zg, MW):
+    """1 面 (dx, ∇g = 0.1) で 新 (§4.2) / 旧案 の流束を、厳密入力 (float64)・格納 float32 入力を float64 で・float32 で計算。"""
     rho = 1.0
-    res = {}
-    for dx, gL in [(1.0, 0.1), (1.0e-3, 0.1)]:
-        gR = gL + 0.1 * dx    # ∇g = 0.1 m⁻¹
-        for dtn, dt in [("float64", np.float64), ("float32", np.float32)]:
-            g = np.array([gL, gR])
-            rY = np.vstack([(1 - g) * zg[0], (1 - g) * zg[1]]) * rho
-            rv = (1 - g) * zg[2] * rho
-            st = make_state([rho, rho], rY, rv + g * rho, g * rho, np.zeros((1, 2)), [0, 0], dt)
-            pb = Problem(2, [1.0 / dx], [0.0], Dbin, MW, [dx, dx])
-            for design in ("new", "old"):
-                F = fluxes(st, None, pb, dt, design=design)
-                X = (zg / MW) / np.sum(zg / MW)
-                Dk = mixavg_D(X[:, None], Dbin)[:, 0]
-                rhog = rho * (1 - 0.5 * (gL + gR))
-                lim = 1e-6 * rhog * Dk.max() * 0.1
-                jmax = float(np.max(np.abs(F["j"].astype(np.float64))))
-                res[(dx, dtn, design)] = (jmax, lim, F["j"].astype(np.float64)[:, 0] / rho)
-    # 判定は plan の幾何 (dx = 1 m, Δg = 0.1 を 1 面で) で
-    for dtn in ("float64", "float32"):
-        jmax, lim, j = res[(1.0, dtn, "new")]
-        verdict(jmax <= lim, f"S1(i) §4.2 気相基準 [{dtn}, dx=1 m]: max|j_k| = {jmax:.3e} ≤ 1e-6·ρ_g·maxD·|∇g| = {lim:.3e}")
-        jo, _, jv = res[(1.0, dtn, "old")]
-        info(f"S1(i) 旧案 [{dtn}, dx=1 m]: j/ρ = [{jv[0]:.4e}, {jv[1]:.4e}, {jv[2]:.4e}] m/s (codex 2026-09-27: [-1.3182e-7, -6.1364e-8, 1.9318e-7]); "
-             f"許容の {jo/lim:.2e} 倍 → 判別 {'可' if jo > lim else '不可'}")
-        verdict(jo > 100 * lim, f"S1(i) 判別: 旧案は同じ判定で FAIL すること [{dtn}] (max|j| = {jo:.3e} > 許容)")
-    for dtn in ("float64", "float32"):
-        jmax, lim, _ = res[(1.0e-3, dtn, "new")]
-        info(f"S1(i) 尺度依存 [{dtn}, dx=1e-3 m, Δg=1e-4/面]: max|j| = {jmax:.3e}、許容 {lim:.3e} (比 {jmax/lim:.2e})"
-             + (" — float32 の z 丸め ~ε₃₂ z/Δg が効く。許容は ∇g 基準なので面あたり Δg が小さいと float32 で満たせない" if dtn == "float32" else ""))
+    gR = gL + 0.1 * dx
+    g = np.array([gL, gR])
+    rY = np.vstack([(1 - g) * zg[0], (1 - g) * zg[1]]) * rho
+    rv = (1 - g) * zg[2] * rho
+    pb = Problem(2, [1.0 / dx], [0.0], Dbin, MW, [dx, dx], Dfixed=Dfixed)
+    st64 = make_state([rho, rho], rY, rv + g * rho, g * rho, np.zeros((1, 2)), [0, 0], np.float64)
+    st32 = cast_state(st64, np.float32)
+    st32in64 = cast_state(st32, np.float64)
+    r = {}
+    for design in ("new", "old"):
+        r[(design, "exact")] = fluxes(st64, None, pb, np.float64, design=design)["j"][:, 0]
+        r[(design, "q")] = fluxes(st32in64, None, pb, np.float64, design=design)["j"][:, 0]
+        r[(design, "f32")] = fluxes(st32, None, pb, np.float32, design=design)["j"].astype(np.float64)[:, 0]
+    Df = fluxes(st64, None, pb, np.float64)["Df"][:, 0]
+    rhog_f = rho * (1 - 0.5 * (gL + gR))
+    lim = 1e-6 * rhog_f * Df.max() * 0.1
+    tol = s1_tolerances(st32, pb, rhog_f, Df)
+    return r, lim, tol, Df
+
+
+def test_structure(quick):
+    print("\n=== S1 分子流束の構造 (i): 三成分・気相一様・g のみ勾配 (∇g = 0.1 m⁻¹) ===")
+    zg = np.array([0.2, 0.3, 0.5])     # [非水 0, 非水 1, 蒸気]
+    MW = np.array([0.028, 0.028, 0.028])
+    Dbin = np.array([[0, 1, 2], [1, 0, 3], [2, 3, 0]], float) * 1e-5   # D_12, D_13, D_23
+    # (S1a) 作用素試験: plan §6 の字義どおり D_k = [1,2,3]e-5 を種の拡散係数として固定 (混合平均しない)
+    # (S1b) 係数試験: 二元 D を混合平均した D_k (補数形) — 係数の値と、その係数での作用素
+    Dmix_ref = np.array([0.8 / 0.55, 0.7 / (0.2 + 0.5 / 3), 0.5 / 0.2]) * 1e-5   # 手計算 (等分子量で X = z)
+    Dmix64 = mixavg_D(zg[:, None], Dbin)[:, 0]
+    Dmix32 = mixavg_D(zg.astype(np.float32)[:, None], Dbin.astype(np.float32))[:, 0].astype(np.float64)
+    e64 = float(np.max(np.abs(Dmix64 / Dmix_ref - 1)))
+    e32 = float(np.max(np.abs(Dmix32 / Dmix_ref - 1)))
+    verdict(e64 <= 1e-12 and e32 <= 8 * EPS32,
+            f"S1b 係数: 混合平均 D_k = [{Dmix64[0]:.6e}, {Dmix64[1]:.6e}, {Dmix64[2]:.6e}] と手計算の相対差 float64 {e64:.1e} (≤1e-12)、float32 {e32:.1e} (≤8ε₃₂)")
+    for tag, Dfixed in (("S1a 作用素 (D_k 固定 [1,2,3]e-5)", np.array([1.0, 2.0, 3.0]) * 1e-5), ("S1b 作用素 (混合平均 D_k)", None)):
+        for dx, gL in ((1.0, 0.1), (1.0e-3, 0.1)):
+            r, lim, tol, Df = s1_case(dx, gL, Dbin, Dfixed, zg, MW)
+            geo = f"dx={dx:g} m, Δg={0.1*dx:g}/面"
+            je = np.abs(r[("new", "exact")])
+            jq = np.abs(r[("new", "q")])
+            ja = np.abs(r[("new", "f32")] - r[("new", "q")])
+            verdict(je.max() <= lim, f"{tag} [{geo}] 厳密入力 float64: max|j_k| = {je.max():.3e} ≤ 1e-6·ρ_g·maxD·|∇g| = {lim:.3e}")
+            verdict(np.all(jq <= tol["q"] + lim), f"{tag} [{geo}] 入力量子化 (格納 float32 を float64 で): max|j_k| = {jq.max():.3e}、"
+                    f"許容 (量子化 + 物理) 最小 {np.min(tol['q'] + lim):.3e} (比の最大 {np.max(jq / (tol['q'] + lim)):.3f})")
+            verdict(np.all(ja <= tol["a"]), f"{tag} [{geo}] 演算誤差 (float32 − 同じ入力の float64): max = {ja.max():.3e}、"
+                    f"許容最小 {np.min(tol['a']):.3e} (比の最大 {np.max(ja / tol['a']):.3f})")
+            jo = np.abs(r[("old", "exact")])
+            oldv = r[("old", "exact")]
+            sep = f" 旧案 j/ρ = [{oldv[0]:.4e}, {oldv[1]:.4e}, {oldv[2]:.4e}] m/s" + \
+                  (" (codex 2026-09-27: [-1.3182e-7, -6.1364e-8, 1.9318e-7])" if Dfixed is None else "")
+            verdict(np.max(jo) > np.max(tol["q"]) + lim,
+                    f"{tag} [{geo}] 判別: 旧案の偽流束 max {jo.max():.3e} は許容 (量子化 + 物理) の {jo.max()/(np.max(tol['q'])+lim):.1e} 倍で FAIL すること —{sep}")
 
 
 # ===================================================================== S2 面恒等式 (ii)
@@ -554,6 +688,26 @@ def test_face_identities(quick):
 
 
 # ===================================================================== S3 3 セル判別
+# float32 の「解き切り」の停止則 (§5.1 #4a (2))。反復上限で返った更新は FAIL (be_solve の stats['cap'])。
+#   floor kε: 成分ごとに BE 残差 ≤ 1e-7 相対 または ≤ kε·max|Mρφ|。carry: 解き残した BE 残差を次ステップの右辺へ持ち越す (停止則ではなく
+#   離散式の変更 — 累積誤差が最後のステップの残差だけになる; 未承認の候補)。
+STOP_RULES_F32 = [("床 16ε", 16.0, False), ("床 8ε", 8.0, False), ("床 6ε", 6.0, False), ("床 4ε", 4.0, False), ("床 16ε + 残差持ち越し", 16.0, True)]
+
+
+def run_be_series(st0, pb, M, dt, nstep, fe, carry, maxit, T0=None, rec_at=(), **kw):
+    """解き切った BE 更新を nstep 回。戻り値: (最終状態, 最終 T, {n: 状態}, stats, 最大反復数)。"""
+    st, T, stats, nit_max, car, recs = copy_state(st0), T0, {}, 0, None, {}
+    for n in range(1, nstep + 1):
+        st, T, nit, _ = be_solve(st, pb, M, dt, T0=T, maxit=maxit, floor_eps=fe, stats=stats,
+                                 check=("f64" if carry else "state"), carry=car, **kw)
+        nit_max = max(nit_max, nit)
+        if carry:
+            car = stats["r_final"]
+        if n in rec_at:
+            recs[n] = copy_state(st)
+    return st, T, recs, stats, nit_max
+
+
 def three_cell_state(dt):
     g = np.array([0.1, 0.2, 0.2])
     Yw = g + 0.1
@@ -564,12 +718,12 @@ def three_cell_state(dt):
 def test_three_cell(quick):
     print("\n=== S3 3 セル判別 (A = 点対角 1 回更新 / B = 解き切った後退 Euler) ===")
     out = {}
-    for dtn, dt, fe in [("float64", np.float64, 16.0), ("float32", np.float32, 16.0), ("float32", np.float32, 4.0)]:
+    for dtn, dt, fe in [("float64", np.float64, 16.0), ("float32", np.float32, 16.0)]:
         pb = Problem(3, [1, 1], [1, 1], np.array([[0, 1e-5], [1e-5, 0]]), np.array([0.028, 0.018]), np.ones(3), molc=0.0)
         M = dt(1.0)
         st0 = three_cell_state(dt)
         t0 = totals(st0, pb.V)
-        for scheme in (("A", "B") if fe == 16.0 else ("B",)):
+        for scheme in (("A", "B") if dtn == "float64" else ("A",)):
             st = copy_state(st0)
             rec = {}
             nit_max, stats = 0, {}
@@ -588,24 +742,23 @@ def test_three_cell(quick):
                     rv = (st["rYw"].astype(np.float64) - st["rg"].astype(np.float64))
                     sumY = st["rY"].astype(np.float64).sum(axis=0) + st["rYw"].astype(np.float64)
                     rec[n] = (rels, float(rv.min()), float(np.max(np.abs(sumY - st["rho"].astype(np.float64)) / st["rho"].astype(np.float64))))
-            out[(dtn, scheme, fe)] = (rec, nit_max, stats.get("floor", 0))
-    for (dtn, scheme, fe), (rec, nit, nfl) in out.items():
+            out[(dtn, scheme, fe)] = (rec, nit_max, stats.get("floor", 0), stats.get("cap", 0))
+    for (dtn, scheme, fe), (rec, nit, nfl, ncap) in out.items():
         for n in (1, 1000):
             rels, vmin, sY = rec[n]
             worst = max(abs(v) for v in rels.values())
             line = (f"S3 {scheme} [{dtn}] {n} 更新: 総液量 {rels['rg']:+.7e}、総水分 {rels['rYw']:+.3e}、非水 {rels['rY0']:+.3e}、"
                     f"Q0 {rels['rQ0']:+.3e} (最大 |相対| {worst:.3e})、min ρv {vmin:.3e}、max|ΣρY−ρ|/ρ {sY:.2e}")
             if scheme == "B":
-                line += f" (反復 ≤{nit}; BE 残差 ≤1e-7 相対か丸め床 {fe:g}ε 以下で停止、床で停止 {nfl} 回)"
+                line += f" (反復 ≤{nit}; BE 残差 ≤1e-7 相対か丸め床 {fe:g}ε 以下で停止、床で停止 {nfl} 回、上限到達 {ncap} 回)"
             if scheme == "B" and dtn == "float64":
-                verdict(worst <= 1e-6 and vmin >= 0 and sY <= 8 * EPS32, line)
+                verdict(worst <= 1e-6 and vmin >= 0 and sY <= 8 * EPS32 and ncap == 0, line)
             elif scheme == "A" and dtn == "float64":
                 print("[A]    " + line)
             else:
                 info(line)
     out = {(k[0], k[1]): (v[0],) for k, v in out.items() if k[2] == 16.0}
     a_fail = max(abs(v) for v in out[("float64", "A")][0][1][0].values()) > 1e-6
-    info("S3 float32 の B は停止基準 (丸め床) に依存する: 残した BE 残差の和がそのまま総量の誤差になる (保存は固定点でだけ成り立つ)")
     b_ok = all(max(abs(v) for v in out[("float64", "B")][0][n][0].values()) <= 1e-6 for n in (1, 1000))
     if a_fail and b_ok:
         verdict(True, "S3 判別規則: A が FAIL・B が PASS → 点対角更新が保存破れの原因、B の更新契約 (保存形 BE の固定点) を支持")
@@ -616,6 +769,23 @@ def test_three_cell(quick):
     a1 = out[("float64", "A")][0][1][0]["rg"]
     a1000 = out[("float64", "A")][0][1000][0]["rg"]
     info(f"S3 A の総液量: 1 更新 {a1*100:+.7f} %、1000 更新 {a1000*100:+.7f} % (上位検算 +3.3333346 % / +2.8571441 %)")
+    # float32 の B: 停止則ごとに 1000 更新の累積保存と上限到達 (上限 = FAIL)
+    pb = Problem(3, [1, 1], [1, 1], np.array([[0, 1e-5], [1e-5, 0]]), np.array([0.028, 0.018]), np.ones(3), molc=0.0)
+    st0 = three_cell_state(np.float32)
+    t0 = totals(st0, pb.V)
+    for name, fe, carry in STOP_RULES_F32:
+        st, _, _, stats, nit = run_be_series(st0, pb, np.float32(1.0), np.float32, 1000, fe, carry, 5000)
+        t = totals(st, pb.V)
+        rels = {k: (t[k] - t0[k]) / abs(t0[k]) for k in t0 if k not in ("rE", "absE") and t0[k] != 0}
+        worst = max(abs(v) for v in rels.values())
+        cap = stats.get("cap", 0)
+        ok = worst <= 1e-6 and cap == 0
+        line = (f"S3 B [float32, {name}] 1000 更新: 最大 |相対| {worst:.3e} (総液量 {rels['rg']:+.2e}, 総水分 {rels['rYw']:+.2e})、"
+                f"反復上限到達 {cap} 回、最大反復 {nit} → {'合格' if ok else '不合格'}")
+        if carry:
+            verdict(ok, line + " [候補]")
+        else:
+            info(line)
 
 
 # ===================================================================== S4 非負
@@ -627,12 +797,14 @@ def test_nonnegativity(quick):
         st0 = make_state([1, 1], (1 - g)[None, :], g, g, (g * 2)[None, :], [0, 0], dt)
         pb = Problem(2, [1.0], [1.0], np.array([[0, 1.0], [1.0, 0]]), np.array([0.028, 0.018]), np.ones(2), molc=1.0)
         M = dt(1.0)
-        stB, _, nit, rel = be_solve(st0, pb, M, dt)
+        st4 = {}
+        stB, _, nit, rel = be_solve(st0, pb, M, dt, stats=st4)
         rvB = stB["rYw"].astype(np.float64) - stB["rg"].astype(np.float64)
         _, corr, nact, _ = realizability_clamp(stB, pb.V)
-        line = f"S4 2 セル [{dtn}] 解き切った擬似時間更新 (新, 蒸気/液変数): ρv = [{rvB[0]:.3e}, {rvB[1]:.3e}]、クランプ補正 {corr:.3e} ({nact} 件; 反復 {nit})"
+        line = (f"S4 2 セル [{dtn}] 解き切った擬似時間更新 (新, 蒸気/液変数): ρv = [{rvB[0]:.3e}, {rvB[1]:.3e}]、クランプ補正 {corr:.3e} "
+                f"({nact} 件; 反復 {nit}, 上限到達 {st4.get('cap', 0)})")
         if dtn == "float64":
-            verdict(rvB.min() >= 0 and corr == 0, line)
+            verdict(rvB.min() >= 0 and corr == 0 and st4.get("cap", 0) == 0, line)
         else:
             info(line)
         # 判別: 改訂前 (総水分と液をそれぞれの点対角で 1 回)
@@ -643,22 +815,65 @@ def test_nonnegativity(quick):
         rvO = stO["rYw"].astype(np.float64) - stO["rg"].astype(np.float64)
         info(f"S4 2 セル [{dtn}] 改訂前 (総水分/液の点対角 1 回): Y_w' = [{float(stO['rYw'][0]):.8f}, {float(stO['rYw'][1]):.8f}]、"
              f"g' = [{float(stO['rg'][0]):.8f}, {float(stO['rg'][1]):.8f}]、ρv = [{rvO[0]:.4e}, {rvO[1]:.4e}] (codex: 0.13333334 / 0.15 / −0.016666666)")
-    # 補正の面 z (plan §4.2 は面値を定めていない) の非負性: 拡散係数の差が大きい三成分で、蒸気 0 のセルから補正流束が蒸気を
-    # 持ち出す例 (情報; mean は −z_v,f S の隣セル分が非対角に負で入るので M 行列でなくなる)。
-    #   L: (A 0, B 1, 蒸気 0)、R: (A 0.99, B 0, 蒸気 0.01)、g = 0、二元 D_AB = D_Av = 10、D_Bv = 0.1 (相対値)、面係数・V/Δτ = 1
-    for corr in ("mean", "upwind"):
-        st0 = make_state([1, 1], np.array([[0.0, 0.99], [1.0, 0.0]]), [0.0, 0.01], [0.0, 0.0], np.zeros((1, 2)), [0, 0], np.float64)
+    # 補正の面 z の反例 (両セル g = 0; codex diagnose 2026-10-02 ①⑤): 拡散係数の差が大きい三成分で、蒸気 0 のセルから補正流束が蒸気を
+    # 持ち出す例。mean は −z_v,f S の隣セル分が非対角に負で入るので M 行列でなくなる。風上 (補正流束 −Σj⁰ の流出側の z) を採用。
+    #   L: (A 0, B 1, 蒸気 0)、R: (A 0.99, B 0, 蒸気 0.01)、g = 0、二元 D_AB = D_Av = 10、D_Bv = 0.1 (相対値; D 比 100)、面係数・V/Δτ = 1
+    def cex(dt):
+        st0 = make_state([1, 1], np.array([[0.0, 0.99], [1.0, 0.0]]), [0.0, 0.01], [0.0, 0.0], np.zeros((1, 2)), [0, 0], dt)
         pb = Problem(2, [1.0], [0.0], np.array([[0, 10, 10], [10, 0, 0.1], [10, 0.1, 0]]), np.array([0.028, 0.028, 0.028]), np.ones(2))
-        stB, _, nitB, _ = be_solve(st0, pb, 1.0, np.float64, corr=corr, maxit=5000)
-        F = fluxes(st0, None, pb, np.float64, corr=corr)
-        Rr = residuals(F, pb, np.float64)
-        d = diagonals(st0, F, pb, np.float64, corr=corr)
-        stJ = jacobi_update(st0, st0, Rr, d, 1.0, np.float64)
-        vB = float(stB["rYw"][0] - stB["rg"][0])
-        vJ = float(stJ["rYw"][0] - stJ["rg"][0])
-        info(f"S4 補正の面 z = {corr} の反例 (D 比 100, 組成の段差 1): 蒸気 0 のセル L の ρv — 点対角 1 回 {vJ:+.3e}、解き切った更新 {vB:+.3e} "
-             f"(反復 {nitB}{' = 上限: 固定点反復が収束しない' if nitB >= 5000 else ''}; Σj⁰ = {float(F['S'][0]):+.3f}, j_v⁰ = {float(F['j0'][2][0]):+.4f}) "
-             f"→ {'負になる' if min(vB, vJ) < 0 else '非負'}")
+        return st0, pb
+    for corr in ("upwind", "mean"):
+        for dtn, dt in (("float64", np.float64), ("float32", np.float32)):
+            st0, pb = cex(dt)
+            M = dt(1.0)
+            F = fluxes(st0, None, pb, dt, corr=corr)
+            Rr = residuals(F, pb, dt)
+            d = diagonals(st0, F, pb, dt, corr=corr)
+            vJ = float((jacobi_update(st0, st0, Rr, d, M, dt)["rYw"][0]))
+            res = {}
+            for damp in (1.0, 0.5):
+                stats = {}
+                with np.errstate(all="ignore"):   # mean の緩和なしは発散してオーバーフローする (記録だけ)
+                    stB, _, nit, rel = be_solve(st0, pb, M, dt, corr=corr, maxit=5000, stats=stats, damp=damp)
+                hist = stats.get("last_hist", [])
+                res[damp] = (stB, nit, stats, hist)
+            sol = None
+            if dtn == "float64":
+                try:
+                    from scipy.optimize import fsolve
+
+                    def Fn(x):
+                        s_ = copy_state(st0)
+                        s_["rY"] = x[:4].reshape(2, 2)
+                        s_["rYw"] = x[4:6]
+                        R_ = residuals(fluxes(s_, None, pb, np.float64, corr=corr), pb, np.float64)
+                        return np.concatenate([(R_["k"] - (s_["rY"] - st0["rY"])).ravel(), R_["w"] - (s_["rYw"] - st0["rYw"])])
+                    x, _, ier, _ = fsolve(Fn, np.concatenate([st0["rY"].ravel(), st0["rYw"]]), full_output=True, xtol=1e-14)
+                    sol = (x[4:6], float(np.max(np.abs(Fn(x)))), ier)
+                except ImportError:
+                    sol = None
+            st1, n1, s1, h1 = res[1.0]
+            st5, n5, s5, h5 = res[0.5]
+            v1 = (st1["rYw"] - st1["rg"]).astype(np.float64)
+            v5 = (st5["rYw"] - st5["rg"]).astype(np.float64)
+            cap1, cap5 = s1.get("cap", 0) > 0, s5.get("cap", 0) > 0
+            hs = ""
+            if cap1 and h1:
+                pick = [0, 1, 2, 3, 5, 10, 20, 50, 100, 500, 1000, 4999]
+                hs = "; 残差履歴 (max|r_k|, max|r_v|) " + ", ".join(f"#{i}: ({h1[i]['k']:.2e}, {h1[i]['v']:.2e})" for i in pick if i < len(h1))
+            tag = f"S4 反例 [補正 z = {corr}, {dtn}]"
+            if corr == "upwind":
+                verdict(vJ >= 0, f"{tag} 点対角 1 回: 蒸気 0 のセル L の ρv {vJ:+.4e} ≥ 0")
+                verdict(not cap1, f"{tag} 緩和なし点対角の固定点反復: {'上限 5000 に到達 (収束しない)' if cap1 else f'{n1} 回で収束'}、"
+                        f"最終 ρv = [{v1[0]:+.3e}, {v1[1]:+.3e}]{hs}")
+                verdict(not cap5 and v5.min() >= 0, f"{tag} 緩和 0.5 の固定点反復: {'上限に到達' if cap5 else f'{n5} 回で収束'}、ρv = [{v5[0]:+.6e}, {v5[1]:+.6e}]")
+            else:
+                info(f"{tag} 点対角 1 回 ρv_L {vJ:+.4e}; 緩和なし {'上限到達' if cap1 else f'{n1} 回'} / 緩和 0.5 {'上限到達' if cap5 else f'{n5} 回'}、"
+                     f"ρv = [{v5[0]:+.6e}, {v5[1]:+.6e}]")
+            if sol is not None:
+                info(f"{tag} 参照 (Newton, scipy fsolve): BE 解は存在し ρv = [{sol[0][0]:+.6e}, {sol[0][1]:+.6e}] (|F| {sol[1]:.1e}, ier {sol[2]})")
+
+
     # ランダム 1D 100 セル × 10⁴ 擬似反復
     nit = 2000 if quick else 10000
     rng0 = np.random.default_rng(7)
@@ -713,6 +928,83 @@ def test_nonnegativity(quick):
             info(line)
 
 
+# ===================================================================== S7 固定点判別 (P1 / 非分割)
+def vl_limit_commit(rho, rYw, rg, rQ, dv, dg, dQ, dt, dg_max=math.inf, dT_per_dg=0.0, dT_max=math.inf):
+    """蒸気・液の制限と commit を一体で定義する (§5.1 #4a; codex diagnose 2026-10-02 ②)。入力の増分は前処理済み (δρv, δρg, δρQ_n)。
+      1. 閾値 θ_thr = min(1, dg_max/|δg/ρ|, dT_max/(|δg/ρ|·dT_per_dg))  — 全増分 (輸送 + ソース + BDF) に対して。
+      2. 対 (蒸気, 液) の非負 θ_vg = min(1, ρv/(−δρv) [δρv<0], ρg/(−δρg) [δρg<0])  — 蒸気は**更新前の** ρv = ρY_w − ρg で見る
+         (現行の液用 θ は更新済み総水分の avail を見て、avail = 0 で枯渇制限が掛からない; condensationUpdateLimiter_d.cuh:78-80)。
+      3. θ = min(θ_thr, θ_vg) を δρv・δρg・δρQ の**全部に共通**に掛ける (蒸気と液を別々に切らない — 片方だけ切ると総水分が増減する)。
+      4. Q は成分ごとの非負化 (θδQ_n < −ρQ_n なら −ρQ_n に切る; 切った量を補正として数える)。
+      5. commit: ρg' = ρg + θδρg、ρY_w' = ρY_w + fl(θδρv + θδρg) (増分形: 増分 0 なら格納値は不変)。
+         丸めで fl(ρY_w' − ρg') < 0 になったら ρY_w' = ρg' (補正として数える; 正確な算術では θ_vg が蒸気 ≥ 0 を保証する)。
+    残差が 0 なら θ に依らず増分 0 → 固定点は動かない。戻り値: (ρY_w', ρg', ρQ', θ, 補正量 dict)。"""
+    one = dt(1.0)
+    rv = rYw - rg
+    th = 1.0
+    adg = abs(float(dg)) / float(rho)
+    if adg > 0:
+        th = min(th, dg_max / adg)
+        if dT_per_dg > 0:
+            th = min(th, dT_max / (adg * dT_per_dg))
+    if dv < 0:
+        th = min(th, float(rv) / float(-dv))
+    if dg < 0:
+        th = min(th, float(rg) / float(-dg))
+    th = max(th, 0.0)
+    T_ = dt(th)
+    corr = {"limiter_v": float((one - T_) * abs(dv)), "limiter_g": float((one - T_) * abs(dg)), "Q_cut": 0.0, "v_round": 0.0}
+    dQn = T_ * dQ
+    cut = np.minimum(dQn + rQ, 0)
+    corr["Q_cut"] = float(np.sum(np.abs(cut.astype(np.float64))))
+    rQn = rQ + (dQn - cut)
+    rg_n = rg + T_ * dg
+    rYw_n = rYw + (T_ * dv + T_ * dg)
+    if rYw_n - rg_n < 0:
+        corr["v_round"] = float(rg_n) - float(rYw_n)
+        rYw_n = rg_n
+    return rYw_n, rg_n, rQn, th, corr
+
+
+def vl_increments(scheme, Rw_tr, Rg_tr, S, Pv, Pg):
+    """A = P1 (輸送とソースを別の前処理で分割): δρg = (R_gᵗʳ + S)/P_g、δρv = (R_wᵗʳ − R_gᵗʳ)/P_v − S/P_g。
+    B = 非分割の全残差: R_g = R_gᵗʳ + S (+ BDF)、R_v = R_w − R_g、δρv = R_v/P_v、δρg = R_g/P_g。"""
+    if scheme == "A":
+        return (Rw_tr - Rg_tr) / Pv - S / Pg, (Rg_tr + S) / Pg
+    Rg = Rg_tr + S
+    return (Rw_tr - Rg) / Pv, Rg / Pg
+
+
+def test_fixed_point(quick):
+    print("\n=== S7 固定点判別: 輸送とソースが釣り合う状態で 1 擬似更新 (A = P1 / B = 非分割の全残差) ===")
+    for dtn, dt in (("float32", np.float32), ("float64", np.float64)):
+        c = lambda x: dt(x)
+        rho, rYw, rg = c(1.0), c(0.3), c(0.1)
+        rQ = np.array([0.3, 0.2, 0.1], dt)
+        dQ = np.zeros(3, dt)                 # Q の全残差 0
+        Rw_tr, Rg_tr, S, Pv, Pg = c(0.0), c(-0.02), c(0.02), c(3.0), c(2.0)
+        out = {}
+        for sch in ("A", "B"):
+            dv, dg = vl_increments(sch, Rw_tr, Rg_tr, S, Pv, Pg)
+            rYw_n, rg_n, rQn, th, corr = vl_limit_commit(rho, rYw, rg, rQ, dv, dg, dQ, dt)
+            out[sch] = (float(dv), float(dg), float(rYw_n) - float(rYw), float(rg_n) - float(rg),
+                        float(np.max(np.abs(rQn.astype(np.float64) - rQ.astype(np.float64)))), th, corr)
+        a, b = out["A"], out["B"]
+        line = lambda t, o: (f"{t} [{dtn}]: δρv {o[0]:+.7e}, δρg {o[1]:+.7e}, ΔρY_w {o[2]:+.7e}, Δρg {o[3]:+.3e}, max|ΔρQ| {o[4]:.1e}, "
+                             f"θ {o[5]:.3f}, 補正 {', '.join(f'{k} {v:.1e}' for k, v in o[6].items())}")
+        verdict(abs(a[2] + 0.02 / 2 - 0.02 / 3) <= 1e-6, line("S7 A = P1", a) + " — ΔρY_w ≈ −0.003333 動くこと")
+        verdict(all(x == 0 for x in b[:5]) and all(v == 0 for v in b[6].values()), line("S7 B = 非分割", b) + " — 全増分・補正が厳密に 0")
+    # 情報: 非固定点での制限と commit の振る舞い
+    for desc, (rYw, rg, Rw_tr, Rg_tr, S) in (("蒸気 0 で凝縮を要求 (ρY_w = ρg = 0.1, S = +0.01)", (0.1, 0.1, 0.0, 0.0, 0.01)),
+                                           ("蒸気が足りない凝縮 (ρv = 0.002, S = +0.02)", (0.102, 0.1, 0.0, 0.0, 0.02)),
+                                           ("輸送で蒸気流入・液流出 + 蒸発 (S = −0.01)", (0.3, 0.1, 0.01, -0.005, -0.01))):
+        dt = np.float64
+        dv, dg = vl_increments("B", Rw_tr, Rg_tr, S, 3.0, 2.0)
+        rYw_n, rg_n, rQn, th, corr = vl_limit_commit(1.0, rYw, rg, np.array([0.3, 0.2, 0.1]), dv, dg, np.zeros(3), dt)
+        info(f"S7 B の制限 [{desc}]: δρv {dv:+.4e}, δρg {dg:+.4e} → θ {th:.4f}, ρv' {rYw_n - rg_n:.4e}, ρg' {rg_n:.4e}, "
+             f"ΔρY_w {rYw_n - rYw:+.4e} (= θ(δρv+δρg) {th*(dv+dg):+.4e})")
+
+
 # ===================================================================== S5 保存
 def test_conservation(quick):
     print("\n=== S5 保存: 閉じた箱・拡散単独・解き切った物理時間更新 ===")
@@ -742,30 +1034,31 @@ def test_conservation(quick):
     V = np.full(N, dx)
     dtime = 2e-3   # 乱流の拡散数 Γ/ρ Δt/dx² ≈ 1、分子 ≈ 0.2〜1.4
     pb = Problem(N, a, Gam, Dbin, MW, V, molc=1.0, thermo=th)
-    for dtn, dt, fe in [("float64", np.float64, 16.0), ("float32", np.float32, 16.0), ("float32", np.float32, 4.0)]:
+    runs = [("float64", np.float64, "床 16ε", 16.0, False)] + [("float32", np.float32, n_, f_, c_) for n_, f_, c_ in STOP_RULES_F32]
+    for dtn, dt, name, fe, carry in runs:
         st = make_state(rho, rY, rv + g * rho, g * rho, rQ, rE, dt)
         t0 = totals(st, V)
         M = (V / dtime).astype(dt)
-        T = T0.copy()
-        nit_max, rel_max, vmin, sYmax = 0, 0.0, math.inf, 0.0
-        for n in range(nstep):
-            st, T, nit, rel = be_solve(st, pb, M, dt, T0=T, maxit=4000, precond="line", floor_eps=fe)
-            nit_max, rel_max = max(nit_max, nit), max(rel_max, rel)
-            rvv = st["rYw"].astype(np.float64) - st["rg"].astype(np.float64)
-            vmin = min(vmin, float(rvv.min()))
-            sY = st["rY"].astype(np.float64).sum(axis=0) + st["rYw"].astype(np.float64)
-            sYmax = max(sYmax, float(np.max(np.abs(sY - st["rho"].astype(np.float64)) / st["rho"].astype(np.float64))))
+        st, T, _, stats, nit_max = run_be_series(st, pb, M, dt, nstep, fe, carry, 3000, T0=T0.copy(), precond="line")
+        cap = stats.get("cap", 0)
         t = totals(st, V)
+        rvv = st["rYw"].astype(np.float64) - st["rg"].astype(np.float64)
+        vmin = float(rvv.min())
+        sY = st["rY"].astype(np.float64).sum(axis=0) + st["rYw"].astype(np.float64)
+        sYmax = float(np.max(np.abs(sY - st["rho"].astype(np.float64)) / st["rho"].astype(np.float64)))
         rel_nz = {k: (t[k] - t0[k]) / abs(t0[k]) for k in t0 if k not in ("rE", "absE", "rv") and t0[k] != 0}
         abs_z = {k: abs(t[k] - t0[k]) for k in t0 if k not in ("rE", "absE", "rv") and t0[k] == 0}
         eE = abs(t["rE"] - t0["rE"]) / t0["absE"]
         worst = max(abs(v) for v in rel_nz.values())
         zworst = max(abs_z.values()) if abs_z else 0.0
-        line = (f"S5 [{dtn}, 丸め床 {fe:g}ε] {nstep} 更新 (反復 ≤{nit_max}): 最大 |相対| {worst:.3e} "
+        ok = worst <= 1e-6 and eE <= 1e-6 and zworst <= 1e-12 and vmin >= 0 and cap == 0
+        line = (f"S5 [{dtn}, {name}] {nstep} 更新 (最大反復 {nit_max}, 上限到達 {cap} 回): 最大 |相対| {worst:.3e} "
                 f"({', '.join(f'{k} {v:+.1e}' for k, v in rel_nz.items())})、ρE {eE:.3e}、初期 0 の量 {zworst:.1e}、"
-                f"min ρv {vmin:.2e}、max|ΣρY−ρ|/ρ {sYmax:.1e}")
+                f"min ρv {vmin:.2e}、max|ΣρY−ρ|/ρ (最終) {sYmax:.1e} → {'合格' if ok else '不合格'}")
         if dtn == "float64":
-            verdict(worst <= 1e-6 and eE <= 1e-6 and zworst <= 1e-12 and vmin >= 0, line)
+            verdict(ok, line)
+        elif carry:
+            verdict(ok, line + " [候補]")
         else:
             info(line)
         T_end = T
@@ -799,7 +1092,10 @@ def test_energy(quick):
     Lc = th.lat.L(Tn)
     results = {}
     for variant in ("full", "no_latent", "latent_only"):
-        st1, T1, nit, rel = be_solve(st0, pb, M, np.float64, T0=Tn, energy=variant, precond="line", maxit=200)
+        st6 = {}
+        st1, T1, nit, rel = be_solve(st0, pb, M, np.float64, T0=Tn, energy=variant, precond="line", maxit=200, stats=st6)
+        if st6.get("cap", 0):
+            verdict(False, f"S6 [{variant}] 反復上限 200 に到達 (解き切っていない)")
         drg = st1["rg"] - st0["rg"]
         drE = st1["rE"] - st0["rE"]
         if variant == "latent_only":
@@ -839,7 +1135,7 @@ def main():
     ap.add_argument("--only", default="", help="S1..S6 をカンマ区切りで")
     args = ap.parse_args()
     tests = {"S1": test_structure, "S2": test_face_identities, "S3": test_three_cell,
-             "S4": test_nonnegativity, "S5": test_conservation, "S6": test_energy}
+             "S4": test_nonnegativity, "S5": test_conservation, "S6": test_energy, "S7": test_fixed_point}
     sel = [s.strip() for s in args.only.split(",") if s.strip()] or list(tests)
     for name in sel:
         tests[name](args.quick)
