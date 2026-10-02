@@ -5,6 +5,7 @@
 import h5py, numpy as np, glob, sys
 C = "/home/ubuntu/forge-species-tp/case/16.nozzle_wys/"
 run = sys.argv[1]
+RO_LAG = len(sys.argv) > 2 and sys.argv[2] == "--ro-lag"   # codex 2026-10-03 next-ab: ρ を 1 step 前の出力から読む (勾配・ψ は同じ step)
 K, L = 0.05, 0.1570673715
 REF = {"ro": 0.5279511755, "Ux": 330.8270384, "Uy": 330.8270384, "P": 43128.33253}
 GR = {"ro": "drod", "Ux": "dUxd", "Uy": "dUyd", "P": "dPd"}
@@ -23,15 +24,18 @@ for u, v in E: nb[u].append(v); nb[v].append(u)
 x = xyz[:, 0] * 1e3
 S = np.where((np.abs(x + 60) < 0.05) | (np.abs(x + 59.37) < 0.05))[0]
 print(run, "snapshots", len(fs), "edges", len(E), "S nodes", S.size)
-stats = {q: {"match": [], "bind": [], "dp_ulp": [], "dm": [], "dp": [], "e2": [], "psi": []} for q in REF}
-for f in fs:
+stats = {q: {"match": [], "bind": [], "dp_ulp": [], "dm": [], "dp": [], "e2": [], "psi": [], "gap": []} for q in REF}
+prev = None
+for f in (fs if not RO_LAG else fs[1:]):
     V = h5py.File(f)["VALUE"]
+    if RO_LAG:
+        Vp = h5py.File(fs[fs.index(f) - 1])["VALUE"]
     vol = np.array(V["volume"][...]).ravel().astype(np.float64); h = np.sqrt(vol); e2 = (K * h / L) ** 3
     for q in REF:
-        Q = np.array(V[q][...]).ravel().astype(np.float32)
+        Q = np.array((Vp if (RO_LAG and q == "ro") else V)[q][...]).ravel().astype(np.float32)
         gx = np.array(V[GR[q] + "x"][...]).ravel(); gy = np.array(V[GR[q] + "y"][...]).ravel()
         lim = np.array(V["limiter_" + q][...]).ravel()
-        ps, bd, dpu, dms, dps = [], [], [], [], []
+        ps, bd, dpu, dms, dps, gaps = [], [], [], [], [], []
         for i in S:
             js = np.array(nb[i]); qi = Q[i]
             qmax = max(qi, Q[js].max()); qmin = min(qi, Q[js].min())
@@ -41,15 +45,20 @@ for f in fs:
             num = dp * dp + e2[i] + 2 * dm * dp; den = dp * dp + 2 * dm * dm + dp * dm + e2[i]
             psi_f = np.where(den > 0, num / den, 1.0); a = np.argmin(psi_f)
             ps.append(min(max(psi_f[a], 0), 1)); bd.append(js[a]); dms.append(dm[a]); dps.append(dp[a])
+            srt = np.sort(np.clip(psi_f, 0, 1)); gaps.append(srt[1] - srt[0] if srt.size > 1 else np.nan)
             dpu.append(abs(dp[a]) / (np.spacing(np.float32(max(abs(qmax), abs(qmin)))) / REF[q]))
         ps = np.array(ps)
         stats[q]["match"].append(np.abs(ps - lim[S])); stats[q]["bind"].append(bd); stats[q]["dp_ulp"].append(dpu)
-        stats[q]["dm"].append(dms); stats[q]["dp"].append(dps); stats[q]["e2"].append(e2[S]); stats[q]["psi"].append(ps)
+        stats[q]["dm"].append(dms); stats[q]["dp"].append(dps); stats[q]["e2"].append(e2[S]); stats[q]["psi"].append(ps); stats[q]["gap"].append(gaps)
 for q in REF:
     s = {k2: np.array(v) for k2, v in stats[q].items()}
     sw = np.mean(s["bind"][1:] != s["bind"][:-1], axis=0)        # 各節点の制限面の入れ替わり率 (step ごと)
     psd = s["psi"].std(0); w = np.argsort(psd)[::-1][:5]
-    print(f"[{q}] recomputed vs solver psi: max|d| {s['match'].max():.2e} p99 {np.quantile(s['match'],0.99):.2e} | "
+    col0 = np.abs(x[S] + 60) < 0.05
+    pdm = s["psi"] * s["dm"]
+    print(f"[{q}] recomputed vs solver psi: max|d| {s['match'].max():.2e} p99 {np.quantile(s['match'],0.99):.2e} frac>2e-7 {np.mean(s['match']>2e-7):.4f} "
+          f"(col -60: max {s['match'][:,col0].max():.2e}, col -59.37: max {s['match'][:,~col0].max():.2e}) | std(psi*dm) max {pdm.std(0).max():.2e} p50 {np.median(pdm.std(0)):.2e} | "
+          f"psi gap 1st-2nd face p50 {np.nanmedian(s['gap']):.2e} | "
           f"binding-face switch rate p50 {np.median(sw):.3f} max {sw.max():.3f} | psi std p50 {np.median(psd):.3e} max {psd.max():.3e}")
     for j in w:
         i = S[j]
