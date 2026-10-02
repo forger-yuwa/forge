@@ -2684,6 +2684,14 @@ int main(int argc, char** argv) {
     StepMonitor monitor(cfg, residual_logger);
     monitor.printHeader();
     passiveRecordInitialTotals_d_wrapper(cfg, cuda_cfg, msh, var);   // 収支の独立照合の始点 (計算開始前の総量)
+    // 二相拡散 (#4f (4)): 収束受入の独立残差監査。開始時に r0 を記録し、終了時に格納状態から組み直して判定する (無効構成は no-op)。
+    auto twoPhaseAudit = [&](int iStepAudit, bool final) {
+        if (!condTwoPhaseDiffusionActive(cfg)) return;
+        StepContext sa{cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger, iStepAudit};
+        assembleResidual(sa, 1);
+        twoPhaseAudit_d_wrapper(cfg, cuda_cfg, msh, var, iStepAudit, final);
+    };
+    twoPhaseAudit(0, false);
     cout << "Start Calculation \n";
     for (int iStep = 0 ; iStep < cfg.mainLoopCount() ; iStep++) {
         advanceOneStep(cfg , cuda_cfg , msh , mat_ns , var , fluct , pprobes , profiler , residual_logger , implicit_diag_logger , iStep);
@@ -2699,6 +2707,7 @@ int main(int argc, char** argv) {
         condCorrectionLog_d_wrapper(cfg, cuda_cfg, msh, var, cfg.mainLoopCount() - 1);
     }
 
+    twoPhaseAudit(cfg.mainLoopCount(), true);   // 最終の格納状態 (出力は書き終えている)
     limiterDiag_finalize(cfg);   // 有界性診断の末尾取りこぼしを回収して累計を確定 (plan §4.35)
 
     // 壁時計 (旧実装は clock() = CPU 時間で、GPU 待ちを含まなかった)。書式 "Time = %.3f s" は grep 互換のため維持。

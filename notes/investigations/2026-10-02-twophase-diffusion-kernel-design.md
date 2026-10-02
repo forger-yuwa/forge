@@ -694,3 +694,54 @@ res_2 は新 vs 旧と旧 vs 旧 (同じバイナリの 2 回) で同じ 83 デ�
 5. B の確認: 起動ログ `[twophase] condTwoPhaseDiffusion 1: ...`、monitor の `[twophase] step ...` (θ<1 のセル数・最小 θ・保留量・Qcut/vround が収束時 0 か)、
    `residual_history.csv` の `rms_roYv` (check_convergence が `rms_roY` 接頭辞で自動検査; 必須列にはしていない)。
 6. 報告量の CSV 化 (200 step ごと、`check_quasisteady.py --series-csv` 用) の抽出スクリプトは #1b の前提で未作成。
+
+## 15. #4f 受入修正 (2026-10-02; HEAD `b4b3d983` + 未 commit)
+
+裁定: [`notes/reviews/2026-10-02-twophase-diffusion-4e-diagnose.md`](../reviews/2026-10-02-twophase-diffusion-4e-diagnose.md) (全件採用; plan §5.1 #4e/#4f 行)。
+試験は `tests/unit/test_twophase_kernel.cu` (GPU 1 本、10 秒)、ソルバは `.build-native/transport-s3` の差分ビルド (solverConfig.hpp 不変)。
+
+### 15.1 (1) θ の float 丸め A/B (plan #4f の入力そのまま、既存 `tp_vl_update` を 1 セル probe で)
+
+| | θ (double) → float | 液 ρg (bounds 前) | 蒸気 ρv | Q | qcut / vround |
+| --- | --- | --- | --- | --- | --- |
+| A 最近接 | 0.020689656167342613 → 0.020689657 (**切り上がり**) | **−2.27373675e-13** | 0.00999999978 | 0 | 0 / 0 |
+| B 安全側 (切り上がったら 0 側の隣) | → 0.0206896551 | +2.27373675e-13 | 0.00999999978 | 0 | 0 / 0 |
+
+規則「A だけ液が負・B は全量非負・補正 0 → B を採用」により **B を採用** (`TP_THETA_ROUND_DEFAULT 1`)。安全側なら |fl(Th·δρg)| ≤ ρg (丸めは単調) なので
+ρg + fl(Th·δρg) ≥ 0 が演算上も成り立つ。採用後に T1〜T3 を再実行: 数値は採用前と同じ (T3 69 / 911 反復、出口 g 2.603278e-3 / 2.603268e-3、T 230.0209 K;
+この 1D 問題では θ<1 のセルで θ が切り上がる場合が結果を変えなかった)。
+
+### 15.2 (2) 3 セル 1000 更新 — 試験側 BE を V/Δτ = 0、停止・判定とも独立残差
+
+停止・判定は、格納 float 状態を double に上げて `ref_face` (double) で組んだ BE 残差で行う (N・w・v・l の全成分、床 6ε·max|(V/Δt)ρφ|、相対 1e-7·r0)。前処理の反復は GPU の面流束と GPU 更新。
+**PASS**: 総量の相対変化 N 5.42e-8・w 1.86e-8・v 4.22e-7・l 2.83e-7 (≤1e-6)、各更新終了時の独立残差比の最大 N 0.33・w 0.78・v 0.63・l 1.00、上限到達 0、最大反復 25、min ρv 0.1、状態補正 0。
+**#4e の FAIL (擬似 V/Δτ = 1・float で組んだ残差の停止で 3.14e-6) は記録として残す** (試験出力では [INFO] として毎回出す; 判定は本項に移した)。
+
+### 15.3 (3) 面恒等式 — ct = 0 で分子恒等式を直接
+
+同じ乱数状態で ct = 0 にし、|Σ_気相 j_k| ≤ 8ε₃₂ Σ|j_k⁰| (j⁰ は同じ float 入力の double 参照、分母を広げない) を検査:
+気相 2 種 × 2 万面 最大 0.106 (Σ|j⁰| = 0 の面 2765 は Σj = 0 を要求して成立)、3 種 × 2 万面 最大 0.139 → **PASS**。
+#4e の記録 (乱流を double で差し引き・分母に乱流の被演算子を足した形) は 0.062 / 0.132 で [INFO] に残した。J_w − J_v − J_l は ≤0.031 (不変)。
+
+### 15.4 (4) 収束受入の独立残差監査 — ソルバ内 (開始時と終了時のログ) を選んだ
+
+**選択と理由**: ソルバ内に置いた (`twoPhaseAudit_d_wrapper`, `speciesTransport_d.cu`; main の計算開始前と終了後に自動、新キー ON のときだけ)。
+- Python で res_*.h5 から組み直すには massflux (SLAU) と S3 の面組成 (リミッタ付き再構成) を Python に再実装する必要があり、それ自体が別の実装で一致の検証が要る。
+  ソルバ内なら、流れのソルバが格納状態から作った面値 (massflux・`Yface`・`Pface`) と EOS (double 研磨の温度反転; 成功判定 1e-9|e|+0.05 J/kg、#4c ハーネスの `eos_T` と同じ条件) を
+  **入力**として、二相系の残差だけを double で組み直せる (安い: 1 回の assembleResidual と 2 カーネル)。
+- 監査の中身: 面ごとに移流 ṁ·φ_face と拡散 `tp_face_flux<double>` (格納値を double に上げる; 係数 D_k・h_k・L・μ_t は本番と同じ float 値) を double で集計し、
+  相変化ソースは同じソースカーネルの値をセルごとに足す (蒸気 r_v は面ごとの蒸気流束と −S から直接組む; float の R_w − R_g は使わない)。
+  成分: 化学種 (水は総水分 w)・蒸気 v・液 g・Q2・Q1・Q0 を個別尺度で。判定は #4c と同じ max_i |r_q,i| ≤ max(1e-7·r0_q, 6ε₃₂·max_i A_q,i)
+  (r0 = 開始時の監査、A = Σ|移流| + Σ|拡散| + |S|V)。入口ピンのノードは除外 (ソルバも残差 0)。
+- **対象外 (明記)**: エネルギー (流れの全残差 [対流・粘性・熱伝導] を double で組み直していない; rms_roe は check_convergence が見る)、
+  S3 でない移流経路・node 周期 (監査はスキップしてログに出す)、massflux と面組成の値そのもの (流れのソルバの float 値を入力として扱う; 1 項あたり ε 相対で床 6ε·A の内)。
+- **監査が同じ離散式を組んでいることの照合**: 同じ組立ての float 残差 (atomicAdd) との差 max|r_double − r_float| を成分の尺度 ε·max A で見て、
+  run_0482 入力 (新キー ON, 2 step) で開始時 ≤0.74、終了時 ≤0.66 (全成分)。初回はセル局所の |flux| で割って 1e6 倍に見えた
+  (最悪セルは流束 1e-10 の壁ノードで、float の打ち消し誤差が |flux| を上回る) — 尺度の誤りとして成分尺度に直した。
+- 2 step 後の判定は NOT CONVERGED (比 w 117、g 6.7e5 など; ほぼ乾いた初期場でソースだけの液が立ち上がる途中) — 未収束を正しく返すことの確認。
+
+ログの形: `[twophase-audit] step N (initial state: r0) / (final state)`、成分ごとの行、終了時 `[twophase-audit] VERDICT: PASS | NOT CONVERGED`。
+
+### 15.5 回帰 (新キー OFF)
+
+`test_transport_gas_phase.py --base-forge <b900550c>` ALL PASS (G0 4 構成バイト一致)。twoPhaseDiffusion_d.cuh のテンプレート化と面入力の切り出しの後も T1〜T3 の数値は不変。

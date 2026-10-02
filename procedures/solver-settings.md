@@ -198,7 +198,7 @@ TP carrier の凝縮 run では `viscMethod 2` の μ・λ と化学種拡散係
 CPG carrier・pure 凝縮・`viscMethod 0` では不活性 (ログに理由、現行経路)。cell は未検証 (WARNING)。
 蒸気・液・Q は `passiveImplicitCoupling`/`speciesImplicitCoupling` の DPLUR ではなく点対角で更新する (非水種は従来どおり)。`condTwoPhaseRelax` (既定 1, 0 < ω ≤ 1) は
 蒸気・液・Q の増分の緩和 (前処理の後・制限の前)。#4c の 1D 試験では大きな擬似刻みで核生成の Q0 が周期運動になり ω 0.5 で収束した (高 CFL は保証外)。
-`residual_history.csv` に `rms_roYv` (蒸気の残差 R_w − R_g) が加わり、`check_convergence.py` の検査対象に入る (`rms_roY` 接頭辞)。monitor に `[twophase]` 行 (θ<1 のセル数・最小 θ・保留量・状態補正)。
+計算開始時と終了時に `[twophase-audit]` 行 (格納状態から化学種・蒸気・液・Q の残差を double で組み直した成分ごとの比と、終了時の `VERDICT: PASS | NOT CONVERGED`; エネルギーは対象外) が出る。収束を受け入れる根拠はこの VERDICT と check_convergence の両方。`residual_history.csv` に `rms_roYv` (蒸気の残差 R_w − R_g) が加わり、`check_convergence.py` の検査対象に入る (`rms_roY` 接頭辞)。monitor に `[twophase]` 行 (θ<1 のセル数・最小 θ・保留量・状態補正)。
 既定 0 の run の結果・列構成は変わらない。
 注意: 受動種/化学種の拡散は `viscMethod != 0` のときだけ加わる (viscMethod 0 は定数粘性ではなく「拡散なし」扱い; 化学種と同じ規約)。
 

@@ -28,79 +28,86 @@
 #define TP_NQ 3   // 液のモーメント Q2, Q1, Q0 (ρg とは別に乱流拡散する)
 
 // 面の入力 (セル 0/1 の格納値と面の係数)。D[k] は気相内の分子拡散係数 D_k (乱流分を含まない)。
-struct TpFaceIn {
+// R = float が本番 (TpFaceIn/TpFaceOut)。R = double は収束受入の独立残差監査 (#4f) が格納値を double に上げて同じ式を評価する。
+template <typename R> struct TpFaceInT {
     int   n, iw;                                 // 化学種数、凝縮種 (水) の輸送種 index
-    float rho0, rho1;                            // セルの ρ
-    float rY0[THERMO_MAX_SPECIES], rY1[THERMO_MAX_SPECIES];   // ρY_k (水は総水分 ρY_w)
-    float rg0, rg1;                              // 液 ρg
-    float rQ0[TP_NQ], rQ1[TP_NQ];                // ρQ_n (順序 Q2, Q1, Q0)
-    float f;                                     // 面の内挿重み (セル 0 側)
-    float geo, geo_abs;                          // δ/dcc (流束の係数) と |δ|/dcc (対角)
-    float D[THERMO_MAX_SPECIES];                 // D_k [m²/s]
-    float ct;                                    // 乱流の係数 μ_t,f/Sc_t
-    float h[THERMO_MAX_SPECIES];                 // h_k(T_f) [J/kg] (水は蒸気 h_v)
-    float L;                                     // 潜熱 L(T_f) [J/kg]
+    R rho0, rho1;                            // セルの ρ
+    R rY0[THERMO_MAX_SPECIES], rY1[THERMO_MAX_SPECIES];   // ρY_k (水は総水分 ρY_w)
+    R rg0, rg1;                              // 液 ρg
+    R rQ0[TP_NQ], rQ1[TP_NQ];                // ρQ_n (順序 Q2, Q1, Q0)
+    R f;                                     // 面の内挿重み (セル 0 側)
+    R geo, geo_abs;                          // δ/dcc (流束の係数) と |δ|/dcc (対角)
+    R D[THERMO_MAX_SPECIES];                 // D_k [m²/s]
+    R ct;                                    // 乱流の係数 μ_t,f/Sc_t
+    R h[THERMO_MAX_SPECIES];                 // h_k(T_f) [J/kg] (水は蒸気 h_v)
+    R L;                                     // 潜熱 L(T_f) [J/kg]
 };
+using TpFaceIn = TpFaceInT<float>;
 
 // 面の出力。J[k] は化学種の残差に足す流束 (水は総水分 J_w)。diag*[k] は輸送の点対角 (ρY_k 単位; 水は**蒸気**の対角)。
-struct TpFaceOut {
-    float J[THERMO_MAX_SPECIES];
-    float Jv, Jl, JQ[TP_NQ];
-    float q;                                     // エネルギー流束
-    float diag0[THERMO_MAX_SPECIES], diag1[THERMO_MAX_SPECIES];
-    float diagt0, diagt1;                        // 液・Q の対角 (乱流のみ)
-    float Sm;                                    // 補正前の分子流束の和 Σ j⁰ (セル 0 へ入る向き)
+template <typename R> struct TpFaceOutT {
+    R J[THERMO_MAX_SPECIES];
+    R Jv, Jl, JQ[TP_NQ];
+    R q;                                     // エネルギー流束
+    R diag0[THERMO_MAX_SPECIES], diag1[THERMO_MAX_SPECIES];
+    R diagt0, diagt1;                        // 液・Q の対角 (乱流のみ)
+    R Sm;                                    // 補正前の分子流束の和 Σ j⁰ (セル 0 へ入る向き)
     int   up0;                                   // 補正の z をセル 0 から取ったか
 };
+using TpFaceOut = TpFaceOutT<float>;
 
-TP_HD inline void tp_face_flux(const TpFaceIn& in, TpFaceOut& o)
+template <typename R> TP_HD inline R tp_max(R a, R b) { return (a > b) ? a : b; }   // fmaxf と同値 (NaN を除く)
+template <typename R> TP_HD inline R tp_abs(R a) { return (a < R(0)) ? -a : a; }
+
+template <typename R>
+TP_HD inline void tp_face_flux(const TpFaceInT<R>& in, TpFaceOutT<R>& o)
 {
     const int n = in.n, iw = in.iw;
     // 気相組成 z (セルごと; Σz で正規化)
-    const float rgas0 = fmaxf(in.rho0 - in.rg0, 1.0e-30f), rgas1 = fmaxf(in.rho1 - in.rg1, 1.0e-30f);
-    const float ig0 = 1.0f/rgas0, ig1 = 1.0f/rgas1;
-    float z0[THERMO_MAX_SPECIES], z1[THERMO_MAX_SPECIES];
-    float s0 = 0.0f, s1 = 0.0f;
+    const R rgas0 = tp_max<R>(in.rho0 - in.rg0, R(1.0e-30)), rgas1 = tp_max<R>(in.rho1 - in.rg1, R(1.0e-30));
+    const R ig0 = R(1.0)/rgas0, ig1 = R(1.0)/rgas1;
+    R z0[THERMO_MAX_SPECIES], z1[THERMO_MAX_SPECIES];
+    R s0 = R(0), s1 = R(0);
     for (int k = 0; k < n; ++k) {
-        const float a0 = (k == iw) ? (in.rY0[k] - in.rg0) : in.rY0[k];
-        const float a1 = (k == iw) ? (in.rY1[k] - in.rg1) : in.rY1[k];
+        const R a0 = (k == iw) ? (in.rY0[k] - in.rg0) : in.rY0[k];
+        const R a1 = (k == iw) ? (in.rY1[k] - in.rg1) : in.rY1[k];
         z0[k] = a0*ig0; z1[k] = a1*ig1;
         s0 += z0[k]; s1 += z1[k];
     }
-    const float n0 = 1.0f/((s0 > 1.0e-30f) ? s0 : 1.0e-30f), n1 = 1.0f/((s1 > 1.0e-30f) ? s1 : 1.0e-30f);
+    const R n0 = R(1.0)/((s0 > R(1.0e-30)) ? s0 : R(1.0e-30)), n1 = R(1.0)/((s1 > R(1.0e-30)) ? s1 : R(1.0e-30));
     for (int k = 0; k < n; ++k) { z0[k] *= n0; z1[k] *= n1; }
-    const float g = 1.0f - in.f;
-    const float rgf = in.f*rgas0 + g*rgas1;
+    const R g = R(1.0) - in.f;
+    const R rgf = in.f*rgas0 + g*rgas1;
 
     // 分子流束 j⁰ と和
-    float jm[THERMO_MAX_SPECIES];
-    float Sm = 0.0f;
+    R jm[THERMO_MAX_SPECIES];
+    R Sm = R(0.0);
     for (int k = 0; k < n; ++k) {
         jm[k] = rgf*in.D[k]*(z1[k] - z0[k])*in.geo;
         Sm += jm[k];
     }
     // 補正の質量流束 −Σj⁰ (セル 0 へ入る向き) が負 = セル 0 から出る → セル 0 の z (風上)
-    const int up0 = (Sm >= 0.0f) ? 1 : 0;
-    const float* zc = up0 ? z0 : z1;
-    const float ir0 = 1.0f/fmaxf(in.rho0, 1.0e-30f), ir1 = 1.0f/fmaxf(in.rho1, 1.0e-30f);
-    const float ctg = in.ct*in.geo;
+    const int up0 = (Sm >= R(0.0)) ? 1 : 0;
+    const R* zc = up0 ? z0 : z1;
+    const R ir0 = R(1.0)/tp_max<R>(in.rho0, R(1.0e-30)), ir1 = R(1.0)/tp_max<R>(in.rho1, R(1.0e-30));
+    const R ctg = in.ct*in.geo;
 
-    float q = 0.0f;
+    R q = R(0.0);
     for (int k = 0; k < n; ++k) {
-        const float jc = jm[k] - zc[k]*Sm;
+        const R jc = jm[k] - zc[k]*Sm;
         if (k == iw) {
-            const float v0 = (in.rY0[k] - in.rg0)*ir0, v1 = (in.rY1[k] - in.rg1)*ir1;
+            const R v0 = (in.rY0[k] - in.rg0)*ir0, v1 = (in.rY1[k] - in.rg1)*ir1;
             o.Jv = jc + ctg*(v1 - v0);
         } else {
             o.J[k] = jc + ctg*(in.rY1[k]*ir1 - in.rY0[k]*ir0);
             q += in.h[k]*o.J[k];
         }
         // 対角: 分子 (気相) + 乱流 + 補正の流出側
-        const float dm = rgf*in.D[k]*in.geo_abs;
+        const R dm = rgf*in.D[k]*in.geo_abs;
         o.diag0[k] = dm*ig0 + in.ct*in.geo_abs*ir0;
         o.diag1[k] = dm*ig1 + in.ct*in.geo_abs*ir1;
     }
-    const float aS = fabsf(Sm);
+    const R aS = tp_abs<R>(Sm);
     for (int k = 0; k < n; ++k) {
         if (up0) o.diag0[k] += aS*ig0; else o.diag1[k] += aS*ig1;
     }
@@ -138,7 +145,13 @@ struct TpCellOut {
     double qcut, vround;             // 状態を書き換えた補正 (Q の非負化、丸めによる蒸気の負)
 };
 
-TP_HD inline void tp_vl_update(const TpCellIn& c, TpCellOut& o)
+// thetaRound: θ (double) を float にするときの丸め。1 = 切り上がったら 0 側の隣の float へ (安全側; 既定)、0 = 最近接 (#4e; 判別用)。
+//   #4f (1) の 1 セル反例 (rYw 0.01f, rg 3e-6f, Rg −1.45e-4f): 最近接は θ_vg を 1 ulp 越えて液 ρg = −2.27e-13、安全側は +2.27e-13・補正 0 → 安全側を採用 (2026-10-02)。
+//   安全側なら |fl(Th·δρg)| ≤ ρg (丸めは単調) なので ρg + fl(Th·δρg) ≥ 0 が成り立つ。
+#ifndef TP_THETA_ROUND_DEFAULT
+#define TP_THETA_ROUND_DEFAULT 1
+#endif
+TP_HD inline void tp_vl_update(const TpCellIn& c, TpCellOut& o, int thetaRound = TP_THETA_ROUND_DEFAULT)
 {
     const float rv = c.Rw - c.Rg;                      // 全残差変換 (float の減算)
     float dv = rv/(c.M + c.Dv);
@@ -159,7 +172,8 @@ TP_HD inline void tp_vl_update(const TpCellIn& c, TpCellOut& o)
     if ((double)dv < 0.0) th = fmin(th, rvs/(-(double)dv));
     if ((double)dg < 0.0) th = fmin(th, (double)c.rg/(-(double)dg));
     if (!(th > 0.0)) th = 0.0;   // NaN も 0 (動かさない; 残差が下がらないことで監視に出る)
-    const float Th = (float)th;
+    float Th = (float)th;
+    if (thetaRound != 0 && (double)Th > th) Th = nextafterf(Th, 0.0f);   // 共通の実効 θ を安全側へ (θ_vg の境界を越えない)
     o.theta = th;
     o.withheld_v = (1.0 - th)*fabs((double)dv);
     o.withheld_g = (1.0 - th)*fabs((double)dg);

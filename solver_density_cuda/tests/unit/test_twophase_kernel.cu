@@ -32,10 +32,19 @@ __global__ void k_face(int nF, TpFaceIn* in, const float* T0, const float* T1, c
     }
     tp_face_flux(a, out[i]);
 }
-__global__ void k_update(int n, const TpCellIn* in, TpCellOut* out)
+__global__ void k_update(int n, const TpCellIn* in, TpCellOut* out, int thetaRound)
 {
     const int i = blockIdx.x*blockDim.x + threadIdx.x;
-    if (i < n) tp_vl_update(in[i], out[i]);
+    if (i < n) tp_vl_update(in[i], out[i], thetaRound);
+}
+// 液の更新値を bounds の前で見るための 1 セル版 (#4f (1)): 更新本体と同じ関数を通し、θ の float 値も返す。
+__global__ void k_update_probe(TpCellIn in, int thetaRound, TpCellOut* out, float* Th)
+{
+    tp_vl_update(in, *out, thetaRound);
+    // 実効 θ (float) を同じ規則で再現して返す
+    float t = (float)out->theta;
+    if (thetaRound != 0 && (double)t > out->theta) t = nextafterf(t, 0.0f);
+    *Th = t;
 }
 
 struct Gpu {
@@ -58,7 +67,7 @@ struct Gpu {
         const int n = (int)in.size();
         if (n > capC) { cudaFree(cin); cudaFree(cout_); CK(cudaMalloc(&cin, n*sizeof(TpCellIn))); CK(cudaMalloc(&cout_, n*sizeof(TpCellOut))); capC = n; }
         CK(cudaMemcpy(cin, in.data(), n*sizeof(TpCellIn), cudaMemcpyHostToDevice));
-        k_update<<<(n + 127)/128, 128>>>(n, cin, cout_);
+        k_update<<<(n + 127)/128, 128>>>(n, cin, cout_, TP_THETA_ROUND_DEFAULT);
         CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
         out.resize(n);
         CK(cudaMemcpy(out.data(), cout_, n*sizeof(TpCellOut), cudaMemcpyDeviceToHost));
@@ -318,9 +327,22 @@ static void test_T2_identities(int nF)
             const double Jw = o.J[a.iw], Jv = o.Jv, Jl = o.Jl;
             w2 = std::max(w2, fabs(Jw - Jv - Jl)/(8*EPS32*(fabs(Jw) + fabs(Jv) + fabs(Jl)) + 1e-300));
         }
-        char b[256];
-        snprintf(b, sizeof b, "T2 (ii) 気相 %d 種 × %d 面: |Σj_k|/(8ε Σ|j⁰|) 最大 %.3f、|J_w − J_v − J_l|/(8ε Σ|J|) 最大 %.3f", nG, nF, w1, w2);
-        verdict(w1 <= 1.0 && w2 <= 1.0, b);
+        // #4f (3): 分子の恒等式は同じ状態で ct = 0 にして直接検査する (許容は §6 の 8ε₃₂ Σ|j_k⁰|; 乱流の差し引きを混ぜない)。
+        //   上の w1 は乱流を double で差し引き、分母を 8ε(Σ|j⁰| + 乱流の被演算子) に広げていた (#4e の記録; 判定に使わない)。
+        std::vector<TpFaceIn> in0 = in; for (auto& a : in0) a.ct = 0.0f;
+        std::vector<TpFaceOut> out0; G.faces(in0, t, t, false, out0);
+        double w3 = 0; long nz = 0;
+        for (int i = 0; i < nF; ++i) {
+            RefFace r; ref_face(in0[i], r);
+            double sj = 0, sa = 0;
+            for (int k = 0; k < nG; ++k) { sj += (k == in0[i].iw) ? (double)out0[i].Jv : (double)out0[i].J[k]; sa += fabs(r.j0[k]); }
+            if (sa == 0.0) { if (sj != 0.0) w3 = INFINITY; ++nz; continue; }
+            w3 = std::max(w3, fabs(sj)/(8*EPS32*sa));
+        }
+        printf("[INFO] T2 (ii) #4e の記録 (乱流を差し引き・分母を広げた形): 気相 %d 種 |Σj_k|/(8ε(Σ|j⁰|+乱流)) 最大 %.3f\n", nG, w1);
+        char b[320];
+        snprintf(b, sizeof b, "T2 (ii) 気相 %d 種 × %d 面: ct = 0 で |Σ_気相 j_k|/(8ε₃₂ Σ|j_k⁰|) 最大 %.3f (Σ|j⁰| = 0 の面 %ld)、|J_w − J_v − J_l|/(8ε Σ|J|) 最大 %.3f", nG, nF, w3, nz, w2);
+        verdict(w3 <= 1.0 && w2 <= 1.0, b);
     }
 }
 
@@ -413,7 +435,9 @@ static void test_T2_nonneg_and_conservation(bool quick)
         double sy = 0; for (int i = 0; i < 3; ++i) sy = std::max(sy, fabs((double)b.rW[i] + b.rN[i] - 1.0));
         char m[320]; snprintf(m, sizeof m, "T2 3 セル判別 B %d 更新: 総液量・各種総量の相対変化 最大 %.2e (液 %.2e)、min ρv %.3e、上限到達 %d、最大反復 %d、状態補正 %.2e、|ΣρY−ρ| %.1e",
                               nupd, e, fabs(t1[0] - t0[0])/t0[0], minrv, caps, maxit, corr, sy);
-        verdict(e <= 1e-6 && minrv >= 0.0 && caps == 0, m);
+        // 1000 更新は #4e の記録 (試験側 BE が擬似 V/Δτ=1・float 停止のとき FAIL 3.14e-6)。判定は #4f (2) の独立残差版 (test_4f_box) に移した。
+        if (nupd == 1) verdict(e <= 1e-6 && minrv >= 0.0 && caps == 0, m);
+        else printf("[INFO] #4e の記録 (旧判定 FAIL, 判定は #4f (2) へ): %s\n", m);
     }
     // 診断 (判定外): 1000 更新の累積が停止の床と前処理 (擬似時間の V/Δτ) のどちらで決まるか
     for (const double* v : (const double[][2]){{1.0, 2.0}, {0.0, 6.0}}) {
@@ -618,6 +642,127 @@ static void test_T3(const Ctx& c, int cap)
     DT_MAX = 1.0;
 }
 
+// ------------------------------------------------------------------ #4f (1) θ 丸めの判別 A/B (plan §5.1 #4f の入力そのまま)
+static void test_4f_theta()
+{
+    printf("\n=== #4f (1) θ の float 丸め A/B: 1 セル (M=V=ρ=ω=1、輸送対角・ソース Jacobian 0、rYw 0.01f・rg 3e-6f・Rw 0・Rg −1.45e-4f) ===\n");
+    TpCellIn c; memset(&c, 0, sizeof c);
+    c.M = 1.0f; c.V = 1.0f; c.rho = 1.0f; c.omega = 1.0f;
+    c.rYw = 0.01f; c.rg = 3e-6f; c.Rw = 0.0f; c.Rg = -1.45e-4f;
+    c.dg_max = 0.005; c.dT_max = 1.0; c.L = 2.5e6; c.cveff = 1000.0;
+    TpCellOut* d_o; float* d_t; CK(cudaMalloc(&d_o, sizeof(TpCellOut))); CK(cudaMalloc(&d_t, sizeof(float)));
+    TpCellOut o[2]; float Th[2];
+    for (int m = 0; m < 2; ++m) {
+        k_update_probe<<<1, 1>>>(c, m, d_o, d_t); CK(cudaGetLastError()); CK(cudaDeviceSynchronize());
+        CK(cudaMemcpy(&o[m], d_o, sizeof(TpCellOut), cudaMemcpyDeviceToHost)); CK(cudaMemcpy(&Th[m], d_t, sizeof(float), cudaMemcpyDeviceToHost));
+        const double rv = (double)o[m].rYw - (double)o[m].rg;
+        printf("[INFO] %s: θ (double) %.17g → float %.9g (%s)、液 ρg %.9g、蒸気 ρv %.9g、Q [%g %g %g]、qcut %.3g、vround %.3g\n",
+               m ? "B (切り上がったら 0 側の隣)" : "A (最近接)", o[m].theta, (double)Th[m], ((double)Th[m] > o[m].theta) ? "切り上がり" : "切り下がりか一致",
+               (double)o[m].rg, rv, o[m].rQ[0], o[m].rQ[1], o[m].rQ[2], o[m].qcut, o[m].vround);
+    }
+    auto nonneg = [](const TpCellOut& x) { return x.rg >= 0.0f && (double)x.rYw - (double)x.rg >= 0.0 && x.rQ[0] >= 0.0f && x.rQ[1] >= 0.0f && x.rQ[2] >= 0.0f; };
+    const bool aNeg = !(o[0].rg >= 0.0f), bOk = nonneg(o[1]) && o[1].qcut == 0.0 && o[1].vround == 0.0;
+    const char* rule;
+    if (aNeg && bOk) rule = "A だけ液が負・B は全量非負・補正 0 → B を採用";
+    else if (aNeg) rule = "A・B とも負 → commit を調べる";
+    else rule = "A も非負 → GPU での反例不成立 (演算順との差を確認)";
+    printf("[判定] #4f (1): %s\n", rule);
+    verdict(nonneg(o[1]) && o[1].qcut == 0.0 && o[1].vround == 0.0, "#4f (1) B (安全側の丸め) で液・蒸気・Q が非負、qcut・vround 0");
+    CK(cudaFree(d_o)); CK(cudaFree(d_t));
+}
+
+// ------------------------------------------------------------------ #4f (2) 3 セル 1000 更新: 試験側 BE を V/Δτ = 0 で、全成分を独立残差で
+// 停止・判定とも、格納 float 状態を double に上げて ref_face (double) で組んだ BE 残差 (独立残差) で行う。床 6ε·max|(V/Δt)ρφ|、相対 1e-7·r0。
+static void box_indep_resid(const Box& b, const Box& bn, double r[4][8], double sc[4])
+{
+    const int N = b.N;
+    for (int q = 0; q < 4; ++q) { for (int i = 0; i < N; ++i) r[q][i] = 0.0; sc[q] = 0.0; }
+    for (int i = 0; i + 1 < N; ++i) {
+        TpFaceIn a; memset(&a, 0, sizeof a);
+        a.n = 2; a.iw = 1; a.f = 0.5f; a.geo = 1.0f; a.geo_abs = 1.0f; a.rho0 = a.rho1 = 1.0f;
+        a.rY0[0] = b.rN[i]; a.rY0[1] = b.rW[i]; a.rY1[0] = b.rN[i + 1]; a.rY1[1] = b.rW[i + 1];
+        a.rg0 = b.rG[i]; a.rg1 = b.rG[i + 1]; a.D[0] = a.D[1] = (float)b.D; a.ct = (float)b.ct;
+        RefFace f; ref_face(a, f);
+        const double F[4] = {f.J[0], f.J[1], f.Jv, f.Jl};   // N, w, v, l (セル i へ入る向き)
+        for (int q = 0; q < 4; ++q) { r[q][i] += F[q]; r[q][i + 1] -= F[q]; }
+    }
+    for (int i = 0; i < N; ++i) {
+        const double x[4] = {b.rN[i], b.rW[i], (double)b.rW[i] - b.rG[i], b.rG[i]}, xn[4] = {bn.rN[i], bn.rW[i], (double)bn.rW[i] - bn.rG[i], bn.rG[i]};
+        for (int q = 0; q < 4; ++q) { r[q][i] -= (x[q] - xn[q]); sc[q] = std::max(sc[q], fabs(x[q])); }
+    }
+}
+static int be_solve_indep(Box& b, const Box& bn, int cap, double* minrv, double* corr, bool* capHit, double ratio_out[4])
+{
+    const int N = b.N; double r0[4] = {0, 0, 0, 0};
+    *capHit = false;
+    for (int it = 0; it <= cap; ++it) {
+        double r[4][8], sc[4]; box_indep_resid(b, bn, r, sc);
+        bool pass = true;
+        for (int q = 0; q < 4; ++q) {
+            double m = 0; for (int i = 0; i < N; ++i) m = std::max(m, fabs(r[q][i]));
+            if (it == 0) r0[q] = m;
+            const double tol = std::max(1e-7*r0[q], 6.0*EPS32*sc[q]);
+            ratio_out[q] = (tol > 0) ? m/tol : (m == 0 ? 0.0 : INFINITY);
+            if (!(ratio_out[q] <= 1.0)) pass = false;
+        }
+        if (pass && it > 0) return it;
+        if (it == cap) { *capHit = true; return it; }
+        // 反復 (前処理): GPU の面流束と GPU 更新、擬似時間 V/Δτ = 0 (対角は BE の V/Δt = 1 だけ)
+        std::vector<TpFaceIn> in(N - 1);
+        for (int i = 0; i + 1 < N; ++i) {
+            TpFaceIn& a = in[i]; memset(&a, 0, sizeof a);
+            a.n = 2; a.iw = 1; a.f = 0.5f; a.geo = 1.0f; a.geo_abs = 1.0f; a.rho0 = a.rho1 = 1.0f;
+            a.rY0[0] = b.rN[i]; a.rY0[1] = b.rW[i]; a.rY1[0] = b.rN[i + 1]; a.rY1[1] = b.rW[i + 1];
+            a.rg0 = b.rG[i]; a.rg1 = b.rG[i + 1]; a.D[0] = a.D[1] = (float)b.D; a.ct = (float)b.ct;
+        }
+        std::vector<float> t; std::vector<TpFaceOut> out; G.faces(in, t, t, false, out);
+        std::vector<float> RN(N, 0.f), RW(N, 0.f), RG(N, 0.f), dN(N, 0.f), dW(N, 0.f), dG(N, 0.f);
+        for (int i = 0; i + 1 < N; ++i) {
+            RN[i] += out[i].J[0]; RN[i + 1] -= out[i].J[0]; RW[i] += out[i].J[1]; RW[i + 1] -= out[i].J[1]; RG[i] += out[i].Jl; RG[i + 1] -= out[i].Jl;
+            dN[i] += out[i].diag0[0]; dN[i + 1] += out[i].diag1[0]; dW[i] += out[i].diag0[1]; dW[i + 1] += out[i].diag1[1];
+            dG[i] += out[i].diagt0; dG[i + 1] += out[i].diagt1;
+        }
+        for (int i = 0; i < N; ++i) { RN[i] -= (b.rN[i] - bn.rN[i]); RW[i] -= (b.rW[i] - bn.rW[i]); RG[i] -= (b.rG[i] - bn.rG[i]); }
+        std::vector<TpCellIn> ci(N); std::vector<TpCellOut> co;
+        for (int i = 0; i < N; ++i) {
+            TpCellIn& c = ci[i]; memset(&c, 0, sizeof c);
+            c.M = 1.0f; c.V = 1.0f; c.Rw = RW[i]; c.Rg = RG[i]; c.Dv = dW[i]; c.Dg = dG[i];
+            c.DQ[0] = c.DQ[1] = c.DQ[2] = 1.0f;
+            c.rYw = b.rW[i]; c.rg = b.rG[i]; c.rho = 1.0f; c.omega = 1.0f; c.dg_max = 1e30; c.dT_max = 1e30; c.L = 0; c.cveff = 1;
+        }
+        G.cells(ci, co);
+        for (int i = 0; i < N; ++i) {
+            b.rN[i] += RN[i]/(1.0f + dN[i]);
+            b.rG[i] = co[i].rg; b.rW[i] = co[i].rYw;
+            *corr += co[i].qcut + co[i].vround;
+            *minrv = std::min(*minrv, (double)b.rW[i] - (double)b.rG[i]);
+        }
+    }
+    return cap;
+}
+static void test_4f_box(bool quick)
+{
+    const int nupd = quick ? 100 : 1000;
+    printf("\n=== #4f (2) 3 セル判別 B %d 更新: 試験側 BE を V/Δτ = 0、停止・判定とも独立残差 (double, 全成分 N・w・v・l)、床 6ε ===\n", nupd);
+    Box b; b.N = 3; b.ct = 1.0; b.D = 0.0;
+    b.rG = {0.1f, 0.2f, 0.2f}; b.rW = {0.2f, 0.3f, 0.3f}; b.rN = {0.8f, 0.7f, 0.7f};
+    double t0[4] = {0, 0, 0, 0}; for (int i = 0; i < 3; ++i) { t0[0] += b.rN[i]; t0[1] += b.rW[i]; t0[2] += (double)b.rW[i] - b.rG[i]; t0[3] += b.rG[i]; }
+    double minrv = INFINITY, corr = 0, rmax[4] = {0, 0, 0, 0}; int caps = 0, maxit = 0;
+    for (int u = 0; u < nupd; ++u) {
+        Box bn = b; bool ch; double rr[4];
+        const int it = be_solve_indep(b, bn, 5000, &minrv, &corr, &ch, rr);
+        caps += ch; maxit = std::max(maxit, it);
+        for (int q = 0; q < 4; ++q) rmax[q] = std::max(rmax[q], rr[q]);
+    }
+    double t1[4] = {0, 0, 0, 0}; for (int i = 0; i < 3; ++i) { t1[0] += b.rN[i]; t1[1] += b.rW[i]; t1[2] += (double)b.rW[i] - b.rG[i]; t1[3] += b.rG[i]; }
+    double e[4], em = 0; for (int q = 0; q < 4; ++q) { e[q] = fabs(t1[q] - t0[q])/t0[q]; em = std::max(em, e[q]); }
+    double rm = 0; for (int q = 0; q < 4; ++q) rm = std::max(rm, rmax[q]);
+    char m[480];
+    snprintf(m, sizeof m, "#4f (2) %d 更新: 総量の相対変化 N %.2e・w %.2e・v %.2e・l %.2e (≤1e-6)、各更新の終了時の独立残差比 最大 N %.2f・w %.2f・v %.2f・l %.2f、上限到達 %d、最大反復 %d、min ρv %.3e、状態補正 %.2e",
+             nupd, e[0], e[1], e[2], e[3], rmax[0], rmax[1], rmax[2], rmax[3], caps, maxit, minrv, corr);
+    verdict(em <= 1e-6 && rm <= 1.0 && caps == 0 && minrv >= 0.0, m);
+}
+
 int main(int argc, char** argv)
 {
     const bool quick = (argc > 1 && !strcmp(argv[1], "--quick"));
@@ -648,7 +793,9 @@ int main(int argc, char** argv)
     test_T2_identities(quick ? 2000 : 20000);
     G.sp = sp2;
     test_T2_nonneg_and_conservation(quick);
+    test_4f_box(quick);
     test_T2_energy(c);
+    test_4f_theta();
     test_T3(c, quick ? 3000 : 20000);
     printf("\n%s\n", g_fail ? "FAIL あり" : "ALL PASS");
     return g_fail ? 1 : 0;

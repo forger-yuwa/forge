@@ -2021,23 +2021,22 @@ double passiveFctLastRhRel()  { return g_fct_last_rh_rel; }
 //   境界ピン・周期集約の前 (condensationTransport_d_wrapper の末尾)。
 // =============================================================================
 namespace {
-__global__ void twophase_diffusion_d(
-    geom_int nCells, geom_int nNormalHaloPlanes, geom_int* normal_halo_planes, geom_int* plane_cells,
+// 面の入力 (格納値と面の係数) を組む。本番カーネル twophase_diffusion_d と収束受入の監査 twophase_audit_face_d (#4f) が共有する。
+// node 境界半割面 (流束 0) は false。
+__device__ inline bool tp_build_face_in(
+    geom_int nCells, geom_int ip, geom_int* plane_cells,
     geom_float* ccx, geom_float* ccy, geom_float* ccz,
     geom_float* fx, geom_float* sx, geom_float* sy, geom_float* sz, geom_float* ss,
     const SpeciesThermoF* sp, int nSpecies, int iw,
-    flow_float** roY, flow_float** res_roY, flow_float** transport_diag,
-    flow_float** rophi, flow_float** res_phi, flow_float** diag_phi,   // 受動種ポインタ配列のモーメント先頭 (順序 g, Q2, Q1, Q0)
+    flow_float** roY, flow_float** rophi,
     flow_float* ro, flow_float* T, flow_float* P, flow_float* vis_lam, flow_float* vis_turb,
-    flow_float* res_roe, int diffMethod, flow_float Sc, flow_float Sc_t, int isNode, CondSpeciesProps cprops)
+    int diffMethod, flow_float Sc, flow_float Sc_t, int isNode, const CondSpeciesProps& cprops,
+    TpFaceIn& in, geom_int& ic0, geom_int& ic1)
 {
-    const geom_int ih = blockDim.x * blockIdx.x + threadIdx.x;
-    if (ih >= nNormalHaloPlanes) return;
-    const geom_int ip  = normal_halo_planes[ih];
-    const geom_int ic0 = plane_cells[2 * ip + 0];
-    const geom_int ic1 = plane_cells[2 * ip + 1];
+    ic0 = plane_cells[2 * ip + 0];
+    ic1 = plane_cells[2 * ip + 1];
     // node 境界半割面は流束 0 (species_diffusion_d と同方針: Dirichlet はピン、Neumann は流束 0)
-    if (isNode != 0 && (ic0 >= nCells || ic1 >= nCells)) return;
+    if (isNode != 0 && (ic0 >= nCells || ic1 >= nCells)) return false;
 
     const flow_float f   = fx[ip];
     const flow_float sxx = sx[ip], syy = sy[ip], szz = sz[ip], sss = ss[ip];
@@ -2049,7 +2048,6 @@ __global__ void twophase_diffusion_d(
     const flow_float Dsafe = (fabsf(denom) < 1.0e-30f) ? ((denom>=0.0f)?1.0e-30f:-1.0e-30f) : denom;
     const flow_float delta = dcc * sss * sss / Dsafe;       // over-relaxed 法線 (species_diffusion_d と同じ)
 
-    TpFaceIn in;
     in.n = nSpecies; in.iw = iw; in.f = f;
     in.rho0 = max(ro[ic0], (flow_float)1.0e-30f);
     in.rho1 = max(ro[ic1], (flow_float)1.0e-30f);
@@ -2085,6 +2083,24 @@ __global__ void twophase_diffusion_d(
     in.ct = (mut_face > 0.0f) ? mut_face/Sc_t : 0.0f;
     in.L  = (flow_float)cond_latent(cprops, (double)T_face);   // EOS と同じ潜熱 (double を 1 回評価)
 
+    return true;
+}
+
+__global__ void twophase_diffusion_d(
+    geom_int nCells, geom_int nNormalHaloPlanes, geom_int* normal_halo_planes, geom_int* plane_cells,
+    geom_float* ccx, geom_float* ccy, geom_float* ccz,
+    geom_float* fx, geom_float* sx, geom_float* sy, geom_float* sz, geom_float* ss,
+    const SpeciesThermoF* sp, int nSpecies, int iw,
+    flow_float** roY, flow_float** res_roY, flow_float** transport_diag,
+    flow_float** rophi, flow_float** res_phi, flow_float** diag_phi,   // 受動種ポインタ配列のモーメント先頭 (順序 g, Q2, Q1, Q0)
+    flow_float* ro, flow_float* T, flow_float* P, flow_float* vis_lam, flow_float* vis_turb,
+    flow_float* res_roe, int diffMethod, flow_float Sc, flow_float Sc_t, int isNode, CondSpeciesProps cprops)
+{
+    const geom_int ih = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ih >= nNormalHaloPlanes) return;
+    TpFaceIn in; geom_int ic0, ic1;
+    if (!tp_build_face_in(nCells, normal_halo_planes[ih], plane_cells, ccx, ccy, ccz, fx, sx, sy, sz, ss, sp, nSpecies, iw,
+                          roY, rophi, ro, T, P, vis_lam, vis_turb, diffMethod, Sc, Sc_t, isNode, cprops, in, ic0, ic1)) return;
     TpFaceOut o;
     tp_face_flux(in, o);
 
@@ -2161,4 +2177,160 @@ void speciesRenormalizeTwoPhase_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cf
         reasonsRn, iwRn, var.c_d["volume"], passive_periodic_root(cfg, msh), g_p_rophi_dev + g_qMom0);
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+}
+
+// =============================================================================
+// 収束受入の独立残差監査 (plans/active/condensation-two-phase-transport.md §5.1 #4f (4); 設計メモ §15)。
+//   格納状態から呼び出し側が assembleResidual を 1 回回して EOS (double 研磨の温度反転)・面値 (massflux と S3 の面組成)・
+//   気相物性を作り直した後、二相系の各成分 (化学種 [水は総水分 w]・蒸気 v = w − l・液 l・Q2/Q1/Q0) の定常残差を
+//   **面ごとの流束を double で組み直して double で集計**する (float の atomicAdd 残差や R_w − R_g の float 減算を使わない)。
+//   移流は ṁ·φ_face (massflux・面組成は流れのソルバが作った float の値を入力として扱う)、拡散は tp_face_flux<double>
+//   (格納値を double に上げる; D_k・h_k・L・μ_t の係数は本番と同じ float 値)、相変化ソースは同じソースカーネルの値 (セルごとの項)。
+//   判定は成分ごと: max_i |r_q,i| ≤ max(1e-7·r0_q, 6ε₃₂·max_i A_q,i) (r0 = 計算開始時の監査、A = Σ|移流| + Σ|拡散| + |S|V)。
+//   エネルギーは流れの全残差 (対流・粘性・熱伝導) を double で組み直していないので対象外 (rms_roe は check_convergence が見る)。
+// =============================================================================
+namespace {
+__global__ void twophase_audit_face_d(
+    geom_int nCells, geom_int nNormalHaloPlanes, geom_int* normal_halo_planes, geom_int* plane_cells,
+    geom_float* ccx, geom_float* ccy, geom_float* ccz,
+    geom_float* fx, geom_float* sx, geom_float* sy, geom_float* sz, geom_float* ss,
+    const SpeciesThermoF* sp, int nSpecies, int iw, flow_float** roY, flow_float** rophi,
+    flow_float* ro, flow_float* T, flow_float* P, flow_float* vis_lam, flow_float* vis_turb,
+    int diffMethod, flow_float Sc, flow_float Sc_t, int isNode, CondSpeciesProps cprops,
+    const flow_float* massflux, const flow_float* Yface, const flow_float* Pface, int nPassive, int q0,
+    int NQ, double* r, double* A)
+{
+    const geom_int ih = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ih >= nNormalHaloPlanes) return;
+    const geom_int ip  = normal_halo_planes[ih];
+    const geom_int c0 = plane_cells[2 * ip + 0];
+    const geom_int c1 = plane_cells[2 * ip + 1];
+    const double mdot = (double)massflux[ip];
+    const bool nodeBnd = (isNode != 0 && c1 >= nCells);
+    const flow_float inv0 = 1.0f/max(ro[c0], (flow_float)1.0e-30);   // 境界ノード自身の組成 (species_advection_faceY_d と同じ float)
+    auto add = [&](int q, double F) {   // F: セル 0 へ入る向き
+        if (c0 < nCells) { atomicAdd(&r[(size_t)c0*NQ + q],  F); atomicAdd(&A[(size_t)c0*NQ + q], fabs(F)); }
+        if (c1 < nCells) { atomicAdd(&r[(size_t)c1*NQ + q], -F); atomicAdd(&A[(size_t)c1*NQ + q], fabs(F)); }
+    };
+    // 移流 (S3 面値; node 境界半割面は境界ノード自身の値)
+    double Yw_f = 0.0, g_f = 0.0;
+    for (int s = 0; s < nSpecies; ++s) {
+        const double Yf = nodeBnd ? (double)(roY[s][c0]*inv0) : (double)Yface[(size_t)ip*nSpecies + s];
+        if (s == iw) Yw_f = Yf;
+        add(s, -mdot*Yf);
+    }
+    for (int m = 0; m < 1 + TP_NQ; ++m) {
+        const double Pf = nodeBnd ? (double)(rophi[m][c0]*inv0) : (double)Pface[(size_t)ip*nPassive + q0 + m];
+        if (m == 0) g_f = Pf;
+        add(nSpecies + 1 + m, -mdot*Pf);
+    }
+    add(nSpecies, -mdot*(Yw_f - g_f));   // 蒸気
+    // 拡散 (格納値を double に上げて同じ式)
+    TpFaceIn in; geom_int ic0, ic1;
+    if (!tp_build_face_in(nCells, ip, plane_cells, ccx, ccy, ccz, fx, sx, sy, sz, ss, sp, nSpecies, iw,
+                          roY, rophi, ro, T, P, vis_lam, vis_turb, diffMethod, Sc, Sc_t, isNode, cprops, in, ic0, ic1)) return;
+    TpFaceInT<double> d;
+    d.n = in.n; d.iw = in.iw;
+    d.rho0 = in.rho0; d.rho1 = in.rho1; d.rg0 = in.rg0; d.rg1 = in.rg1; d.f = in.f; d.geo = in.geo; d.geo_abs = in.geo_abs;
+    d.ct = in.ct; d.L = in.L;
+    for (int s = 0; s < nSpecies; ++s) { d.rY0[s] = in.rY0[s]; d.rY1[s] = in.rY1[s]; d.D[s] = in.D[s]; d.h[s] = in.h[s]; }
+    for (int m = 0; m < TP_NQ; ++m) { d.rQ0[m] = in.rQ0[m]; d.rQ1[m] = in.rQ1[m]; }
+    TpFaceOutT<double> o;
+    tp_face_flux(d, o);
+    for (int s = 0; s < nSpecies; ++s) add(s, o.J[s]);
+    add(nSpecies, o.Jv);
+    add(nSpecies + 1, o.Jl);
+    for (int m = 0; m < TP_NQ; ++m) add(nSpecies + 2 + m, o.JQ[m]);
+}
+
+// mode 0: float の確定残差 (assembleResidual の結果; 比較用) を F に写す。mode 1: res_* に入れたソースだけの値を r・A に足す。
+__global__ void twophase_audit_cell_d(geom_int nCells, int nSpecies, int iw, flow_float** res_roY, flow_float** res_phi,
+                                      int NQ, int mode, double* r, double* A, double* F)
+{
+    const geom_int c = blockDim.x * blockIdx.x + threadIdx.x;
+    if (c >= nCells) return;
+    const size_t b = (size_t)c*NQ;
+    if (mode == 0) {
+        for (int s = 0; s < nSpecies; ++s) F[b + s] = (double)res_roY[s][c];
+        F[b + nSpecies] = (double)res_roY[iw][c] - (double)res_phi[0][c];
+        for (int m = 0; m < 1 + TP_NQ; ++m) F[b + nSpecies + 1 + m] = (double)res_phi[m][c];
+    } else {
+        for (int m = 0; m < 1 + TP_NQ; ++m) {
+            const double S = (double)res_phi[m][c];
+            r[b + nSpecies + 1 + m] += S; A[b + nSpecies + 1 + m] += fabs(S);
+        }
+        const double Sg = (double)res_phi[0][c];
+        r[b + nSpecies] -= Sg; A[b + nSpecies] += fabs(Sg);   // 蒸気 = 総水分 − 液 (総水分にソースは無い)
+    }
+}
+}  // namespace
+
+void twoPhaseAudit_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int iStep, bool final)
+{
+    if (!condTwoPhaseDiffusionActive(cfg) || !speciesEnabled(var) || g_roY_dev == nullptr || g_qMom0 < 0) return;
+    const bool s3 = (cfg.speciesFaceReconstruction >= 2 && g_Yface_dev != nullptr && g_Pface_dev != nullptr
+                     && (cfg.solver == "SLAU" || cfg.solver == "SLAU2"));
+    if (!s3) { printf("[twophase-audit] step %d: skipped — the audit re-evaluates the S3 face-value advection only (speciesFaceReconstruction 2 with SLAU)\n", iStep); return; }
+    if (periodicNodeActive(cfg, msh)) { printf("[twophase-audit] step %d: skipped — node periodic gather is not reproduced by the audit\n", iStep); return; }
+    const int n = g_nSpecies, iw = cfg.condGasSpecies, NQ = n + 5;
+    const size_t N = (size_t)msh.nCells*NQ;
+    static double *r = nullptr, *A = nullptr, *F = nullptr; static size_t cap = 0;
+    if (cap < N) { cudaFree(r); cudaFree(A); cudaFree(F);
+        gpuErrchk( cudaMalloc((void**)&r, N*sizeof(double)) ); gpuErrchk( cudaMalloc((void**)&A, N*sizeof(double)) ); gpuErrchk( cudaMalloc((void**)&F, N*sizeof(double)) ); cap = N; }
+    gpuErrchk( cudaMemset(r, 0, N*sizeof(double)) ); gpuErrchk( cudaMemset(A, 0, N*sizeof(double)) );
+    const CondSpeciesProps cprops = condProps_make(cfg.condModel, cond_prop_opts(cfg));
+    dim3 dimGrid_nh = dim3(ceil(msh.nNormal_halo_Planes / (flow_float)cuda_cfg.blocksize));
+    twophase_audit_face_d<<<dimGrid_nh, cuda_cfg.dimBlock>>>(
+        msh.nCells, msh.nNormal_halo_Planes, msh.normal_halo_planes_d, msh.map_plane_cells_d,
+        var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"], var.p_d["fx"], var.p_d["sx"], var.p_d["sy"], var.p_d["sz"], var.p_d["ss"],
+        thermo_species_device_ptr_f(), n, iw, g_roY_dev, g_p_rophi_dev + g_qMom0,
+        var.c_d["ro"], var.c_d["T"], var.c_d["P"], var.c_d["vis_lam"], var.c_d["vis_turb"],
+        cfg.speciesDiffusionMethod, cfg.Sc, cfg.Sc_t, (cfg.discretization == "node") ? 1 : 0, cprops,
+        var.p_d["massflux"], g_Yface_dev, g_Pface_dev, g_nPassive, g_qMom0, NQ, r, A);
+    twophase_audit_cell_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(msh.nCells, n, iw, g_resroY_dev, g_p_res_dev + g_qMom0, NQ, 0, r, A, F);
+    gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+    // ソースだけを同じソースカーネルで組み直す (モーメント残差を 0 にしてから; 状態・温度は assembleResidual のまま)
+    for (int m = 0; m < 1 + TP_NQ; ++m) gpuErrchk( cudaMemset(h_p_res[g_qMom0 + m], 0, (size_t)msh.nCells*sizeof(flow_float)) );
+    condensationSource_d_wrapper(cfg, cuda_cfg, msh, var);
+    twophase_audit_cell_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(msh.nCells, n, iw, g_resroY_dev, g_p_res_dev + g_qMom0, NQ, 1, r, A, F);
+    gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+
+    std::vector<double> hr(N), hA(N), hF(N);
+    gpuErrchk( cudaMemcpy(hr.data(), r, N*sizeof(double), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(hA.data(), A, N*sizeof(double), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(hF.data(), F, N*sizeof(double), cudaMemcpyDeviceToHost) );
+    std::vector<flow_float> pin(msh.nCells, 0.0f);
+    auto itp = var.c_d.find("scalarDirichletPin");
+    if (cfg.discretization == "node" && itp != var.c_d.end() && itp->second != nullptr)
+        gpuErrchk( cudaMemcpy(pin.data(), itp->second, msh.nCells*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+    const double eps = 1.1920928955078125e-7;
+    static std::vector<double> r0;
+    if (r0.size() != (size_t)NQ) r0.assign(NQ, -1.0);
+    long npin = 0; for (geom_int c = 0; c < msh.nCells; ++c) if (pin[c] == 1.0f) ++npin;
+    bool pass = true, nonfinite = false;
+    printf("[twophase-audit] step %d %s: double re-evaluation from the stored state (EOS via assembleResidual, face fluxes in double, source per cell; energy not covered); pinned nodes excluded %ld\n",
+           iStep, final ? "(final state)" : "(initial state: r0)", npin);
+    for (int q = 0; q < NQ; ++q) {
+        double mr = 0.0, mA = 0.0, md = 0.0;
+        for (geom_int c = 0; c < msh.nCells; ++c) {
+            if (pin[c] == 1.0f) continue;
+            const double rv = hr[(size_t)c*NQ + q], Av = hA[(size_t)c*NQ + q], Fv = hF[(size_t)c*NQ + q];
+            if (!std::isfinite(rv) || !std::isfinite(Av) || !std::isfinite(Fv)) { nonfinite = true; continue; }
+            mr = std::max(mr, fabs(rv)); mA = std::max(mA, Av);
+            md = std::max(md, fabs(rv - Fv));
+        }
+        // 照合 (監査が同じ離散式を組んでいるか): float の確定残差との差を成分の尺度 ε·max A で。セル局所の |flux| で割ると、流束が小さく
+        // 被演算子が大きい壁ノード (流束 1e-10、float の打ち消し誤差 1e-11) で 1e6 倍に見えるので使わない (2026-10-02 初回の試行)。
+        const double cons = (mA > 0.0) ? md/(eps*mA) : (md == 0.0 ? 0.0 : INFINITY);
+        if (!final || r0[q] < 0.0) r0[q] = mr;
+        const double tol = std::max(1.0e-7*r0[q], 6.0*eps*mA);
+        const double ratio = (tol > 0.0) ? mr/tol : (mr == 0.0 ? 0.0 : INFINITY);
+        if (final && !(ratio <= 1.0)) pass = false;
+        std::string nm = (q < n) ? ("roY" + std::to_string(q) + (q == iw ? "(w)" : "")) : (q == n ? "v" : (q == n + 1 ? "g" : (q == n + 2 ? "Q2" : (q == n + 3 ? "Q1" : "Q0"))));
+        printf("[twophase-audit]   %-8s max|r| %.3e  max A %.3e  r0 %.3e  ratio %.3e (<= 1)  max|r_double - r_float|/(eps max A) %.3f\n",
+               nm.c_str(), mr, mA, r0[q], ratio, cons);
+    }
+    if (final) printf("[twophase-audit] VERDICT: %s (component ratios max|r| / max(1e-7 r0, 6 eps max A); non-finite %s)\n",
+                      (pass && !nonfinite) ? "PASS" : "NOT CONVERGED", nonfinite ? "yes" : "no");
+    fflush(stdout);
 }

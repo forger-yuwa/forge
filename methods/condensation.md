@@ -1165,12 +1165,15 @@ $$
 - **更新 (定常)**: 化学種の更新は水を commit せず (更新前に戻す)、凝縮モーメントの N 退避の後に 1 セルずつ
   $\delta\rho v=(R_w-R_g)/D_v$、$\delta\rho g=R_g/(D_g+V s_{j,g})$、$\delta\rho Q_n=R_{Q_n}/(D_{Q_n}+Vs_{j,Q_n})$ ($D_*=V/\Delta\tau+$ 輸送の点対角)、
   緩和 $\omega$ (`condTwoPhaseRelax`, 既定 1) を全増分に掛けてから $\theta=\min(\theta_{thr},\theta_{vg})$ (`condDgMaxStep`/`condDTmaxStep` の閾値と蒸気・液の非負、
-  $\theta\ge0$) を共通に掛け、$Q$ は成分ごとに非負化、$\rho Y_w\leftarrow\rho Y_w+\mathrm{fl}(\theta\delta\rho v+\theta\delta\rho g)$ (丸めで蒸気が負なら $\rho Y_w=\rho g$)。
+  $\theta\ge0$; float への丸めは安全側 [切り上がったら 0 側の隣の float] — 最近接は液枯渇の境界で $\rho g=-2.3\times10^{-13}$ を作った, #4f) を共通に掛け、$Q$ は成分ごとに非負化、$\rho Y_w\leftarrow\rho Y_w+\mathrm{fl}(\theta\delta\rho v+\theta\delta\rho g)$ (丸めで蒸気が負なら $\rho Y_w=\rho g$)。
   続いて再正規化の係数 $\rho/\sum\rho Y$ を化学種と $\rho g$・$\rho Q_n$ に共通に掛け、実現可能性クランプは保険として残す。
   蒸気・液・$Q$ の前処理は**点対角**で、`passiveImplicitCoupling`/`speciesImplicitCoupling` の DPLUR は使わない (非水種は従来の更新)。
   モーメントの $\phi_N\delta\rho$ 項と $\theta_b$ は掛けない (再正規化の係数が密度変化を担い、液と総水分の基点を揃える)。
 - **監視**: `residual_history.csv` に `rms_roYv` (= rms($R_w-R_g$), 毎反復の格納状態から組み直した float32 残差の差) を足す。
   `[twophase]` 行 (monitorInterval ごと) に $\theta<1$ のセル数・最小 $\theta$・保留量 $\sum(1-\theta)|\delta|V$・状態補正 ($Q$ の非負化、蒸気の丸め) を出す。
+- **収束受入の独立残差監査** (#4f): 計算開始時と終了時に、格納状態から assembleResidual を 1 回回した後、化学種・蒸気・液・$Q$ の残差を面ごとの流束から
+  double で組み直し (移流は流れのソルバの massflux と S3 面値を入力、拡散は `tp_face_flux<double>`、ソースは同じカーネルの値)、成分ごとに
+  $\max|r_q|\le\max(10^{-7}r_{0,q},6\varepsilon_{32}\max A_q)$ で `[twophase-audit] VERDICT` を出す。エネルギーは対象外。
 - **CUDA の照合** (`test_twophase_kernel.cu`, 2026-10-02): 面流束 (3 種・D 比 1/3・乱流あり 1.56 万面) は同じ float 入力の double 参照と許容の ≤0.18 倍、
   §6 の構造 (i)・面恒等式 (ii)・非負 2 セル・エネルギー接線は合格、#4c/#4d の 1D 問題は GPU に置き換えてもホスト版と反復数・不動点が一致
   (69 / 911 反復、出口 $g$ 2.603278e-3)。BE の物理時間更新を 1000 回重ねた累積保存は float32 の停止則で $10^{-6}$ を超える (dual-time は本初版の対象外; 設計メモ §14.3)。
