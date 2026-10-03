@@ -298,6 +298,10 @@ SERN セッション (`feature/sern-design`) へ渡す内容。変更は `featur
 7. **回帰**: 切り替え前後の比較は 2 段に分ける。(i) 改名 + lump 記法のみ (輸送は旧のまま比較できる構成で) で、代表作動点の推力・モーメントが事前に決めたノイズ床以内。(ii) 輸送物性の切り替え (`viscMethod: 2` + transport) は結果が変わる前提で、変化量を記録する (不変を合格にしない)。
 8. **取り込み方**: 種 DB・輸送関係の commit だけを `feature/sern-design` に取り込むか main 経由で合わせるかは SERN 側の都合で決める。凝縮関係 (潜熱 #10・気相組成の輸送) は SERN が凝縮 OFF なら影響しない。
 
+9. **2026-10-03 連絡と SERN の回答**: sern-design 未取り込みの 72 commit (SERN 拡散係数の予測表・二相拡散 (opt-in)・リミッタ調査 (opt-in 診断)) を連絡。
+   SERN の回答: 急がず restart 連鎖の切れ目で取り込む。取り込み時は 2D m6_on で同じ初期場から短い回帰を 1 本、ノイズ床は R9b の run_1024–1026 基準で、
+   回す前に SERN の plan R10 に書く。収束は報告量の check_quasisteady で判定 (残差の値で合格にしない)。`limiterEpsConst` は SERN で未使用。→ 本ブランチ側の対応は不要 (待ち)。
+
 ### 5.3 gap-heating セッション (`feature/gap-heating-precision`) との合流準備 (2026-09-27)
 
 - **git 上の衝突なし**: merge-base `d8c11f52` 以降、gap 側 3 commit (case/60・notes・plan) と本ブランチ 20 commit に共通ファイルなし (`git merge-tree` で無衝突を確認)。
@@ -392,6 +396,7 @@ SERN セッション (`feature/sern-design`) へ渡す内容。変更は `featur
 
 ## 9. 変更ログ
 
+- `2026-10-03` — §5.2 #9: SERN へ 72 commit の取り込み候補とリミッタ床の扱いを連絡、SERN は restart 連鎖の切れ目で取り込み・回帰は SERN plan R10 に事前登録と回答。
 - `2026-10-02` — #14-L2 を再スコープして完了 (ブランチ内 A/B なし、SERN R9 へ引き渡し; 判断 diagnostician)。SERN 入口組成の D_i,mix 変化を Δ 表に追記。
 - `2026-10-01` — #14-L1b 完了 (§5.1 #14-L1b 行)。振る舞いの変化: [svehla1962] で解決した H2O/NH3 の kinetic は双極子を適用しない (純 H2O 400 K で μ −11 %)。既定・gri30・legacy_v1、D_ij・ηᵢⱼ は不変。
 - `2026-10-01` — 双極子と svehla1962 の二重計上を diagnostician に諮問 → 集合に `potential` タグ (stockmayer / lj12-6)、Brokaw は Stockmayer 集合のときだけ (§4.10, #14-L1b)。SERN 引き渡しは止めない。
