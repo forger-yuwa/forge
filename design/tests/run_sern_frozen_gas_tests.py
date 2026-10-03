@@ -203,5 +203,22 @@ if yml.exists():
         with h5py.File(run3 / R3.MESH) as f:
             check("warm_from_same_mesh (3D): roY/roXi を引き継ぐ", f["VALUE/roY1"][0] == 1.2 and "roXi" in f["VALUE"])
 
+# 3D の側方・上方境界の切替 (farfield plan, codex result 2026-10-03 M2): 生産 YAML の evaluate.side_far_kind が実効 BC に届くこと
+from forge_design.evaluate import runner_sern3d as R3b
+_y3 = Path(__file__).resolve().parents[2] / "case/46.sern_design/problem_3d_prod_m6on_wallres.yaml"
+p3 = load_problem(str(_y3)); R.design_snapshot(p3); R.select_operating_point(p3, None); st3 = R.gas_states(p3)
+_line = lambda bc, nm: next((l for l in bc.splitlines() if l.startswith(nm + ":")), "")
+bc3 = R3b._bcond_config(p3, st3)
+check("3D 生産 YAML: evaluate.side_far_kind farfield → side_far は kind farfield、外気組成 Y0/Y1 を明示",
+      "kind: farfield" in _line(bc3, "side_far") and "Y0:" in _line(bc3, "side_far") and "Y1:" in _line(bc3, "side_far"), _line(bc3, "side_far")[:90])
+p3.evaluate["side_far_kind"] = "slip"
+check("3D: evaluate.side_far_kind slip → side_far は kind slip", "kind: slip" in _line(R3b._bcond_config(p3, st3), "side_far"))
+p3.evaluate["side_far_kind"] = "farfield"; p3.evaluate["top_out_kind"] = "outflow"
+try:
+    R3b._bcond_config(p3, st3); check("3D: top_out_kind outflow は拒否 (outlet + outlet_kind: outflow を使う)", False)
+except ValueError:
+    check("3D: top_out_kind outflow は拒否 (outlet + outlet_kind: outflow を使う)", True)
+p3.evaluate["top_out_kind"] = "outlet"; p3.evaluate["outlet_kind"] = "outflow"
+check("3D: top_out_kind outlet + outlet_kind outflow → top_out は kind outflow", "kind: outflow" in _line(R3b._bcond_config(p3, st3), "top_out"))
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)

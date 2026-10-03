@@ -27,8 +27,24 @@ def edit_transition(c):
 def edit_axisym(c):
     c["mesh"]["isAxisymmetric"] = 1
 
+def bc_nocomp(b):
+    # 多成分 (TP 2 種) の farfield から組成 Y/X を消す → 起動時に拒否されること (codex result 2026-10-03 M1)
+    for v in b.values():
+        if v.get("kind") == "farfield":
+            v["floats"] = {k: x for k, x in (v.get("floats") or {}).items() if not re.fullmatch(r"[XY]\d+", str(k))}
+def bc_xcomp(b):
+    # 正常系: farfield の組成を Y ではなく X (モル分率) で明示 → 起動して完走すること
+    for v in b.values():
+        if v.get("kind") == "farfield":
+            fl = v.get("floats") or {}
+            ys = {k: x for k, x in fl.items() if re.fullmatch(r"Y\d+", str(k))}
+            assert all(float(x) in (0.0, 1.0) for x in ys.values()), "純成分の外気だけを X に書き換える (換算なしで同値)"
+            v["floats"] = {**{k: x for k, x in fl.items() if k not in ys}, **{"X" + k[1:]: x for k, x in ys.items()}}
+BC_EDIT = {"組成省略": bc_nocomp, "組成 X で明示 (正常系)": bc_xcomp}
+
 CASES = [("cell", SRC_TP, edit_cell), ("ROE", SRC_TP, edit_roe), ("凝縮", SRC_CPG, edit_cond), ("トレーサ", SRC_TP, edit_tracer),
-         ("遷移", SRC_SST, edit_transition), ("軸対称", SRC_TP, edit_axisym), ("周期と共有", SRC_TP, "periodic")]
+         ("遷移", SRC_SST, edit_transition), ("軸対称", SRC_TP, edit_axisym), ("周期と共有", SRC_TP, "periodic"),
+         ("組成省略", SRC_TP, "bc"), ("組成 X で明示 (正常系)", SRC_TP, "bc")]
 def periodic_prep(d):
     """zmin/zmax を周期にして変換し直す (xmin..ymax は farfield のまま → 周期と節点を共有する)"""
     b = yaml.safe_load(open(os.path.join(d, "bcondConfig.yaml")))
@@ -41,6 +57,7 @@ def periodic_prep(d):
                    stdout=open(os.path.join(d, "convert.log"), "w"), stderr=subprocess.STDOUT)
 
 PAT = re.compile(r"kind farfield|周期境界と共有")
+POSITIVE = {"組成 X で明示 (正常系)"}   # 起動して完走すべき追加ケース
 
 fails = 0
 tmp = tempfile.mkdtemp(prefix="v0u_reject_", dir=HERE)
@@ -55,18 +72,23 @@ for name, src, edit in CASES + [("対照 (変更なし)", SRC_TP, None)]:
             shutil.copy(os.path.abspath(os.path.join(src, f)), os.path.join(d, f))
     if edit == "periodic":
         periodic_prep(d)
+    if edit == "bc":
+        b = yaml.safe_load(open(os.path.join(d, "bcondConfig.yaml")))
+        BC_EDIT[name](b)
+        yaml.safe_dump(b, open(os.path.join(d, "bcondConfig.yaml"), "w"), allow_unicode=True, sort_keys=False)
     c = yaml.safe_load(open(os.path.join(d, "solverConfig.yaml")))
     c["time"]["last"]["nStepOuter"] = 1
     c["time"]["outStepInterval"] = 1000000
     if callable(edit):
         edit(c)
     yaml.safe_dump(c, open(os.path.join(d, "solverConfig.yaml"), "w"), allow_unicode=True, sort_keys=False)
-    env = dict(os.environ, FORGE_CUDA_BLOCKSIZE="128")
+    # 種 DB 取り込み後のバイナリは属性の無い入力場を拒否するので、この起動試験では明示許可を付ける (拒否の対象は farfield の検査)
+    env = dict(os.environ, FORGE_CUDA_BLOCKSIZE="128", FORGE_ALLOW_UNVERIFIED_SPECIES="1")
     p = subprocess.run([BIN], cwd=d, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=600)
     out = p.stdout + p.stderr
     m = PAT.search(out)
     line = next((l for l in out.splitlines() if PAT.search(l)), "")
-    if edit is None:
+    if edit is None or name in POSITIVE:
         ok = p.returncode == 0 and not m
         print(f"{name}: 終了コード {p.returncode} → {'PASS' if ok else 'FAIL'} (対照は起動して完走すること)")
     else:

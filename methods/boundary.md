@@ -164,7 +164,7 @@ side_far: {physID: 10, kind: farfield, outputHDFflg: 0, ints: , floats: {ro: 0.0
 ```
 
 対応範囲は `mesh.discretization: node`・`solver` SLAU/SLAU2 だけで、凝縮・トレーサ・遷移モデル・軸対称とは併用できない (起動時にエラーで止まる、`boundaryCond.cpp`)。
-SERN 3D の生成器は `mesh3d.side_far_kind: farfield` (側方の遠方面) と `top_out_kind` で選ぶ。
+SERN 3D の生成器 (`runner_sern3d`) では problem YAML の `evaluate.side_far_kind: farfield` (側方の遠方面、既定 slip) と `evaluate.top_out_kind` (`outlet` [既定、種別は `evaluate.outlet_kind` に従う。例: `outflow`] / `slip` / `farfield`) で選ぶ。`top_out_kind: outflow` のように直接種別を書くとエラーになる。
 
 **診断**: 外側状態の置換 (真空・非物理) と HLL への退避は起動からの累積回数をログに出す (`[farfield] 累積: …`、増えたときだけ。評価区間では 0 が合格条件)。
 `FORGE_DUMP_FARFIELD=<prefix>` を付けると最初の評価 (`FORGE_DUMP_FARFIELD_CALLS=n` で n 回) の面ごとの流束 $\mathbf F S$・外側状態を `<prefix>.<physID>.csv` に書く

@@ -89,6 +89,14 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
                     cerr << "Error: " << e.what() << endl;
                     exit(EXIT_FAILURE);
                 }
+                // 遠方境界は外気の組成を必ず明示させる (入口の既定補完 Y0=1 を使わない。書き忘れが「第 1 種だけの外気」として
+                // 通ると EOS と流入流束が変わる; plan boundary-node-farfield-characteristic §4.1、codex result 2026-10-03 M1)
+                if (kind == "farfield" && Yin.empty()) {
+                    cerr << "Error: boundary '" << bname << "' (kind farfield): 多成分 (physProp.species が 2 種以上) では外気の組成 "
+                         << "floats.Y0..Y" << cfg.nSpecies - 1 << " または X0..X" << cfg.nSpecies - 1 << " の指定が必須"
+                         << " (plan boundary-node-farfield-characteristic §4.1)" << endl;
+                    exit(EXIT_FAILURE);
+                }
                 for (auto it = inputFloats_temp.begin(); it != inputFloats_temp.end(); ) {
                     const std::string& k = it->first;
                     const bool isX = (k.size() >= 2 && k[0] == 'X' && std::all_of(k.begin()+1, k.end(), [](unsigned char ch){ return std::isdigit(ch) != 0; }));
