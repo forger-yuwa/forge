@@ -34,7 +34,7 @@ forge は密度ベース有限体積で **ゴーストセル方式** を採用�
 | `inlet_Pressure` | 全圧・全温固定流入 | 全条件 ($P_t, T_t$) から内部マッハで $P, T$ を再構成 |
 | `inlet_Pressure_dir` | 方向指定全圧流入 | inlet_Pressure に流入方向ベクトルを併用 |
 | `outflow` | 流出 (外挿) | **内部状態の全量コピー** (ゴースト・境界値とも)。外から情報を入れないので超音速流出向け。亜音速や流れが境界に沿う面では外気の状態が伝わらない。旧版の本表は「リーマン不変量に基づく非反射」と書いていたが実装と一致しない (逆流時の全圧分岐は値を計算して捨てる死にコード。2026-09-27 確認) |
-| `farfield` | **遠方境界** (計画中、plan [`boundary-node-farfield-characteristic.md`](../plans/active/boundary-node-farfield-characteristic.md)) | 境界半割面の外側状態を作り (圧力・法線速度は内部エントロピーの 2 膨張波近似 [真空は内部状態に置換]、密度・組成・$k,\omega$ は自由流、超音速の境目は原始変数の滑らかな混合)、境界面だけ HLLC で解く。下の「遠方境界」節 |
+| `farfield` | **遠方境界** (node・SLAU/SLAU2 で実装済み、検証は一部未達。plan [`boundary-node-farfield-characteristic.md`](../plans/active/boundary-node-farfield-characteristic.md)) | 境界半割面の外側状態を作り (圧力・法線速度は内部エントロピーの 2 膨張波近似 [真空は内部状態に置換]、密度・組成・$k,\omega$ は自由流、超音速の境目は原始変数の滑らかな混合)、境界面だけ HLLC で解く。下の「遠方境界」節 |
 | `periodic` | 周期境界 | 対応するペア面のセル値をコピー (`scheme` 強制なし) |
 
 ### 例: 滑り壁
@@ -123,7 +123,7 @@ incoming/outgoing 特性の捌きは upwind フラックスに委ねる。出口
 (これは `inlet_Pressure` の構成であり出口に流用すべきでない)。乱流スカラー $k,\omega$ は出口で
 ゼロ勾配 (Neumann) であり、逆流時も内部値を再循環させる (固定値注入はしない)。
 
-### 特性型の遠方境界 (`farfield`、計画中)
+### 特性型の遠方境界 (`farfield`)
 
 計算領域を有限で打ち切る外部流の境界に使う。plan [`boundary-node-farfield-characteristic.md`](../plans/active/boundary-node-farfield-characteristic.md)。
 
@@ -156,6 +156,25 @@ $S_L\le S_*\le S_R$ と星状態の密度 $>0$ を検査し、外れたら HLL �
 0.14→0.02 % (M 0.3)、高温内部 0.15→0.03 %。外側に自由流をそのまま置き SLAU で解くと 12–78 %、SLAU は両側が超音速流出でも外側の速度に流束が影響される (+25 %)。
 Riemann 不変量 $U_n\pm2c/(\gamma-1)$ を内部と外気から混ぜる方式 (SU2 `BC_Far_Field`) は温度だけ違う接触波で音響擾乱を作り、
 外側状態の密度・組成の側を流向で切り替える方式は流束が跳ぶ (1e-4 刻みの掃引で 14–26 %)。
+
+**使い方 (YAML)**: `bcondConfig.yaml` に自由流の状態を `floats` で与える (入口と同じ書式。多成分は `Y0..`、RANS は `k`・`omega`)。
+
+```yaml
+side_far: {physID: 10, kind: farfield, outputHDFflg: 0, ints: , floats: {ro: 0.0449740914, Ux: 1788.2, Uy: 0.0, Uz: 0.0, Ps: 2851, k: 479.65, omega: 119844.2, Y0: 0, Y1: 1}}
+```
+
+対応範囲は `mesh.discretization: node`・`solver` SLAU/SLAU2 だけで、凝縮・トレーサ・遷移モデル・軸対称とは併用できない (起動時にエラーで止まる、`boundaryCond.cpp`)。
+SERN 3D の生成器は `mesh3d.side_far_kind: farfield` (側方の遠方面) と `top_out_kind` で選ぶ。
+
+**診断**: 外側状態の置換 (真空・非物理) と HLL への退避は起動からの累積回数をログに出す (`[farfield] 累積: …`、増えたときだけ。評価区間では 0 が合格条件)。
+`FORGE_DUMP_FARFIELD=<prefix>` を付けると最初の評価 (`FORGE_DUMP_FARFIELD_CALLS=n` で n 回) の面ごとの流束 $\mathbf F S$・外側状態を `<prefix>.<physID>.csv` に書く
+(運動量流束は $p-p_{\mathrm{ref}}$ のゲージ)。SERN の運動量収支の検算 `design/forge_design/metrics/sern_momentum.py --ff-dump <prefix>` はこの流束で farfield 面を閉じる
+(ダンプが無いと「閉じない」と明示する)。
+
+**検証の状況 (2026-10-03)**: 合格 = ビット不変 (farfield を含まない構成)・単体 (CPU/GPU 一致)・自由流保持・平面音波の反射 (dual-time 0.10 %)・保存収支・
+陽解法と SST・局所逆流・接触波 (3 物性)。**未達・判定不能**: 斜め衝撃波 (V2c、試験形状でソルバが定常に収束しない)、TP 音響の時間精度 (V2d-2、dt 細分で差が増える)、
+独立参照解の精度。SERN (M6、g3/g4) では側方 2.50 H の farfield が 3.42・4.35 H と力係数で許容内、格子差込みで設計許容内 (限定付き)。
+詳細と run は plan の §5.1・§6。
 
 **`slip` との違い**: slip は質量を通さない壁 (法線速度 0 を強制) なので、境界に達した波は反射する。
 **`outflow` との違い**: outflow は全部を内部から取り、外から何も入れない。正しいのは法線方向に超音速で流出する面 ($M_n\ge1$) だけ。
