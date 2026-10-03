@@ -128,6 +128,21 @@ Venkatakrishnan K=0.05 で 1.20e-3、Barth で 4.91e-3)。支配するのは**�
 目的量・局所場・保存収支・CFL/内部反復感度が**事前に決めた誤差予算内**にある場合だけ受理する
 (plan [`limiter-config-simplify.md`](../plans/active/limiter-config-simplify.md) §4.3)。
 
+#### 既定 (`limiterScaled 1`) での残差の床 (2026-10-03、case/16 で確認した範囲)
+
+`limiterScaled 1` では、**一様入口と no-slip 壁の角 (入口の最初の 2 列の壁近傍)・幾何の折れ点・出口中心線の少数節点**で、
+節点が近傍の局所極値になり、極値判定と制限面の選択が float32 の数 ulp で決まる。そこで $\psi$ が反復ごとに切り替わり、
+定常残差が `limiterScaled 0` より約 20 倍高い床で下げ止まる (case/16 平面 2D node SST、凝縮の有無に無関係)。
+
+- **case/16 では壁圧・壁温に影響しない** (床の高さを変える介入 — cfl 半減・領域一定 $\hat\epsilon$ — で壁圧差 ≤ 1e-5 相対、壁温差 ≤ 1e-4 K)。
+  熱流束・他ケースでは測っていないので、「床は一般に解に影響しない」とは言わない。
+- 精度を守れる範囲の $\epsilon$ (許容逸脱から $\hat\epsilon\le2\times10^{-6}$) では入口の床は消えない (入口残差 0.73〜0.80 倍)。
+  一方、入口以外の近壁には $\epsilon$ に感度のある成分がある ($\omega$ 残差 0.07 倍、未対処)。
+- **収束判定**: 全残差列の `check_convergence` (収束済み場からの継続は `--from-floor`) で STALLED を確認したうえで、
+  報告量を `check_quasisteady` で判定する。床の所在 (入口 2 列で Σres² の約 7 割) を見れば、軸特異点型の真の未収束と区別できる。
+- 経緯・実測: plan [limiter-inlet-column-oscillation](../plans/active/limiter-inlet-column-oscillation.md) §4.6、
+  調査 `notes/investigations/limiter-unstructured-convergence-survey.md`・`limiter-recommended-and-recent-survey.md`。
+
 ### リミッタの評価点 (`space.limiterMatchRecon`)
 
 リミッタが $\delta_m$ を評価する点は、**流束が再構成する点と一致していなければならない**。
