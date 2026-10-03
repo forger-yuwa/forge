@@ -21,6 +21,30 @@ def probe(run, i=0):
     return np.asarray(d["TotalTime"], float), np.asarray(d["P"], float), np.asarray(d["T"], float)
 
 
+def coverage(nm, t, P, t_end, dt_nom):
+    """固定区間 [0, t_end] の被覆検査 (codex diagnose 2026-10-03 M4): 先頭 (t[0] ≤ 2 dt)・末尾 (≥ t_end)・欠測 (最大間隔 ≤ 1.5 × 中央値)・
+    単調性・有限性。問題のリストを返す。"""
+    bad = []
+    if len(t) < 2:
+        return [f"{nm}: 標本が 2 未満"]
+    if t[0] > 2.0 * dt_nom:
+        bad.append(f"{nm}: 先頭が欠ける (最初 {t[0]:.4e} s > 2 dt)")
+    if t[-1] < t_end:
+        bad.append(f"{nm}: 区間の末尾 {t_end:.4e} s まで無い (最終 {t[-1]:.4e})")
+    dd = np.diff(t)
+    if np.any(dd <= 0):
+        bad.append(f"{nm}: 時刻が単調増加でない")
+    elif dd.max() > 1.5 * np.median(dd):
+        bad.append(f"{nm}: 欠測 (最大間隔 {dd.max():.3e} > 1.5 × 中央値 {np.median(dd):.3e})")
+    if not (np.all(np.isfinite(t)) and np.all(np.isfinite(P))):
+        bad.append(f"{nm}: 非有限値")
+    return bad
+
+
+def dt_of(run):
+    return float(_re.search(r"dt ([0-9.eE+-]+)、", open(f"{run}/IC_FROM.txt").read()).group(1))
+
+
 def y_series(run, xeval):
     fs = sorted((int(re.search(r"res_(\d+)\.h5$", p).group(1)), p) for p in glob.glob(run + "/res_*.h5") if re.search(r"/res_\d+\.h5$", p))
     with h5py.File(run + "/chan.h5") as m:
@@ -87,6 +111,45 @@ elif mode == "acoustic_win":
     print(f"{s} vs {l}: c_i {ci:.5g} u {U:.5g}、入射窓 [{t_inc - w_inc:.3e}, {t_inc + w_inc:.3e}] 振幅 {A:.4g} Pa、"
           f"反射到達窓 [{t_ref - w_ref:.3e}, {t_ref + w_ref:.3e}] max|ΔP| {d.max():.4g} Pa → 反射率 {d.max() / A:.4%}")
     print(f"VERDICT: {'PASS' if d.max() / A <= 0.05 else 'FAIL'} (≤ 5 %)")
+elif mode == "groups":
+    # nSub 反復比較 (codex diagnose 2026-10-03 第 2 回): python3 eval_v2d.py groups LONG A1 A2 A3 -- B1 B2 B3
+    # F_n = 群内 max_t|P_r − P_s|/A、群平均波形の差 D、群平均からの最大偏差 E_n。合格 D + E_A + E_B ≤ 1 %;
+    # 群内で 1 % 以上 → 単発差を反復不足に帰属しない (保留); F_A, F_B ≤ 0.2 % かつ D − E_A − E_B > 1 % → 「nSub 20 で十分」を棄却; 他は保留
+    l = sys.argv[2]; rest = sys.argv[3:]; k = rest.index("--"); GA, GB = rest[:k], rest[k + 1:]
+    info = open(f"{l}/IC_FROM.txt").read()
+    U = float(_re.search(r"U ([-0-9.eE+]+) \(dir", info).group(1)); ci = float(_re.search(r"内部 T [0-9.]+ Y [0-9.]+ c ([0-9.eE+]+)", info).group(1))
+    sig = 0.04 / (2.0 * np.sqrt(2.0 * np.log(2.0))); t_inc = 0.4 / (ci + U); w_inc = 3 * sig / (ci + U)
+    t_end = 0.6 / (ci + U) + 0.2 / (ci - U) + 3 * sig / (ci - U)
+    tl, Pl, _ = probe(l); ki = (tl >= t_inc - w_inc) & (tl <= t_inc + w_inc)
+    A = float(np.max(np.abs(Pl[ki] - P0))) if ki.any() else float("nan")
+    S = {r: probe(r)[:2] for r in GA + GB}
+    bad = [] if (np.isfinite(A) and A > 0) else [f"入射振幅が有限・正でない ({A})"]
+    bad += coverage(l, tl, Pl, t_end, dt_of(l))
+    for r, (t, P) in S.items():
+        bad += coverage(r, t, P, t_end, dt_of(r))
+    if bad:
+        print("判定不能:\n  " + "\n  ".join(bad)); print("VERDICT: UNDECIDABLE"); sys.exit(2)
+    tg = np.unique(np.concatenate([t[t <= t_end] for t, _ in S.values()] + [np.array([t_end])]))
+    tg = tg[(tg >= max(t[0] for t, _ in S.values())) & (tg <= t_end)]
+    W = {r: np.interp(tg, t, P) for r, (t, P) in S.items()}
+    def F(G):
+        return max(np.max(np.abs(W[r] - W[q])) for i, r in enumerate(G) for q in G[i + 1:]) / A
+    mA = np.mean([W[r] for r in GA], 0); mB = np.mean([W[r] for r in GB], 0)
+    EA = max(np.max(np.abs(W[r] - mA)) for r in GA) / A; EB = max(np.max(np.abs(W[r] - mB)) for r in GB) / A
+    D = np.max(np.abs(mA - mB)) / A; FA, FB = F(GA), F(GB)
+    print(f"区間 [0, {t_end:.4e}] s ({len(tg)} 点)、A_inc {A:.4g} Pa")
+    print(f"  群 A {GA}: F {FA:.3%}、E {EA:.3%}")
+    print(f"  群 B {GB}: F {FB:.3%}、E {EB:.3%}")
+    print(f"  群平均の差 D {D:.3%} (t {tg[np.argmax(np.abs(mA - mB))]:.4e})、D + E_A + E_B {D + EA + EB:.3%}、D − E_A − E_B {D - EA - EB:.3%}")
+    if D + EA + EB <= 0.01:
+        v = "PASS: 観測した反復を含めて nSub 感度は許容内 (≤ 1 %)"
+    elif max(FA, FB) >= 0.01:
+        v = "HOLD (A): 同一群内でも 1 % 以上の差 → 単発の nSub 差を反復不足に帰属しない、時間精度の合格は保留"
+    elif max(FA, FB) <= 0.002 and D - EA - EB > 0.01:
+        v = "REJECT (B): 実行間変動では説明できない nSub 差 → 「nSub 20 で十分」を棄却"
+    else:
+        v = "HOLD: 判定保留"
+    print("VERDICT:", v)
 elif mode == "same":
     # 時間精度: 2 run の評価点 P の差の最大 / 入射振幅 (長領域の入射窓の振幅、P∞ = 2851 Pa) ≤ 0.01
     a, b, l = sys.argv[2], sys.argv[3], sys.argv[4]
@@ -99,21 +162,18 @@ elif mode == "same":
     tl, Pl, _ = probe(l); ta, Pa, _ = probe(a); tb, Pb, _ = probe(b)
     bad = []
     for nm, t, P in ((a, ta, Pa), (b, tb, Pb), (l, tl, Pl)):
-        if len(t) < 2 or t[-1] < t_end:
-            bad.append(f"{nm} が評価区間の末尾 {t_end:.4e} s まで無い (最終 {t[-1] if len(t) else float('nan'):.4e})")
-        if np.any(np.diff(t) <= 0):
-            bad.append(f"{nm} の時刻が単調増加でない")
-        if not (np.all(np.isfinite(t)) and np.all(np.isfinite(P))):
-            bad.append(f"{nm} に非有限値")
+        bad += coverage(nm, t, P, t_end, dt_of(nm))
     ki = (tl >= t_inc - w_inc) & (tl <= t_inc + w_inc)
     A = float(np.max(np.abs(Pl[ki] - P0))) if ki.any() else float("nan")
     if not (np.isfinite(A) and A > 0):
         bad.append(f"入射振幅が有限・正でない ({A})")
     if bad:
         print("判定不能:\n  " + "\n  ".join(bad)); print("VERDICT: UNDECIDABLE"); sys.exit(2)
-    k = ta <= t_end
-    d = np.abs(Pa[k] - np.interp(ta[k], tb, Pb))
-    print(f"{a} vs {b}: 評価区間 [0, {t_end:.4e}] s ({int(k.sum())} 点)、max|ΔP| {d.max():.4g} Pa (t {ta[k][d.argmax()]:.4e}) / 入射振幅 {A:.4g} Pa = {d.max() / A:.3%}")
+    # 両系列の時刻の和集合 + 区間端点で比べる (引数順で最大差を取りこぼさない、codex 2026-10-03)
+    tg = np.unique(np.concatenate([ta[ta <= t_end], tb[tb <= t_end], [0.0, t_end]]))
+    tg = tg[(tg >= max(ta[0], tb[0])) & (tg <= t_end)]
+    d = np.abs(np.interp(tg, ta, Pa) - np.interp(tg, tb, Pb))
+    print(f"{a} vs {b}: 評価区間 [0, {t_end:.4e}] s ({len(tg)} 点、時刻の和集合)、max|ΔP| {d.max():.4g} Pa (t {tg[d.argmax()]:.4e}) / 入射振幅 {A:.4g} Pa = {d.max() / A:.3%}")
     rel = d.max() / A
     if len(sys.argv) > 5 and sys.argv[5] == "--nsub":
         # nSub 感度 (codex diagnose 2026-10-03 ①): D_N ≤ 0.002 → 反復数依存の説明は弱い、> 0.01 → 「nSub 20 で十分」を棄却、中間は保留

@@ -10,6 +10,8 @@ import h5py, numpy as np
 
 SRC = "run_0064_v2c_B"; SNAP = f"{SRC}/res_6000.h5"
 RUNS = {"run_0150_v2c_ord_A2": 1, "run_0151_v2c_ord_B1": 0}
+if len(sys.argv) > 2 and sys.argv[1] == "wall":
+    RUNS = {r: None for r in sys.argv[2:]}
 
 
 def setup(binp):
@@ -52,6 +54,10 @@ def wall():
     for dst in RUNS:
         fs = sorted((int(re.search(r"res_(\d+)\.h5$", p).group(1)), p) for p in glob.glob(dst + "/res_*.h5") if re.search(r"/res_\d+\.h5$", p))
         last = fs[-1][0]; sel = [p for n, p in fs if n >= last - 2000]
+        ns = [n for n, p in fs if n >= last - 2000]
+        if len(sel) < 5 or ns[0] > last - 2000:
+            # 登録どおり末尾 2000 step を 500 step 間隔の 5 標本で覆うことを必須にする (codex diagnose 2026-10-03 第 2 回 M4)
+            print(f"{dst}: 判定不能 — 末尾 2000 step を覆う標本が足りない ({ns})"); continue
         with h5py.File(os.path.join(dst, "ramp.h5")) as m:
             xyz = np.array(m["MESH/COORD"]).reshape(-1, 3)
         g = open(os.path.join(dst, "GEOM.txt")).read().strip()

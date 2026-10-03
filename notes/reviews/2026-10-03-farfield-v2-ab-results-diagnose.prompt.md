@@ -1,3 +1,94 @@
+forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
+SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
+リポジトリに対する**外部レビュー**を依頼する。忖度なしで、主張はコードと実測 (run の数値) で検証すること。
+結論が「この計画/結果は誤り」でも構わない。両論併記で逃げず、推奨は 1 つに絞ること。
+
+ルール:
+- **ファイルを変更しない** (read-only サンドボックスで動いている。読む・実行して確認するのは可)。
+- 出力は日本語。識別子・ファイル名は原語のまま。
+- 指摘は **Critical / Major / Minor** の重大度付きで、必ず根拠 (`ファイル:行` または `run_*` の数値) と対案をセットで書く。
+- リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
+  用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
+- 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
+  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+
+## 依頼: 診断・設計判断の諮問 (stage = diagnose)
+
+あなたは forge の**診断・設計判断係**である。呼び出し側は実装と run を進めている別のモデル (Claude) で、
+**もっともらしい真因に飛びつく前に**あなたに諮っている。仕事は手を動かすことではなく、**次の一手を 1 つに絞ること**。
+
+### 前提
+- あなたは呼び出し側の会話を見ていない。下のブリーフと、自分で読んだファイルだけが根拠になる。
+  足りなければ推測で埋めずに「何が足りないか」を返す。
+- ブリーフは「観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 / 仮説」に分かれて渡される約束である。
+  **観測事実と呼び出し側の解釈が混ざっていたら、まず分け直す**。呼び出し側の要約より、run の数値・コード・
+  設定ファイルを自分で確かめた内容を優先する。
+- forge を起動しない。`python3` による `residual_history.csv` / `res_*.h5` の読み取りは**統計量だけ**を出す
+  (全量ダンプ・長いログ全文をコンテキストに流さない。`*.log`・`*.vtu`・`plans/README.md` は読まない)。
+
+### 診断の作法
+1. **「除外済み」というラベルを信用せず、潰した証拠を確認する** (run パス・設定差分・判定区間・VERDICT)。
+   証拠が足りない・判定期間が短い・変えた設定が実際には効いていない (YAML の階層違い等) なら**候補へ戻す**。
+   証拠が十分な候補は出し直さない。
+2. **症状と原因を分ける**。`detectNaN` が指す変数は結果であって原因ではない (EOS 床 → 負密度 → 圧力暴走 → ω の実績)。
+   後処理のアーチファクト (2 列混在の抽出、`centCoords` の置換、ソルバ `ypls` の退化) を先に疑う。
+3. **このリポジトリで繰り返された真因**を照合する: 投入設定の不整合 (IC と BC、亜音速に超音速 BC)、
+   押し出し 2 ノード spanwise、float32 桁落ち (双対幾何・r 重み)、stale build、cross-mesh IC の基底不一致、
+   絶対値のゼロ割ガード、境界ノードの凍結、YAML キーの階層違いで黙って無視される設定。
+4. 仮説は**確度順に最大 3 つ**。第 1 仮説には根拠を `ファイル:行` か run の数値で付ける。示せないものは「未確認」と明記。
+5. **判別する A/B を 1 つだけ**提案する。安く短く回せて、結果がどちらに出ても仮説が 1 つ消えるもの。
+   「A なら仮説 1、B なら仮説 2」を先に書く (結果を見てから解釈を作らない)。
+6. 少数点の一致・短い窓の値・未収束のトランジェント同士の比較を根拠にしない。
+
+### 設計判断 (plan §4・§6、codex 指摘の採否、result 段の解釈) を諮られたとき
+- 採否は指摘ごとに「採用 / 却下 / 要再検証」と理由。根拠が示されていない指摘は自分で該当箇所を読んでから判定する。
+- 検証計画は「何が出たら方針が誤りと言えるか」が定量的に書かれているかを見る。
+- 既定値の変更・opt-in 機能の削除は、plan の処置欄とユーザ決定の履歴を確認してから判断する
+  (「opt-in 残置」は削除対象でない)。
+- result 段の解釈は、主張ごとに根拠 run・判定ツールの VERDICT・判定区間が揃っているかを確かめる
+  (過渡ピークを定常値と、抽出アーチファクトを物理と誤認した実績は「予想どおり」に見える場面で起きた)。
+
+あなたの結論は**仮説**であって確定ではない。呼び出し側はこの A/B を回して確かめ、plan への反映も呼び出し側が行う。
+
+## ブリーフ (`notes/reviews/briefs/2026-10-03-farfield-v2-ab-results.md`)
+
+# 諮問: farfield V2c 次数 A/B と V2d-2 nSub A/B の結果解釈と次の一手 (2026-10-03)
+
+関連 plan: `plans/active/boundary-node-farfield-characteristic.md` §5.1 #3c・#3f (本日の事前登録と結果を追記済み)、§6 V2c・V2d。
+前回諮問: `notes/reviews/2026-10-03-farfield-v2c-v2d2-next-diagnose.md` (本日、全件採用)。
+run: AWS `~/forge-pgrad-new/case/58.farfield_verification/` (一覧 `case/58.farfield_verification/README.md`)。バイナリは両 A/B とも既存 V2 と同じ build-ff (a6ceee0b)。
+ログ: `V2C_ORD_20261003.log`、`V2_AB_20261003.log` (AWS 上)。評価器: `eval_v2d.py same` (本日、固定区間の被覆・単調性・有限性・振幅の検査を追加)、`v2c_order_ab.py`、`v2c_residual_ab.py` (状態を環境変数で渡せるよう一般化)。
+
+## 1. 観測事実
+
+### V2c 次数 A/B (事前登録どおり)
+- 起点 `run_0064_v2c_B/res_6000` (旧形状 B、上面 farfield)。差は `space.convMethod` のみ。各 6000 step、全場 500 step ごと。
+- 2 次 `run_0150_v2c_ord_A2`: 規格化局所残差 Rmax 初期 4.68e-3 → 最終 4.70e-3 (最大は凸角 x 0.715・y 0.0882、> 1e-5 の節点 1930 → 2418)。圧縮角は ≤ 5.5e-7。末尾 2000 step の壁圧変動幅 W = 9.4e-4 (x 0.535)。
+- 1 次 `run_0151_v2c_ord_B1`: Rmax 初期 6.6e-2 (圧縮角 x 0.21、次数を変えた直後) → 最終 **6.2e-7、全節点 ≤ 1e-5**。W = 2.7e-6。
+- 事前規則: 「1 次側だけ Rmax ≤ 1e-5 かつ W < 0.001、2 次側が停滞を再現」→ 一次化を安定起動に使う方針を支持 (真因の主張はしない)。
+
+### V2d-2 nSub A/B (事前登録どおり)
+- run_0142 と同じ tp2・短領域・left-hot・dt 2.2087e-7・同じパルス初期場。`nSubIterDualTime` のみ 20 / 40。
+- D_N = max|P₂₀ − P₄₀| / A_inc (固定区間 [0, 1.667e-3] s、7547 点、A_inc = 2.224 Pa @ run_0141) = **1.559 %** (最大は t 1.30e-3 s)。規則上は「nSub 20 で十分」を棄却 (> 1 %)。
+- **対照 (同じ設定・同じバイナリの再実行)**: run_0142 (2026-09-29) vs run_0152 (本日、n20) = **1.383 %** (t 1.25e-3 s)。
+- 既報の時間精度: dt 8.8e-7 vs 4.4e-7 = 1.132 %、4.4e-7 vs 2.2e-7 = 2.184 % (本日の評価器で再評価、値は不変)。
+- forge の node 残差は atomicAdd で組まれ、加算順でビット再現しない (既知、[res0-is-not-the-flux-state] メモリ)。
+
+## 2. 期待値と出典
+- 判定はいずれも本日 run 前に plan §5.1 #3c・#3f に書いた規則。
+
+## 3. 解釈の候補 (未確定)
+- V2c: 停滞は 2 次再構成 (MUSCL + Venkatakrishnan) に感度がある。1 次では離散定常解に収束する。
+- V2d-2: 同一設定の再実行差 (1.38 %) が nSub 差 (1.56 %) や dt 差 (1.13 / 2.18 %) と同程度 → 時間精度の判定は再実行の非決定性の床に支配されている疑い。床が dt 細分で増えるなら「dt 細分で悪化」も説明できる (ステップ数が増えるほど非決定的な丸めが積もる)。
+
+## 4. 問い
+1. V2c: 1 次の収束場から 2 次へ上げる (段階起動) ことで、事前登録の必要条件 (Rmax・W・check_convergence PASS・check_quasisteady) を 2 次で満たせるか試すのが次の一手でよいか。その場合の事前閾値と、満たせないときの扱い (V2c の合否を 1 次で判定してよいか、汎用境界の検証として許されるか)。
+2. V2d-2: 再実行の非決定性の床を測る最小の設計は何か (同一設定 n 本の反復で床 F を測り、時間精度の比較は差 − F で判定する等)。床の測り方 (本数・指標) と、時間精度の合否基準をどう直すのが妥当か (緩和にならない形で)。決定的な加算 (例: 環境変数で atomicAdd を避ける経路) が forge にあるかは未確認。
+3. 1・2 の後、accepted に向けて残るものの順序は前回のままでよいか。
+
+## 関連 plan 全文 (`plans/active/boundary-node-farfield-characteristic.md`)
+
+```markdown
 # 特性型の遠方境界 `farfield` (node)
 
 ## メタ
@@ -147,9 +238,9 @@ plan-7 の反例 (M1: 高温の内部を出ていく音響が外気そのまま�
 | 3 | 独立参照解 (§5 の 6) と V1–V2。**V1 済 (2026-09-29、全 4 本合格、置換・退避 0)**: (a) CPG M0.5 7.5e-7 (`case/58.farfield_verification/run_0001_v1a`)、(b) TP M6 6.7e-6 (`run_0005_v1b_fix`)、(c) 30° 傾き 6.3e-6 (`run_0006_v1c_fix`)、(d) SST 輸送残差の打消し 5.8e-7 (`run_0004_v1d`、帳簿 全節点)。(b)(c) のずれは step 0 で 1e-6 (float32 EOS 往復) → 500 step で 6e-6 に達し以後横ばい。旧 `run_0002_v1b`/`run_0003_v1c` は不具合版 (破棄予定)。**V2a 済 (2026-09-29、全判定合格)**: dual-time、Δx 5 mm・dt 1.25e-6 (音響 CFL 0.11)・nSub 20・cfl_pseudo 12。反射率 M0.3 SLAU **0.099 %** (`run_0040`/`0041`)・SLAU2 0.118 % (`0042`/`0043`)・M0 0.203 % (`0048`/`0047`)、対照 M0 slip 91.3 % (`0046`)。時間精度 nSub 40 との差 0.15 %・dt/2 との差 0.58 % (≤ 1 %)。置換・退避 0。**経緯**: (1) 初回 dt 5e-6 (`run_0010`–`0018`) は dt/2 との差 7.6 % で時間精度不足、(2) dt 1.25e-6 (`run_0020`–`0028`) で差の最大が入射パルス通過時刻 (反射でない) に 1.1 % 出た → 原因は**リミッタ基準値の自動決定** (`limiterRefLength` = 領域の対角長、ρ・P・a = 初期場平均) が短 (L 1.0)・長 (L 3.0) で違い離散化が別物になっていたこと。自由流の値で明示固定して解消。プローブ出力の桁 (既定 6 桁で P が 1 Pa 刻み) も 10 桁にした (`probe/point_probes.cu`、出力専用)。**V3 への含意**: 幅系列も同じ自動決定なので、V3 では `limiterRefLength`・`limiterRoRef`・`limiterPRef`・`limiterARef` を全幅で同一値に固定する (R4d の幅系列は未固定 — 4.35/6.19 H の差 C_L 2.5e-5 から主因ではないと見るが未検証)。<br>**V2b 済 (2026-09-29、6 本 × 3 判定 = 18 件合格)**: `run_0030`–`0035` (+ `_bal` = 最終場から restart した 1 評価)。離散恒等式 (初回評価) 全成分 |差|/規模 ≤ 1e-9、Σ種 = 質量 相対 ≤ 2e-8、定常後の全体収支 |R|/代表量 ≤ 6e-9、Y_EXH 最大 5e-36 (置換)。残差は float 床まで 4.4 桁低下 (`rms_roY0` は恒等的 0 で判定不能 = 完全置換)。**帳簿の読み方の訂正**: 各残差配列は担当段の中でゼロに戻されるので、2 回目以降の評価では「段の前後の差」は寄与にならない (段の前に前回の最終残差が残る)。`eval_v2b.py` は担当段直後の値を寄与とする。<br>**V2f 済 (2026-09-29、合格)**: `run_0036_v2f` — 評価 1 で xmax の 169 面すべてが ṁ<0、その面の外側組成 = 外気、化学種の恒等式で流入面の Y = 外気 (Σ 1.6e-10)・流出面 (評価 2・3) で内部値 (相対 1e-10)、置換・退避 0、定常後は自由流に戻る (Y 1e-36)。<br>**V2e 済 (2026-09-29、合格)**: 音響 + SST dual-time 反射 0.12 % (ek0、`run_0052`/`0053`)・0.33 % (ek1、`0054`/`0055`)、V1b 陽解法 (RK3、局所 dt) ずれ 8.7e-6 (`run_0050`)、V2b(i) 陽解法 恒等式・収支・置換 PASS、残差 5.7 桁低下 (`run_0051` + `_bal`)。<br>**V2c FAIL (2026-09-29、保持)**: `run_0063_v2c_A`/`0064_B`/`0065_C` (ランプは 0.7 m で終わる形。出口まで伸ばした `run_0060`–`0062` は A が流路閉塞で発散、破棄)。B vs C 最大 0.087 Δp (x 0.21、ランプ角直後)、角・出口端を除いても 0.048 Δp (基準 0.02)。A vs C 2.61 Δp (対照 OK)。角の値は A = B (6 桁一致)・C だけ違う、cfl 0.5 (`0066`/`0067`) と再変換 (`0068`) で不変。上面の境界節点で B が C より 0.10 Δp 低く、弱い反射波 (内部 0.06 Δp) が出口寄りの下面に届く。**原因未分離** (codex diagnose 採用)。<br>**V2d**: 接触波 V2d-1 は 3 物性 PASS (`run_0070`/`71`・`75`/`76`・`80`/`81`)。**V2d-2 パルスなし対照 FAIL (保持)**: cpg 2.4e-4 Pa PASS、tp1 1.64 Pa・tp2 2.49 Pa (基準 0.0285 Pa)。長領域でも同じ (`run_0085` 2.4888 Pa)、左端の自由流を内部と同じ高温にすると 0.0000 Pa (`run_0086`/`0087`、隔離対照として別記) → 左端流入で作られる接触面の TP 保存形混合が音源という仮説 (未確定)。V2d-2 の反射 (0.07–0.23 %) は左端擾乱が反射より先に評価点に届くため隔離試験になっていない → 再設計。 | AWS | O |
 | 3a | **V2c 角の作用素 A/B** (codex diagnose 2026-09-29): 低領域 (A 格子、上面 slip) と高領域 (C 格子、上面 slip) に、C の最終場を座標対応でそのまま与え、1 step の初回評価だけを比較。対象 = 下面 x 0.195–0.230 と再構成に要る近傍。照合 = 双対体積・面積ベクトル・`after_eos_bc` 状態・面の再構成状態と流束 (帳簿 `.faces`)・`res_after_conv`。**判定 (事前固定)**: 各保存量の残差差 / その節点に接する面流束の絶対和 ≤ 1e-5 (ゼロ規模は自由流基準)。超えたら局所作用素の交絡を採用し最初に異なる幾何・再構成・流束へ絞る、全て許容内なら作用素差を棄却し反復過程へ移る。どちらでも収束・境界性能は判定しない。**結果 (2026-09-29)**: 作用素は同一 (`run_0092`/`0093`、幾何・状態・面の差 0、残差差 ≤ 7.7e-8、`V2C_OPAB_VERDICT.txt`) → 第 1 仮説棄却。C の最終場から低領域 B・A・C 自身を 6000 step 継続 (`run_0094`–`0096`) → 角は 3 本とも C の値を保持。同じ初期場での B vs C は全線 0.0210 Δp (出口端)、除くと 0.0080。codex diagnose 2 回目 ([記録](../../notes/reviews/2026-09-29-farfield-v2c-corner-and-v2d2-redesign-diagnose.md)、全件採用) の絶対残差 A/B (`run_0097`/`0098`、同じ B 格子に 2 つの最終場、事前閾値 \|R\|/Σ\|F\| ≤ 1e-5、slip 節点の運動量は接線成分、運動量は 3 成分共通の規模、規模 0 は自由流基準): **角 (x 0.195–0.23) は 2 状態とも全 5 成分 ≤ 5.2e-7**、しかし**場全体では約 2000 節点が超過し最大はランプ終端の凸角 (x 0.715、下面) で 4.6e-3 / 7.3e-3** → 規則どおり「2 つとも離散定常解」を棄却、非零残差が残る凸角を追う (`V2C_RESAB_VERDICT.txt`)。**次**: 凸角の停滞の扱いを諮る (#3c) | AWS | O |
 | 3d | **V2c 形状 v2 の結果 (2026-09-29、判定不能 = 未収束)**: 絶対残差 A/B を射影なしで再集計 → 圧縮角は 2 状態とも全 5 成分 ≤ 5.2e-7 (射影が残差を隠した仮説は棄却)、凸角近傍は 4.6e-3 / 7.3e-3 で不変。形状 v2 (ランプを出口まで、H 0.5・L 1.8、C は H 1.1) 系列 (i): cfl 1 で A (`run_0100`) と B (`run_0101`) が step 691 / 640 に発散 (B でもランプ下流 x 1.5–1.7 の下面で P が衝撃後理論値を超えて増大し ρ が低下、`run_0103` で位置を特定、閉塞ではない: step 500 で出口 M 1.7–2.2)。発散手順 1 回目 = cfl 0.5 (`run_0104`、3000 step): 発散しないが 2.5 桁でプラトー、出口寄りの下面が動き続ける。2 回目 = cfl 0.5・12000 step (`run_0105`–`0107`): **A は step 10570 で発散**、B・C は 2.3–2.5 桁でプラトー (`check_convergence` STALLED、C の rms_roUz は rising)、壁圧の末尾 2000 step の変動幅 0.0024 / 0.0020 Δp (基準 < 0.001) → **事前登録の必要条件を満たさず判定しない**。参考: B vs C (step 12000) は全線 0.188 Δp (x 1.8)、圧縮角 0.0867 Δp (旧形状と同じ非一意性)。**エスカレーション条件 2 に該当** (発散手順 2 回で解けない) → 判断待ち | AWS | F |
-| 3f | **V2d-2 隔離試験の結果 (2026-09-29)**: dt 8.8e-7 (`run_0110`–`0121`): パルスなし 3 物性 × 短・長 PASS (cpg 2.4e-4 Pa、TP 0.0000 Pa)、窓付き反射 cpg 0.055 %・tp1 0.26 %・tp2 0.31 % PASS。**時間精度 FAIL**: tp2 の dt/2 (`run_0122`) との差 1.13 % (> 1 %。最初は V2a 用の評価器で P∞ 101325 を使い 0.0000 % と誤表示した → `eval_v2d.py same` を追加)。dt 4.4e-7 に下げた組 (`run_0130`–`0141`) でも全判定 PASS (反射 0.40 / 0.94 / 0.77 %、tp1 パルスなし 0.0095 Pa) だが、**dt 2.2e-7 (`run_0142`) との差は 2.18 % とかえって拡大** → 時間方向に収束せず。仮説 (未確認): dual-time の物理時間項 (U^{n+1}−U^n)/dt の float32 丸めが dt を小さくするほど効く ([moment-time-order-noise-and-front] と同型)、パルス振幅 1e-3 P∞ = 2.2 Pa が小さすぎる。**判断待ち**。**判断: 2026-10-03 codex (diagnose) [記録](../../notes/reviews/2026-10-03-farfield-v2c-v2d2-next-diagnose.md) — 全件採用**: float32 確定は要再検証 (BDF 項・更新は `flow_float` だが nSub 感度が未確認)。振幅の訂正: 入力は 1e-3 P∞ = **2.851 Pa**、2.22 Pa は評価点で測った入射窓振幅 (時間精度の分母)。評価器 `eval_v2d.py same` は短い方の終了時刻までしか比べず、区間を覆わない入力でも PASS を返した → 固定評価区間 [0, t_ref + w_ref] の完全被覆・時刻の単調性・全値の有限性・入射振幅が有限かつ正を必須にし、満たさなければ判定不能 (終了コード 2) に修正 (2026-10-03)。修正後の評価器で既報を再評価: run_0120 vs 0122 1.132 %、run_0140 vs 0142 2.184 % (区間を完全被覆) → 既報の FAIL は評価器の欠陥によるものではない。**nSub A/B の事前登録 (2026-10-03、run 前)**: run_0142 と同じ tp2・短領域・`--left-hot`・dt 2.2087e-7 (`--cfl-ac 0.02825`)・同じ元のパルス初期場、`time.nSubIterDualTime` だけ 20 → 40。バイナリは run_0142 と同じ build-ff。`run_0152_v2d2_tp2_short_dt4_n20` (run_0142 の再現も兼ねる) と `run_0153_v2d2_tp2_short_dt4_n40`。評価: `eval_v2d.py same run_0152 run_0153 run_0141 --nsub` で D_N = max|P₂₀ − P₄₀| / A_inc (固定区間、A_inc は run_0141 の入射窓)。**判定**: D_N ≤ 0.002 → 反復数依存による説明は弱い → 精度変更の診断へ。D_N > 0.01 → 「nSub 20 で十分」を棄却。中間は保留。dt 半減差 ≤ 1 % は別条件として維持。**結果 (2026-10-03)**: D_N (n20 vs n40) = **1.56 %** → 規則上は「nSub 20 で十分」を棄却。**ただし対照**: 同じ設定・同じバイナリの run_0142 (既存) と run_0152 (再実行) の差が **1.38 %** (同じ評価器・同じ区間)。→ 同一設定の再実行差が A/B の差と同じ大きさなので、反復数の効果は**この測定では分離できない** (判定は事前規則どおり記録するが、解釈は保留)。dt 半減差 1.13 %・2.18 % も同じ再実行差の内側に入る可能性がある (atomicAdd の加算順による非決定性が時間精度試験の床を作っている疑い、未確認)。次: 諮問 (エスカレーション条件 3)。**判断: 2026-10-03 codex (diagnose) 2 回目 [記録](../../notes/reviews/2026-10-03-farfield-v2-ab-results-diagnose.md) — 全件採用**: 差から再実行幅を引く判定は却下 (1 % 基準は維持、ばらつきは不確かさとして加える)。1.38 % を atomicAdd の床と確定しない (run_0142 は 9/29 に別途生成した入力で、入力同一性が未確認)。評価器は先頭被覆・欠測も検査し、和集合の時刻で比べるよう修正。**反復比較の事前登録 (2026-10-03、run 前)**: 生成済み入力を固定 (run_0152 / run_0153 の chan.h5・config・bcond・物性 DB・プローブをそのまま複製、再生成しない)、`nSubIterDualTime` 20 / 40 を各 3 本: n20 = run_0152・`run_0158`・`run_0159`、n40 = run_0153・`run_0160`・`run_0161` (同じバイナリ build-ff、`FORGE_CUDA_BLOCKSIZE=128`)。run_0142 は過去との照合用に分ける。評価 `eval_v2d.py groups run_0141 <n20 3 本> -- <n40 3 本>`: F_n = 群内 max_t|P_r − P_s|/A_inc、群平均波形の差 D、群平均からの最大偏差 E_n。**判定**: D + E₂₀ + E₄₀ ≤ 1 % → 観測した反復を含めて nSub 感度は許容内。群内で 1 % 以上 → 単発差を反復不足に帰属しない・時間精度の合格は保留。F₂₀, F₄₀ ≤ 0.2 % かつ D − E₂₀ − E₄₀ > 1 % → 「nSub 20 で十分」を棄却。他は保留。dt 半減比較には別途同じ 1 % 条件 | AWS | F |
+| 3f | **V2d-2 隔離試験の結果 (2026-09-29)**: dt 8.8e-7 (`run_0110`–`0121`): パルスなし 3 物性 × 短・長 PASS (cpg 2.4e-4 Pa、TP 0.0000 Pa)、窓付き反射 cpg 0.055 %・tp1 0.26 %・tp2 0.31 % PASS。**時間精度 FAIL**: tp2 の dt/2 (`run_0122`) との差 1.13 % (> 1 %。最初は V2a 用の評価器で P∞ 101325 を使い 0.0000 % と誤表示した → `eval_v2d.py same` を追加)。dt 4.4e-7 に下げた組 (`run_0130`–`0141`) でも全判定 PASS (反射 0.40 / 0.94 / 0.77 %、tp1 パルスなし 0.0095 Pa) だが、**dt 2.2e-7 (`run_0142`) との差は 2.18 % とかえって拡大** → 時間方向に収束せず。仮説 (未確認): dual-time の物理時間項 (U^{n+1}−U^n)/dt の float32 丸めが dt を小さくするほど効く ([moment-time-order-noise-and-front] と同型)、パルス振幅 1e-3 P∞ = 2.2 Pa が小さすぎる。**判断待ち**。**判断: 2026-10-03 codex (diagnose) [記録](../../notes/reviews/2026-10-03-farfield-v2c-v2d2-next-diagnose.md) — 全件採用**: float32 確定は要再検証 (BDF 項・更新は `flow_float` だが nSub 感度が未確認)。振幅の訂正: 入力は 1e-3 P∞ = **2.851 Pa**、2.22 Pa は評価点で測った入射窓振幅 (時間精度の分母)。評価器 `eval_v2d.py same` は短い方の終了時刻までしか比べず、区間を覆わない入力でも PASS を返した → 固定評価区間 [0, t_ref + w_ref] の完全被覆・時刻の単調性・全値の有限性・入射振幅が有限かつ正を必須にし、満たさなければ判定不能 (終了コード 2) に修正 (2026-10-03)。修正後の評価器で既報を再評価: run_0120 vs 0122 1.132 %、run_0140 vs 0142 2.184 % (区間を完全被覆) → 既報の FAIL は評価器の欠陥によるものではない。**nSub A/B の事前登録 (2026-10-03、run 前)**: run_0142 と同じ tp2・短領域・`--left-hot`・dt 2.2087e-7 (`--cfl-ac 0.02825`)・同じ元のパルス初期場、`time.nSubIterDualTime` だけ 20 → 40。バイナリは run_0142 と同じ build-ff。`run_0152_v2d2_tp2_short_dt4_n20` (run_0142 の再現も兼ねる) と `run_0153_v2d2_tp2_short_dt4_n40`。評価: `eval_v2d.py same run_0152 run_0153 run_0141 --nsub` で D_N = max|P₂₀ − P₄₀| / A_inc (固定区間、A_inc は run_0141 の入射窓)。**判定**: D_N ≤ 0.002 → 反復数依存による説明は弱い → 精度変更の診断へ。D_N > 0.01 → 「nSub 20 で十分」を棄却。中間は保留。dt 半減差 ≤ 1 % は別条件として維持。**結果 (2026-10-03)**: D_N (n20 vs n40) = **1.56 %** → 規則上は「nSub 20 で十分」を棄却。**ただし対照**: 同じ設定・同じバイナリの run_0142 (既存) と run_0152 (再実行) の差が **1.38 %** (同じ評価器・同じ区間)。→ 同一設定の再実行差が A/B の差と同じ大きさなので、反復数の効果は**この測定では分離できない** (判定は事前規則どおり記録するが、解釈は保留)。dt 半減差 1.13 %・2.18 % も同じ再実行差の内側に入る可能性がある (atomicAdd の加算順による非決定性が時間精度試験の床を作っている疑い、未確認)。次: 諮問 (エスカレーション条件 3) | AWS | F |
 | 3e | **V2d 独立参照 `ref1d_euler_tp.py` (記録用)**: セル中心 HLLC・MC・SSP-RK3・外挿端。Δx 5 mm (minmod) も 1.25 mm (MC) も Δx/4 との差が §6 の「許容の 1/5」に届かない (音響 P 0.076 Pa vs 0.0285、接触波 T 3.1 K vs 1.52)。これ以上は手元の CPU で重い (ユーザ指示: 重い計算は手元でしない) ので中断。境界の合否には入らない記録項目として残作業 | 手元 / AWS | O |
-| 3c | **V2c 凸角 (ランプ終端 x 0.7) の残差停滞**: 形状側 (slip の凸角) の問題として扱うか、境界と無関係に node slip 凸角の既知欠陥か、を切り分ける。案を codex に諮ってから §6 V2c の手順 (共通初期場の追加隔離試験を含む) を事前登録し直す。**判断: 2026-10-03 codex (diagnose) [記録](../../notes/reviews/2026-10-03-farfield-v2c-v2d2-next-diagnose.md) — 全件採用**: 「凸角の欠陥・farfield 無関係」は却下 (v2 形状でも発散・停滞、A/C も入口は farfield)。形状・BC を固定してまず再構成次数への依存を見る。`limiterScaled 0` は評価点整合も変えるので使わない。陰解法は使用中。**次数 A/B の事前登録 (2026-10-03、run 前)**: `run_0064_v2c_B` (旧形状 B) の最終場を同一格子の新規 2 run へ保存量のままコピー、`space.convMethod` だけ変える: `run_0150_v2c_ord_A2` = 1 (2 次)、`run_0151_v2c_ord_B1` = 0 (1 次)。バイナリは既存 V2 と同じ build-ff (a6ceee0b)、各 6000 step・全場 500 step ごと (`v2c_order_ab.py`)。指標: Rmax = 全域最大の規格化局所残差 (`v2c_residual_ab.py`、射影なし、初期・最終、各 run の自分の設定で 1 評価)、W = 末尾 2000 step の下面評価線の max_x(max_t p − min_t p)/Δp。**判定**: 1 次側だけ Rmax ≤ 1e-5 かつ W < 0.001 で 2 次側が停滞を再現 → 「一次化を安定起動に使う」を支持 (散逸増でも改善しうるので『リミッタ係数の切替が真因』とは言わない)。1 次側でも Rmax・W が 2 次側の 1/2 以上で必要条件未達 → 「一次化だけで停滞を解消できる」を棄却。他は保留。これは診断で、1 次側の改善を V2c 合格にしない (合格には別途 check_convergence PASS・check_quasisteady・登録済み壁圧条件)。次数変更前後の残差系列は連結しない。**結果 (2026-10-03)**: 2 次 `run_0150_v2c_ord_A2`: Rmax 初期 4.7e-3 → 最終 4.7e-3 (凸角 x 0.715、1930 → 2418 節点が 1e-5 超)、W 9.4e-4。1 次 `run_0151_v2c_ord_B1`: Rmax 初期 6.6e-2 (圧縮角、次数変更直後) → **最終 6.2e-7 (全節点 ≤ 1e-5)**、W 2.7e-6。残差評価 `run_0154`–`0157` (`V2C_ORD_20261003.log`)。→ 事前規則で「1 次側だけ必要条件を満たし 2 次側が停滞を再現」= **一次化を安定起動に使う方針を支持** (停滞は 2 次再構成への感度。リミッタ係数の切替が真因とは言わない)。V2c の合格判定はまだ (2 次の本試験は必要条件未達のまま)。次: 1 次の収束場から 2 次へ上げる経路で必要条件を満たせるか (諮問で設計)。**判断: 2026-10-03 codex (diagnose) 2 回目 [記録](../../notes/reviews/2026-10-03-farfield-v2-ab-results-diagnose.md) — 全件採用**: 1 次の結果で V2c を合格にしない (1 次は起動手段として採用、2 次の必要条件と A/B/C の全線判定は残す)。壁圧 W は末尾 2000 step を覆う 5 標本を必須に (`v2c_order_ab.py wall` を修正)。**段階起動の事前登録 (2026-10-03、run 前)**: `run_0162_v2c_B_1to2` = `run_0151_v2c_ord_B1` の最終場を同一格子へ保存量のままコピーし `convMethod: 1` に戻す (他は run_0150 と同一、build-ff)。2 次区間で 6000 step、未達なら 6000 ずつ延長 (最大 24000 step、延長は同じ run を継続する新しい run)。**2 次で満たすべき条件**: 全節点・全 5 成分の Rmax ≤ 1e-5 (`v2c_residual_ab.py`、射影なし)、W < 0.001 (5 標本)、`check_convergence` PASS (2 次区間だけで判定、1 次区間を連結しない)、`check_quasisteady` (壁圧の量が無ければその旨を記録し W で代える)、NaN・置換 0。満たせなければ V2c は未収束・判定不能のまま。満たしても B 単独では合格にせず、同じ起動法で A・C を作り登録済みの全線比較を行う | AWS | F |
+| 3c | **V2c 凸角 (ランプ終端 x 0.7) の残差停滞**: 形状側 (slip の凸角) の問題として扱うか、境界と無関係に node slip 凸角の既知欠陥か、を切り分ける。案を codex に諮ってから §6 V2c の手順 (共通初期場の追加隔離試験を含む) を事前登録し直す。**判断: 2026-10-03 codex (diagnose) [記録](../../notes/reviews/2026-10-03-farfield-v2c-v2d2-next-diagnose.md) — 全件採用**: 「凸角の欠陥・farfield 無関係」は却下 (v2 形状でも発散・停滞、A/C も入口は farfield)。形状・BC を固定してまず再構成次数への依存を見る。`limiterScaled 0` は評価点整合も変えるので使わない。陰解法は使用中。**次数 A/B の事前登録 (2026-10-03、run 前)**: `run_0064_v2c_B` (旧形状 B) の最終場を同一格子の新規 2 run へ保存量のままコピー、`space.convMethod` だけ変える: `run_0150_v2c_ord_A2` = 1 (2 次)、`run_0151_v2c_ord_B1` = 0 (1 次)。バイナリは既存 V2 と同じ build-ff (a6ceee0b)、各 6000 step・全場 500 step ごと (`v2c_order_ab.py`)。指標: Rmax = 全域最大の規格化局所残差 (`v2c_residual_ab.py`、射影なし、初期・最終、各 run の自分の設定で 1 評価)、W = 末尾 2000 step の下面評価線の max_x(max_t p − min_t p)/Δp。**判定**: 1 次側だけ Rmax ≤ 1e-5 かつ W < 0.001 で 2 次側が停滞を再現 → 「一次化を安定起動に使う」を支持 (散逸増でも改善しうるので『リミッタ係数の切替が真因』とは言わない)。1 次側でも Rmax・W が 2 次側の 1/2 以上で必要条件未達 → 「一次化だけで停滞を解消できる」を棄却。他は保留。これは診断で、1 次側の改善を V2c 合格にしない (合格には別途 check_convergence PASS・check_quasisteady・登録済み壁圧条件)。次数変更前後の残差系列は連結しない。**結果 (2026-10-03)**: 2 次 `run_0150_v2c_ord_A2`: Rmax 初期 4.7e-3 → 最終 4.7e-3 (凸角 x 0.715、1930 → 2418 節点が 1e-5 超)、W 9.4e-4。1 次 `run_0151_v2c_ord_B1`: Rmax 初期 6.6e-2 (圧縮角、次数変更直後) → **最終 6.2e-7 (全節点 ≤ 1e-5)**、W 2.7e-6。残差評価 `run_0154`–`0157` (`V2C_ORD_20261003.log`)。→ 事前規則で「1 次側だけ必要条件を満たし 2 次側が停滞を再現」= **一次化を安定起動に使う方針を支持** (停滞は 2 次再構成への感度。リミッタ係数の切替が真因とは言わない)。V2c の合格判定はまだ (2 次の本試験は必要条件未達のまま)。次: 1 次の収束場から 2 次へ上げる経路で必要条件を満たせるか (諮問で設計) | AWS | F |
 | 3b | **V2d-2 の再設計** (codex diagnose 2026-09-29、2 回目で採用確定: `--left-hot` を右端流出の隔離試験として正式化、短・長の両方でパルスなし対照、3 物性、評価器は入射窓で振幅・反射到達窓で短長差を測る形に直す): 右端流出を隔離する対照 (左端 = 内部と同じ高温状態) を正式な隔離試験として別記、元の配置の FAIL は保持。反射の評価は左端擾乱の到達前に反射が評価点へ着く配置に直す (§6 の該当節を改訂してから回す)。左端流入の TP 混合仮説は境界を含まない試験で確かめる | AWS | F |
 | 3g | ~~V2 の残り (V2c・V2d-2 時間精度・独立参照) の扱い~~ **決着 (2026-09-29 ユーザ決定「記録して V3 へ進む」)**: codex diagnose は「V3 は V2 受入れ後」としていたが、ユーザ判断で V3 に進む。V2 は限定付きで記録: V2c = 判定不能 (試験形状上のソルバ定常収束の問題。同一初期場での境界の効果は壁面 ≤ 0.008 Δp、出口端 1 節点 0.021 Δp)、V2d-2 = 隔離試験の判定は全 PASS、時間精度は dt 細分で悪化し未確認 (float 床の疑い)、独立参照 = 収束不足で中断。いずれも FAIL/未確認のまま残作業に残す (#3a–#3f) | — | F |
 | 4 | SERN V3 (**2026-09-29 着手**: `v3_farfield_setup.py`、新バイナリ build-ff、リミッタ基準値を run_0986 の自動値に固定、20000 step・500 出力。V3a = `case/46.sern_design/run_0992_ff_v3a_2p50_slip` / `run_0993_ff_v3a_2p50_ff` (run_0986 最終場からビット一致の restart、side_far 以外の BC 同一)。V3b = 3.42 H (`run_0994`、run_0988 最終場) / 4.35 H (`run_0995`、run_0989 の入力場 = R4d の初期場) を V3a の後に)。**V3a 結果 (2026-09-29、R4d と同じ規則: 末尾 10000 step 平均・a = max|値−平均|・D = |Δ平均| + a₁ + a₂・前窓差 ≤ 0.1ε)**: 両者 GATES PASS。slip (新バイナリ・基準値固定) は旧 run_0986 と D が C_L 2.6e-5・C_M 5.5e-4 (バイナリ・基準値固定の影響は ε の 1/10 程度)。farfield (2.50 H) は C_L 0.0618214・C_M −1.6211579 で slip との D = C_L 7.9e-4・C_M 0.0235 (> ε)、C_T・C_T_with_shear は D ≤ 3e-5。farfield の値は R4d の slip 拡大系列 (3.42 H 0.0618810 / −1.6228715、6.19 H 0.0618870 / −1.6229828) の側へ動いた。**ただし farfield の C_M は前窓差 8.4e-4 > 0.1ε で窓条件未達** → 事前規則どおり `run_0996_ff_v3a_2p50_ff_cont20k` で +20000 延長。**延長後 (窓条件 全量 OK、GATES PASS)**: C_L 0.0618221・C_M −1.6211744。V3a の D (slip vs farfield 延長) = C_L 7.9e-4・C_M 0.0234 (> ε、記録のみ)。**V3b 3.42 H farfield** (`run_0994_ff_v3b_3p42_ff`、GATES PASS・窓条件 OK): C_L 0.0618801・C_M −1.6228598。**2.50 H farfield vs 3.42 H farfield: 全 4 量 D ≤ ε** (C_T 8.0e-6・C_T_with_shear 6.5e-6・C_L 8.2e-5・C_M 2.2e-3)。参考: 両者とも R4d の slip 6.19 H (`run_0990`) と全量 D ≤ ε (2.50 H ff: C_L 8.4e-5・C_M 2.2e-3、3.42 H ff: 3.0e-5・6.2e-4)。**4.35 H farfield** (`run_0995_ff_v3b_4p35_ff`、GATES PASS・窓条件 OK): C_L 0.0618780・C_M −1.6228136。**事前規則の判定**: 2.50 H ff vs 3.42 H ff・vs 4.35 H ff とも全 4 量 D ≤ ε (vs 4.35 H: C_T 8.3e-6・C_T_with_shear 7.9e-6・C_L 8.3e-5・C_M 2.2e-3)、3.42 vs 4.35 も全量 ≤ ε → **farfield での必要側方幅 = 2.50 H (試験した幅系列 4.35 H まで、無限遠との一致とは言わない)**。注記 (訂正): C_M の 2.50 H と広幅の平均差は 1.64–1.69e-3 = ε の **33–34 %**、振幅込みの D は 2.19–2.24e-3 = ε の 44–45 %。**判断: 2026-09-29 codex (diagnose) [記録](../../notes/reviews/2026-09-29-farfield-v3-result-diagnose.md) — 全件採用**: (i) 幅判定は**限定付き**で採用 = 「当該形状・m6_on・g3・リミッタ基準値固定・今回の初期場履歴で、試験した 2.50/3.42/4.35 H のうち最小の適合幅は 2.50 H」(無限遠一致・初期場非依存・汎用境界の受入れは含めない)、(ii) 「反射をほぼ除去」は**却下** (力係数の幅感度を測っただけ。記述は「側方 BC 変更で狭幅の力係数が広幅側へ移り、試験系列の幅感度が許容内になった。機序は未同定」)、(iii) V3 通過で accepted にしない (V2 未達を相殺しない、status は in_progress)、(iv) 旧 slip の格子差 G の転用は不可 → 生産精度の認定には最終 BC・同じ基準値で g3/g4 (列を引き継ぐなら g1 も) の G を取り直す (#4c)、(v) `v3_farfield_eval.py --pair` は窓条件を判定に含めない → 必要条件に組み込む (#4b)、(vi) SERN 帳簿 `sern_momentum.py` が farfield の HLLC 流束を読まない → 診断面流束で組む経路を完成 (#4d)。**次 = 初期場履歴 A/B (#4a)** (`case/46.sern_design/V3_EVAL.txt`) | AWS。R4d へ反映 (restart は `r4d_common_restart.py` 型の index コピー、メッシュ品質、判定区間、case README の run 索引) | O |
@@ -275,3 +366,217 @@ V1–V2 は**境界機能の受入れ**、V3 は**SERN での配置 (側方幅) 
 - `2026-09-27` — plan-2 NO-GO (C0/M5/m2) を全件採用し全面改訂 (ユーザ決定: 検証はレビューどおり全部)。
 - `2026-09-27` — codex plan 段 NO-GO (C1/M6/m1) を全件採用し §4/§6 を改訂。
 - `2026-09-27` — 初稿 (ユーザ「遠方境界入れたらすっきりかもね。やってみますか」)。`methods/boundary.md` に理論節を追加し、`outflow` の説明 (実装は全量コピー) を訂正。
+```
+
+## 参考: `case/58.farfield_verification/README.md`
+
+```
+# case/58 遠方境界 `farfield` の検証
+
+node 用の特性型遠方境界 `farfield` (外側状態 = TRRS + 滑らかな超音速の重み、境界面 HLLC) の受入れ試験。
+計画・合格条件は [`plans/active/boundary-node-farfield-characteristic.md`](../../plans/active/boundary-node-farfield-characteristic.md) §6、
+結果の記録は同 §5.1 #2・#3。run は AWS (`~/forge-pgrad-new/case/58.farfield_verification/`) にあり、手元には入力スクリプトだけを置く。
+
+- `make_box_msh.py`: 構造 hex の直方体 (gmsh 4.1、physID 1–6 = xmin, xmax, ymin, ymax, zmin, zmax、7 = 体積)
+- `setup_v1.py RUN VARIANT [--steps N]`: V1 の run を作る (1 × 0.5 × 0.5 m、24 × 12 × 12、全 6 面 farfield、一様 IC を h5 に直接書く)。
+  VARIANT a = CPG M0.5 / b = TP 外気 M6 (SERN の EXH/AIR、Y_EXH 0) / c = b を xy 面内で 30° 傾ける / d = b + SST
+- `eval_v1.py RUN...`: V1 (a)–(c) の判定 (最終 `res_*.h5` の自由流からの最大相対ずれ ≤ 1e-5)
+- `v0u_reject.py`: V0u (v) 非対応構成の起動拒否 (7 構成 + 対照)
+- `setup_v2a.py` / `eval_v2a.py`: V2a 音響反射 (薄板チャネル、dual-time、プローブ時系列の短−長差)。リミッタ基準値は自由流で固定
+- `setup_v2b.py` / `eval_v2b.py`: V2b 保存収支 (帳簿全節点 + 面ダンプ、最終場 restart の 1 評価 `_bal`)・V2f 局所逆流
+- `setup_v2c.py` / `eval_v2c.py`: V2c 斜め衝撃波 (M2.5・10° ランプ、上面 A slip / B farfield / C 高い slip)
+- `v2c_operator_ab.py setup|compare|fromC`: V2c の角の切り分け (同一状態での 1 評価の作用素照合、C の最終場からの継続)
+- `setup_v2d.py` / `eval_v2d.py`: V2d 接触波・TP 音響 (cpg / tp1 単成分 / tp2 多成分、`--left-hot` は左端流入の接触面を消す診断)
+- `eval_v1d.py RUN`: V1 (d) の判定 (帳簿ダンプ全節点で、対流と k・ω 輸送の残差 / 接する面流束の絶対和 ≤ 1e-5)。
+  run は `FORGE_DUMP_LEDGER=ledger.csv FORGE_DUMP_LEDGER_CALLS=1 FORGE_DUMP_LEDGER_NODES=<全節点> FORGE_DUMP_FARFIELD=ffdump` で回す
+
+V1 の `check_convergence.py` は NOT CONVERGED (全列が丸め床で横ばい) になるが、一様 IC から始める自由流保持の試験で
+残差は step 0 から float32 の丸め床にあり、低下しようがない。判定は plan §6 V1 の場のずれで行う。
+
+## 計算 run 一覧
+
+> **AWS の全場削除 (2026-10-03、ディスク逼迫でユーザ指示)**: `~/forge-pgrad-new/case/58` の run から中間の全場を削除 (各 run の最終場は残す。case/46 と合わせて 39.8 GB)。残したもの: 力係数・残差の CSV、VERDICT、`metrics.json`、config、壁面出力の時系列。
+
+| run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
+| --- | --- | --- | --- |
+| `run_0001_v1a` | V1(a) CPG M0.5、2000 step、block-DPLUR | 最大ずれ dρ 7.5e-7・dP 3.1e-7・du 6.7e-7 → **PASS**。置換・退避 0 | active |
+| `run_0002_v1b` | V1(b) TP M6 (不具合版バイナリ) | dP 4.2e-5 FAIL。側面の全面が置換 (GPU 上で外側状態の組成が 0 になる不具合) | 破棄予定 |
+| `run_0003_v1c` | V1(c) 30° 傾き (不具合版バイナリ) | 側面が置換。不具合版 | 破棄予定 |
+| `run_0004_v1d` | V1(d) TP M6 + SST (k 479.653、ω 119844)、2 step、帳簿ダンプ全 4225 節点 | 輸送残差 / 規模 最大 5.8e-7 → **PASS** (`V1D_VERDICT.txt`)。置換・退避 0 | active |
+| `run_0005_v1b_fix` | V1(b) 修正版バイナリ (`ff_copy`) | dρ 4.9e-6・dP 6.7e-6・du 6.1e-7・dY 0 → **PASS**。step 0 で 1e-6 → 500 step で 6e-6、以後横ばい | active |
+| `run_0006_v1c_fix` | V1(c) 修正版バイナリ | dρ 3.5e-6・dP 6.3e-6・du 4.7e-7・dY 0 → **PASS**。置換・退避 0 | active |
+| `dbg_b` | run_0002 の 1 step 複製 (不具合の切り分け用) | 修正版で置換 0 を確認 | 破棄予定 |
+| `v0u_reject_*` (一時) | V0u (v) 起動拒否。実行ごとに作って消す | 7 構成拒否・対照完走 → **PASS** (`V0U_REJECT_VERDICT.txt`) | 破棄済み |
+| `run_0010`–`run_0018_v2a_*` | V2a 初回 (dt 5e-6、プローブ 6 桁) | dt/2 との差 7.6 % で時間精度不足。プローブが 1 Pa 刻み | 破棄予定 |
+| `run_0020`–`run_0028_v2a_*` | V2a dt 1.25e-6 (リミッタ基準値は自動) | 差の最大 1.1 % が入射通過時刻に出た = 短・長で L_ref が違い離散化が別物 | 破棄予定 |
+| `run_0040_v2a_m03_ff_short` / `run_0041_v2a_m03_long` | V2a 本試験 M0.3 SLAU、dt 1.25e-6、nSub 20、リミッタ基準値固定 | 反射率 **0.099 %** → PASS (`V2A_VERDICT.txt`) | active |
+| `run_0042_v2a_m03_ff_short_slau2` / `run_0043_v2a_m03_long_slau2` | 同 SLAU2 | 反射率 0.118 % → PASS | active |
+| `run_0044_v2a_m03_ff_short_nsub40` / `run_0045_v2a_m03_ff_short_dthalf` | 時間精度 (nSub 40 / dt 6.25e-7) | run_0040 との差 0.15 % / 0.58 % (≤ 1 %) → PASS | active |
+| `run_0046_v2a_m0_slip_short` / `run_0047_v2a_m0_long` / `run_0048_v2a_m0_ff_short` | M0: slip 対照 / 長領域 / farfield | slip 91.3 % (≥ 90 %、試験が反射を検出できる)・farfield 0.203 % → PASS | active |
+| `run_0030_v2b_x_ek0` / `run_0031_v2b_x_ek1` (+ `_bal`) | V2b 流出配置 (+x M0.5)、sstEnergyIncludesK 0/1、3000 step | 恒等式 ≤ 1e-9・全体収支 ≤ 6e-9・Y 置換 → PASS (`V2B_VERDICT.txt`) | active |
+| `run_0032_v2b_obl_ek0` / `run_0033_v2b_obl_ek1` (+ `_bal`) | V2b 流入配置 (3 面から斜め流入) | 同上 PASS。残差 4.4 桁低下で float 床 | active |
+| `run_0034_v2b_x_sfr2` / `run_0035_v2b_obl_sfr2` (+ `_bal`) | V2b 化学種 S3 経路 (speciesFaceReconstruction 2) | 同上 PASS | active |
+| `run_0036_v2f` (+ `_bal`) | V2f: 自由流 +x M2、x ≥ 0.8 m 帯を U_x −0.95a・Y 0.13 | 評価 1 で xmax 169 面が ṁ<0・外側組成 = 外気、恒等式 3 評価とも一致 → PASS (`V2F_VERDICT.txt`) | active |
+| `run_0050_v2e_v1b_expl` | V2e: V1(b) を定常陽解法 (RK3、局所 dt、CFL 0.8) で 4000 step | ずれ 8.7e-6 → PASS (`V2E_VERDICT.txt`) | active |
+| `run_0051_v2e_v2b_x_expl` (+ `_bal`) | V2e: V2b(i) を定常陽解法で 12000 step | 恒等式・全体収支・置換 PASS、残差 5.7 桁低下 | active |
+| `run_0052`–`run_0055_v2e_v2a_sst_ek*` | V2e: V2a + SST (k 1、ω 1e5)、sstEnergyIncludesK 0/1、短/長 | 反射 0.12 % (ek0)・0.33 % (ek1) → PASS | active |
+| `run_0060`–`run_0062_v2c_*` | V2c 初版 (ランプが出口まで) | A が流路閉塞で発散 (試験形状の不備) | 破棄予定 |
+| `run_0063_v2c_A` / `run_0064_v2c_B` / `run_0065_v2c_C` | V2c: ランプ 0.2–0.7 m、一様 IC から 6000 step | B vs C 0.087 Δp (角 x 0.21) → **FAIL (保持)**。A vs C 2.61 Δp (`V2C_VERDICT.txt`) | active |
+| `run_0066_v2c_B_cfl05` / `run_0067_v2c_C_cfl05` / `run_0068_v2c_B_rep` | V2c 診断: cfl 0.5・変換やり直し | 角の値は不変 | 破棄予定 |
+| `run_0092_v2c_opab_low` / `run_0093_v2c_opab_high` | V2c 作用素 A/B (C 最終場を座標対応で与えた 1 評価) | 局所作用素は同一 (差 ≤ 8e-8、`V2C_OPAB_VERDICT.txt`) | active |
+| `run_0094_v2c_B_fromC` / `run_0095_v2c_A_fromC` / `run_0096_v2c_C_cont` | V2c: C の最終場から 6000 step 継続 | 角は 3 本とも C の値 (**初期場依存の停滞状態**。「離散定常解が 2 つ」は後続の絶対残差 A/B と矛盾するので訂正、codex 2026-10-03)。B vs C 全線 0.0210 Δp (出口端)、除くと 0.0080 | active |
+| `run_0070`–`run_0084_v2d_*` | V2d: cpg / tp1 / tp2 × (接触波 短/長、音響 パルスなし/短/長) | 接触波 3 物性 PASS。パルスなし tp1 1.64 Pa・tp2 2.49 Pa → **FAIL (保持)**、cpg PASS。反射 0.07–0.23 % (隔離試験になっていない) (`V2D_VERDICT.txt`) | active |
+| `run_0085_v2d_tp2_ac_nopulse_long` / `run_0086_*_lefthot` / `run_0087_*_lefthot` | V2d 診断: 長領域のパルスなし、左端を高温にしたパルスなし | 長 2.4888 Pa (短と同じ)、左端高温 0.0000 Pa | active |
+| `run_0097_v2c_resab_fromU` / `run_0098_v2c_resab_fromC` | V2c 絶対残差 A/B (同じ B 格子に 2 つの最終場、1 評価、帳簿全節点) | 圧縮角 ≤ 5.2e-7 (両状態)、凸角近傍 4.6e-3 / 7.3e-3 (`V2C_RESAB_VERDICT.txt`、射影あり版は `_proj`) | active |
+| `run_0100`–`run_0102_v2c2_*` | V2c 形状 v2 (ランプを出口まで)、cfl 1、6000 step | A・B が step 691 / 640 で発散、C 完走 | 破棄予定 |
+| `run_0103_v2c2_B_dbg` / `run_0104_v2c2_B_cfl05` | v2 B の発散位置の特定 (20 step 出力) / cfl 0.5・3000 step | 下流ランプ下面 x 1.5–1.7 から / 2.5 桁でプラトー | 破棄予定 |
+| `run_0105_v2c2_A_cfl05` / `run_0106_v2c2_B_cfl05` / `run_0107_v2c2_C_cfl05` | v2 系列 (i)、cfl 0.5、12000 step | A 発散 (step 10570)、B・C 2.5 桁プラトー・壁圧変動 0.002 Δp → 判定不能 | active |
+| `run_0110`–`run_0122_v2d2_*` | V2d-2 隔離試験 (左端高温) dt 8.8e-7 (+ tp2 dt/2) | パルスなし・反射 PASS、時間精度 1.13 % FAIL (`V2D2_VERDICT.txt`) | active |
+| `run_0130`–`run_0142_v2d2_*_dt2` / `_dt4` | 同 dt 4.4e-7 (+ tp2 2.2e-7) | 判定 PASS、時間精度 2.18 % (dt 細分で悪化) (`V2D2_DT2_VERDICT.txt`) | active |
+| `run_0150_v2c_ord_A2` / `run_0151_v2c_ord_B1` (2026-10-03) | V2c 次数 A/B (#3c): run_0064 最終場から convMethod 1 / 0、6000 step、build-ff | 2 次: Rmax 4.7e-3 停滞・W 9.4e-4。1 次: Rmax 6.2e-7 (全節点 ≤ 1e-5)・W 2.7e-6 → 一次化で停滞が解ける (`V2C_ORD_20261003.log`) | active |
+| `run_0154`–`run_0157_v2c_res_*` (2026-10-03) | 上の初期・最終場の局所残差 1 評価 (`v2c_residual_ab.py`、帳簿) | 同上 | active |
+| `run_0152_v2d2_tp2_short_dt4_n20` / `run_0153_..._n40` (2026-10-03) | V2d-2 nSub A/B (#3f): run_0142 と同条件で nSub 20 / 40、build-ff | n20 vs n40 1.56 %、**run_0142 vs run_0152 (同設定の再実行) 1.38 %** → 分離不能 (`V2_AB_20261003.log`) | active |
+| `ref1d/` | 独立参照 1D (`ref1d_euler_tp.py`) Δx 5 mm | 参照自身が未収束 (記録用、中断) | active |
+```
+
+## 参考: `case/58.farfield_verification/eval_v2d.py`
+
+```
+#!/usr/bin/env python3
+"""V2d の判定 (plan boundary-node-farfield-characteristic §6 V2d、判定 (b) = 短領域 vs 長領域 = 境界が加える誤差)。
+  contact SHORT LONG : V2d-1。評価点 (右端から 5 セル内側) で
+       max_t |P_short − P∞|/P∞ ≤ 1e-3、 max_t |T_short − T_long| ≤ 0.02 × (600 − 220) K、 max_t |Y_short − Y_long| ≤ 0.002
+       (Y は 10 step ごとの res_*.h5 から評価点の節点値を読む。T・P はプローブ)
+  nopulse SHORT      : V2d-2 パルスなし対照。評価点 (x 0.8 m) で max_t |P − P∞| ≤ 0.01 × 1e-3 P∞
+  acoustic SHORT LONG: V2d-2 (旧)。反射 = max_t |P_short − P_long| / 入射振幅 ≤ 0.05 (入射振幅 = max_t |P_long − P∞|)
+  acoustic_win SHORT LONG: V2d-2 (再設計、plan §5.1 #3b)。入射窓 = t_inc ± 3σ/(c+u) で入射振幅 max|P_long − P∞|、
+       反射到達窓 = t_ref ± 3σ/(c−u) で max|P_short − P_long|。t_inc = (0.8 − 0.4)/(c+u)、t_ref = (1 − 0.4)/(c+u) + (1 − 0.8)/(c−u)、
+       σ = 0.04/2.355、c・u は内部の値 (IC_FROM.txt から)。反射 ≤ 0.05
+"""
+import re as _re
+import glob, re, sys
+import h5py, numpy as np
+
+P0 = 2851.0
+
+
+def probe(run, i=0):
+    d = np.genfromtxt(f"{run}/point_probe_{i}.out", delimiter=",", names=True)
+    return np.asarray(d["TotalTime"], float), np.asarray(d["P"], float), np.asarray(d["T"], float)
+
+
+def y_series(run, xeval):
+    fs = sorted((int(re.search(r"res_(\d+)\.h5$", p).group(1)), p) for p in glob.glob(run + "/res_*.h5") if re.search(r"/res_\d+\.h5$", p))
+    with h5py.File(run + "/chan.h5") as m:
+        xyz = np.array(m["MESH/COORD"]).reshape(-1, 3)
+    node = int(np.argmin((xyz[:, 0] - xeval) ** 2 + (xyz[:, 1] - 0.005) ** 2 + (xyz[:, 2] - 0.005) ** 2))
+    t, Y = [], []
+    for st, p in fs:
+        with h5py.File(p) as f:
+            V = f["VALUE"]
+            if "roY0" not in V:
+                return None
+            Y.append(float(V["roY0"][node] / V["ro"][node]))
+            t.append(st)
+    return np.array(t), np.array(Y)
+
+
+mode = sys.argv[1]
+if mode == "contact":
+    s, l = sys.argv[2], sys.argv[3]
+    ts, Ps, Ts = probe(s); tl, Pl, Tl = probe(l)
+    tm = min(ts[-1], tl[-1]); k = ts <= tm
+    dP = np.max(np.abs(Ps[k] - P0)) / P0
+    dT = np.max(np.abs(Ts[k] - np.interp(ts[k], tl, Tl)))
+    Tamp = np.max(Tl) - 220.0
+    out = [f"max|P−P∞|/P∞ {dP:.3e} (≤ 1e-3)", f"max|ΔT| {dT:.3f} K (≤ {0.02 * 380:.1f} K、塊の到達振幅 {Tamp:.1f} K)"]
+    ok = dP <= 1e-3 and dT <= 0.02 * 380.0
+    ys, yl = y_series(s, 0.975), y_series(l, 0.975)
+    if ys is not None:
+        n = min(len(ys[0]), len(yl[0]))
+        assert np.array_equal(ys[0][:n], yl[0][:n])
+        dY = np.max(np.abs(ys[1][:n] - yl[1][:n]))
+        out.append(f"max|ΔY| {dY:.2e} (≤ 0.002、塊の到達 Y {np.max(yl[1]):.4f})")
+        ok = ok and dY <= 0.002
+    print(f"{s} vs {l}: " + "、".join(out))
+    print(f"VERDICT: {'PASS' if ok else 'FAIL'}")
+elif mode == "nopulse":
+    s = sys.argv[2]
+    ts, Ps, _ = probe(s)
+    d = np.max(np.abs(Ps - P0))
+    print(f"{s}: パルスなし max|P − P∞| {d:.4e} Pa (≤ {0.01 * 1e-3 * P0:.4e})")
+    print(f"VERDICT: {'PASS' if d <= 0.01 * 1e-3 * P0 else 'FAIL'}")
+elif mode == "acoustic":
+    s, l = sys.argv[2], sys.argv[3]
+    ts, Ps, _ = probe(s); tl, Pl, _ = probe(l)
+    tm = min(ts[-1], tl[-1]); k = ts <= tm
+    A = np.max(np.abs(Pl[tl <= tm] - P0))
+    d = np.abs(Ps[k] - np.interp(ts[k], tl, Pl))
+    print(f"{s} vs {l}: 入射振幅 {A:.4g} Pa、max|ΔP| {d.max():.4g} Pa (t {ts[k][d.argmax()]:.4e} s) → 反射率 {d.max() / A:.4%}")
+    print(f"VERDICT: {'PASS' if d.max() / A <= 0.05 else 'FAIL'} (≤ 5 %)")
+elif mode == "acoustic_win":
+    s, l = sys.argv[2], sys.argv[3]
+    info = open(f"{s}/IC_FROM.txt").read()
+    U = float(_re.search(r"U ([-0-9.eE+]+) \(dir", info).group(1)); ci = float(_re.search(r"内部 T [0-9.]+ Y [0-9.]+ c ([0-9.eE+]+)", info).group(1))
+    sig = 0.04 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+    t_inc = 0.4 / (ci + U); t_ref = 0.6 / (ci + U) + 0.2 / (ci - U)
+    w_inc, w_ref = 3 * sig / (ci + U), 3 * sig / (ci - U)
+    ts, Ps, _ = probe(s); tl, Pl, _ = probe(l)
+    ki = (tl >= t_inc - w_inc) & (tl <= t_inc + w_inc)
+    kr = (ts >= t_ref - w_ref) & (ts <= t_ref + w_ref)
+    if ts[-1] < t_ref + w_ref or tl[-1] < t_ref + w_ref:
+        raise SystemExit(f"run が反射到達窓の終わり ({t_ref + w_ref:.4e} s) まで回っていない")
+    A = np.max(np.abs(Pl[ki] - P0))
+    d = np.abs(Ps[kr] - np.interp(ts[kr], tl, Pl))
+    print(f"{s} vs {l}: c_i {ci:.5g} u {U:.5g}、入射窓 [{t_inc - w_inc:.3e}, {t_inc + w_inc:.3e}] 振幅 {A:.4g} Pa、"
+          f"反射到達窓 [{t_ref - w_ref:.3e}, {t_ref + w_ref:.3e}] max|ΔP| {d.max():.4g} Pa → 反射率 {d.max() / A:.4%}")
+    print(f"VERDICT: {'PASS' if d.max() / A <= 0.05 else 'FAIL'} (≤ 5 %)")
+elif mode == "same":
+    # 時間精度: 2 run の評価点 P の差の最大 / 入射振幅 (長領域の入射窓の振幅、P∞ = 2851 Pa) ≤ 0.01
+    a, b, l = sys.argv[2], sys.argv[3], sys.argv[4]
+    info = open(f"{l}/IC_FROM.txt").read()
+    U = float(_re.search(r"U ([-0-9.eE+]+) \(dir", info).group(1)); ci = float(_re.search(r"内部 T [0-9.]+ Y [0-9.]+ c ([0-9.eE+]+)", info).group(1))
+    sig = 0.04 / (2.0 * np.sqrt(2.0 * np.log(2.0))); t_inc = 0.4 / (ci + U); w_inc = 3 * sig / (ci + U)
+    # 固定評価区間 [0, 反射到達窓の末尾] (codex diagnose 2026-10-03 M4): 3 run とも区間を完全に覆い、時刻が単調増加、
+    # 全値が有限、入射振幅が有限かつ正であることを必須にする (満たさなければ判定不能で終了コード 2)。以前は短い方の終了時刻までしか比べなかった
+    t_ref = 0.6 / (ci + U) + 0.2 / (ci - U); w_ref = 3 * sig / (ci - U); t_end = t_ref + w_ref
+    tl, Pl, _ = probe(l); ta, Pa, _ = probe(a); tb, Pb, _ = probe(b)
+    bad = []
+    for nm, t, P in ((a, ta, Pa), (b, tb, Pb), (l, tl, Pl)):
+        if len(t) < 2 or t[-1] < t_end:
+            bad.append(f"{nm} が評価区間の末尾 {t_end:.4e} s まで無い (最終 {t[-1] if len(t) else float('nan'):.4e})")
+        if np.any(np.diff(t) <= 0):
+            bad.append(f"{nm} の時刻が単調増加でない")
+        if not (np.all(np.isfinite(t)) and np.all(np.isfinite(P))):
+            bad.append(f"{nm} に非有限値")
+    ki = (tl >= t_inc - w_inc) & (tl <= t_inc + w_inc)
+    A = float(np.max(np.abs(Pl[ki] - P0))) if ki.any() else float("nan")
+    if not (np.isfinite(A) and A > 0):
+        bad.append(f"入射振幅が有限・正でない ({A})")
+    if bad:
+        print("判定不能:\n  " + "\n  ".join(bad)); print("VERDICT: UNDECIDABLE"); sys.exit(2)
+    k = ta <= t_end
+    d = np.abs(Pa[k] - np.interp(ta[k], tb, Pb))
+    print(f"{a} vs {b}: 評価区間 [0, {t_end:.4e}] s ({int(k.sum())} 点)、max|ΔP| {d.max():.4g} Pa (t {ta[k][d.argmax()]:.4e}) / 入射振幅 {A:.4g} Pa = {d.max() / A:.3%}")
+    rel = d.max() / A
+    if len(sys.argv) > 5 and sys.argv[5] == "--nsub":
+        # nSub 感度 (codex diagnose 2026-10-03 ①): D_N ≤ 0.002 → 反復数依存の説明は弱い、> 0.01 → 「nSub 20 で十分」を棄却、中間は保留
+        print(f"D_N = {rel:.4%} → " + ("≤ 0.2 %: 20→40 の感度は小さい" if rel <= 0.002 else ("> 1 %: nSub 20 で十分を棄却" if rel > 0.01 else "判定保留 (0.2–1 %)")))
+    else:
+        print(f"VERDICT: {'PASS' if rel <= 0.01 else 'FAIL'} (≤ 1 %)")
+```
+
+## 出力形式 (この形のまま)
+
+```
+結論: <次にやる一手を 1 文で>
+第 1 仮説: <内容>  確度: <高/中/低>
+  根拠: <ファイル:行 / run パスと数値>
+  反証条件: <何が観測されたらこの仮説は誤りか>
+第 2・第 3 仮説: <あれば 1 行ずつ>
+判別 A/B: <変える設定 1 点、回す長さ、見る量>  → A なら … / B なら …
+やらない方がよいこと: <呼び出し側が取りそうな誤った一手>
+呼び出し側の前提への異議: <ブリーフの枠組み・除外判断・指標の定義で受け入れなかったものと理由。無ければ「無し」>
+不足情報: <あれば>
+```
+設計判断・採否を諮られた場合は、上の前に「採否表 (指摘ごとに 採用/却下/要再検証 と理由)」を置いてよい。
