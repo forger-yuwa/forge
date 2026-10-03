@@ -60,4 +60,7 @@ V1 の `check_convergence.py` は NOT CONVERGED (全列が丸め床で横ばい)
 | `run_0105_v2c2_A_cfl05` / `run_0106_v2c2_B_cfl05` / `run_0107_v2c2_C_cfl05` | v2 系列 (i)、cfl 0.5、12000 step | A 発散 (step 10570)、B・C 2.5 桁プラトー・壁圧変動 0.002 Δp → 判定不能 | active |
 | `run_0110`–`run_0122_v2d2_*` | V2d-2 隔離試験 (左端高温) dt 8.8e-7 (+ tp2 dt/2) | パルスなし・反射 PASS、時間精度 1.13 % FAIL (`V2D2_VERDICT.txt`) | active |
 | `run_0130`–`run_0142_v2d2_*_dt2` / `_dt4` | 同 dt 4.4e-7 (+ tp2 2.2e-7) | 判定 PASS、時間精度 2.18 % (dt 細分で悪化) (`V2D2_DT2_VERDICT.txt`) | active |
+| `run_0150_v2c_ord_A2` / `run_0151_v2c_ord_B1` (2026-10-03) | V2c 次数 A/B (#3c): run_0064 最終場から convMethod 1 / 0、6000 step、build-ff | 2 次: Rmax 4.7e-3 停滞・W 9.4e-4。1 次: Rmax 6.2e-7 (全節点 ≤ 1e-5)・W 2.7e-6 → 一次化で停滞が解ける (`V2C_ORD_20261003.log`) | active |
+| `run_0154`–`run_0157_v2c_res_*` (2026-10-03) | 上の初期・最終場の局所残差 1 評価 (`v2c_residual_ab.py`、帳簿) | 同上 | active |
+| `run_0152_v2d2_tp2_short_dt4_n20` / `run_0153_..._n40` (2026-10-03) | V2d-2 nSub A/B (#3f): run_0142 と同条件で nSub 20 / 40、build-ff | n20 vs n40 1.56 %、**run_0142 vs run_0152 (同設定の再実行) 1.38 %** → 分離不能 (`V2_AB_20261003.log`) | active |
 | `ref1d/` | 独立参照 1D (`ref1d_euler_tp.py`) Δx 5 mm | 参照自身が未収束 (記録用、中断) | active |

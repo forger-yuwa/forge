@@ -15,8 +15,10 @@ RUNS = {"run_0150_v2c_ord_A2": 1, "run_0151_v2c_ord_B1": 0}
 def setup(binp):
     for dst, cm in RUNS.items():
         os.makedirs(dst)
-        for f in ("bcondConfig.yaml", "ramp.h5", "probe.yaml", "GEOM.txt"):
+        for f in ("bcondConfig.yaml", "ramp.h5", "probe.yaml"):
             shutil.copy(os.path.join(SRC, f), dst)
+        g = open(os.path.join(SRC, "GEOM.txt")).read() if os.path.exists(os.path.join(SRC, "GEOM.txt")) else "v1\n"   # 旧 run は GEOM.txt なし = v1
+        open(os.path.join(dst, "GEOM.txt"), "w").write(g)
         s = open(os.path.join(SRC, "solverConfig.yaml")).read()
         s = re.sub(r"convMethod: \d+", f"convMethod: {cm}", s)
         s = re.sub(r"outStepInterval: \d+", "outStepInterval: 500", s)
@@ -33,9 +35,20 @@ def setup(binp):
 
 
 def wall():
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import eval_v2c as E
-    b, p2 = E.oblique(2.5, E.TH); dp = (p2 - 1.0) * 101325.0
+    # eval_v2c は import すると main が走るので、同じ定数・関数をここに持つ (XC・TH・DZ・XE_OF・oblique は eval_v2c と同一)
+    import math, types
+    XC, TH, DZ, XE_OF = 0.2, math.radians(10.0), 0.005, {"v1": 0.7, "v2": 1.8}
+
+    def oblique(M, th, g=1.4):
+        lo, hi = math.asin(1.0 / M) + 1e-9, math.radians(64.0)
+        f = lambda b: math.tan(th) - 2.0 / math.tan(b) * (M * M * math.sin(b) ** 2 - 1.0) / (M * M * (g + math.cos(2 * b)) + 2.0)
+        for _ in range(200):
+            mid = 0.5 * (lo + hi)
+            (lo, hi) = (mid, hi) if f(lo) * f(mid) > 0 else (lo, mid)
+        b = 0.5 * (lo + hi); Mn = M * math.sin(b)
+        return b, 1.0 + 2.0 * g / (g + 1.0) * (Mn * Mn - 1.0)
+    E = types.SimpleNamespace(XC=XC, TH=TH, DZ=DZ, XE_OF=XE_OF)
+    b, p2 = oblique(2.5, TH); dp = (p2 - 1.0) * 101325.0
     for dst in RUNS:
         fs = sorted((int(re.search(r"res_(\d+)\.h5$", p).group(1)), p) for p in glob.glob(dst + "/res_*.h5") if re.search(r"/res_\d+\.h5$", p))
         last = fs[-1][0]; sel = [p for n, p in fs if n >= last - 2000]
