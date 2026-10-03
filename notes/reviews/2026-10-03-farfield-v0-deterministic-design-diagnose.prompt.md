@@ -1,3 +1,82 @@
+forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
+SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
+リポジトリに対する**外部レビュー**を依頼する。忖度なしで、主張はコードと実測 (run の数値) で検証すること。
+結論が「この計画/結果は誤り」でも構わない。両論併記で逃げず、推奨は 1 つに絞ること。
+
+ルール:
+- **ファイルを変更しない** (read-only サンドボックスで動いている。読む・実行して確認するのは可)。
+- 出力は日本語。識別子・ファイル名は原語のまま。
+- 指摘は **Critical / Major / Minor** の重大度付きで、必ず根拠 (`ファイル:行` または `run_*` の数値) と対案をセットで書く。
+- リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
+  用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
+- 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
+  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+
+## 依頼: 診断・設計判断の諮問 (stage = diagnose)
+
+あなたは forge の**診断・設計判断係**である。呼び出し側は実装と run を進めている別のモデル (Claude) で、
+**もっともらしい真因に飛びつく前に**あなたに諮っている。仕事は手を動かすことではなく、**次の一手を 1 つに絞ること**。
+
+### 前提
+- あなたは呼び出し側の会話を見ていない。下のブリーフと、自分で読んだファイルだけが根拠になる。
+  足りなければ推測で埋めずに「何が足りないか」を返す。
+- ブリーフは「観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 / 仮説」に分かれて渡される約束である。
+  **観測事実と呼び出し側の解釈が混ざっていたら、まず分け直す**。呼び出し側の要約より、run の数値・コード・
+  設定ファイルを自分で確かめた内容を優先する。
+- forge を起動しない。`python3` による `residual_history.csv` / `res_*.h5` の読み取りは**統計量だけ**を出す
+  (全量ダンプ・長いログ全文をコンテキストに流さない。`*.log`・`*.vtu`・`plans/README.md` は読まない)。
+
+### 診断の作法
+1. **「除外済み」というラベルを信用せず、潰した証拠を確認する** (run パス・設定差分・判定区間・VERDICT)。
+   証拠が足りない・判定期間が短い・変えた設定が実際には効いていない (YAML の階層違い等) なら**候補へ戻す**。
+   証拠が十分な候補は出し直さない。
+2. **症状と原因を分ける**。`detectNaN` が指す変数は結果であって原因ではない (EOS 床 → 負密度 → 圧力暴走 → ω の実績)。
+   後処理のアーチファクト (2 列混在の抽出、`centCoords` の置換、ソルバ `ypls` の退化) を先に疑う。
+3. **このリポジトリで繰り返された真因**を照合する: 投入設定の不整合 (IC と BC、亜音速に超音速 BC)、
+   押し出し 2 ノード spanwise、float32 桁落ち (双対幾何・r 重み)、stale build、cross-mesh IC の基底不一致、
+   絶対値のゼロ割ガード、境界ノードの凍結、YAML キーの階層違いで黙って無視される設定。
+4. 仮説は**確度順に最大 3 つ**。第 1 仮説には根拠を `ファイル:行` か run の数値で付ける。示せないものは「未確認」と明記。
+5. **判別する A/B を 1 つだけ**提案する。安く短く回せて、結果がどちらに出ても仮説が 1 つ消えるもの。
+   「A なら仮説 1、B なら仮説 2」を先に書く (結果を見てから解釈を作らない)。
+6. 少数点の一致・短い窓の値・未収束のトランジェント同士の比較を根拠にしない。
+
+### 設計判断 (plan §4・§6、codex 指摘の採否、result 段の解釈) を諮られたとき
+- 採否は指摘ごとに「採用 / 却下 / 要再検証」と理由。根拠が示されていない指摘は自分で該当箇所を読んでから判定する。
+- 検証計画は「何が出たら方針が誤りと言えるか」が定量的に書かれているかを見る。
+- 既定値の変更・opt-in 機能の削除は、plan の処置欄とユーザ決定の履歴を確認してから判断する
+  (「opt-in 残置」は削除対象でない)。
+- result 段の解釈は、主張ごとに根拠 run・判定ツールの VERDICT・判定区間が揃っているかを確かめる
+  (過渡ピークを定常値と、抽出アーチファクトを物理と誤認した実績は「予想どおり」に見える場面で起きた)。
+
+あなたの結論は**仮説**であって確定ではない。呼び出し側はこの A/B を回して確かめ、plan への反映も呼び出し側が行う。
+
+## ブリーフ (`notes/reviews/briefs/2026-10-03-farfield-v0-deterministic-design.md`)
+
+# 諮問: V0 後半の切り分け — 「加算順を固定した 1 更新 A/B」の最小の実装設計 (2026-10-03)
+
+関連 plan: `plans/active/boundary-node-farfield-characteristic.md` §5.1 #5a (V0 後半 FAIL、ユーザ決定 2026-10-03「切り分ける」)。前回諮問: `notes/reviews/2026-10-03-farfield-v0b-result-diagnose.md` (推奨 = 旧・新の同一入力で加算順を固定した完全な 1 outer step の A/B、同一版内のビット一致が前提ゲート)。
+
+## 事実
+- 旧 = `~/sglsq/forge_2fa3826c` (commit 2fa3826c)、新 = build-ff (commit a6ceee0b 系、sha b0240cd7)。`git diff --stat 2fa3826c a6ceee0b -- solver_density_cuda` は 25 ファイル。farfield 以外のソルバ変更: `boundaryCond.{cpp,hpp}`、`convectiveFlux_common_d.cuh` (+11、FORGE_DIAG_FACE_VEL_CELL)、`convectiveFlux_d.cu` (+283、farfield 振り分け・ダンプ・帳簿)、`convectiveFlux_slau_d.inc.cuh` (+23、FACE_VEL_CELL 介入)、`passiveKernels_d.cuh` (9)、`ransBoundary_d.cu` (6)、`ransTransport_d.cu` (2)、`scalarTransport_d.{cu,cuh}` (16+4、farfield 面値の読み分け)、`speciesTransport_d.cu` (7)、`solverConfig.hpp` (2)、`main.cpp` (11)、`probe/point_probes.cu` (1)。
+- `cuda_forge` の `atomicAdd` は 36 ファイル 478 か所、うち `res_*` への加算は 162 か所。node 残差・輸送対角・勾配の多くが atomicAdd。
+- 既存の診断: `FORGE_DUMP_MASSFLUX` (初回評価の massflux と ro,Ux,Uy,Uz,P,sonic)、`FORGE_DUMP_LEDGER` (段別残差の帳簿、節点・変数ごと)。決定的な加算の仕組みは無い (前回諮問で確認)。
+- 実行は AWS g5 (A10G)。SERN g3 は約 100 万節点級? (run_0971)。
+
+## 設計候補 (どれも未実装)
+A. **固定小数点の影アキュムレータ**: 診断ビルド (`-DFORGE_DET_ATOMIC`) で `atomicAdd(float*, float)` をラッパーに置き換え、値を int64 固定小数点に変換して影配列へ整数 atomicAdd (結合則が成り立つので順序非依存)、段の終わりに float へ戻す。宛先ポインタ → 影配列の対応表が要る。両版 (旧・新のソース) に同じパッチを当ててビルド。
+B. **倍精度アキュムレータ + 最後に float へ丸め**: 影配列を double にし atomicAdd(double)。順序依存は残るが、float への最終丸めでほぼ消える (丸め境界に当たる値だけ非決定的)。ビット一致の保証はないが確率的にほぼ決定的。
+C. **静的な切り分け**: 旧→新の非 farfield 差分を行単位で確認し、farfield の無い構成で実行経路に入る変更が無いこと (FACE_VEL_CELL は env 未設定で -1、面値ポインタは nullptr 経路) を証明し、加えて新バイナリで farfield コードを `#if 0` で除いたビルドとの 1 step 比較 (これも非決定的なので不十分?)。
+D. **部分決定化**: 差分のあるカーネル (scalarTransport・speciesTransport・passive・rans) と流れの残差だけを A/B で決定化し、他は対照で非決定のまま。
+E. **同一ソースの対照**: 新ソースから farfield 追加分だけを除いたビルド (= 旧と同じ作用素のはず) を作り、多 step で旧と同じ統計か比べる (統計比較なので推奨外?)。
+
+## 問い
+1. 前回の推奨を満たす最小の設計はどれか (A〜E 以外も可)。特に「同一版内のビット一致」を 1 outer step (内反復 5) で得る現実的な方法。
+2. 旧ソースにも同じ診断パッチを当てる必要があるか (旧バイナリは改変できないので再ビルドになる。再ビルド旧と配布済み旧の同一性はどう担保するか)。
+3. 合否 (事前閾値) と、A (一致) / B (不一致) それぞれの次の一手。V0 合格に昇格できる条件はあるか (前回は「1 更新一致は V0 合格に昇格させない」)。
+
+## 関連 plan 全文 (`plans/active/boundary-node-farfield-characteristic.md`)
+
+```markdown
 # 特性型の遠方境界 `farfield` (node)
 
 ## メタ
@@ -164,7 +243,7 @@ plan-7 の反例 (M1: 高温の内部を出ていく音響が外気そのまま�
 | 4g | 種の属性の運用: `restart_field.py` は `species_input_unverified=1` の場を既定で拒否し、許可すると宛先の属性を消すので、`--force-species` は**移行 1 回では済まず標準の restart で毎回要る** (前の説明を訂正、codex 2026-10-01)。仕様変更の要否は種 DB plan の未決 #3d (依頼元セッション) に伝える。`species_input_unverified=0` を手で書かない。**決着 (2026-10-01 依頼元の返信)**: Python ツールをソルバと同じ規則 (印付き・ハッシュ一致なら許可なしで継承) にそろえる修正 (#3d、e5fdf2fd) が種 DB 段 3 と一緒に入る (SERN plan R9)。それまでの継続は毎回許可が要る | — | F |
 | 4h | **g4 での LJ A/B** (codex diagnose 2026-10-02 採用、事前登録 2026-10-02): 起点 `run_1021_ff4f_g4_2p50_cont20k` の最終場を `restart_field.py` で別々の新規 run にコピー。バイナリは両方 f28ca2fa (sha256 bec8db5f)、**差は生成済み `solverConfig.yaml` の `physProp.ljSource` だけ**: A = `[legacy_v1]` (`run_1028_lj_g4_legacy`)、B = 既定 [gri30, svehla1962] (`run_1029_lj_g4_default`、キーを書かない)。BC・輸送・CFL・リミッタ基準値・初期保存量の一致を照合。各 20000 step・500 出力、窓条件未達なら各 +20000、なお未達は判定不能。記録: 4 係数の平均・a・前窓差、GATES・残差・準定常、NaN・床・farfield 置換。**判定 (事前固定)**: 全 4 量 D(A,B) ≤ τ (0.2ε) → 「g4 で τ 超の LJ 応答」を棄却 (g4 の持ち越し疑義を解消)。いずれかで |Δ平均| − a_A − a_B > τ → 「g4 でも τ 以下」を棄却し、#14 後の系列で G・幅を取り直す。中間は判定不能。併せて A が run_1021 を全量 D ≤ τ で再現すること (legacy_v1 で段 3 バイナリの結果に戻ること) を確認する。広幅への持ち越しはこの試験の対象外。**結果 (2026-10-02)**: 2 本とも GATES PASS・窓条件 全量 OK。A の restart は許可なしで通った (legacy_v1 は #14 前と同じハッシュ f0a9035e、印は継承)、B は `--force-species`。D(A,B): C_T 1.2e-6・C_T_with_shear 1.3e-6・C_L 7.1e-6・C_M 1.6e-4 (全量 ≤ τ、|Δ平均| − a_A − a_B はすべて負) → **「g4 で τ 超の LJ 応答」を棄却** (g4 の持ち越し疑義を解消)。A vs run_1021: D = 1.8e-6・1.5e-6・1.4e-5・3.6e-4 (≤ τ) → legacy_v1 で段 3 の結果を再現。→ #4f の (a)(b) は g3 2.50 H (run_1027) と g4 2.50 H (本試験) で #14 後に持ち越す。広幅 (3.42・4.35 H) の LJ 応答は未測定のまま (EXH の LJ 変化 −0.04 % と g3・g4 の応答から小さいと見込むが証明ではない)。両 run の全場 (res_20000・sern.h5) はディスク逼迫 (空き 3 GB) のため判定後に削除 | AWS | O |
 | 4d | **(優先度低、生産切替の前提ではない)** 運動量収支の検算ツール `design/forge_design/metrics/sern_momentum.py` を farfield の診断面流束 (FORGE_DUMP_FARFIELD、圧力基準補正込み) で組む (§5 の未完了項目、codex 2026-09-29 M)。**注記 (2026-09-29 ユーザ指摘で整理)**: C_T・C_L・C_M は `runner_sern3d.forces3d` のノズル壁面 (幅内ランプ・カウル内外・ダクト側壁) の積分 + 入口運動量で、遠方境界の面は使わない → farfield 化で推力の算出は変わらない。`sern_momentum.py` はランナーから呼ばれない手動の検算 (壁積分の範囲・符号・面積の誤り検出) で、farfield の run では閉じないだけ。C_T はノズル単品のグロス推力 (簡略化した箱形機体の外部流中)。機体込みの正味性能は実機形状が無いので見積もらない (機体面の力は C_T_vehicle 等の別枠で参考値)  **実装 (2026-10-03)**: `sern_momentum.py` に `--ff-dump <prefix>` を追加 — farfield 群の面流束をソルバの診断ダンプ (`FORGE_DUMP_FARFIELD`、1 評価) の F·S に置き換える (運動量は p − pRef ゲージから p_a ゲージへ + (pRef − p_a) n S)。ダンプが無い・面が欠けると `closure.closable = False` と明示 (従来の 1 次評価で代用)。**確認**: run_1017 (g3 2.50 H) の最終場から 1 評価だけ回して `run_1031_ff_mom_dump/ffdump.10.csv` (side_far 51143 面) を取得。閉じ残差 / F_ideal: ダンプなし (0.0406, 0.0004, 0.0023)・質量不均衡 −0.130 % → ダンプあり (0.0284, 0.0002, 0.0034)・−0.015 %。x の残り 2.8 % は本ツールが壁の粘性力を含めない分 (C_T − C_T_with_shear = 0.0187) と境界ノード値の 1 次評価の差でほぼ説明できる (検算の目的 = 範囲・符号・面積の誤り検出には十分)。**#4d 済**| 手元 | O |
-| 5a | **result 段レビュー (2026-10-03 GO-with-changes, C0/M3/m2) の対応**: M1 多成分 farfield の組成必須化 (済 6c28a556、起動拒否試験に「組成省略」「X で明示」を追加し全 10 件 PASS `V0U_REJECT_20261003.txt`)、M2 文書のキー訂正と生成 BC の試験 (済)、M3 一次証拠の回収と索引 (`notes/investigations/2026-10-03-farfield-evidence/`)、m4 診断ダンプの記述を実装に合わせる、m5 文書の同期。**M3 で見つけた欠け: V0 の後半「更新後保存量は旧バイナリ 3 回反復の再現性幅以内」が未実施** → 事前登録 (2026-10-03、run 前): run_0971 (g3、farfield なし) の設定と最終場 (res_16000) から、旧 = farfield 実装前 `~/sglsq/forge_2fa3826c` × 3、新 = farfield 実装後 build-ff (a6ceee0b 系、種 DB 取り込み前) × 3、各 200 step。保存量 (ro, roUx, roUy, roUz, roe, roK, roOmega, roY*) の最終場で、S_old = 旧同士の全組の max_node|ΔQ|、D = 新×旧の全組の max_node|ΔQ| (変数ごと)。**合格 = 全変数で D ≤ S_old** (S_old = 0 の変数は D = 0)。未達なら D/S_old を記録して諮る。**結果 (2026-10-03): FAIL** — 全 9 保存量で D > S_old (D/S_old 1.08–1.84、新同士 S_new も同じ桁、全値有限)、`run_1032_v0b_{o,n}{1,2,3}` (AWS `~/forge-pgrad-new/case/46.sern_design/`)、原本 `notes/investigations/2026-10-03-farfield-evidence/c46_V0B_REPRO_20261003.txt`。**判断: 2026-10-03 codex (diagnose) [記録](../../notes/reviews/2026-10-03-farfield-v0b-result-diagnose.md) — 全件採用**: FAIL を保持 (「登録条件で同等性を示せなかった」が正式な結論、ただしコード回帰の証明でもない)。規則には統計的な問題がある (3 回の観測範囲を後続標本の許容限界に使う; 同分布の単一スカラーでも PASS 確率 20 %) が、結果を見た後で閾値を変えない。初回ダンプ一致 (run_0991) は保存量更新・輸送・陰解法を網羅せず、run_0991 の新バイナリ (778179) と今回 (b0240cd7) も違うので転用しない。2fa3826c..a6ceee0b には `FORGE_DIAG_FACE_VEL_CELL` (再構成速度を変える診断) も入っており、発動していない証拠を照合するまで除外しない。**次の一手 (codex 推奨、未着手)**: 旧・新の同一入力で、加算順を固定した完全な 1 outer step の A/B (面寄与・段別残差・対角/行列・ΔQ・更新後 9 保存量を比較、同一版内のビット一致が前提ゲート)。既存の `FORGE_DUMP_MASSFLUX` では足りず**診断の実装が要る** (cuda_forge に手を入れる)。**accepted への移動は保留** (§2 の範囲縮小は V2c・V2d-2 の決定で、V0 後半の免除ではない)。進め方はユーザ判断待ち。~~進め方~~ **決着 (2026-10-03 ユーザ「じゃあ 1」= 切り分ける)**: 加算順を固定した 1 更新 A/B を実装して回す。実装方式は諮問 (`notes/reviews/briefs/2026-10-03-farfield-v0-deterministic-design.md`) で決めてから §6 に事前登録する。**判断: 2026-10-03 codex (diagnose、xhigh) [記録](../../notes/reviews/2026-10-03-farfield-v0-deterministic-design-diagnose.md) — 全件採用**: 候補 A (固定小数点)・B (double 積算)・D (部分決定化) は却下 (A/B は元の float 加算と別の演算、B は {2⁶⁰, −2⁶⁰, 1} で順序依存が残る反例、D は未変更カーネルの非決定性を残す)。C/E は補助のみ。**方式 F (採用候補)**: 同じ節点へ書く面を CPU で色分けし、色を同じ stream で固定順に起動、既存の `atomicAdd(float)` は保持 → 節点ごとの加算順が固定される。対象 = 実行経路の面 scatter (内部 SLAU・境界対流・内部/壁粘性・SST/化学種の移流・拡散と輸送対角・化学種 Fick とエンタルピー拡散・GG を使うならその面加算)。勾配 (node LSQ) と block-DPLUR は既に節点 gather で固定順。**両版 (旧 2fa3826c・新 b0240cd7 の実ソース) に同じパッチ**、パッチなし旧の再ビルドを配布物とハッシュ照合 (不一致なら結論を再ビルド版どうしに限定)。採取: 幾何・状態・勾配・面寄与・段別残差・対角・dt・ΔQ (各 sweep)・更新後 9 保存量をバイナリ配列で一括出力 (既存帳簿は 20 万面で打切り・1 要素転送で使えない)。事前閾値: 版内ビット不一致 0 (前提ゲート)、新旧も 0 bit 差で一致。**結果の扱い**: 一致でも V0 合格には昇格しない (通常実行の受入試験が別途必要)。版内一致・新旧不一致なら最初に違う段へ限定。**規模の注記 (2026-10-03)**: 面 scatter を持つカーネル群への色分けの間接参照・一括ダンプ・旧ソースへの移植・旧の再ビルド照合が要り、数日規模。かつ成功しても V0 は自動では合格にならない → ユーザに規模を伝えて着手可否を確認中 | AWS | F |
+| 5a | **result 段レビュー (2026-10-03 GO-with-changes, C0/M3/m2) の対応**: M1 多成分 farfield の組成必須化 (済 6c28a556、起動拒否試験に「組成省略」「X で明示」を追加し全 10 件 PASS `V0U_REJECT_20261003.txt`)、M2 文書のキー訂正と生成 BC の試験 (済)、M3 一次証拠の回収と索引 (`notes/investigations/2026-10-03-farfield-evidence/`)、m4 診断ダンプの記述を実装に合わせる、m5 文書の同期。**M3 で見つけた欠け: V0 の後半「更新後保存量は旧バイナリ 3 回反復の再現性幅以内」が未実施** → 事前登録 (2026-10-03、run 前): run_0971 (g3、farfield なし) の設定と最終場 (res_16000) から、旧 = farfield 実装前 `~/sglsq/forge_2fa3826c` × 3、新 = farfield 実装後 build-ff (a6ceee0b 系、種 DB 取り込み前) × 3、各 200 step。保存量 (ro, roUx, roUy, roUz, roe, roK, roOmega, roY*) の最終場で、S_old = 旧同士の全組の max_node|ΔQ|、D = 新×旧の全組の max_node|ΔQ| (変数ごと)。**合格 = 全変数で D ≤ S_old** (S_old = 0 の変数は D = 0)。未達なら D/S_old を記録して諮る。**結果 (2026-10-03): FAIL** — 全 9 保存量で D > S_old (D/S_old 1.08–1.84、新同士 S_new も同じ桁、全値有限)、`run_1032_v0b_{o,n}{1,2,3}` (AWS `~/forge-pgrad-new/case/46.sern_design/`)、原本 `notes/investigations/2026-10-03-farfield-evidence/c46_V0B_REPRO_20261003.txt`。**判断: 2026-10-03 codex (diagnose) [記録](../../notes/reviews/2026-10-03-farfield-v0b-result-diagnose.md) — 全件採用**: FAIL を保持 (「登録条件で同等性を示せなかった」が正式な結論、ただしコード回帰の証明でもない)。規則には統計的な問題がある (3 回の観測範囲を後続標本の許容限界に使う; 同分布の単一スカラーでも PASS 確率 20 %) が、結果を見た後で閾値を変えない。初回ダンプ一致 (run_0991) は保存量更新・輸送・陰解法を網羅せず、run_0991 の新バイナリ (778179) と今回 (b0240cd7) も違うので転用しない。2fa3826c..a6ceee0b には `FORGE_DIAG_FACE_VEL_CELL` (再構成速度を変える診断) も入っており、発動していない証拠を照合するまで除外しない。**次の一手 (codex 推奨、未着手)**: 旧・新の同一入力で、加算順を固定した完全な 1 outer step の A/B (面寄与・段別残差・対角/行列・ΔQ・更新後 9 保存量を比較、同一版内のビット一致が前提ゲート)。既存の `FORGE_DUMP_MASSFLUX` では足りず**診断の実装が要る** (cuda_forge に手を入れる)。**accepted への移動は保留** (§2 の範囲縮小は V2c・V2d-2 の決定で、V0 後半の免除ではない)。進め方はユーザ判断待ち。~~進め方~~ **決着 (2026-10-03 ユーザ「じゃあ 1」= 切り分ける)**: 加算順を固定した 1 更新 A/B を実装して回す。実装方式は諮問 (`notes/reviews/briefs/2026-10-03-farfield-v0-deterministic-design.md`) で決めてから §6 に事前登録する | AWS | F |
 | 5 | codex result 段 → accepted (**2026-10-03 ユーザ決定: 受理範囲を縮小して result レビューへ**、§2) | | F |
 
 ## 6. 検証
@@ -236,7 +315,6 @@ V1–V2 は**境界機能の受入れ**、V3 は**SERN での配置 (側方幅) 
 | diagnose | 2026-10-03 | [2026-10-03-farfield-v2c-v2d2-next-diagnose.md](../../notes/reviews/2026-10-03-farfield-v2c-v2d2-next-diagnose.md) (brief [2026-10-03-farfield-v2c-v2d2-next.md](../../notes/reviews/briefs/2026-10-03-farfield-v2c-v2d2-next.md)) | Major 4 / Minor 1 | **全件採用**: (1) V2c「凸角の欠陥・farfield 無関係」を却下 → 形状固定で次数 A/B (§5.1 #3c)、(2) `limiterScaled 0` での診断は却下 (評価点整合も変える)、(3) V2d-2 の float32 確定は保留 → nSub 20/40 A/B を先に (§5.1 #3f)、(4) `eval_v2d.py same` に固定区間の被覆・単調性・有限性・振幅の検査を追加 (既報の再評価で FAIL は不変)、(5) 振幅 2.2 → 入力 2.851 Pa・評価点 2.22 Pa と訂正。README の「離散定常解が 2 つ」を「初期場依存の停滞状態」へ訂正。accepted への経路は不変 |
 | result | 2026-10-03 | [2026-10-03-boundary-node-farfield-characteristic-result.md](../../notes/reviews/2026-10-03-boundary-node-farfield-characteristic-result.md) | GO-with-changes, C0/M3/m2 | **全件採用** (§5.1 #5a): M1 多成分 farfield の組成必須化 + 拒否試験 (済)、M2 文書のキー訂正 + 生成 BC 試験 (済)、M3 一次証拠の索引 (済、ただし回収中に V0 後半の未実施が判明し、実施したところ FAIL)、m4 ダンプの実装差を §4.3 に記録 (済)、m5 文書同期 (済) |
 | diagnose | 2026-10-03 | [2026-10-03-farfield-v0b-result-diagnose.md](../../notes/reviews/2026-10-03-farfield-v0b-result-diagnose.md) (brief [2026-10-03-farfield-v0b-result.md](../../notes/reviews/briefs/2026-10-03-farfield-v0b-result.md)) | Major 4 | **全件採用**: V0 後半の FAIL を保持、規則の閾値を後から変えない、初回ダンプ一致を多 step 不変の証拠にしない、`FORGE_DIAG_FACE_VEL_CELL` を照合するまで除外しない、accepted は保留 (§5.1 #5a) |
-| diagnose | 2026-10-03 | [2026-10-03-farfield-v0-deterministic-design-diagnose.md](../../notes/reviews/2026-10-03-farfield-v0-deterministic-design-diagnose.md) (brief [2026-10-03-farfield-v0-deterministic-design.md](../../notes/reviews/briefs/2026-10-03-farfield-v0-deterministic-design.md)) | Major 5 | **全件採用**: 方式 F (面の色分け + 固定順起動、float atomicAdd 保持) を採用候補に、A/B/D 却下、両版に同じパッチと旧の再ビルド照合、一括ダンプ (§5.1 #5a)。着手は規模確認中 |
 
 ## 7. 影響範囲
 
@@ -284,3 +362,19 @@ V1–V2 は**境界機能の受入れ**、V3 は**SERN での配置 (側方幅) 
 - `2026-09-27` — plan-2 NO-GO (C0/M5/m2) を全件採用し全面改訂 (ユーザ決定: 検証はレビューどおり全部)。
 - `2026-09-27` — codex plan 段 NO-GO (C1/M6/m1) を全件採用し §4/§6 を改訂。
 - `2026-09-27` — 初稿 (ユーザ「遠方境界入れたらすっきりかもね。やってみますか」)。`methods/boundary.md` に理論節を追加し、`outflow` の説明 (実装は全量コピー) を訂正。
+```
+
+## 出力形式 (この形のまま)
+
+```
+結論: <次にやる一手を 1 文で>
+第 1 仮説: <内容>  確度: <高/中/低>
+  根拠: <ファイル:行 / run パスと数値>
+  反証条件: <何が観測されたらこの仮説は誤りか>
+第 2・第 3 仮説: <あれば 1 行ずつ>
+判別 A/B: <変える設定 1 点、回す長さ、見る量>  → A なら … / B なら …
+やらない方がよいこと: <呼び出し側が取りそうな誤った一手>
+呼び出し側の前提への異議: <ブリーフの枠組み・除外判断・指標の定義で受け入れなかったものと理由。無ければ「無し」>
+不足情報: <あれば>
+```
+設計判断・採否を諮られた場合は、上の前に「採否表 (指摘ごとに 採用/却下/要再検証 と理由)」を置いてよい。
