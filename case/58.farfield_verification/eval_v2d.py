@@ -93,9 +93,30 @@ elif mode == "same":
     info = open(f"{l}/IC_FROM.txt").read()
     U = float(_re.search(r"U ([-0-9.eE+]+) \(dir", info).group(1)); ci = float(_re.search(r"内部 T [0-9.]+ Y [0-9.]+ c ([0-9.eE+]+)", info).group(1))
     sig = 0.04 / (2.0 * np.sqrt(2.0 * np.log(2.0))); t_inc = 0.4 / (ci + U); w_inc = 3 * sig / (ci + U)
-    tl, Pl, _ = probe(l); A = np.max(np.abs(Pl[(tl >= t_inc - w_inc) & (tl <= t_inc + w_inc)] - P0))
-    ta, Pa, _ = probe(a); tb, Pb, _ = probe(b)
-    tm = min(ta[-1], tb[-1]); k = ta <= tm
+    # 固定評価区間 [0, 反射到達窓の末尾] (codex diagnose 2026-10-03 M4): 3 run とも区間を完全に覆い、時刻が単調増加、
+    # 全値が有限、入射振幅が有限かつ正であることを必須にする (満たさなければ判定不能で終了コード 2)。以前は短い方の終了時刻までしか比べなかった
+    t_ref = 0.6 / (ci + U) + 0.2 / (ci - U); w_ref = 3 * sig / (ci - U); t_end = t_ref + w_ref
+    tl, Pl, _ = probe(l); ta, Pa, _ = probe(a); tb, Pb, _ = probe(b)
+    bad = []
+    for nm, t, P in ((a, ta, Pa), (b, tb, Pb), (l, tl, Pl)):
+        if len(t) < 2 or t[-1] < t_end:
+            bad.append(f"{nm} が評価区間の末尾 {t_end:.4e} s まで無い (最終 {t[-1] if len(t) else float('nan'):.4e})")
+        if np.any(np.diff(t) <= 0):
+            bad.append(f"{nm} の時刻が単調増加でない")
+        if not (np.all(np.isfinite(t)) and np.all(np.isfinite(P))):
+            bad.append(f"{nm} に非有限値")
+    ki = (tl >= t_inc - w_inc) & (tl <= t_inc + w_inc)
+    A = float(np.max(np.abs(Pl[ki] - P0))) if ki.any() else float("nan")
+    if not (np.isfinite(A) and A > 0):
+        bad.append(f"入射振幅が有限・正でない ({A})")
+    if bad:
+        print("判定不能:\n  " + "\n  ".join(bad)); print("VERDICT: UNDECIDABLE"); sys.exit(2)
+    k = ta <= t_end
     d = np.abs(Pa[k] - np.interp(ta[k], tb, Pb))
-    print(f"{a} vs {b}: max|ΔP| {d.max():.4g} Pa (t {ta[k][d.argmax()]:.4e}) / 入射振幅 {A:.4g} Pa = {d.max() / A:.3%}")
-    print(f"VERDICT: {'PASS' if d.max() / A <= 0.01 else 'FAIL'} (≤ 1 %)")
+    print(f"{a} vs {b}: 評価区間 [0, {t_end:.4e}] s ({int(k.sum())} 点)、max|ΔP| {d.max():.4g} Pa (t {ta[k][d.argmax()]:.4e}) / 入射振幅 {A:.4g} Pa = {d.max() / A:.3%}")
+    rel = d.max() / A
+    if len(sys.argv) > 5 and sys.argv[5] == "--nsub":
+        # nSub 感度 (codex diagnose 2026-10-03 ①): D_N ≤ 0.002 → 反復数依存の説明は弱い、> 0.01 → 「nSub 20 で十分」を棄却、中間は保留
+        print(f"D_N = {rel:.4%} → " + ("≤ 0.2 %: 20→40 の感度は小さい" if rel <= 0.002 else ("> 1 %: nSub 20 で十分を棄却" if rel > 0.01 else "判定保留 (0.2–1 %)")))
+    else:
+        print(f"VERDICT: {'PASS' if rel <= 0.01 else 'FAIL'} (≤ 1 %)")

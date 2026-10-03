@@ -51,7 +51,7 @@ V1 の `check_convergence.py` は NOT CONVERGED (全列が丸め床で横ばい)
 | `run_0063_v2c_A` / `run_0064_v2c_B` / `run_0065_v2c_C` | V2c: ランプ 0.2–0.7 m、一様 IC から 6000 step | B vs C 0.087 Δp (角 x 0.21) → **FAIL (保持)**。A vs C 2.61 Δp (`V2C_VERDICT.txt`) | active |
 | `run_0066_v2c_B_cfl05` / `run_0067_v2c_C_cfl05` / `run_0068_v2c_B_rep` | V2c 診断: cfl 0.5・変換やり直し | 角の値は不変 | 破棄予定 |
 | `run_0092_v2c_opab_low` / `run_0093_v2c_opab_high` | V2c 作用素 A/B (C 最終場を座標対応で与えた 1 評価) | 局所作用素は同一 (差 ≤ 8e-8、`V2C_OPAB_VERDICT.txt`) | active |
-| `run_0094_v2c_B_fromC` / `run_0095_v2c_A_fromC` / `run_0096_v2c_C_cont` | V2c: C の最終場から 6000 step 継続 | 角は 3 本とも C の値 (離散定常解が 2 つ)。B vs C 全線 0.0210 Δp (出口端)、除くと 0.0080 | active |
+| `run_0094_v2c_B_fromC` / `run_0095_v2c_A_fromC` / `run_0096_v2c_C_cont` | V2c: C の最終場から 6000 step 継続 | 角は 3 本とも C の値 (**初期場依存の停滞状態**。「離散定常解が 2 つ」は後続の絶対残差 A/B と矛盾するので訂正、codex 2026-10-03)。B vs C 全線 0.0210 Δp (出口端)、除くと 0.0080 | active |
 | `run_0070`–`run_0084_v2d_*` | V2d: cpg / tp1 / tp2 × (接触波 短/長、音響 パルスなし/短/長) | 接触波 3 物性 PASS。パルスなし tp1 1.64 Pa・tp2 2.49 Pa → **FAIL (保持)**、cpg PASS。反射 0.07–0.23 % (隔離試験になっていない) (`V2D_VERDICT.txt`) | active |
 | `run_0085_v2d_tp2_ac_nopulse_long` / `run_0086_*_lefthot` / `run_0087_*_lefthot` | V2d 診断: 長領域のパルスなし、左端を高温にしたパルスなし | 長 2.4888 Pa (短と同じ)、左端高温 0.0000 Pa | active |
 | `run_0097_v2c_resab_fromU` / `run_0098_v2c_resab_fromC` | V2c 絶対残差 A/B (同じ B 格子に 2 つの最終場、1 評価、帳簿全節点) | 圧縮角 ≤ 5.2e-7 (両状態)、凸角近傍 4.6e-3 / 7.3e-3 (`V2C_RESAB_VERDICT.txt`、射影あり版は `_proj`) | active |

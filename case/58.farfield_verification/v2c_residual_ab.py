@@ -6,14 +6,24 @@ index コピーで与え、1 step の初回評価の**絶対残差** (帳簿 res
 (質量 |ρ u·S|、運動量 |ρ u (u·S)| + |P − pRef| |S|、エネルギー |ρ H u·S|; 節点の状態から)。規模 0 は自由流基準 × 節点の境界面積。
 これは収束基準の代用ではない。
   python3 v2c_residual_ab.py setup | compare
+一般化 (2026-10-03、#3c の次数 A/B): 状態を環境変数で渡せる。V2C_STATES="DST=SNAP@CFGRUN;..." (CFGRUN の solverConfig/bcond を使う、省略時は SRC)、
+V2C_BIN=<forge 実行ファイル>、V2C_SRC=<格子を読む run>。
 """
 import csv, os, shutil, subprocess, sys
 from collections import defaultdict
 import h5py, numpy as np
 
-SRC = "run_0064_v2c_B"
+SRC = os.environ.get("V2C_SRC", "run_0064_v2c_B")
 STATES = {"run_0097_v2c_resab_fromU": "run_0064_v2c_B/res_6000.h5", "run_0098_v2c_resab_fromC": "run_0094_v2c_B_fromC/res_6000.h5"}
-BIN = os.path.expanduser("~/forge-pgrad-new/solver_density_cuda/build-ff/forge")
+CFG = {}
+if os.environ.get("V2C_STATES"):
+    STATES = {}
+    for item in os.environ["V2C_STATES"].split(";"):
+        dst, rest = item.split("=", 1); snap, _, cfg = rest.partition("@")
+        STATES[dst] = snap
+        if cfg:
+            CFG[dst] = cfg
+BIN = os.environ.get("V2C_BIN", os.path.expanduser("~/forge-pgrad-new/solver_density_cuda/build-ff/forge"))
 CONS = ("ro", "roUx", "roUy", "roUz", "roe")
 P_REF, GAM, CP = 101325.0, 1.4, 1004.5
 RI = P_REF / ((CP - CP / GAM) * 300.0); UI = 2.5 * (GAM * (CP - CP / GAM) * 300.0) ** 0.5
@@ -25,9 +35,12 @@ def setup():
         n = f["VALUE/ro"].shape[0]
     for dst, snap in STATES.items():
         os.makedirs(dst)
-        for f in ("solverConfig.yaml", "bcondConfig.yaml", "ramp.h5", "probe.yaml"):
-            shutil.copy(os.path.join(SRC, f), dst)
-        s = open(os.path.join(dst, "solverConfig.yaml")).read().replace("nStepOuter: 6000", "nStepOuter: 1").replace("outStepInterval: 1000", "outStepInterval: 1")
+        for f in ("solverConfig.yaml", "bcondConfig.yaml", "probe.yaml"):
+            shutil.copy(os.path.join(CFG.get(dst, SRC), f), dst)
+        shutil.copy(os.path.join(SRC, "ramp.h5"), dst)
+        import re as _re
+        s = _re.sub(r"nStepOuter: \d+", "nStepOuter: 1", open(os.path.join(dst, "solverConfig.yaml")).read())
+        s = _re.sub(r"outStepInterval: \d+", "outStepInterval: 1", s)
         open(os.path.join(dst, "solverConfig.yaml"), "w").write(s)
         with h5py.File(snap) as s5, h5py.File(os.path.join(dst, "ramp.h5"), "r+") as f:
             assert s5["VALUE/ro"].shape[0] == n, "同一格子でない"
