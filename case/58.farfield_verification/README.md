@@ -63,4 +63,7 @@ V1 の `check_convergence.py` は NOT CONVERGED (全列が丸め床で横ばい)
 | `run_0150_v2c_ord_A2` / `run_0151_v2c_ord_B1` (2026-10-03) | V2c 次数 A/B (#3c): run_0064 最終場から convMethod 1 / 0、6000 step、build-ff | 2 次: Rmax 4.7e-3 停滞・W 9.4e-4。1 次: Rmax 6.2e-7 (全節点 ≤ 1e-5)・W 2.7e-6 → 一次化で停滞が解ける (`V2C_ORD_20261003.log`) | active |
 | `run_0154`–`run_0157_v2c_res_*` (2026-10-03) | 上の初期・最終場の局所残差 1 評価 (`v2c_residual_ab.py`、帳簿) | 同上 | active |
 | `run_0152_v2d2_tp2_short_dt4_n20` / `run_0153_..._n40` (2026-10-03) | V2d-2 nSub A/B (#3f): run_0142 と同条件で nSub 20 / 40、build-ff | n20 vs n40 1.56 %、**run_0142 vs run_0152 (同設定の再実行) 1.38 %** → 分離不能 (`V2_AB_20261003.log`) | active |
+| `run_0158`–`run_0161_v2d2_n{20,40}_rep*` (2026-10-03) | V2d-2 反復比較: run_0152/0153 の生成済み入力を複製 (md5 同一) して各 2 本追加、build-ff | 群内再実行幅 F 1.68 % (n20)・1.53 % (n40)、群平均差 0.83 % → HOLD (A) 時間精度は測定不能 (`V2_REP_20261003.log`) | active |
+| `run_0162_v2c_B_1to2` → `run_0164`・`0165`・`0166` (2026-10-03) | V2c 段階起動: 1 次の収束場 (run_0151) から 2 次で 6000 × 4 = 24000 step | Rmax 4.5–5.5e-3 (凸角) で停滞、W 5–6e-4 → 2 次の必要条件未達、V2c 未収束・判定不能のまま (`V2C_EXT_20261003.log`) | active |
+| `run_0163`・`run_0164_..._res` ほか (2026-10-03) | 上の各最終場の局所残差 1 評価 | 同上 | active |
 | `ref1d/` | 独立参照 1D (`ref1d_euler_tp.py`) Δx 5 mm | 参照自身が未収束 (記録用、中断) | active |
