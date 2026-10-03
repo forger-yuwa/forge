@@ -1,0 +1,12 @@
+run_0040_v2a_m03_ff_short vs run_0041_v2a_m03_long: 入射振幅 79.2 Pa、反射 max|ΔP| 0.0782 Pa (t = 2.6925e-03 s) → 反射率 0.0987%
+VERDICT: PASS (反射率 0.0987% ≤ 5.00%)
+run_0042_v2a_m03_ff_short_slau2 vs run_0043_v2a_m03_long_slau2: 入射振幅 79.53 Pa、反射 max|ΔP| 0.0938 Pa (t = 1.6288e-03 s) → 反射率 0.1179%
+VERDICT: PASS (反射率 0.1179% ≤ 5.00%)
+run_0046_v2a_m0_slip_short vs run_0047_v2a_m0_long: 入射振幅 80.67 Pa、反射 max|ΔP| 73.62 Pa (t = 2.3025e-03 s) → 反射率 91.2647%
+VERDICT: PASS (対照: 反射率 91.2647% ≥ 90%)
+run_0048_v2a_m0_ff_short vs run_0047_v2a_m0_long: 入射振幅 80.67 Pa、反射 max|ΔP| 0.164 Pa (t = 2.1875e-03 s) → 反射率 0.2033%
+VERDICT: PASS (反射率 0.2033% ≤ 5.00%)
+run_0040_v2a_m03_ff_short vs run_0044_v2a_m03_ff_short_nsub40: max|ΔP| 0.1171 Pa (t = 2.8612e-03 s) / 入射振幅 79.2 = 0.1479%
+VERDICT: PASS (0.1479% ≤ 1.00%)
+run_0040_v2a_m03_ff_short vs run_0045_v2a_m03_ff_short_dthalf: max|ΔP| 0.461 Pa (t = 9.2625e-04 s) / 入射振幅 79.2 = 0.5821%
+VERDICT: PASS (0.5821% ≤ 1.00%)
