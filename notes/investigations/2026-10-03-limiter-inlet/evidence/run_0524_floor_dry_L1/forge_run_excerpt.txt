@@ -1,0 +1,5 @@
+[limiter] scaled: ro_ref=0.5279511755(auto) p_ref=43128.33253(auto) a_ref=330.8270384(auto) L_ref=0.1570673715 K=0.05 h_i=sqrt(A_planar)
+[limiter] 警告: 基準値が自動決定なので、この run は**開始場に依存する作用素**である (分割実行が連続実行と一致しない)。固定するには solverConfig.yaml の space へ次をそのまま貼ること (plan convection-node-wall-reconstruction §4.25):
+[limiter]   limiterRoRef: 0.5279511755
+[limiter]   limiterPRef: 43128.33253
+[limiter]   limiterARef: 330.8270384

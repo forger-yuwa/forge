@@ -10,7 +10,6 @@
 > 各計画の完了ログや起票履歴に出てくる `.github/plans/<name>.md` という記述は、**現在の root
 > `plans/{active,accepted,archived}/<name>.md`** を指す (移行済み)。履歴の文言はそのまま残してあるので、
 | [`limiter-config-simplify.md`](active/limiter-config-simplify.md) | limiter | リミッタの config 表面を最小化し、ψ 凍結の要否を決める (複雑化を止める判断) |
-| [`limiter-inlet-column-oscillation.md`](active/limiter-inlet-column-oscillation.md) | limiter | case/16 の残差の床 (リミッタ既定で 20 倍) が入口 2 列のリミッタ係数の揺れに集中する原因の調査 (2026-10-03 起票) |
 > 当時の記録として読むこと。
 
 ライフサイクルは**フォルダ移動**で表す (ファイル名は固定し、移動でリンクを壊さない)。
@@ -74,6 +73,7 @@
 ## accepted (現役の設計判断)
 
 | Plan | area | 概要 |
+| [limiter-inlet-column-oscillation.md](accepted/limiter-inlet-column-oscillation.md) | `limiter` | **[done 2026-10-03]** case/16 の残差の床 (`limiterScaled 1` で `0` の約 20 倍、凝縮と無関係) が入口∩壁の角の数節点のリミッタ係数の切り替えに集中することを観測 (面単位検査・cfl A/B・枝分かれ二重評価・領域一定 ε̂ A/B・文献調査 2 本)。原因は未確定のまま、上側壁の報告量が許容差内であることから **Z (限定的な運用判断で調査終了)**、`methods/limiter.md` に限定記述。診断 `FORGE_DIAG_PSI_DUALEVAL` は opt-in で残し、試験キー `limiterEpsConst` は撤去 (codex result GO-with-changes 全件採用、diagnostician 判断) |
 | [time_integration-fp64-accumulator.md](accepted/time_integration-fp64-accumulator.md) | `time_integration` | **保存量アキュムレータの倍精度化** (2026-09-23 起票, **done 2026-09-24**): 定常陰解法の commit `Q += dq` が $|dq|<\tfrac12\,\mathrm{ULP}(Q)$ で丸めに落ち、**残差が残っているのに場が動かなくなる**。`case/56` の深いすきまで実測 ($|dq|$=0.159 ULP、動く CV 0.03 %、実効 0.3 %) し、**倍精度ビルドで幾何級数に変わる**ことを確認。**保存量 5 本の保持と commit だけを倍精度**にする影アキュムレータで、減衰区間 (0→100k) は全域 FP64 と同じ軌道になった (低下倍率 62.0 / 62.7 / FP32 対照 1.014、種は md5 同一)。ただし**床は倍精度の 35 倍**に留まり (codex result M2/M3 で内訳は未分離)、**全ゲート通過**: 壁熱流束・温度・速度が全域 FP64 と一致 (深さ 5 倍まで 0.00–3.77 %)、多 step 後方互換 PASS (同一 SHA・事前登録・両 commit)、速度 +1.77 % (65k CV) / +2.05 % (100 万節点)、40.0 B/CV。**codex 6 回** (plan 3 / result 4)。**主検証の収束は `NOT CONVERGED (plateau)` のままで、成果は局所停滞と過渡減衰の改善**。横展開は [rollout](active/time_integration-fp64-accumulator-rollout.md)。発見元は [case-hypersonic-gap-heating-validation](active/case-hypersonic-gap-heating-validation.md) §4.7-6d-2 |
 | [config-key-pruning.md](accepted/config-key-pruning.md) | `tooling / 設定` | **[done 2026-09-18]** **solverConfig キーの整理** (2026-09-17 起票, ユーザ指示; codex plan 5 回 + result 1 回): 値キー 167 パスを分類し、**第 1 陣**で 2 パス削除 + 定数化 5 件 + 引数撤去 1 件、**第 2 陣**で消費者のない 5 パスを段階移行 (任意化 + 警告 → 起動時エラー、既存 config 3491 本を移送ツールで移送)。残置決定のあるキーは復元。棚卸し `config_key_inventory.py`・投入前検査の完全修飾パス化・回帰判定器 `check_field_regress.py`・移送ツール `migrate_solver_config.py` を整備 |
 | [condensation-kantrowitz-carrier.md](accepted/condensation-kantrowitz-carrier.md) | `condensation` | **[done 2026-09-13]** **carrier 中の非等温核生成補正 (Feder 形 `condKantrowitz 2/3`) と H2O 表面張力の小半径妥当性** (2026-09-12 起票, branch feature/condensation-air): H2O–N2 では N2 衝突がクラスタを冷やし θ が純蒸気形の 1/40; Wysłouzil 2D で 0/1/2/3 と σ ±3 % 感度 |

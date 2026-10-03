@@ -1,0 +1,4 @@
+plan limiter-inlet-column-oscillation §5.1 #2/#3
+IC: run_0524_floor_dry_L1/res_48000.h5 を restart_field.py --force-species で index コピー
+config: run_0524 + cfl_pseudo 1, nStepOuter 48000, outStepInterval 2400, リミッタ参照 4 値を固定 (ro 0.5279511755 / P 43128.33253 / a 330.8270384 / L 0.1570673715)
+build 8ce8da3a; FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_CUDA_BLOCKSIZE=256

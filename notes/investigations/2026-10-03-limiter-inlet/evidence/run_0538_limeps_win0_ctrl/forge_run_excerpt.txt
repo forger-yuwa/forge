@@ -1,0 +1,2 @@
+[limiter] scaled: ro_ref=0.5279511755(fixed) p_ref=43128.33253(fixed) a_ref=330.8270384(fixed) L_ref=0.1570673715 K=0.05 h_i=sqrt(A_planar)
+LIMG1 FINAL sides=16562600 out[ro=0 Ux=0 Uy=0 Uz=0 P=0] nonfinite[0 0 0 0 0] badscale=0 VERDICT=CLEAN

@@ -7,7 +7,7 @@
 - **related_docs**:
   - [`methods/limiter.md`](../../methods/limiter.md) (無次元化 Venkatakrishnan `limiterScaled: 1` の現行仕様)
 - **related_plans**:
-  - [`limiter-inlet-column-oscillation.md`](../../plans/active/limiter-inlet-column-oscillation.md) §3.1・§5.1 #2r・#4r・#5er (本調査の動機: case/16 の入口列の床)
+  - [`limiter-inlet-column-oscillation.md`](../../plans/accepted/limiter-inlet-column-oscillation.md) §3.1・§5.1 #2r・#4r・#5er (本調査の動機: case/16 の入口列の床)
   - [`limiter-config-simplify.md`](../../plans/active/limiter-config-simplify.md) §4.3 (「ψ 凍結は今回は入れない」の決定。証拠しだいで見直し可)
 - **created**: `2026-10-03`
 - **一次資料の置き場**: SU2 ソースは `/home/sano/work/forge/.external/su2-src` (commit `12eb826f`, 2026-04-27)。

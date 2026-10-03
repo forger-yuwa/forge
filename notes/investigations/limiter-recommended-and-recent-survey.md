@@ -9,7 +9,7 @@
   **前回調査に書いたので繰り返さない**。本ノートは「いま何が既定・推奨か」「比較研究は何を『最良』としたか」
   「2018 年以降に何が出たか」「forge にどう当てはまるか」に絞る。
 - **related_docs**: [`methods/limiter.md`](../../methods/limiter.md) (無次元化 Venkatakrishnan `limiterScaled: 1` の現行仕様)
-- **related_plans**: [`limiter-inlet-column-oscillation.md`](../../plans/active/limiter-inlet-column-oscillation.md)、
+- **related_plans**: [`limiter-inlet-column-oscillation.md`](../../plans/accepted/limiter-inlet-column-oscillation.md)、
   [`limiter-config-simplify.md`](../../plans/active/limiter-config-simplify.md) §4.3
 - **created**: `2026-10-03`
 - **一次資料の置き場**: SU2 ソースは `/home/sano/work/forge/.external/su2-src` (commit `12eb826f`)。
@@ -286,7 +286,7 @@ forge は node 中心 median dual、エッジ中点再構成の 2 次 MUSCL、SL
 ### 5.1 forge 側の事実の整理 (候補を評価する軸)
 
 1. **ψ の跳びは「節点が極値か否か」と「どの面が min を取るか」の 2 つの離散的な切替から来ている**
-   (前回調査 §3.1、plan [`limiter-inlet-column-oscillation`](../../plans/active/limiter-inlet-column-oscillation.md) #4r)。
+   (前回調査 §3.1、plan [`limiter-inlet-column-oscillation`](../../plans/accepted/limiter-inlet-column-oscillation.md) #4r)。
 2. **ε を領域一定 2e-6 にしても床は約 0.65 倍** → 増分 $\hat\Delta_-$ ($10^{-4}$〜$10^{-3}$) が許容オーバーシュートで縛った ε より
    まだ桁で大きく、**ε の大きさだけで切替を消すには、単調性を許容値以上に緩める必要がある**と読める [推測]。
    May & Berger の「$10^{-3}$ のオーバーシュートを許すと収束は改善するが新しい極値を許す」と同じ二律背反。
