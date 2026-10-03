@@ -53,14 +53,6 @@ __device__ unsigned long long g_limBadScale = 0;   // 幾何尺度 h_i が 0/非
 // (codex 2026-09-20 result-2 レビュー Major 5: 窓集計だけでは末尾が落ちる)。
 static unsigned long long s_cumG1[5] = {0,0,0,0,0}, s_cumNF[5] = {0,0,0,0,0}, s_cumSides = 0, s_cumCalls = 0;
 
-// ε̂² の係数をカーネルへ渡す。通常は (K/L_ref)^3 (>0、カーネルで h_i^3 を掛ける)。limiterEpsConst > 0 のときは
-// 領域一定の ε̂² を**負号付き**で渡し、カーネルはそれを h_i に依らずそのまま使う (plan limiter-inlet-column-oscillation §5.1 #8)。
-static inline flow_float limiterEps2Arg(const solverConfig& cfg)
-{
-    if (cfg.limiterEpsConst > 0.0) return (flow_float)(-(cfg.limiterEpsConst*cfg.limiterEpsConst));
-    return (flow_float)(cfg.venkatK*cfg.venkatK*cfg.venkatK/(cfg.limiterRefLength*cfg.limiterRefLength*cfg.limiterRefLength));
-}
-
 template<bool SCALED>
 static void limiter_periodic_merged
 (
@@ -91,7 +83,7 @@ static void limiter_periodic_merged
         phi_floor, Q, s_lim_qmax, s_lim_qmin, limiter_Q, dQdx, dQdy, dQdz,
         matchRecon, (cfg.discretization == "node" ? 1 : 0), cfg.convMethod,
         limScaled, qRef,
-        limiterEps2Arg(cfg),
+        (flow_float)(cfg.venkatK*cfg.venkatK*cfg.venkatK/(cfg.limiterRefLength*cfg.limiterRefLength*cfg.limiterRefLength)),
         cfg.limiterLengthFromArea,
         (cfg.isAxisymmetric == 1 ? var.c_d.at("A_planar") : var.c_d.at("volume")));
     gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
@@ -388,7 +380,7 @@ __global__ void limiter_r1_fused5_d
                     // 幾何尺度が 0/非有限なら ε² が消えて K が効かなくなる (codex Critical 1 の再発防止)。
                     // 診断が ON のときだけ数える (生産では分岐のみでコストは無視できる)。
                     if (g_limDiag != 0 && !(isfinite(hi) && hi > (flow_float)0.0)) atomicAdd(&g_limBadScale, 1ULL);
-                    const flow_float e2 = (eps2Coef < (flow_float)0.0) ? -eps2Coef : eps2Coef * hi*hi*hi;   // 負 = 領域一定 ε̂² (limiterEpsConst)
+                    const flow_float e2 = eps2Coef * hi*hi*hi;
                     lk = venkata_limiter_scaled((qmax[k]-qc[k])*inv, (qmin[k]-qc[k])*inv, delta*inv, e2);
                 } else {
                     lk = (SCHEME == 1)
@@ -528,7 +520,7 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         ((cfg.primPack != 0 && cfg.gradLSQ == 2) ? prim_pack_device_ptr() : nullptr), \
         cfg.limiterMatchRecon, (cfg.discretization == "node" ? 1 : 0), cfg.convMethod, \
         cfg.limiterScaled, (flow_float)cfg.limiterRoRef, (flow_float)cfg.limiterARef, (flow_float)cfg.limiterPRef, \
-        limiterEps2Arg(cfg), \
+        (flow_float)(cfg.venkatK*cfg.venkatK*cfg.venkatK/(cfg.limiterRefLength*cfg.limiterRefLength*cfg.limiterRefLength)), \
         cfg.limiterLengthFromArea, \
         (cfg.isAxisymmetric == 1 ? var.c_d.at("A_planar") : var.c_d.at("volume"))
     // 周期 node (合併 CV) は 2 段 (極値の group max/min → ψ の group min) で周期対の ψ を一致させる (§4.8)。
