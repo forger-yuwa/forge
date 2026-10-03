@@ -445,6 +445,39 @@ __global__ void limiter_r1_fused5_d
 }
 
 
+
+// ---- limiter-inlet-column-oscillation §5.1 #5b' (診断専用・既定 off) --------------------------------------------
+// 同じ状態・BC・勾配で「通常 ψ」と「入口 2 列だけ保存 ψ」を差し替えて残差を二重評価する (codex diagnose 2026-10-03)。
+// main.cpp の FORGE_DIAG_PSI_DUALEVAL が有効なときだけ使う。保存は nCells_all ぶん、上書きは実ノード (ic < nCells) で
+// ccx < xmax のものだけ。差し替えは流れ 5 変数の配列 (limiter_ro/Ux/Uy/Uz/P) で、それを読む全経路
+// (SLAU の組成再構成も limiter_ro を読む) に伝わる。周期 node は group の ψ を一致させるので対象外 (拒否する)。
+static flow_float* s_psiSave[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+static bool        s_psiOverride = false;
+static flow_float  s_psiXmax = (flow_float)0.0;
+static const char* s_psiNames[5] = {"limiter_ro","limiter_Ux","limiter_Uy","limiter_Uz","limiter_P"};
+
+__global__ void psi_override_d(geom_int nCells, const geom_float* ccx, flow_float xmax,
+                               flow_float* L, const flow_float* Ls)
+{
+    geom_int i = blockDim.x * blockIdx.x + threadIdx.x;
+    if (i < nCells && ccx[i] < xmax) L[i] = Ls[i];
+}
+
+void limiterPsiSave(solverConfig& cfg, mesh& msh, variables& var, flow_float xmax)
+{
+    if (periodicNodeActive(cfg, msh)) {
+        std::cerr << "[psi-dualeval] periodic node is not supported (psi groups would be split)\n"; exit(EXIT_FAILURE);
+    }
+    for (int k = 0; k < 5; ++k) {
+        if (s_psiSave[k] == nullptr) gpuErrchk( cudaMalloc((void**)&s_psiSave[k], sizeof(flow_float)*msh.nCells_all) );
+        gpuErrchk( cudaMemcpy(s_psiSave[k], var.c_d[s_psiNames[k]], sizeof(flow_float)*msh.nCells_all, cudaMemcpyDeviceToDevice) );
+    }
+    s_psiXmax = xmax;
+}
+
+void limiterPsiOverride(bool on) { s_psiOverride = on; }
+const flow_float* limiterPsiSaved(int k) { return s_psiSave[k]; }
+
 void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
 {
     // 5 配列の 1.0 充填を 1 カーネルに (起動 5→1)。
@@ -511,6 +544,14 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
     else
         limiter_r1_fused5_d<2><<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (FORGE_LIMITER_FUSED5_ARGS);
     #undef FORGE_LIMITER_FUSED5_ARGS
+
+    // §5.1 #5b' 診断: 差し替えが有効なら、計算した ψ を入口集合だけ保存値で上書きする (既定 off)。
+    if (s_psiOverride) {
+        for (int k = 0; k < 5; ++k)
+            psi_override_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(msh.nCells, var.c_d["ccx"], s_psiXmax,
+                                                                        var.c_d[s_psiNames[k]], s_psiSave[k]);
+        gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+    }
 
     // space.reconT=1: 再構成対象が rho -> T に変わるので、**T 自身の極値・勾配から psi_T を作る**
     // (codex レビュー 2026-09-20: limiter_P の流用は「T 自身の制限ではない」ので改善すべき近似)。

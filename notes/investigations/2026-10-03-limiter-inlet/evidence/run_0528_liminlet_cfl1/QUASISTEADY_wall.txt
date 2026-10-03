@@ -1,0 +1,9 @@
+
+=== case/16.nozzle_wys/run_0528_liminlet_cfl1/wall_series.csv  [20 rows, steps 2400..48000]  -> STEADY ===
+  pw_mean_x10     : tail mean=0.2675  drift=0.0%/tail  fluct=0.0%           STEADY
+  pw42            : tail mean=0.2667  drift=0.0%/tail  fluct=0.0%           STEADY
+  pw52            : tail mean=0.2426  drift=0.0%/tail  fluct=0.0%           STEADY
+  Tw_mean_x10_K   : tail mean=276.3  drift=0.0%/tail  fluct=0.0%            STEADY
+
+OVERALL: ALL STEADY
+args: --series-csv wall_series.csv --series-cols pw_mean_x10,pw42,pw52,Tw_mean_x10_K --tail 0.5 --drift 0.0001 --osc 0.0001 --min-snaps 10

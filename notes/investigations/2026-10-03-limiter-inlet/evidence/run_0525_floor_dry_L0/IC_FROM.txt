@@ -1,0 +1,5 @@
+plan condensation-two-phase-transport §5.1 #4l (残差の床: リミタ x 凝縮 2x2)
+IC: run_0520_twophase_off_16k/res_16000.h5 を restart_field.py --force-species で index コピー
+config: run_0520 + nStepOuter 48000, outStepInterval 2400, condensation=0 (0 は condensation: {condensation: 0}), limiterScaled=0 (1 は既定のまま)
+build 8ce8da3a; FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_CUDA_BLOCKSIZE=256
+IC (retry): restart_field ではなく convert_species_field.py --reconstruct-roe always --drop-moments (T 保存・水は全量蒸気・総水量差 0)。理由: 場の記録に H2O(L) があり凝縮 OFF の設定と species_hash が合わず起動拒否

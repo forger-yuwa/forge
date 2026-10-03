@@ -191,6 +191,35 @@ checkpoint には受動種の流束形履歴 (`/CHECKPOINT/<cons>_fctG`, `_fctH`
 凝縮モーメントの実現可能性 (許容領域 $x\le1,\ x^2\le y\le\sqrt x$; $x=Q_1/(Q_0r)$, $y=Q_2/(Q_0r^2)$) は更新後に最近点射影 (退化は単分散再初期化) で保証し、作動数と成分別収支を monitor に出す。
 凝縮 run (受動種経路の有無を問わず) は monitorInterval ごとに `[cond-corr]` 行で理由別の補正量 (蒸気上限違反・負値 floor・増分制限・受動種 floor・射影・化学種再正規化・液滴消滅) の区間値と累積を総液量比で出し、液滴消滅以外が比 1e-6 を超えると `WARN` を出す。累積は restart で 0 から ([methods/condensation.md](../methods/condensation.md) 実装 §4c)。
 TP carrier の凝縮 run では `viscMethod 2` の μ・λ と化学種拡散係数を気相組成 (液を除いた組成) で評価する (同 §7b)。
+**二相拡散 `condensation.condTwoPhaseDiffusion`** (既定 0, 2026-10-02, opt-in・CFD 未検証; plan condensation-two-phase-transport #4e, methods/condensation.md 実装 §7c):
+`1` で TP carrier 凝縮 (`condGasSpecies` ≥ 0) の NS run に、気相内の分子拡散 (気相基準 z・風上の補正) と全輸送量 (化学種・液 g・Q2/Q1/Q0) 共通の乱流混合 μ_t/Sc_t を
+1 回の面流束で足し (エネルギーに Σh_k J_k + h_v J_w − L J_l)、蒸気と液を非分割で更新する (増分は点対角、制限は `condDgMaxStep`/`condDTmaxStep` と蒸気・液の非負)。
+**定常専用**: dual-time・陽解法・`speciesImplicitCoupling 2`・`passiveScalarScheme 0`・`condEquilibrium` ≠ 0・`condLimiterMode 0`・`nCondSpecies` ≠ 1 とは起動時にエラー終了。
+CPG carrier・pure 凝縮・`viscMethod 0` では不活性 (ログに理由、現行経路)。cell は未検証 (WARNING)。
+蒸気・液・Q は `passiveImplicitCoupling`/`speciesImplicitCoupling` の DPLUR ではなく点対角で更新する (非水種は従来どおり)。`condTwoPhaseRelax` (既定 1, 0 < ω ≤ 1) は
+蒸気・液・Q の増分の緩和 (前処理の後・制限の前)。#4c の 1D 試験では大きな擬似刻みで核生成の Q0 が周期運動になり ω 0.5 で収束した (高 CFL は保証外)。
+計算開始時と終了時に `[twophase-audit]` 行 (格納状態から化学種・蒸気・液・Q の残差を double で組み直した成分ごとの比と、終了時の `VERDICT: PASS | NOT CONVERGED`; エネルギーは対象外) が出る。収束を受け入れる根拠はこの VERDICT と check_convergence の両方。`residual_history.csv` に `rms_roYv` (蒸気の残差 R_w − R_g) が加わり、`check_convergence.py` の検査対象に入る (`rms_roY` 接頭辞)。monitor に `[twophase]` 行 (θ<1 のセル数・最小 θ・保留量・状態補正)。
+既定 0 の run の結果・列構成は変わらない。
+**`condensation.condTwoPhaseSolver`** (既定 0, 2026-10-02, #4g): 二相拡散の蒸気・液・Q の増分の作り方。0 = 点対角、1 = 化学種・受動種と同じ緩和整合 scalar-DPLUR
+(右辺は全残差、対角は点対角と同じ分母、非対角は流入質量流束、ゼロ開始で `nStepInner` 回、ω = `implicitRelax`; その後 `condTwoPhaseRelax`・θ・commit・再正規化は同じ)。
+1 sweep・ω 1 では点対角とビット一致。起動時に `[twophase] condTwoPhaseSolver` 行で実効の implicitRelax・nStepInner・scalarCflMax を出す。
+**`condensation.condTwoPhaseNonnegLimit`** (既定 1, 2026-10-02, #4h; 診断用 opt-in): 0 で二相の非分割更新の共通 θ から蒸気・液の非負制限を外す (θ = dg_max・dT_max だけ)。
+commit は総水分だけ 0 に下限を掛け (`vround` を使わない)、液は再正規化 → 受動種の床 → 実現可能性クランプで固定した総水分に対して 0 ≤ ρg ≤ ρY_w に射影する。
+二相拡散 ON の run は更新ごと・成分ごと (ρY_w, ρv, ρg, ρQ2, ρQ1, ρQ0) の補正を `[twophase-corr-gate]` (区間と末尾 ceil(0.1N) 更新の max、κ = 2n_sε₃₂ の VERDICT、段ごとの行) に出す。
+**`condensation.condAuditResidual`** (既定 0, 2026-10-02, #1b-pre): `1` で二相拡散 OFF の TP carrier 凝縮 run でも、現行の作用素 (化学種の Fick 拡散、液・Q は移流のみ) を
+格納状態から double で組み直す `[twophase-audit]` を開始時・終了時に出す (A/B の A 側の受入用; 二相拡散 ON の run は常に新作用素で監査)。結果は変えない。
+凝縮 run の `[cond-corr]` には `renorm components` 行 (再正規化の max|f−1| と ρY_w・ρg・Q2・Q1・Q0 の補正量; 相対は各成分の自分の総量) と
+`theta over all updates` 行 (更新の θ<1 と θ_src<1 のセル数を全更新で積算; 区間・累積・直近の更新) が加わる (2026-10-02)。
+TP carrier 凝縮 run は再正規化の受入ゲート `[renorm-gate]` を出す: 区間 (前回ログからの全更新) と終了時の末尾窓 (実更新数 N の最後の ceil(0.1N) 更新) について、
+更新ごとの成分別相対補正 C_q,n = Σ|q⁺−q⁻|V/Σq⁻V (ρY_w, ρg, ρQ2, ρQ1, ρQ0) と局所係数偏差 max|f−1| の max、終了時は κ = 2 n_s ε₃₂ で `VERDICT`。
+`renorm components` 行は記録用 (ゲートではない)。
+**`condensation.condTwoPhaseDiag`** (既定 0, 2026-10-02, #1b-r1; 読むだけ・数値は不変): 二相拡散 ON の run で `1` = 末尾 200 更新の θ = 0 のセル
+(`2` = θ < 1) について、セル ID・座標・更新前の ρv/ρg・制限前増分・θ を決めた制限・Q 残差・再正規化の f−1 と前後差を記録し、終了時に
+`twophase_diag_theta0_cells.csv` (頻度順上位 500) と `twophase_diag_theta0_summary.csv` (固有セル数・更新あたり件数・持続性・制限理由の内訳) を書く。
+区間ごとに `[twophase-diag]` 行 (θ 制限のセル×更新数を更新数で割った値と固有セル数) を出す。
+`3` (#1b-r2) は 1 に加えて、窓内の各更新で同じ状態・面値・係数・ソース値の double 組立 B (状態は書かない) を作り、乾燥停止セルと成分ごとの残差最大セルについて
+R_g の移流/拡散/ソース内訳・前処理分母・組立 A/B の残差・制限理由を `twophase_diag3_cells.csv`、停止集合内外の Q 残差比較を `twophase_diag3_qcompare.csv`、
+plan #1b-r2 の判定規則を機械的に当てた要約を `twophase_diag3_summary.csv` に書く。cells CSV の値の列は窓内最大 |値| とその更新番号 (最後の記録は `last_update_*`)。
 注意: 受動種/化学種の拡散は `viscMethod != 0` のときだけ加わる (viscMethod 0 は定数粘性ではなく「拡散なし」扱い; 化学種と同じ規約)。
 
 ## physProp.viscMethod — 層流の粘性・熱伝導 (2026-09-27 `viscMethod: 2` を置き換え)

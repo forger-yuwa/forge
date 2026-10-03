@@ -1,0 +1,18 @@
+
+=== .  [last step 47999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=8.82e-08 peak=1.36e-07 fin=9.85e-08 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=2.46e-05 peak=3.26e-05 fin=2.49e-05 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=1.03e-05 peak=1.53e-05 fin=8.98e-06 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.33e-03 peak=1.78e-03 fin=1.33e-03 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roK     : init=1.02e-06 peak=1.13e-06 fin=9.99e-07 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=3.77e+02 peak=7.13e+02 fin=1.87e+02 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=6.88e-08 peak=1.22e-07 fin=7.72e-08 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=7.62e-10 peak=1.36e-09 fin=8.55e-10 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_rog_0   : init=6.26e-10 peak=8.26e-10 fin=6.03e-10 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roQ2_0  : init=8.66e-06 peak=1.14e-05 fin=8.37e-06 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roQ1_0  : init=5.30e+02 peak=6.98e+02 fin=5.13e+02 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roQ0_0  : init=3.83e+10 peak=4.54e+10 fin=3.34e+10 drop= 0.1dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+CONVERGENCE_EXIT: 1

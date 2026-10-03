@@ -1,0 +1,5 @@
+plan limiter-inlet-column-oscillation §5.1 #5d (ψ 差し替えの残差二重評価)
+IC: run_0524_floor_dry_L1/res_48000.h5 を restart_field.py --force-species で index コピー
+config: run_0527 と同一 (参照 4 値固定・cfl 2) + nStepOuter 200, outStepInterval 100
+env: FORGE_DIAG_PSI_DUALEVAL=100,200 FORGE_DIAG_PSI_XMAX=-0.059
+build 05c5ce36 (8ce8da3a + 診断のみ)

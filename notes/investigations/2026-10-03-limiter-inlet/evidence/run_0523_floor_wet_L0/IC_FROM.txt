@@ -1,0 +1,4 @@
+plan condensation-two-phase-transport §5.1 #4l (残差の床: リミタ x 凝縮 2x2)
+IC: run_0520_twophase_off_16k/res_16000.h5 を restart_field.py --force-species で index コピー
+config: run_0520 + nStepOuter 48000, outStepInterval 2400, condensation=1 (0 は condensation: {condensation: 0}), limiterScaled=0 (1 は既定のまま)
+build 8ce8da3a; FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_CUDA_BLOCKSIZE=256

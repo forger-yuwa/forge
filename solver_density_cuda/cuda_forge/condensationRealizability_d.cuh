@@ -212,11 +212,14 @@ __global__ void cond_realizability_clamp_f_d(
     flow_float* T, flow_float* P, CondTablesF tb, CondSpeciesProps cpd,
     flow_float* diagCorrG, flow_float* diagCorrQ, int* realizViol,
     double* budget, const geom_int* root, const geom_float* vol, int doProject,
-    double* reasons = nullptr)   // 理由別の補正量 (COND_REASON_*; nullptr 可。計上のみ)
+    double* reasons = nullptr,   // 理由別の補正量 (COND_REASON_*; nullptr 可。計上のみ)
+    double* tcAcc = nullptr)     // #4h の二相補正計測 (更新ごと; 段 2 = 下限/上限、3 = 射影、4 = 液滴消滅 [物理]; 成分 [w,v,g,Q2,Q1,Q0]; 計上のみ)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     const flow_float gmax = (roY_w != nullptr) ? roY_w[ic] : ((Yw_const > 0.0f) ? Yw_const*ro[ic] : 0.99f*ro[ic]);
+    const bool tcOn = (tcAcc != nullptr) && (root == nullptr || root[ic] == ic);
+    const double tcV = (vol != nullptr) ? (double)vol[ic] : 1.0;
     const flow_float r_in = rog[ic], q0_in = roQ0[ic], q1_in = roQ1[ic], q2_in = roQ2[ic];
     double* rs = (reasons != nullptr && (root == nullptr || root[ic] == ic)) ? reasons : nullptr;
     const double Vr = (vol != nullptr) ? (double)vol[ic] : 1.0;
@@ -233,6 +236,14 @@ __global__ void cond_realizability_clamp_f_d(
     if (roQ1[ic] < 0.0f) roQ1[ic] = 0.0f;
     if (roQ2[ic] < 0.0f) roQ2[ic] = 0.0f;
     const flow_float q1_pre = roQ1[ic], q2_pre = roQ2[ic];   // 射影の計上用 (理由別監視)
+    if (tcOn) {   // 段 2: 液の下限・上限 (総水分は固定なので蒸気も同じ量) と Q の下限
+        const double dg = fabs((double)r - (double)r_in);
+        if (dg != 0.0) { atomicAdd(&tcAcc[2*6 + 2], dg*tcV); atomicAdd(&tcAcc[2*6 + 1], dg*tcV); }
+        const double dq2 = fabs((double)roQ2[ic] - (double)q2_in), dq1 = fabs((double)roQ1[ic] - (double)q1_in), dq0 = fabs((double)roQ0[ic] - (double)q0_in);
+        if (dq2 != 0.0) atomicAdd(&tcAcc[2*6 + 3], dq2*tcV);
+        if (dq1 != 0.0) atomicAdd(&tcAcc[2*6 + 4], dq1*tcV);
+        if (dq0 != 0.0) atomicAdd(&tcAcc[2*6 + 5], dq0*tcV);
+    }
     {   // 実現可能性の射影 (double 実体と同じ規則; ρ_l は表 [範囲外は double 関数]; 射影は double で評価)
         const float q0 = roQ0[ic];
         if (q0 > 0.0f && r > 0.0f) {
@@ -257,6 +268,11 @@ __global__ void cond_realizability_clamp_f_d(
         }
     }
     cond_reason_proj(rs, Vr, (double)q1_pre, (double)q2_pre, (double)roQ1[ic], (double)roQ2[ic]);
+    if (tcOn) {   // 段 3: モーメント射影
+        const double dq2 = fabs((double)roQ2[ic] - (double)q2_pre), dq1 = fabs((double)roQ1[ic] - (double)q1_pre);
+        if (dq2 != 0.0) atomicAdd(&tcAcc[3*6 + 3], dq2*tcV);
+        if (dq1 != 0.0) atomicAdd(&tcAcc[3*6 + 4], dq1*tcV);
+    }
     auto record = [&]() {
         if (diagCorrG == nullptr) return;
         const float rod0 = ro[ic] > 1.0e-20f ? ro[ic] : 1.0e-20f;
@@ -297,6 +313,13 @@ __global__ void cond_realizability_clamp_f_d(
     }
     if (remove) {
         if (rs != nullptr && rog[ic] > 0.0f) { atomicAdd(&rs[COND_REASON_RM_SUM], (double)rog[ic]*Vr); atomicAdd(&rs[COND_REASON_RM_N], 1.0); }
+        if (tcOn) {   // 段 4: 液滴消滅 (物理; ゲートには入れない)
+            const double gr = fabs((double)rog[ic]);
+            if (gr != 0.0) { atomicAdd(&tcAcc[4*6 + 2], gr*tcV); atomicAdd(&tcAcc[4*6 + 1], gr*tcV); }
+            if (roQ2[ic] != 0.0f) atomicAdd(&tcAcc[4*6 + 3], fabs((double)roQ2[ic])*tcV);
+            if (roQ1[ic] != 0.0f) atomicAdd(&tcAcc[4*6 + 4], fabs((double)roQ1[ic])*tcV);
+            if (roQ0[ic] != 0.0f) atomicAdd(&tcAcc[4*6 + 5], fabs((double)roQ0[ic])*tcV);
+        }
         rog[ic] = 0.0f; roQ0[ic] = 0.0f; roQ1[ic] = 0.0f; roQ2[ic] = 0.0f;
     }
     record();

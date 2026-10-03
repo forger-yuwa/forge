@@ -1,0 +1,4 @@
+plan limiter-inlet-column-oscillation §5.1 #8 (領域一定 ε̂ の A/B)
+IC: run_0524_floor_dry_L1/res_48000.h5 を restart_field.py --force-species で index コピー
+config: run_0527 (参照 4 値固定・cfl 2) + limiterDiag 100 + nStepOuter 100, outStepInterval 1, limiterEpsConst 2.0e-6, output level 1 + extraFields
+build 65056017

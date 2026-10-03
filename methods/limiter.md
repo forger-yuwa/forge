@@ -69,9 +69,12 @@ $\delta$ は変数そのものの次元 ($\rho$ なら kg/m³、$P$ なら Pa) �
 - **変数ごとに効き方が桁違いになる**。同じ $\epsilon^2$ を $\Delta\rho \sim O(0.1)$ と
   $\Delta P \sim O(10^5)$ に当てるので、片方では無リミット・片方では通常動作になる。
 
-SU2 が同じ形の式で壊れないのは、**解を無次元化して解いている**ため $\delta$ が $O(1)$ だからである
-(`Common/src/CConfig.cpp:5021` `RefElemLength = 1.0`, `VENKAT_LIMITER_COEFF = 0.05` → $\epsilon^2 = 1.25\times10^{-4}$)。
-forge は SI 次元のまま解くので同じ式が成立しない。
+SU2 の Venkatakrishnan の $\epsilon^2$ は**領域で一定の定数** $(K\,L)^3$ で、局所のセル寸法に依らない
+(`SU2_CFD/include/limiters/CLimiterDetails.hpp`、`Common/src/CConfig.cpp:5021` `RefElemLength = 1.0`、
+`VENKAT_LIMITER_COEFF = 0.05` → $\epsilon^2 = 1.25\times10^{-4}$)。**SU2 の既定は次元付き (SI) で解く**
+(`REF_DIMENSIONALIZATION` の既定は `DIMENSIONAL`、`CConfig.cpp:1511`) ので、SU2 でも変数ごとの効き方は次元で変わる。
+(2026-10-03 訂正: 以前ここに「SU2 は無次元化して解くので壊れない」と書いていたが、既定については誤り。
+調査 `notes/investigations/limiter-unstructured-convergence-survey.md` §2.1。)
 
 #### 無次元化 Venkatakrishnan (`space.limiterScaled: 1`, **既定**)
 
@@ -95,7 +98,10 @@ $$
   (読むと $\epsilon^2=0$ になり `venkatK` が効かなくなる)。
 - $L_\mathrm{ref}$: `limiterRefLength`。0 ならメッシュ境界箱の対角。
 
-**`space.venkatK` の既定は経路で変わる**: `limiterScaled: 1` なら **0.05** (SU2 既定と同値)、`0` なら 1.0。
+**`space.venkatK` の既定は経路で変わる**: `limiterScaled: 1` なら **0.05** (SU2 既定と**数値は同じだが ε の定義が違う**)、`0` なら 1.0。
+forge の $\hat\epsilon^2=(K h_i/L_\mathrm{ref})^3$ は局所寸法 $h_i$ で縮むので、細かい壁近傍セルでは極端に小さくなる
+(case/16 の入口列で $\hat\epsilon\approx5\times10^{-8}$。SU2 を無次元化して回した場合の相対 ε 約 0.011 の 2×10⁵ 分の 1。
+plan [limiter-inlet-column-oscillation](../plans/accepted/limiter-inlet-column-oscillation.md) §4.5)。
 **旧経路の K は `limiterFunctions_d.cuh` で `1.f` 固定**なので、`limiterScaled: 0` では `venkatK` を変えても効かない。
 K=1.0 は Sod で全変数を悪化させる
 (密度の近傍逸脱が K=1.0 で 86674 面側、K=0.05 で **0**)。SERN でも K=1.0 は $\rho$ 797 / $U_y$ 1777 に対し
@@ -121,6 +127,24 @@ Venkatakrishnan K=0.05 で 1.20e-3、Barth で 4.91e-3)。支配するのは**�
 **ψ の凍結は実装していない** (2026-09-20 決定)。プラトー run は「**未収束の準定常評価**」として、
 目的量・局所場・保存収支・CFL/内部反復感度が**事前に決めた誤差予算内**にある場合だけ受理する
 (plan [`limiter-config-simplify.md`](../plans/active/limiter-config-simplify.md) §4.3)。
+
+#### 既定 (`limiterScaled 1`) での残差の床 (2026-10-03、case/16 で観測した範囲。原因は未確定)
+
+case/16 (平面 2D node SST、凝縮の有無に無関係) では、`limiterScaled 1` の定常残差が `limiterScaled 0` より約 20 倍高い床で
+下げ止まる (check_convergence は `NOT CONVERGED (stalled/plateau)`)。床の Σres² の約 7 割は**一様入口と no-slip 壁の角 (入口の最初の
+2 列の壁近傍)** にあり、残りは幾何の折れ点・出口中心線の少数節点。そこでは節点が近傍の局所極値になり、極値判定と制限面の選択が
+float32 の数 ulp で決まる状況で $\psi$ が反復ごとに切り替わる。**この切り替えと床の関連は観測したが、原因としては確定していない**
+(同じ状態で入口の $\psi$ だけ差し替えた二重評価は事前登録の判定で保留)。
+
+- **測定した上側壁の 4 報告量** (x ≥ 10 mm の壁圧平均・x = 42/52 mm の壁圧・壁温平均) は、床の高さを変えた介入で事前の許容差
+  (壁圧 0.1 %、壁温 0.1 K) 内: cfl 半減で壁圧差 ≤ 1.2e-6 相対・壁温差 −0.002 K、領域一定 $\hat\epsilon=2\times10^{-6}$ で壁圧差 ≤ 7e-6 相対・壁温差 1e-4 K。
+  壁温分布全体・熱流束・他ケースは測っていないので、「床は解に影響しない」とは言わない。
+- 試した領域一定 $\hat\epsilon=2\times10^{-6}$ (許容逸脱から決めた 1 点) は、入口残差 0.73〜0.80 倍・全域 rms_ro 0.65 倍で採用基準 (1/2) 未達。
+  入口以外の近壁では下がり方が大きい ($\omega$ 残差 0.07 倍)。他の $\epsilon$ は試していない。
+- **扱い**: 未収束の準定常評価として、報告量を `check_quasisteady` (判定区間と閾値を明記) で判定する。限定した報告量への感度が
+  小さいことを理由に追加調査は打ち切った。残差の位置で収束を合格にはしない。
+- 経緯・実測: plan [limiter-inlet-column-oscillation](../plans/accepted/limiter-inlet-column-oscillation.md) §4.6、
+  調査 `notes/investigations/limiter-unstructured-convergence-survey.md`・`limiter-recommended-and-recent-survey.md`。
 
 ### リミッタの評価点 (`space.limiterMatchRecon`)
 

@@ -14,6 +14,9 @@
 #include <time.h>
 #include <limits>
 #include <cstdio>
+#include <map>
+#include <tuple>
+#include <cstring>
 
 #include "flowFormat.hpp"
 #include "mesh/mesh.hpp"
@@ -246,6 +249,10 @@ std::vector<std::string> residualEquationNames(const solverConfig& cfg)
         for (const auto& name : condMomentConsNames(cfg)) {
             names.emplace_back(name);
         }
+    }
+    // 二相拡散 (#4e) の蒸気残差 rms_roYv = rms(res_roY_w − res_rog_0) (新キー ON の構成だけ; 既定の列構成は不変)。
+    if (condTwoPhaseDiffusionActive(cfg)) {
+        names.emplace_back("roYv");
     }
 
     return names;
@@ -1595,6 +1602,8 @@ cudaConfig initializeSimulation(
                  << " condN2LatentLowT=" << cfg.condN2LatentLowT << " condN2PsatLowT=" << cfg.condN2PsatLowT << " condN2LiquidCp=" << cfg.condN2LiquidCp << "\n";
         }
         cfg.condSonicModel = resolved;
+        // 二相拡散 (condTwoPhaseDiffusion, #4e): 定常専用初版。dual-time 等の併用不可は理由を出して終了、対象外の構成は不活性をログに出す。
+        condTwoPhaseDiffusionValidate(cfg);
         // CPG carrier 形 (空気の N2 選択凝縮) の境界受付範囲 (plans/accepted/condensation-air.md §4.1; codex 2026-09-13 M3):
         //   ghost/ピンを単相 EOS で再構成する境界 (wall, wall_isothermal, inlet_Pressure, outflow, periodic 等) は未対応。
         //   出口 outlet_statPress は超音速全量外挿のときだけ整合 (実行時条件) → 後処理 onset_analysis.py --series の u_n/c>1 で確認する。
@@ -1624,6 +1633,7 @@ cudaConfig initializeSimulation(
 
     // 非平衡凝縮モーメント変数を登録 (allocVariables より前)。condensation==0 では no-op。
     var.registerCondensation(cfg.nCondSpecies);
+    var.registerTwoPhaseVaporResidual(condTwoPhaseDiffusionActive(cfg) ? 1 : 0);   // 二相拡散の蒸気残差 res_roYv (#4e)
 
     // 受動トレーサ roXi を登録 (allocVariables より前)。physProp.tracer 未指定では no-op。
     var.registerTracer(cfg.tracerEnabled() ? 1 : 0);
@@ -1848,9 +1858,20 @@ struct StepContext {
 
 // 残差組み立ての単一情報源（旧 assembleCurrentState）。保存量から派生量・境界・勾配・各フラックス・
 // ソース項を計算し res_* を確定する。explicit / implicit 双方が呼ぶ。
+// 組立の前半 (状態射影・EOS・物性・BC・勾配まで) と後半 (リミッタ以降の流束・ソース) に分ける。
+// 通常は assembleResidual が両方を続けて呼ぶだけで、挙動は分割前と同一。後半だけを複数回呼ぶのは
+// 診断 (limiter-inlet-column-oscillation §5.1 #5e) が共通入力から枝分かれして評価するため。
+static void assembleResidualPre(StepContext& s);
+static void assembleResidualPost(StepContext& s);
 void assembleResidual(StepContext& s, int stage_index)
 {
     (void)stage_index;  // 現状カーネルは stage_index を使わない（dual-time 拡張用に interface 保持）
+    assembleResidualPre(s);
+    assembleResidualPost(s);
+}
+
+static void assembleResidualPre(StepContext& s)
+{
     ledgerBeginAssemble(s.msh);   // 診断 (FORGE_DUMP_LEDGER、既定 off・出力専用)
     ledgerCapture(s.msh , s.var , "entry" , false);
     s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
@@ -1916,6 +1937,10 @@ void assembleResidual(StepContext& s, int stage_index)
     s.profiler.measureCuda(ProfileSection::AxisymmetricSource, [&]() {
         axisymmetricGeomTerms_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     });
+}
+
+static void assembleResidualPost(StepContext& s)
+{
     s.profiler.measureCuda(ProfileSection::Limiter, [&]() {
         limiter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     });
@@ -1949,8 +1974,11 @@ void assembleResidual(StepContext& s, int stage_index)
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         condensationTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);  // 液相モーメント移流残差 (Phase 1)
         condensationSource_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 核生成+成長ソース (Phase 2)
+        condThetaScan_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, 0);       // θ_src の全評価を覆う集計 (#1b-pre; 計上のみ)
         tracerTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);        // 受動トレーサ移流残差 (node 入口ピン込み)
         passivePinResidual_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 受動種経路: node 入口ピンノードの残差除外 (ソース集計の後)
+        // 二相拡散 (#4e) は化学種の残差へ condensationTransport の中で足すので、化学種のピン除去をもう一度掛ける (周期集約の前)。
+        if (condTwoPhaseDiffusionActive(s.cfg)) speciesPinResidual_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);
     });
     ledgerCapture(s.msh , s.var , "res_after_species" , true);   // 診断 (既定 no-op)
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
@@ -1981,6 +2009,8 @@ void assembleResidual(StepContext& s, int stage_index)
     // 同期更新する (継ぎ目に双対面を作らず、両側内部双対面が res を組む)。cell/非周期では no-op。
     periodicNodeGather_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     ledgerCapture(s.msh , s.var , "res_final" , true);   // 診断 (既定 no-op): 壁射影・周期合併の後
+    // 二相拡散 (#4e) の蒸気残差 res_roYv = res_roY_w − res_rog_0 (監視; 周期集約の後の確定残差から)。無効構成は no-op。
+    twoPhaseVaporResidual_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     // TODO(dual-time): unsteady のとき addUnsteadyTimeTerm(s) で BDF 物理時間項を res_* と
     // 対角に加える。定常では no-op。本体は次フェーズ。
 }
@@ -2133,11 +2163,162 @@ static void pinRowDiagnosticState(StepContext& s, int m)
     std::cout << os.str() << "\n";
 }
 
+// ---- limiter-inlet-column-oscillation §5.1 #5e (診断専用・既定 off) ------------------------------------------------
+// FORGE_DIAG_PSI_DUALEVAL="N0,N1": 外反復 N0 (0 始まりの iStep) の通常組立の後に流れ 5 変数の ψ を保存し、
+// N0 < iStep <= N1 の各外反復で、組立の前半 (状態射影・EOS・BC・勾配) を 1 回だけ行ってから、
+// 全 device 配列 (var.c_d・var.p_d・各境界の bvar_d) を退避し、後半 (リミッタ以降) を 3 回評価する:
+//   B  = 入口集合 (ccx < FORGE_DIAG_PSI_XMAX [m]、省略時は全節点) だけ保存 ψ に差し替え
+//   A' = 差し替えなし (退避から復元した同じ入力で。再評価の誤差の基準)
+//   A  = 差し替えなし (退避から復元した同じ入力で。**これを時間更新に使う**)
+// 各評価の前に退避した配列を書き戻すので 3 枝の入力は同一 (codex diagnose 2026-10-03 dualeval-result の指定)。
+// 退避の外にある状態 (static な作業配列など) は検査できないので、A'−A を再評価誤差として記録する。
+struct PsiDualEval {
+    bool on = false; int n0 = -1, n1 = -1; flow_float xmax = (flow_float)1e30; bool saved = false;
+    std::vector<char> inS; std::ofstream csv;
+};
+static PsiDualEval g_pde;
+
+static void pdeInit(StepContext& s)
+{
+    static bool done = false; if (done) return; done = true;
+    const char* e = std::getenv("FORGE_DIAG_PSI_DUALEVAL"); if (!e) return;
+    if (std::sscanf(e, "%d,%d", &g_pde.n0, &g_pde.n1) != 2 || g_pde.n0 < 0 || g_pde.n1 <= g_pde.n0) {
+        std::cerr << "[psi-dualeval] FORGE_DIAG_PSI_DUALEVAL must be \"N0,N1\" with 0 <= N0 < N1\n"; exit(EXIT_FAILURE);
+    }
+    if (const char* x = std::getenv("FORGE_DIAG_PSI_XMAX")) g_pde.xmax = (flow_float)std::atof(x);
+    g_pde.on = true;
+    std::vector<flow_float> cx(s.msh.nCells_all);
+    gpuErrchk( cudaMemcpy(cx.data(), s.var.c_d["ccx"], cx.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+    g_pde.inS.assign(s.msh.nCells_all, 0); long nS = 0;
+    for (geom_int i = 0; i < s.msh.nCells; ++i) if (cx[i] < g_pde.xmax) { g_pde.inS[i] = 1; ++nS; }
+    g_pde.csv.open("psi_dualeval.csv");
+    g_pde.csv << "step,var,nS,S_A,S_B,S_BmA,S_ApmA,S_AdotBmA,all_A,all_B,all_BmA,all_ApmA,all_AdotBmA,psi_maxdiff_S,restore_mismatch\n";
+    printf("[psi-dualeval] ON (branching): save psi at iStep %d, dual evaluation for iStep %d..%d, xmax %.6g m, %ld nodes in S\n",
+           g_pde.n0, g_pde.n0 + 1, g_pde.n1, (double)g_pde.xmax, nS);
+}
+
+// 退避: 名前 → (device ポインタ, 要素数, host 複製)
+struct PdeSnap { std::vector<std::tuple<flow_float*, size_t, std::vector<flow_float>>> arr; };
+static size_t pdeSize(const std::map<std::string, std::vector<flow_float>>& host, const std::string& k, size_t fallback)
+{
+    auto it = host.find(k); return (it != host.end() && !it->second.empty()) ? it->second.size() : fallback;
+}
+static PdeSnap pdeSnapshot(StepContext& s)
+{
+    PdeSnap sn;
+    auto add = [&](flow_float* p, size_t n) { if (!p || n == 0) return; std::vector<flow_float> h(n);
+        gpuErrchk( cudaMemcpy(h.data(), p, n*sizeof(flow_float), cudaMemcpyDeviceToHost) ); sn.arr.emplace_back(p, n, std::move(h)); };
+    for (auto& kv : s.var.c_d) add(kv.second, pdeSize(s.var.c, kv.first, s.msh.nCells_all));
+    for (auto& kv : s.var.p_d) add(kv.second, pdeSize(s.var.p, kv.first, 0));   // host 側の大きさが分からない面配列は退避しない (件数をログ)
+    for (auto& bc : s.msh.bconds) for (auto& kv : bc.bvar_d) add(kv.second, pdeSize(bc.bvar, kv.first, 0));
+    static bool logged = false;
+    if (!logged) { logged = true; size_t nb = 0; for (auto& a : sn.arr) nb += std::get<1>(a);
+        size_t nTot = s.var.c_d.size() + s.var.p_d.size(); for (auto& bc : s.msh.bconds) nTot += bc.bvar_d.size();
+        printf("[psi-dualeval] snapshot: %zu of %zu device arrays (%.1f MB)\n", sn.arr.size(), nTot, nb*sizeof(flow_float)/1048576.0); }
+    return sn;
+}
+static void pdeRestore(const PdeSnap& sn)
+{
+    for (auto& a : sn.arr) gpuErrchk( cudaMemcpy(std::get<0>(a), std::get<2>(a).data(), std::get<1>(a)*sizeof(flow_float), cudaMemcpyHostToDevice) );
+}
+static long pdeRestoreMismatch(const PdeSnap& sn)   // 書き戻しが効いたかの検査 (配列数)
+{
+    long n = 0;
+    for (auto& a : sn.arr) { std::vector<flow_float> h(std::get<1>(a));
+        gpuErrchk( cudaMemcpy(h.data(), std::get<0>(a), h.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+        n += (std::memcmp(h.data(), std::get<2>(a).data(), h.size()*sizeof(flow_float)) != 0); }
+    return n;
+}
+static std::vector<std::string> pdeResKeys(StepContext& s)
+{
+    std::vector<std::string> k;
+    for (auto& kv : s.var.c_d) if (kv.second && kv.first.rfind("res_", 0) == 0) k.push_back(kv.first);
+    return k;
+}
+static std::map<std::string, std::vector<flow_float>> pdeCopy(StepContext& s, const std::vector<std::string>& keys)
+{
+    std::map<std::string, std::vector<flow_float>> m;
+    for (auto& k : keys) { auto& v = m[k]; v.resize(s.msh.nCells_all);
+        gpuErrchk( cudaMemcpy(v.data(), s.var.c_d[k], v.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) ); }
+    return m;
+}
+
+// 窓内なら枝分かれ評価を行って true を返す (このとき通常の assembleResidual は呼ばない)。
+static bool pdeAssemble(StepContext& s)
+{
+    pdeInit(s);
+    if (!g_pde.on || !g_pde.saved || s.iStep <= g_pde.n0 || s.iStep > g_pde.n1) return false;
+    const auto resKeys = pdeResKeys(s);
+    assembleResidualPre(s);
+    const PdeSnap sn = pdeSnapshot(s);
+    limiterPsiOverride(true);
+    assembleResidualPost(s);                                  // B
+    limiterPsiOverride(false);
+    const auto B = pdeCopy(s, resKeys);
+    double psiMax = 0.0;
+    {
+        const char* ln[5] = {"limiter_ro","limiter_Ux","limiter_Uy","limiter_Uz","limiter_P"};
+        for (int k = 0; k < 5; ++k) {
+            std::vector<flow_float> a(s.msh.nCells_all), b(s.msh.nCells_all);
+            gpuErrchk( cudaMemcpy(a.data(), s.var.c_d[ln[k]], a.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+            gpuErrchk( cudaMemcpy(b.data(), limiterPsiSaved(k), b.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+            for (geom_int i = 0; i < s.msh.nCells; ++i) if (g_pde.inS[i]) psiMax = std::max(psiMax, (double)std::fabs(a[i]-b[i]));
+        }
+    }
+    pdeRestore(sn); long mm = pdeRestoreMismatch(sn);
+    assembleResidualPost(s);                                  // A'
+    const auto Ap = pdeCopy(s, resKeys);
+    pdeRestore(sn); mm += pdeRestoreMismatch(sn);
+    assembleResidualPost(s);                                  // A (時間更新に使う)
+    const auto A = pdeCopy(s, resKeys);
+    long nS = 0; for (geom_int i = 0; i < s.msh.nCells; ++i) nS += g_pde.inS[i];
+    for (auto& k : resKeys) {
+        const auto& a = A.at(k); const auto& b = B.at(k); const auto& ap = Ap.at(k);
+        double sA=0, sB=0, sD=0, sP=0, sX=0, gA=0, gB=0, gD=0, gP=0, gX=0;
+        for (geom_int i = 0; i < s.msh.nCells; ++i) {
+            const double va = a[i], vb = b[i], d = vb - va, dp = (double)ap[i] - va;
+            gA += va*va; gB += vb*vb; gD += d*d; gP += dp*dp; gX += va*d;
+            if (g_pde.inS[i]) { sA += va*va; sB += vb*vb; sD += d*d; sP += dp*dp; sX += va*d; }
+        }
+        g_pde.csv << s.iStep << "," << k << "," << nS << "," << std::sqrt(sA) << "," << std::sqrt(sB) << "," << std::sqrt(sD) << ","
+                  << std::sqrt(sP) << "," << sX << "," << std::sqrt(gA) << "," << std::sqrt(gB) << "," << std::sqrt(gD) << ","
+                  << std::sqrt(gP) << "," << gX << "," << psiMax << "," << mm << "\n";
+    }
+    g_pde.csv.flush();
+    return true;
+}
+static void pdeAfterNormal(StepContext& s)
+{
+    if (!g_pde.on) return;
+    if (s.iStep == g_pde.n0 && !g_pde.saved) {               // 通常組立の ψ を保存
+        limiterPsiSave(s.cfg, s.msh, s.var, g_pde.xmax); g_pde.saved = true;
+        printf("[psi-dualeval] psi saved at iStep %d\n", s.iStep);
+    }
+}
+
 // 残差 1 回構築 → 局所擬似時間 dτ → 古典 DPLUR 線形解 → Q への commit。
 void implicitNonlinearUpdate(StepContext& s, int inner_index)
 {
-    assembleResidual(s, 1);
+    // limiter-inlet-column-oscillation §5.1 #5e 診断 (既定 off): 窓内は共通入力から枝分かれして組み、A を残す
+    if (!pdeAssemble(s)) { assembleResidual(s, 1); pdeAfterNormal(s); }
     logResidualSnapshot(s, inner_index);
+    // #1b-r2 診断 (condTwoPhaseDiag 3, 窓内だけ): 同じ状態・面値・係数・ソース値の double 組立 B (状態・組立 A は不変; 読むだけ)
+    if (s.cfg.condTwoPhaseDiag == 3 && twoPhaseDiagInWindow(s.cfg)) {
+        // 試験用 FORGE_TPD3_VERIFY=1: 組立 B の前後で全セル配列 (ghost 込み) をバイト比較し、B が状態を書かないことを確かめる
+        const bool verify = (std::getenv("FORGE_TPD3_VERIFY") != nullptr);
+        std::map<std::string, std::vector<flow_float>> before;
+        if (verify) for (auto& kv : s.var.c_d) if (kv.second) { auto& v = before[kv.first]; v.resize(s.msh.nCells_all);
+            gpuErrchk( cudaMemcpy(v.data(), kv.second, v.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) ); }
+        twoPhaseDiagB_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        if (verify) {
+            long nArr = 0, nDiff = 0; std::string first;
+            for (auto& kv : before) { std::vector<flow_float> a(kv.second.size());
+                gpuErrchk( cudaMemcpy(a.data(), s.var.c_d[kv.first], a.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) ); ++nArr;
+                if (std::memcmp(a.data(), kv.second.data(), a.size()*sizeof(flow_float)) != 0) { ++nDiff; if (first.empty()) first = kv.first; } }
+            printf("[twophase-diag] verify step %d: %ld cell arrays compared byte-wise before/after assembly B, %ld changed%s%s\n",
+                   s.iStep + 1, nArr, nDiff, nDiff ? " (first: " : "", nDiff ? (first + ")").c_str() : "");
+        }
+    }
     // 定常 (unsteady==0) implicit では dt_local=cfl_pseudo·dx/λ で cfg.dt が打ち消され、dt 適応も表示も
     // monitorInterval ごとで足りる (per-step host 同期を回避)。dt 適応と表示は同一 (monitor 時のみ host 読み)。
     // unsteady でここに来る経路は無い (implicit unsteady は dual-time) が、防御的に毎ステップ adapt にする。
@@ -2195,6 +2376,9 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
     // speciesImplicitCoupling==1: 緩和整合 scalar-DPLUR (流れ block と同一 dt/implicitRelax/nStepInner sweep)。
     //                          =0: 従来 segregated 点陰的 forward-Euler (既定・ビット不変)。
     // freezeSpecies 時は化学種更新を完全にスキップ (ρY_s 凍結)。EOS は凍結 ρY/ρ で評価される。
+    // 二相拡散 (condTwoPhaseDiffusion, #4e): 水 ρY_w は化学種の更新で commit せず、液・Q と一緒に非分割更新 (蒸気/液の増分) で commit し、
+    // その後に再正規化 (係数を液・Q にも) する (plan condensation-two-phase-transport §4.2、設計メモ §6.1・§14)。化学種凍結時は現行経路。
+    const bool twoPhase = condTwoPhaseDiffusionActive(s.cfg) && !freezeSpecies;
     if (!freezeSpecies) {
         s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
             if (eosCoupled) {
@@ -2207,9 +2391,13 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
                     speciesTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
                 }
             }
-            speciesRenormalize_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
-            periodicMirrorSpeciesState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // node 周期: 化学種状態を root→member (§4.1-5)
-            speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // Y=roY/ρ (出力/次残差用に同期)
+            if (twoPhase) {
+                twoPhaseHoldWater_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 水は更新前に戻す (液の後で commit)
+            } else {
+                speciesRenormalize_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+                periodicMirrorSpeciesState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // node 周期: 化学種状態を root→member (§4.1-5)
+                speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // Y=roY/ρ (出力/次残差用に同期)
+            }
         });
     }
 
@@ -2218,8 +2406,19 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
     // condensation==0 で no-op。
     s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
         condensationUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // ro*_N = ro*_M = ro*
-        condensationTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
+        if (twoPhase) {
+            // 蒸気・液・Q の非分割更新 → 再正規化 (係数を液・Q にも) → 受動種の砦・周期ミラー (wrapper 内)。化学種の周期ミラーと Y の同期はここ。
+            twoPhaseUpdate_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            periodicMirrorSpeciesState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+            speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+        } else {
+            condensationTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
+        }
+        // 更新の θ (二相の非分割更新 / 更新クランプ θ_u) の全更新を覆う集計 (#1b-pre; 計上のみ)。θ を書かない経路では呼ばない。
+        if (twoPhase || (s.cfg.timeIntegration == 11 && s.cfg.condLimiterMode == 1 && s.cfg.condEquilibrium == 0))
+            condThetaScan_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, 1);
         condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // φ=ρφ/ρ (出力/次残差用に同期)
+        if (twoPhase) twoPhaseCorrGateEnd();   // #4h: この更新の補正計測を閉じる (実現可能性クランプの後)
         // 受動トレーサ (segregated point-implicit)。tracer 無効で no-op。
         tracerUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         tracerTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
@@ -2729,6 +2928,14 @@ int main(int argc, char** argv) {
     StepMonitor monitor(cfg, residual_logger);
     monitor.printHeader();
     passiveRecordInitialTotals_d_wrapper(cfg, cuda_cfg, msh, var);   // 収支の独立照合の始点 (計算開始前の総量)
+    // 二相拡散 (#4f (4)): 収束受入の独立残差監査。開始時に r0 を記録し、終了時に格納状態から組み直して判定する (無効構成は no-op)。
+    auto twoPhaseAudit = [&](int iStepAudit, bool final) {
+        if (!condResidualAuditActive(cfg)) return;
+        StepContext sa{cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger, iStepAudit};
+        assembleResidual(sa, 1);
+        twoPhaseAudit_d_wrapper(cfg, cuda_cfg, msh, var, iStepAudit, final);
+    };
+    twoPhaseAudit(0, false);
     cout << "Start Calculation \n";
     for (int iStep = 0 ; iStep < cfg.mainLoopCount() ; iStep++) {
         advanceOneStep(cfg , cuda_cfg , msh , mat_ns , var , fluct , pprobes , profiler , residual_logger , implicit_diag_logger , iStep);
@@ -2744,6 +2951,10 @@ int main(int argc, char** argv) {
         condCorrectionLog_d_wrapper(cfg, cuda_cfg, msh, var, cfg.mainLoopCount() - 1);
     }
 
+    twoPhaseDiagWrite(cfg, cuda_cfg, msh, var);   // 二相更新の診断 CSV (condTwoPhaseDiag; 無効なら no-op)
+    renormGateLog(cfg, cfg.mainLoopCount(), true);   // 再正規化の受入ゲート: 末尾 ceil(0.1N) 更新の max と VERDICT (#1b-pre)
+    twoPhaseCorrGateLog(cfg, cfg.mainLoopCount(), true);   // 二相の補正ゲート: 末尾 ceil(0.1N) 更新の max と VERDICT (#4h)
+    twoPhaseAudit(cfg.mainLoopCount(), true);   // 最終の格納状態 (出力は書き終えている)
     limiterDiag_finalize(cfg);   // 有界性診断の末尾取りこぼしを回収して累計を確定 (plan §4.35)
 
     // 壁時計 (旧実装は clock() = CPU 時間で、GPU 待ちを含まなかった)。書式 "Time = %.3f s" は grep 互換のため維持。
