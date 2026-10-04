@@ -668,6 +668,19 @@ if __name__ == "__main__":
 
 
 # --- A12: 粘性 δ* 補正 (RANS 経路) ------------------------------------------------
+def delta_r_from_table(x, d):
+    """δ_r の表 (P-spline 平滑化済みの `delta_r_next.csv`) を壁に渡す関数にする: 5 次補間スプライン、範囲外は端値。
+
+    2026-10-05 (plan verification-m6-axis-wave-mesh-su2 §5.1 #8a): 旧実装は np.interp (直線補間) で、表の点ごと
+    (0.09 r_t) の傾きの折れ目を補間 5 次 B-spline の壁が通るため r″ が点間隔の周期で波打っていた (高周波 3〜6e-4 [1/r_t])。
+    平滑化前の生値を渡すと 5 次補間はリンギングするので、平滑化済みの表に限る。"""
+    from scipy.interpolate import make_interp_spline
+    x = np.asarray(x, dtype=float); d = np.asarray(d, dtype=float)
+    spl = make_interp_spline(x, d, k=5)
+    lo, hi = float(x[0]), float(x[-1])
+    return lambda xq, _s=spl, _lo=lo, _hi=hi: _s(np.clip(np.asarray(xq, dtype=float), _lo, _hi))
+
+
 def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                dstar_csv=None, dstar_blend=(6.0, 9.0),
                delta_r_csv=None, offset: str = "normal", euler_ref=None,
@@ -739,7 +752,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                                             positive=(p.wall_thermal["mode"] == "adiabatic"))  # 等温は符号付き
         res_init["delta_r_raw_integral"] = res_init["delta_r"].copy()
         res_init["delta_r"] = f_s(res_init["x"])
-        delta_r_x = delta_r_function(res_init)
+        # 壁には平滑化関数そのものを渡す (2026-10-05, plan verification-m6-axis-wave-mesh-su2 §5.1 #8a):
+        # 1500 点の表を np.interp で渡すと点ごとの傾きの折れ目を補間 5 次スプラインが通り、r″ が点間隔で波打つ
+        delta_r_x = f_s
         offset = "radial"
         init_info = dict(res_init["settings"])
         init_info["smooth"] = {"kind": "quintic_pspline", **sm_diag}
@@ -752,7 +767,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         tbl_r = np.loadtxt(delta_r_csv, delimiter=",", skiprows=1)
         if not np.all(np.isfinite(tbl_r[:, 1])):
             raise ValueError("delta_r_csv に非有限値がある (deltastar_loop.extract_and_merge で前回値保持済みの CSV を渡す)")
-        delta_r_x = lambda x, _t=tbl_r: np.interp(x, _t[:, 0], _t[:, 1])
+        delta_r_x = delta_r_from_table(tbl_r[:, 0], tbl_r[:, 1])
         offset = "radial"
     wall = PhysicalNozzleWall(d["wall"], wall_inv, scale, float(p.spec["Pt"]),
                               float(p.spec["Tt"]), _gam_or_gas(p), p.cp, dstar_x=dstar_x,
