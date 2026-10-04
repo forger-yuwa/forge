@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -172,6 +173,7 @@ def run_pass(problem, euler_ref, prev_run, run_dir, omega: float = 0.5, ic_from=
     (run_dir / "fixed_point.json").write_text(json.dumps(fp, indent=1))
     print("fixed_point(new):", json.dumps({k: v for k, v in fp.items() if k != "massflow"}), flush=True)
     print("massflow(new):", json.dumps(fp["massflow"]), flush=True)
+    _design_report(run_dir, euler_ref)
     return m
 
 
@@ -207,6 +209,7 @@ def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, p
     (run_dir / "fixed_point.json").write_text(json.dumps(fp, indent=1))
     print("extract(new):", json.dumps({k: v for k, v in fp.items() if k != "massflow"}), flush=True)
     print("massflow(new):", json.dumps(fp["massflow"]), flush=True)
+    _design_report(run_dir, euler_ref)
     return m
 
 
@@ -260,3 +263,14 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+def _design_report(run_dir, euler_ref):
+    """ノズル設計の標準出力 (procedures/nozzle-design-outputs.md) を NS pass の後に自動で作る。失敗しても chain は止めない。"""
+    if os.environ.get("FORGE_NO_DESIGN_REPORT"):
+        return
+    try:
+        from ..report.nozzle_report import make_report
+        print("design report:", make_report(run_dir, euler_ref), flush=True)
+    except BaseException as e:  # noqa: BLE001
+        print(f"design report: 失敗 ({type(e).__name__}: {e}) — chain は続行", flush=True)
+
