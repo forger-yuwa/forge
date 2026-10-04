@@ -19,3 +19,20 @@ gap heating (case/56・59・60 の記録、`interp_field.py` の 3D 最近傍修
    `nozzle.msh` が run_0051 と md5 一致、`wall_physical.csv` の最大差 ≤ 1e-12 m。
 4. 報告ツール: 統合版の `nozzle_report` を run_0051 に回し、`report.json` の評価量 (波・オーバーシュート・出口コア M・ṁ 比) が統合前と一致 (相対 1e-9)、pptx が生成される。
 FAIL のときは main へ入れない (原因を切り分ける)。main へは PR で入れる (ユーザ指示 2026-10-05「main 取り込むとともにこの成果を main に入れて」)。
+
+## 結果 (2026-10-05)
+1. **PASS**: `solver_density_cuda/tests/unit/test_*.py` 21 本が main (77318d0e) と統合版で同じ判定 (両方とも全件 rc 0)。
+   `design/tests/run_deltastar_tests.py` ALL PASS、`test_interp_field_3d.py` ALL PASS、`test_gate_bad_input.py` PASS。
+2. **PASS**: `check_plans.py` の FAIL は main 28 件 (21/49 OK)、統合版 28 件 (22/50 OK; 1 件増えたのは feature 側の plan `verification-m6-axis-wave-mesh-su2` で OK 側)。
+3. **FAIL**: 統合版で最終設計の壁を作り直すと run_0051 と一致しない。
+   - まず main では semiperfect TP の NS/SST に**化学種ごとの輸送物性 (`gas.transport`、viscMethod 2) が必須**になっており、feature 側で作った
+     `problem_d155_ns_c2final{,_cond}.yaml` (Sutherland の時代の rt77p02 から複製) は prepare で止まる。main が既存の問題ファイルに入れたのと同じ
+     `transport` 行を 2 ファイルに追加した (この統合ブランチの変更)。壁の形は積分法 (粘性は内部の Sutherland) で決まり transport には依存しない。
+   - そのうえで壁の差は最大 **5.0e-7 m (0.5 µm、相対 6.5e-7)**、`nozzle.msh` の md5 不一致。差の出どころは**設計壁 (逆 MOC)**: 軸 M の目標 3e-9、
+     設計壁 2.3e-7 m (出口側)。main 側の気体熱物性の変更 (`gas/semiperfect.py`・`gas/composition.py`: NASA-9 区間可変化と組成の扱い) で物性が 1e-8 級に動いたもの。
+     feature 側の変更や衝突解消の誤りではない。形状としては無視できる大きさだが、事前登録の基準 (≤1e-12 m) は満たさない。
+   - **より重要な含意**: main の NS は粘性モデルが変わっている (Sutherland → 種ごとの CEA/IAPWS)。最終設計の検証 run (run_0051/0052) は Sutherland で
+     回したもので、main で同じ設計を回すと境界層 (出口 δ) が変わりうる → 出口較正の k_f と r_t を main の物性で取り直す必要がある (未実施)。
+4. **PASS**: 統合版の `nozzle_report` を run_0051 に回した評価量 29 項目が統合前と完全一致 (相対差 0)。統合用の作業ツリーには `.venv-pptx` が無いので pptx は作られない (図と json のみ; 想定どおり)。
+
+→ 事前登録どおり 3 が FAIL なので、main への取り込みはユーザ判断を待つ (原因は特定済み: main 側の熱物性・輸送物性の変更)。

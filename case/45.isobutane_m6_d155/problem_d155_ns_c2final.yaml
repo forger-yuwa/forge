@@ -16,6 +16,7 @@ name: isobutane_m6_d155_ns_c2final
 type: wind_tunnel_axisym_axismach
 gas:
   model: semiperfect
+  transport: {CO2: cea, O2: cea, N2: cea, H2O: custom:h2o_iapws_cea_v1}   # 2026-09-27: 種ごとの輸送物性 (viscMethod 2 既定; plan thermophysics-solver-owned-species-db §4.3c)。H2O は IAPWS/CEA つなぎ
   species: {CO2: 0.1677, H2O: 0.0858, O2: 0.0220, N2: 0.7245}
   # 参照値 (semi-perfect では NASA-9 が優先。IC 初期推定と CPG フォールバック):
   gamma: 1.27354        # γ* (スロート 1409 K, Tt 1600)
