@@ -78,7 +78,7 @@
 | --- | --- | --- | --- |
 | 1 | ~~codex plan 段レビュー~~ | **完了 2026-10-04**: GO-with-changes (C0/M5/m2)、採否は diagnostician に諮り全件採用 (M1・m6・m7 は内容を修正して採用)。§4・§5.1・§6 を改訂 (§6.1) | F (完了) |
 | 2 | S0-前提: 平衡凝縮の分類 | **確定 (2026-10-04、コード確認 + diagnostician)**: `condEquilibrium 1` → (c)、`condEquilibrium 2` → (b) (§4-2)。判定表を S0 で実装 | O (完了) |
-| 3 | S0: 既定の組・判定表・記録・ツール | ON 時の `condTwoPhaseSolver` 既定 1・`condTwoPhaseNonnegLimit` 既定 0、§4-2 の判定表 (ソルバ・`check_solver_config.py`・h5 属性・manifest で共有)。**`condTwoPhaseDiffusion` の既定はまだ 0**。合格: G0 (旧 config のノイズ床内) と G5 | O |
+| 3 | ~~S0: 既定の組・判定表・記録・ツール~~ | **完了 2026-10-04** (commit c910f308、implementer 実装、CUDA は AWS でクリーンビルド)。ON 時の既定 Solver 1・NonnegLimit 0 (明示値が優先)、判定表 `condTwoPhaseDiffusionClassify` (`cuda_forge/condensationTransport_d.cuh`) と Python 版 `tools/twophase_state.py` (定数 `kCondTwoPhaseDiffusionDefault`/`DEFAULT` = 0 を一致試験)、`[twophase]` 起動行・`res_*.h5` 属性 (`twophase_diffusion_effective/state/requested`)・`stage_manifest` の hard キー、`check_solver_config.py` の G5 負例、単体試験 `tests/unit/test_twophase_state.py` ALL PASS。補足: 周期は bcond に `periodic` があれば cell/node とも (c)、既存の拒否 (`passiveScalarScheme 0`・`condLimiterMode 0`) は (c) に残した、3D の未検証は docs のみ (cfg が次元を知らない)。**G0 PASS (S0 後)**: 旧 649f2d77 ×3・新 c910f308 ×2、200 step、`check_field_regress` (液・モーメント込み): case/44 dual-time 非粘性凝縮 `case/44.vitiated_air_wt/run_0524`–`0528` (入力は run_0482_prune_regress_float、species_db の旧 H2O エントリが #10 で両バイナリとも拒否されたので外して移行)、case/34 CPG `case/34.arthur_n2_nozzle/run_0110`–`0114` (run_0108 の入力)、case/16 乾き `case/16.nozzle_wys/run_0555`–`0559`。新バイナリの記録: case/44 は `[twophase] ... state inactive-a, effective 0`・h5 属性あり、凝縮なしの case/16 乾きは行なし (仕様どおり) | O (完了) |
 | 4 | S1-a: G1 (0 step 作用素 A/B) + G3 の閉じた収支 | 親 #4k(1)(2)。`run_0520` res_16000 を共通入力に、拡散作用素だけ A=OFF / B=ON を forge の診断出力で評価し、同じ診断経路で閉じた収支も出す (新しい run なし)。合格は §6 G1・G3 | O (解釈 F) |
 | 5 | S1-b: G2 (生産レシピ ON) | case/16、run_0482 由来 IC、cfl_pseudo 4 + implicitRelax 0.7 + **nStepInner 4** (生産レシピ) + Solver 1 + nn0。先に同条件反復でノイズを測る。合格は §6 G2 | O (解釈 F) |
 | 6 | S1-c: 既定を ON に | G0〜G3・G5 全 PASS のときだけ。docs (§4-6)・変化量の転記。G0 をもう一度 | O |
@@ -122,5 +122,6 @@
 
 ## 9. 変更ログ
 
+- `2026-10-04` — S0 (#3) 完了・G0 PASS (3 ケース)。既定は 0 のまま。
 - `2026-10-04` — codex plan 段 (GO-with-changes, M5/m2) を diagnostician に諮って全件採用: 包絡を検証範囲に絞る (軸対称・周期は (c))、判定表、G1 の誤差尺度、G2 のノイズ基準、G3 の閉じた収支、dual-time を後継 plan に分離、平衡凝縮の分類確定 (1 → (c)、2 → (b))。
 - `2026-10-04` — 起票。ユーザ決定 (二相拡散を既定にしていく) と diagnostician の判断 (段階既定化、既定の組を検証済みに揃える、dual-time は後段で緩和を使わない設計) を §3〜§6 に反映。
