@@ -1,6 +1,6 @@
 # farfield 受理範囲の一次証拠 (2026-10-03、codex result M3)
 
-plan [`boundary-node-farfield-characteristic.md`](../../../plans/active/boundary-node-farfield-characteristic.md) §2 の限定受理の裏付け。run 本体は AWS
+plan [`boundary-node-farfield-characteristic.md`](../../../plans/accepted/boundary-node-farfield-characteristic.md) §2 の限定受理の裏付け。run 本体は AWS
 (`~/forge-pgrad-new/case/58.farfield_verification/`、`~/forge-pgrad-new/case/46.sern_design/`、`~/forge-r8/case/46.sern_design/`) にあり、ここには
 小さなテキストだけを写した (回収スクリプトは AWS で実行、`collect_ff_evidence.py` の出力)。
 

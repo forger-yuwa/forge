@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""farfield plan (plans/active/boundary-node-farfield-characteristic.md §6 V3) の SERN run を作る (AWS で実行)。
+"""farfield plan (plans/accepted/boundary-node-farfield-characteristic.md §6 V3) の SERN run を作る (AWS で実行)。
 R4d と同じ g3・同じ設定で、変えるのは side_far の種別 (slip / farfield) と遠方面の幅だけ。全 run 共通で:
   - 新バイナリ (build-ff、run_case.sh に FORGE_BIN で渡す)
   - リミッタ基準値を run_0986 の自動値に固定 (幅ごとの自動決定の交絡を除く、plan §5.1 #3 V2a の経緯)

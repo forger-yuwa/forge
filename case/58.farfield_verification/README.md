@@ -1,7 +1,7 @@
 # case/58 遠方境界 `farfield` の検証
 
 node 用の特性型遠方境界 `farfield` (外側状態 = TRRS + 滑らかな超音速の重み、境界面 HLLC) の受入れ試験。
-計画・合格条件は [`plans/active/boundary-node-farfield-characteristic.md`](../../plans/active/boundary-node-farfield-characteristic.md) §6、
+計画・合格条件は [`plans/accepted/boundary-node-farfield-characteristic.md`](../../plans/accepted/boundary-node-farfield-characteristic.md) §6、
 結果の記録は同 §5.1 #2・#3。run は AWS (`~/forge-pgrad-new/case/58.farfield_verification/`) にあり、手元には入力スクリプトだけを置く。
 
 - `make_box_msh.py`: 構造 hex の直方体 (gmsh 4.1、physID 1–6 = xmin, xmax, ymin, ymax, zmin, zmax、7 = 体積)

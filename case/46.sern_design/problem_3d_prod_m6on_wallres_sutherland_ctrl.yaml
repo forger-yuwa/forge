@@ -83,7 +83,7 @@ mesh:
 evaluate:
   top_out_kind: slip       # 3D は top_out を slip 壁 (ランプ延長) にする (run_0027 で確立)
   side_far_kind: farfield  # 側方の遠方面を特性型遠方境界に (2026-10-01 生産に採用。遠方面 2.50 H で広幅と許容内・格子差込みで §8 内:
-                           #  plans/active/boundary-node-farfield-characteristic.md §5.1 #4–#4c)。旧挙動は slip
+                           #  plans/accepted/boundary-node-farfield-characteristic.md §5.1 #4–#4c)。旧挙動は slip
   model: sst
   nStepOuter: 4000
   p_min: 20.0              # EOS 圧力床 [Pa]。既定 1.0 Pa は m10_on の p∞ (1026 Pa) の 1/1000 で低すぎ、
