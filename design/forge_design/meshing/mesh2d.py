@@ -39,6 +39,10 @@ class Mesh2DParams:
     # 上流側 (収縮部) も同様に戻す: x <= up_x0 で wall_first_frac、up_x1 以上で wall_first_frac_throat (None = 上流は全域 throat 値)
     wall_first_up_x0: float | None = None
     wall_first_up_x1: float | None = None
+    # --- 軸側の最大間隔の上限 (2026-10-04, plan verification-m6-axis-wave-mesh-su2 §4.1) ---
+    # None なら従来どおり nj 点の等比。指定すると、壁側は nj から決まる同じ第一セル・同じ比 q で伸ばし、
+    # 間隔 (/ r_w) がこの値に達したら軸まで一様にする。nj は導出値になる (壁・境界層の格子は不変)。
+    axis_gap_frac: float | None = None
 
 
 def _x_stations(x0: float, x1: float, ni: int, refine: float, width: float,
@@ -80,6 +84,23 @@ def _radial_fracs(nj: int, first_frac: float) -> np.ndarray:
     return s / s[-1]
 
 
+def _radial_fracs_capped(nj_base: int, first_frac: float, cap: float) -> np.ndarray:
+    """壁側は `_radial_fracs(nj_base, first_frac)` と同じ第一セル・比 q の等比、間隔が `cap` に達したら軸まで一様。"""
+    s0 = _radial_fracs(nj_base, first_frac)
+    g0 = np.diff(s0)[::-1]                      # 壁側から
+    q = g0[1] / g0[0]
+    gaps = []
+    g = g0[0]
+    while g < cap and sum(gaps) + g < 1.0:
+        gaps.append(g)
+        g *= q
+    rest = 1.0 - sum(gaps)
+    m = int(np.ceil(rest / cap - 1e-12))
+    gaps = gaps + [rest / m] * m
+    s = np.concatenate([[0.0], np.cumsum(gaps[::-1])])
+    return s / s[-1]
+
+
 def generate_axisym_mesh(wall, prm: Mesh2DParams):
     """wall: NozzleWall。戻り値 (coords (N,3) [m], quads (M,4), 境界辺 dict)。"""
     xs = _x_stations(wall.x_in, wall.x_e, prm.ni, prm.throat_refine, prm.throat_width,
@@ -87,7 +108,14 @@ def generate_axisym_mesh(wall, prm: Mesh2DParams):
     rw = wall.r(xs)
     ni, nj = prm.ni, prm.nj
     X = np.repeat(xs[:, None], nj, axis=1)
-    if prm.wall_first_frac_throat is None:
+    if prm.axis_gap_frac is not None:
+        if prm.wall_first_frac_throat is not None:
+            raise ValueError("axis_gap_frac と wall_first_frac_throat の併用は未対応")
+        s = _radial_fracs_capped(nj, prm.wall_first_frac, prm.axis_gap_frac)
+        nj = len(s)
+        X = np.repeat(xs[:, None], nj, axis=1)
+        R = rw[:, None] * s[None, :]
+    elif prm.wall_first_frac_throat is None:
         s = _radial_fracs(nj, prm.wall_first_frac)
         R = rw[:, None] * s[None, :]
     else:

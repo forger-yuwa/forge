@@ -783,6 +783,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                       wall_first_blend_x1=float(p.mesh.get("wall_first_blend_x1", 6.0)),
                       wall_first_up_x0=(None if p.mesh.get("wall_first_up_x0") is None else float(p.mesh["wall_first_up_x0"])),
                       wall_first_up_x1=(None if p.mesh.get("wall_first_up_x1") is None else float(p.mesh["wall_first_up_x1"])),
+                      axis_gap_frac=(None if p.mesh.get("axis_gap_frac") is None else float(p.mesh["axis_gap_frac"])),
                       scale=scale)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
@@ -880,7 +881,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "nStepOuter": n, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
             "wall_thermal": p.wall_thermal,
             "ic_from": str(ic_from) if ic_from else None,
-            "mesh": {"ni": mp.ni, "nj": mp.nj, "wall_first_frac": mp.wall_first_frac}}
+            "mesh": {"ni": mp.ni, "nj": int(coords.shape[0] // mp.ni), "wall_first_frac": mp.wall_first_frac,
+                     "axis_gap_frac": mp.axis_gap_frac}}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 
