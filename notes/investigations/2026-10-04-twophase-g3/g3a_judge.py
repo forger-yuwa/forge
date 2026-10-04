@@ -29,7 +29,7 @@ solver_density_cuda/cuda_forge/twoPhaseOperatorDiag_d.cuh)。ON = run_0561 の�
   (float atomic は非正規化数を 0 にする; 非正規化数の項の数は別に表示)。B_double = judge 自身の double の積算の上界 (γ⁽⁵³⁾)。
 合格 (1): |E_assembly| ≤ B_assembly (全 Ω・全成分)。記録の網羅 (経路にある kernel が全面・全節点を書いた) が崩れていれば INVALID。
 
-物理の収支 (2): F_c,exit = 出口マーカー (bcond の種別が outlet で始まる) の node 境界半割面の外向き移流流束 (−a0) の和。出口半割面の拡散は 0
+物理の収支 (2): F_c,exit = 出口マーカー (bcond の種別が outlet で始まる、または outflow) の node 境界半割面の外向き移流流束 (−a0) の和。出口半割面の拡散は 0
   (code 2 を確認する)。ΔF_c = |F_c,exit(ON) − F_c,exit(OFF)|。合格 (2): |Σ_Ω R_final| + B_assembly < 0.1·ΔF_c (成分 w, g, Q2, Q1, Q0; v は記録)。
   ΔF_c がその測定誤差以下なら UNDETERMINED。**注意 (plan との差)**: plan §5.1 #4g3 は ΔF を時間平均と新しい流束系列の check_quasisteady から
   作ると定めているが、この 0 step の記録が与えるのは再開スナップショット 1 枚の出口流束だけである。--dF で系列の平均差を、--dF-err で
@@ -226,7 +226,7 @@ class Rec:
     def exit_flux(self, c):
         """出口マーカーの外向き移流流束 (−a0 の和) と拡散 (0 のはず) の確認。"""
         T = self.terms(c)
-        outlet = np.array([k.startswith("outlet") for k in self.bcKinds] + [False])
+        outlet = np.array([k.startswith("outlet") or k == "outflow" for k in self.bcKinds] + [False])
         bsel = np.where(self.bc >= 0, self.bc, len(self.bcKinds))
         sel = outlet[bsel]
         F = float(np.sum(-T["adv_face"][sel & T["adv_ok"]]))
