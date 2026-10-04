@@ -307,7 +307,8 @@ def pspline_uniform(x, v, knot: float, lam: float = 1.0, weights=None, k: int = 
 
 def edge_band_positions(x, y_ladders, d_ladders, d_in, r_w, eps: float = 0.003, c: float = 1.25,
                         window: float = 3.0, knot: float = 6.0, edge_ratio: float = 1.25,
-                        ref_min_frac: float = 0.0133, lam: float = 1.0) -> dict:
+                        ref_min_frac: float = 0.0133, lam: float = 1.0, crossing: str = "quadratic",
+                        hold_lo: float | None = 3.0, hold_hi_from_end: float | None = 3.0) -> dict:
     r"""帯の位置を「境界層の縁の連続推定 → x 方向平滑化 → その c 倍」で決める (band_select="edge"、純関数)。
 
     plan verification-m6-axis-wave-mesh-su2 §5.1 #7a (diagnostician 2026-10-04 推薦 E)。各断面 i で、帯を固定した
@@ -333,12 +334,26 @@ def edge_band_positions(x, y_ladders, d_ladders, d_in, r_w, eps: float = 0.003, 
         j = int(np.argmax(Rabs < 0.0)) if np.any(Rabs < 0.0) else -1
         if j < 0:
             continue
+        L = ly[m]
         if j == 0:
-            y_star[i] = float(np.exp(ly[m][0]))
-        else:
-            a, b = Rabs[j - 1], Rabs[j]
-            t = a / (a - b) if a != b else 0.0
-            y_star[i] = float(np.exp(ly[m][j - 1] + t * (ly[m][j] - ly[m][j - 1])))
+            y_star[i] = float(np.exp(L[0]))
+            continue
+        lin = None
+        a, b = Rabs[j - 1], Rabs[j]
+        t = a / (a - b) if a != b else 0.0
+        lin = L[j - 1] + t * (L[j] - L[j - 1])
+        y_star[i] = float(np.exp(lin))
+        if crossing == "quadratic" and len(L) >= 3:
+            # 隣接 3 点 (交点を挟む 2 点 + もう 1 点) の 2 次フィットの交点 (位相に鈍感にする; diagnostician 2 回目)
+            k0 = j - 1 if j + 1 < len(L) else j - 2
+            k0 = max(k0, 0)
+            pts = slice(k0, k0 + 3)
+            cf = np.polyfit(L[pts] - L[j - 1], Rabs[pts], 2)
+            rts = np.roots(cf)
+            span = L[j] - L[j - 1]
+            ok = [float(np.real(r_)) for r_ in rts if abs(np.imag(r_)) < 1e-12 and -1e-9 <= np.real(r_) <= span + 1e-9]
+            if ok:
+                y_star[i] = float(np.exp(L[j - 1] + min(ok, key=lambda v: abs(v - (lin - L[j - 1])))))
     kappa = np.log(y_star / y_ref)
     med = np.full(n, np.nan)
     fin = np.isfinite(kappa)
@@ -347,6 +362,12 @@ def edge_band_positions(x, y_ladders, d_ladders, d_in, r_w, eps: float = 0.003, 
         if w.sum() >= 3:
             med[i] = float(np.median(kappa[w]))
     ks = pspline_uniform(x, med, knot=knot, lam=lam, weights=np.isfinite(med).astype(float))
+    # 端の値保持 (P-spline の端を無拘束にしない; diagnostician 2 回目)
+    if hold_lo is not None and np.any(x >= hold_lo):
+        ks = np.where(x < hold_lo, float(np.interp(hold_lo, x, ks)), ks)
+    if hold_hi_from_end is not None:
+        xh = float(x.max()) - hold_hi_from_end
+        ks = np.where(x > xh, float(np.interp(xh, x, ks)), ks)
     return dict(y_b=c * y_ref * np.exp(ks), y_star=y_star, kappa=kappa, kappa_med=med, kappa_s=ks, y_ref=y_ref)
 
 
@@ -362,7 +383,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                                       band_smooth_x: float = 0.0, band_select: str = "adaptive",
                                       plateau_tol: float = 0.003, plateau_kmax: int = 9,
                                       edge_eps: float = 0.003, edge_c: float = 1.25, edge_window: float = 3.0,
-                                      edge_knot: float = 6.0, edge_step: float = 1.25 ** 0.25, edge_y0_fac: float = 1.2,
+                                      edge_knot: float = 6.0, edge_step: float = 1.25 ** 0.125, edge_y0_fac: float = 1.2,
                                       edge_min_frac: float = 0.016, edge_ymax_frac: float = 0.5, edge_ref_min_frac: float = 0.0133,
                                       edge_y0_shift: float = 1.0, return_ladders: bool = False) -> dict:
     r"""**固定 Euler 基準・コア整合**の半径方向等価排除厚 $\delta_r(x)$ を NS 全列で抽出する。
@@ -475,7 +496,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
         pos = edge_band_positions(np.array(xs_e), yl, dl, np.array(din_e), np.array(rw_e_l), eps=edge_eps, c=edge_c,
                                   window=edge_window, knot=edge_knot, edge_ratio=1.25, ref_min_frac=edge_ref_min_frac)
         edge = dict(i=ii, x=np.array(xs_e), y_b=pos["y_b"], y_star=pos["y_star"], kappa_s=pos["kappa_s"],
-                    y_ref=pos["y_ref"], ladders_y=yl, ladders_d=dl)
+                    kappa_med=pos["kappa_med"], y_ref=pos["y_ref"], ladders_y=yl, ladders_d=dl)
         edge_map = {i: k for k, i in enumerate(ii)}
 
     def extract_plateau(i):
@@ -609,7 +630,10 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                          ok.astype(int), hard_ok.astype(int)],
                    delimiter=",", comments="",
                    header="x_rt,delta_r_raw,delta_r_smooth,delta_r_use,delta_in,alpha,core_rms_noaxis,delta_r_sens1,delta_r_sens2,band_y_b,band_slope,band_rms,band_deficit_share,ok,hard_ok")
-        diag = {k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in out.items()}
+        if edge is not None:
+            np.savetxt(od / "delta_r_edge.csv", np.c_[edge["x"], edge["y_ref"], edge["y_star"], edge["kappa_med"], edge["kappa_s"], edge["y_b"]],
+                       delimiter=",", comments="", header="x_rt,y_ref,y_star,kappa_med,kappa_s,y_b")
+        diag = {k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in out.items() if k != "edge_detail"}
         (od / "delta_r_equiv_diag.json").write_text(json.dumps(diag))
     return out
 
