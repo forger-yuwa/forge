@@ -1564,8 +1564,9 @@ cudaConfig initializeSimulation(
                  << " condN2LatentLowT=" << cfg.condN2LatentLowT << " condN2PsatLowT=" << cfg.condN2PsatLowT << " condN2LiquidCp=" << cfg.condN2LiquidCp << "\n";
         }
         cfg.condSonicModel = resolved;
-        // 二相拡散 (condTwoPhaseDiffusion, #4e): 定常専用初版。dual-time 等の併用不可は理由を出して終了、対象外の構成は不活性をログに出す。
-        condTwoPhaseDiffusionValidate(cfg);
+        // 二相拡散 (condTwoPhaseDiffusion, #4e): 実効状態 (active / inactive-a / inactive-b / unsupported-c) を判定して cfg に記録し
+        // [twophase] 行を出す。指定 ON + 未対応 (c) は理由を出して終了 (plan condensation-two-phase-default §4-2)。周期は bcond 種別で判定。
+        condTwoPhaseDiffusionValidate(cfg, std::find(kinds.begin(), kinds.end(), std::string("periodic")) != kinds.end());
         // CPG carrier 形 (空気の N2 選択凝縮) の境界受付範囲 (plans/accepted/condensation-air.md §4.1; codex 2026-09-13 M3):
         //   ghost/ピンを単相 EOS で再構成する境界 (wall, wall_isothermal, inlet_Pressure, outflow, periodic 等) は未対応。
         //   出口 outlet_statPress は超音速全量外挿のときだけ整合 (実行時条件) → 後処理 onset_analysis.py --series の u_n/c>1 で確認する。

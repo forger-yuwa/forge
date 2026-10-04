@@ -10,6 +10,9 @@
   - FCT (`passiveFct 1`) が作動しない組み合わせ (SLAU 以外 / SFR < 2 / dual-time でない)
   - 凝縮 dual-time で `passiveScalarScheme 0` (モーメントに BDF 物理時間項が付かない)
   - `speciesFaceReconstruction` ≥ 2 と `speciesImplicitCoupling 0` の組 (定常で発散)
+  - 二相拡散 (`condTwoPhaseDiffusion`) の実効状態 (tools/twophase_state.py; plan condensation-two-phase-default §4-2):
+    指定 ON (明示 1、既定 ON 後は省略も) で未対応 (c) (dual-time 凝縮 NS 等) は FAIL (ソルバが起動を止める)、
+    構造的に適用できない (b) は WARN、既定 ON 後の明示 0 (包絡内) は WARN (旧作用素)。dual-time + Euler は通す
   - solver が読まないキー・**誤った節に書かれたキー** (WARN) と、起動時に拒否されるキー (FAIL)
 
 使い方: check_solver_config.py RUN_DIR|solverConfig.yaml [...]   (VERDICT PASS/WARN/FAIL, exit 0/0/1)
@@ -24,6 +27,34 @@ def load(path):
     p = os.path.join(path, 'solverConfig.yaml') if os.path.isdir(path) else path
     with open(p) as f:
         return p, (yaml.safe_load(f) or {})
+
+
+def load_bcond(cfg_path):
+    """solverConfig.yaml と同じディレクトリの bcondConfig.yaml (周期の判定用)。無ければ / 読めなければ None。"""
+    bp = os.path.join(os.path.dirname(os.path.abspath(cfg_path)), 'bcondConfig.yaml')
+    if not os.path.exists(bp):
+        return None
+    try:
+        import yaml
+        with open(bp) as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return None
+
+
+_TPS = None
+
+
+def _twophase_state():
+    """tools/twophase_state.py (二相拡散の実効状態の判定; ソルバの condTwoPhaseDiffusionClassify と同じ表)。"""
+    global _TPS
+    if _TPS is None:
+        import importlib.util
+        here = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location('twophase_state', os.path.join(here, 'twophase_state.py'))
+        _TPS = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_TPS)
+    return _TPS
 
 
 _SPEC = None
@@ -91,8 +122,8 @@ def unknown_keys(y):
     return fails, warns
 
 
-def check(y):
-    """戻り (fails, warns): それぞれ (キー, 説明) のリスト。"""
+def check(y, bcond=None):
+    """戻り (fails, warns): それぞれ (キー, 説明) のリスト。bcond は bcondConfig.yaml の dict (二相拡散の周期判定; 無ければ非周期)。"""
     fails, warns = [], []
     t = y.get('time', {}) or {}
     dT = t.get('deltaT', {}) or {}
@@ -153,6 +184,19 @@ def check(y):
         if why:
             warns.append(('time.deltaT.passiveFct', '1 だが作動しない: ' + ', '.join(why) + '。起動ログの `[passiveFct] active` で確認'))
 
+    # 二相拡散の実効状態 (plan condensation-two-phase-default §4-2)。ソルバの起動時判定と同じ表で、起動拒否 (c) を投入前に止める。
+    tps = _twophase_state()
+    tp = tps.classify(y, bcond)
+    tpkey = 'condensation.condTwoPhaseDiffusion'
+    if tp['request_on'] and tp['state'] == 'unsupported-c':
+        fails.append((tpkey, f'指定 {tp["requested"]} (既定 {tps.DEFAULT}) だが未対応の構成: {tp["reason"]}。ソルバは起動を止める。'
+                             ' 旧作用素 (液を拡散しない) で回すなら `condTwoPhaseDiffusion: 0` を明示する'))
+    elif tp['request_on'] and tp['state'] == 'inactive-b':
+        warns.append((tpkey, f'指定 {tp["requested"]} だが構造的に適用できない構成 ({tp["reason"]})。不活性 (実効 0) で回り、'
+                             '液は拡散せずエネルギー流束は液を蒸気として数える近似が残る'))
+    elif (not tp['request_on'] and tp['requested'] == '0' and tp['state'] == 'active' and tps.DEFAULT == 1):
+        warns.append((tpkey, '明示 0: 旧作用素 (液を拡散しない; 既定変更前の作用素)。意図的ならよい'))
+
     return fails, warns
 
 
@@ -169,7 +213,7 @@ def main():
             print(f'[{a}] cannot read solverConfig.yaml: {e}')
             bad = True
             continue
-        fails, warns = check(y)
+        fails, warns = check(y, load_bcond(p))
         print(f'--- {os.path.relpath(p)}')
         for k, m in fails:
             print(f'  FAIL {k}: {m}')

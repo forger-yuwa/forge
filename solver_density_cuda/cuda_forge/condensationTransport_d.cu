@@ -713,7 +713,7 @@ void condCorrectionLog_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
 // -----------------------------------------------------------------------------
 // 二相拡散の起動時検査・蒸気残差・非分割更新 (plans/active/condensation-two-phase-transport.md §4.2, §5.1 #4e)
 // -----------------------------------------------------------------------------
-void condTwoPhaseDiffusionValidate(const solverConfig& cfg)
+void condTwoPhaseDiffusionValidate(solverConfig& cfg, bool hasPeriodic)
 {
     if (cfg.condAuditResidual == 1 && cfg.condTwoPhaseDiffusion == 0) {
         if (condResidualAuditActive(cfg))
@@ -721,38 +721,52 @@ void condTwoPhaseDiffusionValidate(const solverConfig& cfg)
         else
             std::printf("[twophase-audit] condAuditResidual 1 is inactive: needs TP carrier condensation (condGasSpecies >= 0, thermalMethod 2, nCondSpecies 1)\n");
     }
-    if (cfg.condTwoPhaseDiffusion == 0) return;
-    auto fail = [](const std::string& why) {
-        std::fprintf(stderr, "Configuration Error: condensation.condTwoPhaseDiffusion 1 %s (plan condensation-two-phase-transport #4e: steady-only first version)\n", why.c_str());
-        std::exit(EXIT_FAILURE);
-    };
-    if (cfg.condensation != 1) { std::printf("[twophase] condTwoPhaseDiffusion 1 is inactive: condensation is off\n"); return; }
-    if (cfg.condGasSpecies < 0 || cfg.thermalMethod != 2 || cfg.nSpecies < 2) {
-        // CPG carrier (condVaporMassFraction) と pure 凝縮は対象外 (§4.2; 液は拡散しない現行のまま)
-        std::printf("[twophase] condTwoPhaseDiffusion 1 is inactive: %s (two-phase diffusion is not supported; liquid is not diffused)\n",
-                    (cfg.condVaporMassFraction > 0.0) ? "CPG carrier" : "not a TP carrier (pure condensible)");
+    // 実効状態の判定表 (plan condensation-two-phase-default §4-2): 指定 (省略 / 明示 0 / 明示 1) × 実効状態。記録は起動行・res_*.h5 属性。
+    std::string why;
+    const TwoPhaseDiffusionState st = condTwoPhaseDiffusionClassify(cfg, hasPeriodic, &why);
+    const bool requestOn = (cfg.condTwoPhaseDiffusion == 1);   // 省略時は既定 (kCondTwoPhaseDiffusionDefault) が入っている
+    const std::string req = (cfg.condTwoPhaseDiffusionGiven == 0)
+        ? "omitted (default " + std::to_string(solverConfig::kCondTwoPhaseDiffusionDefault) + ")"
+        : std::string(requestOn ? "1" : "0");
+    cfg.condTwoPhaseDiffusionState = twoPhaseDiffusionStateName(st);
+    cfg.condTwoPhaseDiffusionEffective = (requestOn && st == TwoPhaseDiffusionState::Active) ? 1 : 0;
+    if (cfg.condensation == 1 || cfg.condTwoPhaseDiffusionGiven != 0)
+        std::printf("[twophase] condTwoPhaseDiffusion requested %s, state %s, effective %d (%s)\n",
+                    req.c_str(), cfg.condTwoPhaseDiffusionState.c_str(), cfg.condTwoPhaseDiffusionEffective, why.c_str());
+    if (!requestOn) {
+        // 明示 0 で包絡内: 旧作用素。既定が ON になってから (S1-c) WARNING にする (既定 0 の間は上の記録行だけ)。
+        if (st == TwoPhaseDiffusionState::Active && cfg.condTwoPhaseDiffusionGiven != 0 && solverConfig::kCondTwoPhaseDiffusionDefault == 1)
+            std::printf("[twophase] WARNING: condTwoPhaseDiffusion 0: legacy operator: liquid not diffused (only total water Y_w is diffused; "
+                        "liquid and moments are advected only)\n");
         return;
     }
-    if (cfg.viscMethod == 0) { std::printf("[twophase] condTwoPhaseDiffusion 1 is inactive: inviscid (viscMethod 0)\n"); return; }
-    if (cfg.unsteady == 1 && cfg.dualTime == 1) fail("cannot be combined with dual-time (unsteady 1, dualTime 1): the coupled FCT of vapour and liquid is not designed yet");
-    if (cfg.unsteady != 0 || cfg.timeIntegration != 11) fail("requires steady implicit pseudo-time (unsteady 0, timeIntegration 11)");
-    if (cfg.speciesImplicitCoupling == 2) fail("cannot be combined with speciesImplicitCoupling 2 (EOS cross coupling commits water before the liquid)");
-    if (cfg.passiveScalarScheme != 1) fail("requires passiveScalarScheme 1 (moments on the passive-scalar path)");
-    if (cfg.condEquilibrium != 0) fail("requires non-equilibrium condensation (condEquilibrium 0)");
-    if (cfg.condLimiterMode != 1) fail("requires condLimiterMode 1 (the source enters the residual without theta)");
-    if (cfg.nCondSpecies != 1) fail("supports one condensing species (nCondSpecies 1)");
+    switch (st) {
+        case TwoPhaseDiffusionState::InactiveA:
+            std::printf("[twophase] INFO: condTwoPhaseDiffusion %s is inactive: %s (no effect; identical physics)\n", req.c_str(), why.c_str());
+            return;
+        case TwoPhaseDiffusionState::InactiveB:
+            std::printf("[twophase] WARNING: condTwoPhaseDiffusion %s is inactive: %s (two-phase diffusion is not applicable; liquid is not diffused "
+                        "and the energy flux counts the liquid as vapour; recorded as effective 0)\n", req.c_str(), why.c_str());
+            return;
+        case TwoPhaseDiffusionState::UnsupportedC:
+            std::fprintf(stderr, "Configuration Error: condensation.condTwoPhaseDiffusion %s %s (plan condensation-two-phase-default §4-2 (c)). "
+                                 "To run the legacy operator (liquid not diffused), set `condTwoPhaseDiffusion: 0` explicitly.\n", req.c_str(), why.c_str());
+            std::exit(EXIT_FAILURE);
+        case TwoPhaseDiffusionState::Active:
+            break;
+    }
     std::printf("[twophase] condTwoPhaseDiffusion 1: gas-phase molecular diffusion (z basis, upwind correction) + common turbulent mixing "
-                "(species, liquid g, Q2/Q1/Q0, energy), unsplit vapour/liquid update with point-diagonal preconditioner, relax %.3g, "
+                "(species, liquid g, Q2/Q1/Q0, energy), unsplit vapour/liquid update, relax %.3g, "
                 "condDgMaxStep %.3g, condDTmaxStep %.3g; residual column rms_roYv = res_roY%d - res_rog_0\n",
                 cfg.condTwoPhaseRelax, cfg.condDgMaxStep, cfg.condDTmaxStep, cfg.condGasSpecies);
     if (cfg.discretization != "node")
         std::printf("[twophase] WARNING: cell discretization is unverified for two-phase diffusion (only the code path was reviewed)\n");
     std::printf("[twophase] condTwoPhaseNonnegLimit %d (%s)\n", cfg.condTwoPhaseNonnegLimit,
-                cfg.condTwoPhaseNonnegLimit == 1 ? "vapour/liquid non-negativity in the common theta" :
-                "theta = threshold limits only; commit floors total water at 0 and liquid is projected to 0 <= rhog <= rhoYw downstream (diagnostic opt-in)");
+                cfg.condTwoPhaseNonnegLimit == 1 ? "vapour/liquid non-negativity in the common theta (diagnostic opt-in)" :
+                "theta = threshold limits only; commit floors total water at 0 and liquid is projected to 0 <= rhog <= rhoYw downstream (verified default)");
     std::printf("[twophase] condTwoPhaseSolver %d (%s); effective implicitRelax %.6g, nStepInner %d, scalarCflMax %.6g (dt_local scale %.6g), condTwoPhaseRelax %.6g\n",
-                cfg.condTwoPhaseSolver, cfg.condTwoPhaseSolver == 1 ? "matched scalar-DPLUR: R = full residuals, D = point-diagonal denominators, advective inflow off-diagonal, zero start"
-                                                                    : "point-diagonal",
+                cfg.condTwoPhaseSolver, cfg.condTwoPhaseSolver == 1 ? "matched scalar-DPLUR: R = full residuals, D = point-diagonal denominators, advective inflow off-diagonal, zero start (verified default)"
+                                                                    : "point-diagonal (diagnostic opt-in)",
                 (double)cfg.implicitRelax, cfg.nStepInner, (double)cfg.scalarCflMax, (double)scalarDtScale(cfg), cfg.condTwoPhaseRelax);
     if (cfg.condTwoPhaseSolver == 0 && (cfg.passiveImplicitCoupling == 1 || cfg.speciesImplicitCoupling == 1))
         std::printf("[twophase] note: vapour, liquid and moments use the point-diagonal preconditioner (passiveImplicitCoupling / speciesImplicitCoupling "

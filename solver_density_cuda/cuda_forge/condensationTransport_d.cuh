@@ -41,13 +41,60 @@ inline CondPropOpts cond_prop_opts(const solverConfig& cfg)
 }
 int          cond_num_species();
 
+// 二相拡散の実効状態 (plans/active/condensation-two-phase-default.md §4-2)。ソルバ・tools/twophase_state.py・res_*.h5 属性・
+// stage_manifest で同じ判定を使う (Python 側を変えたらここも変える)。指定値 (省略 / 0 / 1) は見ない — 構成だけで決まる。
+//   Active       : 包絡内 (TP carrier・非平衡・NS・定常陰解法・nCondSpecies 1・非軸対称・非周期 …)。指定 ON で作動する。
+//   InactiveA    : 物理が同一 (凝縮 OFF・viscMethod 0 で拡散自体が無い)。どの指定でもビット一致。
+//   InactiveB    : モデルが構造的に適用できない (CPG carrier・pure 凝縮・平衡凝縮 EOS 拘束形 condEquilibrium 2)。不活性 + 毎回 WARNING。
+//   UnsupportedC : 実装が未対応 (dual-time・RK/陽解法・speciesImplicitCoupling 2・passiveScalarScheme 0・condEquilibrium 1・
+//                  condLimiterMode 0・nCondSpecies ≥ 2・軸対称・周期)。指定 ON ならエラー終了。
+// 判定順は (a) → (b) → (c) (dual-time + Euler は (a) で通す)。hasPeriodic は bcond に periodic があるか。reason は理由 (英語)。
+enum class TwoPhaseDiffusionState { Active, InactiveA, InactiveB, UnsupportedC };
+inline const char* twoPhaseDiffusionStateName(TwoPhaseDiffusionState st)
+{
+    switch (st) {
+        case TwoPhaseDiffusionState::Active:       return "active";
+        case TwoPhaseDiffusionState::InactiveA:    return "inactive-a";
+        case TwoPhaseDiffusionState::InactiveB:    return "inactive-b";
+        case TwoPhaseDiffusionState::UnsupportedC: return "unsupported-c";
+    }
+    return "unknown";
+}
+inline TwoPhaseDiffusionState condTwoPhaseDiffusionClassify(const solverConfig& cfg, bool hasPeriodic, std::string* reason)
+{
+    using S = TwoPhaseDiffusionState;
+    auto ret = [reason](S st, const char* why) { if (reason != nullptr) *reason = why; return st; };
+    // (a) 物理が同一
+    if (cfg.condensation != 1 || cfg.nCondSpecies < 1) return ret(S::InactiveA, "condensation is off");
+    if (cfg.viscMethod == 0) return ret(S::InactiveA, "inviscid (viscMethod 0): no diffusion at all");
+    // (b) モデルが構造的に適用できない (液は拡散しない現行のまま; 既定経路のエネルギー流束は液を蒸気として数える近似が残る)
+    if (cfg.condGasSpecies < 0 || cfg.thermalMethod != 2 || cfg.nSpecies < 2)
+        return ret(S::InactiveB, (cfg.condVaporMassFraction > 0.0) ? "CPG carrier" : "not a TP carrier (pure condensible)");
+    if (cfg.condEquilibrium == 2)
+        return ret(S::InactiveB, "EOS-constrained equilibrium condensation (condEquilibrium 2; the liquid is an EOS state, rog is not transported)");
+    // (c) 実装が未対応
+    if (cfg.unsteady == 1 && cfg.dualTime == 1)
+        return ret(S::UnsupportedC, "cannot be combined with dual-time (unsteady 1, dualTime 1): the coupled FCT of vapour and liquid is not designed yet");
+    if (cfg.unsteady != 0 || cfg.timeIntegration != 11)
+        return ret(S::UnsupportedC, "requires steady implicit pseudo-time (unsteady 0, timeIntegration 11)");
+    if (cfg.speciesImplicitCoupling == 2)
+        return ret(S::UnsupportedC, "cannot be combined with speciesImplicitCoupling 2 (EOS cross coupling commits water before the liquid)");
+    if (cfg.passiveScalarScheme != 1) return ret(S::UnsupportedC, "requires passiveScalarScheme 1 (moments on the passive-scalar path)");
+    if (cfg.condEquilibrium != 0)
+        return ret(S::UnsupportedC, "requires non-equilibrium condensation (condEquilibrium 0; the relaxation form condEquilibrium 1 is not supported)");
+    if (cfg.condLimiterMode != 1) return ret(S::UnsupportedC, "requires condLimiterMode 1 (the source enters the residual without theta)");
+    if (cfg.nCondSpecies != 1) return ret(S::UnsupportedC, "supports one condensing species (nCondSpecies 1)");
+    if (cfg.isAxisymmetric != 0)
+        return ret(S::UnsupportedC, "is not verified on axisymmetric meshes (no ON Navier-Stokes test yet; plan condensation-two-phase-default #7)");
+    if (hasPeriodic)
+        return ret(S::UnsupportedC, "is not verified with periodic boundaries (no ON Navier-Stokes test yet; plan condensation-two-phase-default #7)");
+    return ret(S::Active, "inside the verified envelope");
+}
 // 二相拡散 (condTwoPhaseDiffusion; plan condensation-two-phase-transport §4.2, #4e) が実際に働く構成か (cfg だけで決まる)。
-// TP carrier の凝縮 (condGasSpecies ≥ 0、多成分 TP) かつ粘性あり。CPG carrier・pure 凝縮・Euler・凝縮 OFF は false (現行経路)。
-// 併用不可の設定 (dual-time 等) は main の起動時検査が拒否する。
+// 指定 ON かつ実効状態が Active。周期境界は cfg から分からないが、指定 ON + 周期は condTwoPhaseDiffusionValidate が起動時に止める。
 inline bool condTwoPhaseDiffusionActive(const solverConfig& cfg)
 {
-    return cfg.condTwoPhaseDiffusion == 1 && cfg.condensation == 1 && cfg.nCondSpecies >= 1 && cfg.thermalMethod == 2
-        && cfg.condGasSpecies >= 0 && cfg.nSpecies >= 2 && cfg.viscMethod != 0;
+    return cfg.condTwoPhaseDiffusion == 1 && condTwoPhaseDiffusionClassify(cfg, false, nullptr) == TwoPhaseDiffusionState::Active;
 }
 // 収束受入の独立残差監査を行う構成か (#4f (4) / #1b-pre (1))。二相拡散が働く run は新作用素、condAuditResidual 1 の
 // TP carrier 凝縮 run (二相拡散 OFF) は旧作用素を監査する。
@@ -57,8 +104,9 @@ inline bool condResidualAuditActive(const solverConfig& cfg)
     return cfg.condAuditResidual == 1 && cfg.condensation == 1 && cfg.nCondSpecies == 1 && cfg.thermalMethod == 2
         && cfg.condGasSpecies >= 0 && cfg.nSpecies >= 2;
 }
-// 二相拡散の起動時検査とログ (main が bcond 読込後に 1 回呼ぶ)。併用不可の設定は理由を出して終了する。
-void condTwoPhaseDiffusionValidate(const solverConfig& cfg);
+// 二相拡散の起動時検査とログ (main が bcond 読込後に 1 回呼ぶ)。実効状態を判定して cfg.condTwoPhaseDiffusionState /
+// condTwoPhaseDiffusionEffective に書き、[twophase] 行を出す。指定 ON + 未対応 (c) は理由を出して終了する。hasPeriodic: bcond に periodic があるか。
+void condTwoPhaseDiffusionValidate(solverConfig& cfg, bool hasPeriodic);
 // 蒸気の残差 res_roYv = res_roY_w − res_rog (監視・residual_history の rms_roYv 列; 周期集約の後に呼ぶ)。
 void twoPhaseVaporResidual_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 // 非分割更新 (定常; 設計メモ §6.1 の vl_limit_commit)。化学種の更新 (水は commit しない) と流れの更新の後、
