@@ -201,6 +201,7 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
   (2026-09-16 case/44 va3 M4.19 node Euler 軸対称 TP 2 種 + 非平衡凝縮 `run_0181`–`0189`: cfl 6/8 + relax 0.7 は乾き一様場からの起動でも安定で場・残差床が cfl 2 と同じ;
   relax 無しの cfl 6 は軸列の EOS 床洗浄で発散 [implicit-cfl-ceiling-eos-floor と同じ機構]、relax 無しの cfl 4 は完走するが残差床が 2〜10 倍高い)。
   定常 precond × 多成分は `speciesPrecondDt: 1` (既定) — **ただしこのキーは化学ブランチ `feature/chemistry-finite-rate` 限定で、main / sern には未マージ** (2026-09-17 確認)。TP 亜音速 `outlet_statPress` の γ 混用は修正済。
+- **二相拡散 `condensation.condTwoPhaseDiffusion` は書かない (既定 0)** — 現行 (2026-10-05)。opt-in の定常専用初版で、既定化は保留・将来課題 (plan [condensation-two-phase-default](../plans/active/condensation-two-phase-default.md) §5.1 #10: ON では蒸発のモーメント式 S_Q1 = q0ṙ が半径 0 の重みを数えて実現可能性の射影と押し合う。この蒸発の限界は既定 OFF の経路にもある、[methods/condensation.md](../methods/condensation.md) 蒸発節)。ON にする run は `condTwoPhaseSolver 1`・`condTwoPhaseNonnegLimit 0` が既定で入る。
 - 凝縮: 平衡凝縮を選ぶなら `condensation: 1, condEquilibrium: 2` (EOS 拘束形、厳密 S=1) を推奨 (設定既定値は 0 = 非平衡)。蒸発は既定 ON。
 - 凝縮 (2026-09-15, plan [condensation-source-limiter-steady](../plans/accepted/condensation-source-limiter-steady.md)): 非平衡の θ 律速は
   **`condLimiterMode: 1` (既定) で更新クランプ**になり、ソース残差の明示的な Δτ 依存 (θ×Δτ_loc) を除去した (旧 0 は残差に θ を掛け、大型ノズルで成長を 1/4 に絞っていた; case/44 で cfl 2 の解が旧 cfl 0.5 と一致)。cfl 間の固定点一致の検証状況は plan condensation-source-limiter-steady §9。
@@ -352,6 +353,7 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 
 ## 変更ログ
 
+- `2026-10-05` — §3 に二相拡散 (`condTwoPhaseDiffusion` 既定 0・将来課題) を追記。
 - `2026-10-01` — §3 に LJ の出典 `physProp.ljSource` (既定 `[gri30, svehla1962]`、旧 run の再現は `[legacy_v1]`) を追加、§9 に旧既定 (plan [thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §4.10 #14)。
 - `2026-09-25` — §1.0a に `space.slauWallNormalChi` の適用規則 (3D 側壁接続のみ 1、新構成は診断可能性の検査 + 3 条件) を追加 (plan [convection-slau-wall-normal-chi-usage-rule](../plans/accepted/convection-slau-wall-normal-chi-usage-rule.md))。
 - `2026-09-22` — §2.1 遷移モデル (γ–Re_θt, `turbulence.transition: lm2009`) のレシピを追加 (plan [turbulence-transition-lm2009](../plans/active/turbulence-transition-lm2009.md))。
