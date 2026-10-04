@@ -33,7 +33,7 @@ from ..metrics.deltastar import deltastar_from_core_matched_euler, massflow_rati
 
 
 def extract_and_merge(prev_run, euler_run, omega: float = 0.5, smooth_lam: float = 1.0,
-                      knot_spacing: float = 2.0, out_dir=None, **kw) -> dict:
+                      knot_spacing: float = 2.0, out_dir=None, max_lam_factor: float | None = None, **kw) -> dict:
     """前 pass の NS run から抽出し、次 pass の入力 δ_r(x) を作る。
     出力 (out_dir、既定 prev_run): delta_r_equiv.csv / delta_r_equiv_diag.json / delta_r_next.csv / delta_r_extract_summary.json。
     out_dir は同じ場から別設定 (例 band_select) で抽出するとき互いに上書きしないために使う。"""
@@ -71,6 +71,10 @@ def extract_and_merge(prev_run, euler_run, omega: float = 0.5, smooth_lam: float
             lam_used = lam; break
     else:
         lam_used = f"{lam} (still non-monotone)"
+    # 単調性ガードの λ 昇格に上限 (2026-10-04, diagnostician): 昇格しすぎた平滑化は抽出値を追わない壁になるので pass を失敗にする
+    if max_lam_factor is not None and (not isinstance(lam_used, float) and not isinstance(lam_used, int)
+                                       or lam_used > smooth_lam * max_lam_factor):
+        raise RuntimeError(f"extract_and_merge: 単調性ガードで λ が {lam_used} まで上がった (上限 smooth_lam×{max_lam_factor})")
     d_use = d_ext                                   # 以降の帳簿は平滑化後の抽出値で取る
     held = ~np.isfinite(d["delta_r_use"])
     np.savetxt(od / "delta_r_next.csv", np.c_[d["x"], d_next, d_in, d_use, held.astype(int)],
