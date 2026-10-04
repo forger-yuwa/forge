@@ -296,7 +296,8 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                                       band_min_frac: float = 0.02, band_width: float = 0.5,
                                       gate_band_rms: float = 0.005, slope_max: float = 0.01,
                                       band_growth: float = 1.25, max_retry: int = 14, fit_from: float = 1.0,
-                                      band_smooth_x: float = 0.0) -> dict:
+                                      band_smooth_x: float = 0.0, band_select: str = "adaptive",
+                                      plateau_tol: float = 0.003, plateau_kmax: int = 9) -> dict:
     r"""**固定 Euler 基準・コア整合**の半径方向等価排除厚 $\delta_r(x)$ を NS 全列で抽出する。
 
     定義 (plan §4.2–4.4):
@@ -308,6 +309,15 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     - 符号付き欠損 $D = 2\pi\int_0^{r_{w,NS}}(q_{ref}-q_{NS})\,r\,dr$ (クリップなし)。
       $2\pi\int_{r_{eff}}^{r_{w,NS}} q_{ref}\,r\,dr = D$ の根から $\delta_r = r_{w,NS}-r_{eff}$。
     - ゲート (診断; 値は捨てない): コア相対 RMS、コア範囲感度、$D<0$、根なし、欠損のコア分布。
+
+    帯の選び方 `band_select` (method="band" のみ):
+
+    - "adaptive" (既定): `band_local_deficit` の自動選択 (帯内比の変化・残留欠損で 1.25 倍ずつ広げる)。
+    - "plateau" (2026-10-04, plan verification-m6-axis-wave-mesh-su2 §4.4): 帯を
+      $y_{b,k}=\max(k_{band}\delta_{in}, f_{min} r_w)\,g^k$ ($k=0..$plateau_kmax) と外へ並べて各 k で δ_r を測り、
+      **連続 2 段の相対変化がともに plateau_tol 未満になった最初の k** の中央 δ_r,k+1 を採る (感度は δ_r,k / δ_r,k+2)。
+      見つからなければ `no_plateau` (hard、前回値保持)。adaptive は帯の比の形で止めるので、境界層の縁にかかった帯を
+      通してしまい x 方向に 1.25 倍刻みで跳ぶ (case/45 x≈20 で δ_r −1.8 %)。plateau は「答えが帯の位置に依存しなくなったか」で止める。
 
     戻り値: dict of arrays (x, r_wall_euler, r_wall_ns, delta_in, alpha, core_rms, core_rms_noaxis,
     core_maxdev, mass_deficit, delta_r_raw, delta_r_smooth, delta_r_sens (n,2), ok, reason) と mdot 帳簿。
@@ -368,8 +378,50 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
             if w.sum() >= 3:
                 sm[i] = np.median(lyb[w])
         yb_fixed = np.exp(sm)
+    if band_select not in ("adaptive", "plateau"):
+        raise ValueError(f"band_select={band_select!r} は 'adaptive' か 'plateau'")
+    if band_select == "plateau" and (method != "band" or band_smooth_x > 0):
+        raise ValueError("band_select='plateau' は method='band' かつ band_smooth_x=0 でのみ使える")
+
+    def extract_plateau(i):
+        x = float(N["x"][i, 0])
+        if x < xE[0] - 1e-9 or x > xE[-1] + 1e-9:
+            return None
+        _, rwE = euler_q_at(x, N["r"][i][:1])
+        rwN = float(N["r"][i][-1]); d_in = rwN - float(rwE)
+        y0 = max(k_band * max(d_in, 0.0), band_min_frac * rwN)
+        lad, res_k = [], []
+        for k in range(plateau_kmax + 1):
+            rk = extract_one(i, main_par, y_b_fixed=y0 * band_growth ** k)
+            res_k.append(rk)
+            lad.append(rk["delta_r"] if (rk is not None and np.isfinite(rk["delta_r"])) else np.nan)
+        lad = np.array(lad)
+        for k in range(len(lad) - 2):
+            v = lad[k:k + 3]
+            if np.all(np.isfinite(v)) and v[0] > 0 and abs(v[1] / v[0] - 1) < plateau_tol and abs(v[2] / v[1] - 1) < plateau_tol:
+                res = dict(res_k[k + 1]); res["band_retry"] = k + 1
+                return res, [float(v[0]), float(v[2])]
+        # プラトー無し: 中央段の値を入れ、hard 不合格として前回値を保持させる
+        fin = [kk for kk in range(len(lad)) if np.isfinite(lad[kk]) and res_k[kk] is not None]
+        if not fin:
+            return None
+        k = min(fin, key=lambda kk: abs(kk - len(lad) // 2))
+        base = dict(res_k[k])
+        if base is None:
+            return None
+        base["reason"] = list(base["reason"]) + ["no_plateau"]
+        return base, [np.nan, np.nan]
+
     rows = []
     for i in range(N["x"].shape[0]):
+        if band_select == "plateau":
+            got = extract_plateau(i)
+            if got is None:
+                continue
+            base, sens_v = got
+            base["delta_r_sens"] = sens_v
+            rows.append(base)
+            continue
         if yb_fixed is not None and np.isfinite(yb_fixed[i]):
             base = extract_one(i, main_par, y_b_fixed=float(yb_fixed[i]))
             sens = [extract_one(i, main_par, y_b_fixed=float(yb_fixed[i]) * f) for f in (0.8, 1.25)]
@@ -384,7 +436,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     draw = np.array([r_["delta_r"] for r_ in rows])
     sens = np.array([r_["delta_r_sens"] for r_ in rows])
     # negative_deficit は 2026-09-12 から soft (符号付き δ_r を採用: 冷却壁では物理)。hard は根なし/NaN のみ
-    HARD = ("no_root", "nan")
+    HARD = ("no_root", "nan", "no_plateau")
     ok = np.ones(len(rows), bool); hard_ok = np.ones(len(rows), bool); reasons = []
     for k, r_ in enumerate(rows):
         rs = list(r_["reason"])
@@ -425,7 +477,8 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                ok=ok, hard_ok=hard_ok, reason=np.array(reasons),
                settings=dict(method=method, k_band=k_band, k_band_sens=list(k_band_sens), band_min_frac=band_min_frac,
                              band_width=band_width, slope_max=slope_max, band_growth=band_growth, max_retry=max_retry, fit_from=fit_from,
-                             band_smooth_x=band_smooth_x,
+                             band_smooth_x=band_smooth_x, band_select=band_select,
+                             plateau_tol=plateau_tol, plateau_kmax=plateau_kmax,
                              gate_band_rms=gate_band_rms,
                              core_frac=core_frac, core_frac_sens=list(core_frac_sens), n_axis_skip=n_axis_skip,
                              outer_frac=outer_frac, smooth_lam=smooth_lam, gate_core_rms=gate_core_rms,

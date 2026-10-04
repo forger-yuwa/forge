@@ -33,11 +33,14 @@ from ..metrics.deltastar import deltastar_from_core_matched_euler, massflow_rati
 
 
 def extract_and_merge(prev_run, euler_run, omega: float = 0.5, smooth_lam: float = 1.0,
-                      knot_spacing: float = 2.0, **kw) -> dict:
+                      knot_spacing: float = 2.0, out_dir=None, **kw) -> dict:
     """前 pass の NS run から抽出し、次 pass の入力 δ_r(x) を作る。
-    出力 (prev_run 内): delta_r_equiv.csv / delta_r_equiv_diag.json / delta_r_next.csv。"""
+    出力 (out_dir、既定 prev_run): delta_r_equiv.csv / delta_r_equiv_diag.json / delta_r_next.csv / delta_r_extract_summary.json。
+    out_dir は同じ場から別設定 (例 band_select) で抽出するとき互いに上書きしないために使う。"""
     prev_run = Path(prev_run)
-    d = deltastar_from_core_matched_euler(prev_run, euler_run, out_dir=prev_run, **kw)
+    od = Path(out_dir) if out_dir is not None else prev_run
+    od.mkdir(parents=True, exist_ok=True)
+    d = deltastar_from_core_matched_euler(prev_run, euler_run, out_dir=od, **kw)
     d_in = d["delta_in"]
     d_use = d["delta_r_use"]
     held = ~np.isfinite(d_use)
@@ -70,7 +73,7 @@ def extract_and_merge(prev_run, euler_run, omega: float = 0.5, smooth_lam: float
         lam_used = f"{lam} (still non-monotone)"
     d_use = d_ext                                   # 以降の帳簿は平滑化後の抽出値で取る
     held = ~np.isfinite(d["delta_r_use"])
-    np.savetxt(prev_run / "delta_r_next.csv", np.c_[d["x"], d_next, d_in, d_use, held.astype(int)],
+    np.savetxt(od / "delta_r_next.csv", np.c_[d["x"], d_next, d_in, d_use, held.astype(int)],
                delimiter=",", comments="",
                header=f"x_rt,delta_r,delta_in_prev,delta_r_use_smoothed,held (omega={omega}; quintic P-spline knot={knot_spacing} lam={lam_used}; resid_rel_rms={diag['resid_rel_rms']:.4f})")
     fin = np.isfinite(d_use) & (d_in > 1e-4)
@@ -84,7 +87,7 @@ def extract_and_merge(prev_run, euler_run, omega: float = 0.5, smooth_lam: float
                "massflow": d["massflow"],
                "delta_r_throat_use": float(np.interp(0.0, d["x"], np.where(np.isfinite(d_use), d_use, d_in))),
                "delta_r_throat_in": float(np.interp(0.0, d["x"], d_in))}
-    (prev_run / "delta_r_extract_summary.json").write_text(json.dumps(summary, indent=1))
+    (od / "delta_r_extract_summary.json").write_text(json.dumps(summary, indent=1))
     return summary
 
 
