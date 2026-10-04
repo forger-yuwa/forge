@@ -2924,6 +2924,17 @@ static int runTpUpdateDiag(const char* path, solverConfig& cfg, cudaConfig& cuda
         for (int c = 0; c < TPU_NC; ++c)
             for (int x = 0; x < TPU_NX; ++x) slotNames[TPU_XS(ci, c, x)] = std::string(tpuOpName(commitOp[ci])) + "/" + tpuCompName(c) + "/" + tpuXName(x);
     slotNames[TPU_RN_FACTOR] = "RN_factor";
+    {   // 診断 #4pj: 二相 DPLUR の分母 (本番 / sweep が使った値) と射影が使う T・ρ_l・Q3・分岐
+        const char* rowName[5] = {"v", "g", "Q2", "Q1", "Q0"};
+        for (int q = 0; q < 5; ++q) {
+            slotNames[TPU_DIAG(q, 0)] = std::string("DPLUR_denom/") + rowName[q] + "/production";
+            slotNames[TPU_DIAG(q, 1)] = std::string("DPLUR_denom/") + rowName[q] + "/used";
+        }
+        slotNames[TPU_RZ_T] = "RZP_input/T";
+        slotNames[TPU_RZ_RHOL] = "RZP_input/rho_l";
+        slotNames[TPU_RZ_Q3] = "RZP_input/Q3";
+        slotNames[TPU_RZ_KIND] = "RZP_input/kind";
+    }
 
     // 写しの照合 (要約): post_end と upd_start は一致するはず、更新全体の Σ V Δq と Σ V C_round (commit ごと) を出す
     std::vector<float> vol = d2hReal("volume");
@@ -3000,6 +3011,17 @@ static int runTpUpdateDiag(const char* path, solverConfig& cfg, cudaConfig& cuda
             std::string("delta_f_unfused is a non-fused float evaluation for reference only; the production expression (e.g. rg + Th*dg) may be ")
             + "contracted to FMA, so no separately rounded float increment exists; delta_d (exact products of the float operands in double) is the budget term");
         h5.createAttribute("summary", summary);
+        // 診断 #4pj: 分母の共通化 (B) の有無と、追加スロットの意味
+        h5.createAttribute("common_diag", d.commonDiag);
+        h5.createAttribute("note_common_diag",
+            std::string("common_diag 1 (FORGE_DIAG_TP_COMMON_DIAG=1): in the two-phase DPLUR (tp_dplur_prep_d) the denominators of g, Q2, Q1, Q0 ")
+            + "were replaced by the per-node max(D_g, D_Q2, D_Q1, D_Q0); DPLUR_denom/<row>/production = tp_denoms, /used = what the sweep used "
+            + "(rows: v vapour, g, Q2, Q1, Q0; equal when common_diag 0). NaN = DPLUR path not taken");
+        h5.createAttribute("note_rzp_input",
+            std::string("RZP_input/*: written by the float realizability clamp for every node: T, rho_l = cond_rho_cond(T) (same as the projection), ")
+            + "Q3 = rhog/((4/3) pi rho_l) with rhog after the lower/upper clamp; kind: -1 projection branch not entered (rhoQ0 <= 0 or rhog <= 0; "
+            + "g = 0 dust is left to droplet removal), 0 unchanged, 1 nearest-point projection, 2 degenerate monodisperse re-init, "
+            + "3 Q3 not representable -> Q1 = Q2 = 0. The update buffer holds the clamp inside the one update; the pre buffer the assembly pre-part");
     }
     for (const auto& l : summary) printf("%s\n", l.c_str());
     printf("[tp-update] snapshots:");
@@ -3013,6 +3035,16 @@ int main(int argc, char** argv) {
     // --resolve-species: 化学種の解決済み記録だけ書いて終了 (GPU 不使用; plan thermophysics-solver-owned-species-db §4.3)
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--resolve-species") return resolveSpeciesOnly();
+    }
+    // 診断 #4pj (FORGE_DIAG_TP_COMMON_DIAG=1; 既定 off): 分母の共通化は FORGE_DIAG_TP_UPDATE の 1 更新の中だけで使う診断。
+    // 本番の計算に混ざらないよう、単独で立っていたら計算を始めずに拒否する。
+    if (const char* e = getenv("FORGE_DIAG_TP_COMMON_DIAG"); e != nullptr && *e != '\0' && std::strcmp(e, "0") != 0) {
+        const char* u = getenv("FORGE_DIAG_TP_UPDATE");
+        if (u == nullptr || *u == '\0') {
+            fprintf(stderr, "[tp-update] refused: FORGE_DIAG_TP_COMMON_DIAG=%s is a diagnostic for FORGE_DIAG_TP_UPDATE only "
+                            "(plan condensation-two-phase-default #4pj); unset it for production runs\n", e);
+            return EXIT_FAILURE;
+        }
     }
     RuntimeProfiler profiler;
 

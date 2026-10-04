@@ -39,7 +39,19 @@ enum TpuX { TPU_X_DELTA_D = 0, TPU_X_DELTA_F, TPU_X_CAND_F, TPU_X_CAND_D, TPU_X_
 #define TPU_BA(op, c, k) ((((op)*TPU_NC + (c))*2) + (k))          // k: 0 before, 1 after
 #define TPU_XS(ci, c, x) (TPU_NBA + (((ci)*TPU_NC + (c))*TPU_NX) + (x))   // ci: 0 SPC, 1 TPC, 2 CMC
 #define TPU_RN_FACTOR (TPU_NBA + 3*TPU_NC*TPU_NX)                // 再正規化の係数 ρ/ΣρY (double)
-#define TPU_NSLOT (TPU_RN_FACTOR + 1)
+// 診断 #4pj (射影の打ち消しの判別 A/B; plan condensation-two-phase-default §5.1 #4pj):
+//   二相 DPLUR の分母 (tp_dplur_prep_d)。行 q: 0 = 蒸気, 1 = 液 ρg, 2 = ρQ2, 3 = ρQ1, 4 = ρQ0。k: 0 = 本番の分母 (tp_denoms)、
+//   1 = sweep が実際に使った分母 (FORGE_DIAG_TP_COMMON_DIAG=1 のときだけ液・Q の行が節点ごとの max(D_g, D_Q2, D_Q1, D_Q0) に置き換わる)。
+#define TPU_DIAG_BASE (TPU_RN_FACTOR + 1)
+#define TPU_DIAG(q, k) (TPU_DIAG_BASE + (q)*2 + (k))
+//   実現可能性クランプ (float 実体) の射影が使う量: T、ρ_l(T) (射影と同じ cond_rho_cond)、Q3 = ρg/((4/3)π ρ_l) (ρg は下限・上限の後)、
+//   射影の分岐 kind: −1 = 分岐外 (ρQ0 ≤ 0 または ρg ≤ 0; g = 0 の塵は後段の消滅処理)、0 = 変更なし、1 = 最近点射影、
+//   2 = 退化の単分散再初期化、3 = Q3 が表現できず (x, y を作れず) Q1 = Q2 = 0 にする枝。
+#define TPU_RZ_T      (TPU_DIAG_BASE + 2*(2 + 3))
+#define TPU_RZ_RHOL   (TPU_RZ_T + 1)
+#define TPU_RZ_Q3     (TPU_RZ_T + 2)
+#define TPU_RZ_KIND   (TPU_RZ_T + 3)
+#define TPU_NSLOT     (TPU_RZ_T + 4)
 
 static inline const char* tpuOpName(int op)
 {

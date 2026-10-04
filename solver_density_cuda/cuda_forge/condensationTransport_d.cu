@@ -18,6 +18,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>   // std::strcmp (診断 #4pj の環境変数)
 #include <string>
 #include <vector>
 
@@ -887,7 +888,8 @@ namespace {
 __global__ void tp_dplur_prep_d(geom_int nCells, geom_int nAll, flow_float* dt_local, flow_float dtScale, geom_float* vol,
     flow_float* res_w, flow_float* res_g, flow_float* res_Q2, flow_float* res_Q1, flow_float* res_Q0,
     flow_float* td_w, flow_float* td_g, flow_float* td_Q2, flow_float* td_Q1, flow_float* td_Q0,
-    flow_float* sj_g, flow_float* sj_Q2, flow_float* sj_Q1, flow_float* sj_Q0, flow_float* R, flow_float* D)
+    flow_float* sj_g, flow_float* sj_Q2, flow_float* sj_Q1, flow_float* sj_Q0, flow_float* R, flow_float* D,
+    int commonDiag, double* tpu)   // 診断 #4pj (既定 0 / nullptr): 液・Q の分母の共通化 (FORGE_DIAG_TP_COMMON_DIAG) と分母の記録
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -898,6 +900,13 @@ __global__ void tp_dplur_prep_d(geom_int nCells, geom_int nAll, flow_float* dt_l
     c.Dv = td_w[ic]; c.Dg = td_g[ic]; c.DQ[0] = td_Q2[ic]; c.DQ[1] = td_Q1[ic]; c.DQ[2] = td_Q0[ic];
     c.sjg = sj_g[ic]; c.sjQ[0] = sj_Q2[ic]; c.sjQ[1] = sj_Q1[ic]; c.sjQ[2] = sj_Q0[ic];
     float Dd[2 + TP_NQ]; tp_denoms(c, Dd);
+    if (tpu != nullptr) for (int q = 0; q < 2 + TP_NQ; ++q) tpu_put(tpu, TPU_DIAG(q, 0), nCells, ic, (double)Dd[q]);
+    if (commonDiag != 0) {   // 診断 #4pj の B: 液・Q2・Q1・Q0 の分母を節点ごとの max に共通化 (蒸気の分母・残差・sweep・緩和・θ・射影は不変)
+        float Dm = Dd[1];
+        for (int q = 2; q < 2 + TP_NQ; ++q) Dm = tp_max<float>(Dm, Dd[q]);
+        for (int q = 1; q < 2 + TP_NQ; ++q) Dd[q] = Dm;
+    }
+    if (tpu != nullptr) for (int q = 0; q < 2 + TP_NQ; ++q) tpu_put(tpu, TPU_DIAG(q, 1), nCells, ic, (double)Dd[q]);
     const size_t n = (size_t)nAll;
     R[0*n + ic] = res_w[ic] - res_g[ic];   // 全残差変換 (更新カーネルと同じ float の減算)
     R[1*n + ic] = res_g[ic]; R[2*n + ic] = res_Q2[ic]; R[3*n + ic] = res_Q1[ic]; R[4*n + ic] = res_Q0[ic];
@@ -950,7 +959,8 @@ static const flow_float* twoPhaseDPLURIncrement(solverConfig& cfg, cudaConfig& c
         var.c_d["res_"+w], var.c_d["res_rog_0"], var.c_d["res_roQ2_0"], var.c_d["res_roQ1_0"], var.c_d["res_roQ0_0"],
         var.c_d["transport_diag_Y" + std::to_string(cfg.condGasSpecies)], var.c_d["transport_diag_g_0"], var.c_d["transport_diag_Q2_0"],
         var.c_d["transport_diag_Q1_0"], var.c_d["transport_diag_Q0_0"],
-        var.c_d["src_jac_g_0"], var.c_d["src_jac_Q2_0"], var.c_d["src_jac_Q1_0"], var.c_d["src_jac_Q0_0"], g_tpdp_R, g_tpdp_D);
+        var.c_d["src_jac_g_0"], var.c_d["src_jac_Q2_0"], var.c_d["src_jac_Q1_0"], var.c_d["src_jac_Q0_0"], g_tpdp_R, g_tpdp_D,
+        tpuCommonDiag() ? 1 : 0, tpuSlots());   // 診断 #4pj (通常の計算では 0 / nullptr)
     gpuErrchk( cudaMemset(g_tpdp_a, 0, bytes) ); gpuErrchk( cudaMemset(g_tpdp_b, 0, bytes) );
     flow_float* pin = (cfg.discretization == "node") ? var.c_d["scalarDirichletPin"] : nullptr;
     flow_float* roRef = var.c_d["roN"];   // 定常 (dual-time は起動時に拒否)
@@ -1490,6 +1500,7 @@ void twoPhaseDiagWrite(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, varia
 namespace {
 struct TpuState {
     bool on = false; int phase = 0; geom_int n = 0; int iw = -1;
+    bool commonDiag = false;         // 診断 #4pj の B (FORGE_DIAG_TP_COMMON_DIAG=1): 二相 DPLUR の液・Q の分母を共通化
     double* buf[2] = {nullptr, nullptr};
     variables* var = nullptr;
     std::vector<std::string> comp;   // 成分の保存量名 (roY<iw>, rog_0, roQ2_0, roQ1_0, roQ0_0)
@@ -1510,7 +1521,13 @@ bool tpuBegin(solverConfig& cfg, mesh& msh, variables& var, std::string& why)
     if (cfg.condEquilibrium != 0 || cfg.condLimiterMode != 1) { why = "non-equilibrium condensation with condLimiterMode 1 only"; return false; }
     if (cfg.condFloat == 0 || !g_condTables.valid) { why = "condFloat 1 with valid tables only (the float realizability clamp is instrumented)"; return false; }
     if (!condTwoPhaseDiffusionActive(cfg) && cfg.passiveImplicitCoupling != 1) { why = "OFF arm requires passiveImplicitCoupling 1 (the DPLUR moment increment)"; return false; }
+    // 診断 #4pj: 分母の共通化 (B) は二相 ON の DPLUR 経路 (condTwoPhaseSolver 1) だけ (それ以外は置き換える分母が無いので拒否)
+    const bool commonDiag = tpuCommonDiagRequested();
+    if (commonDiag && !(condTwoPhaseDiffusionActive(cfg) && cfg.condTwoPhaseSolver == 1)) {
+        why = "FORGE_DIAG_TP_COMMON_DIAG requires the two-phase ON path with condTwoPhaseSolver 1 (the DPLUR denominators it replaces)"; return false;
+    }
     g_tpu = TpuState{};
+    g_tpu.commonDiag = commonDiag;
     g_tpu.n = msh.nCells; g_tpu.iw = cfg.condGasSpecies; g_tpu.var = &var;
     g_tpu.comp = {"roY" + std::to_string(cfg.condGasSpecies), "rog_0", "roQ2_0", "roQ1_0", "roQ0_0"};
     for (const auto& k : g_tpu.comp) {
@@ -1523,11 +1540,23 @@ bool tpuBegin(solverConfig& cfg, mesh& msh, variables& var, std::string& why)
         gpuErrchk( cudaMemset(g_tpu.buf[b], 0xFF, bytes) );   // 全ビット 1 = NaN (書かれないスロットはその操作が経路に無い)
     }
     g_tpu.on = true;
+    if (commonDiag)
+        std::printf("[tp-update] FORGE_DIAG_TP_COMMON_DIAG=1 (diagnostic B): two-phase DPLUR denominators of liquid g, Q2, Q1, Q0 replaced by the "
+                    "per-node max(D_g, D_Q2, D_Q1, D_Q0); vapour denominator, residuals, sweeps, relaxation, theta and projection unchanged\n");
     std::printf("[tp-update] slots: %d per node x %ld nodes x 2 buffers (%.1f MB)\n", TPU_NSLOT, (long)g_tpu.n, 2.0*(double)bytes/1.0e6);
     return true;
 }
 
 void tpuArm(int phase) { g_tpu.phase = g_tpu.on ? phase : 0; }
+
+bool tpuCommonDiagRequested()
+{
+    const char* e = std::getenv("FORGE_DIAG_TP_COMMON_DIAG");
+    return e != nullptr && *e != '\0' && std::strcmp(e, "0") != 0;
+}
+
+// 更新の記録中 (phase 2) だけ真。tpuBegin を通らない通常の計算では常に偽 (環境変数が立っていても分母は本番のまま)。
+bool tpuCommonDiag() { return g_tpu.on && g_tpu.commonDiag && g_tpu.phase == 2; }
 
 double* tpuSlots() { return (g_tpu.on && g_tpu.phase > 0) ? g_tpu.buf[g_tpu.phase - 1] : nullptr; }
 
@@ -1547,7 +1576,7 @@ bool tpuCollect(TpuDiagData& out)
     if (!g_tpu.on) return false;
     gpuErrchk( cudaDeviceSynchronize() );
     const size_t cnt = (size_t)TPU_NSLOT*(size_t)g_tpu.n;
-    out.n = (long)g_tpu.n; out.iw = g_tpu.iw;
+    out.n = (long)g_tpu.n; out.iw = g_tpu.iw; out.commonDiag = g_tpu.commonDiag ? 1 : 0;
     out.pre.resize(cnt); out.upd.resize(cnt);
     gpuErrchk( cudaMemcpy(out.pre.data(), g_tpu.buf[0], cnt*sizeof(double), cudaMemcpyDeviceToHost) );
     gpuErrchk( cudaMemcpy(out.upd.data(), g_tpu.buf[1], cnt*sizeof(double), cudaMemcpyDeviceToHost) );

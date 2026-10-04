@@ -139,6 +139,7 @@ void condThetaScan_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh,
 struct TpuDiagData {
     long n = 0;                                      // 実節点数 (msh.nCells)
     int iw = -1;                                     // 総水分の化学種 index
+    int commonDiag = 0;                              // 診断 #4pj の B (FORGE_DIAG_TP_COMMON_DIAG=1) で記録したか
     std::vector<double> pre, upd;                    // [TPU_NSLOT][n] (前処理 / 更新)
     std::vector<std::string> snapLabel;              // 写しの名前 (起きた順)
     std::vector<int> snapPhase;                      // 写しを取ったときの phase (1 前処理 / 2 更新)
@@ -149,6 +150,12 @@ void    tpuArm(int phase);
 double* tpuSlots();
 void    tpuSnap(const char* label);
 bool    tpuCollect(TpuDiagData& out);
+// 診断 #4pj (plan condensation-two-phase-default §5.1 #4pj; FORGE_DIAG_TP_COMMON_DIAG=1, 既定 off): 射影の打ち消しの判別 A/B の B。
+//   FORGE_DIAG_TP_UPDATE と併用したときだけ有効 (main が単独指定を拒否し、tpuBegin が二相 ON・condTwoPhaseSolver 1 以外を拒否する)。
+//   tpuCommonDiagRequested: 環境変数が立っているか (空・"0" は off)。
+//   tpuCommonDiag: 更新の記録中 (tpuArm(2)) かつ B が要求されたときだけ真 → tp_dplur_prep_d が液・Q の分母を節点ごとの max に置き換える。
+bool    tpuCommonDiagRequested();
+bool    tpuCommonDiag();
 
 // 原始量 φ = ρφ/ρ を全セル (ghost 含む) について更新する。スカラ移流の上流値に使う。
 void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);

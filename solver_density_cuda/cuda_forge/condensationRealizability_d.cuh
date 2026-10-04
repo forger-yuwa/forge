@@ -254,6 +254,7 @@ __global__ void cond_realizability_clamp_f_d(
         if (dq1 != 0.0) atomicAdd(&tcAcc[2*6 + 4], dq1*tcV);
         if (dq0 != 0.0) atomicAdd(&tcAcc[2*6 + 5], dq0*tcV);
     }
+    int tpu_kind = -1;   // 診断 #4pj (記録のみ): 射影の分岐 (TPU_RZ_KIND の定義)
     {   // 実現可能性の射影 (double 実体と同じ規則; ρ_l は表 [範囲外は double 関数]; 射影は double で評価)
         const float q0 = roQ0[ic];
         if (q0 > 0.0f && r > 0.0f) {
@@ -275,7 +276,15 @@ __global__ void cond_realizability_clamp_f_d(
                 roQ1[ic] = (float)q1n; roQ2[ic] = (float)q2n;
                 if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
             }
+            tpu_kind = (doProject != 0 && !haveXY) ? 3 : kind;
         }
+    }
+    if (tpu != nullptr) {   // 診断 #4pj: 射影が使う T・ρ_l(T)・Q3 (射影と同じ式を読むだけ; 分岐外の節点も同じ式で書く)
+        const double tpu_rhol = cond_rho_cond(cpd, (double)T[ic]);
+        tpu_put(tpu, TPU_RZ_T, nCells, ic, (double)T[ic]);
+        tpu_put(tpu, TPU_RZ_RHOL, nCells, ic, tpu_rhol);
+        tpu_put(tpu, TPU_RZ_Q3, nCells, ic, (double)r / ((4.0/3.0)*COND_PI*tpu_rhol));
+        tpu_put(tpu, TPU_RZ_KIND, nCells, ic, (double)tpu_kind);
     }
     cond_reason_proj(rs, Vr, (double)q1_pre, (double)q2_pre, (double)roQ1[ic], (double)roQ2[ic]);
     if (tcOn) {   // 段 3: モーメント射影
