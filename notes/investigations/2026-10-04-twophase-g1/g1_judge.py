@@ -67,6 +67,7 @@ def verdict_line(tag, v, detail):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("h5")
+    ap.add_argument("--revised-4sr", action="store_true", help="plan #4sr の改訂後の誤差尺度でも (ii) を判定する (旧判定も併記)")
     ap.add_argument("--coord-scale", type=float, default=1.0, help="座標を m に直す倍率 (メッシュが m なら 1)")
     ap.add_argument("--wall-dist-h5", default=None, help="diag h5 に wall_dist が無いときの節点 wall_dist の出典 (IC h5 等)")
     ap.add_argument("--wall-dist-dataset", default="VALUE/wall_dist")
@@ -146,8 +147,24 @@ def main():
         v2 = "PASS" if (nbad_l == 0 and nbad_v == 0 and nnf == 0) else "FAIL"
         detail2 = (f"liquid: max |Jl_f−Jl_d|/(8ε A_l) {np.nanmax(rl):.3f}, faces over {nbad_l}; "
                    f"molecular vapour: max |jv_f−jv_d|/(8ε A_v) {np.nanmax(rv):.3f}, faces over {nbad_v}; non-finite {nnf}")
-    verdict_line("(ii) float vs double", v2, detail2)
-    if v2 != "PASS":
+    verdict_line("(ii) float vs double [pre-registered]", v2, detail2)
+    v2_used = v2
+    if args.revised_4sr and ev.sum() > 0:
+        # plan condensation-two-phase-default §5.1 #4sr: 結果を見た後の改訂 (旧判定は上の行に残す)。
+        # 液流束の非正規化数の絶対項 E_abs = (3·|ctg| + 1)·2^-150 (FTZ なしの段階的アンダーフロー)
+        ctg = (col(d, "on_in/ct")[ev].astype(float) * col(d, "on_in/geo")[ev].astype(float))
+        eabs = (3.0 * np.abs(ctg) + 1.0) * 2.0 ** -150
+        tl2 = tl + eabs
+        okl2 = el <= tl2
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rl2 = np.where(tl2 > 0, el / tl2, np.where(el == 0, 0.0, np.inf))
+        nbad_l2 = int(np.sum(~okl2))
+        v2r = "PASS" if (nbad_l2 == 0 and nbad_v == 0 and nnf == 0) else "FAIL"
+        verdict_line("(ii') float vs double [revised #4sr, after seeing results]", v2r,
+                     f"liquid: max |Jl_f−Jl_d|/(8ε A_l + E_abs) {np.nanmax(rl2):.3f}, faces over {nbad_l2}; "
+                     f"molecular vapour unchanged (faces over {nbad_v}); non-finite {nnf}")
+        v2_used = v2r
+    if v2_used != "PASS":
         undet.append("(ii) double reference check did not pass (diagnostic not established)")
 
     # ---- (i) ----
