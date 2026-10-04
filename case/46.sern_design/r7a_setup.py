@@ -14,10 +14,13 @@ sys.path.insert(0, os.path.join(ROOT, "design"))
 from forge_design.evaluate import runner_sern as R2, runner_sern3d as R3  # noqa: E402
 from forge_design.probdef import load_problem  # noqa: E402
 
-SRC = os.path.join(HERE, "run_1017_ff4f_g3_2p50"); SRC_RES = os.path.join(SRC, "res_20000.h5")
+SRC = os.path.join(HERE, os.environ.get("R7A_SRC", "run_1017_ff4f_g3_2p50")); SRC_RES = os.path.join(SRC, "res_20000.h5")
 TOOLS = os.path.join(ROOT, "solver_density_cuda", "tools")
 GROUPS = {"A": ("problem_3d_prod_m6on_wallres.yaml", ["run_1034_r7a_lsw08_1", "run_1035_r7a_lsw08_2", "run_1036_r7a_lsw08_3"]),
           "B": ("problem_3d_prod_m6on_wallres_lsw10.yaml", ["run_1037_r7a_lsw10_1", "run_1038_r7a_lsw10_2", "run_1039_r7a_lsw10_3"])}
+if os.environ.get("R7A_G4"):   # g4 の対 (2026-10-05): 各群 1 本、B は双子の内外を保存して写す (r7a_twin_restart.py)
+    GROUPS = {"A": ("problem_3d_prod_m6on_g4.yaml", ["run_1045_r7a_g4_lsw08"]),
+              "B": ("problem_3d_prod_m6on_g4_lsw10.yaml", ["run_1046_r7a_g4_lsw10"])}
 INPUTS = ("solverConfig.yaml", "bcondConfig.yaml", "sern.h5", "probe.yaml", "prepare_info.json", "cowl_contour.csv", "ramp_contour.csv",
           "MESH_QUALITY.txt", "species_meta.yaml", "IC_FROM.txt", "RESTART_FROM.txt")
 
@@ -45,7 +48,7 @@ def first_A(dst, prob):
     open(os.path.join(dst, "RESTART_FROM.txt"), "w").write(r.stdout + r.stderr)
     if r.returncode:
         raise SystemExit(f"restart_field 失敗: {r.stdout[-500:]}{r.stderr[-500:]}")
-    open(os.path.join(dst, "IC_FROM.txt"), "w").write(f"R7a A (L_sw 0.8): restart_field.py run_1017 res_20000 -> sern.h5 (同一格子、--force-species)。config = {prob} 生成 + run_1017 の時間・space\n")
+    open(os.path.join(dst, "IC_FROM.txt"), "w").write(f"R7a A (L_sw 0.8): restart_field.py {os.path.basename(SRC)} res_20000 -> sern.h5 (同一格子、--force-species)。config = {prob} 生成 + run_1017 の時間・space\n")
 
 
 def first_B(dst, prob):
@@ -56,12 +59,16 @@ def first_B(dst, prob):
     if r.returncode or not os.path.exists(os.path.join(dst, "sern.h5")):
         raise SystemExit(f"prepare 失敗: {r.stdout[-800:]}{r.stderr[-800:]}")
     merged_config(load_problem(os.path.join(HERE, prob)), dst)
-    r = subprocess.run([sys.executable, os.path.join(TOOLS, "interp_field.py"), SRC_RES, os.path.join(dst, "sern.h5"), "--force-species"],
-                       capture_output=True, text=True)
+    if os.environ.get("R7A_G4"):   # 双子の内外を保存する写像 (codex 2026-10-05; interp_field は厚さ 0 の板の反対側を拾う)
+        r = subprocess.run([sys.executable, os.path.join(HERE, "r7a_twin_restart.py"), SRC_RES, os.path.join(SRC, "sern.h5"), os.path.join(dst, "sern.h5")],
+                           capture_output=True, text=True)
+    else:
+        r = subprocess.run([sys.executable, os.path.join(TOOLS, "interp_field.py"), SRC_RES, os.path.join(dst, "sern.h5"), "--force-species"],
+                           capture_output=True, text=True)
     open(os.path.join(dst, "RESTART_FROM.txt"), "w").write(r.stdout + r.stderr)
     if r.returncode:
         raise SystemExit(f"interp_field 失敗: {r.stdout[-800:]}{r.stderr[-800:]}")
-    open(os.path.join(dst, "IC_FROM.txt"), "w").write(f"R7a B (L_sw 1.0): interp_field.py run_1017 res_20000 -> sern.h5 (格子を作り直し、--force-species)。config = {prob} 生成 + run_1017 の時間・space\n")
+    open(os.path.join(dst, "IC_FROM.txt"), "w").write(f"R7a B (L_sw 1.0): {'r7a_twin_restart.py' if os.environ.get('R7A_G4') else 'interp_field.py'} {os.path.basename(SRC)} res_20000 -> sern.h5 (格子を作り直し)。config = {prob} 生成 + run_1017 の時間・space\n")
 
 
 for g, (prob, runs) in GROUPS.items():
