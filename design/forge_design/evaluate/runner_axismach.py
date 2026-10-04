@@ -745,7 +745,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         res_init = integral_bl(d["wall"], wall_inv, _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]),
                                scale, thermal_bc=tbc,
                                theta0_m=init_cfg.get("theta0_m"), x_virtual_m=init_cfg.get("x_virtual_m"),
-                               a_crocco=float(init_cfg.get("a_crocco", 1.0)), closure=str(init_cfg.get("closure", "contur")))
+                               a_crocco=float(init_cfg.get("a_crocco", 1.0)), closure=str(init_cfg.get("closure", "contur")),
+                               cf_scale=float(init_cfg.get("cf_scale", 1.0)), n_scale=float(init_cfg.get("n_scale", 1.0)))
         # 積分法の出力も同じ 5 次 P-spline で平滑化 (N(Re) テーブルの折れ目などを壁曲率に持ち込まない)
         from ..metrics.deltastar import smooth_delta_quintic
         f_s, sm_diag = smooth_delta_quintic(res_init["x"], res_init["delta_r"], knot_spacing=2.0, lam=1.0,

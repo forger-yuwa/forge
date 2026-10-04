@@ -58,6 +58,8 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0046_ns_band_edge` | 同 **B1**: 縁アンカー・x 平滑帯 (band_select="edge", c 1.25) で作った壁、他は B0 と同一 | NaN 0・SOFT-PASS・NOT CONVERGED (横ばい)。**P(0.1) 0.079 %・b70(0) 0.013 %pt** (局所の山谷なし、x≈48 の小山 +0.035 % と x 56→80 の −0.04 % の傾きのみ)。場から再抽出で δ_r/δ_in 1.0017 (固定点)。事前登録の判定は保留 (P(0.1) ≤ 0.06 % 不成立) | active (帯 A/B) |
 | `run_0047_euler_rt77p02_newbin` | run_0037 (Euler 参照) を restart_field で新バイナリ `bc1c84d1` 継続 12000 step | NOT CONVERGED (rms_ro 3.3e-6 横ばい)。旧 Euler との差は試験部で ≤0.01 % | active (参照の同一バイナリ化) |
 | `run_0048_ns_band_adaptive_ext` | B0 (run_0045) を restart_field で 6000 step 延長 (事前登録の延長規定) | 末尾 5 枚の変動 ≤0.0008、P(0.1) 0.350 % (不変) | active (帯 A/B) |
+| `run_0049_ns_contur_cal_full` | CONTUR (積分法) を B1 の抽出 δ に x∈[8,90] で較正した壁 (k_f 1.050・k_N 0.999・a 1.0、壁入力は 5 次補間/関数渡し)、IC=run_0046、12000 step ([plan](../../plans/active/verification-m6-axis-wave-mesh-su2.md) §5.1 #8f) | NaN 0・SOFT-PASS・NOT CONVERGED (横ばい)。r/r_w=0.1 で波 0.007 %・**オーバーシュート +0.064 %** (不合格)・出口コア M 6.0034 | active (CONTUR 較正) |
+| `run_0050_ns_contur_cal_exit` | CONTUR を**出口の δ だけ**に合わせた壁 (ユーザ提案; k_f 1.027 のみ)、他は run_0049 と同一 | NaN 0・SOFT-PASS・NOT CONVERGED (横ばい)。**波 0.007 %・オーバーシュート +0.019 %・出口コア M 6.0001** (事前登録の判定 合格)。出口半径 0.7771 m (r_t 補正前) | active (**CONTUR 出口較正の候補**) |
 | `run_0008_ns_trim_cond` | 凝縮 ON restart (`problem_d155_trim_ns_cond.yaml`: Kw+HK condModel1+Kantrowitz, 蒸発 ON, IC=run_0007, 12000 step) | 完走・NaN 0・**STEADY** (4k/8k/12k で M_exit 差 5e-4)。軸 onset x≈69 r_t、出口 g 0.20 % (H₂O の 2 %)、**出口軸 M 5.9273 (−1.2 %)**・試験区間に M 低下勾配 (x60→96 で 6.00→5.93)。dry の軸は x≈24 r_t (M5.5) で飽和線越え S≈14 (`axis_values.csv` の Tsat_post) | active (**凝縮評価の正本**) |
 
 ## SU2 クロスチェック (境界層厚さ, 2026-09-01)
