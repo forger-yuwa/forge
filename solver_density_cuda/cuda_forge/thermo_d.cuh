@@ -697,6 +697,69 @@ THERMO_HD float thermo_Dmix_species_f(const SpeciesThermoF* sp, int n, const flo
 }
 
 // -----------------------------------------------------------------------------
+// lump を含む化学種拡散の縮約 (plan thermophysics-solver-owned-species-db §4.4 確定版, #7b; 仕様 methods/thermophysics.md)。
+//   輸送種 (ラベル) のモル分率 XL を実種へ展開 X_r = Σ_s XL_s E[s][r] (E = lump 内モル分率、非 lump は単位行、重複実種は加算) し、
+//   実種ごとに forge の補数形混合平均 D_r = Σ_{q≠r} X_q / Σ_{q≠r} X_q/D_rq (純成分は自己拡散 D_rr) を作る。
+//   ラベルの係数は D_s = Σ_r A[s][r] D_r (A = lump 内質量分率、非 lump は単位行なので D_s = D_{r(s)} がそのまま入る)。
+//   非重複 lump では、同じ面状態・勾配・補正で、lump の補正後流束 = 構成実種の和、外部種 = forge の full と一致する (恒等式)。
+//   重複 lump (SERN の EXH/AMB) は固定組成ラベルの近似 (V4d)。lump の無い config はこの関数を使わない (現行 thermo_Dmix_species_f のまま)。
+//   二元係数は thermo_Dbinary_f と同じ式。対 (r, q) は各 1 回だけ評価し両側の和へ足す (和の順序は q の昇順で full と同じ)。
+// -----------------------------------------------------------------------------
+#define THERMO_MAX_DIFF_REAL 32
+struct LumpDiffD {
+    int   nReal;
+    float MW[THERMO_MAX_DIFF_REAL];        // [kg/mol]
+    float sig[THERMO_MAX_DIFF_REAL];       // [Å]
+    float eps[THERMO_MAX_DIFF_REAL];       // ε/kB [K]
+    float E[THERMO_MAX_SPECIES][THERMO_MAX_DIFF_REAL];   // ラベル → 実種 (lump 内モル分率)
+    float A[THERMO_MAX_SPECIES][THERMO_MAX_DIFF_REAL];   // ラベル → 実種 (lump 内質量分率)
+};
+
+THERMO_HD float thermo_Dbinary_raw_f(float Ma, float sa, float ea, float Mb, float sb, float eb, float T, float P)
+{
+    const float Mi   = Ma*1000.0f, Mj = Mb*1000.0f;          // g/mol
+    const float sig  = 0.5f*(sa + sb);                       // Å
+    const float epsp = ea * eb;
+    const float eps  = sqrtf(epsp > 1.0e-30f ? epsp : 1.0e-30f);
+    const float Tstar = T / eps;
+    const float om   = thermo_omega11(Tstar);
+    const float Patm = P / 101325.0f;
+    const float Dcm2 = 1.8583e-3f * sqrtf(T*T*T*(1.0f/Mi + 1.0f/Mj)) / (Patm * sig*sig * om);
+    return Dcm2 * 1.0e-4f;
+}
+
+// 全ラベルの係数を Dl[0..nLabel) に書く (面ごとに 1 回)。
+THERMO_HD void thermo_Dmix_lumped_f(const LumpDiffD& ld, int nLabel, const float* XL, float T, float P, float* Dl)
+{
+    if (nLabel <= 1) { for (int s = 0; s < nLabel; ++s) Dl[s] = 0.0f; return; }   // 現行 thermo_Dmix_species_f の n==1 と同じ
+    const int nr = ld.nReal;
+    float Xr[THERMO_MAX_DIFF_REAL], num[THERMO_MAX_DIFF_REAL], den[THERMO_MAX_DIFF_REAL];
+    for (int r = 0; r < nr; ++r) {
+        float x = 0.0f;
+        for (int s = 0; s < nLabel; ++s) x += XL[s]*ld.E[s][r];
+        Xr[r] = x; num[r] = 0.0f; den[r] = 0.0f;
+    }
+    for (int r = 0; r < nr; ++r) {
+        for (int q = r + 1; q < nr; ++q) {
+            float d = thermo_Dbinary_raw_f(ld.MW[r], ld.sig[r], ld.eps[r], ld.MW[q], ld.sig[q], ld.eps[q], T, P);
+            d = (d > 1.0e-30f ? d : 1.0e-30f);
+            num[r] += Xr[q]; den[r] += Xr[q]/d;
+            num[q] += Xr[r]; den[q] += Xr[r]/d;
+        }
+    }
+    for (int r = 0; r < nr; ++r) {
+        num[r] = (den[r] < 1.0e-30f)
+            ? thermo_Dbinary_raw_f(ld.MW[r], ld.sig[r], ld.eps[r], ld.MW[r], ld.sig[r], ld.eps[r], T, P)
+            : num[r]/den[r];                     // num[] を D_r の置き場に再利用
+    }
+    for (int s = 0; s < nLabel; ++s) {
+        float D = 0.0f;
+        for (int r = 0; r < nr; ++r) if (ld.A[s][r] > 0.0f) D += ld.A[s][r]*num[r];
+        Dl[s] = D;
+    }
+}
+
+// -----------------------------------------------------------------------------
 // ハイブリッド温度反転 (plan performance-3d-node-sst-speedup §4.2-3, physProp.thermoFloat=1):
 //   float Newton (最大 maxIterF 反復, 前ステップ T からの warm start で通常 1〜2 反復) で T を ~1e-6·T まで寄せ、
 //   double の Newton 1 段で研磨する (二次収束なので誤差は ~1e-12·T = 従来 double 版と同等)。

@@ -16,6 +16,7 @@
 #include "renormGate_d.cuh"              // 再正規化の受入ゲートの計測 (#1b-pre)
 #include "twoPhaseUpdateDiag_d.cuh"      // 診断 G3-b の記録スロット (FORGE_DIAG_TP_UPDATE; plan condensation-two-phase-default #4g3)
 #include "twoPhaseOperatorDiag_d.cuh"    // 診断 G3-a の面の記録 (FORGE_DIAG_TP_OPERATOR; plan condensation-two-phase-default #4g3・#4pjg)
+#include "input/speciesDB.hpp"            // lump の構成 (化学種拡散の縮約; plan thermophysics-solver-owned-species-db #7b)
 
 #include <cmath>
 #include <iostream>
@@ -323,9 +324,12 @@ __global__ void species_diffusion_d(
     // 各化学種の非補正 Fick flux J_s と Σ
     flow_float Js[THERMO_MAX_SPECIES];
     flow_float sumJ = 0.0f;
+    float Dl[THERMO_MAX_SPECIES];   // lump を含む拡散の縮約 (#7b): 面ごとに全ラベル 1 回
+    const bool lumpD = (diffMethod == 1 && c_lumpDiffOn != 0);
+    if (lumpD) thermo_Dmix_lumped_f(c_lumpDiff, nSpecies, X, T_face, P_face, Dl);
     for (int s=0;s<nSpecies;s++){
         flow_float D;
-        if (diffMethod == 1) D = thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face);
+        if (diffMethod == 1) D = lumpD ? Dl[s] : thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face);
         else                 D = mu_face/(ro_face*Sc);
         D += Dt;  // 層流 (Fick/Sc) + 乱流 (μ_t/Sc_t)
         const flow_float roD = ro_face * D;
@@ -626,6 +630,68 @@ static void dplurSweepOnce(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, v
 flow_float** species_resroY_device_ptr() { return g_resroY_dev; }
 flow_float** species_srcjac_device_ptr() { return g_srcjac_dev; }
 
+// lump を含む化学種拡散の縮約 (plan thermophysics-solver-owned-species-db §4.4 確定版, #7b)。lump が 1 つも無ければ c_lumpDiffOn = 0 で
+// 全経路が現行 thermo_Dmix_species_f のまま (係数のビット不変)。同じ TU のカーネル (species_diffusion_d・二相の面入力・監査・probe) が読む。
+__constant__ LumpDiffD c_lumpDiff;
+__constant__ int       c_lumpDiffOn = 0;
+static bool g_lumpDiffOn = false;
+bool speciesLumpDiffusionActive() { return g_lumpDiffOn; }
+
+static void speciesLumpDiffusionInit(int nSpecies)
+{
+    g_lumpDiffOn = false;
+    const ResolvedSpeciesDB* db = speciesDB_current();
+    int on = 0;
+    if (db == nullptr || db->size() != nSpecies) { gpuErrchk( cudaMemcpyToSymbol(c_lumpDiffOn, &on, sizeof(int)) ); return; }
+    bool anyLump = false;
+    for (int s = 0; s < nSpecies; ++s) anyLump |= db->isLump(s);
+    if (!anyLump) { gpuErrchk( cudaMemcpyToSymbol(c_lumpDiffOn, &on, sizeof(int)) ); return; }
+    if (nSpecies > THERMO_MAX_SPECIES) { std::cerr << "[species] lump diffusion: nSpecies " << nSpecies << " > THERMO_MAX_SPECIES\n"; std::exit(1); }
+
+    LumpDiffD h{};
+    std::vector<std::string> keys;
+    auto realIndex = [&](const std::string& key, const SpeciesThermo& sp) -> int {
+        for (size_t r = 0; r < keys.size(); ++r) if (keys[r] == key) return static_cast<int>(r);
+        if (static_cast<int>(keys.size()) >= THERMO_MAX_DIFF_REAL) {
+            std::cerr << "[species] lump diffusion: real species exceed THERMO_MAX_DIFF_REAL=" << THERMO_MAX_DIFF_REAL << "\n"; std::exit(1);
+        }
+        const int r = static_cast<int>(keys.size());
+        keys.push_back(key);
+        h.MW[r] = (float)sp.MW; h.sig[r] = (float)sp.sigma_LJ; h.eps[r] = (float)sp.eps_kB;
+        if (!(sp.sigma_LJ > 0.0) || !(sp.eps_kB > 0.0)) {
+            std::cerr << "[species] lump diffusion: real species " << key << " has no LJ parameters (sigma=" << sp.sigma_LJ
+                      << ", eps=" << sp.eps_kB << ")\n"; std::exit(1);
+        }
+        return r;
+    };
+    for (int s = 0; s < nSpecies; ++s) {
+        if (db->isLump(s)) {
+            const ResolvedLump& l = db->lumps[s];
+            double Ml = 0.0;
+            for (size_t k = 0; k < l.members.size(); ++k) Ml += l.x[k]*l.memberSpecies[k].MW;
+            for (size_t k = 0; k < l.members.size(); ++k) {
+                const std::string key = speciesDB_identityKey(l.memberDbKey[k], l.memberSource[k] == "file");
+                const int r = realIndex(key, l.memberSpecies[k]);
+                h.E[s][r] += (float)l.x[k];
+                h.A[s][r] += (float)(l.x[k]*l.memberSpecies[k].MW/Ml);
+            }
+        } else {
+            const std::string key = speciesDB_identityKey(db->dbKey[s], db->source[s] == "file");
+            const int r = realIndex(key, db->species[s]);
+            h.E[s][r] = 1.0f; h.A[s][r] = 1.0f;
+        }
+    }
+    h.nReal = static_cast<int>(keys.size());
+    gpuErrchk( cudaMemcpyToSymbol(c_lumpDiff, &h, sizeof(LumpDiffD)) );
+    on = 1;
+    gpuErrchk( cudaMemcpyToSymbol(c_lumpDiffOn, &on, sizeof(int)) );
+    g_lumpDiffOn = true;
+    std::cout << "[species] lump diffusion: mass-weighted real-species reduction (lump_reduction_v1; plan thermophysics-solver-owned-species-db #7), "
+              << h.nReal << " real species:";
+    for (const auto& k : keys) std::cout << " " << k;
+    std::cout << "\n";
+}
+
 void speciesInit_d(solverConfig& cfg, variables& var)
 {
     (void)cfg;
@@ -672,6 +738,7 @@ void speciesInit_d(solverConfig& cfg, variables& var)
     for (int s = 0; s < g_nSpecies; s++) hlim[s] = var.c_d["limiter_Y"+std::to_string(s)];
     gpuErrchk( cudaMalloc((void**)&g_limiterY_dev, pbytes) ); gpuErrchk( cudaMemcpy(g_limiterY_dev, hlim.data(), pbytes, cudaMemcpyHostToDevice) );
 
+    speciesLumpDiffusionInit(g_nSpecies);
     std::cout << "speciesInit_d: built device roY/roYN/res/diag/Y/dY/limiterY[] for nSpecies=" << g_nSpecies << "\n";
 }
 
@@ -994,7 +1061,10 @@ __global__ void species_Dmix_probe_d(geom_int nCells_all, const SpeciesThermoF* 
     for (int s = 0; s < nSpecies; s++) Yf[s] *= yinv;
     const flow_float gl = (liq.iw >= 0 && liq.rog != nullptr) ? liq.rog[ic]*inv_ro*yinv : 0.0f;
     species_transport_X_f(sp, nSpecies, Yf, liq.iw, gl, X);
-    for (int s = 0; s < nSpecies; s++) D[(size_t)s*nCells_all + ic] = thermo_Dmix_species_f(sp, nSpecies, X, s, T[ic], P[ic]);
+    float Dl[THERMO_MAX_SPECIES];
+    const bool lumpD = (c_lumpDiffOn != 0);
+    if (lumpD) thermo_Dmix_lumped_f(c_lumpDiff, nSpecies, X, T[ic], P[ic], Dl);
+    for (int s = 0; s < nSpecies; s++) D[(size_t)s*nCells_all + ic] = lumpD ? Dl[s] : thermo_Dmix_species_f(sp, nSpecies, X, s, T[ic], P[ic]);
 }
 
 bool speciesDmixProbe_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, float* D_d)
@@ -2224,8 +2294,11 @@ __device__ inline bool tp_build_face_in(
     const flow_float mut_face = f*vis_turb[ic0] + g*vis_turb[ic1];
     // 定数 Schmidt (diffMethod 0) は ρ_g,f D = μ_f/Sc (気相の分子拡散)
     const flow_float rgf = f*fmaxf(in.rho0 - in.rg0, 1.0e-30f) + g*fmaxf(in.rho1 - in.rg1, 1.0e-30f);
+    float Dl[THERMO_MAX_SPECIES];   // lump を含む拡散の縮約 (#7b): 面ごとに全ラベル 1 回
+    const bool lumpD = (diffMethod == 1 && c_lumpDiffOn != 0);
+    if (lumpD) thermo_Dmix_lumped_f(c_lumpDiff, nSpecies, X, T_face, P_face, Dl);
     for (int s = 0; s < nSpecies; ++s) {
-        in.D[s] = (diffMethod == 1) ? thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face) : mu_face/(rgf*Sc);
+        in.D[s] = (diffMethod == 1) ? (lumpD ? Dl[s] : thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face)) : mu_face/(rgf*Sc);
         in.h[s] = thermo_h_mass_f(sp[s], T_face);
     }
     in.ct = (mut_face > 0.0f) ? mut_face/Sc_t : 0.0f;
@@ -2462,8 +2535,11 @@ __global__ void twophase_audit_face_d(
         // 駆動差と補正は double (格納 ρY を double に上げる)
         const double r0d = (double)ro0, r1d = (double)ro1;
         double Js[THERMO_MAX_SPECIES], sumJ = 0.0, Yd[THERMO_MAX_SPECIES], ys = 0.0;
+        float Dl[THERMO_MAX_SPECIES];   // lump を含む拡散の縮約 (#7b): 面ごとに全ラベル 1 回
+        const bool lumpD = (diffMethod == 1 && c_lumpDiffOn != 0);
+        if (lumpD) thermo_Dmix_lumped_f(c_lumpDiff, nSpecies, X, T_face, P_face, Dl);
         for (int s = 0; s < nSpecies; s++) {
-            flow_float D = (diffMethod == 1) ? thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face) : mu_face/(ro_face*Sc);
+            flow_float D = (diffMethod == 1) ? (lumpD ? Dl[s] : thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face)) : mu_face/(ro_face*Sc);
             D += Dt;
             const flow_float roD = ro_face*D;   // 係数 (本番と同じ float)
             const double y0 = (double)roY[s][c0]/r0d, y1 = (double)roY[s][c1]/r1d;
@@ -2843,9 +2919,12 @@ __device__ inline bool tpfd_off_face(
     const flow_float diag_geo = fabsf(delta) / max(dcc,(flow_float)1.0e-30f);
 
     flow_float sumJ = 0.0f;
+    float Dl[THERMO_MAX_SPECIES];   // lump を含む拡散の縮約 (#7b): 面ごとに全ラベル 1 回
+    const bool lumpD = (diffMethod == 1 && c_lumpDiffOn != 0);
+    if (lumpD) thermo_Dmix_lumped_f(c_lumpDiff, nSpecies, X, T_face, P_face, Dl);
     for (int s=0;s<nSpecies;s++){
         flow_float D;
-        if (diffMethod == 1) D = thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face);
+        if (diffMethod == 1) D = lumpD ? Dl[s] : thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face);
         else                 D = mu_face/(ro_face*Sc);
         o.Dm[s] = D;
         D += Dt;

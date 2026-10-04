@@ -1,4 +1,5 @@
 #include "cuda_forge/passiveTransport_d.cuh"
+bool speciesLumpDiffusionActive();   // cuda_forge/speciesTransport_d.cu (#7b)
 #include <cstdio>
 #include "output.hpp"
 #include "conjugateWall.hpp"
@@ -34,6 +35,11 @@ void writeSpeciesAttributes(File& file)
     file.createAttribute<std::string>("species_record_file", HighFive::DataSpace::From(rec->recordFile)).write(rec->recordFile);
     const int unv = rec->inputUnverified;
     file.createAttribute<int>("species_input_unverified", HighFive::DataSpace::From(unv)).write(unv);
+    // lump を含む化学種拡散の縮約規約の版 (plan thermophysics-solver-owned-species-db #7b)。lump の無い run には書かない。
+    if (speciesLumpDiffusionActive()) {
+        const std::string red = "lump_reduction_v1";
+        file.createAttribute<std::string>("species_diffusion_reduction", HighFive::DataSpace::From(red)).write(red);
+    }
 }
 
 // 二相拡散の実効状態をルート属性に書く (plans/active/condensation-two-phase-default.md §4-4)。

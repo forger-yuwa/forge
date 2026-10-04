@@ -56,6 +56,8 @@ void speciesTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
 // 試験用 (FORGE_TRANSPORT_PROBE): Fick 拡散と同じ組成 (凝縮 carrier は気相組成) と thermo_Dmix_species_f で、セルごとの
 // 分子拡散係数 D_s を D_d[s*nCells_all + ic] に書く (化学種なしは false)。
 bool speciesDmixProbe_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, float* D_d);
+// lump を含む化学種拡散の縮約が有効か (起動時に speciesInit_d が決める; plan thermophysics-solver-owned-species-db #7b)。
+bool speciesLumpDiffusionActive();
 
 // TP 多成分気体の組成-エネルギー整合補正 (speciesTimeIntegration 直後に呼ぶ)。
 // roe[ic] += Σ_s (roY_s[ic] - roYN_s[ic]) * h_s(T[ic]) により組成変化に伴う roe ずれを補正し、

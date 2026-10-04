@@ -135,6 +135,23 @@ $$ D_{i,\mathrm{mix}} = \frac{1-X_i}{\sum_{j\ne i} X_j/D_{ij}}. $$
 
 実装 (`thermo_Dmix_species_f`) は分子を $1-X_i$ でなく同値の $\sum_{j\ne i} X_j$ として分母と同じループで積む (2026-09-30)。$X_i\to1$ で $1-X_i$ の引き算が float で桁落ちし (微量 $10^{-6}$ で相対 7 %、$10^{-8}$ で $O(1)$)、補数形では分子・分母が同じ小さな和になり二成分で厳密に $D_{12}$ を返す。判別試験 `tests/unit/test_dmix_complement.py`、経緯は plan [`condensation-two-phase-transport`](../plans/active/condensation-two-phase-transport.md) §5.1 #3b。
 
+#### 4.3 lump を含む拡散係数の縮約 (2026-10-05, plan [`thermophysics-solver-owned-species-db`](../plans/active/thermophysics-solver-owned-species-db.md) §4.4・#7)
+
+lump (内部組成を固定した擬似種) を含むときは、輸送種 (ラベル) $s$ のモル分率を実種へ展開して
+$X_r=\sum_s X_s E_{sr}$ ($E$ = lump 内モル分率、非 lump は単位行、同じ実種は加算) とし、実種ごとに上の混合平均 $D_r$ を作る
+(純成分 $\sum_{q\ne r}X_q=0$ は自己拡散 $D_{rr}$)。ラベルの係数は
+
+$$ D_s=\sum_r a_{r|s}\,D_r,\qquad a_{r|s}=\frac{E_{sr}W_r}{W_s}\ (\text{lump 内質量分率; 非 lump は } D_s=D_{r(s)}). $$
+
+$\mathbf J=-\rho D\nabla Y$ の集約なので重みは質量分率。**lump が他のラベルと実種を共有しない限り**、同じ面状態・勾配・補正で
+lump の補正後流束は構成実種の補正後流束の和に、外部種の補正後流束は全実種を輸送種にした場合 (forge の同じ演算) に一致する。
+一方、エネルギー $\sum_s h_s\mathbf J_s^*$ には内部組成が固定でも共分散項 $-\rho\sum_L[\sum_r a_r h_r D_r-h_L D_L]\nabla Y_L$ が残る (縮約の誤差)。
+SERN の排気/外気 lump のように実種を**共有する**ラベルは固定組成ラベルの近似で、実種へ戻した流束の誤差は 7〜19 % (旧平均 LJ の 11〜22 % より小さい;
+`tests/unit/test_lump_diffusion_reduction.py` V4d)。正確さが要るときは実種を全部輸送種にする (`tp_species: {mode: full}`)。
+旧方式 (lump を構成種の質量分率平均 LJ の擬似分子として扱う) は廃止した。lump の無い run の係数は変わらない (同じ関数を呼ぶ)。
+実装は `thermo_Dmix_lumped_f` (`cuda_forge/thermo_d.cuh`; 二元係数は対ごとに 1 回、和の順序は全実種の場合と同じ)、
+展開表は `speciesInit_d` が解決済み DB から作り `__constant__` に置く。結果の h5 には属性 `species_diffusion_reduction = lump_reduction_v1` が付く。
+
 ### 5. 化学種拡散とエネルギー結合
 
 化学種拡散流束は $\mathbf{J}_i = -\rho D_{i,\mathrm{mix}} \nabla Y_i$。混合平均は $\sum_i \mathbf{J}_i\ne 0$ となるため、補正速度で $\sum_i \mathbf{J}_i=0$ を担保する (定数 Schmidt 数フォールバックも用意)。エネルギー方程式には**化学種拡散によるエンタルピー輸送** $\sum_i h_i \mathbf{J}_i$ を熱伝導 $-k\nabla T$ に加える:
