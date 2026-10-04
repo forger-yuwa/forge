@@ -1,3 +1,103 @@
+forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
+SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
+リポジトリに対する**外部レビュー**を依頼する。忖度なしで、主張はコードと実測 (run の数値) で検証すること。
+結論が「この計画/結果は誤り」でも構わない。両論併記で逃げず、推奨は 1 つに絞ること。
+
+ルール:
+- **ファイルを変更しない** (read-only サンドボックスで動いている。読む・実行して確認するのは可)。
+- 出力は日本語。識別子・ファイル名は原語のまま。
+- 指摘は **Critical / Major / Minor** の重大度付きで、必ず根拠 (`ファイル:行` または `run_*` の数値) と対案をセットで書く。
+- リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
+  用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
+- 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
+  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+
+## 依頼: 診断・設計判断の諮問 (stage = diagnose)
+
+あなたは forge の**診断・設計判断係**である。呼び出し側は実装と run を進めている別のモデル (Claude) で、
+**もっともらしい真因に飛びつく前に**あなたに諮っている。仕事は手を動かすことではなく、**次の一手を 1 つに絞ること**。
+
+### 前提
+- あなたは呼び出し側の会話を見ていない。下のブリーフと、自分で読んだファイルだけが根拠になる。
+  足りなければ推測で埋めずに「何が足りないか」を返す。
+- ブリーフは「観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 / 仮説」に分かれて渡される約束である。
+  **観測事実と呼び出し側の解釈が混ざっていたら、まず分け直す**。呼び出し側の要約より、run の数値・コード・
+  設定ファイルを自分で確かめた内容を優先する。
+- forge を起動しない。`python3` による `residual_history.csv` / `res_*.h5` の読み取りは**統計量だけ**を出す
+  (全量ダンプ・長いログ全文をコンテキストに流さない。`*.log`・`*.vtu`・`plans/README.md` は読まない)。
+
+### 診断の作法
+1. **「除外済み」というラベルを信用せず、潰した証拠を確認する** (run パス・設定差分・判定区間・VERDICT)。
+   証拠が足りない・判定期間が短い・変えた設定が実際には効いていない (YAML の階層違い等) なら**候補へ戻す**。
+   証拠が十分な候補は出し直さない。
+2. **症状と原因を分ける**。`detectNaN` が指す変数は結果であって原因ではない (EOS 床 → 負密度 → 圧力暴走 → ω の実績)。
+   後処理のアーチファクト (2 列混在の抽出、`centCoords` の置換、ソルバ `ypls` の退化) を先に疑う。
+3. **このリポジトリで繰り返された真因**を照合する: 投入設定の不整合 (IC と BC、亜音速に超音速 BC)、
+   押し出し 2 ノード spanwise、float32 桁落ち (双対幾何・r 重み)、stale build、cross-mesh IC の基底不一致、
+   絶対値のゼロ割ガード、境界ノードの凍結、YAML キーの階層違いで黙って無視される設定。
+4. 仮説は**確度順に最大 3 つ**。第 1 仮説には根拠を `ファイル:行` か run の数値で付ける。示せないものは「未確認」と明記。
+5. **判別する A/B を 1 つだけ**提案する。安く短く回せて、結果がどちらに出ても仮説が 1 つ消えるもの。
+   「A なら仮説 1、B なら仮説 2」を先に書く (結果を見てから解釈を作らない)。
+6. 少数点の一致・短い窓の値・未収束のトランジェント同士の比較を根拠にしない。
+
+### 設計判断 (plan §4・§6、codex 指摘の採否、result 段の解釈) を諮られたとき
+- 採否は指摘ごとに「採用 / 却下 / 要再検証」と理由。根拠が示されていない指摘は自分で該当箇所を読んでから判定する。
+- 検証計画は「何が出たら方針が誤りと言えるか」が定量的に書かれているかを見る。
+- 既定値の変更・opt-in 機能の削除は、plan の処置欄とユーザ決定の履歴を確認してから判断する
+  (「opt-in 残置」は削除対象でない)。
+- result 段の解釈は、主張ごとに根拠 run・判定ツールの VERDICT・判定区間が揃っているかを確かめる
+  (過渡ピークを定常値と、抽出アーチファクトを物理と誤認した実績は「予想どおり」に見える場面で起きた)。
+
+あなたの結論は**仮説**であって確定ではない。呼び出し側はこの A/B を回して確かめ、plan への反映も呼び出し側が行う。
+
+## ブリーフ (`notes/reviews/briefs/2026-10-05-lump-blanc-diffusion.md`)
+
+# 諮問ブリーフ: lump を含む化学種拡散係数 (plan #7) の実装設計
+
+エスカレーション条件 1 (§4.4 の未確定部分を確定させる)、6 (`cuda_forge/` の拡散係数の数値の振る舞いを変える)。
+plan: `plans/active/thermophysics-solver-owned-species-db.md` §4.4、§5.1 #7、§6 V4。ユーザ指示 (2026-10-05): 「ガンガンやって」。
+
+## 観測事実 (現状のコード)
+- μ・λ: `viscMethod 2` は `physProp.transport` 必須で、lump は実種に展開済み (#5t2-2、`transportMix_d.cuh` `transport_expand_X`、モル基底)。
+  旧 kinetic μ・λ 経路は廃止済み (`procedures/solver-settings.md` 「physProp.viscMethod」)。**lump の平均 LJ が残っているのは化学種の分子拡散係数だけ**。
+- 拡散係数: `thermo_d.cuh` `thermo_Dmix_species_f` (float、補数形 D_i = Σ_{j≠i}X_j / Σ_{j≠i} X_j/D_ij、D_ij = Chapman–Enskog + Neufeld Ω(1,1))。
+  呼び出しは面ごと: `speciesTransport_d.cu:328` (species_diffusion_d)、`:2228` (二相拡散の面入力)、`:2466` (独立監査)、`:2848`、probe `:997`。
+  輸送種 s の LJ は `SpeciesThermoF.sigma_LJ/eps_kB`。lump の LJ は構成種の**質量分率平均** (`speciesDB.cpp:1047` に PROVISIONAL 表示)。
+- 補正 `J_i* = J_i − Y_i ΣJ` と `Σh_i J_i*` は輸送種単位 (`speciesTransport_d.cu:271` 付近)。
+- 構成種の情報は host の `ResolvedLump` (`input/speciesDB.hpp:36`: members・x (lump 内モル分率)・memberSpecies (LJ・MW 入り))。
+  device には lump の構成は渡っていない (`physProp.transport` のときだけ輸送表側に展開行列がある)。
+- 拡散は `viscMethod ≠ 0` かつ `speciesDiffusionMethod 1` (既定) で、`viscMethod 1` (Sutherland) + 多成分でも使われる → 輸送表の有無と独立に展開が要る。
+- 使用例: SERN (`case/46`、lump `EXH` (CEA 凍結組成) と `AMB` (空気) の 2 lump)、case/44 va3 (`MIXDRY` lump + H2O)、case/16 (N2 + H2O、lump なし)。
+
+## 設計案 (主セッション)
+**実種展開の混合平均**: 輸送種のモル分率 X_s → 実種のモル分率 X_r = Σ_s X_s·E[s,r] (E = lump 内モル分率、非 lump は単位行; 重複実種は加算)。
+各実種 r の混合平均 D_r = Σ_{q≠r} X_q / Σ_{q≠r} X_q/D_rq (補数形を維持)。
+- 非 lump の輸送種 i (実種 r(i)): **D_i = D_{r(i)}**。lump の外の種 j から見た lump 内寄与は Σ_{q∈L} X_L x_q/D_iq = X_L/D_{i,L}^{Blanc} なので §4.4 の Blanc と同じ。
+  r(i) が lump の構成にも含まれる場合 (例: H2O を輸送種と EXH の構成の両方に持つ) も、同じ分子として全量 X_r で評価するので重なりの定義が自然に決まる。
+- lump の輸送種 L: lump 内の質量分率が固定なら J_L = Σ_{q∈L} J_q = −ρ (Σ_q y_{q|L} D_q) ∇Y_L (構成種 q が L にしか無いとき厳密) → **D_L = Σ_{q∈L} y_{q|L} D_q** (lump 内質量分率重み)。
+  §4.4 の「lump 同士の二重和」を別に作らず、この定義で lump 同士の相互拡散も表す。構成種が他の輸送種と重なるときは近似 (記録する)。
+- lump の無い config では E = 単位行列で、現行の `thermo_Dmix_species_f` と同じ演算順にしてビット不変を保つ (分岐で現行関数を呼ぶ)。
+- device: 実種の (MW, σ, ε) と E を `thermo_init_db` で上げる (n_real ≤ 32)。
+- コスト: 面ごとに n_real² の D_rq (powf/expf)。SERN の実種数は ~6〜10 で現行 (2 輸送種で 2 回) の数十倍。対案: (i) D_rq·P を ln T の区分 3 次表で引く (輸送表 #5t2-3 と同じ方式)、(ii) 節点で D を作って面は平均。
+
+## 検証案 (§6 V4 の具体化、事前登録用)
+- V4a 単体: lump を含む config と、同じ実種組成を `full` (全実種を輸送種) で書いた config で、外部種の D_i が double 参照で ≤1e-12、float で ≤1e-6 一致。lump の D_L は定義どおり。
+- V4b 不変: lump の無い config (case/16 湿り凝縮 ON/OFF、乾き) は旧バイナリ ×3 vs 新 ×2 の `check_field_regress` PASS (ビット一致を期待)。
+- V4c 変化量の記録 (不変を合格にしない): case/44 va3 (MIXDRY + H2O) の H2O の D の変化 (検算 −0.7〜−1.4 %) と報告量の変化。SERN 入口組成の D_i,mix 変化表 (SERN へ連絡、SERN 側の回帰で確認)。
+- V4d 補正後流束の lump vs full の差 (codex 検算 +0.50 %) を記録。
+
+## 問い
+1. 実種展開 (D_i = D_{r(i)}) と lump の D_L = Σ y_{q|L} D_q の定義は §4.4 (Blanc・縮約拡散・lump 同士・重なり) の要件を満たすか。モル重みでなく質量重みでよいか (J は質量流束、勾配は ∇Y)。重なりの扱いに穴は。
+2. ビット不変の保ち方 (lump 無しは現行関数) は妥当か。
+3. コストへの対処: 表引き・節点評価・そのまま、のどれを今やるべきか。精度基準は。
+4. V4a〜d は十分か。SERN への影響の扱い (既定変更として §9 に旧挙動の明示キーを残すか、残さず記録だけか)。
+
+読んでよいファイル: plan 上記、`solver_density_cuda/cuda_forge/thermo_d.cuh` (455–700 付近)、`speciesTransport_d.cu` (200–340・2200–2480)、
+`input/speciesDB.{hpp,cpp}`、`cuda_forge/transportMix_d.cuh`・`transportTables_d.cuh`、`procedures/solver-settings.md`。
+
+## 関連 plan 全文 (`plans/active/thermophysics-solver-owned-species-db.md`)
+
+```markdown
 # 化学種の熱物性をソルバが持ち、run には組成 (モル分率) だけを書く
 
 ## メタ
@@ -171,20 +271,6 @@ physProp:
   **lump 同士** (SERN の `EXH`/`AIR` のような複数 lump) の二元係数は、両 lump の構成実種どうしの二重和 $1/D_{AB}=\sum_{j\in A}\sum_{k\in B}\ldots$ の形を
   実装前に式として確定し、構成実種が lump 間で重なる場合 (自己拡散を含む) の扱いも定義する (§5.1 #7 の前提)。エネルギー流束 `Σh_i J_i*` も同じ縮約で評価する。
 - 平均 LJ の擬似分子は廃止する。NS の結果は変わる (codex 検算で粘性 −1 % 級の是正) ので、変更量を記録する (不変を合格条件にしない)。
-- **確定した縮約規約 (2026-10-05、codex diagnose `notes/reviews/2026-10-05-lump-blanc-diffusion-diagnose.md` 全件採用)** — 上の「lump 同士の二重和」は採らず、次で置き換える:
-  - 輸送種のモル分率を実種へ展開 $X_r=\sum_s X_s E_{sr}$ ($E$ = lump 内モル分率、非 lump は単位行、重複実種は加算)。実種ごとに forge の現行の混合平均
-    $D_r=\sum_{q\ne r}X_q/\sum_{q\ne r}X_q/D_{rq}$ (補数形; 純成分 $\sum_{q\ne r}X_q=0$ は自己拡散 $D_{rr}$) を作る。
-  - 非 lump の輸送種 $i$: $D_i=D_{r(i)}$。lump $L$: **$D_L=\sum_{r\in L}a_{r|L}D_r$、$a_{r|L}=E_{Lr}M_r/M_L$ (lump 内質量分率)**。$J=-\rho D\nabla Y$ の集約なので質量重み。
-  - **非重複 lump では恒等式**: 同じ面状態・勾配・補正で、lump の補正後流束 = 構成実種の補正後流束の和、外部種の補正後流束 = `full` (forge の現行 `full` 演算) と一致する
-    (旧記載「`full` 比 +0.50 %」は旧平均 LJ 縮約の検算で、新規約の期待値ではない — 撤回)。2 lump だけなら $J_A^*=-\rho(Y_BD_A+Y_AD_B)\nabla Y_A$。
-  - **エネルギー**: `Σ h_s J_s*` (輸送種単位) は維持。内部組成固定でも共分散項 $-\rho\sum_L[\sum_r a_rh_rD_r-h_LD_L]\nabla Y_L$ が残る (縮約モデルの誤差)。
-    縮約モデル自身の独立参照と照合し、`full` との差は別に記録する (エネルギーだけ `full` 値へ置き換えることはしない)。
-  - **重複 (SERN: EXH と AMB が N2・O2・Ar・CO2 を共有)**: 固定組成ラベルの**近似モデル**。実種組成の勾配がゼロでもラベル間に流束が出うる (codex 反例)。
-    実種へ戻した流束の誤差を V4 で測り、事前登録した基準で判定する。
-  - lump の無い config は現行関数をそのまま呼ぶ (係数のビット一致)。CFD 全場は atomicAdd があるので回帰のノイズ床で見る。
-  - 性能: 二元係数 $D_{rq}P$ を ln T の区分 3 次表で引き、面ごとに各非対角対を 1 回評価する (既存輸送表と同じ境界処理、範囲外は式へ退避)。節点評価への変更はしない (離散化が変わる)。
-  - 旧平均 LJ への切替キーは作らない (旧結果は旧バイナリで再現)。拡散の縮約規約の版を解決済み記録と互換性ハッシュに入れる。`ljSource: [legacy_v1]` は本件の対象外。
-  - forge の `full` は物理的厳密解ではない (`(1−X_i)/ΣX_j/D_ij` を ∇Y_i に掛ける現行式); 検証は「forge の現行 `full` 演算への一致」に限定する。
 
 ### 4.5 `atoms`
 
@@ -287,7 +373,7 @@ physProp:
 | 3d | ~~印付きの場の継承をツールとソルバで揃える~~ | 観測 (2026-10-01 SERN セッション指摘): ソルバは `species_input_unverified=1` かつハッシュ一致の場を許可なしで通し印を継承する (`speciesDB.cpp` checkInputField の `fieldHash == own` 分岐) が、Python ツール (`restart_field`・`interp_field`・`convert_species_field`・runner の段間継承) は同じ場を未検証として毎回停止し、許可すると印を消す → ツール経由の継続は毎回許可が要る (§5.2 と SERN への予告の「1 回だけ移行、以後は継承」は誤りだった)。**決定 (2026-10-01, 主セッション; ソルバの既存規則にツールを揃えるだけ)**: ツールも「印付き かつ SRC ハッシュ = 宛先ハッシュ」なら許可なしで通し、宛先に同じハッシュと印 (`species_input_unverified=1`) を継承する。印の無い未検証 (属性なし) の場とハッシュ不一致は従来どおり停止。合格: 属性なし SRC → 許可で書く (印付き) → 次の restart_field が許可なしで通り印を保持、ハッシュ不一致の印付きは停止、既存試験 (`test_species_attrs_entry` ほか) PASS。段 3 (#13-3) の実装が終わってから着手 (同じ作業ツリー) **完了 2026-10-01**: `forge_species._plan_inherit_marked`/`_plan_convert_marked` (ハッシュ一致なら許可なしで通し印を継承; restart/interp は宛先の解決ハッシュ、種変換は SRC config の解決ハッシュ)。試験 entry 39・solver 22 ((0r) ソルバが env で書いた印付き res → 許可なしの restart_field → 既定 solver 1 step で印保持)・host 44 ほか PASS。§5.2 の「1 回だけ移行、以後は継承」はソルバで 1 回許可する経路で成立 (ツールだけの許可書き込みは属性なしのまま — 方針どおり)。**残**: (a) 印付き + ハッシュ不一致は、ツールは env/--force-species で属性なしで通すがソルバは env でも通さない (完全一致させるか未決)、(b) `design/tests/run_sern_frozen_gas_tests.py` の restart_by_index は fixture の SRC が属性なしのため停止のまま (runner_sern 側の fixture で対応) | O |
 | 13-3 | ~~段 3: 既存種を CEA そのものへ~~ | **完了 2026-10-01** (data 26573e59、決定反映 53a15301; #3d は 5302b404 で拒否文のみ)。Δ 表は予測内 (N2/O2/CO2 0、Ar 0.073 J/kg、He 5.0e-7・14.8 J/kg、H2O 1.11e-6・15.1 J/kg、混合物 μ・λ ≤6.5e-7; 6000 K クランプ点は第 3 区間の境界段差)。T_max は固定 (`DEPVAR_TMAX 6000.0`)。設計側: 先頭 2 区間 + T > 6000 K で raise、設計 vs ソルバ [200, 6000) 相対 ≤1e-14 (改訂基準; 旧 4e-16 は同順比較の値の誤用) で実測 cp 1.37e-15・h 6.2e-16・s° 4.5e-16 PASS、同順評価は 0.0。#13-5(b) を同時に: `solver_builtin_names` 全気相種、SERN 代表 config の外部 DB 消滅、ハッシュ ff57c6ef1fdf15c2→28834c8ae07252e8。基準 (6): `transport_reference.py` は全区間評価に済 (`test_species_transport` が 20000 K まで 1.67e-14、`test_transport_gpu` 69 PASS)、`test_species_data_bitexact` は基準 JSON を v1 に張り替え (旧新 diff = Δ 表、N2/O2/CO2 は先頭 2 区間・MW 0 差)。§4.9 例外: 凝縮 ON + 旧 MW の外部 H2O は起動拒否 (契約 #10; 拒否文に `H2O.MW`・両値・移行先 2 つ; `FORGE_ALLOW_UNVERIFIED_SPECIES`/`--force-species`/両方でも迂回不可 — ソルバは手動確認、ツールは `test_species_attrs_entry` (p)); H2O を外すと builtin で起動 (9c9d577477c90dd8)、run_0509 は 4378b7d78339ba27 不変。旧記録からの継続は係数不一致キーで停止・明示許可のみ。**V5(i)** `case/44.vitiated_air_wt/run_0532_species_cea_v5i` (AWS g5, V0 メッシュ md5 69d5745e, soft 3000/mid 3000/main 24000, hash 9d545b2d88dc9992 — run_0522 型 config の 276f21e875b0f8e7 との差は、段 3 後の runner が lump のモル分率 O2/AR を 1 ulp 違えて書くため): S2_main NOT CONVERGED plateau (V0 と同型)、NaN 0、series 6 量 ALL STEADY、V0 4 run との最大差 ṁ_in 9.6e-7・ṁ_out 2.6e-7・出口 M 4.8e-7・出口 T 9.2e-5 K・軸 M 出口 1.9e-6・目標差 6.0e-7 — すべて V0 幅の内側で許容の 2〜4 桁下。変換メッシュ h5 は V0 (run_0509) と幾何 87 データセットで一致、差は入口 bcond の Y0 6e-8・Y1 4e-8 のみ (H2O MW 由来)。**解釈 (判断: 2026-10-01 diagnostician)**: V5(i) は 1e-3 級の回帰 (種の取り違え・区間選択の誤り・メッシュ/IC 配管の破損) が無いことの確認であり、段 3 の変化 (≤1e-6) は本ケースの分解能以下で検出不能 (「結果は変わらない」とは書かない)。変化量の根拠は 0-step IC 差 (ρ ≤1.2e-7、Y_H2O ≤1.2e-6; MW 由来の予測 1e-7・1.0e-6 と整合) と Δ 表。SERN 回帰は merge 後に SERN 側で (予測 ≤1e-6 相対)。残: #13-5 (a) LJ の出典 | O |
 | 13-4 | 温度反転の到達比の文書化 (低優先・記録のみ) | `thermo_T_from_e_hybrid` の 1 呼び出しの到達比は 1.5^15 (step 制限 0.5T)。T > 6000 K を常用するケース (化学非平衡・プラズマ) を計画する時点で maxIterF を ln(T_max/T_min)/ln 1.5 から決める。今は数値を変えない (G1-b の 0 ulp が崩れる)。判断: 2026-10-01 diagnostician — 生産は warm start なので現時点で欠陥でない | O |
-| 7 | lump の化学種拡散 (縮約規約 §4.4 確定版) | 判断: 2026-10-05 codex diagnose (`notes/reviews/2026-10-05-lump-blanc-diffusion-diagnose.md`) — 全件採用 (M1 +0.50 % 期待値の撤回・V4d を一致試験へ / M2 重複は近似として事前登録の基準で判定 / M3 V4 拡充 / M4 切替キーなし・記録とハッシュに版)。粘性・熱伝導の実種展開は #5t2-2 で済み (`viscMethod 1` は組成に依らない Sutherland で無関係)。**段**: (7a) host の参照実装 (double) と判別 A/B (A = 対称 Blanc 係数を両側に、B = 質量加重 $D_L$) を合成入力と SERN 組成で — V4a・V4c・V4d、(7b) device 実装 (実種データと $E$ を `thermo_init_db` で上げる、`thermo_Dmix_species_f` の 4 呼び出し + probe を規約の関数へ、lump 無しは現行関数) — V4b・V4f、(7c) 二元係数の表引き — V4e、(7d) 記録・互換性ハッシュ・docs (`methods/thermophysics.md`・`solver-settings.md`) と変化量の記録 (case/44 va3・SERN へ連絡) — V4g | O (実装) / F (判断済み) |
+| 7 | lump の輸送物性展開と Blanc 拡散 | §4.4 (粘性・熱伝導は実種展開、lump を含む二元拡散係数は Blanc)。合格は §6 V4。**状況 (2026-10-05 確認)**: 粘性・熱伝導の実種展開は `physProp.transport` 経路で**済み** (#5t2-2、`transportMix_d.cuh` の `transport_expand_X`)。**残りは拡散**: 化学種の分子拡散係数 `thermo_Dmix_species_f` は lump を「成分の質量分率平均 LJ を持つ擬似分子」として評価したまま (`speciesDB.cpp:1047` の PROVISIONAL 表示) で、Blanc は未実装。`physProp.transport` を使わない旧経路 (`viscMethod ≠ 2`) の lump の μ・λ も同じ平均 LJ のまま | O |
 | 8a | ~~reader の移行 (記録から読む)~~ | 完了 2026-09-27: 共通読み出し `forge_species.run_thermo` (res 属性の記録 → run の記録 → `speciesDBFile` → `--resolve-species`)、`total_quantities.py`・`convert_species_field.py`・`gen_inlet_profile.py`・`runner_sern._species_signature` を移行。V6 PASS (下の #9) | O |
 | 8 | Python 共通 API の残り、canonical ID への移行 | 残り: `forge_species.species_info` の lump MW (`BUILTIN_MW` の写し)・`species_signature` (lump を照合不能扱い)・`interp_field` の署名。 §4.6。加えて (2026-09-27): Python の種名の大文字化をやめ canonical ID + alias 表へ、C++ `ResolvedSpeciesDB::index()` (`speciesDB.cpp:79-85`, 大小文字無視; 重複検査 `:210` も使う) の完全一致化と、tracer・凝縮種など名前で引く箇所の影響調査。**互換性ハッシュには config の名前がそのまま入る (`speciesDB.cpp:461`) ので、canonical 化で既存記録と不一致にならない規約 (ハッシュには canonical ID を入れ、既存記録は移行ツールで読み替え等) を設計してから**。合格は §6 V6 | O |
 | 9 | ~~設計 runner の切り替え~~ (axismach 完了、SERN 未) | 完了 2026-09-27 (axismach): `_apply_gas_to_config` は `physProp.species` を lump 記法 (全桁の正規化モル分率) で書き **`species_db.yaml` を作らない**。内蔵に無い種・外部 DB (`gas.species_db`) が内蔵値を上書きする種だけ生エントリを `species_db_external.yaml` に置く (合成物は置かない)。変換器は `FORGE_BIN` と同じビルドのもの (`runner.converter_path()`)。**V5 (i)** `case/44.vitiated_air_wt/run_0522_species_nodb_lumpX_v5` (ref): V0 (run_0509/0513–0515) との最大差 ṁ_in 6.1e-7 相対・ṁ_out 2.6e-7・出口 M 9.5e-7・出口 T 1.2e-4 K・軸 M 出口 **8.6e-6 (許容 1e-5, 反復差の約 4.5 倍; 原因未切り分け)**・軸 M 目標差 3.6e-7 → 許容内。本段区間 NOT CONVERGED (plateau, run_0509 と同型)・series ALL STEADY、NaN 0、メッシュ PASS。**V6**: DB ファイルなしで prepare → 段間 restart_field (記録継承) → 本段 → `total_quantities` (旧経路比 T0 1.2e-15・P0 2.6e-14) → lump→full5 変換 `run_0523_species_nodb_full5_convert` (ρY 保存差 0、変換後 200 step で照合一致・NaN 0) → `gen_inlet_profile` (CSV バイト一致)。**SERN は未切替**: SERN の lump 名 `AIR` がソルバ内蔵の擬似種 `AIR` と衝突し起動時に拒否される (`speciesDB.cpp:329-334`)。lump 名の変更か内蔵 `AIR` の扱い (#5 の Air 衝突と同根) を決めてから | O |
@@ -351,18 +437,6 @@ SERN セッション (`feature/sern-design`) へ渡す内容。変更は `featur
     (ii) 区切り温度そのもの (1000 K・6000 K) では許容を **3e-8 + Δh_step/(c_v·T)** (Δh_step は係数から計算した両側の h 差、c_v はその点の混合 c_v; 結果から決めない)。区切り以外は 3e-8。係数の連続化は本 plan に入れない。
     info (合否にしない): 6000 K 超での float 面経路 (`thermo_h_mix_f`) の h 相対誤差 (打ち消しで ~1e-6〜1e-5 の見込み) を記録し、6000 K 超の面流束精度の既知の限界として methods に書く。
 - **V4 (輸送物性と拡散)**: lump を含む混合の粘性・熱伝導が、全実種で直接評価した Wilke / Mason–Saxena と機械精度で一致。旧方式 (平均 LJ) との差を 200/300/1000 K で記録。
-  - **V4 改訂 (2026-10-05、事前登録)** — 拡散の縮約 (#7):
-    - V4a (非重複の恒等式): 合成入力 (codex 例: MW (2,4,8)、X (0.4,0.4,0.2)、D 比 1/2/4、lump = 種 1・2) と va3 (MIXDRY + H2O) で、同一面状態・勾配・補正の
-      lump の補正後流束 = 構成実種の和、外部種の補正後流束 = forge `full`、いずれも double 参照で規格化誤差 ≤1e-12。判別 A/B は B のみ一致することを確認 (A は不一致が期待)。
-    - V4b (lump 無しの不変): 係数関数の出力が現行関数とビット一致 (固定入力)。CFD は case/16 (乾き・湿り ON/OFF) の旧 ×3 vs 新 ×2 `check_field_regress` PASS。
-    - V4c (エネルギー): `Σh_sJ_s*` が縮約モデルの独立 double 参照と ≤1e-12。`full` との差 (共分散項) を va3 と SERN 組成で記録 (判定しない)。
-    - V4d (重複・SERN): SERN m6_on の EXH/AMB 組成で、Y_EXH ∈ {0.1, 0.3, 0.5, 0.7, 0.9} × T ∈ {300, 1000, 2000 K} × P 1 atm、∇Y_EXH = 1 の面状態で、
-      実種へ戻した補正後流束の `full` (全実種、同じ実種勾配) に対する誤差 ε = ‖J_real,label − J_real,full‖₂ / ‖J_real,full‖₂ を、
-      **新規約 (B) と旧平均 LJ の両方**で出す。**合格: 全 15 状態で ε_B ≤ ε_旧** (悪化させない)。値は表で記録し SERN に連絡。
-      (実種勾配の取り方: ラベル勾配から実種勾配を $\nabla Y_r=\sum_L a_{r|L}\nabla Y_L$ で作る = 固定組成ラベルが表す実種場。)
-    - V4e (表引き): 同じ float 入力の独立 double 参照に対し、二元係数 ≤2e-6、縮約後係数 ≤1e-5。T* = 0.3/100 の両側・微量種 (X 1e-8)・純成分・実種 32・表範囲外 (式へ退避) を含む。
-    - V4f (経路): 係数の利用先 (通常拡散・二相の面入力・独立監査・probe) が同じ規約の関数を使うこと (lump を含む凝縮 config = case/44 va3 + 凝縮で 1 step 照合)。
-    - V4g (記録): 変化量 — case/44 va3 の H2O の D (検算 −0.7〜−1.4 %) と報告量、SERN 入口の係数変化表。不変を合格条件にしない。収支 (`check_passive_budget` 等の既存の種・エネルギー収支) が PASS。
   lump を含む二元拡散係数が Blanc の式 (実種の $D_{ij}$ から) と機械精度で一致し、旧方式 (平均 LJ) との差を記録。補正後の `J_i*` と `Σh_i J_i*` を独立な参照計算 (`full` 展開の double 実装) で検査し、`full` との差を縮約近似の誤差として記録 (合否は「lump 内組成が一様な場で差 ≤1e-12」、組成勾配のある場は記録のみ)。
   lump + kinetic 拡散で**組成勾配を持つ試験** (2 流入の混合層など小型ケース) の化学種・エネルギー収支は、**収支式・正規化・許容差・実行コマンドを実装前にここへ書いてから**回す (node の開境界のピンによる交換を含める; `check_passive_budget.py` は受動種用で代用しない; 2 回目 M4)。
 - **V5 (CFD 回帰)**:
@@ -422,7 +496,6 @@ SERN セッション (`feature/sern-design`) へ渡す内容。変更は `featur
 
 ## 9. 変更ログ
 
-- `2026-10-05` — #7 の設計を codex diagnose で確定 (§4.4 確定版・V4 改訂・#7 を 7a〜7d に分割; 全件採用)。旧「`full` 比 +0.50 %」の期待値は撤回。
 - `2026-10-05` — ユーザ判断を反映: H2O の低温輸送は IAPWS 案 (9/27 決定・実装済みの再確認、§10 の古い「判断待ち」を決着に)、#12 N2 潜熱は現行のまま。#7 の状況を確認 (μ・λ の lump 展開は済み、Blanc 拡散が残り)。
 - `2026-10-03` — §5.1 の表を整理: 変更ログで完了済みの行に取り消し線と完了の根拠を付けた (内容は変えていない)。
 - `2026-10-03` — §5.2 #9: SERN へ 72 commit の取り込み候補とリミッタ床の扱いを連絡、SERN は restart 連鎖の切れ目で取り込み・回帰は SERN plan R10 に事前登録と回答。
@@ -488,3 +561,19 @@ SERN セッション (`feature/sern-design`) へ渡す内容。変更は `featur
 - `2026-09-27` — ユーザ指摘で 2 点改訂: (1) lump の拡散は平均 LJ でなく Blanc の法則で二元係数を作り kinetic 拡散と併用可 (M2 の拒否を撤回)、(2) 潜熱は液相を気相と同じ datum でシフトして差で作る (§4.8, 本 plan 内に戻す)。
 - `2026-09-27` — codex plan 段レビュー (GO-with-changes, C0/M7/m1) を全件採用し §2–§6 を改訂。最初の実装は「保存場に結び付いた解決済み記録と全 restart 経路の照合」に限定。潜熱の共通化は後続 plan。
 - `2026-09-27` — 初稿。ユーザ要望と codex diagnose 諮問 (`notes/reviews/2026-09-27-solver-owned-species-db-diagnose.md`) の推奨から起票。
+```
+
+## 出力形式 (この形のまま)
+
+```
+結論: <次にやる一手を 1 文で>
+第 1 仮説: <内容>  確度: <高/中/低>
+  根拠: <ファイル:行 / run パスと数値>
+  反証条件: <何が観測されたらこの仮説は誤りか>
+第 2・第 3 仮説: <あれば 1 行ずつ>
+判別 A/B: <変える設定 1 点、回す長さ、見る量>  → A なら … / B なら …
+やらない方がよいこと: <呼び出し側が取りそうな誤った一手>
+呼び出し側の前提への異議: <ブリーフの枠組み・除外判断・指標の定義で受け入れなかったものと理由。無ければ「無し」>
+不足情報: <あれば>
+```
+設計判断・採否を諮られた場合は、上の前に「採否表 (指摘ごとに 採用/却下/要再検証 と理由)」を置いてよい。
