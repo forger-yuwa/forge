@@ -60,6 +60,11 @@ def evaluate(path, mask):
     srcR = {c: snap[L["cond_src"], ci[c], idx] - snap[L["tp_diff"], ci[c], idx] for c in ci}
     base = {c: np.abs(snap[L["tp_diff"], ci[c], idx]) + np.abs(term[c]) + 1e-300 for c in ci}
     mism = max(float(np.max(np.abs(srcR[c] - term[c]) / base[c])) for c in ci)  # float の加算丸め (~6e-8) 程度なら整合
+    # 改訂 (2026-10-04、結果を見た後): 不一致はすべて float の非正規化数の範囲 (abs < FLT_MIN) の丸め (刻み 2^-149)。
+    # 丸め回数 nround ごとに絶対 2^-149 の床を足した整合 (G1 #4sr と同じ型)。旧基準の値も併記する。
+    nround = sl[slots.index("nround"), idx]
+    floor = np.maximum(nround, 1.0) * 2.0 ** -149
+    mism_rev = max(float(np.max(np.maximum(np.abs(srcR[c] - term[c]) - floor, 0.0) / base[c])) for c in ci)
     finR = {c: snap[L["final"], ci[c], idx] for c in ci}
 
     def hdot(R):
@@ -76,7 +81,7 @@ def evaluate(path, mask):
     out = {"n_pos": int(idx.size), "n_evap": int(evap.sum()), "n_tgt": int(tgt.sum()),
            "n_cap1_tgt": int((cap1 & tgt).sum()), "n_cap2_tgt": int((cap2 & tgt).sum()),
            "w0_frac_med": float(np.median(1.0 - (q["Q1"] ** 2 / q["Q2"])[tgt] / q["Q0"][tgt])) if tgt.any() else np.nan,
-           "rec_mismatch_max_rel": mism}
+           "rec_mismatch_max_rel": mism, "rec_mismatch_max_rel_rev": mism_rev}
     for k in H:
         out[f"N {k} (T)"] = float(N[k][tgt].sum())
         out[f"N {k} (all pos)"] = float(N[k].sum())
@@ -89,7 +94,15 @@ def evaluate(path, mask):
     return out
 
 
+REVISED = False
+
+
 def main():
+    global REVISED
+    args = [a for a in sys.argv[1:] if a != "--revised-floor"]
+    REVISED = len(args) != len(sys.argv) - 1
+    print("記録の整合: " + ("改訂 (非正規化数の絶対床 nround·2^-149 を許す; 結果を見た後の改訂)" if REVISED else "事前登録 (相対 1e-5)"))
+    sys.argv = [sys.argv[0]] + args
     mask = np.load(sys.argv[1])
     verdicts = []
     for p in sys.argv[2:]:
@@ -97,7 +110,8 @@ def main():
         print(f"\n## {p}")
         for k, val in o.items():
             print(f"  {k:28s} {val:.6g}" if isinstance(val, float) else f"  {k:28s} {val}")
-        if o["rec_mismatch_max_rel"] > 1e-5 or o["coverage"] < 0.9:
+        key = "rec_mismatch_max_rel_rev" if REVISED else "rec_mismatch_max_rel"
+        if o[key] > 1e-5 or o["coverage"] < 0.9:
             vd = "判別不能"
         elif o["ratio src"] <= 0.1:
             vd = "支持"
