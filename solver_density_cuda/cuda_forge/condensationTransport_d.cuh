@@ -5,6 +5,7 @@
 
 #include "flowFormat.hpp"
 #include <vector>
+#include <string>
 #include "mesh/mesh.hpp"
 #include "input/solverConfig.hpp"
 #include "cuda_forge/condensationProperties_d.cuh"   // CondPropOpts / condProps_make
@@ -127,6 +128,27 @@ void    twoPhaseCorrGateLog(const solverConfig& cfg, int iStep, bool final);
 void    twoPhaseDiagWrite(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 // θ の全更新を覆う集計 (#1b-pre (3)): kind 0 = θ_src (condensationSource の直後), 1 = 更新の θ (モーメント更新の直後)。計上だけ。
 void condThetaScan_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int kind);
+
+// ---- 診断 G3-b (更新写像の収支; FORGE_DIAG_TP_UPDATE=<出力 h5>、既定 off; plan condensation-two-phase-default §5.1 #4g3) ----
+// main の runTpUpdateDiag だけが tpuBegin/tpuArm を呼ぶ。それ以外の経路では tpuSlots() は常に nullptr、tpuSnap は何もしない
+// (本番カーネルの記録分岐は nullptr で無効、演算は変えない)。スロット配置は twoPhaseUpdateDiag_d.cuh。
+//   tpuBegin: 対応構成を検査し (why に拒否理由)、前処理用・更新用の 2 本のスロット (NaN 初期化) を確保する。
+//   tpuArm(phase): 0 = 記録しない、1 = 前処理のバッファへ、2 = 更新のバッファへ。
+//   tpuSnap(label): 記録中なら 5 成分 (ρY_w, ρg, ρQ2, ρQ1, ρQ0) の格納値 (実節点) を写して label 付きで残す (操作の境界の照合用)。
+//   tpuCollect: スロットと写しを host へ移す (終了時に 1 回)。
+struct TpuDiagData {
+    long n = 0;                                      // 実節点数 (msh.nCells)
+    int iw = -1;                                     // 総水分の化学種 index
+    std::vector<double> pre, upd;                    // [TPU_NSLOT][n] (前処理 / 更新)
+    std::vector<std::string> snapLabel;              // 写しの名前 (起きた順)
+    std::vector<int> snapPhase;                      // 写しを取ったときの phase (1 前処理 / 2 更新)
+    std::vector<std::vector<float>> snap;            // [nsnap][5·n] (成分 c の節点 i は c·n + i)
+};
+bool    tpuBegin(solverConfig& cfg, mesh& msh, variables& var, std::string& why);
+void    tpuArm(int phase);
+double* tpuSlots();
+void    tpuSnap(const char* label);
+bool    tpuCollect(TpuDiagData& out);
 
 // 原始量 φ = ρφ/ρ を全セル (ghost 含む) について更新する。スカラ移流の上流値に使う。
 void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);

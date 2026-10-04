@@ -164,6 +164,8 @@ struct TpCellOut {
     // 診断 (condTwoPhaseDiag, #1b-r1; 読むだけ): 制限前 (緩和後) の増分と θ を決めた制限
     float  dv, dg, dq[TP_NQ];
     int    reason;                   // 0 = 制限なし (θ=1), 1 = 蒸気の非負, 2 = 液の非負, 3 = dg_max, 4 = dT_max
+    // 診断 G3-b (FORGE_DIAG_TP_UPDATE; 読むだけ): 実効 θ (float) と、下限・vround を掛ける前の格納候補 (本番の演算で作った値をそのまま写す)
+    float  Th, candW, candG, candQ[TP_NQ];
 };
 
 // thetaRound: θ (double) を float にするときの丸め。1 = 切り上がったら 0 側の隣の float へ (安全側; 既定)、0 = 最近接 (#4e; 判別用)。
@@ -211,15 +213,18 @@ TP_HD inline void tp_vl_update(const TpCellIn& c, TpCellOut& o, int thetaRound =
     o.withheld_v = (1.0 - th)*fabs((double)dv);
     o.withheld_g = (1.0 - th)*fabs((double)dg);
     o.qcut = 0.0; o.vround = 0.0; o.wfloor = 0.0;
+    o.Th = Th;
     for (int m = 0; m < TP_NQ; ++m) {
         float d = Th*dq[m];
         const float nq = c.rQ[m] + d;
+        o.candQ[m] = nq;
         o.qc[m] = 0.0;
         if (nq < 0.0f) { o.qcut += -(double)nq; o.qc[m] = -(double)nq; d = -c.rQ[m]; }
         o.rQ[m] = c.rQ[m] + d;
     }
     const float gnew = c.rg + Th*dg;
     float wnew = c.rYw + (Th*dv + Th*dg);
+    o.candG = gnew; o.candW = wnew;
     if (c.noNonneg == 0) {
         if (wnew - gnew < 0.0f) { o.vround += (double)(gnew - wnew); wnew = gnew; }
     } else if (wnew < 0.0f) {   // #4h: 総水分だけ下限 (液は削らない; 後段で総水分に対して射影)

@@ -319,7 +319,8 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
                 var.c_d["T"], var.c_d["P"], g_condTables, cprops,
                 var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i], condRealizViolCounter(),
                 condClampBudget(s), periodicNodeActive(cfg, msh) ? msh.periodicRoot_d : nullptr, var.c_d["volume"], doProject,
-                condCorrReasons(s), (s == 0) ? tcArmedAcc() : nullptr);
+                condCorrReasons(s), (s == 0) ? tcArmedAcc() : nullptr,
+                (s == 0) ? tpuSlots() : nullptr);   // 診断 G3-b (既定 nullptr)
         } else
         cond_realizability_clamp_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells, var.c_d["ro"], roY_w,
@@ -463,7 +464,8 @@ void condensationTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConf
                     passive_limCorr_cell_ptr(q0+4*s+0), passive_limCorr_cell_ptr(q0+4*s+1), passive_limCorr_cell_ptr(q0+4*s+2), passive_limCorr_cell_ptr(q0+4*s+3),
                     passive_lim_stats_ptr(q0+4*s+0) /* 連続 4 スロットではないので kernel 側は stride 8 で書く */, passive_periodic_root(cfg, msh),
                     // dual-time: dg_max/dT_max の閾値クランプは各物理 step の初回 sub-iter だけ (plan §5.1 #18); 定常は常に (不変)
-                    (cfg.unsteady == 1 && cfg.dualTime == 1) ? ((cfg.dualTimeSubIter == 0) ? 1 : 0) : 1);
+                    (cfg.unsteady == 1 && cfg.dualTime == 1) ? ((cfg.dualTimeSubIter == 0) ? 1 : 0) : 1,
+                    (s == 0) ? tpuSlots() : nullptr);   // 診断 G3-b (既定 nullptr)
             }
         } else {
             if (loop == 0) {
@@ -487,10 +489,14 @@ void condensationTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConf
         }
         gpuErrchk( cudaPeekAtLastError() );
         gpuErrchkKernelSync();
+        tpuSnap("cm_commit");   // 診断 G3-b (記録中のみ; 既定は何もしない)
         const bool rec = passiveRecordStage(cfg, loop);
         passiveAddRhoTerm_d_wrapper(cfg, cuda_cfg, msh, var, q0, nq);              // + φ_N δρ (#19)
+        tpuSnap("add_rho");
         passiveLimitIncrement_d_wrapper(cfg, cuda_cfg, msh, var, q0, nq, rec);   // θ_b 増分スケーリング (M5; 輸送増分 z に対して)
+        tpuSnap("limit_increment");
         passiveBounds_d_wrapper(cfg, cuda_cfg, msh, var, q0, nq, rec);           // ρφ >= 0 と補正収支 (最後の砦)
+        tpuSnap("passive_floor");
         passiveMirrorPeriodic_d_wrapper(cfg, cuda_cfg, msh, var);
         return;
     }
@@ -795,7 +801,8 @@ __global__ void twophase_vl_update_d(
     double* stats, int* thetaMin, double* limStats_g, const geom_int* root,
     double* diag,   // 診断 (condTwoPhaseDiag; nullptr で書かない): TPD_* 列 × nCells
     const flow_float* inc, geom_int nIncStride,   // #4g: DPLUR の増分 [q*nIncStride + ic] (q = 蒸気, 液, Q2, Q1, Q0); nullptr なら点対角
-    int noNonneg, double* tcAcc)   // #4h: 非負制限 θ_vg を外す / 補正計測 (段 0 = commit 内の補正と分母; nullptr で計測しない)
+    int noNonneg, double* tcAcc,   // #4h: 非負制限 θ_vg を外す / 補正計測 (段 0 = commit 内の補正と分母; nullptr で計測しない)
+    double* tpu)                   // 診断 G3-b (FORGE_DIAG_TP_UPDATE; 既定 nullptr): commit の before・δ・候補・after を成分 0..4 で記録
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -840,6 +847,17 @@ __global__ void twophase_vl_update_d(
         diag[15*n + ic] = c.Rw; diag[16*n + ic] = c.Rg;
         diag[17*n + ic] = (double)(c.M + c.Dv); diag[18*n + ic] = (double)(c.M + c.Dg + c.V*c.sjg);
         for (int m = 0; m < TP_NQ; ++m) diag[(19 + m)*n + ic] = (double)(c.M + c.DQ[m] + c.V*c.sjQ[m]);
+    }
+    if (tpu != nullptr) {
+        // δq_limited (double) = 実効 θ (float) × 緩和後の増分 (float) を double で (積は厳密)。総水分は蒸気 + 液の増分の和。
+        // 参考の float 増分は非融合の評価 (__fmul_rn/__fadd_rn)。本番は c.rg + Th·dg を FMA に融合しうるので、本番の「float の増分」は存在しないことがある。
+        const double Thd = (double)o.Th;
+        const double dW = Thd*(double)o.dv + Thd*(double)o.dg;
+        const float  dWf = __fadd_rn(__fmul_rn(o.Th, o.dv), __fmul_rn(o.Th, o.dg));
+        tpu_commit(tpu, TPU_OP_TPC, 1, 0, nCells, ic, c.rYw, dW, dWf, o.candW, o.rYw);
+        tpu_commit(tpu, TPU_OP_TPC, 1, 1, nCells, ic, c.rg, Thd*(double)o.dg, __fmul_rn(o.Th, o.dg), o.candG, o.rg);
+        for (int m = 0; m < TP_NQ; ++m)
+            tpu_commit(tpu, TPU_OP_TPC, 1, 2 + m, nCells, ic, c.rQ[m], Thd*(double)o.dq[m], __fmul_rn(o.Th, o.dq[m]), o.candQ[m], o.rQ[m]);
     }
     roYw[ic] = o.rYw; g[ic] = o.rg; Q2[ic] = o.rQ[0]; Q1[ic] = o.rQ[1]; Q0[ic] = o.rQ[2];
     diagLim[ic] = (flow_float)o.theta;
@@ -1297,11 +1315,13 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
         var.c_d["transport_diag_g_0"], var.c_d["transport_diag_Q2_0"], var.c_d["transport_diag_Q1_0"], var.c_d["transport_diag_Q0_0"],
         var.c_d["condLim_0"], var.c_d["condClampCorr_0"], var.c_d["condClampCorrQ_0"],
         g_tp_stats_dev, g_tp_thetaMin_dev, passive_lim_stats_ptr(q0), passive_periodic_root(cfg, msh),
-        g_tpd_cell, inc, msh.nCells_all, (cfg.condTwoPhaseNonnegLimit == 0) ? 1 : 0, tcAcc);
+        g_tpd_cell, inc, msh.nCells_all, (cfg.condTwoPhaseNonnegLimit == 0) ? 1 : 0, tcAcc, tpuSlots());
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+    tpuSnap("tp_commit");   // 診断 G3-b (記録中のみ; 既定は何もしない)
     // 再正規化 (係数を液・Q にも) → 受動種の最後の砦 (floor と収支の記録; 通常は無作用) → 周期ミラー
     speciesRenormalizeTwoPhase_d_wrapper(cfg, cuda_cfg, msh, var);
+    tpuSnap("tp_renorm");
     if (g_tpd_cell != nullptr) {   // 診断: 末尾 200 更新の θ = 0 (θ < 1) セルを記録、区間の固有セルの印 (読むだけ)
         const int inWindow = twoPhaseDiagInWindow(cfg) ? 1 : 0;
         if (inWindow && cfg.condTwoPhaseDiag == 3) tpdBProcess(cfg, msh, var, g_tpd_nupd);   // #1b-r2: 組立 A/B の比較 (host; 読むだけ)
@@ -1311,6 +1331,7 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
         ++g_tpd_nupd;
     }
     passiveBounds_d_wrapper(cfg, cuda_cfg, msh, var, q0, (int)var.condMomentConsNames.size(), true, tcAcc);
+    tpuSnap("passive_floor");
     passiveMirrorPeriodic_d_wrapper(cfg, cuda_cfg, msh, var);
 }
 
@@ -1458,4 +1479,78 @@ void twoPhaseDiagWrite(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, varia
            fc.c_str(), fs.c_str(), W, N, tot, cells.size(), W ? (double)tot/(double)W : 0.0, npers ? pers/(double)npers : 0.0,
            (nrec > g_tpd_cap) ? nrec - g_tpd_cap : 0ULL);
     fflush(stdout);
+}
+
+// =============================================================================
+// 診断 G3-b (更新写像の収支; FORGE_DIAG_TP_UPDATE=<出力 h5>、既定 off; plan condensation-two-phase-default §5.1 #4g3)。
+//   main の runTpUpdateDiag が tpuBegin → tpuArm(1) [前処理] → tpuArm(2) [1 更新] → tpuCollect の順に呼ぶ。
+//   本番カーネルは tpuSlots() が非 null のときだけ実際に読んだ値・書いた値をスロットへ写す (演算は変えない)。
+//   通常の計算では tpuBegin が呼ばれないので tpuSlots() は nullptr、tpuSnap は何もしない。
+// =============================================================================
+namespace {
+struct TpuState {
+    bool on = false; int phase = 0; geom_int n = 0; int iw = -1;
+    double* buf[2] = {nullptr, nullptr};
+    variables* var = nullptr;
+    std::vector<std::string> comp;   // 成分の保存量名 (roY<iw>, rog_0, roQ2_0, roQ1_0, roQ0_0)
+    std::vector<std::string> snapLabel; std::vector<int> snapPhase; std::vector<std::vector<float>> snap;
+};
+TpuState g_tpu;
+}  // namespace
+
+bool tpuBegin(solverConfig& cfg, mesh& msh, variables& var, std::string& why)
+{
+    // 記録点を入れた経路だけを通す (それ以外は記録が欠けて収支が閉じないので、黙って進めずに拒否する)
+    if (!condensationEnabled(var) || var.nCondSpeciesRegistered != 1) { why = "condensation with exactly one condensing species is required"; return false; }
+    if (cfg.condGasSpecies < 0 || cfg.thermalMethod != 2 || var.nSpeciesRegistered < 2) { why = "TP carrier condensation (condGasSpecies >= 0, thermalMethod 2) is required"; return false; }
+    if (cfg.timeIntegration != 11 || cfg.unsteady != 0) { why = "steady implicit (timeIntegration 11, unsteady 0) only"; return false; }
+    if (cfg.discretization != "node") { why = "node discretization only (the instrumented and validated path)"; return false; }
+    if (cfg.passiveScalarScheme != 1) { why = "passiveScalarScheme 1 only"; return false; }
+    if (cfg.speciesImplicitCoupling != 1) { why = "speciesImplicitCoupling 1 only (the species commit is instrumented in the scalar-DPLUR commit)"; return false; }
+    if (cfg.condEquilibrium != 0 || cfg.condLimiterMode != 1) { why = "non-equilibrium condensation with condLimiterMode 1 only"; return false; }
+    if (cfg.condFloat == 0 || !g_condTables.valid) { why = "condFloat 1 with valid tables only (the float realizability clamp is instrumented)"; return false; }
+    if (!condTwoPhaseDiffusionActive(cfg) && cfg.passiveImplicitCoupling != 1) { why = "OFF arm requires passiveImplicitCoupling 1 (the DPLUR moment increment)"; return false; }
+    g_tpu = TpuState{};
+    g_tpu.n = msh.nCells; g_tpu.iw = cfg.condGasSpecies; g_tpu.var = &var;
+    g_tpu.comp = {"roY" + std::to_string(cfg.condGasSpecies), "rog_0", "roQ2_0", "roQ1_0", "roQ0_0"};
+    for (const auto& k : g_tpu.comp) {
+        auto it = var.c_d.find(k);
+        if (it == var.c_d.end() || it->second == nullptr) { why = "conservative array " + k + " is not registered"; return false; }
+    }
+    const size_t bytes = (size_t)TPU_NSLOT*(size_t)g_tpu.n*sizeof(double);
+    for (int b = 0; b < 2; ++b) {
+        gpuErrchk( cudaMalloc((void**)&g_tpu.buf[b], bytes) );
+        gpuErrchk( cudaMemset(g_tpu.buf[b], 0xFF, bytes) );   // 全ビット 1 = NaN (書かれないスロットはその操作が経路に無い)
+    }
+    g_tpu.on = true;
+    std::printf("[tp-update] slots: %d per node x %ld nodes x 2 buffers (%.1f MB)\n", TPU_NSLOT, (long)g_tpu.n, 2.0*(double)bytes/1.0e6);
+    return true;
+}
+
+void tpuArm(int phase) { g_tpu.phase = g_tpu.on ? phase : 0; }
+
+double* tpuSlots() { return (g_tpu.on && g_tpu.phase > 0) ? g_tpu.buf[g_tpu.phase - 1] : nullptr; }
+
+void tpuSnap(const char* label)
+{
+    if (!g_tpu.on || g_tpu.phase == 0) return;
+    gpuErrchk( cudaDeviceSynchronize() );
+    const size_t n = (size_t)g_tpu.n;
+    std::vector<float> h((size_t)TPU_NC*n);
+    for (int c = 0; c < TPU_NC; ++c)
+        gpuErrchk( cudaMemcpy(h.data() + (size_t)c*n, g_tpu.var->c_d[g_tpu.comp[c]], n*sizeof(float), cudaMemcpyDeviceToHost) );
+    g_tpu.snapLabel.push_back(label); g_tpu.snapPhase.push_back(g_tpu.phase); g_tpu.snap.push_back(std::move(h));
+}
+
+bool tpuCollect(TpuDiagData& out)
+{
+    if (!g_tpu.on) return false;
+    gpuErrchk( cudaDeviceSynchronize() );
+    const size_t cnt = (size_t)TPU_NSLOT*(size_t)g_tpu.n;
+    out.n = (long)g_tpu.n; out.iw = g_tpu.iw;
+    out.pre.resize(cnt); out.upd.resize(cnt);
+    gpuErrchk( cudaMemcpy(out.pre.data(), g_tpu.buf[0], cnt*sizeof(double), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(out.upd.data(), g_tpu.buf[1], cnt*sizeof(double), cudaMemcpyDeviceToHost) );
+    out.snapLabel = g_tpu.snapLabel; out.snapPhase = g_tpu.snapPhase; out.snap = g_tpu.snap;
+    return true;
 }

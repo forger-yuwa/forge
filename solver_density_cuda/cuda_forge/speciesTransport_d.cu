@@ -13,6 +13,7 @@
 #include "twoPhaseDiffusion_d.cuh"      // 二相拡散の面流束 (plan condensation-two-phase-transport §4.2, #4e)
 #include "twoPhaseFaceDiag_d.cuh"       // 診断 D1 の面の中間量 (FORGE_DIAG_TP_FACES; plan condensation-two-phase-default #4)
 #include "renormGate_d.cuh"              // 再正規化の受入ゲートの計測 (#1b-pre)
+#include "twoPhaseUpdateDiag_d.cuh"      // 診断 G3-b の記録スロット (FORGE_DIAG_TP_UPDATE; plan condensation-two-phase-default #4g3)
 
 #include <cmath>
 #include <cstdio>
@@ -168,11 +169,13 @@ __global__ void species_renormalize_d(
     flow_float** roY,
     flow_float* ro,
     double* reasons, int iw, const geom_float* vol, const geom_int* root,
-    double* rnAcc, flow_float** rophiRO)   // 受入ゲートの計測 (#1b-pre; nullptr で計測しない)。rophiRO: 液・Q (読むだけ; この経路は液に掛けない)
+    double* rnAcc, flow_float** rophiRO,   // 受入ゲートの計測 (#1b-pre; nullptr で計測しない)。rophiRO: 液・Q (読むだけ; この経路は液に掛けない)
+    double* tpu = nullptr, int iwTpu = -1)   // 診断 G3-b (既定 nullptr): 水 (iwTpu) の負値の 0 化と係数の乗算を before/after で記録
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic < nCells) {
         const double qw_m = (rnAcc != nullptr && iw >= 0) ? (double)roY[iw][ic] : 0.0;   // 再正規化の直前 (負値の 0 化の前)
+        const flow_float tpu_w0 = (tpu != nullptr && iwTpu >= 0) ? roY[iwTpu][ic] : (flow_float)0.0;
         double sum = 0.0;
         for (int s = 0; s < nSpecies; s++) {
             flow_float v = roY[s][ic];
@@ -182,8 +185,14 @@ __global__ void species_renormalize_d(
         }
         const double factor = (double)ro[ic] / (sum > (double)kSmall ? sum : (double)kSmall);
         const flow_float yw_in = (reasons != nullptr && iw >= 0) ? roY[iw][ic] : (flow_float)0.0;   // クランプ前の値ではなく ≥0 化後
+        const flow_float tpu_w1 = (tpu != nullptr && iwTpu >= 0) ? roY[iwTpu][ic] : (flow_float)0.0;
         for (int s = 0; s < nSpecies; s++) {
             roY[s][ic] = (flow_float)((double)roY[s][ic] * factor);
+        }
+        if (tpu != nullptr && iwTpu >= 0) {
+            tpu_ba(tpu, TPU_OP_RNF, 0, nCells, ic, (double)tpu_w0, (double)tpu_w1);
+            tpu_ba(tpu, TPU_OP_RNS, 0, nCells, ic, (double)tpu_w1, (double)roY[iwTpu][ic]);
+            tpu_put(tpu, TPU_RN_FACTOR, nCells, ic, factor);
         }
         if (reasons != nullptr && iw >= 0 && (root == nullptr || root[ic] == ic)) {
             const double d = fabs((double)roY[iw][ic] - (double)yw_in);
@@ -474,15 +483,20 @@ __global__ void species_dplur_solve_d(
 
 // 緩和整合 scalar-DPLUR の commit: ρY_s = ρY_s^N + δ(ρY_s)。実現可能性フロア (ρY_s>=0)。
 // Σ_s ρY_s = ρ の再正規化は呼び出し側 (speciesRenormalize_d_wrapper) が行う。
+// tpu (診断 G3-b; 既定 nullptr): 水の commit の before・δ・格納前の候補 fl(ρY_N + δ)・after を記録する (演算は同じ式)。
 __global__ void species_commit_correction_d(
     geom_int nCells,
     flow_float* roY,
     flow_float* roYN,
-    flow_float* dq)
+    flow_float* dq,
+    double* tpu = nullptr)
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic < nCells) {
-        roY[ic] = max(roYN[ic] + dq[ic], static_cast<flow_float>(0.0));
+        const flow_float cand = roYN[ic] + dq[ic];
+        roY[ic] = max(cand, static_cast<flow_float>(0.0));
+        if (tpu != nullptr)
+            tpu_commit(tpu, TPU_OP_SPC, 0, 0, nCells, ic, roYN[ic], (double)dq[ic], dq[ic], cand, roY[ic]);
     }
 }
 
@@ -948,7 +962,8 @@ void speciesRenormalize_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
         g_nSpecies,
         g_roY_dev,
         var.c_d["ro"],
-        reasonsRn, iwRn, var.c_d["volume"], passive_periodic_root(cfg, msh), rnAcc, mom);
+        reasonsRn, iwRn, var.c_d["volume"], passive_periodic_root(cfg, msh), rnAcc, mom,
+        tpuSlots(), cfg.condGasSpecies);   // 診断 G3-b (既定 nullptr)
     if (rnAcc != nullptr) rngEnd(cuda_cfg);
 
     gpuErrchk( cudaPeekAtLastError() );
@@ -1006,7 +1021,8 @@ void speciesImplicitDPLURSolve_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg
             msh.nCells,
             var.c_d["roY"+i],
             var.c_d["roY"+i+"N"],
-            var.c_d["dq_roY"+i+"_old"]);
+            var.c_d["dq_roY"+i+"_old"],
+            (s == cfg.condGasSpecies) ? tpuSlots() : nullptr);   // 診断 G3-b (既定 nullptr)
     }
 
     gpuErrchk( cudaPeekAtLastError() );
@@ -1440,6 +1456,8 @@ const geom_int* passive_periodic_root(solverConfig& cfg, mesh& msh)
 }
 flow_float* passive_limCorr_cell_ptr(int q) { return (q >= 0 && q < g_nPassive) ? h_p_limc[q] : nullptr; }
 double*     passive_lim_stats_ptr(int q)    { return (q >= 0 && q < g_nPassive) ? g_p_stats_dev + (size_t)q*8 + 4 : nullptr; }
+// 診断 G3-b: 受動種 q が凝縮種 0 のモーメント (g, Q2, Q1, Q0) なら成分番号 1..4、それ以外は −1 (記録しない)。
+static int tpuMomentComp(int q) { return (g_qMom0 >= 0 && q >= g_qMom0 && q < g_qMom0 + 4) ? 1 + (q - g_qMom0) : -1; }
 
 void passiveSaveRhoPre_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
@@ -1455,7 +1473,8 @@ void passiveAddRhoTerm_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
 {
     if (!passiveSchemeEnabled(cfg) || cfg.timeIntegration != 11 || !g_p_roPre_valid) return;
     for (int q = q0; q < q0+nq; ++q) {
-        passive_add_rho_term_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(msh.nCells, h_p_rophi[q], h_p_rophiN[q], g_p_roPre_dev, var.c_d["ro"]);
+        passive_add_rho_term_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(msh.nCells, h_p_rophi[q], h_p_rophiN[q], g_p_roPre_dev, var.c_d["ro"],
+            tpuSlots(), tpuMomentComp(q));   // 診断 G3-b (既定 nullptr)
     }
     gpuErrchk( cudaPeekAtLastError() );
 }
@@ -1478,7 +1497,8 @@ void passiveLimitIncrement_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
         passive_limit_increment_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
             msh.nCells, h_p_rophi[q], h_p_rophiN[q], (q == g_qTracer) ? 1 : 0, var.c_d["ro"], var.c_d["volume"],
             record ? h_p_limc[q] : nullptr, record ? g_p_stats_dev + (size_t)q*8 + 4 : s_scratch, record ? g_p_thetaMin_dev + q : s_scratchI, root,
-            (cfg.timeIntegration == 11 && g_p_roPre_valid) ? g_p_roPre_dev : nullptr);
+            (cfg.timeIntegration == 11 && g_p_roPre_valid) ? g_p_roPre_dev : nullptr,
+            tpuSlots(), tpuMomentComp(q));   // 診断 G3-b (既定 nullptr)
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
@@ -1499,7 +1519,8 @@ void passiveBounds_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh,
         passive_bounds_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
             msh.nCells, h_p_rophi[q], (q == g_qTracer) ? 1 : 0, var.c_d["ro"], var.c_d["volume"],
             record ? h_p_corr[q] : nullptr, record ? g_p_stats_dev + (size_t)q*8 : s_scratch, root,
-            tcAcc, (tcAcc != nullptr && g_qMom0 >= 0 && q >= g_qMom0 && q < g_qMom0 + 4) ? 2 + (q - g_qMom0) : -1);
+            tcAcc, (tcAcc != nullptr && g_qMom0 >= 0 && q >= g_qMom0 && q < g_qMom0 + 4) ? 2 + (q - g_qMom0) : -1,
+            tpuSlots(), tpuMomentComp(q));   // 診断 G3-b (既定 nullptr)
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
@@ -2143,11 +2164,13 @@ __global__ void twophase_diffusion_d(
 __global__ void species_renormalize_liquid_d(
     geom_int nCells, int nSpecies, flow_float** roY, flow_float* ro,
     double* reasons, int iw, const geom_float* vol, const geom_int* root, flow_float** rophi, double* rnAcc,
-    double* diagRn)   // 診断 (condTwoPhaseDiag; nullptr で書かない): [ic] f−1, [nCells+ic] Δ(ρY_w), [2nCells+ic] Δ(ρg)
+    double* diagRn,   // 診断 (condTwoPhaseDiag; nullptr で書かない): [ic] f−1, [nCells+ic] Δ(ρY_w), [2nCells+ic] Δ(ρg)
+    double* tpu = nullptr, int iwTpu = -1)   // 診断 G3-b (既定 nullptr): 水の負値の 0 化・係数の乗算 (水・液・Q) を before/after で記録
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     const double qw_m = ((rnAcc != nullptr || diagRn != nullptr) && iw >= 0) ? (double)roY[iw][ic] : 0.0;   // 再正規化の直前 (負値の 0 化の前)
+    const flow_float tpu_w0 = (tpu != nullptr && iwTpu >= 0) ? roY[iwTpu][ic] : (flow_float)0.0;
     double sum = 0.0;
     for (int s = 0; s < nSpecies; s++) {
         flow_float v = roY[s][ic];
@@ -2157,9 +2180,16 @@ __global__ void species_renormalize_liquid_d(
     }
     const double factor = (double)ro[ic] / (sum > (double)kSmall ? sum : (double)kSmall);
     const flow_float yw_in = (reasons != nullptr && iw >= 0) ? roY[iw][ic] : (flow_float)0.0;
+    const flow_float tpu_w1 = (tpu != nullptr && iwTpu >= 0) ? roY[iwTpu][ic] : (flow_float)0.0;
     for (int s = 0; s < nSpecies; s++) roY[s][ic] = (flow_float)((double)roY[s][ic] * factor);
     double dl[1 + TP_NQ], qin[1 + TP_NQ];
     for (int m = 0; m < 1 + TP_NQ; ++m) { const flow_float in_ = rophi[m][ic]; qin[m] = (double)in_; rophi[m][ic] = (flow_float)((double)in_ * factor); dl[m] = fabs((double)rophi[m][ic] - (double)in_); }
+    if (tpu != nullptr && iwTpu >= 0) {   // 成分 1..4 = 液・Q2・Q1・Q0 (rophi の順と同じ)
+        tpu_ba(tpu, TPU_OP_RNF, 0, nCells, ic, (double)tpu_w0, (double)tpu_w1);
+        tpu_ba(tpu, TPU_OP_RNS, 0, nCells, ic, (double)tpu_w1, (double)roY[iwTpu][ic]);
+        for (int m = 0; m < 1 + TP_NQ; ++m) tpu_ba(tpu, TPU_OP_RNS, 1 + m, nCells, ic, qin[m], (double)rophi[m][ic]);
+        tpu_put(tpu, TPU_RN_FACTOR, nCells, ic, factor);
+    }
     if (diagRn != nullptr) {
         diagRn[ic] = factor - 1.0;
         diagRn[(size_t)nCells + ic] = (iw >= 0) ? ((double)roY[iw][ic] - qw_m) : 0.0;
@@ -2216,7 +2246,8 @@ void speciesRenormalizeTwoPhase_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cf
     double* rnAcc = (reasonsRn != nullptr) ? rngBegin() : nullptr;
     species_renormalize_liquid_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
         msh.nCells, g_nSpecies, g_roY_dev, var.c_d["ro"],
-        reasonsRn, iwRn, var.c_d["volume"], passive_periodic_root(cfg, msh), g_p_rophi_dev + g_qMom0, rnAcc, twoPhaseDiagRenormPtr());
+        reasonsRn, iwRn, var.c_d["volume"], passive_periodic_root(cfg, msh), g_p_rophi_dev + g_qMom0, rnAcc, twoPhaseDiagRenormPtr(),
+        tpuSlots(), cfg.condGasSpecies);   // 診断 G3-b (既定 nullptr)
     if (rnAcc != nullptr) rngEnd(cuda_cfg);
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

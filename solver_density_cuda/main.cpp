@@ -59,6 +59,7 @@
 #include "cuda_forge/speciesTransport_d.cuh"
 #include "cuda_forge/chemistrySource_d.cuh"
 #include "cuda_forge/condensationTransport_d.cuh"
+#include "cuda_forge/twoPhaseUpdateDiag_d.cuh"   // 診断 G3-b の記録スロットの配置 (FORGE_DIAG_TP_UPDATE; 名前表と定数だけ)
 #include "cuda_forge/tracerTransport_d.cuh"
 #include "cuda_forge/passiveTransport_d.cuh"
 #include "cuda_forge/gasPhaseComposition_d.cuh"   // gasPhaseLiquid (transport probe の液)
@@ -1844,6 +1845,7 @@ static void assembleResidualPre(StepContext& s)
     s.profiler.measureCuda(ProfileSection::GasProperties, [&]() {
         gasProperties_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     });
+    tpuSnap("pre_state");   // 診断 G3-b: 状態の射影・クランプの後、境界の上書きの前 (記録中のみ; 既定は何もしない)
     s.profiler.measureWall(ProfileSection::ApplyBconds, [&]() {
         applyBconds(s.cfg , s.cuda_cfg , s.msh , s.var, s.mat_ns , s.fluct);
     });
@@ -2227,11 +2229,16 @@ static void pdeAfterNormal(StepContext& s)
     }
 }
 
+// 診断 G3-b (FORGE_DIAG_TP_UPDATE): runTpUpdateDiag が組立を自分で (前処理・後処理を分けて) 通したあと、更新だけを 1 回行うための印。
+// 既定 false (通常の計算では立たない)。立っていたら 1 回だけ組立を飛ばして下ろす。
+static bool g_tpuSkipAssemblyOnce = false;
+
 // 残差 1 回構築 → 局所擬似時間 dτ → 古典 DPLUR 線形解 → Q への commit。
 void implicitNonlinearUpdate(StepContext& s, int inner_index)
 {
     // limiter-inlet-column-oscillation §5.1 #5e 診断 (既定 off): 窓内は共通入力から枝分かれして組み、A を残す
-    if (!pdeAssemble(s)) { assembleResidual(s, 1); pdeAfterNormal(s); }
+    if (g_tpuSkipAssemblyOnce) g_tpuSkipAssemblyOnce = false;   // 診断 G3-b: 組立は呼び出し側で済んでいる
+    else if (!pdeAssemble(s)) { assembleResidual(s, 1); pdeAfterNormal(s); }
     logResidualSnapshot(s, inner_index);
     // #1b-r2 診断 (condTwoPhaseDiag 3, 窓内だけ): 同じ状態・面値・係数・ソース値の double 組立 B (状態・組立 A は不変; 読むだけ)
     if (s.cfg.condTwoPhaseDiag == 3 && twoPhaseDiagInWindow(s.cfg)) {
@@ -2322,10 +2329,13 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
                     speciesTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
                 }
             }
+            tpuSnap("sp_commit");   // 診断 G3-b (記録中のみ; 既定は何もしない)
             if (twoPhase) {
                 twoPhaseHoldWater_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 水は更新前に戻す (液の後で commit)
+                tpuSnap("hold");   // 診断 G3-b: 水の戻し (化学種の commit を取り消す格納差; 記録中のみ)
             } else {
                 speciesRenormalize_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+                tpuSnap("sp_renorm");   // 診断 G3-b (記録中のみ)
                 periodicMirrorSpeciesState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // node 周期: 化学種状態を root→member (§4.1-5)
                 speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // Y=roY/ρ (出力/次残差用に同期)
             }
@@ -2349,6 +2359,7 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
         if (twoPhase || (s.cfg.timeIntegration == 11 && s.cfg.condLimiterMode == 1 && s.cfg.condEquilibrium == 0))
             condThetaScan_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, 1);
         condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // φ=ρφ/ρ (出力/次残差用に同期)
+        tpuSnap("realizability");   // 診断 G3-b: 実現可能性クランプの後 (記録中のみ; 既定は何もしない)
         if (twoPhase) twoPhaseCorrGateEnd();   // #4h: この更新の補正計測を閉じる (実現可能性クランプの後)
         // 受動トレーサ (segregated point-implicit)。tracer 無効で no-op。
         tracerUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
@@ -2851,6 +2862,153 @@ static int runTpFacesDiag(const char* path, solverConfig& cfg, cudaConfig& cuda_
     return 0;
 }
 
+// ---- 診断 G3-b (plans/active/condensation-two-phase-default.md §5.1 #4g3; FORGE_DIAG_TP_UPDATE=<出力 h5>, 既定 off) ---------------
+// 更新写像の収支: 再開状態から組立を 1 回 (前処理・後処理) 通し、前処理の格納差 (射影・クランプ・境界の上書き) を「前処理収支」として記録する。
+// 続けて本番と同じ設定で**外側の陰的更新を 1 回だけ**行い (implicitNonlinearUpdate; 組立は上で済んでいるので飛ばす)、
+// 本番カーネルが実際に読んだ値・書いた値を成分 (ρY_w, ρg, ρQ2, ρQ1, ρQ0) ごとに節点スロットへ書かせる
+// (commit の before・δq_limited・格納前の候補・after、各補正操作の before/after; 配置は twoPhaseUpdateDiag_d.cuh)。
+// 操作の境界ごとに格納値の写しも取る (記録点の欠落を後処理の E_bookkeeping で見るため)。h5 を書いて終了する (2 回目の更新・res 出力はしない)。
+// 積算・判定は notes/investigations/2026-10-04-twophase-g3/g3b_judge.py (double)。周期境界は包絡外なので拒否する。
+static int runTpUpdateDiag(const char* path, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, matrix& mat_ns, variables& var,
+                           fluct_variables& fluct, point_probes& pprobes, RuntimeProfiler& profiler,
+                           ResidualCsvLogger& residual_logger, ImplicitDiagLogger& implicit_diag_logger)
+{
+    bool hasPeriodic = (msh.nPeriodicMembers > 0);
+    for (auto& bc : msh.bconds) if (bc.bcondKind == "periodic") hasPeriodic = true;
+    if (hasPeriodic) {
+        fprintf(stderr, "[tp-update] refused: periodic boundaries are outside the two-phase diffusion envelope (plan condensation-two-phase-default §4-1)\n");
+        return EXIT_FAILURE;
+    }
+    {
+        std::string why;
+        if (!tpuBegin(cfg, msh, var, why)) { fprintf(stderr, "[tp-update] refused: %s\n", why.c_str()); return EXIT_FAILURE; }
+    }
+    const bool twoPhase = condTwoPhaseDiffusionActive(cfg);
+    printf("[tp-update] FORGE_DIAG_TP_UPDATE=%s: one pre-part + one post-part of the assembly, then exactly one outer implicit update (%s path), then exit\n",
+           path, twoPhase ? "two-phase ON" : "two-phase OFF");
+    StepContext s{cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger, 0};
+
+    // 前処理収支 (前処理のバッファ): init → pre_state (状態の射影・クランプ) → pre_end (境界の上書き) → post_end (後処理は状態を変えない)
+    tpuArm(1);
+    tpuSnap("init");
+    assembleResidualPre(s);
+    tpuSnap("pre_end");
+    assembleResidualPost(s);
+    tpuSnap("post_end");
+    // 更新写像 (更新のバッファ): upd_start (= q_before) → 本番の 1 更新 (各操作の境界で写し) → final (= q_after)
+    tpuArm(2);
+    tpuSnap("upd_start");
+    g_tpuSkipAssemblyOnce = true;
+    implicitNonlinearUpdate(s, 0);
+    applyNodeIsothermalWallPin(cfg , cuda_cfg , msh , var);   // advanceImplicitSteady と同じ (この 5 成分には触れない)
+    tpuSnap("final");
+    tpuArm(0);
+
+    TpuDiagData d;
+    if (!tpuCollect(d)) { fprintf(stderr, "[tp-update] internal error: no diagnostic state\n"); return EXIT_FAILURE; }
+    const size_t n = (size_t)d.n;
+    auto d2hReal = [&](const std::string& k) {
+        std::vector<float> v(n);
+        gpuErrchk( cudaMemcpy(v.data(), var.c_d[k], n*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+        return v;
+    };
+    auto present = [&](const std::string& k) { auto it = var.c_d.find(k); return it != var.c_d.end() && it->second != nullptr; };
+
+    // スロット名 (h5 の /slot_names; 行 = スロット番号)
+    std::vector<std::string> slotNames(TPU_NSLOT);
+    for (int op = 0; op < TPU_NOP; ++op)
+        for (int c = 0; c < TPU_NC; ++c)
+            for (int k = 0; k < 2; ++k) slotNames[TPU_BA(op, c, k)] = std::string(tpuOpName(op)) + "/" + tpuCompName(c) + (k == 0 ? "/before" : "/after");
+    const int commitOp[3] = {TPU_OP_SPC, TPU_OP_TPC, TPU_OP_CMC};
+    for (int ci = 0; ci < 3; ++ci)
+        for (int c = 0; c < TPU_NC; ++c)
+            for (int x = 0; x < TPU_NX; ++x) slotNames[TPU_XS(ci, c, x)] = std::string(tpuOpName(commitOp[ci])) + "/" + tpuCompName(c) + "/" + tpuXName(x);
+    slotNames[TPU_RN_FACTOR] = "RN_factor";
+
+    // 写しの照合 (要約): post_end と upd_start は一致するはず、更新全体の Σ V Δq と Σ V C_round (commit ごと) を出す
+    std::vector<float> vol = d2hReal("volume");
+    auto snapIdx = [&](const char* lab) { for (size_t i = 0; i < d.snapLabel.size(); ++i) if (d.snapLabel[i] == lab) return (int)i; return -1; };
+    const int iS = snapIdx("upd_start"), iF = snapIdx("final"), iP = snapIdx("post_end");
+    std::vector<std::string> summary;
+    {
+        char buf[512];
+        long nPostDiff = 0;
+        if (iP >= 0 && iS >= 0) for (size_t j = 0; j < (size_t)TPU_NC*n; ++j) if (std::memcmp(&d.snap[iP][j], &d.snap[iS][j], sizeof(float)) != 0) ++nPostDiff;
+        snprintf(buf, sizeof(buf), "[tp-update] post-part changed %ld stored values of the 5 components (expected 0)", nPostDiff);
+        summary.push_back(buf);
+        for (int c = 0; c < TPU_NC; ++c) {
+            double lhs = 0.0, dsum = 0.0, cr = 0.0; long nLost = 0;
+            for (size_t i = 0; i < n; ++i) {
+                const double V = (double)vol[i];
+                if (iS >= 0 && iF >= 0) lhs += V*((double)d.snap[iF][(size_t)c*n + i] - (double)d.snap[iS][(size_t)c*n + i]);
+                for (int ci = 0; ci < 3; ++ci) {
+                    const double dd = d.upd[(size_t)TPU_XS(ci, c, TPU_X_DELTA_D)*n + i];
+                    if (!std::isfinite(dd)) continue;
+                    if (twoPhase && c == 0 && ci == 0) continue;   // ON の水: 化学種の commit は戻されるので δ に数えない (hold と対で別表示)
+                    dsum += V*dd;
+                    cr += V*(d.upd[(size_t)TPU_XS(ci, c, TPU_X_CAND_F)*n + i] - d.upd[(size_t)TPU_XS(ci, c, TPU_X_CAND_D)*n + i]);
+                    if (d.upd[(size_t)TPU_XS(ci, c, TPU_X_LOST)*n + i] != 0.0) ++nLost;
+                }
+            }
+            snprintf(buf, sizeof(buf), "[tp-update] %-2s  sum V dq = %+.6e  sum V delta_limited = %+.6e  sum V C_round = %+.6e  increments lost to storage: %ld nodes",
+                     tpuCompName(c), lhs, dsum, cr, nLost);
+            summary.push_back(buf);
+        }
+    }
+
+    {
+        HighFive::File h5(path, HighFive::File::ReadWrite | HighFive::File::Create | HighFive::File::Truncate);
+        { auto ds = h5.createDataSet<double>("/pre/slots", HighFive::DataSpace({(size_t)TPU_NSLOT, n}));    ds.write_raw(d.pre.data()); }
+        { auto ds = h5.createDataSet<double>("/update/slots", HighFive::DataSpace({(size_t)TPU_NSLOT, n})); ds.write_raw(d.upd.data()); }
+        h5.createDataSet("/slot_names", slotNames);
+        {
+            const size_t ns = d.snap.size();
+            std::vector<float> all(ns*(size_t)TPU_NC*n);
+            for (size_t k = 0; k < ns; ++k) std::memcpy(all.data() + k*(size_t)TPU_NC*n, d.snap[k].data(), (size_t)TPU_NC*n*sizeof(float));
+            auto ds = h5.createDataSet<float>("/snap/data", HighFive::DataSpace({ns, (size_t)TPU_NC, n})); ds.write_raw(all.data());
+            h5.createDataSet("/snap/labels", d.snapLabel);
+            h5.createDataSet("/snap/phase", d.snapPhase);
+        }
+        h5.createDataSet("/node/volume", vol);
+        for (const char* k : {"ccx", "ccy", "ccz", "wall_dist", "scalarDirichletPin"})
+            if (present(k)) h5.createDataSet(std::string("/node/") + k, d2hReal(k));
+        std::vector<std::string> comps, ops;
+        for (int c = 0; c < TPU_NC; ++c) comps.push_back(tpuCompName(c));
+        for (int op = 0; op < TPU_NOP; ++op) ops.push_back(tpuOpName(op));
+        h5.createAttribute("components", comps);
+        h5.createAttribute("ops", ops);
+        h5.createAttribute("nNodes", (long)n);
+        h5.createAttribute("nSlots", (int)TPU_NSLOT);
+        h5.createAttribute("iw", d.iw);
+        h5.createAttribute("twophase_active", twoPhase ? 1 : 0);
+        h5.createAttribute("twophase_diffusion_state", cfg.condTwoPhaseDiffusionState);
+        h5.createAttribute("condTwoPhaseSolver", cfg.condTwoPhaseSolver);
+        h5.createAttribute("condTwoPhaseNonnegLimit", cfg.condTwoPhaseNonnegLimit);
+        h5.createAttribute("condTwoPhaseRelax", cfg.condTwoPhaseRelax);
+        h5.createAttribute("cfl_pseudo", (double)cfg.cfl_pseudo);
+        h5.createAttribute("implicitRelax", (double)cfg.implicitRelax);
+        h5.createAttribute("nStepInner", cfg.nStepInner);
+        h5.createAttribute("passiveImplicitRelax", (double)cfg.passiveImplicitRelax);
+        h5.createAttribute("input_value_file", cfg.valueFileName);
+        h5.createAttribute("species_names", cfg.speciesNames);
+        h5.createAttribute("eps32", 1.1920928955078125e-7);
+        h5.createAttribute("unit_roundoff_u", 5.9604644775390625e-8);
+        h5.createAttribute("note_identity",
+            std::string("per op: after - before (double of stored floats); commit ops: after - before = delta_d + C_round + C_floor, ")
+            + "C_round = cand_f - cand_d, cand_d = before + delta_d, C_floor = after - cand_f; NaN slot = op not on this path");
+        h5.createAttribute("note_fma",
+            std::string("delta_f_unfused is a non-fused float evaluation for reference only; the production expression (e.g. rg + Th*dg) may be ")
+            + "contracted to FMA, so no separately rounded float increment exists; delta_d (exact products of the float operands in double) is the budget term");
+        h5.createAttribute("summary", summary);
+    }
+    for (const auto& l : summary) printf("%s\n", l.c_str());
+    printf("[tp-update] snapshots:");
+    for (size_t i = 0; i < d.snapLabel.size(); ++i) printf(" %s", d.snapLabel[i].c_str());
+    printf("\n[tp-update] wrote %s (%ld nodes, %d slots); exiting after one update\n", path, d.n, TPU_NSLOT);
+    fflush(stdout);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     // --resolve-species: 化学種の解決済み記録だけ書いて終了 (GPU 不使用; plan thermophysics-solver-owned-species-db §4.3)
     for (int i = 1; i < argc; ++i) {
@@ -2976,6 +3134,10 @@ int main(int argc, char** argv) {
     // 診断 D1 (FORGE_DIAG_TP_FACES=<出力 h5>; 既定 off): 組立を 1 回だけ通した状態の面作用素 A/B を書いて終了する (時間更新・res_0 出力なし)。
     if (const char* e = getenv("FORGE_DIAG_TP_FACES"); e != nullptr && *e != '\0') {
         return runTpFacesDiag(e, cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger);
+    }
+    // 診断 G3-b (FORGE_DIAG_TP_UPDATE=<出力 h5>; 既定 off): 組立 1 回 + 外側の陰的更新 1 回の更新写像の記録を書いて終了する (res_0 出力なし)。
+    if (const char* e = getenv("FORGE_DIAG_TP_UPDATE"); e != nullptr && *e != '\0') {
+        return runTpUpdateDiag(e, cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger);
     }
 
     writeInitialOutputs(cfg , msh , var);
