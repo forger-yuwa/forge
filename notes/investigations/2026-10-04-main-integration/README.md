@@ -46,3 +46,8 @@ FAIL のときは main へ入れない (原因を切り分ける)。
 - run: AWS `~/forge-integ/case/16.nozzle_wys/run_0970`–`0984_integ_A{1,2,3}_*`、`~/forge-integ/case/44.vitiated_air_wt/run_0540`–`0544_integ_A4_*` (200 step の回帰専用、判定済み・破棄予定)。
 
 → 事前登録の条件をすべて満たした。main へは PR で入れる (ユーザ判断 2026-10-04)。
+
+## SERN 側の取り込み (2026-10-05)
+SERN セッションが main (77318d0e) を feature/sern-design に fast-forward で取り込んだ (衝突なし)。SERN 2D m6_on の回帰
+(`case/46` `run_1033_r11_1`、`FORGE_CUDA_BLOCKSIZE=128`) は R9b 3 本の平均と比べて 4 量ともノイズ床内で PASS (SERN 側の報告; 記録は sern-design 4607cfc9
+「Record R11」)。「統合ブランチ + 事前登録の回帰 + PR」の運用は SERN 側も了解。
