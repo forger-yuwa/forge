@@ -1,0 +1,11 @@
+
+=== /home/ubuntu/forge-species-tp/case/16.nozzle_wys/run_0565_g2_oncfl2_r2/twophase_series.csv  [121 rows, steps 0..48000]  -> STEADY ===
+  onset_c_g1e4_mm : tail mean=17.34  drift=0.0%/tail  fluct=0.0%            STEADY
+  g_exit_mw       : tail mean=0.01038  drift=0.0%/tail  fluct=0.0%          STEADY
+  pw_mean_x10     : tail mean=0.313  drift=0.0%/tail  fluct=0.0%            STEADY
+  pw42            : tail mean=0.3362  drift=0.0%/tail  fluct=0.0%           STEADY
+  pw52            : tail mean=0.3019  drift=0.0%/tail  fluct=0.0%           STEADY
+  Tw_mean_x10_K   : tail mean=280.7  drift=0.0%/tail  fluct=0.0%            STEADY
+  T_cond0_vmean_K : tail mean=223.3  drift=0.0%/tail  fluct=0.0%            STEADY
+
+OVERALL: ALL STEADY

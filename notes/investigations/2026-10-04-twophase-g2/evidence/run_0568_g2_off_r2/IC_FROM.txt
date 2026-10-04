@@ -1,0 +1,4 @@
+plan condensation-two-phase-default §5.1 #5p (G2) arm O run 2
+IC: run_0482 res_48000 (restart_field --force-species)
+config: run_0520_twophase_off_16k の設定 + 上記の腕の差分, 48000 step, 出力 400
+build 3d6e853f
