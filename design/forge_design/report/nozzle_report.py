@@ -83,9 +83,51 @@ def load_field(run, res=None):
     V["dpdx_nd"] = ddx(V["P"]) / V["P"]
     gx, gr = ddx(V["ro"]), ddr(V["ro"])
     V["schlieren"] = np.log10(np.maximum(np.hypot(gx, gr) / V["ro"], 1e-8))
+    if "g_0" in V and "condS_0" not in V:
+        try:
+            _saturation(run, V)
+        except BaseException as e:  # noqa: BLE001
+            print(f"[nozzle_report] 飽和量を作れない: {e}")
     if "condTsat_0" in V:
-        V["dT_sub"] = V["condTsat_0"] - V["T"]
+        V["dT_sub"] = np.where(V["condTsat_0"] > 0, V["condTsat_0"] - V["T"], np.nan)
     return dict(X=X, R=R, V=V, S=S, ni=ni, nj=nj, info=info, res=res)
+
+
+# ---- 飽和量 (凝縮 ON で condS_0 / condTsat_0 が出力に無いとき)。solver_density_cuda/tools/paraview/forge_filters.py の
+#      _h2o_psat_liquid / _tsat_newton / H2O_RV の写し (あちらは ParaView を import するのでここでは読めない)。
+#      forge の condensationProperties_d.cuh (Murphy & Koop 2005 過冷却液) と同じ式。
+H2O_RV = 461.5
+
+
+def _h2o_psat_liquid(T):
+    Tc = np.maximum(T, 120.0)
+    lnp = (54.842763 - 6763.22 / Tc - 4.210 * np.log(Tc) + 0.000367 * Tc
+           + np.tanh(0.0415 * (Tc - 218.8)) * (53.878 - 1331.22 / Tc - 9.44523 * np.log(Tc) + 0.014025 * Tc))
+    return np.exp(lnp)
+
+
+def _tsat_newton(psat_fn, pv, T_guess):
+    pv = np.asarray(pv, dtype=np.float64)
+    valid = pv > 1.0e-6
+    lnpv = np.log(np.where(valid, pv, 1.0))
+    T = np.where((T_guess > 50.0) & (T_guess < 1000.0), T_guess, 250.0).astype(np.float64)
+    h = 0.01
+    for _ in range(25):
+        f = np.log(np.maximum(psat_fn(T), 1.0e-300)) - lnpv
+        dfdT = (np.log(np.maximum(psat_fn(T + h), 1.0e-300)) - np.log(np.maximum(psat_fn(T - h), 1.0e-300))) / (2 * h)
+        T = np.clip(T - np.clip(f / np.maximum(dfdT, 1.0e-6), -0.3 * T, 0.3 * T), 50.0, 1000.0)
+    return np.where(valid, T, 0.0)
+
+
+def _saturation(run, V):
+    """H2O 凝縮の S と T_sat を T・ρ・Y・g から作る (forge cond_vapor_state と同じ p_v = ρ (Y_v − g) R_v T)。"""
+    sys.path.insert(0, str(TOOLS))
+    from forge_species import species_info
+    yv_name = species_info(str(run))["vapor_array"]
+    pv = V["ro"] * np.maximum(V[yv_name] - V.get("g_0", 0.0), 0.0) * H2O_RV * V["T"]
+    V["condS_0"] = pv / np.maximum(_h2o_psat_liquid(V["T"]), 1.0e-300)
+    V["condTsat_0"] = _tsat_newton(_h2o_psat_liquid, pv, V["T"])
+    V["_saturation_source"] = "post"
 
 
 def eta_line(F, key, eta, xq):
@@ -175,7 +217,15 @@ def metrics(run, F, euler=None):
     if euler is not None:
         try:
             from forge_design.metrics.deltastar import massflow_ratio
-            out["mdot_ratio_vs_euler"] = float(massflow_ratio(run, euler)["mdot_ratio"])
+            # 無次元 (r_t 単位) の流量 2π∫ρU_x r dr を x∈(−2.5, x_E) の中央値で比べる (r_t が違う run 同士でも比べられる)。
+            # metrics.deltastar.massflow_ratio は実寸化で r_t を 3 乗で掛けており (正しくは 2 乗)、r_t が同じ run 同士でしか比が正しくない。
+            from forge_design.metrics.deltastar import _load_structured
+            md = []
+            for rd in (run, euler):
+                d_ = _load_structured(rd); xs_ = d_["x"][:, 0]
+                m_ = 2 * np.pi * np.trapezoid(d_["q"] * d_["r"], d_["r"], axis=1)
+                md.append(float(np.median(m_[(xs_ > -2.5) & (xs_ < d_["info"]["x_E"])])))
+            out["mdot_ratio_vs_euler"] = md[0] / md[1]
         except Exception as e:  # noqa: BLE001
             out["mdot_ratio_vs_euler"] = f"未計算 ({e})"
     if "g_0" in F["V"]:
