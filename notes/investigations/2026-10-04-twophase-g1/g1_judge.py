@@ -153,7 +153,8 @@ def main():
         # plan condensation-two-phase-default §5.1 #4sr: 結果を見た後の改訂 (旧判定は上の行に残す)。
         # 液流束の非正規化数の絶対項 E_abs = (3·|ctg| + 1)·2^-150 (FTZ なしの段階的アンダーフロー)
         ctg = (col(d, "on_in/ct")[ev].astype(float) * col(d, "on_in/geo")[ev].astype(float))
-        eabs = (3.0 * np.abs(ctg) + 1.0) * 2.0 ** -150
+        u = 2.0 ** -24   # 単位丸め; E_abs は ctg・逆数の相対丸めと FMA 縮約を含めた上界 (plan #4sr の改訂導出)
+        eabs = (3.0 * (1.0 + u) ** 3 * np.abs(ctg) + 1.0) * 2.0 ** -150
         tl2 = tl + eabs
         okl2 = el <= tl2
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -202,7 +203,7 @@ def main():
     if not (np.all(np.isfinite(wd0[ev])) and np.all(np.isfinite(wd1[ev]))):
         if args.wall_dist_h5 is None:
             print("  wall_dist missing in the diag h5; pass --wall-dist-h5 (node field) — (iii) not evaluated")
-            return finish(v1, v2)
+            return finish(v1, v2_used)
         with h5py.File(args.wall_dist_h5, "r") as g:
             wdn = g[args.wall_dist_dataset][()].astype(float).ravel()
         ic0 = col(d, "face/ic0"); ic1 = col(d, "face/ic1")
@@ -252,9 +253,9 @@ def main():
     if not any_cell:
         print("RECORD (iii): 判定不能 (対象の面が無い)")
     else:
-        note = "" if v2 == "PASS" else " (ただし (ii) が PASS でないので診断未成立)"
+        note = "" if v2_used == "PASS" else " (ただし (ii) が PASS でないので診断未成立)"
         print(f"RECORD (iii): {'支持' if allsup else '棄却'}{note}")
-    return finish(v1, v2)
+    return finish(v1, v2_used)
 
 
 def finish(v1, v2):
