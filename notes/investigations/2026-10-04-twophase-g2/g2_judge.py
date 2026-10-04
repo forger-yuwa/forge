@@ -33,13 +33,25 @@ for a, ns in arms.items():
         gate = "n/a"
         if a in "PC":
             log = open(os.path.join(d, "forge_run.log"), errors="replace").read().split("\n")
-            vals = []
-            for st in ("commit", "passive_floor", "clamp"):
-                ls = [l for l in log if "[twophase-corr-gate]" in l and f"stage {st}" in l]
-                if ls:
-                    vals += [float(x) for x in re.findall(r"rho\w+ ([0-9.eE+-]+)", ls[-1])]
-            gate = "ok" if vals and max(vals) <= KAPPA else ("FAIL" if vals else "missing")
-        good = steady and nf == 0 and neg == 0 and rising == 0 and gate in ("ok", "n/a")
+            # codex 2026-10-04 (G3 設計の諮問) Major: FINAL 行の直後の段ブロックだけを読み、段の欠落はエラー、
+            # 射影・正式 VERDICT・非有限も記録する。合否は事前登録 (#4j (D)) どおり commit/floor/clamp ≤ κ、射影は記録のみ。
+            fi = [k for k, l in enumerate(log) if l.startswith("[twophase-corr-gate] FINAL")]
+            gate = "missing"
+            if fi:
+                blk = log[fi[-1]:fi[-1] + 8]
+                formal = re.search(r"VERDICT: (\w+)", blk[0]); nonf = re.search(r"nonfinite (\d+)", blk[0])
+                st = {}
+                for l in blk[1:]:
+                    m = re.search(r"stage (\S+)", l)
+                    if m: st[m.group(1)] = [float(x) for x in re.findall(r"rho\w+ ([0-9.eE+-]+)", l)]
+                need = ("commit", "passive_floor", "clamp")
+                if all(s in st and len(st[s]) == 6 for s in need) and nonf and int(nonf.group(1)) == 0:
+                    gated = max(max(st[s]) for s in need)
+                    proj = max(st.get("projection", [float("nan")]))
+                    gate = ("ok" if gated <= KAPPA else "FAIL") + f" (commit/floor/clamp max {gated:.2e}; projection {proj:.2e} recorded; formal VERDICT {formal.group(1) if formal else '?'})"
+                else:
+                    gate = "FAIL (stage missing or non-finite)"
+        good = steady and nf == 0 and neg == 0 and rising == 0 and (gate == "n/a" or gate.startswith("ok"))
         ok_all &= good
         print(f"{a} {name}: STEADY {steady} | nonfinite {nf} neg {neg} | RISING {rising} | corr-gate {gate} -> {'ok' if good else 'NOT OK'}")
 
