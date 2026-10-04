@@ -1,0 +1,101 @@
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0984_r5h_sens_alpha0: 最終 step 16000、末尾窓 20 標本
+   C_T             平均 0.8892220  a 3.72e-06  前窓差 1.06e-06 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705559  a 3.69e-06  前窓差 1.35e-06 (≤ 0.1ε: OK)
+   C_L             平均 0.0625883  a 1.55e-05  前窓差 8.80e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6440962  a 3.35e-04  前窓差 2.20e-04 (≤ 0.1ε: OK)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0985_r5h_sens_alpha1: 最終 step 16000、末尾窓 20 標本
+   C_T             平均 0.8892227  a 3.20e-06  前窓差 3.29e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705565  a 3.02e-06  前窓差 7.03e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0625917  a 1.28e-05  前窓差 1.05e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6441671  a 2.80e-04  前窓差 5.63e-05 (≤ 0.1ε: OK)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0986_r4d_g3_base: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892228  a 3.38e-06  前窓差 2.87e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705567  a 3.38e-06  前窓差 4.92e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0625905  a 1.41e-05  前窓差 2.57e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6441445  a 3.10e-04  前窓差 7.40e-05 (≤ 0.1ε: OK)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0987_r4d_g3_zapp075: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892284  a 2.96e-06  前窓差 1.63e-08 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705793  a 2.97e-06  前窓差 3.14e-06 (≤ 0.1ε: OK)
+   C_L             平均 0.0618806  a 1.37e-05  前窓差 4.15e-05 (≤ 0.1ε: OK)
+   C_M             平均 -1.6228593  a 2.90e-04  前窓差 1.23e-03 (≤ 0.1ε: NG)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0988_r4d_g3_zapp075_cont20k: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892285  a 2.04e-06  前窓差 2.56e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705795  a 2.04e-06  前窓差 2.69e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0618810  a 1.15e-05  前窓差 1.16e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6228715  a 2.50e-04  前窓差 2.70e-05 (≤ 0.1ε: OK)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0989_r4d_g3_zapp18: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892278  a 3.10e-06  前窓差 2.73e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705787  a 3.07e-06  前窓差 2.34e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0618842  a 1.06e-05  前窓差 1.14e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6229336  a 2.38e-04  前窓差 2.73e-05 (≤ 0.1ε: OK)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0990_r4d_g3_zapp35: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892268  a 3.16e-06  前窓差 1.46e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705776  a 3.13e-06  前窓差 1.23e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0618870  a 9.05e-06  前窓差 4.97e-07 (≤ 0.1ε: OK)
+   C_M             平均 -1.6229828  a 1.92e-04  前窓差 9.33e-06 (≤ 0.1ε: OK)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0992_ff_v3a_2p50_slip: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892232  a 2.89e-06  前窓差 6.49e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705571  a 2.82e-06  前窓差 6.39e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0625928  a 9.03e-06  前窓差 2.77e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6441951  a 1.93e-04  前窓差 6.08e-05 (≤ 0.1ε: OK)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0993_ff_v3a_2p50_ff: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892289  a 2.88e-06  前窓差 6.28e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705813  a 2.81e-06  前窓差 4.63e-06 (≤ 0.1ε: OK)
+   C_L             平均 0.0618214  a 1.22e-05  前窓差 2.90e-05 (≤ 0.1ε: OK)
+   C_M             平均 -1.6211579  a 2.65e-04  前窓差 8.39e-04 (≤ 0.1ε: NG)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0994_ff_v3b_3p42_ff: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892306  a 3.20e-06  前窓差 2.87e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705815  a 3.21e-06  前窓差 3.20e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0618801  a 1.38e-05  前窓差 2.63e-07 (≤ 0.1ε: OK)
+   C_M             平均 -1.6228598  a 3.04e-04  前窓差 6.92e-06 (≤ 0.1ε: OK)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0995_ff_v3b_4p35_ff: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892298  a 4.28e-06  前窓差 7.23e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705807  a 4.16e-06  前窓差 7.42e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0618780  a 1.76e-05  前窓差 3.35e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6228136  a 3.91e-04  前窓差 7.12e-05 (≤ 0.1ε: OK)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0996_ff_v3a_2p50_ff_cont20k: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892290  a 3.18e-06  前窓差 4.98e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705813  a 3.07e-06  前窓差 4.93e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0618221  a 9.74e-06  前窓差 1.35e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6211744  a 2.05e-04  前窓差 2.93e-05 (≤ 0.1ε: OK)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0997_ff_v3ic_A_from2p50: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892297  a 3.39e-06  前窓差 8.87e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705820  a 3.35e-06  前窓差 8.60e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0618225  a 1.31e-05  前窓差 1.90e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6211848  a 2.88e-04  前窓差 4.34e-05 (≤ 0.1ε: OK)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0998_ff_v3ic_B_from3p42: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892302  a 2.54e-06  前窓差 3.95e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705825  a 2.49e-06  前窓差 5.40e-08 (≤ 0.1ε: OK)
+   C_L             平均 0.0618254  a 1.54e-05  前窓差 4.69e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6212507  a 3.28e-04  前窓差 1.39e-04 (≤ 0.1ε: OK)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_0999_ff_g4_2p50_ff: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8891201  a 7.30e-07  前窓差 4.25e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8704071  a 2.34e-06  前窓差 2.22e-05 (≤ 0.1ε: OK)
+   C_L             平均 0.0613117  a 1.56e-05  前窓差 2.54e-04 (≤ 0.1ε: NG)
+   C_M             平均 -1.6055138  a 4.50e-04  前窓差 7.56e-03 (≤ 0.1ε: NG)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_1000_ff_g4_2p50_slip: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8891092  a 7.74e-07  前窓差 4.96e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8703350  a 6.43e-07  前窓差 3.14e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0639797  a 2.85e-06  前窓差 1.73e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6849083  a 6.58e-05  前窓差 4.33e-05 (≤ 0.1ε: OK)
+
+/home/ubuntu/forge-pgrad-new/case/46.sern_design/run_1001_ff_g4_2p50_ff_cont20k: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8891183  a 4.10e-07  前窓差 9.37e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8704032  a 7.24e-07  前窓差 1.45e-06 (≤ 0.1ε: OK)
+   C_L             平均 0.0613028  a 2.67e-06  前窓差 1.90e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6052876  a 5.38e-05  前窓差 3.15e-05 (≤ 0.1ε: OK)

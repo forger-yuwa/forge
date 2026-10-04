@@ -1,0 +1,30 @@
+######## m4_off
+run_0965_chidef_2d_m4_off_flag0 GATES PASS None sg lsq chi 0
+# run_0965_chidef_2d_m4_off_flag0/ct.csv: 72 行  終端 C_T 0.9789195  C_L -0.0316556  C_M 0.71706
+run_0966_chidef_2d_m4_off_omit GATES PASS None sg lsq chi 1
+# run_0966_chidef_2d_m4_off_omit/ct.csv: 72 行  終端 C_T 0.9788062  C_L -0.0306812  C_M 0.69748
+C_T             flag0 STEADY       flag1 STEADY       平均差 -0.000096  I_Δ [-0.000142, -0.000054]  許容 ±0.002  → 帯内
+C_T_with_shear  flag0 STEADY       flag1 STEADY       平均差 -0.000149  I_Δ [-0.000193, -0.000109]  許容 ±0.002  → 帯内
+C_L             flag0 OSCILLATING  flag1 OSCILLATING  平均差 +0.001051  I_Δ [+0.000878, +0.001208]  許容 ±0.002  → 帯内
+C_L_with_shear  flag0 OSCILLATING  flag1 OSCILLATING  平均差 +0.001044  I_Δ [+0.000870, +0.001201]  許容 ±0.002  → 帯内
+C_M             flag0 OSCILLATING  flag1 OSCILLATING  平均差 -0.021282  I_Δ [-0.024799, -0.017382]  許容 ±0.05  → 帯内
+全体 (最悪列): 帯内
+
+=== run_0966_chidef_2d_m4_off_omit  [last step 35999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===
+=== run_0965_chidef_2d_m4_off_flag0  [last step 35999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+=== run_0966_chidef_2d_m4_off_omit  [last step 35999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+######## m10_on
+run_0967_chidef_2d_m10_on_flag0 GATES PASS None sg lsq chi 0
+# run_0967_chidef_2d_m10_on_flag0/ct.csv: 72 行  終端 C_T 0.9346612  C_L 0.2013605  C_M -5.36982
+run_0968_chidef_2d_m10_on_omit GATES PASS None sg lsq chi 1
+# run_0968_chidef_2d_m10_on_omit/ct.csv: 72 行  終端 C_T 0.9344033  C_L 0.2026884  C_M -5.39722
+C_T             flag0 STEADY       flag1 STEADY       平均差 -0.000280  I_Δ [-0.000359, -0.000213]  許容 ±0.002  → 帯内
+C_T_with_shear  flag0 STEADY       flag1 STEADY       平均差 -0.000092  I_Δ [-0.000168, -0.000026]  許容 ±0.002  → 帯内
+C_L             flag0 STEADY       flag1 STEADY       平均差 +0.001245  I_Δ [+0.000965, +0.001514]  許容 ±0.002  → 帯内
+C_L_with_shear  flag0 STEADY       flag1 STEADY       平均差 +0.001255  I_Δ [+0.000973, +0.001527]  許容 ±0.002  → 帯内
+C_M             flag0 STEADY       flag1 STEADY       平均差 -0.025527  I_Δ [-0.031544, -0.019177]  許容 ±0.05  → 帯内
+全体 (最悪列): 帯内
+
+=== run_0968_chidef_2d_m10_on_omit  [last step 35999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===
+=== run_0967_chidef_2d_m10_on_flag0  [last step 35999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+=== run_0968_chidef_2d_m10_on_omit  [last step 35999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===

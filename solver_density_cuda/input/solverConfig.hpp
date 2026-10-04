@@ -1,11 +1,13 @@
 #pragma once
 
 #include "flowFormat.hpp"
+#include "speciesLump.hpp"   // SpeciesLumpSpec (同じディレクトリ)
 
 #include <iostream>
 #include <string>
 #include <vector>
 #include <map>
+#include <utility>
 
 #include "yaml-cpp/yaml.h"
 #include <stdexcept>
@@ -37,6 +39,44 @@ public:
     //   extraFields: level 0/1 に個別追加する名前 (output_cellValNames にあるもの)
     int outputLevel = 1;
     std::vector<std::string> outputExtraFields;
+    // CHT 界面診断 (output: {interfaceDiag: 1}, 既定 0 = 出さない)。壁面ダンプに
+    // iface_T1 / iface_d1 / iface_keff / iface_q_compact / iface_q_recon / iface_ok / iface_align を追加する。
+    // 定義と符号は conjugateWall.hpp と methods/boundary.md「共役熱伝達 (CHT)」が正本。
+    int interfaceDiag = 0;
+    // ソルバ内 CHT (Phase 2a, `conjugate:` ブロック + bcond `ints: {conjugate: 1}`)。
+    // 初版は node 限定・定常陰解法限定・薄肉の点ごと 1 次元抵抗 (local1d) のみ。
+    // 仕様は methods/boundary.md「共役熱伝達 (CHT)」、符号は conjugateWall.hpp。
+    int conjugateEnabled = 0;            // `conjugate:` ブロックの有無 (bcond 側の ints で個別に有効化)
+    std::string conjugateMode = "local1d";
+    double conjugateThickness = 0.0;     // t [m]
+    double conjugateKsolid = 0.0;        // k_s [W/mK]
+    std::string conjugateBackKind = "isothermal";   // isothermal | coolant | adiabatic
+    double conjugateTb = 300.0;          // 背面環境温度 [K]
+    double conjugateHc = 0.0;            // coolant: h_c [W/m2K]
+    int conjugateInterval = 50;          // K step ごとに更新
+    int conjugateWarmup = 0;             // 最初の N step は等温固定 (壁温を動かさない)
+    double conjugateRelax = 1.0;         // 追加緩和 (1.0 = 抵抗加重そのまま)
+    // 連成に渡す界面熱量の定義。既定 `q_eff` = 保存形 ($Q_f=\sum F^E-C$, plan §4.3 の正本)。
+    // `q_compact` は旧実装 (k_eff(T_1-T_w)/d_1 の抵抗加重平均) の再現用で、A/B のときだけ使う。
+    std::string conjugateFlux = "q_eff";
+    std::string conjugateSolidFile;      // fem2d: tools/solid_mesh_to_h5.py が作った固体 HDF5
+    // 更新に使う界面熱量を **N 更新の後方移動平均**にする (既定 1 = 平均しない)。
+    // 流体側に局所振動があるとき、瞬時値では界面ゲートが床に当たる (plan §5.1 #70)。
+    int    conjugateFluxAvg = 1;
+    // 固体行列を組み直して**分解し直す**しきい値 [K] (§4.6a)。k_s(T) の勾配は 0.11 %/K なので
+    // 1 K 凍結は作用素の 0.1 % 以下の摂動。組立ては毎回やる (残差を現在の k_s で測るため)。
+    double conjugateRefactorDT = 1.0;
+    double conjugateDfScale = 1.0;       // D_f の倍率 (発散したとき手で上げる。自動調整はしない)
+    // 界面ゲート (G-if) の許容。**run を投入する前に書く** = 結果を見てから決めない仕組み。
+    // ソルバが起動時に conjugate_gate.json に写し、tools/check_cht_interface.py がそれで判定する。
+    int    conjugateGateSet = 0;         // gate: ブロックが書かれたか
+    double conjugateGateEpsRel = 0.0;    // max|r|/max|Q_f|
+    double conjugateGateEpsAbs = 0.0;    // max|r|/A_i [W/m2]
+    double conjugateGateDtK    = 0.0;    // max|dTw| [K]
+    double conjugateGateTolSolid = -1.0; // 固体内部残差 [W/m] (省略時は判定しない)
+    int    conjugateGateNConsec = 0;     // 連続回数
+    // 第一内部点の整列度 |d·n|/|d| の下限 (これ未満は評価不能。tools/check_wall_resolution.py の --align-min と同義)
+    double interfaceDiagAlignMin = 0.5;
 
     int dtControl; // 0: use dt , 1: cfl
     flow_float totalTime=0.0;
@@ -58,6 +98,12 @@ public:
     // blockDPLUR==1 専用・lowMachPrecond>=2 とは併用不可 (config 検証で拒否)。
     // plans/active/time_integration-line-implicit.md
     int lineImplicit = 0;
+    // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.3)。
+    // 1: Q (ro..roe) の正本を内点 CV だけの FP64 配列に置き、commit を Qacc += dq (FP64) で行う。
+    //    Q 自体は float32 のまま全カーネルが読む。step 末尾の reconcile で、FP32 の別 writer が
+    //    書き換えたセルだけ Qacc を追従させる。**残余ゼロなら OFF とビット同一**。
+    // 既定 0: 対応経路 (timeIntegration 11 && unsteady 0) 以外は起動時に拒否する。
+    int qAccumulatorFP64 = 0;
     // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md)。lineImplicit==1 専用。
     int lineKFreeze = 0;              // 1: dual-time サブ反復間で K/diag/LU を凍結 (subiter 0 のみ構築)
     int lineViscCoupling = 0;         // 1: line 面にスカラー粘性結合 K+=α·I (対角 2α→α)
@@ -233,6 +279,33 @@ public:
 
     flow_float  convMethod;
     int limiter;    // 0: off, 1: Barth-Jespersen, 2: Venkata, -1: legacy
+    // リミッタの試行値を、流束が実際に適用する増分と同じ形・同じ点で評価する (既定 0 = 従来の式)。
+    // 0: 従来 (双対面重心で g·d のみ評価) / 1: 流束と一致 (node はエッジ中点、convMethod 2 は隣接値差の項も含む)
+    // 根拠と設計は plans/active/convection-node-wall-reconstruction.md §4.8。SU2 は既定でこの一致形。
+    int limiterMatchRecon = 0;
+
+    // Venkatakrishnan の平滑化を**無次元化**する (既定 0 = 従来の式のまま)。
+    // 現行は eps2 = K^3 * volume を**次元付きの** delta と比べており、閾値 sqrt(volume) が
+    // 変数の値と同じ大きさになると一切制限されない (plan convection-node-wall-reconstruction §4.11/§4.13)。
+    // 1 のとき: delta を run 中固定の物理参照値で割り (ro_ref / p_ref / 速度は共通の a_ref)、
+    //           eps2 = (venkatK * h_i / limiterRefLength)^3 とする。h_i は半径重み前の面積の平方根 (2D/軸対称)
+    //           または体積の立方根 (3D)。式の余分な delta_m 因子も約分する。対象は流れ 5 変数・node のみ。
+    // 0: 現行 (次元付き eps2 = K^3*volume) / 1: 無次元化した差 + eps2=(K h_i/L_ref)^3 /
+    // 2: **比の形** psi(y), y=delta_p/delta_m (基準値も長さも不要。venkatK を無次元 eps として使う)
+    int limiterScaled = 0;
+    double venkatK = 1.0;             // Venkatakrishnan の K (SU2 の VENKAT_LIMITER_COEFF 相当。既定は現行の 1.0)
+    double limiterRefLength = 0.0;    // 無次元化の基準長 [m]。0 = メッシュ境界箱の対角から自動
+    // 無次元化の基準。**明示指定 (>0) が最優先**、0 のときだけ起動時に初期場から決める。
+    // 自動のままだと restart のたびに値が変わり「同じ設定の分割実行」が同じ作用素にならない
+    // (codex plan-3 Major 6)。分割実行を連続実行に一致させたいときは run config に固定値を書く。
+    double limiterRoRef = 0.0, limiterPRef = 0.0, limiterARef = 0.0;
+    int limiterLengthFromArea = 0;
+    // 有界性診断 (§4.20): psi 確定後にカーネル内で「近傍 min/max を外れた面側」を数える。既定 0 = off
+    int limiterDiag = 0;
+    // W2 (plan convection-node-wall-reconstruction §4.23/§6.4 V1): 非物理な再構成の発火計測。既定 0 = OFF。
+    int badReconDiag = 0;
+    // W2 フォールバック (§4.23): 0 = OFF、N = 非物理な面を N 回の訪問だけ 1 次に落とす (SU2 相当は 20)。
+    int badReconFallback = 0;
 
     // free-stream 保存: 対流流束の圧力項を (p_tilde - pRef)*s で組み、非直交メッシュで
     // 大きな p*s を float32 加算する際の桁落ち(metric closure 由来の偽運動量源)を抑える。
@@ -250,6 +323,13 @@ public:
     int LESorRANS; // 0:no 1:LES 2:RANS
     int LESmodel; // 1:WALE
     int RANSmodel = 0; // 0:none 1:SST
+    // 遷移モデル (turbulence.transition): 0 = none, 1 = lm2009 (Langtry-Menter γ-Reθt。methods/turbulence/theory.md §11)。
+    // node + 低 Re SST + 定常 block-DPLUR のみ受け付ける (plan turbulence-transition-lm2009 §4.1)。
+    int transitionModel = 0;
+    bool transitionEnabled() const { return transitionModel != 0; }
+    // 遷移モデルの Re_θt 下限 (turbulence.transitionRethMin)。既定 20 = LM2009/SU2 の推奨値。
+    // case ごとに上げると遷移が遅れる (文献の調整例)。20 以外は「実験に合わせた調整」なので run に明記すること。
+    double transitionRethMin = 20.0;
     int scalarDiffusion = 1; // 0:advection-only 1:advection+diffusion
     int dilatationCorrection = 2; // SST生産項の圧縮性補正 0:off 1:deviatoric(A) 2:deviatoric+isotropic(A+B) 既定:2
     // SST ω 交差拡散の point-implicit Jacobian (plans/active/turbulence-sst-omega-crossdiff-jacobian.md)。
@@ -263,7 +343,14 @@ public:
     int sstIsotropicStress  = 0; // 1: 運動量/エネルギーの応力に等方項 -(2/3)ρk δij を加える (dilatation 2 と整合)。0: 無し (現行)
     int sstEnergyKSource    = 0; // 1: エネルギー式に -(P_k - D_k) を源として加える (E に k を含まない定式化の整合)。0: 無し (現行)
     int sstEnergyIncludesK  = 0; // 1: 全エネルギー E_t = E_m + ρk (SU2 形, plan turbulence-sst-energy-includes-k): 面エンタルピー +(5/3)k・圧力流束 p*=p+(2/3)ρk・k 拡散のエネルギー流束・k 更新後 roe-=Δ(ρk)。roe の格納は E_m のまま。1 のとき sstIsotropicStress/sstEnergyKSource は無効化
-    int wallTreatmentSST = 1; // SST壁処理 0:low-Re壁解像(60ν/β₁y²) 1:automatic(y⁺非依存) 既定:1 (methods/turbulence §6.5)
+    // SST 壁処理 0:low-Re 壁解像 (60ν/β₁y²) / 1:壁関数 (automatic)。**既定 0** (2026-09-20 ユーザ方針)。
+    // **壁関数 (1) は使わない方針**: node 壁関数には既知欠損が積み上がっている
+    //   - Cf −6 % (P_k 規約の欠損, [[node-wallfunction-pk-convention-deficit]])
+    //   - 3D の角線ノードで代表点なし → u_τ=0 ([[node-sst-wallfunction-utau-zero]])
+    //   - **壁モデル渦粘性 ν_t=ν(1/g−1) に上限が無く低密度域で発散** (2026-09-20, plan sern-3d §4.25)
+    //   - case/40 の壁温は y+1 低 Re と SU2 壁関数のみが根拠で、node 壁関数系列は撤回済み
+    // 使うときは run の README に理由を書くこと (ソルバが起動時に警告を出す)。
+    int wallTreatmentSST = 0;
     int sstThermalWallFunction = 0; // SST壁関数の熱的閉包 (§6.5(f))。0=OFF / 1=output-only (Tsb=Taw_diag, 場非介入, 生産baseline) / 2=experimental SU2 coupled (Taw primitive overlay, 未採用) / 3=experimental defect-flux (保存的壁層エネルギー流束 H_T(Taw−T_W), T[W]→Taw を残差の解として実現)。wallTreatmentSST==1時のみ有効
     int sstEnergyWallFunction = 0;  // SST壁関数のエネルギー流束置換: 等温壁のKader q_w (§6.5(g))。wallTreatmentSST==1×wall_isothermalのみ有効。既定0=OFF
                               // 注: 既定を 0→1 に変更 (2026-06-28, user 指示)。cell 含む全ケースが automatic 壁関数に
@@ -362,6 +449,83 @@ public:
     // discretization-node-wall-implicit-dirichlet)。これが無いと壁速度が再循環域でドリフトする。
     // 非 node (cell) / explicit では no-op。0 で旧挙動 (弱形式半割面のみ)。
     int nodeWallDirichlet = 1;
+
+    // node 等温壁のエネルギー境界: 0 = 強制 (壁ノード T ピン + エネルギー残差 0 化 + 陰解法
+    // エネルギー行の単位行化。既定)、1 = **弱形式 (SU2 型)**: 壁ノードのエネルギー方程式を残し、
+    // 壁半割面の伝導を k_eff (T_I - Tw_bc)/d_1 * A_half で置換し、対角へ近似線形化 +g/(rho cv) を足す。
+    // d_1 は**法線投影距離** (conjugateWall::firstInterior と同一規約)、T_I は第一内部点。
+    // **T_W 自身は使わない** (2026-07-20 に棄却した旧弱形式との差)。
+    // 診断: 市松・第 1 スペーシング勾配 -15% ・擬似 CFL 上限 ~5 が熱的壁閉包に帰属するかの切り分け。
+    // plan boundary-weak-isothermal-wall、methods/boundary.md。
+    // 併用不可 (起動時に拒否): cell, thermalMethod!=0, wallTreatmentSST=1, wallModelLES=1,
+    // 軸対称, 移動壁, nodeWallDirichlet=0。
+    int nodeIsothermalEnergyBC = 0;
+
+    // 内部面の**熱伝導**だけの非直交補正の形 (0 = forge の over-relaxed 既定, 1 = SU2 の corrected-gradient)。
+    // どちらも $F/\kappa = \bar g\cdot S + a(\Delta T - \bar g\cdot d)$ の形で、係数だけが違う:
+    //   a_forge = |S|^2 / |d.S|   (over-relaxed)
+    //   a_SU2   = (d.S) / |d|^2   (corrected-gradient)
+    // 直交面では一致し、非直交面では比が 1/cos^2(theta) で **forge のほうが大きい** (減衰は forge が強い)。
+    // 壁熱流束の 2 節点交番 (forge 0.92 % vs SU2 0.046 %) の切り分け用 opt-in。
+    // 1 = 熱伝導だけ (因果の分離用)。**2 = 熱伝導 + 運動量の Laplacian 項**
+    // (近壁の交番は圧力 1.4x・速度 4.7x・温度 20x で速度が主因と分かったため、2026-09-20 に追加)。
+    // plan boundary-conjugate-heat-transfer §5.1 #43、methods/diffusion/。
+    int heatCorrSU2 = 0;
+
+    // MUSCL 再構成する原始変数の選び方 (SLAU のみ)。
+    // 0 (既定): rho, u, v, w, P を再構成し T = P/(rho R) を導出 (従来)。
+    // 1: **T, u, v, w, P を再構成し rho = P/(R T) を導出** — SU2 と同じ構成。
+    //    SU2 は理想気体 + ROE で nPrimVarGrad = ndim+2 (CEulerVariable.cpp:38-41)、原始変数の並びが
+    //    [T, u, v, P, rho, h, c] なので **T,u,v,P の 4 つだけ再構成し rho は導出**する。
+    // **動機**: 既定 (0) では T が独立な 2 つの再構成の差になり、近壁の 2 節点モードを浴びる。
+    //    実測 (case/53 第一内部点、log Nyquist 射影): (dP/P)/(drho/rho) が forge 1.24 / SU2 0.995
+    //    (等温=1.000)、その差がそのまま dT/T の交番 (forge -0.0041 % / SU2 +0.0001 %)。
+    // 2: 1 と同じ再構成だが **psi_P を流用** する (A/B 対照用。旧実装の再現)。
+    // limiter は reconT=1 のとき T 専用の psi_T を計算する (limiter_d.cu、基準 T_ref = P_ref/(R rho_ref))。
+    // psi_P 流用は「T 自身の極値・勾配に基づく制限でない」ため不可 (codex レビュー 2026-09-20)。
+    int reconT = 0;
+
+    // 壁ノードの k 残差を 0 に射影する (ω と同じ扱いにする)。既定 0 = 従来。
+    // **動機**: 壁解像 (低 Re) SST では k_w=0 は Dirichlet なのに、forge は状態ピン (nodeWallKPin) だけで
+    // res_roK を射影していない。ω は状態ピン + res_roOmega ゼロ化の両方をしている。SU2 は
+    // `LinSysRes.SetBlock_Zero(iPoint)` + `Jacobian.DeleteValsRowi(iPoint, 0/1)` で **k も ω も**強制する。
+    // この非対称が、近壁で k にだけ 2 節点モードが立ち ω には立たない (実測 k -0.089 % / ω -0.0003 %、
+    // その結果 mu_t = rho k/omega が k の交番をそのまま受ける) 原因の候補。
+    // plan boundary-conjugate-heat-transfer §5.1 #43。
+    int nodeWallKResidualZero = 0;
+
+    // ROE の固有値下限 (SU2 の ENTROPY_FIX_COEFF と同形): lam[i] = max(lam[i], coeff*(|Ua|+ca))。
+    // 0 (既定) で従来どおり = forge の Harten 補正のみ。SU2 の既定は 0.001。
+    // **動機**: forge の現行 Harten 補正は `eta_vl = 0.1*(|Ua|/ca + 1.0)` で、|Ua|/ca が無次元なので
+    // eta_vl も無次元 (0.1-0.2) になり、速度次元の lam と比較している (次元不整合)。
+    // 正しい形はすぐ下にコメントアウトされている `0.05*(|Ua|+ca)`。この case (c~530 m/s) では
+    // 本来 ~53 m/s のところ実効 ~0.1 で、**接触波 (エントロピー波) の散逸が約 500 倍弱い**。
+    // 壁近傍では |Ua|->0 なので、ここが T/rho の 2 節点交番 (市松) の容疑になる。
+    // plan boundary-conjugate-heat-transfer §5.1 #43。
+    flow_float roeEntropyFixCoeff = 0.0;
+
+    // SLAU の**接触波 (エントロピー波) 散逸に速度下限**を足す (SLAU のみ、既定 0.0 = ビット不変)。
+    // **動機** (codex 2026-09-21): SLAU の `mdot` は一様圧力なら -(S/2)|u_n| dro を持つので接触波散逸は
+    // 「無い」のではなく、**下限が無い**。Roe は `convectiveFlux_roe_d.inc.cuh:342-344` で
+    // lambda_j <- max(lambda_j, eps(|U_a|+c_a)) を**接触波を含む全固有値**に適用する。
+    // 近壁では面法線速度 u_n がほぼ 0 なので、SLAU では接触波の Nyquist モードが減衰しない。
+    // **効果**: dlambda_s = max(0, eps(|u_n|+c) - |u_n|)、alpha_s = dro - dP/c^2 として
+    //   dF = -(S/2) dlambda_s alpha_s (1, ux, uy, uz, |u|^2/2)
+    // を 5 保存量の流束に足す (massflux にも質量分を反映)。**mdot を変えて h_upwind を掛けるのは不可**
+    // (追加エネルギーが接触波方向にならない)。SU2 の実 run の下限値の再現ではなく、**因果試験**である。
+    // plan boundary-conjugate-heat-transfer §5.1 #43。
+    flow_float slauContactFloor = 0.0;
+
+    // SLAU の質量流束の圧力散逸 chi を、**壁隣接面に限って**面法線 Mach で組み直す。
+    // node × nodeWallDirichlet=1 の壁ノード (u=0) が接線速度の大きい内点と面を共有すると chi=0 になり、
+    // 壁 CV への補充経路が消えて排出される (methods/convection/theory.md「既知の限界」)。
+    // **圧力束の (1-chi) は変えない** (別作用。plans/accepted/convection-slau-wall-normal-chi.md §4.1)。
+    // 三値 (2026-09-26 ユーザ決定・2026-09-27 検証完了、plans/accepted/convection-slau-wall-normal-chi-default.md §4.1):
+    //   省略 = auto (-1) → 読込後に node ∧ nodeWallDirichlet==1 ∧ solver∈{SLAU,SLAU2} なら 1、それ以外 0 に解決。
+    //   明示 0 = 旧挙動 (ビット同一)、明示 1 = 構成を検査して有効化。解決後の値は常に 0 か 1。
+    int slauWallNormalChi = -1;
+    std::string slauWallNormalChiReason;   // 起動エコー用の解決理由 ("auto: ..." / "explicit")
+
     int nodeInletCornerWall = 0;
     std::vector<int> wallDistExtraPhysIDs;   // 壁距離の壁点集合に加える非 wall bcond の physID (例: 出口バッファの slip 壁)。SST の F1/F2 用   // 1: 変換時に入口∩壁コーナーの入口側半割面を壁へ帰属 (node)。methods/discretization.md §7.2 (D)
 
@@ -388,6 +552,13 @@ public:
     // gradLSQ=2 の退化判定閾値: M=Σ d̂d̂ᵀ の固有値が λ_max×この値 未満のモードを落とし
     // 擬似逆行列にする (退化方向の勾配 1 次化)。近傍方向が共線/共面なノードの LSQ 発散対策。
     double gradLSQDegenThresh = 1.0e-2;
+
+    // node のスカラー勾配 (k/ω・化学種 Y_s・受動種 ξ・凝縮モーメント) の作用素 (mesh.scalarGradient)。
+    //   "lsq" (**node の既定、2026-09-27 から**): NS と同じ事前計算 LSQ 係数 (gradLSQ=2 の cInt、継ぎ目の合併係数を含む) による差分形 gather。
+    //   "gg": Green–Gauss (2026-09-26 までの node の既定。旧結果の再現は明記)。
+    // cell は常に "gg" (lsq を書いても警告して gg に解決)。省略時の解決は solverConfig.cpp。plans/active/gradient-scalar-lsq-unification.md §4.4・#6。
+    std::string scalarGradient = "gg";
+    std::string scalarGradientReason = "default";   // 起動エコー用 ("default" / "explicit")
 
     // (撤去 2026-08-16) nodeMidpointFx: 値=ノード座標では幾何 fx が自動的に中点相当になるため不要。
 
@@ -420,7 +591,14 @@ public:
     // 多成分 thermally-perfect gas (thermalMethod==2)。calorically-perfect 経路では未使用。
     int nSpecies = 1;                          // 化学種数 (既定 1 = 単成分)
     std::vector<std::string> speciesNames;     // 混合を構成する化学種名。順序が index s を定義
+    std::vector<SpeciesLumpSpec> speciesLumps; // physProp.species のうち lump (擬似種) で書いた要素 (起動時に合成; plan thermophysics-solver-owned-species-db #6a)
+    // physProp.transport: 実種 (lump は構成種名) ごとの輸送物性の出所 {種名: cea|kinetic|fit|custom:<名前>_v<版>} を書いた順で
+    // (plan thermophysics-solver-owned-species-db #5t2)。空なら従来経路。解決・検査は speciesTransportDB_resolve。
+    std::vector<std::pair<std::string, std::string>> speciesTransport;
     std::string speciesDBFile = "";            // 任意: NASA-9/LJ 係数の外部 DB (yaml)。空なら内蔵 DB
+    // physProp.ljSource: 内蔵種の LJ パラメータの集合を探す順 (plan thermophysics-solver-owned-species-db §4.10, #14)。
+    // 空 = 既定 {gri30, svehla1962} (speciesDB_ljSourceDefault)。集合名の検査は speciesDB_checkLjSource (speciesDB_resolve から)。
+    std::vector<std::string> ljSource;
     int speciesDiffusionMethod = 1;            // 0: 定数 Schmidt, 1: kinetic theory 混合平均拡散
     // TP の温度反転をハイブリッド (float Newton + double 1 段研磨, thermo_T_from_e_hybrid) にする。0: 従来 double Newton。
     // **既定 1** (ユーザ決定 2026-09-12)。thermoHrefTemp>0 が前提: 明示 1 で datum 無しはエラー、既定のまま datum 無しなら 0 に落として警告。
@@ -482,6 +660,31 @@ public:
     int    condLimiterMode = 1;      // 1: θ は更新量 Δ(ρφ) のクランプのみ (残差は Δτ 非依存の瞬間速度; 既定), 0: 旧 (残差に θ; A/B 用)
     double condDgMaxStep   = 5.0e-3; // 1 更新あたりの |Δg| 上限 (質量分率)
     double condDTmaxStep   = 1.0;    // 1 更新あたりの潜熱 |ΔT| 上限 [K]
+    // 二相拡散 (plans/active/condensation-two-phase-transport.md §4.2, #4e; methods/condensation.md §7c)。TP carrier 凝縮 (condGasSpecies ≥ 0) で
+    // 気相内の分子拡散 (z 基準・風上補正) + 全輸送量共通の乱流拡散を面流束 1 回で組み、蒸気/液を非分割で更新する。定常専用初版
+    // (dual-time・陽解法・speciesImplicitCoupling 2・passiveScalarScheme 0 とは併用不可、起動時に拒否)。0 で現行経路 (既定・ビット不変)。
+    // 既定化 (plans/active/condensation-two-phase-default.md §4-2): condTwoPhaseDiffusion は指定値 (省略時は kCondTwoPhaseDiffusionDefault)、
+    // condTwoPhaseDiffusionGiven は明示の有無。実効状態 (active / inactive-a / inactive-b / unsupported-c) と実効値は
+    // condTwoPhaseDiffusionValidate が判定して下の 2 つに書く (起動行・res_*.h5 属性の正本; tools/twophase_state.py と同じ判定)。
+    static constexpr int kCondTwoPhaseDiffusionDefault = 0;   // 省略時の既定。S1-c で 1 にする (明示 0 の旧作用素 WARNING もこれで切り替わる)
+    int    condTwoPhaseDiffusion = kCondTwoPhaseDiffusionDefault;
+    int    condTwoPhaseDiffusionGiven = 0;                       // 1: condensation.condTwoPhaseDiffusion を明示した
+    int    condTwoPhaseDiffusionEffective = 0;                   // 1: 二相拡散が実際に作動する (condTwoPhaseDiffusionValidate が書く)
+    std::string condTwoPhaseDiffusionState = "inactive-a";      // 実効状態 (同上)
+    double condTwoPhaseRelax     = 1.0;   // 非分割更新の緩和 ω (前処理の後・制限の前で蒸気・液・Q の全増分に掛ける; 0 < ω ≤ 1)
+    // 収束受入の独立残差監査 (#1b-pre (1)): 1 で二相拡散が OFF の run でも旧作用素 (現行の化学種拡散・液とモーメントは移流のみ) を
+    // double で組み直して開始時・終了時に [twophase-audit] を出す (TP carrier 凝縮のみ)。0 で出さない (既定・ビット不変)。二相拡散 ON の run は常に監査する。
+    int    condAuditResidual     = 0;
+    // 二相の非分割更新の診断 (#1b-r1; 読むだけ・数値は不変)。1: 末尾 200 更新で θ = 0 のセルを記録し終了時に CSV、区間ごとに θ 制限の頻度を更新数で正規化した行。
+    // 2: 同じことを θ < 1 のセルで (機構確認用)。3: 1 に加えて組立 A (float) と診断の double 組立 B の比較 (#1b-r2)。0: 出さない (既定)。二相拡散が働く run だけ。
+    int    condTwoPhaseDiag      = 0;
+    // 二相の非分割更新の増分の作り方 (#4g)。0: 点対角 (診断用 opt-in)、1: 化学種・受動種と同じ緩和整合 scalar-DPLUR (右辺は全残差、対角は点対角と同じ分母、
+    // 非対角は流入質量流束、ゼロ開始で nStepInner 回 sweep、ω = implicitRelax; 最終増分に condTwoPhaseRelax、その後 θ・commit・再正規化は同じ)。
+    // 既定は condTwoPhaseDiffusion が 1 のとき 1 (検証済みの組; plan condensation-two-phase-default §4-3)、0 のとき 0 (使われない)。
+    int    condTwoPhaseSolver    = 0;
+    // 二相の非分割更新の蒸気・液の非負制限 θ_vg (#4h)。1: 掛ける (診断用 opt-in)。0: 外す (θ = θ_thr だけ; commit は総水分だけ下限 0、液は後段で
+    // 固定した総水分に対して 0 ≤ ρg ≤ ρY_w に射影)。既定は condTwoPhaseDiffusion が 1 のとき 0 (検証済みの組)、0 のとき 1 (使われない)。
+    int    condTwoPhaseNonnegLimit = 1;
     // 平衡凝縮 (plans/accepted/condensation-equilibrium.md): 核生成・成長を経ず各セルで p_v=p_sat(T) の g_eq へ緩和。
     int    condEquilibrium = 0;   // 0: 非平衡 (既定) / 1: 平衡凝縮・緩和形 (ソース S_g=αρΔ/dt, モーメント Q0-Q2 ソース 0)
                                   // / 2: 平衡凝縮・EOS 拘束形 (dependentVariables で (T,g) 同時反転し rog へ射影、rog 輸送は凍結;

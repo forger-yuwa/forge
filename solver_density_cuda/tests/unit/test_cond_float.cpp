@@ -1,5 +1,8 @@
 // test_cond_float.cpp — 凝縮経路 float 化の host 単体検証 (plans/active/condensation-float-speedup.md §4.3)。
 //   build: nvcc -x cu --expt-relaxed-constexpr -I. -o test_cond_float tests/unit/test_cond_float.cpp
+//   (plan #10 以降: H2O の潜熱に共通データの気液ペアが要るので、-I <solver_density_cuda> -I <埋め込みヘッダの生成先> と
+//    solver_density_cuda/input/speciesDB.cpp solver_density_cuda/input/speciesTransportDB.cpp -lyaml-cpp を足す;
+//    生成は tests/unit/cond_latent_test_helper.cuh 冒頭)
 // (1) 物性表 vs double 関数: 0.01 K 刻み全域 (接続点・床・臨界直下を含む)。
 //     許容 (plan §4.3 v2): ln p_sat 絶対 ≤ 2e-6 + 1.5e-7·|ln p| (|ln p|~20–50 では float の表現限界 6e-8·|ln p| が支配),
 //     L/ρ_l/k_gas/μ_gas 相対 ≤2e-6 (H2O の L は凝縮が起き得る T ≤ 400 K で厳密、それ以上は L 床 1.5 MJ/kg の折れ点 (~968 K) を含むので ≤1e-4),
@@ -11,6 +14,7 @@
 #include "cuda_forge/condensationTables_d.cuh"
 #include "cuda_forge/condensationSourceF_d.cuh"
 #include "cuda_forge/condensationEOS_d.cuh"
+#include "tests/unit/cond_latent_test_helper.cuh"   // H2O 潜熱の気液ペア (plan thermophysics-solver-owned-species-db #10)
 #include <cstdlib>
 
 static int g_fail = 0;
@@ -171,12 +175,10 @@ static void test_chain(const char* name, const CondSpeciesProps& s, int carrier,
 // (3) 一温度二相反転のハイブリッド (float Newton → double 研磨 → 残差判定) vs 厳密 double 参照。N2/H2O carrier (datum 298.15 K)。
 //     許容: |ΔT| ≤ 1e-8·T (研磨後), float 格納 roe の 10 往復ドリフト ≤ 従来 double 反転のドリフト × 1.5 + 1e-7·T, 失敗 (ok=false) 0 件。
 static SpeciesThermo mk(double MW,double sig,double eps,const double lo[9],const double hi[9]){
-    SpeciesThermo s; s.MW=MW; s.sigma_LJ=sig; s.eps_kB=eps; s.Tlo=200.0; s.Tmid=1000.0; s.Thi=6000.0; s.h_datum=0.0; s.invMW=1.0/MW;
-    for(int i=0;i<9;i++){ s.low[i]=lo[i]; s.high[i]=hi[i]; } return s; }
+    SpeciesThermo s; s.MW=MW; s.sigma_LJ=sig; s.eps_kB=eps; s.h_datum=0.0; s.invMW=1.0/MW;
+    thermo_set_nasa9_2(s, 200.0, 1000.0, 6000.0, lo, hi); return s; }
 static SpeciesThermoF toF(const SpeciesThermo& s){
-    SpeciesThermoF f; f.MW=(float)s.MW; f.invMW=(float)(1.0/s.MW); f.R=(float)(THERMO_RU/s.MW);
-    f.sigma_LJ=(float)s.sigma_LJ; f.eps_kB=(float)s.eps_kB; f.Tlo=(float)s.Tlo; f.Tmid=(float)s.Tmid; f.Thi=(float)s.Thi;
-    for(int k=0;k<9;k++){ f.low[k]=(float)s.low[k]; f.high[k]=(float)s.high[k]; } return f; }
+    return thermo_to_float(s); }
 
 static void test_inversion()
 {
@@ -185,9 +187,10 @@ static void test_inversion()
     const double H2Olo[9]={-3.947960830e+04,5.755731020e+02,9.317826530e-01,7.222712860e-03,-7.342557370e-06,4.955043490e-09,-1.336933246e-12,-3.303974310e+04,1.724205775e+01};
     const double H2Ohi[9]={1.034972096e+06,-2.412698562e+03,4.646110780e+00,2.291998307e-03,-6.836830480e-07,9.426468930e-11,-4.822380530e-15,-1.384286509e+04,-7.978148510e+00};
     std::vector<SpeciesThermo> sp = { mk(0.0280134,3.621,97.53,N2lo,N2hi), mk(0.0180153,2.605,572.4,H2Olo,H2Ohi) };
-    for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); s.low[7] += -hr/THERMO_RU; s.high[7] += -hr/THERMO_RU; }
+    for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); thermo_add_a7(s, -hr/THERMO_RU); }
     std::vector<SpeciesThermoF> spf = { toF(sp[0]), toF(sp[1]) };
     CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    o.h2oLatent = cond_test_latent_ref(298.15, false);
     const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o);
     CondTablesHost ht; cond_tables_build_host(cp, ht); const CondTablesF tb = cond_tables_view_host(ht);
     const double Rw = cp.R;
@@ -235,6 +238,7 @@ int main()
 {
     printf("== (1) property tables vs double ==\n");
     CondPropOpts o; o.latentLowT = 1; o.psatLowT = 1; o.liquidCp = 2000.0; o.gasKgasModel = 0; o.sigmaScale = 1.0; o.Yw = 0.0;
+    o.h2oLatent = cond_test_latent_ref(0.0, false);
     test_tables("N2 (default)", condProps_make(COND_MODEL_N2, o), 15.0, 140.0);
     CondPropOpts o2 = o; o2.latentLowT = 0; o2.psatLowT = 0; o2.gasKgasModel = 1; o2.sigmaScale = 1.03;
     test_tables("N2 (old lowT, air kgas, sigma x1.03)", condProps_make(COND_MODEL_N2, o2), 15.0, 140.0);

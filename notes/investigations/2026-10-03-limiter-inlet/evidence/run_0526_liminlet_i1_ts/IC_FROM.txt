@@ -1,0 +1,4 @@
+plan limiter-inlet-column-oscillation §5.1 #1 (I1 揺れの時間特性)
+IC: run_0524_floor_dry_L1/res_48000.h5 を restart_field.py --force-species で index コピー
+config: run_0524 + nStepOuter 200, outStepInterval 5 (dry, リミッタ既定 L1)
+build 8ce8da3a; FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_CUDA_BLOCKSIZE=256

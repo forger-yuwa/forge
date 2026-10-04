@@ -1,0 +1,12 @@
+# S3 性能 (case/48.flat_plate_cooled_m4)
+(無効: 反復 a・b が同じ GPU 上の別 run (#5a・#5b) と重なった。s3_perf.py を走行中監視に直して取り直した → S3_case48.txt)
+binary: /home/ubuntu/sglsq/forge_f99f236d
+block 128/128、2500 step、step 501–2499 の 1 step 壁時計の平均、gg/lsq 交互 3 反復
+- gg_a: 3.345 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_gg_a
+- lsq_a: 3.365 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_lsq_a
+- lsq_b: 3.334 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_lsq_b
+- gg_b: 3.343 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_gg_b
+- gg_c: 1.529 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_gg_c
+- lsq_c: 1.570 ms/step (n=1999) case/48.flat_plate_cooled_m4/_s3_lsq_c
+中央値: gg 3.343 / lsq 3.334 ms/step → 比 lsq/gg = 0.9972 (上限 1.05)
+VERDICT S3 (case/48.flat_plate_cooled_m4): PASS

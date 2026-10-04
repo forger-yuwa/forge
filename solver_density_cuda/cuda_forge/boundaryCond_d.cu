@@ -1139,6 +1139,17 @@ void inlet_Pressure_d
                 Ts_new = Tt_b/(1.0+0.5*(ga-1.0)*mach_c*mach_c);
                 sonic_new = sqrt((ga-1.0)*cp*Ts_new);
                 ro_new = ga*Ps_new/((ga-1.0)*cp*Ts_new);
+                // **速度を新しい音速に整合させる** (plan convection-node-wall-reconstruction §4.36)。
+                // 上で Ts_new を作ると音速が内点値から変わるので、速度を Un_c のまま残すと
+                // 境界状態の実 Mach が Un_c/sonic_new ≠ mach_c になり、**指定した Tt/Pt を再現しない**
+                // (反例 ga1.4/cp1005/T_i100K/|Un|100: Tt 293.15→284.232, Pt 100000→89751)。
+                // TP 分岐は `um_d` で速度を作り直しており、CPG 分岐だけ取り残されていた。
+                // 流入方向は境界法線の内向き (-n)、大きさは |mach_c|·sonic_new。
+                const flow_float umag_new = fabs(mach_c)*sonic_new;
+                const flow_float invs = 1.0f/sss;
+                Ux_new = -umag_new * sxx*invs;
+                Uy_new = -umag_new * syy*invs;
+                Uz_new = -umag_new * szz*invs;
             }
 
         } else { // reverse-flow detected at pressure inlet: clamp ghost to stagnation
@@ -1341,11 +1352,23 @@ flow_float* T,
         Pt_b = Ptb[ib];
         Tt_b = Ttb[ib];
 
+        // 流入方向: bvar Ux/Uy/Uz は config 指定の方向ベクトルだが、本カーネルが毎 step
+        // 次元付き速度で上書きするため「大きさ 0 になると方向が失われる」。M→0 (P_c≈Pt) で
+        // 実際に 0 になり、次 step の 0/0 で境界が NaN 化する事故があったので、退化時は
+        // 面法線 (内向き) を方向として使う。
         flow_float Ubmag = sqrt(Uxb[ib]*Uxb[ib] + Uyb[ib]*Uyb[ib] + Uzb[ib]*Uzb[ib]);
 
-        flow_float Unx_b = Uxb[ib]/Ubmag;
-        flow_float Uny_b = Uyb[ib]/Ubmag;
-        flow_float Unz_b = Uzb[ib]/Ubmag;
+        flow_float Unx_b, Uny_b, Unz_b;
+        if (Ubmag > 1.0e-10f) {
+            Unx_b = Uxb[ib]/Ubmag;
+            Uny_b = Uyb[ib]/Ubmag;
+            Unz_b = Uzb[ib]/Ubmag;
+        } else {
+            const flow_float inv_ss = 1.0f/ss[ip];
+            Unx_b = -sx[ip]*inv_ss;   // sx は外向き法線 → 流入は内向き
+            Uny_b = -sy[ip]*inv_ss;
+            Unz_b = -sz[ip]*inv_ss;
+        }
 
         Ux_c = Ux[ic];
         Uy_c = Uy[ic];
@@ -1369,7 +1392,11 @@ flow_float* T,
                                  ? (thermo_cp_mass(sp[0], Ts0_d)-thermo_R_species(sp[0])):1e-6)
                                * thermo_R_species(sp[0]) * Ts0_d);
             mach_b = (flow_float)(um0_d/(a0 > 1.0e-6 ? a0 : 1.0e-6));
+            // CPG 分岐と同じ理由で退避 (P_c>Pt の過渡で反転が NaN/負になる)。
+            if (!(mach_b > 0.0f)) mach_b = 0.0f;
+            if (mach_b > 1.0f) mach_b = 1.0f;
             mach_new = rf*mach_b + (1.0-rf)*mach_c;
+            if (mach_new < 0.0f) mach_new = 0.0f;
             // blend 後マッハに対応する静温・速度を全状態から再構成。
             double Ts_d, Ps_d, ro_d, um_d;
             thermo_isentropic_from_total_single(sp, (double)Pt_b, (double)Tt_b, (double)mach_new,
@@ -1380,8 +1407,14 @@ flow_float* T,
             const double gmx = cpv/((cpv-Rg) > 1.0e-6 ? (cpv-Rg) : 1.0e-6);
             sonic_new = (flow_float)sqrt(gmx*(double)Ps_new/(double)ro_new);
         } else {
-            mach_b = sqrt((pow((P_c/Pt_b),-(ga-1.0)/ga) -1.0)*2.0/(ga-1.0));
+            // P_c > Pt_b (過渡で内点静圧が指定全圧を超える) だと根号内が負になり NaN。
+            // 亜音速全圧入口としては M=0 が正しい極限なので 0 に落とし、逆に P_c が
+            // 落ち込んだときの暴走を避けるため M<=1 に制限する。
+            const flow_float arg_b = (pow((P_c/Pt_b),-(ga-1.0)/ga) - 1.0)*2.0/(ga-1.0);
+            mach_b = (arg_b > 0.0f) ? sqrt(arg_b) : 0.0f;
+            if (mach_b > 1.0f) mach_b = 1.0f;
             mach_new = rf*mach_b + (1.0-rf)*mach_c;
+            if (mach_new < 0.0f) mach_new = 0.0f;
             Ps_new = P_c;
             Ts_new = Tt_b/(1.0+0.5*(ga-1.0)*mach_new*mach_new);
             sonic_new = sqrt((ga-1.0)*cp*Ts_new);

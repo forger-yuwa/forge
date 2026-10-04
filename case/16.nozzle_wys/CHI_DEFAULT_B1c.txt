@@ -1,0 +1,25 @@
+(注: 下の onset 系列の NONFINITE は step 0 = restart 入力の res_0 だけ (g_0 が初回 step 前で未計算)。既存の凝縮系列 (compare_condfix) と同じく step 0 を除いた再判定を末尾に追記)
+成立条件 (b): 初回面流束が違う面 434 / 83745
+# case/16 壁圧比較: flag0 = run_0963_chidef_b1c_flag0 / 省略 = run_0964_chidef_b1c_omit (凝縮: onset も)
+[flag0] === run_0963_chidef_b1c_flag0/chidef_wallpp0.csv  [25 rows, steps 0..12000]  -> NONFINITE ===
+[flag0]   pp0_16p4        : tail mean=0.3656  drift=0.0%/tail  fluct=0.0%           STEADY
+[flag0]   pp0_45p6        : tail mean=0.3205  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.320467 (最終比 +0.000 %)] STEADY
+[flag0]   pp0_85          : tail mean=0.223  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.223027 (最終比 +0.002 %)] STEADY
+[flag0]   onset_mm        : 1/25 non-finite value(s) in series                      NONFINITE
+[omit] === run_0964_chidef_b1c_omit/chidef_wallpp0.csv  [25 rows, steps 0..12000]  -> NONFINITE ===
+[omit]   pp0_16p4        : tail mean=0.3656  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.365614 (最終比 +0.000 %)] STEADY
+[omit]   pp0_45p6        : tail mean=0.3205  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.320467 (最終比 +0.000 %)] STEADY
+[omit]   pp0_85          : tail mean=0.223  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.223027 (最終比 +0.001 %)] STEADY
+[omit]   onset_mm        : 1/25 non-finite value(s) in series                      NONFINITE
+輪郭壁 p/p0 L∞ (x 10–94 mm、最終) = 0.0012 % (許容 0.5 %) → PASS
+3 点 (最終) flag0 / 省略: 16.4 mm 0.36561/0.36561, 45.6 mm 0.32047/0.32047, 85.0 mm 0.22302/0.22302
+onset = 22.508 / 22.508 mm、差 0.0000 (許容 = 中心線ノード間隔 0.4260 mm) → PASS
+g_exit (報告のみ) = 0.01085 / 0.01085
+VERDICT 量: PASS
+=== run_0963_chidef_b1c_flag0  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+=== run_0964_chidef_b1c_omit  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+=== run_0964_chidef_b1c_omit  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===
+=== run_0963_chidef_b1c_flag0/chidef_wallpp0_nostep0.csv  [24 rows, steps 500..12000]  -> STEADY ===
+  onset_mm        : tail mean=22.51  drift=0.0%/tail  fluct=0.0%            STEADY
+=== run_0964_chidef_b1c_omit/chidef_wallpp0_nostep0.csv  [24 rows, steps 500..12000]  -> STEADY ===
+  onset_mm        : tail mean=22.51  drift=0.0%/tail  fluct=0.0%            STEADY

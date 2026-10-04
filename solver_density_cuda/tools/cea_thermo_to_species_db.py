@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """NASA CEA `thermo.inp` から forge の `speciesDBFile` (species_db.yaml) を生成する。
 
+**非推奨 (2026-10-01, plan thermophysics-solver-owned-species-db §5.1 #13-3)**: ソルバは共通データ
+(`data/species/forge_species_v1.yaml`) の気相 61 種を CEA thermo.inp そのもの (1〜3 区間) で内蔵するので、内蔵種のための
+外部 DB は不要。共通データの生成・照合は `tools/cea_thermo_to_forge_species.py` (--write / --check) を使う。
+このツールは最初の 2 域だけを書く旧形式のままで、内蔵種と同名のエントリを書くと内蔵 (3 区間) を上書きしてしまう
+(6000 K 超の区間が落ちる) ので、内蔵に無い種にだけ使うこと。下の `--check` の「既知の不一致」(H2O の MW・AR の高温域) は
+段 3 で共通データ側が CEA に揃ったので、今は起きない。
+
   python3 cea_thermo_to_species_db.py thermo.inp --species H2 O2 H O OH HO2 H2O2 H2O N2 [--out species_db.yaml]
 
 - NASA-9 係数 (2 温度域: 200–1000 / 1000–6000 K) を固定幅 16 文字フィールドで読む (Fortran D 指数)。

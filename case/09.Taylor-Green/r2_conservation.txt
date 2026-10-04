@@ -1,0 +1,30 @@
+
+## run_0173_r2_keep_eul_old  [keep, 73 snapshots, t_end=25.004, 体積重み=cv_weight]
+    |K/K0-1|                     max 6.848e-03  final 2.972e-03  (<= 1e-02)  PASS
+    |dS/S0|                      max 8.406e-06  final 6.186e-06  (<= 1e-04)  PASS
+    |P_i|/(rho0 U0 V)            max 1.559e-08  final 1.559e-08  (<= 1e-06)  PASS
+  VERDICT(run_0173_r2_keep_eul_old): PASS
+
+## run_0174_r2_keep_eul_new  [keep, 73 snapshots, t_end=25.004, 体積重み=cv_weight]
+    |K/K0-1|                     max 6.848e-03  final 2.972e-03  (<= 1e-02)  PASS
+    |dS/S0|                      max 8.413e-06  final 6.189e-06  (<= 1e-04)  PASS
+    |P_i|/(rho0 U0 V)            max 1.400e-08  final 1.223e-08  (<= 1e-06)  PASS
+  VERDICT(run_0174_r2_keep_eul_new): PASS
+  KEEP 旧新差 (記録のみ): max|ΔK/K0| 6.035e-08 (t=19.95)、final 1.480e-08; max|Δ(dS/S0)| 4.622e-08、final 2.667e-09
+
+## run_0175_r2_slau_visc_old  [slau, 73 snapshots, t_end=25.004, 体積重み=cv_weight]
+    |M-M0|/M0                    max 1.725e-08  final 9.724e-10  (<= 1e-06)  PASS
+    |P_i|/(rho0 U0 V)            max 1.290e-08  final 1.180e-08  (<= 1e-06)  PASS
+    |E-E0|/E0                    max 1.009e-08  final 7.591e-09  (<= 1e-05)  PASS
+    (記録) K/K0 final 0.421737, dS/S0 final 1.973e-02
+  VERDICT(run_0175_r2_slau_visc_old): PASS
+
+## run_0176_r2_slau_visc_new  [slau, 73 snapshots, t_end=25.004, 体積重み=cv_weight]
+    |M-M0|/M0                    max 2.277e-08  final 2.268e-08  (<= 1e-06)  PASS
+    |P_i|/(rho0 U0 V)            max 1.216e-08  final 5.819e-09  (<= 1e-06)  PASS
+    |E-E0|/E0                    max 8.330e-09  final 5.189e-09  (<= 1e-05)  PASS
+    (記録) K/K0 final 0.376505, dS/S0 final 2.132e-02
+  VERDICT(run_0176_r2_slau_visc_new): PASS
+  SLAU 旧新差 (記録のみ): max|ΔK/K0| 1.009e-01 (t=10.85)、final 4.523e-02; max|Δ(dS/S0)| 3.388e-03、final 1.588e-03
+
+saved r2_ke_entropy.png

@@ -1,0 +1,30 @@
+{
+  "_source": "NASA TN D-5908 図 1 (220 dpi 描画で確認) / Table I (熱電対) / Table II (キャビティ) / Table III (圧力孔)",
+  "_warning": "旧稿は圧力孔 3.5 in をキャビティ位置と誤認していた。後壁は前縁から 6.24 in。",
+  "units": "mm",
+  "plate": {
+    "holder_length": 197.0, "holder_width": 102.0,
+    "le_radius_nominal": 0.762, "le_radius_after_test_max": 1.5,
+    "_le_note": "図 1 の公称 r = 0.03 in (0.08 cm)。本文は試験終了時の最大鼻半径 0.06 in ≈ 1.5 mm と記載"
+  },
+  "cavity": {
+    "depth": 20.32,
+    "x_rear_wall_from_le": 158.496,
+    "_x_note": "6.24 in = 15.86 cm。前壁 = x_rear - w、中点 = x_rear - w/2",
+    "spanwise_length_main": 76.2, "spanwise_length_check": 25.4,
+    "widths": {"0.063": 1.270, "0.211": 4.293, "0.383": 7.772, "0.524": 10.643}
+  },
+  "instrumentation": {
+    "sensing_skin_thickness": 0.305,
+    "tc_rear_wall_x_mm": [0.25, 0.76, 1.02, 1.27, 2.54, 3.81, 5.08, 6.35, 7.62, 10.16, 15.24, 16.51],
+    "_tc_note": "Table I (a) 後壁。最上部は x = 0.01 in = 0.254 mm (x/d = 0.0125)。z オフセット ±0.25 in の点もある",
+    "tc_bottom_y_mm": [0.0, 3.18, 6.35, 9.53],
+    "pressure_model_orifice_x_from_le": 88.9,
+    "pressure_cavity_orifice_above_floor": 1.27,
+    "_p_note": "Table III: 模型面圧は前縁から 3.5 in、キャビティ圧は床から 0.05 in"
+  },
+  "reynolds_check": {
+    "_note": "独立確認: 報告の Re*_L = 1.4-1.8e5 は L≈157 mm + Eckert 基準温度で再現する。L=88.9 mm では合わない",
+    "L_used_mm": 157.0
+  }
+}

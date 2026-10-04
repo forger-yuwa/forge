@@ -15,11 +15,11 @@ forge の入口分布機能 (bcondConfig の対象 inlet に `ints: {inletProfil
       bcond 一様値 cfg_Tt, cfg_Pt, cfg_k, cfg_omega, cfg_Y_<name>。
     - 化学種は名前指定 (`--Y H2O=...`)。指定しなかった種が残り (1−ΣY指定) を bcond 比率で受け持つ。
     - モル分率で与えるなら `--X NAME=EXPR` (表の列は `X_<NAME>`)。**X を 1 つでも使うと全種必須**で、点ごとに
-      Y_k = X_k M_k / Σ X_j M_j (MW は species_db.yaml) に換算して Y{s} 列を書く。`--X` と `--Y` の混在はエラー。
+      Y_k = X_k M_k / Σ X_j M_j (MW は forge_species.run_thermo = run の記録か speciesDBFile) に換算して Y{s} 列を書く。`--X` と `--Y` の混在はエラー。
     - inlet_Pressure (亜音速): 列 Tt Pt (+Y_s, k, omega)。Pt の代わりに --Ps と --M でも可 (等エントロピーで Pt に換算)。
     - inlet_uniformVelocity / inlet_fluctVelocity (超音速・全量固定): --Tt と --M と (--Ps | --Pt) から
       ρ, |U|, Ps を換算して列 ro Ux Uy Uz Ps を書く (方向は --dir、既定は bcond の速度方向)。
-      CPG は閉形式、TP (thermalMethod 2) は NASA-9 (species_db.yaml) の h/s° で解く (凍結組成)。
+      CPG は閉形式、TP (thermalMethod 2) は NASA-9 (forge_species.run_thermo) の h/s° で解く (凍結組成)。
     - --set NAME=EXPR で任意の bvar 列 (Ux, ro, Ps, Ts ...) を直接書ける (換算より優先)。
     - 2D 分布は --axis "y z" --range ylo yhi zlo zhi --n ny nz (forge 側は最近傍補間)。
 
@@ -50,10 +50,11 @@ def find_bc(bcs, physID):
 
 
 def species_names(cfg):
-    """physProp.species (TP)。省略時はソルバ既定と同じ単成分 N2 (solverConfig.cpp)。CPG は []。"""
+    """physProp.species (TP)。省略時はソルバ既定と同じ単成分 N2 (solverConfig.cpp)。CPG は []。
+    lump 記法 `{name, lump: {...}, basis}` は名前を取る (plan thermophysics-solver-owned-species-db #6a)。"""
     pp = cfg["physProp"]
     if int(pp.get("thermalMethod", 0)) == 2:
-        return list(pp["species"]) if pp.get("species") else ["N2"]
+        return [str(s["name"]) if isinstance(s, dict) else str(s) for s in pp["species"]] if pp.get("species") else ["N2"]
     return []
 
 
@@ -62,13 +63,17 @@ class Gas:
     def __init__(self, run_dir, cfg):
         pp = cfg["physProp"]; self.tm = int(pp.get("thermalMethod", 0))
         if self.tm == 2:
-            from total_quantities import _TPGas
+            # 熱物性は forge_species.run_thermo (run の記録 > 従来の speciesDBFile > forge --resolve-species; plan #8)
+            import forge_species as fsp
             self.names = species_names(cfg)
-            db = yaml.safe_load(open(os.path.join(run_dir, pp.get("speciesDBFile", "species_db.yaml"))))
-            for n in self.names:
-                if n not in db:
-                    raise SystemExit(f"species_db に {n} が無い (physProp.species / 既定 N2)")
-            self.tp = _TPGas(db, self.names, float(pp.get("thermoHrefTemp", 0.0)))
+            try:
+                self.th = fsp.run_thermo(run_dir)
+            except ValueError as e:
+                raise SystemExit(f"熱物性を解決できない: {e}")
+            if [n.upper() for n in self.th["names"]] != [n.upper() for n in self.names]:
+                raise SystemExit(f"解決済み熱物性の種 {self.th['names']} が physProp.species {self.names} と違う")
+            print(f"[gen] thermophysics: {self.th['source']} ({self.th['how']})")
+            self.tp = fsp.thermo_gas(self.th, self.names)
         elif self.tm == 0:
             self.cp0 = float(pp["cp"]); self.ga0 = float(pp["gamma"]); self.R0 = self.cp0 * (self.ga0 - 1.0) / self.ga0
             self.names = []
@@ -217,7 +222,7 @@ def cmd_gen(a):
         raise SystemExit("--X (モル分率) と --Y (質量分率) は同じ入口で混在できない")
     if xspec:
         if not names or gas.tm != 2:
-            raise SystemExit("--X は thermalMethod 2 (physProp.species + species_db.yaml) のときだけ使える")
+            raise SystemExit("--X は thermalMethod 2 (physProp.species) のときだけ使える")
         for nm in xspec:
             if nm not in names:
                 raise SystemExit(f"化学種 {nm} は physProp.species {names} に無い")
@@ -446,7 +451,7 @@ def main():
     g.add_argument("--n", type=int, nargs="+", default=[201]); g.add_argument("--table", help="測定表 CSV (空白区切り, ヘッダ先頭に座標列)")
     g.add_argument("--Tt"); g.add_argument("--Pt"); g.add_argument("--Ps"); g.add_argument("--M")
     g.add_argument("--Y", action="append", help="NAME=EXPR (例 H2O=0.01+0.005*exp(-(y/0.004)**2))")
-    g.add_argument("--X", action="append", help="NAME=EXPR モル分率 (全種必須; species_db.yaml の MW で Y に換算。--Y と混在不可)")
+    g.add_argument("--X", action="append", help="NAME=EXPR モル分率 (全種必須; 解決済み熱物性の MW で Y に換算。--Y と混在不可)")
     g.add_argument("--k"); g.add_argument("--omega"); g.add_argument("--set", action="append", help="NAME=EXPR (任意 bvar 列)")
     g.add_argument("--dir", type=float, nargs=3, help="超音速入口の速度方向 (既定: bcond の Ux,Uy,Uz)")
     g.add_argument("--out"); g.add_argument("--plot", action="store_true")

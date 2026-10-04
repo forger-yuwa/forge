@@ -1,0 +1,25 @@
+{
+  "_source": "NASA TN D-8233 (Throckmorton 1976) 本文。寸法は conditions.json の model と同じものを長さ単位 mm で持つ",
+  "_note": "T2' (桁の下界試験) 用の 2D 断面。前縁は持たない — 流入 BL (δ* 12.8 cm) は inletProfile で与える (bl_derived.json)",
+  "units": "mm",
+  "tunnel": {
+    "test_section_side": 787.4,
+    "half_height": 393.7,
+    "_why": "上面 slip はトンネル中心線 (対向壁までの半分)。δ = 229 mm なので自由流コアが 165 mm 残る"
+  },
+  "gap": {
+    "width": 2.29,
+    "depth": 45.72,
+    "depth_over_width": 19.97,
+    "x_rear_wall": 0.0,
+    "_x_note": "後壁 (せん断層が当たる側) を x=0 に置く。前壁は x = -W"
+  },
+  "domain": {
+    "x_in": -100.0,
+    "x_split": -50.0,
+    "x_plate_end": 200.0,
+    "x_out": 300.0,
+    "_why_x_in": "入口に実測 BL を与えるので助走は不要。50 mm の調整区間 + 50 mm の細分区間を置く",
+    "_why_plate_end": "出口境界を境界層で切らないため、模型下流に slip バッファを取る (case/55 と同じ作法)"
+  }
+}

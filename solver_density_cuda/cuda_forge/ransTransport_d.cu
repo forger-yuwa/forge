@@ -1,4 +1,6 @@
 #include "ransTransport_d.cuh"
+#include "periodicNode_d.cuh"
+#include "calcGradient_d.cuh"
 
 #include "scalarTransport_d.cuh"
 
@@ -28,13 +30,19 @@ __global__ void calc_scalar_gradient_face_d(
     flow_float* dKdz,
     flow_float* dOmegadx,
     flow_float* dOmegady,
-    flow_float* dOmegadz)
+    flow_float* dOmegadz,
+    int excludePeriodic,
+    const unsigned char* planePeriodic)
 {
     geom_int ip = blockDim.x * blockIdx.x + threadIdx.x;
     if (ip >= nPlanes) return;
 
     const geom_int ic0 = plane_cells[2 * ip + 0];
     const geom_int ic1 = plane_cells[2 * ip + 1];
+    // node 周期半割面 (相手が実 CV) は積算しない。勾配は内部双対面だけの部分寄与にし、後段の gather で合併する
+    // (plan boundary-node-periodic-gradient-fix §4.2。化学種 species_gradient_d の excludePeriodic と同じ扱い)。
+    // 判定は面フラグで行う (周期 bcond にもゴーストが付くので ic1 < nCells は成立しない、§4.2a)。
+    if (excludePeriodic != 0 && planePeriodic[ip] != 0) return;
 
     geom_float f   = fx[ip];
     flow_float kf, wf;
@@ -100,14 +108,10 @@ __global__ void fill_const_d(geom_int n, flow_float* a, flow_float v)
 std::array<ScalarTransportDesc, 2> buildScalarDescs(variables& var, const solverConfig& cfg, cudaConfig& cuda_cfg, geom_int nCells)
 {
     // sstSigmaBlend=1: σ_k = F1·0.85 + (1−F1)·1.0, σ_ω = F1·0.5 + (1−F1)·0.856 (Menter SST の正式ブレンド)。
-    // 0 (既定): k-ω 側定数 0.85 / 0.5 (現行)。F1 は ransSource が書く sstF1 (初回は 1 で埋める)。
+    // 0 (既定): k-ω 側定数 0.85 / 0.5 (現行)。F1 は ransSource が書く sstF1 (初期値 1 は allocVariables)。
     flow_float* F1 = nullptr;
     if (cfg.sstSigmaBlend != 0 && var.c_d.count("sstF1")) {
-        static bool inited = false;
-        if (!inited) {
-            fill_const_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(nCells, var.c_d["sstF1"], static_cast<flow_float>(1.0));
-            inited = true;
-        }
+        // 初期値 1 は allocVariables が入れる (ここでは埋めない: 計算済みの F1 を上書きしないため)
         F1 = var.c_d["sstF1"];
     }
     std::array<ScalarTransportDesc, 2> d = {{
@@ -116,6 +120,8 @@ std::array<ScalarTransportDesc, 2> buildScalarDescs(variables& var, const solver
     }};
     d[0].sigma2 = static_cast<flow_float>(1.0);   d[0].F1 = F1;
     d[1].sigma2 = static_cast<flow_float>(0.856); d[1].F1 = F1;
+    d[0].ext_face = farfieldFaceScalar("k");       // 遠方境界 farfield 面の流入値 (無ければ nullptr)
+    d[1].ext_face = farfieldFaceScalar("omega");
     return d;
 }
 
@@ -215,6 +221,32 @@ void ransGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, 
     CHECK_CUDA_ERROR(cudaMemset(var.c_d["dOmegady"], 0, msh.nCells_all * sizeof(flow_float)));
     CHECK_CUDA_ERROR(cudaMemset(var.c_d["dOmegadz"], 0, msh.nCells_all * sizeof(flow_float)));
 
+    // mesh.scalarGradient: lsq (node のみ) — NS と同じ事前計算 LSQ 係数の差分形 gather (plan gradient-scalar-lsq-unification §4.2)。
+    // 体積除算なし (軸対称も係数が planar LSQ なので A_planar は不要)。ghost はゼロのまま (上の memset)。
+    if (scalarGradientLsqActive(cfg)) {
+        static flow_float** s_ptrDev = nullptr;
+        static std::array<flow_float*, 8> s_ptrHost{};
+        const std::array<flow_float*, 8> h = {
+            var.c_d["k"], var.c_d["omega"],
+            var.c_d["dKdx"], var.c_d["dOmegadx"], var.c_d["dKdy"], var.c_d["dOmegady"], var.c_d["dKdz"], var.c_d["dOmegadz"]};
+        if (s_ptrDev == nullptr) gpuErrchk(cudaMalloc((void**)&s_ptrDev, 8 * sizeof(flow_float*)));
+        if (h != s_ptrHost) {
+            gpuErrchk(cudaMemcpy(s_ptrDev, h.data(), 8 * sizeof(flow_float*), cudaMemcpyHostToDevice));
+            s_ptrHost = h;
+        }
+        lsqScalarGradient_d_wrapper(cuda_cfg, msh, 2, s_ptrDev + 0, s_ptrDev + 2, s_ptrDev + 4, s_ptrDev + 6);
+        if (preGatherDumpEnabled())   // 診断 (FORGE_DUMP_PREGATHER、既定 off・出力専用)
+            preGatherDump("rans.loop1", msh.nCells, {"K", "Omega"},
+                          {{var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"]}, {var.c_d["dOmegadx"], var.c_d["dOmegady"], var.c_d["dOmegadz"]}});
+        // 継ぎ目: 合併係数の部分和を group で和 → broadcast (GG 経路と同じ述語・同じ専用 gather)。
+        if (periodicSeamMergeActive(cfg, msh)) {
+            for (const char* k : {"dKdx", "dKdy", "dKdz", "dOmegadx", "dOmegady", "dOmegadz"}) {
+                periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, var.c_d[k]);
+            }
+        }
+        return;
+    }
+
     calc_scalar_gradient_face_d<<<cuda_cfg.dimGrid_plane, cuda_cfg.dimBlock>>>(
         msh.nPlanes,
         msh.nCells,
@@ -225,7 +257,8 @@ void ransGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, 
         var.c_d["k"],
         var.c_d["omega"],
         var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"],
-        var.c_d["dOmegadx"], var.c_d["dOmegady"], var.c_d["dOmegadz"]);
+        var.c_d["dOmegadx"], var.c_d["dOmegady"], var.c_d["dOmegadz"],
+        periodicSeamMergeActive(cfg, msh) ? 1 : 0, msh.planePeriodic_d);
 
     calc_scalar_gradient_div_vol_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
         msh.nCells,
@@ -235,4 +268,16 @@ void ransGradient_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, 
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+    if (preGatherDumpEnabled())   // 診断 (FORGE_DUMP_PREGATHER、既定 off・出力専用)
+        preGatherDump("rans.loop1", msh.nCells, {"K", "Omega"},
+                      {{var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"]}, {var.c_d["dOmegadx"], var.c_d["dOmegady"], var.c_d["dOmegadz"]}});
+
+    // node 周期の継ぎ目: 合併体積で割った部分寄与を group で和 → broadcast (Green–Gauss の合併勾配)。
+    // 以前は periodicGradientGather (main) の後で本関数が作り直していたので、F1 と拡散は片側の勾配を読んでいた
+    // (plan boundary-node-periodic-gradient-fix §4.2)。順序: ransGradient → この gather → ransBlendF1 → ransTransport。
+    if (periodicSeamMergeActive(cfg, msh)) {
+        for (const char* k : {"dKdx", "dKdy", "dKdz", "dOmegadx", "dOmegady", "dOmegadz"}) {
+            periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, var.c_d[k]);   // 和 → broadcast まで行う
+        }
+    }
 }

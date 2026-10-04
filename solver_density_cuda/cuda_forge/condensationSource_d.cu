@@ -68,7 +68,8 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
                 var.c_d["res_rog_"+i], var.c_d["res_roQ0_"+i], var.c_d["res_roQ1_"+i], var.c_d["res_roQ2_"+i],
                 var.c_d["src_jac_g_"+i], var.c_d["src_jac_Q0_"+i], var.c_d["src_jac_Q1_"+i], var.c_d["src_jac_Q2_"+i],
                 var.c_d["condS_"+i], var.c_d["condDrdt_"+i], var.c_d["condR30_"+i], var.c_d["condTsat_"+i],
-                var.c_d["condTheta_"+i], var.c_d["condLim_"+i]);
+                var.c_d["condTheta_"+i], var.c_d["condLim_"+i],
+                (s == 0) ? tpoSrcSlots() : nullptr);   // 診断 G3-a (既定 nullptr)
             continue;
         }
         condensation_source_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
@@ -89,7 +90,8 @@ void condensationSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh&
             var.c_d["res_rog_"+i], var.c_d["res_roQ0_"+i], var.c_d["res_roQ1_"+i], var.c_d["res_roQ2_"+i],
             var.c_d["src_jac_g_"+i], var.c_d["src_jac_Q0_"+i], var.c_d["src_jac_Q1_"+i], var.c_d["src_jac_Q2_"+i],
             var.c_d["condS_"+i], var.c_d["condDrdt_"+i], var.c_d["condR30_"+i], var.c_d["condTsat_"+i],
-            var.c_d["condTheta_"+i], var.c_d["condLim_"+i]);
+            var.c_d["condTheta_"+i], var.c_d["condLim_"+i],
+            (s == 0) ? tpoSrcSlots() : nullptr);   // 診断 G3-a (既定 nullptr)
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

@@ -106,8 +106,8 @@ db = C.ResolvedSpeciesDB.builtin()
 x_va3 = {"H2O": 6.09135e-2, "N2": 6.64860e-1, "O2": 2.16072e-1, "AR": 7.97588e-3, "CO2": 4.90034e-2}
 Y = C.mole_to_mass(x_va3, db); X2 = C.mass_to_mole(Y, db); x_norm, tot = C.normalize_fractions(x_va3)
 _chk("composition (a): mole→mass→mole 往復 rtol 1e-12", all(abs(X2[k] / x_norm[k] - 1.0) < 1e-12 for k in x_norm), f"Σ入力 {tot:.6f}")
-# (b) va3 のモル分率 (Σ 0.998825) → Y_H2O = 0.03769539643
-_chk("composition (b): va3 X (Σ 0.998825) → Y_H2O = 0.03769539643 (rtol 1e-9)", abs(Y["H2O"] / 0.03769539643 - 1.0) < 1e-9, f"{Y['H2O']:.11f}")
+# (b) va3 のモル分率 (Σ 0.998825) → Y_H2O = 0.03769535616 (段 3 #13-3 で H2O MW が CEA の 0.01801528 に; 旧 0.0180153 では 0.03769539643)
+_chk("composition (b): va3 X (Σ 0.998825) → Y_H2O = 0.03769535616 (rtol 1e-9)", abs(Y["H2O"] / 0.03769535616 - 1.0) < 1e-9, f"{Y['H2O']:.11f}")
 Yb, Xb, totb = C.composition_to_mass(x_va3, "mole", db)
 _chk("composition (b'): composition_to_mass(mole) = mole_to_mass (rtol 1e-12), 入力総和を返す", all(abs(Yb[k] / Y[k] - 1) < 1e-12 for k in Y) and abs(totb - 0.998825) < 1e-6)
 # (c) full と lumped の混合 cp(T)/h(T) が 200–3000 K で一致 (rtol 1e-12 + atol cp 1e-9 / h 1e-6)
@@ -164,12 +164,18 @@ with tempfile.TemporaryDirectory() as td:
 # SERN 型: 流れ lump + keep の質量配分 (codex M3): 純排気でも Y_EXH = 1 − Y_H2O
 x_m6 = {"N2": 0.63890, "H2O": 0.32695, "H2": 0.01251, "AR": 0.00767, "OH": 0.00604, "O2": 0.00398, "NO": 0.00206, "H": 0.00125, "O": 0.00037, "CO2": 0.00021, "CO": 0.00005}
 Y6 = C.mole_to_mass(x_m6, db); Yair = C.mole_to_mass({"N2": 0.78084, "O2": 0.20946, "AR": 0.00934}, db)
-Ls = C.resolve_species_layout(C.parse_tp_species({"tp_species": {"mode": "lumped", "lumps": {"EXH": {"from": "stream", "stream": "inflow"}, "AIR": {"from": "stream", "stream": "external"}}, "keep": ["H2O"]}}),
+Ls = C.resolve_species_layout(C.parse_tp_species({"tp_species": {"mode": "lumped", "lumps": {"EXH": {"from": "stream", "stream": "inflow"}, "AMB": {"from": "stream", "stream": "external"}}, "keep": ["H2O"]}}),
                               {"inflow": Y6, "external": Yair}, db)
-_chk("SERN lumped+keep: 輸送種 [EXH, AIR, H2O], 排気入口 [1−Y_H2O, 0, Y_H2O] (0.2411)", Ls.species == ["EXH", "AIR", "H2O"] and abs(Ls.Y_transport("inflow")[2] - 0.2411091186) < 1e-9 and abs(Ls.Y_transport("inflow")[0] - (1 - 0.2411091186)) < 1e-9 and Ls.Y_transport("external") == [0.0, 1.0, 0.0])
+# Y_H2O = 0.2411089155 (段 3 #13-3 で H2O MW が CEA の値に; 旧 MW では 0.2411091186)
+_chk("SERN lumped+keep: 輸送種 [EXH, AMB, H2O], 排気入口 [1−Y_H2O, 0, Y_H2O] (0.2411)", Ls.species == ["EXH", "AMB", "H2O"] and abs(Ls.Y_transport("inflow")[2] - 0.2411089155) < 1e-9 and abs(Ls.Y_transport("inflow")[0] - (1 - 0.2411089155)) < 1e-9 and Ls.Y_transport("external") == [0.0, 1.0, 0.0])
 _chk("SERN lumped+keep: EXH の lump 内組成に H2O が無い (二重計上なし)", "H2O" not in Ls.lumps["EXH"]["members"])
-La = C.resolve_species_layout(C.parse_tp_species({"tp_species": ["EXH", "AIR"]}), {"inflow": Y6, "external": Yair}, db)
-_chk("SERN 別名 [EXH, AIR]: 輸送種 [EXH, AIR], 入口 [1,0]/[0,1], トレーサ無し", La.species == ["EXH", "AIR"] and La.Y_transport("inflow") == [1.0, 0.0] and La.Y_transport("external") == [0.0, 1.0] and not La.tracer)
+La = C.resolve_species_layout(C.parse_tp_species({"tp_species": ["EXH", "AMB"]}), {"inflow": Y6, "external": Yair}, db)
+try:
+    C.parse_tp_species({"tp_species": ["EXH", "AIR"]}); _old_rejected = False
+except ValueError as e:
+    _old_rejected = "AMB" in str(e)
+_chk("SERN 旧名 [EXH, AIR] は改名 (AMB) を示して拒否 (ソルバ内蔵の擬似種 AIR と衝突、2026-09-30)", _old_rejected)
+_chk("SERN 別名 [EXH, AMB]: 輸送種 [EXH, AMB], 入口 [1,0]/[0,1], トレーサ無し", La.species == ["EXH", "AMB"] and La.Y_transport("inflow") == [1.0, 0.0] and La.Y_transport("external") == [0.0, 1.0] and not La.tracer)
 Lf2 = C.resolve_species_layout(C.parse_tp_species({"tp_species": "full"}), {"inflow": Y6, "external": Yair}, db)
 _chk("SERN full: 輸送種 = 排気 ∪ 外気 (11 種), トレーサ有り, 各流れの入口ベクトル和 1", Lf2.n == 11 and Lf2.tracer and all(abs(sum(Lf2.Y_transport(s)) - 1) < 1e-12 for s in ("inflow", "external")))
 # 元素質量分率の診断
@@ -195,7 +201,10 @@ def ref_h_molar(e, T):               # thermo_h_molar: 範囲外は線形外挿
 with tempfile.TemporaryDirectory() as td:
     f = pathlib.Path(td) / "db_h2o_tlo300.yaml"
     h2o = db["H2O"]
-    f.write_text('"H2O":\n  MW: %r\n  Tlo: 300.0\n  Tmid: 1000.0\n  Thi: 6000.0\n  nasa9_low: %r\n  nasa9_high: %r\n' % (h2o.MW, list(h2o.low), list(h2o.high)))
+    # N2 も外部 DB に写す (段 3 #13-3 から内蔵種は 6000 K 超の評価で例外にする; 外部 DB の生エントリは従来どおり Thi の外を外挿する)
+    n2 = db["N2"]
+    f.write_text('"H2O":\n  MW: %r\n  Tlo: 300.0\n  Tmid: 1000.0\n  Thi: 6000.0\n  nasa9_low: %r\n  nasa9_high: %r\n' % (h2o.MW, list(h2o.low), list(h2o.high))
+                 + '"N2":\n  MW: %r\n  Tlo: 200.0\n  Tmid: 1000.0\n  Thi: 6000.0\n  nasa9_low: %r\n  nasa9_high: %r\n' % (n2.MW, list(n2.low), list(n2.high)))
     db3 = C.ResolvedSpeciesDB.from_file(f)
     from forge_design.gas.frozen import FrozenGas
     Ym = {"N2": 0.8, "H2O": 0.2}; href = 298.15
@@ -219,6 +228,13 @@ with tempfile.TemporaryDirectory() as td:
     gs = spm.GasSemiPerfect(Ym, Tt=1000.0, db=db3)
     worst2 = max(abs(float(gs.h_mass(T)[0]) - sum(y * ref_h_molar(db3[k], T) / db3[k].MW for k, y in Ym.items())) / 1e6 for T in (100.0, 250.0, 7000.0))
     _chk("範囲外処理: GasSemiPerfect.h_mass も同じ (MOC 側も外部 DB の Tlo/Thi に従う)", worst2 < 1e-12, f"{worst2:.1e}")
+    # 内蔵種 (と内蔵種の混合) は 6000 K 超を評価しない (共通データの第 3 区間を持たず第 2 区間を外挿しない; #13-3)
+    try:
+        FrozenGas(Ym, "MIXT", href, db=db).e_sens(7000.0)
+        raised = False
+    except ValueError:
+        raised = True
+    _chk("範囲外処理: 内蔵 DB の混合は 6000 K 超 (7000 K) の評価で例外 (#13-3)、外部 DB の生エントリは外挿のまま", raised)
     # 内蔵 DB (Tlo 200) では旧 T_FLOOR 凍結と同じ値
     fg0 = FrozenGas(Ym, "MIXT", href); e_old = float(fg0.e_sens(150.0)[0]); e_new = float(FrozenGas(Ym, "MIXT", href, db=db).e_sens(150.0)[0])
     _chk("範囲外処理: 内蔵 DB (Tlo 200 K) の値は従来の T_FLOOR 凍結と同一", abs(e_old - e_new) < 1e-9, f"{e_old:.6f} vs {e_new:.6f}")

@@ -619,7 +619,9 @@ if (wall_flag != nullptr && wall_flag[ic] == 1) {
   §7.7.1 [`boundary-node-nozzle-wall-outlet-stability.md`](../plans/active/boundary-node-nozzle-wall-outlet-stability.md) §2.11)
   は、この一般化によって「outlet だけの特例」ではなく「全境界の既定」に格上げされ、コード上の特例分岐は不要になった。
 
-#### 7.3 node モード: 最小二乗 (LSQ) 勾配 (`gradLSQ`, 既定 OFF)
+#### 7.3 node モード: 最小二乗 (LSQ) 勾配 (`gradLSQ`、**node は 2 固定**)
+
+> **現状 (2026-09-26 確認)**: node では `gradLSQ: 2` 固定で、それ以外は起動エラー (`solverConfig.cpp`、GG は壁行で市松を作る, case/43)。下の「既定 OFF」「`gradLSQ=0` の node は GG」は導入当時の記述。**2026-09-27 から node ではスカラー ($k,\omega$・化学種・受動種・凝縮モーメント) も NS と同じ事前計算係数の LSQ** (`mesh.scalarGradient` の node 既定 `lsq`、plan [`gradient-scalar-lsq-unification.md`](../plans/accepted/gradient-scalar-lsq-unification.md))。`mesh.scalarGradient: gg` で旧来の Green–Gauss。cell は常に GG。
 
 専用計画: [`discretization-lsq-gradient.md`](../plans/active/discretization-lsq-gradient.md)。
 
@@ -665,6 +667,10 @@ float32 格納で解く条件数 2 乗の増幅と、(b) 一部メッシュに�
 
 ##### 7.3.1 `gradLSQ=2`: 係数事前計算 + スペクトル打ち切りフォールバック
 
+> **スカラーへの適用 (実装中、opt-in)**: 係数は幾何のみで変数に依らないので、$k,\omega$・化学種・受動種の勾配も
+> 同じ係数 (継ぎ目の合併済み) で求められる。`mesh.scalarGradient: lsq` (既定 `gg`)、
+> [plans/accepted/gradient-scalar-lsq-unification.md](../plans/accepted/gradient-scalar-lsq-unification.md)。
+
 メッシュが静的なら正規方程式の解は**幾何のみの線形演算子**に畳める:
 
 $$
@@ -704,6 +710,31 @@ $M$ そのものではない ([gmshReader.hpp](../solver_density_cuda/mesh/gmshR
 $\phi_f=\tfrac12(\phi_A+\phi_B)$ の中点補間にする ([calcStructualVariables_d.cu](../solver_density_cuda/cuda_forge/calcStructualVariables_d.cu))。
 cell モード・境界半割面 (`ip>=nNormalPlanes`) は対象外。`fx` は対流・粘性の全面補間で使われる
 (gradient の over-relaxed 法線項が使う `dcc` は CV 中心間距離のまま)。
+
+**再訂正 (2026-09-21) — 「幾何 fx が中点相当」は高 AR の曲面壁層で成り立たない**
+([plan](../plans/accepted/discretization-node-face-weight-midpoint.md))。冷却翼 (case/53 C3X、第一層 2 µm × 壁沿い 0.73 mm) で
+壁側の重みが翼全周 **0.07–0.96** に散っていた。原因は 2 つ:
+
+1. **実装の式が射影ではない**。`calcStructualVariables_d.cu` は
+   $d_0=\sqrt{\sum_i (n_i\Delta_{0,i})^2}$ ($\Delta_0=x_{pc}-x_0$) を使っており、上の記述「法線方向に射影した距離比」
+   ($|n\cdot\Delta|$) と違う。$\Delta=b\,n+a\,t$ と分けると射影は $b$ を返すが、この式は
+   $d^2=b^2(n_x^4+n_y^4)+2ab\,n_xn_y(n_y^2-n_x^2)+2a^2n_x^2n_y^2$ で接線成分 $a$ に依存し、**交差項が辺の両端で逆符号**なので
+   面が中点にあっても $d_0\ne d_1$ になる ($a=b$ のとき壁が 22.5° で重み 0.366、67.5° で 0.634。0°/45°/90° では 0.500 なので
+   軸に沿った平板の検証では見えない)。面重心の接線ずれは壁沿い間隔の
+   不均一で µm 級あり、$d_1/2$ と同程度になる。
+2. **射影に直しても足りない**。曲率 $\kappa$ の壁では面重心が弦のたるみ $\kappa\Delta s^2/8$ だけ沈み、これが $d_1/2$ と
+   同程度なので、射影でも 0.03–1.00 になる。
+
+症状は壁熱流束 `iface_q_eff` の**約 25 節点周期・空間固定のうねり** (粘性仕事 $\tau\cdot U_f$、$U_f=(1-f)U_1$ に乗る。
+$s/S$ 0.45–0.95 で rms 571 W/m²)。`fx=0.5` でうねり rms 1.22 → 0.46 kW/m²、平板 (case/48) と 1 次元スラブ (case/52) は不変。
+**node の内部双対面は `fx=0.5` の固定スキーム** (2026-09-22 恒久化。`calcStructualVariables_d_wrapper` の
+`nodeMode = (discretization=="node")`。オプションは無い)。周期 TGV (case/09)・軸対称凝縮ノズル (case/44) はノイズ床内で不変、
+平板を 30° 回した同一問題では回転不変性が 3–4 倍よくなる ($\tau_w$ の差 0.085 → 0.024 %)。
+**製造解での測定** ([notes](../notes/investigations/2026-09-22-mms-node-face-weight.md)、曲面・AR 350・成長率 1.1/1.2・4 水準):
+`fx=0.5` は**節点値 (温度・速度) が $p$ = 2.00** (節点勾配と物性に解析値を使う補助問題)、**壁の検査体積に入る粘性仕事の相対 RMS 誤差は約 1 次**
+(最粗 31 % → 最細 2.9 %。絶対誤差は約 2 次。曲面上で辺中点の評価位置と双対面上の積分位置がずれるため)。旧式は同じ相対誤差が**約 25 % に停滞する**
+(絶対誤差は約 1 次)。
+2 点差分の壁面熱流束・壁せん断は重みに依らず 1 次。
 
 **検証 (case/29 conical, node laminar viscous 40k)**: `fx=0.5` は近壁 `dUxdy` の checkerboard roughness を
 低減 (99pct 12.84→8.23, −36%)。SU2 (axisym laminar 同条件) との**壁圧比較で fx ON/OFF は区別不能** (<0.5% 差、

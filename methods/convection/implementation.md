@@ -126,6 +126,23 @@ limiter = (duc > 0.8) ? max(0.0, (1.0 - duc) * limiter) : limiter;
    ```
    SLAU2 の根拠と式は [`theory.md` の SLAU2 節](theory.md#slau2-圧力束の低マッハ改良) を参照。
    `velocity2_L/R`, `c_hat` は既存量、新規は `0.5*(ro_L+ro_R)` のみ。
+
+   **`space.slauWallNormalChi: 1` (opt-in, 既定 0)**: 壁隣接面に限り、**質量流束の `chi` だけ**を
+   面法線成分で組み直す (`theory.md` の「既知の限界」節)。圧力束の `(1-chi)` は変えない:
+   ```cpp
+   flow_float chi_mass = chi;                       // 既定はこのまま = ビット同一
+   if (slauWallNormalChi != 0 && geom.wall_flag != nullptr
+       && ((ic0 < geom.nCells && geom.wall_flag[ic0] == 1)
+        || (ic1 < geom.nCells && geom.wall_flag[ic1] == 1))) {
+       const flow_float M_hat_n = min(1, sqrt(0.5*(Vn_p*Vn_p + Vn_m*Vn_m))/c_hat);
+       chi_mass = (1 - M_hat_n)*(1 - M_hat_n);
+   }
+   mdot = sss*0.5*((ro_L*(Vn_p+Vn_hat_p_abs) + ro_R*(Vn_m-Vn_hat_m_abs))
+                   - chi_mass/c_diss * (P_R-P_L));  // ← chi ではなく chi_mass
+   ```
+   `Vn_p`/`Vn_m` は既存の面法線速度で新規量は無い。`wall_flag` は `FaceGeom` 経由で渡す
+   (`mesh.wall_flag_d` は `nCells` しか無いのでゴースト index は範囲で弾く)。
+   `node` かつ `nodeWallDirichlet: 1` 以外で 1 を指定すると **config 検証で停止**する (黙って無効にしない)。
 7. **残差**: `0.5*(mdot ± |mdot|)` で風上選択し、運動量に `p_tilde * S_*` を加え、
    エネルギは `h_p, h_m` (全エンタルピ) を風上にとる。
 8. 両側セルに `atomicAdd(±)`。

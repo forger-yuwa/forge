@@ -1,0 +1,30 @@
+# #4a ダンプ非干渉 (case48)
+harness revision: 1a33427 (dirty)
+forge_mtime : 2026-09-26T09:53:49+00:00
+forge_sha256: a398afdc2c42b64861ac1efdccbbae5c75f929346a1ae23773095fd8ee56766f
+git_head    : 1a334275e07a5fb75724cfdbb9025b8a771add38
+ダンプ有り: /home/ubuntu/sglsq/pg/dc_case48_a, /home/ubuntu/sglsq/pg/dc_case48_b, /home/ubuntu/sglsq/pg/dc_case48_c (ダンプ ['pregather.init', 'pregather.init.names', 'pregather.loop1', 'pregather.loop1.names', 'pregather.rans.loop1', 'pregather.rans.loop1.names'])
+
+## #4a ダンプ非干渉: ダンプ無し gg 3 本 vs ダンプ有り gg 3 本 (res_0・res_1 の全配列、noise_rule)
+無し: /home/ubuntu/sglsq/s1h/s1_case48_gg_a, /home/ubuntu/sglsq/s1h/s1_case48_gg_b, /home/ubuntu/sglsq/s1h/s1_case48_gg_c
+全 152 配列中 135 配列は全 15 対でビット一致
+| res | 配列 | 不一致 | 判定 |
+| --- | --- | --- | --- |
+| res_1 | dKdx | 無し同士 n≤484、有り同士 n≤424、無し–有り n≤445 / 最大差 0.0315 | PASS |
+| res_1 | dKdy | 無し同士 n≤102、有り同士 n≤80、無し–有り n≤110 / 最大差 0.667 | PASS |
+| res_1 | dOmegadx | 無し同士 n≤567、有り同士 n≤477、無し–有り n≤529 / 最大差 1.43e+04 | PASS |
+| res_1 | dOmegady | 無し同士 n≤507、有り同士 n≤426、無し–有り n≤506 / 最大差 2.1e+06 | PASS |
+| res_1 | res_ro | 無し同士 n≤281、有り同士 n≤276、無し–有り n≤320 / 最大差 3.45e-09 | PASS |
+| res_1 | res_roK | 無し同士 n≤170、有り同士 n≤177、無し–有り n≤180 / 最大差 2.38e-07 | PASS |
+| res_1 | res_roOmega | 無し同士 n≤327、有り同士 n≤357、無し–有り n≤350 / 最大差 0.00195 | PASS |
+| res_1 | res_roUx | 無し同士 n≤289、有り同士 n≤282、無し–有り n≤315 / 最大差 2.34e-05 | PASS |
+| res_1 | res_roUy | 無し同士 n≤202、有り同士 n≤158、無し–有り n≤175 / 最大差 2.81e-06 | PASS |
+| res_1 | res_roe | 無し同士 n≤300、有り同士 n≤302、無し–有り n≤320 / 最大差 0.00183 | PASS |
+| res_1 | ro | 無し同士 n≤13、有り同士 n≤21、無し–有り n≤25 / 最大差 9.44e-05 | PASS |
+| res_1 | roOmega | 無し同士 n≤1、有り同士 n≤2、無し–有り n≤2 / 最大差 0.00781 | PASS |
+| res_1 | roUx | 無し同士 n≤60、有り同士 n≤62、無し–有り n≤72 / 最大差 4.48e-05 | PASS |
+| res_1 | roUy | 無し同士 n≤9763、有り同士 n≤9577、無し–有り n≤9740 / 最大差 8.29e-07 | PASS |
+| res_1 | roe | 無し同士 n≤0、有り同士 n≤3、無し–有り n≤2 / 最大差 0.0156 | FAIL (旧同士ビット一致・旧新不一致) |
+| res_1 | transport_diag_k | 無し同士 n≤16182、有り同士 n≤16113、無し–有り n≤16509 / 最大差 2.38e-07 | PASS |
+| res_1 | transport_diag_omega | 無し同士 n≤15971、有り同士 n≤14940、無し–有り n≤16320 / 最大差 2.38e-07 | PASS |
+VERDICT #4a ダンプ非干渉 (case48): FAIL

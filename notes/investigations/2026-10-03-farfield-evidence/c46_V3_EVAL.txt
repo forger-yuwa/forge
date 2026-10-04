@@ -1,0 +1,21 @@
+run_0996_ff_v3a_2p50_ff_cont20k: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892290  a 3.18e-06  前窓差 4.98e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705813  a 3.07e-06  前窓差 4.93e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0618221  a 9.74e-06  前窓差 1.35e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6211744  a 2.05e-04  前窓差 2.93e-05 (≤ 0.1ε: OK)
+run_0994_ff_v3b_3p42_ff: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892306  a 3.20e-06  前窓差 2.87e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705815  a 3.21e-06  前窓差 3.20e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0618801  a 1.38e-05  前窓差 2.63e-07 (≤ 0.1ε: OK)
+   C_M             平均 -1.6228598  a 3.04e-04  前窓差 6.92e-06 (≤ 0.1ε: OK)
+run_0992_ff_v3a_2p50_slip vs run_0996_ff_v3a_2p50_ff_cont20k: C_T D 1.18e-05 (≤ε)  C_T_with_shear D 3.01e-05 (≤ε)  C_L D 7.89e-04 (>ε)  C_M D 2.34e-02 (>ε)  → D > ε あり
+run_0996_ff_v3a_2p50_ff_cont20k vs run_0994_ff_v3b_3p42_ff: C_T D 7.99e-06 (≤ε)  C_T_with_shear D 6.51e-06 (≤ε)  C_L D 8.15e-05 (≤ε)  C_M D 2.19e-03 (≤ε)  → 全量 D ≤ ε
+run_0996_ff_v3a_2p50_ff_cont20k vs run_0990_r4d_g3_zapp35: C_T D 8.57e-06 (≤ε)  C_T_with_shear D 9.91e-06 (≤ε)  C_L D 8.37e-05 (≤ε)  C_M D 2.21e-03 (≤ε)  → 全量 D ≤ ε
+run_0994_ff_v3b_3p42_ff vs run_0990_r4d_g3_zapp35: C_T D 1.02e-05 (≤ε)  C_T_with_shear D 1.03e-05 (≤ε)  C_L D 2.98e-05 (≤ε)  C_M D 6.19e-04 (≤ε)  → 全量 D ≤ ε
+run_0995_ff_v3b_4p35_ff: 最終 step 20000、末尾窓 20 標本
+   C_T             平均 0.8892298  a 4.28e-06  前窓差 7.23e-07 (≤ 0.1ε: OK)
+   C_T_with_shear  平均 0.8705807  a 4.16e-06  前窓差 7.42e-07 (≤ 0.1ε: OK)
+   C_L             平均 0.0618780  a 1.76e-05  前窓差 3.35e-06 (≤ 0.1ε: OK)
+   C_M             平均 -1.6228136  a 3.91e-04  前窓差 7.12e-05 (≤ 0.1ε: OK)
+run_0996_ff_v3a_2p50_ff_cont20k vs run_0995_ff_v3b_4p35_ff: C_T D 8.28e-06 (≤ε)  C_T_with_shear D 7.88e-06 (≤ε)  C_L D 8.33e-05 (≤ε)  C_M D 2.24e-03 (≤ε)  → 全量 D ≤ ε
+run_0994_ff_v3b_3p42_ff vs run_0995_ff_v3b_4p35_ff: C_T D 8.26e-06 (≤ε)  C_T_with_shear D 8.24e-06 (≤ε)  C_L D 3.35e-05 (≤ε)  C_M D 7.41e-04 (≤ε)  → 全量 D ≤ ε

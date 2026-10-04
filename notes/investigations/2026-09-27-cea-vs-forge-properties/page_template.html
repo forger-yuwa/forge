@@ -1,0 +1,220 @@
+<title>CEA と forge の気体物性</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --page:#f6f7f8; --surface:#fcfcfb; --ink:#101418; --ink2:#4d5560; --muted:#838a93; --rule:#dde1e5; --grid:#e9ecef;
+  --accent:#2a78d6; --shade:#eef2f7;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
+  --ok:#e7f4ea; --warn:#fdf1d6; --bad:#fbe1dc; --na:#f1f2f4;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"Noto Sans JP","Hiragino Sans","Yu Gothic",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --page:#101214; --surface:#1a1a19; --ink:#f2f4f6; --ink2:#c3c7cd; --muted:#8c9299; --rule:#34383d; --grid:#2a2d31;
+    --accent:#3987e5; --shade:#222831;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#1f9a1f; --s7:#9085e9; --s8:#e66767;
+    --ok:#1d3325; --warn:#3a3016; --bad:#3e2320; --na:#24272b;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --page:#101214; --surface:#1a1a19; --ink:#f2f4f6; --ink2:#c3c7cd; --muted:#8c9299; --rule:#34383d; --grid:#2a2d31;
+  --accent:#3987e5; --shade:#222831;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#1f9a1f; --s7:#9085e9; --s8:#e66767;
+  --ok:#1d3325; --warn:#3a3016; --bad:#3e2320; --na:#24272b;
+}
+body{background:var(--page);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.7;padding-inline:16px;padding-block:28px 48px}
+main{max-width:1080px;margin-inline:auto;display:grid;gap:40px}
+h1{font-size:26px;line-height:1.35;margin:0;text-wrap:balance;font-weight:700}
+h2{font-size:19px;margin:0 0 6px;text-wrap:balance}
+h3{font-size:15px;margin:0 0 4px}
+p{margin:0;max-width:68ch}
+.lede{color:var(--ink2);margin-top:8px}
+.eyebrow{font-size:12px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;font-family:var(--mono)}
+section{display:grid;gap:14px}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:18px}
+.panel{background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:14px 14px 10px}
+.method{width:100%;border-collapse:collapse;font-size:14px}
+.method th,.method td{border-bottom:1px solid var(--rule);padding:8px 10px;text-align:left;vertical-align:top}
+.method th{color:var(--ink2);font-weight:500;white-space:nowrap}
+.scroll{overflow-x:auto}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--ink2);margin:2px 0 6px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:18px;height:0;border-top:2px solid;display:inline-block}
+.sw.d{border-top-style:dashed}
+svg text{font-family:var(--mono);font-size:11px;fill:var(--muted)}
+svg .lab{fill:var(--ink2);font-family:var(--sans);font-size:12px}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:6px 9px;font-size:12px;font-family:var(--mono);color:var(--ink);box-shadow:0 4px 14px rgba(0,0,0,.12);white-space:nowrap}
+.chartwrap{position:relative}
+.errt{border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums;min-width:860px}
+.errt th,.errt td{padding:5px 8px;border-bottom:1px solid var(--rule);text-align:right;font-family:var(--mono)}
+.errt th{font-family:var(--sans);font-weight:500;color:var(--ink2);background:var(--surface);position:sticky;top:0}
+.errt td.sp,.errt th.sp{text-align:left;font-family:var(--sans);font-weight:700}
+.errt td.grp{border-left:1px solid var(--rule)}
+.g0{background:var(--ok)} .g1{background:var(--warn)} .g2{background:var(--bad)} .gx{background:var(--na);color:var(--muted)}
+.key{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--ink2)}
+.key i{display:inline-block;width:14px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.note{font-size:13px;color:var(--ink2)}
+.callout{border-left:3px solid var(--accent);padding:4px 12px;background:var(--surface)}
+code{font-family:var(--mono);font-size:.92em}
+ul{margin:0;padding-left:1.2em;max-width:72ch}
+li+li{margin-top:4px}
+</style>
+
+<main>
+<header>
+  <div class="eyebrow">forge · 熱物性の照合 · 2026-09-27</div>
+  <h1>CEA と forge の気体物性</h1>
+  <p class="lede">単成分の分子量・定圧比熱 c<sub>p</sub>・粘性係数 μ・熱伝導率 λ を、NASA CEA (<code>thermo.inp</code> / <code>trans.inp</code>) と forge の現行モデルで比べた。あわせて、CEA にデータが無い 373 K 未満の水蒸気で、μ・λ をどう決めるかの案を並べた。</p>
+</header>
+
+<section>
+  <h2>物性の決め方の違い</h2>
+  <div class="panel scroll">
+  <table class="method">
+    <tr><th></th><th>CEA</th><th>forge (現行)</th></tr>
+    <tr><th>分子量・c<sub>p</sub></th><td>NASA 多項式 (<code>thermo.inp</code>)</td><td>同じ係数を転記 (<code>data/species/forge_species_v1.yaml</code>)。差は H2O・He の MW と Ar 高温区間の丸めだけ</td></tr>
+    <tr><th>粘性 μ</th><td>種ごとの経験フィット <code>ln μ = A lnT + B/T + C/T² + D</code> (実測・高精度計算への当てはめ; Svehla 1994 ほか)。範囲外は最寄り区間を外挿</td><td>Lennard-Jones (σ, ε/k) から Chapman–Enskog + Neufeld Ω<sup>(2,2)</sup> で計算</td></tr>
+    <tr><th>熱伝導 λ</th><td>同形の経験フィット</td><td>修正 Eucken 式 λ = μ(c<sub>p</sub> + 1.25R)</td></tr>
+    <tr><th>混合</th><td>相互作用粘性 η<sub>ij</sub> から φ<sub>ij</sub>、λ には別の ψ<sub>ij</sub> (frozen 混合則)</td><td>Wilke の φ<sub>ij</sub> を μ と λ で共用</td></tr>
+  </table>
+  </div>
+  <p class="note">CEA も μ・λ を実行時に kinetic theory で計算しているわけではない。種ごとの値はフィット式で、kinetic theory が出てくるのは混合則の形だけ。</p>
+</section>
+
+<section>
+  <h2>373 K 未満の水蒸気: μ・λ の決め方の案</h2>
+  <p>CEA の H2O は 373.2 K 以上にしかデータが無い。凝縮域 (200–300 K) では次のどれかを選ぶことになる。網掛けは CEA の範囲外、破線は各式の保証範囲の外。</p>
+  <div class="legend" id="h2oLegend"></div>
+  <div class="two">
+    <div class="panel"><h3>粘性係数 μ [μPa·s]</h3><div class="chartwrap" id="h2oMu"></div></div>
+    <div class="panel"><h3>熱伝導率 λ [mW/(m·K)]</h3><div class="chartwrap" id="h2oLam"></div></div>
+  </div>
+  <ul class="note">
+    <li><b>forge LJ (現行)</b>: μ は全域で IAPWS より約 30 % 大きい。λ は 300 K で +52 %、330 K 付近で最大 +59 %。</li>
+    <li><b>CEA の外挿</b>: μ は 250 K まで IAPWS と数 % 以内だが、約 219 K 以下で温度を下げると増える。λ は 300 K で +12 %、250 K 付近から下で増え始める (非物理)。</li>
+    <li><b>IAPWS 希薄気体</b> (粘性 2008・熱伝導 2011): 公式の保証は 253.15 K 以上。373 K で CEA と μ −0.4 %・λ +3.6 % で接続する。</li>
+    <li><b>案 B (つなぎ)</b>: 373.2 K 以上 CEA、253–373 K IAPWS、253 K 未満は IAPWS の傾きで単調に延長。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>forge と CEA の差 (温度依存)</h2>
+  <p>forge / CEA − 1 [%]。破線は CEA のフィット範囲外 (外挿) の区間。</p>
+  <div class="legend" id="errLegend"></div>
+  <div class="two">
+    <div class="panel"><h3>粘性係数 μ</h3><div class="chartwrap" id="errMu"></div></div>
+    <div class="panel"><h3>熱伝導率 λ</h3><div class="chartwrap" id="errLam"></div></div>
+  </div>
+</section>
+
+<section>
+  <h2>種ごとの差の一覧</h2>
+  <p>forge / CEA − 1 [%]。* は CEA のフィット範囲外 (CEA 側の外挿との比較)。OH・H・O は CEA のデータが 1000 K 以上だけ。</p>
+  <div class="key"><span><i class="g0"></i>|差| &lt; 3 %</span><span><i class="g1"></i>3–10 %</span><span><i class="g2"></i>≥ 10 %</span><span><i class="gx"></i>CEA 範囲外</span></div>
+  <div class="panel scroll"><table class="errt" id="errTable"></table></div>
+  <p class="note">c<sub>p</sub> は全種・全温度で差 0.001 % 未満 (同じ NASA 係数)。MW の差は H2O +1.1×10⁻⁶、He −5×10⁻⁷ (相対)。</p>
+</section>
+
+<section>
+  <h2>読み取りと次の判断</h2>
+  <div class="callout"><ul>
+    <li>非極性の軽くない分子 (N2・O2・Ar・CO2・CO・NO) の μ は 2000 K まで ±4 % 以内。λ は修正 Eucken 式のせいで CO2・NO が高温で −10〜−16 %。</li>
+    <li>H2O は μ +14〜+31 %、λ +26〜+52 % (300–1000 K)。極性分子の LJ 値を双極子補正なしで使っているためと推定 (未検証)。</li>
+    <li>He・H2 は高温で μ・λ とも −8〜−21 %。燃焼生成物のラジカル (OH・H・O) は 1000 K 以上で −23〜+14 %。</li>
+    <li>単成分を CEA に合わせても、混合則を forge のまま (φ を λ にも共用) にすると、600 K・H2O 50 % で μ −11 %・λ −10 % の差が残る (codex の独立検算)。CEA に寄せるなら混合則ごと寄せる。</li>
+    <li>未決: 373 K 未満の H2O を CEA の外挿にするか案 B にするか。混合物では水蒸気のモル分率 (凝縮域で数 % 以下) に比例して効く。</li>
+  </ul></div>
+  <p class="note">データ: <code>notes/investigations/2026-09-27-cea-vs-forge-properties/compute.py</code> (forge 共通データ + CEA thermo.inp / trans.inp + IAPWS 希薄気体式)。plan: <code>plans/active/thermophysics-solver-owned-species-db.md</code> §4.3b・§5.1 #5t・§10。</p>
+</section>
+</main>
+
+<script>
+const D = __DATA__;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const SER = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7','--s8'];
+
+function chart(el, cfg){
+  // cfg: {series:[{name,color,pts:[[x,y,solid]]}], x:[lo,hi], y:[lo,hi], xt:[], yt:[], xl, yl, shade:[lo,hi]|null, vlines:[], unit}
+  const W=520,H=330,m={l:52,r:14,t:10,b:40};
+  const X=v=>m.l+(v-cfg.x[0])/(cfg.x[1]-cfg.x[0])*(W-m.l-m.r);
+  const Y=v=>H-m.b-(v-cfg.y[0])/(cfg.y[1]-cfg.y[0])*(H-m.t-m.b);
+  const clampY=v=>Math.max(cfg.y[0],Math.min(cfg.y[1],v));
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${cfg.aria}">`;
+  s+=`<rect x="0" y="0" width="${W}" height="${H}" fill="none"/>`;
+  if(cfg.shade) s+=`<rect x="${X(cfg.shade[0])}" y="${m.t}" width="${X(cfg.shade[1])-X(cfg.shade[0])}" height="${H-m.t-m.b}" fill="var(--shade)"/>`;
+  cfg.yt.forEach(v=>{s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)" stroke-width="1"/><text x="${m.l-6}" y="${Y(v)+4}" text-anchor="end">${v}</text>`;});
+  cfg.xt.forEach(v=>{s+=`<text x="${X(v)}" y="${H-m.b+16}" text-anchor="middle">${v}</text>`;});
+  if(cfg.zero) s+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--muted)" stroke-width="1"/>`;
+  (cfg.vlines||[]).forEach(v=>{s+=`<line x1="${X(v.x)}" x2="${X(v.x)}" y1="${m.t}" y2="${H-m.b}" stroke="var(--muted)" stroke-dasharray="3 3" stroke-width="1"/><text x="${X(v.x)+4}" y="${m.t+12}" class="lab">${v.t}</text>`;});
+  s+=`<text x="${(m.l+W-m.r)/2}" y="${H-6}" text-anchor="middle" class="lab">${cfg.xl}</text>`;
+  cfg.series.forEach(se=>{
+    // split into solid / dashed runs
+    let run=[],solid=null;
+    const flush=()=>{ if(run.length>1){ s+=`<path d="M${run.map(p=>X(p[0]).toFixed(1)+','+Y(clampY(p[1])).toFixed(1)).join('L')}" fill="none" stroke="${se.color}" stroke-width="2" ${solid?'':'stroke-dasharray="5 4"'} stroke-linejoin="round"/>`; } };
+    se.pts.forEach(p=>{ if(p[1]===null||!isFinite(p[1])) {flush();run=[];solid=null;return;} if(solid===null) solid=p[2]; if(p[2]!==solid){ run.push(p); flush(); run=[p]; solid=p[2]; } else run.push(p); });
+    flush();
+  });
+  s+=`<line id="cx" x1="0" x2="0" y1="${m.t}" y2="${H-m.b}" stroke="var(--ink2)" stroke-width="1" visibility="hidden"/>`;
+  s+=`<rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}" fill="transparent" class="hit"/></svg>`;
+  el.innerHTML=s;
+  const svg=el.querySelector('svg'), hit=svg.querySelector('.hit'), cx=svg.querySelector('#cx');
+  const tip=document.createElement('div'); tip.className='tip'; tip.hidden=true; el.appendChild(tip);
+  hit.addEventListener('mousemove',ev=>{
+    const r=svg.getBoundingClientRect(); const px=(ev.clientX-r.left)/r.width*W;
+    const xv=cfg.x[0]+(px-m.l)/(W-m.l-m.r)*(cfg.x[1]-cfg.x[0]);
+    cx.setAttribute('x1',px); cx.setAttribute('x2',px); cx.setAttribute('visibility','visible');
+    let rows=`<div style="color:var(--ink2)">T = ${Math.round(xv)} K</div>`;
+    cfg.series.forEach(se=>{ let best=null; se.pts.forEach(p=>{ if(best===null||Math.abs(p[0]-xv)<Math.abs(best[0]-xv)) best=p; });
+      if(best&&best[1]!==null) rows+=`<div><span style="color:${se.color}">━</span> ${se.name}: ${best[1].toFixed(cfg.dec)}${cfg.unit}${best[2]?'':' (範囲外)'}</div>`; });
+    tip.innerHTML=rows; tip.hidden=false;
+    const lx=ev.clientX-el.getBoundingClientRect().left; tip.style.left=Math.min(lx+12, el.clientWidth-tip.offsetWidth-4)+'px'; tip.style.top='8px';
+  });
+  hit.addEventListener('mouseleave',()=>{tip.hidden=true;cx.setAttribute('visibility','hidden');});
+}
+function legend(el, items){ el.innerHTML=items.map(i=>`<span><span class="sw${i.dash?' d':''}" style="border-top-color:${i.color}"></span>${i.name}</span>`).join(''); }
+
+function draw(){
+  const h=D.h2o, T=h.T;
+  const mk=(arr,inFn)=>T.map((t,k)=>[t,arr[k],inFn(t)]);
+  const hs=[
+    {name:'forge LJ (現行)',color:css('--s2'),key:'forge_LJ',inr:t=>true},
+    {name:'CEA フィット (外挿は破線)',color:css('--s1'),key:'CEA',inr:t=>t>=h.cea_lo},
+    {name:'IAPWS 希薄気体 (保証外は破線)',color:css('--s3'),key:'IAPWS',inr:t=>t>=h.iapws_lo},
+    {name:'案 B: CEA + IAPWS つなぎ',color:css('--s7'),key:'blend',inr:t=>true},
+  ];
+  legend(document.getElementById('h2oLegend'),hs.map(x=>({name:x.name,color:x.color})));
+  const vl=[{x:373.2,t:'373 K'},{x:253.15,t:'253 K'}];
+  chart(document.getElementById('h2oMu'),{aria:'H2O の粘性係数と温度',series:hs.map(x=>({name:x.name,color:x.color,pts:mk(h.mu[x.key],x.inr)})),
+    x:[150,1100],y:[0,50],xt:[200,400,600,800,1000],yt:[0,10,20,30,40,50],xl:'温度 T [K]',shade:[150,373.2],vlines:vl,unit:' μPa·s',dec:2});
+  chart(document.getElementById('h2oLam'),{aria:'H2O の熱伝導率と温度',series:hs.map(x=>({name:x.name,color:x.color,pts:mk(h.lam[x.key],x.inr)})),
+    x:[150,1100],y:[0,140],xt:[200,400,600,800,1000],yt:[0,20,40,60,80,100,120,140],xl:'温度 T [K]',shade:[150,373.2],vlines:vl,unit:' mW/(m·K)',dec:2});
+  const sp=['N2','O2','Ar','CO2','H2O','He','H2','CO'];
+  const es=sp.map((n,i)=>({name:n,color:css(SER[i])}));
+  legend(document.getElementById('errLegend'),es);
+  chart(document.getElementById('errMu'),{aria:'粘性係数の forge と CEA の差',series:sp.map((n,i)=>({name:n,color:css(SER[i]),pts:D.curves[n].mu})),
+    x:[200,3000],y:[-25,35],xt:[500,1000,1500,2000,2500,3000],yt:[-20,-10,0,10,20,30],xl:'温度 T [K]',zero:true,unit:' %',dec:1});
+  chart(document.getElementById('errLam'),{aria:'熱伝導率の forge と CEA の差',series:sp.map((n,i)=>({name:n,color:css(SER[i]),pts:D.curves[n].lam})),
+    x:[200,3000],y:[-25,65],xt:[500,1000,1500,2000,2500,3000],yt:[-20,0,20,40,60],xl:'温度 T [K]',zero:true,unit:' %',dec:1});
+}
+function table(){
+  const TC=D.meta.TCOLS; const t=document.getElementById('errTable');
+  let h=`<thead><tr><th class="sp" rowspan="2">種</th><th rowspan="2">MW 差</th><th colspan="${TC.length}" class="grp">粘性 μ [%]</th><th colspan="${TC.length}" class="grp">熱伝導 λ [%]</th><th rowspan="2">CEA 範囲 [K]</th></tr><tr>`;
+  for(let g=0;g<2;g++) TC.forEach((T,i)=>{h+=`<th class="${i===0?'grp':''}">${T} K</th>`;});
+  h+='</tr></thead><tbody>';
+  const cell=(o,first)=>{ if(!o) return `<td class="gx ${first?'grp':''}">—</td>`; const v=o.rel*100, a=Math.abs(v);
+    const c=!o.in?'gx':(a<3?'g0':a<10?'g1':'g2'); return `<td class="${c} ${first?'grp':''}">${(v>0?'+':'')+v.toFixed(1)}${o.in?'':'*'}</td>`; };
+  D.species.forEach(r=>{
+    h+=`<tr><td class="sp">${r.id}</td><td>${(r.MW_rel*100).toExponential(1)}%</td>`;
+    TC.forEach((T,i)=>h+=cell(r.mu[T],i===0)); TC.forEach((T,i)=>h+=cell(r.lam[T],i===0));
+    h+=`<td>${r.V_range?Math.round(r.V_range[0])+'–'+Math.round(r.V_range[1]):'—'}</td></tr>`;
+  });
+  t.innerHTML=h+'</tbody>';
+}
+table(); draw();
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw);
+new MutationObserver(draw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+</script>

@@ -1,8 +1,13 @@
 #include <vector>
 #include <iterator>
 #include <string>
+#include <set>
+#include <fstream>
+#include <iostream>
+#include <cstdlib>
 #include "periodicNode_d.cuh"
 #include "periodicAtomic_d.cuh"
+#include "calcGradient_d.cuh"   // scalarGradientLsqActive
 #include "cuda_forge/cudaWrapper.cuh"
 
 // node-centered 周期境界 DOF 同一視 (median-dual M4, §4.5)。
@@ -91,6 +96,10 @@ void periodicNodeGather_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
     for (const auto& nm : var.speciesVarNames)     extra.push_back("res_" + nm);
     for (const auto& nm : var.condMomentConsNames) extra.push_back("res_" + nm);
     if (var.tracerRegistered != 0)                 extra.push_back("res_roXi");   // 受動トレーサ (codex 2026-09-16 M5)
+    // 遷移モデル: 残差と輸送対角の両方を合併する (対角の V は合併体積。plan turbulence-transition-lm2009 §4.1)。
+    if (var.transitionRegistered != 0) {
+        for (const char* nm : {"res_roGamma", "res_roReth", "transport_diag_gamma", "transport_diag_reth"}) extra.push_back(nm);
+    }
     // 輸送対角 transport_diag_* も合併する (plan species-passive-scalar-unification §4.1-5, codex M4): 対角
     // D = V/Δτ + V·src_jac + transport_diag の V は合併体積なので、部分 CV の transport_diag のままでは seam の
     // 点陰的/DPLUR 更新が内部と不整合になる。化学種は常に、受動種は passiveScalarScheme 1 のとき (旧経路はビット不変)。
@@ -149,6 +158,16 @@ void periodicMirrorScalarState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cf
     }
 }
 
+void periodicMirrorTransitionState_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
+{
+    if (cfg.discretization != "node" || msh.periodicRoot_d == nullptr || msh.nPeriodicMembers == 0) return;
+    if (var.transitionRegistered == 0) return;
+    for (const char* k : {"roGamma", "roReth"}) {
+        periodicBroadcast1FromRoot_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(msh.nCells, msh.periodicRoot_d, var.c_d[k]);
+        gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
+    }
+}
+
 // 勾配の periodic gather (§4.5 拡張)。Green-Gauss 勾配 ∇φ[ic]=(1/V[ic])Σφ_f·S_f は、合併体積
 // (buildPeriodicNodeGroups で V[master]=V[slave]=V合併) のおかげで ∇φ_master+∇φ_slave=(1/V合併)Σ_両側 =
 // 真の合併勾配になる。よって残差と同じ「和→broadcast」で boundary periodic node の片側勾配を厳密合併に直す。
@@ -161,14 +180,16 @@ void periodicGradientGather_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg ,
 
     const char* keys[] = {
         "dUxdx","dUxdy","dUxdz", "dUydx","dUydy","dUydz", "dUzdx","dUzdy","dUzdz",
-        "drodx","drody","drodz", "dPdx","dPdy","dPdz", "dTdx","dTdy","dTdz", "divU",
-        // RANS SST 勾配 (未割当ならスキップ): k/ω の seam 拡散・生産の片側勾配を合併
-        "dKdx","dKdy","dKdz", "dOmegadx","dOmegady","dOmegadz"
+        "drodx","drody","drodz", "dPdx","dPdy","dPdz", "dTdx","dTdy","dTdz", "divU"
+        // k/ω の勾配はここでは合併しない: 後段の ransGradient が作り直すため、合併は ransGradient の直後で行う
+        // (plan boundary-node-periodic-gradient-fix §4.2)
     };
     std::vector<std::string> names(std::begin(keys), std::end(keys));
     // 化学種・受動種の勾配 (speciesFaceReconstruction>=1 で計算; 周期半割面を除外して積算済み) も合併する
     // (plan species-passive-scalar-unification §4.1-5-1)。受動種は passiveScalarScheme 1 のときだけ計算される。
-    if (cfg.speciesFaceReconstruction >= 1) {
+    // mesh.scalarGradient: lsq では各 wrapper が periodicSeamMergeActive のときだけ自分で合併するので、ここでは登録しない
+    // (二重合併の回避、plan gradient-scalar-lsq-unification §4.3)。gg は従来どおり。
+    if (cfg.speciesFaceReconstruction >= 1 && !scalarGradientLsqActive(cfg)) {
         for (int s = 0; s < var.nSpeciesRegistered; ++s) {
             const std::string i = std::to_string(s);
             names.push_back("dY"+i+"dx"); names.push_back("dY"+i+"dy"); names.push_back("dY"+i+"dz");
@@ -194,6 +215,19 @@ void periodicGradientGather_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg ,
 bool periodicNodeActive(const solverConfig& cfg, const mesh& msh)
 {
     return cfg.discretization == "node" && msh.periodicRoot_d != nullptr && msh.nPeriodicMembers != 0;
+}
+
+// 継ぎ目の合併 stencil (LSQ 係数・SST k/ω 勾配の gather) を使う条件 (plan boundary-node-periodic-gradient-fix §4.1)。
+// node ∧ 周期 group あり ∧ 非軸対称 ∧ 周期 bcond がすべて並進 (type 0)。回転周期は別 plan (boundary-node-rotational-periodic)。
+bool periodicSeamMergeActive(const solverConfig& cfg, const mesh& msh)
+{
+    if (!periodicNodeActive(cfg, msh) || cfg.isAxisymmetric == 1) return false;
+    for (const auto& bc : msh.bconds) {
+        if (bc.bcondKind != "periodic") continue;
+        auto it = bc.inputInts.find("type");
+        if (it != bc.inputInts.end() && it->second != 0) return false;
+    }
+    return true;
 }
 
 void periodicGatherArray_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , flow_float* a)
@@ -262,4 +296,69 @@ void periodicMirrorDq_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh&
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+}
+
+void preGatherDump(const std::string& tag, geom_int nCells, const std::vector<std::string>& names,
+                   const std::vector<std::array<const flow_float*, 3>>& grads)
+{
+    const char* p = std::getenv("FORGE_DUMP_PREGATHER");
+    if (!p || !*p || names.empty() || names.size() != grads.size()) return;
+    static std::set<std::string> done;
+    if (!done.insert(tag).second) return;
+    // 成分の配列が無いときはゼロで埋めない (真のゼロと区別できなくなる)。診断失敗として tag ごと書かない。
+    for (size_t v = 0; v < names.size(); ++v) {
+        for (int c = 0; c < 3; ++c) {
+            if (grads[v][c] == nullptr) {
+                std::cout << "[FORGE_DUMP_PREGATHER] " << tag << ": d" << names[v] << "d" << "xyz"[c]
+                          << " が無いのでこの tag は書かない\n";
+                return;
+            }
+        }
+    }
+    const size_t n = (size_t)nCells;
+    std::vector<flow_float> buf(names.size() * n * 3), tmp(n);
+    for (size_t v = 0; v < names.size(); ++v) {
+        for (int c = 0; c < 3; ++c) {
+            gpuErrchk( cudaMemcpy(tmp.data(), grads[v][c], n * sizeof(flow_float), cudaMemcpyDeviceToHost) );
+            for (size_t i = 0; i < n; ++i) buf[(v * n + i) * 3 + c] = tmp[i];
+        }
+    }
+    const std::string path = std::string(p) + "." + tag;
+    std::ofstream ofs(path, std::ios::binary);
+    if (!ofs) { std::cout << "[FORGE_DUMP_PREGATHER] cannot open " << path << '\n'; return; }
+    ofs.write(reinterpret_cast<const char*>(buf.data()), (std::streamsize)(buf.size() * sizeof(flow_float)));
+    std::ofstream nf(path + ".names");
+    nf << names.size() << " " << n << "\n";
+    for (const auto& nm : names) nf << nm << "\n";
+    std::cout << "[FORGE_DUMP_PREGATHER] wrote " << names.size() << " x " << n << " x 3 pre-gather gradients to " << path << '\n';
+}
+
+bool preGatherDumpEnabled()
+{
+    static const bool on = [] { const char* p = std::getenv("FORGE_DUMP_PREGATHER"); return p != nullptr && *p != '\0'; }();
+    return on;
+}
+
+void preGatherDumpMain(solverConfig& cfg , mesh& msh , variables& var , const char* tag)
+{
+    if (!preGatherDumpEnabled()) return;
+    std::vector<std::string> names;
+    std::vector<std::array<const flow_float*, 3>> g;
+    auto add = [&](const std::string& nm) {
+        auto f = [&](const std::string& k) -> const flow_float* {
+            auto it = var.c_d.find(k); return (it == var.c_d.end()) ? nullptr : it->second; };
+        const flow_float* x = f("d" + nm + "dx");
+        if (x == nullptr) return;
+        names.push_back(nm);
+        g.push_back({x, f("d" + nm + "dy"), f("d" + nm + "dz")});
+    };
+    for (const char* v : {"ro", "Ux", "Uy", "Uz", "P", "T"}) add(v);
+    if (cfg.speciesFaceReconstruction >= 1 && !scalarGradientLsqActive(cfg)) {
+        for (int s = 0; s < var.nSpeciesRegistered; ++s) add("Y" + std::to_string(s));
+        if (cfg.passiveScalarScheme == 1) {
+            if (var.tracerRegistered != 0) add("Xi");
+            for (const auto& nm : var.condMomentConsNames) add(nm.substr(2));
+        }
+    }
+    preGatherDump(tag, msh.nCells, names, g);
 }

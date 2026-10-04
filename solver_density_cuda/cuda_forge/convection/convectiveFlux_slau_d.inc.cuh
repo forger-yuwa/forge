@@ -10,6 +10,17 @@ __global__ void SLAU_d
 (
  int conv_scheme, int limit_scheme,
  int slauVariant,   // 1: SLAU, 2: SLAU2 (圧力束第3項のみ低マッハ改良)
+ // space.reconT=1: MUSCL 再構成を **rho でなく T** に対して行い、面密度を EOS から導く
+ // (rho_face = P_face/(R T_face))。SU2 は理想気体+ROE で T,u,v,P の 4 変数だけ再構成し rho を導出する
+ // (CEulerVariable.cpp:38-41, nPrimVarGrad = ndim+2)。既定 (0) は rho,u,v,w,P を再構成して T を導出するため、
+ // **T が独立な 2 つの再構成の差**になり 2 節点モードを浴びる (case/53 実測: (dP/P)/(drho/rho) が
+ // forge 1.24 / SU2 0.995、等温=1.000)。0 でビット不変。**リミッタは limiter_P を流用** (limiter_T は未計算)。
+ int reconT,
+ // 壁隣接面に限り、**質量流束の chi だけ**を面法線 Mach で組み直す (0 でビット不変)。
+ // 圧力束の (1-chi) は変えない。plans/active/convection-slau-wall-normal-chi.md §4.1
+ int slauWallNormalChi,
+ // 接触波 (エントロピー波) 散逸の速度下限 eps。0.0 でビット不変 (solverConfig.hpp `slauContactFloor` 参照)
+ flow_float contactFloor,
  int lowMachPrecond, flow_float precondEps,   // 低マッハ前処理 (1: 散逸スケールを c'、0: 従来 c_hat)
  int lowMachThornber,                         // Thornber 再構成補正 (1: L/R 速度ジャンプを z=min(M,1) で縮約)
  flow_float ga,
@@ -67,6 +78,9 @@ __global__ void SLAU_d
     flow_float *dUydx=grd.dUydx, *dUydy=grd.dUydy, *dUydz=grd.dUydz;
     flow_float *dUzdx=grd.dUzdx, *dUzdy=grd.dUzdy, *dUzdz=grd.dUzdz;
     flow_float *dPdx=grd.dPdx, *dPdy=grd.dPdy, *dPdz=grd.dPdz;
+    flow_float *T_cellv=st.T, *dTdx=grd.dTdx, *dTdy=grd.dTdy, *dTdz=grd.dTdz;   // space.reconT=1 のみ
+    // psi_T があればそれを使い、無ければ limiter_P を流用 (codex レビュー: 流用は近似)
+    flow_float *limT = (lim.limiter_T != nullptr) ? lim.limiter_T : lim.limiter_P;
     // --- ローカル展開ここまで ---
 
     geom_int ip_orig = blockDim.x*blockIdx.x + threadIdx.x;
@@ -164,7 +178,13 @@ __global__ void SLAU_d
             atomicMin(&g_psiRhoY_min_scaled, (int)(min(lim_rho_L, lim_rho_R)*1.0e6f));
         }
 
-        flow_float ro_L = interp_dispatch(conv_scheme, limit_scheme, ro[ic0] , ro[ic1], drodx[ic0], drody[ic0], drodz[ic0], drodx[ic1], drody[ic1], drodz[ic1], dcc_x, dcc_y, dcc_z, dc0p_x, dc0p_y, dc0p_z, f, lim_rho_L);
+        flow_float ro_L;
+        flow_float T_L_recon = 0.0f, T_R_recon = 0.0f;
+        if (reconT != 0) {
+            T_L_recon = interp_dispatch(conv_scheme, limit_scheme, T_cellv[ic0], T_cellv[ic1], dTdx[ic0], dTdy[ic0], dTdz[ic0], dTdx[ic1], dTdy[ic1], dTdz[ic1], dcc_x, dcc_y, dcc_z, dc0p_x, dc0p_y, dc0p_z, f, limT[ic0]);
+        } else {
+        ro_L = interp_dispatch(conv_scheme, limit_scheme, ro[ic0] , ro[ic1], drodx[ic0], drody[ic0], drodz[ic0], drodx[ic1], drody[ic1], drodz[ic1], dcc_x, dcc_y, dcc_z, dc0p_x, dc0p_y, dc0p_z, f, lim_rho_L);
+        }
         flow_float Ux_L = interp_dispatch(conv_scheme, limit_scheme, Ux[ic0] , Ux[ic1], dUxdx[ic0], dUxdy[ic0], dUxdz[ic0], dUxdx[ic1], dUxdy[ic1], dUxdz[ic1], dcc_x, dcc_y, dcc_z, dc0p_x, dc0p_y, dc0p_z, f, limiter_Ux[ic0]);
         flow_float Uy_L = interp_dispatch(conv_scheme, limit_scheme, Uy[ic0] , Uy[ic1], dUydx[ic0], dUydy[ic0], dUydz[ic0], dUydx[ic1], dUydy[ic1], dUydz[ic1], dcc_x, dcc_y, dcc_z, dc0p_x, dc0p_y, dc0p_z, f, limiter_Uy[ic0]);
         flow_float Uz_L = interp_dispatch(conv_scheme, limit_scheme, Uz[ic0] , Uz[ic1], dUzdx[ic0], dUzdy[ic0], dUzdz[ic0], dUzdx[ic1], dUzdy[ic1], dUzdz[ic1], dcc_x, dcc_y, dcc_z, dc0p_x, dc0p_y, dc0p_z, f, limiter_Uz[ic0]);
@@ -174,7 +194,12 @@ __global__ void SLAU_d
         //flow_float Uz_L = roUz_L/ro_L;
         // velocity2_L / h_p はブレンド後に算出するため後段へ移動 (lowMachThornber 対応)。
 
-        flow_float ro_R  = interp_dispatch(conv_scheme, limit_scheme, ro[ic1], ro[ic0], drodx[ic1], drody[ic1], drodz[ic1], drodx[ic0], drody[ic0], drodz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, lim_rho_R);
+        flow_float ro_R;
+        if (reconT != 0) {
+            T_R_recon = interp_dispatch(conv_scheme, limit_scheme, T_cellv[ic1], T_cellv[ic0], dTdx[ic1], dTdy[ic1], dTdz[ic1], dTdx[ic0], dTdy[ic0], dTdz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limT[ic1]);
+        } else {
+        ro_R = interp_dispatch(conv_scheme, limit_scheme, ro[ic1], ro[ic0], drodx[ic1], drody[ic1], drodz[ic1], drodx[ic0], drody[ic0], drodz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, lim_rho_R);
+        }
         flow_float Ux_R  = interp_dispatch(conv_scheme, limit_scheme, Ux[ic1], Ux[ic0], dUxdx[ic1], dUxdy[ic1], dUxdz[ic1], dUxdx[ic0], dUxdy[ic0], dUxdz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limiter_Ux[ic1]);
         flow_float Uy_R  = interp_dispatch(conv_scheme, limit_scheme, Uy[ic1], Uy[ic0], dUydx[ic1], dUydy[ic1], dUydz[ic1], dUydx[ic0], dUydy[ic0], dUydz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limiter_Uy[ic1]);
         flow_float Uz_R  = interp_dispatch(conv_scheme, limit_scheme, Uz[ic1], Uz[ic0], dUzdx[ic1], dUzdy[ic1], dUzdz[ic1], dUzdx[ic0], dUzdy[ic0], dUzdz[ic0],-dcc_x, -dcc_y, -dcc_z, dc1p_x, dc1p_y, dc1p_z, 1.0f-f, limiter_Uz[ic1]);
@@ -185,9 +210,25 @@ __global__ void SLAU_d
             const flow_float w = min((flow_float)1.0, sY_dbg / g_contactBlend);
             if (w > (flow_float)0.0) {
                 const flow_float w1 = (flow_float)1.0 - w;
-                ro_L = w1*ro_L + w*ro[ic0]; Ux_L = w1*Ux_L + w*Ux[ic0]; Uy_L = w1*Uy_L + w*Uy[ic0]; Uz_L = w1*Uz_L + w*Uz[ic0]; P_L = w1*P_L + w*Ps[ic0];
-                ro_R = w1*ro_R + w*ro[ic1]; Ux_R = w1*Ux_R + w*Ux[ic1]; Uy_R = w1*Uy_R + w*Uy[ic1]; Uz_R = w1*Uz_R + w*Uz[ic1]; P_R = w1*P_R + w*Ps[ic1];
+                // reconT では ρ を後で EOS から作るので、ここでブレンドするのは **T** (ρ を別々に
+                // ブレンドすると再構成した T との整合が壊れる — codex レビュー 2026-09-20 (d))。
+                if (reconT != 0) { T_L_recon = w1*T_L_recon + w*T_cellv[ic0]; T_R_recon = w1*T_R_recon + w*T_cellv[ic1]; }
+                else { ro_L = w1*ro_L + w*ro[ic0]; ro_R = w1*ro_R + w*ro[ic1]; }
+                Ux_L = w1*Ux_L + w*Ux[ic0]; Uy_L = w1*Uy_L + w*Uy[ic0]; Uz_L = w1*Uz_L + w*Uz[ic0]; P_L = w1*P_L + w*Ps[ic0];
+                Ux_R = w1*Ux_R + w*Ux[ic1]; Uy_R = w1*Uy_R + w*Uy[ic1]; Uz_R = w1*Uz_R + w*Uz[ic1]; P_R = w1*P_R + w*Ps[ic1];
             }
+        }
+        // reconT: 面密度を EOS から導く (ρ = P/(R T), R = cp(γ−1)/γ)。**D2a ブレンドの後**に置く
+        // (ブレンドが T を動かすため)。Thornber は速度だけを変えるので前後どちらでもよい。
+        // **正値性**: T と P に床を当ててから割る。床に当たった面は 1 次 (セル値) へ落とす
+        // — max(R T, 1e-30) だけでは負 T が巨大な ρ に化け、負 P も防げない (codex レビュー 2026-09-20)。
+        if (reconT != 0) {
+            const flow_float Rgas = cnd.cp_cpg * (ga - (flow_float)1.0) / ga;
+            const flow_float Tfl = (flow_float)1.0e-3, Pfl = (flow_float)1.0e-3;
+            if (!(T_L_recon > Tfl) || !(P_L > Pfl)) { T_L_recon = T_cellv[ic0]; P_L = Ps[ic0]; }
+            if (!(T_R_recon > Tfl) || !(P_R > Pfl)) { T_R_recon = T_cellv[ic1]; P_R = Ps[ic1]; }
+            ro_L = P_L / (Rgas * T_L_recon);
+            ro_R = P_R / (Rgas * T_R_recon);
         }
         // 低マッハ Thornber 再構成補正: L/R 速度ジャンプを z=min(M,1) で縮約し、低マッハで
         // O(1/M) に増大する速度ジャンプ由来の散逸を抑える。lowMachThornber==0 で恒等 (ビット不変)、
@@ -201,6 +242,44 @@ __global__ void SLAU_d
             um = 0.5f*(Ux_L+Ux_R); du = 0.5f*(Ux_L-Ux_R); Ux_L = um + z_th*du; Ux_R = um - z_th*du;
             um = 0.5f*(Uy_L+Uy_R); du = 0.5f*(Uy_L-Uy_R); Uy_L = um + z_th*du; Uy_R = um - z_th*du;
             um = 0.5f*(Uz_L+Uz_R); du = 0.5f*(Uz_L-Uz_R); Uz_L = um + z_th*du; Uz_R = um - z_th*du;
+        }
+        // W2 V1 (plan §4.23/§6.4): 非物理な再構成の**発火計測のみ** (フォールバックはしない)。
+        // 判定点は SU2 と同じく「流束が実際に消費する L/R 状態」= contactBlend / Thornber の後。
+        if (g_badReconDiag != 0) {
+            const bool badRo = (ro_L <= g_badReconRoMin) || (ro_R <= g_badReconRoMin)
+                            || !isfinite(ro_L) || !isfinite(ro_R);
+            const bool badP  = (P_L  <= g_badReconPMin)  || (P_R  <= g_badReconPMin)
+                            || !isfinite(P_L)  || !isfinite(P_R);
+            atomicAdd(&g_badReconTotal, 1ULL);
+            if (badRo) atomicAdd(&g_badReconRo, 1ULL);
+            if (badP)  atomicAdd(&g_badReconP,  1ULL);
+            if (badRo || badP) atomicAdd(&g_badReconFaces, 1ULL);
+        }
+
+        // W2 フォールバック本体 (§4.23): 非物理なら**その面だけ**両側ともセル値 (1 次) に戻す。
+        // SU2 と同じく blend / Thornber の補正も一緒に捨てる (`SetPrimitive(bad ? V_i : Primitive_i, ...)`)。
+        // `conv_scheme = -1` にするので、この後の化学種・受動スカラー・凝縮モーメントも同じ面で 1 次になり、
+        // 組成 (ΣY=1) と面エンタルピーが自動で整合する。1 スレッド = 1 面なのでカウンタ更新に競合は無い。
+        if (g_badReconHyst > 0 && g_badReconCnt != nullptr) {
+            const bool bad = (ro_L <= g_badReconRoMin) || (ro_R <= g_badReconRoMin)
+                          || (P_L  <= g_badReconPMin)  || (P_R  <= g_badReconPMin)
+                          || !isfinite(ro_L) || !isfinite(ro_R) || !isfinite(P_L) || !isfinite(P_R);
+            int c = (int)g_badReconCnt[ip];
+            if (bad) c = min(127, g_badReconHyst + 1);
+            c = max(0, c - 1);
+            g_badReconCnt[ip] = (signed char)c;
+            if (c > 0) {
+                ro_L = ro[ic0]; Ux_L = Ux[ic0]; Uy_L = Uy[ic0]; Uz_L = Uz[ic0]; P_L = Ps[ic0];
+                ro_R = ro[ic1]; Ux_R = Ux[ic1]; Uy_R = Uy[ic1]; Uz_R = Uz[ic1]; P_R = Ps[ic1];
+                conv_scheme = -1;
+                if (g_badReconDiag != 0) atomicAdd(&g_badReconActive, 1ULL);
+            }
+        }
+
+        // 診断介入 (FORGE_DIAG_FACE_VEL_CELL、既定 off): 指定面の指定節点側の速度だけセル値へ (R5h の 1 変数 A/B)
+        if ((long long)ip == g_diagVelCellFace) {
+            if ((long long)ic0 == g_diagVelCellNode) { Ux_L = Ux[ic0]; Uy_L = Uy[ic0]; Uz_L = Uz[ic0]; }
+            if ((long long)ic1 == g_diagVelCellNode) { Ux_R = Ux[ic1]; Uy_R = Uy[ic1]; Uz_R = Uz[ic1]; }
         }
         // velocity2_L / h_p はブレンド後に算出 (L 再構成直後から移動)。
         flow_float velocity2_L = Ux_L*Ux_L + Uy_L*Uy_L + Uz_L*Uz_L;
@@ -467,6 +546,18 @@ __global__ void SLAU_d
         flow_float M_hat = min(one, sqrt(half*(velocity2_R + velocity2_L))/c_hat);
         flow_float chi = (1.0f-M_hat)*(1.0f-M_hat);
 
+        // 壁隣接面の質量流束だけ chi を面法線 Mach で組み直す (space.slauWallNormalChi)。
+        // 壁ノードは u=0 で移流の流入経路を持たないのに、隣の内点の**接線**速度が大きいと
+        // M_hat (= |u| ベース) が 1 に張り付いて chi=0 になり、圧力差項による補充が消える。
+        // 圧力束の (1-chi) は変えない (chi_n >= chi なので圧力散逸が減る = 別作用)。
+        flow_float chi_mass = chi;
+        if (slauWallNormalChi != 0 && geom.wall_flag != nullptr
+            && ((ic0 < geom.nCells && geom.wall_flag[ic0] == 1)
+             || (ic1 < geom.nCells && geom.wall_flag[ic1] == 1))) {
+            const flow_float M_hat_n = min(one, sqrt(half*(Vn_p*Vn_p + Vn_m*Vn_m))/c_hat);
+            chi_mass = (1.0f-M_hat_n)*(1.0f-M_hat_n);
+        }
+
         flow_float pressure_sum = Pf_L + Pf_R;
         // 圧力束の第3項のみ slauVariant で分岐 (mdot は SLAU/SLAU2 共通)。
         // SLAU : (1-chi)(beta_p+beta_m-1) * (P_L+P_R)/2   ... 低マッハで消失し圧力散逸が乏しい
@@ -490,7 +581,7 @@ __global__ void SLAU_d
             c_diss = lowMachCprime(c_hat, velMag_face, Un_face, precondEps);
         }
 
-        flow_float mdot = sss*0.5f*((ro_L*(Vn_p+Vn_hat_p_abs)+ro_R*(Vn_m-Vn_hat_m_abs)) -chi/(c_diss)*P_del);
+        flow_float mdot = sss*0.5f*((ro_L*(Vn_p+Vn_hat_p_abs)+ro_R*(Vn_m-Vn_hat_m_abs)) -chi_mass/(c_diss)*P_del);
         massflux[ip] = mdot;
 
         // S3: 同一の再構成 face 組成 (upwind) を Yface_out[ip*nSpecies+s] へ書き出す。species 移流がこれを読む。
@@ -526,6 +617,46 @@ __global__ void SLAU_d
         flow_float res_roUy_temp = 0.5f*(mdot+abs(mdot))*Uy_L +0.5f*(mdot-abs(mdot))*Uy_R +p_tilde_r*syy;
         flow_float res_roUz_temp = 0.5f*(mdot+abs(mdot))*Uz_L +0.5f*(mdot-abs(mdot))*Uz_R +p_tilde_r*szz;
         flow_float res_roe_temp  = 0.5f*(mdot+abs(mdot))*h_p +0.5f*(mdot-abs(mdot))*h_m ;
+
+        // 接触波散逸の速度下限 (space.slauContactFloor > 0 のときだけ)。
+        // SLAU の mdot は -(S/2)|u_n| dro を既に持つが**下限が無い**ので、近壁 (u_n ~ 0) で
+        // 接触波の Nyquist モードが減衰しない。Roe は全固有値に max(lambda, eps(|u_n|+c)) を掛ける。
+        // ここでは**不足分 dlambda_s のみ**を接触波方向 r_s=(1,u,|u|^2/2) に足す。
+        if (contactFloor > 0.0f) {
+            const flow_float un_bar = 0.5f*(Vn_p + Vn_m);
+            const flow_float dlam   = max(0.0f, contactFloor*(abs(un_bar) + c_hat) - abs(un_bar));
+            if (dlam > 0.0f) {
+                const flow_float alpha_s = (ro_R - ro_L) - (P_R - P_L)/(c_hat*c_hat);
+                const flow_float ux_b = 0.5f*(Ux_L + Ux_R);
+                const flow_float uy_b = 0.5f*(Uy_L + Uy_R);
+                const flow_float uz_b = 0.5f*(Uz_L + Uz_R);
+                const flow_float coef = -0.5f*sss*dlam*alpha_s;
+                res_ro_temp   += coef;
+                res_roUx_temp += coef*ux_b;
+                res_roUy_temp += coef*uy_b;
+                res_roUz_temp += coef*uz_b;
+                res_roe_temp  += coef*0.5f*(ux_b*ux_b + uy_b*uy_b + uz_b*uz_b);
+                massflux[ip]   = res_ro_temp;   // 化学種移流が読む質量束にも反映
+            }
+        }
+
+        // 局所帳簿ダンプ (FORGE_DUMP_LEDGER、既定 off。出力専用で流束は変えない)
+        if (g_ledgerFlag != nullptr
+            && ((ic0 < nCells && g_ledgerFlag[ic0] != 0) || (ic1 < nCells && g_ledgerFlag[ic1] != 0))) {
+            const unsigned int kL = atomicAdd(&g_ledgerFaceCount, 1u);
+            if (kL < g_ledgerFaceCap) {
+                float* o = g_ledgerFaceBuf + (size_t)kL*LEDGER_FACE_NF;
+                o[0] = __int_as_float((int)ip); o[1] = __int_as_float((int)ic0); o[2] = __int_as_float((int)ic1);
+                o[3] = sxx; o[4] = syy; o[5] = szz; o[6] = sss;
+                o[7] = ro_L; o[8] = ro_R; o[9] = P_L; o[10] = P_R; o[11] = Pf_L; o[12] = Pf_R;
+                o[13] = Ux_L; o[14] = Uy_L; o[15] = Uz_L; o[16] = Ux_R; o[17] = Uy_R; o[18] = Uz_R;
+                o[19] = h_p; o[20] = h_m; o[21] = c_hat; o[22] = M_hat; o[23] = chi; o[24] = chi_mass;
+                o[25] = Vn_p; o[26] = Vn_m; o[27] = p_tilde_r; o[28] = mdot;
+                o[29] = res_ro_temp; o[30] = res_roUx_temp; o[31] = res_roUy_temp; o[32] = res_roUz_temp; o[33] = res_roe_temp;
+                o[34] = __int_as_float(conv_scheme); o[35] = P_del; o[36] = f;
+                o[37] = limiter_ro[ic0]; o[38] = (ic1 < nCells) ? limiter_ro[ic1] : -1.0f; o[39] = limiter_P[ic0];
+            }
+        }
 
         atomicAdd(&res_ro[ic0]  , -res_ro_temp);
         atomicAdd(&res_roUx[ic0], -res_roUx_temp);

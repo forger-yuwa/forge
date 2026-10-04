@@ -24,6 +24,16 @@ public:
     std::map<std::string, flow_float*> c_d; // device cell variables
     std::map<std::string, flow_float*> p_d; // device plane variables
 
+    // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.3)。
+    // c_d は flow_float* のマップなので double を入れられない → **型付きの専用領域**として持つ。
+    // 並びは {ro, roUx, roUy, roUz, roe}。**内点 CV (nCells) だけ**確保する (commit が動かすのは内点のみ)。
+    // qAccumulatorFP64 == 0 のときは確保しない (OFF 経路は一切変わらない)。
+    double* qacc_d[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+    int*    qaccAdopt_d = nullptr;   // reconcile が発火したセル数 (monitorInterval ごとにログへ)
+    void allocQAccumulator(geom_int nCells);              // 確保 + 現在の Q から初期化
+    void initQAccumulatorFromQ(geom_int nCells);          // Q (float32) → Qacc (FP64)
+    void freeQAccumulator();
+
 
     // 化学種輸送 (M2): registerSpecies() で 1 化学種ごとの保存量/派生量を末尾に追加するため
     // 非 const とする。registerSpecies は変数構築後 allocVariables 前に 1 度だけ呼ぶ。
@@ -140,6 +150,9 @@ public:
         //   wi_ftan_res : 再スケール **前** の解像接線力 [N]
         // 毎ステップ 0 クリアして atomicAdd で積む。壁ノード以外は 0。
         "wi_ftan", "wi_fnrm", "wi_fnrm_abs", "wi_ftan_res",
+        // 同じ診断群 (FORGE_WI_FORCE_DIAG=1): 内部面の粘性エネルギー流束を**熱伝導と粘性仕事に分けて**
+        // 両端節点へ残差と同じ符号で積む [W]。壁半 CV の q_eff の内訳 (plan boundary-conjugate-heat-transfer §5.1 #58)。
+        "wi_eheat", "wi_ework",
         // 診断 (2026-08-13, plan turbulence-node-wf-omega-source §4.1): omega 方程式の項別収支。
         // res_roOmega に加える前後を分解して、平衡がどの項で決まっているかを直接見る。
         // 単位はすべて [kg/(m·s²)] 相当 = res_roOmega と同じ (体積込み)。
@@ -219,6 +232,10 @@ public:
         "dcc"   // dcc: distance between two cell centers
     };
 
+    // output.extraFields で**だけ**出せる量 (level 2 の既定出力には入れないので、既存 run の res_*.h5 の中身は変わらない)。
+    // 化学種の勾配 dY{s}d{x,y,z} は registerSpecies() が足す。値は周期 gather 後。plan gradient-scalar-lsq-unification §5.1 #4a。
+    std::list<std::string> extraOnly_cellValNames = {"wall_y_eff"};
+
     // 化学種 (M2): registerSpecies() が Y{s} を出力対象に追加するため非 const。
     std::list<std::string> output_cellValNames =
     {
@@ -230,6 +247,7 @@ public:
         "dUzdx" , "dUzdy" , "dUzdz" ,
         "drodx" , "drody" , "drodz" ,
         "dPdx"  , "dPdy"  , "dPdz" ,
+        "dTdx"  , "dTdy"  , "dTdz" ,   // 粘性流束の熱伝導項が読む勾配 (壁熱流束の内訳診断用。level 2 / extraFields)
         "dKdx"  , "dKdy"  , "dKdz" ,
         "dOmegadx", "dOmegady", "dOmegadz",
 
@@ -240,6 +258,7 @@ public:
         "limiter_Uy" , 
         "limiter_Uz" , 
         "limiter_P" , 
+        "limiter_T" ,     // space.reconT=1 のみ計算される (それ以外は 0 のまま)
         //"limiter_Ht" , 
 
         "dt_local",
@@ -255,9 +274,11 @@ public:
         // omega 残差収支調査 (入口×壁コーナー残差プラトーの局在, 一時診断): 残差 res_roOmega,
         // 源項ヤコビ src_jac_omega, 輸送対角 transport_diag_omega
         "res_roOmega" , "src_jac_omega" , "transport_diag_omega" , "res_roK" ,
+        // 平均流の残差場 (level 2 のみ)。残差の下げ止まりが**どこに**あるかを見るため (2026-09-22, plan turbulence-transition-lm2009 codex result M4)。
+        "res_ro" , "res_roUx" , "res_roUy" , "res_roe" ,
 
         // W-I 実力診断 (plan turbulence-node-wf-omega-source §4.2)
-        "wi_ftan" , "wi_fnrm" , "wi_fnrm_abs" , "wi_ftan_res" , "wf_irep_flag" ,
+        "wi_ftan" , "wi_fnrm" , "wi_fnrm_abs" , "wi_ftan_res" , "wi_eheat" , "wi_ework" , "wf_irep_flag" ,
         "omg_prod" , "omg_dest" , "omg_cross" , "omg_trans" , "omg_axisym" , "wf_sprod" , "wf_g" ,
         "rep_id" , "rep_y" , "rep_dist" , "rep_cos" , "rep_toff" , "rep_wdratio" ,
         "rep_nx" , "rep_ny" , "rep_nz" ,
@@ -290,6 +311,12 @@ public:
     // 受動トレーサ (physProp.tracer: exhaust)。registerTracer() で 1 なら roXi 系変数が登録済み。
     // 0 のときは何も登録せず従来経路を保つ (tracerTransport_d.cu の wrapper は全て no-op)。
     int tracerRegistered = 0;
+    // 遷移モデル (turbulence.transition: lm2009)。registerTransition は allocVariables の前に 1 度だけ呼ぶ。
+    //   roGamma/roReth: 保存量 ργ, ρRe_θt。gammaTr/reTheta: 原始量。gammaEff: SST が読む max(γ, γ_sep)。
+    //   diag!=0 で相関・ソースの診断場 (lm*) も確保して出力する。
+    int transitionRegistered = 0;
+    int transitionNeedsInit = 0;   // 入力に roGamma/roReth が無かった (初回の primitive で初期化する)
+    void registerTransition(int enabled, int diag);
 
     variables();
 
@@ -310,6 +337,8 @@ public:
     // cellValNames / c / c_d へ追加し roXi, Xi を出力対象にする。allocVariables より前に 1 度だけ呼ぶ。
     // enabled == 0 のときは何もしない。
     void registerTracer(int enabled);
+    // 二相拡散 (condTwoPhaseDiffusion, #4e) の蒸気残差 res_roYv (residual_history の rms_roYv 列)。enabled==0 で no-op。
+    void registerTwoPhaseVaporResidual(int enabled);
 
     void allocVariables(const int &useGPU , mesh& msh);
 

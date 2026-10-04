@@ -1,0 +1,10 @@
+start_run: case/16.nozzle_wys/run_0950_sglsq_s2_0476_gg
+res: case/16.nozzle_wys/run_0950_sglsq_s2_0476_gg/res_24000.h5
+res_sha256: ad1684d0fc6a03de90d05c1d98306d29d450ed6bdebcfdea3d17bd65a94cc6f1
+mesh_sha256 (起点の nozzle_user_2d.h5): ad15b502e79e3f3913383e298faff6c613e71dbd1f709f52e9c24e5785d35b89
+value file (restart 先): nozzle_user_2d.h5
+config changes vs start:
+  - set mesh.scalarGradient: gg (明示)
+  - set time.last.nStepOuter: 24000 -> 24000
+  - set time.outStepInterval: 4000 -> 4000
+check_solver_config rc=0

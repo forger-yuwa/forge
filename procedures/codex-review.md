@@ -2,6 +2,8 @@
 
 ルールの正本は [`AGENTS.md`](../AGENTS.md) 「codex レビュー (計画立案時と検証結果時の 2 回)」。本書はその手順。
 
+Claude Code はプロンプトの作法・禁止事項 (巨大ファイルを読ませない / 読んでよい `sed -n` を列挙する / 仮説と A/B を 1 つに絞らせる / 最終回答は `tokens used` の後ろに出る) を skill `codex-review` で参照する (`.claude/skills/codex-review/SKILL.md`)。
+
 ## 1. いつ回すか
 
 | 段階 | タイミング | 何を見てもらうか |
@@ -11,6 +13,14 @@
 
 対象は [`AGENTS.md`](../AGENTS.md) 「開発フロー」を踏む変更 (新規機能・スキーム/設計方針の変更)。例外 (typo、1 ファイル内バグ修正、
 振る舞い同一のリファクタ、docs のみ) は不要。判断がつかなければ回す側を選ぶ。
+
+### 1.1 診断・設計判断の諮問 (stage = diagnose, 2026-09-26〜)
+
+plan/result 段レビューとは別に、AGENTS.md「モデル分担とエスカレーション」の 7 条件に当たったときの諮問も codex で回す
+(既定は `diagnostician` = Fable サブエージェント。Fable が usage 上限のとき・`~/.config/forge/diagnose-backend` が `codex` のときの代替。切り替え条件は AGENTS.md)。ブリーフを `notes/reviews/briefs/<日付>-<slug>.md`
+に書き、`codex_review.py --stage diagnose --brief <brief> [plan] [--extra ...]` を回す。出力は
+`notes/reviews/<日付>-<slug>-diagnose.md` (結論・仮説・判別 A/B の定型)。plan の §6.1 レビュー記録表には書かない
+(`check_plans.py` の plan/result 行とは別物)。痕跡は応答と plan §5.1 の `F` 項目の判断欄に残す。
 
 ## 2. 回し方
 

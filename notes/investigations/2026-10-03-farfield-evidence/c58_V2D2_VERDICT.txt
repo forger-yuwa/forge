@@ -1,0 +1,22 @@
+run_0110_v2d2_cpg_nop_short: パルスなし max|P − P∞| 2.4400e-04 Pa (≤ 2.8510e-02)
+VERDICT: PASS
+run_0111_v2d2_cpg_nop_long: パルスなし max|P − P∞| 2.4400e-04 Pa (≤ 2.8510e-02)
+VERDICT: PASS
+run_0112_v2d2_cpg_short vs run_0113_v2d2_cpg_long: c_i 491 u 147.3、入射窓 [5.468e-04, 7.065e-04] 振幅 2.223 Pa、反射到達窓 [1.374e-03, 1.670e-03] max|ΔP| 0.001221 Pa → 反射率 0.0549%
+VERDICT: PASS (≤ 5 %)
+run_0114_v2d2_tp1_nop_short: パルスなし max|P − P∞| 0.0000e+00 Pa (≤ 2.8510e-02)
+VERDICT: PASS
+run_0115_v2d2_tp1_nop_long: パルスなし max|P − P∞| 0.0000e+00 Pa (≤ 2.8510e-02)
+VERDICT: PASS
+run_0116_v2d2_tp1_short vs run_0117_v2d2_tp1_long: c_i 486.83 u 146.05、入射窓 [5.515e-04, 7.126e-04] 振幅 2.223 Pa、反射到達窓 [1.385e-03, 1.684e-03] max|ΔP| 0.00586 Pa → 反射率 0.2636%
+VERDICT: PASS (≤ 5 %)
+run_0118_v2d2_tp2_nop_short: パルスなし max|P − P∞| 0.0000e+00 Pa (≤ 2.8510e-02)
+VERDICT: PASS
+run_0119_v2d2_tp2_nop_long: パルスなし max|P − P∞| 0.0000e+00 Pa (≤ 2.8510e-02)
+VERDICT: PASS
+run_0120_v2d2_tp2_short vs run_0121_v2d2_tp2_long: c_i 491.93 u 147.58、入射窓 [5.458e-04, 7.052e-04] 振幅 2.222 Pa、反射到達窓 [1.371e-03, 1.667e-03] max|ΔP| 0.006836 Pa → 反射率 0.3077%
+VERDICT: PASS (≤ 5 %)
+run_0120_v2d2_tp2_short vs run_0122_v2d2_tp2_short_dthalf: max|ΔP| 0.02515 Pa (t = 7.3595e-04 s) / 入射振幅 9.847e+04 = 0.0000%
+VERDICT: PASS (0.0000% ≤ 1.00%)
+run_0120_v2d2_tp2_short vs run_0122_v2d2_tp2_short_dthalf: max|ΔP| 0.02515 Pa (t 7.3595e-04) / 入射振幅 2.222 Pa = 1.132%
+VERDICT: FAIL (≤ 1 %)

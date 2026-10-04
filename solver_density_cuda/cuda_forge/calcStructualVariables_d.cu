@@ -3,6 +3,8 @@
 
 #include "flowFormat.hpp"
 #include "iostream"
+#include <cstdlib>
+#include <cstdio>
 
 __global__ 
 void calcStructualVariables_d 
@@ -62,8 +64,12 @@ void calcStructualVariables_d
 
 void calcStructualVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh,  variables& v)
 {
-    // (nodeMidpointFx 撤去 2026-08-16) 値=ノード座標では幾何 fx が中点相当になるため常に幾何 fx。
-    const int nodeMode = 0;
+    // (nodeMidpointFx 撤去 2026-08-16 → 2026-09-21 に固定スキームとして復活。下記)
+    // node の内部双対面は fx=0.5 (辺中点) の固定スキーム (2026-09-21, plan discretization-node-face-weight-midpoint)。
+    // 幾何 fx は (i) 下の式が法線射影でなく成分ごとの積のノルムなので**回転不変でなく**、(ii) 射影に直しても
+    // 高 AR の曲面壁層では弦のたるみ κΔs²/8 ~ d1 のため 0.03–1.00 に散る。「値=ノード座標なら幾何 fx は中点相当」
+    // (2026-08-16 の nodeMidpointFx 撤去の前提) は等方セルでしか成り立たない。cell と境界半割面は従来どおり。
+    const int nodeMode = (cfg.discretization == "node") ? 1 : 0;
     calcStructualVariables_d<<<cuda_cfg.dimGrid_plane , cuda_cfg.dimBlock>>>(
         msh.nPlanes, msh.nNormalPlanes,
         msh.map_plane_cells_d,

@@ -251,6 +251,12 @@ void ransBoundary_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , bcond& bc
         return;
     }
 
+    // 遠方境界 farfield: k/ω は流束で出入りさせる (流入時の値は farfield_flux_d が面の値配列に書き、ransTransport が運ぶ)。
+    // ピンもゴースト書き込みもしない (node はゴーストを読まない。bvar kb/omegab も持たない)。
+    if (bc.bcondKind == "farfield") {
+        return;
+    }
+
     if (bc.bcondKind == "inlet_uniformVelocity" ||
         bc.bcondKind == "inlet_fluctVelocity" ||
         bc.bcondKind == "inlet_Pressure" ||

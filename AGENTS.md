@@ -15,7 +15,9 @@
 | [`procedures/recommended-settings.md`](procedures/recommended-settings.md) | **推奨解析設定の正本** (解析種別ごとの現行レシピ・日付付き・旧設定一覧)。config を組む/点検するときは skill `forge-config` の手順で参照 |
 | [`procedures/solver-settings.md`](procedures/solver-settings.md) | `convMethod` / `limiter` などの数値設定リファレンス |
 | [`procedures/su2-cross-check.md`](procedures/su2-cross-check.md) | 同一メッシュ・同一 BC で SU2 と比較し forge 固有の問題を切り分ける手順 |
-| [`procedures/codex-review.md`](procedures/codex-review.md) | 計画立案時・検証結果時の **codex 外部レビュー**の手順 (`codex_review.py`、記録の残し方、指摘の採否ルール) |
+| `.claude/agents/*.md` | モデル固定のサブエージェント定義 (`run-watcher` / `implementer` / `diagnostician`)。`diagnostician` (Fable) が使えないときの代替は codex (`codex_review.py --stage diagnose`)。分担とエスカレーション条件の正本は本ファイル「[モデル分担とエスカレーション](#モデル分担とエスカレーション-2026-09-22)」 |
+| [`procedures/codex-review.md`](procedures/codex-review.md) | 計画立案時・検証結果時の **codex 外部レビュー**の手順 (`codex_review.py`、記録の残し方、指摘の採否ルール)。Claude はプロンプト作法・禁止事項を skill `codex-review` |
+| [`plans/active/tooling-nozzle-sern-chain.md`](plans/active/tooling-nozzle-sern-chain.md) | ⑤ SERN の設計チェーン。起動レシピ (§4.12/§4.16)・収束判定 (§4.16.1)・残作業 (§5.1)。Claude は skill `sern-eval` |
 | [`procedures/inlet-profile.md`](procedures/inlet-profile.md) | 入口に分布 (全温・全圧・組成・k/ω・超音速入口の ρ,U,Ps) を与える手順 (`inletProfile` CSV + `gen_inlet_profile.py`)。Claude は skill `forge-inlet-profile` |
 | [`procedures/development-environment.md`](procedures/development-environment.md) | 開発環境とビルド (Docker / WSL native) の方針 |
 | [`procedures/coding-conventions.md`](procedures/coding-conventions.md) | ソース構成・C++/CUDA 命名規約・ビルド/テスト実行手順 |
@@ -30,6 +32,7 @@
 - 文書本文・コード内コメントは日本語で記述する。
 - 識別子・関数名・スキーム名・ファイルパスなどコード由来の語は原語 (英語) のまま `` `code` `` 表記とする。
 - git commit メッセージは英語の命令形で記述する (識別子・コード由来語は原語のまま)。
+- チャット応答 (ターミナル表示) では TeX (`$...$`) を使わず Unicode 数式で書く (例: `y₁⁺ = y₁·√(ρ_w|τ_w|)/μ_w`)。ターミナルは TeX を描画しないため。ファイルに書く文書 (`methods/` 等) は従来どおり KaTeX 記法とする。
 
 ## 計算・実行ルール
 
@@ -73,17 +76,61 @@
 - **`rms_ro` だけで判断しない**。`residual_history.csv` の **全列** (`rms_ro`,`rms_roUx`,`rms_roUy`,`rms_roUz`,`rms_roe`、RANS 時は `rms_roK`,`rms_roOmega`) のトレンドを見る。`rms_ro` が低くても、運動量 (特に軸対称の `rms_roUy`) や乱流 (`rms_roK`/`rms_roOmega`) が**下げ止まり・横ばい・上昇**していれば未収束。実例: 軸対称 SST で `rms_ro`≈3e-5 でも `rms_roUy`≈1e-2 停滞・`rms_roK` 増大=近軸が未収束だった ([architecture-axisym-axis-singularity.md](plans/accepted/architecture-axisym-axis-singularity.md))。
 - **残差プラトーは「収束」ではない**。下げ止まる場合は、積分量 (massflux/推力/出口諸量) が**定常化**しているか、場が**発達しきっている**かを併せて確認する (リミットサイクルの可能性)。
 - **場の発達も確認する** ([develop-flow-before-reporting] と同趣旨): 残差が下がっていても、境界層・乱流・衝撃などが発達途中なら結果は使えない。中間 `res_*.h5` を時系列で見て、注目量が定常化したことを確認する。
+- **段階起動の run では「どの区間で判定したか」を明示する** (2026-09-19)。段階起動 (slip → 層流 →
+  等温 → SST → 2 次ランプ → 本段) では**本段だけを見ると前段の収束場から始まるので低下桁数が
+  小さく出る**一方、**全段を連結すると別の方程式・BC の過渡を本段の基準にしてしまう**
+  (`check_convergence.py` は系列全体の最大値を低下桁数の基準に取る)。**数値設定 (方程式・BC・
+  空間離散化) が同一の区間**で判定し、応答にはその区間を書くこと。CFL・反復数だけの違いは連結可。
+  収束済み場からの継続は `--from-floor <参照 run>` を使う。
+  **区間は段名で決めない**: run 生成側が `solver_density_cuda/tools/stage_manifest.py` の
+  `StageManifest` で段ごとの実効設定を `stage_manifest.json` に書き、
+  `check_convergence.py <run> --segment` が**その最後の区間**を連結して判定する
+  (段名のプレフィックスでは方程式・BC・離散化の同一性を保証できない)。
+  区間の確認は `python3 solver_density_cuda/tools/stage_manifest.py <run> --segments`。
+- **収束ゲート (Stop フック) はセッション別スコープ** (2026-09-20)。`hook_convergence_gate.py` は
+  `case/*/run_*` をファイル状態だけで見るため、共有ワークツリーで並行作業すると**他セッションの run**で
+  ターン終了を block してしまう。そこで PreToolUse(Bash) の `hook_forge_guard.py` が
+  「このセッションが forge を回した case」を `forge_gate_claims.py` 経由で claim し、Stop 側は
+  **claim した case の run だけ**を検査する。`session_id` が取れないときは絞り込まず全件検査する
+  (ゲートを弱めない)。**他セッションの run ディレクトリに VERDICT を書きに行かないこと** —
+  block されたらその旨を伝えて止まる。
+- **判定ツールが「判定不能」を返したら、それは合格ではない**。残差列が無い / 必須の保存量列が
+  欠けている / 末尾窓の代表値が 0 といった入力は、以前は**合格として通っていた** (2026-09-19 修正)。
+  回帰試験は `python3 solver_density_cuda/tools/test_gate_bad_input.py`。判定ロジックを触るときは必ず通す。
 - 外部ソルバ (SU2 等) でクロスチェックする場合の収束確認も同様。手順は [`procedures/su2-cross-check.md`](procedures/su2-cross-check.md) を参照。
+
+**壁解像確認 (必須・低 Re / 壁関数の別を問わず)**: 壁面の $y^+$ を報告するとき、
+**ソルバ出力の `ypls` をそのまま壁解像の根拠にしないこと**。`viscousFlux_d.cu` の低 Re 経路は
+`ypls_b = ρ·u_τ·dcc/μ` で、`dcc` は**ゴーストセル重心と内点セル重心の距離**である。
+**node 方式では壁ノードが壁面上に乗るので `dcc` が退化し、値が 1 桁以上小さく出る**
+(ソルバ自身、流束計算ではこの退化を避けて別経路を通している)。実例 (2026-09-19, case/49):
+ソルバ `ypls` 平均 0.022 に対し、第一内部ノード基準の $y_1^+$ は平均 0.146・**最大 2.60**。
+「y⁺ 0.02 だから低 Re 解像は十分」と報告したが、実際にはリップ近傍で 1 を超えていた。
+
+- 壁解像は**第一内部ノードまでの局所距離** $y_1$ と**接線**壁応力から
+  $y_1^+ = y_1\sqrt{\rho_w|\tau_{w,t}|}/\mu_w$ として出す。**壁面ごと・局所**で見る
+  (全域の代表値 1 つで割ると、細かい壁が 1 つあるだけで粗い壁の解像不足が隠れる)。
+- ソルバの `utau` をそのまま使わない。node の既定経路は `twall_*` だけを上書きし
+  `utau`/`ypls` を更新しないため、高せん断域で $|\tau_w|/(\rho u_\tau^2)$ が 1 から外れる
+  (case/49 で最大 74.5)。
+- 判定は**局所 $y_1^+\le1$ を既定目標**とし、超過した面積割合と位置を報告する。
+  平均だけで合格にしない。緩和するときは熱流束・摩擦の格子感度で裏付ける。
+- ツール化は [`plans/active/tooling-convergence-and-wall-resolution-gates.md`](plans/active/tooling-convergence-and-wall-resolution-gates.md) で進行中。
 
 **準定常確認 (必須・収束確認とは別)**: 残差が下がっていても (またはプラトーでも)、**報告する派生量そのもの** (衝撃位置・上下非対称・CL/CD・massflux・推力・peak μt/μ・出口諸量 等) が**定常化 (頭打ち) しているか**は別問題である。**残差プラトー ≠ 量の定常化**であり、**過渡ピーク ≠ 飽和値**である。これを怠り、過渡ピークの量を定常値として報告した事例があるため、量の報告にはツール経由の確認を必須とする。
 
 - **判定は `solver_density_cuda/tools/check_quasisteady.py <run_dir> [--quantity shock,asym,...]` を実行して行う** (本ルールの実体化ツール)。全 `res_*.h5` スナップショット時系列から対象量を計算し、末尾の頭打ちを `STEADY / DRIFTING / OSCILLATING / TRANSIENT-UNSETTLED` で判定する。**衝撃位置・非対称・CL/CD・massflux 等の派生量を「○○だ」と報告する応答には、このツールの VERDICT を必ず貼ること**。
 - **単一スナップショット・短窓で量を報告しない**。`DRIFTING` / `TRANSIENT-UNSETTLED` を「定常」「飽和」と表現しない。`OSCILLATING` (リミットサイクル) は瞬時値でなく**平均±振幅**で報告する。
+- **`STEADY` でも単調なら、そのことと漸近値を書く** (2026-09-19 ユーザ指摘「上がり続けている・下がり続けているなら収束していないはず」)。`classify` は末尾が単調なとき
+  `[単調増加/減少; 増分減衰から漸近値 X (最終比 ±Y %)]` を detail に付ける。**単調な量は最終値でなく漸近値を併記する**。
+- **「ゼロになる」と書く前に時系列を見る**。実例 (case/49 偏心 1.5 mm): 底面入熱を「消える」と報告したが、
+  実際は粗格子で 1.0e−4 W に落ちて振動、細格子では **−0.0036〜+0.0032 W と符号ごと行き来**していた。
+  正しくは「側壁の 3〜4 桁下」「符号が反転する」であって「ゼロ」ではない。
 - **過渡が減衰しきる長さまで回す**。短い run では非対称・衝撃位置などの**過渡ピークを定常的な値と誤認する** (例: 擬似衝撃波の上下非対称は visc=0 Euler で過渡 0.25→減衰 0.05 だが、~12k step では 0.25 を定常偏りと誤判定した。十分長く=量が頭打ちするまで回す)。量が `DRIFTING` なら「未だ動いている」と明記し run を伸ばす。
 - 強い偏り流など中心線量が破綻する場合は対象量を選ぶ (`--quantity asym` 等)。詳細閾値は `--tail/--drift/--osc`。
 - 外部ソルバ比較や「一致」の主張でも同様: 比較する両者がともに `STEADY` であることを確認してから「一致」と述べる。
 
-**メッシュ変更後の restart (必須)**: メッシュを変えた (quad↔tri↔構造化, 解像度変更) ときは **uniform 初期値から計算を始めない** (超音速/衝撃波/SST は uniform IC から step 数回で発散する)。`solver_density_cuda/tools/interp_field.py SRC.h5 新メッシュ入力.h5` で過去の収束済み場を**最近傍interpolateして cross-mesh restart** する (保存量+roK/roOmega+スカラー輸送を移植、wall_dist は移植せず新メッシュの値を使う)。同一メッシュの restart は `restart_field.py`。
+**メッシュ変更後の restart (必須)**: メッシュを変えた (quad↔tri↔構造化, 解像度変更) ときは **uniform 初期値から計算を始めない** (超音速/衝撃波/SST は uniform IC から step 数回で発散する)。`solver_density_cuda/tools/interp_field.py SRC.h5 新メッシュ入力.h5` で過去の収束済み場を**最近傍interpolateして cross-mesh restart** する (保存量+roK/roOmega+スカラー輸送を移植、wall_dist は移植せず新メッシュの値を使う)。**同一メッシュの restart は `solver_density_cuda/tools/restart_field.py`** (保存量を index コピーし、SRC とビット一致することを検査する)。**同一メッシュに `interp_field.py` を使わないこと**: cross-mesh 用は原始量から保存量を組み直すので `roUx = ρ·Ux` の丸めで元に戻らず、2026-09-23 に `case/56` で `roUy` が 62104/65194 セル・最大 1.6 % ずれた (測っていた量が $\dot m=|\int\rho U_y dx|$ だったので気づかなければ実験ごと壊れていた)。`case/*/restart_field.py` の古い実装も原始量から組み直すので使わないこと。
 
 **メッシュ品質チェック (計算前・必須)**: メッシュを HDF5 化したら計算投入前に必ず `solver_density_cuda/tools/check_mesh_quality.py <mesh.h5>` で品質を確認する。**アスペクト比 ≤ 1000、スキューネス ≤ 0.9 を目標**とし、`VERDICT: FAIL` のメッシュは投入しない。近壁細分化で AR が増えやすいので接線長と第一セル厚のバランスを取る。**例外 (2026-09-12 ユーザ決定): 壁法線に沿った構造格子の境界層セル (壁解像 y⁺≈1〜2 が要る冷却壁など、内角 90° 近傍でスキューの無い層) は AR ≤ 5000 まで可**。その場合は `check_mesh_quality.py --ar-max 5000` (設計チェーンは問題 YAML `mesh.ar_max`) で判定し、run の README/台帳に「AR 緩和 (≤5000)」と明記する。緩和の裏付けは [`plans/active/tooling-nozzle-isothermal-wall-chain.md`](plans/active/tooling-nozzle-isothermal-wall-chain.md) §8-3 (AR 846 メッシュとの A/B)。非構造・スキュー有りのセルには適用しない。壁関数 (y+~30-80 + `wallTreatmentSST=1`) は AR 回避の代替だが、圧縮性冷却壁では未検証。詳細は [`procedures/calculation-workflow.md`](procedures/calculation-workflow.md) の「メッシュ品質チェック」。「メッシュできた/収束した」と報告する応答には品質 VERDICT も併記する。
 
@@ -179,6 +226,100 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
   記録ファイルの実在も確認)。plan 編集時の PostToolUse フックがこれを返す。**2026-09-09 以前に起票済みで既に
   実装が進んでいる plan は `plan 免除` 行 + 理由で通す** (以後の `result` 段は免除しない)。
 - 別セッションが同じツリーで並行作業しているときは、相手の plan にレビュー行を書き込まない (自分の plan だけ)。
+
+## モデル分担とエスカレーション (2026-09-22)
+
+**上位の判断役は 2 系統あり、切り替えて使う (2026-09-26 ユーザ決定)**。以下「上位」「諮る」はどちらかへの諮問を指す。
+
+- **既定: `diagnostician` サブエージェント (Fable)**。
+- **代替: codex 諮問** (`gpt-6-astra`, `model_reasoning_effort=high`)。
+  `python3 solver_density_cuda/tools/codex_review.py --stage diagnose --brief <brief.md> [plan]`。
+- **切り替え条件** (どれか 1 つで codex 側を使う):
+  1. `~/.config/forge/diagnose-backend` があり中身が `codex` (リポジトリ外に置いた全ワークツリー共通のスイッチ。
+     ユーザが「Fable がいっぱい」と言ったら親が `echo codex > ~/.config/forge/diagnose-backend` で立て、
+     「Fable 戻して」で消す)。**諮る前に毎回このファイルを確認する**。
+  2. `diagnostician` の呼び出しが usage 上限・rate limit・overloaded で失敗した (その諮問は codex で回し直し、
+     応答に「Fable 不可のため codex で代替」と書く。スイッチは立てない — 恒常化はユーザが決める)。
+  3. ユーザがその場で codex を指定した。
+- ブリーフは両系統で共通 (下記の 5 分割)。codex 側はファイルに書いて渡すので、Fable 側でも同じファイルを
+  `notes/reviews/briefs/` に残しておくと、失敗時にそのまま codex へ回せる。
+
+上位の判断役は高価・低速なので**判断の場面だけ**に使い、実装・run・後処理は下位モデルに寄せる。
+分担の軸は「難しさ」ではなく**「誤りをツールで判定できるか」**である。収束・準定常・メッシュ品質・plan 構造は
+判定ツールがあるので下位モデルに任せてよい。**ただしフックが保証するのは「判定を実行した痕跡があること」までで、
+判定の中身・対象量・判定区間が揃っているかは保証しない** (Stop フックは `CONVERGENCE_VERDICT.txt` の有無と時刻だけを見る。
+更新後 120 秒未満・180 分超の run は対象外)。**必要な VERDICT が揃ったことの確認は主セッション (親) の責任**である。
+ツールでも拾えないのは**もっともらしいが誤った真因**と
+**設計判断**で、これを誤ると GPU 時間と日数を失う (トークン代より高い)。過去の撤回 (抽出アーチファクトを物理と誤認、
+少数点の一致を精度と主張、ソルバ `ypls` を壁解像の根拠に使用) はいずれもこの型だった。
+
+| 担当 | 作業 |
+| --- | --- |
+| **上位 (既定 Fable `diagnostician` / 代替 codex astra high)** | plan §4 設計方針・§6 検証計画 / 手順で解けない発散・異常の真因切り分け / codex Critical・Major の採否 / result 段の解釈 / `solver_density_cuda/cuda_forge/` の数値カーネル変更のレビュー |
+| **中位 (Opus)** | 既定の主セッション。plan §5.1 に沿った実装、skill 経由の config 組み、メッシュ生成、Python ツール、報告、docs 同期 |
+| **下位 (Sonnet)** | run の準備・NaN 早期確認・終了後の`check_*` 実行・`residual_history.png`・case README の run 一覧同期、コード探索 |
+
+**委譲先** (Claude Code のサブエージェント。定義は `.claude/agents/*.md`、モデルは frontmatter で固定):
+
+- `run-watcher` (下位): run の準備 (`prepare`)・序盤確認 (`early-check`)・終了後検査 (`post-check`) を委譲する。
+  診断はさせない (発散したら事実だけ返す)。**長時間 run のジョブは親が持つ**: 親が `run_case.sh` を
+  `run_in_background` で起動して完了通知を受け、終了後に `post-check` を委譲する (サブエージェントに数時間の完走責任を
+  持たせない。10 分程度で終わる run は `run-watcher` が通しで回してよい)。`run-watcher` の返却が `CHECKED` になり、
+  必要な VERDICT・判定区間・対象量が揃うまで、親は結果報告を完了扱いにしない。
+- `implementer` (中位): 主セッションが plan §5.1 の項目を実装させるときに使う。方針は変えさせない。
+  項目番号を渡さなければ編集せずに返る。
+- `diagnostician` (上位・既定。指示上の編集禁止。Edit/Write は持たないが Bash は持つ): 下のエスカレーション条件に当たったら諮る。
+  ブリーフの書き方は次項の codex 諮問と同じ。
+- **codex 諮問 (上位・代替)**: 上の切り替え条件に当たったら `codex_review.py --stage diagnose` で諮る
+  (read-only サンドボックス、所要 5〜15 分なので `run_in_background` + timeout 1200 s 以上。難所は `--effort xhigh`)。
+  ブリーフは `notes/reviews/briefs/<日付>-<slug>.md` に書き (codex がリポジトリ内で読めるよう、また記録として残すため)、
+  関連 plan を位置引数、case README 等を `--extra` で渡す。出力は `notes/reviews/<日付>-<slug>-diagnose.md`。
+  セッションの文脈は引き継がれないので、ブリーフは**観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 / 仮説**を
+  **分けて**書く。各試行に run パス・コード版 (commit)・実効設定差分・判定区間・VERDICT を付ける。
+  「潰した候補」は結論でなく**潰した証拠**を渡す (呼び出し側の誤った除外を上位モデルに固定しないため。
+  codex は証拠不足なら候補へ戻すよう指示されている)。プロンプトの作法は skill `codex-review`。
+- **共有物の責任者は親**: plan の更新、commit / push、run 名 (`run_NNNN_<slug>`) の決定は親が行う。
+  `run-watcher` は親が決めた名前で `mkdir` し (既存なら失敗させて返す)、case README には**自分の run の行だけ**を
+  編集直前に読み直して追記する。
+- サブエージェントのフック入力は**親と同じ `session_id`** を持つ (2026-09-22 実測: 親・子の Bash が同じ
+  `~/.cache/forge-gate-claims/<session_id>.txt` に claim された)。したがって子が回した run は親の Stop ゲートの検査対象に入る。
+  Claude Code の更新でこの挙動が変わりうるので、ゲートが子の run を見ていない兆候があれば同じ方法で測り直す
+  (`echo "run_case.sh case/99.claimprobe_child"` を子に打たせて台帳を見る)。
+- **定義はセッション開始時に読み込まれる** (2026-09-22 実測)。`.claude/agents/*.md` を追加・変更したセッションからは
+  その定義を呼べない (`Agent type not found`)。新規セッションでは読み込まれ、`run-watcher` = Sonnet 5 /
+  `implementer` = Opus 5 / `diagnostician` = Fable 5.1 (`model: claude-fable-5-1` は受理される) で動くことを確認した。
+  定義を変えたら `claude -p --model haiku` の別プロセスから 1 回呼んで確かめる。
+- **固定コスト**: サブエージェントは 1 回の呼び出しで AGENTS.md・メモリ索引・ツール定義ぶん**約 4.7 万トークン**を読む
+  (2026-09-22 実測、`echo` 1 回で 47,499)。codex 諮問も編集単位で細かく回さず、**判断単位にまとめて**回す。
+  費用削減は未計測の見立てなので、運用開始後にセッション別の実費で確かめる。
+
+**エスカレーション条件** (「難しいと感じたら」では発火しないので、**外から観測できる行為**で決める)。
+主セッションが上位モデルでないとき、次のいずれかに当たったら上位 (既定 `diagnostician`、切り替え条件に当たれば codex 諮問) に諮ってから先へ進む:
+
+1. `plans/active/*.md` の §4 設計方針・§6 検証計画を新規に書く、または方針を変える。
+2. [`procedures/divergence-and-startup.md`](procedures/divergence-and-startup.md) の手順で**2 回**対処しても発散・未収束が解けない
+   (試行は run パスで数える。case README の run 一覧に 2 行あれば 2 回)。
+3. plan §6 に**事前に書いた**参照値・許容差との比較が FAIL または判定不能。**参照値・許容差を事前に書いていない比較**も
+   ここに入る (結果を見てから合格条件を作らない)。
+4. **plan §5.1・承認済みの手順に無い修正や再実行へ進む前**。思いついた修正を入れて回し直す前に諮る
+   (「原因は○○」と plan・case README・応答に書く前、も同じ)。
+5. codex の Critical / Major の採否を決める。
+6. `solver_density_cuda/cuda_forge/` 配下で数値の振る舞い (流束・勾配・リミッタ・境界・陰解法・ソース項) を変える編集の前。
+7. **result 段の解釈を確定する前** (VERDICT が出そろい、codex の `--stage result` に回す前)。結果が予想どおりに見えるときも諮る
+   (過渡ピークを定常値と、抽出アーチファクトを物理と誤認した実績は「予想どおり」に見える場面で起きた)。
+
+- **痕跡を残す** (run パス明示・VERDICT 貼付と同じ扱い): 条件に当たった応答には「`diagnostician` に諮った (結論 1 行)」または「codex (diagnose) に諮った: `notes/reviews/<記録>.md` — 結論 1 行」を書く。
+  **「諮っていない」は保留の記録であって通過ではない** — 諮るまで、その条件が守る先 (修正の投入・原因の記載・解釈の確定) へ進まない。
+  plan §5.1 残作業表の**担当列** (`F` = 上位の判断が要る / `O` = 中位で自走可) を埋め、`F` の項目を完了にするときは
+  内容欄に「判断: 日付・結論 1 行」を書く。
+- 諮問の結論は**仮説**であり、提案された A/B を回して確かめる。codex レビュー 2 回 (plan / result 段) は諮問とは別に維持する
+  (諮問も codex になったので、同じ論点を諮問とレビューで二度聞くより、諮問は切り分け、レビューは plan 全体の点検と役割を分ける)。
+- 主セッション自身が上位モデル (Fable) のときは諮問を省いてよい。ただし codex スイッチが立っているとき
+  (Fable 節約中) は、主セッションが Fable でも判断は codex 諮問に回す。run と実装の委譲 (下向き) は従来どおり。
+- §5.1 を書くときは (諮問の結論を反映する主セッションが)、中位が迷わず実行できる粒度にする (触るファイル・合格条件の VERDICT・回す run)。
+  plan がモデル間の受け渡しの仕様である。
+- サブエージェントは Claude Code のみの仕組み。Copilot 側には本節の分担と条件そのものが規範として効く
+  (判断の場面では codex 諮問を回す、またはユーザに判断を仰ぐ)。
 
 ## コミット・push 運用
 

@@ -105,6 +105,25 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp/forge-home \
 `.geo` を対話編集したいときだけ後述の NICE DCV を使う (通常は不要)。
 メッシュ品質チェック (`check_mesh_quality.py`) と HDF5 変換もクラウド側で通常ルール通り実施する。
 
+#### 大規模メッシュ (>5M 節点) の変換はホスト RAM が律速 (2026-09-20)
+
+g5.xlarge の **RAM は 15 GB** しかなく、GPU (A10G 23 GB) より先にここで詰まる。
+
+- `convertGmshToForge` は **5.5M 節点で RSS 8.6 GB / VM 17 GB**。他の計算と同居していると **OOM kill** される
+  (実例: `case/46` `run_0412_3d_wallres` の初回、`anon-rss:8579624kB` で kill)。
+- **node 方式は変換が 2 回走る**。設計チェーンの `prepare` は QC 用に `discretization: "cell"` で 1 回、
+  本番の node で 1 回呼ぶので、ピークが 2 回来る。
+- 対策は順に **(1) 他の計算を止めて単独で変換する → (2) スワップを張る → (3) インスタンスを大きくする**。
+  スワップは非破壊・即時で、再起動で消える:
+
+  ```bash
+  sudo fallocate -l 16G /swapfile && sudo chmod 600 /swapfile
+  sudo mkswap -q /swapfile && sudo swapon /swapfile && swapon --show
+  ```
+
+- **ディスクも見る**: 1.16M 節点 × 41 スナップショットの 3D run が **6.1 GB**。`outStepInterval` を粗くし、
+  収束・準定常の判定を済ませたら中間スナップショットを間引く。
+
 ### 定型の後処理図 — matplotlib (同梱)
 
 `residual_history.png`・line profile・断面図などのスクリプト後処理はイメージ内の
@@ -215,6 +234,39 @@ sudo shutdown -h now        # または コンソール/CLI から stop-instance
 ```
 
 - **stop** は EBS が残り再開できる (通常はこれ)。**terminate** はディスクごと消える (撤収時のみ)。
+### インスタンスの起動・停止 (2026-09-25)
+
+`solver_density_cuda/tools/aws_instance.sh {status|ip|busy|start|stop|ssh}`。**鍵はスクリプトに含めない**
+(インスタンス ID とリージョンだけ)。`start` は running になり **SSH が上がるまで**待って IP を返す (実測 26 秒)。
+
+**認証情報は WSL ネイティブ側に置く**。`~/.aws` が `/mnt/c` へのリンクだと **drvfs はパーミッションを持たないので
+`chmod 600` が黙って 777 になる** (2026-09-25 実測)。Windows 側からも読める場所に長期の鍵を置かないこと。
+
+```
+/home/sano/.aws-wsl/credentials   [forge]          ← 700/600, WSL ネイティブ
+/home/sano/.aws-wsl/config        [profile forge]  ← **config だけ `profile ` 接頭辞が要る**
+```
+
+`config` を `[forge]` と書くとリージョンが読まれず `NoRegion` になる (credentials 側は `[forge]` で正しい)。
+`~/.bashrc` で `AWS_SHARED_CREDENTIALS_FILE` / `AWS_CONFIG_FILE` / `AWS_PROFILE` を指す。
+
+IAM は **当該インスタンス 1 台の `StartInstances`/`StopInstances` + `DescribeInstances` のみ**。
+`TerminateInstances` も `RunInstances` も付けない (最悪でも「1 台が動きっぱなし」が上限)。
+ポリシーの `Resource` はアカウント番号を `*` にしてよい (インスタンス ID が一意)。
+
+**止まっているのは異常ではない**: 下の `idle_autostop.sh` が正しく働いた結果である。2026-09-24 に 3 回止まったが、
+いずれも run 終了後に手元で解析していた 30 分間だった。**偽のプロセスを走らせて保護を回避しないこと** —
+起動が 26 秒で済む以上、止まってから起こす方が安い。
+
+**インスタンスは 1 台を複数セッションで共有している** (2026-09-25)。別セッションが起動して run を回していることがあるので:
+
+- 触る前に `status`。running なら `busy` で `forge=<プロセス数> logins=<対話ログイン数> gpu=<使用率%>` を見る。
+- **原則として手動で `stop` しない** (2026-09-25 ユーザ指示「停止はほかとの兼ね合いに注意」)。転送・変換・ビルド準備中の他セッションは
+  forge も GPU も 0 に見えるので、止めるのは `idle_autostop.sh` (30 分 idle) に任せる。`busy` は非対話 ssh (scp・コマンド実行) も `ssh=` で数える。
+- `stop` は上の 3 つが全部 0 でなければ拒否する (取得できないときも拒否)。上書き `FORGE_AWS_FORCE_STOP=1` はユーザが明示したときだけ。
+  run 準備中 (ビルド・変換) は forge も GPU も 0 に見えるので、ログイン有無と合わせても完全ではない。
+- `start` は既に running なら使用状況を表示する。自分が起こしたと思い込まず、他の run と GPU を取り合う投入をしない。
+
 - 消し忘れ保険: `idle_autostop.sh` が root cron で 5 分おきに監視し、「GPU 使用率 0 + forge プロセス無し + ログイン無し」が 30 分続くと自動 shutdown する。長時間バッチは forge プロセスが生きている限り止まらない。
 - ローカルへの取り込みは `aws s3 sync s3://forge-runs-<name>/case/... case/...` で逆方向に。
 

@@ -6,6 +6,7 @@
 #include "condensationSourceF_d.cuh"
 #include "condensationEOS_d.cuh"       // cond_equilibrium_delta (緩和形平衡)
 #include "thermo_d.cuh"
+#include "twoPhaseOperatorDiag_d.cuh"   // 診断 G3-a の節点スロット (FORGE_DIAG_TP_OPERATOR; 既定 nullptr)
 
 // 相変化ソース kernel。pure (N2/CPG) と carrier (H2O/TP) の両対応。一温度 T_v=T_d=T。
 // J,r*,dr/dt は現在セル状態から freeze。安定化: J 上限、dr/dt<0→0、r̄≤r* 成長停止、g≤g_max、
@@ -30,8 +31,10 @@ __device__ __forceinline__ void condensation_source_cell_d(
     flow_float* res_rog, flow_float* res_roQ0, flow_float* res_roQ1, flow_float* res_roQ2,
     flow_float* sj_g, flow_float* sj_Q0, flow_float* sj_Q1, flow_float* sj_Q2,
     flow_float* diagS, flow_float* diagDrdt, flow_float* diagR30, flow_float* diagTsat,
-    flow_float* diagTheta, flow_float* diagLim)
+    flow_float* diagTheta, flow_float* diagLim,
+    double* tpo = nullptr, geom_int tpoN = 0)   // 診断 G3-a (既定 nullptr): 足した項・分岐 (10 足さない / 11 成長 / 12 蒸発) を記録
 {
+    if (tpo != nullptr) tpo_src_none(tpo, tpoN, ic, 10);   // 早期退出も「足さない」を明示 (分岐に入れば上書き)
     sj_Q0[ic] = 0.0; sj_Q1[ic] = 0.0; sj_Q2[ic] = 0.0; sj_g[ic] = 0.0;
     diagS[ic] = 0.0; diagDrdt[ic] = 0.0; diagR30[ic] = 0.0; diagTsat[ic] = 0.0;
     diagTheta[ic] = 0.0; diagLim[ic] = 1.0;   // θ (非等温補正) / ソース律速係数 (1=律速なし)
@@ -183,6 +186,11 @@ __device__ __forceinline__ void condensation_source_cell_d(
         res_roQ1[ic] += (flow_float)(SQ1*v);
         res_roQ2[ic] += (flow_float)(SQ2*v);
         res_rog[ic]  += (flow_float)(Sg *v);
+        if (tpo != nullptr) {   // 診断 G3-a: 足した値 = (float)(S·V) (1 項 1 丸め)
+            tpo_src_terms(tpo, tpoN, ic, 12, (double)(flow_float)(Sg*v), (double)(flow_float)(SQ2*v), (double)(flow_float)(SQ1*v),
+                          (double)(flow_float)(SQ0*v), 1);
+            tpo_src_put(tpo, tpoN, ic, TPO_S_THETA, 1.0);
+        }
         return;
     }
 
@@ -204,6 +212,11 @@ __device__ __forceinline__ void condensation_source_cell_d(
     double SQ1 = J*r_nuc + q0*drdt;
     double SQ2 = J*r_nuc*r_nuc + 2.0*q1*drdt;
     double Sg  = (4.0/3.0)*COND_PI*rho_l*(J*r_nuc*r_nuc*r_nuc + 3.0*q2*drdt);
+    if (tpo != nullptr) {   // 診断 G3-a: クリップ前の Sg とクリップの作動
+        tpo_src_put(tpo, tpoN, ic, TPO_S_SG_RAW, Sg);
+        tpo_src_put(tpo, tpoN, ic, TPO_S_CLIP, (Sg < 0.0) ? 1.0 : 0.0);
+        tpo_src_put(tpo, tpoN, ic, TPO_S_J, J);
+    }
     if (Sg < 0.0) Sg = 0.0;
 
     // θ 律速: Δg, 潜熱 ΔT, 蒸気枯渇 (carrier は利用可能蒸気=Yw-g)
@@ -258,6 +271,11 @@ __device__ __forceinline__ void condensation_source_cell_d(
     res_roQ1[ic] += (flow_float)(SQ1*v);
     res_roQ2[ic] += (flow_float)(SQ2*v);
     res_rog[ic]  += (flow_float)(Sg *v);
+    if (tpo != nullptr) {   // 診断 G3-a: 足した値 = (float)(S·V) (1 項 1 丸め)
+        tpo_src_terms(tpo, tpoN, ic, 11, (double)(flow_float)(Sg*v), (double)(flow_float)(SQ2*v), (double)(flow_float)(SQ1*v),
+                      (double)(flow_float)(SQ0*v), 1);
+        tpo_src_put(tpo, tpoN, ic, TPO_S_THETA, theta);
+    }
 }
 
 __global__ void condensation_source_d(
@@ -278,11 +296,12 @@ __global__ void condensation_source_d(
     flow_float* res_rog, flow_float* res_roQ0, flow_float* res_roQ1, flow_float* res_roQ2,
     flow_float* sj_g, flow_float* sj_Q0, flow_float* sj_Q1, flow_float* sj_Q2,
     flow_float* diagS, flow_float* diagDrdt, flow_float* diagR30, flow_float* diagTsat,
-    flow_float* diagTheta, flow_float* diagLim)
+    flow_float* diagTheta, flow_float* diagLim,
+    double* tpo = nullptr)   // 診断 G3-a (既定 nullptr)
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
-    condensation_source_cell_d(ic, condModel, carrier, Rw, M, kantrowitz, kwGammaMode, opts, sp, nSpecies, roYall, condGasSpecies, growthModel, gyarC, twoTemp, evap, evapRmin, evapKelvin, evapLamMin, eq, eqRelax, eqDgMax, eqDTmax, cp_cpg, gamma_cpg, Jmax, dg_max, dT_max, limiterMode, vol, dt_local, T, P, ro, cp_cell, Rmix_cell, roY_w, rog, roQ0, roQ1, roQ2, res_rog, res_roQ0, res_roQ1, res_roQ2, sj_g, sj_Q0, sj_Q1, sj_Q2, diagS, diagDrdt, diagR30, diagTsat, diagTheta, diagLim);
+    condensation_source_cell_d(ic, condModel, carrier, Rw, M, kantrowitz, kwGammaMode, opts, sp, nSpecies, roYall, condGasSpecies, growthModel, gyarC, twoTemp, evap, evapRmin, evapKelvin, evapLamMin, eq, eqRelax, eqDgMax, eqDTmax, cp_cpg, gamma_cpg, Jmax, dg_max, dT_max, limiterMode, vol, dt_local, T, P, ro, cp_cell, Rmix_cell, roY_w, rog, roQ0, roQ1, roQ2, res_rog, res_roQ0, res_roQ1, res_roQ2, sj_g, sj_Q0, sj_Q1, sj_Q2, diagS, diagDrdt, diagR30, diagTsat, diagTheta, diagLim, tpo, nCells);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -312,10 +331,12 @@ __global__ void condensation_source_f_d(
     flow_float* res_rog, flow_float* res_roQ0, flow_float* res_roQ1, flow_float* res_roQ2,
     flow_float* sj_g, flow_float* sj_Q0, flow_float* sj_Q1, flow_float* sj_Q2,
     flow_float* diagS, flow_float* diagDrdt, flow_float* diagR30, flow_float* diagTsat,
-    flow_float* diagTheta, flow_float* diagLim)
+    flow_float* diagTheta, flow_float* diagLim,
+    double* tpo = nullptr)   // 診断 G3-a (既定 nullptr): 足した項・分岐 (0 足さない / 1 成長 / 2 蒸発; 表範囲外の委譲は 10〜12)
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
+    if (tpo != nullptr) tpo_src_none(tpo, nCells, ic, 0);   // 早期退出 (ρ≈0・乾燥) も「足さない」を明示 (分岐に入れば上書き)
     const CondSpeciesProps* dbl_cprops = &dbl.cprops;
     const float Tsat_prev = diagTsat[ic];   // warm start (初期化前に読む)
     sj_Q0[ic] = 0.0f; sj_Q1[ic] = 0.0f; sj_Q2[ic] = 0.0f; sj_g[ic] = 0.0f;
@@ -385,7 +406,8 @@ __global__ void condensation_source_f_d(
         condensation_source_cell_d(ic, dbl.condModel, carrier, dbl.Rw, dbl.M, kantrowitz, kwGammaMode, dbl.opts, dbl.sp, nSpecies, roYall, condGasSpecies,
             growthModel, dbl.gyarC, dbl.twoTemp, evap, dbl.evapRmin, evapKelvin, dbl.evapLamMin, 0, 1.0, 5.0e-3, 10.0, cp_cpg, gamma_cpg,
             dbl.Jmax, dbl.dg_max, dbl.dT_max, limiterMode, vol, dt_local, T, P, ro, cp_cell, Rmix_cell, roY_w, rog, roQ0, roQ1, roQ2,
-            res_rog, res_roQ0, res_roQ1, res_roQ2, sj_g, sj_Q0, sj_Q1, sj_Q2, diagS, diagDrdt, diagR30, diagTsat, diagTheta, diagLim);
+            res_rog, res_roQ0, res_roQ1, res_roQ2, sj_g, sj_Q0, sj_Q1, sj_Q2, diagS, diagDrdt, diagR30, diagTsat, diagTheta, diagLim,
+            tpo, nCells);
         return;
     }
     // ---- 蒸発分岐 (S<=1, 液相あり) ----
@@ -441,6 +463,10 @@ __global__ void condensation_source_f_d(
         res_roQ1[ic] += SQ1*v;
         res_roQ2[ic] += SQ2*v;
         res_rog[ic]  += Sg *v;
+        if (tpo != nullptr) {   // 診断 G3-a: 積の厳密値 double(S)·double(V) (本番は積と和で丸め最大 2 回; FMA なら 1 回)
+            tpo_src_terms(tpo, nCells, ic, 2, (double)Sg*(double)v, (double)SQ2*(double)v, (double)SQ1*(double)v, (double)SQ0*(double)v, 2);
+            tpo_src_put(tpo, nCells, ic, TPO_S_THETA, 1.0);
+        }
         return;
     }
     // ---- 核生成・成長 ----
@@ -460,6 +486,11 @@ __global__ void condensation_source_f_d(
     float SQ1 = J*r_nuc + q0*drdt;
     float SQ2 = J*r_nuc*r_nuc + 2.0f*q1*drdt;
     float Sg  = (4.0f/3.0f)*COND_PI_F*rho_l*(J*r_nuc*r_nuc*r_nuc + 3.0f*q2*drdt);
+    if (tpo != nullptr) {   // 診断 G3-a: クリップ前の Sg とクリップの作動 (SQ1・SQ2 は切らずに残る)
+        tpo_src_put(tpo, nCells, ic, TPO_S_SG_RAW, (double)Sg);
+        tpo_src_put(tpo, nCells, ic, TPO_S_CLIP, (Sg < 0.0f) ? 1.0 : 0.0);
+        tpo_src_put(tpo, nCells, ic, TPO_S_J, (double)J);
+    }
     if (Sg < 0.0f) Sg = 0.0f;
     const float dt = dt_local[ic];
     const float L  = cond_tab_latent_f(tb, Td);
@@ -504,5 +535,9 @@ __global__ void condensation_source_f_d(
     res_roQ1[ic] += SQ1*v;
     res_roQ2[ic] += SQ2*v;
     res_rog[ic]  += Sg *v;
+    if (tpo != nullptr) {   // 診断 G3-a: 積の厳密値 double(S)·double(V) (本番は積と和で丸め最大 2 回; FMA なら 1 回)
+        tpo_src_terms(tpo, nCells, ic, 1, (double)Sg*(double)v, (double)SQ2*(double)v, (double)SQ1*(double)v, (double)SQ0*(double)v, 2);
+        tpo_src_put(tpo, nCells, ic, TPO_S_THETA, (double)theta);
+    }
 }
 

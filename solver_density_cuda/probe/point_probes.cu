@@ -205,6 +205,7 @@ void point_probes::outputProbes(solverConfig& cfg , cudaConfig& cudaCfg ,  mesh&
         std::string fname = "point_probe_" + oss.str() + ".out";
 
         outfile.open(fname, std::ios::app);
+        outfile.precision(10);   // 既定 6 桁では P ~1e5 Pa が 1 Pa 刻みに丸まる (音響の検証で不足、2026-09-29)
         if (outfile.tellp() == 0) { 
             outfile << "Step , TotalTime";
             for (auto varName : this->valNames) {

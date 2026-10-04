@@ -1,5 +1,6 @@
 #include "convection/convectiveFlux_d.cuh"
 #include "cuda_forge/wmlesWallModel_d.cuh"   // wmlesActiveForBcond / wmlesNodeActive (WMLES ゲート)
+#include "cuda_forge/weakIsothermalWall_d.cuh"   // 等温壁エネルギー境界の弱形式 (SU2 型) の幾何
 #include <cstdlib>
 #include <cstdio>
 #include <vector>
@@ -54,6 +55,7 @@ __global__ void viscousFlux_d
  // 診断 (§4.2): W-I 面で実際に残差へ加えた接線力/法線力と、再スケール前の解像接線力を壁ノードへ集計。
  // nullptr 可 (診断オフ)。
  flow_float* wi_ftan, flow_float* wi_fnrm, flow_float* wi_fnrm_abs, flow_float* wi_ftan_res,
+ flow_float* wi_eheat, flow_float* wi_ework,   // 診断: 内部面のエネルギー流束の内訳 (nullptr で無効)
 
  // WMLES 等温壁 (node): 壁ノードに格納した q_w [W/m²] (壁→流体正, 非対象は -1)。片端だけ壁ノードの
  // W-I 面で解像伝導熱流束を q_w·S に置換する (AddQWall, methods/turbulence §10.4)。nullptr で無効。
@@ -84,7 +86,11 @@ __global__ void viscousFlux_d
  // sstEnergyIncludesK (plan turbulence-sst-energy-includes-k §4.2): E_t のエネルギー流束に k 拡散
  //   (μ + σ_k μt)(∂k/∂n) S を足す。離散化は scalarTransport の k 拡散 (法線 over-relaxed 項のみ、相対ゼロ割ガード、
  //   σ_k は sstF1 ブレンド) と同形。nullptr/0 で無効。
- flow_float* dKdx_e, flow_float* dKdy_e, flow_float* dKdz_e, flow_float* sstF1_e, int sigmaBlend_e, int energyK
+ flow_float* dKdx_e, flow_float* dKdy_e, flow_float* dKdz_e, flow_float* sstF1_e, int sigmaBlend_e, int energyK,
+ // 内部面の**熱伝導だけ**の非直交補正の形: 0 = forge の over-relaxed (a=|S|^2/|d.S|),
+ // 1 = SU2 の corrected-gradient (a=(d.S)/|d|^2)。運動量の tau には適用しない。
+ // 壁熱流束の 2 節点交番の切り分け用 (plan boundary-conjugate-heat-transfer §5.1 #43)。
+ int heatCorrSU2
 )
 {
     geom_int ip = blockDim.x*blockIdx.x + threadIdx.x;
@@ -162,23 +168,58 @@ __global__ void viscousFlux_d
         // 完全な Newton 応力 tau_ij S_j = mu(du_i/dx_j + du_j/dx_i)S_j - (2/3)mu divu S_i。
         // 第1項 (Laplacian, mu grad(u_i).S) は over-relaxed: 法線スカラー delta + 同成分勾配.k。
         // 第2項 (転置, mu du_j/dx_i S_j) は面平均勾配にフル S を内積。第3項 (発散) は成分 s**。
-        flow_float tau_x = mu_total*((Ux[ic1] -Ux[ic0])/dcc)*delta;
-        tau_x += mu_total*(dUxdxf*k_x +dUxdyf*k_y +dUxdzf*k_z);
+        // heatCorrSU2 == 2: **運動量の Laplacian 項だけ** SU2 係数に (不完全。切り分け用に残す)。
+        // heatCorrSU2 == 3: **SU2 と同形** — 勾配そのものを補正してから全応力を組む:
+        //     r_i = (U_i[1]-U_i[0]) - (G_i . d),   G^c_ij = G_ij + r_i d_j / |d|^2
+        //     tau_i = mu[ (G^c + G^cT - (2/3) tr(G^c) I) S ]_i
+        // 2 に欠けていたのは転置項 mu*d(r.S)/|d|^2 と発散項 -(2/3)mu(r.d)S/|d|^2 (codex 2026-09-20)。
+        // 粘性仕事 (res_roe += tau.u) は下で同じ tau を使うので自動的に整合する。
+        flow_float d_mom = delta, kx_m = k_x, ky_m = k_y, kz_m = k_z;
+        if (heatCorrSU2 == 2) {
+            const flow_float dd2m  = max(dcc_x*dcc_x + dcc_y*dcc_y + dcc_z*dcc_z, (flow_float)1.0e-30);
+            const flow_float a_su2 = (dcc_x*sxx + dcc_y*syy + dcc_z*szz)/dd2m;
+            d_mom = a_su2*dcc;
+            kx_m = sxx - a_su2*dcc_x; ky_m = syy - a_su2*dcc_y; kz_m = szz - a_su2*dcc_z;
+        }
+        flow_float tau_x, tau_y, tau_z;
+        if (heatCorrSU2 == 3) {
+            const flow_float iL2 = (flow_float)1.0/max(dcc_x*dcc_x + dcc_y*dcc_y + dcc_z*dcc_z, (flow_float)1.0e-30);
+            const flow_float rx = (Ux[ic1]-Ux[ic0]) - (dUxdxf*dcc_x + dUxdyf*dcc_y + dUxdzf*dcc_z);
+            const flow_float ry = (Uy[ic1]-Uy[ic0]) - (dUydxf*dcc_x + dUydyf*dcc_y + dUydzf*dcc_z);
+            const flow_float rz = (Uz[ic1]-Uz[ic0]) - (dUzdxf*dcc_x + dUzdyf*dcc_y + dUzdzf*dcc_z);
+            // G^c_ij = G_ij + r_i d_j iL2
+            const flow_float gxx=dUxdxf+rx*dcc_x*iL2, gxy=dUxdyf+rx*dcc_y*iL2, gxz=dUxdzf+rx*dcc_z*iL2;
+            const flow_float gyx=dUydxf+ry*dcc_x*iL2, gyy=dUydyf+ry*dcc_y*iL2, gyz=dUydzf+ry*dcc_z*iL2;
+            const flow_float gzx=dUzdxf+rz*dcc_x*iL2, gzy=dUzdyf+rz*dcc_y*iL2, gzz=dUzdzf+rz*dcc_z*iL2;
+            const flow_float trg = (isAxisymmetric == 1)
+                ? (divu + (rx*dcc_x + ry*dcc_y + rz*dcc_z)*iL2)   // 軸対称は u_r/r 込みの divu に補正分を足す
+                : (gxx + gyy + gzz);
+            tau_x = mu_total*((gxx*sxx + gxy*syy + gxz*szz) + (gxx*sxx + gyx*syy + gzx*szz) - (2.0f/3.0f)*trg*sxx);
+            tau_y = mu_total*((gyx*sxx + gyy*syy + gyz*szz) + (gxy*sxx + gyy*syy + gzy*szz) - (2.0f/3.0f)*trg*syy);
+            tau_z = mu_total*((gzx*sxx + gzy*syy + gzz*szz) + (gxz*sxx + gyz*syy + gzz*szz) - (2.0f/3.0f)*trg*szz);
+            if (isoStress != 0 && kturb != nullptr) {
+                const flow_float rk23 = -(2.0f/3.0f)*(f*ro[ic0]+(1.0f-f)*ro[ic1])*(f*kturb[ic0]+(1.0f-f)*kturb[ic1]);
+                tau_x += rk23*sxx; tau_y += rk23*syy; tau_z += rk23*szz;
+            }
+        } else {
+        tau_x = mu_total*((Ux[ic1] -Ux[ic0])/dcc)*d_mom;
+        tau_x += mu_total*(dUxdxf*kx_m +dUxdyf*ky_m +dUxdzf*kz_m);
         tau_x += mu_total*(dUxdxf*sxx +dUydxf*syy +dUzdxf*szz);
         tau_x += -mu_total*2.0f/3.0f*(divu)*sxx;
         if (isoStress != 0 && kturb != nullptr) tau_x += -(2.0f/3.0f)*(f*ro[ic0]+(1.0f-f)*ro[ic1])*(f*kturb[ic0]+(1.0f-f)*kturb[ic1])*sxx;
 
-        flow_float tau_y = mu_total*((Uy[ic1] -Uy[ic0])/dcc)*delta;
-        tau_y += mu_total*(dUydxf*k_x +dUydyf*k_y +dUydzf*k_z);
+        tau_y = mu_total*((Uy[ic1] -Uy[ic0])/dcc)*d_mom;
+        tau_y += mu_total*(dUydxf*kx_m +dUydyf*ky_m +dUydzf*kz_m);
         tau_y += mu_total*(dUxdyf*sxx +dUydyf*syy +dUzdyf*szz);
         tau_y += -mu_total*2.0f/3.0f*(divu)*syy;
         if (isoStress != 0 && kturb != nullptr) tau_y += -(2.0f/3.0f)*(f*ro[ic0]+(1.0f-f)*ro[ic1])*(f*kturb[ic0]+(1.0f-f)*kturb[ic1])*syy;
 
-        flow_float tau_z = mu_total*((Uz[ic1] -Uz[ic0])/dcc)*delta;
-        tau_z += mu_total*(dUzdxf*k_x +dUzdyf*k_y +dUzdzf*k_z);
+        tau_z = mu_total*((Uz[ic1] -Uz[ic0])/dcc)*d_mom;
+        tau_z += mu_total*(dUzdxf*kx_m +dUzdyf*ky_m +dUzdzf*kz_m);
         tau_z += mu_total*(dUxdzf*sxx +dUydzf*syy +dUzdzf*szz);
         tau_z += -mu_total*2.0f/3.0f*(divu)*szz;
         if (isoStress != 0 && kturb != nullptr) tau_z += -(2.0f/3.0f)*(f*ro[ic0]+(1.0f-f)*ro[ic1])*(f*kturb[ic0]+(1.0f-f)*kturb[ic1])*szz;
+        }
 
         // SST node 壁関数 (SU2 AddTauWall): 片端のみ壁ノードの内部双対面 (W-I) で、解像した粘性 traction
         // の接線成分をモデル τ_w に再スケールする。粗い y+ メッシュでは生の解像勾配が τ_w を過小評価する
@@ -225,8 +266,22 @@ __global__ void viscousFlux_d
         tc_face += cp_face*v_turb/Prt;
         // W-I 内部熱拡散は既定で DOF 状態 (Ts) と DOF 勾配で評価する。モデル温度の単純 compact
         // 代入は禁止 (上の Taw_Ov コメント参照)。例外は mode 2 の SU2 corrected-gradient (下)。
-        flow_float heatflux = tc_face*((Ts[ic1] -Ts[ic0])/dcc)*delta;
-        heatflux += tc_face*(dTdxf*k_x +dTdyf*k_y +dTdzf*k_z);
+        // 熱伝導の非直交補正: 0 = forge の over-relaxed (a=|S|^2/|d.S|), 1 = SU2 の
+        // corrected-gradient (a=(d.S)/|d|^2)。どちらも F/k = ḡ·S + a(ΔT - ḡ·d) の形で係数だけが違う。
+        // 直交面では一致し、非直交面では比が 1/cos^2(θ) で forge のほうが大きい。
+        // **熱伝導だけに適用する** (運動量の tau は触らない) — 因果を分離するため。
+        flow_float heatflux;
+        if (heatCorrSU2 != 0) {
+            const flow_float dd2   = max(dcc_x*dcc_x + dcc_y*dcc_y + dcc_z*dcc_z, (flow_float)1.0e-30);
+            const flow_float a_su2 = (dcc_x*sxx + dcc_y*syy + dcc_z*szz)/dd2;
+            heatflux  = tc_face*a_su2*(Ts[ic1] - Ts[ic0]);
+            heatflux += tc_face*(dTdxf*(sxx - a_su2*dcc_x)
+                               + dTdyf*(syy - a_su2*dcc_y)
+                               + dTdzf*(szz - a_su2*dcc_z));
+        } else {
+            heatflux  = tc_face*((Ts[ic1] -Ts[ic0])/dcc)*delta;
+            heatflux += tc_face*(dTdxf*k_x +dTdyf*k_y +dTdzf*k_z);
+        }
 
         // SST 断熱壁 SU2 式熱結合 (mode 2): overlay 端点 (Taw) を持つ内部辺は SU2 corrected-gradient
         //   g_corr = ḡ + (ΔT_flux − ḡ·d)·d/|d|²,  q = k_eff·(g_corr·S)
@@ -279,6 +334,10 @@ __global__ void viscousFlux_d
         flow_float res_roUy_temp = tau_y;
         flow_float res_roUz_temp = tau_z;
         flow_float res_roe_temp  = tau_x*Uxf +tau_y*Uyf +tau_z*Uzf;
+        if (wi_eheat != nullptr) {          // 診断のみ (res_* は触らない)
+            atomicAdd(&wi_ework[ic0],  res_roe_temp); atomicAdd(&wi_ework[ic1], -res_roe_temp);
+            atomicAdd(&wi_eheat[ic0],  heatflux);     atomicAdd(&wi_eheat[ic1], -heatflux);
+        }
         res_roe_temp += heatflux;
 
         // sstEnergyIncludesK: k 拡散のエネルギー流束 (k 式の拡散と同形: 法線項のみ・相対ガード・σ_k ブレンド)
@@ -408,7 +467,23 @@ __global__ void viscousFlux_wall_d
  // SST エネルギー壁関数 (§6.5(g), sstEnergyWallFunction==1 × wall_isothermal): 壁面熱流束を
  // ransWallFunction が書いた qwall_b (Kader q_w) に置換する (運動量は wallTreatment==1 のまま)。
  // node では壁ノード res_roe が Dirichlet で 0 化されるため実効は cell のみ (書いても無害)。
- int sstEnergyWf
+ int sstEnergyWf,
+ // CHT の保存的界面熱量 (plan boundary-conjugate-heat-transfer §4.3) の素材。
+ // 壁半割面が res_roe に入れた寄与そのものを保存する (= $-\sum F^E_{\partial w}$、
+ // 符号は「流体へ入る側が正」= qwall と同じ)。nullptr なら何もしない (既定はビット不変)。
+ flow_float* ifaceFw_b,
+ // 等温壁のエネルギー境界を弱形式 (SU2 型) で課す (mesh.nodeIsothermalEnergyBC=1)。
+ // 1 のとき壁半割面の伝導を **k_eff (T_I - Tw_bc)/d_1 * A_half** で置換する
+ // (置換するのはここだけ。内部双対面には触らない。Qw_Wall 機構は流用しない)。
+ // weakJ_b: 第一内部点の DOF index、weakD1_b: **法線投影距離**、Tw_b: 指定壁温 (bvar Ts)。
+ // 選択フラグと符号付き流束を分離してある (Qw_Wall の >-0.5 兼用と違い冷却壁でも安全)。
+ // plan boundary-weak-isothermal-wall §4.2、methods/boundary.md。
+ int weakIsoEnergy,
+ const geom_int*   weakJ_b,
+ const flow_float* weakD1_b,
+ const flow_float* Tw_b,
+ // 陰解法の近似対角項の素材 g = Σ k_eff A_half / d_1 [W/K] を DOF へ積む (weakIsoEnergy のみ)。
+ flow_float* weakDiag
 )
 {
     geom_int ib  = blockDim.x*blockIdx.x + threadIdx.x;
@@ -526,6 +601,17 @@ __global__ void viscousFlux_wall_d
         flow_float heatflux;
         if (wallTreatment == 2 || sstEnergyWf != 0)  heatflux = qwall_b[ib]*sss;
         else if (adiabaticWall != 0)    heatflux = (flow_float)0.0;
+        else if (weakIsoEnergy != 0) {
+            // 弱形式 (SU2 型): **指定壁温 Tw_bc と第一内部点**から作る。T[W] 自身は使わない。
+            // 符号は他経路と同じ「流体 (壁ノード) へ入る側が正」。冷却壁 (T_I > Tw) では負。
+            // cell の ghost 形 tc_w*((Ts[ig]-Ts[ic])/dcc)*sss (Ts[ig]=2Tw-T_I, dcc=2 d1) と
+            // 恒等的に同じ値になる。
+            const geom_int jj = weakJ_b[ib];
+            const flow_float g = tc_w*sss/weakD1_b[ib];          // [W/K]
+            heatflux = g*(Tw_b[ib] - Ts[jj]);
+            // 残差と**同じ k_eff・同じ幾何**を陰解法へ渡す (別々に組むと符号検査が通らない)。
+            if (weakDiag != nullptr) atomicAdd(&weakDiag[ic], g);
+        }
         else                            heatflux = (isNode != 0)
                                             ? tc_w*(dTdx[ic]*sxx +dTdy[ic]*syy +dTdz[ic]*szz)
                                             : tc_w*((Ts[ig]- Ts[ic])/dcc)*sss;
@@ -549,6 +635,7 @@ __global__ void viscousFlux_wall_d
         atomicAdd(&res_roUy[ic], res_roUy_temp);
         atomicAdd(&res_roUz[ic], res_roUz_temp);
         atomicAdd(&res_roe[ic] , res_roe_temp);
+        if (ifaceFw_b != nullptr) ifaceFw_b[ib] = res_roe_temp;   // CHT: $-\sum F^E_{\partial w}$
 
         twall_x_b[ib] = tau_x/sss;
         twall_y_b[ib] = tau_y/sss;
@@ -557,8 +644,28 @@ __global__ void viscousFlux_wall_d
         flow_float twall = sqrt(tau_x*tau_x + tau_y*tau_y + tau_z*tau_z)/sss;
         flow_float utau = sqrt(twall/ro[ic]);
 
+        // 解像壁 (wallTreatment==0, 壁関数によるエネルギー置換なし) では、従来 qwall_b / utau_b に
+        // 誰も書かないため壁面ダンプ (res_wall_<physID>_*.h5) の qwall/utau が**全点 0** になり、
+        // 低 Re 壁の熱流束・熱伝達率・C_f が取り出せなかった。ここで**診断として**、
+        // 実際に残差へ入れた値と同じもの (符号規約は壁→流体正、モデル経路と同一) を格納する。
+        // mode 1/2 と sstEnergyWf!=0 では qwall_b/utau_b は入力側なので触れない (ビット不変)。
+        if (wallTreatment == 0) {
+            utau_b[ib] = utau;
+            if (sstEnergyWf == 0) qwall_b[ib] = heatflux/sss;
+        }
+
         // mode 1/2 では壁関数/壁モデルカーネルが y⁺=u_τ y/ν を既に格納済み。
         // ここで dcc/mu_total ベースの値で上書きすると定義が不整合になるため mode 0 のみ更新する。
+        //
+        // **この ypls を「壁解像の y₁⁺」として読んではいけない** (2026-09-19):
+        //   dcc は「ゴーストセル重心 - 内点セル重心」の距離なので、**node 方式では壁ノードが
+        //   壁面上に乗って退化**し、値が 1 桁以上小さく出る (実測 case/49: ここの 0.043 に対し
+        //   第一内部ノード基準の y₁⁺ は平均 0.32、面積の 7.8 % が 1 超)。
+        //   さらに node の既定経路は下流で twall_* だけを上書きし utau/ypls を更新しないため、
+        //   高せん断域で |τ_w|/(ρ u_τ²) が 1 から外れる (実測 最大 74.5)。
+        //   壁解像の判定は solver_density_cuda/tools/check_wall_resolution.py を使うこと
+        //   (接続から壁面ごとの局所 y₁ を引き、接線 traction から u_τ を組む)。
+        //   詳細は methods/turbulence/implementation.md の該当節と AGENTS.md「壁解像確認」。
         if (wallTreatment == 0) {
             ypls_b[ib] = ro[ic]*utau*dcc/mu_total;
         }
@@ -784,6 +891,8 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
         gpuErrchk(cudaMemset(var.c_d["wi_fnrm"],     0, sizeof(flow_float)*msh.nCells_all));
         gpuErrchk(cudaMemset(var.c_d["wi_fnrm_abs"], 0, sizeof(flow_float)*msh.nCells_all));
         gpuErrchk(cudaMemset(var.c_d["wi_ftan_res"], 0, sizeof(flow_float)*msh.nCells_all));
+        gpuErrchk(cudaMemset(var.c_d["wi_eheat"],    0, sizeof(flow_float)*msh.nCells_all));
+        gpuErrchk(cudaMemset(var.c_d["wi_ework"],    0, sizeof(flow_float)*msh.nCells_all));
     }
 
     // 距離診断 (1 回限り)。FORGE_VISC_WALL_DIAG=1 のとき壁半割面の dn/dcc/tangential を集計表示。
@@ -884,6 +993,8 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
         (wiDiagOn && var.c_d.count("wi_fnrm"))     ? var.c_d["wi_fnrm"]     : nullptr,
         (wiDiagOn && var.c_d.count("wi_fnrm_abs")) ? var.c_d["wi_fnrm_abs"] : nullptr,
         (wiDiagOn && var.c_d.count("wi_ftan_res")) ? var.c_d["wi_ftan_res"] : nullptr,
+        (wiDiagOn && var.c_d.count("wi_eheat"))    ? var.c_d["wi_eheat"]    : nullptr,
+        (wiDiagOn && var.c_d.count("wi_ework"))    ? var.c_d["wi_ework"]    : nullptr,
         // node WMLES 等温壁 / node SST エネルギー壁関数 (§6.5(g)) のとき Qw_Wall を渡し
         // AddQWall (W-I 熱流束置換)。それ以外は nullptr (Qw_Wall 未初期化のため)。
         (wmlesNodeIsothermalActive(cfg, msh) || sstEnergyWfNodeActive(cfg, msh))
@@ -923,15 +1034,20 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
         var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"],
         var.c_d.count("sstF1") ? var.c_d["sstF1"] : nullptr,
         cfg.sstSigmaBlend,
-        (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? 1 : 0
+        (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? 1 : 0,
+        cfg.heatCorrSU2
     ) ;
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
 
+    if (weakIsoWall::active(cfg, msh)) weakIsoWall::diagReset(msh);
+
     for (auto& bc : msh.bconds)
     {
         if (bc.bcondKind == "wall" or bc.bcondKind == "wall_isothermal") {
+            // 弱形式が効くのは等温壁のみ (断熱壁は adiabaticWall で厳密 0)。
+            const bool weakOn = (bc.bcondKind == "wall_isothermal") && weakIsoWall::active(cfg, msh);
             viscousFlux_wall_d<<<cuda_cfg.dimGrid_bplane , cuda_cfg.dimBlock>>> ( 
                 // mesh structure
                 bc.iPlanes.size(),
@@ -994,10 +1110,25 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
                     : (wmlesActiveForBcond(cfg, bc) ? 2 : 0),
                 bc.bvar_d["utau"], bc.bvar_d["qwall"],
                 (cfg.discretization == "node") ? 1 : 0,   // node: 壁法線/熱流束を ∇φ·S で評価 (ghostless)
-                (bc.bcondKind == "wall") ? 1 : 0,         // 断熱壁: 伝導熱流束を厳密 0 (等温壁は 0=従来)
+                // 断熱壁: 伝導熱流束を厳密 0 (等温壁は 0=従来)。
+                // **診断用 nodeIsothermalEnergyBC: 2** — 強制のまま等温壁の壁半割面熱流束だけを 0 にする。
+                // 強制側は壁ノードの res_roe をゼロ化するので、これで場が変わらなければ
+                // 「壁半割面の流束は解に入っていない」ことの直接証拠になる (plan §5.1 #6a)。
+                ((bc.bcondKind == "wall") ||
+                 (cfg.nodeIsothermalEnergyBC == 2 && bc.bcondKind == "wall_isothermal")) ? 1 : 0,
                 // SST エネルギー壁関数 (§6.5(g)): 等温壁の壁面熱流束を Kader q_w に置換
                 (cfg.LESorRANS == 2 && cfg.RANSmodel == 1 && cfg.wallTreatmentSST == 1
-                 && cfg.sstEnergyWallFunction == 1 && bc.bcondKind == "wall_isothermal") ? 1 : 0
+                 && cfg.sstEnergyWallFunction == 1 && bc.bcondKind == "wall_isothermal") ? 1 : 0,
+                // CHT の保存的界面熱量の素材 (plan boundary-conjugate-heat-transfer §4.3)。
+                // `output.interfaceDiag: 1` のときだけ渡す (既定 nullptr = ビット不変)。
+                (cfg.interfaceDiag != 0 && bc.bvar_d.count("ifaceFw")) ? bc.bvar_d["ifaceFw"] : nullptr,
+                // 等温壁エネルギー境界の弱形式 (mesh.nodeIsothermalEnergyBC=1)。
+                // 既定 0 では 0 / nullptr を渡す (ビット不変)。
+                weakOn ? 1 : 0,
+                weakOn ? weakIsoWall::geom(cfg, msh, bc).j_d  : nullptr,
+                weakOn ? weakIsoWall::geom(cfg, msh, bc).d1_d : nullptr,
+                weakOn ? bc.bvar_d["Ts"] : nullptr,
+                weakOn ? weakIsoWall::diagBuf(msh) : nullptr
             ) ;
         }
     }

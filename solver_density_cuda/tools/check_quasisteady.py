@@ -28,6 +28,12 @@ OSCILLATING (リミットサイクル) は 0 扱いだが「平均±振幅」で
 """
 import sys, os, glob, argparse, math
 import numpy as np
+
+
+def _trapz(y, x):
+    """台形積分。**numpy 2 で `np.trapz` が削除された**ので互換に包む (AWS の numpy で落ちた)。"""
+    f = getattr(np, "trapezoid", None) or getattr(np, "trapz")
+    return f(y, x)
 import h5py
 
 GAMMA = 1.4
@@ -184,7 +190,7 @@ def _theta_and_utau(cc, V, xs, ytop=None, law='reichardt'):
     ue = ux[m].max()
     roe = ro[m][int(np.argmax(ux[m]))]
     core = (ro[m] / roe) * (ux[m] / ue) * (1.0 - ux[m] / ue)
-    theta = float(np.trapz(core, yy[m]))
+    theta = float(_trapz(core, yy[m]))
     nu1 = mu[first] / ro[first]
     utau = _solve_utau(ux[first], yy[first], nu1, law)
     return theta, utau, ue
@@ -202,7 +208,7 @@ def _dstar(cc, V, xs, ytop=None):
         ro = np.concatenate((ro[:1], ro))
     m = np.ones(len(yy), bool) if ytop is None else (yy <= ytop)
     ue = ux[m].max(); roe = ro[m][int(np.argmax(ux[m]))]
-    return float(np.trapz(1.0 - (ro[m] * ux[m]) / (roe * ue), yy[m]))
+    return float(_trapz(1.0 - (ro[m] * ux[m]) / (roe * ue), yy[m]))
 
 
 def make_q_cf_momentum(xs, ytop, window=0.08, order=2, xmin=0.1, xmax=0.95):
@@ -249,9 +255,22 @@ def make_q_asym(cc):
     return f
 
 
-def classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps):
+def classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps, allow_nonfinite=False):
+    """**非有限値を黙って落とさない**。既定では 1 つでもあれば NONFINITE を返す。
+
+    旧実装は `np.isfinite` で落としてから判定していたため、`[1,1,1,1,1,NaN]` が `STEADY` に
+    なった (2026-09-19 codex)。落として判定したい呼び出し側だけ `allow_nonfinite=True` にする。
+    時刻 `steps` の非有限も同様に拒否する (step が全点 NaN でも値が一定なら STEADY になっていた)。
+    """
     s = np.array(steps, float); v = np.array(vals, float)
-    good = np.isfinite(v)
+    if not allow_nonfinite:
+        nb_v = int(np.count_nonzero(~np.isfinite(v)))
+        nb_s = int(np.count_nonzero(~np.isfinite(s)))
+        if nb_v or nb_s:
+            return ('NONFINITE',
+                    f"{nb_v}/{len(v)} non-finite value(s), {nb_s}/{len(s)} non-finite step(s)",
+                    None)
+    good = np.isfinite(v) & np.isfinite(s)
     s, v = s[good], v[good]
     n = len(v)
     if n < min_snaps:
@@ -277,7 +296,43 @@ def classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps):
         return 'OSCILLATING', detail + f"  -> report {mean:.4g} +/- {amp:.2g}", (mean, amp)
     if extremum_at_end and drift > drift_tol * 0.5:
         return 'TRANSIENT-UNSETTLED', detail + "  (still trending at tail-end)", (mean, amp)
+    # **単調なら「まだ動いている」ことを明示し、漸近値を併記する** (2026-09-19 ユーザ指摘:
+    # 「上がり続けている・下がり続けているなら収束していないはず」)。drift が許容内でも
+    # 単調増加/減少は続いているので、増分が幾何級数的に減衰する場合の**外挿値**を出す。
+    mono = _monotone_limit(s, v)
+    if mono is not None:
+        lim, direction, rel = mono
+        detail += ("  [単調%s; 増分減衰から漸近値 %.6g (最終比 %+.3f %%)]"
+                   % (direction, lim, 100 * rel))
     return 'STEADY', detail, (mean, amp)
+
+
+def _monotone_limit(s, v, frac=0.5, min_pts=5):
+    r"""末尾が**単調**なら、増分の幾何減衰から漸近値を外挿して返す。
+
+    戻り値 (漸近値, "増加"/"減少", (漸近値-最終値)/|最終値|)、単調でなければ None。
+    増分比 r = Δ_last/Δ_prev が 0<r<1 のとき、残りの和は Δ_last·r/(1-r) で近似する。
+    """
+    n = len(v)
+    k = max(min_pts, int(math.ceil(frac * n)))
+    if n < min_pts + 1:
+        return None
+    vt = v[-k:]
+    d = np.diff(vt)
+    if not (np.all(d > 0) or np.all(d < 0)):
+        return None                      # 単調でない (振動) -> 何も言わない
+    direction = "増加" if d[0] > 0 else "減少"
+    # 増分の比 (後半の平均)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        rr = d[1:] / d[:-1]
+    rr = rr[np.isfinite(rr) & (rr > 0) & (rr < 1.0)]
+    last = float(v[-1])
+    if rr.size == 0:
+        return (last, direction, 0.0)    # 減衰していない -> 外挿しない (値そのまま)
+    r = float(np.median(rr))
+    rest = float(d[-1]) * r / max(1.0 - r, 1e-12)
+    lim = last + rest
+    return (lim, direction, rest / max(abs(last), 1e-30))
 
 
 SEV = {'STEADY': 0, 'OSCILLATING': 1, 'TRANSIENT-UNSETTLED': 2, 'DRIFTING': 3, 'NONFINITE': 4}
@@ -292,6 +347,7 @@ def classify_series(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps):
     bad = int(np.count_nonzero(~np.isfinite(v)))
     if bad:
         return 'NONFINITE', f"{bad}/{len(v)} non-finite value(s) in series", None
+    # classify 側でも step の非有限を拒否する (2026-09-19: step 全点 NaN で STEADY になっていた)
     return classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps)
 
 
@@ -441,11 +497,11 @@ def analyze(run_dir, want, tail_frac, drift_tol, osc_tol, min_snaps, mesh_arg, c
                          f"-> TRANSIENT-UNSETTLED")
             worst = max(worst, 2)
         else:
-            v, d, _ = classify(wsteps, wvals, tail_frac, drift_tol, osc_tol, min_snaps)
+            v, d, _ = classify_series(wsteps, wvals, tail_frac, drift_tol, osc_tol, min_snaps)
             worst = max(worst, SEV[v])
             lines.append(f"  {'wall_model_tau':14s}: {d:50s} {v}")
     for q in quantities:
-        verdict, detail, _ = classify(steps, series[q], tail_frac, drift_tol, osc_tol, min_snaps)
+        verdict, detail, _ = classify_series(steps, series[q], tail_frac, drift_tol, osc_tol, min_snaps)
         worst = max(worst, SEV[verdict])
         lines.append(f"  {q:9s}: {detail:55s} {verdict}")
     overall = [k for k, vv in SEV.items() if vv == worst][0]

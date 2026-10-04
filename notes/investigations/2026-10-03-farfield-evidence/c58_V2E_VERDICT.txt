@@ -1,0 +1,28 @@
+run_0052_v2e_v2a_sst_ek0_short vs run_0053_v2e_v2a_sst_ek0_long: 入射振幅 79.17 Pa、反射 max|ΔP| 0.0938 Pa (t = 1.1713e-03 s) → 反射率 0.1185%
+VERDICT: PASS (反射率 0.1185% ≤ 5.00%)
+run_0054_v2e_v2a_sst_ek1_short vs run_0055_v2e_v2a_sst_ek1_long: 入射振幅 80.05 Pa、反射 max|ΔP| 0.2657 Pa (t = 9.6750e-04 s) → 反射率 0.3319%
+VERDICT: PASS (反射率 0.3319% ≤ 5.00%)
+run_0050_v2e_v1b_expl step 4000: dρ 8.23e-06  dP 8.65e-06  du 9.44e-07  dY 0.00e+00  非有限 0  → PASS (≤ 1e-5)
+run_0051_v2e_v2b_x_expl 評価 1: farfield 面 1638、置換 0、退避 0
+  ro      : Σ残差 +1.077556e+00  −Σ面流束 +1.077555e+00  |差|/規模 2.93e-10 OK
+  roUx    : Σ残差 +1.602835e+02  −Σ面流束 +1.602835e+02  |差|/規模 1.94e-10 OK
+  roUy    : Σ残差 +0.000000e+00  −Σ面流束 -0.000000e+00  |差|/規模 0.00e+00 OK
+  roUz    : Σ残差 +0.000000e+00  −Σ面流束 -0.000000e+00  |差|/規模 0.00e+00 OK
+  roe     : Σ残差 -3.112297e+05  −Σ面流束 -3.112297e+05  |差|/規模 3.40e-11 OK
+  roY0    : Σ残差 -7.812621e-02  −Σṁφ_面 -7.812621e-02  |差|/規模 4.57e-10 OK
+  roK     : Σ残差 -2.077464e+03  −Σṁφ_面 -2.077464e+03  |差|/規模 2.03e-10 OK
+  roOmega : Σ残差 -5.190662e+05  −Σṁφ_面 -5.190662e+05  |差|/規模 1.58e-09 OK
+  Σ種 vs 質量: +1.077555e+00 vs +1.077556e+00 (相対 1.58e-08、|差|/Σ|ṁ| 1.02e-09)
+VERDICT identity: PASS
+run_0051_v2e_v2b_x_expl_bal: 定常後の全体収支 (res_final の全節点和 / 代表量、A = 2.5 m²)
+  ro      : -2.174e-08 OK
+  roUx    : -7.009e-08 OK
+  roUy    : -2.091e-09 OK
+  roUz    : -4.316e-10 OK
+  roe     : -6.146e-08 OK
+  roY0    : +0.000e+00 OK
+  roY1    : -2.134e-08 OK
+  roK     : -1.233e-08 OK
+  roOmega : -1.227e-08 OK
+VERDICT balance: PASS (≤ 1e-4)
+run_0051_v2e_v2b_x_expl step 12000: max|Y_EXH| 4.019e-36、非有限 0 → VERDICT replaced: PASS (≤ 1e-4)

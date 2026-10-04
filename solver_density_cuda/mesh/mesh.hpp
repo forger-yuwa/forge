@@ -62,7 +62,10 @@ public:
         "Ux"   , "Uy"   , "Uz"   , "Tt"   , "Pt"   , "Ts" , "Ps",
         "k"    , "omega", "kb", "omegab",
         "Ux0"  , "Uy0"  , "Uz0"  , 
-        "ypls" , "twall_x" , "twall_y" , "twall_z" , "utau" , "qwall"
+        "ypls" , "twall_x" , "twall_y" , "twall_z" , "utau" , "qwall",
+        // CHT の保存的界面熱量 $Q_f=\sum F^E-C$ の素材 (plan boundary-conjugate-heat-transfer §4.3)。
+        // **このリストに無いと bvar/bvar_d が確保されない** (valueTypes 側の宣言だけでは足りない)。
+        "ifaceFw" , "ifaceRraw" , "ifaceRconv" , "ifaceRpre" , "ifaceRro"
     };
 
     std::list<std::string> bplaneIntNames =  
@@ -101,6 +104,11 @@ public:
 
     std::map<std::string, std::vector<flow_float>> bvar;
     std::map<std::string, flow_float* > bvar_d; // cuda
+
+    // 壁面ダンプに載せる host 専用の診断量 (device 側を持たない)。CHT の界面診断
+    // (conjugateWall::fillInterfaceDiagnostics) が bplane 順で詰め、output がそのまま書く。
+    // bvar と違い copyVariables_bplane_D2H で上書きされない。
+    std::map<std::string, std::vector<flow_float>> diagVar;
 
     // 多成分 TP (M5): 入口組成 Y_s^in の device ポインタ配列 (flow_float*[nSpecies])。
     // inlet カーネルが混合則 thermo を計算するため。inlet_uniformVelocity_d_wrapper で
@@ -208,6 +216,10 @@ public:
     // periodicNodeGather (res 和を group 全員に書く) と合併体積で「両側部分 CV を 1 CV」として扱う。
     std::vector<geom_int> periodicRoot;       // [nCells] host: 各 CV の group root
     geom_int* periodicRoot_d = nullptr;       // [nCells] device
+    // 周期 bcond (bcondKind=="periodic") の半割面なら 1 [nPlanes] device。node/cell 問わず setMeshMap_d で作る。
+    // スカラー GG が node 周期の継ぎ目で半割面を除外する判定に使う (ゴーストの有無では判定できない:
+    // 周期 bcond にもゴーストが付くため。plan boundary-node-periodic-gradient-fix §4.2a)。
+    unsigned char* planePeriodic_d = nullptr;
     // 合併前の部分 CV 体積 [nCells] (node periodic 時のみ確保、他は nullptr)。
     // 体積ソース (bodyForce, ransSource の k/ω 源) は periodicNodeGather で group 合算されるため、
     // merged volume (var volume) を使うと seam で 2 倍 (コーナー group は 4 倍) になる。

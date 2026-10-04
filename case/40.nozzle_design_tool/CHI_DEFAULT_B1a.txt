@@ -1,0 +1,26 @@
+成立条件 (b): 初回面流束が違う面 371 / 36104
+# B1-a 比較: flag0 = run_0954_chidef_b1a_flag0 / 省略 = run_0955_chidef_b1a_omit
+追加の成立条件 (記録): 壁ノード 221、壁∩軸ノード 0
+[flag0] === run_0954_chidef_b1a_flag0/chidef_b1a_eta.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[flag0]   eta_cf          : tail mean=0.9779  drift=0.0%/tail  fluct=0.0%           STEADY
+[flag0]   mdot            : tail mean=1.299  drift=0.0%/tail  fluct=0.0%            STEADY
+[flag0] === run_0954_chidef_b1a_flag0/chidef_b1a_wall.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[flag0]   pp0_25          : tail mean=0.9728  drift=0.0%/tail  fluct=0.0%           STEADY
+[flag0]   pp0_50          : tail mean=0.08348  drift=0.0%/tail  fluct=0.0%          STEADY
+[flag0]   pp0_75          : tail mean=0.02254  drift=0.0%/tail  fluct=0.0%          STEADY
+[omit] === run_0955_chidef_b1a_omit/chidef_b1a_eta.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[omit]   eta_cf          : tail mean=0.9779  drift=0.0%/tail  fluct=0.0%           STEADY
+[omit]   mdot            : tail mean=1.299  drift=0.0%/tail  fluct=0.0%            STEADY
+[omit] === run_0955_chidef_b1a_omit/chidef_b1a_wall.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[omit]   pp0_25          : tail mean=0.9728  drift=0.0%/tail  fluct=0.0%           STEADY
+[omit]   pp0_50          : tail mean=0.08348  drift=0.0%/tail  fluct=0.0%          STEADY
+[omit]   pp0_75          : tail mean=0.02254  drift=0.0%/tail  fluct=0.0%          STEADY
+① η_CF: 差区間 [-0.0000, +0.0000] % (許容 ±0.1 %) → 帯内
+① ṁ: 差区間 [-0.0001, +0.0000] % (許容 ±0.1 %) → 帯内
+② 輪郭壁 p/p0 L∞ = 0.3765 % (許容 0.5 %) → PASS
+③ 等温壁 q_w: 本ケースは断熱壁のため対象外
+VERDICT B1-a 量: PASS
+=== run_0954_chidef_b1a_flag0  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+=== run_0955_chidef_b1a_omit  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+=== run_0955_chidef_b1a_omit  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===
+=== run_0953_chidef_b1p_omit  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===

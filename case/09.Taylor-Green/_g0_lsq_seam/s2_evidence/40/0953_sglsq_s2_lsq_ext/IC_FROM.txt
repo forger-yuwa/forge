@@ -1,0 +1,9 @@
+start_run: case/40.nozzle_design_tool/run_0951_sglsq_s2_lsq
+res: case/40.nozzle_design_tool/run_0951_sglsq_s2_lsq/res_12000.h5
+res_sha256: 346972f93742fab22af374f31d21b67438a84abe9afb864e2c75691a65201e22
+mesh_sha256 (restart 前、起点の nozzle.h5): 932e70c7ddd28148ed84a59e1b6245a51d167cd38457246ab78e304b8642b579
+config changes vs start:
+  - set mesh.scalarGradient: lsq (明示)
+  - set time.last.nStepOuter: 12000 -> 12000
+  - set time.outStepInterval: 1000 -> 1000
+check_solver_config rc=0

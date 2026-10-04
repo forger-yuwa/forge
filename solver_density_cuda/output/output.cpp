@@ -1,6 +1,8 @@
 #include "cuda_forge/passiveTransport_d.cuh"
 #include <cstdio>
 #include "output.hpp"
+#include "conjugateWall.hpp"
+#include "input/speciesDB.hpp"
 
 #include <iostream>
 #include <fstream>
@@ -20,6 +22,34 @@ using HighFive::File;
 
 namespace {
 
+// 化学種の解決済み記録をルート属性に書く (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3a)。
+//   species_hash (互換性ハッシュ) / species_record_sha256 (記録全文) / species_record_file / species_input_unverified。
+//   記録が無い (CPG) ときは何も書かない。
+void writeSpeciesAttributes(File& file)
+{
+    const SpeciesRecordInfo* rec = speciesDB_currentRecord();
+    if (rec == nullptr) return;
+    file.createAttribute<std::string>("species_hash", HighFive::DataSpace::From(rec->compatHash)).write(rec->compatHash);
+    file.createAttribute<std::string>("species_record_sha256", HighFive::DataSpace::From(rec->recordSha256)).write(rec->recordSha256);
+    file.createAttribute<std::string>("species_record_file", HighFive::DataSpace::From(rec->recordFile)).write(rec->recordFile);
+    const int unv = rec->inputUnverified;
+    file.createAttribute<int>("species_input_unverified", HighFive::DataSpace::From(unv)).write(unv);
+}
+
+// 二相拡散の実効状態をルート属性に書く (plans/active/condensation-two-phase-default.md §4-4)。
+//   twophase_diffusion_effective (0/1) / twophase_diffusion_state (active / inactive-a / inactive-b / unsupported-c) /
+//   twophase_diffusion_requested ("omitted" / "0" / "1")。凝縮 OFF かつ未指定の run には書かない。
+//   値は condTwoPhaseDiffusionValidate が起動時に cfg へ書いたもの (判定の正本はソルバ側の 1 箇所)。
+void writeTwoPhaseAttributes(File& file, const solverConfig& cfg)
+{
+    if (cfg.condensation != 1 && cfg.condTwoPhaseDiffusionGiven == 0) return;
+    const int eff = cfg.condTwoPhaseDiffusionEffective;
+    const std::string req = (cfg.condTwoPhaseDiffusionGiven == 0) ? std::string("omitted") : std::to_string(cfg.condTwoPhaseDiffusion);
+    file.createAttribute<int>("twophase_diffusion_effective", HighFive::DataSpace::From(eff)).write(eff);
+    file.createAttribute<std::string>("twophase_diffusion_state", HighFive::DataSpace::From(cfg.condTwoPhaseDiffusionState)).write(cfg.condTwoPhaseDiffusionState);
+    file.createAttribute<std::string>("twophase_diffusion_requested", HighFive::DataSpace::From(req)).write(req);
+}
+
 flow_float outputTimeValue(const solverConfig& cfg, int iStep)
 {
     if (cfg.unsteady == 1) {
@@ -34,29 +64,49 @@ flow_float outputTimeValue(const solverConfig& cfg, int iStep)
 // 出力する場の量を config output.level で絞る (procedures/solver-settings.md「output」)。
 //   level 2: output_cellValNames 全部 (従来)。level 0/1: 下の基本集合 + extraFields を output_cellValNames の順で。
 //   h0 (全エンタルピー) は level>=1 で合成出力 (Ht [+k]) し、属性 h0_includes_k を付ける。
+// extraFields は確保済みの cell 変数なら何でも末尾に足す (extraOnly_cellValNames の wall_y_eff・dY{s}d* もこれで出る)。
 static std::list<std::string> effectiveOutputNames(const solverConfig& cfg, const variables& var)
 {
-    if (cfg.outputLevel >= 2) return var.output_cellValNames;
-    std::vector<std::string> base = {"ro","roUx","roUy","roUz","roe","roK","roOmega"};
-    for (const auto& n : var.speciesVarNames) base.push_back(n);            // roY{s}
-    for (const auto& n : var.condMomentConsNames) base.push_back(n);        // 凝縮モーメント保存量
-    if (var.tracerRegistered != 0) base.push_back("roXi");                  // 受動トレーサ保存量 (restart 用)
-    if (cfg.outputLevel >= 1) {
-        if (var.tracerRegistered != 0) base.push_back("Xi");
-        for (const char* n : {"P","T","Ux","Uy","Uz","k","omega","sonic","vis_lam","vis_turb","wall_dist"}) base.push_back(n);
-        for (const auto& n : var.speciesVarNames) base.push_back(n.substr(2));   // Y{s}
-        for (const auto& n : var.condMomentConsNames) base.push_back(n.substr(2));
+    // level 2 は output_cellValNames 全部、level 0/1 は基本集合。
+    // **extraFields はどの level でも効く** (2026-09-24, codex result m1): 以前は level>=2 で
+    // 即 return していたため、下の「確保済み変数を出力する」処理へ到達せず、`level: 2` の run では
+    // `res_ro` などを指定しても黙って出なかった。
+    std::vector<std::string> base;
+    if (cfg.outputLevel >= 2) {
+        for (const auto& n : var.output_cellValNames) base.push_back(n);
+    } else {
+        for (const char* n : {"ro","roUx","roUy","roUz","roe","roK","roOmega"}) base.push_back(n);
+        for (const auto& n : var.speciesVarNames) base.push_back(n);            // roY{s}
+        for (const auto& n : var.condMomentConsNames) base.push_back(n);        // 凝縮モーメント保存量
+        if (var.tracerRegistered != 0) base.push_back("roXi");                  // 受動トレーサ保存量 (restart 用)
+        if (var.transitionRegistered != 0) { base.push_back("roGamma"); base.push_back("roReth"); }   // 遷移モデル保存量 (restart 用)
+        if (cfg.outputLevel >= 1) {
+            if (var.tracerRegistered != 0) base.push_back("Xi");
+            if (var.transitionRegistered != 0) { for (const char* n : {"gammaTr","reTheta","gammaEff"}) base.push_back(n); }
+            for (const char* n : {"P","T","Ux","Uy","Uz","k","omega","sonic","vis_lam","vis_turb","wall_dist"}) base.push_back(n);
+            for (const auto& n : var.speciesVarNames) base.push_back(n.substr(2));   // Y{s}
+            for (const auto& n : var.condMomentConsNames) base.push_back(n.substr(2));
+        }
     }
     for (const auto& n : cfg.outputExtraFields) base.push_back(n);
+
     std::list<std::string> out;
     for (const auto& n : var.output_cellValNames) {
         if (std::find(base.begin(), base.end(), n) != base.end()) out.push_back(n);
     }
+    // **extraFields は確保済みの cell 変数なら何でも出せる** (2026-09-24)。
+    // 以前は `output_cellValNames` に入っているものしか受け付けず、`res_ro` のように
+    // `cellValNames` には在って出力候補に入っていない診断量を**指定しても黙って無視**していた。
+    // 丸めの内訳を場で測るのに残差そのものが要る (plan time_integration-fp64-accumulator §5.1 S6)。
     for (const auto& n : cfg.outputExtraFields) {
-        if (std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), n) == var.output_cellValNames.end()) {
-            static bool warned = false;
-            if (!warned) { std::cerr << "[output] extraFields: '" << n << "' is not an output variable (ignored)\n"; warned = true; }
+        if (std::find(out.begin(), out.end(), n) != out.end()) continue;
+        if (std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), n) != var.output_cellValNames.end()) continue;
+        if (var.c.count(n) != 0 || var.c_d.count(n) != 0) {
+            out.push_back(n);   // 確保済みの診断量 (res_* など)
+            continue;
         }
+        static bool warned = false;
+        if (!warned) { std::cerr << "[output] extraFields: '" << n << "' は確保されていない変数なので無視する\n"; warned = true; }
     }
     return out;
 }
@@ -84,6 +134,8 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
     ofstream ofsH5(fnameH5);
 
     File file(fnameH5, File::ReadWrite | File::Truncate);
+    writeSpeciesAttributes(file);
+    writeTwoPhaseAttributes(file, cfg);
 
     // write mesh structure
     vector<geom_float> COORD;
@@ -262,7 +314,11 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
 
 void outputH5_XDMF(const solverConfig& cfg , const mesh& msh , variables& var , const int& iStep)
 {
-    if (iStep%cfg.outStepInterval != 0 or iStep < cfg.outStepStart) return;
+    // **最終 step は間隔に関係なく必ず保存する** (codex 2026-09-20 plan レビュー Major 4)。
+    // 剰余判定だけだと `nStepOuter` が `outStepInterval` の倍数でない run は最終場を残さず、
+    // 「完走した」のに比較できる場が無い (run_0324 は 40 step 走って res_0 しか書いていなかった)。
+    const bool isLast = (cfg.nStepOuter > 0) && (iStep >= cfg.nStepOuter);
+    if (!isLast && (iStep%cfg.outStepInterval != 0 or iStep < cfg.outStepStart)) return;
 
     writeSolutionH5_XDMF(cfg , msh , var , iStep , "res_");
 }
@@ -276,7 +332,11 @@ void dumpSolutionH5_force(const solverConfig& cfg , const mesh& msh , variables&
 
 void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var , const int& iStep)
 {
-    if (iStep%cfg.outStepInterval != 0 or iStep < cfg.outStepStart) return;
+    // **最終 step は必ず出す** (CHT の収支ゲートが壁ダンプと固体チェックポイントを突き合わせるため。
+    // 出力間隔だけで制御していたので、非倍数で終わる run では壁だけ 960 step 古い組合せができ、
+    // それを G-cons が PASS にしていた。codex result 4 巡目 M1)。
+    const bool lastStep = (cfg.nStepOuter > 0) && (iStep == cfg.nStepOuter);
+    if (!lastStep && (iStep%cfg.outStepInterval != 0 or iStep < cfg.outStepStart)) return;
 
 
     for (auto& bc : msh.bconds) {
@@ -284,6 +344,10 @@ void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var ,
         if (bc.outputHDFflg != 1) continue;
 
         bc.copyVariables_bplane_D2H();
+
+        // CHT 界面診断 (output.interfaceDiag: 1)。device bvar のコピー後に host で作る
+        // (bvar を上書きしないので、既定 run の出力はビット不変)。
+        conjugateWall::fillInterfaceDiagnostics(cfg , msh , var , bc);
 
         elementTypeMap eleTypeMap;
         ostringstream oss;
@@ -300,6 +364,14 @@ void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var ,
         ofstream ofsH5(fnameH5);
 
         File file(fnameH5, File::ReadWrite | File::Truncate);
+        // **累積 step** を属性で残す (再開後はファイル名の step がローカルになるため、
+        // 固体チェックポイントとの時刻一致を機械的に確認できるようにする)。
+        {
+            const int sabs = iStep + conjugateWall::stepOffsetForOutput();
+            file.createAttribute<int>("step", HighFive::DataSpace::From(iStep)).write(iStep);
+            file.createAttribute<int>("step_abs", HighFive::DataSpace::From(sabs)).write(sabs);
+        }
+        writeSpeciesAttributes(file);
 
         // write boundary
         vector<geom_float> COORD;
@@ -368,6 +440,25 @@ void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var ,
                 copy(bc.bvar[name].begin(), bc.bvar[name].begin()+bc.planes_local.size(), vtemp.begin());
             }
             file.createDataSet("/VALUE/"+name , vtemp);
+        }
+
+        // host 専用の診断量 (CHT 界面診断)。bplane 順なので bvar と同じ並べ替えを通す。
+        for (auto& dv : bc.diagVar)
+        {
+            if ((geom_int)dv.second.size() < (geom_int)bc.planes_local.size()) continue;
+            std::vector<flow_float> vtemp;
+            if (nodeWallViz) {
+                vtemp.assign(bc.inodes_l2g.size(), (flow_float)0.0);
+                for (geom_int j = 0; j < (geom_int)bc.planes_local.size(); j++) {
+                    if (bc.planes_local[j].iNodes.empty()) continue;
+                    geom_int L = bc.inodes_g2l[bc.planes_local[j].iNodes[0]];
+                    if (L >= 0) vtemp[L] = dv.second[j];
+                }
+            } else {
+                vtemp.resize(bc.planes_local.size());
+                copy(dv.second.begin(), dv.second.begin()+bc.planes_local.size(), vtemp.begin());
+            }
+            file.createDataSet("/VALUE/"+dv.first , vtemp);
         }
 
 //

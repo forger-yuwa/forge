@@ -1,4 +1,5 @@
 #include "dependentVariables_d.cuh"
+#include "qAccumulator_d.cuh"
 
 __global__ void updateVariablesOuter_d
 ( 
@@ -28,11 +29,32 @@ __global__ void updateVariablesOuter_d
  flow_float* roUzM ,
  flow_float* roeM ,
  flow_float* roKM ,
- flow_float* roOmegaM 
+ flow_float* roOmegaM ,
+
+ // FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.3)。
+ // nullptr = OFF (このときカーネルは従来とビット同一)。
+ double* qacc_ro , double* qacc_roUx , double* qacc_roUy , double* qacc_roUz , double* qacc_roe ,
+ int* qaccAdopt
 
 )
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
+
+    // **reconcile をここに融合する** (新規 launch を増やさない = §6 G5)。
+    // commit → (壁ピン・BC・SST・化学種) → この step 末尾、の順なので、その step の FP32 writer が
+    // 全部走り終えた直後・次 step の基準 (Q_N) を取る**直前**に当たる。
+    // 規則は「**上書き型の writer が書き換えたセルだけ** FP32 側を採用する」。増分型 (SST の交換
+    // エネルギー) と拘束射影型 (軸) と転送型 (周期) は、ここでなく各自で Qacc を扱う (§4.4)。
+    // 採用数は計器として数え、run ごとの期待値 (case/56 なら等温壁ノード数) と突き合わせる。
+    if (qacc_ro != nullptr && ic < nCells) {
+        int n = 0;
+        n += qaccReconcileCell(qacc_ro[ic]  , ro[ic])   ? 1 : 0;
+        n += qaccReconcileCell(qacc_roUx[ic], roUx[ic]) ? 1 : 0;
+        n += qaccReconcileCell(qacc_roUy[ic], roUy[ic]) ? 1 : 0;
+        n += qaccReconcileCell(qacc_roUz[ic], roUz[ic]) ? 1 : 0;
+        n += qaccReconcileCell(qacc_roe[ic] , roe[ic])  ? 1 : 0;
+        if (n > 0 && qaccAdopt != nullptr) atomicAdd(qaccAdopt, n);
+    }
 
     if (ic < nCells_all) {
 
@@ -65,7 +87,8 @@ void updateVariablesOuter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , m
         // basic variables
         var.c_d["ro"]  , var.c_d["roUx"] , var.c_d["roUy"]  , var.c_d["roUz"]  , var.c_d["roe"]  , var.c_d["roK"] , var.c_d["roOmega"] ,
         var.c_d["roN"] , var.c_d["roUxN"], var.c_d["roUyN"] , var.c_d["roUzN"] , var.c_d["roeN"] , var.c_d["roKN"] , var.c_d["roOmegaN"] ,
-        var.c_d["roM"] , var.c_d["roUxM"], var.c_d["roUyM"] , var.c_d["roUzM"] , var.c_d["roeM"] , var.c_d["roKM"] , var.c_d["roOmegaM"] 
+        var.c_d["roM"] , var.c_d["roUxM"], var.c_d["roUyM"] , var.c_d["roUzM"] , var.c_d["roeM"] , var.c_d["roKM"] , var.c_d["roOmegaM"] ,
+        var.qacc_d[0] , var.qacc_d[1] , var.qacc_d[2] , var.qacc_d[3] , var.qacc_d[4] , var.qaccAdopt_d
     ) ;
 
     gpuErrchk( cudaPeekAtLastError() );
@@ -146,12 +169,23 @@ __global__ void applyScalarImplicitCorrection_d
  flow_float* dq_roUx,
  flow_float* dq_roUy,
  flow_float* dq_roUz,
- flow_float* dq_roe
+ flow_float* dq_roe,
+ double* qacc_ro , double* qacc_roUx , double* qacc_roUy , double* qacc_roUz , double* qacc_roe
 )
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
 
     if (ic < nCells) {
+        if (qacc_ro != nullptr) {
+            // FP64 正本に増分を積み、FP32 はその丸めミラーにする。
+            // commit は外側 step につき 1 回なので、基準は Q_N でなく Qacc 自身でよい (§4.4)。
+            qaccCommitCell(qacc_ro[ic]  , ro[ic]  , dq_ro[ic]  , (flow_float)1.0);
+            qaccCommitCell(qacc_roUx[ic], roUx[ic], dq_roUx[ic], (flow_float)1.0);
+            qaccCommitCell(qacc_roUy[ic], roUy[ic], dq_roUy[ic], (flow_float)1.0);
+            qaccCommitCell(qacc_roUz[ic], roUz[ic], dq_roUz[ic], (flow_float)1.0);
+            qaccCommitCell(qacc_roe[ic] , roe[ic] , dq_roe[ic] , (flow_float)1.0);
+            return;
+        }
         ro[ic] = roN[ic] + dq_ro[ic];
         roUx[ic] = roUxN[ic] + dq_roUx[ic];
         roUy[ic] = roUyN[ic] + dq_roUy[ic];
@@ -178,7 +212,8 @@ void applyScalarImplicitCorrection_d_wrapper(solverConfig& cfg , cudaConfig& cud
         var.c_d["dq_roUx_old"],
         var.c_d["dq_roUy_old"],
         var.c_d["dq_roUz_old"],
-        var.c_d["dq_roe_old"]
+        var.c_d["dq_roe_old"],
+        var.qacc_d[0] , var.qacc_d[1] , var.qacc_d[2] , var.qacc_d[3] , var.qacc_d[4]
     );
 
     gpuErrchk( cudaPeekAtLastError() );
@@ -233,7 +268,8 @@ __global__ void applyBlockImplicitCorrection_d
  flow_float* dq_block_3,
  flow_float* dq_block_4,
  geom_int* axis_flag , // node-centered 軸対称: 軸上 CV で roUy=0 (対称条件)。nullptr 可。
- flow_float updateGuardAlpha   // >0 で正値性ガード有効 (0 = 既存とビット同一)
+ flow_float updateGuardAlpha ,  // >0 で正値性ガード有効 (0 = 既存とビット同一)
+ double* qacc_ro , double* qacc_roUx , double* qacc_roUy , double* qacc_roUz , double* qacc_roe
 )
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
@@ -245,6 +281,22 @@ __global__ void applyBlockImplicitCorrection_d
             const flow_float s = updateGuardScale(updateGuardAlpha,
                 roN[ic], roUxN[ic], roUyN[ic], roUzN[ic], roeN[ic], d0, d1, d2, d3, d4);
             d0 *= s; d1 *= s; d2 *= s; d3 *= s; d4 *= s;
+        }
+        if (qacc_ro != nullptr) {
+            // FP64 正本に増分を積み、FP32 はその丸めミラーにする (§4.3)。
+            // guard scale s は上で d0..d4 に掛け済みなので scale=1 で渡す。
+            qaccCommitCell(qacc_ro[ic]  , ro[ic]  , d0, (flow_float)1.0);
+            qaccCommitCell(qacc_roUx[ic], roUx[ic], d1, (flow_float)1.0);
+            if (axis_flag != nullptr && axis_flag[ic] == 1) {
+                // 拘束への射影は **Qacc 側に当てる** (FP32 だけ 0 にすると次の commit で戻る)。
+                qacc_roUy[ic] = 0.0;
+                roUy[ic]      = (flow_float)0.0;
+            } else {
+                qaccCommitCell(qacc_roUy[ic], roUy[ic], d2, (flow_float)1.0);
+            }
+            qaccCommitCell(qacc_roUz[ic], roUz[ic], d3, (flow_float)1.0);
+            qaccCommitCell(qacc_roe[ic] , roe[ic] , d4, (flow_float)1.0);
+            return;
         }
         ro[ic]   = roN[ic]   + d0;
         roUx[ic] = roUxN[ic] + d1;
@@ -281,7 +333,8 @@ void applyBlockImplicitCorrection_d_wrapper(solverConfig& cfg , cudaConfig& cuda
         // (Mach~1000)。SU2 流の対称面は Jacobian を整合的に修正する必要がある (block-DPLUR の row 修正)。
         // 暫定で無効 (nullptr=baseline)。near-axis corner は open issue (docs §7.1)。
         nullptr,
-        cfg.updateGuardAlpha
+        cfg.updateGuardAlpha,
+        var.qacc_d[0] , var.qacc_d[1] , var.qacc_d[2] , var.qacc_d[3] , var.qacc_d[4]
     );
 
     gpuErrchk( cudaPeekAtLastError() );

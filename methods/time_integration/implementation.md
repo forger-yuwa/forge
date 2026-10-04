@@ -175,6 +175,52 @@ $\Delta\mathbf Q_{\text{new}} = D_i^{-1}\,\text{RHS}$ を解く。`cfg.implicitR
 （`applyScalarImplicitCorrection` と対称、`update_d.cu` に新設）で `Q = Q_baseline + dq_block` を
 **1 度だけ** commit する。残差 `res_*` と $|\widetilde A_f|$ は sweep 中固定（matrix-free のため固定 Q から毎 sweep 再構築してよい）。
 
+#### commit の丸め — 定常解の到達限界を決める (2026-09-23)
+
+commit は `update_d.cu` で `ro[ic] = roN[ic] + d0`（`d0` = `dq_block_old_0`）である。
+`Q` が `flow_float`（既定 float32）なので、**$|dq| < \tfrac12\,\mathrm{ULP}(Q)$ になった時点で加算は丸めで消え、
+反復はそこで進まなくなる**。定常解へ近づくほど $dq$ は小さくなるので、これは**収束の到達限界**そのものである。
+
+`updateGuardScale`（同ファイル）は $\rho$ か $e_i$ を $\alpha$ 倍未満に落とす更新だけを半減列で縮める
+局所 under-relax であり、$dq/\rho \ll 1$ の領域では発動しない（$s$=1）。したがってこの丸めを緩和しない。
+
+**実測例**（`case/56.gap_tp1187`、M7 の深いすきま、深さ $z/W>10$ の 16607 CV）:
+
+| 量 | 値 |
+| --- | --- |
+| $\langle\rho\rangle$ | 0.017755 |
+| 1 ULP (float32) | 1.86e-9 |
+| $\langle\lvert dq\rvert\rangle$ | 2.97e-10 = **0.159 ULP** |
+| 1 step で値が動く CV | **0.03 %** |
+| 実効 $\langle d\rho\rangle$ / 意図した $dq$ | **0.3 %** |
+
+この状態では、残差が系統的に残っているのに場が動かない。すきま断面を通る正味の質量流束
+$\lvert\dot m\rvert$（定常解ならゼロ）は **step のべき乗則** $\propto \mathrm{step}^{-0.23}$ でしか減らず、
+step を 2 倍にしても 15 % しか下がらない。同じ場を**倍精度ビルド**で継続すると**幾何級数**（25k step ごとに
+2.81 分の 1）に変わり、減衰区間で 4.54e-7 から 4 桁以上落ちる。
+~~「300k step で 4.56e-12」~~ **撤回** (2026-09-23): 4.56e-12 は 1.9M の谷で、2.0M では 1.48e-11 に戻る。
+床は**平坦でなく**、到達最小レベルと振れ幅で書くこと (1.234e-11 ± 2.5e-12、振れ幅 1.50 倍)。
+
+**使い方** (2026-09-24): `time.deltaT.qAccumulatorFP64: 1` (既定 0、**`time:` 直下ではない**)。
+対応するのは **GPU (`gpu: 1`)・node 離散化**かつ `timeIntegration: 11` かつ `unsteady: 0`、軸対称でない、`sstEnergyIncludesK: 0`、
+node 周期でない場合のみで、それ以外は起動時に拒否する。**`Qacc` は checkpoint されない** = **restart は残余を失う**。失う量は ½ ULP 分:
+commit は `Qacc += dq` のあと必ず `Q = (flow_float)Qacc` とするため $\lvert Q_{acc}-Q\rvert\le\tfrac12\mathrm{ULP}(Q)$ が
+構造上いつでも成り立ち、**残余は 1 ULP を超えて溜まらない**。実測の $\langle\lvert dq\rvert\rangle$ = 0.159 ULP/step から
+restart の代償は case/56 の $dq$/ULP 比で**平均 3 step 分に相当する**。
+**ただしこれは「$\tfrac12\mathrm{ULP}\div\langle\lvert dq\rvert\rangle$」という割り算であって、
+符号相殺を含む進捗の損失そのものではない**。言えるのは —
+言えるのは「このケース・この $dq$/ULP 比・100k step に 1 回の restart では、差がノイズ床の中」まで。
+**ただし一般化しないこと**: $dq$ が小さいほど相当 step 数は増え、**頻回 restart は機能を丸ごと消す**
+($Q=1$, $dq=0.125$ ULP を 100 回: 連続は 12 ULP 動くが毎 step restart では **0 ULP**)。case/56 で 100k から再開した軌道は、連続で回した軌道と
+通算 125k–200k の 4 点すべてで **run 間ノイズ床 (絶対 1.3e-9) の中**にあり区別できない
+(`run_0030_restart_cost`, 2026-09-24)。したがって `/QACC` の出力は行わない。
+
+**切り分けの指標**: $\lvert dq\rvert/\mathrm{ULP}(Q)$ が O(1) を下回っていないか。下回っていれば、
+sweep 数（`nStepInner`）を増やしても `lineImplicit` を入れても改善しない（どちらも $dq$ を精緻にするだけで、
+その $dq$ が表現できない）。実測でも 4→16 sweep が ±20 % 以内、line-implicit は壁時計あたり 1 桁悪化した。
+
+詳細と対処の設計は [`plans/active/time_integration-fp64-accumulator.md`](../../plans/active/time_integration-fp64-accumulator.md)。
+
 #### 閉形式 FVS と混合精度 (`implicitSolvePrecision`)
 
 `accumulate_split_jacobian_cf<T>` は固有ベクトル行列 $R,L$ を陽に作らず、$\mathrm{diag}(g)-g_2 I$ が

@@ -1,0 +1,97 @@
+#8a: スカラー GG の面寄与ダンプ (FORGE_DUMP_SCALARGRAD) を 3 バイナリで比較 (plan boundary-node-periodic-gradient-fix §5.1 #8a、codex result-2 M1)
+run root: /home/ubuntu/pgrad6_scratch/r8a_<axi|trans>_<new|olddump|wrong>
+比較は float32 のビット比較 (uint32 view)。面 = PLANES の index、周期半割面 = BCONDS/<physID>/iPlanes (kind periodic) の和集合
+注: RUN_PROVENANCE の git_head は run_case.sh を置いたリポジトリ (forge-pgrad-new = f67fe877) の値で、バイナリの版ではない。バイナリは forge_sha256 で識別する (new = f67fe877、olddump = 1266aba1 + olddump.patch、wrong = f67fe877 + wrong.patch)
+
+## axi
+new: forge_sha256: 712141ec6289165b2b4cba1c11111d410f042ff9a45976da2ae581714f24db0c git_head    : f67fe877ab2fa5fcaa20dd2193fa7a21065b4846
+  new log: [buildPeriodicNodeGroups] node periodic DOF identification: 41 slave CVs merged into masters (union-find).
+  new log: [FORGE_DUMP_SCALARGRAD] wrote 2 x 5104 x 3 face contributions to /home/ubuntu/pgrad6_scratch/r8a_axi_new/sgdump.species
+  new log: [FORGE_DUMP_SCALARGRAD] wrote 1 x 5104 x 3 face contributions to /home/ubuntu/pgrad6_scratch/r8a_axi_new/sgdump.passive
+olddump: forge_sha256: 0ef63e4fb18e074601405713f5a49e06dc17fdfa2a11b1f4fc10c180e5585c69 git_head    : f67fe877ab2fa5fcaa20dd2193fa7a21065b4846
+  olddump log: [buildPeriodicNodeGroups] node periodic DOF identification: 41 slave CVs merged into masters (union-find).
+  olddump log: [FORGE_DUMP_SCALARGRAD] wrote 2 x 5104 x 3 face contributions to /home/ubuntu/pgrad6_scratch/r8a_axi_olddump/sgdump.species
+  olddump log: [FORGE_DUMP_SCALARGRAD] wrote 1 x 5104 x 3 face contributions to /home/ubuntu/pgrad6_scratch/r8a_axi_olddump/sgdump.passive
+wrong: forge_sha256: d7d3c56fbd91f6158d9d816d079618451ff612edc7a20bc5d137a9ab85722c90 git_head    : f67fe877ab2fa5fcaa20dd2193fa7a21065b4846
+  wrong log: [buildPeriodicNodeGroups] node periodic DOF identification: 41 slave CVs merged into masters (union-find).
+  wrong log: [FORGE_DUMP_SCALARGRAD] wrote 2 x 5104 x 3 face contributions to /home/ubuntu/pgrad6_scratch/r8a_axi_wrong/sgdump.species
+  wrong log: [FORGE_DUMP_SCALARGRAD] wrote 1 x 5104 x 3 face contributions to /home/ubuntu/pgrad6_scratch/r8a_axi_wrong/sgdump.passive
+  new res_1.h5 の VALUE 非有限: 0
+  olddump res_1.h5 の VALUE 非有限: 0
+  wrong res_1.h5 の VALUE 非有限: 0
+nPlanes 5104 (内部 4900)、周期半割面 82、それ以外 5022
+- species: nVar 2。非有限 new 0, olddump 0, wrong 0
+  | 比較 | 周期半割面で差のある (変数,面) | それ以外で差のある (変数,面) |
+  | --- | --- | --- |
+  | olddump vs new | 0 / 164 | 0 / 10044 |
+  | wrong vs new | 164 / 164 | 0 / 10044 |
+  | olddump vs wrong | 164 / 164 | 0 / 10044 |
+  | バイナリ | 周期半割面で 3 成分とも 0 の (変数,面) | それ以外で 3 成分とも 0 の (変数,面) |
+  | --- | --- | --- |
+  | new | 0 / 164 | 0 / 10044 |
+  | olddump | 0 / 164 | 0 / 10044 |
+  | wrong | 164 / 164 | 0 / 10044 |
+  判定 (axi: olddump = new 全面ビット同一): ok
+  検出力 (wrong は周期半割面が全て 0・その全てで new と差、他の面は new と同一): ok
+- passive: nVar 1。非有限 new 0, olddump 0, wrong 0
+  | 比較 | 周期半割面で差のある (変数,面) | それ以外で差のある (変数,面) |
+  | --- | --- | --- |
+  | olddump vs new | 0 / 82 | 0 / 5022 |
+  | wrong vs new | 82 / 82 | 0 / 5022 |
+  | olddump vs wrong | 82 / 82 | 0 / 5022 |
+  | バイナリ | 周期半割面で 3 成分とも 0 の (変数,面) | それ以外で 3 成分とも 0 の (変数,面) |
+  | --- | --- | --- |
+  | new | 0 / 82 | 0 / 5022 |
+  | olddump | 0 / 82 | 0 / 5022 |
+  | wrong | 82 / 82 | 0 / 5022 |
+  判定 (axi: olddump = new 全面ビット同一): ok
+  検出力 (wrong は周期半割面が全て 0・その全てで new と差、他の面は new と同一): ok
+
+## trans
+new: forge_sha256: 712141ec6289165b2b4cba1c11111d410f042ff9a45976da2ae581714f24db0c git_head    : f67fe877ab2fa5fcaa20dd2193fa7a21065b4846
+  new log: [buildPeriodicNodeGroups] node periodic DOF identification: 3169 slave CVs merged into masters (union-find).
+  new log: gradLSQ=2 periodic seam: 2977 groups re-fitted on the merged stencil (0 truncated) (plan boundary-node-periodic-gradient-fix)
+  new log: [FORGE_DUMP_SCALARGRAD] wrote 2 x 111078 x 3 face contributions to /home/ubuntu/pgrad6_scratch/r8a_trans_new/sgdump.species
+  new log: [FORGE_DUMP_SCALARGRAD] wrote 1 x 111078 x 3 face contributions to /home/ubuntu/pgrad6_scratch/r8a_trans_new/sgdump.passive
+olddump: forge_sha256: 0ef63e4fb18e074601405713f5a49e06dc17fdfa2a11b1f4fc10c180e5585c69 git_head    : f67fe877ab2fa5fcaa20dd2193fa7a21065b4846
+  olddump log: [buildPeriodicNodeGroups] node periodic DOF identification: 3169 slave CVs merged into masters (union-find).
+  olddump log: [FORGE_DUMP_SCALARGRAD] wrote 2 x 111078 x 3 face contributions to /home/ubuntu/pgrad6_scratch/r8a_trans_olddump/sgdump.species
+  olddump log: [FORGE_DUMP_SCALARGRAD] wrote 1 x 111078 x 3 face contributions to /home/ubuntu/pgrad6_scratch/r8a_trans_olddump/sgdump.passive
+wrong: forge_sha256: d7d3c56fbd91f6158d9d816d079618451ff612edc7a20bc5d137a9ab85722c90 git_head    : f67fe877ab2fa5fcaa20dd2193fa7a21065b4846
+  wrong log: [buildPeriodicNodeGroups] node periodic DOF identification: 3169 slave CVs merged into masters (union-find).
+  wrong log: gradLSQ=2 periodic seam: 2977 groups re-fitted on the merged stencil (0 truncated) (plan boundary-node-periodic-gradient-fix)
+  wrong log: [FORGE_DUMP_SCALARGRAD] wrote 2 x 111078 x 3 face contributions to /home/ubuntu/pgrad6_scratch/r8a_trans_wrong/sgdump.species
+  wrong log: [FORGE_DUMP_SCALARGRAD] wrote 1 x 111078 x 3 face contributions to /home/ubuntu/pgrad6_scratch/r8a_trans_wrong/sgdump.passive
+  new res_1.h5 の VALUE 非有限: 0
+  olddump res_1.h5 の VALUE 非有限: 0
+  wrong res_1.h5 の VALUE 非有限: 0
+nPlanes 111078 (内部 104544)、周期半割面 6534、それ以外 104544
+- species: nVar 2。非有限 new 0, olddump 0, wrong 0
+  | 比較 | 周期半割面で差のある (変数,面) | それ以外で差のある (変数,面) |
+  | --- | --- | --- |
+  | olddump vs new | 13068 / 13068 | 0 / 209088 |
+  | wrong vs new | 0 / 13068 | 0 / 209088 |
+  | olddump vs wrong | 13068 / 13068 | 0 / 209088 |
+  | バイナリ | 周期半割面で 3 成分とも 0 の (変数,面) | それ以外で 3 成分とも 0 の (変数,面) |
+  | --- | --- | --- |
+  | new | 13068 / 13068 | 0 / 209088 |
+  | olddump | 0 / 13068 | 0 / 209088 |
+  | wrong | 13068 / 13068 | 0 / 209088 |
+  判定 (trans: 周期半割面以外で olddump = new ビット同一 ok、周期半割面 new = 0 ok、olddump ≠ 0 ok): ok
+- passive: nVar 1。非有限 new 0, olddump 0, wrong 0
+  | 比較 | 周期半割面で差のある (変数,面) | それ以外で差のある (変数,面) |
+  | --- | --- | --- |
+  | olddump vs new | 6534 / 6534 | 0 / 104544 |
+  | wrong vs new | 0 / 6534 | 0 / 104544 |
+  | olddump vs wrong | 6534 / 6534 | 0 / 104544 |
+  | バイナリ | 周期半割面で 3 成分とも 0 の (変数,面) | それ以外で 3 成分とも 0 の (変数,面) |
+  | --- | --- | --- |
+  | new | 6534 / 6534 | 0 / 104544 |
+  | olddump | 0 / 6534 | 0 / 104544 |
+  | wrong | 6534 / 6534 | 0 / 104544 |
+  判定 (trans: 周期半割面以外で olddump = new ビット同一 ok、周期半割面 new = 0 ok、olddump ≠ 0 ok): ok
+
+VERDICT #8a axi (軸対称 × 周期、olddump = new 全面ビット同一): PASS
+VERDICT #8a trans (並進周期、半割面以外ビット同一・半割面 new 0 / olddump 非 0): PASS
+VERDICT #8a 検出力 (wrong は axi で周期半割面の寄与 0 → new と差): PASS
+VERDICT #8a (3 条件): PASS

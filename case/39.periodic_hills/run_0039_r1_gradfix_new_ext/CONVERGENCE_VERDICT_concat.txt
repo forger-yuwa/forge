@@ -1,0 +1,12 @@
+  [segment] 判定区間 = S1_spin -> S2_dev -> S3_ext  (4806000 行) -> run_0039_r1_gradfix_new_ext/residual_history_segment.csv
+
+=== run_0039_r1_gradfix_new_ext  [last step 1601999]  -> PASS (converged) ===
+  rms_ro      : init=4.32e-11 peak=1.42e-05 fin=3.84e-10 drop= 4.6dec flat   
+  rms_roUx    : init=1.38e-05 peak=2.20e-03 fin=4.09e-08 drop= 4.7dec flat   
+  rms_roUy    : init=2.05e-08 peak=2.19e-03 fin=4.62e-08 drop= 4.7dec flat   
+  rms_roUz    : init=7.12e-16 peak=1.53e-04 fin=2.89e-08 drop= 3.7dec flat   
+  rms_roe     : init=1.12e-05 peak=4.32e+00 fin=1.03e-04 drop= 4.6dec flat   
+  rms_roK     : init=5.10e-05 peak=5.79e-05 fin=2.67e-09 drop= 4.3dec flat   
+  rms_roOmega : init=3.23e+03 fin=1.22e-03 drop= 6.4dec flat   
+
+OVERALL: ALL PASS

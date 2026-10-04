@@ -1,0 +1,16 @@
+mesh: {discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: "fluid_c3x.h5", valueFileName: "fluid_c3x.h5"}
+gpu: 1
+solver: "SLAU"
+physProp: {thermalMethod: 0, viscMethod: 1, visc: 3.3e-5, thermCond: 0.05, thermCondMethod: 1, prandtlLam: 0.72, cp: 1004.5, gamma: 1.4}
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {nStepOuter: 1}
+  deltaT: {control: 1, dt: 1e-9, cfl: 0.5, cfl_pseudo: 0.5, blockDPLUR: 1, dt_min: 1e-12, dt_max: 1.0}
+  outStepStart: 0
+  outStepInterval: 1
+  timeIntegration: 11
+  nStepInner: 5
+space: {convMethod: 0, limiter: 0}
+turbulence: {model: "sst", wallTreatmentSST: 0}
+initial: "uniform_p101325_u10"

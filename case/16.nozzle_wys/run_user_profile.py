@@ -80,7 +80,6 @@ if a.ext:
     corner += "  wallDistExtraPhysIDs: [6]\n"   # 出口バッファの slip 壁も壁距離に含める (SST の wall_dist 不連続を防ぐ)
 species_cfg = "" if a.cpg else '  species: ["MIXDRY", "H2O"]\n  speciesDBFile: "species_db.yaml"\n  thermoHrefTemp: 298.15\n'
 cfg = f"""mesh:
-  meshFormat: "hdf5"
   discretization: "{a.disc}"
   isAxisymmetric: 0
   nodeWallDirichlet: 1
@@ -89,15 +88,13 @@ cfg = f"""mesh:
 gpu: 1
 solver: "SLAU"
 physProp:
-  isCompressible: 1
   thermalMethod: {0 if a.cpg else 2}
-{phys}  ro: 1.2
-  cp: 1039.0
+{phys}  cp: 1039.0
   gamma: 1.4
 {species_cfg}time:
   unsteady: 0
   dualTime: 0
-  last: {{control: 0, nStepOuter: {a.nsteps}}}
+  last: {{nStepOuter: {a.nsteps}}}
   deltaT: {{control: 1, dt: 0.00001, cfl: {a.cfl}, cfl_pseudo: {a.cfl}, implicitRelax: 1.0, blockDPLUR: 1,
            dt_min: 0.00000001, dt_max: 1.0, detectNaN: 1}}
   outStepInterval: {a.out_interval}
@@ -171,7 +168,9 @@ frontback:
 for kv in a.bc_sub:
     o, n = kv.split("=", 1); assert o in bc, f"--bc-sub: {o!r} not in bcond"; bc = bc.replace(o, n)
 (run_dir / "bcondConfig.yaml").write_text(bc)
-shutil.copy(CASE / "run_0050_fig3_2d_sst_kwhk" / "probe.yaml", run_dir / "probe.yaml")
+# solver は probe.yaml を必須で読む (無いと "bad file: probe.yaml" で終了)。以前は run_0050 から copy していたが
+# 手元に無いことがある (2026-09-25 #10 で踏んだ) ので空の probe を書く
+(run_dir / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
 
 # 3. mesh 変換
 msh = {("cell", True): "nozzle_user_2d.msh", ("cell", False): "nozzle_user_2d.msh",

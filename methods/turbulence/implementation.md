@@ -167,7 +167,9 @@ cell モードは ghost 経由で正しく課されるため不変。設計詳�
 ### 3.7 automatic (enhanced / y⁺ 非依存) wall treatment
 
 理論は [`theory.md`](theory.md) §6.5。`wallTreatmentSST`
-(`solverConfig` の `turbulence.wallTreatmentSST`, 0:wall-resolved / **1:automatic [既定]**)。
+(`solverConfig` の `turbulence.wallTreatmentSST`, **0:wall-resolved [既定]** / 1:automatic)。
+**1 は使わない方針** (2026-09-20): 既知欠損が積み上がっており、指定すると起動時に警告が出る。
+理由と帰結は [`procedures/recommended-settings.md`](../../procedures/recommended-settings.md) の壁処理の節。
 **既定は 1** (2026-06-28 に 0→1 へ変更, user 指示)。`0` で §6.1 の wall-resolved 型 (`60ν/β₁y²`) に戻せる。
 あわせて node Dirichlet 既定も ON: `mesh.nodeWallDirichlet=1`・`turbulence.nodeKwfDirichlet=1` (§3.7 適用先・theory §6.5(e))。
 **注**: 既定変更で y⁺~1 wall-resolved 前提の cell 検証 (case/26 $C_f$, flat-plate 回帰 等) は automatic に切替わるため要再検証。
@@ -194,6 +196,31 @@ cell モードは ghost 経由で正しく課されるため不変。設計詳�
 	mode 1 で接線せん断を modeled $\boldsymbol{\tau}_w = \rho u_\tau^2 \hat{\mathbf e}_t$ に
 	置換 (法線粘性項・熱流束は不変、no-slip なので壁せん断仕事 0)。`twall_*_b` / `ypls_b` は
 	この modeled 値で上書き出力。mode 0 は現行の分子勾配式。
+
+#### 3.7.x `ypls` / `utau` の定義と、**壁解像の指標には使えない**こと (2026-09-19)
+
+壁面ダンプ (`res_<群>_<physID>_<step>.h5`) の `ypls` / `utau` は **mode ごとに定義が違う診断量**で、
+**そのまま $y_1^+$ として読んではいけない**。
+
+| mode | `utau` | `ypls` | 備考 |
+| --- | --- | --- | --- |
+| 0 (低 Re) | 分子勾配 traction の**大きさ** ([`viscousFlux_d.cu`](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) `viscousFlux_wall_d`) | $\rho u_\tau d_{cc}/\mu$。$d_{cc}$ は**ゴースト重心と内点重心の距離** | node では壁ノードが壁面に乗り $d_{cc}$ が退化 |
+| 1 (automatic) | Reichardt 逆解き ([`ransWallFunction_d.cu`](../../solver_density_cuda/cuda_forge/ransWallFunction_d.cu)) | 代表内部点の $\rho,\mu$ と `wall_dist` から | modeled 値で上書き |
+
+**問題点** (実測 `case/49` run_0103 `cav_outer`):
+
+- **node 方式で `ypls` が 1 桁以上小さく出る**。$d_{cc}$ が退化するため。ソルバ自身、
+  流束計算では `dcc` を使わない別経路 (`∇φ·S` 弱形式) を通っている。
+  実測: `ypls` 平均 0.043 に対し、正しい $y_1^+$ は平均 0.32・**面積の 7.8 % が 1 超**。
+- **node の既定経路は `twall_*` だけを上書きし `utau`/`ypls` を更新しない**。そのため
+  $|\boldsymbol\tau_w|/(\rho u_\tau^2)$ が 1 から外れる (中央値 0.996 だが**最大 74.5**)。
+  ずれるのは**高せん断域**なので、$y_1^+$ の最大値がまさに信用できない。
+
+**したがって壁解像は `solver_density_cuda/tools/check_wall_resolution.py` で測る** (AGENTS.md
+「壁解像確認 (必須)」)。同ツールは `PLANES/STRUCT` の接続から**壁面ごとの局所**第一内部点を
+法線方向に引き、**接線** traction から $u_\tau=\sqrt{|\boldsymbol\tau_{w,t}|/\rho_w}$ を組む。
+$y_1$ が構造格子の第一層厚と一致することが自己検査になる。
+**判定は超過面積割合で行う** — 鋭角エッジがあると traction が発散するので最大値は格子収束しない。
 
 `utau` は `wall` / `wall_isothermal` の `bvar` 初期化リスト (`boundaryCond.hpp`) と
 `mesh.hpp` の `bplaneValNames` マスターリストの**両方**に追加する (片方だと device 未確保で
@@ -555,3 +582,35 @@ $E_t$ の式に交換ソースは現れない。理論と設計判断は plan `t
 ghost の $k$ は node では書かれない (ghostless) ため主ループの ghost 側は内部値を使う。`sstIsotropicStress` / `sstEnergyKSource` は 1 のとき無効化 (後継)。
 検証 (plan §6): 周期箱の一様減衰で $\Sigma V(E_m + \rho k)$ が 1e-7 で保存し $c_v\Delta T = -\Delta k$、$u=0$ 維持 (case/09 run_0046–0048)。
 後処理の全温は $T + u^2/2c_p + k/c_p$ で比較する。
+
+## 遷移モデル γ–Re_θt (`turbulence.transition: lm2009`, 2026-09-22)
+
+式と定数は [theory.md §11](theory.md)。実装は `cuda_forge/transition_d.cu` に閉じており、`transition: none` (既定) では全 wrapper が no-op である
+(`var.transitionRegistered == 0`)。SST 側が読むのは `gammaEff` だけ。
+
+| 段 | 実装 | 呼び出し位置 (`main.cpp` の `assembleResidual`) |
+|---|---|---|
+| 原始量 | `transitionPrimitive_d_wrapper`: $\gamma=\rho\gamma/\rho\in[10^{-4},1]$, $\tilde{Re}_{\theta t}\ge20$。入力 h5 に `roGamma`/`roReth` が無い初回だけ $\gamma=1$・自由流相関 (局所 $Tu$) で初期化 | `dependentVariables` の直後 (初期化に $U$, $k$ が要る) |
+| 入口 | `applyTransitionBoundaries`: `scalarDirichletPin==1` の節点を $\gamma=1$, $\tilde{Re}_{\theta t}=Re_{\theta t}(Tu_{local},\lambda_\theta=0)$ にピン | `applyRansScalarBoundaries` の直後 ($k$ のピンの後) |
+| 輸送 | `transitionTransport_d_wrapper`: 汎用 `scalarTransportResidualMulti_d` に記述子 2 本。$\gamma$: $\mu+\mu_t$、$\tilde{Re}_{\theta t}$: $2(\mu+\mu_t)$ (`sigma_lam = 2`, `sigma = 2`) | `ransTransport` の直後 |
+| ソース | `transitionSource_d_wrapper`: $P_\gamma-E_\gamma$, $P_{\theta t}$, 陰的対角, `gammaEff` | **`ransSource` の前** ($k$ 式が同じ反復の $\gamma_{eff}$ を読む) |
+| 更新 | `applyTransitionPointImplicit_d_wrapper`: $D=V/\Delta\tau+V\,J^-+$ `transport_diag`、上下限は更新後の保存量に直接 | SST の point-implicit 更新の直後 |
+
+- **壁**: node の境界半割面は拡散を skip し、壁ノードは $u=0$ で移流もゼロなので、何も課さなければ法線勾配ゼロになる。壁ノード・壁距離 0・停滞点
+  ($U<10^{-6}a$) はソースを評価せず ($1/U$, $1/U^2$ のゼロ割)、`gammaEff` には $\gamma$ そのものを書く。
+- **陰的対角 $J^-$** は項ごとの負の部分: $1.5\,c_{e1}F_{length}c_{a1}S\sqrt{F_{onset}\gamma}$ ($P_\gamma$ の $-\gamma^{3/2}$ 側) と
+  $\max(c_{a2}\Omega F_{turb}(2c_{e2}\gamma-1),0)$、$\tilde{Re}_{\theta t}$ は $(c_{\theta t}/t)(1-F_{\theta t})$。$P_\gamma$ の $+0.5/\sqrt\gamma$ 側は陽的に残す
+  ($\gamma\to0$ で正側に発散するので対角に入れられない。受けは下限 $10^{-4}$ と上限 1)。定常解は対角の取り方に依らない。
+- **局所 $Tu$ の上限 100 %** は初期化と入口ピンだけ (停滞点の保護)。ソースは SU2 と同じく下限 0.027 % だけで上限は無い (停滞点は $U<10^{-6}a$ のガードで評価しない)。
+- **$Re_{\theta t}$ の下限** (`turbulence.transitionRethMin`, 既定 20): 自由流相関の値・入口値・原始量の床・更新後のクリップの 4 か所で共通に使う
+  (SU2 は相関の clip `Corr_Ret_lim` = 20 と輸送変数の下限 1e−4 を分けている。forge は 1 つの定数で揃えた)。
+- **相関**: $Re_{\theta c}$ と $F_{length,1}$ の多項式は桁落ちするので倍精度で評価する (節点あたり数回の乗算)。$Re_{\theta t}(Tu,\lambda_\theta)$ の
+  不動点反復は上限 100 回・相対 $10^{-6}$ で停止 (T3A の収束場で平均 3.3 回・最大 6 回)。
+- **SST 側** (`ransSource_d.cu`): $P_k\to\gamma_{eff}P_k$ (リミッタ・Kato–Launder・壁関数置換の**後**)、$D_k$ と `src_jac_k` に $\min(\max(\gamma_{eff},0.1),1)$。
+  **$P_\omega$ は補正前の `Pk_base` から作る**。$F_1=\max(F_1,F_3)$ は共通の `sst_f1_transition` をソースカーネルと `rans_sst_blend_f1_d` の両方に通す。
+- **周期 node**: 残差と `transport_diag_*` を group で合算し、更新後に `roGamma`/`roReth` を root→member でミラーする。ソースの体積は部分体積。
+- **受付条件** (`transitionValidateConfig`): node・SST・`wallTreatmentSST: 0`・非軸対称・DES なし・`sstEnergyIncludesK: 0`・`scalarDiffusion: 1`・定常陰解法。違反は起動時に例外。
+- **出力**: level 1 で `roGamma`, `roReth`, `gammaTr`, `reTheta`, `gammaEff`。level 2 で相関・ソースの診断場 `lm*` も出る。
+  `tools/check_lm_kernel.py <run>` が診断場を numpy 参照 (`tools/lm2009_reference.py`、倍精度) と節点ごとに突き合わせる。
+- **初期場**: 平板 (T3A) では、完全乱流の SST 場からそのまま始めても、$k$/$\omega$ を入口値に戻してから始めても同じ解に落ちる (`case/57` `run_0011` と `run_0005` が 4 桁一致)。
+  乱流境界層の中は $F_{turb}=e^{-(R_T/4)^4}=0$ で $\gamma$ の破壊項が働かないが、上流から $\gamma$ の小さい流体が入れ替わるので履歴は残らない。

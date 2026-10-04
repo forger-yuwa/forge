@@ -1,0 +1,572 @@
+# /home/ubuntu/forge-species-tp/case/16.nozzle_wys/run_0580_g3b_update_on/tp_update.h5: 41640 nodes, twophase_active=1, x range [-60.000, 95.000] (scaled; mm expected), wall_dist max 12.331
+#   cfl_pseudo = 4.0
+#   implicitRelax = 0.699999988079071
+#   nStepInner = 4
+#   condTwoPhaseSolver = 1
+#   condTwoPhaseNonnegLimit = 0
+#   condTwoPhaseRelax = 1.0
+#   input_value_file = nozzle_user_2d.h5
+#   [tp-update] post-part changed 0 stored values of the 5 components (expected 0)
+#   [tp-update] w   sum V dq = +9.443487e-15  sum V delta_limited = +1.228303e-14  sum V C_round = -2.667541e-15  increments lost to storage: 11224 nodes
+#   [tp-update] g   sum V dq = +4.825583e-15  sum V delta_limited = +5.736610e-15  sum V C_round = +6.560207e-17  increments lost to storage: 5531 nodes
+#   [tp-update] Q2  sum V dq = -9.590214e-11  sum V delta_limited = +7.640701e-09  sum V C_round = -4.968723e-12  increments lost to storage: 5135 nodes
+#   [tp-update] Q1  sum V dq = -3.844217e-02  sum V delta_limited = -7.707930e-01  sum V C_round = +3.266018e-04  increments lost to storage: 4886 nodes
+#   [tp-update] Q0  sum V dq = -6.325589e+05  sum V delta_limited = -4.157280e+05  sum V C_round = +1.273762e+04  increments lost to storage: 5670 nodes
+
+=== /home/ubuntu/forge-species-tp/case/16.nozzle_wys/run_0580_g3b_update_on/tp_update.h5  [ON]  pre-part budget (assembly before the update) ===
+  snapshots: init pre_state pre_end post_end upd_start sp_commit hold tp_commit tp_renorm passive_floor realizability final
+  -- Omega = all --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +7.7916e-45   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +7.7916e-45   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = x[in,17) --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +7.7916e-45   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +7.7916e-45   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = x[17,35) --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = x[35,70) --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = x[70,ex] --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = x35-70 wd<0.4 --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = x35-70 wd>=0.4 --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = pinned (ref) --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+
+=== /home/ubuntu/forge-species-tp/case/16.nozzle_wys/run_0580_g3b_update_on/tp_update.h5  [ON]  update-map budget (one outer implicit update) ===
+  boundary check w : all op boundaries bit-identical
+  boundary check g : all op boundaries bit-identical
+  boundary check Q2: all op boundaries bit-identical
+  boundary check Q1: all op boundaries bit-identical
+  boundary check Q0: all op boundaries bit-identical
+
+  -- Omega = all (41640 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          +9.4435e-15               +4.8256e-15               -9.5902e-11               -3.8442e-02               -6.3256e+05               +4.6179e-15
+  delta_limited                             +1.2283e-14 [1.45e-12]    +5.7366e-15 [2.32e-13]    +7.6407e-09 [1.13e-08]    -7.7079e-01 [1.02e+00]    -4.1573e+05 [3.77e+07]    +6.5464e-15 [1.28e-12]
+  C_round                                   -2.6675e-15 [1.63e-13]    +6.5602e-17 [2.33e-14]    -4.9687e-12 [3.33e-10]    +3.2660e-04 [2.02e-02]    +1.2738e+04 [1.44e+06]    -2.7331e-15 [1.70e-13]
+  C_floor (commit)                          +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +1.9541e-31 [1.95e-31]    +8.1288e-07 [8.13e-07]    +5.6751e-14 [5.68e-14]    +0.0000e+00 [0.00e+00]
+  C_species_commit (undone by hold)         +9.5500e-15 [1.43e-12]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +9.5500e-15 [1.43e-12]
+  C_hold (undo species commit)              -9.5500e-15 [1.43e-12]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -9.5500e-15 [1.43e-12]
+  C_renorm_scale                            -1.7201e-16 [1.18e-12]    -9.7510e-16 [1.14e-13]    -1.1132e-11 [1.59e-09]    -1.2793e-03 [9.97e-02]    -5.8361e+04 [7.07e+06]    +8.0309e-16 [1.06e-12]
+  C_passive_floor                           +0.0000e+00 [0.00e+00]    +2.2532e-36 [2.25e-36]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -2.2532e-36 [2.25e-36]
+  C_projection                              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -7.7204e-09 [7.79e-09]    +7.3339e-01 [7.33e-01]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  C_droplet_removal (physical)              +0.0000e+00 [0.00e+00]    -1.5331e-18 [1.53e-18]    -1.0394e-13 [1.04e-13]    -9.0094e-05 [9.01e-05]    -1.7121e+05 [1.71e+05]    +1.5331e-18 [1.53e-18]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     +4.7540e-26               -3.0141e-26               -3.6139e-22               +1.7000e-14               -7.6939e-07               +7.7681e-26
+  |E| / sum|terms|                                       1.389e-12                 4.446e-12                 2.350e-14                 1.129e-14                 1.169e-12                 2.662e-12
+  increment lost to storage (sum V)                    -7.4754e-18               +1.3473e-16               +1.3534e-12               +1.7921e-05               -6.5330e+03               -1.4221e-16
+    nodes with lost increment                                11224                      5531                      5135                      4886                      5670
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               -2.6675e-15               +6.5602e-17               -4.9687e-12               +3.2660e-04               +1.2738e+04               -2.7331e-15
+    B unclosed = A - sum C_round                       +4.7541e-26               -3.0141e-26               -3.6153e-22               +1.7132e-14               -7.6944e-07               +7.7681e-26
+    A - B (= sum V C_round)                            -2.6675e-15               +6.5602e-17               -4.9687e-12               +3.2660e-04               +1.2738e+04               -2.7331e-15
+    |B| / |A|                                            1.782e-11                 4.595e-10                 7.276e-11                 5.246e-11                 6.041e-11                 2.842e-11
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               5.794e-13                 6.033e-14                 8.475e-10                 5.398e-02                 3.957e+06
+
+  -- Omega = x[in,17) (19560 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          +1.3303e-14               -3.4819e-16               -2.7005e-11               -9.6120e-03               -8.3581e+04               +1.3651e-14
+  delta_limited                             +1.4127e-14 [1.19e-12]    -3.4757e-16 [4.74e-16]    -2.6987e-11 [3.56e-11]    -9.6110e-03 [1.84e-02]    -8.5954e+04 [1.68e+07]    +1.4475e-14 [1.19e-12]
+  C_round                                   -2.1810e-15 [1.33e-13]    -2.8562e-19 [4.24e-18]    +1.8153e-15 [1.70e-13]    -3.1762e-06 [3.53e-05]    +1.8907e+03 [1.40e+04]    -2.1807e-15 [1.33e-13]
+  C_floor (commit)                          +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +3.3526e-37 [3.35e-37]    +4.4187e-16 [4.42e-16]    +1.8713e-18 [1.87e-18]    +0.0000e+00 [0.00e+00]
+  C_species_commit (undone by hold)         +1.1971e-14 [1.18e-12]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +1.1971e-14 [1.18e-12]
+  C_hold (undo species commit)              -1.1971e-14 [1.18e-12]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -1.1971e-14 [1.18e-12]
+  C_renorm_scale                            +1.3563e-15 [1.03e-12]    -3.3437e-19 [1.61e-17]    -1.6948e-14 [6.25e-13]    +1.4473e-06 [1.35e-04]    +4.8217e+02 [4.56e+04]    +1.3566e-15 [1.03e-12]
+  C_passive_floor                           +0.0000e+00 [0.00e+00]    +6.5882e-41 [6.59e-41]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -6.5882e-41 [6.59e-41]
+  C_projection                              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -2.7100e-15 [2.71e-15]    +7.5598e-07 [7.56e-07]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  C_droplet_removal (physical)              +0.0000e+00 [0.00e+00]    -2.7850e-26 [2.79e-26]    -2.9402e-22 [2.94e-22]    -1.3009e-14 [1.30e-14]    -8.3109e-04 [8.31e-04]    +2.7850e-26 [2.79e-26]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     +2.8311e-26               -6.1630e-30               -1.6156e-26               -1.8908e-16               -8.4401e-10               +2.8319e-26
+  |E| / sum|terms|                                       6.804e-13                 1.770e-14                 5.982e-16                 1.966e-14                 9.556e-15                 6.750e-13
+  increment lost to storage (sum V)                    -1.9662e-16               +6.2461e-20               +8.4572e-16               +6.9439e-07               -5.8189e+01               -1.9668e-16
+    nodes with lost increment                                 4548                       499                       430                       439                       419
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               -2.1810e-15               -2.8562e-19               +1.8153e-15               -3.1762e-06               +1.8907e+03               -2.1807e-15
+    B unclosed = A - sum C_round                       +2.8312e-26               -6.1846e-30               -1.7435e-26               -1.8771e-16               -8.4060e-10               +2.8319e-26
+    A - B (= sum V C_round)                            -2.1810e-15               -2.8562e-19               +1.8153e-15               -3.1762e-06               +1.8907e+03               -2.1807e-15
+    |B| / |A|                                            1.298e-11                 2.165e-11                 9.604e-12                 5.910e-11                 4.446e-13                 1.299e-11
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               4.939e-13                 1.279e-17                 4.889e-13                 1.046e-04                 3.588e+04
+
+  -- Omega = x[17,35) (5160 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          +1.5597e-15               +9.1925e-15               +1.3930e-10               +7.6449e-03               -1.2583e+05               -7.6328e-15
+  delta_limited                             +1.4970e-15 [3.40e-14]    +9.0618e-15 [1.89e-14]    +1.5487e-10 [3.94e-10]    +5.2925e-03 [4.28e-02]    -1.4314e+05 [6.95e+06]    -7.5648e-15 [3.56e-14]
+  C_round                                   +1.5607e-18 [6.09e-15]    +5.9605e-17 [1.69e-15]    -1.4587e-12 [3.02e-11]    -2.7957e-05 [2.69e-03]    +9.3359e+02 [3.16e+05]    -5.8044e-17 [6.41e-15]
+  C_floor (commit)                          +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +8.0158e-33 [8.02e-33]    +7.3237e-25 [7.32e-25]    +9.8747e-15 [9.87e-15]    +0.0000e+00 [0.00e+00]
+  C_species_commit (undone by hold)         +1.4522e-15 [3.33e-14]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +1.4522e-15 [3.33e-14]
+  C_hold (undo species commit)              -1.4522e-15 [3.33e-14]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -1.4522e-15 [3.33e-14]
+  C_renorm_scale                            +6.1126e-17 [2.87e-14]    +7.1075e-17 [6.39e-15]    +1.8603e-12 [1.15e-10]    +7.3672e-05 [9.97e-03]    +1.6373e+04 [1.13e+06]    -9.9491e-18 [2.24e-14]
+  C_passive_floor                           +0.0000e+00 [0.00e+00]    +4.8015e-37 [4.80e-37]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -4.8015e-37 [4.80e-37]
+  C_projection                              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -1.5975e-11 [1.60e-11]    +2.3067e-03 [2.31e-03]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  C_droplet_removal (physical)              +0.0000e+00 [0.00e+00]    -1.0681e-42 [1.07e-42]    -1.3022e-37 [1.30e-37]    -8.2233e-29 [8.22e-29]    -3.3982e-20 [3.40e-20]    +1.0681e-42 [1.07e-42]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     +7.5019e-26               +1.2144e-26               -3.9834e-23               +9.4716e-15               -4.8720e-08               +6.2877e-26
+  |E| / sum|terms|                                       1.681e-11                 1.321e-12                 2.287e-13                 1.230e-12                 3.037e-13                 5.967e-12
+  increment lost to storage (sum V)                    -1.0632e-18               +4.4418e-18               +3.4373e-13               +1.4003e-05               +8.7303e+02               -5.5051e-18
+    nodes with lost increment                                 1759                      1032                       967                       926                      1006
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               +1.5607e-18               +5.9605e-17               -1.4587e-12               -2.7957e-05               +9.3359e+02               -5.8044e-17
+    B unclosed = A - sum C_round                       +7.5019e-26               +1.2144e-26               -3.9828e-23               +9.4722e-15               -4.8741e-08               +6.2877e-26
+    A - B (= sum V C_round)                            +1.5607e-18               +5.9605e-17               -1.4587e-12               -2.7957e-05               +9.3359e+02               -5.8044e-17
+    |B| / |A|                                            4.807e-08                 2.037e-10                 2.730e-11                 3.388e-10                 5.221e-11                 1.083e-09
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               2.122e-14                 4.676e-15                 8.435e-11                 7.423e-03                 8.590e+05
+
+  -- Omega = x[35,70) (9840 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          -3.2673e-15               -1.9705e-15               -9.9430e-11               -2.4472e-02               -2.9987e+05               -1.2968e-15
+  delta_limited                             -3.2331e-15 [6.28e-14]    -2.8319e-15 [5.43e-14]    +2.4616e-09 [3.44e-09]    -2.6254e-01 [3.16e-01]    -2.7007e+05 [4.70e+06]    -4.0119e-16 [3.29e-14]
+  C_round                                   -7.0112e-16 [1.33e-14]    -6.9526e-17 [1.21e-14]    -2.1306e-12 [1.84e-10]    +3.6770e-04 [1.20e-02]    +4.6868e+03 [7.48e+05]    -6.3159e-16 [1.69e-14]
+  C_floor (commit)                          +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +1.8739e-31 [1.87e-31]    +3.1411e-22 [3.14e-22]    +4.6874e-14 [4.69e-14]    +0.0000e+00 [0.00e+00]
+  C_species_commit (undone by hold)         -3.9859e-15 [6.06e-14]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -3.9859e-15 [6.06e-14]
+  C_hold (undo species commit)              +3.9859e-15 [6.06e-14]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +3.9859e-15 [6.06e-14]
+  C_renorm_scale                            +6.6693e-16 [4.92e-14]    +9.3181e-16 [4.08e-14]    +1.6620e-11 [5.62e-10]    +3.2003e-04 [3.39e-02]    +3.1398e+04 [2.27e+06]    -2.6488e-16 [8.81e-15]
+  C_passive_floor                           +0.0000e+00 [0.00e+00]    +1.7730e-36 [1.77e-36]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -1.7730e-36 [1.77e-36]
+  C_projection                              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -2.5754e-09 [2.58e-09]    +2.3742e-01 [2.37e-01]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  C_droplet_removal (physical)              +0.0000e+00 [0.00e+00]    -8.4793e-19 [8.48e-19]    -4.9135e-14 [4.91e-14]    -3.6430e-05 [3.64e-05]    -6.5882e+04 [6.59e+04]    +8.4793e-19 [8.48e-19]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     -2.7138e-26               -8.0890e-27               -3.3711e-22               +9.0206e-16               -1.4440e-06               -1.9049e-26
+  |E| / sum|terms|                                       2.158e-12                 2.110e-12                 6.668e-14                 1.802e-15                 3.881e-12                 2.055e-12
+  increment lost to storage (sum V)                    +3.2970e-16               +9.4648e-17               +1.8411e-12               +5.8476e-05               -7.7550e+03               +2.3505e-16
+    nodes with lost increment                                 2970                      2440                      2339                      2241                      2580
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               -7.0112e-16               -6.9526e-17               -2.1306e-12               +3.6770e-04               +4.6868e+03               -6.3159e-16
+    B unclosed = A - sum C_round                       -2.7138e-26               -8.0889e-27               -3.3715e-22               +9.1268e-16               -1.4440e-06               -1.9050e-26
+    A - B (= sum V C_round)                            -7.0112e-16               -6.9526e-17               -2.1306e-12               +3.6770e-04               +4.6868e+03               -6.3159e-16
+    |B| / |A|                                            3.871e-11                 1.163e-10                 1.582e-10                 2.482e-12                 3.081e-10                 3.016e-11
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               3.883e-14                 3.222e-14                 4.476e-10                 2.768e-02                 1.847e+06
+
+  -- Omega = x[70,ex] (7080 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          -2.1515e-15               -2.0482e-15               -1.0876e-10               -1.2003e-02               -1.2327e+05               -1.0328e-16
+  delta_limited                             -1.0807e-16 [1.62e-13]    -1.4567e-16 [1.59e-13]    +5.0512e-09 [7.44e-09]    -5.0393e-01 [6.39e-01]    +8.3439e+04 [9.29e+06]    +3.7595e-17 [2.36e-14]
+  C_round                                   +2.1297e-16 [1.06e-14]    +7.5809e-17 [9.52e-15]    -1.3812e-12 [1.18e-10]    -9.9650e-06 [5.50e-03]    +5.2265e+03 [3.66e+05]    +1.3716e-16 [1.37e-14]
+  C_floor (commit)                          +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +1.6310e-36 [1.63e-36]    +8.1288e-07 [8.13e-07]    +4.0226e-23 [4.02e-23]    +0.0000e+00 [0.00e+00]
+  C_species_commit (undone by hold)         +1.1299e-16 [1.60e-13]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +1.1299e-16 [1.60e-13]
+  C_hold (undo species commit)              -1.1299e-16 [1.60e-13]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -1.1299e-16 [1.60e-13]
+  C_renorm_scale                            -2.2564e-15 [6.93e-14]    -1.9777e-15 [6.70e-14]    -2.9595e-11 [9.10e-10]    -1.6744e-03 [5.57e-02]    -1.0661e+05 [3.63e+06]    -2.7873e-16 [3.25e-15]
+  C_passive_floor                           +0.0000e+00 [0.00e+00]    +3.2430e-41 [3.24e-41]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -3.2430e-41 [3.24e-41]
+  C_projection                              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -5.1290e-09 [5.19e-09]    +4.9366e-01 [4.94e-01]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  C_droplet_removal (physical)              +0.0000e+00 [0.00e+00]    -6.8513e-19 [6.85e-19]    -5.4804e-14 [5.48e-14]    -5.3664e-05 [5.37e-05]    -1.0533e+05 [1.05e+05]    +6.8513e-19 [6.85e-19]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     -2.8656e-26               -3.4191e-26               +1.5174e-23               +6.6249e-15               +7.2314e-07               +5.5310e-27
+  |E| / sum|terms|                                       1.022e-11                 1.554e-11                 1.486e-15                 6.629e-15                 2.406e-12                 8.132e-12
+  increment lost to storage (sum V)                    -1.3949e-16               +3.5578e-17               -8.3228e-13               -5.5252e-05               +4.0721e+02               -1.7507e-16
+    nodes with lost increment                                 1947                      1560                      1399                      1280                      1665
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               +2.1297e-16               +7.5809e-17               -1.3812e-12               -9.9650e-06               +5.2265e+03               +1.3716e-16
+    B unclosed = A - sum C_round                       -2.8656e-26               -3.4191e-26               +1.5893e-23               +6.6689e-15               +7.2312e-07               +5.5310e-27
+    A - B (= sum V C_round)                            +2.1297e-16               +7.5809e-17               -1.3812e-12               -9.9650e-06               +5.2265e+03               +1.3716e-16
+    |B| / |A|                                            1.346e-10                 4.510e-10                 1.151e-11                 6.692e-10                 1.384e-10                 4.032e-11
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               2.540e-14                 2.342e-14                 3.150e-10                 1.877e-02                 1.216e+06
+
+  -- Omega = x35-70 wd<0.4 (5990 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          -9.4736e-18               +1.9585e-16               -6.2604e-11               -2.0607e-02               +5.3992e+04               -2.0532e-16
+  delta_limited                             -4.2231e-17 [6.06e-15]    +1.7340e-16 [3.40e-15]    +2.5127e-09 [2.65e-09]    -2.5802e-01 [2.60e-01]    +1.1921e+05 [2.11e+05]    -2.1563e-16 [3.32e-15]
+  C_round                                   -4.3900e-19 [1.57e-15]    +1.9552e-17 [6.35e-16]    -1.0765e-13 [8.17e-12]    +7.1449e-06 [3.86e-04]    -2.0090e+02 [2.69e+04]    -1.9991e-17 [1.61e-15]
+  C_floor (commit)                          +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +1.8739e-31 [1.87e-31]    +3.1411e-22 [3.14e-22]    +4.6874e-14 [4.69e-14]    +0.0000e+00 [0.00e+00]
+  C_species_commit (undone by hold)         -9.7761e-17 [5.17e-15]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -9.7761e-17 [5.17e-15]
+  C_hold (undo species commit)              +9.7761e-17 [5.17e-15]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +9.7761e-17 [5.17e-15]
+  C_renorm_scale                            +3.3196e-17 [3.71e-15]    +3.7467e-18 [1.54e-15]    +3.4475e-13 [1.83e-11]    +1.7053e-05 [9.85e-04]    +8.6882e+02 [6.41e+04]    +2.9450e-17 [2.40e-15]
+  C_passive_floor                           +0.0000e+00 [0.00e+00]    +1.7730e-36 [1.77e-36]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -1.7730e-36 [1.77e-36]
+  C_projection                              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -2.5754e-09 [2.58e-09]    +2.3742e-01 [2.37e-01]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  C_droplet_removal (physical)              +0.0000e+00 [0.00e+00]    -8.4793e-19 [8.48e-19]    -4.9135e-14 [4.91e-14]    -3.6430e-05 [3.64e-05]    -6.5882e+04 [6.59e+04]    +8.4793e-19 [8.48e-19]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     +3.6232e-26               +1.1070e-27               +4.2574e-23               -2.0123e-15               +1.0761e-07               +3.5125e-26
+  |E| / sum|terms|                                       1.335e-10                 5.604e-12                 8.367e-15                 4.061e-15                 5.781e-13                 7.612e-11
+  increment lost to storage (sum V)                    -6.2110e-18               -3.4751e-18               +1.6182e-14               -1.5035e-06               -1.5389e+01               -2.7358e-18
+    nodes with lost increment                                 1934                      1336                      1268                      1211                      1703
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               -4.3900e-19               +1.9552e-17               -1.0765e-13               +7.1449e-06               -2.0090e+02               -1.9991e-17
+    B unclosed = A - sum C_round                       +3.6232e-26               +1.1070e-27               +4.2417e-23               -2.0263e-15               +1.0761e-07               +3.5125e-26
+    A - B (= sum V C_round)                            -4.3900e-19               +1.9552e-17               -1.0765e-13               +7.1449e-06               -2.0090e+02               -1.9991e-17
+    |B| / |A|                                            8.253e-08                 5.662e-11                 3.940e-10                 2.836e-10                 5.356e-10                 1.757e-09
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               4.183e-15                 1.835e-15                 2.220e-11                 1.177e-03                 7.524e+04
+
+  -- Omega = x35-70 wd>=0.4 (3850 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          -3.2578e-15               -2.1663e-15               -3.6826e-11               -3.8644e-03               -3.5386e+05               -1.0915e-15
+  delta_limited                             -3.1909e-15 [5.68e-14]    -3.0053e-15 [5.09e-14]    -5.1079e-11 [7.92e-10]    -4.5279e-03 [5.69e-02]    -3.8928e+05 [4.49e+06]    -1.8556e-16 [2.96e-14]
+  C_round                                   -7.0068e-16 [1.17e-14]    -8.9079e-17 [1.15e-14]    -2.0230e-12 [1.76e-10]    +3.6055e-04 [1.16e-02]    +4.8877e+03 [7.22e+05]    -6.1160e-16 [1.53e-14]
+  C_species_commit (undone by hold)         -3.8881e-15 [5.55e-14]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -3.8881e-15 [5.55e-14]
+  C_hold (undo species commit)              +3.8881e-15 [5.55e-14]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +3.8881e-15 [5.55e-14]
+  C_renorm_scale                            +6.3374e-16 [4.55e-14]    +9.2807e-16 [3.92e-14]    +1.6275e-11 [5.44e-10]    +3.0298e-04 [3.29e-02]    +3.0529e+04 [2.21e+06]    -2.9433e-16 [6.41e-15]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     -6.3371e-26               -9.1954e-27               -3.7919e-22               +2.8892e-15               -1.5516e-06               -5.4174e-26
+  |E| / sum|terms|                                       5.151e-12                 2.286e-12                 5.466e-12                 5.565e-13                 3.654e-12                 6.109e-12
+  increment lost to storage (sum V)                    +3.3591e-16               +9.8123e-17               +1.8249e-12               +5.9980e-05               -7.7396e+03               +2.3779e-16
+    nodes with lost increment                                 1036                      1104                      1071                      1030                       877
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               -7.0068e-16               -8.9079e-17               -2.0230e-12               +3.6055e-04               +4.8877e+03               -6.1160e-16
+    B unclosed = A - sum C_round                       -6.3370e-26               -9.1955e-27               -3.7919e-22               +2.8894e-15               -1.5517e-06               -5.4174e-26
+    A - B (= sum V C_round)                            -7.0068e-16               -8.9079e-17               -2.0230e-12               +3.6055e-04               +4.8877e+03               -6.1160e-16
+    |B| / |A|                                            9.044e-11                 1.032e-10                 1.874e-10                 8.014e-12                 3.175e-10                 8.858e-11
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               3.464e-14                 3.039e-14                 4.254e-10                 2.650e-02                 1.771e+06
+
+  -- Omega = pinned (ref) (118 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          +3.3392e-15               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +3.3392e-15
+  C_renorm_scale                            +3.3392e-15 [3.79e-14]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +3.3392e-15 [3.79e-14]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00
+  |E| / sum|terms|                                       0.000e+00                       nan                       nan                       nan                       nan                 0.000e+00
+  increment lost to storage (sum V)                    +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00
+    nodes with lost increment                                    0                         0                         0                         0                         0
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00
+    B unclosed = A - sum C_round                       +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00
+    A - B (= sum V C_round)                            +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00
+    |B| / |A|                                                  nan                       nan                       nan                       nan                       nan                       nan
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               3.572e-15                 1.118e-50                 1.118e-50                 1.118e-50                 1.118e-50
+# /home/ubuntu/forge-species-tp/case/16.nozzle_wys/run_0581_g3b_update_off/tp_update.h5: 41640 nodes, twophase_active=0, x range [-60.000, 95.000] (scaled; mm expected), wall_dist max 12.331
+#   cfl_pseudo = 2.0
+#   implicitRelax = 1.0
+#   nStepInner = 5
+#   condTwoPhaseSolver = 0
+#   condTwoPhaseNonnegLimit = 1
+#   condTwoPhaseRelax = 1.0
+#   input_value_file = nozzle_user_2d.h5
+#   [tp-update] post-part changed 0 stored values of the 5 components (expected 0)
+#   [tp-update] w   sum V dq = +1.418868e-14  sum V delta_limited = +5.986419e-15  sum V C_round = -6.254421e-16  increments lost to storage: 15366 nodes
+#   [tp-update] g   sum V dq = -1.425676e-15  sum V delta_limited = -7.251256e-16  sum V C_round = +6.150866e-16  increments lost to storage: 2441 nodes
+#   [tp-update] Q2  sum V dq = +8.375689e-12  sum V delta_limited = +1.685785e-11  sum V C_round = +7.053037e-12  increments lost to storage: 2215 nodes
+#   [tp-update] Q1  sum V dq = -5.541179e-03  sum V delta_limited = -4.575722e-03  sum V C_round = +6.673767e-07  increments lost to storage: 1962 nodes
+#   [tp-update] Q0  sum V dq = +7.344290e+05  sum V delta_limited = +8.664432e+05  sum V C_round = -5.970643e+04  increments lost to storage: 1774 nodes
+
+=== /home/ubuntu/forge-species-tp/case/16.nozzle_wys/run_0581_g3b_update_off/tp_update.h5  [OFF]  pre-part budget (assembly before the update) ===
+  snapshots: init pre_state pre_end post_end upd_start sp_commit sp_renorm cm_commit add_rho limit_increment passive_floor realizability final
+  -- Omega = all --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +6.1827e-48   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +6.1827e-48   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = x[in,17) --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = x[17,35) --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +9.4490e-49   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +9.4490e-49   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = x[35,70) --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +5.2378e-48   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +5.2378e-48   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = x[70,ex] --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = x35-70 wd<0.4 --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +5.2378e-48   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +5.2378e-48   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = x35-70 wd>=0.4 --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  -- Omega = pinned (ref) --
+  term                                                   w             g            Q2            Q1            Q0
+  LHS sum V(pre_end - init)                    +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_lower                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  realiz_upper                                 +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  projection                                   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  droplet_removal (phys)                       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  other state ops (pre_state-init-RZ)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  boundary overwrite (pre_end-pre_state)       +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+  post-part change (post_end-pre_end)          +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00   +0.0000e+00
+
+=== /home/ubuntu/forge-species-tp/case/16.nozzle_wys/run_0581_g3b_update_off/tp_update.h5  [OFF]  update-map budget (one outer implicit update) ===
+  boundary check w : all op boundaries bit-identical
+  boundary check g : all op boundaries bit-identical
+  boundary check Q2: all op boundaries bit-identical
+  boundary check Q1: all op boundaries bit-identical
+  boundary check Q0: all op boundaries bit-identical
+
+  -- Omega = all (41640 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          +1.4189e-14               -1.4257e-15               +8.3757e-12               -5.5412e-03               +7.3443e+05               +1.5614e-14
+  delta_limited                             +5.9864e-15 [1.11e-12]    -7.2513e-16 [3.26e-13]    +1.6858e-11 [4.90e-09]    -4.5757e-03 [3.54e-01]    +8.6644e+05 [4.58e+07]    +6.7115e-15 [1.05e-12]
+  C_round                                   -6.2544e-16 [1.62e-13]    +6.1509e-16 [2.28e-14]    +7.0530e-12 [3.28e-10]    +6.6738e-07 [1.97e-02]    -5.9706e+04 [1.43e+06]    -1.2405e-15 [1.69e-13]
+  C_floor (commit)                          +0.0000e+00 [0.00e+00]    +7.5905e-44 [7.59e-44]    +3.9783e-40 [3.98e-40]    +7.4641e-33 [7.46e-33]    +3.2568e-28 [3.26e-28]    -7.5905e-44 [7.59e-44]
+  C_renorm_scale                            +8.8277e-15 [8.63e-13]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +8.8277e-15 [8.63e-13]
+  C_add_rho_term                            +0.0000e+00 [0.00e+00]    -1.3156e-15 [1.51e-13]    -1.5535e-11 [2.16e-09]    -9.6612e-04 [1.34e-01]    -7.2308e+04 [9.12e+06]    +1.3156e-15 [1.51e-13]
+  C_projection                              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -4.2170e-40 [1.03e-39]    -2.2175e-32 [5.00e-32]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  C_droplet_removal (physical)              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -8.9931e-49 [8.99e-49]    -9.6534e-42 [9.65e-42]    -2.4251e-34 [2.43e-34]    +0.0000e+00 [0.00e+00]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     +1.8462e-25               +1.2252e-25               +4.0895e-22               -3.0634e-14               -1.2877e-06               +6.2087e-26
+  |E| / sum|terms|                                       1.196e-11                 4.613e-11                 1.037e-11                 5.527e-12                 1.290e-12                 3.431e-12
+  increment lost to storage (sum V)                    +2.8912e-16               -5.5870e-17               +2.3855e-13               -1.0078e-04               +1.5872e+04               +3.4499e-16
+    nodes with lost increment                                15366                      2441                      2215                      1962                      1774
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               -6.2544e-16               +6.1509e-16               +7.0530e-12               +6.6738e-07               -5.9706e+04               -1.2405e-15
+    B unclosed = A - sum C_round                       +1.8462e-25               +1.2252e-25               +4.0895e-22               -3.0635e-14               -1.2876e-06               +6.2086e-26
+    A - B (= sum V C_round)                            -6.2544e-16               +6.1509e-16               +7.0530e-12               +6.6738e-07               -5.9706e+04               -1.2405e-15
+    |B| / |A|                                            2.952e-10                 1.992e-10                 5.798e-11                 4.590e-08                 2.157e-11                 5.005e-11
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               5.793e-13                 5.772e-14                 8.185e-10                 5.287e-02                 3.899e+06
+
+  -- Omega = x[in,17) (19560 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          +1.5841e-14               -2.8404e-16               -2.6103e-11               -9.9141e-03               -8.3961e+04               +1.6125e-14
+  delta_limited                             +8.7173e-15 [8.48e-13]    -2.8441e-16 [5.44e-16]    -2.6130e-11 [3.94e-11]    -9.9176e-03 [1.97e-02]    -8.5469e+04 [1.75e+07]    +9.0017e-15 [8.48e-13]
+  C_round                                   -7.1371e-16 [1.32e-13]    +3.7621e-20 [4.56e-18]    +2.2702e-15 [1.72e-13]    +5.2700e-07 [3.49e-05]    -7.0396e+01 [1.35e+04]    -7.1375e-16 [1.32e-13]
+  C_floor (commit)                          +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +2.3608e-44 [2.36e-44]    +3.2329e-39 [3.23e-39]    +7.6025e-31 [7.60e-31]    +0.0000e+00 [0.00e+00]
+  C_renorm_scale                            +7.8374e-15 [7.14e-13]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +7.8374e-15 [7.14e-13]
+  C_add_rho_term                            +0.0000e+00 [0.00e+00]    +3.2970e-19 [1.25e-17]    +2.4424e-14 [4.86e-13]    +2.9990e-06 [1.03e-04]    +1.5783e+03 [3.70e+04]    -3.2970e-19 [1.25e-17]
+  C_projection                              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -2.1723e-41 [2.17e-41]    -1.2357e-32 [1.24e-32]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     +2.0101e-25               -4.9304e-32               +1.8127e-24               -1.2663e-16               -8.2946e-10               +2.0101e-25
+  |E| / sum|terms|                                       1.164e-11                 1.731e-16                 6.930e-14                 1.276e-14                 9.521e-15                 1.145e-11
+  increment lost to storage (sum V)                    +7.7873e-16               +5.2710e-20               +2.9441e-15               +3.0685e-08               -1.1638e+01               +7.7868e-16
+    nodes with lost increment                                 5623                       122                       115                       102                        87
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               -7.1371e-16               +3.7621e-20               +2.2702e-15               +5.2700e-07               -7.0396e+01               -7.1375e-16
+    B unclosed = A - sum C_round                       +2.0101e-25               -3.4895e-32               +1.8104e-24               -1.2682e-16               -8.2869e-10               +2.0101e-25
+    A - B (= sum V C_round)                            -7.1371e-16               +3.7621e-20               +2.2702e-15               +5.2700e-07               -7.0396e+01               -7.1375e-16
+    |B| / |A|                                            2.816e-10                 9.275e-13                 7.975e-10                 2.406e-10                 1.177e-11                 2.816e-10
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               4.939e-13                 1.277e-17                 4.884e-13                 1.046e-04                 3.586e+04
+
+  -- Omega = x[17,35) (5160 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          -3.6105e-18               -6.7803e-16               -4.3443e-11               -4.7574e-03               -9.5757e+04               +6.7442e-16
+  delta_limited                             +3.1614e-16 [3.59e-14]    -3.5365e-16 [2.21e-14]    -3.7714e-11 [4.55e-10]    -4.2065e-03 [4.91e-02]    -5.4891e+04 [8.11e+06]    +6.6979e-16 [3.95e-14]
+  C_round                                   -9.4911e-18 [6.16e-15]    +5.6708e-17 [1.69e-15]    +4.9860e-13 [2.96e-11]    -6.2833e-05 [2.77e-03]    -5.1175e+03 [3.29e+05]    -6.6200e-17 [6.52e-15]
+  C_floor (commit)                          +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +8.2503e-49 [8.25e-49]    +2.9225e-40 [2.92e-40]    +1.2098e-32 [1.21e-32]    +0.0000e+00 [0.00e+00]
+  C_renorm_scale                            -3.1026e-16 [2.97e-14]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -3.1026e-16 [2.97e-14]
+  C_add_rho_term                            +0.0000e+00 [0.00e+00]    -3.8109e-16 [4.90e-15]    -6.2280e-12 [8.84e-11]    -4.8805e-04 [7.96e-03]    -3.5749e+04 [8.78e+05]    +3.8109e-16 [4.90e-15]
+  C_projection                              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -2.9101e-40 [3.80e-40]    +1.2446e-33 [6.29e-33]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  C_droplet_removal (physical)              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -4.5895e-43 [4.59e-43]    -9.6588e-36 [9.66e-36]    +0.0000e+00 [0.00e+00]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     +1.4313e-26               -5.6624e-27               -1.9135e-23               +9.3337e-15               -3.2672e-07               +1.9976e-26
+  |E| / sum|terms|                                       2.251e-11                 7.155e-12                 4.306e-13                 1.962e-12                 3.412e-12                 1.400e-11
+  increment lost to storage (sum V)                    +1.2805e-17               +2.6866e-17               -1.7709e-14               -1.6161e-05               +7.1810e+03               -1.4061e-17
+    nodes with lost increment                                 1945                       376                       345                       325                       313
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               -9.4911e-18               +5.6708e-17               +4.9860e-13               -6.2833e-05               -5.1175e+03               -6.6200e-17
+    B unclosed = A - sum C_round                       +1.4313e-26               -5.6624e-27               -1.9132e-23               +9.3342e-15               -3.2671e-07               +1.9976e-26
+    A - B (= sum V C_round)                            -9.4911e-18               +5.6708e-17               +4.9860e-13               -6.2833e-05               -5.1175e+03               -6.6200e-17
+    |B| / |A|                                            1.508e-09                 9.985e-11                 3.837e-11                 1.486e-10                 6.384e-11                 3.018e-10
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               2.121e-14                 4.596e-15                 8.330e-11                 7.363e-03                 8.552e+05
+
+  -- Omega = x[35,70) (9840 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          -4.3602e-16               +6.0549e-15               +1.7231e-10               +1.6218e-02               +1.4851e+06               -6.4909e-15
+  delta_limited                             -7.5067e-16 [6.30e-14]    +4.7878e-15 [7.37e-14]    +1.5510e-10 [1.18e-09]    +1.5274e-02 [8.54e-02]    +1.4899e+06 [6.81e+06]    -5.5385e-15 [6.28e-14]
+  C_round                                   -4.6721e-17 [1.31e-14]    +4.3335e-16 [1.16e-14]    +5.0368e-12 [1.87e-10]    +1.5586e-04 [1.18e-02]    -4.9288e+04 [7.43e+05]    -4.8007e-16 [1.71e-14]
+  C_floor (commit)                          +0.0000e+00 [0.00e+00]    +7.5905e-44 [7.59e-44]    +3.9781e-40 [3.98e-40]    +7.4641e-33 [7.46e-33]    +3.2491e-28 [3.25e-28]    -7.5905e-44 [7.59e-44]
+  C_renorm_scale                            +3.6137e-16 [5.09e-14]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +3.6137e-16 [5.09e-14]
+  C_add_rho_term                            +0.0000e+00 [0.00e+00]    +8.3371e-16 [3.07e-14]    +1.2170e-11 [4.74e-10]    +7.8829e-04 [3.09e-02]    +4.4475e+04 [2.00e+06]    -8.3371e-16 [3.07e-14]
+  C_projection                              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -8.1178e-41 [6.01e-40]    -1.1464e-32 [3.09e-32]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  C_droplet_removal (physical)              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -8.9931e-49 [8.99e-49]    -9.1944e-42 [9.19e-42]    -2.3285e-34 [2.33e-34]    +0.0000e+00 [0.00e+00]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     +4.2880e-26               +6.2960e-26               +4.3194e-22               -4.8055e-14               -4.0908e-07               -2.0080e-26
+  |E| / sum|terms|                                       3.700e-11                 1.040e-11                 2.507e-12                 2.963e-12                 2.583e-13                 2.784e-12
+  increment lost to storage (sum V)                    -1.7186e-16               +2.7710e-17               -2.3799e-13               -1.0650e-04               +8.4867e+03               -1.9957e-16
+    nodes with lost increment                                 4503                      1058                      1023                       928                       821
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               -4.6721e-17               +4.3335e-16               +5.0368e-12               +1.5586e-04               -4.9288e+04               -4.8007e-16
+    B unclosed = A - sum C_round                       +4.2880e-26               +6.2959e-26               +4.3195e-22               -4.8055e-14               -4.0924e-07               -2.0080e-26
+    A - B (= sum V C_round)                            -4.6721e-17               +4.3335e-16               +5.0368e-12               +1.5586e-04               -4.9288e+04               -4.8007e-16
+    |B| / |A|                                            9.178e-10                 1.453e-10                 8.576e-11                 3.083e-10                 8.303e-12                 4.183e-11
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               3.879e-14                 3.079e-14                 4.318e-10                 2.704e-02                 1.818e+06
+
+  -- Omega = x[70,ex] (7080 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          -1.2127e-15               -6.5185e-15               -9.4387e-11               -7.0881e-03               -5.7099e+05               +5.3058e-15
+  delta_limited                             -2.2964e-15 [1.67e-13]    -4.8749e-15 [2.30e-13]    -7.4401e-11 [3.22e-09]    -5.7259e-03 [2.00e-01]    -4.8315e+05 [1.34e+07]    +2.5785e-15 [1.03e-13]
+  C_round                                   +1.4448e-16 [1.06e-14]    +1.2499e-16 [9.51e-15]    +1.5154e-12 [1.12e-10]    -9.2884e-05 [5.09e-03]    -5.2307e+03 [3.41e+05]    +1.9491e-17 [1.34e-14]
+  C_floor (commit)                          +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +3.2432e-37 [3.24e-37]    +0.0000e+00 [0.00e+00]
+  C_renorm_scale                            +9.3920e-16 [6.83e-14]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +9.3920e-16 [6.83e-14]
+  C_add_rho_term                            +0.0000e+00 [0.00e+00]    -1.7686e-15 [1.16e-13]    -2.1501e-11 [1.60e-09]    -1.2694e-03 [9.47e-02]    -8.2612e+04 [6.21e+06]    +1.7686e-15 [1.16e-13]
+  C_projection                              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -2.7787e-41 [2.78e-41]    +4.0192e-34 [4.02e-34]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  C_droplet_removal (physical)              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -7.9521e-46 [7.95e-46]    +0.0000e+00 [0.00e+00]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     -7.3592e-26               +6.5222e-26               -5.5576e-24               +8.2183e-15               -5.5193e-07               -1.3882e-25
+  |E| / sum|terms|                                       2.177e-11                 9.636e-12                 5.705e-14                 1.159e-12                 9.666e-13                 2.616e-11
+  increment lost to storage (sum V)                    -3.3056e-16               -1.1050e-16               +4.9130e-13               +2.1854e-05               +2.1560e+02               -2.2006e-16
+    nodes with lost increment                                 3295                       885                       732                       607                       553
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               +1.4448e-16               +1.2499e-16               +1.5154e-12               -9.2884e-05               -5.2307e+03               +1.9491e-17
+    B unclosed = A - sum C_round                       -7.3592e-26               +6.5223e-26               -5.5552e-24               +8.2180e-15               -5.5196e-07               -1.3882e-25
+    A - B (= sum V C_round)                            +1.4448e-16               +1.2499e-16               +1.5154e-12               -9.2884e-05               -5.2307e+03               +1.9491e-17
+    |B| / |A|                                            5.094e-10                 5.218e-10                 3.666e-12                 8.848e-11                 1.055e-10                 7.122e-09
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               2.542e-14                 2.232e-14                 3.028e-10                 1.836e-02                 1.190e+06
+
+  -- Omega = x35-70 wd<0.4 (5990 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          +7.3026e-17               -2.5070e-17               -6.5380e-14               +7.2498e-07               +4.9761e+01               +9.8096e-17
+  delta_limited                             -5.2234e-17 [3.85e-15]    -2.6446e-17 [6.33e-16]    -8.8041e-14 [4.67e-12]    -9.3035e-07 [1.49e-04]    +2.4687e+01 [4.97e+03]    -2.5788e-17 [3.88e-15]
+  C_round                                   +1.9532e-17 [1.60e-15]    +7.6208e-19 [5.24e-17]    -6.9882e-15 [3.34e-13]    +5.4150e-07 [9.91e-06]    -1.2432e+00 [2.78e+02]    +1.8770e-17 [1.60e-15]
+  C_floor (commit)                          +0.0000e+00 [0.00e+00]    +7.5905e-44 [7.59e-44]    +3.9781e-40 [3.98e-40]    +7.4641e-33 [7.46e-33]    +3.2491e-28 [3.25e-28]    -7.5905e-44 [7.59e-44]
+  C_renorm_scale                            +1.0573e-16 [2.99e-15]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +1.0573e-16 [2.99e-15]
+  C_add_rho_term                            +0.0000e+00 [0.00e+00]    +6.1388e-19 [6.26e-17]    +2.9650e-14 [4.20e-13]    +1.1138e-06 [1.17e-05]    +2.6317e+01 [3.17e+02]    -6.1388e-19 [6.26e-17]
+  C_projection                              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -8.1178e-41 [6.01e-40]    -1.1464e-32 [3.09e-32]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  C_droplet_removal (physical)              +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    -8.9931e-49 [8.99e-49]    -9.1944e-42 [9.19e-42]    -2.3285e-34 [2.33e-34]    +0.0000e+00 [0.00e+00]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     -8.1410e-28               -8.3153e-28               +2.1600e-24               +6.3437e-17               +8.1658e-09               +1.7417e-29
+  |E| / sum|terms|                                       4.587e-12                 2.989e-11                 1.732e-11                 2.453e-11                 1.563e-10                 1.154e-13
+  increment lost to storage (sum V)                    -1.6454e-17               -9.1840e-19               -2.3606e-15               +1.0553e-07               -3.1107e+00               -1.5536e-17
+    nodes with lost increment                                 3484                       228                       218                       227                       232
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               +1.9532e-17               +7.6208e-19               -6.9882e-15               +5.4150e-07               -1.2432e+00               +1.8770e-17
+    B unclosed = A - sum C_round                       -8.1409e-28               -8.3153e-28               +2.1600e-24               +6.3437e-17               +8.1658e-09               +1.7401e-29
+    A - B (= sum V C_round)                            +1.9532e-17               +7.6208e-19               -6.9882e-15               +5.4150e-07               -1.2432e+00               +1.8770e-17
+    |B| / |A|                                            4.168e-11                 1.091e-09                 3.091e-10                 1.172e-10                 6.568e-09                 9.271e-13
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               4.259e-15                 1.415e-16                 9.406e-13                 2.784e-05                 8.822e+02
+
+  -- Omega = x35-70 wd>=0.4 (3850 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          -5.0904e-16               +6.0800e-15               +1.7237e-10               +1.6218e-02               +1.4851e+06               -6.5890e-15
+  delta_limited                             -6.9844e-16 [5.91e-14]    +4.8143e-15 [7.31e-14]    +1.5519e-10 [1.17e-09]    +1.5275e-02 [8.53e-02]    +1.4899e+06 [6.81e+06]    -5.5127e-15 [5.90e-14]
+  C_round                                   -6.6253e-17 [1.15e-14]    +4.3259e-16 [1.15e-14]    +5.0438e-12 [1.87e-10]    +1.5532e-04 [1.18e-02]    -4.9287e+04 [7.42e+05]    -4.9884e-16 [1.55e-14]
+  C_renorm_scale                            +2.5565e-16 [4.79e-14]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +2.5565e-16 [4.79e-14]
+  C_add_rho_term                            +0.0000e+00 [0.00e+00]    +8.3310e-16 [3.06e-14]    +1.2140e-11 [4.74e-10]    +7.8718e-04 [3.09e-02]    +4.4449e+04 [2.00e+06]    -8.3310e-16 [3.06e-14]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     +4.3694e-26               +6.3793e-26               +4.2982e-22               -4.8118e-14               -4.1723e-07               -2.0097e-26
+  |E| / sum|terms|                                       4.282e-11                 1.049e-11                 2.494e-12                 2.967e-12                 2.635e-13                 2.830e-12
+  increment lost to storage (sum V)                    -1.5540e-16               +2.8628e-17               -2.3563e-13               -1.0661e-04               +8.4898e+03               -1.8403e-16
+    nodes with lost increment                                 1019                       830                       805                       701                       589
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               -6.6253e-17               +4.3259e-16               +5.0438e-12               +1.5532e-04               -4.9287e+04               -4.9884e-16
+    B unclosed = A - sum C_round                       +4.3694e-26               +6.3792e-26               +4.2982e-22               -4.8118e-14               -4.1720e-07               -2.0097e-26
+    A - B (= sum V C_round)                            -6.6253e-17               +4.3259e-16               +5.0438e-12               +1.5532e-04               -4.9287e+04               -4.9884e-16
+    |B| / |A|                                            6.595e-10                 1.475e-10                 8.522e-11                 3.098e-10                 8.465e-12                 4.029e-11
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               3.453e-14                 3.065e-14                 4.309e-10                 2.701e-02                 1.817e+06
+
+  -- Omega = pinned (ref) (118 nodes); signed sum V*term [abs sum V*|term|] --
+  term                                                           w                         g                        Q2                        Q1                        Q0                         v
+  LHS sum V(q_after-q_before)                          +7.9833e-15               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +7.9833e-15
+  C_renorm_scale                            +7.9833e-15 [4.06e-14]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +7.9833e-15 [4.06e-14]
+  B_boundary_overwrite                      +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]    +0.0000e+00 [0.00e+00]
+  E_bookkeeping = LHS - sum(terms)                     +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00
+  |E| / sum|terms|                                       0.000e+00                       nan                       nan                       nan                       nan                 0.000e+00
+  increment lost to storage (sum V)                    +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00
+    nodes with lost increment                                    0                         0                         0                         0                         0
+  A/B (A = float storage, C_round not booked; B = candidates stored in double):
+    A unclosed = LHS - sum delta - sum C_a               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00
+    B unclosed = A - sum C_round                       +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00
+    A - B (= sum V C_round)                            +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00               +0.0000e+00
+    |B| / |A|                                                  nan                       nan                       nan                       nan                       nan                       nan
+    C_round nodes above IEEE bound                               0                         0                         0                         0                         0
+    sum V*IEEE bound (ref)                               3.572e-15                 5.592e-51                 5.592e-51                 5.592e-51                 5.592e-51
+
+wrote /home/ubuntu/forge-species/g3b.csv

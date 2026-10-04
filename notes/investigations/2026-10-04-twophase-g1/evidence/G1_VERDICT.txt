@@ -1,0 +1,35 @@
+input /home/ubuntu/forge-species-tp/case/16.nozzle_wys/run_0560_g1_faces_off0520/tp_faces.h5: faces 83745, nodes 41640, nSpecies 2, iw 1 (H2O), state active, requested 0, IC nozzle_user_2d.h5
+sign: J > 0 = into cell ic0 (face-integrated; res[ic0] += J, res[ic1] -= J)
+pre-part changes of conserved arrays (count real / max|d| real / count ghost / max|d| ghost):
+  ro                0 0.000e+00        0 0.000e+00
+  roUx              0 0.000e+00       12 5.722e-06
+  roUy              0 0.000e+00        0 0.000e+00
+  roUz              0 0.000e+00        0 0.000e+00
+  roe            1921 3.906e-03       10 7.812e-03
+  roK               0 0.000e+00        0 0.000e+00
+  roOmega           0 0.000e+00        0 0.000e+00
+  roY0              0 0.000e+00        0 0.000e+00
+  roY1              0 0.000e+00        0 0.000e+00
+  rog_0             0 0.000e+00        0 0.000e+00
+  roQ2_0            0 0.000e+00        0 0.000e+00
+  roQ1_0           13 8.082e-39        0 0.000e+00
+  roQ0_0            0 0.000e+00        0 0.000e+00
+faces: evaluated 82813, node boundary half-faces 932, OFF/ON skip disagreement 0, intermediate self-check mismatch 0
+P0: OFF copy vs production species_diffusion_d (node; bound = nface·eps32·Σ|J|):
+  roY0       max|copy-prod| 1.282e-17  max|prod| 1.596e-10  max ratio 0.283  over 0  ok
+  roY1(w)    max|copy-prod| 1.282e-17  max|prod| 1.596e-10  max ratio 0.280  over 0  ok
+  roe        max|copy-prod| 4.204e-13  max|prod| 2.182e-06  max ratio 0.282  over 0  ok
+  diag0      max|copy-prod| 1.529e-08  max|prod| 1.506e-01  max ratio 0.302  over 0  ok
+  diag1      max|copy-prod| 1.462e-08  max|prod| 1.506e-01  max ratio 0.302  over 0  ok
+VERDICT (ii) float vs double: FAIL  — liquid: max |Jl_f−Jl_d|/(8ε A_l) 1048576.000, faces over 574; molecular vapour: max |jv_f−jv_d|/(8ε A_v) 0.068, faces over 0; non-finite 0
+VERDICT (i) |J_w^A| <= 0.05 max|J_l^B| on turbulent faces: UNDETERMINED  — turbulent faces 50446; max|J_w^A| 1.424e-10 vs 0.05·max|J_l^B| 7.178e-07 (ratio 0.000); faces over 0 (0.000%); max at face 34328 x=9.371 mm y=-2.566 mm; max|J_w^A| over all evaluated faces 2.629e-10, max|J_l^B| over all evaluated faces 1.436e-05  [UNDETERMINED because: (ii) double reference check did not pass (diagnostic not established); the raw comparison was PASS]
+RECORD (iii) hypothesis 1 (molecular vapour away from the wall, turbulent liquid toward the wall):
+  faces in x 35.0–70.0 mm with Δwd ≠ 0: 19403 (wall side 'none': 0)
+  band [mm]    wall    faces  Σ j_v,mol away (f)         (d)  Σ scale_v  Σ J_l away (f)         (d)  Σ scale_l  result
+  0.0–0.1       upper    3912         -8.8923e-09 -8.8512e-09  3.782e-07     -2.4170e-23 -2.4170e-23  2.305e-29  棄却
+  0.0–0.1       lower    3918         -9.3647e-09 -9.3116e-09  3.782e-07     -2.4221e-23 -2.4221e-23  2.310e-29  棄却
+  0.1–0.4       upper    1956          7.5257e-05  7.5257e-05  1.748e-08     -1.3630e-03 -1.3630e-03  2.442e-09  支持
+  0.1–0.4       lower    1956          7.5254e-05  7.5254e-05  1.748e-08     -1.3629e-03 -1.3629e-03  2.442e-09  支持
+  0.4–1.6       upper    2251          8.5892e-05  8.5892e-05  1.029e-09     -1.5676e-03 -1.5676e-03  2.437e-08  支持
+  0.4–1.6       lower    2251          8.5894e-05  8.5894e-05  1.025e-09     -1.5676e-03 -1.5676e-03  2.437e-08  支持
+RECORD (iii): 棄却 (ただし (ii) が PASS でないので診断未成立)

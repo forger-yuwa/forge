@@ -58,6 +58,126 @@ $$
 $\delta_m \to 0$ で $\psi \to 1$ (連続)。$|\delta_m|$ が体積スケール以下では実質
 無リミットになり、滑らかな領域での精度低下を避ける。
 
+#### ⚠ 既定の $\epsilon^2$ は**次元が合っていない**
+
+$\epsilon^2 = (K|V_C|^{1/3})^3 = K^3 |V_C|$ は**長さの 3 乗の次元**を持つのに、比べる相手の
+$\delta$ は変数そのものの次元 ($\rho$ なら kg/m³、$P$ なら Pa) である。結果:
+
+- **メッシュを拡大すると実質 OFF になる**。座標を ×1024 すると $\epsilon^2$ が面積とともに ×2²⁰ 増え、
+  分子分母を支配して常に $\psi \approx 1$ を返す (実測: $\bar\psi_\rho$ 0.9718 → 0.99998、
+  62069 ノード中 58761 で $\psi$ が変化)。
+- **変数ごとに効き方が桁違いになる**。同じ $\epsilon^2$ を $\Delta\rho \sim O(0.1)$ と
+  $\Delta P \sim O(10^5)$ に当てるので、片方では無リミット・片方では通常動作になる。
+
+SU2 の Venkatakrishnan の $\epsilon^2$ は**領域で一定の定数** $(K\,L)^3$ で、局所のセル寸法に依らない
+(`SU2_CFD/include/limiters/CLimiterDetails.hpp`、`Common/src/CConfig.cpp:5021` `RefElemLength = 1.0`、
+`VENKAT_LIMITER_COEFF = 0.05` → $\epsilon^2 = 1.25\times10^{-4}$)。**SU2 の既定は次元付き (SI) で解く**
+(`REF_DIMENSIONALIZATION` の既定は `DIMENSIONAL`、`CConfig.cpp:1511`) ので、SU2 でも変数ごとの効き方は次元で変わる。
+(2026-10-03 訂正: 以前ここに「SU2 は無次元化して解くので壊れない」と書いていたが、既定については誤り。
+調査 `notes/investigations/limiter-unstructured-convergence-survey.md` §2.1。)
+
+#### 無次元化 Venkatakrishnan (`space.limiterScaled: 1`, **既定**)
+
+**`limiterScaled: 1` は評価点の一致を内包する** (2026-09-20 に `limiterMatchRecon` を畳んだ)。
+公開値は **0 (旧経路) / 1 (修正版)** の 2 つだけで、**既定は 1** (2026-09-20 変更)。
+旧値を再現したい run は `limiterScaled: 0` を明記すること。
+node 以外 / `convMethod` 対象外では**警告して自動で 0 に落ちる**。
+
+$\delta$ を**変数ごとの固定参照** $q_\mathrm{ref}$ で割ってから Venkatakrishnan を当てる。
+
+$$
+\hat\delta = \delta / q_\mathrm{ref}, \qquad
+\hat\epsilon^2 = \left(\frac{K\,h_i}{L_\mathrm{ref}}\right)^3 ,
+$$
+
+- $q_\mathrm{ref}$: $\rho$ は `limiterRoRef`、$P$ は `limiterPRef`、速度 3 成分は `limiterARef` (音速)。
+  **明示指定 (>0) が最優先**で、0 (既定) なら起動時に初期場の体積加重平均から決める。
+  自動だと restart のたびに値が変わるのでログに `(auto)` と警告を出す。貼り付け用の行も印字する。
+- $h_i$: **軸対称は `A_planar`、平面 2D は `volume` (奥行 1 の面積) の平方根**、3D は $V^{1/3}$。
+  `A_planar` は軸対称のときしか device へ転送されないので、**平面 2D で `A_planar` を読んではいけない**
+  (読むと $\epsilon^2=0$ になり `venkatK` が効かなくなる)。
+- $L_\mathrm{ref}$: `limiterRefLength`。0 ならメッシュ境界箱の対角。
+
+**`space.venkatK` の既定は経路で変わる**: `limiterScaled: 1` なら **0.05** (SU2 既定と**数値は同じだが ε の定義が違う**)、`0` なら 1.0。
+forge の $\hat\epsilon^2=(K h_i/L_\mathrm{ref})^3$ は局所寸法 $h_i$ で縮むので、細かい壁近傍セルでは極端に小さくなる
+(case/16 の入口列で $\hat\epsilon\approx5\times10^{-8}$。SU2 を無次元化して回した場合の相対 ε 約 0.011 の 2×10⁵ 分の 1。
+plan [limiter-inlet-column-oscillation](../plans/accepted/limiter-inlet-column-oscillation.md) §4.5)。
+**旧経路の K は `limiterFunctions_d.cuh` で `1.f` 固定**なので、`limiterScaled: 0` では `venkatK` を変えても効かない。
+K=1.0 は Sod で全変数を悪化させる
+(密度の近傍逸脱が K=1.0 で 86674 面側、K=0.05 で **0**)。SERN でも K=1.0 は $\rho$ 797 / $U_y$ 1777 に対し
+K=0.05 は $\rho$/$U_x$/$P$ が 0。
+
+**`limiterMatchRecon` は廃止** (2026-09-20)。`limiterScaled: 1` が評価点の一致を含む。
+**中間だった `matchRecon: 1, scaled: 0` (評価点だけ直して旧 Venkat 式を使う。Barth にも効いた) は機能打ち切り**で、
+改名ではない。旧キーは移行先を示して拒否する。
+
+#### 比の形 — **削除済み** (旧 `space.limiterScaled: 2`)
+
+$\psi$ を $y=\delta^+/\delta_m$ だけの関数にする形。基準値も長さも要らないが、
+**滑らか域でリミッタが切れない**ので定常残差の床が 2〜5 倍上がった (case/44 で実測)。
+**2026-09-20 にコードごと削除**し、指定すると理由つきで拒否する。
+
+#### 定常 2 次の残差プラトーについて
+
+**活きたリミッタを持つと定常 2 次は機械収束しない** (`case/08` で実測: `limiter: 0` なら 5.11e-7 まで落ちるが、
+Venkatakrishnan K=0.05 で 1.20e-3、Barth で 4.91e-3)。支配するのは**衝撃反射点**の節点で、
+`cfl_pseudo` を上げるとプラトーも上がる。**K を上げれば収束は戻るが、それはリミッタが切れていくからである**
+(K=50 で残差はリミッタ無しと同等、近傍逸脱は 255 万)。
+
+**ψ の凍結は実装していない** (2026-09-20 決定)。プラトー run は「**未収束の準定常評価**」として、
+目的量・局所場・保存収支・CFL/内部反復感度が**事前に決めた誤差予算内**にある場合だけ受理する
+(plan [`limiter-config-simplify.md`](../plans/active/limiter-config-simplify.md) §4.3)。
+
+#### 既定 (`limiterScaled 1`) での残差の床 (2026-10-03、case/16 で観測した範囲。原因は未確定)
+
+case/16 (平面 2D node SST、凝縮の有無に無関係) では、`limiterScaled 1` の定常残差が `limiterScaled 0` より約 20 倍高い床で
+下げ止まる (check_convergence は `NOT CONVERGED (stalled/plateau)`)。床の Σres² の約 7 割は**一様入口と no-slip 壁の角 (入口の最初の
+2 列の壁近傍)** にあり、残りは幾何の折れ点・出口中心線の少数節点。そこでは節点が近傍の局所極値になり、極値判定と制限面の選択が
+float32 の数 ulp で決まる状況で $\psi$ が反復ごとに切り替わる。**この切り替えと床の関連は観測したが、原因としては確定していない**
+(同じ状態で入口の $\psi$ だけ差し替えた二重評価は事前登録の判定で保留)。
+
+- **測定した上側壁の 4 報告量** (x ≥ 10 mm の壁圧平均・x = 42/52 mm の壁圧・壁温平均) は、床の高さを変えた介入で事前の許容差
+  (壁圧 0.1 %、壁温 0.1 K) 内: cfl 半減で壁圧差 ≤ 1.2e-6 相対・壁温差 −0.002 K、領域一定 $\hat\epsilon=2\times10^{-6}$ で壁圧差 ≤ 7e-6 相対・壁温差 1e-4 K。
+  壁温分布全体・熱流束・他ケースは測っていないので、「床は解に影響しない」とは言わない。
+- 試した領域一定 $\hat\epsilon=2\times10^{-6}$ (許容逸脱から決めた 1 点) は、入口残差 0.73〜0.80 倍・全域 rms_ro 0.65 倍で採用基準 (1/2) 未達。
+  入口以外の近壁では下がり方が大きい ($\omega$ 残差 0.07 倍)。他の $\epsilon$ は試していない。
+- **扱い**: 未収束の準定常評価として、報告量を `check_quasisteady` (判定区間と閾値を明記) で判定する。限定した報告量への感度が
+  小さいことを理由に追加調査は打ち切った。残差の位置で収束を合格にはしない。
+- 経緯・実測: plan [limiter-inlet-column-oscillation](../plans/accepted/limiter-inlet-column-oscillation.md) §4.6、
+  調査 `notes/investigations/limiter-unstructured-convergence-survey.md`・`limiter-recommended-and-recent-survey.md`。
+
+### リミッタの評価点 (`space.limiterMatchRecon`)
+
+リミッタが $\delta_m$ を評価する点は、**流束が再構成する点と一致していなければならない**。
+
+| 設定 | 評価点 | 増分の形 |
+| --- | --- | --- |
+| `0` (既定) | 双対面重心 | $g\cdot d$ のみ |
+| `1` | **流束と同じ点** (node は常にエッジ中点) | `convMethod` と同じ (2 なら隣接値差の項も含む) |
+
+node の流束は `matchRecon` に関係なく**常にエッジ中点**で再構成する (`convectiveFlux_d.cu` の
+`g_reconEdgeMid` は node なら無条件 1) ので、既定の `0` では**リミッタと流束が別の点を見ている**。
+実測ではこれが $U_x$ と $P$ の近傍逸脱の原因で、`1` にすると 0 になる
+(密度と $U_y$ の逸脱は次元不整合が原因なので `limiterScaled` 側で直す)。
+
+### 有界性の診断 (`space.limiterDiag: N`, 既定 0)
+
+$\psi$ 確定後に**流束と同じ点・同じ増分関数**で face 値を作り直し、そのノードの近傍 min/max を
+外れた face-side を変数ごとに数える。N 回の flux 呼び出しごとに印字し、**窓と累計 (`CUM`) の両方**を出す。
+
+- 許容幅は $\max(\text{近傍レンジ},\ |q|_\max) \times 10^{-5}$ に**絶対床 $10^{-6} q_\mathrm{ref}$** を敷く
+  (恒等 0 の変数では近傍レンジも 0 になり float ノイズを逸脱と数えてしまうため)。
+- 非有限は別枠で数える (NaN は大小比較が両方 false になるので「逸脱なし」に化ける)。
+- 検査件数 0 は `VERDICT=NO-CHECKS(FAIL)`。幾何尺度 $h_i \le 0$ も警告する。
+- **後処理で再構成を再現して判定してはいけない** — 出力ファイルは状態が更新後・勾配が更新前で 1 step ずれる。
+
+### 面単位の非物理フォールバック (`space.badReconDiag` / `badReconFallback`, 既定 0)
+
+SU2 の `bad_recon` 相当。流束が消費する L/R 状態が $\rho \le$ `roMin` / $P \le$ `pMin` / 非有限なら、
+**その面だけ**両側をセル値に戻し (`conv_scheme = -1`)、N 回の訪問だけ 1 次に保つ。
+**⚠ カウンタはフォールバック前に数える**ので、発火数から介入の効果は読めない。
+SERN のベース発散には効かなかった (opt-in で残置)。
+
 ### Nishikawa R1 リミッタ (未有効)
 
 `nishikawa_r1_limiter` の実装は残されているがコメントアウト済み。

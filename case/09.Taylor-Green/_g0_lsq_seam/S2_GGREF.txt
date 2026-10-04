@@ -1,0 +1,101 @@
+######## gg=case/48.flat_plate_cooled_m4/run_0952_sglsq_s2_gg_ext
+=== case/48.flat_plate_cooled_m4/run_0952_sglsq_s2_gg_ext  [last step 23999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro        : 2.026e-07
+  rms_roK       : 4.589e-05
+  rms_roOmega   : 2.239e+00
+  rms_roUx      : 2.814e-04
+  rms_roUy      : 1.343e-04
+  rms_roe       : 2.483e-01
+=== case/48.flat_plate_cooled_m4/run_0953_sglsq_s2_lsq_ext  [last step 23999]  -> PASS (plateau 許容、末尾平均 ≤ 1.5× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.376 peak/floor=    2.01 @step 12590 re-entry=23999
+  rms_roUx      : tail/floor= 1.392 peak/floor=    2.04 @step 12590 re-entry=23999
+  rms_roUy      : tail/floor= 1.139 peak/floor=    1.70 @step 1175 re-entry=23814
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.419 peak/floor=    2.09 @step 12590 re-entry=not re-entered
+  rms_roK       : tail/floor= 0.961 peak/floor=    1.36 @step 14609 re-entry=never left
+  rms_roOmega   : tail/floor= 1.000 peak/floor=    1.31 @step 19090 re-entry=never left
+######## gg=case/40.nozzle_design_tool/run_0952_sglsq_s2_gg_ext
+=== case/40.nozzle_design_tool/run_0952_sglsq_s2_gg_ext  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro        : 2.030e-08
+  rms_roK       : 2.181e-05
+  rms_roOmega   : 3.938e+02
+  rms_roUx      : 3.965e-06
+  rms_roUy      : 9.532e-06
+  rms_roe       : 2.897e-02
+=== case/40.nozzle_design_tool/run_0953_sglsq_s2_lsq_ext  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 1.5× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.006 peak/floor=    2.79 @step 6532 re-entry=11980
+  rms_roUx      : tail/floor= 1.019 peak/floor=    2.00 @step 8981 re-entry=11992
+  rms_roUy      : tail/floor= 1.024 peak/floor=    3.92 @step 8059 re-entry=11992
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.003 peak/floor=    2.72 @step 6532 re-entry=11980
+  rms_roK       : tail/floor= 0.999 peak/floor=    2.66 @step 3590 re-entry=11815
+  rms_roOmega   : tail/floor= 1.015 peak/floor=    4.81 @step 6532 re-entry=11996
+######## gg=case/39.periodic_hills/run_0950_sglsq_s2_gg
+=== case/39.periodic_hills/run_0950_sglsq_s2_gg  [last step 199999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro        : 3.828e-10
+  rms_roK       : 2.675e-09
+  rms_roOmega   : 1.242e-03
+  rms_roUx      : 4.121e-08
+  rms_roUy      : 4.591e-08
+  rms_roUz      : 2.909e-08
+  rms_roe       : 1.028e-04
+=== case/39.periodic_hills/run_0951_sglsq_s2_lsq  [last step 199999]  -> PASS (plateau 許容、末尾平均 ≤ 1.5× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 0.999 peak/floor=    1.01 @step 81569 re-entry=never left
+  rms_roUx      : tail/floor= 0.997 peak/floor=    1.03 @step 25762 re-entry=never left
+  rms_roUy      : tail/floor= 1.000 peak/floor=    1.01 @step 36979 re-entry=never left
+  rms_roUz      : tail/floor= 0.999 peak/floor=    1.03 @step 9430 re-entry=never left
+  rms_roe       : tail/floor= 1.000 peak/floor=    1.01 @step 95116 re-entry=never left
+  rms_roK       : tail/floor= 1.000 peak/floor=    2.39 @step 584 re-entry=2762
+  rms_roOmega   : tail/floor= 0.998 peak/floor=    1.12 @step 121910 re-entry=never left
+######## gg=case/16.nozzle_wys/run_0956_sglsq_s2_0476_gg_cont
+=== case/16.nozzle_wys/run_0956_sglsq_s2_0476_gg_cont  [last step 23999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro        : 2.912e-07
+  rms_roUx      : 2.497e-05
+  rms_roUy      : 5.399e-05
+  rms_roXi      : 1.312e-08
+  rms_roY0      : 6.089e-09
+  rms_roY1      : 1.896e-07
+  rms_roY2      : 7.037e-08
+  rms_roY3      : 3.243e-09
+  rms_roY4      : 2.195e-08
+  rms_roe       : 1.682e-02
+=== case/16.nozzle_wys/run_0957_sglsq_s2_0476_lsq_cont  [last step 23999]  -> PASS (plateau 許容、末尾平均 ≤ 1.5× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.003 peak/floor=    1.90 @step 19237 re-entry=23962
+  rms_roUx      : tail/floor= 1.007 peak/floor=    1.94 @step 12515 re-entry=23929
+  rms_roUy      : tail/floor= 1.004 peak/floor=    2.31 @step 10484 re-entry=23965
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.004 peak/floor=    1.86 @step 19237 re-entry=23962
+  rms_roY0      : tail/floor= 1.003 peak/floor=    1.87 @step 19237 re-entry=23962
+  rms_roY1      : tail/floor= 1.003 peak/floor=    1.90 @step 19237 re-entry=23962
+  rms_roY2      : tail/floor= 1.003 peak/floor=    1.90 @step 19237 re-entry=23962
+  rms_roY3      : tail/floor= 1.003 peak/floor=    1.90 @step 19237 re-entry=23962
+  rms_roY4      : tail/floor= 1.003 peak/floor=    1.90 @step 19237 re-entry=23962
+  rms_roXi      : tail/floor= 1.001 peak/floor= 8787.37 @step 8 re-entry=5677
+######## gg=case/16.nozzle_wys/run_0952_sglsq_s2_0482_gg
+=== case/16.nozzle_wys/run_0952_sglsq_s2_0482_gg  [last step 47999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro        : 9.441e-08
+  rms_roK       : 1.022e-06
+  rms_roOmega   : 3.059e+02
+  rms_roQ0_0    : 3.506e+10
+  rms_roQ1_0    : 5.383e+02
+  rms_roQ2_0    : 8.799e-06
+  rms_roUx      : 2.529e-05
+  rms_roUy      : 9.619e-06
+  rms_roY0      : 7.717e-08
+  rms_roY1      : 8.546e-10
+  rms_roe       : 1.358e-03
+  rms_rog_0     : 6.352e-10
+=== case/16.nozzle_wys/run_0953_sglsq_s2_0482_lsq  [last step 47999]  -> PASS (plateau 許容、末尾平均 ≤ 1.5× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.001 peak/floor=  288.66 @step 78 re-entry=7161
+  rms_roUx      : tail/floor= 1.001 peak/floor=  452.93 @step 39 re-entry=5195
+  rms_roUy      : tail/floor= 0.997 peak/floor=  763.92 @step 98 re-entry=43704
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.002 peak/floor=  515.02 @step 198 re-entry=24291
+  rms_roK       : tail/floor= 1.001 peak/floor=34606.15 @step 58 re-entry=27713
+  rms_roOmega   : tail/floor= 0.993 peak/floor=  886.42 @step 74 re-entry=47992
+  rms_roY0      : tail/floor= 1.000 peak/floor=  349.30 @step 78 re-entry=35670
+  rms_roY1      : tail/floor= 1.000 peak/floor=  349.17 @step 78 re-entry=35670
+  rms_rog_0     : tail/floor= 1.000 peak/floor= 5491.11 @step 24 re-entry=6595
+  rms_roQ2_0    : tail/floor= 1.000 peak/floor=21894.98 @step 18 re-entry=6144
+  rms_roQ1_0    : tail/floor= 1.000 peak/floor=91962.25 @step 11 re-entry=6144
+  rms_roQ0_0    : tail/floor= 1.000 peak/floor=565363.47 @step 0 re-entry=6144

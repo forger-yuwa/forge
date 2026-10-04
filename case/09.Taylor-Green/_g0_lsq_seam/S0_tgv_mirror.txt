@@ -1,0 +1,64 @@
+# S0 tgv_mirror (plan gradient-scalar-lsq-unification §6 S0、mesh.scalarGradient: lsq)
+harness revision: 7ebf6d7 (dirty)
+
+## S0-a 純作用素 (tgv_mirror, sin 場, 参照 = 合併 LSQ double)
+run: /home/ubuntu/sglsq/s0/s0_tgv_mirror_sin
+forge_mtime : 2026-09-26T09:28:02+00:00
+forge_sha256: 05b42b44f01eff65b56ad1870349c0451746821322b2a349a1abe27c54e5e06a
+git_head    : 7ebf6d7db7e0198e57052952434b7f55020003b6
+起動エコー: 'scalarGradient' effective: lsq (explicit)
+NaN/Inf: なし
+判定: max_i |∇φ_gpu − ∇φ_ref| ≤ 1e-5·S、S = max_i |∇φ_ref| (全節点)。参照の入力は res_0 の場 (境界条件の上書き後)
+| 場 | S | 最大差 | 最大差/S | 区分別 最大差/S (member 1/2/4/8) | 判定 |
+| --- | --- | --- | --- | --- | --- |
+| k | 0.6041 | 2.407e-08 | 3.99e-08 | 1:4.0e-08, 2:4.0e-08, 4:4.0e-08, 8:3.3e-08 | ok |
+| omega | 24.19 | 1.169e-06 | 4.83e-08 | 1:4.8e-08, 2:4.8e-08, 4:4.8e-08, 8:1.4e-08 | ok |
+| Xi | 0.2424 | 1.238e-08 | 5.11e-08 | 1:5.1e-08, 2:5.1e-08, 4:3.9e-08, 8:2.2e-08 | ok |
+  (打ち切り group/節点数 0)
+化学種 Y: dY{s}d* は出力変数に無いので測れない (保留)
+VERDICT S0-a (tgv_mirror): PASS
+
+## S0-b 定数場 (tgv_mirror, k=2・ω=100・ξ=0.5)
+run: /home/ubuntu/sglsq/s0/s0_tgv_mirror_const
+forge_mtime : 2026-09-26T09:28:02+00:00
+forge_sha256: 05b42b44f01eff65b56ad1870349c0451746821322b2a349a1abe27c54e5e06a
+git_head    : 7ebf6d7db7e0198e57052952434b7f55020003b6
+起動エコー: 'scalarGradient' effective: lsq (explicit)
+NaN/Inf: なし
+判定: 定数だけの stencil の節点 (group 単位) は ∇φ == 0 (厳密)。境界条件で値が変わった節点に stencil が触れる group は |∇φ_gpu − ∇φ_ref| ≤ 4ε·max_stencil|φ|/h (参照 = res_0 の場の LSQ double、h = 節点の合併体積^(1/3))。ξ は全節点で == 0
+| 場 | 区分 | 節点 | 非零の節点 | 最大 |∇φ| or 差 [ε·max|φ|/h] | 判定 |
+| --- | --- | --- | --- | --- | --- |
+| k | stencil が定数のみ  | 35937 | 0 | 0.000e+00 (絶対値) | ok |
+| omega | stencil が定数のみ  | 35937 | 0 | 0.000e+00 (絶対値) | ok |
+| Xi | stencil が定数のみ  | 35937 | 0 | 0.000e+00 (絶対値) | ok |
+VERDICT S0-b (tgv_mirror): PASS
+
+## S0-c NS との一致 (tgv_mirror, ρ = k = ω = ξ = q、q = m/2048)
+run: /home/ubuntu/sglsq/s0/s0_tgv_mirror_same
+forge_mtime : 2026-09-26T09:28:02+00:00
+forge_sha256: 05b42b44f01eff65b56ad1870349c0451746821322b2a349a1abe27c54e5e06a
+git_head    : 7ebf6d7db7e0198e57052952434b7f55020003b6
+起動エコー: 'scalarGradient' effective: lsq (explicit)
+NaN/Inf: なし
+比較対象: res_0 でスカラーの値が ρ とビット一致する節点だけで stencil (group 単位) が閉じる節点 (境界条件で k・ω が変わる節点に触れる group は除外)
+| 場 | 区分 | 節点 (除外) | ビット不一致 | 最大 |差| | 最大 |差|/(ε·Σ|p_m|) | 判定 |
+| --- | --- | --- | --- | --- | --- | --- |
+| k | member 1 (ビット一致を要求) | 29791 (0) | 0 | 0.000e+00 | - | ok |
+| k | member 2 (ビット一致を要求) | 5766 (0) | 0 | 0.000e+00 | - | ok |
+| k | member 4 | 372 (0) | 8 | 3.725e-09 | 0.97 | ok |
+| k | member 8 | 8 (0) | 0 | 0.000e+00 | 0.00 | ok |
+| omega | member 1 (ビット一致を要求) | 29791 (0) | 0 | 0.000e+00 | - | ok |
+| omega | member 2 (ビット一致を要求) | 5766 (0) | 0 | 0.000e+00 | - | ok |
+| omega | member 4 | 372 (0) | 0 | 0.000e+00 | 0.00 | ok |
+| omega | member 8 | 8 (0) | 0 | 0.000e+00 | 0.00 | ok |
+| Xi | member 1 (ビット一致を要求) | 29791 (0) | 0 | 0.000e+00 | - | ok |
+| Xi | member 2 (ビット一致を要求) | 5766 (0) | 0 | 0.000e+00 | - | ok |
+| Xi | member 4 | 372 (0) | 0 | 0.000e+00 | 0.00 | ok |
+| Xi | member 8 | 8 (0) | 0 | 0.000e+00 | 0.00 | ok |
+化学種 dY と dξ のビット一致 (5 種、チャンク 4+1): dY{s}d* が出力変数に無いので測れない (保留)
+VERDICT S0-c (tgv_mirror): PASS
+
+## まとめ
+S0-a: PASS
+S0-b: PASS
+S0-c: PASS

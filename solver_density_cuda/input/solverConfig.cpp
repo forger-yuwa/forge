@@ -1,4 +1,5 @@
 #include "input/solverConfig.hpp"
+#include <set>
 #include <cctype>
 
 
@@ -209,6 +210,15 @@ void solverConfig::read(std::string fname)
         if (config["mesh"]["nodeWallDirichlet"]) {
             this->nodeWallDirichlet = config["mesh"]["nodeWallDirichlet"].as<int>();
         }
+        if (config["mesh"]["nodeWallKResidualZero"]) {
+            this->nodeWallKResidualZero = config["mesh"]["nodeWallKResidualZero"].as<int>();
+            std::cout << "'nodeWallKResidualZero' in 'mesh': " << this->nodeWallKResidualZero << std::endl;
+        }
+        if (config["mesh"]["nodeIsothermalEnergyBC"]) {
+            this->nodeIsothermalEnergyBC = config["mesh"]["nodeIsothermalEnergyBC"].as<int>();
+            std::cout << "'nodeIsothermalEnergyBC' in 'mesh': " << this->nodeIsothermalEnergyBC
+                      << (this->nodeIsothermalEnergyBC ? "  (weak, SU2-type)" : "  (strong pin)") << std::endl;
+        }
         if (config["mesh"]["hoopAreaFromClosure"]) {
             this->hoopAreaFromClosure = config["mesh"]["hoopAreaFromClosure"].as<int>();
         }
@@ -235,6 +245,33 @@ void solverConfig::read(std::string fname)
             }
             this->gradLSQ = 2;
         }
+        // スカラー勾配の作用素 (plan gradient-scalar-lsq-unification §4.4・#6)。**2026-09-27 から node の既定は lsq**、cell は常に gg。
+        if (!config["mesh"]["scalarGradient"]) {
+            this->scalarGradient = (this->discretization == "node") ? "lsq" : "gg";
+            if (this->discretization == "node") {
+                // 既定変更の警告 (ユーザ決定「B」の運用ルール): 旧既定 gg で始めた run を途中から再開すると
+                // 段の区間判定が gg 段と lsq 段を 1 区間につなぐので、最初から回し直す。旧挙動は gg を明記。
+                std::cout << "[config] mesh.scalarGradient 省略 → 既定 lsq (2026-09-27 から。それ以前に既定 gg で始めた run を"
+                          << "途中から再開しないこと。旧挙動は mesh.scalarGradient: gg を明記)" << std::endl;
+            }
+        }
+        if (config["mesh"]["scalarGradient"]) {
+            this->scalarGradient = config["mesh"]["scalarGradient"].as<std::string>();
+            if (this->scalarGradient != "gg" && this->scalarGradient != "lsq") {
+                std::cerr << "[config] mesh.scalarGradient は 'gg' か 'lsq' です (指定値: '" << this->scalarGradient << "')。" << std::endl;
+                std::exit(1);
+            }
+            this->scalarGradientReason = "explicit";
+        }
+        if (this->scalarGradient == "lsq" && this->discretization != "node") {
+            std::cout << "[config] mesh.scalarGradient: lsq は node 専用のため " << this->discretization
+                      << " では gg (Green–Gauss) を使う" << std::endl;
+            this->scalarGradient = "gg";
+            this->scalarGradientReason = "explicit(cell->gg)";   // 明示 gg と区別する (provenance、plan §4.4)
+        }
+        // **起動エコーは常に 1 行** (RUN_PROVENANCE・forge_launches.jsonl と対)。
+        std::cout << "'scalarGradient' effective: " << this->scalarGradient
+                  << " (" << this->scalarGradientReason << ")" << std::endl;
         if (config["mesh"]["nodeWallStressEdgeKernel"]) {
             this->nodeWallStressEdgeKernel = config["mesh"]["nodeWallStressEdgeKernel"].as<int>();
         }
@@ -327,6 +364,11 @@ void solverConfig::read(std::string fname)
         this->implicitRelax = getOptionalValidatedValue<double>(deltaT, "implicitRelax", 1.0, "time.deltaT");
         this->updateGuardAlpha = getOptionalValidatedValue<flow_float>(deltaT, "updateGuardAlpha", 0.0, "time.deltaT");
         this->lineImplicit = getOptionalValidatedValue<int>(deltaT, "lineImplicit", 0, "time.deltaT");
+        // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md)。
+        this->qAccumulatorFP64 = getOptionalValidatedValue<int>(deltaT, "qAccumulatorFP64", 0, "time.deltaT");
+        if (this->qAccumulatorFP64 != 0 && this->qAccumulatorFP64 != 1) {
+            throw std::runtime_error("Key 'qAccumulatorFP64' in 'time.deltaT' must be 0 or 1.");
+        }
         this->blockDPLURDiagCache = getOptionalValidatedValue<int>(deltaT, "blockDPLURDiagCache", 0, "time.deltaT");
         this->blockDPLURDqPack = getOptionalValidatedValue<int>(deltaT, "blockDPLURDqPack", 0, "time.deltaT");
         // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md):
@@ -480,8 +522,104 @@ void solverConfig::read(std::string fname)
             this->outputLevel = getOptionalValidatedValue<int>(out, "level", 1, "output");
             if (this->outputLevel < 0 || this->outputLevel > 2) throw std::runtime_error("Key 'level' in 'output' must be 0, 1, or 2.");
             if (out["extraFields"]) this->outputExtraFields = out["extraFields"].as<std::vector<std::string>>();
+            this->interfaceDiag = getOptionalValidatedValue<int>(out, "interfaceDiag", 0, "output");
+            if (this->interfaceDiag != 0 && this->interfaceDiag != 1) throw std::runtime_error("Key 'interfaceDiag' in 'output' must be 0 or 1.");
+            this->interfaceDiagAlignMin = getOptionalValidatedValue<double>(out, "interfaceDiagAlignMin", 0.5, "output");
+            if (!(this->interfaceDiagAlignMin > 0.0 && this->interfaceDiagAlignMin <= 1.0)) throw std::runtime_error("Key 'interfaceDiagAlignMin' in 'output' must be in (0, 1].");
         }
-        std::cout << "'output': level=" << this->outputLevel << " extraFields=" << this->outputExtraFields.size() << "\n";
+        std::cout << "'output': level=" << this->outputLevel << " extraFields=" << this->outputExtraFields.size()
+                  << " interfaceDiag=" << this->interfaceDiag << "\n";
+
+        // ソルバ内 CHT (`conjugate:` ブロック, 既定 無効)
+        if (config["conjugate"]) {
+            auto cj = config["conjugate"];
+            this->conjugateEnabled   = 1;
+            // **未知キーを拒否する** (codex result 2026-09-23 m9)。`flux_avgg: 42` のような綴り違いが
+            // 黙って無視されて既定値に落ちると、設定を変えたつもりの run が同じ結果になる
+            // (§5.1 #52 と同じ事故。turbulence.kInf で 4 run を無駄にした)。
+            {
+                static const std::set<std::string> allowedCj = {
+                    "mode", "solid", "flux", "flux_avg", "thickness", "k_solid", "back", "T_b", "h_c",
+                    "interval", "warmup", "relax", "Df_scale", "refactorDT", "gate"};
+                static const std::set<std::string> allowedGate = {
+                    "eps_rel", "eps_abs_Wm2", "dT_K", "n_consec", "tol_solid"};
+                for (auto it = cj.begin(); it != cj.end(); ++it) {
+                    const std::string key = it->first.as<std::string>();
+                    if (allowedCj.count(key) == 0)
+                        throw std::runtime_error("Unknown key '" + key + "' in 'conjugate'.");
+                    if (key == "gate" && it->second.IsMap())
+                        for (auto g = it->second.begin(); g != it->second.end(); ++g) {
+                            const std::string gk = g->first.as<std::string>();
+                            if (allowedGate.count(gk) == 0)
+                                throw std::runtime_error("Unknown key '" + gk + "' in 'conjugate.gate'.");
+                        }
+                }
+            }
+            this->conjugateMode      = getOptionalValidatedValue<std::string>(cj, "mode", std::string("local1d"), "conjugate");
+            if (this->conjugateMode != "local1d" && this->conjugateMode != "fem2d")
+                throw std::runtime_error("Key 'mode' in 'conjugate' must be 'local1d' or 'fem2d' (shell2d は外部ループ tools/cht_loop.py を使う).");
+            if (this->conjugateMode == "fem2d") {
+                // 固体は HDF5 が正本 (メッシュ・孔 Robin・k_s(T) をすべて持つ)。
+                this->conjugateSolidFile = getValidatedValue<std::string>(cj, "solid", "conjugate");
+            } else {
+                this->conjugateThickness = getValidatedValue<double>(cj, "thickness", "conjugate");
+                this->conjugateKsolid    = getValidatedValue<double>(cj, "k_solid", "conjugate");
+                if (!(this->conjugateThickness > 0.0) || !(this->conjugateKsolid > 0.0))
+                    throw std::runtime_error("'conjugate': thickness and k_solid must be positive.");
+            }
+            this->conjugateFluxAvg   = getOptionalValidatedValue<int>(cj, "flux_avg", 1, "conjugate");
+            if (this->conjugateFluxAvg < 1)
+                throw std::runtime_error("'conjugate': flux_avg must be >= 1.");
+            this->conjugateRefactorDT = getOptionalValidatedValue<double>(cj, "refactorDT", 1.0, "conjugate");
+            if (!(this->conjugateRefactorDT >= 0.0))
+                throw std::runtime_error("'conjugate': refactorDT must be >= 0 (0 = 毎回分解する).");
+            this->conjugateDfScale   = getOptionalValidatedValue<double>(cj, "Df_scale", 1.0, "conjugate");
+            if (cj["gate"]) {
+                auto g = cj["gate"];
+                this->conjugateGateSet     = 1;
+                this->conjugateGateEpsRel  = getValidatedValue<double>(g, "eps_rel", "conjugate.gate");
+                this->conjugateGateEpsAbs  = getValidatedValue<double>(g, "eps_abs_Wm2", "conjugate.gate");
+                this->conjugateGateDtK     = getValidatedValue<double>(g, "dT_K", "conjugate.gate");
+                this->conjugateGateNConsec = getValidatedValue<int>(g, "n_consec", "conjugate.gate");
+                this->conjugateGateTolSolid = getOptionalValidatedValue<double>(g, "tol_solid", -1.0, "conjugate.gate");
+                if (!(this->conjugateGateEpsRel > 0.0) || !(this->conjugateGateEpsAbs > 0.0)
+                    || !(this->conjugateGateDtK > 0.0) || this->conjugateGateNConsec <= 0)
+                    throw std::runtime_error("'conjugate.gate': eps_rel / eps_abs_Wm2 / dT_K / n_consec must be positive.");
+            }
+            if (!(this->conjugateDfScale > 0.0))
+                throw std::runtime_error("'conjugate': Df_scale must be > 0.");
+            if (this->conjugateMode == "fem2d") {
+                // 背面・孔の条件は固体 h5 が持つので、ここでは読まない (書かれていたら拒否する)。
+                for (const char* k : {"back", "T_b", "h_c", "thickness", "k_solid"})
+                    if (cj[k]) throw std::runtime_error(std::string("Key '") + k +
+                        "' in 'conjugate' is not used with mode: fem2d (固体条件は solid の HDF5 が持つ).");
+            }
+            this->conjugateBackKind  = getOptionalValidatedValue<std::string>(cj, "back", std::string("isothermal"), "conjugate");
+            this->conjugateTb        = getOptionalValidatedValue<double>(cj, "T_b", 300.0, "conjugate");
+            this->conjugateHc        = getOptionalValidatedValue<double>(cj, "h_c", 0.0, "conjugate");
+            if (this->conjugateMode == "local1d" && this->conjugateBackKind == "coolant" && !(this->conjugateHc > 0.0))
+                throw std::runtime_error("'conjugate': back=coolant requires h_c > 0.");
+            if (this->conjugateMode == "local1d" && this->conjugateBackKind == "adiabatic")
+                throw std::runtime_error("'conjugate': back=adiabatic は定常解を持たない (正味入熱が 0 でない限り)。isothermal か coolant を使うこと.");
+            if (this->conjugateBackKind != "isothermal" && this->conjugateBackKind != "coolant")
+                throw std::runtime_error("Key 'back' in 'conjugate' must be 'isothermal' or 'coolant'.");
+            this->conjugateInterval  = getOptionalValidatedValue<int>(cj, "interval", 50, "conjugate");
+            this->conjugateWarmup    = getOptionalValidatedValue<int>(cj, "warmup", 0, "conjugate");
+            this->conjugateRelax     = getOptionalValidatedValue<double>(cj, "relax", 1.0, "conjugate");
+            this->conjugateFlux      = getOptionalValidatedValue<std::string>(cj, "flux", std::string("q_eff"), "conjugate");
+            if (this->conjugateFlux != "q_eff" && this->conjugateFlux != "q_compact")
+                throw std::runtime_error("Key 'flux' in 'conjugate' must be 'q_eff' (保存形, 既定) or 'q_compact' (旧実装の再現用).");
+            if (!(this->conjugateInterval > 0)) throw std::runtime_error("'conjugate': interval must be > 0.");
+            if (!(this->conjugateRelax > 0.0 && this->conjugateRelax <= 1.0))
+                throw std::runtime_error("'conjugate': relax must be in (0, 1].");
+            std::cout << "'conjugate': mode=" << this->conjugateMode
+                      << (this->conjugateMode == "fem2d" ? " solid=" + this->conjugateSolidFile : "")
+                      << " t=" << this->conjugateThickness
+                      << " k_s=" << this->conjugateKsolid << " back=" << this->conjugateBackKind
+                      << " T_b=" << this->conjugateTb << " interval=" << this->conjugateInterval
+                      << " warmup=" << this->conjugateWarmup << " relax=" << this->conjugateRelax
+                      << " flux=" << this->conjugateFlux << "\n";
+        }
 
         // 空間設定
         auto space = config["space"];
@@ -490,6 +628,136 @@ void solverConfig::read(std::string fname)
         if (this->limiter != 0 && this->limiter != 1 && this->limiter != 2 && this->limiter != -1) {
             throw std::runtime_error("Key 'limiter' in 'space' must be one of 0, 1, 2, or -1.");
         }
+        if (space["slauContactFloor"]) {
+            this->slauContactFloor = space["slauContactFloor"].as<flow_float>();
+            std::cout << "'slauContactFloor' in 'space': " << this->slauContactFloor << std::endl;
+        }
+        if (space["slauWallNormalChi"]) {
+            this->slauWallNormalChi = space["slauWallNormalChi"].as<int>();
+            if (this->slauWallNormalChi != 0 && this->slauWallNormalChi != 1) {
+                throw std::runtime_error("Key 'slauWallNormalChi' in 'space' must be 0 (off) or 1 (omit it for auto).");
+            }
+            this->slauWallNormalChiReason = "explicit";
+        }
+        if (space["roeEntropyFixCoeff"]) {
+            this->roeEntropyFixCoeff = space["roeEntropyFixCoeff"].as<flow_float>();
+            std::cout << "'roeEntropyFixCoeff' in 'space': " << this->roeEntropyFixCoeff
+                      << "  (SU2 ENTROPY_FIX_COEFF 同形の固有値下限; 0=従来)" << std::endl;
+        }
+        if (space["reconT"]) {
+            this->reconT = space["reconT"].as<int>();
+            std::cout << "'reconT' in 'space': " << this->reconT
+                      << (this->reconT ? "  (reconstruct T, derive rho -- SU2 form)" : "  (reconstruct rho, derive T)") << std::endl;
+        }
+        if (space["heatCorrSU2"]) {
+            this->heatCorrSU2 = space["heatCorrSU2"].as<int>();
+            std::cout << "'heatCorrSU2' in 'space': " << this->heatCorrSU2
+                      << (this->heatCorrSU2 ? "  (SU2 corrected-gradient, heat conduction only)"
+                                            : "  (forge over-relaxed)") << std::endl;
+        }
+        // `limiterMatchRecon` は廃止 (plan limiter-config-simplify §4.2)。`limiterScaled` に内包した。
+        // **これは同義キーの削除ではなく機能打ち切り**である: 旧 `matchRecon=1, scaled=0`
+        // (評価点・増分だけ直して旧 Venkat 式を使う。Barth にも効いた) は無くなる。
+        if (space["limiterMatchRecon"]) {
+            throw std::runtime_error(
+                "Key 'limiterMatchRecon' in 'space' is no longer supported. It is now implied by 'limiterScaled': "
+                "use 'limiterScaled: 1' (evaluation point matched to the flux AND non-dimensionalised Venkatakrishnan) "
+                "or 'limiterScaled: 0' (legacy path). The intermediate combination "
+                "'limiterMatchRecon: 1, limiterScaled: 0' is discontinued, not renamed "
+                "(plan limiter-config-simplify.md 4.2).");
+        }
+        // 対象は **流れ 5 変数・node・convMethod 0/1/2 のみ** (plan convection-node-wall-reconstruction §4.14)。
+        // cell は目標点が双対面重心のままで流束と整合しているが、convMethod 2 の増分の形は変わるので拒否する。
+        // MINMOD (その他の convMethod) は増分の式が別なので共通関数の対象外。
+        // **既定は 1 (修正版)** (2026-09-20 ユーザ決定、plan limiter-config-simplify §4.7)。
+        // 旧経路 (0) は ε² = K³·体積 を次元のある Δ と比べており、メッシュを拡大すると実質 OFF になり、
+        // 変数ごとに効き方が桁違いになる。厳密 Riemann 解との比較でも修正版が優る。
+        this->limiterScaled = getOptionalValidatedValue<int>(space, "limiterScaled", 1, "space");
+        if (this->limiterScaled == 2) {
+            throw std::runtime_error(
+                "Key 'limiterScaled: 2' (ratio form) in 'space' is no longer supported: it raises the steady residual "
+                "floor by 2-5x because psi never switches off in smooth regions (case/44). Use 'limiterScaled: 1' "
+                "(plan convection-node-wall-reconstruction.md 4.22).");
+        }
+        if (this->limiterScaled != 0 && this->limiterScaled != 1) {
+            throw std::runtime_error("Key 'limiterScaled' in 'space' must be 0 (legacy) or 1 (matched evaluation point + non-dimensionalised Venkatakrishnan).");
+        }
+        // `limiterScaled: 1` は評価点の一致を**含む**。内部フラグはここで立てる。
+        this->limiterMatchRecon = (this->limiterScaled == 1) ? 1 : 0;
+        // `venkatK` の既定は経路で変える: 修正版は 0.05 (SU2 既定と同値。1.0 は Sod でも SERN でも悪い)。
+        // **旧経路の K は `limiterFunctions_d.cuh` で 1.f 固定**なので、`limiterScaled: 0` では効かない。
+        this->venkatK = getOptionalValidatedValue<double>(space, "venkatK", (this->limiterScaled == 1) ? 0.05 : 1.0, "space");
+        if (!(this->venkatK > 0.0)) {
+            throw std::runtime_error("Key 'venkatK' in 'space' must be > 0.");
+        }
+        this->limiterRefLength = getOptionalValidatedValue<double>(space, "limiterRefLength", 0.0, "space");
+
+        // 基準値の明示指定 (codex plan-3 Major 6)。0 = 起動時に初期場から自動決定。
+        this->limiterRoRef = getOptionalValidatedValue<double>(space, "limiterRoRef", 0.0, "space");
+        this->limiterPRef  = getOptionalValidatedValue<double>(space, "limiterPRef",  0.0, "space");
+        this->limiterARef  = getOptionalValidatedValue<double>(space, "limiterARef",  0.0, "space");
+        if (this->limiterRoRef < 0.0 || this->limiterPRef < 0.0 || this->limiterARef < 0.0) {
+            throw std::runtime_error("Keys 'limiterRoRef'/'limiterPRef'/'limiterARef' in 'space' must be >= 0 (0 = auto).");
+        }
+        this->limiterDiag = getOptionalValidatedValue<int>(space, "limiterDiag", 0, "space");
+        // W2 V1 (plan convection-node-wall-reconstruction §4.23/§6.4): 非物理な再構成の発火計測。既定 0。
+        this->badReconDiag = getOptionalValidatedValue<int>(space, "badReconDiag", 0, "space");
+        if (this->badReconDiag < 0) {
+            throw std::runtime_error("Key 'badReconDiag' in 'space' must be >= 0 (0 = off, N = print every N flux calls).");
+        }
+        // W2 面単位フォールバック (plan convection-node-wall-reconstruction §4.23)。既定 0 = OFF (既定パス不変)。
+        this->badReconFallback = getOptionalValidatedValue<int>(space, "badReconFallback", 0, "space");
+        if (this->badReconFallback < 0 || this->badReconFallback > 100) {
+            throw std::runtime_error("Key 'badReconFallback' in 'space' must be 0 (off) or 1..100 (hysteresis visits; SU2 uses 20).");
+        }
+        // 省略 = auto の解決 (plan convection-slau-wall-normal-chi-default §4.1)。明示 1 の検査は下で従来どおり。
+        if (this->slauWallNormalChi < 0) {
+            if (this->discretization != "node") {
+                this->slauWallNormalChi = 0; this->slauWallNormalChiReason = "auto: " + this->discretization;
+            } else if (this->nodeWallDirichlet != 1) {
+                this->slauWallNormalChi = 0; this->slauWallNormalChiReason = "auto: nodeWallDirichlet=" + std::to_string(this->nodeWallDirichlet);
+            } else if (this->solver != "SLAU" && this->solver != "SLAU2") {
+                this->slauWallNormalChi = 0; this->slauWallNormalChiReason = "auto: solver=" + this->solver;
+            } else {
+                this->slauWallNormalChi = 1; this->slauWallNormalChiReason = "auto: node+nodeWallDirichlet+" + this->solver;
+            }
+        }
+        // **起動エコーは常に 1 行** (stage_manifest・RUN_PROVENANCE・diag_applicability の正本)。
+        std::cout << "'slauWallNormalChi' effective: " << this->slauWallNormalChi
+                  << " (" << this->slauWallNormalChiReason << ")"
+                  << (this->slauWallNormalChi ? "  (wall-adjacent faces: mass-flux chi from face-normal Mach)"
+                                              : "  (off; bit-identical to the pre-2026-09-23 flux)") << std::endl;
+        if (this->slauWallNormalChi != 0) {
+            if (this->discretization != "node") {
+                throw std::runtime_error("'slauWallNormalChi: 1' in 'space' requires 'mesh.discretization: node' "
+                                         "(the wall CV drain it addresses is specific to node-centred Dirichlet wall nodes).");
+            }
+            if (this->nodeWallDirichlet != 1) {
+                throw std::runtime_error("'slauWallNormalChi: 1' in 'space' requires 'mesh.nodeWallDirichlet: 1' "
+                                         "(without the velocity pin there is no starved wall CV to fix).");
+            }
+            if (this->solver != "SLAU" && this->solver != "SLAU2") {
+                throw std::runtime_error("'slauWallNormalChi: 1' in 'space' requires 'solver: SLAU' or 'SLAU2'.");
+            }
+        }
+        if (this->limiterScaled == 1 && this->discretization != "node") {
+            std::cout << "[config] limiterScaled: 1 は discretization 'node' 専用のため無効化した" << std::endl;
+            this->limiterScaled = 0;
+        }
+
+        // 例外でなく**警告して無効化**する: 同じ solverConfig をメッシュ変換 (convertGmshToForge の
+        // 品質チェック用 cell 変換) など別用途のユーティリティも読むため、投げると無関係な工程が落ちる。
+        if (this->limiterMatchRecon == 1 && this->discretization != "node") {
+            std::cout << "[config] limiterMatchRecon: 1 は discretization 'node' 専用のため無効化した "
+                      << "(cell は既に流束と同じ双対面重心で評価している)" << std::endl;
+            this->limiterMatchRecon = 0;
+        }
+        if (this->limiterMatchRecon == 1 && this->convMethod != 0 && this->convMethod != 1 && this->convMethod != 2) {
+            std::cout << "[config] limiterMatchRecon: 1 は convMethod 0/1/2 のみ対応のため無効化した "
+                      << "(MINMOD は増分の式が別)" << std::endl;
+            this->limiterMatchRecon = 0;
+        }
+
         // free-stream 保存用の基準静圧 (既定 0.0 = 従来挙動・ビット不変)
         this->pRef = getOptionalValidatedValue<double>(space, "pRef", 0.0, "space");
 
@@ -536,6 +804,24 @@ void solverConfig::read(std::string fname)
                 "none | wale | sigma | sst | sst-ddes | sst-iddes (got '" + turbModel + "').");
         }
         std::cout << "'model' in 'turbulence': " << turbModel << "\n";
+        {
+            const std::string tr = getOptionalValidatedValue<std::string>(turb, "transition", std::string("none"), "turbulence");
+            if      (tr == "none")   this->transitionModel = 0;
+            else if (tr == "lm2009") this->transitionModel = 1;
+            else throw std::runtime_error("Key 'transition' in 'turbulence' must be one of: none | lm2009 (got '" + tr + "').");
+            if (this->transitionModel != 0) {
+                // 受付条件: 検証した組み合わせだけを通す (未検証の経路を黙って動かさない)。
+                if (!(this->LESorRANS == 2 && this->RANSmodel == 1 && this->DESmode == 0))
+                    throw std::runtime_error("'transition: lm2009' requires turbulence.model: sst (no DES).");
+                this->transitionRethMin = getOptionalValidatedValue<double>(turb, "transitionRethMin", 20.0, "turbulence");
+                if (this->transitionRethMin < 1.0)
+                    throw std::runtime_error("Key 'transitionRethMin' in 'turbulence' must be >= 1 (default 20).");
+                std::cout << "'transition' in 'turbulence': lm2009 (Langtry-Menter gamma-Re_theta_t, SU2-matched)\n";
+                if (this->transitionRethMin != 20.0)
+                    std::cout << "[transition] Re_theta_t lower bound changed from the recommended 20 to "
+                              << this->transitionRethMin << " (case-specific tuning; record it in the run README)\n";
+            }
+        }
         this->scalarDiffusion = getOptionalValidatedValue<int>(turb, "scalarDiffusion", 1, "turbulence");
         this->dilatationCorrection = getOptionalValidatedValue<int>(turb, "dilatationCorrection", 2, "turbulence");
 
@@ -568,8 +854,20 @@ void solverConfig::read(std::string fname)
         }
 
         // SST 壁処理 (methods/turbulence §6.5): 0=low-Re 壁解像 (60ν/β₁y², 既定), 1=automatic (y⁺ 非依存)
-        this->wallTreatmentSST = getOptionalValidatedValue<int>(turb, "wallTreatmentSST", 1, "turbulence"); // 既定 1 (automatic)
+        // **既定 0 = 低 Re 壁解像** (2026-09-20 ユーザ方針: node の SST 壁関数は使わない)。
+        this->wallTreatmentSST = getOptionalValidatedValue<int>(turb, "wallTreatmentSST", 0, "turbulence");
 
+        if (this->wallTreatmentSST == 1) {
+            // 黙って継承されるのを防ぐ: 使うたびに既知欠損を読ませる (2026-09-20 ユーザ方針)。
+            std::cout << "[turbulence] 警告: wallTreatmentSST: 1 (SST 壁関数) は**使わない方針**です。既知欠損:\n"
+                      << "[turbulence]   - Cf -6% (壁関数 P_k 規約の欠損)\n"
+                      << "[turbulence]   - 3D の角線ノードで代表点が無く u_tau=0 になる\n"
+                      << "[turbulence]   - 壁モデル渦粘性 nu_t = nu*(1/g - 1) に上限が無く、低密度域で発散する\n"
+                      << "[turbulence]     (plan tooling-nozzle-sern-3d.md 4.25: nu_t 4660 m^2/s -> k 2.06e9 で 3D SST が死ぬ)\n"
+                      << "[turbulence]   - case/40 の壁温は y+1 低 Re と SU2 壁関数のみが根拠。node 壁関数系列は撤回済み\n"
+                      << "[turbulence] 壁解像 (wallTreatmentSST: 0, y+ ~ 1) を使うこと。やむを得ず使うなら run の README に理由を書くこと。"
+                      << std::endl;
+        }
         if (this->wallTreatmentSST < 0 || this->wallTreatmentSST > 1) {
             throw std::runtime_error("Key 'wallTreatmentSST' in 'turbulence' must be 0 or 1.");
         }
@@ -671,8 +969,64 @@ void solverConfig::read(std::string fname)
         // 多成分 thermally-perfect gas 設定 (任意, thermalMethod==2 で使用)
         if (physProp["species"]) {
             this->speciesNames.clear();
-            for (const auto& sn : physProp["species"]) this->speciesNames.push_back(sn.as<std::string>());
+            this->speciesLumps.clear();
+            // 要素は文字列 (種名) か mapping {name, lump: {構成種: 分率, ...}, basis: mole|mass} (lump = 擬似種;
+            // 係数は起動時に speciesDB_resolve が合成する。plan thermophysics-solver-owned-species-db §4.2 #6a)。
+            // ここでは構造だけを読み、分率の検査・正規化・構成種の解決は speciesDB_resolve に置く (単体試験と同じ経路)。
+            for (const auto& sn : physProp["species"]) {
+                if (sn.IsScalar()) { this->speciesNames.push_back(sn.as<std::string>()); continue; }
+                if (!sn.IsMap()) throw std::runtime_error("physProp.species: each entry must be a species name or a mapping {name, lump, basis}.");
+                SpeciesLumpSpec lp;
+                for (auto it = sn.begin(); it != sn.end(); ++it) {
+                    const std::string k = it->first.as<std::string>();
+                    if (k != "name" && k != "lump" && k != "basis") {
+                        throw std::runtime_error("physProp.species: unknown key '" + k + "' in a lump entry (allowed: name, lump, basis).");
+                    }
+                }
+                if (!sn["name"] || !sn["name"].IsScalar()) throw std::runtime_error("physProp.species: a lump entry needs 'name'.");
+                lp.name = sn["name"].as<std::string>();
+                const YAML::Node lm = sn["lump"];
+                if (!lm || !lm.IsMap() || lm.size() == 0) {
+                    throw std::runtime_error("physProp.species: lump '" + lp.name + "' needs a non-empty mapping 'lump: {species: fraction, ...}'.");
+                }
+                // basis は必須 (設計側 problem の composition_basis は既定 mass なので、省略時の既定を置くと取り違えやすい)
+                if (!sn["basis"] || !sn["basis"].IsScalar()) {
+                    throw std::runtime_error("physProp.species: lump '" + lp.name + "' needs 'basis: mole' or 'basis: mass'.");
+                }
+                lp.basis = sn["basis"].as<std::string>();
+                for (auto it = lm.begin(); it != lm.end(); ++it) {
+                    const std::string mn = it->first.as<std::string>();
+                    double v;
+                    try {
+                        v = it->second.as<double>();
+                    } catch (const std::exception&) {
+                        throw std::runtime_error("physProp.species: lump '" + lp.name + "' fraction of '" + mn + "' is not a number.");
+                    }
+                    lp.members.push_back(mn);
+                    lp.fractions.push_back(v);
+                }
+                this->speciesNames.push_back(lp.name);
+                this->speciesLumps.push_back(lp);
+            }
             this->nSpecies = static_cast<int>(this->speciesNames.size());
+        }
+        // 種ごとの輸送物性の出所 (plan thermophysics-solver-owned-species-db #5t2 段 1)。mapping {種名: モデル名} の構造だけを読み、
+        // 実種との対応・モデル名・データの有無の検査は speciesTransportDB_resolve (speciesDB_resolve から呼ぶ) に置く。
+        this->speciesTransport.clear();
+        if (physProp["transport"]) {
+            const YAML::Node tn = physProp["transport"];
+            if (!tn.IsMap() || tn.size() == 0) {
+                throw std::runtime_error("physProp.transport must be a non-empty mapping {species: model} (models: cea, kinetic, fit, custom:<name>_v<version>).");
+            }
+            if (this->thermalMethod != 2) {
+                throw std::runtime_error("physProp.transport requires thermalMethod: 2 (multi-species thermally-perfect gas).");
+            }
+            for (auto it = tn.begin(); it != tn.end(); ++it) {
+                if (!it->first.IsScalar() || !it->second.IsScalar()) {
+                    throw std::runtime_error("physProp.transport: each entry must be 'species: model' (scalar: scalar).");
+                }
+                this->speciesTransport.emplace_back(it->first.as<std::string>(), it->second.as<std::string>());
+            }
         }
 
         if (this->isAxisymmetric == 1 &&
@@ -705,6 +1059,19 @@ void solverConfig::read(std::string fname)
             }
         }
         if (physProp["speciesDBFile"])          this->speciesDBFile = physProp["speciesDBFile"].as<std::string>();
+        // 内蔵種の LJ の集合を探す順 (plan thermophysics-solver-owned-species-db #14)。構造 (文字列の列) だけを読み、
+        // 集合名の検査 (未知・重複) は speciesDB_checkLjSource に置く (speciesDB_resolve から; 単体試験と同じ経路)。
+        this->ljSource.clear();
+        if (physProp["ljSource"]) {
+            const YAML::Node ls = physProp["ljSource"];
+            if (!ls.IsSequence() || ls.size() == 0) {
+                throw std::runtime_error("physProp.ljSource must be a non-empty list of LJ set names (e.g. [gri30, svehla1962]; sets: gri30, svehla1962, legacy_v1).");
+            }
+            for (const auto& s : ls) {
+                if (!s.IsScalar()) throw std::runtime_error("physProp.ljSource: each entry must be an LJ set name (gri30, svehla1962, legacy_v1).");
+                this->ljSource.push_back(s.as<std::string>());
+            }
+        }
         if (physProp["speciesDiffusionMethod"]) this->speciesDiffusionMethod = physProp["speciesDiffusionMethod"].as<int>();
         if (physProp["thermoHrefTemp"])         this->thermoHrefTemp = physProp["thermoHrefTemp"].as<double>();
         const bool thermoFloatExplicit = static_cast<bool>(physProp["thermoFloat"]);
@@ -850,6 +1217,23 @@ void solverConfig::read(std::string fname)
             this->condDgMaxStep   = getOptionalValidatedValue<double>(cond, "condDgMaxStep", 5.0e-3, "condensation");
             this->condDTmaxStep   = getOptionalValidatedValue<double>(cond, "condDTmaxStep", 1.0, "condensation");
             if (!(this->condDgMaxStep > 0.0) || !(this->condDTmaxStep > 0.0)) throw std::runtime_error("condDgMaxStep and condDTmaxStep must be > 0.");
+            // 省略時は kCondTwoPhaseDiffusionDefault。明示の有無は実効状態の判定 (明示 0 の旧作用素 WARNING) に使う (plan condensation-two-phase-default §4-2)。
+            this->condTwoPhaseDiffusionGiven = cond["condTwoPhaseDiffusion"].IsDefined() ? 1 : 0;
+            this->condTwoPhaseDiffusion = getOptionalValidatedValue<int>(cond, "condTwoPhaseDiffusion", kCondTwoPhaseDiffusionDefault, "condensation");
+            if (this->condTwoPhaseDiffusion != 0 && this->condTwoPhaseDiffusion != 1) throw std::runtime_error("Key 'condTwoPhaseDiffusion' in 'condensation' must be 0 (off) or 1 (two-phase diffusion, steady only).");
+            this->condTwoPhaseRelax = getOptionalValidatedValue<double>(cond, "condTwoPhaseRelax", 1.0, "condensation");
+            if (!(this->condTwoPhaseRelax > 0.0) || this->condTwoPhaseRelax > 1.0) throw std::runtime_error("Key 'condTwoPhaseRelax' in 'condensation' must be in (0, 1].");
+            this->condAuditResidual = getOptionalValidatedValue<int>(cond, "condAuditResidual", 0, "condensation");
+            if (this->condAuditResidual != 0 && this->condAuditResidual != 1) throw std::runtime_error("Key 'condAuditResidual' in 'condensation' must be 0 or 1.");
+            // 二相拡散 ON のときの既定は検証済みの組 (Solver 1 + NonnegLimit 0; plan condensation-two-phase-default §4-3)。明示値が優先。
+            // OFF のときは使われない (従来の既定 0 / 1 のまま)。
+            const bool tpOn = (this->condTwoPhaseDiffusion == 1);
+            this->condTwoPhaseSolver = getOptionalValidatedValue<int>(cond, "condTwoPhaseSolver", tpOn ? 1 : 0, "condensation");
+            if (this->condTwoPhaseSolver != 0 && this->condTwoPhaseSolver != 1) throw std::runtime_error("Key 'condTwoPhaseSolver' in 'condensation' must be 0 (point-diagonal) or 1 (matched scalar-DPLUR).");
+            this->condTwoPhaseNonnegLimit = getOptionalValidatedValue<int>(cond, "condTwoPhaseNonnegLimit", tpOn ? 0 : 1, "condensation");
+            if (this->condTwoPhaseNonnegLimit != 0 && this->condTwoPhaseNonnegLimit != 1) throw std::runtime_error("Key 'condTwoPhaseNonnegLimit' in 'condensation' must be 0 (theta = threshold limits only; default with condTwoPhaseDiffusion 1) or 1 (vapour/liquid non-negativity in theta).");
+            this->condTwoPhaseDiag = getOptionalValidatedValue<int>(cond, "condTwoPhaseDiag", 0, "condensation");
+            if (this->condTwoPhaseDiag < 0 || this->condTwoPhaseDiag > 3) throw std::runtime_error("Key 'condTwoPhaseDiag' in 'condensation' must be 0, 1 (theta = 0 cells), 2 (theta < 1 cells) or 3 (theta = 0 cells + float/double assembly A/B).");
             this->condEquilibrium = getOptionalValidatedValue<int>(cond, "condEquilibrium", 0, "condensation");
             this->condFloat = getOptionalValidatedValue<int>(cond, "condFloat", 1, "condensation");
             if (this->condFloat != 0 && this->condFloat != 1) throw std::runtime_error("Key 'condFloat' in 'condensation' must be 0 or 1.");

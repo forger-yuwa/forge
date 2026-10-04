@@ -1,0 +1,31 @@
+inlet:
+  physID: 1
+  kind: inlet_Pressure
+  outputHDFflg: 0
+  ints: {inletProfile: 1}
+  floats:
+    Xi: 1.0
+    Pt: 59070.0
+    Tt: 353.0
+    Y0: 0.03769539643469918
+    Y1: 0.6397779825710758
+    Y2: 0.23750100195082502
+    Y3: 0.010944776937178035
+    Y4: 0.07408084210622207
+
+outlet:
+  physID: 2
+  kind: outflow
+  outputHDFflg: 0
+  ints:
+  floats:
+    Ps: 2000.0
+    Pt: 2000.0
+    Tt: 353.0
+
+wall:
+  physID: 3
+  kind: slip          # Euler: slip
+  outputHDFflg: 0
+  ints:
+  floats:

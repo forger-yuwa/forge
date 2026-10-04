@@ -7,6 +7,9 @@
 #include "cuda_forge/condensationEOS_d.cuh"      // cond_clamp_vapor_pressure
 #include "cuda_forge/condensationSourceF_d.cuh"  // float 実体の表評価 (cond_tab_*)
 
+#include "cuda_forge/condensationCorrReasons_d.cuh"   // 理由別の補正量監視 (COND_REASON_*; 計上のみ)
+#include "cuda_forge/twoPhaseUpdateDiag_d.cuh"      // 診断 G3-b の記録スロット (tpu; 既定 nullptr)
+
 
 // モーメント実現可能性の射影 (plan §4.7 v5, codex plan-5 M3/M4, plan-6 M3): 無次元 x = Q1/(Q0 r), y = Q2/(Q0 r²), r = (Q3/Q0)^{1/3}。
 
@@ -105,13 +108,21 @@ __global__ void cond_realizability_clamp_d(
     flow_float* diagCorrG, flow_float* diagCorrQ,   // 補正量の記録 (nullptr 可): |Δρg|/ρ [質量分率] の累積, Q の最大相対補正 (codex result M2)
     int* realizViol,                                // [0] 最近点射影の作動数, [1] 退化の単分散再初期化数 (nullptr 可; plan species-passive-scalar-unification §4.7 v5)
     double* budget, const geom_int* root, const geom_float* vol,   // 成分別収支 [g,Q0,Q1,Q2]×(符号付き, 絶対)·V (root のみ; nullptr 可)
-    int doProject)                                  // 1: 実現可能性射影も行う (定常/RK の各 step; dual-time は sub-iter 内 0 で step 末尾に project_only を呼ぶ)
+    int doProject,                                  // 1: 実現可能性射影も行う (定常/RK の各 step; dual-time は sub-iter 内 0 で step 末尾に project_only を呼ぶ)
+    double* reasons = nullptr)                      // 理由別の補正量 (COND_REASON_*; nullptr 可。計上のみ)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     // 実現可能性 g<=Y_w: TP carrier は roY_w (輸送), CPG carrier (空気) は定数 opts.Yw, pure は 0.99
     const flow_float gmax = (roY_w != nullptr) ? roY_w[ic] : ((opts.Yw > 0.0) ? (flow_float)opts.Yw*ro[ic] : (flow_float)0.99*ro[ic]);
     const flow_float r_in = rog[ic], q0_in = roQ0[ic], q1_in = roQ1[ic], q2_in = roQ2[ic];
+    double* rs = (reasons != nullptr && (root == nullptr || root[ic] == ic)) ? reasons : nullptr;
+    const double Vr = (vol != nullptr) ? (double)vol[ic] : 1.0;
+    {
+        const bool have_yv = (roY_w != nullptr) || (opts.Yw > 0.0);
+        const double rod = ((double)ro[ic] > 1.0e-20) ? (double)ro[ic] : 1.0e-20;
+        cond_reason_pre(rs, Vr, (double)r_in, (double)gmax, have_yv, ((double)gmax - (double)r_in)/rod);
+    }
     flow_float r = r_in;
     if (r < (flow_float)0.0) r = (flow_float)0.0;
     if (r > gmax)            r = gmax;
@@ -119,6 +130,7 @@ __global__ void cond_realizability_clamp_d(
     if (roQ0[ic] < (flow_float)0.0) roQ0[ic] = (flow_float)0.0;
     if (roQ1[ic] < (flow_float)0.0) roQ1[ic] = (flow_float)0.0;
     if (roQ2[ic] < (flow_float)0.0) roQ2[ic] = (flow_float)0.0;
+    const flow_float q1_pre = roQ1[ic], q2_pre = roQ2[ic];   // 射影の計上用 (理由別監視)
     // 実現可能性の射影 (cond_realizability_project; plan §4.7 v5)。Q0>0, g>0 のみ。(Q0, g) は保存し Q1, Q2 だけ動かす。
     // Q0=0 または g=0 で他が正の「塵」は下の消滅規則 (S≤1) に任せる (核生成域は触らない)。
     {
@@ -145,6 +157,7 @@ __global__ void cond_realizability_clamp_d(
             }
         }
     }
+    cond_reason_proj(rs, Vr, (double)q1_pre, (double)q2_pre, (double)roQ1[ic], (double)roQ2[ic]);
     auto record = [&]() {
         if (diagCorrG == nullptr) return;
         const double rod0 = (double)ro[ic] > 1.0e-20 ? (double)ro[ic] : 1.0e-20;
@@ -184,6 +197,7 @@ __global__ void cond_realizability_clamp_d(
         remove = (r30 < 2.0*rmin);
     }
     if (remove) {
+        if (rs != nullptr && rog[ic] > (flow_float)0.0) { atomicAdd(&rs[COND_REASON_RM_SUM], (double)rog[ic]*Vr); atomicAdd(&rs[COND_REASON_RM_N], 1.0); }
         rog[ic] = (flow_float)0.0; roQ0[ic] = (flow_float)0.0;
         roQ1[ic] = (flow_float)0.0; roQ2[ic] = (flow_float)0.0;
     }
@@ -198,19 +212,49 @@ __global__ void cond_realizability_clamp_f_d(
     int evap, float Rw, float rmin, float g_rm, float Yw_const,
     flow_float* T, flow_float* P, CondTablesF tb, CondSpeciesProps cpd,
     flow_float* diagCorrG, flow_float* diagCorrQ, int* realizViol,
-    double* budget, const geom_int* root, const geom_float* vol, int doProject)
+    double* budget, const geom_int* root, const geom_float* vol, int doProject,
+    double* reasons = nullptr,   // 理由別の補正量 (COND_REASON_*; nullptr 可。計上のみ)
+    double* tcAcc = nullptr,     // #4h の二相補正計測 (更新ごと; 段 2 = 下限/上限、3 = 射影、4 = 液滴消滅 [物理]; 成分 [w,v,g,Q2,Q1,Q0]; 計上のみ)
+    double* tpu = nullptr)       // 診断 G3-b (既定 nullptr): 下限・上限・射影・液滴消滅の before/after を成分 1..4 (g, Q2, Q1, Q0) で記録
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
     const flow_float gmax = (roY_w != nullptr) ? roY_w[ic] : ((Yw_const > 0.0f) ? Yw_const*ro[ic] : 0.99f*ro[ic]);
+    const bool tcOn = (tcAcc != nullptr) && (root == nullptr || root[ic] == ic);
+    const double tcV = (vol != nullptr) ? (double)vol[ic] : 1.0;
     const flow_float r_in = rog[ic], q0_in = roQ0[ic], q1_in = roQ1[ic], q2_in = roQ2[ic];
+    double* rs = (reasons != nullptr && (root == nullptr || root[ic] == ic)) ? reasons : nullptr;
+    const double Vr = (vol != nullptr) ? (double)vol[ic] : 1.0;
+    {
+        const bool have_yv = (roY_w != nullptr) || (Yw_const > 0.0f);
+        const double rod = ((double)ro[ic] > 1.0e-20) ? (double)ro[ic] : 1.0e-20;
+        cond_reason_pre(rs, Vr, (double)r_in, (double)gmax, have_yv, ((double)gmax - (double)r_in)/rod);
+    }
     flow_float r = r_in;
     if (r < 0.0f) r = 0.0f;
+    const flow_float tpu_r_lo = r;   // 診断 G3-b: 下限の後・上限の前
     if (r > gmax) r = gmax;
     rog[ic] = r;
     if (roQ0[ic] < 0.0f) roQ0[ic] = 0.0f;
     if (roQ1[ic] < 0.0f) roQ1[ic] = 0.0f;
     if (roQ2[ic] < 0.0f) roQ2[ic] = 0.0f;
+    const flow_float q1_pre = roQ1[ic], q2_pre = roQ2[ic];   // 射影の計上用 (理由別監視)
+    if (tpu != nullptr) {   // 成分 1 = g, 2 = Q2, 3 = Q1, 4 = Q0
+        tpu_ba(tpu, TPU_OP_RZL, 1, nCells, ic, (double)r_in, (double)tpu_r_lo);
+        tpu_ba(tpu, TPU_OP_RZU, 1, nCells, ic, (double)tpu_r_lo, (double)r);
+        tpu_ba(tpu, TPU_OP_RZL, 2, nCells, ic, (double)q2_in, (double)roQ2[ic]);
+        tpu_ba(tpu, TPU_OP_RZL, 3, nCells, ic, (double)q1_in, (double)roQ1[ic]);
+        tpu_ba(tpu, TPU_OP_RZL, 4, nCells, ic, (double)q0_in, (double)roQ0[ic]);
+    }
+    if (tcOn) {   // 段 2: 液の下限・上限 (総水分は固定なので蒸気も同じ量) と Q の下限
+        const double dg = fabs((double)r - (double)r_in);
+        if (dg != 0.0) { atomicAdd(&tcAcc[2*6 + 2], dg*tcV); atomicAdd(&tcAcc[2*6 + 1], dg*tcV); }
+        const double dq2 = fabs((double)roQ2[ic] - (double)q2_in), dq1 = fabs((double)roQ1[ic] - (double)q1_in), dq0 = fabs((double)roQ0[ic] - (double)q0_in);
+        if (dq2 != 0.0) atomicAdd(&tcAcc[2*6 + 3], dq2*tcV);
+        if (dq1 != 0.0) atomicAdd(&tcAcc[2*6 + 4], dq1*tcV);
+        if (dq0 != 0.0) atomicAdd(&tcAcc[2*6 + 5], dq0*tcV);
+    }
+    int tpu_kind = -1;   // 診断 #4pj (記録のみ): 射影の分岐 (TPU_RZ_KIND の定義)
     {   // 実現可能性の射影 (double 実体と同じ規則; ρ_l は表 [範囲外は double 関数]; 射影は double で評価)
         const float q0 = roQ0[ic];
         if (q0 > 0.0f && r > 0.0f) {
@@ -232,9 +276,35 @@ __global__ void cond_realizability_clamp_f_d(
                 roQ1[ic] = (float)q1n; roQ2[ic] = (float)q2n;
                 if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
             }
+            tpu_kind = (doProject != 0 && !haveXY) ? 3 : kind;
         }
     }
+    if (tpu != nullptr) {   // 診断 #4pj: 射影が使う T・ρ_l(T)・Q3 (射影と同じ式を読むだけ; 分岐外の節点も同じ式で書く)
+        const double tpu_rhol = cond_rho_cond(cpd, (double)T[ic]);
+        tpu_put(tpu, TPU_RZ_T, nCells, ic, (double)T[ic]);
+        tpu_put(tpu, TPU_RZ_RHOL, nCells, ic, tpu_rhol);
+        tpu_put(tpu, TPU_RZ_Q3, nCells, ic, (double)r / ((4.0/3.0)*COND_PI*tpu_rhol));
+        tpu_put(tpu, TPU_RZ_KIND, nCells, ic, (double)tpu_kind);
+    }
+    cond_reason_proj(rs, Vr, (double)q1_pre, (double)q2_pre, (double)roQ1[ic], (double)roQ2[ic]);
+    if (tcOn) {   // 段 3: モーメント射影
+        const double dq2 = fabs((double)roQ2[ic] - (double)q2_pre), dq1 = fabs((double)roQ1[ic] - (double)q1_pre);
+        if (dq2 != 0.0) atomicAdd(&tcAcc[3*6 + 3], dq2*tcV);
+        if (dq1 != 0.0) atomicAdd(&tcAcc[3*6 + 4], dq1*tcV);
+    }
+    // 診断 G3-b: 射影 (Q1・Q2) と、液滴消滅の before (= 射影の後の格納値)。after はどの退出経路でも record() の中で書く。
+    const flow_float tpu_g_p = rog[ic], tpu_q2_p = roQ2[ic], tpu_q1_p = roQ1[ic], tpu_q0_p = roQ0[ic];
+    if (tpu != nullptr) {
+        tpu_ba(tpu, TPU_OP_RZP, 2, nCells, ic, (double)q2_pre, (double)tpu_q2_p);
+        tpu_ba(tpu, TPU_OP_RZP, 3, nCells, ic, (double)q1_pre, (double)tpu_q1_p);
+    }
     auto record = [&]() {
+        if (tpu != nullptr) {
+            tpu_ba(tpu, TPU_OP_RZR, 1, nCells, ic, (double)tpu_g_p,  (double)rog[ic]);
+            tpu_ba(tpu, TPU_OP_RZR, 2, nCells, ic, (double)tpu_q2_p, (double)roQ2[ic]);
+            tpu_ba(tpu, TPU_OP_RZR, 3, nCells, ic, (double)tpu_q1_p, (double)roQ1[ic]);
+            tpu_ba(tpu, TPU_OP_RZR, 4, nCells, ic, (double)tpu_q0_p, (double)roQ0[ic]);
+        }
         if (diagCorrG == nullptr) return;
         const float rod0 = ro[ic] > 1.0e-20f ? ro[ic] : 1.0e-20f;
         diagCorrG[ic] += fabsf(rog[ic] - r_in)/rod0;
@@ -272,7 +342,17 @@ __global__ void cond_realizability_clamp_f_d(
         const float r30 = cbrtf(g/((4.0f/3.0f)*COND_PI_F*rho_l*q0/rod));
         remove = (r30 < 2.0f*rmin);
     }
-    if (remove) { rog[ic] = 0.0f; roQ0[ic] = 0.0f; roQ1[ic] = 0.0f; roQ2[ic] = 0.0f; }
+    if (remove) {
+        if (rs != nullptr && rog[ic] > 0.0f) { atomicAdd(&rs[COND_REASON_RM_SUM], (double)rog[ic]*Vr); atomicAdd(&rs[COND_REASON_RM_N], 1.0); }
+        if (tcOn) {   // 段 4: 液滴消滅 (物理; ゲートには入れない)
+            const double gr = fabs((double)rog[ic]);
+            if (gr != 0.0) { atomicAdd(&tcAcc[4*6 + 2], gr*tcV); atomicAdd(&tcAcc[4*6 + 1], gr*tcV); }
+            if (roQ2[ic] != 0.0f) atomicAdd(&tcAcc[4*6 + 3], fabs((double)roQ2[ic])*tcV);
+            if (roQ1[ic] != 0.0f) atomicAdd(&tcAcc[4*6 + 4], fabs((double)roQ1[ic])*tcV);
+            if (roQ0[ic] != 0.0f) atomicAdd(&tcAcc[4*6 + 5], fabs((double)roQ0[ic])*tcV);
+        }
+        rog[ic] = 0.0f; roQ0[ic] = 0.0f; roQ1[ic] = 0.0f; roQ2[ic] = 0.0f;
+    }
     record();
 }
 
@@ -281,7 +361,8 @@ __global__ void cond_realizability_clamp_f_d(
 __global__ void cond_realizability_project_only_d(
     geom_int nCells, flow_float* ro, flow_float* rog, flow_float* roQ0, flow_float* roQ1, flow_float* roQ2,
     int condModel, flow_float* T, CondPropOpts opts, int useTab, CondTablesF tb,
-    flow_float* diagCorrQ, int* realizViol, double* budget, const geom_int* root, const geom_float* vol)
+    flow_float* diagCorrQ, int* realizViol, double* budget, const geom_int* root, const geom_float* vol,
+    double* reasons = nullptr)   // 理由別の補正量 (射影; nullptr 可。計上のみ)
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -306,6 +387,8 @@ __global__ void cond_realizability_project_only_d(
         roQ1[ic] = (flow_float)q1n; roQ2[ic] = (flow_float)q2n;
     }
     if (realizViol != nullptr) atomicAdd(realizViol + (kind == 2 ? 1 : 0), 1);
+    if (reasons != nullptr && (root == nullptr || root[ic] == ic))
+        cond_reason_proj(reasons, (vol != nullptr) ? (double)vol[ic] : 1.0, (double)q1_in, (double)q2_in, (double)roQ1[ic], (double)roQ2[ic]);
     if (diagCorrQ != nullptr) {
         double rq = 0.0;
         const double d1 = fabs((double)roQ1[ic] - (double)q1_in)/fmax(fabs((double)q1_in), 1.0e-30), d2 = fabs((double)roQ2[ic] - (double)q2_in)/fmax(fabs((double)q2_in), 1.0e-30);

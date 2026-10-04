@@ -1,0 +1,4 @@
+plan limiter-inlet-column-oscillation §5.1 #3 (終了窓)
+IC: run_0527_liminlet_ctrl_cfl2/res_48000.h5 を restart_field.py --force-species で index コピー
+config: run_0529_liminlet_win0_cfl2 と同一 (100 step 毎 step 出力、level 1 + extraFields、参照 4 値固定)
+build 8ce8da3a

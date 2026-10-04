@@ -1,0 +1,105 @@
+記録の整合: 改訂 (非正規化数の絶対床 nround·2^-149 を許す; 結果を見た後の改訂)
+
+## run_0604_g3a_op_561_g2_onprod_r1/tp_operator.h5
+  n_pos                        4831
+  n_evap                       4810
+  n_tgt                        4793
+  n_cap1_tgt                   1
+  n_cap2_tgt                   0
+  w0_frac_med                  0.858867
+  rec_mismatch_max_rel         1
+  rec_mismatch_max_rel_rev     5.88722e-08
+  N src A (T)                  8.5653e+07
+  N src A (all pos)            8.5653e+07
+  N src A (outside T)          0.733201
+  frac<0 src A (T)             0.999791
+  median Hdot src A (T)        -323259
+  N src B (T)                  4.82956
+  N src B (all pos)            4.82956
+  N src B (outside T)          4.39376e-33
+  frac<0 src B (T)             0.622366
+  median Hdot src B (T)        -0.00214941
+  N final A (T)                8.10718e+07
+  N final A (all pos)          8.10718e+07
+  N final A (outside T)        0.214926
+  frac<0 final A (T)           0.999165
+  median Hdot final A (T)      -310081
+  N final B (T)                43161.8
+  N final B (all pos)          43161.8
+  N final B (outside T)        8.51147e-25
+  frac<0 final B (T)           0.122053
+  median Hdot final B (T)      10316.7
+  coverage                     1
+  ratio src                    5.63852e-08
+  ratio final                  0.000532389
+  -> 支持 (coverage 1.000, N_B/N_A src 5.64e-08, final 0.000532)
+
+## run_0605_g3a_op_562_g2_onprod_r2/tp_operator.h5
+  n_pos                        4784
+  n_evap                       4763
+  n_tgt                        4493
+  n_cap1_tgt                   6
+  n_cap2_tgt                   4
+  w0_frac_med                  0.826958
+  rec_mismatch_max_rel         1
+  rec_mismatch_max_rel_rev     5.86032e-08
+  N src A (T)                  8.38148e+07
+  N src A (all pos)            8.4105e+07
+  N src A (outside T)          290240
+  frac<0 src A (T)             0.999332
+  median Hdot src A (T)        -251039
+  N src B (T)                  4.99713
+  N src B (all pos)            4.99713
+  N src B (outside T)          0
+  frac<0 src B (T)             0.642333
+  median Hdot src B (T)        -0.0024693
+  N final A (T)                7.94056e+07
+  N final A (all pos)          7.96518e+07
+  N final A (outside T)        246204
+  frac<0 final A (T)           0.997774
+  median Hdot final A (T)      -242113
+  N final B (T)                43134.1
+  N final B (all pos)          51008.7
+  N final B (outside T)        7874.65
+  frac<0 final B (T)           0.125974
+  median Hdot final B (T)      9343.51
+  coverage                     0.996549
+  ratio src                    5.96211e-08
+  ratio final                  0.000543211
+  -> 支持 (coverage 0.997, N_B/N_A src 5.96e-08, final 0.000543)
+
+## run_0606_g3a_op_563_g2_onprod_r3/tp_operator.h5
+  n_pos                        4755
+  n_evap                       4734
+  n_tgt                        4428
+  n_cap1_tgt                   2
+  n_cap2_tgt                   1
+  w0_frac_med                  0.820596
+  rec_mismatch_max_rel         1
+  rec_mismatch_max_rel_rev     5.78918e-08
+  N src A (T)                  8.34444e+07
+  N src A (all pos)            8.38776e+07
+  N src A (outside T)          433174
+  frac<0 src A (T)             0.999548
+  median Hdot src A (T)        -233708
+  N src B (T)                  4.72219
+  N src B (all pos)            4.72219
+  N src B (outside T)          0
+  frac<0 src B (T)             0.632565
+  median Hdot src B (T)        -0.002463
+  N final A (T)                7.90103e+07
+  N final A (all pos)          7.93489e+07
+  N final A (outside T)        338553
+  frac<0 final A (T)           0.998871
+  median Hdot final A (T)      -224607
+  N final B (T)                43112.4
+  N final B (all pos)          43637.7
+  N final B (outside T)        525.226
+  frac<0 final B (T)           0.127823
+  median Hdot final B (T)      9241.33
+  coverage                     0.994836
+  ratio src                    5.65909e-08
+  ratio final                  0.000545656
+  -> 支持 (coverage 0.995, N_B/N_A src 5.66e-08, final 0.000546)
+
+VERDICT #4g3c: 支持  (支持, 支持, 支持); 全残差の外向きの残りは 'ratio final' で別記

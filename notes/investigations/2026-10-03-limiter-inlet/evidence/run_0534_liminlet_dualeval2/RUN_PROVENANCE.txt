@@ -1,0 +1,10 @@
+date        : 2026-10-02T21:13:11+00:00
+forge_bin   : /home/ubuntu/forge-species-tp/solver_density_cuda/build/forge
+forge_mtime : 2026-10-02T21:13:10+00:00
+forge_sha256: 3c5bd78a56997b2e59e7967c7d998c5e0273660d8b58efac33c6acdd443af158
+git_head    : aef6c1e14ddf461e60e1d6878b13a3abf99d90b2
+git_dirty   : 0 件
+host        : ip-172-31-5-94
+env         : FORGE_CUDA_BLOCKSIZE=256
+env         : FORGE_BIN=/home/ubuntu/forge-species-tp/solver_density_cuda/build/forge
+cfg         : wallTreatmentSST=0 (要求値)

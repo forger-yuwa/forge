@@ -19,7 +19,20 @@ import h5py
 import numpy as np
 
 WALL_KINDS = {"slip", "wall", "wall_isothermal", "wall_heatflux"}
-OPEN_KINDS = {"inlet_uniformVelocity", "inlet_Pressure", "inlet_Pressure_dir", "outlet_statPress", "outflow", "inlet_profile"}
+OPEN_KINDS = {"inlet_uniformVelocity", "inlet_Pressure", "inlet_Pressure_dir", "outlet_statPress", "outflow", "inlet_profile", "farfield"}
+# farfield 面の流束は外側状態との HLLC で、境界ノード値の 1 次評価とは別物 (plan boundary-node-farfield-characteristic §5.1 #4d)。
+# ソルバの診断ダンプ (env FORGE_DUMP_FARFIELD=<prefix> で 1 評価、<prefix>.<physID>.csv) の面流束 F·S をそのまま使う。
+FF_KIND = "farfield"
+
+
+def read_ff_dump(prefix, pid: int):
+    """FORGE_DUMP_FARFIELD の <prefix>.<physID>.csv → {ip: (F_ro, F_roU[3], pRef)} (F は面積を掛けた流束、運動量は p − pRef のゲージ)。"""
+    f = Path(f"{prefix}.{pid}.csv")
+    if not f.exists():
+        return None
+    d = np.genfromtxt(f, delimiter=",", names=True)
+    d = np.atleast_1d(d)
+    return {int(r["ip"]): (float(r["F_ro"]), np.array([r["F_roUx"], r["F_roUy"], r["F_roUz"]], float), float(r["pRef"])) for r in d}
 
 
 def parse_bcond(bcond_yaml) -> dict:
@@ -33,9 +46,11 @@ def parse_bcond(bcond_yaml) -> dict:
 
 
 def momentum_balance(mesh_h5, res_h5, bcond_yaml, p_a: float, F_ideal: float, vehicle_groups=("vehicle",), z_half_w=None,
-                     ramp_group: str = "ramp") -> dict:
+                     ramp_group: str = "ramp", ff_dump=None) -> dict:
     """戻り値: {"groups": {name: {kind, Fx_p, Fy_p, Fz_p, Fx_m, Fy_m, Fz_m, area, mdot}}, "closure": {...}, ...}。
-    z_half_w を与えると `ramp_group` の面を z ≤ z_half_w (ノズル幅内) と外 (機体) に分けて別群にする (旧 3D メッシュ用)。"""
+    z_half_w を与えると `ramp_group` の面を z ≤ z_half_w (ノズル幅内) と外 (機体) に分けて別群にする (旧 3D メッシュ用)。
+    ff_dump: farfield 面の診断ダンプの prefix。farfield 群があるのに与えない (または面が欠ける) と closure["closable"] = False。"""
+    closable = True; ff_notes = []
     bc = parse_bcond(bcond_yaml)
     with h5py.File(mesh_h5, "r") as m, h5py.File(res_h5, "r") as r:
         coord = m["MESH/COORD"][:].reshape(-1, 3).astype(float)
@@ -60,13 +75,25 @@ def momentum_balance(mesh_h5, res_h5, bcond_yaml, p_a: float, F_ideal: float, ve
             un = np.einsum("ij,ij->i", uf, nA)                     # u·n A
             Fm = (rof * un)[:, None] * uf                          # ρ u (u·n) A
             Fp = (Pf - p_a)[:, None] * nA
+            mflux = rof * un
+            if kind == FF_KIND:
+                dump = read_ff_dump(ff_dump, pid) if ff_dump else None
+                if dump is None or any(int(i) not in dump for i in ip):
+                    closable = False
+                    ff_notes.append(f"{name} (physID {pid}): 診断ダンプ {'無し' if dump is None else '面が欠ける'} → 境界ノード値の 1 次評価で代用 (閉じない)")
+                else:
+                    # ダンプの運動量流束は ρu(u·n)S + (p − pRef) n S。p_a ゲージへ: + (pRef − p_a) n S。全量を Fm 側に置き Fp = 0
+                    mflux = np.array([dump[int(i)][0] for i in ip])
+                    Fm = np.array([dump[int(i)][1] + (dump[int(i)][2] - p_a) * nA[k] for k, i in enumerate(ip)])
+                    Fp = np.zeros_like(Fm)
+                    ff_notes.append(f"{name} (physID {pid}): HLLC 流束 (診断ダンプ) {len(ip)} 面")
             parts = [(name, np.ones(len(ip), bool))]
             if z_half_w is not None and name == ramp_group:
                 inside = cen[:, 2] <= z_half_w * (1 + 1e-9)
                 parts = [(name, inside), (name + "_outside", ~inside)]
             for nm, sel in parts:
                 groups[nm] = {"physID": pid, "kind": kind, "wall": kind in WALL_KINDS, "n_faces": int(sel.sum()),
-                              "area": float(np.linalg.norm(nA[sel], axis=1).sum()), "mdot": float((rof * un)[sel].sum()),
+                              "area": float(np.linalg.norm(nA[sel], axis=1).sum()), "mdot": float(mflux[sel].sum()),
                               "Fx_p": float(Fp[sel, 0].sum()), "Fy_p": float(Fp[sel, 1].sum()), "Fz_p": float(Fp[sel, 2].sum()),
                               "Fx_m": float(Fm[sel, 0].sum()), "Fy_m": float(Fm[sel, 1].sum()), "Fz_m": float(Fm[sel, 2].sum())}
     tot = np.zeros(3); wall = np.zeros(3); openf = np.zeros(3); mdot_in = mdot_out = 0.0
@@ -80,14 +107,14 @@ def momentum_balance(mesh_h5, res_h5, bcond_yaml, p_a: float, F_ideal: float, ve
     T_wall_p = -sum(g["Fx_p"] for g in groups.values() if g["wall"])
     T_wall_nozzle_p = -sum(g["Fx_p"] for nm, g in groups.items() if g["wall"] and nm not in vehicle_groups and not nm.endswith("_outside"))
     return {"node_mode": bool(node_mode), "p_a": p_a, "F_ideal": F_ideal, "groups": groups,
-            "closure": {"sum_all": tot.tolist(), "sum_wall": wall.tolist(), "sum_open": openf.tolist(),
+            "closure": {"closable": closable, "farfield": ff_notes, "sum_all": tot.tolist(), "sum_wall": wall.tolist(), "sum_open": openf.tolist(),
                         "residual_over_F_ideal": (np.abs(tot) / F_ideal).tolist(),
                         "mass_in": mdot_in, "mass_out": mdot_out, "mass_imbalance_frac": (mdot_out - mdot_in) / max(mdot_in, 1e-30)},
             "T_wall_all_p": T_wall_p, "T_wall_nozzle_p": T_wall_nozzle_p,
             "C_T_wall_all": T_wall_p / F_ideal, "C_T_wall_nozzle": T_wall_nozzle_p / F_ideal}
 
 
-def check_run(run_dir, mesh_name: str = "sern.h5", step=None, vehicle_groups=("vehicle",), z_half_w=None, out_path=None) -> dict:
+def check_run(run_dir, mesh_name: str = "sern.h5", step=None, vehicle_groups=("vehicle",), z_half_w=None, out_path=None, ff_dump=None) -> dict:
     """run ディレクトリの prepare_info.json / metrics.json と突き合わせて momentum_balance.json を書く。"""
     run_dir = Path(run_dir)
     info = json.loads((run_dir / "prepare_info.json").read_text())
@@ -98,7 +125,7 @@ def check_run(run_dir, mesh_name: str = "sern.h5", step=None, vehicle_groups=("v
         raise FileNotFoundError(f"{run_dir}: res_*.h5 が無い")
     H = info["H_m"]; F_ideal = info["F_ideal_N_per_m"] * (info.get("half_W_m", 1.0) if info.get("dim") == 3 else 1.0)
     mb = momentum_balance(run_dir / mesh_name, res[-1], run_dir / "bcondConfig.yaml", info["states"]["ext"]["P"], F_ideal,
-                          vehicle_groups=vehicle_groups, z_half_w=z_half_w)
+                          vehicle_groups=vehicle_groups, z_half_w=z_half_w, ff_dump=ff_dump)
     mb["res"] = res[-1].name
     mp = run_dir / "metrics.json"
     if mp.exists():
@@ -117,12 +144,15 @@ def main(argv=None) -> int:
     ap.add_argument("run_dir"); ap.add_argument("--step", type=int, default=None); ap.add_argument("--z-half-w", type=float, default=None,
                                                                                                     help="旧 3D メッシュ用: ramp を z ≤ W/2 と外に分ける")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--ff-dump", default=None, help="farfield 面の診断ダンプの prefix (FORGE_DUMP_FARFIELD に渡した値; 同じ場から 1 評価だけ回して取る)")
     a = ap.parse_args(argv)
-    mb = check_run(a.run_dir, step=a.step, z_half_w=a.z_half_w, out_path=a.out)
+    mb = check_run(a.run_dir, step=a.step, z_half_w=a.z_half_w, out_path=a.out, ff_dump=a.ff_dump)
     c = mb["closure"]
     print(f"{a.run_dir} [{mb['res']}] node_mode={mb['node_mode']}")
     print(f"  closure residual / F_ideal = ({c['residual_over_F_ideal'][0]:.4f}, {c['residual_over_F_ideal'][1]:.4f}, {c['residual_over_F_ideal'][2]:.4f})"
-          f"  mass imbalance {c['mass_imbalance_frac']*100:+.3f} %")
+          f"  mass imbalance {c['mass_imbalance_frac']*100:+.3f} %" + ("" if c["closable"] else "  [閉じない: farfield の流束が無い]"))
+    for n in c["farfield"]:
+        print("  farfield:", n)
     for nm, g in mb["groups"].items():
         print(f"  {nm:16s} {g['kind']:22s} Fx_p {g['Fx_p']:+.4e} Fx_m {g['Fx_m']:+.4e} | Fy_p {g['Fy_p']:+.4e} Fy_m {g['Fy_m']:+.4e} | mdot {g['mdot']:+.4e}")
     print(f"  C_T_wall (all walls) {mb['C_T_wall_all']:.5f} / nozzle-only {mb['C_T_wall_nozzle']:.5f}" + (f" / ledger C_T_wall {mb['ledger']['C_T_wall']}" if "ledger" in mb else ""))

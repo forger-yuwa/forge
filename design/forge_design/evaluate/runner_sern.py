@@ -24,6 +24,7 @@ from ..meshing.mesh_sern import PHYS_SERN, SernMeshParams, generate_sern_mesh, w
 from ..metrics.sern_forces import force_history, write_force_history_csv
 from ..metrics.sern_gates import evaluate_gates, forge_rc_from_log
 from ..probdef import Problem, dv_value, load_problem
+from .ic import _forge_species
 
 # リポジトリ位置から導く (AWS など別マシンでも動くように。FORGE_ROOT で上書き可)
 FORGE_ROOT = Path(os.environ.get("FORGE_ROOT", Path(__file__).resolve().parents[3]))
@@ -31,6 +32,38 @@ FORGE_TOOLS = FORGE_ROOT / "solver_density_cuda" / "tools"
 FORGE_BUILD = FORGE_ROOT / "solver_density_cuda" / "build"
 _ENV = dict(os.environ, LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/hdf5/serial")
 MESH = "sern.h5"
+
+
+
+# 既定が変わった日。設計 DB で旧既定の評価と混ぜないための識別子。
+#   2026-09-26: slauWallNormalChi の既定 0 → auto (node+SLAU で 1)
+#   2026-09-27: mesh.scalarGradient の node 既定 gg → lsq (plan gradient-scalar-lsq-unification #6)。
+#               日付の一致だけでは旧評価の混入を防げないので、学習側は実効 scalarGradient も見る (codex diagnose 2026-09-27)
+FLAG_POLICY = "2026-09-27"
+
+
+def _last_launch_value(run_dir, key, allowed=None):
+    """forge_launches.jsonl の**最後の非空行** (= 最後の起動) の実効値 (文字列)。無い・壊れている・キーが無い・
+    allowed に無い値は None (= 不明)。**前の起動の値に遡らない** (codex result 2026-09-27 M1: 最後の起動が
+    読めないときに過去の lsq を引き継いで学習に採用していた)。"""
+    p = Path(run_dir) / "forge_launches.jsonl"
+    if not p.exists():
+        return None
+    lines = [l for l in p.read_text().splitlines() if l.strip()]
+    if not lines:
+        return None
+    try:
+        v = str(json.loads(lines[-1])[key])
+    except Exception:
+        return None
+    return v if (allowed is None or v in allowed) else None
+
+
+def _last_launch_chi(run_dir):
+    """最後の起動の slauWallNormalChi 実効値 (0/1)。無い・壊れている・キーが無い・0/1 以外は None (= 不明)。
+    前の起動の値に遡らない (codex result 2026-09-27 chi-default M4、scalarGradient と同じ厳格さ)。"""
+    v = _last_launch_value(run_dir, "slauWallNormalChi", allowed=("0", "1"))
+    return None if v is None else int(v)
 
 
 def _dv(p: Problem, name, default=None) -> float:
@@ -83,8 +116,9 @@ def select_operating_point(p: Problem, op: str | None) -> dict:
             "inflow": dict(p.spec["inflow"]), "gas": {"gamma": p.gamma, "cp": p.cp, "composition": p.raw.get("gas", {}).get("exhaust_composition")}}
 
 
-# --- R3: 凍結組成 TP (排気 = CEA 凍結組成の擬似種 EXH, 外気 = 空気 AIR) ------------------------------------
-SPECIES_ORDER = ("EXH", "AIR")     # 旧既定 (evaluate.tp_species 省略時の別名 = lumps {EXH: stream inflow, AIR: stream external})
+# --- R3: 凍結組成 TP (排気 = CEA 凍結組成の lump EXH, 外気 = 空気の lump AMB) ------------------------------------
+# 外気 lump は 2026-09-30 に AIR → AMB へ改名 (ソルバ内蔵の擬似種 AIR と衝突するため。plan tooling-nozzle-sern-chain R8)。順序は不変
+SPECIES_ORDER = ("EXH", "AMB")     # 既定 (evaluate.tp_species 省略時の別名 = lumps {EXH: stream inflow, AMB: stream external})
 
 
 def frozen_gases(p: Problem) -> dict | None:
@@ -92,7 +126,7 @@ def frozen_gases(p: Problem) -> dict | None:
     "transported": [FrozenGas (輸送種ごと)]}。cpg なら None。
     排気組成は作動点 `gas.composition` (select_operating_point が `gas.exhaust_composition` に写す) のモル分率、
     外気は `spec.external.composition` (モル分率) があればそれ、無ければ乾燥空気。
-    輸送種の配置は統一スキーマ `evaluate.tp_species` (省略時 = 旧 `[EXH, AIR]` = 流れごとの lump; `{mode: full}` で実種の和集合、
+    輸送種の配置は統一スキーマ `evaluate.tp_species` (省略時 = `[EXH, AMB]` = 流れごとの lump; `{mode: full}` で実種の和集合、
     このとき排気率は受動スカラ `roXi` で輸送) を流れ {inflow, external} で解決する (plan cea-mole-fraction §4.5)。"""
     if not p.is_frozen_tp:
         return None
@@ -103,10 +137,11 @@ def frozen_gases(p: Problem) -> dict | None:
         raise ValueError("gas.model: frozen_tp には gas.exhaust_composition か operating_points[].gas.composition (モル分率) が要る")
     db = p.species_db
     ext_comp = p.spec["external"].get("composition")
+    from ..gas.frozen import AIR_MOLE
     exh = FrozenGas.from_mole(comp, "EXH", href, db)
-    ext = FrozenGas.from_mole(ext_comp, "AIR", href, db) if ext_comp else FrozenGas.air(href, db)
+    ext = FrozenGas.from_mole(ext_comp if ext_comp else AIR_MOLE, "AMB", href, db)
     ev = dict(p.evaluate)
-    ev.setdefault("tp_species", ["EXH", "AIR"])
+    ev.setdefault("tp_species", ["EXH", "AMB"])
     layout = resolve_species_layout(parse_tp_species(ev), {"inflow": exh.Y, "external": ext.Y}, db,
                                     condensing_species=None, condensation=False)
     transported = []
@@ -116,12 +151,28 @@ def frozen_gases(p: Problem) -> dict | None:
     return {"exhaust": exh, "ext": ext, "href_T": href, "layout": layout, "db": db, "transported": transported}
 
 
+def frozen_transport(p: Problem, layout) -> dict:
+    """frozen_tp の `gas.transport` をこの作動点の実種に絞って照合する ({実種: モデル}、実種の順)。
+    SERN は作動点で排気の構成種が変わる (m4_off は燃料なしで N2/O2/AR/CO2 だけ) ので、YAML には全作動点の実種の和集合を書き、
+    ここで作動点に無い種を落とす。作動点の実種の書き漏れはエラー (resolve_transport, required=True)。2026-10-01 (R8)。"""
+    from ..gas.composition import resolve_transport, transport_real_species
+    reals = set(transport_real_species(layout))
+    sub = {k: v for k, v in (p.gas_transport or {}).items() if k in reals}
+    return resolve_transport(layout, sub, required=True)
+
+
 def write_species_db(p: Problem, run_dir, gases: dict | None) -> None:
-    """輸送種の `species_db.yaml` (由来コメント付き) と `species_meta.yaml` を run dir に書く (cpg なら何も書かない)。"""
+    """`species_meta.yaml` を run dir に書く (cpg なら何も書かない)。lump の熱物性はソルバが起動時に合成するので
+    合成済み擬似種の `species_db.yaml` は書かない (2026-09-30、plan thermophysics-solver-owned-species-db §5.2 / SERN R8)。
+    ソルバ内蔵で解決できない実種 (外部 DB 由来など) があるときだけ、その生エントリを `species_db_external.yaml` に書く。"""
     if gases is None:
         return
-    from ..gas.composition import write_species_files
-    write_species_files(gases["layout"], run_dir)
+    from ..gas.composition import solver_species_config, species_db_raw_yaml, write_species_meta
+    _, external = solver_species_config(gases["layout"])
+    tr = frozen_transport(p, gases["layout"]) if p.raw.get("gas", {}).get("transport") is not None else None
+    write_species_meta(gases["layout"], run_dir, tr)
+    if external:
+        (Path(run_dir) / "species_db_external.yaml").write_text(species_db_raw_yaml(external))
 
 
 def gas_states(p: Problem) -> dict:
@@ -205,6 +256,31 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     と記録している。run_0075 の発散 (M∞10 の boat-tail 膨張で 18 % のノードが pMin=1 Pa に着地 → 負密度) は
     まさにこの指紋なので、relax を効かせる。"""
     _lim = int(p.evaluate.get("limiter", 2))   # 2=Venkatakrishnan (既定), 1=Barth
+    # リミッタの試行値を流束が適用する増分と同じ形・同じ点で評価する (既定 0 = 従来)。
+    # plan convection-node-wall-reconstruction §4.8。Barth と組むと厳密有界になる
+    # `limiter_match_recon` は廃止 (plan limiter-config-simplify §4.2)。`limiter_scaled` に内包した。
+    if "limiter_match_recon" in p.evaluate:
+        raise ValueError("evaluate.limiter_match_recon は廃止。limiter_scaled: 0 (旧経路) / 1 (評価点一致 + 無次元化) を使うこと "
+                         "(中間の match_recon=1, scaled=0 は機能打ち切り)")
+    _lsc = int(p.evaluate.get("limiter_scaled", 1))   # 既定 1 = 修正版 (2026-09-20)
+    if _lsc not in (0, 1):
+        raise ValueError(f"evaluate.limiter_scaled は 0 か 1 (比の形 2 は棄却済み): {_lsc}")
+    # 既定はソルバと揃える: 修正版 (1) は 0.05、旧経路 (0) は 1.0 (旧経路の K は device 側で 1.f 固定)
+    _vk = float(p.evaluate.get("venkat_k", 0.05 if _lsc == 1 else 1.0))
+    # space.slauWallNormalChi (2026-09-26 既定化、plan convection-slau-wall-normal-chi-default §4.4): runner は既定でキーを書かない
+    # (= auto。node+Dirichlet 壁+SLAU なら 1、品質検査用の cell 変換では 0 に静かに解決する)。明示 1 を書くと cell 変換が起動エラーになる。
+    # 問題 YAML `mesh.slau_wall_normal_chi: 0` のときだけ明示 0 (旧挙動) を書く。
+    _wnc = p.mesh.get("slau_wall_normal_chi", None)
+    if _wnc is not None and int(_wnc) not in (0, 1):
+        raise ValueError(f"mesh.slau_wall_normal_chi must be 0 or 1 (or omitted for auto): {_wnc}")
+    _wnc_key = ", slauWallNormalChi: 0" if (_wnc is not None and int(_wnc) == 0) else ""
+    # `evaluate.limiter_ref: {length, ro, p, a}` (2026-09-29): リミッタ基準値の明示固定。既定 (キーなし) は forge が
+    # 領域の対角長と初期場の平均から自動で決めるので、**領域の大きさを変える比較 (幅系列) では離散化そのものが変わる**
+    # (plan boundary-node-farfield-characteristic §5.1 #3 の V2a で確認)。幅系列では全幅で同じ値を書く。
+    _lr = p.evaluate.get("limiter_ref")
+    if _lr is not None:
+        _wnc_key += (f", limiterRefLength: {float(_lr['length'])!r}, limiterRoRef: {float(_lr['ro'])!r}, "
+                     f"limiterPRef: {float(_lr['p'])!r}, limiterARef: {float(_lr['a'])!r}")
     ir = p.evaluate.get("implicit_relax")
     _relax = f", implicitRelax: {float(ir)}" if ir is not None else ""
     pm = p.evaluate.get("p_min")
@@ -216,12 +292,15 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     # 生産 YAML は mesh.node_inlet_corner_wall: 1 (角ノードの壁圧 1.75 p_in 対策; plans/active/boundary-node-inlet-corner-wall.md)
     if disc == "node" and int(p.mesh.get("node_inlet_corner_wall", 0)):
         node_keys += ", nodeInletCornerWall: 1"
-    # R3 (frozen_tp): 排気 EXH / 空気 AIR の 2 擬似種 TP。thermoHrefTemp (sensible datum) は陰解法の χ_eos 桁違い対策で必須
+    # R3 (frozen_tp): 排気 EXH / 外気 AMB の 2 lump TP。thermoHrefTemp (sensible datum) は陰解法の χ_eos 桁違い対策で必須
     # ([[isobutane-wt-semiperfect]] / runner_axismach と同じ)。IC の roe も同じ基準で組む (paste_region_ic)
+    # physProp.species は lump 記法 ({name, lump: {構成種: モル分率}, basis: mole}) で、NASA-9 はソルバが起動時に合成する (R8)
     if p.is_frozen_tp:
+        from ..gas.composition import physprop_species_flow, solver_species_config
         gases = frozen_gases(p); L = gases["layout"]
-        _sp = ", ".join(f'"{k}"' for k in L.species)   # 引用符付き (NO/N/Y の真偽値化を防ぐ; codex result M1)
-        _tp = f", species: [{_sp}], speciesDBFile: \"species_db.yaml\", thermoHrefTemp: {gases['href_T']}"
+        items, external = solver_species_config(L)
+        _db = ', speciesDBFile: "species_db_external.yaml"' if external else ""
+        _tp = f", species: {physprop_species_flow(items)}{_db}, thermoHrefTemp: {gases['href_T']}"
         if L.tracer:
             _tp += ", tracer: exhaust"
         _tm = 2
@@ -231,9 +310,25 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
         phys = f"physProp: {{thermalMethod: {_tm}, viscMethod: 0, visc: 0.0, thermCond: 0.0, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}}}"
         turb = 'turbulence: {model: "none"}'
     else:
-        phys = (f"physProp: {{thermalMethod: {_tm}, viscMethod: 1, visc: 1.8e-5, thermCond: 0.0257, "
-                f"thermCondMethod: 1, prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}}}")
-        turb = 'turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 1}'
+        # 輸送物性 (R8 段 (ii)、2026-09-30): frozen_tp で problem に `gas.transport` ({実種: モデル}) があるときだけ、
+        # 実種ごとの輸送物性 (viscMethod 2 + physProp.transport、混合則 CEA frozen) にする。無ければ従来どおり
+        # viscMethod 1 (空気の Sutherland) — 既存の run と同じ config。thermCondMethod は viscMethod 2 では読まれないので落とす。
+        # visc (dt と陰解法対角の剛性見積り)・thermCond (必須キー)・prandtlLam (SST 壁関数の回復係数) は残す (runner_axismach と同じ)
+        _transport = None
+        if p.is_frozen_tp and p.raw.get("gas", {}).get("transport") is not None:
+            from ..gas.composition import physprop_transport_flow
+            _transport = frozen_transport(p, frozen_gases(p)["layout"])
+        if _transport is not None:
+            phys = (f"physProp: {{thermalMethod: {_tm}, viscMethod: 2, visc: 1.8e-5, thermCond: 0.0257, "
+                    f"prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}, transport: {physprop_transport_flow(_transport)}}}")
+        else:
+            phys = (f"physProp: {{thermalMethod: {_tm}, viscMethod: 1, visc: 1.8e-5, thermCond: 0.0257, "
+                    f"thermCondMethod: 1, prandtlLam: 0.72, cp: {p.cp}, gamma: {p.gamma}{_pmin}{_tp}}}")
+        # 壁処理は**既定 0 (低 Re 壁解像)**。node の SST 壁関数は使わない方針 (2026-09-20)。
+        # 壁関数を使うには問題 YAML に `evaluate.wall_treatment_sst: 1` を明示し、理由を run の README に書くこと。
+        _wts = int(p.evaluate.get("wall_treatment_sst", 0))
+        turb = ('turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, '
+                f'katoLaunder: 1, wallTreatmentSST: {_wts}}}')
     return f"""mesh: {{discretization: "{disc}", isAxisymmetric: 0{node_keys}, meshFileName: "{MESH}", valueFileName: "{MESH}"}}
 gpu: 1
 solver: "SLAU"
@@ -248,7 +343,7 @@ time:
   outStepInterval: {out_int}
   timeIntegration: 11
   nStepInner: 5
-space: {{convMethod: 1, limiter: {_lim}, pRef: {p_ref}}}
+space: {{convMethod: 1, limiter: {_lim}, pRef: {p_ref}, limiterScaled: {_lsc}, venkatK: {_vk}{_wnc_key}}}
 {turb}
 initial: "uniform_p101325_u10"
 """
@@ -257,12 +352,19 @@ initial: "uniform_p101325_u10"
 def _bcond_config(p: Problem, st: dict) -> str:
     model = p.evaluate.get("model", "euler")
     ex, en = st["exhaust"], st["ext"]
+    # `evaluate.outlet_kind`: outflow (既定・全量外挿) / statPress。**既定は 2026-09-23 に statPress から変更**。
+    # SERN の出口と bottom は設計上つねに超音速なので、静圧指定は node の壁列・後流の**亜音速ノード**に
+    # Ps ≪ 実出口圧を課し、そこから圧力が育つ (procedures/recommended-settings.md「出口」/ [[node-supersonic-exit-outflow]])。
+    # 実績: run_0121 で出口 P 7.5 → 128 kPa で発散、run_0430–0436 で出口の亜音速率 3.5 → 99.5 %・far_bottom 22 MPa。
+    okind = str(p.evaluate.get("outlet_kind", "outflow"))
 
     def inlet(name, pid, s):
         return (f"{name}: {{physID: {pid}, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , "
                 f"floats: {{ro: {s['ro']:.6g}, Ux: {s['u']:.6g}, Uy: 0.0, Uz: 0.0, Ps: {s['P']:.6g}, k: {s['k']:.6g}, omega: {s['omega']:.6g}{inlet_species_floats(s)}}}}}\n")
 
     def outlet(name, pid):
+        if okind == "outflow":
+            return f"{name}: {{physID: {pid}, kind: outflow, outputHDFflg: 0, ints: , floats: }}\n"
         return (f"{name}: {{physID: {pid}, kind: outlet_statPress, outputHDFflg: 0, ints: , "
                 f"floats: {{Ps: {en['P']:.6g}, Pt: {en['P']:.6g}, Tt: {en['T']:.6g}}}}}\n")
 
@@ -275,8 +377,13 @@ def _bcond_config(p: Problem, st: dict) -> str:
             + wall("cowl_out", P["cowl_out"]) + outlet("bottom", P["bottom"])
             + (outlet("top_out", P["top_out"]) if p.evaluate.get("top_out_kind", "outlet") == "outlet"
                else f"top_out: {{physID: {P['top_out']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n")
-            # 機体上面 + base (§4.11): 機体の力なので帳簿外だが base 圧の診断のため壁出力する。Euler/SST とも slip
-            + (f"vehicle: {{physID: {P['vehicle']}, kind: slip, outputHDFflg: 1, ints: , floats: }}\n"
+            # 機体上面 + base (§4.11)。機体の力なので帳簿外だが base 圧の診断のため壁出力する。
+            # 既定は slip (2D 中立モデル)。**`evaluate.vehicle_kind: wall` で等温粘性壁**にできる
+            # (3D の生産仕様 R4f/R4e と揃えるため。有限ベース `mesh.t_base > 0` の診断で使う —
+            #  slip の base は鋭い 90° 角で wall_dist が 0 に落ち、SST の ω が発散する)
+            + ((f"vehicle: {p.wall_bcond_line(model == 'euler', phys_id=P['vehicle'], output=1)}\n"
+                if str(p.evaluate.get("vehicle_kind", "slip")) == "wall"
+                else f"vehicle: {{physID: {P['vehicle']}, kind: slip, outputHDFflg: 1, ints: , floats: }}\n")
                if int(p.mesh.get("ext_top", 0)) else ""))
 
 
@@ -338,13 +445,119 @@ def apply_wall_offset(design, wall_offset: dict, H: float):
     return d
 
 
-def paste_region_ic(h5path, y_mid, y_top, scale: float, st: dict, gamma: float) -> None:
-    """領域別一様 IC: 中間線とランプ/プルーム上線の間 = 燃焼器出口状態、それ以外 (カウル下・ランプ側外部流) = 外部流。"""
+
+def moc_ic_arrays(kern, xn, yn, upper, st: dict, gamma: float, gas=None) -> tuple:
+    """**MOC 場を初期値にする** (2026-09-19, ユーザ提案)。
+
+    現行の領域別一様 IC は、ノズル内を燃焼器出口状態 (例 101 kPa) で埋める。実際の解は出口で
+    ~6.5 kPa まで膨張するので、**初期値が 17 倍ずれた状態**から始めることになり、
+    梯子 12000 step を cfl 0.1 で這わせる主因になっている。MOC は同じ形状の非粘性解を
+    station ごとに (Y, TH, M) で持っているので、それを内挿すれば初期値が解のすぐ近くから始まる。
+
+    返り値: (arrays, n_moc) — n_moc は MOC を当てられたノード数 (残りは一様 IC のまま)。
+    MOC の被覆外 (kernel の x 範囲外・上下境界の外) は `upper` による一様値に落とす。
+    等エントロピー: よどみ量は排気の入口状態から作り、M(x,y)・θ(x,y) で静圧・静温・速度に展開する。
+    """
+    ex = st["exhaust"]
+    g = float(gamma); gm = g - 1.0
+    R = float(ex.get("R", ex["P"] / (ex["ro"] * ex["T"])))
+    M_in = float(ex.get("M", 0.0))
+    X = np.asarray(kern.X)
+    M = np.full(len(xn), np.nan); TH = np.full(len(xn), np.nan)
+    # **被覆外は外挿する** (2026-09-19)。x を kernel 範囲に、y を各 station の範囲にクランプして端の値を伸ばす。
+    # 落とすと排気域の中に一様値 (入口状態) の塊が残り、その境界が 17 倍の圧力段差になって
+    # 一様 IC より悪い初期値になる (実測: 排気域 32268 ノードのうち 13111 が一様のまま → mid 段 step 6 で発散)
+    sel = np.flatnonzero(upper)
+    xc = np.clip(xn[sel], X[0], X[-1])
+    idx = np.clip(np.searchsorted(X, xc), 1, len(X) - 1)
+    for j, (i1, x, y) in enumerate(zip(idx, xc, yn[sel])):
+        i0 = i1 - 1
+        t = (x - X[i0]) / max(X[i1] - X[i0], 1e-30)
+        a = np.interp(y, kern.Y[i0], kern.M[i0]); b = np.interp(y, kern.Y[i1], kern.M[i1])   # 端はクランプ = 外挿
+        ta = np.interp(y, kern.Y[i0], kern.TH[i0]); tb = np.interp(y, kern.Y[i1], kern.TH[i1])
+        M[sel[j]] = a + t * (b - a)
+        TH[sel[j]] = ta + t * (tb - ta)
+    ok = np.isfinite(M) & (M > 0.0)
+    base = region_ic_arrays(upper, st, gamma)
+    if not ok.any():
+        return base, 0
+    # **NASA-9 に整合な等エントロピー展開** (2026-09-19, codex plan レビュー M4)。
+    # 旧実装は一定 γ の式で T/P/q を作り `roe` だけ NASA-9 に置換していたため、入口に対して
+    # 全エンタルピーが +1.20 %・エントロピーが +30.7 J/(kg·K) ずれていた。
+    # ここでは同じ NASA-9 物性で次の 2 式を解く:
+    #   h_sens(T) + ½ M² γ(T) R T = h0_in     (全エンタルピー保存)
+    #   p = p_in · exp[(s°(T) − s°(T_in)) / R]  (等エントロピー)
+    # 速度は q = M · a(T)。cpg のときは従来どおり一定 γ の式。
+    Mo = M[ok]
+    if st.get("gas_model") == "frozen_tp":
+        if gas is None:
+            raise ValueError("frozen_tp の MOC IC には FrozenGas が要る")
+        T_in = float(ex["T"]); P_in = float(ex["P"])
+        h0_in = float(np.ravel(gas.h_sens(T_in))[0]) + 0.5 * float(ex["u"]) ** 2
+        T = np.full_like(Mo, T_in)
+        for _ in range(40):                      # h0 一定から T を Newton で解く (γ(T) も更新)
+            gT = np.asarray(gas.gamma(T)); hT = np.asarray(gas.h_sens(T))
+            F = hT + 0.5 * Mo ** 2 * gT * R * T - h0_in
+            cpT = np.asarray(gas.cp_mass(T))
+            dF = cpT + 0.5 * Mo ** 2 * gT * R      # γ の T 依存は 2 次なので無視 (収束には十分)
+            step = F / np.maximum(dF, 1e-30)
+            step = np.clip(step, -0.3 * T, 0.3 * T)
+            T = np.maximum(T - step, 1.0)
+            if np.max(np.abs(step)) < 1e-8 * np.max(T):
+                break
+        s0 = np.asarray(gas.s0_mass(T)); s0_in = float(np.ravel(gas.s0_mass(T_in))[0])
+        P = P_in * np.exp((s0 - s0_in) / R)
+        ro = P / (R * T)
+        q = Mo * np.asarray(gas.a(T))
+    else:
+        T0 = float(ex["T"]) * (1.0 + 0.5 * gm * M_in * M_in)
+        P0 = float(ex["P"]) * (1.0 + 0.5 * gm * M_in * M_in) ** (g / gm)
+        f = 1.0 + 0.5 * gm * Mo ** 2
+        T = T0 / f; P = P0 / f ** (g / gm); ro = P / (R * T)
+        q = Mo * np.sqrt(g * R * T)
+    base["ro"][ok] = ro
+    base["roUx"][ok] = ro * q * np.cos(TH[ok])
+    base["roUy"][ok] = ro * q * np.sin(TH[ok])
+    base["roK"][ok] = ro * float(ex["k"]); base["roOmega"][ok] = ro * float(ex["omega"])
+    if st.get("gas_model") == "frozen_tp":
+        # 内部エネルギーは **NASA-9 をそのまま使う** (定 cv の近似はしない)。forge の thermoHrefTemp 基準と同一
+        if gas is None:
+            raise ValueError("frozen_tp の MOC IC には FrozenGas が要る")
+        base["roe"][ok] = ro * (gas.h_sens(T) - ex["R"] * T + 0.5 * q * q)
+        if st.get("tracer"):
+            base["roXi"][ok] = ro
+        for i, ye in enumerate(ex["Y"]):
+            base[f"roY{i}"][ok] = ro * float(ye)
+    else:
+        base["roe"][ok] = P / gm + 0.5 * ro * q * q
+    return base, int(ok.sum())
+
+
+def paste_region_ic(h5path, y_mid, y_top, scale: float, st: dict, gamma: float, kern=None, gas=None) -> int:
+    """領域別一様 IC: 中間線とランプ/プルーム上線の間 = 燃焼器出口状態、それ以外 (カウル下・ランプ側外部流) = 外部流。
+    `kern` を渡すと排気側を **MOC 場**で埋める (`moc_ic_arrays`)。戻り値 = MOC を当てたノード数。"""
     with h5py.File(h5path, "r+") as f:
         cc = f["/CELLS/centCoords"][:].reshape(-1, 3)
         xn, yn = cc[:, 0] / scale, cc[:, 1] / scale
         upper = (yn > y_mid(xn)) & (yn < y_top(xn))
-        write_ic_arrays(f["/VALUE"], region_ic_arrays(upper, st, gamma))
+        if kern is None:
+            write_ic_arrays(f["/VALUE"], region_ic_arrays(upper, st, gamma)); return 0
+        arrays, n = moc_ic_arrays(kern, xn, yn, upper, st, gamma, gas)
+        write_ic_arrays(f["/VALUE"], arrays); return n
+
+
+def stamp_region_ic_species(h5path, run_dir, st: dict, gases: dict | None) -> str | None:
+    """新規初期場 (paste_region_ic) に化学種の属性を付ける (frozen_tp のみ; plan thermophysics-solver-owned-species-db §4.3 #3b)。
+    IC が roe を作った排気・外気のガス (datum・輸送種組成・R・e_sens) を宛先の `forge --resolve-species` の記録と照合し、
+    一致したときだけ付ける (違えば forge_species.SpeciesCheckError)。cpg は何もしない。"""
+    if gases is None or st.get("gas_model") != "frozen_tp":
+        return None
+    L = gases["layout"]
+    species = list(L.species)
+    mixes = [("exhaust", st["exhaust"]["Y"], gases["exhaust"].R, gases["exhaust"].e_sens),
+             ("external", st["ext"]["Y"], gases["ext"].R, gases["ext"].e_sens)]
+    return _forge_species().stamp_new_field(h5path, run_dir, species, [float(L.entries[k].MW) for k in species],
+                                            gases["href_T"], mixes, tool="paste_region_ic")
 
 
 def convert_mesh(run_dir, msh: str, out: str) -> None:
@@ -382,8 +595,8 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
                         top_ext_angle=float(np.deg2rad(m.get("top_ext_angle_deg", np.rad2deg(design.info["theta_e"])))),
                         ext_top=bool(int(m.get("ext_top", 0))), top_depth=float(m.get("top_depth", 2.0)),
                         nj_ext_top=int(m.get("nj_ext_top", 41)), nj_wake=int(m.get("nj_wake", 9)),
-                        vehicle_clearance=float(m.get("vehicle_clearance", 0.02)), first_top_frac=float(m.get("first_top_frac", 0.02)),
-                        vehicle_taper=float(m.get("vehicle_taper", 0.0)),
+                        vehicle_clearance=float(m.get("vehicle_clearance", 0.06)), first_top_frac=float(m.get("first_top_frac", 0.02)),
+                        vehicle_taper=float(m.get("vehicle_taper", 0.0)), t_base=float(m.get("t_base", 0.0)), first_wake_frac=float(m.get("first_wake_frac", 0.0)), split_plume_at_te=bool(m.get("split_plume_at_te", False)),
                         vehicle_wedge_deg=float(m.get("vehicle_wedge_deg", 3.0)), ramp_fillet=float(m.get("ramp_fillet", 0.0)),
                         scale=H)
     if wall_offset:
@@ -398,13 +611,17 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     cfg = _solver_config(p, n, out_int, cfl, st["ext"]["P"])
     (run_dir / "bcondConfig.yaml").write_text(_bcond_config(p, st))
     (run_dir / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
-    write_species_db(p, run_dir, frozen_gases(p))     # R3: 擬似種 EXH / AIR の NASA-9 (cpg なら何も書かない)
+    write_species_db(p, run_dir, frozen_gases(p))     # R3: species_meta.yaml (lump の NASA-9 はソルバが合成、cpg なら何も書かない)
     disc = p.mesh.get("discretization", "cell")
     # 品質ゲートは primal (cell) 変換で
     (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"')
                                                .replace(", nodeWallDirichlet: 1", "").replace(", nodeInletCornerWall: 1", ""))
     convert_mesh(run_dir, "sern.msh", "sern_qc.h5")
-    q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"), "sern_qc.h5", "--mode", "2d"], cwd=run_dir, env=_ENV, capture_output=True, text=True)
+    # AR 上限は問題 YAML の `mesh.ar_max` で緩められる (既定 1000)。**壁法線に沿った構造格子の
+    # 境界層セルに限り 5000 まで** (AGENTS.md「メッシュ品質チェック」2026-09-12 ユーザ決定)。
+    # 他の設計チェーン (`runner_axismach` / `runner_wt`) は既にこの knob を持っている。
+    q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"), "sern_qc.h5", "--mode", "2d",
+                        "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV, capture_output=True, text=True)
     (run_dir / "MESH_QUALITY.txt").write_text(q.stdout + q.stderr)
     if q.returncode != 0:
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
@@ -417,10 +634,18 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     for f in run_dir.glob("sern_qc.xmf"):
         f.unlink()
     (run_dir / "solverConfig.yaml").write_text(cfg)
-    paste_region_ic(run_dir / MESH, y_mid, y_top, H, st, p.gamma)
+    # `mesh.ic: moc` で排気側を MOC 場から与える (既定 uniform)。一様 IC は入口状態を全域に置くので
+    # 出口で 17 倍ずれており、梯子 12000 step の主因になっている (2026-09-19)
+    _ic = str(p.mesh.get("ic", "uniform")).lower()
+    _gs = frozen_gases(p)
+    n_moc = paste_region_ic(run_dir / MESH, y_mid, y_top, H, st, p.gamma,
+                           kern=(kern if _ic == "moc" else None),
+                           gas=((_gs or {}).get("exhaust")))
+    stamp_region_ic_species(run_dir / MESH, run_dir, st, _gs)     # 新規初期場の化学種属性 (TP のみ)
     ex = st["exhaust"]
     F_ideal_nd, M_e_id = ideal_thrust(p, st)
     info = {"problem": str(problem_path), "run_dir": str(run_dir), "nsteps": n, "H_m": H, "states": st, "gas_model": st["gas_model"],
+            "ic": {"mode": _ic, "n_moc_nodes": int(n_moc)},
             "operating_point": opinfo, "wall_offset": bool(wall_offset), "design_point": d0,
             "design": {"key_point": list(design.key_point), "foot_a": list(design.foot_a), "lip_e": list(design.lip_e),
                        "L_ramp": design.L_ramp, "mass_fraction_check": design.mass_fraction_check,
@@ -434,7 +659,7 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
 
 
 def _species_signature(run_dir) -> dict | None:
-    """run dir の輸送種の署名を**実 config + 解決済み DB** から作る (codex result-2 M2): 種順序・MW・両区間 NASA-9 係数・
+    """run dir の輸送種の署名を**実 config + 解決済み熱物性** (forge_species.run_thermo) から作る (codex result-2 M2): 種順序・MW・全区間の NASA-9 係数・
     温度区切り・thermoHrefTemp・tracer 設定。`species_meta.yaml` があれば順序の矛盾を拒否。CPG (thermalMethod≠2) は None。
     TP なのに config/DB が読めなければ ValueError (照合不能)。"""
     from ..gas.composition import load_species_meta, load_yaml_str
@@ -445,19 +670,21 @@ def _species_signature(run_dir) -> dict | None:
     cfg = load_yaml_str(cfgp.read_text()); pp = cfg.get("physProp", {})
     if int(pp.get("thermalMethod", 0)) != 2:
         return None
-    names = [str(k).upper() for k in (pp.get("species") or ["N2"])]
-    dbp = rd / str(pp.get("speciesDBFile") or "species_db.yaml")
-    if not dbp.exists():
-        raise ValueError(f"{rd}: speciesDBFile {dbp.name} が無く種配置を照合できない")
-    db = load_yaml_str(dbp.read_text()) or {}
-    dbu = {str(k).upper(): v for k, v in db.items()}
+    names = [(str(k["name"]) if isinstance(k, dict) else str(k)).upper() for k in (pp.get("species") or ["N2"])]
+    # 熱物性は共通の読み出し forge_species.run_thermo (plan thermophysics-solver-owned-species-db #8): ソルバの解決済み記録 >
+    # 従来の speciesDBFile > forge --resolve-species。lump 記法 ({name, lump, basis}) の config も読める
+    try:
+        th = _forge_species().run_thermo(rd)
+    except ValueError as e:
+        raise ValueError(f"{rd}: 熱物性を解決できず種配置を照合できない ({e})") from None
+    if [str(k).upper() for k in th["names"]] != names:
+        raise ValueError(f"{rd}: 解決済み熱物性の種 {th['names']} が {cfgp.name} の {names} と違う")
     ents = {}
-    for k in names:
-        if k not in dbu:
-            raise ValueError(f"{rd}: 種 {k} が {dbp.name} に無い")
-        e = dbu[k]
-        ents[k] = {"MW": float(e["MW"]), "low": [float(v) for v in e["nasa9_low"]], "high": [float(v) for v in e["nasa9_high"]],
-                   "ranges": [float(e.get("Tlo", 200.0)), float(e.get("Tmid", 1000.0)), float(e.get("Thi", 6000.0))]}
+    for k, n in zip(names, th["names"]):
+        e = th["species"][n]
+        # 2 区間 (Tlo/Tmid/Thi, nasa9_low/high) と区間可変 (Tbounds, nasa9_intervals; 種 DB 段 3 の解決済み記録) の両方を読む
+        Tb, co = _forge_species().nasa9_intervals(e)
+        ents[k] = {"MW": float(e["MW"]), "coefs": co, "ranges": Tb}
     meta = load_species_meta(rd)
     if meta is not None and [str(k).upper() for k in meta["species"]] != names:
         raise ValueError(f"{rd}: species_meta.yaml の種順序 {meta['species']} が solverConfig の {names} と矛盾")
@@ -483,11 +710,11 @@ def check_species_compatible(src_run_dir, dst_run_dir, what: str = "restart", al
             ea, eb = a["entries"][k], b["entries"][k]
             if abs(ea["MW"] / eb["MW"] - 1.0) > 1e-9:
                 raise ValueError(f"{what}: 種 {k} の MW が違う ({ea['MW']} / {eb['MW']}) — DB が異なる")
-            for rng in ("low", "high"):
-                if any(abs(x - y) > 1e-12 * max(abs(x), abs(y), 1.0) for x, y in zip(ea[rng], eb[rng])):
-                    raise ValueError(f"{what}: 種 {k} の NASA-9 係数 ({rng}) が違う — DB が異なる")
             if ea["ranges"] != eb["ranges"]:
                 raise ValueError(f"{what}: 種 {k} の温度区切りが違う ({ea['ranges']} / {eb['ranges']})")
+            for i, (ca, cb) in enumerate(zip(ea["coefs"], eb["coefs"])):
+                if any(abs(x - y) > 1e-12 * max(abs(x), abs(y), 1.0) for x, y in zip(ca, cb)):
+                    raise ValueError(f"{what}: 種 {k} の NASA-9 係数 (区間 {i}) が違う — DB が異なる")
     if abs(a["href"] - b["href"]) > 1e-9:
         raise ValueError(f"{what}: thermoHrefTemp が違う ({a['href']} / {b['href']})")
     if a["tracer"] != b["tracer"]:
@@ -506,6 +733,13 @@ def restart_by_index(res_h5, mesh_h5) -> None:
     ノードに写す → 排気側の壁ノードが外部流の圧力を持ち 2 次で発散した (interp_field の全 134 station で誤写像を確認)。"""
     check_species_compatible(Path(res_h5).parent, Path(mesh_h5).parent, "restart_by_index")
     sig = _species_signature(Path(mesh_h5).parent)
+    # 化学種の属性 (§4.3): SRC の記録を検証し、宛先を --resolve-species で解決して一致なら継承 (不一致は書き込み前に停止)
+    fsp = _forge_species()
+    try:
+        species_plan = fsp.plan_inherit(res_h5, Path(mesh_h5).parent, tool="restart_by_index")
+    except fsp.SpeciesCheckError as e:
+        raise ValueError(f"restart_by_index: {e}") from None
+    fsp.write_species_attrs(mesh_h5, None)
     with h5py.File(res_h5, "r") as src, h5py.File(mesh_h5, "r+") as dst:
         n = len(dst["VALUE/ro"])
         if sig is not None:
@@ -519,6 +753,7 @@ def restart_by_index(res_h5, mesh_h5) -> None:
                         dst["VALUE"].create_dataset(k, data=np.asarray(src["VALUE"][k][:], dtype=np.float32))
                     continue
                 dst["VALUE"][k][:] = src["VALUE"][k][:]
+        fsp.commit_inherit(dst, species_plan)
 
 
 def warm_from_run(dst_run_dir, src_run_dir) -> dict:
@@ -551,6 +786,20 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
         check_species_compatible(src_run_dir, dst_run_dir, "warm_from_run", allow_db_change=True)   # codex result M3
         # 作動点適用後の組成で擬似種を作る (prepare_info の problem は作動点未適用の YAML なので op を再選択)
         pd_ = load_problem(di["problem"]); select_operating_point(pd_, di["operating_point"]["name"]); gases_d = frozen_gases(pd_)
+    # 化学種の属性 (§4.3「種変換」と同じ扱い): roe は目標作動点の物性で作り直すので、入口 (元 res) が検証済みなら
+    # 書き込み後に宛先の記録と照合して付ける。記録が壊れていれば止める。元が未検証で宛先が TP なら既定で止める
+    # (ソルバと同じ規約, #3c); その実行だけ FORGE_ALLOW_UNVERIFIED_SPECIES=1 で許可したときは宛先も未検証 (属性なし)
+    fsp = _forge_species()
+    src_state = fsp.source_species_state(res[-1])
+    if src_state["state"] == "broken":
+        raise ValueError(f"warm_from_run: 元 res の化学種記録を検証できない (照合不能): {src_state['why']}")
+    if gases_d is not None and src_state["state"] in ("none", "unverified"):
+        try:
+            fsp.refuse_unverified("warm_from_run", f"SRC {res[-1]} is unverified ({src_state['why']}) and destination "
+                                                   f"{dst_run_dir} is thermally perfect (frozen_tp)")
+        except fsp.SpeciesCheckError as e:
+            raise ValueError(f"warm_from_run: {e}") from None
+    fsp.write_species_attrs(dst_run_dir / MESH, None)
     with h5py.File(res[-1], "r") as src, h5py.File(dst_run_dir / MESH, "r+") as dst:
         n = len(dst["VALUE/ro"])
         if len(src["VALUE/ro"]) != n:
@@ -564,10 +813,10 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
             P = (g_s - 1.0) * (roe - 0.5 * sum(m * m for m in mom) / np.maximum(ro, 1e-30))
             roe_n = P * s_P / (g_d - 1.0) + 0.5 * sum(m * m for m in mom_n) / np.maximum(ro_n, 1e-30)
         else:
-            # frozen_tp (R3): 圧力は出力の P を相似スケール、組成 (Y_EXH, Y_AIR) は場のまま持ち越し、
+            # frozen_tp (R3): 圧力は出力の P を相似スケール、組成 (Y_EXH, Y_AMB) は場のまま持ち越し、
             # T' = P'/(ρ' R_mix(Y)) と目標作動点の擬似種 (排気組成が違う) で roe' = ρ'(Σ Y_s e_sens,s(T') + ½|u'|²) を組み直す
             # 組成の再初期化 (codex result-2 M1): 元の組成は排気率 ξ 以外捨て、**目標作動点**の入口ベクトルから
-            # Y_t = ξ Y_in^dst + (1−ξ) Y_ext^dst を組む (lumped [EXH, AIR] では Y_EXH の持ち越しと同値、full / lumped+keep では
+            # Y_t = ξ Y_in^dst + (1−ξ) Y_ext^dst を組む (lumped [EXH, AMB] では Y_EXH の持ち越しと同値、full / lumped+keep では
             # 実種分率が新作動点の排気組成に変わる)。ξ は元 run の exhaust_fraction (tracer なら roXi/ρ、無ければ流入元ラベル種)
             from ..gas.composition import exhaust_fraction, reinit_transport_vector
             tg = gases_d["transported"]; Ld = gases_d["layout"]; names = list(Ld.species)
@@ -599,7 +848,14 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
         if "roK" in src["VALUE"] and "roK" in dst["VALUE"]:
             dst["VALUE/roK"][:] = src["VALUE/roK"][:] * (s_ro * s_u * s_u)
             dst["VALUE/roOmega"][:] = src["VALUE/roOmega"][:] * (s_ro * s_u)
-    return {"src": str(src_run_dir), "s_ro": s_ro, "s_u": s_u, "s_P": s_P, "gamma": [g_s, g_d]}
+    species = "unverified"
+    if gases_d is not None and src_state["state"] == "verified":
+        tg = gases_d["transported"]; Ld = gases_d["layout"]; names = list(Ld.species)
+        mixes = [(f"species {k}", [1.0 if j == i else 0.0 for j in range(len(names))], g.R, g.e_sens)
+                 for i, (k, g) in enumerate(zip(names, tg))]
+        species = fsp.stamp_new_field(dst_run_dir / MESH, dst_run_dir, names, [float(Ld.entries[k].MW) for k in names],
+                                      gases_d["href_T"], mixes, tool="warm_from_run")
+    return {"src": str(src_run_dir), "s_ro": s_ro, "s_u": s_u, "s_P": s_P, "gamma": [g_s, g_d], "species_attrs": species}
 
 
 def run_forge(run_dir) -> int:
@@ -608,8 +864,22 @@ def run_forge(run_dir) -> int:
     return r.returncode
 
 
+
+def _archive_stage(run_dir, tag: str) -> None:
+    """段の `residual_history.csv` を `residual_<tag>.csv` に退避する (2026-09-19, codex plan レビュー M5)。
+    forge は段ごとに上書きするので、退避しないと**どの段で残差が上がったかを後から追えない**。
+    設計 B の `rms_roY1` 上昇を「soft/mid で起きた」と断じた根拠が無かったのはこれが理由。"""
+    src = Path(run_dir) / "residual_history.csv"
+    if src.exists():
+        try:
+            (Path(run_dir) / f"residual_{tag}.csv").write_bytes(src.read_bytes())
+        except OSError:
+            pass
+
+
 def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: float = 0.5, soft_conv: int = 0,
                warm_lam_steps: int = 0, warm_lam_cfl: float = 0.2, mid_steps: int = 0,
+               warm_lam_ramp=None, soft_ramp=None,
                warm_src=None, warm_adapt_steps: int = 500) -> int:
     """soft_cfl / soft_conv: soft 段の CFL と convMethod (既定 0.5 / 1 次)。3D SST の後縁 3 重点など、1 次でも
     立ち上がりが厳しいケースで下げる。
@@ -654,46 +924,72 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
             f.unlink()
         warm_lam_steps = 0      # 以降は mid → 本段
     if warm_lam_steps > 0 and 'model: "sst"' in cfg_main:      # 層流暖機段 (SST を後から入れる)
-        lam = re.sub(r'turbulence: \{model: "sst"[^}]*\}', 'turbulence: {model: "none"}', cfg_main)
-        if 'model: "none"' not in lam:
+        lam0 = re.sub(r'turbulence: \{model: "sst"[^}]*\}', 'turbulence: {model: "none"}', cfg_main)
+        if 'model: "none"' not in lam0:
             raise RuntimeError("層流暖機: turbulence 行の置換に失敗 (solverConfig の書式が変わった)")
-        lam = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {warm_lam_cfl}, cfl_pseudo: {warm_lam_cfl}", lam)
-        lam = lam.replace("convMethod: 1", "convMethod: 0")
-        lam = re.sub(r"nStepOuter: \d+", f"nStepOuter: {warm_lam_steps}", lam)
-        lam = re.sub(r"outStepInterval: \d+", f"outStepInterval: {warm_lam_steps}", lam)
-        (run_dir / "solverConfig.yaml").write_text(lam)
+        lam0 = lam0.replace("convMethod: 1", "convMethod: 0")
+        # **CFL ramp** (2026-09-19 ユーザ提案): 暖機は固定 CFL だと 0.1 が上限だが、場が育つにつれ上げられる。
+        # ソルバ側に ramp が無いので runner が forge を複数回起動して段階昇圧する
+        # (風洞チェーン `runner_axismach.run_staged_ns(stages="ramp")` と同じ方式)。
+        # `warm_lam_ramp` が空なら従来どおり `warm_lam_cfl` 固定の 1 段。
+        legs = [(float(c), int(warm_lam_steps / max(len(warm_lam_ramp), 1))) for c in warm_lam_ramp] \
+            if warm_lam_ramp else [(float(warm_lam_cfl), int(warm_lam_steps))]
+        for c, n_leg in legs:
+            lam = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", lam0)
+            lam = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", lam)
+            lam = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", lam)
+            (run_dir / "solverConfig.yaml").write_text(lam)
+            rc = run_forge(run_dir)
+            res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
+            if rc != 0 or not res:
+                raise RuntimeError(f"層流暖機段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
+            _archive_stage(run_dir, f"warm_cfl{c:g}")
+            restart_by_index(res[-1], run_dir / MESH)
+            for f in run_dir.glob("res_*"):
+                f.unlink()
+    if warm_src is not None:      # soft は適応段で代替済み → mid へ
+        return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps)
+    # soft 段も **CFL ramp** できる (`opt.soft_ramp`, 2026-09-19)。暖機で ramp が効いた (固定 0.5 は step 30 で
+    # 発散するのに ramp なら 1.0 まで到達) のと同じ理屈。固定 soft_cfl 1.0 は設計によって
+    # `rms_roY1` (排気∩外気のせん断層) が上昇するので、段階昇圧で通す。
+    _soft_legs = [(float(c), max(int(soft_steps / len(soft_ramp)), 1)) for c in soft_ramp] \
+        if soft_ramp else [(float(soft_cfl), int(soft_steps))]
+    for c, n_leg in _soft_legs:
+        soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", cfg_main)
+        soft = soft.replace("convMethod: 1", f"convMethod: {soft_conv}")
+        soft = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", soft)
+        soft = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", soft)
+        (run_dir / "solverConfig.yaml").write_text(soft)
         rc = run_forge(run_dir)
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res:
-            raise RuntimeError("層流暖機段が失敗 (res_nan_*.h5 / forge_run.log を見る)")
+            raise RuntimeError(f"soft 段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
+        _archive_stage(run_dir, f"soft_cfl{c:g}")
         restart_by_index(res[-1], run_dir / MESH)
         for f in run_dir.glob("res_*"):
             f.unlink()
-    if warm_src is not None:      # soft は適応段で代替済み → mid へ
-        return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps)
-    soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {soft_cfl}, cfl_pseudo: {soft_cfl}", cfg_main)
-    soft = soft.replace("convMethod: 1", f"convMethod: {soft_conv}")
-    soft = re.sub(r"nStepOuter: \d+", f"nStepOuter: {soft_steps}", soft)
-    soft = re.sub(r"outStepInterval: \d+", f"outStepInterval: {soft_steps}", soft)
-    (run_dir / "solverConfig.yaml").write_text(soft)
-    rc = run_forge(run_dir)
-    res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
-    if rc != 0 or not res:
-        raise RuntimeError("soft 段が失敗 (res_nan_*.h5 / forge_run.log を見る)")
-    restart_by_index(res[-1], run_dir / MESH)
-    for f in run_dir.glob("res_*"):
-        f.unlink()
-    return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps)
+    return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps, soft_ramp)
 
 
-def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int) -> int:
+def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, soft_ramp=None) -> int:
     """mid 段 (2 次 + soft CFL) → 本段。soft/暖機/warm start の後段として共用する。"""
     if mid_steps > 0:      # mid 段: 2 次に上げるが CFL は soft のまま (次数と CFL を同時に上げない)
-        mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {soft_cfl}, cfl_pseudo: {soft_cfl}", cfg_main)
-        mid = re.sub(r"nStepOuter: \d+", f"nStepOuter: {mid_steps}", mid)
-        mid = re.sub(r"outStepInterval: \d+", f"outStepInterval: {mid_steps}", mid)
-        (run_dir / "solverConfig.yaml").write_text(mid)
-        rc = run_forge(run_dir)
+        legs = [(float(c), max(int(mid_steps / len(soft_ramp)), 1)) for c in soft_ramp] \
+            if soft_ramp else [(float(soft_cfl), int(mid_steps))]
+        for _ci, (c, n_leg) in enumerate(legs):
+            mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", cfg_main)
+            mid = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", mid)
+            mid = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", mid)
+            (run_dir / "solverConfig.yaml").write_text(mid)
+            rc = run_forge(run_dir)
+            _archive_stage(run_dir, f"mid_cfl{c:g}")
+            if _ci < len(legs) - 1:
+                _r = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(ch for ch in f.stem if ch.isdigit())))
+                if rc != 0 or not _r:
+                    raise RuntimeError(f"mid 段が失敗 (cfl {c})")
+                restart_by_index(_r[-1], run_dir / MESH)
+                for f in run_dir.glob("res_*"):
+                    f.unlink()
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res:
             raise RuntimeError("mid 段 (2 次 + soft CFL) が失敗 (res_nan_*.h5 / forge_run.log を見る)")
@@ -718,7 +1014,8 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     if rc is None:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
-    gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass)
+    gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass,
+                           p_min=float(p.evaluate.get("p_min", 1.0)))
     out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "forge_rc": rc,
            "operating_point": info.get("operating_point"), "L_ramp": info["design"]["L_ramp"],
            "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"]}
@@ -738,6 +1035,12 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
         if on_design:
             out["cfd_vs_moc"] = {k: (last[k] - info["moc_forces"][k]) for k in ("C_T", "C_L", "C_M")}
         write_force_history_csv(out_dir / "force_history.csv", hist)
+    # 実効 slauWallNormalChi と設定方針 (plan convection-slau-wall-normal-chi-default §4.4、codex plan M3)。
+    # 起動記録 forge_launches.jsonl の**最後の起動** (本段) の値。記録が無い run (旧バイナリ) は None = 不明。
+    out["slau_wall_normal_chi_effective"] = _last_launch_chi(run_dir)
+    # 実効 mesh.scalarGradient (plan gradient-scalar-lsq-unification #6、codex diagnose 2026-09-27)。記録が無ければ None = 不明。
+    out["scalar_gradient_effective"] = _last_launch_value(run_dir, "scalarGradient", allowed=("gg", "lsq"))
+    out["flag_policy"] = FLAG_POLICY
     (out_dir / "metrics.json").write_text(json.dumps(out, indent=1))
     return out
 
@@ -763,6 +1066,7 @@ def main(argv=None):
     rc = run_staged(a.run_dir, a.stages,
                     soft_steps=int(o.get("soft_steps", 3000)), soft_cfl=float(o.get("soft_cfl", 0.5)),
                     warm_lam_steps=int(o.get("warm_lam_steps", 0)), warm_lam_cfl=float(o.get("warm_lam_cfl", 0.2)),
+                    warm_lam_ramp=o.get("warm_lam_ramp"), soft_ramp=o.get("soft_ramp"),
                     mid_steps=int(o.get("mid_steps", 0)),
                     warm_adapt_steps=int(o.get("warm_adapt_steps", 500)))
     out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))

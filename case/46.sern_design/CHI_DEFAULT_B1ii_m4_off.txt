@@ -1,0 +1,8 @@
+# chi 既定化 B1 (ii) 帯判定 m4_off: 明示 0 = run_0965_chidef_2d_m4_off_flag0/ct.csv / 省略 = run_0966_chidef_2d_m4_off_omit/ct.csv
+末尾 40 % の窓、差区間 I_Δ = [min C1 − max C0, max C1 − min C0]
+C_T             flag0 STEADY       flag1 STEADY       平均差 -0.000096  I_Δ [-0.000142, -0.000054]  許容 ±0.002  → 帯内
+C_T_with_shear  flag0 STEADY       flag1 STEADY       平均差 -0.000149  I_Δ [-0.000193, -0.000109]  許容 ±0.002  → 帯内
+C_L             flag0 OSCILLATING  flag1 OSCILLATING  平均差 +0.001051  I_Δ [+0.000878, +0.001208]  許容 ±0.002  → 帯内
+C_L_with_shear  flag0 OSCILLATING  flag1 OSCILLATING  平均差 +0.001044  I_Δ [+0.000870, +0.001201]  許容 ±0.002  → 帯内
+C_M             flag0 OSCILLATING  flag1 OSCILLATING  平均差 -0.021282  I_Δ [-0.024799, -0.017382]  許容 ±0.05  → 帯内
+全体 (最悪列): 帯内

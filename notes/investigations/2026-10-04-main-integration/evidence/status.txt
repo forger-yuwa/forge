@@ -1,0 +1,32 @@
+BUILT integ 20ea4718
+BUILT sern 4703a727
+unit test_passive_fct rc=0 ALL PASS
+unit test_passive_scalar rc=0 ALL PASS
+unit test_renorm_gate rc=0 ALL PASS
+unit test_twophase_kernel BUILDFAIL
+unit test_farfield_flux BUILDFAIL
+run_0970_integ_A1_ref1 rows=601
+run_0971_integ_A1_ref2 rows=601
+run_0972_integ_A1_ref3 rows=601
+run_0973_integ_A1_new1 rows=601
+run_0974_integ_A1_new2 rows=601
+regress A1 VERDICT: PASS
+run_0975_integ_A2_ref1 rows=601
+run_0976_integ_A2_ref2 rows=601
+run_0977_integ_A2_ref3 rows=601
+run_0978_integ_A2_new1 rows=601
+run_0979_integ_A2_new2 rows=601
+regress A2 VERDICT: PASS
+run_0980_integ_A3_ref1 rows=601
+run_0981_integ_A3_ref2 rows=601
+run_0982_integ_A3_ref3 rows=601
+run_0983_integ_A3_new1 rows=601
+run_0984_integ_A3_new2 rows=601
+regress A3 VERDICT: PASS
+run_0540_integ_A4_ref1 rows=2401
+run_0541_integ_A4_ref2 rows=2401
+run_0542_integ_A4_ref3 rows=2401
+run_0543_integ_A4_new1 rows=2401
+run_0544_integ_A4_new2 rows=2401
+regress A4 VERDICT: PASS
+DONE

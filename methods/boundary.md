@@ -33,7 +33,8 @@ forge は密度ベース有限体積で **ゴーストセル方式** を採用�
 | `outlet_statPress` | 静圧固定流出 | $P_R = P_{\text{back}}$ を課し、$\rho$・速度は内部エントロピー＋外向き Riemann 不変量で構成 (亜音速)。逆流時も同じ静圧アンカー |
 | `inlet_Pressure` | 全圧・全温固定流入 | 全条件 ($P_t, T_t$) から内部マッハで $P, T$ を再構成 |
 | `inlet_Pressure_dir` | 方向指定全圧流入 | inlet_Pressure に流入方向ベクトルを併用 |
-| `outflow` | サブソニック流出 | リーマン不変量に基づく Non-reflecting 流出 |
+| `outflow` | 流出 (外挿) | **内部状態の全量コピー** (ゴースト・境界値とも)。外から情報を入れないので超音速流出向け。亜音速や流れが境界に沿う面では外気の状態が伝わらない。旧版の本表は「リーマン不変量に基づく非反射」と書いていたが実装と一致しない (逆流時の全圧分岐は値を計算して捨てる死にコード。2026-09-27 確認) |
+| `farfield` | **遠方境界** (node・SLAU/SLAU2 で実装済み、検証は一部未達。plan [`boundary-node-farfield-characteristic.md`](../plans/accepted/boundary-node-farfield-characteristic.md)) | 境界半割面の外側状態を作り (圧力・法線速度は内部エントロピーの 2 膨張波近似 [真空は内部状態に置換]、密度・組成・$k,\omega$ は自由流、超音速の境目は原始変数の滑らかな混合)、境界面だけ HLLC で解く。下の「遠方境界」節 |
 | `periodic` | 周期境界 | 対応するペア面のセル値をコピー (`scheme` 強制なし) |
 
 ### 例: 滑り壁
@@ -65,6 +66,42 @@ $$
 
 速度方向は外挿 (`inlet_Pressure`) または指定方向 (`inlet_Pressure_dir`)。
 
+**速度の大きさは新しい音速に整合させる** (2026-09-20 修正、`boundaryCond_d.cu` CPG 分岐)。
+$M_L$ は**内点の音速**で測った値なので、上式で $T_R$ を作ると音速が変わる。ここで速度を内点値のまま
+残すと境界状態の実マッハが $|u_L|/a_R \ne M_L$ になり、**指定した $T_t$・$P_t$ を再現しない**。
+
+$$|u_R| = |M_L|\,a_R,\qquad a_R = \sqrt{(\gamma-1)c_p T_R},\qquad \mathbf{u}_R = -|u_R|\,\mathbf{n}.$$
+
+反例 ($\gamma$ 1.4, $c_p$ 1005, $T_L$ 100 K, $|u_{n,L}|$ 100 m/s、指定 $T_t$ 293.15 K / $P_t$ 100 kPa):
+修正前は $T_t$ **284.232 K** / $P_t$ **89751 Pa** を返していた (3.0 % / 10.2 % 低い)。修正後は厳密に指定値を返す。
+TP 分岐 (`thermalMethod: 2`) は `thermo_isentropic_from_total_*` の $|u|$ で速度を作り直しており、
+**CPG 分岐だけが取り残されていた**。
+
+**⚠ 定常の設計点では現れない**: 内点が指定全条件と等エントロピーで整合していると $a_R = a_L$ になり
+不整合が消える (`case/08.bump` は修正前でも境界 $T_t$/$P_t$ の誤差 0.000 %)。
+**過渡・オフデザインでのみ出る**ので、検査は過渡で行うこと。
+
+**⚠ 超音速流入に使ってはいけない**: この閉包は内点から境界を決めるので、全特性が流入する超音速入口では
+**$\rho\downarrow \to u\uparrow \to P_s\downarrow \to \rho\downarrow$ の正帰還**になり、
+**入口の 1 節点だけが十数 step で枯れて発散する**。超音速入口は `inlet_uniformVelocity` を使う
+(詳細と指紋は [`procedures/divergence-and-startup.md`](../procedures/divergence-and-startup.md))。
+
+**`inlet_Pressure_dir` の退避 2 点** (2026-09-20 修正、`boundaryCond_d.cu`)。どちらも過渡で
+入口面の一部の節点だけが非有限になる形で出る (実測: case/53 翼列で step 214、49 節点中 24 節点)。
+
+1. **$P_c > P_t$ の根号**: 境界マッハは内点静圧から
+   $M_b=\sqrt{2\{(P_c/P_t)^{-(\gamma-1)/\gamma}-1\}/(\gamma-1)}$ で作るが、起動過渡で内点静圧が
+   指定全圧を超えると根号内が負になり NaN。亜音速全圧入口としては $M=0$ が正しい極限なので
+   0 に落とし、逆に $P_c$ が落ち込んだときの暴走を避けるため $M_b\le1$ に制限する。
+2. **方向ベクトルの消失**: `bvar` の `Ux/Uy/Uz` は config 指定の**方向**ベクトル (`valueTypes==1`) だが、
+   カーネルは毎 step これを**次元付き速度で上書き**する。$M\to0$ で長さが 0 になると次 step の
+   正規化が 0/0 になり、以後ずっと NaN。長さが $10^{-10}$ 未満なら面法線 (内向き) を方向に使う。
+
+**用途上の注意**: `inlet_uniformVelocity` は「速度 3 成分 + config エントロピー ($P_s/\rho^\gamma$)」を
+課し $R^+$ を内点から取る正しく posed な亜音速入口だが、**全温を固定しない**。内部静圧が config の
+アンカー状態からずれるとその分だけ $T_t$ がずれる (case/53 で入口 $T_t$ が 786→738 K と 48 K 低下)。
+$T_t$ 基準の熱伝達を比較する run では `inlet_Pressure_dir` (全圧・全温指定) を使う。
+
 ### 例: 静圧固定流出 (特性ベース・逆流統一)
 
 亜音速流出では SU2 `CEulerSolver::BC_Outlet` と同様、指定静圧 $P_{\text{exit}}$ のみを境界条件として課し、
@@ -86,10 +123,82 @@ incoming/outgoing 特性の捌きは upwind フラックスに委ねる。出口
 (これは `inlet_Pressure` の構成であり出口に流用すべきでない)。乱流スカラー $k,\omega$ は出口で
 ゼロ勾配 (Neumann) であり、逆流時も内部値を再循環させる (固定値注入はしない)。
 
+### 特性型の遠方境界 (`farfield`)
+
+計算領域を有限で打ち切る外部流の境界に使う。plan [`boundary-node-farfield-characteristic.md`](../plans/accepted/boundary-node-farfield-characteristic.md)。
+
+**node での形**: ゴーストセルは無い。境界節点 (自由度、半分の双対 CV) と、境界半割面の近似 Riemann 問題に渡す**外側状態 $U_R$** から、
+半割面の流束をその場で作る (弱形式)。外側状態は保持・更新しない。
+
+**外側状態** (外向き単位法線 $\hat{\mathbf n}$、境界節点 $i$、自由流 $\infty$):
+
+- 圧力・法線速度: 内部のエントロピーのまま、内部と擬似外側 ($P_\infty,U_{n,\infty}$) の間の 2 膨張波近似 (TRRS)。$z=(\gamma-1)/(2\gamma)$、$c_{po}=c_i(P_\infty/P_i)^z$ として
+
+$$
+P_R=\left[\frac{c_i+c_{po}-\tfrac{\gamma-1}{2}(U_{n,\infty}-U_{n,i})}{c_iP_i^{-z}+c_{po}P_\infty^{-z}}\right]^{1/z},\qquad
+U_{n,R}=U_{n,i}+\frac{2c_i}{\gamma-1}\Big(1-(P_R/P_i)^z\Big).
+$$
+
+  分子が正なら正 (外気と内部が法線方向に音速の数倍で離れて真空ができる面は、外側状態を内部状態に置き換えて数える)。小振幅では線形の特性量 $w^\pm=P\pm\rho_ic_iU_n$ (外向き $w^+$ は内部、内向き $w^-$ は自由流) に一致する。
+- 密度 (自由流のエントロピーで $P_R$ から)・接線速度・組成・$k,\omega$ は常に自由流側。
+- 超音速の境目は滑らかな重み (帯幅 0.1、原始変数 $\rho,\mathbf u,P,Y,k,\omega$ を同じ重みで混ぜる。流入時に運ぶスカラーも混ぜた後の値) でつなぐ: 自由流の法線 Mach が −1 以下なら $U_R=U_\infty$、内部の法線 Mach が 1 以上なら $U_R=U_i$ (こちらを優先。内部の特性がすべて外向きなら外の情報は入らない)。
+
+**面流束**: $\mathbf F=\mathbf F_{\mathrm{HLLC}}(U_i,U_R;\hat{\mathbf n})|S|$ (境界面だけ HLLC、内部面は SLAU)。波速は Davis ($S_L=\min(U_{n,L}-c_L,U_{n,R}-c_R)$、$S_R=\max(U_{n,L}+c_L,U_{n,R}+c_R)$)、
+$S_L\le S_*\le S_R$ と星状態の密度 $>0$ を検査し、外れたら HLL に退避する。化学種・$k,\omega$ は同じ質量流束の符号で風上化する (ピンなし)。
+
+**何が起きるか**: 法線方向の Mach 数 $U_n/c$ で、外向きに運ばれる量は内部から、内向きは外から来る (流れ全体の Mach ではない。境界に沿う流れは法線方向には亜音速)。
+- 境界に**法線方向に**入射する小振幅の音波は、外側状態の圧力・速度が内部の $\rho c$ のまま追随するので、ほとんど反射しない (1 次元試作で 0.04–0.5 %)。**斜めに入射する音波は反射する**: 線形極限 $p'-\rho c\,u_n'=0$ の反射係数は $(1-\cos\theta)/(1+\cos\theta)$ (入射角 $\theta$、45° で約 17 %、Giles 1990)。境界に沿う平均流・渦・強い衝撃波も同様に完全には抜けない。領域独立性は幅の系列で別に確かめる。外側に自由流をそのまま置くと、内部と外気の $\rho c$ の差で反射する (高温のプルームが出ていく例で 24–33 %)。
+- 流出か流入かは HLLC の接触波速度 $S_*$ の符号が選ぶ (外側状態の側を切り替える分岐が無いので流束は連続)。流出では内部の組成・エンタルピー、流入では自由流のものが入る。
+- 法線方向に超音速で流出する面 ($S_L\ge0$) では内部の物理流束そのもの。
+- 面流束は接触波 (圧力・速度が同じで温度・組成だけ違う流れ) を擾乱なしに通す。ただし TP 多成分では、温度・組成の違う気体が保存形で混ざるだけで圧力が 0.5 % 程度ずれる (境界と無関係のスキームの性質)。
+
+**方式の選定 (1 次元ホスト試作、`solver_density_cuda/tools/farfield_proto1d.py`)**: 平面音波の反射率 (Δx 5→1.25 mm) は採用案で一様流 0.52→0.10 % (M 0)・
+0.14→0.02 % (M 0.3)、高温内部 0.15→0.03 %。外側に自由流をそのまま置き SLAU で解くと 12–78 %、SLAU は両側が超音速流出でも外側の速度に流束が影響される (+25 %)。
+Riemann 不変量 $U_n\pm2c/(\gamma-1)$ を内部と外気から混ぜる方式 (SU2 `BC_Far_Field`) は温度だけ違う接触波で音響擾乱を作り、
+外側状態の密度・組成の側を流向で切り替える方式は流束が跳ぶ (1e-4 刻みの掃引で 14–26 %)。
+
+**使い方 (YAML)**: `bcondConfig.yaml` に自由流の状態を `floats` で与える (入口と同じ書式。多成分は `Y0..`、RANS は `k`・`omega`)。
+
+```yaml
+side_far: {physID: 10, kind: farfield, outputHDFflg: 0, ints: , floats: {ro: 0.0449740914, Ux: 1788.2, Uy: 0.0, Uz: 0.0, Ps: 2851, k: 479.65, omega: 119844.2, Y0: 0, Y1: 1}}
+```
+
+対応範囲は `mesh.discretization: node`・`solver` SLAU/SLAU2 だけで、凝縮・トレーサ・遷移モデル・軸対称とは併用できない (起動時にエラーで止まる、`boundaryCond.cpp`)。
+SERN 3D の生成器 (`runner_sern3d`) では problem YAML の `evaluate.side_far_kind: farfield` (側方の遠方面、既定 slip) と `evaluate.top_out_kind` (`outlet` [既定、種別は `evaluate.outlet_kind` に従う。例: `outflow`] / `slip` / `farfield`) で選ぶ。`top_out_kind: outflow` のように直接種別を書くとエラーになる。
+
+**診断**: 外側状態の置換 (真空・非物理) と HLL への退避は起動からの累積回数をログに出す (`[farfield] 累積: …`、増えたときだけ。評価区間では 0 が合格条件)。
+`FORGE_DUMP_FARFIELD=<prefix>` を付けると最初の評価 (`FORGE_DUMP_FARFIELD_CALLS=n` で n 回) の面ごとの流束 $\mathbf F S$・外側状態を `<prefix>.<physID>.csv` に書く
+(運動量流束は $p-p_{\mathrm{ref}}$ のゲージ)。SERN の運動量収支の検算 `design/forge_design/metrics/sern_momentum.py --ff-dump <prefix>` はこの流束で farfield 面を閉じる
+(ダンプが無いと「閉じない」と明示する)。
+
+**検証の状況と受理範囲 (plan accepted 2026-10-04、限定受理)**: **汎用の遠方境界としては受理していない** (ユーザ決定で範囲を限定)。farfield の無い構成での多 step の新旧同等性 (V0 後半) は示せていない (再実行変動と同じ桁の差、静的確認では経路差なし)。合格 = farfield を含まない構成での初回評価のビット一致・単体 (CPU/GPU 一致)・起動拒否 (非対応構成と多成分の組成省略)・自由流保持・法線入射の平面音波の反射 (dual-time 0.10 %)・保存収支・陽解法と SST・局所逆流・接触波 (3 物性)。独立参照解 (1D、Δx 0.3125 mm で収束) との比較では、Δx 5 mm の forge の差は内部の数値散逸 (音響振幅 −22 %) で、境界の寄与は小さい。**未達・判定不能**: 斜め衝撃波 (V2c、2 次精度で凸角の残差が停滞し必要条件を満たさない)、TP 音響の時間精度 (V2d-2、同一入力の再実行変動 ≈ 1.5 % が基準 1 % を超え測定不能)。SERN 3D の側方遠方面 (M6、g3/g4、固定リミッタ基準値) では 2.50 H が 3.42・4.35 H と力係数で許容内、g3/g4 の 2 水準の差を足しても設計許容内 (2 水準の差は格子誤差の上限ではない; 広幅での種 DB #14 後の応答は未測定)。
+詳細と run は plan の §5.1・§6。
+
+**`slip` との違い**: slip は質量を通さない壁 (法線速度 0 を強制) なので、境界に達した波は反射する。
+**`outflow` との違い**: outflow は全部を内部から取り、外から何も入れない。正しいのは法線方向に超音速で流出する面 ($M_n\ge1$) だけ。
+
 ### 周期境界
 
 周期境界は他境界と異なり、対応するペアセル値を直接コピーする。
 対流再構成は内部面と同じ MUSCL 経路で処理されるため、`scheme` の強制 1 次降格は無い。
+
+- **並進 (`type: 0`, `dx/dy/dz`) と回転 (`type: 1`, `dtheta`、x 軸まわり)**。cell 方式はゴーストへのコピーで、回転ではゴーストの $(u_y,u_z)$・$(\rho u_y,\rho u_z)$ を
+  $R(d\theta)$ で回す (`boundaryCond_d.cu`)。
+- **node 方式は seam 合算の別経路** (`periodicNode_d.cu`): 継ぎ目で割れた CV を union-find で group にし、合併体積のもとで残差を root に集めて
+  全員へ書き戻す (保存量・勾配・dq もミラー)。詳細は [`discretization.md`](discretization.md) §2.5.5 と
+  plan [`discretization-median-dual-3d.md`](../plans/active/discretization-median-dual-3d.md) §4.5。
+- **node の回転周期 (実装中、plan [`boundary-node-rotational-periodic.md`](../plans/active/boundary-node-rotational-periodic.md))**: 各 member は root 相対角
+  $\theta_m$ を持ち、**ベクトル量の授受にだけ** x 軸まわりの回転 $R_m=R(\theta_m)$ をはさむ。
+  | 量 | gather (member → root) | broadcast / ミラー (root → member) |
+  | --- | --- | --- |
+  | 運動量残差・保存量・dq の $(y,z)$ 成分 | $R_m^{\mathsf T}\,\mathbf v_m$ | $R_m\,\mathbf v$ |
+  | スカラーの勾配 $\nabla\phi$ | $R_m^{\mathsf T}\,\mathbf g_m$ | $R_m\,\mathbf g$ |
+  | 速度勾配テンソル $G_{ij}=\partial u_i/\partial x_j$ | $R_m^{\mathsf T} G_m R_m$ | $R_m\,G\,R_m^{\mathsf T}$ |
+  | 陰解法の対角ブロック | $\mathcal R_m^{\mathsf T} D_m \mathcal R_m$ | $\mathcal R_m D\,\mathcal R_m^{\mathsf T}$ |
+  | $\rho,\rho e$、化学種・乱流量・遷移・凝縮モーメント・受動種、$\nabla\cdot\mathbf u$ | 恒等 (回転不変) | 恒等 |
+
+  リミタの seam 越し min/max は、スカラーと $u_x$ は従来どおり、$u_y,u_z$ は回転 group では取らない (自側の隣接だけで bound)。
+  並進のみの mesh は従来のカーネルをそのまま使う (ビット不変)。軸対称との併用と、軸 ($r=0$) を含むセクタは対象外。
 
 ### 物理 ID と YAML 設定
 
@@ -161,6 +270,76 @@ node (median-dual) の `wall_isothermal` は、壁ノードの温度状態を BC
 ため。cfl_pseudo 20 は発散)。ピン導入前は壁ノード T が壁 CV 平均に緩み (~0.1 K オフセット)、
 第 1 スペーシング勾配 −24% だった。
 
+#### 等温壁のエネルギー境界: 強制 と 弱形式 (`mesh.nodeIsothermalEnergyBC`)
+
+連続系の条件は同じ $T|_{\rm wall}=T_w$ だが、**離散化に 2 通りある**。既定は従来どおり強制 (0)。
+
+| | 強制 `0` (既定) | 弱形式 `1` (opt-in, SU2 型) |
+| --- | --- | --- |
+| 壁ノード $T$ | BC 値へ上書き (`pin_wall_node_temperature_d`) | 上書きしない (方程式を解く) |
+| 壁エネルギー残差 | ゼロ化 (`zero_res_roe_bplane_d`) | 残す |
+| 陰解法エネルギー行 | 単位行 | 対角ブロックに線形化を加算 |
+| 壁半割面の伝導 | $\nabla T\cdot S$ (ghostless) | $k_{\rm eff}(T_I-T_w)/d_1\cdot A_{\rm half}$ で**置換** |
+| 運動量 no-slip | 強制 | 強制 (変えない) |
+
+弱形式の残差寄与は壁半割面ごとに
+
+$$R^{\rm roe}_W \mathrel{-}= k_{\rm eff}\,\frac{T_I-T_w}{d_1}\,A_{\rm half},\qquad
+k_{\rm eff}=k_{\rm lam}+\frac{c_p\mu_t}{{\rm Pr}_t}$$
+
+で、$I$ は第一内部点 (壁法線との alignment 最大の非壁隣接)、$d_1$ は**法線投影距離**
+$\lvert(\mathbf x_I-\mathbf x_W)\cdot\hat n\rvert$。**点間距離ではない** — 法線から 30° 傾いた辺では
+点間距離版の熱流束が 13.4 % 小さくなる。**$T_W$ 自身は使わない**。
+
+陰解法には**近似対角項**を足す。$g=k_{\rm eff}A_{\rm half}/d_1$ と置くと壁寄与は
+$R_W^{\rm wall}=-g(T_I-T_w)$ なので、**$(\rho e)_W$ による厳密微分は 0** であり温度微分は
+内部点 $I$ の列にある。SU2 も同じく内部点温度による残差に対して壁点の対角項を加える
+**近似線形化**である。forge は `res_roe` を右辺に取り行列へは符号を反転して組むので、
+CPG でのエネルギー対角への追加は
+
+$$\Delta A_{WW}^{\rm energy}=+\frac{g}{\rho\,c_v}$$
+
+**初版は `thermalMethod: 0` (CPG) 限定**。TP は $e(T)$ を使うので密度微分の CPG 式を一般化できない。
+
+**壁半割面が複数ある壁ノード**では、半割面ごとに残差と対角の両方を `atomicAdd` で積む (回数が構造的に一致する)。
+**内部側は 1 点**で、複数の内部隣接に分配しない (SU2 と同型。診断 `iface_q_compact` と CHT の
+$D_f=k_{\rm eff}A/d_1$ が同じ 1 点を使うので、BC・診断・連成が同じ幾何を見る)。
+
+**初版に over-relaxed 非直交補正は入っていない** — 内部面と違い純粋な 2 点差分である。
+非直交補正には壁面の接線勾配が要り、弱形式では隣の壁ノードの $T$ が自由 DOF なので**隣接壁ノード同士が
+再結合する**。市松を減衰させる方向かもしれないし、旧弱形式の「CV 平均に緩む」問題を呼び戻すかもしれないので、
+**第 2 の変数**として分離し最初の A/B には混ぜない (plan §5.1 #6b)。
+
+**2026-07-20 に棄却した旧弱形式とは別物**である。旧実装は壁ノード $T$ を浮かせ、**その緩んだ
+$T$ で壁流束を作った**ので壁 CV 平均へ落ち (~0.1 K オフセット)、第 1 スペーシング勾配が $-24\,\%$
+だった。本節の弱形式は流束を**指定 $T_w$** から作るのでこの経路が無い。SU2 の実装は
+`SU2_CFD/src/solvers/CNSSolver.cpp` の `BC_Isothermal_Wall_Generic` で、コメントに
+"Apply a weak boundary condition for the energy equation" と明記され、
+運動量だけ `Jacobian.DeleteValsRowi` で強制している。実測で SU2 の壁ノード保存温度は
+566.011–566.886 K (指定 566 K)。
+
+**動機**: 強制の既知の副作用 3 つ — (a) 壁熱流束の節点交番が同一メッシュの SU2 の **20 倍**
+(C3X 負圧面 0.919 % vs 0.046 %)、(b) 第 1 スペーシング勾配の $-15\,\%$ バイアス、
+(c) エネルギー行 decouple による擬似 CFL 上限 $\sim5$ — がこの閉包に帰属するかを切り分ける。
+対流スキーム (ROE 0.901 % / HLLE 2.10 %)・低マッハ前処理 (破綻)・float32 の丸め
+(観測 0.083 K は 1360 ULP) は**いずれも棄却済み**。
+計画は [`plans/active/boundary-weak-isothermal-wall.md`](../plans/active/boundary-weak-isothermal-wall.md)。
+
+**CHT との整合**: 保存的界面熱量 $Q_f=\sum F^E-C$ の拘束反力 $C=-R^{\rm raw}$ は、弱形式では
+**拘束が無いので $C=0$**。$Q_f=\sum F^E$ がそのまま収支に一致する。`iface_q_eff` の式は変えない。
+
+**併用不可 (起動時に拒否)**: `wallTreatmentSST: 1`、`wallModelLES: 1`、cell 方式、`thermalMethod != 0`、
+軸対称、壁ノードが周期で同一視される構成、移動壁、内部点なし / $d_1$ 退化 / 選ばれた $I$ が別の壁ノード。
+`nodeWallDirichlet: 1` は必須条件。**`nodeWallDirichlet: 0` で代用してはならない** (運動量まで弱くなる)。
+
+**置換するのは `viscousFlux_wall_d` の壁半割面の伝導だけ**で、内部双対面には触らない。
+`Qw_Wall` は W–I **内部双対面**を置換する別機構で、`> -0.5` を有効判定に使いマーカと符号付き値を
+兼用しているため、冷却壁 (負の流束) に流用できない。
+
+**診断との整合**: `iface_q_compact` は壁ノードの**保存温度**を使うので、強制側では $T_W=T_w$ で隠れるが
+弱形式では境界流束と別量になる。比較用のコンパクト熱流束は**両枝とも指定 $T_w$** で定義し、
+保存温度からの勾配は別名の診断量にする。`Tw_bc` と `T_W` を別々に壁ダンプへ記録する。
+
 #### WMLES 壁モデルの指定 (`wallModelLES`)
 
 `wall` / `wall_isothermal` の `ints:` に `wallModelLES: 1` を書くと、その壁の粘性流束が
@@ -214,6 +393,359 @@ SST automatic wall treatment (`wallTreatmentSST`) とはコードパスが分離
   Reichardt 合成則でチャネル/片側 BL の $u(y)$ を生成し CSV を書く ($u_\tau$ は中央/外縁速度 = `Uc` に
   なるよう二分法)。設計判断は
   [`boundary-inlet-profile.md`](../plans/accepted/boundary-inlet-profile.md)。
+
+### 共役熱伝達 (CHT) — 壁温を固体と連立して解く
+
+> **状態 (2026-09-23)**: 契約は下記のとおり確定。
+> **実装済み**: 界面診断の出力 (`output.interfaceDiag`)、壁温分布の入力 (`wallProfile`)、
+> 共有 CV の壁温競合の起動時拒否、**固体側モデル** ([`tools/solid_shell.py`](../solver_density_cuda/tools/solid_shell.py))、
+> **外部弱連成ループ** ([`tools/cht_loop.py`](../solver_density_cuda/tools/cht_loop.py))、
+> **ソルバ内連成** (`conjugate:` ブロック + bcond `ints: {conjugate: 1}`): `mode: local1d` (点ごとの 1 次元抵抗) と
+> **`mode: fem2d`** (一般 2D 固体を全節点系で解く。下の節)。界面熱量は既定で**保存形** $q_{\rm eff}$。
+> **未実装**: ソルバ内の `shell2d` (帯メッシュを `fem2d` に食わせる方針)、dual-time 連成。
+> 検証: 1 次元純伝導の共役解を解析解と照合 (`case/52.conjugate_slab`) — $T_w$ 誤差 0.025 %、
+> 両側 $q$ の不一致 0.0053 % で **PASS**。
+> 設計判断と検証計画は [`plans/active/boundary-conjugate-heat-transfer.md`](../plans/active/boundary-conjugate-heat-transfer.md)
+> (codex plan レビュー 3 巡: NO-GO → NO-GO → GO-with-changes、全件採用)。実装時は本節と実装の整合を確認する。
+
+等温壁は $T_w$ を**与件**とするが、すきま・深いキャビティ・冷却壁では $T_w(x)$ は解の一部である。
+CHT は流体の壁熱流束と固体の伝導を連立して $T_w(x)$ を決める。
+
+#### 対応範囲 (初版)
+
+| 項目 | 対応 |
+| --- | --- |
+| 離散化 | **node のみ**。cell は `wallProfile` ($T_w$ 分布の入力) までで、連成は起動時に拒否する (cell は `vizBfaceNodes` が空でシェルと 1 対 1 に対応づけられない) |
+| 時間積分 | **定常陰解法** (`advanceImplicitSteady` → `implicitNonlinearUpdate`)。**dual-time 連成は対象外** (物理時間ステップ境界でのみ更新する別契約として後続) |
+| 固体 | 薄肉シェル (`local1d` / `shell2d`) と一般 2D 領域 (`fem2d`) |
+| 壁種別 | `wall_isothermal` + `ints: {conjugate: 1}`。**新種別を作らない** (種別名は `iso_wall_flag`・温度ピン・粘性壁・壁距離・block-DPLUR のエネルギー行切離しの 5 経路で直書き判定されており、新種別はそこから漏れる) |
+| 対象外 | 表面間放射、非定常 (thin-skin 過渡)、軸対称の面内伝導、壁関数 (`wallTreatmentSST: 1` / `sstEnergyWallFunction: 1`) 併用、接触熱抵抗の同定 |
+
+#### 界面量の定義と符号
+
+面流束 $F^E$ は**流体 CV から外向きを正**、拘束反力 $C$ は**流体への供給を正**とする
+([`plans/active/tooling-energy-balance-diagnostics.md`](../plans/active/tooling-energy-balance-diagnostics.md) と同一規約)。
+壁 CV $i$ について**流体から固体へ入る熱量**は
+
+$$Q_{f,i} \;=\; \sum_{f\in\partial_w} F^{E}_{if} \;-\; C_i \qquad [\mathrm{W}]\;(\text{平面 2D は } \mathrm{W/m})$$
+
+- 定常の Dirichlet 行では $C_i=-R_i^{raw}$。**過渡では $C_i = D_t(V_iE_i) - R_i^{raw}$** で、定常式を瞬時入熱に使えない。
+- 検算: $\sum F^E=80$, $C=-20$ なら $Q_f=100$。
+- **これが連成の正本**である。node 等温壁は温度ピン後に `res_roe` を 0 化するため、
+  壁 CV に実際に入った熱は「壁面の物理境界流束 + 拘束反力」であり、
+  次の 2 つは**診断**として併記するだけで界面には渡さない。
+  - **コンパクト差分形** $k_{\rm eff}(T_1-T_w)/d_1$ (固体向き正) — $D_f$ の推定と精度診断に使う。SU2 CHT の界面転送と同じ形。
+  - **再構成勾配形** $k_{\rm eff}\nabla T\cdot\mathbf S$ — `viscousFlux_d.cu` が `qwall` に保存している値。
+  - 実測差の例: case/48 `run_0011` の $x\approx0.5$ m で コンパクト 96.184 / 2 次片側 98.820 kW/m² (2.67 %)。
+- 界面の積分 (面積重み、軸対称の $r$ 重み) は **host・double** で行う。
+- 幾何は **primal facet 単位** (`bc.vizBfaceNodes`) を正本にする。node の合成半割面ベクトルは
+  $|\sum_f\mathbf S_f|\ne\sum_f|\mathbf S_f|$ なので**面積として使わない**。
+
+#### 固体モデル
+
+未知数は**ガス側表面温度** $T_w$。背面環境 $T_b$ までの**全抵抗**は
+
+$$R_{\rm tot}=\frac{t}{k_s}+R_{\rm back},\qquad
+R_{\rm back}=\begin{cases}0&\text{背面等温}\\ 1/h_c&\text{冷却剤}\\ \sum_i t_i/k_i&\text{多層}\\ \infty&\text{断熱}\end{cases}$$
+
+で、**背面等温でも $t/k_s$ を落とさない** (落とすと $T_w=T_b$ に退化する)。シェル方程式は
+
+$$\nabla_{\!s}\!\cdot\!\left(k_s t\,\nabla_{\!s}T_w\right)+q_{\rm gas}-\frac{T_w-T_b}{R_{\rm tot}}=0 .$$
+
+- **断熱・孤立系** ($R_{\rm tot}=\infty$ かつ端部断熱) は定数零空間を持ち、正味入熱が非零なら定常解が無い →
+  起動時に拒否するか、適合条件と零空間の固定を明示する。**「SPD なので CG」は Robin 項がある構成に限る**。
+**離散化 (`shell2d`, 実装は [`tools/solid_shell.py`](../solver_density_cuda/tools/solid_shell.py))**:
+境界面 (primal facet) の線形 FE + 集中質量。**四角形は 2 通りの対角線分割を 1/2 ずつ使う** —
+片方だけで割ると集中面積が非対称になり、**境界節点に O(1) の荷重不均衡**が残って
+**収束次数が 2 次 → 1 次**に落ちる (帯フィン問題の実測: rate 1.00 → 対称化で 2.00)。
+**断熱・孤立系は定数零空間を持つ**ので、正味入熱が非零なら例外にする (解が無い)。
+
+- `fem2d` では未知数が固体全節点 $u$ になる。界面抽出を $E$、固体剛性を $K_s$ として
+
+  $$\left(K_s+E^{\mathsf T}D_fE\right)u^{k+1}=b_s+E^{\mathsf T}\!\left[Q_f(Eu^{k})+D_f\,Eu^{k}\right]$$
+
+  とし、流体と固体の外周節点を一致させる (補間を挟まない)。$Q_f$ は**積分済み節点荷重**なので
+  $E^{\mathsf T}$ で載せるときに**面積を再乗算しない**。共有角の反力は**一度だけ**計上する。
+
+#### 反復と受理判定
+
+共役定常解は $A_sT^{*}=b_s+Q_f(T^{*})$。反復は**固定点を保存する**形で書く:
+
+$$\left(A_s+D_f\right)T^{k+1}=b_s+Q_f(T^{k})+D_f\,T^{k}$$
+
+- $D_f$ は収束速度だけを決め、**固定点は $D_f$ に依らない**。初期推定は $D_f^{(0)}=k_{\rm eff}A/d_1$ だが、
+  これは**上界ではない** (実効応答 $H=-\partial Q_f/\partial T_w$ は非対角を持ち、発散する反例がある)。
+- **受理はメリット関数の降下で判定する**。未緩和残差 $r^k=A_sT^k-b_s-Q_f(T^k)$ に対し、
+  **比較の間は重みを固定した** $\Phi(r)=r^{\mathsf T}(A_s+D_f)^{-1}r$ を使い、降下しなければ line search → $D_f$ 増加 →
+  再試行上限で失敗を報告する。**残差最大ノルムの単調減少を受理条件にしない** (収束する反復を棄却する反例がある)。
+  **$D_f$ を動かしながら $\Phi$ を比べてはいけない**: 重み変更による見かけの降下で受理が通り、
+  $D_f$ が発散的に増えて停滞する (実測)。**収束判定は物理量** (max$|\Delta T|$ [K] と max$|r|$/スケール) で行う。
+- **加速器 (Anderson) を既定に含める**。スカラー $D_f$ は非対角な流体応答を表せないので、
+  素の固定点反復は収束しないことがある (実測: 三重対角 SPD の応答で 200 反復未収束 → Anderson 深さ 5 で 57 反復)。
+  加速候補は $\Phi$ が降下しなければ棄却し、$D_f$ を変えたら履歴を捨てる。
+  **$\Delta\Phi$ が丸め以下の停滞を合格にしない**。局所最大ノルムは最終ゲート (下記 G-if) に使う。
+
+#### ソルバ内連成 (`conjugate:`, Phase 2a)
+
+```yaml
+conjugate: {mode: local1d, flux: q_eff, thickness: 1.0e-3, k_solid: 0.217, back: isothermal,
+            T_b: 300.0, interval: 50, warmup: 500, relax: 1.0}
+```
+
+と書き、対象壁の bcond に `ints: {conjugate: 1}` を付ける (種別は `wall_isothermal` のまま)。
+`interval` step ごとに、**ステップ完了後** (次の残差組立ての前) に壁温を更新する。
+
+**`flux: q_eff` (既定、保存形)** — 上の「界面熱量」で定義した $q_{\rm eff}$ を使い、
+[plan §4.2](../plans/active/boundary-conjugate-heat-transfer.md) の**固定点を保存する形**で解く:
+
+$$(g_s + D_f)\,T_w^{k+1} = g_s T_b + q_{\rm eff}(T_w^k) + D_f\,T_w^k,\qquad
+  g_f = \frac{k_{\rm eff}}{d_1},\quad g_s = \frac{1}{R_{\rm tot}},\quad D_f = g_f$$
+
+収束点は $g_s(T_w - T_b) = q_{\rm eff}$、すなわち**保存形の界面熱量**と固体の 1 次元法則の釣り合いで、
+外部ループ (`cht_loop.py --flux q_eff`) と**同じ不動点**である。$D_f$ は界面抵抗の初期推定で、
+収束速度だけを決める (固定点は $D_f$ に依らない)。**`output: {interfaceDiag: 1}` が要る** (無ければ起動時に拒否)。
+
+**`flux: q_compact` (旧実装、A/B 専用)** — 抵抗加重平均 $T_w^{new} = (g_f T_1 + g_s T_b)/(g_f+g_s)$
+(SU2 の `AVERAGED_TEMPERATURE` と同型)。これは $q_{\rm compact}$ の固定点であり、**保存形とは一致しない**。
+差は壁半 CV 内の粘性加熱 $\tau\cdot u$ と流動仕事で、第一層厚 $d_1$ に比例する。
+**実測** (`case/48.flat_plate_cooled_m4`, $d_1$=3.0 µm、[plan §5.1 #66](../plans/active/boundary-conjugate-heat-transfer.md)):
+同一状態の G-cons が $q_{\rm eff}$ 形の更新では **0.0028 % (PASS)**、$q_{\rm compact}$ 形では **1.77 % (FAIL)**。
+壁温は平均 599.96 → **604.17 K**、前縁の最大 987.1 → **1148.5 K** と動く。
+
+- **起動時に拒否**: `node` 以外、`unsteady: 1` (dual-time)、`mode != local1d`、背面断熱、
+  対象壁が `wall_isothermal` でない、第一内部点が定まらない壁 CV が 1 つでもある場合、
+  `flux: q_eff` なのに `interfaceDiag != 1`、$q_{\rm eff}$ が 1 節点でも非有限 (適用範囲外の構成)。
+- **界面の収束判定 (G-if)**: 更新ごとに run 直下の `conjugate_history.csv` に
+  `step, physID, n, Tw_mean, Tw_min, Tw_max, dTw_max, res_abs_Wm2, res_max_W, res_rel, q_total` を追記する。
+  $r_i = Q_{f,i} - g_s(T_{w,i}-T_b)A_i$ は**更新前 (未緩和)** の界面残差で、`res_abs_Wm2` $=\max_i|r_i|/A_i$、
+  `res_rel` $=\max_i|r_i|/\max_i|Q_{f,i}|$。判定 (許容と連続回数) は判定ツール側で行う。
+- **面内伝導が要るなら `mode: fem2d`** (下の節)。`local1d` は点ごとの 1 次元抵抗で、面内伝導を落とした極限。
+  `shell2d` は外部ループ ([`tools/cht_loop.py`](../solver_density_cuda/tools/cht_loop.py) + `solid_shell.py`) の担当のまま。
+##### `mode: fem2d` — 一般 2D 固体をソルバ内で解く (2026-09-23)
+
+```yaml
+conjugate:
+  mode: fem2d
+  solid: solid.h5        # tools/solid_mesh_to_h5.py が作る (メッシュ・孔 Robin・k_s(T) の正本)
+  flux: q_eff            # 既定。保存形の界面熱量
+  interval: 50           # K step ごとに更新
+  flux_avg: 42           # 界面熱量を N 更新の後方移動平均にする (既定 1 = 平均しない)
+  Df_scale: 1.0          # D_f の倍率 (発散したとき手で上げる。自動調整はしない)
+  refactorDT: 1.0        # [K] 固体温度がこれ以上動いたら分解し直す
+  gate: {eps_rel: 1.0e-3, eps_abs_Wm2: 150.0, dT_K: 1.0e-2, tol_solid: 1.0e-2, n_consec: 80}
+```
+
+毎更新、**固体の全節点系を 1 回解く** (Schur 補元は作らない)。解き方は**残差補正形**:
+
+$$r = K_s(u^k)u^k - b_s - E^{\mathsf T}\bar Q_f,\qquad
+  \Delta = -\bigl(K_s(u^{\rm fact}) + E^{\mathsf T}D_fE\bigr)^{-1} r,\qquad u^{k+1} = u^k + \Delta$$
+
+残差 $r$ は**常に現在の $k_s(u^k)$** で組むので、固定点は $K_s(u)u = b_s + E^{\mathsf T}\bar Q_f$ になり、
+分解を再利用しても物性が凍らない (左辺は前処理としてしか効かない)。
+$r$ は **$D_f$ を含まない形で直接組む** — 相殺に頼ると界面温度の精度差 $D_f(Eu-T_s)$ が残り、
+$D_f$ が大きいとき量子化で止まった状態を合格にできる。
+
+- 未知数は**全節点温度** $u$ なので内部温度が状態になり、$k_s(T)$ の自己整合に「復元してから組み直す」操作が要らない。
+- $D_f$ は**界面対角のみ** $g_fA_i$ ($g_f=k_{\rm eff}/d_1$、$A_i$ は**固体側の集中辺長**)。非対角性は左辺の $K_s$ が持つ。
+  **$Q_f$ は流体側の積分済み荷重 `iface_Qf_eff` $=R^{raw}-F_w-e_wR_\rho$ をそのまま渡す**。
+  面積で割って固体側の集中辺長を掛け直すと、両者が違う角で荷重が歪む (Mark II 後縁で +29.9 %)。
+  集中辺長は**熱流束に換算する段でだけ**使う。`surfArea` を荷重に使わない (押し出し疑似 2D で奥行きが乗る)。
+  初版は $z\equiv0$ の平面 2D 以外を拒否する。
+- 行列は SPD なので**下三角バンド Cholesky** (RCM 並べ替えは変換時に済ませる)。
+  **分解は `refactorDT` 以内なら再利用する** (上の残差補正形なので固定点は動かない)。
+  **直接求解 $Au^{k+1}=b$ のまま再利用してはいけない**: 行列側の $D_f$ や $k_s$ が古いまま右辺だけ新しくなり、
+  固定点がずれる (実測: `res_rel` 1.8e-4 → 1.5e-2、窓内の壁温の振れ 2.34 K)。
+- **受理判定・line search・Anderson は持ち込まない**。ソルバ内の $Q_f(T)$ は step ごとに動く写像なので、
+  更新間のメリット比較は同じ関数の比較にならない (外部ループが凍った機構)。
+- **`flux_avg`**: 流体側に局所振動があると瞬時の $Q_f$ では界面ゲートが床に当たる。
+  C3X は吸込面の $k$ オンセット前線が**周期 1012 step** で揺れ、最悪節点の $Q_f$ が中央値の 78 倍ばらつく。
+  窓は「$F_N\le\epsilon_{\rm abs}L_i/2$ を全節点で満たす最小 N」で選ぶ (C3X では 21 = 1 周期。周期揺らぎ対策で 42 を採用)。
+- **出力**: 更新ごとに `conjugate_history.csv` (G-if の素材)、流体の出力間隔で `res_solid_<physID>_<step>.h5`+`.xmf`
+  (`T` / `k_s` / `q_iface` / `q_hole`) と再開用の `conjugate_state_<physID>.h5`。
+- **起動時に拒否**: 平面 2D 以外、界面節点が流体の壁節点と 1 対 1 でない (**内挿しない**)、Robin 辺が 1 本も無い
+  (定数零空間)、$q_{\rm eff}$ が 1 節点でも非有限、`flux: q_eff` なのに `interfaceDiag != 1`。
+- **判定**: 界面の収束は [`tools/check_cht_interface.py`](../solver_density_cuda/tools/check_cht_interface.py) が
+  `conjugate_gate.json` の**事前登録値**で行う (`check_convergence.py` は流体の保存量しか見ない)。
+
+- **再開**: 出力ステップごとに `conjugate_Tw_<physID>.csv` を書く。続きを回すときは
+  これを `wall_profile_<physID>.csv` にコピーして `ints: {conjugate: 1, wallProfile: 1}` にすると、
+  収束した壁温から再開できる (`wallProfile` が初期値、`conjugate` がその後の更新)。
+  **`mode: fem2d` では CSV だけでは足りない** — 固体の内部温度・平均バッファ・更新位相・累積 step は
+  `conjugate_state_<physID>.h5` にあるので、**これも次の run ディレクトリへコピーする**。
+  起動時に `content_sha1` を照合し、違えば拒否する。収支ゲートも
+  **このチェックポイントを必須**とし、無ければ `REFUSED` にする (初期壁温から復元した固体で代替しない)。
+- **実測 (case/52, V1 の 1 次元共役解)**: 解析解 $T_w$=316.2618 K に対し
+  **ソルバ内 316.2371 K (温度上昇の −0.152 %)**、外部ループ (shell2d) 316.2659 K (+0.025 %)。
+  両側 $q$ の不一致はそれぞれ **0.0002 % / 0.0053 %**。両者の差 0.029 K は
+  **流体側の離散解の差** (同じ壁温での $q$ が ±0.2 % 動く) の範囲。
+
+#### 壁温分布の入力 (`wallProfile`)
+
+`Ts` は `valueTypes==1` の **per-face bvar** で、起動時に YAML の一様値で 1 度埋めた後は
+カーネルが書き換えない。したがって面ごとに違う $T_w$ を入れればそのまま効く
+(cell ゴースト `wall_isothermal_d`、node 温度ピン `pin_wall_node_temperature_d` とも `Tsb[ib]` を読む)。
+`ints: {wallProfile: 1}` で `wall_profile_<physID>.csv` から埋める (入口分布 `applyInletProfiles` の一般化。
+CSV 書式は入口分布と同じで、先頭の連続 x/y/z 列が補間座標、残りが量名 = 壁では `Ts`)。
+
+- **補間位置**: node は**ノード座標**、cell は面重心。
+  face 重心をそのまま node に使うと位置がずれる (case/48 `run_0011` で実測 0.679 mm)。
+- **verify は `bvar` の再出力では不十分**。壁ダンプの `Ts` は入力の再表示なので、
+  場に入ったことは `VALUE/T` と EOS 整合まで見て確認する。
+- CHT 内部の転送は座標補間でなく**安定なノード ID** を正本にする。
+- **実測 (case/48 `run_0015_wallprofile`)**: $T_w = 300+100x$ を与えると、**場の `VALUE/T` が壁ノードで
+  同じ分布になる (最大差 0.068 K)**。`bvar` の `Ts` を見るだけでは「入力が入ったこと」しか分からない。
+- **入口分布 (`inletProfile`) は従来どおり face 重心で補間する** (既存 run のビット不変を守るため)。
+  node の入口にも同じ位置ずれの問題はあるので、必要になったら別途 opt-in で直す (本節の契約の範囲外)。
+
+#### 起動時に拒否する構成
+
+契約を散文で守らず、次はいずれも**起動時にエラーで落とす**。
+
+1. `cell` 離散化で `conjugate: 1`。
+2. **温度を拘束する壁どうしが CV を共有**していて、**そこに与える壁温が食い違う**場合
+   (温度ピンは bcond 順に適用され、角ノードは複数 bcond に重複するので**後勝ち**になる)。
+   連成の有無を問わず拒否する。**実装済み** (`conjugateWall::checkWallTemperatureSharing`):
+   壁温を陽に扱っている run (`wallProfile` か `interfaceDiag` が有効) でのみ走り、
+   競合 CV の数・physID・それぞれの $T_w$ を出して起動時に落とす。それ以外の run は挙動不変。
+   検証: case/48 の平板で `sym` (前縁上流の対称面) を $T_s$=500 K の等温壁にすると、
+   前縁で共有する 1 CV を検出して exit 1 する。
+3. 断熱・孤立固体で正味入熱が非零 (定常解が無い)。
+4. 未定義の構成: 周期同一視・軸対称の面内伝導・壁関数併用・dual-time 連成。
+
+#### 診断出力とゲート
+
+**実装済み**: `output: {interfaceDiag: 1}` (既定 0) で、壁 (`wall` / `wall_isothermal`) のダンプ
+`res_wall_<physID>_*.h5` に次を追加する (host 側で作るので device の `bvar` を汚さず、既定 run の出力は不変)。
+
+| データセット | 中身 |
+| --- | --- |
+| `iface_T1` / `iface_d1` | 第一内部点の温度と法線距離 (定義は上記。`tools/check_wall_resolution.py` と同一規則) |
+| `iface_keff` | $k_{\rm eff}=k_{\rm lam}+c_p\mu_t/Pr_t$ (viscousFlux の壁経路と同じ) |
+| `iface_q_compact` | $k_{\rm eff}(T_1-T_w)/d_1$ (**固体向き正**) |
+| `iface_q_recon` | $-$`qwall` = viscousFlux が残差に入れた再構成勾配形 (**固体向き正**に反転済み) |
+| `iface_q_2nd` | 3 点非等間隔の 2 次片側差分による $k_{\rm eff}\,dT/dn$ |
+| `iface_ok` / `iface_align` | 第一内部点が定まったか / 整列度 $|d\cdot\hat n|/|d|$ |
+
+**実測 (case/48 `run_0014_iface_diag`, 壁法線に整列した node メッシュ, $y_1$=3 µm)**:
+
+- `iface_d1` = 3.0001 µm = **第一層厚と一致**、`align` = 1.000、1001/1001 点が評価可。
+- **`q_recon` は `q_compact` と 1.6e-7 相対で一致する**。この配置では再構成勾配がコンパクト差分に帰着するため。
+- **`q_2nd` は `q_compact` と中央値 2.79 % 違う** (最大 3.1 %)。つまり過去に見えた ~2.7 % の食い違いは
+  **後処理の差分形式の選択**であって、ソルバ内部の不整合ではない。滑らかな分布では 2 次片側の方が正確なので、
+  **カーネルの壁熱流束はこの解像度で ~3 % の 1 次打ち切り誤差を持つ** (誤差予算に入れる)。
+- 斜交・非整列メッシュでは 3 つが分かれるはずなので、**どれを見ているかを列名で明示する**。
+
+$q_{\rm eff}$ (拘束反力込み、= 連成の正本) は依存診断の完成後に追加する。
+
+- **G-cons (熱収支)**: $\varepsilon=\big|\sum_i Q_{f,i}-(\text{固体正味入熱})\big|$ を
+  $\max(\sum_i|Q_{f,i}|,\,Q_{\rm floor})$ で規格化する (正味量で割ると符号相殺で分母が消える)。
+- **G-if (界面収束)**: ① 局所面積で規格化した残差 $\max_i|r_i|/A_i$ [W/m²] の絶対条件、
+  ② 相対条件 $\max_i|r_i|/\max_i|Q_{f,i}|$、③ 必要連続反復数、の 3 つを**別々に**満たすこと。
+  欠損・非有限・量子化停滞は不合格 (float32 では 1000 K 付近の 1 ULP が $6.1\times10^{-5}$ K)。
+- 派生量の準定常判定は **drift と振動幅の両方**を比較許容の 1/5 以下にする
+  (`check_quasisteady.py` の既定 5 % / 10 % では 0.2–0.5 % の比較を支えられない)。
+
+拘束反力 $C_i$ の採取は [`tooling-energy-balance-diagnostics`](../plans/active/tooling-energy-balance-diagnostics.md) が提供する。
+同診断は初版で dual-time・周期・軸対称を対象外としているため、**dual-time は 1 次元検証の前、周期は翼列検証の前**に
+解除するマイルストーンを同 plan の残作業に登録済み。
+
+
+#### 界面熱量の 4 つの定義 — **保存的な `iface_q_eff` が正本**
+
+`output.interfaceDiag: 1` の壁ダンプ (`res_wall_<physID>_*.h5`) は 4 つ出す。**どれを見ているかを
+必ず明記する** (実測で 2〜19 % 違う)。符号はすべて**固体向きが正**。
+
+| 列 | 定義 | 用途 |
+| --- | --- | --- |
+| **`iface_q_eff`** | $Q_f=\sum F^E_{\partial w}-C$ を面積で割ったもの。**正本** | 連成の熱量 (`cht_loop --flux q_eff`)、収支ゲート |
+| `iface_q_compact` | $k_{\rm eff}(T_1-T_w)/d_1$ | $D_f$ の初期推定・精度診断 |
+| `iface_q_recon` | 再構成勾配 (`qwall` の符号反転) | 診断 |
+| `iface_q_2nd` | 3 点非等間隔の 2 次片側差分 | 診断 |
+
+**SU2 と比べるときだけはコンパクト差分を使う** (2026-09-21): SU2 の表面出力 `Heat_Flux` は
+等温境界では `HeatFlux = thermal_conductivity * (There - Twall) / dist_ij`
+(`SU2_CFD/include/solvers/CFVMFlowSolverBase.inl:2638`) で、`iface_q_compact` と**同一構成**である。
+SU2 には保存形の対応物が無いので、`iface_q_eff` と `Heat_Flux` を並べるのは別量の比較になる。
+実測 ($h$ は金属の熱収支から出る) との比較は `iface_q_eff`、SU2 との比較は `iface_q_compact` 同士、
+と使い分けること。C3X run 108 で両者は平均 2.2 % 違う (保存形が大きい)。
+
+**なぜコンパクト差分ではいけないか**: 壁 CV に実際に入った熱は `viscousFlux` の再構成勾配と
+内部面の離散の和であって、$k_{\rm eff}(T_1-T_w)/d_1$ ではない。これを連成に使うと**熱量が
+閉じない解を合格させてしまう**。実測 (case/53 C3X 翼列, 480 節点): `q_eff` は `q_compact` に対し
+**bias +2.26 % / rms 3.28 % / 局所最大 19.1 %** 違う。
+
+**$Q_f$ の作り方** (符号規約はここが正本。散文で保証せず V1 で検算する):
+面流束 $F^E$ は**流体 CV から外向きを正**、拘束反力 $C$ は**流体への供給を正**とすると、壁 1 節点で
+
+$$Q_{f,i}=\sum_{f\in\partial_w}F^{E}_{if}-C_i,\qquad \text{定常の Dirichlet 行では } C_i=-R_i^{raw}$$
+
+実装は残差の言葉で次の 2 つを採る。
+
+- `ifaceFw[ib]`: **壁半割面が `res_roe` に入れた寄与そのもの** ([`viscousFlux_d.cu`](../solver_density_cuda/cuda_forge/viscousFlux_d.cu) の
+  `res_roe_temp`)。残差規約が $R=-\sum F$ なので $\sum F^E_{\partial w}=-\,$`ifaceFw`。
+- `ifaceRraw[ib]`: **壁残差射影の直前**の `res_roe` ([`nodeWallDirichlet_d.cu`](../solver_density_cuda/cuda_forge/nodeWallDirichlet_d.cu) の
+  `zero_res_roe_bplane_d` が 0 化する前に退避)。**後から `res_roe` を読んでも 0 しか出ない**ので、
+  この位置で採るしかない。
+
+よって `iface_q_eff = (ifaceRraw - ifaceFw) / 面積`。これは恒等的に
+$-\sum_{f\in \text{内部面}}F^E$ (= 流体内部から壁 CV へ入る正味熱) に等しく、
+**壁面流束の離散化に依らず保存する**。
+
+**未収束の擬似時間での蓄積項 (2026-09-21)**。定常解では壁 CV の質量残差 $R_\rho$ は 0 だが、擬似時間が落ちきらない場
+(翼の衝撃足のように解が動き続ける所) では 0 でない。壁 CV は固定体積・$u=0$・$T=T_w$ なので、そのエネルギーは
+$d(V\rho e_w)/d\tau=e_wR_\rho$ だけ変わる。これは壁 CV の**蓄積**であって固体へ渡る熱ではない (下の dual-time の $D_t(VE)$ と同じ位置づけ)。そこで
+
+$$\texttt{iface\_q\_eff}=\frac{R^{raw}-F_w-e_wR_\rho}{A},\qquad e_w=\frac{\rho E}{\rho}\Big|_w$$
+
+**係数は $H_w$ ではない**。対流エネルギー残差は $H_wR_\rho$ として現れる (実測: `case/53.c3x_vane_cht/run_0124_fxhalf_rro` の衝撃足で
+相関 1.000、傾き 571 kJ/kg = $c_pT_w$) が、差 $(P/\rho)R_\rho$ は等温のまま質量を押し込む流動仕事で、壁が実際に受け取る熱である
+(codex 2026-09-21)。block-DPLUR の実際の更新量 $V\Delta\rho/\Delta\tau$ は $R_\rho$ と一般に一致しないので、これは**半離散式に基づく推定**。
+とし、引く前の値を `iface_q_eff_raw` に残す。$R_\rho$ は壁ピンの直前に `ifaceRro` へ退避する。定常では両者一致
+(1 次元スラブ `case/52.conjugate_slab/run_0006_ctrl_newbin`: 上壁 −81.51316、`q_compact` −81.51314)。
+壁エネルギー残差の内訳は `ifaceRconv` (対流の直後)・`ifaceRpre` (粘性の直前) で対流・ソース・粘性に分けられ、
+`FORGE_WI_FORCE_DIAG=1` の `wi_eheat`/`wi_ework` で内部面の熱伝導と粘性仕事に分けられる
+(`case/53.c3x_vane_cht/tools/resid_split.py`)。$q_{eff}$ と壁面勾配流束の差 (C3X で +2.5 %) の平均は
+壁半 CV 内の粘性仕事 $\tau_w U_1(1-f)$ で、第一層厚に比例する (2 µm で 2.47 %、1 µm で 1.31 %)。
+
+**適用範囲** (超えたら `NaN` を出す。ここに無い構成では使わない):
+
+- **定常 (`unsteady: 0`) のみ**。dual-time は $C_i=D_t(V_iE_i)-R_i^{raw}$ で式が違う。
+- **node の等温壁 (`wall_isothermal`) で Dirichlet ピンがあるもののみ**。断熱壁には $R^{raw}$ が無い。
+- **周期境界に属する壁ノードを除く**。root 単位の 1 回集計が要る (依存 plan の解除待ち)。
+
+**検証** (V1, `case/52.conjugate_slab/run_0005_qeff`): 1 次元純伝導の解析解 $q$=81.3090 W/m² に対し
+`iface_q_eff` **81.1837 W/m² (−0.154 %)** で、`q_compact` (−0.155 %)・`q_recon` (−0.155 %) と同等。
+**符号と絶対値を再現している**。
+
+
+#### 合否ゲート — **G-if (界面反復) と G-cons (収支) を別々に満たす**
+
+**G-if** (`cht_loop`、判定は `solid_shell.FixedPointDriver.advance`): 次を**独立に**満たし、
+かつ `--n-consec` 回連続したときだけ収束とする。1 つでも欠けると、$D_f$ を上げて更新が
+小さくなっただけの状態を収束と認めてしまう。
+
+| 量 | 意味 | 渡し方 |
+| --- | --- | --- |
+| `dTw` | 温度更新の絶対値 [K] | `--tol-K` |
+| `res_abs` | 界面残差の**絶対値** [W] (単位奥行きなら W/m) | `--tol-abs-W` (**事前登録**) |
+| `res_rel` | $\max\lvert r\rvert/\max\lvert Q_f\rvert$。**規格化は $Q_f$ のみ** | `--tol-rel` |
+| `res_solid` | 固体**内部**の残差 (Schur 縮約と内部復元の整合) | `--tol-solid` |
+| 退避していないこと | $D_f$ を上げた反復は収束と認めない | — |
+
+**規格化に $b$ を混ぜない**のが要点。旧実装は $\max(\lvert Q_f\rvert,\lvert b\rvert)$ で割っており、
+背面温度で $b$ が大きいと $A_s=1000$ W/K, $b=3\times10^5$ W, $Q_f=1$ W, $D=10^9$ W/K のような構成で
+`res_rel` が **3.33e−6** に見え、物理的な不釣合いが **100 %** でも合格した
+(回帰試験 `test_solid_shell.py` T7)。
+
+**G-cons** (`tools/check_cht_balance.py`): 同一状態で
+
+$$\varepsilon=\Big|\sum_i Q_{f,i}-Q_{\rm solid}\Big|,\qquad
+  \text{分母}=\max\Big(\sum_i\lvert Q_{f,i}\rvert,\ Q_{\rm floor}\Big)$$
+
+とし、$\varepsilon/\text{分母}\le$ `--tol-rel` (既定 0.5 %) **かつ** $\varepsilon\le$ `--tol-abs` で合格。
+**正味量で割らない** (正負が相殺する構成で分母が消える)。$Q_{\rm floor}$ は
+**ケースごとに計算前に登録**する絶対床。`iface_q_eff` が `NaN` の節点が 1 つでもあれば**不合格**
+(適用範囲外の構成をそのまま通さない)。
 
 ### ディスパッチ
 

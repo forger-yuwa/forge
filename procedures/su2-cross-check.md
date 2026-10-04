@@ -136,3 +136,29 @@ SU2 v8 の `flow.vtu` は `NumberOfComponents= "3"`(= 後の空白)など属性�
 - forge(セル中心)は **float32 の陰解法(block-DPLUR)が近軸第一セルの `u_r` を収束させきれず**(陽解法・倍精度では正しい)、
   偽の `∂u_r/∂r` → 偽ひずみ → SST 生産で k がスパイク。フープ項・Kato–Launder は無関係(下流の対症療法)。
 - 詳細: [`.github/plans/architecture-axisym-axis-singularity.md`](../plans/accepted/architecture-axisym-axis-singularity.md)。
+
+## CHT (multizone) で突き合わせるとき (2026-09-24 追加)
+
+plan [`boundary-conjugate-heat-transfer`](../plans/active/boundary-conjugate-heat-transfer.md) §6 V2 で実施した手順。
+実例は [`case/52.conjugate_slab/su2/`](../case/52.conjugate_slab/su2/) (1 次元純伝導の共役スラブ)。
+
+**構成**: 親 config が `SOLVER= MULTIPHYSICS` + `CONFIG_LIST= (fluid.cfg, solid.cfg)`、
+`MARKER_ZONE_INTERFACE` と `MARKER_CHT_INTERFACE` に**両側のマーカ名**を並べる。
+**`MULTIZONE_MESH= NO` にしてゾーンごとに別メッシュ**を与えるのが楽 (1 ファイルに `IZONE=` で
+詰める形式もあるが、マーカ名の衝突を気にせずに済む)。固体は `SOLVER= HEAT_EQUATION` +
+`THERMAL_CONDUCTIVITY_CONSTANT` + `MARKER_ISOTHERMAL` で背面を固定する。
+
+**界面の節点は両側で一致させる**。SU2 は内挿できるが、内挿誤差を比較の差に混ぜない。
+
+**罠: 静止流体では既定の収束判定が即座に成立して、固体が未収束のまま終わる。**
+純伝導のスラブでは流体の BGS 残差が最初から **−23** で、`CONV_FIELD= AVG_BGS_RES[0]` /
+`CONV_RESIDUAL_MINVAL= -12` だと **11 外反復**で「収束」して終了する。そのとき固体側は **−0.62** で、
+界面温度は解析解から **1.8 K (11 % of rise)** ずれていた。
+→ **判定は固体側 (`AVG_BGS_RES[1]`) に付けるか、固定回数まで回して両ゾーンの残差を記録する**。
+3000 外反復で固体が −8.58 まで落ち、界面温度が解析解と **1e-7 K** で一致した。
+
+**流体の温度は restart に `Temperature` 列として出ないことがある** (`INC_DENSITY_MODEL= CONSTANT`
+では `Enthalpy` が出る)。$h=c_p(T-T_{\rm ref})$ で、$T_{\rm ref}$ は `FREESTREAM_TEMPERATURE` の既定
+298.15 K。固定温度マーカの値 (既知) から $T_{\rm ref}$ を逆算して検算すること。
+
+**熱流束 `HF[*]` は `MARKER_MONITORING` を設定しないと 0 のまま出る**。

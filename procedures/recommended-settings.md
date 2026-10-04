@@ -27,6 +27,7 @@
 mesh: {discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: X.h5, valueFileName: X.h5}
 solver: "SLAU"
 space: {convMethod: 1, limiter: 2}                      # 本段。起動は convMethod 0 (§1.2)
+                                                        # limiterScaled は既定 1 (無次元化 Venkatakrishnan, venkatK 0.05)
 time:
   unsteady: 0
   last: {nStepOuter: N}
@@ -42,6 +43,13 @@ output: {level: 1}                                      # 保存量 + 原始量 
   **node 用に変換した h5** (`discretization: node` を書いた config で `convertGmshToForge`) を使い、2D は
   **平面メッシュ** (押し出し 2 ノード spanwise は 2 次 MUSCL の散逸が消えて発散)。
 - 対流は SLAU。`convMethod: 1, limiter: 2` が本段の標準、`limiter: 0` は使わない、**`mesh.bndFirstOrder` は禁止**。
+- **リミッタは `limiterScaled: 1` が既定** (2026-09-20 変更)。旧式 (`0`) は $\varepsilon^2=K^3|V|$ を次元のある $\Delta$ と
+  比べており、**メッシュを拡大すると実質 OFF になり、変数ごとに効き方が桁違い**になる。
+  修正版は $\Delta$ を変数ごとの基準で無次元化し、評価点を流束と揃える。`venkatK` の既定は **0.05**。
+  根拠: 厳密 Riemann 解との L1 収束次数が 0.76/1.00 → **0.82/1.04**、近傍逸脱が数千 → **0**、
+  座標 ×1024 でビット不変 ([`limiter-config-simplify.md`](../plans/active/limiter-config-simplify.md) §4.5)。
+  **切り替えで答えは変わる** — ⑤ SERN の目的量で +0.54 %。旧値を再現したい run は `limiterScaled: 0` を明記すること。
+  node 以外 / `convMethod` 対象外では**自動で 0 に落ちる** (警告を出す)。
 - 定常は陰解法 `timeIntegration: 11` + `blockDPLUR: 1`。実効 CFL は `cfl_pseudo` (§solver-settings「CFL の定義」)。
   `cfl` は表示用なので同じ値を入れておく。**`nStepInner` は 4** (node NS の soft/mid 段は 10)。
   根拠 (2026-09-12, 3D node SST TP case/16 run_0410–0412): 本段の `nStepInner: 3` は 5 と残差経路が全列一致
@@ -57,6 +65,35 @@ output: {level: 1}                                      # 保存量 + 原始量 
 - 出力は `output: {level: 1}` (既定)。勾配・リミッタ・診断が要る run だけ `level: 2` か `extraFields`。
   全温・全圧は `VALUE/h0` から `tools/total_quantities.py` で作る (AGENTS.md「出力と後処理の原則」)。
 
+### 1.0a 壁隣接面の $\chi$ (`space.slauWallNormalChi`) — 現行 (2026-09-27)
+
+**既定は auto = 実効 1** (node ∧ `nodeWallDirichlet: 1` ∧ SLAU/SLAU2 のとき。それ以外は 0。2026-09-26 ユーザ決定、
+plan [convection-slau-wall-normal-chi-default](../plans/accepted/convection-slau-wall-normal-chi-default.md))。**書かない**のが推奨。
+旧挙動 (2026-09-25 以前の結果) の再現だけ `slauWallNormalChi: 0` を明記する (演算はビット同一)。起動ログに実効値と解決理由が 1 行出る。
+
+- **検証 (2026-09-27)**: 省略 (auto 1) と明示 0 を同じ起点から分岐し、SERN 2D 3 作動点の力係数 5 列 (差区間が R5n 帯内)、
+  case/16 SST と凝縮の壁 p/p0 (L∞ ≤ 0.0012 %)・onset (差 0)、case/39 周期丘の下壁 $C_f$ (相対 L2 0.0002 %)・再付着点・継ぎ目比、
+  case/40 軸対称ノズルの $\eta_{CF}$・$\dot m$ (±0.0001 %)・壁 p/p0 (0.38 %) がすべて許容内。3D 接続模型では flag 0 が壁 CV を排出して
+  発散する構成を auto 1 が救う (起点から 8〜14 step で回復)。
+- **周期・軸対称・凝縮も auto に含む** (上の追加域の検証で成立条件と許容を満たした)。回転周期は node では未対応 (起動エラー)。
+- **既定変更をまたぐ run は途中から再開しない** (`scalarGradient` と同じ運用ルール、2026-09-27): 旧既定 0 で始めた段階起動 run を
+  省略のまま新バイナリで再開すると、`stage_manifest.py` は同じ設定の起動を区別できず (起動記録との結び付けは plan
+  [tooling-stage-manifest-launch-binding](../plans/active/tooling-stage-manifest-launch-binding.md) で後回し) 0 の段と 1 の段を 1 区間につなぐ。
+  最初から回し直すか、`slauWallNormalChi: 0` を明記して続ける。**段の途中で切り替えない**。
+- **0 に落とすかの判断材料** (既定化前は「1 にする条件」だったもの): 診断ツール `case/46.sern_design/cad/diag_wall_cv_budget.py` と
+  `case/46.sern_design/cad/diag_applicability.py` (設定キーの検査 + 1 step `FORGE_DUMP_MASSFLUX` で対象 CV の全接続面を照合) で、
+  `convMethod: 0` の起動区間に (i) 壁 CV の $\rho_w$ が 3 dump 以上単調減少し $\rho_w/\rho_i<0.1$、(ii) 全接続面の正味流出が 3 dump 以上持続、
+  (iii) $\chi=0$ の壁隣接面を $\chi_n$ に置換すると補充が増える、の 3 つが成り立つ構成は **0 に落とさない** (0 では壁 CV が排出される)。
+  検査に落ちる設定 (`slauContactFloor ≠ 0`、`convMethod: 1`、`lowMachPrecond ≠ 0` 等) は診断できないので、既定 (1) のまま使い、0 にする理由にはしない。
+- **残る制限**:
+  - **衝撃がランプに当たる点の壁圧への影響は未評価** (m6_on・m4_off とも登録条件で衝撃足を同定できず判定保留)。衝撃衝突のある構成で
+    0/1 の差が問題になりうるときは、その構成で壁圧分布の比較を別途行う。
+  - **軸対称ノズルの出口角 (壁∩出口) の壁圧は 0/1 で ±1 % 程度動く** (case/40 等温壁、他の壁点は ≤ 0.03 %)。出口角の壁圧を評価に使う場合は注意 (2026-09-27、plan §5.1 #12)。
+  - 1 の run は SLAU の node カーネルのレジスタ上限に当たりうるので `FORGE_CUDA_BLOCKSIZE=128` (比較する run どうしで揃える)。
+- **旧方針 (2026-09-25〜26、履歴)**: 「既定 0 のまま、1 にするのは 3D 側壁∩後端面接続構成だけ」「2D 生産で 1 にしたときの差は生産許容内だが、
+  これは 2D を 0 のままにしてよい根拠であって 1 にしてよい根拠ではない」(plan [convection-slau-wall-normal-chi-usage-rule](../plans/accepted/convection-slau-wall-normal-chi-usage-rule.md))。
+  2026-09-26 のユーザ決定で既定 1 に変わり、上の検証 (2026-09-27) で 2D・周期・軸対称・凝縮も含めた。
+
 ### 1.1 境界条件 — 現行 (2026-09-07)
 
 - 入口: `inlet_Pressure` (Pt/Tt/組成/k/ω)。node NS では `mesh.nodeInletCornerWall: 1` を**変換時**に付ける
@@ -67,6 +104,12 @@ output: {level: 1}                                      # 保存量 + 原始量 
   `outlet_statPress` の Ps を実出口圧に合わせる (node は壁列が常に亜音速なので Ps ≪ 実圧だと SST が出口列から
   unstart [node-supersonic-exit-outflow])。3D の出口角線で unstart が続く場合は出口バッファ (slip 延長, physID 別)
   + `mesh.wallDistExtraPhysIDs: [そのID]` + Ps 一致 (case/16 run_0226〜0228)。
+  **⑤ SERN (case/46) は出口・`far_bottom` とも設計上つねに超音速なので、runner の `evaluate.outlet_kind` の既定を
+  `outflow` にした (2026-09-23)**。この罠は**同じ case で 2 回踏んでいる**: run_0121 で出口 P 7.5 → 128 kPa に積み上がって発散
+  (対策が `problem_r5_3d_sst_outflow.yaml` の個別 YAML に留まり既定へ反映されなかった)、接続模型 run_0430–0436 で
+  出口の亜音速率 3.5 → 99.5 %・`far_bottom` の圧力 22 MPa・残差 +0.8 桁。**`outflow` に変えるだけで**同一起点・同一設定で
+  亜音速率 4.4 %・逆流 0.1 %・全域 P>2e5 が 0 節点・残差 −1.3 桁になった (run_0435 対 run_0437)。
+  **超音速出口に静圧を課さない**こと。
 - 壁: NS は `wall` (断熱 no-slip)、等温は `wall_isothermal` (キーは `Ts`)。Euler は `slip`。
   **SST の壁は変換時に no-slip `wall` でないと wall_dist=0 になり ω が step 0 で発散**。
 - 対称面/疑似 2D 側面は `slip`。
@@ -103,12 +146,44 @@ turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaun
   乱流の跳ねが T に伝播しない)。エネルギー整合の検証で必要なときだけ 1 (opt-in) にし、全温は h0 (k 込み属性) から。
 - `dilatationCorrection: 2` はノズル BL を SU2 比 −16 % 薄くする (モデル形式差、ソルバ無罪)。SU2 と揃える A/B は 0。
 - `katoLaunder: 1` はノズル喉のよどみ偽生産抑制用。平板など剪断層主体では 0 でも可 (A/B で無影響)。
-- 壁処理: y⁺≈1 のメッシュは `wallTreatmentSST: 0` (低 Re)。高 Re で y⁺≈1 と AR ≤ 1000 が両立しないときは
-  y⁺ 30〜80 + `wallTreatmentSST: 1`。node 壁関数は Cf −6 % の既知欠損あり ([node-wallfunction-pk-convention-deficit])、
-  3D の角線ノードでは代表点なし→u_τ=0 になる (未対応)。断熱壁の壁温出力は `sstThermalWallFunction: 3` (defect-flux)。
+- **壁処理: `wallTreatmentSST: 0` (低 Re 壁解像) を使う。`1` (SST 壁関数) は使わない** (2026-09-20 ユーザ方針)。
+  **ソルバ既定も 0 に変更**し、`1` を指定すると起動時に既知欠損を列挙した警告が出る。
+  設計チェーンの生成器もハードコードをやめ、`evaluate.wall_treatment_sst` (既定 0) にした。
+
+  **使わない理由** (積み上がった既知欠損):
+
+  | 欠損 | 根拠 |
+  | --- | --- |
+  | Cf −6 % | 壁関数 P_k 規約の欠損 ([node-wallfunction-pk-convention-deficit]) |
+  | 3D の角線ノードで u_τ=0 | 代表点が無い ([node-sst-wallfunction-utau-zero]) |
+  | **壁モデル渦粘性に上限が無い** | `ν_t = ν(1/g−1)` が `g→0` で発散。低密度域で **4660 m²/s → k 2.06e9** となり 3D SST が死ぬ ([`tooling-nozzle-sern-3d.md`](../plans/active/tooling-nozzle-sern-3d.md) §4.25) |
+  | case/40 の壁温 | y⁺1 低 Re と SU2 壁関数のみが根拠。**node 壁関数系列は撤回済み** |
+
+  **帰結**: y⁺≈1 を満たすメッシュが要る。y⁺≈1 と AR ≤ 1000 が両立しないときは
+  **壁関数に逃げず**、AR 緩和 (壁法線構造格子は ≤5000 可) か形状・解像度の見直しで解く。
+  やむを得ず `1` を使う run は **README に理由を書く**こと。
+  断熱壁の壁温出力は `sstThermalWallFunction: 3` (defect-flux) だが、これも `wallTreatmentSST: 1` 依存である。
 - 3D node SST の角部加熱は k/ω 拡散の相対ゼロ割ガード (2026-09-08 修正) で解消済み。**3D SST の壁圧は実験より +9 %
   (側壁合流域の乱流 BL 過厚) が未解決** (case/16 run_0228)。定量比較には 3D 層流 (0.7 %) か 2D SST (+1.5 %) を使う。
 - restart で `vis_turb` が再現されない (敏感な擬似衝撃波は位置が動く) [forge-sst-restart-nonfidelity]。
+
+### 2.1 遷移モデル (γ–Re_θt) — 現行 (2026-09-22)
+
+```yaml
+turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 0, katoLaunder: 0,
+             wallTreatmentSST: 0, turbulentPrandtl: 0.9, transition: "lm2009"}
+```
+
+- **使う場面**: 層流域が長く、そこでの摩擦・熱伝達が目的量に効くとき (翼の負圧面前半、低 Re 平板)。既定は `none`。
+  キーの意味と受付条件は [`solver-settings.md`](solver-settings.md)「遷移モデル」。
+- **前提は局所 $y_1^+\le1$** (`check_wall_resolution.py` の VERDICT)。C3X は第一層 2 µm だと面積の 67 % が 1 を超えるので 1 µm メッシュを使う。
+- **SST の収束場から継続する** (段階起動の最後の段)。$k$/$\omega$ を入口値に戻す必要は無い (T3A で同じ解)。
+- **遷移位置が落ち着くまで長い**: T3A は cfl 5 で 50000 step、C3X は cfl 0.5 で 150000〜200000 step (粘性比 30 の正圧面は 60000 step で +18 %、200000 step で −22 % — **短い run は符号まで違う値を読む**)。`rms_roGamma` が下がっても遷移終了位置は動き続けるので、
+  **報告量の時系列** (`cf_plate.py --series` / `h_series.py`) を `check_quasisteady.py --series-csv` に掛けて止める。
+- **入口の $\omega$ (入口粘性比) の感度を必ず付ける**。入口から物体までの乱れの減衰は $\omega$ で決まり、実験報告は普通これを与えない。
+  C3X では入口粘性比 1 / 10 / 30 / 100 で正圧面の $h$ 偏差が −39 / −33 / −22 / +25 % と動く。**実験に合う値を事後に選ばない**。
+- `dilatationCorrection` との組み合わせは未検証。`katoLaunder: 1` は前縁よどみ点の $k$ 過大生成を抑え、C3X の正圧面の結果を大きく変える (粘性比 100 で +25 → −26 %)。どちらが正しいかは決まっていない。
+- 検証の到達点: T3A 平板で同一メッシュの SU2 LM と遷移開始 −2.2 %・$C_f$ ±0.8 % ([`case/57`](../case/57.transition_flat_plate/README.md))。翼では遷移が実測より遅く急に起きる (C3X 負圧面 $s/S$ 0.32、実測は 0.2 から緩やかに)。
 
 ## 3. 多成分 semi-perfect (TP)・凝縮・化学 — 現行 (2026-09-07)
 
@@ -117,6 +192,10 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 ```
 
 - **`thermoHrefTemp: 298.15` は必須** (絶対基準 h では χ_eos が桁違いになり TP×node 軸対称が発散 [isobutane-wt-semiperfect])。
+- **LJ パラメータの出典 `physProp.ljSource` は書かない (既定 `[gri30, svehla1962]`)** — 現行 (2026-10-01, plan
+  [thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §4.10 #14)。#14 前の run を同じ物性で
+  再現・継続するときだけ `ljSource: [legacy_v1]` を明示する (旧既定 = §9)。既定変更の影響 (H2・OH・H・O・NO・CO の LJ が GRI 値に) の
+  確認は plan #14-L2 で進行中。
 - 種 DB は `forge_design.gas.semiperfect.mixture_pseudo_species_split` (乾き空気を擬似種 MIXDRY にまとめ H2O を残す)。
 - TP 陰解法の `cfl_pseudo` は 0.5〜2 から上げる (H2O 生成エンタルピーの増幅で上限が低い)。**`implicitRelax: 0.7` を付ければ 6〜8 まで可**
   (2026-09-16 case/44 va3 M4.19 node Euler 軸対称 TP 2 種 + 非平衡凝縮 `run_0181`–`0189`: cfl 6/8 + relax 0.7 は乾き一様場からの起動でも安定で場・残差床が cfl 2 と同じ;
@@ -258,6 +337,8 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 | `mesh.bndFirstOrder: 1` | **禁止** (粘性応力破壊・疑似 2D で全域に効く) | 段階起動 (§1.2) |
 | `nodeAxisDirichlet` / `nodeMidpointFx` / `nodeValueAtNode` / `nodeReconEdgeMidpoint` / `nodeAxisUrDirichlet` | 廃止 (2026-08-16, 書くと起動エラー) | node は固定スキーム (§1) |
 | `turbulence: {LESorRANS: 2, RANSmodel: 1}` 旧キー体系 | 旧 config に残存 | `turbulence: {model: "sst", ...}` |
+| `space.slauWallNormalChi` 省略 = 0 | **2026-09-25 まで既定** (2026-09-26 から auto = node+nodeWallDirichlet+SLAU で 1、plan [convection-slau-wall-normal-chi-default](../plans/accepted/convection-slau-wall-normal-chi-default.md)) | 旧結果の再現は `slauWallNormalChi: 0` を明記 |
+| node の `mesh.scalarGradient` 省略 = gg | **2026-09-26 まで既定** (2026-09-27 から node の既定は lsq、plan [gradient-scalar-lsq-unification](../plans/accepted/gradient-scalar-lsq-unification.md) #6) | 旧結果の再現は `mesh.scalarGradient: gg` を明記。**切り替え日をまたぐ run は途中から再開せず最初から回し直す** (段の区間判定が gg 段と lsq 段をつなぐため、ユーザ決定 2026-09-27) |
 | `sstOmegaProdFromPk: 0` / `sstSigmaBlend: 0` | 2026-09-08 まで既定 | 既定 1 (旧挙動が要るときだけ 0 明記) |
 | `sstEnergyKSource: 1` / `sstIsotropicStress: 1` (分離型) | 非推奨 (境界未完備・離散保存せず) | 必要なら `sstEnergyIncludesK: 1` (opt-in) |
 | 定常 + 陽解法 (`timeIntegration: 3`, `unsteady: 0`) | 非推奨 (局所 dt で不安定) | 陰解法 11 + blockDPLUR、または `unsteady: 1` |
@@ -267,9 +348,13 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 | `output` 未指定 = 全量出力 | 2026-09-08 まで | `output.level` 既定 1 (全量は `level: 2`) |
 | k/ω 拡散の絶対ゼロ割ガード 1e-12 [m³] | バグ (2026-09-08 修正) | 相対ガード (コード側、キー無し) |
 | `wall_dist` を双対重心から測る変換 | バグ (2026-09-08 修正) | ノード座標 (コード側) |
+| 内蔵種の LJ = #14 前の単一の値 (GRI-Mech 3.0 と Svehla 1962 の混在、`physProp.ljSource` 無し) | 2026-10-01 まで既定 | 既定 `[gri30, svehla1962]` (書かない)。旧 run の再現・継続だけ `ljSource: [legacy_v1]` |
 
 ## 変更ログ
 
+- `2026-10-01` — §3 に LJ の出典 `physProp.ljSource` (既定 `[gri30, svehla1962]`、旧 run の再現は `[legacy_v1]`) を追加、§9 に旧既定 (plan [thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §4.10 #14)。
+- `2026-09-25` — §1.0a に `space.slauWallNormalChi` の適用規則 (3D 側壁接続のみ 1、新構成は診断可能性の検査 + 3 条件) を追加 (plan [convection-slau-wall-normal-chi-usage-rule](../plans/accepted/convection-slau-wall-normal-chi-usage-rule.md))。
+- `2026-09-22` — §2.1 遷移モデル (γ–Re_θt, `turbulence.transition: lm2009`) のレシピを追加 (plan [turbulence-transition-lm2009](../plans/active/turbulence-transition-lm2009.md))。
 - `2026-09-17` — §6 に dual-time の内部反復レシピを追加 (`cfl_pseudo` 12–20 + `nSubIterDualTime` 10–20 + 緩和なし; 擬似 CFL に安定限界が見つからず、必要な nSub は `cfl_pseudo` で決まる)。定常の `implicitRelax 0.7` は据え置き。投入前チェック `check_solver_config.py` を追加。
 
 - `2026-09-08` — 初稿 (散在していた推奨値を集約。ユーザ要請「既定の解析設定を 1 か所に、最新/旧を明記」)。

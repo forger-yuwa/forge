@@ -42,6 +42,10 @@ __global__ void zeroWallDirichletResiduals_d
     // Dirichlet ノードの残差は BC 強制であり物理的不均衡でない → rms_roOmega の汚染 (収束判定の誤検出) を防ぐ。
     // nullptr で無効 (非 SST)。k はノイマンなので res_roK は触らない。
     flow_float* res_roOmega,
+    // 壁ノードの k 残差 (mesh.nodeWallKResidualZero=1 のときだけ非 nullptr)。
+    // 壁解像 SST では k_w=0 は Dirichlet なので、状態ピン (nodeWallKPin) と対で残差も射影する
+    // — ω と同じ扱い。SU2 は k も ω も LinSysRes.SetBlock_Zero + DeleteValsRowi で強制する。
+    flow_float* res_roK,
     // WMLES 等温壁 (node): 壁ノード温度は温度ピンで Dirichlet されるため res_roe も 0 に射影する。
     // 対象ノードの識別は Qw_Wall マーカ (>-0.5 = 等温 WMLES 壁ノード)。nullptr で無効。
     // 素の等温壁 (非 WMLES) の res_roe は zeroNodeIsothermalEnergyResidual (bcond 単位) が担う。
@@ -54,6 +58,7 @@ __global__ void zeroWallDirichletResiduals_d
         res_roUy[ic] = (flow_float)0.0;
         res_roUz[ic] = (flow_float)0.0;
         if (res_roOmega != nullptr) res_roOmega[ic] = (flow_float)0.0;
+        if (res_roK != nullptr) res_roK[ic] = (flow_float)0.0;
         if (Qw_Wall != nullptr && Qw_Wall[ic] > (flow_float)-0.5f) res_roe[ic] = (flow_float)0.0;
     }
 }
@@ -82,12 +87,27 @@ __global__ void pin_wall_node_temperature_d(
     sonic[ic] = sqrt(g.gamma * g.R * Tw);
 }
 
-// res_roe を bcond の壁ノードで 0 化 (Dirichlet ノードの残差は BC 強制であり物理不均衡でない)
-__global__ void zero_res_roe_bplane_d(geom_int nb, geom_int* bplane_cell, flow_float* res_roe)
+// res_roe を bcond の壁ノードで 0 化 (Dirichlet ノードの残差は BC 強制であり物理不均衡でない)。
+// **0 化する直前の値が $R^{raw}$** (拘束反力 $C=-R^{raw}$ の素材)。CHT の保存的な実効界面熱量
+// $Q_f=\sum F^E-C$ はこれが無いと作れない (後から res_roe を読んでも 0 しか出ない)。
+// plan boundary-conjugate-heat-transfer §4.3。`ifaceRraw` は nullptr なら触らない。
+__global__ void zero_res_roe_bplane_d(geom_int nb, geom_int* bplane_cell, flow_float* res_roe,
+                                      flow_float* ifaceRraw)
 {
     const geom_int ib = blockDim.x*blockIdx.x + threadIdx.x;
     if (ib >= nb) return;
-    res_roe[bplane_cell[ib]] = static_cast<flow_float>(0.0);
+    const geom_int ic = bplane_cell[ib];
+    if (ifaceRraw != nullptr) ifaceRraw[ib] = res_roe[ic];
+    res_roe[ic] = static_cast<flow_float>(0.0);
+}
+
+// 壁 bplane の res_roe を読むだけで写す (残差の内訳診断。res_roe は書かない)。
+__global__ void copy_res_roe_bplane_d(geom_int nb, geom_int* bplane_cell, flow_float* res_roe,
+                                      flow_float* dst)
+{
+    const geom_int ib = blockDim.x*blockIdx.x + threadIdx.x;
+    if (ib >= nb) return;
+    dst[ib] = res_roe[bplane_cell[ib]];
 }
 
 } // namespace
@@ -113,6 +133,7 @@ void zeroWallDirichletResiduals_d_wrapper(solverConfig& cfg , cudaConfig& cuda_c
         msh.nCells, msh.wall_flag_d,
         var.c_d["res_roUx"], var.c_d["res_roUy"], var.c_d["res_roUz"],
         sst ? var.c_d["res_roOmega"] : nullptr,
+        (sst && cfg.nodeWallKResidualZero != 0) ? var.c_d["res_roK"] : nullptr,
         wmlesIso ? var.c_d["Qw_Wall"] : nullptr,
         wmlesIso ? var.c_d["res_roe"] : nullptr
     );
@@ -126,6 +147,11 @@ void zeroWallDirichletResiduals_d_wrapper(solverConfig& cfg , cudaConfig& cuda_c
 bool nodeIsothermalPinActive(const solverConfig& cfg, const mesh& msh)
 {
     if (cfg.discretization != "node" || cfg.nodeWallDirichlet == 0 || msh.wall_flag_d == nullptr) return false;
+    // 弱形式 (mesh.nodeIsothermalEnergyBC=1) では**温度系の強制を一切しない**:
+    // 状態ピン・エネルギー残差ゼロ化・陰解法エネルギー行の単位行化を一組で外す。
+    // 運動量の no-slip (enforceWallNoSlip / 運動量残差射影) と SST 壁条件は不変。
+    // plan boundary-weak-isothermal-wall §4.4。
+    if (cfg.nodeIsothermalEnergyBC == 1) return false;   // 2 は強制のまま (診断用)
     for (const auto& bc : msh.bconds)
         if (bc.bcondKind == "wall_isothermal" && !wmlesActiveForBcond(cfg, bc)) return true;
     return false;
@@ -170,7 +196,8 @@ void zeroNodeIsothermalEnergyResidual(solverConfig& cfg , cudaConfig& cuda_cfg ,
         zero_res_roe_bplane_d<<<cuda_cfg.dimGrid_bplane , cuda_cfg.dimBlock>>>(
             static_cast<geom_int>(bc.iPlanes.size()),
             bc.map_bplane_cell_d,
-            var.c_d["res_roe"]);
+            var.c_d["res_roe"],
+            (cfg.interfaceDiag != 0 && bc.bvar_d.count("ifaceRraw")) ? bc.bvar_d["ifaceRraw"] : nullptr);
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
@@ -233,6 +260,28 @@ void applySstThermalWallFunction(solverConfig& cfg , cudaConfig& cuda_cfg , mesh
             static_cast<geom_int>(bc.iPlanes.size()),
             bc.map_bplane_cell_d,
             var.c_d["Taw_diag"], bc.bvar_d["Ts"]);
+    }
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchkKernelSync();
+}
+
+// 残差組み立ての途中で、等温壁ノードのエネルギー残差を bvar `name` に写す (plan
+// boundary-conjugate-heat-transfer §5.1 #58)。対流の直後 (`ifaceRconv`) と粘性の直前 (`ifaceRpre`) に呼び、
+// 壁熱流束のうねりが対流・ソース・粘性のどれに乗るかを切り分ける。`interfaceDiag: 0` (既定) では no-op。
+// **読むだけ**なので診断の有無で解はビット同一。
+void captureNodeIsothermalEnergyResidual(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var ,
+                                         const std::string& name , const std::string& srcField)
+{
+    if (cfg.interfaceDiag == 0) return;
+    if (!nodeIsothermalPinActive(cfg, msh)) return;
+    for (auto& bc : msh.bconds) {
+        if (bc.bcondKind != "wall_isothermal") continue;
+        if (bc.iPlanes.empty() || !bc.bvar_d.count(name)) continue;
+        copy_res_roe_bplane_d<<<cuda_cfg.dimGrid_bplane , cuda_cfg.dimBlock>>>(
+            static_cast<geom_int>(bc.iPlanes.size()),
+            bc.map_bplane_cell_d,
+            var.c_d[srcField],
+            bc.bvar_d[name]);
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

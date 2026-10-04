@@ -1,0 +1,9 @@
+{
+  "mode": "shell2d",
+  "thickness": 0.002,
+  "k_solid": 0.01,
+  "back": {
+    "kind": "isothermal",
+    "T_b": 300.0
+  }
+}
