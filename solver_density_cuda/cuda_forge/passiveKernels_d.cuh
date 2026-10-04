@@ -3,6 +3,8 @@
 // (plans/active/species-passive-scalar-unification.md §4.1)。speciesTransport_d.cu (本番) と
 // tests/unit/test_passive_scalar.cu (単体試験) が include する。__global__ を含むので他のライブラリ TU からは include しない。
 #include "flowFormat.hpp"
+#include "cuda_forge/twoPhaseUpdateDiag_d.cuh"   // 診断 G3-b の記録スロット (tpu; 既定 nullptr)
+#include "cuda_forge/twoPhaseOperatorDiag_d.cuh" // 診断 G3-a の面の記録 (TpoFacePtr; 既定は無効)
 
 // S3: species 移流流束を **convectiveFlux が書いた face 組成** で組む (energy 流束と同一面組成)。
 // 対角 transport_diag は 1 次風上のまま (defect-correction)。ΣY_face=1 なので Σ res_roY = res_ro。
@@ -13,7 +15,8 @@ __global__ void species_advection_faceY_d(
     flow_float** res_roY, flow_float** transport_diag,
     int isNode, flow_float** roY,
     int stride,   // Yface の面ストライド (化学種 = nSpecies; 受動種は部分範囲を Yface+q0, stride=nPassive で呼ぶ)
-    flow_float* const* ffY = nullptr)   // 遠方境界 farfield の面の値 (化学種ごと、farfield 以外は NaN、nullptr = 無し)
+    flow_float* const* ffY = nullptr,   // 遠方境界 farfield の面の値 (化学種ごと、farfield 以外は NaN、nullptr = 無し)
+    TpoFacePtr tpo = TpoFacePtr{})       // 診断 G3-a (既定は無効): res[ic0] に足した値 −flux を面スロットへ写す
 {
     geom_int ih = blockDim.x*blockIdx.x + threadIdx.x;
     if (ih < nNormalHaloPlanes) {
@@ -26,6 +29,7 @@ __global__ void species_advection_faceY_d(
         // node 境界半割面 (ic1=ghost): 主ループ (SLAU/ROE) は境界半割面を除外するため Yface[ip] が
         // 未書込 (stale)。node は ghost を読まない設計なので、境界ノード ic0 自身の組成を面組成に使う。
         const bool nodeBnd = (isNode != 0 && ic1 >= nCells);
+        if (tpo.val != nullptr) tpo_face_code(tpo, ih, nodeBnd ? 3 : 1);
         for (int s = 0; s < nSpecies; ++s) {
             flow_float Yf = nodeBnd
                 ? (roY[s][ic0] / max(ro[ic0], (flow_float)1.0e-30))
@@ -35,6 +39,7 @@ __global__ void species_advection_faceY_d(
                 if (isfinite(v)) Yf = v;
             }
             const flow_float flux = mdot * Yf;
+            if (tpo.val != nullptr) tpo_face_put(tpo, ih, tpo_comp(tpo, s), (double)(-flux));
             if (ic0 < nCells) { atomicAdd(&res_roY[s][ic0], -flux); atomicAdd(&transport_diag[s][ic0], d0); }
             if (ic1 < nCells) { atomicAdd(&res_roY[s][ic1],  flux); atomicAdd(&transport_diag[s][ic1], d1); }
         }
@@ -53,7 +58,8 @@ __global__ void species_advection_faceY_d(
 __global__ void passive_bounds_d(
     geom_int nCells, flow_float* rophi, int upperIsRho, flow_float* ro, geom_float* vol,
     flow_float* corrCell, double* stats, const geom_int* root,
-    double* tcAcc = nullptr, int tcComp = -1)   // #4h の補正計測 (二相の更新ごと; 段 1 = 受動種の床): 成分 tcComp に |Δ|V、液 (2) なら蒸気 (1) にも
+    double* tcAcc = nullptr, int tcComp = -1,   // #4h の補正計測 (二相の更新ごと; 段 1 = 受動種の床): 成分 tcComp に |Δ|V、液 (2) なら蒸気 (1) にも
+    double* tpu = nullptr, int tpuComp = -1)    // 診断 G3-b (既定 nullptr): 成分 tpuComp (1..4) の before/after を記録
 {
     const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     double lo = 0.0, hi = 0.0, ab = 0.0, tot = 0.0;
@@ -63,6 +69,7 @@ __global__ void passive_bounds_d(
         flow_float v = v0;
         if (v < (flow_float)0.0) v = (flow_float)0.0;
         if (upperIsRho != 0) { const flow_float r = ro[ic]; if (v > r) v = r; }
+        if (tpu != nullptr && tpuComp >= 0) tpu_ba(tpu, TPU_OP_PFL, tpuComp, nCells, ic, (double)v0, (double)v);
         const double d = (double)v - (double)v0;
         const double V = (double)vol[ic];
         if (d != 0.0) {
@@ -109,22 +116,28 @@ __global__ void passive_bounds_d(
 // 流れの密度更新と整合した受動種の増分 (plan §5.1 #19, 案C の ρY_N + z + Y_N δρ と同形): 候補 ρφ = ρφ_N + z に
 //   φ_N·δρ = (ρφ_N/ρ_pre)·(ρ_new − ρ_pre)
 // を加える (ρ_pre = 同じ (サブ) 反復の残差組み立て時の ρ, ρ_new = 流れ block 更新後の ρ)。z=0 なら ρφ = φ_N ρ_new で φ は不変。
-__global__ void passive_add_rho_term_d(geom_int nCells, flow_float* rophi, const flow_float* rophiN, const flow_float* roPre, const flow_float* ro)
+// tpu (診断 G3-b; 既定 nullptr): 成分 tpuComp の before/after を記録 (早期退出は after = before)。
+__global__ void passive_add_rho_term_d(geom_int nCells, flow_float* rophi, const flow_float* rophiN, const flow_float* roPre, const flow_float* ro,
+                                       double* tpu = nullptr, int tpuComp = -1)
 {
     const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
+    if (tpu != nullptr && tpuComp >= 0) tpu_ba(tpu, TPU_OP_ARH, tpuComp, nCells, ic, (double)rophi[ic], (double)rophi[ic]);
     const double rp = (double)roPre[ic];
     if (rp <= 0.0) return;
     rophi[ic] = (flow_float)((double)rophi[ic] + ((double)rophiN[ic]/rp)*((double)ro[ic] - rp));
+    if (tpu != nullptr && tpuComp >= 0) tpu_put(tpu, TPU_BA(TPU_OP_ARH, tpuComp, 1), nCells, ic, (double)rophi[ic]);
 }
 
 // roPre != nullptr のとき増分の基点は φ_N ρ_new (= ρφ_N + φ_N δρ) で、制限するのは輸送増分 z だけ (基点自体は [0,ρ_new] 内)。
 __global__ void passive_limit_increment_d(
     geom_int nCells, flow_float* rophi, const flow_float* rophiN, int upperIsRho, const flow_float* ro, const geom_float* vol,
-    flow_float* limCell, double* stats, int* thetaMinInt, const geom_int* root, const flow_float* roPre)
+    flow_float* limCell, double* stats, int* thetaMinInt, const geom_int* root, const flow_float* roPre,
+    double* tpu = nullptr, int tpuComp = -1)   // 診断 G3-b (既定 nullptr): 成分 tpuComp の before/after (早期退出は after = before)
 {
     const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
+    if (tpu != nullptr && tpuComp >= 0) tpu_ba(tpu, TPU_OP_LIM, tpuComp, nCells, ic, (double)rophi[ic], (double)rophi[ic]);
     double N = (double)rophiN[ic];
     if (roPre != nullptr && roPre[ic] > (flow_float)0.0) N = N / (double)roPre[ic] * (double)ro[ic];
     const double d = (double)rophi[ic] - N;
@@ -136,6 +149,7 @@ __global__ void passive_limit_increment_d(
     double th = allowed / fabs(d);
     if (th >= 1.0) return;
     rophi[ic] = (flow_float)(N + th*d);
+    if (tpu != nullptr && tpuComp >= 0) tpu_put(tpu, TPU_BA(TPU_OP_LIM, tpuComp, 1), nCells, ic, (double)rophi[ic]);
     const bool count = (root == nullptr) || (root[ic] == ic);
     if (count && limCell != nullptr) {   // limCell==nullptr: 収支を記録しない (RK の中間ステージ)
         const double amt = (1.0 - th)*fabs(d);

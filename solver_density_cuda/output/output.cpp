@@ -36,6 +36,20 @@ void writeSpeciesAttributes(File& file)
     file.createAttribute<int>("species_input_unverified", HighFive::DataSpace::From(unv)).write(unv);
 }
 
+// 二相拡散の実効状態をルート属性に書く (plans/active/condensation-two-phase-default.md §4-4)。
+//   twophase_diffusion_effective (0/1) / twophase_diffusion_state (active / inactive-a / inactive-b / unsupported-c) /
+//   twophase_diffusion_requested ("omitted" / "0" / "1")。凝縮 OFF かつ未指定の run には書かない。
+//   値は condTwoPhaseDiffusionValidate が起動時に cfg へ書いたもの (判定の正本はソルバ側の 1 箇所)。
+void writeTwoPhaseAttributes(File& file, const solverConfig& cfg)
+{
+    if (cfg.condensation != 1 && cfg.condTwoPhaseDiffusionGiven == 0) return;
+    const int eff = cfg.condTwoPhaseDiffusionEffective;
+    const std::string req = (cfg.condTwoPhaseDiffusionGiven == 0) ? std::string("omitted") : std::to_string(cfg.condTwoPhaseDiffusion);
+    file.createAttribute<int>("twophase_diffusion_effective", HighFive::DataSpace::From(eff)).write(eff);
+    file.createAttribute<std::string>("twophase_diffusion_state", HighFive::DataSpace::From(cfg.condTwoPhaseDiffusionState)).write(cfg.condTwoPhaseDiffusionState);
+    file.createAttribute<std::string>("twophase_diffusion_requested", HighFive::DataSpace::From(req)).write(req);
+}
+
 flow_float outputTimeValue(const solverConfig& cfg, int iStep)
 {
     if (cfg.unsteady == 1) {
@@ -121,6 +135,7 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
 
     File file(fnameH5, File::ReadWrite | File::Truncate);
     writeSpeciesAttributes(file);
+    writeTwoPhaseAttributes(file, cfg);
 
     // write mesh structure
     vector<geom_float> COORD;

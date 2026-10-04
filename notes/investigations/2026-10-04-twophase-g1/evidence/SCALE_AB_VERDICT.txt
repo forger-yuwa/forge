@@ -1,0 +1,5 @@
+precondition: A Jl_f bit-identical to the stored diagnostic value: True (mismatches 0 )
+A: active faces 33038, over old scale 574, max ratio 1.049e+06
+B (2^64): over old scale on the A-failing faces 0 / 574, max ratio 1.211e-01; control 574 faces max ratio 9.865e-02 over 0; all active faces over 0 max ratio 1.889e-01
+B non-finite: 0 | B results normal: 574 / 574
+VERDICT #4s: SUPPORT (A fails, B all within the old scale) -> derive underflow-aware scale

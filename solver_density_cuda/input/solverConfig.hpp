@@ -663,7 +663,14 @@ public:
     // 二相拡散 (plans/active/condensation-two-phase-transport.md §4.2, #4e; methods/condensation.md §7c)。TP carrier 凝縮 (condGasSpecies ≥ 0) で
     // 気相内の分子拡散 (z 基準・風上補正) + 全輸送量共通の乱流拡散を面流束 1 回で組み、蒸気/液を非分割で更新する。定常専用初版
     // (dual-time・陽解法・speciesImplicitCoupling 2・passiveScalarScheme 0 とは併用不可、起動時に拒否)。0 で現行経路 (既定・ビット不変)。
-    int    condTwoPhaseDiffusion = 0;
+    // 既定化 (plans/active/condensation-two-phase-default.md §4-2): condTwoPhaseDiffusion は指定値 (省略時は kCondTwoPhaseDiffusionDefault)、
+    // condTwoPhaseDiffusionGiven は明示の有無。実効状態 (active / inactive-a / inactive-b / unsupported-c) と実効値は
+    // condTwoPhaseDiffusionValidate が判定して下の 2 つに書く (起動行・res_*.h5 属性の正本; tools/twophase_state.py と同じ判定)。
+    static constexpr int kCondTwoPhaseDiffusionDefault = 0;   // 省略時の既定。S1-c で 1 にする (明示 0 の旧作用素 WARNING もこれで切り替わる)
+    int    condTwoPhaseDiffusion = kCondTwoPhaseDiffusionDefault;
+    int    condTwoPhaseDiffusionGiven = 0;                       // 1: condensation.condTwoPhaseDiffusion を明示した
+    int    condTwoPhaseDiffusionEffective = 0;                   // 1: 二相拡散が実際に作動する (condTwoPhaseDiffusionValidate が書く)
+    std::string condTwoPhaseDiffusionState = "inactive-a";      // 実効状態 (同上)
     double condTwoPhaseRelax     = 1.0;   // 非分割更新の緩和 ω (前処理の後・制限の前で蒸気・液・Q の全増分に掛ける; 0 < ω ≤ 1)
     // 収束受入の独立残差監査 (#1b-pre (1)): 1 で二相拡散が OFF の run でも旧作用素 (現行の化学種拡散・液とモーメントは移流のみ) を
     // double で組み直して開始時・終了時に [twophase-audit] を出す (TP carrier 凝縮のみ)。0 で出さない (既定・ビット不変)。二相拡散 ON の run は常に監査する。
@@ -671,11 +678,12 @@ public:
     // 二相の非分割更新の診断 (#1b-r1; 読むだけ・数値は不変)。1: 末尾 200 更新で θ = 0 のセルを記録し終了時に CSV、区間ごとに θ 制限の頻度を更新数で正規化した行。
     // 2: 同じことを θ < 1 のセルで (機構確認用)。3: 1 に加えて組立 A (float) と診断の double 組立 B の比較 (#1b-r2)。0: 出さない (既定)。二相拡散が働く run だけ。
     int    condTwoPhaseDiag      = 0;
-    // 二相の非分割更新の増分の作り方 (#4g)。0: 点対角 (既定)、1: 化学種・受動種と同じ緩和整合 scalar-DPLUR (右辺は全残差、対角は点対角と同じ分母、
+    // 二相の非分割更新の増分の作り方 (#4g)。0: 点対角 (診断用 opt-in)、1: 化学種・受動種と同じ緩和整合 scalar-DPLUR (右辺は全残差、対角は点対角と同じ分母、
     // 非対角は流入質量流束、ゼロ開始で nStepInner 回 sweep、ω = implicitRelax; 最終増分に condTwoPhaseRelax、その後 θ・commit・再正規化は同じ)。
+    // 既定は condTwoPhaseDiffusion が 1 のとき 1 (検証済みの組; plan condensation-two-phase-default §4-3)、0 のとき 0 (使われない)。
     int    condTwoPhaseSolver    = 0;
-    // 二相の非分割更新の蒸気・液の非負制限 θ_vg (#4h)。1: 掛ける (既定・従来)。0: 外す (θ = θ_thr だけ; commit は総水分だけ下限 0、液は後段で
-    // 固定した総水分に対して 0 ≤ ρg ≤ ρY_w に射影; 診断用 opt-in)。
+    // 二相の非分割更新の蒸気・液の非負制限 θ_vg (#4h)。1: 掛ける (診断用 opt-in)。0: 外す (θ = θ_thr だけ; commit は総水分だけ下限 0、液は後段で
+    // 固定した総水分に対して 0 ≤ ρg ≤ ρY_w に射影)。既定は condTwoPhaseDiffusion が 1 のとき 0 (検証済みの組)、0 のとき 1 (使われない)。
     int    condTwoPhaseNonnegLimit = 1;
     // 平衡凝縮 (plans/accepted/condensation-equilibrium.md): 核生成・成長を経ず各セルで p_v=p_sat(T) の g_eq へ緩和。
     int    condEquilibrium = 0;   // 0: 非平衡 (既定) / 1: 平衡凝縮・緩和形 (ソース S_g=αρΔ/dt, モーメント Q0-Q2 ソース 0)

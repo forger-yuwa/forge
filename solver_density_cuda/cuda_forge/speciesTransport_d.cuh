@@ -7,6 +7,7 @@
 #include "mesh/mesh.hpp"
 #include "input/solverConfig.hpp"
 #include "variables.hpp"
+#include <string>
 #include <vector>
 
 // 多成分化学種輸送 (M2)。汎用スカラ輸送コア scalarTransport_d (ScalarTransportDesc) を
@@ -95,6 +96,17 @@ void speciesRenormalizeTwoPhase_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cf
 // 収束受入の独立残差監査 (#4f (4)): 呼び出し側が assembleResidual を回した直後に呼ぶ。二相系の各成分を double で組み直して判定し
 // [twophase-audit] 行に出す (final=false で r0 を記録、true で VERDICT)。res_rog/Q はソースだけの値に置き換わる (次の組立てで戻る)。
 void twoPhaseAudit_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int iStep, bool final);
+// 診断 D1 (FORGE_DIAG_TP_FACES; plan condensation-two-phase-default §5.1 #4): 組立の前処理・後処理を 1 回ずつ通した状態から、全通常面の
+// OFF (species_diffusion_d の診断用の写し) と ON (本番の tp_build_face_in + tp_face_flux<float> と double 参照) の面作用素を評価し、
+// OFF の写しを本番カーネルの拡散寄与 (退避用の 0 初期化配列に流したもの) と節点で照合する。状態・本番の残差配列は書かない。
+// face: 面ごとのブロック [nFaces][width]、node: 節点ごとのブロック [nNodes][width] (名前は h5 のパス)。kind 0 float / 1 double / 2 int。
+struct TpFaceDiagData {
+    struct Block { std::string name; int width = 1; int kind = 0; std::vector<float> f; std::vector<double> d; std::vector<int> i; };
+    long nFaces = 0, nNodes = 0; int nSpecies = 0, iw = -1;
+    std::vector<Block> face, node;
+    std::vector<std::string> summary;   // [tp-faces] 要約行 (ログと h5 属性)
+};
+bool twoPhaseFaceDiag_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, TpFaceDiagData& out, std::string& why);
 // 再正規化の受入ゲート (#1b-pre): 更新ごとの成分別相対補正 C_q,n と局所係数偏差の max を、区間 (final=false; 前回ログからの全更新) と
 // 末尾窓 (final=true; 実更新数 N の最後の ceil(0.1N) 更新、κ = 2 n_s ε₃₂ で VERDICT) で [renorm-gate] 行に出す。TP carrier 凝縮のみ。
 void renormGateLog(const solverConfig& cfg, int iStep, bool final);

@@ -18,6 +18,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>   // std::strcmp (診断 #4pj の環境変数)
 #include <string>
 #include <vector>
 
@@ -319,7 +320,8 @@ void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
                 var.c_d["T"], var.c_d["P"], g_condTables, cprops,
                 var.c_d["condClampCorr_"+i], var.c_d["condClampCorrQ_"+i], condRealizViolCounter(),
                 condClampBudget(s), periodicNodeActive(cfg, msh) ? msh.periodicRoot_d : nullptr, var.c_d["volume"], doProject,
-                condCorrReasons(s), (s == 0) ? tcArmedAcc() : nullptr);
+                condCorrReasons(s), (s == 0) ? tcArmedAcc() : nullptr,
+                (s == 0) ? tpuSlots() : nullptr);   // 診断 G3-b (既定 nullptr)
         } else
         cond_realizability_clamp_d<<<cuda_cfg.dimGrid_normalcell, cuda_cfg.dimBlock>>>(
             msh.nCells, var.c_d["ro"], roY_w,
@@ -400,8 +402,10 @@ void condensationTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
     if (passiveSchemeEnabled(cfg)) {
         // 受動種経路 (§4.3): S3 面値 (SLAU) または 1 次風上。res_/transport_diag/src_jac のゼロ初期化と順序 (移流→ソース→更新) は同じ。
         passiveAdvection_d_wrapper(cfg, cuda_cfg, msh, var, passive_moment_index0(), (int)var.condMomentConsNames.size());
+        tpoSnap("cm_adv");    // 診断 G3-a: 残差の写し (記録中のみ; 既定は何もしない)
         // 二相拡散 (#4e): モーメントの残差ゼロ化の後に、化学種・液・Q・エネルギーへ同じ面流束を足す (無効構成は no-op)。
         twoPhaseDiffusion_d_wrapper(cfg, cuda_cfg, msh, var);
+        tpoSnap("tp_diff");   // 診断 G3-a (記録中のみ; 二相 OFF では cm_adv と同じ)
         return;
     }
 
@@ -463,7 +467,8 @@ void condensationTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConf
                     passive_limCorr_cell_ptr(q0+4*s+0), passive_limCorr_cell_ptr(q0+4*s+1), passive_limCorr_cell_ptr(q0+4*s+2), passive_limCorr_cell_ptr(q0+4*s+3),
                     passive_lim_stats_ptr(q0+4*s+0) /* 連続 4 スロットではないので kernel 側は stride 8 で書く */, passive_periodic_root(cfg, msh),
                     // dual-time: dg_max/dT_max の閾値クランプは各物理 step の初回 sub-iter だけ (plan §5.1 #18); 定常は常に (不変)
-                    (cfg.unsteady == 1 && cfg.dualTime == 1) ? ((cfg.dualTimeSubIter == 0) ? 1 : 0) : 1);
+                    (cfg.unsteady == 1 && cfg.dualTime == 1) ? ((cfg.dualTimeSubIter == 0) ? 1 : 0) : 1,
+                    (s == 0) ? tpuSlots() : nullptr);   // 診断 G3-b (既定 nullptr)
             }
         } else {
             if (loop == 0) {
@@ -487,10 +492,14 @@ void condensationTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConf
         }
         gpuErrchk( cudaPeekAtLastError() );
         gpuErrchkKernelSync();
+        tpuSnap("cm_commit");   // 診断 G3-b (記録中のみ; 既定は何もしない)
         const bool rec = passiveRecordStage(cfg, loop);
         passiveAddRhoTerm_d_wrapper(cfg, cuda_cfg, msh, var, q0, nq);              // + φ_N δρ (#19)
+        tpuSnap("add_rho");
         passiveLimitIncrement_d_wrapper(cfg, cuda_cfg, msh, var, q0, nq, rec);   // θ_b 増分スケーリング (M5; 輸送増分 z に対して)
+        tpuSnap("limit_increment");
         passiveBounds_d_wrapper(cfg, cuda_cfg, msh, var, q0, nq, rec);           // ρφ >= 0 と補正収支 (最後の砦)
+        tpuSnap("passive_floor");
         passiveMirrorPeriodic_d_wrapper(cfg, cuda_cfg, msh, var);
         return;
     }
@@ -713,7 +722,7 @@ void condCorrectionLog_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
 // -----------------------------------------------------------------------------
 // 二相拡散の起動時検査・蒸気残差・非分割更新 (plans/active/condensation-two-phase-transport.md §4.2, §5.1 #4e)
 // -----------------------------------------------------------------------------
-void condTwoPhaseDiffusionValidate(const solverConfig& cfg)
+void condTwoPhaseDiffusionValidate(solverConfig& cfg, bool hasPeriodic)
 {
     if (cfg.condAuditResidual == 1 && cfg.condTwoPhaseDiffusion == 0) {
         if (condResidualAuditActive(cfg))
@@ -721,38 +730,52 @@ void condTwoPhaseDiffusionValidate(const solverConfig& cfg)
         else
             std::printf("[twophase-audit] condAuditResidual 1 is inactive: needs TP carrier condensation (condGasSpecies >= 0, thermalMethod 2, nCondSpecies 1)\n");
     }
-    if (cfg.condTwoPhaseDiffusion == 0) return;
-    auto fail = [](const std::string& why) {
-        std::fprintf(stderr, "Configuration Error: condensation.condTwoPhaseDiffusion 1 %s (plan condensation-two-phase-transport #4e: steady-only first version)\n", why.c_str());
-        std::exit(EXIT_FAILURE);
-    };
-    if (cfg.condensation != 1) { std::printf("[twophase] condTwoPhaseDiffusion 1 is inactive: condensation is off\n"); return; }
-    if (cfg.condGasSpecies < 0 || cfg.thermalMethod != 2 || cfg.nSpecies < 2) {
-        // CPG carrier (condVaporMassFraction) と pure 凝縮は対象外 (§4.2; 液は拡散しない現行のまま)
-        std::printf("[twophase] condTwoPhaseDiffusion 1 is inactive: %s (two-phase diffusion is not supported; liquid is not diffused)\n",
-                    (cfg.condVaporMassFraction > 0.0) ? "CPG carrier" : "not a TP carrier (pure condensible)");
+    // 実効状態の判定表 (plan condensation-two-phase-default §4-2): 指定 (省略 / 明示 0 / 明示 1) × 実効状態。記録は起動行・res_*.h5 属性。
+    std::string why;
+    const TwoPhaseDiffusionState st = condTwoPhaseDiffusionClassify(cfg, hasPeriodic, &why);
+    const bool requestOn = (cfg.condTwoPhaseDiffusion == 1);   // 省略時は既定 (kCondTwoPhaseDiffusionDefault) が入っている
+    const std::string req = (cfg.condTwoPhaseDiffusionGiven == 0)
+        ? "omitted (default " + std::to_string(solverConfig::kCondTwoPhaseDiffusionDefault) + ")"
+        : std::string(requestOn ? "1" : "0");
+    cfg.condTwoPhaseDiffusionState = twoPhaseDiffusionStateName(st);
+    cfg.condTwoPhaseDiffusionEffective = (requestOn && st == TwoPhaseDiffusionState::Active) ? 1 : 0;
+    if (cfg.condensation == 1 || cfg.condTwoPhaseDiffusionGiven != 0)
+        std::printf("[twophase] condTwoPhaseDiffusion requested %s, state %s, effective %d (%s)\n",
+                    req.c_str(), cfg.condTwoPhaseDiffusionState.c_str(), cfg.condTwoPhaseDiffusionEffective, why.c_str());
+    if (!requestOn) {
+        // 明示 0 で包絡内: 旧作用素。既定が ON になってから (S1-c) WARNING にする (既定 0 の間は上の記録行だけ)。
+        if (st == TwoPhaseDiffusionState::Active && cfg.condTwoPhaseDiffusionGiven != 0 && solverConfig::kCondTwoPhaseDiffusionDefault == 1)
+            std::printf("[twophase] WARNING: condTwoPhaseDiffusion 0: legacy operator: liquid not diffused (only total water Y_w is diffused; "
+                        "liquid and moments are advected only)\n");
         return;
     }
-    if (cfg.viscMethod == 0) { std::printf("[twophase] condTwoPhaseDiffusion 1 is inactive: inviscid (viscMethod 0)\n"); return; }
-    if (cfg.unsteady == 1 && cfg.dualTime == 1) fail("cannot be combined with dual-time (unsteady 1, dualTime 1): the coupled FCT of vapour and liquid is not designed yet");
-    if (cfg.unsteady != 0 || cfg.timeIntegration != 11) fail("requires steady implicit pseudo-time (unsteady 0, timeIntegration 11)");
-    if (cfg.speciesImplicitCoupling == 2) fail("cannot be combined with speciesImplicitCoupling 2 (EOS cross coupling commits water before the liquid)");
-    if (cfg.passiveScalarScheme != 1) fail("requires passiveScalarScheme 1 (moments on the passive-scalar path)");
-    if (cfg.condEquilibrium != 0) fail("requires non-equilibrium condensation (condEquilibrium 0)");
-    if (cfg.condLimiterMode != 1) fail("requires condLimiterMode 1 (the source enters the residual without theta)");
-    if (cfg.nCondSpecies != 1) fail("supports one condensing species (nCondSpecies 1)");
+    switch (st) {
+        case TwoPhaseDiffusionState::InactiveA:
+            std::printf("[twophase] INFO: condTwoPhaseDiffusion %s is inactive: %s (no effect; identical physics)\n", req.c_str(), why.c_str());
+            return;
+        case TwoPhaseDiffusionState::InactiveB:
+            std::printf("[twophase] WARNING: condTwoPhaseDiffusion %s is inactive: %s (two-phase diffusion is not applicable; liquid is not diffused "
+                        "and the energy flux counts the liquid as vapour; recorded as effective 0)\n", req.c_str(), why.c_str());
+            return;
+        case TwoPhaseDiffusionState::UnsupportedC:
+            std::fprintf(stderr, "Configuration Error: condensation.condTwoPhaseDiffusion %s %s (plan condensation-two-phase-default §4-2 (c)). "
+                                 "To run the legacy operator (liquid not diffused), set `condTwoPhaseDiffusion: 0` explicitly.\n", req.c_str(), why.c_str());
+            std::exit(EXIT_FAILURE);
+        case TwoPhaseDiffusionState::Active:
+            break;
+    }
     std::printf("[twophase] condTwoPhaseDiffusion 1: gas-phase molecular diffusion (z basis, upwind correction) + common turbulent mixing "
-                "(species, liquid g, Q2/Q1/Q0, energy), unsplit vapour/liquid update with point-diagonal preconditioner, relax %.3g, "
+                "(species, liquid g, Q2/Q1/Q0, energy), unsplit vapour/liquid update, relax %.3g, "
                 "condDgMaxStep %.3g, condDTmaxStep %.3g; residual column rms_roYv = res_roY%d - res_rog_0\n",
                 cfg.condTwoPhaseRelax, cfg.condDgMaxStep, cfg.condDTmaxStep, cfg.condGasSpecies);
     if (cfg.discretization != "node")
         std::printf("[twophase] WARNING: cell discretization is unverified for two-phase diffusion (only the code path was reviewed)\n");
     std::printf("[twophase] condTwoPhaseNonnegLimit %d (%s)\n", cfg.condTwoPhaseNonnegLimit,
-                cfg.condTwoPhaseNonnegLimit == 1 ? "vapour/liquid non-negativity in the common theta" :
-                "theta = threshold limits only; commit floors total water at 0 and liquid is projected to 0 <= rhog <= rhoYw downstream (diagnostic opt-in)");
+                cfg.condTwoPhaseNonnegLimit == 1 ? "vapour/liquid non-negativity in the common theta (diagnostic opt-in)" :
+                "theta = threshold limits only; commit floors total water at 0 and liquid is projected to 0 <= rhog <= rhoYw downstream (verified default)");
     std::printf("[twophase] condTwoPhaseSolver %d (%s); effective implicitRelax %.6g, nStepInner %d, scalarCflMax %.6g (dt_local scale %.6g), condTwoPhaseRelax %.6g\n",
-                cfg.condTwoPhaseSolver, cfg.condTwoPhaseSolver == 1 ? "matched scalar-DPLUR: R = full residuals, D = point-diagonal denominators, advective inflow off-diagonal, zero start"
-                                                                    : "point-diagonal",
+                cfg.condTwoPhaseSolver, cfg.condTwoPhaseSolver == 1 ? "matched scalar-DPLUR: R = full residuals, D = point-diagonal denominators, advective inflow off-diagonal, zero start (verified default)"
+                                                                    : "point-diagonal (diagnostic opt-in)",
                 (double)cfg.implicitRelax, cfg.nStepInner, (double)cfg.scalarCflMax, (double)scalarDtScale(cfg), cfg.condTwoPhaseRelax);
     if (cfg.condTwoPhaseSolver == 0 && (cfg.passiveImplicitCoupling == 1 || cfg.speciesImplicitCoupling == 1))
         std::printf("[twophase] note: vapour, liquid and moments use the point-diagonal preconditioner (passiveImplicitCoupling / speciesImplicitCoupling "
@@ -781,7 +804,8 @@ __global__ void twophase_vl_update_d(
     double* stats, int* thetaMin, double* limStats_g, const geom_int* root,
     double* diag,   // 診断 (condTwoPhaseDiag; nullptr で書かない): TPD_* 列 × nCells
     const flow_float* inc, geom_int nIncStride,   // #4g: DPLUR の増分 [q*nIncStride + ic] (q = 蒸気, 液, Q2, Q1, Q0); nullptr なら点対角
-    int noNonneg, double* tcAcc)   // #4h: 非負制限 θ_vg を外す / 補正計測 (段 0 = commit 内の補正と分母; nullptr で計測しない)
+    int noNonneg, double* tcAcc,   // #4h: 非負制限 θ_vg を外す / 補正計測 (段 0 = commit 内の補正と分母; nullptr で計測しない)
+    double* tpu)                   // 診断 G3-b (FORGE_DIAG_TP_UPDATE; 既定 nullptr): commit の before・δ・候補・after を成分 0..4 で記録
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -827,6 +851,17 @@ __global__ void twophase_vl_update_d(
         diag[17*n + ic] = (double)(c.M + c.Dv); diag[18*n + ic] = (double)(c.M + c.Dg + c.V*c.sjg);
         for (int m = 0; m < TP_NQ; ++m) diag[(19 + m)*n + ic] = (double)(c.M + c.DQ[m] + c.V*c.sjQ[m]);
     }
+    if (tpu != nullptr) {
+        // δq_limited (double) = 実効 θ (float) × 緩和後の増分 (float) を double で (積は厳密)。総水分は蒸気 + 液の増分の和。
+        // 参考の float 増分は非融合の評価 (__fmul_rn/__fadd_rn)。本番は c.rg + Th·dg を FMA に融合しうるので、本番の「float の増分」は存在しないことがある。
+        const double Thd = (double)o.Th;
+        const double dW = Thd*(double)o.dv + Thd*(double)o.dg;
+        const float  dWf = __fadd_rn(__fmul_rn(o.Th, o.dv), __fmul_rn(o.Th, o.dg));
+        tpu_commit(tpu, TPU_OP_TPC, 1, 0, nCells, ic, c.rYw, dW, dWf, o.candW, o.rYw);
+        tpu_commit(tpu, TPU_OP_TPC, 1, 1, nCells, ic, c.rg, Thd*(double)o.dg, __fmul_rn(o.Th, o.dg), o.candG, o.rg);
+        for (int m = 0; m < TP_NQ; ++m)
+            tpu_commit(tpu, TPU_OP_TPC, 1, 2 + m, nCells, ic, c.rQ[m], Thd*(double)o.dq[m], __fmul_rn(o.Th, o.dq[m]), o.candQ[m], o.rQ[m]);
+    }
     roYw[ic] = o.rYw; g[ic] = o.rg; Q2[ic] = o.rQ[0]; Q1[ic] = o.rQ[1]; Q0[ic] = o.rQ[2];
     diagLim[ic] = (flow_float)o.theta;
     const double rod = (double)ro[ic];
@@ -855,7 +890,8 @@ namespace {
 __global__ void tp_dplur_prep_d(geom_int nCells, geom_int nAll, flow_float* dt_local, flow_float dtScale, geom_float* vol,
     flow_float* res_w, flow_float* res_g, flow_float* res_Q2, flow_float* res_Q1, flow_float* res_Q0,
     flow_float* td_w, flow_float* td_g, flow_float* td_Q2, flow_float* td_Q1, flow_float* td_Q0,
-    flow_float* sj_g, flow_float* sj_Q2, flow_float* sj_Q1, flow_float* sj_Q0, flow_float* R, flow_float* D)
+    flow_float* sj_g, flow_float* sj_Q2, flow_float* sj_Q1, flow_float* sj_Q0, flow_float* R, flow_float* D,
+    int commonDiag, double* tpu)   // 診断 #4pj (既定 0 / nullptr): 液・Q の分母の共通化 (FORGE_DIAG_TP_COMMON_DIAG) と分母の記録
 {
     const geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -866,6 +902,13 @@ __global__ void tp_dplur_prep_d(geom_int nCells, geom_int nAll, flow_float* dt_l
     c.Dv = td_w[ic]; c.Dg = td_g[ic]; c.DQ[0] = td_Q2[ic]; c.DQ[1] = td_Q1[ic]; c.DQ[2] = td_Q0[ic];
     c.sjg = sj_g[ic]; c.sjQ[0] = sj_Q2[ic]; c.sjQ[1] = sj_Q1[ic]; c.sjQ[2] = sj_Q0[ic];
     float Dd[2 + TP_NQ]; tp_denoms(c, Dd);
+    if (tpu != nullptr) for (int q = 0; q < 2 + TP_NQ; ++q) tpu_put(tpu, TPU_DIAG(q, 0), nCells, ic, (double)Dd[q]);
+    if (commonDiag != 0) {   // 診断 #4pj の B: 液・Q2・Q1・Q0 の分母を節点ごとの max に共通化 (蒸気の分母・残差・sweep・緩和・θ・射影は不変)
+        float Dm = Dd[1];
+        for (int q = 2; q < 2 + TP_NQ; ++q) Dm = tp_max<float>(Dm, Dd[q]);
+        for (int q = 1; q < 2 + TP_NQ; ++q) Dd[q] = Dm;
+    }
+    if (tpu != nullptr) for (int q = 0; q < 2 + TP_NQ; ++q) tpu_put(tpu, TPU_DIAG(q, 1), nCells, ic, (double)Dd[q]);
     const size_t n = (size_t)nAll;
     R[0*n + ic] = res_w[ic] - res_g[ic];   // 全残差変換 (更新カーネルと同じ float の減算)
     R[1*n + ic] = res_g[ic]; R[2*n + ic] = res_Q2[ic]; R[3*n + ic] = res_Q1[ic]; R[4*n + ic] = res_Q0[ic];
@@ -918,7 +961,8 @@ static const flow_float* twoPhaseDPLURIncrement(solverConfig& cfg, cudaConfig& c
         var.c_d["res_"+w], var.c_d["res_rog_0"], var.c_d["res_roQ2_0"], var.c_d["res_roQ1_0"], var.c_d["res_roQ0_0"],
         var.c_d["transport_diag_Y" + std::to_string(cfg.condGasSpecies)], var.c_d["transport_diag_g_0"], var.c_d["transport_diag_Q2_0"],
         var.c_d["transport_diag_Q1_0"], var.c_d["transport_diag_Q0_0"],
-        var.c_d["src_jac_g_0"], var.c_d["src_jac_Q2_0"], var.c_d["src_jac_Q1_0"], var.c_d["src_jac_Q0_0"], g_tpdp_R, g_tpdp_D);
+        var.c_d["src_jac_g_0"], var.c_d["src_jac_Q2_0"], var.c_d["src_jac_Q1_0"], var.c_d["src_jac_Q0_0"], g_tpdp_R, g_tpdp_D,
+        tpuCommonDiag() ? 1 : 0, tpuSlots());   // 診断 #4pj (通常の計算では 0 / nullptr)
     gpuErrchk( cudaMemset(g_tpdp_a, 0, bytes) ); gpuErrchk( cudaMemset(g_tpdp_b, 0, bytes) );
     flow_float* pin = (cfg.discretization == "node") ? var.c_d["scalarDirichletPin"] : nullptr;
     flow_float* roRef = var.c_d["roN"];   // 定常 (dual-time は起動時に拒否)
@@ -1283,11 +1327,13 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
         var.c_d["transport_diag_g_0"], var.c_d["transport_diag_Q2_0"], var.c_d["transport_diag_Q1_0"], var.c_d["transport_diag_Q0_0"],
         var.c_d["condLim_0"], var.c_d["condClampCorr_0"], var.c_d["condClampCorrQ_0"],
         g_tp_stats_dev, g_tp_thetaMin_dev, passive_lim_stats_ptr(q0), passive_periodic_root(cfg, msh),
-        g_tpd_cell, inc, msh.nCells_all, (cfg.condTwoPhaseNonnegLimit == 0) ? 1 : 0, tcAcc);
+        g_tpd_cell, inc, msh.nCells_all, (cfg.condTwoPhaseNonnegLimit == 0) ? 1 : 0, tcAcc, tpuSlots());
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+    tpuSnap("tp_commit");   // 診断 G3-b (記録中のみ; 既定は何もしない)
     // 再正規化 (係数を液・Q にも) → 受動種の最後の砦 (floor と収支の記録; 通常は無作用) → 周期ミラー
     speciesRenormalizeTwoPhase_d_wrapper(cfg, cuda_cfg, msh, var);
+    tpuSnap("tp_renorm");
     if (g_tpd_cell != nullptr) {   // 診断: 末尾 200 更新の θ = 0 (θ < 1) セルを記録、区間の固有セルの印 (読むだけ)
         const int inWindow = twoPhaseDiagInWindow(cfg) ? 1 : 0;
         if (inWindow && cfg.condTwoPhaseDiag == 3) tpdBProcess(cfg, msh, var, g_tpd_nupd);   // #1b-r2: 組立 A/B の比較 (host; 読むだけ)
@@ -1297,6 +1343,7 @@ void twoPhaseUpdate_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh
         ++g_tpd_nupd;
     }
     passiveBounds_d_wrapper(cfg, cuda_cfg, msh, var, q0, (int)var.condMomentConsNames.size(), true, tcAcc);
+    tpuSnap("passive_floor");
     passiveMirrorPeriodic_d_wrapper(cfg, cuda_cfg, msh, var);
 }
 
@@ -1444,4 +1491,204 @@ void twoPhaseDiagWrite(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, varia
            fc.c_str(), fs.c_str(), W, N, tot, cells.size(), W ? (double)tot/(double)W : 0.0, npers ? pers/(double)npers : 0.0,
            (nrec > g_tpd_cap) ? nrec - g_tpd_cap : 0ULL);
     fflush(stdout);
+}
+
+// =============================================================================
+// 診断 G3-b (更新写像の収支; FORGE_DIAG_TP_UPDATE=<出力 h5>、既定 off; plan condensation-two-phase-default §5.1 #4g3)。
+//   main の runTpUpdateDiag が tpuBegin → tpuArm(1) [前処理] → tpuArm(2) [1 更新] → tpuCollect の順に呼ぶ。
+//   本番カーネルは tpuSlots() が非 null のときだけ実際に読んだ値・書いた値をスロットへ写す (演算は変えない)。
+//   通常の計算では tpuBegin が呼ばれないので tpuSlots() は nullptr、tpuSnap は何もしない。
+// =============================================================================
+namespace {
+struct TpuState {
+    bool on = false; int phase = 0; geom_int n = 0; int iw = -1;
+    bool commonDiag = false;         // 診断 #4pj の B (FORGE_DIAG_TP_COMMON_DIAG=1): 二相 DPLUR の液・Q の分母を共通化
+    double* buf[2] = {nullptr, nullptr};
+    variables* var = nullptr;
+    std::vector<std::string> comp;   // 成分の保存量名 (roY<iw>, rog_0, roQ2_0, roQ1_0, roQ0_0)
+    std::vector<std::string> snapLabel; std::vector<int> snapPhase; std::vector<std::vector<float>> snap;
+};
+TpuState g_tpu;
+}  // namespace
+
+bool tpuBegin(solverConfig& cfg, mesh& msh, variables& var, std::string& why)
+{
+    // 記録点を入れた経路だけを通す (それ以外は記録が欠けて収支が閉じないので、黙って進めずに拒否する)
+    if (!condensationEnabled(var) || var.nCondSpeciesRegistered != 1) { why = "condensation with exactly one condensing species is required"; return false; }
+    if (cfg.condGasSpecies < 0 || cfg.thermalMethod != 2 || var.nSpeciesRegistered < 2) { why = "TP carrier condensation (condGasSpecies >= 0, thermalMethod 2) is required"; return false; }
+    if (cfg.timeIntegration != 11 || cfg.unsteady != 0) { why = "steady implicit (timeIntegration 11, unsteady 0) only"; return false; }
+    if (cfg.discretization != "node") { why = "node discretization only (the instrumented and validated path)"; return false; }
+    if (cfg.passiveScalarScheme != 1) { why = "passiveScalarScheme 1 only"; return false; }
+    if (cfg.speciesImplicitCoupling != 1) { why = "speciesImplicitCoupling 1 only (the species commit is instrumented in the scalar-DPLUR commit)"; return false; }
+    if (cfg.condEquilibrium != 0 || cfg.condLimiterMode != 1) { why = "non-equilibrium condensation with condLimiterMode 1 only"; return false; }
+    if (cfg.condFloat == 0 || !g_condTables.valid) { why = "condFloat 1 with valid tables only (the float realizability clamp is instrumented)"; return false; }
+    if (!condTwoPhaseDiffusionActive(cfg) && cfg.passiveImplicitCoupling != 1) { why = "OFF arm requires passiveImplicitCoupling 1 (the DPLUR moment increment)"; return false; }
+    // 診断 #4pj: 分母の共通化 (B) は二相 ON の DPLUR 経路 (condTwoPhaseSolver 1) だけ (それ以外は置き換える分母が無いので拒否)
+    const bool commonDiag = tpuCommonDiagRequested();
+    if (commonDiag && !(condTwoPhaseDiffusionActive(cfg) && cfg.condTwoPhaseSolver == 1)) {
+        why = "FORGE_DIAG_TP_COMMON_DIAG requires the two-phase ON path with condTwoPhaseSolver 1 (the DPLUR denominators it replaces)"; return false;
+    }
+    g_tpu = TpuState{};
+    g_tpu.commonDiag = commonDiag;
+    g_tpu.n = msh.nCells; g_tpu.iw = cfg.condGasSpecies; g_tpu.var = &var;
+    g_tpu.comp = {"roY" + std::to_string(cfg.condGasSpecies), "rog_0", "roQ2_0", "roQ1_0", "roQ0_0"};
+    for (const auto& k : g_tpu.comp) {
+        auto it = var.c_d.find(k);
+        if (it == var.c_d.end() || it->second == nullptr) { why = "conservative array " + k + " is not registered"; return false; }
+    }
+    const size_t bytes = (size_t)TPU_NSLOT*(size_t)g_tpu.n*sizeof(double);
+    for (int b = 0; b < 2; ++b) {
+        gpuErrchk( cudaMalloc((void**)&g_tpu.buf[b], bytes) );
+        gpuErrchk( cudaMemset(g_tpu.buf[b], 0xFF, bytes) );   // 全ビット 1 = NaN (書かれないスロットはその操作が経路に無い)
+    }
+    g_tpu.on = true;
+    if (commonDiag)
+        std::printf("[tp-update] FORGE_DIAG_TP_COMMON_DIAG=1 (diagnostic B): two-phase DPLUR denominators of liquid g, Q2, Q1, Q0 replaced by the "
+                    "per-node max(D_g, D_Q2, D_Q1, D_Q0); vapour denominator, residuals, sweeps, relaxation, theta and projection unchanged\n");
+    std::printf("[tp-update] slots: %d per node x %ld nodes x 2 buffers (%.1f MB)\n", TPU_NSLOT, (long)g_tpu.n, 2.0*(double)bytes/1.0e6);
+    return true;
+}
+
+void tpuArm(int phase) { g_tpu.phase = g_tpu.on ? phase : 0; }
+
+bool tpuCommonDiagRequested()
+{
+    const char* e = std::getenv("FORGE_DIAG_TP_COMMON_DIAG");
+    return e != nullptr && *e != '\0' && std::strcmp(e, "0") != 0;
+}
+
+// 更新の記録中 (phase 2) だけ真。tpuBegin を通らない通常の計算では常に偽 (環境変数が立っていても分母は本番のまま)。
+bool tpuCommonDiag() { return g_tpu.on && g_tpu.commonDiag && g_tpu.phase == 2; }
+
+double* tpuSlots() { return (g_tpu.on && g_tpu.phase > 0) ? g_tpu.buf[g_tpu.phase - 1] : nullptr; }
+
+void tpuSnap(const char* label)
+{
+    if (!g_tpu.on || g_tpu.phase == 0) return;
+    gpuErrchk( cudaDeviceSynchronize() );
+    const size_t n = (size_t)g_tpu.n;
+    std::vector<float> h((size_t)TPU_NC*n);
+    for (int c = 0; c < TPU_NC; ++c)
+        gpuErrchk( cudaMemcpy(h.data() + (size_t)c*n, g_tpu.var->c_d[g_tpu.comp[c]], n*sizeof(float), cudaMemcpyDeviceToHost) );
+    g_tpu.snapLabel.push_back(label); g_tpu.snapPhase.push_back(g_tpu.phase); g_tpu.snap.push_back(std::move(h));
+}
+
+bool tpuCollect(TpuDiagData& out)
+{
+    if (!g_tpu.on) return false;
+    gpuErrchk( cudaDeviceSynchronize() );
+    const size_t cnt = (size_t)TPU_NSLOT*(size_t)g_tpu.n;
+    out.n = (long)g_tpu.n; out.iw = g_tpu.iw; out.commonDiag = g_tpu.commonDiag ? 1 : 0;
+    out.pre.resize(cnt); out.upd.resize(cnt);
+    gpuErrchk( cudaMemcpy(out.pre.data(), g_tpu.buf[0], cnt*sizeof(double), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(out.upd.data(), g_tpu.buf[1], cnt*sizeof(double), cudaMemcpyDeviceToHost) );
+    out.snapLabel = g_tpu.snapLabel; out.snapPhase = g_tpu.snapPhase; out.snap = g_tpu.snap;
+    return true;
+}
+
+// =============================================================================
+// 診断 G3-a (作用素の収支; FORGE_DIAG_TP_OPERATOR=<出力 h5>、既定 off; plan condensation-two-phase-default §5.1 #4g3・#4pjg)。
+//   main の runTpOperatorDiag が tpoBegin → tpoArm(true) [組立 1 回] → tpoArm(false) → tpoCollect の順に呼ぶ。
+//   本番カーネルは tpoFace() / tpoSrcSlots() が有効なときだけ、実際に残差へ足した値をスロットへ写す (演算は変えない)。
+//   通常の計算では tpoBegin が呼ばれないので記録ポインタは無効、tpoSnap は何もしない。
+// =============================================================================
+namespace {
+struct TpoState {
+    bool on = false, armed = false;
+    geom_int n = 0, nF = 0; int nComp = 0; int iw = -1;
+    double* face = nullptr;          // [2][nComp][nF]
+    int* code = nullptr;             // [TPO_NK][nF]
+    double* src = nullptr;           // [TPO_NSRC][n]
+    variables* var = nullptr;
+    std::vector<std::string> cons, res;   // 成分の保存量名・残差名
+    std::vector<std::string> snapLabel; std::vector<std::vector<float>> snap;
+};
+TpoState g_tpo;
+}  // namespace
+
+bool tpoBegin(solverConfig& cfg, mesh& msh, variables& var, std::string& why)
+{
+    // 記録点を入れた経路だけを通す (それ以外は記録が欠けて収支が閉じないので、黙って進めずに拒否する)
+    if (!condensationEnabled(var) || var.nCondSpeciesRegistered != 1) { why = "condensation with exactly one condensing species is required"; return false; }
+    if (cfg.condGasSpecies < 0 || cfg.condGasSpecies >= var.nSpeciesRegistered || cfg.thermalMethod != 2 || var.nSpeciesRegistered < 2) {
+        why = "TP carrier condensation (0 <= condGasSpecies < nSpecies, thermalMethod 2) is required"; return false;
+    }
+    if (cfg.discretization != "node") { why = "node discretization only (the instrumented and validated path)"; return false; }
+    if (cfg.passiveScalarScheme != 1) { why = "passiveScalarScheme 1 only (the moment advection is instrumented in the passive path)"; return false; }
+    if (cfg.speciesFaceReconstruction < 2 || !(cfg.solver == "SLAU" || cfg.solver == "SLAU2")) {
+        why = "speciesFaceReconstruction >= 2 with SLAU/SLAU2 only (the S3 face-value advection kernel is the instrumented one)"; return false;
+    }
+    if (cfg.condEquilibrium != 0) { why = "non-equilibrium condensation only (the equilibrium source branches are not instrumented)"; return false; }
+    g_tpo = TpoState{};
+    g_tpo.n = msh.nCells; g_tpo.nF = msh.nNormal_halo_Planes; g_tpo.iw = cfg.condGasSpecies; g_tpo.var = &var;
+    g_tpo.nComp = TPO_NC_CORE + (var.nSpeciesRegistered - 1);
+    g_tpo.cons = {"roY" + std::to_string(cfg.condGasSpecies), "rog_0", "roQ2_0", "roQ1_0", "roQ0_0"};
+    for (int s = 0; s < var.nSpeciesRegistered; ++s) if (s != cfg.condGasSpecies) g_tpo.cons.push_back("roY" + std::to_string(s));
+    for (const auto& k : g_tpo.cons) {
+        g_tpo.res.push_back("res_" + k);
+        for (const std::string& kk : {k, std::string("res_") + k}) {
+            auto it = var.c_d.find(kk);
+            if (it == var.c_d.end() || it->second == nullptr) { why = "array " + kk + " is not registered"; return false; }
+        }
+    }
+    const size_t fb = 2*(size_t)g_tpo.nComp*(size_t)g_tpo.nF*sizeof(double);
+    const size_t cb = (size_t)TPO_NK*(size_t)g_tpo.nF*sizeof(int);
+    const size_t sb = (size_t)TPO_NSRC*(size_t)g_tpo.n*sizeof(double);
+    gpuErrchk( cudaMalloc((void**)&g_tpo.face, fb) ); gpuErrchk( cudaMemset(g_tpo.face, 0xFF, fb) );   // 全ビット 1 = NaN
+    gpuErrchk( cudaMalloc((void**)&g_tpo.code, cb) ); gpuErrchk( cudaMemset(g_tpo.code, 0xFF, cb) );   // −1 = 未実行
+    gpuErrchk( cudaMalloc((void**)&g_tpo.src, sb) );  gpuErrchk( cudaMemset(g_tpo.src, 0xFF, sb) );    // NaN = ソース kernel が書いていない
+    g_tpo.on = true;
+    std::printf("[tp-operator] slots: faces %ld x %d components x 2 kinds, codes %d x %ld, source %d x %ld nodes (%.1f MB)\n",
+                (long)g_tpo.nF, g_tpo.nComp, TPO_NK, (long)g_tpo.nF, TPO_NSRC, (long)g_tpo.n, (double)(fb + cb + sb)/1.0e6);
+    return true;
+}
+
+void tpoArm(bool on) { g_tpo.armed = g_tpo.on && on; }
+
+TpoFacePtr tpoFace(int kernel, int kind, int compBase)
+{
+    TpoFacePtr t;   // 既定 = 無効
+    if (!g_tpo.armed) return t;
+    t.val = g_tpo.face; t.code = g_tpo.code; t.nF = g_tpo.nF; t.nComp = g_tpo.nComp;
+    t.kind = kind; t.kernel = kernel; t.compBase = compBase; t.iw = g_tpo.iw;
+    return t;
+}
+
+double* tpoSrcSlots() { return g_tpo.armed ? g_tpo.src : nullptr; }
+
+void tpoSnap(const char* label)
+{
+    if (!g_tpo.armed) return;
+    gpuErrchk( cudaDeviceSynchronize() );
+    const size_t n = (size_t)g_tpo.n;
+    std::vector<float> h((size_t)g_tpo.nComp*n);
+    for (int c = 0; c < g_tpo.nComp; ++c)
+        gpuErrchk( cudaMemcpy(h.data() + (size_t)c*n, g_tpo.var->c_d[g_tpo.res[c]], n*sizeof(float), cudaMemcpyDeviceToHost) );
+    g_tpo.snapLabel.push_back(label); g_tpo.snap.push_back(std::move(h));
+}
+
+bool tpoCollect(mesh& msh, TpoDiagData& out)
+{
+    if (!g_tpo.on) return false;
+    gpuErrchk( cudaDeviceSynchronize() );
+    const size_t n = (size_t)g_tpo.n, nF = (size_t)g_tpo.nF;
+    out.n = (long)n; out.nF = (long)nF; out.nComp = g_tpo.nComp; out.iw = g_tpo.iw;
+    out.compCons = g_tpo.cons; out.compRes = g_tpo.res;
+    out.faceVal.resize(2*(size_t)g_tpo.nComp*nF);
+    out.faceCode.resize((size_t)TPO_NK*nF);
+    out.src.resize((size_t)TPO_NSRC*n);
+    gpuErrchk( cudaMemcpy(out.faceVal.data(), g_tpo.face, out.faceVal.size()*sizeof(double), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(out.faceCode.data(), g_tpo.code, out.faceCode.size()*sizeof(int), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(out.src.data(), g_tpo.src, out.src.size()*sizeof(double), cudaMemcpyDeviceToHost) );
+    // 面の所属: ih → ip (normal_halo_planes)、ip → (ic0, ic1) (map_plane_cells; ic ≥ nCells は ghost)
+    std::vector<geom_int> nh(nF), pc(2*(size_t)msh.nPlanes);
+    gpuErrchk( cudaMemcpy(nh.data(), msh.normal_halo_planes_d, nF*sizeof(geom_int), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(pc.data(), msh.map_plane_cells_d, pc.size()*sizeof(geom_int), cudaMemcpyDeviceToHost) );
+    out.faceIp.resize(nF); out.faceIc0.resize(nF); out.faceIc1.resize(nF);
+    for (size_t ih = 0; ih < nF; ++ih) {
+        const geom_int ip = nh[ih];
+        out.faceIp[ih] = (int)ip; out.faceIc0[ih] = (int)pc[2*(size_t)ip]; out.faceIc1[ih] = (int)pc[2*(size_t)ip + 1];
+    }
+    out.snapLabel = g_tpo.snapLabel; out.snap = g_tpo.snap;
+    return true;
 }

@@ -10,6 +10,7 @@
 > 各計画の完了ログや起票履歴に出てくる `.github/plans/<name>.md` という記述は、**現在の root
 > `plans/{active,accepted,archived}/<name>.md`** を指す (移行済み)。履歴の文言はそのまま残してあるので、
 | [`limiter-config-simplify.md`](active/limiter-config-simplify.md) | limiter | リミッタの config 表面を最小化し、ψ 凍結の要否を決める (複雑化を止める判断) |
+| [`condensation-two-phase-default.md`](active/condensation-two-phase-default.md) | condensation | 凝縮の二相拡散を既定にする (段階既定化: 定常包絡で ON、包絡外は 3 分類、dual-time は後段) — 2026-10-04 起票、ユーザ決定 **2026-10-04 保留・将来課題 (ユーザ判断)**: 射影と押し合う原因は蒸発 S_Q1 の半径 0 の重み (ON/OFF 共通)、修正と既定化を凍結 |
 > 当時の記録として読むこと。
 
 ライフサイクルは**フォルダ移動**で表す (ファイル名は固定し、移動でリンクを壊さない)。

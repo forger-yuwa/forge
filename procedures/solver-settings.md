@@ -194,16 +194,24 @@ TP carrier の凝縮 run では `viscMethod 2` の μ・λ と化学種拡散係
 **二相拡散 `condensation.condTwoPhaseDiffusion`** (既定 0, 2026-10-02, opt-in・CFD 未検証; plan condensation-two-phase-transport #4e, methods/condensation.md 実装 §7c):
 `1` で TP carrier 凝縮 (`condGasSpecies` ≥ 0) の NS run に、気相内の分子拡散 (気相基準 z・風上の補正) と全輸送量 (化学種・液 g・Q2/Q1/Q0) 共通の乱流混合 μ_t/Sc_t を
 1 回の面流束で足し (エネルギーに Σh_k J_k + h_v J_w − L J_l)、蒸気と液を非分割で更新する (増分は点対角、制限は `condDgMaxStep`/`condDTmaxStep` と蒸気・液の非負)。
-**定常専用**: dual-time・陽解法・`speciesImplicitCoupling 2`・`passiveScalarScheme 0`・`condEquilibrium` ≠ 0・`condLimiterMode 0`・`nCondSpecies` ≠ 1 とは起動時にエラー終了。
-CPG carrier・pure 凝縮・`viscMethod 0` では不活性 (ログに理由、現行経路)。cell は未検証 (WARNING)。
-蒸気・液・Q は `passiveImplicitCoupling`/`speciesImplicitCoupling` の DPLUR ではなく点対角で更新する (非水種は従来どおり)。`condTwoPhaseRelax` (既定 1, 0 < ω ≤ 1) は
+**実効状態の判定表** (2026-10-04, plan condensation-two-phase-default §4-2; ソルバ・`check_solver_config.py`・`res_*.h5` 属性・`stage_manifest.json` で共通、Python 側は `tools/twophase_state.py`):
+active (包絡内: TP carrier・非平衡・`nCondSpecies 1`・`condLimiterMode 1`・NS・定常陰解法・`passiveScalarScheme 1`・非軸対称・非周期) で指定 ON なら作動。
+inactive-a (凝縮 OFF・`viscMethod 0`; dual-time + Euler もここ) は INFO・ビット不変。inactive-b (CPG carrier・pure 凝縮・`condEquilibrium 2`) は毎回 WARNING で実効 0。
+unsupported-c (dual-time・陽解法/RK・`speciesImplicitCoupling 2`・`passiveScalarScheme 0`・`condEquilibrium 1`・`condLimiterMode 0`・`nCondSpecies` ≥ 2・**軸対称・周期**) は
+指定 ON で起動時にエラー終了 (旧作用素で回すなら `condTwoPhaseDiffusion: 0` を明示)。cell は未検証 (WARNING)。
+起動時に `[twophase] condTwoPhaseDiffusion requested <omitted|0|1>, state <…>, effective <0|1>` 行を出し、`res_*.h5` のルート属性
+`twophase_diffusion_effective`・`twophase_diffusion_state`・`twophase_diffusion_requested` に記録する (凝縮 run か明示したときだけ)。
+`stage_manifest.json` の hard キーに `twophase_diffusion_effective` が入り、OFF の場から ON で継続した段は別区間になる。
+**既定はまだ 0**。既定を 1 にした後 (S1-c) は省略も ON と数え、包絡内の明示 0 は `WARNING: legacy operator: liquid not diffused` を出す。
+`condTwoPhaseSolver 0` のとき、蒸気・液・Q は `passiveImplicitCoupling`/`speciesImplicitCoupling` の DPLUR ではなく点対角で更新する (非水種は従来どおり)。`condTwoPhaseRelax` (既定 1, 0 < ω ≤ 1) は
 蒸気・液・Q の増分の緩和 (前処理の後・制限の前)。#4c の 1D 試験では大きな擬似刻みで核生成の Q0 が周期運動になり ω 0.5 で収束した (高 CFL は保証外)。
 計算開始時と終了時に `[twophase-audit]` 行 (格納状態から化学種・蒸気・液・Q の残差を double で組み直した成分ごとの比と、終了時の `VERDICT: PASS | NOT CONVERGED`; エネルギーは対象外) が出る。収束を受け入れる根拠はこの VERDICT と check_convergence の両方。`residual_history.csv` に `rms_roYv` (蒸気の残差 R_w − R_g) が加わり、`check_convergence.py` の検査対象に入る (`rms_roY` 接頭辞)。monitor に `[twophase]` 行 (θ<1 のセル数・最小 θ・保留量・状態補正)。
 既定 0 の run の結果・列構成は変わらない。
-**`condensation.condTwoPhaseSolver`** (既定 0, 2026-10-02, #4g): 二相拡散の蒸気・液・Q の増分の作り方。0 = 点対角、1 = 化学種・受動種と同じ緩和整合 scalar-DPLUR
+**`condensation.condTwoPhaseSolver`** (既定: `condTwoPhaseDiffusion 1` のとき **1** (2026-10-04 から、検証済みの組)、0 のとき 0 (使われない); #4g): 二相拡散の蒸気・液・Q の増分の作り方。0 = 点対角 (診断用 opt-in)、1 = 化学種・受動種と同じ緩和整合 scalar-DPLUR
 (右辺は全残差、対角は点対角と同じ分母、非対角は流入質量流束、ゼロ開始で `nStepInner` 回、ω = `implicitRelax`; その後 `condTwoPhaseRelax`・θ・commit・再正規化は同じ)。
 1 sweep・ω 1 では点対角とビット一致。起動時に `[twophase] condTwoPhaseSolver` 行で実効の implicitRelax・nStepInner・scalarCflMax を出す。
-**`condensation.condTwoPhaseNonnegLimit`** (既定 1, 2026-10-02, #4h; 診断用 opt-in): 0 で二相の非分割更新の共通 θ から蒸気・液の非負制限を外す (θ = dg_max・dT_max だけ)。
+**`condensation.condTwoPhaseNonnegLimit`** (既定: `condTwoPhaseDiffusion 1` のとき **0** (2026-10-04 から、検証済みの組)、0 のとき 1 (使われない); #4h): 0 で二相の非分割更新の共通 θ から蒸気・液の非負制限を外す (θ = dg_max・dT_max だけ)。1 (非負 θ を掛ける) は診断用 opt-in。
+2026-10-04 より前に `condTwoPhaseDiffusion: 1` だけを書いた run (Solver 0・NonnegLimit 1 だった) を再現するには `condTwoPhaseSolver: 0`・`condTwoPhaseNonnegLimit: 1` を明示する。
 commit は総水分だけ 0 に下限を掛け (`vround` を使わない)、液は再正規化 → 受動種の床 → 実現可能性クランプで固定した総水分に対して 0 ≤ ρg ≤ ρY_w に射影する。
 二相拡散 ON の run は更新ごと・成分ごと (ρY_w, ρv, ρg, ρQ2, ρQ1, ρQ0) の補正を `[twophase-corr-gate]` (区間と末尾 ceil(0.1N) 更新の max、κ = 2n_sε₃₂ の VERDICT、段ごとの行) に出す。
 **`condensation.condAuditResidual`** (既定 0, 2026-10-02, #1b-pre): `1` で二相拡散 OFF の TP carrier 凝縮 run でも、現行の作用素 (化学種の Fick 拡散、液・Q は移流のみ) を

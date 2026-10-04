@@ -238,6 +238,31 @@ def _conjugate_solid_sha1(cfg_text, run_dir):
     return h.hexdigest()[:12]
 
 
+def _twophase_effective(cfg_text, bcond_text):
+    """二相拡散の実効値 (0/1; tools/twophase_state.py)。凝縮 OFF かつ未指定、または YAML が読めなければ None (キーを足さない)。
+
+    `condTwoPhaseDiffusion` は液・モーメントの輸送作用素を変えるので方程式の一部 (plan condensation-two-phase-default §4-4)。
+    OFF の場から ON で継続した段を同一区間に連結しないため、実効値を hard キーに入れる。指定値でなく実効値を見るのは、
+    不活性 (inactive-a/b) な指定の違いでは作用素が変わらないから。"""
+    try:
+        import yaml
+        import importlib.util
+        y = yaml.safe_load(cfg_text or "") or {}
+        b = yaml.safe_load(bcond_text or "") if bcond_text else None
+        if not isinstance(y, dict):
+            return None
+        cd = y.get("condensation") or {}
+        if not isinstance(cd, dict) or (int(cd.get("condensation", 0) or 0) != 1 and "condTwoPhaseDiffusion" not in cd):
+            return None
+        here = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location("twophase_state", os.path.join(here, "twophase_state.py"))
+        tps = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tps)
+        return tps.classify(y, b if isinstance(b, dict) else None)["effective"]
+    except Exception:
+        return None
+
+
 def stage_key(cfg_text, bcond_text, run_dir=None):
     """段の **hard キー** (方程式・BC・空間離散化)。BC は全文のハッシュで見る。"""
     k = _grab(cfg_text, HARD_PATTERNS)
@@ -256,6 +281,9 @@ def stage_key(cfg_text, bcond_text, run_dir=None):
     sha = _conjugate_solid_sha1(cfg_text, run_dir)
     if sha is not None:
         k["conjugate.solid_sha1"] = sha
+    tp = _twophase_effective(cfg_text, bcond_text)
+    if tp is not None:
+        k["twophase_diffusion_effective"] = str(tp)   # 凝縮 run だけ (他の run の署名は従来どおり)
     return k
 
 

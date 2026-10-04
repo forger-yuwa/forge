@@ -2,6 +2,7 @@
 // 凝縮モーメントの更新クランプ kernel (condLimiterMode 1)。condensationTransport_d.cu と単体試験 tests/unit/test_cond_limiter_steady.cu が include する。
 #include "flowFormat.hpp"
 #include "cuda_forge/condensationProperties_d.cuh"   // CondPropOpts / condProps_make / cond_latent
+#include "cuda_forge/twoPhaseUpdateDiag_d.cuh"         // 診断 G3-b の記録スロット (tpu; 既定 nullptr)
 
 // 更新クランプ (condLimiterMode 1; plans/active/condensation-source-limiter-steady.md §4.2-4)。
 //   定常 point-implicit 更新 (timeIntegration 11) の 4 モーメントについて、floor 前の候補増分
@@ -35,7 +36,9 @@ __device__ __forceinline__ void cond_moment_update_limited_body(
     // 共通 θ は変えない)。切った量を limCorr_k (セル累積) と limStats[8k] (Σ·V, root のみ; 受動種収支の stride 8) に記録。
     int boundByTheta, flow_float* limCorr_g, flow_float* limCorr_Q2, flow_float* limCorr_Q1, flow_float* limCorr_Q0,
     double* limStats, const geom_int* root,
-    int clampThresholds)   // 0: dg_max/dT_max の閾値クランプを掛けない (dual-time の 2 回目以降の sub-iter; plan §5.1 #18)。実現可能性 (avail, 蒸発上限, 非負) は常に
+    int clampThresholds,   // 0: dg_max/dT_max の閾値クランプを掛けない (dual-time の 2 回目以降の sub-iter; plan §5.1 #18)。実現可能性 (avail, 蒸発上限, 非負) は常に
+    double* tpu = nullptr, // 診断 G3-b (既定 nullptr): commit の before・δ = θ d (double)・候補 (float 化した候補)・after を成分 1..4 (g, Q2, Q1, Q0) で記録
+    geom_int tpuN = 0)     // tpu のスロット長 (= nCells)
 {
     const double dt = (double)(dt_local[ic] * dtScale);
     const double v  = (double)vol[ic];
@@ -89,6 +92,7 @@ __device__ __forceinline__ void cond_moment_update_limited_body(
     double nQ2 = (double)N_Q2[ic] + theta*d_Q2;
     double nQ1 = (double)N_Q1[ic] + theta*d_Q1;
     double nQ0 = (double)N_Q0[ic] + theta*d_Q0;
+    const double tpu_c[4] = {ng, nQ2, nQ1, nQ0};   // 診断 G3-b: 非負化の前の double 候補 (tpu が nullptr なら読まない)
     if (boundByTheta != 0) {
         // codex result-2 M1 (plan §4.6): 非負化は**成分ごと**。共通 θ (= θ_u ≥ 1e-12) は変えず、N_k + θ d_k < 0 となる成分 k だけ
         // 増分を −N_k に切って確定値 0 にする (他の成分は θ d_k のまま)。旧 (result-1 M5) の「共通 θ で全成分停止」は、いずれかの
@@ -121,6 +125,14 @@ __device__ __forceinline__ void cond_moment_update_limited_body(
         out_Q2[ic] = (flow_float)nQ2;
         out_Q1[ic] = (flow_float)nQ1;
         out_Q0[ic] = (flow_float)nQ0;
+    }
+    if (tpu != nullptr) {
+        const flow_float* Nk[4] = {N_g, N_Q2, N_Q1, N_Q0};
+        const flow_float* Ok[4] = {out_g, out_Q2, out_Q1, out_Q0};
+        const double dkk[4] = {d_g, d_Q2, d_Q1, d_Q0};
+        for (int k = 0; k < 4; ++k)
+            tpu_commit(tpu, TPU_OP_CMC, 2, 1 + k, tpuN, ic, Nk[k][ic], theta*dkk[k], (float)(theta*dkk[k]),
+                       (float)tpu_c[k], Ok[k][ic]);
     }
     diagLim[ic]  = (flow_float)theta;
     // 補正量の記録 (このステップの全補正の起点なのでリセット): G = floor による |Δρg|/ρ [質量分率], Q = Q0..Q2 の最大相対補正。
@@ -165,7 +177,8 @@ __global__ void cond_moment_update_limited_passive_d(
     double relax, flow_float dtScale, int applyFloor,
     flow_float* dq_g, flow_float* dq_Q2, flow_float* dq_Q1, flow_float* dq_Q0,
     int boundByTheta, flow_float* limCorr_g, flow_float* limCorr_Q2, flow_float* limCorr_Q1, flow_float* limCorr_Q0,
-    double* limStats, const geom_int* root, int clampThresholds)
+    double* limStats, const geom_int* root, int clampThresholds,
+    double* tpu = nullptr)   // 診断 G3-b (FORGE_DIAG_TP_UPDATE; 既定 nullptr)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -173,5 +186,5 @@ __global__ void cond_moment_update_limited_passive_d(
         condModel, opts, dg_max, dT_max, lam_min, N_g, N_Q2, N_Q1, N_Q0, res_g, res_Q2, res_Q1, res_Q0,
         sj_g, sj_Q2, sj_Q1, sj_Q0, td_g, td_Q2, td_Q1, td_Q0, out_g, out_Q2, out_Q1, out_Q0, diagLim, diagCorrG, diagCorrQ,
         relax, dtScale, applyFloor, dq_g, dq_Q2, dq_Q1, dq_Q0,
-        boundByTheta, limCorr_g, limCorr_Q2, limCorr_Q1, limCorr_Q0, limStats, root, clampThresholds);
+        boundByTheta, limCorr_g, limCorr_Q2, limCorr_Q1, limCorr_Q0, limStats, root, clampThresholds, tpu, nCells);
 }

@@ -1,0 +1,20 @@
+P run_0561_g2_onprod_r1: STEADY True | nonfinite 0 neg 0 | RISING 0 | corr-gate ok -> ok
+P run_0562_g2_onprod_r2: STEADY True | nonfinite 0 neg 0 | RISING 0 | corr-gate ok -> ok
+P run_0563_g2_onprod_r3: STEADY True | nonfinite 0 neg 0 | RISING 0 | corr-gate ok -> ok
+C run_0564_g2_oncfl2_r1: STEADY True | nonfinite 0 neg 0 | RISING 0 | corr-gate ok -> ok
+C run_0565_g2_oncfl2_r2: STEADY True | nonfinite 0 neg 0 | RISING 0 | corr-gate ok -> ok
+C run_0566_g2_oncfl2_r3: STEADY True | nonfinite 0 neg 0 | RISING 0 | corr-gate ok -> ok
+O run_0567_g2_off_r1: STEADY True | nonfinite 0 neg 0 | RISING 0 | corr-gate n/a -> ok
+O run_0568_g2_off_r2: STEADY True | nonfinite 0 neg 0 | RISING 0 | corr-gate n/a -> ok
+O run_0569_g2_off_r3: STEADY True | nonfinite 0 neg 0 | RISING 0 | corr-gate n/a -> ok
+
+quantity | P mean (sd) | C mean (sd) | O mean (sd) | ON-OFF (C-O) ± s | P-C ± s | judgement
+onset_c_g1e4_mm | 17.3361 (6.4e-06) | 17.336 (6.2e-06) | 17.337 (3.6e-06) | -0.0009836 ± 4.2e-06 | +2.537e-05 ± 5.2e-06 | PASS (significant ON-OFF; |P-C| <= 0.1|ON-OFF|)
+g_exit_mw | 0.0103826 (3e-10) | 0.0103827 (7.7e-10) | 0.0100569 (1.3e-09) | +0.0003258 ± 8.8e-10 | -1.508e-08 ± 4.8e-10 | PASS (significant ON-OFF; |P-C| <= 0.1|ON-OFF|)
+pw_mean_x10 | 0.31299 (1.1e-08) | 0.31299 (1.9e-09) | 0.311668 (4.5e-09) | +0.001323 ± 2.8e-09 | +6.217e-08 ± 6.3e-09 | PASS (significant ON-OFF; |P-C| <= 0.1|ON-OFF|)
+pw42 | 0.33621 (7.4e-09) | 0.33621 (5.2e-09) | 0.333612 (1.2e-08) | +0.002598 ± 7.5e-09 | +8.486e-08 ± 5.2e-09 | PASS (significant ON-OFF; |P-C| <= 0.1|ON-OFF|)
+pw52 | 0.301852 (3.3e-08) | 0.301852 (4.7e-09) | 0.299969 (2e-09) | +0.001883 ± 3e-09 | -7.027e-08 ± 1.9e-08 | PASS (significant ON-OFF; |P-C| <= 0.1|ON-OFF|)
+Tw_mean_x10_K | 280.742 (2e-05) | 280.742 (5.9e-05) | 283.18 (1.2e-05) | -2.438 ± 3.5e-05 | +0.0003595 ± 3.6e-05 | PASS (significant ON-OFF; |P-C| <= 0.1|ON-OFF|)
+T_cond0_vmean_K | 223.254 (1.4e-06) | 223.254 (9.9e-07) | 222.389 (1.2e-06) | +0.8644 ± 9e-07 | +1.434e-05 ± 9.8e-07 | PASS (significant ON-OFF; |P-C| <= 0.1|ON-OFF|)
+
+VERDICT G2: PASS (per-run checks all ok: True)

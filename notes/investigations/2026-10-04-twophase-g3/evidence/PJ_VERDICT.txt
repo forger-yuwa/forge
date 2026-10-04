@@ -1,0 +1,323 @@
+# A /home/ubuntu/forge-species-tp/case/16.nozzle_wys/run_0592_pj_update_A/tp_update.h5: 41640 nodes, x [-60.000, 95.000]; B /home/ubuntu/forge-species-tp/case/16.nozzle_wys/run_0593_pj_update_B/tp_update.h5: 41640 nodes
+# update start state (5 components) differs at 0 values between A and B (expected 0: same restart and assembly)
+
+=== A: /home/ubuntu/forge-species-tp/case/16.nozzle_wys/run_0592_pj_update_A/tp_update.h5 ===
+  common_diag = 0
+  input_value_file = nozzle_user_2d.h5
+  cfl_pseudo = 4.0
+  implicitRelax = 0.699999988079071
+  nStepInner = 4
+  condTwoPhaseSolver = 1
+  condTwoPhaseRelax = 1.0
+  common_diag attribute = 0; DPLUR denominators recorded at 41640 / 41640 nodes
+    production spread max/min over (g,Q2,Q1,Q0): median 1.000e+00, 90% 1.004e+00, max 1.018e+00
+
+  -- Omega = all (41640 nodes); projection set P 4953 nodes (branch entered but unchanged 21705), g=0 dust set G0 429 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       2.325568e-13     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         7.785455e-09       1.130720e-08     0.6885           1.0065       3.434131e-35     0.0000
+    Q1         7.333928e-01       1.016729e+00     0.7213           1.0348       1.043513e-26     0.0000
+    Q0         0.000000e+00       3.770797e+07     0.0000           0.0000       1.062743e-17     0.0000
+    outward [reference, own projection set P_A, own violated conditions]: fraction (outward + undetermined)/|S| = 0.9988  (|S| 4953; outward 4825, undetermined 122 = no droplets at start 122 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9988 (4831 nodes); vol-weighted mean of min dH/ds = -1.3225e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 23 (outward 7, vw mean dH1/ds -1.6514e-01); H2 active 4935 (outward 4818, vw mean dH2/ds -1.3231e+00)
+      start state on S: median H1_s = +3.888e-01, median H2_s = -1.155e-12 (0 = on the boundary)
+
+  -- Omega = x[in,17) (19560 nodes); projection set P 600 nodes (branch entered but unchanged 4725), g=0 dust set G0 262 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       4.736354e-16     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         2.710777e-15       3.563834e-11     0.0001           1.0004       2.023263e-41     0.0000
+    Q1         7.559836e-07       1.837242e-02     0.0000           1.0001       8.265699e-33     0.0000
+    Q0         0.000000e+00       1.676021e+07     0.0000           0.0000       6.219081e-24     0.0000
+    outward [reference, own projection set P_A, own violated conditions]: fraction (outward + undetermined)/|S| = 0.9967  (|S| 600; outward 543, undetermined 55 = no droplets at start 55 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9963 (545 nodes); vol-weighted mean of min dH/ds = -3.4285e-01
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 12 (outward 0, vw mean dH1/ds +nan); H2 active 594 (outward 543, vw mean dH2/ds -3.4285e-01)
+      start state on S: median H1_s = +3.871e-01, median H2_s = -1.222e-11 (0 = on the boundary)
+
+  -- Omega = x[17,35) (5160 nodes); projection set P 770 nodes (branch entered but unchanged 4347), g=0 dust set G0 2 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       1.893960e-14     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         1.597528e-11       3.945024e-10     0.0405           1.0008       0.000000e+00     0.0000
+    Q1         2.306667e-03       4.280958e-02     0.0539           0.9993       1.571418e-29     0.0000
+    Q0         0.000000e+00       6.947173e+06     0.0000           0.0000       0.000000e+00     0.0000
+    outward [reference, own projection set P_A, own violated conditions]: fraction (outward + undetermined)/|S| = 1.0000  (|S| 770; outward 762, undetermined 8 = no droplets at start 8 + zero increment 0 + no identified condition 0)
+      fraction among determined = 1.0000 (762 nodes); vol-weighted mean of min dH/ds = -1.2093e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 4 (outward 4, vw mean dH1/ds -4.1553e-01); H2 active 766 (outward 758, vw mean dH2/ds -1.2117e+00)
+      start state on S: median H1_s = +1.818e-01, median H2_s = +1.309e-11 (0 = on the boundary)
+
+  -- Omega = x[35,70) (9840 nodes); projection set P 1979 nodes (branch entered but unchanged 7584), g=0 dust set G0 83 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       5.433190e-14     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         2.575446e-09       3.442552e-09     0.7481           1.0033       3.434129e-35     0.0000
+    Q1         2.374208e-01       3.164535e-01     0.7503           0.9962       1.041941e-26     0.0000
+    Q0         0.000000e+00       4.703868e+06     0.0000           0.0000       1.059423e-17     0.0000
+    outward [reference, own projection set P_A, own violated conditions]: fraction (outward + undetermined)/|S| = 0.9985  (|S| 1979; outward 1951, undetermined 25 = no droplets at start 25 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9985 (1954 nodes); vol-weighted mean of min dH/ds = -1.5416e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 6 (outward 3, vw mean dH1/ds -7.1855e-03); H2 active 1972 (outward 1948, vw mean dH2/ds -1.5429e+00)
+      start state on S: median H1_s = +3.734e-01, median H2_s = -1.988e-11 (0 = on the boundary)
+
+  -- Omega = x[70,ex] (7080 nodes); projection set P 1604 nodes (branch entered but unchanged 5049), g=0 dust set G0 82 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       1.588117e-13     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         5.194031e-09       7.434507e-09     0.6986           1.0081       3.280772e-44     0.0000
+    Q1         4.936646e-01       6.390935e-01     0.7724           1.0547       1.360884e-36     0.0000
+    Q0         0.000000e+00       9.296716e+06     0.0000           0.0000       3.318924e-20     0.0000
+    outward [reference, own projection set P_A, own violated conditions]: fraction (outward + undetermined)/|S| = 0.9994  (|S| 1604; outward 1569, undetermined 34 = no droplets at start 34 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9994 (1570 nodes); vol-weighted mean of min dH/ds = -1.6319e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 1 (outward 0, vw mean dH1/ds +2.4845e-04); H2 active 1603 (outward 1569, vw mean dH2/ds -1.6320e+00)
+      start state on S: median H1_s = +4.185e-01, median H2_s = +1.041e-12 (0 = on the boundary)
+
+  -- Omega = x35-70 wd<0.4 (5990 nodes); projection set P 1979 nodes (branch entered but unchanged 3734), g=0 dust set G0 83 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       3.400827e-15     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         2.575446e-09       2.647275e-09     0.9729           1.0033       3.434129e-35     0.0000
+    Q1         2.374208e-01       2.595022e-01     0.9149           0.9962       1.041941e-26     0.0000
+    Q0         0.000000e+00       2.109213e+05     0.0000           0.0000       1.059423e-17     0.0000
+    outward [reference, own projection set P_A, own violated conditions]: fraction (outward + undetermined)/|S| = 0.9985  (|S| 1979; outward 1951, undetermined 25 = no droplets at start 25 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9985 (1954 nodes); vol-weighted mean of min dH/ds = -1.5416e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 6 (outward 3, vw mean dH1/ds -7.1855e-03); H2 active 1972 (outward 1948, vw mean dH2/ds -1.5429e+00)
+      start state on S: median H1_s = +3.734e-01, median H2_s = -1.988e-11 (0 = on the boundary)
+
+  -- Omega = x35-70 wd>=0.4 (3850 nodes); projection set P 0 nodes (branch entered but unchanged 3850), g=0 dust set G0 0 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       5.093107e-14     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         0.000000e+00       7.952770e-10     0.0000           0.0000       0.000000e+00     0.0000
+    Q1         0.000000e+00       5.695133e-02     0.0000           0.0000       0.000000e+00     0.0000
+    Q0         0.000000e+00       4.492947e+06     0.0000           0.0000       0.000000e+00     0.0000
+    outward [reference, own projection set P_A, own violated conditions]: fraction (outward + undetermined)/|S| = 0.0000  (|S| 0; outward 0, undetermined 0 = no droplets at start 0 + zero increment 0 + no identified condition 0)
+      fraction among determined = nan (0 nodes); vol-weighted mean of min dH/ds = +nan
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 0 (outward 0, vw mean dH1/ds +nan); H2 active 0 (outward 0, vw mean dH2/ds +nan)
+      start state on S: median H1_s = +nan, median H2_s = +nan (0 = on the boundary)
+
+  -- Omega = pinned (ref) (118 nodes); projection set P 0 nodes (branch entered but unchanged 0), g=0 dust set G0 0 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       0.000000e+00     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         0.000000e+00       0.000000e+00     0.0000           0.0000       0.000000e+00     0.0000
+    Q1         0.000000e+00       0.000000e+00     0.0000           0.0000       0.000000e+00     0.0000
+    Q0         0.000000e+00       0.000000e+00     0.0000           0.0000       0.000000e+00     0.0000
+    outward [reference, own projection set P_A, own violated conditions]: fraction (outward + undetermined)/|S| = 0.0000  (|S| 0; outward 0, undetermined 0 = no droplets at start 0 + zero increment 0 + no identified condition 0)
+      fraction among determined = nan (0 nodes); vol-weighted mean of min dH/ds = +nan
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 0 (outward 0, vw mean dH1/ds +nan); H2 active 0 (outward 0, vw mean dH2/ds +nan)
+      start state on S: median H1_s = +nan, median H2_s = +nan (0 = on the boundary)
+
+=== B: /home/ubuntu/forge-species-tp/case/16.nozzle_wys/run_0593_pj_update_B/tp_update.h5 ===
+  common_diag = 1
+  input_value_file = nozzle_user_2d.h5
+  cfl_pseudo = 4.0
+  implicitRelax = 0.699999988079071
+  nStepInner = 4
+  condTwoPhaseSolver = 1
+  condTwoPhaseRelax = 1.0
+  common_diag attribute = 1; DPLUR denominators recorded at 41640 / 41640 nodes
+    production spread max/min over (g,Q2,Q1,Q0): median 1.000e+00, 90% 1.004e+00, max 1.018e+00
+
+  -- Omega = all (41640 nodes); projection set P 4953 nodes (branch entered but unchanged 21705), g=0 dust set G0 429 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       2.323429e-13     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         7.770199e-09       1.128448e-08     0.6886           1.0065       3.434131e-35     0.0000
+    Q1         7.324923e-01       1.015201e+00     0.7215           1.0349       1.043513e-26     0.0000
+    Q0         0.000000e+00       3.763797e+07     0.0000           0.0000       1.062740e-17     0.0000
+    outward [reference, own projection set P_B, own violated conditions]: fraction (outward + undetermined)/|S| = 0.9988  (|S| 4953; outward 4825, undetermined 122 = no droplets at start 122 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9988 (4831 nodes); vol-weighted mean of min dH/ds = -1.3225e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 23 (outward 7, vw mean dH1/ds -1.6512e-01); H2 active 4935 (outward 4818, vw mean dH2/ds -1.3231e+00)
+      start state on S: median H1_s = +3.888e-01, median H2_s = -1.155e-12 (0 = on the boundary)
+
+  -- Omega = x[in,17) (19560 nodes); projection set P 600 nodes (branch entered but unchanged 4725), g=0 dust set G0 262 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       4.733382e-16     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         2.710777e-15       3.563846e-11     0.0001           1.0004       2.023263e-41     0.0000
+    Q1         7.559835e-07       1.837221e-02     0.0000           1.0001       8.265699e-33     0.0000
+    Q0         0.000000e+00       1.676014e+07     0.0000           0.0000       6.219081e-24     0.0000
+    outward [reference, own projection set P_B, own violated conditions]: fraction (outward + undetermined)/|S| = 0.9967  (|S| 600; outward 543, undetermined 55 = no droplets at start 55 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9963 (545 nodes); vol-weighted mean of min dH/ds = -3.4286e-01
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 12 (outward 0, vw mean dH1/ds +nan); H2 active 594 (outward 543, vw mean dH2/ds -3.4286e-01)
+      start state on S: median H1_s = +3.871e-01, median H2_s = -1.222e-11 (0 = on the boundary)
+
+  -- Omega = x[17,35) (5160 nodes); projection set P 770 nodes (branch entered but unchanged 4347), g=0 dust set G0 2 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       1.893622e-14     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         1.597336e-11       3.936184e-10     0.0406           1.0008       0.000000e+00     0.0000
+    Q1         2.306509e-03       4.274315e-02     0.0540           0.9993       1.571418e-29     0.0000
+    Q0         0.000000e+00       6.943055e+06     0.0000           0.0000       0.000000e+00     0.0000
+    outward [reference, own projection set P_B, own violated conditions]: fraction (outward + undetermined)/|S| = 1.0000  (|S| 770; outward 762, undetermined 8 = no droplets at start 8 + zero increment 0 + no identified condition 0)
+      fraction among determined = 1.0000 (762 nodes); vol-weighted mean of min dH/ds = -1.2093e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 4 (outward 4, vw mean dH1/ds -4.1549e-01); H2 active 766 (outward 758, vw mean dH2/ds -1.2117e+00)
+      start state on S: median H1_s = +1.818e-01, median H2_s = +1.309e-11 (0 = on the boundary)
+
+  -- Omega = x[35,70) (9840 nodes); projection set P 1979 nodes (branch entered but unchanged 7584), g=0 dust set G0 83 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       5.418151e-14     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         2.571456e-09       3.430760e-09     0.7495           1.0033       3.434129e-35     0.0000
+    Q1         2.371938e-01       3.156230e-01     0.7515           0.9962       1.041941e-26     0.0000
+    Q0         0.000000e+00       4.656620e+06     0.0000           0.0000       1.059420e-17     0.0000
+    outward [reference, own projection set P_B, own violated conditions]: fraction (outward + undetermined)/|S| = 0.9985  (|S| 1979; outward 1951, undetermined 25 = no droplets at start 25 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9985 (1954 nodes); vol-weighted mean of min dH/ds = -1.5416e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 6 (outward 3, vw mean dH1/ds -7.1854e-03); H2 active 1972 (outward 1948, vw mean dH2/ds -1.5429e+00)
+      start state on S: median H1_s = +3.734e-01, median H2_s = -1.988e-11 (0 = on the boundary)
+
+  -- Omega = x[70,ex] (7080 nodes); projection set P 1604 nodes (branch entered but unchanged 5049), g=0 dust set G0 82 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       1.587519e-13     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         5.182767e-09       7.424465e-09     0.6981           1.0081       3.280772e-44     0.0000
+    Q1         4.929913e-01       6.384624e-01     0.7722           1.0547       1.360884e-36     0.0000
+    Q0         0.000000e+00       9.278157e+06     0.0000           0.0000       3.318924e-20     0.0000
+    outward [reference, own projection set P_B, own violated conditions]: fraction (outward + undetermined)/|S| = 0.9994  (|S| 1604; outward 1569, undetermined 34 = no droplets at start 34 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9994 (1570 nodes); vol-weighted mean of min dH/ds = -1.6319e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 1 (outward 0, vw mean dH1/ds +2.4845e-04); H2 active 1603 (outward 1569, vw mean dH2/ds -1.6320e+00)
+      start state on S: median H1_s = +4.185e-01, median H2_s = +1.041e-12 (0 = on the boundary)
+
+  -- Omega = x35-70 wd<0.4 (5990 nodes); projection set P 1979 nodes (branch entered but unchanged 3734), g=0 dust set G0 83 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       3.402651e-15     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         2.571456e-09       2.643115e-09     0.9729           1.0033       3.434129e-35     0.0000
+    Q1         2.371938e-01       2.592667e-01     0.9149           0.9962       1.041941e-26     0.0000
+    Q0         0.000000e+00       2.105895e+05     0.0000           0.0000       1.059420e-17     0.0000
+    outward [reference, own projection set P_B, own violated conditions]: fraction (outward + undetermined)/|S| = 0.9985  (|S| 1979; outward 1951, undetermined 25 = no droplets at start 25 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9985 (1954 nodes); vol-weighted mean of min dH/ds = -1.5416e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 6 (outward 3, vw mean dH1/ds -7.1854e-03); H2 active 1972 (outward 1948, vw mean dH2/ds -1.5429e+00)
+      start state on S: median H1_s = +3.734e-01, median H2_s = -1.988e-11 (0 = on the boundary)
+
+  -- Omega = x35-70 wd>=0.4 (3850 nodes); projection set P 0 nodes (branch entered but unchanged 3850), g=0 dust set G0 0 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       5.077886e-14     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         0.000000e+00       7.876450e-10     0.0000           0.0000       0.000000e+00     0.0000
+    Q1         0.000000e+00       5.635637e-02     0.0000           0.0000       0.000000e+00     0.0000
+    Q0         0.000000e+00       4.446030e+06     0.0000           0.0000       0.000000e+00     0.0000
+    outward [reference, own projection set P_B, own violated conditions]: fraction (outward + undetermined)/|S| = 0.0000  (|S| 0; outward 0, undetermined 0 = no droplets at start 0 + zero increment 0 + no identified condition 0)
+      fraction among determined = nan (0 nodes); vol-weighted mean of min dH/ds = +nan
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 0 (outward 0, vw mean dH1/ds +nan); H2 active 0 (outward 0, vw mean dH2/ds +nan)
+      start state on S: median H1_s = +nan, median H2_s = +nan (0 = on the boundary)
+
+  -- Omega = pinned (ref) (118 nodes); projection set P 0 nodes (branch entered but unchanged 0), g=0 dust set G0 0 nodes --
+    comp   sumV|C_proj| (P)    sumV|delta_lim|      ratio  ratio(den on P)    sumV|C_rm| (G0)   G0 ratio
+    g          0.000000e+00       0.000000e+00     0.0000           0.0000       0.000000e+00     0.0000
+    Q2         0.000000e+00       0.000000e+00     0.0000           0.0000       0.000000e+00     0.0000
+    Q1         0.000000e+00       0.000000e+00     0.0000           0.0000       0.000000e+00     0.0000
+    Q0         0.000000e+00       0.000000e+00     0.0000           0.0000       0.000000e+00     0.0000
+    outward [reference, own projection set P_B, own violated conditions]: fraction (outward + undetermined)/|S| = 0.0000  (|S| 0; outward 0, undetermined 0 = no droplets at start 0 + zero increment 0 + no identified condition 0)
+      fraction among determined = nan (0 nodes); vol-weighted mean of min dH/ds = +nan
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 0 (outward 0, vw mean dH1/ds +nan); H2 active 0 (outward 0, vw mean dH2/ds +nan)
+      start state on S: median H1_s = +nan, median H2_s = +nan (0 = on the boundary)
+
+=== outward component on the common set S = P_A (A's projection set; same nodes and start state in both arms) ===
+
+  -- Omega = all --
+    outward [A increment on S]: fraction (outward + undetermined)/|S| = 0.9988  (|S| 4953; outward 4825, undetermined 122 = no droplets at start 122 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9988 (4831 nodes); vol-weighted mean of min dH/ds = -1.3225e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 23 (outward 7, vw mean dH1/ds -1.6514e-01); H2 active 4935 (outward 4818, vw mean dH2/ds -1.3231e+00)
+      start state on S: median H1_s = +3.888e-01, median H2_s = -1.155e-12 (0 = on the boundary)
+    outward [B increment on S]: fraction (outward + undetermined)/|S| = 0.9988  (|S| 4953; outward 4825, undetermined 122 = no droplets at start 122 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9988 (4831 nodes); vol-weighted mean of min dH/ds = -1.3225e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 23 (outward 7, vw mean dH1/ds -1.6512e-01); H2 active 4935 (outward 4818, vw mean dH2/ds -1.3231e+00)
+      start state on S: median H1_s = +3.888e-01, median H2_s = -1.155e-12 (0 = on the boundary)
+
+  -- Omega = x[in,17) --
+    outward [A increment on S]: fraction (outward + undetermined)/|S| = 0.9967  (|S| 600; outward 543, undetermined 55 = no droplets at start 55 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9963 (545 nodes); vol-weighted mean of min dH/ds = -3.4285e-01
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 12 (outward 0, vw mean dH1/ds +nan); H2 active 594 (outward 543, vw mean dH2/ds -3.4285e-01)
+      start state on S: median H1_s = +3.871e-01, median H2_s = -1.222e-11 (0 = on the boundary)
+    outward [B increment on S]: fraction (outward + undetermined)/|S| = 0.9967  (|S| 600; outward 543, undetermined 55 = no droplets at start 55 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9963 (545 nodes); vol-weighted mean of min dH/ds = -3.4286e-01
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 12 (outward 0, vw mean dH1/ds +nan); H2 active 594 (outward 543, vw mean dH2/ds -3.4286e-01)
+      start state on S: median H1_s = +3.871e-01, median H2_s = -1.222e-11 (0 = on the boundary)
+
+  -- Omega = x[17,35) --
+    outward [A increment on S]: fraction (outward + undetermined)/|S| = 1.0000  (|S| 770; outward 762, undetermined 8 = no droplets at start 8 + zero increment 0 + no identified condition 0)
+      fraction among determined = 1.0000 (762 nodes); vol-weighted mean of min dH/ds = -1.2093e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 4 (outward 4, vw mean dH1/ds -4.1553e-01); H2 active 766 (outward 758, vw mean dH2/ds -1.2117e+00)
+      start state on S: median H1_s = +1.818e-01, median H2_s = +1.309e-11 (0 = on the boundary)
+    outward [B increment on S]: fraction (outward + undetermined)/|S| = 1.0000  (|S| 770; outward 762, undetermined 8 = no droplets at start 8 + zero increment 0 + no identified condition 0)
+      fraction among determined = 1.0000 (762 nodes); vol-weighted mean of min dH/ds = -1.2093e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 4 (outward 4, vw mean dH1/ds -4.1549e-01); H2 active 766 (outward 758, vw mean dH2/ds -1.2117e+00)
+      start state on S: median H1_s = +1.818e-01, median H2_s = +1.309e-11 (0 = on the boundary)
+
+  -- Omega = x[35,70) --
+    outward [A increment on S]: fraction (outward + undetermined)/|S| = 0.9985  (|S| 1979; outward 1951, undetermined 25 = no droplets at start 25 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9985 (1954 nodes); vol-weighted mean of min dH/ds = -1.5416e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 6 (outward 3, vw mean dH1/ds -7.1855e-03); H2 active 1972 (outward 1948, vw mean dH2/ds -1.5429e+00)
+      start state on S: median H1_s = +3.734e-01, median H2_s = -1.988e-11 (0 = on the boundary)
+    outward [B increment on S]: fraction (outward + undetermined)/|S| = 0.9985  (|S| 1979; outward 1951, undetermined 25 = no droplets at start 25 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9985 (1954 nodes); vol-weighted mean of min dH/ds = -1.5416e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 6 (outward 3, vw mean dH1/ds -7.1854e-03); H2 active 1972 (outward 1948, vw mean dH2/ds -1.5429e+00)
+      start state on S: median H1_s = +3.734e-01, median H2_s = -1.988e-11 (0 = on the boundary)
+
+  -- Omega = x[70,ex] --
+    outward [A increment on S]: fraction (outward + undetermined)/|S| = 0.9994  (|S| 1604; outward 1569, undetermined 34 = no droplets at start 34 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9994 (1570 nodes); vol-weighted mean of min dH/ds = -1.6319e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 1 (outward 0, vw mean dH1/ds +2.4845e-04); H2 active 1603 (outward 1569, vw mean dH2/ds -1.6320e+00)
+      start state on S: median H1_s = +4.185e-01, median H2_s = +1.041e-12 (0 = on the boundary)
+    outward [B increment on S]: fraction (outward + undetermined)/|S| = 0.9994  (|S| 1604; outward 1569, undetermined 34 = no droplets at start 34 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9994 (1570 nodes); vol-weighted mean of min dH/ds = -1.6319e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 1 (outward 0, vw mean dH1/ds +2.4845e-04); H2 active 1603 (outward 1569, vw mean dH2/ds -1.6320e+00)
+      start state on S: median H1_s = +4.185e-01, median H2_s = +1.041e-12 (0 = on the boundary)
+
+  -- Omega = x35-70 wd<0.4 --
+    outward [A increment on S]: fraction (outward + undetermined)/|S| = 0.9985  (|S| 1979; outward 1951, undetermined 25 = no droplets at start 25 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9985 (1954 nodes); vol-weighted mean of min dH/ds = -1.5416e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 6 (outward 3, vw mean dH1/ds -7.1855e-03); H2 active 1972 (outward 1948, vw mean dH2/ds -1.5429e+00)
+      start state on S: median H1_s = +3.734e-01, median H2_s = -1.988e-11 (0 = on the boundary)
+    outward [B increment on S]: fraction (outward + undetermined)/|S| = 0.9985  (|S| 1979; outward 1951, undetermined 25 = no droplets at start 25 + zero increment 0 + no identified condition 0)
+      fraction among determined = 0.9985 (1954 nodes); vol-weighted mean of min dH/ds = -1.5416e+00
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 6 (outward 3, vw mean dH1/ds -7.1854e-03); H2 active 1972 (outward 1948, vw mean dH2/ds -1.5429e+00)
+      start state on S: median H1_s = +3.734e-01, median H2_s = -1.988e-11 (0 = on the boundary)
+
+  -- Omega = x35-70 wd>=0.4 --
+    outward [A increment on S]: fraction (outward + undetermined)/|S| = 0.0000  (|S| 0; outward 0, undetermined 0 = no droplets at start 0 + zero increment 0 + no identified condition 0)
+      fraction among determined = nan (0 nodes); vol-weighted mean of min dH/ds = +nan
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 0 (outward 0, vw mean dH1/ds +nan); H2 active 0 (outward 0, vw mean dH2/ds +nan)
+      start state on S: median H1_s = +nan, median H2_s = +nan (0 = on the boundary)
+    outward [B increment on S]: fraction (outward + undetermined)/|S| = 0.0000  (|S| 0; outward 0, undetermined 0 = no droplets at start 0 + zero increment 0 + no identified condition 0)
+      fraction among determined = nan (0 nodes); vol-weighted mean of min dH/ds = +nan
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 0 (outward 0, vw mean dH1/ds +nan); H2 active 0 (outward 0, vw mean dH2/ds +nan)
+      start state on S: median H1_s = +nan, median H2_s = +nan (0 = on the boundary)
+
+  -- Omega = pinned (ref) --
+    outward [A increment on S]: fraction (outward + undetermined)/|S| = 0.0000  (|S| 0; outward 0, undetermined 0 = no droplets at start 0 + zero increment 0 + no identified condition 0)
+      fraction among determined = nan (0 nodes); vol-weighted mean of min dH/ds = +nan
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 0 (outward 0, vw mean dH1/ds +nan); H2 active 0 (outward 0, vw mean dH2/ds +nan)
+      start state on S: median H1_s = +nan, median H2_s = +nan (0 = on the boundary)
+    outward [B increment on S]: fraction (outward + undetermined)/|S| = 0.0000  (|S| 0; outward 0, undetermined 0 = no droplets at start 0 + zero increment 0 + no identified condition 0)
+      fraction among determined = nan (0 nodes); vol-weighted mean of min dH/ds = +nan
+      tangent (|dH/ds| <= 1e-06 for an active condition) 0 nodes; outward decided at second order (finite increment) 0 nodes
+      H1 active 0 (outward 0, vw mean dH1/ds +nan); H2 active 0 (outward 0, vw mean dH2/ds +nan)
+      start state on S: median H1_s = +nan, median H2_s = +nan (0 = on the boundary)
+
+=== pre-registered verdict (Omega = x35-70 wd<0.4) ===
+  projection ratio Q1: A 0.9149  B 0.9149  B/A 1.0000
+  projection ratio Q2: A 0.9729  B 0.9729  B/A 1.0000
+  outward fraction   : A 0.9985  B 0.9985  B/A 1.0000   (on S = P_A; outward = increment decreases a Hankel condition violated at the projection input of A or B; undetermined counted as outward)
+  A reproduction: |A_Q1 - 0.913| <= 0.05 and |A_Q2 - 0.974| <= 0.05
+  SUPPORT: A reproduces, B_Q1 <= 0.1 A_Q1, B_Q2 <= 0.1 A_Q2, and outward resolved := B_outward <= 0.1 A_outward
+  REJECT : A reproduces, B_Q1 >= 0.5 A_Q1, B_Q2 >= 0.5 A_Q2 and B_outward >= 0.5 A_outward;  otherwise UNDECIDED
+VERDICT: REJECT (diagonal mismatch is not the main cause; prioritise hypothesis 2)

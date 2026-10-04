@@ -1,0 +1,6 @@
+plan condensation-two-phase-default §5.1 #4 (G1 診断 D1、更新なし)
+IC: run_0520_twophase_off_16k/res_16000.h5 を restart_field.py --force-species で index コピー
+config: run_0520 と同一 (condTwoPhaseDiffusion 0)
+env: FORGE_DIAG_TP_FACES=tp_faces.h5
+build 3d6e853f
+診断 run (更新なし) — 収束ゲートの対象外

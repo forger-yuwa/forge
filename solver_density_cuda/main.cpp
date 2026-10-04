@@ -59,6 +59,8 @@
 #include "cuda_forge/speciesTransport_d.cuh"
 #include "cuda_forge/chemistrySource_d.cuh"
 #include "cuda_forge/condensationTransport_d.cuh"
+#include "cuda_forge/twoPhaseUpdateDiag_d.cuh"   // 診断 G3-b の記録スロットの配置 (FORGE_DIAG_TP_UPDATE; 名前表と定数だけ)
+#include "cuda_forge/twoPhaseOperatorDiag_d.cuh" // 診断 G3-a の記録の配置 (FORGE_DIAG_TP_OPERATOR; 名前表と定数だけ)
 #include "cuda_forge/tracerTransport_d.cuh"
 #include "cuda_forge/passiveTransport_d.cuh"
 #include "cuda_forge/gasPhaseComposition_d.cuh"   // gasPhaseLiquid (transport probe の液)
@@ -1602,8 +1604,9 @@ cudaConfig initializeSimulation(
                  << " condN2LatentLowT=" << cfg.condN2LatentLowT << " condN2PsatLowT=" << cfg.condN2PsatLowT << " condN2LiquidCp=" << cfg.condN2LiquidCp << "\n";
         }
         cfg.condSonicModel = resolved;
-        // 二相拡散 (condTwoPhaseDiffusion, #4e): 定常専用初版。dual-time 等の併用不可は理由を出して終了、対象外の構成は不活性をログに出す。
-        condTwoPhaseDiffusionValidate(cfg);
+        // 二相拡散 (condTwoPhaseDiffusion, #4e): 実効状態 (active / inactive-a / inactive-b / unsupported-c) を判定して cfg に記録し
+        // [twophase] 行を出す。指定 ON + 未対応 (c) は理由を出して終了 (plan condensation-two-phase-default §4-2)。周期は bcond 種別で判定。
+        condTwoPhaseDiffusionValidate(cfg, std::find(kinds.begin(), kinds.end(), std::string("periodic")) != kinds.end());
         // CPG carrier 形 (空気の N2 選択凝縮) の境界受付範囲 (plans/accepted/condensation-air.md §4.1; codex 2026-09-13 M3):
         //   ghost/ピンを単相 EOS で再構成する境界 (wall, wall_isothermal, inlet_Pressure, outflow, periodic 等) は未対応。
         //   出口 outlet_statPress は超音速全量外挿のときだけ整合 (実行時条件) → 後処理 onset_analysis.py --series の u_n/c>1 で確認する。
@@ -1903,6 +1906,7 @@ static void assembleResidualPre(StepContext& s)
     s.profiler.measureCuda(ProfileSection::GasProperties, [&]() {
         gasProperties_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     });
+    tpuSnap("pre_state");   // 診断 G3-b: 状態の射影・クランプの後、境界の上書きの前 (記録中のみ; 既定は何もしない)
     s.profiler.measureWall(ProfileSection::ApplyBconds, [&]() {
         applyBconds(s.cfg , s.cuda_cfg , s.msh , s.var, s.mat_ns , s.fluct);
     });
@@ -1969,16 +1973,22 @@ static void assembleResidualPost(StepContext& s)
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         speciesTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);  // 化学種移流残差
         chemistrySource_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);   // 有限速度化学ソース (ω_s, Q̇, 対角 Jacobian)
+        tpoSnap("chem");      // 診断 G3-a: 残差の写し (記録中のみ; 既定は何もしない)
         speciesPinResidual_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var); // node 入口ピンノードの化学種残差除外 (cell は no-op)
+        tpoSnap("sp_pin1");   // 診断 G3-a (記録中のみ)
     });
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
         condensationTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);  // 液相モーメント移流残差 (Phase 1)
         condensationSource_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 核生成+成長ソース (Phase 2)
+        tpoSnap("cond_src");  // 診断 G3-a (記録中のみ)
         condThetaScan_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var, 0);       // θ_src の全評価を覆う集計 (#1b-pre; 計上のみ)
         tracerTransport_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);        // 受動トレーサ移流残差 (node 入口ピン込み)
+        tpoSnap("tracer");    // 診断 G3-a (記録中のみ; この 2 つは記録する成分に触れない)
         passivePinResidual_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);     // 受動種経路: node 入口ピンノードの残差除外 (ソース集計の後)
+        tpoSnap("pas_pin");   // 診断 G3-a (記録中のみ)
         // 二相拡散 (#4e) は化学種の残差へ condensationTransport の中で足すので、化学種のピン除去をもう一度掛ける (周期集約の前)。
         if (condTwoPhaseDiffusionActive(s.cfg)) speciesPinResidual_d_wrapper(s.cfg , s.cuda_cfg, s.msh , s.var);
+        tpoSnap("sp_pin2");   // 診断 G3-a (記録中のみ; 二相 OFF では pas_pin と同じ)
     });
     ledgerCapture(s.msh , s.var , "res_after_species" , true);   // 診断 (既定 no-op)
     s.profiler.measureCuda(ProfileSection::TurbulenceModel, [&]() {
@@ -2011,6 +2021,7 @@ static void assembleResidualPost(StepContext& s)
     ledgerCapture(s.msh , s.var , "res_final" , true);   // 診断 (既定 no-op): 壁射影・周期合併の後
     // 二相拡散 (#4e) の蒸気残差 res_roYv = res_roY_w − res_rog_0 (監視; 周期集約の後の確定残差から)。無効構成は no-op。
     twoPhaseVaporResidual_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+    tpoSnap("final");   // 診断 G3-a: 組立後の確定残差 (記録中のみ; 既定は何もしない)
     // TODO(dual-time): unsteady のとき addUnsteadyTimeTerm(s) で BDF 物理時間項を res_* と
     // 対角に加える。定常では no-op。本体は次フェーズ。
 }
@@ -2296,11 +2307,16 @@ static void pdeAfterNormal(StepContext& s)
     }
 }
 
+// 診断 G3-b (FORGE_DIAG_TP_UPDATE): runTpUpdateDiag が組立を自分で (前処理・後処理を分けて) 通したあと、更新だけを 1 回行うための印。
+// 既定 false (通常の計算では立たない)。立っていたら 1 回だけ組立を飛ばして下ろす。
+static bool g_tpuSkipAssemblyOnce = false;
+
 // 残差 1 回構築 → 局所擬似時間 dτ → 古典 DPLUR 線形解 → Q への commit。
 void implicitNonlinearUpdate(StepContext& s, int inner_index)
 {
     // limiter-inlet-column-oscillation §5.1 #5e 診断 (既定 off): 窓内は共通入力から枝分かれして組み、A を残す
-    if (!pdeAssemble(s)) { assembleResidual(s, 1); pdeAfterNormal(s); }
+    if (g_tpuSkipAssemblyOnce) g_tpuSkipAssemblyOnce = false;   // 診断 G3-b: 組立は呼び出し側で済んでいる
+    else if (!pdeAssemble(s)) { assembleResidual(s, 1); pdeAfterNormal(s); }
     logResidualSnapshot(s, inner_index);
     // #1b-r2 診断 (condTwoPhaseDiag 3, 窓内だけ): 同じ状態・面値・係数・ソース値の double 組立 B (状態・組立 A は不変; 読むだけ)
     if (s.cfg.condTwoPhaseDiag == 3 && twoPhaseDiagInWindow(s.cfg)) {
@@ -2391,10 +2407,13 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
                     speciesTimeIntegration_d_wrapper(0, s.cfg , s.cuda_cfg , s.msh , s.var);
                 }
             }
+            tpuSnap("sp_commit");   // 診断 G3-b (記録中のみ; 既定は何もしない)
             if (twoPhase) {
                 twoPhaseHoldWater_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 水は更新前に戻す (液の後で commit)
+                tpuSnap("hold");   // 診断 G3-b: 水の戻し (化学種の commit を取り消す格納差; 記録中のみ)
             } else {
                 speciesRenormalize_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
+                tpuSnap("sp_renorm");   // 診断 G3-b (記録中のみ)
                 periodicMirrorSpeciesState_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // node 周期: 化学種状態を root→member (§4.1-5)
                 speciesPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // Y=roY/ρ (出力/次残差用に同期)
             }
@@ -2418,6 +2437,7 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
         if (twoPhase || (s.cfg.timeIntegration == 11 && s.cfg.condLimiterMode == 1 && s.cfg.condEquilibrium == 0))
             condThetaScan_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var, 1);
         condensationPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);     // φ=ρφ/ρ (出力/次残差用に同期)
+        tpuSnap("realizability");   // 診断 G3-b: 実現可能性クランプの後 (記録中のみ; 既定は何もしない)
         if (twoPhase) twoPhaseCorrGateEnd();   // #4h: この更新の補正計測を閉じる (実現可能性クランプの後)
         // 受動トレーサ (segregated point-implicit)。tracer 無効で no-op。
         tracerUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
@@ -2801,10 +2821,495 @@ void advanceOneStep(
 
 }
 
+// ---- 診断 D1 (plans/active/condensation-two-phase-default.md §5.1 #4; FORGE_DIAG_TP_FACES=<出力 h5>, 既定 off) -------------------
+// 組立の前処理 (assembleResidualPre: 状態射影・EOS・BC・勾配) を 1 回だけ通し、その前後の保存量の差 (クランプ・境界上書き) を記録する。
+// 続けて後処理 (assembleResidualPost) を 1 回通す: 面の拡散係数が読む μ_t (vis_turb) は後処理の turbulent_viscosity が作るので、
+// 本番の拡散カーネルが見るのと同じ状態にするため。後処理が面計算の入力 (ρ・T・P・μ・ρY・液・Q) を変えないことはバイト比較で記録する。
+// その状態から全通常面の OFF/ON 面作用素を評価して h5 に書き (twoPhaseFaceDiag_d_wrapper)、**時間更新へ進まず終了する**
+// (nStepOuter に頼らない)。周期境界は二相拡散の包絡外 (plan §4-1) で、面診断は周期集約を再現しないので拒否する。
+static int runTpFacesDiag(const char* path, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, matrix& mat_ns, variables& var,
+                          fluct_variables& fluct, point_probes& pprobes, RuntimeProfiler& profiler,
+                          ResidualCsvLogger& residual_logger, ImplicitDiagLogger& implicit_diag_logger)
+{
+    bool hasPeriodic = (msh.nPeriodicMembers > 0);
+    for (auto& bc : msh.bconds) if (bc.bcondKind == "periodic") hasPeriodic = true;
+    if (hasPeriodic) {
+        fprintf(stderr, "[tp-faces] refused: periodic boundaries are outside the two-phase diffusion envelope (plan condensation-two-phase-default §4-1) "
+                        "and the face diagnostic does not reproduce the node periodic gather\n");
+        return EXIT_FAILURE;
+    }
+    printf("[tp-faces] FORGE_DIAG_TP_FACES=%s: one pre-part + one post-part of the assembly, face operators A (OFF copy) / B (ON float + double), then exit without update\n", path);
+    StepContext s{cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger, 0};
+    const size_t nca = (size_t)msh.nCells_all, nc = (size_t)msh.nCells;
+    auto present = [&](const std::string& k) { auto it = var.c_d.find(k); return it != var.c_d.end() && it->second != nullptr; };
+    auto d2h = [&](const std::vector<std::string>& keys) {
+        std::map<std::string, std::vector<flow_float>> m;
+        for (auto& k : keys) { auto& v = m[k]; v.resize(nca); gpuErrchk( cudaMemcpy(v.data(), var.c_d[k], nca*sizeof(flow_float), cudaMemcpyDeviceToHost) ); }
+        return m;
+    };
+    // 前後差: 内点 [0, nCells) と ghost [nCells, nCells_all) を分けて、変わった要素数と最大絶対差 (NaN の出入りも 1 件と数える)
+    struct Diff { std::vector<std::string> name; std::vector<long long> nReal, nGhost; std::vector<double> mReal, mGhost; };
+    auto diffOf = [&](const std::vector<std::string>& keys, const std::map<std::string, std::vector<flow_float>>& a,
+                      const std::map<std::string, std::vector<flow_float>>& b) {
+        Diff D;
+        for (auto& k : keys) {
+            const auto& x = a.at(k); const auto& y = b.at(k);
+            long long nr = 0, ng = 0; double mr = 0.0, mg = 0.0;
+            for (size_t i = 0; i < nca; ++i) {
+                if (std::memcmp(&x[i], &y[i], sizeof(flow_float)) == 0) continue;
+                const double d = std::fabs((double)y[i] - (double)x[i]);
+                if (i < nc) { ++nr; if (std::isnan(d) || d > mr) mr = d; } else { ++ng; if (std::isnan(d) || d > mg) mg = d; }
+            }
+            D.name.push_back(k); D.nReal.push_back(nr); D.nGhost.push_back(ng); D.mReal.push_back(mr); D.mGhost.push_back(mg);
+        }
+        return D;
+    };
+    // 保存量 (存在するものだけ)
+    std::vector<std::string> cons;
+    for (const char* k : {"ro","roUx","roUy","roUz","roe","roK","roOmega","roXi","roGamma","roReth"}) if (present(k)) cons.push_back(k);
+    for (int k = 0; k < var.nSpeciesRegistered; ++k) if (present("roY" + std::to_string(k))) cons.push_back("roY" + std::to_string(k));
+    for (const auto& k : var.condMomentConsNames) if (present(k)) cons.push_back(k);
+    const auto consBefore = d2h(cons);
+    assembleResidualPre(s);
+    const auto consAfter = d2h(cons);
+    const Diff preDiff = diffOf(cons, consBefore, consAfter);
+
+    // 面計算の入力 (後処理の前後で変わらないこと) と μ_t (後処理が作る; 変わるのが正常)
+    std::vector<std::string> inp;
+    for (const char* k : {"ro","T","P","vis_lam","vis_turb","ccx","ccy","ccz"}) if (present(k)) inp.push_back(k);
+    for (int k = 0; k < var.nSpeciesRegistered; ++k) if (present("roY" + std::to_string(k))) inp.push_back("roY" + std::to_string(k));
+    for (const auto& k : var.condMomentConsNames) if (present(k)) inp.push_back(k);
+    const auto inpBefore = d2h(inp);
+    assembleResidualPost(s);
+    const auto inpAfter = d2h(inp);
+    const Diff postDiff = diffOf(inp, inpBefore, inpAfter);
+
+    TpFaceDiagData d; std::string why;
+    if (!twoPhaseFaceDiag_d_wrapper(cfg, cuda_cfg, msh, var, d, why)) {
+        fprintf(stderr, "[tp-faces] refused: %s\n", why.c_str());
+        return EXIT_FAILURE;
+    }
+
+    // h5
+    {
+        HighFive::File h5(path, HighFive::File::ReadWrite | HighFive::File::Create | HighFive::File::Truncate);
+        auto writeBlk = [&](const TpFaceDiagData::Block& B, size_t rows) {
+            if (rows == 0) return;
+            const std::vector<size_t> dims = (B.width == 1) ? std::vector<size_t>{rows} : std::vector<size_t>{rows, (size_t)B.width};
+            if (B.kind == 0)      { auto ds = h5.createDataSet<float>("/" + B.name, HighFive::DataSpace(dims));  ds.write_raw(B.f.data()); }
+            else if (B.kind == 1) { auto ds = h5.createDataSet<double>("/" + B.name, HighFive::DataSpace(dims)); ds.write_raw(B.d.data()); }
+            else                  { auto ds = h5.createDataSet<int>("/" + B.name, HighFive::DataSpace(dims));    ds.write_raw(B.i.data()); }
+        };
+        for (const auto& B : d.face) writeBlk(B, (size_t)d.nFaces);
+        for (const auto& B : d.node) writeBlk(B, (size_t)d.nNodes);
+        auto writeDiff = [&](const std::string& g, const Diff& D) {
+            h5.createDataSet("/" + g + "/names", D.name);
+            h5.createDataSet("/" + g + "/count_real", D.nReal); h5.createDataSet("/" + g + "/maxabs_real", D.mReal);
+            h5.createDataSet("/" + g + "/count_ghost", D.nGhost); h5.createDataSet("/" + g + "/maxabs_ghost", D.mGhost);
+        };
+        writeDiff("pre", preDiff);
+        writeDiff("post_inputs", postDiff);
+        const int iw = d.iw, ns = d.nSpecies, nq = 3 /* Q2, Q1, Q0 (TP_NQ) */, dm = cfg.speciesDiffusionMethod, req = cfg.condTwoPhaseDiffusion;
+        const long long nF = d.nFaces, nN = d.nNodes;
+        const double Sc = cfg.Sc, Sct = cfg.Sc_t, eps32 = 1.1920928955078125e-7;
+        const int hasWd = var.c_d.count("wall_dist") ? 1 : 0;
+        const std::string sign = "J > 0 = into cell ic0 (face-integrated; res[ic0] += J, res[ic1] -= J)";
+        const std::string skip = "face/skip: 0 evaluated, 1 node boundary half-face (diffusion not added by either operator), 2/3 OFF/ON skip disagreement";
+        h5.createAttribute("nSpecies", ns); h5.createAttribute("iw", iw); h5.createAttribute("nMoments", nq);
+        h5.createAttribute("nFaces", nF); h5.createAttribute("nNodes", nN);
+        h5.createAttribute("speciesDiffusionMethod", dm); h5.createAttribute("Sc", Sc); h5.createAttribute("Sc_t", Sct);
+        h5.createAttribute("condTwoPhaseDiffusion_requested", req);
+        h5.createAttribute("twophase_diffusion_state", cfg.condTwoPhaseDiffusionState);
+        h5.createAttribute("discretization", cfg.discretization);
+        h5.createAttribute("input_value_file", cfg.valueFileName);
+        h5.createAttribute("species_names", cfg.speciesNames);
+        h5.createAttribute("eps32", eps32); h5.createAttribute("has_wall_dist", hasWd);
+        h5.createAttribute("sign_convention", sign); h5.createAttribute("skip_codes", skip);
+        h5.createAttribute("summary", d.summary);
+    }
+    for (size_t i = 0; i < preDiff.name.size(); ++i)
+        printf("[tp-faces] pre-part change %-10s real %lld (max|d| %.3e)  ghost %lld (max|d| %.3e)\n", preDiff.name[i].c_str(),
+               preDiff.nReal[i], preDiff.mReal[i], preDiff.nGhost[i], preDiff.mGhost[i]);
+    for (size_t i = 0; i < postDiff.name.size(); ++i)
+        if (postDiff.nReal[i] + postDiff.nGhost[i] > 0)
+            printf("[tp-faces] post-part changed face input %-10s real %lld  ghost %lld%s\n", postDiff.name[i].c_str(),
+                   postDiff.nReal[i], postDiff.nGhost[i], (postDiff.name[i] == "vis_turb") ? " (expected: mu_t is built in the post-part)" : "  ** unexpected **");
+    for (const auto& l : d.summary) printf("%s\n", l.c_str());
+    printf("[tp-faces] wrote %s (%ld faces, %ld nodes); exiting without any update\n", path, d.nFaces, d.nNodes);
+    fflush(stdout);
+    return 0;
+}
+
+// ---- 診断 G3-b (plans/active/condensation-two-phase-default.md §5.1 #4g3; FORGE_DIAG_TP_UPDATE=<出力 h5>, 既定 off) ---------------
+// 更新写像の収支: 再開状態から組立を 1 回 (前処理・後処理) 通し、前処理の格納差 (射影・クランプ・境界の上書き) を「前処理収支」として記録する。
+// 続けて本番と同じ設定で**外側の陰的更新を 1 回だけ**行い (implicitNonlinearUpdate; 組立は上で済んでいるので飛ばす)、
+// 本番カーネルが実際に読んだ値・書いた値を成分 (ρY_w, ρg, ρQ2, ρQ1, ρQ0) ごとに節点スロットへ書かせる
+// (commit の before・δq_limited・格納前の候補・after、各補正操作の before/after; 配置は twoPhaseUpdateDiag_d.cuh)。
+// 操作の境界ごとに格納値の写しも取る (記録点の欠落を後処理の E_bookkeeping で見るため)。h5 を書いて終了する (2 回目の更新・res 出力はしない)。
+// 積算・判定は notes/investigations/2026-10-04-twophase-g3/g3b_judge.py (double)。周期境界は包絡外なので拒否する。
+static int runTpUpdateDiag(const char* path, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, matrix& mat_ns, variables& var,
+                           fluct_variables& fluct, point_probes& pprobes, RuntimeProfiler& profiler,
+                           ResidualCsvLogger& residual_logger, ImplicitDiagLogger& implicit_diag_logger)
+{
+    bool hasPeriodic = (msh.nPeriodicMembers > 0);
+    for (auto& bc : msh.bconds) if (bc.bcondKind == "periodic") hasPeriodic = true;
+    if (hasPeriodic) {
+        fprintf(stderr, "[tp-update] refused: periodic boundaries are outside the two-phase diffusion envelope (plan condensation-two-phase-default §4-1)\n");
+        return EXIT_FAILURE;
+    }
+    {
+        std::string why;
+        if (!tpuBegin(cfg, msh, var, why)) { fprintf(stderr, "[tp-update] refused: %s\n", why.c_str()); return EXIT_FAILURE; }
+    }
+    const bool twoPhase = condTwoPhaseDiffusionActive(cfg);
+    printf("[tp-update] FORGE_DIAG_TP_UPDATE=%s: one pre-part + one post-part of the assembly, then exactly one outer implicit update (%s path), then exit\n",
+           path, twoPhase ? "two-phase ON" : "two-phase OFF");
+    StepContext s{cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger, 0};
+
+    // 前処理収支 (前処理のバッファ): init → pre_state (状態の射影・クランプ) → pre_end (境界の上書き) → post_end (後処理は状態を変えない)
+    tpuArm(1);
+    tpuSnap("init");
+    assembleResidualPre(s);
+    tpuSnap("pre_end");
+    assembleResidualPost(s);
+    tpuSnap("post_end");
+    // 更新写像 (更新のバッファ): upd_start (= q_before) → 本番の 1 更新 (各操作の境界で写し) → final (= q_after)
+    tpuArm(2);
+    tpuSnap("upd_start");
+    g_tpuSkipAssemblyOnce = true;
+    implicitNonlinearUpdate(s, 0);
+    applyNodeIsothermalWallPin(cfg , cuda_cfg , msh , var);   // advanceImplicitSteady と同じ (この 5 成分には触れない)
+    tpuSnap("final");
+    tpuArm(0);
+
+    TpuDiagData d;
+    if (!tpuCollect(d)) { fprintf(stderr, "[tp-update] internal error: no diagnostic state\n"); return EXIT_FAILURE; }
+    const size_t n = (size_t)d.n;
+    auto d2hReal = [&](const std::string& k) {
+        std::vector<float> v(n);
+        gpuErrchk( cudaMemcpy(v.data(), var.c_d[k], n*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+        return v;
+    };
+    auto present = [&](const std::string& k) { auto it = var.c_d.find(k); return it != var.c_d.end() && it->second != nullptr; };
+
+    // スロット名 (h5 の /slot_names; 行 = スロット番号)
+    std::vector<std::string> slotNames(TPU_NSLOT);
+    for (int op = 0; op < TPU_NOP; ++op)
+        for (int c = 0; c < TPU_NC; ++c)
+            for (int k = 0; k < 2; ++k) slotNames[TPU_BA(op, c, k)] = std::string(tpuOpName(op)) + "/" + tpuCompName(c) + (k == 0 ? "/before" : "/after");
+    const int commitOp[3] = {TPU_OP_SPC, TPU_OP_TPC, TPU_OP_CMC};
+    for (int ci = 0; ci < 3; ++ci)
+        for (int c = 0; c < TPU_NC; ++c)
+            for (int x = 0; x < TPU_NX; ++x) slotNames[TPU_XS(ci, c, x)] = std::string(tpuOpName(commitOp[ci])) + "/" + tpuCompName(c) + "/" + tpuXName(x);
+    slotNames[TPU_RN_FACTOR] = "RN_factor";
+    {   // 診断 #4pj: 二相 DPLUR の分母 (本番 / sweep が使った値) と射影が使う T・ρ_l・Q3・分岐
+        const char* rowName[5] = {"v", "g", "Q2", "Q1", "Q0"};
+        for (int q = 0; q < 5; ++q) {
+            slotNames[TPU_DIAG(q, 0)] = std::string("DPLUR_denom/") + rowName[q] + "/production";
+            slotNames[TPU_DIAG(q, 1)] = std::string("DPLUR_denom/") + rowName[q] + "/used";
+        }
+        slotNames[TPU_RZ_T] = "RZP_input/T";
+        slotNames[TPU_RZ_RHOL] = "RZP_input/rho_l";
+        slotNames[TPU_RZ_Q3] = "RZP_input/Q3";
+        slotNames[TPU_RZ_KIND] = "RZP_input/kind";
+    }
+
+    // 写しの照合 (要約): post_end と upd_start は一致するはず、更新全体の Σ V Δq と Σ V C_round (commit ごと) を出す
+    std::vector<float> vol = d2hReal("volume");
+    auto snapIdx = [&](const char* lab) { for (size_t i = 0; i < d.snapLabel.size(); ++i) if (d.snapLabel[i] == lab) return (int)i; return -1; };
+    const int iS = snapIdx("upd_start"), iF = snapIdx("final"), iP = snapIdx("post_end");
+    std::vector<std::string> summary;
+    {
+        char buf[512];
+        long nPostDiff = 0;
+        if (iP >= 0 && iS >= 0) for (size_t j = 0; j < (size_t)TPU_NC*n; ++j) if (std::memcmp(&d.snap[iP][j], &d.snap[iS][j], sizeof(float)) != 0) ++nPostDiff;
+        snprintf(buf, sizeof(buf), "[tp-update] post-part changed %ld stored values of the 5 components (expected 0)", nPostDiff);
+        summary.push_back(buf);
+        for (int c = 0; c < TPU_NC; ++c) {
+            double lhs = 0.0, dsum = 0.0, cr = 0.0; long nLost = 0;
+            for (size_t i = 0; i < n; ++i) {
+                const double V = (double)vol[i];
+                if (iS >= 0 && iF >= 0) lhs += V*((double)d.snap[iF][(size_t)c*n + i] - (double)d.snap[iS][(size_t)c*n + i]);
+                for (int ci = 0; ci < 3; ++ci) {
+                    const double dd = d.upd[(size_t)TPU_XS(ci, c, TPU_X_DELTA_D)*n + i];
+                    if (!std::isfinite(dd)) continue;
+                    if (twoPhase && c == 0 && ci == 0) continue;   // ON の水: 化学種の commit は戻されるので δ に数えない (hold と対で別表示)
+                    dsum += V*dd;
+                    cr += V*(d.upd[(size_t)TPU_XS(ci, c, TPU_X_CAND_F)*n + i] - d.upd[(size_t)TPU_XS(ci, c, TPU_X_CAND_D)*n + i]);
+                    if (d.upd[(size_t)TPU_XS(ci, c, TPU_X_LOST)*n + i] != 0.0) ++nLost;
+                }
+            }
+            snprintf(buf, sizeof(buf), "[tp-update] %-2s  sum V dq = %+.6e  sum V delta_limited = %+.6e  sum V C_round = %+.6e  increments lost to storage: %ld nodes",
+                     tpuCompName(c), lhs, dsum, cr, nLost);
+            summary.push_back(buf);
+        }
+    }
+
+    {
+        HighFive::File h5(path, HighFive::File::ReadWrite | HighFive::File::Create | HighFive::File::Truncate);
+        { auto ds = h5.createDataSet<double>("/pre/slots", HighFive::DataSpace({(size_t)TPU_NSLOT, n}));    ds.write_raw(d.pre.data()); }
+        { auto ds = h5.createDataSet<double>("/update/slots", HighFive::DataSpace({(size_t)TPU_NSLOT, n})); ds.write_raw(d.upd.data()); }
+        h5.createDataSet("/slot_names", slotNames);
+        {
+            const size_t ns = d.snap.size();
+            std::vector<float> all(ns*(size_t)TPU_NC*n);
+            for (size_t k = 0; k < ns; ++k) std::memcpy(all.data() + k*(size_t)TPU_NC*n, d.snap[k].data(), (size_t)TPU_NC*n*sizeof(float));
+            auto ds = h5.createDataSet<float>("/snap/data", HighFive::DataSpace({ns, (size_t)TPU_NC, n})); ds.write_raw(all.data());
+            h5.createDataSet("/snap/labels", d.snapLabel);
+            h5.createDataSet("/snap/phase", d.snapPhase);
+        }
+        h5.createDataSet("/node/volume", vol);
+        for (const char* k : {"ccx", "ccy", "ccz", "wall_dist", "scalarDirichletPin"})
+            if (present(k)) h5.createDataSet(std::string("/node/") + k, d2hReal(k));
+        std::vector<std::string> comps, ops;
+        for (int c = 0; c < TPU_NC; ++c) comps.push_back(tpuCompName(c));
+        for (int op = 0; op < TPU_NOP; ++op) ops.push_back(tpuOpName(op));
+        h5.createAttribute("components", comps);
+        h5.createAttribute("ops", ops);
+        h5.createAttribute("nNodes", (long)n);
+        h5.createAttribute("nSlots", (int)TPU_NSLOT);
+        h5.createAttribute("iw", d.iw);
+        h5.createAttribute("twophase_active", twoPhase ? 1 : 0);
+        h5.createAttribute("twophase_diffusion_state", cfg.condTwoPhaseDiffusionState);
+        h5.createAttribute("condTwoPhaseSolver", cfg.condTwoPhaseSolver);
+        h5.createAttribute("condTwoPhaseNonnegLimit", cfg.condTwoPhaseNonnegLimit);
+        h5.createAttribute("condTwoPhaseRelax", cfg.condTwoPhaseRelax);
+        h5.createAttribute("cfl_pseudo", (double)cfg.cfl_pseudo);
+        h5.createAttribute("implicitRelax", (double)cfg.implicitRelax);
+        h5.createAttribute("nStepInner", cfg.nStepInner);
+        h5.createAttribute("passiveImplicitRelax", (double)cfg.passiveImplicitRelax);
+        h5.createAttribute("input_value_file", cfg.valueFileName);
+        h5.createAttribute("species_names", cfg.speciesNames);
+        h5.createAttribute("eps32", 1.1920928955078125e-7);
+        h5.createAttribute("unit_roundoff_u", 5.9604644775390625e-8);
+        h5.createAttribute("note_identity",
+            std::string("per op: after - before (double of stored floats); commit ops: after - before = delta_d + C_round + C_floor, ")
+            + "C_round = cand_f - cand_d, cand_d = before + delta_d, C_floor = after - cand_f; NaN slot = op not on this path");
+        h5.createAttribute("note_fma",
+            std::string("delta_f_unfused is a non-fused float evaluation for reference only; the production expression (e.g. rg + Th*dg) may be ")
+            + "contracted to FMA, so no separately rounded float increment exists; delta_d (exact products of the float operands in double) is the budget term");
+        h5.createAttribute("summary", summary);
+        // 診断 #4pj: 分母の共通化 (B) の有無と、追加スロットの意味
+        h5.createAttribute("common_diag", d.commonDiag);
+        h5.createAttribute("note_common_diag",
+            std::string("common_diag 1 (FORGE_DIAG_TP_COMMON_DIAG=1): in the two-phase DPLUR (tp_dplur_prep_d) the denominators of g, Q2, Q1, Q0 ")
+            + "were replaced by the per-node max(D_g, D_Q2, D_Q1, D_Q0); DPLUR_denom/<row>/production = tp_denoms, /used = what the sweep used "
+            + "(rows: v vapour, g, Q2, Q1, Q0; equal when common_diag 0). NaN = DPLUR path not taken");
+        h5.createAttribute("note_rzp_input",
+            std::string("RZP_input/*: written by the float realizability clamp for every node: T, rho_l = cond_rho_cond(T) (same as the projection), ")
+            + "Q3 = rhog/((4/3) pi rho_l) with rhog after the lower/upper clamp; kind: -1 projection branch not entered (rhoQ0 <= 0 or rhog <= 0; "
+            + "g = 0 dust is left to droplet removal), 0 unchanged, 1 nearest-point projection, 2 degenerate monodisperse re-init, "
+            + "3 Q3 not representable -> Q1 = Q2 = 0. The update buffer holds the clamp inside the one update; the pre buffer the assembly pre-part");
+    }
+    for (const auto& l : summary) printf("%s\n", l.c_str());
+    printf("[tp-update] snapshots:");
+    for (size_t i = 0; i < d.snapLabel.size(); ++i) printf(" %s", d.snapLabel[i].c_str());
+    printf("\n[tp-update] wrote %s (%ld nodes, %d slots); exiting after one update\n", path, d.n, TPU_NSLOT);
+    fflush(stdout);
+    return 0;
+}
+
+// ---- 診断 G3-a (plans/active/condensation-two-phase-default.md §5.1 #4g3・#4pjg; FORGE_DIAG_TP_OPERATOR=<出力 h5>, 既定 off) -------
+// 作用素の収支 (0 step): 再開状態から組立を 1 回 (前処理・後処理) 通し、後処理の中で本番カーネルが実際に残差へ足した値を記録する:
+//   面: 移流 (化学種・凝縮モーメント; S3 面値) と拡散 (OFF: species_diffusion_d / ON: twophase_diffusion_d) の atomic の前の値と所属 (ic0, ic1)、
+//   節点: 凝縮ソースの実際に足した S·V (分岐・成長分岐の Sg クリップ・クリップ前の Sg・θ)、
+//   記録点ごとの残差の写し (speciesTransport のゼロ化後・移流後・OFF 拡散後、化学ソース後、1 回目のピン後、モーメントのゼロ化後・移流後・
+//   二相拡散後、凝縮ソース後、トレーサ後、受動種のピン後、2 回目のピン後、最終)。
+// 更新へ進まず h5 を書いて終了する (nStepOuter に頼らない)。積算・判定は notes/investigations/2026-10-04-twophase-g3/g3a_judge.py (double)。
+// 周期境界は包絡外 (集約後の残差を全 member で二重に数えてしまう) なので拒否する。化学ソースは記録していないので有効なら拒否する。
+static int runTpOperatorDiag(const char* path, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, matrix& mat_ns, variables& var,
+                             fluct_variables& fluct, point_probes& pprobes, RuntimeProfiler& profiler,
+                             ResidualCsvLogger& residual_logger, ImplicitDiagLogger& implicit_diag_logger)
+{
+    bool hasPeriodic = (msh.nPeriodicMembers > 0);
+    for (auto& bc : msh.bconds) if (bc.bcondKind == "periodic") hasPeriodic = true;
+    if (hasPeriodic) {
+        fprintf(stderr, "[tp-operator] refused: periodic boundaries are outside the two-phase diffusion envelope (plan condensation-two-phase-default §4-1) "
+                        "and the node periodic gather would double-count the summed residual\n");
+        return EXIT_FAILURE;
+    }
+    if (chemistryEnabled(cfg)) {
+        fprintf(stderr, "[tp-operator] refused: finite-rate chemistry is on; the chemistry source is not instrumented (its residual increment could not be closed)\n");
+        return EXIT_FAILURE;
+    }
+    {
+        std::string why;
+        if (!tpoBegin(cfg, msh, var, why)) { fprintf(stderr, "[tp-operator] refused: %s\n", why.c_str()); return EXIT_FAILURE; }
+    }
+    const bool twoPhase = condTwoPhaseDiffusionActive(cfg);
+    printf("[tp-operator] FORGE_DIAG_TP_OPERATOR=%s: one pre-part + one post-part of the assembly (%s path), recording the residual terms; exit without update\n",
+           path, twoPhase ? "two-phase ON" : "two-phase OFF");
+    StepContext s{cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger, 0};
+    assembleResidualPre(s);
+    tpoArm(true);
+    assembleResidualPost(s);
+    tpoArm(false);
+
+    TpoDiagData d;
+    if (!tpoCollect(msh, d)) { fprintf(stderr, "[tp-operator] internal error: no diagnostic state\n"); return EXIT_FAILURE; }
+    const size_t n = (size_t)d.n, nF = (size_t)d.nF, nC = (size_t)d.nComp;
+    auto present = [&](const std::string& k) { auto it = var.c_d.find(k); return it != var.c_d.end() && it->second != nullptr; };
+    auto d2hReal = [&](const std::string& k) {
+        std::vector<float> v(n);
+        gpuErrchk( cudaMemcpy(v.data(), var.c_d[k], n*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+        return v;
+    };
+
+    // 記録の網羅 (経路にある kernel が全面を書いたか、ソースが全節点を書いたか)
+    std::vector<std::string> summary;
+    bool coverageOk = true;
+    {
+        char buf[512];
+        for (int k = 0; k < TPO_NK; ++k) {
+            long cnt[5] = {0, 0, 0, 0, 0};   // −1, 1, 2, 3, その他
+            for (size_t ih = 0; ih < nF; ++ih) {
+                const int c = d.faceCode[(size_t)k*nF + ih];
+                if (c == -1) ++cnt[0]; else if (c == 1) ++cnt[1]; else if (c == 2) ++cnt[2]; else if (c == 3) ++cnt[3]; else ++cnt[4];
+            }
+            const bool expected = (k == TPO_K_ADV_SP || k == TPO_K_ADV_PA)
+                                  || (cfg.viscMethod != 0 && ((k == TPO_K_DIFF_ON) == twoPhase));
+            const bool ok = expected ? (cnt[0] == 0 && cnt[4] == 0) : (cnt[0] == (long)nF);
+            if (!ok) coverageOk = false;
+            snprintf(buf, sizeof(buf), "[tp-operator] face kernel %-17s: %s; not run %ld, internal %ld, half-face skipped %ld, half-face evaluated %ld, other %ld%s",
+                     tpoKernelName(k), expected ? "on path" : "off path", cnt[0], cnt[1], cnt[2], cnt[3], cnt[4], ok ? "" : "  ** coverage mismatch **");
+            summary.push_back(buf);
+        }
+        long nNaN = 0, nBr[4] = {0, 0, 0, 0}, nClip = 0;
+        for (size_t i = 0; i < n; ++i) {
+            const double b = d.src[(size_t)TPO_S_BRANCH*n + i];
+            if (!std::isfinite(b)) { ++nNaN; continue; }
+            const int bi = (int)b % 10;
+            if (bi >= 0 && bi < 4) ++nBr[bi];
+            if (d.src[(size_t)TPO_S_CLIP*n + i] == 1.0) ++nClip;
+        }
+        if (nNaN != 0) coverageOk = false;
+        snprintf(buf, sizeof(buf), "[tp-operator] source: nodes not written %ld%s; branch none %ld, growth %ld, evaporation %ld; growth-branch Sg clip fired %ld",
+                 nNaN, nNaN ? "  ** coverage mismatch **" : "", nBr[0], nBr[1], nBr[2], nClip);
+        summary.push_back(buf);
+        std::string lab = "[tp-operator] residual snapshots:";
+        for (const auto& l : d.snapLabel) lab += " " + l;
+        summary.push_back(lab);
+    }
+
+    // 面の境界種別 (−1 = 内部面; それ以外は msh.bconds の番号)
+    std::vector<int> faceBc(nF, -1);
+    {
+        std::vector<int> ipBc((size_t)msh.nPlanes, -1);
+        for (size_t b = 0; b < msh.bconds.size(); ++b)
+            for (geom_int ip : msh.bconds[b].iPlanes) if (ip >= 0 && ip < msh.nPlanes) ipBc[(size_t)ip] = (int)b;
+        for (size_t ih = 0; ih < nF; ++ih) faceBc[ih] = ipBc[(size_t)d.faceIp[ih]];
+    }
+    std::vector<float> mdot(nF);
+    {
+        std::vector<float> mp((size_t)msh.nPlanes);
+        gpuErrchk( cudaMemcpy(mp.data(), var.p_d["massflux"], mp.size()*sizeof(flow_float), cudaMemcpyDeviceToHost) );
+        for (size_t ih = 0; ih < nF; ++ih) mdot[ih] = mp[(size_t)d.faceIp[ih]];
+    }
+
+    {
+        HighFive::File h5(path, HighFive::File::ReadWrite | HighFive::File::Create | HighFive::File::Truncate);
+        h5.createDataSet("/face/ip", d.faceIp);
+        h5.createDataSet("/face/ic0", d.faceIc0);
+        h5.createDataSet("/face/ic1", d.faceIc1);
+        h5.createDataSet("/face/bcond", faceBc);
+        h5.createDataSet("/face/massflux", mdot);
+        { auto ds = h5.createDataSet<double>("/face/adv", HighFive::DataSpace({nC, nF}));  ds.write_raw(d.faceVal.data()); }
+        { auto ds = h5.createDataSet<double>("/face/diff", HighFive::DataSpace({nC, nF})); ds.write_raw(d.faceVal.data() + nC*nF); }
+        { auto ds = h5.createDataSet<int>("/face/code", HighFive::DataSpace({(size_t)TPO_NK, nF})); ds.write_raw(d.faceCode.data()); }
+        { auto ds = h5.createDataSet<double>("/source/slots", HighFive::DataSpace({(size_t)TPO_NSRC, n})); ds.write_raw(d.src.data()); }
+        {
+            std::vector<std::string> sn; for (int k = 0; k < TPO_NSRC; ++k) sn.push_back(tpoSrcName(k));
+            h5.createDataSet("/source/slot_names", sn);
+            std::vector<std::string> kn; for (int k = 0; k < TPO_NK; ++k) kn.push_back(tpoKernelName(k));
+            h5.createDataSet("/face/code_kernels", kn);
+        }
+        {
+            const size_t ns = d.snap.size();
+            std::vector<float> all(ns*nC*n);
+            for (size_t k = 0; k < ns; ++k) std::memcpy(all.data() + k*nC*n, d.snap[k].data(), nC*n*sizeof(float));
+            auto ds = h5.createDataSet<float>("/res/snap", HighFive::DataSpace({ns, nC, n})); ds.write_raw(all.data());
+            h5.createDataSet("/res/labels", d.snapLabel);
+        }
+        {
+            std::vector<float> st(nC*n);
+            for (size_t c = 0; c < nC; ++c) { const auto v = d2hReal(d.compCons[c]); std::memcpy(st.data() + c*n, v.data(), n*sizeof(float)); }
+            auto ds = h5.createDataSet<float>("/node/state", HighFive::DataSpace({nC, n})); ds.write_raw(st.data());
+        }
+        h5.createDataSet("/node/volume", d2hReal("volume"));
+        if (msh.volumePartial_d != nullptr) {
+            std::vector<float> v(n);
+            gpuErrchk( cudaMemcpy(v.data(), msh.volumePartial_d, n*sizeof(geom_float), cudaMemcpyDeviceToHost) );
+            h5.createDataSet("/node/volume_partial", v);
+        }
+        for (const char* k : {"ccx", "ccy", "ccz", "wall_dist", "scalarDirichletPin", "ro", "T", "P",
+                              "condS_0", "condLim_0", "condDrdt_0", "condR30_0"})
+            if (present(k)) h5.createDataSet(std::string("/node/") + k, d2hReal(k));
+        std::vector<std::string> comps = {"w", "g", "Q2", "Q1", "Q0"};
+        for (int sp = 0; sp < var.nSpeciesRegistered; ++sp)
+            if (sp != d.iw) comps.push_back((sp < (int)cfg.speciesNames.size()) ? cfg.speciesNames[sp] : ("Y" + std::to_string(sp)));
+        std::vector<std::string> bcNames, bcKinds;
+        for (auto& bc : msh.bconds) { bcNames.push_back(bc.physName); bcKinds.push_back(bc.bcondKind); }
+        h5.createAttribute("components", comps);
+        h5.createAttribute("comp_cons", d.compCons);
+        h5.createAttribute("comp_res", d.compRes);
+        h5.createAttribute("bcond_names", bcNames);
+        h5.createAttribute("bcond_kinds", bcKinds);
+        h5.createAttribute("nNodes", (long)n);
+        h5.createAttribute("nFaces", (long)nF);
+        h5.createAttribute("nComp", (int)nC);
+        h5.createAttribute("iw", d.iw);
+        h5.createAttribute("twophase_active", twoPhase ? 1 : 0);
+        h5.createAttribute("twophase_diffusion_state", cfg.condTwoPhaseDiffusionState);
+        h5.createAttribute("viscMethod", cfg.viscMethod);
+        h5.createAttribute("speciesDiffusionMethod", cfg.speciesDiffusionMethod);
+        h5.createAttribute("Sc", (double)cfg.Sc);
+        h5.createAttribute("Sc_t", (double)cfg.Sc_t);
+        h5.createAttribute("condFloat", cfg.condFloat);
+        h5.createAttribute("condLimiterMode", cfg.condLimiterMode);
+        h5.createAttribute("discretization", cfg.discretization);
+        h5.createAttribute("input_value_file", cfg.valueFileName);
+        h5.createAttribute("species_names", cfg.speciesNames);
+        h5.createAttribute("coverage_ok", coverageOk ? 1 : 0);
+        h5.createAttribute("unit_roundoff_u", 5.9604644775390625e-8);
+        h5.createAttribute("flt_min", 1.1754943508222875e-38);
+        h5.createAttribute("note_face",
+            std::string("/face/adv and /face/diff [component, ih]: value a0 added to res[ic0] (res[ic1] receives -a0; face-integrated). ")
+            + "adv: a0 = -mdot*Y_f (node boundary half-face, ic1 >= nNodes: added to ic0 only, code 3). diff: a0 = J (into ic0); "
+            + "node boundary half-faces are not added (value 0, code 2). NaN = no kernel wrote this component on this face. "
+            + "/face/code [kernel, ih]: -1 kernel not on path, 1 internal face evaluated, 2 half-face skipped, 3 half-face evaluated. "
+            + "/face/bcond: -1 internal, else index into bcond_names/bcond_kinds. /face/massflux = massflux of the plane (positive ic0 -> ic1)");
+        h5.createAttribute("note_source",
+            std::string("/source/slots [slot, node] (names /source/slot_names): term_* = value added to res (float path: exact double(S)*double(V), ")
+            + "production rounds the product and the sum, nround 2; double delegate: (float)(S*V), nround 1; nothing added: 0 and nround 0). "
+            + "branch: 0 none, 1 nucleation/growth, 2 evaporation (float); 10/11/12 the same in the double delegate. clip: growth-branch "
+            + "'if (Sg < 0) Sg = 0' fired. Sg_unclipped: Sg before that clip (growth branch only, else NaN). theta: source scale, J: nucleation rate");
+        h5.createAttribute("note_snap",
+            std::string("/res/snap [label, component, node] (float stored residuals at the recording points, labels /res/labels). ")
+            + "Moment residuals are zeroed in passiveAdvection (label cm_zero); species residuals in speciesTransport (sp_zero). "
+            + "Pins overwrite (no rounding); every other change between labels is a sum of the recorded terms plus assembly rounding");
+        h5.createAttribute("summary", summary);
+    }
+    for (const auto& l : summary) printf("%s\n", l.c_str());
+    printf("[tp-operator] wrote %s (%ld nodes, %ld faces, %d components); exiting without any update%s\n", path, (long)n, (long)nF, (int)nC,
+           coverageOk ? "" : "  ** recording coverage mismatch: do not use for the budget **");
+    fflush(stdout);
+    return coverageOk ? 0 : EXIT_FAILURE;
+}
+
 int main(int argc, char** argv) {
     // --resolve-species: 化学種の解決済み記録だけ書いて終了 (GPU 不使用; plan thermophysics-solver-owned-species-db §4.3)
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--resolve-species") return resolveSpeciesOnly();
+    }
+    // 診断 #4pj (FORGE_DIAG_TP_COMMON_DIAG=1; 既定 off): 分母の共通化は FORGE_DIAG_TP_UPDATE の 1 更新の中だけで使う診断。
+    // 本番の計算に混ざらないよう、単独で立っていたら計算を始めずに拒否する。
+    if (const char* e = getenv("FORGE_DIAG_TP_COMMON_DIAG"); e != nullptr && *e != '\0' && std::strcmp(e, "0") != 0) {
+        const char* u = getenv("FORGE_DIAG_TP_UPDATE");
+        if (u == nullptr || *u == '\0') {
+            fprintf(stderr, "[tp-update] refused: FORGE_DIAG_TP_COMMON_DIAG=%s is a diagnostic for FORGE_DIAG_TP_UPDATE only "
+                            "(plan condensation-two-phase-default #4pj); unset it for production runs\n", e);
+            return EXIT_FAILURE;
+        }
     }
     RuntimeProfiler profiler;
 
@@ -2922,6 +3427,19 @@ int main(int argc, char** argv) {
         exit(1);
     }
     ResidualCsvLogger residual_logger("residual_history.csv", cfg, msh, var);
+
+    // 診断 D1 (FORGE_DIAG_TP_FACES=<出力 h5>; 既定 off): 組立を 1 回だけ通した状態の面作用素 A/B を書いて終了する (時間更新・res_0 出力なし)。
+    if (const char* e = getenv("FORGE_DIAG_TP_FACES"); e != nullptr && *e != '\0') {
+        return runTpFacesDiag(e, cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger);
+    }
+    // 診断 G3-a (FORGE_DIAG_TP_OPERATOR=<出力 h5>; 既定 off): 組立 1 回の作用素の記録 (面流束・ソース・残差の写し) を書いて終了する (更新・res_0 出力なし)。
+    if (const char* e = getenv("FORGE_DIAG_TP_OPERATOR"); e != nullptr && *e != '\0') {
+        return runTpOperatorDiag(e, cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger);
+    }
+    // 診断 G3-b (FORGE_DIAG_TP_UPDATE=<出力 h5>; 既定 off): 組立 1 回 + 外側の陰的更新 1 回の更新写像の記録を書いて終了する (res_0 出力なし)。
+    if (const char* e = getenv("FORGE_DIAG_TP_UPDATE"); e != nullptr && *e != '\0') {
+        return runTpUpdateDiag(e, cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger);
+    }
 
     writeInitialOutputs(cfg , msh , var);
 

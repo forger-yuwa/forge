@@ -1217,16 +1217,21 @@ void solverConfig::read(std::string fname)
             this->condDgMaxStep   = getOptionalValidatedValue<double>(cond, "condDgMaxStep", 5.0e-3, "condensation");
             this->condDTmaxStep   = getOptionalValidatedValue<double>(cond, "condDTmaxStep", 1.0, "condensation");
             if (!(this->condDgMaxStep > 0.0) || !(this->condDTmaxStep > 0.0)) throw std::runtime_error("condDgMaxStep and condDTmaxStep must be > 0.");
-            this->condTwoPhaseDiffusion = getOptionalValidatedValue<int>(cond, "condTwoPhaseDiffusion", 0, "condensation");
+            // 省略時は kCondTwoPhaseDiffusionDefault。明示の有無は実効状態の判定 (明示 0 の旧作用素 WARNING) に使う (plan condensation-two-phase-default §4-2)。
+            this->condTwoPhaseDiffusionGiven = cond["condTwoPhaseDiffusion"].IsDefined() ? 1 : 0;
+            this->condTwoPhaseDiffusion = getOptionalValidatedValue<int>(cond, "condTwoPhaseDiffusion", kCondTwoPhaseDiffusionDefault, "condensation");
             if (this->condTwoPhaseDiffusion != 0 && this->condTwoPhaseDiffusion != 1) throw std::runtime_error("Key 'condTwoPhaseDiffusion' in 'condensation' must be 0 (off) or 1 (two-phase diffusion, steady only).");
             this->condTwoPhaseRelax = getOptionalValidatedValue<double>(cond, "condTwoPhaseRelax", 1.0, "condensation");
             if (!(this->condTwoPhaseRelax > 0.0) || this->condTwoPhaseRelax > 1.0) throw std::runtime_error("Key 'condTwoPhaseRelax' in 'condensation' must be in (0, 1].");
             this->condAuditResidual = getOptionalValidatedValue<int>(cond, "condAuditResidual", 0, "condensation");
             if (this->condAuditResidual != 0 && this->condAuditResidual != 1) throw std::runtime_error("Key 'condAuditResidual' in 'condensation' must be 0 or 1.");
-            this->condTwoPhaseSolver = getOptionalValidatedValue<int>(cond, "condTwoPhaseSolver", 0, "condensation");
+            // 二相拡散 ON のときの既定は検証済みの組 (Solver 1 + NonnegLimit 0; plan condensation-two-phase-default §4-3)。明示値が優先。
+            // OFF のときは使われない (従来の既定 0 / 1 のまま)。
+            const bool tpOn = (this->condTwoPhaseDiffusion == 1);
+            this->condTwoPhaseSolver = getOptionalValidatedValue<int>(cond, "condTwoPhaseSolver", tpOn ? 1 : 0, "condensation");
             if (this->condTwoPhaseSolver != 0 && this->condTwoPhaseSolver != 1) throw std::runtime_error("Key 'condTwoPhaseSolver' in 'condensation' must be 0 (point-diagonal) or 1 (matched scalar-DPLUR).");
-            this->condTwoPhaseNonnegLimit = getOptionalValidatedValue<int>(cond, "condTwoPhaseNonnegLimit", 1, "condensation");
-            if (this->condTwoPhaseNonnegLimit != 0 && this->condTwoPhaseNonnegLimit != 1) throw std::runtime_error("Key 'condTwoPhaseNonnegLimit' in 'condensation' must be 1 (vapour/liquid non-negativity in theta; default) or 0 (theta = threshold limits only).");
+            this->condTwoPhaseNonnegLimit = getOptionalValidatedValue<int>(cond, "condTwoPhaseNonnegLimit", tpOn ? 0 : 1, "condensation");
+            if (this->condTwoPhaseNonnegLimit != 0 && this->condTwoPhaseNonnegLimit != 1) throw std::runtime_error("Key 'condTwoPhaseNonnegLimit' in 'condensation' must be 0 (theta = threshold limits only; default with condTwoPhaseDiffusion 1) or 1 (vapour/liquid non-negativity in theta).");
             this->condTwoPhaseDiag = getOptionalValidatedValue<int>(cond, "condTwoPhaseDiag", 0, "condensation");
             if (this->condTwoPhaseDiag < 0 || this->condTwoPhaseDiag > 3) throw std::runtime_error("Key 'condTwoPhaseDiag' in 'condensation' must be 0, 1 (theta = 0 cells), 2 (theta < 1 cells) or 3 (theta = 0 cells + float/double assembly A/B).");
             this->condEquilibrium = getOptionalValidatedValue<int>(cond, "condEquilibrium", 0, "condensation");

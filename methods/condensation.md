@@ -256,6 +256,11 @@ $$
 - **適用範囲**: $S\le1$ のみ。$S>1$ の亜臨界 ($\bar r<r_*$) 蒸発は核生成域で $\bar r$ が $r_*$ に
   張り付く既知の罠 (`COND_RNUC_FAC`) を再燃させるため従来どおり成長 0 (クランプ) のまま。
   核生成 $J$ は $S\le1$ で元々 0。二温度 (`condTwoTemp`) の $T_d\le T$ 側は未対応 (一温度のみ)。
+- **既知の限界 (将来課題, 2026-10-04)**: 瞬間速度形 (`condLimiterMode 1`) の $S_{Q_1}=Q_0\dot r$ は、半径 0 に達した液滴の数も
+  $Q_0$ に残したまま蒸発させる ($S_{Q_0}=0$)。分布が実現可能域の上側境界 $Q_2^2=Q_1Q_3$ (2 点求積の一方が $r=0$) に乗ると
+  境界上で $\dot D=\dot r\,Q_3 w_0<0$ ($D=Q_1Q_3-Q_2^2$, $w_0=Q_0-Q_1^2/Q_2$) となり外向きに押し、実現可能性の射影が毎更新これを押し戻す。
+  case/16 の二相拡散 ON (高温の壁近傍へ液が運ばれる) で顕在化した。$Q_0$ を $w_1=Q_1^2/Q_2$ に替える試算で外向きの押しは $6\times10^{-8}$ 倍に消える
+  ([condensation-two-phase-default.md](../plans/active/condensation-two-phase-default.md) §5.1 #4g3cr)。$r=0$ の境界処理の整合は未着手。
 
 蒸発は負帰還 (蒸発→冷却→$p_{sat}$↓・蒸気復帰→$S\to1$) なので、圧縮帯では**平衡蒸発**
 ($S\to1$ に漸近、$g$ は僅かに減) になり、高温境界層 (回復温度 $\gg T_{sat}$) では液相が消える。
@@ -1051,8 +1056,16 @@ Phase 2 の二相 EOS による気相逆結合 ($p$ が $g$ 依存) は密結合
 
 > 状態: 実装 2026-10-02 (plan [condensation-two-phase-transport](../plans/active/condensation-two-phase-transport.md) §4.2, §5.1 #4e)。
 > `condensation.condTwoPhaseDiffusion: 1` で有効 (既定 0 = 下の「既定の経路」のまま、ビット不変)。**定常の局所擬似時間 (`unsteady 0`,
-> `timeIntegration 11`) 専用**で、dual-time・陽解法・`speciesImplicitCoupling 2`・`passiveScalarScheme 0`・`condEquilibrium ≠ 0`・`condLimiterMode 0` との
-> 併用は起動時にエラー終了する。CFD での検証 (case/16 の A/B, plan #1b) は未了。式と更新の契約はホスト参照実装
+> `timeIntegration 11`) 専用**で、dual-time・陽解法・`speciesImplicitCoupling 2`・`passiveScalarScheme 0`・`condEquilibrium 1`・`condLimiterMode 0` との
+> 併用は起動時にエラー終了する (`condEquilibrium 2` は不活性)。CFD での検証 (case/16 の A/B, plan #1b) は未了。
+> **既定化の準備 (2026-10-04, plan [condensation-two-phase-default](../plans/active/condensation-two-phase-default.md) S0)**: 指定 (省略 / 明示 0 / 明示 1) と
+> 構成から決まる実効状態 — active (包絡内) / inactive-a (凝縮 OFF・`viscMethod 0`; 物理が同一) / inactive-b (CPG carrier・pure 凝縮・`condEquilibrium 2`;
+> 構造的に適用できず毎回 WARNING) / unsupported-c (上の併用不可に加えて `condEquilibrium 1`・`nCondSpecies` ≥ 2・**軸対称・周期**; 指定 ON でエラー終了、
+> 旧作用素は `condTwoPhaseDiffusion: 0` の明示で回る) — を 1 つの判定 (`condTwoPhaseDiffusionClassify`、`cuda_forge/condensationTransport_d.cuh`;
+> Python 側 `tools/twophase_state.py`) で決め、`[twophase]` 起動行・`res_*.h5` 属性 (`twophase_diffusion_effective`/`_state`/`_requested`)・
+> `stage_manifest.json` の hard キーに記録する。ON のときの既定は検証済みの組 `condTwoPhaseSolver 1` (緩和整合 scalar-DPLUR)・
+> `condTwoPhaseNonnegLimit 0` (明示値が優先)。**`condTwoPhaseDiffusion` の既定はまだ 0** (S1-c で G0〜G3・G5 が通れば 1)。
+> 式と更新の契約はホスト参照実装
 > [`tests/unit/test_twophase_diffusion_harness.py`](../solver_density_cuda/tests/unit/test_twophase_diffusion_harness.py)・
 > [`test_twophase_real_source.cpp`](../solver_density_cuda/tests/unit/test_twophase_real_source.cpp) で確かめ、CUDA 実装は
 > [`test_twophase_kernel.cu`](../solver_density_cuda/tests/unit/test_twophase_kernel.cu) で両者と照合した (下の「実装」)。
@@ -1168,6 +1181,8 @@ $$
   $\theta\ge0$; float への丸めは安全側 [切り上がったら 0 側の隣の float] — 最近接は液枯渇の境界で $\rho g=-2.3\times10^{-13}$ を作った, #4f) を共通に掛け、$Q$ は成分ごとに非負化、$\rho Y_w\leftarrow\rho Y_w+\mathrm{fl}(\theta\delta\rho v+\theta\delta\rho g)$ (丸めで蒸気が負なら $\rho Y_w=\rho g$)。
   続いて再正規化の係数 $\rho/\sum\rho Y$ を化学種と $\rho g$・$\rho Q_n$ に共通に掛け、実現可能性クランプは保険として残す。
   蒸気・液・$Q$ の前処理は**点対角**で、`passiveImplicitCoupling`/`speciesImplicitCoupling` の DPLUR は使わない (非水種は従来の更新)。
+  これは初版の組 (`condTwoPhaseSolver 0`・`condTwoPhaseNonnegLimit 1`) の記述。2026-10-04 から ON のときの既定は検証済みの組 — 増分は緩和整合 scalar-DPLUR (#4g)、
+  $\theta=\theta_{thr}$ (非負の $\theta_{vg}$ を外し、総水分だけ下限 0 で commit・液は後段で $0\le\rho g\le\rho Y_w$ に射影, #4h) — で、初版の組は診断用 opt-in。
   モーメントの $\phi_N\delta\rho$ 項と $\theta_b$ は掛けない (再正規化の係数が密度変化を担い、液と総水分の基点を揃える)。
 - **監視**: `residual_history.csv` に `rms_roYv` (= rms($R_w-R_g$), 毎反復の格納状態から組み直した float32 残差の差) を足す。
   `[twophase]` 行 (monitorInterval ごと) に $\theta<1$ のセル数・最小 $\theta$・保留量 $\sum(1-\theta)|\delta|V$・状態補正 ($Q$ の非負化、蒸気の丸め) を出す。
