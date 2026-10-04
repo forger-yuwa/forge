@@ -158,7 +158,13 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     disc = p.mesh.get("discretization", "node")
     (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"')
                                                .replace(", nodeWallDirichlet: 1", "").replace(", nodeInletCornerWall: 1", ""))
+    # 品質ゲートの primal (cell) 変換では farfield を slip に読み替える: farfield は node 専用で、変換器も境界の対応範囲を
+    # 検査して止まる (2026-10-05、R7a で初めて farfield 入りの生産 YAML から格子を作って発覚)。どちらも壁ではないので
+    # 壁距離・品質判定は同じ。node の本変換の前に元の bcond に戻す
+    _bc = (run_dir / "bcondConfig.yaml").read_text()
+    (run_dir / "bcondConfig.yaml").write_text(_bc.replace("kind: farfield", "kind: slip"))
     R2.convert_mesh(run_dir, "sern.msh", "sern_qc.h5")
+    (run_dir / "bcondConfig.yaml").write_text(_bc)
     # AR 上限は問題 YAML の `mesh.ar_max` で緩められる (既定 1000)。**壁法線に沿った構造格子の
     # 境界層セルに限り 5000 まで** (AGENTS.md「メッシュ品質チェック」2026-09-12 ユーザ決定)。
     # 他の設計チェーン (`runner_axismach` / `runner_wt`) は既にこの knob を持っている。
