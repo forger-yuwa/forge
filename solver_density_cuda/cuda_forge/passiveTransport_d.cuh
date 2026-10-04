@@ -82,7 +82,8 @@ flow_float* passive_limCorr_cell_ptr(int q);
 double*     passive_lim_stats_ptr(int q);      // Σ(1−θ)|δ|·V の積算スロット (受動種 q)
 const geom_int* passive_periodic_root(solverConfig& cfg, mesh& msh);   // node 周期なら periodicRoot_d、他は nullptr
 // 更新確定時の上下限と補正収支 [q0, q0+nq) (トレーサは上限 ρ、モーメントは下限 0 のみ)。
-void passiveBounds_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int q0, int nq, bool record = true);
+void passiveBounds_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, int q0, int nq, bool record = true,
+                             double* tcAcc = nullptr);   // tcAcc: #4h の二相補正計測 (凝縮モーメントの床を段 1 に)
 // 時間積分ステージ loop が収支を記録する確定ステージか (timeIntegration 11 は常に true; RK は最終ステージのみ)。
 bool passiveRecordStage(const solverConfig& cfg, int loop);
 // 補正収支の要約を stdout に出す (monitorInterval ごと): 前回出力からの平均/step と全期間積算、相対量 (積算|Δ|/∫ρφ dV)。

@@ -1,0 +1,28 @@
+[flag0] === run_0958_chidef_b1a_isoT_flag0_ext/chidef_b1a_eta.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[flag0]   eta_cf          : tail mean=0.9774  drift=0.0%/tail  fluct=0.0%           STEADY
+[flag0]   mdot            : tail mean=1.302  drift=0.0%/tail  fluct=0.0%            STEADY
+[flag0] === run_0958_chidef_b1a_isoT_flag0_ext/chidef_b1a_wall.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[flag0]   pp0_25          : tail mean=0.9727  drift=0.0%/tail  fluct=0.0%           STEADY
+[flag0]   pp0_50          : tail mean=0.08336  drift=0.0%/tail  fluct=0.0%          STEADY
+[flag0]   pp0_75          : tail mean=0.02249  drift=0.0%/tail  fluct=0.0%          STEADY
+[omit] === run_0959_chidef_b1a_isoT_omit_ext/chidef_b1a_eta.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[omit]   eta_cf          : tail mean=0.9774  drift=0.0%/tail  fluct=0.0%           STEADY
+[omit]   mdot            : tail mean=1.302  drift=0.0%/tail  fluct=0.0%            STEADY
+[omit] === run_0959_chidef_b1a_isoT_omit_ext/chidef_b1a_wall.csv  [25 rows, steps 0..12000]  -> STEADY ===
+[omit]   pp0_25          : tail mean=0.9727  drift=0.0%/tail  fluct=0.0%           STEADY
+[omit]   pp0_50          : tail mean=0.08336  drift=0.0%/tail  fluct=0.0%          STEADY
+[omit]   pp0_75          : tail mean=0.02249  drift=0.0%/tail  fluct=0.0%          STEADY
+① η_CF: 差区間 [-0.0001, +0.0000] % (許容 ±0.1 %) → 帯内
+① ṁ: 差区間 [-0.0000, +0.0000] % (許容 ±0.1 %) → 帯内
+② 輪郭壁 p/p0 L∞ = 1.3583 % (許容 0.5 %) → FAIL
+[flag0] === run_0958_chidef_b1a_isoT_flag0_ext/chidef_b1a_qwall.csv  [24 rows, steps 500..12000]  -> STEADY ===
+[flag0]   qw_25           : tail mean=-1.461e+06  drift=0.0%/tail  fluct=0.0%       STEADY
+[flag0]   qw_50           : tail mean=-4.912e+05  drift=0.0%/tail  fluct=0.0%       STEADY
+[flag0]   qw_75           : tail mean=-2.02e+05  drift=0.0%/tail  fluct=0.0%        STEADY
+[omit] === run_0959_chidef_b1a_isoT_omit_ext/chidef_b1a_qwall.csv  [24 rows, steps 500..12000]  -> STEADY ===
+[omit]   qw_25           : tail mean=-1.461e+06  drift=0.0%/tail  fluct=0.0%       STEADY
+[omit]   qw_50           : tail mean=-4.912e+05  drift=0.0%/tail  fluct=0.0%       STEADY
+[omit]   qw_75           : tail mean=-2.02e+05  drift=0.0%/tail  fluct=0.0%        STEADY
+③ 等温壁 q_w 相対 L2 (最終) = 0.1184 % (許容 1 %) → PASS
+VERDICT B1-a 量: FAIL
+=== run_0959_chidef_b1a_isoT_omit_ext  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===

@@ -1,4 +1,13 @@
 #include <cstdlib>
+#include <limits>
+#include <set>
+#include <map>
+#include <cstring>
+#include <algorithm>
+#include <string>
+#include <fstream>
+#include <vector>
+#include <iostream>
 #include "../condensationTransport_d.cuh"   // cond_prop_opts() (凝縮物性オプション → CondArgs)
 #include "../condensationEOS_d.cuh"         // cond_face_h_cpg (SLAU CPG 二相の面エンタルピー)
 #include "../condensationSourceF_d.cuh"     // cond_face_h_cpg_f / cond_tab_latent_f (float 面潜熱, plan condensation-float-speedup)
@@ -11,6 +20,7 @@
 
 #include <stdexcept>
 #include "convectiveFlux_slau_d.inc.cuh"
+#include "farfieldFlux_d.inc.cuh"          // 遠方境界 farfield (node、plan boundary-node-farfield-characteristic)
 
 #include "legacy/convectiveFlux_ausm_keep_d.inc.cuh"
 
@@ -30,6 +40,141 @@
 
 
 
+
+// ---- 遠方境界 farfield の面の値配列 (plan boundary-node-farfield-characteristic §4.3) ----
+// 化学種・k・ω の輸送カーネルが、farfield の境界半割面で流入 (質量流束 < 0) のときに運ぶ外側状態の値。
+// 面 (plane) ごとの配列で、farfield 以外の面は NaN (= 使わない。既存の境界はビット不変)。
+namespace {
+struct FfFaceArrays {
+    bool init = false;
+    std::vector<flow_float*> Y;       // 化学種ごと
+    flow_float** Ydev = nullptr;      // デバイス上のポインタ配列 (S3 カーネル用)
+    flow_float* k = nullptr;
+    flow_float* om = nullptr;
+    geom_int nPlanes = 0;
+};
+FfFaceArrays& ffFace() { static FfFaceArrays a; return a; }
+
+void ffFaceAlloc(solverConfig& cfg, mesh& msh)
+{
+    FfFaceArrays& A = ffFace();
+    if (A.init) return;
+    A.init = true;
+    bool any = false;
+    for (auto& bc : msh.bconds) any = any || (bc.bcondKind == "farfield");
+    if (!any) return;
+    // 周期境界と節点を共有する farfield は初版の対象外 (plan §2)。起動時に拒否する
+    {
+        std::vector<char> per((size_t)msh.nCells + 1, 0);
+        for (auto& bc : msh.bconds) if (bc.bcondKind == "periodic") for (auto c : bc.iCells) if (c >= 0 && (size_t)c < per.size()) per[c] = 1;
+        for (auto& bc : msh.bconds) {
+            if (bc.bcondKind != "farfield") continue;
+            for (auto c : bc.iCells) if (c >= 0 && (size_t)c < per.size() && per[c]) {
+                std::cerr << "Error: farfield (physID " << bc.physID << ") の節点 " << c << " が周期境界と共有されている (plan boundary-node-farfield-characteristic §2: 初版は非対応)" << std::endl;
+                std::exit(EXIT_FAILURE);
+            }
+        }
+    }
+    A.nPlanes = msh.nPlanes;
+    std::vector<flow_float> nanv((size_t)msh.nPlanes, std::numeric_limits<flow_float>::quiet_NaN());
+    auto mk = [&]() {
+        flow_float* d = nullptr;
+        CHECK_CUDA_ERROR(cudaMalloc(&d, sizeof(flow_float) * (size_t)msh.nPlanes));
+        CHECK_CUDA_ERROR(cudaMemcpy(d, nanv.data(), sizeof(flow_float) * (size_t)msh.nPlanes, cudaMemcpyHostToDevice));
+        return d;
+    };
+    const int nY = (cfg.thermalMethod == 2 && cfg.nSpecies >= 2) ? cfg.nSpecies : 0;
+    for (int sp = 0; sp < nY; ++sp) A.Y.push_back(mk());
+    if (nY > 0) {
+        CHECK_CUDA_ERROR(cudaMalloc(&A.Ydev, sizeof(flow_float*) * (size_t)nY));
+        CHECK_CUDA_ERROR(cudaMemcpy(A.Ydev, A.Y.data(), sizeof(flow_float*) * (size_t)nY, cudaMemcpyHostToDevice));
+    }
+    if (cfg.LESorRANS == 2 && cfg.RANSmodel == 1) { A.k = mk(); A.om = mk(); }
+    std::cout << "[farfield] 面の値配列を確保 (化学種 " << nY << "、k/ω " << (A.k ? "あり" : "なし") << "、" << msh.nPlanes << " 面)" << std::endl;
+}
+}  // namespace
+
+flow_float* farfieldFaceScalar(const std::string& name)
+{
+    FfFaceArrays& A = ffFace();
+    if (!A.init) return nullptr;
+    if (name == "k") return A.k;
+    if (name == "omega") return A.om;
+    if (name.size() > 1 && name[0] == 'Y') {
+        const int sp = std::atoi(name.c_str() + 1);
+        if (sp >= 0 && sp < (int)A.Y.size()) return A.Y[sp];
+    }
+    return nullptr;
+}
+
+flow_float** farfieldFaceYDevice() { return ffFace().Ydev; }
+
+static void farfieldFlux_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, bcond& bc, mesh& msh, variables& var, int sstEnergyK)
+{
+    ffFaceAlloc(cfg, msh);
+    FfFaceArrays& A = ffFace();
+    const int nY = (cfg.thermalMethod == 2 && cfg.nSpecies >= 2) ? cfg.nSpecies : 0;
+    FfGas gas{cfg.thermalMethod, (double)cfg.gamma, (double)cfg.cp, thermo_species_device_ptr(), cfg.nSpecies};
+    FfInf inf{};
+    auto hv = [&](const char* nm, double dflt) -> double {
+        auto it = bc.bvar.find(nm);
+        return (it != bc.bvar.end() && !it->second.empty()) ? (double)it->second[0] : dflt;
+    };
+    inf.r = hv("ro", 0.0); inf.u[0] = hv("Ux", 0.0); inf.u[1] = hv("Uy", 0.0); inf.u[2] = hv("Uz", 0.0); inf.p = hv("Ps", 0.0);
+    inf.k = hv("k", 0.0); inf.om = hv("omega", 0.0);
+    for (int sp = 0; sp < nY; ++sp) inf.Y[sp] = hv(("Y" + std::to_string(sp)).c_str(), sp == 0 ? 1.0 : 0.0);
+    static bool s_logged = false;
+    if (!s_logged) {
+        s_logged = true;
+        std::cout << "[farfield] physID " << bc.physID << ": 自由流 ρ " << inf.r << ", u (" << inf.u[0] << ", " << inf.u[1] << ", " << inf.u[2]
+                  << "), P " << inf.p << ", k " << inf.k << ", ω " << inf.om << std::endl;
+    }
+    const bool rans = (cfg.LESorRANS == 2 && cfg.RANSmodel == 1);
+    // 診断ダンプ (env FORGE_DUMP_FARFIELD=<path>、既定 off。出力専用): 最初の呼び出し (FORGE_DUMP_FARFIELD_CALLS=n なら最初の n 回)
+    // で面ごとの流束・外側状態を書く。1 回目は <path>.<physID>.csv、2 回目以降は <path>.<physID>.<回>.csv
+    static std::map<int, int> s_calls;   // physID ごとの呼び出し回数 (= assembleResidual の回数)
+    const int call = ++s_calls[bc.physID];
+    static const int s_maxCalls = [] { const char* c = std::getenv("FORGE_DUMP_FARFIELD_CALLS"); return c ? std::max(1, std::atoi(c)) : 1; }();
+    float* dumpBuf = nullptr;
+    const char* dumpPath = std::getenv("FORGE_DUMP_FARFIELD");
+    const size_t nb = bc.iPlanes.size();
+    if (dumpPath && *dumpPath && call <= s_maxCalls && nb > 0) {
+        CHECK_CUDA_ERROR(cudaMalloc(&dumpBuf, sizeof(float) * nb * FF_DUMP_NF));
+    }
+    farfield_flux_d<<<cuda_cfg.dimGrid_bplane, cuda_cfg.dimBlock>>>(
+        (geom_int)nb, bc.map_bplane_plane_d, bc.map_bplane_cell_d,
+        var.p_d["sx"], var.p_d["sy"], var.p_d["sz"], var.p_d["ss"],
+        var.c_d["ro"], var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["P"],
+        (nY > 0) ? species_roY_device_ptr() : nullptr,
+        rans ? var.c_d["k"] : nullptr, rans ? var.c_d["omega"] : nullptr,
+        gas, inf, (flow_float)cfg.pRef, sstEnergyK,
+        var.c_d["res_ro"], var.c_d["res_roUx"], var.c_d["res_roUy"], var.c_d["res_roUz"], var.c_d["res_roe"],
+        var.p_d["massflux"], A.Ydev, A.k, A.om, dumpBuf);
+    gpuErrchk( cudaPeekAtLastError() );
+    if (dumpBuf != nullptr) {
+        gpuErrchkKernelSync();
+        std::vector<float> h(nb * FF_DUMP_NF);
+        CHECK_CUDA_ERROR(cudaMemcpy(h.data(), dumpBuf, sizeof(float) * h.size(), cudaMemcpyDeviceToHost));
+        CHECK_CUDA_ERROR(cudaFree(dumpBuf));
+        std::ofstream o(std::string(dumpPath) + "." + std::to_string(bc.physID) + (call > 1 ? "." + std::to_string(call) : std::string()) + ".csv");
+        o << "ip,ic,nx,ny,nz,S,F_ro,F_roUx,F_roUy,F_roUz,F_roe,R_ro,R_Ux,R_Uy,R_Uz,R_P,R_k,R_om,R_Y0,vacuum,hll,pRef,c_i,c_R\n";
+        o.precision(9);
+        for (size_t b = 0; b < nb; ++b) {
+            for (int q = 0; q < FF_DUMP_NF; ++q) o << (q ? "," : "") << (double)h[b * FF_DUMP_NF + q];
+            o << "\n";
+        }
+        if (call == 1) std::cout << "[FORGE_DUMP_FARFIELD] physID " << bc.physID << ": " << nb << " 面を書いた (最初の " << s_maxCalls << " 回)" << std::endl;
+    }
+    // 退避・置換の計数 (累積。増えたときだけ表示)
+    static unsigned long long s_hll = 0, s_vac = 0;
+    unsigned long long hll = 0, vac = 0;
+    CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&hll, g_ffHll, sizeof(unsigned long long)));
+    CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&vac, g_ffVac, sizeof(unsigned long long)));
+    if (hll != s_hll || vac != s_vac) {
+        std::cout << "[farfield] 累積: HLL 退避 " << hll << " 面・回、真空/非物理の置換 " << vac << " 面・回 (評価区間では 0 が合格条件)" << std::endl;
+        s_hll = hll; s_vac = vac;
+    }
+}
 
 void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var , matrix& mat_ns)
 {
@@ -79,8 +224,60 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_contactLog,       &clog, sizeof(int)));
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_contactLogThresh, &lth,  sizeof(flow_float)));
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_contactBlend,     &blend,sizeof(flow_float)));
+            if (const char* e = getenv("FORGE_DIAG_FACE_VEL_CELL")) {   // 診断介入 (数値を変える。既定 off)
+                std::string v(e);
+                const size_t c = v.find(':');
+                if (c != std::string::npos) {
+                    const long long fid = std::atoll(v.substr(0, c).c_str()), nid = std::atoll(v.substr(c + 1).c_str());
+                    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_diagVelCellFace, &fid, sizeof(long long)));
+                    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_diagVelCellNode, &nid, sizeof(long long)));
+                    std::cout << "[FORGE_DIAG_FACE_VEL_CELL] **警告: 数値を変える診断介入** 面 " << fid << " の節点 " << nid
+                              << " 側の再構成速度をセル値に戻す (生産で使わない)" << std::endl;
+                }
+            }
+            const int brd = ((cfg.badReconDiag > 0) ? 1 : 0);
+            const flow_float brro = (flow_float)cfg.roMin, brp = (flow_float)cfg.pMin;
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconDiag,  &brd,  sizeof(int)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconRoMin, &brro, sizeof(flow_float)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconPMin,  &brp,  sizeof(flow_float)));
+            // W2 フォールバックの面カウンタ (§4.23)。opt-in のときだけ確保する。
+            const int brf = cfg.badReconFallback;
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconHyst, &brf, sizeof(int)));
+            if (brf > 0) {
+                signed char* cnt_d = nullptr;
+                CHECK_CUDA_ERROR(cudaMalloc(&cnt_d, sizeof(signed char)*msh.nPlanes));
+                CHECK_CUDA_ERROR(cudaMemset(cnt_d, 0, sizeof(signed char)*msh.nPlanes));
+                CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconCnt, &cnt_d, sizeof(signed char*)));
+                std::cout << "[convectiveFlux] badReconFallback: " << brf
+                          << " 回の訪問だけ 1 次化する面カウンタを " << msh.nPlanes << " 面ぶん確保した" << std::endl;
+            }
             s_init = true;
         }
+    }
+
+    // W2 V1 (plan convection-node-wall-reconstruction §6.4): 非物理な再構成の発火を一定間隔で 1 行印字しリセット。
+    if (cfg.badReconDiag > 0) {
+        static int s_br_call = 0;
+        const int interval = cfg.badReconDiag;
+        if ((s_br_call % interval) == 0) {
+            unsigned long long faces=0, nro=0, np=0, tot=0;
+            gpuErrchkKernelSync();
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&faces, g_badReconFaces, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&nro,   g_badReconRo,    sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&np,    g_badReconP,     sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&tot,   g_badReconTotal, sizeof(unsigned long long)));
+            unsigned long long act=0;
+            CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&act, g_badReconActive, sizeof(unsigned long long)));
+            printf("BADRECON call=%d faces=%llu/%llu [ro=%llu P=%llu] active1st=%llu\n",
+                   s_br_call, faces, tot, nro, np, act);
+            const unsigned long long z = 0ULL;
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconFaces, &z, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconRo,    &z, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconP,     &z, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconTotal, &z, sizeof(unsigned long long)));
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_badReconActive, &z, sizeof(unsigned long long)));
+        }
+        s_br_call++;
     }
 
     // rho-Y 共通リミタ診断: 一定間隔で device カウンタを読み出して 1 行印字しリセット (opt-in 時のみ)。
@@ -167,21 +364,24 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
         var.p_d["pcx"]   , var.p_d["pcy"], var.p_d["pcz"], var.p_d["fx"],
         var.p_d["sx"]    , var.p_d["sy"] , var.p_d["sz"] , var.p_d["ss"],
-        var.p_d["massflux"] };
+        var.p_d["massflux"],
+        msh.wall_flag_d };
     PrimState st {
         var.c_d["ro"], var.c_d["roUx"], var.c_d["roUy"], var.c_d["roUz"], var.c_d["roe"],
-        var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["P"], var.c_d["Ht"], var.c_d["sonic"] };
+        var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["P"], var.c_d["Ht"], var.c_d["sonic"],
+        var.c_d["T"] };
     ResidualOut reso {
         var.c_d["res_ro"], var.c_d["res_roUx"], var.c_d["res_roUy"], var.c_d["res_roUz"], var.c_d["res_roe"] };
     LimiterFields lim {
         var.c_d["limiter_ro"], var.c_d["limiter_Ux"], var.c_d["limiter_Uy"], var.c_d["limiter_Uz"], var.c_d["limiter_P"],
-        var.c_d["ducros"] };
+        var.c_d["ducros"], (cfg.reconT == 1 && var.c_d.count("limiter_T")) ? var.c_d["limiter_T"] : nullptr };
     GradFields grd {
         var.c_d["drodx"], var.c_d["drody"], var.c_d["drodz"],
         var.c_d["dUxdx"], var.c_d["dUxdy"], var.c_d["dUxdz"],
         var.c_d["dUydx"], var.c_d["dUydy"], var.c_d["dUydz"],
         var.c_d["dUzdx"], var.c_d["dUzdy"], var.c_d["dUzdz"],
-        var.c_d["dPdx"] , var.c_d["dPdy"] , var.c_d["dPdz"] };
+        var.c_d["dPdx"] , var.c_d["dPdy"] , var.c_d["dPdz"],
+        var.c_d["dTdx"] , var.c_d["dTdy"] , var.c_d["dTdz"] };
     // SST 全エネルギー E_t = E_m + ρk (sstEnergyIncludesK): 面エンタルピー +(5/3)k, 圧力流束 p* = p + (2/3)ρk。
     const bool sstEnergyK = (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1);
     if (sstEnergyK && !(cfg.solver == "SLAU" || cfg.solver == "SLAU2")) {
@@ -215,7 +415,9 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         }
 
         SLAU_d<<<dimGrid_normal_halo , cuda_cfg.dimBlock>>> (
-            cfg.convMethod, cfg.limiter, slauVariant,
+            cfg.convMethod, cfg.limiter, slauVariant, cfg.reconT,
+            (cfg.slauWallNormalChi > 0 ? 1 : 0),   // 未解決の auto (-1) を有効扱いにしない
+            cfg.slauContactFloor,
             cfg.lowMachPrecond, cfg.precondEps,
             cfg.lowMachThornber,
             cfg.gamma,
@@ -234,6 +436,7 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         ROE_d<<<dimGrid_normal_halo , cuda_cfg.dimBlock>>> (
             cfg.convMethod, cfg.limiter,
             cfg.gamma,
+            cfg.roeEntropyFixCoeff,
             cfg.thermalMethod, thermo_species_device_ptr(), cfg.nSpecies,
             cnd, geom, st, reso, lim, grd
         );
@@ -291,6 +494,10 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             continue;
         }
         if (skipBoundaryFluxKernel) {
+            continue;
+        }
+        if (bc.bcondKind == "farfield") {   // 遠方境界: 専用の HLLC 流束 (既存の境界流束は通らない)
+            farfieldFlux_d_wrapper(cfg, cuda_cfg, bc, msh, var, sstEnergyK ? 1 : 0);
             continue;
         }
         convectiveFlux_boundary_d<<<cuda_cfg.dimGrid_bplane , cuda_cfg.dimBlock>>> (
@@ -355,5 +562,179 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
 
+    // 診断ダンプ (env `FORGE_DUMP_MASSFLUX=<path>`、既定 off。**数値の振る舞いは変えない**)。
+    // 面流束 massflux[nPlanes] を **最初の呼び出しだけ** ホストへ写して raw float32 で書く。
+    // plan convection-slau-wall-normal-chi §6 V5 (#10d): 場 (res_*.h5) は残差の atomicAdd で
+    // 1 step でもビット再現しないが、massflux[ip] は 1 面 = 1 スレッドが非 atomic に書くので
+    // 面レベルのビット比較ができる。**第 2 評価以降は flag 0/1 で状態が違う**ので 1 回目に限る。
+    {
+        static bool s_mfDumped = false;
+        static int  s_cfCall = 0;
+        ++s_cfCall;                      // この wrapper の呼び出し回数 (1 = 第 1 評価)
+        if (!s_mfDumped) {
+            const char* mfPath = std::getenv("FORGE_DUMP_MASSFLUX");
+            if (mfPath && *mfPath) {
+                s_mfDumped = true;
+                std::vector<flow_float> mf(msh.nPlanes);
+                CHECK_CUDA_ERROR(cudaMemcpy(mf.data(), var.p_d["massflux"],
+                                            msh.nPlanes*sizeof(flow_float), cudaMemcpyDeviceToHost));
+                std::ofstream ofs(mfPath, std::ios::binary);
+                if (ofs) {
+                    ofs.write(reinterpret_cast<const char*>(mf.data()),
+                              (std::streamsize)(msh.nPlanes*sizeof(flow_float)));
+                    std::cout << "[FORGE_DUMP_MASSFLUX] wrote " << msh.nPlanes
+                              << " faces to " << mfPath << " (call " << s_cfCall << ")\n";
+                } else {
+                    std::cout << "[FORGE_DUMP_MASSFLUX] cannot open " << mfPath << '\n';
+                }
+                // **カーネルが実際に読む状態**も同じ呼び出しで書く。res_*.h5 の値を代理に使うと
+                // 1 ulp ずれることがある (§6 V5 の P2 初版が 3 面で FAIL した原因)。
+                // 並び: ro, Ux, Uy, Uz, Ps, sonic を各 nCells 個、この順に連結。
+                {
+                    const std::string sPath = std::string(mfPath) + ".state";
+                    std::ofstream sfs(sPath, std::ios::binary);
+                    if (sfs) {
+                        std::vector<flow_float> buf(msh.nCells);
+                        for (const char* nm : {"ro", "Ux", "Uy", "Uz", "P", "sonic"}) {
+                            CHECK_CUDA_ERROR(cudaMemcpy(buf.data(), var.c_d[nm],
+                                                        msh.nCells*sizeof(flow_float), cudaMemcpyDeviceToHost));
+                            sfs.write(reinterpret_cast<const char*>(buf.data()),
+                                      (std::streamsize)(msh.nCells*sizeof(flow_float)));
+                        }
+                        std::cout << "[FORGE_DUMP_MASSFLUX] wrote state (ro,Ux,Uy,Uz,P,sonic x "
+                                  << msh.nCells << ") to " << sPath << '\n';
+                    }
+                }
+            }
+        }
+    }
 
+}
+// =============================================================================
+// 局所帳簿ダンプ (plan tooling-nozzle-sern-3d §5.1 R5h、codex diagnose 2026-09-27)。
+//   FORGE_DUMP_LEDGER=<path>        : 出力先 (CSV)。未設定なら全関数 no-op (解はビット同一)。
+//   FORGE_DUMP_LEDGER_NODES=<a,b,..>: 印を付ける節点 ID (0 始まり)。all で全節点。
+//   FORGE_DUMP_LEDGER_CALLS=<n>     : 記録する assembleResidual の呼び出し数 (既定 2)。
+// 出力専用: 状態・残差をホストへ写して書くだけで、どの配列も書き換えない。
+//   <path>          行 = call,tag,node,field,value (段ごとの状態・残差)
+//   <path>.faces    行 = call + SLAU_d が記録した面の LEDGER_FACE_NF 列 (列名は 1 行目)
+// =============================================================================
+namespace {
+struct LedgerState {
+    bool init = false, on = false;
+    std::string path;
+    std::vector<long long> nodes;
+    unsigned char* flag_d = nullptr;
+    float* buf_d = nullptr;
+    unsigned int cap = 0;
+    int call = 0, maxCalls = 2;
+};
+LedgerState& ledger() { static LedgerState s; return s; }
+}
+
+static void ledgerInitOnce(mesh& msh)
+{
+    LedgerState& L = ledger();
+    if (L.init) return;
+    L.init = true;
+    const char* p = std::getenv("FORGE_DUMP_LEDGER");
+    const char* n = std::getenv("FORGE_DUMP_LEDGER_NODES");
+    if (!p || !*p || !n || !*n) return;
+    L.path = p;
+    if (const char* c = std::getenv("FORGE_DUMP_LEDGER_CALLS")) L.maxCalls = std::max(1, std::atoi(c));
+    std::string s(n);
+    size_t pos = 0;
+    if (s == "all") {   // 全節点 (環境変数に全 ID を並べると ARG_MAX を超える)
+        for (long long id = 0; id < (long long)msh.nCells; ++id) L.nodes.push_back(id);
+        pos = s.size();
+    }
+    while (pos < s.size()) {
+        size_t q = s.find(',', pos);
+        if (q == std::string::npos) q = s.size();
+        if (q > pos) {
+            const long long id = std::atoll(s.substr(pos, q - pos).c_str());
+            if (id >= 0 && id < (long long)msh.nCells) L.nodes.push_back(id);
+        }
+        pos = q + 1;
+    }
+    if (L.nodes.empty()) { std::cout << "[FORGE_DUMP_LEDGER] 有効な節点が無いので無効\n"; return; }
+    std::vector<unsigned char> flag(msh.nCells, 0);
+    for (long long id : L.nodes) flag[id] = 1;
+    CHECK_CUDA_ERROR(cudaMalloc(&L.flag_d, msh.nCells));
+    CHECK_CUDA_ERROR(cudaMemcpy(L.flag_d, flag.data(), msh.nCells, cudaMemcpyHostToDevice));
+    L.cap = (unsigned int)std::min<size_t>(200000, 64 * L.nodes.size() + 1024);
+    CHECK_CUDA_ERROR(cudaMalloc(&L.buf_d, sizeof(float) * (size_t)L.cap * LEDGER_FACE_NF));
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_ledgerFaceCap, &L.cap, sizeof(unsigned int)));
+    const unsigned int zero = 0;
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_ledgerFaceCount, &zero, sizeof(unsigned int)));
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_ledgerFaceBuf, &L.buf_d, sizeof(float*)));
+    { std::ofstream o(L.path); o << "call,tag,node,field,value\n"; }
+    {
+        std::ofstream o(L.path + ".faces");
+        o << "call,ip,ic0,ic1,sx,sy,sz,ss,ro_L,ro_R,P_L,P_R,Pf_L,Pf_R,Ux_L,Uy_L,Uz_L,Ux_R,Uy_R,Uz_R,h_p,h_m,c_hat,M_hat,chi,chi_mass,"
+             "Vn_p,Vn_m,p_tilde_r,mdot,F_ro,F_roUx,F_roUy,F_roUz,F_roe,conv_scheme,P_del,fx,limiter_ro_0,limiter_ro_1,limiter_P_0\n";
+    }
+    L.on = true;
+    std::cout << "[FORGE_DUMP_LEDGER] " << L.nodes.size() << " 節点に印、最初の " << L.maxCalls
+              << " 回の assembleResidual を " << L.path << " に記録する\n";
+}
+
+void ledgerBeginAssemble(mesh& msh)
+{
+    ledgerInitOnce(msh);
+    LedgerState& L = ledger();
+    if (!L.on) return;
+    ++L.call;
+    // 記録する回だけ SLAU_d の面記録を有効にする (それ以外は nullptr で完全に no-op)
+    const unsigned char* f = (L.call <= L.maxCalls) ? L.flag_d : nullptr;
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_ledgerFlag, &f, sizeof(const unsigned char*)));
+}
+
+void ledgerCapture(mesh& msh, variables& var, const char* tag, bool residual)
+{
+    LedgerState& L = ledger();
+    if (!L.on || L.call > L.maxCalls) return;
+    static const char* stateF[] = {"ro","roUx","roUy","roUz","roe","roK","roOmega","roY0","roY1","T","P","Ux","Uy","Uz","Y0","Y1","Ht","sonic","Rmix"};
+    static const char* resF[]   = {"res_ro","res_roUx","res_roUy","res_roUz","res_roe","res_roK","res_roOmega","res_roY0","res_roY1"};
+    std::ofstream o(L.path, std::ios::app);
+    o.precision(9);
+    const size_t nf = residual ? sizeof(resF)/sizeof(resF[0]) : sizeof(stateF)/sizeof(stateF[0]);
+    for (size_t i = 0; i < nf; ++i) {
+        const char* nm = residual ? resF[i] : stateF[i];
+        auto it = var.c_d.find(nm);
+        if (it == var.c_d.end() || it->second == nullptr) continue;
+        for (long long id : L.nodes) {
+            flow_float v;
+            CHECK_CUDA_ERROR(cudaMemcpy(&v, it->second + id, sizeof(flow_float), cudaMemcpyDeviceToHost));
+            o << L.call << ',' << tag << ',' << id << ',' << nm << ',' << (double)v << '\n';
+        }
+    }
+    (void)msh;
+}
+
+void ledgerFlushFaces()
+{
+    LedgerState& L = ledger();
+    if (!L.on || L.call > L.maxCalls) return;
+    unsigned int cnt = 0;
+    CHECK_CUDA_ERROR(cudaMemcpyFromSymbol(&cnt, g_ledgerFaceCount, sizeof(unsigned int)));
+    const unsigned int n = std::min(cnt, L.cap);
+    std::vector<float> buf((size_t)n * LEDGER_FACE_NF);
+    if (n > 0) CHECK_CUDA_ERROR(cudaMemcpy(buf.data(), L.buf_d, sizeof(float) * buf.size(), cudaMemcpyDeviceToHost));
+    std::ofstream o(L.path + ".faces", std::ios::app);
+    o.precision(9);
+    auto asInt = [](float x) { int i; std::memcpy(&i, &x, sizeof(int)); return i; };
+    for (unsigned int k = 0; k < n; ++k) {
+        const float* r = buf.data() + (size_t)k * LEDGER_FACE_NF;
+        o << L.call;
+        for (int j = 0; j < LEDGER_FACE_NF; ++j) {
+            o << ',';
+            if (j == 0 || j == 1 || j == 2 || j == 34) o << asInt(r[j]); else o << (double)r[j];
+        }
+        o << '\n';
+    }
+    if (cnt > L.cap) std::cout << "[FORGE_DUMP_LEDGER] 面バッファ不足: " << cnt << " > " << L.cap << "\n";
+    const unsigned int zero = 0;
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_ledgerFaceCount, &zero, sizeof(unsigned int)));
+    std::cout << "[FORGE_DUMP_LEDGER] call " << L.call << ": " << n << " 面を記録\n";
 }

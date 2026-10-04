@@ -36,7 +36,8 @@ $$
 
 気相の質量・運動量・エネルギー式のソースは**ゼロ** (混合気体全体は保存)。気相と液相の結合は
 **熱力学 (状態方程式・温度関係) 経由**で、潜熱が静温を上げる。モーメントは気相速度 $\mathbf u$ で
-運ばれる受動スカラー (拡散なし) として移流される。
+運ばれる受動スカラー (拡散なし) として移流される (既定。NS で気相内の分子拡散 + 全相共通の乱流混合にする経路は
+実装 §7c、`condensation.condTwoPhaseDiffusion: 1` で有効 [定常専用初版, 2026-10-02])。
 
 ソース項は核生成項 ($T$ 依存) と成長項 ($T_d$ 依存) の加算分離:
 
@@ -478,14 +479,21 @@ $n_1=1.48654237,\ n_2=-0.280476066,\ n_3=0.0894143085,\ n_4=-0.119879866$。
 
 #### 潜熱 $L(T)$
 
-**H₂O (2026-08-18 更新)**: $L(T)=h_v(T)-h_l(T)$ を **CEA (NASA-9) の気相 H₂O と液相 H₂O(L) の全エンタルピー差**として作る
-(`h2o_latent`, `condensationProperties_d.cuh`)。$h_v$ は forge 種 DB と同じ CEA 2002 の H₂O 200–1000 K 係数、$h_l$ は CEA
-`thermo.inp` の H₂O(L) 273.15–373.15 K 係数 (Cox 1989 / Haar 1984)。両方とも**生成エンタルピー込みの絶対値**で評価するので
-差は datum に依らず、forge の sensible-enthalpy シフト (`thermoHrefTemp`) の影響を受けない (CEA 内での気液差をそのまま保つ)。
+**H₂O (2026-08-18 更新、2026-09-28 に種 DB の気液ペアへ移行)**: $L(T)=h_v(T)-h_l(T)$ を**気相 H₂O と液相 H₂O(L) の全エンタルピー差**
+(CEA の絶対基準のペア) として作る (`h2o_latent`, `condensationProperties_d.cuh`; plan
+[thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §4.8, #10; 仕様 [thermophysics.md](thermophysics.md) §1b.5)。
+$h_v$ は**種 DB の気相 H₂O そのもの** (同じ係数・区間・外挿規約・datum; 200 K 未満は $c_p(200\,\mathrm K)$ 一定の線形外挿)、
+$h_l$ は共通データの H₂O(L) 273.15–373.15 K 係数 (CEA `thermo.inp`; Cox 1989 / Haar 1984) を気相と同じ MW で質量換算し、
+**気相と同じ datum 定数**を足す。気相係数のハードコードは持たない (起動時に種 DB から作り、kernel へはポインタで渡す)。
+差は datum に依らない (`thermoHrefTemp` を 0 / 298.15 / 1234.5 K に変えても 120–400 K で相対 $\le2\times10^{-15}$; `tests/unit/test_cond_latent_pair.cu`)。
 **273.15 K 未満は CEA に液相フィットが無い** (CEA は氷 H₂O(cr) に切替) — H₂O(L) 多項式の外挿は 250 K 以下で発散する
-($c_{p,l}$ 230 K で 10 kJ/kgK) ため、$h_l$ を 273.15 K の値と勾配 $c_{p,l}(273.15)=4228$ J/kgK で線形外挿する (過冷却水の標準的扱い)。
-値: $L$(273.15)=2.501, $L$(250)=2.556, $L$(230)=2.603, $L$(200)=2.674 MJ/kg。旧線形フィット $3.1485\times10^6-2370T$ は
-この構成と <0.05 % で一致していた (等価; case/44 M4.75 で T 差 0.002 K, g 差 1e-4)。氷 (昇華熱 2.835 MJ/kg) は使わず、
+($c_{p,l}$ 230 K で 10 kJ/kgK) ため、$h_l$ を 273.15 K の値と勾配 $c_{p,l}(273.15)\approx4228$ J/kgK (1 K 差分) で線形外挿する (過冷却水の標準的扱い)。
+373.15 K 超は $h_l(373.15)$ で頭打ち。$L$ は [1.5, 3.5] MJ/kg にクランプ、評価温度の下限 45 K。
+値: $L$(273.15)=2.501, $L$(250)=2.556, $L$(230)=2.603, $L$(200)=2.674 MJ/kg、$L$(298.15)=2.44258 MJ/kg (thermo.inp の係数と相対 $8\times10^{-16}$、
+ヘッダの生成エンタルピー差より 9.06 J/kg 小さい = NASA フィットの再現誤差)。
+**#10 前との差**: 200 K 以上は丸め程度 (相対 $\le3\times10^{-15}$)、200 K 未満は外挿規約の統一分で 199 K −0.074、190 K −8.55、180 K −40.7、
+150 K −465.9、120 K −2387 J/kg (旧は気相多項式を 200 K 未満へそのまま外挿していた)。湿り場の変換は §thermophysics 1b.5 の式で液相項の差も移す。
+旧線形フィット $3.1485\times10^6-2370T$ はこの構成と <0.05 % で一致していた (等価; case/44 M4.75 で T 差 0.002 K, g 差 1e-4)。氷 (昇華熱 2.835 MJ/kg) は使わず、
 飽和線も過冷却液 (Murphy–Koop) で統一している。
 
 N2 は従来どおり Lin 2014 のフィット (`n2_latent`)。
@@ -855,6 +863,12 @@ $\Delta\tau$ の関数になり固定点が動く)。蒸発側も同型で、λ 
 3. **診断**: `condLim_<s>` = $\theta_u$ (収束時 ≈1 を確認する)、`condClampCorr_<s>` = このステップの**全**硬クランプによる $|\Delta\rho g|/\rho$ の累積
    [質量分率] (更新 floor + 実現可能性クランプ $g\le Y_w$ / $0.99$ + 液滴消滅)、`condClampCorrQ_<s>` = $Q_0..Q_2$ の最大相対補正 (負値 floor は 1)。収束時に
    凝縮域で 0 であること (乾きセルの数値塵 $Q\to0^-$ の floor は $g=0$ なら無害) を確認する。
+   **理由別の補正量 (2026-09-28, plan [condensation-two-phase-transport](../plans/active/condensation-two-phase-transport.md) §4.3)**: 凝縮 run では monitorInterval ごとに
+   `[cond-corr]` 行を種ごとに出す。理由は蒸気上限違反 ($g>Y_w$, `capViol`; 作動ノード数と**制限前の最小蒸気分率** $(\rho Y_w-\rho g)/\rho$)、負値 floor (`negFloor`)、
+   増分制限 (`incrLimit` = 受動種経路の $\theta_u/\theta_b$ が $\rho g$ から切った量)、受動種の硬い floor (`passFloor`)、モーメント射影 (`proj`, $|\Delta\rho Q_1|,|\Delta\rho Q_2|$)、
+   化学種再正規化が凝縮種 $\rho Y_w$ に掛けた補正 (`renorm`, $\sum|\Delta\rho Y_w|V$ と $\max|f-1|$)、液滴消滅 (`removal`, 物理)。各々の区間値 (前回ログからの差) と累積
+   (プロセス開始から; **restart で 0 から**) を総液量 $\sum\rho gV$ 比 (射影は $\sum\rho Q_{1,2}V$ 比; 総量 0 のときは絶対量で比は「非 0 なら 1」) で出し、
+   液滴消滅以外の区間値が比 $10^{-6}$ を超えると `[cond-corr] WARN` を出す。計上だけで、クランプの算術・書き込み値は変えない (`tests/unit/test_cond_corr_reasons.cu`)。
 4. **設定**: `condDgMaxStep` (既定 5e-3) / `condDTmaxStep` (既定 1 K) / `condLimiterMode` (1: 更新クランプ [既定], 0: 旧・残差 θ [A/B 用])。
    **新経路は `condEquilibrium 0` (非平衡) のみ** (平衡形 1/2 は従来の更新のまま)。**RK 陽解法 (`timeIntegration` 1/3/4) では起動時に自動で 0 に降格**する (未制限残差の累積バッファを持つため)。dual-time は `passiveScalarScheme 1`
    (モーメントに BDF 物理時間項; F-cf8 → plan species-passive-scalar-unification §4.4) で有効 (旧経路 0 では従来どおり降格)。
@@ -1026,6 +1040,155 @@ Phase 2 の二相 EOS による気相逆結合 ($p$ が $g$ 依存) は密結合
 [plans/accepted/tooling-nozzle-tp-split-h2o-condensation.md](../plans/accepted/tooling-nozzle-tp-split-h2o-condensation.md)
 (Wyslouzil fig3 で N₂ 擬似種 + H₂O が既存 `[N2, H2O]` CPG 結果を再現、イソブタン M4.2 H₂O 5 %)。
 気相 thermo の低温側は forge の `Tlo` クランプ (cp 凍結) が効く。
+
+**輸送物性は気相組成で評価する (2026-09-28, plan [condensation-two-phase-transport](../plans/active/condensation-two-phase-transport.md) §4.1)**: TP carrier
+(`condGasSpecies` ≥ 0) の凝縮 run では、μ・λ (`viscMethod 2` の `transport_mix_Y` / 表引き、セル・壁 WMLES) と化学種の混合平均拡散係数
+(`thermo_Dmix_species_f`) に渡す組成から液を除く: $Y_s^{gas}=Y_s/(1-g)$ ($s\ne w$)、$Y_w^{gas}=\max(Y_w-g,0)/(1-g)$ (1 つの関数
+`gas_phase_composition` を全経路が通る; $1-g$ の正規化は各入口の既存の正規化が行う)。液滴の懸濁効果 (粘性増加・有効熱伝導) は無視 ($\phi\sim10^{-6}$)。
+液 0・凝縮 OFF は現行とビット一致。CPG carrier・pure 凝縮・`viscMethod 0/1` は変わらない。拡散流束の駆動勾配 ($\nabla Y_w$) は未変更 (§4.2 は別項目; 仕様は次の §7c)。
+
+### 7c. 二相拡散 — 気相内の分子拡散 + 全相共通の乱流混合 (**実装済み: 定常専用初版**, opt-in)
+
+> 状態: 実装 2026-10-02 (plan [condensation-two-phase-transport](../plans/active/condensation-two-phase-transport.md) §4.2, §5.1 #4e)。
+> `condensation.condTwoPhaseDiffusion: 1` で有効 (既定 0 = 下の「既定の経路」のまま、ビット不変)。**定常の局所擬似時間 (`unsteady 0`,
+> `timeIntegration 11`) 専用**で、dual-time・陽解法・`speciesImplicitCoupling 2`・`passiveScalarScheme 0`・`condEquilibrium ≠ 0`・`condLimiterMode 0` との
+> 併用は起動時にエラー終了する。CFD での検証 (case/16 の A/B, plan #1b) は未了。式と更新の契約はホスト参照実装
+> [`tests/unit/test_twophase_diffusion_harness.py`](../solver_density_cuda/tests/unit/test_twophase_diffusion_harness.py)・
+> [`test_twophase_real_source.cpp`](../solver_density_cuda/tests/unit/test_twophase_real_source.cpp) で確かめ、CUDA 実装は
+> [`test_twophase_kernel.cu`](../solver_density_cuda/tests/unit/test_twophase_kernel.cu) で両者と照合した (下の「実装」)。
+
+**既定の経路 (`condTwoPhaseDiffusion: 0`)**: `species_diffusion_d` (`cuda_forge/speciesTransport_d.cu:208`) は総組成の $Y_s$ (水は総水分 $Y_w$) を
+$\rho(D_s + D_t)$ で Fick 拡散し、面の算術平均 $Y_f$ で $\Sigma J=0$ 補正、エネルギーに $\Sigma_s h_s J_s$ を足す。液 $\rho g$ とモーメントは拡散しない。
+したがって NS 凝縮 run では「総水分が乱流で混ざり、液は混ざらない」(差の蒸気の非負は実現可能性クランプ頼み; 理論 §1 の「拡散なし」はこの現行の記述)。
+
+**対象**: TP carrier 凝縮 (`condGasSpecies` ≥ 0、`speciesEnabled`) の NS run (`viscMethod` ≠ 0)。CPG carrier (空気凝縮,
+`condVaporMassFraction`) と pure 凝縮は対象外で現行のまま (液は拡散しない; 起動ログに「CPG carrier: 二相拡散は未対応」)。
+cell 離散化は経路のコード確認のみで実行検証しない (「cell 未検証」)。有限の液シュミット数 $Sc_l$ は本仕様に含めない (液の分子拡散は 0;
+plan §5.1 #8 で気相の補償流束・全モーメント・実現可能性と一体で定義する)。
+
+#### 記号
+
+輸送変数は現行のまま: 非水の気相種 $\rho Y_k$、総水分 $\rho Y_w$ (蒸気 + 液)、液 $\rho g$、モーメント $\rho Q_2,\rho Q_1,\rho Q_0$、$\rho E$。
+
+$$
+\rho_g=\rho(1-g),\qquad \rho v=\rho Y_w-\rho g\ (\text{蒸気}),\qquad
+z_k=\frac{\rho Y_k}{\rho_g}\ (k\ne w),\qquad z_v=\frac{\rho v}{\rho_g},\qquad \sum_{k\in\text{気相}} z_k=1
+$$
+
+($z$ は気相内の質量分率。セルで作り $\Sigma z$ で正規化する)。拡散係数 $D_k$ は §7b の気相組成で評価した混合平均 (補数形)。
+
+#### 流束
+
+**分子拡散 (気相のみ)** — 駆動変数は気相基準の $z$:
+
+$$
+j_k^0=-\rho_g D_k\nabla z_k,\qquad j_k=j_k^0-z_k\sum_{j\in\text{気相}} j_j^0\quad(\textstyle\sum_{\text{気相}} j_k=0)
+$$
+
+$k$ は水蒸気を含む全気相種。混合物基準の $-\rho D_k\nabla Y_k$ は、気相組成が一様で $g$ だけが変わる場で
+$J_k=\rho z_k(D_k-\sum_j z_jD_j)\nabla g$ の偽の分離流束を作るので使わない (三成分・二元 $D=[1,2,3]\times10^{-5}$・$\nabla g=0.1$ で
+$|J|/\rho\approx1.3\times10^{-7}$ m/s; codex plan 段 C1)。液の分子拡散は 0。
+
+**乱流混合 (全相共通)** — 全輸送量の質量当たりの値 $\phi\in\{Y_k, Y_w, g, v, Q_n\}$ に同じ係数:
+
+$$
+J_t(\phi)=-\frac{\mu_t}{Sc_t}\nabla\phi\qquad(\textstyle\sum\nabla Y=0\ \text{なので補正不要})
+$$
+
+**組み立て**:
+
+$$
+J_k=j_k+J_t(Y_k)\ (k\ne w),\qquad J_v=j_v+J_t(v),\qquad J_l=J_t(g),\qquad J_w=J_v+J_l,\qquad J_{Q_n}=J_t(Q_n)
+$$
+
+**エネルギー流束** (液のエンタルピー $h_l=h_v-L$; EOS $e=e_{gas}+g(R_wT-L)$ と同じ基準):
+
+$$
+q_h=\sum_{k\ne w} h_k J_k+h_v J_w-L(T)\,J_l
+$$
+
+温度への効き: 局所定係数では潜熱流束 $-LJ_l$ の発散と EOS の $-L\,\delta(\rho g)$ が打ち消し、乱流だけ・総組成一様・$g$ だけが勾配を持つとき
+
+$$
+\rho\,c_{v,\mathrm{eff}}\,\delta T=-R_wT\,r_g\,\Delta t,\qquad r_g=-\nabla\cdot J_l,\qquad c_{v,\mathrm{eff}}=c_v^{全蒸気}+g\,(R_w-L')
+$$
+
+(H2O で $R_wT/L\approx4$ %)。$L$ が $T$ に依るので有限の温度勾配があると $J_l\cdot\nabla L$ の 2 次項が加わる (物理の項)。
+**液と $Q$ の乱流流束を入れずにエネルギーだけ潜熱流束を足すこと、および液を拡散させてエネルギーに $-LJ_l$ を入れないことは禁止**
+(ハーネスでどちらも接線投影が解析値から 27–33 倍ずれる)。
+
+#### 離散形
+
+- 二点差分 (現行 `species_diffusion_d` と同じ over-relaxed 法線の面係数; 非直交補正は現行も無い)。面の $\rho_{g,f}$ と
+  拡散係数の組成は線形補間 ($f$ 重み)、$\nabla z$・$\nabla\phi$ はセル値の差。node 境界半割面は現行どおり流束を加えない。
+- **蒸気の流束は蒸気の変数から作り、総水分は $J_w=\mathrm{fl}(J_v+J_l)$** とする。
+  面恒等式 $|J_w-J_v-J_l|\le8\varepsilon_{32}(|J_w|+|J_v|+|J_l|)$ と $|\sum_{\text{気相}}j_k|\le8\varepsilon_{32}\sum|j_k^0|$ は格納値から float64 で評価する
+  (ビット一致は求めない)。
+- **面流束は 1 回だけ作り共有する**: 化学種残差 ($\rho Y_k$、$\rho Y_w$)・液とモーメントの残差・エネルギー残差・dual-time FCT の低次作用素と
+  面流束履歴に同じ値を足す。凝縮 TP では `species_diffusion_d` の水・気相種の分子拡散をこれで置き換え、二重に足さない。
+
+#### 更新の契約
+
+保存を求めるのは**離散方程式**である:
+
+$$
+\frac{V}{\Delta t}\big(\rho\phi-\rho\phi^n\big)=R(\phi)\qquad(\text{全輸送量で共通の輸送行列; dual-time は BDF 形})
+$$
+
+定常 (局所 $\Delta\tau$) では収束した固定点が、dual-time では各物理ステップで解き切った状態がこれを満たすこと。
+点対角 (蒸気: 分子 + 乱流、液・$Q$: 乱流、非水: 分子 + 乱流) は反復の**前処理**で、1 擬似反復ごとの保存は求めない
+(点対角で割った 1 回更新は 3 セル例で総液量を +3.3 % 動かす; ハーネス S3 の A)。
+
+- 増分は**蒸気 $\rho v$ と液 $\rho g$ を変数**に作り、$\Delta(\rho Y_w)=\Delta\rho v+\Delta\rho g$ で総水分へ戻す
+  (総水分と液をそれぞれの点対角で割ると蒸気が負になる: 2 セル例で $\rho v=-0.0167$; ハーネス S4)。
+- 化学種の再正規化 ($\Sigma\rho Y=\rho$) の係数を $\rho g$ と $\rho Q_n$ にも掛ける (現行は液の更新前に水だけ再正規化)。
+- 実現可能性クランプ ($0\le\rho g\le\rho Y_w$, $Q\ge0$) は保険として残し、理由別監視 (plan §4.3) で働いた量を出す。
+- **再正規化・クランプで吸収した後に保存を判定しない**。保存は固定点でだけ成り立つので、解き切らずに止めた反復の残差の和が
+  そのまま総量の誤差になる (ハーネス S3: float32 で停止の丸め床 16ε → 1000 更新で総液量 +1.0e-6、4ε → +2.8e-7)。
+
+#### 単体の参照 (ホスト, 2026-10-02)
+
+`python3 solver_density_cuda/tests/unit/test_twophase_diffusion_harness.py` (float64 の参照実装で判定、float32 は記録; plan §6 の数値):
+分子流束の構造 (三成分・気相一様) $2.7\times10^{-22}$ (許容 $2.1\times10^{-12}$; 旧案は $1.9\times10^{-7}$)、面恒等式 ≤ 0.23 × 許容、3 セル判別 A +3.3 % / B ≤ $2.2\times10^{-9}$、
+非負 (2 セル・ランダム 100 セル × $10^4$) クランプ 0、保存 1000 更新 ≤ $6.8\times10^{-9}$、エネルギー接線投影 $6\times10^{-9}$。
+
+#### 実装 (2026-10-02, #4e)
+
+- 面の代数と 1 セルの更新は [`cuda_forge/twoPhaseDiffusion_d.cuh`](../solver_density_cuda/cuda_forge/twoPhaseDiffusion_d.cuh) の
+  `tp_face_flux` / `tp_vl_update` (`__host__ __device__`, float32)。本番カーネル `twophase_diffusion_d` (`speciesTransport_d.cu`) と
+  更新 `twophase_vl_update_d` (`condensationTransport_d.cu`) と GPU 単体試験が同じ関数を呼ぶ。
+- **面流束**: 上の式。補正の面 $z$ は**風上** (補正の質量流束 $-\sum j^0$ が出ていくセルの $z$)。$D_k$ は §7b の気相組成で
+  `thermo_Dmix_species_f` (`speciesDiffusionMethod 1`)、定数 Schmidt (`0`) は $\rho_{g,f}D=\mu_f/Sc$。$h_k$ は面温度の float NASA、$L$ は EOS と同じ `cond_latent`。
+  点対角: 気相種 (水は**蒸気**の対角) に $\rho_{g,f}D_k|\delta|/(d_{cc}\rho_{g,i})$ + 補正の流出側に $|\sum j^0|/\rho_{g,\mathrm{up}}$、全輸送量に乱流 $(\mu_t/Sc_t)|\delta|/(d_{cc}\rho_i)$。
+- **呼び出し位置**: 凝縮モーメントの残差ゼロ化 (`passiveAdvection_d_wrapper`) の後 (`condensationTransport_d_wrapper` の末尾)、境界ピン・周期集約の前。
+  化学種のピン除去は新カーネルの後にもう一度掛ける。この構成では `species_diffusion_d` は呼ばない (二重に足さない)。
+- **更新 (定常)**: 化学種の更新は水を commit せず (更新前に戻す)、凝縮モーメントの N 退避の後に 1 セルずつ
+  $\delta\rho v=(R_w-R_g)/D_v$、$\delta\rho g=R_g/(D_g+V s_{j,g})$、$\delta\rho Q_n=R_{Q_n}/(D_{Q_n}+Vs_{j,Q_n})$ ($D_*=V/\Delta\tau+$ 輸送の点対角)、
+  緩和 $\omega$ (`condTwoPhaseRelax`, 既定 1) を全増分に掛けてから $\theta=\min(\theta_{thr},\theta_{vg})$ (`condDgMaxStep`/`condDTmaxStep` の閾値と蒸気・液の非負、
+  $\theta\ge0$; float への丸めは安全側 [切り上がったら 0 側の隣の float] — 最近接は液枯渇の境界で $\rho g=-2.3\times10^{-13}$ を作った, #4f) を共通に掛け、$Q$ は成分ごとに非負化、$\rho Y_w\leftarrow\rho Y_w+\mathrm{fl}(\theta\delta\rho v+\theta\delta\rho g)$ (丸めで蒸気が負なら $\rho Y_w=\rho g$)。
+  続いて再正規化の係数 $\rho/\sum\rho Y$ を化学種と $\rho g$・$\rho Q_n$ に共通に掛け、実現可能性クランプは保険として残す。
+  蒸気・液・$Q$ の前処理は**点対角**で、`passiveImplicitCoupling`/`speciesImplicitCoupling` の DPLUR は使わない (非水種は従来の更新)。
+  モーメントの $\phi_N\delta\rho$ 項と $\theta_b$ は掛けない (再正規化の係数が密度変化を担い、液と総水分の基点を揃える)。
+- **監視**: `residual_history.csv` に `rms_roYv` (= rms($R_w-R_g$), 毎反復の格納状態から組み直した float32 残差の差) を足す。
+  `[twophase]` 行 (monitorInterval ごと) に $\theta<1$ のセル数・最小 $\theta$・保留量 $\sum(1-\theta)|\delta|V$・状態補正 ($Q$ の非負化、蒸気の丸め) を出す。
+- **収束受入の独立残差監査** (#4f): 計算開始時と終了時に、格納状態から assembleResidual を 1 回回した後、化学種・蒸気・液・$Q$ の残差を面ごとの流束から
+  double で組み直し (移流は流れのソルバの massflux と S3 面値を入力、拡散は `tp_face_flux<double>`、ソースは同じカーネルの値)、成分ごとに
+  $\max|r_q|\le\max(10^{-7}r_{0,q},6\varepsilon_{32}\max A_q)$ で `[twophase-audit] VERDICT` を出す。エネルギーは対象外。
+  二相拡散 OFF の run も `condAuditResidual: 1` で同じ監査を**現行の作用素** (化学種 Fick・液と $Q$ は移流のみ) について行う (A/B の A 側; #1b-pre)。
+- **CUDA の照合** (`test_twophase_kernel.cu`, 2026-10-02): 面流束 (3 種・D 比 1/3・乱流あり 1.56 万面) は同じ float 入力の double 参照と許容の ≤0.18 倍、
+  §6 の構造 (i)・面恒等式 (ii)・非負 2 セル・エネルギー接線は合格、#4c/#4d の 1D 問題は GPU に置き換えてもホスト版と反復数・不動点が一致
+  (69 / 911 反復、出口 $g$ 2.603278e-3)。BE の物理時間更新を 1000 回重ねた累積保存は float32 の停止則で $10^{-6}$ を超える (dual-time は本初版の対象外; 設計メモ §14.3)。
+
+#### ~~未確定~~ (決着 2026-10-02: plan §5.1 #4–#4d の判断。記録として残す)
+
+1. **補正項 $z_k\sum j^0$ の面の $z$** (plan は面値を定めていない): 算術平均は隣セル分が負の非対角になり、拡散係数の差が大きく組成の段差が大きい面で
+   蒸気 0 のセルから蒸気を持ち出す (D 比 100・段差 1 の 2 セル反例で負)。補正の質量流束 $-\sum j^0$ の出ていく側の $z$ (風上) なら点対角 1 回は非負。
+   通常の組成 (D 比 ≤3) ではどちらもランダム試験で負にならない。
+2. **相変化ソースと更新クランプ ($\theta_u$, $\theta_b$, $\phi_N\delta\rho$, 床) が蒸気の増分にどう入るか**: 総水分にソースは無いので、蒸気の増分に
+   液と同じ扱いのソース分を逆符号で入れないと、反復の途中で総水分がソースに反応する。
+3. **総水分 $\rho Y_w$ の dual-time FCT**: 化学種は FCT を通らないので、物理ステップ末尾に液だけ FCT 補正すると蒸気が動く (移流でも既存)。
+4. **float32 での合格条件の尺度**: 分子流束の構造の許容 $10^{-6}\rho_gD|\nabla g|$ は面あたりの $\Delta g$ が小さいと float32 の $z$ の丸めで満たせない
+   ($dx=1$ mm・$\Delta g=10^{-4}$/面で許容の 98 倍)。保存 $10^{-6}$/1000 更新は float32 の停止基準しだい。
 
 ### 8. 精度・無次元化 (Phase 2)
 

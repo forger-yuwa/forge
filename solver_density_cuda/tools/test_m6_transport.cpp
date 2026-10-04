@@ -8,8 +8,7 @@
 // builtinDB() (thermo_d.cu) と同一の係数で N2 / AIR / He を再構成
 static SpeciesThermo mk(double MW,double sig,double eps,const double lo[9],const double hi[9]){
     SpeciesThermo s; s.MW=MW; s.sigma_LJ=sig; s.eps_kB=eps;
-    s.Tlo=200.0; s.Tmid=1000.0; s.Thi=6000.0;
-    for(int i=0;i<9;i++){ s.low[i]=lo[i]; s.high[i]=hi[i]; }
+    thermo_set_nasa9_2(s, 200.0, 1000.0, 6000.0, lo, hi);
     return s;
 }
 // double 参照: FP32 化前と同じ Chapman-Enskog/Eucken を全 double で評価

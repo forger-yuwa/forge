@@ -1,0 +1,5 @@
+inlet:  {physID: 1, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , floats: {ro: 0.0620209, Ux: 1412.9, Uy: 0.0, Uz: 0.0, Ps: 5037.4, k: 75.0, omega: 26000.0}}
+outlet: {physID: 2, kind: outlet_statPress, outputHDFflg: 0, ints: , floats: {Ps: 5037.4, Pt: 5037.4, Tt: 283}}
+top:    {physID: 3, kind: slip, outputHDFflg: 0, ints: , floats: }
+wall:   {physID: 4, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 300.0}}
+sym:    {physID: 5, kind: slip, outputHDFflg: 0, ints: , floats: }

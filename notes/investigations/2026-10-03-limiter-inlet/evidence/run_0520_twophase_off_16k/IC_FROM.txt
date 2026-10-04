@@ -1,0 +1,5 @@
+plan condensation-two-phase-transport §5.1 #1b (二相拡散 A/B; prepare_twophase_ab.sh)
+IC: /home/ubuntu/forge-species/src_run0482/res_48000.h5 を restart_field.py --force-species で index コピー (凝縮モーメント rog_0/roQ*_0 を含む; A・B 同一)
+edits: species_db.yaml から H2O を削除 (内蔵項目を使う); time.last.nStepOuter=16000; time.outStepInterval=800
+       (A: 現行; condTwoPhaseDiffusion なし)
+launch: FORGE_ALLOW_UNVERIFIED_SPECIES=1 (A・B 同じ)

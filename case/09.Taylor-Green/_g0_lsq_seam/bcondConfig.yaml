@@ -1,0 +1,6 @@
+bottom: {physID: 1, kind: periodic, outputHDFflg: 0, ints: {type: 0, partnerBCID: 2}, floats: {dx: 0.0, dy: 6.283185307179586,  dz: 0.0}}
+upper:  {physID: 2, kind: periodic, outputHDFflg: 0, ints: {type: 0, partnerBCID: 1}, floats: {dx: 0.0, dy: -6.283185307179586, dz: 0.0}}
+left:   {physID: 3, kind: periodic, outputHDFflg: 0, ints: {type: 0, partnerBCID: 4}, floats: {dx: 0.0, dy: 0.0, dz: -6.283185307179586}}
+right:  {physID: 4, kind: periodic, outputHDFflg: 0, ints: {type: 0, partnerBCID: 3}, floats: {dx: 0.0, dy: 0.0, dz: 6.283185307179586}}
+inlet:  {physID: 5, kind: periodic, outputHDFflg: 0, ints: {type: 0, partnerBCID: 6}, floats: {dx: 6.283185307179586,  dy: 0.0, dz: 0.0}}
+outlet: {physID: 6, kind: periodic, outputHDFflg: 0, ints: {type: 0, partnerBCID: 5}, floats: {dx: -6.283185307179586, dy: 0.0, dz: 0.0}}

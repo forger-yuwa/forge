@@ -17,7 +17,16 @@
   (solverConfig/species_db が無い・種名が DB に無い) ときも既定でエラー**。種を変える restart は `tools/convert_species_field.py`
   (擬似種の展開・名前で移す) を使う。`--force-species` で照合を無視できる (自己責任)。
 
-usage: interp_field.py SRC.h5 DST_input.h5 [--gamma 1.4] [--force-species]
+- **化学種の属性** (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3b): SRC が属性 (`species_hash` ほか) と
+  検証できる解決済み記録を持つときは、宛先 run を `forge --resolve-species` (`--forge` / `FORGE_BIN`) で解決し、互換性ハッシュが
+  一致したときだけ属性を DST に継承する (記録も複製)。不一致は差のある係数を示して書き込み前に拒否。上の設定ファイルによる署名照合も
+  続けて行う (トレーサ・種の並びは記録に無いので)。SRC が未検証 (属性なし / `species_input_unverified=1`) で宛先が TP のとき・
+  宛先を解決できない (旧バイナリ) とき・署名照合で内蔵種が「照合不能」になるときは**既定で拒否** (ソルバと同じ規約, #3c)。
+  許可はその実行だけの `FORGE_ALLOW_UNVERIFIED_SPECIES=1` か `--force-species` で、そのとき DST には属性を付けない
+  (ソルバ側でも未検証として扱われ、その run にも同じ許可が要る)。ただし印付きの SRC (`species_input_unverified=1`) で
+  `species_hash` = 宛先ハッシュなら、ソルバと同じく許可なしで通し DST に同じハッシュと印を継承する (#3d)。
+
+usage: interp_field.py SRC.h5 DST_input.h5 [--gamma 1.4] [--force-species] [--forge BIN] [--dst-run DIR]
 """
 import argparse, sys, os
 import numpy as np, h5py
@@ -26,36 +35,46 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from res_h5_to_vtu import parse_conne
 
 
-def centroids(f):
+def is_3d(f):
+    """格子が 3D か。z の異なる値が 3 つ以上あれば 3D (疑似 2D の押し出しは z が 2 層なので 2D として x,y だけで照合する)。
+    2026-09-27 修正: 以前は常に x,y だけで最近傍を取っていたので、3D では z を無視した別の節点の値を貼っていた
+    (case/46 run_0987: 共通領域で座標が完全一致する節点の ro が最大 55 倍違った。plan tooling-nozzle-sern-3d §5.1 R4d)。"""
+    z = np.array(f["MESH/COORD"]).reshape(-1, 3)[:, 2]
+    return np.unique(np.round(z, 12)).size >= 3
+
+
+def centroids(f, nd=2):
     # DOF の代表座標。node (median-dual) では値数=節点数なので MESH/COORD (節点座標)
     # を最優先する — CELLS/centCoords (双対 CV 重心) は高 AR の μm 級壁 CV で節点から
     # ±100 μm 級に外れ (壁 CV の重心が域外に出る例あり)、最近傍照会に使うと近壁 IC が
     # src の壁値/内部値を交互に拾う市松になる (case/40 y+1 node で発散種になった実害)。
-    coord = np.array(f["MESH/COORD"]).reshape(-1, 3)[:, :2]
+    coord = np.array(f["MESH/COORD"]).reshape(-1, 3)[:, :nd]
     if "VALUE/ro" in f and f["VALUE/ro"].shape[0] == coord.shape[0]:
         return coord
     # cell: 入力 h5 は /CELLS/centCoords を持つのでそれを優先 (res_*.h5 は CONNE 経路)
     if "CELLS/centCoords" in f:
-        return np.array(f["CELLS/centCoords"]).reshape(-1, 3)[:, :2]
+        return np.array(f["CELLS/centCoords"]).reshape(-1, 3)[:, :nd]
     nc = f["VALUE/ro"].shape[0]
     if nc == coord.shape[0]:
         # node-centered res (median-dual): 値の位置はノード座標そのもの
         # (MESH/CONNE は可視化用 primal トポロジで parse できない)
         return coord
     conn, offs, _ = parse_conne(np.array(f["MESH/CONNE"]), nc)
-    c = np.zeros((nc, 2)); s = 0
+    c = np.zeros((nc, nd)); s = 0
     for i, o in enumerate(offs):
         c[i] = coord[conn[s:o]].mean(axis=0); s = o
     return c
 
 
-def check_species_signatures(src_h5, dst_h5, force):
+def check_species_signatures(src_h5, dst_h5, force, record_verified=False, dst_run=None):
     """SRC/DST の隣の run 設定から化学種署名を作って照合する。不一致・解決不能は拒否 (force で警告に降格)。
-    照合できたときは SRC 署名を返す (必須データセットの存在検査に使う)。"""
-    from forge_species import species_signature, compare_signatures
+    照合できたときは SRC 署名を返す (必須データセットの存在検査に使う)。
+    内蔵種の係数が設定から分からない「照合不能」だけの場合: record_verified (記録で熱物性を照合済み) なら無視、
+    そうでなければ既定で拒否 (FORGE_ALLOW_UNVERIFIED_SPECIES=1 ならその実行だけ警告して通す; 属性は plan_inherit が付けない)。"""
+    from forge_species import species_signature, compare_signatures, allow_unverified_species, UNVERIFIED_GUIDANCE
     sig = {}
     for tag, h5 in (("SRC", src_h5), ("DST", dst_h5)):
-        d = os.path.dirname(os.path.abspath(h5))
+        d = dst_run if (tag == "DST" and dst_run) else os.path.dirname(os.path.abspath(h5))
         try:
             sig[tag] = species_signature(d)
         except Exception as e:   # noqa: BLE001
@@ -65,6 +84,17 @@ def check_species_signatures(src_h5, dst_h5, force):
             print("[interp_field] WARNING (--force-species): " + msg)
             return None
     bad = compare_signatures(sig["SRC"], sig["DST"])
+    unv = [x for x in bad if "unverifiable" in x]
+    bad = [x for x in bad if "unverifiable" not in x]
+    if unv and not bad and not force:
+        if record_verified:
+            unv = []
+        elif allow_unverified_species():
+            print("[interp_field] WARNING: " + "; ".join(unv) + " — SRC is unverified; allowed for this invocation by "
+                  "FORGE_ALLOW_UNVERIFIED_SPECIES=1, copied fields stay unverified (no species attributes)")
+        else:
+            raise SystemExit("[interp_field] REFUSED (nothing written): " + "; ".join(unv)
+                             + " — SRC is unverified (UNVERIFIED).\n" + UNVERIFIED_GUIDANCE)
     if bad:
         msg = ("化学種署名が違う: " + "; ".join(bad) + ". 種の順序/集合/DB が違う場は index コピーできない。"
                " tools/convert_species_field.py SRC_res.h5 DST_input.h5 --meta DST/species_meta.yaml で名前により移す"
@@ -106,16 +136,33 @@ def main():
     ap.add_argument("src"); ap.add_argument("dst")
     ap.add_argument("--gamma", type=float, default=1.4)
     ap.add_argument("--force-species", action="store_true",
-                    help="SRC/DST の physProp.species が違っても index で貼る (通常は convert_species_field.py を使う)")
+                    help="SRC/DST の physProp.species が違っても index で貼る (通常は convert_species_field.py を使う)。属性は付けない")
+    ap.add_argument("--forge", help="--resolve-species を持つ forge (既定: FORGE_BIN, solver_density_cuda/build/forge)")
+    ap.add_argument("--dst-run", help="宛先 run ディレクトリ (solverConfig.yaml の場所; 既定: DST h5 の隣)")
     a = ap.parse_args(); g = a.gamma
+    import forge_species as fsp
+
+    # 化学種の属性 (§4.3): SRC の記録を検証し、宛先を --resolve-species で解決して継承できるか決める (書き込み前)
+    try:
+        species_plan = fsp.plan_inherit(a.src, a.dst_run or os.path.dirname(os.path.abspath(a.dst)), forge=a.forge,
+                                        force=a.force_species, tool="interp_field")
+    except fsp.SpeciesCheckError as e:
+        raise SystemExit(f"[interp_field] REFUSED (nothing written): {e}")
 
     # 化学種署名の照合 (名前・順序・MW・NASA-9 係数・温度区切り・datum・tracer)。解決不能も既定でエラー (codex 2026-09-16 M3 / result-2 M2)。
-    src_sig = check_species_signatures(a.src, a.dst, a.force_species)
+    src_sig = check_species_signatures(a.src, a.dst, a.force_species, record_verified=species_plan is not None, dst_run=a.dst_run)
 
     check_required_datasets(a.src, src_sig)
 
+    with h5py.File(a.src, "r") as s, h5py.File(a.dst, "r") as d0:
+        s3, d3 = is_3d(s), is_3d(d0)
+    if s3 and not d3:
+        raise SystemExit("[interp_field] REFUSED: SRC が 3D で DST が 2D (断面の取り出しは本ツールの対象外)")
+    # 3D→3D は x,y,z。2D→2D と 2D→3D (2D 場のスパン方向への押し出し、case/18 run_0035 の DES 初期場) は x,y
+    nd = 3 if (s3 and d3) else 2
+    print(f"[interp_field] 最近傍の照合座標: {'x,y,z (3D)' if nd == 3 else ('x,y (2D 場を 3D へ押し出し)' if d3 else 'x,y (2D / 疑似 2D)')}")
     with h5py.File(a.src, "r") as s:
-        cs = centroids(s); V = s["VALUE"]
+        cs = centroids(s, nd); V = s["VALUE"]
         if "P" in V and "Ux" in V:            # res (primitives)
             ro = np.array(V["ro"]); P = np.array(V["P"])
             Ux = np.array(V["Ux"]); Uy = np.array(V["Uy"]); Uz = np.array(V["Uz"])
@@ -130,6 +177,12 @@ def main():
             fields = {"ro": ro, "roUx": ro*Ux, "roUy": ro*Uy, "roUz": ro*Uz, "roe": roe}
             if "k" in V and "omega" in V:
                 fields["roK"] = ro*np.array(V["k"]); fields["roOmega"] = ro*np.array(V["omega"])
+            # 遷移モデル (LM2009): **保存量があればそのまま使う** (出力の原始量は更新前・密度は更新後なので ρ·原始量 は 1 step ずれる;
+            # codex result M1)。保存量の無い旧形式だけ原始量から復元する。
+            if "roGamma" in V and "roReth" in V:
+                fields["roGamma"] = np.array(V["roGamma"]); fields["roReth"] = np.array(V["roReth"])
+            elif "gammaTr" in V and "reTheta" in V:
+                fields["roGamma"] = ro*np.array(V["gammaTr"]); fields["roReth"] = ro*np.array(V["reTheta"])
             for key in V:                      # scalar transport Y* -> roY*
                 if key.startswith("Y") and key[1:].isdigit():
                     fields["ro"+key] = ro*np.array(V[key])
@@ -142,7 +195,7 @@ def main():
                 fields["roXi"] = ro*np.clip(np.array(V["Xi"], dtype=np.float64), 0.0, 1.0)
         else:                                  # input (conserved)
             fields = {n: np.array(V[n]) for n in
-                      ["ro","roUx","roUy","roUz","roe","roK","roOmega"] if n in V}
+                      ["ro","roUx","roUy","roUz","roe","roK","roOmega","roGamma","roReth"] if n in V}
             for key in V:
                 if key.startswith("roY") and key[3:].isdigit():
                     fields[key] = np.array(V[key])
@@ -157,20 +210,24 @@ def main():
             raise SystemExit(f"[interp_field] REFUSED: 転送配列に必須の保存量が無い: {lack}")
 
     tree = cKDTree(cs)
+    fsp.write_species_attrs(a.dst, None)      # 書き込み途中で失敗しても古い属性が残らないように先に消す
     with h5py.File(a.dst, "r+") as d:
-        cd = centroids(d)
-        _, idx = tree.query(cd)
+        cd = centroids(d, nd)
+        dist, idx = tree.query(cd)
+        print(f"[interp_field] 最近傍距離: max {float(dist.max()):.3e}, 0 の DST 節点 {int((dist == 0).sum())} / {len(dist)}")
         moved = []
         for name, arr in fields.items():
             ds = "VALUE/"+name
             if ds in d and name != "wall_dist":
                 d[ds][...] = arr[idx].astype(d[ds].dtype); moved.append(name)
-            elif name.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")) or (name.startswith("roY") and name[3:].isdigit()) or name == "roXi":
+            elif name.startswith(("rog_", "roQ0_", "roQ1_", "roQ2_")) or (name.startswith("roY") and name[3:].isdigit()) or name in ("roXi", "roGamma", "roReth"):
                 # 凝縮モーメントと化学種は convert 直後の入力 h5 に無いので新規作成する (無ければ forge は第 1 種以外を 0 に
                 # 初期化し、carrier では rog<=roY_w のクランプで液相が消える: codex 2026-09-16 result M2)。
                 # forge は VALUE/<consName> が存在すれば読む (無ければ 0 = dry restart)。2026-08-18 / 2026-09-16
                 d.create_dataset(ds, data=arr[idx].astype(d["VALUE/ro"].dtype)); moved.append(name+"(new)")
+        fsp.commit_inherit(d, species_plan)
         print(f"interp {a.src} -> {a.dst}: {len(cd)} dst cells, moved {moved} (wall_dist kept)")
+        print(f"[interp_field] species attributes: {('inherited (species_input_unverified=%d)' % species_plan['species_input_unverified']) if species_plan else 'none (unverified)'}")
 
 
 if __name__ == "__main__":

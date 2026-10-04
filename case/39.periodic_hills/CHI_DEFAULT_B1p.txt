@@ -1,0 +1,21 @@
+成立条件 (b): 初回面流束が違う面 3791 / 392406
+周期 group 5559 壁/非壁の混在 group 0 壁を含む group 218
+=== run_0952_chidef_b1p_flag0/chidef_b1p_series.csv  [24 rows, steps 500..12000]  -> STEADY ===
+  Cf_x05          : tail mean=-0.007396  drift=0.0%/tail  fluct=0.0%        STEADY
+  Cf_x2           : tail mean=-0.004539  drift=0.0%/tail  fluct=0.0%        STEADY
+  Cf_x6           : tail mean=0.0003934  drift=0.0%/tail  fluct=0.0%        STEADY
+  xr_h            : tail mean=5.034  drift=0.0%/tail  fluct=0.0%            STEADY
+  seam_ub_ratio   : tail mean=0.9974  drift=0.0%/tail  fluct=0.0%           STEADY
+=== run_0953_chidef_b1p_omit/chidef_b1p_series.csv  [24 rows, steps 500..12000]  -> STEADY ===
+  Cf_x05          : tail mean=-0.007396  drift=0.0%/tail  fluct=0.0%        STEADY
+  Cf_x2           : tail mean=-0.004539  drift=0.0%/tail  fluct=0.0%        STEADY
+  Cf_x6           : tail mean=0.0003934  drift=0.0%/tail  fluct=0.0%        STEADY
+  xr_h            : tail mean=5.034  drift=0.0%/tail  fluct=0.0%            STEADY
+  seam_ub_ratio   : tail mean=0.9974  drift=0.0%/tail  fluct=0.0%           STEADY
+# B1-p 比較 @ step 12000: flag0 = run_0952_chidef_b1p_flag0 / 省略 = run_0953_chidef_b1p_omit
+① 下壁 Cf(x) 相対 L2 = 0.0002 % (許容 1 %)
+② x_r/h = 5.0341 / 5.0341、差 0.0000 (許容 = 局所ノード間隔 0.1125 h)
+③ 継ぎ目/隣接 バルク速度比 = 0.997399 / 0.997400、相対差 0.0001 % (許容 0.5 %、case/16 V3 からの流用)
+VERDICT B1-p 量: PASS
+=== run_0952_chidef_b1p_flag0  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+=== run_0953_chidef_b1p_omit  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===

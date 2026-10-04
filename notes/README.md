@@ -13,7 +13,11 @@
 
 | ノート | area | 概要 |
 | --- | --- | --- |
+| [2026-10-03-farfield-evidence/](investigations/2026-10-03-farfield-evidence/README.md) | `boundary` | farfield 限定受理の一次証拠 (147 run の索引: バイナリ・収束・ゲート・定常性・置換カウンタ、判定原本の写し)。plan [boundary-node-farfield-characteristic](../plans/accepted/boundary-node-farfield-characteristic.md) §5.1 #5a |
+| [2026-10-02-twophase-diffusion-kernel-design.md](investigations/2026-10-02-twophase-diffusion-kernel-design.md) | `condensation` | 二相拡散 (気相内の分子拡散 + 全相共通の乱流混合) のカーネル実装設計と上位諮問の材料。ホスト参照実装 `tests/unit/test_twophase_diffusion_harness.py` で plan §6 の単体条件は全件 PASS (3 セル判別 A +3.3 % / B 2.2e-9)。未確定: 補正項の面の z、相変化ソースと蒸気の増分、総水分の FCT、float32 の許容。判断は plan [condensation-two-phase-transport](../plans/active/condensation-two-phase-transport.md) §5.1 #4 (未諮問) |
+| [2026-09-30-cea-thermo-builtin-audit.md](investigations/2026-09-30-cea-thermo-builtin-audit.md) | `thermophysics` | CEA thermo.inp の熱物性をソルバ内蔵にする前の監査: trans 66 種のうち thermo.inp に 61 種 (5 CFC 無し)、2 区間 39・3 区間 22、非標準境界は `e-` のみ、既存 7 種と H2O(L) の CEA 化 Δ (H2O・He は MW 由来で \|Δh\| ~15 J/kg、Ar 0.073 J/kg)。判断は plan [thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §5.1 #13 (2026-09-30) |
 | [config-key-inventory-2026-09-18.md](investigations/config-key-inventory-2026-09-18.md) | `config / tooling` | solverConfig の全キーを完全修飾パスで棚卸しした表 (live な値キー 167 / 拒否専用 12 / 起動時拒否 8 / 節 10)。全 worktree の run config 4063 本での記載数・非既定数と、文書での言及先。判断は plan [config-key-pruning](../plans/accepted/config-key-pruning.md) 側 (2026-09-18) |
+| [2026-09-22-mms-node-face-weight.md](investigations/2026-09-22-mms-node-face-weight.md) | `discretization` | node 拡散演算子の収束次数を製造解で測定 (曲面・AR 700・成長率 1.1/1.2、4 水準)。`fx=0.5` は温度も壁面熱流束も $p=2.00$、幾何重みは壁面熱流束で 1.69–1.86 に落ちる。判断は plan [discretization-node-face-weight-midpoint](../plans/accepted/discretization-node-face-weight-midpoint.md) (2026-09-22) |
 | [chemistry-finite-rate-h2-survey.md](investigations/chemistry-finite-rate-h2-survey.md) | `thermophysics / chemistry` | 有限速度化学 (H₂ 燃焼・ノズル上流の化学非平衡) 導入の文献調査と方針: 機構選定 (Jachimowski→Burke)、剛性処理 (decoupled point-implicit 種ブロック)、sensible datum + 反応熱陽注入、Phase 0–4 計画と検証 (Cantera/CEA/Burrows–Kurkov) (2026-09-04) |
 | [condensation-carrier-kantrowitz-air-survey.md](investigations/condensation-carrier-kantrowitz-air-survey.md) | `condensation` | carrier 中の非等温核生成補正 (Feder 一般形と Wysłouzil 条件の θ 見積り)、過冷却水 σ の実測状況と Tolman 長、空気/N2 凝縮 onset データ (Daum & Gyarmathy 最小 onset 曲線の読み取り値) |
 | [condensation-droplet-hypersonic-survey.md](investigations/condensation-droplet-hypersonic-survey.md) | `condensation / multiphase` | 極超音速燃焼風洞・飛翔体における凝縮液滴/雨滴の挙動 (風洞凝縮の蒸発vs成長・燃焼器到達 end-to-end・迎角依存) |
@@ -41,3 +45,5 @@
 | [implicit-acceleration-session-prompt.md](sessions/implicit-acceleration-session-prompt.md) | 別セッション用プロンプト: 陰解法の安定 CFL 引き上げ |
 | [precision-mixed-axisym-session-prompt.md](sessions/precision-mixed-axisym-session-prompt.md) | 新セッション引き継ぎプロンプト — 軸対称 近軸の陰解法を混合精度で root-fix |
 | [species-in-dplur-session-prompt.md](sessions/species-in-dplur-session-prompt.md) | 引継ぎプロンプト: 化学種 `roY_s` を block-DPLUR に結合する (roe↔roY coupling) |
+
+- `reports/` — 公開した報告 (Artifact) の原稿の控え。`/tmp` の作業領域は再起動で消えるので、公開のたびにここへ写す (例: `reports/vane-cht-validation/`)。

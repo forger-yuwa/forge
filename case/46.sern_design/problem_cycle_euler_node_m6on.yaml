@@ -87,7 +87,7 @@ mesh:
   top_depth: 2.0
   nj_ext_top: 41
   nj_wake: 9
-  vehicle_clearance: 0.02
+  vehicle_clearance: 0.06        # 物理値 (旧実装は 0.02 と書いて max(0.02, 3*first_top_frac) = 0.06 に膨らませていた)
   first_top_frac: 0.02
   vehicle_taper: 2.0      # 後縁手前 2H で機体厚を 0 に絞り TE 共有 (鉛直 base は node で発散: run_0034)
 evaluate:

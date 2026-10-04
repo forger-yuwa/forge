@@ -1,0 +1,14 @@
+
+=== .  [last step 47999]  -> PASS (converged) ===
+  rms_ro      : init=1.61e-07 peak=1.02e-05 fin=4.60e-09 drop= 3.3dec flat   
+  rms_roUx    : init=1.87e-04 peak=3.60e-03 fin=1.32e-06 drop= 3.4dec flat   
+  rms_roUy    : init=4.37e-03 fin=1.77e-06 drop= 3.4dec flat   
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.69e+00 fin=4.77e-04 drop= 3.5dec flat   
+  rms_roK     : init=9.04e-04 peak=1.26e-02 fin=8.92e-07 drop= 4.1dec falling
+  rms_roOmega : init=6.16e+03 peak=6.70e+04 fin=1.93e+01 drop= 3.5dec falling
+  rms_roY0    : init=1.53e-07 peak=1.01e-05 fin=4.56e-09 drop= 3.3dec flat   
+  rms_roY1    : init=1.70e-09 peak=1.12e-07 fin=5.45e-11 drop= 3.3dec flat   
+
+OVERALL: ALL PASS
+CONVERGENCE_EXIT: 0

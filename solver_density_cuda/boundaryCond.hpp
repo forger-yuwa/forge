@@ -75,6 +75,18 @@ struct bcondConfFormat{
               {"twall_z",0},
               {"utau",0},
               {"qwall",0},   // WMLES 壁モデルの q_w (Kader。viscousFlux wallTreatment==2 が消費)
+              // CHT の**保存的な実効界面熱量** $Q_f=\sum F^E-C$ の素材 (plan boundary-conjugate-heat-transfer §4.3)。
+              //   `ifaceFw`   : 壁半割面が res_roe に入れた寄与そのもの (= $-\sum F^E_{\partial w}$)
+              //   `ifaceRraw` : 壁ノードの**残差射影より前**の res_roe (= $R^{raw}$、定常 Dirichlet では $C=-R^{raw}$)
+              // どちらも `output.interfaceDiag: 1` のときだけ書かれる (既定は触らないのでビット不変)。
+              {"ifaceFw",0},
+              {"ifaceRraw",0},
+              //   `ifaceRconv`: 対流流束の直後の res_roe、`ifaceRpre`: 粘性流束の直前の res_roe。
+              //   粘性分 = Rraw − Rpre、ソース分 = Rpre − Rconv (plan 同 §5.1 #58。読むだけで解は不変)。
+              {"ifaceRconv",0},
+              {"ifaceRpre",0},
+              //   `ifaceRro`  : 壁ノードの質量残差 (未収束の擬似時間では壁 CV の蓄積項 e_w·R_ρ が q_eff に混ざる。その診断)
+              {"ifaceRro",0},
 
           }},
 
@@ -94,6 +106,25 @@ struct bcondConfFormat{
               {"k"   ,1},
               {"omega",1},
 
+          }},
+
+          // 遠方境界 (node 専用、plan boundary-node-farfield-characteristic): floats は自由流 (入口と同じキー)。
+          // 流束は convectiveFlux の farfield_flux_d (外側状態 + HLLC) が作り、bvar は自由流のまま保持する。
+          {"farfield", {
+              {"ro"  ,1},
+              {"roUx",0},
+              {"roUy",0},
+              {"roUz",0},
+              {"roe" ,0},
+              {"Ux"  ,1},
+              {"Uy"  ,1},
+              {"Uz"  ,1},
+              {"Tt"  ,0},
+              {"Pt"  ,0},
+              {"Ts"  ,0},
+              {"Ps"  ,1},
+              {"k"   ,1},
+              {"omega",1},
           }},
 
           {"inlet_fluctVelocity", { 
@@ -264,4 +295,10 @@ void readBcondConfig(solverConfig& , vector<bcond>& );
 // face 重心座標で補間してセットする (ints:{inletProfile:1} で有効化)。readBcondConfig の後・
 // 最初の applyBconds より前に呼ぶ。詳細は boundaryCond.cpp の関数ヘッダ参照。
 void applyInletProfiles(solverConfig& cfg , mesh& msh);
+
+// 壁温分布プロファイル: `ints: {wallProfile: 1}` の壁 bcond の per-face `Ts` を
+// `wall_profile_<physID>.csv` から補間してセットする (inlet 版と同じ CSV 書式)。
+// **評価点は値を課す位置** (node モードは壁ノード座標、cell モードは CV 重心) で、
+// inlet の face 重心とは違う。readBcondConfig の後・最初の applyBconds より前に呼ぶ。
+void applyWallProfiles(solverConfig& cfg , mesh& msh);
 

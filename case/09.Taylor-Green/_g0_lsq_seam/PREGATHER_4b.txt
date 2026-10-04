@@ -1,0 +1,83 @@
+# #4b pre-gather ダンプによる tgv S1(2) の判定 (plan gradient-scalar-lsq-unification §5.1 #4b) と #4a のダンプ非干渉
+harness revision: 1a33427 (dirty)
+run: /home/ubuntu/sglsq/pg/pg_tgv_{gg,lsq}_{a,b,c}
+forge_mtime : 2026-09-26T09:53:49+00:00
+forge_sha256: a398afdc2c42b64861ac1efdccbbae5c75f929346a1ae23773095fd8ee56766f
+git_head    : 1a334275e07a5fb75724cfdbb9025b8a771add38
+CV 35937、周期 group 2977 (member 数の内訳 1:29791, 2:5766, 4:372, 8:8)
+- gg_a: ダンプ ['pregather.init', 'pregather.loop1', 'pregather.rans.loop1']
+- gg_b: ダンプ ['pregather.init', 'pregather.loop1', 'pregather.rans.loop1']
+- gg_c: ダンプ ['pregather.init', 'pregather.loop1', 'pregather.rans.loop1']
+- lsq_a: ダンプ ['pregather.init', 'pregather.loop1', 'pregather.passive_lsq.loop1', 'pregather.rans.loop1']
+- lsq_b: ダンプ ['pregather.init', 'pregather.loop1', 'pregather.passive_lsq.loop1', 'pregather.rans.loop1']
+- lsq_c: ダンプ ['pregather.init', 'pregather.loop1', 'pregather.passive_lsq.loop1', 'pregather.rans.loop1']
+
+## (i) NS 18 配列の gather 前 (tag init → res_0、loop1 → res_1) が 6 本でビット同一か
+| tag | 変数 | 6 本のうち a (gg_a) と異なる run の数 | 不一致節点数 (最大) |
+| --- | --- | --- | --- |
+| init | dro | 0 | 0 |
+| init | dUx | 0 | 0 |
+| init | dUy | 0 | 0 |
+| init | dUz | 0 | 0 |
+| init | dP | 0 | 0 |
+| init | dT | 0 | 0 |
+| loop1 | dro | 0 | 0 |
+| loop1 | dUx | 0 | 0 |
+| loop1 | dUy | 0 | 0 |
+| loop1 | dUz | 0 | 0 |
+| loop1 | dP | 0 | 0 |
+| loop1 | dT | 0 | 0 |
+(i): ビット同一
+
+## (ii) gather 後の値が member 部分和の float32 順列和の集合に含まれるか
+gather 前は gg_a のダンプを使う ((i) が同一ならどれでも同じ)。対象 = 6 本の間で gather 後の値に不一致がある節点、参考 = 2 member 以上の全 group の全節点
+| res | 変数 | 6 本で不一致の節点 (その member 数) | 不一致節点で集合外の (run, 節点, 成分) | 全 group で集合外 | 判定 |
+| --- | --- | --- | --- | --- | --- |
+| 0 | dro | 0 ([]) | 0 | 0 | ok |
+| 0 | dUx | 124 ([4]) | 0 | 0 | ok |
+| 0 | dUy | 0 ([]) | 0 | 0 | ok |
+| 0 | dUz | 0 ([]) | 0 | 0 | ok |
+| 0 | dP | 0 ([]) | 0 | 0 | ok |
+| 0 | dT | 0 ([]) | 0 | 0 | ok |
+| 1 | dro | 0 ([]) | 0 | 0 | ok |
+| 1 | dUx | 232 ([4]) | 0 | 0 | ok |
+| 1 | dUy | 0 ([]) | 0 | 0 | ok |
+| 1 | dUz | 0 ([]) | 0 | 0 | ok |
+| 1 | dP | 0 ([]) | 0 | 0 | ok |
+| 1 | dT | 0 ([]) | 0 | 0 | ok |
+
+VERDICT #4b: A ((i) 同一、(ii) 全点で含まれる)
+
+## #4a ダンプ非干渉: ダンプ無し gg 3 本 vs ダンプ有り gg 3 本 (res_0・res_1 の全配列、noise_rule)
+無し: /home/ubuntu/sglsq/s1h/s1_tgv_gg_a, /home/ubuntu/sglsq/s1h/s1_tgv_gg_b, /home/ubuntu/sglsq/s1h/s1_tgv_gg_c
+全 168 配列中 141 配列は全 15 対でビット一致
+| res | 配列 | 不一致 | 判定 |
+| --- | --- | --- | --- |
+| res_0 | dUxdx | 無し同士 n≤4、有り同士 n≤88、無し–有り n≤88 / 最大差 1.19e-07 | PASS |
+| res_0 | dUxdz | 無し同士 n≤0、有り同士 n≤32、無し–有り n≤32 / 最大差 2.98e-08 | FAIL (旧同士ビット一致・旧新不一致) |
+| res_1 | Xi | 無し同士 n≤3、有り同士 n≤3、無し–有り n≤3 / 最大差 2.98e-08 | PASS |
+| res_1 | dKdx | 無し同士 n≤282、有り同士 n≤292、無し–有り n≤320 / 最大差 1.91e-06 | PASS |
+| res_1 | dKdy | 無し同士 n≤212、有り同士 n≤178、無し–有り n≤244 / 最大差 2.86e-06 | PASS |
+| res_1 | dKdz | 無し同士 n≤178、有り同士 n≤146、無し–有り n≤166 / 最大差 2.86e-06 | PASS |
+| res_1 | dOmegadx | 無し同士 n≤262、有り同士 n≤290、無し–有り n≤294 / 最大差 0.000183 | PASS |
+| res_1 | dOmegady | 無し同士 n≤260、有り同士 n≤254、無し–有り n≤288 / 最大差 9.16e-05 | PASS |
+| res_1 | dOmegadz | 無し同士 n≤252、有り同士 n≤256、無し–有り n≤288 / 最大差 0.000183 | PASS |
+| res_1 | dUxdx | 無し同士 n≤104、有り同士 n≤176、無し–有り n≤168 / 最大差 1.19e-07 | PASS |
+| res_1 | dUxdy | 無し同士 n≤0、有り同士 n≤4、無し–有り n≤4 / 最大差 5.96e-08 | FAIL (旧同士ビット一致・旧新不一致) |
+| res_1 | dXidx | 無し同士 n≤208、有り同士 n≤188、無し–有り n≤246 / 最大差 7.15e-07 | PASS |
+| res_1 | dXidy | 無し同士 n≤198、有り同士 n≤192、無し–有り n≤274 / 最大差 4.77e-07 | PASS |
+| res_1 | dXidz | 無し同士 n≤212、有り同士 n≤130、無し–有り n≤168 / 最大差 7.15e-07 | PASS |
+| res_1 | res_ro | 無し同士 n≤12、有り同士 n≤45、無し–有り n≤42 / 最大差 2.98e-08 | PASS |
+| res_1 | res_roK | 無し同士 n≤689、有り同士 n≤730、無し–有り n≤700 / 最大差 3.58e-07 | PASS |
+| res_1 | res_roOmega | 無し同士 n≤481、有り同士 n≤606、無し–有り n≤563 / 最大差 1.14e-05 | PASS |
+| res_1 | res_roUx | 無し同士 n≤659、有り同士 n≤740、無し–有り n≤713 / 最大差 0.000244 | PASS |
+| res_1 | res_roUy | 無し同士 n≤13527、有り同士 n≤13718、無し–有り n≤13895 / 最大差 0.000244 | PASS |
+| res_1 | res_roe | 無し同士 n≤48、有り同士 n≤128、無し–有り n≤136 / 最大差 0.0156 | PASS |
+| res_1 | ro | 無し同士 n≤415、有り同士 n≤316、無し–有り n≤402 / 最大差 2.98e-07 | PASS |
+| res_1 | roUx | 無し同士 n≤2、有り同士 n≤5、無し–有り n≤7 / 最大差 9.54e-07 | PASS |
+| res_1 | roUy | 無し同士 n≤13708、有り同士 n≤13826、無し–有り n≤14219 / 最大差 8.38e-08 | PASS |
+| res_1 | roUz | 無し同士 n≤11123、有り同士 n≤11191、無し–有り n≤11538 / 最大差 8.38e-08 | PASS |
+| res_1 | roXi | 無し同士 n≤359、有り同士 n≤266、無し–有り n≤342 / 最大差 2.38e-07 | PASS |
+| res_1 | transport_diag_k | 無し同士 n≤1353、有り同士 n≤1370、無し–有り n≤1404 / 最大差 1.19e-07 | PASS |
+| res_1 | transport_diag_omega | 無し同士 n≤1053、有り同士 n≤1122、無し–有り n≤1118 / 最大差 1.19e-07 | PASS |
+VERDICT #4a ダンプ非干渉 (tgv): FAIL

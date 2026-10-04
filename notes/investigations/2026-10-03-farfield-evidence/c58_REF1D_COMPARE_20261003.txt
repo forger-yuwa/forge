@@ -1,0 +1,12 @@
+contact cpg run_0070_v2d_cpg_contact_short: max|T − T_ref| 20.400 K (ピーク T_ref 599.83、forge 580.31)、max|P − P_ref| 0.00708 Pa
+contact cpg run_0071_v2d_cpg_contact_long: max|T − T_ref| 20.401 K (ピーク T_ref 599.83、forge 580.31)、max|P − P_ref| 0.008789 Pa
+contact tp1 run_0075_v2d_tp1_contact_short: max|T − T_ref| 20.346 K (ピーク T_ref 599.83、forge 580.38)、max|P − P_ref| 0.05932 Pa
+contact tp1 run_0076_v2d_tp1_contact_long: max|T − T_ref| 20.346 K (ピーク T_ref 599.83、forge 580.38)、max|P − P_ref| 0.05981 Pa
+contact tp2 run_0080_v2d_tp2_contact_short: max|T − T_ref| 15.513 K (ピーク T_ref 599.83、forge 585.42)、max|P − P_ref| 0.3105 Pa
+contact tp2 run_0081_v2d_tp2_contact_long: max|T − T_ref| 15.510 K (ピーク T_ref 599.83、forge 585.42)、max|P − P_ref| 0.3071 Pa
+acoustic cpg run_0132_v2d2_cpg_short_dt2: max|P − P_ref| 0.6235 Pa = 21.92% of 参照の入射振幅 2.844 Pa (t 6.2935e-04)、forge の振幅 2.221 Pa
+acoustic cpg run_0133_v2d2_cpg_long_dt2: max|P − P_ref| 0.6231 Pa = 21.91% of 参照の入射振幅 2.844 Pa (t 6.2802e-04)、forge の振幅 2.221 Pa
+acoustic tp1 run_0136_v2d2_tp1_short_dt2: max|P − P_ref| 0.6203 Pa = 21.81% of 参照の入射振幅 2.844 Pa (t 6.3474e-04)、forge の振幅 2.224 Pa
+acoustic tp1 run_0137_v2d2_tp1_long_dt2: max|P − P_ref| 0.6196 Pa = 21.78% of 参照の入射振幅 2.844 Pa (t 6.3340e-04)、forge の振幅 2.225 Pa
+acoustic tp2 run_0140_v2d2_tp2_short_dt2: max|P − P_ref| 0.6218 Pa = 21.86% of 参照の入射振幅 2.844 Pa (t 6.2684e-04)、forge の振幅 2.223 Pa
+acoustic tp2 run_0141_v2d2_tp2_long_dt2: max|P − P_ref| 0.6203 Pa = 21.81% of 参照の入射振幅 2.844 Pa (t 6.2728e-04)、forge の振幅 2.224 Pa

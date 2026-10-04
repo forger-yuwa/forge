@@ -1,0 +1,9 @@
+date        : 2026-09-26T18:04:41+00:00
+forge_bin   : /home/ubuntu/sglsq/forge_2fa3826c
+forge_mtime : 2026-09-26T16:47:06+00:00
+forge_sha256: dcd17eb3bcaa7b559af1605afa1c4f4df1adcf0a386998bb655d65ffb34b8614
+git_head    : 2fa3826cfa5773bacbdc12c97ce5ba3d32dc2e9a
+git_dirty   : 27 件
+host        : ip-172-31-5-94
+'slauWallNormalChi' effective: 0 (explicit)  (off; bit-identical to the pre-2026-09-23 flux)
+'scalarGradient' effective: lsq (default)

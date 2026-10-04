@@ -1,6 +1,9 @@
 // test_cond_float_device.cu — 凝縮ソース kernel の double 実体と float 実体を合成状態に掛けて比較する device 単体試験
 // (plans/active/condensation-float-speedup.md §4.3「単体 (device)」)。
 //   build: nvcc --expt-relaxed-constexpr -I. -o test_cond_float_device tests/unit/test_cond_float_device.cu
+//   (plan #10 以降: H2O の潜熱に共通データの気液ペアが要るので、-I <solver_density_cuda> -I <埋め込みヘッダの生成先> と
+//    solver_density_cuda/input/speciesDB.cpp solver_density_cuda/input/speciesTransportDB.cpp -lyaml-cpp を足す;
+//    生成は tests/unit/cond_latent_test_helper.cuh 冒頭)
 // 状態: H2O TP carrier (N2/H2O, Y_w=0.0113) と N2 pure CPG。T × S × Q0 × g の格子 + S<1 (蒸発) + 実 run で差が出たセル状態。
 // 判定: res_* / sj_* は相対 1e-3 + ln J 許容 (S→1 の CNT 感度) または絶対 1e-4×成長流束尺度、diagS 相対 1e-5、T_sat 2e-3 K、
 //       θ 相対 1e-5 (S≈1 の境界セルは除外)、condLim 絶対 1e-4、蒸発端 0.99<S<1 の sj は 1 step の陰的更新差 |Δsj|·dt ≤ 1e-4。sj_* は両実体とも有限・非負、全出力有限。
@@ -11,6 +14,7 @@
 #include <cuda_runtime.h>
 #include "flowFormat.hpp"
 #include "cuda_forge/thermo_d.cuh"
+#include "tests/unit/cond_latent_test_helper.cuh"   // H2O 潜熱の気液ペア (plan thermophysics-solver-owned-species-db #10)
 namespace {
 #include "cuda_forge/condensationSourceKernels_d.cuh"
 }
@@ -20,12 +24,10 @@ static int g_limiterMode = 0;   // 0: 旧 (残差 θ), 1: 更新クランプ (ma
 template <class T> static T* up(const std::vector<T>& v) { T* d = nullptr; cudaMalloc((void**)&d, v.size()*sizeof(T)); cudaMemcpy(d, v.data(), v.size()*sizeof(T), cudaMemcpyHostToDevice); return d; }
 template <class T> static std::vector<T> down(const T* d, size_t n) { std::vector<T> v(n); cudaMemcpy(v.data(), d, n*sizeof(T), cudaMemcpyDeviceToHost); return v; }
 static SpeciesThermo mk(double MW,double sig,double eps,const double lo[9],const double hi[9]){
-    SpeciesThermo s; s.MW=MW; s.sigma_LJ=sig; s.eps_kB=eps; s.Tlo=200.0; s.Tmid=1000.0; s.Thi=6000.0; s.h_datum=0.0; s.invMW=1.0/MW;
-    for(int i=0;i<9;i++){ s.low[i]=lo[i]; s.high[i]=hi[i]; } return s; }
+    SpeciesThermo s; s.MW=MW; s.sigma_LJ=sig; s.eps_kB=eps; s.h_datum=0.0; s.invMW=1.0/MW;
+    thermo_set_nasa9_2(s, 200.0, 1000.0, 6000.0, lo, hi); return s; }
 static SpeciesThermoF toF(const SpeciesThermo& s){
-    SpeciesThermoF f; f.MW=(float)s.MW; f.invMW=(float)(1.0/s.MW); f.R=(float)(THERMO_RU/s.MW);
-    f.sigma_LJ=(float)s.sigma_LJ; f.eps_kB=(float)s.eps_kB; f.Tlo=(float)s.Tlo; f.Tmid=(float)s.Tmid; f.Thi=(float)s.Thi;
-    for(int k=0;k<9;k++){ f.low[k]=(float)s.low[k]; f.high[k]=(float)s.high[k]; } return f; }
+    return thermo_to_float(s); }
 
 struct State { double T, P, ro, Yw, g, q0, q1, q2; };
 struct Worst { double v=0; int i=-1; const char* what=""; void upd(double e,int i_,const char* w){ if(e>v){v=e;i=i_;what=w;} } };
@@ -33,7 +35,7 @@ struct Worst { double v=0; int i=-1; const char* what=""; void upd(double e,int 
 static void run_case(const char* name, int model, int carrier, const std::vector<State>& st, int kantrowitz, int growthModel, int evap)
 {
     const int n = (int)st.size();
-    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0; o.h2oLatent=cond_test_latent_ref(0.0, true);
     const CondSpeciesProps cp = condProps_make(model, o);
     CondTablesHost ht; cond_tables_build_host(cp, ht); const CondTablesF tb = cond_tables_upload(ht);
     // species (TP carrier: N2/H2O with sensible datum at 298.15 K)
@@ -42,7 +44,7 @@ static void run_case(const char* name, int model, int carrier, const std::vector
     const double H2Olo[9]={-3.947960830e+04,5.755731020e+02,9.317826530e-01,7.222712860e-03,-7.342557370e-06,4.955043490e-09,-1.336933246e-12,-3.303974310e+04,1.724205775e+01};
     const double H2Ohi[9]={1.034972096e+06,-2.412698562e+03,4.646110780e+00,2.291998307e-03,-6.836830480e-07,9.426468930e-11,-4.822380530e-15,-1.384286509e+04,-7.978148510e+00};
     std::vector<SpeciesThermo> sp = { mk(0.0280134,3.621,97.53,N2lo,N2hi), mk(0.0180153,2.605,572.4,H2Olo,H2Ohi) };
-    for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); s.low[7] += -hr/THERMO_RU; s.high[7] += -hr/THERMO_RU; }
+    for (auto& s : sp) { const double hr = thermo_h_molar(s, 298.15); thermo_add_a7(s, -hr/THERMO_RU); }
     std::vector<SpeciesThermoF> spf = { toF(sp[0]), toF(sp[1]) };
     const int nSp = 2, cgs = 1;
     // arrays
@@ -168,7 +170,7 @@ static int run_all()
 {
     // ---- H2O TP carrier (case/16 相当 Y_w=0.0113): T × S × Q0 × g、S<1 の蒸発、実 run のセル
     std::vector<State> st;
-    { CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    { CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0; o.h2oLatent=cond_test_latent_ref(0.0, true);
       const CondSpeciesProps cp = condProps_make(COND_MODEL_H2O, o); const double Yw = 0.0113, Rw = cp.R, Rmix = 296.0;
       for (double T = 200.0; T <= 300.0; T += 10.0) for (double S : {0.5, 0.999, 1.001, 1.01, 1.1, 2.0, 10.0, 100.0, 1000.0})
         for (double q0 : {0.0, 1.0e9, 1.0e14, 1.0e17, 1.0e19}) for (double g : {0.0, 1.0e-13, 1.0e-6, 1.0e-4, 1.0e-2}) for (double rb : {1.0e-9, 1.0e-8, 1.0e-7}) {
@@ -184,7 +186,7 @@ static int run_all()
       run_case("H2O Kw3 Gyar", COND_MODEL_H2O, 1, st, 3, 1, 1);
     }
     // ---- N2 pure CPG (case/34 相当): T 40–110 K
-    { std::vector<State> s2; CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0;
+    { std::vector<State> s2; CondPropOpts o; o.latentLowT=1; o.psatLowT=1; o.liquidCp=2000.0; o.gasKgasModel=0; o.sigmaScale=1.0; o.Yw=0.0; o.h2oLatent=cond_test_latent_ref(0.0, true);
       const CondSpeciesProps cp = condProps_make(COND_MODEL_N2, o);
       for (double T = 40.0; T <= 110.0; T += 5.0) for (double S : {0.5, 0.999, 1.001, 1.1, 2.0, 10.0, 100.0})
         for (double q0 : {0.0, 1.0e9, 1.0e15, 1.0e18}) for (double g : {0.0, 1.0e-8, 1.0e-3, 5.0e-2}) for (double rb : {2.0e-9, 3.0e-8, 5.0e-7}) {

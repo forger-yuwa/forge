@@ -44,6 +44,10 @@ class SernMeshParams:
     interface_angle: float = 0.0
     top_ext_angle: float = 0.0
     scale: float = 1.0
+    split_plume_at_te: bool = False      # プルーム区間 (L_cowl→x_out) を **ランプ後縁 L_ramp で分割**し、
+                                         # 後縁の前後に station クラスタを置く。既定 False = 従来 (後縁は最寄り station を
+                                         # 置換するだけでクラスタ無し)。R4e ④: ベース直後の流れ方向間隔がベース厚の 4 倍あり、
+                                         # 極小の壁 CV が巨大な隣接へ吐く構図を緩めるための試験用
     x_cluster_w: float = 0.15
     x_cluster_a: float = 3.0
     # --- ランプ側外部流ブロック (plan §4.11) ---
@@ -51,7 +55,15 @@ class SernMeshParams:
     top_depth: float = 2.0               # 機体上面線から上境界までの高さ / H
     nj_ext_top: int = 41
     nj_wake: int = 9                     # base 高さ分の後流ブロックの j 点数
-    vehicle_clearance: float = 0.02      # 機体上面 = max(ランプ y) + これ (/H)
+    first_wake_frac: float = 0.0          # ベース直後の第一 station 間隔 /H (**絶対値**, 0 = 従来のクラスタ比)。
+                                         # t_base > 0 のときは必須で、t_base/5 以下でなければ生成を失敗させる
+                                         # (plan convection-node-wall-reconstruction §4.28)。
+    t_base: float = 0.0                  # 機体後縁ベースの厚み /H。**物理入力**。> 0 で「テーパ + 薄いベース」
+                                         # (3D の R4e 案 (d) と同じ形状)。0 = 従来のテーパ (厚さ 0 で終わる)。
+                                         # `vehicle_taper = 0` の全高鉛直ベース (h_base ≈ 1.9 H) とは別物で、
+                                         # run_0034 が発散したのはそちら (ベースが 100 倍厚い)
+    vehicle_clearance: float = 0.06      # 機体上面 = max(ランプ y) + これ (/H)。**物理入力** (格子から独立)。
+                                         # 旧実装の実効値 max(0.02, 3*first_top_frac) = 0.06 をそのまま既定にした
     first_top_frac: float = 0.02         # top バンドの第一セル / H (slip 壁なので粗くてよい)
     ramp_fillet: float = 0.0             # ランプ膨張角部 (x=0) の丸め半径 / H。0 = 鋭角 (従来)。
                                          # 鋭角だと SST が θ_r0 ≳ 18° で `roOmega` 発散する (case/46 run_0055-0057)。
@@ -78,6 +90,59 @@ def _cluster_stations(x0, x1, n, ends=(True, True), w=0.15, a=3.0):
     cum /= cum[-1]
     return x0 + L * np.interp(np.linspace(0.0, 1.0, n), cum, xi)
 
+
+def _wake_stations(x_te, x_out, n, first_abs, w, a):
+    """ベース直後 (x_te) の第一 station 間隔を**絶対値** `first_abs` にして x_out まで伸ばす。
+
+    ベース後流は壁法線が流れ方向なので、`first_wall_frac` が壁法線に対して果たす役割を
+    ここでは流れ方向に持たせる必要がある。等間隔やクラスタ比では「ベース厚さの数倍のセルが
+    ベース直後に並ぶ」状態を許してしまい、剪断層を 1 セルで跨いで発散する
+    (plan convection-node-wall-reconstruction §4.28: 厚さ 2.0 mm のベースに対し第一 station が
+    8.19 mm = 4.1 倍で、壁 u=0 から 1100 m/s へのエッジ中点に u_face≈550 m/s が立った)。
+    戻り値は x_te を**含む**。"""
+    L = x_out - x_te
+    if not (first_abs > 0.0):
+        return _cluster_stations(x_te, x_out, n, (True, False), w, a)
+    return x_te + L * _geom_start(n, first_abs / L)
+
+
+def check_wake_first_spacing(xs, x_base, t_base, first_wake_frac, tol=1.05):
+    """**生成後の実座標**で、ベース直後 (x_base の直後) の第一 station 間隔を検査する。
+
+    入力値の検査だけでは保証にならない (`_geom_start` は公比の探索上限 3 で打ち切ってから正規化するので、
+    要求間隔を実現できないまま返ることがある。codex 2026-09-20 result レビュー Major 3)。
+    ベースが無い (t_base <= 0) なら何もしない。"""
+    if not (float(t_base) > 0.0):
+        return
+    xs = np.asarray(xs, dtype=float)
+    after = xs[xs > x_base + 1e-12]
+    if after.size == 0:
+        raise ValueError(f"mesh_sern: ベース x={x_base:g} より下流に station が無い")
+    d1 = float(after.min() - x_base)
+    want = float(first_wake_frac) if float(first_wake_frac) > 0.0 else float(t_base) / 5.0
+    if not (d1 <= want * tol):
+        raise ValueError(
+            f"mesh_sern: ベース直後の第一 station 間隔が {d1:g} で要求 {want:g} を超えた "
+            f"(ベース厚さ {t_base:g} の {d1/float(t_base):.2f} 倍)。station 数 (ni_plume) を増やすか "
+            f"first_wake_frac を見直すこと。後流を 1 セルで跨ぐと壁 CV から質量が抜ける "
+            f"(plan convection-node-wall-reconstruction §4.28)")
+
+
+def _plume_stations(L_cowl, L_ramp, x_out, n, prm):
+    """プルーム区間の station。`split_plume_at_te` で後縁 L_ramp を境に 2 分割し、両側にクラスタを置く。
+    戻り値は L_cowl を**含まない** (呼び出し側が前区間と連結する)。"""
+    w, a = prm.x_cluster_w, prm.x_cluster_a
+    # t_base > 0 のときは **必ず** 後縁で分割する。分割しないとベース直後の第一 station が
+    # プルーム全長のクラスタ比で決まり、`first_wake_frac` が効かない
+    # (plan convection-node-wall-reconstruction §4.28: これを見落として 8.19 mm のまま生成していた)。
+    _split = bool(getattr(prm, "split_plume_at_te", False)) or float(getattr(prm, "t_base", 0.0)) > 0.0
+    if not _split or not (L_cowl < L_ramp < x_out):
+        return _cluster_stations(L_cowl, x_out, n, (True, False), w, a)[1:]
+    fa = (L_ramp - L_cowl) / (x_out - L_cowl)
+    na = max(int(round(n * fa)), 5)
+    nb = max(n - na + 1, 5)
+    return np.concatenate([_cluster_stations(L_cowl, L_ramp, na, (True, True), w, a)[1:],
+                           _wake_stations(L_ramp, x_out, nb, float(getattr(prm, "first_wake_frac", 0.0)), w, a)[1:]])
 
 def _geom_start(n, first):
     """[0,1] を n 点、始端の第一間隔が first (比) になる幾何級数で切る (first ≥ 1/(n−1) なら一様)。"""
@@ -119,6 +184,24 @@ def generate_sern_mesh(design, prm: SernMeshParams):
     L_ramp = float(design.L_ramp)
     y_e = float(design.ramp_xy[-1, 1])
     x_out = L_ramp + prm.x_out_extra
+    # ベース厚さがあるなら、その後流を 1 セルで跨がせない (plan convection-node-wall-reconstruction §4.28)。
+    # 粗いまま黙って生成すると、壁 u=0 から外側 1000 m/s へのエッジ中点に数百 m/s の面速度が立ち、
+    # 有界性も物理性も満たしたまま壁 CV から質量が抜けて発散する。**形状でなく解像度なので生成を失敗させる**。
+    _tb = float(getattr(prm, "t_base", 0.0))
+    if _tb > 0.0:
+        _fw = float(getattr(prm, "first_wake_frac", 0.0))
+        if not (_fw > 0.0):
+            # 未設定は失敗させず **t_base/5 を既定**にする (既存 config を壊さない。
+            # codex 2026-09-20 result レビュー Major 4)。保証は生成後の `check_wake_first_spacing` で行う。
+            _fw = _tb / 5.0
+            try: prm.first_wake_frac = _fw
+            except Exception: pass
+            print(f"[mesh_sern] first_wake_frac 未設定 → t_base/5 = {_fw:g} を使う")
+        if _fw > _tb / 5.0:
+            raise ValueError(
+                f"mesh_sern: first_wake_frac {_fw:g} がベース厚さ {_tb:g} に対して粗すぎる "
+                f"(t_base/5 = {_tb/5.0:g} 以下にすること)。ベース後流の剪断層を 1 セルで跨ぐと発散する "
+                f"(plan convection-node-wall-reconstruction §4.28)")
     # 丸め区間 [xf1, xf2] は station を「追加」せず**ブロック境界**にする (追加すると既存点と 1e-9 まで接近して AR が飛ぶ)
     Rf0 = float(prm.ramp_fillet)
     if Rf0 > 0.0 and len(design.ramp_xy) > 1:
@@ -130,17 +213,20 @@ def generate_sern_mesh(design, prm: SernMeshParams):
             np.linspace(f1, 0.0, nf)[1:],
             np.linspace(0.0, f2, nf)[1:],
             _cluster_stations(f2, L_cowl, prm.ni_noz, (True, True), prm.x_cluster_w, prm.x_cluster_a)[1:],
-            _cluster_stations(L_cowl, x_out, prm.ni_plume, (True, False), prm.x_cluster_w, prm.x_cluster_a)[1:],
+            _plume_stations(L_cowl, L_ramp, x_out, prm.ni_plume, prm),
         ])
     else:
         xs = np.concatenate([
             _cluster_stations(-prm.L_up, 0.0, prm.ni_up, (False, True), prm.x_cluster_w, prm.x_cluster_a),
             _cluster_stations(0.0, L_cowl, prm.ni_noz, (True, True), prm.x_cluster_w, prm.x_cluster_a)[1:],
-            _cluster_stations(L_cowl, x_out, prm.ni_plume, (True, False), prm.x_cluster_w, prm.x_cluster_a)[1:],
+            _plume_stations(L_cowl, L_ramp, x_out, prm.ni_plume, prm),
         ])
     # ランプ後縁に station を置く (最寄りを置換)
     k = int(np.argmin(np.abs(xs - L_ramp)))
     xs[k] = L_ramp
+    # **生成後の実座標**でベース直後の第一間隔を検査する (入力値の検査では保証にならない)
+    check_wake_first_spacing(xs, L_ramp, float(getattr(prm, "t_base", 0.0)),
+                             float(getattr(prm, "first_wake_frac", 0.0)))
     i_te = int(np.argmin(np.abs(xs - L_cowl)))
     assert abs(xs[i_te] - L_cowl) < 1e-12
     rx, ry = design.ramp_xy[:, 0], design.ramp_xy[:, 1]
@@ -250,7 +336,14 @@ def _add_ext_top(coords, quads, bedges, xs, yt, k, L_ramp, y_e, up, njt, prm, ex
     ni = len(xs); njT, njW = int(prm.nj_ext_top), int(prm.nj_wake)
     # 機体上面はランプ最大 y の上に置く。クリアランスは絶対値 (H) だが、壁第一セル (first_top_frac) より
     # 十分厚くないとテーパ区間で潰れるので下限を課す (run_0071 の発散対策)
-    clr = max(float(prm.vehicle_clearance), 3.0 * float(prm.first_top_frac))
+    # **形状は格子間隔に依存させない** (2026-09-19, codex plan-3 M3 を 2D にも適用)。
+    # 旧: max(vehicle_clearance, 3*first_top_frac) — `first_top_frac` を変えると機体上面が動き、
+    # 格子独立性試験が成立しなかった。いまは物理値のみで決め、格子が粗ければ生成を失敗させる。
+    clr = float(prm.vehicle_clearance)
+    if float(prm.first_top_frac) > clr / 3.0:
+        raise ValueError(
+            f"mesh_sern: first_top_frac {prm.first_top_frac:g} が vehicle_clearance {clr:g} に対して粗すぎる "
+            f"(clr/3 = {clr / 3.0:g} 以下が要る)。**形状を格子に合わせて動かさない**ので、格子側を細かくすること")
     y_veh = float(yt[:k + 1].max()) + clr
     ii = np.arange(ni)
     if prm.vehicle_taper > 0.0:
@@ -270,10 +363,15 @@ def _add_ext_top(coords, quads, bedges, xs, yt, k, L_ramp, y_e, up, njt, prm, ex
                   + (_s ** 3 - _s ** 2) * taper_len * m1)
         y3_veh = np.where(xs < x0, y_veh, y3_veh)
         # 保険: 上面は必ずランプより上。最小厚 = 後縁から張ったくさびの厚み (TE で 0 なので端点条件と衝突しない)
-        y3_veh = np.maximum(y3_veh, yt + np.clip(np.tan(np.radians(float(prm.vehicle_wedge_deg)))
-                                                 * (L_ramp - xs), 0.0, clr))
-        y3_veh[k] = y_e
-        h_base = 0.0
+        tb = float(prm.t_base)
+        if tb > 0.0:
+            # R4e 案 (d) と同じ「テーパ + 有限ベース」。後縁で厚み t_base、どこでも yt + t_base 以上
+            y3_veh = np.maximum(y3_veh + tb * _s ** 3, yt + tb)
+        else:
+            y3_veh = np.maximum(y3_veh, yt + np.clip(np.tan(np.radians(float(prm.vehicle_wedge_deg)))
+                                                     * (L_ramp - xs), 0.0, clr))
+        y3_veh[k] = y_e + tb
+        h_base = tb
     else:
         y3_veh = np.full(ni, y_veh)
         h_base = y_veh - y_e

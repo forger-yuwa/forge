@@ -1,0 +1,10 @@
+start_run: /home/ubuntu/sglsq/s2start/case40_run0045
+res: /home/ubuntu/sglsq/s2start/case40_run0045/res_12000.h5
+res_sha256: 15e47af050e3e86ec68d8e033ab45abb5403c8a31c80d3021aa5a04010250fad
+mesh_sha256 (restart 前、起点の nozzle.h5): 849660afcfb58a8f87578feca57adea3b63a6642703990a62a4b588011802707
+config changes vs start:
+  - drop mesh.nodeAxisDirichlet (起点値 1)
+  - set mesh.scalarGradient: gg (明示)
+  - set time.last.nStepOuter: 12000 -> 12000
+  - set time.outStepInterval: 1000 -> 1000
+check_solver_config rc=0

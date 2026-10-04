@@ -252,7 +252,8 @@ def _config_sst_node(p: Problem, nsteps: int, out_int: int, cfl: float) -> str:
     非零 [[node-wall-velocity-needs-dirichlet-flag]]) +
     `axisCentroidShift` + 低 Re SST (`wallTreatmentSST: 0` — **壁関数は使わない**。
     node 壁関数経路には既知の Cf 欠損 [[node-wallfunction-pk-convention-deficit]]、
-    ユーザ指示 2026-08-16)。粘性は Sutherland (viscMethod 1)。"""
+    ユーザ指示 2026-08-16)。粘性は Sutherland (viscMethod 1)。semiperfect TP の NS は
+    `runner_axismach._apply_gas_to_config(..., viscous=True)` が種ごとの輸送物性 (viscMethod 2 + physProp.transport) に置き換える。"""
     return f"""mesh: {{discretization: "node", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}}
 gpu: 1
 solver: "SLAU"

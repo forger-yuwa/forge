@@ -3,7 +3,10 @@
 #include "cuda_forge/cudaWrapper.cuh"
 #include "cuda_forge/wallLaw_d.cuh"
 #include "cuda_forge/thermo_d.cuh"
+#include "cuda_forge/transportMix_d.cuh"   // 種ごとの輸送物性 (physProp.transport; plan #5t2-2)
+#include "cuda_forge/transportTables_d.cuh"  // 同・表引き (float; plan #5t2-3)
 #include "cuda_forge/speciesTransport_d.cuh"  // species_roY_device_ptr()
+#include "cuda_forge/gasPhaseComposition_d.cuh"  // 凝縮 carrier の気相組成 (plan condensation-two-phase-transport §4.1)
 #include "cuda_forge/nodeWallDirichlet_d.cuh"  // pinWallNodeTemperature_bcond (状態層・共有)
 
 #include <unordered_set>
@@ -19,12 +22,16 @@ namespace {
 constexpr flow_float kSmall = static_cast<flow_float>(1.0e-12);
 
 // 壁温 T_w での層流物性 (μ, λ, cp, R)。gasProperties_d (セル評価) と同式で壁温評価する。
-//   viscMethod 0: 定数 / 1: Sutherland (熱伝導は定数) / 2: kinetic theory (Chapman-Enskog+Wilke)
+//   viscMethod 0: 定数 / 1: Sutherland (熱伝導は定数) / 2: 種ごとの輸送物性 (physProp.transport 必須; transportOn=1)、
+//   セルと同じ transport_mix_Y (種ごとの出所 + CEA frozen; 表があれば表引き)。
 //   thermalMethod 2 (TP): NASA 多項式 (組成 Y は呼び出し側で正規化済み)。それ以外 (CPG): 定数 γ, cp。
+//   nY: Y の有効な種数 (roY 無し・単成分は 1)。transport 経路だけが使う。
+//   Yt: 輸送物性 (μ・λ) に渡す組成 = 気相組成 (wmles_transport_Y; 凝縮 carrier 以外は Y と同じ値)。R・cp は Y (総組成) のまま。
 __device__ inline void wmles_wall_props(
     int thermalMethod, int viscMethod,
     flow_float ga, flow_float cp_const, flow_float visc_const, flow_float thermCond_const,
-    const SpeciesThermo* sp, int nSpecies, const double* Y,
+    const SpeciesThermo* sp, int nSpecies, const double* Y, const double* Yt,
+    int transportOn, const TransportTableD& ttab, int nY,
     flow_float Tw,
     flow_float& mu_w, flow_float& lam_w, flow_float& cp_w, flow_float& R_w)
 {
@@ -46,13 +53,37 @@ __device__ inline void wmles_wall_props(
         const flow_float Smu = 111.0;
         mu_w  = mu0*pow(Tw/T0, static_cast<flow_float>(3.0/2.0))*(T0+Smu)/(Tw+Smu);
         lam_w = thermCond_const;
-    } else {                        // kinetic theory
-        double X[THERMO_MAX_SPECIES];
-        thermo_X_from_Y(sp, n, Y, X);
-        const double Twd = (double)Tw;
-        mu_w  = (flow_float)thermo_mu_mix(sp, n, X, Twd);
-        lam_w = (flow_float)thermo_lambda_mix(sp, n, X, Twd);
+    } else if (transportOn != 0 && ttab.tab.valid != 0) {   // 同・表引き (セルと同じ関数; float。範囲外は double へ委譲)
+        float rY[THERMO_MAX_SPECIES];
+        for (int k = 0; k < nY; ++k) rY[k] = (float)Yt[k];
+        float mu, lam;
+        transport_mix_Y_tab(sp, ttab, nY, rY, (float)Tw, &mu, &lam);
+        mu_w  = (flow_float)mu;
+        lam_w = (flow_float)lam;
+    } else {  // 種ごとの出所 + CEA frozen 混合則 (セルと同じ関数; double 評価・float 格納)
+        // viscMethod 2 は physProp.transport 必須 (main.cpp が起動時に検査) なので transportOn=1。
+        // 旧 kinetic 経路 (thermo_mu_mix / thermo_lambda_mix の Wilke 共用 φ) は計算から外した (plan §4.3c 案 C)。
+        double mu, lam;
+        transport_mix_Y(sp, ttab, nY, Yt, (double)Tw, &mu, &lam);
+        mu_w  = (flow_float)mu;
+        lam_w = (flow_float)lam;
     }
+}
+
+// 壁の輸送物性の組成 (気相組成; plan condensation-two-phase-transport §4.1)。Y は thermo_cell_Y の正規化済み総組成。
+//   凝縮 carrier で液があれば、同じ正規化 (Σ ρY) の単位で液 ρg/ΣρY を凝縮種から除く (gas_phase_composition; 正規化は
+//   transport_mix_Y の X の正規化が行う)。液なし・単成分は Y をそのまま写す (ビット一致)。
+__device__ inline void wmles_transport_Y(flow_float* const* roY, int nSpecies, bool mixY, const double* Y,
+                                         GasPhaseLiquid liq, geom_int ic, double* Yt)
+{
+    const int n = mixY ? nSpecies : 1;
+    for (int k = 0; k < n; ++k) Yt[k] = Y[k];
+    if (!mixY) return;
+    const double rl = (double)gas_phase_liquid_rho(liq, ic);
+    if (liq.iw < 0 || !(rl > 0.0)) return;
+    double s = 0.0;
+    for (int k = 0; k < nSpecies; ++k) s += (double)roY[k][ic];
+    gas_phase_composition(Yt, liq.iw, rl/(s > 1.0e-300 ? s : 1.0e-300));
 }
 
 // node 用: Tau_Wall / Qw_Wall を全 CV -1 (inactive) に初期化 (毎 step、bcond ループ前)。
@@ -85,6 +116,8 @@ __global__ void wmles_wall_model_d(
     int thermalMethod, flow_float ga, flow_float cp_const,
     const SpeciesThermo* sp, flow_float* const* roY, int nSpecies,
     int viscMethod, flow_float visc_const, flow_float thermCond_const,
+    int transportOn, TransportTableD ttab,
+    GasPhaseLiquid liq,   // 凝縮 carrier の液 (輸送物性は気相組成)
     // モデルパラメータ
     flow_float tol, int maxIt,
     // 熱条件: 0=断熱 (q_w=0) / 1=等温 (Tsb=指定壁温)
@@ -161,10 +194,13 @@ __global__ void wmles_wall_model_d(
     // ---- 壁面物性 (T_w 評価; γ/cp 一定を焼き込まない) ----
     //   組成: node は壁ノード, cell は第一セル (ghost 組成=内部と同一)。
     double Y[THERMO_MAX_SPECIES];
-    if (!thermo_cell_Y(roY, nSpecies, ic, Y)) Y[0] = 1.0;   // 共通 helper (thermo_d.cuh)
+    const bool mixY = thermo_cell_Y(roY, nSpecies, ic, Y);
+    if (!mixY) Y[0] = 1.0;   // 共通 helper (thermo_d.cuh)
+    double Yt[THERMO_MAX_SPECIES];
+    wmles_transport_Y(roY, nSpecies, mixY, Y, liq, ic, Yt);
     flow_float mu_w, lam_w, cp_w, R_w;
     wmles_wall_props(thermalMethod, viscMethod, ga, cp_const, visc_const, thermCond_const,
-                     sp, nSpecies, Y, Tw, mu_w, lam_w, cp_w, R_w);
+                     sp, nSpecies, Y, Yt, transportOn, ttab, mixY ? nSpecies : 1, Tw, mu_w, lam_w, cp_w, R_w);
     const flow_float rho_w = p_w / (R_w * Tw);
     const flow_float Pr    = mu_w * cp_w / max(lam_w, kSmall);
 
@@ -236,6 +272,35 @@ __global__ void wmles_wall_model_d(
 }
 
 
+// 試験用 (FORGE_TRANSPORT_PROBE; tests/unit/test_transport_gpu.py)。計算経路からは呼ばない。
+//   境界面 ib の解点 ic で、壁モデルと同じ組成の取り出し (thermo_cell_Y + wmles_transport_Y) と同じ物性関数 (wmles_wall_props) を
+//   T_w = T[ic] で呼び、float の μ_w・λ_w と、同じ組成・温度での transport_mix_Y の double 値を書く。
+__global__ void wmles_transport_probe_d(
+    geom_int nb, geom_int* bplane_cell,
+    flow_float* T,
+    int thermalMethod, flow_float ga, flow_float cp_const,
+    const SpeciesThermo* sp, flow_float* const* roY, int nSpecies,
+    int viscMethod, flow_float visc_const, flow_float thermCond_const,
+    TransportTableD ttab, GasPhaseLiquid liq,
+    flow_float* mu_w_out, flow_float* lam_w_out, double* mu_out, double* lam_out)
+{
+    const geom_int ib = blockDim.x * blockIdx.x + threadIdx.x;
+    if (ib >= nb) return;
+    const geom_int ic = bplane_cell[ib];
+    const flow_float Tw = T[ic];
+    double Y[THERMO_MAX_SPECIES];
+    const bool mixY = thermo_cell_Y(roY, nSpecies, ic, Y);
+    if (!mixY) Y[0] = 1.0;
+    double Yt[THERMO_MAX_SPECIES];
+    wmles_transport_Y(roY, nSpecies, mixY, Y, liq, ic, Yt);
+    flow_float mu_w, lam_w, cp_w, R_w;
+    wmles_wall_props(thermalMethod, viscMethod, ga, cp_const, visc_const, thermCond_const,
+                     sp, nSpecies, Y, Yt, 1, ttab, mixY ? nSpecies : 1, Tw, mu_w, lam_w, cp_w, R_w);
+    mu_w_out[ib]  = mu_w;
+    lam_w_out[ib] = lam_w;
+    transport_mix_Y(sp, ttab, mixY ? nSpecies : 1, Yt, (double)Tw, &mu_out[ib], &lam_out[ib]);
+}
+
 } // namespace
 
 bool wmlesActiveForBcond(const solverConfig& cfg, const bcond& bc)
@@ -270,6 +335,7 @@ void applyWmlesWallModel(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , 
     if (!wmlesAnyActive(cfg, msh)) return;
 
     const int isNode = (cfg.discretization == "node" && msh.wall_flag_d != nullptr) ? 1 : 0;
+    const TransportTableD* ttab = thermo_transport_table();   // physProp.transport が無ければ nullptr (現行経路)
 
     // Newton 不収束カウンタ (一度だけ確保)
     static unsigned int* nonconv_d = nullptr;
@@ -320,6 +386,8 @@ void applyWmlesWallModel(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , 
             cfg.thermalMethod, cfg.gamma, cfg.cp,
             thermo_species_device_ptr(), species_roY_device_ptr(), cfg.nSpecies,
             cfg.viscMethod, cfg.visc, cfg.thermCond,
+            ttab ? 1 : 0, ttab ? *ttab : TransportTableD{0, 0, nullptr, nullptr, nullptr},
+            gasPhaseLiquid(cfg, var),
             cfg.wmlesNewtonTol, cfg.wmlesNewtonMaxIt,
             isothermal, bc.bvar_d["Ts"],
             bc.bvar_d["utau"], bc.bvar_d["ypls"],
@@ -343,4 +411,46 @@ void applyWmlesWallModel(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , 
             lastReported = h;
         }
     }
+}
+
+bool wmlesTransportProbe(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, WmlesTransportProbeOut& out)
+{
+    const TransportTableD* ttab = thermo_transport_table();
+    out = WmlesTransportProbeOut{};
+    if (ttab == nullptr) return false;
+    for (size_t b = 0; b < msh.bconds.size(); ++b) {
+        bcond& bc = msh.bconds[b];
+        const geom_int nb = static_cast<geom_int>(bc.iPlanes.size());
+        if (nb == 0) continue;
+        flow_float *mw = nullptr, *lw = nullptr;
+        double *md = nullptr, *ld = nullptr;
+        gpuErrchk(cudaMalloc(&mw, nb*sizeof(flow_float)));
+        gpuErrchk(cudaMalloc(&lw, nb*sizeof(flow_float)));
+        gpuErrchk(cudaMalloc(&md, nb*sizeof(double)));
+        gpuErrchk(cudaMalloc(&ld, nb*sizeof(double)));
+        const int bs = 128;
+        wmles_transport_probe_d<<<(nb + bs - 1)/bs, bs>>>(
+            nb, bc.map_bplane_cell_d, var.c_d["T"],
+            cfg.thermalMethod, cfg.gamma, cfg.cp,
+            thermo_species_device_ptr(), species_roY_device_ptr(), cfg.nSpecies,
+            cfg.viscMethod, cfg.visc, cfg.thermCond, *ttab, gasPhaseLiquid(cfg, var), mw, lw, md, ld);
+        gpuErrchk( cudaPeekAtLastError() );
+        gpuErrchkKernelSync();
+        std::vector<flow_float> hmw(nb), hlw(nb);
+        std::vector<double> hmd(nb), hld(nb);
+        gpuErrchk(cudaMemcpy(hmw.data(), mw, nb*sizeof(flow_float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(hlw.data(), lw, nb*sizeof(flow_float), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(hmd.data(), md, nb*sizeof(double), cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(hld.data(), ld, nb*sizeof(double), cudaMemcpyDeviceToHost));
+        cudaFree(mw); cudaFree(lw); cudaFree(md); cudaFree(ld);
+        for (geom_int ib = 0; ib < nb; ++ib) {
+            out.bcond.push_back(static_cast<int>(b));
+            out.cell.push_back(static_cast<long long>(bc.iCells[ib]));
+            out.mu_w.push_back(hmw[ib]);
+            out.lam_w.push_back(hlw[ib]);
+            out.mu.push_back(hmd[ib]);
+            out.lam.push_back(hld[ib]);
+        }
+    }
+    return true;
 }

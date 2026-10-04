@@ -36,7 +36,9 @@ __global__ void updateVariablesOuter_d
  flow_float* roUzM ,
  flow_float* roeM ,
  flow_float* roKM ,
- flow_float* roOmegaM 
+ flow_float* roOmegaM ,
+ double* qacc_ro , double* qacc_roUx , double* qacc_roUy , double* qacc_roUz , double* qacc_roe ,
+ int* qaccAdopt
 );
 
 void updateVariablesOuter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);
@@ -86,7 +88,8 @@ __global__ void applyScalarImplicitCorrection_d
  flow_float* dq_roUx,
  flow_float* dq_roUy,
  flow_float* dq_roUz,
- flow_float* dq_roe
+ flow_float* dq_roe,
+ double* qacc_ro , double* qacc_roUx , double* qacc_roUy , double* qacc_roUz , double* qacc_roe
 );
 
 void applyScalarImplicitCorrection_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);
@@ -115,7 +118,8 @@ __global__ void applyBlockImplicitCorrection_d
  flow_float* dq_block_3,
  flow_float* dq_block_4,
  geom_int* axis_flag,
- flow_float updateGuardAlpha
+ flow_float updateGuardAlpha ,
+ double* qacc_ro , double* qacc_roUx , double* qacc_roUy , double* qacc_roUz , double* qacc_roe
 );
 
 void applyBlockImplicitCorrection_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);

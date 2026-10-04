@@ -1,0 +1,12 @@
+reference floor from run_0036_r1_gradfix_old (normal criterion PASS at step 799999; tail 20% mean), factor 1.5; columns ['rms_ro', 'rms_roK', 'rms_roOmega', 'rms_roUx', 'rms_roUy', 'rms_roUz', 'rms_roe']; inactive []
+
+=== run_0038_r1_gradfix_old_ext  [last step 799999]  -> NOT CONVERGED (residual left the reference floor, or column mismatch) ===
+  rms_ro      : ref_floor=3.87e-10 tail=3.83e-10 (x0.99) peak=3.90e-10 (x1.01) fin=3.83e-10
+  rms_roUx    : ref_floor=4.18e-08 tail=4.10e-08 (x0.98) peak=4.30e-08 (x1.03) fin=4.07e-08
+  rms_roUy    : ref_floor=4.66e-08 tail=4.60e-08 (x0.99) peak=4.71e-08 (x1.01) fin=4.59e-08
+  rms_roUz    : ref_floor=2.92e-08 tail=2.85e-08 (x0.98) peak=2.99e-08 (x1.02) fin=2.84e-08
+  rms_roe     : ref_floor=1.03e-04 tail=1.03e-04 (x1.00) peak=1.04e-04 (x1.01) fin=1.03e-04
+  rms_roK     : ref_floor=3.29e-09 tail=3.11e-09 (x0.94) peak=1.34e-06 (x408.52) fin=3.06e-09  <-- ABOVE FLOOR (peak)
+  rms_roOmega : ref_floor=1.25e-03 tail=1.25e-03 (x1.00) peak=1.44e-03 (x1.15) fin=1.29e-03
+
+OVERALL: CHECK FAILURES ABOVE

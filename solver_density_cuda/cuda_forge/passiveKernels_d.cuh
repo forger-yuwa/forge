@@ -12,7 +12,8 @@ __global__ void species_advection_faceY_d(
     flow_float* ro, flow_float* massflux, int nSpecies, flow_float* Yface,
     flow_float** res_roY, flow_float** transport_diag,
     int isNode, flow_float** roY,
-    int stride)   // Yface の面ストライド (化学種 = nSpecies; 受動種は部分範囲を Yface+q0, stride=nPassive で呼ぶ)
+    int stride,   // Yface の面ストライド (化学種 = nSpecies; 受動種は部分範囲を Yface+q0, stride=nPassive で呼ぶ)
+    flow_float* const* ffY = nullptr)   // 遠方境界 farfield の面の値 (化学種ごと、farfield 以外は NaN、nullptr = 無し)
 {
     geom_int ih = blockDim.x*blockIdx.x + threadIdx.x;
     if (ih < nNormalHaloPlanes) {
@@ -26,9 +27,13 @@ __global__ void species_advection_faceY_d(
         // 未書込 (stale)。node は ghost を読まない設計なので、境界ノード ic0 自身の組成を面組成に使う。
         const bool nodeBnd = (isNode != 0 && ic1 >= nCells);
         for (int s = 0; s < nSpecies; ++s) {
-            const flow_float Yf = nodeBnd
+            flow_float Yf = nodeBnd
                 ? (roY[s][ic0] / max(ro[ic0], (flow_float)1.0e-30))
                 : Yface[(size_t)ip*stride + s];     // 内部面 upwind は convectiveFlux 側で確定済み
+            if (nodeBnd && ffY != nullptr && mdot < (flow_float)0.0) {   // farfield 面の流入は外側状態の組成
+                const flow_float v = ffY[s][ip];
+                if (isfinite(v)) Yf = v;
+            }
             const flow_float flux = mdot * Yf;
             if (ic0 < nCells) { atomicAdd(&res_roY[s][ic0], -flux); atomicAdd(&transport_diag[s][ic0], d0); }
             if (ic1 < nCells) { atomicAdd(&res_roY[s][ic1],  flux); atomicAdd(&transport_diag[s][ic1], d1); }
@@ -47,7 +52,8 @@ __global__ void species_advection_faceY_d(
 // member を数えると合併 CV が二重計上される)。クランプ自体は全ノードに掛ける (member は後段のミラーで root に揃う)。
 __global__ void passive_bounds_d(
     geom_int nCells, flow_float* rophi, int upperIsRho, flow_float* ro, geom_float* vol,
-    flow_float* corrCell, double* stats, const geom_int* root)
+    flow_float* corrCell, double* stats, const geom_int* root,
+    double* tcAcc = nullptr, int tcComp = -1)   // #4h の補正計測 (二相の更新ごと; 段 1 = 受動種の床): 成分 tcComp に |Δ|V、液 (2) なら蒸気 (1) にも
 {
     const geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
     double lo = 0.0, hi = 0.0, ab = 0.0, tot = 0.0;
@@ -68,6 +74,10 @@ __global__ void passive_bounds_d(
             }
         }
         if (count) tot = (double)v*V;
+        if (tcAcc != nullptr && tcComp >= 0 && count && d != 0.0) {
+            atomicAdd(&tcAcc[1*6 + tcComp], fabs(d)*V);
+            if (tcComp == 2) atomicAdd(&tcAcc[1*6 + 1], fabs(d)*V);   // 液の床は総水分を変えないので蒸気が同じ量だけ変わる
+        }
     }
     // block 縮約 → 1 block 1 回の atomicAdd (double)。
     __shared__ double sh[4][32];

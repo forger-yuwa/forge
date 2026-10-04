@@ -5,6 +5,7 @@
 //     の定義をここに置くため、他 TU から include しないこと (多重定義になる)。
 //   - sign_sano は betaPls_slau/betaMns_slau より前に置き正順で参照させる。
 // =============================================================================
+#include "cuda_forge/reconIncrement_d.cuh"
 
 
 // free-stream 保存: 対流流束の圧力項を (p_tilde - d_pRef)*s で組むための基準静圧。
@@ -41,6 +42,17 @@ __device__ int g_faceThermoY = 0;
 // 壁法線勾配 (∂φ/∂r Δ) が接線面の面値に混入する。高 AR (y+1) で不安定 (case/43 run_0042 等)。
 // 1 で dc0p = ½(cc1−cc0), dc1p = −½(cc1−cc0)。cell/既定 0 でビット不変。内部面のみ (境界半割面は従来)。
 __device__ int g_reconEdgeMid = 0;
+// 局所帳簿ダンプ (env FORGE_DUMP_LEDGER、既定 off = g_ledgerFlag nullptr でビット不変。出力専用。
+// plan tooling-nozzle-sern-3d §5.1 R5h): 印の付いた節点に接する面の再構成状態・chi・流束を面ごとに記録する。
+#define LEDGER_FACE_NF 40
+__device__ const unsigned char* g_ledgerFlag = nullptr;
+__device__ float*        g_ledgerFaceBuf   = nullptr;
+__device__ unsigned int  g_ledgerFaceCount = 0;
+__device__ unsigned int  g_ledgerFaceCap   = 0;
+// 診断介入 (env FORGE_DIAG_FACE_VEL_CELL="<面 ID>:<節点 ID>"、既定 -1 = off でビット不変)。**数値を変える診断**:
+// 指定面の指定節点側の再構成速度 3 成分だけをセル値に戻す (plan tooling-nozzle-sern-3d §5.1 R5h の 1 変数 A/B)。生産で使わない。
+__device__ long long g_diagVelCellFace = -1;
+__device__ long long g_diagVelCellNode = -1;
 // speciesFaceReconstruction==1: Y_s を ρ/Y 勾配 + min(ψ_ρ,ψ_Y) で face へ再構成し thermo/species 流束で
 // 同一 face 組成を使う (proper S2/S3)。wrapper で cfg.speciesFaceReconstruction を設定。
 __device__ int g_speciesFaceRecon = 0;
@@ -57,6 +69,20 @@ __device__ unsigned long long g_psiRhoY_lt01  = 0;      // ψ_ρY<0.1  の face-
 __device__ unsigned long long g_rhoYMinByRho     = 0;   // min を ρ が決めた face-side 数
 __device__ unsigned long long g_rhoYMinBySpecies = 0;   // min を species が決めた face-side 数
 __device__ unsigned long long g_rhoYFallback = 0;       // 非実現可能で cell 値へ fallback した face-side 数
+// W2 (plan convection-node-wall-reconstruction §4.23 / §6.4 V1): 面単位の非物理な再構成の**発火計測**。
+// 既定 0 で atomicAdd は一切走らない。フォールバック本体は V1 で発火の実在を確かめてから入れる。
+__device__ int   g_badReconDiag  = 0;      // 1 で計測 ON (space.badReconDiag)
+__device__ flow_float g_badReconRoMin = 0.0f;   // ρ の床 (physProp.roMin)
+__device__ flow_float g_badReconPMin  = 0.0f;   // P の床 (physProp.pMin)
+__device__ unsigned long long g_badReconFaces = 0;   // ρ か P が床以下になった面の数
+__device__ unsigned long long g_badReconRo    = 0;   // うち ρ が床以下
+__device__ unsigned long long g_badReconP     = 0;   // うち P が床以下
+__device__ unsigned long long g_badReconTotal = 0;   // 判定した面の総数 (分母)
+// フォールバック本体 (§4.23): 発火した面を N 回の訪問だけ 1 次に落とす。SU2 `UpdateNonPhysicalEdgeCounter` と同一。
+__device__ int g_badReconHyst = 0;                   // 0 = OFF、N = 1 次に落とす訪問回数 (SU2 は 20)
+__device__ signed char* g_badReconCnt = nullptr;     // 面ごとのカウンタ (size = nPlanes)
+__device__ unsigned long long g_badReconActive = 0;  // カウンタが生きていて 1 次化した面の数
+
 __device__ int g_Yface_min_scaled =  2000000;           // min(Y_face)·1e6 (atomicMin)
 __device__ int g_Yface_max_scaled = -2000000;           // max(Y_face)·1e6 (atomicMax)
 
@@ -77,7 +103,8 @@ __device__ flow_float interp_MUSCL_2nd(int scheme, int limit_scheme,
     flow_float r;
     flow_float psi_r;
 
-    phif = phiC + limiter*(dphidx*cpdx +dphidy*cpdy +dphidz*cpdz);
+    // 増分は recon_increment (reconIncrement_d.cuh) が唯一の定義。リミッタも同じ関数を呼ぶ。
+    phif = phiC + limiter*recon_increment(1, phiC, phiD, dphidx, dphidy, dphidz, cpdx, cpdy, cpdz);
 
     return phif;
 };
@@ -96,8 +123,8 @@ __device__ flow_float interp_MUSCL_3rd(int scheme, int limit_scheme,
     flow_float r;
     flow_float psi_r;
 
-    k = 1.0f/3.0f;
-    phif = phiC + limiter*(0.5f*k*(phiD-phiC) +(1.0f-k)*(dphidx*cpdx +dphidy*cpdy +dphidz*cpdz));
+    (void)k;
+    phif = phiC + limiter*recon_increment(2, phiC, phiD, dphidx, dphidy, dphidz, cpdx, cpdy, cpdz);
 
     return phif;
 };
@@ -252,10 +279,15 @@ struct FaceGeom {
     geom_float *pcx, *pcy, *pcz, *fx;
     geom_float *sx, *sy, *sz, *ss;
     flow_float* massflux;
+    // node の壁ノードフラグ [nCells] (cell 方式・未設定では nullptr)。space.slauWallNormalChi が読む。
+    // ゴースト index (>= nCells) には無いので参照前に範囲で弾くこと。
+    geom_int*   wall_flag = nullptr;
 };
 struct PrimState {
     flow_float *ro, *roUx, *roUy, *roUz, *roe;
     flow_float *Ux, *Uy, *Uz, *Ps, *Ht, *sonic;
+    // space.reconT=1 で MUSCL 再構成を ρ でなく T に対して行うときの温度場 (0 では未使用)。
+    flow_float *T = nullptr;
 };
 struct ResidualOut {
     flow_float *res_ro, *res_roUx, *res_roUy, *res_roUz, *res_roe;
@@ -263,6 +295,7 @@ struct ResidualOut {
 struct LimiterFields {
     flow_float *limiter_ro, *limiter_Ux, *limiter_Uy, *limiter_Uz, *limiter_P;
     flow_float *ducros;
+    flow_float *limiter_T = nullptr;   // space.reconT=1 のみ (nullptr なら limiter_P を流用)
 };
 struct GradFields {
     flow_float *drodx, *drody, *drodz;
@@ -270,6 +303,8 @@ struct GradFields {
     flow_float *dUydx, *dUydy, *dUydz;
     flow_float *dUzdx, *dUzdy, *dUzdz;
     flow_float *dPdx, *dPdy, *dPdz;
+    // space.reconT=1 用 (0 では未使用)。
+    flow_float *dTdx = nullptr, *dTdy = nullptr, *dTdz = nullptr;
 };
 // 非平衡凝縮 (二相) のエネルギー流束補正。g_total==nullptr で従来挙動 (ビット不変)。全スキーム共通。
 struct CondArgs {

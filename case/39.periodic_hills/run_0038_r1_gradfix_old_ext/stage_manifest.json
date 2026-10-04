@@ -1,0 +1,107 @@
+{
+  "manifest_version": 2,
+  "stages": [
+    {
+      "order": 0,
+      "tag": "S1_spin",
+      "history": "../run_0036_r1_gradfix_old/residual_history_S1_spin.csv",
+      "restart_from": null,
+      "key": {
+        "convMethod": "0",
+        "limiter": "2",
+        "wallTreatmentSST": "0",
+        "viscMethod": "0",
+        "thermalMethod": "0",
+        "unsteady": "0",
+        "dualTime": "0",
+        "turbulence.model": "sst",
+        "turbulence.wallTreatmentSST": "0",
+        "space.convMethod": "0",
+        "space.limiter": "2",
+        "time.unsteady": "0",
+        "time.dualTime": "0",
+        "solver": "SLAU",
+        "space.slauWallNormalChi.effective": "0",
+        "bcond_sha1": "c5eb146c1971",
+        "conjugate.enabled": "0"
+      },
+      "cfg_fnv": "b77cd292a771fc43",
+      "chi_source": "explicit",
+      "soft": {
+        "cfl": "2.0",
+        "cfl_pseudo": "2.0",
+        "nStepInner": "5",
+        "nStepOuter": "2000",
+        "implicitRelax": "0.5"
+      }
+    },
+    {
+      "order": 1,
+      "tag": "S2_dev",
+      "history": "../run_0036_r1_gradfix_old/residual_history_S2_dev.csv",
+      "restart_from": "S1_spin",
+      "key": {
+        "convMethod": "0",
+        "limiter": "2",
+        "wallTreatmentSST": "0",
+        "viscMethod": "0",
+        "thermalMethod": "0",
+        "unsteady": "0",
+        "dualTime": "0",
+        "turbulence.model": "sst",
+        "turbulence.wallTreatmentSST": "0",
+        "space.convMethod": "0",
+        "space.limiter": "2",
+        "time.unsteady": "0",
+        "time.dualTime": "0",
+        "solver": "SLAU",
+        "space.slauWallNormalChi.effective": "0",
+        "bcond_sha1": "c5eb146c1971",
+        "conjugate.enabled": "0"
+      },
+      "cfg_fnv": "e3ff8eee39c089df",
+      "chi_source": "explicit",
+      "soft": {
+        "cfl": "2.0",
+        "cfl_pseudo": "2.0",
+        "nStepInner": "5",
+        "nStepOuter": "800000",
+        "implicitRelax": "0.5"
+      }
+    },
+    {
+      "order": 2,
+      "tag": "S3_ext",
+      "history": "residual_history.csv",
+      "restart_from": "S2_dev",
+      "key": {
+        "convMethod": "0",
+        "limiter": "2",
+        "wallTreatmentSST": "0",
+        "viscMethod": "0",
+        "thermalMethod": "0",
+        "unsteady": "0",
+        "dualTime": "0",
+        "turbulence.model": "sst",
+        "turbulence.wallTreatmentSST": "0",
+        "space.convMethod": "0",
+        "space.limiter": "2",
+        "time.unsteady": "0",
+        "time.dualTime": "0",
+        "solver": "SLAU",
+        "space.slauWallNormalChi.effective": "0",
+        "bcond_sha1": "c5eb146c1971",
+        "conjugate.enabled": "0"
+      },
+      "cfg_fnv": "dbfa1c922052edbb",
+      "chi_source": "explicit",
+      "soft": {
+        "cfl": "2.0",
+        "cfl_pseudo": "2.0",
+        "nStepInner": "5",
+        "nStepOuter": "800000",
+        "implicitRelax": "0.5"
+      }
+    }
+  ]
+}

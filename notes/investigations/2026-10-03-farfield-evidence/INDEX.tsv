@@ -1,0 +1,148 @@
+group	run	bin	head	conv	gates	steady	ff_hll/vac	nan
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0001_v1a	778179984023	c758e59d	=== .  [last step 1999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0002_v1b	778179984023	c758e59d	=== .  [last step 1999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===			0/2600000	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0003_v1c	778179984023	c758e59d	=== .  [last step 1999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===			0/1300000	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0004_v1d	size 75811672		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0005_v1b_fix	size 75811672		=== run_0005_v1b_fix  [last step 1999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more step			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0006_v1c_fix	size 75811672		=== run_0006_v1c_fix  [last step 1999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more step			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0030_v2b_x_ek0	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0030_v2b_x_ek0_bal	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0031_v2b_x_ek1	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0031_v2b_x_ek1_bal	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0032_v2b_obl_ek0	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0032_v2b_obl_ek0_bal	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0033_v2b_obl_ek1	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0033_v2b_obl_ek1_bal	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0034_v2b_x_sfr2	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0034_v2b_x_sfr2_bal	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0035_v2b_obl_sfr2	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0035_v2b_obl_sfr2_bal	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0036_v2f	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0036_v2f_bal	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0040_v2a_m03_ff_short	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0041_v2a_m03_long	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0042_v2a_m03_ff_short_slau2	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0043_v2a_m03_long_slau2	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0044_v2a_m03_ff_short_nsub40	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0045_v2a_m03_ff_short_dthalf	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0046_v2a_m0_slip_short	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0047_v2a_m0_long	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0048_v2a_m0_ff_short	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0050_v2e_v1b_expl	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0051_v2e_v2b_x_expl	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0051_v2e_v2b_x_expl_bal	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0052_v2e_v2a_sst_ek0_short	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0053_v2e_v2a_sst_ek0_long	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0054_v2e_v2a_sst_ek1_short	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0055_v2e_v2a_sst_ek1_long	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0070_v2d_cpg_contact_short	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0071_v2d_cpg_contact_long	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0072_v2d_cpg_ac_nopulse	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0073_v2d_cpg_ac_short	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0074_v2d_cpg_ac_long	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0075_v2d_tp1_contact_short	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0076_v2d_tp1_contact_long	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0077_v2d_tp1_ac_nopulse	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0078_v2d_tp1_ac_short	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0079_v2d_tp1_ac_long	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0080_v2d_tp2_contact_short	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0081_v2d_tp2_contact_long	size 75874648		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0110_v2d2_cpg_nop_short	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0111_v2d2_cpg_nop_long	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0112_v2d2_cpg_short	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0113_v2d2_cpg_long	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0114_v2d2_tp1_nop_short	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0115_v2d2_tp1_nop_long	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0116_v2d2_tp1_short	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0117_v2d2_tp1_long	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0118_v2d2_tp2_nop_short	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0119_v2d2_tp2_nop_long	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0120_v2d2_tp2_short	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0121_v2d2_tp2_long	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0122_v2d2_tp2_short_dthalf	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0130_v2d2_cpg_nop_short_dt2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0131_v2d2_cpg_nop_long_dt2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0132_v2d2_cpg_short_dt2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0133_v2d2_cpg_long_dt2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0134_v2d2_tp1_nop_short_dt2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0135_v2d2_tp1_nop_long_dt2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0136_v2d2_tp1_short_dt2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0137_v2d2_tp1_long_dt2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0138_v2d2_tp2_nop_short_dt2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0139_v2d2_tp2_nop_long_dt2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0140_v2d2_tp2_short_dt2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0141_v2d2_tp2_long_dt2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0142_v2d2_tp2_short_dt4	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0150_v2c_ord_A2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0151_v2c_ord_B1	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0152_v2d2_tp2_short_dt4_n20	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0153_v2d2_tp2_short_dt4_n40	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0154_v2c_res_A2_init	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0155_v2c_res_A2_final	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0156_v2c_res_B1_init	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0157_v2c_res_B1_final	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0158_v2d2_n20_rep2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0159_v2d2_n20_rep3	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0160_v2d2_n40_rep2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0161_v2d2_n40_rep3	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0162_v2c_B_1to2	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0163_v2c_res_1to2_final	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0164_v2c_B_1to2_c12k	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0164_v2c_B_1to2_c12k_res	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0165_v2c_B_1to2_c18k	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0165_v2c_B_1to2_c18k_res	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0166_v2c_B_1to2_c24k	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V0-V2	~/forge-pgrad-new/case/58.farfield_verification/run_0166_v2c_B_1to2_c24k_res	size 75872688		(なし)			0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0980_r5h_bitcheck_old	dcd17eb3bcaa	c758e59d	=== .  [last step 1]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===			0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0981_r5h_bitcheck_off	2bb57d73bc58	c758e59d	=== .  [last step 1]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===			0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0982_r5h_vel_alpha1	11912cc530e1	c758e59d	=== .  [last step 1]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===			0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0983_r5h_vel_alpha0	11912cc530e1	c758e59d	=== .  [last step 1]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===			0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0984_r5h_sens_alpha0	11912cc530e1	c758e59d	=== .  [last step 15999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0985_r5h_sens_alpha1	11912cc530e1	c758e59d	=== .  [last step 15999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0986_r4d_g3_base	dcd17eb3bcaa	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0987_r4d_g3_zapp075	dcd17eb3bcaa	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0988_r4d_g3_zapp075_cont20k	dcd17eb3bcaa	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0989_r4d_g3_zapp18	dcd17eb3bcaa	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0990_r4d_g3_zapp35	dcd17eb3bcaa	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0991_ff_v0_new	778179984023	c758e59d	=== .  [last step 0]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===			0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0991_ff_v0_old	dcd17eb3bcaa	c758e59d	=== .  [last step 0]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===			0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0992_ff_v3a_2p50_slip	b0240cd7f9d0	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0993_ff_v3a_2p50_ff	b0240cd7f9d0	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0994_ff_v3b_3p42_ff	b0240cd7f9d0	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0995_ff_v3b_4p35_ff	b0240cd7f9d0	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0996_ff_v3a_2p50_ff_cont20k	b0240cd7f9d0	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0997_ff_v3ic_A_from2p50	b0240cd7f9d0	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0998_ff_v3ic_B_from3p42	b0240cd7f9d0	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_0999_ff_g4_2p50_ff	b0240cd7f9d0	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_1000_ff_g4_2p50_slip	b0240cd7f9d0	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_1001_ff_g4_2p50_ff_cont20k	b0240cd7f9d0	c758e59d	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_1002_r8A_1	b0240cd7f9d0	c758e59d	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_1003_r8A_2	b0240cd7f9d0	c758e59d	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-pgrad-new/case/46.sern_design/run_1004_r8A_3	b0240cd7f9d0	c758e59d	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1005_r8B_1	dc56091055f0	8b87c0e7	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1006_r8B_2	dc56091055f0	8b87c0e7	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1007_r8B_3	dc56091055f0	8b87c0e7	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1008_r8C_tr_1	dc56091055f0	802a0c43	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1009_r8C_tr_2	dc56091055f0	802a0c43	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1010_r8C_tr_3	dc56091055f0	802a0c43	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1011_prod3d_ff_tr	dc56091055f0	d0afda17	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1012_prod3d_ff_tr_cont20k	dc56091055f0	d0afda17	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1013_prod3d_ff_suth_ctrl	dc56091055f0	d0afda17	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1014_r9_1	2ac853cf3ef4	dba4b582	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1015_r9_2	2ac853cf3ef4	dba4b582	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1016_r9_3	2ac853cf3ef4	dba4b582	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1017_ff4f_g3_2p50	2ac853cf3ef4	81f1e6e4	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1018_ff4f_g4_2p50	2ac853cf3ef4	81f1e6e4	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1019_ff4f_g3_3p42	2ac853cf3ef4	81f1e6e4	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1020_ff4f_g3_4p35	2ac853cf3ef4	81f1e6e4	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1021_ff4f_g4_2p50_cont20k	2ac853cf3ef4	81f1e6e4	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1022_ff4f_g3_3p42_cont20k	2ac853cf3ef4	81f1e6e4	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1023_ff4f_g3_4p35_cont20k	2ac853cf3ef4	81f1e6e4	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1024_r9b_1	bec8db5f2ae3	4222c1d3	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1025_r9b_2	bec8db5f2ae3	4222c1d3	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1026_r9b_3	bec8db5f2ae3	4222c1d3	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1027_r9b_3d_g3_2p50	bec8db5f2ae3	4222c1d3	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1028_lj_g4_legacy	bec8db5f2ae3	4222c1d3	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1029_lj_g4_default	bec8db5f2ae3	4222c1d3	=== .  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1030_r10_1	ee6f0c092a05	4d5da76c	=== .  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===	PASS	C_T_with_shear:STEADY,C_T:STEADY,C_L:STEADY,C_M:STEADY	0/0 (表示なし=増加なし)	なし
+V3/#4	~/forge-r8/case/46.sern_design/run_1031_ff_mom_dump	ee6f0c092a05	4d5da76c	=== .  [last step 0]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===			0/0 (表示なし=増加なし)	なし

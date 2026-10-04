@@ -42,6 +42,9 @@ DV_ORDER = ("M_c", "f", "theta_r0_deg", "theta_c0_deg", "L_cowl")
 GATE_KEYS = ("C_T", "C_L", "C_M")
 
 
+# slauWallNormalChi の既定変更 (runner_sern.FLAG_POLICY と同じ値)
+from ..evaluate.runner_sern import FLAG_POLICY  # noqa: E402
+
 class DesignInfeasible(ValueError):
     """物理的に成立しない候補 (逆設計不成立 / L_ramp_max 超過)。数値失敗と区別する (R1)。"""
 
@@ -61,6 +64,21 @@ class _KrgBoth:
         return self.krg.predict(np.atleast_2d(np.asarray(X, dtype=float)))
 
 
+REQUIRED_SCALAR_GRADIENT = "lsq"
+REQUIRED_WALL_NORMAL_CHI = 1   # 2026-09-26 から node+SLAU の既定 (auto)。明示 0 の評価は別の応答関数なので混ぜない
+
+
+def _learnable(r: dict) -> bool:
+    """学習・Pareto に使ってよい行: PASS・現行の flag_policy・全作動点の実効 scalarGradient が lsq かつ実効 chi が 1。
+    不明 (None) は除外 (codex result 2026-09-27 chi-default M4: 日付と scalarGradient だけでは chi 0/1/不明が混ざる)。"""
+    if r.get("status") != "PASS" or r.get("flag_policy") != FLAG_POLICY:
+        return False
+    ops = r.get("ops") or {}
+    return bool(ops) and all(o.get("scalar_gradient_effective") == REQUIRED_SCALAR_GRADIENT
+                             and o.get("slau_wall_normal_chi_effective") in (REQUIRED_WALL_NORMAL_CHI, str(REQUIRED_WALL_NORMAL_CHI))
+                             for o in ops.values())
+
+
 class SernCampaign:
     def __init__(self, base_yaml, campaign_dir, ref=(-0.90, 20.0), seed: int = 0) -> None:
         self.base_yaml = Path(base_yaml); self.dir = Path(campaign_dir); self.dir.mkdir(parents=True, exist_ok=True)
@@ -71,6 +89,13 @@ class SernCampaign:
         self.optcfg = self.base_raw.get("opt", {})
         self.ledger = self.dir / "ledger.jsonl"
         self.rows = [json.loads(l) for l in self.ledger.read_text().splitlines() if l.strip()] if self.ledger.exists() else []
+        _old = sum(1 for r in self.rows if r.get("status") == "PASS" and r.get("flag_policy") != FLAG_POLICY)
+        if _old:
+            print(f"[campaign] flag_policy が {FLAG_POLICY} でない PASS 行 {_old} 件を学習から除外 "
+                  f"(既定変更前の評価: slauWallNormalChi 2026-09-26 / scalarGradient 2026-09-27)", flush=True)
+        _nolsq = sum(1 for r in self.rows if r.get("status") == "PASS" and r.get("flag_policy") == FLAG_POLICY and not _learnable(r))
+        if _nolsq:
+            print(f"[campaign] 実効 scalarGradient (lsq) / slauWallNormalChi (1) が全作動点で確認できない PASS 行 {_nolsq} 件を学習から除外", flush=True)
 
     def _write_problem(self, x, path: Path) -> Path:
         raw = json.loads(json.dumps(self.base_raw))
@@ -158,6 +183,8 @@ class SernCampaign:
         return {"C_T": out.get(g.get("objective", "C_T"), out.get("C_T")), "C_T_p": out.get("C_T"), "C_L": out.get("C_L"), "C_M": out.get("C_M"),
                 "step": out.get("step"), "run_dir": str(rd), "sep_frac_ramp": out.get("sep_frac_ramp"), "sep_x_min_ramp": out.get("sep_x_min_ramp"),
                 "forge_rc": out.get("forge_rc"), "gate": g.get("verdict"), "gate_fail_class": g.get("fail_class"),
+                "slau_wall_normal_chi_effective": out.get("slau_wall_normal_chi_effective"), "flag_policy": out.get("flag_policy"),
+                "scalar_gradient_effective": out.get("scalar_gradient_effective"),
                 "residual": g.get("residual", {}).get("verdict"), "objective": g.get("objective"),
                 "steadiness": {k: v.get("verdict") for k, v in g.get("steadiness", {}).get("series", {}).items()}}
 
@@ -178,7 +205,8 @@ class SernCampaign:
     def evaluate(self, x, tag: str) -> dict:
         x = [float(v) for v in np.asarray(x, dtype=float)]
         t0 = time.time(); prob = self._write_problem(x, self.dir / f"{tag}.yaml")
-        row = {"tag": tag, "x": x, "status": "FAIL", "fail_class": None, "ops": {}, "note": "", "degraded": False, "degraded_ops": []}
+        row = {"tag": tag, "x": x, "status": "FAIL", "fail_class": None, "ops": {}, "note": "", "degraded": False, "degraded_ops": [],
+               "flag_policy": FLAG_POLICY}
         try:
             ct_w, L_ramp, cm_w, wsum = 0.0, None, 0.0, 0.0
             for o in self.ops:
@@ -222,7 +250,11 @@ class SernCampaign:
         return row
 
     def _XF(self):
-        ok = [r for r in self.rows if r["status"] == "PASS"]
+        # slauWallNormalChi の既定変更 (2026-09-26) 前後の評価を同じ応答関数として学習しない (plan
+        # convection-slau-wall-normal-chi-default §4.4、codex plan M3)。flag_policy の無い旧行と不一致の行は除外する。
+        # さらに mesh.scalarGradient の node 既定 lsq 化 (2026-09-27) 以降は、**全作動点の実効値が lsq と確認できた行だけ**を使う
+        # (日付の一致だけでは gg 評価・不明が混ざる。codex diagnose 2026-09-27、plan gradient-scalar-lsq-unification #6)。
+        ok = [r for r in self.rows if _learnable(r)]
         X = np.array([r["x"] for r in ok]); F = np.array([[-r["C_T_w"], r["L_ramp"]] for r in ok])
         return X, F
 
@@ -258,7 +290,8 @@ class SernCampaign:
     def summary(self, rows=None) -> dict:
         """Pareto 要約。**degraded / tag / 作動点ごとのゲート要約を落とさない** (R1: pareto.json でも追える)。"""
         rows = self.rows if rows is None else rows
-        ok = [r for r in rows if r["status"] == "PASS"]
+        # Pareto・HV の母集団も学習と同じ選別 (codex result 2026-09-27 M2: 学習から外した gg・旧方針の行が Pareto に混ざっていた)
+        ok = [r for r in rows if _learnable(r)]
         X = np.array([r["x"] for r in ok]); F = np.array([[-r["C_T_w"], r["L_ramp"]] for r in ok])
         pareto = []
         if len(ok):
@@ -266,13 +299,18 @@ class SernCampaign:
                 r = ok[i]
                 pareto.append({"tag": r["tag"], "x": dict(zip(DV_ORDER, X[i].tolist())), "C_T_w": float(-F[i, 0]), "L_ramp": float(F[i, 1]),
                                "C_M_w": r["C_M_w"], "degraded": bool(r.get("degraded")), "degraded_ops": r.get("degraded_ops", []),
-                               "ops": {op: {k: v.get(k) for k in ("C_T", "C_M", "gate", "residual", "steadiness")} for op, v in r.get("ops", {}).items()}})
+                               "flag_policy": r.get("flag_policy"),
+                               "ops": {op: {k: v.get(k) for k in ("C_T", "C_M", "gate", "residual", "steadiness", "scalar_gradient_effective")}
+                                       for op, v in r.get("ops", {}).items()}})
         pareto.sort(key=lambda r: r["L_ramp"])
         classes = {}
         for r in rows:
             k = r["status"] + ("/" + r["fail_class"] if r.get("fail_class") else "")
             classes[k] = classes.get(k, 0) + 1
-        return {"n_eval": len(rows), "n_pass": int(len(ok)), "n_degraded": int(sum(1 for r in ok if r.get("degraded"))),
+        n_status_pass = sum(1 for r in rows if r["status"] == "PASS")
+        return {"n_eval": len(rows), "n_pass": int(len(ok)), "n_pass_excluded_by_policy": int(n_status_pass - len(ok)),
+                "flag_policy": FLAG_POLICY, "required_scalar_gradient": REQUIRED_SCALAR_GRADIENT,
+                "n_degraded": int(sum(1 for r in ok if r.get("degraded"))),
                 "hv": (hypervolume2d(F, self.ref) if len(ok) else 0.0), "ref": self.ref, "status_counts": classes,
                 "gate_policy": "R1: rc==0 + finite field + residual no NaN/rising + objective & C_T/C_L/C_M STEADY (no divergent adoption)",
                 "operating_points": self.ops, "pareto": pareto}
@@ -286,7 +324,8 @@ class SernCampaign:
         for r0 in self.rows:
             tag = r0["tag"]; prob = self.dir / f"{tag}.yaml"
             row = {"tag": tag, "x": r0["x"], "status": "FAIL", "fail_class": None, "ops": {}, "note": "", "degraded": False, "degraded_ops": [],
-                   "old_status": r0["status"], "old_fail_class": r0.get("fail_class"), "old_C_T_w": r0.get("C_T_w")}
+                   "old_status": r0["status"], "old_fail_class": r0.get("fail_class"), "old_C_T_w": r0.get("C_T_w"),
+                   "flag_policy": r0.get("flag_policy")}   # 評価時の方針を引き継ぐ (再判定で現行方針に書き換えない)
             try:
                 if not prob.exists():
                     raise EvalFailure("ERROR", "problem yaml missing")

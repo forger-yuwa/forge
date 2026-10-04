@@ -1,0 +1,1 @@
+{"time": 1790445147, "cfg_fnv": "fef1cc10faef1b7a", "bcond_fnv": "220f4ad528f2edb7", "exe_size": 75050656, "exe_mtime": 1790441226, "slauWallNormalChi": 1, "slauWallNormalChi_source": "auto: node+nodeWallDirichlet+SLAU", "scalarGradient": "lsq", "scalarGradient_source": "default"}

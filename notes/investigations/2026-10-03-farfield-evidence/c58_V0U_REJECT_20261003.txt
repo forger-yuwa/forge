@@ -1,0 +1,11 @@
+cell: 終了コード 1、Error: boundary 'xmin' (physID 1, kind farfield): mesh.discretization: node のみ対応 (plan boundary-node-farfield-characteristic §2) → PASS
+ROE: 終了コード 1、Error: boundary 'xmin' (physID 1, kind farfield): solver は SLAU / SLAU2 のみ対応 (plan boundary-node-farfield-characteristic §2) → PASS
+凝縮: 終了コード 1、Error: boundary 'xmin' (physID 1, kind farfield): 凝縮 (physProp.condensation) とは併用できない (plan boundary-node-farfield-characteristic §2) → PASS
+トレーサ: 終了コード 1、Error: boundary 'xmin' (physID 1, kind farfield): トレーサ (physProp.tracer) とは併用できない (plan boundary-node-farfield-characteristic §2) → PASS
+遷移: 終了コード 1、Error: boundary 'xmin' (physID 1, kind farfield): 遷移モデルとは併用できない (plan boundary-node-farfield-characteristic §2) → PASS
+軸対称: 終了コード 1、Error: boundary 'xmin' (physID 1, kind farfield): 軸対称とは併用できない (plan boundary-node-farfield-characteristic §2) → PASS
+周期と共有: 終了コード 1、Error: farfield (physID 1) の節点 0 が周期境界と共有されている (plan boundary-node-farfield-characteristic §2: 初版は非対応) → PASS
+組成省略: 終了コード 1、Error: boundary 'xmin' (kind farfield): 多成分 (physProp.species が 2 種以上) では外気の組成 floats.Y0..Y1 または X0..X1 の指定が必須 (plan boundary-node-farfield-characteristic §4.1) → PASS
+組成 X で明示 (正常系): 終了コード 0 → PASS (対照は起動して完走すること)
+対照 (変更なし): 終了コード 0 → PASS (対照は起動して完走すること)
+VERDICT: PASS (0 件不合格)

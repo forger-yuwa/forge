@@ -28,6 +28,10 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
     const auto isInletKind = [](const std::string& kind) {
         return kind.rfind("inlet_", 0) == 0;
     };
+    // 自由流の状態 (組成 Y/X・k・ω) を floats に持つ種別: 入口と遠方境界 farfield
+    const auto hasFreestreamState = [&](const std::string& kind) {
+        return isInletKind(kind) || kind == "farfield";
+    };
 
     std::string bcondConfigFileName  = "bcondConfig.yaml";
 
@@ -71,7 +75,7 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
             // Y{s} に換算して inputFloats (flow_float) へ入れる。X/Y 混在・負値・非有限・総和 0・未知 index・
             // X 指定時の種欠落・|ΣY−1|>1e-3 はエラー (plans/active/thermophysics-cea-mole-fraction-species.md §4.3)。
             // どちらも無ければ空 (後段で既定補完 Y0=1)。X{s} キーは bvar に流さず消す。
-            if (cfg.nSpecies >= 2 && isInletKind(kind)) {
+            if (cfg.nSpecies >= 2 && hasFreestreamState(kind)) {
                 const ResolvedSpeciesDB* db = speciesDB_current();
                 if (db == nullptr) db = &speciesDB_init(cfg);
                 if (db->size() != cfg.nSpecies) {
@@ -83,6 +87,14 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
                     Yin = bcondSpeciesMassFractions(bcInYaml.second["floats"], *db, bname);
                 } catch (const std::exception& e) {
                     cerr << "Error: " << e.what() << endl;
+                    exit(EXIT_FAILURE);
+                }
+                // 遠方境界は外気の組成を必ず明示させる (入口の既定補完 Y0=1 を使わない。書き忘れが「第 1 種だけの外気」として
+                // 通ると EOS と流入流束が変わる; plan boundary-node-farfield-characteristic §4.1、codex result 2026-10-03 M1)
+                if (kind == "farfield" && Yin.empty()) {
+                    cerr << "Error: boundary '" << bname << "' (kind farfield): 多成分 (physProp.species が 2 種以上) では外気の組成 "
+                         << "floats.Y0..Y" << cfg.nSpecies - 1 << " または X0..X" << cfg.nSpecies - 1 << " の指定が必須"
+                         << " (plan boundary-node-farfield-characteristic §4.1)" << endl;
                     exit(EXIT_FAILURE);
                 }
                 for (auto it = inputFloats_temp.begin(); it != inputFloats_temp.end(); ) {
@@ -104,7 +116,7 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
             bcf.inputFloats = inputFloats_temp;
             bcf.outputHDFflg = outputHDFflg_temp;
 
-            if (cfg.LESorRANS == 2 && isInletKind(kind)) {
+            if (cfg.LESorRANS == 2 && hasFreestreamState(kind)) {
                 const bool hasK = inputFloats_temp.find("k") != inputFloats_temp.end();
                 const bool hasOmega = inputFloats_temp.find("omega") != inputFloats_temp.end();
                 if (!hasK || !hasOmega) {
@@ -168,7 +180,7 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
         // 与える。inlet_* 種別に対して Y0..Y{n-1} を type-1 (uniform float read) として
         // 動的登録する。既存の単成分入口 config (Y 未指定) を壊さないよう、未指定なら
         // Y0=1, それ以外=0 を既定値とする (= 第 1 化学種のみの単成分入口)。
-        if (cfg.nSpecies >= 2 && isInletKind(bcf.kind)) {
+        if (cfg.nSpecies >= 2 && hasFreestreamState(bcf.kind)) {
             for (int s = 0; s < cfg.nSpecies; s++) {
                 const std::string yname = "Y" + std::to_string(s);
                 bc.valueTypes[yname] = 1;             // uniform float read
@@ -194,11 +206,28 @@ void readBcondConfig(solverConfig& cfg , vector<bcond>& bconds)
         bc.bcondInitVariables(cfg.gpu); // allocate and set boundary variables
     }
 
+    // 遠方境界 farfield の対応範囲 (plan boundary-node-farfield-characteristic §2)。外は起動時に拒否する。
+    for (const bcond& bc : bconds) {
+        if (bc.bcondKind != "farfield") continue;
+        std::string why;
+        if (cfg.discretization != "node") why = "mesh.discretization: node のみ対応";
+        else if (!(cfg.solver == "SLAU" || cfg.solver == "SLAU2")) why = "solver は SLAU / SLAU2 のみ対応";
+        else if (cfg.condensation != 0) why = "凝縮 (physProp.condensation) とは併用できない";
+        else if (cfg.tracerEnabled()) why = "トレーサ (physProp.tracer) とは併用できない";
+        else if (cfg.transitionEnabled()) why = "遷移モデルとは併用できない";
+        else if (cfg.isAxisymmetric != 0) why = "軸対称とは併用できない";
+        if (!why.empty()) {
+            cerr << "Error: boundary '" << bc.physName << "' (physID " << bc.physID << ", kind farfield): " << why
+                 << " (plan boundary-node-farfield-characteristic §2)" << endl;
+            exit(EXIT_FAILURE);
+        }
+    }
+
     // 起動ログ: 入口組成 (Y と、MW から戻した X) とトレーサ入口値。多成分でなければ出さない。
     if (cfg.nSpecies >= 2 || cfg.tracerEnabled()) {
         const ResolvedSpeciesDB* db = speciesDB_current();
         for (const bcond& bc : bconds) {
-            if (!isInletKind(bc.bcondKind)) continue;
+            if (!hasFreestreamState(bc.bcondKind)) continue;
             if (cfg.nSpecies >= 2 && db != nullptr && db->size() == cfg.nSpecies) {
                 std::vector<double> Y(cfg.nSpecies), MW(cfg.nSpecies);
                 for (int s = 0; s < cfg.nSpecies; ++s) {
@@ -239,17 +268,26 @@ static std::vector<std::string> splitWS(const std::string& s)
     return out;
 }
 
-void applyInletProfiles(solverConfig& cfg , mesh& msh)
+// 境界値プロファイルの共通実装。inlet (face 重心で補間) と wall (node は DOF=ノード座標で補間) が共有する。
+//   flagName   : bcond の ints キー (inletProfile / wallProfile)
+//   filePrefix : CSV のファイル名接頭辞 (inlet_profile_ / wall_profile_)
+//   tag        : ログの接頭辞
+//   dofCoords  : true なら評価点を境界 DOF の値位置 (node モードはノード座標) にする
+static void applyBoundaryProfiles(solverConfig& cfg , mesh& msh ,
+                                  const std::string& flagName , const std::string& filePrefix ,
+                                  const std::string& tag , bool dofCoords)
 {
+    const std::string tagp = "[" + tag + "] ";
+    const bool nodeMode = (cfg.discretization == "node");
     for (bcond& bc : msh.bconds)
     {
-        const auto it = bc.inputInts.find("inletProfile");
+        const auto it = bc.inputInts.find(flagName);
         if (it == bc.inputInts.end() || it->second != 1) continue;
 
-        const std::string fname = "inlet_profile_" + std::to_string(bc.physID) + ".csv";
+        const std::string fname = filePrefix + std::to_string(bc.physID) + ".csv";
         std::ifstream fin(fname);
         if (!fin) {
-            std::cerr << "[applyInletProfiles] inletProfile=1 but file '" << fname
+            std::cerr << tagp << flagName << "=1 but file '" << fname
                       << "' not found (physID=" << bc.physID << ").\n";
             exit(EXIT_FAILURE);
         }
@@ -271,7 +309,7 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
             else break;
         }
         if (ncoord == 0) {
-            std::cerr << "[applyInletProfiles] " << fname << ": header must start with x/y/z coordinate column(s).\n";
+            std::cerr << tagp << fname << ": header must start with x/y/z coordinate column(s).\n";
             exit(EXIT_FAILURE);
         }
         std::vector<std::string> qnames(hdr.begin() + ncoord, hdr.end());
@@ -289,7 +327,7 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
             rowC.push_back(c); rowQ.push_back(q);
         }
         const int nrow = (int)rowC.size();
-        if (nrow < 1) { std::cerr << "[applyInletProfiles] " << fname << ": no data rows.\n"; exit(EXIT_FAILURE); }
+        if (nrow < 1) { std::cerr << tagp << fname << ": no data rows.\n"; exit(EXIT_FAILURE); }
 
         // 1D の場合は補間軸で昇順ソート (線形補間用)
         const bool oneD = (ncoord == 1);
@@ -309,9 +347,25 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
         for (size_t i = 0; i < bc.iPlanes.size(); ++i)
         {
             const geom_int ip = bc.iPlanes[i];
-            const double fc[3] = { (double)msh.planes[ip].centCoords[0],
-                                   (double)msh.planes[ip].centCoords[1],
-                                   (double)msh.planes[ip].centCoords[2] };
+            // 評価点: inlet は従来どおり face 重心 (既存 run のビット不変を守る)。
+            // wall (dofCoords=true) は**値を課す位置**で引く — node モードでは温度ピンが壁ノードに
+            // 当たるので、face 重心で引くと位置がずれる (case/48 run_0011 で実測 0.679 mm)。
+            double fc[3];
+            const geom_int icw = (i < bc.iCells.size()) ? bc.iCells[i] : -1;
+            if (dofCoords && icw >= 0 && icw < msh.nCells
+                && nodeMode && (geom_int)msh.nodes.size() > icw && msh.nodes[icw].coords.size() >= 3) {
+                fc[0] = (double)msh.nodes[icw].coords[0];
+                fc[1] = (double)msh.nodes[icw].coords[1];
+                fc[2] = (double)msh.nodes[icw].coords[2];
+            } else if (dofCoords && icw >= 0 && icw < msh.nCells) {
+                fc[0] = (double)msh.cells[icw].centCoords[0];
+                fc[1] = (double)msh.cells[icw].centCoords[1];
+                fc[2] = (double)msh.cells[icw].centCoords[2];
+            } else {
+                fc[0] = (double)msh.planes[ip].centCoords[0];
+                fc[1] = (double)msh.planes[ip].centCoords[1];
+                fc[2] = (double)msh.planes[ip].centCoords[2];
+            }
             std::vector<double> qv(qnames.size());
             if (oneD) {
                 const int ax = axisIdx[0];
@@ -365,13 +419,13 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
         for (const auto& qn : qnames) {
             if (isInputQuantity(qn)) applied += " " + qn; else ignored += " " + qn;
         }
-        std::cout << "[applyInletProfiles] physID=" << bc.physID << " kind=" << bc.bcondKind
+        std::cout << tagp << "physID=" << bc.physID << " kind=" << bc.bcondKind
                   << ": set " << qnames.size() << " quantities from " << fname
                   << " (" << (oneD ? "1D interp" : (std::to_string(ncoord) + "D nearest")) << ", " << nrow << " rows, "
                   << bc.iPlanes.size() << " faces). applied:" << (applied.empty() ? " (none)" : applied)
                   << (ignored.empty() ? "" : "  IGNORED (not an input quantity of this kind):" + ignored) << "\n";
         if (applied.empty()) {
-            std::cerr << "[applyInletProfiles] " << fname << ": no column matches a boundary value of kind "
+            std::cerr << tagp << fname << ": no column matches a boundary value of kind "
                       << bc.bcondKind << " (see procedures/inlet-profile.md).\n";
             exit(EXIT_FAILURE);
         }
@@ -387,14 +441,14 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
                         const auto it2 = bc.bvar.find("Y" + std::to_string(sidx));
                         const double y = (it2 != bc.bvar.end()) ? (double)it2->second[i] : 0.0;
                         if (!(y >= -1.0e-6 && y <= 1.0 + 1.0e-6)) {
-                            std::cerr << "[applyInletProfiles] " << fname << ": Y" << sidx << "=" << y
+                            std::cerr << tagp << fname << ": Y" << sidx << "=" << y
                                       << " at face " << i << " is outside [0,1].\n";
                             exit(EXIT_FAILURE);
                         }
                         ysum += y;
                     }
                     if (std::fabs(ysum - 1.0) > 1.0e-3) {
-                        std::cerr << "[applyInletProfiles] " << fname << ": sum of Y_s = " << ysum << " at face " << i
+                        std::cerr << tagp << fname << ": sum of Y_s = " << ysum << " at face " << i
                                   << " (must be 1 within 1e-3; write all species columns or use gen_inlet_profile.py).\n";
                         exit(EXIT_FAILURE);
                     }
@@ -402,6 +456,21 @@ void applyInletProfiles(solverConfig& cfg , mesh& msh)
             }
         }
     }
+}
+
+// 入口分布プロファイル (従来どおり face 重心で補間)。
+void applyInletProfiles(solverConfig& cfg , mesh& msh)
+{
+    applyBoundaryProfiles(cfg , msh , "inletProfile" , "inlet_profile_" , "applyInletProfiles" , false);
+}
+
+// 壁温分布プロファイル: `wall_isothermal` の per-face `Ts` を CSV から埋める。
+// `Ts` は valueTypes==1 (起動時に一様値を 1 度入れるだけでカーネルは書き換えない) なので、
+// ここで面ごとに違う値を入れればそのまま効く。CHT の弱連成ループの入口でもある
+// (methods/boundary.md「共役熱伝達 (CHT)」/ plans/active/boundary-conjugate-heat-transfer.md)。
+void applyWallProfiles(solverConfig& cfg , mesh& msh)
+{
+    applyBoundaryProfiles(cfg , msh , "wallProfile" , "wall_profile_" , "applyWallProfiles" , true);
 }
 
 void applyBconds(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var , matrix& mat_p , fluct_variables& fluct)
@@ -426,6 +495,7 @@ void applyBconds(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variable
             else if (bc.bcondKind == "inlet_Pressure_dir") { inlet_Pressure_dir_d_wrapper(cfg , cuda_cfg , bc , msh , var , mat_p); }
             else if (bc.bcondKind == "outflow") { outflow_d_wrapper(cfg , cuda_cfg , bc , msh , var , mat_p); }
             else if (bc.bcondKind == "periodic") { periodic_d_wrapper(cfg , cuda_cfg , bc , msh , var , mat_p); }
+            else if (bc.bcondKind == "farfield") { /* 流束は convectiveFlux の farfield_flux_d が作る。bvar は自由流のまま (node はゴーストを読まない) */ }
         }
         gpuErrchk( cudaPeekAtLastError() );
         gpuErrchkKernelSync();

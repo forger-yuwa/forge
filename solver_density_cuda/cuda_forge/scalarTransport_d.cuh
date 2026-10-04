@@ -7,6 +7,7 @@
 #include "mesh/mesh.hpp"
 #include "input/solverConfig.hpp"
 #include "variables.hpp"
+#include "cuda_forge/convection/farfieldFace.hpp"   // 遠方境界 farfield の面の値 (ScalarTransportDesc::ext_face)
 
 // 汎用スカラ輸送コア。特定の物理 (RANS / species など) には依存せず、
 // 1 変数ぶんの保存量 ρφ について移流・拡散の残差組み立てと時間積分を提供する。
@@ -30,6 +31,12 @@ struct ScalarTransportDesc {
                                 //   (化学種は Fick 拡散を speciesTransport 側で別途扱うため 0)
     flow_float sigma2 = static_cast<flow_float>(0.0);   // F1 ブレンド時の k-ε 側 (F1=0) σ (sstSigmaBlend=1 のときのみ使用)
     flow_float* F1 = nullptr;                             // ブレンド関数 (nullptr なら sigma 定数)
+    // 分子粘性の係数: 有効粘性 = sigma_lam·vis_lam + sigma·vis_turb。既定 1 (k/ω・凝縮・トレーサ。1.0 の乗算は厳密なのでビット不変)。
+    // 遷移モデルの Re_θt は σ_θt(μ+μ_t) = 2μ+2μ_t なので (sigma_lam, sigma) = (2, 2) (plan turbulence-transition-lm2009 §4.1)。
+    flow_float sigma_lam = static_cast<flow_float>(1.0);
+    // 遠方境界 farfield の面の値 (面ごと、farfield 以外は NaN。nullptr = farfield 無し)。node の境界半割面で流入のとき
+    // 内部値の代わりに運ぶ (plan boundary-node-farfield-characteristic §4.3)。既存の境界はビット不変。
+    const flow_float* ext_face = nullptr;
 };
 
 // 複数スカラーの移流 (+汎用拡散) を 1 回の面ループで積む (plan performance-3d-node-sst-speedup: k/ω・化学種の

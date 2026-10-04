@@ -4,6 +4,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 import numpy as np
+from dataclasses import replace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from forge_design.geometry.moc_sern import PlanarMOC, SernKernelSpec  # noqa: E402
 from forge_design.meshing.mesh_sern3d import PHYS_SERN3D, SernMesh3DParams, generate_sern_mesh3d  # noqa: E402
@@ -76,19 +77,80 @@ coords, hexes, B, info, y_mid = generate_sern_mesh3d(d, prm)
 print(f"--- ext_top: cells {info['cells']} nodes {info['nodes']} top nodes {info['n_top_nodes']} vehicle_top faces {len(B['vehicle_top'])}")
 nun, miss, extra = closure(hexes, B)
 check("ext_top: 境界の閉性 (プルーム上線が内部面になり top_out は上面だけ)", miss == 0 and extra == 0, f"unshared {nun} missing {miss} extra {extra}")
-ir = info["i_ramp_te"]
-check("ext_top: vehicle_top 面数 = i_ramp_te × (nz−1)", len(B["vehicle_top"]) == ir * (info["nz"] - 1))
+ir = info["i_ramp_te"]; k_sw = info["k_sw"]; nzf = info["nz"]
+# R4e 案 (d): 機体上面は **幅内 (k < k_sw) かつ後縁より上流**だけ。幅外はバンド、後縁より下流は後流ブロックとの内部面
+_exp = ir * k_sw
+check("ext_top: vehicle_top 面数 = 後縁 station × 幅内 z セル数", len(B["vehicle_top"]) == _exp, f"{len(B['vehicle_top'])} vs {_exp}")
+zc = np.array([coords[list(q), 2].mean() for q in B["vehicle_top"]]) / prm.scale
+check("ext_top: 機体上面は全面が幅内 (z ≤ W/2)  ← 中央値でなく最大値で見る (codex plan-3 M5)",
+      float(zc.max()) <= 0.5 * prm.W + 1e-9, f"max z {float(zc.max()):.3f}")
+check("ext_top: 幅外の旧ランプ線は内部面 (vehicle / underside_far は 0)",
+      len(B.get("vehicle", [])) + len(B.get("underside_far", [])) == 0,
+      f"vehicle {len(B.get('vehicle',[]))} underside_far {len(B.get('underside_far',[]))}")
+check("ext_top: 機体側面 (vehicle_side) が在る", len(B.get("vehicle_side", [])) > 0, f"{len(B.get('vehicle_side',[]))} faces")
+
+# --- R4e の核心: 幅外を横断して塞ぐ壁が 1 面も無いこと ---
+# 「幅外 (z > W/2) に在って法線が x 方向を向く壁面」= 旧実装が 224 面持っていた閉じ壁
+def _face_normal_x(q):
+    P = coords[list(q)]
+    n = np.cross(P[1] - P[0], P[2] - P[0])
+    nl = np.linalg.norm(n)
+    return abs(n[0]) / nl if nl > 0 else 0.0
+_wall_groups = ("vehicle_side", "vehicle_base", "vehicle_top", "ramp", "cowl_in", "cowl_out",
+                "sidewall_in", "sidewall_out", "vehicle", "underside_far")
+_blockers = [q for g in _wall_groups for q in B.get(g, [])
+             if coords[list(q), 2].mean() / prm.scale > 0.5 * prm.W + 1e-9 and _face_normal_x(q) > 0.5]
+check("ext_top: 幅外を横断する壁面が 0 (R4e: 旧実装は 224 面で 5.72 MPa を溜めた)",
+      len(_blockers) == 0, f"{len(_blockers)} faces")
+
+# --- 機体ベース: 幅内のみ・面積が t_base × W/2 と一致 ---
+vb = B.get("vehicle_base", [])
+check("ext_top: 機体ベース (vehicle_base) が在る", len(vb) > 0, f"{len(vb)} faces")
+check("ext_top: ベースは幅内のみ (z ≤ W/2)",
+      all(coords[list(q), 2].mean() / prm.scale <= 0.5 * prm.W + 1e-9 for q in vb))
+def _quad_area(q):
+    P = coords[list(q)]
+    return 0.5 * (np.linalg.norm(np.cross(P[1] - P[0], P[2] - P[0])) + np.linalg.norm(np.cross(P[2] - P[0], P[3] - P[0])))
+A_base = sum(_quad_area(q) for q in vb) / prm.scale ** 2
+A_exp = float(info["t_base"]) * 0.5 * prm.W
+check("ext_top: ベース面積 = t_base × W/2 (設計値と照合)", abs(A_base - A_exp) < 1e-6 * max(A_exp, 1.0),
+      f"{A_base:.6f} vs {A_exp:.6f}")
 check("ext_top: top_out 面数 = (ni−1)(nz−1) (上面のみ)", len(B["top_out"]) == (info["ni"] - 1) * (info["nz"] - 1))
 yt_faces = np.array([coords[list(q), 1].mean() for q in B["top_out"]]) / prm.scale
 check("ext_top: top_out は y3 + top_depth より上", np.all(yt_faces > info["y_veh"] - 1e-9))
 vt = np.array([coords[list(q), 1].mean() for q in B["vehicle_top"]]) / prm.scale
 rp = np.array([coords[list(q), 1].mean() for q in B["ramp"]]) / prm.scale
 check("ext_top: 機体上面はランプ (下面) より上", vt.min() >= rp.min() and vt.max() >= rp.max())
-# 後縁でテーパが y_e に着地 (x = L_ramp の上面ノード = プルーム上線ノードと共有)
-te_nodes = {n for q in B["vehicle_top"] for n in q if abs(coords[n, 0] / prm.scale - info["L_ramp"]) < 1e-9}
-ramp_te = {n for g in ("ramp", "vehicle", "underside_far") for q in B[g] for n in q if abs(coords[n, 0] / prm.scale - info["L_ramp"]) < 1e-9}
-check("ext_top: 後縁 station のノードは機体上面と下面 (ramp/vehicle/underside_far) で共有 (テーパが y_e に着地)", te_nodes and te_nodes == ramp_te, f"{len(te_nodes)} vs {len(ramp_te)}")
-check("ext_top: hex は非退化 (体積 > 0)", np.all(np.abs(np.linalg.det(np.stack([coords[hexes[:, 1]] - coords[hexes[:, 0]], coords[hexes[:, 3]] - coords[hexes[:, 0]], coords[hexes[:, 4]] - coords[hexes[:, 0]]], axis=1))) > 1e-18))
+
+# --- 幾何: **符号付き** Jacobian (絶対値では負向き要素を見逃す, codex plan-3 M5) ---
+_J = np.linalg.det(np.stack([coords[hexes[:, 1]] - coords[hexes[:, 0]],
+                             coords[hexes[:, 3]] - coords[hexes[:, 0]],
+                             coords[hexes[:, 4]] - coords[hexes[:, 0]]], axis=1))
+check("ext_top: hex の符号付き Jacobian が全て同符号かつ非退化", np.all(_J > 1e-18) or np.all(_J < -1e-18),
+      f"min {_J.min():.3e} max {_J.max():.3e} 負 {int((_J<0).sum())}/{len(_J)}")
+
+# --- float32 変換後の節点衝突 (変換器は float32 で書く) ---
+# スリット (カウル板厚 0 / 側壁) の重複ノードは**設計上わざと座標一致**しているので、
+# 判定は「float32 にして **新たに** 衝突するノードが 0」かどうか
+_u64 = np.unique(coords, axis=0).shape[0]
+_u32 = np.unique(coords.astype(np.float32), axis=0).shape[0]
+check("ext_top: float32 化で新たな節点衝突が起きない", _u32 == _u64, f"float32 {_u32} vs float64 {_u64}")
+_nd = info["n_dup_cowl"] + info["n_dup_side"]
+check("ext_top: 座標一致ノードはスリット由来だけ (カウル + 側壁)", coords.shape[0] - _u64 == _nd,
+      f"{coords.shape[0] - _u64} vs {_nd}")
+
+# --- 形状が格子に依存しないこと (codex plan-3 M3) ---
+_p2 = replace(prm, nj_ext_top=13, first_top_frac=0.01)
+_c2, _h2, _B2, _i2, _ = generate_sern_mesh3d(d, _p2)
+check("ext_top: first_top_frac を変えても機体上面の高さが動かない",
+      abs(_i2["y_veh"] - info["y_veh"]) < 1e-12, f"{_i2['y_veh']:.6f} vs {info['y_veh']:.6f}")
+_n2, _m2, _e2 = closure(_h2, _B2)
+check("ext_top: 細かい格子でも閉性", _m2 == 0 and _e2 == 0, f"missing {_m2} extra {_e2}")
+try:
+    generate_sern_mesh3d(d, replace(prm, first_top_frac=0.05)); ok = False
+except ValueError:
+    ok = True
+check("ext_top: クリアランスに対して粗すぎる格子は生成を失敗させる (形状を動かさない)", ok)
 try:
     generate_sern_mesh3d(d, SernMesh3DParams(ni_up=6, ni_noz=20, ni_plume=30, nj_top=15, nj_bot=11, nz_in=7, nz_out=6, ext_top=True, vehicle_taper=0.0,
                                              interface_angle=float(k.TH[-1, 0]), top_ext_angle=d.info["theta_e"])); ok = False
@@ -107,5 +169,80 @@ near = (xr > -0.05) & (xr < 0.05)
 check("fillet: 角部近傍のランプ面は y > 1 (流体と反対側へ膨らむ)", near.any() and np.all(yr[near] >= 1.0 - 1e-12), f"min y {yr[near].min():.4f}")
 check("fillet: info に ramp_fillet", info["ramp_fillet"] == 0.1)
 
+
+
+# --- カウル板の自由な側端 (z = W/2, L_sw < x < L_cowl) は上下で 1 節点 (plan sern-3d R5r) ---
+# 二重化したままだと双子の双対 CV が閉じない (|ΣS|/Σ|S| = 0.3。primal の面の閉性では見えず、変換後の check_dual_closure.py でだけ出る)
+_pe = SernMesh3DParams(ni_up=6, ni_noz=20, ni_plume=120, nj_top=15, nj_bot=11, nz_in=7, nz_out=6, W=2.0, Z_ext=1.5, L_sw=0.67,
+                       interface_angle=float(k.TH[-1, 0]), top_ext_angle=d.info["theta_e"], cowl_thickness=0.005)
+_ce, _he, _Be, _ie, _ = generate_sern_mesh3d(d, _pe)
+_co, _ho, _Bo, _io, _ = generate_sern_mesh3d(d, replace(_pe, share_cowl_free_edge=False))
+_nfree = _ie["i_te"] - _ie["i_sw"]
+_sh = lambda B: len({n for q in B["cowl_in"] for n in q} & {n for q in B["cowl_out"] for n in q})
+check("free edge: 側壁より長いカウル板がある", _nfree > 0, f"{_nfree} station")
+check("free edge: 上下で共有する節点が側端の station 数だけ増える", _sh(_Be) - _sh(_Bo) == _nfree, f"{_sh(_Bo)} -> {_sh(_Be)}")
+check("free edge: 二重節点がその数だけ減る", _io["n_dup_cowl"] - _ie["n_dup_cowl"] == _nfree)
+_u, _m, _x = closure(_he, _Be)
+check("free edge: 境界の閉性", _m == 0 and _x == 0, f"missing {_m} extra {_x}")
+
+
+# --- 壁第 1 層の x ブレンド (plan sern-3d §4.41) ---
+# ブレンドは station 数が要る (急だと skew が出るのでガードが落とす) のでプルームを細かくした専用 params
+_pb = SernMesh3DParams(ni_up=6, ni_noz=20, ni_plume=120, nj_top=15, nj_bot=11, nz_in=7, nz_out=6, W=2.0, Z_ext=1.5,
+                       interface_angle=float(k.TH[-1, 0]), top_ext_angle=d.info["theta_e"], first_wall_frac=4.0e-4)
+c0, h0, B0, i0, _ = generate_sern_mesh3d(d, _pb)
+c1, h1, B1, i1, _ = generate_sern_mesh3d(d, replace(_pb, first_wall_frac_far=0.0))
+check("xblend: 既定 (far=0) は座標がビット一致", np.array_equal(c0, c1))
+c2, h2, B2, i2, _ = generate_sern_mesh3d(d, replace(_pb, first_wall_frac_far=4.0e-3, wall_frac_blend_len=3.0))
+check("xblend: 節点数・要素数は変わらない", c2.shape == c0.shape and h2.shape == h0.shape)
+check("xblend: 壁の形状は動かない (ランプ線 y の最大)",
+      abs(float(np.max(c2[:, 1])) - float(np.max(c0[:, 1]))) < 1e-12,
+      f"{np.max(c2[:,1]):.12f} vs {np.max(c0[:,1]):.12f}")
+# 生成後の実座標で第 1 層厚を測る (入力値でなく結果を見る)
+_Lc = float(d.cowl_xy[-1, 0]); _Lr = float(d.L_ramp)
+def _first_layer(coords, xq):
+    """x = xq の station で、上線 (ランプ) 直下の第一層厚を返す"""
+    m = np.abs(coords[:, 0] - xq) < 1e-9
+    ys = np.unique(np.round(coords[m, 1], 12))
+    return float(ys[-1] - ys[-2])
+_xs = np.unique(c0[:, 0])
+_x_in = _xs[np.argmin(np.abs(_xs - 0.5 * _Lr))]              # 壁の内側
+_x_far = _xs[np.argmin(np.abs(_xs - (_Lr + 1.5)))]           # ブレンド完了後
+check("xblend: 壁の内側では第一層厚が first_wall_frac のまま",
+      abs(_first_layer(c2, _x_in) - _first_layer(c0, _x_in)) < 1e-12,
+      f"{_first_layer(c2,_x_in):.3e} vs {_first_layer(c0,_x_in):.3e}")
+# 上バンドの壁終端は `L_ramp` で、下流は `x_out_extra` (既定 2 H) しかないので
+# ブレンド長 3 H は**領域内で完了しない**。完了を要求せず「単調に粗くなる」ことを見る。
+_xd = _xs[_xs > _Lr]
+_seq = [_first_layer(c2, x) for x in _xd]
+check("xblend: 壁の下流で第一層厚が単調に粗くなる",
+      all(b >= a - 1e-15 for a, b in zip(_seq[:-1], _seq[1:])) and _seq[-1] >= 2.5 * _first_layer(c0, _x_far),
+      f"{_seq[0]:.3e} -> {_seq[-1]:.3e} (壁値 {_first_layer(c0,_x_far):.3e})")
+_n2, _m2, _e2 = closure(h2, B2)
+check("xblend: 境界の閉性", _m2 == 0 and _e2 == 0, f"missing {_m2} extra {_e2}")
+try:      # 急なブレンドは skew を生むので生成を失敗させる
+    generate_sern_mesh3d(d, replace(_pb, first_wall_frac_far=4.0e-3, wall_frac_blend_len=0.05))
+    check("xblend: 急なブレンドは生成を失敗させる", False, "例外が出なかった")
+except ValueError as e:
+    check("xblend: 急なブレンドは生成を失敗させる", "急すぎる" in str(e))
+# z_append (plan sern-3d §5.1 R4d、codex diagnose 2026-09-27): 共通領域の座標・接続を保ったまま側方の外側にだけ節点列を足す
+coords, hexes, _B0z, info, _ = generate_sern_mesh3d(d, prm)   # 基準 (上の試験で coords が別格子に書き換わるので取り直す)
+_ca, _ha, _Ba, _ia, _ = generate_sern_mesh3d(d, replace(prm, z_append=0.0))
+check("z_append 0: 既定と座標・hex がビット一致", np.array_equal(_ca, coords) and np.array_equal(np.asarray(_ha), np.asarray(hexes)))
+_cz, _hz, _Bz, _iz, _ = generate_sern_mesh3d(d, replace(prm, z_append=0.75))
+_zf0 = float(info["Z_far"]); _zf1 = float(_iz["Z_far"])
+_set1 = {tuple(r) for r in _cz.tolist()}
+check("z_append: 既存の全節点座標が拡張後にもそのまま在る", all(tuple(r) in _set1 for r in coords.tolist()))
+_hz_arr = np.asarray(_hz); _in = np.all(_cz[_hz_arr][:, :, 2] <= _zf0 + 1e-12, axis=1)
+check("z_append: 既存領域の hex 数が不変", int(_in.sum()) == len(hexes), f"{int(_in.sum())} vs {len(hexes)}")
+_dz0 = float(np.diff(np.unique(np.round(coords[:, 2], 12)))[-1])
+check("z_append: 遠方境界が 0.75 以上外へ、追加間隔は最外セルと同じ", _zf1 - _zf0 >= 0.75 - 1e-9 and _zf1 - _zf0 < 0.75 + _dz0 + 1e-9,
+      f"Z_far {_zf0:.4f} -> {_zf1:.4f} (dz {_dz0:.4f})")
+_nz_, _mz, _ez = closure(_hz, _Bz)
+check("z_append: 境界の閉性", _mz == 0 and _ez == 0, f"missing {_mz} extra {_ez}")
+_sf = PHYS_SERN3D["side_far"]
+_sfn = np.unique(np.asarray([n for f in _Bz[_sf] for n in f])) if isinstance(_Bz, dict) and _sf in _Bz else None
+if _sfn is not None:
+    check("z_append: side_far は新しい遠方面 (z = Z_far) だけ", np.allclose(_cz[_sfn, 2], _zf1))
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)

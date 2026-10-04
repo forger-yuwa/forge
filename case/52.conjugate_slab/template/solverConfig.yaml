@@ -1,0 +1,37 @@
+# V1: 1 次元純伝導の共役解 (plans/active/boundary-conjugate-heat-transfer.md §6 V1)
+# 静止流体層 (厚さ H=0.01 m, k_f=0.0241 一定) + 固体 (R_s) の直列。
+# 上壁 350 K 固定 / 下壁 = 共役壁 (cht_loop が wallProfile で毎反復更新)。
+mesh: {discretization: "node", meshFileName: "mesh.h5", valueFileName: "mesh.h5"}
+gpu: 1
+detectNaN: 1
+detectNaNInterval: 100
+solver: "SLAU"
+physProp:
+  isAxisymmetric: 0
+  thermalMethod: 0
+  viscMethod: 0        # 定数 visc / thermCond (厳密解 q = k dT/dy が成立する条件)
+  visc: 1.81e-5
+  thermCond: 0.0241
+  cp: 1004.5
+  gamma: 1.4
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {nStepOuter: 10000, time: 1.00}
+  deltaT:
+    control: 1
+    dt: 0.00000001
+    cfl: 1.0
+    cfl_pseudo: 5.0
+    blockDPLUR: 1
+    implicitRelax: 0.5
+    dt_min: 0.00000000001
+    dt_max: 1.0
+  outStepStart: 0
+  outStepInterval: 5000
+  timeIntegration: 11
+  nStepInner: 5
+space: {convMethod: 2, limiter: 2}
+turbulence: {model: "none"}
+output: {level: 1, interfaceDiag: 1}
+initial: "uniform_p101325_u10"

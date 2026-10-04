@@ -15,6 +15,12 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+
+
+def _trapz(y, x):
+    """台形積分。**numpy 2 で `np.trapz` が削除された**ので互換に包む (AWS の numpy で落ちた)。"""
+    f = getattr(np, "trapezoid", None) or getattr(np, "trapz")
+    return f(y, x)
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -94,13 +100,13 @@ def main():
     yy, uu, rr = yy[order], uu[order], rr[order]
     if args.axisym:
         # area-weighted (annular) mean: integral u*2*pi*r dr / (pi R^2)
-        num = np.trapz(uu * rr * yy, yy)
-        den = np.trapz(rr * yy, yy)
+        num = _trapz(uu * rr * yy, yy)
+        den = _trapz(rr * yy, yy)
         umean = num / den if den != 0 else float("nan")
         D = 2.0 * args.half
     else:
-        num = np.trapz(uu * rr, yy)
-        den = np.trapz(rr, yy)
+        num = _trapz(uu * rr, yy)
+        den = _trapz(rr, yy)
         umean = num / den if den != 0 else float("nan")
         D = 2.0 * args.half
     romean = float(np.mean(rr))

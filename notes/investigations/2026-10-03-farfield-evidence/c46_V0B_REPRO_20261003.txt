@@ -1,0 +1,28 @@
+dcd17eb3bcaa7b55
+b0240cd7f9d0e69d
+copied 9
+run_1032_v0b_o1 rc=0
+copied 9
+run_1032_v0b_o2 rc=0
+copied 9
+run_1032_v0b_o3 rc=0
+copied 9
+run_1032_v0b_n1 rc=0
+copied 9
+run_1032_v0b_n2 rc=0
+copied 9
+run_1032_v0b_n3 rc=0
+Traceback (most recent call last):
+  File "<stdin>", line 15, in <module>
+NameError: name 'NG' is not defined
+V0B_DONE
+ro       S_old 2.194e-03  S_new 2.465e-03  D(new x old) 2.379e-03  D/S 1.08  finite True  -> NG
+roK      S_old 1.084e+01  S_new 9.783e+00  D(new x old) 1.342e+01  D/S 1.24  finite True  -> NG
+roOmega  S_old 4.459e+05  S_new 7.511e+05  D(new x old) 6.332e+05  D/S 1.42  finite True  -> NG
+roUx     S_old 2.778e-01  S_new 3.838e-01  D(new x old) 5.125e-01  D/S 1.84  finite True  -> NG
+roUy     S_old 2.796e-01  S_new 3.871e-01  D(new x old) 3.200e-01  D/S 1.14  finite True  -> NG
+roUz     S_old 1.155e-01  S_new 1.276e-01  D(new x old) 1.500e-01  D/S 1.30  finite True  -> NG
+roY0     S_old 2.194e-03  S_new 2.465e-03  D(new x old) 2.379e-03  D/S 1.08  finite True  -> NG
+roY1     S_old 1.541e-04  S_new 2.036e-04  D(new x old) 2.799e-04  D/S 1.82  finite True  -> NG
+roe      S_old 1.308e+03  S_new 1.470e+03  D(new x old) 1.418e+03  D/S 1.08  finite True  -> NG
+VERDICT: FAIL

@@ -67,6 +67,43 @@ FORGE_BUILD_JOBS=1 FORGE_CUDA_ARCHITECTURES=86 ./tools/build_native_wsl.sh
 
 この例は native 側のビルド確認用であり、通常開発の既定経路を Docker から native に置き換える意図ではない。
 
+### カーネル起動が `too many resources requested for launch` で落ちるとき (2026-09-24)
+
+**GPU が小さいせいだと決めつけないこと。** レジスタは **65,536/ブロック**で、これは sm_70 以降
+どの NVIDIA GPU でも同じ定数である。したがって `REG:R` のカーネルが使えるブロックサイズは
+`floor(65536/R)` で、**GPU を大きくしても解決しない**。
+
+```bash
+cuobjdump -res-usage .build-native/relwithdebinfo/forge | grep -A1 _Z6SLAU_d
+```
+
+**現状 (2026-09-24, HEAD)**: `SLAU_d` は `REG:136` で**上限 481 threads**。既定の 512 では
+`convectiveFlux_d.cu:316` で起動に失敗する。**回避は `FORGE_CUDA_BLOCKSIZE=128` (256 でも足りる)**。
+double ビルドでは以前から必要だった (`FORGE_CUDA_BLOCKSIZE=128 FORGE_CUDA_BLOCKSIZE_SMALL=128`) が、
+**float の既定ビルドでも越えた**。
+
+越えた地点は単一 TU を各 commit でコンパイルして実測した (nvcc 12.0 / sm_86, `-O3`):
+
+| commit | 内容 | `SLAU_d` REG | 512 (R×512 ≤ 65536) |
+| --- | --- | --- | --- |
+| `bcc68797` (2026-09-20) | | 114 | 可 |
+| `f8fca224` / `a0426086` | | 113 | 可 |
+| `6430909d` | `reconT` | **128** | 可 (65,536 = ちょうど上限) |
+| `571e81df` | `limiter_T` | **138** | **不可** ← 最初に越えた |
+| `adcd5579` 以降・HEAD | | 136 | 不可 |
+
+**`6430909d` が余裕を使い切り `571e81df` が越えた。** どちらも既定 0 でビット不変の opt-in だが、
+**レジスタは実行時フラグに依らず確保される**ので、使っていない機能が既定構成の起動を壊した。
+**新しい分岐・一時変数をフラックスカーネルに足すときは `REG` を測ること。**
+
+**恒久対策は未決** (2026-09-24 時点):
+
+- 既定ブロックを 256 にする → 安全だが **node の残差 gather は `atomicAdd`** なので加算順が変わり
+  **ビット不変でない** (既存の回帰基準がずれる)。
+- `__launch_bounds__` で 128 に抑える → 512 を維持できるがスピルして遅くなる。
+
+どちらも計測してから決める。
+
 ## Docker 実行時のファイル所有者ルール
 
 `docker run` を含むすべてのスクリプト・コマンドには、必ず `--user "$(id -u):$(id -g)"` を付加すること。

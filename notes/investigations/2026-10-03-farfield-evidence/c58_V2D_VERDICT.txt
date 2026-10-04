@@ -1,0 +1,18 @@
+run_0070_v2d_cpg_contact_short vs run_0071_v2d_cpg_contact_long: max|P−P∞|/P∞ 2.483e-06 (≤ 1e-3)、max|ΔT| 0.002 K (≤ 7.6 K、塊の到達振幅 360.3 K)
+VERDICT: PASS
+run_0072_v2d_cpg_ac_nopulse: パルスなし max|P − P∞| 2.4400e-04 Pa (≤ 2.8510e-02)
+VERDICT: PASS
+run_0073_v2d_cpg_ac_short vs run_0074_v2d_cpg_ac_long: 入射振幅 2.223 Pa、max|ΔP| 0.001465 Pa (t 5.2048e-04 s) → 反射率 0.0659%
+VERDICT: PASS (≤ 5 %)
+run_0075_v2d_tp1_contact_short vs run_0076_v2d_tp1_contact_long: max|P−P∞|/P∞ 2.081e-05 (≤ 1e-3)、max|ΔT| 0.006 K (≤ 7.6 K、塊の到達振幅 360.4 K)
+VERDICT: PASS
+run_0077_v2d_tp1_ac_nopulse: パルスなし max|P − P∞| 1.6362e+00 Pa (≤ 2.8510e-02)
+VERDICT: FAIL
+run_0078_v2d_tp1_ac_short vs run_0079_v2d_tp1_ac_long: 入射振幅 2.223 Pa、max|ΔP| 0.005127 Pa (t 1.5221e-03 s) → 反射率 0.2306%
+VERDICT: PASS (≤ 5 %)
+run_0080_v2d_tp2_contact_short vs run_0081_v2d_tp2_contact_long: max|P−P∞|/P∞ 1.089e-04 (≤ 1e-3)、max|ΔT| 0.025 K (≤ 7.6 K、塊の到達振幅 365.4 K)、max|ΔY| 2.62e-06 (≤ 0.002、塊の到達 Y 0.0776)
+VERDICT: PASS
+run_0082_v2d_tp2_ac_nopulse: パルスなし max|P − P∞| 2.4895e+00 Pa (≤ 2.8510e-02)
+VERDICT: FAIL
+run_0083_v2d_tp2_ac_short vs run_0084_v2d_tp2_ac_long: 入射振幅 2.493 Pa、max|ΔP| 0.005371 Pa (t 1.6194e-03 s) → 反射率 0.2155%
+VERDICT: PASS (≤ 5 %)

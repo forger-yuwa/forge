@@ -17,6 +17,12 @@
 """
 import numpy as np
 
+
+def _trapz(y, x):
+    """台形積分。**numpy 2 で `np.trapz` が削除された**ので互換に包む (AWS の numpy で落ちた)。"""
+    f = getattr(np, "trapezoid", None) or getattr(np, "trapz")
+    return f(y, x)
+
 KAPPA = 0.41
 B_LOG = 5.0
 GAMMA = 1.4
@@ -122,8 +128,8 @@ def profile(C, V, xc, ytop=None, edge="local", inf=None):
         ue, roe, mue = inf
     else:
         ue, roe, mue = u[m][j], ro[m][j], mu[m][j]
-    theta = float(np.trapz((ro[m] / roe) * (u[m] / ue) * (1.0 - u[m] / ue), y[m]))
-    dstar = float(np.trapz(1.0 - (ro[m] * u[m]) / (roe * ue), y[m]))
+    theta = float(_trapz((ro[m] / roe) * (u[m] / ue) * (1.0 - u[m] / ue), y[m]))
+    dstar = float(_trapz(1.0 - (ro[m] * u[m]) / (roe * ue), y[m]))
     ae = float(np.sqrt(GAMMA * P[m][j] / ro[m][j])) if P is not None else float("nan")
     return dict(y=y, u=u, ro=ro, mu=mu, ue=ue, roe=roe, mue=mue, ae=ae,
                 theta=theta, dstar=dstar, col=col, y1=y[1], u1=u[1], nu1=mu[1] / ro[1])

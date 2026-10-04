@@ -189,7 +189,56 @@ S3 は凝縮の固定点を動かす (onset が case/44 で +0.18 r_t、Wysłouz
 **非定常 (dual-time) の合否**は `python3 solver_density_cuda/tools/check_passive_budget.py <run_dir>` (monitor の `[passive]` 積算 [floor / limCorr / FCT の基点逸脱・ピン交換 / 実現可能性クランプの成分別 |Δ|] を総量比 1e-6 で PASS/FAIL) で判定する。
 checkpoint には受動種の流束形履歴 (`/CHECKPOINT/<cons>_fctG`, `_fctH`, `passive_fctMeff`) が入り、FCT 有効時の restart はこれが揃わないと全系 BDF1 から再開する。
 凝縮モーメントの実現可能性 (許容領域 $x\le1,\ x^2\le y\le\sqrt x$; $x=Q_1/(Q_0r)$, $y=Q_2/(Q_0r^2)$) は更新後に最近点射影 (退化は単分散再初期化) で保証し、作動数と成分別収支を monitor に出す。
+凝縮 run (受動種経路の有無を問わず) は monitorInterval ごとに `[cond-corr]` 行で理由別の補正量 (蒸気上限違反・負値 floor・増分制限・受動種 floor・射影・化学種再正規化・液滴消滅) の区間値と累積を総液量比で出し、液滴消滅以外が比 1e-6 を超えると `WARN` を出す。累積は restart で 0 から ([methods/condensation.md](../methods/condensation.md) 実装 §4c)。
+TP carrier の凝縮 run では `viscMethod 2` の μ・λ と化学種拡散係数を気相組成 (液を除いた組成) で評価する (同 §7b)。
+**二相拡散 `condensation.condTwoPhaseDiffusion`** (既定 0, 2026-10-02, opt-in・CFD 未検証; plan condensation-two-phase-transport #4e, methods/condensation.md 実装 §7c):
+`1` で TP carrier 凝縮 (`condGasSpecies` ≥ 0) の NS run に、気相内の分子拡散 (気相基準 z・風上の補正) と全輸送量 (化学種・液 g・Q2/Q1/Q0) 共通の乱流混合 μ_t/Sc_t を
+1 回の面流束で足し (エネルギーに Σh_k J_k + h_v J_w − L J_l)、蒸気と液を非分割で更新する (増分は点対角、制限は `condDgMaxStep`/`condDTmaxStep` と蒸気・液の非負)。
+**定常専用**: dual-time・陽解法・`speciesImplicitCoupling 2`・`passiveScalarScheme 0`・`condEquilibrium` ≠ 0・`condLimiterMode 0`・`nCondSpecies` ≠ 1 とは起動時にエラー終了。
+CPG carrier・pure 凝縮・`viscMethod 0` では不活性 (ログに理由、現行経路)。cell は未検証 (WARNING)。
+蒸気・液・Q は `passiveImplicitCoupling`/`speciesImplicitCoupling` の DPLUR ではなく点対角で更新する (非水種は従来どおり)。`condTwoPhaseRelax` (既定 1, 0 < ω ≤ 1) は
+蒸気・液・Q の増分の緩和 (前処理の後・制限の前)。#4c の 1D 試験では大きな擬似刻みで核生成の Q0 が周期運動になり ω 0.5 で収束した (高 CFL は保証外)。
+計算開始時と終了時に `[twophase-audit]` 行 (格納状態から化学種・蒸気・液・Q の残差を double で組み直した成分ごとの比と、終了時の `VERDICT: PASS | NOT CONVERGED`; エネルギーは対象外) が出る。収束を受け入れる根拠はこの VERDICT と check_convergence の両方。`residual_history.csv` に `rms_roYv` (蒸気の残差 R_w − R_g) が加わり、`check_convergence.py` の検査対象に入る (`rms_roY` 接頭辞)。monitor に `[twophase]` 行 (θ<1 のセル数・最小 θ・保留量・状態補正)。
+既定 0 の run の結果・列構成は変わらない。
+**`condensation.condTwoPhaseSolver`** (既定 0, 2026-10-02, #4g): 二相拡散の蒸気・液・Q の増分の作り方。0 = 点対角、1 = 化学種・受動種と同じ緩和整合 scalar-DPLUR
+(右辺は全残差、対角は点対角と同じ分母、非対角は流入質量流束、ゼロ開始で `nStepInner` 回、ω = `implicitRelax`; その後 `condTwoPhaseRelax`・θ・commit・再正規化は同じ)。
+1 sweep・ω 1 では点対角とビット一致。起動時に `[twophase] condTwoPhaseSolver` 行で実効の implicitRelax・nStepInner・scalarCflMax を出す。
+**`condensation.condTwoPhaseNonnegLimit`** (既定 1, 2026-10-02, #4h; 診断用 opt-in): 0 で二相の非分割更新の共通 θ から蒸気・液の非負制限を外す (θ = dg_max・dT_max だけ)。
+commit は総水分だけ 0 に下限を掛け (`vround` を使わない)、液は再正規化 → 受動種の床 → 実現可能性クランプで固定した総水分に対して 0 ≤ ρg ≤ ρY_w に射影する。
+二相拡散 ON の run は更新ごと・成分ごと (ρY_w, ρv, ρg, ρQ2, ρQ1, ρQ0) の補正を `[twophase-corr-gate]` (区間と末尾 ceil(0.1N) 更新の max、κ = 2n_sε₃₂ の VERDICT、段ごとの行) に出す。
+**`condensation.condAuditResidual`** (既定 0, 2026-10-02, #1b-pre): `1` で二相拡散 OFF の TP carrier 凝縮 run でも、現行の作用素 (化学種の Fick 拡散、液・Q は移流のみ) を
+格納状態から double で組み直す `[twophase-audit]` を開始時・終了時に出す (A/B の A 側の受入用; 二相拡散 ON の run は常に新作用素で監査)。結果は変えない。
+凝縮 run の `[cond-corr]` には `renorm components` 行 (再正規化の max|f−1| と ρY_w・ρg・Q2・Q1・Q0 の補正量; 相対は各成分の自分の総量) と
+`theta over all updates` 行 (更新の θ<1 と θ_src<1 のセル数を全更新で積算; 区間・累積・直近の更新) が加わる (2026-10-02)。
+TP carrier 凝縮 run は再正規化の受入ゲート `[renorm-gate]` を出す: 区間 (前回ログからの全更新) と終了時の末尾窓 (実更新数 N の最後の ceil(0.1N) 更新) について、
+更新ごとの成分別相対補正 C_q,n = Σ|q⁺−q⁻|V/Σq⁻V (ρY_w, ρg, ρQ2, ρQ1, ρQ0) と局所係数偏差 max|f−1| の max、終了時は κ = 2 n_s ε₃₂ で `VERDICT`。
+`renorm components` 行は記録用 (ゲートではない)。
+**`condensation.condTwoPhaseDiag`** (既定 0, 2026-10-02, #1b-r1; 読むだけ・数値は不変): 二相拡散 ON の run で `1` = 末尾 200 更新の θ = 0 のセル
+(`2` = θ < 1) について、セル ID・座標・更新前の ρv/ρg・制限前増分・θ を決めた制限・Q 残差・再正規化の f−1 と前後差を記録し、終了時に
+`twophase_diag_theta0_cells.csv` (頻度順上位 500) と `twophase_diag_theta0_summary.csv` (固有セル数・更新あたり件数・持続性・制限理由の内訳) を書く。
+区間ごとに `[twophase-diag]` 行 (θ 制限のセル×更新数を更新数で割った値と固有セル数) を出す。
+`3` (#1b-r2) は 1 に加えて、窓内の各更新で同じ状態・面値・係数・ソース値の double 組立 B (状態は書かない) を作り、乾燥停止セルと成分ごとの残差最大セルについて
+R_g の移流/拡散/ソース内訳・前処理分母・組立 A/B の残差・制限理由を `twophase_diag3_cells.csv`、停止集合内外の Q 残差比較を `twophase_diag3_qcompare.csv`、
+plan #1b-r2 の判定規則を機械的に当てた要約を `twophase_diag3_summary.csv` に書く。cells CSV の値の列は窓内最大 |値| とその更新番号 (最後の記録は `last_update_*`)。
 注意: 受動種/化学種の拡散は `viscMethod != 0` のときだけ加わる (viscMethod 0 は定数粘性ではなく「拡散なし」扱い; 化学種と同じ規約)。
+
+## physProp.viscMethod — 層流の粘性・熱伝導 (2026-09-27 `viscMethod: 2` を置き換え)
+
+| 値 | μ・λ | 備考 |
+| --- | --- | --- |
+| `0` | 定数 (`visc`, `thermCond` / `thermCondMethod: 1` なら k=μ·cp/`prandtlLam`) | 受動種・化学種の拡散は加わらない (上の注意) |
+| `1` | 空気の Sutherland (熱伝導は `thermCondMethod` で選択) | 組成に依らない。CPG・TP どちらでも可 |
+| `2` | 種ごとの輸送物性 (`physProp.transport` 必須、CEA 形 frozen 混合則) | `thermalMethod: 2` のみ。[plan §4.3c](../plans/active/thermophysics-solver-owned-species-db.md) |
+
+- **`viscMethod: 2` は `physProp.transport` (実種ごとの出所 `cea` / `kinetic` / `fit` / `custom:<名前>_v<版>`、lump は構成実種ごと) が無いと
+  起動時エラー**。以前の `viscMethod: 2` (LJ + Chapman–Enskog の種別値を Wilke の φ で混合し、λ にも同じ φ を使う kinetic 経路) は
+  計算から外した。空気の Sutherland で足りるなら `viscMethod: 1` にする。逆に `physProp.transport` を `viscMethod ≠ 2` と併用するのも起動拒否
+  (記録と計算が食い違うため)。
+- **旧 `viscMethod: 2` の結果を再現するときは旧バイナリで回す** (置き換え前の `e2daaba8` までのコミットでビルドしたもの)。
+  新バイナリには旧経路へ戻す設定・環境変数は無い。
+- 表引き: `physProp.transport` の μ・λ は既定で ln T の区分 3 次表を float で引く。`FORGE_TRANSPORT_TABLE=0` はその実行だけ同じモデルの
+  double 評価に戻す (性能比較・切り分け用; 旧 kinetic 経路には戻らない)。
+- `visc` は `viscMethod: 2` でも dt と陰解法対角の剛性見積りに使われるので残す。
 
 ## physProp.chemistry — 有限速度化学 (H₂ 燃焼・ノズル化学非平衡)
 
@@ -229,9 +278,63 @@ physProp: {thermalMethod: 2, species: [H2, O2, H, O, OH, H2O, HO2, H2O2, N2], sp
   |ΣY−1|>1e-3 はエラー (以前は黙って通した; 未指定種は従来どおり `Y0=1`, 他 0)。起動ログに入口ごとの Y と X (MW から逆算) が出るので
   ここで桁を確認する。`initial` (IC) は文字列のまま; 組成付き IC と `inletProfile` CSV は生成ツール側で Y に換算する
   (`gen_inlet_profile.py --X`, [procedures/inlet-profile.md](inlet-profile.md))。
+- **内蔵の化学種** (2026-10-01, [plan #13-2](../plans/active/thermophysics-solver-owned-species-db.md)): `physProp.species` の名前は共通データ
+  `solver_density_cuda/data/species/forge_species_v1.yaml` の**全気相種 61 種** (移行前からの N2/O2/CO2/H2O/Ar/He/AIR、CO/H2/OH/H/NO/O、
+  CEA `thermo.inp` から生成した 48 種 — 例 `CH4`・`C2H2,acetylene`・`N`・`NH3`・`Kr`・`Xe`) で `speciesDBFile` なしに解決できる。一覧と出典は
+  [methods/thermophysics.md](../methods/thermophysics.md)「内蔵 species DB の一覧と出典」。`e-` と CEA の `Air` は内蔵に無い (`Air`/`air` は擬似種 `AIR` の別名)。
+  生成 48 種の多くは **LJ を持たない**: `physProp.transport` で `kinetic` を指定する、または LJ の混合平均拡散 (化学種 2 以上・`viscMethod` ≠ 0・
+  `speciesDiffusionMethod: 1` = 既定) に使うと起動時エラー (`cea`/`fit` か `speciesDiffusionMethod: 0`、または `speciesDBFile` で LJ を与える)。
+  `speciesDBFile` による上書き・追加は従来どおり (同じキーだけ上書き)。既存 config の解決結果・互換性ハッシュは変わらない。
+  (LJ の有無は次項の `physProp.ljSource` で決まる。既定でどの集合にも LJ が無いのは D2・D2O・H6F6・N2O4 の 4 種。)
+- **`physProp.ljSource`** (2026-10-01, [plan §4.10 #14](../plans/active/thermophysics-solver-owned-species-db.md)): 内蔵種の Lennard-Jones パラメータ
+  (σ, ε/k_B) を探す**集合の順序付きリスト**。先頭から探して最初にある集合の値を使う。lump の構成種も同じリストで解決し、
+  `speciesDBFile` の種はそのファイルの LJ が優先 (リストに関係なし)。
+  - 集合: `gri30` (GRI-Mech 3.0 の transport; Cantera 同梱 `gri30.yaml`)、`svehla1962` (Svehla 1962 NASA TR R-132 Table I(a); 希ガスは粘性フィット行)、
+    `legacy_v1` (#14 前の内蔵値の凍結 — GRI と Svehla の混在; 旧 run の再現用)。
+  - **既定 (無指定) は `[gri30, svehla1962]`** (2026-10-01 ユーザ決定)。#14 前の値に対して変わるのは H2・OH・H・O・NO・CO (GRI 値へ) と、
+    以前 LJ が無かった CEA 生成種 (GRI か Svehla の値が入る)。N2/O2/CO2/H2O/Ar/He/AIR/N/NH3/NO2/N2O は値が同じ。
+  - 旧 run を同じ物性で再現・継続するときは `physProp: {..., ljSource: [legacy_v1]}` を明示する (#14 前と同じ互換性ハッシュ)。
+  - 効くのは LJ を読む経路だけ: LJ の混合平均拡散 (化学種 2 以上・`viscMethod` ≠ 0・`speciesDiffusionMethod: 1`) の D_ij と、
+    `physProp.transport` の `kinetic` の μ・λ。Euler (`viscMethod: 0`)・`cea`/`fit` 輸送・定数 Schmidt 数の run では値は使われない
+    (ただし互換性ハッシュには LJ の値が入るので、値が変わる種を含む config はハッシュが変わる)。
+  - どの集合にも無い種を LJ を読む使い方に回すと、種名と探した集合を示して起動時エラー。空リスト・未知の集合名・重複もエラー。
+  - 解決結果は起動ログ (`[species]   LJ sets searched ...` と種ごとの集合・値) と解決済み記録の `provenance.lj_source`・`lj_resolved` に出る
+    (互換性ハッシュには値だけが入り、集合名は入らない)。双極子 (H2O・NH3) は種レベルの値だが、`kinetic` で適用するのは
+    `stockmayer` の集合 (`gri30`・`legacy_v1`) で解決した種だけ。`svehla1962` (`lj12-6`) で解決した種には適用しない (起動ログに NOTE; #14-L1b)。
+- **化学種の解決済み記録と入力場の照合** (TP `thermalMethod: 2` のみ、2026-09-27、[plan §4.3 #3a](../plans/active/thermophysics-solver-owned-species-db.md))。
+  - 起動時に使用した全種の物性 (順序・名前・MW・datum 前の絶対係数と温度区間・LJ・`thermoHrefTemp`・来歴) を run ディレクトリへ
+    `resolved_species_<互換ハッシュ16桁>.yaml` として書く (**出力=記録であり入力ではない**; 同名で来歴だけ違えば `_<完全性16桁>` 付きの別名)。
+    各 `res_*.h5` (境界出力を含む) のルート属性に `species_hash` (互換性ハッシュ; `source` とパスは含まない)・`species_record_sha256` (記録全文)・
+    `species_record_file`・`species_input_unverified` が付く。Python からは `tools/forge_species.py` の `load_record` / `find_record`。
+  - `valueFileName` に `species_hash` があり自分と違えば**起動を拒否**し、入力側の記録が見つかれば差のある種・係数を表示する (許可手段なし;
+    種を変えるなら `tools/convert_species_field.py`)。**属性が無い場は「照合不能」で拒否**する。確認済みなら**その実行だけ**
+    `FORGE_ALLOW_UNVERIFIED_SPECIES=1 forge` で通せる (出力に `species_input_unverified=1` が付き、以後の restart に継承される)。
+    **config キーでの恒常的な許可は無い** (生成 config に埋め込まない)。
+    **属性なしの場は既定で停止する** (2026-09-27 #3c で過渡期の既定を終了。過渡期用の `FORGE_REQUIRE_VERIFIED_SPECIES` はソルバから撤去し、
+    立てても何も変わらない)。停止したら (1) 属性を付ける生成処理で IC を作り直す (IC 生成は `forge --resolve-species` で宛先を解決して
+    `species_hash` を付ける; 付いた場から `restart_field.py` / `interp_field.py` で作った場は属性を継承する) か、(2) 同じ種・datum で作った場だと
+    確認できているなら**その実行だけ** `FORGE_ALLOW_UNVERIFIED_SPECIES=1 forge` で通す (起動ログの警告は環境変数で許可された旨を示し、
+    出力に `species_input_unverified=1` が付く)。種・DB が変わった場は `convert_species_field.py`。
+  - **引き継ぎツールも同じ規約** (2026-09-27 #3c 残)。`restart_field.py` / `interp_field.py` / `convert_species_field.py` と設計 runner の
+    IC 付与・段間継承 (`runner_axismach` の `_restart_same_mesh`・`runner_sern` の `restart_by_index` / `warm_from_run`) は、
+    SRC が未検証 (属性なし / ハッシュが宛先と違う `species_input_unverified=1`; 一致する印付きは下記) で宛先が TP のとき・宛先の `solverConfig.yaml` が無く CPG か TP か判定できないとき・
+    宛先を解決できない (`--resolve-species` を持つ forge が無い = 旧バイナリ; `--forge` / `FORGE_BIN` で新しいバイナリを渡す) とき・
+    記録が壊れているときに**既定で書き込まずに停止**し、ソルバと同じ 2 通り (IC を属性を付ける処理で作り直す / その実行だけ許可) を案内する。
+    許可は**その実行だけ** `FORGE_ALLOW_UNVERIFIED_SPECIES=1 python3 tools/restart_field.py ...` か各ツールの `--force-species`
+    (記録の破損・係数不一致を通すのは `--force-species` だけ; 環境変数は未検証・解決不能だけを通す)。**許可して通した宛先には属性を付けない**ので、
+    その場から起動するソルバにも同じ許可が要る。検証済みの SRC からの継承は従来どおり (宛先を解決して互換性ハッシュが一致すれば属性と記録を継承)。
+    **印付きの場 (`species_input_unverified=1`) はソルバと同じ規則** (2026-10-01 #3d): 場の `species_hash` が宛先のハッシュ (種変換は SRC run の設定の
+    ハッシュ) と一致すれば許可なしで通し、宛先に同じハッシュと印を継承する (印は消さない)。一致しなければ停止。
+    したがって属性なしの旧場の移行は「その実行だけ `FORGE_ALLOW_UNVERIFIED_SPECIES=1 forge` で 1 回回す (出力が印付きになる) → 以後は許可なし」で済む。
+    宛先が CPG なら対象外。過渡期の `FORGE_REQUIRE_VERIFIED_SPECIES` はツールからも撤去した。
+  - **凝縮 ON の気液ペア検査** (2026-10-01 #13-3): 外部 DB の気相 H2O が内蔵と違う (例: #9 以前の runner が写した旧 MW 0.0180153 の H2O) と
+    起動を拒否し、キーと両値・移行先 (外部 DB から H2O を外す / lump 記法で `speciesDBFile` をやめる) を示す。`FORGE_ALLOW_UNVERIFIED_SPECIES=1`・
+    `--force-species` では通らない。その config の旧場からの継続は `convert_species_field.py` (種の物性が変わるため)。
+  - `forge --resolve-species`: GPU を使わず `solverConfig.yaml` を解決して記録を書き、互換性ハッシュを**標準出力の最終行**に出して終了
+    (CPG は終了コード 2)。記録を既存の場へ貼っても検証済みにはならない。
 - **`thermoHrefTemp: 298.15` を必ず指定する** (反応熱は sensible datum の残差項 $\dot Q=-\sum_s h^{abs}_s(T_{ref})\dot\omega_s$ として入る。絶対 datum (0) でも動くが陰解法は不安定)。
 - 機構に現れる種は `species` に全て含めること (無ければ起動時エラー)。`species` にだけある種は不活性として扱う。
-- 熱力学 DB は `tools/cea_thermo_to_species_db.py thermo.inp --species ...` で CEA から生成する (ラジカルは内蔵 DB に無い)。
+- 熱力学 DB は `tools/cea_thermo_to_species_db.py thermo.inp --species ...` で CEA から生成する (内蔵 DB は H・O・OH・H2 までは持つが HO2・H2O2 などは無い; 下の「内蔵の化学種」)。
 - 出力: `chemQdot` [W/m³], `chemTau` [s] (=1/max|∂ω_s/∂ρY_s|、化学時間の目安。`dt` や `cfl_pseudo` の妥当性判断に使う)。
 - 検証: `case/35.uniform_periodic_box/run_0049_node_h2_ignition` (0-D 着火 vs Cantera)。
 
@@ -256,6 +359,27 @@ turbulence: {model: "sst", ..., sstNodeWallKPin: 1, sstOmegaProdFromPk: 1, sstSi
 
 検証 (plan [turbulence-sst-consistency-options](../plans/active/turbulence-sst-consistency-options.md)): case/16 2D node SST では全オプションが壁圧比 ≤0.25 % の差、case/26 平板 Cf と case/16 3D の結果は同 plan 参照。
 `tools/test_scale_invariance.py` (相似メッシュで無次元残差の一致を見る) は単位付き閾値の検出用。
+
+### 遷移モデル `turbulence.transition` (2026-09-22)
+
+```yaml
+turbulence: {model: "sst", ..., wallTreatmentSST: 0, transition: "lm2009"}   # 既定 "none"
+```
+
+| 値 | 内容 |
+| --- | --- |
+| `none` (既定) | 遷移モデルなし。SST は前縁から完全乱流 |
+| `lm2009` | Langtry–Menter 2009 の $\gamma$–$\tilde{Re}_{\theta t}$ 2 方程式 (SU2 の `KIND_TRANS_MODEL= LM` と同じソース式・相関)。輸送変数の上下限は SU2 と違う: forge は $\gamma\in[10^{-4},1]$・$\tilde{Re}_{\theta t}\ge20$、SU2 は $\gamma\in[10^{-4},5]$・$\tilde{Re}_{\theta t}\ge10^{-4}$ (T3A の準定常場で下限の作動は 0 %、$\gamma=1$ は自由流の 7 %)。理論は [`methods/turbulence/theory.md`](../methods/turbulence/theory.md) §11、実装は同 `implementation.md` |
+
+- **受け付ける組み合わせは検証したものだけ**: node・`model: sst`・`wallTreatmentSST: 0`・非軸対称・DES なし・`sstEnergyIncludesK: 0`・`scalarDiffusion: 1`・定常陰解法。外れると起動時に止まる。
+- 入口は $\gamma=1$、$\tilde{Re}_{\theta t}$ は入口の $k$ と速度から決まる局所 $Tu$ の相関値。**追加の入口キーは無い**。入口の $k$・$\omega$ (乱れの強さと減衰の速さ) が遷移位置を決めるので、
+  $\omega$ は「入口粘性比」の感度を必ず見る。
+- **`turbulence.transitionRethMin`** (既定 **20** = LM2009/SU2 の推奨値 `Corr_Ret_lim`): 相関値と輸送変数 $\tilde{Re}_{\theta t}$ の下限。上げると遷移が遅れる。
+  文献には case ごとに 100〜200 へ上げる調整例がある (Lin ら JGPP 6(3):9-15, 2014) が、**Mark II で 20/130/200 を試したところほぼ空振り**だった
+  (下限に触れるのは衝撃下流の $\gamma\to1$ の領域だけで、層流域の輸送値は 130 以上。plan §6.5)。**20 以外にしたら run の README に「実験に合わせた調整」と明記する**。
+- 壁は $y_1^+\le1$ が前提 (モデルの定義)。残差は `rms_roGamma` / `rms_roReth` が増える (`check_convergence.py` が読む)。
+- 出発場は完全乱流の SST 場でよい (平板 T3A で、$k$/$\omega$ を入口値に戻した場からの解と 4 桁一致)。
+- 検証: `case/57.transition_flat_plate` (ERCOFTAC T3A、同一メッシュの SU2 LM と比較)。
 
 ## output — 出力する場の量の絞り込みと h0 (2026-09-08)
 
@@ -343,6 +467,20 @@ mesh:
 
 根拠と検証は [case/43.node_axis_dof](../case/43.node_axis_dof/README.md) と
 [plans/active/architecture-node-option-consolidation.md](../plans/active/architecture-node-option-consolidation.md)。
+
+## mesh.scalarGradient — node のスカラー勾配の作用素 (2026-09-27 から node の既定は lsq)
+
+`lsq` (**node の既定、2026-09-27 から**) / `gg`。node で $k,\omega$・化学種 $Y_s$・受動種 $\xi$・凝縮モーメントの勾配を、
+NS と同じ事前計算 LSQ 係数 (差分形、境界は内部隣接のみ、並進周期は合併係数を共有) で計算する。`gg` は Green–Gauss で、
+2026-09-26 までの node の既定。cell は常に GG (キーは無視)。
+起動エコー `'scalarGradient' effective: <値> (default|explicit)`。node で省略すると既定変更の警告が 1 行出る。
+
+- **旧結果の再現**: `mesh.scalarGradient: gg` を明記する。
+- **切り替え日をまたぐ run は途中から再開しない** (ユーザ決定 2026-09-27): 旧既定 gg で始めた段階起動 run を省略のまま
+  新バイナリで再開すると、`stage_manifest.py` が gg 段と lsq 段を 1 区間につないで収束判定する (起動記録との結び付けは
+  plan [`tooling-stage-manifest-launch-binding`](../plans/active/tooling-stage-manifest-launch-binding.md) で後回し)。最初から回し直すか、`gg` を明記して続ける。
+- 設計 DB (SERN) は `FLAG_POLICY` 2026-09-27 以降、全作動点の実効値が lsq と確認できた評価だけを学習に使う。
+- 検証: plan [`gradient-scalar-lsq-unification.md`](../plans/accepted/gradient-scalar-lsq-unification.md) (S0/S1・S2 [現行 gg 基準]・S3 合格)。
 
 ## 文書に無かった設定キー (2026-09-18, plan [config-key-pruning](../plans/accepted/config-key-pruning.md) §5.3 c/g/n)
 

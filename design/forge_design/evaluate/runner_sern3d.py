@@ -31,30 +31,73 @@ def _solver_config(p, nsteps, out_int, cfl, p_ref):
 
 
 def _bcond_config(p, st):
-    model = p.evaluate.get("model", "euler"); wall_kind = "slip" if model == "euler" else "wall"
+    model = p.evaluate.get("model", "euler")
     ex, en = st["exhaust"], st["ext"]; P = PHYS_SERN3D
 
     def inlet(name, s):
         return (f"{name}: {{physID: {P[name]}, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , "
                 f"floats: {{ro: {s['ro']:.6g}, Ux: {s['u']:.6g}, Uy: 0.0, Uz: 0.0, Ps: {s['P']:.6g}, k: {s['k']:.6g}, omega: {s['omega']:.6g}{R2.inlet_species_floats(s)}}}}}\n")
 
+    # `evaluate.outlet_kind`: outflow (既定・全量外挿) / statPress。**既定は 2026-09-23 に statPress から変更**
+    # node は壁列が常に亜音速なので、実出口圧より桁違いに低い Ps を課すとその列から unstart する
+    # (case/16 run_0212/0213 で確定)。SERN 3D の出口はプルーム実圧 ~7.5 kPa に対し Ps 2851 Pa で、
+    # run_0121 は出口面の圧力が 7.5 → 128 kPa に積み上がり Ux が 1714 → 153 m/s に落ちて発散した。
+    _okind = str(p.evaluate.get("outlet_kind", "outflow"))   # 既定 outflow (SERN 出口は超音速。run_junction_model.py の注記参照)
+
     def outlet(name):
+        if _okind == "outflow":
+            return f"{name}: {{physID: {P[name]}, kind: outflow, outputHDFflg: 0, ints: , floats: }}\n"
         return f"{name}: {{physID: {P[name]}, kind: outlet_statPress, outputHDFflg: 0, ints: , floats: {{Ps: {en['P']:.6g}, Pt: {en['P']:.6g}, Tt: {en['T']:.6g}}}}}\n"
 
+    def farfield(name, s):
+        # 特性型の遠方境界 (plan boundary-node-farfield-characteristic)。自由流 = 外気 (入口 inlet_ext と同じ状態)
+        return (f"{name}: {{physID: {P[name]}, kind: farfield, outputHDFflg: 0, ints: , "
+                f"floats: {{ro: {s['ro']:.9g}, Ux: {s['u']:.9g}, Uy: 0.0, Uz: 0.0, Ps: {s['P']:.9g}, k: {s['k']:.9g}, omega: {s['omega']:.9g}{R2.inlet_species_floats(s)}}}}}\n")
+
+    def simple(name, kind):
+        return f"{name}: {{physID: {P[name]}, kind: {kind}, outputHDFflg: 0, ints: , floats: }}\n"
+
+    # `evaluate.side_far_kind`: slip (既定) / farfield。`evaluate.top_out_kind`: outlet (既定 = outlet_kind に従う) / slip / farfield。
+    # 旧実装は top_out_kind が outlet 以外なら何でも slip にしていた (outflow と書いても slip になる)。未知の値はエラーにする
+    _sfk = str(p.evaluate.get("side_far_kind", "slip"))
+    _tok = str(p.evaluate.get("top_out_kind", "outlet"))
+    if _sfk not in ("slip", "farfield"):
+        raise ValueError(f"evaluate.side_far_kind は slip / farfield: {_sfk}")
+    if _tok not in ("outlet", "slip", "farfield"):
+        raise ValueError(f"evaluate.top_out_kind は outlet / slip / farfield: {_tok}")
+    top_line = outlet("top_out") if _tok == "outlet" else (farfield("top_out", en) if _tok == "farfield" else simple("top_out", "slip"))
+    side_line = farfield("side_far", en) if _sfk == "farfield" else simple("side_far", "slip")
+
     def wall(name, kind=None):
-        return f"{name}: {{physID: {P[name]}, kind: {kind or wall_kind}, outputHDFflg: 1, ints: , floats: }}\n"
+        # 物理壁は 2D と同じく `spec.wall_thermal` を単一ソースにする (断熱 wall / 等温 wall_isothermal+Ts)。
+        # ここを直書きしていたため、生産 YAML が等温 1000 K を指定しても 3D は断熱で回っていた
+        # (run_0118、codex plan レビュー 2026-09-19 M3)。kind を明示指定した呼び出し (slip など) はそのまま。
+        if kind is not None:
+            return f"{name}: {{physID: {P[name]}, kind: {kind}, outputHDFflg: 1, ints: , floats: }}\n"
+        return f"{name}: {p.wall_bcond_line(model == 'euler', phys_id=P[name], output=1)}\n"
     return (inlet("inlet_nozzle", ex) + inlet("inlet_ext", en) + outlet("outlet") + wall("ramp") + wall("cowl_in") + wall("cowl_out")
-            + outlet("bottom") + (outlet("top_out") if p.evaluate.get("top_out_kind", "outlet") == "outlet"
-                                  else f"top_out: {{physID: {P['top_out']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n")
+            + outlet("bottom") + top_line
             + f"sym: {{physID: {P['sym']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
-            + f"side_far: {{physID: {P['side_far']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
+            + side_line
             + wall("sidewall_in") + wall("sidewall_out")
-            # R2: 幅外の機体下面 (vehicle) は ramp と同じ壁種・壁出力だが帳簿は別枠 (forces3d)
+            # R4c/R4e: 機体側面 (z = W/2, x ≤ L_ramp) と機体ベース (x = L_ramp, 幅内)。
+            # ダクト側壁とは別タグ・別帳簿。**上面・側面・ベースは同一の等温壁で揃える** (codex plan-3 M4)
+            + ((wall("vehicle_side") + wall("vehicle_base"))
+               if (int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0
+                   and p.raw.get("mesh3d", {}).get("vehicle_side", True)
+                   and p.raw.get("mesh3d", {}).get("ext_top", p.raw.get("mesh", {}).get("ext_top", 0))) else "")
+            # R2: 幅外の機体下面 (vehicle)。**R4e で 0 面になった** (幅外はバンドが全長を覆う) が、
+            # 旧メッシュ (vehicle_side なし) はまだ面を出すので行は残す (無いと forge が physID 14 で止まる)
             + (wall("vehicle") if int(p.raw.get("mesh3d", {}).get("nz_out", 17)) > 0 else "")
             + (f"underside_far: {{physID: {P['underside_far']}, kind: slip, outputHDFflg: 0, ints: , floats: }}\n"
                if p.raw.get("mesh3d", {}).get("W_vehicle") is not None else "")
             # R4: 機体上面 (ext_top)。2D の vehicle と同じく slip・壁出力 (帳簿外、診断)
-            + (f"vehicle_top: {{physID: {P['vehicle_top']}, kind: slip, outputHDFflg: 1, ints: , floats: }}\n" if int(m2_ext(p)) else ""))
+            # R4f (codex plan レビュー 2 の M3, 2026-09-19): 機体上面も機体側面と同じ**等温粘性壁**を既定にする。
+            # 「帳簿外だから力に効かない」は誤りで、上面の境界層・熱伝達・後縁流れが変わればランプ/カウルの圧力も変わる。
+            # 旧既定の slip は `evaluate.vehicle_top_kind: slip` で比較用に残す (§4.11 の 2D 中立モデルの流用だった)
+            + ((wall("vehicle_top") if str(p.evaluate.get("vehicle_top_kind", "wall")) != "slip"
+                else f"vehicle_top: {{physID: {P['vehicle_top']}, kind: slip, outputHDFflg: 1, ints: , floats: }}\n")
+               if int(m2_ext(p)) else ""))
 
 
 def m2_ext(p) -> int:
@@ -90,12 +133,16 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     H = float(p.spec["H_m"]); m = p.raw.get("mesh3d", {}); m2 = p.mesh
     prm = SernMesh3DParams(ni_up=int(m.get("ni_up", 10)), ni_noz=int(m.get("ni_noz", 60)), ni_plume=int(m.get("ni_plume", 110)),
                            nj_top=int(m.get("nj_top", 49)), nj_bot=int(m.get("nj_bot", 31)), nz_in=int(m.get("nz_in", 25)), nz_out=int(m.get("nz_out", 17)),
-                           W=float(m.get("W", 2.0)), Z_ext=float(m.get("Z_ext", 1.5)), L_sw=m.get("L_sw"), W_vehicle=m.get("W_vehicle"), L_up=float(m2.get("L_up", 0.5)),
+                           W=float(m.get("W", 2.0)), Z_ext=float(m.get("Z_ext", 1.5)), z_append=float(m.get("z_append", 0.0)), L_sw=m.get("L_sw"), W_vehicle=m.get("W_vehicle"), L_up=float(m2.get("L_up", 0.5)),
                            x_out_extra=float(m2.get("x_out_extra", 2.0)), bot_depth=float(m2.get("bot_depth", 3.0)),
                            first_wall_frac=float(m.get("first_wall_frac", m2.get("first_wall_frac", 4e-3))), first_z_frac=float(m.get("first_z_frac", 4e-3)),
+                           # 壁が終わった下流の第一層厚 (0 = ブレンドしない = 既定・挙動不変。plan sern-3d §4.41)
+                           first_wall_frac_far=float(m.get("first_wall_frac_far", 0.0)),
+                           wall_frac_blend_len=float(m.get("wall_frac_blend_len", 0.5)),
                            cowl_thickness=float(m.get("cowl_thickness", m2.get("cowl_thickness", 0.0))),
-                           ext_top=bool(int(m2.get("ext_top", 0))), top_depth=float(m2.get("top_depth", 2.0)), nj_ext_top=int(m2.get("nj_ext_top", 41)),
-                           vehicle_clearance=float(m2.get("vehicle_clearance", 0.02)), first_top_frac=float(m2.get("first_top_frac", 0.02)),
+                           ext_top=bool(int(m2.get("ext_top", 0))),
+                           vehicle_side=bool(m.get("vehicle_side", True)), nj_vside=int(m.get("nj_vside", 17)), top_depth=float(m2.get("top_depth", 2.0)), nj_ext_top=int(m2.get("nj_ext_top", 41)),
+                           vehicle_clearance=float(m2.get("vehicle_clearance", 0.06)), t_base=float(m2.get("t_base", 0.02)), first_wake_frac=float(m.get("first_wake_frac", m2.get("first_wake_frac", 0.0))), first_top_frac=float(m2.get("first_top_frac", 0.02)),
                            vehicle_taper=float(m2.get("vehicle_taper", 0.0)), vehicle_wedge_deg=float(m2.get("vehicle_wedge_deg", 3.0)),
                            ramp_fillet=float(m2.get("ramp_fillet", 0.0)),
                            interface_angle=float(m2.get("interface_angle_rad", theta_b)),
@@ -112,7 +159,11 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"')
                                                .replace(", nodeWallDirichlet: 1", "").replace(", nodeInletCornerWall: 1", ""))
     R2.convert_mesh(run_dir, "sern.msh", "sern_qc.h5")
-    q = subprocess.run([sys.executable, str(R2.FORGE_TOOLS / "check_mesh_quality.py"), "sern_qc.h5", "--mode", "3d"], cwd=run_dir, env=R2._ENV, capture_output=True, text=True)
+    # AR 上限は問題 YAML の `mesh.ar_max` で緩められる (既定 1000)。**壁法線に沿った構造格子の
+    # 境界層セルに限り 5000 まで** (AGENTS.md「メッシュ品質チェック」2026-09-12 ユーザ決定)。
+    # 他の設計チェーン (`runner_axismach` / `runner_wt`) は既にこの knob を持っている。
+    q = subprocess.run([sys.executable, str(R2.FORGE_TOOLS / "check_mesh_quality.py"), "sern_qc.h5", "--mode", "3d",
+                        "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=R2._ENV, capture_output=True, text=True)
     (run_dir / "MESH_QUALITY.txt").write_text(q.stdout + q.stderr)
     if q.returncode != 0:
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
@@ -213,6 +264,10 @@ def surface_forces(h5file, expect_dir, p_a, x_ref, y_ref, z_split=None, z_vehicl
     return out
 
 
+# 機体側の面集合 (ノズル力に入れない。codex plan-3 M4)。`vehicle` は幅外機体下面 (R4e で 0 面、旧メッシュ互換)
+_VEHICLE_FACES = ("vehicle", "vehicle_top", "vehicle_side", "vehicle_base")
+
+
 def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0, mdot_u_in=0.0, p_in=0.0, twall_on_fluid=False,
              half_W_vehicle=None):
     """3D の力係数。**帳簿 (R2, codex M5 採用 2026-09-09)**: C_T / C_L / C_M は**ノズル力**
@@ -223,8 +278,10 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
     P = PHYS_SERN3D; run_dir = Path(run_dir)
     spec = {"ramp": (P["ramp"], (0, 1, 0)), "cowl_in": (P["cowl_in"], (0, -1, 0)), "cowl_out": (P["cowl_out"], (0, 1, 0)),
             "sidewall_in": (P["sidewall_in"], (0, 0, 1)), "sidewall_out": (P["sidewall_out"], (0, 0, -1)),
-            "vehicle": (P["vehicle"], (0, 1, 0)),      # R2: 幅外機体下面 (メッシャが分離したタグ。旧 run は ramp の z 分割で代替)
-            "vehicle_top": (P["vehicle_top"], (0, -1, 0))}   # R4: 機体上面 (帳簿外・診断のみ: C_T_vehicle_top)
+            "vehicle": (P["vehicle"], (0, 1, 0)),      # R2: 幅外機体下面 (R4e で 0 面。旧メッシュ互換で残す)
+            "vehicle_top": (P["vehicle_top"], (0, -1, 0)),   # R4: 機体上面
+            "vehicle_side": (P["vehicle_side"], (0, 0, -1)),  # R4c: 機体側面 (z = W/2、外向きは −z)
+            "vehicle_base": (P["vehicle_base"], (-1, 0, 0))}  # R4e: 機体ベース (x = L_ramp、外向きは −x)
     parts = {}
     for name, (pid, d) in spec.items():
         c = list(run_dir.glob(f"res_{name}_{pid}_{step}.h5"))
@@ -236,10 +293,10 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
         for name, v in parts.items():
             if name == "ramp" and "inside" in v:
                 tot += v["inside"][key] if sel == "nozzle" else (v["outside"][key] if sel == "vehicle" else 0.0)
-            elif name == "vehicle":
-                tot += v[key] if sel == "vehicle" else 0.0
-            elif name == "vehicle_top":
-                tot += v[key] if sel == "vehicle_top" else 0.0
+            elif name in _VEHICLE_FACES:
+                # **機体面はノズル力に入れない** (codex plan-3 M4)。集計は明示的な面集合で三分する:
+                # ノズル = ramp(幅内) + cowl + ダクト側壁 / 機体 = 上面 + 側面 + ベース + 幅外下面 / 全収支 = 両者
+                tot += v[key] if sel in ("vehicle", name) else 0.0
             elif sel == "nozzle":
                 tot += v[key]
         return tot
@@ -252,7 +309,11 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
            "C_T_vehicle": -Fx_v / F_ideal, "C_L_vehicle": Fy_v / F_ideal, "C_M_vehicle": Mn_v / (F_ideal * H),
            "C_T_total_with_vehicle": (inlet - Fx - Fx_v) / F_ideal, "C_L_total_with_vehicle": (Fy + Fy_v) / F_ideal,
            "half_W_vehicle": half_W_vehicle,
-           "C_T_vehicle_top": -_sum("Fx_p", "vehicle_top") / F_ideal, "C_L_vehicle_top": _sum("Fy_p", "vehicle_top") / F_ideal}
+           "C_T_vehicle_top": -_sum("Fx_p", "vehicle_top") / F_ideal, "C_L_vehicle_top": _sum("Fy_p", "vehicle_top") / F_ideal,
+           # 機体面を個別にも残す (ベース抗力は帳簿外だが**機体力として保存する**。codex plan-3 M4)
+           "C_T_vehicle_side": -_sum("Fx_p", "vehicle_side") / F_ideal,
+           "C_T_vehicle_base": -_sum("Fx_p", "vehicle_base") / F_ideal,
+           "C_L_vehicle_base": _sum("Fy_p", "vehicle_base") / F_ideal}
     if "ramp" in parts and "inside" in parts["ramp"]:
         ri, ro = parts["ramp"]["inside"], parts["ramp"]["outside"]
         out["C_L_ramp_inside"] = ri["Fy_p"] / F_ideal; out["C_L_ramp_outside"] = ro["Fy_p"] / F_ideal
@@ -261,8 +322,8 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
     if any("Fx_tau" in v for v in parts.values()):
         # 摩擦: vehicle タグがあればノズル面 (vehicle 以外) だけを足す。旧 run (ramp が幅外を含む) では全面の値になる
         sgn = 1.0 if twall_on_fluid else -1.0
-        Fx_t = sgn * sum(v.get("Fx_tau", 0.0) for name, v in parts.items() if name not in ("vehicle", "vehicle_top"))
-        Fx_tv = sgn * parts.get("vehicle", {}).get("Fx_tau", 0.0)
+        Fx_t = sgn * sum(v.get("Fx_tau", 0.0) for name, v in parts.items() if name not in _VEHICLE_FACES)
+        Fx_tv = sgn * sum(parts.get(n, {}).get("Fx_tau", 0.0) for n in _VEHICLE_FACES)
         out["C_T_with_shear"] = (inlet - Fx + Fx_t) / F_ideal; out["C_T_friction"] = Fx_t / F_ideal
         out["C_T_friction_vehicle"] = Fx_tv / F_ideal
         out["friction_note"] = ("nozzle faces only (vehicle tag separate)" if "vehicle" in parts
@@ -281,13 +342,18 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     if rc is None:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
-    gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass)
+    gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass,
+                           p_min=float(p.evaluate.get("p_min", 1.0)))
     out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "dim": 3, "moc_forces": info["moc_forces"], "forge_rc": rc,
            "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"]}
     if hist:
         last = hist[-1]
         out.update({k: last[k] for k in last if k != "parts"})
         write_force_history_csv(out_dir / "force_history.csv", hist)
+    # 来歴 (2D runner と同じ関数・同じ厳格さ。codex result 2026-09-27 chi-default m6)
+    out["slau_wall_normal_chi_effective"] = R2._last_launch_chi(run_dir)
+    out["scalar_gradient_effective"] = R2._last_launch_value(run_dir, "scalarGradient", allowed=("gg", "lsq"))
+    out["flag_policy"] = R2.FLAG_POLICY
     (out_dir / "metrics.json").write_text(json.dumps(out, indent=1))
     return out
 

@@ -9,12 +9,16 @@
 //   (d) Kantrowitz θ: γ_v=1.331 (H2O) は旧 1.40 比で 0.85 倍
 //   (f) resolveCondSonicModel の選択条件
 //   build: nvcc -x cu --expt-relaxed-constexpr -o test_cond_sonic tests/unit/test_cond_sonic.cpp
+//   (plan #10 以降: H2O の潜熱に共通データの気液ペアが要るので、-I <solver_density_cuda> -I <埋め込みヘッダの生成先> と
+//    solver_density_cuda/input/speciesDB.cpp solver_density_cuda/input/speciesTransportDB.cpp -lyaml-cpp を足す;
+//    生成は tests/unit/cond_latent_test_helper.cuh 冒頭)
 // =============================================================================
 #include <cstdio>
 #include <cmath>
 #include "../../cuda_forge/condensationEOS_d.cuh"
 #include "../../cuda_forge/condensationSource_d.cuh"
 #include "../../input/condSonicResolve.hpp"
+#include "tests/unit/cond_latent_test_helper.cuh"   // H2O 潜熱の気液ペア (plan thermophysics-solver-owned-species-db #10)
 
 static int nfail = 0;
 static void check(const char* name, double a, double b, double tol) {
@@ -25,8 +29,7 @@ static void check(const char* name, double a, double b, double tol) {
 
 static SpeciesThermo makeSp(double MW, const double lo[9], const double hi[9]) {
     SpeciesThermo s{}; s.MW = MW; s.sigma_LJ = 3.6; s.eps_kB = 97.0;
-    s.Tlo = 200.0; s.Tmid = 1000.0; s.Thi = 6000.0;
-    for (int i = 0; i < 9; ++i) { s.low[i] = lo[i]; s.high[i] = hi[i]; }
+    thermo_set_nasa9_2(s, 200.0, 1000.0, 6000.0, lo, hi);
     return s;
 }
 static const double N2_lo[9] = {2.210371497e4,-3.818461820e2,6.082738360,-8.530914410e-3,1.384646189e-5,-9.625793620e-9,2.519705809e-12,7.108460860e2,-1.076003744e1};
@@ -85,7 +88,7 @@ static void test_tp(const TPctx& c, double T, double rho, double g) {
 
 int main() {
     printf("== (a) CPG pure ==\n");
-    const CondSpeciesProps n2 = condProps_N2(), h2o = condProps_H2O();
+    const CondSpeciesProps n2 = condProps_N2(), h2o = cond_test_props_H2O(false);
     for (double g : {0.0, 0.01, 0.1, 0.2}) test_cpg(n2, 1.4, 80.0, 0.05, g, "N2");
     for (double g : {0.0, 0.01, 0.1}) test_cpg(h2o, h2o.cp/h2o.cv, 230.0, 0.02, g, "H2O");
     printf("== (b) TP carrier (N2 + H2O) ==\n");

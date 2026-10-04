@@ -1,0 +1,7 @@
+problem case=mix_0p1 tp t,k=400,600,1000,2000 p,bar=1
+reac
+  name=N2 moles=0.9000000000
+  name=H2O moles=0.1000000000
+only N2 H2O
+output siunits transport
+end

@@ -1,0 +1,10 @@
+start_run: run_0963_chidef_2d_m4_off_base
+res: run_0963_chidef_2d_m4_off_base/res_12000.h5
+res_sha256: 5409017970ac9a566b38e9dcadb8dd2fc48ac658d8f397cb7a173b36b957e409
+mesh_sha256 (起点の sern.h5): 7b1a6f3b4a9dd7a7e86a093b848dcb97e189e098d371c456403b2330cdf6c7c0
+value file (restart 先): sern.h5
+config changes vs start:
+  - mesh.scalarGradient: 書かない (実装前バイナリ、実効 gg)
+  - set time.last.nStepOuter: 12000 -> 36000
+  - set time.outStepInterval: 500 -> 500
+check_solver_config rc=0

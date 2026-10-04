@@ -82,10 +82,16 @@ def write_h5(path, ro, Y, T, u=100.0, roXi=None, drop=None, roK=None, roOmega=No
                 f.create_dataset("VALUE/" + k, data=np.asarray(v, np.float64 if k in ("roK", "roOmega") else np.float32))
 
 
-def run_tool(src, dst, extra=()):
+def run_tool(src, dst, extra=(), allow=True):
+    """合成の入力場は化学種属性を持たない (未検証)。#3c 以降の変換器は既定で停止するので、本試験の主題 (数値検査) は
+    その実行だけの許可 FORGE_ALLOW_UNVERIFIED_SPECIES=1 で回す (allow=False で既定の停止を確かめる)。"""
     cmd = [sys.executable, TOOL, os.path.join(src, "in.h5"), os.path.join(dst, "in.h5"),
            "--meta", os.path.join(dst, "species_meta.yaml"), "--src-meta", os.path.join(src, "species_meta.yaml"), "--dry-run", *extra]
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    env = dict(os.environ)
+    env.pop("FORGE_ALLOW_UNVERIFIED_SPECIES", None)
+    if allow:
+        env["FORGE_ALLOW_UNVERIFIED_SPECIES"] = "1"
+    p = subprocess.run(cmd, capture_output=True, text=True, env=env)
     return p.returncode, p.stdout + p.stderr
 
 
@@ -95,18 +101,20 @@ def main():
     dst = os.path.join(root, "dst"); make_run(dst); write_h5(os.path.join(dst, "in.h5"), ro0, Y0, T0)
 
     def case(name, expect_ok, keyword, ro=ro0, Y=Y0, T=T0, drop=None, roXi=None, dst_dir=dst, extra=(), src_tracer=False, patch=None,
-             roK=None, roOmega=None, meta_tracer=None):
+             roK=None, roOmega=None, meta_tracer=None, allow=True):
         src = os.path.join(root, "src_" + name); make_run(src, tracer=src_tracer, meta_tracer=meta_tracer)
         write_h5(os.path.join(src, "in.h5"), ro, Y, T, roXi=roXi, drop=drop, roK=roK, roOmega=roOmega)
         if patch:
             patch(src)
-        rc, out = run_tool(src, dst_dir, extra)
+        rc, out = run_tool(src, dst_dir, extra, allow=allow)
         ok = (rc == 0) == expect_ok and (keyword in out)
         check(ok, f"{name}: expected {'OK' if expect_ok else 'REFUSE'} with '{keyword}' -> rc={rc}" + ("" if keyword in out else " (keyword NOT found)"))
         if not ok:
             print("      " + "\n      ".join(out.strip().splitlines()[-6:]))
 
     case("good", True, "all checks passed")
+    # 属性なし (未検証) の入力は既定で停止する (#3c: ソルバと同じ規約; 許可はその実行だけの環境変数か --force-species)
+    case("unverified-default", False, "FORGE_ALLOW_UNVERIFIED_SPECIES=1", allow=False)
     case("good-reinit", True, "composition re-initialized", extra=("--mode", "reinit"), src_tracer=True, roXi=ro0 * 0.3)
     # roe = NaN in one cell
     def nan_roe(src):

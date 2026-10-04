@@ -1,0 +1,522 @@
+# 判定ツールを元ファイルに当てた全出力 (plan convection-slau-wall-normal-chi-default §6、codex result 2026-09-27 M1)
+
+## case/46.sern_design: 明示 0 run_0965_chidef_2d_m4_off_flag0 / 省略 run_0966_chidef_2d_m4_off_omit
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/46.sern_design/run_0965_chidef_2d_m4_off_flag0 case/46.sern_design/run_0966_chidef_2d_m4_off_omit
+(rc=1)
+
+=== case/46.sern_design/run_0965_chidef_2d_m4_off_flag0  [last step 35999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=7.41e-05 peak=7.70e-05 fin=6.55e-05 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=7.40e-02 peak=8.06e-02 fin=7.03e-02 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=2.51e-02 peak=2.82e-02 fin=2.51e-02 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=4.12e+01 peak=4.50e+01 fin=4.33e+01 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roK     : init=1.33e-01 peak=1.62e-01 fin=7.34e-02 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=1.05e+02 peak=1.83e+02 fin=1.05e+02 drop= 0.6dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=4.59e-05 peak=5.00e-05 fin=4.48e-05 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=3.27e-05 peak=3.61e-05 fin=1.99e-05 drop= 0.1dec flat     <-- STALLED (plateau)
+
+=== case/46.sern_design/run_0966_chidef_2d_m4_off_omit  [last step 35999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=7.06e-05 peak=7.82e-05 fin=6.84e-05 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=7.38e-02 peak=7.93e-02 fin=7.24e-02 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=2.50e-02 peak=2.76e-02 fin=2.52e-02 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=4.00e+01 peak=4.35e+01 fin=4.02e+01 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roK     : init=6.08e-02 peak=1.63e-01 fin=4.67e-02 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=8.86e+01 peak=1.96e+02 fin=3.90e+01 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=4.44e-05 peak=5.22e-05 fin=4.32e-05 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=2.95e-05 peak=3.61e-05 fin=2.74e-05 drop= 0.1dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_floor_ratio.py --start case/46.sern_design/run_0965_chidef_2d_m4_off_flag0 --factor 2 case/46.sern_design/run_0966_chidef_2d_m4_off_omit
+(rc=0)
+起点床: case/46.sern_design/run_0965_chidef_2d_m4_off_flag0 (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 6.879e-05
+  rms_roK       : 6.882e-02
+  rms_roOmega   : 5.505e+01
+  rms_roUx      : 7.284e-02
+  rms_roUy      : 2.576e-02
+  rms_roY0      : 4.224e-05
+  rms_roY1      : 2.921e-05
+  rms_roe       : 4.022e+01
+  inactive: ['rms_roUz']
+
+=== case/46.sern_design/run_0966_chidef_2d_m4_off_omit  [last step 35999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.015 peak/floor=    1.14 @step 31207 re-entry=never left
+  rms_roUx      : tail/floor= 1.008 peak/floor=    1.09 @step 17957 re-entry=never left
+  rms_roUy      : tail/floor= 0.996 peak/floor=    1.07 @step 10662 re-entry=never left
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 0.995 peak/floor=    1.08 @step 21602 re-entry=never left
+  rms_roK       : tail/floor= 0.963 peak/floor=    2.37 @step 21773 re-entry=34443
+  rms_roOmega   : tail/floor= 1.140 peak/floor=    3.56 @step 21602 re-entry=35990
+  rms_roY0      : tail/floor= 1.019 peak/floor=    1.24 @step 12916 re-entry=never left
+  rms_roY1      : tail/floor= 1.023 peak/floor=    1.23 @step 35907 re-entry=never left
+
+OVERALL: ALL PASS
+
+
+## case/46.sern_design: 明示 0 run_0967_chidef_2d_m10_on_flag0 / 省略 run_0968_chidef_2d_m10_on_omit
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/46.sern_design/run_0967_chidef_2d_m10_on_flag0 case/46.sern_design/run_0968_chidef_2d_m10_on_omit
+(rc=1)
+
+=== case/46.sern_design/run_0967_chidef_2d_m10_on_flag0  [last step 35999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.09e-04 peak=1.39e-04 fin=5.89e-05 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=9.14e-02 peak=1.23e-01 fin=9.59e-02 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=3.30e-02 peak=6.14e-02 fin=3.63e-02 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.83e+02 peak=2.43e+02 fin=1.45e+02 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roK     : init=7.00e+00 fin=2.28e+00 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=2.85e+02 peak=3.20e+02 fin=1.10e+02 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=1.04e-04 peak=1.36e-04 fin=4.97e-05 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=1.66e-05 peak=2.41e-05 fin=1.88e-05 drop= 0.2dec flat     <-- STALLED (plateau)
+
+=== case/46.sern_design/run_0968_chidef_2d_m10_on_omit  [last step 35999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=5.61e-05 peak=1.48e-04 fin=4.62e-05 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=7.58e-02 peak=1.03e-01 fin=8.88e-02 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=3.34e-02 peak=6.32e-02 fin=2.91e-02 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.30e+02 peak=2.17e+02 fin=1.26e+02 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roK     : init=2.93e+00 peak=6.75e+00 fin=3.34e+00 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=1.19e+02 peak=3.63e+02 fin=7.14e+01 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=5.03e-05 peak=1.45e-04 fin=3.59e-05 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=1.38e-05 peak=1.68e-05 fin=1.67e-05 drop= 0.1dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_floor_ratio.py --start case/46.sern_design/run_0967_chidef_2d_m10_on_flag0 --factor 2 case/46.sern_design/run_0968_chidef_2d_m10_on_omit
+(rc=0)
+起点床: case/46.sern_design/run_0967_chidef_2d_m10_on_flag0 (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 5.403e-05
+  rms_roK       : 2.658e+00
+  rms_roOmega   : 1.016e+02
+  rms_roUx      : 7.927e-02
+  rms_roUy      : 3.598e-02
+  rms_roY0      : 4.692e-05
+  rms_roY1      : 1.265e-05
+  rms_roe       : 1.247e+02
+  inactive: ['rms_roUz']
+
+=== case/46.sern_design/run_0968_chidef_2d_m10_on_omit  [last step 35999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.054 peak/floor=    2.73 @step 19055 re-entry=35926
+  rms_roUx      : tail/floor= 0.973 peak/floor=    1.30 @step 1571 re-entry=never left
+  rms_roUy      : tail/floor= 0.928 peak/floor=    1.76 @step 19055 re-entry=never left
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 0.998 peak/floor=    1.74 @step 1571 re-entry=never left
+  rms_roK       : tail/floor= 1.043 peak/floor=    2.54 @step 30663 re-entry=35942
+  rms_roOmega   : tail/floor= 1.141 peak/floor=    3.57 @step 19055 re-entry=35950
+  rms_roY0      : tail/floor= 1.080 peak/floor=    3.09 @step 19055 re-entry=35926
+  rms_roY1      : tail/floor= 1.014 peak/floor=    1.32 @step 33459 re-entry=never left
+
+OVERALL: ALL PASS
+
+
+## case/16.nozzle_wys: 明示 0 run_0965_chidef_sst_flag0 / 省略 run_0966_chidef_sst_omit
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/16.nozzle_wys/run_0965_chidef_sst_flag0 case/16.nozzle_wys/run_0966_chidef_sst_omit
+(rc=1)
+
+=== case/16.nozzle_wys/run_0965_chidef_sst_flag0  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=8.71e-08 peak=1.36e-07 fin=9.06e-08 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=1.90e-05 peak=2.82e-05 fin=2.26e-05 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=9.63e-06 peak=1.47e-05 fin=9.73e-06 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=4.88e-03 peak=4.93e-03 fin=1.40e-03 drop= 0.5dec falling  <-- still converging
+  rms_roK     : init=2.90e-05 fin=1.80e-06 drop= 1.1dec falling  <-- still converging
+  rms_roOmega : init=2.53e+02 peak=4.43e+02 fin=2.27e+02 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=7.21e-08 peak=1.20e-07 fin=7.45e-08 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=7.98e-10 peak=1.33e-09 fin=8.24e-10 drop= 0.2dec flat     <-- STALLED (plateau)
+
+=== case/16.nozzle_wys/run_0966_chidef_sst_omit  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=8.71e-08 peak=1.36e-07 fin=8.37e-08 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=1.90e-05 peak=2.79e-05 fin=1.97e-05 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=9.62e-06 peak=1.43e-05 fin=7.71e-06 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=4.88e-03 peak=4.92e-03 fin=1.34e-03 drop= 0.5dec falling  <-- still converging
+  rms_roK     : init=2.90e-05 fin=1.79e-06 drop= 1.1dec falling  <-- still converging
+  rms_roOmega : init=2.52e+02 peak=4.23e+02 fin=2.52e+02 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=7.21e-08 peak=1.21e-07 fin=6.41e-08 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=7.98e-10 peak=1.34e-09 fin=7.10e-10 drop= 0.2dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_floor_ratio.py --start case/16.nozzle_wys/run_0965_chidef_sst_flag0 --factor 2 case/16.nozzle_wys/run_0966_chidef_sst_omit
+(rc=0)
+起点床: case/16.nozzle_wys/run_0965_chidef_sst_flag0 (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 8.940e-08
+  rms_roK       : 2.132e-06
+  rms_roOmega   : 1.898e+02
+  rms_roUx      : 2.123e-05
+  rms_roUy      : 9.223e-06
+  rms_roY0      : 7.128e-08
+  rms_roY1      : 7.894e-10
+  rms_roe       : 1.466e-03
+  inactive: ['rms_roUz']
+
+=== case/16.nozzle_wys/run_0966_chidef_sst_omit  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.006 peak/floor=    1.52 @step 5819 re-entry=never left
+  rms_roUx      : tail/floor= 1.000 peak/floor=    1.31 @step 9773 re-entry=never left
+  rms_roUy      : tail/floor= 1.005 peak/floor=    1.55 @step 8248 re-entry=never left
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.002 peak/floor=    3.36 @step 12 re-entry=4047
+  rms_roK       : tail/floor= 1.000 peak/floor=   13.60 @step 0 re-entry=5746
+  rms_roOmega   : tail/floor= 0.984 peak/floor=    2.23 @step 3530 re-entry=11422
+  rms_roY0      : tail/floor= 1.007 peak/floor=    1.70 @step 5819 re-entry=never left
+  rms_roY1      : tail/floor= 1.007 peak/floor=    1.70 @step 5819 re-entry=never left
+
+OVERALL: ALL PASS
+
+
+## case/39.periodic_hills: 明示 0 run_0952_chidef_b1p_flag0 / 省略 run_0953_chidef_b1p_omit
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/39.periodic_hills/run_0952_chidef_b1p_flag0 case/39.periodic_hills/run_0953_chidef_b1p_omit
+(rc=1)
+
+=== case/39.periodic_hills/run_0952_chidef_b1p_flag0  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=3.84e-10 peak=3.86e-10 fin=3.82e-10 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=4.13e-08 peak=4.24e-08 fin=4.12e-08 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=4.60e-08 peak=4.65e-08 fin=4.60e-08 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUz    : init=2.92e-08 peak=2.99e-08 fin=2.90e-08 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roe     : init=1.03e-04 peak=1.04e-04 fin=1.03e-04 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roK     : init=2.99e-09 peak=6.43e-09 fin=2.72e-09 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=1.24e-03 peak=1.34e-03 fin=1.25e-03 drop= 0.0dec flat     <-- STALLED (plateau)
+
+=== case/39.periodic_hills/run_0953_chidef_b1p_omit  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=3.84e-10 peak=3.86e-10 fin=3.83e-10 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=4.13e-08 peak=4.24e-08 fin=4.15e-08 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=4.60e-08 peak=4.64e-08 fin=4.60e-08 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roUz    : init=2.92e-08 peak=2.99e-08 fin=2.92e-08 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roe     : init=1.03e-04 peak=1.04e-04 fin=1.03e-04 drop= 0.0dec flat     <-- STALLED (plateau)
+  rms_roK     : init=2.99e-09 peak=6.40e-09 fin=2.74e-09 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=1.27e-03 peak=1.38e-03 fin=1.24e-03 drop= 0.0dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_floor_ratio.py --start case/39.periodic_hills/run_0952_chidef_b1p_flag0 --factor 2 case/39.periodic_hills/run_0953_chidef_b1p_omit
+(rc=0)
+起点床: case/39.periodic_hills/run_0952_chidef_b1p_flag0 (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 3.833e-10
+  rms_roK       : 2.752e-09
+  rms_roOmega   : 1.245e-03
+  rms_roUx      : 4.134e-08
+  rms_roUy      : 4.596e-08
+  rms_roUz      : 2.913e-08
+  rms_roe       : 1.028e-04
+
+=== case/39.periodic_hills/run_0953_chidef_b1p_omit  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.000 peak/floor=    1.01 @step 1617 re-entry=never left
+  rms_roUx      : tail/floor= 0.999 peak/floor=    1.03 @step 3396 re-entry=never left
+  rms_roUy      : tail/floor= 1.000 peak/floor=    1.01 @step 10120 re-entry=never left
+  rms_roUz      : tail/floor= 1.000 peak/floor=    1.03 @step 266 re-entry=never left
+  rms_roe       : tail/floor= 1.000 peak/floor=    1.01 @step 1788 re-entry=never left
+  rms_roK       : tail/floor= 0.999 peak/floor=    2.32 @step 669 re-entry=1227
+  rms_roOmega   : tail/floor= 0.998 peak/floor=    1.11 @step 10145 re-entry=never left
+
+OVERALL: ALL PASS
+
+
+## case/40.nozzle_design_tool: 明示 0 run_0954_chidef_b1a_flag0 / 省略 run_0955_chidef_b1a_omit
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/40.nozzle_design_tool/run_0954_chidef_b1a_flag0 case/40.nozzle_design_tool/run_0955_chidef_b1a_omit
+(rc=1)
+
+=== case/40.nozzle_design_tool/run_0954_chidef_b1a_flag0  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=8.63e-07 fin=7.91e-09 drop= 1.7dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=9.75e-04 fin=3.06e-06 drop= 2.4dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=3.64e-04 peak=4.43e-04 fin=6.09e-06 drop= 1.7dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.30e+00 fin=1.20e-02 drop= 1.7dec flat     <-- STALLED (plateau)
+  rms_roK     : init=1.98e-03 peak=2.19e-03 fin=1.78e-05 drop= 2.0dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=3.39e+05 fin=5.92e+01 drop= 3.0dec flat   
+
+=== case/40.nozzle_design_tool/run_0955_chidef_b1a_omit  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=8.63e-07 fin=2.65e-08 drop= 1.7dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=9.75e-04 fin=4.11e-06 drop= 2.4dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=3.64e-04 peak=4.43e-04 fin=6.94e-06 drop= 1.7dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.30e+00 fin=3.89e-02 drop= 1.7dec flat     <-- STALLED (plateau)
+  rms_roK     : init=1.98e-03 peak=2.19e-03 fin=2.21e-05 drop= 2.0dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=3.39e+05 fin=7.06e+02 drop= 3.0dec flat   
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_floor_ratio.py --start case/40.nozzle_design_tool/run_0954_chidef_b1a_flag0 --factor 2 case/40.nozzle_design_tool/run_0955_chidef_b1a_omit
+(rc=0)
+起点床: case/40.nozzle_design_tool/run_0954_chidef_b1a_flag0 (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 1.982e-08
+  rms_roK       : 2.066e-05
+  rms_roOmega   : 3.804e+02
+  rms_roUx      : 3.973e-06
+  rms_roUy      : 9.525e-06
+  rms_roe       : 2.830e-02
+  inactive: ['rms_roUz']
+
+=== case/40.nozzle_design_tool/run_0955_chidef_b1a_omit  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.000 peak/floor=   43.55 @step 0 re-entry=11924
+  rms_roUx      : tail/floor= 1.023 peak/floor=  245.53 @step 0 re-entry=1519
+  rms_roUy      : tail/floor= 1.039 peak/floor=   46.52 @step 2 re-entry=11982
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.003 peak/floor=   46.06 @step 0 re-entry=11924
+  rms_roK       : tail/floor= 1.028 peak/floor=  106.09 @step 88 re-entry=11356
+  rms_roOmega   : tail/floor= 1.005 peak/floor=  890.18 @step 0 re-entry=11998
+
+OVERALL: ALL PASS
+
+
+## case/40.nozzle_design_tool: 明示 0 run_0956_chidef_b1a_isoT_flag0 / 省略 run_0957_chidef_b1a_isoT_omit
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/40.nozzle_design_tool/run_0956_chidef_b1a_isoT_flag0 case/40.nozzle_design_tool/run_0957_chidef_b1a_isoT_omit
+(rc=1)
+
+=== case/40.nozzle_design_tool/run_0956_chidef_b1a_isoT_flag0  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.33e-05 fin=6.10e-08 drop= 2.6dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=3.55e-03 fin=6.80e-06 drop= 2.8dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=5.76e-03 fin=1.22e-05 drop= 2.7dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.00e+01 fin=4.95e-02 drop= 2.6dec flat     <-- STALLED (plateau)
+  rms_roK     : init=1.25e-02 peak=1.51e-02 fin=8.46e-05 drop= 2.4dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=3.33e+04 fin=9.90e+02 drop= 2.0dec flat     <-- STALLED (plateau)
+
+=== case/40.nozzle_design_tool/run_0957_chidef_b1a_isoT_omit  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.36e-05 fin=1.42e-08 drop= 2.7dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=3.55e-03 fin=4.16e-06 drop= 2.9dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=5.76e-03 fin=2.35e-05 drop= 2.8dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.03e+01 fin=1.73e-02 drop= 2.6dec flat     <-- STALLED (plateau)
+  rms_roK     : init=1.25e-02 peak=1.50e-02 fin=4.49e-05 drop= 2.5dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=3.36e+04 fin=9.24e+02 drop= 2.0dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_floor_ratio.py --start case/40.nozzle_design_tool/run_0956_chidef_b1a_isoT_flag0 --factor 2 case/40.nozzle_design_tool/run_0957_chidef_b1a_isoT_omit
+(rc=0)
+起点床: case/40.nozzle_design_tool/run_0956_chidef_b1a_isoT_flag0 (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 3.374e-08
+  rms_roK       : 5.717e-05
+  rms_roOmega   : 3.952e+02
+  rms_roUx      : 5.181e-06
+  rms_roUy      : 1.143e-05
+  rms_roe       : 2.713e-02
+  inactive: ['rms_roUz']
+
+=== case/40.nozzle_design_tool/run_0957_chidef_b1a_isoT_omit  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.007 peak/floor=  403.96 @step 0 re-entry=11999
+  rms_roUx      : tail/floor= 0.980 peak/floor=  684.75 @step 0 re-entry=4226
+  rms_roUy      : tail/floor= 0.991 peak/floor=  503.91 @step 0 re-entry=not re-entered
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.007 peak/floor=  379.84 @step 0 re-entry=11999
+  rms_roK       : tail/floor= 0.962 peak/floor=  262.00 @step 5 re-entry=11775
+  rms_roOmega   : tail/floor= 1.012 peak/floor=   85.03 @step 0 re-entry=not re-entered
+
+OVERALL: ALL PASS
+
+
+## case/40.nozzle_design_tool: 明示 0 run_0958_chidef_b1a_isoT_flag0_ext / 省略 run_0959_chidef_b1a_isoT_omit_ext
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/40.nozzle_design_tool/run_0958_chidef_b1a_isoT_flag0_ext case/40.nozzle_design_tool/run_0959_chidef_b1a_isoT_omit_ext
+(rc=1)
+
+=== case/40.nozzle_design_tool/run_0958_chidef_b1a_isoT_flag0_ext  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=3.98e-08 peak=1.14e-07 fin=1.25e-08 drop= 0.6dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=6.00e-06 peak=1.11e-05 fin=5.37e-06 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=9.04e-06 peak=3.50e-05 fin=1.05e-05 drop= 0.6dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=3.39e-02 peak=8.63e-02 fin=9.82e-03 drop= 0.6dec flat     <-- STALLED (plateau)
+  rms_roK     : init=8.55e-05 peak=1.75e-04 fin=7.68e-05 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=6.70e+02 peak=1.95e+03 fin=2.03e+02 drop= 0.8dec flat     <-- STALLED (plateau)
+
+=== case/40.nozzle_design_tool/run_0959_chidef_b1a_isoT_omit_ext  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.09e-08 peak=1.06e-07 fin=7.95e-09 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=4.51e-06 peak=1.07e-05 fin=4.57e-06 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=3.30e-05 peak=3.56e-05 fin=9.13e-06 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.37e-02 peak=8.34e-02 fin=9.04e-03 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roK     : init=4.19e-05 peak=1.63e-04 fin=5.30e-05 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=2.19e+02 peak=2.05e+03 fin=1.27e+02 drop= 0.8dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_floor_ratio.py --start case/40.nozzle_design_tool/run_0958_chidef_b1a_isoT_flag0_ext --factor 2 case/40.nozzle_design_tool/run_0959_chidef_b1a_isoT_omit_ext
+(rc=0)
+起点床: case/40.nozzle_design_tool/run_0958_chidef_b1a_isoT_flag0_ext (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 3.354e-08
+  rms_roK       : 5.456e-05
+  rms_roOmega   : 3.858e+02
+  rms_roUx      : 4.977e-06
+  rms_roUy      : 1.096e-05
+  rms_roe       : 2.689e-02
+  inactive: ['rms_roUz']
+
+=== case/40.nozzle_design_tool/run_0959_chidef_b1a_isoT_omit_ext  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.035 peak/floor=    3.17 @step 11986 re-entry=11991
+  rms_roUx      : tail/floor= 1.023 peak/floor=    2.16 @step 6798 re-entry=8520
+  rms_roUy      : tail/floor= 1.052 peak/floor=    3.25 @step 3820 re-entry=11991
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.039 peak/floor=    3.10 @step 11986 re-entry=11991
+  rms_roK       : tail/floor= 0.985 peak/floor=    2.98 @step 8519 re-entry=11990
+  rms_roOmega   : tail/floor= 1.038 peak/floor=    5.31 @step 6903 re-entry=11987
+
+OVERALL: ALL PASS
+
+
+## case/16.nozzle_wys: 明示 0 run_0963_chidef_b1c_flag0 / 省略 run_0964_chidef_b1c_omit
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/16.nozzle_wys/run_0963_chidef_b1c_flag0 case/16.nozzle_wys/run_0964_chidef_b1c_omit
+(rc=1)
+
+=== case/16.nozzle_wys/run_0963_chidef_b1c_flag0  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.88e-07 peak=6.60e-05 fin=8.15e-08 drop= 2.9dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=1.41e-03 peak=2.29e-02 fin=2.08e-05 drop= 3.0dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=3.30e-02 fin=9.80e-06 drop= 3.5dec flat   
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=2.29e+00 fin=1.22e-03 drop= 3.2dec flat   
+  rms_roK     : init=5.30e-05 peak=6.46e-02 fin=1.09e-06 drop= 4.7dec falling
+  rms_roOmega : init=5.21e+02 peak=6.45e+05 fin=3.29e+02 drop= 3.3dec flat   
+  rms_roY0    : init=1.68e-07 peak=6.53e-05 fin=6.74e-08 drop= 2.9dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=1.86e-09 peak=7.23e-07 fin=7.46e-10 drop= 2.9dec flat     <-- STALLED (plateau)
+  rms_rog_0   : init=1.01e-09 peak=4.08e-06 fin=5.54e-10 drop= 3.8dec flat   
+  rms_roQ2_0  : init=1.15e-03 peak=2.28e-01 fin=7.06e-06 drop= 4.4dec flat   
+  rms_roQ1_0  : init=5.42e+06 peak=5.58e+07 fin=4.02e+02 drop= 5.1dec flat   
+  rms_roQ0_0  : init=2.58e+16 fin=2.46e+10 drop= 5.9dec flat   
+
+=== case/16.nozzle_wys/run_0964_chidef_b1c_omit  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.88e-07 peak=6.60e-05 fin=9.13e-08 drop= 2.9dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=1.41e-03 peak=2.29e-02 fin=2.34e-05 drop= 3.0dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=3.30e-02 fin=8.67e-06 drop= 3.5dec flat   
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=2.29e+00 fin=1.30e-03 drop= 3.2dec flat   
+  rms_roK     : init=5.30e-05 peak=6.46e-02 fin=1.12e-06 drop= 4.7dec falling
+  rms_roOmega : init=5.21e+02 peak=6.46e+05 fin=2.86e+02 drop= 3.3dec flat   
+  rms_roY0    : init=1.68e-07 peak=6.53e-05 fin=7.42e-08 drop= 2.9dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=1.86e-09 peak=7.23e-07 fin=8.22e-10 drop= 2.9dec flat     <-- STALLED (plateau)
+  rms_rog_0   : init=1.01e-09 peak=4.08e-06 fin=6.19e-10 drop= 3.8dec flat   
+  rms_roQ2_0  : init=1.15e-03 peak=2.28e-01 fin=7.90e-06 drop= 4.4dec flat   
+  rms_roQ1_0  : init=5.42e+06 peak=5.58e+07 fin=4.50e+02 drop= 5.0dec flat   
+  rms_roQ0_0  : init=2.58e+16 fin=2.76e+10 drop= 5.9dec flat   
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_floor_ratio.py --start case/16.nozzle_wys/run_0963_chidef_b1c_flag0 --factor 2 case/16.nozzle_wys/run_0964_chidef_b1c_omit
+(rc=0)
+起点床: case/16.nozzle_wys/run_0963_chidef_b1c_flag0 (末尾 20% の |値| 平均、判定は通常基準を問わない)
+  rms_ro        : 9.337e-08
+  rms_roK       : 1.190e-06
+  rms_roOmega   : 3.130e+02
+  rms_roQ0_0    : 3.007e+10
+  rms_roQ1_0    : 4.911e+02
+  rms_roQ2_0    : 8.629e-06
+  rms_roUx      : 2.428e-05
+  rms_roUy      : 9.590e-06
+  rms_roY0      : 7.586e-08
+  rms_roY1      : 8.401e-10
+  rms_roe       : 1.330e-03
+  rms_rog_0     : 6.762e-10
+  inactive: ['rms_roUz']
+
+=== case/16.nozzle_wys/run_0964_chidef_b1c_omit  [last step 11999]  -> PASS (plateau 許容、末尾平均 ≤ 2.0× 起点床、RISING なし) ===
+  rms_ro        : tail/floor= 1.002 peak/floor=  707.22 @step 86 re-entry=1446
+  rms_roUx      : tail/floor= 1.001 peak/floor=  944.22 @step 18 re-entry=1985
+  rms_roUy      : tail/floor= 0.999 peak/floor= 3441.50 @step 0 re-entry=1620
+  rms_roUz      : all-zero (both inactive, skip)
+  rms_roe       : tail/floor= 1.001 peak/floor= 1718.58 @step 0 re-entry=2736
+  rms_roK       : tail/floor= 0.999 peak/floor=54242.67 @step 6 re-entry=7862
+  rms_roOmega   : tail/floor= 1.008 peak/floor= 2062.72 @step 81 re-entry=11259
+  rms_roY0      : tail/floor= 1.002 peak/floor=  860.87 @step 86 re-entry=1511
+  rms_roY1      : tail/floor= 1.002 peak/floor=  860.65 @step 86 re-entry=1511
+  rms_rog_0     : tail/floor= 1.001 peak/floor= 6034.98 @step 32 re-entry=2117
+  rms_roQ2_0    : tail/floor= 1.001 peak/floor=26425.03 @step 27 re-entry=1761
+  rms_roQ1_0    : tail/floor= 1.001 peak/floor=113629.45 @step 19 re-entry=1597
+  rms_roQ0_0    : tail/floor= 1.001 peak/floor=858916.18 @step 0 re-entry=1590
+
+OVERALL: ALL PASS
+
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/46.sern_design/run_0961_chidef_junction_omit
+(rc=1)
+
+=== case/46.sern_design/run_0961_chidef_junction_omit  [last step 5999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=6.02e-06 fin=2.65e-07 drop= 1.3dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=6.25e-03 fin=4.87e-04 drop= 1.1dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=2.07e-03 fin=1.38e-04 drop= 1.1dec flat     <-- STALLED (plateau)
+  rms_roUz    : init=2.01e-03 fin=8.54e-05 drop= 1.3dec falling  <-- still converging
+  rms_roe     : init=1.22e+01 fin=5.29e-01 drop= 1.3dec falling  <-- still converging
+  rms_roY0    : init=2.46e-06 fin=1.12e-07 drop= 1.3dec falling  <-- still converging
+  rms_roY1    : init=5.33e-06 fin=2.61e-07 drop= 1.3dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/46.sern_design/run_0960_chidef_junction_warm
+(rc=1)
+
+=== case/46.sern_design/run_0960_chidef_junction_warm  [last step 1799]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.59e-05 fin=4.00e-06 drop= 0.6dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=4.31e-02 fin=5.21e-03 drop= 0.9dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=2.35e-02 fin=1.95e-03 drop= 1.1dec flat     <-- STALLED (plateau)
+  rms_roUz    : init=7.71e-03 fin=2.02e-03 drop= 0.6dec falling  <-- still converging
+  rms_roe     : init=8.24e+01 fin=8.11e+00 drop= 1.0dec falling  <-- still converging
+  rms_roY0    : init=1.42e-05 fin=2.22e-06 drop= 0.8dec falling  <-- still converging
+  rms_roY1    : init=6.99e-06 peak=7.40e-06 fin=3.58e-06 drop= 0.3dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/46.sern_design/run_0963_chidef_2d_m4_off_base
+(rc=1)
+
+=== case/46.sern_design/run_0963_chidef_2d_m4_off_base  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=7.90e-05 peak=9.63e-05 fin=7.09e-05 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=8.26e-02 peak=1.02e-01 fin=7.40e-02 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=2.50e-02 peak=3.34e-02 fin=2.57e-02 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=4.47e+01 peak=5.25e+01 fin=4.07e+01 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roK     : init=2.00e-01 peak=2.22e-01 fin=8.53e-02 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=1.09e+02 peak=2.05e+02 fin=6.10e+01 drop= 0.6dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=4.29e-05 peak=5.57e-05 fin=4.49e-05 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=5.85e-05 peak=6.49e-05 fin=2.89e-05 drop= 0.3dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/46.sern_design/run_0964_chidef_2d_m10_on_base
+(rc=1)
+
+=== case/46.sern_design/run_0964_chidef_2d_m10_on_base  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.15e-04 peak=1.50e-04 fin=1.23e-04 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=3.03e-01 peak=3.11e-01 fin=9.76e-02 drop= 0.6dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=1.08e-01 peak=1.15e-01 fin=5.25e-02 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=4.92e+02 peak=5.04e+02 fin=1.67e+02 drop= 0.6dec flat     <-- STALLED (plateau)
+  rms_roK     : init=4.16e+00 peak=6.40e+00 fin=2.54e+00 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=7.38e+01 peak=3.33e+02 fin=2.95e+02 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=4.35e-05 peak=1.33e-04 fin=1.19e-04 drop= 0.4dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=1.02e-04 peak=1.03e-04 fin=1.66e-05 drop= 0.9dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+
+
+$ python3 solver_density_cuda/tools/check_convergence.py case/16.nozzle_wys/run_0962_chidef_sst_base
+(rc=1)
+
+=== case/16.nozzle_wys/run_0962_chidef_sst_base  [last step 11999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.40e-06 peak=1.87e-06 fin=9.30e-08 drop= 1.3dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=9.06e-04 peak=9.21e-04 fin=1.98e-05 drop= 1.6dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=5.39e-04 fin=8.14e-06 drop= 1.8dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=2.98e-02 peak=7.76e-02 fin=4.88e-03 drop= 1.1dec falling  <-- still converging
+  rms_roK     : init=3.92e-03 fin=2.90e-05 drop= 2.1dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=1.26e+03 peak=5.93e+03 fin=3.05e+02 drop= 1.3dec falling  <-- still converging
+  rms_roY0    : init=1.38e-06 peak=1.85e-06 fin=7.48e-08 drop= 1.4dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=1.53e-08 peak=2.04e-08 fin=8.28e-10 drop= 1.4dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+

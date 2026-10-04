@@ -1,0 +1,17 @@
+mesh: {discretization: "node", isAxisymmetric: 0, nodeWallDirichlet: 1, meshFileName: "sern.h5", valueFileName: "sern.h5"}
+gpu: 1
+solver: "SLAU"
+physProp: {thermalMethod: 2, viscMethod: 1, visc: 1.8e-5, thermCond: 0.0257, thermCondMethod: 1, prandtlLam: 0.72, cp: 1925.0, gamma: 1.2549, pMin: 20.0, species: ["EXH", "AIR"], speciesDBFile: "species_db.yaml", thermoHrefTemp: 298.15}
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {nStepOuter: 12000}
+  deltaT: {control: 1, dt: 1e-8, cfl: 0.5, cfl_pseudo: 0.5,
+           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}
+  outStepStart: 0
+  outStepInterval: 500
+  timeIntegration: 11
+  nStepInner: 5
+space: {convMethod: 1, limiter: 2, pRef: 1026.0, limiterScaled: 1, venkatK: 0.05}
+turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0}
+initial: "uniform_p101325_u10"

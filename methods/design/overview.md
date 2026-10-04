@@ -57,6 +57,10 @@ v2 Euler 帰還 [凍結特性線マップ] → v3 NS トレース) で決まる�
 読込時検証: ($D_e$, $r^*$, $M_d$) の独立指定は 2 つまで (過拘束はエラー)、dv の bound、
 Bézier 自由度勘定の整合。
 
+> **移行中 (2026-09-27, plan [`tooling-design-problem-campaign-recipe`](../../plans/active/tooling-design-problem-campaign-recipe.md))**:
+> 探索範囲 (dv の min/max)・目的・制約・評価手順 (Euler / δ\* NS) の選択は `campaign.yaml` へ移し、problem には基準値と作る物の物理条件だけを置く。
+> 現状の axismach では dv の min/max は探索に使われず (範囲検査のみ)、設計が成立する範囲は runner が自分で計算して検査している。
+
 ## ジオメトリ (区分構成)
 
 壁は上流から: 入口配管 → 収縮 (Bell–Mehta 5 次) → 曲率ブレンド → 上流円弧 $R_u$ →
@@ -795,6 +799,13 @@ r: 壁側幾何級数クラスタリング)、**gmsh msh4.1 テキストを直�
 変換器が計算)。物理タグは inlet=1 / outlet=2 / wall=3 / axis=4 / fluid=5 固定。
 同一トポロジで再生成するため、帰還パス間の場移植は同 index コピーで済む (補間ノイズなし)。
 生成のたび `check_mesh_quality.py` ゲート (AR≤1000 / skew≤0.9) を通す。
+
+### SERN 3D の全ヘキサ・マルチブロック (gmsh Python API, 方式検証中 2026-09-21)
+
+計画: [`plans/active/tooling-sern-mesh-blocking.md`](../../plans/active/tooling-sern-mesh-blocking.md)。
+
+SERN 3D の現行メッシャ `mesh_sern3d.py` は x-station × y-band × z の**テンソル積**で、薄板 (カウル・側壁) を同一座標の双子ノードで表す。この構造は (1) 厚さ 0 の面が 2 つ交わる線で ρ が床に張り付く欠陥 (格子細分で悪化) を持ち、(2) **断面 (y–z) の隅フィレット**を作れない (隅ノードで格子線が同じ円弧に接し skew → 1)。
+後継として、**固体を有限厚で明示し、流体をその補集合としてブロックに切る**方式を検証している: ダクト内はバタフライ型の C リングで隅フィレットを受け、外部は H 型、x 方向は物理端点で区間を切って transfinite 体積でつなぐ。壁が終わった下流は格子帯を潰さず内部ブロックとして延ばし、板の後ろはスロット後流ブロックで埋める。出力は msh4.1 で既存の `convertGmshToForge` (node) に乗る。**旧メッシャは互換用に保持し既定のまま**。
 
 ### 壁の熱境界条件 (断熱 / 等温) と壁温影響の評価 (2026-09-12 起票、検証中)
 

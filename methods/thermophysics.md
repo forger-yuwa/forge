@@ -12,7 +12,7 @@
 
 - 比熱 $c_p(T)$ を温度依存とする (**NASA-9 多項式**, CEA 準拠)。
 - 複数化学種の質量分率 $Y_s$ を輸送し、混合物性を **ideal-gas mixing** で評価する。
-- 粘性・熱伝導率・質量拡散係数を **kinetic theory** (Chapman-Enskog) で評価する。
+- 粘性・熱伝導率は種ごとに指定した出所 (`physProp.transport`: `cea` / `kinetic` / `fit` / `custom:…`) の単成分値を CEA 形 frozen 混合則で混合して評価する (`viscMethod: 2`; 2026-09-27〜)。質量拡散係数は kinetic theory (Chapman-Enskog, lump は Blanc) のまま。
 
 `thermalMethod==0` (CPG) は完全に保持し、`thermalMethod==2` で本モデルを有効化する。
 
@@ -38,7 +38,19 @@ $$ \frac{H_s}{R_u T} = -a_0 T^{-2} + a_1 \frac{\ln T}{T} + a_2 + \frac{a_3}{2} T
 
 $$ \frac{S^{\circ}_s}{R_u} = -\frac{a_0}{2} T^{-2} - a_1 T^{-1} + a_2 \ln T + a_3 T + \frac{a_4}{2} T^2 + \frac{a_5}{3} T^3 + \frac{a_6}{4} T^4 + a_8 $$
 
-積分定数 $a_7,a_8$ により、エンタルピーは**標準生成エンタルピーを含む絶対エンタルピー基準**となる。係数は 2 温度域 ($T_{\mathrm{lo}}\le T<T_{\mathrm{mid}}$ と $T_{\mathrm{mid}}\le T\le T_{\mathrm{hi}}$、標準は 200/1000/6000 K) で切り替える。範囲外は端でクランプし、エンタルピーは $h(T)\approx h(T_c)+c_p(T_c)(T-T_c)$ と線形外挿して衝撃波での暴走を防ぐ。
+積分定数 $a_7,a_8$ により、エンタルピーは**標準生成エンタルピーを含む絶対エンタルピー基準**となる。係数は温度区間で切り替える (区間数は種ごとに 1〜3 = `THERMO_MAX_INTERVALS`; 移行前からの内蔵 7 種と CO/H2/OH/H/NO/O は 2 区間 200/1000/6000 K、CEA から生成した内蔵種 (2026-10-01, plan #13-2) は CEA の区間のまま 200/1000/6000 K の 2 区間か 200/1000/6000/20000 K の 3 区間)。
+区間 $k$ は $T_k\le T<T_{k+1}$ (**区切りちょうどは上の区間**、最後の区間は $T_{\mathrm{hi}}$ を含む) で、2 区間では従来の「$T<T_{\mathrm{mid}}$ で低温側」と同じ (plan thermophysics-solver-owned-species-db #13-1)。範囲外は端でクランプし、エンタルピーは $h(T)\approx h(T_c)+c_p(T_c)(T-T_c)$ と線形外挿して衝撃波での暴走を防ぐ。
+
+**6000 K 超の float 精度 (既知の限界; plan thermophysics-solver-owned-species-db §6 V3/V3f の再スコープ, 2026-10-01)**: CEA の第 3 区間 (6000–20000 K) の係数は
+$a_0\sim 8\times10^8$、$a_7\sim 5\times10^6$ のように大きく、$h/(RT)$ の各項が打ち消し合う (比 ~100)。このため double でも 1 回の評価で $h$ に
+~1e-6 J/kg の丸めが出る (N2 18660 K で 1.2e-6 J/kg; lump 合成の検証は同じ係数の long double 評価と比べる)。float の面経路
+(`thermo_h_mix_f`, SLAU の面エンタルピー・化学種拡散の $h_s$) では影響がさらに大きく、CEA 3 区間の N2 で 6000 K 超の $h$ の誤差は
+相対 最大 5.5e-5・絶対 最大 ~530 J/kg ($\Delta h/(c_pT)\approx 5\times10^{-5}$) になる (6000 K 以下は絶対 ~1.4 J/kg、$\Delta h/(c_pT)\approx 7\times10^{-7}$)。
+混合では相対 0.7e-5〜3.5e-5 (`tools/test_thermo_float.cpp` の info 列)。
+セルの温度反転は double の研磨段を通るので、6000 K 超でも $|T-T_{\mathrm{ref}}|/T<3\times10^{-8}$ を保つ (warm start 時)。ただし区切り温度そのもの
+(1000・6000 K) では、係数の段差 (CEA N2 は 6000 K で 0.29 J/kg) の分だけ誤差が $\Delta h_{\mathrm{step}}/(c_vT)$ 増える。冷間開始 (50.1 K) から 1 回の呼び出しで
+届くのは ~6500 K まで。6000 K 超の面流束の精度は float 表のこの丸めで決まるので、6000 K を超える流れで面の $h$ を精密に扱うには double 評価が要る
+(現状の既存ケースは 6000 K を超えない)。
 
 質量基準は $c_{p,s}=C_{p,s}/W_s$、$h_s=H_s/W_s$。
 
@@ -97,7 +109,7 @@ $$ \Big(\tfrac{V}{\Delta\tau}+\!\sum_f \tfrac{\max(\dot m_f,0)}{\rho}\Big)\,\del
 
 化学種拡散 ($\mathbf J_s$, §5) の非対角は省いて点陰的のまま残す (拡散は剛性が低く、定常 ($\mathcal R\to0$) では $\delta\to0$ ゆえ収束先は不変)。完全結合 (5+$N$ ブロック) は最も根本的だが、まず緩和整合で「緩和率の統一だけで安定 $\Delta\tau$ 上限が上がるか」を切り分ける。実装は 本ドキュメントの「実装」節。
 
-### 4. kinetic theory による輸送係数
+### 4. kinetic theory による輸送係数 (`kinetic` 出所と拡散係数)
 
 #### 4.1 純成分 (Chapman-Enskog)
 
@@ -111,6 +123,8 @@ $$ D_{ij} = 1.8583\times10^{-7}\,\frac{\sqrt{T^3\,(1/W_i+1/W_j)}}{P\,\sigma_{ij}
 
 #### 4.2 混合則
 
+> **2026-09-27 以降、μ・λ の混合は下の Wilke/Mason–Saxena (φ を μ と λ で共用) ではなく CEA 形 frozen 混合則 (ηᵢⱼ から φᵢⱼ、λ には ψᵢⱼ; §1b.3b・plan thermophysics-solver-owned-species-db §4.3c) を使う。下の Wilke 式は旧 `viscMethod: 2` の記録として残す。旧結果の再現は e2daaba8 までのバイナリで行う。混合平均拡散 $D_{i,mix}$ は現行。**
+
 粘性は Wilke、熱伝導率は Wassiljewa/Mason-Saxena:
 
 $$ \mu_{\mathrm{mix}} = \sum_i \frac{X_i \mu_i}{\sum_j X_j \phi_{ij}}, \quad k_{\mathrm{mix}} = \sum_i \frac{X_i k_i}{\sum_j X_j \phi_{ij}}, \quad \phi_{ij} = \frac{[1+\sqrt{\mu_i/\mu_j}\,(W_j/W_i)^{1/4}]^2}{\sqrt{8(1+W_i/W_j)}}. $$
@@ -118,6 +132,8 @@ $$ \mu_{\mathrm{mix}} = \sum_i \frac{X_i \mu_i}{\sum_j X_j \phi_{ij}}, \quad k_{
 ここで $X_i$ はモル分率。質量拡散は混合平均 (Curtiss-Hirschfelder):
 
 $$ D_{i,\mathrm{mix}} = \frac{1-X_i}{\sum_{j\ne i} X_j/D_{ij}}. $$
+
+実装 (`thermo_Dmix_species_f`) は分子を $1-X_i$ でなく同値の $\sum_{j\ne i} X_j$ として分母と同じループで積む (2026-09-30)。$X_i\to1$ で $1-X_i$ の引き算が float で桁落ちし (微量 $10^{-6}$ で相対 7 %、$10^{-8}$ で $O(1)$)、補数形では分子・分母が同じ小さな和になり二成分で厳密に $D_{12}$ を返す。判別試験 `tests/unit/test_dmix_complement.py`、経緯は plan [`condensation-two-phase-transport`](../plans/active/condensation-two-phase-transport.md) §5.1 #3b。
 
 ### 5. 化学種拡散とエネルギー結合
 
@@ -142,7 +158,11 @@ $$ \mathbf{q} = -k\,\nabla T + \sum_i h_i(T)\,\mathbf{J}_i. $$
 ### 1. 熱力学モジュール `cuda_forge/thermo_d.{cuh,cu}`
 
 #### データ構造
-`SpeciesThermo` (POD): 分子量 `MW` [kg/mol]、Lennard-Jones パラメータ `sigma_LJ` [Å]・`eps_kB` [K]、温度域 `Tlo/Tmid/Thi`、NASA-9 係数 `low[9]/high[9]`。
+`SpeciesThermo` (POD): 分子量 `MW` [kg/mol]、Lennard-Jones パラメータ `sigma_LJ` [Å]・`eps_kB` [K]、温度域の端 `Tlo/Thi`、区間数 `nInt` (1..`THERMO_MAX_INTERVALS`=3)、
+内側の区切り `Tbrk[THERMO_MAX_INTERVALS-1]`、NASA-9 係数 `coef[THERMO_MAX_INTERVALS][9]` (区間可変, plan #13-1)。値は `thermo_set_intervals` / `thermo_set_nasa9_2` で入れ、
+未使用の区切りは +inf・未使用の係数行は最後の区間の写しにする (区間選択 `thermo_interval` が `nInt` を読まずに済み、NaN は最後の区間と同じく NaN を返す)。
+datum は `thermo_add_a7` で全区間の $a_7$ に同じ定数を足す。float ミラー `SpeciesThermoF` は `thermo_to_float` で同じ区間表から作る。
+2 区間の種の評価は区間可変の前とビット一致 (host・device、double・float; `tests/unit/test_thermo_intervals_bitexact.cu`)。
 
 #### device/host 共通関数 (`__host__ __device__`, 内部 double)
 - `thermo_cp_molar / thermo_h_molar` — NASA-9 評価。範囲クランプ + エンタルピー線形外挿。
@@ -152,7 +172,7 @@ $$ \mathbf{q} = -k\,\nabla T + \sum_i h_i(T)\,\mathbf{J}_i. $$
 - `thermo_T_from_h` — 比エンタルピーからの反転 (Roe 平均状態の有効 γ 用)。
 
 #### DB 構築・アップロード (`thermo_d.cu`)
-- 内蔵 DB に代表化学種 (N2/O2/Ar/CO2/He/AIR) の NASA-9 + LJ を保持。
+- 内蔵 DB は共通データの全気相種 (下の「内蔵 species DB の一覧と出典」; 2026-10-01 から 61 種) の NASA-9 + LJ (LJ の無い種あり) を保持。
 - `thermo_init_db(cfg)`: `cfg.speciesNames` 順に host 配列を構築し、`cfg.speciesDBFile` (yaml) があれば上書き、device global memory (`cudaMalloc`) へアップロード。
 - アクセサ `thermo_species_device_ptr()` / `thermo_num_species()` / `thermo_species_host()`。化学種データは translation unit をまたぐため `__constant__` ではなく device pointer をカーネル引数で渡す (`-rdc` 非依存)。
 - `main.cpp` の `initializeSimulation` で `cfg.read()` 直後に `thermo_init_db(cfg)` を呼ぶ。
@@ -166,26 +186,147 @@ $$ \mathbf{q} = -k\,\nabla T + \sum_i h_i(T)\,\mathbf{J}_i. $$
 
 #### 内蔵 species DB の一覧と出典
 
-内蔵 species と各定数の一次情報は `builtinDB()` ([`thermo_d.cu:53`](../solver_density_cuda/cuda_forge/thermo_d.cu#L53)) にベタ書きされている。各値の出典は下表の通り (NASA-9 係数 / Lennard-Jones パラメータで出典が異なる)。外部 yaml (`physProp.speciesDBFile`, [`thermo_d.cu:142`](../solver_density_cuda/cuda_forge/thermo_d.cu#L142)) で上書き/追加できる。温度域は全種共通で $T_{\mathrm{lo}}/T_{\mathrm{mid}}/T_{\mathrm{hi}}=200/1000/6000$ K。
+値の正本は共通データ `solver_density_cuda/data/species/forge_species_v1.yaml` (§1b.1; ビルド時に埋め込み、`speciesDB_builtin()` が構築)。**内蔵種は同ファイルの `phase: gas` の全エントリ** (2026-10-01, plan #13-2; それ以前は下表の 7 種 = `legacy_builtin` に `solver` を含むエントリだけ)。内訳は (a) 下表の 7 種、(b) CO/H2/OH/H/NO/O (SERN の燃焼生成物; LJ は設計側 `LJ_PARAMS`)、(c) **CEA 生成ブロック 48 種** (下記)。下表の 7 種はエントリごとの出典 (`source`・`LJ.source`) も同ファイルにある。**2026-10-01 (plan #13-3) から (a) の AIR を除く 6 種と (b) は CEA `thermo.inp` そのもの** (区間数・区切り・係数・MW; `tools/cea_thermo_to_forge_species.py --write` が手保守エントリの `MW:` と `intervals:` を同期し `--check` (d) でビット一致を検査)。それまでの既知の差 (`deviations`) — H2O の MW (0.0180153 vs 18.01528 g/mol)、He の MW (0.0040026 vs 4.002602 g/mol)、Ar の高温区間 (単原子理想 vs thermo.inp の a0 = 20.105…)、6000–20000 K 区間なし — は解消し、互換性ハッシュはこの段で一斉に変わった (200 ≤ T < 6000 K の差: N2/O2/CO2 と (b) は 0、H2O は $|\Delta c_p|/c_p$ 1.11e-6・$|\Delta h|$ 15.1 J/kg、He は 5.0e-7・14.8 J/kg、Ar は 4.9e-7・0.073 J/kg)。設計側だけの 6 種 (H2 OH H NO O CO; SERN の燃焼生成物) も同ファイルにある。LJ の出典と選択は [2] (2026-10-01 から集合 `LJ_sets` と `physProp.ljSource`; 設計側 `LJ_PARAMS` も同じ既定で解決する)。各値の出典は下表の通り (NASA-9 係数 / Lennard-Jones パラメータで出典が異なる)。外部 yaml (`physProp.speciesDBFile`, [`thermo_d.cu:142`](../solver_density_cuda/cuda_forge/thermo_d.cu#L142)) で上書き/追加できる。(a)(b) の温度域は CEA のまま: N2/O2/CO2/Ar/He と (b) は 3 区間 200/1000/6000/20000 K、H2O は CEA も 2 区間 200/1000/6000 K、AIR は 2 区間。温度反転の上限は種の $T_{\mathrm{hi}}$ でなく固定の 6000 K (`dependentVariables_d.cu` の `DEPVAR_TMAX`) なので、既存ケースで 6000 K 超の区間は使われない (6000 K にクランプされたセルは区切りちょうど = 第 3 区間を選ぶ)。**設計側 (Python) はこの共通データの先頭 2 区間だけを持ち、内蔵種の $c_p$/$h$/$s^\circ$ を 6000 K 超で評価すると例外** (第 2 区間を外挿しない; `semiperfect.check_design_T`)。
 
-| species (別名) | MW [kg/mol] | $\sigma_{LJ}$ [Å] | $\varepsilon/k_B$ [K] | NASA-9 出典 | LJ 出典 | 備考 |
+**CEA 生成ブロック (c)** (2026-10-01, plan #13-2): 同ファイル末尾の `BEGIN generated`〜`END generated` の間は `tools/cea_thermo_to_forge_species.py --write` が CEA `thermo.inp` から生成する (手で編集しない; `--check` で往復のビット一致を検査)。対象は輸送データ (CEA `trans.inp` 由来 66 種) のうち `thermo.inp` に同名 (大小文字区別) があり (a)(b) に無い 48 種 (例 `CH4`・`C2H2,acetylene`・`N`・`NH3`・`Kr`・`Xe`・`SF6`)。区間数・区切り・係数・MW は `thermo.inp` のまま (2 区間 38 種・3 区間 10 種)。`e-` (区切り 298.15 K) は除外、CEA の `Air` (reactants 節) は取り込まない (空気は `AIR` か lump)。`trans.inp` にある CFC 5 種 (`CCLF3` など) は `thermo.inp` に無いので熱物性なし。LJ は CEA に無い。#13-2 では `tools/cea_thermo_to_species_db.py` の LJ 表の 1 つに固定し `N`・`NH3`・`NO2`・`N2O` の 4 種だけが LJ を持っていた (今は `legacy_v1` 集合として凍結)。#14-L1 (2026-10-01) から全種に `gri30`・`svehla1962` 集合を生成し、既定で LJ の無い種は 4 種 (D2・D2O・H6F6・N2O4) になった ([2])。**LJ の無い種は LJ を読む使い方で起動を拒否する**: `physProp.transport` の `kinetic` (`cea`・`fit` は使える)、LJ の混合平均拡散 (化学種 2 以上・`viscMethod` ≠ 0・`speciesDiffusionMethod` 1 = 既定。構成種に LJ: null を含む lump も同じ)。名前 (ID と別名) は大小文字を無視しても全エントリで一意でなければ起動を拒否する (`thermo.inp` には `CO`/`Co` などが実在; 名前解決が完全一致の次に大小文字無視で引くため)。
+
+LJ の列は既定 `physProp.ljSource: [gri30, svehla1962]` で解決する値 (集合と出典は [2])。
+
+| species (別名) | MW [kg/mol] | $\sigma_{LJ}$ [Å] | $\varepsilon/k_B$ [K] | NASA-9 出典 | LJ 出典 (既定で解決する集合) | 備考 |
 | --- | --- | --- | --- | --- | --- | --- |
-| N2 | 0.0280134 | 3.621 | 97.53 | CEA [1] | [2] 系 | — |
-| O2 | 0.0319988 | 3.458 | 107.4 | CEA [1] | [2] 系 | — |
-| Ar (`AR`/`Ar`) | 0.039948 | 3.330 | 136.5 | 単原子理想 [†] | [2] 系 | NASA-9 は $a_2=c_p/R=5/2$ のみ・$a_7,a_8$ は CEA 基準定数 |
-| CO2 | 0.0440095 | 3.763 | 244.0 | CEA [1] | [2] 系 | — |
-| He (`HE`/`He`) | 0.0040026 | 2.551 | 10.22 | 単原子理想 [†] | [2] | 単原子 (Ar と同形)。$\varepsilon/k_B$ は Svehla [2] に一致 |
-| H2O (`h2o`/`WATER`) | 0.0180153 | 2.605 | 572.4 | CEA [1] | [2] 系 | 非平衡凝縮 (Wyslouzil) のキャリア + 凝縮種 |
-| AIR (`Air`/`air`) | 0.0289647 | 3.711 | 78.6 | **forge 擬似種 [‡]** | 空気の標準 LJ [2] 系 | 単成分擬似空気。$c_p/R=7/2$ 一定 ($\gamma=1.4$)、CEA 種ではない |
+| N2 | 0.0280134 | 3.621 | 97.53 | CEA [1] | gri30 [2a] | — |
+| O2 | 0.0319988 | 3.458 | 107.4 | CEA [1] | gri30 [2a] | — |
+| Ar (`AR`/`Ar`) | 0.039948 | 3.33 | 136.5 | CEA [1] | gri30 [2a] (名前 AR) | #13-3 前は単原子理想 [†] (高温区間も低温区間の流用) |
+| CO2 | 0.0440095 | 3.763 | 244.0 | CEA [1] | gri30 [2a] | — |
+| He (`HE`/`He`) | 0.004002602 | 2.551 | 10.22 | CEA [1] | svehla1962 [2b] (粘性フィット行) | #13-3 前は MW 0.0040026 (丸め)。gri30 に He は無い |
+| H2O (`h2o`/`WATER`) | 0.01801528 | 2.605 | 572.4 | CEA [1] | gri30 [2a] (双極子 1.844 D) | 非平衡凝縮 (Wyslouzil) のキャリア + 凝縮種。#13-3 前は MW 0.0180153 (丸め)。`H2O(L)` も同じ MW |
+| AIR (`Air`/`air`) | 0.0289647 | 3.711 | 78.6 | **forge 擬似種 [‡]** | svehla1962 [2b] (Air) | 単成分擬似空気。$c_p/R=7/2$ 一定 ($\gamma=1.4$)、CEA 種ではない |
 
 出典記号:
 
-- **[1] CEA**: B. J. McBride, M. J. Gordon, *NASA Glenn Coefficients for Calculating Thermodynamic Properties of Individual Species*, NASA/TP-2002-211556 (2002)。NASA Glenn CEA データベース (`thermo.inp`) の 2 区間 (200–1000–6000 K) 係数。N2/O2/CO2/H2O は published CEA 値そのまま。
-- **[†] 単原子理想**: Ar/He は理想単原子気体として $c_p/R=5/2$ を厳密値で与える ($a_0{=}a_1{=}a_3{\dots}{=}0,\ a_2{=}2.5$)。エンタルピー基準定数 $a_7=-745.375$ (生成エンタルピー 0 の単原子基準)・エントロピー定数 $a_8$ は CEA に一致。
+- **[1] CEA**: B. J. McBride, M. J. Gordon, *NASA Glenn Coefficients for Calculating Thermodynamic Properties of Individual Species*, NASA/TP-2002-211556 (2002)。NASA Glenn CEA データベース (`thermo.inp`) の記録そのもの (区間数・区切り・係数・MW; #13-3 から Ar/He を含む)。
+- **[†] 単原子理想 (#13-3 前の Ar/He)**: Ar/He は理想単原子気体として $c_p/R=5/2$ を厳密値で与える ($a_0{=}a_1{=}a_3{\dots}{=}0,\ a_2{=}2.5$)。エンタルピー基準定数 $a_7=-745.375$ (生成エンタルピー 0 の単原子基準)・エントロピー定数 $a_8$ は CEA に一致。
 - **[‡] forge 擬似種 (AIR)**: CEA の Air 混合に近い熱力学を**単成分**で近似するための簡便種。$c_p/R=3.5$ 一定の擬似多項式 ($a_2{=}3.5$, $a_7=-1043.1$, $a_8=3.0$) で、低温で $c_p\approx1004.5$ J/(kg·K)・$\gamma=1.4$ となる。**CEA 由来ではない** ので、空気を厳密に扱う場合は N2/O2 混合か外部 DB を使う。
-- **[2] LJ パラメータ**: R. A. Svehla, *Estimated Viscosities and Thermal Conductivities of Gases at High Temperatures*, NASA TR R-132 (1962) ほか標準の動力学理論輸送データ集に基づく。各 $\sigma_{LJ}$/$\varepsilon/k_B$ は広く使われる輸送データ集 (例: CHEMKIN transport database) とも整合する。He の $\varepsilon/k_B$ は Svehla 値に一致。「[2] 系」は文献単位での整合を意味し、**species ごとの該当表・行レベルの個別照合までは未追跡** — 厳密な監査が必要な場合は一次文献の該当表と突き合わせること。
+- **[2] LJ パラメータの出典と選択 (2026-10-01, plan §4.10・#14)**: LJ は CEA に無いので、共通データは種ごとに**出典別の集合** `LJ_sets: {<集合>: {sigma, eps_kB, source}}` を持ち、run の `physProp.ljSource` (順序付きの集合名リスト) の**先頭から探して最初にある集合**の値を使う。
+  - **[2a] `gri30`**: GRI-Mech 3.0 の transport (`gri30_tran.dat`; Cantera 同梱 `gri30.yaml` を生成器 `tools/cea_thermo_to_forge_species.py --write` が読む。名前の対応 `AR`→`Ar`・`C2H2`→`C2H2,acetylene`)。共通データの 22 種。
+  - **[2b] `svehla1962`**: R. A. Svehla, NASA TR R-132 (1962) Table I(a) (印刷頁 20–24)。2 本独立の転記 (`notes/investigations/2026-10-01-svehla1962-lj/`) が全 56 分子で一致することと頁参照を生成器が検査し、`source` に頁を書く。**希ガス (Ar・He・Kr・Ne・Xe) は粘性データへのフィット行** (熱伝導フィット行 p.24 は使わない)。共通データの 56 種 (Svehla に無い: D2, D2O, (HF)6, N2O4, NO2)。
+  - **[2c] `legacy_v1`**: #14 前の内蔵値の凍結 (旧 run の再現用、値は変えない)。2026-10-01 の監査で**出典が混在**していたことが分かった: N2/O2/CO2/H2O/Ar/NH3/NO2 は GRI-Mech 3.0 の値 (うち 5 種は「Svehla 1962 系」と誤表記していた)、CO/H2/OH/H/NO/O/He/AIR は Svehla 1962 の値 (GRI とは別値: 例 H2 GRI 2.92/38.0 vs Svehla 2.827/59.7)、N/N2O は両者同値。種ごとの実際の出典は各エントリの `LJ_sets.legacy_v1.source`。
+  - **既定は `[gri30, svehla1962]`** (2026-10-01 ユーザ決定「あるべき姿を既定に」): GRI にある種は GRI、無い種は Svehla。既定でどの集合にも無い内蔵種は D2・D2O・H6F6・N2O4 の 4 種。「Cantera」は機構ファイルごとの CHEMKIN の写しで独立の集合ではないので選択肢にしない。
+  - **双極子** は集合から切り離した種レベルの分子定数 `dipole: {value, source}` (H2O 1.844 D・NH3 1.47 D; どちらも GRI-Mech 3.0)。`physProp.transport` の `kinetic` (Brokaw の極性補正) だけが読む。**適用の可否は種の LJ を解決した集合の性質で決まる** (2026-10-01, plan §4.10「双極子の適用規則」・#14-L1b): 各集合は共通データのトップレベル `lj_sets.<集合>.potential` を必ず持ち (無い・未知の値は起動時に拒否)、`gri30`・`legacy_v1` は `stockmayer` (σ/ε は非極性部で、双極子を Brokaw 補正に使う)、`svehla1962` は `lj12-6` (粘性フィットの有効 σ/ε が極性を含むので双極子を適用しない = $\delta^*=0$; 起動ログに「NOT applied」の NOTE)。解決済み記録には輸送の互換行に実際に使った `dipole_debye`・`delta_star`、来歴 (`transport_sources`・`lj_resolved`) に集合と `potential` を書く。外部 DB の LJ は従来どおり `LJ_dipole` があれば Stockmayer 扱い。CE の $\eta_{ij}$ と $D_{ij}$ は従来どおり極性補正なし ($D_{ij}$ は双極子を読まない)。例 (純 H2O・kinetic・400 K): `[gri30]` は $\delta^*=1.217$、`[svehla1962]` は $\delta^*=0$ で σ 2.641/ε 809.1 の 12-6 値 (svehla1962 に双極子をかけると μ が −10.7 % ずれる = 二重計上)。
+  - **`legacy_v1` は σ/ε の凍結であり、双極子は種レベルの現行値を使う**。NH3 の 1.47 D は #14 で新設したので、`[legacy_v1]`+NH3+`kinetic` は #14 前と異なる (既存 run なし; 記録の `dipole_debye` の差で restart の照合が止まる)。
+  - どの集合にも無い種は LJ なし (0) として解決し、LJ を読む使い方 (`kinetic` 輸送・LJ の混合平均拡散) で**種名と探した集合を示して起動を拒否**する (Euler・定数 Schmidt 数・`cea`/`fit` 輸送では使える)。lump の構成種も同じリストで解決する。外部 DB (`speciesDBFile`) の LJ は従来どおり集合に関係なく優先する (記録の集合欄は `speciesDBFile`)。
+  - **記録と互換性ハッシュ**: 解決済み記録の `provenance` に `lj_source` (探した集合リスト) と `lj_resolved` (種 (lump は構成種) ごとの解決した集合と値) を書く。互換性ハッシュには**値だけ**が入り、集合名は入れない (値が同じなら同じハッシュ: 例 N2/O2/CO2/H2O/Ar だけの run は `legacy_v1` と既定で同じハッシュ)。旧 run の再現は `physProp.ljSource: [legacy_v1]` を明示する (#14 前と同じ互換性ハッシュ)。
 
 > 衝突積分の近似式 ($\Omega^{(2,2)*},\Omega^{(1,1)*}$) は Neufeld et al. (1972) 閉形式 (§5c)。理論的背景と全参考文献は 本ドキュメントの「理論」節 を参照。
+
+### 1b. 化学種 DB の解決・lump・記録 — 移行中の仕様 (plan [`thermophysics-solver-owned-species-db`](../plans/active/thermophysics-solver-owned-species-db.md))
+
+> **状態 (2026-09-27)**: 本節は実装前に確定させた仕様 (plan §5.1 #2)。実装済みの項目は各小節に「実装済み」と書く。未記載の項目は現行 (上の「DB 構築・アップロード」、設計側が合成した `species_db.yaml` を `speciesDBFile` で渡す) のまま動いている。
+
+#### 1b.1 熱物性の正本 (共通データ)
+
+- ソルバ配布物に **CEA `thermo.inp` (McBride–Gordon 2002) 由来の全種表**を置き、C++ (ソルバ・変換器) と Python (設計・後処理) が同じファイルを読む。
+  ファイルは版と `thermo.inp` の SHA-256 を持つ。LJ パラメータ (CEA に無い) は出典付きで同じファイルに持つ。
+- 各エントリ: **canonical ID** (CEA の表記、大小文字を区別; 例 `CO` と `Co` は別種)、別名 (明示的な alias 表; `AR`→`Ar`, `WATER`→`H2O` など)、**相** (gas / condensed)、
+  MW、生成エンタルピー、**温度区間の列** (区間数可変、各区間 NASA-9 の 9 係数)、LJ (無ければ「輸送データなし」)、元素組成 (`atoms`; 診断用)。
+- 使用時の拒否: 凝縮相を気相 EOS に使う、LJ の無い種を粘性・熱伝導・拡散に使う。LJ の仮置き (N2 相当) はしない。
+- 現行の `AIR` (cp/R 3.5 一定) は CEA の `Air` と別の互換擬似種として残す。
+- 外部 DB (`speciesDBFile`) による上書き・追加は残す。凝縮 ON のとき、凝縮種の気相エントリを気液ペアの基準が確認できない外部 DB で上書きすることは拒否する。
+
+> **実装済み (2026-09-27, plan #4; 値は移行前の内蔵値のまま)**: 共通データは `solver_density_cuda/data/species/forge_species_v1.yaml` (schema `forge_species_data_v1`)。第一段では移行前の内蔵経路の値 (C++ 内蔵 7 種、設計側 `SPECIES_NASA9` 11 種・`LJ_PARAMS`・原子組成) だけを移した (CEA 全種表への拡張は #5/#6)。C++ はビルド時に `cmake/embed_species_data.cmake` でヘッダへ埋め込み、起動時に yaml-cpp でパースする (実行時にファイルを読まない; ソルバと `convertGmshToForge` は同じ `speciesDB_builtin()`)。Python は `design/forge_design/gas/semiperfect.py` が同じファイルを直接読み、従来の大文字キー (`Ar`→`AR`) で `SPECIES_NASA9`/`LJ_PARAMS`/`SPECIES_ATOMS` を作る。各エントリは canonical ID (大小文字を区別)・別名・相・MW・2 温度区間の NASA-9 係数・LJ (null 可)・元素組成・出典・CEA 直読みとの既知の差 (`deviations`) を持つ。過渡の欄 `legacy_builtin` で、各読み手は移行前と同じ内蔵種の集合だけを読む (**2026-10-01 (#13-2) からソルバはこの欄で絞らず全気相種を読む**; Python の `SPECIES_NASA9` は今も欄で絞る; `composition.solver_builtin_names` は #13-3 から全気相種で、内蔵で解決できる実種を SERN runner が外部 DB に書かない)。名前解決は C++ が完全一致 (外部 DB のキー、canonical ID、別名) → 従来の大小文字無視 (互換)、Python は従来の大文字化のまま。canonical ID への移行と完全一致化は #8、区間可変は #6、LJ の無い種の輸送拒否は #6/#7。移行前後のビット一致は `tests/unit/test_species_data_bitexact.py` (基準 `tests/unit/data/species_builtin_baseline_v0.json`) で確認できる。
+
+#### 1b.2 lump (擬似種) の指定と起動時合成
+
+```yaml
+physProp:
+  species:
+    - {name: MIXDRY, lump: {N2: 0.708873, O2: 0.230376, AR: 0.00850387, CO2: 0.0522474}, basis: mole}   # basis: mole | mass
+    - H2O
+```
+
+- lump の中身は構成種と分率 (モル基準または質量基準、lump 内で正規化) で書く。係数はソルバが起動時に合成する。
+- **区間**: 構成種の全区切り温度の和集合で区間を分け、区間ごとに NASA-9 係数を lump 内モル分率 $x_k$ で線形結合する
+  ($c_p/R$, $h/(RT)$, $s/R$ は係数について線形なので、固定組成なら構成種の和と厳密に一致)。端の外挿 (定 $c_p$) も区間として表す。
+- **datum** (`thermoHrefTemp`) は全区間に適用する。float 表 (`SpeciesThermoF`) も同じ区間表から作る。区切り温度での既存の段差 (例: 1000 K で H2O 0.019 J/kg) は保持し、合成・datum で増やさない。
+- 凝縮種は lump に入れられない (独立種として置く)。
+- 上限は「輸送種数」「lump 展開後の実種数」「区間数」を別々に定数で持ち、超過は起動時に拒否する。
+- 起動ログに lump の中身・MW・区間・参照温度での $c_p$, $h$ を出す。
+
+> **実装状況 (2026-09-27, plan #6a; 区切りの違う構成種は 2026-10-01 #13-1)**: `input/speciesDB.cpp` の `speciesDB_resolve`。構成種の区間がすべて同じなら同じ区間で畳み
+> (合成規約 `SPECIES_LUMP_SYNTHESIS`、#6a と同じ演算・同じ記録)、違えば区切りの和集合で畳む (`SPECIES_LUMP_SYNTHESIS_UNION`; 構成種が自分の $[T_{lo},T_{hi}]$ の外に
+> ある区間ではその外挿 ($c_p/R=a_2$ 一定、$a_7=h(T_b)/R-a_2T_b$、$a_8=s(T_b)/R-a_2\ln T_b$) を 1 区間として足す)。和集合が 3 区間を超える lump
+> (例: 200 K 始まりの種と 298.15 K 始まりの 3 区間種) は起動時に拒否する。構成種ごとの加重和との一致は `tests/unit/test_thermo_intervals_host.cpp` (V3)。
+> `basis` は必須 (`mole` | `mass`)。分率は lump 内で正規化し、総和が 1 から 1e-3 以上ずれたら警告、非正・非有限はエラー。構成種は内蔵 DB と `speciesDBFile` から通常の種と同じ規則で解決する。
+> 重複 (別名・大小文字違いを含む)・未知の種・lump 名と内蔵種/外部 DB 種名の衝突 (大小文字無視)・凝縮 ON での凝縮種の混入は起動時に拒否する。
+> 合成は $x_k$ でモル加重して $M=\sum x_k M_k$、NASA-9 両区間の係数を $\sum x_k a_k$ (設計側 `composition.lump_entry` と同式; case/44 va3 で生成 DB と相対 4e-16)。
+> LJ は**暫定**で質量分率平均 $\sigma=\sum Y_k\sigma_k$, $\varepsilon=\sum Y_k\varepsilon_k$ (§1b.3 の実種展開・Blanc 拡散は plan #7)。datum は合成後の lump を 1 種として従来どおり適用する。
+> 解決済み記録には lump の basis・入力の分率・正規化モル分率・構成種の係数を書き、互換性ハッシュには合成規約・構成種名・正規化モル分率・構成種の MW/区間/LJ/係数を入れる (basis と入力の分率は入れない)。
+> lump を使わない config のハッシュは変わらない。外部 DB で与えた同じ擬似種とはハッシュが異なるので、既存場からの restart は照合で止まる (移行は明示許可で 1 回行う)。
+
+#### 1b.3 lump の輸送物性
+
+- 粘性・熱伝導: lump を構成実種へ展開し、全実種で Wilke / Mason–Saxena 混合を評価する (平均 LJ の擬似分子は使わない)。
+- 化学種拡散 (混合平均): lump の外の種 $i$ と lump の二元係数を Blanc の法則 $1/D_{i,\mathrm{lump}}=\sum_{j\in\mathrm{lump}} x_j/D_{ij}$ で作る。
+  lump 同士・構成実種が重なる場合の式は plan §4.4 で確定してから実装する。補正後の流束は `full` と厳密には一致しない (lump 内組成固定の近似誤差)。
+
+#### 1b.3b 輸送物性の表引き (float) — 実装済み (2026-09-27, plan #5t2-3)
+
+`physProp.transport` を書いた run では、セル (`gasProperties_d`) と壁 (`wmlesWallModel_d`) の μ・λ を表から引く (`cuda_forge/transportTables_d.cuh`)。表は起動時に host で double から作り device に置く。
+- 対象: 各実種の $\ln\mu_i$・$\ln\lambda_i$ と、組 $\ln\eta_{ij}$ のうち二元 Chapman–Enskog と CEA 相互作用のもの。剛体球近似の組は実行時に種別表の $\mu$ から作る。
+- 分割: 式が切り替わる温度 (CEA・fit の区間境界、H2O の 253.15/500/700 K、$T^*$ のクランプ点 $0.3\varepsilon$・$100\varepsilon$、修正 Eucken の $c_p$ の NASA $T_{lo}$・全区切り・$T_{hi}$ (区間可変, #13-1)) で分割し、各分割区間を $\Delta\ln T\le 1/256$ で刻む。
+- 補間: 小区間ごとに両端の値と $d\ln f/d\ln T$ から 3 次 Hermite ($f\approx f_0\exp(c_1u+c_2u^2+c_3u^3)$)。右区間の左端も右側の式で評価する。
+- 区間の選択は元の $T$ と元の境界値 (現行の所属規約) で行い、float の $\ln T$ では選ばない (999.99994/1000/1000.00006 K の float $\ln T$ は同値)。
+- 範囲 150–15000 K、範囲外は double 評価へ委譲 (端値クランプなし)。精度は独立 double 参照に対し単体 4.7e-7・混合 4.1e-7 以内 (基準 2e-6/1e-5)。
+- 性能 (RTX 3060, 23725 CV): 物性時間は実種 5/12/32 で 0.049/0.20/1.34 ms (従来の Wilke 経路 0.062/0.31/0.44 ms、double 評価 0.43/3.05/20.5 ms)。メモリは実種 12 で 0.76 MB。`FORGE_TRANSPORT_TABLE=0` で double 評価に戻せる。
+- 新しい μ・λ は粘性・熱流束、SST・遷移・スカラー拡散、定数 Sc の化学種・受動種拡散、軸対称ソース、CHT、SST 壁関数の局所 Pr、乱流粘性・壁 ω が読む。**CFL の粘性項 (`setDT_d`) と陰解法の粘性対角 (`timeIntegration_d`) は定数 `physProp.visc` のまま** (剛性の見積りで流束の値ではない)。SST 壁関数の回復係数も `prandtlLam` のまま。
+
+#### 1b.4 解決済み記録と内容照合
+
+- ソルバは使用した全種 (内蔵種・外部 DB・lump とその構成実種を含む) の**解決済み物性**を run ディレクトリへ出力する: 種の順序、canonical ID、出所、MW、区間と係数、LJ、datum、
+  lump の構成と分率、共通データの版とハッシュ。これは**出力 (記録)** であり入力ではない。
+- 記録の正規化した内容から **species ハッシュ** (SHA-256) を作り、記録は `resolved_species_<hash>.yaml` として上書きせずに保存する。**各 `res_*.h5` の属性**にハッシュを書く。
+- **区間可変 (plan #13-1)**: `nInt == 2` の種は記録・互換性テキストとも従来の書式 (`Tlo/Tmid/Thi`, `nasa9_low/nasa9_high`; テキストは `T: Tlo Tmid Thi` と `low:`/`high:`) のまま。
+  それ以外の種は記録に `Tbounds: [Tlo, 区切り..., Thi]` と `nasa9_intervals: [[a0..a8] x nInt]`、テキストに `T:` の全境界と `coef[k]:` の行を書く。
+  記録に `nInt != 2` の種 (lump の構成種を含む) が 1 つでもあるときだけ schema を `forge_resolved_species_v1_nint` (輸送ブロック付きは `_v2_nint`)、
+  外挿規約を区間可変の文字列 (`SPECIES_RECORD_EXTRAPOLATION_NINT`: 区間 $k$ は $T_k\le T<T_{k+1}$、区切りは上の区間) にする。
+  2 区間だけの記録はバイト不変 (case/44 run_0509 の互換性ハッシュ 4378b7d78339ba27 のまま)。外部 DB (`speciesDBFile`) も同じキー (`Tbounds`/`nasa9_intervals`) で区間可変の種を書ける
+  (2 区間の書式と混ぜると拒否、4 区間以上・非単調も起動時に拒否)。Python の鏡像は `tools/forge_species.py` (`nasa9_intervals()`・`compat_text`・`load_record`) と
+  `tools/total_quantities.py` の `_TPGas`。
+- 照合は内容 (ハッシュと差分の項目) で行う。`source` (builtin / file) で比較を省略しない。過去の run の署名を現在の内蔵表から作り直さない。
+- 照合する入口: ソルバの `valueFileName` 読み込み、同一メッシュ restart (`restart_field.py`)、補間 (`interp_field.py`)、種変換 (`convert_species_field.py`)、設計 runner の段間引き継ぎ・warm start。
+  不一致は差のある項目 (種・係数) を示して拒否する。ハッシュ属性の無い旧い場は「照合不能」とし、明示的に許可したときだけ通す。
+- 既定は**ソルバとツールで同じ** (2026-09-27, plan #3c): 未検証の場 (属性なし / `species_input_unverified=1`)・宛先を解決できない
+  (`forge --resolve-species` を持つバイナリが無い)・記録が壊れている、のいずれも既定で停止する。許可はその実行だけの環境変数
+  `FORGE_ALLOW_UNVERIFIED_SPECIES=1` (未検証・解決不能のみ; ツールでは加えて明示フラグ `--force-species`) で、config キーによる恒常的な許可は無い。
+  ツールが許可して書いた場には属性を付けない (宛先のハッシュで埋めない) ので、その場を読むソルバは再び「照合不能」とし、同じ許可を要する。
+  ソルバ自身が許可して書いた出力は自分のハッシュと `species_input_unverified=1` (印) を持つ。**印付きの場の継承はソルバとツールで同じ規則**
+  (2026-10-01, plan #3d): 場の `species_hash` = 宛先のハッシュ (ソルバは自分の互換性ハッシュ、restart/補間ツールは宛先を `forge --resolve-species`
+  で解決したハッシュ、種変換は SRC run の設定を解決したハッシュ) なら許可なしで通し、出力に同じ印を継承する (ソルバは
+  `speciesDB_checkInputField` の `fieldHash == own` 分岐、ツールは `forge_species._plan_inherit_marked` / `_plan_convert_marked`)。
+  記録は照合に使わない (ツールは SRC の隣に記録があればそれを、無ければ宛先の解決記録を DST の隣に置く)。印付きでもハッシュが違えば停止する。
+  印は許可を付けても消えない。したがって「属性なしの場を 1 回だけ許可して印付きにする → 以後は許可なしで継承」が成り立つ。
+
+#### 1b.5 凝縮種の液相 (気液ペア) と潜熱 — 実装済み (2026-09-28, plan #10)
+
+- 共通データに液相 `H2O(L)` (`phase: condensed`, `pair_of: "H2O"`, CEA `thermo.inp` の 273.15–373.15 K 区間, `extension: {below: linear_cp_fd_at_Tlo, above: hold_at_Thi}`) を置く。
+  内蔵の気相種ではない (`legacy_builtin: []`)。MW は気相 H2O と同じ値を持ち、ソルバが一致を検査する (気液は同じ MW で質量換算する契約)。
+- 凝縮 ON かつ `condModel: 1` のとき、`speciesDB_resolve(cfg)` が液相をペアの気相種と組にして `ResolvedSpeciesDB::condensed` に付ける。
+  TP ではペアの気相が種リストに要り (無ければ拒否)、CPG は内蔵の気相 H2O を使う。
+  **気液ペアの基準契約**: 外部 DB (`speciesDBFile`) の気相 H2O が内蔵のペアと MW・区切り・両区間の係数で 1 bit でも違えば凝縮 ON で拒否する
+  (同一なら通す; 生成 `species_db.yaml` の H2O は内蔵と同じ値)。拒否文は種名・最初に違うキー・両値 (例 `H2O.MW: speciesDBFile 0.0180153… vs built-in 0.01801528…`)
+  と移行先 2 つ (外部 DB から H2O を外して内蔵を使う / lump 記法にして `speciesDBFile` をやめる) を示す。これは物性の契約で場の未検証とは別なので
+  `FORGE_ALLOW_UNVERIFIED_SPECIES=1`・`--force-species` では通らない (起動直後の種 DB 解決で止まり、`--resolve-species` を使うツールも同じ所で止まる)。
+  段 3 (plan #13-3) で内蔵 H2O の MW が CEA の 0.01801528 になったので、#9 以前の runner が旧 MW 0.0180153 の H2O を外部 DB に写した凝縮 config
+  (例 case/44 run_0510) はこの拒否に当たる (凝縮 OFF の run_0509 は対象外でハッシュ不変)。
+- 潜熱 $L(T)=h_v(T)-h_l(T)$ ([`condensation.md`](condensation.md) の潜熱の節): $h_v$ は**種 DB の気相そのもの** (同じ係数・区間・外挿規約、datum を焼き込んだ device 係数とビット一致)、
+  $h_l$ は液相の絶対基準の係数を気相 MW で質量換算し、**気相と同じ datum 定数** $R_u\Delta a_7/M$ ($\Delta a_7=-h_{abs,gas}(T_{ref})/R_u$) を足す。
+  datum を変えても $L$ は相対 $\sim10^{-15}$ で不変 (液相係数は $a_0=1.3\times10^9$ と大きく打ち消しが強いので、$\Delta a_7$ を係数に焼き込まず定数で足す)。
+- 記録と互換性ハッシュ: 液相があるときだけ、互換性テキストの種の後に `condensed[0]` の行 (名前・ペア・`gas_index`・MW・区間・9 係数 (datum 前)・延長規約・潜熱規約・datum 規約) を足し、
+  記録に `condensed:` ブロックを書く。**凝縮 OFF の記録はバイト不変** (スキーマ名も変えない)。液相だけ違う場の restart は差 (`condensed H2O(L).nasa9[k]` 等) を示して拒否する。
+  液相の無い #10 以前の記録は「潜熱モデルが記録されていない」と表示する。
+- 湿り場の種変換 (`convert_species_field.py`): 潜熱は記録の液相から作り、差分形の補正を
+  $\Delta(\rho e)=\rho\{\Delta e_{gas}+g_{dst}(R\,T-L_{dst})-g_{src}(R\,T-L_{src})\}$ にする (液相モデルだけの違いでも再構成する)。
+  記録に液相が無い湿り場 (#10 以前) は既定で拒否し、旧モデルで作った場と確かめたときだけ `--src-latent legacy-v0` (旧 `h2o_latent`) で移す。
 
 ### 2. 従属変数と温度反転 `cuda_forge/dependentVariables_d.cu`
 
@@ -302,7 +443,11 @@ L/R 状態の `roe_L/Ht_L/ca_L` (および R 側) を NASA で再構成。Roe �
   `speciesRenormalize_d` が $\rho Y_s\ge0$ にクランプし $\sum_s\rho Y_s=\rho$ へ再スケール
   ($\sum_s Y_s=1$)。`roY{s}N/M` は `speciesUpdateOuter/Inner` が D2D copy で NS の N/M に同期。
 
-### 5c. 輸送係数 — kinetic theory (M3) `cuda_forge/thermo_d.cuh` + `gasProperties_d.cu`
+### 5c. 輸送係数 — 種ごとの輸送物性 (`viscMethod==2`, `physProp.transport` 必須)
+
+> `thermalMethod==2` で `viscMethod==2` を選ぶと、実種ごとに指定した出所の μᵢ・λᵢ を CEA 形 frozen 混合則で per-cell に評価する (`transportMix_d.cuh`・既定は表引き `transportTables_d.cuh`、`FORGE_TRANSPORT_TABLE=0` で double 評価)。`physProp.transport` が無い `viscMethod: 2` は起動時エラー (2026-09-27、旧 kinetic 経路は撤去)。以下の M3 の記述 (Wilke/Mason–Saxena、`thermo_mu_mix`) は旧経路の記録。
+
+#### (旧) kinetic theory (M3) `cuda_forge/thermo_d.cuh` + `gasProperties_d.cu`
 
 `thermalMethod==2` で `viscMethod==2` を選ぶと、混合粘性 $\mu$ と熱伝導率 $\lambda$ を
 Chapman-Enskog + Wilke/Mason-Saxena で per-cell に評価する (LJ パラメータ `sigma_LJ`,`eps_kB` を使用)。

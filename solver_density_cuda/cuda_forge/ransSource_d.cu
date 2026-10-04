@@ -16,6 +16,16 @@ constexpr flow_float kSigmaW2   = static_cast<flow_float>(0.856);
 constexpr flow_float kA1        = static_cast<flow_float>(0.31);
 constexpr flow_float kSmall     = static_cast<flow_float>(1.0e-12);
 
+// 遷移モデル (LM2009) 併用時の F1 修正: F1 = max(F1, F3), F3 = exp(-(R_y/120)^8), R_y = ρ y √k / μ
+// (層流境界層の中で F1 が 0 に落ちて k-ε 側へ切り替わるのを防ぐ。SU2 CTurbSSTVariable.cpp:89-91)。
+// ソースカーネルと F1 前処理カーネルの**両方**がこの関数を通す (片方だけだと σ ブレンドと α/β で別の F1 になる)。
+__device__ __forceinline__ flow_float sst_f1_transition(flow_float F1, flow_float rho, flow_float k_c, flow_float y, flow_float mu_lam)
+{
+    const flow_float Ry = min(rho * y * sqrt(k_c) / mu_lam / static_cast<flow_float>(120.0), static_cast<flow_float>(1.0e3));
+    const flow_float Ry2 = Ry * Ry, Ry4 = Ry2 * Ry2;
+    return max(F1, exp(-Ry4 * Ry4));
+}
+
 // SST source terms (production, destruction, cross-diffusion) for k and omega.
 // vis_turb にはこの段階での渦粘性が入る（Stage 4 以前はゼロまたは簡易値）。
 // 生産項の mu_t が 0 の場合は内部で rho*a1*k/omega で代替計算する。
@@ -74,7 +84,9 @@ __global__ void rans_sst_source_d(
     int energyKSource,
     flow_float* res_roe,
     flow_float* sstF1,
-    int nodeWallKPin)
+    int nodeWallKPin,
+    // 遷移モデル (LM2009): gammaEff = max(γ, γ_sep)。nullptr (transition: none) で従来ビット不変。
+    flow_float* gammaEff)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -146,7 +158,8 @@ __global__ void rans_sst_source_d(
     const flow_float arg1_b = static_cast<flow_float>(500.0) * nu / (w_c * y * y);
     const flow_float arg1_c = static_cast<flow_float>(4.0) * rho * kSigmaW2 * k_c / (CD_kw * y * y);
     const flow_float arg1   = min(max(arg1_a, arg1_b), arg1_c);
-    const flow_float F1     = tanh(arg1 * arg1 * arg1 * arg1);
+    flow_float F1           = tanh(arg1 * arg1 * arg1 * arg1);
+    if (gammaEff != nullptr) F1 = sst_f1_transition(F1, rho, k_c, y, mu_lam);
     // sstF1 は ransBlendF1_d_wrapper (拡散の前) が同式・同入力で書いており、ここでは同じ値を再書込するだけ
     // (σ ブレンドと生成の F1 が同一 step で一致することの保証)。
     if (sstF1 != nullptr) sstF1[ic] = F1;
@@ -173,7 +186,15 @@ __global__ void rans_sst_source_d(
     if (wallTreatment == 1 && wf_pk[ic] >= static_cast<flow_float>(0.0)) {
         Pk = wf_pk[ic];
     }
-    Pk_diag[ic] = Pk;  // 診断: 確定 k 生産 (wall-function 置換後)
+    // 遷移モデル: P_ω は補正前の P_k (Pk_base) から作り、k 式だけ γ_eff を掛ける (SU2 turb_sources.hpp:1002-1005 と同じ順序)。
+    const flow_float Pk_base = Pk;
+    flow_float trDestr = static_cast<flow_float>(1.0);
+    if (gammaEff != nullptr) {
+        const flow_float ge = gammaEff[ic];
+        Pk *= ge;
+        trDestr = min(max(ge, static_cast<flow_float>(0.1)), static_cast<flow_float>(1.0));
+    }
+    Pk_diag[ic] = Pk;  // 診断: 確定 k 生産 (wall-function 置換・遷移補正後)
 
     // k 消滅項。標準 SST は D_k = β* ρ k ω = ρ k^{3/2}/l_RANS。
     // SST-DES (DESmode>0) では l_RANS を l_DDES に置換: D_k = ρ k^{3/2}/l_des (methods/turbulence §8)。
@@ -189,6 +210,7 @@ __global__ void rans_sst_source_d(
         Dk    = kBetaStar * rho * k_c * w_c;
         jac_k = kBetaStar * w_c;
     }
+    if (gammaEff != nullptr) { Dk *= trDestr; jac_k *= trDestr; }
 
     // omega 生産項。
     // E3 (§5): 壁関数の第一内層ノードでは入力ひずみを壁法則整合 S_wf^2 に差し替える
@@ -203,7 +225,7 @@ __global__ void rans_sst_source_d(
     // ν_t は closure の正本 vis_turb (mu_t) を使う (mu_t_eff の 1e-12 切替は a1 分ずれる, codex 2026-09-08)。μt→0 の極限では
     // P_k→0 かつ P_k/ν_t→ρS² なので αρS_prod にフォールバック (相対閾値: μt < 1e-6 μ)。
     const flow_float Pw = (omegaProdFromPk != 0 && mu_t > static_cast<flow_float>(1.0e-6) * mu_lam)
-        ? alpha * rho * Pk / mu_t
+        ? alpha * rho * Pk_base / mu_t
         : alpha * rho * S_prod_omega;
 
     // omega 消滅項
@@ -310,7 +332,7 @@ __global__ void rans_sst_blend_f1_d(
     flow_float* ro, flow_float* k, flow_float* omega, flow_float* vis_lam, flow_float* wall_dist,
     flow_float* dKdx,     flow_float* dKdy,     flow_float* dKdz,
     flow_float* dOmegadx, flow_float* dOmegady, flow_float* dOmegadz,
-    flow_float* sstF1)
+    flow_float* sstF1, int transitionF3)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
     if (ic >= nCells) return;
@@ -329,7 +351,9 @@ __global__ void rans_sst_blend_f1_d(
     const flow_float arg1_b = static_cast<flow_float>(500.0) * nu / (w_c * y * y);
     const flow_float arg1_c = static_cast<flow_float>(4.0) * rho * kSigmaW2 * k_c / (CD_kw * y * y);
     const flow_float arg1   = min(max(arg1_a, arg1_b), arg1_c);
-    sstF1[ic] = tanh(arg1 * arg1 * arg1 * arg1);
+    flow_float F1 = tanh(arg1 * arg1 * arg1 * arg1);
+    if (transitionF3 != 0) F1 = sst_f1_transition(F1, rho, k_c, y, mu_lam);
+    sstF1[ic] = F1;
 }
 
 }
@@ -343,7 +367,7 @@ void ransBlendF1_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, v
         var.c_d["ro"], var.c_d["k"], var.c_d["omega"], var.c_d["vis_lam"], var.c_d["wall_dist"],
         var.c_d["dKdx"],     var.c_d["dKdy"],     var.c_d["dKdz"],
         var.c_d["dOmegadx"], var.c_d["dOmegady"], var.c_d["dOmegadz"],
-        var.c_d["sstF1"]);
+        var.c_d["sstF1"], (var.transitionRegistered != 0) ? 1 : 0);
     gpuErrchk(cudaPeekAtLastError());
     gpuErrchkKernelSync();
 }
@@ -421,7 +445,8 @@ void ransSource_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, va
         cfg.sstEnergyKSource,
         var.c_d["res_roe"],
         var.c_d.count("sstF1") ? var.c_d["sstF1"] : nullptr,
-        cfg.sstNodeWallKPin);
+        cfg.sstNodeWallKPin,
+        (var.transitionRegistered != 0) ? var.c_d["gammaEff"] : nullptr);
 
     gpuErrchk(cudaPeekAtLastError());
     gpuErrchkKernelSync();

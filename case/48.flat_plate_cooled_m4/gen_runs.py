@@ -5,7 +5,9 @@ usage: python3 gen_runs.py --run run_0001_A_ad_y3 --mesh fp_y1_3um --wall adiaba
   --wall adiabatic → kind: wall / 数値 → wall_isothermal Ts=数値
   --plain          → dilatationCorrection 0, katoLaunder 0 (SU2 比較用の素 SST)
 段階: soft (1次, cfl 0.5, nStepInner 10, 2000) → mid (1次, cfl 1.0, 2000) → main (2次, cfl, implicitRelax, main-steps)。
-段間は interp_field.py (同一メッシュなので index 同値) で mesh h5 の VALUE を更新。
+段間は restart_field.py (同一メッシュ) で mesh h5 の VALUE を更新。
+**interp_field.py は cross-mesh 用で、原始量から保存量を組み直すので同一メッシュに使ってはいけない**
+(2026-09-24 実測: この case のメッシュで roUx 29037/89440 が最大 14.2 %、roUy 47630 が最大 100 % ずれた)。
 """
 import argparse, os, re, shutil, subprocess, sys
 from pathlib import Path
@@ -23,21 +25,21 @@ RO_INF = P_INF / (R * T_INF); A_INF = (GAM * R * T_INF) ** 0.5; U_INF = M_INF * 
 K_INF, OM_INF = 75.0, 26000.0     # TI 0.5 %, mu_t/mu ~ 10
 IC_DELTA0 = 3.0e-4               # IC の壁近傍速度ランプ幅 [m]
 
-CFG = """mesh: {{meshFormat: "hdf5", discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: "mesh.h5", valueFileName: "mesh.h5"}}
+CFG = """mesh: {{discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: "mesh.h5", valueFileName: "mesh.h5"}}
 gpu: 1
 solver: "SLAU"
-physProp: {{isCompressible: 1, thermalMethod: 0, viscMethod: 1, ro: 1.2, visc: 1.8e-5, thermCond: 0.0257, thermCondMethod: 1, prandtlLam: 0.72, cp: {cp}, gamma: {gam}}}
+physProp: {{thermalMethod: 0, viscMethod: 1, visc: 1.8e-5, thermCond: 0.0257, thermCondMethod: 1, prandtlLam: 0.72, cp: {cp}, gamma: {gam}}}
 time:
   unsteady: 0
   dualTime: 0
-  last: {{control: 0, nStepOuter: {nsteps}}}
+  last: {{nStepOuter: {nsteps}}}
   deltaT: {{control: 1, dt: 1e-8, cfl: {cfl}, cfl_pseudo: {cfl}, implicitRelax: {relax}, blockDPLUR: 1, lowMachPrecond: 0, dt_min: 1e-10, dt_max: 1.0, detectNaN: 1}}
   outStepStart: 0
   outStepInterval: {outint}
   timeIntegration: 11
   nStepInner: {ninner}
 space: {{convMethod: {conv}, limiter: {lim}}}
-turbulence: {{model: "sst", scalarDiffusion: 1, dilatationCorrection: {dil}, katoLaunder: {kl}, wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInf: {k}, omegaInf: {om}}}
+turbulence: {{model: "sst", scalarDiffusion: 1, dilatationCorrection: {dil}, katoLaunder: {kl}, wallTreatmentSST: 0, turbulentPrandtl: 0.9}}
 output: {{level: 1}}
 initial: "uniform_p101325_u10"
 """
@@ -110,7 +112,7 @@ def stage(rd, text, nsteps, tag=""):
     res = sorted(rd.glob("res_[0-9]*.h5"), key=lambda f: int(f.stem.split("_")[1]))
     if rc != 0 or not res or int(res[-1].stem.split("_")[1]) < nsteps:
         raise SystemExit(f"stage failed rc={rc} res={[r.name for r in res][-2:]}")
-    subprocess.run([sys.executable, str(TOOLS / "interp_field.py"), str(res[-1]), str(rd / "mesh.h5")], env=ENV, check=True,
+    subprocess.run([sys.executable, str(TOOLS / "restart_field.py"), str(res[-1]), str(rd / "mesh.h5")], env=ENV, check=True,
                    capture_output=True, text=True)
     # 層流段の res には roK/roOmega が無い → 自由流値を入れ直す (SST 段の IC)
     with h5py.File(rd / "mesh.h5", "r+") as f:
@@ -134,7 +136,7 @@ def main():
     ap.add_argument("--ramp", default="0.5,1,2", help="本段前の 2 次 cfl ランプ (各 --ramp-steps)。空文字で無し")
     ap.add_argument("--ramp-steps", type=int, default=2000)
     ap.add_argument("--limiter", type=int, default=2)
-    ap.add_argument("--ic-from", default=None, help="warm start 元 run (mesh.h5 を interp_field で作る; 同一メッシュ)")
+    ap.add_argument("--ic-from", default=None, help="warm start 元 run (mesh.h5 を restart_field で作る; 同一メッシュ)")
     ap.add_argument("--ic-mesh", default=None, help="場入り mesh h5 をそのまま mesh.h5 に使う (段階起動済み場の再利用)")
     a = ap.parse_args()
     rd = HERE / a.run
@@ -142,11 +144,13 @@ def main():
     rd.mkdir()
     shutil.copy(HERE / "mesh" / f"{a.mesh}.h5", rd / "mesh.h5")
     Tw = None if a.wall == "adiabatic" else float(a.wall)
+    # 同一メッシュなので restart_field (保存量を index コピーしビット一致を検査する) を使う
+    (rd / "solverConfig.yaml").write_text(cfg(a.main_steps, a.cfl, a.relax, 1, a.limiter, 5, a.out_int, a.plain))
     if a.ic_mesh:
         shutil.copy(a.ic_mesh, rd / "mesh.h5"); (rd / "CONTINUED_FROM").write_text(str(a.ic_mesh) + "\n")
     elif a.ic_from:
         src = sorted((HERE / a.ic_from).glob("res_[0-9]*.h5"), key=lambda f: int(f.stem.split("_")[1]))[-1]
-        subprocess.run([sys.executable, str(TOOLS / "interp_field.py"), str(src), str(rd / "mesh.h5")], env=ENV, check=True,
+        subprocess.run([sys.executable, str(TOOLS / "restart_field.py"), str(src), str(rd / "mesh.h5")], env=ENV, check=True,
                        capture_output=True, text=True)
         (rd / "CONTINUED_FROM").write_text(str(src) + "\n")
         if Tw is not None: set_wall_T(rd / "mesh.h5", Tw)

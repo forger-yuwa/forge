@@ -11,6 +11,7 @@
 #include "variables.hpp"
 #include "cuda_forge/cudaWrapper.cuh"
 #include "cuda_forge/calcStructualVariables_d.cuh"
+#include "cuda_forge/qAccumulator.hpp"
 
 
 
@@ -76,6 +77,7 @@ void variables::registerSpecies(int nSpecies, int chemistry)
         // 保存質量分率 roY{s} と原始 Y{s} を HDF5 出力対象に加える (roY はリスタートに必須)。
         this->output_cellValNames.push_back("roY"+std::to_string(s));
         this->output_cellValNames.push_back("Y"+std::to_string(s));
+        for (const char* c : {"x", "y", "z"}) this->extraOnly_cellValNames.push_back("dY"+std::to_string(s)+"d"+c);   // extraFields 専用
     }
 
     // 診断 (FORGE_SPECIES_RAW_DIAG=1): 再正規化前の生更新値 roYraw{s} を出力する (plan species-passive-scalar-unification §6-1 の
@@ -111,6 +113,28 @@ void variables::registerSpecies(int nSpecies, int chemistry)
 // 受動トレーサ (排気率 ξ; physProp.tracer: exhaust)。凝縮モーメントと同じ 8 本構成。
 //   roXi : 保存量 ρξ, Xi : 原始量 ξ=ρξ/ρ, roXiN/roXiM : RK ステップ/ステージ始点,
 //   res_roXi, res_roXi_m : 残差 / 4thRunge 累積, src_jac_Xi : 源項ヤコビアン (0), transport_diag_Xi : 輸送対角 [m³/s]
+void variables::registerTransition(int enabled, int diag)
+{
+    this->transitionRegistered = (enabled != 0) ? 1 : 0;
+    if (enabled == 0) return;
+    std::vector<std::string> names = {"roGamma", "roReth", "gammaTr", "reTheta", "gammaEff", "res_roGamma", "res_roReth",
+                                      "src_jac_gamma", "src_jac_reth", "transport_diag_gamma", "transport_diag_reth"};
+    std::vector<std::string> outs  = {"roGamma", "roReth", "gammaTr", "reTheta", "gammaEff"};
+    if (diag != 0) {
+        for (const char* nm : {"lmFonset", "lmFlength", "lmFtheta", "lmRethCorr", "lmGammaSep", "lmPgamma", "lmEgamma", "lmPtheta", "lmCorrIter"}) {
+            names.emplace_back(nm); outs.emplace_back(nm);
+        }
+        outs.emplace_back("src_jac_gamma"); outs.emplace_back("src_jac_reth");   // 陰的対角も単体検査の対象 (codex result M3)
+    }
+    for (const auto& name : names) {
+        this->cellValNames.push_back(name);
+        this->c.emplace(name, std::vector<flow_float>{});
+        this->c_d.emplace(name, nullptr);
+    }
+    for (const auto& name : outs) this->output_cellValNames.push_back(name);
+    std::cout << "registerTransition: LM2009 gamma-Re_theta_t registered (" << names.size() << " cell variables)\n";
+}
+
 void variables::registerTracer(int enabled)
 {
     if (enabled == 0) {
@@ -155,6 +179,16 @@ static std::list<std::string> condMomentCellVarNames(const std::string& consName
         "dq_"+consName, "dq_"+consName+"_old",
         consName+"P", consName+"PP"   // dual-time の物理時間レベル (受動種 BDF 項用)
     };
+}
+
+void variables::registerTwoPhaseVaporResidual(int enabled)
+{
+    if (enabled == 0) return;
+    // 蒸気の残差 R_v = R_w − R_g (監視のみ; HDF5 には出さない)。plans/active/condensation-two-phase-transport.md §5.1 #4e
+    const std::string name = "res_roYv";
+    this->cellValNames.push_back(name);
+    this->c.emplace(name, std::vector<flow_float>{});
+    this->c_d.emplace(name, nullptr);
 }
 
 void variables::registerCondensation(int nCondSpecies)
@@ -207,6 +241,45 @@ void variables::registerCondensation(int nCondSpecies)
               << " -> registered " << nCondSpecies*(4*17+8) << " cell variables\n";
 }
 
+// --- FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.3) ---
+// **内点 CV だけ**確保する (nCells。ゴースト nCells_all-nCells は境界条件が毎 step 書くので正本を持たない)。
+// 5 保存量 x 8 B = 40 B/CV。1000 万 CV で +400 MB。
+static const char* const s_qaccNames[5] = {"ro", "roUx", "roUy", "roUz", "roe"};
+
+void variables::allocQAccumulator(geom_int nCells)
+{
+    if (this->qacc_d[0] != nullptr) return;   // 二重確保を防ぐ
+    for (int i = 0; i < 5; i++) {
+        gpuErrchk( cudaMalloc((void**) &(this->qacc_d[i]), nCells*sizeof(double)) );
+    }
+    gpuErrchk( cudaMalloc((void**) &(this->qaccAdopt_d), sizeof(int)) );
+    qaccResetAdoptCounter(this->qaccAdopt_d);
+    std::cout << "allocQAccumulator: FP64 影アキュムレータ " << nCells << " CV x 5 変数 ("
+              << (double)nCells*5.0*8.0/1024.0/1024.0 << " MB)\n";
+}
+
+void variables::initQAccumulatorFromQ(geom_int nCells)
+{
+    // **黙って no-op にしない** (2026-09-23): 以前はここで return していたため、確保より先に
+    // 呼ばれていたことに気づけず、Qacc=0 のまま commit されて ro≈0 → 発散した。
+    if (this->qacc_d[0] == nullptr) {
+        std::cerr << "initQAccumulatorFromQ: 正本が未確保のまま呼ばれた "
+                     "(allocQAccumulator より前に呼んでいる)\n";
+        std::exit(1);
+    }
+    flow_float* q[5];
+    for (int i = 0; i < 5; i++) q[i] = this->c_d.at(s_qaccNames[i]);
+    qaccInitFromQ(this->qacc_d, q, nCells);
+}
+
+void variables::freeQAccumulator()
+{
+    for (int i = 0; i < 5; i++) {
+        if (this->qacc_d[i] != nullptr) { cudaWrapper::cudaFree_wrapper(this->qacc_d[i]); this->qacc_d[i] = nullptr; }
+    }
+    if (this->qaccAdopt_d != nullptr) { cudaWrapper::cudaFree_wrapper(this->qaccAdopt_d); this->qaccAdopt_d = nullptr; }
+}
+
 variables::~variables() {
     for (auto& cellValName : cellValNames)
     {
@@ -217,6 +290,8 @@ variables::~variables() {
     {
         cudaWrapper::cudaFree_wrapper(this->p_d.at(planeValName));
     }
+
+    this->freeQAccumulator();
 }
 
 void variables::allocVariables(const int &useGPU , mesh& msh)
@@ -226,7 +301,7 @@ void variables::allocVariables(const int &useGPU , mesh& msh)
     {
         const char* e = std::getenv("FORGE_WI_FORCE_DIAG");
         if (!(e && std::atoi(e) != 0)) {
-            for (const char* n : {"wi_ftan", "wi_fnrm", "wi_fnrm_abs", "wi_ftan_res"}) {
+            for (const char* n : {"wi_ftan", "wi_fnrm", "wi_fnrm_abs", "wi_ftan_res", "wi_eheat", "wi_ework"}) {
                 cellValNames.remove(n);
                 output_cellValNames.remove(n);
                 c.erase(n);
@@ -294,9 +369,18 @@ void variables::allocVariables(const int &useGPU , mesh& msh)
                 || cellValName.rfind("rep_", 0) == 0 || cellValName.rfind("cond", 0) == 0
                 || cellValName.rfind("passiveFloorCorr_", 0) == 0 || cellValName.rfind("passiveLimCorr_", 0) == 0 || cellValName.rfind("roYraw", 0) == 0
                 || cellValName == "wf_irep_flag" || cellValName == "wf_sprod"
-                || cellValName == "wf_g") {
+                || cellValName == "wf_g"
+                || cellValName.rfind("lm", 0) == 0 || cellValName == "gammaEff" || cellValName == "gammaTr" || cellValName == "reTheta"
+                || cellValName == "roGamma" || cellValName == "roReth" || cellValName.find("_gamma") != std::string::npos
+                || cellValName.find("_reth") != std::string::npos || cellValName == "res_roGamma" || cellValName == "res_roReth") {
                 gpuErrchk( cudaMemset(this->c_d.at(cellValName), 0, (msh.nCells_all)*sizeof(flow_float)) );
             }
+        }
+        // SST F1 の初期値は 1 (配列の確保時に入れる。以前は buildScalarDescs が初回に 1 で埋めており、直前に計算した F1 を
+        // 上書きしていた。plan boundary-node-periodic-gradient-fix §4.2 / codex m5・実装レビュー m3)
+        if (this->c_d.count("sstF1") && this->c_d.at("sstF1") != nullptr) {
+            std::vector<flow_float> ones(msh.nCells_all, (flow_float)1.0);
+            gpuErrchk( cudaMemcpy(this->c_d.at("sstF1"), ones.data(), sizeof(flow_float)*msh.nCells_all, cudaMemcpyHostToDevice) );
         }
 
     }
@@ -763,6 +847,22 @@ void variables::readValueHDF5(std::string fname , mesh& msh,
             sp_names.push_back(Yname);
         }
         this->copyVariables_cell_H2D(sp_names);
+    }
+
+    // --- 遷移モデル: ργ, ρRe_θt を読み込む。無ければ初回の transitionPrimitive が γ=1 / 自由流相関で初期化する ---
+    if (this->transitionRegistered != 0) {
+        const bool has = file.exist("/VALUE/roGamma") && file.exist("/VALUE/roReth");
+        if (has) {
+            std::vector<geom_float> g, r;
+            file.getDataSet("/VALUE/roGamma").read(g);
+            file.getDataSet("/VALUE/roReth").read(r);
+            std::vector<flow_float>& vg = this->c.at("roGamma");
+            std::vector<flow_float>& vr = this->c.at("roReth");
+            for (geom_int i=0; i<msh.nCells; i++) { vg[i] = g[i]; vr[i] = r[i]; }
+            this->copyVariables_cell_H2D({"roGamma", "roReth"});
+        }
+        this->transitionNeedsInit = has ? 0 : 1;
+        std::cout << "[variables] transition roGamma/roReth " << (has ? "read from input" : "not in input: will be initialised on the first step") << "\n";
     }
 
     // --- 受動トレーサ: ρξ を読み込む (VALUE/roXi → VALUE/Xi×ρ → 0 の優先順) ---

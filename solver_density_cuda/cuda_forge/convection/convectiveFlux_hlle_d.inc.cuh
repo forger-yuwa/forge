@@ -130,7 +130,7 @@ __global__ void HLLE_d
         // 非平衡凝縮 (二相): 単相 roe/Ht を二相 (内部エネルギー e=(cv+gR)T-gL) に補正。差 g(cpT-L)/質量。
         // HLLE は roe (S_L S_R(roe_R-roe_L)) と Ht (ro Ht U) を両方使うため両方補正。g_total==nullptr で従来。
         if (g_total != nullptr) {
-            const CondSpeciesProps cprC = (condModel == 1) ? condProps_H2O() : condProps_N2();
+            const CondSpeciesProps cprC = (condModel == 1) ? cnd.cprops : condProps_N2();   // H2O は種 DB の気液ペア入り (cnd.cprops; plan #10)、N2 は従来の既定物性
             const flow_float dL0 = g_total[ic0]*(cp_cpg*T_cell[ic0] - (flow_float)cond_latent(cprC, (double)T_cell[ic0]));
             const flow_float dR0 = g_total[ic1]*(cp_cpg*T_cell[ic1] - (flow_float)cond_latent(cprC, (double)T_cell[ic1]));
             roe_L += ro_L*dL0;

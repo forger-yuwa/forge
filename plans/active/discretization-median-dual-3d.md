@@ -158,6 +158,8 @@ block-DPLUR の各成分が partner で加算:
 > ミラーは implicit 専用パスなので explicit free-stream (run_0004 機械ゼロ) は不変。
 
 #### 4.5.8 回転 (円周) 周期 — 運動量回転 $T(d\theta)$ の挿入 (将来対応)
+
+> **2026-09-26: 実装は [`boundary-node-rotational-periodic.md`](boundary-node-rotational-periodic.md) で行う** (ユーザ指示。スカラー・勾配・リミタ・陰解法の対角まで含めて具体化)。
 回転周期では partner $N_L$ ($\theta=0$ 側) と $N_R$ ($\theta=\Delta\theta$ 側) は**別の物理位置**で、流れは軸まわり回転
 $T(d\theta)$ で関係する (スカラー $\rho,\rho e,P,T,$ species は等しく、運動量だけ回転)。→ Cartesian の「同一 DOF」が
 「**回転で結ばれた DOF**」になる。骨格 (§4.5.3/4.5.7) は不変で、ベクトル (運動量3成分) の授受に $T$ が挟まるだけ:
