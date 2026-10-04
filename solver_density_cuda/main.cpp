@@ -2732,6 +2732,125 @@ void advanceOneStep(
 
 }
 
+// ---- 診断 D1 (plans/active/condensation-two-phase-default.md §5.1 #4; FORGE_DIAG_TP_FACES=<出力 h5>, 既定 off) -------------------
+// 組立の前処理 (assembleResidualPre: 状態射影・EOS・BC・勾配) を 1 回だけ通し、その前後の保存量の差 (クランプ・境界上書き) を記録する。
+// 続けて後処理 (assembleResidualPost) を 1 回通す: 面の拡散係数が読む μ_t (vis_turb) は後処理の turbulent_viscosity が作るので、
+// 本番の拡散カーネルが見るのと同じ状態にするため。後処理が面計算の入力 (ρ・T・P・μ・ρY・液・Q) を変えないことはバイト比較で記録する。
+// その状態から全通常面の OFF/ON 面作用素を評価して h5 に書き (twoPhaseFaceDiag_d_wrapper)、**時間更新へ進まず終了する**
+// (nStepOuter に頼らない)。周期境界は二相拡散の包絡外 (plan §4-1) で、面診断は周期集約を再現しないので拒否する。
+static int runTpFacesDiag(const char* path, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, matrix& mat_ns, variables& var,
+                          fluct_variables& fluct, point_probes& pprobes, RuntimeProfiler& profiler,
+                          ResidualCsvLogger& residual_logger, ImplicitDiagLogger& implicit_diag_logger)
+{
+    bool hasPeriodic = (msh.nPeriodicMembers > 0);
+    for (auto& bc : msh.bconds) if (bc.bcondKind == "periodic") hasPeriodic = true;
+    if (hasPeriodic) {
+        fprintf(stderr, "[tp-faces] refused: periodic boundaries are outside the two-phase diffusion envelope (plan condensation-two-phase-default §4-1) "
+                        "and the face diagnostic does not reproduce the node periodic gather\n");
+        return EXIT_FAILURE;
+    }
+    printf("[tp-faces] FORGE_DIAG_TP_FACES=%s: one pre-part + one post-part of the assembly, face operators A (OFF copy) / B (ON float + double), then exit without update\n", path);
+    StepContext s{cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger, 0};
+    const size_t nca = (size_t)msh.nCells_all, nc = (size_t)msh.nCells;
+    auto present = [&](const std::string& k) { auto it = var.c_d.find(k); return it != var.c_d.end() && it->second != nullptr; };
+    auto d2h = [&](const std::vector<std::string>& keys) {
+        std::map<std::string, std::vector<flow_float>> m;
+        for (auto& k : keys) { auto& v = m[k]; v.resize(nca); gpuErrchk( cudaMemcpy(v.data(), var.c_d[k], nca*sizeof(flow_float), cudaMemcpyDeviceToHost) ); }
+        return m;
+    };
+    // 前後差: 内点 [0, nCells) と ghost [nCells, nCells_all) を分けて、変わった要素数と最大絶対差 (NaN の出入りも 1 件と数える)
+    struct Diff { std::vector<std::string> name; std::vector<long long> nReal, nGhost; std::vector<double> mReal, mGhost; };
+    auto diffOf = [&](const std::vector<std::string>& keys, const std::map<std::string, std::vector<flow_float>>& a,
+                      const std::map<std::string, std::vector<flow_float>>& b) {
+        Diff D;
+        for (auto& k : keys) {
+            const auto& x = a.at(k); const auto& y = b.at(k);
+            long long nr = 0, ng = 0; double mr = 0.0, mg = 0.0;
+            for (size_t i = 0; i < nca; ++i) {
+                if (std::memcmp(&x[i], &y[i], sizeof(flow_float)) == 0) continue;
+                const double d = std::fabs((double)y[i] - (double)x[i]);
+                if (i < nc) { ++nr; if (std::isnan(d) || d > mr) mr = d; } else { ++ng; if (std::isnan(d) || d > mg) mg = d; }
+            }
+            D.name.push_back(k); D.nReal.push_back(nr); D.nGhost.push_back(ng); D.mReal.push_back(mr); D.mGhost.push_back(mg);
+        }
+        return D;
+    };
+    // 保存量 (存在するものだけ)
+    std::vector<std::string> cons;
+    for (const char* k : {"ro","roUx","roUy","roUz","roe","roK","roOmega","roXi","roGamma","roReth"}) if (present(k)) cons.push_back(k);
+    for (int k = 0; k < var.nSpeciesRegistered; ++k) if (present("roY" + std::to_string(k))) cons.push_back("roY" + std::to_string(k));
+    for (const auto& k : var.condMomentConsNames) if (present(k)) cons.push_back(k);
+    const auto consBefore = d2h(cons);
+    assembleResidualPre(s);
+    const auto consAfter = d2h(cons);
+    const Diff preDiff = diffOf(cons, consBefore, consAfter);
+
+    // 面計算の入力 (後処理の前後で変わらないこと) と μ_t (後処理が作る; 変わるのが正常)
+    std::vector<std::string> inp;
+    for (const char* k : {"ro","T","P","vis_lam","vis_turb","ccx","ccy","ccz"}) if (present(k)) inp.push_back(k);
+    for (int k = 0; k < var.nSpeciesRegistered; ++k) if (present("roY" + std::to_string(k))) inp.push_back("roY" + std::to_string(k));
+    for (const auto& k : var.condMomentConsNames) if (present(k)) inp.push_back(k);
+    const auto inpBefore = d2h(inp);
+    assembleResidualPost(s);
+    const auto inpAfter = d2h(inp);
+    const Diff postDiff = diffOf(inp, inpBefore, inpAfter);
+
+    TpFaceDiagData d; std::string why;
+    if (!twoPhaseFaceDiag_d_wrapper(cfg, cuda_cfg, msh, var, d, why)) {
+        fprintf(stderr, "[tp-faces] refused: %s\n", why.c_str());
+        return EXIT_FAILURE;
+    }
+
+    // h5
+    {
+        HighFive::File h5(path, HighFive::File::ReadWrite | HighFive::File::Create | HighFive::File::Truncate);
+        auto writeBlk = [&](const TpFaceDiagData::Block& B, size_t rows) {
+            if (rows == 0) return;
+            const std::vector<size_t> dims = (B.width == 1) ? std::vector<size_t>{rows} : std::vector<size_t>{rows, (size_t)B.width};
+            if (B.kind == 0)      { auto ds = h5.createDataSet<float>("/" + B.name, HighFive::DataSpace(dims));  ds.write_raw(B.f.data()); }
+            else if (B.kind == 1) { auto ds = h5.createDataSet<double>("/" + B.name, HighFive::DataSpace(dims)); ds.write_raw(B.d.data()); }
+            else                  { auto ds = h5.createDataSet<int>("/" + B.name, HighFive::DataSpace(dims));    ds.write_raw(B.i.data()); }
+        };
+        for (const auto& B : d.face) writeBlk(B, (size_t)d.nFaces);
+        for (const auto& B : d.node) writeBlk(B, (size_t)d.nNodes);
+        auto writeDiff = [&](const std::string& g, const Diff& D) {
+            h5.createDataSet("/" + g + "/names", D.name);
+            h5.createDataSet("/" + g + "/count_real", D.nReal); h5.createDataSet("/" + g + "/maxabs_real", D.mReal);
+            h5.createDataSet("/" + g + "/count_ghost", D.nGhost); h5.createDataSet("/" + g + "/maxabs_ghost", D.mGhost);
+        };
+        writeDiff("pre", preDiff);
+        writeDiff("post_inputs", postDiff);
+        const int iw = d.iw, ns = d.nSpecies, nq = 3 /* Q2, Q1, Q0 (TP_NQ) */, dm = cfg.speciesDiffusionMethod, req = cfg.condTwoPhaseDiffusion;
+        const long long nF = d.nFaces, nN = d.nNodes;
+        const double Sc = cfg.Sc, Sct = cfg.Sc_t, eps32 = 1.1920928955078125e-7;
+        const int hasWd = var.c_d.count("wall_dist") ? 1 : 0;
+        const std::string sign = "J > 0 = into cell ic0 (face-integrated; res[ic0] += J, res[ic1] -= J)";
+        const std::string skip = "face/skip: 0 evaluated, 1 node boundary half-face (diffusion not added by either operator), 2/3 OFF/ON skip disagreement";
+        h5.createAttribute("nSpecies", ns); h5.createAttribute("iw", iw); h5.createAttribute("nMoments", nq);
+        h5.createAttribute("nFaces", nF); h5.createAttribute("nNodes", nN);
+        h5.createAttribute("speciesDiffusionMethod", dm); h5.createAttribute("Sc", Sc); h5.createAttribute("Sc_t", Sct);
+        h5.createAttribute("condTwoPhaseDiffusion_requested", req);
+        h5.createAttribute("twophase_diffusion_state", cfg.condTwoPhaseDiffusionState);
+        h5.createAttribute("discretization", cfg.discretization);
+        h5.createAttribute("input_value_file", cfg.valueFileName);
+        h5.createAttribute("species_names", cfg.speciesNames);
+        h5.createAttribute("eps32", eps32); h5.createAttribute("has_wall_dist", hasWd);
+        h5.createAttribute("sign_convention", sign); h5.createAttribute("skip_codes", skip);
+        h5.createAttribute("summary", d.summary);
+    }
+    for (size_t i = 0; i < preDiff.name.size(); ++i)
+        printf("[tp-faces] pre-part change %-10s real %lld (max|d| %.3e)  ghost %lld (max|d| %.3e)\n", preDiff.name[i].c_str(),
+               preDiff.nReal[i], preDiff.mReal[i], preDiff.nGhost[i], preDiff.mGhost[i]);
+    for (size_t i = 0; i < postDiff.name.size(); ++i)
+        if (postDiff.nReal[i] + postDiff.nGhost[i] > 0)
+            printf("[tp-faces] post-part changed face input %-10s real %lld  ghost %lld%s\n", postDiff.name[i].c_str(),
+                   postDiff.nReal[i], postDiff.nGhost[i], (postDiff.name[i] == "vis_turb") ? " (expected: mu_t is built in the post-part)" : "  ** unexpected **");
+    for (const auto& l : d.summary) printf("%s\n", l.c_str());
+    printf("[tp-faces] wrote %s (%ld faces, %ld nodes); exiting without any update\n", path, d.nFaces, d.nNodes);
+    fflush(stdout);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     // --resolve-species: 化学種の解決済み記録だけ書いて終了 (GPU 不使用; plan thermophysics-solver-owned-species-db §4.3)
     for (int i = 1; i < argc; ++i) {
@@ -2853,6 +2972,11 @@ int main(int argc, char** argv) {
         exit(1);
     }
     ResidualCsvLogger residual_logger("residual_history.csv", cfg, msh, var);
+
+    // 診断 D1 (FORGE_DIAG_TP_FACES=<出力 h5>; 既定 off): 組立を 1 回だけ通した状態の面作用素 A/B を書いて終了する (時間更新・res_0 出力なし)。
+    if (const char* e = getenv("FORGE_DIAG_TP_FACES"); e != nullptr && *e != '\0') {
+        return runTpFacesDiag(e, cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger);
+    }
 
     writeInitialOutputs(cfg , msh , var);
 
