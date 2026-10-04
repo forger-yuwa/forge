@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `condensation`
-- **status**: `draft`
+- **status**: `in_progress`
 - **related_docs**:
   - `methods/condensation.md` §7c (二相拡散の現在仕様)
   - `procedures/solver-settings.md`・`procedures/recommended-settings.md` (既定変更の記載先)
@@ -44,54 +44,67 @@
 
 ## 4. 設計方針
 
-1. **既定の意味**: `condTwoPhaseDiffusion` 省略時 = 1。キー ON の実効条件は `condTwoPhaseDiffusionValidate` の包絡: TP carrier (`condGasSpecies ≥ 0`、`thermalMethod 2`、`nSpecies ≥ 2`)・`viscMethod ≠ 0`・`unsteady 0, timeIntegration 11`・`speciesImplicitCoupling ≠ 2`・`passiveScalarScheme 1`・`condEquilibrium 0`・`condLimiterMode 1`・`nCondSpecies 1`。
-2. **包絡外の 3 分類** (「同じ物理が構成で違う式になる」危険を、黙って OFF に落ちる構成を作らないことで防ぐ):
-   - (a) **物理が同一 → 不活性 (INFO)**: `condensation 0`、`viscMethod 0` (拡散自体が無い)。ON/OFF でビット一致。
-   - (b) **モデルが構造的に適用できない → 不活性 + 毎回 WARNING + 出力に記録**: CPG carrier・pure 凝縮。「液は拡散しない (旧近似)」を `[twophase]` 行と `res_*.h5` 属性 (`twophase_diffusion_effective = 0`) に書く。
-   - (c) **実装が未対応 → エラー終了** (黙って OFF にしない): dual-time・RK・coupling 2・平衡凝縮 (g が輸送変数なら; 代数量なら (b) — 要確認)・凝縮種 2 以上。メッセージに「旧作用素で回すなら `condTwoPhaseDiffusion: 0` を明示」。明示 0 は起動時 WARNING「legacy operator: liquid not diffused」。
+1. **既定の意味と包絡**: `condTwoPhaseDiffusion` 省略時 = 1。キー ON が実際に作動する包絡 (検証済み・包絡に含めるもの):
+
+   | 項目 | 包絡 | 検証の状態 |
+   | --- | --- | --- |
+   | 熱物性・凝縮形 | TP carrier (`condGasSpecies ≥ 0`、`thermalMethod 2`、`nSpecies ≥ 2`)、非平衡 (`condEquilibrium 0`)、`nCondSpecies 1`、`condLimiterMode 1` | case/16 で検証 |
+   | 方程式 | NS (`viscMethod ≠ 0`)、定常 (`unsteady 0`、`timeIntegration 11`) | 同上 |
+   | 離散化・幾何 | node、平面 2D / 3D、**非周期** | 平面 2D のみ実行検証 (3D は未検証と明記) |
+   | 化学種の更新 | `speciesImplicitCoupling` 1 (検証済み)・0 (包絡に含めるが実行検証なし; 二相更新は非水種の更新方式に依存しない)、`speciesFaceReconstruction` 2 (検証済み)・0 (同上) | 表のとおり |
+   | 受動種 | `passiveScalarScheme 1` | 検証済み |
+
+   **軸対称・周期は、二相拡散が実際に作動する ON の NS 試験が通るまで (c) (エラー)** とする (既存の入力が無い: case/16 は平面、case/44 の軸対称は Euler で不活性、周期の凝縮ケースは無い)。cell は「未検証」を起動 WARNING で明記。
+2. **判定表 (省略 / 明示 0 / 明示 1 × 実効状態)** をソルバ・`check_solver_config.py`・`res_*.h5` 属性・`stage_manifest.json` で共有する。実効状態は次の 4 つ:
+   - **active**: 包絡内。省略・明示 1 で作動。明示 0 は旧作用素 + 起動 WARNING「legacy operator: liquid not diffused」。
+   - **inactive-(a) 物理が同一**: `condensation 0`、`viscMethod 0` (拡散自体が無い)。どの指定でもビット一致、INFO。dual-time + Euler もここ (FAIL にしない)。
+   - **inactive-(b) モデルが構造的に適用できない**: CPG carrier・pure 凝縮・**平衡凝縮の EOS 拘束形 (`condEquilibrium 2`、g は EOS の状態量で `res_rog = 0`)**。不活性 + 毎回 WARNING + `twophase_diffusion_effective = 0` を記録。**「物理が同一」とは書かない**: 既定経路のエネルギー流束は液を蒸気として数え (h_v J_w、−L·J_t(g) が無い)、分子拡散は ∇Y_w 駆動のままという近似が残る。
+   - **unsupported-(c) 実装が未対応 → エラー終了**: dual-time・RK・`speciesImplicitCoupling 2`・**平衡凝縮の緩和形 (`condEquilibrium 1`、g を輸送 + 緩和ソース)**・凝縮種 2 以上・軸対称・周期 (実効判定で。省略・明示 1 のとき)。メッセージに「旧作用素で回すなら `condTwoPhaseDiffusion: 0` を明示」。
 3. **ON の既定の組を検証済みに揃える**: ON のとき `condTwoPhaseSolver` 既定 1・`condTwoPhaseNonnegLimit` 既定 0。点対角・非負 θ は診断用 opt-in として残す (削除しない)。
-4. **実効作用素の記録**: `[twophase]` 起動行・`res_*.h5` 属性・`stage_manifest.json` の方程式署名に実効の `condTwoPhaseDiffusion` を入れる (今の `tools/stage_manifest.py:73` は二相キーを見ないので、OFF の場から ON で継続すると同一区間に連結されうる)。`check_solver_config.py` は 0 明示を WARN、dual-time + ON を FAIL。
-5. **dual-time 拡張 (後段 S2)** — sub-iter が収束したとき BDF 解が nSub・ω・θ に依存しない契約:
-   - 更新順は定常と同じ。R_v = R_w − R_g と D_v は BDF 対角込みで線形整合 (`speciesTransport_d.cu:1645-1653`、`twoPhaseDiffusion_d.cuh:149-154`)。
-   - θ_thr (dg_max/dT_max) は**各物理 step の初回 sub-iter だけ** (既存の受動種と同じ規則、`condensationTransport_d.cu:466`)。
-   - **緩和は dual-time では使わない**: `condTwoPhaseRelax < 1` + dual-time は起動拒否、`implicitRelax < 1` は既存どおり FAIL (#26)。
-   - θ_vg と commit の床は sub-iter 内では「記録付きの最後の砦」。作動量を `[twophase-corr-gate]` に積算し、総量比 ≤1e-6 を要求 (作動 = 不動点が動いた証拠)。有界化の本体は物理 step 末尾の FCT。
-   - FCT: 液 g と Q2/Q1/Q0 を既存の受動種 FCT に乗せ、二相カーネルの面の乱流係数を **F_H と F_L の両方**に入れる (今の低次作用素の拡散はトレーサ 1 本だけ `speciesTransport_d.cu:1808`)。総水分 ρY_w は化学種経路のまま FCT を通さない。蒸気の非負は step 末尾の実現可能性射影 (記録) に任せる。
+4. **実効作用素の記録**: `[twophase]` 起動行・`res_*.h5` 属性・`stage_manifest.json` の方程式署名に実効状態を入れる (今の `tools/stage_manifest.py:73` は二相キーを見ないので、OFF の場から ON で継続すると同一区間に連結されうる)。
+5. **dual-time は本 plan の範囲外 (後継 plan に分離、codex plan M3)**: 本 plan では起動拒否 (c) を維持する。後継 plan の設計要件:
+   - 蒸気・液・他の気相種を**連成して制限**し、総水分は蒸気 + 液から戻す (「液だけ FCT・蒸気は射影」は撤回: 総水分 [0.10, 0.20]・液 [0.09, 0.11] に保存的補正 [+0.02, −0.02] で蒸気が負になり、clamp `condensationRealizability_d.cuh:125-127` が液を削って総液量 −5 %。FCT の制限係数は成分別で ρY_w を見ない `passiveFct_d.cuh:290-300`)。
+   - エネルギー流束と BDF 履歴 (G/H) の定義、FCT の作動条件 (SFR ≥ 2・SLAU、`speciesTransport_d.cu:1781`) を包絡に明記。
+   - #26 の教訓を持ち越す: 緩和 (DPLUR の ω と `condTwoPhaseRelax`) は dual-time で使わない、θ_thr は各物理 step の初回 sub-iter だけ、θ_vg・床は記録して収支で判定。検証は nSub 倍増差・3 水準次数・sub-iter 低下・収支 (旧 G4 の骨子) + 緩和の A/B を 1 組 (|q(ω=0.7,nSub) − q(ω=1,2nSub)| が |q(ω=1,nSub) − q(ω=1,2nSub)| の 2 倍超なら「dual-time で緩和は使えない」と書く)。
 6. **既定変更の手順**: `solver-settings.md` §9 旧設定に「0 = 既定変更日以前の作用素」を日付付きで、`recommended-settings.md` の凝縮 NS レシピに ON 既定と検証済みの組を明記。case README の該当 run 行に「既定 ON 後の再現には 0 を明示」。OFF の場から ON での restart は同一メッシュ restart として許し、manifest では新しい区間に切る。
 
 ## 5. 実装ステップ
 
-段 S0 → S1 → (S2) の順。各段の合格は §6。
+段 S0 → S1 の順。各段の合格は §6。dual-time は後継 plan。
 
 ### 5.1 残作業 (優先順)
 
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
-| 1 | codex plan 段レビュー | §4・§6 を `codex_review.py --stage plan` で点検し、採否を §6.1 と本表へ | F |
-| 2 | S0: 既定の組・記録・ツール | ON 時の `condTwoPhaseSolver` 既定 1・`condTwoPhaseNonnegLimit` 既定 0、包絡外 3 分類のメッセージと属性、`stage_manifest` の方程式署名、`check_solver_config.py`。**`condTwoPhaseDiffusion` の既定はまだ 0**。合格: G0 (旧 config のビット不変 = ノイズ床内) と負例試験 | O |
-| 3 | S1-a: G1 (0 step 作用素 A/B) | 親 #4k(1)。`run_0520` res_16000 を共通入力に、拡散作用素だけ A=OFF / B=ON を forge の診断出力で評価。合格は §6 G1 | O (解釈 F) |
-| 4 | S1-b: G2 (生産レシピ ON) | case/16、run_0482 由来 IC、cfl_pseudo 4〜6 + implicitRelax 0.7 + nStepInner 5 + Solver 1 + nn0。合格は §6 G2・G3 | O (解釈 F) |
-| 5 | S1-c: 既定を ON に | G0〜G3 全 PASS のときだけ。docs (§4-6)・変化量の転記 | O |
-| 6 | S2: dual-time 拡張 | §4-5 の設計。μt > 0 の NS 凝縮 dual-time ケースを用意 (case/44 は Euler なので不可)。合格は §6 G4 | F (設計) / O |
-| 7 | 平衡凝縮の分類 | `condEquilibrium 1/2` で g が輸送変数か代数量かを確認し、§4-2 の (b)/(c) に振り分ける | O |
+| 1 | ~~codex plan 段レビュー~~ | **完了 2026-10-04**: GO-with-changes (C0/M5/m2)、採否は diagnostician に諮り全件採用 (M1・m6・m7 は内容を修正して採用)。§4・§5.1・§6 を改訂 (§6.1) | F (完了) |
+| 2 | S0-前提: 平衡凝縮の分類 | **確定 (2026-10-04、コード確認 + diagnostician)**: `condEquilibrium 1` → (c)、`condEquilibrium 2` → (b) (§4-2)。判定表を S0 で実装 | O (完了) |
+| 3 | S0: 既定の組・判定表・記録・ツール | ON 時の `condTwoPhaseSolver` 既定 1・`condTwoPhaseNonnegLimit` 既定 0、§4-2 の判定表 (ソルバ・`check_solver_config.py`・h5 属性・manifest で共有)。**`condTwoPhaseDiffusion` の既定はまだ 0**。合格: G0 (旧 config のノイズ床内) と G5 | O |
+| 4 | S1-a: G1 (0 step 作用素 A/B) + G3 の閉じた収支 | 親 #4k(1)(2)。`run_0520` res_16000 を共通入力に、拡散作用素だけ A=OFF / B=ON を forge の診断出力で評価し、同じ診断経路で閉じた収支も出す (新しい run なし)。合格は §6 G1・G3 | O (解釈 F) |
+| 5 | S1-b: G2 (生産レシピ ON) | case/16、run_0482 由来 IC、cfl_pseudo 4 + implicitRelax 0.7 + **nStepInner 4** (生産レシピ) + Solver 1 + nn0。先に同条件反復でノイズを測る。合格は §6 G2 | O (解釈 F) |
+| 6 | S1-c: 既定を ON に | G0〜G3・G5 全 PASS のときだけ。docs (§4-6)・変化量の転記。G0 をもう一度 | O |
+| 7 | 軸対称・周期の ON NS 試験 | 包絡に入れるための試験ケースを用意 (ケース未定; 軸対称 NS の TP carrier 凝縮、node 周期の凝縮)。通るまで (c) | O (ケース選定 F) |
+| 8 | 平衡形 (EOS 拘束形) の二相輸送 | `condEquilibrium 2` のエネルギー流束 (−L·J_t(g)) と ∇z_v 駆動の扱いを別途設計 (g が EOS で再決定されるので非平衡形の非分割更新は使えない。親 §4.2 の「エネルギーだけ直すのは禁止」は g を輸送する非平衡形の話) | F |
+| 9 | dual-time の後継 plan | §4-5 の要件で起票 | F |
 
 ## 6. 検証
 
 事前登録 (結果を見てから変えない)。
 
-- **G0 不活性クラスの不変**: case/44 dual-time Euler (`run_0487` 系 config)・case/34 CPG・case/16 乾き (`run_0524` config) を変更前後のバイナリで、親 #5a と同じプロトコル (旧 ×3・新 ×2、短 step、`check_field_regress` ノイズ床 × 2) → PASS。S0 の後と S1-c の後の 2 回。
-- **G1 (0 step 作用素 A/B、既定化のゲート)**: (i) A の総水分流束が乱流域で |J_w^A| ≤ 0.05·max|J_l^B| (旧経路は ∇Y_w ≈ 0 で流束ほぼ 0)、(ii) B の J_l = −(μt/Sc_t)∇g が格納場から float64 で組んだ値と 8ε₃₂ で一致し、L·|J_l| / 熱流束の p50 が `analyze_liquid_diffusion_error.py` の 0.77 の 0.5〜2 倍、(iii) B の分子蒸気流束が ∇z_v で評価した値と一致。**どれかが外れたら既定化を止める** (符号・大きさの説明を後から変えない)。
-- **G2 生産レシピでの ON**: 親 #4j の (A)〜(D) (7 報告量 STEADY `--tail 0.5 --drift 0.0001 --osc 0.0001 --min-snaps 21`、非有限/負値 0、RISING 0、corr-gate ≤ κ) + NaN 0。加えて**レシピ感度 < 既定化の効果**: 7 量の |ON@生産 − ON@cfl2 (`run_0521`)| ≤ 0.1 × |ON − OFF| (親 #4j の差: g_exit_mw 3.24 %、pw42 0.78 %、Tw −2.44 K など)。超えたら「レシピ依存」として既定化を保留。
-- **G3 収支**: ON run の `[twophase-corr-gate]` commit・floor・clamp ≤ κ、射影は記録。再正規化 max|f−1| は OFF と同程度 (記録)。
-- **G4 dual-time (S2)**: species-passive-scalar-unification #28 のゲートを流用 — nSub 倍増比 ≤0.1、3 水準次数 (流れ・化学種 BDF2 1.7–2.3、受動種 ≥1.3)、`rms_roYv` を含む全列の sub-iter 低下 ≥2 桁、`check_passive_budget.py` PASS (floor+lim+射影+二相 withheld/vround の総量比 ≤1e-6)、**ω = 1 固定**。緩和の A/B は診断として 1 組だけ記録: |q(ω=0.7, nSub) − q(ω=1, 2nSub)| が |q(ω=1, nSub) − q(ω=1, 2nSub)| の 2 倍を超えたら「dual-time で緩和は使えない」を本 plan に書く (#26 の再現)。
-- **G5 記録・ツール**: 実効作用素が `[twophase]`・h5 属性・manifest に出る。`check_solver_config.py` の負例試験 (dual-time + ON → FAIL、0 明示 → WARN)。
+- **G0 不活性クラスの不変**: case/44 dual-time Euler 凝縮 `case/44.vitiated_air_wt/run_0482_prune_regress_float` (同条件反復 `run_0483_prune_regress_float_rep` をノイズ床に)・case/34 CPG・case/16 乾き (`case/16.nozzle_wys/run_0524_floor_dry_L1` の config) を変更前後のバイナリで、親 #5a と同じプロトコル (旧 ×3・新 ×2、短 step、`check_field_regress` ノイズ床 × 2) → PASS。S0 の後と S1-c の後の 2 回。入力 (config・IC・メッシュ) は完全パスで固定し、番号だけで参照しない。
+- **G1 (0 step 作用素 A/B、既定化のゲート)**: 同一面・同一格納入力・同一係数で独立な double 参照を組む。絶対誤差尺度 = 8ε₃₂ × (差し引き前の項の大きさ: ρ_g,f D abs(z)・c_t abs(g/ρ) など) × 面の幾何量 (流束自身を分母にしない — 小さい勾配では差し引きの丸めが支配し、正しい演算でも相対 0.3 ずれる)。評価領域・符号規約・面積重みを事前に固定。
+  合格: (i) A の総水分流束が乱流域で abs(J_w^A) ≤ 0.05·max abs(J_l^B)、(ii) B の J_l = −(μt/Sc_t)∇g と分子蒸気流束 (∇z_v) が double 参照と上の尺度内で一致。**外れたら既定化を止める**。0.77 (`analyze_liquid_diffusion_error.py` の節点回復勾配の統計) は参考値で合否に使わない。
+- **G2 生産レシピでの ON**: 親 #4j の (A)〜(D) (7 報告量 STEADY `--tail 0.5 --drift 0.0001 --osc 0.0001 --min-snaps 21`、非有限/負値 0、RISING 0、corr-gate ≤ κ) + NaN 0。
+  **レシピ感度**: 先に同条件反復 (2 本以上) で量ごとのノイズ σ を測る。abs(ON−OFF) > 3σ の量だけに「abs(ON@生産 − ON@cfl2 `run_0521`) ≤ 0.1 × abs(ON − OFF)」を課す。それ以外の量は絶対許容 (onset ±0.01 mm、その他はノイズ × 3)。分解能が足りなければ「判定不能」(既定化は保留、「レシピ依存」とは書かない)。7 量の抽出マスク・断面の数値照合を前提に入れる。
+- **G3 閉じた収支 (親 #4k(2))**: ON・OFF それぞれ同じ制御体積で、移流 + 拡散の境界流束・相変化ソース (正負別)・残差・成分別 (ρY_w, ρv, ρg, ρQn) の数値補正 (再正規化・射影・床・clamp) を積算し、収支の不整合 < 観測された液流束差の 10 %。加えて `[twophase-corr-gate]` の commit・floor・clamp ≤ κ。準定常性だけで輸送の収支を代替しない。
+- **G5 記録・ツール (既定変更前の必須ゲート)**: §4-2 の判定表どおりに実効状態が `[twophase]`・h5 属性・manifest に出る。`check_solver_config.py` の負例試験 (dual-time + 凝縮 NS + 省略/明示 1 → FAIL、dual-time + Euler → 通る、明示 0 → WARN)。
 - **外部参照の限定**: CFD レベルの外部参照 (解析解・文献・SU2) は無い。物理の向きの根拠は (a) 単体のエネルギー接線試験 (親 plan、済)、(b) G1、(c) 作用素の構造 (乱流拡散が全輸送量で共通、分子拡散は気相内で Σj=0) の 3 つまでと明記する。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
-| diagnostician (§4・§6 の方針) | `2026-10-04` | ブリーフ [`notes/reviews/briefs/2026-10-04-twophase-default-plan.md`](../../notes/reviews/briefs/2026-10-04-twophase-default-plan.md)、応答の要旨は §3・§4・§6 | 段階既定化 (定常包絡で ON、包絡外は 3 分類)、既定の組を検証済みに揃える、G1・G2 を既定化のゲートに、dual-time は後段 | 全件採用 (本 plan の §3〜§6) |
+| diagnostician (§4・§6 の方針) | `2026-10-04` | ブリーフ [`notes/reviews/briefs/2026-10-04-twophase-default-plan.md`](../../notes/reviews/briefs/2026-10-04-twophase-default-plan.md)、応答の要旨は §3・§4・§6 | 段階既定化 (定常包絡で ON、包絡外は分類)、既定の組を検証済みに揃える、G1・G2 を既定化のゲートに、dual-time は後段 | 全件採用 |
+| plan | `2026-10-04` | [`notes/reviews/2026-10-04-condensation-two-phase-default-plan.md`](../../notes/reviews/2026-10-04-condensation-two-phase-default-plan.md) | GO-with-changes, C0/M5/m2 | 採否は diagnostician に諮った (2026-10-04、全件採用・M1/m6/m7 は修正して採用)。M1 包絡を検証範囲に絞る (軸対称・周期は (c)、cell は未検証明記、coupling/SFR を表で区別、G2 は nStepInner 4) → §4-1・#7。M2 G3 に閉じた収支 → §6 G3・#4。M3 dual-time を後継 plan に分離・「液だけ FCT」撤回 → §4-5・#9。M4 G1 を double 参照と絶対誤差尺度に → §6 G1。M5 G2 はノイズ σ を先に測り有意な量だけに 10 % 条件 → §6 G2・#5。m6 分類を S0 前提に・判定表・G5 を必須に → §4-2・#2・#3。m7 G0 の参照 run を完全パスに (case/44 `run_0482_prune_regress_float` と反復 `run_0483`) → §6 G0 |
 
 ## 7. 影響範囲
 
@@ -101,12 +114,13 @@
 
 ## 8. 完了条件
 
-- [ ] S0・S1 を実施し、G0〜G3・G5 を満たして既定を ON にした (または G1/G2 の FAIL で既定化を止めた記録)
-- [ ] S2 (dual-time) は別途 G4 で判定 (本 plan で行うか後継に送るかを S1 完了時に決める)
+- [ ] S0・S1 を実施し、G0〜G3・G5 を満たして既定を ON にした (または G1/G2 の FAIL・判定不能で既定化を止めた記録)
+- [ ] dual-time の後継 plan を起票 (#9)
 - [ ] 関連 docs を更新済み
 - [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録し、Critical / Major の採否を残作業表に反映済み
 - [ ] `status` を `done` にし §9 に変更ログ、`plans/accepted/` へ移動、`plans/README.md` を同期
 
 ## 9. 変更ログ
 
+- `2026-10-04` — codex plan 段 (GO-with-changes, M5/m2) を diagnostician に諮って全件採用: 包絡を検証範囲に絞る (軸対称・周期は (c))、判定表、G1 の誤差尺度、G2 のノイズ基準、G3 の閉じた収支、dual-time を後継 plan に分離、平衡凝縮の分類確定 (1 → (c)、2 → (b))。
 - `2026-10-04` — 起票。ユーザ決定 (二相拡散を既定にしていく) と diagnostician の判断 (段階既定化、既定の組を検証済みに揃える、dual-time は後段で緩和を使わない設計) を §3〜§6 に反映。
