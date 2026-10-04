@@ -402,8 +402,10 @@ void condensationTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
     if (passiveSchemeEnabled(cfg)) {
         // 受動種経路 (§4.3): S3 面値 (SLAU) または 1 次風上。res_/transport_diag/src_jac のゼロ初期化と順序 (移流→ソース→更新) は同じ。
         passiveAdvection_d_wrapper(cfg, cuda_cfg, msh, var, passive_moment_index0(), (int)var.condMomentConsNames.size());
+        tpoSnap("cm_adv");    // 診断 G3-a: 残差の写し (記録中のみ; 既定は何もしない)
         // 二相拡散 (#4e): モーメントの残差ゼロ化の後に、化学種・液・Q・エネルギーへ同じ面流束を足す (無効構成は no-op)。
         twoPhaseDiffusion_d_wrapper(cfg, cuda_cfg, msh, var);
+        tpoSnap("tp_diff");   // 診断 G3-a (記録中のみ; 二相 OFF では cm_adv と同じ)
         return;
     }
 
@@ -1581,5 +1583,112 @@ bool tpuCollect(TpuDiagData& out)
     gpuErrchk( cudaMemcpy(out.pre.data(), g_tpu.buf[0], cnt*sizeof(double), cudaMemcpyDeviceToHost) );
     gpuErrchk( cudaMemcpy(out.upd.data(), g_tpu.buf[1], cnt*sizeof(double), cudaMemcpyDeviceToHost) );
     out.snapLabel = g_tpu.snapLabel; out.snapPhase = g_tpu.snapPhase; out.snap = g_tpu.snap;
+    return true;
+}
+
+// =============================================================================
+// 診断 G3-a (作用素の収支; FORGE_DIAG_TP_OPERATOR=<出力 h5>、既定 off; plan condensation-two-phase-default §5.1 #4g3・#4pjg)。
+//   main の runTpOperatorDiag が tpoBegin → tpoArm(true) [組立 1 回] → tpoArm(false) → tpoCollect の順に呼ぶ。
+//   本番カーネルは tpoFace() / tpoSrcSlots() が有効なときだけ、実際に残差へ足した値をスロットへ写す (演算は変えない)。
+//   通常の計算では tpoBegin が呼ばれないので記録ポインタは無効、tpoSnap は何もしない。
+// =============================================================================
+namespace {
+struct TpoState {
+    bool on = false, armed = false;
+    geom_int n = 0, nF = 0; int nComp = 0; int iw = -1;
+    double* face = nullptr;          // [2][nComp][nF]
+    int* code = nullptr;             // [TPO_NK][nF]
+    double* src = nullptr;           // [TPO_NSRC][n]
+    variables* var = nullptr;
+    std::vector<std::string> cons, res;   // 成分の保存量名・残差名
+    std::vector<std::string> snapLabel; std::vector<std::vector<float>> snap;
+};
+TpoState g_tpo;
+}  // namespace
+
+bool tpoBegin(solverConfig& cfg, mesh& msh, variables& var, std::string& why)
+{
+    // 記録点を入れた経路だけを通す (それ以外は記録が欠けて収支が閉じないので、黙って進めずに拒否する)
+    if (!condensationEnabled(var) || var.nCondSpeciesRegistered != 1) { why = "condensation with exactly one condensing species is required"; return false; }
+    if (cfg.condGasSpecies < 0 || cfg.condGasSpecies >= var.nSpeciesRegistered || cfg.thermalMethod != 2 || var.nSpeciesRegistered < 2) {
+        why = "TP carrier condensation (0 <= condGasSpecies < nSpecies, thermalMethod 2) is required"; return false;
+    }
+    if (cfg.discretization != "node") { why = "node discretization only (the instrumented and validated path)"; return false; }
+    if (cfg.passiveScalarScheme != 1) { why = "passiveScalarScheme 1 only (the moment advection is instrumented in the passive path)"; return false; }
+    if (cfg.speciesFaceReconstruction < 2 || !(cfg.solver == "SLAU" || cfg.solver == "SLAU2")) {
+        why = "speciesFaceReconstruction >= 2 with SLAU/SLAU2 only (the S3 face-value advection kernel is the instrumented one)"; return false;
+    }
+    if (cfg.condEquilibrium != 0) { why = "non-equilibrium condensation only (the equilibrium source branches are not instrumented)"; return false; }
+    g_tpo = TpoState{};
+    g_tpo.n = msh.nCells; g_tpo.nF = msh.nNormal_halo_Planes; g_tpo.iw = cfg.condGasSpecies; g_tpo.var = &var;
+    g_tpo.nComp = TPO_NC_CORE + (var.nSpeciesRegistered - 1);
+    g_tpo.cons = {"roY" + std::to_string(cfg.condGasSpecies), "rog_0", "roQ2_0", "roQ1_0", "roQ0_0"};
+    for (int s = 0; s < var.nSpeciesRegistered; ++s) if (s != cfg.condGasSpecies) g_tpo.cons.push_back("roY" + std::to_string(s));
+    for (const auto& k : g_tpo.cons) {
+        g_tpo.res.push_back("res_" + k);
+        for (const std::string& kk : {k, std::string("res_") + k}) {
+            auto it = var.c_d.find(kk);
+            if (it == var.c_d.end() || it->second == nullptr) { why = "array " + kk + " is not registered"; return false; }
+        }
+    }
+    const size_t fb = 2*(size_t)g_tpo.nComp*(size_t)g_tpo.nF*sizeof(double);
+    const size_t cb = (size_t)TPO_NK*(size_t)g_tpo.nF*sizeof(int);
+    const size_t sb = (size_t)TPO_NSRC*(size_t)g_tpo.n*sizeof(double);
+    gpuErrchk( cudaMalloc((void**)&g_tpo.face, fb) ); gpuErrchk( cudaMemset(g_tpo.face, 0xFF, fb) );   // 全ビット 1 = NaN
+    gpuErrchk( cudaMalloc((void**)&g_tpo.code, cb) ); gpuErrchk( cudaMemset(g_tpo.code, 0xFF, cb) );   // −1 = 未実行
+    gpuErrchk( cudaMalloc((void**)&g_tpo.src, sb) );  gpuErrchk( cudaMemset(g_tpo.src, 0xFF, sb) );    // NaN = ソース kernel が書いていない
+    g_tpo.on = true;
+    std::printf("[tp-operator] slots: faces %ld x %d components x 2 kinds, codes %d x %ld, source %d x %ld nodes (%.1f MB)\n",
+                (long)g_tpo.nF, g_tpo.nComp, TPO_NK, (long)g_tpo.nF, TPO_NSRC, (long)g_tpo.n, (double)(fb + cb + sb)/1.0e6);
+    return true;
+}
+
+void tpoArm(bool on) { g_tpo.armed = g_tpo.on && on; }
+
+TpoFacePtr tpoFace(int kernel, int kind, int compBase)
+{
+    TpoFacePtr t;   // 既定 = 無効
+    if (!g_tpo.armed) return t;
+    t.val = g_tpo.face; t.code = g_tpo.code; t.nF = g_tpo.nF; t.nComp = g_tpo.nComp;
+    t.kind = kind; t.kernel = kernel; t.compBase = compBase; t.iw = g_tpo.iw;
+    return t;
+}
+
+double* tpoSrcSlots() { return g_tpo.armed ? g_tpo.src : nullptr; }
+
+void tpoSnap(const char* label)
+{
+    if (!g_tpo.armed) return;
+    gpuErrchk( cudaDeviceSynchronize() );
+    const size_t n = (size_t)g_tpo.n;
+    std::vector<float> h((size_t)g_tpo.nComp*n);
+    for (int c = 0; c < g_tpo.nComp; ++c)
+        gpuErrchk( cudaMemcpy(h.data() + (size_t)c*n, g_tpo.var->c_d[g_tpo.res[c]], n*sizeof(float), cudaMemcpyDeviceToHost) );
+    g_tpo.snapLabel.push_back(label); g_tpo.snap.push_back(std::move(h));
+}
+
+bool tpoCollect(mesh& msh, TpoDiagData& out)
+{
+    if (!g_tpo.on) return false;
+    gpuErrchk( cudaDeviceSynchronize() );
+    const size_t n = (size_t)g_tpo.n, nF = (size_t)g_tpo.nF;
+    out.n = (long)n; out.nF = (long)nF; out.nComp = g_tpo.nComp; out.iw = g_tpo.iw;
+    out.compCons = g_tpo.cons; out.compRes = g_tpo.res;
+    out.faceVal.resize(2*(size_t)g_tpo.nComp*nF);
+    out.faceCode.resize((size_t)TPO_NK*nF);
+    out.src.resize((size_t)TPO_NSRC*n);
+    gpuErrchk( cudaMemcpy(out.faceVal.data(), g_tpo.face, out.faceVal.size()*sizeof(double), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(out.faceCode.data(), g_tpo.code, out.faceCode.size()*sizeof(int), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(out.src.data(), g_tpo.src, out.src.size()*sizeof(double), cudaMemcpyDeviceToHost) );
+    // 面の所属: ih → ip (normal_halo_planes)、ip → (ic0, ic1) (map_plane_cells; ic ≥ nCells は ghost)
+    std::vector<geom_int> nh(nF), pc(2*(size_t)msh.nPlanes);
+    gpuErrchk( cudaMemcpy(nh.data(), msh.normal_halo_planes_d, nF*sizeof(geom_int), cudaMemcpyDeviceToHost) );
+    gpuErrchk( cudaMemcpy(pc.data(), msh.map_plane_cells_d, pc.size()*sizeof(geom_int), cudaMemcpyDeviceToHost) );
+    out.faceIp.resize(nF); out.faceIc0.resize(nF); out.faceIc1.resize(nF);
+    for (size_t ih = 0; ih < nF; ++ih) {
+        const geom_int ip = nh[ih];
+        out.faceIp[ih] = (int)ip; out.faceIc0[ih] = (int)pc[2*(size_t)ip]; out.faceIc1[ih] = (int)pc[2*(size_t)ip + 1];
+    }
+    out.snapLabel = g_tpo.snapLabel; out.snap = g_tpo.snap;
     return true;
 }

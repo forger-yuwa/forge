@@ -14,6 +14,7 @@
 #include "twoPhaseFaceDiag_d.cuh"       // 診断 D1 の面の中間量 (FORGE_DIAG_TP_FACES; plan condensation-two-phase-default #4)
 #include "renormGate_d.cuh"              // 再正規化の受入ゲートの計測 (#1b-pre)
 #include "twoPhaseUpdateDiag_d.cuh"      // 診断 G3-b の記録スロット (FORGE_DIAG_TP_UPDATE; plan condensation-two-phase-default #4g3)
+#include "twoPhaseOperatorDiag_d.cuh"    // 診断 G3-a の面の記録 (FORGE_DIAG_TP_OPERATOR; plan condensation-two-phase-default #4g3・#4pjg)
 
 #include <cmath>
 #include <cstdio>
@@ -244,7 +245,8 @@ __global__ void species_diffusion_d(
     flow_float* res_roe,
     int diffMethod, flow_float Sc, flow_float Sc_t,
     int isNode, flow_float** dYdx, flow_float** dYdy, flow_float** dYdz,
-    GasPhaseLiquid liq)   // 凝縮 carrier の液 (拡散係数は気相組成で評価; 液なしは {nullptr, -1})
+    GasPhaseLiquid liq,   // 凝縮 carrier の液 (拡散係数は気相組成で評価; 液なしは {nullptr, -1})
+    TpoFacePtr tpo = TpoFacePtr{})   // 診断 G3-a (既定は無効): res_roY[s][ic0] に足した Jc を面スロットへ写す
 {
     // 面ループは float32 で評価する (係数は SpeciesThermoF, 評価点は従来どおり面状態 T_f/P_f/Y_f。
     // 離散式は不変, plan performance-3d-node-sst-speedup §4.2-2)。旧 double 版は FP64 パイプ律速で
@@ -267,6 +269,10 @@ __global__ void species_diffusion_d(
     //  → ghost mirror の dcc≈0 退化も ∇Y·S 弱形式の境界閉包依存も不要。エネルギー結合 (Σh_sJ_s) も
     //    半割面では 0。cell は ghost で正しく閉じるので従来どおり。
     if (isNode != 0 && (ic0 >= nCells || ic1 >= nCells)) {
+        if (tpo.val != nullptr) {   // 診断 G3-a: 足さない面も明示的に 0 を書く
+            tpo_face_code(tpo, ih, 2);
+            for (int s = 0; s < nSpecies; ++s) tpo_face_put(tpo, ih, tpo_comp(tpo, s), 0.0);
+        }
         return;
     }
 
@@ -331,6 +337,7 @@ __global__ void species_diffusion_d(
     flow_float q = 0.0f;
     for (int s=0;s<nSpecies;s++){
         const flow_float Jc = Js[s] - Yf[s]*sumJ;
+        if (tpo.val != nullptr) { tpo_face_code(tpo, ih, 1); tpo_face_put(tpo, ih, tpo_comp(tpo, s), (double)Jc); }
         if (ic0 < nCells) atomicAdd(&res_roY[s][ic0],  Jc);
         if (ic1 < nCells) atomicAdd(&res_roY[s][ic1], -Jc);
         const flow_float hs = thermo_h_mass_f(sp[s], T_face);   // NASA エンタルピー [J/kg] (datum 込み)
@@ -691,7 +698,8 @@ void speciesAdvectionFaceY_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
     species_advection_faceY_d<<<dimGrid_nh, cuda_cfg.dimBlock>>>(
         msh.nCells, msh.nNormal_halo_Planes, msh.normal_halo_planes_d, msh.map_plane_cells_d,
         var.c_d["ro"], var.p_d["massflux"], g_nSpecies, g_Yface_dev, g_resroY_dev, g_transdiag_dev,
-        (cfg.discretization == "node") ? 1 : 0, g_roY_dev, g_nSpecies);
+        (cfg.discretization == "node") ? 1 : 0, g_roY_dev, g_nSpecies,
+        tpoFace(TPO_K_ADV_SP, TPO_KIND_ADV, -1));   // 診断 G3-a (既定は無効)
     gpuErrchk( cudaPeekAtLastError() );
 }
 
@@ -862,6 +870,7 @@ void speciesTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
         CHECK_CUDA_ERROR(cudaMemset(var.c_d["transport_diag_Y"+i], 0, msh.nCells * sizeof(flow_float)));
         CHECK_CUDA_ERROR(cudaMemset(var.c_d["src_jac_Y"+i], 0, msh.nCells * sizeof(flow_float)));
     }
+    tpoSnap("sp_zero");   // 診断 G3-a: 残差の写し (記録中のみ; 既定は何もしない)
 
     if (cfg.speciesFaceReconstruction >= 2 && g_Yface_dev != nullptr) {
         // S3: convectiveFlux が書いた同一 face 組成で移流 (energy 流束と整合)。diag は 1 次のまま。
@@ -872,6 +881,7 @@ void speciesTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
         for (int s = 0; s < var.nSpeciesRegistered; s++) descs.push_back(buildSpeciesDesc(var, s));
         scalarTransportResidualMulti_d(cfg, cuda_cfg, msh, var, descs.data(), (int)descs.size());
     }
+    tpoSnap("sp_adv");   // 診断 G3-a (記録中のみ)
 
     // M4: 粘性ケースのみ Fick 拡散 + ΣJ=0 補正 + エンタルピー拡散 (res_roe へ加算)。
     // 二相拡散 (condTwoPhaseDiffusion, #4e) が働く構成では水・気相種の分子拡散を twoPhaseDiffusion_d_wrapper (凝縮モーメントの
@@ -888,11 +898,13 @@ void speciesTransport_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
             var.c_d["res_roe"],
             cfg.speciesDiffusionMethod, cfg.Sc, cfg.Sc_t,
             (cfg.discretization == "node") ? 1 : 0, g_dYdx_dev, g_dYdy_dev, g_dYdz_dev,
-            gasPhaseLiquid(cfg, var));
+            gasPhaseLiquid(cfg, var),
+            tpoFace(TPO_K_DIFF_OFF, TPO_KIND_DIFF, -1));   // 診断 G3-a (既定は無効)
     }
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+    tpoSnap("sp_diff");   // 診断 G3-a (記録中のみ; 二相 ON では拡散を足さないので sp_adv と同じ)
 }
 
 // 試験用 (FORGE_TRANSPORT_PROBE; tests/unit/test_transport_gpu.py)。計算経路からは呼ばない。
@@ -1377,6 +1389,9 @@ void passiveAdvection_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
         CHECK_CUDA_ERROR(cudaMemset(h_p_diag[q], 0, bytes));
         CHECK_CUDA_ERROR(cudaMemset(h_p_sj[q],   0, bytes));
     }
+    // 診断 G3-a: 凝縮モーメント (液・Q2・Q1・Q0 の 4 本を一括で呼ぶとき) だけ記録する (トレーサの呼び出しは記録しない)
+    const bool tpoMom = (g_qMom0 >= 0 && q0 == g_qMom0 && nq == 4);
+    if (tpoMom) tpoSnap("cm_zero");
     const bool s3 = (cfg.speciesFaceReconstruction >= 2 && g_Pface_dev != nullptr
                      && (cfg.solver == "SLAU" || cfg.solver == "SLAU2"));
     if (s3) {
@@ -1385,7 +1400,8 @@ void passiveAdvection_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
         species_advection_faceY_d<<<dimGrid_nh, cuda_cfg.dimBlock>>>(
             msh.nCells, msh.nNormal_halo_Planes, msh.normal_halo_planes_d, msh.map_plane_cells_d,
             var.c_d["ro"], var.p_d["massflux"], nq, g_Pface_dev + q0, g_p_res_dev + q0, g_p_diag_dev + q0,
-            (cfg.discretization == "node") ? 1 : 0, g_p_rophi_dev + q0, g_nPassive);
+            (cfg.discretization == "node") ? 1 : 0, g_p_rophi_dev + q0, g_nPassive,
+            tpoMom ? tpoFace(TPO_K_ADV_PA, TPO_KIND_ADV, 1) : TpoFacePtr{});   // 診断 G3-a (既定は無効; 成分 1 + s = g, Q2, Q1, Q0)
     } else {
         // 1 次風上 (化学種の既定経路と同じ融合カーネル)。
         std::vector<ScalarTransportDesc> descs;
@@ -2135,15 +2151,29 @@ __global__ void twophase_diffusion_d(
     flow_float** roY, flow_float** res_roY, flow_float** transport_diag,
     flow_float** rophi, flow_float** res_phi, flow_float** diag_phi,   // 受動種ポインタ配列のモーメント先頭 (順序 g, Q2, Q1, Q0)
     flow_float* ro, flow_float* T, flow_float* P, flow_float* vis_lam, flow_float* vis_turb,
-    flow_float* res_roe, int diffMethod, flow_float Sc, flow_float Sc_t, int isNode, CondSpeciesProps cprops)
+    flow_float* res_roe, int diffMethod, flow_float Sc, flow_float Sc_t, int isNode, CondSpeciesProps cprops,
+    TpoFacePtr tpo = TpoFacePtr{})   // 診断 G3-a (既定は無効): res[ic0] に足した J・Jl・JQ を面スロットへ写す
 {
     const geom_int ih = blockDim.x * blockIdx.x + threadIdx.x;
     if (ih >= nNormalHaloPlanes) return;
     TpFaceIn in; geom_int ic0, ic1;
     if (!tp_build_face_in(nCells, normal_halo_planes[ih], plane_cells, ccx, ccy, ccz, fx, sx, sy, sz, ss, sp, nSpecies, iw,
-                          roY, rophi, ro, T, P, vis_lam, vis_turb, diffMethod, Sc, Sc_t, isNode, cprops, in, ic0, ic1)) return;
+                          roY, rophi, ro, T, P, vis_lam, vis_turb, diffMethod, Sc, Sc_t, isNode, cprops, in, ic0, ic1)) {
+        if (tpo.val != nullptr) {   // 診断 G3-a: node 境界半割面 (足さない) も明示的に 0 を書く
+            tpo_face_code(tpo, ih, 2);
+            for (int s = 0; s < nSpecies; ++s) tpo_face_put(tpo, ih, tpo_comp(tpo, s), 0.0);
+            for (int m = 0; m < 1 + TP_NQ; ++m) tpo_face_put(tpo, ih, 1 + m, 0.0);
+        }
+        return;
+    }
     TpFaceOut o;
     tp_face_flux(in, o);
+    if (tpo.val != nullptr) {   // 診断 G3-a: atomic の前の値 (res[ic0] に足す値; res[ic1] には符号反転)
+        tpo_face_code(tpo, ih, 1);
+        for (int s = 0; s < nSpecies; ++s) tpo_face_put(tpo, ih, tpo_comp(tpo, s), (double)o.J[s]);
+        tpo_face_put(tpo, ih, 1, (double)o.Jl);
+        for (int m = 0; m < TP_NQ; ++m) tpo_face_put(tpo, ih, 2 + m, (double)o.JQ[m]);
+    }
 
     if (ic0 < nCells) {
         for (int s = 0; s < nSpecies; ++s) { atomicAdd(&res_roY[s][ic0], o.J[s]); atomicAdd(&transport_diag[s][ic0], o.diag0[s]); }
@@ -2233,7 +2263,8 @@ void twoPhaseDiffusion_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& 
         g_p_rophi_dev + g_qMom0, g_p_res_dev + g_qMom0, g_p_diag_dev + g_qMom0,
         var.c_d["ro"], var.c_d["T"], var.c_d["P"], var.c_d["vis_lam"], var.c_d["vis_turb"],
         var.c_d["res_roe"], cfg.speciesDiffusionMethod, cfg.Sc, cfg.Sc_t,
-        (cfg.discretization == "node") ? 1 : 0, cprops);
+        (cfg.discretization == "node") ? 1 : 0, cprops,
+        tpoFace(TPO_K_DIFF_ON, TPO_KIND_DIFF, -1));   // 診断 G3-a (既定は無効; 化学種は化学種の成分、液・Q は 1..4)
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
 }

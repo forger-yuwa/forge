@@ -11,6 +11,7 @@
 #include "cuda_forge/condensationProperties_d.cuh"   // CondPropOpts / condProps_make
 #include "cuda_forge/condensationTables_d.cuh"       // CondTablesF (float 経路の物性表)
 #include "variables.hpp"
+#include "cuda_forge/twoPhaseOperatorDiag_d.cuh"     // 診断 G3-a の面ポインタ TpoFacePtr (POD; 既定は無効)
 
 // 非平衡凝縮 (Phase 1): 凝縮種ごとの 4 モーメント (ρg,ρQ2,ρQ1,ρQ0) を、汎用スカラ輸送コア
 // scalarTransport_d (ScalarTransportDesc) を再利用して受動スカラーとして移流する。
@@ -156,6 +157,35 @@ bool    tpuCollect(TpuDiagData& out);
 //   tpuCommonDiag: 更新の記録中 (tpuArm(2)) かつ B が要求されたときだけ真 → tp_dplur_prep_d が液・Q の分母を節点ごとの max に置き換える。
 bool    tpuCommonDiagRequested();
 bool    tpuCommonDiag();
+
+// ---- 診断 G3-a (作用素の収支; FORGE_DIAG_TP_OPERATOR=<出力 h5>、既定 off; plan condensation-two-phase-default §5.1 #4g3・#4pjg) ----
+// main の runTpOperatorDiag だけが tpoBegin/tpoArm を呼ぶ。それ以外の経路では tpoFace() は無効 (val == nullptr)、tpoSrcSlots() は nullptr、
+// tpoSnap は何もしない (本番カーネルの記録分岐は無効、演算は変えない)。記録の配置は twoPhaseOperatorDiag_d.cuh。
+//   tpoBegin: 対応構成を検査し (why に拒否理由)、面・節点のスロット (NaN 初期化、code は −1) を確保する。
+//   tpoArm(on): 記録の開始・停止。
+//   tpoFace(kernel, kind, compBase): 記録中ならそのカーネル用の面ポインタ、そうでなければ無効。
+//   tpoSnap(label): 記録中なら全成分の残差 (res_roY_w, res_rog_0, res_roQ2_0, res_roQ1_0, res_roQ0_0, 水以外の res_roY) の実節点の値を写す。
+//   tpoCollect: スロット・写し・面の所属 (ih → ip, ic0, ic1) を host へ移す (終了時に 1 回)。
+struct TpoDiagData {
+    long n = 0;                                      // 実節点数 (msh.nCells)
+    long nF = 0;                                     // 面数 (normal_halo_planes の並び; 内部面 + 境界半割面)
+    int nComp = 0;                                   // 成分数 (5 + 水以外の化学種)
+    int iw = -1;
+    std::vector<std::string> compCons;               // 成分の保存量名 (roY<iw>, rog_0, roQ2_0, roQ1_0, roQ0_0, roY<s≠iw>...)
+    std::vector<std::string> compRes;                // 成分の残差名
+    std::vector<double> faceVal;                     // [2 kind][nComp][nF] (res[ic0] に足した値; NaN = 記録なし)
+    std::vector<int> faceCode;                       // [TPO_NK][nF]
+    std::vector<int> faceIp, faceIc0, faceIc1;       // [nF]
+    std::vector<double> src;                         // [TPO_NSRC][n]
+    std::vector<std::string> snapLabel;              // 残差の写しの名前 (起きた順)
+    std::vector<std::vector<float>> snap;            // [nsnap][nComp·n]
+};
+bool       tpoBegin(solverConfig& cfg, mesh& msh, variables& var, std::string& why);
+void       tpoArm(bool on);
+TpoFacePtr tpoFace(int kernel, int kind, int compBase);
+double*    tpoSrcSlots();
+void       tpoSnap(const char* label);
+bool       tpoCollect(mesh& msh, TpoDiagData& out);
 
 // 原始量 φ = ρφ/ρ を全セル (ghost 含む) について更新する。スカラ移流の上流値に使う。
 void condensationPrimitive_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);

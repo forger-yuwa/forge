@@ -4,6 +4,7 @@
 // tests/unit/test_passive_scalar.cu (単体試験) が include する。__global__ を含むので他のライブラリ TU からは include しない。
 #include "flowFormat.hpp"
 #include "cuda_forge/twoPhaseUpdateDiag_d.cuh"   // 診断 G3-b の記録スロット (tpu; 既定 nullptr)
+#include "cuda_forge/twoPhaseOperatorDiag_d.cuh" // 診断 G3-a の面の記録 (TpoFacePtr; 既定は無効)
 
 // S3: species 移流流束を **convectiveFlux が書いた face 組成** で組む (energy 流束と同一面組成)。
 // 対角 transport_diag は 1 次風上のまま (defect-correction)。ΣY_face=1 なので Σ res_roY = res_ro。
@@ -13,7 +14,8 @@ __global__ void species_advection_faceY_d(
     flow_float* ro, flow_float* massflux, int nSpecies, flow_float* Yface,
     flow_float** res_roY, flow_float** transport_diag,
     int isNode, flow_float** roY,
-    int stride)   // Yface の面ストライド (化学種 = nSpecies; 受動種は部分範囲を Yface+q0, stride=nPassive で呼ぶ)
+    int stride,   // Yface の面ストライド (化学種 = nSpecies; 受動種は部分範囲を Yface+q0, stride=nPassive で呼ぶ)
+    TpoFacePtr tpo = TpoFacePtr{})   // 診断 G3-a (既定は無効): res[ic0] に足した値 −flux を面スロットへ写す
 {
     geom_int ih = blockDim.x*blockIdx.x + threadIdx.x;
     if (ih < nNormalHaloPlanes) {
@@ -26,11 +28,13 @@ __global__ void species_advection_faceY_d(
         // node 境界半割面 (ic1=ghost): 主ループ (SLAU/ROE) は境界半割面を除外するため Yface[ip] が
         // 未書込 (stale)。node は ghost を読まない設計なので、境界ノード ic0 自身の組成を面組成に使う。
         const bool nodeBnd = (isNode != 0 && ic1 >= nCells);
+        if (tpo.val != nullptr) tpo_face_code(tpo, ih, nodeBnd ? 3 : 1);
         for (int s = 0; s < nSpecies; ++s) {
             const flow_float Yf = nodeBnd
                 ? (roY[s][ic0] / max(ro[ic0], (flow_float)1.0e-30))
                 : Yface[(size_t)ip*stride + s];     // 内部面 upwind は convectiveFlux 側で確定済み
             const flow_float flux = mdot * Yf;
+            if (tpo.val != nullptr) tpo_face_put(tpo, ih, tpo_comp(tpo, s), (double)(-flux));
             if (ic0 < nCells) { atomicAdd(&res_roY[s][ic0], -flux); atomicAdd(&transport_diag[s][ic0], d0); }
             if (ic1 < nCells) { atomicAdd(&res_roY[s][ic1],  flux); atomicAdd(&transport_diag[s][ic1], d1); }
         }
