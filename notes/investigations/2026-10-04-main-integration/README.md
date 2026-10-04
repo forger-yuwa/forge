@@ -26,3 +26,23 @@ AWS (g5.xlarge): 統合版をクリーンビルド (ビルド成功、`cuobjdump
 | A4 | case/44 dual-time Euler 凝縮 (G0 c44 入力) | sern-design 4703a727 | 既定のまま | 受動種 S3 移流 (衝突解消箇所) と FCT |
 
 FAIL のときは main へ入れない (原因を切り分ける)。
+
+## 結果 (2026-10-04、AWS g5.xlarge、統合版 build 20ea4718 = 5c5f905e と同じソルバ)
+証拠は `evidence/` (`status.txt`・`REGRESS_A*.txt`・`unit_*.out`・`python_unit_3trees.txt`・実行スクリプト `integ.sh`)。
+
+- **ビルド**: 統合版・sern-design 4703a727 ともクリーンビルド成功。レジスタ数の記録は抽出の grep が空を返し**未記録** (`regs_integ.txt` 空)。
+  回帰は `FORGE_CUDA_BLOCKSIZE=256` で起動できている (SLAU node カーネルの上限 481 未満)。
+- **Python 単体試験** (`tests/unit/*.py` 21 本): 統合版・sern・species の 3 本とも全件 rc 0。
+- **CUDA 単体試験**: `test_passive_fct`・`test_passive_scalar`・`test_renorm_gate`・`test_twophase_kernel`・`test_farfield_flux` すべて PASS。
+  - `test_farfield_flux` は **sern-design でもビルド不能だった** (2026-10-01 の NASA-9 区間可変化 fba0a015 で `SpeciesThermo` の `Tmid/low/high` が
+    `nInt/Tbrk/coef` に変わったのに試験が追随していなかった)。統合ブランチで `thermo_set_intervals` (旧 low/high と同値の 2 区間) に直して PASS
+    (CPG/TP 56 面、流束の最大相対差 2.7e-8)。マージ起因の失敗ではない。
+  - `test_twophase_kernel` は試験の指示どおり種 DB の .o を別に作ってリンク (初回は実行スクリプトのビルド手順の誤りで失敗、試験の問題ではない)。
+- **回帰** (`check_field_regress`、参照 ×3 vs 統合版 ×2、200 step、許容 = ノイズ床 ×2): **4 腕すべて PASS**。
+  - A1 (case/16 湿り 二相拡散 ON、vs species): 16 量 ok、候補/ノイズ床の比 L2 0.88〜1.36・L∞ 0.90〜1.70。
+  - A2 (同 OFF、vs species): 16 量 ok。
+  - A3 (case/16 乾き、vs sern): 9 量 ok。
+  - A4 (case/44 dual-time 凝縮 S3 + FCT、vs sern): 9 量 ok。
+- run: AWS `~/forge-integ/case/16.nozzle_wys/run_0970`–`0984_integ_A{1,2,3}_*`、`~/forge-integ/case/44.vitiated_air_wt/run_0540`–`0544_integ_A4_*` (200 step の回帰専用、判定済み・破棄予定)。
+
+→ 事前登録の条件をすべて満たした。main へは PR で入れる (ユーザ判断 2026-10-04)。

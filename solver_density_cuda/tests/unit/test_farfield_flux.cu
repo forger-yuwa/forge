@@ -26,9 +26,12 @@ template <class T> static std::vector<T> down(const T* d, size_t n) { std::vecto
 // 2 成分 (0 = EXH 相当、1 = AIR 相当)。cp が T に依存する NASA-9 (a2 定数 + a3 T) で TP の経路を通す
 static SpeciesThermo mkSp(double MW, double a2, double a3)
 {
-    SpeciesThermo s{}; s.MW = MW; s.Tlo = 200.0; s.Tmid = 1000.0; s.Thi = 6000.0; s.invMW = 1.0 / MW;
-    for (int k = 0; k < 9; ++k) { s.low[k] = 0.0; s.high[k] = 0.0; }
-    s.low[2] = s.high[2] = a2; s.low[3] = s.high[3] = a3;
+    // 区間可変の NASA-9 (2026-10-01 #13-1) に合わせ、旧 low/high (同じ係数・Tmid 1000 K) と同値の 2 区間で組む。
+    SpeciesThermo s{}; s.MW = MW; s.invMW = 1.0 / MW;
+    const double Tb[3] = {200.0, 1000.0, 6000.0};
+    double a[2][9] = {};
+    a[0][2] = a[1][2] = a2; a[0][3] = a[1][3] = a3;
+    thermo_set_intervals(s, 2, Tb, a);
     return s;
 }
 static SpeciesThermo g_sp[2] = { mkSp(0.0250, 4.0, 2.0e-4), mkSp(0.02896, 3.5, 1.0e-4) };
