@@ -1,0 +1,151 @@
+<title>排除厚さ抽出の帯</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* layout: 1 カラムの手順書。各ステップ = 短い説明 + 実データの図 1 枚 */
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1b2330; --muted: #5a6577; --rule: #d9dee6;
+  --accent: #1f5fa8; --accent-soft: #e6eef8; --green: #2c7a3a; --orange: #b45a09; --warn-soft: #fbf0e3;
+  --f-body: "IBM Plex Sans JP", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161d; --panel: #1a2029; --ink: #e3e8ef; --muted: #9aa5b5; --rule: #2c3442;
+  --accent: #7fb0ea; --accent-soft: #1d2a3b; --green: #7cc893; --orange: #f0a868; --warn-soft: #2e2318; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12161d; --panel: #1a2029; --ink: #e3e8ef; --muted: #9aa5b5; --rule: #2c3442;
+  --accent: #7fb0ea; --accent-soft: #1d2a3b; --green: #7cc893; --orange: #f0a868; --warn-soft: #2e2318; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15.5px; line-height: 1.8; }
+.wrap { max-width: 900px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 64px; }
+.prose { max-width: 66ch; }
+h1 { font-size: 1.6rem; line-height: 1.35; margin: 0 0 .4em; text-wrap: balance; }
+h2 { font-size: 1.15rem; margin: 2.4em 0 .5em; display: flex; gap: .6em; align-items: baseline; text-wrap: balance; }
+h2 .no { font-family: var(--f-mono); font-size: .85rem; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 0 .45em; flex: none; }
+p, li { margin: .45em 0; }
+.meta { color: var(--muted); font-size: .86rem; }
+code { font-family: var(--f-mono); font-size: .85em; background: var(--accent-soft); padding: .05em .3em; border-radius: 3px; overflow-wrap: anywhere; }
+.key { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--accent); padding: 12px 16px; margin: 1em 0; }
+.key.warn { border-left-color: var(--orange); background: var(--warn-soft); }
+.g { color: var(--green); font-weight: 500; } .o { color: var(--orange); font-weight: 500; }
+figure { margin: 1.1em 0 1.6em; }
+figure button { display: block; width: 100%; padding: 0; border: 1px solid var(--rule); background: #fff; cursor: zoom-in; border-radius: 4px; }
+figure button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+figure img { display: block; width: 100%; height: auto; }
+figcaption { font-size: .84rem; color: var(--muted); margin-top: .45em; }
+figcaption b { color: var(--ink); }
+.tbl { overflow-x: auto; margin: .6em 0 1em; }
+table { border-collapse: collapse; font-size: .88rem; }
+th, td { border-bottom: 1px solid var(--rule); padding: 5px 12px; text-align: left; }
+th { color: var(--muted); font-weight: 500; font-size: .8rem; }
+td.n { text-align: right; font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.chain { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: .8em 0; font-size: .9rem; }
+.chain span { background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 4px 10px; }
+.chain i { color: var(--muted); font-style: normal; }
+.lb { position: fixed; inset: 0; background: rgba(10,12,16,.92); display: flex; overflow: auto; z-index: 10; }
+.lb img { margin: auto; max-width: none; background: #fff; }
+.lb .x { position: fixed; top: calc(12px + env(safe-area-inset-top,0px)); right: 16px; background: #fff; color: #111; border: 0; border-radius: 4px; padding: 6px 12px; font: inherit; cursor: pointer; }
+footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid var(--rule); color: var(--muted); font-size: .84rem; }
+</style>
+
+<div class="wrap">
+<header>
+  <p class="meta">case/45 M6 ノズル · 排除厚さの測り方の説明 · 2026-10-04</p>
+  <h1>Euler との差から排除厚さを測る方法と、「帯」がずれて壁がへこんだ仕組み</h1>
+  <p class="prose meta">使ったデータ: NS <code>case/45.isobutane_m6_d155/run_0022_ns_ib_pass0/res_24000.h5</code> (積分法の壁) と Euler <code>run_0001_euler_shortest_dry/res_12000.h5</code> (同じ設計壁)。主に x = 21.0 r<sub>t</sub> の 1 断面で説明する。NS は残差が横ばいで止まった状態 (<code>check_convergence</code>: NOT CONVERGED、プラトー)、Euler は収束 (PASS)。計算条件の全体は <a href="https://claude.ai/artifact/HJbD8v9DRaeXAgzpt8VKSK">前のレポート</a> の §1。</p>
+</header>
+
+<div class="key prose">
+  <b>一言でいうと</b>: 境界層で「流れが足りない分」を測るときに、比べる相手 (Euler) を少しだけ補正する。その補正量を壁のすぐ外の狭い区間 (=「帯」) で測っている。x ≈ 20 から先では帯が境界層の縁に引っかかり、補正が狂って排除厚さを 1〜2 % 小さく測っていた。それが壁の小さなへこみになり、軸の山の元になっていた。
+</div>
+
+<h2><span class="no">1</span>測りたいもの: 境界層で足りなくなった流れ</h2>
+<p class="prose">ノズルの 1 断面を、軸 (r = 0) から壁まで切って、単位面積あたりの流量 ρu を並べたのが下の図。黒が Euler (粘性なし)、赤が NS (粘性あり)。</p>
+<figure>
+  <button type="button" aria-label="図 1 を原寸で開く"><img src="band_figA_profiles.png" alt="断面の質量流束分布"></button>
+  <figcaption><b>図 1.</b> x = 21.0 r<sub>t</sub> の断面。(a) 全体。NS の壁 (赤の点線) は Euler の壁 (黒の点線) より δ<sub>in</sub> = 0.114 r<sub>t</sub> だけ外にある。(b) 壁の近くだけを、NS の壁からの距離 y で拡大 (y は δ<sub>in</sub> で割って表示)。Euler は自分の壁より外 (y &lt; δ<sub>in</sub>) では壁の値をそのまま延ばしている。</figcaption>
+</figure>
+<ul class="prose">
+  <li>壁から離れたところ (コア) では、赤と黒はほとんど重なる。</li>
+  <li>壁の近く (y が δ<sub>in</sub> の約 2.5 倍より内側) では、赤が黒より小さい。これが境界層。薄い赤で塗った面積が「足りない流量」。</li>
+  <li>この足りない流量を、「壁を何 mm 外に広げれば取り戻せるか」に直したのが<b>排除厚さ δ<sub>r</sub></b>。設計では、非粘性の壁にこの δ<sub>r</sub> を足して実際の壁にする。</li>
+  <li>正しく足せていれば、測った δ<sub>r</sub> は足した δ<sub>in</sub> と同じになる (比が 1)。これを「固定点」と呼んでいる。</li>
+</ul>
+
+<h2><span class="no">2</span>Euler をそのまま引かない理由</h2>
+<p class="prose">「赤と黒の差を足し合わせればいい」と思えるが、そうしていない。NS と Euler はコアでも完全には一致しないからである。下の図 2 の左は、比 ρu<sub>NS</sub> / ρu<sub>Euler</sub> を断面全体で描いたもの。</p>
+<figure>
+  <button type="button" aria-label="図 2 を原寸で開く"><img src="band_figB_ratio.png" alt="NS と Euler の比と帯"></button>
+  <figcaption><b>図 2.</b> 比 ρu<sub>NS</sub> / ρu<sub>Euler</sub>。(a) 断面全体 (横軸は 0.99〜1.01 に拡大)。(b) 壁の近く。色の帯が測定区間 (帯)、点線がその区間で引いた直線を壁まで延ばしたもの。<span class="g">緑 = 帯 A</span> (壁から 2.93 δ<sub>in</sub>〜4.4 δ<sub>in</sub>)、<span class="o">橙 = 帯 B</span> (2.34 δ<sub>in</sub>〜3.5 δ<sub>in</sub>)。</figcaption>
+</figure>
+<ul class="prose">
+  <li>(a) を見ると、コアでも比は 1 ではなく 0.995〜0.999 である。上流の小さな波や、軸付近の値のずれのため。</li>
+  <li>この 0.1〜0.5 % のずれを無視して断面全体で差を取ると、コアのずれまで「境界層で足りない分」に数えてしまう。断面積の大部分はコアなので、δ<sub>r</sub> は数 % 以上狂う。</li>
+  <li>そこで、<b>壁のすぐ外の狭い区間</b>だけで比を測り、「境界層がなければ壁際でも NS はこの比で Euler からずれているはず」と考える。その区間が<b>帯</b>。</li>
+</ul>
+
+<h2><span class="no">3</span>帯で比を測って、壁まで延ばす</h2>
+<p class="prose">図 2 (b) の手順:</p>
+<ol class="prose">
+  <li>帯の中 (色の区間) で、比を壁からの距離 y の 1 次式 (直線) で近似する。</li>
+  <li>その直線を、帯の下端から壁 (y = 0) まで延ばす (点線)。これが「境界層がなかったときの比」の見積もり。</li>
+  <li>Euler の ρu にこの比を掛けたものを<b>基準</b>にする。NS と基準の差の面積が「足りない流量」で、そこから δ<sub>r</sub> を出す (図 3)。</li>
+</ol>
+<div class="key prose">
+  <p>図 2 (b) の<span class="g">緑 (帯 A)</span> は境界層の完全に外にある。比は帯の中で 0.999 で平らなので、延長した点線もまっすぐ 0.999 のまま壁まで下りる。基準は「Euler × 0.999」。</p>
+  <p><span class="o">橙 (帯 B)</span> は下端が y = 2.34 δ<sub>in</sub> で、<b>境界層の縁 (y ≈ 2.3〜2.7 δ<sub>in</sub>、比が 1 から急に落ち始めるところ) にかかっている</b>。帯の中に「落ち始め」が入るので、直線が大きく傾き、壁まで延ばすと比は 0.98 まで下がる。基準が実際より 2 % 低くなる。</p>
+</div>
+
+<h2><span class="no">4</span>基準が下がると、排除厚さを小さく測る</h2>
+<figure>
+  <button type="button" aria-label="図 3 を原寸で開く"><img src="band_figC_deficit.png" alt="基準と欠損"></button>
+  <figcaption><b>図 3.</b> 同じ断面で、帯 A と帯 B それぞれの基準 (点線) と、足りない流量 (塗った面積)。赤は NS (どちらも同じ)。</figcaption>
+</figure>
+<div class="tbl"><table>
+<tr><th>帯</th><th>帯の位置 (壁から)</th><th>延長した比 (壁で)</th><th>測った δ<sub>r</sub> [r<sub>t</sub>]</th><th>壁に足していた δ<sub>in</sub> との比</th></tr>
+<tr><td class="g">A</td><td class="n">2.93〜4.40 δ<sub>in</sub></td><td class="n">0.999</td><td class="n">0.11350</td><td class="n">0.999</td></tr>
+<tr><td class="o">B</td><td class="n">2.34〜3.52 δ<sub>in</sub></td><td class="n">0.98</td><td class="n">0.11152</td><td class="n">0.982</td></tr>
+</table></div>
+<p class="prose">帯 A で測ると、δ<sub>r</sub> は壁に足していた値とほぼ同じ (99.9 %)。積分法の壁はこの断面ではほぼ正しかった。帯 B で測ると 1.8 % 小さく出る。基準の点線が NS 側に寄った分、塗った面積が小さくなったためである。</p>
+
+<h2><span class="no">5</span>帯の位置は断面ごとに自動で決めていた</h2>
+<p class="prose">帯の位置は人が決めず、断面ごとに次のルールで自動で決めていた。</p>
+<ol class="prose">
+  <li>まず壁から 1.5 δ<sub>in</sub> の位置に帯を置く (細いノズル上流では 0.02 r<sub>w</sub> のほうが大きければそちら)。</li>
+  <li>「帯の中で比が 1 % 以上変わる」「帯の中にも足りない流量が 1 割以上残る」など、まだ境界層の中にいる兆候があれば、帯を 1.25 倍外へずらしてやり直す。</li>
+  <li>兆候が消えたところで止める。</li>
+</ol>
+<figure>
+  <button type="button" aria-label="図 4 を原寸で開く"><img src="band_figD_alongx.png" alt="自動選択の帯の位置と測った排除厚さ"></button>
+  <figcaption><b>図 4.</b> x = 10〜35 r<sub>t</sub> の各断面 (0.25 r<sub>t</sub> 刻み) で、(a) 自動で選ばれた帯の位置、(b) 測った δ<sub>r</sub> / δ<sub>in</sub>。青 = 自動選択 (実際に次の壁に使った値)、緑の点線 = 帯を 3.66 δ<sub>in</sub> に固定して測った値。</figcaption>
+</figure>
+<ul class="prose">
+  <li>x ≈ 12〜19 では 3 回ずらして 2.93 δ<sub>in</sub> (帯 A の位置) で止まっていた (x <li>x &lt; 19 では 3 回ずらして 2.93 δ<sub>in</sub> (帯 A の位置) で止まっていた。</li>lt; 12 は 0.02 r<sub>w</sub> の下限が効いてもう少し外)。</li>
+  <li>x ≈ 19.5 から先は <b>2 回目で止まってしまい、2.34 δ<sub>in</sub> (帯 B の位置)</b> になった。1.25 倍刻みなので、帯は一段で 20 % 壁側に跳ぶ。</li>
+  <li>帯 B は境界層の縁に少しかかるが、「比が 1 % 以上変わる」という判定には引っかからない程度だった。ところが δ<sub>r</sub> には 1〜2 % 効く。判定のしきい値が、効いてくる誤差に比べて粗かった。</li>
+  <li>結果として、自動選択の δ<sub>r</sub> (青) は x ≈ 19.5 で急に 2 % 落ち、x ≈ 28 までかけて戻る。帯を外に固定した値 (緑) は、x = 10〜35 で 0.998〜1.002 に収まって平らである。</li>
+</ul>
+
+<h2><span class="no">6</span>それが壁のへこみになり、軸の山になる</h2>
+<div class="chain"><span>帯が x≈19.5 で壁側に跳ぶ</span><i>→</i><span>δ<sub>r</sub> を 1〜2 % 小さく測る</span><i>→</i><span>平滑化して、壁が x≈17〜29 で 0.001 r<sub>t</sub> へこむ</span><i>→</i><span>へこみの入口 (x≈18〜21) で圧縮波、出口 (x≈22〜30) で膨張波</span><i>→</i><span>特性線に乗って軸へ</span><i>→</i><span>軸 x≈57 で M が下がり、x≈69 で上がる</span></div>
+<p class="prose">へこみの深さは δ<sub>r</sub> の 1 % 程度 (約 0.1 mm) しかないが、M6 の軸対称ノズルでは、壁から出た弱い波が軸に集まって強まる。壁 x≈18 発の特性線は軸 x≈57.5 に、壁 x≈24 発は軸 x≈68 に着くので、軸の谷と山の位置と合う (前のレポートの Figure 7〜8)。積分法の壁 (run_0022) にはこのへこみが無く、軸にも山が無い。</p>
+<div class="key warn prose">
+  <b>まだ確かめていないこと</b>: 帯を外に固定した抽出で壁を作り直し、NS を回して軸の山が消えることは、まだ見ていない。ここまでは既存の場を測り直した結果である。帯の決め方の直し方 (下限を設ける、x 方向に急に跳ばないようにする) も未決定で、plan の残作業表 (§5.1 #7) に入れてある。
+</div>
+
+<footer>
+  <p>図の生成: <code>case/45.isobutane_m6_d155/viz_band_explain.py</code>。抽出の実装: <code>design/forge_design/metrics/deltastar.py::band_local_deficit</code>。記録: <code>plans/active/verification-m6-axis-wave-mesh-su2.md</code> §9。本ページは 2026-10-04 時点のスナップショット。</p>
+</footer>
+</div>
+
+<div class="lb" id="lb" hidden><button type="button" class="x" id="lbx">閉じる (Esc)</button><img id="lbimg" alt=""></div>
+<script>
+(function(){
+  var lb = document.getElementById('lb'), im = document.getElementById('lbimg');
+  function close(){ lb.hidden = true; im.removeAttribute('src'); }
+  document.querySelectorAll('figure button').forEach(function(b){
+    b.addEventListener('click', function(){ var i = b.querySelector('img'); im.src = i.src; im.alt = i.alt; lb.hidden = false; lb.scrollTo(0,0); document.getElementById('lbx').focus(); });
+  });
+  document.getElementById('lbx').addEventListener('click', close);
+  lb.addEventListener('click', function(e){ if (e.target === lb) close(); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !lb.hidden) close(); });
+})();
+</script>

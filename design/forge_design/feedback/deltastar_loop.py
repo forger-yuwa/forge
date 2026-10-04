@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -33,11 +34,14 @@ from ..metrics.deltastar import deltastar_from_core_matched_euler, massflow_rati
 
 
 def extract_and_merge(prev_run, euler_run, omega: float = 0.5, smooth_lam: float = 1.0,
-                      knot_spacing: float = 2.0, **kw) -> dict:
+                      knot_spacing: float = 2.0, out_dir=None, max_lam_factor: float | None = None, **kw) -> dict:
     """前 pass の NS run から抽出し、次 pass の入力 δ_r(x) を作る。
-    出力 (prev_run 内): delta_r_equiv.csv / delta_r_equiv_diag.json / delta_r_next.csv。"""
+    出力 (out_dir、既定 prev_run): delta_r_equiv.csv / delta_r_equiv_diag.json / delta_r_next.csv / delta_r_extract_summary.json。
+    out_dir は同じ場から別設定 (例 band_select) で抽出するとき互いに上書きしないために使う。"""
     prev_run = Path(prev_run)
-    d = deltastar_from_core_matched_euler(prev_run, euler_run, out_dir=prev_run, **kw)
+    od = Path(out_dir) if out_dir is not None else prev_run
+    od.mkdir(parents=True, exist_ok=True)
+    d = deltastar_from_core_matched_euler(prev_run, euler_run, out_dir=od, **kw)
     d_in = d["delta_in"]
     d_use = d["delta_r_use"]
     held = ~np.isfinite(d_use)
@@ -68,9 +72,13 @@ def extract_and_merge(prev_run, euler_run, omega: float = 0.5, smooth_lam: float
             lam_used = lam; break
     else:
         lam_used = f"{lam} (still non-monotone)"
+    # 単調性ガードの λ 昇格に上限 (2026-10-04, diagnostician): 昇格しすぎた平滑化は抽出値を追わない壁になるので pass を失敗にする
+    if max_lam_factor is not None and (not isinstance(lam_used, float) and not isinstance(lam_used, int)
+                                       or lam_used > smooth_lam * max_lam_factor):
+        raise RuntimeError(f"extract_and_merge: 単調性ガードで λ が {lam_used} まで上がった (上限 smooth_lam×{max_lam_factor})")
     d_use = d_ext                                   # 以降の帳簿は平滑化後の抽出値で取る
     held = ~np.isfinite(d["delta_r_use"])
-    np.savetxt(prev_run / "delta_r_next.csv", np.c_[d["x"], d_next, d_in, d_use, held.astype(int)],
+    np.savetxt(od / "delta_r_next.csv", np.c_[d["x"], d_next, d_in, d_use, held.astype(int)],
                delimiter=",", comments="",
                header=f"x_rt,delta_r,delta_in_prev,delta_r_use_smoothed,held (omega={omega}; quintic P-spline knot={knot_spacing} lam={lam_used}; resid_rel_rms={diag['resid_rel_rms']:.4f})")
     fin = np.isfinite(d_use) & (d_in > 1e-4)
@@ -84,7 +92,7 @@ def extract_and_merge(prev_run, euler_run, omega: float = 0.5, smooth_lam: float
                "massflow": d["massflow"],
                "delta_r_throat_use": float(np.interp(0.0, d["x"], np.where(np.isfinite(d_use), d_use, d_in))),
                "delta_r_throat_in": float(np.interp(0.0, d["x"], d_in))}
-    (prev_run / "delta_r_extract_summary.json").write_text(json.dumps(summary, indent=1))
+    (od / "delta_r_extract_summary.json").write_text(json.dumps(summary, indent=1))
     return summary
 
 
@@ -165,6 +173,7 @@ def run_pass(problem, euler_ref, prev_run, run_dir, omega: float = 0.5, ic_from=
     (run_dir / "fixed_point.json").write_text(json.dumps(fp, indent=1))
     print("fixed_point(new):", json.dumps({k: v for k, v in fp.items() if k != "massflow"}), flush=True)
     print("massflow(new):", json.dumps(fp["massflow"]), flush=True)
+    _design_report(run_dir, euler_ref)
     return m
 
 
@@ -200,6 +209,7 @@ def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, p
     (run_dir / "fixed_point.json").write_text(json.dumps(fp, indent=1))
     print("extract(new):", json.dumps({k: v for k, v in fp.items() if k != "massflow"}), flush=True)
     print("massflow(new):", json.dumps(fp["massflow"]), flush=True)
+    _design_report(run_dir, euler_ref)
     return m
 
 
@@ -253,3 +263,14 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+def _design_report(run_dir, euler_ref):
+    """ノズル設計の標準出力 (procedures/nozzle-design-outputs.md) を NS pass の後に自動で作る。失敗しても chain は止めない。"""
+    if os.environ.get("FORGE_NO_DESIGN_REPORT"):
+        return
+    try:
+        from ..report.nozzle_report import make_report
+        print("design report:", make_report(run_dir, euler_ref), flush=True)
+    except BaseException as e:  # noqa: BLE001
+        print(f"design report: 失敗 ({type(e).__name__}: {e}) — chain は続行", flush=True)
+

@@ -1,0 +1,163 @@
+<title>M6 帯修正 A/B</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* layout: 1 カラムの結果報告。条件 → 結果 (軸 M → 壁 → コンタ) → 残っていること */
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1b2330; --muted: #5a6577; --rule: #d9dee6;
+  --accent: #1f5fa8; --accent-soft: #e6eef8; --warn: #a1520a; --warn-soft: #fbf0e3; --ok: #2d7a46;
+  --f-body: "IBM Plex Sans JP", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161d; --panel: #1a2029; --ink: #e3e8ef; --muted: #9aa5b5; --rule: #2c3442;
+  --accent: #7fb0ea; --accent-soft: #1d2a3b; --warn: #f0a868; --warn-soft: #2e2318; --ok: #7cc893; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12161d; --panel: #1a2029; --ink: #e3e8ef; --muted: #9aa5b5; --rule: #2c3442;
+  --accent: #7fb0ea; --accent-soft: #1d2a3b; --warn: #f0a868; --warn-soft: #2e2318; --ok: #7cc893; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.75; }
+.wrap { max-width: 980px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 64px; }
+.prose { max-width: 70ch; }
+h1 { font-size: 1.6rem; line-height: 1.3; margin: 0 0 .3em; text-wrap: balance; }
+h2 { font-size: 1.2rem; margin: 2.4em 0 .6em; padding-top: .8em; border-top: 2px solid var(--ink); }
+h3 { font-size: 1.02rem; margin: 1.8em 0 .4em; color: var(--accent); }
+.meta { color: var(--muted); font-size: .86rem; }
+code { font-family: var(--f-mono); font-size: .85em; background: var(--accent-soft); padding: .05em .3em; border-radius: 3px; overflow-wrap: anywhere; }
+.lede { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--accent); padding: 12px 16px; margin: 1.2em 0; }
+.lede.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+.tbl { overflow-x: auto; margin: .7em 0 1.1em; }
+table { border-collapse: collapse; font-size: .86rem; }
+th, td { border-bottom: 1px solid var(--rule); padding: 5px 10px; text-align: left; vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: .8rem; }
+td.n { text-align: right; font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pill { font-family: var(--f-mono); font-size: .74rem; padding: 0 .45em; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.ok { color: var(--ok); } .ng { color: var(--warn); }
+figure { margin: 1.2em 0 1.8em; }
+figure button { display: block; width: 100%; padding: 0; border: 1px solid var(--rule); background: #fff; cursor: zoom-in; border-radius: 4px; }
+figure button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+figure img { display: block; width: 100%; height: auto; }
+figcaption { font-size: .84rem; color: var(--muted); margin-top: .45em; }
+figcaption b { color: var(--ink); }
+pre { background: var(--panel); border: 1px solid var(--rule); padding: 10px 14px; overflow-x: auto; font-family: var(--f-mono); font-size: .82rem; }
+.lb { position: fixed; inset: 0; background: rgba(10,12,16,.92); display: flex; overflow: auto; z-index: 10; }
+.lb img { margin: auto; max-width: none; background: #fff; }
+.lb .x { position: fixed; top: calc(12px + env(safe-area-inset-top,0px)); right: 16px; background: #fff; color: #111; border: 0; border-radius: 4px; padding: 6px 12px; font: inherit; cursor: pointer; }
+footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid var(--rule); color: var(--muted); font-size: .84rem; }
+</style>
+
+<div class="wrap">
+<header>
+  <p class="meta">case/45.isobutane_m6_d155 · 排除厚さ抽出の「帯」修正の CFD 確認 · 2026-10-04</p>
+  <h1>M6 ノズル: 帯の選び方を変えた壁で軸 M の山は消えたか</h1>
+  <p class="meta">計画: <code>plans/active/verification-m6-axis-wave-mesh-su2.md</code> §4.4・§6・§9 / 前のページ: <a href="https://claude.ai/artifact/HJbD8v9DRaeXAgzpt8VKSK">軸 M の山の報告</a>・<a href="https://claude.ai/artifact/P631e7LVr6Bf6Tfv2V2915">帯の説明</a></p>
+</header>
+
+<div class="lede prose">
+  <p><b>目的</b>: 同じ NS 場 (run_0042) から、排除厚さを今の方式 (adaptive) と新方式 E (縁アンカー・x 平滑帯) で測って 2 枚の壁を作り、軸 M の山が帯の選び方で変わるかを確かめる。</p>
+  <p><b>結論</b>: 新方式 E の壁 (B1) では軸の局所的な山谷が消えた (山 0.36 → 0.013 %pt)。帯の段差が山の主因と記録した。ただし事前登録の判定は<b>保留</b> — 試験部の振れ幅 P(0.1) が 0.079 % で基準 0.06 % を超える。残りは x≈48 の小さな山と x 56→80 の −0.04 % の傾きで、壁の作り方 (固定点・参照解) では説明できず、NS 側の原因が未特定。</p>
+</div>
+
+<section id="analysis-conditions">
+<h2>1. 解析条件</h2>
+<p class="prose">形状・格子・境界条件・物性は <a href="https://claude.ai/artifact/HJbD8v9DRaeXAgzpt8VKSK">前のレポート</a> §1 と同じ (イソブタン燃焼ガス 2 成分 semi-perfect、P<sub>t</sub> 5.5 MPa、T<sub>t</sub> 1600 K、断熱 no-slip、SST 低 Re、node・軸対称・SLAU 2 次・Venkatakrishnan・block-DPLUR、格子 1250 × 97)。違いは次の表だけ。</p>
+<div class="tbl"><table>
+<tr><th>記号</th><th>run (<code>case/45.isobutane_m6_d155/</code>)</th><th>壁 (δ<sub>r</sub> の出所)</th><th>初期場</th><th>step</th></tr>
+<tr><td>Euler</td><td><code>run_0047_euler_rt77p02_newbin</code></td><td>設計壁 (非粘性)</td><td>run_0037 を restart_field</td><td class="n">12000</td></tr>
+<tr><td>A0′</td><td><code>run_0042_ns_restart_ctrl</code></td><td>旧最終壁 (adaptive 3 回目)</td><td>run_0038 を restart_field</td><td class="n">12000</td></tr>
+<tr><td>B0</td><td><code>run_0045_ns_band_adaptive</code> → <code>run_0048_…_ext</code></td><td>run_0042 の場から adaptive で抽出</td><td>run_0042 を interp_field</td><td class="n">12000 + 6000</td></tr>
+<tr><td>B1</td><td><code>run_0046_ns_band_edge</code></td><td>run_0042 の場から方式 E (c 1.25) で抽出</td><td>run_0042 を interp_field</td><td class="n">12000</td></tr>
+</table></div>
+<p class="prose meta">すべて同じバイナリ (AWS <code>~/forge-axiswave</code>、commit <code>bc1c84d1</code>)、CFL 5・implicitRelax 0.7、r<sub>t</sub> 77.02 mm。B0/B1 の壁は出口半径 0.7771 m (仕様 0.775 m から +2.1 mm、新バイナリで境界層が 4〜6 % 厚く出るため。r<sub>t</sub> 補正はしていない)。</p>
+<h3>判定ゲート</h3>
+<div class="tbl"><table>
+<tr><th>対象</th><th>判定</th><th>結果</th><th>結論への制約</th></tr>
+<tr><td>全 run</td><td><code>check_convergence.py</code></td><td><span class="pill ng">NOT CONVERGED</span> rms_ro 3.9e-7・rms_roe 0.64 で横ばい (Euler は 3.3e-6)</td><td>残差プラトー下の比較。従来の M6 run と同じ水準</td></tr>
+<tr><td>B0 / B1</td><td>山・振れ幅の末尾 5 枚の変動 (事前登録 ≤ 0.005)</td><td>B0 延長後 ≤ 0.0008 <span class="pill ok">OK</span> / B1 ≤ 0.0046 <span class="pill ok">OK</span></td><td>量は時間的に落ち着いている</td></tr>
+<tr><td>全 run</td><td>NaN / Inf</td><td>0</td><td>—</td></tr>
+<tr><td>B0 / B1</td><td><code>check_mesh_quality.py</code></td><td><span class="pill ng">SOFT-PASS</span> AR 最大 1208 (壁第 1 層、0.07 %)</td><td>従来の M6 NS 格子と同じ</td></tr>
+<tr><td>B1</td><td>固定点 (場から再抽出)</td><td>δ<sub>r</sub>/δ<sub>in</sub> median 1.0017、x = 8〜70 で ±0.1 %</td><td>壁と場は整合している</td></tr>
+</table></div>
+</section>
+
+<section id="results">
+<h2>2. 結果</h2>
+<div class="tbl"><table>
+<tr><th>run</th><th class="n">軸の山 b70 [%pt]</th><th class="n">振れ幅 P (r/r<sub>w</sub>=0.1) [%]</th><th class="n">振れ幅 P (軸) [%]</th></tr>
+<tr><td>A0′ 旧最終壁</td><td class="n">0.228</td><td class="n">0.179</td><td class="n">0.298</td></tr>
+<tr><td>B0 adaptive</td><td class="n">0.351</td><td class="n">0.350</td><td class="n">0.872</td></tr>
+<tr><td><b>B1 方式 E</b></td><td class="n"><b>0.005</b></td><td class="n"><b>0.080</b></td><td class="n"><b>0.113</b></td></tr>
+</table></div>
+<p class="prose meta">Euler 参照 = run_0047 (同じバイナリ)。P = x = 42〜94 での M/M<sub>Euler</sub> − 1 の最大 − 最小。事前登録の「効いた」は P(0.1) ≤ 0.06 %・≤ B0 の半分・b70 ≤ 0.08 %pt の 3 つ。1 つ目だけ満たさないので判定は保留。</p>
+
+<h3>2.1 軸のマッハ数</h3>
+<figure>
+  <button type="button" aria-label="Figure 1 を原寸で開く"><img src="fig_axis_mach.png" alt="軸上のマッハ数"></button>
+  <figcaption><b>Figure 1.</b> (a) 軸上 (r = 0) の M。(b) 軸上の M_NS / M_Euler − 1。(c) r / r<sub>w</sub> = 0.1 の同じ比。灰色 = 判定区間 x = 42〜94。各 run の最終スナップショット (A0′・B1: <code>res_12000</code>、B0: <code>run_0048/res_6000</code>、Euler: <code>run_0047/res_12000</code>)。M = |U| / sonic。</figcaption>
+</figure>
+<ul class="prose">
+  <li>B0 (赤) は軸の x≈56 に +0.48 %、x≈85 に −0.39 %。旧最終壁 (灰) は x≈56 に谷、x≈70 に山。どちらも壁のへこみから出た波。</li>
+  <li>B1 (青) の軸上は +0.07〜+0.19 % でなだらか。この一様な上乗せの大部分は、軸ノードだけに出る既知のスパイク。r/r<sub>w</sub> = 0.1 では x≈48 に +0.035 %、x = 60〜80 で −0.04 % に下がるだけ。</li>
+</ul>
+
+<h3>2.2 壁の形・1 階微分・2 階微分</h3>
+<figure>
+  <button type="button" aria-label="Figure 2 を原寸で開く"><img src="fig_wall_derivatives.png" alt="壁の座標と微分"></button>
+  <figcaption><b>Figure 2.</b> 壁 r<sub>w</sub>(x)・dr<sub>w</sub>/dx・d²r<sub>w</sub>/dx²。左はそのもの (黒の点線 = 設計壁)、右は設計壁との差。<code>prepare_ns</code> と同じ経路で壁を作り直し、保存済みの <code>wall_physical.csv</code> と 4e-16 m 以内で一致することを確認したうえで、5 次スプラインを解析的に微分。</figcaption>
+</figure>
+<figure>
+  <button type="button" aria-label="Figure 3 を原寸で開く"><img src="fig_wall_derivatives_zoom.png" alt="設計壁との差の拡大"></button>
+  <figcaption><b>Figure 3.</b> 設計壁との差を x = −1〜60 で拡大。上から r<sub>w</sub>、dr<sub>w</sub>/dx、d²r<sub>w</sub>/dx²。</figcaption>
+</figure>
+<ul class="prose">
+  <li><b>へこみ</b>: 1 階微分 (中段) で B0 は x≈35〜40 で傾きが一度下がって戻る。これが B0 の軸の山谷の発生源 (下の Figure 4 の差の帯と一致)。旧最終壁はもっと上流 (x≈17〜29)。B1 にはこの局所構造が無い。</li>
+  <li><b>2 階微分の細かいギザギザ (下段の櫛の歯)</b>: 3 枚とも全区間にある。高周波成分の最大はスロート直後 (x = 0.5〜6) で約 2 × 10<sup>−3</sup> [1/r<sub>t</sub>]、下流で 4〜11 × 10<sup>−4</sup>。原因は壁を作るときに δ<sub>r</sub> の表 (0.09 r<sub>t</sub> 間隔) を<b>直線補間</b>していること — 表の点ごとに傾きが折れ、2 階微分が点ごとに跳ねる。帯の選び方とは別の問題で、壁の半径にすると 10<sup>−7</sup> r<sub>t</sub> 級なので流れへの影響は小さいと見ているが、確かめてはいない。</li>
+</ul>
+
+<h3>2.3 圧力勾配とマッハ数のコンタ</h3>
+<figure>
+  <button type="button" aria-label="Figure 4 を原寸で開く"><img src="fig_dpdx_contours.png" alt="無次元圧力勾配のコンタ"></button>
+  <figcaption><b>Figure 4.</b> 無次元圧力勾配 (r<sub>t</sub>/p) ∂p/∂x。∂p/∂x は静圧から構造格子の座標変換で計算 (新バイナリは <code>dPdx</code> を出力しないため全 run で統一)。上 2 段は B1・B0 (±0.02 で頭打ち)、下 2 段は差 B0 − B1、A0′ − B1 (±0.003)。黒線は B1 の場で追った C<sup>−</sup> 特性線 (壁 x = 4, 7, …, 40 発)。</figcaption>
+</figure>
+<figure>
+  <button type="button" aria-label="Figure 5 を原寸で開く"><img src="fig_mach_vs_euler_contours.png" alt="Euler 比のマッハ数コンタ"></button>
+  <figcaption><b>Figure 5.</b> M / M<sub>Euler</sub> − 1 [%] (±0.5 で頭打ち)。Euler の M を (x, r/r<sub>w</sub>) で各 NS 節点に補間して割ったもの。上から B1、B0、A0′。</figcaption>
+</figure>
+<ul class="prose">
+  <li>差 B0 − B1 (Figure 4 の 3 段目) には、壁 x≈35〜40 から C<sup>−</sup> に沿って軸の x≈55〜60 へ下りる帯と、その反射が見える。A0′ − B1 では帯の起点がもっと上流。</li>
+  <li>B1 の場で追った特性線は、壁 x = 13 発が軸 x = 47.6 に着く。B1 に残る x≈48 の小さな山の位置と一致する。x≈13 は抽出の試験でも毎回最大値が出た場所 (格子間隔・壁曲率には特徴なし)。原因の候補だが未確認。</li>
+</ul>
+</section>
+
+<section>
+<h2>3. 残っていること</h2>
+<ul class="prose">
+  <li>B1 の振れ幅 0.08 % の正体。否定済み: Euler 参照のバイナリ違い (差 ≤ 0.01 %)、B1 の固定点未達 (δ<sub>r</sub>/δ<sub>in</sub> 1.0017)。残る候補: 壁 x≈13 起点の波、半径方向オフセットでは表せない NS と Euler のコアの系統差。</li>
+  <li>壁を作る経路の 2 点: δ<sub>r</sub> の直線補間による 2 階微分のギザギザ、縮流部の作り直し (−0.8 より上流は 5 次 Hermite で引き直し、縮流部が最大 1.2 mm 内側に寄る)。</li>
+  <li>方式 E を最終設計 (出口半径 0.775 m に合わせる r<sub>t</sub> 補正込み) に反映するかの判断。</li>
+</ul>
+</section>
+
+<section>
+<h2>ParaView で見る</h2>
+<pre>cd ~/work/forge/case/45.isobutane_m6_d155/_band_ab/paraview
+~/opt/ParaView-6.1.1-MPI-Linux-Python3.12-x86_64/bin/paraview --script=load_band_ab.py</pre>
+<p class="prose">B1・B0・A0′・B1−B0 を縦にずらして並べ、M/M<sub>Euler</sub> − 1 (差は dM_pct) を Turbo の ±0.5 % で色付けする。変数は Mach、M_over_6_minus1_pct、M_vs_Euler_pct、dpdx_nd (= (r<sub>t</sub>/p) ∂p/∂x)、P、T、rho、Ux、Uy。座標は r<sub>t</sub> 単位。全変数の生の結果は各 run の <code>res_*.xmf</code> をそのまま開けばよい。説明は同じディレクトリの <code>README.txt</code>。</p>
+</section>
+
+<footer>
+  <p>図の生成: <code>case/45.isobutane_m6_d155/viz_band_ab.py</code> (数値 <code>_band_ab/viz/numbers.json</code>)。判定量: <code>eval_band_ab.py</code> → <code>_band_ab/cfd_ab.json</code>、新 Euler 参照 <code>_band_ab/cfd_ab_newEuler.json</code>。run 索引の正本は <code>case/45.isobutane_m6_d155/README.md</code>。本ページは 2026-10-04 時点のスナップショット。</p>
+</footer>
+</div>
+
+<div class="lb" id="lb" hidden><button type="button" class="x" id="lbx">閉じる (Esc)</button><img id="lbimg" alt=""></div>
+<script>
+(function(){
+  var lb = document.getElementById('lb'), im = document.getElementById('lbimg');
+  function close(){ lb.hidden = true; im.removeAttribute('src'); }
+  document.querySelectorAll('figure button').forEach(function(b){
+    b.addEventListener('click', function(){ var i = b.querySelector('img'); im.src = i.src; im.alt = i.alt; lb.hidden = false; lb.scrollTo(0,0); document.getElementById('lbx').focus(); });
+  });
+  document.getElementById('lbx').addEventListener('click', close);
+  lb.addEventListener('click', function(e){ if (e.target === lb) close(); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !lb.hidden) close(); });
+})();
+</script>

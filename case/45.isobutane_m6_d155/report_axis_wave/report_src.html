@@ -1,0 +1,308 @@
+<title>M6 ノズル軸 M の山</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* layout: 1 本の本文カラム (~68ch) + 図だけ全幅。工学レポートの体裁 — 条件 → 方法 → 結果 → 特定できたこと */
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1b2330; --muted: #5a6577; --rule: #d9dee6;
+  --accent: #1f5fa8; --accent-soft: #e6eef8; --warn: #a1520a; --warn-soft: #fbf0e3; --ok: #2d7a46;
+  --f-body: "IBM Plex Sans JP", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --fig-bg: #ffffff;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161d; --panel: #1a2029; --ink: #e3e8ef; --muted: #9aa5b5; --rule: #2c3442;
+  --accent: #7fb0ea; --accent-soft: #1d2a3b; --warn: #f0a868; --warn-soft: #2e2318; --ok: #7cc893;
+  --fig-bg: #ffffff; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12161d; --panel: #1a2029; --ink: #e3e8ef; --muted: #9aa5b5; --rule: #2c3442;
+  --accent: #7fb0ea; --accent-soft: #1d2a3b; --warn: #f0a868; --warn-soft: #2e2318; --ok: #7cc893;
+  --fig-bg: #ffffff; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.75; }
+.wrap { max-width: 980px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 64px; }
+.prose { max-width: 70ch; }
+h1 { font-size: 1.75rem; line-height: 1.3; margin: 0 0 .3em; text-wrap: balance; letter-spacing: .01em; }
+h2 { font-size: 1.25rem; margin: 2.6em 0 .6em; padding-top: .9em; border-top: 2px solid var(--ink); text-wrap: balance; }
+h3 { font-size: 1.05rem; margin: 2em 0 .4em; color: var(--accent); }
+h4 { font-size: .95rem; margin: 1.4em 0 .3em; }
+p, li { margin: .5em 0; }
+.eyebrow { font-family: var(--f-mono); font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.meta { color: var(--muted); font-size: .88rem; }
+code, .mono { font-family: var(--f-mono); font-size: .86em; }
+code { background: var(--accent-soft); padding: .05em .35em; border-radius: 3px; overflow-wrap: anywhere; }
+.lede { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--accent); padding: 14px 18px; margin: 1.4em 0; }
+.lede p { margin: .45em 0; }
+.limit { border-left-color: var(--warn); background: var(--warn-soft); }
+.tbl { overflow-x: auto; margin: .8em 0 1.2em; }
+table { border-collapse: collapse; font-size: .86rem; min-width: 100%; }
+th, td { border-bottom: 1px solid var(--rule); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { font-weight: 500; color: var(--muted); font-size: .8rem; white-space: nowrap; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--f-mono); white-space: nowrap; }
+.pill { display: inline-block; font-family: var(--f-mono); font-size: .74rem; padding: 0 .5em; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.pill.ok { color: var(--ok); } .pill.ng { color: var(--warn); } .pill.na { color: var(--muted); }
+figure { margin: 1.4em 0 2em; }
+figure button { display: block; width: 100%; padding: 0; border: 1px solid var(--rule); background: var(--fig-bg); cursor: zoom-in; border-radius: 4px; }
+figure button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+figure img { display: block; width: 100%; height: auto; }
+figcaption { font-size: .85rem; color: var(--muted); margin-top: .5em; max-width: 90ch; }
+figcaption b { color: var(--ink); }
+.eq { font-family: var(--f-mono); font-size: .88rem; background: var(--panel); border: 1px solid var(--rule); padding: 10px 14px; margin: .7em 0; overflow-x: auto; white-space: pre; line-height: 1.6; }
+.steps { counter-reset: s; list-style: none; padding-left: 0; }
+.steps > li { counter-increment: s; position: relative; padding-left: 2.2em; }
+.steps > li::before { content: counter(s); position: absolute; left: 0; top: .1em; width: 1.5em; height: 1.5em; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-family: var(--f-mono); font-size: .8rem; text-align: center; line-height: 1.5em; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.two > * { min-width: 0; }
+@media (max-width: 720px) { .two { grid-template-columns: 1fr; } }
+.box { background: var(--panel); border: 1px solid var(--rule); padding: 12px 16px; }
+.box h4 { margin-top: .2em; }
+.lb { position: fixed; inset: 0; background: rgba(10,12,16,.92); display: flex; overflow: auto; z-index: 10; padding: env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px); }
+.lb img { margin: auto; max-width: none; background: #fff; }
+.lb .x { position: fixed; top: calc(12px + env(safe-area-inset-top,0px)); right: 16px; background: #fff; color: #111; border: 0; border-radius: 4px; padding: 6px 12px; font: inherit; cursor: pointer; }
+footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid var(--rule); color: var(--muted); font-size: .85rem; }
+@media (prefers-reduced-motion: no-preference) { figure button { transition: border-color .15s; } figure button:hover { border-color: var(--accent); } }
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">case/45.isobutane_m6_d155 · 軸対称 M6 ノズル · 2026-10-04</div>
+  <h1>M6 ノズル試験部の軸 M の山 — 排除厚さ・壁の作り方・場の応答</h1>
+  <p class="meta">対象: イソブタン燃焼ガス M6 ノズル (出口径 1.55 m)。積分法壁 (pass 0) → Euler 差分抽出壁 (pass 1, 2) → 最終壁 の 4 枚の壁と、その NS 解。
+  計画: <code>plans/active/verification-m6-axis-wave-mesh-su2.md</code></p>
+</header>
+
+<div class="lede prose">
+  <p><b>目的</b>: 試験部の軸上 x≈69 r<sub>t</sub> に出る M の山 (最終形で +0.23 %pt) が、排除厚さ δ<sub>r</sub> の求め方・壁の作り方とどう結びついているかを、各段階の δ<sub>r</sub>・壁の 2 階微分・軸 M・場のコンタで並べて示す。</p>
+  <p><b>結論</b>: 山は Euler にも積分法の壁 (run_0022) にも無く、<b>壁を Euler 差分の抽出値に替えた時点で現れる</b>。2 枚の壁の δ<sub>r</sub> の差は x=8〜80 r<sub>t</sub> で 2 % 以内しかないが、その差が作る擾乱は壁 x≈15〜25 から C<sup>−</sup> 特性線に沿って軸へ集まり、軸の x≈57 に谷、x≈69 に山を作る。壁の 2 階微分の細かいガタつきは、山の出ない積分法壁のほうがむしろ大きく、山の有無を説明しない。</p>
+  <p class="limit" style="padding:8px 12px;margin:.6em 0 0"><b>最大の限界</b>: NS の 4 run はどれも <code>check_convergence</code> が NOT CONVERGED (残差プラトー) である。山の高さはスナップショット間で 0.004 %pt 以内しか動かないが、反復誤差の影響幅は未測定。また「どの区間の δ 差が効いているか」は特性線の幾何と差分場から読んだもので、区間を限った A/B はまだ回していない。</p>
+</div>
+
+<!-- ============================================================ 条件 -->
+<section id="analysis-conditions">
+<h2>1. 解析条件</h2>
+
+<h3>(a) 解析領域</h3>
+<figure>
+  <button type="button" aria-label="Figure 1 を原寸で開く"><img src="fig1_domain.png" alt="ノズルの解析領域と境界"></button>
+  <figcaption><b>Figure 1.</b> 解析領域と境界 (<code>case/45.isobutane_m6_d155/run_0038_ns_final_rt77p02/nozzle.h5</code> の <code>MESH/COORD</code> と <code>BCONDS/&lt;physID&gt;/vizBfaceNodes</code>)。軸対称 2D の上半分、入口直管 −12.5 r<sub>t</sub> から出口 x<sub>F</sub>=95.1 r<sub>t</sub>。格子は 1250 × 97 の構造格子で、半径方向は壁側に等比で集中 (第 1 セル 4.5×10<sup>−5</sup> r<sub>w</sub>、比 1.081、軸側第 1 間隔 0.075 r<sub>w</sub>)。run_0022〜0025 も同じ格子トポロジで、壁の形だけが違う。</figcaption>
+</figure>
+
+<h3>(b) 境界条件</h3>
+<p class="prose">4 本の NS run で共通 (<code>bcondConfig.yaml</code> を run_0022 と run_0038 で照合し差分なし)。Euler run は壁がスリップ、他は同じ。</p>
+<div class="tbl"><table>
+<tr><th>physID</th><th>境界</th><th>kind</th><th>値</th><th>備考</th></tr>
+<tr><td class="n">1</td><td>inlet</td><td><code>inlet_Pressure</code></td><td>P<sub>t</sub> 5.5 MPa, T<sub>t</sub> 1600 K, Y(MIXDRY) 0.9142, Y(H<sub>2</sub>O) 0.0858, k 1.0 m²/s², ω 18000 1/s</td><td>一様</td></tr>
+<tr><td class="n">2</td><td>outlet</td><td><code>outlet_statPress</code></td><td>P<sub>s</sub> 2237 Pa (逆流時 P<sub>t</sub> 2237 Pa, T<sub>t</sub> 300 K)</td><td>出口は超音速、コアでは外挿</td></tr>
+<tr><td class="n">3</td><td>wall</td><td><code>wall</code></td><td>断熱 no-slip、壁ノード速度 Dirichlet (<code>nodeWallDirichlet: 1</code>)</td><td>形状は run ごとに違う (§2)</td></tr>
+<tr><td class="n">4</td><td>axis</td><td><code>axis</code></td><td>軸対称の軸 (<code>axisCentroidShift: 1</code>)</td><td></td></tr>
+</table></div>
+
+<h3>(c) 数値設定</h3>
+<div class="tbl"><table>
+<tr><th>run</th><th>壁 (δ<sub>r</sub> の出所)</th><th>r<sub>t</sub> [mm]</th><th>モデル</th><th>CFL / 緩和</th><th>本段 step</th><th>初期場</th></tr>
+<tr><td><code>run_0037_euler_rt77p02</code></td><td>非粘性設計壁 (Euler 参照)</td><td class="n">77.02</td><td>Euler (粘性 0)、65 節点/断面</td><td class="n">6 / 0.7</td><td class="n">12000</td><td>等エントロピー 1D</td></tr>
+<tr><td><code>run_0022_ns_ib_pass0</code></td><td>積分法 (CONTUR)、平滑化なし</td><td class="n">77.10</td><td rowspan="4">node・軸対称・SLAU 2 次・Venkatakrishnan・block-DPLUR 陰解法・SST (dilatationCorrection 2, Kato-Launder) 低 Re 壁</td><td class="n">1 / —</td><td class="n">24000</td><td>run_0021 を補間</td></tr>
+<tr><td><code>run_0023_ns_ib_pass1</code></td><td>run_0022 の場から抽出 (旧 3 次平滑化)</td><td class="n">77.10</td><td class="n">1 / —</td><td class="n">24000</td><td>run_0022</td></tr>
+<tr><td><code>run_0025_ns_ib_pass2_q</code></td><td>run_0023 の場から抽出 (5 次 P-spline λ=1)</td><td class="n">77.10</td><td class="n">1 / —</td><td class="n">24000</td><td>run_0023</td></tr>
+<tr><td><code>run_0038_ns_final_rt77p02</code></td><td>run_0025 の場から抽出 (P-spline、単調化で λ=100)</td><td class="n">77.02</td><td class="n">5 / 0.7</td><td class="n">12000</td><td>run_0025 (warm)</td></tr>
+</table></div>
+<p class="prose meta">Euler 参照: run_0022〜0025 は <code>run_0001_euler_shortest_dry</code> (r<sub>t</sub> 77.1 mm)、run_0038 は run_0037。両者は r<sub>t</sub> 単位では同じ設計なので、軸 M は一致する (Figure 4)。x, r は各 run の r<sub>t</sub> で無次元化。</p>
+
+<h3>(d) 物性</h3>
+<div class="tbl"><table>
+<tr><th>項目</th><th>値 (run_0038 の <code>solverConfig.yaml</code> / <code>species_db.yaml</code> から転記)</th></tr>
+<tr><td>気体</td><td>イソブタン燃焼ガス φ=0.9 を 2 成分で表現: MIXDRY (乾き燃焼ガス、モル分率 CO<sub>2</sub> 0.1255 / O<sub>2</sub> 0.0226 / N<sub>2</sub> 0.8518、M 30.11 g/mol) + H<sub>2</sub>O。質量分率 0.9142 / 0.0858</td></tr>
+<tr><td>熱力学</td><td>熱的完全気体 (semi-perfect)、NASA-9 多項式 (<code>thermalMethod: 2</code>)、比熱は温度依存。凝縮なし (dry)</td></tr>
+<tr><td>輸送</td><td>粘性係数 Sutherland (<code>viscMethod: 1</code>)、熱伝導は Pr<sub>lam</sub> 0.72 一定 (<code>thermCondMethod: 1</code>)、乱流 Pr<sub>t</sub> 0.9、化学種拡散なし</td></tr>
+<tr><td>積分法側</td><td>縁条件は同じ semi-perfect ガスの等エントロピー膨張 (設計壁の MOC 壁 M)、粘性 Sutherland、Pr 0.72、回復係数 Pr<sup>1/3</sup></td></tr>
+</table></div>
+
+<h3>(e) 判定ゲート</h3>
+<div class="tbl"><table>
+<tr><th>対象</th><th>判定</th><th>出力</th><th>結論への制約</th></tr>
+<tr><td>run_0037 (Euler)</td><td><code>check_convergence.py</code> 本段</td><td><span class="pill ok">ALL PASS</span> 全列 3.2〜3.6 桁低下</td><td>Euler 参照の場は収束済み</td></tr>
+<tr><td>run_0022 / 0023 / 0025</td><td><code>check_convergence.py</code> 本段 24000 step</td><td><span class="pill ng">NOT CONVERGED</span> ro・roe (0023/0025 は roUx・roUy も) が 2 桁前後でプラトー、roK・roOmega は低下中</td><td>軸 M の値は残差プラトー上の場。山の時間変化は下の行で別途確認</td></tr>
+<tr><td>run_0038</td><td><code>check_convergence.py</code> 本段 12000 step</td><td><span class="pill ng">NOT CONVERGED</span> ro・roUy・roe プラトー (2.5〜2.7 桁)</td><td>同上</td></tr>
+<tr><td>山の高さ b<sub>70</sub> の時系列</td><td>独自 (全スナップショットで b<sub>70</sub> を計算。<code>check_quasisteady.py</code> は軸の山を量として持たない)</td><td>0022: 0.0075 / 0.0066 / 0.0068 · 0023: 0.3421 / 0.3437 / 0.3436 · 0025: 0.3462 / 0.3497 / 0.3491 (8k/16k/24k) · 0038: 0.2310 / 0.2316 / 0.2324 (4k/8k/12k) [%pt]</td><td>山は過渡ではない (変動 ≤ 0.004 %pt)</td></tr>
+<tr><td>メッシュ品質</td><td><code>check_mesh_quality.py</code> AR ≤ 1000, skew ≤ 0.9</td><td>NS 4 run <span class="pill ng">SOFT-PASS</span> AR 最大 1208 (0.07 % のセルが &gt;1000、壁第 1 層)、skew 最大 0.44 · Euler <span class="pill ok">PASS</span> AR 12.4</td><td>AR 超過は壁第 1 層のみ。軸近傍の格子には関係しない</td></tr>
+<tr><td>壁解像 y<sub>1</sub><sup>+</sup></td><td><code>check_wall_resolution.py</code></td><td><span class="pill na">未実行</span></td><td>本ページの主張 (コアの擾乱) には直接効かないが、δ<sub>r</sub> の絶対値の精度は未確認</td></tr>
+</table></div>
+</section>
+
+<!-- ============================================================ 方法 -->
+<section id="methods">
+<h2>2. 排除厚さの求め方と壁の作り方</h2>
+
+<p class="prose">壁は「非粘性設計壁 r<sub>inv</sub>(x) に半径方向の排除厚 δ<sub>r</sub>(x) を足す」ことで作る。δ<sub>r</sub> の出所が 2 通りある: 1 発目は境界層積分法、2 回目以降は前回の NS 場と Euler 参照の差から測る。</p>
+
+<h3>2.1 積分法 (CONTUR 型運動量積分) — pass 0 の壁</h3>
+<p class="prose">実装: <code>design/forge_design/feedback/deltastar_integral.py</code>。Sivells CONTUR (AEDC-TR-78-63 §5) の軸対称 von Kármán 運動量積分を、入口から出口まで 1 本の常微分方程式として前進積分する。</p>
+<div class="eq">dθ/dx + θ [ (2 − M² + H) / (M (1 + (γ−1)/2·M²)) · dM/dx  +  (1/r_w) dr_w/dx ]  =  (C_f / 2) · sec φ_w        (CONTUR Eq. 61)</div>
+<ol class="steps prose">
+  <li><b>縁条件は設計壁から決め打ち</b>: 縁マッハ数 M<sub>e</sub>(x) は、スロート上流は A/A* の亜音速枝、下流は逆 MOC が出した設計壁上の M。T<sub>e</sub>, p<sub>e</sub>, ρ<sub>e</sub>, u<sub>e</sub> は semi-perfect ガスの等エントロピー関係から。<b>境界層が主流に与える影響 (相互作用) は入っていない</b>。</li>
+  <li><b>速度・温度分布を仮定</b>: u/u<sub>e</sub> = (z/δ)<sup>1/N</sup>、温度は Crocco 型の 2 次式、断熱壁 T<sub>w</sub> = T<sub>aw</sub> = T<sub>e</sub>(1 + Pr<sup>1/3</sup>(γ−1)/2·M²)。N は Re<sub>δ</sub> の関数で、CONTUR Fig. 10 を折れ線テーブルにしたもの。</li>
+  <li><b>θ から δ を根探索</b>: 各ステーションで、横曲率の重み (1 − z cos φ/r<sub>w</sub>) 込みの θ・δ* を 16 点 Gauss 積分し、与えられた θ に合う δ を Brent 法で解く。H = δ*/θ が決まる。</li>
+  <li><b>摩擦</b>: Spalding–Chi 型の圧縮性変換 (F<sub>c</sub>, F<sub>Rδ</sub> = μ<sub>e</sub>/μ<sub>w</sub>) と C<sub>fi</sub> = 0.0773 / [(log Re<sub>θi</sub> + 4.561)(log Re<sub>θi</sub> − 0.546)]。</li>
+  <li><b>入口の θ<sub>0</sub></b>: 入口直管長 (0.0386 m) を仮想発達長とする乱流平板 θ<sub>0</sub> = 0.036 x<sub>v</sub> Re<sub>x</sub><sup>−0.2</sup> = 0.119 mm。</li>
+  <li><b>出力</b>: 壁法線方向の δ*<sub>n</sub>(x) を 1500 点で出し、半径方向に直して δ<sub>r</sub> = δ*<sub>n</sub> / cos θ<sub>w</sub>。スロートで 0.0011 r<sub>t</sub>、出口で 0.70 r<sub>t</sub>。</li>
+</ol>
+<p class="prose meta">run_0022 の時点ではこの出力を平滑化せずに壁へ渡していた。現行コードは同じ 5 次 P-spline (§2.2 の 5) を通す。</p>
+
+<h3>2.2 Euler 差分からの抽出 (帯局所参照) — pass 1 以降の壁</h3>
+<p class="prose">実装: <code>design/forge_design/metrics/deltastar.py::band_local_deficit</code> と <code>feedback/deltastar_loop.py</code>。考え方は「NS 場の質量流束 ρU<sub>x</sub> が、同じ設計の非粘性解 (固定した Euler run) に比べて壁近くでどれだけ足りないか」を断面ごとに測り、その不足を運ぶのに要る半径方向の厚さを δ<sub>r</sub> とする。</p>
+<ol class="steps prose">
+  <li><b>断面の対応づけ</b>: 同じ x の断面で、NS 側を η<sub>NS</sub> = r / (r<sub>w,NS</sub> − δ<sub>in</sub>)、Euler 側を η<sub>E</sub> = r / r<sub>inv</sub> と正規化して重ねる。δ<sub>in</sub> はその NS run の壁に足してあった δ<sub>r</sub>。固定点では NS のコアは設計壁の非粘性流に一致するはずなので、「足した分を引いた壁」で揃える (物理壁で正規化すると、M6 では 1.5〜7 % 半径を引き伸ばしてしまい、膨張部で 10〜20 % の偽欠損が出る)。</li>
+  <li><b>参照プロファイル q<sub>ref</sub> を作る</b>: 境界層のすぐ外の帯 y ∈ [y<sub>b</sub>, 1.5 y<sub>b</sub>] (y は壁からの距離) で比 q<sub>NS</sub>/q<sub>E</sub> を y の 1 次式で最小二乗フィットし、壁側 y &lt; y<sub>b</sub> へ延長した比を Euler の q に掛けたものを q<sub>ref</sub> とする。y<sub>b</sub> は max(1.5 δ<sub>in</sub>, 0.02 r<sub>w</sub>) から始め、帯の中で比が 1 % 以上変わる・帯の比がコア比より 5 % 低い・帯の中に欠損が 10 % 以上残る、のどれかなら 1.25 倍ずつ広げる (最大 14 回)。</li>
+  <li><b>欠損と等価半径</b>:</li>
+</ol>
+<div class="eq">D = 2π ∫_{y&lt;y_b} (q_ref − q_NS) r dr          (q = ρ U_x)
+2π ∫_{r_eff}^{r_w} q_ref r dr = D   →   δ_r = r_w − r_eff</div>
+<ol class="steps prose" start="4" style="counter-reset: s 3">
+  <li><b>ゲート</b>: D &lt; 0・根なし・NaN は「hard」で前回値を保持。帯フィットの RMS &gt; 0.5 %、帯幅を 3 倍/6 倍にしたときの感度 &gt; 5 %、帯内残留欠損 &gt; 10 % は「soft」(使うが記録)。</li>
+  <li><b>平滑化</b>: 断面ごとの生値 (1250 点、ノイズ 4〜8 %) を平滑化する。<b>旧 (run_0023 の壁)</b>: 3 次平滑化スプライン。<b>新 (run_0025 以降)</b>: 5 次 B-spline + 係数の 3 階差分ペナルティ (P-spline)。ノットは ξ = √(x − x<sub>0</sub> + 4) で等間隔 (物理で約 2 r<sub>t</sub> 間隔、スロート側が密)、λ = 1。壁が x ≥ 0.5 で単調でなくなれば λ を 10 倍ずつ上げる (run_0025 → 最終壁では λ = 100 まで上がった)。</li>
+  <li><b>緩和</b>: δ<sub>next</sub> = (1 − ω) δ<sub>in</sub> + ω δ<sub>extracted</sub>、本系列は ω = 1。</li>
+</ol>
+
+<h3>2.3 δ<sub>r</sub> から実際の壁へ</h3>
+<p class="prose">実装: <code>design/forge_design/geometry/wall_axismach.py::PhysicalNozzleWall</code> (offset = radial)。以下のとおり、<b>平滑化は δ<sub>r</sub> の段階だけで、壁そのものは補間スプライン (点を必ず通る) で作る</b>。δ<sub>r</sub> に残ったガタつきは壁の 2 階微分にそのまま乗る。</p>
+<ol class="steps prose">
+  <li>設計壁 (逆 MOC の 334 点を通るクランプ 5 次 B-spline) を、入口から x<sub>F</sub> まで 3000 点で評価する。</li>
+  <li>各点に δ<sub>r</sub>(x) を足す。δ<sub>r</sub> は CSV (1250 点) から<b>線形補間</b>で取る。</li>
+  <li>足した点列から真の幾何スロート (r′ = 0 の点) を微小 λ の平滑化スプラインで探し、スロート曲率は 1 パラメータの最小二乗で推定する。</li>
+  <li><b>下流</b>: スロート (r′ = 0, r″ = κ<sub>t</sub> でクランプ) から出口まで、全点を通る<b>補間 5 次 B-spline</b>。<b>上流</b>: 入口直管からスロートまで 5 次 Hermite で作り直す。</li>
+  <li>メッシュ生成 (<code>meshing/mesh2d.py</code>) はこのスプラインを 1250 個の x 断面で評価し、半径方向に 97 点を等比で並べる。</li>
+</ol>
+<p class="prose">本ページの壁は、この経路を各 run の入力から再実行して作り直し、保存されている <code>wall_physical.csv</code> と 4 本とも最大 1.2×10<sup>−15</sup> m で一致することを確認した上で微分している (Figure 3)。</p>
+</section>
+
+<!-- ============================================================ 結果 -->
+<section id="results">
+<h2>3. 結果</h2>
+
+<h3>3.1 各手法の排除厚さ δ<sub>r</sub>(x)</h3>
+<figure>
+  <button type="button" aria-label="Figure 2 を原寸で開く"><img src="fig3_delta_r.png" alt="各手法の排除厚さ分布"></button>
+  <figcaption><b>Figure 2.</b> 壁に載せた δ<sub>r</sub>(x)。(a) 全体。線は各壁が実際に読んだ値 (<code>run_0022_ns_ib_pass0/delta_r_initial.csv</code>、<code>run_0022…/delta_r_next.csv</code>、<code>run_0023…/delta_r_next.csv</code>、<code>run_0025…/delta_r_next.csv</code> の 2 列目)。点は各 run の最終場から Euler 差分で抽出した生値 (<code>delta_r_equiv.csv</code>、3 点に 1 点)。(b) 積分法に対する比 [%]。(c) x = −1〜30 の拡大。</figcaption>
+</figure>
+<div class="tbl"><table>
+<tr><th>x / r<sub>t</sub></th><th class="n">5</th><th class="n">10</th><th class="n">15</th><th class="n">20</th><th class="n">25</th><th class="n">30</th><th class="n">40</th><th class="n">60</th><th class="n">80</th><th class="n">94</th></tr>
+<tr><td>積分法 (run_0022 の壁)</td><td class="n">0.01762</td><td class="n">0.04497</td><td class="n">0.07428</td><td class="n">0.10689</td><td class="n">0.14251</td><td class="n">0.18069</td><td class="n">0.26300</td><td class="n">0.44006</td><td class="n">0.60759</td><td class="n">0.69423</td></tr>
+<tr><td>pass 1 (run_0023 の壁)</td><td class="n">0.01745</td><td class="n">0.04489</td><td class="n">0.07431</td><td class="n">0.10566</td><td class="n">0.14200</td><td class="n">0.18083</td><td class="n">0.26357</td><td class="n">0.43909</td><td class="n">0.60158</td><td class="n">0.67668</td></tr>
+<tr><td>pass 2 (run_0025 の壁)</td><td class="n">0.01744</td><td class="n">0.04482</td><td class="n">0.07424</td><td class="n">0.10575</td><td class="n">0.14177</td><td class="n">0.18068</td><td class="n">0.26326</td><td class="n">0.43858</td><td class="n">0.60134</td><td class="n">0.67829</td></tr>
+<tr><td>最終 (run_0038 の壁)</td><td class="n">0.01752</td><td class="n">0.04486</td><td class="n">0.07426</td><td class="n">0.10607</td><td class="n">0.14171</td><td class="n">0.18067</td><td class="n">0.26328</td><td class="n">0.43859</td><td class="n">0.60005</td><td class="n">0.68286</td></tr>
+</table></div>
+<p class="prose">積分法と抽出値の差は、x = 8〜80 r<sub>t</sub> でほぼ 1 % 以内 (x≈20 で −0.8〜−1.2 %、x = 30〜40 で +0.1〜0.2 %)。違いが大きいのはスロート直後 (x &lt; 6、抽出値が +5〜40 %、ただし絶対値は 0.001〜0.01 r<sub>t</sub>) と出口側 (x = 80〜94、−1.0〜−2.6 %) である。</p>
+
+<h3>3.2 壁の 2 階微分</h3>
+<figure>
+  <button type="button" aria-label="Figure 3 を原寸で開く"><img src="fig4_wall_curvature.png" alt="壁の2階微分"></button>
+  <figcaption><b>Figure 3.</b> §2.3 の経路で再構成した壁スプラインの 2 階微分 (Δx = 0.005 r<sub>t</sub> で評価)。(a) r<sub>w</sub>″ と設計壁 r<sub>inv</sub>″。(b) 差 r<sub>w</sub>″ − r<sub>inv</sub>″ (= 壁に実際に乗った δ<sub>r</sub>″)。(c) (b) から幅 2 r<sub>t</sub> の移動平均を引いた高周波成分。</figcaption>
+</figure>
+<div class="tbl"><table>
+<tr><th>壁</th><th>δ<sub>r</sub> の平滑化</th><th class="n">δ<sub>r</sub>″ RMS (x=3〜90)</th><th class="n">高周波 RMS</th><th class="n">高周波 最大</th><th class="n">軸の山 b<sub>70</sub> [%pt]</th></tr>
+<tr><td>積分法 (run_0022)</td><td>なし</td><td class="n">5.97e−4</td><td class="n">5.74e−4</td><td class="n">6.2e−3</td><td class="n">0.007</td></tr>
+<tr><td>pass 1 (run_0023)</td><td>旧 3 次平滑化</td><td class="n">7.16e−4</td><td class="n">6.08e−4</td><td class="n">8.3e−3</td><td class="n">0.344</td></tr>
+<tr><td>pass 2 (run_0025)</td><td>5 次 P-spline λ=1</td><td class="n">2.90e−4</td><td class="n">2.32e−4</td><td class="n">2.3e−3</td><td class="n">0.349</td></tr>
+<tr><td>最終 (run_0038)</td><td>5 次 P-spline λ=100</td><td class="n">2.33e−4</td><td class="n">1.86e−4</td><td class="n">1.8e−3</td><td class="n">0.232</td></tr>
+</table></div>
+<p class="prose">単位は 1/r<sub>t</sub>。比較の目安として、設計壁の |r<sub>inv</sub>″| は x = 3〜90 で最大 1.4×10<sup>−2</sup>。</p>
+<ul class="prose">
+  <li><b>ご懸念のガタつきは実在する</b>。積分法の壁は δ<sub>r</sub> を平滑化せずに線形補間で載せているため、2 階微分に鋸歯状のスパイクが等間隔に並ぶ (最大 6×10<sup>−3</sup>、設計壁の曲率の 4 割)。旧 3 次平滑化の壁 (pass 1) は、x ≈ 20 に局所的な曲率の振れ (±0.004) があり、x &gt; 88 で大きく振動する。</li>
+  <li><b>ただし、ガタつきの大きさは山と対応していない</b>。最もガタつく積分法壁で山は出ず (0.007)、ガタつきを 3 分の 1 にした P-spline 壁 (pass 2) で山は 0.35 のまま残る。</li>
+</ul>
+
+<h3>3.3 軸の M</h3>
+<figure>
+  <button type="button" aria-label="Figure 4 を原寸で開く"><img src="fig5_axis_mach.png" alt="軸上のマッハ数分布"></button>
+  <figcaption><b>Figure 4.</b> (a) 軸上 (r = 0) の M / 6 − 1。(b) 軸上の各 NS と同じ設計の Euler との比。(c) r / r<sub>w</sub> = 0.1 での同じ比。M = |U| / <code>sonic</code>、各 run の最終スナップショット (run_0022〜0025: <code>res_24000.h5</code>、run_0038: <code>res_12000.h5</code>、Euler: <code>res_12000.h5</code>)。x 方向は 0.1 r<sub>t</sub> 間隔、半径方向は行内の線形補間。</figcaption>
+</figure>
+<div class="tbl"><table>
+<tr><th>run</th><th class="n">山 b<sub>70</sub> 軸 [%pt] / 位置</th><th class="n">山 b<sub>70</sub> r/r<sub>w</sub>=0.1</th><th class="n">x≈35〜40 の山 (軸)</th><th class="n">x=42〜94 の振れ幅 (軸) [%]</th></tr>
+<tr><td>Euler run_0037 (M/6−1)</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">0.034</td></tr>
+<tr><td>run_0022 積分法</td><td class="n">0.007 / 64.8</td><td class="n">0.004</td><td class="n">0.067 / 40.5</td><td class="n">0.080</td></tr>
+<tr><td>run_0023 pass 1</td><td class="n">0.344 / 69.3</td><td class="n">0.106</td><td class="n">0.039 / 25.0</td><td class="n">0.641</td></tr>
+<tr><td>run_0025 pass 2</td><td class="n">0.349 / 69.1</td><td class="n">0.115</td><td class="n">0.056 / 28.4</td><td class="n">0.589</td></tr>
+<tr><td>run_0038 最終</td><td class="n">0.232 / 69.7</td><td class="n">0.112</td><td class="n">0.089 / 39.2</td><td class="n">0.309</td></tr>
+</table></div>
+<p class="prose meta">b<sub>70</sub> = max<sub>x∈[60,80]</sub> ΔM − median<sub>x∈[45,90]</sub> ΔM、ΔM = M<sub>NS</sub>/M<sub>Euler</sub> − 1。</p>
+<ul class="prose">
+  <li><b>Euler</b>: 試験部の軸 M は 6 から +0.00〜+0.03 %。波は無い。</li>
+  <li><b>積分法の壁</b>: Euler より一様に +0.13 % 高いだけで、x 方向は平ら。一様な +0.13 % は軸ノードだけに出る既知のスパイクで、r/r<sub>w</sub> = 0.1 では消える。</li>
+  <li><b>抽出壁 3 枚</b>: どれも x≈57 に谷、x≈69 に山。<b>r/r<sub>w</sub> = 0.1 では 3 枚の波形がほぼ重なる</b> (山 0.106 / 0.115 / 0.112)。最終壁で小さくなったのは主に軸上の値 (0.35 → 0.23) である。</li>
+</ul>
+
+<h3>3.4 場のコンタ</h3>
+<figure>
+  <button type="button" aria-label="Figure 5 を原寸で開く"><img src="fig6_mach.png" alt="マッハ数コンタ"></button>
+  <figcaption><b>Figure 5.</b> マッハ数 (<code>run_0038_ns_final_rt77p02/res_12000.h5</code>、最大 6.016)。0.2 % 級の山はこの目盛では見えない。</figcaption>
+</figure>
+<figure>
+  <button type="button" aria-label="Figure 6 を原寸で開く"><img src="fig7_mach_finestructure.png" alt="試験部のマッハ数微細構造"></button>
+  <figcaption><b>Figure 6.</b> 試験部の M/6 − 1 を ±0.8 % で頭打ちにしたもの。上から run_0022 (積分法壁、<code>res_24000</code>)、run_0023 (pass 1、<code>res_24000</code>)、run_0038 (最終、<code>res_12000</code>)。白線は run_0022 の場で追った C<sup>−</sup> 特性線 (壁 x = 4, 6, …, 40 r<sub>t</sub> 発)。pass 1 では軸の x≈65〜75 に橙の領域がある。</figcaption>
+</figure>
+<figure>
+  <button type="button" aria-label="Figure 7 を原寸で開く"><img src="fig8_dM_wallchange.png" alt="壁を替えたときのマッハ数差"></button>
+  <figcaption><b>Figure 7.</b> 積分法壁 (run_0022) からの M の変化 100·(M/M<sub>0022</sub> − 1) [%]。±0.5 % で頭打ち。同じ格子トポロジの (i, j) 節点どうしで比較 (run_0038 は r<sub>t</sub> が 0.1 % 違うので、r<sub>t</sub> 単位の座標が 0.1 % 以内でずれる)。黒線は run_0022 の場の C<sup>−</sup> 特性線。最下段は run_0023 − run_0022 の x = 0〜40 拡大。</figcaption>
+</figure>
+<figure>
+  <button type="button" aria-label="Figure 8 を原寸で開く"><img src="fig9_dpdx.png" alt="無次元圧力勾配"></button>
+  <figcaption><b>Figure 8.</b> 無次元圧力勾配 (r<sub>t</sub>/p) ∂p/∂x (ソルバ出力 <code>dPdx</code> を静圧で割り r<sub>t</sub> = 77.1 mm を掛けたもの)。上: run_0022、中: run_0023 (±0.02 で頭打ち)、下: 差 run_0023 − run_0022 (±0.004 で頭打ち)。</figcaption>
+</figure>
+<ul class="prose">
+  <li><b>擾乱の通り道</b>: Figure 7 の pass 1 では、壁 x≈20〜22 (r≈5.7) から出た負の帯が C<sup>−</sup> 特性線に沿って下り、軸の x≈55〜62 に届く。その後ろに正の帯が続き、軸の x≈65〜75 で強まる。帯は軸に近づくほど濃くなる。Figure 8 の差でも、同じ経路の波と、軸上の +/−/+ の交互パターン (x≈50〜55 / 60〜66 / 70〜77) が見える。</li>
+  <li><b>平滑化した壁でも同じ経路</b>: pass 2 と最終壁 (Figure 7 の 2・3 段目) では、壁際の起点ははっきりしないが、同じ特性線の束 (壁 x≈15〜25 発) に沿って弱い帯が軸の x≈55〜75 に届く。最終壁では帯が弱い。</li>
+  <li><b>出口側の壁際</b>: pass 1 の壁は x &gt; 88 で 2 階微分が大きく振動しており (Figure 3)、壁際 x≈88〜95 に短い波列が出る (Figure 7 上段右・Figure 8 中段右)。これは C<sup>−</sup> の着地点 (下表) から見て、試験部の軸には届かない。</li>
+</ul>
+<p class="prose">run_0022 の場で追った C<sup>−</sup> 特性線 (dr/dx = tan(θ − μ)、壁の境界層外縁 η = 0.985 から出発) の軸への着地点:</p>
+<div class="tbl"><table>
+<tr><th>壁の出発点 x</th><th class="n">4</th><th class="n">10</th><th class="n">16</th><th class="n">18</th><th class="n">20</th><th class="n">22</th><th class="n">24</th><th class="n">26</th><th class="n">28</th><th class="n">30</th><th class="n">36</th><th class="n">40</th></tr>
+<tr><td>軸への着地 x</td><td class="n">15.4</td><td class="n">40.7</td><td class="n">53.7</td><td class="n">57.5</td><td class="n">61.1</td><td class="n">64.5</td><td class="n">67.8</td><td class="n">71.0</td><td class="n">74.1</td><td class="n">77.1</td><td class="n">85.7</td><td class="n">91.0</td></tr>
+</table></div>
+<p class="prose">軸の谷 x≈57 と山 x≈69 は、壁の x≈18 と x≈24〜25 から出た特性線の着地点に当たる。</p>
+</section>
+
+<!-- ============================================================ まとめ -->
+<section id="findings">
+<h2>4. 特定できたこと / できなかったこと</h2>
+<div class="two">
+  <div class="box">
+    <h4>特定できたこと (観測)</h4>
+    <ul>
+      <li>Euler と積分法の壁では、試験部の軸 M に x 方向の山は無い (b<sub>70</sub> 0.007 %pt 以下)。</li>
+      <li>抽出壁 3 枚すべてで、x≈57 の谷と x≈69 の山が出る。山の高さは時間的に落ち着いている (変動 ≤ 0.004 %pt)。</li>
+      <li>積分法と抽出値の δ<sub>r</sub> の差は x = 8〜80 で 1〜2 % 程度にすぎない。</li>
+      <li>その差による擾乱は、壁 x≈15〜25 から C<sup>−</sup> 特性線に沿って軸へ集まり、軸に近いほど強い。</li>
+      <li>壁の 2 階微分の高周波のガタつきは、山の出ない積分法壁が最も大きく、山の大きさとは対応しない。</li>
+      <li>軸側の半径方向格子を 6 倍細かくしても、山の 88 % が残る (別途の A/B: <code>run_0041_ns_axgap0125</code>)。</li>
+    </ul>
+  </div>
+  <div class="box">
+    <h4>特定できていないこと</h4>
+    <ul>
+      <li>δ<sub>r</sub> の差のうち、どの区間 (x≈15〜25 か、スロート直後 x&lt;6 か) が効いているか。区間だけを入れ替えた A/B は未実施。</li>
+      <li>軸への集束が物理なのか、軸の扱いで増幅された数値なのか。r/r<sub>w</sub> = 0.1 の波形が 3 枚の抽出壁でほぼ同じで、軸上の値だけ違う点は、軸ノードの寄与を疑わせるが、切り分けていない。</li>
+      <li>最終壁で軸の山が 0.35 → 0.23 に減った理由。平滑化 (λ=1 → 100)、もう 1 回の抽出、r<sub>t</sub> の 0.1 % 変更、が同時に変わっている。</li>
+      <li>NS の残差プラトーが山に与える影響の幅。</li>
+    </ul>
+  </div>
+</div>
+</section>
+
+<footer>
+  <p>run 索引の正本は <code>case/45.isobutane_m6_d155/README.md</code> の「計算 run 一覧」、検証計画と判断の記録は <code>plans/active/verification-m6-axis-wave-mesh-su2.md</code>。本ページは 2026-10-04 時点のスナップショット。</p>
+  <p>図と数値の生成: <code>case/45.isobutane_m6_d155/report_axis_wave.py</code> (数値は <code>report_axis_wave/numbers.json</code>)。軸 M の指標: <code>axis_wave_compare.py</code>。</p>
+</footer>
+</div>
+
+<div class="lb" id="lb" hidden><button type="button" class="x" id="lbx">閉じる (Esc)</button><img id="lbimg" alt=""></div>
+<script>
+(function(){
+  var lb = document.getElementById('lb'), im = document.getElementById('lbimg');
+  function close(){ lb.hidden = true; im.removeAttribute('src'); }
+  document.querySelectorAll('figure button').forEach(function(b){
+    b.addEventListener('click', function(){ var i = b.querySelector('img'); im.src = i.src; im.alt = i.alt; lb.hidden = false; lb.scrollTo(0,0); document.getElementById('lbx').focus(); });
+  });
+  document.getElementById('lbx').addEventListener('click', close);
+  lb.addEventListener('click', function(e){ if (e.target === lb) close(); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !lb.hidden) close(); });
+})();
+</script>

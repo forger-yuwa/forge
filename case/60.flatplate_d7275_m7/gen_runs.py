@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""case/60 (TN D-7275 試験 26、8-ft HTST 大型校正パネル) の forge run を生成して段階起動する。
+"""case/60 (TN D-7275 試験 26・28、8-ft HTST 大型校正パネル) の forge run を生成して段階起動する。
 
     python3 gen_runs.py --run run_0001_t26 [--mesh fp_d7275_y3] [--forge-tools DIR] [--dry]
 
@@ -25,28 +25,58 @@ from gas_htst import htst                                       # noqa: E402
 
 ENV = dict(os.environ, FORGE_CUDA_BLOCKSIZE="128",
            LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/hdf5/serial:" + os.environ.get("LD_LIBRARY_PATH", ""))
-M_INF, P_INF, TT = 6.64, 2117.0, 1867.0
 TW = 300.0
+# 試験ごとの Table II / III (digitize_*.json と同じ値)。alpha > 0 は斜め衝撃波の背後の局所状態を平板に平行な入口にする
+TESTS = {
+    26: dict(M=6.64, p=2117.0, Tt=1867.0, alpha=0.0, Taw=1728.0, rvcs=0.413 * 68.89e3),
+    28: dict(M=6.60, p=2144.0, Tt=1817.0, alpha=9.8, Taw=1689.0, rvcs=1.46 * 69.91e3),
+}
 
 
-def freestream():
-    g = htst(TT)
-    h0 = g.h(TT); lo, hi = 100.0, 600.0
+def oblique(g, T1, U1, p1, theta_deg):
+    """熱的完全気体 (h(T)) の斜め衝撃波。弱い解の背後の (T, U, p, ρ, β)。"""
+    from scipy.optimize import brentq
+    r1 = p1 / (g.R * T1)
+
+    def post(beta):
+        un1, ut = U1 * np.sin(beta), U1 * np.cos(beta)
+
+        def f(eps):
+            un2 = un1 * eps; p2 = p1 + r1 * un1 ** 2 * (1 - eps)
+            h2 = g.h(T1) + 0.5 * (un1 ** 2 - un2 ** 2)
+            T2 = brentq(lambda T: g.h(T) - h2, 100, 3000)
+            return p2 - r1 / eps * g.R * T2
+        eps = brentq(f, 0.05, 0.99)
+        un2 = un1 * eps; p2 = p1 + r1 * un1 ** 2 * (1 - eps)
+        T2 = brentq(lambda T: g.h(T) - (g.h(T1) + 0.5 * (un1 ** 2 - un2 ** 2)), 100, 3000)
+        return beta - np.arctan2(un2, ut), T2, float(np.hypot(un2, ut)), p2, r1 / eps
+    M1 = U1 / (g.gamma(T1) * g.R * T1) ** 0.5
+    b = brentq(lambda b: np.degrees(post(b)[0]) - theta_deg, np.arcsin(1 / M1) + 1e-3, np.radians(40))
+    _, T2, U2, p2, r2 = post(b)
+    return dict(T=T2, U=U2, p=p2, rho=r2, beta_deg=float(np.degrees(b)))
+
+
+def freestream(test=26):
+    c = TESTS[test]
+    g = htst(c["Tt"])
+    h0 = g.h(c["Tt"]); lo, hi = 100.0, 600.0
     for _ in range(80):
-        T = 0.5 * (lo + hi); U = M_INF * (g.gamma(T) * g.R * T) ** 0.5
+        T = 0.5 * (lo + hi); U = c["M"] * (g.gamma(T) * g.R * T) ** 0.5
         if g.h(T) + 0.5 * U * U > h0:
             hi = T
         else:
             lo = T
-    ro = P_INF / (g.R * T)
-    k = 1.5 * (0.005 * U) ** 2
-    om = ro * k / (10.0 * g.mu(T))
-    return g, dict(T=T, U=U, rho=ro, p=P_INF, k=k, om=om)
+    free = dict(T=T, U=U, rho=c["p"] / (g.R * T), p=c["p"])
+    loc = oblique(g, T, U, c["p"], c["alpha"]) if c["alpha"] > 0 else dict(free)
+    k = 1.5 * (0.005 * loc["U"]) ** 2          # Tu 0.5 %、μt/μ 10 (入口 = 平板の縁の状態)
+    om = loc["rho"] * k / (10.0 * g.mu(loc["T"]))
+    return g, dict(loc, k=k, om=om, free=free)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True)
+    ap.add_argument("--test", type=int, default=26, choices=sorted(TESTS))
     ap.add_argument("--mesh", default="fp_d7275_y3")
     ap.add_argument("--main-steps", type=int, default=40000)
     ap.add_argument("--out-int", type=int, default=5000)
@@ -54,7 +84,8 @@ def main():
     ap.add_argument("--forge-tools", default=None)
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args()
-    gas, fs = freestream()
+    gas, fs = freestream(a.test)
+    tc = TESTS[a.test]
     rd = HERE / a.run
     if rd.exists():
         raise SystemExit(f"{rd} は既にある。消さない")
@@ -85,13 +116,15 @@ def main():
     sm.write()
     (rd / "solverConfig.yaml").write_text(cfg(stages[0][1]))
     (rd / "case_setup.json").write_text(json.dumps(dict(
-        d7275_test=26, M=M_INF, p_inf=fs["p"], T_inf=fs["T"], U_inf=fs["U"], ro_inf=fs["rho"], Tt=TT, Tw=TW,
-        phi=gas.phi, Y=gas.Y, R=gas.R, Taw_table=1728.0, rhoVcp_star_l=0.413 * 68.89e3, mesh=a.mesh,
+        d7275_test=a.test, M=tc["M"], alpha_deg=tc["alpha"], p_inf=fs["free"]["p"], T_inf=fs["free"]["T"], U_inf=fs["free"]["U"],
+        ro_inf=fs["free"]["rho"], inlet_local=dict(T=fs["T"], U=fs["U"], p=fs["p"], rho=fs["rho"], beta_deg=fs.get("beta_deg")),
+        Tt=tc["Tt"], Tw=TW, phi=gas.phi, Y=gas.Y, R=gas.R, Taw_table=tc["Taw"], rhoVcp_star_l=tc["rvcs"], mesh=a.mesh,
         cuda_blocksize=128, gen_args=sys.argv[1:]), indent=2, ensure_ascii=False))
     mc56.m50.IC_DELTA0 = mc56.IC_DELTA0
     mc56.m50.patch_ic(rd / "mesh.h5", dict(rho=fs["rho"], U=fs["U"], T=fs["T"], p=fs["p"]), gas, TW)
     mc56.seed_turb(rd / "mesh.h5", fs["k"], fs["om"])
-    print(f"{a.run}: T∞ {fs['T']:.2f} K  U∞ {fs['U']:.1f}  ρ∞ {fs['rho']:.5f}  p∞ {fs['p']:.0f}  Tw {TW}")
+    print(f"{a.run}: 試験 {a.test}  入口 (平板の縁) T {fs['T']:.2f} K  U {fs['U']:.1f}  ρ {fs['rho']:.5f}  p {fs['p']:.0f}  Tw {TW}"
+          f"  (自由流 T∞ {fs['free']['T']:.2f} K、β {fs.get('beta_deg')})")
     if a.dry:
         return
     run_tools = Path(a.forge_tools) if a.forge_tools else TOOLS

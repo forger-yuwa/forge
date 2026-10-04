@@ -684,6 +684,19 @@ if __name__ == "__main__":
 
 
 # --- A12: 粘性 δ* 補正 (RANS 経路) ------------------------------------------------
+def delta_r_from_table(x, d):
+    """δ_r の表 (P-spline 平滑化済みの `delta_r_next.csv`) を壁に渡す関数にする: 5 次補間スプライン、範囲外は端値。
+
+    2026-10-05 (plan verification-m6-axis-wave-mesh-su2 §5.1 #8a): 旧実装は np.interp (直線補間) で、表の点ごと
+    (0.09 r_t) の傾きの折れ目を補間 5 次 B-spline の壁が通るため r″ が点間隔の周期で波打っていた (高周波 3〜6e-4 [1/r_t])。
+    平滑化前の生値を渡すと 5 次補間はリンギングするので、平滑化済みの表に限る。"""
+    from scipy.interpolate import make_interp_spline
+    x = np.asarray(x, dtype=float); d = np.asarray(d, dtype=float)
+    spl = make_interp_spline(x, d, k=5)
+    lo, hi = float(x[0]), float(x[-1])
+    return lambda xq, _s=spl, _lo=lo, _hi=hi: _s(np.clip(np.asarray(xq, dtype=float), _lo, _hi))
+
+
 def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                dstar_csv=None, dstar_blend=(6.0, 9.0),
                delta_r_csv=None, offset: str = "normal", euler_ref=None,
@@ -750,14 +763,17 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         res_init = integral_bl(d["wall"], wall_inv, _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]),
                                scale, thermal_bc=tbc,
                                theta0_m=init_cfg.get("theta0_m"), x_virtual_m=init_cfg.get("x_virtual_m"),
-                               a_crocco=float(init_cfg.get("a_crocco", 1.0)), closure=str(init_cfg.get("closure", "contur")))
+                               a_crocco=float(init_cfg.get("a_crocco", 1.0)), closure=str(init_cfg.get("closure", "contur")),
+                               cf_scale=float(init_cfg.get("cf_scale", 1.0)), n_scale=float(init_cfg.get("n_scale", 1.0)))
         # 積分法の出力も同じ 5 次 P-spline で平滑化 (N(Re) テーブルの折れ目などを壁曲率に持ち込まない)
         from ..metrics.deltastar import smooth_delta_quintic
         f_s, sm_diag = smooth_delta_quintic(res_init["x"], res_init["delta_r"], knot_spacing=2.0, lam=1.0,
                                             positive=(p.wall_thermal["mode"] == "adiabatic"))  # 等温は符号付き
         res_init["delta_r_raw_integral"] = res_init["delta_r"].copy()
         res_init["delta_r"] = f_s(res_init["x"])
-        delta_r_x = delta_r_function(res_init)
+        # 壁には平滑化関数そのものを渡す (2026-10-05, plan verification-m6-axis-wave-mesh-su2 §5.1 #8a):
+        # 1500 点の表を np.interp で渡すと点ごとの傾きの折れ目を補間 5 次スプラインが通り、r″ が点間隔で波打つ
+        delta_r_x = f_s
         offset = "radial"
         init_info = dict(res_init["settings"])
         init_info["smooth"] = {"kind": "quintic_pspline", **sm_diag}
@@ -770,7 +786,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         tbl_r = np.loadtxt(delta_r_csv, delimiter=",", skiprows=1)
         if not np.all(np.isfinite(tbl_r[:, 1])):
             raise ValueError("delta_r_csv に非有限値がある (deltastar_loop.extract_and_merge で前回値保持済みの CSV を渡す)")
-        delta_r_x = lambda x, _t=tbl_r: np.interp(x, _t[:, 0], _t[:, 1])
+        delta_r_x = delta_r_from_table(tbl_r[:, 0], tbl_r[:, 1])
         offset = "radial"
     wall = PhysicalNozzleWall(d["wall"], wall_inv, scale, float(p.spec["Pt"]),
                               float(p.spec["Tt"]), _gam_or_gas(p), p.cp, dstar_x=dstar_x,
@@ -801,6 +817,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                       wall_first_blend_x1=float(p.mesh.get("wall_first_blend_x1", 6.0)),
                       wall_first_up_x0=(None if p.mesh.get("wall_first_up_x0") is None else float(p.mesh["wall_first_up_x0"])),
                       wall_first_up_x1=(None if p.mesh.get("wall_first_up_x1") is None else float(p.mesh["wall_first_up_x1"])),
+                      axis_gap_frac=(None if p.mesh.get("axis_gap_frac") is None else float(p.mesh["axis_gap_frac"])),
                       scale=scale)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
@@ -898,7 +915,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "nStepOuter": n, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
             "wall_thermal": p.wall_thermal,
             "ic_from": str(ic_from) if ic_from else None,
-            "mesh": {"ni": mp.ni, "nj": mp.nj, "wall_first_frac": mp.wall_first_frac}}
+            "mesh": {"ni": mp.ni, "nj": int(coords.shape[0] // mp.ni), "wall_first_frac": mp.wall_first_frac,
+                     "axis_gap_frac": mp.axis_gap_frac}}
     if transport is not None:
         # 来歴: 種ごとの輸送物性の指定 (solverConfig の physProp.transport と同じ; 解決結果はソルバの resolved_species 記録)
         info["transport"] = {"source": "gas.transport", "viscMethod": 2, "models": transport}
