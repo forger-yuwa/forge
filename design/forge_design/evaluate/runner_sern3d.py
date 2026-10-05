@@ -133,7 +133,7 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     H = float(p.spec["H_m"]); m = p.raw.get("mesh3d", {}); m2 = p.mesh
     prm = SernMesh3DParams(ni_up=int(m.get("ni_up", 10)), ni_noz=int(m.get("ni_noz", 60)), ni_plume=int(m.get("ni_plume", 110)),
                            nj_top=int(m.get("nj_top", 49)), nj_bot=int(m.get("nj_bot", 31)), nz_in=int(m.get("nz_in", 25)), nz_out=int(m.get("nz_out", 17)),
-                           W=float(m.get("W", 2.0)), Z_ext=float(m.get("Z_ext", 1.5)), z_append=float(m.get("z_append", 0.0)), L_sw=m.get("L_sw"), W_vehicle=m.get("W_vehicle"), L_up=float(m2.get("L_up", 0.5)),
+                           W=float(m.get("W", 2.0)), Z_ext=float(m.get("Z_ext", 1.5)), z_append=float(m.get("z_append", 0.0)), L_sw=m.get("L_sw"), L_sw_exact=bool(m.get("L_sw_exact", False)), W_vehicle=m.get("W_vehicle"), L_up=float(m2.get("L_up", 0.5)),
                            x_out_extra=float(m2.get("x_out_extra", 2.0)), bot_depth=float(m2.get("bot_depth", 3.0)),
                            first_wall_frac=float(m.get("first_wall_frac", m2.get("first_wall_frac", 4e-3))), first_z_frac=float(m.get("first_z_frac", 4e-3)),
                            # 壁が終わった下流の第一層厚 (0 = ブレンドしない = 既定・挙動不変。plan sern-3d §4.41)

@@ -244,5 +244,27 @@ _sf = PHYS_SERN3D["side_far"]
 _sfn = np.unique(np.asarray([n for f in _Bz[_sf] for n in f])) if isinstance(_Bz, dict) and _sf in _Bz else None
 if _sfn is not None:
     check("z_append: side_far は新しい遠方面 (z = Z_far) だけ", np.allclose(_cz[_sfn, 2], _zf1))
+# --- R7b ③: L_sw を物理位置どおりに (L_sw_exact、2026-10-05) ---------------------------------------
+def _sw_end(prm_):
+    c_, h_, B_, info_, _ = generate_sern_mesh3d(d, prm_)
+    q = B_["sidewall_in"]; return float(max(c_[list(f), 0].max() for f in q)) / prm_.scale, c_, h_, B_
+_base = SernMesh3DParams(ni_up=6, ni_noz=20, ni_plume=30, nj_top=15, nj_bot=11, nz_in=7, nz_out=6, W=2.0, Z_ext=1.5,
+                         interface_angle=float(k.TH[-1, 0]), top_ext_angle=d.info["theta_e"])
+x_snap, *_ = _sw_end(replace(_base, L_sw=0.8))
+x_ex, c_ex, h_ex, B_ex = _sw_end(replace(_base, L_sw=0.8, L_sw_exact=True))
+x_ex2, *_ = _sw_end(replace(_base, L_sw=0.8001, L_sw_exact=True))
+check("L_sw 既定 (丸め): 側壁後縁は既存 station (≠ 0.8)", abs(x_snap - 0.8) > 1e-9, f"{x_snap:.6f}")
+check("L_sw_exact: 側壁後縁 = 指定値 0.8", abs(x_ex - 0.8) < 1e-12, f"{x_ex:.12f}")
+check("L_sw_exact: 0.8 と 0.8001 で側壁後縁が違う (連続変数になる)", abs(x_ex2 - 0.8001) < 1e-12 and x_ex2 != x_ex, f"{x_ex2:.12f}")
+nun, miss, extra = closure(h_ex, B_ex)
+check("L_sw_exact: 境界の閉性", miss == 0 and extra == 0, f"missing {miss} extra {extra}")
+_P = c_ex[h_ex]
+_J = np.einsum("ij,ij->i", _P[:, 1] - _P[:, 0], np.cross(_P[:, 3] - _P[:, 0], _P[:, 4] - _P[:, 0]))
+check("L_sw_exact: hex の符号付き Jacobian が同符号・非退化", np.all(_J > 1e-18) or np.all(_J < -1e-18))
+try:
+    _sw_end(replace(_base, L_sw=1.0, L_sw_exact=True)); check("L_sw_exact: カウル後縁と重なる指定は失敗", False)
+except ValueError:
+    check("L_sw_exact: カウル後縁と重なる指定は失敗", True)
+
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)

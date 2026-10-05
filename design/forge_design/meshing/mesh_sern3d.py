@@ -42,6 +42,10 @@ class SernMesh3DParams:
     # **最外セルと同じ間隔で**節点列を足す。既存の z 分布 (共通領域の座標・接続) は変えない。0 = 足さない (既定・挙動不変)
     z_append: float = 0.0
     L_sw: float | None = None  # 側壁の x 範囲 (None → L_cowl)
+    # L_sw を物理位置どおりに置く (plan tooling-nozzle-sern-chain §5.1 R7b ③、2026-10-05)。False (既定・挙動不変) は最寄りの既存 station に丸める
+    # (例: g3 で 0.8 → 0.80910、0.8 と 0.8001 が同じ形になり連続変数にならない)。True はノズル区間の station を区分線形に写して最寄り station を L_sw に置く
+    # (両端固定)。間隔比が L_SW_EXACT_MAX_RATIO を超える・最寄りが区間端 (カウル後縁/上流端) のときは生成を失敗させる
+    L_sw_exact: bool = False
     # カウル板の自由な側端 (z = W/2、側壁が終わった x > L_sw) の節点を上下で共有する。False は 2026-09-22 以前の挙動 (A/B 用):
     # 端の節点まで二重化していたので、双子の双対 CV が互いの間の面を欠いて**閉じていなかった** (|ΣS|/Σ|S| = 0.30 が
     # (i_te − i_sw) × 2 個。`check_dual_closure.py` で検出。plan sern-3d R5r)。板の後縁 (i_te) と同じく、端は 1 節点にする
@@ -116,6 +120,9 @@ def _sern3d_plume(L_cowl, L_ramp, x_out, prm):
         _wake_stations(L_ramp, x_out, nb, fw, prm.x_cluster_w, prm.x_cluster_a)[1:]])
 
 
+L_SW_EXACT_MAX_RATIO = 1.25   # L_sw_exact の写像で各間隔が元の何倍まで変わってよいか (実際は ~1.01)
+
+
 def generate_sern_mesh3d(design, prm: SernMesh3DParams):
     L_cowl = float(design.cowl_xy[-1, 0]); y_te = float(design.cowl_xy[-1, 1])
     tan_c = -y_te / L_cowl if L_cowl > 0 else 0.0
@@ -146,6 +153,24 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
                              float(getattr(prm, "first_wake_frac", 0.0)))
     i_te = int(np.argmin(np.abs(xs - L_cowl))); assert abs(xs[i_te] - L_cowl) < 1e-12
     i_sw = int(np.argmin(np.abs(xs - L_sw)))
+    if prm.L_sw_exact and prm.L_sw is not None:
+        # ノズル区間 [x0, L_cowl] (x0 = 0、角丸めありなら xf2) の station を区分線形に写して、最寄り station を L_sw に置く。
+        # 区間の両端は動かさない。ずらす量は間隔の半分以下なので、間隔比の変化は ~1 % (1 つだけ動かすと最悪 3 倍になる)
+        x0 = xf2 if R_f > 0.0 else 0.0
+        if not (x0 < L_sw < L_cowl):
+            raise ValueError(f"L_sw_exact: L_sw {L_sw} はノズル区間 ({x0}, {L_cowl}) の内側に限る")
+        seg = (xs >= x0 - 1e-15) & (xs <= L_cowl + 1e-15)
+        idx = np.where(seg)[0]
+        i_sw = int(idx[np.argmin(np.abs(xs[idx] - L_sw))])
+        if i_sw in (idx[0], idx[-1]):
+            raise ValueError(f"L_sw_exact: L_sw {L_sw} の最寄り station がノズル区間の端 (カウル後縁/上流端) と重なる")
+        xa = xs[i_sw]
+        xs_new = xs.copy()
+        xs_new[seg] = np.interp(xs[seg], [x0, xa, L_cowl], [x0, L_sw, L_cowl])
+        dd0, dd = np.diff(xs[idx]), np.diff(xs_new[idx])
+        if np.any(dd <= 0.0) or np.max(np.maximum(dd / dd0, dd0 / dd)) > L_SW_EXACT_MAX_RATIO:
+            raise ValueError(f"L_sw_exact: 写像で間隔比が {np.max(np.maximum(dd / dd0, dd0 / dd)):.3f} (上限 {L_SW_EXACT_MAX_RATIO})")
+        xs = xs_new
 
     def y_top(x):
         x = np.asarray(x, dtype=float)
