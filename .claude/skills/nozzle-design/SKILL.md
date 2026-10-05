@@ -22,6 +22,10 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 
 ## 判断の分かれ目
 
+- **既存ノズルで条件 (Pt・Tt・組成・背圧) だけ変えたい** → 正本 §3a: 既存 run の `nozzle.h5` を再利用し `bcondConfig.yaml` を書き換える。
+  **problem YAML の spec/gas を変えて runner/deltastar_loop に通すと壁が作り直される** (それは §1・§2 の設計作業)。
+  組成の lump を変えると化学種の定義が変わり restart_field が拒否する → convert_species_field か等エントロピー初期場。
+
 - **探索段階** (軸長・R・M_knot を振る) は Hall 初期線 + 補間壁 (YAML の既定) と粗い格子で十分。
   **形状を詰める段階**で `wall_repr: joint`・`initial_line: cfd`・`Md_moc_offset` を入れる (ユーザ決定 2026-10-05)。
 - 壁の評価観点 (ユーザの方針): **壁がなめらか (r″ が連続) / 試験部に圧力波が無い / オーバーシュートが小さい** (凝縮を強めるので)。

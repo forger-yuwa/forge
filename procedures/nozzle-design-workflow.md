@@ -119,19 +119,55 @@ M6 (case/45) で実際に通した順番。各段の「何で判定するか」�
 
 ## 3. 作成済みのノズルで Euler / NS を回す
 
-- **problem YAML がある場合 (axismach で作った形状)**:
-  - Euler: `.venv-opt/bin/python -m forge_design.evaluate.runner_axismach PROBLEM RUN_DIR [--stages full|soft|none] [--cfl C] [--implicit-relax 0.7] [--steps N] [--ic-from RUN]`
-  - NS: runner に NS フラグは無い。`deltastar_loop` (`--init-integral` で CONTUR の δ から、`--prev RUN` で前の NS の δ_E から)、
-    または C2 で解いた k_f で `prep_c2pin.py RUN K_F --problem YAML --ic RUN --stages full` → `run_staged_ns`
-    (`case/45.isobutane_m6_d155/run_recal_chain.sh` が手本)。
-- **初期場**: 同じ格子の続きは `restart_field.py SRC_res.h5 DST/nozzle.h5` (ビット一致を検査)、
-  格子が違えば `interp_field.py` (`--ic-from` が内部で使う)。一様初期場からは始めない (等エントロピー初期場か補間)。
-- **外部の壁座標 (CSV・CAD) しか無い場合**: axismach パイプラインに取り込むキーは**未実装**
-  (`wall_csv` 相当なし)。Gmsh `.geo` → `gmsh` → 変換器 → config を手で組む一般経路
-  ([`calculation-workflow.md`](calculation-workflow.md)) を使い、config は `/forge-config` で組む。
-- **判定**: `check_mesh_quality.py` (投入前)、`check_convergence.py` (同一設定の区間)、
-  `check_quasisteady.py` (報告する量そのもの)、NS は `check_wall_resolution.py`。
-  残差が plateau (`NOT CONVERGED`) になるのはこの系の常態 — そのまま記録し、量の準定常で判断する。
+**まず「形状を固定するか」を決める。** problem YAML の `spec` (Pt・Tt)・`gas` を変えて `runner_axismach` や
+`deltastar_loop` に渡すと、`design_chain` が MOC と δ 補正をやり直し、**壁そのものが変わる** (= 作り直し、§1・§2)。
+既にあるノズルで条件だけ変えたいときは、YAML を通さず run ディレクトリの config を直接書き換える (3a)。
+
+### 3a. 形状は固定、入口条件・背圧・組成だけ変えて回す (よくある用途)
+
+既存 run の `nozzle.h5` には物理壁の格子がそのまま入っているので、これを再利用する。
+
+1. **参照 run を選ぶ** — 回したい形状の最終 run (例: `case/45.isobutane_m6_d155/run_0116_ns_recal_final`)。
+   NS なら NS の run、Euler なら Euler の run (壁が違う: Euler は設計壁、NS は物理壁 = 設計壁 + δ_r)。
+2. **新しい run ディレクトリに入力だけ複製する** — `nozzle.h5`・`nozzle.xmf`・`bcondConfig.yaml`・`solverConfig.yaml`・
+   `species_meta.yaml`・`probe.yaml`・`prepare_info.json`・`resolved_species_*.yaml`・`wall_*.csv`・`MESH_QUALITY.txt`。
+   `res_*`・ログ・VERDICT は持ち込まない (既存 run を上書きしない)。
+3. **条件を書き換える** — `bcondConfig.yaml`:
+   - 入口 (`inlet_Pressure`): `Pt` [Pa]、`Tt` [K]、質量分率 `Y0` (乾き成分 MIXDRY)・`Y1` (H2O)、乱流の `k`・`omega`。
+   - 出口 (`outlet_statPress`): 背圧 `Ps` (超音速出口では効かない; 起動時の逆流用 `Pt`・`Tt` と合わせて)。
+   - 乾き成分の中身 (CO2/O2/N2 の比) を変えるときだけ `solverConfig.yaml` の `physProp.species` の `lump` を書き換える
+     (化学種の定義が変わる → 手順 4 の注意)。
+4. **初期場を入れる** —
+   - 化学種の定義が同じ (Pt・Tt・Y0/Y1 だけ変えた): `python3 solver_density_cuda/tools/restart_field.py 参照run/res_最終.h5 新run/nozzle.h5`
+     (参照の収束場から始める。条件の変更が大きいときは段階起動を併用)。
+   - 化学種の定義が変わる (lump の成分比・種の追加): `convert_species_field.py --mode conserve` で変換するか、
+     等エントロピー初期場から段階起動 (restart_field は拒否する)。
+5. **回す** — NS: `run_staged_ns(run, stages="full")` (段階起動; 細分格子は本段 cfl 1)、条件の変更が小さく参照場から続けるなら
+   `stages="none"`。Euler: `run_staged(run, cfl_main=2.0, stages="soft")`。どちらも `design/forge_design/evaluate/runner_axismach.py`。
+   step 数・出力間隔・CFL は `solverConfig.yaml` の `time.last.nStepOuter`・`outStepInterval`・`deltaT.cfl/cfl_pseudo` で決める。
+6. **判定と報告** — `check_convergence.py`・`check_quasisteady.py` (報告する量の時系列)・NS は `check_wall_resolution.py`
+   (Pt・Tt が変わると Re と y1+ が変わる — 再確認する)。報告は `nozzle_report` (Euler 参照は同じ形状の Euler run)。
+   **注意**: 壁は元の条件で設計したもの。条件を変えると境界層の厚さが変わり、出口 M・試験部の一様性は設計値からずれる
+   (それを見るのがこの計算の目的のことが多い)。そのずれを壁に返したいなら §2 の作り直し。
+
+### 3b. 既存の problem YAML から同じ設計を回し直す (作り直しを含む)
+
+- Euler: `.venv-opt/bin/python -m forge_design.evaluate.runner_axismach PROBLEM RUN_DIR [--stages full|soft|none] [--cfl C] [--implicit-relax 0.7] [--steps N] [--ic-from RUN]`
+- NS: runner に NS フラグは無い。`deltastar_loop` (`--init-integral` で CONTUR の δ から、`--prev RUN` で前の NS の δ_E から)、
+  または C2 で解いた k_f で `prep_c2pin.py RUN K_F --problem YAML --ic RUN --stages full` → `run_staged_ns`
+  (`case/45.isobutane_m6_d155/run_recal_chain.sh` が手本)。
+- YAML の Pt・Tt・ガスを変えると壁が変わる (上記)。同じ壁を再現したいだけなら YAML を変えない。
+
+### 3c. 外部の壁座標 (CSV・CAD) しか無い場合
+
+axismach パイプラインに取り込むキーは**未実装** (`wall_csv` 相当なし)。Gmsh `.geo` → `gmsh` → 変換器 → config を手で組む
+一般経路 ([`calculation-workflow.md`](calculation-workflow.md)) を使い、config は skill `forge-config` で組む。
+
+### 共通
+
+- 同じ格子の続きは `restart_field.py` (ビット一致を検査)、格子が違えば `interp_field.py`。一様初期場からは始めない。
+- 判定: `check_mesh_quality.py` (投入前)、`check_convergence.py` (同一設定の区間)、`check_quasisteady.py` (報告する量そのもの)、
+  NS は `check_wall_resolution.py`。残差が plateau (`NOT CONVERGED`) になるのはこの系の常態 — そのまま記録し、量の準定常で判断する。
 
 ## 4. 未実装・注意 (2026-10-06 時点)
 
