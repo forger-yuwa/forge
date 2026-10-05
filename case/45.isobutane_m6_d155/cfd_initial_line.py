@@ -17,7 +17,13 @@ from forge_design.geometry.transonic import HallThroat
 
 
 def load_run_field(run_dir, res=None, n_tail=1):
+    """対応範囲 (codex plan M5): 構造化 node・軸対称・Euler (slip) の run だけ。不適合は拒否する。"""
     rd = Path(run_dir); info = json.loads((rd / "prepare_info.json").read_text()); S = float(info["scale_m"]); ni = int(info["mesh"]["ni"])
+    cfg = (rd / "solverConfig.yaml").read_text()
+    if 'discretization: "node"' not in cfg.replace("'", '"') or "isAxisymmetric: 1" not in cfg:
+        raise ValueError("CFD ピン: node・軸対称の run でない")
+    if info.get("viscous") not in (None, False, "none", "euler"):
+        raise ValueError(f"CFD ピン: Euler run でない (viscous={info.get('viscous')})")
     with h5py.File(rd / "nozzle.h5") as f:
         nc = f["/MESH/COORD"][:].reshape(-1, 3)
     X = (nc[:, 0] / S).reshape(ni, -1); R = (nc[:, 1] / S).reshape(ni, -1)
@@ -55,12 +61,21 @@ class CFDPinnedThroat(HallThroat):
 
     def _build_line(self, ds):
         def slope(p):
-            Mv, tv = self._field(p[0], p[1]); a = tv - np.arcsin(1.0 / max(Mv, 1.0 + 1e-9))
+            if not (self._xs[0] <= p[0] <= self._xs[-1]):
+                raise ValueError(f"CFD ピン: 追跡点 x={p[0]:.4f} が場の窓 [{self._xs[0]:.3f}, {self._xs[-1]:.3f}] の外")
+            Mv, tv = self._field(p[0], p[1])
+            if not (np.isfinite(Mv) and np.isfinite(tv)):
+                raise ValueError(f"CFD ピン: 非有限の場 (x={p[0]:.4f}, r={p[1]:.4f})")
+            if Mv <= 1.0:
+                raise ValueError(f"CFD ピン: 亜音速 M={Mv:.5f} (x={p[0]:.4f}, r={p[1]:.4f}) — スロート特性線が引けない")
+            a = tv - np.arcsin(1.0 / Mv)
             return np.r_[np.cos(a), np.sin(a)]
         p = np.r_[0.0, 1.0 - 1e-6]; P = [p.copy()]
         while p[1] > 0 and len(P) < 400000:
             k1 = slope(p); k2 = slope(p + 0.5 * ds * k1); k3 = slope(p + 0.5 * ds * k2); k4 = slope(p + ds * k3)
             p = p + ds * (k1 + 2 * k2 + 2 * k3 + k4) / 6; P.append(p.copy())
+        if p[1] > 0:
+            raise ValueError("CFD ピン: 軸に到達しない")
         P = np.array(P[:-1]); P = P[P[:, 1] > 0]                           # 軸を跨いだ最後の点は捨てる
         F = np.array([self._field(a, b) for a, b in P])
         nr = P[:, 1] <= 0.05

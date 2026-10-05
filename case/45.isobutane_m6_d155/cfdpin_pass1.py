@@ -60,7 +60,7 @@ gap, gapH = law_gap(dP), law_gap(dH)
 dm = dP["mstar"] / dH["mstar"] - 1
 xx = np.linspace(0, min(mH["x_F"], mP["x_F"]) - 0.01, 20001)
 dshape = sP(xx) - sH(xx) * (1 + 0.5 * dm)       # m* による一様な膨らみ (r ∝ √m*) を除いた形状差
-bands = {f"[{a},{b})": float(np.abs(dshape[(xx >= a) & (xx < b)]).max()) for a, b in ((0, 0.5), (0.5, 5), (5, 15), (15, 40), (40, 95))}
+bands = {f"[{a},{b})": dict(maxabs=float(np.abs(dshape[(xx >= a) & (xx < b)]).max()), min=float(dshape[(xx >= a) & (xx < b)].min()), max=float(dshape[(xx >= a) & (xx < b)].max())) for a, b in ((0, 0.5), (0.5, 5), (5, 15), (15, 40), (40, 95))}
 out = dict(source=str(src), hall=dict(mH, x0=dH["x0"], anchor=list(dH["anchor"]), mstar=dH["mstar"], law_gap_max=gapH),
            pinned=dict(mP, x0=dP["x0"], anchor=list(dP["anchor"]), mstar=dP["mstar"], law_gap_max=gap, x_E=dP["x_E"], x_K=dP["x_K"]),
            mstar_rel=float(dm), shape_change_bands=bands, rF_change=mP["r_F"] - mH["r_F"])
