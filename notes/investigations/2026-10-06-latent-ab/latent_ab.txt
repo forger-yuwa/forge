@@ -1,0 +1,22 @@
+gas MW (DB) 0.01801528 -> fixed 0.0180153
+== (4) positive control: double ΔL = B − A ==
+  T  120.00 K: L_A 2.866958132e+06  L_B 2.864570940e+06  ΔL -2.387192e+03 J/kg (rel -8.33e-04)
+  T  150.00 K: L_A 2.793722228e+06  L_B 2.793256308e+06  ΔL -4.659201e+02 J/kg (rel -1.67e-04)
+  T  199.90 K: L_A 2.674636303e+06  L_B 2.674636302e+06  ΔL -7.350673e-04 J/kg (rel -2.75e-10)
+  T  200.00 K: L_A 2.674398586e+06  L_B 2.674398586e+06  ΔL +0.000000e+00 J/kg (rel +0.00e+00)
+  T  200.10 K: L_A 2.674160872e+06  L_B 2.674160872e+06  ΔL -2.328306e-09 J/kg (rel -8.71e-16)
+  T  207.50 K: L_A 2.656573665e+06  L_B 2.656573665e+06  ΔL -4.656613e-10 J/kg (rel -1.75e-16)
+  T  228.00 K: L_A 2.607880975e+06  L_B 2.607880975e+06  ΔL +0.000000e+00 J/kg (rel +0.00e+00)
+  T  250.00 K: L_A 2.555665245e+06  L_B 2.555665245e+06  ΔL +1.396984e-09 J/kg (rel +5.47e-16)
+  T  300.00 K: L_A 2.438292939e+06  L_B 2.438292939e+06  ΔL -2.328306e-09 J/kg (rel -9.55e-16)
+  T  373.15 K: L_A 2.269078998e+06  L_B 2.269078998e+06  ΔL -2.793968e-09 J/kg (rel -1.23e-15)
+== (1) table coefficients (grid T0 120.15 h 0.25 n 4320): bitwise mismatches c0 c1 c2 c3 ==
+  120-200 K                    intervals   320 : 315 320 320 320
+  199.90-200.15 K (crossing)   intervals     1 : 0 1 1 1
+  200-400 K                    intervals   801 : 0 62 792 784
+  400-1200 K                   intervals  3201 : 0 196 2251 2241
+== (2) device cond_tab_eval: L and L' (200-400 K every 1e-3 K + 200 K neighbours) ==
+  points 200004: L mismatches 6 (max |ΔL| 2.500e-01 J/kg), L' mismatches 26420 (max |ΔL'| 2.441e-03 J/(kg K), max rel 1.03e-06)
+== (3) downstream with the table values (fixed states) ==
+  max |Δ(g L')| over T {207.5..300} x g {1e-4,1e-3,1.1e-2}: 0.000e+00 J/(kg K)   max |Δ(L/(R_v T))|: 0.000e+00
+DONE
