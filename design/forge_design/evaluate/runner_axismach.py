@@ -819,6 +819,10 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         # 壁には平滑化関数そのものを渡す (2026-10-05, plan verification-m6-axis-wave-mesh-su2 §5.1 #8a):
         # 1500 点の表を np.interp で渡すと点ごとの傾きの折れ目を補間 5 次スプラインが通り、r″ が点間隔で波打つ
         delta_r_x = f_s
+        if getattr(d["wall"], "wall_repr", None) == "joint" or type(d["wall"]).__name__ == "JointFitCFDWall":
+            # joint 壁の物理壁 (解析経路) は δ_r の導関数を要る (plan tooling-nozzle-cfd-pinned-initial-line §5.1 #6b)。
+            # 平滑化済みの値 (5 次 P-spline) を表にし、導関数を返せる 5 次補間 (delta_r_from_table) で渡す。
+            delta_r_x = delta_r_from_table(res_init["x"], f_s(res_init["x"]))
         offset = "radial"
         init_info = dict(res_init["settings"])
         init_info["smooth"] = {"kind": "quintic_pspline", **sm_diag}
