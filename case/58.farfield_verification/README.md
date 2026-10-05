@@ -22,6 +22,8 @@ V1 の `check_convergence.py` は NOT CONVERGED (全列が丸め床で横ばい)
 
 ## 計算 run 一覧
 
+> **AWS の大規模削除 (2026-10-05)**: case/58 の各 run の全場・入力格子 (chan.h5・ramp.h5・box.h5)・全節点帳簿 (V2c の `ledger.csv`、1 本 180 MB) を削除。残したもの: プローブ時系列 (`point_probe_*.out`)・判定の原本 (`V*_VERDICT.txt`・`*_2026*.log`)・config。再評価が要るときは setup スクリプトで作り直す。
+
 > **AWS の全場削除 (2026-10-03、ディスク逼迫でユーザ指示)**: `~/forge-pgrad-new/case/58` の run から中間の全場を削除 (各 run の最終場は残す。case/46 と合わせて 39.8 GB)。残したもの: 力係数・残差の CSV、VERDICT、`metrics.json`、config、壁面出力の時系列。
 
 | run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
