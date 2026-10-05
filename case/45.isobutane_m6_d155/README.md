@@ -90,8 +90,9 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0110_euler_pin_G0` | #11f Euler 格子 A/B 腕 G0 (旧較正格子 1100 × 65、生産経路の CFD ピン壁 = 旧 pincal と同一、新バイナリ、IC run_0086、cfl 2 × 12000) | 出口コア M 5.999996、STEADY | ref |
 | `run_0111_euler_pin_G1` + `run_0112_euler_pin_G1_ext6k` | #11f Euler 腕 G1 (生産 NS 細分格子の格子パラメータ) + 延長 6000 | 出口コア M 5.999207 (STEADY) → G1 − G0 = −0.000789 [−0.000800, −0.000777] (判定 A) | ref |
 | `run_0113_euler_pin_G1_recal` + `run_0114_euler_pin_G1_recal_ext6k` | #11f E2: Md_moc_offset +3.770e-4 で作り直した壁の Euler (G1) + 延長 6000 | 出口コア M 5.999998 (STEADY) → 合格。**run_0114 が新しい固定 Euler 参照** | ref |
-| `run_0115_ns_recal_pass` | #11f NS ①: 新しい壁の細分 NS (k_f 1.055734、r_t 76.6715 mm、cfl 1・60000) | 走行中 | active |
-| `run_0116_ns_recal_final` | #11f NS ③: ② の k_f・r_t で最終 NS | 予定 | active |
+| `run_0115_ns_recal_pass` | #11f NS ①: 新しい壁の細分 NS (k_f 1.055734、r_t 76.6715 mm、cfl 1・60000) | 完走 → ② k_f 1.054129・r_t 76.6539 mm (`c2pin_solve_recal.json`) | ref |
+| `run_0116_ns_recal_final` + `run_0117_ns_recal_final_ext` | #11f NS ③: 最終 NS (k_f 1.054129・r_t 76.6539 mm、段階起動 → cfl 1・60000) + 延長 60000 | **出口コア M 5.998887 (STEADY、登録 ±0.02 % 合格)**・δ_E/δ_C 0.9998・オーバーシュート η0.1 0.0079 %・出口半径 0.7749995 m・壁解像 PASS 3.6 %; 波 η0.1 0.0065 % は DRIFTING (未達のまま記録、ユーザ決定 A) | active |
+| `run_0118_ns_recal_final_cond` | #11 ④: run_0117 の凝縮 ON (convert_species_field conserve、cfl 1・18000) | 凝縮 4 量 STEADY: 開始 x 57.94・S_max 16.86・出口コア g 3.13e-4・出口コア M 5.9864 → 合格 | active |
 | `run_0108_ns_finemesh_final_cond` | #11 ④: 0107 の凝縮 ON (cfl 1・18000 step) | 保留 (③ の出口 M FAIL) | active |
 | (注) | 2026-10-05: AWS の空き不足のため run_0053〜0105 の中間 `res_<n>.h5` を削除 (res_0・最終場・`delta_E_series.csv` は残る) | — | — |
 | `run_0008_ns_trim_cond` | 凝縮 ON restart (`problem_d155_trim_ns_cond.yaml`: Kw+HK condModel1+Kantrowitz, 蒸発 ON, IC=run_0007, 12000 step) | 完走・NaN 0・**STEADY** (4k/8k/12k で M_exit 差 5e-4)。軸 onset x≈69 r_t、出口 g 0.20 % (H₂O の 2 %)、**出口軸 M 5.9273 (−1.2 %)**・試験区間に M 低下勾配 (x60→96 で 6.00→5.93)。dry の軸は x≈24 r_t (M5.5) で飽和線越え S≈14 (`axis_values.csv` の Tsat_post) | active (**凝縮評価の正本**) |
