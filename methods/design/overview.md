@@ -891,6 +891,7 @@ $$\text{燃焼器出口 starting line} \rightarrow \text{平面最大推力理�
 - **3D の帳簿 (R2, 2026-09-13)**: メッシャは幅外の機体下面を `vehicle` タグ (W/2 < z ≤ W_vehicle/2) に分け、`forces3d` の $C_T,C_L,C_M$ は
   ノズル面 (ramp z ≤ W/2 + cowl + 側壁) だけ。機体力は `C_T_vehicle` 等の別枠。`metrics/sern_momentum.py` が BCONDS 全面の運動量収支で
   帳簿を検算する (閉じ残差 ~1–2 % of $F_{\rm ideal}$ が離散化差の目安)。
+- **$C_M$ の定義 (現行、2026-10-05 明記; plan tooling-nozzle-sern-chain §5.1 R7b ②)**: 頭上げ正のピッチモーメント $C_M = M_{\rm noseup}/(F_{\rm ideal}H)$。$M_{\rm noseup} = -\sum_f [(x_f-x_{\rm ref})F_{y,f} - (y_f-y_{\rm ref})F_{x,f}]$ で、$F_f = (p_f - p_a)\,\mathbf n_f A_f$ (**圧力だけ、壁の摩擦は含まない**)、和は**ノズル面** (幅内ランプ z ≤ W/2・カウル内外・ダクト側壁) だけ (機体面は `C_M_vehicle` の別枠、遠方境界の面は使わない)。基準点は problem YAML の `spec.moment_ref` ($x_{\rm ref},y_{\rm ref}$)/H、生産は (−20 H, 0)。3D は半幅 (対称面) の値で $F_{\rm ideal}$ も半幅。腕が 20 H と長いので $C_L$ の小さな変化がモーメントに大きく乗る ($\Delta C_M \approx -20\,\Delta C_L$ の項)。**実機のトリム許容とは定義が違う** (摩擦・機体面・基準点が未調整)。MOO の `opt.cm_min` (加重平均、生産 −7.0) は探索用の暫定制約で、作動点別の実機窓 `opt.cm_window` は出典が無く未設定 (2026-10-05 ユーザ)。
 - **粘性**: NS 帰還ループは持たない。設計点の RANS 場から `metrics/deltastar.py` で $\delta^*(x)$ を
   抽出し法線オフセットする**一発補正**のみ。
 - **壁圧規定の位置づけ**: 剥離制約 ($\tau_w$ 符号 / $p_w/p_a$) の判定量と、二段膨張オプション
