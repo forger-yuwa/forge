@@ -223,26 +223,51 @@ def find_ref_res(ref, res_arg):
     return os.path.abspath(max(cands, key=_res_step))
 
 
-def exit_pressure_ref(ref, res_path, outlet_id):
-    """参照の出口圧 P_exit_ref: res_outlet_<physID>_<step>.h5 の Ps の中央値、無ければ res の最終断面 (x 最大) の P の中央値。"""
+def exit_pressure_ref(ref, res_path, outlet_id, excluded_ids=()):
+    """参照の出口圧 P_exit_ref = 参照 res の**出口断面 (最終 x の節点列) の内部節点の静圧 P の中央値**。
+    壁節点 (wall / wall_isothermal の BC 節点) と軸節点 (axis の BC 節点) は除く (`excluded_ids` = その physID)。
+    `res_outlet_*` の Ps は課した値そのものなので使わない (2026-10-06 主セッション決定; plan §4.1)。
+    出口 BC の節点が単一の x に並ばない (節点列が取れない) ときは、出口 BC の節点と同じ x 座標を持つ節点で代替する。
+    節点の座標と BC 節点は参照 run の nozzle.h5 (MESH/COORD・BCONDS/<physID>/iCells; node 離散化では節点番号) から読む。
+    戻り (値 or None, 出所の説明)。取れなければ None (呼び手は停止せず警告として記録する)。"""
     import h5py
-    step = _res_step(res_path)
-    p = os.path.join(ref, f"res_outlet_{outlet_id}_{step}.h5")
-    if os.path.exists(p):
-        with h5py.File(p, "r") as f:
-            if "VALUE/Ps" in f:
-                return float(np.median(np.asarray(f["VALUE/Ps"], dtype=np.float64))), os.path.basename(p) + ":Ps median"
+    mesh = os.path.join(ref, MESH_FILE)
     with h5py.File(res_path, "r") as f:
-        if "VALUE/P" not in f or "MESH/COORD" not in f:
-            return None, "取れない (res_outlet も res の P/COORD も無い)"
+        if "VALUE/P" not in f:
+            return None, f"取れない ({os.path.basename(res_path)} に VALUE/P が無い)"
         P = np.asarray(f["VALUE/P"], dtype=np.float64)
+    with h5py.File(mesh, "r") as f:
+        if "MESH/COORD" not in f:
+            return None, f"取れない ({MESH_FILE} に MESH/COORD が無い)"
         C = np.asarray(f["MESH/COORD"], dtype=np.float64)
+
+        def _nodes(pid):
+            k = f"BCONDS/{pid}/iCells"
+            return np.asarray(f[k], dtype=np.int64) if k in f else None
+        out_nodes = _nodes(outlet_id)
+        excl = [n for n in (_nodes(pid) for pid in excluded_ids) if n is not None]
     if C.size != 3 * P.size:
-        return None, "取れない (COORD と P の点数が合わない; node 以外)"
+        return None, "取れない (COORD と P の点数が合わない; node 離散化でない)"
     x = C.reshape(-1, 3)[:, 0]
-    tol = 1e-9 * max(float(x.max() - x.min()), 1e-300)
-    sel = x >= x.max() - tol
-    return float(np.median(P[sel])), f"{os.path.basename(res_path)}: 最終断面 x={x.max():.6g} の P median ({int(sel.sum())} 点)"
+    tol = 1e-6 * max(float(x.max() - x.min()), 1e-300)
+    if out_nodes is None or out_nodes.size == 0 or out_nodes.max() >= x.size:
+        return None, f"取れない ({MESH_FILE} に出口 BCONDS/{outlet_id}/iCells が無い)"
+    xo = x[out_nodes]
+    if float(xo.max() - xo.min()) <= tol:
+        sel = np.abs(x - float(np.mean(xo))) <= tol          # 最終 x の節点列
+        how = f"出口断面 x={float(np.mean(xo)):.6g} の節点列"
+    else:
+        xs = np.unique(xo)                                    # 代替: 出口 BC の節点と同じ x を持つ節点
+        k = np.clip(np.searchsorted(xs, x), 1, xs.size - 1)
+        sel = np.minimum(np.abs(x - xs[k - 1]), np.abs(x - xs[k])) <= tol
+        how = "出口 BC の節点と同じ x の節点 (出口が単一 x に並ばない)"
+    n_all = int(sel.sum())
+    for n in excl:
+        sel[n[n < x.size]] = False
+    if not sel.any():
+        return None, f"取れない ({how} に壁・軸以外の節点が無い)"
+    return (float(np.median(P[sel])),
+            f"{os.path.basename(res_path)}: {how} の内部節点 {int(sel.sum())}/{n_all} 点 (壁・軸の BC 節点を除く) の P median")
 
 
 def _file_refs(obj, path=""):
@@ -437,13 +462,17 @@ def build_plan(a):
     res_path = find_ref_res(ref, a.res)
     f_pt = (changes["Pt"][1] / changes["Pt"][0]) if "Pt" in changes else 1.0
     outlet_id = outl["entry"].get("physID")
-    P_exit_ref, P_exit_src = exit_pressure_ref(ref, res_path, outlet_id)
+    P_exit_ref, P_exit_src = exit_pressure_ref(
+        ref, res_path, outlet_id,
+        excluded_ids=[bc[n]["entry"].get("physID") for n, k in kinds.items() if k in ("wall", "wall_isothermal", "axis")])
+    p_exit_warn = None if P_exit_ref is not None else f"P_exit_ref: null — {P_exit_src}"
     if "Pt" in changes and a.Ps is None and not a.keep_Ps:
         ratio = (Ps_ref / (f_pt * P_exit_ref)) if P_exit_ref else None
         raise RerunError(
             "Pt を変えるときは --Ps P か --keep-Ps が必須 (node の出口は壁列が常に亜音速で Ps を見る; Pt だけ下げて Ps 据え置きは"
             " 出口列の不安定要因。plan §4.1)\n"
             f"    f = Pt_new/Pt_ref = {f_pt:.6g}, P_exit_ref = {P_exit_ref} [{P_exit_src}], Ps_ref = {Ps_ref}\n"
+            f"    参照の Ps_ref/P_exit_ref = {(Ps_ref / P_exit_ref) if P_exit_ref else None}\n"
             f"    --keep-Ps のとき Ps/(f·P_exit_ref) = {ratio if ratio is None else f'{ratio:.6g}'}\n"
             f"    参照と同じ比にするなら --Ps {f_pt * Ps_ref:.10g} (= f·Ps_ref)")
     if a.Ps is not None and float(a.Ps) != Ps_ref:
@@ -524,7 +553,7 @@ def build_plan(a):
     if n_out <= 0 or n_outer <= 0 or n_outer % n_out != 0:
         raise RerunError(f"nStepOuter {n_outer} が outStepInterval {n_out} の倍数でない (最終 res が書かれない)")
     ref_outer = int((((cfg.get("time") or {}).get("last") or {}).get("nStepOuter")) or 0)
-    warnings = []
+    warnings = [p_exit_warn] if p_exit_warn else []
     if _res_step(res_path) is not None and _res_step(res_path) != ref_outer:
         warnings.append(f"参照 res の step {_res_step(res_path)} が参照 config の nStepOuter {ref_outer} と違う "
                         "(途中の res を種にしている / config が延長後のものでない)")

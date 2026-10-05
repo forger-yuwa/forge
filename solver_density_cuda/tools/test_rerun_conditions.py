@@ -214,8 +214,43 @@ def main():
     check("(b) YAML 再読込で要求値", y["inlet"]["floats"]["Pt"] == 4.4e6 and y["outlet"]["floats"]["Ps"] == 1789.6
           and y["outlet"]["floats"]["Pt"] == 1789.6 and y["outlet"]["floats"]["Tt"] == 300.0)
     check("(b) 他の行はバイト一致", all(la[i] == lb[i] for i in range(len(la)) if i not in (inl, outl)))
-    check("(b) Ps/(f·P_exit_ref) を記録 (≈1)", p["Ps_over_fPexit"] is not None and abs(p["Ps_over_fPexit"] - 1.0) < 1e-9,
-          p["Ps_over_fPexit"])
+    check("(b) Ps/(f·P_exit_ref) を記録 (= 1789.6/(0.8·P_exit_ref))", p["Ps_over_fPexit"] is not None
+          and abs(p["Ps_over_fPexit"] - 1789.6 / (0.8 * p["P_exit_ref"])) < 1e-12, p["Ps_over_fPexit"])
+    check("(b) P_exit_ref は出口断面の内部節点の P (課した Ps 2237 ちょうどでない; 2238〜2246)",
+          p["P_exit_ref"] != 2237.0 and 2238.0 < p["P_exit_ref"] < 2246.0 and "内部節点" in p["P_exit_ref_source"],
+          (p["P_exit_ref"], p["P_exit_ref_source"]))
+    done(ref, new)
+    # 壁・軸の BC 節点を除いていること: 出口列の端 (壁・軸) の P を極端な値にしても P_exit_ref は動かない
+    ref, new = make_ref()
+    with h5py.File(os.path.join(ref, "nozzle.h5"), "r") as f:
+        o = set(np.asarray(f["BCONDS/2/iCells"]).tolist())
+        ends = sorted(o & (set(np.asarray(f["BCONDS/3/iCells"]).tolist()) | set(np.asarray(f["BCONDS/4/iCells"]).tolist())))
+    with h5py.File(os.path.join(ref, RES), "r+") as f:
+        a = np.asarray(f["VALUE/P"]); a[ends] = 1e9; f["VALUE/P"][...] = a
+    p_end = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6"])
+    check("(b) 壁・軸の節点を除外 (端の P を 1e9 にしても P_exit_ref 不変)",
+          len(ends) == 2 and p_end["P_exit_ref"] == p["P_exit_ref"], (ends, p_end["P_exit_ref"]))
+    done(ref, new)
+    # 出口の BC 節点が単一 x に並ばないとき: 出口 BC の節点と同じ x を持つ節点で代替
+    ref, new = make_ref()
+    with h5py.File(os.path.join(ref, "nozzle.h5"), "r+") as f:
+        o = np.asarray(f["BCONDS/2/iCells"])
+        C = np.asarray(f["MESH/COORD"]).reshape(-1, 3)
+        C[o[50], 0] -= 1e-3                      # 出口の内部節点 1 つだけ x をずらす
+        f["MESH/COORD"][...] = C.reshape(-1)
+    p_alt = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6"])
+    check("(b) 出口が単一 x に並ばない → 同じ x の節点で代替 (値は出口列とほぼ同じ)",
+          p_alt["P_exit_ref"] is not None and "出口 BC の節点と同じ x" in p_alt["P_exit_ref_source"] and abs(p_alt["P_exit_ref"] - p["P_exit_ref"]) < 5.0,
+          (p_alt["P_exit_ref"], p_alt["P_exit_ref_source"]))
+    done(ref, new)
+    # 出口の BC 節点が取れないとき: 停止せず P_exit_ref = null と警告を記録
+    ref, new = make_ref()
+    with h5py.File(os.path.join(ref, "nozzle.h5"), "r+") as f:
+        del f["BCONDS/2/iCells"]
+    p_null = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6"])
+    check("(b) P_exit_ref が取れない → 停止せず null・警告を記録",
+          p_null["P_exit_ref"] is None and p_null["Ps_over_fPexit"] is None
+          and any("P_exit_ref: null" in w for w in p_null["warnings"]), p_null["warnings"])
     done(ref, new)
 
     # ------------------------------------------------------------------ (c)
@@ -381,7 +416,9 @@ def main():
     ref, new = make_ref()
     code, _, err = run_main([ref, new, "--Pt", "4.4e6"])
     check("(l) --Pt のみ → 停止", code == 2 and not os.path.exists(new))
-    check("(l) Ps/(f·P_exit_ref) を表示 (--keep-Ps なら 1.25)", "Ps/(f·P_exit_ref) = 1.25" in err, err.strip()[-300:])
+    pe = plan_of([ref, new, "--Pt", "4.4e6", "--keep-Ps"])["P_exit_ref"]
+    check("(l) Ps/(f·P_exit_ref) を表示 (--keep-Ps なら 2237/(0.8·P_exit_ref))",
+          f"Ps/(f·P_exit_ref) = {2237.0 / (0.8 * pe):.6g}" in err and f"P_exit_ref = {pe}" in err, err.strip()[-300:])
     code, _, _ = run_main([ref, new, "--Pt", "4.4e6", "--keep-Ps", "--dry-run"])
     check("(l) --keep-Ps なら通る (dry-run)", code == 0 and not os.path.exists(new))
     done(ref, new)
@@ -451,8 +488,8 @@ def test_execute_with_mock_restart():
                                      rtol=1e-6, atol=0) for k in rec["required_conserved"])
             check("[mock restart] --scale-ic pt: 必要保存量が f = 0.8 倍", ok and abs(rec["f"] - 0.8) < 1e-15)
             check("[mock restart] 記録: 変更前後・P_exit_ref・Ps/(f·P_exit_ref)・recommended_stages・commit",
-                  rec["changes"]["Pt"] == [5500000.0, 4400000.0] and rec["P_exit_ref"] == 2237.0
-                  and abs(rec["Ps_over_f_P_exit_ref"] - 1.0) < 1e-9 and rec["recommended_stages"]["stages"] == "full"
+                  rec["changes"]["Pt"] == [5500000.0, 4400000.0] and abs(rec["P_exit_ref"] - 2242.0) < 4.0
+                  and abs(rec["Ps_over_f_P_exit_ref"] - 1789.6 / (0.8 * rec["P_exit_ref"])) < 1e-12 and rec["recommended_stages"]["stages"] == "full"
                   and rec["tool_commit"]["head"] != "unknown" and rec["restart_field_verdict"].startswith("VERDICT: OK"))
             pi = json.load(open(os.path.join(new, "prepare_info.json")))
             pr = json.load(open(os.path.join(ref, "prepare_info.json")))
