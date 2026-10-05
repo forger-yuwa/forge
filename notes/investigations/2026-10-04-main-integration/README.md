@@ -66,4 +66,4 @@ SERN セッションが main (77318d0e) を feature/sern-design に fast-forward
 `test_species_record_solver` は (b) 記録のすり替え検知の 2 件が FAIL → 原因は試験の前提: seed から正しい記録の SHA 付き別名が複製されるようになり、
 ソルバと `find_record` がそれを SHA で見つけて正しい記録を使うため、すり替えの経路を通らず熱物性の不一致で止まっていた (停止はしていた)。
 試験で場が名指す記録以外を消すよう直して (79f50ea1) **ALL PASSED**。`test_transport_gpu` の 2 件は環境 (host ハーネスの CUDA ヘッダのパス、FCEA2 が AWS に無い) で未判定。
-`test_twophase_diffusion_harness` は純 Python で 1 時間を超え時間切れ (途中の S1–S5 は PASS 表示)。
+`test_twophase_diffusion_harness` は 2 回目に完走して 7 FAIL (`evidence/twophase_harness_2026-10-06.txt`): S9 の 2 件は既知の保持 FAIL、S8 の 3 件は親 plan の記録 (合格) と食い違う — plan condensation-two-phase-default §5.1 #10 に観測として記録 (二相拡散は保留中)。
