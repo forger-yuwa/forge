@@ -1,0 +1,7 @@
+run_1067_b1b_old 前提: OK GATES PASS {'C_T_with_shear': 'STEADY', 'C_T': 'STEADY', 'C_L': 'STEADY', 'C_M': 'STEADY'}
+run_1068_b1b_new 前提: OK GATES PASS {'C_T_with_shear': 'STEADY', 'C_T': 'STEADY', 'C_L': 'STEADY', 'C_M': 'STEADY'}
+C_T             old 0.8891017 new 0.8891018 差 +1.48e-07 U 5.46e-06 D 5.60e-06 (閾値 5e-05) OK
+C_T_with_shear  old 0.8704578 new 0.8704580 差 +1.88e-07 U 5.45e-06 D 5.64e-06 (閾値 5e-05) OK
+C_L             old 0.0614310 new 0.0614331 差 +2.01e-06 U 2.19e-05 D 2.39e-05 (閾値 5e-05) OK
+C_M             old -1.6124582 new -1.6125002 差 -4.20e-05 U 4.81e-04 D 5.23e-04 (閾値 5e-04) 超過
+VERDICT: 閾値超過あり → 記録して諮る
