@@ -45,7 +45,8 @@ def main():
     moved = d[:, 0] != 0.0
     if ratio.max() > 0.5:
         raise SystemExit(f"x のずれが局所間隔の半分を超える節点がある (最大比 {ratio.max():.3f})")
-    print(f"節点 {n}: 接続・境界タグ同一、動いた節点 {int(moved.sum())} (x {ca[moved,0].min():.5f}–{ca[moved,0].max():.5f} m)、"
+    rng = f" (x {ca[moved,0].min():.5f}–{ca[moved,0].max():.5f} m)" if moved.any() else " (座標は完全一致)"
+    print(f"節点 {n}: 接続・境界タグ同一、動いた節点 {int(moved.sum())}{rng}、"
           f"最大 |Δx| {np.abs(d[:,0]).max():.3e} m (局所間隔比 {ratio.max():.3f})、最大 |Δy| {np.abs(d[:,1]).max():.3e} m")
     with h5py.File(src_res, "r") as s, h5py.File(dst, "r+") as f:
         names = [q for q in s["VALUE"] if (q.startswith("ro")) and q in f["VALUE"]]
