@@ -253,12 +253,21 @@ class PhysicalNozzleWall:
 
     def __init__(self, design_wall, wall_tbl, rt_m: float, Pt: float, Tt: float,
                  gamma: float = 1.4, cp: float = 1004.5, dstar_x=None,
-                 x_offset_lo: float = -0.8, offset: str = "normal", delta_r_x=None) -> None:
+                 x_offset_lo: float = -0.8, offset: str = "normal", delta_r_x=None,
+                 analytic: bool | None = None, ramp: tuple = (-11.0, -6.0)) -> None:
         """design_wall: AxisMachCFDWall (非粘性)。wall_tbl: (n,4) MOC 壁 [x,r,θ,M]。
         dstar_x: 任意の δ*(x) [r_t 単位] (None = 上流履歴込み相関)。
         offset: "normal" (旧: 壁法線オフセット + x シフト) / "radial" (半径方向 r_W = r + δ_r(x)、
         plans/active/tooling-nozzle-deltastar-core-matched-euler.md §4.5 の生産経路)。
-        delta_r_x: 半径方向補正 δ_r(x) [r_t 単位] を直接与える (与えると offset="radial" 固定)。"""
+        delta_r_x: 半径方向補正 δ_r(x) [r_t 単位] を直接与える (与えると offset="radial" 固定)。
+        analytic: 解析経路 (下記)。None = 設計壁が `JointFitCFDWall` (wall_repr: joint) のとき True。
+        ramp: 解析経路の δ_r を入れる区間 [x_lo, x_hi] (x ≤ x_lo で 0、x ≥ x_hi で全量、間は 5 次 smoothstep)。
+
+        **解析経路** (plan tooling-nozzle-cfd-pinned-initial-line §5.1 #6b, 仕様 A″ diagnostician 2026-10-05):
+        κ_t の窓 LSQ 再推定・上流 Hermite の作り直し・オフセット点群の補間スプラインでの作り直しをせず、
+        r_W(x) = r_design(x) + s(x)·δ_r(x) をそのまま使う (r′・r″・r‴ も設計壁の解析微分 + (s·δ_r) の
+        解析微分)。δ_r は導関数を返せる callable (`delta_r_x(x, deriv)`, `supports_deriv`) に限る — 差分では代用しない。
+        物理スロート (x_t, r_t, κ_t) は r_W′ = 0 の根。"""
         from ..evaluate.ic import invert_area_ratio
         from ..feedback.deltastar import dstar_flatplate
         self.design = design_wall
@@ -289,6 +298,13 @@ class PhysicalNozzleWall:
         ds_g = dstar_flatplate(s_g, M_g, Pt, Tt, g_corr, cp) / rt_m
         self._dstar_hist = lambda x: np.interp(x, xg, ds_g)
         dstar = self._dstar_hist if dstar_x is None else dstar_x
+
+        if analytic is None:
+            analytic = isinstance(design_wall, JointFitCFDWall)
+        self.analytic = bool(analytic)
+        if self.analytic:
+            self._init_analytic(design_wall, delta_r_x, ramp, xg, x_offset_lo)
+            return
 
         # --- 法線オフセット (窓 [x_offset_lo, x_F] — 真のスロート探索を含む) ---
         mw = xg >= x_offset_lo
@@ -340,6 +356,61 @@ class PhysicalNozzleWall:
                                         self.r_U, 0.0, 0.0,
                                         self.r_throat, 0.0, self.kappa_throat)
         self._poly_eval = _poly_eval
+
+    def _init_analytic(self, design_wall, delta_r_x, ramp, xg, x_offset_lo) -> None:
+        """解析経路の構築 (`__init__` の docstring 参照)。"""
+        from scipy.optimize import brentq
+        if delta_r_x is None:
+            raise ValueError("PhysicalNozzleWall (解析経路 / joint 壁): delta_r_x (半径方向 δ_r) が必須 "
+                             "— 相関 δ* の法線オフセットは解析経路に無い")
+        if not getattr(delta_r_x, "supports_deriv", False):
+            raise ValueError("PhysicalNozzleWall (解析経路 / joint 壁): δ_r が導関数を返せない "
+                             "(delta_r_from_table の関数を使う。積分法の smooth_delta_quintic は未対応 — 差分で代用しない)")
+        lo, hi = float(ramp[0]), float(ramp[1])
+        if not (-self.L_U <= lo < hi < 0.0):
+            raise ValueError(f"ramp {ramp} は [−L_U, 0) 内の増加区間であること")
+        self._ramp = (lo, hi)
+        self._dr = delta_r_x
+        self.offset_mode = "radial"
+        self.x_e = float(design_wall.x_e)
+        self._herm_x0 = -self.L_U                              # validate の上流区間 (設計の U→T Hermite 始点)
+        self._delta_r_applied = lambda x: self._sdr(np.asarray(x, dtype=float), 0)
+        mw = xg >= x_offset_lo
+        self._xw_dbg, self._rw_dbg = xg[mw].copy(), self.r(xg[mw])
+        d1 = lambda x: float(self.r(np.array([x]), 1)[0])  # noqa: E731
+        xl, xr = -0.3, 0.2
+        if not (d1(xl) < 0.0 < d1(xr)):
+            raise RuntimeError("PhysicalNozzleWall (解析経路): r′=0 の囲い込みに失敗 (−0.3, 0.2)")
+        self.x_throat = float(brentq(d1, xl, xr, xtol=1e-14))
+        self.r_throat = float(self.r(np.array([self.x_throat]))[0])
+        self.kappa_throat = float(self.r(np.array([self.x_throat]), 2)[0])
+        self._throat_diag = {"method": "analytic", "ramp": [lo, hi]}
+
+    def _s(self, x, n: int):
+        """δ_r の入れ方 s(x): 5 次 smoothstep (端で 1・2 階微分 0)。n 階微分。"""
+        lo, hi = self._ramp
+        L = hi - lo
+        u = np.clip((x - lo) / L, 0.0, 1.0)
+        m = (x > lo) & (x < hi)
+        if n == 0:
+            return u ** 3 * (10.0 - 15.0 * u + 6.0 * u * u)
+        if n == 1:
+            return np.where(m, 30.0 * u * u * (1.0 - u) ** 2 / L, 0.0)
+        if n == 2:
+            return np.where(m, 60.0 * u * (1.0 - u) * (1.0 - 2.0 * u) / L ** 2, 0.0)
+        if n == 3:
+            return np.where(m, 60.0 * (1.0 - 6.0 * u + 6.0 * u * u) / L ** 3, 0.0)
+        raise ValueError("deriv は 0..3")
+
+    def _sdr(self, x, n: int):
+        """(s·δ_r) の n 階微分 (Leibniz)。s = 0 の区間 (直管・縮流部入口側) は厳密に 0。"""
+        out = np.zeros_like(x)
+        on = x > self._ramp[0]
+        if on.any():
+            xo = x[on]
+            binom = (1, 1, 1, 1) if n == 0 else ((1, 1), (1, 2, 1), (1, 3, 3, 1))[n - 1]
+            out[on] = sum(binom[k] * self._dr(xo, k) * self._s(xo, n - k) for k in range(n + 1))
+        return out
 
     @staticmethod
     def _locate_throat(xw, rw, window: float = 0.6, smooth_lam: float = 1e-9,
@@ -402,6 +473,8 @@ class PhysicalNozzleWall:
 
     def r(self, x, deriv: int = 0):
         x = np.asarray(x, dtype=float)
+        if self.analytic:
+            return self.design.r(x, deriv) + self._sdr(x, deriv)
         out = np.empty_like(x)
         m_pipe = x < self._herm_x0
         m_up = (x >= self._herm_x0) & (x < self.x_throat)
@@ -434,8 +507,9 @@ class PhysicalNozzleWall:
             msgs.append("上流 Hermite が非単調収縮")
         # C1/C2 接合 (構成的に成り立つはず — 実測で保証)
         h = 1e-6
-        for name, xc in (("直管/Hermite", self._herm_x0),
-                         ("Hermite/下流 (物理スロート)", self.x_throat)):
+        joints = ((("直管/縮流部", self._herm_x0), ("縮流部/設計壁 (x=0)", 0.0)) if self.analytic else
+                  (("直管/Hermite", self._herm_x0), ("Hermite/下流 (物理スロート)", self.x_throat)))
+        for name, xc in joints:
             dl = float(self.r(np.array([xc - h]), 1)[0])
             dr_ = float(self.r(np.array([xc + h]), 1)[0])
             if abs(dl - dr_) > 5e-3:

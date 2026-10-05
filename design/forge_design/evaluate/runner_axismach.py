@@ -722,12 +722,24 @@ def delta_r_from_table(x, d):
 
     2026-10-05 (plan verification-m6-axis-wave-mesh-su2 §5.1 #8a): 旧実装は np.interp (直線補間) で、表の点ごと
     (0.09 r_t) の傾きの折れ目を補間 5 次 B-spline の壁が通るため r″ が点間隔の周期で波打っていた (高周波 3〜6e-4 [1/r_t])。
-    平滑化前の生値を渡すと 5 次補間はリンギングするので、平滑化済みの表に限る。"""
+    平滑化前の生値を渡すと 5 次補間はリンギングするので、平滑化済みの表に限る。
+
+    `f(xq, deriv)` で導関数 (deriv=1..3) も返す (plan tooling-nozzle-cfd-pinned-initial-line §5.1 #6b: joint 壁の
+    物理壁は r′・r″・r‴ を解析的に足す)。表の範囲外は値が端値クリップなので導関数は 0。"""
     from scipy.interpolate import make_interp_spline
     x = np.asarray(x, dtype=float); d = np.asarray(d, dtype=float)
     spl = make_interp_spline(x, d, k=5)
     lo, hi = float(x[0]), float(x[-1])
-    return lambda xq, _s=spl, _lo=lo, _hi=hi: _s(np.clip(np.asarray(xq, dtype=float), _lo, _hi))
+
+    def f(xq, deriv: int = 0, _s=spl, _lo=lo, _hi=hi):
+        xq = np.asarray(xq, dtype=float)
+        if deriv == 0:
+            return _s(np.clip(xq, _lo, _hi))
+        if deriv not in (1, 2, 3):
+            raise ValueError("deriv は 0..3")
+        return np.where((xq >= _lo) & (xq <= _hi), _s(np.clip(xq, _lo, _hi), deriv), 0.0)
+    f.supports_deriv = True
+    return f
 
 
 def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,

@@ -752,6 +752,23 @@ B-spline、**上流はその点へ Hermite を作り直す** (下流がマスタ
 変化は CFD で測り、必要ならアンカー帰還 (Codex 整理)。NS v1 で overshoot +0.30% →
 +0.03%、残差は x≈5.4 の設計側の谷のみ (run_0073)。
 
+**joint 壁の物理壁 (解析経路, 2026-10-05)**: 設計壁が `wall_repr: joint` (`JointFitCFDWall`) のとき、`PhysicalNozzleWall` は
+上記のスロート再推定 ($\kappa_t$ の窓 LSQ)・上流 Hermite の作り直し・オフセット点群の補間スプラインでの作り直しを**しない**
+(計画: [`plans/active/tooling-nozzle-cfd-pinned-initial-line.md`](../../plans/active/tooling-nozzle-cfd-pinned-initial-line.md) §5.1 #6b)。
+物理壁は
+
+$$
+r_W(x) = r_{\rm design}(x) + s(x)\,\delta_r(x),\qquad
+s(x)=\begin{cases}0 & x\le -11\\ u^3(10-15u+6u^2),\ u=\frac{x+11}{5} & -11<x<-6\\ 1 & x\ge-6\end{cases}
+$$
+
+で、$r_W', r_W'', r_W'''$ も設計壁の解析微分 + $(s\,\delta_r)$ の解析微分 (Leibniz) で返す。入口直管と縮流部の入口側は設計のまま、
+スロート直上流 (x ≥ −6) には δ_r を全量入れる。δ_r は導関数を返せる関数 (`delta_r_from_table(x, d)(x, deriv)`、
+表の範囲外は値を端値クリップ・導関数 0) に限り、返せない関数 (積分法の `smooth_delta_quintic`) や δ_r 無しは例外で止める
+(差分で代用しない)。物理スロート $(x_t, r_t, \kappa_t)$ は $r_W'=0$ の根 (IC の 1D 等エントロピー用)。
+$x=0$ では設計壁の $C^2$ がそのまま残り、$r_W''(0)=1/R+\delta_r''(0)$。非 joint の壁は従来経路のまま
+(`analytic=False` で joint にも従来経路を強制できる)。
+
 **壁表現の A/B (A14, 2026-08-17)**: 制約付き最小二乗 B-spline (`LSQBsplineCFDWall`、
 拘束 $r,r',r''$@T + $r,r'$@F、弧長重み、KKT) を CFD で補間壁と比較。LSQ は曲率振動を
 50 倍抑える ($\int\kappa'^2ds$ 11.4 → 0.2) が、壁角の系統乖離 (32 CP で 0.34°) が
