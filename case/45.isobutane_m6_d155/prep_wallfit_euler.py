@@ -15,9 +15,13 @@ if sys.argv[1] == "--run":
     print(f"forge exit={rc}"); raise SystemExit(rc)
 run_dir, arm = Path(sys.argv[1]), sys.argv[2]
 ic = sys.argv[sys.argv.index("--ic") + 1] if "--ic" in sys.argv else None
-if arm not in ("interp", "fit", "v4", "v4b"):
-    raise SystemExit("arm は interp / fit / v4 / v4b")
-if arm == "fit":
+if arm not in ("interp", "fit", "v4", "v4b", "pin"):
+    raise SystemExit("arm は interp / fit / v4 / v4b / pin")
+if arm == "pin":   # plan tooling-nozzle-cfd-pinned-initial-line: 初期線・m*・アンカーを V0 の Euler 場 (run_0062 res_6000) から凍結 → V0 型の同時当てはめ
+    import os
+    from cfd_initial_line import pinned_factory  # noqa: E402
+    RA.HallThroat = pinned_factory(os.environ.get("PIN_RUN", str(C / "run_0062_euler_wallfit_fit_r1_ext6k")), [os.environ.get("PIN_RES", "res_6000.h5")])
+if arm in ("fit", "pin"):
     from moc_wall_fit_ab import joint_fit  # noqa: E402  (import で形状 A/B の測定も 1 回走る)
     _dc = RA.design_chain
 
