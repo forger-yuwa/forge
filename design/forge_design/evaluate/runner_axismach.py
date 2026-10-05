@@ -527,6 +527,23 @@ def design_chain(p: Problem) -> dict:
             "cd_series": float(ht.cd_series())}
 
 
+def mesh_params(p, scale, ni, nj, wall_first_frac):
+    """problem の mesh ブロック → Mesh2DParams。Euler (`prepare`) と NS (`prepare_ns`) で同じキーを読む
+    (2026-10-06 codex diagnose: 以前の Euler 経路は ni/nj/wall_first_frac/throat_refine しか渡さず、throat_width・
+    wall_first_frac_throat・前後ブレンド等を黙って無視していた)。既定値は経路ごとの ni/nj/wall_first_frac だけが違う。"""
+    m = p.mesh
+    opt = lambda k: None if m.get(k) is None else float(m[k])  # noqa: E731
+    return Mesh2DParams(ni=int(m.get("ni", ni)), nj=int(m.get("nj", nj)),
+                        wall_first_frac=float(m.get("wall_first_frac", wall_first_frac)),
+                        throat_refine=float(m.get("throat_refine", 3.0)),
+                        throat_width=float(m.get("throat_width", 1.5)),
+                        wall_first_frac_throat=opt("wall_first_frac_throat"),
+                        wall_first_blend_x0=float(m.get("wall_first_blend_x0", 0.5)),
+                        wall_first_blend_x1=float(m.get("wall_first_blend_x1", 6.0)),
+                        wall_first_up_x0=opt("wall_first_up_x0"), wall_first_up_x1=opt("wall_first_up_x1"),
+                        axis_gap_frac=opt("axis_gap_frac"), scale=scale)
+
+
 def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, implicit_relax=None) -> dict:
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
@@ -536,10 +553,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     d = design_chain(p)
     wall = d["wall"]
     scale = float(p.spec["r_throat"])
-    mp = Mesh2DParams(ni=int(p.mesh.get("ni", 321)), nj=int(p.mesh.get("nj", 65)),
-                      wall_first_frac=float(p.mesh.get("wall_first_frac", 5.0e-3)),
-                      throat_refine=float(p.mesh.get("throat_refine", 3.0)),
-                      scale=scale)
+    mp = mesh_params(p, scale, ni=321, nj=65, wall_first_frac=5.0e-3)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
     # 記録: 目標軸分布 (x0 → x_E) と設計壁
@@ -875,18 +889,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     msgs = wall.validate()
     if msgs:
         raise ValueError("物理壁フィルタ不合格: " + "; ".join(msgs))
-    mp = Mesh2DParams(ni=int(p.mesh.get("ni", 561)), nj=int(p.mesh.get("nj", 97)),
-                      wall_first_frac=float(p.mesh.get("wall_first_frac", 4.5e-5)),
-                      throat_refine=float(p.mesh.get("throat_refine", 3.0)),
-                      throat_width=float(p.mesh.get("throat_width", 1.5)),
-                      wall_first_frac_throat=(None if p.mesh.get("wall_first_frac_throat") is None
-                                              else float(p.mesh["wall_first_frac_throat"])),
-                      wall_first_blend_x0=float(p.mesh.get("wall_first_blend_x0", 0.5)),
-                      wall_first_blend_x1=float(p.mesh.get("wall_first_blend_x1", 6.0)),
-                      wall_first_up_x0=(None if p.mesh.get("wall_first_up_x0") is None else float(p.mesh["wall_first_up_x0"])),
-                      wall_first_up_x1=(None if p.mesh.get("wall_first_up_x1") is None else float(p.mesh["wall_first_up_x1"])),
-                      axis_gap_frac=(None if p.mesh.get("axis_gap_frac") is None else float(p.mesh["axis_gap_frac"])),
-                      scale=scale)
+    mp = mesh_params(p, scale, ni=561, nj=97, wall_first_frac=4.5e-5)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
     law = d["law"]
