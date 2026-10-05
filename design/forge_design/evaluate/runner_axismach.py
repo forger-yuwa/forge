@@ -541,7 +541,7 @@ def mesh_params(p, scale, ni, nj, wall_first_frac):
                         wall_first_blend_x0=float(m.get("wall_first_blend_x0", 0.5)),
                         wall_first_blend_x1=float(m.get("wall_first_blend_x1", 6.0)),
                         wall_first_up_x0=opt("wall_first_up_x0"), wall_first_up_x1=opt("wall_first_up_x1"),
-                        axis_gap_frac=opt("axis_gap_frac"), scale=scale)
+                        axis_gap_frac=opt("axis_gap_frac"), axis_cap_frac=opt("axis_cap_frac"), scale=scale)
 
 
 def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, implicit_relax=None) -> dict:

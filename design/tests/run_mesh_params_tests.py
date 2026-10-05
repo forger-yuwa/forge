@@ -28,4 +28,15 @@ me = mesh_params(P(fine), 0.0767531, 321, 65, 5.0e-3); mn = mesh_params(P(fine),
 check("(b) Euler 経路が細分格子のキーを読む", (me.throat_width, me.wall_first_frac_throat, me.wall_first_up_x0, me.wall_first_blend_x1) == (3.0, 4.5e-6, -9.0, 17.0))
 check("(c) 同じキーなら Euler 経路と NS 経路のパラメータが一致", me == mn)
 check("(c') 既定値は dataclass と同じ (キー無しでビット不変)", mesh_params(P({}), 1.0, 241, 81, 0.002) == Mesh2DParams())
+m = mesh_params(P(dict(fine, axis_cap_frac=0.02)), 0.0767531, 321, 65, 5.0e-3)
+check("(d) axis_cap_frac が Euler/NS 両経路に渡る", m.axis_cap_frac == 0.02 and mesh_params(P(dict(fine, axis_cap_frac=0.02)), 0.0767531, 561, 97, 4.5e-5) == m)
+from forge_design.meshing.mesh2d import _radial_fracs_capfixed  # noqa: E402
+import numpy as np  # noqa: E402
+s, ratio = _radial_fracs_capfixed(257, 1.3e-5, 0.02); d = np.diff(s)
+check("(e) capfixed: 第一セル・上限・単調・和", abs(d[-1] - 1.3e-5) < 1e-12 and abs(d[0] - 0.02) < 1e-9 and np.all(d > 0) and abs(s[-1] - 1) < 1e-15 and ratio < 1.05, (d[-1], d[0], ratio))
+for args, why in (((65, 1.3e-5, 0.0133), "和が 1 にならない"), ((257, 0.03, 0.02), "第一セル > 上限")):
+    try:
+        _radial_fracs_capfixed(*args); check(f"(f) 実現不能 {args} を拒否", False)
+    except ValueError:
+        check(f"(f) 実現不能 {args} を拒否 ({why})", True)
 print(f"FAIL 件数: {fails}"); sys.exit(1 if fails else 0)
