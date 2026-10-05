@@ -300,8 +300,10 @@ primal **面 (tri/quad)** であり、双対面の単位となる**エッジ列�
 要素 (tet/prism/hex/pyramid) の各局所面 (`elementType.hpp` の `nodesOrderPlanes`) は、その周回ノード対が
 そのままエッジである。全セル・全面の周回エッジを正規化キー $(\min(a,b),\max(a,b))$ で重複除去し `edges[]` を作る。
 **1 エッジは各 incident cell 内でちょうど 2 つの面に属する** (多面体エッジの定義) ので、各 (edge, cell) に対し
-その 2 面 (`F1,F2`) を `edge → {cell, faceA, faceB}` として記録する。これは別途エッジテーブルを持たず、
-既存 primal 面 (`planes` の重心 `centCoords`) をそのまま面重心 $F$ に流用できる利点がある。3D では
+その 2 面 (`F1,F2`) を `edge → {cell, faceA, faceB}` として記録する。面重心 $F$ は節点座標から double で計算する (内部双対面・境界半割面とも同じ式・同じ精度)。
+**保存済みの primal 面重心 `planes[].centCoords` (geom_float で積算) を流用しない**: 2026-10-05 まで境界半割面だけがそれを使い、
+内部側と境界側で同じ面の重心が別の丸めになって境界 CV の双対閉性 $|\sum S|/\sum|S|$ が $10^{-5}$ を超えていた
+(生産 SERN 3D g3 で 408 CV・最大 $2.8\times10^{-4}$ → 修正後 0 CV・最大 $5.7\times10^{-8}$; plan tooling-sern-mesh-blocking §5.1 B1b)。2D の双対構築は元から節点由来の double で、該当しない。3D では
 $n_{DF} = $ 一意エッジ数 (2D の $n_{DF}=n_{Planes}$ に相当)。
 
 #### 2.5.2 3D 双対面 (エッジ $\{A,B\}$)

@@ -74,7 +74,9 @@ def prepare(problem, msh, run_dir, op=None, wake_at_rest=True):
         if cmd[0] == "check_mesh_quality.py" and q.returncode != 0:
             (run_dir / "MESH_QUALITY.txt").write_text(txt); raise RuntimeError("メッシュ品質 FAIL:\n" + q.stdout)
         if cmd[0] == "check_dual_closure.py" and q.returncode != 0:
-            print("WARNING: check_dual_closure FAIL (変換器の単精度、plan B1b)。続行するが結果の解釈で考慮する", file=sys.stderr)
+            # 閉性 FAIL は記録して止める (旧: 警告だけで続行。B1b で原因 [境界半割面の面重心の精度] を直したので
+            # 受入経路では続行させない; codex diagnose 2026-10-05、plan tooling-sern-mesh-blocking §5.1 B1b)
+            (run_dir / "MESH_QUALITY.txt").write_text(txt); raise RuntimeError("双対閉性 FAIL (check_dual_closure):\n" + q.stdout[-1500:])
     (run_dir / "MESH_QUALITY.txt").write_text(txt)
     with h5py.File(run_dir / MESH, "r+") as f:             # 領域別一様 IC: 排気 = カウル上面より上 かつ 側壁内面より内側 (板厚の中央で分ける)
         cc = f["/CELLS/centCoords"][:].reshape(-1, 3)
