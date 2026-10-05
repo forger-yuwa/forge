@@ -15,13 +15,13 @@ if sys.argv[1] == "--run":
     print(f"forge exit={rc}"); raise SystemExit(rc)
 run_dir, arm = Path(sys.argv[1]), sys.argv[2]
 ic = sys.argv[sys.argv.index("--ic") + 1] if "--ic" in sys.argv else None
-if arm not in ("interp", "fit", "v4", "v4b", "pin"):
-    raise SystemExit("arm は interp / fit / v4 / v4b / pin")
-if arm == "pin":   # plan tooling-nozzle-cfd-pinned-initial-line: 初期線・m*・アンカーを V0 の Euler 場 (run_0062 res_6000) から凍結 → V0 型の同時当てはめ
+if arm not in ("interp", "fit", "v4", "v4b", "pin", "pincal"):
+    raise SystemExit("arm は interp / fit / v4 / v4b / pin / pincal")
+if arm in ("pin", "pincal"):   # plan tooling-nozzle-cfd-pinned-initial-line: 初期線・m*・アンカーを V0 の Euler 場 (run_0062 res_6000) から凍結 → V0 型の同時当てはめ
     import os
     from cfd_initial_line import pinned_factory  # noqa: E402
     RA.HallThroat = pinned_factory(os.environ.get("PIN_RUN", str(C / "run_0062_euler_wallfit_fit_r1_ext6k")), [os.environ.get("PIN_RES", "res_6000.h5")])
-if arm in ("fit", "pin"):
+if arm in ("fit", "pin", "pincal"):
     from moc_wall_fit_ab import joint_fit  # noqa: E402  (import で形状 A/B の測定も 1 回走る)
     _dc = RA.design_chain
 
@@ -43,7 +43,7 @@ if arm in ("v4", "v4b"):   # plan §5.1 #16: 始点の r′(0)・r″(0) を自�
         d = _dc4(p); d["wall"] = build_v4(d, 1e-9) if arm == "v4" else build_v4b(d, 1e-9, 1.5); d["wall_fit"] = d["wall"].fit_info
         return d
     RA.design_chain = design_chain_v4
-info = RA.prepare(C / "problem_d155_euler_c2final_n2400.yaml", run_dir, nsteps=12000, ic_from=ic, cfl_main=6.0, implicit_relax=0.7)
+info = RA.prepare(C / ("problem_d155_euler_c2final_n2400_pincal.yaml" if arm == "pincal" else "problem_d155_euler_c2final_n2400.yaml"), run_dir, nsteps=12000, ic_from=ic, cfl_main=6.0, implicit_relax=0.7)
 info["stages"] = "soft"
 info["wall_arm"] = arm
 (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
