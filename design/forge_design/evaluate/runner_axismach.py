@@ -997,27 +997,73 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     return info
 
 
+def _first_order(cfg: str) -> str:
+    """段階起動の前段用に空間 1 次化する (`convMethod: 1` / `2` → 0)。旧実装は `convMethod: 1` しか置換せず、
+    2 次 (`convMethod: 2`) の config では前段が 2 次のまま回っていた (plan tooling-rerun-conditions §4.9)。"""
+    return re.sub(r"convMethod: [12]\b", "convMethod: 0", cfg)
+
+
+def stage_gate(res_h5, cfg_text: str) -> list:
+    """段終了ゲート: 段の最終 res で必要保存量 (config から決める; `rerun_conditions.required_conserved_from_cfg`)
+    が揃い、有限で ρ>0 か。問題のリストを返す (空なら次段へ進んでよい)。
+    forge の rc と最終 step だけを見ていた旧実装は、非有限の場を `restart_field` で次段の初期場へ写しえた (§4.9)。"""
+    import yaml
+    if str(FORGE_TOOLS) not in sys.path:
+        sys.path.insert(0, str(FORGE_TOOLS))
+    from rerun_conditions import field_problems, required_conserved_from_cfg
+    req = required_conserved_from_cfg(yaml.safe_load(cfg_text) or {})
+    probs, _ = field_problems(res_h5, req, species_bounds=False)
+    return probs
+
+
+def _stage_manifest_cls():
+    if str(FORGE_TOOLS) not in sys.path:
+        sys.path.insert(0, str(FORGE_TOOLS))
+    from stage_manifest import StageManifest
+    return StageManifest
+
+
 def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 1000) -> int:
     """NS の起動。stages:
     - "full" (既定・run_0030 レシピ): soft (1次 cfl0.5 ni10, 3000 step) → mid (1次 cfl1, 3000) → 本段 (2次 cfl_main)。
     - "none": 本段だけ (収束済み NS 場からの warm start 用)。
     - "ramp": 2 次のまま cfl を `ramp` (例 (1, 2, 3.5)) の順に各 ramp_steps だけ回して本段 cfl_main へ
       (forge に CFL ランプ機能は無いので restart で段階化する。本段の step 数はランプ分を差し引く)。
-    各段の最終場を IC に引き継ぐ。"""
-    import re
+    各段の最終場を IC に引き継ぐ。
+    段ごとの実効設定を `stage_manifest.json` に記録し (`check_convergence.py --segment` 用)、段の残差履歴を
+    `residual_history_<tag>.csv` に残す (段の res_* は従来どおり消す)。段の最終 res の必要保存量が非有限・ρ≤0 なら
+    次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9)。"""
+    import shutil
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
+    bc_path = run_dir / "bcondConfig.yaml"
+    bc_text = bc_path.read_text() if bc_path.exists() else ""
     n_main = int(re.search(r"nStepOuter: (\d+)", cfg_main).group(1))
+    sm = _stage_manifest_cls()(run_dir)
 
-    def _stage(cfg, nsteps):
+    def _record(cfg, tag):
+        """段の残差履歴を段名つきで残し、manifest に段を足して書く (失敗した段も診断用に残す)。"""
+        hist = run_dir / "residual_history.csv"
+        if hist.exists():
+            shutil.copy(hist, run_dir / f"residual_history_{tag}.csv")
+        sm.add(tag, cfg, bc_text, history=f"residual_history_{tag}.csv")
+        sm.write()
+
+    def _stage(cfg, nsteps, tag):
         cfg = re.sub(r"nStepOuter: \d+", f"nStepOuter: {nsteps}", cfg)
         cfg = re.sub(r"outStepInterval: \d+", f"outStepInterval: {nsteps}", cfg)
         (run_dir / "solverConfig.yaml").write_text(cfg)
+        (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
         rc = run_forge(run_dir)
+        _record(cfg, tag)
         res = sorted(run_dir.glob("res_[0-9]*.h5"),
                      key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res or int("".join(c for c in res[-1].stem if c.isdigit())) < nsteps:
             raise RuntimeError(f"段階起動が失敗 (rc={rc}, res={res[-1].name if res else None})")
+        probs = stage_gate(res[-1], cfg)
+        if probs:
+            raise RuntimeError(f"段 {tag} の最終場 {res[-1].name} が段終了ゲートで不合格 — 次段へ進まない:\n    "
+                               + "\n    ".join(probs))
         _restart_same_mesh(res[-1], run_dir / "nozzle.h5")    # 同一メッシュ: index コピー (旧: interp_field.py)
         for f in run_dir.glob("res_*"):
             f.unlink()
@@ -1025,19 +1071,19 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     if stages == "full":
         soft = cfg_main
         soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 0.5, cfl_pseudo: 0.5", soft)
-        soft = soft.replace("convMethod: 1", "convMethod: 0")
+        soft = _first_order(soft)
         soft = soft.replace("nStepInner: 5", "nStepInner: 10")
-        _stage(soft, 3000)
+        _stage(soft, 3000, "S1_soft")
         mid = cfg_main
         mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 1.0, cfl_pseudo: 1.0", mid)
-        mid = mid.replace("convMethod: 1", "convMethod: 0")
+        mid = _first_order(mid)
         mid = mid.replace("nStepInner: 5", "nStepInner: 10")
-        _stage(mid, 3000)
+        _stage(mid, 3000, "S2_mid")
     elif stages == "ramp":
         ramp = tuple(ramp or (1.0, 2.0, 3.5))
-        for c in ramp:
+        for i, c in enumerate(ramp):
             st = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", cfg_main)
-            _stage(st, int(ramp_steps))
+            _stage(st, int(ramp_steps), f"R{i + 1}_cfl{c:g}")
         n_main = max(n_main - int(ramp_steps) * len(ramp), int(ramp_steps))
         # 最終 res が書かれるよう outStepInterval の倍数に丸める (forge は outStepInterval の倍数でしか res を書かない)
         out_int = int(re.search(r"outStepInterval: (\d+)", cfg_main).group(1))
@@ -1046,4 +1092,7 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     elif stages != "none":
         raise ValueError("stages は 'full' / 'none' / 'ramp'")
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
-    return run_forge(run_dir)
+    (run_dir / "residual_history.csv").unlink(missing_ok=True)
+    rc = run_forge(run_dir)
+    _record(cfg_main, "main")
+    return rc
