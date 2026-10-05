@@ -8,9 +8,9 @@ set -e
 export FORGE_BIN FORGE_CUDA_BLOCKSIZE
 cd "$(dirname "$0")"
 TOOLS=../../solver_density_cuda/tools
-i=59
-for src in run_0053_euler_wallfit_interp_r1 run_0054_euler_wallfit_interp_r2 run_0055_euler_wallfit_interp_r3 \
-           run_0056_euler_wallfit_fit_r1 run_0057_euler_wallfit_fit_r2 run_0058_euler_wallfit_fit_r3; do
+i=${START:-59}
+SRCS=${SRCS:-"run_0053_euler_wallfit_interp_r1 run_0054_euler_wallfit_interp_r2 run_0055_euler_wallfit_interp_r3 run_0056_euler_wallfit_fit_r1 run_0057_euler_wallfit_fit_r2 run_0058_euler_wallfit_fit_r3"}
+for src in $SRCS; do
   rd=run_00${i}_${src#run_00??_}_ext6k
   mkdir "$rd"
   cp "$src"/{nozzle.h5,nozzle.xmf,bcondConfig.yaml,solverConfig.yaml,probe.yaml,prepare_info.json,target_axis_M.csv,wall_design.csv} "$rd"/

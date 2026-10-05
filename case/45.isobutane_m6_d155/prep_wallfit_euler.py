@@ -1,7 +1,7 @@
 """補間壁 vs 位置+壁角の同時当てはめ壁の Euler A/B の run 準備 (solver は回さない)。plan verification-m6-axis-wave-mesh-su2 §5.1 #15。
 problem_d155_euler_c2final_n2400.yaml (MOC 2400 点) から、arm=interp は現行の AxisMachCFDWall、arm=fit は同じ MOC 点群の
 joint_fit (λ=1e-9, h0 0.0125, h1 0.5; moc_wall_fit_ab.py) で設計区間を置き換えた壁で、runner_axismach.prepare (Euler, slip, 段階起動 soft) を作る。
-usage: python3 prep_wallfit_euler.py <run_dir> {interp|fit} --ic RUN     (準備のみ: 本段 cfl 6・implicitRelax 0.7・12000 step)
+usage: python3 prep_wallfit_euler.py <run_dir> {interp|fit|v4} [--ic RUN]     (準備のみ: 本段 cfl 6・implicitRelax 0.7・12000 step)
        python3 prep_wallfit_euler.py --run <run_dir>                     (準備済み run を soft 3000 → 本段で回す)
 """
 import json, sys
@@ -15,8 +15,8 @@ if sys.argv[1] == "--run":
     print(f"forge exit={rc}"); raise SystemExit(rc)
 run_dir, arm = Path(sys.argv[1]), sys.argv[2]
 ic = sys.argv[sys.argv.index("--ic") + 1] if "--ic" in sys.argv else None
-if arm not in ("interp", "fit"):
-    raise SystemExit("arm は interp か fit")
+if arm not in ("interp", "fit", "v4"):
+    raise SystemExit("arm は interp / fit / v4")
 if arm == "fit":
     from moc_wall_fit_ab import joint_fit  # noqa: E402  (import で形状 A/B の測定も 1 回走る)
     _dc = RA.design_chain
@@ -31,6 +31,14 @@ if arm == "fit":
             print("validate:", msgs)
         return d
     RA.design_chain = design_chain_fit
+if arm == "v4":   # plan §5.1 #16: 始点の r′(0)・r″(0) を自由にした当てはめ + 縮流部 Hermite を接続 (wall_v4.py)
+    from wall_v4 import build_v4  # noqa: E402
+    _dc4 = RA.design_chain
+
+    def design_chain_v4(p):
+        d = _dc4(p); d["wall"] = build_v4(d, 1e-9); d["wall_fit"] = d["wall"].fit_info
+        return d
+    RA.design_chain = design_chain_v4
 info = RA.prepare(C / "problem_d155_euler_c2final_n2400.yaml", run_dir, nsteps=12000, ic_from=ic, cfl_main=6.0, implicit_relax=0.7)
 info["stages"] = "soft"
 info["wall_arm"] = arm

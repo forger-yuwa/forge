@@ -10,12 +10,11 @@ export FORGE_BIN FORGE_CUDA_BLOCKSIZE
 export FORGE_CONVERTER="$(cd "$(dirname "$0")" && pwd)/conv_tolerant.sh"   # 終了時 GPUassert の既知の罠を許容
 cd "$(dirname "$0")"
 IC=${1:-none}
+ARMS=${ARMS:-"interp fit"}   # v4 腕だけ追加するとき: ARMS=v4 START=65
 ICARG=(); [ "$IC" != none ] && ICARG=(--ic "$IC")
-rm -rf _prep_wallfit_interp _prep_wallfit_fit
-python3 prep_wallfit_euler.py _prep_wallfit_interp interp "${ICARG[@]}"
-python3 prep_wallfit_euler.py _prep_wallfit_fit fit "${ICARG[@]}"
-i=53
-for arm in interp fit; do
+for arm in $ARMS; do rm -rf _prep_wallfit_$arm; python3 prep_wallfit_euler.py _prep_wallfit_$arm $arm "${ICARG[@]}"; done
+i=${START:-53}
+for arm in $ARMS; do
   for k in 1 2 3; do
     rd=run_00${i}_euler_wallfit_${arm}_r${k}
     cp -r _prep_wallfit_${arm} "$rd"

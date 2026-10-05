@@ -2,7 +2,7 @@
 A: run_0053〜0055 / B: run_0056〜0058 (各腕 3 回の独立再実行)。
 延長 (準定常未達時の 6000 step × 1 回, run_0059〜0064) があれば、本段 (step 1000〜12000) に延長 (12000+1000〜) を連結して判定する。
 v2 (2026-10-05, codex 6 回目): 分布差の U に 2T・2E を入れ、E ≤ Δ/10 を前提ゲートに、残差 VERDICT は全文の行を保存。登録時の出力 (wallfit_euler_ab.json) は上書きしない。
-usage: python3 eval_wallfit_euler.py [case_dir] [--fixed-coef]   (→ _band_ab/wallfit_euler_ab_v2.json / _band_ab/wallfit_euler_ab_diag_fixedcoef.json) → _band_ab/wallfit_euler_ab.json, 各 run の wallfit_series.csv と QUASISTEADY_wallfit.txt
+usage: python3 eval_wallfit_euler.py [case_dir] [--fixed-coef] [--pair=A,B (既定 interp,fit; 例 fit,v4)]   (→ _band_ab/wallfit_euler_ab_v2.json / _band_ab/wallfit_euler_ab_diag_fixedcoef.json) → _band_ab/wallfit_euler_ab.json, 各 run の wallfit_series.csv と QUASISTEADY_wallfit.txt
 """
 import json, re, subprocess, sys
 from pathlib import Path
@@ -19,8 +19,15 @@ X_E, X_F = 39.82004263, 95.22667765
 WIN_T = (41.82004263, 94.22667765); WIN_O = (24.82004263, 95.22667765)
 P_REF, MD = 2237.0, 6.0
 DELTA = dict(M_wave=0.001, M_resid_diff=0.001, overshoot=0.003, exit_core_M=0.00018, P_wave=0.010, P_resid_diff=0.010)
-ARMS = {"A": [f"run_00{n}_euler_wallfit_interp_r{k}" for n, k in ((53, 1), (54, 2), (55, 3))],
-        "B": [f"run_00{n}_euler_wallfit_fit_r{k}" for n, k in ((56, 1), (57, 2), (58, 3))]}
+_pair = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--pair=")), "interp,fit").split(",")   # A 腕, B 腕 (interp / fit / v4)
+
+
+def _arm_runs(arm):
+    rs = sorted(q.name for q in C.glob(f"run_00[0-9][0-9]_euler_wallfit_{arm}_r[0-9]") if q.is_dir())
+    return rs
+
+
+ARMS = {"A": _arm_runs(_pair[0]), "B": _arm_runs(_pair[1])}
 
 
 def grid(h):
@@ -128,13 +135,13 @@ for arm, runs in ARMS.items():
 mesh_check = {}
 try:
     W = {}
-    for arm in ("interp", "fit"):
+    for arm in _pair:
         pd = C / f"_prep_wallfit_{arm}"; info = json.loads((pd / "prepare_info.json").read_text())
         with h5py.File(pd / "nozzle.h5") as f:
             nc = f["/MESH/COORD"][:].reshape(-1, 3)
         ni = int(info["mesh"]["ni"]); S = float(info["scale_m"]); nj = nc.shape[0] // ni
         W[arm] = ((nc[:, 0] / S).reshape(ni, nj)[:, -1], (nc[:, 1] / S).reshape(ni, nj)[:, -1])
-    xa, ra = W["interp"]; xb, rb = W["fit"]
+    xa, ra = W[_pair[0]]; xb, rb = W[_pair[1]]
     mesh_check = dict(same_x=bool(np.allclose(xa, xb, atol=1e-9)), wall_dr_max=float(np.abs(rb - ra).max()),
                       x_at_max=float(xa[np.argmax(np.abs(rb - ra))]))
 except Exception as e:  # noqa: BLE001
@@ -174,6 +181,6 @@ out["overall"] = ("保留 (準定常・刻み精度の前提未達)" if not (all
                   "支持: 両壁の差は小さい" if all(g == "small" for g in gated) else
                   "棄却: 差あり (向きを確認)" if any(g == "different" for g in gated) else "保留")
 (C / "_band_ab").mkdir(exist_ok=True)
-(C / ("_band_ab/wallfit_euler_ab_diag_fixedcoef.json" if FIXED else "_band_ab/wallfit_euler_ab_v2.json")).write_text(json.dumps(out, indent=1, ensure_ascii=False))
+(C / ("_band_ab/wallfit_euler_ab" + ("" if _pair == ["interp", "fit"] else f"_{_pair[0]}_vs_{_pair[1]}") + ("_diag_fixedcoef.json" if FIXED else "_v2.json"))).write_text(json.dumps(out, indent=1, ensure_ascii=False))
 print(json.dumps({"mesh_check": mesh_check, "all_steady": qs_all, "overall": out["overall"],
                   "judge": {k: {kk: (round(vv, 7) if isinstance(vv, float) else vv) for kk, vv in v.items()} for k, v in judge.items()}}, indent=1, ensure_ascii=False))
