@@ -319,6 +319,14 @@ def main():
     check("(f′) slip 壁の節点は P_exit_ref から除かれる (内部節点 95 点)", "95/97" in str(p.get("P_exit_ref_source", "")), p.get("P_exit_ref_source"))
     done(ref, new)
 
+    # ------------------------------------------------------------------ (f″) 乱流モデルなしの run に残る roK/roOmega (2026-10-06 追加)
+    noturb = lambda t: re.sub(r"^turbulence:.*$", "turbulence: {model: \"none\"}", t, flags=re.M)  # noqa: E731
+    ref, new = make_ref(edit_cfg=noturb, edit_bc=slip)
+    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt"])
+    check("(f″) 乱流なし + roK/roOmega の入れ物 → 受理し警告に記録、必要保存量に roK/roOmega を含めない",
+          "roK" not in p["required"] and any("未使用量" in w for w in p["warnings"]), (p["required"], p["warnings"]))
+    done(ref, new)
+
     # ------------------------------------------------------------------ (g)
     ref, new = make_ref(edit_cfg=lambda t: t + "condensation: {condensation: 1, nCondSpecies: 1, condensationSpecies: H2O}\n")
     code, _, err = run_main([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt"])

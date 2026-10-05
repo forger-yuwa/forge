@@ -50,6 +50,7 @@ ALLOW_COPY = ("nozzle.h5", "nozzle.xmf", "bcondConfig.yaml", "solverConfig.yaml"
               "resolved_species_*.yaml", "species_db_external.yaml", "probe.yaml", "prepare_info.json",
               "wall_*.csv", "target_axis_M.csv", "delta_r_initial.*", "MESH_QUALITY.txt")
 REQUIRED_FILES = ("nozzle.h5", "bcondConfig.yaml", "solverConfig.yaml")
+INERT_WHEN_NO_TURB = ("roK", "roOmega")   # 乱流モデルなしの run に残る変換器既定の入れ物
 ALLOWED_KINDS = ("inlet_Pressure", "outlet_statPress", "wall", "wall_isothermal", "slip", "axis")   # slip = Euler の滑り壁 (2026-10-06 追加)
 Y_SUM_TOL = 1e-12          # 書いた Y の Σ=1 の許容 (forge の起動検査 1e-3 より厳しく; plan §4.3)
 FIELD_Y_TOL = 1e-6         # 場の 0 ≤ ρY/ρ ≤ 1+tol, |Σ ρY − ρ| ≤ tol·ρ (plan §4.4)
@@ -528,6 +529,12 @@ def build_plan(a):
     with h5py.File(res_path, "r") as fh:
         src_dtypes = {k: str(fh["VALUE"][k].dtype) for k in required}
         src_species_hash = fh.attrs.get("species_hash")
+    # 乱流モデルなし (Euler・層流) の run では、変換器が既定で作る roK/roOmega の入れ物が残っている (forge は読まない)。
+    # それだけは「使われない余りの量」として許し、記録する (スケールもしない)。他の未知の量は従来どおり拒否 (2026-10-06)。
+    tb_model = str((cfg.get("turbulence") or {}).get("model") or "none").strip().lower()
+    inert = [k for k in extra if k in INERT_WHEN_NO_TURB and not tb_model.startswith("sst")]
+    extra = [k for k in extra if k not in inert]
+    inert_note = (f"乱流モデルなしの run の未使用量 {inert} は restart_field がそのまま写す (forge は読まない・スケールしない)" if inert else None)
     if extra:
         raise RerunError(f"DST {dst_ref} の /VALUE に必要保存量と wall_dist 以外がある {extra} "
                          "(restart_field は SRC に同名があれば写すので、設定と食い違う量が持ち込まれうる; codex M1)")
@@ -554,6 +561,8 @@ def build_plan(a):
         raise RerunError(f"nStepOuter {n_outer} が outStepInterval {n_out} の倍数でない (最終 res が書かれない)")
     ref_outer = int((((cfg.get("time") or {}).get("last") or {}).get("nStepOuter")) or 0)
     warnings = [p_exit_warn] if p_exit_warn else []
+    if inert_note:
+        warnings.append(inert_note)
     if _res_step(res_path) is not None and _res_step(res_path) != ref_outer:
         warnings.append(f"参照 res の step {_res_step(res_path)} が参照 config の nStepOuter {ref_outer} と違う "
                         "(途中の res を種にしている / config が延長後のものでない)")
