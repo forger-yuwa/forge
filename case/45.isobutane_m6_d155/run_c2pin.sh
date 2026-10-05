@@ -28,8 +28,9 @@ info["stages"] = {"stages": "none", "ramp": None, "ramp_steps": 1000}; info["res
 (cd / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
 PY
 LAST=$(ls $FN/res_[0-9]*.h5 | sort -V | tail -1)
-python3 ../../solver_density_cuda/tools/restart_field.py "$LAST" "$CD/nozzle.h5" --dst-run "$CD" > "$CD/restart_field.log" 2>&1
-tail -2 "$CD/restart_field.log"
+# 凝縮 ON は液相 H2O(L) が加わる種構成の変換なので restart_field でなく convert_species_field (conserve) で移す (main の来歴ガード)
+python3 ../../solver_density_cuda/tools/convert_species_field.py "$LAST" "$CD/nozzle.h5" --meta "$CD/species_meta.yaml" --src-run "$FN" --dst-run "$CD" > "$CD/convert_species_field.log" 2>&1
+tail -3 "$CD/convert_species_field.log"
 python3 -c "$RUNNS" $CD
 echo "done $CD"
 echo ALLDONE
