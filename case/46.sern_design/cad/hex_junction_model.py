@@ -395,7 +395,7 @@ def build(out, P, quiet=False):
                x_ratio=[abs(xlaw[i][1]) for i in range(len(ivs))], x_adjacent_ratio_max=x_ratio_max, dx_min=float(dxs.min()), dx_max=float(dxs.max()), counts=dict(NL=NL, NY=NY, NZ=NZ, NSW=NSW, NTC=NTC, NFY=NFY, NFZ=NFZ),
                n_blocks=len(vols), blocks_per_region={r_: len(PRESENT[r_]) for r_ in "ABC"}, untagged_boundary_faces=[str(u) for u in untag],
                tags={t: len(v) for t, v in groups.items()})
-    rep.update(check(G, P, vols, groups, h1, h1e, out))
+    rep.update(check(G, P, vols, groups, h1, h1e, out, NL))
     ok = (not untag and x_ratio_max <= g * 1.02 and rep["ar_gt5000"] == 0 and rep["ar1000_skew_max"] <= 0.30 and rep["other_elems"] == {} and rep["neg_jac_f32"] == 0 and rep["mixed_sign_volumes"] == 0 and rep["skew_max"] <= 0.90
           and rep["topology"]["ok"] and all(v["ok"] for v in rep["first_layer"].values()))
     rep["VERDICT"] = "PASS" if ok else "FAIL"
@@ -414,7 +414,161 @@ def cornerJ(Pn):
     return np.stack([np.einsum('ij,ij->i', np.cross(Pn[:, a] - Pn[:, c], Pn[:, b] - Pn[:, c]), Pn[:, d] - Pn[:, c]) for c, (a, b, d) in NBR.items()], 1)
 
 
-def check(G, P, vols, groups, h1, h1e, out):
+END_TAGS = ("sidewall_end", "cowl_base")
+
+
+def model_classifier(G):
+    """接続模型の判定区分 (フィレット円弧上 / 半径が変わる区間) を返す関数を作る。first_layer_check の classify に渡す"""
+    def classify(t, pts):
+        arc = np.zeros(len(pts), bool); edge = np.zeros(len(pts), bool)
+        if t in ("ramp", "sidewall_in", "cowl_in"):
+            dl = 0.05 * G.H      # r -> 0 の端点 (フィレットの生え際) も円弧の区分に入れる
+            rr = np.array([np.max([G.r(x_ + q) for q in (-dl, 0.0, dl)], axis=0) for x_ in pts[:, 0]]).reshape(-1, 2)
+            yrn = np.array([G.yr(x_) for x_ in pts[:, 0]]); mg = 0.5 * G.DR
+            arc |= (rr[:, 0] > 0) & (pts[:, 2] > G.ZW - rr[:, 0] - mg) & (pts[:, 1] > yrn - rr[:, 0] - mg)
+            arc |= (rr[:, 1] > 0) & (pts[:, 2] > G.ZW - rr[:, 1] - mg) & (pts[:, 1] < G.YC + rr[:, 1] + mg)
+            for (xa, ua, la), (xb, ub, lb) in zip(G.prof[:-1], G.prof[1:]):       # 半径が変わる区間 (フィレット遷移) はダクト内の壁全周を ±10 % の区分に入れる (plan §4.10 (e))
+                if (ua, la) != (ub, lb): edge |= (pts[:, 0] >= xa - 1e-12) & (pts[:, 0] <= xb + 1e-12)
+        return arc, edge
+    return classify
+
+
+def first_layer_check(xyz, hx, bq, h1, h1e, nl, nl_end, dr, classify=None, wall_tags=WALL_TAGS, end_tags=END_TAGS,
+                      expected_tags=None, gmax=1.2, unit=1.0):
+    """壁第一層の検査 (gmsh に依存しない純関数。plan tooling-sern-mesh-blocking §5.1 B4-0)。
+    入力: 節点座標 xyz (N,3)、ヘキサ hx (M,8, gmsh 順)、壁タグ -> 境界四角形 (K,4) の dict bq、第一層の指定 h1 (端面は h1e)、
+    期待層数 nl (端面は nl_end)、稜の近傍幅の基準 dr、区分関数 classify(t, pts) -> (arc, edge) (None なら円弧区分なし)。
+    壁タグ別に次を見て、1 つでも外れたら ok=False:
+      (1) 第一内部点の資格: 壁節点 w に接する全ヘキサの節点のうち、**どの壁タグにも属さない**節点で、壁法線の内側 (n.d > 0) にあるものが候補。
+          候補のうち w と辺でつながるものがあればその中から、法線からの横ずれ |d - (n.d) n| が最小のものを第一内部点 p1 とする
+          (隅の近くで格子線が扇形に傾いても、同じヘキサの対角の点でなく格子線上の点を取る)。辺でつながる候補が無いときは
+          接する全ヘキサの候補から選ぶ (直交格子の凹の稜では p1 は対角の節点になる)。これを許すのは稜 (複数の壁タグに属する節点) だけで、
+          非稜の節点で辺でつながる候補が無い・候補が 1 つも無い壁節点は「評価不能」。
+      (2) 全数被覆: タグの全節点を評価する。法線が作れない節点 (ヘキサの面でない四角形だけに属する) と (1) の評価不能を数え、1 以上なら不合格。
+          expected_tags に挙げたタグが bq に無ければそのタグは不合格 (missing)。
+      (3) 実層数: w -> p1 の向きから、辺でつながる節点を「直前の向きとの cos が最大 (> 0.5)・壁節点でない・来た節点でない」で 1 つずつたどり、
+          間隔 d_k = |p_k - p_{k-1}| が減らない (d_{k+1}/d_k >= 0.98) 間を層として数える (上限 2 × 期待層数)。期待層数 (nl / 端面は nl_end) より少なければ不合格。
+          稜で p1 が辺でつながらない (対角) 節点は、たどる向きが格子線に乗らないので層数・間隔比を数えない (layers_skipped_diag に件数を出す。
+          非稜の節点で p1 が辺でつながらなければ評価不能)。
+      (4) 隣接間隔比: (3) でたどった連続 3 節点の間隔比 d_{k+1}/d_k を壁から期待層数ぶん実測し、> gmax (許容の上乗せなし) の節点があれば不合格。
+    第一層の比 |n.(p1 - w)| / h1 の区分 (平面部 ±5 %、稜から 2 dr 以内と半径が変わる区間 ±10 %、フィレット円弧上 −10〜+45 %) は従来どおり。
+    """
+    from scipy.spatial import cKDTree
+    N = len(xyz); wall_tags = tuple(wall_tags)
+    wallnode = np.zeros(N, bool)
+    for t in wall_tags:
+        if t in bq: wallnode[np.asarray(bq[t]).ravel()] = True
+    multi = np.zeros(N, int)
+    for t in wall_tags:
+        if t in bq: multi[np.unique(bq[t])] += 1
+    ridge = xyz[multi >= 2]; tree = cKDTree(ridge) if len(ridge) else None
+    # 壁四角形 -> それを面に持つヘキサ (法線の向きを内側に揃えるのに使う)
+    cand = np.where(wallnode[hx].sum(1) >= 4)[0]; key = {}
+    for hi in cand:
+        for f in HF:
+            if wallnode[hx[hi, list(f)]].all(): key[tuple(sorted(hx[hi, list(f)]))] = (hi, f)
+    # 辺でつながる節点 (全ヘキサの 12 辺)。行ごとに -1 で詰めた表
+    E = np.vstack([hx[:, [a, b]] for a, b in HE]).astype(np.int64); E = np.vstack([E, E[:, ::-1]])
+    E = np.unique(E[:, 0] * N + E[:, 1]); src, dst = E // N, E % N; del E
+    deg = np.bincount(src, minlength=N); D = int(deg.max()) if N else 0; st = np.r_[0, np.cumsum(deg)[:-1]]
+    NB = -np.ones((N, max(D, 1)), np.int64); NB[src, np.arange(len(src)) - st[src]] = dst; del src, dst
+    # 節点 -> 接するヘキサ (壁節点だけで使う)
+    hflat = hx.ravel().astype(np.int64); od = np.argsort(hflat, kind="stable"); hcnt = np.bincount(hflat, minlength=N); hst = np.r_[0, np.cumsum(hcnt)[:-1]]
+    def hexes_of(nd):
+        Dh = int(hcnt[nd].max()) if len(nd) else 1; Hm = -np.ones((len(nd), Dh), np.int64)
+        for j in range(Dh):
+            m = hcnt[nd] > j; Hm[m, j] = od[hst[nd[m]] + j] // 8
+        return Hm
+    acc = {}
+    for t in wall_tags:                      # 1 巡目: 壁タグ別の節点法線 (隣接する壁四角形の面積ベクトルの和)
+        if t not in bq: continue
+        q = np.asarray(bq[t]); nrm = np.zeros((N, 3)); uneval = 0
+        for row in q:
+            hit = key.get(tuple(sorted(row)))
+            if hit is None: uneval += 1; continue
+            hi, f = hit; loc = list(f); Pq = xyz[hx[hi, loc]]; n_ = np.cross(Pq[2] - Pq[0], Pq[3] - Pq[1])
+            cen_in = xyz[hx[hi]].mean(0) - Pq.mean(0); n_ = n_ * np.sign(n_ @ cen_in)
+            nrm[hx[hi, loc]] += n_
+        acc[t] = (nrm, uneval)
+    fl = {}
+    for t in (expected_tags or ()):
+        if t not in bq: fl[t] = dict(missing=True, ok=False)
+    for t in wall_tags:
+        if t not in bq: continue
+        q = np.asarray(bq[t]); nrm, uneval = acc[t]
+        nd_all = np.unique(q); has_n = np.linalg.norm(nrm[nd_all], axis=1) > 0; no_normal = int((~has_n).sum()); nd = nd_all[has_n]
+        n_ = nrm[nd] / np.linalg.norm(nrm[nd], axis=1)[:, None]
+        ns = nrm[nd].copy()                                                   # タグの境が滑らか (フィレットの 45° 点など) なら隣のタグの面も法線に入れる。稜 (50° 超) は入れない
+        for t2 in acc:
+            if t2 == t: continue
+            v2 = acc[t2][0][nd]; l2 = np.linalg.norm(v2, axis=1); okk = l2 > 0
+            cs = np.zeros(len(nd)); cs[okk] = np.einsum('ij,ij->i', n_[okk], v2[okk]) / l2[okk]
+            ns += np.where((cs > math.cos(math.radians(50.0)))[:, None], v2, 0.0)
+        n_ = ns / np.linalg.norm(ns, axis=1)[:, None]
+        # (1) 第一内部点: 接する全ヘキサの節点から、壁でない・内側・横ずれ最小
+        p1 = -np.ones(len(nd), np.int64)
+        for c0 in range(0, len(nd), 20000):                 # メモリを抑えるため節点を分けて処理
+            sl = slice(c0, c0 + 20000); ndc, nc = nd[sl], n_[sl]
+            Hm = hexes_of(ndc); C = np.where(Hm[:, :, None] >= 0, hx[np.maximum(Hm, 0)], -1).reshape(len(ndc), -1)
+            dv = xyz[np.maximum(C, 0)] - xyz[ndc][:, None, :]; dn = np.einsum('ijk,ik->ij', dv, nc)
+            tang = np.linalg.norm(dv - dn[:, :, None] * nc[:, None, :], axis=2)
+            valid = (C >= 0) & ~wallnode[np.maximum(C, 0)] & (dn > 0)
+            ise = (C[:, :, None] == NB[ndc][:, None, :]).any(2)          # 辺でつながる候補を優先 (扇形に傾いた格子線でも線上の点を取る)
+            valid &= np.where(ise.__and__(valid).any(1)[:, None], ise, True)
+            tang = np.where(valid, tang, np.inf); j = np.argmin(tang, axis=1); r_ = np.arange(len(ndc))
+            p1[sl] = np.where(np.isfinite(tang[r_, j]), C[r_, j], -1)
+        qual = p1 >= 0
+        edgecon = qual & np.any(NB[nd] == p1[:, None], axis=1)
+        isridge = multi[nd] >= 2; diag = qual & ~edgecon & isridge
+        noqual = ~qual | (qual & ~edgecon & ~isridge)               # 候補なし / 非稜で辺につながらない = 評価不能
+        is_end = t in end_tags; target = h1e if is_end else h1; nexp = int(nl_end if is_end else nl)
+        ev = ~noqual; nde, ne, pe = nd[ev], n_[ev], p1[ev]
+        ratio = np.abs(np.einsum('ij,ij->i', ne, xyz[pe] - xyz[nde])) / target
+        # (3)(4) 実層数と隣接間隔比: 辺でつながる p1 から格子線をたどる
+        walk = ~diag[ev]; lay = np.zeros(len(nde), int); lay[walk] = 1; rmax = np.full(len(nde), np.nan)
+        wi = np.flatnonzero(walk); prev, cur = nde[wi], pe[wi]; dprev = np.linalg.norm(xyz[cur] - xyz[prev], axis=1)
+        alive = np.ones(len(wi), bool); rcur = np.full(len(wi), np.nan)
+        for k in range(1, 2 * max(nexp, 1)):
+            if not alive.any(): break
+            a = np.flatnonzero(alive); Cn = NB[cur[a]]; u = xyz[cur[a]] - xyz[prev[a]]; u /= np.linalg.norm(u, axis=1)[:, None]
+            vv = xyz[np.maximum(Cn, 0)] - xyz[cur[a]][:, None, :]; ln = np.linalg.norm(vv, axis=2)
+            cs = np.einsum('ijk,ik->ij', vv, u) / np.where(ln > 0, ln, 1.0)
+            ok_ = (Cn >= 0) & (Cn != prev[a][:, None]) & ~wallnode[np.maximum(Cn, 0)] & (cs > 0.5)
+            cs = np.where(ok_, cs, -np.inf); jj = np.argmax(cs, axis=1); go = np.isfinite(cs[np.arange(len(a)), jj])
+            nx_ = Cn[np.arange(len(a)), jj]; dnext = np.where(go, ln[np.arange(len(a)), jj], 0.0); rr = dnext / dprev[a]
+            go &= rr >= 0.98
+            if k < nexp: rcur[a[go]] = np.fmax(rcur[a[go]], rr[go])     # 期待層数の範囲の間隔比だけを判定に使う
+            alive[a[~go]] = False; g_ = a[go]; lay[wi[g_]] += 1
+            prev[g_], cur[g_], dprev[g_] = cur[g_], nx_[go], dnext[go]
+        rmax[wi] = rcur
+        # 第一層の比の区分: (i) フィレット円弧の上は [-10 %, +45 %] (バタフライ位相では 45° 点で最大 sqrt2 倍厚い。薄くはしない)、
+        #       (ii) 稜 (複数の壁タグに属する節点) から 2 dr 以内は ±10 %、(iii) それ以外の平面部は ±5 %
+        arc = np.zeros(len(nde), bool); edge = np.zeros(len(nde), bool)
+        if tree is not None and len(nde): edge |= tree.query(xyz[nde])[0] < 2 * dr
+        if classify is not None and len(nde):
+            a_, e_ = classify(t, xyz[nde]); arc |= a_; edge |= e_
+        edge &= ~arc; core = ~(edge | arc); dev = ratio - 1
+        bad = (core & (np.abs(dev) > 0.05)) | (edge & (np.abs(dev) > 0.10)) | (arc & ((dev < -0.10) | (dev > 0.45)))
+        short = walk & (lay < nexp); steep = walk & (rmax > gmax)
+        n_uneval = no_normal + int(noqual.sum())
+        mm = lambda v: (float(v.min()), float(v.max())) if len(v) else (float("nan"), float("nan"))
+        fl[t] = dict(nodes=int(len(nd_all)), evaluated=int(len(nde)), unevaluable_nodes=n_uneval, unevaluable_quads=int(uneval),
+                     ratio_min=mm(ratio)[0], ratio_max=mm(ratio)[1],
+                     layers_expected=nexp, layers_min=int(lay[walk].min()) if walk.any() else 0, layers_short=int(short.sum()),
+                     layers_skipped_diag=int(diag.sum()), adjacent_ratio_max=float(np.nanmax(rmax)) if np.isfinite(rmax).any() else float("nan"),
+                     adjacent_ratio_gt=int(steep.sum()), adjacent_ratio_limit=gmax)
+        for nm, mk in (("core", core), ("edge", edge), ("arc", arc)):
+            fl[t][nm] = dict(nodes=int(mk.sum()), out=int((bad & mk).sum()), min=float(ratio[mk].min()) if mk.any() else 1.0, max=float(ratio[mk].max()) if mk.any() else 1.0)
+        fl[t]["ok"] = bool(uneval == 0 and n_uneval == 0 and len(nde) > 0 and not bad.any() and not short.any() and not steep.any()); dev = np.abs(dev)
+        fl[t]["_bad"] = [[float(v) for v in xyz[nde[i]] / unit] + [float(ratio[i]), "core" if core[i] else ("edge" if edge[i] else "arc")] for i in np.flatnonzero(bad)[:8]]
+        fl[t]["_short"] = [[float(v) for v in xyz[nde[i]] / unit] + [int(lay[i])] for i in np.flatnonzero(short)[:8]]
+        fl[t]["_steep"] = [[float(v) for v in xyz[nde[i]] / unit] + [float(rmax[i])] for i in np.flatnonzero(steep)[:8]]
+        fl[t]["_uneval"] = [[float(v) for v in xyz[i] / unit] for i in np.r_[nd_all[~has_n], nd[noqual]][:8]]
+        fl[t]["_worst"] = [[float(v) for v in xyz[nde[i]]] + [float(ratio[i])] for i in np.argsort(-dev)[:5]]
+    return fl
+
+
+def check(G, P, vols, groups, h1, h1e, out, nl):
     from scipy.spatial import cKDTree
     M = gmsh.model.mesh; ntag, xyz, _ = M.getNodes(); xyz = xyz.reshape(-1, 3)
     idx = np.zeros(int(ntag.max()) + 1, np.int64); idx[ntag.astype(np.int64)] = np.arange(len(ntag))
@@ -469,62 +623,10 @@ def check(G, P, vols, groups, h1, h1e, out):
     same = len(b1) == len(a1) and bool(np.all(b1 == a1) and np.all(b2 == a2))
     topo = dict(faces_gt2=int((cnt > 2).sum()), boundary_faces=int(len(b1)), tagged_quads=int(len(a1)), quads_in_two_tags=dup,
                 unused_nodes=int(len(xyz) - len(used)), ok=bool(same and (cnt > 2).sum() == 0 and dup == 0))
-    # ---- 壁第一層: 壁タグ別・節点別の |n . dx| / h1
-    wallnode = np.zeros(len(xyz), bool)
-    for t in WALL_TAGS:
-        if t in bq: wallnode[bq[t].ravel()] = True
-    cand = np.where(wallnode[hx].sum(1) >= 4)[0]; key = {}
-    for hi in cand:
-        for f in HF:
-            if wallnode[hx[hi, list(f)]].all(): key[tuple(sorted(hx[hi, list(f)]))] = (hi, f)
-    multi = np.zeros(len(xyz), int)
-    for t in WALL_TAGS:
-        if t in bq: multi[np.unique(bq[t])] += 1
-    ridge = xyz[multi >= 2]; tree = cKDTree(ridge) if len(ridge) else None
-    fl, acc = {}, {}; nrm_all = np.zeros((len(xyz), 3))
-    for t in WALL_TAGS:                      # 1 巡目: 壁タグ別の節点法線 (隣接する壁四角形の面積ベクトルの和) と対向節点
-        if t not in bq: continue
-        q = bq[t]; nrm = np.zeros((len(xyz), 3)); opp = -np.ones(len(xyz), np.int64); uneval = 0
-        for row in q:
-            hit = key.get(tuple(sorted(row)))
-            if hit is None: uneval += 1; continue
-            hi, f = hit; loc = list(f); Pq = xyz[hx[hi, loc]]; n_ = np.cross(Pq[2] - Pq[0], Pq[3] - Pq[1])
-            cen_in = xyz[hx[hi]].mean(0) - Pq.mean(0); n_ = n_ * np.sign(n_ @ cen_in)
-            for l in loc:
-                o_ = [m for m in NBR[l] if m not in loc][0]; nrm[hx[hi, l]] += n_; opp[hx[hi, l]] = hx[hi, o_]
-        acc[t] = (nrm, opp, uneval)
-    for t in WALL_TAGS:
-        if t not in bq: continue
-        q = bq[t]; nrm, opp, uneval = acc[t]
-        nd = np.unique(q); nd = nd[opp[nd] >= 0]; n_ = nrm[nd] / np.linalg.norm(nrm[nd], axis=1)[:, None]
-        ns = nrm[nd].copy()                                                   # タグの境が滑らか (フィレットの 45° 点など) なら隣のタグの面も法線に入れる。稜 (50° 超) は入れない
-        for t2 in acc:
-            if t2 == t: continue
-            v2 = acc[t2][0][nd]; l2 = np.linalg.norm(v2, axis=1); okk = l2 > 0
-            cs = np.zeros(len(nd)); cs[okk] = np.einsum('ij,ij->i', n_[okk], v2[okk]) / l2[okk]
-            ns += np.where((cs > math.cos(math.radians(50.0)))[:, None], v2, 0.0)
-        n_ = ns / np.linalg.norm(ns, axis=1)[:, None]
-        target = h1e if t in ("sidewall_end", "cowl_base") else h1
-        ratio = np.abs(np.einsum('ij,ij->i', n_, xyz[opp[nd]] - xyz[nd])) / target
-        # 区分: (i) フィレット円弧の上 (+ 余白 dr/4) は [-10 %, +45 %] (バタフライ位相では 45° 点で最大 sqrt2 倍厚い。薄くはしない)、
-        #       (ii) 稜 (複数の壁タグに属する節点) から 2 dr 以内は ±10 %、(iii) それ以外の平面部は ±5 %
-        arc = np.zeros(len(nd), bool); edge = np.zeros(len(nd), bool)
-        if tree is not None: edge |= tree.query(xyz[nd])[0] < 2 * G.DR
-        if t in ("ramp", "sidewall_in", "cowl_in"):
-            dl = 0.05 * G.H      # r -> 0 の端点 (フィレットの生え際) も円弧の区分に入れる
-            rr = np.array([np.max([G.r(x_ + q) for q in (-dl, 0.0, dl)], axis=0) for x_ in xyz[nd, 0]]); yrn = np.array([G.yr(x_) for x_ in xyz[nd, 0]]); mg = 0.5 * G.DR
-            arc |= (rr[:, 0] > 0) & (xyz[nd, 2] > G.ZW - rr[:, 0] - mg) & (xyz[nd, 1] > yrn - rr[:, 0] - mg)
-            arc |= (rr[:, 1] > 0) & (xyz[nd, 2] > G.ZW - rr[:, 1] - mg) & (xyz[nd, 1] < G.YC + rr[:, 1] + mg)
-            for (xa, ua, la), (xb, ub, lb) in zip(G.prof[:-1], G.prof[1:]):       # 半径が変わる区間 (フィレット遷移) はダクト内の壁全周を ±10 % の区分に入れる (plan §4.10 (e))
-                if (ua, la) != (ub, lb): edge |= (xyz[nd, 0] >= xa - 1e-12) & (xyz[nd, 0] <= xb + 1e-12)
-        edge &= ~arc; core = ~(edge | arc); dev = ratio - 1
-        bad = (core & (np.abs(dev) > 0.05)) | (edge & (np.abs(dev) > 0.10)) | (arc & ((dev < -0.10) | (dev > 0.45)))
-        fl[t] = dict(nodes=int(len(nd)), unevaluable_quads=int(uneval), ratio_min=float(ratio.min()), ratio_max=float(ratio.max()))
-        for nm, mk in (("core", core), ("edge", edge), ("arc", arc)):
-            fl[t][nm] = dict(nodes=int(mk.sum()), out=int((bad & mk).sum()), min=float(ratio[mk].min()) if mk.any() else 1.0, max=float(ratio[mk].max()) if mk.any() else 1.0)
-        fl[t]["ok"] = bool(uneval == 0 and not bad.any()); dev = np.abs(dev)
-        fl[t]["_bad"] = [[float(v) for v in xyz[nd[i]] / G.H] + [float(ratio[i]), "core" if core[i] else ("edge" if edge[i] else "arc")] for i in np.flatnonzero(bad)[:8]]
-        fl[t]["_worst"] = [[float(v) for v in xyz[nd[i]]] + [float(ratio[i])] for i in np.argsort(-dev)[:5]]
+    # ---- 壁第一層: 壁タグ別・節点別の |n . dx| / h1、第一内部点の資格、全数被覆、実層数、隣接間隔比 (検査の中核は first_layer_check)
+    # 期待層数: 壁は生成側の NL。端面 (x 方向の march) には生成側の記録が無いので、厚さ dr の壁帯を h1e から成長率 G で覆う最小層数を仮に置く
+    nl_end = prog_n(G.DR, h1e, P["G"])
+    fl = first_layer_check(xyz, hx, bq, h1, h1e, nl, nl_end, G.DR, classify=model_classifier(G), expected_tags=WALL_TAGS, unit=G.H)
     # ---- 描画用
     dump = {"wall_" + t: xyz[bq[t]] for t in bq if t in WALL_TAGS}
     for xq in P.get("DUMP_X", [0.0, 0.6, 1.2, 1.4, 1.6, 2.0]):
