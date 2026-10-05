@@ -1,5 +1,6 @@
 """補間壁 (A) vs 同時当てはめ壁 (B) の Euler A/B を固定評価器で判定する。plan verification-m6-axis-wave-mesh-su2 §5.1 #15 (事前登録)。
 A: run_0053〜0055 / B: run_0056〜0058 (各腕 3 回の独立再実行)。
+延長 (準定常未達時の 6000 step × 1 回, run_0059〜0064) があれば、本段 (step 1000〜12000) に延長 (12000+1000〜) を連結して判定する。
 usage: python3 eval_wallfit_euler.py [case_dir] → _band_ab/wallfit_euler_ab.json, 各 run の wallfit_series.csv と QUASISTEADY_wallfit.txt
 """
 import json, re, subprocess, sys
@@ -57,14 +58,28 @@ def snaps(run):
     return sorted(fs, key=lambda f: int(re.findall(r"\d+", f)[0]))
 
 
+def ext_of(run):
+    m = sorted(C.glob("run_00[0-9][0-9]_" + run[9:] + "_ext6k"))
+    return m[0] if m else None
+
+
+def series_files(run):
+    """[(run_dir, res 名, 通算 step)]。延長があれば本段 12000 の後に連結 (延長の step 0 は本段 12000 と同じ場なので除く)。"""
+    rd = C / run; out = [(rd, f, int(re.findall(r"\d+", f)[0])) for f in snaps(run) if int(re.findall(r"\d+", f)[0]) > 0]
+    e = ext_of(run)
+    if e is not None:
+        out += [(e, f, 12000 + int(re.findall(r"\d+", f)[0])) for f in snaps(e.name) if int(re.findall(r"\d+", f)[0]) > 0]
+    return out
+
+
 R = {}
 for arm, runs in ARMS.items():
     for run in runs:
         rd = C / run
-        fs = [f for f in snaps(run) if int(re.findall(r"\d+", f)[0]) > 0]
+        sf = series_files(run)
         series = []
-        for f in fs:
-            F = load_field(rd, f); q, _ = quantities(F, 0.05); q["step"] = int(re.findall(r"\d+", f)[0]); series.append(q)
+        for d_, f, st_ in sf:
+            F = load_field(d_, f); q, _ = quantities(F, 0.05); q["step"] = st_; series.append(q)
         cols = [k for k in series[0] if k != "step"]
         with open(rd / "wallfit_series.csv", "w") as fh:
             fh.write("step," + ",".join(cols) + "\n")
@@ -80,12 +95,13 @@ for arm, runs in ARMS.items():
         for c in cols:
             v = np.array([q[c] for q in tail]); st = np.array([q["step"] for q in tail], float)
             T[c] = max(float(np.ptp(v)), float(abs(np.polyfit(st, v, 1)[0]) * (st[-1] - st[0])))
-        last = [f for f in fs][-5:]
-        dists = [quantities(load_field(rd, f), 0.05)[1] for f in last]
+        last = sf[-5:]
+        dists = [quantities(load_field(d_, f), 0.05)[1] for d_, f, _ in last]
         dmean = {k: (dists[0][k][0], np.mean([d[k][1] for d in dists], axis=0)) for k in dists[0]}
-        qE, _ = quantities(load_field(rd, fs[-1]), 0.025); q5 = series[-1]
+        qE, _ = quantities(load_field(sf[-1][0], sf[-1][1]), 0.025); q5 = series[-1]
         E = {c: abs(qE[c] - q5[c]) for c in cols if c in qE}
-        conv = (rd / "CONVERGENCE_VERDICT.txt").read_text() if (rd / "CONVERGENCE_VERDICT.txt").exists() else "missing"
+        cv = (sf[-1][0] / "CONVERGENCE_VERDICT.txt")
+        conv = cv.read_text() if cv.exists() else "missing"
         conv_overall = re.findall(r"-> ([A-Z ()/a-z—-]+?) ===", conv)
         R[run] = dict(arm=arm, rep=rep, T=T, E=E, quasisteady=verd, dist=dmean, n_snaps=len(series), last_step=series[-1]["step"],
                       convergence=conv_overall[-1] if conv_overall else conv.strip().splitlines()[-1] if conv != "missing" else "missing")
