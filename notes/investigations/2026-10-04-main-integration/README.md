@@ -59,3 +59,11 @@ SERN セッションが main (77318d0e) を feature/sern-design に fast-forward
 `test_thermo_intervals`・`test_transport_gas_phase`・`test_transport_gpu`) は `--forge` (ソルバのバイナリ) が必須で**回っていなかった**、
 `test_twophase_diffusion_harness` は 170 秒で時間切れ。forge 必須の 7 本と harness は AWS のビルド済みバイナリで別途回す (plan thermophysics-solver-owned-species-db の記録へ)。
 回帰 4 腕・CUDA 単体 5 本の判定は影響を受けない。
+
+### forge 必須の 7 本の実行 (2026-10-06、AWS、species-transport f01165a4/79f50ea1、ソルバ 029dc631 と同一; `evidence/forge_tests_2026-10-06.*`)
+手元にしか無い入力 (CEA の `trans.inp`・`thermo.inp`、case/44 の種 run `run_0509`・`run_0510`) を AWS へ複製して実行。
+`test_dmix_complement`・`test_species_attrs_entry`・`test_species_lump_solver`・`test_thermo_intervals`・`test_transport_gas_phase` PASS。
+`test_species_record_solver` は (b) 記録のすり替え検知の 2 件が FAIL → 原因は試験の前提: seed から正しい記録の SHA 付き別名が複製されるようになり、
+ソルバと `find_record` がそれを SHA で見つけて正しい記録を使うため、すり替えの経路を通らず熱物性の不一致で止まっていた (停止はしていた)。
+試験で場が名指す記録以外を消すよう直して (79f50ea1) **ALL PASSED**。`test_transport_gpu` の 2 件は環境 (host ハーネスの CUDA ヘッダのパス、FCEA2 が AWS に無い) で未判定。
+`test_twophase_diffusion_harness` は純 Python で 1 時間を超え時間切れ (途中の S1–S5 は PASS 表示)。

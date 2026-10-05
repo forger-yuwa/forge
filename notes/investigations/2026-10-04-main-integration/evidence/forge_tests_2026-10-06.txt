@@ -1,0 +1,10 @@
+latent A/B rc=0 DONE
+0 test_dmix_complement | ALL PASS
+0 test_species_attrs_entry | ALL PASSED
+0 test_species_lump_solver | ALL PASS
+1 test_species_record_solver | FAILED (2)
+0 test_thermo_intervals | ALL PASSED
+0 test_transport_gas_phase | ALL PASS
+1 test_transport_gpu | FAILED: 2
+124 test_twophase_diffusion_harness | [INFO] S5 [float32, z=upwind, 床 16ε] 1000 更新 (最大反復 5, 上限到達 0 回): 最大 |相対| 7.297e-06 (rYw +3.1e-06, rg -3.9e-07, rY0 -1
+127 test_twophase_diffusion_harness | /home/ubuntu/integ/vt.sh: line 19: 3600: command not found
