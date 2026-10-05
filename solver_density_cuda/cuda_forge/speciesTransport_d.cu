@@ -30,6 +30,10 @@
 #include <utility>
 #include <vector>
 
+// lump を含む化学種拡散の縮約表 (plan thermophysics-solver-owned-species-db #7b)。speciesLumpDiffusionInit が設定し、本 TU の拡散カーネルが読む。
+__constant__ LumpDiffD c_lumpDiff;
+__constant__ int       c_lumpDiffOn = 0;
+
 // 再正規化の受入ゲート (#1b-pre): 更新ごとの集計バッファと履歴 (定義は本ファイル末尾)
 static double* rngBegin();                 // 1 更新の集計を 0 にして返す (履歴の容量も確保)
 static void    rngEnd(cudaConfig& cuda_cfg); // 1 更新の集計を履歴の 1 行にする
@@ -632,8 +636,6 @@ flow_float** species_srcjac_device_ptr() { return g_srcjac_dev; }
 
 // lump を含む化学種拡散の縮約 (plan thermophysics-solver-owned-species-db §4.4 確定版, #7b)。lump が 1 つも無ければ c_lumpDiffOn = 0 で
 // 全経路が現行 thermo_Dmix_species_f のまま (係数のビット不変)。同じ TU のカーネル (species_diffusion_d・二相の面入力・監査・probe) が読む。
-__constant__ LumpDiffD c_lumpDiff;
-__constant__ int       c_lumpDiffOn = 0;
 static bool g_lumpDiffOn = false;
 bool speciesLumpDiffusionActive() { return g_lumpDiffOn; }
 
