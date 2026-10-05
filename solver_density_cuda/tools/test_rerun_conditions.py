@@ -308,6 +308,17 @@ def main():
     check("(f) --keep-Tw → 壁行はバイト一致", lines_diff(p["bc_text"], p["new_bc_text"]) == [0])
     done(ref, new)
 
+    # ------------------------------------------------------------------ (f′) Euler の滑り壁 (2026-10-06 追加)
+    slip = lambda t: re.sub(r"wall:\s*\{physID: 3, kind: wall, +outputHDFflg: 1, ints: , floats: \}",  # noqa: E731
+                            "wall:   {physID: 3, kind: slip,             outputHDFflg: 1, ints: , floats: }", t)
+    ref, new = make_ref(edit_bc=slip)
+    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6"])
+    yb = yaml.safe_load(p["new_bc_text"])
+    check("(f′) 滑り壁 (slip) の run を受理し、壁行はバイト一致", yb["wall"]["kind"] == "slip" and lines_diff(p["bc_text"], p["new_bc_text"]) == [0, 1],
+          lines_diff(p["bc_text"], p["new_bc_text"]))
+    check("(f′) slip 壁の節点は P_exit_ref から除かれる (内部節点 95 点)", "95/97" in str(p.get("P_exit_ref_source", "")), p.get("P_exit_ref_source"))
+    done(ref, new)
+
     # ------------------------------------------------------------------ (g)
     ref, new = make_ref(edit_cfg=lambda t: t + "condensation: {condensation: 1, nCondSpecies: 1, condensationSpecies: H2O}\n")
     code, _, err = run_main([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt"])

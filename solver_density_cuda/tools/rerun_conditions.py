@@ -11,7 +11,7 @@ plan: plans/active/tooling-rerun-conditions.md §4 (設計方針)。手順の正
 
 やること (順に; どこで止まっても NEW_RUN は残さない):
 1. **入力契約の検査** (NEW_RUN を作る前): 単一の `inlet_Pressure` (floats に `Y{s}`、`inletProfile` なし)・
-   単一の `outlet_statPress`・`wall`/`wall_isothermal`・`axis` だけ、bcond は 1 行 1 境界の flow 形式、
+   単一の `outlet_statPress`・`wall`/`wall_isothermal`/`slip` (Euler の滑り壁)・`axis` だけ、bcond は 1 行 1 境界の flow 形式、
    `meshFileName == valueFileName == "nozzle.h5"`、solverConfig のファイル参照は許可リストの run 内相対だけ。
 2. **書き換えの計画**: bcond は対象行の floats の当該トークンだけを置換し (他の行はバイト一致)、YAML で読み直して検証。
    Y は全種を書いて Σ=1 を 1e−12 で検査 (forge の起動検査は 1e−3 で、入口カーネルが黙って正規化する)。
@@ -50,7 +50,7 @@ ALLOW_COPY = ("nozzle.h5", "nozzle.xmf", "bcondConfig.yaml", "solverConfig.yaml"
               "resolved_species_*.yaml", "species_db_external.yaml", "probe.yaml", "prepare_info.json",
               "wall_*.csv", "target_axis_M.csv", "delta_r_initial.*", "MESH_QUALITY.txt")
 REQUIRED_FILES = ("nozzle.h5", "bcondConfig.yaml", "solverConfig.yaml")
-ALLOWED_KINDS = ("inlet_Pressure", "outlet_statPress", "wall", "wall_isothermal", "axis")
+ALLOWED_KINDS = ("inlet_Pressure", "outlet_statPress", "wall", "wall_isothermal", "slip", "axis")   # slip = Euler の滑り壁 (2026-10-06 追加)
 Y_SUM_TOL = 1e-12          # 書いた Y の Σ=1 の許容 (forge の起動検査 1e-3 より厳しく; plan §4.3)
 FIELD_Y_TOL = 1e-6         # 場の 0 ≤ ρY/ρ ≤ 1+tol, |Σ ρY − ρ| ≤ tol·ρ (plan §4.4)
 SCALE_RTOL = 1e-6          # スケール検査 allclose(d_new, f·d_ref, rtol, atol=0)
@@ -464,7 +464,7 @@ def build_plan(a):
     outlet_id = outl["entry"].get("physID")
     P_exit_ref, P_exit_src = exit_pressure_ref(
         ref, res_path, outlet_id,
-        excluded_ids=[bc[n]["entry"].get("physID") for n, k in kinds.items() if k in ("wall", "wall_isothermal", "axis")])
+        excluded_ids=[bc[n]["entry"].get("physID") for n, k in kinds.items() if k in ("wall", "wall_isothermal", "slip", "axis")])
     p_exit_warn = None if P_exit_ref is not None else f"P_exit_ref: null — {P_exit_src}"
     if "Pt" in changes and a.Ps is None and not a.keep_Ps:
         ratio = (Ps_ref / (f_pt * P_exit_ref)) if P_exit_ref else None

@@ -13,7 +13,7 @@ RC=../../solver_density_cuda/tools/rerun_conditions.py
 NS="import sys; sys.path.insert(0,'../../design'); from forge_design.evaluate.runner_axismach import run_staged_ns; from pathlib import Path; rc=run_staged_ns(Path(sys.argv[1]), stages=sys.argv[2]); print('forge exit', rc); sys.exit(rc)"
 EU="import sys; sys.path.insert(0,'../../design'); from forge_design.evaluate.runner_axismach import run_staged; from pathlib import Path; rc=run_staged(Path(sys.argv[1]), stages='none'); print('forge exit', rc); sys.exit(rc)"
 REF=run_0094_ns_c2pin_pass2_ext6k; EREF=run_0086_euler_wallfit_pincal_r1_ext6k
-python3 $RC $REF run_0119_rerun_ctrl --steps 12000 --out-interval 1000
+[ -d run_0119_rerun_ctrl ] || python3 $RC $REF run_0119_rerun_ctrl --steps 12000 --out-interval 1000
 python3 $RC $EREF run_0120_rerun_euler_pt08 --Pt 4.4e6 --Ps 1789.6 --scale-ic pt --steps 6000 --out-interval 500 --cfl 2.0
 python3 $RC $REF run_0121_rerun_pt08_scale --Pt 4.4e6 --Ps 1789.6 --scale-ic pt --steps 12000 --out-interval 1000
 python3 $RC $REF run_0122_rerun_pt08_noscale --Pt 4.4e6 --Ps 1789.6 --scale-ic none --steps 12000 --out-interval 1000
