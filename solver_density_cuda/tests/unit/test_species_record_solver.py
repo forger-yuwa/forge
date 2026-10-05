@@ -248,6 +248,12 @@ def main():
         other = [f for f in os.listdir(dX) if f.startswith("resolved_species_")][0]
         db_ = C.make("b_swap", seed_res=r1, db_edit=bump_low2("MIXDRY", 0.001))
         stamp(os.path.join(db_, "nozzle.h5"), at)
+        # 正しい記録の SHA 付きの別名 (resolved_species_<hash16>_<sha16>.yaml; seed から複製される) が残っていると、ソルバと find_record は
+        # そちらを内容の SHA で見つけて正しい記録を使うので、すり替えを検知する経路を通らない (2026-10-06: 熱物性の不一致で止まるだけだった)。
+        # すり替えの検知を試すため、場が名指す記録以外の記録ファイルを消す。
+        for f in os.listdir(db_):
+            if f.startswith("resolved_species_") and f != at["species_record_file"]:
+                os.remove(os.path.join(db_, f))
         shutil.copy(os.path.join(dX, other), os.path.join(db_, at["species_record_file"]))
         rc, out = C.run(db_)
         check(rc != 0 and "integrity" in out and "cannot be identified" in out,
