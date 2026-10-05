@@ -79,11 +79,13 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0096`・`run_0097` | (欠番: 0095 の発散で番号を送った) | — | — |
 | `run_0098_ns_finemesh_pass_staged` | #11 ① 2 回目: run_0095 と同じ IC に段階起動 (soft 1 次 cfl 0.5 → mid 1 次 cfl 1 → 本段 2 次 cfl 5・relax 0.7) | soft・mid 完走、**本段 step 35 で DIVERGED** (x/r_t 79〜94 の出口側壁際で T → 6000 K・ω 120〜155 倍; `res_nan_35.h5`)。発散 2 回目 → codex 諮問 (`notes/reviews/briefs/2026-10-05-m6-finemesh-divergence.md`) | 破棄予定 |
 | `run_0099`・`run_0100` | (欠番: #11a の切り分けで番号を送った。③④ は後続番号で回す) | — | — |
-| `run_0101_ns_finemesh_diag_cfl5` | #11a 腕 A: run_0098 の本段開始場 (nozzle.h5) から 2 次・cfl 5、100 step (2 step ごと) | step 35 で再現発散。前駆: 軸の P 過渡 (16 %) → step 28 から x/r_t 88.3 の壁第 3 節点で T 指数成長 | 破棄予定 |
-| `run_0102_ns_finemesh_diag_cfl1` | #11a 腕 B: 同起点、2 次・cfl 1、1000 step | 停止なし、全残差の末尾 200 step が −0.03〜−0.09 桁 (短期合格) | 破棄予定 |
+| `run_0101_ns_finemesh_diag_cfl5` | #11a 腕 A: run_0098 の本段開始場 (nozzle.h5) から 2 次・cfl 5、100 step (2 step ごと) | step 35 で再現発散。前駆: 軸の P 過渡 (16 %) → step 28 から x/r_t 88.3 の壁第 3 節点で T 指数成長 | 削除済み (2026-10-05、ディスク) |
+| `run_0102_ns_finemesh_diag_cfl1` | #11a 腕 B: 同起点、2 次・cfl 1、1000 step | 停止なし、全残差の末尾 200 step が −0.03〜−0.09 桁 (短期合格) | 削除済み (2026-10-05、ディスク) |
 | **`run_0103_ns_finemesh_pass_cfl1`** | #11 ①: 同起点、2 次・cfl 1、60000 step (累積 CFL を run_0092 にそろえる)、5000 step ごと | NOT CONVERGED (plateau 2.1〜2.8 桁)、machmax・pmax STEADY、δ_E(x_F) 0.733096 (5000 step ごとの変化 ≤ 0.003 %)、**壁解像 PASS (y1+>1 3.6 %)**、細分前後 (vs run_0094 0.725282) **+1.077 % (登録 ≤ 1 % FAIL)**; δ_E 時系列 STEADY、末尾 5 枚 0.733114 | active |
 | `run_0104_ns_coarse_cfl5` | #11b 腕 A: run_0094 res_6000 を restart_field、粗格子・cfl 5・12000 step | NOT CONVERGED (plateau)、δ_E STEADY 0.725280 | ref |
 | `run_0105_ns_coarse_cfl1` | #11b 腕 B: 同起点、粗格子・cfl 1・60000 step | NOT CONVERGED (plateau)、δ_E STEADY 0.725276 (CFL 5/1 差 +0.0006 %) → 細/粗 +1.08 % は格子差 | ref |
+| `run_0106_ns_finemesh3_pass_cfl1` | #11c 第三水準: 細分格子の全方向 1/1.5 (ni 3000 × nj 145、第 1 セル 8.667e-6・スロート 3.0e-6、431856 セル、AR max 4252)、IC = run_0103 res_60000 を interp_field → 段階起動 → 2 次 cfl 1・60000 step。バイナリ `~/forge-wallfit-bin` (sha256 6b47811b…、plan §9) | 走行中 | active |
+| (注) | 2026-10-05: AWS の空き不足のため run_0053〜0105 の中間 `res_<n>.h5` を削除 (res_0・最終場・`delta_E_series.csv` は残る) | — | — |
 | `run_0008_ns_trim_cond` | 凝縮 ON restart (`problem_d155_trim_ns_cond.yaml`: Kw+HK condModel1+Kantrowitz, 蒸発 ON, IC=run_0007, 12000 step) | 完走・NaN 0・**STEADY** (4k/8k/12k で M_exit 差 5e-4)。軸 onset x≈69 r_t、出口 g 0.20 % (H₂O の 2 %)、**出口軸 M 5.9273 (−1.2 %)**・試験区間に M 低下勾配 (x60→96 で 6.00→5.93)。dry の軸は x≈24 r_t (M5.5) で飽和線越え S≈14 (`axis_values.csv` の Tsat_post) | active (**凝縮評価の正本**) |
 
 ## SU2 クロスチェック (境界層厚さ, 2026-09-01)
