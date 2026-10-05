@@ -14,7 +14,8 @@ R_EXIT = 0.775
 p1, eu = C / sys.argv[1], C / sys.argv[2]
 summ = extract_and_merge(p1, eu, band_select="edge")
 rs = solve_rt(C / "problem_d155_ns_c2pin.yaml", R_EXIT, prev_run=p1, euler_run=eu)
-rt_new, rt_prev = rs["r_t_m"], rs["r_t_prev_m"]
+rt_new = rs["r_t_m"]
+rt_prev = float(json.loads((p1 / "prepare_info.json").read_text())["scale_m"])   # δ_E を測った run の r_t (2 pass 目では problem の値と違う)
 nx = np.loadtxt(p1 / "delta_r_next.csv", delimiter=",", skiprows=1)
 # 新 r_t の problem (形は r_t 無次元で不変)
 src = (C / "problem_d155_ns_c2pin.yaml").read_text()
