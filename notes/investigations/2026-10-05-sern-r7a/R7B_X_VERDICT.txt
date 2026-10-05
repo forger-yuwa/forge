@@ -1,0 +1,7 @@
+run_1050_r7b_x_lsw08 前提: OK GATES PASS {'C_T_with_shear': 'STEADY', 'C_T': 'STEADY', 'C_L': 'STEADY', 'C_M': 'STEADY'}
+run_1051_r7b_x_lsw10 前提: OK GATES PASS {'C_T_with_shear': 'STEADY', 'C_T': 'STEADY', 'C_L': 'STEADY', 'C_M': 'STEADY'}
+C_T             A_x 0.8891018 B_x 0.8926157 Δx +0.003514 U 6.35e-06 | 丸め版 Δ +0.003434 | exact−丸め A -1.62e-04 B -8.24e-05
+C_T_with_shear  A_x 0.8704579 B_x 0.8725856 Δx +0.002128 U 6.16e-06 | 丸め版 Δ +0.002086 | exact−丸め A -9.81e-05 B -5.64e-05
+C_L             A_x 0.0614301 B_x 0.0707526 Δx +0.009323 U 2.24e-05 | 丸め版 Δ +0.008975 | exact−丸め A -5.33e-04 B -1.85e-04
+C_M             A_x -1.6124275 B_x -1.8333610 Δx -0.220933 U 5.30e-04 | 丸め版 Δ -0.213185 | exact−丸め A +1.22e-02 B +4.49e-03
+|Δ| − U 0.002122 → VERDICT: 結果 A: exact 形状への持ち越しを支持
