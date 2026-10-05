@@ -1996,9 +1996,13 @@ public:
             {
                 const auto& fn = this->planes[ip].iNodes;       // 周回ノード (surfVect と整合)
                 const int mf = (int)fn.size();
-                const double Fcen[3] = { this->planes[ip].centCoords[0],
-                                         this->planes[ip].centCoords[1],
-                                         this->planes[ip].centCoords[2] };
+                // 面重心は節点座標から double で計算し直す (内部双対面の Fc と同じ式・同じ精度)。
+                // 保存済みの planes[ip].centCoords (geom_float で積算した節点平均) を使うと、内部側と境界側で
+                // 同じ面の重心が別の丸めになり、境界 CV の双対閉性 |ΣS|/Σ|S| が 1e-5 を超えた
+                // (接続模型で 866 CV; plan tooling-sern-mesh-blocking §5.1 B1b、2026-10-05)
+                double Fcen[3] = { 0.0, 0.0, 0.0 };
+                for (const geom_int g : fn) { Fcen[0] += nodes[g].coords[0]; Fcen[1] += nodes[g].coords[1]; Fcen[2] += nodes[g].coords[2]; }
+                Fcen[0] /= (double)mf; Fcen[1] /= (double)mf; Fcen[2] /= (double)mf;
                 const double S[3] = { this->planes[ip].surfVect[0],   // 外向き (makeMesh で整向済)
                                       this->planes[ip].surfVect[1],
                                       this->planes[ip].surfVect[2] };
