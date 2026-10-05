@@ -1,0 +1,9 @@
+round 1 arr attempt 1: contaminated (Time = 11.120 s (wall, 5000 steps, 2.22 ms/step))
+round 1 arr: Time = 10.641 s (wall, 5000 steps, 2.13 ms/step)
+round 1 noarr: Time = 10.724 s (wall, 5000 steps, 2.14 ms/step)
+round 2 old: Time = 9.678 s (wall, 5000 steps, 1.94 ms/step)
+round 2 arr: Time = 10.670 s (wall, 5000 steps, 2.13 ms/step)
+round 2 noarr: Time = 10.616 s (wall, 5000 steps, 2.12 ms/step)
+DONE
+
+[exited with code 0]

@@ -1,0 +1,9 @@
+run_1914_lumpdiff_perf_arr1 Time = 140.694 s (wall, 10000 steps, 14.07 ms/step)  [GPU procs before/after: 2/2]
+run_1915_lumpdiff_perf_noarr1 Time = 145.841 s (wall, 10000 steps, 14.58 ms/step)  [GPU procs before/after: 2/2]
+run_1916_lumpdiff_perf_old2 Time = 144.089 s (wall, 10000 steps, 14.41 ms/step)  [GPU procs before/after: 2/2]
+run_1917_lumpdiff_perf_arr2 Time = 147.505 s (wall, 10000 steps, 14.75 ms/step)  [GPU procs before/after: 2/1]
+run_1918_lumpdiff_perf_noarr2 Time = 68.001 s (wall, 10000 steps, 6.80 ms/step)  [GPU procs before/after: 1/1]
+DONE
+/dev/root       193G  191G  1.8G 100% /
+
+[exited with code 0]
