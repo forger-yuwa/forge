@@ -17,6 +17,7 @@
 #include "twoPhaseUpdateDiag_d.cuh"      // 診断 G3-b の記録スロット (FORGE_DIAG_TP_UPDATE; plan condensation-two-phase-default #4g3)
 #include "twoPhaseOperatorDiag_d.cuh"    // 診断 G3-a の面の記録 (FORGE_DIAG_TP_OPERATOR; plan condensation-two-phase-default #4g3・#4pjg)
 #include "input/speciesDB.hpp"            // lump の構成 (化学種拡散の縮約; plan thermophysics-solver-owned-species-db #7b)
+#include "lumpDiffTable.cuh"              // 縮約の二元係数の表引き (#7c)
 
 #include <cmath>
 #include <iostream>
@@ -33,6 +34,7 @@
 // lump を含む化学種拡散の縮約表 (plan thermophysics-solver-owned-species-db #7b)。speciesLumpDiffusionInit が設定し、本 TU の拡散カーネルが読む。
 __constant__ LumpDiffD c_lumpDiff;
 __constant__ int       c_lumpDiffOn = 0;
+__constant__ LumpDiffTabD c_lumpDiffTab;   // 二元係数の表 (#7c; on = 0 なら式)
 
 // 再正規化の受入ゲート (#1b-pre): 更新ごとの集計バッファと履歴 (定義は本ファイル末尾)
 static double* rngBegin();                 // 1 更新の集計を 0 にして返す (履歴の容量も確保)
@@ -330,7 +332,7 @@ __global__ void species_diffusion_d(
     flow_float sumJ = 0.0f;
     float Dl[THERMO_MAX_SPECIES];   // lump を含む拡散の縮約 (#7b): 面ごとに全ラベル 1 回
     const bool lumpD = (diffMethod == 1 && c_lumpDiffOn != 0);
-    if (lumpD) thermo_Dmix_lumped_f(c_lumpDiff, nSpecies, X, T_face, P_face, Dl);
+    if (lumpD) thermo_Dmix_lumped_tab_f(c_lumpDiff, c_lumpDiffTab, nSpecies, X, T_face, P_face, Dl);
     for (int s=0;s<nSpecies;s++){
         flow_float D;
         if (diffMethod == 1) D = lumpD ? Dl[s] : thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face);
@@ -685,6 +687,26 @@ static void speciesLumpDiffusionInit(int nSpecies)
     }
     h.nReal = static_cast<int>(keys.size());
     gpuErrchk( cudaMemcpyToSymbol(c_lumpDiff, &h, sizeof(LumpDiffD)) );
+    // 二元係数の表 (#7c)。FORGE_LUMPDIFF_TABLE=0 でその実行だけ式に戻す (A/B 用)。
+    LumpDiffTabD tb{};
+    tb.Tmin = (float)LUMPDIFF_TAB_TMIN; tb.Tmax = (float)LUMPDIFF_TAB_TMAX;
+    const char* te = getenv("FORGE_LUMPDIFF_TABLE");
+    const bool useTab = !(te != nullptr && std::string(te) == "0") && h.nReal > 1;
+    if (useTab) {
+        std::vector<LumpDiffPairTab> pairs; std::vector<LumpDiffC4> coef;
+        lumpdiff_build_table(h, pairs, coef);
+        LumpDiffPairTab* pd = nullptr; LumpDiffC4* cd = nullptr;
+        gpuErrchk( cudaMalloc((void**)&pd, pairs.size()*sizeof(LumpDiffPairTab)) );
+        gpuErrchk( cudaMalloc((void**)&cd, coef.size()*sizeof(LumpDiffC4)) );
+        gpuErrchk( cudaMemcpy(pd, pairs.data(), pairs.size()*sizeof(LumpDiffPairTab), cudaMemcpyHostToDevice) );
+        gpuErrchk( cudaMemcpy(cd, coef.data(), coef.size()*sizeof(LumpDiffC4), cudaMemcpyHostToDevice) );
+        tb.on = 1; tb.pair = pd; tb.coef = cd;
+        std::cout << "[species] lump diffusion table: " << pairs.size() << " pairs, " << coef.size() << " cubic pieces, "
+                  << LUMPDIFF_TAB_TMIN << "-" << LUMPDIFF_TAB_TMAX << " K (outside: formula)\n";
+    } else {
+        std::cout << "[species] lump diffusion table: off (formula" << (te ? ", FORGE_LUMPDIFF_TABLE=0" : "") << ")\n";
+    }
+    gpuErrchk( cudaMemcpyToSymbol(c_lumpDiffTab, &tb, sizeof(LumpDiffTabD)) );
     on = 1;
     gpuErrchk( cudaMemcpyToSymbol(c_lumpDiffOn, &on, sizeof(int)) );
     g_lumpDiffOn = true;
@@ -1065,7 +1087,7 @@ __global__ void species_Dmix_probe_d(geom_int nCells_all, const SpeciesThermoF* 
     species_transport_X_f(sp, nSpecies, Yf, liq.iw, gl, X);
     float Dl[THERMO_MAX_SPECIES];
     const bool lumpD = (c_lumpDiffOn != 0);
-    if (lumpD) thermo_Dmix_lumped_f(c_lumpDiff, nSpecies, X, T[ic], P[ic], Dl);
+    if (lumpD) thermo_Dmix_lumped_tab_f(c_lumpDiff, c_lumpDiffTab, nSpecies, X, T[ic], P[ic], Dl);
     for (int s = 0; s < nSpecies; s++) D[(size_t)s*nCells_all + ic] = lumpD ? Dl[s] : thermo_Dmix_species_f(sp, nSpecies, X, s, T[ic], P[ic]);
 }
 
@@ -2298,7 +2320,7 @@ __device__ inline bool tp_build_face_in(
     const flow_float rgf = f*fmaxf(in.rho0 - in.rg0, 1.0e-30f) + g*fmaxf(in.rho1 - in.rg1, 1.0e-30f);
     float Dl[THERMO_MAX_SPECIES];   // lump を含む拡散の縮約 (#7b): 面ごとに全ラベル 1 回
     const bool lumpD = (diffMethod == 1 && c_lumpDiffOn != 0);
-    if (lumpD) thermo_Dmix_lumped_f(c_lumpDiff, nSpecies, X, T_face, P_face, Dl);
+    if (lumpD) thermo_Dmix_lumped_tab_f(c_lumpDiff, c_lumpDiffTab, nSpecies, X, T_face, P_face, Dl);
     for (int s = 0; s < nSpecies; ++s) {
         in.D[s] = (diffMethod == 1) ? (lumpD ? Dl[s] : thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face)) : mu_face/(rgf*Sc);
         in.h[s] = thermo_h_mass_f(sp[s], T_face);
@@ -2539,7 +2561,7 @@ __global__ void twophase_audit_face_d(
         double Js[THERMO_MAX_SPECIES], sumJ = 0.0, Yd[THERMO_MAX_SPECIES], ys = 0.0;
         float Dl[THERMO_MAX_SPECIES];   // lump を含む拡散の縮約 (#7b): 面ごとに全ラベル 1 回
         const bool lumpD = (diffMethod == 1 && c_lumpDiffOn != 0);
-        if (lumpD) thermo_Dmix_lumped_f(c_lumpDiff, nSpecies, X, T_face, P_face, Dl);
+        if (lumpD) thermo_Dmix_lumped_tab_f(c_lumpDiff, c_lumpDiffTab, nSpecies, X, T_face, P_face, Dl);
         for (int s = 0; s < nSpecies; s++) {
             flow_float D = (diffMethod == 1) ? (lumpD ? Dl[s] : thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face)) : mu_face/(ro_face*Sc);
             D += Dt;
@@ -2923,7 +2945,7 @@ __device__ inline bool tpfd_off_face(
     flow_float sumJ = 0.0f;
     float Dl[THERMO_MAX_SPECIES];   // lump を含む拡散の縮約 (#7b): 面ごとに全ラベル 1 回
     const bool lumpD = (diffMethod == 1 && c_lumpDiffOn != 0);
-    if (lumpD) thermo_Dmix_lumped_f(c_lumpDiff, nSpecies, X, T_face, P_face, Dl);
+    if (lumpD) thermo_Dmix_lumped_tab_f(c_lumpDiff, c_lumpDiffTab, nSpecies, X, T_face, P_face, Dl);
     for (int s=0;s<nSpecies;s++){
         flow_float D;
         if (diffMethod == 1) D = lumpD ? Dl[s] : thermo_Dmix_species_f(sp, nSpecies, X, s, T_face, P_face);
