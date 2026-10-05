@@ -1,5 +1,5 @@
 """plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11f 手順 2 (事前登録 2026-10-06): Euler G0/G1 の格子 A/B。
-usage: python3 euler_grid_ab.py prep RUN {G0|G1}   (準備 + 段階起動 soft → 本段 2 次 cfl 2・relax 0.7・12000 step)
+usage: python3 euler_grid_ab.py prep RUN {G0|G1|G1_recal}  (G1 系の IC は EULER_IC_G1、既定 run_0086)   (準備 + 段階起動 soft → 本段 2 次 cfl 2・relax 0.7・12000 step)
        python3 euler_grid_ab.py eval RUN_G0 RUN_G1  (出口コア M: 自格子平均と G1 帯内 η 節点の共通標本、時系列 CSV)
 IC = 旧較正 Euler 場 run_0086 (G0 は同格子なので restart_field、G1 は interp_field)。設計壁が旧較正と同じことを wall_design.csv で検査。"""
 import csv, json, subprocess, sys
@@ -8,9 +8,10 @@ import numpy as np
 C = Path(__file__).resolve().parent; sys.path.insert(0, str(C.parents[1] / "design"))
 from forge_design.evaluate import runner_axismach as RA  # noqa: E402
 OLD = C / "run_0086_euler_wallfit_pincal_r1_ext6k"
+IC_G1 = C / __import__("os").environ.get("EULER_IC_G1", "run_0086_euler_wallfit_pincal_r1_ext6k")
 if sys.argv[1] == "prep":
     rd, arm = C / sys.argv[2], sys.argv[3]
-    info = RA.prepare(C / f"problem_d155_euler_pin_{arm}.yaml", rd, nsteps=12000, ic_from=(OLD if arm == "G1" else None), cfl_main=2.0, implicit_relax=0.7)
+    info = RA.prepare(C / f"problem_d155_euler_pin_{arm}.yaml", rd, nsteps=12000, ic_from=(IC_G1 if arm.startswith("G1") else None), cfl_main=2.0, implicit_relax=0.7)
     (rd / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
     if arm == "G0":
         last = sorted(OLD.glob("res_[0-9]*.h5"), key=lambda f: int(f.stem.split("_")[1]))[-1]
