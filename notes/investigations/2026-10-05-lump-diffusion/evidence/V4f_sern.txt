@@ -1,0 +1,4 @@
+probe /home/ubuntu/forge-integ/case/46.sern_design/run_1900_lumpdiff_probe_new/dmix.bin: cells 62067, species 2 ['EXH', 'AMB'], lump reduction flag 1, record has lump True, real species 11
+  flag 一致: ok
+  非有限 0、最大相対差 4.772e-07 (cell, species, GPU, ref, T) = (32625, 0, 0.0010883287759497762, 0.001088329295325246, 2192.521484375)
+VERDICT V4f: PASS

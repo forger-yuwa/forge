@@ -1,0 +1,28 @@
+BUILT 91a79925
+host unit rc=1 
+probe new rc=0
+V4f sern VERDICT V4f: PASS
+run_1901_lumpdiff_cont_old1 wall 29 s rows=30001 loop_time=Time = 19.323 s (wall, 10000 steps, 1.93 ms/step)
+run_1902_lumpdiff_cont_new1 wall 31 s rows=30001 loop_time=Time = 22.484 s (wall, 10000 steps, 2.25 ms/step)
+run_1903_lumpdiff_cont_old2 wall 29 s rows=30001 loop_time=Time = 19.416 s (wall, 10000 steps, 1.94 ms/step)
+run_1904_lumpdiff_cont_new2 wall 32 s rows=30001 loop_time=Time = 22.246 s (wall, 10000 steps, 2.22 ms/step)
+sern change VERDICT: PASS (記録; lump 拡散の変更で差が出るのが期待)
+run_0985_lumpdiff_dry_old1 rows=601
+run_0986_lumpdiff_dry_old2 rows=601
+run_0987_lumpdiff_dry_old3 rows=601
+run_0988_lumpdiff_dry_new1 rows=601
+run_0989_lumpdiff_dry_new2 rows=601
+regress dry VERDICT: PASS
+run_0990_lumpdiff_wetoff_old1 rows=601
+run_0991_lumpdiff_wetoff_old2 rows=601
+run_0992_lumpdiff_wetoff_old3 rows=601
+run_0993_lumpdiff_wetoff_new1 rows=601
+run_0994_lumpdiff_wetoff_new2 rows=601
+regress wetoff VERDICT: PASS
+run_0995_lumpdiff_weton_old1 rows=601
+run_0996_lumpdiff_weton_old2 rows=601
+run_0997_lumpdiff_weton_old3 rows=601
+run_0998_lumpdiff_weton_new1 rows=601
+run_0999_lumpdiff_weton_new2 rows=601
+regress weton VERDICT: PASS
+DONE
