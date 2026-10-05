@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
-"""⑤ SERN 接続模型 (case/46.sern_design/cad/hex_junction_model.py) の壁第一層検査 `first_layer_check` の単体テスト
-(plan tooling-sern-mesh-blocking §5.1 B4-0。python3 で実行、gmsh 不要)。
+"""⑤ SERN 接続模型 (case/46.sern_design/cad/hex_junction_model.py) の検査の単体テスト
+(plan tooling-sern-mesh-blocking §5.1 B4-0 / B4-1。python3 で実行、gmsh 不要)。
+
+B4-0: 壁第一層検査 `first_layer_check`。B4-1: 出力実座標の隣接間隔比 `adjacent_spacing_check`、後流 Δx `wake_dx_check`、
+形状ゲート `shape_check` (と MOC 輪郭 `Contour` / カウル外壁のオフセット `Geom.yo`) — 末尾の (e)(f)(g)。
 
 山場: 旧検査は対向節点が別の壁上の節点でも除外せず、層数も設定の記録だけだったので、全 6 面が壁で内部節点 0 の立方体でも
 6 壁 ok になった (2026-10-06 plan レビュー M1)。人工の格子を渡して
@@ -19,7 +22,7 @@ try:
     import gmsh  # noqa: F401
 except ImportError:                       # 検査の中核は gmsh を使わない。import だけ通す
     sys.modules["gmsh"] = types.ModuleType("gmsh")
-from hex_junction_model import first_layer_check  # noqa: E402
+from hex_junction_model import first_layer_check, adjacent_spacing_check, wake_dx_check, shape_check, Geom, P0  # noqa: E402
 
 FAIL = 0
 
@@ -127,6 +130,90 @@ check("(d3) 期待タグ cowl_base の欠落: FAIL", fl["ramp"]["ok"] and not fl
 # (d4) 端面タグは h1e と端面の期待層数で見る
 fl = first_layer_check(xyz, hx, {"cowl_base": F["ymin"]}, 9 * H1, H1, 99, NL, DR)
 check("(d4) 端面 (cowl_base) は h1e・nl_end で判定", fl["cowl_base"]["ok"] and fl["cowl_base"]["layers_expected"] == NL)
+
+# (d5) 端面の縁の節点: 端面と同一平面の内部節点が座標の丸めで n.d = +1e-18 になっても第一内部点に選ばない (B4-1 の偽 FAIL の再現)。
+#      壁 (x = 0, z >= zm) の上流 z > zm は固体、z < zm は流体。下流は y が x に比例してずれる (傾いた壁) ので、
+#      +x の隣より同一平面の隣 (Δz = 0.1 H1) の方が法線からの横ずれが小さい
+xs = np.r_[-3 * H1, -2 * H1, -H1, prog(H1, 1.1, 8)]; ys = np.array([0.0, H1, 2 * H1]); zs = np.array([0.0, 0.5, 0.9, 1.0, 1.5, 2.0]) * H1
+xyz, hx, F = box(xs, ys, zs); xyz = xyz.copy(); ny_, nz_ = len(ys), len(zs); i0, k0 = 3, 3
+cen = xyz[hx].mean(1); hx = hx[~((cen[:, 0] < 0) & (cen[:, 2] > zs[k0]))]
+nid = lambda i, j, k: (i * ny_ + j) * nz_ + k
+q = np.array([[nid(i0, j, k), nid(i0, j + 1, k), nid(i0, j + 1, k + 1), nid(i0, j, k + 1)] for j in range(ny_ - 1) for k in range(k0, nz_ - 1)])
+inplane = (xyz[:, 0] == 0) & (xyz[:, 2] < zs[k0]); xyz[inplane, 0] = 1e-18
+xyz[:, 1] += 0.5 * np.maximum(xyz[:, 0], 0.0)
+fl = first_layer_check(xyz, hx, {"cowl_base": q}, 9 * H1, H1, 99, 3, DR)
+check("(d5) 端面の縁: 同一平面の隣 (n.d = 1e-18) を選ばず +x の隣で評価 (PASS)", fl["cowl_base"]["ok"] and fl["cowl_base"]["ratio_min"] > 0.99,
+      f"ratio {fl['cowl_base']['ratio_min']:.3g}–{fl['cowl_base']['ratio_max']:.3g}")
+
+# ---------------------------------------------------------------- B4-1
+# (e) 出力実座標の隣接間隔比: 面を共有する 2 ヘキサの、面に直交する辺の長さの比 (ブロック内・継ぎ目を跨ぐものとも)
+xs = prog(H1, 1.19, 8); ys = prog(H1, 1.15, 6); zs = np.linspace(0, 4 * H1, 3)
+xyz, hx, F = box(xs, ys, zs)
+a = adjacent_spacing_check(xyz, hx)
+check("(e1) 公比 1.19 (x)・1.15 (y): PASS", a["ok"] and abs(a["x"]["ratio_max"] - 1.19) < 1e-9 and abs(a["section"]["ratio_max"] - 1.15) < 1e-9,
+      f"x {a['x']['ratio_max']:.6f} section {a['section']['ratio_max']:.6f}")
+# 継ぎ目で x 間隔が 2 倍に飛ぶ: 2 つのブロック (labels 0/1) をまたぐ面で検出し、ブロックの組で数える
+xs2 = np.r_[np.linspace(0, 4 * H1, 5), 4 * H1 + 2 * H1 * np.arange(1, 4)]
+xyz, hx, F = box(xs2, ys, zs); lab = (xyz[hx].mean(1)[:, 0] > 4 * H1).astype(int)
+a = adjacent_spacing_check(xyz, hx, labels=lab, label_names=["L", "R"])
+check("(e2) 継ぎ目で x 間隔 2 倍: FAIL (x 方向・比 2・組 L|R)", not a["ok"] and abs(a["x"]["ratio_max"] - 2) < 1e-9 and a["section"]["n_gt"] == 0
+      and list(a.get("gt_by_block_pair", {}))[:1] == ["L|R|x"], f"x {a['x']['ratio_max']:.4f} 組 {list(a.get('gt_by_block_pair', {}))}")
+# 断面内で公比 1.3 -> FAIL (section)
+xyz, hx, F = box(np.linspace(0, 3 * H1, 4), prog(H1, 1.3, 5), zs)
+a = adjacent_spacing_check(xyz, hx)
+check("(e3) 断面内の公比 1.3: FAIL (section)", not a["ok"] and a["section"]["n_gt"] > 0 and a["x"]["n_gt"] == 0, f"section {a['section']['ratio_max']:.4f}")
+# 傾いた (15°) 格子でも x 方向の分類が保たれ、比は辺長で測る
+th = np.radians(15.0); xyz, hx, F = box(prog(H1, 1.1, 6), np.linspace(0, 3 * H1, 4), zs)
+xyz = xyz.copy(); xyz[:, 1] += np.tan(th) * xyz[:, 0]
+a = adjacent_spacing_check(xyz, hx)
+check("(e4) 15° に傾けた x 方向の公比 1.1: PASS・x に分類", a["ok"] and abs(a["x"]["ratio_max"] - 1.1) < 1e-9 and a["x"]["pairs"] > 0, f"x {a['x']['ratio_max']:.6f}")
+
+# (f) 後流 Δx: [L, L + 0.02] の全 x 辺で Δx <= cap
+Hm, cap = 0.1, 1.0e-4                      # H = 0.1 m、cap = 1e-3 H
+xw = np.r_[np.linspace(0.0, 0.002, 21), 0.002 + np.cumsum(1e-4 * 1.15 ** np.arange(1, 6))]
+xyz, hx, F = box(xw, [0.0, 1e-3, 2e-3], [0.0, 1e-3])
+w = wake_dx_check(xyz, hx, {"cowl": (0.0, 0.002)}, cap, unit=Hm)
+check("(f1) 後流 20 × 1e-3 H: PASS", w["ok"] and w["cowl"]["edges"] > 0 and abs(w["cowl"]["dx_max"] - 1e-3) < 1e-12, str(w["cowl"]))
+xw2 = np.r_[np.linspace(0.0, 0.0018, 13), 0.002]          # 1.5e-3 H の間隔 + 2e-3 H の間隔
+xyz, hx, F = box(xw2, [0.0, 1e-3], [0.0, 1e-3])
+w = wake_dx_check(xyz, hx, {"cowl": (0.0, 0.002)}, cap, unit=Hm)
+check("(f2) 後流に 1.5e-3 H 超の間隔: FAIL", not w["ok"] and w["cowl"]["dx_max"] > 1e-3, f"dx_max {w['cowl']['dx_max']:.3g} H")
+w = wake_dx_check(xyz, hx, {"cowl": (0.5, 0.6)}, cap, unit=Hm)
+check("(f3) 区間に辺が無い: 評価不能で FAIL", not w["ok"] and w["cowl"]["edges"] == 0)
+
+# (g) 形状ゲート: 直線の MOC 輪郭 (ランプ 15°・カウル -5°) で Geom を作り、節点を参照輪郭の上 / 少しずらして置く
+H = 0.1; P = dict(P0); P["TC"] = 0.005
+xr = np.linspace(-0.002, 0.2, 60); xc = np.linspace(0.0, P["LCOWL"] * H, 50)
+G = Geom(P, np.stack([xr, H + np.tan(np.radians(15)) * xr], 1), np.stack([xc, -np.tan(np.radians(5)) * xc], 1))
+t = P["TC"] * H; sc = -np.tan(np.radians(5)); L = P["LCOWL"] * H
+check("(g0) 外壁と後縁平面の交点 y = y_c(L) - t/cos θ (オフセット曲線を延長して平面で切る)",
+      abs(G.yo_te - (sc * L - t * np.sqrt(1 + sc * sc))) < 1e-15 and abs(G.yo(0.5 * L) - (sc * 0.5 * L - t * np.sqrt(1 + sc * sc))) < 1e-15,
+      f"yo_te {G.yo_te:.12g} 期待 {sc * L - t * np.sqrt(1 + sc * sc):.12g}")
+xq = np.linspace(0.0, L, 41); z0 = np.zeros_like(xq)
+pin = np.stack([xq, G.yc(xq), z0], 1); pr = np.stack([xq, G.yr(xq), z0], 1); pout = np.stack([xq, G.yo(xq), z0], 1)
+zb = np.linspace(0, 0.1, 5); yb = np.linspace(G.yo_te, float(G.yc(L)), 4)
+pbase = np.array([(L, y_, z_) for y_ in yb for z_ in zb]); pend = np.array([(G.LSW, y_, z_) for y_ in (0.0, 0.05) for z_ in zb])
+def gates(pin, pr, pout, pbase, pend):
+    xyz = np.vstack([pin, pr, pout, pbase, pend]); o = np.cumsum([0, len(pin), len(pr), len(pout), len(pbase), len(pend)])
+    bq = {t_: np.arange(o[i], o[i + 1]) for i, t_ in enumerate(("cowl_in", "ramp", "cowl_out", "cowl_base", "sidewall_end"))}
+    return shape_check(xyz, bq, G)
+s_ = gates(pin, pr, pout, pbase, pend)
+check("(g1) 参照輪郭の上の節点・法線オフセットの外壁・平面の端面: PASS", s_["ok"],
+      f"cowl_in {s_['cowl_in']['dist_max']:.2e} ramp {s_['ramp']['dist_max']:.2e} 厚さ {s_['cowl_out_thickness']['err_max']:.2e}")
+s_ = gates(pin + [0, 2e-6 * H, 0], pr, pout, pbase, pend)
+check("(g2) cowl_in を 2e-6 H ずらす: FAIL (cowl_in のみ)", not s_["ok"] and not s_["cowl_in"]["ok"] and s_["ramp"]["ok"], f"{s_['cowl_in']['dist_max']:.2e}")
+s_ = gates(pin, pr + [0, -2e-6 * H, 0], pout, pbase, pend)
+check("(g3) ramp を 2e-6 H ずらす: FAIL (ramp のみ)", not s_["ok"] and not s_["ramp"]["ok"] and s_["cowl_in"]["ok"], f"{s_['ramp']['dist_max']:.2e}")
+pout_v = np.stack([xq, G.yc(xq) - t, z0], 1)              # y 方向に t ずらしただけ (法線オフセットでない) -> 法線厚 t cos θ
+s_ = gates(pin, pr, pout_v, pbase, pend)
+check("(g4) 外壁を y 方向オフセットにする: FAIL (厚さ)", not s_["ok"] and not s_["cowl_out_thickness"]["ok"], f"err {s_['cowl_out_thickness']['err_min']:.2e} H")
+s_ = gates(pin, pr, pout, pbase + [1e-8 * H, 0, 0], pend)
+check("(g5) cowl_base を x に 1e-8 H ずらす: FAIL", not s_["ok"] and not s_["cowl_base_x"]["ok"], f"{s_['cowl_base_x']['dx_max']:.2e}")
+pb2 = pbase.copy(); pb2[pb2[:, 1] == pb2[:, 1].min(), 1] = float(G.yc(L)) - t          # 外側交点を y 方向オフセットの位置に置く
+s_ = gates(pin, pr, pout, pb2, pend)
+check("(g6) cowl_base の外側交点の y 違い: FAIL", not s_["ok"] and not s_["cowl_base_y"]["ok"], f"err_out {s_['cowl_base_y']['err_out']:.2e}")
+s_ = shape_check(np.vstack([pin, pr]), {"cowl_in": np.arange(len(pin)), "ramp": len(pin) + np.arange(len(pr))}, G)
+check("(g7) 必要なタグ (cowl_out ほか) の欠落: FAIL", not s_["ok"] and s_.get("cowl_out", {}).get("missing"))
 
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)

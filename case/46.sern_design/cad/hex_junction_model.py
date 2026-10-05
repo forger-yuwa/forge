@@ -9,23 +9,40 @@
 第一層は「辺長」でなく壁面の 3D 法線に対する距離で決める (§4.10 (e))。端面 (sidewall_end / cowl_base) にも壁層を置く。
 境界タグは「参照する体積が 1 つの面」を機械的に拾い、(面の名前, 区間) の表で決める。
 
-usage (mesh venv):  .venv-mesh/bin/python case/46.sern_design/cad/hex_junction_model.py OUT_PREFIX [--scale S] [--h1 H1/H] [--set k=v ...]
+B4a (plan §4.14-2〜5・§6.2、§5.1 B4-1) で MOC 輪郭に置き換えた (旧: 放物線ランプ・平坦カウル・断面隅フィレット。後方互換なし):
+  - ランプ y_r(x) = 参照輪郭 (`ramp_fillet` 適用後の 2D 輪郭)、カウル内壁 (cowl_in) y_c(x) = cowl_xy。どちらも点列の 3 次 B-spline 補間
+    (`Contour`、点列の外は端の接線で直線延長)。入力は `--contours DIR` の ramp_contour.csv / cowl_contour.csv (列 x_m,y_m、単位 m。
+    export_contours.py で作る)。
+  - カウル外壁 (cowl_out) = 内壁を内壁法線方向 (外 = 下) に板厚 TC だけオフセットした曲線 (テーパなし)。後端は内外とも平面 x = L_cowl で切る
+    (オフセット曲線を延長して平面と交わらせる)。x > L_cowl のカウル跡 (CW1/CW2) の上下は後縁から接線方向に直線延長。
+  - 側壁: 内面 z = W/2、厚さ TSW を +z 側へ、後端は平面 x = L_sw。断面隅フィレットは全て 0。
+  - x 方向は**格子の全 x 位置を station にする** (各 station で断面を物理位置から作り、x 区間は 1 セル幅)。全節点が station 面上にあり、
+    壁節点は参照輪郭そのものの上に乗る (transfinite の x 方向補間で輪郭から外れることがない)。
+  - 後流区間 [L, L + LWAKE] (L = L_sw, L_cowl) の全体で Δx <= DXW、以降は比 <= 1.2 で HX / HX_FAR へ。成長率は生成 1.2・実測の隣接比 <= 1.2。
+  - 検査 (VERDICT): 位相・タグ・頂点 Jacobian (float32)・skew/AR・壁第一層 (first_layer_check) に加えて、
+    出力実座標の隣接間隔比 (adjacent_spacing_check、全ヘキサの面隣接・継ぎ目を含む)、後流 Δx (wake_dx_check)、形状ゲート (shape_check)。
+
+usage (mesh venv):  .venv-mesh/bin/python case/46.sern_design/cad/hex_junction_model.py OUT_PREFIX --contours DIR [--scale S] [--set k=v ...]
 出力: OUT.msh / OUT_report.json / OUT_sections.npz (描画用)
 """
-import sys, math, json, argparse
+import sys, math, json, argparse, hashlib
+from pathlib import Path
 import numpy as np
 import gmsh
 
 # ---------------------------------------------------------------- 物理入力 (すべて /H)
-P0 = dict(H=0.1, ZW=1.0, TSW=0.05, TC=0.02, LSW=1.2, LCOWL=1.6, XEND=2.4, DR=0.08, YBOT=-1.0, ZFAR=2.0,
-          RAMP_A=0.30, RAMP_B=-0.02,            # y_r/H = 1 + A x/H + B (x/H)^2
+# 数値仕様は plan §6.2 の表: h1 1.6e-4 H、端面 h1e 1.0e-3 H、後流 [L, L + 0.02 H] で Δx <= 1.0e-3 H、成長率 1.2。
+# HX / HX_FAR / NZ は §4.12 の採用値 (0.05 / 0.08 / 31)。TC (カウル板厚 = 後縁厚) は §6.2 の A/B で 0.02 / 0.005 を与える (既定は生産値 0.005)
+P0 = dict(H=0.1, ZW=1.0, TSW=0.005, TC=0.005, LSW=0.8, LCOWL=1.2, XEND=1.5, DR=0.08, YBOT=-1.0, ZFAR=2.0,
           ZONE=0.3,                             # 端面の上下流に置く物理 station までの距離
-          H1=4.0e-5, G=1.2, NZ=41, HX=0.03, HX_FAR=0.03, M_SPL=129,   # HX: 45° の隅セルも AR <= 1000 に入る x 間隔 (h1 の 750 倍)
-          CORE_MILD=1.0, MILD1=5.0, MILD2=25.0, E5_BLEND=1.1,
+          LWAKE=0.02, DXW=1.0e-3,               # 後流区間の長さと、その区間全体の x 間隔の上限
+          H1=1.6e-4, H1_END=1.0e-3, G=1.2, NZ=31, HX=0.05, HX_FAR=0.08, M_SPL=129,
+          CORE_MILD=1.0, MILD1=5.0, MILD2=25.0, E5_BLEND=0.8,   # e5 の一様 -> 両端細分の移行長 (側壁の全長 [0, L_sw] で移す)
           HFAR=0.10, AR_TAN=900.0)                            # 外部遠方の最大格子幅 (端面層が断面全体に伝播するので、遠方の幅が AR を決める)
 # (x/H, 上隅 r/H, 下隅 r/H)。区間内は smoothstep (両端で r' = 0)
 # 半径を変える区間の長さは 2 r 以上にする: 短いと r'(x) で壁法線が x に傾き、円弧上の第一層が薄くなる (長さ r で -19 %、2 r で -5 %)
-PROFILE = [(0.00, 0.00, 0.06), (0.20, 0.10, 0.06), (0.60, 0.10, 0.06), (0.90, 0.10, 0.06), (1.10, 0.00, 0.00), (1.20, 0.00, 0.00)]
+# B4a (plan §4.14-5): 断面隅フィレットは初版ゼロ。半径を明示的に 0 にする (旧 PROFILE の非ゼロ半径は流用しない)
+PROFILE = [(0.00, 0.00, 0.00)]
 
 
 def smooth(t):
@@ -82,11 +99,27 @@ class Bump:
             n += 2 if n < 60 else 4
 
 
-def march(lengths, h0, g_t, g, hmax):
+def march(lengths, h0, g_t, g, hmax, caps=None):
     """端面から離れる向きに区間を順にたどり、区間ごとの (区間数, 公比) を決める。最初の区間は第一間隔 = h0。
-    以降は「第一間隔 = 前の最終間隔 × 公比」で継ぎ目の間隔比も公比に揃える。なるべく粗く (公比 <= g_t、最終間隔 <= 1.15 hmax)"""
+    以降は「第一間隔 = 前の最終間隔 × 公比」で継ぎ目の間隔比も公比に揃える。なるべく粗く (公比 <= g_t、最終間隔 <= 1.15 hmax)。
+    caps[i] (None 以外) は区間 i の**全体**の間隔上限 (後流区間の Δx <= DXW。plan §4.14-4): 区間内の全間隔 (= 単調なので始端と終端) が
+    caps[i] 以下の分割だけを採る (1.15 の緩和なし。丸めの 1e-9 相対だけ許す)"""
     out, last = [], None
-    for L in lengths:
+    caps = caps or [None] * len(lengths)
+    for L, cap in zip(lengths, caps):
+        if cap is not None:
+            n_cap = int(math.ceil(L / cap - 1e-9))
+            for n in range(n_cap, n_cap + 400):
+                if last is None:
+                    r = prog_r(L, n, h0); first = h0
+                else:                                   # 前区間の最終間隔から公比で続ける。合わなければ一様
+                    r = 1.0; first = L / n
+                end = first * r ** (n - 1)
+                if max(first, end) <= cap * (1 + 1e-9) and 1.0 / g - 1e-9 <= r <= g + 1e-9 and (last is None or max(first / last, last / first) <= g + 1e-9):
+                    break
+            else:
+                raise ValueError("後流区間に間隔上限 %.3g を課す分割が見つからない (L=%.4g)" % (cap, L))
+            out.append((n, 1.0 if n == 1 else r)); last = end; continue
         found = None
         for lim in (g_t, g):
             for n in range(1, int(L / (h0 if last is None else last / g)) + 4):
@@ -113,15 +146,91 @@ def march(lengths, h0, g_t, g, hmax):
 
 
 # ---------------------------------------------------------------- 形状
-class Geom:
-    def __init__(s, P):
-        s.P = P; H = P["H"]; s.H = H
-        for k in ("ZW", "TSW", "TC", "LSW", "LCOWL", "XEND", "DR", "YBOT", "ZFAR", "ZONE"): setattr(s, k, P[k] * H)
-        s.ZO = s.ZW + s.TSW; s.YC = 0.0; s.YCL = -s.TC
-        s.prof = [(a * H, b * H, c * H) for a, b, c in PROFILE]
+def _out(x, v):
+    return float(v) if np.ndim(x) == 0 else v
 
-    def yr(s, x): xh = x / s.H; return s.H * (1.0 + s.P["RAMP_A"] * xh + s.P["RAMP_B"] * xh * xh)
-    def dyr(s, x): return s.P["RAMP_A"] + 2.0 * s.P["RAMP_B"] * x / s.H
+
+class Contour:
+    """MOC 輪郭 (点列, 単位 m) の 3 次 B-spline 補間 y(x) (plan §4.14-3)。点列の範囲外は端点の接線で直線延長する
+    (カウル後縁の外壁交点・カウル跡の上下境界。§6.2 接続規則)。x は狭義単調増加であること"""
+    def __init__(s, xy):
+        from scipy.interpolate import make_interp_spline
+        xy = np.asarray(xy, float)
+        if xy.ndim != 2 or xy.shape[1] != 2 or len(xy) < 4: raise ValueError("輪郭は (N>=4, 2) の点列")
+        if np.any(np.diff(xy[:, 0]) <= 0): raise ValueError("輪郭の x が狭義単調増加でない")
+        s.xy = xy; s.xa, s.xb = float(xy[0, 0]), float(xy[-1, 0])
+        s.sp = make_interp_spline(xy[:, 0], xy[:, 1], k=3); s.d1 = s.sp.derivative(); s.d2 = s.sp.derivative(2)
+        s.ya, s.yb = float(s.sp(s.xa)), float(s.sp(s.xb)); s.sa, s.sb = float(s.d1(s.xa)), float(s.d1(s.xb))
+
+    def y(s, x):
+        xv = np.asarray(x, float); v = s.sp(np.clip(xv, s.xa, s.xb))
+        v = np.where(xv < s.xa, s.ya + s.sa * (xv - s.xa), np.where(xv > s.xb, s.yb + s.sb * (xv - s.xb), v))
+        return _out(x, v)
+
+    def dy(s, x):
+        xv = np.asarray(x, float); v = s.d1(np.clip(xv, s.xa, s.xb))
+        v = np.where(xv < s.xa, s.sa, np.where(xv > s.xb, s.sb, v)); return _out(x, v)
+
+    def ddy(s, x):
+        xv = np.asarray(x, float); v = s.d2(np.clip(xv, s.xa, s.xb))
+        v = np.where((xv < s.xa) | (xv > s.xb), 0.0, v); return _out(x, v)
+
+    def project(s, pts, it=12):
+        """点 (x, y) から曲線への最近点の x 座標 p と距離 (符号: 曲線より上 = 正)。延長部を含む"""
+        P = np.asarray(pts, float).reshape(-1, 2); p = P[:, 0].copy()
+        for _ in range(it):                     # Newton: f(p) = (p - x0) + (y(p) - y0) y'(p) = 0
+            yy, d1, d2 = s.y(p), s.dy(p), s.ddy(p)
+            f = (p - P[:, 0]) + (yy - P[:, 1]) * d1; df = 1.0 + d1 * d1 + (yy - P[:, 1]) * d2
+            p = p - f / df
+        d = np.hypot(P[:, 0] - p, P[:, 1] - s.y(p)) * np.sign(P[:, 1] - s.y(p))
+        return p, d
+
+
+def load_contours(d):
+    """DIR/ramp_contour.csv と DIR/cowl_contour.csv (列 x_m,y_m、単位 m) を読む。runner_sern3d.prepare と同じ書式"""
+    d = Path(d); out = {}
+    for k in ("ramp", "cowl"):
+        f = d / f"{k}_contour.csv"; raw = f.read_bytes()
+        out[k] = np.loadtxt(f, delimiter=",", skiprows=1); out[k + "_src"] = dict(path=str(f.resolve()), sha256=hashlib.sha256(raw).hexdigest(), n=int(len(out[k])))
+    return out
+
+
+class Geom:
+    def __init__(s, P, ramp_xy, cowl_xy):
+        s.P = P; H = P["H"]; s.H = H
+        for k in ("ZW", "TSW", "TC", "LSW", "LCOWL", "XEND", "DR", "YBOT", "ZFAR", "ZONE", "LWAKE"): setattr(s, k, P[k] * H)
+        s.ZO = s.ZW + s.TSW
+        s.prof = [(a * H, b * H, c * H) for a, b, c in PROFILE]
+        s.ramp, s.cowl = Contour(ramp_xy), Contour(cowl_xy)
+        # 参照輪郭の範囲と模型の寸法の整合 (黙って外挿・切り詰めをしない)
+        if s.ramp.xa > 1e-12 * H or s.ramp.xb < s.XEND: raise ValueError("ランプ輪郭が模型の x 範囲 [0, XEND] を覆わない (%.4g..%.4g m)" % (s.ramp.xa, s.ramp.xb))
+        if abs(s.cowl.xa) > 1e-12 * H: raise ValueError("カウル輪郭の始点 x が 0 でない (%.3g m)" % s.cowl.xa)
+        if abs(s.cowl.xb - s.LCOWL) > 1e-9 * H: raise ValueError("カウル輪郭の終点 x %.9g m が L_cowl %.9g m と一致しない" % (s.cowl.xb, s.LCOWL))
+        xx = np.linspace(0.0, s.LCOWL, 4001); kap = np.abs(s.cowl.ddy(xx)) / (1 + s.cowl.dy(xx) ** 2) ** 1.5
+        if kap.max() * s.TC >= 0.5: raise ValueError("板厚がカウル内壁の曲率半径に対して厚すぎる (κ t = %.3g)" % (kap.max() * s.TC))
+        s.p_te = float(s._po(np.array([s.LCOWL]))[0]); s.s_te = float(s.cowl.dy(s.p_te))
+        s.yo_te = float(s.cowl.y(s.p_te) - s.TC / math.sqrt(1 + s.s_te ** 2))     # 外壁オフセット曲線と平面 x = L_cowl の交点の y
+
+    def yr(s, x): return s.ramp.y(x)
+    def dyr(s, x): return s.ramp.dy(x)
+    def yc(s, x): return s.cowl.y(x)                 # カウル内壁 (流れ側) = cowl_xy
+    def dyc(s, x): return s.cowl.dy(x)
+
+    def _po(s, x):
+        """外壁オフセット曲線上で x 座標が x になる点の、内壁側の媒介変数 p (内壁点 (p, y_c(p)) を法線方向に t ずらすと x)"""
+        x = np.asarray(x, float); p = x.copy()
+        for _ in range(60):
+            sl = s.cowl.dy(p); p = x - s.TC * sl / np.sqrt(1 + sl * sl)
+        return p
+
+    def yo(s, x):
+        """カウル外壁 (cowl_out) の y。x > L_cowl は外壁交点から接線方向の直線延長"""
+        xv = np.asarray(x, float); p = s._po(np.minimum(xv, s.LCOWL)); sl = s.cowl.dy(p)
+        v = s.cowl.y(p) - s.TC / np.sqrt(1 + sl * sl)
+        v = np.where(xv > s.LCOWL, s.yo_te + s.s_te * (xv - s.LCOWL), v); return _out(x, v)
+
+    def dyo(s, x):
+        xv = np.asarray(x, float); v = s.cowl.dy(s._po(np.minimum(xv, s.LCOWL))); v = np.where(xv > s.LCOWL, s.s_te, v); return _out(x, v)
 
     def r(s, x):
         pr = s.prof
@@ -133,7 +242,7 @@ class Geom:
 
     def section(s, x):
         """断面の点 (y,z) と 3 本の壁曲線 (密な折れ線)。角度は z 軸から y 軸へ測る"""
-        ru, rl = s.r(x); yr, yc, ZW, DR = s.yr(x), s.YC, s.ZW, s.DR
+        ru, rl = s.r(x); yr, yc, yo, ZW, DR = s.yr(x), s.yc(x), s.yo(x), s.ZW, s.DR
         arc = lambda cy, cz, r, a0, a1: np.stack([cy + r * np.sin(np.linspace(a0, a1, 200)), cz + r * np.cos(np.linspace(a0, a1, 200))], 1)
         if ru > 0: up1, up2 = arc(yr - ru, ZW - ru, ru, math.pi / 2, math.pi / 4), arc(yr - ru, ZW - ru, ru, math.pi / 4, 0.0)
         else: up1 = up2 = np.array([(yr, ZW)])
@@ -153,7 +262,7 @@ class Geom:
                      e10=np.vstack([il2, [(yc + DR, ZW - max(rl, DR))], [(yc + DR, 0.0)]])[::-1])
         pt = dict(PT0=(yr, 0.0), WU=tuple(up1[-1]), CUR=tuple(iu1[-1]), CUL=(yr - DR, 0.0),
                   WL=tuple(lo1[-1]), CLR=tuple(il1[-1]), CLL=(yc + DR, 0.0), PB0=(yc, 0.0))
-        ys = [s.YBOT, s.YCL - DR, s.YCL, yc, yr]; zs = [0.0, ZW, s.ZO, s.ZO + DR, s.ZFAR]
+        ys = [s.YBOT, yo - DR, yo, yc, yr]; zs = [0.0, ZW, s.ZO, s.ZO + DR, s.ZFAR]      # y 位置は x 依存 (外壁 yo・内壁 yc・ランプ yr)
         for j in range(5):
             for k in range(5):
                 if (j, k) in ((3, 0), (3, 1), (4, 1), (4, 0)): continue
@@ -213,12 +322,16 @@ def xface_tag(e, reg):
 
 
 # ---------------------------------------------------------------- 本体
-def build(out, P, quiet=False):
-    G = Geom(P); H = G.H; h1 = P["H1"] * H; g = P["G"]; DR = G.DR
+def build(out, P, contours, quiet=False):
+    import time
+    t0 = time.time()
+    G = Geom(P, contours["ramp"], contours["cowl"]); H = G.H; h1 = P["H1"] * H; g = P["G"]; DR = G.DR
     gmsh.initialize(); gmsh.option.setNumber("General.Terminal", 0)
     bump = Bump()
-    # ---- station (すべて物理位置) と区間
-    xs = {p[0] for p in G.prof} | {G.LSW, G.LCOWL, G.XEND, 0.5 * (G.LSW + G.LCOWL), G.LSW - G.ZONE, G.LCOWL + G.ZONE}
+    # ---- 物理 station (すべて物理位置) と物理区間。後流区間の終端 L + LWAKE も物理 station にする
+    xm = 0.5 * (G.LSW + G.LCOWL)
+    if not (G.LSW + G.LWAKE < xm and G.LCOWL + G.LWAKE < G.XEND): raise ValueError("後流区間 LWAKE が区間に収まらない")
+    xs = {p[0] for p in G.prof} | {G.LSW, G.LCOWL, G.XEND, xm, G.LSW - G.ZONE, G.LCOWL + G.ZONE, G.LSW + G.LWAKE, G.LCOWL + G.LWAKE}
     for (xa, ua, la), (xb, ub, lb) in zip(G.prof[:-1], G.prof[1:]):
         if (ua, la) != (ub, lb):
             kink = False
@@ -230,49 +343,60 @@ def build(out, P, quiet=False):
                         lo, hi = (xm_, hi) if (rm - G.DR) * (ra - G.DR) > 0 else (lo, xm_)
                     xs.add(0.5 * (lo + hi)); kink = True
             if not kink: xs.add(0.5 * (xa + xb))   # 折れ点の station があれば中点は足さない (station が詰まると x 間隔が飛ぶ)          # 対角辺の第一間隔 s1 = h1 L/dr は r について連続なので、r = 0 の手前に特別な station は要らない
-    xs = sorted(x for x in xs if -1e-12 <= x <= G.XEND + 1e-12)
-    xs = [x for i, x in enumerate(xs) if i == 0 or x - xs[i - 1] > 1e-9]
+    xp = sorted(x for x in xs if -1e-12 <= x <= G.XEND + 1e-12)
+    xp = [x for i, x in enumerate(xp) if i == 0 or x - xp[i - 1] > 1e-9]
     reg = lambda xa, xb: "A" if xb <= G.LSW + 1e-12 else ("B" if xb <= G.LCOWL + 1e-12 else "C")
+    ivp = [(xp[i], xp[i + 1], reg(xp[i], xp[i + 1])) for i in range(len(xp) - 1)]
+    # ---- x 分布: 端面から離れる向きに march。A は L_sw から上流へ、B は両端から中央へ、C は L_cowl から下流へ。
+    # 後流区間 [L, L + LWAKE] は区間全体で Δx <= DXW (plan §6.2)、端面の第一間隔は h1e
+    h1e = P.get("H1_END", P["H1"]) * H; hx = P["HX"] * H; g_t = 1.0 + 0.75 * (g - 1.0); dxw = P["DXW"] * H
+    near = lambda a, b: abs(a - b) <= 1e-9 * H
+    capf = lambda i: dxw if any(near(ivp[i][0], L_) and near(ivp[i][1], L_ + G.LWAKE) for L_ in (G.LSW, G.LCOWL)) else None
+    idx = {r_: [i for i, v in enumerate(ivp) if v[2] == r_] for r_ in "ABC"}
+    xlaw = {}
+    def run(ids, toward_plus, hmax):
+        res = march([ivp[i][1] - ivp[i][0] for i in ids], h1e, g_t, g, hmax, caps=[capf(i) for i in ids])
+        for i, (n, r) in zip(ids, res): xlaw[i] = (n, r if toward_plus else -r)       # 負 = 逆向き (第一間隔が終端側)
+    run(idx["A"][::-1], False, hx)
+    run([i for i in idx["B"] if ivp[i][1] <= xm + 1e-12], True, hx); run([i for i in idx["B"] if ivp[i][0] >= xm - 1e-12][::-1], False, hx)
+    run(idx["C"], True, P["HX_FAR"] * H)
+    # ---- 格子の全 x 位置を station にする (各物理区間を march の分布で分割。物理 station の位置はそのまま)
+    xs = [xp[0]]
+    for i, (xa, xb, _) in enumerate(ivp):
+        n, r = xlaw[i]; q = abs(r) if r > 0 else 1.0 / abs(r); w = q ** np.arange(n); cw = np.cumsum(w) / w.sum()
+        xs += [xa + (xb - xa) * float(c_) for c_ in cw[:-1]] + [xb]
+    dxs = np.diff(xs); x_ratio_design = float(np.maximum(dxs[1:] / dxs[:-1], dxs[:-1] / dxs[1:]).max())
     ivs = [(xs[i], xs[i + 1], reg(xs[i], xs[i + 1])) for i in range(len(xs) - 1)]
-    # ---- 事前判定
-    assert 0 < G.LSW < G.LCOWL < G.XEND and G.TC > 0 and G.TSW > 0 and G.YBOT < G.YCL - DR and G.ZO + DR < G.ZFAR
+    # ---- 事前判定 (全 station と区間中点)
+    assert 0 < G.LSW < G.LCOWL < G.XEND and G.TC > 0 and G.TSW > 0 and G.ZO + DR < G.ZFAR
     for x in xs + [0.5 * (a + b) for a, b, _ in ivs]:
         pt, _, (ru, rl) = G.section(x)
         if x >= G.LSW - 1e-12 and (ru > 0 or rl > 0): raise ValueError("x >= L_sw で r != 0")
-        if ru + rl + 2 * DR >= G.yr(x) - G.YC or max(ru, rl) + DR >= G.ZW: raise ValueError("フィレットが入らない x=%.4g" % x)
+        if ru + rl + 2 * DR >= G.yr(x) - G.yc(x) or max(ru, rl) + DR >= G.ZW: raise ValueError("フィレットが入らない x=%.4g" % x)
+        if not G.YBOT < G.yo(x) - DR: raise ValueError("外部の下端 YBOT がカウル外壁の壁帯と交わる x=%.4g" % x)
         for e in ("e2", "e6"):
             if math.dist(pt[N_EDGE[e][0]], pt[N_EDGE[e][1]]) < 0.5 * DR: raise ValueError("コアが壁に近すぎる (%s, x=%.4g)" % (e, x))
-    # ---- x 分布: 端面から離れる向きに march。A は L_sw から上流へ、B は両端から中央へ、C は L_cowl から下流へ
-    h1e = P.get("H1_END", P["H1"]) * H; hx = P["HX"] * H; g_t = 1.0 + 0.75 * (g - 1.0)
-    idx = {r_: [i for i, v in enumerate(ivs) if v[2] == r_] for r_ in "ABC"}
-    xlaw = {}
-    def run(ids, toward_plus, hmax):
-        res = march([ivs[i][1] - ivs[i][0] for i in ids], h1e, g_t, g, hmax)
-        for i, (n, r) in zip(ids, res): xlaw[i] = (n, r if toward_plus else -r)       # gmsh: 負 = 逆向き
-    run(idx["A"][::-1], False, hx)
-    xm = 0.5 * (G.LSW + G.LCOWL)
-    run([i for i in idx["B"] if ivs[i][1] <= xm + 1e-12], True, hx); run([i for i in idx["B"] if ivs[i][0] >= xm - 1e-12][::-1], False, hx)
-    run(idx["C"], True, P["HX_FAR"] * H)
-    dxs = []
-    for i, (xa, xb, _) in enumerate(ivs):
-        n, r = xlaw[i]; q = abs(r) if r > 0 else 1.0 / abs(r); w = q ** np.arange(n); dxs += list((xb - xa) * w / w.sum())
-    dxs = np.array(dxs); x_ratio_max = float(np.maximum(dxs[1:] / dxs[:-1], dxs[:-1] / dxs[1:]).max())
     # ---- 断面の分布 (節点数は同値類ごとに 1 つ)
-    NL = prog_n(DR, h1, g) + 4                                           # 壁法線の区間数
-    Lmax = max(G.yr(x) - G.YC for x in xs); cmax = math.sqrt(1 + max(abs(G.dyr(x)) for x in xs) ** 2)
+    NL = prog_n(DR, h1, g) + 4                                           # 壁法線の区間数 (plan §6.2: prog_n(DR, h1, 1.2) + 4)
+    NL_END = prog_n(DR, h1e, g) + 4                                      # 端面の期待層数 (同式で h1e。§6.2 の正式規則として report に記録)
+    xa_ = np.array(xs); Lmax = float(np.max(G.yr(xa_) - G.yc(xa_)))
+    ccs = np.sqrt(1 + G.dyc(xa_) ** 2); LTmax = float(np.max(G.yc(xa_) - G.yo(xa_)))
     tan_max = P["AR_TAN"] * h1            # 壁層セルの接線方向の幅の上限 (リングは最大 45° 傾くので、壁層でも AR <= 1000 に収める)
-    NY = bump.fit_n(h1 / Lmax, g, hmax_rel=tan_max / Lmax); NSW = bump.fit_n(h1 / G.TSW, g); NTC = bump.fit_n(h1 / G.TC, g); NZ = int(P["NZ"])
+    NY = bump.fit_n(h1 / Lmax, g, hmax_rel=tan_max / Lmax); NSW = bump.fit_n(h1 / G.TSW, g)
+    NTC = bump.fit_n(h1 * float(ccs.min()) / LTmax, g); NZ = int(P["NZ"])     # 板の y 方向 (鉛直厚 t/cos θ_c、両端 h1 cc)
     s_out = DR * (1 - 1 / prog_r(DR, NL, h1))                            # 壁帯の最外間隔 (概算)
     def far_n(L):
         n = prog_n(L, s_out * g_t, g_t) + 1
         while L * (1 - 1 / prog_r(L, n, s_out * g_t)) > P["HFAR"] * H and n < 400: n += 1      # 最終間隔 = L (r-1)/r
         return n
-    NFY = far_n(G.YCL - DR - G.YBOT); NFZ = far_n(G.ZFAR - G.ZO - DR)
+    NFY = far_n(float(np.max(G.yo(xa_))) - DR - G.YBOT); NFZ = far_n(G.ZFAR - G.ZO - DR)
     m1, m2, mc = P["MILD1"] * h1, P["MILD2"] * h1, P["CORE_MILD"] * h1
 
     def laws(x, pt, elen):
         """station x での各辺の (節点数, 種別, 係数)"""
         c = math.sqrt(1 + G.dyr(x) ** 2); ru, rl = G.r(x); L = {}
+        cc = math.sqrt(1 + G.dyc(x) ** 2); co = math.sqrt(1 + G.dyo(x) ** 2)       # カウル内壁・外壁の傾き (鉛直の間隔 = 法線距離 × c)
+        LT = G.yc(x) - G.yo(x); LFY = G.yo(x) - DR - G.YBOT
         # gmsh の transfinite 補間は、層 1 を「辺長に対する比 eta = s1/L」で置く (X = (1-eta) 壁 + eta 内側線、eta は両側辺の間で線形)。
         # 内側線は平面壁から dr だけ離れた平行線なので、**リングの全側辺で eta = h1/dr に揃えれば平面部の法線距離は厳密に h1**。
         # 対角辺 e2/e6 は長さが sqrt2 dr - (sqrt2-1) r なので s1 = h1 L/dr (r=0 で sqrt2 h1 = 接する両壁の条件と同じ)。
@@ -283,10 +407,10 @@ def build(out, P, quiet=False):
             return math.sqrt(1 + (float((w_(x1) - w_(x0)) @ d) / (x1 - x0)) ** 2)
         # 傾きの補正は 3 割だけ掛ける: 全部掛けると e2 側の eta が増えて平面部が厚くなる (円弧上 -9 % -> -6 %、平面部 +3 % 以内)
         k2 = (1 + 0.3 * (tilt("e2", "WU") - 1)) if ru > 0 else 1.0; k6 = (1 + 0.3 * (tilt("e6", "WL") - 1)) if rl > 0 else 1.0
-        s = dict(e2=h1 * 0.5 * (1 + c) * k2 * elen["e2"] / DR, e6=h1 * k6 * elen["e6"] / DR, e4=h1 * c, e9=h1)
+        s = dict(e2=h1 * 0.5 * (1 + c) * k2 * elen["e2"] / DR, e6=h1 * 0.5 * (1 + cc) * k6 * elen["e6"] / DR, e4=h1 * c, e9=h1 * cc)
         for e, sg in (("e2", 1), ("e6", 1), ("e9", 1), ("e4", -1)): L[e] = (NL + 1, "Progression", sg * prog_r(elen[e], NL, s[e]))
         for e in ("e1", "e3", "e8", "e10", "hz00", "hz10", "hz20"): L[e] = (NZ, "Progression", 1.0)
-        hend = 0.5 * h1 * (1 + c)                                        # 両端細分: ランプ側とカウル側の平均
+        hend = 0.5 * h1 * (c + cc)                                       # 両端細分: ランプ側とカウル側の平均
         w = smooth((x - (x_r0 - P["E5_BLEND"] * H)) / (P["E5_BLEND"] * H))   # e5 は上流で一様、フィレットが消える位置 x_r0 までに h1 へ
         huni = elen["e5"] / (NY - 1); h5 = (1 - w) * huni + w * hend      # 間隔で線形に混ぜる (対数で混ぜると節点の移動が上流側に偏り、壁面の格子線が x-y 面で 45° 傾く)
         def bl(n, Led, h):
@@ -297,9 +421,9 @@ def build(out, P, quiet=False):
         for j, hh in ((0, m2), (1, h1), (2, h1), (3, h1), (4, h1)): L["hz%d1" % j] = bl(NSW, G.TSW, hh)
         cap = lambda hh: min(hh, 0.999 * DR / NL)
         for k, hh in ((0, h1), (1, h1), (2, h1), (3, h1), (4, m2)):
-            L["vy2%d" % k] = bl(NTC, G.TC, hh)
-            hh = cap(hh); r_ = prog_r(DR, NL, hh); L["vy1%d" % k] = (NL + 1, "Progression", -r_)
-            L["vy0%d" % k] = (NFY + 1, "Progression", -prog_r(G.YCL - DR - G.YBOT, NFY, hh * r_ ** NL))
+            L["vy2%d" % k] = bl(NTC, LT, hh * cc if k < 4 else hh)
+            hh = cap(hh * co if k < 4 else hh); r_ = prog_r(DR, NL, hh); L["vy1%d" % k] = (NL + 1, "Progression", -r_)
+            L["vy0%d" % k] = (NFY + 1, "Progression", -prog_r(LFY, NFY, hh * r_ ** NL))
         for j, hh in ((0, m2), (1, h1), (2, h1), (3, h1), (4, h1)):
             hh = cap(hh); r_ = prog_r(DR, NL, hh); L["hz%d2" % j] = (NL + 1, "Progression", r_)
             L["hz%d3" % j] = (NFZ + 1, "Progression", prog_r(G.ZFAR - G.ZO - DR, NFZ, hh * r_ ** NL))
@@ -317,6 +441,8 @@ def build(out, P, quiet=False):
             if e in walls:
                 W = np.asarray(walls[e]); dd = np.r_[0, np.cumsum(np.linalg.norm(np.diff(W, axis=0), axis=1))]
                 W = W[np.r_[True, np.diff(dd) > 1e-14]]; dd = np.r_[0, np.cumsum(np.linalg.norm(np.diff(W, axis=0), axis=1))]
+                ch = W[-1] - W[0]; off = np.abs(ch[0] * (W[:, 1] - W[0, 1]) - ch[1] * (W[:, 0] - W[0, 0])) / max(np.linalg.norm(ch), 1e-300)
+                if off.max() <= 1e-12 * H: elen[e] = math.dist(pt[a_], pt[b_]); continue       # 直線の壁 (半径 0) は Line で張る (節点が壁の直線上に厳密に乗る)
                 sv = np.linspace(0, dd[-1], int(P["M_SPL"])); wr[e] = np.stack([np.interp(sv, dd, W[:, q]) for q in (0, 1)], 1); elen[e] = dd[-1]
             else: elen[e] = math.dist(pt[a_], pt[b_])
         for e in ("e5", "e7", "e11", "vy32"): elen.setdefault(e, math.dist(pt[EDGE[e][0]], pt[EDGE[e][1]]))
@@ -335,13 +461,10 @@ def build(out, P, quiet=False):
         S.append(dict(x=x, pt=pt, pid=pid, eid=eid, face=face, law=Q["law"]))
     vols, xfaces, refs = {}, {}, {}
     for ii, (xa, xb, rg) in enumerate(ivs):
-        A, B = S[ii], S[ii + 1]; pm = G.section(0.5 * (xa + xb))[0]; blks = sorted(PRESENT[rg])
+        A, B = S[ii], S[ii + 1]; blks = sorted(PRESENT[rg])
         ed = sorted({e for b in blks for e, _ in BLK[b]}); pn = sorted({p for e in ed for p in EDGE[e]}); xl = {}
-        for p in pn:
-            ya, yb, ym = np.array(A["pt"][p]), np.array(B["pt"][p]), np.array(pm[p])
-            if np.abs(0.5 * (ya + yb) - ym).max() < 1e-13: xl[p] = ge.addLine(A["pid"][p], B["pid"][p])
-            else: xl[p] = ge.addSpline([A["pid"][p], ge.addPoint(0.5 * (xa + xb), ym[0], ym[1]), B["pid"][p]])
-            n, r = xlaw[ii]; gm.setTransfiniteCurve(xl[p], n + 1, "Progression", r)
+        for p in pn:                    # x 区間は 1 セル幅: 両端の station 点を結ぶ直線 (内部節点なし。全節点が station 面上)
+            xl[p] = ge.addLine(A["pid"][p], B["pid"][p]); gm.setTransfiniteCurve(xl[p], 2, "Progression", 1.0)
         for e in ed:
             a, b = EDGE[e]
             xfaces[(ii, e)] = ge.addSurfaceFilling([ge.addCurveLoop([A["eid"][e], xl[b], -B["eid"][e], -xl[a]])])
@@ -388,19 +511,34 @@ def build(out, P, quiet=False):
                     sk = np.maximum(sk, np.abs(th - 90) / 90)
                 res.setdefault(b, []).append((round(xs[si] / H, 3), round(float(sk.max()), 3), int((sk > 0.7).sum())))
         for b in res: print("%-7s" % b, " ".join("%.3f:%.2f(%d)" % t for t in res[b] if t[1] > 0.3))
-        print("counts", dict(NL=NL, NY=NY, NZ=NZ, NSW=NSW, NTC=NTC, NFY=NFY, NFZ=NFZ), "nx", [xlaw[i][0] for i in range(len(ivs))], "sum", sum(xlaw[i][0] for i in range(len(ivs))))
-        gmsh.finalize(); return dict(VERDICT="DIM2")
+        n2 = int(len(ntag)); cnt = dict(NL=NL, NL_END=NL_END, NY=NY, NZ=NZ, NSW=NSW, NTC=NTC, NFY=NFY, NFZ=NFZ)
+        print("counts", cnt, "nx", [xlaw[i][0] for i in range(len(ivp))], "stations", len(xs))
+        print("nodes (全節点が station 面上なので 2D の節点数 = 3D の節点数):", n2, " 生成時間 %.1f s" % (time.time() - t0))
+        gmsh.finalize(); return dict(VERDICT="DIM2", nodes=n2, stations=len(xs), counts=cnt)
     gmsh.model.mesh.generate(3)
-    rep = dict(params={k: P[k] for k in sorted(P)}, stations=[x / H for x in xs], regions=[v[2] for v in ivs], nx=[abs(xlaw[i][0]) for i in range(len(ivs))],
-               x_ratio=[abs(xlaw[i][1]) for i in range(len(ivs))], x_adjacent_ratio_max=x_ratio_max, dx_min=float(dxs.min()), dx_max=float(dxs.max()), counts=dict(NL=NL, NY=NY, NZ=NZ, NSW=NSW, NTC=NTC, NFY=NFY, NFZ=NFZ),
+    t_gen = time.time() - t0
+    rep = dict(params={k: P[k] for k in sorted(P)}, contours={k: contours[k + "_src"] for k in ("ramp", "cowl")},
+               geometry=dict(L_sw=G.LSW / H, L_cowl=G.LCOWL / H, x_end=G.XEND / H, t_cowl=G.TC / H, t_sw=G.TSW / H, W_half=G.ZW / H,
+                             y_c_te=float(G.yc(G.LCOWL)) / H, y_o_te=G.yo_te / H, cowl_base_height=(float(G.yc(G.LCOWL)) - G.yo_te) / H,
+                             cowl_base_height_expected=G.TC / math.sqrt(1 + G.s_te ** 2) / H * (1 + G.s_te ** 2), y_r_inlet=float(G.yr(0.0)) / H),
+               phys_stations=[x / H for x in xp], phys_regions=[v[2] for v in ivp], nx=[abs(xlaw[i][0]) for i in range(len(ivp))],
+               x_ratio=[abs(xlaw[i][1]) for i in range(len(ivp))], wake_caps=[capf(i) / H if capf(i) else None for i in range(len(ivp))],
+               n_stations=len(xs), x_adjacent_ratio_design=x_ratio_design, dx_min=float(dxs.min()), dx_max=float(dxs.max()),
+               counts=dict(NL=NL, NL_END=NL_END, NY=NY, NZ=NZ, NSW=NSW, NTC=NTC, NFY=NFY, NFZ=NFZ),
+               layer_rules=dict(wall="NL = prog_n(DR, h1, 1.2) + 4", end="NL_END = prog_n(DR, h1e, 1.2) + 4 (端面 sidewall_end・cowl_base・cowl_side の期待層数。plan §6.2)",
+                                h1=h1 / H, h1e=h1e / H, dx_wake_max=dxw / H, wake_length=G.LWAKE / H, growth=g),
                n_blocks=len(vols), blocks_per_region={r_: len(PRESENT[r_]) for r_ in "ABC"}, untagged_boundary_faces=[str(u) for u in untag],
-               tags={t: len(v) for t, v in groups.items()})
-    rep.update(check(G, P, vols, groups, h1, h1e, out, NL))
-    ok = (not untag and x_ratio_max <= g * 1.02 and rep["ar_gt5000"] == 0 and rep["ar1000_skew_max"] <= 0.30 and rep["other_elems"] == {} and rep["neg_jac_f32"] == 0 and rep["mixed_sign_volumes"] == 0 and rep["skew_max"] <= 0.90
-          and rep["topology"]["ok"] and all(v["ok"] for v in rep["first_layer"].values()))
-    rep["VERDICT"] = "PASS" if ok else "FAIL"
+               tags={t: len(v) for t, v in groups.items()}, time_generate_s=t_gen)
+    rep.update(check(G, P, vols, groups, h1, h1e, out, NL, NL_END, [x for x, _, _ in ivs]))
+    rep["time_total_s"] = time.time() - t0
+    gates = dict(untagged=not untag, other_elems=rep["other_elems"] == {}, neg_jac_f32=rep["neg_jac_f32"] == 0, mixed_sign_volumes=rep["mixed_sign_volumes"] == 0,
+                 skew=rep["skew_max"] <= 0.90, ar=rep["ar_gt5000"] == 0 and rep["ar1000_skew_max"] <= 0.30, topology=rep["topology"]["ok"],
+                 first_layer=all(v["ok"] for v in rep["first_layer"].values()), adjacent_spacing=rep["adjacent_spacing"]["ok"],
+                 wake_dx=rep["wake_dx"]["ok"], shape=rep["shape"]["ok"])
+    rep["gates"] = gates
+    rep["VERDICT"] = "PASS" if all(gates.values()) else "FAIL"
     json.dump(rep, open(out + "_report.json", "w"), indent=1, ensure_ascii=False)
-    if not quiet: print(json.dumps({k: v for k, v in rep.items() if k != "params"}, indent=1, ensure_ascii=False))
+    if not quiet: print(json.dumps({k: v for k, v in rep.items() if k not in ("params", "phys_stations")}, indent=1, ensure_ascii=False))
     gmsh.write(out + ".msh"); gmsh.finalize(); return rep
 
 
@@ -414,7 +552,8 @@ def cornerJ(Pn):
     return np.stack([np.einsum('ij,ij->i', np.cross(Pn[:, a] - Pn[:, c], Pn[:, b] - Pn[:, c]), Pn[:, d] - Pn[:, c]) for c, (a, b, d) in NBR.items()], 1)
 
 
-END_TAGS = ("sidewall_end", "cowl_base")
+# 端面 (第一内部点距離 h1e・期待層数 NL_END で判定。plan §6.2 の表: cowl_base・sidewall_end・cowl_side)
+END_TAGS = ("sidewall_end", "cowl_base", "cowl_side")
 
 
 def model_classifier(G):
@@ -426,7 +565,7 @@ def model_classifier(G):
             rr = np.array([np.max([G.r(x_ + q) for q in (-dl, 0.0, dl)], axis=0) for x_ in pts[:, 0]]).reshape(-1, 2)
             yrn = np.array([G.yr(x_) for x_ in pts[:, 0]]); mg = 0.5 * G.DR
             arc |= (rr[:, 0] > 0) & (pts[:, 2] > G.ZW - rr[:, 0] - mg) & (pts[:, 1] > yrn - rr[:, 0] - mg)
-            arc |= (rr[:, 1] > 0) & (pts[:, 2] > G.ZW - rr[:, 1] - mg) & (pts[:, 1] < G.YC + rr[:, 1] + mg)
+            arc |= (rr[:, 1] > 0) & (pts[:, 2] > G.ZW - rr[:, 1] - mg) & (pts[:, 1] < G.yc(pts[:, 0]) + rr[:, 1] + mg)
             for (xa, ua, la), (xb, ub, lb) in zip(G.prof[:-1], G.prof[1:]):       # 半径が変わる区間 (フィレット遷移) はダクト内の壁全周を ±10 % の区分に入れる (plan §4.10 (e))
                 if (ua, la) != (ub, lb): edge |= (pts[:, 0] >= xa - 1e-12) & (pts[:, 0] <= xb + 1e-12)
         return arc, edge
@@ -440,6 +579,8 @@ def first_layer_check(xyz, hx, bq, h1, h1e, nl, nl_end, dr, classify=None, wall_
     期待層数 nl (端面は nl_end)、稜の近傍幅の基準 dr、区分関数 classify(t, pts) -> (arc, edge) (None なら円弧区分なし)。
     壁タグ別に次を見て、1 つでも外れたら ok=False:
       (1) 第一内部点の資格: 壁節点 w に接する全ヘキサの節点のうち、**どの壁タグにも属さない**節点で、壁法線の内側 (n.d > 0) にあるものが候補。
+          (n.d が |d| の 1e-6 以下の節点 = 壁と同一平面で丸めだけ内側に見える節点は候補にしない。2026-10-06 B4-1 で端面 station 面上の
+          隣接節点 (n.d ~ 1e-18 m) が選ばれ比 3e-14 で偽 FAIL したため)。
           候補のうち w と辺でつながるものがあればその中から、法線からの横ずれ |d - (n.d) n| が最小のものを第一内部点 p1 とする
           (隅の近くで格子線が扇形に傾いても、同じヘキサの対角の点でなく格子線上の点を取る)。辺でつながる候補が無いときは
           接する全ヘキサの候補から選ぶ (直交格子の凹の稜では p1 は対角の節点になる)。これを許すのは稜 (複数の壁タグに属する節点) だけで、
@@ -512,7 +653,8 @@ def first_layer_check(xyz, hx, bq, h1, h1e, nl, nl_end, dr, classify=None, wall_
             Hm = hexes_of(ndc); C = np.where(Hm[:, :, None] >= 0, hx[np.maximum(Hm, 0)], -1).reshape(len(ndc), -1)
             dv = xyz[np.maximum(C, 0)] - xyz[ndc][:, None, :]; dn = np.einsum('ijk,ik->ij', dv, nc)
             tang = np.linalg.norm(dv - dn[:, :, None] * nc[:, None, :], axis=2)
-            valid = (C >= 0) & ~wallnode[np.maximum(C, 0)] & (dn > 0)
+            # 内側 = n.d > 0。ただし壁と同一平面の節点 (端面の station 面上の隣など) が座標の丸め (1 ulp) で n.d > 0 になるのは除く
+            valid = (C >= 0) & ~wallnode[np.maximum(C, 0)] & (dn > 1e-6 * np.linalg.norm(dv, axis=2))
             ise = (C[:, :, None] == NB[ndc][:, None, :]).any(2)          # 辺でつながる候補を優先 (扇形に傾いた格子線でも線上の点を取る)
             valid &= np.where(ise.__and__(valid).any(1)[:, None], ise, True)
             tang = np.where(valid, tang, np.inf); j = np.argmin(tang, axis=1); r_ = np.arange(len(ndc))
@@ -568,7 +710,114 @@ def first_layer_check(xyz, hx, bq, h1, h1e, nl, nl_end, dr, classify=None, wall_
     return fl
 
 
-def check(G, P, vols, groups, h1, h1e, out, nl):
+# 各面 HF[i] の節点に対応する、向かいの面の節点 (面に直交する辺の他端)
+HF_OPP = [(4, 7, 6, 5), (0, 1, 2, 3), (3, 2, 6, 7), (0, 3, 7, 4), (1, 0, 4, 5), (2, 1, 5, 6)]
+
+
+def adjacent_spacing_check(xyz, hx, gmax=1.2, labels=None, label_names=None, unit=1.0, xdir=0.5, nworst=12, chunk=2000000):
+    """出力実座標の隣接間隔比 (plan §6.2「実測の隣接間隔比 <= 1.2、全方向・継ぎ目を含む」。§5.1 B4-1)。
+    面を共有する 2 つのヘキサについて、共有面の各節点から**面に直交する辺** (向かいの面への辺) の長さを両側で取り、
+    比 max(L1/L2, L2/L1) を節点ごとに出す。ブロック内の隣接も、ブロック・区間の継ぎ目を跨ぐ隣接も同じ式で見る (gmsh 非依存の純関数)。
+    分類: 辺の向きの |dx|/|d| > xdir を x 方向、それ以外を断面内とする。比 > gmax (許容の上乗せなし) が 1 つでもあれば ok=False。
+    labels (ヘキサごとの整数、例えばブロック名の番号) を渡すと、超過をブロックの組ごとに数える"""
+    xyz = np.asarray(xyz, float); hx = np.asarray(hx, np.int64); M = len(hx)
+    if M == 0: return dict(ok=False, reason="ヘキサなし")
+    def keys(Q):
+        Q = np.sort(Q, axis=1); return (Q[:, 0] << 32) | Q[:, 1], (Q[:, 2] << 32) | Q[:, 3]
+    k1 = np.empty(6 * M, np.int64); k2 = np.empty(6 * M, np.int64)
+    for fi, f in enumerate(HF):
+        k1[fi * M:(fi + 1) * M], k2[fi * M:(fi + 1) * M] = keys(hx[:, list(f)])
+    od = np.lexsort((k2, k1)); k1s, k2s = k1[od], k2[od]; del k1, k2
+    same = (k1s[1:] == k1s[:-1]) & (k2s[1:] == k2s[:-1]); del k1s, k2s
+    ia = od[:-1][same]; ib = od[1:][same]; del od, same
+    n_pairs = len(ia)
+    def side(e):                    # 面 entry -> (面の節点 (節点番号順), 直交辺の長さ, 直交辺のベクトル)
+        h = e % M; fi = e // M; F = np.array(HF)[fi]; O = np.array(HF_OPP)[fi]
+        nf = np.take_along_axis(hx[h], F, 1); no = np.take_along_axis(hx[h], O, 1)
+        o = np.argsort(nf, axis=1); nf = np.take_along_axis(nf, o, 1); no = np.take_along_axis(no, o, 1)
+        v = xyz[no] - xyz[nf]; return nf, np.linalg.norm(v, axis=2), v, h
+    rmax_all = np.zeros(n_pairs); isx = np.zeros(n_pairs, bool); hpair = np.zeros((n_pairs, 2), np.int64); worst_node = np.zeros(n_pairs, np.int64)
+    for c0 in range(0, n_pairs, chunk):
+        sl = slice(c0, c0 + chunk)
+        nfa, La, va, ha = side(ia[sl]); nfb, Lb, vb, hb = side(ib[sl])
+        assert np.array_equal(nfa, nfb)
+        r = np.maximum(La / Lb, Lb / La); j = np.argmax(r, axis=1); rr = np.arange(len(j))
+        rmax_all[sl] = r[rr, j]; worst_node[sl] = nfa[rr, j]
+        vm = va.mean(1); isx[sl] = np.abs(vm[:, 0]) > xdir * np.linalg.norm(vm, axis=1)
+        hpair[sl, 0], hpair[sl, 1] = ha, hb
+    bad = rmax_all > gmax
+    out = dict(gmax=gmax, pairs=int(n_pairs), ratio_max=float(rmax_all.max()) if n_pairs else float("nan"), n_gt=int(bad.sum()),
+               x=dict(pairs=int(isx.sum()), ratio_max=float(rmax_all[isx].max()) if isx.any() else 1.0, n_gt=int((bad & isx).sum())),
+               section=dict(pairs=int((~isx).sum()), ratio_max=float(rmax_all[~isx].max()) if (~isx).any() else 1.0, n_gt=int((bad & ~isx).sum())))
+    nm = (lambda i: label_names[i]) if label_names is not None else (lambda i: int(i))
+    item = lambda i: dict(ratio=float(rmax_all[i]), dir="x" if isx[i] else "section", at=[float(v) / unit for v in xyz[worst_node[i]]],
+                          blocks=[nm(labels[hpair[i, 0]]), nm(labels[hpair[i, 1]])] if labels is not None else None)
+    out["worst"] = [item(i) for i in np.argsort(-rmax_all)[:nworst]]
+    for cls, m in (("x", isx), ("section", ~isx)):
+        ii_ = np.flatnonzero(m); out[cls]["worst"] = [item(i) for i in ii_[np.argsort(-rmax_all[ii_])[:nworst]]]
+    if labels is not None and bad.any():
+        la, lb = np.sort(np.stack([labels[hpair[bad, 0]], labels[hpair[bad, 1]]], 1), axis=1).T; bi = np.flatnonzero(bad); rb = rmax_all[bad]
+        grp = {}
+        for a_, b_, r_, i in zip(la, lb, rb, bi):
+            k = "%s|%s|%s" % (nm(a_), nm(b_), "x" if isx[i] else "section"); q = grp.setdefault(k, [0, 0.0])
+            q[0] += 1; q[1] = max(q[1], float(r_))
+        out["gt_by_block_pair"] = {k: dict(n=v[0], ratio_max=v[1]) for k, v in sorted(grp.items(), key=lambda kv: -kv[1][1])[:30]}
+    out["ok"] = bool(n_pairs > 0 and not bad.any())
+    return out
+
+
+def wake_dx_check(xyz, hx, ranges, cap, unit=1.0, xdir=0.5, tol=1e-9):
+    """後流区間の実測 Δx (plan §6.2: x ∈ [L, L + 0.02 H] で Δx <= 1.0e-3 H)。ヘキサの 12 辺のうち x 方向 (|dx|/|d| > xdir) で
+    両端の x が区間 [a, b] に入る辺の |dx| の最大を区間ごとに出す。丸めの許容は相対 tol (1e-9) だけ。辺が 1 本も無い区間は評価不能 = 不合格"""
+    xyz = np.asarray(xyz, float); hx = np.asarray(hx, np.int64); res = {}; ok = True
+    span = max(float(np.ptp(xyz[:, 0])), 1e-300)
+    for name, (a, b) in ranges.items():
+        e_ = tol * span; mx, n = 0.0, 0
+        for p_, q_ in HE:
+            A, B = xyz[hx[:, p_]], xyz[hx[:, q_]]; d = B - A; dx = np.abs(d[:, 0])
+            m = (dx > xdir * np.linalg.norm(d, axis=1)) & (np.minimum(A[:, 0], B[:, 0]) >= a - e_) & (np.maximum(A[:, 0], B[:, 0]) <= b + e_)
+            if m.any(): mx = max(mx, float(dx[m].max())); n += int(m.sum())
+        good = n > 0 and mx <= cap * (1 + tol); ok &= good
+        res[name] = dict(range=[a / unit, b / unit], edges=n, dx_max=mx / unit, cap=cap / unit, ok=bool(good))
+    res["ok"] = bool(ok); return res
+
+
+def shape_check(xyz, bq, G, tol_c=1e-6, tol_x=1e-9):
+    """形状ゲート (plan §6.2 の形状の表。品質・閉性とは独立)。単位 H で判定する。
+      cowl_in 節点と参照輪郭 cowl_xy の距離 <= tol_c、ramp 節点と参照輪郭 (ramp_fillet 適用後) の距離 <= tol_c、
+      cowl_out 節点から内壁輪郭 (後縁の先は接線延長) までの法線距離 = t ± tol_c、
+      sidewall_end / cowl_base の全節点 |x - L| <= tol_x、cowl_base の y 範囲 = [外壁交点 y_o(L), 内壁後縁 y_c(L)] (tol_x)。
+    G は Geom (ramp / cowl の Contour、TC、LSW、LCOWL、yo_te を使う)。必要なタグが無ければ不合格"""
+    H = G.H; out = {}; ok = True
+    def need(t):
+        if t not in bq: out[t] = dict(missing=True, ok=False); return None
+        return xyz[np.unique(np.asarray(bq[t]))]
+    for t, C in (("cowl_in", G.cowl), ("ramp", G.ramp)):
+        P_ = need(t)
+        if P_ is None: ok = False; continue
+        _, d = C.project(P_[:, :2]); dmax = float(np.abs(d).max()) / H; i = int(np.argmax(np.abs(d)))
+        g_ = dmax <= tol_c; ok &= g_
+        out[t] = dict(nodes=int(len(P_)), dist_max=dmax, at=[float(v) / H for v in P_[i]], tol=tol_c, ok=bool(g_))
+    P_ = need("cowl_out")
+    if P_ is None: ok = False
+    else:
+        _, d = G.cowl.project(P_[:, :2]); e = (-d - G.TC) / H; i = int(np.argmax(np.abs(e)))     # 外壁は内壁の下 (d < 0)
+        g_ = float(np.abs(e).max()) <= tol_c; ok &= g_
+        out["cowl_out_thickness"] = dict(nodes=int(len(P_)), t=G.TC / H, err_min=float(e.min()), err_max=float(e.max()), at=[float(v) / H for v in P_[i]], tol=tol_c, ok=bool(g_))
+    for t, L_ in (("sidewall_end", G.LSW), ("cowl_base", G.LCOWL)):
+        P_ = need(t)
+        if P_ is None: ok = False; continue
+        dx = float(np.abs(P_[:, 0] - L_).max()) / H; g_ = dx <= tol_x
+        out[t + "_x"] = dict(nodes=int(len(P_)), dx_max=dx, tol=tol_x, ok=bool(g_)); ok &= g_
+        if t == "cowl_base":
+            ylo, yhi = float(P_[:, 1].min()), float(P_[:, 1].max()); yc_te = float(G.yc(G.LCOWL))
+            e_lo, e_hi = abs(ylo - G.yo_te) / H, abs(yhi - yc_te) / H; g_ = e_lo <= tol_x and e_hi <= tol_x; ok &= g_
+            out["cowl_base_y"] = dict(y_min=ylo / H, y_out_expected=G.yo_te / H, err_out=e_lo, y_max=yhi / H, y_in_expected=yc_te / H, err_in=e_hi,
+                                      height=(yhi - ylo) / H, tol=tol_x, ok=bool(g_))
+    out["ok"] = bool(ok); return out
+
+
+def check(G, P, vols, groups, h1, h1e, out, nl, nl_end, xstart):
     from scipy.spatial import cKDTree
     M = gmsh.model.mesh; ntag, xyz, _ = M.getNodes(); xyz = xyz.reshape(-1, 3)
     idx = np.zeros(int(ntag.max()) + 1, np.int64); idx[ntag.astype(np.int64)] = np.arange(len(ntag))
@@ -598,8 +847,8 @@ def check(G, P, vols, groups, h1, h1e, out, nl):
     Led = np.stack([np.linalg.norm(xyz[hx[:, a]] - xyz[hx[:, b]], axis=1) for a, b in HE], 1); AR = Led.max(1) / Led.min(1)
     for (ii, b), hv in zip(vols.keys(), hx_l):
         q = per.setdefault(b, dict(skew_max=0.0, ar_max=0.0, n=0)); m = slice(o, o + len(hv)); o += len(hv)
-        if sk[m].max() > q["skew_max"]: q["skew_max"] = float(sk[m].max()); q["skew_at_interval"] = ii
-        if AR[m].max() > q["ar_max"]: q["ar_max"] = float(AR[m].max()); q["ar_at_interval"] = ii
+        if sk[m].max() > q["skew_max"]: q["skew_max"] = float(sk[m].max()); q["skew_at_x"] = xstart[ii] / G.H
+        if AR[m].max() > q["ar_max"]: q["ar_max"] = float(AR[m].max()); q["ar_at_x"] = xstart[ii] / G.H
         q["n"] += len(hv)
         mm = (AR[m] > 1000) & (sk[m] > 0.30)
         if mm.any():
@@ -624,12 +873,19 @@ def check(G, P, vols, groups, h1, h1e, out, nl):
     topo = dict(faces_gt2=int((cnt > 2).sum()), boundary_faces=int(len(b1)), tagged_quads=int(len(a1)), quads_in_two_tags=dup,
                 unused_nodes=int(len(xyz) - len(used)), ok=bool(same and (cnt > 2).sum() == 0 and dup == 0))
     # ---- 壁第一層: 壁タグ別・節点別の |n . dx| / h1、第一内部点の資格、全数被覆、実層数、隣接間隔比 (検査の中核は first_layer_check)
-    # 期待層数: 壁は生成側の NL。端面 (x 方向の march) には生成側の記録が無いので、厚さ dr の壁帯を h1e から成長率 G で覆う最小層数を仮に置く
-    nl_end = prog_n(G.DR, h1e, P["G"])
+    # 期待層数: 壁は生成側の NL、端面は NL_END = prog_n(DR, h1e, 1.2) + 4 (plan §6.2 の正式規則)。判定は接続から数えた実層数
     fl = first_layer_check(xyz, hx, bq, h1, h1e, nl, nl_end, G.DR, classify=model_classifier(G), expected_tags=WALL_TAGS, unit=G.H)
+    if "cowl_side" in fl and "ratio_min" in fl["cowl_side"]:     # 参考: cowl_side を一般壁の h1 で見た比 (判定には使わない)
+        fl["cowl_side"]["info_ratio_vs_h1"] = [fl["cowl_side"]["ratio_min"] * h1e / h1, fl["cowl_side"]["ratio_max"] * h1e / h1]
+    # ---- 出力実座標の隣接間隔比・後流 Δx・形状ゲート
+    names = sorted({b for (_, b) in vols}); bidx = {b: i for i, b in enumerate(names)}
+    lab = np.concatenate([np.full(len(hv), bidx[b], np.int16) for (_, b), hv in zip(vols.keys(), hx_l)])
+    adj = adjacent_spacing_check(xyz, hx, gmax=P["G"], labels=lab, label_names=names, unit=G.H); del lab
+    wk = wake_dx_check(xyz, hx, {"cowl": (G.LCOWL, G.LCOWL + G.LWAKE), "sidewall": (G.LSW, G.LSW + G.LWAKE)}, P["DXW"] * G.H, unit=G.H)
+    shp = shape_check(xyz, bq, G)
     # ---- 描画用
     dump = {"wall_" + t: xyz[bq[t]] for t in bq if t in WALL_TAGS}
-    for xq in P.get("DUMP_X", [0.0, 0.6, 1.2, 1.4, 1.6, 2.0]):
+    for xq in P.get("DUMP_X", [0.0, 0.5, 0.8, 1.0, 1.2, 1.5]):
         xv = xq * G.H; tol = 1e-9
         for f in HF:
             Pf = xyz[hx[:, f]]; m = np.all(np.abs(Pf[:, :, 0] - xv) < tol, axis=1)
@@ -639,14 +895,15 @@ def check(G, P, vols, groups, h1, h1e, out, nl):
     return dict(nodes=int(len(used)), hexes=int(len(hx)), other_elems=other, neg_jac=int((J * sg <= 0).sum()), neg_jac_f32=int((J32 * sg <= 0).sum()),
                 mixed_sign_volumes=mixed, skew_max=float(sk.max()), skew_p99=float(np.percentile(sk, 99)), skew_gt090=int((sk > 0.9).sum()),
                 skew_gt070=int((sk > 0.7).sum()), ar_max=float(AR.max()), ar_gt1000=int((AR > 1000).sum()), ar_gt5000=int((AR > 5000).sum()), ar1000_skew_max=float(sk[AR > 1000].max()) if (AR > 1000).any() else 0.0,
-                min_edge=float(Led.min()), per_block=per, topology=topo, first_layer=fl)
+                min_edge=float(Led.min()), per_block=per, topology=topo, first_layer=fl, adjacent_spacing=adj, wake_dx=wk, shape=shp)
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("out"); ap.add_argument("--scale", type=float, default=1.0)
+    ap.add_argument("--contours", required=True, help="ramp_contour.csv / cowl_contour.csv のあるディレクトリ (export_contours.py で作る)")
     ap.add_argument("--set", nargs="*", default=[]); a = ap.parse_args(); P = dict(P0)
     for kv in a.set: k, v = kv.split("="); P[k] = float(v)
-    if a.scale != 1.0:          # 真の細分列: h1 を 1/scale、成長率を 1/scale 乗、接線分割を scale 倍
-        P["H1"] /= a.scale; P["G"] = P["G"] ** (1.0 / a.scale); P["NZ"] = int(round((P["NZ"] - 1) * a.scale)) + 1
-        P["HX"] /= a.scale; P["HX_FAR"] /= a.scale
-    r = build(a.out, P, quiet=False); sys.exit(0 if r["VERDICT"] == "PASS" else 1)
+    if a.scale != 1.0:          # 細分列 (plan §6.2): h1・h1e・後流 Δx 上限・HX・HX_FAR を 1/scale、NZ を scale 倍。成長率 G は 1.2 固定 (層数で吸収)
+        for k in ("H1", "H1_END", "DXW", "HX", "HX_FAR"): P[k] /= a.scale
+        P["NZ"] = int(round((P["NZ"] - 1) * a.scale)) + 1
+    r = build(a.out, P, load_contours(a.contours), quiet=False); sys.exit(0 if r["VERDICT"] in ("PASS", "DIM2") else 1)
