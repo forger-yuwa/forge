@@ -1,0 +1,16 @@
+source: /VIZMESH/CONNE (primal cells of a node-converted mesh, 2522226 cells)
+mode: 3D (per-face skew / edge AR)
+cell volume  : |V| min=2.056e-13  median=1.163e-10  max=1.369e-06  (0 or 非有限: 0)
+cells: 2522226
+aspect ratio : max=384.1  p99=206.9  mean=29.7  >1000: 0 (0.00%)
+skewness     : max=0.508  p99=0.506  mean=0.218  >0.90: 0 (0.00%)
+VERDICT: PASS (AR<= 1000, skew<= 0.90)
+CV 2586863 / 双対面 7826633 (内部 7695505, 境界 131128)
+体積: min 5.884e-14  max 1.130e-06  非正または非有限 0
+閉性 |ΣS|/Σ|S|: median 5.71e-09  p99 3.18e-08  max 5.51e-08   (> 1e-05: 0 CV, 面の無い CV: 0)
+   worst CV 2522337  closure 5.51e-08  vol 2.053e-09  faces 6  at (0.14322, -0.00480, 0.01085)
+   worst CV 348530  closure 5.51e-08  vol 3.019e-10  faces 6  at (0.05387, 0.00887, 0.09993)
+   worst CV 2368488  closure 5.41e-08  vol 2.650e-10  faces 6  at (0.12943, 0.06812, 0.09997)
+   worst CV 7588  closure 5.40e-08  vol 1.290e-10  faces 6  at (0.01913, 0.00406, 0.10051)
+   worst CV 1546035  closure 5.40e-08  vol 3.542e-10  faces 6  at (0.11198, 0.06010, 0.09989)
+VERDICT: PASS

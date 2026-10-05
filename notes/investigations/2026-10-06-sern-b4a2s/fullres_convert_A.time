@@ -1,0 +1,130 @@
+Traceback (most recent call last):
+  File "/home/ubuntu/forge-r8/case/46.sern_design/cad/run_junction_model.py", line 130, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/ubuntu/forge-r8/case/46.sern_design/cad/run_junction_model.py", line 122, in main
+    info = prepare(a.problem, a.msh, a.run_dir, a.op, wake_at_rest=not a.moving_wake); print(json.dumps({k: info[k] for k in ("nodes", "n_exhaust_ic", "n_wake_ic", "gas_model")}, indent=1))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/forge-r8/case/46.sern_design/cad/run_junction_model.py", line 70, in prepare
+    R2.convert_mesh(run_dir, "sern.msh", MESH)
+  File "/home/ubuntu/forge-r8/design/forge_design/evaluate/runner_sern.py", line 571, in convert_mesh
+    raise RuntimeError(f"convertGmshToForge が {out} を作れなかった (rc={r.returncode})\n"
+RuntimeError: convertGmshToForge が sern.h5 を作れなかった (rc=-9)
+---------------------------- 
+*** Read Boundary Conditions *** 
+-------------------------------- 
+bname = inlet
+physID=8
+kind=inlet_uniformVelocity
+outputHDF=0
+bname = ext_in
+physID=5
+kind=inlet_uniformVelocity
+outputHDF=0
+bname = outlet
+physID=9
+kind=outflow
+outputHDF=0
+bname = far_bottom
+physID=6
+kind=outflow
+outputHDF=0
+bname = far_side
+physID=7
+kind=slip
+outputHDF=0
+bname = symmetry
+physID=14
+kind=slip
+outputHDF=0
+bname = ramp
+physID=10
+kind=wall_isothermal
+outputHDF=1
+bname = vehicle
+physID=15
+kind=wall_isothermal
+outputHDF=1
+bname = sidewall_in
+physID=12
+kind=wall_isothermal
+outputHDF=1
+bname = sidewall_out
+physID=13
+kind=wall_isothermal
+outputHDF=1
+bname = sidewall_end
+physID=11
+kind=wall_isothermal
+outputHDF=1
+bname = cowl_in
+physID=2
+kind=wall_isothermal
+outputHDF=1
+bname = cowl_out
+physID=3
+kind=wall_isothermal
+outputHDF=1
+bname = cowl_side
+physID=4
+kind=wall_isothermal
+outputHDF=1
+bname = cowl_base
+physID=1
+kind=wall_isothermal
+outputHDF=1
+bc.physID=1
+bcf.kind=wall_isothermal
+bc.physID=2
+bcf.kind=wall_isothermal
+bc.physID=3
+bcf.kind=wall_isothermal
+bc.physID=4
+bcf.kind=wall_isothermal
+bc.physID=5
+bcf.kind=inlet_uniformVelocity
+bc.physID=6
+bcf.kind=outflow
+bc.physID=7
+bcf.kind=slip
+bc.physID=8
+bcf.kind=inlet_uniformVelocity
+bc.physID=9
+bcf.kind=outflow
+bc.physID=10
+bcf.kind=wall_isothermal
+bc.physID=11
+bcf.kind=wall_isothermal
+bc.physID=12
+bcf.kind=wall_isothermal
+bc.physID=13
+bcf.kind=wall_isothermal
+bc.physID=14
+bcf.kind=slip
+bc.physID=15
+bcf.kind=wall_isothermal
+
+Command exited with non-zero status 1
+	Command being timed: "python3 cad/run_junction_model.py problem_3d_prod_m6on_wallres_lswx08.yaml /home/ubuntu/b4a2/jm_A.msh /home/ubuntu/b4a2/conv_A --prepare-only"
+	User time (seconds): 98.75
+	System time (seconds): 11.70
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:50.65
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 14934476
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 274
+	Minor (reclaiming a frame) page faults: 5133138
+	Voluntary context switches: 1873
+	Involuntary context switches: 701
+	Swaps: 0
+	File system inputs: 50024
+	File system outputs: 1201872
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 1
