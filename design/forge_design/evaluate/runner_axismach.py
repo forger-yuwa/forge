@@ -244,14 +244,38 @@ def design_chain(p: Problem) -> dict:
     use_gas = getattr(gas, "kind", "cpg") == "semiperfect"
     g = gas if use_gas else p.gamma                   # MOC/面積比に渡す「γ or ガス」
     g_hall = float(gas.gamma_throat(float(p.spec["Tt"])))
-    Md = float(p.spec["M_design"])
+    # 報告・評価の M_d は spec.M_design のまま。MOC・軸 law・壁 QA には出口較正 Md_moc_offset を足した値を渡す
+    # (plan tooling-nozzle-cfd-pinned-initial-line §5.1 #6; 既定 0 で従来と同一)
+    Md_report = float(p.spec["M_design"])
+    Md_moc_offset = float(p.geometry.get("Md_moc_offset", 0.0))
+    Md = Md_report + Md_moc_offset if Md_moc_offset != 0.0 else Md_report
     R = float(p.geometry.get("R", 2.0))
     M_start = float(p.geometry.get("M_start", 1.05))
     n_start = int(p.geometry.get("n_start", 41))
-    ht = HallThroat(R=R, gamma=g_hall)
+    # 初期線の出所 (methods/design/overview.md「初期線の出所: Hall / CFD ピン」):
+    # 'hall' (既定) = Hall 級数 / 'cfd' = 凍結源の node Euler 場 (CFDPinnedThroat, 線・軸アンカー・場の M)
+    initial_line = str(p.geometry.get("initial_line", "hall"))
+    il_src = None
+    if initial_line == "hall":
+        ht = HallThroat(R=R, gamma=g_hall)
+    elif initial_line == "cfd":
+        from ..feedback.cfd_initial_line import pinned_factory
+        il_run = p.geometry.get("initial_line_run")
+        if not il_run:
+            raise ValueError("geometry.initial_line: cfd には geometry.initial_line_run が必須")
+        il_run = Path(str(il_run))
+        if not il_run.is_absolute() and p.path:
+            il_run = (Path(p.path).resolve().parent / il_run).resolve()
+        il_res = p.geometry.get("initial_line_res")
+        ht = pinned_factory(il_run, il_res)(R, g_hall)
+        il_src = dict(ht.source)
+    else:
+        raise ValueError("geometry.initial_line は 'hall' か 'cfd'")
     # 初期値線: 'throat_char' = スロート壁点発 C⁻ (CONTUR 流、壁が T から MOC 出力に
     # なる) / 'vertical' = M_start の縦線 (旧構成、回帰対照)。x0 = その軸着地点。
     start_line = str(p.geometry.get("start_line", "vertical"))
+    if initial_line == "cfd" and start_line != "throat_char":
+        raise ValueError("geometry.initial_line: cfd は start_line: throat_char 専用 (CFD 線の軸アンカーは線の軸着地でだけ定義)")
     if start_line == "throat_char":
         x0 = float(ht.throat_characteristic(n=n_start)[0][0])
     elif start_line == "vertical":
@@ -439,7 +463,8 @@ def design_chain(p: Problem) -> dict:
     if qa["violations"]:
         raise ValueError("壁 QA 不合格: " + "; ".join(qa["violations"]))
     # 壁表現 (A14): 'interp' = 補間 5 次 B-spline (現行・比較基準) /
-    # 'lsq' = 制約付き最小二乗 B-spline (n_cp は誤差ゲートで自動、または wall_ncp)
+    # 'lsq' = 制約付き最小二乗 B-spline (n_cp は誤差ゲートで自動、または wall_ncp) /
+    # 'joint' = 位置 + 壁角の同時当てはめ (V0 型壁, plan tooling-nozzle-cfd-pinned-initial-line §4.5)
     wall_repr = str(p.geometry.get("wall_repr", "interp"))
     wkw = dict(R=R, r_U=float(p.geometry.get("r_inlet", 2.5)),
                L_U=float(p.geometry.get("L_U", 3.5)),
@@ -452,8 +477,11 @@ def design_chain(p: Problem) -> dict:
                                  **wkw)
     elif wall_repr == "interp":
         wall = AxisMachCFDWall(res["wall"], **wkw)
+    elif wall_repr == "joint":
+        from ..geometry.wall_axismach import JointFitCFDWall
+        wall = JointFitCFDWall(res["wall"], **wkw)
     else:
-        raise ValueError("geometry.wall_repr は 'interp' か 'lsq'")
+        raise ValueError("geometry.wall_repr は 'interp' / 'lsq' / 'joint'")
     msgs = wall.validate()
     if msgs:
         raise ValueError("axis-Mach 壁フィルタ不合格: " + "; ".join(msgs))
@@ -472,7 +500,11 @@ def design_chain(p: Problem) -> dict:
                     else {"kind": "cpg", "gamma": p.gamma, "cp": p.cp}),
             "gamma_hall": g_hall,
             "wall_fit": getattr(wall, "fit_diag", None),
-            "Md": Md, "R": R, "gates": gates,
+            "Md": Md_report, "Md_moc_offset": Md_moc_offset, "Md_moc": Md, "R": R, "gates": gates,
+            "initial_line": {"source": initial_line,
+                             "run": (il_src or {}).get("run"), "res": (il_src or {}).get("res"),
+                             "x0": float(x0), "anchor": [float(M_A), float(Mp_A), float(Mpp_A)],
+                             "mstar": float(res["mdot_start"])},
             # cplus 閉包では構成的に 1 になる循環指標なので出さない (A9 の教訓)
             "mdot_ratio_moc": (None if not np.isfinite(res["mdot_exit"])
                                else float(res["mdot_exit"] / res["mdot_start"])),
@@ -551,7 +583,8 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
             "L_U": float(p.geometry.get("L_U", 3.5)),
             "gas": d["gas"], "species": _species_info(p), "gamma_hall": d["gamma_hall"],
             "wall_fit": d["wall_fit"],
-            "Md": d["Md"], "R": d["R"],
+            "Md": d["Md"], "Md_moc_offset": d["Md_moc_offset"], "R": d["R"],
+            "initial_line": d["initial_line"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},
             "exit": d["exit"],
             "mdot_ratio_moc": d["mdot_ratio_moc"], "cd_series": d["cd_series"],
@@ -910,7 +943,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "Lc_mode": d["Lc_mode"], "Lc_solve": d["Lc_solve"],
             "anchor": list(d["anchor"]), "anchor_source": d["anchor_source"],
             "start_line": d["start_line"], "wall_mode": d["wall_mode"],
-            "Md": d["Md"], "R": d["R"],
+            "wall_repr": d["wall_repr"], "initial_line": d["initial_line"],
+            "Md": d["Md"], "Md_moc_offset": d["Md_moc_offset"], "R": d["R"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},
             "nStepOuter": n, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
             "wall_thermal": p.wall_thermal,

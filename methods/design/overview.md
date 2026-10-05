@@ -307,6 +307,48 @@ $n_{\rm axis}$=2000・終端特性線出口・差分は `start_line` と `ni` �
 **アンカー更新なしの 1 パスで 0.5% $M_d$ ゲートを通る** (旧構成は 3 パス required で
 0.451%)。CFD アンカー更新 (下記) は引き続き使えるが、必須ではなくなった。
 
+#### 初期線の出所: Hall / CFD ピン (`geometry.initial_line`, 2026-10-05)
+
+計画: [`plans/active/tooling-nozzle-cfd-pinned-initial-line.md`](../../plans/active/tooling-nozzle-cfd-pinned-initial-line.md)。
+
+スロート特性線 (MOC の初期線) とそこでの軸アンカーの出所を problem YAML の 1 キーで選ぶ。
+
+| `geometry.initial_line` | 初期線 $(x, r, M, \theta)$ | 軸アンカー $(M_A, M'_A, M''_A)$ と $x_A$ |
+| --- | --- | --- |
+| `hall` (既定) | Hall 級数場の中で壁足 $(0,1)$ から C⁻ を軸まで追跡 | Hall の解析微分 `axis_anchor(x_0)` |
+| `cfd` (CFD ピン) | **凍結源の node Euler 場**の中で同じ C⁻ を追跡 | 下記 (線と同じ場から) |
+
+- **凍結源の定義**: 同じ形 (縮流部・$R$)・同じガスで、**Hall 初期線の V0 型壁を Euler で解いた場**
+  (`geometry.initial_line_run` + `initial_line_res`; run は problem ファイルの場所からの相対パスも可)。
+  ピン壁自身の Euler から線を取り直すと循環定義になるので使わない。線は無次元で $r_t$・Re に依らないので
+  $r_t$ を解き直しても同じ凍結源を使える。固定点反復はしない (基準 run から 1 回抽出して凍結)。
+- **抽出** (`feedback/cfd_initial_line.py::CFDPinnedThroat`, `HallThroat` を継承し
+  `throat_characteristic`・`axis_anchor`・`mach`・`theta` だけを上書き): 構造格子 (断面は $x$ 一定) の
+  $M,\theta$ を $(x,\ \eta=r/r_w(x))$ 平面の 3 次スプラインで補間し、壁足は $(0,1,\theta=0)$ に厳密に置く。
+  追跡は壁足の $10^{-6}$ 内側から $dr/dx=\tan(\theta-\mu)$ を RK4 ($ds=2\times10^{-4}$) で軸を跨ぐまで。
+  壁足の $M$ は内側 10 点の線形外挿、軸端 ($r=0$) の $x_0, M, \theta$ は追跡点の $r\le0.05$ の 2 次多項式
+  (偶関数当てはめは使わない — C⁻ は軸を斜めに横切る)。$r$ 等間隔の $n_{\rm start}$ 点へ再標本化する。
+- **軸アンカー**: $x_A = x_0$ (線の軸着地)。$M_A$ = 線の軸端の $M$ (線と同じ出所)、
+  $M'_A$ = 軸の evenfit (各断面の $r>0$ の 4 点に $M=a_0+a_2r^2$) の $x_0\pm0.25$ 窓 4 次フィットの 1 階微分、
+  **$M''_A$ = Hall の式を $x_0$ で評価した値** (CFD の局所 4 次フィットの $M''$ は law を実測軸から離すので使わない)。
+  CFD ピンでは 3 成分とも評価位置が Hall の $x_0$ から動く (case/45: 0.520 → 0.509)。
+- **$m^*$**: 線上の $M,\theta$ を MOC のガスモデルへ写像した等エントロピー流束 (`_flux_along`)。CFD の保存量 $\rho u$
+  の積分ではない。
+- **入力の拒否**: node・軸対称・Euler の run でない、断面が $x$ 一定でない、追跡点が場の窓 ($-2\le x\le2.5$) の外、
+  非有限、亜音速 ($M\le1$)、軸に到達しない — いずれも例外で止める。
+- **記録**: `prepare_info.json` の `initial_line` に出所 (`hall`/`cfd`)・run・res・$x_0$・アンカー・$m^*$
+  (線上の写像流束) を残す。
+- **抽出器の検証** (`design/tests/run_cfd_initial_line_tests.py`): 合成 Hall 場 (Euler 格子に Hall 場を載せる)
+  から Hall の線を 線 $|\Delta M|\le2\times10^{-4}$・$|\Delta\theta|\le0.004°$・$|\Delta x_0|\le2\times10^{-4}$、
+  アンカー $|\Delta M|\le2\times10^{-5}$・$|\Delta M'|\le10^{-4}$・$|\Delta M''|\le10^{-3}$、$m^*$ 相対 $\le10^{-4}$ で再現する。
+
+**出口較正 `geometry.Md_moc_offset`** (既定 0): MOC と軸 law (と壁 QA) に渡す設計マッハを
+$M_{d,\rm MOC}=M_d+\Delta M_{\rm cal}$ にする 1 係数較正。CFD ピンでは $m^*$ が Hall 比 $+4.2\times10^{-4}$ 動き、
+Euler の出口コア $M$ が設計値からずれる (case/45: 6.000416) ので、その偏差を打ち消す
+($\Delta M_{\rm cal}=-4.16\times10^{-4}$)。**報告・評価の $M_d$ (`prepare_info` の `Md`、`collect` の基準) は
+`spec.M_design` のまま**で、較正値は `prepare_info` の `Md_moc_offset` に別記録する。Euler の性質として据え置き、
+NS では較正し直さない。
+
 ### 軸 Mach law: 5次 Hermite (`geometry/axis_law.py`)
 
 $s=(x-x_A)/L_c\in[0,1]$、$M(s)=\sum a_i s^i$。両端 6 条件
@@ -526,6 +568,21 @@ U→T Hermite の端点条件の一致で $C^2$。
 旧・縦 starting line 構成 (`start_line: vertical`) では壁流線が $x_A>0$ から始まるため、
 $[T,\,x_A]$ を Hall 模型が仮定する骨接放物線 $r=r_t+x^2/(2\rho_t)$ で埋めていた
 (幾何 DOF ではない)。`AxisMachCFDWall` は壁テーブルの先頭点でどちらかを自動判定する。
+
+**設計区間の壁表現 `geometry.wall_repr`**: `interp` (既定、上記の補間 5 次 B-spline) / `lsq` (A14、下記) /
+**`joint`** (位置 + 壁角の同時当てはめ、`JointFitCFDWall` / `joint_fit_wall`, 2026-10-05)。`joint` は MOC 壁点
+$(x_j, r_j, \theta_j)$ に 5 次 B-spline $r(x)$ を当てはめる:
+
+$$
+\min_c\ \sum_j w_j\left[\frac{(r(x_j)-r_j)^2}{\sigma_r^2}+\frac{(r'(x_j)-\tan\theta_j)^2}{\sigma_\theta^2}\right]
++\frac{\lambda}{\sigma_r^2}\int (r''')^2\,dx
+$$
+
+($w_j\propto\Delta x_j$、$\sigma_r=10^{-6}$、$\sigma_\theta=10^{-4}$、$\lambda=10^{-9}$)。ハード拘束 (KKT) は
+始点 $r(x_0)=r_0$・$r'(x_0)=x_0/R$・$r''(x_0)=1/R$ (スロート始点では $r'=0$・$r''=1/R$ で U→T Hermite と $C^2$) と
+出口 $r(x_e)=r_e$・$r'(x_e)=\tan\theta_e$。ノットは始点から間隔 $h_0=0.0125$ → $h_1=0.5$ を $x_G=6$ まで
+smoothstep で広げ、以降 $h_1$ (V0 型壁。case/45 の r″ の山 [x∈[0,0.3]] は Hall 初期線 0.534、CFD ピン 0.510)。
+入口直管・U→T Hermite は `interp` と同じで、`validate()` のリンギング検査 (テーブル点上 $|\Delta\theta|\le0.2°$) も同じ。
 
 ### CFD-in-the-loop アンカー更新
 

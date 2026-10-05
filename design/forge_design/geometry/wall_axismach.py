@@ -588,3 +588,70 @@ class LSQBsplineCFDWall(AxisMachCFDWall):
         if dg["max_dtheta_deg"] > self.tol_dtheta_deg:
             msgs.append(f"LSQ 近似誤差 max|Δθ|={dg['max_dtheta_deg']:.3f}° > {self.tol_dtheta_deg}°")
         return msgs
+
+
+# --- 位置 + 壁角の同時当てはめ (wall_repr: joint, V0 型壁) ---------------------------
+def joint_fit_wall(wall_tbl, R: float, lam: float = 1e-9, k: int = 5, sig_r: float = 1e-6,
+                   sig_th: float = 1e-4, h0: float = 0.0125, h1: float = 0.5, x_g: float = 6.0):
+    r"""MOC 壁点 (n,>=3)[x,r,θ] に 5 次 B-spline $r(x)$ を**位置と壁角の両方**で当てはめる (V0 型壁)。
+
+    計画: plans/active/tooling-nozzle-cfd-pinned-initial-line.md §4.5・§5.1 #6 (試作は
+    case/45.isobutane_m6_d155/moc_wall_fit_ab.py::joint_fit、同じ式・同じ既定値)。
+
+    目的関数 $\sum_j w_j[(r(x_j)-r_j)^2/\sigma_r^2 + (r'(x_j)-\tan\theta_j)^2/\sigma_\theta^2]
+    + (\lambda/\sigma_r^2)\int (r''')^2 dx$ ($w_j\propto\Delta x_j$)。ハード拘束 (KKT):
+    $r(x_0)=r_0$, $r'(x_0)=x_0/R$, $r''(x_0)=1/R$, $r(x_e)=r_e$, $r'(x_e)=\tan\theta_e$。
+    ノット間隔は始点 h0 → x_g で h1 へ smoothstep、以降 h1 (最後の内部ノットは x_e − h1/2 まで)。
+    戻り: (BSpline, 制御点数)。"""
+    from scipy.interpolate import BSpline
+    tb = np.asarray(wall_tbl, dtype=float)
+    x, r, th = tb[:, 0], tb[:, 1], tb[:, 2]
+    x0, xe = x[0], x[-1]
+    xs = [x0]
+    while xs[-1] < xe:
+        u = min((xs[-1] - x0) / (x_g - x0), 1.0)
+        xs.append(xs[-1] + h0 + (h1 - h0) * u * u * (3 - 2 * u))
+    xi = np.array(xs[1:-1])
+    xi = xi[xi < xe - 0.5 * h1]
+    t = np.r_[[x0] * (k + 1), xi, [xe] * (k + 1)]
+    nc = len(t) - k - 1
+    E = np.eye(nc)
+
+    def D(xq, d):
+        return np.array([BSpline(t, E[i], k)(xq, d) for i in range(nc)]).T
+    B0, B1 = D(x, 0), D(x, 1)
+    w = np.gradient(x)
+    w = w / w.mean()
+    A = (B0.T * (w / sig_r ** 2)) @ B0 + (B1.T * (w / sig_th ** 2)) @ B1
+    b = B0.T @ (w * r / sig_r ** 2) + B1.T @ (w * np.tan(th) / sig_th ** 2)
+    if lam > 0:
+        xq = np.linspace(x0, xe, 8000)
+        B3 = D(xq, 3)
+        A = A + lam * (B3.T * np.gradient(xq)) @ B3 / sig_r ** 2
+    Cm = np.array([D(np.r_[x0], 0)[0], D(np.r_[x0], 1)[0], D(np.r_[x0], 2)[0],
+                   D(np.r_[xe], 0)[0], D(np.r_[xe], 1)[0]])
+    dv = np.array([r[0], x0 / R, 1.0 / R, r[-1], np.tan(th[-1])])
+    K = np.block([[A, Cm.T], [Cm, np.zeros((5, 5))]])
+    c = np.linalg.solve(K, np.r_[b, dv])[:nc]
+    return BSpline(t, c, k), nc
+
+
+class JointFitCFDWall(AxisMachCFDWall):
+    r"""**`wall_repr: joint` の CFD 壁**: 設計区間を `joint_fit_wall` (位置 + 壁角の同時当てはめ) で表現する
+    `AxisMachCFDWall` 亜種。上流 (直管 + U→T Hermite) と検査 (接合・リンギング 0.2°) は親と同じ。
+    `PhysicalNozzleWall` はこの壁を受けると、スロートの再推定をせず設計壁の解析 $r(x)$ に $\delta_r(x)$ を足す
+    (`analytic=True` 経路)。`fit_diag` に当てはめの設定と点上の乖離 (max|Δr|・max|Δθ|) を持つ。"""
+
+    def __init__(self, wall_tbl, R: float, r_U: float = 2.5, L_U: float = 3.5,
+                 L_pipe: float = 0.5, lam: float = 1e-9, h0: float = 0.0125, h1: float = 0.5,
+                 x_g: float = 6.0) -> None:
+        wall_tbl = np.asarray(wall_tbl, dtype=float)
+        super().__init__(wall_tbl, R=R, r_U=r_U, L_U=L_U, L_pipe=L_pipe)
+        spl, nc = joint_fit_wall(wall_tbl, self.R, lam=lam, h0=h0, h1=h1, x_g=x_g)
+        self._spl = spl
+        xt = wall_tbl[:, 0]
+        self.fit_diag = {"kind": "joint_fit", "lam": float(lam), "h0": float(h0), "h1": float(h1),
+                         "x_g": float(x_g), "n_cp": int(nc),
+                         "max_dr_pts": float(np.max(np.abs(spl(xt) - wall_tbl[:, 1]))),
+                         "max_dtheta_pts_deg": float(np.degrees(np.max(np.abs(
+                             np.arctan(spl(xt, 1)) - wall_tbl[:, 2]))))}
