@@ -1,5 +1,5 @@
 """plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11e (codex diagnose 2026-10-05 exitM、事前登録): 出口コア M の標本位置 A/B と各量の時系列。
-usage (AWS, case dir): python3 exitM_sampling_ab.py RUN REF_RUN → RUN/quantities_series.csv、_band_ab/exitM_sampling_ab_<RUN>.json
+usage (AWS, case dir): [EULER_REF=… SOLVE_JSON=… FINAL_PROBLEM=…] python3 exitM_sampling_ab.py RUN REF_RUN → RUN/quantities_series.csv、_band_ab/exitM_sampling_ab_<RUN>.json
 腕 A: 出口断面 (最終 i) の η∈[0.05,0.7] 節点の単純平均 (nozzle_report.metrics と同じ)。腕 B: 同じ M(η) を REF_RUN 最終場の出口断面の帯内 η 節点へ線形補間して単純平均。
 δ_E/δ_C(x_F) は extract_and_merge (E 法、Euler 参照 run_0086) と CONTUR (c2pin_solve_fine.json の k_f) の比。"""
 import csv, json, os, shutil, sys
@@ -9,7 +9,8 @@ import numpy as np
 C = Path(__file__).resolve().parent; sys.path.insert(0, str(C.parents[1] / "design"))
 from forge_design.report.nozzle_report import _res_files, load_field, eta_line, pspline  # noqa: E402
 RUN, REF = C / sys.argv[1], C / sys.argv[2]
-EU = C / "run_0086_euler_wallfit_pincal_r1_ext6k"
+EU = C / os.environ.get("EULER_REF", "run_0086_euler_wallfit_pincal_r1_ext6k")   # #11f 以降は新しい固定参照 run_0114
+SOLVE = os.environ.get("SOLVE_JSON", "c2pin_solve_fine.json"); FINAL = os.environ.get("FINAL_PROBLEM", "problem_d155_ns_finemesh_pin_final.yaml")
 
 
 def core_eta(F):
@@ -42,8 +43,8 @@ if __name__ == "__main__":
     from forge_design.metrics.deltastar import smooth_delta_quintic
     from forge_design.evaluate.runner_axismach import design_chain, load_problem, _gam_or_gas
     rows = list(ProcessPoolExecutor(3).map(one, _res_files(RUN)))
-    p = load_problem(C / "problem_d155_ns_finemesh_pin_final.yaml"); dch = design_chain(p); xF = float(dch["wall_inv"][-1, 0])
-    kf = json.load(open(C / "c2pin_solve_fine.json"))["k_f"]
+    p = load_problem(C / FINAL); dch = design_chain(p); xF = float(dch["wall_inv"][-1, 0])
+    kf = json.load(open(C / SOLVE))["k_f"]
     res = integral_bl(dch["wall"], dch["wall_inv"], _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]), float(p.spec["r_throat"]),
                       thermal_bc=p.wall_thermal_bc_integral, cf_scale=kf)
     f_s, _ = smooth_delta_quintic(res["x"], res["delta_r"], knot_spacing=2.0, lam=1.0, positive=True); dC = float(f_s(np.r_[xF])[0])
