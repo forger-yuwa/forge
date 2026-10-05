@@ -1202,6 +1202,32 @@ static void checkInputSpeciesAndWriteRecord(const solverConfig& cfg)
 //   液の質量分率 g を読み、rog_0 = ρg を全セルに書く (TP carrier の凝縮 run でなければエラー)。このとき pass ごとに
 //   読み戻した rog・P と、化学種拡散と同じ組成・関数の分子拡散係数 D_s (speciesDmixProbe_d_wrapper) も書き、
 //   (5)(6) は同じ g で気相組成にしてから評価する。
+// 試験用 (FORGE_DMIX_PROBE=<out.bin>; plan thermophysics-solver-owned-species-db #7b, §6 V4f)。CFD 0 step:
+//   初期化後の場 (実セル) の T・P・ρ・ρY と、化学種拡散と同じ組成・関数の分子拡散係数 D_s (speciesDmixProbe_d_wrapper;
+//   lump があれば縮約 thermo_Dmix_lumped_f) を読み戻して書き、時間更新せずに終了する。本番経路は変えない。
+//   形式: int32 nCells, int32 nSpecies, int32 lumpReduction(0/1), float T[n], P[n], ro[n], roY[s][n], D[s][n]。
+static int runDmixProbe(const char* outPath, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    const int nS = var.nSpeciesRegistered;
+    const geom_int nA = msh.nCells, nAll = msh.nCells_all;
+    if (nS < 2) { std::cerr << "[dmix-probe] needs >= 2 species\n"; return 1; }
+    float* D_d = nullptr;
+    gpuErrchk(cudaMalloc(&D_d, static_cast<size_t>(nAll)*nS*sizeof(float)));
+    if (!speciesDmixProbe_d_wrapper(cfg, cuda_cfg, msh, var, D_d)) { std::cerr << "[dmix-probe] species not enabled\n"; return 1; }
+    std::vector<float> D(static_cast<size_t>(nAll)*nS);
+    gpuErrchk(cudaMemcpy(D.data(), D_d, D.size()*sizeof(float), cudaMemcpyDeviceToHost));
+    cudaFree(D_d);
+    auto rd = [&](const std::string& k) { std::vector<flow_float> v(nA); gpuErrchk(cudaMemcpy(v.data(), var.c_d[k], nA*sizeof(flow_float), cudaMemcpyDeviceToHost)); return v; };
+    std::ofstream bin(outPath, std::ios::binary);
+    const int32_t hdr[3] = {static_cast<int32_t>(nA), nS, speciesLumpDiffusionActive() ? 1 : 0};
+    bin.write(reinterpret_cast<const char*>(hdr), sizeof(hdr));
+    for (const char* k : {"T", "P", "ro"}) { auto v = rd(k); bin.write(reinterpret_cast<const char*>(v.data()), nA*sizeof(flow_float)); }
+    for (int s = 0; s < nS; ++s) { auto v = rd("roY" + std::to_string(s)); bin.write(reinterpret_cast<const char*>(v.data()), nA*sizeof(flow_float)); }
+    for (int s = 0; s < nS; ++s) bin.write(reinterpret_cast<const char*>(D.data() + static_cast<size_t>(s)*nAll), nA*sizeof(float));
+    std::cout << "[dmix-probe] wrote " << outPath << " (cells " << nA << ", species " << nS << ", lump reduction " << hdr[2] << "); exiting\n";
+    return 0;
+}
+
 static int runTransportProbe(const char* statesPath, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     std::ifstream in(statesPath);
@@ -3325,6 +3351,9 @@ int main(int argc, char** argv) {
     // 試験用: 物性だけを評価して終了 (時間更新なし; runTransportProbe の説明)
     if (const char* e = getenv("FORGE_TRANSPORT_PROBE"); e != nullptr && *e != '\0') {
         return runTransportProbe(e, cfg, cuda_cfg, msh, var);
+    }
+    if (const char* e = getenv("FORGE_DMIX_PROBE"); e != nullptr && *e != '\0') {
+        return runDmixProbe(e, cfg, cuda_cfg, msh, var);
     }
     if (const char* e = getenv("FORGE_TRANSPORT_TABLE_PROBE"); e != nullptr && *e != '\0') {
         return runTransportTableProbe(e);
