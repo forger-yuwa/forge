@@ -33,6 +33,33 @@ import numpy as np
 from ..metrics.deltastar import deltastar_from_core_matched_euler, massflow_ratio
 
 
+# delta_r_next.csv の列 (2026-10-05, plan tooling-nozzle-cfd-pinned-initial-line §5.1 #8 — codex result M1):
+# 第 2 列は**緩和・再平滑化後の次 pass の壁入力** δ_target、第 4 列が**未緩和の平滑化抽出値** δ_E。
+# 2026-10-05 以前のファイルは同じ並びで名前だけ旧称 (delta_r / delta_r_use_smoothed)。列の位置は変えていないので、
+# 第 2 列を壁入力として読む既存の読み手 (prepare_ns の delta_r_csv 等) の挙動は変わらない。
+DELTA_R_NEXT_COLUMNS = ("x_rt", "delta_target", "delta_in_prev", "delta_E", "held")
+_DELTA_R_NEXT_OLD = ("x_rt", "delta_r", "delta_in_prev", "delta_r_use_smoothed", "held")
+
+
+def read_delta_r_next(path) -> dict:
+    """`delta_r_next.csv` を列名で読む。戻り: x_rt / delta_target (緩和後の壁入力) / delta_in_prev /
+    delta_E (未緩和の平滑化抽出) / held と header_kind ("named" か "legacy")。並びが想定と違えば拒否する。"""
+    path = Path(path)
+    with open(path) as f:
+        head = f.readline().strip()
+    names = tuple(c.strip().split(" ")[0] for c in head.split(","))
+    if names[:5] == DELTA_R_NEXT_COLUMNS:
+        kind = "named"
+    elif names[:5] == _DELTA_R_NEXT_OLD:
+        kind = "legacy"
+    else:
+        raise ValueError(f"{path}: delta_r_next.csv の列が想定外 ({names})")
+    a = np.loadtxt(path, delimiter=",", skiprows=1)
+    out = {k: a[:, i] for i, k in enumerate(DELTA_R_NEXT_COLUMNS)}
+    out["header_kind"] = kind
+    return out
+
+
 def extract_and_merge(prev_run, euler_run, omega: float = 0.5, smooth_lam: float = 1.0,
                       knot_spacing: float = 2.0, out_dir=None, max_lam_factor: float | None = None, **kw) -> dict:
     """前 pass の NS run から抽出し、次 pass の入力 δ_r(x) を作る。
@@ -80,7 +107,7 @@ def extract_and_merge(prev_run, euler_run, omega: float = 0.5, smooth_lam: float
     held = ~np.isfinite(d["delta_r_use"])
     np.savetxt(od / "delta_r_next.csv", np.c_[d["x"], d_next, d_in, d_use, held.astype(int)],
                delimiter=",", comments="",
-               header=f"x_rt,delta_r,delta_in_prev,delta_r_use_smoothed,held (omega={omega}; quintic P-spline knot={knot_spacing} lam={lam_used}; resid_rel_rms={diag['resid_rel_rms']:.4f})")
+               header=",".join(DELTA_R_NEXT_COLUMNS) + f" (delta_target = relaxed wall input; delta_E = unrelaxed smoothed extraction; omega={omega}; quintic P-spline knot={knot_spacing} lam={lam_used}; resid_rel_rms={diag['resid_rel_rms']:.4f})")
     fin = np.isfinite(d_use) & (d_in > 1e-4)
     ratio = d_use[fin] / d_in[fin]
     summary = {"omega": omega, "smooth": {"kind": "quintic_pspline", "knot_spacing": knot_spacing, "lam": str(lam_used), **diag},
@@ -102,7 +129,7 @@ def solve_rt(problem, R_exit_m: float, prev_run=None, euler_run=None, n_iter: in
     設計は $r_t$ 無次元で不変なので $R = r_t\,[r_F/r_t + \delta_r(x_F)/r_t]$ の $r_t$ だけを解く。
     - prev_run なし: 積分法 (CONTUR) の $\delta_{r}(x_F; r_t)$ で Newton (CFD 前に使う)。
     - prev_run あり: その run の抽出 δ_r(x_F) を使い、$r_t$ 依存は $Re^{-0.2}$ で補正 (NS 後の最終補正; 再計算不要)。
-    戻り: dict(r_t_m, delta_exit_rt, source, iters)。"""
+    戻り: dict(r_t_m, delta_exit_rt, source, delta_column [prev_run ありで読んだ列], iters)。"""
     from ..probdef import load_problem
     from ..evaluate.runner_axismach import design_chain, _gam_or_gas
     from ..feedback.deltastar_integral import integral_bl
@@ -118,18 +145,24 @@ def solve_rt(problem, R_exit_m: float, prev_run=None, euler_run=None, n_iter: in
             if abs(rt_new - rt) < 1e-7: rt = rt_new; break
             rt = rt_new
         src = "integral_bl (CONTUR)"
+        d_col = None
+        d_meas = None
     else:
         prev_run = Path(prev_run)
         if not (prev_run / "delta_r_equiv.csv").exists():
             if euler_run is None: raise ValueError("prev_run に抽出結果が無く euler_run も未指定")
             deltastar_from_core_matched_euler(prev_run, euler_run, out_dir=prev_run)
-        # 次 pass の壁に実際に載る値 (P-spline 平滑化後 = delta_r_next.csv の x_F 端) を使う。無ければ生抽出の x_F−0.3
+        # 未緩和の平滑化抽出値 δ_E (delta_r_next.csv の delta_E 列) の x_F 端を使う。2026-10-05 訂正 (codex result M1):
+        # 以前は第 2 列 (ω 緩和後の次 pass 壁入力 δ_target) を読んでいて、出口の δ を約半分しか動かしていなかった。
+        # delta_r_next.csv が無ければ生抽出の x_F−0.3
         if (prev_run / "delta_r_next.csv").exists():
-            nx = np.loadtxt(prev_run / "delta_r_next.csv", delimiter=",", skiprows=1)
-            d_meas = float(np.interp(xF, nx[:, 0], nx[:, 1]))
+            nx = read_delta_r_next(prev_run / "delta_r_next.csv")
+            d_meas = float(np.interp(xF, nx["x_rt"], nx["delta_E"]))
+            d_col = f"delta_E (unrelaxed smoothed extraction; delta_r_next.csv {nx['header_kind']} header, col 4)"
         else:
             e = np.genfromtxt(prev_run / "delta_r_equiv.csv", delimiter=",", names=True)
             d_meas = float(np.interp(xF - 0.3, e["x_rt"], e["delta_r_raw"]))
+            d_col = "delta_r_raw at x_F-0.3 (delta_r_equiv.csv)"
         S_prev = float(json.loads((prev_run / "prepare_info.json").read_text())["scale_m"])
         rt = S_prev
         for k in range(n_iter):
@@ -137,7 +170,8 @@ def solve_rt(problem, R_exit_m: float, prev_run=None, euler_run=None, n_iter: in
             rt_new = R_exit_m / (rF + de); hist.append((rt, de, rt_new)); rt = rt_new
         src = f"measured delta_r from {prev_run.name} (Re^-0.2 scaling)"
     return dict(r_t_m=float(rt), r_t_prev_m=S0, delta_exit_rt=float(hist[-1][1]), r_F_rt=rF, x_F_rt=xF,
-                R_exit_m=R_exit_m, source=src, iters=hist, length_m=float(xF * rt))
+                R_exit_m=R_exit_m, source=src, delta_column=d_col, delta_measured_xF_rt=d_meas,
+                iters=hist, length_m=float(xF * rt))
 
 
 def run_pass(problem, euler_ref, prev_run, run_dir, omega: float = 0.5, ic_from=None,

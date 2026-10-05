@@ -1,3 +1,4 @@
+# §5.1 #11 ①: 細分メッシュ版 (壁と設計は problem_d155_ns_c2pin_final.yaml = run_0092 と同一; r_t 76.7531 mm)
 # plan tooling-nozzle-cfd-pinned-initial-line §5.1 #7 (P5): C2 方式の最終設計を CFD ピン + joint 壁 + 物理壁解析経路で作り直す (2026-10-05)。r_t は c2final の値から始め solve_rt で解き直す
 # ② イソブタン燃焼ガス M6 / 出口径 1.55 m (物理壁定義) — 最短ロバスト点の Euler 検証
 # 条件 (2026-08-31 ユーザ指示): Pt 5.5 MPa / Tt 1600 K / φ=0.9 組成 (case/42 と同一) /
@@ -13,7 +14,7 @@
 # 凝縮の事前見積り: 出口 T 233.5 K vs H2O 飽和 263.9 K (x_H2O 0.1356, pH2O 303 Pa)
 #   = −30 K 過冷却 → dry 前提は出口近傍で破れる。方針 (a): 本 run は dry、採用点で
 #   凝縮 ON restart 再評価 (split_h2o は最初から有効にしておく)。
-name: isobutane_m6_d155_ns_c2pin_final
+name: isobutane_m6_d155_ns_finemesh_pin
 type: wind_tunnel_axisym_axismach
 gas:
   model: semiperfect
@@ -49,7 +50,7 @@ geometry:
   initial_line_run: run_0062_euler_wallfit_fit_r1_ext6k
   initial_line_res: res_6000.h5
   wall_repr: joint             # 位置+壁角の同時当てはめ (V0 型始点)、物理壁は解析経路
-  pw_ramp: [-11.0, -6.0]       # 物理壁の δ_r ランプ区間 (x ≤ −11 は設計縮流部のまま、x ≥ −6 で δ_r 全量; plan §5.1 #9, run_0090〜0094 と同じ)
+  pw_ramp: [-11.0, -6.0]      # 物理壁の δ_r ランプ区間 (run_0090〜0094 と同じ)
   Md_moc_offset: -4.16e-4      # 出口較正 (Euler の出口コア M 6.000416 → 6; V3′)
   exit_mode: characteristic
   axis_law: knot
@@ -58,14 +59,23 @@ geometry:
 
 mesh:
   discretization: node
-  ni: 1250
+  ni: 2000
   nj: 97
-  wall_first_frac: 4.5e-5  # 第一セル ~3.5 µm, y+~1.4 (2D双対幾何修正後は y+1 帯も可)
-  throat_refine: 3.0
+  # plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11 ① (2026-10-05): スロート近傍の第 1 セルを細分し y1+ ≤ 1 を狙う (run_0094 の y1+ 最大: スロート ±2 で 9.0、x −6〜−2 で 6.3、x 2〜6 で 5.4、x 6〜12 で 2.0)。
+  # 壁法線に沿った構造格子の境界層層なので AR ≤ 5000 (AGENTS.md の例外、check_mesh_quality --ar-max 5000)。x 方向も細分して AR を抑える。
+  wall_first_frac: 1.3e-5        # 局所半径比 (旧 4.5e-5)
+  wall_first_frac_throat: 4.5e-6 # スロート近傍 (旧の 1/10)
+  wall_first_up_x0: -9.0
+  wall_first_up_x1: -4.0
+  wall_first_blend_x0: 1.0
+  wall_first_blend_x1: 17.0
+  throat_refine: 4.0
+  throat_width: 3.0
+  ar_max: 5000
 
 evaluate:
-  nStepOuter: 24000
-  outStepInterval: 8000
+  nStepOuter: 12000
+  outStepInterval: 1000
   cfl_main: 1.0
   mid_stage: true
   tp_species: split_h2o   # dry でも pseudo と同一 (M4.2 検証済)。凝縮 restart を可能にしておく

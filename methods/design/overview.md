@@ -336,8 +336,15 @@ $n_{\rm axis}$=2000・終端特性線出口・差分は `start_line` と `ni` �
   の積分ではない。
 - **入力の拒否**: node・軸対称・Euler の run でない、断面が $x$ 一定でない、追跡点が場の窓 ($-2\le x\le2.5$) の外、
   非有限、亜音速 ($M\le1$)、軸に到達しない — いずれも例外で止める。
-- **記録**: `prepare_info.json` の `initial_line` に出所 (`hall`/`cfd`)・run・res・$x_0$・アンカー・$m^*$
-  (線上の写像流束) を残す。
+- **凍結入力の契約** (2026-10-05, codex result M2): 凍結源の `solverConfig.yaml`・`bcondConfig.yaml` を YAML の構造として読み、
+  node・軸対称・Euler (`viscMethod: 0` かつ `visc: 0`・`turbulence.model: none`・物理壁はすべて `slip`) を照合する。snapshot
+  (`initial_line_res`) は必須 (省略すると最新場を黙って選ぶので拒否)。凍結源の `initial_line.source` が `cfd` (ピン壁自身の場 = 循環定義)
+  なら拒否。使う側と**同じ形・ガス**かを照合する: $R$・$\gamma_{\rm Hall}$ (凍結源の `prepare_info`)、ガス (種類・$T_t$・組成 $Y$)、
+  入口位置 ($L_U+L_{pipe}$)・$r_U$・縮流部の形 (凍結源メッシュの壁節点と使う側の U→T Hermite の差 ≤ 5e-6 $r_t$; メッシュ座標は float32 で
+  case/45 の実測残差 5.1e-7)。食い違えば拒否する。
+- **記録**: `prepare_info.json` の `initial_line` に出所 (`hall`/`cfd`)・run・res・$x_0$・アンカー・$m^*$ (線上の写像流束)・
+  照合した設定と項目・snapshot/抽出線/熱力学条件 (ガス・$\gamma_{\rm Hall}$・`physProp`) の sha256 先頭 16 桁 (`sha256_16`) を残す。
+  `anchor_source` は成分別 (CFD ピン `{"M": "cfd", "Mp": "cfd", "Mpp": "hall@x0_cfd"}`、Hall は全成分 `hall`)。
 - **抽出器の検証** (`design/tests/run_cfd_initial_line_tests.py`): 合成 Hall 場 (Euler 格子に Hall 場を載せる)
   から Hall の線を 線 $|\Delta M|\le2\times10^{-4}$・$|\Delta\theta|\le0.004°$・$|\Delta x_0|\le2\times10^{-4}$、
   アンカー $|\Delta M|\le2\times10^{-5}$・$|\Delta M'|\le10^{-4}$・$|\Delta M''|\le10^{-3}$、$m^*$ 相対 $\le10^{-4}$ で再現する。
@@ -713,7 +720,11 @@ $x<x_{lo}$ を相関×比で補完) は**スロート δ\* を NS 実効値の 3
    (同じ $x$ でコア全体を合わせる方式は、上流の壁 δ 誤差が特性線で下流の軸へ運ぶ波を欠損に取り込み反復が収縮しなかった —
    case/45 run_0019)。実測: 壁の異なる 3 つの NS 場から同じ $\delta_r(x)$ が ±1 % で出る。
    壁更新は半径方向 $r^{k+1}_{phys} = r_{inv} + (1-\omega)\delta^k_{in} + \omega\,\delta^k_{ext}$ ($\omega$=0.5 → 1.0)。
-   真のスロート探索 (A13) と上流 Hermite 再生成は維持。反復ドライバは `feedback/deltastar_loop.py`。
+   真のスロート探索 (A13) と上流 Hermite 再生成は維持 (joint 壁は下記「joint 壁の物理壁」の解析経路)。反復ドライバは `feedback/deltastar_loop.py`。
+   **`delta_r_next.csv` の列** (2026-10-05 明示): 第 2 列 `delta_target` = 緩和・再平滑化後の次 pass の壁入力 $\delta^{k+1}_{in}$、
+   第 4 列 `delta_E` = 未緩和の平滑化抽出値 $\delta^k_{ext}$ (`read_delta_r_next` で列名で読む; 旧ファイルは同じ並びで旧称)。
+   **出口の閉包 ($\delta_E/\delta_C$、`solve_rt` の $r_t$ 解き) は `delta_E` で取る** — 第 2 列を読むと ω=0.5 で偏差が約半分に見える
+   (case/45 run_0090: 1.0036 と誤報 → 正 1.0072、run_0092: 1.0019 → 1.0038; codex result M1)。
 3. **帳簿 (必須)**: NS/Euler 質量流量比 (= 有効音速スロート面積比) と質量流量由来の等価スロート補正量 $r_{t,W}-\sqrt{\dot m_{NS}/\dot m_E}$
    を `collect` が出す。ゲート $|\dot m_{NS}/\dot m_E - 1| \le 0.3\,\%$。
 
@@ -759,11 +770,17 @@ B-spline、**上流はその点へ Hermite を作り直す** (下流がマスタ
 
 $$
 r_W(x) = r_{\rm design}(x) + s(x)\,\delta_r(x),\qquad
-s(x)=\begin{cases}0 & x\le -11\\ u^3(10-15u+6u^2),\ u=\frac{x+11}{5} & -11<x<-6\\ 1 & x\ge-6\end{cases}
+s(x)=\begin{cases}0 & x\le x_{lo}\\ u^3(10-15u+6u^2),\ u=\frac{x-x_{lo}}{x_{hi}-x_{lo}} & x_{lo}<x<x_{hi}\\ 1 & x\ge x_{hi}\end{cases}
 $$
 
-で、$r_W', r_W'', r_W'''$ も設計壁の解析微分 + $(s\,\delta_r)$ の解析微分 (Leibniz) で返す。入口直管と縮流部の入口側は設計のまま、
-スロート直上流 (x ≥ −6) には δ_r を全量入れる。δ_r は導関数を返せる関数 (`delta_r_from_table(x, d)(x, deriv)`、
+で、$r_W', r_W'', r_W'''$ も設計壁の解析微分 + $(s\,\delta_r)$ の解析微分 (Leibniz) で返す。ランプ区間 $[x_{lo}, x_{hi}]$ は
+problem の **`geometry.pw_ramp`** (`prepare_ns` が渡す)。省略時の既定は「直管接合の直後 (設計縮流部で $r'<-0.05$ になる最初の $x$)
+から $-0.5\,L_U$」(`default_pw_ramp`; case/45 の $L_U=12$ で $[-10.71, -6]$)。case/45 の CFD ピン設計は `pw_ramp: [-11, -6]` を明記する
+(run_0090〜0094 と同じ壁: run の δ_r 表から作り直すと `wall_physical.csv` と 8.9e-16 m で一致)。$x\le x_{lo}$ (入口直管と縮流部の入口側) は
+設計のまま、$x\ge x_{hi}$ (スロート直上流) には δ_r を全量入れる。**ランプのゲート**: $[x_{lo}, x_{hi}]$ で
+$|r_W''-r_{\rm design}''|\le5\times10^{-3}$ かつ $r_W'<0$ でなければ例外で chain を止める (結果は `prepare_info.json` の `pw_ramp_gate`)。
+短い縮流部では $\delta_r s''$ が縮流部の曲率を壊す — 標準の $L_U=3.5$ ($r_U=2.5$) では既定ランプ $[-3.24, -1.75]$ で 6.2e-3 になり
+ゲートで止まる (`design/tests/run_physical_wall_analytic_tests.py`)。その形状で joint を使うには `pw_ramp` を広げるか $L_U$ を見直す。δ_r は導関数を返せる関数 (`delta_r_from_table(x, d)(x, deriv)`、
 表の範囲外は値を端値クリップ・導関数 0) に限り、返せない関数 (積分法の `smooth_delta_quintic`) や δ_r 無しは例外で止める
 (差分で代用しない)。物理スロート $(x_t, r_t, \kappa_t)$ は $r_W'=0$ の根 (IC の 1D 等エントロピー用)。
 $x=0$ では設計壁の $C^2$ がそのまま残り、$r_W''(0)=1/R+\delta_r''(0)$。非 joint の壁は従来経路のまま

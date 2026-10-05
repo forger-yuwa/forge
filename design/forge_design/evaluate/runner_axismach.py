@@ -267,7 +267,13 @@ def design_chain(p: Problem) -> dict:
         if not il_run.is_absolute() and p.path:
             il_run = (Path(p.path).resolve().parent / il_run).resolve()
         il_res = p.geometry.get("initial_line_res")
-        ht = pinned_factory(il_run, il_res)(R, g_hall)
+        if not il_res:
+            raise ValueError("geometry.initial_line: cfd には geometry.initial_line_res (凍結源の snapshot) が必須")
+        # 凍結源の形・ガスを使う側と照合 (codex result M2): 縮流部 (r_U・L_U・L_pipe・R の U→T Hermite)・組成・Tt・γ_Hall
+        expect = {"gas": (gas.summary() if hasattr(gas, "summary") else {"kind": "cpg"}),
+                  "r_U": float(p.geometry.get("r_inlet", 2.5)), "L_U": float(p.geometry.get("L_U", 3.5)),
+                  "L_pipe": float(p.geometry.get("L_pipe", 0.5))}
+        ht = pinned_factory(il_run, il_res, expect=expect)(R, g_hall)
         il_src = dict(ht.source)
     else:
         raise ValueError("geometry.initial_line は 'hall' か 'cfd'")
@@ -298,6 +304,13 @@ def design_chain(p: Problem) -> dict:
     else:
         x_A = x0
         M_A, Mp_A, Mpp_A = ht.axis_anchor(x0)
+    # アンカーの出所を成分別に (codex result m6): CFD ピンは M・M′ が CFD 場、M″ は Hall の式を CFD の x0 で評価
+    if x_reach_cfd is not None:
+        anchor_src = {"M": "cfd_reach", "Mp": "cfd_reach", "Mpp": "cfd_reach"}
+    elif initial_line == "cfd":
+        anchor_src = {"M": "cfd", "Mp": "cfd", "Mpp": "hall@x0_cfd"}
+    else:
+        anchor_src = {"M": "hall", "Mp": "hall", "Mpp": "hall"}
 
     # --- 軸 M 則: 'quintic' = 単一 5 次 Hermite (DOF L_c) / 'knot' = 内部 knot 1 個の
     # 区分 C² (A6, DOF L_c + M_knot)。高マッハ (M6) では単一 quintic の L_c 上限
@@ -493,7 +506,7 @@ def design_chain(p: Problem) -> dict:
             "axis_law": axis_law, "M_knot": M_K,
             "x_K": (float(law.x_K) if axis_law == "knot" else None),
             "anchor": (float(M_A), float(Mp_A), float(Mpp_A)),
-            "anchor_source": ("cfd" if x_reach_cfd is not None else "hall"),
+            "anchor_source": anchor_src,
             "start_line": start_line, "wall_mode": res["wall_mode"],
             "wall_repr": wall_repr,
             "gas": (gas.summary() if hasattr(gas, "summary")
@@ -504,7 +517,10 @@ def design_chain(p: Problem) -> dict:
             "initial_line": {"source": initial_line,
                              "run": (il_src or {}).get("run"), "res": (il_src or {}).get("res"),
                              "x0": float(x0), "anchor": [float(M_A), float(Mp_A), float(Mpp_A)],
-                             "mstar": float(res["mdot_start"])},
+                             "mstar": float(res["mdot_start"]),
+                             "sha256_16": (il_src or {}).get("sha256_16"),
+                             "config": (il_src or {}).get("config"),
+                             "match": (il_src or {}).get("match")},
             # cplus 閉包では構成的に 1 になる循環指標なので出さない (A9 の教訓)
             "mdot_ratio_moc": (None if not np.isfinite(res["mdot_exit"])
                                else float(res["mdot_exit"] / res["mdot_start"])),
@@ -837,9 +853,12 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             raise ValueError("delta_r_csv に非有限値がある (deltastar_loop.extract_and_merge で前回値保持済みの CSV を渡す)")
         delta_r_x = delta_r_from_table(tbl_r[:, 0], tbl_r[:, 1])
         offset = "radial"
+    # joint 壁の物理壁 (解析経路) の δ_r ランプ区間: geometry.pw_ramp (None = 既定、default_pw_ramp)。ゲート不合格は例外
+    pw_ramp = p.geometry.get("pw_ramp")
     wall = PhysicalNozzleWall(d["wall"], wall_inv, scale, float(p.spec["Pt"]),
                               float(p.spec["Tt"]), _gam_or_gas(p), p.cp, dstar_x=dstar_x,
-                              offset=offset, delta_r_x=delta_r_x)
+                              offset=offset, delta_r_x=delta_r_x,
+                              ramp=(None if pw_ramp is None else tuple(float(v) for v in pw_ramp)))
     if init_info is not None:
         np.savetxt(run_dir / "delta_r_initial.csv",
                    np.c_[res_init["x"], res_init["delta_r"], res_init["dstar_n"], res_init["theta"] * scale,
@@ -952,6 +971,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                                 "dstar_throat_correlation": float(wall._dstar_hist(0.0)),
                                 "delta_r_throat_applied": float(wall.r_throat - 1.0)},
             "offset": wall.offset_mode, "euler_ref": (str(euler_ref) if euler_ref else None),
+            "pw_ramp_gate": getattr(wall, "ramp_gate", None),
             "initializer": init_info,
             "omega": omega, "prev_run": (str(prev_run) if prev_run else None),
             "delta_r_csv": (str(delta_r_csv) if delta_r_csv else None),

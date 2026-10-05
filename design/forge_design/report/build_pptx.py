@@ -15,6 +15,19 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.oxml.ns import qn
 from pptx.util import Inches, Pt
 
+
+def _wall_res_text(wr) -> str:
+    """壁解像の正式値 (nozzle_report.wall_resolution = check_wall_resolution.py) を 1 行に。無ければ未評価と書く。"""
+    if not wr:
+        return "未評価 (report.json に wall_resolution が無い — nozzle_report を再実行)"
+    parts = [f"VERDICT {wr.get('verdict')}"]
+    if wr.get("over_area_pct") is not None:
+        parts.append(f"y₁⁺ > {wr.get('target', 1):g} の面積 {wr['over_area_pct']:.1f} % (許容 {wr.get('over_area_allow_pct', float('nan')):g} %)")
+    for name, w in (wr.get("per_wall") or {}).items():
+        loc = f" (x/r_t = {w['x_max_rt']:.2f})" if "x_max_rt" in w else ""
+        parts.append(f"{name}: 最大 {w['y1p_max']:.2f}{loc}・平均 {w['y1p_mean']:.2f}・p99 {w['y1p_p99']:.2f}")
+    return "、".join(parts)
+
 NAVY = RGBColor(0x1B, 0x2B, 0x3A)
 TEAL = RGBColor(0x0E, 0x7C, 0x86)
 INK = RGBColor(0x22, 0x2B, 0x33)
@@ -134,7 +147,7 @@ def main(report_dir):
     s = new("判定ゲート", "合格したものだけでなく、不合格・未収束もそのまま載せる")
     gates = [["判定", "結果"]] + cond["gates"] + [
         ["準定常 (末尾 5 枚の変動)", f"オーバーシュート {met['tail5_range']['overshoot_pct']:.4f} %、波 {met['tail5_range']['wave_pct']:.4f} %、出口コア M {met['tail5_range']['exit_core_M']:.5f}"],
-        ["壁解像 y₁⁺ (第 1 内部節点、x>0)", f"最大 {met['wall']['y1p_max']:.2f} (x={met['wall']['x_y1p_max']:.1f})、y₁⁺>1 の割合 {100 * met['wall']['y1p_gt1_fraction']:.0f} %"]]
+        ["壁解像 y₁⁺ (check_wall_resolution.py、全 no-slip 壁)", _wall_res_text(met.get("wall_resolution"))]]
     table(s, gates, 0.5, 1.4, W - 1.0, [3.6, W - 1.0 - 3.6], size=11, row_h=0.6)
 
     # 6 評価量
@@ -165,7 +178,7 @@ def main(report_dir):
 
     for key, t, sub in (("axis", "軸に沿った分布", "M・静圧・静温・密度・動圧 0.5ρv²・0.5v²・全圧 (凝縮ありは g・過冷却度・S)。実線 r=0、破線 r/r_w=0.1"),
                         ("exit", "出口断面の分布", "同じ量を半径方向に。流れ角 atan(v/u) を追加"),
-                        ("wall", "壁面の分布", "壁圧・壁温・C_f・y₁⁺ (y₁⁺ は第 1 内部節点基準。ソルバの ypls は使わない)"),
+                        ("wall", "壁面の分布", "壁圧・壁温・C_f・y₁⁺ 近似 (図示のみ。y₁⁺ の判定値は判定ゲート表 = check_wall_resolution.py)"),
                         ("wall_shape", "壁の形と微分", "左: r・r′・r″ (点線 = 設計壁)、右: 設計壁との差 (境界層の補正分)")):
         s = new(t, sub, notes=f"図: {figs[key]} ({src})")
         picture(s, rd / figs[key], 0.5, 1.4, W - 1.0, 5.9)

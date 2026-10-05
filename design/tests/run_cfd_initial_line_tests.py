@@ -126,8 +126,82 @@ if (run / "res_6000.h5").exists():
     check(f"報告の Md は spec のまま ({d['Md']}), MOC は較正値 ({d['Md_moc']})",
           d["Md"] == float(pp.spec["M_design"]) and d["Md_moc"] == float(pp.spec["M_design"]) - 4.16e-4)
     check(f"x0 = CFD 線の軸着地 ({il['x0']:.6f})", abs(il["x0"] - d["x_A"]) == 0.0 and il["source"] == "cfd")
+    check(f"アンカーの出所を成分別に記録 ({d['anchor_source']})",
+          d["anchor_source"] == {"M": "cfd", "Mp": "cfd", "Mpp": "hall@x0_cfd"})
+    hs = il.get("sha256_16") or {}
+    check(f"snapshot・抽出線・熱力学条件のハッシュを記録 ({hs})",
+          all(isinstance(hs.get(k), str) and len(hs[k]) == 16 for k in ("snapshot", "line", "thermo")))
+    check(f"凍結源の形・ガスを照合した ({il.get('match')})",
+          set(("R", "gamma_hall", "gas", "L_U", "r_U", "L_pipe", "contraction_shape")) <= set((il.get("match") or {}).get("checked", [])))
+    d_hall = design_chain(load_problem(PROB))
+    check(f"Hall 経路のアンカー出所 ({d_hall['anchor_source']})", d_hall["anchor_source"] == {"M": "hall", "Mp": "hall", "Mpp": "hall"})
+
+    # --- 凍結入力契約 (codex result M2 の再現を拒否する) -----------------------------
+    from forge_design.feedback.cfd_initial_line import pinned_factory  # noqa: E402
+    try:
+        pinned_factory(run, "res_6000.h5")(3.0, 1.4)
+        check("R=3・γ=1.4 (凍結源と別の形・ガス) を拒否", False)
+    except ValueError as e:
+        check(f"R=3・γ=1.4 (凍結源と別の形・ガス) を拒否 ({str(e)[:90]}…)", True)
+    try:
+        pinned_factory(run, None)
+        check("snapshot (res) 省略を拒否", False)
+    except ValueError:
+        check("snapshot (res) 省略を拒否", True)
+    for key, val in (("L_U", 11.5), ("r_inlet", 6.4)):
+        pp = load_problem(PROB)
+        pp.geometry.update({"initial_line": "cfd", "initial_line_res": "res_6000.h5", "initial_line_run": str(run), key: val})
+        try:
+            design_chain(pp)
+            check(f"使う側の {key}={val} (凍結源の縮流部と違う) を拒否", False)
+        except ValueError as e:
+            check(f"使う側の {key}={val} (凍結源の縮流部と違う) を拒否 ({str(e)[:80]}…)", "凍結源" in str(e))
+    pp = load_problem(PROB)
+    pp.geometry.update({"initial_line": "cfd", "initial_line_res": "res_6000.h5", "initial_line_run": str(run)})
+    pp.spec["Tt"] = 1500.0
+    try:
+        design_chain(pp)
+        check("使う側の Tt (熱力学条件) 違いを拒否", False)
+    except ValueError as e:
+        check(f"使う側の Tt (熱力学条件) 違いを拒否 ({str(e)[:80]}…)", True)
+    # 実効設定: 読み取り内容だけを差し替えた凍結源 (h5 は symlink、書き込みはしない)
+    import tempfile  # noqa: E402
+    import yaml  # noqa: E402
+    for label, edit_cfg, edit_bc in (
+            ("viscMethod 2・SST", lambda c: (c["physProp"].update({"viscMethod": 2, "visc": 1.8e-5}),
+                                             c.update({"turbulence": {"model": "SST"}})), None),
+            ("viscMethod 0 だが visc ≠ 0", lambda c: c["physProp"].update({"visc": 1.8e-5}), None),
+            ("乱流 SST のみ", lambda c: c.update({"turbulence": {"model": "SST"}}), None),
+            ("壁が no-slip", None, lambda b: b["wall"].update({"kind": "wall"})),
+            ("cell 離散化", lambda c: c["mesh"].update({"discretization": "cell"}), None)):
+        td = Path(tempfile.mkdtemp(prefix="cfdpin_bad_"))
+        for fn in ("nozzle.h5", "res_6000.h5"):
+            (td / fn).symlink_to(run / fn)
+        (td / "prepare_info.json").write_text((run / "prepare_info.json").read_text())
+        cfg = yaml.safe_load((run / "solverConfig.yaml").read_text())
+        bc = yaml.safe_load((run / "bcondConfig.yaml").read_text())
+        if edit_cfg:
+            edit_cfg(cfg)
+        if edit_bc:
+            edit_bc(bc)
+        (td / "solverConfig.yaml").write_text(yaml.safe_dump(cfg))
+        (td / "bcondConfig.yaml").write_text(yaml.safe_dump(bc))
+        try:
+            pinned_factory(td, "res_6000.h5")
+            check(f"凍結源の実効設定 {label} を拒否", False)
+        except ValueError as e:
+            check(f"凍結源の実効設定 {label} を拒否 ({str(e)[:100]}…)", True)
+    # 対照: 同じ手順で書き直しただけの (変更なし) 設定は受理する
+    td = Path(tempfile.mkdtemp(prefix="cfdpin_ok_"))
+    for fn in ("nozzle.h5", "res_6000.h5"):
+        (td / fn).symlink_to(run / fn)
+    (td / "prepare_info.json").write_text((run / "prepare_info.json").read_text())
+    (td / "solverConfig.yaml").write_text(yaml.safe_dump(yaml.safe_load((run / "solverConfig.yaml").read_text())))
+    (td / "bcondConfig.yaml").write_text(yaml.safe_dump(yaml.safe_load((run / "bcondConfig.yaml").read_text())))
+    ok_t = pinned_factory(td, "res_6000.h5")(2.0, d["gamma_hall"])
+    check("対照: 設定を変えずに書き直した凍結源は受理", ok_t.x0_cfd == il["x0"])
 else:
-    print("skip: res_6000.h5 が無いので design_chain (cfd) の検査を省略")
+    print("skip: res_6000.h5 が無いので design_chain (cfd) と凍結入力契約の検査を省略")
 
 print(json.dumps(out, indent=1))
 print("FAIL 件数:", FAIL)

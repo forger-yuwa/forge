@@ -65,7 +65,7 @@ d = design_chain(p)
 w = d["wall"]
 check("設計壁は JointFitCFDWall", isinstance(w, JointFitCFDWall))
 args = (w, d["wall_inv"], float(p.spec["r_throat"]), float(p.spec["Pt"]), float(p.spec["Tt"]), _gam_or_gas(p), p.cp)
-PW = PhysicalNozzleWall(*args, offset="radial", delta_r_x=f)
+PW = PhysicalNozzleWall(*args, offset="radial", delta_r_x=f, ramp=(-11.0, -6.0))   # case/45 の pw_ramp
 check("joint 壁では解析経路が自動で選ばれる", PW.analytic)
 
 xa = np.linspace(w.x_in, -11.0, 30001)
@@ -112,6 +112,32 @@ for name, kw in (("δ_r 無し", {}), ("導関数を返せない δ_r", {"delta_
         check(f"解析経路で {name} を拒否", True)
 PWo = PhysicalNozzleWall(*args, offset="radial", delta_r_x=f, analytic=False)
 check("analytic=False で従来経路 (κ_t 再推定) を選べる", (not PWo.analytic) and hasattr(PWo, "_herm_c"))
+
+# --- pw_ramp (plan §5.1 #9, codex result M5) -----------------------------------------
+check(f"pw_ramp ゲート (case/45 [−11, −6]) を記録: {PW.ramp_gate}", PW.ramp_gate["pass"] and PW.ramp_gate["source"] == "pw_ramp")
+from forge_design.geometry.wall_axismach import default_pw_ramp  # noqa: E402
+PD = PhysicalNozzleWall(*args, offset="radial", delta_r_x=f)
+x_on = default_pw_ramp(w)[0]
+check(f"既定 pw_ramp = (r′ < −0.05 の最初の x {x_on:.4f}, −0.5·L_U = {-0.5 * w.up.L_U:g}) でゲート合格 ({PD.ramp_gate})",
+      PD._ramp == (x_on, -0.5 * w.up.L_U) and PD.ramp_gate["pass"]
+      and float(w.r(np.r_[x_on], 1)[0]) < -0.05 <= float(w.r(np.r_[x_on - 1e-4], 1)[0]))
+for bad in ((-13.0, -6.0), (-6.0, -11.0), (-11.0,)):
+    try:
+        PhysicalNozzleWall(*args, offset="radial", delta_r_x=f, ramp=bad)
+        check(f"不正な pw_ramp {bad} を拒否", False)
+    except ValueError:
+        check(f"不正な pw_ramp {bad} を拒否", True)
+# 標準 geometry (L_U 3.5, r_U 2.5): 既定ランプは [−3.x, −1.75] と短く δ_r·s″ が縮流部の曲率を壊す → ゲートで止まることが合格
+p35 = load_problem(C45 / "problem_d155_euler_c2final_n2400.yaml")
+p35.geometry.update({"wall_repr": "joint", "L_U": 3.5, "r_inlet": 2.5})
+d35 = design_chain(p35)
+args35 = (d35["wall"], d35["wall_inv"], float(p35.spec["r_throat"]), float(p35.spec["Pt"]), float(p35.spec["Tt"]),
+          _gam_or_gas(p35), p35.cp)
+try:
+    P35 = PhysicalNozzleWall(*args35, offset="radial", delta_r_x=f)
+    check(f"L_U 3.5: 既定 pw_ramp のゲートで止まる (通ってしまった: {P35.ramp_gate})", False)
+except ValueError as e:
+    check(f"L_U 3.5: 既定 pw_ramp {default_pw_ramp(d35['wall'])} のゲートで止まる ({str(e)[:120]}…)", "ゲート不合格" in str(e))
 
 print("FAIL 件数:", FAIL)
 sys.exit(1 if FAIL else 0)

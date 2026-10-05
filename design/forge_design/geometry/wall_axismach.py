@@ -254,7 +254,8 @@ class PhysicalNozzleWall:
     def __init__(self, design_wall, wall_tbl, rt_m: float, Pt: float, Tt: float,
                  gamma: float = 1.4, cp: float = 1004.5, dstar_x=None,
                  x_offset_lo: float = -0.8, offset: str = "normal", delta_r_x=None,
-                 analytic: bool | None = None, ramp: tuple = (-11.0, -6.0)) -> None:
+                 analytic: bool | None = None, ramp: tuple | None = None,
+                 ramp_gate_d2: float = 5e-3) -> None:
         """design_wall: AxisMachCFDWall (非粘性)。wall_tbl: (n,4) MOC 壁 [x,r,θ,M]。
         dstar_x: 任意の δ*(x) [r_t 単位] (None = 上流履歴込み相関)。
         offset: "normal" (旧: 壁法線オフセット + x シフト) / "radial" (半径方向 r_W = r + δ_r(x)、
@@ -262,6 +263,10 @@ class PhysicalNozzleWall:
         delta_r_x: 半径方向補正 δ_r(x) [r_t 単位] を直接与える (与えると offset="radial" 固定)。
         analytic: 解析経路 (下記)。None = 設計壁が `JointFitCFDWall` (wall_repr: joint) のとき True。
         ramp: 解析経路の δ_r を入れる区間 [x_lo, x_hi] (x ≤ x_lo で 0、x ≥ x_hi で全量、間は 5 次 smoothstep)。
+        problem の `geometry.pw_ramp`。None = 既定「直管接合の直後 (設計縮流部で r′ < −0.05 になる最初の x) から −0.5·L_U」
+        (`default_pw_ramp`)。
+        ramp_gate_d2: ランプ区間のゲート。|r″ − r″_design| ≤ ramp_gate_d2 かつ r′ < 0 でなければ例外で止める
+        (短い縮流部ではランプが δ_r·s″ で縮流部の曲率を壊すため; codex result M5)。
 
         **解析経路** (plan tooling-nozzle-cfd-pinned-initial-line §5.1 #6b, 仕様 A″ diagnostician 2026-10-05):
         κ_t の窓 LSQ 再推定・上流 Hermite の作り直し・オフセット点群の補間スプラインでの作り直しをせず、
@@ -303,7 +308,7 @@ class PhysicalNozzleWall:
             analytic = isinstance(design_wall, JointFitCFDWall)
         self.analytic = bool(analytic)
         if self.analytic:
-            self._init_analytic(design_wall, delta_r_x, ramp, xg, x_offset_lo)
+            self._init_analytic(design_wall, delta_r_x, ramp, xg, x_offset_lo, ramp_gate_d2)
             return
 
         # --- 法線オフセット (窓 [x_offset_lo, x_F] — 真のスロート探索を含む) ---
@@ -357,7 +362,7 @@ class PhysicalNozzleWall:
                                         self.r_throat, 0.0, self.kappa_throat)
         self._poly_eval = _poly_eval
 
-    def _init_analytic(self, design_wall, delta_r_x, ramp, xg, x_offset_lo) -> None:
+    def _init_analytic(self, design_wall, delta_r_x, ramp, xg, x_offset_lo, ramp_gate_d2: float = 5e-3) -> None:
         """解析経路の構築 (`__init__` の docstring 参照)。"""
         from scipy.optimize import brentq
         if delta_r_x is None:
@@ -366,9 +371,16 @@ class PhysicalNozzleWall:
         if not getattr(delta_r_x, "supports_deriv", False):
             raise ValueError("PhysicalNozzleWall (解析経路 / joint 壁): δ_r が導関数を返せない "
                              "(delta_r_from_table の関数を使う。積分法の smooth_delta_quintic は未対応 — 差分で代用しない)")
+        if ramp is None:
+            ramp = default_pw_ramp(design_wall)
+            self._ramp_source = "default"
+        else:
+            self._ramp_source = "pw_ramp"
+        if len(ramp) != 2:
+            raise ValueError(f"pw_ramp {ramp} は 2 要素 [x_lo, x_hi]")
         lo, hi = float(ramp[0]), float(ramp[1])
         if not (-self.L_U <= lo < hi < 0.0):
-            raise ValueError(f"ramp {ramp} は [−L_U, 0) 内の増加区間であること")
+            raise ValueError(f"pw_ramp {ramp} は [−L_U, 0) = [{-self.L_U:g}, 0) 内の増加区間であること")
         self._ramp = (lo, hi)
         self._dr = delta_r_x
         self.offset_mode = "radial"
@@ -384,7 +396,18 @@ class PhysicalNozzleWall:
         self.x_throat = float(brentq(d1, xl, xr, xtol=1e-14))
         self.r_throat = float(self.r(np.array([self.x_throat]))[0])
         self.kappa_throat = float(self.r(np.array([self.x_throat]), 2)[0])
-        self._throat_diag = {"method": "analytic", "ramp": [lo, hi]}
+        # ランプ区間のゲート: 縮流部の曲率を δ_r·s″ で壊していないか・収縮が単調か
+        xr = np.linspace(lo, hi, 6001)
+        d2 = float(np.max(np.abs(self.r(xr, 2) - design_wall.r(xr, 2))))
+        r1 = float(np.max(self.r(xr, 1)))
+        self.ramp_gate = {"ramp": [lo, hi], "source": self._ramp_source, "max_abs_d2_change": d2,
+                          "max_r1": r1, "limit_d2": float(ramp_gate_d2),
+                          "pass": bool(d2 <= ramp_gate_d2 and r1 < 0.0)}
+        if not self.ramp_gate["pass"]:
+            raise ValueError(f"PhysicalNozzleWall (解析経路): pw_ramp [{lo:g}, {hi:g}] のゲート不合格 — "
+                             f"|r″ − r″_design| max {d2:.2e} (≤ {ramp_gate_d2:g}), max r′ {r1:.2e} (< 0) "
+                             "(縮流部が短くランプが曲率を壊す: geometry.pw_ramp を広げるか L_U を見直す)")
+        self._throat_diag = {"method": "analytic", "ramp": [lo, hi], "ramp_gate": self.ramp_gate}
 
     def _s(self, x, n: int):
         """δ_r の入れ方 s(x): 5 次 smoothstep (端で 1・2 階微分 0)。n 階微分。"""
@@ -662,6 +685,17 @@ class LSQBsplineCFDWall(AxisMachCFDWall):
         if dg["max_dtheta_deg"] > self.tol_dtheta_deg:
             msgs.append(f"LSQ 近似誤差 max|Δθ|={dg['max_dtheta_deg']:.3f}° > {self.tol_dtheta_deg}°")
         return msgs
+
+
+def default_pw_ramp(design_wall, r1_on: float = -0.05) -> tuple:
+    """`pw_ramp` の既定: 直管接合の直後 (設計縮流部で r′ < r1_on になる最初の x) から −0.5·L_U。"""
+    L_U = float(design_wall.up.L_U)
+    xs = np.linspace(-L_U, 0.0, 200001)
+    r1 = design_wall.r(xs, 1)
+    i = int(np.argmax(r1 < r1_on))
+    if not r1[i] < r1_on:
+        raise ValueError(f"default_pw_ramp: 設計縮流部で r′ < {r1_on} の点が無い")
+    return (float(xs[i]), -0.5 * L_U)
 
 
 # --- 位置 + 壁角の同時当てはめ (wall_repr: joint, V0 型壁) ---------------------------

@@ -49,7 +49,7 @@ PowerPoint にまとめる (2026-10-05 ユーザ指示でルール化)。設計�
 - カラーマップは全量 turbo (skill `forge-contour`)。M/M_d − 1 は ±0.5 %、圧力勾配は ±0.02 で頭打ち、他は 0.2〜99.8 % で切る (切った値は題に書く)。
 - 静圧・密度・動圧の軸方向分布は対数目盛。
 - 全圧・全温は `solver_density_cuda/tools/total_quantities.py` の `total_state` で h0 から作る (AGENTS.md「出力と後処理の原則」)。h0 の無い古い res では全圧を省く。
-- y₁⁺ は第 1 内部節点までの壁法線距離と接線壁応力から作る。**ソルバの `ypls` は使わない** (AGENTS.md「壁解像確認」)。
+- y₁⁺ の判定値 (ゲート表・`report.json` の `metrics.wall_resolution`) は**正式ツール `solver_density_cuda/tools/check_wall_resolution.py` を全 no-slip 壁で実行した結果** (VERDICT・目標超過の面積割合・最大とその位置 x/r_t) をそのまま載せる (2026-10-05, codex result M4: 速度差の近似を x>0 の節点割合で出していて最大 8.7 / 18 % と正式値 13.4 / 29 % より甘かった)。許容面積は `--wall-over-frac` (既定はツール既定 2 %)。壁面分布の図の y₁⁺ は近似で図示だけ。**ソルバの `ypls` は使わない** (AGENTS.md「壁解像確認」)。
 - 各スライドのノートに図のファイル名と出典の run / res を書く。
 
 ## 報告の扱い

@@ -383,8 +383,10 @@ def fig_wall_lines(F, path):
     qe = np.array([V["q_dyn"][i, j] for i, j in enumerate(je)])
     Cf = tw / qe
     y1p = yn * np.sqrt(V["ro"][:, -1] * np.abs(tw)) / mu[:, -1]
+    # この y₁⁺ は速度差からの近似で**図示だけ**に使う。判定・報告の数値は正式ツール check_wall_resolution.py
+    # (wall_resolution(); plan tooling-nozzle-cfd-pinned-initial-line §5.1 #10 — codex result M4: 近似は x>0 の節点割合で最大 8.7/18 % と出ていた)
     rows = [(V["P"][:, -1] / 1e3, "壁圧 [kPa]"), (V["T"][:, -1], "壁温 [K]"), (Cf * 1e3, "C_f × 10³ (接線壁応力 / 動圧@r/r_w=0.8)"),
-            (y1p, "y₁⁺ (第 1 内部節点、壁法線)")]
+            (y1p, "y₁⁺ 近似 (図示のみ; 判定は check_wall_resolution.py)")]
     fig, axs = plt.subplots(2, 2, figsize=(13, 6), sharex=True)
     for ax, (v, lab) in zip(axs.ravel(), rows):
         ax.plot(x, v, lw=1.1); ax.set_ylabel(lab, fontsize=9)
@@ -397,8 +399,54 @@ def fig_wall_lines(F, path):
     fig.suptitle("壁面の分布", fontsize=10)
     fig.tight_layout(); fig.savefig(path, dpi=130); plt.close(fig)
     m = x > 0
-    return dict(y1p_max=float(np.nanmax(y1p[m])), x_y1p_max=float(x[m][np.nanargmax(y1p[m])]),
-                y1p_gt1_fraction=float(np.mean(y1p[m] > 1.0)))
+    return dict(y1p_approx_note="速度差からの近似 (x>0 の節点、図示用)。判定には metrics.wall_resolution (正式ツール) を使う",
+                y1p_approx_max=float(np.nanmax(y1p[m])), y1p_approx_x_max=float(x[m][np.nanargmax(y1p[m])]))
+
+
+def wall_resolution(run, F, over_frac=None):
+    """壁解像の正式値: `solver_density_cuda/tools/check_wall_resolution.py` を no-slip 壁全部 (bcondConfig の kind が wall*) で
+    実行し、出力 (壁ごとの y₁⁺ 平均・p99・最大・評価面積・目標超過面積・最大の位置・VERDICT) を解析する。
+    最大の位置は壁ダンプ `res_<群>_<physID>_<step>.h5` の座標 (index) から x/r_t, r/r_t に直す。
+    over_frac: 目標超過を許す面積割合 [%] (None = ツール既定)。"""
+    run = Path(run)
+    bc = yaml.safe_load((run / "bcondConfig.yaml").read_text()) or {}
+    walls = [k for k, v in bc.items() if isinstance(v, dict) and str(v.get("kind", "")).startswith("wall")]
+    if not walls:
+        return {"verdict": "INDETERMINATE", "reason": "no-slip 壁が無い"}
+    cmd = [sys.executable, str(TOOLS / "check_wall_resolution.py"), str(run), "--groups", ",".join(walls)]
+    if over_frac is not None:
+        cmd += ["--over-frac", str(float(over_frac))]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    txt = r.stdout + r.stderr
+    out = {"tool": "solver_density_cuda/tools/check_wall_resolution.py", "cmd": " ".join(cmd[1:]), "returncode": r.returncode,
+           "groups": walls, "per_wall": {}}
+    m = re.search(r"^VERDICT: (\S+)(.*)$", txt, re.M)
+    out["verdict"] = m.group(1) if m else "INDETERMINATE"
+    out["verdict_line"] = m.group(0).strip() if m else None
+    m = re.search(r"目標 ([0-9.eE+-]+) を超える面積 最大 ([0-9.]+) % \(許容 ([0-9.eE+-]+) %\)", txt)
+    if m:
+        out.update(target=float(m.group(1)), over_area_pct=float(m.group(2)), over_area_allow_pct=float(m.group(3)))
+    m = re.search(r"最大 y1\+ = ([0-9.]+)", txt)
+    if m:
+        out["y1p_max"] = float(m.group(1))
+    S = F["S"]
+    for mm in re.finditer(r"^  (\S+)\s+step\s+(\d+)\s+y1 = ([0-9.e+-]+) m\s+y1\+ 平均\s+([0-9.]+) / p99\s+([0-9.]+) / 最大\s+([0-9.]+)\n"
+                          r"\s+評価できた面積割合 ([0-9.]+) % ; y1\+ > \S+ が ([0-9.]+) % ; 最大の位置 index (\d+)", txt, re.M):
+        name, step = mm.group(1), int(mm.group(2))
+        w = dict(step=step, y1_median_m=float(mm.group(3)), y1p_mean=float(mm.group(4)), y1p_p99=float(mm.group(5)),
+                 y1p_max=float(mm.group(6)), evaluated_area_pct=float(mm.group(7)), over_area_pct=float(mm.group(8)),
+                 index_max=int(mm.group(9)))
+        pid = int(bc[name]["physID"])
+        dump = run / f"res_{name}_{pid}_{step}.h5"
+        if dump.exists():
+            with h5py.File(dump) as f:
+                xyz = np.array(f["MESH/COORD"]).reshape(-1, 3)
+            if w["index_max"] < len(xyz):
+                w["x_max_rt"], w["r_max_rt"] = float(xyz[w["index_max"], 0] / S), float(xyz[w["index_max"], 1] / S)
+        out["per_wall"][name] = w
+    if not out["per_wall"]:
+        out["raw"] = txt[-3000:]
+    return out
 
 
 def fig_wall_shape(run, F, path):
@@ -440,7 +488,7 @@ def fig_wall_shape(run, F, path):
 
 
 # ------------------------------------------------------------------ 本体
-def make_report(run, euler=None, out=None, pptx=True):
+def make_report(run, euler=None, out=None, pptx=True, wall_over_frac=None):
     run = Path(run).resolve(); out = Path(out) if out else run / "report"; out.mkdir(parents=True, exist_ok=True)
     F = load_field(run)
     try:
@@ -459,6 +507,7 @@ def make_report(run, euler=None, out=None, pptx=True):
     rep["figures"].update(axis="fig_axis_lines.png", axis_dev="fig_axis_deviation.png")
     fig_exit_lines(F, out / "fig_exit_lines.png"); rep["figures"]["exit"] = "fig_exit_lines.png"
     rep["metrics"]["wall"] = fig_wall_lines(F, out / "fig_wall_lines.png"); rep["figures"]["wall"] = "fig_wall_lines.png"
+    rep["metrics"]["wall_resolution"] = wall_resolution(run, F, over_frac=wall_over_frac)
     rep["metrics"]["wall_shape"] = fig_wall_shape(run, F, out / "fig_wall_shape.png"); rep["figures"]["wall_shape"] = "fig_wall_shape.png"
     rep["euler_ref"] = str(euler) if euler else None
     (out / "report.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False, default=float))
@@ -475,8 +524,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run"); ap.add_argument("--euler", default=None); ap.add_argument("--out", default=None)
     ap.add_argument("--no-pptx", action="store_true")
+    ap.add_argument("--wall-over-frac", type=float, default=None,
+                    help="壁解像: y1+ > 1 を許す面積割合 [%%] (check_wall_resolution.py --over-frac; 既定はツール既定)")
     a = ap.parse_args(argv)
-    print(make_report(a.run, a.euler, a.out, pptx=not a.no_pptx))
+    print(make_report(a.run, a.euler, a.out, pptx=not a.no_pptx, wall_over_frac=a.wall_over_frac))
 
 
 if __name__ == "__main__":
