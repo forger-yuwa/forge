@@ -7,8 +7,10 @@ set -e
 : "${FORGE_BIN:=$HOME/forge-integ/solver_density_cuda/build/forge}"
 : "${FORGE_CUDA_BLOCKSIZE:=128}"
 export FORGE_BIN FORGE_CUDA_BLOCKSIZE
+export FORGE_CONVERTER="$(cd "$(dirname "$0")" && pwd)/conv_tolerant.sh"   # 終了時 GPUassert の既知の罠を許容
 cd "$(dirname "$0")"
 IC=$1
+rm -rf _prep_wallfit_interp _prep_wallfit_fit
 python3 prep_wallfit_euler.py _prep_wallfit_interp interp --ic "$IC"
 python3 prep_wallfit_euler.py _prep_wallfit_fit fit --ic "$IC"
 i=53
