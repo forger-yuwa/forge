@@ -5,13 +5,17 @@ description: 軸対称風洞ノズル (wind_tunnel_axisym_axismach) の設計・
 
 # /nozzle-design — 軸対称風洞ノズルの設計・計算
 
+**棲み分け**: 要件の確定 (目的・Pt/Tt/組成・M_design・寸法・凝縮の扱い・コスト承認) と problem YAML・方針メモの作成は
+skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り返さない)。本 skill はその YAML ができた後の
+**axismach ノズルの作り方・回し方**だけを扱う。YAML が無い新規の依頼は、まず `design-intake` を通す。
+
 **手順の正本は [`procedures/nozzle-design-workflow.md`](../../../procedures/nozzle-design-workflow.md)**。
 ここには AI が判断を誤りやすい点だけを置く。作業前に正本の該当節 (§1 新規設計 / §2 パラスタ〜凝縮 / §3 既存形状) を読む。
 
 ## 最初に決めること
 
 1. **どのユースケースか** を確定する (§1 / §2 / §3)。曖昧ならユーザに 1 問だけ聞く。
-2. **新規設計 (§1・§2) は `/design-intake` で要件を固める** — Pt・Tt・組成・M_design・入口半径・軸長 (or 全長)・出口径・凝縮の扱い。
+2. **新規設計 (§1・§2) で problem YAML が未確定なら `/design-intake` に渡す** (要件インタビューはそちらの担当)。
 3. **最新の実例を手本にする**: `case/45.isobutane_m6_d155` (M6、2026-10)。生産レシピは
    [`plans/active/tooling-nozzle-cfd-pinned-initial-line.md`](../../../plans/active/tooling-nozzle-cfd-pinned-initial-line.md) §4・§5.1 #11〜#11f と §9 末尾。
    古い run の YAML をそのまま複製しない (試作の `M_design` 較正値・廃止キーが残っている)。

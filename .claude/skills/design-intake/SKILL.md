@@ -33,6 +33,7 @@ ledger) であり、ループの中に対話を持ち込まない。
 `probdef.KNOWN_TYPES` から選ぶ。迷ったら:
 - スラスタ/ベルノズル形状の MOO → `thruster_bell` (+ `opt/driver.py`)
 - 風洞ノズル (目標 M の軸分布を直接設計) → `wind_tunnel_axisym_axismach`
+  (この型は MOO ドライバでなく直接設計。YAML ができた後の実行 — MOC パラスタ・Euler・NS/δ*・形状調整・凝縮・既存形状の再計算 — は skill [`nozzle-design`](../nozzle-design/SKILL.md) / [`procedures/nozzle-design-workflow.md`](../../../procedures/nozzle-design-workflow.md) に従う)
 - 既存タイプに合わない → 新タイプ = 実装タスク。§6 へ。
 
 ### 3. 仕様固定量 (spec) とガスモデル
@@ -113,6 +114,9 @@ CAPABILITIES §2–4 を見ながら選ぶ。主な分岐:
 6. 新しい知見 (未対応→実装した等) が出たら **CAPABILITIES.md を同期**する。
 
 ## キャンペーン起動 (承認後)
+
+> **棲み分け**: 本 skill は「何を作るか」を決めて検証済み YAML と方針メモを残すところまで。
+> `wind_tunnel_axisym_axismach` の実行手順は skill `nozzle-design` が正本 (下の MOO 例は `thruster_bell` 用)。
 
 ```bash
 # thruster_bell MOO の例
