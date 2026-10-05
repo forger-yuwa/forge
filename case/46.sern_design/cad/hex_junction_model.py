@@ -22,6 +22,15 @@ B4a (plan §4.14-2〜5・§6.2、§5.1 B4-1) で MOC 輪郭に置き換えた (�
   - 検査 (VERDICT): 位相・タグ・頂点 Jacobian (float32)・skew/AR・壁第一層 (first_layer_check) に加えて、
     出力実座標の隣接間隔比 (adjacent_spacing_check、全ヘキサの面隣接・継ぎ目を含む)、後流 Δx (wake_dx_check)、形状ゲート (shape_check)。
 
+B4-2 (plan §5.1、§6.3 の局所 A′/B′ = seam_coupon.py で B′ 合格を確認してから全継ぎ目へ): 断面の分布を継ぎ目で連動させた。
+  - 共有辺を挟む 2 ブロックの「共有辺の端から出る辺」の第一間隔を比 1.2 以内にする (match_spacing: 隣の全部と比 g 以内の幾何平均、解けなければ停止)。
+  - z ∈ [0, W/2] の同値類は継ぎ目 z = W/2 側 (内側の隅 CUR/CLR) へ片側等比、第一間隔は全辺で F。節点数は NZ = max(P.NZ, prog_n(W/2, h1, 1.15) + 1)。
+  - リング横断 (e2/e4/e6/e9) は両端細分 (Bump、NR 区間、増加側 >= NL)。リング外縁が h1 級になりコアの端 (e7/e11/e3/e10) と 1.2 以内でつながる。
+  - e5 (と SW・S の de) の端は E5K 倍、側壁外面帯 hz32/hz42 の第一間隔は KV 倍 (P0 の注記)。e5 の x 方向ブレンドと e7/e11 の max クランプは撤去。
+  - cowl_side は一般壁 (h1・NL) として検査 (END_TAGS から外した)。
+  - 検査は msh を書き出してから gmsh を解放して numpy だけで行う (ピーク RSS 約 1.4 kB/節点)。
+  - --set SEC2D=x1,x2,... は指定 station の断面だけを 2D で切って継ぎ目の比と skew を出す (分布の調整用の診断。判定はしない)。
+
 usage (mesh venv):  .venv-mesh/bin/python case/46.sern_design/cad/hex_junction_model.py OUT_PREFIX --contours DIR [--scale S] [--set k=v ...]
 出力: OUT.msh / OUT_report.json / OUT_sections.npz (描画用)
 """
@@ -37,8 +46,12 @@ P0 = dict(H=0.1, ZW=1.0, TSW=0.005, TC=0.005, LSW=0.8, LCOWL=1.2, XEND=1.5, DR=0
           ZONE=0.3,                             # 端面の上下流に置く物理 station までの距離
           LWAKE=0.02, DXW=1.0e-3,               # 後流区間の長さと、その区間全体の x 間隔の上限
           H1=1.6e-4, H1_END=1.0e-3, G=1.2, NZ=31, HX=0.05, HX_FAR=0.08, M_SPL=129,
-          CORE_MILD=1.0, MILD1=5.0, MILD2=25.0, E5_BLEND=0.8,   # e5 の一様 -> 両端細分の移行長 (側壁の全長 [0, L_sw] で移す)
+          E5K=1.03,                             # e5 (と SW・S の de の y) の両端 = h1 (c + cc)/2 × E5K。N_SIDE で e7 の端 F (>= 対角の s2/1.2) との差を縮め、
+                                                # リングの格子線の傾きを抑える (N_SIDE|SW の比)。B・C の露出壁の第一層はランプ +1.4 %・カウル上面 +4.6 % (稜の近傍 ±10 %)
+          KV=1.02,                              # 側壁外面帯 (hz32・hz42) の第一間隔 / h1。SW の z (hz41) の両端を e2 の第一間隔と hz42 の両方に 1.2 以内で
+                                                # つなぐための余裕 (KV = 1 だと窓 [s2/1.2, 1.2 h1] の幅が 0.06 %)。sidewall_out の第一層は +2 % (±5 % の内側)
           HFAR=0.10, AR_TAN=900.0)                            # 外部遠方の最大格子幅 (端面層が断面全体に伝播するので、遠方の幅が AR を決める)
+# B4-2 (plan §5.1、§6.3): NZ は下限。z 方向 (e1/e3/e8/e10/hz?0) の節点数は「継ぎ目側の第一間隔 (>= h1) から成長率 1.15 で 1 H を覆う」数との大きい方
 # (x/H, 上隅 r/H, 下隅 r/H)。区間内は smoothstep (両端で r' = 0)
 # 半径を変える区間の長さは 2 r 以上にする: 短いと r'(x) で壁法線が x に傾き、円弧上の第一層が薄くなる (長さ r で -19 %、2 r で -5 %)
 # B4a (plan §4.14-5): 断面隅フィレットは初版ゼロ。半径を明示的に 0 にする (旧 PROFILE の非ゼロ半径は流用しない)
@@ -64,6 +77,21 @@ def prog_n(L, h, g):
     """公比 <= g で覆える最小の区間数"""
     if h >= L: return 1
     return max(int(math.ceil(math.log(1.0 + L * (g - 1.0) / h) / math.log(g) - 1e-9)), 1)
+
+
+def prog_nodes(L, n, h, at_end=False):
+    """n 区間・全長 L の等比分布の節点位置 (0..L)。第一間隔 h を始点側 (at_end=True なら終点側) に置く。gmsh の Progression と同じ則"""
+    r = prog_r(L, n, h); d = h * r ** np.arange(n); d *= L / d.sum()
+    if at_end: d = d[::-1]
+    return np.r_[0.0, np.cumsum(d)]
+
+
+def match_spacing(nbr, g):
+    """継ぎ目の間隔の連動 (plan §5.1 B4-2): 共有辺の端で隣り合う間隔 nbr (複数) の**全部と比 g 以内**になる間隔を返す。
+    可能な範囲 [max(nbr)/g, g min(nbr)] の幾何平均 (両側の比が等しく最小)。範囲が空なら ValueError (分布だけでは解けない継ぎ目)"""
+    nbr = [float(v) for v in nbr]; lo, hi = max(nbr) / g, g * min(nbr)
+    if lo > hi * (1 + 1e-12): raise ValueError("継ぎ目の間隔を比 %.3g 以内で連動できない: 隣の間隔 %s (比 %.4f > %.4f)" % (g, nbr, max(nbr) / min(nbr), g * g))
+    return math.sqrt(lo * hi)
 
 
 class Bump:
@@ -383,17 +411,33 @@ def build(out, P, contours, quiet=False):
     ccs = np.sqrt(1 + G.dyc(xa_) ** 2); LTmax = float(np.max(G.yc(xa_) - G.yo(xa_)))
     tan_max = P["AR_TAN"] * h1            # 壁層セルの接線方向の幅の上限 (リングは最大 45° 傾くので、壁層でも AR <= 1000 に収める)
     NY = bump.fit_n(h1 / Lmax, g, hmax_rel=tan_max / Lmax); NSW = bump.fit_n(h1 / G.TSW, g)
-    NTC = bump.fit_n(h1 * float(ccs.min()) / LTmax, g); NZ = int(P["NZ"])     # 板の y 方向 (鉛直厚 t/cos θ_c、両端 h1 cc)
+    NTC = bump.fit_n(h1 * float(ccs.min()) / LTmax, g)                # 板の y 方向 (鉛直厚 t/cos θ_c、両端 h1 cc)
+    # z 方向 (z ∈ [0, W/2] の同値類 e1/e3/e8/e10/hz00/hz10/hz20) は継ぎ目 z = W/2 側へ片側細分 (plan §6.3 の B′ を全継ぎ目へ、§5.1 B4-2)。
+    # 第一間隔はどれも h1 以上・長さは W/2 以下なので、h1 から成長率 g_t で W/2 を覆う区間数があれば全辺の公比 <= g_t (分割数の固定 NZ=31 は下限に)
+    NZ = max(int(P["NZ"]), prog_n(G.ZW, h1, g_t) + 1)
+    # リングの横断 (同値類 e2/e4/e6/e9): 対角辺 e2/e6 は両端細分 (Bump)。対角の内側端 CUR/CLR の間隔をコア (e3/e7/e10) と 1.2 以内でつなぐため
+    # (等比のままだと内側端が 0.015 H になり、壁側の隅で h1 級に細分した e1/e5/e8 と同じリングの中で格子線が 75° 以上傾く)。
+    # 増加側の区間数が壁の期待層数 NL 以上になるよう 2 NL 区間から始め、公比 <= g まで増やす
+    cmax = float(np.max(np.sqrt(1 + G.dyr(xa_) ** 2))); s2_rel = h1 * 0.5 * (1 + cmax) / DR      # 対角辺の第一間隔 / 辺長 (r = 0 で L = sqrt2 dr)
+    NR = 2 * NL
+    while True:
+        cf_ = bump.coef(NR + 1, s2_rel); sp_ = bump.spacing(NR + 1, cf_)
+        if np.maximum(sp_[1:] / sp_[:-1], sp_[:-1] / sp_[1:]).max() <= g_t: break
+        NR += 2
     s_out = DR * (1 - 1 / prog_r(DR, NL, h1))                            # 壁帯の最外間隔 (概算)
     def far_n(L):
         n = prog_n(L, s_out * g_t, g_t) + 1
         while L * (1 - 1 / prog_r(L, n, s_out * g_t)) > P["HFAR"] * H and n < 400: n += 1      # 最終間隔 = L (r-1)/r
         return n
     NFY = far_n(float(np.max(G.yo(xa_))) - DR - G.YBOT); NFZ = far_n(G.ZFAR - G.ZO - DR)
-    m1, m2, mc = P["MILD1"] * h1, P["MILD2"] * h1, P["CORE_MILD"] * h1
+    kv = P["KV"] * h1
+    seams = {}                                                           # 継ぎ目の間隔の連動の記録 (station ごとの値。report に最小・最大を出す)
 
     def laws(x, pt, elen):
-        """station x での各辺の (節点数, 種別, 係数)"""
+        """station x での各辺の (節点数, 種別, 係数)。
+        継ぎ目の規則 (plan §5.1 B4-2): 共有辺を挟む 2 ブロックの「共有辺の端から出る辺」の第一間隔を比 g 以内に揃える。
+        端点ごとの拘束は match_spacing で解き (両隣との比が等しくなる幾何平均)、解けなければ ValueError で止める。
+        gmsh の transfinite は同値類ごとに節点数 1 つ・辺ごとに分布 1 つなので、継ぎ目を挟む両側の第一/最終間隔を同じ値から作る"""
         c = math.sqrt(1 + G.dyr(x) ** 2); ru, rl = G.r(x); L = {}
         cc = math.sqrt(1 + G.dyc(x) ** 2); co = math.sqrt(1 + G.dyo(x) ** 2)       # カウル内壁・外壁の傾き (鉛直の間隔 = 法線距離 × c)
         LT = G.yc(x) - G.yo(x); LFY = G.yo(x) - DR - G.YBOT
@@ -408,29 +452,48 @@ def build(out, P, contours, quiet=False):
         # 傾きの補正は 3 割だけ掛ける: 全部掛けると e2 側の eta が増えて平面部が厚くなる (円弧上 -9 % -> -6 %、平面部 +3 % 以内)
         k2 = (1 + 0.3 * (tilt("e2", "WU") - 1)) if ru > 0 else 1.0; k6 = (1 + 0.3 * (tilt("e6", "WL") - 1)) if rl > 0 else 1.0
         s = dict(e2=h1 * 0.5 * (1 + c) * k2 * elen["e2"] / DR, e6=h1 * 0.5 * (1 + cc) * k6 * elen["e6"] / DR, e4=h1 * c, e9=h1 * cc)
-        for e, sg in (("e2", 1), ("e6", 1), ("e9", 1), ("e4", -1)): L[e] = (NL + 1, "Progression", sg * prog_r(elen[e], NL, s[e]))
-        for e in ("e1", "e3", "e8", "e10", "hz00", "hz10", "hz20"): L[e] = (NZ, "Progression", 1.0)
-        hend = 0.5 * h1 * (c + cc)                                       # 両端細分: ランプ側とカウル側の平均
-        w = smooth((x - (x_r0 - P["E5_BLEND"] * H)) / (P["E5_BLEND"] * H))   # e5 は上流で一様、フィレットが消える位置 x_r0 までに h1 へ
-        huni = elen["e5"] / (NY - 1); h5 = (1 - w) * huni + w * hend      # 間隔で線形に混ぜる (対数で混ぜると節点の移動が上流側に偏り、壁面の格子線が x-y 面で 45° 傾く)
         def bl(n, Led, h):
             cf = bump.coef(n, h / Led); return (n, "Progression", 1.0) if cf is None else (n, "Bump", cf)
-        L["e5"] = bl(NY, elen["e5"], h5)
-        for e in ("e7", "e11"): L[e] = bl(NY, elen[e], max(mc, h5 * elen[e] / elen["e5"]))
+        # リング横断: 対角 e2/e6 は両端 s (Bump)、平面の対称面側 e4/e9 は壁から等比 (NR 区間)
+        for e in ("e2", "e4", "e6", "e9"): L[e] = bl(NR + 1, elen[e], s[e])
+        o4, o9 = s["e4"], s["e9"]                                        # リング外縁 (CUL・CLL 側) の間隔 = 両端細分の端
+        hend = 0.5 * h1 * (c + cc) * P["E5K"]                           # e5 (と SW・S の de の y) の両端: ランプ側とカウル側の平均 (B・C で露出壁の第一層)
+        # 隅 WU/WL と内側の隅 CUR/CLR: e1@WU・e5@WU (TOP|SIDE)、e3@CUR・e7@CUR・e2@CUR (TOP|SIDE・TOP|CORE・SIDE|CORE)、WL/CLR も同様。
+        # リングの中で格子線を 45° 以内に保つため e1/e3 (e8/e10, e7) の第一間隔を 1 つの値 F にする: F は e5 の端 hend と対角の端 s2/s6 の両方と 1.2 以内
+        # N_SIDE の中ほどのリング外縁の間隔 (対角 e2/e6 の端の法線成分の平均 = (s2 + s6)/(2 sqrt2)) も N_CORE の z 間隔 (e3/e10 の端 F) と接する
+        F = match_spacing([hend, s["e2"], s["e6"], (s["e2"] + s["e6"]) / (2 * math.sqrt(2))], g)
+        L["e5"] = bl(NY, elen["e5"], hend)
+        L["e7"] = bl(NY, elen["e7"], F)                                  # コアの側壁側: 内側の隅 CUR/CLR で e3/e10 と同じ F
+        L["e11"] = bl(NY, elen["e11"], match_spacing([o4, o9], g))     # コアの対称面側: リング外縁 o4 (CUL)・o9 (CLL) に合わせる
         for k in (2, 3, 4): L["vy3%d" % k] = bl(NY, elen["vy32"], hend)
-        for j, hh in ((0, m2), (1, h1), (2, h1), (3, h1), (4, h1)): L["hz%d1" % j] = bl(NSW, G.TSW, hh)
+        # z ∈ [0, W/2]: 継ぎ目 z = W/2 側 (e3/e10 は内側の隅) へ片側細分。**同値類の全辺で継ぎ目側の第一間隔を F に揃える**
+        # (CW1 は板厚 0.005 H の薄いブロックなので、上下の辺 e8・hz20 の分布が違うと格子線が大きく傾く。U1b・U1a も同じ分布で追従)
+        zl = lambda e: elen.get(e, G.ZW)
+        L["e1"] = (NZ, "Progression", -prog_r(zl("e1"), NZ - 1, F)); L["e3"] = (NZ, "Progression", prog_r(zl("e3"), NZ - 1, F))
+        L["e8"] = (NZ, "Progression", prog_r(zl("e8"), NZ - 1, F)); L["e10"] = (NZ, "Progression", -prog_r(zl("e10"), NZ - 1, F))
+        for j in (0, 1, 2): L["hz%d0" % j] = (NZ, "Progression", -prog_r(G.ZW, NZ - 1, F))
+        # z ∈ [W/2, W/2 + t_sw] (Bump): U2/CW2 の列 hz01/hz11/hz21 は z = W/2 側 F と z = z_o 側 hz?2 (h1) に連動。
+        # SW の hz31 (WL)・hz41 (WU) は e6/e2 の第一間隔・e8@WL (F)・側壁外面帯 hz32/hz42 の第一間隔 kv に連動
+        b21 = match_spacing([F, h1], g)
+        for j in (0, 1, 2): L["hz%d1" % j] = bl(NSW, G.TSW, b21)
+        a3 = match_spacing([s["e6"], F, kv], g); a4 = match_spacing([s["e2"], kv], g)
+        L["hz31"] = bl(NSW, G.TSW, a3); L["hz41"] = bl(NSW, G.TSW, a4)
         cap = lambda hh: min(hh, 0.999 * DR / NL)
-        for k, hh in ((0, h1), (1, h1), (2, h1), (3, h1), (4, m2)):
-            L["vy2%d" % k] = bl(NTC, LT, hh * cc if k < 4 else hh)
-            hh = cap(hh * co if k < 4 else hh); r_ = prog_r(DR, NL, hh); L["vy1%d" % k] = (NL + 1, "Progression", -r_)
+        # y: カウル外壁帯 vy1k (NL 区間、壁 = yo 側 h1 co)、板厚 vy2k (Bump、両端 h1 cc)。vy21 (C の CW1|CW2) は e6@WL・e5@WL・vy11@G21 に連動
+        v21 = match_spacing([s["e6"], hend, h1 * co], g)
+        for k in range(5):
+            L["vy2%d" % k] = bl(NTC, LT, v21 if k == 1 else h1 * cc)
+            hh = cap(h1 * co); r_ = prog_r(DR, NL, hh); L["vy1%d" % k] = (NL + 1, "Progression", -r_)
             L["vy0%d" % k] = (NFY + 1, "Progression", -prog_r(LFY, NFY, hh * r_ ** NL))
-        for j, hh in ((0, m2), (1, h1), (2, h1), (3, h1), (4, h1)):
-            hh = cap(hh); r_ = prog_r(DR, NL, hh); L["hz%d2" % j] = (NL + 1, "Progression", r_)
+        for j in range(5):                       # z = z_o から外へ: 側壁外面帯 hz{j}2 (NL 区間)。hz32・hz42 は kv (SW の Bump との連動)
+            hh = cap(kv if j >= 3 else h1); r_ = prog_r(DR, NL, hh); L["hz%d2" % j] = (NL + 1, "Progression", r_)
             L["hz%d3" % j] = (NFZ + 1, "Progression", prog_r(G.ZFAR - G.ZO - DR, NFZ, hh * r_ ** NL))
+        for k_, v_ in dict(F_over_h1=F / h1, b21_over_h1=b21 / h1, a3_over_h1=a3 / h1, a4_over_h1=a4 / h1, v21_over_h1=v21 / h1, s2_over_h1=s["e2"] / h1, s6_over_h1=s["e6"] / h1,
+                           hend_over_h1=hend / h1, o4_over_h1=o4 / h1, o9_over_h1=o9 / h1).items():
+            q = seams.setdefault(k_, [math.inf, -math.inf]); q[0] = min(q[0], v_); q[1] = max(q[1], v_)
         return L
 
     # ---- 断面の前計算 (gmsh の較正モデルは本体モデルを作る前に使い切る)
-    x_r0 = min([xb for (xa, ua, la), (xb, ub, lb) in zip(G.prof[:-1], G.prof[1:]) if ub == 0 and lb == 0 and all(q[1] == 0 and q[2] == 0 for q in G.prof if q[0] >= xb)] or [G.LSW])
     need_blk = lambda si: (PRESENT[ivs[si - 1][2]] if si > 0 else set()) | (PRESENT[ivs[si][2]] if si < len(ivs) else set())
     SEC = []
     for si, x in enumerate(xs):
@@ -447,6 +510,8 @@ def build(out, P, contours, quiet=False):
             else: elen[e] = math.dist(pt[a_], pt[b_])
         for e in ("e5", "e7", "e11", "vy32"): elen.setdefault(e, math.dist(pt[EDGE[e][0]], pt[EDGE[e][1]]))
         SEC.append(dict(pt=pt, nb=nb, ed=ed, elen=elen, wr=wr, law=laws(x, pt, elen)))
+    if P.get("SEC2D") is not None:          # 分布の調整用: 指定 x (/H) に最も近い station の断面だけを 2D で切り、継ぎ目の比と skew を出す (判定には使わない)
+        return section_2d(G, xs, SEC, [float(v) for v in np.atleast_1d(P["SEC2D"])], seams, quiet)
     # ---- gmsh モデル
     gmsh.model.add("junction"); ge = gmsh.model.geo; gm = ge.mesh
     S = []
@@ -511,10 +576,10 @@ def build(out, P, contours, quiet=False):
                     sk = np.maximum(sk, np.abs(th - 90) / 90)
                 res.setdefault(b, []).append((round(xs[si] / H, 3), round(float(sk.max()), 3), int((sk > 0.7).sum())))
         for b in res: print("%-7s" % b, " ".join("%.3f:%.2f(%d)" % t for t in res[b] if t[1] > 0.3))
-        n2 = int(len(ntag)); cnt = dict(NL=NL, NL_END=NL_END, NY=NY, NZ=NZ, NSW=NSW, NTC=NTC, NFY=NFY, NFZ=NFZ)
-        print("counts", cnt, "nx", [xlaw[i][0] for i in range(len(ivp))], "stations", len(xs))
+        n2 = int(len(ntag)); cnt = dict(NL=NL, NL_END=NL_END, NR=NR, NY=NY, NZ=NZ, NSW=NSW, NTC=NTC, NFY=NFY, NFZ=NFZ)
+        print("counts", cnt, "nx", [xlaw[i][0] for i in range(len(ivp))], "stations", len(xs)); print("seams", {k: [round(v[0], 4), round(v[1], 4)] for k, v in seams.items()})
         print("nodes (全節点が station 面上なので 2D の節点数 = 3D の節点数):", n2, " 生成時間 %.1f s" % (time.time() - t0))
-        gmsh.finalize(); return dict(VERDICT="DIM2", nodes=n2, stations=len(xs), counts=cnt)
+        gmsh.finalize(); return dict(VERDICT="DIM2", nodes=n2, stations=len(xs), counts=cnt, seam_spacings=seams)
     gmsh.model.mesh.generate(3)
     t_gen = time.time() - t0
     rep = dict(params={k: P[k] for k in sorted(P)}, contours={k: contours[k + "_src"] for k in ("ramp", "cowl")},
@@ -524,11 +589,12 @@ def build(out, P, contours, quiet=False):
                phys_stations=[x / H for x in xp], phys_regions=[v[2] for v in ivp], nx=[abs(xlaw[i][0]) for i in range(len(ivp))],
                x_ratio=[abs(xlaw[i][1]) for i in range(len(ivp))], wake_caps=[capf(i) / H if capf(i) else None for i in range(len(ivp))],
                n_stations=len(xs), x_adjacent_ratio_design=x_ratio_design, dx_min=float(dxs.min()), dx_max=float(dxs.max()),
-               counts=dict(NL=NL, NL_END=NL_END, NY=NY, NZ=NZ, NSW=NSW, NTC=NTC, NFY=NFY, NFZ=NFZ),
-               layer_rules=dict(wall="NL = prog_n(DR, h1, 1.2) + 4", end="NL_END = prog_n(DR, h1e, 1.2) + 4 (端面 sidewall_end・cowl_base・cowl_side の期待層数。plan §6.2)",
+               counts=dict(NL=NL, NL_END=NL_END, NR=NR, NY=NY, NZ=NZ, NSW=NSW, NTC=NTC, NFY=NFY, NFZ=NFZ), seam_spacings=seams,
+               layer_rules=dict(wall="NL = prog_n(DR, h1, 1.2) + 4", end="NL_END = prog_n(DR, h1e, 1.2) + 4 (端面 sidewall_end・cowl_base の期待層数。cowl_side は一般壁 NL。plan §6.2)", ring="NR: 対角 e2/e6 の Bump の増加側が NL 以上・公比 <= 1.15 (B4-2)", z="NZ = max(P.NZ, prog_n(W/2, h1, 1.15) + 1) (B4-2)",
                                 h1=h1 / H, h1e=h1e / H, dx_wake_max=dxw / H, wake_length=G.LWAKE / H, growth=g),
                n_blocks=len(vols), blocks_per_region={r_: len(PRESENT[r_]) for r_ in "ABC"}, untagged_boundary_faces=[str(u) for u in untag],
                tags={t: len(v) for t, v in groups.items()}, time_generate_s=t_gen)
+    gmsh.write(out + ".msh")                        # 検査の前に書き出す (check が gmsh を finalize して格子を解放する)
     rep.update(check(G, P, vols, groups, h1, h1e, out, NL, NL_END, [x for x, _, _ in ivs]))
     rep["time_total_s"] = time.time() - t0
     gates = dict(untagged=not untag, other_elems=rep["other_elems"] == {}, neg_jac_f32=rep["neg_jac_f32"] == 0, mixed_sign_volumes=rep["mixed_sign_volumes"] == 0,
@@ -539,7 +605,57 @@ def build(out, P, contours, quiet=False):
     rep["VERDICT"] = "PASS" if all(gates.values()) else "FAIL"
     json.dump(rep, open(out + "_report.json", "w"), indent=1, ensure_ascii=False)
     if not quiet: print(json.dumps({k: v for k, v in rep.items() if k not in ("params", "phys_stations")}, indent=1, ensure_ascii=False))
-    gmsh.write(out + ".msh"); gmsh.finalize(); return rep
+    return rep
+
+
+def section_2d(G, xs, SEC, xq, seams, quiet=False):
+    """断面 1 枚の 2D 四角形格子で、辺を共有する 2 つの四角形の「共有辺の端から出る辺」の長さの比 (3D の隣接間隔比の断面方向と同じ定義) と
+    skew をブロックの組ごとに出す (分布の調整用の診断。受入の判定は 3D の adjacent_spacing_check)"""
+    out = {}
+    for xv in xq:
+        si = int(np.argmin(np.abs(np.array(xs) - xv * G.H))); x = xs[si]; Q = SEC[si]
+        gmsh.model.add("sec"); ge = gmsh.model.geo; pt, ed = Q["pt"], Q["ed"]
+        pid = {p: ge.addPoint(x, pt[p][0], pt[p][1]) for p in sorted({p for e in ed for p in EDGE[e]})}; eid = {}
+        for e in ed:
+            a_, b_ = EDGE[e]
+            eid[e] = ge.addSpline([pid[a_]] + [ge.addPoint(x, p_[0], p_[1]) for p_ in Q["wr"][e][1:-1]] + [pid[b_]]) if e in Q["wr"] else ge.addLine(pid[a_], pid[b_])
+        face = {b: ge.addSurfaceFilling([ge.addCurveLoop([sg * eid[e] for e, sg in BLK[b]])]) for b in sorted(Q["nb"])}
+        for e, tg in eid.items(): n, typ, cf = Q["law"][e]; ge.mesh.setTransfiniteCurve(tg, n, typ, cf)
+        for f in face.values(): ge.mesh.setTransfiniteSurface(f); ge.mesh.setRecombine(2, f)
+        ge.synchronize(); gmsh.model.mesh.generate(2)
+        ntag, xyz, _ = gmsh.model.mesh.getNodes(); xyz = xyz.reshape(-1, 3)
+        idx = np.zeros(int(ntag.max()) + 1, np.int64); idx[ntag.astype(np.int64)] = np.arange(len(ntag))
+        qs, lab = [], []; names = sorted(face)
+        for b in names:
+            q_ = idx[np.asarray(gmsh.model.mesh.getElements(2, face[b])[2][0], np.int64)].reshape(-1, 4); qs.append(q_); lab.append(np.full(len(q_), names.index(b)))
+        q = np.vstack(qs); lab = np.concatenate(lab)
+        # 辺 (k, k+1) を共有する四角形の組。端点 a から出る辺は (a, 前の頂点)、端点 b から出る辺は (b, 次の頂点)
+        rec = {}
+        for k in range(4):
+            a, b = q[:, k], q[:, (k + 1) % 4]; pa, nb_ = q[:, (k + 3) % 4], q[:, (k + 2) % 4]
+            la = np.linalg.norm(xyz[pa] - xyz[a], axis=1); lb = np.linalg.norm(xyz[nb_] - xyz[b], axis=1)
+            for i in range(len(q)):
+                rec.setdefault((min(a[i], b[i]), max(a[i], b[i])), []).append((i, {a[i]: la[i], b[i]: lb[i]}))
+        pair, skw = {}, {}
+        for key, v in rec.items():
+            if len(v) != 2: continue
+            (i1, d1), (i2, d2) = v
+            for n_ in key:
+                r = max(d1[n_] / d2[n_], d2[n_] / d1[n_]); k_ = "%s|%s" % tuple(sorted((names[lab[i1]], names[lab[i2]])))
+                if r > pair.get(k_, (0,))[0]: pair[k_] = (float(r), [float(c) / G.H for c in xyz[n_][1:]])
+        for b in names:
+            qq = xyz[q[lab == names.index(b)]]; sk = np.zeros(len(qq))
+            for c_ in range(4):
+                u, v = qq[:, (c_ - 1) % 4] - qq[:, c_], qq[:, (c_ + 1) % 4] - qq[:, c_]
+                th = np.degrees(np.arccos(np.clip(np.einsum('ij,ij->i', u, v) / (np.linalg.norm(u, axis=1) * np.linalg.norm(v, axis=1)), -1, 1)))
+                sk = np.maximum(sk, np.abs(th - 90) / 90)
+            skw[b] = float(sk.max())
+        gmsh.model.remove()
+        key_ = "%.4f" % (x / G.H); out[key_] = dict(pairs=dict(sorted(pair.items(), key=lambda kv: -kv[1][0])), skew=skw, nodes=int(len(xyz)))
+        if not quiet:
+            print("x/H = %s  nodes %d  max ratio %.4f  max skew %.3f (%s)" % (key_, len(xyz), max(v[0] for v in pair.values()), max(skw.values()), max(skw, key=skw.get)))
+            for k_, v in list(out[key_]["pairs"].items())[:10]: print("   %-14s %.4f at (y,z)/H = (%.5f, %.5f)" % (k_, v[0], v[1][0], v[1][1]))
+    gmsh.finalize(); return dict(VERDICT="DIM2", sections=out, seam_spacings=seams)
 
 
 # ---------------------------------------------------------------- 検査
@@ -552,8 +668,26 @@ def cornerJ(Pn):
     return np.stack([np.einsum('ij,ij->i', np.cross(Pn[:, a] - Pn[:, c], Pn[:, b] - Pn[:, c]), Pn[:, d] - Pn[:, c]) for c, (a, b, d) in NBR.items()], 1)
 
 
-# 端面 (第一内部点距離 h1e・期待層数 NL_END で判定。plan §6.2 の表: cowl_base・sidewall_end・cowl_side)
-END_TAGS = ("sidewall_end", "cowl_base", "cowl_side")
+def hex_quality(xyz, hx, chunk=400000):
+    """頂点 Jacobian (float64 / float32 座標)・skew (面の内角の 90° からのずれ / 90)・AR (最長辺 / 最短辺) をヘキサごとに返す (gmsh 非依存の純関数)。
+    戻り値: (J, J32, sk, AR, Led)。符号の基準は呼び出し側で J の中央値の符号に揃える"""
+    x32 = xyz.astype(np.float32).astype(float)
+    J = np.vstack([cornerJ(xyz[hx[i:i + chunk]]) for i in range(0, len(hx), chunk)])
+    J32 = np.vstack([cornerJ(x32[hx[i:i + chunk]]) for i in range(0, len(hx), chunk)]); del x32
+    sk = np.zeros(len(hx))
+    for f in HF:
+        Pf = [xyz[hx[:, q]] for q in f]
+        for c in range(4):
+            a, b = Pf[(c - 1) % 4] - Pf[c], Pf[(c + 1) % 4] - Pf[c]
+            th = np.degrees(np.arccos(np.clip(np.einsum('ij,ij->i', a, b) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1)), -1, 1)))
+            sk = np.maximum(sk, np.abs(th - 90) / 90)
+    Led = np.stack([np.linalg.norm(xyz[hx[:, a]] - xyz[hx[:, b]], axis=1) for a, b in HE], 1); AR = Led.max(1) / Led.min(1)
+    return J, J32, sk, AR, Led
+
+
+# 端面 (第一内部点距離 h1e・期待層数 NL_END で判定。plan §6.2 の表: cowl_base・sidewall_end)。
+# cowl_side は一般壁 (h1・NL。2026-10-06 仕様訂正: z = 側壁外面の平面上で sidewall_out と節点・z 分布を共有するので h1 と h1e を同時に要求できない)
+END_TAGS = ("sidewall_end", "cowl_base")
 
 
 def model_classifier(G):
@@ -755,6 +889,12 @@ def adjacent_spacing_check(xyz, hx, gmax=1.2, labels=None, label_names=None, uni
     out["worst"] = [item(i) for i in np.argsort(-rmax_all)[:nworst]]
     for cls, m in (("x", isx), ("section", ~isx)):
         ii_ = np.flatnonzero(m); out[cls]["worst"] = [item(i) for i in ii_[np.argsort(-rmax_all[ii_])[:nworst]]]
+    if labels is not None and n_pairs:              # 参考: 全ブロック組の最大比 (超過の有無によらず。判定には使わない)
+        la0, lb0 = np.sort(np.stack([labels[hpair[:, 0]], labels[hpair[:, 1]]], 1), axis=1).T
+        kk = (la0.astype(np.int64) * 65536 + lb0) * 2 + isx; uk, inv = np.unique(kk, return_inverse=True)
+        mx = np.zeros(len(uk)); np.maximum.at(mx, inv, rmax_all)
+        out["max_by_block_pair"] = {"%s|%s|%s" % (nm(int(k // 2 // 65536)), nm(int(k // 2 % 65536)), "x" if k % 2 else "section"): float(v)
+                                    for k, v in zip(uk, mx)}
     if labels is not None and bad.any():
         la, lb = np.sort(np.stack([labels[hpair[bad, 0]], labels[hpair[bad, 1]]], 1), axis=1).T; bi = np.flatnonzero(bad); rb = rmax_all[bad]
         grp = {}
@@ -830,21 +970,21 @@ def check(G, P, vols, groups, h1, h1e, out, nl, nl_end, xstart):
     et2, _, cn2 = M.getElements(2)
     for t, c in zip(et2, cn2):
         if int(t) != 3: other[int(t)] = other.get(int(t), 0) + len(c)
-    hx = np.vstack(hx_l); used = np.unique(hx); x32 = xyz.astype(np.float32).astype(float)
-    J = np.vstack([cornerJ(xyz[hx[i:i + 400000]]) for i in range(0, len(hx), 400000)])
-    J32 = np.vstack([cornerJ(x32[hx[i:i + 400000]]) for i in range(0, len(hx), 400000)])
+    bq = {}
+    for t, surfs in groups.items():
+        q = []
+        for s_ in surfs:
+            _, _, c2 = M.getElements(2, s_); q.append(idx[np.asarray(c2[0], np.int64)].reshape(-1, 4))
+        bq[t] = np.vstack(q)
+    del idx, ntag
+    gmsh.finalize()                                 # msh は書き出し済み。検査は numpy 配列だけで行い、gmsh の格子を先に解放する (ピーク RSS を下げる)
+    hx = np.vstack(hx_l); used = np.unique(hx)
+    J, J32, sk, AR, Led = hex_quality(xyz, hx); min_edge = float(Led.min()); del Led
     sg = np.sign(np.median(J)); o = 0
     for hv in hx_l:
         s_ = np.sign(J[o:o + len(hv)]); mixed += int(not (np.all(s_ > 0) or np.all(s_ < 0)) or np.sign(s_.flat[0]) != sg); o += len(hv)
-    sk = np.zeros(len(hx))
-    for f in HF:
-        Pf = [xyz[hx[:, q]] for q in f]
-        for c in range(4):
-            a, b = Pf[(c - 1) % 4] - Pf[c], Pf[(c + 1) % 4] - Pf[c]
-            th = np.degrees(np.arccos(np.clip(np.einsum('ij,ij->i', a, b) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1)), -1, 1)))
-            sk = np.maximum(sk, np.abs(th - 90) / 90)
+    neg_jac, neg_jac_f32 = int((J * sg <= 0).sum()), int((J32 * sg <= 0).sum()); del J, J32
     o = 0; per = {}
-    Led = np.stack([np.linalg.norm(xyz[hx[:, a]] - xyz[hx[:, b]], axis=1) for a, b in HE], 1); AR = Led.max(1) / Led.min(1)
     for (ii, b), hv in zip(vols.keys(), hx_l):
         q = per.setdefault(b, dict(skew_max=0.0, ar_max=0.0, n=0)); m = slice(o, o + len(hv)); o += len(hv)
         if sk[m].max() > q["skew_max"]: q["skew_max"] = float(sk[m].max()); q["skew_at_x"] = xstart[ii] / G.H
@@ -861,12 +1001,6 @@ def check(G, P, vols, groups, h1, h1e, out, nl, nl_end, xstart):
     h32 = hx.astype(np.int32); k1, k2 = keys(np.vstack([h32[:, f] for f in HF])); od = np.lexsort((k2, k1)); k1, k2 = k1[od], k2[od]; del od
     new = np.r_[True, (k1[1:] != k1[:-1]) | (k2[1:] != k2[:-1])]; st = np.flatnonzero(new); cnt = np.diff(np.r_[st, len(k1)])
     b1, b2 = k1[st[cnt == 1]], k2[st[cnt == 1]]; del k1, k2
-    bq = {}
-    for t, surfs in groups.items():
-        q = []
-        for s_ in surfs:
-            _, _, c2 = M.getElements(2, s_); q.append(idx[np.asarray(c2[0], np.int64)].reshape(-1, 4))
-        bq[t] = np.vstack(q)
     a1, a2 = keys(np.vstack(list(bq.values()))); od = np.lexsort((a2, a1)); a1, a2 = a1[od], a2[od]
     dup = int(((a1[1:] == a1[:-1]) & (a2[1:] == a2[:-1])).sum())
     same = len(b1) == len(a1) and bool(np.all(b1 == a1) and np.all(b2 == a2))
@@ -875,8 +1009,6 @@ def check(G, P, vols, groups, h1, h1e, out, nl, nl_end, xstart):
     # ---- 壁第一層: 壁タグ別・節点別の |n . dx| / h1、第一内部点の資格、全数被覆、実層数、隣接間隔比 (検査の中核は first_layer_check)
     # 期待層数: 壁は生成側の NL、端面は NL_END = prog_n(DR, h1e, 1.2) + 4 (plan §6.2 の正式規則)。判定は接続から数えた実層数
     fl = first_layer_check(xyz, hx, bq, h1, h1e, nl, nl_end, G.DR, classify=model_classifier(G), expected_tags=WALL_TAGS, unit=G.H)
-    if "cowl_side" in fl and "ratio_min" in fl["cowl_side"]:     # 参考: cowl_side を一般壁の h1 で見た比 (判定には使わない)
-        fl["cowl_side"]["info_ratio_vs_h1"] = [fl["cowl_side"]["ratio_min"] * h1e / h1, fl["cowl_side"]["ratio_max"] * h1e / h1]
     # ---- 出力実座標の隣接間隔比・後流 Δx・形状ゲート
     names = sorted({b for (_, b) in vols}); bidx = {b: i for i, b in enumerate(names)}
     lab = np.concatenate([np.full(len(hv), bidx[b], np.int16) for (_, b), hv in zip(vols.keys(), hx_l)])
@@ -892,17 +1024,17 @@ def check(G, P, vols, groups, h1, h1e, out, nl, nl_end, xstart):
             if m.any(): dump.setdefault("sec_%.3f" % xq, []).append(Pf[m])
     dump = {k: (np.vstack(v) if isinstance(v, list) else v) for k, v in dump.items()}
     np.savez_compressed(out + "_sections.npz", **dump)
-    return dict(nodes=int(len(used)), hexes=int(len(hx)), other_elems=other, neg_jac=int((J * sg <= 0).sum()), neg_jac_f32=int((J32 * sg <= 0).sum()),
+    return dict(nodes=int(len(used)), hexes=int(len(hx)), other_elems=other, neg_jac=neg_jac, neg_jac_f32=neg_jac_f32,
                 mixed_sign_volumes=mixed, skew_max=float(sk.max()), skew_p99=float(np.percentile(sk, 99)), skew_gt090=int((sk > 0.9).sum()),
                 skew_gt070=int((sk > 0.7).sum()), ar_max=float(AR.max()), ar_gt1000=int((AR > 1000).sum()), ar_gt5000=int((AR > 5000).sum()), ar1000_skew_max=float(sk[AR > 1000].max()) if (AR > 1000).any() else 0.0,
-                min_edge=float(Led.min()), per_block=per, topology=topo, first_layer=fl, adjacent_spacing=adj, wake_dx=wk, shape=shp)
+                min_edge=min_edge, per_block=per, topology=topo, first_layer=fl, adjacent_spacing=adj, wake_dx=wk, shape=shp)
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("out"); ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--contours", required=True, help="ramp_contour.csv / cowl_contour.csv のあるディレクトリ (export_contours.py で作る)")
     ap.add_argument("--set", nargs="*", default=[]); a = ap.parse_args(); P = dict(P0)
-    for kv in a.set: k, v = kv.split("="); P[k] = float(v)
+    for kv in a.set: k, v = kv.split("="); P[k] = [float(u) for u in v.split(",")] if "," in v else float(v)
     if a.scale != 1.0:          # 細分列 (plan §6.2): h1・h1e・後流 Δx 上限・HX・HX_FAR を 1/scale、NZ を scale 倍。成長率 G は 1.2 固定 (層数で吸収)
         for k in ("H1", "H1_END", "DXW", "HX", "HX_FAR"): P[k] /= a.scale
         P["NZ"] = int(round((P["NZ"] - 1) * a.scale)) + 1

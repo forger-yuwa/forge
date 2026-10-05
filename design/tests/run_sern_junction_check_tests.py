@@ -4,6 +4,7 @@
 
 B4-0: 壁第一層検査 `first_layer_check`。B4-1: 出力実座標の隣接間隔比 `adjacent_spacing_check`、後流 Δx `wake_dx_check`、
 形状ゲート `shape_check` (と MOC 輪郭 `Contour` / カウル外壁のオフセット `Geom.yo`) — 末尾の (e)(f)(g)。
+B4-2: 継ぎ目の分布則 (片側等比 `prog_nodes`・継ぎ目の間隔の連動 `match_spacing`・z の節点数の規則) と `cowl_side` の一般壁分類 — (h)(i)。
 
 山場: 旧検査は対向節点が別の壁上の節点でも除外せず、層数も設定の記録だけだったので、全 6 面が壁で内部節点 0 の立方体でも
 6 壁 ok になった (2026-10-06 plan レビュー M1)。人工の格子を渡して
@@ -22,7 +23,8 @@ try:
     import gmsh  # noqa: F401
 except ImportError:                       # 検査の中核は gmsh を使わない。import だけ通す
     sys.modules["gmsh"] = types.ModuleType("gmsh")
-from hex_junction_model import first_layer_check, adjacent_spacing_check, wake_dx_check, shape_check, Geom, P0  # noqa: E402
+from hex_junction_model import (first_layer_check, adjacent_spacing_check, wake_dx_check, shape_check, Geom, P0,  # noqa: E402
+                                prog_nodes, prog_r, prog_n, match_spacing, END_TAGS, WALL_TAGS)
 
 FAIL = 0
 
@@ -214,6 +216,48 @@ s_ = gates(pin, pr, pout, pb2, pend)
 check("(g6) cowl_base の外側交点の y 違い: FAIL", not s_["ok"] and not s_["cowl_base_y"]["ok"], f"err_out {s_['cowl_base_y']['err_out']:.2e}")
 s_ = shape_check(np.vstack([pin, pr]), {"cowl_in": np.arange(len(pin)), "ramp": len(pin) + np.arange(len(pr))}, G)
 check("(g7) 必要なタグ (cowl_out ほか) の欠落: FAIL", not s_["ok"] and s_.get("cowl_out", {}).get("missing"))
+
+# ---------------------------------------------------------------- B4-2
+# (h) 継ぎ目の分布則 (1D)。単位 H
+h1, g = 1.6e-4, 1.2
+z = prog_nodes(1.0, 48, h1, at_end=True); dz = np.diff(z)
+check("(h1) §6.3 B′: 48 区間・終端 (継ぎ目側) の間隔 = h1、公比 1.153867、最大間隔 0.133488 H",
+      abs(dz[-1] - h1) < 1e-15 and abs(z[-1] - 1.0) < 1e-14 and abs(dz[0] / dz[1] - 1.153867) < 5e-7 and abs(dz.max() - 0.133488) < 5e-7,
+      f"終端 {dz[-1]:.6e} 公比 {dz[0] / dz[1]:.6f} 最大 {dz.max():.6f}")
+check("(h2) 片側等比の隣接比は全区間で一定 (<= 1.2)", np.allclose(dz[:-1] / dz[1:], dz[0] / dz[1], rtol=1e-12) and (dz[:-1] / dz[1:]).max() <= g)
+g_t = 1.0 + 0.75 * (g - 1.0); nz = prog_n(1.0, h1, g_t) + 1
+z2 = prog_nodes(1.0, nz - 1, h1, at_end=True); d2 = np.diff(z2)
+check("(h3) z の節点数の規則 NZ = prog_n(W/2, h1, 1.15) + 1 = 50: 第一間隔 >= h1・長さ <= W/2 の全辺で公比 <= 1.15",
+      nz == 50 and (d2[:-1] / d2[1:]).max() <= g_t and prog_r(0.92, nz - 1, 1.2 * h1) <= g_t, f"NZ {nz} 公比 {(d2[:-1] / d2[1:]).max():.6f}")
+# 継ぎ目の連動: 隣の間隔の全部と比 g 以内、両側の比が等しい (幾何平均)
+v = match_spacing([1.0, 1.4392], g)
+check("(h4) match_spacing: 隣 1.0・1.4392 の両方と比 <= 1.2 で、両側の比が等しい", max(1.4392 / v, v / 1.0) <= g and abs(1.4392 / v - v / 1.0) < 1e-12, f"{v:.6f}")
+try:
+    match_spacing([1.0, 1.5], g); bad = False
+except ValueError:
+    bad = True
+check("(h5) match_spacing: 比 1.5 > 1.2² の隣は連動できず ValueError (分布だけでは解けない継ぎ目で止める)", bad)
+# 生産形状 (ランプ 15°・カウル 5°) の隅の連動の鎖: 対角 e2/e6 の第一間隔 s2/s6、e5 の端 hend、側壁外面帯 kv の間で全部比 <= 1.2
+c, cc = 1 / np.cos(np.radians(15.0)), 1 / np.cos(np.radians(5.0)); s2, s6 = np.sqrt(2) * (1 + c) / 2, np.sqrt(2) * (1 + cc) / 2
+hend = 0.5 * (c + cc) * P0["E5K"]; kv = P0["KV"]
+F = match_spacing([hend, s2, s6, (s2 + s6) / (2 * np.sqrt(2))], g); a3 = match_spacing([s6, F, kv], g); a4 = match_spacing([s2, kv], g)
+v21 = match_spacing([s6, hend, cc], g); b21 = match_spacing([F, 1.0], g)
+links = [(F, hend), (F, s2), (F, s6), (F, (s2 + s6) / (2 * np.sqrt(2))), (a3, s6), (a3, F), (a3, kv), (a4, s2), (a4, kv), (v21, s6), (v21, hend), (v21, cc), (b21, F), (b21, 1.0)]
+rmax = max(max(p / q, q / p) for p, q in links)
+check("(h6) 隅の連動の鎖 (F・a3・a4・v21・b21) が全部比 <= 1.2", rmax <= g, f"最大比 {rmax:.4f}  F {F:.4f} a3 {a3:.4f} a4 {a4:.4f} v21 {v21:.4f} b21 {b21:.4f} (/h1)")
+w_kv1 = g * 1.0 / (s2 / g) - 1
+check("(h7) KV = 1 では a4 の窓 [s2/1.2, 1.2 h1] の幅が 0.1 % 未満 (KV = 1.02 を置く理由)", 0 <= w_kv1 < 1e-3, f"窓の相対幅 {w_kv1:.2e}")
+
+# (i) cowl_side は一般壁 (h1・NL)。端面は sidewall_end・cowl_base だけ (2026-10-06 仕様訂正)
+check("(i1) END_TAGS = (sidewall_end, cowl_base)、cowl_side は壁タグだが端面でない",
+      set(END_TAGS) == {"sidewall_end", "cowl_base"} and "cowl_side" in WALL_TAGS and "cowl_side" not in END_TAGS)
+ys = prog(H1, 1.15, NL + 3, tail=2)
+xyz, hx, F_ = box(np.linspace(0, 10 * H1, 4), ys, np.linspace(0, 10 * H1, 4))
+fl = first_layer_check(xyz, hx, {"cowl_side": F_["ymin"]}, H1, 9 * H1, NL, 3, DR)
+check("(i2) cowl_side は h1 (端面の h1e でない) と一般壁の層数 NL で判定: PASS", fl["cowl_side"]["ok"] and fl["cowl_side"]["layers_expected"] == NL
+      and abs(fl["cowl_side"]["ratio_min"] - 1) < 1e-12, f"比 {fl['cowl_side']['ratio_min']:.4f} 期待層数 {fl['cowl_side']['layers_expected']}")
+fl = first_layer_check(xyz, hx, {"cowl_side": F_["ymin"]}, 9 * H1, H1, NL, 3, DR)
+check("(i3) cowl_side の第一層が h1 の 1/9 (h1e 相当の設定で切った格子) なら FAIL", not fl["cowl_side"]["ok"], f"比 {fl['cowl_side']['ratio_min']:.4f}")
 
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)
