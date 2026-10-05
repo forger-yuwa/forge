@@ -49,9 +49,17 @@ def main():
     print(f"節点 {n}: 接続・境界タグ同一、動いた節点 {int(moved.sum())}{rng}、"
           f"最大 |Δx| {np.abs(d[:,0]).max():.3e} m (局所間隔比 {ratio.max():.3f})、最大 |Δy| {np.abs(d[:,1]).max():.3e} m")
     with h5py.File(src_res, "r") as s, h5py.File(dst, "r+") as f:
-        names = [q for q in s["VALUE"] if (q.startswith("ro")) and q in f["VALUE"]]
+        # 元にある保存量 (ro*) は全部写す。新しく変換した格子には化学種 roY* が無いので、無ければ作る
+        # (以前は両方にある量だけを黙って写し、run_1068 で roY0/roY1 が変換時の既定値のまま始まった、2026-10-05)
+        names = [q for q in s["VALUE"] if q.startswith("ro")]
+        made = []
         for q in names:
-            f["VALUE/" + q][...] = np.asarray(s["VALUE/" + q]).astype(f["VALUE/" + q].dtype)
+            if q not in f["VALUE"]:
+                f["VALUE"].create_dataset(q, data=np.asarray(s["VALUE/" + q]).astype(f["VALUE/ro"].dtype)); made.append(q)
+            else:
+                f["VALUE/" + q][...] = np.asarray(s["VALUE/" + q]).astype(f["VALUE/" + q].dtype)
+        if made:
+            print(f"宛先に無かったので作った量: {made}")
         bad = [q for q in names if not np.array_equal(np.asarray(f["VALUE/" + q]), np.asarray(s["VALUE/" + q]).astype(f["VALUE/" + q].dtype))]
     if bad:
         raise SystemExit(f"写した保存量が一致しない: {bad}")
