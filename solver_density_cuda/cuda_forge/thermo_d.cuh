@@ -729,33 +729,28 @@ THERMO_HD float thermo_Dbinary_raw_f(float Ma, float sa, float ea, float Mb, flo
 }
 
 // 全ラベルの係数を Dl[0..nLabel) に書く (面ごとに 1 回)。
+//   局所配列を持たない形 (2026-10-05 #7e): 実種 r ごとに q を昇順に回して num/den をスカラーで積み、X_q はその場で展開する。
+//   対 (r, q) は両側で 2 回評価するが、和の順序 (q の昇順)・ラベルへの集約の順序 (r の昇順) は配列版と同じでビット一致する。
 THERMO_HD void thermo_Dmix_lumped_f(const LumpDiffD& ld, int nLabel, const float* XL, float T, float P, float* Dl)
 {
-    if (nLabel <= 1) { for (int s = 0; s < nLabel; ++s) Dl[s] = 0.0f; return; }   // 現行 thermo_Dmix_species_f の n==1 と同じ
+    for (int s = 0; s < nLabel; ++s) Dl[s] = 0.0f;
+    if (nLabel <= 1) return;                     // 現行 thermo_Dmix_species_f の n==1 と同じ
     const int nr = ld.nReal;
-    float Xr[THERMO_MAX_DIFF_REAL], num[THERMO_MAX_DIFF_REAL], den[THERMO_MAX_DIFF_REAL];
     for (int r = 0; r < nr; ++r) {
-        float x = 0.0f;
-        for (int s = 0; s < nLabel; ++s) x += XL[s]*ld.E[s][r];
-        Xr[r] = x; num[r] = 0.0f; den[r] = 0.0f;
-    }
-    for (int r = 0; r < nr; ++r) {
-        for (int q = r + 1; q < nr; ++q) {
-            float d = thermo_Dbinary_raw_f(ld.MW[r], ld.sig[r], ld.eps[r], ld.MW[q], ld.sig[q], ld.eps[q], T, P);
+        float num = 0.0f, den = 0.0f;
+        for (int q = 0; q < nr; ++q) {
+            if (q == r) continue;
+            float xq = 0.0f;
+            for (int s = 0; s < nLabel; ++s) xq += XL[s]*ld.E[s][q];
+            float d = (r < q) ? thermo_Dbinary_raw_f(ld.MW[r], ld.sig[r], ld.eps[r], ld.MW[q], ld.sig[q], ld.eps[q], T, P)
+                              : thermo_Dbinary_raw_f(ld.MW[q], ld.sig[q], ld.eps[q], ld.MW[r], ld.sig[r], ld.eps[r], T, P);
             d = (d > 1.0e-30f ? d : 1.0e-30f);
-            num[r] += Xr[q]; den[r] += Xr[q]/d;
-            num[q] += Xr[r]; den[q] += Xr[r]/d;
+            num += xq; den += xq/d;
         }
-    }
-    for (int r = 0; r < nr; ++r) {
-        num[r] = (den[r] < 1.0e-30f)
+        const float Dr = (den < 1.0e-30f)
             ? thermo_Dbinary_raw_f(ld.MW[r], ld.sig[r], ld.eps[r], ld.MW[r], ld.sig[r], ld.eps[r], T, P)
-            : num[r]/den[r];                     // num[] を D_r の置き場に再利用
-    }
-    for (int s = 0; s < nLabel; ++s) {
-        float D = 0.0f;
-        for (int r = 0; r < nr; ++r) if (ld.A[s][r] > 0.0f) D += ld.A[s][r]*num[r];
-        Dl[s] = D;
+            : num/den;
+        for (int s = 0; s < nLabel; ++s) if (ld.A[s][r] > 0.0f) Dl[s] += ld.A[s][r]*Dr;
     }
 }
 
