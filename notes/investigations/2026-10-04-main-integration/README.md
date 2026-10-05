@@ -51,3 +51,11 @@ FAIL のときは main へ入れない (原因を切り分ける)。
 SERN セッションが main (77318d0e) を feature/sern-design に fast-forward で取り込んだ (衝突なし)。SERN 2D m6_on の回帰
 (`case/46` `run_1033_r11_1`、`FORGE_CUDA_BLOCKSIZE=128`) は R9b 3 本の平均と比べて 4 量ともノイズ床内で PASS (SERN 側の報告; 記録は sern-design 4607cfc9
 「Record R11」)。「統合ブランチ + 事前登録の回帰 + PR」の運用は SERN 側も了解。
+
+## 訂正 (2026-10-06)
+「Python 単体試験 (`tests/unit/*.py` 21 本): 統合版・sern・species の 3 本とも全件 rc 0」は**誤り**。集計スクリプトが `echo "$(basename $t) $?"` で、
+`$?` が `basename` の終了コード (常に 0) を拾っていた (`evidence/python_unit_3trees.txt` の 0 はすべて無効)。正しく取り直すと (species-transport 2026-10-06、統合版と同じ試験):
+引数なしで通るもの 14 本 PASS、7 本 (`test_dmix_complement`・`test_species_attrs_entry`・`test_species_lump_solver`・`test_species_record_solver`・
+`test_thermo_intervals`・`test_transport_gas_phase`・`test_transport_gpu`) は `--forge` (ソルバのバイナリ) が必須で**回っていなかった**、
+`test_twophase_diffusion_harness` は 170 秒で時間切れ。forge 必須の 7 本と harness は AWS のビルド済みバイナリで別途回す (plan thermophysics-solver-owned-species-db の記録へ)。
+回帰 4 腕・CUDA 単体 5 本の判定は影響を受けない。

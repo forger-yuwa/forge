@@ -75,9 +75,25 @@ def load_yaml_str(path):
     with open(path) as f:
         return yaml.load(f, Loader=_StrSafeLoader)
 
-# thermo_d.cu / speciesDB.cpp 内蔵 DB の MW [kg/mol] (speciesDBFile が無い run 用)。別名込み。
-BUILTIN_MW = {"N2": 0.0280134, "O2": 0.0319988, "AR": 0.039948, "CO2": 0.0440095, "HE": 0.0040026,
-              "H2O": 0.0180153, "WATER": 0.0180153, "AIR": 0.0289647}
+# 内蔵種の MW [kg/mol] (speciesDBFile が無い run 用)。ソルバと同じ共通データ data/species/forge_species_v1.yaml の気相種から作る
+# (id と別名; plan thermophysics-solver-owned-species-db #8, 2026-10-06)。以前は 8 種の手書きの写し (H2O 0.0180153 はソルバの
+# 0.01801528 と 1.1e-6 違い、CO・H2・OH など移行後の内蔵種は KeyError) だった。引き方は C++ findSpecies と同じ (完全一致 → 大小文字無視)。
+def _builtin_mw():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "species", "forge_species_v1.yaml")
+    with open(path) as f:
+        data = yaml.safe_load(f) or {}
+    out = {}
+    for e in data.get("species") or []:
+        if str(e.get("phase", "gas")) != "gas":
+            continue
+        mw = float(e["MW"])
+        out[str(e["id"])] = mw
+        for a in e.get("aliases") or []:
+            out[str(a)] = mw
+    return out
+
+
+BUILTIN_MW = _builtin_mw()
 
 
 def _find_ci(d, name):
