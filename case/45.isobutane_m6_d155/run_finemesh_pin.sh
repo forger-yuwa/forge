@@ -10,14 +10,15 @@ set -e
 export FORGE_CONVERTER="$(cd "$(dirname "$0")" && pwd)/conv_tolerant.sh"
 cd "$(dirname "$0")"
 EU=run_0086_euler_wallfit_pincal_r1_ext6k; P0=run_0092_ns_c2pin_pass2
-F1=run_0098_ns_finemesh_pass_staged; F2=run_0099_ns_finemesh_final; F3=run_0100_ns_finemesh_final_cond
+F1=run_0103_ns_finemesh_pass_cfl1; F2=run_0107_ns_finemesh_final; F3=run_0108_ns_finemesh_final_cond
+# 2026-10-05: ① は #11a/#11b/#11c を経て run_0103 (cfl 1・60000 step) で合格 (第三水準との差 +0.21 %)。③ は事前登録 (#11a) どおり cfl 1・60000 step、段階起動から。
 # 2026-10-05: 1 回目 (run_0095、IC 補間 → 本段 cfl 5 直行) は step 20 で発散 (x/r_t 55〜70 の壁際の薄セルで T → 6000 K 上限)。
 # 手順書 divergence-and-startup の段階起動 (soft 1 次 cfl 0.5 → mid 1 次 cfl 1 → 本段) を同じ IC に掛ける。番号 0096/0097 は欠番。
 RUN='import sys; sys.path.insert(0,"../../design"); from forge_design.evaluate.runner_axismach import run_staged_ns; from pathlib import Path; rc=run_staged_ns(Path(sys.argv[1]), stages=(sys.argv[2] if len(sys.argv) > 2 else "none")); print("forge exit", rc); sys.exit(rc)'
 report() { (cd ../../design && python3 -m forge_design.report.nozzle_report ../case/45.isobutane_m6_d155/$1 --euler ../case/45.isobutane_m6_d155/$EU --no-pptx > ../case/45.isobutane_m6_d155/$1/report_stdout.log 2>&1) || echo "report $1 failed (rc=$?)"; }
 
 # ① (段階起動: 本段の残差履歴の最終 step で完了を判定)
-if [ ! -f $F1/residual_history.csv ] || [ "$(tail -1 $F1/residual_history.csv | cut -d, -f1)" != "11999" ]; then
+if [ ! -f $F1/res_60000.h5 ]; then echo "① ($F1) が無い — 止める"; exit 2; fi; if false; then
   KF0=$(python3 -c "import json;print(json.load(open('c2pin_solve_pass2.json'))['k_f'])")
   python3 prep_c2pin.py $F1 $KF0 --problem problem_d155_ns_finemesh_pin.yaml --ic $P0 --stages full
   python3 -c "$RUN" $F1 full
@@ -38,8 +39,9 @@ echo "done solve"
 
 # ③
 KF=$(python3 -c "import json;print(json.load(open('c2pin_solve_fine.json'))['k_f'])")
-python3 prep_c2pin.py $F2 $KF --problem problem_d155_ns_finemesh_pin_final.yaml --ic $F1
-python3 -c "$RUN" $F2
+python3 prep_c2pin.py $F2 $KF --problem problem_d155_ns_finemesh_pin_final.yaml --ic $F1 --stages full
+sed -i -E "s/cfl: [0-9.]+, cfl_pseudo: [0-9.]+/cfl: 1.0, cfl_pseudo: 1.0/; s/nStepOuter: [0-9]+/nStepOuter: 60000/; s/outStepInterval: [0-9]+/outStepInterval: 5000/" $F2/solverConfig.yaml
+python3 -c "$RUN" $F2 full
 report $F2
 echo "done $F2"
 
