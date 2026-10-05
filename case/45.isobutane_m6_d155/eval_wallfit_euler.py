@@ -18,7 +18,8 @@ from forge_design.report.nozzle_report import load_field, eta_line  # noqa: E402
 X_E, X_F = 39.82004263, 95.22667765
 WIN_T = (41.82004263, 94.22667765); WIN_O = (24.82004263, 95.22667765)
 P_REF, MD = 2237.0, 6.0
-DELTA = dict(M_wave=0.001, M_resid_diff=0.001, overshoot=0.003, exit_core_M=0.00018, P_wave=0.010, P_resid_diff=0.010)
+DELTA = dict(M_wave=0.001, M_resid_diff=0.001, overshoot=0.003, exit_core_M=0.00018, P_wave=0.010, P_resid_diff=0.010,
+             P_slope_abs=0.03, overshoot_exitnorm=0.003, exit_M_dev=0.00018)   # 2026-10-05 codex plan M1 (CFD ピン): |傾き|・出口 M 規格化オーバーシュート・|出口 M − 6|
 _pair = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--pair=")), "interp,fit").split(",")   # A 腕, B 腕 (interp / fit / v4)
 
 
@@ -67,6 +68,11 @@ def quantities(F, h, fixed_from=None):
     eta_last = F["R"][-1] / F["R"][-1, -1]; eg = np.linspace(0.05, 0.7, 131)
     Me = np.interp(eg, eta_last, F["V"]["M"][-1])
     q["exit_core_M"] = float(np.trapezoid(Me * eg, eg) / np.trapezoid(eg, eg))
+    q["exit_M_dev"] = abs(q["exit_core_M"] - MD)
+    for eta in (0.0, 0.1):
+        q[f"P_slope_abs_eta{eta}"] = abs(q[f"P_slope_eta{eta}"])
+        dmx = 100 * (eta_line(F, "M", eta, xq) / q["exit_core_M"] - 1)          # 出口コア M で規格化 (m* によるレベルシフトを除く)
+        q[f"overshoot_exitnorm_eta{eta}"] = float(dmx[wo].max())
     return q, dist
 
 
@@ -149,7 +155,8 @@ except Exception as e:  # noqa: BLE001
 
 scal = list(next(iter(R.values()))["rep"].keys())
 out = {"runs": {k: {kk: vv for kk, vv in v.items() if kk != "dist"} for k, v in R.items()}, "mesh_check": mesh_check, "delta": DELTA}
-dkey = lambda c: ("M_wave" if c.startswith("M_wave") else "P_wave" if c.startswith("P_wave") else "overshoot" if c.startswith("overshoot")
+dkey = lambda c: ("M_wave" if c.startswith("M_wave") else "P_wave" if c.startswith("P_wave") else "overshoot_exitnorm" if c.startswith("overshoot_exitnorm")
+                  else "overshoot" if c.startswith("overshoot") else "P_slope_abs" if c.startswith("P_slope_abs") else "exit_M_dev" if c == "exit_M_dev"
                   else "exit_core_M" if c == "exit_core_M" else None)
 judge = {}
 for c in scal:
@@ -161,6 +168,9 @@ for c in scal:
         D = DELTA[dk]; U = max(3 * row["R_A"], 3 * row["R_B"], 2 * T, 2 * E, D / 10)
         row.update(Delta=D, U=U, tail_ok=bool(T <= D / 4), step_ok=bool(E <= D / 10))
         row["judge"] = ("small" if (U <= D / 2 and abs(row["B_minus_A"]) + U <= D) else "different" if abs(row["B_minus_A"]) - U > D else "hold")
+        if dk != "exit_core_M":   # 大きいほど悪い量: 非劣化 (B−A+U ≤ Δ)・改善 (B−A ≤ −U)・悪化 (B−A ≥ +U) (codex plan M1)
+            d_ = row["B_minus_A"]
+            row["noninferior"] = bool(d_ + U <= D); row["direction"] = "improved" if d_ <= -U else "worse" if d_ >= U else "within_U"
     judge[c] = row
 for k in ("M_resid_eta0.0", "M_resid_eta0.1", "P_resid_eta0.0", "P_resid_eta0.1"):
     dk = "M_resid_diff" if k.startswith("M") else "P_resid_diff"; D = DELTA[dk]
