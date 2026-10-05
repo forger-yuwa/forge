@@ -88,7 +88,6 @@ THERMO_HD void thermo_Dmix_lumped_tab_f(const LumpDiffD& ld, const LumpDiffTabD&
     }
 }
 
-#ifndef __CUDA_ARCH__
 #include <cmath>
 #include <vector>
 // ---- host: 表の構築 (double の式) ----
@@ -149,4 +148,3 @@ inline void lumpdiff_build_table(const LumpDiffD& ld, std::vector<LumpDiffPairTa
         }
     }
 }
-#endif

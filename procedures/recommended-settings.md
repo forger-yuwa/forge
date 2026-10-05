@@ -349,10 +349,12 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 | `output` 未指定 = 全量出力 | 2026-09-08 まで | `output.level` 既定 1 (全量は `level: 2`) |
 | k/ω 拡散の絶対ゼロ割ガード 1e-12 [m³] | バグ (2026-09-08 修正) | 相対ガード (コード側、キー無し) |
 | `wall_dist` を双対重心から測る変換 | バグ (2026-09-08 修正) | ノード座標 (コード側) |
+| lump の化学種拡散 = 構成種の質量分率平均 LJ の擬似分子 | 2026-10-05 まで (キー無し) | 実種展開の縮約 (methods/thermophysics.md §4.3)。旧結果の再現は旧バイナリ、変更をまたいで再開しない |
 | 内蔵種の LJ = #14 前の単一の値 (GRI-Mech 3.0 と Svehla 1962 の混在、`physProp.ljSource` 無し) | 2026-10-01 まで既定 | 既定 `[gri30, svehla1962]` (書かない)。旧 run の再現・継続だけ `ljSource: [legacy_v1]` |
 
 ## 変更ログ
 
+- `2026-10-05` — §9 に lump の化学種拡散の旧方式 (平均 LJ 擬似分子) を追加 (plan thermophysics-solver-owned-species-db #7)。
 - `2026-10-05` — §3 に二相拡散 (`condTwoPhaseDiffusion` 既定 0・将来課題) を追記。
 - `2026-10-01` — §3 に LJ の出典 `physProp.ljSource` (既定 `[gri30, svehla1962]`、旧 run の再現は `[legacy_v1]`) を追加、§9 に旧既定 (plan [thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §4.10 #14)。
 - `2026-09-25` — §1.0a に `space.slauWallNormalChi` の適用規則 (3D 側壁接続のみ 1、新構成は診断可能性の検査 + 3 条件) を追加 (plan [convection-slau-wall-normal-chi-usage-rule](../plans/accepted/convection-slau-wall-normal-chi-usage-rule.md))。
