@@ -55,3 +55,36 @@ def build_v4(d, lam=1e-9):
     w.fit_info = {"kind": "joint_fit_v4", "lam": lam, "h0": H0, "h1": H1, "n_cp": nc,
                   "r1_0": float(s(np.r_[0.0], 1)[0]), "r2_0": float(s(np.r_[0.0], 2)[0])}
     return w
+
+
+class UpstreamBlend:
+    """V4b の縮流部 (diagnostician 2026-10-05): x < −L_b は V0 の UpstreamThroatPoly と同一多項式、[−L_b, 0] だけ 5 次 Hermite で
+    (r, r′, r″)(−L_b) = V0 の値 → (1, s0, k0) へ C² 接続する。縮流部の端条件を変えても x < −L_b の形は動かさない。"""
+
+    def __init__(self, up0, s0, k0, L_b=1.5):
+        self.up0, self.L_b, self.s0, self.k0 = up0, float(L_b), float(s0), float(k0)
+        self.r_U, self.L_U = up0.r_U, up0.L_U
+        xb = np.r_[-self.L_b]
+        self._c = _hermite_quintic(-self.L_b, 0.0, float(up0.r(xb)[0]), float(up0.r(xb, 1)[0]), float(up0.r(xb, 2)[0]), 1.0, self.s0, self.k0)
+
+    @property
+    def mu(self):
+        return self.up0.mu
+
+    def r(self, x, deriv=0):
+        x = np.asarray(x, dtype=float); out = np.asarray(self.up0.r(x, deriv), dtype=float).copy()
+        m = x >= -self.L_b
+        if np.any(m):
+            out[m] = _poly_eval(self._c, -self.L_b, 0.0, x[m], deriv)
+        return out
+
+    def validate(self, n=4001):
+        return []
+
+
+def build_v4b(d, lam=1e-9, L_b=1.5):
+    """V4b: x ≥ 0 は V4 と同一スプライン、縮流部は UpstreamBlend。"""
+    w = build_v4(d, lam)
+    w.up = UpstreamBlend(d["wall"].up, w.fit_info["r1_0"], w.fit_info["r2_0"], L_b)
+    w.fit_info = dict(w.fit_info, kind="joint_fit_v4b", L_b=L_b)
+    return w

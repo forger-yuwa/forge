@@ -15,8 +15,8 @@ if sys.argv[1] == "--run":
     print(f"forge exit={rc}"); raise SystemExit(rc)
 run_dir, arm = Path(sys.argv[1]), sys.argv[2]
 ic = sys.argv[sys.argv.index("--ic") + 1] if "--ic" in sys.argv else None
-if arm not in ("interp", "fit", "v4"):
-    raise SystemExit("arm は interp / fit / v4")
+if arm not in ("interp", "fit", "v4", "v4b"):
+    raise SystemExit("arm は interp / fit / v4 / v4b")
 if arm == "fit":
     from moc_wall_fit_ab import joint_fit  # noqa: E402  (import で形状 A/B の測定も 1 回走る)
     _dc = RA.design_chain
@@ -31,12 +31,12 @@ if arm == "fit":
             print("validate:", msgs)
         return d
     RA.design_chain = design_chain_fit
-if arm == "v4":   # plan §5.1 #16: 始点の r′(0)・r″(0) を自由にした当てはめ + 縮流部 Hermite を接続 (wall_v4.py)
-    from wall_v4 import build_v4  # noqa: E402
+if arm in ("v4", "v4b"):   # plan §5.1 #16: 始点の r′(0)・r″(0) を自由にした当てはめ + 縮流部 Hermite を接続 (wall_v4.py)
+    from wall_v4 import build_v4, build_v4b  # noqa: E402
     _dc4 = RA.design_chain
 
     def design_chain_v4(p):
-        d = _dc4(p); d["wall"] = build_v4(d, 1e-9); d["wall_fit"] = d["wall"].fit_info
+        d = _dc4(p); d["wall"] = build_v4(d, 1e-9) if arm == "v4" else build_v4b(d, 1e-9, 1.5); d["wall_fit"] = d["wall"].fit_info
         return d
     RA.design_chain = design_chain_v4
 info = RA.prepare(C / "problem_d155_euler_c2final_n2400.yaml", run_dir, nsteps=12000, ic_from=ic, cfl_main=6.0, implicit_relax=0.7)
