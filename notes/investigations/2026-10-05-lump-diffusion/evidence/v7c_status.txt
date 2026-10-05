@@ -1,0 +1,13 @@
+BUILT 36cadb3b
+probe tab rc=0
+V4f tab VERDICT V4f: PASS
+[species] lump diffusion table: 55 pairs, 45091 cubic pieces, 50-30000 K (outside: formula)
+[species] lump diffusion: mass-weighted real-species reduction (lump_reduction_v1; plan thermophysics-solver-owned-species-db #7), 11 real species: N2 H2O H2 Ar OH O2 NO H O CO2 CO
+run_1906_lumpdiff_tabperf_old1 Time = 83.629 s (wall, 10000 steps, 8.36 ms/step)
+run_1907_lumpdiff_tabperf_form1 Time = 63.216 s (wall, 10000 steps, 6.32 ms/step)
+run_1908_lumpdiff_tabperf_tab1 Time = 23.258 s (wall, 10000 steps, 2.33 ms/step)
+run_1909_lumpdiff_tabperf_old2 Time = 19.266 s (wall, 10000 steps, 1.93 ms/step)
+run_1910_lumpdiff_tabperf_form2 Time = 22.692 s (wall, 10000 steps, 2.27 ms/step)
+run_1911_lumpdiff_tabperf_tab2 Time = 23.024 s (wall, 10000 steps, 2.30 ms/step)
+tab vs formula VERDICT: PASS
+DONE

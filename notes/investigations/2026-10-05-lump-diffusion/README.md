@@ -21,3 +21,10 @@ plan: [`plans/active/thermophysics-solver-owned-species-db.md`](../../../plans/a
 
 run (AWS `~/forge-integ`): case/46 `run_1900_lumpdiff_probe_new`・`run_1901`–`1904_lumpdiff_cont_{old,new}{1,2}`、case/16 `run_0985`–`0999_lumpdiff_{dry,wetoff,weton}_*`。
 初回投入は AWS の作業ツリーの未 commit の変更で checkout が中断し旧コミットをビルドしたため無効 (削除し同名で再実行)、2 回目は `__constant__` の定義位置でビルドエラー (91a79925 で修正)。
+
+## 7c 表引き (2026-10-05) — 撤回
+二元係数 D_rq·P を Neufeld のクランプ点で分けた ln T の 3 次 Hermite で引く版 (36cadb3b)。host の V4e は二元 1.9e-7・縮約 2.9e-7 で合格
+(初版は ln T を float で作り ln f を float で持ったため 2.13e-6 で基準 2e-6 を超えた; 基準は変えず精度を直した)。AWS (`evidence/v7c_*`):
+V4f PASS、表 vs 式の場 (10000 step、2 本ずつ) はノイズ床内。**1 step の時間 (SERN 2D)**: 旧 1.93、式 2.27、表 2.30 ms
+(1 回目の組 8.36/6.32/2.33 ms は他セッションと GPU を共有した時間帯で使わない)。**表引きでは速くならない** → 外して式のまま (ソルバは 91a79925 と同一)。
+run: case/46 `run_1905_lumpdiff_tab_probe`・`run_1906`–`1911_lumpdiff_tabperf_{old,form,tab}{1,2}` (AWS `~/forge-integ`、破棄予定)。

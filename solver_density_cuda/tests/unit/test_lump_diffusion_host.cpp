@@ -6,7 +6,6 @@
 // build: g++ -O2 -std=c++17 -I. -o test_lump_diffusion_host tests/unit/test_lump_diffusion_host.cpp
 //        (solver_density_cuda で。CUDA は使わない)
 #include "cuda_forge/thermo_d.cuh"
-#include "cuda_forge/lumpDiffTable.cuh"
 #include <cstdio>
 #include <cmath>
 #include <map>
@@ -142,47 +141,6 @@ int main()
         CHECK(pure.ld.nReal == 1, "同じ実種だけのラベル 2 つは実種 1 (自己拡散)");
         m = max_rel_float_vs_ref(pure, {0.3, 0.7}, 300.0, 101325.0, "pure");
         CHECK(m <= 1e-5, "純成分の自己拡散 D_rr: 相対差 %.2e", m);
-    }
-
-    printf("[V4e/7c] 表引き: 二元係数 ≤2e-6・縮約後 ≤1e-5 (独立 double 参照; T* = 0.3/100 の両側・表範囲外を含む)\n");
-    {
-        const Comp exh = {{"N2", 0.6389}, {"H2O", 0.32695}, {"H2", 0.01251}, {"AR", 0.00767}, {"OH", 0.00604}, {"O2", 0.00398},
-                          {"NO", 0.00206}, {"H", 0.00125}, {"O", 0.00037}, {"CO2", 0.00021}, {"CO", 0.00005}};
-        const Comp amb = {{"N2", 0.78084}, {"O2", 0.20946}, {"AR", 0.00934}};
-        Setup sern = build({exh, amb});
-        std::vector<LumpDiffPairTab> pairs; std::vector<LumpDiffC4> coef;
-        lumpdiff_build_table(sern.ld, pairs, coef);
-        LumpDiffTabD tb{}; tb.on = 1; tb.pair = pairs.data(); tb.coef = coef.data();
-        tb.Tmin = (float)LUMPDIFF_TAB_TMIN; tb.Tmax = (float)LUMPDIFF_TAB_TMAX;
-        printf("    表: %zu 組, %zu 区分\n", pairs.size(), coef.size());
-        double mb = 0, mbOut = 0; int nT = 0;
-        const int nr = sern.ld.nReal;
-        for (int r = 0; r < nr; ++r) for (int q = r + 1; q < nr; ++q) {
-            const double eps = std::sqrt((double)sern.ld.eps[r]*(double)sern.ld.eps[q]);
-            std::vector<double> Ts = {30.0, 50.0, 51.3, 300.0, 1234.5, 5000.0, 29999.0, 30000.0, 40000.0};
-            for (double c : {0.3, 100.0}) for (double f : {0.999, 1.0, 1.001}) Ts.push_back(c*eps*f);
-            for (int k = 0; k < 400; ++k) Ts.push_back(50.0*std::pow(600.0, k/399.0));
-            for (double T : Ts) {
-                const float Tf = (float)T, P = 1.0e5f;
-                const float d = lumpdiff_tab_D(tb, sern.ld, r, q, Tf, std::log((double)Tf), P);
-                const Real a = {sern.ld.MW[r], sern.ld.sig[r], sern.ld.eps[r]}, b = {sern.ld.MW[q], sern.ld.sig[q], sern.ld.eps[q]};
-                const double ref = dbin(a, b, (double)Tf, (double)P);
-                const double e = std::fabs(d - ref)/ref;
-                if (Tf >= tb.Tmin && Tf <= tb.Tmax) mb = std::fmax(mb, e); else mbOut = std::fmax(mbOut, e);
-                ++nT;
-            }
-        }
-        CHECK(mb <= 2e-6, "二元係数 (表の範囲内, %d 点): 最大相対差 %.2e", nT, mb);
-        CHECK(mbOut <= 2e-6, "二元係数 (範囲外 = 式へ戻る): 最大相対差 %.2e", mbOut);
-        double mr = 0;
-        for (double T : {40.0, 300.0, 1000.0, 2000.0, 35000.0}) for (double Ye : {0.0, 1e-8, 0.3, 0.9, 1.0}) {
-            const std::vector<double> XL = X_from_Y(sern, {Ye, 1 - Ye});
-            float Xf[2] = {(float)XL[0], (float)XL[1]}, Dl[2];
-            thermo_Dmix_lumped_tab_f(sern.ld, tb, 2, Xf, (float)T, 1.0e5f, Dl);
-            const std::vector<double> D = refD(sern, XL, T, 1.0e5);
-            for (int s = 0; s < 2; ++s) mr = std::fmax(mr, std::fabs(Dl[s] - D[s])/D[s]);
-        }
-        CHECK(mr <= 1e-5, "縮約後の係数 (SERN、純成分・微量・範囲外を含む): 最大相対差 %.2e", mr);
     }
 
     printf("[V4a] 非重複の恒等式 (double 参照; 外部種 = full、lump = 構成和、≤1e-12)\n");
