@@ -1,0 +1,7 @@
+run_1045_r7a_g4_lsw08 前提: OK GATES PASS {'C_T_with_shear': 'STEADY', 'C_T': 'STEADY', 'C_L': 'STEADY', 'C_M': 'STEADY'}
+run_1049_r7a_g4_lsw10_c60k 前提: OK GATES PASS {'C_T_with_shear': 'STEADY', 'C_T': 'STEADY', 'C_L': 'STEADY', 'C_M': 'STEADY'}
+C_T             Δg3 +0.003434  Δg4 +0.003442  U_g4 2.00e-06  G_A -1.101e-04  G_B -1.026e-04  G_B−G_A +7.492e-06
+C_T_with_shear  Δg3 +0.002086  Δg4 +0.002085  U_g4 2.00e-06  G_A -1.947e-04  G_B -1.956e-04  G_B−G_A -8.840e-07
+C_L             Δg3 +0.008975  Δg4 +0.009001  U_g4 9.68e-06  G_A -5.560e-04  G_B -5.302e-04  G_B−G_A +2.575e-05
+C_M             Δg3 -0.213185  Δg4 -0.213868  U_g4 2.69e-04  G_A +1.683e-02  G_B +1.615e-02  G_B−G_A -6.828e-04
+|Δg4| − U 0.002083 → VERDICT (追加試験): g4 でも識別成立 (|Δ| − U > 0.002)
