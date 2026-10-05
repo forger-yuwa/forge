@@ -1,3 +1,153 @@
+forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
+SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
+リポジトリに対する**外部レビュー**を依頼する。忖度なしで、主張はコードと実測 (run の数値) で検証すること。
+結論が「この計画/結果は誤り」でも構わない。両論併記で逃げず、推奨は 1 つに絞ること。
+
+ルール:
+- **ファイルを変更しない** (read-only サンドボックスで動いている。読む・実行して確認するのは可)。
+- 出力は日本語。識別子・ファイル名は原語のまま。
+- 指摘は **Critical / Major / Minor** の重大度付きで、必ず根拠 (`ファイル:行` または `run_*` の数値) と対案をセットで書く。
+- リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
+  用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
+- 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
+  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+
+## 依頼: 診断・設計判断の諮問 (stage = diagnose)
+
+あなたは forge の**診断・設計判断係**である。呼び出し側は実装と run を進めている別のモデル (Claude) で、
+**もっともらしい真因に飛びつく前に**あなたに諮っている。仕事は手を動かすことではなく、**次の一手を 1 つに絞ること**。
+
+### 前提
+- あなたは呼び出し側の会話を見ていない。下のブリーフと、自分で読んだファイルだけが根拠になる。
+  足りなければ推測で埋めずに「何が足りないか」を返す。
+- ブリーフは「観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 / 仮説」に分かれて渡される約束である。
+  **観測事実と呼び出し側の解釈が混ざっていたら、まず分け直す**。呼び出し側の要約より、run の数値・コード・
+  設定ファイルを自分で確かめた内容を優先する。
+- forge を起動しない。`python3` による `residual_history.csv` / `res_*.h5` の読み取りは**統計量だけ**を出す
+  (全量ダンプ・長いログ全文をコンテキストに流さない。`*.log`・`*.vtu`・`plans/README.md` は読まない)。
+
+### 診断の作法
+1. **「除外済み」というラベルを信用せず、潰した証拠を確認する** (run パス・設定差分・判定区間・VERDICT)。
+   証拠が足りない・判定期間が短い・変えた設定が実際には効いていない (YAML の階層違い等) なら**候補へ戻す**。
+   証拠が十分な候補は出し直さない。
+2. **症状と原因を分ける**。`detectNaN` が指す変数は結果であって原因ではない (EOS 床 → 負密度 → 圧力暴走 → ω の実績)。
+   後処理のアーチファクト (2 列混在の抽出、`centCoords` の置換、ソルバ `ypls` の退化) を先に疑う。
+3. **このリポジトリで繰り返された真因**を照合する: 投入設定の不整合 (IC と BC、亜音速に超音速 BC)、
+   押し出し 2 ノード spanwise、float32 桁落ち (双対幾何・r 重み)、stale build、cross-mesh IC の基底不一致、
+   絶対値のゼロ割ガード、境界ノードの凍結、YAML キーの階層違いで黙って無視される設定。
+4. 仮説は**確度順に最大 3 つ**。第 1 仮説には根拠を `ファイル:行` か run の数値で付ける。示せないものは「未確認」と明記。
+5. **判別する A/B を 1 つだけ**提案する。安く短く回せて、結果がどちらに出ても仮説が 1 つ消えるもの。
+   「A なら仮説 1、B なら仮説 2」を先に書く (結果を見てから解釈を作らない)。
+6. 少数点の一致・短い窓の値・未収束のトランジェント同士の比較を根拠にしない。
+
+### 設計判断 (plan §4・§6、codex 指摘の採否、result 段の解釈) を諮られたとき
+- 採否は指摘ごとに「採用 / 却下 / 要再検証」と理由。根拠が示されていない指摘は自分で該当箇所を読んでから判定する。
+- 検証計画は「何が出たら方針が誤りと言えるか」が定量的に書かれているかを見る。
+- 既定値の変更・opt-in 機能の削除は、plan の処置欄とユーザ決定の履歴を確認してから判断する
+  (「opt-in 残置」は削除対象でない)。
+- result 段の解釈は、主張ごとに根拠 run・判定ツールの VERDICT・判定区間が揃っているかを確かめる
+  (過渡ピークを定常値と、抽出アーチファクトを物理と誤認した実績は「予想どおり」に見える場面で起きた)。
+
+あなたの結論は**仮説**であって確定ではない。呼び出し側はこの A/B を回して確かめ、plan への反映も呼び出し側が行う。
+
+## ブリーフ (`notes/reviews/briefs/2026-10-05-m6-wall-fit-and-design-pipeline.md`)
+
+# 諮問: (A) MOC 壁の表現を「位置+壁角の同時当てはめ」に替えるか / (B) M6 設計チェーン (C2 方式) の再現パイプラインの置き場所
+
+日付 2026-10-05。主セッション Opus。諮問先は codex (`~/.config/forge/diagnose-backend` = codex)。
+関連 plan: `plans/active/verification-m6-axis-wave-mesh-su2.md` (§5.1 #9・#12, §9)、
+`plans/active/tooling-design-problem-campaign-recipe.md` (draft, plan 段 codex 済み)、
+`plans/accepted/tooling-nozzle-axismach-physical-throat.md` (A14 の棄却と Codex 訂正)。
+ブランチ `feature/nozzle-wall-fit-and-pipeline` (統合ブランチ `integrate/main-2026-10-05` = ed1fab3e から分岐、main への PR はユーザ側で未マージ)。
+
+## ユーザの要求 (原文の要旨)
+
+- 「この一連の設計が再現性あるようなしかけをしてほしい。マッハ数を変えて同じような形状を作るときは? ときには軸長さと出口径・入口径が決め打ち、
+  ときには軸長さ等でパレート解が欲しい」→「全部 problem ファイルにその情報を書く? スクリプトはどうなる?」
+- 「今ノズル壁はどうやって出力されている? MOC 時点で滑らかにできる?」→ 当方が (a) MOC 解像度を上げる / (b) 位置と壁角を同時に当てはめる、を提示 →
+  「(a) と壁角はどうやって合わせる?」
+- 評価の観点 (ユーザ決定 2026-10-05): 軸 M は形状の生成器にすぎない。**壁がなめらか・試験部に圧力波なし・オーバーシュートが小さい (凝縮を強める)** で良否を見る。
+- ユーザは r″ (壁の 2 階微分) のガタつきを最も気にしている。
+
+## (A) 壁の表現
+
+### 観測事実
+
+現行の生産壁 (`AxisMachCFDWall`, `design/forge_design/geometry/wall_axismach.py:79-83`) は逆 MOC (`wall_mode: cplus`) の壁点 (x, r) を
+**全点通過の 5 次 B-spline** で結ぶ。MOC が各点で出す θ は構築に使わず、`validate` で点上の θ 乖離 ≤ 0.2° を検査するだけ。
+出口端の傾きは CubicSpline の推定値でクランプ (MOC の θ_e ≈ 9e-8° ではない)。
+
+測定 (形状のみ・CFD なし、`case/45.isobutane_m6_d155/moc_wall_fit_probe.py` → `_band_ab/moc_wall_fit_probe.json`、problem `problem_d155_ns_c2final.yaml`、
+生産は `n_axis_inv: 1200` = 壁 334 点)。r″ 高周波 = 0.5 r_t 移動平均からの残差の最大 [1/r_t] (報告ツール `nozzle_report.py` と同じ定義):
+
+| n_axis_inv (壁点) | 補間壁 r″高周波 [0.5,2) / [2,6) / [6,20) / [20,60) / [60,95) | 同時当てはめ (λ=1e-7) 同 |
+| --- | --- | --- |
+| 600 (203) | 1.4e-2 / 9.9e-4 / 6.9e-5 / 3.9e-6 / 5.0e-5 | 4.4e-3 / 4.4e-4 / 6.8e-5 / 2.6e-5 / 2.9e-5 |
+| 1200 (334, 生産) | 7.4e-3 / 4.0e-4 / 5.9e-5 / 1.7e-5 / **1.6e-4** | 4.5e-3 / 3.7e-4 / 6.4e-5 / 1.2e-5 / 8.3e-6 |
+| 2400 (609) | 4.6e-3 / 3.5e-4 / 6.3e-5 / 3.5e-5 / **1.9e-4** | 4.6e-3 / 3.9e-4 / 6.4e-5 / **1.7e-6 / 2.6e-6** |
+| 9600 (2298) | 4.8e-3 / 3.6e-4 / 6.4e-5 / 4.6e-5 / **2.1e-4** | 4.7e-3 / 3.7e-4 / 6.4e-5 / 3.0e-7 / 2.7e-6 |
+
+- x < 20 の値は**どの表現・どの解像度でも同じ** (4.7e-3 / 3.7e-4 / 6.4e-5) → 0.5 r_t 移動平均が実在の曲率変化 (スロート直後 r″ 0.19 → 0.01) を拾う**指標の癖**。
+  plan §9 (2026-10-05) と §5.1 #12 に書いた「設計壁の r″ リップル x=2〜6 で 4e-4」はリップルではないと考える (図: r″ の 1200/9600 重ね描きで x<45 は一致、x≈1.3 に 1200 だけの小さなこぶ)。
+- x > 20 の補間壁の高周波は**解像度を上げるほど増える** (1.7e-5 → 4.6e-5, 1.6e-4 → 2.1e-4)。点間隔が縮むと点の微小な誤差を 5 次補間が r″ に増幅する (9600 の図で x 65〜90 に毛羽)。
+  したがって (a) 単独では r″ は良くならない。
+- 点の位置と角度はもともと整合: 補間壁の点上 |Δθ| は 1200 で ≤ 0.0064° (x<2)、x>6 で ≤ 0.0007°。`streamline_residual_max` 0.0036 は始点近傍。
+- 同時当てはめ: 目的 Σw(r−rᵢ)²/σ_r² + Σw(r′−tanθᵢ)²/σ_θ² + λ∫(r‴)²/σ_r² (σ_r 1e-6, σ_θ 1e-4)、5 次、ノット間隔 0.05 (スロート) → 0.5 r_t (x≥6)、約 220 制御点、
+  ハード拘束 r(x0), r′(x0)=x0/R, r″(x0)=1/R, r′(x_e)=tanθ_e。1200 で点上 |Δr| ≤ 4.7e-6 (x<2)・≤ 1.2e-6、|Δθ| ≤ 0.0042° (x<2)・≤ 0.0011°。
+  λ を 1e-5 以上にすると x<2 で |Δθ| 0.013° 以上に崩れる (λ=1e-2 で 0.44°)。
+- MOC 自体の位置の離散化誤差 (当てはめ壁同士、9600 基準): 600 で 4.3e-4 r_t、1200 で 1.9e-4、2400 で 9.0e-5 (1 次収束)。1200 → 15 µm (r_t 76.8 mm)。
+  θ は 1200 で ≤ 0.007°。n を変えると x_F が動く (1200: 95.104, 2400: 95.227, 9600: 95.268 r_t; `Lc_mode: explicit`)。
+
+### 経緯 (A14, 2026-08-17)
+
+r だけを目的にした LSQ 32 CP 壁は点上 |Δθ| 0.34° で、Euler の軸 ‖ΔM‖∞ 0.24 → 0.95 % に悪化 → 棄却。Codex 訂正: 棄却したのは「r だけを目的にした低自由度表現」であり、
+再挑戦するなら r と r′ の両方を目的に入れる。今回の案はその形で、自由度は点数並み (220)、点上 |Δθ| は A14 の 1/80。
+
+### 最終設計の現状 (参考)
+
+`case/45.isobutane_m6_d155/run_0051_ns_final_c2` (n_axis 1200 の補間壁 + C2 の δ): 試験部の波 0.003 %・オーバーシュート +0.018 %・出口コア M 6.00005 で事前登録の全項目合格。
+つまり現在の r″ の毛羽 (x>60 で 1.6e-4) は試験部の圧力波として観測されていない。
+
+### 問い (A)
+
+A1. 生産壁を「n_axis_inv 2400 + 位置・壁角の同時当てはめ」に替える方針は妥当か。替えるなら、この案の盲点 (例: 始点 x0 の放物線クランプとの整合、
+    当てはめが MOC の 1 次離散化誤差 1e-4 r_t を隠すこと、出口端の拘束、δ_r を足す `PhysicalNozzleWall` 側との関係) は何か。
+A2. 事前登録すべき合格基準と A/B の組。当方の案:
+    形状ゲート — 点上 |Δr| ≤ 5e-6 r_t、|Δθ| ≤ 0.005°、x∈[20,95) の r″ 高周波 ≤ 1e-5、単調。
+    CFD — 同じ n で補間壁と当てはめ壁の Euler A/B (同一メッシュ条件・同一バイナリ) で試験部の波・オーバーシュート・出口コア M の差がノイズ床以内
+    (ノイズ床 = 同一入力の再実行差 × 3; 「forge は同一入力でも再実行で揺れる」既知)、その後 NS は C2 の手順で 1 本。
+A3. r″ 高周波の指標の作り直し: 0.5 r_t 移動平均の残差は x<20 で実在の曲率を拾う。代替 (例: 高解像度の当てはめ壁との差、スケール依存の窓、スペクトル) のどれがよいか。
+
+## (B) 再現パイプライン
+
+### 観測事実
+
+- C2 方式の生産手順 (plan verification-m6 §5.1 #9, §9 2026-10-05) は case/45 内の使い捨てスクリプトの連鎖:
+  逆 MOC → Euler (`runner_axismach`) → CONTUR 積分法の δ で壁 (`deltastar_loop.run_pass0_integral`) → NS → E 法 (`band_select="edge"`) で出口 δ を測る →
+  `calibrate_contur.py` で cf_scale (k_f) を出口 δ に合わせる → 出口半径の仕様 (0.775 m) から r_t を解く (`prep_contur_cal.py`、δ を (r_t 比)^−0.2 で換算) →
+  最終 NS → 凝縮 ON の NS → `nozzle_report.py` で pptx。値の受け渡しは problem YAML の手書き (`problem_d155_ns_c2final{,_cond}.yaml`)。
+- `tooling-design-problem-campaign-recipe.md` (draft、plan 段 codex GO-with-changes 済み) が problem / campaign / recipe の 3 分割と
+  `resolve_evaluation`・`execution_plan.json`・3 値判定を決めているが、recipe は `axismach.euler/v1` と `axismach.deltastar_ns/v1` (旧生産レシピ = 帯局所 δ* 反復) の 2 本だけで、
+  C2 (E 法は測定器、CONTUR を出口 δ で較正、r_t を出口半径から解く) は載っていない。§5.1 #3, #4, #6, #7, #8 は未着手。
+- 「軸長・出口径・入口径を決め打ち」は既存の `Lc_mode: from_length` (L_c は従属) + r_t を出口半径から解く、で表せる見込み。「パレート」は campaign の `search`
+  (Euler で探索 → 上位だけ qualification で C2) に当たる。
+
+### 問い (B)
+
+B1. C2 を `axismach.contur_c2/v1` のような新 recipe として campaign-recipe plan に足すのでよいか。r_t 解き (出口半径の仕様を満たす外側反復) と k_f 較正 (NS 1 本 → E で測定 → 解く)
+    は recipe 内部の反復として持つのか、campaign の段に出すのか。
+B2. 実装順: campaign-recipe plan の未着手 (#3 熱力学, #4 評価量の抽出関数, #6–#8) と、C2 recipe・壁表現 (A) の順序。当方の案は
+    (A) の形状ゲートと Euler A/B → C2 recipe を「search 無しの campaign (evaluations だけ)」で M6 の最終設計を再現 (V: run_0051 の評価量と一致) → 決め打ち/パレートの順。
+B3. 再現の合格条件: 「同じ problem から run_0051 を再現」の許容差をどう決めるか (main の物性変更で壁が 0.5 µm 動くことを既に観測、forge の再実行揺れあり)。
+
+## 仮説 (当方)
+
+- r″ の本当の毛羽は x>20 の点の微小誤差を補間が増幅したもの。同時当てはめで 2 桁下がり、角度の忠実度は A14 と違って保たれる。
+- ただし現行の最終設計は既に波・オーバーシュートが合格水準で、壁表現を替える利得は「滑らかさの構造保証」であって軸 M の改善ではない見込み。
+
+## 関連 plan 全文 (`plans/active/verification-m6-axis-wave-mesh-su2.md`)
+
+```markdown
 # M6 ノズル試験部の軸 M の山: 軸近傍の数値解か物理か (軸細分 A/B + SU2 同一メッシュ比較)
 
 ## メタ
@@ -145,9 +295,7 @@ SU2 の軸ノードが 2 % 級に低い件は**原因未同定のソルバ間差
 | 9 | ~~生産化: C2 方式の最終壁~~ 済 (2026-10-05、§9; ⑥ 壁解像ツールは未実行で #12 へ) | ① run_0050 の場から E で δ_E(x_F) ② solve_rt で r_t (出口半径 0.775 m) ③ 新 r_t で C2 壁 (k_f を δ_C(x_F) = δ_E(x_F)·(r_t,new/r_t,prev)^−0.2 で解き直し)、合格: 出口半径 0.7750 ± 0.1 mm・r″ 高周波 ≤ 1e-5 (x≥2)・SOFT-PASS ④ 最終 NS 1 本 (IC=run_0050)、事前登録: NaN 0・末尾 5 枚 ≤ 0.005 %・波 ≤ 0.01 %・最大 M/6−1 ≤ +0.035 %・出口コア M 6.000 ± 0.02 %・δ_E(x_F)/δ_C(x_F) = 1 ± 1 % ⑤ 凝縮 ON 1 本 (run_0039 と同設定; onset・出口 g・出口軸/コア M を比較) ⑥ 壁解像 `check_wall_resolution.py` (簡易計算で x<17 の y1+ が 1 超、x=2 で 5.8) ⑦ 点列 `points_d155_final_*.csv` 再生成・README・plan done | O |
 | 10 | ~~ノズル設計の標準出力ツールと PowerPoint 報告 (ユーザ指示 2026-10-05)~~ 済 (2026-10-05、§9) | `design/forge_design/report/nozzle_report.py` (図・数値・条件表 → `report/report.json`) と `design/forge_design/report/build_pptx.py` (`.venv-pptx` の python-pptx で `report/<run>_report.pptx`)。設計チェーン (`feedback/deltastar_loop.py` の NS pass の後) で自動実行 (失敗しても chain は止めない)。手順書 `procedures/nozzle-design-outputs.md` を正本にし AGENTS.md の文書表から参照。中身: 条件 (解析領域図・境界条件表・数値設定表・物性表・ゲート) → 評価量 (試験部の波・オーバーシュート・傾き、出口コア M、ṁ 比、凝縮 onset・出口 g) → コンタ (M、M/M_d−1、(r_t/p)∂p/∂x、数値シュリーレン |∇ρ|r_t/ρ、静圧、静温; 凝縮ありは g・過冷却度 T_sat−T・過飽和度 S) → 線グラフ (軸 r=0 と r/r_w=0.1・出口断面・壁面で M、P、T、ρ、0.5ρu²、0.5u²、全圧 [total_quantities]、凝縮量; 壁は P_w、T_w、C_f、y1+ [第 1 内部節点基準]) → 壁形状 (r_w, r_w′, r_w″)。合格: run_0050 (凝縮なし) と run_0039 (凝縮あり) で pptx が生成され、validate と目視 QA を通る | O |
 | 11 | **main の取り込み** (ユーザ依頼 2026-10-05、急がない) | main がかなり進んでいるので、区切りのよいところで feature/gap-heating-precision に main を取り込み、本 plan の変更 (抽出 band_select・壁入力の 5 次補間・CONTUR 較正つまみ・nozzle_report) と衝突がないか確認して反映する | O |
-| 12 | 残りの気づき (記録) | ① `metrics.deltastar.massflow_ratio` は実寸化で r_t を 3 乗で掛けている (正しくは 2 乗); r_t が同じ run 同士の比は正しいが絶対値と r_t の違う比較は誤り → 修正 ② 圧力波の指標 (10 r_t P-spline 残差) は判定区間の端で節点位置が動き値が 2 倍変わる (C2: 0.0068 vs 0.0030 %) → 節点を x 固定にするなど頑健化 ③ 設計壁 (逆 MOC 点列の 5 次スプライン) 自体の r″ 高周波 4e-4 (x 2〜6)・1.6e-4 (x 60〜94) → **訂正 (2026-10-05, #13)**: x<20 の値は 0.5 r_t 移動平均が実在の曲率変化を拾う指標の癖 (どの壁・解像度でも同値)。毛羽は x>20 で、全点通過の補間が MOC 点の微小誤差を増幅したもの (MOC 解像度を上げると増える) ④ 最終壁の y₁⁺ がスロートで 9.0、x<17 で 1 超 (壁の 20 %) → `check_wall_resolution.py` を回し、必要ならスロート近傍の第 1 セルを細かく | O |
-| 13 | **MOC 壁の表現: 位置+壁角の同時当てはめ** (ユーザ要求「MOC 時点で滑らかに」、codex 諮問 2026-10-05 で順序つき採用) | 形状だけ (CFD 0 step) の A/B を先に: 同一 MOC 点群 `n_axis_inv` 2400、ノット h₀ 0.0125 (スロート側)・h₁ 0.5、変えるのは λ だけ (A=0, B=1e-9)。合格 (事前登録): **全 MOC 点** (x<0.5 も含め、端をゼロ埋めしない) で |Δr| ≤ 5e-6 r_t・|Δθ| ≤ 0.005°、全ノット区間の点間極値と単調性、始点 (x0=0 のスロート拘束 r′=0, r″=1/R) と出口 (設計壁の出口位置 r(x_e) をハード拘束、r′(x_e)=tanθ_e)、上流 Hermite との C⁰/C¹/C²、`PhysicalNozzleWall` 再構成後の解析微分 (出口角はδ_r′ を含むので 0 固定にしない)。判定: A 合格・B 不合格 → 正則化が忠実度を壊す (λ=0)。両方合格で B が曲率振動を減らす → B を CFD 候補。A も点間・物理壁で落ちる → 局所細分案を棄却。r″ の滑らかさ指標は #14 で作り直してから閾値を登録する (旧 1e-5 を移植しない)。CFD は形状ゲート通過後、campaign-recipe plan の順序 (評価量統一・熱力学修正・最小 C2 recipe の後) で同一 n・同一ビルドの Euler A/B → NS | O |
-| 14 | r″ の滑らかさ指標の作り直し (codex 諮問 Minor 採用) | 実際の壁関数の解析微分に、対称な局所多項式フィルタを複数の固定窓幅でかけて残差を見る。端部は別判定。滑らかな基準曲線と既知の振幅・波長の擾乱で応答を確かめてから閾値を事前登録。報告ツール (`nozzle_report.py:410` は壁 CSV を別スプラインで再補間している) も同じ関数に | O |
+| 12 | 残りの気づき (記録) | ① `metrics.deltastar.massflow_ratio` は実寸化で r_t を 3 乗で掛けている (正しくは 2 乗); r_t が同じ run 同士の比は正しいが絶対値と r_t の違う比較は誤り → 修正 ② 圧力波の指標 (10 r_t P-spline 残差) は判定区間の端で節点位置が動き値が 2 倍変わる (C2: 0.0068 vs 0.0030 %) → 節点を x 固定にするなど頑健化 ③ 設計壁 (逆 MOC 点列の 5 次スプライン) 自体の r″ 高周波 4e-4 (x 2〜6)・1.6e-4 (x 60〜94) ④ 最終壁の y₁⁺ がスロートで 9.0、x<17 で 1 超 (壁の 20 %) → `check_wall_resolution.py` を回し、必要ならスロート近傍の第 1 セルを細かく | O |
 
 ## 6. 検証
 
@@ -212,7 +360,6 @@ CSV / diag に edge_y_star・kappa_med・kappa_s を残す。
 | diagnose | `2026-10-05` | [`notes/reviews/2026-10-04-deltastar-extraction-robust-method-diagnose.md`](../../notes/reviews/2026-10-04-deltastar-extraction-robust-method-diagnose.md) 6 回目 (壁の 2 階微分・CONTUR 較正) | 波打ちは δ_r 表の直線補間が原因、5 次補間で 3 桁減。H2 の CFD 不要。CONTUR 較正は初期壁精度・局所構造排除のため (k_f, k_N, a)、x∈[8,90] で抽出 δ に合わせる | 全件採用。§5.1 #8a/#8b に事前登録 |
 | diagnose | `2026-10-05` | 同上 7 回目 (#8a ②・#8b) | ② FAIL のまま。縮流部の作り直し (Hermite) が原因で、縮流部 1.2 mm 内側と同根 → 縮流部も設計 + δ_r に揃える変更を提案 (ユーザ決定待ち)。CONTUR_cal 壁は run しない (傾き ±2 % が P を悪化させる見積もり)、試験部の傾き ≤0.3 % を基準に追加、4 番目の係数 Δm | 採用 (縮流部の変更はユーザ決定待ち) |
 | diagnose | `2026-10-05` | 同上 8 回目 (C1/C2 の CFD) | C2 を生産壁の生成器の候補に採用可 (E は測定器)。波は 3 壁同値、C2 の利点は滑らかさの構造保証・1 スカラー・出口 M。生産化は r_t 補正込み 1 pass、最終 NS + 凝縮 ON | 採用 (生産化はユーザ承認待ち) |
-| diagnose | `2026-10-05` | [`notes/reviews/2026-10-05-m6-wall-fit-and-design-pipeline-diagnose.md`](../../notes/reviews/2026-10-05-m6-wall-fit-and-design-pipeline-diagnose.md) (codex) | C0。同時当てはめの方向は採用だが現案の生産化は保留 (x<0.5 を集計から外していた: 全点で |Δr| 4.7e-5・|Δθ| 0.051° で不合格、h₀ 0.0125 で 3.9e-7・0.0018°)。run_0051 は残差 NOT CONVERGED・壁解像 FAIL・波/オーバーシュート DRIFTING で設計資格の合格に使えない。r″ 指標を作り直す。C2 は新 recipe に、順序は旧基準保存→評価量統一→熱力学→最小 C2→壁→寸法固定/探索 | 全件採用 (A1 2 件 → #13、A2/B3 → run_0051 を歴史的な回帰参照に限定 [再現: 残差 `NOT CONVERGED (stalled/plateau)`、`check_wall_resolution` FAIL y1+>1 31.0 %、オーバーシュート 0.0201→0.0184 % 単調減少で DRIFTING・波 0.0032 % DRIFTING (相対 7 %)・出口コア M STEADY 漸近 5.99992]、A3 → #14、B1/B2 → campaign-recipe plan §4.9・§5.1) |
 
 ## 7. 影響範囲
 
@@ -375,4 +522,668 @@ CSV / diag に edge_y_star・kappa_med・kappa_s を残す。
   報告: `case/45.isobutane_m6_d155/run_005{1,2}_*/report/*_report.pptx` (nozzle_report)。凝縮 ON の新バイナリは condS/condTsat を出力しないので、ツールが forge と同じ式で後計算
   (run_0039 で出力値と相対 2e-6・0.04 mK で一致を確認)。流量比はツール側で r_t 無次元の流量で比べる (#12 ①)。
 - `2026-10-05` — ユーザ依頼: main がかなり進んでいるので、どこかで取り込み・反映する (急がない) → §5.1 #11。
-- `2026-10-05` — ユーザ要求 (MOC 時点で滑らかに / 再現パイプライン) を codex (diagnose) に諮った: `notes/reviews/2026-10-05-m6-wall-fit-and-design-pipeline-diagnose.md`。形状だけの測定 (`case/45.isobutane_m6_d155/moc_wall_fit_probe.py` → `_band_ab/moc_wall_fit_probe.json`, 図 `_band_ab/moc_wall_fit_r2.png`): 補間壁の x>20 の r″ 毛羽は MOC 解像度を上げると増える (1200: 1.6e-4 → 9600: 2.1e-4 @x 60〜95)、同時当てはめで 2 桁下がる。MOC の位置の離散化誤差は 1 次 (1200 で 1.9e-4 r_t = 15 µm)。#12 ③ の x 2〜6 の 4e-4 は指標の癖と訂正。**run_0051 の位置づけを訂正**: 事前登録した波・オーバーシュート・出口 M の基準は満たすが、残差は plateau (NOT CONVERGED)、壁解像 FAIL (y1+>1 が 31 %, 最大は縮流部)、オーバーシュートは単調減少中 (DRIFTING; ゲートから離れる向き)。設計資格の合格ではなく歴史的な回帰参照として扱う → §5.1 #13・#14、§6.1。
+```
+
+## 参考: `plans/active/tooling-design-problem-campaign-recipe.md`
+
+```
+# 設計ツールの入力構造: problem (何を作るか) / campaign (どう探し・どう評価するか) / recipe (機種別の実行手順)
+
+## メタ
+
+- **area**: `tooling / optimization`
+- **status**: `draft`
+- **related_docs**:
+  - [`methods/design/overview.md`](../../methods/design/overview.md) (§問題定義 YAML — 本 plan の移行中である旨を注記)
+  - [`design/CAPABILITIES.md`](../../design/CAPABILITIES.md) (機種・メニューの対応表)
+- **related_plans**:
+  - [`tooling-nozzle-axismach-length-dv.md`](../accepted/tooling-nozzle-axismach-length-dv.md) (§2 の「ドライバは dv dict に対して汎用」はコードと矛盾 — 本 plan §5.1 #8 で訂正)
+  - [`tooling-nozzle-deltastar-core-matched-euler.md`](../accepted/tooling-nozzle-deltastar-core-matched-euler.md) (δ\* 補正の生産レシピ = `axismach.deltastar_ns/v1` の中身)
+  - [`tooling-nozzle-sern-chain.md`](tooling-nozzle-sern-chain.md) (SERN の多作動点 MOO — 後続で同じ契約に載せる)
+- **created**: `2026-09-27`
+- **owner**: `Claude (主セッション) / ユーザ`
+
+## 1. 目的
+
+forge_design を「ユーザと対話しながら、機種 (風洞 axismach / ベル+スラスタ / デュアルベル / SERN、将来は熱制約・FEM) ごとの
+最適化フローを組める」基盤にする。現状は **YAML に書いた内容と実際に動くコードの間に検査できる約束事が無い**ため、
+書いても無視される設定・黙って入る既定値・入口の名前で決まる物理が生じている (§3)。
+完了時には、axismach で「problem (基準値) + campaign (探索・評価要求)」から、何が回るかを実行前に解決・表示・拒否でき、
+「Euler で探索 → 上位 N 点を δ\* 補正 NS で評価 → 補正後で最終順位」が 1 つの campaign で回る状態にする。
+
+## 2. スコープ
+
+- **やる**:
+  - スキーマ `forge.problem/v1` (何を作るか: 仕様・ガス・形状パラメータの基準値・作る物の物理条件) と
+    `forge.campaign/v1` (探索: dv と範囲・目的・制約・探索法 / qualification: 上位の選び方・評価手順の列・最終順位の決め方) の骨格。
+  - 機種 adapter の公開契約: 変数一覧 (名前・単位・独立/従属・対応モード)、評価手順 (recipe) 一覧と各 recipe の必須入力・出力・検査する VERDICT。
+  - `resolve_evaluation(problem, candidate, recipe)`: 副作用なしで実行計画 (形状・メッシュ・実効 solverConfig/bcond・段・必須入力・検査予定 VERDICT・値の出所) を返す。
+  - axismach の recipe 2 本: `axismach.euler/v1` (現 `prepare` + 段階起動) と `axismach.deltastar_ns/v1` (現 `deltastar_loop` の生産レシピ)。
+  - 既存の不具合修正: `run_staged` の同一メッシュ段間引き継ぎを `restart_field.py` に、semiperfect の γ/cp の扱いの分離、dv の min/max の置き場所。
+  - 利用例 1 本で端から端まで検証: case/44 va3 M4.19 で L_c を Euler 探索 → 上位 2〜3 点を δ\* 補正 → 補正後で最終順位。
+- **やらない** (別 plan / 後続):
+  - 機種非依存の汎用 stage DAG エンジン (codex 2026-09-27 諮問で却下: δ\* は壁を変えて再評価する反復で段の直列に乗らない)。
+  - 既存 problem YAML の一括移行 (旧形式は読み続ける。新形式は新規 campaign から)。
+  - ベル (`opt/driver.py`)・SERN (`opt/driver_sern.py`) の adapter 化 (axismach で契約を確かめてから、§5.1 #9 以降)。
+  - 熱構造 FEM・CHT の recipe (CAPABILITIES §4 で 📋。契約上の置き場所だけ §4.5 で決める)。
+  - MOO (サロゲート) を axismach に繋ぐこと (初回の探索法は grid。§5.1 #10)。
+
+## 3. 関連 docs と前提 (観測事実, 2026-09-27)
+
+根拠の詳細はブリーフ [`notes/reviews/briefs/2026-09-27-design-problem-schema.md`](../../notes/reviews/briefs/2026-09-27-design-problem-schema.md) の観測事実 1〜10。
+
+- semiperfect でも `gas.gamma`/`gas.cp` を書かせ、省略すると黙って γ 1.4 / cp 1004.5 (`probdef.py:167-168`)。
+  値は forge `physProp` への素通し (TP では無効)・出口一様性診断への引数 (`runner_axismach.py:581-582`; ただし `core_radius_traced` は出力の `sonic` から M を作り
+  `gamma` を使っていない = 未使用引数, codex plan レビュー m7)・NS の ω 床初期化 (`runner_axismach.py:820-829`; **TP の `roe` から CPG の式で T を逆算しており不整合**。
+  codex の `run_0509` 場での検算で 57 % のノードが 50 K 下限に張り付く, plan レビュー M1)・`cfd_gas: cpg` の CPG 定数・SERN `frozen_tp` の設計側 `GasCPG` で使われる。
+- `dv.L_c.min/max` は axismach の探索に使われない (`probdef.py:221-226` の範囲検査と MOO ドライバだけが読む)。
+  runner は自分で計算した許容範囲 (va3 では `[0.01, 10.94]`) で検査する。YAML の `max: 14.0` は設計上ありえない値のまま。
+- MOO ドライバは機種ごとに別実装で runner を固定 import (`opt/driver.py:40,77`, `opt/driver_sern.py:41`)。風洞の L_c 最適化は
+  problem YAML を読まない使い捨てスクリプト (`case/42.isobutane_wt/optimize_axislaw_A_shortest.py`, 条件・範囲がスクリプト内定数)。
+- Euler/NS は YAML で表せず入口で決まる (`runner_axismach` CLI は常に Euler + slip、NS は `feedback.deltastar_loop` からだけ)。
+- `--prepare-only` では YAML の `cfl_main` が効かず準備時 cfl 4.0 (`runner_axismach.py:477,620`)。同じ problem で入口により実効設定が変わる。
+- `run_staged` は同一メッシュの段間引き継ぎに `interp_field.py` を使う (`runner_axismach.py:538-540`)。AGENTS.md 違反。
+  case/44 run_0509–0511 では runner を prepare で止め、段階起動を case 内スクリプト `run_lumpX_staged.py` に置き換えた。
+- 数値設定の正本 `procedures/recommended-settings.md` の §1/§3 (cfl 6+relax 0.7, nStepInner 4) と §4 Euler 設計評価 (cfl 4 / nStepInner 5) が
+  食い違う (codex 諮問 Minor)。recipe は適用範囲と版を持たせ、どちらを採るかを recipe 側で明示する。
+- 方向の判断: codex (diagnose) に諮った — [`notes/reviews/2026-09-27-design-problem-schema-diagnose.md`](../../notes/reviews/2026-09-27-design-problem-schema-diagnose.md)
+  — 結論「汎用 DAG ではなく機種別 runner + 小さな共通契約。まず axismach に副作用なしの `resolve_evaluation` を作り Euler/δ\* NS の計画差分で境界を検証」。
+  採否表は同記録の末尾。ユーザ承認 2026-09-27 (「現状方針でいきましょう」)。
+
+## 4. 設計方針
+
+### 4.1 3 つの置き場所
+
+| 置き場所 | 持つもの | 持たないもの |
+| --- | --- | --- |
+| `problem.yaml` (`forge.problem/v1`) | 機種 `kind`、仕様 (Pt, Tt, M_design, r_throat …)、ガス (モデル・組成・入力基準)、形状パラメータの**基準値** (例 `L_c: 8.0`)、**作る物の物理条件** (壁の熱条件・乱流の有無など、NS 評価で必須になるもの) | 探索範囲 (min/max)、目的・制約、評価手順の選択、数値設定 |
+| `campaign.yaml` (`forge.campaign/v1`) | `problem` への参照、seed、`search` (探索する dv と範囲・目的・制約・探索法・探索中の評価 recipe)、`qualification` (上位の選び方・評価手順の列と入力参照・最終順位の決め方) | 物理条件・数値設定の直書き |
+| recipe (機種別コード, 名前 + 版 `axismach.euler/v1`) | 形状生成・メッシュ・段階起動・δ\* 反復・停止条件・数値設定 (推奨設定のどの節に従うかを明記)・検査する VERDICT | 探索範囲 |
+
+- 1 点だけ回す (今回の再計算のような) ときは `search` の無い campaign (`evaluations` だけ) にする。
+- 探索範囲には 2 種類ある: **ユーザの探索範囲** (campaign に書く) と**設計が成立する範囲** (adapter が候補ごとに計算して検査する、人は書かない)。
+  設備の上限 (全長など) は campaign の制約に書く。
+- 旧形式 (1 ファイルに dv の min/max を含む) は読み続ける。新形式では problem に min/max があれば**拒否**する (黙って無視しない)。
+
+### 4.2 adapter の公開契約
+
+機種 adapter (初回は axismach のみ) は次を返す関数を持つ:
+
+- `variables()`: 変数名・単位・独立/従属・有効な `Lc_mode` などの対応モード。campaign はここに無い変数を探索できない。
+  `Lc_mode: from_length` のとき `L_c` の探索は拒否 (従属量なので)。
+- `recipes()`: recipe 名・版 → 必須入力 (他の評価結果の参照を含む)・problem に必須の物理条件・出力 (評価量と単位)・検査する VERDICT。
+- `feasible_range(problem, name)`: 設計が成立する範囲 (L_c の許容範囲など)。
+
+### 4.3 `resolve_evaluation(problem, candidate, recipe) -> ExecutionPlan`
+
+- **副作用なし** (forge・メッシュ変換・ファイル書き込みを呼ばない)。
+- 返すもの: 形状の識別子 (Euler 設計壁か δ\* 補正壁か + 生成元)、メッシュ条件、**実効の** solverConfig/bcond (壁 BC、CFL、段、γ/cp の出所)、
+  必須入力とその充足状況、検査予定の VERDICT (種類・対象量・判定区間)、各値の出所 (problem / recipe 既定 / 推奨設定の節)。
+- 矛盾は実行前に拒否する: NS recipe なのに壁の熱条件が無い、`from_length` なのに L_c を探索する、problem に min/max がある、必須入力の欠落 など。
+- 実行時は解決済みの計画を run ディレクトリに `execution_plan.json` として保存する (来歴)。実行は計画だけを読む (CLI・case 内の後編集に依存しない)。
+- **事前に決まるものと実行後に決まるものを分ける** (codex plan レビュー M2): campaign 開始時の検証では、入力を「充足」「将来生成される参照」
+  (例: δ\* pass 1 の壁は pass 0 の NS 場から作られる) 「欠落」に分類し、欠落だけを拒否する。具体的な実行計画は recipe が**各 pass・各段の直前に確定**して保存する。
+- 成果物の参照は run ディレクトリ名でなく **candidate・形状 ID・メッシュ・輸送種配置・エネルギー基準・特定 snapshot と内容ハッシュ**で持ち、不一致を拒否する
+  (現状の `ic_from` は run ディレクトリの最大番号 `res_*.h5` を拾い、継続計算後は別の場を読む: `runner_axismach.py:805`)。
+- 段ごとの実効設定と履歴は既存 `StageManifest` (`stage_manifest.json`) に保存し、**全段**を計画と照合する (最終 solverConfig だけを見ない)。
+
+### 4.4 VERDICT の扱い
+
+- 生の VERDICT (`NOT CONVERGED` など) は書き換えない。campaign の採否は「どの VERDICT を合格条件にしたか」を別に記録する。
+- 要求された評価の未実行・判定ファイルの欠落は不合格。
+- qualification の用途判定は生の VERDICT と別に `accepted / rejected / incomplete` の 3 値で持つ (codex plan レビュー M3)。
+  δ\* のゲート (ṁ_NS/ṁ_E, 出口コア M) は **NS・Euler 両系列の定常性**を確認したうえで判定し、反復上限でも不合格なら `rejected` として最終順位から除く。
+  判定ファイルの欠落・solver 失敗は `incomplete` (合格にしない)。全候補が不合格なら「勝者なし」を返す。
+  最終順位は補正後の目的量・制約を**再評価**して決める (Euler の順位を流用しない)。既存 `run_pass` は solver 戻り値を表示して先へ進み収束検査も `check=False`
+  (`deltastar_loop.py:156`) なので、recipe 側で判定を強制する。
+- δ\* 補正後の壁は**別の形状**として扱い、後段 (凝縮・3D・FEM) がどちらの形状を評価するかは入力参照で固定する。
+
+### 4.5 熱制約・FEM の置き場所 (今回は実装しない、契約だけ決める)
+
+- 熱が**制約**なら探索中の評価 (`search.evaluator` か制約評価) に入れる。勝者だけに FEM をかけても熱制約付き最適化にはならない。
+- 片方向 FEM は追加 recipe、双方向 CHT は界面反復を所有する別 recipe。
+
+### 4.6 γ/cp の分離
+
+- semiperfect では熱力学の本体は `gas` のモデル (NASA-9)。**TP の R は組成から直接取り、温度は組成・エネルギー基準 (`thermoHrefTemp`) と整合した EOS で復元する**
+  (NS の ω 床初期化の CPG 逆算はこれで置き換える; codex plan レビュー M1)。
+- 定数 γ/cp が本当に要る箇所 (`cfd_gas: cpg`・`frozen_tp` の設計側 `GasCPG`) は**近似用の参照定数**として別名で扱う。**γ* と cp(Tt) のように別温度の値を組み合わせない**
+  (va3 で R が 292.59 vs モデル 285.27 = +2.6 %)。同一参照温度の γ/cp の組、または R と一方の定数で持つ。ユーザ記入値とモデル値が食い違えば警告。
+- 暗黙の既定 (1.4 / 1004.5) への fallback は semiperfect では禁止 (CPG では従来どおり)。
+- 出口一様性診断の `gamma` は未使用引数なので整理だけする (ガスモデル経由化は不要; plan レビュー m7)。
+- 試験は 2 種類に分ける: **熱力学の整合性試験** (R・T の復元が EOS と一致) と、**不具合修正に伴う結果変化の評価** (ω 床修正後の NS が旧 run からどれだけ動くか; 「旧結果不変」を合格条件にしない)。
+
+### 4.7 評価量の定義は 1 つの抽出関数で固定する (codex plan レビュー M4)
+
+評価量ごとに**抽出位置・補間格子・積分重み・正規化・版**を固定し、探索・時系列判定・旧 run 比較を同じ関数で行う。現状は runner (`runner_axismach.py:572`,
+軸 200 点補間・出口は x_E) と case 側 (`case/44.vitiated_air_wt/lumpX_series_csv.py:13,30`, 軸ノード上・出口は x_max−2 r_t) で定義が違い、
+同じ `run_0509` の場で軸 M 目標差 max が 0.002129 vs 0.002120 (0.41 %) と食い違う。`run_0509` は**未収束 (残差 plateau) の準定常回帰参照**として扱う。
+
+### 4.8 メッシュ条件は recipe ごとに固定し、壁解像をゲートにする (codex plan レビュー M5)
+
+- Euler と NS でメッシュ条件 (特に `wall_first_frac`) は別物。現状 `prepare_ns` は problem の `mesh.wall_first_frac` を優先し (`runner_axismach.py:746-747`)、
+  Euler 用 0.005 がそのまま NS に渡る (NS 既定 4.5e-5 の約 111 倍)。メッシュ条件は **recipe の持ち物**にし、problem の `mesh` は recipe ごとの節に分けるか recipe 既定を上書きする明示キーにする。
+- δ\* 補正の各 pass で: メッシュ品質 (`check_mesh_quality.py`) 不合格なら投入停止、cross-mesh IC の適合性確認、低 Re SST の**局所 y₁⁺** (`check_wall_resolution.py`; ソルバ `ypls` は使わない, AGENTS.md 壁解像確認)
+  が不足なら qualification を `rejected`。
+
+## 5. 実装ステップ
+
+1. スキーマと検証 (`design/forge_design/probdef.py` 周辺に `campaign.py` を新設)。旧形式の読み込みは維持。
+2. axismach adapter の `variables()` / `recipes()` / `feasible_range()` (`evaluate/runner_axismach.py` から抽出)。
+3. `resolve_evaluation` と `execution_plan.json`。
+4. recipe `axismach.euler/v1` (段間は `restart_field.py`)、`axismach.deltastar_ns/v1` (`feedback/deltastar_loop.py` を呼ぶ)。
+5. campaign 実行器 (grid 探索 → qualification → 最終順位、ledger)。
+6. case/44 で端から端まで。
+
+### 5.1 残作業 (優先順)
+
+| # | 項目 | 内容 | 担当 |
+| --- | --- | --- | --- |
+| 1 | ~~plan 段 codex レビュー~~ | 完了 2026-09-27 (GO-with-changes, C0/M5/m2, 全件採用 → #2–#7 と §4.3/4.4/4.6/4.7/4.8/§6 に反映; §6.1) | O |
+| 2 | ~~V0 ノイズ床の取得~~ | 完了 2026-09-27 (種 DB plan の基準として取得; 抽出は現行 case 側 `lumpX_series_csv.py`、#4 の統一抽出関数ができたら再抽出して併記): `run_0513`–`0515` の 3 反復で許容差 ṁ 1e-4 相対・M 1e-5・T 0.01 K・軸 M 目標差 1e-5 (下限が効く)。詳細は `thermophysics-solver-owned-species-db.md` §6 冒頭 | O |
+| 3 | 熱力学の修正 | §4.6: TP の R を組成から・NS ω 床の T を EOS 整合で復元、γ/cp の参照定数化・fallback 禁止・未使用 `gamma` 引数整理。合格: 熱力学整合性の単体試験 (va3 で R 285.2704、IC 場で逆算 T と `res` の T の差 ≤0.01 K)、CPG / semiperfect / `frozen_tp` の読込試験。NS への影響は旧 run 比の変化量を記録 (不変を合格条件にしない) | O |
+| 4 | 評価量の抽出関数 | §4.7: 軸 M 目標差・軸 M 出口・出口質量流束平均 M/T・ṁ を 1 モジュールに定義 (版付き)。runner の `collect` と case の系列スクリプトをこれに置換。合格: `run_0509` で両旧定義との差を記録し、新定義で `check_quasisteady --series-csv` を再判定 | O |
+| 5 | ~~`run_staged` の段間引き継ぎ修正~~ | 完了 2026-09-27 (種 DB plan #3b で実施): `run_staged`/`run_staged_ns` の段間を restart_field (ビット一致、species ハッシュの継承つき) に。配管 run `case/44.vitiated_air_wt/run_0520_species_attrs_runner`。旧 runner 経路の run との本段の差は未計測 (丸め程度の見込み) | O |
+| 6 | スキーマ骨格と検証 | `forge.problem/v1` / `forge.campaign/v1`。problem の min/max 拒否、未知キー拒否、recipe ごとの `mesh` 節。合格: 単体テスト (正例 2・負例 5 以上) | O |
+| 7 | axismach adapter 契約 + `resolve_evaluation` | §4.2/§4.3 (入力の 3 分類、pass ごとの計画確定、snapshot ハッシュ参照、全段照合)。合格は §6 V1 | O |
+| 8 | recipe 2 本と campaign 実行器 | §4.4 の 3 値判定・勝者なし・補正後の再評価と最終順位、§4.8 のメッシュ/y₁⁺ ゲート。合格は §6 V2 | O |
+| 9 | length-dv plan の記述訂正 | `plans/accepted/tooling-nozzle-axismach-length-dv.md` §2 の「ドライバは汎用」に訂正注記 | O |
+| 10 | ベル・SERN の adapter 化 | axismach で V1/V2 が通った後。方針は別 plan で | F |
+| 11 | axismach へのサロゲート MOO 接続 | 探索法の追加。grid で足りない需要が出てから | F |
+| 12 | result 段の解釈と codex result レビュー | V1/V2 の結果解釈を上位に諮ってから `--stage result` | F |
+
+## 6. 検証
+
+事前に決める参照値・許容差 (結果を見てから変えない):
+
+- **V0 ノイズ床** (§5.1 #2, 数値を変える作業の前に取る): 同一バイナリ・同一初期場・同一実効設定で 3 回反復し、§4.7 の抽出関数で量ごとに
+  許容差 = max(反復差の最大 × 3, 絶対下限 ṁ 1e-4 相対・M 1e-5・T 0.01 K)。1 回の差をそのまま許容差にしない (codex plan レビュー m6)。
+- **V1 (配線の検証, CFD 0 step)**: va3 M4.19 L_c8 の同じ候補に `axismach.euler/v1` と `axismach.deltastar_ns/v1` の実行計画を解決して項目比較する。
+  合格: Euler 計画は slip 壁・Euler 設定・Euler メッシュ条件、NS 計画は no-slip + problem の壁熱条件 + NS メッシュ条件 (`wall_first_frac` を数値で照合) + δ\* 入出力に解決され、
+  **説明できない設定差 0・無視された有効入力 0・共通層に入った物理の分岐 0**。pass 1 の壁が「将来生成される参照」として分類されること。
+  負例: NS 計画で壁熱条件を消す → 拒否、problem に min/max → 拒否、`from_length` で L_c を探索 → 拒否、snapshot ハッシュ不一致 → 拒否。
+  どちらかが CLI や case 内の後編集に依存したら不合格。
+- **V1b (判定ロジック, CFD 0 step)**: 合成した評価結果で「Euler 順位が NS で逆転」「判定ファイル欠落 → incomplete」「全候補 rejected → 勝者なし」を試験する。
+- **V2 (端から端まで)**: case/44 va3 M4.19 で campaign 1 本: `search` = grid L_c ∈ {7.0, 7.5, …, 10.0} を `axismach.euler/v1`、目的 = 軸 M 目標差 max 最小 (§4.7 定義)、
+  `qualification` = 上位 2 点に `axismach.deltastar_ns/v1`、最終順位 = 補正後の同じ目的量。合格:
+  - 各 Euler 評価: NaN 0、評価量が `check_quasisteady` STEADY (残差は plateau でも可、生の VERDICT はそのまま記録)。L_c8 の Euler 評価が `run_0509` と V0 許容差以内。
+  - 各 δ\* 評価: メッシュ品質 PASS、局所 y₁⁺ ≤1 (面積割合と位置を報告)、NS・Euler 両系列 STEADY のうえでゲート |ṁ_NS/ṁ_E − 1| ≤ 0.3 %・出口コア M ±0.1 %
+    (deltastar-core-matched-euler plan の値)。**ゲート不合格は `rejected` として記録され最終順位から除かれること** (記録しただけでは V2 合格にならない)。
+  - 最終順位が補正後の目的量で決まり、少なくとも 1 候補が `accepted`。全候補 `rejected` なら V2 は不合格 (勝者なしの挙動は V1b で確認済みとする)。
+  - すべての run ディレクトリに段ごとの `execution_plan.json` と `stage_manifest.json` があり、全段の実効設定が計画と差分 0。
+- **単体**: スキーマ検証の正例/負例テスト、`resolve_evaluation` の決定性 (同入力で同出力)。
+
+### 6.1 レビュー記録 (codex)
+
+| 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
+| --- | --- | --- | --- | --- |
+| plan | 2026-09-27 | [2026-09-27-tooling-design-problem-campaign-recipe-plan.md](../../notes/reviews/2026-09-27-tooling-design-problem-campaign-recipe-plan.md) | GO-with-changes, C0/M5/m2 | 全件採用。M1 (γ*/cp(Tt) の R 不整合・NS ω 床の CPG 逆算) → §4.6・#3 (R 292.59 vs 285.27 と `runner_axismach.py:822-829` を当方で再現)。M2 (事前計画と実行後成果物の区別・snapshot ハッシュ) → §4.3・#7。M3 (qualification の 3 値判定・勝者なし・補正後の再評価) → §4.4・#8・V1b/V2。M4 (評価量の定義差 0.41 %) → §4.7・#4。M5 (NS メッシュに Euler の `wall_first_frac` が渡る・y₁⁺ ゲート) → §4.8・V1/V2 (`runner_axismach.py:746-747` を再現)。m6 (V0 を 3 反復×安全係数に) → #2・V0。m7 (出口診断の `gamma` は未使用) → §3・§4.6 訂正。判断役 (codex) 自身の指摘で却下が無いため、採否の別途諮問は省略 |
+
+## 7. 影響範囲
+
+- `design/forge_design/probdef.py`, 新規 `design/forge_design/campaign.py` (仮), `evaluate/runner_axismach.py`, `feedback/deltastar_loop.py`
+- `design/CAPABILITIES.md` (契約・recipe 一覧を追記)、`methods/design/overview.md` §問題定義 YAML、`.claude/skills/design-intake/SKILL.md` (インテークの出力を problem + campaign に)
+- 既存 case の旧形式 YAML は変更しない
+
+## 8. 完了条件
+
+- [ ] 関連 `methods/design/overview.md` の現在仕様を更新済み
+- [ ] 実装・検証完了 (本計画の §6 を満たす)
+- [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録し、Critical / Major の採否を残作業表に反映済み
+- [ ] 本計画の `status` を `done` に変更し、§9 に変更ログを記載
+- [ ] ファイルを `plans/active/` → `plans/accepted/` へ移動
+- [ ] [`plans/README.md`](../README.md) の一覧を同期
+
+## 9. 変更ログ
+
+- `2026-09-27` — codex plan 段レビュー (GO-with-changes, C0/M5/m2) を全件採用し §3・§4.3/4.4/4.6/4.7/4.8・§5.1・§6 を改訂。実装順は ①熱力学 ②pass ごとの計画と成果物参照 ③合否・最終順位 ④評価量と V0 ⑤メッシュ・壁解像ゲート (V0 取得は数値変更の前)。
+- `2026-09-27` — 初稿。codex diagnose 諮問 (`notes/reviews/2026-09-27-design-problem-schema-diagnose.md`) の推奨とユーザとの対話
+  (dv は campaign、Euler/δ\* NS の切り替えは campaign の recipe 選択、NS に要る物理条件は problem、探索後に上位だけ δ\* 補正 = qualification) を方針として確定。ユーザ承認。
+```
+
+## 参考: `plans/accepted/tooling-nozzle-axismach-physical-throat.md`
+
+```
+# A13: 上流履歴込み δ\* と物理スロート再定義 (+ A14: 制約付き LSQ B-spline A/B)
+
+## メタ
+
+- **area**: `tooling / optimization`
+- **status**: `done`  <!-- 2026-08-17 起票・同日 A13 採用 / A14 棄却 -->
+- **related_docs**:
+  - [`methods/design/overview.md`](../../methods/design/overview.md) (「axis-Mach チェーン」節)
+- **related_plans**:
+  - 親: [`../accepted/tooling-nozzle-axismach-viscous-deltastar.md`](../accepted/tooling-nozzle-axismach-viscous-deltastar.md) (A12 — 本計画はその 2 つの近似を除く)
+- **created**: `2026-08-17`
+- **owner**: `sano` (方針 = ユーザ + Codex レビュー 2026-08-17、実装: Claude 自走)
+
+## 1. 目的と方針決定の経緯
+
+A12 の δ\* 補正には近似が 2 つ残っている: (i) **δ\* の弧長をスロート起点で測る**
+(= スロートで δ\*=0、収縮部からの境界層発達履歴を無視)、(ii) その結果
+**物理スロートが設計スロートと同一点** (幾何スロートの移動・壁角の非ゼロ化が潜在化)。
+
+外部レビュー (ChatGPT 案 + Codex 補強、ユーザ採択 2026-08-17) に従い:
+
+1. **A13**: δ\* を**入口からの弧長**で計算 (上流は亜音速 1D の縁条件)、
+   補正後輪郭から**真の幾何スロート ($r_W'=0$) を探索**し、その
+   $(x_{t,W}, r_{t,W}, r''_{t,W})$ へ上流 5 次 Hermite を**作り直す** (下流がマスター)。
+2. **A14**: 制約付き最小二乗 B-spline を**本流の形状表現として** A/B する
+   (エクスポート層のみは CAD≠CFD 形状となるため不採用 — Codex 指摘)。
+   制御点数は固定 20 でなく誤差ゲートから自動決定。raw MOC 点は保持し、
+   近似誤差 (max|Δr|・max|Δθ|)・曲率振動・スロート/出口拘束・CFD ΔM を**別々の
+   ゲート**で監視 (「LSQ = 隠蔽」にしない)。
+3. **law 側 RANS 帰還は A13/A14 の後** (先にやると①で消える系統誤差を law が代償する)。
+
+**遷音速解の扱い** (ユーザの懸念への整理): Hall 解・目標軸 law は設計基準として保持。
+$C_W - \delta^* n = C_I$ が全域で成るなら有効遷音速場は不変だが、上流を Hermite で
+作り直す本方式ではその保証はない。**「変わらないよう設計し、変化は CFD で測り、
+必要なら $(x_a, M, M', M'')$ を帰還する」**が正しい姿勢 (Codex)。
+
+## 2. 設計
+
+### A13: δ\*(s) と物理壁
+
+- $s$ = **入口 (配管始端) からの弧長**。縁 Mach: 上流は $A/A^*=(r/r_t)^2$ の亜音速枝、
+  下流は MOC 壁テーブルの $M$。スロートで $M=1$ 連続。
+- 相関は従来と同じ (乱流平板 + Eckert)。$\delta^*_t > 0$ になる。
+- 物理輪郭: 設計壁 (上流 Hermite の尾部を含む窓 $[-1, x_F]$) を法線オフセット →
+  $r_W'=0$ の**真のスロート**を数値探索 ($x_{t,W}$ は設計スロートよりやや上流、
+  $r_{t,W} \approx r_t + \delta^*_t$) → 下流は $x \ge x_{t,W}$ をスロートクランプ
+  $(r'=0,\ r''=r''_{t,W})$ 付きで表現、上流は入口 $(r_U, 0, 0)$ → 新スロートの
+  quintic Hermite で再生成。
+- 反復は従来どおり $C_I$ 基準の再構築 (α=1 非累積、A12 で 1 反復固定点を実証済み)。
+
+### A14: 制約付き LSQ B-spline (別コミットで)
+
+- $r(x)$ の LSQ B-spline。ハード拘束: $r(x_{t})=r_{t}$, $r'=0$, $r''=\kappa_t$,
+  $r(x_e)=r_e$ (+ $r'(x_e)=\tan\theta_F$)。重み $w_j \sim \Delta s_j$。
+- $n_{CP} \in \{12,16,20,24,32\}$ を走査し、max|Δr|・max|Δθ|・曲率振動
+  ($\int \kappa'^2 ds$ 比)・ゲート充足の最小を採用。
+- 現行補間壁と**CFD で A/B** し、劣後すれば不採用 (補間壁は比較基準として恒久保持)。
+
+## 3. 実測 (2026-08-17)
+
+### A13: 物理スロート (`PhysicalNozzleWall`) — 採用
+
+- 上流履歴込み δ\*: スロートで **0.0125 $r_t$** (A12 は 0)、出口で 0.181 (A12 比 +15%)。
+- 真の幾何スロート: $x_{t,W}=-0.0085$, $r_{t,W}=1.0125$, $\kappa_{t,W}=0.528$ (設計 0.5)。
+  上流 Hermite はこの点へ作り直し (C² 接合を検証: 点上で曲率厳密一致)。
+- 有効壁の自己整合: 物理壁 − δ\*·n が設計壁を 1e-7 で再現。
+- **NS v1** (`run_0073_a13_v1`, coarse 中継 `run_0072_a13_coarse`。品質 PASS・
+  `check_convergence --drop 2`: PASS [既定判定は NOT CONVERGED = warm 床のプラトー、
+  既存 NS 系列と同じ扱い]・軸 M/出口指標 STEADY・NaN 0):
+  ‖ΔM‖∞ **0.582%** (A12 v1 0.533% — 最大誤差はわずかに悪化)、
+  **overshoot +0.03%** (A12 +0.30%)、rms 0.0131。ΔM プロファイル:
+  上流の正ずれ (+0.012→+0.009) と出口側 (+0.013→+0.002) が消え、
+  **残るのは x≈5.4 の谷のみ**。**スロート・出口側の系統誤差を除去し、残差を 1 つの
+  谷へ分離できた** (Euler と同源の設計側残差 → law 分布帰還の対象)。
+- **真のスロートの厳密化** (Codex 指摘): 位置は点群の平滑化スプラインで $r'=0$ を
+  Brent 法 root solve ($x_t=-0.0096$、λ 感度 ±0.004、$r_t$ は 5 桁不変)、曲率は
+  $r'(x_t)=0$ 拘束の 1 パラメータ LSQ (窓 0.08–0.30 で 0.54–0.63、採用 0.556)。
+  スプラインの $r''$ は λ で 4.36→0.53 と暴れ、法線オフセット点群の $r''$ ジッタ
+  (IQR ±10%) を拾うため使わない。旧・放物線法 (−0.0085 / 0.528) と本質的に同値で
+  CFD 結論は不変。感度は `_throat_diag` に保持。
+
+### A14: 制約付き LSQ B-spline — CFD で棄却 (補間壁を維持)
+
+設計側 (生産 n=500、cplus 壁 165 点):
+
+| 表現 | max\|Δr\| | 点上 max\|Δθ\| | $J_{\rm fair}=\int\kappa'^2ds$ | 単調 |
+| --- | --- | --- | --- | --- |
+| 補間 (現行) | 0 | **0.067°** | 11.4 | ✓ |
+| LSQ 20 CP | 7.5e-3 | 0.97° | **0.196** | ✗ |
+| LSQ 32 CP | 1.5e-3 | 0.34° | 0.229 | ✓ |
+| LSQ 48 CP | 6.1e-4 | 0.24° | 0.237 | ✗ |
+
+Codex の指摘は 2 点とも正しかった: (a) 私の「数百 µm」予測は誤り (20 CP で 75 µm)、
+(b) 補間壁は位置を通すが**曲率は 50 倍振動**している ($J_{\rm fair}$ 11.4 vs 0.2)。
+
+しかし **CFD は補間壁を選んだ** (`run_0075_a14_lsq32`、品質 PASS・conv ALL PASS・ALL STEADY):
+
+| 指標 | 補間 (run_0056) | **LSQ 32 CP** |
+| --- | --- | --- |
+| ‖ΔM‖∞ [% $M_d$] | **0.240** | 0.953 |
+| ΔM rms | **0.0057** | 0.0214 |
+| overshoot | +0.115% | +0.593% |
+| 出口 $\varepsilon_M$ | **0.035%** | 0.112% |
+| 出口 $\varepsilon_\theta$ | **0.012°** | 0.097° |
+
+LSQ 20 CP は非単調で設計段階で REJECT。**曲率振動 ($J_{\rm fair}$) は CFD 性能を
+予測しない** — 位置・壁角の忠実度が支配する。壁角 0.34° の系統的乖離が軸 M を
+0.24→0.95% 悪化させた。
+
+**結論の適用範囲 (Codex 訂正 2026-08-17)**: 実測から言えるのは
+「**半径 $r$ の位置誤差だけを目的関数にした 32 CP 表現**は、壁角誤差 0.34° のため不採用」
+まで。**「低自由度 B-spline 全般」や「曲率を滑らかにすること」を棄却したのではない**。
+壁角忠実度が支配的と分かったので、再挑戦するなら目的関数に $r$ と $r'$ の両方を入れる
+($\min \sum w_j[(r_{fit}-r_j)^2 + \lambda_\theta (r'_{fit}-\tan\theta_j)^2]$)。
+48 CP と 165 点の自由度差はまだ大きく「48 CP なら意義が消える」は言い過ぎだった。
+ただし今すぐ再挑戦する必要はない。
+
+**CAD 化に再近似は不要**: 現行の下流壁は 5 次 B-spline、上流 Hermite/Bézier も
+B-spline として厳密表現できるので、**現行物理壁をそのまま全 weight=1 の NURBS として
+STEP に出せる** — LSQ を挟む必要がない (CAD=CFD 形状同一性も満たす)。
+
+補間 5 次 B-spline を本流として維持。`LSQBsplineCFDWall` は `wall_repr: lsq` で残置。
+
+## 4. 完了条件
+
+- [x] A13 実装 + 単体テスト + NS 再検証 (run_0072/0073)
+- [x] A14 実装 + フィットゲート + Euler A/B (run_0074 REJECT / run_0075) → 棄却
+- [x] methods 更新・README run 表・commit
+
+## 4. 変更ログ
+
+- `2026-08-17` — 起票 (ユーザ + Codex レビュー採択)。A12 の「δ\*_t=0 で潜在化」の指摘、
+  「エクスポート層のみ」案の棄却 (CAD=CFD 形状同一性)、実装順 ①→②→law 帰還を記録。
+
+## 5. 新 binary での再評価 (2026-08-17、別セッションの node オプション整理 `ea08bcbe` を引き継ぎ)
+
+nodeAxisDirichlet が撤去され軸ノードが真の DOF になった新 binary で、生産 Euler (run_0077) と
+A13 NS (run_0078/0079) を同一設定で再走した:
+
+| | 旧 binary | 新 binary |
+| --- | --- | --- |
+| Euler ‖ΔM‖∞ (直読 / 偶外挿) | 0.240 / 0.165% | 0.222 / **0.207%** |
+| NS ‖ΔM‖∞ (直読 / 偶外挿) | 0.582 / 0.369% | 0.587 / **0.466%** |
+| 誤差の支配位置 | **x≈5.4 の谷** (Euler −0.0065, NS −0.0147) | **x>8 の正ずれ** (Euler +0.008, NS +0.019) |
+
+**A13 §3 の「残差は x≈5.4 の谷のみ = 設計側残差 → law 帰還の対象」は旧 binary の軸 Dirichlet
+汚染を見ていた**可能性が高い (新 binary で谷は −0.0006 に消滅)。支配残差は $x_E$ 近傍の正の
+ずれへ移り、これは Euler でも出るので law 尾部 ($M''\to0$ の接続) か物理スロートの実効面積比
+(A13 の $r_{t,W}=1.0125$) が候補。次の帰還設計はこの新しい残差形に対して行うこと。
+新 binary の偶外挿値が旧の偶外挿値より悪化 (0.165→0.207) している点は case/43 の別セッション
+所見 (期待 0.15–0.16 帯) と食い違うので、抽出法・run 条件の突合せが要る (未解決)。
+```
+
+## 参考: `case/45.isobutane_m6_d155/moc_wall_fit_probe.py`
+
+```
+"""MOC 壁点の表現 (補間 vs 位置+壁角の同時当てはめ) と MOC 解像度 n_axis_inv の効果を測る (形状だけ, CFD なし)。
+plan: plans/active/verification-m6-axis-wave-mesh-su2.md §5.1 #12 (設計壁の r'' リップル)。
+usage: design/.venv-opt/bin/python moc_wall_fit_probe.py → _band_ab/moc_wall_fit_probe.json
+r'' の高周波 = 0.5 r_t 移動平均からの残差 (報告ツールと同じ定義)。帯 [0.5,20) は滑らかな曲線でも同じ値になる (定義の癖) ことも出す。
+"""
+import json, sys
+from pathlib import Path
+import numpy as np
+from scipy.interpolate import BSpline
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "design"))
+from forge_design.evaluate.runner_axismach import design_chain, load_problem
+
+C = Path(__file__).resolve().parent
+def joint_fit(tb, R, h0=0.05, h1=0.5, xg=6.0, sig_r=1e-6, sig_th=1e-4, lam=1e-3, k=5):
+    x, r, th = tb[:, 0], tb[:, 1], tb[:, 2]
+    x0, xe = x[0], x[-1]
+    # ノット間隔: スロート近傍 h0 → xg 以降 h1 (滑らかに)
+    xs = [x0]
+    while xs[-1] < xe:
+        u = min((xs[-1] - x0) / (xg - x0), 1.0); xs.append(xs[-1] + h0 + (h1 - h0) * u * u * (3 - 2 * u))
+    xi = np.array(xs[1:-1]); xi = xi[xi < xe - 0.5 * h1]
+    t = np.r_[[x0] * (k + 1), xi, [xe] * (k + 1)]; nc = len(t) - k - 1
+    B0 = BSpline.design_matrix(x, t, k).toarray()
+    E = np.eye(nc)
+    D = lambda xq, d: np.array([BSpline(t, E[i], k)(xq, d) for i in range(nc)]).T
+    B1 = D(x, 1)
+    ds = np.gradient(x); w = ds / ds.mean()
+    xq = np.linspace(x0, xe, 6000); B3 = D(xq, 3); wq = np.gradient(xq)
+    A = (B0.T * (w / sig_r**2)) @ B0 + (B1.T * (w / sig_th**2)) @ B1 + lam * (B3.T * wq) @ B3 / sig_r**2
+    b = B0.T @ (w * r / sig_r**2) + B1.T @ (w * np.tan(th) / sig_th**2)
+    C = np.array([D(np.r_[x0], 0)[0], D(np.r_[x0], 1)[0], D(np.r_[x0], 2)[0], D(np.r_[xe], 1)[0]])
+    dv = np.array([r[0], x0 / R, 1.0 / R, np.tan(th[-1])])
+    K = np.block([[A, C.T], [C, np.zeros((4, 4))]])
+    c = np.linalg.solve(K, np.r_[b, dv])[:nc]
+    return BSpline(t, c, k), nc
+
+
+BANDS = ((0.5, 2), (2, 6), (6, 20), (20, 60), (60, 95))
+xx = np.arange(0.53, 94.9, 0.001); K = 500
+
+
+def band(x, v):
+    return {f"[{a},{b})": float("%.3e" % np.abs(v[(x >= a) & (x < b)]).max()) for a, b in BANDS}
+
+
+def hf(v):
+    h = v - np.convolve(v, np.ones(K) / K, "same"); h[:K] = 0; h[-K:] = 0
+    return h
+
+
+W, out = {}, {}
+for n in (600, 1200, 2400, 9600):
+    p = load_problem(C / "problem_d155_ns_c2final.yaml"); p.geometry["n_axis_inv"] = n
+    d = design_chain(p); tb = d["wall_inv"]; s, nc = joint_fit(tb, d["R"], lam=1e-7); W[n] = (d["wall"], s)
+    out[n] = {"n_pts": len(tb), "n_cp_fit": nc,
+              "interp_r2_hf": band(xx, hf(d["wall"].r(xx, 2))), "fit_r2_hf": band(xx, hf(s(xx, 2))),
+              "interp_dtheta_pts_deg": band(tb[:, 0], np.degrees(np.arctan(d["wall"].r(tb[:, 0], 1)) - tb[:, 2])),
+              "fit_dr_pts": band(tb[:, 0], s(tb[:, 0]) - tb[:, 1]),
+              "fit_dtheta_pts_deg": band(tb[:, 0], np.degrees(np.arctan(s(tb[:, 0], 1)) - tb[:, 2]))}
+rf = W[9600][1]
+for n in (600, 1200, 2400):
+    s = W[n][1]
+    out[n]["fit_dr_vs_fit9600"] = band(xx, s(xx) - rf(xx))
+    out[n]["fit_dtheta_vs_fit9600_deg"] = band(xx, np.degrees(np.arctan(s(xx, 1)) - np.arctan(rf(xx, 1))))
+(C / "_band_ab/moc_wall_fit_probe.json").write_text(json.dumps(out, indent=1))
+print(json.dumps(out, indent=1))
+```
+
+## 参考: `case/45.isobutane_m6_d155/_band_ab/moc_wall_fit_probe.json`
+
+```
+{
+ "600": {
+  "n_pts": 203,
+  "n_cp_fit": 221,
+  "interp_r2_hf": {
+   "[0.5,2)": 0.01392,
+   "[2,6)": 0.0009938,
+   "[6,20)": 6.933e-05,
+   "[20,60)": 3.874e-06,
+   "[60,95)": 4.965e-05
+  },
+  "fit_r2_hf": {
+   "[0.5,2)": 0.004442,
+   "[2,6)": 0.0004442,
+   "[6,20)": 6.828e-05,
+   "[20,60)": 2.569e-05,
+   "[60,95)": 2.911e-05
+  },
+  "interp_dtheta_pts_deg": {
+   "[0.5,2)": 0.01902,
+   "[2,6)": 0.00262,
+   "[6,20)": 0.001597,
+   "[20,60)": 0.0008729,
+   "[60,95)": 0.001039
+  },
+  "fit_dr_pts": {
+   "[0.5,2)": 1.118e-05,
+   "[2,6)": 2.78e-06,
+   "[6,20)": 4.272e-07,
+   "[20,60)": 3.25e-10,
+   "[60,95)": 1.474e-06
+  },
+  "fit_dtheta_pts_deg": {
+   "[0.5,2)": 0.006572,
+   "[2,6)": 0.001585,
+   "[6,20)": 0.00179,
+   "[20,60)": 0.0001833,
+   "[60,95)": 0.0009729
+  },
+  "fit_dr_vs_fit9600": {
+   "[0.5,2)": 0.0001485,
+   "[2,6)": 0.0001551,
+   "[6,20)": 0.0004251,
+   "[20,60)": 0.0004132,
+   "[60,95)": 0.0001067
+  },
+  "fit_dtheta_vs_fit9600_deg": {
+   "[0.5,2)": 0.00751,
+   "[2,6)": 0.004803,
+   "[6,20)": 0.003167,
+   "[20,60)": 0.001261,
+   "[60,95)": 0.00112
+  }
+ },
+ "1200": {
+  "n_pts": 334,
+  "n_cp_fit": 222,
+  "interp_r2_hf": {
+   "[0.5,2)": 0.007376,
+   "[2,6)": 0.0004031,
+   "[6,20)": 5.92e-05,
+   "[20,60)": 1.712e-05,
+   "[60,95)": 0.0001627
+  },
+  "fit_r2_hf": {
+   "[0.5,2)": 0.004501,
+   "[2,6)": 0.0003741,
+   "[6,20)": 6.376e-05,
+   "[20,60)": 1.203e-05,
+   "[60,95)": 8.309e-06
+  },
+  "interp_dtheta_pts_deg": {
+   "[0.5,2)": 0.006386,
+   "[2,6)": 0.001469,
+   "[6,20)": 0.0007092,
+   "[20,60)": 0.0003258,
+   "[60,95)": 0.0005083
+  },
+  "fit_dr_pts": {
+   "[0.5,2)": 4.668e-06,
+   "[2,6)": 9.449e-07,
+   "[6,20)": 8.486e-07,
+   "[20,60)": 9.456e-07,
+   "[60,95)": 1.169e-06
+  },
+  "fit_dtheta_pts_deg": {
+   "[0.5,2)": 0.004188,
+   "[2,6)": 0.001037,
+   "[6,20)": 0.0007061,
+   "[20,60)": 0.0005323,
+   "[60,95)": 0.000271
+  },
+  "fit_dr_vs_fit9600": {
+   "[0.5,2)": 0.0001255,
+   "[2,6)": 0.0001866,
+   "[6,20)": 0.0001927,
+   "[20,60)": 0.0001116,
+   "[60,95)": 2.797e-05
+  },
+  "fit_dtheta_vs_fit9600_deg": {
+   "[0.5,2)": 0.006845,
+   "[2,6)": 0.004009,
+   "[6,20)": 0.001342,
+   "[20,60)": 0.0005162,
+   "[60,95)": 0.0003006
+  }
+ },
+ "2400": {
+  "n_pts": 609,
+  "n_cp_fit": 222,
+  "interp_r2_hf": {
+   "[0.5,2)": 0.004623,
+   "[2,6)": 0.000345,
+   "[6,20)": 6.309e-05,
+   "[20,60)": 3.499e-05,
+   "[60,95)": 0.0001864
+  },
+  "fit_r2_hf": {
+   "[0.5,2)": 0.004626,
+   "[2,6)": 0.0003866,
+   "[6,20)": 6.368e-05,
+   "[20,60)": 1.657e-06,
+   "[60,95)": 2.642e-06
+  },
+  "interp_dtheta_pts_deg": {
+   "[0.5,2)": 0.001897,
+   "[2,6)": 0.001085,
+   "[6,20)": 0.000411,
+   "[20,60)": 0.0001343,
+   "[60,95)": 0.0003614
+  },
+  "fit_dr_pts": {
+   "[0.5,2)": 1.679e-06,
+   "[2,6)": 1.733e-07,
+   "[6,20)": 3.025e-07,
+   "[20,60)": 3.064e-07,
+   "[60,95)": 3.489e-07
+  },
+  "fit_dtheta_pts_deg": {
+   "[0.5,2)": 0.001504,
+   "[2,6)": 0.001055,
+   "[6,20)": 0.0004202,
+   "[20,60)": 7.787e-05,
+   "[60,95)": 0.0001475
+  },
+  "fit_dr_vs_fit9600": {
+   "[0.5,2)": 6.786e-05,
+   "[2,6)": 8.953e-05,
+   "[6,20)": 7.528e-05,
+   "[20,60)": 2.921e-05,
+   "[60,95)": 7.209e-06
+  },
+  "fit_dtheta_vs_fit9600_deg": {
+   "[0.5,2)": 0.004415,
+   "[2,6)": 0.002876,
+   "[6,20)": 0.0005735,
+   "[20,60)": 0.0001016,
+   "[60,95)": 7.108e-05
+  }
+ },
+ "9600": {
+  "n_pts": 2298,
+  "n_cp_fit": 222,
+  "interp_r2_hf": {
+   "[0.5,2)": 0.004807,
+   "[2,6)": 0.0003631,
+   "[6,20)": 6.42e-05,
+   "[20,60)": 4.555e-05,
+   "[60,95)": 0.0002129
+  },
+  "fit_r2_hf": {
+   "[0.5,2)": 0.004688,
+   "[2,6)": 0.0003689,
+   "[6,20)": 6.365e-05,
+   "[20,60)": 3.028e-07,
+   "[60,95)": 2.705e-06
+  },
+  "interp_dtheta_pts_deg": {
+   "[0.5,2)": 0.0004177,
+   "[2,6)": 0.000179,
+   "[6,20)": 3.977e-05,
+   "[20,60)": 4.785e-05,
+   "[60,95)": 0.0001989
+  },
+  "fit_dr_pts": {
+   "[0.5,2)": 1.541e-07,
+   "[2,6)": 3.676e-08,
+   "[6,20)": 2.325e-08,
+   "[20,60)": 2.495e-08,
+   "[60,95)": 1.641e-07
+  },
+  "fit_dtheta_pts_deg": {
+   "[0.5,2)": 0.0004054,
+   "[2,6)": 0.0001839,
+   "[6,20)": 3.003e-05,
+   "[20,60)": 6.008e-06,
+   "[60,95)": 0.0001487
+  }
+ }
+}
+```
+
+## 出力形式 (この形のまま)
+
+```
+結論: <次にやる一手を 1 文で>
+第 1 仮説: <内容>  確度: <高/中/低>
+  根拠: <ファイル:行 / run パスと数値>
+  反証条件: <何が観測されたらこの仮説は誤りか>
+第 2・第 3 仮説: <あれば 1 行ずつ>
+判別 A/B: <変える設定 1 点、回す長さ、見る量>  → A なら … / B なら …
+やらない方がよいこと: <呼び出し側が取りそうな誤った一手>
+呼び出し側の前提への異議: <ブリーフの枠組み・除外判断・指標の定義で受け入れなかったものと理由。無ければ「無し」>
+不足情報: <あれば>
+```
+設計判断・採否を諮られた場合は、上の前に「採否表 (指摘ごとに 採用/却下/要再検証 と理由)」を置いてよい。

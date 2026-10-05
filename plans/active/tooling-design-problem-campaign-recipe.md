@@ -137,6 +137,28 @@ forge_design を「ユーザと対話しながら、機種 (風洞 axismach / �
 - δ\* 補正の各 pass で: メッシュ品質 (`check_mesh_quality.py`) 不合格なら投入停止、cross-mesh IC の適合性確認、低 Re SST の**局所 y₁⁺** (`check_wall_resolution.py`; ソルバ `ypls` は使わない, AGENTS.md 壁解像確認)
   が不足なら qualification を `rejected`。
 
+### 4.9 recipe `axismach.contur_c2/v1` — M6 で確定した C2 方式 (codex 諮問 2026-10-05 で条件付き採用)
+
+出典: `plans/active/verification-m6-axis-wave-mesh-su2.md` §5.1 #8f・#9、諮問 `notes/reviews/2026-10-05-m6-wall-fit-and-design-pipeline-diagnose.md`。
+ユーザ要求 (2026-10-05): マッハ数を変えて同じ形状を作り直せること、軸長・出口径・入口径の決め打ちとパレート探索の両方。
+
+- **手順** (recipe の内部): 逆 MOC → Euler 参照 → CONTUR 積分法の δ で物理壁 → NS → E 法 (`band_select="edge"`, 測定器) で出口 δ を測る → CONTUR の `cf_scale` (k_f) を出口 δ に合わせる →
+  出口半径の仕様から r_t を解く → 最終 NS → (後段) 凝縮 ON の NS → `nozzle_report` (pptx)。
+- **反復は recipe 内部に置く**: r_t 解き・k_f 較正・再測定・停止判定。campaign は候補の探索と評価の順序だけを持つ (§4.1 の分担と同じ)。
+  r_t 比の −0.2 乗による δ の換算は**初期予測**であり、最終 NS で出口 δ を再測定して閉じる (残差が許容外なら反復、上限で未達なら `rejected`)。
+- **寸法固定は r_t 解きだけでは閉じない**: `from_length` の `L_total` は r_t 単位で設計スロート起点 (`runner_axismach.py:386`)。実寸の全長・入口径を固定するなら、
+  r_t を更新するたびに `L_total`・`r_inlet` も換算し直し、長さの起点 (設計スロートか物理スロートか) を problem のキーで定義する。
+  recipe は寸法残差 (全長・出口半径・入口半径) と出口 δ 残差をともに検査する。現 `problem_d155_ns_c2final.yaml` の入口半径は 0.4980966 m でコメントの 0.5 m と合っていない (同期漏れの実例)。
+- 凝縮評価は確定した物理壁を参照する後段 recipe として campaign に置く (壁を作り直さない)。
+- 入力成果物の来歴 (Euler 参照・δ 表・NS snapshot) は §4.3 のハッシュ参照で持つ。
+- **合格の分け方**: 「旧結果の再現」(同一入力・物性・バイナリで run_0051 系列を再現) と「修正後の設計資格」(用途上の絶対ゲート: 波 ≤ 0.01 %・オーバーシュート ≤ +0.035 %・出口コア M 6 ± 0.02 %、
+  残差・準定常・壁解像の各 VERDICT) を別に判定する。main の物性変更や TP 初期化修正による差は再現ノイズに含めず「変更影響」として報告する。
+  `run_0051` は残差 plateau・壁解像 FAIL・波/オーバーシュート DRIFTING なので**歴史的な回帰参照**であって、修正後の recipe にこれとの数値一致を課さない。
+- 再現許容差は量ごとに max(同一条件 3 反復の最大差 × 3, 事前登録の絶対下限)。別 case のノイズ実測 (§5.1 #2 の va3) を M6 に流用しない。波・オーバーシュートの下限は別に決める。
+  許容差が用途上の余裕を食い潰すなら判定不能とする。
+- **実装順** (諮問の推奨を採用): M6 の旧入力・物性・壁・メッシュ・初期 snapshot・バイナリのハッシュ保存と再現幅の取得 → #4 評価量統一 → #3 熱力学修正 → #6・#7 の最小契約 →
+  search 無しの C2 campaign → 壁表現の変更 (verification-m6 §5.1 #13) → 寸法固定・パレート探索。
+
 ## 5. 実装ステップ
 
 1. スキーマと検証 (`design/forge_design/probdef.py` 周辺に `campaign.py` を新設)。旧形式の読み込みは維持。
@@ -162,6 +184,9 @@ forge_design を「ユーザと対話しながら、機種 (風洞 axismach / �
 | 10 | ベル・SERN の adapter 化 | axismach で V1/V2 が通った後。方針は別 plan で | F |
 | 11 | axismach へのサロゲート MOO 接続 | 探索法の追加。grid で足りない需要が出てから | F |
 | 12 | result 段の解釈と codex result レビュー | V1/V2 の結果解釈を上位に諮ってから `--stage result` | F |
+| 13 | M6 の旧基準を固定 (C2 recipe の前提) | `case/45.isobutane_m6_d155/run_0051_ns_final_c2` 系列の入力 (problem・δ 表・Euler 参照)・物性・壁・メッシュ・初期 snapshot・バイナリのハッシュを保存し、同一条件 3 反復で評価量 (§4.7 の関数) の再現幅を取る。合格: 3 反復が完走し量ごとの許容差を §6 に登録 | O |
+| 14 | recipe `axismach.contur_c2/v1` (§4.9) | #3・#4・#6・#7 の後。search 無しの campaign で M6 を作り直す。合格: 寸法残差・出口 δ 残差の検査、3 値判定、用途上の絶対ゲート、旧基準との差を「再現差」「変更影響」に分けて報告 (§4.9)。合否条件の数値は #13 の後に §6 へ事前登録 | F |
+| 15 | 寸法固定・パレート探索の campaign | #14 の後。寸法固定 (全長・入口径・出口径を実寸で固定、長さの起点を problem キーで定義) と、Euler で探索 → 上位だけ C2 で qualification | F |
 
 ## 6. 検証
 
@@ -189,6 +214,7 @@ forge_design を「ユーザと対話しながら、機種 (風洞 axismach / �
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
 | plan | 2026-09-27 | [2026-09-27-tooling-design-problem-campaign-recipe-plan.md](../../notes/reviews/2026-09-27-tooling-design-problem-campaign-recipe-plan.md) | GO-with-changes, C0/M5/m2 | 全件採用。M1 (γ*/cp(Tt) の R 不整合・NS ω 床の CPG 逆算) → §4.6・#3 (R 292.59 vs 285.27 と `runner_axismach.py:822-829` を当方で再現)。M2 (事前計画と実行後成果物の区別・snapshot ハッシュ) → §4.3・#7。M3 (qualification の 3 値判定・勝者なし・補正後の再評価) → §4.4・#8・V1b/V2。M4 (評価量の定義差 0.41 %) → §4.7・#4。M5 (NS メッシュに Euler の `wall_first_frac` が渡る・y₁⁺ ゲート) → §4.8・V1/V2 (`runner_axismach.py:746-747` を再現)。m6 (V0 を 3 反復×安全係数に) → #2・V0。m7 (出口診断の `gamma` は未使用) → §3・§4.6 訂正。判断役 (codex) 自身の指摘で却下が無いため、採否の別途諮問は省略 |
+| diagnose | 2026-10-05 | [2026-10-05-m6-wall-fit-and-design-pipeline-diagnose.md](../../notes/reviews/2026-10-05-m6-wall-fit-and-design-pipeline-diagnose.md) | C0 / Major 4 (本 plan 関係: B1 C2 recipe 条件付き、B2 順序変更、B3 再現と資格の分離、寸法固定の連成) | 全件採用 → §4.9・§5.1 #13–#15 |
 
 ## 7. 影響範囲
 
@@ -206,6 +232,8 @@ forge_design を「ユーザと対話しながら、機種 (風洞 axismach / �
 - [ ] [`plans/README.md`](../README.md) の一覧を同期
 
 ## 9. 変更ログ
+
+- `2026-10-05` — ユーザ要求 (M6 設計の再現・別マッハ・寸法決め打ち/パレート) を受け、codex (diagnose) に諮って C2 方式を recipe `axismach.contur_c2/v1` として §4.9 に追加。実装順は旧基準の保存 → 評価量統一 → 熱力学 → 最小契約 → C2 → 壁表現 → 寸法固定/探索 (§5.1 #13–#15)。
 
 - `2026-09-27` — codex plan 段レビュー (GO-with-changes, C0/M5/m2) を全件採用し §3・§4.3/4.4/4.6/4.7/4.8・§5.1・§6 を改訂。実装順は ①熱力学 ②pass ごとの計画と成果物参照 ③合否・最終順位 ④評価量と V0 ⑤メッシュ・壁解像ゲート (V0 取得は数値変更の前)。
 - `2026-09-27` — 初稿。codex diagnose 諮問 (`notes/reviews/2026-09-27-design-problem-schema-diagnose.md`) の推奨とユーザとの対話
