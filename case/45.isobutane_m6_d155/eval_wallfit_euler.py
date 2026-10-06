@@ -10,6 +10,14 @@ usage: python3 eval_wallfit_euler.py [case_dir] [--fixed-coef] [--pair=A,B (既�
   壁の証拠 (M4、throat_mono_ab.wall_evidence) / 腕の run 数が足りない・snapshot が足りないときは欠損として保留。
   例: python3 eval_wallfit_euler.py . --fixed-coef --e3 --pair=pinG1,monoG1  → _band_ab/throat_mono_euler_ab_pinG1_vs_monoG1_fixedcoef.json
   (各 run には wallfit_series_e3.csv・QUASISTEADY_wallfit_e3.txt を書く。既存の評価の出力は上書きしない。--pair は必須)
+  §5.1 #5b (諮問 2026-10-06 ②③): 前提 = A の mono_r2 が None・B が [0.0, 1.5] と完全一致、壁の証拠 (他腕との照合を含む)・出口既定帯の照合・
+  IC の記録 (A restart_field / B ic_index_map の index) がそろい有限、判定区間の収束判定 (投入スクリプトが書いた
+  CONVERGENCE_VERDICT_segment.txt) が PASS か既知の plateau。欠損・非有限・DIVERGED・判定不能は既定値で通さず保留。
+  |出口 M − 6| は元の check_quasisteady の VERDICT を残したまま、別欄の「絶対許容内」(E4; 末尾 10 枚) なら判定に入れる。
+--icab=ALPHA,BETA (§6 E1 の予備 A/B): 同じ B 格子で IC の写像だけを変えた 2 本 (α 最近傍 run_0146 / β 番号写像 run_0143) を、
+  本段の連続 10 枚の窓で比べる (throat_mono_judge.judge_icab_quantity)。→ _band_ab/throat_mono_icab[_fixedcoef].json、
+  各 run に wallfit_series_icab.csv・QUASISTEADY_wallfit_icab.txt。
+  例: python3 eval_wallfit_euler.py . --fixed-coef --icab=run_0146_euler_icab_monoG1_nn,run_0143_euler_wallfit_monoG1_r1
 """
 import json, re, subprocess, sys
 from pathlib import Path
@@ -155,14 +163,32 @@ def _verdict_lines(qs, cols):
     return v
 
 
-def e3_run(run, arm, etaS, other_run):
-    """1 run の評価: 時系列 CSV・末尾 5 枚の準定常・代表値・T・E・出口変種・分布・壁の証拠。足りなければ status=missing。"""
+def _max_finite(vals):
+    """最大値。空・非有限が 1 つでもあれば NaN (Python の max は NaN の位置で結果が変わるので使わない; 欠損を既定値で通さない)。"""
+    v = [float(x) if x is not None else float("nan") for x in vals]
+    return max(v) if v and all(np.isfinite(v)) else float("nan")
+
+
+def _segment_of(rd):
+    """投入スクリプトが書いた判定区間の収束判定 (check_convergence --segment) を読んで解釈する (E4、諮問 ③)。"""
+    from throat_mono_judge import SEGMENT_VERDICT_FILE, parse_segment_verdict
+    p = rd / SEGMENT_VERDICT_FILE
+    seg = parse_segment_verdict(p.read_text() if p.exists() else None)
+    seg["file"] = str(p.relative_to(C)) if p.exists() else None
+    return seg
+
+
+def e3_run(run, arm, etaS, other_run, tail=None, tag="e3"):
+    """1 run の評価: 時系列 CSV・末尾 tail 枚 (既定 5) の準定常・代表値・T・E・出口変種・分布・壁の証拠・近零量の絶対許容内・
+    判定区間の収束判定・前提の材料。足りなければ status=missing。成果物は wallfit_series_<tag>.csv / QUASISTEADY_wallfit_<tag>.txt。"""
     from throat_mono_ab import wall_evidence
+    from throat_mono_judge import ABS_TOL_N, DELTA_Q, abs_tolerance_verdict
+    tail = E3_TAIL if tail is None else int(tail)
     rd = C / run
     sf = series_files(run)
     rec = {"arm": arm, "run": run}
-    if len(sf) < E3_TAIL:
-        rec.update(status="missing", reason=f"snapshot {len(sf)} 枚 (< {E3_TAIL})")
+    if len(sf) < tail:
+        rec.update(status="missing", reason=f"snapshot {len(sf)} 枚 (< {tail})")
         return rec
     series, exv, dists = [], [], []
     for k, (d_, f, st_) in enumerate(sf):
@@ -170,24 +196,24 @@ def e3_run(run, arm, etaS, other_run):
         q, dist = quantities(F, 0.05)
         q["step"] = st_
         series.append(q)
-        if k >= len(sf) - E3_TAIL:
+        if k >= len(sf) - tail:
             exv.append(exit_variant_quantities(F, q, etaS))
             dists.append(dist)
     cols = [k for k in series[0] if k != "step"]
-    # 既存の評価の成果物 (wallfit_series.csv・QUASISTEADY_wallfit.txt) を上書きしないよう --e3 は別名で書く
-    with open(rd / "wallfit_series_e3.csv", "w") as fh:
+    # 既存の評価の成果物 (wallfit_series.csv・QUASISTEADY_wallfit.txt) を上書きしないよう別名で書く
+    with open(rd / f"wallfit_series_{tag}.csv", "w") as fh:
         fh.write("step," + ",".join(cols) + "\n")
         for q in series:
             fh.write(f"{q['step']}," + ",".join(f"{q[c]:.10g}" for c in cols) + "\n")
-    tail_frac = (E3_TAIL - 0.5) / len(series)       # check_quasisteady は k = max(3, ceil(tail·n)) 枚 → ちょうど 5 枚
-    qs = subprocess.run([sys.executable, str(ROOT / "solver_density_cuda/tools/check_quasisteady.py"), "--series-csv", str(rd / "wallfit_series_e3.csv"),
+    tail_frac = (tail - 0.5) / len(series)          # check_quasisteady は k = max(3, ceil(tail·n)) 枚 → ちょうど tail 枚
+    qs = subprocess.run([sys.executable, str(ROOT / "solver_density_cuda/tools/check_quasisteady.py"), "--series-csv", str(rd / f"wallfit_series_{tag}.csv"),
                          "--series-cols", ",".join(cols), "--tail", f"{tail_frac:.6f}"], capture_output=True, text=True).stdout
-    (rd / "QUASISTEADY_wallfit_e3.txt").write_text(qs)
-    tail = series[-E3_TAIL:]
-    rep = {c: float(np.mean([q[c] for q in tail])) for c in cols}
+    (rd / f"QUASISTEADY_wallfit_{tag}.txt").write_text(qs)
+    tl = series[-tail:]
+    rep = {c: float(np.mean([q[c] for q in tl])) for c in cols}
     T = {}
     for c in cols:
-        v = np.array([q[c] for q in tail]); st = np.array([q["step"] for q in tail], float)
+        v = np.array([q[c] for q in tl]); st = np.array([q["step"] for q in tl], float)
         T[c] = max(float(np.ptp(v)), float(abs(np.polyfit(st, v, 1)[0]) * (st[-1] - st[0])))
     qE, dE = quantities(load_field(sf[-1][0], sf[-1][1]), 0.025, fixed_from=0.05 if FIXED else None)
     E = {c: abs(qE[c] - series[-1][c]) for c in cols if c in qE}
@@ -197,21 +223,72 @@ def e3_run(run, arm, etaS, other_run):
     conv = cv.read_text() if cv.exists() else "missing"
     conv_overall = [l.strip() for l in conv.splitlines() if "-> " in l and l.startswith("===")]
     info = json.loads((rd / "prepare_info.json").read_text())
+    wf = info.get("wall_fit") or {}
     try:
         ev = wall_evidence(rd, (C / other_run) if other_run else None)
     except Exception as e:  # noqa: BLE001 — 証拠が取れないことも記録 (前提未達として総合を保留にする)
         ev = {"status": "error", "error": str(e)}
+    # 近零量 |出口 M − 6| の「絶対許容内」(E4): 符号付き M_exit − 6、末尾 10 枚。元の VERDICT は quasisteady に残す。
+    # 窓が 1 つの run dir (同一設定区間) に収まるときだけ適用 (延長 run との連結にまたがれば適用外)
+    win_dirs = {str(d_) for d_, _, _ in sf[-ABS_TOL_N:]}
+    if len(win_dirs) == 1:
+        abs_tol = abs_tolerance_verdict([q["step"] for q in series], [q["exit_core_M"] - MD for q in series],
+                                        DELTA_Q["exit_M_dev"] / 10.0)
+    else:
+        abs_tol = {"status": "適用外", "reason": f"末尾 {ABS_TOL_N} 枚が別の run dir にまたがる (同一設定区間でない)"}
     rec.update(status="ok", rep=rep, T=T, E=E, quasisteady=_verdict_lines(qs, cols), n_snaps=len(series), last_step=series[-1]["step"],
-               tail_steps=[q["step"] for q in tail], tail_frac=tail_frac, exit_variants_tailmean=exrep, exit_base_check_maxabs=base_err,
+               tail=tail, tail_steps=[q["step"] for q in tl], tail_frac=tail_frac, exit_variants_tailmean=exrep, exit_base_check_maxabs=base_err,
                convergence=(conv_overall[-1] if conv_overall else conv.strip().splitlines()[-1] if conv != "missing" else "missing"),
-               wall_evidence=ev, ic=info.get("ic"), wall_fit_mono_r2=(info.get("wall_fit") or {}).get("mono_r2"),
-               _dists=dists)
+               segment_convergence=_segment_of(sf[-1][0]), abs_tol_exit_M_dev=abs_tol,
+               wall_evidence=ev, ic=info.get("ic"), wall_fit_mono_r2=wf.get("mono_r2"), wall_fit_has_mono_r2=("mono_r2" in wf),
+               dry=bool(info.get("DRY") or info.get("DRY_NO_IC")), _dists=dists)
     return rec
+
+
+def _steady(rec, c):
+    """量 c がこの run で判定に入れるか: 元の VERDICT が STEADY、または |出口 M − 6| が絶対許容内 (E4; STEADY とは表示しない)。"""
+    from throat_mono_judge import ABS_TOL_WITHIN
+    if rec["quasisteady"].get(c) == "STEADY":
+        return True
+    return c == "exit_M_dev" and rec.get("abs_tol_exit_M_dev", {}).get("status") == ABS_TOL_WITHIN
+
+
+def _steady_label(rec, c):
+    """表示用: 元の VERDICT (STEADY / DRIFTING …)。STEADY でなく絶対許容内で判定に入れた量は「絶対許容内 (元 VERDICT)」と書く。"""
+    v = rec["quasisteady"].get(c)
+    return v if (v == "STEADY" or not _steady(rec, c)) else f"絶対許容内 (元 {v})"
+
+
+def _pre_meta(rec):
+    return {"wall_fit_has_mono_r2": rec.get("wall_fit_has_mono_r2"), "mono_r2": rec.get("wall_fit_mono_r2"),
+            "wall_evidence": rec.get("wall_evidence"), "exit_base_check_maxabs": rec.get("exit_base_check_maxabs"),
+            "segment": rec.get("segment_convergence"), "ic": rec.get("ic"), "dry": rec.get("dry")}
+
+
+def _exit_E(runs_a, runs_b, R_):
+    """出口評価誤差 E_exit,q: 各変種での (B − A) と既定での (B − A) の差の最大 (腕 = run の組)。"""
+    from throat_mono_judge import EXIT_QUANTITIES
+    E_exit, exit_rows = {}, {}
+    if runs_a and runs_b:
+        variants = list(R_[runs_a[0]]["exit_variants_tailmean"].keys())
+        for qn in EXIT_QUANTITIES + ("exit_core_M",):
+            ba = {}
+            for v in variants:
+                a = np.mean([R_[r]["exit_variants_tailmean"][v][qn] for r in runs_a])
+                b = np.mean([R_[r]["exit_variants_tailmean"][v][qn] for r in runs_b])
+                ba[v] = {"A": float(a), "B": float(b), "B_minus_A": float(b - a)}
+            exit_rows[qn] = ba
+            if qn in EXIT_QUANTITIES:
+                E_exit[qn] = float(max(abs(ba[v]["B_minus_A"] - ba["base"]["B_minus_A"]) for v in variants))
+    return E_exit, exit_rows
+
+
+ARM_EXPECT = {"A": (None, {"tool": "restart_field"}), "B": ([0.0, 1.5], {"tool": "ic_index_map", "mode": "index"})}
 
 
 def run_e3():
     global X_E, X_F, WIN_T, WIN_O
-    from throat_mono_judge import EXIT_QUANTITIES, delta_key, judge_quantity, overall
+    from throat_mono_judge import EXIT_QUANTITIES, check_run_preconditions, delta_key, judge_quantity, overall
     runs_all = ARMS["A"] + ARMS["B"]
     X_E, X_F = e3_geometry(runs_all)
     WIN_T = (X_E + 2.0, X_F - 1.0); WIN_O = (X_E - 15.0, X_F)          # c2final n2400 の定数と同じ取り方 (X_E+2, X_F−1) / (X_E−15, X_F)
@@ -227,36 +304,31 @@ def run_e3():
             R_[run] = e3_run(run, arm, etaS, other[0] if other else None)
     ok = {arm: [r for r in runs if R_[r]["status"] == "ok"] for arm, runs in ARMS.items()}
     cols = list(next(R_[r] for r in R_ if R_[r]["status"] == "ok")["rep"].keys()) if any(ok.values()) else []
-    # 出口評価誤差 E_exit,q: 各変種での (B − A) と既定での (B − A) の差の最大
-    E_exit, exit_rows = {}, {}
-    if ok["A"] and ok["B"]:
-        variants = list(R_[ok["A"][0]]["exit_variants_tailmean"].keys())
-        for qn in EXIT_QUANTITIES + ("exit_core_M",):
-            ba = {}
-            for v in variants:
-                a = np.mean([R_[r]["exit_variants_tailmean"][v][qn] for r in ok["A"]])
-                b = np.mean([R_[r]["exit_variants_tailmean"][v][qn] for r in ok["B"]])
-                ba[v] = {"A": float(a), "B": float(b), "B_minus_A": float(b - a)}
-            exit_rows[qn] = ba
-            if qn in EXIT_QUANTITIES:
-                E_exit[qn] = float(max(abs(ba[v]["B_minus_A"] - ba["base"]["B_minus_A"]) for v in variants))
+    E_exit, exit_rows = _exit_E(ok["A"], ok["B"], R_)
     judge = []
     for c in cols:
         if delta_key(c) is None:
             continue
         a = [R_[r]["rep"][c] for r in ok["A"]]; b = [R_[r]["rep"][c] for r in ok["B"]]
-        Tm = max([R_[r]["T"][c] for r in ok["A"] + ok["B"]], default=float("nan"))
-        Em = max([R_[r]["E"].get(c, float("nan")) for r in ok["A"] + ok["B"]], default=float("nan"))
-        steady = all(R_[r]["quasisteady"].get(c) == "STEADY" for r in ok["A"] + ok["B"])
-        judge.append(judge_quantity(c, a, b, Tm, Em, steady, E_exit=E_exit.get(c, 0.0) if c in EXIT_QUANTITIES else 0.0))
+        Tm = _max_finite([R_[r]["T"][c] for r in ok["A"] + ok["B"]])
+        Em = _max_finite([R_[r]["E"].get(c) for r in ok["A"] + ok["B"]])
+        runs_ab = ok["A"] + ok["B"]
+        steady = bool(runs_ab) and all(_steady(R_[r], c) for r in runs_ab)
+        row = judge_quantity(c, a, b, Tm, Em, steady,
+                             E_exit=(E_exit.get(c, float("nan")) if c in EXIT_QUANTITIES else 0.0))   # 出口量の E_exit 欠損は既定値で通さない
+        row["steady_basis"] = {r: _steady_label(R_[r], c) for r in runs_ab}
+        judge.append(row)
     ov = overall(judge)
-    # 前提: 全 run の壁の証拠が一致し、腕 B の壁に mono_r2、出口の既定帯が quantities と一致
-    pre = {r: {"wall_evidence": R_[r].get("wall_evidence", {}).get("status"), "mono_r2": R_[r].get("wall_fit_mono_r2"),
-               "exit_base_check_maxabs": R_[r].get("exit_base_check_maxabs")} for r in R_ if R_[r]["status"] == "ok"}
-    pre_ok = (all(v["wall_evidence"] == "consistent" for v in pre.values())
-              and all(R_[r].get("wall_fit_mono_r2") is not None for r in ok["B"])
-              and all((v["exit_base_check_maxabs"] or 0.0) <= 1e-12 for v in pre.values()))
-    verdict = ov["verdict"] if pre_ok else f"保留 (前提未達: 壁の証拠・腕 B の mono_r2・出口既定帯の照合) / 量の判定は {ov['verdict']}"
+    # 前提 (諮問 ③): A の mono_r2 = None・B = [0.0, 1.5] の完全一致、壁の証拠、出口既定帯の照合、判定区間の収束判定、IC の記録。
+    # 証拠の欠損・非有限値は既定値で通さない。run が足りない・missing の run も前提未達に数える
+    pre = {}
+    for arm, runs in ARMS.items():
+        mono, ic_exp = ARM_EXPECT[arm]
+        for r in runs:
+            pre[r] = ([f"run の評価ができない ({R_[r].get('reason')})"] if R_[r]["status"] != "ok"
+                      else check_run_preconditions(_pre_meta(R_[r]), mono, ic_exp, require_vs_other=True))
+    pre_ok = bool(ok["A"]) and bool(ok["B"]) and not any(pre.values())
+    verdict = ov["verdict"] if pre_ok else f"保留 (前提未達: {sum(1 for v in pre.values() if v)} run) / 量の判定は {ov['verdict']}"
     # 分布 (残差分布の差) は記録のみ (E3 の判定量ではない)
     dist_rec = {}
     if ok["A"] and ok["B"]:
@@ -278,14 +350,107 @@ def run_e3():
     for row in judge:
         print(f"{row['col']:28s} {row['status']:9s} " + ("" if "U" not in row else
               f"B−A {row['B_minus_A']:+.3e}  U {row['U']:.3e}  Δq {row['Delta']:.3g}") + (f"  ({row['reason']})" if "reason" in row else ""))
+    for r, v in pre.items():
+        if v:
+            print(f"前提未達 {r}: " + " / ".join(v))
     print(f"VERDICT: {verdict}  -> {dst}")
 
 
-if E3:
-    if not any(a.startswith("--pair=") for a in sys.argv):
-        raise SystemExit("--e3 は --pair=A,B を明示する (既定の interp,fit の run に e3 の成果物を書かない)")
+def residual_window(rd, step_from):
+    """判定区間の残差 (check_convergence --segment が書いた residual_history_segment.csv、同じ行の選び方) の step ≥ step_from の平均。
+    区間の CSV が無ければ None。"""
+    sys.path.insert(0, str(ROOT / "solver_density_cuda/tools"))
+    from check_convergence import load_series
+    p = rd / "residual_history_segment.csv"
+    if not p.exists():
+        return None
+    rows, cols = load_series(str(p))
+    st = np.array([float(r["step"]) for r in rows])
+    m = st >= step_from
+    return {c: (float(np.mean(np.abs(np.array(v)[m]))) if m.any() else float("nan")) for c, v in cols.items()}
+
+
+def run_icab(alpha, beta):
+    """予備 A/B (§6 E1): 同じ B 格子で IC の写像だけを変えた 2 本 (α 最近傍 = run_0146、β 番号写像 = run_0143)。
+    本段の連続 ICAB_WIN 枚の窓で、E2 の全量の代表値 (窓平均)・T (窓の幅と線形ドリフトの大きい方)・E (固定係数の刻み感度)・E_exit を出し、
+    throat_mono_judge.judge_icab_quantity で判定する。全残差は判定区間の CSV の窓平均を比べて記録する (残差は Δq を持たないので判定量に
+    しない。前提として両 run の判定区間の収束判定が pass / plateau であることを求める)。"""
+    global X_E, X_F, WIN_T, WIN_O
+    from ic_index_map import mesh_digest
+    from throat_mono_judge import (EXIT_QUANTITIES, ICAB_WIN, check_run_preconditions, delta_key, icab_overall,
+                                   judge_icab_quantity)
+    X_E, X_F = e3_geometry([alpha, beta])
+    WIN_T = (X_E + 2.0, X_F - 1.0); WIN_O = (X_E - 15.0, X_F)
+    F0 = load_field(C / beta, snaps(beta)[-1])
+    eta0 = F0["R"][-1] / F0["R"][-1, -1]
+    etaS = eta0[(eta0 >= EXIT_BAND[0]) & (eta0 <= EXIT_BAND[1])]
+    R_ = {alpha: e3_run(alpha, "alpha_nearest", etaS, None, tail=ICAB_WIN, tag="icab"),
+          beta: e3_run(beta, "beta_index", etaS, None, tail=ICAB_WIN, tag="icab")}
+    ok = all(R_[r]["status"] == "ok" for r in R_)
+    pre = {alpha: [], beta: []}
+    for r, mode in ((alpha, "nearest"), (beta, "index")):
+        pre[r] = ([f"run の評価ができない ({R_[r].get('reason')})"] if R_[r]["status"] != "ok"
+                  else check_run_preconditions(_pre_meta(R_[r]), [0.0, 1.5], {"tool": "ic_index_map", "mode": mode}, require_vs_other=False))
+    # 同じ B 格子 (座標・接続・境界) であること: 両 run の格子の内容ハッシュと、IC 写像の記録の格子ハッシュ
+    md = {r: mesh_digest(C / r / "nozzle.h5") for r in R_}
+    icd = {r: ((R_[r].get("ic") or {}).get("dst_mesh_digest")) for r in R_}
+    same_grid = len(set(md.values())) == 1 and all(icd[r] == md[r] for r in R_)
+    pre_common = [] if same_grid else [f"2 本の格子が同じでない (格子ハッシュ {md}, IC 記録 {icd})"]
+    judge, resid = [], {}
+    if ok:
+        E_exit, exit_rows = _exit_E([alpha], [beta], R_)
+        for c in R_[beta]["rep"]:
+            if delta_key(c) is None:
+                continue
+            judge.append(judge_icab_quantity(
+                c, R_[alpha]["rep"][c], R_[beta]["rep"][c], _max_finite([R_[r]["T"][c] for r in R_]),
+                _max_finite([R_[r]["E"].get(c) for r in R_]), all(_steady(R_[r], c) for r in R_),
+                E_exit=(E_exit.get(c, float("nan")) if c in EXIT_QUANTITIES else 0.0)))
+        step_from = min(R_[r]["tail_steps"][0] for r in R_)
+        ra, rb = residual_window(C / alpha, step_from), residual_window(C / beta, step_from)
+        if ra is None or rb is None:
+            pre_common.append("判定区間の残差 (residual_history_segment.csv) が無い")
+        else:
+            resid = {c: {"alpha": ra[c], "beta": rb.get(c), "beta_over_alpha": (rb[c] / ra[c] if (c in rb and ra[c]) else None)}
+                     for c in ra}
+            resid["_window_step_from"] = step_from
+    else:
+        E_exit, exit_rows = {}, {}
+    pre_ok = ok and not any(pre.values()) and not pre_common
+    ov = icab_overall(judge, preconditions_ok=pre_ok)
+    for r in R_:
+        R_[r].pop("_dists", None)
+    out = {"plan": "plans/active/tooling-nozzle-throat-monotone-r2.md §6 E1 (予備 A/B)", "alpha_nearest": alpha, "beta_index": beta,
+           "window": ICAB_WIN, "fixed_coef": FIXED, "geometry": {"X_E": X_E, "X_F": X_F, "WIN_T": list(WIN_T), "WIN_O": list(WIN_O)},
+           "runs": R_, "E_exit": E_exit, "exit_variants_beta_minus_alpha": exit_rows, "judge": judge, "residuals_window_mean": resid,
+           "preconditions": pre, "preconditions_common": pre_common, "same_grid": {"mesh_digest": md, "ic_record_digest": icd},
+           "preconditions_ok": pre_ok, "overall": ov, "VERDICT": ov["verdict"],
+           "note": ("残差は Δq を持たないので判定量にせず記録する。U は E3 と同じ項から 3R_A・3R_B を除いたもの (各 1 本)。"
+                    "短い過渡の比較から無害と結論しない (§6 E1)")}
+    (C / "_band_ab").mkdir(exist_ok=True)
+    dst = C / f"_band_ab/throat_mono_icab{'_fixedcoef' if FIXED else ''}.json"
+    dst.write_text(json.dumps(out, indent=1, ensure_ascii=False, default=float))
+    for row in judge:
+        print(f"{row['col']:28s} {row['status']:13s} " + ("" if "U" not in row else
+              f"β−α {row['b_minus_a']:+.3e}  U {row['U']:.3e}  Δq/10 {row['threshold']:.3g}") + (f"  ({row['reason']})" if "reason" in row else ""))
+    for r, v in list(pre.items()) + [("共通", pre_common)]:
+        if v:
+            print(f"前提未達 {r}: " + " / ".join(v))
+    print(f"VERDICT: {ov['verdict']}  -> {dst}")
+
+
+_ICAB = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--icab=")), None)
+if E3 or _ICAB:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    run_e3()
+    if _ICAB:
+        _ab = _ICAB.split(",")
+        if len(_ab) != 2 or not all((C / r).is_dir() for r in _ab):
+            raise SystemExit(f"--icab=ALPHA_RUN,BETA_RUN (α 最近傍 run_0146, β 番号写像 run_0143) の 2 本の run dir が要る: {_ICAB}")
+        run_icab(*_ab)
+    else:
+        if not any(a.startswith("--pair=") for a in sys.argv):
+            raise SystemExit("--e3 は --pair=A,B を明示する (既定の interp,fit の run に e3 の成果物を書かない)")
+        run_e3()
     sys.exit(0)
 
 R = {}

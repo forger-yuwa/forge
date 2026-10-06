@@ -1,19 +1,28 @@
-"""Euler A/B (plan tooling-nozzle-throat-monotone-r2 §6 E1、§5.1 #5) の run 準備・実行と、壁の証拠 (M4)・IC 写像の記録。
+"""Euler A/B (plan tooling-nozzle-throat-monotone-r2 §6 E1、§5.1 #5・#5b) の run 準備・実行と、壁の証拠 (M4)・IC 写像の記録。
 腕 A (pinG1) = 現行壁 problem_d155_euler_pin_G1_recal.yaml / 腕 B (monoG1) = 単調壁 problem_d155_euler_pin_G1_recal_mono.yaml
-(G1_recal + geometry.wall_fit_mono_r2 [0, 1.5])。生産 Euler 格子 G1、IC はどちらも run_0114 の最終場:
+(G1_recal + geometry.wall_fit_mono_r2 [0, 1.5])。生産 Euler 格子 G1、IC はどちらも run_0114 の最終場の**保存済み保存量**:
   A は同一メッシュなので restart_field (保存量の index コピー、ビット一致検査つき)、
-  B は壁節点が最大 0.5 µm 動くので interp_field (規則どおり) で、IC 写像 (対応節点の一致率・最大移動量・保存量の差) を記録する。
+  B は壁と近傍の節点が最大 0.5 µm 動くので、検証付き番号写像 ic_index_map.py --mode index (節点数・接続・論理位置 (i, j)・境界種別・
+  座標系と単位・化学種とエネルギー基準・要素の反転なし・移動 ≤ 1 µm を検査し、保存量を番号で直接コピー; 諮問 2026-10-06 ①)。
+  予備 A/B (§6 E1): `--with-nn <dir>` で、B の prep を IC を入れる前に複製し (同じ問題・同じ格子)、最近傍対応 (interp_field と同じ規則) で
+  保存済み保存量を直接転送した prep を作る → run_0146 euler_icab_monoG1_nn。run_0143 (B の r1) が (β) を兼ねる。
 起動は euler_grid_ab.py prep と同じ RA.prepare + RA.run_staged: soft (1 次 cfl 0.5、3000) → 本段 2 次 cfl 2・implicitRelax 0.7・
 18000 step・1000 ごと出力。
-usage: [CASE_RUNS=<run_0062 / run_0114 のある case dir>] python3 throat_mono_ab.py prep <prep_dir> {pinG1|monoG1} [--no-ic (乾式確認)]
+usage: [CASE_RUNS=<run_0062 / run_0114 のある case dir>] python3 throat_mono_ab.py prep <prep_dir> {pinG1|monoG1} [--with-nn <prep_dir_nn>] [--dry]
        python3 throat_mono_ab.py run <run_dir>               (準備済み run を soft → 本段で回す; forge は run_case.sh 経由)
+       python3 throat_mono_ab.py verify-prep <prep_dir> [<run_dir> ...]   (prep の入力が IC 写像の直後のままで、run がその prep から作られたか)
        python3 throat_mono_ab.py evidence <run_dir> [<run_dir_other_arm>]   (壁の証拠だけ出す; JSON を標準出力へ)
+--dry (旧名 --no-ic): ローカルの乾式確認 (forge を起動しない)。A は restart_field (forge --resolve-species を起動する) を飛ばし、
+  B・最近傍は ic_index_map を --no-species-resolve で通す (検査・転送・記録は本番と同じで、化学種の属性だけ付けない)。
+  その prep は prepare_info に DRY の印が付き、run・verify-prep が拒否する。
 壁の証拠 (M4): prepare_info.json の wall_fit.spline (当てはめ後のノット・係数・次数) を、変換後メッシュ (nozzle.h5, float32) の
 壁節点の x で評価し、節点の r と照合する (許容 = float32 の丸め ulp(r) + |r′|·ulp(x))。wall_design.csv は当てはめ前の MOC 点群なので
 証拠にならない。r″ の山の有無は壁節点からは認定しない (解析形で形状ゲート S1 が担う)。
 """
+import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -29,9 +38,10 @@ TOOLS = ROOT / "solver_density_cuda/tools"
 RUNS = Path(os.environ.get("CASE_RUNS", C))           # 凍結源 run_0062・IC run_0114 の場所 (既定は case dir)
 IC_RUN = "run_0114_euler_pin_G1_recal_ext6k"
 ARMS = {"pinG1": "problem_d155_euler_pin_G1_recal.yaml", "monoG1": "problem_d155_euler_pin_G1_recal_mono.yaml"}
-IC_MODE = {"pinG1": "restart_field", "monoG1": "interp_field"}
+MONO_R2 = {"pinG1": None, "monoG1": [0.0, 1.5]}       # prepare_info の wall_fit.mono_r2 の期待値 (完全一致)
+# IC の入れ方 (variant → 道具): 腕 A は restart_field、腕 B は番号写像、予備 A/B の (α) は最近傍 (どちらも保存量の直接転送)
+IC_MODE = {"pinG1": "restart_field", "monoG1": "index", "monoG1_nn": "nearest"}
 NSTEPS, CFL_MAIN, RELAX = 18000, 2.0, 0.7
-CONS = ("ro", "roUx", "roUy", "roUz", "roe")
 
 
 def _last_res(run: Path) -> Path:
@@ -122,36 +132,6 @@ def wall_evidence(run_dir, other_dir=None) -> dict:
     return out
 
 
-def ic_map_record(src_res: Path, src_mesh: Path, dst_h5: Path) -> dict:
-    """B の IC 写像 (interp_field の後): 対応節点の一致率・最大移動量、保存量の差 (最大・RMS、index 対応で比較)。"""
-    from scipy.spatial import cKDTree
-    with h5py.File(src_mesh) as f:
-        cs = f["/MESH/COORD"][:].reshape(-1, 3).astype(float)
-    with h5py.File(dst_h5) as f:
-        cd = f["/MESH/COORD"][:].reshape(-1, 3).astype(float)
-        vd = {k: f["/VALUE/" + k][:].astype(float) for k in CONS if "/VALUE/" + k in f}
-    with h5py.File(src_res) as f:
-        vs = {k: f["/VALUE/" + k][:].astype(float) for k in CONS if "/VALUE/" + k in f}
-    out = {"src_res": str(src_res), "n_src": int(len(cs)), "n_dst": int(len(cd))}
-    dist, idx = cKDTree(cs).query(cd)
-    out["nn_match_rate"] = (float(np.mean(idx == np.arange(len(cd)))) if len(cs) == len(cd) else None)
-    out["nn_dist_max_m"] = float(dist.max())
-    if len(cs) == len(cd):
-        disp = np.linalg.norm(cd - cs, axis=1)
-        out["same_index_disp_max_m"] = float(disp.max())
-        out["n_moved_nodes"] = int(np.count_nonzero(disp > 0))
-        dv = {}
-        for k in CONS:
-            if k in vd and k in vs and len(vd[k]) == len(vs[k]):
-                d = vd[k] - vs[k]
-                sc = float(np.abs(vs[k]).max()) or 1.0
-                dv[k] = {"max_abs": float(np.abs(d).max()), "rms": float(np.sqrt(np.mean(d * d))), "max_rel_to_maxabs": float(np.abs(d).max() / sc),
-                         "n_differs": int(np.count_nonzero(d))}
-        out["conserved_diff_vs_src"] = dv
-    out["note"] = "IC の影響は消去済みとは扱わない (plan §6 E1、諮問 ④)。限界として記録する"
-    return out
-
-
 def _load_problem_with_runs():
     """design_chain が凍結源 run (geometry.initial_line_run、問題ファイルからの相対) を探す場所を CASE_RUNS に向ける。"""
     from forge_design.evaluate import runner_axismach as RA
@@ -168,44 +148,48 @@ def _load_problem_with_runs():
     return RA
 
 
-def prep(prep_dir: Path, arm: str, no_ic: bool = False) -> dict:
-    """腕の入力を作る。no_ic=True はローカルの乾式確認用 (restart_field / interp_field は forge --resolve-species を起動するので
-    飛ばし、メッシュ・壁の証拠・座標一致だけを確かめる。その prep は投入に使えないので prepare_info に印を残す)。"""
-    if arm not in ARMS:
-        raise SystemExit(f"arm は {list(ARMS)}")
-    RA = _load_problem_with_runs()
-    ic_run = RUNS / IC_RUN
-    src = _last_res(ic_run)
-    info = RA.prepare(C / ARMS[arm], prep_dir, nsteps=NSTEPS, ic_from=None, cfl_main=CFL_MAIN, implicit_relax=RELAX)
-    if arm == "monoG1" and (info.get("wall_fit") or {}).get("mono_r2") != [0.0, 1.5]:
-        raise RuntimeError(f"腕 B の壁に mono_r2 [0, 1.5] が入っていない: {(info.get('wall_fit') or {}).get('mono_r2')}")
-    if arm == "pinG1" and (info.get("wall_fit") or {}).get("mono_r2") is not None:
-        raise RuntimeError("腕 A の壁に mono_r2 が入っている")
-    tool = IC_MODE[arm]
-    with h5py.File(prep_dir / "nozzle.h5") as f, h5py.File(ic_run / "nozzle.h5") as g:
-        same_mesh = f["/MESH/COORD"].shape == g["/MESH/COORD"].shape and np.array_equal(f["/MESH/COORD"][:], g["/MESH/COORD"][:])
-    if tool == "restart_field" and not same_mesh:
-        # 同一メッシュでなければ index コピーの restart は誤り (規則: 座標が違えば interp_field)。座標検査を緩めない
-        raise RuntimeError(f"腕 A のメッシュが IC run {IC_RUN} と座標一致しない — restart_field を使えない")
-    if no_ic:
-        ev = wall_evidence(prep_dir)
-        info.update(wall_arm=arm, DRY_NO_IC=True, wall_evidence_prep=ev, ic={"tool": tool, "skipped": True,
-                    "mesh_coords_identical_to_ic_run": bool(same_mesh)})
-        (prep_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
-        print(arm, "(dry, IC なし) | M4", ev["status"], f"resid/tol {ev.get('resid_over_f32tol_max', float('nan')):.3g}",
-              "| 座標一致 (IC run)", same_mesh)
-        return info
-    cmd = [sys.executable, str(TOOLS / f"{tool}.py"), str(src), str(prep_dir / "nozzle.h5")]
-    if tool == "restart_field":
-        cmd += ["--dst-run", str(prep_dir)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    (prep_dir / f"{tool}.log").write_text(r.stdout + r.stderr)
-    if r.returncode != 0:
-        raise RuntimeError(f"{tool} が失敗 (rc {r.returncode}):\n{(r.stdout + r.stderr)[-2000:]}")
-    ic = {"run": str(ic_run), "res": src.name, "tool": tool, "log": f"{tool}.log", "mesh_coords_identical_to_ic_run": bool(same_mesh),
-          "tool_last_line": ((r.stdout.strip().splitlines() or [""])[-1])}
-    if tool == "interp_field":
-        ic["map"] = ic_map_record(src, ic_run / "nozzle.h5", prep_dir / "nozzle.h5")
+
+
+def _run_tool(cmd, log: Path) -> subprocess.CompletedProcess:
+    r = subprocess.run([str(x) for x in cmd], capture_output=True, text=True)
+    log.write_text(r.stdout + r.stderr)
+    return r
+
+
+def _map_ic(prep_dir: Path, variant: str, info: dict, src: Path, ic_run: Path, dry: bool, same_mesh: bool, extra=None) -> dict:
+    """prep_dir の nozzle.h5 に IC を入れ、壁の証拠を照合して prepare_info.json・IC_MAP.json を書く。
+    variant: pinG1 (restart_field) / monoG1 (ic_index_map --mode index) / monoG1_nn (ic_index_map --mode nearest)。"""
+    from ic_index_map import _sha_file, mesh_digest
+    mode = IC_MODE[variant]
+    dst = prep_dir / "nozzle.h5"
+    ic = {"run": str(ic_run), "res": src.name, "mesh_coords_identical_to_ic_run": bool(same_mesh), **(extra or {})}
+    if mode == "restart_field":
+        ic.update(tool="restart_field", log="restart_field.log")
+        if dry:
+            ic.update(skipped="restart_field は forge --resolve-species を起動するので乾式確認では飛ばす", VERDICT=None)
+        else:
+            r = _run_tool([sys.executable, TOOLS / "restart_field.py", src, dst, "--dst-run", prep_dir], prep_dir / "restart_field.log")
+            last = (r.stdout.strip().splitlines() or [""])[-1]
+            if r.returncode != 0 or not (last.startswith("VERDICT: OK") and "SRC とビット一致" in last):
+                raise RuntimeError(f"restart_field が失敗・ビット一致でない (rc {r.returncode}):\n{(r.stdout + r.stderr)[-2000:]}")
+            ic.update(tool_last_line=last, VERDICT="OK")
+        ic.update(dst_sha256_after=_sha_file(dst), dst_mesh_digest=mesh_digest(dst))
+    else:
+        cmd = [sys.executable, C / "ic_index_map.py", src, dst, "--mode", mode, "--src-mesh", ic_run / "nozzle.h5",
+               "--src-run", ic_run, "--dst-run", prep_dir, "--record", prep_dir / "IC_MAP.json"]
+        if dry:
+            cmd.append("--no-species-resolve")
+        r = _run_tool(cmd, prep_dir / "ic_index_map.log")
+        rec = json.loads((prep_dir / "IC_MAP.json").read_text()) if (prep_dir / "IC_MAP.json").exists() else {}
+        if r.returncode != 0 or rec.get("VERDICT") != "OK":
+            raise RuntimeError(f"ic_index_map ({mode}) が失敗 (rc {r.returncode}, VERDICT {rec.get('VERDICT')}):\n{(r.stdout + r.stderr)[-3000:]}")
+        dr = rec["checks"]["displacement"]["detail"]
+        nv = rec["nearest_vs_index"]
+        ic.update(tool="ic_index_map", mode=mode, log="ic_index_map.log", record="IC_MAP.json", VERDICT=rec["VERDICT"],
+                  species_resolved=rec["species_resolved"], transferred=rec["transferred"],
+                  displacement_max_um=dr["max_um"], n_moved=dr["n_moved"], nearest_mismatch=nv["n_mismatch"],
+                  nearest_mismatch_dj=nv["dj_counts"], dst_sha256_after=rec["dst_sha256_after"], dst_mesh_digest=rec["dst_mesh_digest"],
+                  tool_last_line=(r.stdout.strip().splitlines() or [""])[-1])
     # MOC 点群 (当てはめ前) が IC run と同じこと (腕の違いは当てはめだけ)
     a = np.loadtxt(prep_dir / "wall_design.csv", delimiter=",", skiprows=1)
     b = np.loadtxt(ic_run / "wall_design.csv", delimiter=",", skiprows=1)
@@ -213,27 +197,118 @@ def prep(prep_dir: Path, arm: str, no_ic: bool = False) -> dict:
     ev = wall_evidence(prep_dir)
     if ev.get("status") != "consistent":
         raise RuntimeError(f"壁の証拠 (M4) が不一致: {json.dumps(ev, ensure_ascii=False)}")
-    info.update(stages="soft", wall_arm=arm, ic=ic, wall_evidence_prep=ev,
-                plan="plans/active/tooling-nozzle-throat-monotone-r2.md §6 E1")
+    info.update(stages="soft", wall_arm=variant, ic=ic, wall_evidence_prep=ev, plan="plans/active/tooling-nozzle-throat-monotone-r2.md §6 E1")
+    info.pop("DRY_NO_IC", None)
+    if dry:
+        info["DRY"] = True
+    else:
+        info.pop("DRY", None)
     (prep_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
-    (prep_dir / "IC_MAP.json").write_text(json.dumps(ic, indent=1, default=str, ensure_ascii=False))
-    print(arm, "mesh", json.dumps(info.get("mesh")), "| IC", tool, src.name, "| M4", ev["status"],
-          f"resid/tol {ev['resid_over_f32tol_max']:.3g}", "|", (prep_dir / "MESH_QUALITY.txt").read_text().strip().splitlines()[-1])
+    if mode == "restart_field":                      # B・最近傍の IC_MAP.json は ic_index_map の記録そのもの (上書きしない)
+        (prep_dir / "IC_MAP.json").write_text(json.dumps(ic, indent=1, default=str, ensure_ascii=False))
+    print(variant, "mesh", json.dumps(info.get("mesh")), "| IC", ic["tool"], ic.get("mode", ""), src.name, "VERDICT", ic.get("VERDICT"),
+          ("(dry)" if dry else ""), "| M4", ev["status"], f"resid/tol {ev['resid_over_f32tol_max']:.3g}", "|",
+          (prep_dir / "MESH_QUALITY.txt").read_text().strip().splitlines()[-1])
+    if mode != "restart_field":
+        print(f"  移動 最大 {ic['displacement_max_um']:.4f} µm / 動いた節点 {ic['n_moved']} / 最近傍が番号と食い違う節点 {ic['nearest_mismatch']} "
+              f"(j の差 {ic['nearest_mismatch_dj']})")
     return info
 
 
+def prep(prep_dir: Path, arm: str, dry: bool = False, nn_dir: Path | None = None) -> dict:
+    """腕の入力を作る。nn_dir (monoG1 のみ): 予備 A/B の最近傍の prep を、IC を入れる前の B の prep の複製から作る (同じ格子)。
+    dry=True はローカルの乾式確認用 (forge を起動しない; その prep は投入に使えない)。"""
+    if arm not in ARMS:
+        raise SystemExit(f"arm は {list(ARMS)}")
+    if nn_dir is not None and arm != "monoG1":
+        raise SystemExit("--with-nn は monoG1 (腕 B) の prep にだけ付ける (予備 A/B は B の格子で行う)")
+    if nn_dir is not None and Path(nn_dir).exists():
+        raise SystemExit(f"{nn_dir} が既にある (消してから作る)")
+    RA = _load_problem_with_runs()
+    ic_run = RUNS / IC_RUN
+    src = _last_res(ic_run)
+    info = RA.prepare(C / ARMS[arm], prep_dir, nsteps=NSTEPS, ic_from=None, cfl_main=CFL_MAIN, implicit_relax=RELAX)
+    wf = info.get("wall_fit") or {}
+    if "mono_r2" not in wf:
+        raise RuntimeError("prepare_info の wall_fit に mono_r2 の記録が無い (壁の当てはめ設定の証拠が欠損)")
+    from throat_mono_judge import mono_r2_matches
+    if not mono_r2_matches(wf["mono_r2"], MONO_R2[arm]):
+        raise RuntimeError(f"腕 {arm} の壁の mono_r2 {wf['mono_r2']!r} が期待 {MONO_R2[arm]!r} と完全一致しない")
+    with h5py.File(prep_dir / "nozzle.h5") as f, h5py.File(ic_run / "nozzle.h5") as g:
+        same_mesh = f["/MESH/COORD"].shape == g["/MESH/COORD"].shape and np.array_equal(f["/MESH/COORD"][:], g["/MESH/COORD"][:])
+    if IC_MODE[arm] == "restart_field" and not same_mesh:
+        # 同一メッシュでなければ index コピーの restart は誤り。restart_field の座標検査を緩めない
+        raise RuntimeError(f"腕 A のメッシュが IC run {IC_RUN} と座標一致しない — restart_field を使えない")
+    if nn_dir is not None:
+        nn_dir = Path(nn_dir).resolve()
+        shutil.copytree(prep_dir, nn_dir)            # IC を入れる前の B の prep (同じ問題・同じ格子・同じ設定) を複製
+    out = _map_ic(prep_dir, arm, info, src, ic_run, dry, same_mesh)
+    if nn_dir is not None:
+        info_nn = json.loads((nn_dir / "prepare_info.json").read_text())
+        _map_ic(nn_dir, "monoG1_nn", info_nn, src, ic_run, dry, same_mesh,
+                extra={"grid_copied_from": str(prep_dir), "icab": "plan §6 E1 予備 A/B の (α)、(β) = 腕 B の r1"})
+        a, b = (json.loads((d / "IC_MAP.json").read_text())["dst_mesh_digest"] for d in (prep_dir, nn_dir))
+        if a != b:
+            raise RuntimeError(f"予備 A/B の 2 つの prep の格子が同じでない ({a[:16]} / {b[:16]})")
+    return out
+
+
+def verify_prep(prep_dir: Path, run_dirs=()) -> list:
+    """prep の入力が IC 写像の直後のまま (nozzle.h5 の sha256 = IC_MAP.json の記録) で、run_dirs がその prep から作られたか
+    (run の IC_MAP.json の記録が同じ)。腕 B の r2・r3 を r1 と同じ入力から作るときに使う。戻り値 = 不成立の理由 (空なら成立)。"""
+    from ic_index_map import _sha_file
+    bad = []
+    try:
+        info = json.loads((prep_dir / "prepare_info.json").read_text())
+        rec = json.loads((prep_dir / "IC_MAP.json").read_text())
+    except (OSError, ValueError) as e:
+        return [f"{prep_dir}: prepare_info.json / IC_MAP.json を読めない ({e})"]
+    if info.get("DRY") or info.get("DRY_NO_IC"):
+        bad.append(f"{prep_dir} は乾式確認 (DRY) の prep")
+    if rec.get("VERDICT") != "OK":
+        bad.append(f"{prep_dir}: IC 写像の VERDICT {rec.get('VERDICT')!r}")
+    sha = rec.get("dst_sha256_after")
+    if not sha or _sha_file(prep_dir / "nozzle.h5") != sha:
+        bad.append(f"{prep_dir}/nozzle.h5 が IC 写像の記録 (sha256 {str(sha)[:16]}) と違う (写像の後に変わった)")
+    for rd in run_dirs:
+        try:
+            r2 = json.loads((Path(rd) / "IC_MAP.json").read_text())
+            i2 = json.loads((Path(rd) / "prepare_info.json").read_text())
+        except (OSError, ValueError) as e:
+            bad.append(f"{rd}: IC_MAP.json / prepare_info.json を読めない ({e})")
+            continue
+        if r2.get("dst_sha256_after") != sha:
+            bad.append(f"{rd}: IC 写像の記録が prep と違う (別の prep から作られた)")
+        if i2.get("wall_arm") != info.get("wall_arm"):
+            bad.append(f"{rd}: wall_arm {i2.get('wall_arm')!r} が prep {info.get('wall_arm')!r} と違う")
+    return bad
+
+
 def main(argv) -> int:
-    if len(argv) in (3, 4) and argv[0] == "prep" and (len(argv) == 3 or argv[3] == "--no-ic"):
-        prep(Path(argv[1]).resolve(), argv[2], no_ic=(len(argv) == 4))
+    if argv and argv[0] == "prep":
+        ap = argparse.ArgumentParser(prog="throat_mono_ab.py prep")
+        ap.add_argument("prep_dir")
+        ap.add_argument("arm", choices=list(ARMS))
+        ap.add_argument("--with-nn", help="予備 A/B の最近傍の prep (monoG1 のみ)")
+        ap.add_argument("--dry", "--no-ic", dest="dry", action="store_true", help="乾式確認 (forge を起動しない)")
+        a = ap.parse_args(argv[1:])
+        prep(Path(a.prep_dir).resolve(), a.arm, dry=a.dry, nn_dir=(Path(a.with_nn) if a.with_nn else None))
         return 0
     if len(argv) == 2 and argv[0] == "run":
         from forge_design.evaluate import runner_axismach as RA
         rd = Path(argv[1]).resolve()
-        if json.loads((rd / "prepare_info.json").read_text()).get("DRY_NO_IC"):
-            raise SystemExit(f"{rd} は乾式確認 (--no-ic) の prep から作られている — IC が無いので回さない")
+        info = json.loads((rd / "prepare_info.json").read_text())
+        if info.get("DRY") or info.get("DRY_NO_IC"):
+            raise SystemExit(f"{rd} は乾式確認 (--dry) の prep から作られている — 化学種の属性・IC がそろっていないので回さない")
+        if (info.get("ic") or {}).get("VERDICT") != "OK":
+            raise SystemExit(f"{rd}: IC 写像の VERDICT が OK でない ({(info.get('ic') or {}).get('VERDICT')!r}) — 回さない")
         rc = RA.run_staged(rd, cfl_main=CFL_MAIN, mid_stage=False, stages="soft")
         print(f"forge exit={rc}")
         return rc
+    if len(argv) >= 2 and argv[0] == "verify-prep":
+        bad = verify_prep(Path(argv[1]).resolve(), [Path(x).resolve() for x in argv[2:]])
+        print("VERIFY-PREP: " + ("OK" if not bad else "FAIL\n  " + "\n  ".join(bad)))
+        return 0 if not bad else 1
     if len(argv) in (2, 3) and argv[0] == "evidence":
         print(json.dumps(wall_evidence(Path(argv[1]), Path(argv[2]) if len(argv) == 3 else None), indent=1, ensure_ascii=False))
         return 0
