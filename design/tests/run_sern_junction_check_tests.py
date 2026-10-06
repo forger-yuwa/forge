@@ -6,6 +6,8 @@ B4-0: 壁第一層検査 `first_layer_check`。B4-1: 出力実座標の隣接間
 形状ゲート `shape_check` (と MOC 輪郭 `Contour` / カウル外壁のオフセット `Geom.yo`) — 末尾の (e)(f)(g)。
 B4-2: 継ぎ目の分布則 (片側等比 `prog_nodes`・継ぎ目の間隔の連動 `match_spacing`・z の節点数の規則) と `cowl_side` の一般壁分類 — (h)(i)。
 B4-4: リング対角辺の非対称分布 `ring_diag_spacing` (壁側端の保持・コア側端の比・全長・区間数・内部隣接比) — (j)。
+B4-4 (§6.5): SW 端間隔の選定則 `sw_end_spacing` (A = match_spacing・B = s/2^(1/4)) — (k)、全長診断の評価位置 `section_targets`
+(要求 x = 評価 x、station に丸めない、物理 station 上は両側の領域) — (l)。
 
 山場: 旧検査は対向節点が別の壁上の節点でも除外せず、層数も設定の記録だけだったので、全 6 面が壁で内部節点 0 の立方体でも
 6 壁 ok になった (2026-10-06 plan レビュー M1)。人工の格子を渡して
@@ -25,7 +27,8 @@ try:
 except ImportError:                       # 検査の中核は gmsh を使わない。import だけ通す
     sys.modules["gmsh"] = types.ModuleType("gmsh")
 from hex_junction_model import (first_layer_check, adjacent_spacing_check, wake_dx_check, shape_check, Geom, P0,  # noqa: E402
-                                prog_nodes, prog_r, prog_n, match_spacing, ring_diag_spacing, END_TAGS, WALL_TAGS)
+                                prog_nodes, prog_r, prog_n, match_spacing, ring_diag_spacing, sw_end_spacing, section_targets,
+                                END_TAGS, WALL_TAGS)
 
 FAIL = 0
 
@@ -275,6 +278,39 @@ try:
 except ValueError:
     bad = True
 check("(j3) 少ない区間数で端比 0.05 は内部隣接比 > 1.2 になり ValueError (分布だけでは満たせないときは止める)", bad)
+
+# (k) SW の端間隔の選定則 (plan §6.5)。値は §6.4 B の x/H = 1.5 断面 (/h1): s2 1.439157589、s6 1.416914595、F・kv は P0 の規則
+s2k, s6k, kvk = 1.439157589, 1.416914595, P0["KV"]; Fk = 1.2054973751476779; R0 = 2 ** 0.25
+a3A, a4A = sw_end_spacing(s2k, s6k, Fk, kvk, g, 0)
+check("(k1) 規則 0 (A) は従来の match_spacing と同一", a3A == match_spacing([s6k, Fk, kvk], g) and a4A == match_spacing([s2k, kvk], g), f"a3 {a3A:.6f} a4 {a4A:.6f}")
+a3B, a4B = sw_end_spacing(s2k, s6k, Fk, kvk, g, 1); tN = (s2k + s6k) / (2 * np.sqrt(2))
+check("(k2) 規則 1 (B): 両隅 s6/a3・s2/a4 と e5 中央の平均間隔 / t_N がどれも 2^(1/4) (codex 値 a3 1.191478、a4 1.210182)",
+      abs(s6k / a3B - R0) < 1e-14 and abs(s2k / a4B - R0) < 1e-14 and abs(0.5 * (a3B + a4B) / tN - R0) < 1e-14 and abs(a3B - 1.191478404) < 1e-9 and abs(a4B - 1.210182457) < 1e-9,
+      f"a3 {a3B:.9f} a4 {a4B:.9f} 中央比 {0.5 * (a3B + a4B) / tN:.9f}")
+rA = 0.5 * (a3A + a4A) / tN
+check("(k3) A の e5 中央の平均間隔比は 1.1952 (§6.4 B の N_SIDE|SW を再現)、B はそれより小さい", abs(rA - 1.195204443) < 1e-8 and 0.5 * (a3B + a4B) / tN < rA, f"A {rA:.9f}")
+rk = max(max(a3B / kvk, kvk / a3B), max(a4B / kvk, kvk / a4B), max(a3B / Fk, Fk / a3B))
+check("(k4) B の端間隔は外側帯 kv・e8 の F とも比 <= 1.2 (codex: kv に対して最大 1.186)", rk <= g, f"最大比 {rk:.6f}")
+try:
+    sw_end_spacing(s2k, s6k, Fk, kvk, g, 2); bad = False
+except ValueError:
+    bad = True
+check("(k5) 未定義の規則番号は ValueError", bad)
+
+# (l) 全長診断の評価位置: 要求 x/H をそのまま評価位置にする (最近傍 station への丸めなし)
+Hl = 0.1; ivl = [(0.0, 0.08, "A"), (0.08, 0.12, "B"), (0.12, 0.15, "C"), (0.15, 1.0091642885701801, "C")]
+xq = [0.0, 0.8, 1.0, 1.2, 1.37, 3.0, 8.0, 10.0, 10.0916428857018]
+tg = section_targets(xq, ivl, Hl)
+check("(l1) 評価 x = 要求 x/H × H (全要求点で一致、丸めなし)", [t[0] for t in tg] == xq and all(t[1] == t[0] * Hl for t in tg),
+      " ".join(f"{t[0]:g}->{t[1] / Hl:.15g}" for t in tg))
+rgs = {t[0]: t[2] for t in tg}
+check("(l2) 物理 station 上 (x/H 0.8・1.2) は両側の領域、区間内部は 1 つ、x/H 1.5 の station は C 同士",
+      rgs[0.8] == {"A", "B"} and rgs[1.2] == {"B", "C"} and rgs[1.0] == {"B"} and rgs[1.37] == {"C"} and rgs[10.0] == {"C"} and rgs[0.0] == {"A"}, str({k: sorted(v) for k, v in rgs.items()}))
+try:
+    section_targets([10.2], ivl, Hl); bad = False
+except ValueError:
+    bad = True
+check("(l3) 診断範囲 (参照輪郭の終端) の外は ValueError", bad)
 
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)

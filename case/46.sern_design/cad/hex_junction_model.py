@@ -39,6 +39,11 @@ B4-4 (plan §5.1、§6.4 の局所 A/B): リング対角辺 e2/e6 の拘束解�
   - --set COUPON_X=x COUPON_N=k: 全模型と同じ分布・同じ station のうち x/H に最も近い station を含む k 個だけを押し出した 3D 接続試験片
     (本体と同じ検査関数。区間の端面が無いので後流 Δx・形状ゲートは対象外、壁層は試験片にある壁タグだけ)。
 
+B4-4 (plan §6.5): SW の z 分布 hz31/hz41 の端間隔 a3/a4 の選定則 SW_END_RULE (0 = match_spacing = A・既定、1 = s6/2^(1/4)・s2/2^(1/4) = B。sw_end_spacing)。
+  --set SECX=x1,x2,... (/H) は全長診断: 模型の終端を参照ランプ輪郭の終端 (または SECX_END) まで現行の延長則で延ばし、station と分割数を
+    その全域から現行規則で決め直したうえで、**指定 x そのもの** (station への丸めなし) の断面を 2D で切って全継ぎ目・ブロック内の比と skew を出す。
+    要求 x と評価 x を並べて出す。XEND (1.5 H) を超える x の延長則は暫定 (判定はしない)。
+
 usage (mesh venv):  .venv-mesh/bin/python case/46.sern_design/cad/hex_junction_model.py OUT_PREFIX --contours DIR [--scale S] [--set k=v ...]
 出力: OUT.msh / OUT_report.json / OUT_sections.npz (描画用)
 """
@@ -58,7 +63,8 @@ P0 = dict(H=0.1, ZW=1.0, TSW=0.005, TC=0.005, LSW=0.8, LCOWL=1.2, XEND=1.5, DR=0
                                                 # リングの格子線の傾きを抑える (N_SIDE|SW の比)。B・C の露出壁の第一層はランプ +1.4 %・カウル上面 +4.6 % (稜の近傍 ±10 %)
           KV=1.02,                              # 側壁外面帯 (hz32・hz42) の第一間隔 / h1。SW の z (hz41) の両端を e2 の第一間隔と hz42 の両方に 1.2 以内で
                                                 # つなぐための余裕 (KV = 1 だと窓 [s2/1.2, 1.2 h1] の幅が 0.06 %)。sidewall_out の第一層は +2 % (±5 % の内側)
-          RING_CORE_RATIO=1.0,                   # リング対角辺 e2/e6 のコア側端間隔 / 壁側端間隔 (plan §6.4。1.0 = 旧の対称 Bump = A、B は 1/√2)
+          RING_CORE_RATIO=0.7071067811865476,                   # リング対角辺 e2/e6 のコア側端間隔 / 壁側端間隔 (plan §6.4。1.0 = 旧の対称 Bump = A、B は 1/√2)
+          SW_END_RULE=1,                         # SW の z 分布 hz31/hz41 の端間隔 a3/a4 の選定則 (plan §6.5。0 = match_spacing = A、1 = s6/2^(1/4)・s2/2^(1/4) = B)
           HFAR=0.10, AR_TAN=900.0)                            # 外部遠方の最大格子幅 (端面層が断面全体に伝播するので、遠方の幅が AR を決める)
 # B4-2 (plan §5.1、§6.3): NZ は下限。z 方向 (e1/e3/e8/e10/hz?0) の節点数は「継ぎ目側の第一間隔 (>= h1) から成長率 1.15 で 1 H を覆う」数との大きい方
 # (x/H, 上隅 r/H, 下隅 r/H)。区間内は smoothstep (両端で r' = 0)
@@ -120,6 +126,19 @@ def ring_diag_spacing(base, ratio, g=1.2):
     q = np.maximum(d[1:] / d[:-1], d[:-1] / d[1:]).max()
     if q > g * (1 + 1e-12): raise ValueError("非対称分布の内部隣接比 %.4f > %.3g (ratio %.4g, n %d)" % (q, g, ratio, n))
     return d
+
+
+SW_R0 = 2.0 ** 0.25
+
+
+def sw_end_spacing(s2, s6, F, kv, g, rule=0):
+    """SW の z 分布の端間隔 (a3 = hz31 の WL 側、a4 = hz41 の WU 側) の選定則 (plan §6.5、§5.1 B4-4)。
+    rule 0 (A、既定): a3 = match_spacing([s6, F, kv])、a4 = match_spacing([s2, kv]) (隅の対角端・e8 の F・側壁外面帯 kv と比 g 以内の幾何平均)。
+    rule 1 (B): a3 = s6/2^(1/4)、a4 = s2/2^(1/4)。両隅の s/a と、e5 中央の N_SIDE 第一層 t_N = (s2 + s6)/(2√2) に対する
+    平均間隔 (a3 + a4)/2 の比がどれも 2^(1/4) になる (codex diagnose 2026-10-06 の端点・中央の拘束)。B は F・kv との比を拘束しない (3D の検査で見る)"""
+    if rule == 0: return match_spacing([s6, F, kv], g), match_spacing([s2, kv], g)
+    if rule == 1: return s6 / SW_R0, s2 / SW_R0
+    raise ValueError("SW_END_RULE は 0 か 1 (%r)" % rule)
 
 
 class Bump:
@@ -406,6 +425,10 @@ def xface_tag(e, reg):
 def build(out, P, contours, quiet=False):
     import time
     t0 = time.time()
+    if P.get("SECX") is not None:           # 全長診断: 模型の終端 XEND を参照ランプ輪郭の終端 (既定) か SECX_END まで延ばし、station と分割数をその全域から現行規則で決め直す
+        P = dict(P); xe = float(contours["ramp"][-1, 0]) / P["H"]
+        while xe * P["H"] > float(contours["ramp"][-1, 0]): xe = float(np.nextafter(xe, 0.0))      # 丸めで輪郭の外に出ない (Geom の範囲検査)
+        P["XEND"] = min(float(P["SECX_END"]), xe) if P.get("SECX_END") is not None else xe
     G = Geom(P, contours["ramp"], contours["cowl"]); H = G.H; h1 = P["H1"] * H; g = P["G"]; DR = G.DR
     gmsh.initialize(); gmsh.option.setNumber("General.Terminal", 0)
     bump = Bump()
@@ -539,7 +562,7 @@ def build(out, P, contours, quiet=False):
         # SW の hz31 (WL)・hz41 (WU) は e6/e2 の第一間隔・e8@WL (F)・側壁外面帯 hz32/hz42 の第一間隔 kv に連動
         b21 = match_spacing([F, h1], g)
         for j in (0, 1, 2): L["hz%d1" % j] = bl(NSW, G.TSW, b21)
-        a3 = match_spacing([s["e6"], F, kv], g); a4 = match_spacing([s["e2"], kv], g)
+        a3, a4 = sw_end_spacing(s["e2"], s["e6"], F, kv, g, int(P.get("SW_END_RULE", 0)))
         L["hz31"] = bl(NSW, G.TSW, a3); L["hz41"] = bl(NSW, G.TSW, a4)
         cap = lambda hh: min(hh, 0.999 * DR / NL)
         # y: カウル外壁帯 vy1k (NL 区間、壁 = yo 側 h1 co)、板厚 vy2k (Bump、両端 h1 cc)。vy21 (C の CW1|CW2) は e6@WL・e5@WL・vy11@G21 に連動
@@ -558,9 +581,9 @@ def build(out, P, contours, quiet=False):
 
     # ---- 断面の前計算 (gmsh の較正モデルは本体モデルを作る前に使い切る)
     need_blk = lambda si: (PRESENT[ivs[si - 1][2]] if si > 0 else set()) | (PRESENT[ivs[si][2]] if si < len(ivs) else set())
-    SEC = []
-    for si, x in enumerate(xs):
-        pt, walls, _ = G.section(x); nb = need_blk(si)
+    def sec_at(x, nb):
+        """位置 x の断面 (点・辺・壁曲線・各辺の分布則)。nb はその断面に面を張るブロックの集合"""
+        pt, walls, _ = G.section(x)
         ed = sorted({e for b in nb for e, _ in BLK[b]}); elen, wr = {}, {}
         for e in ed:
             a_, b_ = EDGE[e]
@@ -572,7 +595,17 @@ def build(out, P, contours, quiet=False):
                 sv = np.linspace(0, dd[-1], int(P["M_SPL"])); wr[e] = np.stack([np.interp(sv, dd, W[:, q]) for q in (0, 1)], 1); elen[e] = dd[-1]
             else: elen[e] = math.dist(pt[a_], pt[b_])
         for e in ("e5", "e7", "e11", "vy32"): elen.setdefault(e, math.dist(pt[EDGE[e][0]], pt[EDGE[e][1]]))
-        SEC.append(dict(pt=pt, nb=nb, ed=ed, elen=elen, wr=wr, law=laws(x, pt, elen)))
+        return dict(pt=pt, nb=nb, ed=ed, elen=elen, wr=wr, law=laws(x, pt, elen))
+    if P.get("SECX") is not None:           # 全長診断 (plan §6.5 末尾): 指定 x (/H) の断面を station に丸めずその位置で作る (分割数は延長した全域の station から決めたもの)
+        items = [(xv, x, sec_at(x, set().union(*[PRESENT[r_] for r_ in rg]))) for xv, x, rg in section_targets(np.atleast_1d(P["SECX"]), ivp, H)]
+        res = section_2d(G, items, seams, quiet)
+        js = np.array(xs) / H; ii = np.searchsorted(js, [it[0] for it in items])
+        res.update(counts=dict(NL=NL, NR=NR, NY=NY, NZ=NZ, NSW=NSW, NTC=NTC, NFY=NFY, NFZ=NFZ), domain_x_end=G.XEND / H, n_stations=len(xs),
+                   neighbor_stations={"%.6g" % it[0]: [float(js[max(i_ - 1, 0)]), float(js[min(i_, len(js) - 1)])] for it, i_ in zip(items, ii)},
+                   note="XEND (模型 1.5 H) を超える x は現行の延長則 (カウル跡の上下 = 後縁から接線延長、ランプは参照輪郭) で作った断面。延長則は暫定 "
+                        "(B4a(1) の接続表で確定させる)。分割数 (NY・NTC・NR・NFY・NFZ 等) は x ∈ [0, domain_x_end] の全 station から現行規則で決めた値")
+        return res
+    SEC = [sec_at(x, need_blk(si)) for si, x in enumerate(xs)]
     coupon = P.get("COUPON_N") is not None
     if coupon:                              # B4-4 (plan §6.4): 全模型と同じ station・同じ分布のうち、COUPON_X に最も近い station を含む COUPON_N 個だけを押し出す
         k_ = int(P["COUPON_N"]); i_ = int(np.argmin(np.abs(np.array(xs) - float(P["COUPON_X"]) * H)))
@@ -583,7 +616,10 @@ def build(out, P, contours, quiet=False):
             Q["nb"] = need_blk(si); Q["ed"] = sorted({e for b in Q["nb"] for e, _ in BLK[b]})
             Q["wr"] = {e: v for e, v in Q["wr"].items() if e in Q["ed"]}
     if P.get("SEC2D") is not None:          # 分布の調整用: 指定 x (/H) に最も近い station の断面だけを 2D で切り、継ぎ目の比と skew を出す (判定には使わない)
-        return section_2d(G, xs, SEC, [float(v) for v in np.atleast_1d(P["SEC2D"])], seams, quiet)
+        items = []
+        for xv in [float(v) for v in np.atleast_1d(P["SEC2D"])]:
+            si = int(np.argmin(np.abs(np.array(xs) - xv * H))); items.append((xv, xs[si], SEC[si]))
+        return section_2d(G, items, seams, quiet)
     # ---- gmsh モデル
     gmsh.model.add("junction"); ge = gmsh.model.geo; gm = ge.mesh
     S = []
@@ -684,12 +720,24 @@ def build(out, P, contours, quiet=False):
     return rep
 
 
-def section_2d(G, xs, SEC, xq, seams, quiet=False):
+def section_targets(xq, ivp, H):
+    """全長診断 (SECX) の評価位置: 要求 x/H をそのまま評価位置 x = x/H × H にし (station への丸めなし)、その位置を含む物理区間の領域 (A/B/C) の集合を返す。
+    物理 station 上の x は両側の区間の領域 (station に張る面と同じ規則)。物理区間の範囲外は ValueError。戻り値は (要求 x/H, 評価 x, 領域の集合) の列"""
+    out = []; x0, x1 = ivp[0][0], ivp[-1][1]
+    for xv in [float(v) for v in xq]:
+        x = xv * H
+        if not (x0 - 1e-12 * H <= x <= x1 + 1e-12 * H): raise ValueError("SECX の x/H = %.6g が診断の範囲 [%.6g, %.6g] の外" % (xv, x0 / H, x1 / H))
+        out.append((xv, x, {r_ for a_, b_, r_ in ivp if a_ - 1e-12 * H <= x <= b_ + 1e-12 * H}))
+    return out
+
+
+def section_2d(G, items, seams, quiet=False):
     """断面 1 枚の 2D 四角形格子で、辺を共有する 2 つの四角形の「共有辺の端から出る辺」の長さの比 (3D の隣接間隔比の断面方向と同じ定義) と
-    skew をブロックの組ごとに出す (分布の調整用の診断。受入の判定は 3D の adjacent_spacing_check)"""
+    skew をブロックの組ごとに出す (分布の調整用の診断。受入の判定は 3D の adjacent_spacing_check)。
+    items は (要求 x/H, 評価 x [m], 断面 Q) の列。SEC2D は最近傍 station の断面、SECX (全長診断) は要求位置そのものの断面を渡す。
+    各組の最大比には位置と、比を作った 2 本の辺 (共有辺の端の節点から両側のブロックへ出る辺) のベクトル (/H) を付ける"""
     out = {}
-    for xv in xq:
-        si = int(np.argmin(np.abs(np.array(xs) - xv * G.H))); x = xs[si]; Q = SEC[si]
+    for xv, x, Q in items:
         gmsh.model.add("sec"); ge = gmsh.model.geo; pt, ed = Q["pt"], Q["ed"]
         pid = {p: ge.addPoint(x, pt[p][0], pt[p][1]) for p in sorted({p for e in ed for p in EDGE[e]})}; eid = {}
         for e in ed:
@@ -710,16 +758,20 @@ def section_2d(G, xs, SEC, xq, seams, quiet=False):
         rec = {}
         for k in range(4):
             a, b = q[:, k], q[:, (k + 1) % 4]; pa, nb_ = q[:, (k + 3) % 4], q[:, (k + 2) % 4]
-            la = np.linalg.norm(xyz[pa] - xyz[a], axis=1); lb = np.linalg.norm(xyz[nb_] - xyz[b], axis=1)
             for i in range(len(q)):
-                rec.setdefault((min(a[i], b[i]), max(a[i], b[i])), []).append((i, {a[i]: la[i], b[i]: lb[i]}))
+                rec.setdefault((min(a[i], b[i]), max(a[i], b[i])), []).append((i, {a[i]: pa[i], b[i]: nb_[i]}))
         pair, skw = {}, {}
         for key, v in rec.items():
             if len(v) != 2: continue
             (i1, d1), (i2, d2) = v
             for n_ in key:
-                r = max(d1[n_] / d2[n_], d2[n_] / d1[n_]); k_ = "%s|%s" % tuple(sorted((names[lab[i1]], names[lab[i2]])))
-                if r > pair.get(k_, (0,))[0]: pair[k_] = (float(r), [float(c) / G.H for c in xyz[n_][1:]])
+                v1, v2 = xyz[d1[n_]] - xyz[n_], xyz[d2[n_]] - xyz[n_]; l1, l2 = np.linalg.norm(v1), np.linalg.norm(v2)
+                r = max(l1 / l2, l2 / l1); b1, b2 = names[lab[i1]], names[lab[i2]]
+                if b1 > b2: b1, b2, v1, v2, l1, l2 = b2, b1, v2, v1, l2, l1
+                k_ = "%s|%s" % (b1, b2)
+                if r > pair.get(k_, (0,))[0]:
+                    pair[k_] = (float(r), [float(c) / G.H for c in xyz[n_][1:]],
+                                {b1: [float(c) / G.H for c in v1[1:]], b2 + ("'" if b1 == b2 else ""): [float(c) / G.H for c in v2[1:]]})
         for b in names:
             qq = xyz[q[lab == names.index(b)]]; sk = np.zeros(len(qq))
             for c_ in range(4):
@@ -728,9 +780,10 @@ def section_2d(G, xs, SEC, xq, seams, quiet=False):
                 sk = np.maximum(sk, np.abs(th - 90) / 90)
             skw[b] = float(sk.max())
         gmsh.model.remove()
-        key_ = "%.4f" % (x / G.H); out[key_] = dict(pairs=dict(sorted(pair.items(), key=lambda kv: -kv[1][0])), skew=skw, nodes=int(len(xyz)))
+        key_ = "%.4f" % (x / G.H)
+        out[key_] = dict(x_requested=xv, x_evaluated=x / G.H, pairs=dict(sorted(pair.items(), key=lambda kv: -kv[1][0])), skew=skw, nodes=int(len(xyz)))
         if not quiet:
-            print("x/H = %s  nodes %d  max ratio %.4f  max skew %.3f (%s)" % (key_, len(xyz), max(v[0] for v in pair.values()), max(skw.values()), max(skw, key=skw.get)))
+            print("x/H 要求 %.6g 評価 %s  nodes %d  max ratio %.4f  max skew %.3f (%s)" % (xv, key_, len(xyz), max(v[0] for v in pair.values()), max(skw.values()), max(skw, key=skw.get)))
             for k_, v in list(out[key_]["pairs"].items())[:10]: print("   %-14s %.4f at (y,z)/H = (%.5f, %.5f)" % (k_, v[0], v[1][0], v[1][1]))
     gmsh.finalize(); return dict(VERDICT="DIM2", sections=out, seam_spacings=seams)
 
@@ -972,6 +1025,14 @@ def adjacent_spacing_check(xyz, hx, gmax=1.2, labels=None, label_names=None, uni
         mx = np.zeros(len(uk)); np.maximum.at(mx, inv, rmax_all)
         out["max_by_block_pair"] = {"%s|%s|%s" % (nm(int(k // 2 // 65536)), nm(int(k // 2 % 65536)), "x" if k % 2 else "section"): float(v)
                                     for k, v in zip(uk, mx)}
+        # 各組の最大比の位置と、比を作った 2 本の辺 (共有面の節点から面に直交して両側のヘキサへ出る辺) のベクトル (plan §6.5「失敗節点の接続ベクトル」)
+        arg = np.full(len(uk), -1, np.int64); hit = rmax_all >= mx[inv]
+        arg[inv[hit][::-1]] = np.flatnonzero(hit)[::-1]                # 組ごとに最大比を取る最初の面対
+        nfa, La, va, ha = side(ia[arg]); _, Lb, vb, hb = side(ib[arg]); jj = np.argmax(np.maximum(La / Lb, Lb / La), axis=1)
+        out["at_by_block_pair"] = {"%s|%s|%s" % (nm(int(k // 2 // 65536)), nm(int(k // 2 % 65536)), "x" if k % 2 else "section"):
+                                   dict(ratio=float(mx[q]), at=[float(v) / unit for v in xyz[nfa[q, jj[q]]]],
+                                        vec={nm(labels[ha[q]]): [float(v) / unit for v in va[q, jj[q]]], nm(labels[hb[q]]) + ("'" if labels[ha[q]] == labels[hb[q]] else ""): [float(v) / unit for v in vb[q, jj[q]]]})
+                                   for q, k in enumerate(uk)}
     if labels is not None and bad.any():
         la, lb = np.sort(np.stack([labels[hpair[bad, 0]], labels[hpair[bad, 1]]], 1), axis=1).T; bi = np.flatnonzero(bad); rb = rmax_all[bad]
         grp = {}
