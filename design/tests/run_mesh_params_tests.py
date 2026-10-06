@@ -39,4 +39,10 @@ for args, why in (((65, 1.3e-5, 0.0133), "和が 1 にならない"), ((257, 0.0
         _radial_fracs_capfixed(*args); check(f"(f) 実現不能 {args} を拒否", False)
     except ValueError:
         check(f"(f) 実現不能 {args} を拒否 ({why})", True)
+import ast  # noqa: E402
+for mod in ("evaluate/runner_axismach.py", "feedback/deltastar_loop.py"):
+    body = ast.parse((Path(__file__).resolve().parents[1] / "forge_design" / mod).read_text()).body
+    mi = [i for i, n in enumerate(body) if isinstance(n, ast.If) and "__main__" in ast.unparse(n.test)]
+    ld = max(i for i, n in enumerate(body) if isinstance(n, (ast.FunctionDef, ast.ClassDef)))
+    check(f"(g) {mod}: `if __name__ == \"__main__\"` が全関数定義の後 (CLI から後方の関数に届く; codex result-2 2026-10-06)", bool(mi) and mi[0] > ld)
 print(f"FAIL 件数: {fails}"); sys.exit(1 if fails else 0)

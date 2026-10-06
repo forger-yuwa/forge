@@ -834,9 +834,6 @@ def main(argv=None) -> int:
     return rc
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
 
 # --- A12: 粘性 δ* 補正 (RANS 経路) ------------------------------------------------
 def delta_r_from_table(x, d):
@@ -1196,3 +1193,7 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     rc = run_forge(run_dir)
     _record(cfg_main, "main")
     return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

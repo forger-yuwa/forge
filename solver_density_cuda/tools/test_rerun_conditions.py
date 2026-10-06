@@ -316,7 +316,12 @@ def main():
     # ------------------------------------------------------------------ (f′) Euler の滑り壁 (2026-10-06 追加)
     slip = lambda t: re.sub(r"wall:\s*\{physID: 3, kind: wall, +outputHDFflg: 1, ints: , floats: \}",  # noqa: E731
                             "wall:   {physID: 3, kind: slip,             outputHDFflg: 1, ints: , floats: }", t)
-    ref, new = make_ref(edit_bc=slip)
+    noturb = lambda t: re.sub(r"^turbulence:.*$", "turbulence: {model: \"none\"}", t, flags=re.M)  # noqa: E731
+
+    def _drop_viscous(r):   # Euler 構成の fixture: prepare_info.viscous (run_0094 は True) を外す
+        _pi = json.load(open(os.path.join(r, "prepare_info.json"))); _pi.pop("viscous", None)
+        json.dump(_pi, open(os.path.join(r, "prepare_info.json"), "w"))
+    ref, new = make_ref(edit_cfg=noturb, edit_bc=slip); _drop_viscous(ref)
     p = plan_of([ref, new, *PT08])
     yb = yaml.safe_load(p["new_bc_text"])
     check("(f′) 滑り壁 (slip) の run を受理し、壁行はバイト一致", yb["wall"]["kind"] == "slip" and lines_diff(p["bc_text"], p["new_bc_text"]) == [0, 1],
@@ -325,11 +330,33 @@ def main():
     done(ref, new)
 
     # ------------------------------------------------------------------ (f″) 乱流モデルなしの run に残る roK/roOmega (2026-10-06 追加)
-    noturb = lambda t: re.sub(r"^turbulence:.*$", "turbulence: {model: \"none\"}", t, flags=re.M)  # noqa: E731
-    ref, new = make_ref(edit_cfg=noturb, edit_bc=slip)
+    ref, new = make_ref(edit_cfg=noturb, edit_bc=slip); _drop_viscous(ref)
     p = plan_of([ref, new, *PT08, "--scale-ic", "pt"])
     check("(f″) 乱流なし + roK/roOmega の入れ物 → 受理し警告に記録、必要保存量に roK/roOmega を含めない",
           "roK" not in p["required"] and any("未使用量" in w for w in p["warnings"]), (p["required"], p["warnings"]))
+    done(ref, new)
+
+    # ------------------------------------------------------------------ (q) NS/Euler の分類と推奨の適用範囲 (codex result-2 2026-10-06)
+    ref, new = make_ref(edit_cfg=noturb)   # 層流 NS (壁は粘着、乱流なし)、prepare_info.viscous あり
+    p = plan_of([ref, new, *PT08])
+    check("(q) 層流 NS (粘着壁・乱流なし) は NS に分類 → run_staged_ns・本段 cfl 1", p["recommended_stages"]["runner"] == "run_staged_ns", p["recommended_stages"])
+    _drop_viscous(ref)
+    p = plan_of([ref, new, *PT08])
+    check("(q) prepare_info.viscous が無くても粘着壁なら NS", p["recommended_stages"]["runner"] == "run_staged_ns", p["recommended_stages"])
+    done(ref, new)
+    ref, new = make_ref(edit_bc=slip)   # SST + 全 slip → 不整合で停止
+    code, _, err = run_main([ref, new, "--dry-run"])
+    check("(q) 乱流 (sst) なのに壁が全部 slip → 停止", code == 2 and "slip" in err, err[-200:])
+    done(ref, new)
+    ref, new = make_ref(edit_cfg=noturb, edit_bc=slip); _drop_viscous(ref)
+    p = plan_of([ref, new, "--Pt", "4.4e6", "--keep-Ps", "--cfl", "2.0", "--steps", "6000", "--out-interval", "500"])
+    check("(q) Euler: Pt 変更でも scale なし・Ps 据え置き → none でなく full + 未検証の警告",
+          p["recommended_stages"]["stages"] == "full" and any("検証済み条件" in w for w in p["warnings"]), (p["recommended_stages"], p["warnings"]))
+    done(ref, new)
+    ref, new = make_ref()
+    p = plan_of([ref, new, *PT08, "--Tt", "1500"])
+    check("(q) NS: Pt と Tt を同時に変える → scale-ic pt を推奨しない (禁止条件)・複合変更の警告",
+          "--scale-ic pt を推奨" not in p["recommended_stages"]["note"] and any("同時に変えた" in w for w in p["warnings"]), (p["recommended_stages"], p["warnings"]))
     done(ref, new)
 
     # ------------------------------------------------------------------ (n) Pt 変更の推奨 (2026-10-06、§6 (ii′)・A3)

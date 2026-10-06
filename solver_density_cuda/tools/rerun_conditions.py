@@ -671,7 +671,29 @@ def build_plan(a):
         meta_text_new, meta_note = _sync_species_meta(open(meta_path, encoding="utf-8").read(), names, Y_new)
 
     cond_changed = bool(changes)
-    if cond_changed and "Pt" in changes:
+    info_path = os.path.join(ref, "prepare_info.json")
+    pinfo = json.load(open(info_path)) if os.path.exists(info_path) else None
+    # NS / Euler の分類は実効 config から (codex result-2 2026-10-06 Major 2): 壁 BC が粘着 (wall / wall_isothermal) なら NS、
+    # 全部 slip なら Euler。乱流モデル (sst*) があれば NS。prepare_info.viscous は照合だけに使い、食い違えば作成前に止める。
+    wall_kinds = [k for k in kinds.values() if k in ("wall", "wall_isothermal", "slip")]
+    if not wall_kinds:
+        raise RerunError("壁 BC (wall / wall_isothermal / slip) が無いので NS / Euler を判別できない")
+    noslip = any(k in ("wall", "wall_isothermal") for k in wall_kinds)
+    if noslip and any(k == "slip" for k in wall_kinds):
+        raise RerunError(f"粘着壁と slip 壁が混在 ({wall_kinds}) — NS / Euler を判別できない (v1 対象外)")
+    is_ns = noslip or tb_model.startswith("sst")
+    if tb_model.startswith("sst") and not noslip:
+        raise RerunError("乱流モデル (sst) なのに壁が全部 slip — config が不整合")
+    if pinfo is not None and pinfo.get("viscous") is not None and bool(pinfo["viscous"]) != is_ns:
+        raise RerunError(f"prepare_info.viscous={pinfo['viscous']} と実効 config (壁 {wall_kinds}・乱流 {tb_model}) の分類が食い違う")
+    scale_allowed = not (("condensation" in cfg) or ("Tt" in changes) or ("Y" in changes) or ("Tw" in changes))
+    if cond_changed and is_ns and "Pt" in changes and not scale_allowed:
+        # Pt と Tt・組成・壁温・凝縮の複合変更: scale-ic pt は使えない (§4.4 の禁止条件) — 推奨は本段 cfl 1 だけ、整定の実績なし
+        rec = {"stages": "full", "cfl": 1.0, "nStepOuter_min": 60000,
+               "note": "Pt と Tt/組成/壁温/凝縮の複合変更 → run_staged_ns(stages='full')・本段 cfl 1・60000 step。"
+                       "scale-ic pt は禁止条件に当たるので推奨しない。複合変更の整定の実績はない (plan §4.7)"}
+        warnings.append("Pt と Tt/組成/壁温/凝縮を同時に変えた: この組合せの起動・整定は未検証 (plan §4.7)。量が STEADY になるまで延長して確認すること")
+    elif cond_changed and is_ns and "Pt" in changes:
         # plan tooling-rerun-conditions §6 (ii′)・A3 (2026-10-06): Pt 0.8 倍は stages full でも本段 cfl 5 で出口壁際の角から発散
         # (scale あり step 468、なし step 2 で入口)、scale あり + full + 本段 cfl 1 は STEADY → Pt 変更の本段は cfl 1、scale-ic pt を推奨
         rec = {"stages": "full", "cfl": 1.0, "nStepOuter_min": 60000,
@@ -689,16 +711,19 @@ def build_plan(a):
     # --- 推奨と生成 config の整合 (codex result 段 #3: 表示する run_staged_ns の行は生成 config の cfl で本段を回す) ---
     # §4.7 の推奨は NS (run_staged_ns) の実測に基づく。Euler 参照 (δ_E 用の対; plan §4.8) は run_staged で回し、
     # §6 (ii) 腕 E は stages none・cfl 2・6000 で合格している — §4.7 は Euler の推奨を定めていないので整合検査をしない。
-    info_path = os.path.join(ref, "prepare_info.json")
-    pinfo = json.load(open(info_path)) if os.path.exists(info_path) else None
-    is_ns = bool(pinfo and pinfo.get("viscous")) or tb_model.startswith("sst")
     if cond_changed and not is_ns:
         # Euler 参照 (δ_E 用の対; plan §4.8)。実績があるのは Pt だけの変更: §6 (ii) 腕 E (Pt 0.8、scale-ic pt) は
         # run_staged(stages="none")・cfl 2・6000 step で STEADY (run_0120)。Tt・組成の変更 (run_0134: Tt 1500・H2O 0.10) は
         # 同じ設定で 6000 step では DRIFTING (出口 M 6.022、直前窓差 0.021) — 推奨は未確立 (2026-10-06 監査で判明)
-        if set(changes) <= {"Pt", "Ps"}:
+        ps_scaled = ("Pt" in changes and abs(Ps_new / Ps_ref - f_pt) <= 1e-3 * abs(f_pt))
+        if set(changes) <= {"Pt", "Ps"} and a.scale_ic == "pt" and ps_scaled:
+            # 検証済みの条件に限る (codex result-2 Major 3): 腕 E は保存量と背圧をともに f 倍 (scale-ic pt・Ps = f·Ps_ref)
             rec = {"stages": "none", "cfl": 2.0,
-                   "note": "Euler 参照・Pt のみ変更 → run_staged(stages='none')・cfl 2・6000 step (plan §4.7: 腕 E run_0120 の実績)"}
+                   "note": "Euler 参照・Pt のみ変更 (scale-ic pt・Ps も同じ比) → run_staged(stages='none')・cfl 2・6000 step (plan §4.7: 腕 E run_0120 の実績)"}
+        elif set(changes) <= {"Pt", "Ps"}:
+            rec = {"stages": "full", "cfl": 2.0,
+                   "note": "Euler 参照・Pt 変更だが scale-ic pt でない、または Ps が Pt と同じ比でない → 未検証。run_staged(stages='full') で STEADY まで (plan §4.7)"}
+            warnings.append("Euler 参照の Pt 変更で、検証済み条件 (scale-ic pt かつ Ps = f·Ps_ref) と違う: 起動の実績なし。STEADY を確認すること")
         else:
             rec = {"stages": "full", "cfl": 2.0,
                    "note": "Euler 参照・Tt/組成の変更 → 推奨は未確立 (run_0134 は stages none・cfl 2・6000 で DRIFTING)。"
