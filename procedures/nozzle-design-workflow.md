@@ -98,6 +98,11 @@ M6 (case/45) で実際に通した順番。各段の「何で判定するか」�
    - `Md_moc_offset` — Euler の出口コア M を 6 に合わせる 1 係数の較正。**生産 NS と同じ格子パラメータの Euler で決める**
      (粗い Euler 格子で決めると細分格子の NS で出口 M が約 −0.0008 ずれる; plan §5.1 #11f)。
    - `pw_ramp` — 縮流部側で δ_r をなめらかに入れる区間 (case/45 は [−11, −6])。
+   - `wall_fit_mono_r2: [0.0, 1.5]` — joint 壁のスロート直後の r″ の山を消す単調拘束 (case/45 の生産、2026-10-07)。
+     Euler・NS・凝縮で旧壁との差は許容幅内 (plan `tooling-nozzle-throat-monotone-r2`)。
+   - `deltastar_initializer: {model: contur, a_crocco: 1.0, cf_scale: <k_f>, n_scale: 1.0}` — C2 で較正した k_f を YAML に書く。
+     `deltastar_loop --init-integral` も読む (書かないと k_f = 1 の物理壁になる)。最終 NS の数値レシピ (CFL 1・60000 step など) は
+     YAML ではなく投入スクリプトが持つ (case/45 の手本 `run_mono_ns_chain.sh`、延長 `run_mono_ns_ext.sh`)。
 6. **NS の格子** — 壁解像 (y1+ ≤ 1、`check_wall_resolution.py --over-frac 5`) を満たす細分格子を使い、
    格子ゲート (細分前後で δ_E(x_F) の差 ≤ 1 %、三水準目で確認) を通す。case/45 の生産格子:
    ni 2000 × nj 97、第 1 セル 1.3e-5 (スロート 4.5e-6)、`throat_refine 4`・`throat_width 3`、AR ≤ 5000 (境界層層の例外)。
