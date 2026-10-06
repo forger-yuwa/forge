@@ -23,6 +23,8 @@ Hall の初期線は MOC の C⁻ 適合条件を積算 0.12〜0.13° 満たさ�
 
 ユーザ決定 (2026-10-05): 「CFD ピンは形状を詰める段階の選択肢」→ V4b の結果を受けて前倒し (「やって」)。
 
+**採用の根拠 (2026-10-06 訂正)**: CFD ピンは「Hall 版より全量で劣らない」ことを示して採用したのではない。V1 点上ゲート不合格・V2 許容超過・V3 不採用・V3′ 保留の履歴のうえで、2026-10-05 にユーザが試験部の |傾き|・オーバーシュート・出口 M・スロートの r″ の改善と軸の Mach 波の微増 (+0.009 %pt) のトレードオフで採用を決めた (§9)。
+
 ## 2. スコープ
 
 - **やる**:
@@ -47,6 +49,15 @@ Hall の初期線は MOC の C⁻ 適合条件を積算 0.12〜0.13° 満たさ�
 - CFD 0 step の pass 1 予測 (diagnostician の再計算): 始点オフセット a_θ 0.096° → 0.047° (V0 場) / 0.055° (補間壁場)、c₀ 0.044° → 0.009°。CFD 軸そのものを目標にした再現試験でも a_θ 0.058° が残る → **約 0.05° は MOC の壁足第 1 セルの性質で Hall 線由来ではない**。
 
 ## 4. 設計方針 (diagnostician 2026-10-05 を採用)
+
+### 4.0 現行の生産レシピ (2026-10-06 時点の集約; 以下 4.1〜 は経緯を含む)
+
+- 初期線: `initial_line: cfd` (凍結源 run_0062 res_6000、Hall 初期線の V0 型壁の Euler)、実効入口条件 (Pt・Tt・組成・熱力学) を凍結源と照合 (#13a)。
+- 壁表現: `wall_repr: joint`、物理壁は解析経路 (`pw_ramp` [−11, −6])。
+- 出口較正: `Md_moc_offset` **+3.770e−4** (生産 NS 格子と同じ格子パラメータの Euler [G1] で出口コア M 5.999207 → 6; 旧値 −4.16e−4 は粗い Euler 格子の較正で履歴)。**固定 Euler 参照は run_0114** (δ_E 抽出・報告)。
+- NS: 生産格子 ni 2000 × nj 97 (第 1 セル 1.3e−5・スロート 4.5e−6、壁解像 PASS)、段階起動 → 本段 cfl 1・60000 step。C2: k_f 1.054129・r_t 76.6539 mm。
+- 評価格子 (性能の確認用): 軸付近の半径方向配置に評価量が敏感 (#11h) — 暫定候補は nj 257・`axis_cap_frac` 0.02 (壁・係数は生産のまま)。生産格子の値は軸付近の量 (η≤0.05) について格子依存が大きい。
+
 
 1. **provider** (`HallThroat` を継承し `throat_characteristic` / `axis_anchor` / `mach` だけ上書き): node Euler 場の (M, θ) を (x, η=r/r_w) 平面で補間 (壁は断面の壁節点の 3 次補間)。
    壁足は (0, 1, θ=0) に厳密に置き、追跡は壁足 1e-6 内側から RK4 で軸まで。壁足の M は内側 10 点の線形外挿。軸端は追跡点の r ≤ 0.05 の 2 次多項式 (偶関数当てはめは使わない — C⁻ は軸を斜めに横切る)。r 等間隔 n_start 点に再標本化。
@@ -98,7 +109,7 @@ Hall の初期線は MOC の C⁻ 適合条件を積算 0.12〜0.13° 満たさ�
 | 11f | **出口較正 (`Md_moc_offset`) を細分格子の Euler でやり直す (ユーザ決定 2026-10-06「1」; codex diagnose 2026-10-06 で手順を修正)** — 判断: 2026-10-06 codex「Euler の格子引数の受け渡しを修正・確認したうえで、凍結線と設計壁を固定し、新バイナリ・同一実効設定による G0/G1 の Euler A/B を先に」 | **0. NS の同一壁比較 (CFD 0 step、ユーザ指摘「そんな格子で変わったんだっけ」)**: 同じ run_0092 の壁で格子だけ違う `run_0094`/`run_0105` (粗)・`run_0103` (細)・`run_0106` (第三) の最終場の出口コア M を、自格子平均と共通標本 (run_0103 の帯内 η 節点へ線形補間) の両方で。共通標本で細 − 粗の差が |ΔM| < 2e-4 なら「格子で出口 M が下がる」前提を退け、1・2 へ進まず再判断 (不足は壁の作り直し [k_f・r_t] 側); ≤ −2e-4 なら 1・2 へ。**1. Euler 経路の格子引数**: `runner_axismach.prepare` (Euler) が NS 経路と同じ格子パラメータ (`throat_width`・`wall_first_frac_throat`・前後ブレンド等) を渡すよう修正し、生成座標で実効配置を検査 (単体試験)。**2. Euler G0/G1 A/B**: 設計壁・r_t・凍結線 run_0062・ガス・BC・バイナリ (`~/forge-wallfit-bin`) を固定し、G0 = 旧較正格子 (新バイナリで再計算)、G1 = 生産 NS 格子の全分布パラメータ。IC = 旧較正 Euler 場 (同格子 restart_field / 別格子 interp_field)、soft 3000 → 本段 2 次 cfl/cfl_pseudo 2・relax 0.7・limiter 2 × 12000 step・1000 ごと、未達なら 6000 step を 1 回だけ延長。指標: 自格子平均と、G1 の帯内 η 節点を固定標本にした共通平均 (差 D)。準定常: `check_quasisteady --series-csv` STEADY かつ末尾 5 枚の幅と直前 5 枚との平均差が各 ≤ 5e-5。判定: D の評価幅全体 < −2e-4 → 負側の Euler 格子依存を支持 (NS 不足の原因確定ではない) → 新 offset = −4.16e-4 − (M_E(G1) − 6) を係数 1 で 1 回だけ更新、`spec.M_design = 6` と `geometry.Md_moc_offset` に統一 (二重補正しない)、E2 = 新壁の Euler (G1) で出口コア M 6.0000 ± 1e-4 (時間変動込み)、外れたら補正を重ねず諮問; 合格した E2 を新しい固定 Euler 参照にして抽出・較正・報告の参照先 (`run_finemesh_final.sh`・`exitM_sampling_ab.py` の run_0086) を同期; D の評価幅全体が ±2e-4 内 → 持越し主因説を棄却 (境界層側を確定とは言わない)、諮問; またぐ・準定常未達 → 保留。G2 はこの判別後、E2・NS 連鎖へ自動続行しない。旧 ③ の出口 M FAIL・④ 保留・overshoot01 DRIFTING・NOT CONVERGED は履歴に残す | F |
 | 11g | **波 η0.1 の DRIFTING の切り分け (codex diagnose 2026-10-06 wave-drifting 採用、事前登録)** — 判断: 2026-10-06 codex「③未達・④保留を維持し、既存スナップショットだけで最大値探索の空間標本間隔を変える後処理 A/B を一度」 | `case/45.isobutane_m6_d155/wave_sampling_ab.py`、対象 run_0116・run_0117 の各 12 枚。腕 A = 現行 (2401 点、試験窓、P-spline knot 10)、腕 B = 同じ P-spline 曲線 (A の標本で当てはめた係数を再利用) を試験窓の標本間隔 1/4 で評価して最大値を探す。各時刻の最大値・最大位置・B−A、末尾 5 枚の符号付きトレンド、`check_quasisteady --series-csv` の VERDICT。判定: 全枚 |B−A| ≤ 5e-5 %pt → 探索の粗さ主因説を棄却; B が STEADY かつ末尾の絶対トレンドが A から 80 % 以上減る → 抽出感度を支持 (最大振幅の持続的ドリフト説を退ける); 中間 → 保留。B は診断値で登録ゲートを置き換えない。やらない: 無条件の再延長・`--drift` の事後緩和・固定位置/上位 N の選択・④ の自動投入。③ は未達・④ 保留のまま | F |
 | 11h | **軸付近も細分した格子での感度 A/B (ユーザ指示 2026-10-06; codex diagnose 2026-10-06 axis-refined-grid 採用、事前登録)** — 判断: 2026-10-06 codex「最終物理壁を固定し、ni 2000・nj 257 の NS で axis_cap_frac だけを 0.02 と 0.0133 に変える一組の感度 A/B を先に」 | 実装: `mesh2d.Mesh2DParams.axis_cap_frac` (各断面で第一セルから比 q_i の等比、間隔が c で頭打ち、nj 固定で q_i を二分法; 実現不能・単調性・axis_gap_frac との同時指定を検査; Euler/NS とも `mesh_params()` 経由; 未指定でビット不変) と試験 (`design/tests/run_mesh_params_tests.py` (d)〜(f))。問題 `case/45.isobutane_m6_d155/problem_d155_ns_recal_final_cap020.yaml`・`_cap0133.yaml` (run_0117 の壁・k_f 1.054129・r_t 76.6539 mm・Md_moc_offset +3.770e-4、nj 257、ni・壁側は生産格子のまま); 品質 dry-run 両方 PASS (511744 セル、AR max 4261、skew 0.44)。run 腕 A `run_0124_ns_axiscap020`・腕 B `run_0125_ns_axiscap0133` (`run_axiscap_ab.sh`): IC = run_0117 res_60000 を interp_field → 段階起動 full → 本段 2 次 cfl 1・60000 step・5000 ごと; 未達なら両腕 60000 step を 1 回延長、なお未達は保留。量 (`axisgrid_metrics.py` → `axisgrid_series.csv`、`exitM_sampling_ab.py` → `quantities_series.csv`): η=0・0.05・0.1 の Mach 波・オーバーシュート・傾き・最大位置、出口コア M (自格子平均と run_0117 の帯内 η 節点の共通標本)、δ_E/δ_C (Euler 参照 run_0114 固定、未緩和列)。**許容差 ε (感度検出用; 連続解の誤差上限ではない)**: Mach 波 0.001 %pt・オーバーシュート 0.003 %pt・共通標本の出口コア M 1e−4。**準定常**: 本段の末尾 10 枚の直前 5 枚と最終 5 枚で、最終 5 枚の幅・線形トレンド・両窓の平均差の最大 T ≤ ε/4、かつ `check_quasisteady --series-csv` STEADY (0 近傍で DRIFTING は合格に読み替えない)。**比較**: U = 両腕の T の和 (時間変動込みの比較幅)。全量で |平均差| + U ≤ ε → 上限 0.02→0.0133 の大きな感度を棄却し軸方向 (ni) の感度確認へ (格子収束の証明にはしない); いずれかで |平均差| − U > ε → 感度を支持し評価格子の確定を止める (諮問); またぐ・準定常未達 → 保留。**性能判定は別**: 評価幅が波 0.01 %・オーバーシュート 0.035 %・出口 M 5.9988〜6.0012 の内側か。閾値超過が確定したら性能不合格として active を維持し設計再検討へ (自動で壁を作り直さない・記録だけで完了にしない)。格子試験中は壁・k_f・r_t・Md_moc_offset・凍結線を変えない。η=0 と非軸の結果は分けて残す (軸上の誤差は verification-m6 #17)。 | F |
-| 13 | **result 再レビュー前の是正 (codex diagnose 2026-10-06 result-interpretation 採用)** | (a) CFD ピン provider の実効入力照合: 入口 BC の実効 Tt・組成・熱力学条件を凍結源と照合し不整合を拒否 (`cfd_initial_line.py:100,137`; 回帰試験 = 入口 Tt 1600 受理・1500 拒否)、(b) 報告: build_pptx の「圧力波」を「Mach 波」に、量別 VERDICT・判定区間・未達継続の決定を掲載して run_0117/0118 の pptx を再生成、(c) §8 完了条件・§1 を「実装完了・採用判断・性能検証」に分けて書き直し (codex 推奨文言)、§4 を現行値 (+3.770e-4・Euler 参照 run_0114・生産格子) に集約、methods の旧 offset を更新。#11h の結果が出るまで accepted にしない | O |
+| 13 | **result 再レビュー前の是正 (codex diagnose 2026-10-06 result-interpretation 採用)** — (a)(b) 完了 2026-10-06 (commit 96c46e72)、(c) 完了 2026-10-06 (§1・§4.0・§8 書き直し) | (a) CFD ピン provider の実効入力照合: 入口 BC の実効 Tt・組成・熱力学条件を凍結源と照合し不整合を拒否 (`cfd_initial_line.py:100,137`; 回帰試験 = 入口 Tt 1600 受理・1500 拒否)、(b) 報告: build_pptx の「圧力波」を「Mach 波」に、量別 VERDICT・判定区間・未達継続の決定を掲載して run_0117/0118 の pptx を再生成、(c) §8 完了条件・§1 を「実装完了・採用判断・性能検証」に分けて書き直し (codex 推奨文言)、§4 を現行値 (+3.770e-4・Euler 参照 run_0114・生産格子) に集約、methods の旧 offset を更新。#11h の結果が出るまで accepted にしない | O |
 | 12 | **m7 文書同期** — 完了 2026-10-05 (§4.7〜4.11・§6 生産 pass に集約、plans/README.md 同期) | §4・§5.1・§6 を現在有効な仕様に集約 (P2 窓 (−11,−6)→pw_ramp、出口 M ゲート #9 の ±0.02 %、縮流部不変は x ≤ ランプ始点)、README・plans/README.md | O |
 
 ## 6. 検証 (事前登録、diagnostician 2026-10-05 の数値)
@@ -135,12 +146,23 @@ Hall の初期線は MOC の C⁻ 適合条件を積算 0.12〜0.13° 満たさ�
 - `design/forge_design/feedback/cfd_initial_line.py` (新規)、`design/forge_design/evaluate/runner_axismach.py` (design_chain・prepare_info)、`methods/design/overview.md`。
 - 既定は Hall のまま (`initial_line: hall`) なので既存 case の結果は変わらない。
 
-## 8. 完了条件
+## 8. 完了条件 (2026-10-06 書き直し: 実装完了・採用判断・性能検証を分ける; codex diagnose result-interpretation 採用)
 
-- [ ] `methods/design/overview.md` を更新
-- [ ] §6 を満たす
-- [ ] codex レビュー 2 回 (plan / result) を §6.1 に記録
-- [ ] `status: done`、§9 に変更ログ、`plans/accepted/` へ移動、`plans/README.md` 同期
+**実装の完了** (機能として):
+- [x] CFD ピン provider・design_chain の切り替え・joint 壁・物理壁の解析経路・出口較正キー・δ 台帳の列分離 (#1〜#10)
+- [x] provider の実効入力照合 (#13a、回帰試験 Tt 1600 受理・1500 拒否)
+- [x] 報告の Mach 波表記・量別 VERDICT 欄 (#13b)
+- [x] `methods/design/overview.md` を更新 (初期線の出所・joint・出口較正・rerun 節)
+- [ ] codex result 段の再レビュー (§6.1) と採否
+
+**採用判断** (ユーザ): 2026-10-05 トレードオフ採用、2026-10-06 「A」(波の DRIFTING を未達のまま凝縮評価へ)・「B」(出口 M は下限境界上と記録して設計を変えない)。
+
+**性能検証の結果** (認定ではなく記録; 閉じる時点の文言は下記):
+> 本 plan は CFD ピン機能と case/45 の指定レシピの実装・評価を完了した。Hall 対比の全量非劣化、流れ場の残差収束、最終設計の格子独立性を証明したものではない。V1 点上ゲート不合格、V2 許容超過、V3 不採用、V3′ 保留の履歴を保持し、採用根拠は 2026-10-05 のユーザによるトレードオフ判断とする。最終 dry の Mach 波は閾値内だが DRIFTING であり、2026-10-06 のユーザ決定により未達のまま凝縮評価へ進んだ。出口コア M は格子・標本によらず目標比 −0.018〜−0.020 % で許容 ±0.02 % の下限境界上 (評価の不確かさ ±1e−4 と同程度、ユーザ決定 B)。dry・凝縮とも残差は NOT CONVERGED。凝縮の登録 4 量は指定末尾区間で STEADY。軸付近の半径方向配置に試験部の評価量 (特に軸上のオーバーシュート) が強く依存する (#11h; 生産格子の軸上 0.23 % → 細分 −0.01 %)。凍結線の格子依存、Euler 較正の G2、軸方向 (ni) の格子感度、波の準定常達成は未確認として残す。
+
+**移管** (本 plan の外へ): 軸上の M の誤差 → `verification-m6-axis-wave-mesh-su2.md` §5.1 #17; 評価格子の確定 (nj 257・cap 0.02 を既定にするか) と ni 感度 → 次の設計チェーン plan で扱う (campaign-recipe §5.1 に追記予定)。
+
+- [ ] 上記を満たしたら `status: done`、`plans/accepted/` へ移動、`plans/README.md` 同期
 
 ## 9. 変更ログ
 
@@ -203,3 +225,4 @@ Hall の初期線は MOC の C⁻ 適合条件を積算 0.12〜0.13° 満たさ�
 - `2026-10-06` — **監査の結果** (run_0126/0127 の末尾 5 枚、評価幅 = 平均 ± T、check_quasisteady は §6 の出口 M 閾値 --drift/--osc 3e−6 で全 STEADY): cap 0.02 — 自格子平均 **5.998888** [5.998884, 5.998892]・共通標本 5.998898 → 両定義とも 5.9988〜6.0012 内; cap 0.0133 — **自格子平均 5.998775 [5.998771, 5.998779] → 下限 5.9988 を 2.5e−5 下回る (性能ゲート FAIL)**・共通標本 5.998923 → 内。→ codex の判別どおり「共通標本による性能合格の代用」を棄却。**最終設計の出口コア M は格子・標本によらず 5.9988〜5.9989 (目標比 −0.018〜−0.020 %) で、登録許容 ±0.02 % の下限に張り付いており、評価格子の選び方 (1e−4 級) で合否が入れ替わる**。性能認定は保留 (ユーザ判断: 出口較正の中心合わせをするか、±0.02 % の許容と評価の不確かさの関係をどう扱うか)。
 - `2026-10-06` — **ユーザ決定「B」**: 最終設計 (run_0117 の壁) の NS 出口コア M は格子・標本によらず 5.9988〜5.9989 (目標比 −0.018〜−0.020 %)。登録許容 ±0.02 % の下限境界上で、評価格子・標本の取り方による不確かさ (約 ±1e−4) と同程度 — と**記録して設計は変えない** (出口較正・δ 補正の追加調整はしない)。注記: 出口較正 `Md_moc_offset` は Euler の出口 M を 6 に合わせる操作で、生産格子の Euler では既に 5.999998; NS の −0.019 % は境界層補正側で生じる (NS の値から Md_moc_offset を更新しない — codex diagnose 2026-10-06 axiscap-result)。主セッションが先に提案した「出口較正の中心合わせ (案 A)」はこの点で誤りだったので撤回。性能認定の表記は「出口コア M: 下限境界上 (−0.019 %、不確かさ ±1e−4 と同程度)」とする。
 - `2026-10-06` — **#13 (a)(b) 実装 (implementer、未 commit)**: (a) `cfd_initial_line.py` が凍結源の実効入口 (bcondConfig の inlet_Pressure の Pt・Tt・Y{s}) と physProp (thermalMethod・species・thermoHrefTemp) を凍結源の prepare_info と使う側の問題 (spec.Pt・spec.Tt・gas、`expected_inlet_thermo`) に照合し不整合を拒否 (Tt・Pt・href 相対 1e-6、Y 1e-9 [書き手の 8 桁丸め後]、species・thermalMethod 完全一致)、照合項目を `initial_line.match.checked` に追記・熱力学ハッシュに入口 BC を追加 (`runner_axismach.design_chain` は期待値を渡す 2 行のみ)。回帰 `design/tests/run_cfd_initial_line_tests.py` に入口 Tt 1600 受理・1500 拒否ほか 8 件 (FAIL 0)。(b) `build_pptx`・`nozzle_report` の「圧力波」を「Mach 波」に改称、`nozzle_report --verdicts <json>` で量別 VERDICT・判定区間・備考を report.json と評価量の表に掲載 (無ければ「VERDICT 未指定」)、`procedures/nozzle-design-outputs.md` 同期。run_0117/0118 の report/ 再生成は未実施 (主セッション)。
+- `2026-10-06` — #13 (c): §1 に採用根拠の訂正、§4.0 に現行の生産レシピの集約 (+3.770e−4・Euler 参照 run_0114・生産格子・評価格子の暫定候補)、§8 完了条件を「実装完了 / 採用判断 / 性能検証の結果」に分けて書き直し (codex 推奨文言に出口 M・軸付近の格子依存を追記)。
