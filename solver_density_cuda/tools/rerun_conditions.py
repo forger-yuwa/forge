@@ -605,7 +605,7 @@ def build_plan(a):
                "note": "Pt を変えた → run_staged_ns(stages='full') (soft→mid→本段) で本段 cfl 1、--scale-ic pt を推奨 (plan §4.7、§6 (ii′)・A3)"}
         if a.scale_ic != "pt":
             warnings.append("Pt 変更で --scale-ic none: 検証では stages full・本段 cfl 5 で入口から step 2 で発散した (plan §6 (ii′) 腕 B2)。"
-                            "--scale-ic pt を推奨 (none の本段 cfl 1 は未検証)")
+                            "--scale-ic pt を推奨 (none は本段 cfl 1 でも入口配管の壁際に逆流域を残して別の状態に向かった: §6 (ii″) B3)")
     elif cond_changed:
         rec = {"stages": "full",
                "note": "条件を変えた → run_staged_ns(stages='full') (soft→mid→本段)。細分格子は本段 cfl 1 (plan §4.7)"}
