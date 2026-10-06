@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""rerun_conditions.py と run_staged_ns の段終了ゲートの単体試験 (plan tooling-rerun-conditions §6「単体」(a)〜(m))。
+"""rerun_conditions.py と run_staged_ns の段終了ゲートの単体試験 (plan tooling-rerun-conditions §6「単体」(a)〜(m)、
+codex result 段の指摘への回帰 (o) 入力の有限性・物理範囲 / (p) 推奨と生成 config の整合 / 段の config 変更の書式依存)。
 
     python3 solver_density_cuda/tools/test_rerun_conditions.py
 
@@ -40,6 +41,10 @@ FIXTURE_GLOBS = ("bcondConfig.yaml", "solverConfig.yaml", "species_meta.yaml", "
                  "wall_*.csv", "target_axis_M.csv", "delta_r_initial.*",
                  # 持ち込まれてはいけないもの (許可リスト外) も 1 つずつ置く
                  "CONVERGENCE_VERDICT.txt", "RUN_PROVENANCE.txt")
+
+# Pt 変更の推奨 (plan §4.7: 本段 cfl 1・60000 step) に合わせた引数。推奨と食い違う config は作成前に停止する (codex result 段 #3)
+REC_PT = ["--cfl", "1.0", "--steps", "60000"]
+PT08 = ["--Pt", "4.4e6", "--Ps", "1789.6", *REC_PT]
 
 fails = 0
 skips = []
@@ -199,7 +204,7 @@ def main():
 
     # ------------------------------------------------------------------ (b)
     ref, new = make_ref()
-    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6"])
+    p = plan_of([ref, new, *PT08])
     a, b = p["bc_text"], p["new_bc_text"]
     dl = lines_diff(a, b)
     la, lb = a.splitlines(), b.splitlines()
@@ -227,7 +232,7 @@ def main():
         ends = sorted(o & (set(np.asarray(f["BCONDS/3/iCells"]).tolist()) | set(np.asarray(f["BCONDS/4/iCells"]).tolist())))
     with h5py.File(os.path.join(ref, RES), "r+") as f:
         a = np.asarray(f["VALUE/P"]); a[ends] = 1e9; f["VALUE/P"][...] = a
-    p_end = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6"])
+    p_end = plan_of([ref, new, *PT08])
     check("(b) 壁・軸の節点を除外 (端の P を 1e9 にしても P_exit_ref 不変)",
           len(ends) == 2 and p_end["P_exit_ref"] == p["P_exit_ref"], (ends, p_end["P_exit_ref"]))
     done(ref, new)
@@ -238,7 +243,7 @@ def main():
         C = np.asarray(f["MESH/COORD"]).reshape(-1, 3)
         C[o[50], 0] -= 1e-3                      # 出口の内部節点 1 つだけ x をずらす
         f["MESH/COORD"][...] = C.reshape(-1)
-    p_alt = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6"])
+    p_alt = plan_of([ref, new, *PT08])
     check("(b) 出口が単一 x に並ばない → 同じ x の節点で代替 (値は出口列とほぼ同じ)",
           p_alt["P_exit_ref"] is not None and "出口 BC の節点と同じ x" in p_alt["P_exit_ref_source"] and abs(p_alt["P_exit_ref"] - p["P_exit_ref"]) < 5.0,
           (p_alt["P_exit_ref"], p_alt["P_exit_ref_source"]))
@@ -247,7 +252,7 @@ def main():
     ref, new = make_ref()
     with h5py.File(os.path.join(ref, "nozzle.h5"), "r+") as f:
         del f["BCONDS/2/iCells"]
-    p_null = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6"])
+    p_null = plan_of([ref, new, *PT08])
     check("(b) P_exit_ref が取れない → 停止せず null・警告を記録",
           p_null["P_exit_ref"] is None and p_null["Ps_over_fPexit"] is None
           and any("P_exit_ref: null" in w for w in p_null["warnings"]), p_null["warnings"])
@@ -312,7 +317,7 @@ def main():
     slip = lambda t: re.sub(r"wall:\s*\{physID: 3, kind: wall, +outputHDFflg: 1, ints: , floats: \}",  # noqa: E731
                             "wall:   {physID: 3, kind: slip,             outputHDFflg: 1, ints: , floats: }", t)
     ref, new = make_ref(edit_bc=slip)
-    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6"])
+    p = plan_of([ref, new, *PT08])
     yb = yaml.safe_load(p["new_bc_text"])
     check("(f′) 滑り壁 (slip) の run を受理し、壁行はバイト一致", yb["wall"]["kind"] == "slip" and lines_diff(p["bc_text"], p["new_bc_text"]) == [0, 1],
           lines_diff(p["bc_text"], p["new_bc_text"]))
@@ -322,28 +327,28 @@ def main():
     # ------------------------------------------------------------------ (f″) 乱流モデルなしの run に残る roK/roOmega (2026-10-06 追加)
     noturb = lambda t: re.sub(r"^turbulence:.*$", "turbulence: {model: \"none\"}", t, flags=re.M)  # noqa: E731
     ref, new = make_ref(edit_cfg=noturb, edit_bc=slip)
-    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt"])
+    p = plan_of([ref, new, *PT08, "--scale-ic", "pt"])
     check("(f″) 乱流なし + roK/roOmega の入れ物 → 受理し警告に記録、必要保存量に roK/roOmega を含めない",
           "roK" not in p["required"] and any("未使用量" in w for w in p["warnings"]), (p["required"], p["warnings"]))
     done(ref, new)
 
     # ------------------------------------------------------------------ (n) Pt 変更の推奨 (2026-10-06、§6 (ii′)・A3)
     ref, new = make_ref()
-    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt"])
+    p = plan_of([ref, new, *PT08, "--scale-ic", "pt"])
     check("(n) Pt 変更 → recommended_stages full・本段 cfl 1", p["recommended_stages"].get("stages") == "full" and p["recommended_stages"].get("cfl") == 1.0, p["recommended_stages"])
     check("(n) scale-ic pt なら none 警告なし", not any("--scale-ic none" in w for w in p["warnings"]), p["warnings"])
-    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "none"])
+    p = plan_of([ref, new, *PT08, "--scale-ic", "none"])
     check("(n) Pt 変更 + scale-ic none → 警告", any("--scale-ic none" in w for w in p["warnings"]), p["warnings"])
     done(ref, new)
 
     # ------------------------------------------------------------------ (g)
     ref, new = make_ref(edit_cfg=lambda t: t + "condensation: {condensation: 1, nCondSpecies: 1, condensationSpecies: H2O}\n")
-    code, _, err = run_main([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt"])
+    code, _, err = run_main([ref, new, *PT08, "--scale-ic", "pt"])
     check("(g) 凝縮 block + --scale-ic pt → 停止", code == 2 and "--scale-ic pt は使えない" in err and "condensation" in err
           and not os.path.exists(new), err[-200:])
     done(ref, new)
     ref, new = make_ref()
-    code, _, err = run_main([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--Tt", "1500", "--scale-ic", "pt"])
+    code, _, err = run_main([ref, new, *PT08, "--Tt", "1500", "--scale-ic", "pt"])
     check("(g') Tt 変更 + --scale-ic pt → 停止", code == 2 and "Tt を変える" in err)
     code, _, err = run_main([ref, new, "--scale-ic", "pt"])
     check("(g') Pt 変更なし + --scale-ic pt → 停止", code == 2 and "Pt を変えていない" in err)
@@ -383,7 +388,7 @@ def main():
     cfg = yaml.safe_load(open(os.path.join(ref, "solverConfig.yaml")))
     req = rc.required_conserved_from_cfg(cfg)
     check("(j) 3 種 + トレーサの必要保存量に roY2・roXi", "roY2" in req and "roXi" in req, req)
-    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt"])
+    p = plan_of([ref, new, *PT08, "--scale-ic", "pt"])
     check("(j) 3 種 + トレーサで --scale-ic pt の計画が通る (f = 0.8)", abs(p["f"] - 0.8) < 1e-15)
     dst = os.path.join(TMP, "scale_dst.h5")
     shutil.copy2(os.path.join(ref, "nozzle.h5"), dst)
@@ -409,7 +414,7 @@ def main():
                "species_record_file": r3["record_file"], "species_input_unverified": 0}
         for fn in (RES, "nozzle.h5"):
             fsp.write_species_attrs(os.path.join(ref, fn), att)
-        code, out, err = run_main([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt"])
+        code, out, err = run_main([ref, new, *PT08, "--scale-ic", "pt"])
         check("(j) 作成: 終了コード 0", code == 0, err[-400:])
         if code == 0:
             rec = json.load(open(os.path.join(new, "RERUN_CONDITIONS.json")))
@@ -444,10 +449,10 @@ def main():
     ref, new = make_ref()
     code, _, err = run_main([ref, new, "--Pt", "4.4e6"])
     check("(l) --Pt のみ → 停止", code == 2 and not os.path.exists(new))
-    pe = plan_of([ref, new, "--Pt", "4.4e6", "--keep-Ps"])["P_exit_ref"]
+    pe = plan_of([ref, new, "--Pt", "4.4e6", "--keep-Ps", *REC_PT])["P_exit_ref"]
     check("(l) Ps/(f·P_exit_ref) を表示 (--keep-Ps なら 2237/(0.8·P_exit_ref))",
           f"Ps/(f·P_exit_ref) = {2237.0 / (0.8 * pe):.6g}" in err and f"P_exit_ref = {pe}" in err, err.strip()[-300:])
-    code, _, _ = run_main([ref, new, "--Pt", "4.4e6", "--keep-Ps", "--dry-run"])
+    code, _, _ = run_main([ref, new, "--Pt", "4.4e6", "--keep-Ps", *REC_PT, "--dry-run"])
     check("(l) --keep-Ps なら通る (dry-run)", code == 0 and not os.path.exists(new))
     done(ref, new)
 
@@ -468,6 +473,12 @@ def main():
 
     # ------------------------------------------------------------------ run_staged_ns の段終了ゲート (§4.9)
     test_stage_gate()
+
+    # ------------------------------------------------------------------ (o) 入力の有限性・物理範囲 (codex result 段 #1)
+    test_input_ranges()
+
+    # ------------------------------------------------------------------ (p) 推奨と生成 config の整合 (codex result 段 #3)
+    test_recommended_vs_config()
 
     shutil.rmtree(TMP, ignore_errors=True)
     print(f"\nSKIP 件数: {len(skips)}")
@@ -498,7 +509,7 @@ def test_execute_with_mock_restart():
     rc.subprocess.run = mock_run
     try:
         ref, new = make_ref()
-        code, out, err = run_main([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt", "--steps", "12000"])
+        code, out, err = run_main([ref, new, *PT08, "--scale-ic", "pt"])
         check("[mock restart] 作成: 終了コード 0", code == 0, err[-300:])
         if code == 0:
             names = set(os.listdir(new))
@@ -509,7 +520,7 @@ def test_execute_with_mock_restart():
                   and "prepare_info.json" in names)
             y = yaml.safe_load(open(os.path.join(new, "bcondConfig.yaml")))
             check("[mock restart] bcond を書き出した", y["inlet"]["floats"]["Pt"] == 4.4e6 and y["outlet"]["floats"]["Ps"] == 1789.6)
-            check("[mock restart] solverConfig を書き出した", "nStepOuter: 12000" in open(os.path.join(new, "solverConfig.yaml")).read())
+            check("[mock restart] solverConfig を書き出した", "nStepOuter: 60000" in open(os.path.join(new, "solverConfig.yaml")).read())
             rec = json.load(open(os.path.join(new, "RERUN_CONDITIONS.json")))
             with h5py.File(os.path.join(ref, RES), "r") as s, h5py.File(os.path.join(new, "nozzle.h5"), "r") as d:
                 ok = all(np.allclose(np.asarray(d["VALUE"][k], np.float64), 0.8 * np.asarray(s["VALUE"][k], np.float64),
@@ -548,9 +559,11 @@ def test_stage_gate():
     with h5py.File(neg, "r+") as f:
         a = np.asarray(f["VALUE/ro"]); a[5] = -1.0; f["VALUE/ro"][...] = a
     check("段ゲート: ρ ≤ 0 は不合格", any("ρ ≤ 0" in s for s in ram.stage_gate(neg, cfg_text)))
-    check("convMethod: 2 も 1 次化 (convMethod: 12 は触らない)",
+    check("convMethod: 2 も 1 次化 (0 はそのまま)",
           ram._first_order("space: {convMethod: 2, limiter: 2}") == "space: {convMethod: 0, limiter: 2}"
-          and ram._first_order("convMethod: 1,") == "convMethod: 0," and ram._first_order("convMethod: 12") == "convMethod: 12")
+          and ram._first_order("space: {convMethod: 1, limiter: 2}") == "space: {convMethod: 0, limiter: 2}"
+          and ram._first_order("space: {convMethod: 0, limiter: 2}") == "space: {convMethod: 0, limiter: 2}")
+    test_stage_config_structured(ram)
 
     calls = SimpleNamespace(forge=[], restart=[])
 
@@ -609,6 +622,272 @@ def test_stage_gate():
               [[s["tag"] for s in g] for g in segs])
     finally:
         ram.run_forge, ram._restart_same_mesh = orig
+
+
+def to_block_deltaT(t):
+    """`deltaT: {…}` (flow 形式、複数行) を block 形式に書き換える。"""
+    m = re.search(r"^([ \t]*)deltaT: \{(.*?)\}", t, flags=re.M | re.S)
+    ind = m.group(1)
+    items = [x.strip() for x in m.group(2).replace("\n", " ").split(",") if x.strip()]
+    return t[:m.start()] + f"{ind}deltaT:\n" + "\n".join(f"{ind}  {it}" for it in items) + t[m.end():]
+
+
+def test_stage_config_structured(ram):
+    """codex result 段 #2: 段の config 変更が書式 (空白数・指数表記・block 形式) で黙って外れないこと。forge は起動しない。"""
+    base = open(os.path.join(BASE, "solverConfig.yaml")).read()
+    variants = {
+        "convMethod:  2 (空白 2)": base.replace("space: {convMethod: 1,", "space: {convMethod:  2,", 1),
+        "cfl: 5.0e+0 (指数表記)": base.replace("cfl: 5.0, cfl_pseudo: 5.0", "cfl: 5.0e+0, cfl_pseudo: 5.0e+0", 1),
+        "cfl: 5e+0 (PyYAML では文字列)": base.replace("cfl: 5.0, cfl_pseudo: 5.0", "cfl: 5e+0, cfl_pseudo: 5e+0", 1),
+        "block 形式の deltaT": to_block_deltaT(base),
+        "block 形式 + convMethod:  2 + 指数表記": to_block_deltaT(
+            base.replace("space: {convMethod: 1,", "space: {convMethod:  2,", 1)
+                .replace("cfl: 5.0, cfl_pseudo: 5.0", "cfl: 5.0e+0, cfl_pseudo: 5.0e+0", 1)),
+    }
+    for label, t in variants.items():
+        assert t != base, label
+
+    def eff(t):
+        d = yaml.safe_load(t)
+        num = lambda v: float(v)  # noqa: E731  forge は `5e+0` も数値として読む
+        return {"convMethod": int(d["space"]["convMethod"]), "cfl": num(d["time"]["deltaT"]["cfl"]),
+                "cfl_pseudo": num(d["time"]["deltaT"]["cfl_pseudo"]), "nStepOuter": int(d["time"]["last"]["nStepOuter"]),
+                "outStepInterval": int(d["time"]["outStepInterval"]), "nStepInner": int(d["time"]["nStepInner"])}
+
+    seen = []
+    orig = (ram.run_forge, ram._restart_same_mesh)
+    try:
+        ram._restart_same_mesh = lambda res, mesh: None
+
+        def fake_forge(run_dir):
+            t = open(os.path.join(str(run_dir), "solverConfig.yaml")).read()
+            seen.append(t)
+            n = int(float(yaml.safe_load(t)["time"]["last"]["nStepOuter"]))
+            shutil.copy2(os.path.join(BASE, RES), os.path.join(str(run_dir), f"res_{n}.h5"))
+            with open(os.path.join(str(run_dir), "residual_history.csv"), "w") as f:
+                f.write("step,rms_ro\n0,1.0\n%d,0.5\n" % n)
+            return 0
+        ram.run_forge = fake_forge
+        for label, t in variants.items():
+            rd = os.path.join(TMP, "staged_fmt")
+            shutil.rmtree(rd, ignore_errors=True)
+            os.makedirs(rd)
+            shutil.copy2(os.path.join(BASE, "bcondConfig.yaml"), os.path.join(rd, "bcondConfig.yaml"))
+            open(os.path.join(rd, "solverConfig.yaml"), "w").write(t)
+            seen.clear()
+            try:
+                r = ram.run_staged_ns(rd, stages="full")
+                err = None
+            except Exception as e:  # noqa: BLE001
+                r, err = None, repr(e)
+            ok = (err is None and r == 0 and len(seen) == 3)
+            if ok:
+                e0, e1, e2, em = eff(seen[0]), eff(seen[1]), eff(seen[2]), eff(t)
+                ok = (e0 == {**em, "convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5, "nStepOuter": 3000, "outStepInterval": 3000,
+                             "nStepInner": 10}
+                      and e1 == {**em, "convMethod": 0, "cfl": 1.0, "cfl_pseudo": 1.0, "nStepOuter": 3000, "outStepInterval": 3000,
+                                 "nStepInner": 10}
+                      and seen[2] == t)
+                # 書き換えたのは要求した値だけ (他の値は YAML として同一)
+                for st, ch in ((seen[0], ("convMethod", "cfl", "cfl_pseudo", "nStepOuter", "outStepInterval", "nStepInner")),):
+                    d0, dm = yaml.safe_load(st), yaml.safe_load(t)
+                    for dd in (d0, dm):
+                        dd["space"].pop("convMethod"); dd["time"]["deltaT"].pop("cfl"); dd["time"]["deltaT"].pop("cfl_pseudo")
+                        dd["time"]["last"].pop("nStepOuter"); dd["time"].pop("outStepInterval"); dd["time"].pop("nStepInner")
+                    ok = ok and d0 == dm
+            check(f"run_staged_ns 段の config ({label}): soft 1 次・cfl 0.5、mid 1 次・cfl 1、nStepInner 10、本段は元のまま",
+                  ok, err or [eff(x) for x in seen])
+
+        # 置換が 1 回に定まらない (コメントに同じ key) → forge を起動せずに停止
+        rd = os.path.join(TMP, "staged_fmt")
+        shutil.rmtree(rd, ignore_errors=True)
+        os.makedirs(rd)
+        shutil.copy2(os.path.join(BASE, "bcondConfig.yaml"), os.path.join(rd, "bcondConfig.yaml"))
+        open(os.path.join(rd, "solverConfig.yaml"), "w").write(base + "# 旧設定 cfl: 2.0\n")
+        seen.clear()
+        try:
+            ram.run_staged_ns(rd, stages="full")
+            raised = False
+        except ValueError:
+            raised = True
+        check("run_staged_ns: `cfl:` が 2 回当たる config → 例外・forge を起動しない", raised and not seen, len(seen))
+        # convMethod が無い → 前段を 1 次化できないので停止
+        open(os.path.join(rd, "solverConfig.yaml"), "w").write(base.replace("space: {convMethod: 1, limiter: 2}", "space: {limiter: 2}", 1))
+        seen.clear()
+        try:
+            ram.run_staged_ns(rd, stages="full")
+            raised = False
+        except ValueError:
+            raised = True
+        check("run_staged_ns: convMethod が無い config → 例外・forge を起動しない", raised and not seen, len(seen))
+
+        # ramp: 2 次のまま cfl だけ上げる、本段の nStepOuter は outStepInterval の倍数
+        t = variants["block 形式 + convMethod:  2 + 指数表記"]
+        shutil.rmtree(rd, ignore_errors=True)
+        os.makedirs(rd)
+        shutil.copy2(os.path.join(BASE, "bcondConfig.yaml"), os.path.join(rd, "bcondConfig.yaml"))
+        open(os.path.join(rd, "solverConfig.yaml"), "w").write(t)
+        seen.clear()
+        r = ram.run_staged_ns(rd, stages="ramp", ramp=(1.0, 2.0), ramp_steps=1000)
+        es = [eff(x) for x in seen]
+        check("run_staged_ns ramp (block 形式): 2 次のまま cfl 1→2→本段 5、本段 nStepOuter 4000",
+              r == 0 and [e["cfl"] for e in es] == [1.0, 2.0, 5.0] and all(e["convMethod"] == 2 for e in es)
+              and es[2]["nStepOuter"] == 4000 and es[0]["nStepOuter"] == 1000, es)
+
+        # run_staged (Euler): soft 段は convMethod 2 も 0 に (旧: `convMethod: 1` だけ置換)、指数表記の cfl も 0.5 に
+        t = variants["block 形式 + convMethod:  2 + 指数表記"]
+        open(os.path.join(rd, "solverConfig.yaml"), "w").write(t)
+        seen.clear()
+        r = ram.run_staged(rd, stages="full", mid_stage=True)
+        es = [eff(x) for x in seen]
+        check("run_staged (Euler): soft 1 次・cfl 0.5・3000、mid 2 次のまま cfl 1、本段は元のまま",
+              r == 0 and len(es) == 3 and es[0]["convMethod"] == 0 and es[0]["cfl"] == 0.5 and es[0]["nStepOuter"] == 3000
+              and es[1]["convMethod"] == 2 and es[1]["cfl"] == 1.0 and seen[2] == t, es)
+        open(os.path.join(rd, "solverConfig.yaml"), "w").write(t)
+        seen.clear()
+        r = ram.run_staged(rd, cfl_main=2, stages="none")
+        check("run_staged (Euler) cfl_main 2 (block 形式) → 本段 cfl・cfl_pseudo 2", r == 0 and len(seen) == 1
+              and eff(seen[0])["cfl"] == 2.0 and eff(seen[0])["cfl_pseudo"] == 2.0, [eff(x) for x in seen])
+    finally:
+        ram.run_forge, ram._restart_same_mesh = orig
+    try:
+        ram._cfg_check(base, {"cfl": 0.5}, "x")
+        raised = False
+    except RuntimeError:
+        raised = True
+    check("_cfg_check: 実効値が要求と違えば RuntimeError", raised)
+
+
+def test_input_ranges():
+    """codex result 段 #1: 非物理な指定値・参照値を作成前に拒否し、スケール後の場も検査する。"""
+    ref, new = make_ref()
+    for label, argv, key in (
+        ("--Pt -1", ["--Pt", "-1", "--keep-Ps", "--scale-ic", "pt"], "--Pt"),
+        ("--Pt 0", ["--Pt", "0", "--keep-Ps", "--scale-ic", "pt"], "--Pt"),
+        ("--Tt -1", ["--Tt", "-1"], "--Tt"),
+        ("--Ps -1", ["--Pt", "4.4e6", "--Ps", "-1", *REC_PT], "--Ps"),
+        ("--cfl -1", ["--cfl", "-1"], "--cfl"),
+        ("--cfl inf", ["--cfl", "inf"], "--cfl"),
+        ("--Tt nan", ["--Tt", "nan"], "--Tt"),
+        ("--omega 0", ["--omega", "0"], "--omega"),
+        ("--k -1", ["--k", "-1"], "--k"),
+        ("--steps 0", ["--steps", "0"], "--steps"),
+        ("--out-interval -1000", ["--out-interval", "-1000"], "--out-interval"),
+    ):
+        try:
+            code, _, err = run_main([ref, new, *argv])
+        except Exception as e:  # noqa: BLE001  ZeroDivisionError などの素通りを FAIL として拾う
+            code, err = None, repr(e)
+        check(f"(o) {label} → 作成前に拒否 (例外でなく STOP)", code == 2 and key in err and not os.path.exists(new), err.strip()[-160:])
+    code, _, _ = run_main([ref, new, "--k", "0", "--dry-run"])
+    check("(o) --k 0 は受理 (k ≥ 0)", code == 0)
+    done(ref, new)
+
+    # 参照 BC の非物理値・ΣY ≠ 1 (変更の有無によらず検査)
+    for label, eb, key in (
+        ("参照 ΣY = 1.0001", lambda t: t.replace("Y0: 0.91420000, Y1: 0.08580000", "Y0: 0.91430000, Y1: 0.08580000", 1), "ΣY"),
+        ("参照 Y1 < 0", lambda t: t.replace("Y0: 0.91420000, Y1: 0.08580000", "Y0: 1.08580000, Y1: -0.08580000", 1), "[0, 1] の外"),
+        ("参照 Pt = 0", lambda t: re.sub(r"(inlet:.*?\bPt: )[\d.eE+]+", r"\g<1>0.0", t, count=1), "Pt"),
+        ("参照 出口 Ps < 0", lambda t: re.sub(r"(outlet:.*?\bPs: )[\d.eE+]+", r"\g<1>-2237.0", t, count=1), "Ps"),
+    ):
+        ref, new = make_ref(edit_bc=eb)
+        code, _, err = run_main([ref, new, "--dry-run"])
+        check(f"(o) {label} → 無変更でも拒否", code == 2 and key in err and not os.path.exists(new), err.strip()[-160:])
+        done(ref, new)
+    ref, new = make_ref(edit_bc=lambda t: t.replace("Y0: 0.91420000, Y1: 0.08580000", "Y0: 0.91430000, Y1: 0.08580000", 1))
+    code, _, err = run_main([ref, new, "--Y", "H2O=0.0858", "--dry-run"])
+    check("(o) 参照 ΣY = 1.0001 でも --Y で全種を書き直せば通る", code == 0, err.strip()[-160:])
+    done(ref, new)
+
+    # スケール後の検査: allclose は掛け算の正確さしか見ないので、f < 0 (全点負密度) を field_problems が拒否する
+    req = rc.required_conserved_from_cfg(yaml.safe_load(open(os.path.join(BASE, "solverConfig.yaml"))))
+    dst = os.path.join(TMP, "scale_neg.h5")
+    shutil.copy2(os.path.join(BASE, "nozzle.h5"), dst)
+    try:
+        rc.scale_fields(dst, os.path.join(BASE, RES), req, -1.0)
+        msg = None
+    except rc.RerunError as e:
+        msg = str(e)
+    check("(o) scale_fields: f = −1 (全点負密度) はスケール後の field_problems で拒否", msg is not None and "ρ ≤ 0" in msg, msg)
+    probs, _ = rc.field_problems(dst, req)
+    check("(o) field_problems 単体: 負密度の場を拒否", any("ρ ≤ 0" in p for p in probs), probs[:2])
+    os.remove(dst)
+
+
+def test_recommended_vs_config():
+    """codex result 段 #3: recommended_stages と生成 config (本段 cfl・step 数) が食い違えば作成前に停止し、必要な引数を示す。
+    表示する run_staged_ns の行で回したときの本段 config が推奨と一致することを、forge を起動せずに確かめる。"""
+    ref, new = make_ref()
+    code, _, err = run_main([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt"])
+    check("(p) Pt 変更で --cfl/--steps 未指定 (参照 cfl 5・6000) → 作成前に停止し --cfl 1.0 --steps 60000 を表示",
+          code == 2 and "--cfl 1.0" in err and "--steps 60000" in err and not os.path.exists(new), err.strip()[-300:])
+    code, _, err = run_main([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--cfl", "1.0", "--steps", "6000"])
+    check("(p) cfl だけ合わせて step 数が足りない → 停止 (--steps 60000)", code == 2 and "--steps 60000" in err and "--cfl" not in err.split("推奨どおりにするなら")[-1],
+          err.strip()[-200:])
+    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--override-recommended"])
+    check("(p) --override-recommended なら通り、警告と記録 (override) が残る",
+          any("--override-recommended" in w for w in p["warnings"]) and p["recommended_stages"]["config_effective"]["override"] is True)
+    check("(p) NS 参照の回し方は run_staged_ns", p["recommended_stages"]["runner"] == "run_staged_ns")
+    p = plan_of([ref, new, "--Tt", "1500"])
+    check("(p) Tt 変更 (推奨は本段 参照 cfl) → 参照 cfl のまま通る", p["recommended_stages"]["config_effective"]["cfl"] == 5.0
+          and p["recommended_stages"]["config_effective"]["override"] is False)
+    done(ref, new)
+    # Euler 参照 (乱流なし・slip 壁・prepare_info に viscous なし): §4.7 は NS の推奨なので停止せず警告、回し方は run_staged
+    euler_cfg = lambda t: re.sub(r"^turbulence:.*$", "turbulence: {model: \"none\"}", t, flags=re.M)  # noqa: E731
+    euler_bc = lambda t: re.sub(r"wall:\s*\{physID: 3, kind: wall, +outputHDFflg: 1, ints: , floats: \}",  # noqa: E731
+                                "wall:   {physID: 3, kind: slip,             outputHDFflg: 1, ints: , floats: }", t)
+    ref, new = make_ref(edit_cfg=euler_cfg, edit_bc=euler_bc)
+    pi = json.load(open(os.path.join(ref, "prepare_info.json")))
+    pi.pop("viscous", None)
+    json.dump(pi, open(os.path.join(ref, "prepare_info.json"), "w"))
+    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt", "--cfl", "2.0", "--out-interval", "500"])
+    rec = p["recommended_stages"]
+    check("(p) Euler 参照 (腕 E の cfl 2・6000) → 推奨 run_staged・stages none・cfl 2 (§4.7 の Euler 行) で食い違いなし",
+          rec["runner"] == "run_staged" and rec["stages"] == "none" and rec["cfl"] == 2.0 and not rec["config_effective"]["override"]
+          and not any("食い違う" in w for w in p["warnings"]), (rec, p["warnings"]))
+    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt", "--steps", "6000", "--out-interval", "500"])
+    check("(p) Euler 参照で cfl が推奨 (2) と違う → 停止せず警告だけ",
+          p["recommended_stages"]["runner"] == "run_staged" and any("Euler 参照" in w and "食い違う" in w for w in p["warnings"]), p["warnings"])
+    done(ref, new)
+
+    # 作成 (restart_field を模擬) → 表示された回し方の stages で run_staged_ns を回すと本段が推奨 cfl・step 数になる
+    from forge_design.evaluate import runner_axismach as ram
+    real_run = rc.subprocess.run
+
+    def mock_run(cmd, *a, **k):
+        if len(cmd) > 1 and str(cmd[1]).endswith("restart_field.py"):
+            return subprocess.CompletedProcess(cmd, 0, "VERDICT: OK (mock)\n", "")
+        return real_run(cmd, *a, **k)
+    seen = []
+
+    def fake_forge(run_dir):
+        t = open(os.path.join(str(run_dir), "solverConfig.yaml")).read()
+        seen.append(t)
+        n = int(yaml.safe_load(t)["time"]["last"]["nStepOuter"])
+        shutil.copy2(os.path.join(BASE, RES), os.path.join(str(run_dir), f"res_{n}.h5"))
+        return 0
+    orig = (rc.subprocess.run, ram.run_forge, ram._restart_same_mesh)
+    rc.subprocess.run = mock_run
+    ram.run_forge, ram._restart_same_mesh = fake_forge, (lambda res, mesh: None)
+    try:
+        ref, new = make_ref()
+        code, out, err = run_main([ref, new, *PT08, "--scale-ic", "pt"])
+        check("(p) 推奨どおりの引数で作成: 終了コード 0", code == 0, err[-300:])
+        if code == 0:
+            m = re.search(r"run_staged_ns\(Path\(.*?\), stages='(\w+)'\)", out)
+            rec = json.load(open(os.path.join(new, "RERUN_CONDITIONS.json")))["recommended_stages"]
+            check("(p) 表示の回し方の stages が記録の recommended_stages と同じ", m is not None and m.group(1) == rec["stages"],
+                  out.strip()[-200:])
+            if m:
+                ram.run_staged_ns(new, stages=m.group(1))
+                d = yaml.safe_load(seen[-1])
+                check("(p) 表示どおり回すと本段は推奨の cfl 1・60000 step (soft・mid を経て 3 段)",
+                      len(seen) == 3 and float(d["time"]["deltaT"]["cfl"]) == rec["cfl"]
+                      and float(d["time"]["deltaT"]["cfl_pseudo"]) == rec["cfl"]
+                      and int(d["time"]["last"]["nStepOuter"]) >= rec["nStepOuter_min"], [yaml.safe_load(x)["time"]["deltaT"]["cfl"] for x in seen])
+        done(ref, new)
+    finally:
+        rc.subprocess.run, ram.run_forge, ram._restart_same_mesh = orig
 
 
 if __name__ == "__main__":

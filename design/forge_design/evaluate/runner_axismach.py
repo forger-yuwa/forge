@@ -627,6 +627,94 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     return info
 
 
+# 段階起動の段 config の変更 (plan tooling-rerun-conditions §4.9、codex result 段 #2)。
+# 旧実装は `cfl: [\d.]+, cfl_pseudo: [\d.]+` などの正規表現置換で、`convMethod:  2` (空白 2)・`cfl: 5.0e+0`
+# (指数表記)・block 形式の deltaT では黙って当たらず、soft 段が 2 次・CFL 5 のまま回りえた。
+# ここでは YAML 上の位置 (_CFG_PATHS) で値を読み、その値トークンだけを書き換え、読み直して実効値と
+# 「他の値が変わっていないこと」を検査する (コメント・書式は保つ)。
+_CFG_PATHS = {"cfl": ("time", "deltaT", "cfl"), "cfl_pseudo": ("time", "deltaT", "cfl_pseudo"),
+              "convMethod": ("space", "convMethod"), "nStepOuter": ("time", "last", "nStepOuter"),
+              "outStepInterval": ("time", "outStepInterval"), "nStepInner": ("time", "nStepInner")}
+_CFG_INT_KEYS = ("convMethod", "nStepOuter", "outStepInterval", "nStepInner")
+
+
+def _cfg_num(v):
+    """YAML の値を数値として読む (`5e+0` は PyYAML では文字列だが forge は数値として読む)。数値でなければ None。"""
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cfg_load(cfg_text: str) -> dict:
+    import yaml
+    doc = yaml.safe_load(cfg_text)
+    if not isinstance(doc, dict):
+        raise ValueError("solverConfig が YAML の辞書でない")
+    return doc
+
+
+def _cfg_get(doc: dict, key: str):
+    """YAML 上の位置 _CFG_PATHS[key] の値 (無ければ None)。"""
+    v = doc
+    for k in _CFG_PATHS[key]:
+        if not isinstance(v, dict) or k not in v:
+            return None
+        v = v[k]
+    return v
+
+
+def _cfg_value(cfg_text: str, key: str):
+    """config 本文の key の実効値 (数値)。無い・数値でなければ ValueError。"""
+    v = _cfg_num(_cfg_get(_cfg_load(cfg_text), key))
+    if v is None:
+        raise ValueError(f"solverConfig の {'.'.join(_CFG_PATHS[key])} が無い・数値でない")
+    return int(v) if key in _CFG_INT_KEYS else v
+
+
+def _cfg_set(cfg_text: str, updates: dict) -> str:
+    """updates {key: 値} を YAML 上の位置 _CFG_PATHS[key] に書く。各 key の値トークン (`key: 値`) がちょうど 1 回
+    当たることを要求し、そのトークンだけを置換する。書き換え後に読み直し、(1) 各 key の実効値が要求値、
+    (2) それ以外の値が変わっていない ことを検査する。違反は ValueError (黙って当たらない置換を起こさない)。"""
+    import copy
+    before = _cfg_load(cfg_text)
+    text = cfg_text
+    for key, val in updates.items():
+        if _cfg_get(before, key) is None:
+            raise ValueError(f"solverConfig に {'.'.join(_CFG_PATHS[key])} が無い (段の {key} を書けない)")
+        rx = re.compile(r"(?<![\w.])(" + re.escape(key) + r"[ \t]*:[ \t]*)([^\s,{}\[\]#]+)")
+        hits = list(rx.finditer(text))
+        if len(hits) != 1:
+            raise ValueError(f"solverConfig の `{key}: 値` が {len(hits)} 回当たる (ちょうど 1 回のはず)")
+        tok = str(int(val)) if key in _CFG_INT_KEYS else repr(float(val))
+        m = hits[0]
+        text = text[:m.start(2)] + tok + text[m.end(2):]
+    after = _cfg_load(text)
+    want = copy.deepcopy(before)
+    for key, val in updates.items():
+        got = _cfg_num(_cfg_get(after, key))
+        if got is None or got != float(val):
+            raise ValueError(f"段の config を読み直したら {'.'.join(_CFG_PATHS[key])} = {_cfg_get(after, key)!r} (要求 {val})")
+        node = want
+        for k in _CFG_PATHS[key][:-1]:
+            node = node[k]
+        node[_CFG_PATHS[key][-1]] = _cfg_get(after, key)
+    if want != after:
+        raise ValueError("段の config の書き換えで要求した key 以外の値が変わった")
+    return text
+
+
+def _cfg_check(cfg_text: str, want: dict, label: str) -> None:
+    """起動前の検査: config の実効値 (YAML 上の位置で読む) が want {key: 要求値} と一致しなければ RuntimeError。"""
+    doc = _cfg_load(cfg_text)
+    bad = {k: _cfg_get(doc, k) for k, v in want.items() if _cfg_num(_cfg_get(doc, k)) != float(v)}
+    if bad:
+        raise RuntimeError(f"段 {label} の config の実効値が要求と違う — forge を起動しない: "
+                           + ", ".join(f"{'.'.join(_CFG_PATHS[k])} = {bad[k]!r} (要求 {want[k]})" for k in bad))
+
+
 def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, stages: str = "full",
                mesh_h5: str = "nozzle.h5") -> int:
     """soft 段 (1次+cfl0.5, 3000 step) → [mid 段 (2次+cfl1, 3000 step)] → 本段。
@@ -637,12 +725,12 @@ def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, 
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
     if cfl_main is not None:
-        cfg_main = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+",
-                          f"cfl: {cfl_main}, cfl_pseudo: {cfl_main}", cfg_main)
+        cfg_main = _cfg_set(cfg_main, {"cfl": cfl_main, "cfl_pseudo": cfl_main})
+    main_want = {k: _cfg_value(cfg_main, k) for k in ("convMethod", "cfl", "cfl_pseudo", "nStepOuter", "outStepInterval")}
 
-    def _stage(cfg, nsteps, label):
-        cfg = re.sub(r"nStepOuter: \d+", f"nStepOuter: {nsteps}", cfg)
-        cfg = re.sub(r"outStepInterval: \d+", f"outStepInterval: {nsteps}", cfg)
+    def _stage(cfg, nsteps, label, want):
+        cfg = _cfg_set(cfg, {"nStepOuter": nsteps, "outStepInterval": nsteps})
+        _cfg_check(cfg, {**want, "nStepOuter": nsteps, "outStepInterval": nsteps}, label)
         (run_dir / "solverConfig.yaml").write_text(cfg)
         rc = run_forge(run_dir)
         res = sorted(run_dir.glob("res_[0-9]*.h5"),
@@ -654,14 +742,15 @@ def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, 
             f.unlink()
 
     if stages == "none":
+        _cfg_check(cfg_main, main_want, "main")
         (run_dir / "solverConfig.yaml").write_text(cfg_main)
         return run_forge(run_dir)
-    soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 0.5, cfl_pseudo: 0.5", cfg_main)
-    soft = soft.replace("convMethod: 1", "convMethod: 0")
-    _stage(soft, 3000, "soft")
+    soft = _first_order(_cfg_set(cfg_main, {"cfl": 0.5, "cfl_pseudo": 0.5}))   # 旧: `convMethod: 1` だけを 0 に置換
+    _stage(soft, 3000, "soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
     if mid_stage and stages == "full":
-        mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 1.0, cfl_pseudo: 1.0", cfg_main)
-        _stage(mid, 3000, "mid")
+        mid = _cfg_set(cfg_main, {"cfl": 1.0, "cfl_pseudo": 1.0})
+        _stage(mid, 3000, "mid", {"convMethod": main_want["convMethod"], "cfl": 1.0, "cfl_pseudo": 1.0})
+    _cfg_check(cfg_main, main_want, "main")
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
     return run_forge(run_dir)
 
@@ -1001,9 +1090,15 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
 
 
 def _first_order(cfg: str) -> str:
-    """段階起動の前段用に空間 1 次化する (`convMethod: 1` / `2` → 0)。旧実装は `convMethod: 1` しか置換せず、
-    2 次 (`convMethod: 2`) の config では前段が 2 次のまま回っていた (plan tooling-rerun-conditions §4.9)。"""
-    return re.sub(r"convMethod: [12]\b", "convMethod: 0", cfg)
+    """段階起動の前段用に空間 1 次化する (space.convMethod 1 / 2 → 0、0 はそのまま)。旧実装は `convMethod: 1` しか置換せず、
+    2 次 (`convMethod: 2`) の config では前段が 2 次のまま回っていた (plan tooling-rerun-conditions §4.9)。
+    YAML 上の位置で読み書きする (空白数・書式に依らない; codex result 段 #2)。convMethod が無い・0/1/2 以外は ValueError。"""
+    conv = _cfg_num(_cfg_get(_cfg_load(cfg), "convMethod"))
+    if conv == 0.0:
+        return cfg
+    if conv not in (1.0, 2.0):
+        raise ValueError(f"space.convMethod = {_cfg_get(_cfg_load(cfg), 'convMethod')!r} — 前段を 1 次化できない")
+    return _cfg_set(cfg, {"convMethod": 0})
 
 
 def stage_gate(res_h5, cfg_text: str) -> list:
@@ -1041,7 +1136,8 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
     bc_path = run_dir / "bcondConfig.yaml"
     bc_text = bc_path.read_text() if bc_path.exists() else ""
-    n_main = int(re.search(r"nStepOuter: (\d+)", cfg_main).group(1))
+    n_main = _cfg_value(cfg_main, "nStepOuter")
+    main_want = {k: _cfg_value(cfg_main, k) for k in ("convMethod", "cfl", "cfl_pseudo", "outStepInterval")}
     sm = _stage_manifest_cls()(run_dir)
 
     def _record(cfg, tag):
@@ -1052,9 +1148,9 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         sm.add(tag, cfg, bc_text, history=f"residual_history_{tag}.csv")
         sm.write()
 
-    def _stage(cfg, nsteps, tag):
-        cfg = re.sub(r"nStepOuter: \d+", f"nStepOuter: {nsteps}", cfg)
-        cfg = re.sub(r"outStepInterval: \d+", f"outStepInterval: {nsteps}", cfg)
+    def _stage(cfg, nsteps, tag, want):
+        cfg = _cfg_set(cfg, {"nStepOuter": nsteps, "outStepInterval": nsteps})
+        _cfg_check(cfg, {**want, "nStepOuter": nsteps, "outStepInterval": nsteps}, tag)   # 起動前に実効値を検査
         (run_dir / "solverConfig.yaml").write_text(cfg)
         (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
         rc = run_forge(run_dir)
@@ -1071,29 +1167,30 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         for f in run_dir.glob("res_*"):
             f.unlink()
 
+    def _pre(cfg, cfl):
+        """前段: CFL を cfl に、空間 1 次、nStepInner 5 → 10 (従来どおり; 5 以外は据え置き)。"""
+        cfg = _first_order(_cfg_set(cfg, {"cfl": cfl, "cfl_pseudo": cfl}))
+        if _cfg_num(_cfg_get(_cfg_load(cfg), "nStepInner")) == 5.0:
+            cfg = _cfg_set(cfg, {"nStepInner": 10})
+        return cfg
+
     if stages == "full":
-        soft = cfg_main
-        soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 0.5, cfl_pseudo: 0.5", soft)
-        soft = _first_order(soft)
-        soft = soft.replace("nStepInner: 5", "nStepInner: 10")
-        _stage(soft, 3000, "S1_soft")
-        mid = cfg_main
-        mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 1.0, cfl_pseudo: 1.0", mid)
-        mid = _first_order(mid)
-        mid = mid.replace("nStepInner: 5", "nStepInner: 10")
-        _stage(mid, 3000, "S2_mid")
+        _stage(_pre(cfg_main, 0.5), 3000, "S1_soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
+        _stage(_pre(cfg_main, 1.0), 3000, "S2_mid", {"convMethod": 0, "cfl": 1.0, "cfl_pseudo": 1.0})
     elif stages == "ramp":
         ramp = tuple(ramp or (1.0, 2.0, 3.5))
         for i, c in enumerate(ramp):
-            st = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", cfg_main)
-            _stage(st, int(ramp_steps), f"R{i + 1}_cfl{c:g}")
+            st = _cfg_set(cfg_main, {"cfl": c, "cfl_pseudo": c})
+            _stage(st, int(ramp_steps), f"R{i + 1}_cfl{c:g}",
+                   {"convMethod": main_want["convMethod"], "cfl": c, "cfl_pseudo": c})
         n_main = max(n_main - int(ramp_steps) * len(ramp), int(ramp_steps))
         # 最終 res が書かれるよう outStepInterval の倍数に丸める (forge は outStepInterval の倍数でしか res を書かない)
-        out_int = int(re.search(r"outStepInterval: (\d+)", cfg_main).group(1))
+        out_int = main_want["outStepInterval"]
         n_main = max((n_main // out_int) * out_int, out_int)
-        cfg_main = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_main}", cfg_main)
+        cfg_main = _cfg_set(cfg_main, {"nStepOuter": n_main})
     elif stages != "none":
         raise ValueError("stages は 'full' / 'none' / 'ramp'")
+    _cfg_check(cfg_main, {**main_want, "nStepOuter": n_main}, "main")
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
     (run_dir / "residual_history.csv").unlink(missing_ok=True)
     rc = run_forge(run_dir)

@@ -894,13 +894,17 @@ run を作るツール `solver_density_cuda/tools/rerun_conditions.py`
 python3 solver_density_cuda/tools/rerun_conditions.py REF_RUN NEW_RUN [--res res_N.h5]
     [--Pt P] [--Tt T] [--Y NAME=v ... | --Y1 v] [--balance NAME] [--k K] [--omega W]
     [--Ps P | --keep-Ps] [--Tw T | --keep-Tw] [--steps N] [--out-interval M] [--cfl C]
-    [--scale-ic none|pt] [--forge BIN] [--dry-run]
+    [--scale-ic none|pt] [--override-recommended] [--forge BIN] [--dry-run]
 ```
 
 ### 対応入力 (v1 の入力契約; NEW_RUN を作る前に検査)
 
 - `bcondConfig.yaml` は 1 行 1 境界の flow 形式で、境界種別は **単一の `inlet_Pressure`**・**単一の `outlet_statPress`**・
-  `wall` / `wall_isothermal` (floats に `Ts`)・`axis` だけ。入口組成は floats の `Y{s}` 形式で全輸送種 `Y0..Y{n-1}` がそろうこと。
+  `wall` / `wall_isothermal` (floats に `Ts`)・`slip` (Euler 対参照の滑り壁、壁温なし)・`axis` だけ。
+  入口組成は floats の `Y{s}` 形式で全輸送種 `Y0..Y{n-1}` がそろうこと。
+- 値の範囲: 指定値と参照の実効値が有限で、$P_t$・$T_t$・$P_s$ (出口の逆流用 $P_t$・$T_t$ も)・等温壁 $T_s$ > 0、$k \ge 0$、$\omega > 0$、
+  `cfl`・`cfl_pseudo` > 0、`--steps`・`--out-interval` > 0。入口 $Y$ は**変えないときも**参照の値を各成分 $[0,1]$・
+  $|\sum_s Y_s - 1| \le 10^{-9}$ で検査する (参照 BC の $\sum Y = 1.0001$ は forge が黙って正規化するので拒否; `--Y` で全種を書き直せば通る)。
 - `solverConfig.yaml` の `mesh.meshFileName == mesh.valueFileName == "nozzle.h5"`。ファイル参照は run 内相対で複製の許可リストにあるもの
   (`physProp.speciesDBFile` → `species_db_external.yaml` 等) だけ。
 - 複製は**許可リスト**: `nozzle.h5`・`nozzle.xmf`・`bcondConfig.yaml`・`solverConfig.yaml`・`species_meta.yaml`・`resolved_species_*.yaml`・
@@ -918,13 +922,15 @@ python3 solver_density_cuda/tools/rerun_conditions.py REF_RUN NEW_RUN [--res res
 - 出口: `--Ps` は `outlet_statPress` の `Ps` と逆流用 `Pt` を同時に書く (`Tt` は据え置き)。
 - 等温壁: `--Tw` は全 `wall_isothermal` の `Ts` を書く。
 - `solverConfig.yaml`: `--steps` (`nStepOuter`)・`--out-interval` (`outStepInterval`) は `nStepOuter % outStepInterval == 0` を強制、
-  `--cfl` は `cfl: X, cfl_pseudo: X` がちょうど 1 回当たることを検査。
+  `--cfl` は `cfl: X, cfl_pseudo: X` がちょうど 1 回当たることを検査し、読み直して実効値を照合する。
 
 ### Pt を変えたら出口 Ps の指定が必須
 
 node 離散化の出口は壁列が常に亜音速で `Ps` を見る (`boundaryCond_d.cu` の `outlet_statPress`)。Pt だけ下げて Ps を据え置くと、
 出口列の不安定要因になる。そこで Pt を変えるときは `--Ps P` か `--keep-Ps` を必須にし、無ければ止めて
-$f = P_{t,\rm new}/P_{t,\rm ref}$、参照の出口圧 $P_{\rm exit,ref}$ (`res_outlet_<physID>_<step>.h5` の `Ps` の中央値、無ければ res の最終断面の $P$ の中央値)、
+$f = P_{t,\rm new}/P_{t,\rm ref}$、参照の出口圧 $P_{\rm exit,ref}$ (参照 res の**出口断面 (最終 $x$ の節点列) の内部節点の静圧 $P$ の中央値**。
+壁 (`wall`/`wall_isothermal`/`slip`)・軸の BC 節点は除く。出口が単一 $x$ に並ばなければ出口 BC の節点と同じ $x$ の節点で代替し、
+それも取れなければ停止せず `P_exit_ref: null` と警告を記録する。`res_outlet_*` の `Ps` は課した値そのものなので使わない)、
 `--keep-Ps` のときの比 $P_s/(f\,P_{\rm exit,ref})$ と、参照と同じ比になる $P_s = f\,P_{s,\rm ref}$ を表示する。指定したときもこの比を記録する。
 
 ### 初期場: 状態変換であって境界値問題の相似ではない
@@ -933,7 +939,9 @@ $f = P_{t,\rm new}/P_{t,\rm ref}$、参照の出口圧 $P_{\rm exit,ref}$ (`res_
    SST → `roK`・`roOmega` + 遷移 → `roGamma`・`roReth` + 凝縮 → `rog_*`・`roQ2_*`・`roQ1_*`・`roQ0_*`。
    参照 res (SRC) と参照 `nozzle.h5` (DST) で、存在・形・有限・$\rho>0$・$0 \le \rho Y_s/\rho \le 1+10^{-6}$・
    $|\sum_s \rho Y_s - \rho| \le 10^{-6}\rho$ を検査する。DST の `/VALUE` に集合と `wall_dist` 以外があれば拒否
-   (`restart_field` は SRC に同名があれば写すので、設定と食い違う量が持ち込まれうる)。
+   (`restart_field` は SRC に同名があれば写すので、設定と食い違う量が持ち込まれうる)。ただし**乱流モデルなし (Euler・層流) の run** では、
+   変換器が既定で作る `roK`・`roOmega` の入れ物を「使われない余りの量」として許し警告に記録する (必要保存量に含めず、スケールもしない。
+   `restart_field` はそのまま写すが forge は読まない)。
 2. `restart_field.py REF_res NEW/nozzle.h5 --dst-run NEW` で保存量を index コピーする (`VERDICT: OK` 行と、SRC と同じ `species_hash` が必須。
    SRC が倍精度なら `--keep-src-dtype`)。化学種の照合に `forge --resolve-species` を使う。
 3. **`--scale-ic pt` のときだけ** (明示 opt-in) 必要保存量を全部 $f$ 倍する:
@@ -941,6 +949,7 @@ $f = P_{t,\rm new}/P_{t,\rm ref}$、参照の出口圧 $P_{\rm exit,ref}$ (`res_
    これは $T$・$\mathbf{U}$・$Y_s$・$k$・$\omega$ (と $e(T)$) を保ち圧力と密度だけを $f$ 倍する**初期場の状態変換**であって、
    境界値問題の相似ではない。Re が $f$ 倍になるので境界層は変わり、出口 Ps・壁温は別の境界条件として与える。
    検査は `allclose(d_new, f·d_ref, rtol=1e-6, atol=0)` (比で検査しない — ゼロ成分で NaN になる; ゼロはゼロのまま)。
+   `allclose` は掛け算の正確さしか見ないので、変換後の場にも 1. と同じ検査 (有限・$\rho>0$・$Y$ の範囲) をかける。
    凝縮 block・Tt 変更・組成変更と同時には使えない (凝縮モーメントと温度・組成は状態変換で保てない)。
 
 ### 拒否条件 (いずれも非ゼロ終了・NEW_RUN なし)
@@ -949,7 +958,8 @@ $f = P_{t,\rm new}/P_{t,\rm ref}$、参照の出口圧 $P_{\rm exit,ref}$ (`res_
   reinit ($\xi$ の出所なし)・forge (旧ハッシュ属性) の全経路が拒否するので v1 では停止する。
 - 入力契約違反: `X{s}` 形式・`inletProfile: 1`・inlet / outlet が複数・対応外の境界種別・`valueFileName` が別名・外部参照・flow 形式でない bcond。
 - 条件の不整合: Pt 変更で `--Ps`/`--keep-Ps` なし、等温壁で Tt 変更なのに `--Tw`/`--keep-Tw` なし、`--Tw` なのに等温壁なし、
-  3 種以上で `--balance` なし、$Y$ が $[0,1]$ の外、`--scale-ic pt` の併用禁止条件。
+  3 種以上で `--balance` なし、$Y$ が $[0,1]$ の外・参照の $\sum Y$ が 1 から外れる、`--scale-ic pt` の併用禁止条件、
+  値の範囲 (上記) の違反、NS 参照で `recommended_stages` と生成 config の本段 cfl・step 数が食い違う (下記; `--override-recommended` なしのとき)。
 - 初期場の検査不合格、`restart_field` の失敗、スケール検査の不合格 (後 2 つは作成後なので NEW_RUN を消す)。
 
 ### 記録と recommended_stages
@@ -958,8 +968,15 @@ $f = P_{t,\rm new}/P_{t,\rm ref}$、参照の出口圧 $P_{\rm exit,ref}$ (`res_
 $P_{\rm exit,ref}$ と $P_s/(f\,P_{\rm exit,ref})$、restart_field の VERDICT 行、forge の sha256、ツールの commit、`recommended_stages` を残す。
 `prepare_info.json` は幾何を据え置き、`ic_from` を参照 res で上書きし `rerun_of` を足す (`nozzle_report` が読む)。
 
-`recommended_stages` は、条件 (Pt・Tt・Y・k・ω・Ps・Tw) を変えなければ `none` (参照 cfl で参照場から継続)、1 つでも変えれば
-`full` (`run_staged_ns(stages="full")`; 細分格子は本段 cfl 1)。`--steps`・`--out-interval`・`--cfl` は条件に数えない。
+`recommended_stages` は、条件 (Pt・Tt・Y・k・ω・Ps・Tw) を変えなければ `none` (参照 cfl で参照場から継続)、
+**Pt を変えれば `full`・本段 cfl 1・60000 step・`--scale-ic pt` 推奨** (下記の検証で確定; scale none には警告)、
+Tt・Y などそれ以外を変えれば `full` (本段は参照 cfl; 整定長は生産利用で確定する — plan §5.1 #11)。
+`--steps`・`--out-interval`・`--cfl` は条件に数えない。`run_staged_ns(stages="full")` の本段は**生成 config の cfl・nStepOuter で回る**ので、
+NS 参照で推奨の本段 cfl・step 数 (Pt 変更なら cfl 1・≥ 60000) と生成 config が食い違えば、必要な引数 (`--cfl 1.0 --steps 60000` 等) を
+示して作成前に停止する (意図して違う config で作るなら `--override-recommended`; 警告と `config_effective.override` に残る)。
+Euler 参照 (乱流なし、`prepare_info` に `viscous` なし) は `run_staged` で回し、推奨は NS の実測に基づくので整合検査をせず警告だけ記録する
+(Euler 対参照の実績は plan §6 (ii) 腕 E: stages none・cfl 2・6000 step)。記録の `recommended_stages.runner` と表示する回し方は
+`run_staged_ns` / `run_staged` を区別する。
 NS run の条件を変えたときは、δ_E の評価に**同条件の Euler rerun を対で作る** (旧条件の Euler 参照では edge 帯の判定が動く;
 旧条件参照の `mdot_ratio_vs_euler` は診断量として記録するだけ)。
 
@@ -970,6 +987,11 @@ NS run の条件を変えたときは、δ_E の評価に**同条件の Euler re
 (段の `res_*` は従来どおり消す)。`check_convergence.py <run> --segment` はこの manifest の最後の区間 (1 次の前段は別区間) で判定する。
 前段の 1 次化は `convMethod: 1`/`2` → 0。段の最終 res の必要保存量が非有限・$\rho \le 0$ なら次段へ進まず停止する
 (非有限の場を `restart_field` で次段の初期場へ写さない)。段の CFL・step 数は変えていない。
+段の config の変更 (`cfl`・`cfl_pseudo`・`convMethod`・`nStepOuter`・`outStepInterval`・`nStepInner`) は YAML 上の位置で値を読み、
+その値トークンだけを書き換えて読み直し、要求値と「他の値が変わっていないこと」を検査する。起動前に各段の実効値
+(convMethod・cfl・cfl_pseudo・nStepOuter・outStepInterval) を照合し、違えば forge を起動せずに例外。旧実装の正規表現置換は
+`convMethod:  2` (空白 2)・`cfl: 5.0e+0` (指数表記)・block 形式の `deltaT` で黙って外れ、前段が 2 次・CFL 5 のまま回りえた。
+`run_staged` (Euler) も同じ方式 (前段の 1 次化は旧来 `convMethod: 1` だけだったのを 1/2 → 0 に)。
 
 **Pt を変える rerun の起動 (2026-10-06 の検証)**: 粗格子 NS の Pt 0.8 倍では、段階起動 (full) でも本段 cfl 5 で出口の壁際の角 (scale あり) / 入口 (scale なし) から発散し、`--scale-ic pt` + full + 本段 cfl 1 は準定常に達した。ツールは Pt 変更に `recommended_stages` = full・本段 cfl 1 と `--scale-ic pt` を推奨し、scale none には警告を出す。scale none + full + 本段 cfl 1 は入口配管の壁際に逆流域を残したまま別の状態に向かった (2026-10-06)。
 

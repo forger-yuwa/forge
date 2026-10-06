@@ -4,7 +4,7 @@ r"""既存 run の形状 (格子) を固定したまま、入口条件・背圧�
     python3 solver_density_cuda/tools/rerun_conditions.py REF_RUN NEW_RUN [--res res_N.h5]
         [--Pt P] [--Tt T] [--Y NAME=v ... | --Y1 v] [--balance NAME] [--k K] [--omega W]
         [--Ps P | --keep-Ps] [--Tw T | --keep-Tw] [--steps N] [--out-interval M] [--cfl C]
-        [--scale-ic none|pt] [--forge BIN] [--dry-run]
+        [--scale-ic none|pt] [--override-recommended] [--forge BIN] [--dry-run]
 
 plan: plans/active/tooling-rerun-conditions.md §4 (設計方針)。手順の正本は procedures/nozzle-design-workflow.md §3a、
 仕様の解説は methods/design/overview.md「既存 run の条件変更 (rerun_conditions)」。
@@ -13,13 +13,17 @@ plan: plans/active/tooling-rerun-conditions.md §4 (設計方針)。手順の正
 1. **入力契約の検査** (NEW_RUN を作る前): 単一の `inlet_Pressure` (floats に `Y{s}`、`inletProfile` なし)・
    単一の `outlet_statPress`・`wall`/`wall_isothermal`/`slip` (Euler の滑り壁)・`axis` だけ、bcond は 1 行 1 境界の flow 形式、
    `meshFileName == valueFileName == "nozzle.h5"`、solverConfig のファイル参照は許可リストの run 内相対だけ。
-2. **書き換えの計画**: bcond は対象行の floats の当該トークンだけを置換し (他の行はバイト一致)、YAML で読み直して検証。
-   Y は全種を書いて Σ=1 を 1e−12 で検査 (forge の起動検査は 1e−3 で、入口カーネルが黙って正規化する)。
+2. **書き換えの計画**: 指定値と参照の実効値の有限性・物理範囲 (Pt・Tt・Ps・Tw > 0、k ≥ 0、omega > 0、cfl > 0、
+   steps・out-interval > 0) を検査。bcond は対象行の floats の当該トークンだけを置換し (他の行はバイト一致)、YAML で読み直して検証。
+   Y は全種を書いて Σ=1 を 1e−12 で検査 (forge の起動検査は 1e−3 で、入口カーネルが黙って正規化する)。変更しないときも
+   参照の入口 Y を各成分 [0, 1]・Σ=1 (1e−9) で検査する。
    Pt を変えたら `--Ps` か `--keep-Ps` が必須 (node の出口は壁列が亜音速で Ps を見る)。
+   `recommended_stages` (plan §4.7) と生成 config の本段 cfl・step 数が食い違えば、必要な引数を示して作成前に停止
+   (`--override-recommended` で明示的に通す)。
 3. **初期場の検査**: config から必要保存量集合を決め、SRC (参照 res) と DST (参照 nozzle.h5) の存在・形・有限・ρ>0・
    0 ≤ ρY/ρ ≤ 1+1e−6・|Σ ρY − ρ| ≤ 1e−6 ρ を検査。DST の /VALUE に集合と `wall_dist` 以外があれば拒否。
 4. NEW_RUN を作り、許可リストのファイルだけ複製 → 書き換え → `restart_field.py` (VERDICT OK 必須) →
-   `--scale-ic pt` のときだけ必要保存量を全部 f = Pt_new/Pt_ref 倍 (T・U・Y・k・ω を保つ初期場変換) → 記録。
+   `--scale-ic pt` のときだけ必要保存量を全部 f = Pt_new/Pt_ref 倍 (T・U・Y・k・ω を保つ初期場変換; 変換後も場を検査) → 記録。
 5. `RERUN_CONDITIONS.json` (変更前後・必要保存量・スケール検査・P_exit_ref・restart の VERDICT・forge の sha256・
    ツールの commit・recommended_stages) と `prepare_info.json` (`ic_from`・`rerun_of`) を書く。
 
@@ -53,6 +57,7 @@ REQUIRED_FILES = ("nozzle.h5", "bcondConfig.yaml", "solverConfig.yaml")
 INERT_WHEN_NO_TURB = ("roK", "roOmega")   # 乱流モデルなしの run に残る変換器既定の入れ物
 ALLOWED_KINDS = ("inlet_Pressure", "outlet_statPress", "wall", "wall_isothermal", "slip", "axis")   # slip = Euler の滑り壁 (2026-10-06 追加)
 Y_SUM_TOL = 1e-12          # 書いた Y の Σ=1 の許容 (forge の起動検査 1e-3 より厳しく; plan §4.3)
+REF_Y_SUM_TOL = 1e-9       # 変更しない参照の入口 Y の Σ=1 の許容 (参照 BC の ΣY = 1.0001 などを拒否; codex result 段 #1)
 FIELD_Y_TOL = 1e-6         # 場の 0 ≤ ρY/ρ ≤ 1+tol, |Σ ρY − ρ| ≤ tol·ρ (plan §4.4)
 SCALE_RTOL = 1e-6          # スケール検査 allclose(d_new, f·d_ref, rtol, atol=0)
 KEEP_FROM_DST = ("wall_dist",)
@@ -307,6 +312,28 @@ def _sha256(path):
     return h.hexdigest()
 
 
+def _num(v):
+    """YAML の値を数値として読む (`5e+0` は PyYAML では文字列になるが forge は数値として読む)。数値でなければ None。"""
+    if isinstance(v, bool) or v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _check_range(what, v, *, zero_ok=False):
+    """v が有限で > 0 (zero_ok なら ≥ 0) であることを検査する。違反は RerunError。"""
+    x = _num(v)
+    if x is None or not np.isfinite(x) or (x < 0.0 if zero_ok else x <= 0.0):
+        raise RerunError(f"{what} = {v!r} は有限で {'≥ 0' if zero_ok else '> 0'} でなければならない")
+    return x
+
+
+def _deltaT(cfg):
+    return ((cfg.get("time") or {}).get("deltaT") or {})
+
+
 # ---------------------------------------------------------------------------
 # 計画 (検査と書き換え内容の決定; 何も書かない)
 # ---------------------------------------------------------------------------
@@ -318,6 +345,12 @@ def build_plan(a):
         raise RerunError("--lump (乾き成分 lump の組成変更) は v1 で停止する: restart_field (互換ハッシュ不一致)・"
                          "convert_species_field conserve (実種ごとの ρY 保存検査)・reinit (ξ の出所なし)・"
                          "forge (旧ハッシュ属性) の全経路が拒否する (plan §4.4(4)、§5.1 #9)")
+    # --- 指定値の有限性と物理範囲 (codex result 段 #1: 非物理な値で計画が通り、--Pt 0 で ZeroDivisionError だった) ---
+    for what, v, zok in (("--Pt", a.Pt, False), ("--Tt", a.Tt, False), ("--Ps", a.Ps, False), ("--Tw", a.Tw, False),
+                         ("--k", a.k, True), ("--omega", a.omega, False), ("--cfl", a.cfl, False),
+                         ("--steps", a.steps, False), ("--out-interval", a.out_interval, False)):
+        if v is not None:
+            _check_range(what, v, zero_ok=zok)
     if os.path.exists(new):
         raise RerunError(f"NEW_RUN {new} が既にある (上書きしない)")
     if not os.path.isdir(ref):
@@ -385,10 +418,25 @@ def build_plan(a):
     elif ykeys:
         raise RerunError(f"{inlets[0]}: 単成分なのに Y{{s}} がある ({ykeys})")
 
+    # --- 参照の実効値の有限性と物理範囲 (f = Pt_new/Pt_ref などの割り算の前に) ---
+    Pt_ref = _check_range(f"参照 {inlets[0]}.Pt", fin["Pt"])
+    Tt_ref = _check_range(f"参照 {inlets[0]}.Tt", fin["Tt"])
+    for key, zok in (("k", True), ("omega", False)):
+        if key in fin:
+            _check_range(f"参照 {inlets[0]}.{key}", fin[key], zero_ok=zok)
+    Ps_ref = _check_range(f"参照 {outlets[0]}.Ps", outl["floats"]["Ps"])
+    for key in ("Pt", "Tt"):
+        if key in outl["floats"]:
+            _check_range(f"参照 {outlets[0]}.{key}", outl["floats"][key])
+    for n in walls_iso:
+        if "Ts" in bc[n]["floats"]:
+            _check_range(f"参照 {n}.Ts", bc[n]["floats"]["Ts"])
+    for key in ("cfl", "cfl_pseudo"):
+        if key in _deltaT(cfg):
+            _check_range(f"参照 solverConfig time.deltaT.{key}", _deltaT(cfg)[key])
+
     changes = {}               # 条件名 → (旧, 新)
     inlet_upd, outlet_upd, wall_upd = {}, {}, {}
-    Pt_ref, Tt_ref = float(fin["Pt"]), float(fin["Tt"])
-    Ps_ref = float(outl["floats"]["Ps"])
 
     def _set(key, new, old, upd, tok):
         if new is None:
@@ -409,7 +457,12 @@ def build_plan(a):
         _set("omega", a.omega, float(fin["omega"]), inlet_upd, "omega")
 
     # --- Y (全種を書く; 吸収種は 2 種なら自動・3 種以上は --balance) ---
-    Y_ref = [float(fin[f"Y{i}"]) for i in range(nsp)]
+    Y_ref = []
+    for i in range(nsp):
+        y = _num(fin[f"Y{i}"])
+        if y is None or not np.isfinite(y):
+            raise RerunError(f"参照 {inlets[0]}.Y{i} ({names[i]}) = {fin[f'Y{i}']!r} が有限の数値でない")
+        Y_ref.append(y)
     Y_new = list(Y_ref)
     yreq = {}
     for item in (a.Y or []):
@@ -448,7 +501,7 @@ def build_plan(a):
         if bal is not None:
             Y_new[bal] = 1.0 - sum(Y_new[i] for i in range(nsp) if i != bal)
         for i, v in enumerate(Y_new):
-            if not (0.0 <= v <= 1.0):
+            if not (np.isfinite(v) and 0.0 <= v <= 1.0):
                 raise RerunError(f"Y{i} ({names[i]}) = {v} が [0, 1] の外")
         Y_back = [float(fmt(v)) for v in Y_new]
         if abs(sum(Y_back) - 1.0) > Y_SUM_TOL:
@@ -459,6 +512,16 @@ def build_plan(a):
                 inlet_upd[f"Y{i}"] = fmt(v)
         Y_new = Y_back
 
+    if nsp and "Y" not in changes:
+        # 入口 Y を変えないときも、そのまま使う参照の Y を検査する (forge の起動検査は 1e-3 で、入口カーネルが黙って正規化する;
+        # codex result 段 #1: 参照 BC の ΣY = 1.0001 を受理していた)。変えるときは上で 1e-12 で検査済み
+        bad = [f"Y{i} ({names[i]}) = {y!r}" for i, y in enumerate(Y_ref) if not (0.0 <= y <= 1.0)]
+        if bad:
+            raise RerunError(f"参照 {inlets[0]} の入口 Y が [0, 1] の外: {bad} (--Y で全種を書き直すこと)")
+        if abs(sum(Y_ref) - 1.0) > REF_Y_SUM_TOL:
+            raise RerunError(f"参照 {inlets[0]} の ΣY = {sum(Y_ref)!r} が 1 から {REF_Y_SUM_TOL:g} より外れる "
+                             "(参照 BC の入口組成が正規化されていない; --Y で全種を書き直すこと)")
+
     # --- 出口 Ps (Pt を変えたら --Ps / --keep-Ps 必須) ---
     res_path = find_ref_res(ref, a.res)
     f_pt = (changes["Pt"][1] / changes["Pt"][0]) if "Pt" in changes else 1.0
@@ -466,6 +529,9 @@ def build_plan(a):
     P_exit_ref, P_exit_src = exit_pressure_ref(
         ref, res_path, outlet_id,
         excluded_ids=[bc[n]["entry"].get("physID") for n, k in kinds.items() if k in ("wall", "wall_isothermal", "slip", "axis")])
+    if P_exit_ref is not None and not (np.isfinite(P_exit_ref) and P_exit_ref > 0.0):
+        P_exit_src = f"取れない (出口断面の P の中央値 {P_exit_ref!r} が有限の正値でない; {P_exit_src})"
+        P_exit_ref = None
     p_exit_warn = None if P_exit_ref is not None else f"P_exit_ref: null — {P_exit_src}"
     if "Pt" in changes and a.Ps is None and not a.keep_Ps:
         ratio = (Ps_ref / (f_pt * P_exit_ref)) if P_exit_ref else None
@@ -554,6 +620,12 @@ def build_plan(a):
                                  lambda m: f"cfl: {fmt(a.cfl)}, cfl_pseudo: {fmt(a.cfl)}", new_cfg_text, "`cfl: X, cfl_pseudo: X`")
         cfg_changes["cfl"] = float(a.cfl)
     new_cfg = yaml.safe_load(new_cfg_text) or {}
+    eff_cfl = {k: _num(_deltaT(new_cfg).get(k)) for k in ("cfl", "cfl_pseudo")}
+    if a.cfl is not None and any(v is not None and v != float(a.cfl) for v in eff_cfl.values()):
+        raise RerunError(f"書き換え後の solverConfig を読み直したら time.deltaT の cfl/cfl_pseudo = {eff_cfl} (期待 {float(a.cfl)})")
+    for k, v in eff_cfl.items():
+        if k in _deltaT(new_cfg):
+            _check_range(f"生成 solverConfig time.deltaT.{k}", v)
     tt = new_cfg.get("time") or {}
     n_outer = int(((tt.get("last") or {}).get("nStepOuter")) or 0)
     n_out = int(tt.get("outStepInterval") or 0)
@@ -588,8 +660,9 @@ def build_plan(a):
             raise RerunError(f"書き換え後の bcond の {name} のキー・種別が変わった")
     if nsp:
         yb = [float(nb[inlets[0]]["floats"][f"Y{i}"]) for i in range(nsp)]
-        if "Y" in changes and abs(sum(yb) - 1.0) > Y_SUM_TOL:
-            raise RerunError(f"書き換え後の ΣY = {sum(yb)!r}")
+        tol = Y_SUM_TOL if "Y" in changes else REF_Y_SUM_TOL
+        if any(not (0.0 <= y <= 1.0) for y in yb) or abs(sum(yb) - 1.0) > tol:
+            raise RerunError(f"書き換え後の入口 Y = {yb} (各成分 [0, 1]・|ΣY − 1| ≤ {tol:g} でない)")
 
     # --- species_meta の同期 ---
     meta_text_new, meta_note = None, None
@@ -601,8 +674,9 @@ def build_plan(a):
     if cond_changed and "Pt" in changes:
         # plan tooling-rerun-conditions §6 (ii′)・A3 (2026-10-06): Pt 0.8 倍は stages full でも本段 cfl 5 で出口壁際の角から発散
         # (scale あり step 468、なし step 2 で入口)、scale あり + full + 本段 cfl 1 は STEADY → Pt 変更の本段は cfl 1、scale-ic pt を推奨
-        rec = {"stages": "full", "cfl": 1.0,
-               "note": "Pt を変えた → run_staged_ns(stages='full') (soft→mid→本段) で本段 cfl 1、--scale-ic pt を推奨 (plan §4.7、§6 (ii′)・A3)"}
+        rec = {"stages": "full", "cfl": 1.0, "nStepOuter_min": 60000,
+               "note": "Pt を変えた → run_staged_ns(stages='full') (soft→mid→本段) で本段 cfl 1・60000 step、"
+                       "--scale-ic pt を推奨 (plan §4.7、§6 (ii′)・A3)"}
         if a.scale_ic != "pt":
             warnings.append("Pt 変更で --scale-ic none: 検証では stages full・本段 cfl 5 で入口から step 2 で発散した (plan §6 (ii′) 腕 B2)。"
                             "--scale-ic pt を推奨 (none は本段 cfl 1 でも入口配管の壁際に逆流域を残して別の状態に向かった: §6 (ii″) B3)")
@@ -612,8 +686,40 @@ def build_plan(a):
     else:
         rec = {"stages": "none", "cfl": cfg_changes.get("cfl", _ref_cfl(cfg)),
                "note": "条件の変更なし → 参照場からの継続 (stages='none', 参照 cfl)"}
+    # --- 推奨と生成 config の整合 (codex result 段 #3: 表示する run_staged_ns の行は生成 config の cfl で本段を回す) ---
+    # §4.7 の推奨は NS (run_staged_ns) の実測に基づく。Euler 参照 (δ_E 用の対; plan §4.8) は run_staged で回し、
+    # §6 (ii) 腕 E は stages none・cfl 2・6000 で合格している — §4.7 は Euler の推奨を定めていないので整合検査をしない。
     info_path = os.path.join(ref, "prepare_info.json")
     pinfo = json.load(open(info_path)) if os.path.exists(info_path) else None
+    is_ns = bool(pinfo and pinfo.get("viscous")) or tb_model.startswith("sst")
+    if cond_changed and not is_ns:
+        # Euler 参照 (δ_E 用の対; plan §4.8) の推奨 = 検証の実績 (2026-10-06 §4.7 に追加): §6 (ii) 腕 E (Pt 0.8、scale-ic pt) と
+        # (iv″) run_0134 (Tt 1500・H2O 0.10) はいずれも run_staged(stages="none")・cfl 2・6000 step で STEADY
+        rec = {"stages": "none", "cfl": 2.0,
+               "note": "Euler 参照 → run_staged(stages='none')・cfl 2 (plan §4.7 の Euler 行: 腕 E・run_0134 の実績)"}
+    rec["runner"] = "run_staged_ns" if is_ns else "run_staged"
+    mism, fix = [], []
+    if rec.get("cfl") is not None and any(v is not None and v != _num(rec["cfl"]) for v in eff_cfl.values()):
+        mism.append(f"本段 cfl/cfl_pseudo = {eff_cfl['cfl']}/{eff_cfl['cfl_pseudo']} (推奨 {rec['cfl']})")
+        fix.append(f"--cfl {float(rec['cfl'])}")
+    if rec.get("nStepOuter_min") is not None and n_outer < int(rec["nStepOuter_min"]):
+        mism.append(f"nStepOuter = {n_outer} (推奨 ≥ {rec['nStepOuter_min']})")
+        fix.append(f"--steps {int(rec['nStepOuter_min'])}")
+        if int(rec["nStepOuter_min"]) % n_out:
+            fix.append("--out-interval <nStepOuter の約数>")
+    if mism and not is_ns:
+        warnings.append("Euler 参照 (run_staged で回す): 推奨 (stages none・cfl 2、plan §4.7 の Euler 行) と生成 config が食い違う — "
+                        "Euler は停止せず警告だけ (--cfl 2.0 で推奨どおり)。食い違い: " + "; ".join(mism))
+        mism = []
+    if mism:
+        msg = ("推奨 (recommended_stages: " + json.dumps(rec, ensure_ascii=False) + ") と生成 config が食い違う: "
+               + "; ".join(mism))
+        if not a.override_recommended:
+            raise RerunError(msg + f"\n    推奨どおりにするなら {' '.join(fix)} を足す。"
+                             "意図して違う config で作るなら --override-recommended (記録に残る)")
+        warnings.append(msg + " — --override-recommended で推奨と違う config のまま作った")
+    rec["config_effective"] = {"cfl": eff_cfl["cfl"], "cfl_pseudo": eff_cfl["cfl_pseudo"], "nStepOuter": n_outer,
+                               "outStepInterval": n_out, "override": bool(mism)}
     euler_note = None
     if cond_changed and pinfo and pinfo.get("viscous"):
         euler_note = ("δ_E の評価には同条件の Euler rerun を対で作ること (Euler 参照 run にも同じ条件引数で rerun_conditions)。"
@@ -696,6 +802,11 @@ def scale_fields(dst_h5, src_h5, required, f):
                 raise RerunError(f"スケール検査 NG: {name} が f·d_ref に rtol {SCALE_RTOL:g} で一致しない")
             nz = want != 0.0
             out[name] = float(np.max(np.abs(got[nz] - want[nz]) / np.abs(want[nz]))) if nz.any() else 0.0
+    # allclose は掛け算の正確さしか見ないので、変換後の場の物理的妥当性 (有限・ρ>0・Y の範囲) を改めて検査する
+    # (codex result 段 #1: f < 0 で全点負密度でも合格していた)
+    probs, _ = field_problems(dst_h5, required)
+    if probs:
+        raise RerunError(f"スケール後 (f = {f!r}) の初期場が不正:\n    " + "\n    ".join(probs))
     return out
 
 
@@ -819,6 +930,8 @@ def make_parser():
     ap.add_argument("--cfl", type=float, help="`cfl: X, cfl_pseudo: X` を書き換える")
     ap.add_argument("--scale-ic", choices=("none", "pt"), default="none",
                     help="pt: 必要保存量を全部 Pt_new/Pt_ref 倍 (T・U・Y・k・ω を保つ初期場変換; 明示 opt-in)")
+    ap.add_argument("--override-recommended", action="store_true",
+                    help="recommended_stages (plan §4.7) の本段 cfl・step 数と違う config のまま作る (既定は停止; 記録に残る)")
     ap.add_argument("--lump", default=None, help="(v1 では停止) 乾き成分 lump の組成変更")
     ap.add_argument("--forge", help="--resolve-species を持つ forge (restart_field に渡す; 既定 FORGE_BIN)")
     ap.add_argument("--dry-run", action="store_true", help="検査と書き換え内容の表示だけ (何も作らない)")
@@ -856,8 +969,10 @@ def main(argv=None):
     print(f"restart_field: {rec['restart_field_verdict']}")
     print(f"作成: {plan['new']} (記録 RERUN_CONDITIONS.json)")
     st = plan["recommended_stages"]["stages"]
-    print(f"回し方: run_staged_ns(Path({_repo_rel(plan['new'])!r}), stages={st!r}) "
-          "(design/forge_design/evaluate/runner_axismach.py)")
+    eff = plan["recommended_stages"]["config_effective"]
+    print(f"回し方: {plan['recommended_stages']['runner']}(Path({_repo_rel(plan['new'])!r}), stages={st!r}) "
+          "(design/forge_design/evaluate/runner_axismach.py) — 本段は生成 config の "
+          f"cfl {eff['cfl']}・nStepOuter {eff['nStepOuter']} で回る")
     if plan["euler_note"]:
         print(f"注意: {plan['euler_note']}")
     return 0
