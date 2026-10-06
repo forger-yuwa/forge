@@ -273,7 +273,7 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
 - `diagnostician` (上位・既定。指示上の編集禁止。Edit/Write は持たないが Bash は持つ): 下のエスカレーション条件に当たったら諮る。
   ブリーフの書き方は次項の codex 諮問と同じ。
 - **codex 諮問 (上位・代替)**: 上の切り替え条件に当たったら `codex_review.py --stage diagnose` で諮る
-  (read-only サンドボックス、所要 5〜15 分なので `run_in_background` + timeout 1200 s 以上。難所は `--effort xhigh`)。
+  (read-only サンドボックス、所要 5〜15 分なので `run_in_background` + timeout 1200 s 以上。難所は `--effort xhigh`)。**`( … &)`・nohup のシェル背景で起動しない** — 完了通知が来ず、終わっても気づけない (2026-10-06 ユーザ指摘)。PreToolUse フック `hook_forge_guard.py` が `codex_review.py` の `run_in_background` なし起動を拒否する。
   ブリーフは `notes/reviews/briefs/<日付>-<slug>.md` に書き (codex がリポジトリ内で読めるよう、また記録として残すため)、
   関連 plan を位置引数、case README 等を `--extra` で渡す。出力は `notes/reviews/<日付>-<slug>-diagnose.md`。
   セッションの文脈は引き継がれないので、ブリーフは**観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 / 仮説**を
