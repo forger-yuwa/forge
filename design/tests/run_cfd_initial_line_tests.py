@@ -200,6 +200,63 @@ if (run / "res_6000.h5").exists():
     (td / "bcondConfig.yaml").write_text(yaml.safe_dump(yaml.safe_load((run / "bcondConfig.yaml").read_text())))
     ok_t = pinned_factory(td, "res_6000.h5")(2.0, d["gamma_hall"])
     check("対照: 設定を変えずに書き直した凍結源は受理", ok_t.x0_cfd == il["x0"])
+
+    # --- 実効入口・熱力学条件 (codex diagnose 2026-10-06 result-interpretation の判別 A/B を回帰化) ----------
+    # 凍結源の入力を一時ディレクトリへ写し (h5 は symlink、元 run は書き換えない)、入口 BC・physProp だけを変える。
+    # A = 入口 Tt 1600 (そのまま) は受理、B = 1500 は拒否。使う側は同じ問題 (spec.Tt 1600)。
+    def _src_copy(edit_bc=None, edit_cfg=None, prefix="cfdpin_eff_"):
+        td = Path(tempfile.mkdtemp(prefix=prefix))
+        for fn in ("nozzle.h5", "res_6000.h5"):
+            (td / fn).symlink_to(run / fn)
+        (td / "prepare_info.json").write_text((run / "prepare_info.json").read_text())
+        cfg = yaml.safe_load((run / "solverConfig.yaml").read_text())
+        bc = yaml.safe_load((run / "bcondConfig.yaml").read_text())
+        if edit_cfg:
+            edit_cfg(cfg)
+        if edit_bc:
+            edit_bc(bc)
+        (td / "solverConfig.yaml").write_text(yaml.safe_dump(cfg))
+        (td / "bcondConfig.yaml").write_text(yaml.safe_dump(bc))
+        return td
+
+    def _chain_with(td):
+        pp = load_problem(PROB)
+        pp.geometry.update({"initial_line": "cfd", "initial_line_res": "res_6000.h5", "Md_moc_offset": -4.16e-4,
+                            "initial_line_run": str(td)})
+        return design_chain(pp)
+    td = _src_copy(prefix="cfdpin_tt1600_")
+    d_a = _chain_with(td)
+    ma = d_a["initial_line"].get("match") or {}
+    want = {"inlet.Pt", "inlet.Tt", "inlet.Y", "physProp.thermalMethod", "physProp.species", "physProp.thermoHrefTemp",
+            "meta.gas.Tt", "meta.species.Y_transport", "meta.species.transported"}
+    check(f"A: 入口 Tt 1600 (凍結源そのまま) は受理し実効入口・熱力学条件を照合済みと記録 (欠け {sorted(want - set(ma.get('checked', [])))})",
+          want <= set(ma.get("checked", [])) and d_a["initial_line"]["x0"] == il["x0"])
+    check("A: 熱力学ハッシュは元の凍結源と同じ (書き直しだけでは変わらない)",
+          d_a["initial_line"]["sha256_16"]["thermo"] == il["sha256_16"]["thermo"])
+    for label, edit_bc, edit_cfg, key in (
+            ("B: 入口 Tt 1500", lambda b: b["inlet"]["floats"].update({"Tt": 1500.0}), None, "入口 Tt"),
+            ("入口 Pt 5.0 MPa", lambda b: b["inlet"]["floats"].update({"Pt": 5.0e6}), None, "入口 Pt"),
+            ("入口組成 Y0/Y1 の入れ替え", lambda b: b["inlet"]["floats"].update({"Y0": 0.0858, "Y1": 0.9142}), None, "入口 Y"),
+            ("thermalMethod 0 (CPG)", None, lambda c: c["physProp"].update({"thermalMethod": 0}), "thermalMethod"),
+            ("thermoHrefTemp 0", None, lambda c: c["physProp"].update({"thermoHrefTemp": 0.0}), "thermoHrefTemp"),
+            ("species の lump 分率違い", None,
+             lambda c: c["physProp"]["species"][0]["lump"].update({"CO2": 0.13}), "physProp.species"),
+            ("入口が inlet_Pressure でない", lambda b: b["inlet"].update({"kind": "inlet_uniformVelocity"}), None,
+             "inlet_Pressure")):
+        td = _src_copy(edit_bc, edit_cfg)
+        try:
+            _chain_with(td)
+            check(f"凍結源の実効入口・熱力学条件 {label} を拒否", False)
+        except ValueError as e:
+            check(f"凍結源の実効入口・熱力学条件 {label} を拒否 ({str(e)[:110]}…)", key in str(e))
+    # 使う側の問題を通さない呼び方 (pinned_factory 単独) でも、凍結源の prepare_info と実効 BC の食い違いは拒否
+    td = _src_copy(lambda b: b["inlet"]["floats"].update({"Tt": 1500.0}))
+    try:
+        pinned_factory(td, "res_6000.h5")(2.0, d["gamma_hall"])
+        check("pinned_factory 単独でも入口 Tt 1500 (prepare_info.gas.Tt 1600 と不整合) を拒否", False)
+    except ValueError as e:
+        check(f"pinned_factory 単独でも入口 Tt 1500 (prepare_info.gas.Tt 1600 と不整合) を拒否 ({str(e)[:90]}…)",
+              "prepare_info" in str(e))
 else:
     print("skip: res_6000.h5 が無いので design_chain (cfd) と凍結入力契約の検査を省略")
 

@@ -273,6 +273,9 @@ def design_chain(p: Problem) -> dict:
         expect = {"gas": (gas.summary() if hasattr(gas, "summary") else {"kind": "cpg"}),
                   "r_U": float(p.geometry.get("r_inlet", 2.5)), "L_U": float(p.geometry.get("L_U", 3.5)),
                   "L_pipe": float(p.geometry.get("L_pipe", 0.5))}
+        # 実効入口 (BC の Pt・Tt・組成) と熱力学条件 (thermalMethod・species・thermoHrefTemp) も照合 (codex diagnose 2026-10-06)
+        from ..feedback.cfd_initial_line import expected_inlet_thermo
+        expect["inlet_thermo"] = expected_inlet_thermo(p)
         ht = pinned_factory(il_run, il_res, expect=expect)(R, g_hall)
         il_src = dict(ht.source)
     else:

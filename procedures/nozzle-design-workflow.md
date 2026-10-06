@@ -77,7 +77,7 @@ M6 (case/45) で実際に通した順番。各段の「何で判定するか」�
    .venv-opt/bin/python -m forge_design.evaluate.runner_axismach ../case/NN/problem_X.yaml ../case/NN/run_XXXX_euler_X [--stages soft --cfl 2 --implicit-relax 0.7]
    ```
    → `metrics.json` (`collect()`: 軸 M の偏差・出口 M・オーバーシュート・出口一様性・流量比)。
-   形状比較は `nozzle_report` の評価量 (r/r_w = 0.1 の圧力波・オーバーシュート・出口コア M) で行う。
+   形状比較は `nozzle_report` の評価量 (r/r_w = 0.1 のMach 波・オーバーシュート・出口コア M) で行う。
    複数候補は `case/44.../run_study_va.py` のようにバッチで回す。
 3. **NS + 境界層補正 (δ* ループ)** — `design/forge_design/feedback/deltastar_loop.py`:
    ```

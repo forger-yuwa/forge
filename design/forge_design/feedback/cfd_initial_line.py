@@ -65,6 +65,109 @@ def _check_run_config(rd: Path, info: dict) -> dict:
             "walls": {k: "slip" for k in walls}}
 
 
+def _read_effective_thermo(rd: Path) -> dict:
+    """凍結源の**実効**入口条件と熱力学条件を YAML の構造として読む (codex diagnose 2026-10-06 result-interpretation:
+    prepare_info のガス条件だけを照合していたので、入口 BC の Tt を 1500 K に替えた凍結源も受理していた)。
+    入口は kind inlet_Pressure がちょうど 1 つであること (Pt・Tt を BC として持つ形でなければ照合できないので拒否)。
+    戻り: {"inlet": {name, kind, Pt, Tt, Y [Y0.. の順]}, "physProp": {thermalMethod, species, thermoHrefTemp}}。"""
+    import yaml
+    cfg = yaml.safe_load((rd / "solverConfig.yaml").read_text()) or {}
+    bc = yaml.safe_load((rd / "bcondConfig.yaml").read_text()) or {}
+    pp = cfg.get("physProp") or {}
+    inlets = {k: v for k, v in bc.items() if isinstance(v, dict) and str(v.get("kind", "")).lower().startswith("inlet")}
+    if len(inlets) != 1:
+        raise ValueError(f"CFD ピン: 凍結源の入口 BC がちょうど 1 つでない ({sorted(inlets)}) — 実効の Pt・Tt・組成を照合できない")
+    name, ib = next(iter(inlets.items()))
+    if str(ib.get("kind")) != "inlet_Pressure":
+        raise ValueError(f"CFD ピン: 凍結源の入口 {name} の kind={ib.get('kind')!r} (inlet_Pressure でない) — 実効の Pt・Tt を照合できない")
+    fl = ib.get("floats") or {}
+    if fl.get("Pt") is None or fl.get("Tt") is None:
+        raise ValueError(f"CFD ピン: 凍結源の入口 {name} に Pt・Tt が無い ({fl})")
+    ny = sum(1 for k in fl if str(k).startswith("Y") and str(k)[1:].isdigit())
+    if any(f"Y{i}" not in fl for i in range(ny)):
+        raise ValueError(f"CFD ピン: 凍結源の入口 {name} の組成キーが Y0.. の連番でない ({sorted(fl)})")
+    return {"inlet": {"name": name, "kind": "inlet_Pressure", "Pt": float(fl["Pt"]), "Tt": float(fl["Tt"]),
+                      "Y": [float(fl[f"Y{i}"]) for i in range(ny)]},
+            "physProp": {"thermalMethod": pp.get("thermalMethod"), "species": pp.get("species"),
+                         "thermoHrefTemp": pp.get("thermoHrefTemp")}}
+
+
+def expected_inlet_thermo(p) -> dict:
+    """使う側の問題 (Problem) から、凍結源が持つべき実効入口条件と熱力学条件を作る (照合の期待値)。
+    BC・physProp を書く側 (`runner_axismach._apply_gas_to_config`・`_bcond_with_species`) と同じ規則で求める:
+    Pt・Tt = spec、組成 = 輸送種配置の inflow 組成 (単一輸送種・CPG は Y キー無し)、TP なら thermalMethod 2・
+    species (lump 記法の items)・thermoHrefTemp (evaluate.thermo_href_temp、既定 298.15)、CPG なら thermalMethod 0。"""
+    from ..evaluate.runner_axismach import _tp_species_Y
+    tp = bool(p.is_semiperfect) and str(p.evaluate.get("cfd_gas", "same")) != "cpg"
+    out = {"Pt": float(p.spec["Pt"]), "Tt": float(p.spec["Tt"]), "Y": None, "thermalMethod": 0,
+           "species": None, "thermoHrefTemp": None}
+    if tp:
+        from ..gas.composition import solver_species_config
+        items, _ = solver_species_config(p.species_layout())
+        Ys = _tp_species_Y(p)
+        out.update({"Y": None if Ys is None else [float(y) for y in Ys], "thermalMethod": 2, "species": items,
+                    "thermoHrefTemp": float(p.evaluate.get("thermo_href_temp", 298.15))})
+    return out
+
+
+# 入口 BC の組成は `_bcond_with_species` が "%.8f" で書く。期待値は同じ丸めをしてから 1e-9 で比べる
+# (丸めをしないと Y の 9 桁目以降を持つ組成が書き手の丸めだけで拒否される)。
+def _y_written(y: float) -> float:
+    return float(f"{float(y):.8f}")
+
+
+def _check_effective_thermo(eff: dict, info_gas: dict | None, info_species: dict | None, exp: dict | None,
+                            errs: list, checked: list) -> None:
+    """凍結源の実効入口・熱力学条件を (1) 凍結源自身の prepare_info (メタデータ) と (2) 使う側の問題と照合する。
+    許容: Tt・Pt・thermoHrefTemp は相対 1e-6、Y は 1e-9 (書き手の 8 桁丸め後)、species・thermalMethod は完全一致。"""
+    inl, pp = eff["inlet"], eff["physProp"]
+
+    def rel(a, b):
+        return abs(float(a) - float(b)) > 1e-6 * max(1.0, abs(float(b)))
+    # (1) メタデータ: prepare_info に書いたガス条件と実効 BC が食い違う凍結源は、メタデータを信用できないので拒否
+    if info_gas and info_gas.get("Tt") is not None:
+        if rel(inl["Tt"], info_gas["Tt"]):
+            errs.append(f"入口 Tt: 凍結源の BC {inl['Tt']} vs 凍結源の prepare_info.gas {info_gas['Tt']}")
+        checked.append("meta.gas.Tt")
+    if info_species and info_species.get("Y_transport") is not None:
+        ym = [float(v) for v in info_species["Y_transport"]]
+        if len(ym) != len(inl["Y"]) or any(abs(a - _y_written(b)) > 1e-9 for a, b in zip(inl["Y"], ym)):
+            errs.append(f"入口 Y: 凍結源の BC {inl['Y']} vs 凍結源の prepare_info.species.Y_transport {ym}")
+        checked.append("meta.species.Y_transport")
+    if info_species and info_species.get("transported") is not None:
+        names = [s["name"] if isinstance(s, dict) else s for s in (pp["species"] or [])]
+        if list(names) != list(info_species["transported"]):
+            errs.append(f"physProp.species の種名 {names} vs 凍結源の prepare_info.species.transported {info_species['transported']}")
+        checked.append("meta.species.transported")
+    # (2) 使う側の問題 (spec.Pt・spec.Tt・gas)
+    if not exp:
+        return
+    for k in ("Pt", "Tt"):
+        if rel(inl[k], exp[k]):
+            errs.append(f"入口 {k}: 凍結源の BC {inl[k]} vs 使う側の spec.{k} {exp[k]}")
+        checked.append(f"inlet.{k}")
+    ye = exp.get("Y")
+    if ye is None:
+        if inl["Y"] and not (len(inl["Y"]) == 1 and abs(inl["Y"][0] - 1.0) <= 1e-9):
+            errs.append(f"入口 Y: 凍結源の BC {inl['Y']} vs 使う側 (単一輸送種・組成キー無し)")
+    elif len(ye) != len(inl["Y"]) or any(abs(a - _y_written(b)) > 1e-9 for a, b in zip(inl["Y"], ye)):
+        errs.append(f"入口 Y: 凍結源の BC {inl['Y']} vs 使う側の inflow 組成 {ye}")
+    checked.append("inlet.Y")
+    try:
+        tm_src = int(pp["thermalMethod"]) if pp["thermalMethod"] is not None else 0
+    except (TypeError, ValueError):
+        tm_src = pp["thermalMethod"]
+    if tm_src != exp["thermalMethod"]:
+        errs.append(f"physProp.thermalMethod: 凍結源 {pp['thermalMethod']!r} vs 使う側 {exp['thermalMethod']}")
+    checked.append("physProp.thermalMethod")
+    if exp["thermalMethod"] == 2:
+        if pp["species"] != exp["species"]:
+            errs.append(f"physProp.species: 凍結源 {pp['species']} vs 使う側 {exp['species']}")
+        if pp["thermoHrefTemp"] is None or rel(pp["thermoHrefTemp"], exp["thermoHrefTemp"]):
+            errs.append(f"physProp.thermoHrefTemp: 凍結源 {pp['thermoHrefTemp']} vs 使う側 {exp['thermoHrefTemp']}")
+        checked += ["physProp.species", "physProp.thermoHrefTemp"]
+
+
 def load_run_field(run_dir, res=None, n_tail: int = 1):
     """run の node 場 (r_t 単位の格子 X, R と M, θ) を読む。res: ファイル名 (str) かその列 (平均する) — **必須**
     (省略すると最新場を黙って選ぶので拒否する; codex result M2)。n_tail は互換のため残すが使わない。
@@ -97,10 +200,12 @@ def load_run_field(run_dir, res=None, n_tail: int = 1):
             Ux, Uy, son = (f["/VALUE/" + k][:] for k in ("Ux", "Uy", "sonic"))
         Ms.append(np.hypot(Ux, Uy) / son)
         Ts.append(np.arctan2(Uy, Ux))
+    eff = _read_effective_thermo(rd)
+    # 熱力学ハッシュには実効の入口 BC も入れる (入口 Tt だけ替えた凍結源でハッシュが不変だった; codex diagnose 2026-10-06)
     thermo = {"gas": info.get("gas"), "gamma_hall": info.get("gamma_hall"),
-              "physProp": {k: v for k, v in (yaml_physprop(rd)).items()}}
+              "physProp": {k: v for k, v in (yaml_physprop(rd)).items()}, "inlet": eff["inlet"]}
     src = {"run": str(rd), "res": [f.name for f in files],
-           "config": cfg_checked,
+           "config": cfg_checked, "effective": eff, "species_meta": info.get("species"),
            "shape": {"R": info.get("R"), "L_U": info.get("L_U"), "scale_m": S,
                      "x_in_mesh": float(X[0, 0]), "r_U_mesh": float(R[0, -1])},
            "gamma_hall": info.get("gamma_hall"), "gas": info.get("gas"),
@@ -122,6 +227,9 @@ def check_source_matches(src: dict, R: float, gamma: float, expect: dict | None 
     - R・γ_Hall (prepare_info の値) と使う側の R・γ_Hall
     - expect (design_chain から): gas (kind・Tt・組成 Y)、r_U・L_U・L_pipe と U→T Hermite —
       凍結源のメッシュの壁節点 (入口直管と縮流部) を使う側の設計縮流部 `UpstreamThroatPoly` と比べる
+    - 実効入口・熱力学条件 (`src["effective"]` = 凍結源の bcondConfig の入口 Pt・Tt・Y と physProp の
+      thermalMethod・species・thermoHrefTemp): 凍結源の prepare_info とは常に、使う側の問題とは
+      expect["inlet_thermo"] (`expected_inlet_thermo`) があるとき照合する (`_check_effective_thermo`)
     tol_wall [r_t]: メッシュ座標は float32 (case/45 の r_U 6.485 で 1 ulp ≈ 5e-7 r_t、実測の残差 5.1e-7) なので 5e-6。
     戻り: 照合結果 (照合した項目と照合できなかった項目)。"""
     errs, checked, unchecked = [], [], []
@@ -168,6 +276,11 @@ def check_source_matches(src: dict, R: float, gamma: float, expect: dict | None 
             if dmax > tol_wall:
                 errs.append(f"縮流部の形: 凍結源のメッシュ壁と使う側の U→T Hermite の差 {dmax:.2e} > {tol_wall:g}")
         checked += ["L_U", "r_U", "L_pipe", "contraction_shape"]
+    if src.get("effective") is not None:
+        _check_effective_thermo(src["effective"], src.get("gas"), src.get("species_meta"),
+                                expect.get("inlet_thermo"), errs, checked)
+    elif expect.get("inlet_thermo") is not None:
+        unchecked.append("inlet_thermo")
     if errs:
         raise ValueError("CFD ピン: 凍結源が使う側と同じ形・ガスでない — " + "; ".join(errs))
     return {"checked": checked, "unchecked": unchecked}
@@ -183,7 +296,7 @@ class CFDPinnedThroat(HallThroat):
         if self.source.get("run"):
             # 凍結源の形・熱力学条件と使う側の照合 (source が run 由来のときだけ。合成場の単体試験は source 無し)
             self.source["match"] = check_source_matches(self.source, R, gamma, self.source.pop("_expect", None))
-        for k in ("_wall_x", "_wall_r", "_expect"):
+        for k in ("_wall_x", "_wall_r", "_expect", "species_meta"):
             self.source.pop(k, None)
         xs = X[:, 0]
         eta = Rr[0] / Rr[0, -1]
@@ -278,7 +391,8 @@ class CFDPinnedThroat(HallThroat):
 
 def pinned_factory(run_dir, res=None, expect: dict | None = None):
     """`HallThroat(R=, gamma=)` と同じ呼び方で CFD ピンの throat を返す factory (場は 1 回だけ読む)。
-    res (snapshot) は必須。expect (gas・r_U・L_U・L_pipe) を渡すと凍結源の形・ガスを照合する (`check_source_matches`)。"""
+    res (snapshot) は必須。expect (gas・r_U・L_U・L_pipe・inlet_thermo) を渡すと凍結源の形・ガス・実効入口条件を照合する
+    (`check_source_matches`)。凍結源の実効入口条件とその prepare_info の照合は expect が無くても行う。"""
     X, Rr, M, TH, src = load_run_field(run_dir, res)
 
     def make(R, gamma):

@@ -3,11 +3,16 @@
 規約の正本は procedures/nozzle-design-outputs.md (2026-10-05 ユーザ指示でルール化)。
 出力 (既定 <run>/report/):
   fig_*.png        解析領域・コンタ・線グラフ・壁形状
-  report.json      条件 (境界条件・数値設定・物性・ゲート) と評価量。build_pptx.py が読む
+  report.json      条件 (境界条件・数値設定・物性・ゲート)・評価量・量別の準定常 VERDICT (--verdicts)。build_pptx.py が読む
   <run>_report.pptx  build_pptx.py が `.venv-pptx` の python-pptx で作る (無ければ図と json だけ)
 
 usage:
   design/.venv-opt/bin/python -m forge_design.report.nozzle_report RUN_DIR [--euler EULER_RUN] [--out DIR] [--no-pptx]
+      [--verdicts VERDICTS.json]
+
+--verdicts: 量別の準定常 VERDICT (check_quasisteady.py の判定) と判定区間・備考 (未達のまま進めた決定など) を
+  {"wave_eta0.1": {"verdict": "DRIFTING", "window": "40000–60000", "note": "..."}, ...} で渡す。報告はこれを
+  評価量の表にそのまま載せるだけで、自分では判定しない。無ければ表に「VERDICT 未指定」と出る。
 """
 from __future__ import annotations
 
@@ -246,6 +251,34 @@ def metrics(run, F, euler=None):
     return out
 
 
+# ------------------------------------------------------------------ 量別の準定常 VERDICT (--verdicts)
+# check_quasisteady.py の VERDICT と同じ綴りだけを受ける (それ以外は打ち間違いとして拒否する)
+QS_VERDICTS = ("STEADY", "OSCILLATING", "TRANSIENT-UNSETTLED", "DRIFTING", "NONFINITE")
+# 評価量の表の行に対応するキー (判定するのは r/r_w = 0.1 の線; r=0 は併記のみ)。これ以外のキーは表の末尾に別行で載せる
+QS_KEYS = ("wave_eta0.1", "overshoot_eta0.1", "slope_eta0.1", "range_eta0.1", "exit_core_M", "mdot_ratio", "condensation")
+
+
+def load_verdicts(path) -> dict:
+    """--verdicts の json を読み、各量が {verdict, window, note} の形で verdict が QS_VERDICTS のどれかであることを検査する。
+    戻り: {"source": パス, "items": {量: {verdict, window, note}}}。報告は判定しない (渡された判定を載せるだけ)。"""
+    raw = json.loads(Path(path).read_text())
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError(f"--verdicts {path}: 量をキーにした空でない object が要る")
+    items = {}
+    for k, v in raw.items():
+        if not isinstance(v, dict) or "verdict" not in v:
+            raise ValueError(f"--verdicts {path}: {k} に verdict が無い ({v!r})")
+        vd = str(v["verdict"]).strip().upper()
+        if vd not in QS_VERDICTS:
+            raise ValueError(f"--verdicts {path}: {k} の verdict {v['verdict']!r} は check_quasisteady.py の判定 {QS_VERDICTS} でない")
+        extra = set(v) - {"verdict", "window", "note"}
+        if extra:
+            raise ValueError(f"--verdicts {path}: {k} に未知のキー {sorted(extra)} (verdict・window・note だけ)")
+        items[str(k)] = {"verdict": vd, "window": None if v.get("window") is None else str(v["window"]),
+                         "note": None if v.get("note") is None else str(v["note"])}
+    return {"source": str(Path(path).resolve()), "items": items}
+
+
 # ------------------------------------------------------------------ 図
 def fig_domain(run, F, path):
     run = Path(run); X, R = F["X"], F["R"]
@@ -350,7 +383,7 @@ def fig_axis_lines(F, Md, path, path_dev, euler=None):
             ax.plot(xq, 100 * (eta_line(euler, "M", eta, xq) / Md - 1), ls=ls, color="k", lw=0.9, alpha=0.6, label=f"Euler (設計壁) r/r_w = {eta}")
     ax.axhline(0, color="0.6", lw=0.5); ax.set_ylim(-0.6, 0.6); ax.set_xlim(max(10, xq[0]), xq[-1])
     ax.set_xlabel("x / r_t"); ax.set_ylabel("M / M_d − 1 [%]"); ax.legend(fontsize=8, frameon=False, ncol=2)
-    ax.set_title("試験部の M の設計値からのずれ (圧力波・オーバーシュート・傾きを見る図)", fontsize=10)
+    ax.set_title("試験部の M の設計値からのずれ (Mach 波・オーバーシュート・傾きを見る図)", fontsize=10)
     fig.tight_layout(); fig.savefig(path_dev, dpi=130); plt.close(fig)
 
 
@@ -488,7 +521,9 @@ def fig_wall_shape(run, F, path):
 
 
 # ------------------------------------------------------------------ 本体
-def make_report(run, euler=None, out=None, pptx=True, wall_over_frac=None):
+def make_report(run, euler=None, out=None, pptx=True, wall_over_frac=None, verdicts=None):
+    # verdicts: --verdicts の json パス (量別の準定常 VERDICT・判定区間・備考)。先に検査して、不正なら図を作る前に止める
+    qs = load_verdicts(verdicts) if verdicts else None
     run = Path(run).resolve(); out = Path(out) if out else run / "report"; out.mkdir(parents=True, exist_ok=True)
     F = load_field(run)
     try:
@@ -510,6 +545,7 @@ def make_report(run, euler=None, out=None, pptx=True, wall_over_frac=None):
     rep["metrics"]["wall_resolution"] = wall_resolution(run, F, over_frac=wall_over_frac)
     rep["metrics"]["wall_shape"] = fig_wall_shape(run, F, out / "fig_wall_shape.png"); rep["figures"]["wall_shape"] = "fig_wall_shape.png"
     rep["euler_ref"] = str(euler) if euler else None
+    rep["quasisteady_verdicts"] = qs          # None = 未指定 (pptx の表に「VERDICT 未指定」と出す)
     (out / "report.json").write_text(json.dumps(rep, indent=1, ensure_ascii=False, default=float))
     if pptx:
         if PPTX_PY.exists():
@@ -526,8 +562,10 @@ def main(argv=None):
     ap.add_argument("--no-pptx", action="store_true")
     ap.add_argument("--wall-over-frac", type=float, default=None,
                     help="壁解像: y1+ > 1 を許す面積割合 [%%] (check_wall_resolution.py --over-frac; 既定はツール既定)")
+    ap.add_argument("--verdicts", default=None,
+                    help="量別の準定常 VERDICT の json ({量: {verdict, window, note}}; 量のキーは QS_KEYS、他は表の末尾に別行)")
     a = ap.parse_args(argv)
-    print(make_report(a.run, a.euler, a.out, pptx=not a.no_pptx, wall_over_frac=a.wall_over_frac))
+    print(make_report(a.run, a.euler, a.out, pptx=not a.no_pptx, wall_over_frac=a.wall_over_frac, verdicts=a.verdicts))
 
 
 if __name__ == "__main__":
