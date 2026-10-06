@@ -295,8 +295,6 @@ def main(argv=None) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
 
 def _design_report(run_dir, euler_ref):
     """ノズル設計の標準出力 (procedures/nozzle-design-outputs.md) を NS pass の後に自動で作る。失敗しても chain は止めない。"""
@@ -308,3 +306,6 @@ def _design_report(run_dir, euler_ref):
     except BaseException as e:  # noqa: BLE001
         print(f"design report: 失敗 ({type(e).__name__}: {e}) — chain は続行", flush=True)
 
+
+if __name__ == "__main__":
+    sys.exit(main())

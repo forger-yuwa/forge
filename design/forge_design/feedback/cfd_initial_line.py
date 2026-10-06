@@ -80,14 +80,30 @@ def _read_effective_thermo(rd: Path) -> dict:
     name, ib = next(iter(inlets.items()))
     if str(ib.get("kind")) != "inlet_Pressure":
         raise ValueError(f"CFD ピン: 凍結源の入口 {name} の kind={ib.get('kind')!r} (inlet_Pressure でない) — 実効の Pt・Tt を照合できない")
+    ints = ib.get("ints") or {}
+    if isinstance(ints, dict) and int(ints.get("inletProfile", 0) or 0) != 0:
+        # 入口分布 CSV が実際の Pt・Tt・組成を上書きする (procedures/inlet-profile.md) — 一様入口の照合では扱えないので拒否
+        # (codex result 2026-10-06 Major 2)
+        raise ValueError(f"CFD ピン: 凍結源の入口 {name} が inletProfile={ints.get('inletProfile')} (入口分布) — 一様入口の照合の対象外")
     fl = ib.get("floats") or {}
     if fl.get("Pt") is None or fl.get("Tt") is None:
         raise ValueError(f"CFD ピン: 凍結源の入口 {name} に Pt・Tt が無い ({fl})")
     ny = sum(1 for k in fl if str(k).startswith("Y") and str(k)[1:].isdigit())
     if any(f"Y{i}" not in fl for i in range(ny)):
         raise ValueError(f"CFD ピン: 凍結源の入口 {name} の組成キーが Y0.. の連番でない ({sorted(fl)})")
-    return {"inlet": {"name": name, "kind": "inlet_Pressure", "Pt": float(fl["Pt"]), "Tt": float(fl["Tt"]),
-                      "Y": [float(fl[f"Y{i}"]) for i in range(ny)]},
+    vals = {"Pt": float(fl["Pt"]), "Tt": float(fl["Tt"])}
+    ys = [float(fl[f"Y{i}"]) for i in range(ny)]
+    # 非有限・非物理の値は照合の比較 (NaN は不一致を検出しない) を素通りするので先に拒否 (codex result 2026-10-06 Minor 4)
+    import math
+    if not (math.isfinite(vals["Pt"]) and vals["Pt"] > 0 and math.isfinite(vals["Tt"]) and vals["Tt"] > 0):
+        raise ValueError(f"CFD ピン: 凍結源の入口 {name} の Pt・Tt が有限・正でない ({vals})")
+    if any(not (math.isfinite(y) and -1e-12 <= y <= 1 + 1e-12) for y in ys):
+        raise ValueError(f"CFD ピン: 凍結源の入口 {name} の組成が [0, 1] の有限値でない ({ys})")
+    href = pp.get("thermoHrefTemp")
+    if href is not None and not (math.isfinite(float(href)) and float(href) > 0):
+        raise ValueError(f"CFD ピン: 凍結源の thermoHrefTemp が有限・正でない ({href})")
+    return {"inlet": {"name": name, "kind": "inlet_Pressure", "Pt": vals["Pt"], "Tt": vals["Tt"],
+                      "Y": ys},
             "physProp": {"thermalMethod": pp.get("thermalMethod"), "species": pp.get("species"),
                          "thermoHrefTemp": pp.get("thermoHrefTemp")}}
 

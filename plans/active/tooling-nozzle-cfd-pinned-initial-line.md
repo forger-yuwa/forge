@@ -23,7 +23,7 @@ Hall の初期線は MOC の C⁻ 適合条件を積算 0.12〜0.13° 満たさ�
 
 ユーザ決定 (2026-10-05): 「CFD ピンは形状を詰める段階の選択肢」→ V4b の結果を受けて前倒し (「やって」)。
 
-**採用の根拠 (2026-10-06 訂正)**: CFD ピンは「Hall 版より全量で劣らない」ことを示して採用したのではない。V1 点上ゲート不合格・V2 許容超過・V3 不採用・V3′ 保留の履歴のうえで、2026-10-05 にユーザが試験部の |傾き|・オーバーシュート・出口 M・スロートの r″ の改善と軸の Mach 波の微増 (+0.009 %pt) のトレードオフで採用を決めた (§9)。
+**採用の根拠 (2026-10-06 訂正)**: CFD ピンは「Hall 版より全量で劣らない」ことを示して採用したのではない。V1 点上ゲート不合格・V2 許容超過・V3 不採用・V3′ 保留の履歴のうえで、2026-10-05 にユーザが試験部の |傾き|・オーバーシュート・出口 M・スロートの r″ の改善と軸の**圧力波**の微増 (+0.009 %pt; `_band_ab/wallfit_euler_ab_fit_vs_pincal_diag_fixedcoef.json` の P_wave、M_wave は +0.0015 %pt で判定保留) のトレードオフで採用を決めた (§9)。
 
 ## 2. スコープ
 
@@ -140,6 +140,7 @@ Hall の初期線は MOC の C⁻ 適合条件を積算 0.12〜0.13° 満たさ�
 | diagnose | `2026-10-06` | [`notes/reviews/2026-10-06-axis-refined-grid-diagnose.md`](../../notes/reviews/2026-10-06-axis-refined-grid-diagnose.md) (#11h 草案) | Major 5・Minor 1 | 全件採用 → §5.1 #11h 書き換え。半径方向だけで格子収束とする案・Euler で代替する案・共通 0.005 %pt を却下、出口 M は共通標本、超過時は性能不合格として設計再検討、隣接比の試算訂正 (A1 は 1.07 超) |
 | plan | `2026-10-05` | [`notes/reviews/2026-10-05-tooling-nozzle-cfd-pinned-initial-line-plan.md`](../../notes/reviews/2026-10-05-tooling-nozzle-cfd-pinned-initial-line-plan.md) | GO-with-changes, C0/M6/m2 | M1 (V3 が非劣化を示せない・評価器が傾きを判定しない) 採用 → §6 V3 を非劣化判定に、評価器に |傾き|・出口 M 規格化オーバーシュート・|出口 M−6|・non-inferior を追加。M2 (凍結入力の時間安定性・V2 の判定対象) 採用 → §6 V2a を追加 (Euler 前)。M3 (V1 点上ゲート不合格を解消してから Euler へ) **却下**: 上位判断 (diagnostician 2026-10-05) — V0 型始点では a_θ ≈ 0.05° が残る以上構造的に不成立、実害 0.6 µm (メッシュ壁の折れ線誤差の 1/10)、ユーザの評価軸に効く r″ の山は改善 (0.534→0.510)。ゲートは緩めず FAIL のまま記録し合否判定から外す。始点型の決着は verification-m6 #16。M4 (m* は等エントロピー流束の写像、出口 M の符号棄却に根拠なし) 採用 → §4.3。M5 (不適合入力の拒否) 採用 → provider に亜音速・非有限・窓外・軸未到達の拒否と node/軸対称/Euler の検査を実装 (一様 M=0.9 で拒否を確認)。M6 (x_F は可変、M″ の評価位置) 採用 → §4.2。m7 (動機の因果帰属) 採用 → §1。m8 (工程の不統一) 採用 → §2・§5 |
 | result | `2026-10-05` | [`notes/reviews/2026-10-05-tooling-nozzle-cfd-pinned-initial-line-result.md`](../../notes/reviews/2026-10-05-tooling-nozzle-cfd-pinned-initial-line-result.md) | NO-GO, C0/M5/m2 | 全件採用 (diagnostician 確認)。M1 δ_E の取り違え (delta_r_next 第 2 列は ω=0.5 緩和後) → #8 (列名分離・未緩和値で解く・記録訂正)。M2 入力契約 → #9。M3 凝縮の準定常不足 → #11 ④。M4 壁解像 FAIL を完了扱い・報告ツールの y1+ が近似 → run_0092 は暫定最終、#10・#11。M5 ランプ固定 → #9。m6 anchor_source → #9。m7 文書同期 → #12 |
+| result | `2026-10-06` | [`notes/reviews/2026-10-06-tooling-nozzle-cfd-pinned-initial-line-result.md`](../../notes/reviews/2026-10-06-tooling-nozzle-cfd-pinned-initial-line-result.md) (再レビュー) | GO-with-changes, C0/M3/m2 | 全件採用 (再現つきの具体的欠陥で、主セッションが M1 を `deltastar_loop.py:298` の位置で確認): M1 `__main__` を全定義の後へ + 回帰試験、M2 `inletProfile` ≠ 0 を拒否 + 試験、M3 未確認事項を campaign-recipe §5.1 #16〜#19 に移管・case README 更新、m4 非有限・非物理の入口値を拒否 + 試験、m5 §1 の採用根拠を「圧力波」に訂正 |
 
 ## 7. 影響範囲
 
@@ -160,7 +161,7 @@ Hall の初期線は MOC の C⁻ 適合条件を積算 0.12〜0.13° 満たさ�
 **性能検証の結果** (認定ではなく記録; 閉じる時点の文言は下記):
 > 本 plan は CFD ピン機能と case/45 の指定レシピの実装・評価を完了した。Hall 対比の全量非劣化、流れ場の残差収束、最終設計の格子独立性を証明したものではない。V1 点上ゲート不合格、V2 許容超過、V3 不採用、V3′ 保留の履歴を保持し、採用根拠は 2026-10-05 のユーザによるトレードオフ判断とする。最終 dry の Mach 波は閾値内だが DRIFTING であり、2026-10-06 のユーザ決定により未達のまま凝縮評価へ進んだ。出口コア M は格子・標本によらず目標比 −0.018〜−0.020 % で許容 ±0.02 % の下限境界上 (評価の不確かさ ±1e−4 と同程度、ユーザ決定 B)。dry・凝縮とも残差は NOT CONVERGED。凝縮の登録 4 量は指定末尾区間で STEADY。軸付近の半径方向配置に試験部の評価量 (特に軸上のオーバーシュート) が強く依存する (#11h; 生産格子の軸上 0.23 % → 細分 −0.01 %)。凍結線の格子依存、Euler 較正の G2、軸方向 (ni) の格子感度、波の準定常達成は未確認として残す。
 
-**移管** (本 plan の外へ): 軸上の M の誤差 → `verification-m6-axis-wave-mesh-su2.md` §5.1 #17; 評価格子の確定 (nj 257・cap 0.02 を既定にするか) と ni 感度 → 次の設計チェーン plan で扱う (campaign-recipe §5.1 に追記予定)。
+**移管** (本 plan の外へ; 2026-10-06 確定): 軸上の M の誤差 → `verification-m6-axis-wave-mesh-su2.md` §5.1 #17; 評価格子の確定 → `tooling-design-problem-campaign-recipe.md` §5.1 #16 (高); ni 感度 → 同 #17 (中); Mach 波の準定常達成 → 同 #18 (中); 凍結線の格子依存・Euler 較正の G2 → 同 #19 (低・延期)。
 
 - [ ] 上記を満たしたら `status: done`、`plans/accepted/` へ移動、`plans/README.md` 同期
 
@@ -227,3 +228,4 @@ Hall の初期線は MOC の C⁻ 適合条件を積算 0.12〜0.13° 満たさ�
 - `2026-10-06` — **#13 (a)(b) 実装 (implementer、未 commit)**: (a) `cfd_initial_line.py` が凍結源の実効入口 (bcondConfig の inlet_Pressure の Pt・Tt・Y{s}) と physProp (thermalMethod・species・thermoHrefTemp) を凍結源の prepare_info と使う側の問題 (spec.Pt・spec.Tt・gas、`expected_inlet_thermo`) に照合し不整合を拒否 (Tt・Pt・href 相対 1e-6、Y 1e-9 [書き手の 8 桁丸め後]、species・thermalMethod 完全一致)、照合項目を `initial_line.match.checked` に追記・熱力学ハッシュに入口 BC を追加 (`runner_axismach.design_chain` は期待値を渡す 2 行のみ)。回帰 `design/tests/run_cfd_initial_line_tests.py` に入口 Tt 1600 受理・1500 拒否ほか 8 件 (FAIL 0)。(b) `build_pptx`・`nozzle_report` の「圧力波」を「Mach 波」に改称、`nozzle_report --verdicts <json>` で量別 VERDICT・判定区間・備考を report.json と評価量の表に掲載 (無ければ「VERDICT 未指定」)、`procedures/nozzle-design-outputs.md` 同期。run_0117/0118 の report/ 再生成は未実施 (主セッション)。
 - `2026-10-06` — #13 (c): §1 に採用根拠の訂正、§4.0 に現行の生産レシピの集約 (+3.770e−4・Euler 参照 run_0114・生産格子・評価格子の暫定候補)、§8 完了条件を「実装完了 / 採用判断 / 性能検証の結果」に分けて書き直し (codex 推奨文言に出口 M・軸付近の格子依存を追記)。
 - `2026-10-06` — **報告の再生成** (#13 b の正式版): `nozzle_report --verdicts` (判定の出典 `case/45.isobutane_m6_d155/_band_ab/verdicts_run_0117.json`・`verdicts_run_0118.json`: 波 η0.1 DRIFTING + ユーザ決定 A、出口 M STEADY + ユーザ決定 B の下限境界上、凝縮 4 量 STEADY ほか) → `case/45.isobutane_m6_d155/run_0117_ns_recal_final_ext/report/run_0117_ns_recal_final_ext_report.pptx` (14 枚)・`run_0118_ns_recal_final_cond/report/run_0118_ns_recal_final_cond_report.pptx` (15 枚)、表記は Mach 波 (ローカル)。
+- `2026-10-06` — **codex result 段の再レビュー** (GO-with-changes, C0/M3/m2) を全件反映: `deltastar_loop.py` の `__main__` を全関数定義の後へ (CLI で `_design_report` が NameError になっていた; 回帰試験追加)、CFD ピン provider が `inletProfile` ≠ 0 と非有限・非物理の入口値を拒否 (試験 3 件追加、`run_cfd_initial_line_tests.py` FAIL 0)、未確認事項を `tooling-design-problem-campaign-recipe.md` §5.1 #16〜#19 に移管、case README の run 一覧を最終判定に更新、§1 の採用根拠を「軸の圧力波 +0.009 %pt」に訂正 (主セッションの一括改称の誤り)。

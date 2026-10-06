@@ -242,7 +242,11 @@ if (run / "res_6000.h5").exists():
             ("species の lump 分率違い", None,
              lambda c: c["physProp"]["species"][0]["lump"].update({"CO2": 0.13}), "physProp.species"),
             ("入口が inlet_Pressure でない", lambda b: b["inlet"].update({"kind": "inlet_uniformVelocity"}), None,
-             "inlet_Pressure")):
+             "inlet_Pressure"),
+            # codex result 2026-10-06: 入口分布 (inletProfile) と非有限値
+            ("入口分布 inletProfile 1", lambda b: b["inlet"].update({"ints": {"inletProfile": 1}}), None, "inletProfile"),
+            ("入口 Tt NaN", lambda b: b["inlet"]["floats"].update({"Tt": float("nan")}), None, "有限"),
+            ("入口 Pt 負", lambda b: b["inlet"]["floats"].update({"Pt": -1.0}), None, "有限")):
         td = _src_copy(edit_bc, edit_cfg)
         try:
             _chain_with(td)
@@ -259,6 +263,14 @@ if (run / "res_6000.h5").exists():
               "prepare_info" in str(e))
 else:
     print("skip: res_6000.h5 が無いので design_chain (cfd) と凍結入力契約の検査を省略")
+
+# codex result 2026-10-06 Major 1: CLI の __main__ が全関数定義より後にあること (前にあると _design_report 未定義で NameError)
+import ast as _ast  # noqa: E402
+_src = (Path(__file__).resolve().parents[1] / "forge_design" / "feedback" / "deltastar_loop.py").read_text()
+_body = _ast.parse(_src).body
+_main_idx = [i for i, n in enumerate(_body) if isinstance(n, _ast.If) and "__main__" in _ast.unparse(n.test)]
+_last_def = max(i for i, n in enumerate(_body) if isinstance(n, (_ast.FunctionDef, _ast.ClassDef)))
+check("deltastar_loop: `if __name__ == \"__main__\"` が全関数定義の後 (CLI から _design_report に届く)", bool(_main_idx) and _main_idx[0] > _last_def)
 
 print(json.dumps(out, indent=1))
 print("FAIL 件数:", FAIL)
