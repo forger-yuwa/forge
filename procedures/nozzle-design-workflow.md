@@ -99,7 +99,7 @@ M6 (case/45) で実際に通した順番。各段の「何で判定するか」�
      (粗い Euler 格子で決めると細分格子の NS で出口 M が約 −0.0008 ずれる; plan §5.1 #11f)。
    - `pw_ramp` — 縮流部側で δ_r をなめらかに入れる区間 (case/45 は [−11, −6])。
    - `wall_fit_mono_r2: [0.0, 1.5]` — joint 壁のスロート直後の r″ の山を消す単調拘束 (case/45 の生産、2026-10-07)。
-     Euler・NS・凝縮で旧壁との差は許容幅内 (plan `tooling-nozzle-throat-monotone-r2`)。
+     Euler は実務判定 (全量で 差 + 2SE ≤ 許容幅) に合格、dry NS は登録したゲートに合格、凝縮 NS は 4 量の準定常に合格。新旧の場の差は参考値 (plan `tooling-nozzle-throat-monotone-r2`)。
    - `deltastar_initializer: {model: contur, a_crocco: 1.0, cf_scale: <k_f>, n_scale: 1.0}` — C2 で較正した k_f を YAML に書く。
      `deltastar_loop --init-integral` も読む (書かないと k_f = 1 の物理壁になる)。最終 NS の数値レシピ (CFL 1・60000 step など) は
      YAML ではなく投入スクリプトが持つ (case/45 の手本 `run_mono_ns_chain.sh`、延長 `run_mono_ns_ext.sh`)。
