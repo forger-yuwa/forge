@@ -1,6 +1,6 @@
 """plan tooling-nozzle-throat-monotone-r2 §6 E′ の実務判定 (ユーザ決定 2026-10-06「まずは 1 で」)。
 腕 A (現行壁) run_0140〜0142 と腕 B (単調壁) run_0143〜0145 の評価量を、本段 step 6000〜18000 の 13 枚の時間平均で比べる。
-入力: 各 run の wallfit_series_e3.csv (eval_wallfit_euler.py --e3 が書く)。予備 A/B の α−β の差は wallfit_series_icab.csv から併記する。
+入力: 各 run の wallfit_series_e3.csv (eval_wallfit_euler.py --e3 が書く)。予備 A/B の β−α の差 (番号写像 − 最近傍)は wallfit_series_icab.csv から併記する。
 統計 (§6 E′):
   run i の窓平均 m_i、時間変動の標準誤差 s_i = sd_i/√n (自己相関は補正しない)。
   腕の平均 M = mean(m_i)、腕の標準誤差 SE = max(sd(m_i)/√3, √(Σ s_i²)/3)。
@@ -51,6 +51,25 @@ def series(run: str, name: str) -> dict:
     return out
 
 
+def spline_shape_checks(info: dict, arm: str) -> list:
+    """保存された当てはめ後 spline (prepare_info の wall_fit.spline) 自体の形状検査 (2 回目の result 段レビュー M1)。
+    腕 B: 形状ゲート S1 と同じ形状用許容差で、[0, 1.5] の r‴ 最大 ≤ 1e-6 かつ r″ の最大増加 ≤ 1e-7。
+    腕 A: 単調拘束が掛かっていない旧壁であること (r″ の最大増加 > 1e-4; 旧壁は 0.0102)。"""
+    from scipy.interpolate import BSpline
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "design"))
+    from forge_design.geometry.wall_axismach import r3_piecewise_exact
+    sp = (info.get("wall_fit") or {}).get("spline")
+    if not sp:
+        return ["prepare_info の wall_fit.spline が無い (形状を検査できない)"]
+    spl = BSpline(np.asarray(sp["t"], dtype=float), np.asarray(sp["c"], dtype=float), int(sp["k"]))
+    sh = r3_piecewise_exact(spl, None, 0.0, 1.5)
+    if arm == "B" and not (sh["r3_max"] <= 1e-6 and sh["r2_max_increase"] <= 1e-7):
+        return [f"腕 B の保存 spline が単調でない (r‴ 最大 {sh['r3_max']:.3g}、r″ の最大増加 {sh['r2_max_increase']:.3g})"]
+    if arm == "A" and not sh["r2_max_increase"] > 1e-4:
+        return [f"腕 A の保存 spline が旧壁に見えない (r″ の最大増加 {sh['r2_max_increase']:.3g} ≤ 1e-4)"]
+    return []
+
+
 def preconditions() -> tuple:
     """§冒頭の前提検査。戻り値 (不成立の一覧 {run: [理由]}, 例外の記録 [文])。証拠が読めないこと自体を不成立にする。"""
     from throat_mono_judge import SEGMENT_VERDICT_FILE, parse_segment_verdict, mono_r2_matches
@@ -75,8 +94,18 @@ def preconditions() -> tuple:
                 ev = wall_evidence(rd, C / ARMS["B" if arm == "A" else "A"][k])
                 if ev.get("status") != "consistent":
                     why.append(f"壁の証拠が {ev.get('status')} ({ev.get('reason', '')})")
-                if (ev.get("vs_other") or {}).get("status") != "ok":
-                    why.append(f"他腕との壁の照合が {(ev.get('vs_other') or {}).get('status')}")
+                vo = ev.get("vs_other") or {}
+                if vo.get("status") != "ok":
+                    why.append(f"他腕との壁の照合が {vo.get('status')}")
+                else:
+                    # 2 回目の result 段レビュー M1: 同じ壁を両腕に使っても照合は ok になるので、見分けられる節点があり、
+                    # それがすべて自腕の当てはめに一致することを必須にする
+                    nd, nown = int(vo.get("n_discriminable", 0)), int(vo.get("n_discriminable_matching_own", -1))
+                    if nd <= 0:
+                        why.append("他腕と見分けられる壁節点が無い (両腕が同じ壁の可能性)")
+                    elif nown != nd:
+                        why.append(f"見分けられる壁節点 {nd} のうち自腕の当てはめに一致するのは {nown} (壁の取り違えの可能性)")
+                why += spline_shape_checks(info, arm)
                 if arm == "B":
                     rec = json.loads((rd / "IC_MAP.json").read_text())
                     if rec.get("VERDICT") != "OK" or rec.get("mode") != "index":
@@ -141,7 +170,7 @@ def main():
     out = dict(plan="plans/active/tooling-nozzle-throat-monotone-r2.md §6 E′", window_steps=WIN, n_per_run=13,
                arms=ARMS, icab=ICAB, rows=rows, overall=overall, preconditions_failed=pre_bad, precondition_exceptions=pre_exc,
                limits=["自己相関は補正していない", "窓の開始 6000 は予備 A/B の時系列を見た後に決めた",
-                       "IC 写像による差 (α−β) は Δq/10 の精度では除外できていない (表の ic 列)", "軸 (η0) の量は判定対象外"])
+                       "IC 写像による差 (β−α = 番号写像 − 最近傍) は Δq/10 の精度では除外できていない (表の ic 列)", "軸 (η0) の量は判定対象外"])
     (C / "_band_ab").mkdir(exist_ok=True)
     (C / "_band_ab/throat_mono_practical_eval.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
     print(f"{'量':28s} {'Δq':>8s} {'A 平均':>11s} {'B 平均':>11s} {'D=B−A':>10s} {'2·SE_D':>9s} {'(D+2SE)/Δq':>10s} {'IC β−α':>10s} {'検出':>4s}  判定")
