@@ -22,7 +22,7 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 
 ## 判断の分かれ目
 
-- **既存ノズルで条件 (Pt・Tt・組成・背圧) だけ変えたい** → 正本 §3a: 既存 run の `nozzle.h5` を再利用し `bcondConfig.yaml` を書き換える。
+- **既存ノズルで条件 (Pt・Tt・H2O 分率・背圧) だけ変えたい** → 正本 §3a: `solver_density_cuda/tools/rerun_conditions.py REF NEW ...` (形状固定、forge は起動しない)。Pt を変えるなら `--Ps`/`--keep-Ps` 必須、回し方は `RERUN_CONDITIONS.json` の `recommended_stages` (Pt 変更は full + 本段 cfl 1 + `--scale-ic pt` が暫定推奨)。
   **problem YAML の spec/gas を変えて runner/deltastar_loop に通すと壁が作り直される** (それは §1・§2 の設計作業)。
   組成の lump を変えると化学種の定義が変わり restart_field が拒否する → convert_species_field か等エントロピー初期場。
 

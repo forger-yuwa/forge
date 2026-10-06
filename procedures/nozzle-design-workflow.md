@@ -123,32 +123,27 @@ M6 (case/45) で実際に通した順番。各段の「何で判定するか」�
 `deltastar_loop` に渡すと、`design_chain` が MOC と δ 補正をやり直し、**壁そのものが変わる** (= 作り直し、§1・§2)。
 既にあるノズルで条件だけ変えたいときは、YAML を通さず run ディレクトリの config を直接書き換える (3a)。
 
-### 3a. 形状は固定、入口条件・背圧・組成だけ変えて回す (よくある用途)
+### 3a. 形状は固定、入口条件・背圧・入口分率だけ変えて回す (よくある用途)
 
-既存 run の `nozzle.h5` には物理壁の格子がそのまま入っているので、これを再利用する。
+ツール **`solver_density_cuda/tools/rerun_conditions.py`** を使う (plan [`tooling-rerun-conditions.md`](../plans/active/tooling-rerun-conditions.md)、仕様は `methods/design/overview.md`「既存 run の条件変更」)。
+既存 run の `nozzle.h5` (物理壁の格子) を再利用し、bcond の floats だけを書き換え、参照 run の最終場を初期場に入れ、変更点を `RERUN_CONDITIONS.json` に残す。**forge は起動しない。**
 
-1. **参照 run を選ぶ** — 回したい形状の最終 run (例: `case/45.isobutane_m6_d155/run_0116_ns_recal_final`)。
-   NS なら NS の run、Euler なら Euler の run (壁が違う: Euler は設計壁、NS は物理壁 = 設計壁 + δ_r)。
-2. **新しい run ディレクトリに入力だけ複製する** — `nozzle.h5`・`nozzle.xmf`・`bcondConfig.yaml`・`solverConfig.yaml`・
-   `species_meta.yaml`・`probe.yaml`・`prepare_info.json`・`resolved_species_*.yaml`・`wall_*.csv`・`MESH_QUALITY.txt`。
-   `res_*`・ログ・VERDICT は持ち込まない (既存 run を上書きしない)。
-3. **条件を書き換える** — `bcondConfig.yaml`:
-   - 入口 (`inlet_Pressure`): `Pt` [Pa]、`Tt` [K]、質量分率 `Y0` (乾き成分 MIXDRY)・`Y1` (H2O)、乱流の `k`・`omega`。
-   - 出口 (`outlet_statPress`): 背圧 `Ps` (超音速出口では効かない; 起動時の逆流用 `Pt`・`Tt` と合わせて)。
-   - 乾き成分の中身 (CO2/O2/N2 の比) を変えるときだけ `solverConfig.yaml` の `physProp.species` の `lump` を書き換える
-     (化学種の定義が変わる → 手順 4 の注意)。
-4. **初期場を入れる** —
-   - 化学種の定義が同じ (Pt・Tt・Y0/Y1 だけ変えた): `python3 solver_density_cuda/tools/restart_field.py 参照run/res_最終.h5 新run/nozzle.h5`
-     (参照の収束場から始める。条件の変更が大きいときは段階起動を併用)。
-   - 化学種の定義が変わる (lump の成分比・種の追加): `convert_species_field.py --mode conserve` で変換するか、
-     等エントロピー初期場から段階起動 (restart_field は拒否する)。
-5. **回す** — NS: `run_staged_ns(run, stages="full")` (段階起動; 細分格子は本段 cfl 1)、条件の変更が小さく参照場から続けるなら
-   `stages="none"`。Euler: `run_staged(run, cfl_main=2.0, stages="soft")`。どちらも `design/forge_design/evaluate/runner_axismach.py`。
-   step 数・出力間隔・CFL は `solverConfig.yaml` の `time.last.nStepOuter`・`outStepInterval`・`deltaT.cfl/cfl_pseudo` で決める。
-6. **判定と報告** — `check_convergence.py`・`check_quasisteady.py` (報告する量の時系列)・NS は `check_wall_resolution.py`
-   (Pt・Tt が変わると Re と y1+ が変わる — 再確認する)。報告は `nozzle_report` (Euler 参照は同じ形状の Euler run)。
-   **注意**: 壁は元の条件で設計したもの。条件を変えると境界層の厚さが変わり、出口 M・試験部の一様性は設計値からずれる
-   (それを見るのがこの計算の目的のことが多い)。そのずれを壁に返したいなら §2 の作り直し。
+```
+python3 solver_density_cuda/tools/rerun_conditions.py REF_RUN NEW_RUN [--Pt P --Ps P | --keep-Ps] [--Tt T] [--Y H2O=0.09] \
+    [--Tw T | --keep-Tw] [--scale-ic pt] [--steps N --out-interval N --cfl C] [--dry-run]
+```
+
+- 対応する入力: 単一の `inlet_Pressure` (Y{s} 形式、inletProfile なし)・`outlet_statPress`・`wall`/`wall_isothermal`/`slip`・`axis`、`nozzle.h5` を mesh/value に使う run。外れれば作る前に止まる。
+- **Pt を変えるときは背圧の指定 (`--Ps` か `--keep-Ps`) が必須**。node の出口は壁際の列が常に背圧を見るので、Pt だけ下げると出口の壁際から崩れる。
+  ツールは参照の出口断面の静圧に対する `Ps/(f·P_exit_ref)` を表示する (相似にするなら Ps も同じ比で)。
+- 乾き成分 (lump) の組成変更は v1 では止まる (化学種の定義が変わり、どの引き継ぎ経路も拒否する)。H2O 分率 (`--Y H2O=...`) は可。
+- 入口の k・ω は変えない (指定時のみ)。等温壁で Tt を変えるときは `--Tw` か `--keep-Tw` を明示する。
+- **回し方** (`RERUN_CONDITIONS.json` の `recommended_stages` に従う): 条件の変更なし → `run_staged_ns(run, stages="none")`; 条件を変えた → `stages="full"` (段階起動);
+  **Pt を変えた → full + 本段 cfl 1 (`--cfl 1.0 --steps 60000`)、`--scale-ic pt` (保存量を Pt 比で一様スケールする初期場変換) を推奨 — 暫定 (2026-10-06、同条件確認中)**。
+  粗格子の Pt 0.8 倍は、段階起動でも本段 cfl 5 では発散した (plan §6 (ii′))。Tt・H2O を変えたときは本段の量の整定に時間がかかる (確認中、plan §6 (iv″))。
+- **Euler 参照**: δ_E の抽出や流量比には、同じ条件にした Euler の rerun を対で作る (旧条件の Euler 参照だと δ が数 % 動く)。
+- 判定: `check_convergence.py` (`--segment` で本段だけ)・`check_quasisteady.py --series-csv` (報告する量)・NS は `check_wall_resolution.py` (Pt・Tt が変わると Re と y1+ が変わる)。
+- 注意: 壁は元の条件で設計したもの。条件を変えると境界層の厚さが変わり、出口 M・試験部の一様性は設計値からずれる (それを見るのがこの計算の目的のことが多い)。ずれを壁に返したいなら §2 の作り直し。
 
 ### 3b. 既存の problem YAML から同じ設計を回し直す (作り直しを含む)
 
