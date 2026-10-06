@@ -13,6 +13,7 @@
 #include <common/stringUtil.hpp>
 #include "common/vectorUtil.hpp"
 #include "variables.hpp"
+#include "mesh/memlog.hpp"
 
 #include <sstream>
 #include <fstream>
@@ -277,6 +278,41 @@ public:
 
     elementTypeMap eleTypeMap;
 
+    // FORGE_MEMLOG=1 の工程別メモリ計測 (memlog.hpp) で出す主要コンテナの推定バイト (計測専用。挙動に影響しない)。
+    std::string memSummary() const
+    {
+        using namespace memlog;
+        std::ostringstream os;
+        auto nodeIn  = [](const node& n)  { return innerVec(n.iCells) + innerVec(n.iPlanes) + innerVec(n.coords); };
+        auto planeIn = [](const plane& p) { return innerVec(p.iNodes) + innerVec(p.iCells) + innerVec(p.surfVect) + innerVec(p.centCoords); };
+        auto cellIn  = [](const cell& c)  { return innerVec(c.iNodes) + innerVec(c.iPlanes) + innerVec(c.iPlanesDir) + innerVec(c.centCoords); };
+        os << item("nodes<node>", nodes.size(), nestedBytes(nodes, nodeIn))
+           << " " << item("planes<plane>", planes.size(), nestedBytes(planes, planeIn))
+           << " " << item("cells<cell>", cells.size(), nestedBytes(cells, cellIn));
+        if (!elements_summary.empty()) {
+            size_t b = 0, n = 0;
+            for (const auto& e : elements_summary) {
+                b += heapChunk(sizeof(elementsOfEntity) + 16) + heapChunk(e.elements.capacity() * sizeof(element));
+                for (const auto& el : e.elements) b += innerVec(el.iNodes);
+                n += e.elements.size();
+            }
+            os << " " << item("elements_summary<element>", n, b);
+        }
+        const size_t dualB = flatBytes(dualVolume) + flatBytes(dualCentroid) + flatBytes(dualFaceCells) + flatBytes(dualFaceVect)
+                           + flatBytes(dualFaceArea) + flatBytes(dualFaceCent) + flatBytes(dualBnodeId) + flatBytes(dualBnodeVect)
+                           + flatBytes(dualBnodeCent);
+        if (dualB > 0) os << " " << item("dual*(flat)", dualFaceArea.size(), dualB);
+        if (!vizCONNE.empty()) os << " " << item("vizCONNE", vizCONNE.size(), flatBytes(vizCONNE));
+        size_t vb = 0, nvb = 0;
+        for (const auto& bc : bconds) {
+            vb += nestedBytes(bc.vizBfaceNodes, [](const std::vector<geom_int>& f) { return innerVec(f); });
+            vb += flatBytes(bc.iPlanes) + flatBytes(bc.iCells) + flatBytes(bc.iBPlanes);
+            nvb += bc.vizBfaceNodes.size();
+        }
+        os << " " << item("bconds(iPlanes,iCells,vizBface)", nvb, vb);
+        return os.str();
+    }
+
     mesh getMesh()
     {
         mesh msh = mesh(this->nNodes, this->nPlanes, this->nCells, this->nNormalPlanes, 
@@ -306,12 +342,15 @@ public:
             }
         }
         this->readNodes(inputFile);
+        MEMLOG("readNodes 後", memSummary());
         this->readElements(inputFile);
         if (renumberRCM) this->renumberNodesRCM();
+        MEMLOG("readElements(+RCM) 後", memSummary());
 
         // *** Make Grid ***
         cout << "makeMesh in gmsh Reader\n";
         this->makeMesh(); // nodes & planes & cells & bconds are made.
+        MEMLOG("makeMesh 後", memSummary());
 
     }
 
@@ -643,6 +682,8 @@ public:
             }
         }
 
+        MEMLOG("makeMesh: cells 構築後", memSummary());
+
         vector<int> cellCheckedFlag(cells.size());
 
         for (auto& cCF : cellCheckedFlag) {
@@ -757,6 +798,7 @@ public:
         this->nPlanes = nPlanes_temp;
 
         cout << "numPlanes " << this->nPlanes << endl;
+        MEMLOG("makeMesh: planes 生成後 (cellCheckedFlag 生存中)", memSummary());
 
         // set planes around each node.
         geom_int i = 0;
@@ -768,6 +810,8 @@ public:
             }
             i++;
         }
+
+        MEMLOG("makeMesh: node.iPlanes 設定後", memSummary());
 
         cout << "make boundary" << endl;
 
@@ -803,6 +847,7 @@ public:
         // 境界ノードマップを作り終えたら elements_summary は以降不要。大規模メッシュでは
         // 全要素のノードリストを保持しており大きいので解放する (writeInputH5 まで保持しない)。
         std::list<elementsOfEntity>().swap(this->elements_summary);
+        MEMLOG("makeMesh: elements_summary 解放後", memSummary() + " " + memlog::item("bcellMap_physTag_nodes(nested)", nBPlanes_temp, [&]{ size_t b=0; for (const auto& kv : bcellMap_physTag_nodes) b += memlog::nestedBytes(kv.second, [](const vector<geom_int>& f){ return memlog::innerVec(f); }); return b; }()));
 
         this->nBPlanes = nBPlanes_temp;
         this->nNormalPlanes = this->nPlanes - this->nBPlanes;
@@ -944,6 +989,8 @@ public:
             bconds.push_back(bcond_temp);
         }
 
+        MEMLOG("makeMesh: plane 並べ替え・bconds 構築後", memSummary());
+
         // iPlane direction for surface of cells
         i = 0;
         for (auto &pln : planes)
@@ -1056,6 +1103,7 @@ public:
             pln.centCoords[2] = pln.centCoords[2]/pln.iNodes.size();
         }
 
+        MEMLOG("makeMesh: 面ベクトル・面重心後", memSummary());
         cout << "calculate volume" << endl;
         // ------------------------
         // *** calculate volume ***
@@ -1848,10 +1896,12 @@ public:
                 const auto& cn = cells[ic].iNodes;
                 for (const auto& e : edgesOf(cells[ic].ieleType)) edgeKeys.push_back(packKey(cn[e[0]], cn[e[1]]));
             }
+            MEMLOG("dual3D: 全要素エッジキー収集後 (sort 前)", memlog::item("edgeKeys<u64>", edgeKeys.size(), memlog::flatBytes(edgeKeys)) + " " + memSummary());
             std::sort(edgeKeys.begin(), edgeKeys.end());
             edgeKeys.erase(std::unique(edgeKeys.begin(), edgeKeys.end()), edgeKeys.end());
         }
         std::vector<DFA> dfa(edgeKeys.size());
+        MEMLOG("dual3D: unique 後・dfa 確保後", memlog::item("edgeKeys<u64>(cap)", edgeKeys.size(), memlog::flatBytes(edgeKeys)) + " " + memlog::item("dfa<DFA>", dfa.size(), memlog::flatBytes(dfa)) + " " + memSummary());
 
         for (geom_int ic = 0; ic < this->nCells; ++ic)
         {
@@ -1920,6 +1970,8 @@ public:
             }
         }
 
+        MEMLOG("dual3D: 双対面・双対体積の集約後", memSummary());
+
         // ---- 双対面配列へ平坦化 (キー昇順 = 決定的、旧 std::map と同順) ----
         const geom_int nDF = (geom_int)edgeKeys.size();
         dualFaceCells.assign(nDF * 2, -1);
@@ -1946,9 +1998,11 @@ public:
                     dualFaceCent[3*idf+2] = 0.5*(nodes[keyA].coords[2]+nodes[keyB].coords[2]);
                 }
             }
+            MEMLOG("dual3D: 双対面配列へ平坦化後 (dfa/edgeKeys 解放前)", memSummary());
             std::vector<DFA>().swap(dfa);
             std::vector<unsigned long long>().swap(edgeKeys);
         }
+        MEMLOG("dual3D: dfa/edgeKeys 解放後", memSummary());
 
         // 面積加重重心を正規化 (= 双対 CV の FV セル中心)。
         for (geom_int in = 0; in < nN; ++in) {
@@ -2037,6 +2091,7 @@ public:
                 }
             }
         }
+        MEMLOG("dual3D: 境界半割面の集約後 (halfByOwner/hcentByOwner/bnodeAccum/wallOwnerOf 生存中)", [&]{ size_t nh=0; for (const auto& m : halfByOwner) nh += m.size(); return memlog::item("halfByOwner+hcentByOwner(map節点)", nh, nh * (memlog::heapChunk(32+4+24) + memlog::heapChunk(32+4+32))) + " " + memlog::item("bnodeAccum<double>", bnodeAccum.size(), memlog::flatBytes(bnodeAccum)) + " " + memlog::item("wallOwnerOf", wallOwnerOf.size(), memlog::flatBytes(wallOwnerOf)); }() + " " + memSummary());
         if (inletCornerWall)
             std::cout << "[buildMedianDual3D] nodeInletCornerWall: " << nCornerReassigned
                       << " inlet half-faces at wall nodes reassigned to wall bconds\n";
@@ -2082,6 +2137,7 @@ public:
         }
         for (geom_int in = 0; in < nN; ++in)
             for (int d = 0; d < 3; ++d) clos[3*in+d] += bnodeAccum[3*in+d];
+        MEMLOG("dual3D: 閉性集計後 (clos 生存中)", memlog::item("clos<double>", clos.size(), memlog::flatBytes(clos)) + " " + memSummary());
 
         double maxClos = 0.0, refArea = 0.0;
         for (geom_int ip = 0; ip < nDF; ++ip) refArea = std::max(refArea, (double)dualFaceArea[ip]);
@@ -2152,6 +2208,7 @@ public:
             exit(EXIT_FAILURE);
         }
 
+        MEMLOG("dual3D: 終了直前", memSummary());
         dualBuilt = true;
         cout << "[buildMedianDual] done (3D). nNodes(CV)=" << nN << " nDualFaces=" << nDF
              << " nBHalf=" << dualBnodeId.size() << "\n";
@@ -2190,6 +2247,7 @@ public:
                 bc.vizBfaceNodes.push_back(this->planes[ip].iNodes);
         }
 
+        MEMLOG("replace: vizBfaceNodes 退避後", memSummary());
         const geom_int nN = this->nNodes;
         const geom_int nDualInternal = (geom_int)this->dualFaceArea.size();
         const geom_int nBHalf        = (geom_int)this->dualBnodeId.size();
@@ -2216,6 +2274,8 @@ public:
             for (const geom_int nod : cel.iNodes) this->vizCONNE.push_back(nod);
         }
 
+        MEMLOG("replace: vizCONNE 退避後", memSummary());
+
         // ---- 新 cells (CV = ノード) ----
         std::vector<cell> newCells(nN);
         for (geom_int i = 0; i < nN; ++i) {
@@ -2231,6 +2291,8 @@ public:
             newCells[i].regionId    = 0;
             // iPlanes/iPlanesDir は下で充填
         }
+
+        MEMLOG("replace: newCells 構築後", memlog::item("newCells<cell>", newCells.size(), memlog::nestedBytes(newCells, [](const cell& c){ return memlog::innerVec(c.iNodes)+memlog::innerVec(c.iPlanes)+memlog::innerVec(c.iPlanesDir)+memlog::innerVec(c.centCoords); })) + " " + memSummary());
 
         // ---- 新 planes: 内部双対面 [0,nDualInternal) + 境界半割面 [nDualInternal, +nBHalf) ----
         std::vector<plane> newPlanes;
@@ -2263,6 +2325,8 @@ public:
             newPlanes.push_back(std::move(p));
         }
 
+        MEMLOG("replace: newPlanes 構築後 (旧 cells/planes と併存)", memlog::item("newPlanes<plane>", newPlanes.size(), memlog::nestedBytes(newPlanes, [](const plane& p){ return memlog::innerVec(p.iNodes)+memlog::innerVec(p.iCells)+memlog::innerVec(p.surfVect)+memlog::innerVec(p.centCoords); })) + " " + memSummary());
+
         this->nNormalPlanes = nDualInternal;
         this->nBPlanes      = nBHalf;
         this->nPlanes       = nDualInternal + nBHalf;
@@ -2278,8 +2342,10 @@ public:
             }
         }
 
+        MEMLOG("replace: newCells.iPlanes 充填後 (旧 cells/planes と併存)", memSummary());
         this->cells  = std::move(newCells);
         this->planes = std::move(newPlanes);
+        MEMLOG("replace: 新 cells/planes へ move 後 (旧を解放)", memSummary());
 
         // ---- bconds を双対境界半割面で更新 (bcondKind / physID / 入力値は保持) ----
         const geom_int nBc = (geom_int)this->bconds.size();
@@ -2305,6 +2371,8 @@ public:
                 this->bconds[ib].iBPlanes.push_back(gp - this->nNormalPlanes);
             }
         }
+
+        MEMLOG("replace: bconds 更新後", memSummary());
 
         // 双対は primary に昇格したので /DUAL の重複出力は不要にする
         dualBuilt = false;
@@ -2332,6 +2400,8 @@ public:
             cerr << "write hdf5 name is wrong. " << outFileName << endl;
             exit(EXIT_FAILURE);
         }
+
+        MEMLOG("write: 入口 (var は値渡しの複製)", memlog::item("var.c(全変数)", var.c.size(), [&]{ size_t b=0; for (const auto& kv : var.c) b += memlog::flatBytes(kv.second); return b; }()));
 
         File file(outFileName, File::ReadWrite | File::Truncate);
 
@@ -2392,6 +2462,7 @@ public:
             }
         }
         file.createDataSet("/MESH/CONNE",CONNE);
+        MEMLOG("write: COORD・CONNE 書出し後", memlog::item("COORD", COORD.size(), memlog::flatBytes(COORD)) + " " + memlog::item("CONNE", CONNE.size(), memlog::flatBytes(CONNE)));
 
         // write planes
         vector<geom_int> planes_struct;
@@ -2424,6 +2495,7 @@ public:
             centCoords.push_back(pln.centCoords[1]);
             centCoords.push_back(pln.centCoords[2]);
         }
+        MEMLOG("write: planes 平坦配列構築後", memlog::item("planes_struct", planes_struct.size(), memlog::flatBytes(planes_struct)) + " " + memlog::item("surfVect+surfArea+centCoords", surfArea.size(), memlog::flatBytes(surfVect)+memlog::flatBytes(surfArea)+memlog::flatBytes(centCoords)));
         file.createDataSet("/PLANES/STRUCT",planes_struct);
         file.createDataSet("/PLANES/surfVect",surfVect);
         file.createDataSet("/PLANES/surfArea",surfArea);
@@ -2463,6 +2535,7 @@ public:
             centCoords2.push_back(cel.centCoords[1]);
             centCoords2.push_back(cel.centCoords[2]);
         }
+        MEMLOG("write: cells 平坦配列構築後", memlog::item("cells_struct", cells_struct.size(), memlog::flatBytes(cells_struct)) + " " + memlog::item("volume+centCoords2", volume.size(), memlog::flatBytes(volume)+memlog::flatBytes(centCoords2)));
         file.createDataSet("/CELLS/STRUCT",cells_struct);
         file.createDataSet("/CELLS/volume",volume);
         file.createDataSet("/CELLS/centCoords",centCoords2);
@@ -2569,6 +2642,8 @@ public:
                 file.createDataSet("/BCONDS/"+oss.str()+"/VALUE/"+name , bvar.second);
             }
         }
+
+        MEMLOG("write: h5 全データセット作成後", std::string());
 
         // ------------
         // *** XDMF ***
