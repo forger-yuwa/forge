@@ -827,6 +827,7 @@ MOC カーネル (`pm_nu`/`pm_mach`/`_mass_flux_density`/`area_ratio_isentropic`
 RANS 軸 M の law 側帰還 / 粘性の出口一様性 (BL 除外) 評価 / 出口 $\varepsilon_M$ の差の原因究明 / MOC の 2 次精度化 (軸上の解析極限
 $\partial\theta/\partial r|_{r=0}=-\frac12 d\ln F/dx$・適合式の Simpson 化・軸点の非一様配置) /
 `AXIS_LIMIT_FRAC` のしきい値不要化。
+軸上の解析極限と予測修正の収束は plan [discretization-moc-axis-limit-and-corrector](../../plans/active/discretization-moc-axis-limit-and-corrector.md) で着手 (2026-10-07)。軸上の極限は気体モデルの ν(M) を使い $\theta_r=\tfrac12\sqrt{M^2-1}\,d\nu/dx$ と書ける (比熱一定なら上の $-\tfrac12 d\ln F/dx$ と同じ)。
 なお **ΔM の支配残差 (x≈6.2 の谷) は壁の抽出法に依存しない** ため、
 これ以上は逆 MOC ではなくアンカー/軸 Mach law 側の課題。
 
