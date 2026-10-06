@@ -5,7 +5,8 @@
   run i の窓平均 m_i、時間変動の標準誤差 s_i = sd_i/√n (自己相関は補正しない)。
   腕の平均 M = mean(m_i)、腕の標準誤差 SE = max(sd(m_i)/√3, √(Σ s_i²)/3)。
   D = M_B − M_A、SE_D = √(SE_A² + SE_B²)。
-判定 (大きいほど悪い量の片側): D + 2·SE_D ≤ Δq → 「差は検出できず許容幅未満」/ D − 2·SE_D ≥ Δq → 「悪化」/ それ以外 → 保留 (ユーザ判断)。
+判定 (大きいほど悪い量の片側): D + 2·SE_D ≤ Δq → 「許容幅未満」/ D − 2·SE_D ≥ Δq → 「悪化」/ それ以外 → 保留 (ユーザ判断)。
+  別欄で差の検出の有無 (|D| > 2·SE_D なら「検出」) を記録する。判定は許容幅で行い、検出の有無は判定に使わない。
 usage: python3 throat_mono_practical_eval.py [case_dir]   → _band_ab/throat_mono_practical_eval.json と標準出力の表
 """
 import csv
@@ -63,18 +64,19 @@ def main():
         if k in DQ:
             dq = DQ[k]
             if D + 2 * SE <= dq:
-                v = "差は検出できず許容幅未満"
+                v = "許容幅未満"
             elif D - 2 * SE >= dq:
                 v = "悪化"
             else:
                 v = "保留"
-            row.update(dq=dq, verdict=v, D_plus_2SE_over_dq=float((D + 2 * SE) / dq))
+            row.update(dq=dq, verdict=v, D_plus_2SE_over_dq=float((D + 2 * SE) / dq), detected=bool(abs(D) > 2 * SE))
             verdicts[k] = v
         else:
             row.update(verdict="記録のみ")
         rows.append(row)
-    if all(v == "差は検出できず許容幅未満" for v in verdicts.values()):
-        overall = "単調壁を候補形状として採用 (Euler で差は Δq 未満、揺れの範囲で検出できず)"
+    if all(v == "許容幅未満" for v in verdicts.values()):
+        det = [r["qty"] for r in rows if r.get("detected")]
+        overall = ("単調壁を候補形状として採用 (Euler で全量の D + 2·SE ≤ Δq)。差を検出した量: " + (", ".join(det) if det else "なし"))
     elif any(v == "悪化" for v in verdicts.values()):
         overall = "不採用 (悪化した量がある)"
     else:
@@ -85,10 +87,10 @@ def main():
                        "IC 写像による差 (α−β) は Δq/10 の精度では除外できていない (表の ic 列)", "軸 (η0) の量は判定対象外"])
     (C / "_band_ab").mkdir(exist_ok=True)
     (C / "_band_ab/throat_mono_practical_eval.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
-    print(f"{'量':28s} {'Δq':>8s} {'A 平均':>11s} {'B 平均':>11s} {'D=B−A':>10s} {'2·SE_D':>9s} {'(D+2SE)/Δq':>10s} {'IC β−α':>10s}  判定")
+    print(f"{'量':28s} {'Δq':>8s} {'A 平均':>11s} {'B 平均':>11s} {'D=B−A':>10s} {'2·SE_D':>9s} {'(D+2SE)/Δq':>10s} {'IC β−α':>10s} {'検出':>4s}  判定")
     for r in rows:
         print(f"{r['qty']:28s} {r.get('dq', float('nan')):8.2e} {r['A']['mean']:11.6g} {r['B']['mean']:11.6g} {r['D']:+10.2e} "
-              f"{2 * r['SE_D']:9.2e} {r.get('D_plus_2SE_over_dq', float('nan')):10.2f} {r['ic_beta_minus_alpha']:+10.2e}  {r['verdict']}")
+              f"{2 * r['SE_D']:9.2e} {r.get('D_plus_2SE_over_dq', float('nan')):10.2f} {r['ic_beta_minus_alpha']:+10.2e} {('あり' if r.get('detected') else 'なし') if 'detected' in r else '-':>4s}  {r['verdict']}")
     print("総合:", overall)
 
 
