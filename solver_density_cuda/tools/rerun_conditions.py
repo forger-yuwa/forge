@@ -12,14 +12,17 @@ plan: plans/active/tooling-rerun-conditions.md §4 (設計方針)。手順の正
 やること (順に; どこで止まっても NEW_RUN は残さない):
 1. **入力契約の検査** (NEW_RUN を作る前): 単一の `inlet_Pressure` (floats に `Y{s}`、`inletProfile` なし)・
    単一の `outlet_statPress`・`wall`/`wall_isothermal`/`slip` (Euler の滑り壁)・`axis` だけ、bcond は 1 行 1 境界の flow 形式、
-   `meshFileName == valueFileName == "nozzle.h5"`、solverConfig のファイル参照は許可リストの run 内相対だけ。
+   `meshFileName == valueFileName == "nozzle.h5"`、solverConfig のファイル参照はキーの完全修飾パスで判定 (`FILE_REF_KEYS`;
+   値の拡張子・存在によらない) し、`physProp.speciesDBFile` は `species_db_external.yaml` の run 内相対 (実在) だけを通す。`conjugate:` ブロックと
+   bcond の `inletProfile`/`wallProfile` (暗黙に CSV/HDF5 を読む) は拒否。
 2. **書き換えの計画**: 指定値と参照の実効値の有限性・物理範囲 (Pt・Tt・Ps・Tw > 0、k ≥ 0、omega > 0、cfl > 0、
    steps・out-interval > 0) を検査。bcond は対象行の floats の当該トークンだけを置換し (他の行はバイト一致)、YAML で読み直して検証。
    Y は全種を書いて Σ=1 を 1e−12 で検査 (forge の起動検査は 1e−3 で、入口カーネルが黙って正規化する)。変更しないときも
    参照の入口 Y を各成分 [0, 1]・Σ=1 (1e−9) で検査する。
    Pt を変えたら `--Ps` か `--keep-Ps` が必須 (node の出口は壁列が亜音速で Ps を見る)。
    `recommended_stages` (plan §4.7) と生成 config の本段 cfl・step 数が食い違えば、必要な引数を示して作成前に停止
-   (`--override-recommended` で明示的に通す)。
+   (`--override-recommended` で明示的に通す)。照合は条件を変えて推奨 cfl があるときだけ (無変更なら参照の cfl・cfl_pseudo を
+   それぞれ保持し照合しない)。`--Ps` は出口の Ps・Pt を個別に照合し、どちらかが違えば両方を揃えて変更として記録する。
 3. **初期場の検査**: config から必要保存量集合を決め、SRC (参照 res) と DST (参照 nozzle.h5) の存在・形・有限・ρ>0・
    0 ≤ ρY/ρ ≤ 1+1e−6・|Σ ρY − ρ| ≤ 1e−6 ρ を検査。DST の /VALUE に集合と `wall_dist` 以外があれば拒否。
 4. NEW_RUN を作り、許可リストのファイルだけ複製 → 書き換え → `restart_field.py` (VERDICT OK 必須) →
@@ -65,7 +68,7 @@ REF_Y_SUM_TOL = 1e-9       # 変更しない参照の入口 Y の Σ=1 の許容
 FIELD_Y_TOL = 1e-6         # 場の 0 ≤ ρY/ρ ≤ 1+tol, |Σ ρY − ρ| ≤ tol·ρ (plan §4.4)
 SCALE_RTOL = 1e-6          # スケール検査 allclose(d_new, f·d_ref, rtol, atol=0)
 KEEP_FROM_DST = ("wall_dist",)
-CONDITION_KEYS = ("Pt", "Tt", "Y", "k", "omega", "Ps", "Tw")
+CONDITION_KEYS = ("Pt", "Tt", "Y", "k", "omega", "Ps", "outlet_Pt", "Tw")   # outlet_Pt = 出口の Pt (--Ps と同時に書く)
 
 
 class RerunError(Exception):
@@ -283,17 +286,68 @@ def exit_pressure_ref(ref, res_path, outlet_id, excluded_ids=()):
             f"{os.path.basename(res_path)}: {how} の内部節点 {int(sel.sum())}/{n_all} 点 (壁・軸の BC 節点を除く) の P median")
 
 
-def _file_refs(obj, path=""):
-    """solverConfig 内のファイル参照らしき文字列値 (拡張子で判定) を列挙する。"""
-    out = []
+# solverConfig でファイル名を値に取るキー (完全修飾パス) と v1 の扱い。**値の拡張子・ファイルの有無によらず**キーの存在で判定する
+# (codex result 段 5 回目 #2: 拡張子で探していたので `physProp.speciesDBFile: /tmp/x` のような拡張子なしの参照を受理していた)。
+# 出典 (solver がファイルとして開くキー; 2026-10-06 に solverConfig.cpp の `as<std::string>`/`getValidatedValue<std::string>` と
+# ファイルを開く箇所 [YAML::LoadFile・ifstream・HighFive::File] を grep して列挙):
+#   - mesh.meshFileName / mesh.valueFileName: solverConfig.cpp:183-184 (h5handler で開く)。v1 は両方 "nozzle.h5" だけ
+#   - physProp.speciesDBFile: solverConfig.cpp:1061 → speciesDB.cpp:548・speciesTransportDB.cpp:305 (YAML::LoadFile)。
+#     v1 は SPECIES_DB_NAMES (species_db_external.yaml) の run 内相対で参照 run に実在するもの (複製される) と空文字列 (外部 DB なし) だけ
+#   - physProp.chemistry.mechanismFile: solverConfig.cpp:1090 → chemistry_mech_io.hpp:104 (YAML::LoadFile)。v1 対応外
+#   - conjugate.solid: solverConfig.cpp:563 (mode fem2d の固体 HDF5)。v1 対応外
+# 値にファイル名を書かない暗黙のファイル依存:
+#   - `conjugate:` ブロック: conjugateWall.cpp:473 が conjugate_state_<physID>.h5 を cwd から読む (許可リスト外で複製されない
+#     → 新しい run は固体状態を引き継がない)。v1 はブロックの存在で拒否 (CONFIG_BLOCKS_WITH_FILE_DEPS)
+#   - bcond の ints `inletProfile` / `wallProfile`: boundaryCond.cpp:464・:473 が inlet_profile_<physID>.csv /
+#     wall_profile_<physID>.csv を読む。v1 は両方拒否 (parse 後の bcond 検査)
+#   - probe.yaml: point_probes.cu:57 (固定名)。許可リストで複製する
+FILE_REF_KEYS = {
+    ("mesh", "meshFileName"): "nozzle.h5",          # MESH_FILE であることを別に検査
+    ("mesh", "valueFileName"): "nozzle.h5",
+    ("physProp", "speciesDBFile"): "run_local",     # SPECIES_DB_NAMES の run 内相対・実在、または空文字列のときだけ
+    ("physProp", "chemistry", "mechanismFile"): "reject",
+    ("conjugate", "solid"): "reject",
+}
+CONFIG_BLOCKS_WITH_FILE_DEPS = {
+    ("conjugate",): "ソルバ内 CHT は conjugate_state_<physID>.h5 (と mode fem2d の solid の HDF5) を読む — 複製しないので v1 対応外",
+}
+# physProp.speciesDBFile に許す名前 (run 内相対; ALLOW_COPY に入っていて複製される外部 DB だけ。設計チェーンの
+# runner_axismach.py:122-123 が書く名前)。probe.yaml など許可リストの他の名前を DB として読ませる設定は拒否する
+SPECIES_DB_NAMES = ("species_db_external.yaml",)
+BCOND_PROFILE_FLAGS = {"inletProfile": "inlet_profile_<physID>.csv", "wallProfile": "wall_profile_<physID>.csv"}
+_FILE_EXT_RX = re.compile(r"\.(ya?ml|h5|hdf5|csv|dat|txt|json|xmf|msh|inp|cti|ck)$", re.I)
+
+
+def _walk_scalars(obj, path=()):
+    """dict/list を辿り (キーのタプル, 葉の値) を列挙する (list の要素は添字を int でパスに入れる)。"""
     if isinstance(obj, dict):
         for k, v in obj.items():
-            out += _file_refs(v, f"{path}.{k}" if path else str(k))
+            yield from _walk_scalars(v, path + (str(k),))
     elif isinstance(obj, list):
         for i, v in enumerate(obj):
-            out += _file_refs(v, f"{path}[{i}]")
-    elif isinstance(obj, str) and re.search(r"\.(ya?ml|h5|hdf5|csv|dat|txt|json|xmf|msh|inp)$", obj.strip(), re.I):
-        out.append((path, obj.strip()))
+            yield from _walk_scalars(v, path + (i,))
+    else:
+        yield path, obj
+
+
+def _file_refs(cfg):
+    """solverConfig のファイル参照を列挙する。戻り [(パス文字列, 値, 扱い)]。扱いは FILE_REF_KEYS の値、または
+    "unknown" (キー名に file/File/path を含む・値がファイル拡張子で終わる等、表に無いがファイル参照と見えるもの; 拒否する)。
+    表のキーは値の型・拡張子によらずキーの存在で返す。"""
+    out = []
+    for path, kind in FILE_REF_KEYS.items():
+        if _has_path(cfg, path):
+            out.append((".".join(path), yaml_strict._get(cfg, path), kind))
+    known = set(FILE_REF_KEYS)
+    for path, v in _walk_scalars(cfg):
+        if path in known:
+            continue
+        keys = [k for k in path if isinstance(k, str)]
+        last = keys[-1] if keys else ""
+        by_key = bool(re.search(r"(file|path|dir)(name)?$", last, re.I))
+        by_val = isinstance(v, str) and bool(_FILE_EXT_RX.search(v.strip()))
+        if by_key or by_val:
+            out.append((".".join(str(k) for k in path), v, "unknown"))
     return out
 
 
@@ -443,15 +497,22 @@ def build_plan(a):
     if str(mesh.get("meshFileName")) != MESH_FILE or str(mesh.get("valueFileName")) != MESH_FILE:
         raise RerunError(f"mesh.meshFileName / valueFileName が両方 {MESH_FILE!r} でない "
                          f"({mesh.get('meshFileName')!r} / {mesh.get('valueFileName')!r}); v1 の対応外")
-    # --- 入力契約: solverConfig のファイル参照は許可リストの run 内相対だけ ---
+    # --- 入力契約: solverConfig のファイル参照 (キーの完全修飾パスで判定; FILE_REF_KEYS) と暗黙のファイル依存 ---
     pp = cfg.get("physProp") or {}
-    for path, val in _file_refs(cfg):
-        if path in ("mesh.meshFileName", "mesh.valueFileName"):
-            continue
-        if path == "physProp.speciesDBFile" and not os.path.isabs(val) and os.sep not in os.path.normpath(val) \
-                and _allowed_name(val) and os.path.exists(os.path.join(ref, val)):
-            continue
-        raise RerunError(f"solverConfig.yaml の {path} = {val!r} は外部参照・未知の入力依存 (v1 の対応外)")
+    for blk, why in CONFIG_BLOCKS_WITH_FILE_DEPS.items():
+        if _has_path(cfg, blk):
+            raise RerunError(f"solverConfig.yaml に {'.'.join(blk)} ブロックがある: {why} (外部参照・未知の入力依存; v1 の対応外)")
+    for path, val, kind in _file_refs(cfg):
+        if kind == "nozzle.h5":
+            continue                                   # 上で MESH_FILE であることを検査済み
+        if kind == "run_local" and isinstance(val, str) and val == "":
+            continue                                   # 空文字列 = 外部 DB なし (speciesDB.cpp は empty() で内蔵 DB だけを使う)
+        nv = os.path.normpath(val) if isinstance(val, str) else None
+        if kind == "run_local" and nv and not os.path.isabs(val) and os.sep not in nv and nv not in (".", "..") \
+                and nv in SPECIES_DB_NAMES and os.path.isfile(os.path.join(ref, nv)):
+            continue                                   # 外部 DB の許可名の run 内相対・実在 (許可リストで複製される)
+        raise RerunError(f"solverConfig.yaml の {path} = {val!r} は外部参照・未知の入力依存 (v1 の対応外; "
+                         f"{'拒否するキー' if kind == 'reject' else f'{SPECIES_DB_NAMES} の run 内相対で実在するもの・空文字列だけ' if kind == 'run_local' else 'ファイル参照と見える未知のキー'})")
 
     # --- 入力契約: bcond ---
     bc = parse_bcond(bc_text)
@@ -467,8 +528,10 @@ def build_plan(a):
         raise RerunError(f"outlet_statPress が {len(outlets)} 本 (v1 は単一の outlet_statPress だけ)")
     walls_iso = [n for n, k in kinds.items() if k == "wall_isothermal"]
     for n, e in bc.items():
-        if "inletProfile" in e["ints"] or "inletProfile" in e["floats"] or "inletProfile" in e["entry"]:
-            raise RerunError(f"{n}: inletProfile は v1 の対応外 (入口分布の CSV を引き継げない)")
+        for flag, fn in BCOND_PROFILE_FLAGS.items():
+            # 値によらずキーの存在で拒否 (forge は ints の 1 で CSV を読む; 0 でも書いてあれば v1 では扱わない)
+            if flag in e["ints"] or flag in e["floats"] or flag in e["entry"]:
+                raise RerunError(f"{n}: {flag} は v1 の対応外 (境界分布の CSV {fn} を引き継げない; 外部参照・未知の入力依存)")
     inl, outl = bc[inlets[0]], bc[outlets[0]]
     fin = inl["floats"]
     if any(re.fullmatch(r"X\d+", str(k)) for k in fin):
@@ -614,10 +677,17 @@ def build_plan(a):
             f"    参照の Ps_ref/P_exit_ref = {(Ps_ref / P_exit_ref) if P_exit_ref else None}\n"
             f"    --keep-Ps のとき Ps/(f·P_exit_ref) = {ratio if ratio is None else f'{ratio:.6g}'}\n"
             f"    参照と同じ比にするなら --Ps {f_pt * Ps_ref:.10g} (= f·Ps_ref)")
-    if a.Ps is not None and float(a.Ps) != Ps_ref:
-        changes["Ps"] = (Ps_ref, float(a.Ps))
-        outlet_upd["Ps"] = fmt(a.Ps)
-        outlet_upd["Pt"] = fmt(a.Ps)        # 出口の逆流用 Pt も Ps と同時に書く (Tt は据え置き; plan §4.3)
+    if a.Ps is not None:
+        # 出口の Ps と Pt を**個別に**照合し、どちらかが変われば変更として記録する (Tt は据え置き; plan §4.3)。
+        # 参照 `Ps: 2237, Pt: 3000` に --Ps 2237 なら Pt だけ 2237 に揃える (codex result 段 5 回目 #4: Ps が同値だと Pt の同期を
+        # 省き、変更記録が空・推奨 none になっていた)
+        Pt_out_ref = _num(outl["floats"]["Pt"])
+        if float(a.Ps) != Ps_ref:
+            changes["Ps"] = (Ps_ref, float(a.Ps))
+            outlet_upd["Ps"] = fmt(a.Ps)
+        if Pt_out_ref != float(a.Ps):
+            changes["outlet_Pt"] = (Pt_out_ref, float(a.Ps))
+            outlet_upd["Pt"] = fmt(a.Ps)
     Ps_new = float(a.Ps) if a.Ps is not None else Ps_ref
     ps_ratio = (Ps_new / (f_pt * P_exit_ref)) if P_exit_ref else None
 
@@ -817,8 +887,11 @@ def build_plan(a):
         rec = {"stages": "full",
                "note": "条件を変えた → run_staged_ns(stages='full') (soft→mid→本段)。細分格子は本段 cfl 1 (plan §4.7)"}
     else:
-        rec = {"stages": "none", "cfl": cfg_changes.get("cfl", _ref_cfl(cfg)),
-               "note": "条件の変更なし → 参照場からの継続 (stages='none', 参照 cfl)"}
+        # 無変更: 参照の cfl・cfl_pseudo を**それぞれ**そのまま使う (--cfl 指定時はその値)。推奨 cfl を持たないので照合しない
+        # (codex result 段 5 回目 #1: 参照 cfl を推奨値にして両方に一致を求め、`cfl: 4.0, cfl_pseudo: 5.0` の無変更 rerun を止めて
+        # 実効 CFL [定常では cfl_pseudo; procedures/solver-settings.md「CFL の定義」] を 5→4 に変える --cfl 4.0 を提案していた)
+        rec = {"stages": "none", "cfl_ref": {"cfl": _num(_ref_cfl(cfg)), "cfl_pseudo": _num(_deltaT(cfg).get("cfl_pseudo"))},
+               "note": "条件の変更なし → 参照場からの継続 (stages='none'、参照の cfl・cfl_pseudo をそれぞれ保持; --cfl 指定時はその値)"}
     # --- 推奨と生成 config の整合 (codex result 段 #3: 表示する run_staged_ns の行は生成 config の cfl で本段を回す) ---
     # §4.7 の推奨は NS (run_staged_ns) の実測に基づく。Euler 参照 (δ_E 用の対; plan §4.8) は run_staged で回し、
     # §6 (ii) 腕 E は stages none・cfl 2・6000 で合格している — §4.7 は Euler の推奨を定めていないので整合検査をしない。
@@ -827,11 +900,11 @@ def build_plan(a):
         # run_staged(stages="none")・cfl 2・6000 step で STEADY (run_0120)。Tt・組成の変更 (run_0134: Tt 1500・H2O 0.10) は
         # 同じ設定で 6000 step では DRIFTING (出口 M 6.022、直前窓差 0.021) — 推奨は未確立 (2026-10-06 監査で判明)
         ps_scaled = ("Pt" in changes and abs(Ps_new / Ps_ref - f_pt) <= 1e-3 * abs(f_pt))
-        if set(changes) <= {"Pt", "Ps"} and a.scale_ic == "pt" and ps_scaled:
+        if set(changes) <= {"Pt", "Ps", "outlet_Pt"} and a.scale_ic == "pt" and ps_scaled:
             # 検証済みの条件に限る (codex result-2 Major 3): 腕 E は保存量と背圧をともに f 倍 (scale-ic pt・Ps = f·Ps_ref)
             rec = {"stages": "none", "cfl": 2.0,
                    "note": "Euler 参照・Pt のみ変更 (scale-ic pt・Ps も同じ比) → run_staged(stages='none')・cfl 2・6000 step (plan §4.7: 腕 E run_0120 の実績)"}
-        elif set(changes) <= {"Pt", "Ps"}:
+        elif set(changes) <= {"Pt", "Ps", "outlet_Pt"}:
             rec = {"stages": "full", "cfl": 2.0,
                    "note": "Euler 参照・Pt 変更だが scale-ic pt でない、または Ps が Pt と同じ比でない → 未検証。run_staged(stages='full') で STEADY まで (plan §4.7)"}
             warnings.append("Euler 参照の Pt 変更で、検証済み条件 (scale-ic pt かつ Ps = f·Ps_ref) と違う: 起動の実績なし。STEADY を確認すること")
@@ -843,8 +916,9 @@ def build_plan(a):
                             "δ_E の参照に使う前に STEADY を確認すること")
     rec["runner"] = "run_staged_ns" if is_ns else "run_staged"
     mism, fix = [], []
-    if rec.get("cfl") is not None and any(v is not None and v != _num(rec["cfl"]) for v in eff_cfl.values()):
-        mism.append(f"本段 cfl/cfl_pseudo = {eff_cfl['cfl']}/{eff_cfl['cfl_pseudo']} (推奨 {rec['cfl']})")
+    # 推奨 cfl との照合は「条件を変えて推奨 cfl がある」ときだけ、生成 config の実効 cfl_pseudo (定常で効く値) と cfl に対して行う
+    if cond_changed and rec.get("cfl") is not None and any(v is not None and v != _num(rec["cfl"]) for v in eff_cfl.values()):
+        mism.append(f"本段 cfl/cfl_pseudo = {eff_cfl['cfl']}/{eff_cfl['cfl_pseudo']} (推奨 {rec['cfl']}; 定常で効くのは cfl_pseudo)")
         fix.append(f"--cfl {float(rec['cfl'])}")
     if rec.get("nStepOuter_min") is not None and n_outer < int(rec["nStepOuter_min"]):
         mism.append(f"nStepOuter = {n_outer} (推奨 ≥ {rec['nStepOuter_min']})")
@@ -1104,7 +1178,7 @@ def make_parser():
     ap.add_argument("--k", type=float, help="入口 k (既定は据え置き)")
     ap.add_argument("--omega", type=float, help="入口 omega (既定は据え置き)")
     pg = ap.add_mutually_exclusive_group()
-    pg.add_argument("--Ps", type=float, help="出口背圧 [Pa] (出口の Ps と Pt を同時に書く)")
+    pg.add_argument("--Ps", type=float, help="出口背圧 [Pa] (出口の Ps と Pt を個別に照合し、両方をこの値に揃える; 違えば変更として記録)")
     pg.add_argument("--keep-Ps", action="store_true", help="Pt を変えても出口 Ps を据え置く")
     tg = ap.add_mutually_exclusive_group()
     tg.add_argument("--Tw", type=float, help="等温壁の壁温 Ts [K]")
@@ -1156,7 +1230,7 @@ def main(argv=None):
     eff = plan["recommended_stages"]["config_effective"]
     print(f"回し方: {plan['recommended_stages']['runner']}(Path({_repo_rel(plan['new'])!r}), stages={st!r}) "
           "(design/forge_design/evaluate/runner_axismach.py) — 本段は生成 config の "
-          f"cfl {eff['cfl']}・nStepOuter {eff['nStepOuter']} で回る")
+          f"cfl/cfl_pseudo {eff['cfl']}/{eff['cfl_pseudo']} (定常で効くのは cfl_pseudo)・nStepOuter {eff['nStepOuter']} で回る")
     if plan["euler_note"]:
         print(f"注意: {plan['euler_note']}")
     return 0

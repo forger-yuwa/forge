@@ -566,6 +566,9 @@ def main():
     # ------------------------------------------------------------------ (p) 推奨と生成 config の整合 (codex result 段 #3)
     test_recommended_vs_config()
 
+    # ------------------------------------------------------------------ (q) codex result 段 5 回目 #1・#2・#4
+    test_review5()
+
     shutil.rmtree(TMP, ignore_errors=True)
     print(f"\nSKIP 件数: {len(skips)}")
     for n, w in skips:
@@ -1237,6 +1240,136 @@ def test_recommended_vs_config():
         done(ref, new)
     finally:
         rc.subprocess.run, ram.run_forge, ram._restart_same_mesh = orig
+
+
+def test_review5():
+    """codex result 段 5 回目: #1 無変更 rerun は cfl・cfl_pseudo をそれぞれ保持し推奨と照合しない (条件変更時は実効 cfl_pseudo と cfl を照合)、
+    #2 ファイル参照はキーの完全修飾パスで検査 (拡張子・存在によらない)、#4 --Ps は出口の Ps・Pt を個別に照合。"""
+    CFL = "cfl: 5.0, cfl_pseudo: 5.0"
+
+    def cfl_set(c, cp):
+        return lambda t: t.replace(CFL, f"cfl: {c}, cfl_pseudo: {cp}", 1)
+
+    def eff(p):
+        d = yaml.safe_load(p["new_cfg_text"])["time"]["deltaT"]
+        return float(d["cfl"]), float(d["cfl_pseudo"])
+
+    # ---- #1 ----
+    ref, new = make_ref(edit_cfg=cfl_set("4.0", "5.0"))
+    code, _, err = run_main([ref, new, "--dry-run"])
+    check("(q#1) 参照 cfl 4・cfl_pseudo 5 の無変更 rerun → 停止しない", code == 0 and not os.path.exists(new), err.strip()[-300:])
+    p = plan_of([ref, new])
+    ce = p["recommended_stages"]["config_effective"]
+    check("(q#1) 無変更: 生成 config は参照のまま (cfl 4・cfl_pseudo 5 を保持)・stages none・override なし",
+          p["new_cfg_text"] == p["cfg_text"] and eff(p) == (4.0, 5.0) and ce["cfl"] == 4.0 and ce["cfl_pseudo"] == 5.0
+          and p["recommended_stages"]["stages"] == "none" and ce["override"] is False
+          and p["recommended_stages"]["cfl_ref"] == {"cfl": 4.0, "cfl_pseudo": 5.0}, (eff(p), p["recommended_stages"]))
+    p = plan_of([ref, new, "--steps", "12000"])
+    check("(q#1) 無変更 + --steps → 停止せず cfl 4・cfl_pseudo 5 のまま", eff(p) == (4.0, 5.0) and p["recommended_stages"]["stages"] == "none")
+    p = plan_of([ref, new, "--cfl", "3"])
+    check("(q#1) 無変更 + --cfl 3 → 両方 3 (指定どおり)・照合しない", eff(p) == (3.0, 3.0) and not p["recommended_stages"]["config_effective"]["override"])
+    code, _, err = run_main([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt", "--steps", "60000"])
+    check("(q#1) 同じ参照で Pt 変更・--cfl なし → 作成前に停止し --cfl 1.0 を要求",
+          code == 2 and "--cfl 1.0" in err and not os.path.exists(new), err.strip()[-300:])
+    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt", "--steps", "60000", "--cfl", "1.0"])
+    check("(q#1) Pt 変更 + --cfl 1.0 → 通り、生成 config は cfl・cfl_pseudo とも 1", eff(p) == (1.0, 1.0))
+    p = plan_of([ref, new, "--Tt", "1500"])
+    check("(q#1) Tt だけ変更 (推奨 cfl なし) → 停止せず cfl 4・cfl_pseudo 5 のまま", eff(p) == (4.0, 5.0)
+          and p["recommended_stages"]["stages"] == "full")
+    done(ref, new)
+    ref, new = make_ref(edit_cfg=cfl_set("4e+0", "5e+0"))
+    p = plan_of([ref, new])
+    check("(q#1) 参照 cfl 4e+0・cfl_pseudo 5e+0 (PyYAML では文字列) の無変更 → 停止せず、記録は数値 4・5",
+          p["new_cfg_text"] == p["cfg_text"] and p["recommended_stages"]["cfl_ref"] == {"cfl": 4.0, "cfl_pseudo": 5.0}
+          and p["recommended_stages"]["config_effective"]["cfl_pseudo"] == 5.0, p["recommended_stages"])
+    done(ref, new)
+    # 実効 CFL (定常では cfl_pseudo) だけが推奨と違う: cfl 1・cfl_pseudo 5 で Pt 変更 → 停止
+    ref, new = make_ref(edit_cfg=cfl_set("1.0", "5.0"))
+    code, _, err = run_main([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt", "--steps", "60000"])
+    check("(q#1) cfl 1・cfl_pseudo 5 で Pt 変更 → cfl_pseudo が推奨 1 と違うので停止 (--cfl 1.0)",
+          code == 2 and "--cfl 1.0" in err and "cfl_pseudo" in err, err.strip()[-300:])
+    code, _, err = run_main([ref, new, "--dry-run"])
+    check("(q#1) cfl 1・cfl_pseudo 5 の無変更 → 停止しない", code == 0, err.strip()[-200:])
+    done(ref, new)
+
+    # ---- #2 ----
+    PP = "thermoHrefTemp: 298.15}"
+    rej = [
+        ("physProp.speciesDBFile: /tmp/x (拡張子なし・絶対)", lambda t: t.replace(PP, "thermoHrefTemp: 298.15, speciesDBFile: /tmp/x}", 1),
+         "physProp.speciesDBFile"),
+        ("physProp.chemistry.mechanismFile: /tmp/y (拡張子なし)",
+         lambda t: t.replace(PP, "thermoHrefTemp: 298.15, chemistry: {mechanismFile: /tmp/y}}", 1), "physProp.chemistry.mechanismFile"),
+        ("physProp.chemistry.mechanismFile: mech.yaml (run 内相対でも)",
+         lambda t: t.replace(PP, 'thermoHrefTemp: 298.15, chemistry: {mechanismFile: "mech.yaml"}}', 1), "physProp.chemistry.mechanismFile"),
+        ("引用符付きキー 'speciesDBFile' : review_db (拡張子なし・相対・不在)",
+         lambda t: t.replace(PP, "thermoHrefTemp: 298.15, 'speciesDBFile' : review_db}", 1), "physProp.speciesDBFile"),
+        ("speciesDBFile が数値", lambda t: t.replace(PP, "thermoHrefTemp: 298.15, speciesDBFile: 5}", 1), "physProp.speciesDBFile"),
+        ("speciesDBFile が run 内の許可リスト外の名前 (実在)", lambda t: t.replace(PP, 'thermoHrefTemp: 298.15, speciesDBFile: "probe.yaml"}', 1),
+         "physProp.speciesDBFile"),
+        ("speciesDBFile: null", lambda t: t.replace(PP, "thermoHrefTemp: 298.15, speciesDBFile: null}", 1), "physProp.speciesDBFile"),
+        ("複数行にまたがる chemistry: {mechanismFile: /tmp/y} (拡張子なし)",
+         lambda t: t.replace(PP, "thermoHrefTemp: 298.15,\n           chemistry: {\n             mechanismFile: /tmp/y}}", 1),
+         "physProp.chemistry.mechanismFile"),
+        ("conjugate ブロック (mode local1d; conjugate_state_<id>.h5 を暗黙に読む)",
+         lambda t: t + "conjugate: {mode: local1d, thickness: 0.002, k_solid: 20.0}\n", "conjugate"),
+        ("conjugate.solid (fem2d)", lambda t: t + "conjugate: {mode: fem2d, solid: solid}\n", "conjugate"),
+        ("未知のファイルキー (fooFile: abc)", lambda t: t.replace(PP, "thermoHrefTemp: 298.15, fooFile: abc}", 1), "physProp.fooFile"),
+    ]
+    for label, ec, key in rej:
+        ref, new = make_ref(edit_cfg=ec)
+        open(os.path.join(ref, "mech.yaml"), "w").write("{}\n")
+        code, _, err = run_main([ref, new])
+        check(f"(q#2) {label} → 作成前に拒否", code == 2 and key in err and "外部参照" in err and not os.path.exists(new),
+              err.strip()[-200:])
+        done(ref, new)
+    for label, flag in (("wallProfile: 0", "{wallProfile: 0}"), ("wallProfile: 1", "{wallProfile: 1}")):
+        ref, new = make_ref(edit_bc=lambda t, f=flag: re.sub(r"(wall:\s*\{physID: 3, kind: wall, +outputHDFflg: 1, ints: )",
+                                                             lambda m: m.group(1) + f, t, count=1))
+        code, _, err = run_main([ref, new])
+        check(f"(q#2) bcond の {label} → 値によらず作成前に拒否", code == 2 and "wallProfile" in err and not os.path.exists(new),
+              err.strip()[-200:])
+        done(ref, new)
+    # 許可されるもの: 許可リスト名の run 内相対で実在 (species_db_external.yaml・./ 付き)、空文字列
+    for label, v, mk in (("species_db_external.yaml (実在)", '"species_db_external.yaml"', True),
+                         ("./species_db_external.yaml (実在)", '"./species_db_external.yaml"', True),
+                         ('"" (外部 DB なし)', '""', False)):
+        ref, new = make_ref(edit_cfg=lambda t, v=v: t.replace(PP, f"thermoHrefTemp: 298.15, speciesDBFile: {v}}}", 1))
+        if mk:
+            open(os.path.join(ref, "species_db_external.yaml"), "w").write("species: {}\n")
+        code, _, err = run_main([ref, new, "--dry-run"])
+        check(f"(q#2) speciesDBFile: {label} → 受理", code == 0, err.strip()[-200:])
+        done(ref, new)
+    ref, new = make_ref(edit_cfg=lambda t: t.replace(PP, 'thermoHrefTemp: 298.15, speciesDBFile: "species_db_external.yaml"}', 1))
+    code, _, err = run_main([ref, new])
+    check("(q#2) speciesDBFile: species_db_external.yaml が参照 run に無い → 拒否", code == 2 and "physProp.speciesDBFile" in err,
+          err.strip()[-200:])
+    done(ref, new)
+
+    # ---- #4 ----
+    OUT = "Ps: 2237.0, Pt: 2237.0, Tt: 300.0"
+    ref, new = make_ref(edit_bc=lambda t: t.replace(OUT, "Ps: 2237.0, Pt: 3000.0, Tt: 300.0", 1))
+    p = plan_of([ref, new, "--Ps", "2237"])
+    nb = rc.parse_bcond(p["new_bc_text"])
+    check("(q#4) 参照 Ps 2237・Pt 3000 に --Ps 2237 → 出口 Pt を 2237 に揃えて変更記録 (outlet_Pt)・推奨 full",
+          p["changes"] == {"outlet_Pt": (3000.0, 2237.0)} and nb["outlet"]["floats"]["Pt"] == 2237.0
+          and nb["outlet"]["floats"]["Ps"] == 2237.0 and nb["outlet"]["floats"]["Tt"] == 300.0
+          and p["recommended_stages"]["stages"] == "full", (p["changes"], nb["outlet"]["floats"], p["recommended_stages"]["stages"]))
+    ld = lines_diff(p["bc_text"], p["new_bc_text"])
+    check("(q#4) 書き換えは出口の行だけ", len(ld) == 1 and p["bc_text"].splitlines()[ld[0]].startswith("outlet:"), ld)
+    p = plan_of([ref, new, "--Ps", "2000"])
+    check("(q#4) --Ps 2000 → Ps・outlet_Pt の両方を変更記録", p["changes"] == {"Ps": (2237.0, 2000.0), "outlet_Pt": (3000.0, 2000.0)},
+          p["changes"])
+    p = plan_of([ref, new, "--Pt", "4.4e6", "--keep-Ps", *REC_PT])
+    check("(q#4) --keep-Ps は出口を触らない (Pt 3000 のまま)", "Ps" not in p["changes"] and "outlet_Pt" not in p["changes"]
+          and rc.parse_bcond(p["new_bc_text"])["outlet"]["floats"]["Pt"] == 3000.0, p["changes"])
+    done(ref, new)
+    ref, new = make_ref()
+    p = plan_of([ref, new, "--Ps", "2.237e3"])
+    check("(q#4) 参照 Ps = Pt = 2237 に --Ps 2.237e3 (指数表記) → 変更なし", p["changes"] == {}, p["changes"])
+    p = plan_of([ref, new, "--Ps", "2237"])
+    check("(q#4) 参照 Ps = Pt = 2237 に --Ps 2237 → 変更なし・推奨 none・bcond バイト一致",
+          p["changes"] == {} and p["recommended_stages"]["stages"] == "none" and p["new_bc_text"] == p["bc_text"], p["changes"])
+    done(ref, new)
 
 
 if __name__ == "__main__":

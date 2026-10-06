@@ -919,7 +919,7 @@ python3 solver_density_cuda/tools/rerun_conditions.py REF_RUN NEW_RUN [--res res
   (forge の起動検査は $10^{-3}$ で、入口カーネルが黙って正規化するため、書いた値と実効値がずれうる)。吸収種は 2 種なら自動、
   3 種以上は `--balance` 必須。`species_meta.yaml` の `streams.inflow.Y_transport` と実種 `Y` (lump の展開行列で展開) を同期し、
   `X` は実種の MW が内蔵表でそろうときだけ作り直す。
-- 出口: `--Ps` は `outlet_statPress` の `Ps` と逆流用 `Pt` を同時に書く (`Tt` は据え置き)。
+- 出口: `--Ps` は `outlet_statPress` の `Ps` と `Pt` をそれぞれ照合し、違うほうを指定値に揃える (`Tt` は据え置き; Pt だけ違っても変更として記録)。現行の出口カーネルは逆流時も静圧で拘束する (`boundaryCond_d.cu:593` 付近) ので、`Pt` は旧来の書式として Ps と同値にそろえておくだけ。
 - 等温壁: `--Tw` は全 `wall_isothermal` の `Ts` を書く。
 - `solverConfig.yaml`: `--steps` (`nStepOuter`)・`--out-interval` (`outStepInterval`) は `nStepOuter % outStepInterval == 0` を強制、
   `--cfl` は `time.deltaT.cfl`・`cfl_pseudo` の両方を書く。いずれも YAML の値ノードの位置だけを書き換え (`yaml_strict.replace_scalars`; コメント・引用符付きキー・空白の揺れ・flow/block 形式に対応)、読み直して要求値との一致と他の値の不変を検査する。
@@ -968,13 +968,13 @@ $f = P_{t,\rm new}/P_{t,\rm ref}$、参照の出口圧 $P_{\rm exit,ref}$ (参�
 $P_{\rm exit,ref}$ と $P_s/(f\,P_{\rm exit,ref})$、restart_field の VERDICT 行、forge の sha256、ツールの commit、`recommended_stages` を残す。
 `prepare_info.json` は幾何を据え置き、`ic_from` を参照 res で上書きし `rerun_of` を足す (`nozzle_report` が読む)。
 
-`recommended_stages` は、条件 (Pt・Tt・Y・k・ω・Ps・Tw) を変えなければ `none` (参照 cfl で参照場から継続)、
+`recommended_stages` は、条件 (Pt・Tt・Y・k・ω・Ps・出口 Pt・Tw) を変えなければ `none` (参照の `cfl`・`cfl_pseudo` をそれぞれそのまま保持して参照場から継続; 推奨 cfl との照合はしない)、
 **Pt を変えれば `full`・本段 cfl 1・60000 step・`--scale-ic pt` 推奨** (下記の検証で確定; scale none には警告)、
 Tt・Y などそれ以外を変えれば `full` (本段は参照 cfl; 整定長は生産利用で確定する — plan §5.1 #11)。
 `--steps`・`--out-interval`・`--cfl` は条件に数えない。`run_staged_ns(stages="full")` の本段は**生成 config の cfl・nStepOuter で回る**ので、
 NS 参照で推奨の本段 cfl・step 数 (Pt 変更なら cfl 1・≥ 60000) と生成 config が食い違えば、必要な引数 (`--cfl 1.0 --steps 60000` 等) を
 示して作成前に停止する (意図して違う config で作るなら `--override-recommended`; 警告と `config_effective.override` に残る)。
-Euler 参照 (乱流なし、`prepare_info` に `viscous` なし) は `run_staged` で回し、推奨は NS の実測に基づくので整合検査をせず警告だけ記録する
+Euler 参照 (分類は下の「NS / Euler の分類」の条件) は `run_staged` で回し、推奨と生成 config の食い違いは停止せず警告だけ記録する
 (Euler 対参照の実績は plan §6 (ii) 腕 E: stages none・cfl 2・6000 step)。記録の `recommended_stages.runner` と表示する回し方は
 `run_staged_ns` / `run_staged` を区別する。
 NS run の条件を変えたときは、δ_E の評価に**同条件の Euler rerun を対で作る** (旧条件の Euler 参照では edge 帯の判定が動く;
@@ -1001,6 +1001,9 @@ NS run の条件を変えたときは、δ_E の評価に**同条件の Euler re
 **入力 YAML の重複キー**: solverConfig・bcondConfig・species_meta と、`run_staged`/`run_staged_ns` の段 config 検査は `solver_density_cuda/tools/yaml_strict.py` で読み、全階層 (flow・block 形式) の重複キーを拒否する (PyYAML は後勝ち・solver の yaml-cpp は先勝ちなので、PyYAML で読んだ値は solver の実効設定と違いうる)。 **merge key (`<<`) も全階層で拒否する** (yaml-cpp は merge を展開しないので、PyYAML で展開した値と solver の実効値が食い違う)。**使用禁止・廃止キー** (`mesh.bndFirstOrder`、`procedures/recommended-settings.md` §9 の削除キー・node 廃止キー・旧乱流キー) を持つ参照 run は作成前に拒否し、旧既定・非推奨の値 (sst の旧既定、`wallTreatmentSST: 1` など) は警告する。
 
 `run_staged` (Euler) も `run_staged_ns` と同じく、各段 (soft・mid) の restart 前に段終了ゲート (`stage_gate`) をかけ、段ごとの `residual_history_<tag>.csv` (tag = soft / mid / main) と `stage_manifest.json` を残す。段の CFL・step 数は変えていない。
+
+
+**外部ファイル参照 (2026-10-06)**: ファイル名を取る設定キーは完全修飾パスで検査する (拡張子では判定しない)。`mesh.meshFileName`/`valueFileName` は `nozzle.h5` だけ、`physProp.speciesDBFile` は run 内の実在する `species_db_external.yaml` か空だけを通し、`physProp.chemistry.mechanismFile`・`conjugate:` ブロック (暗黙に `conjugate_state_<id>.h5` を読む)・bcond の `inletProfile`/`wallProfile`・その他ファイル参照に見えるキーは値によらず作成前に拒否する (v1 対象外)。
 
 ## メッシュ (構造化・トポロジ固定)
 

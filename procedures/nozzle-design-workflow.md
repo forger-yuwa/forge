@@ -140,8 +140,8 @@ python3 solver_density_cuda/tools/rerun_conditions.py REF_RUN NEW_RUN [--Pt P --
 - 乾き成分 (lump) の組成変更は v1 では止まる (化学種の定義が変わり、どの引き継ぎ経路も拒否する)。H2O 分率 (`--Y H2O=...`) は可。
 - 入口の k・ω は変えない (指定時のみ)。等温壁で Tt を変えるときは `--Tw` か `--keep-Tw` を明示する。
 - **回し方** (`RERUN_CONDITIONS.json` の `recommended_stages` に従う): 条件の変更なし → `run_staged_ns(run, stages="none")`; 条件を変えた → `stages="full"` (段階起動);
-  **Pt を変えた → full + 本段 cfl 1 (`--cfl 1.0 --steps 60000`)、`--scale-ic pt` (保存量を Pt 比で一様スケールする初期場変換) を推奨** (2026-10-06 確定: scale なしは規定時間内に準定常に達せず、入口配管の壁際に逆流域が残った)。
-  粗格子の Pt 0.8 倍は、段階起動でも本段 cfl 5 では発散した (plan §6 (ii′))。Tt・H2O を変えたときは本段の量の整定に時間がかかる (確認中、plan §6 (iv″))。
+  **Pt だけを変えた → full + 本段 cfl 1 (`--cfl 1.0 --steps 60000`)、`--scale-ic pt` (保存量を Pt 比で一様スケールする初期場変換) を推奨** (2026-10-06 確定: scale なしは規定時間内に準定常に達せず、入口配管の壁際に逆流域が残った)。**Pt と Tt・組成・壁温を同時に変える、または凝縮 run で Pt を変えるときは `--scale-ic pt` が使えないか推奨外で、起動・整定は未検証** (full・本段 cfl 1・60000 step と警告が記録される)。
+  粗格子の Pt 0.8 倍は、段階起動でも本段 cfl 5 では発散した (plan §6 (ii′))。Tt・H2O を変えたときは本段の量の整定に時間がかかる (粗格子で本段 36000 step でも流量・δ_E は DRIFTING; 整定長は未確定、plan §5.1 #11)。
 - **Euler 参照**: δ_E の抽出や流量比には、同じ条件にした Euler の rerun を対で作る (旧条件の Euler 参照だと δ が数 % 動く)。
 - 判定: `check_convergence.py` (`--segment` で本段だけ)・`check_quasisteady.py --series-csv` (報告する量)・NS は `check_wall_resolution.py` (Pt・Tt が変わると Re と y1+ が変わる)。
 - 注意: 壁は元の条件で設計したもの。条件を変えると境界層の厚さが変わり、出口 M・試験部の一様性は設計値からずれる (それを見るのがこの計算の目的のことが多い)。ずれを壁に返したいなら §2 の作り直し。
