@@ -109,8 +109,8 @@
 | --- | --- | --- | --- |
 | 1 | ~~§4・§6 の諮問~~ 完了 | 判断: 2026-10-07 codex (diagnose) — 式は採用、放射源流の判別 A/B を先行し、修正子の未収束はゲート不合格、V4 の基準を新しく、生産化には NS・凝縮の再評価。全件採用 (§6.1) | F |
 | 2 | codex plan 段レビュー | `codex_review.py <本 plan> --stage plan` | O |
-| 3 | 実装 | §5 の 1〜4 と、§4.0 の判別 A/B の試験 (`design/tests/run_moc_axis_limit_tests.py` に含める)。合格条件: 新テスト FAIL 0、design/tests の既存テスト FAIL 0、§4.0 の判別 A/B の結果を記録 | O |
-| 4 | 検証 (順序固定) | V0 → 実装・回帰 (V1・V3・V6) → V4。V4 の結果をユーザに報告し、生産に入れる候補にするかを決めてもらう | O (解釈は F) |
+| 3 | ~~実装~~ 完了 (2026-10-07) | §5 の 1〜4 と、§4.0 の判別 A/B の試験。新テスト 106 件 PASS、既存テスト FAIL 0 (§9) | O |
+| 4 | 検証 (順序固定) | ~~V0 → 実装・回帰 (V1・V3・V6) → V4~~ 完了 (§9)。**残り: V4 の結果をユーザに報告し、生産に入れる候補にするかを決めてもらう** (報告 2026-10-07) | O (解釈は F) |
 | 5 | case/45 の生産への反映 (候補にする場合) | V5 (IC の検査 → Euler の比較と出口較正) → V5′ (NS・凝縮) → codex result 段レビュー → 生産採用の判断 (ユーザ)。生産に入れない場合は、機能実装の完了として閉じる | ユーザ・O |
 | 6 | codex result 段レビュー | `--stage result` | O |
 
@@ -165,3 +165,17 @@
 - `2026-10-07` — 初稿。ユーザ決定「予測修正を 20 回まで回す手順をメインに」「θ_r は semi-perfect で」。軸上のソース項は、試験で使った 0 ではなく解析極限 θ_r にする。
 - `2026-10-07` — **codex (diagnose) に諮った**: `notes/reviews/2026-10-07-moc-axis-limit-diagnose.md` — 放射源流の判別 A/B (legacy + converge 対 analytic + converge) を先行し、結果で §4・§6 を確定する。諮問内のメモリ上の試算 (放射源流、軸端 x = 1.5、修正 50 回) で、第 1 段の θ の相対誤差は legacy +33.3 %、analytic −0.004 % (h 0.03)。全件採用し §3・§4・§5.1・§6 を改訂。
 - `2026-10-07` — **codex plan 段レビュー** (`notes/reviews/2026-10-07-discretization-moc-axis-limit-and-corrector-plan.md`): GO-with-changes、C0/M4/m1、全件採用 (§6.1)。§2・§4.2・§5.1・§6 V5・V5′・§8 を改訂。status を in_progress に。
+- `2026-10-07` — **§5.1 #3 実装** (implementer、主セッションで検証):
+  - `moc_kernel.axis_theta_r`・`interior_vec(axis_limit, corrector, stats)`、`moc_inverse.axis_theta_r_init`・`MocFillDiag`・`moc_gate`、`runner_axismach` のキー `geometry.moc_axis_limit`・`geometry.moc_corrector` (既定 legacy + fixed2 でビット同一)。`design_chain` と `prepare_info.json` に `moc` (診断) が加わる。不正なキーの値は `design_chain` の冒頭で例外。
+  - 対の 5 分類 (幾何的棄却は「平行」と「軸より下」、反復の失敗は「非有限」と「上限到達」に分けて記録)。ゲートは converge のときだけ合否を出す (反復の失敗・残差 > 1e-10・壁の内側の幾何的棄却・analytic での軸端の接続不一致)。
+  - methods A11 の記述を訂正: 軸外の代用は発火しない (case/45 で 298 万対中 0) が、軸上の端点は常に代用の分岐に入っていた (case/45 で 4798 端点が 0、1 端点が借用)。
+  - テスト: `design/tests/run_moc_axis_limit_tests.py` 106 件 ALL PASS (主セッションでも再実行)。既存の `run_joint_fit_mono`・`run_physical_wall_analytic`・`run_moc_diagnostics`・`run_cfd_initial_line`・`run_moc_cancel` は FAIL 0 (主セッションで再実行)。`run_inverse_tests` は numpy 2 の環境 (`np.trapezoid`) で ALL PASS (システムの numpy 1.26 では本変更と無関係に AttributeError)。`run_sern_gates`・`run_sern_moc` は変更前の 170b0d75 でも同じく失敗、`run_species_attrs_ic` は forge バイナリが要る。
+- `2026-10-07` — **§5.1 #4 の V0・V1・V2・V3・V4・V6** (CFD 0 step):
+  - **V0** (`case/45.isobutane_m6_d155/_band_ab/moc_axis_limit_v0_radial.json`、`design/tests/moc_axis_limit_radial.py`): **支持**。第 1 段の θ の誤差の比 (analytic+converge / legacy+converge) は 5.4e-4〜9.3e-6 (全段 ≤ 1/10)。壁の誤差は analytic+converge 7.04e-5 → 1.10e-6、legacy+converge 9.76e-5 → 2.53e-6 (全段で B ≤ A)、最細区間の次数 1.990 (≥ 1.7)。未収束の対 0。
+  - **V2**: PASS (全段で legacy+fixed2 以下、次数 1.990 ≥ 1.723)。
+  - **V1**: PASS (キー無しで、case/45 の MOC 点群 609×4・係数 259・ノット 265 が 170b0d75 と完全一致。放射源流の網も一致)。
+  - **V3** (記録、`_band_ab/moc_axis_limit_v3_restart.json`): 新しい手順は網を 4e-12°、列の 1 段目の作り直しを 2e-11° で再現 (現行 0.13°)。
+  - **V4** (`_band_ab/moc_axis_limit_v4_case45.json`、`case/45.isobutane_m6_d155/moc_axis_limit_v4_case45.py`): 第 1 点の角度差 Δθ₁ 0.0219° → 0.0054°、拘束なしの当てはめの r″ の山 1.02e-2 → 3.5e-5。設計壁の変化は最大 6.18 µm (x = 0.40)、出口 7e-8 µm。S1・S2・S3′・S4′・S6・S7・S8 PASS、未収束の対 0 → **候補の条件を満たす**。
+    - **S4′ の余裕は 0.00004°** (当てはめの第 1 点のずれ −0.00741°、下限 0.00544°、差 0.00196° ≤ 0.002°)。補足 (`moc_axis_limit_v4_firstpoints.py` → `_band_ab/moc_axis_limit_v4_firstpoints.txt`): 新しい点群では拘束なしと単調拘束の当てはめがほぼ同じ (第 1 点で −0.00185° と −0.00196°、x ≥ 0.05 で差 ≤ 0.0001°)。単調拘束はほとんど効いていない。当てはめが第 1 点で円弧より 0.002° 下にあるのは、第 2 点以降の MOC 点 (x = 0.051 で円弧より −0.018°) に沿うためで、拘束の代償ではない。第 1 点は、なお近傍から 0.007° 浮いている (原因は未確定)。
+    - **物理壁** (設計壁 + δ_r) は出口で −1.07 µm 動く (δ_r の出口 0.7327641 → 0.7327502 r_t。δ_r は設計壁と MOC 壁の M から積分法で作り直されるので、設計壁の変化が δ_r に伝わる。どの区間の変化が効いたかは未確認)。S3′ は設計壁だけを見ている。番号写像の IC の上限 (1 µm) を超えるので、V5 では §6 V5 の IC の検査が要る。
+  - **V6**: design_chain 1 回 3.34 s → 4.92 s (1.48 倍、目安 5 倍以内)。修正子の回数は平均 1.99、最大 34。

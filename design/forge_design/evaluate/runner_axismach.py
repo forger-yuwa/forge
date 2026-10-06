@@ -228,6 +228,26 @@ def _bcond_with_species(txt: str, Ys) -> str:
 
 
 
+_MOC_KEYS = {"moc_axis_limit": ("legacy", "analytic"), "moc_corrector": ("fixed2", "converge")}
+
+
+def _moc_keys(geometry: dict) -> tuple:
+    """geometry.moc_axis_limit / geometry.moc_corrector を読む (plans/active/discretization-moc-axis-limit-and-corrector.md
+    §4.3)。キーが無ければ既定 (legacy, fixed2)。値は文字列で選択肢のどれかに完全一致すること — null・大文字違い・
+    前後の空白・数値・真偽値は既定に読み替えず例外にする (黙って既定で設計しない)。"""
+    out = []
+    for key, choices in _MOC_KEYS.items():
+        if key not in geometry:
+            out.append(choices[0])
+            continue
+        v = geometry[key]
+        if not isinstance(v, str) or v not in choices:
+            raise ValueError(f"geometry.{key} は {' / '.join(repr(c) for c in choices)} のどれか "
+                             f"(受け取った値: {v!r}。既定にするならキーを書かない)")
+        out.append(v)
+    return tuple(out)
+
+
 def design_chain(p: Problem) -> dict:
     """Hall (+CFD アンカー) → Hermite law → 逆 MOC → 壁 QA → CFD 壁。決定的。
 
@@ -238,6 +258,7 @@ def design_chain(p: Problem) -> dict:
         # 単調拘束 (plan tooling-nozzle-throat-monotone-r2 §4.2) は joint 壁の当てはめのオプション。他の壁表現で黙って無視しない
         raise ValueError("geometry.wall_fit_mono_r2 は wall_repr: joint 専用 "
                          f"(wall_repr = {p.geometry.get('wall_repr', 'interp')!r})")
+    moc_axis_limit, moc_corrector = _moc_keys(p.geometry)     # 不正値は重い処理 (CFD ピンの読込) の前に例外
     gas = p.gas_model
     # cfd_gas: cpg のときは**設計も** CPG(γ 参照値) で作る。設計だけ semi-perfect にすると
     # 壁 (A/A*=13.1) と CFD (CPG γ=1.309 なら A/A*=15.3) の熱力学が食い違い、出口 M が
@@ -380,6 +401,10 @@ def design_chain(p: Problem) -> dict:
         return law
 
     rF_pred = float(np.sqrt(area_ratio_isentropic(Md, g)))
+    # 逆 MOC の単位過程 (plans/active/discretization-moc-axis-limit-and-corrector.md §4.3):
+    # geometry.moc_axis_limit = legacy (既定、軸端点の sinθ/r は相手の値で代用) | analytic (軸則から解析極限 θ_r)
+    # geometry.moc_corrector = fixed2 (既定、予測 1 + 修正 2 回) | converge (更新量 ≤ 1e-12 まで、上限 50 回)
+    # キーが無ければ従来とビット同一。キーの検査は design_chain の冒頭 (`_moc_keys`)
 
     def _run_inverse(law):
         # target: [x0, x_A) は実測 (反復時) / [x_A, x_E] law / 以降 M_d
@@ -390,8 +415,24 @@ def design_chain(p: Problem) -> dict:
                     return float(seg(np.float64(x)))
                 return float(ht.mach(x, 0.0)) if x_reach_cfd is None else float(law(x_A))
             return float(law(x))
+
+        def target_dM(x: float) -> float:
+            """target_moc の dM/dx (analytic の θ_r 用。軸則の解析微分)。区間の分け方は target_moc と同じ。"""
+            x = float(x)
+            if x < x_A:
+                if seg is not None:
+                    return float(seg(np.float64(x), 1))
+                if x_reach_cfd is None:
+                    # x_A = x0 なので軸節点 (x > x0) では通らない。Hall の級数なら解析微分、他 (CFD ピン) は未定義
+                    return float(ht.axis_anchor(x)[1]) if type(ht) is HallThroat else float("nan")
+                return 0.0                                  # target = law(x_A) の定数
+            return float(law.deriv(x, 1))
         x_end = law.x_E + float(p.geometry.get("x_end_margin", 2.3)) \
             * rF_pred * float(np.sqrt(Md * Md - 1.0))
+        kw_moc = {}
+        if (moc_axis_limit, moc_corrector) != ("legacy", "fixed2"):
+            kw_moc = dict(axis_limit=moc_axis_limit, corrector=moc_corrector, target_dM=target_dM,
+                          axis_anchor=(x_A, M_A, Mp_A))
         return inverse_design(ht, target_moc, x_axis_end=float(x_end),
                               n_axis=int(p.geometry.get("n_axis_inv", 500)),
                               n_start=n_start, gamma=g,
@@ -401,7 +442,7 @@ def design_chain(p: Problem) -> dict:
                               x_E=law.x_E, M_d=Md, start_line=start_line,
                               wall_mode=str(p.geometry.get("wall_mode", "streamline")),
                               blend_width=float(p.geometry.get("wall_blend_width", 1.0)),
-                              axis_dx0=p.geometry.get("axis_dx0"))
+                              axis_dx0=p.geometry.get("axis_dx0"), **kw_moc)
 
     mode = str(p.geometry.get("Lc_mode", "explicit"))
     solve_diag = None
@@ -518,6 +559,9 @@ def design_chain(p: Problem) -> dict:
             "anchor_source": anchor_src,
             "start_line": start_line, "wall_mode": res["wall_mode"],
             "wall_repr": wall_repr,
+            # 逆 MOC の単位過程の診断 (plan discretization-moc-axis-limit-and-corrector §4.2): キーの値・対の 5 分類・反復回数・
+            # 最終残差・源項の分岐 (AXIS_LIMIT_FRAC の発火の数と位置)・θ_r の出所と軸端の接続検査・ゲート (converge のとき合否)
+            "moc": res.get("moc"),
             "gas": (gas.summary() if hasattr(gas, "summary")
                     else {"kind": "cpg", "gamma": p.gamma, "cp": p.cp}),
             "gamma_hall": g_hall,
@@ -624,6 +668,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
             "wall_fit": d["wall_fit"],
             "Md": d["Md"], "Md_moc_offset": d["Md_moc_offset"], "R": d["R"],
             "initial_line": d["initial_line"],
+            "moc": d["moc"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},
             "exit": d["exit"],
             "mdot_ratio_moc": d["mdot_ratio_moc"], "cd_series": d["cd_series"],
@@ -1107,7 +1152,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "Lc_mode": d["Lc_mode"], "Lc_solve": d["Lc_solve"],
             "anchor": list(d["anchor"]), "anchor_source": d["anchor_source"],
             "start_line": d["start_line"], "wall_mode": d["wall_mode"],
-            "wall_repr": d["wall_repr"], "initial_line": d["initial_line"],
+            "wall_repr": d["wall_repr"], "initial_line": d["initial_line"], "moc": d["moc"],
             "wall_fit": d["wall_fit"],      # 設計壁の当てはめ (joint: spline・mono_r2 ほか; plan tooling-nozzle-throat-monotone-r2 §5.1 #5 M4)
             "Md": d["Md"], "Md_moc_offset": d["Md_moc_offset"], "R": d["R"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},

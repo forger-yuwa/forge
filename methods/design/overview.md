@@ -672,10 +672,65 @@ n=4000 で 1.32e-3 と素直に減る)。採否の最終判定は CFD の軸 M /
 **A5 で「逆 MOC の質量流束リーク (離散化誤差)」と診断し `n_axis_inv: 2000` を要求した根拠は
 実際にはこのバグだった** — 修正後は流線壁と C⁺ 流束閉包の $r_F$ が 5 桁一致し
 (3.26760 / 3.26759、修正前は 3.26550 / 3.26757)、両壁の差は 2.09e-3 → 2.33e-5 に縮む。
-軸に寄りすぎた点だけは $\theta$ の誤差が $1/r$ で増幅されるため
+軸に寄りすぎた**軸外の点** ($r>10^{-9}$) だけは $\theta$ の誤差が $1/r$ で増幅されるため
 `AXIS_LIMIT_FRAC` (相手点の半径に対する比、既定 0.05) を下回るときのみ相手から極限を
-代用する。**生産ノズル経路では 1 度も発火しない** (n=2000 で 2695 万回中 0 回)。
+代用する。**この軸外の代用は生産ノズル経路では 1 度も発火しない** (n=2000 で 2695 万回中 0 回。
+case/45 の生産問題 n_axis 2400・n_start 41 でも 298 万対中 0 回、2026-10-07)。
+一方、**軸上の端点** ($r\le10^{-9}$: 軸節点と初期線の軸端) は $0/0$ なので**常に**代用の分岐に入る:
+相手が軸外なら相手の $\sin\theta/r$ を借り、相手も軸上なら 0 にする。軸の第 1 段 (軸節点 2 個の対) は
+両端とも 0 で評価されていた (case/45 で 4798 端点が 0、1 端点が借用)。
 詳細は [`plans/accepted/discretization-moc-axisymmetric-source-term.md`](../../plans/accepted/discretization-moc-axisymmetric-source-term.md)。
+
+**軸上の解析極限と予測修正の収束 (選択式、2026-10-07)**: 問題 YAML の 2 キーで単位過程を選ぶ
+(`InverseMOC` / `moc_kernel.interior_vec`。キーが無ければ従来とビット同一。計画
+[discretization-moc-axis-limit-and-corrector](../../plans/active/discretization-moc-axis-limit-and-corrector.md))。
+
+| キー | 値 | 意味 |
+| --- | --- | --- |
+| `geometry.moc_axis_limit` | `legacy` (既定) / `analytic` | 軸上の端点の $\sin\theta/r$ を、相手の値で代用 / その点の解析極限 $\theta_r$ にする |
+| `geometry.moc_corrector` | `fixed2` (既定) / `converge` | 予測 1 回 + 修正 2 回 / θ・ν の更新量 $\le10^{-12}$ rad まで (上限 50 回) |
+
+不正値 (null・大文字違い・前後の空白・数値・真偽値) は既定に読み替えず例外にする。
+
+- **解析極限**: 軸の近くで $\theta\approx\theta_r r$。軸近傍の質量保存 $2\rho u\,\theta_r=-d(\rho u)/dx$ と、
+  等エントロピー流の $d\nu=\sqrt{M^2-1}\,d\ln u$・$d\ln(\rho u)=(1-M^2)\,d\ln u$ から
+  $$\theta_r=\tfrac12\sqrt{M^2-1}\,\nu_M(M)\,M'(x)$$
+  (`moc_kernel.axis_theta_r`)。比熱一定なら $\tfrac12(M^2-1)M'/[M(1+\frac{\gamma-1}2M^2)]$ で、上の
+  $-\tfrac12 d\ln F/dx$ と同じ量。semi-perfect の $\nu_M$ は MOC 本体と同じ ν(M) 表の 3 次スプライン微分
+  (本体の ν と逆関数は線形補間なので補間関数は違う。case/45 のアンカーで勾配の差 0.0156 %、
+  $\theta_r=0.104146$ rad/$r_t$。反復の許容差とは別の熱力学近似誤差として扱う)。
+  $M,M'$ は軸則 (target) の値と解析微分 (`law.deriv`)、初期線の軸端はアンカー $(M_A,M'_A)$
+  (`moc_inverse.axis_theta_r_init`)。CFD 反復のアンカーで $x_A\ne x_0$ のときは初期線の軸端を $x_A$ と扱わず、
+  初期線の軸端の M と target の $dM/dx$ を使う。軸則に微分が無いときの代わりは軸端点の ν の 3 次スプライン微分で
+  $\theta_r=\tfrac12\sqrt{M^2-1}\,d\nu/dx$ ($\nu_M$ を掛けない)。どちらを使ったか (`theta_r.source`) と、
+  target (軸節点) と throat (初期線の軸端) の x・M・ν・$M'$ の接続検査 (`theta_r.connection`、許容差 $10^{-9}$) を記録する。
+  既知の軸端点の $\theta_r$ は予測・修正を通じて固定 (反復中の $\theta/r$ から更新しない)。軸外の点は従来どおり点自身で
+  評価し、`AXIS_LIMIT_FRAC` の分岐も変えない (真の軸端点の判定が先)。
+- **収束する修正子**: 対ごとに更新量が $10^{-12}$ 以下になった時点で止める (同じ段の他の対の反復回数に結果が依存しない)。
+  停止判定は入力が有限の対だけで行う。
+- **診断** (`inverse_design(...)["moc"]` → `design_chain(...)["moc"]` → `prepare_info.json` の `moc`):
+  対の 5 分類 (入力時点の対象 = もともとの欠損 + 幾何的棄却 [平行な特性線・軸より下] + 反復の失敗
+  [反復中の NaN・Inf、上限到達] + 収束)、反復回数の分布、最終状態で幾何の交点式と適合式を再評価した残差の最大、
+  源項の分岐の数 (軸端点の解析極限・借用・0、`AXIS_LIMIT_FRAC` の発火の数と位置)。
+- **ゲート** (`moc["gate"]`、`converge` のときだけ合否): 反復の失敗が 1 対でもある・最終残差 $>10^{-10}$・
+  幾何的棄却が壁の内側 (許す領域 = 対の両端が設計壁より上、または壁の x 範囲の外) ・`analytic` で軸端の接続不一致、
+  のどれかで不合格。**設計自体は止めない** (検証・生産の手順がこの合否を読む)。
+
+**放射源流の厳密解** (`design/tests/moc_axis_limit_radial.py`、壁の誤差 = x 1.4〜2.4 の 21 標本の最大相対誤差、
+第 1 段 = 軸節点 2 個の対から作る点の θ の厳密解からの誤差、2026-10-07):
+
+| n_axis × n_start | 壁: legacy+fixed2 (現行) | 壁: legacy+converge | 壁: **analytic+converge** | 第 1 段 θ の相対誤差 (現行 / legacy+converge / analytic+converge) |
+| --- | --- | --- | --- | --- |
+| 140 × 25 | 1.057e-4 | 9.765e-5 | **7.037e-5** | 50 % / 33 % / 1.8e-4 |
+| 280 × 49 | 3.470e-5 | 2.949e-5 | **1.743e-5** | 50 % / 33 % / 4.8e-5 |
+| 560 × 97 | 1.094e-5 | 8.738e-6 | **4.369e-6** | 50 % / 33 % / 1.2e-5 |
+| 1120 × 193 | 3.314e-6 | 2.526e-6 | **1.100e-6** | 50 % / 33 % / 3.1e-6 |
+| 最細区間の次数 | 1.72 | 1.79 | **1.99** | |
+
+修正子をそろえても (legacy+converge) 第 1 段の θ は 1/3 ずれたままで、軸端の源項を解析極限にすると
+$O(h^2)$ で消え、壁全体が 2 次になる。いずれも未収束の対 0 (修正子の回数 最大 31〜34、平均 3.6〜5.9)。
+case/45 の生産問題 (n_axis 2400・n_start 41) では analytic+converge の修正子は平均 1.99 回・最大 34 回、
+最終残差 5.0e-13 (適合式) / 2.2e-13 (幾何)。生産への採否は計画 §6 V4・V5 で決める (既定は legacy + fixed2 のまま)。
 
 **CFD 実測** (case/41。`wall_mode`・解像度・源項修正の有無以外は同一):
 
@@ -827,7 +882,7 @@ MOC カーネル (`pm_nu`/`pm_mach`/`_mass_flux_density`/`area_ratio_isentropic`
 RANS 軸 M の law 側帰還 / 粘性の出口一様性 (BL 除外) 評価 / 出口 $\varepsilon_M$ の差の原因究明 / MOC の 2 次精度化 (軸上の解析極限
 $\partial\theta/\partial r|_{r=0}=-\frac12 d\ln F/dx$・適合式の Simpson 化・軸点の非一様配置) /
 `AXIS_LIMIT_FRAC` のしきい値不要化。
-軸上の解析極限と予測修正の収束は plan [discretization-moc-axis-limit-and-corrector](../../plans/active/discretization-moc-axis-limit-and-corrector.md) で着手 (2026-10-07)。軸上の極限は気体モデルの ν(M) を使い $\theta_r=\tfrac12\sqrt{M^2-1}\,d\nu/dx$ と書ける (比熱一定なら上の $-\tfrac12 d\ln F/dx$ と同じ)。
+軸上の解析極限と予測修正の収束は plan [discretization-moc-axis-limit-and-corrector](../../plans/active/discretization-moc-axis-limit-and-corrector.md) で選択式として実装した (2026-10-07、上の「軸上の解析極限と予測修正の収束」。既定は従来のまま)。
 なお **ΔM の支配残差 (x≈6.2 の谷) は壁の抽出法に依存しない** ため、
 これ以上は逆 MOC ではなくアンカー/軸 Mach law 側の課題。
 
