@@ -134,6 +134,7 @@ python3 solver_density_cuda/tools/rerun_conditions.py REF_RUN NEW_RUN [--Pt P --
 ```
 
 - 対応する入力: 単一の `inlet_Pressure` (Y{s} 形式、inletProfile なし)・`outlet_statPress`・`wall`/`wall_isothermal`/`slip`・`axis`、`nozzle.h5` を mesh/value に使う run。外れれば作る前に止まる。
+  NS / Euler は実効 config で判定する (粘着壁があれば NS; 全壁 `slip` は粘性・熱伝導・種拡散・乱流が無効な config だけ Euler として受理し、輸送が有効なら止まる)。重複した YAML キーを含む config は止まる (ツールとソルバで解釈が違うため)。
 - **Pt を変えるときは背圧の指定 (`--Ps` か `--keep-Ps`) が必須**。node の出口は壁際の列が常に背圧を見るので、Pt だけ下げると出口の壁際から崩れる。
   ツールは参照の出口断面の静圧に対する `Ps/(f·P_exit_ref)` を表示する (相似にするなら Ps も同じ比で)。
 - 乾き成分 (lump) の組成変更は v1 では止まる (化学種の定義が変わり、どの引き継ぎ経路も拒否する)。H2O 分率 (`--Y H2O=...`) は可。

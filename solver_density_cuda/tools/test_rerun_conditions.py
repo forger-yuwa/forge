@@ -125,6 +125,19 @@ def lines_diff(a, b):
 
 
 # --- 合成 fixture の書き換え ---
+def cfg_noturb(t):
+    return re.sub(r"^turbulence:.*$", "turbulence: {model: \"none\"}", t, flags=re.M)
+
+
+def cfg_inviscid(t):
+    """Euler 構成 (乱流なし・viscMethod 0・visc 0・thermCond 0・transport なし; run_0086 と同じ輸送設定) に書き換える。"""
+    t = cfg_noturb(t).replace("viscMethod: 2,", "viscMethod: 0,", 1)
+    t = t.replace("visc: 1.8e-5, thermCond: 0.0257,", "visc: 0.0, thermCond: 0.0,", 1)
+    t2 = re.sub(r"\n\s*transport: \{[^{}]*\},", "", t, count=1)
+    assert t2 != t and "viscMethod: 0," in t2 and "visc: 0.0, thermCond: 0.0," in t2, "Euler 構成への書き換えが当たらない"
+    return t2
+
+
 def cfg_three_species_tracer(t):
     t = t.replace('"H2O"],', '"H2O", "CO2"],', 1)
     return t.replace("thermoHrefTemp: 298.15}", "thermoHrefTemp: 298.15, tracer: exhaust}", 1)
@@ -316,12 +329,12 @@ def main():
     # ------------------------------------------------------------------ (f′) Euler の滑り壁 (2026-10-06 追加)
     slip = lambda t: re.sub(r"wall:\s*\{physID: 3, kind: wall, +outputHDFflg: 1, ints: , floats: \}",  # noqa: E731
                             "wall:   {physID: 3, kind: slip,             outputHDFflg: 1, ints: , floats: }", t)
-    noturb = lambda t: re.sub(r"^turbulence:.*$", "turbulence: {model: \"none\"}", t, flags=re.M)  # noqa: E731
+    noturb = cfg_noturb
 
     def _drop_viscous(r):   # Euler 構成の fixture: prepare_info.viscous (run_0094 は True) を外す
         _pi = json.load(open(os.path.join(r, "prepare_info.json"))); _pi.pop("viscous", None)
         json.dump(_pi, open(os.path.join(r, "prepare_info.json"), "w"))
-    ref, new = make_ref(edit_cfg=noturb, edit_bc=slip); _drop_viscous(ref)
+    ref, new = make_ref(edit_cfg=cfg_inviscid, edit_bc=slip); _drop_viscous(ref)
     p = plan_of([ref, new, *PT08])
     yb = yaml.safe_load(p["new_bc_text"])
     check("(f′) 滑り壁 (slip) の run を受理し、壁行はバイト一致", yb["wall"]["kind"] == "slip" and lines_diff(p["bc_text"], p["new_bc_text"]) == [0, 1],
@@ -330,7 +343,7 @@ def main():
     done(ref, new)
 
     # ------------------------------------------------------------------ (f″) 乱流モデルなしの run に残る roK/roOmega (2026-10-06 追加)
-    ref, new = make_ref(edit_cfg=noturb, edit_bc=slip); _drop_viscous(ref)
+    ref, new = make_ref(edit_cfg=cfg_inviscid, edit_bc=slip); _drop_viscous(ref)
     p = plan_of([ref, new, *PT08, "--scale-ic", "pt"])
     check("(f″) 乱流なし + roK/roOmega の入れ物 → 受理し警告に記録、必要保存量に roK/roOmega を含めない",
           "roK" not in p["required"] and any("未使用量" in w for w in p["warnings"]), (p["required"], p["warnings"]))
@@ -348,7 +361,7 @@ def main():
     code, _, err = run_main([ref, new, "--dry-run"])
     check("(q) 乱流 (sst) なのに壁が全部 slip → 停止", code == 2 and "slip" in err, err[-200:])
     done(ref, new)
-    ref, new = make_ref(edit_cfg=noturb, edit_bc=slip); _drop_viscous(ref)
+    ref, new = make_ref(edit_cfg=cfg_inviscid, edit_bc=slip); _drop_viscous(ref)
     p = plan_of([ref, new, "--Pt", "4.4e6", "--keep-Ps", "--cfl", "2.0", "--steps", "6000", "--out-interval", "500"])
     check("(q) Euler: Pt 変更でも scale なし・Ps 据え置き → none でなく full + 未検証の警告",
           p["recommended_stages"]["stages"] == "full" and any("検証済み条件" in w for w in p["warnings"]), (p["recommended_stages"], p["warnings"]))
@@ -357,6 +370,49 @@ def main():
     p = plan_of([ref, new, *PT08, "--Tt", "1500"])
     check("(q) NS: Pt と Tt を同時に変える → scale-ic pt を推奨しない (禁止条件)・複合変更の警告",
           "--scale-ic pt を推奨" not in p["recommended_stages"]["note"] and any("同時に変えた" in w for w in p["warnings"]), (p["recommended_stages"], p["warnings"]))
+    check("(q) NS: Pt と Tt を同時に変える → 推奨文は Tt を禁止条件として挙げる",
+          "禁止条件 (Tt" in p["recommended_stages"]["note"] and "推奨対象外" in p["recommended_stages"]["note"], p["recommended_stages"])
+    done(ref, new)
+
+    # ------------------------------------------------------------------ (r) 重複 YAML キーの拒否 (codex result 段 3 回目 #1)
+    test_duplicate_keys()
+
+    # ------------------------------------------------------------------ (s) Euler 判定は輸送が無効なときだけ (codex result 段 3 回目 #2)
+    ref86 = os.path.join(os.path.dirname(REF_SRC), "run_0086_euler_wallfit_pincal_r1_ext6k", "solverConfig.yaml")
+    if os.path.exists(ref86):
+        check("(s) 参照 Euler run_0086 (viscMethod 0・visc 0・thermCond 0) は非粘性と判定",
+              rc.inviscid_problems(yaml.safe_load(open(ref86))) == [], rc.inviscid_problems(yaml.safe_load(open(ref86))))
+    else:
+        skip("(s) run_0086 の solverConfig", f"{ref86} が無い")
+    ref, new = make_ref(edit_cfg=noturb, edit_bc=slip); _drop_viscous(ref)   # 全 slip・乱流なし・viscMethod 2 + transport
+    code, _, err = run_main([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt", "--cfl", "5.0", "--steps", "6000"])
+    check("(s) 全 slip でも viscMethod 2 + transport → 作成前に停止 (未対応)",
+          code == 2 and "輸送が無効と確認できない" in err and "viscMethod" in err and "transport" in err and not os.path.exists(new), err[-300:])
+    done(ref, new)
+    ref, new = make_ref(edit_cfg=lambda t: cfg_inviscid(t).replace("visc: 0.0,", "visc: 1.8e-5,", 1), edit_bc=slip); _drop_viscous(ref)
+    code, _, err = run_main([ref, new, "--dry-run"])
+    check("(s) 全 slip・viscMethod 0 でも visc ≠ 0 (定数粘性) → 停止", code == 2 and "physProp.visc" in err, err[-300:])
+    done(ref, new)
+    ref, new = make_ref(edit_cfg=lambda t: cfg_inviscid(t).replace("thermCond: 0.0,", "thermCond: 0.0257,", 1), edit_bc=slip)
+    _drop_viscous(ref)
+    code, _, err = run_main([ref, new, "--dry-run"])
+    check("(s) 全 slip・visc 0 でも thermCond ≠ 0 (thermCondMethod 0) → 停止", code == 2 and "physProp.thermCond" in err, err[-300:])
+    done(ref, new)
+    ref, new = make_ref(edit_cfg=cfg_inviscid)   # 粘着壁 + 輸送なし → 従来どおり NS
+    p = plan_of([ref, new, *PT08])
+    check("(s) 粘着壁があれば (輸送の設定によらず) NS", p["recommended_stages"]["runner"] == "run_staged_ns", p["recommended_stages"])
+    done(ref, new)
+
+    # ------------------------------------------------------------------ (t) Pt + Tw の同時変更 (codex result 段 3 回目 #4)
+    ref, new = make_ref(edit_bc=iso)
+    code, out, err = run_main([ref, new, "--Pt", "4400000", "--Ps", "1789.6", "--Tw", "350", "--scale-ic", "pt", *REC_PT, "--dry-run"])
+    check("(t) --Pt --Ps --Tw --scale-ic pt は受理 (Tw は禁止条件でない)", code == 0, err[-300:])
+    p = plan_of([ref, new, "--Pt", "4400000", "--Ps", "1789.6", "--Tw", "350", "--scale-ic", "pt", *REC_PT])
+    rec = p["recommended_stages"]
+    txt = rec["note"] + " ".join(p["warnings"])
+    check("(t) 記録は「複合条件の起動・整定は未検証で推奨対象外」で、禁止条件に当たるとは書かない",
+          p["scale_ic"] == "pt" and "推奨対象外" in rec["note"] and "禁止条件に当たる" not in txt and "禁止条件 (" not in txt
+          and any("推奨対象外" in w for w in p["warnings"]), (rec, p["warnings"]))
     done(ref, new)
 
     # ------------------------------------------------------------------ (n) Pt 変更の推奨 (2026-10-06、§6 (ii′)・A3)
@@ -591,6 +647,7 @@ def test_stage_gate():
           and ram._first_order("space: {convMethod: 1, limiter: 2}") == "space: {convMethod: 0, limiter: 2}"
           and ram._first_order("space: {convMethod: 0, limiter: 2}") == "space: {convMethod: 0, limiter: 2}")
     test_stage_config_structured(ram)
+    test_run_staged_euler_gate(ram)
 
     calls = SimpleNamespace(forge=[], restart=[])
 
@@ -649,6 +706,145 @@ def test_stage_gate():
               [[s["tag"] for s in g] for g in segs])
     finally:
         ram.run_forge, ram._restart_same_mesh = orig
+
+
+def test_duplicate_keys():
+    """(r) 重複キーを含む YAML は作成前に拒否 (PyYAML は後勝ち・solver の yaml-cpp は先勝ち; codex result 段 3 回目 #1)。"""
+    import yaml_strict
+    for label, t in (("flow", 'turbulence: {model: "sst", model: "none"}'),
+                     ("block", "turbulence:\n  model: sst\n  model: none\n"),
+                     ("トップレベル", "gpu: 1\ngpu: 0\n"),
+                     ("深い階層の flow", "time:\n  deltaT: {cfl: 5.0, cfl: 1.0}\n")):
+        try:
+            yaml_strict.load(t)
+            raised = False
+        except yaml_strict.DuplicateKeyError:
+            raised = True
+        check(f"(r) yaml_strict: 重複キー ({label}) → DuplicateKeyError", raised)
+    base = open(os.path.join(BASE, "solverConfig.yaml")).read()
+    check("(r) yaml_strict: 正常な config は yaml.safe_load と同じ", yaml_strict.load(base) == yaml.safe_load(base))
+
+    dup_turb = lambda t: re.sub(r'^turbulence: \{model: "sst",', 'turbulence: {model: "sst", model: "none",', t, flags=re.M)  # noqa: E731
+    ref, new = make_ref(edit_cfg=dup_turb)
+    code, _, err = run_main([ref, new, *PT08, "--scale-ic", "pt"])
+    check("(r) solverConfig の turbulence: {model: \"sst\", model: \"none\"} → 作成前に停止",
+          code == 2 and "重複キー" in err and "model" in err and not os.path.exists(new), err[-300:])
+    done(ref, new)
+    ref, new = make_ref(edit_bc=lambda t: t.replace("Pt: 5500000.0,", "Pt: 5500000.0, Pt: 4400000.0,", 1))
+    code, _, err = run_main([ref, new, "--Tt", "1500", "--dry-run"])
+    check("(r) bcond の floats に重複キー → 停止", code == 2 and "重複キー" in err, err[-300:])
+    done(ref, new)
+
+    from forge_design.evaluate import runner_axismach as ram
+    rd = os.path.join(TMP, "staged_dup")
+    os.makedirs(rd)
+    shutil.copy2(os.path.join(BASE, "bcondConfig.yaml"), os.path.join(rd, "bcondConfig.yaml"))
+    open(os.path.join(rd, "solverConfig.yaml"), "w").write(dup_turb(base))
+    seen = []
+    orig = ram.run_forge
+    ram.run_forge = lambda run_dir: seen.append(1) or 0
+    try:
+        for fn, kw in ((ram.run_staged_ns, {"stages": "full"}), (ram.run_staged, {"stages": "full"})):
+            try:
+                fn(rd, **kw)
+                raised = False
+            except yaml_strict.DuplicateKeyError:
+                raised = True
+            check(f"(r) {fn.__name__}: 重複キーの段 config → 例外・forge を起動しない", raised and not seen, len(seen))
+        try:
+            ram.stage_gate(os.path.join(BASE, RES), dup_turb(base))
+            raised = False
+        except yaml_strict.DuplicateKeyError:
+            raised = True
+        check("(r) stage_gate: 重複キーの config → 例外", raised)
+    finally:
+        ram.run_forge = orig
+    shutil.rmtree(rd, ignore_errors=True)
+
+
+def test_run_staged_euler_gate(ram):
+    """codex result 段 3 回目 #3: run_staged (Euler) も各段の restart 前に段終了ゲートをかけ、段ごとの履歴と manifest を残す。"""
+    cfg_e = cfg_inviscid(open(os.path.join(BASE, "solverConfig.yaml")).read())
+    bad = {}
+    for label, val in (("ro=-1", -1.0), ("ro=Inf", np.inf)):
+        pth = os.path.join(TMP, f"euler_bad_{label.replace('=', '_')}.h5")
+        shutil.copy2(os.path.join(BASE, RES), pth)
+        with h5py.File(pth, "r+") as f:
+            a = np.asarray(f["VALUE/ro"]); a[7] = val; f["VALUE/ro"][...] = a
+        bad[label] = pth
+    calls = SimpleNamespace(forge=[], restart=[], gate=[])
+
+    def fake_forge_factory(src_for_stage):
+        def fake_forge(run_dir):
+            t = open(os.path.join(str(run_dir), "solverConfig.yaml")).read()
+            calls.forge.append(t)
+            n = int(yaml.safe_load(t)["time"]["last"]["nStepOuter"])
+            shutil.copy2(src_for_stage(len(calls.forge)), os.path.join(str(run_dir), f"res_{n}.h5"))
+            with open(os.path.join(str(run_dir), "residual_history.csv"), "w") as f:
+                f.write("step,rms_ro\n0,1.0\n%d,0.5\n" % n)
+            return 0
+        return fake_forge
+
+    real_gate = ram.stage_gate
+
+    def spy_gate(res, cfg):
+        probs = real_gate(res, cfg)
+        calls.gate.append((os.path.basename(str(res)), probs))
+        return probs
+
+    def fresh():
+        rd = os.path.join(TMP, "staged_euler")
+        shutil.rmtree(rd, ignore_errors=True)
+        os.makedirs(rd)
+        shutil.copy2(os.path.join(BASE, "bcondConfig.yaml"), os.path.join(rd, "bcondConfig.yaml"))
+        open(os.path.join(rd, "solverConfig.yaml"), "w").write(cfg_e)
+        for v in calls.__dict__.values():
+            v.clear()
+        return rd
+
+    orig = (ram.run_forge, ram._restart_same_mesh, ram.stage_gate)
+    try:
+        ram._restart_same_mesh = lambda res, mesh: calls.restart.append(str(res))
+        ram.stage_gate = spy_gate
+        for label, pth in bad.items():
+            for stage_no, where in ((1, "soft"), (2, "mid")):
+                rd = fresh()
+                ram.run_forge = fake_forge_factory(lambda k, _p=pth, _s=stage_no: _p if k == _s else os.path.join(BASE, RES))
+                try:
+                    ram.run_staged(rd, stages="full", mid_stage=True)
+                    raised = None
+                except RuntimeError as e:
+                    raised = str(e)
+                check(f"run_staged (Euler): {where} 段の最終場 {label} → 段終了ゲートで停止・次段の forge を起動しない",
+                      raised is not None and "段終了ゲート" in raised and len(calls.forge) == stage_no
+                      and len(calls.restart) == stage_no - 1 and len(calls.gate) == stage_no and calls.gate[-1][1],
+                      (raised or "")[:120] + f" forge={len(calls.forge)} restart={len(calls.restart)} gate={calls.gate}")
+                man = json.load(open(os.path.join(rd, "stage_manifest.json")))
+                tags = ["soft", "mid"][:stage_no]
+                check(f"run_staged (Euler): {where} 段 {label} で止まっても manifest と residual_history_<tag>.csv が残る",
+                      [s["tag"] for s in man["stages"]] == tags
+                      and all(os.path.exists(os.path.join(rd, f"residual_history_{t}.csv")) for t in tags))
+        # 健全: soft → mid → 本段、段の CFL・step 数は従来どおり、manifest 3 段、ゲートは 2 回
+        rd = fresh()
+        ram.run_forge = fake_forge_factory(lambda k: os.path.join(BASE, RES))
+        r = ram.run_staged(rd, stages="full", mid_stage=True)
+        man = json.load(open(os.path.join(rd, "stage_manifest.json")))
+        d = [yaml.safe_load(x) for x in calls.forge]
+        check("run_staged (Euler 健全): 3 段・ゲート 2 回・restart 2 回・rc 0、段の CFL・step 数は従来どおり (0.5/3000, 1.0/3000, 本段は元のまま)",
+              r == 0 and len(calls.forge) == 3 and len(calls.gate) == 2 and len(calls.restart) == 2
+              and float(d[0]["time"]["deltaT"]["cfl"]) == 0.5 and d[0]["time"]["last"]["nStepOuter"] == 3000 and d[0]["space"]["convMethod"] == 0
+              and float(d[1]["time"]["deltaT"]["cfl"]) == 1.0 and d[1]["time"]["last"]["nStepOuter"] == 3000 and d[1]["space"]["convMethod"] == 1
+              and calls.forge[2] == cfg_e, [(x["time"]["deltaT"]["cfl"], x["time"]["last"]["nStepOuter"]) for x in d])
+        check("run_staged (Euler 健全): manifest の段 = soft, mid, main・段ごとの残差履歴",
+              [s["tag"] for s in man["stages"]] == ["soft", "mid", "main"]
+              and all(os.path.exists(os.path.join(rd, f"residual_history_{t}.csv")) for t in ("soft", "mid", "main")))
+        rd = fresh()
+        r = ram.run_staged(rd, cfl_main=2, stages="none")
+        man = json.load(open(os.path.join(rd, "stage_manifest.json")))
+        check("run_staged (Euler) stages none: 本段だけ・manifest = main", r == 0 and len(calls.forge) == 1 and not calls.gate
+              and [s["tag"] for s in man["stages"]] == ["main"])
+    finally:
+        ram.run_forge, ram._restart_same_mesh, ram.stage_gate = orig
 
 
 def to_block_deltaT(t):
@@ -860,7 +1056,7 @@ def test_recommended_vs_config():
           and p["recommended_stages"]["config_effective"]["override"] is False)
     done(ref, new)
     # Euler 参照 (乱流なし・slip 壁・prepare_info に viscous なし): §4.7 は NS の推奨なので停止せず警告、回し方は run_staged
-    euler_cfg = lambda t: re.sub(r"^turbulence:.*$", "turbulence: {model: \"none\"}", t, flags=re.M)  # noqa: E731
+    euler_cfg = cfg_inviscid
     euler_bc = lambda t: re.sub(r"wall:\s*\{physID: 3, kind: wall, +outputHDFflg: 1, ints: , floats: \}",  # noqa: E731
                                 "wall:   {physID: 3, kind: slip,             outputHDFflg: 1, ints: , floats: }", t)
     ref, new = make_ref(edit_cfg=euler_cfg, edit_bc=euler_bc)

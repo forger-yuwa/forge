@@ -28,7 +28,9 @@ plan: plans/active/tooling-rerun-conditions.md §4 (設計方針)。手順の正
    ツールの commit・recommended_stages) と `prepare_info.json` (`ic_from`・`rerun_of`) を書く。
 
 v1 で止めるもの: 乾き成分 lump の組成変更 (`--lump`; restart_field・convert_species_field・forge の全経路が拒否する)、
-`X{s}` 形式・`inletProfile: 1`・複数 inlet・外部参照、凝縮 block・Tt 変更・組成変更と `--scale-ic pt` の併用。
+`X{s}` 形式・`inletProfile: 1`・複数 inlet・外部参照、凝縮 block・Tt 変更・組成変更と `--scale-ic pt` の併用、
+重複キーを含む YAML (solver の yaml-cpp は先勝ち・PyYAML は後勝ち; `yaml_strict`)、全壁 slip なのに輸送 (粘性・熱伝導・
+種拡散・乱流) が有効な config (Euler は viscMethod 0・visc 0・thermCond 0・transport なし・乱流なしだけ; `inviscid_problems`)。
 """
 import argparse
 import glob
@@ -46,6 +48,7 @@ import yaml
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import forge_species as fsp  # noqa: E402
+import yaml_strict  # noqa: E402  (重複キーを拒否する読み込み; solver の yaml-cpp は先勝ち・PyYAML は後勝ち)
 
 REPO_ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 MESH_FILE = "nozzle.h5"
@@ -156,7 +159,9 @@ def parse_bcond(text):
     """bcond を 1 行 1 境界の flow 形式として読む。戻り {名前: {line, kind, floats, ints, entry}} (出現順)。
     flow 形式でない行・YAML として読めない・名前が重複するものは RerunError。"""
     try:
-        doc = yaml.safe_load(text)
+        doc = yaml_strict.load(text)
+    except yaml_strict.DuplicateKeyError as e:
+        raise RerunError(f"bcondConfig.yaml が重複キーを含む (v1 は拒否): {e}")
     except yaml.YAMLError as e:
         raise RerunError(f"bcondConfig.yaml が YAML として読めない: {e}")
     if not isinstance(doc, dict):
@@ -362,7 +367,9 @@ def build_plan(a):
     cfg_text = open(os.path.join(ref, "solverConfig.yaml"), encoding="utf-8").read()
     bc_text = open(os.path.join(ref, "bcondConfig.yaml"), encoding="utf-8").read()
     try:
-        cfg = yaml.safe_load(cfg_text) or {}
+        cfg = yaml_strict.load(cfg_text) or {}
+    except yaml_strict.DuplicateKeyError as e:
+        raise RerunError(f"solverConfig.yaml が重複キーを含む (v1 は拒否; 必要保存量・分類を solver と違う解釈で決めうる): {e}")
     except yaml.YAMLError as e:
         raise RerunError(f"solverConfig.yaml が YAML として読めない: {e}")
 
@@ -619,7 +626,7 @@ def build_plan(a):
         new_cfg_text = _sub_once(r"\bcfl:\s*[-+.\deE]+,\s*cfl_pseudo:\s*[-+.\deE]+",
                                  lambda m: f"cfl: {fmt(a.cfl)}, cfl_pseudo: {fmt(a.cfl)}", new_cfg_text, "`cfl: X, cfl_pseudo: X`")
         cfg_changes["cfl"] = float(a.cfl)
-    new_cfg = yaml.safe_load(new_cfg_text) or {}
+    new_cfg = yaml_strict.load(new_cfg_text) or {}
     eff_cfl = {k: _num(_deltaT(new_cfg).get(k)) for k in ("cfl", "cfl_pseudo")}
     if a.cfl is not None and any(v is not None and v != float(a.cfl) for v in eff_cfl.values()):
         raise RerunError(f"書き換え後の solverConfig を読み直したら time.deltaT の cfl/cfl_pseudo = {eff_cfl} (期待 {float(a.cfl)})")
@@ -684,15 +691,29 @@ def build_plan(a):
     is_ns = noslip or tb_model.startswith("sst")
     if tb_model.startswith("sst") and not noslip:
         raise RerunError("乱流モデル (sst) なのに壁が全部 slip — config が不整合")
+    if not noslip:
+        # 全壁 slip を Euler と扱うのは、輸送 (粘性・熱伝導・化学種/受動種の拡散) が無効と確認できる設定だけ
+        # (codex result 段 3 回目 #2: viscMethod 2 + transport を残した全 slip を Euler と判定し stages none を推奨していた)
+        inv = inviscid_problems(cfg)
+        if inv:
+            raise RerunError("壁が全部 slip だが輸送が無効と確認できない — v1 の Euler 参照は「全壁 slip・乱流なし・"
+                             "粘性/熱伝導/種拡散が無効」の設定だけ (未対応):\n    " + "\n    ".join(inv))
     if pinfo is not None and pinfo.get("viscous") is not None and bool(pinfo["viscous"]) != is_ns:
         raise RerunError(f"prepare_info.viscous={pinfo['viscous']} と実効 config (壁 {wall_kinds}・乱流 {tb_model}) の分類が食い違う")
-    scale_allowed = not (("condensation" in cfg) or ("Tt" in changes) or ("Y" in changes) or ("Tw" in changes))
-    if cond_changed and is_ns and "Pt" in changes and not scale_allowed:
-        # Pt と Tt・組成・壁温・凝縮の複合変更: scale-ic pt は使えない (§4.4 の禁止条件) — 推奨は本段 cfl 1 だけ、整定の実績なし
-        rec = {"stages": "full", "cfl": 1.0, "nStepOuter_min": 60000,
-               "note": "Pt と Tt/組成/壁温/凝縮の複合変更 → run_staged_ns(stages='full')・本段 cfl 1・60000 step。"
-                       "scale-ic pt は禁止条件に当たるので推奨しない。複合変更の整定の実績はない (plan §4.7)"}
-        warnings.append("Pt と Tt/組成/壁温/凝縮を同時に変えた: この組合せの起動・整定は未検証 (plan §4.7)。量が STEADY になるまで延長して確認すること")
+    # scale-ic pt の禁止条件は凝縮・Tt・組成だけ (§4.4(3))。壁温 Tw は禁止条件でない (スケール可) — ただし Pt との同時変更は
+    # 複合条件として起動・整定が未検証なので推奨対象外 (codex result 段 3 回目 #4: Tw を禁止条件と書いて受理と矛盾していた)
+    scale_forbid = [w for c, w in (("condensation" in cfg, "凝縮"), ("Tt" in changes, "Tt"), ("Y" in changes, "組成")) if c]
+    compound = [w for k, w in (("Tt", "Tt"), ("Y", "組成"), ("Tw", "壁温")) if k in changes]
+    if cond_changed and is_ns and "Pt" in changes and (scale_forbid or compound):
+        # Pt と Tt・組成・壁温の複合変更 (または凝縮 run の Pt 変更): 推奨は本段 cfl 1 だけ、整定の実績なし
+        what = "・".join(compound + (["凝縮 run"] if "condensation" in cfg else []))
+        note = (f"Pt と {what} の複合条件 → run_staged_ns(stages='full')・本段 cfl 1・60000 step。"
+                "複合条件の起動・整定は未検証で推奨対象外 (plan §4.7)。")
+        note += (f"scale-ic pt は禁止条件 ({'・'.join(scale_forbid)}; plan §4.4(3)) に当たるので使えない"
+                 if scale_forbid else "scale-ic pt は使える (壁温は禁止条件でない; plan §4.4(3)) が、この組合せでの効果は未検証")
+        rec = {"stages": "full", "cfl": 1.0, "nStepOuter_min": 60000, "note": note}
+        warnings.append(f"Pt と {what} を同時に変えた: 複合条件の起動・整定は未検証で推奨対象外 (plan §4.7)。"
+                        "量が STEADY になるまで延長して確認すること")
     elif cond_changed and is_ns and "Pt" in changes:
         # plan tooling-rerun-conditions §6 (ii′)・A3 (2026-10-06): Pt 0.8 倍は stages full でも本段 cfl 5 で出口壁際の角から発散
         # (scale あり step 468、なし step 2 で入口)、scale あり + full + 本段 cfl 1 は STEADY → Pt 変更の本段は cfl 1、scale-ic pt を推奨
@@ -773,6 +794,41 @@ def build_plan(a):
     }
 
 
+def inviscid_problems(cfg):
+    """全壁 slip の run を Euler (非粘性) と扱ってよいかを solverConfig (dict) の実効値で検査する。問題のリストを返す (空なら非粘性)。
+    forge の実効値 (codex result 段 3 回目 #2):
+    - 粘性: `viscousFlux_d_wrapper` は viscMethod によらず毎反復呼ばれ、viscMethod 0 の μ は定数 `visc` (`gasProperties_d.cu:91`)
+      → viscMethod 0 かつ visc 0 で μ ≡ 0。viscMethod 1 (Sutherland)・2 (`physProp.transport`) は μ > 0。
+    - 熱伝導: viscMethod 0 の λ は thermCondMethod 0 なら定数 `thermCond`、1 なら μ·cp/Pr (visc 0 なら 0)。
+    - 化学種・受動種の拡散・二相拡散・軸対称の粘性ソースは viscMethod != 0 のときだけ (`speciesTransport_d.cu:960`・
+      `axisymmetricSource_d.cu:264`)。`physProp.transport` は viscMethod 2 専用 (他と併用は forge が起動拒否)。
+    - 乱流・遷移モデルなし。"""
+    pp = cfg.get("physProp") or {}
+    tb = cfg.get("turbulence") or {}
+    probs = []
+    vm = _num(pp.get("viscMethod"))
+    if vm != 0.0:
+        probs.append(f"physProp.viscMethod = {pp.get('viscMethod')!r} (0 でない: 粘性・熱伝導・化学種/受動種の拡散が働く)")
+    visc = _num(pp.get("visc"))
+    if visc is None or visc != 0.0:
+        probs.append(f"physProp.visc = {pp.get('visc')!r} (0 でない/無い: viscMethod 0 の μ は定数 visc)")
+    tcm = _num(pp.get("thermCondMethod", 0))
+    if tcm == 0.0:
+        tc = _num(pp.get("thermCond"))
+        if tc is None or tc != 0.0:
+            probs.append(f"physProp.thermCond = {pp.get('thermCond')!r} (0 でない/無い: thermCondMethod 0 の λ は定数 thermCond)")
+    elif tcm != 1.0:                                   # 1 は λ = μ·cp/Pr (visc 0 なら 0)
+        probs.append(f"physProp.thermCondMethod = {pp.get('thermCondMethod')!r} (0/1 以外は対応外)")
+    if "transport" in pp:
+        probs.append("physProp.transport がある (種ごとの輸送物性 = 粘性・熱伝導が有効)")
+    model = str(tb.get("model") or "none").strip().lower()
+    if model not in ("none", "0"):
+        probs.append(f"turbulence.model = {tb.get('model')!r} (乱流モデルあり)")
+    if str(tb.get("transition") or "none").strip().lower() not in ("none", "0"):
+        probs.append(f"turbulence.transition = {tb.get('transition')!r} (遷移モデルあり)")
+    return probs
+
+
 def _ref_cfl(cfg):
     dT = ((cfg.get("time") or {}).get("deltaT") or {})
     return dT.get("cfl")
@@ -781,7 +837,10 @@ def _ref_cfl(cfg):
 def _sync_species_meta(text, names, Y):
     """species_meta.yaml の streams.inflow.Y_transport・Y (実種; expansion で展開) を同期し、
     実種の MW が内蔵表で揃うときだけ X も作り直す (揃わなければ X を消す)。戻り (新しい本文, 注記)。"""
-    meta = yaml.safe_load(text) or {}
+    try:
+        meta = yaml_strict.load(text) or {}
+    except yaml_strict.DuplicateKeyError as e:
+        raise RerunError(f"species_meta.yaml が重複キーを含む (v1 は拒否): {e}")
     if [str(s) for s in (meta.get("species") or names)] != names:
         raise RerunError(f"species_meta.yaml の species {meta.get('species')} が physProp.species {names} と違う")
     inflow = ((meta.get("streams") or {}).get("inflow"))

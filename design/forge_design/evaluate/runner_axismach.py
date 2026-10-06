@@ -648,9 +648,19 @@ def _cfg_num(v):
         return None
 
 
+def _yaml_strict():
+    """重複キーを拒否する YAML ローダー (`solver_density_cuda/tools/yaml_strict.py`)。solver の yaml-cpp は先勝ち・
+    PyYAML は後勝ちなので、重複キーのある段 config を PyYAML で検査すると solver と違う値を照合してしまう
+    (plan tooling-rerun-conditions、codex result 段 3 回目 #1)。"""
+    if str(FORGE_TOOLS) not in sys.path:
+        sys.path.insert(0, str(FORGE_TOOLS))
+    import yaml_strict
+    return yaml_strict
+
+
 def _cfg_load(cfg_text: str) -> dict:
-    import yaml
-    doc = yaml.safe_load(cfg_text)
+    """solverConfig を読む (重複キーは yaml_strict.DuplicateKeyError)。辞書でなければ ValueError。"""
+    doc = _yaml_strict().load(cfg_text)
     if not isinstance(doc, dict):
         raise ValueError("solverConfig が YAML の辞書でない")
     return doc
@@ -720,39 +730,59 @@ def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, 
     """soft 段 (1次+cfl0.5, 3000 step) → [mid 段 (2次+cfl1, 3000 step)] → 本段。
     walldriven W3 と同方式・段階起動必須。`cfl_main` で本段 CFL を上書き
     (semi-perfect TP は cfl4 で本段 step ~60 に爆発 — case/42 実測。TP は cfl≤2 が実績
-    [[cutler-cpg-vs-tp-dplur-sst]])。`mid_stage=True` で 2 次化と CFL 上げを分離する。"""
-    import re
+    [[cutler-cpg-vs-tp-dplur-sst]])。`mid_stage=True` で 2 次化と CFL 上げを分離する。
+    `run_staged_ns` と同じく、段ごとの実効設定を `stage_manifest.json` に記録し、段の残差履歴を
+    `residual_history_<tag>.csv` に残す (tag = soft / mid / main)。段の最終 res の必要保存量が非有限・ρ≤0 なら
+    次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9、codex result 段 3 回目 #3)。"""
+    import shutil
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
+    bc_path = run_dir / "bcondConfig.yaml"
+    bc_text = bc_path.read_text() if bc_path.exists() else ""
     if cfl_main is not None:
         cfg_main = _cfg_set(cfg_main, {"cfl": cfl_main, "cfl_pseudo": cfl_main})
     main_want = {k: _cfg_value(cfg_main, k) for k in ("convMethod", "cfl", "cfl_pseudo", "nStepOuter", "outStepInterval")}
+    sm = _stage_manifest_cls()(run_dir)
+
+    def _record(cfg, tag):
+        """段の残差履歴を段名つきで残し、manifest に段を足して書く (失敗した段も診断用に残す; run_staged_ns と同じ)。"""
+        hist = run_dir / "residual_history.csv"
+        if hist.exists():
+            shutil.copy(hist, run_dir / f"residual_history_{tag}.csv")
+        sm.add(tag, cfg, bc_text, history=f"residual_history_{tag}.csv")
+        sm.write()
 
     def _stage(cfg, nsteps, label, want):
         cfg = _cfg_set(cfg, {"nStepOuter": nsteps, "outStepInterval": nsteps})
         _cfg_check(cfg, {**want, "nStepOuter": nsteps, "outStepInterval": nsteps}, label)
         (run_dir / "solverConfig.yaml").write_text(cfg)
+        (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
         rc = run_forge(run_dir)
+        _record(cfg, label)
         res = sorted(run_dir.glob("res_[0-9]*.h5"),
                      key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res or int("".join(c for c in res[-1].stem if c.isdigit())) < nsteps:
             raise RuntimeError(f"{label} 段が失敗 (発散切り分けは res_nan_*.h5 を見る)")
+        probs = stage_gate(res[-1], cfg)                    # restart_field のビット一致検査は Inf・負密度を排除しない
+        if probs:
+            raise RuntimeError(f"段 {label} の最終場 {res[-1].name} が段終了ゲートで不合格 — 次段へ進まない:\n    "
+                               + "\n    ".join(probs))
         _restart_same_mesh(res[-1], run_dir / mesh_h5)      # 同一メッシュ: index コピー (旧: interp_field.py)
         for f in run_dir.glob("res_*"):
             f.unlink()
 
-    if stages == "none":
-        _cfg_check(cfg_main, main_want, "main")
-        (run_dir / "solverConfig.yaml").write_text(cfg_main)
-        return run_forge(run_dir)
-    soft = _first_order(_cfg_set(cfg_main, {"cfl": 0.5, "cfl_pseudo": 0.5}))   # 旧: `convMethod: 1` だけを 0 に置換
-    _stage(soft, 3000, "soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
-    if mid_stage and stages == "full":
-        mid = _cfg_set(cfg_main, {"cfl": 1.0, "cfl_pseudo": 1.0})
-        _stage(mid, 3000, "mid", {"convMethod": main_want["convMethod"], "cfl": 1.0, "cfl_pseudo": 1.0})
+    if stages != "none":
+        soft = _first_order(_cfg_set(cfg_main, {"cfl": 0.5, "cfl_pseudo": 0.5}))   # 旧: `convMethod: 1` だけを 0 に置換
+        _stage(soft, 3000, "soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
+        if mid_stage and stages == "full":
+            mid = _cfg_set(cfg_main, {"cfl": 1.0, "cfl_pseudo": 1.0})
+            _stage(mid, 3000, "mid", {"convMethod": main_want["convMethod"], "cfl": 1.0, "cfl_pseudo": 1.0})
     _cfg_check(cfg_main, main_want, "main")
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
-    return run_forge(run_dir)
+    (run_dir / "residual_history.csv").unlink(missing_ok=True)
+    rc = run_forge(run_dir)
+    _record(cfg_main, "main")
+    return rc
 
 
 def collect(problem_path, run_dir) -> dict:
@@ -1102,11 +1132,10 @@ def stage_gate(res_h5, cfg_text: str) -> list:
     """段終了ゲート: 段の最終 res で必要保存量 (config から決める; `rerun_conditions.required_conserved_from_cfg`)
     が揃い、有限で ρ>0 か。問題のリストを返す (空なら次段へ進んでよい)。
     forge の rc と最終 step だけを見ていた旧実装は、非有限の場を `restart_field` で次段の初期場へ写しえた (§4.9)。"""
-    import yaml
     if str(FORGE_TOOLS) not in sys.path:
         sys.path.insert(0, str(FORGE_TOOLS))
     from rerun_conditions import field_problems, required_conserved_from_cfg
-    req = required_conserved_from_cfg(yaml.safe_load(cfg_text) or {})
+    req = required_conserved_from_cfg(_cfg_load(cfg_text))
     probs, _ = field_problems(res_h5, req, species_bounds=False)
     return probs
 

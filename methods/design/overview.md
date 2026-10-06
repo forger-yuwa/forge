@@ -996,7 +996,11 @@ NS run の条件を変えたときは、δ_E の評価に**同条件の Euler re
 **Pt を変える rerun の起動 (2026-10-06 の検証)**: 粗格子 NS の Pt 0.8 倍では、段階起動 (full) でも本段 cfl 5 で出口の壁際の角 (scale あり) / 入口 (scale なし) から発散し、`--scale-ic pt` + full + 本段 cfl 1 は準定常に達した。ツールは Pt 変更に `recommended_stages` = full・本段 cfl 1 と `--scale-ic pt` を推奨し、scale none には警告を出す。scale none + full + 本段 cfl 1 は入口配管の壁際に逆流域を残したまま別の状態に向かった (2026-10-06)。
 
 
-**NS / Euler の分類と Euler 参照の推奨 (2026-10-06)**: NS か Euler かは実効 config で決める (粘着壁 `wall`/`wall_isothermal` があれば NS、壁が全部 `slip` なら Euler; `prepare_info.viscous` は照合のみ)。Euler 参照の `stages: none`・cfl 2・6000 step は「Pt だけを変え、`--scale-ic pt` で Ps も同じ比」の条件でしか検証していない (run_0120)。Tt・組成を変えた Euler 参照は同じ設定では準定常に達しなかった (run_0134) ので、full で STEADY まで回す。NS で Pt と Tt・組成・壁温・凝縮を同時に変えるときは `--scale-ic pt` が使えず、起動・整定の実績もない。
+**NS / Euler の分類と Euler 参照の推奨 (2026-10-06)**: NS か Euler かは実効 config で決める (粘着壁 `wall`/`wall_isothermal` があれば NS、壁が全部 `slip` なら Euler; `prepare_info.viscous` は照合のみ)。Euler と扱うのは、全壁 `slip` に加えて輸送が無効と確認できる設定だけ: 乱流・遷移モデルなし、`viscMethod: 0` かつ `visc: 0` (viscMethod 0 の μ は定数 `visc` で、粘性流束は viscMethod によらず毎反復評価される)、`thermCondMethod: 0` なら `thermCond: 0`、`physProp.transport` なし (化学種・受動種の拡散は `viscMethod ≠ 0` のときだけ働く)。全壁 `slip` でも輸送が有効な config (例 `viscMethod: 2` + `transport`) は未対応として作成前に拒否する。Euler 参照の `stages: none`・cfl 2・6000 step は「Pt だけを変え、`--scale-ic pt` で Ps も同じ比」の条件でしか検証していない (run_0120)。Tt・組成を変えた Euler 参照は同じ設定では準定常に達しなかった (run_0134) ので、full で STEADY まで回す。NS で Pt と Tt・組成・壁温を同時に変える (または凝縮 run で Pt を変える) 複合条件は、起動・整定が未検証で推奨対象外 (`recommended_stages` は full・本段 cfl 1・60000 step と警告を記録)。`--scale-ic pt` の禁止条件は Tt・組成・凝縮だけで、壁温 Tw は禁止条件でない (Pt + Tw は `--scale-ic pt` を受理する)。
+
+**入力 YAML の重複キー**: solverConfig・bcondConfig・species_meta と、`run_staged`/`run_staged_ns` の段 config 検査は `solver_density_cuda/tools/yaml_strict.py` で読み、全階層 (flow・block 形式) の重複キーを拒否する (PyYAML は後勝ち・solver の yaml-cpp は先勝ちなので、PyYAML で読んだ値は solver の実効設定と違いうる)。
+
+`run_staged` (Euler) も `run_staged_ns` と同じく、各段 (soft・mid) の restart 前に段終了ゲート (`stage_gate`) をかけ、段ごとの `residual_history_<tag>.csv` (tag = soft / mid / main) と `stage_manifest.json` を残す。段の CFL・step 数は変えていない。
 
 ## メッシュ (構造化・トポロジ固定)
 
