@@ -62,7 +62,7 @@ problem YAML を書き換えて runner/deltastar_loop に通すと `design_chain
 5. **記録**: `NEW_RUN/RERUN_CONDITIONS.json` (参照 run/res、変更前後の全値、必要保存量集合、scale_ic と f・スケール検査の結果、P_exit_ref と `Ps/(f·P_exit_ref)`、restart_field の VERDICT 行、forge の sha256、ツールの commit、`recommended_stages`)。
    `prepare_info.json` は幾何を据え置き、`ic_from` を参照 res で上書き、`rerun_of` を追加。
 6. **入口 k・ω は変えない** (指定時のみ上書き; 設計チェーン自身も固定値、`runner_wt.py:280-285`)。
-7. **`recommended_stages`**: 変更なし → `none` (参照 cfl); 条件を 1 つでも変えた → `full` (細分格子は本段 cfl 1); **Pt を変えた → `full` かつ本段 cfl 1、`--scale-ic pt` を推奨 (scale none なら警告)** — §6 (ii′)・A3 の結果 (2026-10-06)。「スケール IC + none」を Pt のみ変更の推奨に昇格するかは §6 (ii) の結果で別途判断 (§5.1 #8)。
+7. **`recommended_stages`**: 変更なし → `none` (参照 cfl); 条件を 1 つでも変えた → `full` (細分格子は本段 cfl 1); **Pt を変えた → `full` かつ本段 cfl 1、`--scale-ic pt` を推奨 (scale none なら警告)** — §6 (ii′)・A3 の結果 (2026-10-06)。**暫定**: 根拠は A3 のみ (同条件の B3 で確定、§6 (ii″))。「スケール IC + none」を Pt のみ変更の推奨に昇格するかは §6 (ii) の結果で別途判断 (§5.1 #8)。
 8. **Euler 参照**: Pt のみの変更でも、δ_E 評価には同条件の Euler rerun を対で作る (旧 Pt の Euler 参照だと edge 帯の |傾き| 判定が変わり δ が −4 % 動く合成反例; `deltastar.py:243-250`)。旧条件参照の `mdot_ratio_vs_euler` は診断量として記録のみ。
 9. **前提作業: `run_staged_ns` の改修** (codex M4、design 側コード、ソルバ数値は触らない): StageManifest 記録 (`stage_manifest.py` 既存 API)・段ごとの `residual_history_<tag>.csv` 保持・`convMethod: [12]` → 0 の正規表現・段終了ゲート (最終 res の必要保存量が有限・ρ>0、非有限なら次段へ進まず停止)。
 
@@ -85,7 +85,7 @@ problem YAML を書き換えて runner/deltastar_loop に通すと `design_chain
 | 6 | 文書同期 | `procedures/nozzle-design-workflow.md` §3a・skill `nozzle-design` | O |
 | 7 | codex result 段レビュー | `codex_review.py --stage result` | O |
 | 8 | ~~「スケール IC + none」を Pt のみ変更の推奨に昇格するか~~ 決着 2026-10-06 (diagnostician): 昇格しない ((ii) で両腕とも none・cfl 5 で発散) | 完了 | F |
-| 10 | ~~スケール IC の残置/推奨/削除~~ 決着 2026-10-06 (登録表 (c) の補足 → A3 に (b) を適用): **Pt 変更時は `--scale-ic pt` を推奨・stages full・本段 cfl 1**、scale none + Pt 変更には警告。注記: B 腕は cfl 5 でしか試しておらず、scale none の本段 cfl 1 は未検証 | 完了 (ツール・単体 (n)・§4.7) | F |
+| 10 | スケール IC の残置/推奨/削除 — **暫定** 2026-10-06 (A3 に (b) を適用したが B2 は cfl 5 で同条件でない → (ii″) B3 で確定): **Pt 変更時は `--scale-ic pt` を推奨・stages full・本段 cfl 1**、scale none + Pt 変更には警告。注記: B 腕は cfl 5 でしか試しておらず、scale none の本段 cfl 1 は未検証 | 完了 (ツール・単体 (n)・§4.7) | F |
 | 9 | (本 plan 外) lump 変更対応・物理受入れ (iii) | `convert_species_field` に lump 同名・輸送 Y 保持のモード; (iii) は最初の生産利用で | F |
 
 ## 6. 検証 (事前登録; diagnostician 2026-10-06 の改訂版)
@@ -134,6 +134,16 @@ problem YAML を書き換えて runner/deltastar_loop に通すと `design_chain
 - **(iv) の決着規約 (延長 run_0128 の結果を見る前に固定)**: 延長後 STEADY → 合格。不達のとき: `classify` の detail が単調・増分減衰 (漸近値あり) で NaN 0・残差 rising でなければ「経路合格・量は漸近中 (漸近値 X・最終比 ±Y %)」と記録して plan 完了の妨げにしない (経路試験で値は報告に使わない; 量の定常性は (iii) で確認)。OSCILLATING・残差 rising・漸近値なしの DRIFTING → 保留・再諮問。これ以上延長しない。
 - **方針が誤りと言える観測 (追記)**: (ii′) で A2 が soft/mid 段で破綻 (スケール場が NS で不整合) または B2 のみ健全。
 
+- **(ii″) B3 (diagnostician 2026-10-06、(ii′)(b) の同条件確認; 先に固定)**: run_0094 res_6000 → `--Pt 4.4e6 --Ps 1789.6 --scale-ic none`、`run_staged_ns(stages="full")`、本段 cfl 1・60000 step・5000 ごと (A3 と同一)、延長 1 回 (6000) まで (`run_0133_rerun_pt08_noscale_full_cfl1`)。δ_E は run_0120 参照。
+  ゲート: 段ゲート停止なし・NaN 0; δ_E・M・ṁ が規約で STEADY; |A3−B3| が δ_E ≤ 0.02 %・M ≤ 5e−5。
+  解釈: (a) B3 STEADY・一致 → scale-ic pt は opt-in 残置、§4.7「Pt 変更: full + 本段 cfl 1 (scale は任意、どちらも検証済み)」、scale none の警告は情報表示に格下げ; (b) B3 が破綻 (段を問わず) または延長後も STEADY 不達 → (b) 確定、警告維持; (d) 両方 STEADY だが不一致 → 保留・再諮問。B3 の結果が出るまで §4.7 の (b) は「暫定 (根拠 A3 のみ)」。
+- **(iv″) 整定長の確定 (diagnostician 2026-10-06、(iv) 保留の決着手順; 先に固定)**: run_0128 から restart_field (ビット一致) で cfl 5・6000 step・500 ごとのブロックを最大 4 回 (本段累計 36000) (`run_0135`〜`run_0138_rerun_fullpath_blk{1..4}`)。Euler 参照 = run_0086 → `--Tt 1500 --Y H2O=0.10 --keep-Ps`、`run_staged(stages="none", cfl 2)` 6000 step (`run_0134_rerun_euler_tt1500`、δ_E 抽出用、値の合否なし)。
+  各ブロック終了ごとに規約 (M drift 3e−6/osc 3e−6、ṁ drift 1e−5/osc 2e−5、δ_E drift 5e−5/osc 1e−4、`--tail 0.4 --min-snaps 10`) で判定し、3 量 STEADY で停止。
+  診断量 (合否外): ṁ の到達予想 ≈ 17150 (Pt/√(R·Tt) スケーリング、BL 変化含まず; 1 % 以上外れて単調に進み続ければ実効入力を疑う)、本段 res の入口列の T・Y1 実効値 (1500 K・0.10)。
+  解釈: STEADY 到達 → (iv) 合格、§4.7 に「Tt/Y 変更: full + 本段 cfl 参照、量が STEADY になるまで (粗格子で N step)」を実測で記載; 上限で単調・増分減衰 (classify が漸近値) → 「経路合格・量は漸近中」で記録し §5.1 に F 項目を残して plan は進める; 上限で線形 (漸近値なし) または OSCILLATING → 保留のまま、ツール外としてユーザ判断に上げる (plan は done にしない)。
+- **§4.7 最終形 (B3・(iv″) の後に実測で埋める)**: 無変更 → none・参照 cfl (run_0119); Pt 変更 → full + 本段 cfl 1・60000 (+ scale は (ii″) の結果); Tt/Y 変更 → full + 本段 参照 cfl、STEADY まで N step ((iv″) の結果)。
+- **方針が誤りと言える観測 (追記)**: (iv″) で ṁ が到達予想から 1 % 超外れて単調に進む (実効入力の不整合); B3 と A3 が両方 STEADY で不一致 (IC 依存)。
+
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -166,3 +176,4 @@ problem YAML を書き換えて runner/deltastar_loop に通すと `design_chain
 - `2026-10-06` — diagnostician に諮った (エスカレーション条件 3): 「A 発散 → 削除候補」は発火したが、(ii) は両腕とも stages none・cfl 5 で発散し scale の良否を識別していない (B は入口 step 120、A は出口角 step 334; 出口 BC の ghost 構築はスケール不変 `boundaryCond_d.cu:614-624`、config に Pt 依存定数なし)。第 1 仮説 = 非固定点 IC からの本段 cfl 5 の安定限界超え (run_0098/0101 と同指紋、run_0031 は full なら Euler IC からでも cfl 5 完走) — 原因の確定は (ii′) の後。#8 は「昇格しない」で決着。残置/推奨/削除は (ii′) [scale-ic pt/none × full] の事前登録表で決める (§6)。(iv) の延長不達時の扱いを事前登録。
 - `2026-10-06` — **(ii′) の結果**: 腕 A2 `case/45.isobutane_m6_d155/run_0129_rerun_pt08_scale_full` (scale-ic pt) は soft・mid 段を通過し**本段 (2 次 cfl 5) の step 468 で発散** (非有限 54 節点 x/r_t 94.7〜95.2・r/r_t 10.09〜10.10 = 出口の壁際の角、T 上限 6000 K; (ii) 腕 A と同じ位置); 腕 B2 `run_0130_rerun_pt08_noscale_full` (scale none) は soft・mid 段を通過し**本段の step 2 で発散** (x/r_t −12.5〜−12.0・r/r_t 5.7〜6.1 = 入口、T 50 K)。段記録 (stage_manifest 3 段・段ごとの残差履歴) は両腕とも正常。→ 登録 (c) の補足「soft/mid は通り本段 cfl 5 だけが出口角で破綻 → 削除の前に本段 cfl 1・60000 step の A3 を 1 本だけ」に該当 → `run_0131_rerun_pt08_scale_full_cfl1` (scale-ic pt、stages full、本段 cfl 1・60000 step・5000 ごと) を投入。**(iv) 延長** `run_0128_rerun_fullpath_ext`: 出口コア M 6.0274 → 6.0299 (末尾 5 枚、直前窓差 +0.0008)・流量も増加中、`classify` は DRIFTING (extremum at tail-end、漸近値なし) → 決着規約により**保留・再諮問** (延長はしない)。
 - `2026-10-06` — **(ii′) の補足 A3 の結果と決着**: `case/45.isobutane_m6_d155/run_0131_rerun_pt08_scale_full_cfl1` (scale-ic pt、stages full、本段 cfl 1・60000) は完走・NaN 0、延長 1 回 `run_0132_rerun_pt08_scale_cfl1_ext` (6000 step・500 ごと、restart_field ビット一致) の末尾 5 枚で δ_E 0.7494484 (直前窓差 0.0005 %)・出口コア M 5.992124 (幅 3.5e−6)・流量 13341 (run_0120 比 0.99970) が §6 の閾値で全 STEADY (延長前は δ_E の直前窓差 0.0114 % が 0.01 % を僅かに超えたため登録どおり延長)。壁解像は粗格子の既知 FAIL (y1+>1 25.9 %、run_0094 の 29.4 % より下がった)。診断量: δ_E/0.725280 = 1.033 (予想 1.02〜1.10 内)、出口 M は低下 (予想どおり)。→ 登録 (c) の補足「A3 STEADY → §4.7 を『Pt 変更の本段は cfl 1』とし (a)/(b) を A3 に適用」: B2 は破綻 → **(b) Pt 変更時は `--scale-ic pt` を推奨 (stages full・本段 cfl 1)、scale none に警告**。ツール (`recommended_stages` に cfl 1、警告) と単体 (n) を追加、FAIL 0。注記: B 腕は cfl 5 でしか試しておらず「scale none + 本段 cfl 1」は未検証 — 推奨の根拠は A 腕が安定したことだけ。
+- `2026-10-06` — diagnostician に諮った ((iv) 保留・再諮問): (iv) の DRIFTING は Tt/H2O 変更の正当で遅い整定 (NaN 0・plateau・ṁ は到達予想 ≈ 17150 まで残り ≈ 0.2 %) と判断、「cfl 1・60000」は累積擬似時間が同じで整定を進めないため却下 → cfl 5 のまま上限付き延長 (iv″) と同条件 Euler rerun を登録。(ii′)(b) は A3 (cfl 1) と B2 (cfl 5) の非同条件比較なので暫定とし、B3 (none + full + cfl 1) で確定 (ii″)。result 段レビューは (ii″)・(iv″)・#6 の後。
