@@ -5,6 +5,7 @@
 B4-0: 壁第一層検査 `first_layer_check`。B4-1: 出力実座標の隣接間隔比 `adjacent_spacing_check`、後流 Δx `wake_dx_check`、
 形状ゲート `shape_check` (と MOC 輪郭 `Contour` / カウル外壁のオフセット `Geom.yo`) — 末尾の (e)(f)(g)。
 B4-2: 継ぎ目の分布則 (片側等比 `prog_nodes`・継ぎ目の間隔の連動 `match_spacing`・z の節点数の規則) と `cowl_side` の一般壁分類 — (h)(i)。
+B4-4: リング対角辺の非対称分布 `ring_diag_spacing` (壁側端の保持・コア側端の比・全長・区間数・内部隣接比) — (j)。
 
 山場: 旧検査は対向節点が別の壁上の節点でも除外せず、層数も設定の記録だけだったので、全 6 面が壁で内部節点 0 の立方体でも
 6 壁 ok になった (2026-10-06 plan レビュー M1)。人工の格子を渡して
@@ -24,7 +25,7 @@ try:
 except ImportError:                       # 検査の中核は gmsh を使わない。import だけ通す
     sys.modules["gmsh"] = types.ModuleType("gmsh")
 from hex_junction_model import (first_layer_check, adjacent_spacing_check, wake_dx_check, shape_check, Geom, P0,  # noqa: E402
-                                prog_nodes, prog_r, prog_n, match_spacing, END_TAGS, WALL_TAGS)
+                                prog_nodes, prog_r, prog_n, match_spacing, ring_diag_spacing, END_TAGS, WALL_TAGS)
 
 FAIL = 0
 
@@ -258,6 +259,22 @@ check("(i2) cowl_side は h1 (端面の h1e でない) と一般壁の層数 NL 
       and abs(fl["cowl_side"]["ratio_min"] - 1) < 1e-12, f"比 {fl['cowl_side']['ratio_min']:.4f} 期待層数 {fl['cowl_side']['layers_expected']}")
 fl = first_layer_check(xyz, hx, {"cowl_side": F_["ymin"]}, 9 * H1, H1, NL, 3, DR)
 check("(i3) cowl_side の第一層が h1 の 1/9 (h1e 相当の設定で切った格子) なら FAIL", not fl["cowl_side"]["ok"], f"比 {fl['cowl_side']['ratio_min']:.4f}")
+
+# (j) リング対角辺の非対称分布 (plan §6.4 の B)。対称の基準分布 (両端細分、gmsh の Bump の代わりに対数放物の間隔列) から作る
+n_r = 52; tt = (np.arange(n_r) + 0.5) / n_r; base = np.exp(2.2 * (1 - (2 * tt - 1) ** 2)) ** -1
+base = base / base.sum() * 0.08 * np.sqrt(2)                       # 全長 = √2 dr (dr 0.08 H)
+qb = np.maximum(base[1:] / base[:-1], base[:-1] / base[1:]).max()
+d = ring_diag_spacing(base, 1 / np.sqrt(2), g); qd = np.maximum(d[1:] / d[:-1], d[:-1] / d[1:]).max()
+check("(j1) 非対称分布: 区間数・全長・壁側端を保持し、コア側端 / 壁側端 = 1/√2、内部隣接比 <= 1.2",
+      len(d) == n_r and abs(d.sum() - base.sum()) < 1e-15 and abs(d[0] / base[0] - 1) < 1e-12 and abs(d[-1] / d[0] - 1 / np.sqrt(2)) < 1e-12 and qd <= g,
+      f"全長差 {d.sum() - base.sum():.1e} 壁側 {d[0] / base[0]:.12f} 端比 {d[-1] / d[0]:.12f} 内部比 {qd:.4f} (基準 {qb:.4f})")
+d1 = ring_diag_spacing(base, base[-1] / base[0], g)
+check("(j2) 比 = 基準の端比 (対称なら 1) では基準分布そのもの (A と同一)", np.allclose(d1, base, rtol=1e-12, atol=0), f"最大相対差 {np.abs(d1 / base - 1).max():.1e}")
+try:
+    ring_diag_spacing(base[:8] / base[:8].sum(), 0.05, g); bad = False
+except ValueError:
+    bad = True
+check("(j3) 少ない区間数で端比 0.05 は内部隣接比 > 1.2 になり ValueError (分布だけでは満たせないときは止める)", bad)
 
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)
