@@ -5,6 +5,13 @@
   run i の窓平均 m_i、時間変動の標準誤差 s_i = sd_i/√n (自己相関は補正しない)。
   腕の平均 M = mean(m_i)、腕の標準誤差 SE = max(sd(m_i)/√3, √(Σ s_i²)/3)。
   D = M_B − M_A、SE_D = √(SE_A² + SE_B²)。
+前提検査 (codex result 段レビュー 2026-10-07 M2。どれか不成立なら総合は「保留 (前提不成立)」):
+  残差: 判定区間 (--segment) の判定が pass か既知の plateau。DIVERGED・RISING・欠損・判定不能は不成立。
+  壁: prepare_info の wall_fit.mono_r2 が腕 A は None、腕 B は [0.0, 1.5] と完全一致。メッシュの壁節点が自腕の当てはめ後 spline と一致し
+      (throat_mono_ab.wall_evidence の consistent)、対の他腕 (A rk ↔ B rk) との照合が ok。
+  初期値: 腕 B は IC_MAP.json の VERDICT OK・mode index で、3 本の写像後 sha256 が同じ (同じ準備から作った)。
+          腕 A は新形式の IC 記録より前に準備したので、旧形式の例外として restart_field.log の「SRC とビット一致」を要する (例外として記録)。
+  乾式確認 (DRY) の準備から作った run は不成立。
 判定 (大きいほど悪い量の片側): D + 2·SE_D ≤ Δq → 「許容幅未満」/ D − 2·SE_D ≥ Δq → 「悪化」/ それ以外 → 保留 (ユーザ判断)。
   別欄で差の検出の有無 (|D| > 2·SE_D なら「検出」) を記録する。判定は許容幅で行い、検出の有無は判定に使わない。
 usage: python3 throat_mono_practical_eval.py [case_dir]   → _band_ab/throat_mono_practical_eval.json と標準出力の表
@@ -44,7 +51,55 @@ def series(run: str, name: str) -> dict:
     return out
 
 
+def preconditions() -> tuple:
+    """§冒頭の前提検査。戻り値 (不成立の一覧 {run: [理由]}, 例外の記録 [文])。証拠が読めないこと自体を不成立にする。"""
+    from throat_mono_judge import SEGMENT_VERDICT_FILE, parse_segment_verdict, mono_r2_matches
+    bad, exceptions, sha_b = {}, [], {}
+    for arm, runs in ARMS.items():
+        for k, run in enumerate(runs):
+            rd = C / run; why = []
+            try:
+                seg = parse_segment_verdict((rd / SEGMENT_VERDICT_FILE).read_text() if (rd / SEGMENT_VERDICT_FILE).is_file() else None)
+                if seg["status"] not in ("pass", "plateau"):
+                    why.append(f"判定区間の残差判定が {seg['status']} ({seg.get('reason') or seg.get('line')})")
+                info = json.loads((rd / "prepare_info.json").read_text())
+                if info.get("DRY") or info.get("DRY_NO_IC"):
+                    why.append("乾式確認 (DRY) の準備から作った run")
+                wf = info.get("wall_fit") or {}
+                exp = None if arm == "A" else [0.0, 1.5]
+                if "mono_r2" not in wf:
+                    why.append("prepare_info の wall_fit に mono_r2 の記録が無い")
+                elif not mono_r2_matches(wf.get("mono_r2"), exp):
+                    why.append(f"mono_r2 {wf.get('mono_r2')!r} が期待 {exp!r} と一致しない")
+                from throat_mono_ab import wall_evidence
+                ev = wall_evidence(rd, C / ARMS["B" if arm == "A" else "A"][k])
+                if ev.get("status") != "consistent":
+                    why.append(f"壁の証拠が {ev.get('status')} ({ev.get('reason', '')})")
+                if (ev.get("vs_other") or {}).get("status") != "ok":
+                    why.append(f"他腕との壁の照合が {(ev.get('vs_other') or {}).get('status')}")
+                if arm == "B":
+                    rec = json.loads((rd / "IC_MAP.json").read_text())
+                    if rec.get("VERDICT") != "OK" or rec.get("mode") != "index":
+                        why.append(f"IC_MAP.json の VERDICT {rec.get('VERDICT')!r}・mode {rec.get('mode')!r} (OK・index であること)")
+                    sha_b[run] = rec.get("dst_sha256_after")
+                else:
+                    log = (rd / "restart_field.log").read_text() if (rd / "restart_field.log").is_file() else ""
+                    if "SRC とビット一致" not in log:
+                        why.append("restart_field.log に「SRC とビット一致」が無い (腕 A の IC の証拠)")
+                    else:
+                        exceptions.append(f"{run}: 新形式の IC 記録より前に準備したため、旧形式 (restart_field.log のビット一致) で受けた")
+            except Exception as e:  # noqa: BLE001  証拠が読めないことは不成立
+                why.append(f"証拠を読めない: {type(e).__name__}: {e}")
+            if why:
+                bad[run] = why
+    if len(set(sha_b.values())) > 1 or any(v is None for v in sha_b.values()):
+        for r in sha_b:
+            bad.setdefault(r, []).append(f"腕 B の 3 本の写像後 sha256 がそろわない ({sorted(set(map(str, sha_b.values())))})")
+    return bad, exceptions
+
+
 def main():
+    pre_bad, pre_exc = preconditions()
     S = {arm: {r: series(r, "wallfit_series_e3.csv") for r in runs} for arm, runs in ARMS.items()}
     ic = {r: series(r, "wallfit_series_icab.csv") for r in ICAB}
     rows, verdicts = [], {}
@@ -74,7 +129,9 @@ def main():
         else:
             row.update(verdict="記録のみ")
         rows.append(row)
-    if all(v == "許容幅未満" for v in verdicts.values()):
+    if pre_bad:
+        overall = "保留 (前提不成立): " + "; ".join(f"{r}: {', '.join(w)}" for r, w in pre_bad.items())
+    elif all(v == "許容幅未満" for v in verdicts.values()):
         det = [r["qty"] for r in rows if r.get("detected")]
         overall = ("単調壁を候補形状として採用 (Euler で全量の D + 2·SE ≤ Δq)。差を検出した量: " + (", ".join(det) if det else "なし"))
     elif any(v == "悪化" for v in verdicts.values()):
@@ -82,7 +139,7 @@ def main():
     else:
         overall = "保留 (ユーザ判断)"
     out = dict(plan="plans/active/tooling-nozzle-throat-monotone-r2.md §6 E′", window_steps=WIN, n_per_run=13,
-               arms=ARMS, icab=ICAB, rows=rows, overall=overall,
+               arms=ARMS, icab=ICAB, rows=rows, overall=overall, preconditions_failed=pre_bad, precondition_exceptions=pre_exc,
                limits=["自己相関は補正していない", "窓の開始 6000 は予備 A/B の時系列を見た後に決めた",
                        "IC 写像による差 (α−β) は Δq/10 の精度では除外できていない (表の ic 列)", "軸 (η0) の量は判定対象外"])
     (C / "_band_ab").mkdir(exist_ok=True)
@@ -91,6 +148,8 @@ def main():
     for r in rows:
         print(f"{r['qty']:28s} {r.get('dq', float('nan')):8.2e} {r['A']['mean']:11.6g} {r['B']['mean']:11.6g} {r['D']:+10.2e} "
               f"{2 * r['SE_D']:9.2e} {r.get('D_plus_2SE_over_dq', float('nan')):10.2f} {r['ic_beta_minus_alpha']:+10.2e} {('あり' if r.get('detected') else 'なし') if 'detected' in r else '-':>4s}  {r['verdict']}")
+    for e in pre_exc:
+        print("前提の例外:", e)
     print("総合:", overall)
 
 
