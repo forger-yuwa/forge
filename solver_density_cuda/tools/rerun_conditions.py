@@ -6,7 +6,7 @@ r"""既存 run の形状 (格子) を固定したまま、入口条件・背圧�
         [--Ps P | --keep-Ps] [--Tw T | --keep-Tw] [--steps N] [--out-interval M] [--cfl C]
         [--scale-ic none|pt] [--override-recommended] [--forge BIN] [--dry-run]
 
-plan: plans/active/tooling-rerun-conditions.md §4 (設計方針)。手順の正本は procedures/nozzle-design-workflow.md §3a、
+plan: plans/accepted/tooling-rerun-conditions.md §4 (設計方針)。手順の正本は procedures/nozzle-design-workflow.md §3a、
 仕様の解説は methods/design/overview.md「既存 run の条件変更 (rerun_conditions)」。
 
 やること (順に; どこで止まっても NEW_RUN は残さない):
@@ -1139,7 +1139,7 @@ def execute(plan):
                 json.dump(pinfo, f, indent=1)
 
         record = {
-            "tool": "solver_density_cuda/tools/rerun_conditions.py", "plan": "plans/active/tooling-rerun-conditions.md",
+            "tool": "solver_density_cuda/tools/rerun_conditions.py", "plan": "plans/accepted/tooling-rerun-conditions.md",
             "argv": sys.argv[1:], "ref_run": _repo_rel(ref), "ref_res": _repo_rel(plan["res"]),
             "copied": copied,
             "changes": {k: v for k, v in plan["changes"].items()}, "solverConfig_changes": plan["cfg_changes"],

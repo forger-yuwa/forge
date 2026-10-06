@@ -125,7 +125,7 @@ M6 (case/45) で実際に通した順番。各段の「何で判定するか」�
 
 ### 3a. 形状は固定、入口条件・背圧・入口分率だけ変えて回す (よくある用途)
 
-ツール **`solver_density_cuda/tools/rerun_conditions.py`** を使う (plan [`tooling-rerun-conditions.md`](../plans/active/tooling-rerun-conditions.md)、仕様は `methods/design/overview.md`「既存 run の条件変更」)。
+ツール **`solver_density_cuda/tools/rerun_conditions.py`** を使う (plan [`tooling-rerun-conditions.md`](../plans/accepted/tooling-rerun-conditions.md)、仕様は `methods/design/overview.md`「既存 run の条件変更」)。
 既存 run の `nozzle.h5` (物理壁の格子) を再利用し、bcond の floats だけを書き換え、参照 run の最終場を初期場に入れ、変更点を `RERUN_CONDITIONS.json` に残す。**forge は起動しない。**
 
 ```

@@ -886,7 +886,7 @@ evaluate:
 
 作成済みのノズル (既存 run の `nozzle.h5` に物理壁の格子が入っている) で、**形状を変えずに**入口条件・背圧・入口分率だけを変えた
 run を作るツール `solver_density_cuda/tools/rerun_conditions.py`
-(plan [`tooling-rerun-conditions.md`](../../plans/active/tooling-rerun-conditions.md) §4)。problem YAML を書き換えて runner に通すと
+(plan [`tooling-rerun-conditions.md`](../../plans/accepted/tooling-rerun-conditions.md) §4)。problem YAML を書き換えて runner に通すと
 `design_chain` が壁を作り直すので、run ディレクトリを直接複製・編集する。**run の準備までを行い、forge は起動しない**
 (起動は `runner_axismach.run_staged_ns` / `run_staged`、判定は既存の `check_*`)。
 
