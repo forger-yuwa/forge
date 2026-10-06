@@ -25,7 +25,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
-| [tooling-nozzle-wall-single-bspline.md](active/tooling-nozzle-wall-single-bspline.md) | `tooling` | **draft 2026-10-07**: 物理壁を入口から出口まで 1 本の x の 5 次 B-spline で表す (δ_r の平滑化を x 空間に、ランプ区間は 0.1 µm 以下で当てはめ)。CAD に渡せる形に。既定はビット同一、生産化は NS・凝縮の再評価 (MOC の plan と合わせる) |
+| [tooling-nozzle-wall-single-bspline.md](active/tooling-nozzle-wall-single-bspline.md) | `tooling` | **draft 2026-10-07 (案 A)**: 設計の中身は変えず、物理壁を入口から出口まで 1 本の x の 5 次 B-spline に許容誤差 0.01 µm で作り直し、メッシュ生成・報告・CAD で共通に使う。CAD には STEP (平面の B-spline 曲線) で渡す。既定はビット同一 |
 | [discretization-moc-axis-limit-and-corrector.md](active/discretization-moc-axis-limit-and-corrector.md) | `discretization` | **in_progress 2026-10-07**: 逆 MOC の軸上の端点のソース項を、相手からの代用ではなく解析極限 θ_r = ½√(M²−1)·dν/dx (semi-perfect は ν(M) 表) にし、予測修正を収束まで回す。YAML キーで選び既定はビット同一。case/45 への反映は検証後にユーザが決める |
 | [tooling-stage-manifest-launch-binding.md](active/tooling-stage-manifest-launch-binding.md) | `tooling` | **段の区間判定を起動記録に結び付ける** (2026-09-27 起票、gradient-scalar-lsq #2g): 同じ YAML を旧→新バイナリで起動すると最後の起動の実効値で全段が上書きされ、別作用素の段が 1 区間に連結される欠陥 (codex M7)。起動記録にバイナリ id、段と起動を設定ハッシュ + 起動順で単調対応、実効 `scalarGradient`・`slauWallNormalChi`・バイナリを hard キーに。draft・**後回し (2026-09-27 ユーザ決定)**: 起動 ID と履歴の直接対応で §4/§6 は確定済み、codex plan 段 GO-with-changes (Major 4) の反映は再開時 |
 | [boundary-node-rotational-periodic.md](active/boundary-node-rotational-periodic.md) | `boundary` | **node 周期 (seam 合算経路) の回転周期対応** (2026-09-26 ユーザ指示)。member ごとの root 相対角でベクトル量 (運動量・勾配・速度勾配テンソル・陰解法対角) にだけ回転をはさむ、スカラーは恒等。90° 環状セクタ vs 全周で同値性、SLAU + slauWallNormalChi を検証。draft・codex plan 段が先 |
