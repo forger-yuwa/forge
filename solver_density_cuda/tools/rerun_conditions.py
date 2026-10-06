@@ -693,10 +693,18 @@ def build_plan(a):
     pinfo = json.load(open(info_path)) if os.path.exists(info_path) else None
     is_ns = bool(pinfo and pinfo.get("viscous")) or tb_model.startswith("sst")
     if cond_changed and not is_ns:
-        # Euler 参照 (δ_E 用の対; plan §4.8) の推奨 = 検証の実績 (2026-10-06 §4.7 に追加): §6 (ii) 腕 E (Pt 0.8、scale-ic pt) と
-        # (iv″) run_0134 (Tt 1500・H2O 0.10) はいずれも run_staged(stages="none")・cfl 2・6000 step で STEADY
-        rec = {"stages": "none", "cfl": 2.0,
-               "note": "Euler 参照 → run_staged(stages='none')・cfl 2 (plan §4.7 の Euler 行: 腕 E・run_0134 の実績)"}
+        # Euler 参照 (δ_E 用の対; plan §4.8)。実績があるのは Pt だけの変更: §6 (ii) 腕 E (Pt 0.8、scale-ic pt) は
+        # run_staged(stages="none")・cfl 2・6000 step で STEADY (run_0120)。Tt・組成の変更 (run_0134: Tt 1500・H2O 0.10) は
+        # 同じ設定で 6000 step では DRIFTING (出口 M 6.022、直前窓差 0.021) — 推奨は未確立 (2026-10-06 監査で判明)
+        if set(changes) <= {"Pt", "Ps"}:
+            rec = {"stages": "none", "cfl": 2.0,
+                   "note": "Euler 参照・Pt のみ変更 → run_staged(stages='none')・cfl 2・6000 step (plan §4.7: 腕 E run_0120 の実績)"}
+        else:
+            rec = {"stages": "full", "cfl": 2.0,
+                   "note": "Euler 参照・Tt/組成の変更 → 推奨は未確立 (run_0134 は stages none・cfl 2・6000 で DRIFTING)。"
+                           "run_staged(stages='full') で回し、量が STEADY になるまで延長すること (plan §4.7)"}
+            warnings.append("Euler 参照で Tt・組成を変えた: 検証では stages none・cfl 2・6000 step で準定常に達しなかった (run_0134)。"
+                            "δ_E の参照に使う前に STEADY を確認すること")
     rec["runner"] = "run_staged_ns" if is_ns else "run_staged"
     mism, fix = [], []
     if rec.get("cfl") is not None and any(v is not None and v != _num(rec["cfl"]) for v in eff_cfl.values()):

@@ -846,6 +846,9 @@ def test_recommended_vs_config():
           rec["runner"] == "run_staged" and rec["stages"] == "none" and rec["cfl"] == 2.0 and not rec["config_effective"]["override"]
           and not any("食い違う" in w for w in p["warnings"]), (rec, p["warnings"]))
     p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt", "--steps", "6000", "--out-interval", "500"])
+    p2 = plan_of([ref, new, "--Tt", "1500", "--Y", "H2O=0.10", "--cfl", "2.0", "--steps", "6000", "--out-interval", "500"])
+    check("(p) Euler 参照で Tt・組成を変えた → 推奨は full・警告 (run_0134 は none・cfl 2・6000 で DRIFTING)",
+          p2["recommended_stages"]["stages"] == "full" and any("準定常に達しなかった" in w for w in p2["warnings"]), (p2["recommended_stages"], p2["warnings"]))
     check("(p) Euler 参照で cfl が推奨 (2) と違う → 停止せず警告だけ",
           p["recommended_stages"]["runner"] == "run_staged" and any("Euler 参照" in w and "食い違う" in w for w in p["warnings"]), p["warnings"])
     done(ref, new)

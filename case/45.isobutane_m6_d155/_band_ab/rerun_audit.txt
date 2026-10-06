@@ -1,0 +1,13 @@
+run_0119_rerun_ctrl: delta_E 0.7252822 (幅 1.18e-05, 直前窓差 1.25e-06) STEADY | exitM_A 5.999261 (幅 5.81e-06, 直前窓差 -2.19e-06) STEADY | mdot 16670.92 (幅 0.00391, 直前窓差 -0.00781) STEADY; res_12000.h5: Ux<0 0 節点
+run_0120_rerun_euler_pt08: exitM_A 5.999998 (幅 2.47e-06, 直前窓差 -7.06e-07) STEADY | mdot 13344.97 (幅 0.00586, 直前窓差 0.000586) STEADY; res_6000.h5: Ux<0 0 節点
+run_0123_rerun_fullpath: exitM_A 6.02749 (幅 0.0019, 直前窓差 -0.000395) DRIFTING | mdot 17085.32 (幅 22.6, 直前窓差 48.4) DRIFTING
+run_0128_rerun_fullpath_ext: exitM_A 6.029873 (幅 0.000731, 直前窓差 0.000824) DRIFTING | mdot 17118.32 (幅 5.27, 直前窓差 8.47) DRIFTING
+run_0131_rerun_pt08_scale_full_cfl1: delta_E 0.7494547 (幅 1.52e-05, 直前窓差 -8.56e-05) STEADY | exitM_A 5.992124 (幅 3.86e-06, 直前窓差 2.82e-06) STEADY | mdot 13341 (幅 0.0137, 直前窓差 0.113) STEADY
+run_0132_rerun_pt08_scale_cfl1_ext: delta_E 0.7494484 (幅 7.44e-06, 直前窓差 3.39e-06) STEADY | exitM_A 5.992124 (幅 3.51e-06, 直前窓差 -1.53e-06) STEADY | mdot 13341 (幅 0.00586, 直前窓差 -0.000977) STEADY; res_6000.h5: Ux<0 0 節点
+run_0133_rerun_pt08_noscale_full_cfl1: delta_E 1.164759e+09 (幅 5.1e+07, 直前窓差 -5e+08) DRIFTING | exitM_A 5.994476 (幅 0.000774, 直前窓差 -0.0114) DRIFTING | mdot 13378.4 (幅 15.1, 直前窓差 -111) DRIFTING
+run_0134_rerun_euler_tt1500: exitM_A 6.021834 (幅 0.0221, 直前窓差 0.0208) DRIFTING | mdot 16900.79 (幅 143, 直前窓差 212) DRIFTING
+run_0135_rerun_fullpath_blk1: delta_E 0.7332055 (幅 0.00176, 直前窓差 -0.00255) DRIFTING | exitM_A 6.031686 (幅 0.000397, 直前窓差 0.000615) DRIFTING | mdot 17128.19 (幅 2.07, 直前窓差 2.9) DRIFTING
+run_0136_rerun_fullpath_blk2: delta_E 0.7294612 (幅 0.000867, 直前窓差 -0.00126) DRIFTING | exitM_A 6.032434 (幅 0.000126, 直前窓差 0.000207) DRIFTING | mdot 17132.46 (幅 0.924, 直前窓差 1.38) DRIFTING
+run_0137_rerun_fullpath_blk3: delta_E 0.7276454 (幅 0.000438, 直前窓差 -0.000602) DRIFTING | exitM_A 6.032649 (幅 2.85e-05, 直前窓差 5.56e-05) DRIFTING | mdot 17134.88 (幅 0.734, 直前窓差 0.947) DRIFTING
+run_0138_rerun_fullpath_blk4: delta_E 0.7265066 (幅 0.000351, 直前窓差 -0.000504) DRIFTING | exitM_A 6.032685 (幅 6.28e-06, 直前窓差 5.36e-06) STEADY | mdot 17136.93 (幅 0.639, 直前窓差 0.822) DRIFTING; res_6000.h5: Ux<0 0 節点
+run_0139_rerun_pt08_noscale_cfl1_ext: exitM_A 5.993977 (幅 5.22e-05, 直前窓差 -7.08e-05) DRIFTING | mdot 13368.62 (幅 1.03, 直前窓差 -1.3) DRIFTING; res_6000.h5: Ux<0 779 節点
