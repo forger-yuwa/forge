@@ -331,3 +331,9 @@ joint 壁の当てはめに「[0, 1.5] r_t で r″ が増えない」不等式�
   - 到達段階 (§4.3): **候補形状**。NS (N・K) はユーザが今後決める。result 段の解釈の諮問と codex result レビューは、NS の判断の後、plan を閉じる前に行う。
 - `2026-10-06` — **ユーザ決定**:「NS と凝縮計算を回し直して、結果まとめといて。報告書に」。問題 `problem_d155_ns_finemesh_recal_final_mono.yaml`・`problem_d155_ns_finemesh_recal_final_mono_cond.yaml` (元の問題との差は name と wall_fit_mono_r2 だけ、辞書比較で確認)、投入 `run_mono_ns_chain.sh`。§6 N の IC を番号写像に、段階起動なしに変更 (投入前)。
 - `2026-10-06` — **切り分け試験 (b)** (§3 仮説 H): 始点付近の角度差は `axis_dx0` に連れて減る (ピン 0.036 → 0.022 → 0.016°)。生産の MOC 単位過程の軸の 1 段目に誤差がある。「MOC の離散化は原因でない」は撤回。生産の MOC を変えるかは別 plan で判断する (§5.1 #10)。
+- `2026-10-06` — **dry NS run_0147 の判定** (AWS `case/45.isobutane_m6_d155/run_0147_ns_mono_final/`、`_band_ab/verdicts_run_0147_monoeval.json`)。
+  - forge exit 0。本段区間は NOT CONVERGED (plateau)。
+  - 判定窓 40000〜60000 (5 枚): 出口コア M 5.998873 (−0.019 %) STEADY、δ_E/δ_C 0.99987 STEADY、Mach 波 η0.1 0.0065 % STEADY、オーバーシュート η0.1 0.0079 % **DRIFTING** (0.0081 → 0.0076 と減少)。
+  - 出口半径 0.7749997 m。壁解像 PASS (y₁⁺ > 1 の面積 3.5 %、最大 1.50)。
+  - 旧壁 run_0117 を同じ方法で再判定すると、波 DRIFTING・他 STEADY で既存の記録と一致した (`verdicts_run_0117_monoeval.json`)。
+  - 事前登録どおり延長 1 回: `run_0149_ns_mono_final_ext` (`run_mono_ns_ext.sh`、restart_field で 20000 step、連結した末尾 5 枚で再判定)。
