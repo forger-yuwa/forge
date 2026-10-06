@@ -234,6 +234,10 @@ def design_chain(p: Problem) -> dict:
     ガス: `p.gas_model` (cpg なら float γ と等価 / semiperfect なら NASA-9 テーブル)。
     Hall 遷音速級数は定数 γ 前提なので**スロートの局所 γ* を渡す。MOC の ν↔M・
     質量流束・面積比はガスモデル経由 (`moc_kernel._is_gas` 規約)。"""
+    if "wall_fit_mono_r2" in p.geometry and str(p.geometry.get("wall_repr", "interp")) != "joint":
+        # 単調拘束 (plan tooling-nozzle-throat-monotone-r2 §4.2) は joint 壁の当てはめのオプション。他の壁表現で黙って無視しない
+        raise ValueError("geometry.wall_fit_mono_r2 は wall_repr: joint 専用 "
+                         f"(wall_repr = {p.geometry.get('wall_repr', 'interp')!r})")
     gas = p.gas_model
     # cfd_gas: cpg のときは**設計も** CPG(γ 参照値) で作る。設計だけ semi-perfect にすると
     # 壁 (A/A*=13.1) と CFD (CPG γ=1.309 なら A/A*=15.3) の熱力学が食い違い、出口 M が
@@ -495,7 +499,9 @@ def design_chain(p: Problem) -> dict:
         wall = AxisMachCFDWall(res["wall"], **wkw)
     elif wall_repr == "joint":
         from ..geometry.wall_axismach import JointFitCFDWall
-        wall = JointFitCFDWall(res["wall"], **wkw)
+        # geometry.wall_fit_mono_r2 = [a, b]: [a, b] r_t で r″ を単調非増加に拘束 (plan tooling-nozzle-throat-monotone-r2 §4.2)。
+        # 無い (または null) なら拘束なし = 従来とビット同一
+        wall = JointFitCFDWall(res["wall"], mono_r2=p.geometry.get("wall_fit_mono_r2"), **wkw)
     else:
         raise ValueError("geometry.wall_repr は 'interp' / 'lsq' / 'joint'")
     msgs = wall.validate()
@@ -877,7 +883,48 @@ def delta_r_from_table(x, d):
             raise ValueError("deriv は 0..3")
         return np.where((xq >= _lo) & (xq <= _hi), _s(np.clip(xq, _lo, _hi), deriv), 0.0)
     f.supports_deriv = True
+    f.spline = spl          # ノット (区分の境界) を形状の厳密評価に渡すため (plan tooling-nozzle-throat-monotone-r2 §6 S6)
     return f
+
+
+def integral_delta_r(p: Problem, d: dict, init_cfg: dict):
+    """積分法初期壁の δ_r (`prepare_ns` の initializer 経路): `integral_bl` → 5 次 P-spline 平滑化 → 壁に渡す δ_r 関数。
+    戻り: (res_init, delta_r_x, init_info)。`prepare_ns` から切り出したもの (振る舞いは同一; plan
+    tooling-nozzle-throat-monotone-r2 §6 S6 の形状ゲートが同じ経路で物理壁を作るために共有する)。"""
+    from ..feedback.deltastar_integral import integral_bl
+    scale = float(p.spec["r_throat"])
+    wall_inv = d["wall_inv"]
+    model = str(init_cfg.get("model", "contur"))
+    if model not in ("contur", "contur_momentum_integral"):
+        raise ValueError(f"deltastar_initializer.model={model!r} は未対応 (contur のみ)")
+    # 熱境界条件は spec.wall_thermal が単一ソース (plan tooling-nozzle-isothermal-wall-chain §4.1)。
+    # initializer/YAML の thermal_bc 指定は無視し、食い違えば警告する (NS と積分法が別の壁温を読む状態を作らない)。
+    tbc = p.wall_thermal_bc_integral
+    if init_cfg.get("thermal_bc") and dict(init_cfg["thermal_bc"]) != tbc:
+        print(f"[prepare_ns] warning: initializer.thermal_bc={init_cfg['thermal_bc']} は無視 (spec.wall_thermal={p.wall_thermal} を使用)")
+    res_init = integral_bl(d["wall"], wall_inv, _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]),
+                           scale, thermal_bc=tbc,
+                           theta0_m=init_cfg.get("theta0_m"), x_virtual_m=init_cfg.get("x_virtual_m"),
+                           a_crocco=float(init_cfg.get("a_crocco", 1.0)), closure=str(init_cfg.get("closure", "contur")),
+                           cf_scale=float(init_cfg.get("cf_scale", 1.0)), n_scale=float(init_cfg.get("n_scale", 1.0)))
+    # 積分法の出力も同じ 5 次 P-spline で平滑化 (N(Re) テーブルの折れ目などを壁曲率に持ち込まない)
+    from ..metrics.deltastar import smooth_delta_quintic
+    f_s, sm_diag = smooth_delta_quintic(res_init["x"], res_init["delta_r"], knot_spacing=2.0, lam=1.0,
+                                        positive=(p.wall_thermal["mode"] == "adiabatic"))  # 等温は符号付き
+    res_init["delta_r_raw_integral"] = res_init["delta_r"].copy()
+    res_init["delta_r"] = f_s(res_init["x"])
+    # 壁には平滑化関数そのものを渡す (2026-10-05, plan verification-m6-axis-wave-mesh-su2 §5.1 #8a):
+    # 1500 点の表を np.interp で渡すと点ごとの傾きの折れ目を補間 5 次スプラインが通り、r″ が点間隔で波打つ
+    delta_r_x = f_s
+    if getattr(d["wall"], "wall_repr", None) == "joint" or type(d["wall"]).__name__ == "JointFitCFDWall":
+        # joint 壁の物理壁 (解析経路) は δ_r の導関数を要る (plan tooling-nozzle-cfd-pinned-initial-line §5.1 #6b)。
+        # 平滑化済みの値 (5 次 P-spline) を表にし、導関数を返せる 5 次補間 (delta_r_from_table) で渡す。
+        delta_r_x = delta_r_from_table(res_init["x"], f_s(res_init["x"]))
+    init_info = dict(res_init["settings"])
+    init_info["smooth"] = {"kind": "quintic_pspline", **sm_diag}
+    init_info["delta_r_throat"] = float(np.interp(0.0, res_init["x"], res_init["delta_r"]))
+    init_info["delta_r_exit"] = float(res_init["delta_r"][-1])
+    return res_init, delta_r_x, init_info
 
 
 def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
@@ -934,38 +981,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     init_cfg = initializer if initializer is not None else p.raw.get("deltastar_initializer")
     if init_cfg and delta_r_csv is None and dstar_csv is None:
         # 積分法初期壁 (plan §4.1): 初回 NS 専用。断熱 / 指定壁温は thermal_bc で。
-        from ..feedback.deltastar_integral import integral_bl, delta_r_function
-        model = str(init_cfg.get("model", "contur"))
-        if model not in ("contur", "contur_momentum_integral"):
-            raise ValueError(f"deltastar_initializer.model={model!r} は未対応 (contur のみ)")
-        # 熱境界条件は spec.wall_thermal が単一ソース (plan tooling-nozzle-isothermal-wall-chain §4.1)。
-        # initializer/YAML の thermal_bc 指定は無視し、食い違えば警告する (NS と積分法が別の壁温を読む状態を作らない)。
-        tbc = p.wall_thermal_bc_integral
-        if init_cfg.get("thermal_bc") and dict(init_cfg["thermal_bc"]) != tbc:
-            print(f"[prepare_ns] warning: initializer.thermal_bc={init_cfg['thermal_bc']} は無視 (spec.wall_thermal={p.wall_thermal} を使用)")
-        res_init = integral_bl(d["wall"], wall_inv, _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]),
-                               scale, thermal_bc=tbc,
-                               theta0_m=init_cfg.get("theta0_m"), x_virtual_m=init_cfg.get("x_virtual_m"),
-                               a_crocco=float(init_cfg.get("a_crocco", 1.0)), closure=str(init_cfg.get("closure", "contur")),
-                               cf_scale=float(init_cfg.get("cf_scale", 1.0)), n_scale=float(init_cfg.get("n_scale", 1.0)))
-        # 積分法の出力も同じ 5 次 P-spline で平滑化 (N(Re) テーブルの折れ目などを壁曲率に持ち込まない)
-        from ..metrics.deltastar import smooth_delta_quintic
-        f_s, sm_diag = smooth_delta_quintic(res_init["x"], res_init["delta_r"], knot_spacing=2.0, lam=1.0,
-                                            positive=(p.wall_thermal["mode"] == "adiabatic"))  # 等温は符号付き
-        res_init["delta_r_raw_integral"] = res_init["delta_r"].copy()
-        res_init["delta_r"] = f_s(res_init["x"])
-        # 壁には平滑化関数そのものを渡す (2026-10-05, plan verification-m6-axis-wave-mesh-su2 §5.1 #8a):
-        # 1500 点の表を np.interp で渡すと点ごとの傾きの折れ目を補間 5 次スプラインが通り、r″ が点間隔で波打つ
-        delta_r_x = f_s
-        if getattr(d["wall"], "wall_repr", None) == "joint" or type(d["wall"]).__name__ == "JointFitCFDWall":
-            # joint 壁の物理壁 (解析経路) は δ_r の導関数を要る (plan tooling-nozzle-cfd-pinned-initial-line §5.1 #6b)。
-            # 平滑化済みの値 (5 次 P-spline) を表にし、導関数を返せる 5 次補間 (delta_r_from_table) で渡す。
-            delta_r_x = delta_r_from_table(res_init["x"], f_s(res_init["x"]))
+        res_init, delta_r_x, init_info = integral_delta_r(p, d, init_cfg)
         offset = "radial"
-        init_info = dict(res_init["settings"])
-        init_info["smooth"] = {"kind": "quintic_pspline", **sm_diag}
-        init_info["delta_r_throat"] = float(np.interp(0.0, res_init["x"], res_init["delta_r"]))
-        init_info["delta_r_exit"] = float(res_init["delta_r"][-1])
         (run_dir / "delta_r_initial.csv").write_text("")   # 後で上書き (run_dir は下で作る)
     if delta_r_csv is not None:
         if dstar_csv is not None:
@@ -1091,6 +1108,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "anchor": list(d["anchor"]), "anchor_source": d["anchor_source"],
             "start_line": d["start_line"], "wall_mode": d["wall_mode"],
             "wall_repr": d["wall_repr"], "initial_line": d["initial_line"],
+            "wall_fit": d["wall_fit"],      # 設計壁の当てはめ (joint: spline・mono_r2 ほか; plan tooling-nozzle-throat-monotone-r2 §5.1 #5 M4)
             "Md": d["Md"], "Md_moc_offset": d["Md_moc_offset"], "R": d["R"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},
             "nStepOuter": n, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,

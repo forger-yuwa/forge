@@ -700,7 +700,8 @@ def default_pw_ramp(design_wall, r1_on: float = -0.05) -> tuple:
 
 # --- 位置 + 壁角の同時当てはめ (wall_repr: joint, V0 型壁) ---------------------------
 def joint_fit_wall(wall_tbl, R: float, lam: float = 1e-9, k: int = 5, sig_r: float = 1e-6,
-                   sig_th: float = 1e-4, h0: float = 0.0125, h1: float = 0.5, x_g: float = 6.0):
+                   sig_th: float = 1e-4, h0: float = 0.0125, h1: float = 0.5, x_g: float = 6.0,
+                   mono_r2=None, diag: dict | None = None):
     r"""MOC 壁点 (n,>=3)[x,r,θ] に 5 次 B-spline $r(x)$ を**位置と壁角の両方**で当てはめる (V0 型壁)。
 
     計画: plans/active/tooling-nozzle-cfd-pinned-initial-line.md §4.5・§5.1 #6 (試作は
@@ -710,11 +711,33 @@ def joint_fit_wall(wall_tbl, R: float, lam: float = 1e-9, k: int = 5, sig_r: flo
     + (\lambda/\sigma_r^2)\int (r''')^2 dx$ ($w_j\propto\Delta x_j$)。ハード拘束 (KKT):
     $r(x_0)=r_0$, $r'(x_0)=x_0/R$, $r''(x_0)=1/R$, $r(x_e)=r_e$, $r'(x_e)=\tan\theta_e$。
     ノット間隔は始点 h0 → x_g で h1 へ smoothstep、以降 h1 (最後の内部ノットは x_e − h1/2 まで)。
-    戻り: (BSpline, 制御点数)。"""
+    戻り: (BSpline, 制御点数)。
+
+    `mono_r2=(a, b)` (plans/active/tooling-nozzle-throat-monotone-r2.md §4.1): r‴ (2 次スプライン) の B-spline 係数の
+    うち台 [t₃ⱼ, t₃ⱼ₊₃] が (a, b) にかかるものを ≤ 0 に拘束する (凸包性により r″ が [a, b] で単調非増加の**十分条件**)。
+    2 次形式を対角最大で、不等式行列を行ごとの最大絶対値で正規化し、有効制約法 (違反最大を追加・負の乗数を除去、
+    上限 200 回で例外) で解く。停止条件は違反 max(Gc) ≤ 1e-10·max(1, max|Gc|)、乗数 ≥ −1e-12·max(1, max|μ|)
+    (解法用。形状の単調性の保証は区間多項式で別に検査する)。`mono_r2=None` は従来の連立方程式 1 回 (正規化なし) で
+    ビット同一。`diag` (dict) を渡すと、等式残差・ノット・係数・次数 (と mono 時は KKT の記録) を書き込む。"""
     from scipy.interpolate import BSpline
     tb = np.asarray(wall_tbl, dtype=float)
     x, r, th = tb[:, 0], tb[:, 1], tb[:, 2]
     x0, xe = x[0], x[-1]
+    if mono_r2 is not None:
+        # 不正入力は当てはめ前に拒否 (黙って拘束なし・空拘束で解かない)
+        try:
+            mono = [float(v) for v in mono_r2]
+        except (TypeError, ValueError):
+            raise ValueError(f"mono_r2 は 2 要素の数値列 (a, b): {mono_r2!r}") from None
+        if isinstance(mono_r2, (str, bytes)) or len(mono) != 2 or any(isinstance(v, (bool, np.bool_)) for v in mono_r2):
+            raise ValueError(f"mono_r2 は 2 要素の数値列 (a, b): {mono_r2!r}")
+        a_m, b_m = mono
+        if not (np.isfinite(a_m) and np.isfinite(b_m)):
+            raise ValueError(f"mono_r2 に非有限値: {mono_r2!r}")
+        if not a_m < b_m:
+            raise ValueError(f"mono_r2 は a < b: {mono_r2!r}")
+        if a_m < x0 or b_m > xe:
+            raise ValueError(f"mono_r2 = {mono_r2!r} が設計壁の x 範囲 [{x0:.6g}, {xe:.6g}] の外")
     xs = [x0]
     while xs[-1] < xe:
         u = min((xs[-1] - x0) / (x_g - x0), 1.0)
@@ -739,9 +762,144 @@ def joint_fit_wall(wall_tbl, R: float, lam: float = 1e-9, k: int = 5, sig_r: flo
     Cm = np.array([D(np.r_[x0], 0)[0], D(np.r_[x0], 1)[0], D(np.r_[x0], 2)[0],
                    D(np.r_[xe], 0)[0], D(np.r_[xe], 1)[0]])
     dv = np.array([r[0], x0 / R, 1.0 / R, r[-1], np.tan(th[-1])])
-    K = np.block([[A, Cm.T], [Cm, np.zeros((5, 5))]])
-    c = np.linalg.solve(K, np.r_[b, dv])[:nc]
+    kkt = None
+    if mono_r2 is None:
+        K = np.block([[A, Cm.T], [Cm, np.zeros((5, 5))]])
+        c = np.linalg.solve(K, np.r_[b, dv])[:nc]
+    else:
+        c, kkt = _joint_fit_mono_qp(A, b, Cm, dv, t, k, nc, (a_m, b_m))
+    if diag is not None:
+        diag.update({"eq_resid": float(np.max(np.abs(Cm @ c - dv))),
+                     "spline": {"k": int(k), "t": [float(v) for v in t], "c": [float(v) for v in c]}})
+        if kkt is not None:
+            diag.update(kkt)
     return BSpline(t, c, k), nc
+
+
+def _joint_fit_mono_qp(A, b, Ce, de, t, k: int, nc: int, mono, max_iter: int = 200):
+    r"""`joint_fit_wall(mono_r2=…)` の有効制約法 (plan tooling-nozzle-throat-monotone-r2 §4.1)。
+    等式 Ce c = de、不等式 G c ≤ 0 (G = 台が mono にかかる r‴ の B-spline 係数の行、行ごとに最大絶対値で正規化)。
+    試作 case/45.isobutane_m6_d155/throat_r2_explainer.py::fit_variant と同じ式・同じ停止条件。戻り: (c, KKT 記録)。"""
+    from scipy.interpolate import BSpline
+    sc = float(np.abs(np.diag(A)).max())
+    A = A / sc
+    b = b / sc
+    E = np.eye(nc)
+    # r‴ (2 次スプライン, ノット t[3:-3]) の係数を c の一次式として組む: r‴ の係数 = M3 @ c
+    M3 = np.array([BSpline(t, E[i], k).derivative(3).c[:nc - 3] for i in range(nc)]).T
+    t3 = t[3:len(t) - 3]
+    sel = [j for j in range(nc - 3) if t3[j + 3] > mono[0] + 1e-12 and t3[j] < mono[1]]
+    if not sel:
+        raise ValueError(f"mono_r2 = {mono!r} にかかる r‴ の係数が無い")
+    G0 = M3[sel]
+    gs = np.abs(G0).max(axis=1, keepdims=True)
+    G = G0 / gs
+    ne = len(de)
+    act: list = []
+    for it in range(max_iter):
+        Cm = np.vstack([Ce, G[act]]) if act else Ce
+        dd = np.r_[de, np.zeros(len(act))]
+        m = len(dd)
+        sol = np.linalg.solve(np.block([[A, Cm.T], [Cm, np.zeros((m, m))]]), np.r_[b, dd])
+        c, mu = sol[:nc], sol[nc + ne:]
+        if len(act) and mu.min() < -1e-12 * max(1.0, float(np.abs(mu).max())):
+            act.pop(int(np.argmin(mu)))
+            continue
+        viol = G @ c
+        if viol.max() <= 1e-10 * max(1.0, float(np.abs(viol).max())):
+            break
+        j = int(np.argmax(viol))
+        if j in act:
+            raise RuntimeError("joint_fit_wall(mono_r2): 有効制約法が循環した (有効な制約が違反最大)")
+        act.append(j)
+    else:
+        raise RuntimeError(f"joint_fit_wall(mono_r2): 有効制約法が {max_iter} 回で収束しない")
+    viol = G @ c
+    kkt = {"mono_r2": [float(mono[0]), float(mono[1])], "n_constraints": int(len(sel)),
+           "n_active": int(len(act)), "iters": int(it + 1),
+           "ineq_max_normalized": float(viol.max()),
+           "mu_min": (float(mu.min()) if len(act) else None),
+           "r3_coef_max_unnormalized": float((G0 @ c).max()),
+           "active_support": [[float(t3[sel[a]]), float(t3[sel[a] + 3])] for a in act],
+           "qp_scale_diag_max": sc}
+    return c, kkt
+
+
+def r3_piecewise_exact(f, breaks, a: float, b: float, tol_sign: float = 1e-6) -> dict:
+    r"""[a, b] で r‴ が区間ごとの 2 次式 (5 次スプライン、またはノットの違う 5 次スプラインの和) である壁の形状量を
+    **区間多項式から厳密に**求める (plan tooling-nozzle-throat-monotone-r2 §6 S1・S6・S8 の形状用検査。均等点ではない)。
+
+    f: `f(x, deriv)` (deriv = 2, 3 を使う) か `BSpline` (breaks 省略可)。breaks: 区分の境界 (ノット; [a, b] 外は無視)。
+    各区間で r‴ を内部の Gauss 3 点から 2 次式として復元し (2 次式なので厳密)、次を返す
+    (区間端の r‴ は f を直接評価する。5 次スプラインは単純ノットで C⁴ なので r‴ は区間端で連続):
+
+    - `r3_max` / `x_r3_max`: r‴ の最大 (区間端・頂点で評価)
+    - `r2_max_increase`: max_{x<y} [r″(y) − r″(x)] (r″ は r‴ の零点の間で単調なので、区間端と零点の r″ 列で厳密)
+    - `r2_max` / `x_r2_max`: r″ の最大 (同じ候補点)
+    - `r4_absmax`: max|r⁗| (r⁗ は区間ごとの 1 次式なので区間端の片側極限)
+    - `int_r3sq`: ∫_a^b (r‴)² dx (区間 3 点 Gauss、被積分は 4 次なので厳密)
+    - `n_r2_extrema`: r″ の内部極値の数 = r‴ の符号反転の数 (|r‴| < tol_sign の点は符号なしとして飛ばす)"""
+    if hasattr(f, "t") and hasattr(f, "c") and hasattr(f, "k"):
+        spl = f
+        if breaks is None:
+            breaks = spl.t
+        f = lambda x, d, _s=spl: _s(x, d)  # noqa: E731
+    a, b = float(a), float(b)
+    if not (np.isfinite(a) and np.isfinite(b) and a < b):
+        raise ValueError(f"r3_piecewise_exact: 区間 [{a}, {b}] が不正")
+    br = np.unique(np.r_[a, b, np.asarray(breaks, dtype=float)])
+    br = br[(br >= a) & (br <= b)]
+    lo_, hi_ = br[:-1], br[1:]
+    keep = hi_ - lo_ > 0.0
+    lo_, hi_ = lo_[keep], hi_[keep]
+    gp, gw = np.polynomial.legendre.leggauss(3)
+    h = hi_ - lo_
+    xq = 0.5 * h[:, None] * gp[None, :] + 0.5 * (lo_ + hi_)[:, None]          # (n, 3)
+    r3q = np.asarray(f(xq.ravel(), 3), dtype=float).reshape(xq.shape)
+    int_r3sq = float((r3q ** 2 * (0.5 * h[:, None] * gw[None, :])).sum())
+    # 区間ごとの 2 次式 q(u) = c2 u² + c1 u + c0 (u = x − lo) を 3 点から復元
+    cand_x, cand_r3, r4_end = [], [], []
+    sign_seq = []
+    roots_all = []
+    for i in range(len(lo_)):
+        u = xq[i] - lo_[i]
+        c2, c1, c0 = np.linalg.solve(np.vander(u, 3), r3q[i])
+        q = lambda uu, c2=c2, c1=c1, c0=c0: c2 * uu * uu + c1 * uu + c0  # noqa: E731
+        pts = [0.0]
+        if c2 != 0.0:
+            uv = -c1 / (2.0 * c2)
+            if 0.0 < uv < h[i]:
+                pts.append(uv)
+        pts.append(h[i])
+        for j, uu in enumerate(pts):
+            # 区間端は f を直接評価 (2 次式の外挿は丸めで ~1e-9 相対ずれる)、頂点だけ復元した 2 次式で
+            v = q(uu) if 0 < j < len(pts) - 1 else float(np.asarray(f(np.array([lo_[i] + uu]), 3), dtype=float)[0])
+            cand_x.append(lo_[i] + uu)
+            cand_r3.append(v)
+            sign_seq.append(v)
+        r4_end += [abs(c1), abs(2.0 * c2 * h[i] + c1)]
+        # r‴ の零点 (r″ の極値候補)
+        if c2 != 0.0:
+            disc = c1 * c1 - 4.0 * c2 * c0
+            rts = [] if disc < 0 else [(-c1 - np.sqrt(disc)) / (2 * c2), (-c1 + np.sqrt(disc)) / (2 * c2)]
+        elif c1 != 0.0:
+            rts = [-c0 / c1]
+        else:
+            rts = []
+        roots_all += [lo_[i] + rr for rr in rts if 0.0 < rr < h[i]]
+    cand_x = np.asarray(cand_x)
+    cand_r3 = np.asarray(cand_r3)
+    i3 = int(np.argmax(cand_r3))
+    xs2 = np.unique(np.r_[br, roots_all])
+    r2 = np.asarray(f(xs2, 2), dtype=float)
+    inc = float(np.max(r2 - np.minimum.accumulate(r2)))
+    i2 = int(np.argmax(r2))
+    sg = np.sign([v if abs(v) >= tol_sign else 0.0 for v in sign_seq])
+    sg = sg[sg != 0]
+    return {"a": a, "b": b, "r3_max": float(cand_r3[i3]), "x_r3_max": float(cand_x[i3]),
+            "r2_max_increase": inc, "r2_max": float(r2[i2]), "x_r2_max": float(xs2[i2]),
+            "r4_absmax": float(max(r4_end)), "int_r3sq": int_r3sq,
+            "n_r2_extrema": int(np.count_nonzero(np.diff(sg) != 0)), "n_intervals": int(len(lo_))}
 
 
 class JointFitCFDWall(AxisMachCFDWall):
@@ -752,14 +910,19 @@ class JointFitCFDWall(AxisMachCFDWall):
 
     def __init__(self, wall_tbl, R: float, r_U: float = 2.5, L_U: float = 3.5,
                  L_pipe: float = 0.5, lam: float = 1e-9, h0: float = 0.0125, h1: float = 0.5,
-                 x_g: float = 6.0) -> None:
+                 x_g: float = 6.0, mono_r2=None) -> None:
         wall_tbl = np.asarray(wall_tbl, dtype=float)
         super().__init__(wall_tbl, R=R, r_U=r_U, L_U=L_U, L_pipe=L_pipe)
-        spl, nc = joint_fit_wall(wall_tbl, self.R, lam=lam, h0=h0, h1=h1, x_g=x_g)
+        fd: dict = {}
+        spl, nc = joint_fit_wall(wall_tbl, self.R, lam=lam, h0=h0, h1=h1, x_g=x_g, mono_r2=mono_r2, diag=fd)
         self._spl = spl
         xt = wall_tbl[:, 0]
+        # mono_r2 (plan tooling-nozzle-throat-monotone-r2 §4.1): r″ の単調拘束区間 (None = 拘束なし、従来と同一)。
+        # spline (ノット・係数・次数) は run の壁の証拠 (変換後メッシュの壁節点と解析壁の照合) に使う
         self.fit_diag = {"kind": "joint_fit", "lam": float(lam), "h0": float(h0), "h1": float(h1),
                          "x_g": float(x_g), "n_cp": int(nc),
                          "max_dr_pts": float(np.max(np.abs(spl(xt) - wall_tbl[:, 1]))),
                          "max_dtheta_pts_deg": float(np.degrees(np.max(np.abs(
-                             np.arctan(spl(xt, 1)) - wall_tbl[:, 2]))))}
+                             np.arctan(spl(xt, 1)) - wall_tbl[:, 2])))),
+                         "mono_r2": (None if mono_r2 is None else [float(v) for v in mono_r2]),
+                         **fd}
