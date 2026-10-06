@@ -52,7 +52,10 @@
 ### 4.1 上流の多項式 (`geometry.pw_upstream`)
 
 - キー `geometry.pw_upstream`: `ramp` (今の作り方) | `poly` (本 plan)。joint 壁の物理壁の解析経路でだけ有効。他の経路で `poly` を指定したら例外。不正値は例外。
-- **コードの既定は `ramp` のまま**にする (キーの無い過去の問題 YAML と `rerun_conditions` の再現を壊さないため)。**標準の手順** (`procedures/nozzle-design-workflow.md`・`procedures/recommended-settings.md` の該当行) は `poly` にする。ユーザの「既定に」はこの形で実現する (2026-10-07 の応答で説明)。
+- **コードの既定を `poly` にする** (ユーザ決定 2026-10-07「現在開発中なんだから過去の開発とか気にしなくていい」「既定はランプとしなくていい」。初稿の「過去の YAML の再現のために既定を `ramp` に残す」は取り下げ)。今の作り方は `pw_upstream: ramp` を明示したときだけ使う。
+  - 既定が適用されるのは joint 壁の物理壁の解析経路だけ。他の経路ではキーが無ければ今の振る舞いのまま、`poly` を明示したら例外。
+  - キーの無い過去の問題 YAML (case/45 の生産 YAML を含む) は、次に回すと `poly` の壁になる。どちらで作ったかは `prepare_info.json` に実効値として記録する。
+  - 標準の手順 (`procedures/nozzle-design-workflow.md`・`procedures/recommended-settings.md`) も `poly` に揃え、`pw_ramp` を旧設定として記す。
 - `poly` の物理壁:
   - x ∈ [x_in, −L_U): r_U (直管)。
   - x ∈ [−L_U, 0): 5 次多項式 Q。端条件は x = −L_U で (r_U, 0, 0)、x = 0 で下流の物理壁 (S + δ_r) の x = 0⁺ の (r, r′, r″)。6 条件で一意。
@@ -87,7 +90,7 @@
 
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
-| 1 | §4・§6 の諮問 | codex diagnose。特に: コードの既定を `ramp` に残す判断、x = 0 で接続する判断 (物理スロートで接続する案との比較)、NS の再評価の方法 (§6 U4) | F |
+| 1 | §4・§6 の諮問 | codex diagnose (2026-10-07 実行。ブリーフはコードの既定を `ramp` とする初稿の前提で書いたので、その問いへの回答はユーザ決定で不要になった)。特に: x = 0 で接続する判断 (物理スロートで接続する案との比較)、NS の再評価の方法 (§6 U4) | F |
 | 2 | codex plan 段レビュー | `codex_review.py <本 plan> --stage plan` | O |
 | 3 | 実装 | §5 の 1〜6。全域 1 本の B-spline の実装 (同じ `wall_axismach.py`・`runner_axismach.py` を触る) が終わってから。合格条件: 新テスト FAIL 0、design/tests の既存テスト FAIL 0 | O |
 | 4 | 検証 (CFD 0 step) | §6 U0〜U3 | O (解釈は F) |
@@ -98,7 +101,7 @@
 
 ### 6.0 事前登録 (初稿 2026-10-07。諮問で確定する)
 
-- **U0 既定のビット同一**: キー無しで、今の物理壁・`prepare_info.json` の既存の値・`solve_rt` の結果が変更前と完全一致。design/tests の既存テストが FAIL 0。
+- **U0 旧経路のビット同一**: `pw_upstream: ramp` を明示すると、今の物理壁・`prepare_info.json` の既存の値が変更前と完全一致。`solve_rt` (出口径から決める) の結果は、キーによらず変更前と一致する (下流の壁が同じため)。design/tests の既存テストは、ランプの振る舞いを試すものに `pw_upstream: ramp` を明示したうえで FAIL 0。キー無しが `poly` になることもテストで確かめる。
 - **U1 上流の多項式の形** (case/45 の単調壁の生産問題、CFD 0 step):
   - [0, x_e] の物理壁が `ramp` とビット同一。
   - 物理スロートの差: 位置 ≤ 1e-6 r_t、半径 ≤ 1e-9 r_t (事前試算では 7 桁一致)。
@@ -119,7 +122,7 @@
 
 ## 7. 影響範囲
 
-- `design/forge_design/geometry/wall_axismach.py`・`evaluate/runner_axismach.py`・`feedback/deltastar_loop.py`。既定はビット同一。
+- `design/forge_design/geometry/wall_axismach.py`・`evaluate/runner_axismach.py`・`feedback/deltastar_loop.py`。joint 壁の物理壁の既定が `poly` に変わる (キーの無い問題 YAML の物理壁が縮流部で変わる)。`pw_upstream: ramp` で今の壁を再現できる。
 - `methods/design/overview.md`・`procedures/nozzle-design-workflow.md`・`procedures/recommended-settings.md`。
 
 ## 8. 完了条件
@@ -132,3 +135,4 @@
 ## 9. 変更ログ
 
 - `2026-10-07` — 初稿。ユーザ決定「スロート点より上流に排除厚さを足しこむ処理を、やめにしませんか」「上流側は、配管〜スロート点まで、の多項式で形状を作る形」「a yes、b 逆算にしようか」。事前試算 (`case/45.isobutane_m6_d155/upstream_poly_probe.py`): 物理スロートは不変、縮流部で最大 −0.52 mm、徐変案は実効的な壁のずれ 0.12〜0.23° で採らない。
+- `2026-10-07` — **ユーザ決定「現在開発中なんだから過去の開発とか気にしなくていいんだが。既定はランプとしなくていい」**: コードの既定を `poly` に変更 (§4.1・§6 U0・§7)。旧経路は `pw_upstream: ramp` の明示で再現する。
