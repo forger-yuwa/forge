@@ -211,6 +211,20 @@ def run_pass(problem, euler_ref, prev_run, run_dir, omega: float = 0.5, ic_from=
     return m
 
 
+def resolve_integral_initializer(problem) -> dict:
+    """`--init-integral` の積分法初期化: problem YAML の `deltastar_initializer` があればそれ、無ければ断熱 contur (cf_scale 1)。
+    2026-10-07 までは YAML を読まずに常に {"model": "contur"} を渡していた (help・docstring と食い違い)。
+    C2 で較正した k_f (cf_scale) を YAML に書いた生産問題で、prep_c2pin.py (k_f を明示) と同じ物理壁にするため
+    (plan tooling-nozzle-throat-monotone-r2 §9 2026-10-07: 読まないと出口半径が 2.4 mm ずれた)。"""
+    from ..evaluate.runner_axismach import load_problem
+    cfg = load_problem(problem).raw.get("deltastar_initializer")
+    if cfg is None:
+        return {"model": "contur"}
+    if not isinstance(cfg, dict) or "model" not in cfg:
+        raise ValueError(f"deltastar_initializer は model を持つ mapping であること ({cfg!r})")
+    return dict(cfg)
+
+
 def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, prepare_only: bool = False,
                        nsteps=None, omega: float = 0.5, cfl_main=None, implicit_relax=None,
                        stages: str = "full", ramp=None, ramp_steps: int = 1000) -> dict:
@@ -220,7 +234,7 @@ def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, p
     from ..evaluate.runner import FORGE_TOOLS
     run_dir = Path(run_dir)
     # thermal_bc は prepare_ns 側で spec.wall_thermal から決める (ここでは model のみ)
-    init = initializer if initializer is not None else {"model": "contur"}
+    init = initializer if initializer is not None else resolve_integral_initializer(problem)
     info = prepare_ns(problem, run_dir, nsteps=nsteps, ic_from=ic_from, initializer=init,
                       euler_ref=euler_ref, omega=omega, cfl_main=cfl_main, implicit_relax=implicit_relax)
     info["stages"] = {"stages": stages, "ramp": (list(ramp) if ramp else None), "ramp_steps": ramp_steps}

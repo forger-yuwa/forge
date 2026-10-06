@@ -25,6 +25,10 @@ gas:
   gamma: 1.27354        # γ* (スロート 1409 K, Tt 1600)
   cp: 1360.0            # cp(T*=1409 K)
 
+# 積分法 (CONTUR) 初期壁の較正 (C2 方式の k_f、c2pin_solve_recal.json)。prep_c2pin.py が明示で渡す値と同じ。
+# deltastar_loop --init-integral もこれを読む (plan tooling-nozzle-throat-monotone-r2 §9 2026-10-07: 無いと出口半径が 2.4 mm ずれる)
+deltastar_initializer: {model: contur, a_crocco: 1.0, cf_scale: 1.054129117086371, n_scale: 1.0}
+
 spec:
   Pt: 5.5e6
   Tt: 1600.0

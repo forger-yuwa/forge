@@ -240,7 +240,7 @@ joint 壁の当てはめに「[0, 1.5] r_t で r″ が増えない」不等式�
   - それ以外は保留で、ユーザに判断を仰ぐ。
   - 判定対象の 6 量すべてが「許容幅未満」なら、単調壁を候補形状として採用する。
 - 主張の範囲:
-  - 「Euler で単調壁と現行壁の差は Δq 未満で、揺れの範囲で検出できなかった」まで。厳密な非劣化の証明とは書かない。
+  - 「Euler で全量の (D + 2SE) が Δq 未満」まで (2026-10-07 訂正: 初稿の「揺れの範囲で検出できなかった」は \|P 傾き\| で差を検出しているので誤り。2SE も自己相関未補正・窓の事後選択のため保証された信頼限界ではない)。厳密な非劣化の証明とは書かない。
   - 予備 A/B の α−β の差 (η0.1 オーバーシュート +0.0014 %pt など、Δq/10 の精度では IC 依存を除外できていない) を、限界として結果の表に併記する。
   - 予備 A/B の独立関門は「判別不能」のまま記録する。腕 B の r2・r3 は、関門を理由つきで上書きして先行投入した (`B23_OVERRIDE`)。
 - 実装: `case/45.isobutane_m6_d155/throat_mono_practical_eval.py`。`eval_wallfit_euler.py --e3` が各 run に書く `wallfit_series_e3.csv` を読む。
@@ -274,7 +274,7 @@ joint 壁の当てはめに「[0, 1.5] r_t で r″ が増えない」不等式�
   - 出口コア M と凝縮開始位置の run_0118 との差を表にする。
 - 未達は延長 1 回、なお未達ならユーザ判断。
 
-**生産化の条件**: S 全 PASS、E3 採用、N・K の合格 (またはユーザ判断)、result レビューの記録がそろったとき。
+**生産化の条件**: S 全 PASS、E′ 採用 (2026-10-07 訂正: 初稿は E3)、N・K の合格 (またはユーザ判断)、result レビューの記録がそろったとき。加えて、生産の入口 (`deltastar_loop --init-integral` と `prep_c2pin.py`) が検証した物理壁を再現すること (2026-10-07 諮問、§9 同日)。
 
 ### 6.1 レビュー記録 (codex)
 
@@ -284,6 +284,7 @@ joint 壁の当てはめに「[0, 1.5] r_t で r″ が増えない」不等式�
 | plan | `2026-10-06` | [`notes/reviews/2026-10-06-tooling-nozzle-throat-monotone-r2-plan.md`](../../notes/reviews/2026-10-06-tooling-nozzle-throat-monotone-r2-plan.md) | GO-with-changes, C0/M5/m2 | 全件採用: M1 判定の流れを S→E→N→K→result→生産化に統一し完了区分を分離、N・K の量・窓・VERDICT を明記、旧壁のユーザ判断は継承しない (§4.3・§6 N/K) / M2 E3 の片側判定関数と末尾 5 枚の統一を実装対象に (§5.1 #5) / M3 出口評価誤差を規格化オーバーシュートにも伝播 (§6 E3) / M4 実壁の証拠を当てはめ後 spline + 壁節点照合に (§5.1 #5・§6 E1) / M5 S6 を物理壁の最大増加量 ≤ 0.002 で判定 / m6 解法用と形状用の許容差を分離 (§4.1・S1) / m7 §9 の数値を採用腕の値に訂正 |
 | diagnose | `2026-10-06` | [`notes/reviews/2026-10-06-throat-mono-ab-ic-diagnose.md`](../../notes/reviews/2026-10-06-throat-mono-ab-ic-diagnose.md) (ブリーフ [`briefs/2026-10-06-throat-mono-ab-ic.md`](../../notes/reviews/briefs/2026-10-06-throat-mono-ab-ic.md)) | C0/M4 + 判別 A/B 1 件 | 全件採用: ① 番号写像を条件付き採用 (検査を強化、保存量の直接転送、限定例外) + IC 写像の予備 A/B (§6 E1) / ② 近零量は別判定「絶対許容内」(§6 E4) / ③ 評価器の前提条件を厳格化 (§5.1 #5b) / ④ N の δ_r は生産経路の再計算が主、新旧差と再現差を分けて記録 (§6 N)。ブリーフの「roUx 差は丸め」「S6 の差は環境依存」は撤回 |
 | diagnose | `2026-10-06` | [`notes/reviews/2026-10-06-throat-mono-noise-limited-diagnose.md`](../../notes/reviews/2026-10-06-throat-mono-noise-limited-diagnose.md) (ブリーフ [`briefs/2026-10-06-throat-mono-noise-limited.md`](../../notes/reviews/briefs/2026-10-06-throat-mono-noise-limited.md)) | C0/M5/m1 | **ユーザ決定で範囲を絞った** (§6 E′)。採用: 平均場からは評価しない (m)、軸 η0 は判定対象外 (旧規則の維持)、IC 独立関門の「判別不能」を記録として残す、「トレンドなし・幅は縮まない・IC の影響は見えない」は観測でなく解釈として書かない、窓 6000 は結果を見た後の選択と明記。採用せず (ユーザ判断で範囲外): CFL 2/1 の診断 A/B (§5.1 #12 に将来課題として記録)、自己相関補正つきの長窓 SE、延長の評価実装の修正。理由付き上書きで IC 関門を越えたことは記録する |
+| diagnose | `2026-10-07` | [`notes/reviews/2026-10-07-throat-mono-result-interpretation-diagnose.md`](../../notes/reviews/2026-10-07-throat-mono-result-interpretation-diagnose.md) (ブリーフ [`briefs/2026-10-07-throat-mono-result-interpretation.md`](../../notes/reviews/briefs/2026-10-07-throat-mono-result-interpretation.md)、result 段の解釈) | C0/M2/m2 + 判別 A/B 1 件 | 全件採用。M: 主張を「Euler は E′ 合格、dry は N 合格、凝縮は K 合格。新旧差は参考値」に分ける (dry の η0.1 の差 0.0022 %pt は揺れの幅 0.0017 を超え、比較図の帯は差の信頼区間でない) / M: 生産の入口の準備 A/B → 不一致 (deltastar_loop の入口は k_f を読まず出口半径 −2.4 mm) → レシピを修正 (§9 2026-10-07) / m: E′ の 2SE は保証された信頼限界でない、P 傾きの D は Δq の 27.3 %・D + 2SE は 37.0 %、§6 の「検出できなかった」「E3 採用」を訂正 / m: K は N の準定常判定を待たずに run_0147 res_60000 から開始した (K 自身は STEADY を再現) と記録。出口 M 5.998871 は下限まで 7.1e-5 で、格子・標本の不確かさ約 ±1e-4 より小さい余裕 — 旧壁の下限境界問題が解消したとは解釈しない |
 
 ## 7. 影響範囲
 
@@ -348,3 +349,13 @@ joint 壁の当てはめに「[0, 1.5] r_t で r″ が増えない」不等式�
   - 報告: 標準報告 `run_0149_ns_mono_final_ext/report/run_0149_ns_mono_final_ext_report.pptx` (14 枚)・`run_0148_ns_mono_final_cond/report/run_0148_ns_mono_final_cond_report.pptx` (15 枚)。要約報告 `_band_ab/throat_mono_compare/throat_mono_summary_report.pptx` (8 枚、`throat_mono_summary_pptx.py`)。どれもローカルの主ツリーの case dir にある。
   - 付随の修正: `nozzle_report.py` の日本語フォントのパスを各自のホームにした (AWS で字化けしていた)。延長 run の複製リストに `wall_physical.csv` などが漏れていたので補った (計算には影響なし)。
   - 到達段階 (§4.3): **候補形状のまま**。生産の問題 YAML への既定化 (#7b) は、codex の result 段レビュー (#8) と result 段の解釈の諮問を経てから。
+- `2026-10-07` — **codex (diagnose) に諮った** (result 段の解釈): `notes/reviews/2026-10-07-throat-mono-result-interpretation-diagnose.md` — 生産キーの反映前に、検証した NS の準備経路と生産の入口を比べる 0 step の準備 A/B を 1 件行う。採否は §6.1 (全件採用)。
+  - **主張の訂正**: 「Euler・dry NS・凝縮 NS のどれでも旧壁との差が許容幅と時間変動の範囲」は撤回。正しくは「Euler は §6 E′ 合格 (全量で D + 2SE ≤ Δq、\|P 傾き\| は差を検出し D は Δq の 27 %)、dry は §6 N のゲートに合格、凝縮は §6 K に合格。新旧の場の差は参考値」。dry の η0.1 の場の差の最大 0.0022 %pt は、両腕の末尾 5 枚の幅の最大 0.0017 %pt を超える。比較図の帯は各腕の幅で、差の信頼区間ではない。
+  - **手順の記録**: 投入スクリプトは N の準定常判定を待たずに run_0147 res_60000 から K を始めた (その時点でオーバーシュートは DRIFTING)。K 自身の 4 量は STEADY。「登録した順序どおり」とは書かない。
+  - **生産の入口の準備 A/B** (`case/45.isobutane_m6_d155/throat_mono_entry_ab.py` → `_band_ab/throat_mono_entry_ab.json`、CFD 0 step、変えたのは initializer の供給経路だけ):
+    - A (検証の経路、prep_c2pin と同じく k_f 1.054129 を明示) は run_0147 の実際の物理壁を 0.22 µm 以内で再現した (ローカルの numpy の版の差)。
+    - B (`deltastar_loop --init-integral`) は YAML を読まずに {"model": "contur"} (cf_scale 1) を渡しており、出口半径が 0.77260 m (A 0.77500 m、−2.4 mm、合格範囲 ±0.1 mm の外)。→ 判別の基準どおり「YAML キーを入れるだけで検証条件を引き継げる」を棄却し、レシピを修正した。
+    - 修正: `deltastar_loop.resolve_integral_initializer` を追加し、`--init-integral` で initializer が無いときは YAML の `deltastar_initializer` を読む (help・docstring の記述どおり。既存の YAML にこのキーは無いので、従来の問題の挙動は変わらない)。単調壁の生産 YAML 2 本に `deltastar_initializer: {model: contur, a_crocco: 1.0, cf_scale: 1.054129117086371, n_scale: 1.0}` を追加。
+    - 修正後: A と B の物理壁は完全一致 (差 0)、どちらも run_0147 と 0.22 µm 以内。design/tests (deltastar・joint_fit_mono・physical_wall_analytic・cfd_initial_line・mesh_params) は FAIL 0。
+  - 出口 M 5.998871 は下限 5.9988 まで 7.1e-5 で、既知の格子・標本の不確かさ約 ±1e-4 より余裕が小さい。登録した評価法では合格だが、旧壁の下限境界問題が解消したとは解釈しない。
+  - 次: 要約報告の文言を訂正版にそろえ、codex の result 段レビュー (§5.1 #8)。
