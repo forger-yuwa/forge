@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib import font_manager as fm  # noqa: E402
 from scipy.interpolate import RegularGridInterpolator, make_interp_spline  # noqa: E402
 
-_FONT = "/home/sano/.fonts/NotoSansCJKjp-Regular.otf"
+_FONT = os.path.expanduser("~/.fonts/NotoSansCJKjp-Regular.otf")   # 各自のホーム (AWS では /home/ubuntu/.fonts)
 if os.path.exists(_FONT):
     fm.fontManager.addfont(_FONT)
     matplotlib.rcParams["font.family"] = ["Noto Sans CJK JP", "DejaVu Sans"]
