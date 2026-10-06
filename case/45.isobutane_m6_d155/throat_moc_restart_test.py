@@ -493,7 +493,7 @@ def main():
               flush=True)
         runs.append(s)
         del cap
-    out = {"plan": "plans/active/tooling-nozzle-throat-monotone-r2.md §5.1 #10 (b)", "commit": commit,
+    out = {"plan": "plans/accepted/tooling-nozzle-throat-monotone-r2.md §5.1 #10 (b)", "commit": commit,
            "design_tree_dirty": dirty, "case_runs": str(RUNS), "R": 2.0, "targets_x": list(TARGETS), "fit_window": list(FIT),
            "levels": LV, "n_corr_conv": N_CORR_CONV, "runs": runs, "mstar": mst, "elapsed_s": time.time() - t0}
     OUT.parent.mkdir(parents=True, exist_ok=True)

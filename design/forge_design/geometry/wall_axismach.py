@@ -713,7 +713,7 @@ def joint_fit_wall(wall_tbl, R: float, lam: float = 1e-9, k: int = 5, sig_r: flo
     ノット間隔は始点 h0 → x_g で h1 へ smoothstep、以降 h1 (最後の内部ノットは x_e − h1/2 まで)。
     戻り: (BSpline, 制御点数)。
 
-    `mono_r2=(a, b)` (plans/active/tooling-nozzle-throat-monotone-r2.md §4.1): r‴ (2 次スプライン) の B-spline 係数の
+    `mono_r2=(a, b)` (plans/accepted/tooling-nozzle-throat-monotone-r2.md §4.1): r‴ (2 次スプライン) の B-spline 係数の
     うち台 [t₃ⱼ, t₃ⱼ₊₃] が (a, b) にかかるものを ≤ 0 に拘束する (凸包性により r″ が [a, b] で単調非増加の**十分条件**)。
     2 次形式を対角最大で、不等式行列を行ごとの最大絶対値で正規化し、有効制約法 (違反最大を追加・負の乗数を除去、
     上限 200 回で例外) で解く。停止条件は違反 max(Gc) ≤ 1e-10·max(1, max|Gc|)、乗数 ≥ −1e-12·max(1, max|μ|)

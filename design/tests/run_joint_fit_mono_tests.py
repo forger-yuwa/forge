@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """joint 壁の r″ 単調拘束 (`joint_fit_wall(mono_r2=…)` / `JointFitCFDWall(mono_r2=…)` / `geometry.wall_fit_mono_r2`) の試験。
-plan: plans/active/tooling-nozzle-throat-monotone-r2.md §5.1 #3 (§4.1・§4.2)。
+plan: plans/accepted/tooling-nozzle-throat-monotone-r2.md §5.1 #3 (§4.1・§4.2)。
 
 1. 合成の MOC 風の点群 (run データ不要):
    - mono_r2=None は改修前の式 (下の `_ref_joint_fit_wall` = 改修前の `joint_fit_wall` の写し) と係数・ノットが完全一致

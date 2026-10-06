@@ -167,7 +167,7 @@ def main():
         overall = "不採用 (悪化した量がある)"
     else:
         overall = "保留 (ユーザ判断)"
-    out = dict(plan="plans/active/tooling-nozzle-throat-monotone-r2.md §6 E′", window_steps=WIN, n_per_run=13,
+    out = dict(plan="plans/accepted/tooling-nozzle-throat-monotone-r2.md §6 E′", window_steps=WIN, n_per_run=13,
                arms=ARMS, icab=ICAB, rows=rows, overall=overall, preconditions_failed=pre_bad, precondition_exceptions=pre_exc,
                limits=["自己相関は補正していない", "窓の開始 6000 は予備 A/B の時系列を見た後に決めた",
                        "IC 写像による差 (β−α = 番号写像 − 最近傍) は Δq/10 の精度では除外できていない (表の ic 列)", "軸 (η0) の量は判定対象外"])

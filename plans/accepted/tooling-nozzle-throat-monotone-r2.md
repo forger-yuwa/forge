@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `tooling`
-- **status**: `in_progress`
+- **status**: `done`
 - **related_docs**:
   - `methods/design/overview.md` (設計区間の壁表現 `geometry.wall_repr` の `joint`)
   - `case/45.isobutane_m6_d155/README.md`
@@ -296,10 +296,10 @@ joint 壁の当てはめに「[0, 1.5] r_t で r″ が増えない」不等式�
 
 ## 8. 完了条件
 
-- [ ] `methods/design/overview.md` の joint の節を更新済み
-- [ ] 完了区分 (§4.3) のどこまで到達したかを §9 に明記: 機能実装完了 / 候補形状 / 生産採用。保留・未達は諮問またはユーザ判断の記録つき
-- [ ] codex レビュー 2 回 (plan / result) を §6.1 に記録
-- [ ] `status: done` にして accepted へ移動し、`plans/README.md` を同期
+- [x] `methods/design/overview.md` の joint の節を更新済み
+- [x] 完了区分 (§4.3) のどこまで到達したかを §9 に明記: **生産採用 (限定)**
+- [x] codex レビュー (plan 1 回・result 2 回) を §6.1 に記録
+- [x] `status: done` にして accepted へ移動し、`plans/README.md` を同期
 
 ## 9. 変更ログ
 
@@ -374,3 +374,5 @@ joint 壁の当てはめに「[0, 1.5] r_t で r″ が増えない」不等式�
 - `2026-10-07` — **codex result 段レビュー 2 回目** (`notes/reviews/2026-10-07-tooling-nozzle-throat-monotone-r2-result-2.md`): GO-with-changes、C0/M1/m3、全件採用 (§6.1)。1 回目の M1 (実入口の準備 A/B) への対応は支持された。
   - M1: 判定器の他腕照合は同じ壁でも ok を返していた (メモリ上の負例で、同じ非単調壁を両腕に使っても「採用」を再現された)。`throat_mono_practical_eval.py` に、見分けられる壁節点が 1 つ以上あり全数が自腕の当てはめに一致することと、保存 spline の形状 (腕 B は S1 と同じ許容差で単調、腕 A は r″ の増加 > 1e-4 の旧壁) を追加。`test_throat_mono_practical_eval.py` に同一非単調壁・取り違え・陽性対照の 3 例を最終判定まで通すテストを追加 (全 10 件 ok)。
   - m: `procedures/nozzle-design-workflow.md` の撤回済み主張を「Euler は E′、dry は N、凝縮は K に合格、新旧差は参考値」に訂正。判定器の説明文の差の向きを β−α に。§5.1 #9・#10・#12 は受け皿の plan が無いので「未移管・本 plan に将来課題として保持」と明記。
+- `2026-10-07` — **実データでの再判定** (AWS、前提検査の強化後): 前提の不成立 0 件。単調壁 3 本とも、他腕と見分けられる壁節点 12 個 (x/r_t 0.017〜0.187) がすべて自腕の当てはめに一致。保存 spline の形状検査も合格。判定・数値は不変 (総合「単調壁を候補形状として採用」、差を検出した量は \|P 傾き\| η0.1)。
+- `2026-10-07` — **status: done、accepted へ移動**。到達段階は **生産採用 (限定)**: case/45 の M6 ノズルで、生産の問題 `problem_d155_ns_finemesh_recal_final_mono.yaml`・`…_mono_cond.yaml` と NS レシピ `run_mono_ns_chain.sh` (+ `run_mono_ns_ext.sh`)。主張は「Euler は §6 E′ 合格、dry NS は §6 N 合格、凝縮 NS は §6 K 合格、新旧の場の差は参考値」まで。性能認定と厳密な非劣化は主張しない。未移管の将来課題は §5.1 #9 (初期線の取り直し)・#10 (MOC 始点付近の誤差、生産の MOC 単位過程・axis_dx0)・#12 (CFL と揺れ)。

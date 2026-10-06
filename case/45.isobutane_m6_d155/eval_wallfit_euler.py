@@ -340,7 +340,7 @@ def run_e3():
                                "R_B": float(np.ptp(B_, 0).max())}
     for r in R_:
         R_[r].pop("_dists", None)
-    out = {"plan": "plans/active/tooling-nozzle-throat-monotone-r2.md §6 E1〜E4", "pair": _pair, "arms": ARMS, "fixed_coef": FIXED,
+    out = {"plan": "plans/accepted/tooling-nozzle-throat-monotone-r2.md §6 E1〜E4", "pair": _pair, "arms": ARMS, "fixed_coef": FIXED,
            "geometry": {"X_E": X_E, "X_F": X_F, "WIN_T": list(WIN_T), "WIN_O": list(WIN_O)}, "exit_common_sample_from": r0,
            "runs": R_, "E_exit": E_exit, "exit_variants_B_minus_A": exit_rows, "judge": judge, "overall": ov, "preconditions": pre,
            "preconditions_ok": pre_ok, "VERDICT": verdict, "distributions_record_only": dist_rec}
@@ -420,7 +420,7 @@ def run_icab(alpha, beta):
     ov = icab_overall(judge, preconditions_ok=pre_ok)
     for r in R_:
         R_[r].pop("_dists", None)
-    out = {"plan": "plans/active/tooling-nozzle-throat-monotone-r2.md §6 E1 (予備 A/B)", "alpha_nearest": alpha, "beta_index": beta,
+    out = {"plan": "plans/accepted/tooling-nozzle-throat-monotone-r2.md §6 E1 (予備 A/B)", "alpha_nearest": alpha, "beta_index": beta,
            "window": ICAB_WIN, "fixed_coef": FIXED, "geometry": {"X_E": X_E, "X_F": X_F, "WIN_T": list(WIN_T), "WIN_O": list(WIN_O)},
            "runs": R_, "E_exit": E_exit, "exit_variants_beta_minus_alpha": exit_rows, "judge": judge, "residuals_window_mean": resid,
            "preconditions": pre, "preconditions_common": pre_common, "same_grid": {"mesh_digest": md, "ic_record_digest": icd},

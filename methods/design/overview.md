@@ -591,7 +591,7 @@ $$
 smoothstep で広げ、以降 $h_1$ (V0 型壁。case/45 の r″ の山 [x∈[0,0.3]] は Hall 初期線 0.534、CFD ピン 0.510)。
 入口直管・U→T Hermite は `interp` と同じで、`validate()` のリンギング検査 (テーブル点上 $|\Delta\theta|\le0.2°$) も同じ。
 
-**単調拘束オプション (2026-10-07 生産採用 (case/45 の M6)、plan [tooling-nozzle-throat-monotone-r2](../../plans/active/tooling-nozzle-throat-monotone-r2.md))**: `geometry.wall_fit_mono_r2: [a, b]` で、台が $[a,b]$ にかかる $r'''$ の B-spline 係数を $\le0$ に拘束する (凸包性により $r''$ が $[a,b]$ で単調非増加の十分条件、有効制約法)。
+**単調拘束オプション (2026-10-07 生産採用 (case/45 の M6)、plan [tooling-nozzle-throat-monotone-r2](../../plans/accepted/tooling-nozzle-throat-monotone-r2.md))**: `geometry.wall_fit_mono_r2: [a, b]` で、台が $[a,b]$ にかかる $r'''$ の B-spline 係数を $\le0$ に拘束する (凸包性により $r''$ が $[a,b]$ で単調非増加の十分条件、有効制約法)。
 目的は上記の r″ の山の除去: MOC 壁点の始点付近の角度差 (case/45 で第 1 区間の曲率 0.515 相当) が $1/R$ の曲線を上回るため、始点 $r''=1/R$ 固定の当てはめは山を作る (高さは λ 依存)。
 拘束すると第 1 点の流れ角ずれは下限 $\theta_1-\arctan(x_1/R)$ (case/45 で 0.022°) になる。未指定なら現行とビット同一。
 case/45 では [0, 1.5] で、設計壁の r″ の最大 0.5102 → 0.5000、壁の差は最大 0.5 µm (物理壁 0.6 µm)。Euler (実務判定)・dry NS (ゲート)・凝縮 NS (準定常) に合格した。

@@ -194,7 +194,7 @@ item("S8", "PASS" if ok8 else "FAIL", int_r3sq_mono=m8["int_r3sq"], int_r3sq_cur
 gated = [k for k in res if res[k]["status"] in ("PASS", "FAIL")]
 verdict = "PASS" if all(res[k]["status"] == "PASS" for k in gated) else "FAIL"
 fails = [k for k in gated if res[k]["status"] == "FAIL"]
-out = {"plan": "plans/active/tooling-nozzle-throat-monotone-r2.md §6 S1〜S8", "problem": PROB.name, "mono_r2": MONO, "lam": 1e-9,
+out = {"plan": "plans/accepted/tooling-nozzle-throat-monotone-r2.md §6 S1〜S8", "problem": PROB.name, "mono_r2": MONO, "lam": 1e-9,
        "R": R, "r_t_mm": float(pm.spec["r_throat"]) * 1e3, "case_runs": str(RUNS), "items": res,
        "wall_fit_mono": {k: v for k, v in dm["wall_fit"].items() if k != "spline"},
        "VERDICT": verdict, "fail_items": fails}

@@ -62,7 +62,7 @@ BCOND_TOPO = ("iBPlanes", "iCells", "iPlanes", "vizBfaceNodes", "vizBfaceSizes")
 CONS_RE = re.compile(r"^(ro|roU[xyz]|roe|roK|roOmega|roGamma|roReth|roXi|roY\d+|rog_.+|roQ[012]_.+)$")
 # 境界種別 → 論理辺 (構造格子 i = 0..ni−1 (流れ方向)、j = 0..nj−1 (軸 → 壁))
 EDGE_OF_KIND = (("inlet", "i0"), ("outlet", "i1"), ("axis", "j0"), ("slip", "j1"), ("wall", "j1"))
-PLAN = "plans/active/tooling-nozzle-throat-monotone-r2.md §6 E1 (諮問 2026-10-06 ①)"
+PLAN = "plans/accepted/tooling-nozzle-throat-monotone-r2.md §6 E1 (諮問 2026-10-06 ①)"
 
 
 class MapRefused(Exception):

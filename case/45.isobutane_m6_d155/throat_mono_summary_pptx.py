@@ -68,7 +68,7 @@ text(s, 0.7, 4.1, W - 1.4, 2.6, [
     "差を検出した量は試験部の |P 傾き| (r/r_w = 0.1) だけで、差 D は許容幅の 27 %、D + 2SE で 37 %。2SE は保証された信頼限界ではない。",
     "r″ の山の原因 (MOC の始点付近の不整合) は特定途中で、本報告の結論には影響しない (補足を参照)。"],
     size=14, color=WHITE)
-text(s, 0.7, 6.9, W - 1.4, 0.4, f"作成 {date.today().isoformat()} · plan plans/active/tooling-nozzle-throat-monotone-r2.md · run 索引は {CASE}/README.md が正本",
+text(s, 0.7, 6.9, W - 1.4, 0.4, f"作成 {date.today().isoformat()} · plan plans/accepted/tooling-nozzle-throat-monotone-r2.md · run 索引は {CASE}/README.md が正本",
      size=10, color=RGBColor(0xC9, 0xD6, 0xDF))
 
 # 2 何を変えたか
@@ -189,7 +189,7 @@ table(s, [["run", "内容"],
 text(s, 0.5, 5.3, 12.3, 1.8, [
     "判定の出典: _band_ab/throat_mono_practical_eval.json、_band_ab/verdicts_run_01{17,18,48,49}_monoeval.json、_band_ab/throat_mono_compare/*.json",
     "スクリプト: throat_mono_practical_eval.py・throat_mono_ns_verdicts.py・throat_mono_ns_compare.py・throat_mono_wall_fig.py・run_throat_mono_ab.sh・run_mono_ns_chain.sh・run_mono_ns_ext.sh",
-    "plan: plans/active/tooling-nozzle-throat-monotone-r2.md (§6 E′・N・K、§9)"], size=11, color=MUTED)
+    "plan: plans/accepted/tooling-nozzle-throat-monotone-r2.md (§6 E′・N・K、§9)"], size=11, color=MUTED)
 
 out = CMP / "throat_mono_summary_report.pptx"
 prs.save(out)

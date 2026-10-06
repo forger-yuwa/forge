@@ -197,7 +197,7 @@ def _map_ic(prep_dir: Path, variant: str, info: dict, src: Path, ic_run: Path, d
     ev = wall_evidence(prep_dir)
     if ev.get("status") != "consistent":
         raise RuntimeError(f"壁の証拠 (M4) が不一致: {json.dumps(ev, ensure_ascii=False)}")
-    info.update(stages="soft", wall_arm=variant, ic=ic, wall_evidence_prep=ev, plan="plans/active/tooling-nozzle-throat-monotone-r2.md §6 E1")
+    info.update(stages="soft", wall_arm=variant, ic=ic, wall_evidence_prep=ev, plan="plans/accepted/tooling-nozzle-throat-monotone-r2.md §6 E1")
     info.pop("DRY_NO_IC", None)
     if dry:
         info["DRY"] = True

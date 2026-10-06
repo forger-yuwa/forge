@@ -25,7 +25,6 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
-| [tooling-nozzle-throat-monotone-r2.md](active/tooling-nozzle-throat-monotone-r2.md) | `tooling` | **in_progress 2026-10-07 (result レビュー反映済み・限定の生産採用)**: joint 壁のスロート直後 r″ の山 (+0.010, x 0.014 r_t) を r‴ ≤ 0 の不等式拘束で消す。形状ゲート → 生産 Euler 格子で現行壁との非劣化 A/B (各 3 回) → 生産キー化 |
 | [tooling-stage-manifest-launch-binding.md](active/tooling-stage-manifest-launch-binding.md) | `tooling` | **段の区間判定を起動記録に結び付ける** (2026-09-27 起票、gradient-scalar-lsq #2g): 同じ YAML を旧→新バイナリで起動すると最後の起動の実効値で全段が上書きされ、別作用素の段が 1 区間に連結される欠陥 (codex M7)。起動記録にバイナリ id、段と起動を設定ハッシュ + 起動順で単調対応、実効 `scalarGradient`・`slauWallNormalChi`・バイナリを hard キーに。draft・**後回し (2026-09-27 ユーザ決定)**: 起動 ID と履歴の直接対応で §4/§6 は確定済み、codex plan 段 GO-with-changes (Major 4) の反映は再開時 |
 | [boundary-node-rotational-periodic.md](active/boundary-node-rotational-periodic.md) | `boundary` | **node 周期 (seam 合算経路) の回転周期対応** (2026-09-26 ユーザ指示)。member ごとの root 相対角でベクトル量 (運動量・勾配・速度勾配テンソル・陰解法対角) にだけ回転をはさむ、スカラーは恒等。90° 環状セクタ vs 全周で同値性、SLAU + slauWallNormalChi を検証。draft・codex plan 段が先 |
 | [verification-m6-axis-wave-mesh-su2.md](active/verification-m6-axis-wave-mesh-su2.md) | `verification` | **M6 ノズル試験部の軸 M の山 (x≈70, +0.24 %pt) は軸近傍の数値解か物理か** (2026-10-04 起票, draft): 軸側の半径方向細分 2 水準 (腕 A, TP) と同一メッシュ・CPG の forge vs SU2 (腕 B) で切り分ける。判定基準は §6 に事前登録 |
@@ -78,6 +77,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [tooling-nozzle-throat-monotone-r2.md](accepted/tooling-nozzle-throat-monotone-r2.md) | `tooling` | **done 2026-10-07 (生産採用・限定)**: joint 壁に r‴ ≤ 0 の拘束 (`wall_fit_mono_r2`) を入れ、スロート直後の r″ の山 (0.5102) を消した。Euler は実務判定に合格、dry NS は全ゲート合格、凝縮 NS は 4 量 STEADY。生産入口 (deltastar_loop) が k_f を読まない欠陥を修正。将来課題: MOC 始点付近の誤差 (axis_dx0) |
 | [tooling-rerun-conditions.md](accepted/tooling-rerun-conditions.md) | `tooling` | **done 2026-10-06**: 既存 run の形状を固定して入口条件・背圧・H2O 分率だけ変えた run を作るツール (`solver_density_cuda/tools/rerun_conditions.py`)。Pt 変更は full + 本段 cfl 1 + scale-ic pt を推奨 (粗格子で検証)。残作業 #9・#11 は生産利用時に |
 | [tooling-nozzle-cfd-pinned-initial-line.md](accepted/tooling-nozzle-cfd-pinned-initial-line.md) | `tooling / nozzle design` | **done 2026-10-06** (実装・評価の完了; 性能の認定は保留): 生産レシピ = CFD ピン初期線 + 当てはめ壁 + 生産格子 (ni 2000 × nj 97) + 生産格子の Euler で出口較正 (+3.770e−4) + C2。最終 NS run_0117: 出口 M −0.019 % (下限境界上、ユーザ決定 B)・Mach 波 DRIFTING (ユーザ決定 A)。軸付近の半径方向格子に評価量が強く依存 (#11h)。未確認事項は campaign-recipe #16〜#19・verification-m6 #17 へ移管 |
 | [boundary-node-farfield-characteristic.md](accepted/boundary-node-farfield-characteristic.md) | `boundary` | **[done 2026-10-04、限定受理]** **遠方境界 `farfield` (node)**: 境界半割面の外側状態 (TRRS + 超音速の滑らかな重み) と境界面だけの HLLC。受理範囲 = V0–V2 の合格項目 (初回評価のビット一致・単体・起動拒否・自由流保持・法線入射の音響反射・保存収支・陽解法/SST・局所逆流・接触波) と SERN 3D 側方遠方面の用途 (2.50 H、g3/g4 で §8 内)。**汎用の遠方境界としては受理しない** (ユーザ決定): V0 後半 (多 step の新旧同等性) は FAIL 保持、V2c (2 次で凸角停滞) と V2d-2 時間精度 (再実行変動 1.5 %) は判定不能。codex plan 10 回・result 1 回 (GO-with-changes 全件対応)・diagnose 9 回 |
