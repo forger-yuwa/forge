@@ -1,0 +1,6 @@
+{
+ "cond_onset_x_axis": {"verdict": "STEADY", "window": "run_0118 res_14000–18000 (cond_series.csv)", "note": "軸の凝縮開始 x/r_t 57.94"},
+ "cond_S_max": {"verdict": "STEADY", "window": "run_0118 res_14000–18000", "note": "16.86"},
+ "cond_exit_g_core": {"verdict": "STEADY", "window": "run_0118 res_14000–18000", "note": "3.13e-4"},
+ "exit_core_M": {"verdict": "STEADY", "window": "run_0118 res_14000–18000", "note": "5.9864 (凝縮 ON; dry run_0117 から −0.0125)。凝縮の登録 4 量の準定常合格であって dry の M6 許容への合格ではない"}
+}
