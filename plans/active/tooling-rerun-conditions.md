@@ -82,7 +82,7 @@ problem YAML を書き換えて runner/deltastar_loop に通すと `design_chain
 | 3 | `rerun_conditions.py` 実装と単体 | §4.1〜4.8、§6 単体 (a)〜(m)。合格: `test_rerun_conditions.py` FAIL 0 | O |
 | 4 | `methods/design/overview.md` 追記 | 対応入力・初期場変換 (T・U・Y・k・ω を保つ)・拒否条件 | O |
 | 5 | 検証 run (i)(ii)(iv) | §6、AWS、粗格子 run_0094 系列。case README 台帳に run を追記 (主セッション) | O |
-| 6 | 文書同期 | `procedures/nozzle-design-workflow.md` §3a・skill `nozzle-design` | O |
+| 6 | 文書同期 — 完了 2026-10-06 (procedures §3a・skill・methods の rerun 節; 推奨は (ii″) で確定) | `procedures/nozzle-design-workflow.md` §3a・skill `nozzle-design` | O |
 | 7 | codex result 段レビュー | `codex_review.py --stage result` | O |
 | 8 | ~~「スケール IC + none」を Pt のみ変更の推奨に昇格するか~~ 決着 2026-10-06 (diagnostician): 昇格しない ((ii) で両腕とも none・cfl 5 で発散) | 完了 | F |
 | 10 | ~~スケール IC の残置/推奨/削除~~ **確定 2026-10-06 ((ii″) B3 → (b))**: Pt 変更時は `--scale-ic pt` を推奨・stages full・本段 cfl 1、scale none には警告: **Pt 変更時は `--scale-ic pt` を推奨・stages full・本段 cfl 1**、scale none + Pt 変更には警告。注記: B 腕は cfl 5 でしか試しておらず、scale none の本段 cfl 1 は未検証 | 完了 (ツール・単体 (n)・§4.7) | F |
@@ -142,7 +142,7 @@ problem YAML を書き換えて runner/deltastar_loop に通すと `design_chain
   各ブロック終了ごとに規約 (M drift 3e−6/osc 3e−6、ṁ drift 1e−5/osc 2e−5、δ_E drift 5e−5/osc 1e−4、`--tail 0.4 --min-snaps 10`) で判定し、3 量 STEADY で停止。
   診断量 (合否外): ṁ の到達予想 ≈ 17150 (Pt/√(R·Tt) スケーリング、BL 変化含まず; 1 % 以上外れて単調に進み続ければ実効入力を疑う)、本段 res の入口列の T・Y1 実効値 (1500 K・0.10)。
   解釈: STEADY 到達 → (iv) 合格、§4.7 に「Tt/Y 変更: full + 本段 cfl 参照、量が STEADY になるまで (粗格子で N step)」を実測で記載; 上限で単調・増分減衰 (classify が漸近値) → 「経路合格・量は漸近中」で記録し §5.1 に F 項目を残して plan は進める; 上限で線形 (漸近値なし) または OSCILLATING → 保留のまま、ツール外としてユーザ判断に上げる (plan は done にしない)。
-- **§4.7 最終形 (B3・(iv″) の後に実測で埋める)**: 無変更 → none・参照 cfl (run_0119); Pt 変更 → full + 本段 cfl 1・60000 (+ scale は (ii″) の結果); Tt/Y 変更 → full + 本段 参照 cfl、STEADY まで N step ((iv″) の結果)。
+- **§4.7 最終形 (2026-10-06、実測で確定)**: 無変更 → none・参照 cfl (run_0119: δ_E +0.0003 %・出口 M −4e−6 で参照を再現); Pt 変更 → full + 本段 cfl 1・60000 + `--scale-ic pt` (A3 run_0131/0132 STEADY; scale none は B3 run_0133/0139 で入口壁際の偽のはく離を残し不達、cfl 5 の本段は A2/B2 とも発散); Tt/Y 変更 → full + 本段 参照 cfl (粗格子 cfl 5 で本段 36000 step まで延長しても流量・δ_E は漸近中 [残り約 0.1 %]、出口 M は 30000 step 付近で STEADY — 整定長は (iii) の生産利用で確定、§5.1 #11)。
 - **方針が誤りと言える観測 (追記)**: (iv″) で ṁ が到達予想から 1 % 超外れて単調に進む (実効入力の不整合); B3 と A3 が両方 STEADY で不一致 (IC 依存)。
 
 ### 6.1 レビュー記録 (codex)
