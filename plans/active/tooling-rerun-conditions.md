@@ -9,7 +9,7 @@
   - [`.claude/skills/nozzle-design/SKILL.md`](../../.claude/skills/nozzle-design/SKILL.md)
   - [`methods/design/overview.md`](../../methods/design/overview.md) (対応入力・初期場変換・拒否条件の節を追加する)
 - **related_plans**:
-  - [`tooling-nozzle-cfd-pinned-initial-line.md`](tooling-nozzle-cfd-pinned-initial-line.md) (case/45 の生産 run — 本ツールの最初の利用先)
+  - [`tooling-nozzle-cfd-pinned-initial-line.md`](../accepted/tooling-nozzle-cfd-pinned-initial-line.md) (case/45 の生産 run — 本ツールの最初の利用先)
   - [`tooling-design-problem-campaign-recipe.md`](tooling-design-problem-campaign-recipe.md) (将来の campaign 層。本ツールは run 単位の小道具で、それとは独立)
 - **created**: `2026-10-06`
 - **owner**: `Claude (主セッション) / ユーザ`

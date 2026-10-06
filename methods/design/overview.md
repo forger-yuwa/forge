@@ -309,7 +309,7 @@ $n_{\rm axis}$=2000・終端特性線出口・差分は `start_line` と `ni` �
 
 #### 初期線の出所: Hall / CFD ピン (`geometry.initial_line`, 2026-10-05)
 
-計画: [`plans/active/tooling-nozzle-cfd-pinned-initial-line.md`](../../plans/active/tooling-nozzle-cfd-pinned-initial-line.md)。
+計画: [`plans/accepted/tooling-nozzle-cfd-pinned-initial-line.md`](../../plans/accepted/tooling-nozzle-cfd-pinned-initial-line.md)。
 
 スロート特性線 (MOC の初期線) とそこでの軸アンカーの出所を problem YAML の 1 キーで選ぶ。
 
@@ -765,7 +765,7 @@ B-spline、**上流はその点へ Hermite を作り直す** (下流がマスタ
 
 **joint 壁の物理壁 (解析経路, 2026-10-05)**: 設計壁が `wall_repr: joint` (`JointFitCFDWall`) のとき、`PhysicalNozzleWall` は
 上記のスロート再推定 ($\kappa_t$ の窓 LSQ)・上流 Hermite の作り直し・オフセット点群の補間スプラインでの作り直しを**しない**
-(計画: [`plans/active/tooling-nozzle-cfd-pinned-initial-line.md`](../../plans/active/tooling-nozzle-cfd-pinned-initial-line.md) §5.1 #6b)。
+(計画: [`plans/accepted/tooling-nozzle-cfd-pinned-initial-line.md`](../../plans/accepted/tooling-nozzle-cfd-pinned-initial-line.md) §5.1 #6b)。
 物理壁は
 
 $$

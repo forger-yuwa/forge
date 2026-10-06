@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `tooling / nozzle design`
-- **status**: `in_progress`
+- **status**: `done`
 - **related_docs**:
   - [`methods/design/overview.md`](../../methods/design/overview.md) (§軸 Mach law・§壁の決め方 — 初期線の出所に CFD ピンを追記する)
 - **related_plans**:
@@ -154,7 +154,7 @@ Hall の初期線は MOC の C⁻ 適合条件を積算 0.12〜0.13° 満たさ�
 - [x] provider の実効入力照合 (#13a、回帰試験 Tt 1600 受理・1500 拒否)
 - [x] 報告の Mach 波表記・量別 VERDICT 欄 (#13b)
 - [x] `methods/design/overview.md` を更新 (初期線の出所・joint・出口較正・rerun 節)
-- [ ] codex result 段の再レビュー (§6.1) と採否
+- [x] codex result 段の再レビュー (§6.1) と採否 (2026-10-06 GO-with-changes、全件反映)
 
 **採用判断** (ユーザ): 2026-10-05 トレードオフ採用、2026-10-06 「A」(波の DRIFTING を未達のまま凝縮評価へ)・「B」(出口 M は下限境界上と記録して設計を変えない)。
 
@@ -163,7 +163,7 @@ Hall の初期線は MOC の C⁻ 適合条件を積算 0.12〜0.13° 満たさ�
 
 **移管** (本 plan の外へ; 2026-10-06 確定): 軸上の M の誤差 → `verification-m6-axis-wave-mesh-su2.md` §5.1 #17; 評価格子の確定 → `tooling-design-problem-campaign-recipe.md` §5.1 #16 (高); ni 感度 → 同 #17 (中); Mach 波の準定常達成 → 同 #18 (中); 凍結線の格子依存・Euler 較正の G2 → 同 #19 (低・延期)。
 
-- [ ] 上記を満たしたら `status: done`、`plans/accepted/` へ移動、`plans/README.md` 同期
+- [x] 上記を満たしたら `status: done`、`plans/accepted/` へ移動、`plans/README.md` 同期 (2026-10-06)
 
 ## 9. 変更ログ
 
@@ -229,3 +229,4 @@ Hall の初期線は MOC の C⁻ 適合条件を積算 0.12〜0.13° 満たさ�
 - `2026-10-06` — #13 (c): §1 に採用根拠の訂正、§4.0 に現行の生産レシピの集約 (+3.770e−4・Euler 参照 run_0114・生産格子・評価格子の暫定候補)、§8 完了条件を「実装完了 / 採用判断 / 性能検証の結果」に分けて書き直し (codex 推奨文言に出口 M・軸付近の格子依存を追記)。
 - `2026-10-06` — **報告の再生成** (#13 b の正式版): `nozzle_report --verdicts` (判定の出典 `case/45.isobutane_m6_d155/_band_ab/verdicts_run_0117.json`・`verdicts_run_0118.json`: 波 η0.1 DRIFTING + ユーザ決定 A、出口 M STEADY + ユーザ決定 B の下限境界上、凝縮 4 量 STEADY ほか) → `case/45.isobutane_m6_d155/run_0117_ns_recal_final_ext/report/run_0117_ns_recal_final_ext_report.pptx` (14 枚)・`run_0118_ns_recal_final_cond/report/run_0118_ns_recal_final_cond_report.pptx` (15 枚)、表記は Mach 波 (ローカル)。
 - `2026-10-06` — **codex result 段の再レビュー** (GO-with-changes, C0/M3/m2) を全件反映: `deltastar_loop.py` の `__main__` を全関数定義の後へ (CLI で `_design_report` が NameError になっていた; 回帰試験追加)、CFD ピン provider が `inletProfile` ≠ 0 と非有限・非物理の入口値を拒否 (試験 3 件追加、`run_cfd_initial_line_tests.py` FAIL 0)、未確認事項を `tooling-design-problem-campaign-recipe.md` §5.1 #16〜#19 に移管、case README の run 一覧を最終判定に更新、§1 の採用根拠を「軸の圧力波 +0.009 %pt」に訂正 (主セッションの一括改称の誤り)。
+- `2026-10-06` — **status: done、accepted へ移動** (範囲: 実装・評価の完了。性能の認定は保留 — §8 の文言どおり。未確認事項は campaign-recipe §5.1 #16〜#19 と verification-m6 §5.1 #17 へ移管済み)。

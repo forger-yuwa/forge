@@ -8,7 +8,7 @@
   標準出力と pptx [`nozzle-design-outputs.md`](nozzle-design-outputs.md)、
   計算の一般手順 [`calculation-workflow.md`](calculation-workflow.md)、
   発散対処 [`divergence-and-startup.md`](divergence-and-startup.md)、AWS 投入 [`/forge-aws-run`](../.claude/skills/forge-aws-run/SKILL.md)。
-- 設計判断の正本: [`plans/active/tooling-nozzle-cfd-pinned-initial-line.md`](../plans/active/tooling-nozzle-cfd-pinned-initial-line.md)
+- 設計判断の正本: [`plans/accepted/tooling-nozzle-cfd-pinned-initial-line.md`](../plans/accepted/tooling-nozzle-cfd-pinned-initial-line.md)
   (CFD ピン・当てはめ壁・細分格子・Euler 較正、§5.1 #11〜#11f)、
   [`plans/active/tooling-design-problem-campaign-recipe.md`](../plans/active/tooling-design-problem-campaign-recipe.md)
   (再現可能なパイプライン化、§4.9 C2 方式 — **未実装部分が多い**)。

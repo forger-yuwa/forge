@@ -9,7 +9,7 @@
 
 - 作業ツリー: `/home/sano/work/forge-integ-1005` (ブランチ `feature/nozzle-wall-fit-and-pipeline`)。元のツリー `/home/sano/work/forge` は別ブランチなので、そちらで探さないこと。
 - 正本: `plans/active/verification-m6-axis-wave-mesh-su2.md` の **§5.1 #17** (観測値・既知の関連・切り分け候補)。
-  観測の出所: `plans/active/tooling-nozzle-cfd-pinned-initial-line.md` §9 の 2026-10-06 「軸付近の格子依存」。
+  観測の出所: `plans/accepted/tooling-nozzle-cfd-pinned-initial-line.md` §9 の 2026-10-06 「軸付近の格子依存」。
 - 使える run (同じ壁 run_0092 で格子だけ違う): `case/45.isobutane_m6_d155/run_0105_ns_coarse_cfl1` (粗)・`run_0103_ns_finemesh_pass_cfl1` (細)・
   `run_0106_ns_finemesh3_pass_cfl1` (第三水準)、設計壁の Euler `run_0114_euler_pin_G1_recal_ext6k`。**AWS の `~/forge-wallfit/case/45.isobutane_m6_d155/` にある**
   (最終場と res_0 だけ残っている。ローカルには run_0114 などの一部のみ)。AWS は skill `forge-aws-run` (起動は毎回ユーザに確認)。

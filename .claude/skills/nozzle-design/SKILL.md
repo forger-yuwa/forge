@@ -17,7 +17,7 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 1. **どのユースケースか** を確定する (§1 / §2 / §3)。曖昧ならユーザに 1 問だけ聞く。
 2. **新規設計 (§1・§2) で problem YAML が未確定なら `/design-intake` に渡す** (要件インタビューはそちらの担当)。
 3. **最新の実例を手本にする**: `case/45.isobutane_m6_d155` (M6、2026-10)。生産レシピは
-   [`plans/active/tooling-nozzle-cfd-pinned-initial-line.md`](../../../plans/active/tooling-nozzle-cfd-pinned-initial-line.md) §4・§5.1 #11〜#11f と §9 末尾。
+   [`plans/accepted/tooling-nozzle-cfd-pinned-initial-line.md`](../../../plans/accepted/tooling-nozzle-cfd-pinned-initial-line.md) §4・§5.1 #11〜#11f と §9 末尾。
    古い run の YAML をそのまま複製しない (試作の `M_design` 較正値・廃止キーが残っている)。
 
 ## 判断の分かれ目
