@@ -341,6 +341,11 @@ public:
     void registerTwoPhaseVaporResidual(int enabled);
 
     void allocVariables(const int &useGPU , mesh& msh);
+    // 変換器 (convertGmshToForge) 専用: keep に含まれる cell 変数だけを確保し、それ以外の cell 変数は c / c_d /
+    // cellValNames から登録ごと外す (未確保の変数に触れたら c に空エントリが増える・c_d.at が投げるので検出できる)。
+    // plane 変数は確保しない。変換器は read_cellValNames だけを h5 に書くので、全変数の確保は不要
+    // (plan tooling-sern-mesh-blocking §5.1 B4-5 (2) ②)。forge 本体は従来どおり allocVariables を使う。
+    void allocVariablesConverter(const int &useGPU , mesh& msh, const std::list<std::string>& keep);
 
 
     void copyVariables_cell_plane_H2D_all();

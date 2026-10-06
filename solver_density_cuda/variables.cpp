@@ -398,6 +398,27 @@ void variables::allocVariables(const int &useGPU , mesh& msh)
 
 
 
+// 変換器専用の確保 (variables.hpp の宣言を参照)。
+void variables::allocVariablesConverter(const int &useGPU , mesh& msh, const std::list<std::string>& keep)
+{
+    auto kept = [&](const std::string& n) { return std::find(keep.begin(), keep.end(), n) != keep.end(); };
+    for (auto it = this->c.begin(); it != this->c.end(); ) {
+        if (kept(it->first)) { ++it; continue; }
+        this->c_d.erase(it->first);
+        it = this->c.erase(it);
+    }
+    this->cellValNames.remove_if([&](const std::string& n) { return !kept(n); });
+    for (auto& cellValName : cellValNames)
+    {
+        std::vector<flow_float>& cellValues = this->c.at(cellValName);
+        cellValues.resize(msh.nCells_all); // including ghost cells
+        if (useGPU == 1)
+        {
+            gpuErrchk( cudaMalloc((void**) &(this->c_d.at(cellValName)), (msh.nCells_all)*sizeof(flow_float)) );
+        }
+    }
+}
+
 void variables::copyVariables_cell_plane_H2D_all()
 {
     for (auto& name : this->cellValNames)

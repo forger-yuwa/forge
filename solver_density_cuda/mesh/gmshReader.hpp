@@ -14,6 +14,7 @@
 #include "common/vectorUtil.hpp"
 #include "variables.hpp"
 #include "mesh/memlog.hpp"
+#include <malloc.h>   // malloc_trim (glibc)
 
 #include <sstream>
 #include <fstream>
@@ -277,6 +278,13 @@ public:
     geom_int nElements;
 
     elementTypeMap eleTypeMap;
+
+    // vector の確保領域ごと解放する (clear は capacity を残すので swap で空にする)。
+    template <class T>
+    static void freeVec(std::vector<T>& v) { std::vector<T>().swap(v); }
+    // 解放した小さいチャンクを OS に返す。node 変換は要素ごとの小さな vector を大量に持つので、free しただけでは
+    // RSS が下がらない (B4-5 (1) の実測で 940 MB 解放に対し RSS −406 MiB)。挙動 (出力) には影響しない。
+    static void releaseHeap() { malloc_trim(0); }
 
     // FORGE_MEMLOG=1 の工程別メモリ計測 (memlog.hpp) で出す主要コンテナの推定バイト (計測専用。挙動に影響しない)。
     std::string memSummary() const
@@ -2276,6 +2284,16 @@ public:
 
         MEMLOG("replace: vizCONNE 退避後", memSummary());
 
+        // ---- primal の cells / planes / nodes 隣接を解放 (B4-5 (2) ③) ----
+        // 可視化用の退避 (vizBfaceNodes / vizCONNE) が済めば primal の接続は以降どこからも読まない
+        // (新 cells/planes は dual* とノード座標だけから作る。setInitial・writeInputH5 も nodes は coords だけを読む)。
+        // 旧実装は新 dual を作り終えるまで primal を保持しており、replace が 2.4 kB/節点の山になっていた。
+        freeVec(this->cells);
+        freeVec(this->planes);
+        for (auto& nd : this->nodes) { freeVec(nd.iCells); freeVec(nd.iPlanes); }
+        releaseHeap();
+        MEMLOG("replace: primal cells/planes/nodes 隣接の解放後", memSummary());
+
         // ---- 新 cells (CV = ノード) ----
         std::vector<cell> newCells(nN);
         for (geom_int i = 0; i < nN; ++i) {
@@ -2291,6 +2309,9 @@ public:
             newCells[i].regionId    = 0;
             // iPlanes/iPlanesDir は下で充填
         }
+        // 双対体積・重心は newCells に移したので解放 (B4-5 (2) ④)
+        freeVec(dualVolume);
+        freeVec(dualCentroid);
 
         MEMLOG("replace: newCells 構築後", memlog::item("newCells<cell>", newCells.size(), memlog::nestedBytes(newCells, [](const cell& c){ return memlog::innerVec(c.iNodes)+memlog::innerVec(c.iPlanes)+memlog::innerVec(c.iPlanesDir)+memlog::innerVec(c.centCoords); })) + " " + memSummary());
 
@@ -2325,7 +2346,12 @@ public:
             newPlanes.push_back(std::move(p));
         }
 
-        MEMLOG("replace: newPlanes 構築後 (旧 cells/planes と併存)", memlog::item("newPlanes<plane>", newPlanes.size(), memlog::nestedBytes(newPlanes, [](const plane& p){ return memlog::innerVec(p.iNodes)+memlog::innerVec(p.iCells)+memlog::innerVec(p.surfVect)+memlog::innerVec(p.centCoords); })) + " " + memSummary());
+        // 双対面・境界半割面の配列は newPlanes に移したので解放 (B4-5 (2) ④)。以降は dualBcond* だけを使う。
+        freeVec(dualFaceCells); freeVec(dualFaceVect); freeVec(dualFaceArea); freeVec(dualFaceCent);
+        freeVec(dualBnodeId);   freeVec(dualBnodeVect); freeVec(dualBnodeCent);
+        releaseHeap();
+
+        MEMLOG("replace: newPlanes 構築後 (dualFace*/dualBnode* 解放後)", memlog::item("newPlanes<plane>", newPlanes.size(), memlog::nestedBytes(newPlanes, [](const plane& p){ return memlog::innerVec(p.iNodes)+memlog::innerVec(p.iCells)+memlog::innerVec(p.surfVect)+memlog::innerVec(p.centCoords); })) + " " + memSummary());
 
         this->nNormalPlanes = nDualInternal;
         this->nBPlanes      = nBHalf;
@@ -2334,6 +2360,13 @@ public:
         this->nCells_all    = nN; // ゴーストは solver readMesh で付与
 
         // ---- cells の iPlanes / iPlanesDir を充填 ----
+        // 先に CV ごとの面数を数えて reserve する (push_back の倍々確保で capacity が余るのを避ける。並びは同一)。
+        {
+            std::vector<geom_int> deg(nN, 0);
+            for (geom_int ip = 0; ip < this->nPlanes; ++ip)
+                for (const geom_int c : newPlanes[ip].iCells) deg[c]++;
+            for (geom_int i = 0; i < nN; ++i) { newCells[i].iPlanes.reserve(deg[i]); newCells[i].iPlanesDir.reserve(deg[i]); }
+        }
         for (geom_int ip = 0; ip < this->nPlanes; ++ip) {
             const auto& ic = newPlanes[ip].iCells;
             for (size_t j = 0; j < ic.size(); ++j) {
@@ -2342,10 +2375,10 @@ public:
             }
         }
 
-        MEMLOG("replace: newCells.iPlanes 充填後 (旧 cells/planes と併存)", memSummary());
+        MEMLOG("replace: newCells.iPlanes 充填後", memSummary());
         this->cells  = std::move(newCells);
         this->planes = std::move(newPlanes);
-        MEMLOG("replace: 新 cells/planes へ move 後 (旧を解放)", memSummary());
+        MEMLOG("replace: 新 cells/planes へ move 後", memSummary());
 
         // ---- bconds を双対境界半割面で更新 (bcondKind / physID / 入力値は保持) ----
         const geom_int nBc = (geom_int)this->bconds.size();
@@ -2376,6 +2409,10 @@ public:
 
         // 双対は primary に昇格したので /DUAL の重複出力は不要にする
         dualBuilt = false;
+        // 残りの dual* も解放 (dualBuilt=false なので writeInputH5 は /DUAL を書かず dual* を読まない; B4-5 (2) ④)
+        freeVec(dualBcondOffset); freeVec(dualBcondPhysID); freeVec(dualBcondNodes);
+        releaseHeap();
+        MEMLOG("replace: dual* 全解放後", memSummary());
 
         cout << "[replacePrimalWithDual] done. nCells(CV)=" << this->nCells
              << " nNormalPlanes=" << this->nNormalPlanes
@@ -2383,7 +2420,8 @@ public:
              << " nPlanes=" << this->nPlanes << "\n";
     }
 
-    void writeInputH5(const string outFileName ,variables var)
+    // var は const 参照で受ける (旧: 値渡しで全変数を複製しピーク +0.94 kB/節点; B4-5 (2) ①)
+    void writeInputH5(const string outFileName , const variables& var)
     {
         // ------------
         // *** HDF5 *** 
@@ -2401,12 +2439,14 @@ public:
             exit(EXIT_FAILURE);
         }
 
-        MEMLOG("write: 入口 (var は値渡しの複製)", memlog::item("var.c(全変数)", var.c.size(), [&]{ size_t b=0; for (const auto& kv : var.c) b += memlog::flatBytes(kv.second); return b; }()));
+        MEMLOG("write: 入口 (var は const 参照)", memlog::item("var.c(確保済み変数)", var.c.size(), [&]{ size_t b=0; for (const auto& kv : var.c) b += memlog::flatBytes(kv.second); return b; }()));
 
         File file(outFileName, File::ReadWrite | File::Truncate);
 
         // write mesh structure
+        // 平坦配列は事前に必要数を reserve し、データセットを書いたら直ちに解放する (B4-5 (2) ⑤。値・並びは不変)。
         vector<geom_float> COORD;
+        COORD.reserve(this->nodes.size() * 3);
         for (auto& nod : this->nodes)
         {
             COORD.push_back(nod.coords[0]);
@@ -2435,9 +2475,15 @@ public:
 
 
         file.createDataSet("/MESH/COORD",COORD);
+        const size_t nCOORD = COORD.size(); freeVec(COORD);
         if (!renumberPerm.empty()) file.createDataSet("/MESH/RENUMBER_PERM", renumberPerm);   // new -> old (元 gmsh 節点順)
 
         vector<geom_int> CONNE;
+        {
+            size_t n = 0;
+            for (const auto& cel : this->cells) n += 1 + cel.iNodes.size();
+            CONNE.reserve(n);
+        }
         geom_int CONNE_dim = 0;
         geom_int CONNE0;    
         for (auto& cel : this->cells)
@@ -2462,13 +2508,22 @@ public:
             }
         }
         file.createDataSet("/MESH/CONNE",CONNE);
-        MEMLOG("write: COORD・CONNE 書出し後", memlog::item("COORD", COORD.size(), memlog::flatBytes(COORD)) + " " + memlog::item("CONNE", CONNE.size(), memlog::flatBytes(CONNE)));
+        MEMLOG("write: COORD・CONNE 書出し後", memlog::item("COORD(解放済)", nCOORD, 0) + " " + memlog::item("CONNE", CONNE.size(), memlog::flatBytes(CONNE)));
+        freeVec(CONNE);
 
         // write planes
         vector<geom_int> planes_struct;
         vector<geom_float> surfVect;
         vector<geom_float> surfArea;
         vector<geom_float> centCoords;
+        {
+            size_t n = 0;
+            for (const auto& pln : this->planes) n += 2 + pln.iNodes.size() + pln.iCells.size();
+            planes_struct.reserve(n);
+            surfVect.reserve(this->planes.size() * 3);
+            surfArea.reserve(this->planes.size());
+            centCoords.reserve(this->planes.size() * 3);
+        }
 
 
         for (auto& pln : this->planes)
@@ -2500,11 +2555,19 @@ public:
         file.createDataSet("/PLANES/surfVect",surfVect);
         file.createDataSet("/PLANES/surfArea",surfArea);
         file.createDataSet("/PLANES/centCoords",centCoords);
+        freeVec(planes_struct); freeVec(surfVect); freeVec(surfArea); freeVec(centCoords);
 
         // write cells
         vector<geom_int> cells_struct;
         vector<geom_float> volume;
         vector<geom_float> centCoords2;
+        {
+            size_t n = 0;
+            for (const auto& cel : this->cells) n += 4 + cel.iNodes.size() + 2 * cel.iPlanes.size();
+            cells_struct.reserve(n);
+            volume.reserve(this->cells.size());
+            centCoords2.reserve(this->cells.size() * 3);
+        }
 
         for (auto& cel: this->cells)
         {
@@ -2539,12 +2602,16 @@ public:
         file.createDataSet("/CELLS/STRUCT",cells_struct);
         file.createDataSet("/CELLS/volume",volume);
         file.createDataSet("/CELLS/centCoords",centCoords2);
+        freeVec(cells_struct); freeVec(volume); freeVec(centCoords2);
 
         vector<geom_int> regionIds;
+        regionIds.reserve(this->cells.size());
         for (auto& cel : this->cells) {
             regionIds.push_back(cel.regionId);
         }
         file.createDataSet("/CELLS/regionId", regionIds);
+        freeVec(regionIds);
+        releaseHeap();
 
         // ---- node-centered 可視化トポロジ (/VIZMESH) ----
         // replacePrimalWithDual() で退避した primal CONNE。solver の出力が node モードで

@@ -1,5 +1,7 @@
 #include <iostream>
 #include <vector>
+#include <list>
+#include <algorithm>
 
 #include "input/solverConfig.hpp"
 #include "input/setInitial.hpp"
@@ -63,11 +65,24 @@ int main(int argc , char *argv[])
     cout << "*** Set Initial Values *** \n";
     cout << "-------------------------- \n";
     variables var = variables();
-    var.allocVariables(cfg.gpu , gmsh);
-    MEMLOG("allocVariables 後", [&]{ size_t b = 0; for (const auto& kv : var.c) b += memlog::flatBytes(kv.second);
+    // 変換器は read_cellValNames (保存量・wall_dist 等 8 本) だけを h5 に書くので、それだけを確保する
+    // (全 cell 変数 + plane 変数の確保は約 0.9 kB/節点; plan tooling-sern-mesh-blocking §5.1 B4-5 (2) ②)。
+    const std::list<std::string> keepNames(var.read_cellValNames.begin(), var.read_cellValNames.end());
+    var.allocVariablesConverter(cfg.gpu , gmsh , keepNames);
+    MEMLOG("allocVariablesConverter 後", [&]{ size_t b = 0; for (const auto& kv : var.c) b += memlog::flatBytes(kv.second);
                                      size_t bp = 0; for (const auto& kv : var.p) bp += memlog::flatBytes(kv.second);
                                      return memlog::item("var.c(cell 変数)", var.c.size(), b) + " " + memlog::item("var.p(plane 変数)", var.p.size(), bp); }());
     setInitial(cfg , gmsh , var);
+    // 確保漏れの検出: setInitial が未確保の変数に v.c["名前"] で触れると c に空エントリが増える
+    // (operator[] の暗黙生成)。増えた・サイズが合わない変数があれば停止する。
+    for (const auto& kv : var.c) {
+        const bool kept = std::find(keepNames.begin(), keepNames.end(), kv.first) != keepNames.end();
+        if (!kept || (geom_int)kv.second.size() != gmsh.nCells_all) {
+            cerr << "Error: setInitial touched a variable not allocated by the converter: " << kv.first
+                 << " (size " << kv.second.size() << ", nCells_all " << gmsh.nCells_all << ")\n";
+            return EXIT_FAILURE;
+        }
+    }
     MEMLOG("setInitial 後 (壁距離 kd-tree を含む)", std::string());
 
     cout << "------------------------ \n";
