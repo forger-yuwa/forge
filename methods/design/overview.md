@@ -922,7 +922,7 @@ python3 solver_density_cuda/tools/rerun_conditions.py REF_RUN NEW_RUN [--res res
 - 出口: `--Ps` は `outlet_statPress` の `Ps` と逆流用 `Pt` を同時に書く (`Tt` は据え置き)。
 - 等温壁: `--Tw` は全 `wall_isothermal` の `Ts` を書く。
 - `solverConfig.yaml`: `--steps` (`nStepOuter`)・`--out-interval` (`outStepInterval`) は `nStepOuter % outStepInterval == 0` を強制、
-  `--cfl` は `cfl: X, cfl_pseudo: X` がちょうど 1 回当たることを検査し、読み直して実効値を照合する。
+  `--cfl` は `time.deltaT.cfl`・`cfl_pseudo` の両方を書く。いずれも YAML の値ノードの位置だけを書き換え (`yaml_strict.replace_scalars`; コメント・引用符付きキー・空白の揺れ・flow/block 形式に対応)、読み直して要求値との一致と他の値の不変を検査する。
 
 ### Pt を変えたら出口 Ps の指定が必須
 
@@ -998,7 +998,7 @@ NS run の条件を変えたときは、δ_E の評価に**同条件の Euler re
 
 **NS / Euler の分類と Euler 参照の推奨 (2026-10-06)**: NS か Euler かは実効 config で決める (粘着壁 `wall`/`wall_isothermal` があれば NS、壁が全部 `slip` なら Euler; `prepare_info.viscous` は照合のみ)。Euler と扱うのは、全壁 `slip` に加えて輸送が無効と確認できる設定だけ: 乱流・遷移モデルなし、`viscMethod: 0` かつ `visc: 0` (viscMethod 0 の μ は定数 `visc` で、粘性流束は viscMethod によらず毎反復評価される)、`thermCondMethod: 0` なら `thermCond: 0`、`physProp.transport` なし (化学種・受動種の拡散は `viscMethod ≠ 0` のときだけ働く)。全壁 `slip` でも輸送が有効な config (例 `viscMethod: 2` + `transport`) は未対応として作成前に拒否する。Euler 参照の `stages: none`・cfl 2・6000 step は「Pt だけを変え、`--scale-ic pt` で Ps も同じ比」の条件でしか検証していない (run_0120)。Tt・組成を変えた Euler 参照は同じ設定では準定常に達しなかった (run_0134) ので、full で STEADY まで回す。NS で Pt と Tt・組成・壁温を同時に変える (または凝縮 run で Pt を変える) 複合条件は、起動・整定が未検証で推奨対象外 (`recommended_stages` は full・本段 cfl 1・60000 step と警告を記録)。`--scale-ic pt` の禁止条件は Tt・組成・凝縮だけで、壁温 Tw は禁止条件でない (Pt + Tw は `--scale-ic pt` を受理する)。
 
-**入力 YAML の重複キー**: solverConfig・bcondConfig・species_meta と、`run_staged`/`run_staged_ns` の段 config 検査は `solver_density_cuda/tools/yaml_strict.py` で読み、全階層 (flow・block 形式) の重複キーを拒否する (PyYAML は後勝ち・solver の yaml-cpp は先勝ちなので、PyYAML で読んだ値は solver の実効設定と違いうる)。
+**入力 YAML の重複キー**: solverConfig・bcondConfig・species_meta と、`run_staged`/`run_staged_ns` の段 config 検査は `solver_density_cuda/tools/yaml_strict.py` で読み、全階層 (flow・block 形式) の重複キーを拒否する (PyYAML は後勝ち・solver の yaml-cpp は先勝ちなので、PyYAML で読んだ値は solver の実効設定と違いうる)。 **merge key (`<<`) も全階層で拒否する** (yaml-cpp は merge を展開しないので、PyYAML で展開した値と solver の実効値が食い違う)。**使用禁止・廃止キー** (`mesh.bndFirstOrder`、`procedures/recommended-settings.md` §9 の削除キー・node 廃止キー・旧乱流キー) を持つ参照 run は作成前に拒否し、旧既定・非推奨の値 (sst の旧既定、`wallTreatmentSST: 1` など) は警告する。
 
 `run_staged` (Euler) も `run_staged_ns` と同じく、各段 (soft・mid) の restart 前に段終了ゲート (`stage_gate`) をかけ、段ごとの `residual_history_<tag>.csv` (tag = soft / mid / main) と `stage_manifest.json` を残す。段の CFL・step 数は変えていない。
 

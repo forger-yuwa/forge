@@ -29,7 +29,8 @@ plan: plans/active/tooling-rerun-conditions.md §4 (設計方針)。手順の正
 
 v1 で止めるもの: 乾き成分 lump の組成変更 (`--lump`; restart_field・convert_species_field・forge の全経路が拒否する)、
 `X{s}` 形式・`inletProfile: 1`・複数 inlet・外部参照、凝縮 block・Tt 変更・組成変更と `--scale-ic pt` の併用、
-重複キーを含む YAML (solver の yaml-cpp は先勝ち・PyYAML は後勝ち; `yaml_strict`)、全壁 slip なのに輸送 (粘性・熱伝導・
+重複キー・merge key `<<` を含む YAML (solver の yaml-cpp は先勝ちで merge を展開しない・PyYAML は後勝ちで展開する;
+`yaml_strict`)、使用禁止・廃止キー (`mesh.bndFirstOrder` ほか `BANNED_KEYS`; 値によらず)、全壁 slip なのに輸送 (粘性・熱伝導・
 種拡散・乱流) が有効な config (Euler は viscMethod 0・visc 0・thermCond 0・transport なし・乱流なしだけ; `inviscid_problems`)。
 """
 import argparse
@@ -162,6 +163,8 @@ def parse_bcond(text):
         doc = yaml_strict.load(text)
     except yaml_strict.DuplicateKeyError as e:
         raise RerunError(f"bcondConfig.yaml が重複キーを含む (v1 は拒否): {e}")
+    except yaml_strict.MergeKeyError as e:
+        raise RerunError(f"bcondConfig.yaml が merge key `<<` を含む (v1 は拒否; solver は展開しない): {e}")
     except yaml.YAMLError as e:
         raise RerunError(f"bcondConfig.yaml が YAML として読めない: {e}")
     if not isinstance(doc, dict):
@@ -207,11 +210,10 @@ def replace_float_tokens(line, updates):
     return line[:m.start(1)] + body + line[m.end(1):]
 
 
-def _sub_once(rx, repl, text, what):
-    hits = re.findall(rx, text)
-    if len(hits) != 1:
-        raise RerunError(f"solverConfig.yaml の {what} がちょうど 1 回当たらない ({len(hits)} 回)")
-    return re.sub(rx, repl, text, count=1)
+# --steps / --out-interval / --cfl が書き換える YAML 上の位置 (design/forge_design/evaluate/runner_axismach.py の
+# _CFG_PATHS と同じ位置; 置換は両者とも yaml_strict.replace_scalars)
+_CFG_SET_PATHS = {"nStepOuter": ("time", "last", "nStepOuter"), "outStepInterval": ("time", "outStepInterval"),
+                  "cfl": ("time", "deltaT", "cfl"), "cfl_pseudo": ("time", "deltaT", "cfl_pseudo")}
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +337,58 @@ def _check_range(what, v, *, zero_ok=False):
     return x
 
 
+# 使用禁止・廃止キー (参照 config にあれば作成前に拒否)。出典:
+#   - `mesh.bndFirstOrder`: AGENTS.md「計算・実行ルール」(使用禁止; 値によらずキーの存在で拒否)、
+#     procedures/recommended-settings.md §9 末尾の表 (「禁止」)
+#   - §9.1・§9.2 の削除したキー (solverConfig.cpp の `removed[]` 表; 起動時エラー)
+#   - §9 末尾の表の node 廃止キー (`mesh.node*`; 起動時エラー) と旧乱流キー体系 (`turbulence.LESorRANS` 等; 起動時エラー)
+BANNED_KEYS = {
+    ("mesh", "bndFirstOrder"): "使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md・recommended-settings §9)",
+    **{("time", "deltaT", k): "削除したキー (recommended-settings §9.1/§9.2; 起動時エラー)"
+       for k in ("lineDtWallRelief", "implicitRelaxSST", "detectNaNInterval")},
+    **{("mesh", k): "削除したキー (recommended-settings §9.1/§9.2; 起動時エラー)" for k in ("gradLSQDegenThresh", "meshFormat")},
+    **{("turbulence", k): "削除したキー (recommended-settings §9.1; 起動時エラー)"
+       for k in ("C_DES_kw", "C_DES_ke", "wmlesNewtonTol", "wmlesNewtonMaxIt", "wmlesPrt")},
+    **{("physProp", k): "削除したキー (recommended-settings §9.2; 起動時エラー)" for k in ("isCompressible", "ro")},
+    ("time", "last", "control"): "削除したキー (recommended-settings §9.2; 起動時エラー。time.deltaT.control は別物)",
+    **{("mesh", k): "廃止 (2026-08-16; recommended-settings §9; 起動時エラー)"
+       for k in ("nodeAxisDirichlet", "nodeMidpointFx", "nodeValueAtNode", "nodeReconEdgeMidpoint", "nodeAxisUrDirichlet")},
+    **{("turbulence", k): "旧乱流キー体系 (recommended-settings §9; 起動時エラー。turbulence.model を使う)"
+       for k in ("LESorRANS", "LESmodel", "RANSmodel", "DESmode")},
+}
+# 旧設定・非推奨の値 (拒否はせず警告; 旧結果の再現として意図的に書くことがあるもの)。出典: recommended-settings §9 末尾の表
+LEGACY_VALUE_WARN = (
+    (("turbulence", "sstOmegaProdFromPk"), 0, "2026-09-08 までの旧既定 (現行既定 1)"),
+    (("turbulence", "sstSigmaBlend"), 0, "2026-09-08 までの旧既定 (現行既定 1)"),
+    (("turbulence", "sstEnergyKSource"), 1, "非推奨 (境界未完備・離散保存せず; 必要なら sstEnergyIncludesK)"),
+    (("turbulence", "sstIsotropicStress"), 1, "非推奨 (境界未完備・離散保存せず; 必要なら sstEnergyIncludesK)"),
+    (("turbulence", "wallTreatmentSST"), 1, "SST 壁関数は使わない (既定 0 = 低 Re; memory sst-wall-function-banned、solver も警告)"),
+)
+
+
+def _has_path(doc, path):
+    v = doc
+    for k in path:
+        if not isinstance(v, dict) or k not in v:
+            return False
+        v = v[k]
+    return True
+
+
+def banned_key_problems(cfg):
+    """使用禁止・廃止キー (BANNED_KEYS) の存在を値によらず列挙する。戻り: 問題の文字列のリスト (空なら OK)。"""
+    return [f"{'.'.join(p)}: {why}" for p, why in BANNED_KEYS.items() if _has_path(cfg, p)]
+
+
+def legacy_key_warnings(cfg):
+    """旧設定・非推奨の値 (LEGACY_VALUE_WARN) を警告文で返す (拒否しない)。"""
+    out = []
+    for path, val, why in LEGACY_VALUE_WARN:
+        if _has_path(cfg, path) and _num(yaml_strict._get(cfg, path)) == float(val):
+            out.append(f"参照 config の {'.'.join(path)}: {val} は {why} (recommended-settings §9)。そのまま複製した")
+    return out
+
+
 def _deltaT(cfg):
     return ((cfg.get("time") or {}).get("deltaT") or {})
 
@@ -370,8 +424,19 @@ def build_plan(a):
         cfg = yaml_strict.load(cfg_text) or {}
     except yaml_strict.DuplicateKeyError as e:
         raise RerunError(f"solverConfig.yaml が重複キーを含む (v1 は拒否; 必要保存量・分類を solver と違う解釈で決めうる): {e}")
+    except yaml_strict.MergeKeyError as e:
+        raise RerunError(f"solverConfig.yaml が merge key `<<` を含む (v1 は拒否; solver の yaml-cpp は展開しないので "
+                         f"検査した設定と solver の実効設定が割れる): {e}")
     except yaml.YAMLError as e:
         raise RerunError(f"solverConfig.yaml が YAML として読めない: {e}")
+    if not isinstance(cfg, dict):
+        raise RerunError("solverConfig.yaml が YAML の辞書でない")
+    # --- 入力契約: 使用禁止・廃止キー (作成前に拒否; 禁止設定を新しい run に複製しない、codex result 段 4 回目 #2) ---
+    bad_keys = banned_key_problems(cfg)
+    if bad_keys:
+        raise RerunError("参照 run の solverConfig.yaml に使用禁止・廃止キーがある — 参照設定から削除してから再実行すること:\n    "
+                         + "\n    ".join(bad_keys))
+    legacy_warns = legacy_key_warnings(cfg)
 
     # --- 入力契約: メッシュと値のファイル ---
     mesh = cfg.get("mesh") or {}
@@ -613,20 +678,34 @@ def build_plan(a):
                          "(restart_field は SRC に同名があれば写すので、設定と食い違う量が持ち込まれうる; codex M1)")
 
     # --- solverConfig の書き換え (step 数・出力間隔・CFL) ---
-    new_cfg_text = cfg_text
-    cfg_changes = {}
+    # YAML 上の位置 (_CFG_SET_PATHS) の値トークンだけを置換し、読み直して要求値・他の値の不変を検査する
+    # (yaml_strict.replace_scalars)。旧実装の正規表現置換はコメント (`# previous nStepOuter: 6000`) に当たり、
+    # `{nStepOuter : 6000}` の実効値を変えないまま「変更済み」と記録していた (codex result 段 4 回目 #3)。
+    cfg_updates, cfg_changes = {}, {}
     if a.steps is not None:
-        new_cfg_text = _sub_once(r"(nStepOuter:\s*)\d+", lambda m: m.group(1) + str(int(a.steps)), new_cfg_text, "nStepOuter")
+        cfg_updates[_CFG_SET_PATHS["nStepOuter"]] = str(int(a.steps))
         cfg_changes["nStepOuter"] = int(a.steps)
     if a.out_interval is not None:
-        new_cfg_text = _sub_once(r"(outStepInterval:\s*)\d+", lambda m: m.group(1) + str(int(a.out_interval)),
-                                 new_cfg_text, "outStepInterval")
+        cfg_updates[_CFG_SET_PATHS["outStepInterval"]] = str(int(a.out_interval))
         cfg_changes["outStepInterval"] = int(a.out_interval)
     if a.cfl is not None:
-        new_cfg_text = _sub_once(r"\bcfl:\s*[-+.\deE]+,\s*cfl_pseudo:\s*[-+.\deE]+",
-                                 lambda m: f"cfl: {fmt(a.cfl)}, cfl_pseudo: {fmt(a.cfl)}", new_cfg_text, "`cfl: X, cfl_pseudo: X`")
+        for k in ("cfl", "cfl_pseudo"):
+            if k not in _deltaT(cfg):
+                raise RerunError(f"solverConfig.yaml に time.deltaT.{k} が無い (--cfl は cfl と cfl_pseudo の両方を書き換える)")
+            cfg_updates[_CFG_SET_PATHS[k]] = fmt(a.cfl)
         cfg_changes["cfl"] = float(a.cfl)
+    new_cfg_text = cfg_text
+    if cfg_updates:
+        try:
+            new_cfg_text = yaml_strict.replace_scalars(cfg_text, cfg_updates)
+        except (ValueError, yaml.YAMLError) as e:
+            raise RerunError(f"solverConfig.yaml の書き換えができない (作成前に停止): {e}")
     new_cfg = yaml_strict.load(new_cfg_text) or {}
+    for k, (path, want_v) in {"nStepOuter": (_CFG_SET_PATHS["nStepOuter"], a.steps),
+                              "outStepInterval": (_CFG_SET_PATHS["outStepInterval"], a.out_interval)}.items():
+        got = _num(yaml_strict._get(new_cfg, path))
+        if want_v is not None and got != float(int(want_v)):
+            raise RerunError(f"書き換え後の solverConfig を読み直したら {'.'.join(path)} = {got} (期待 {int(want_v)})")
     eff_cfl = {k: _num(_deltaT(new_cfg).get(k)) for k in ("cfl", "cfl_pseudo")}
     if a.cfl is not None and any(v is not None and v != float(a.cfl) for v in eff_cfl.values()):
         raise RerunError(f"書き換え後の solverConfig を読み直したら time.deltaT の cfl/cfl_pseudo = {eff_cfl} (期待 {float(a.cfl)})")
@@ -639,7 +718,7 @@ def build_plan(a):
     if n_out <= 0 or n_outer <= 0 or n_outer % n_out != 0:
         raise RerunError(f"nStepOuter {n_outer} が outStepInterval {n_out} の倍数でない (最終 res が書かれない)")
     ref_outer = int((((cfg.get("time") or {}).get("last") or {}).get("nStepOuter")) or 0)
-    warnings = [p_exit_warn] if p_exit_warn else []
+    warnings = ([p_exit_warn] if p_exit_warn else []) + legacy_warns
     if inert_note:
         warnings.append(inert_note)
     if _res_step(res_path) is not None and _res_step(res_path) != ref_outer:
@@ -674,8 +753,19 @@ def build_plan(a):
     # --- species_meta の同期 ---
     meta_text_new, meta_note = None, None
     meta_path = os.path.join(ref, "species_meta.yaml")
-    if "Y" in changes and os.path.exists(meta_path):
-        meta_text_new, meta_note = _sync_species_meta(open(meta_path, encoding="utf-8").read(), names, Y_new)
+    if os.path.exists(meta_path):
+        # 検査 (重複キー・merge key) は変更の有無に関わらず行い、書き換えは組成変更時だけ (codex result 段 4 回目 #4)
+        meta_text = open(meta_path, encoding="utf-8").read()
+        try:
+            yaml_strict.load(meta_text)
+        except yaml_strict.DuplicateKeyError as e:
+            raise RerunError(f"species_meta.yaml が重複キーを含む (v1 は拒否): {e}")
+        except yaml_strict.MergeKeyError as e:
+            raise RerunError(f"species_meta.yaml が merge key `<<` を含む (v1 は拒否): {e}")
+        except yaml.YAMLError as e:
+            raise RerunError(f"species_meta.yaml が YAML として読めない: {e}")
+        if "Y" in changes:
+            meta_text_new, meta_note = _sync_species_meta(meta_text, names, Y_new)
 
     cond_changed = bool(changes)
     info_path = os.path.join(ref, "prepare_info.json")
@@ -841,6 +931,8 @@ def _sync_species_meta(text, names, Y):
         meta = yaml_strict.load(text) or {}
     except yaml_strict.DuplicateKeyError as e:
         raise RerunError(f"species_meta.yaml が重複キーを含む (v1 は拒否): {e}")
+    except yaml_strict.MergeKeyError as e:
+        raise RerunError(f"species_meta.yaml が merge key `<<` を含む (v1 は拒否): {e}")
     if [str(s) for s in (meta.get("species") or names)] != names:
         raise RerunError(f"species_meta.yaml の species {meta.get('species')} が physProp.species {names} と違う")
     inflow = ((meta.get("streams") or {}).get("inflow"))
@@ -1019,7 +1111,7 @@ def make_parser():
     tg.add_argument("--keep-Tw", action="store_true", help="Tt を変えても等温壁の壁温を据え置く")
     ap.add_argument("--steps", type=int, help="nStepOuter")
     ap.add_argument("--out-interval", type=int, help="outStepInterval")
-    ap.add_argument("--cfl", type=float, help="`cfl: X, cfl_pseudo: X` を書き換える")
+    ap.add_argument("--cfl", type=float, help="time.deltaT.cfl と cfl_pseudo の両方を書き換える")
     ap.add_argument("--scale-ic", choices=("none", "pt"), default="none",
                     help="pt: 必要保存量を全部 Pt_new/Pt_ref 倍 (T・U・Y・k・ω を保つ初期場変換; 明示 opt-in)")
     ap.add_argument("--override-recommended", action="store_true",

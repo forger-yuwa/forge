@@ -685,34 +685,23 @@ def _cfg_value(cfg_text: str, key: str):
 
 
 def _cfg_set(cfg_text: str, updates: dict) -> str:
-    """updates {key: 値} を YAML 上の位置 _CFG_PATHS[key] に書く。各 key の値トークン (`key: 値`) がちょうど 1 回
-    当たることを要求し、そのトークンだけを置換する。書き換え後に読み直し、(1) 各 key の実効値が要求値、
-    (2) それ以外の値が変わっていない ことを検査する。違反は ValueError (黙って当たらない置換を起こさない)。"""
-    import copy
+    """updates {key: 値} を YAML 上の位置 _CFG_PATHS[key] に書く (yaml_strict.replace_scalars: その位置の値トークンだけを
+    置換)。書き換え後に読み直し、(1) 各 key の実効値が要求値、(2) それ以外の値が変わっていない ことを検査する。
+    違反は ValueError (黙って当たらない置換を起こさない)。"""
+    ys = _yaml_strict()
     before = _cfg_load(cfg_text)
-    text = cfg_text
-    for key, val in updates.items():
+    for key in updates:
         if _cfg_get(before, key) is None:
             raise ValueError(f"solverConfig に {'.'.join(_CFG_PATHS[key])} が無い (段の {key} を書けない)")
-        rx = re.compile(r"(?<![\w.])(" + re.escape(key) + r"[ \t]*:[ \t]*)([^\s,{}\[\]#]+)")
-        hits = list(rx.finditer(text))
-        if len(hits) != 1:
-            raise ValueError(f"solverConfig の `{key}: 値` が {len(hits)} 回当たる (ちょうど 1 回のはず)")
-        tok = str(int(val)) if key in _CFG_INT_KEYS else repr(float(val))
-        m = hits[0]
-        text = text[:m.start(2)] + tok + text[m.end(2):]
+    # 値トークンの位置は YAML の構造から決める (正規表現だとコメント・引用符付きキー・`key :` に当たり外れが出る;
+    # codex result 段 4 回目 #3)。replace_scalars が読み直して要求値・他の値の不変を検査する
+    toks = {_CFG_PATHS[k]: (str(int(v)) if k in _CFG_INT_KEYS else repr(float(v))) for k, v in updates.items()}
+    text = ys.replace_scalars(cfg_text, toks)
     after = _cfg_load(text)
-    want = copy.deepcopy(before)
     for key, val in updates.items():
         got = _cfg_num(_cfg_get(after, key))
         if got is None or got != float(val):
             raise ValueError(f"段の config を読み直したら {'.'.join(_CFG_PATHS[key])} = {_cfg_get(after, key)!r} (要求 {val})")
-        node = want
-        for k in _CFG_PATHS[key][:-1]:
-            node = node[k]
-        node[_CFG_PATHS[key][-1]] = _cfg_get(after, key)
-    if want != after:
-        raise ValueError("段の config の書き換えで要求した key 以外の値が変わった")
     return text
 
 

@@ -377,6 +377,9 @@ def main():
     # ------------------------------------------------------------------ (r) 重複 YAML キーの拒否 (codex result 段 3 回目 #1)
     test_duplicate_keys()
 
+    # ------------------------------------------------------------------ (u) codex result 段 4 回目 #1〜#4
+    test_review4()
+
     # ------------------------------------------------------------------ (s) Euler 判定は輸送が無効なときだけ (codex result 段 3 回目 #2)
     ref86 = os.path.join(os.path.dirname(REF_SRC), "run_0086_euler_wallfit_pincal_r1_ext6k", "solverConfig.yaml")
     if os.path.exists(ref86):
@@ -762,6 +765,113 @@ def test_duplicate_keys():
     shutil.rmtree(rd, ignore_errors=True)
 
 
+def test_review4():
+    """codex result 段 4 回目: #1 merge key の拒否、#2 使用禁止・廃止キーの拒否、#3 --steps/--out-interval/--cfl の
+    構造ベースの書き換え、#4 species_meta.yaml の無変更時の検査。"""
+    import yaml_strict
+    # --- #1 merge key は全階層で拒否 (solver の yaml-cpp は展開しない)
+    for label, t in (("merge 内の重複", "turbulence: {<<: {model: sst, model: none}}\n"),
+                     ("merge で任意設定", "turbulence: {model: sst, <<: {sstEnergyIncludesK: 1}}\n"),
+                     ("anchor + merge (block)", "a: &a {x: 1}\nb:\n  <<: *a\n  y: 2\n")):
+        try:
+            yaml_strict.load(t)
+            raised = False
+        except yaml_strict.MergeKeyError:
+            raised = True
+        check(f"(u#1) yaml_strict: merge key ({label}) → MergeKeyError", raised)
+    check("(u#1) yaml_strict: anchor / alias だけ (merge なし) は通る",
+          yaml_strict.load("a: &a 1\nb: *a\n") == {"a": 1, "b": 1})
+    add_merge = lambda t: t.replace('turbulence: {model: "sst",', 'turbulence: {model: "sst", <<: {sstEnergyIncludesK: 1},', 1)  # noqa: E731
+    ref, new = make_ref(edit_cfg=add_merge)
+    code, _, err = run_main([ref, new, *PT08, "--scale-ic", "pt"])
+    check("(u#1) solverConfig の turbulence に <<: {sstEnergyIncludesK: 1} → 作成前に停止",
+          code == 2 and "merge key" in err and not os.path.exists(new), err[-300:])
+    done(ref, new)
+
+    # --- #2 使用禁止・廃止キーは値によらず作成前に拒否
+    for v in ("1", "0"):
+        ref, new = make_ref(edit_cfg=lambda t, v=v: t.replace('mesh: {discretization: "node",',
+                                                              f'mesh: {{bndFirstOrder: {v}, discretization: "node",', 1))
+        code, _, err = run_main([ref, new, *PT08, "--scale-ic", "pt"])
+        check(f"(u#2) mesh.bndFirstOrder: {v} → 作成前に停止・参照設定からの削除を案内・NEW_RUN なし",
+              code == 2 and "bndFirstOrder" in err and "削除してから再実行" in err and not os.path.exists(new), err[-300:])
+        done(ref, new)
+    ref, new = make_ref(edit_cfg=lambda t: t.replace('turbulence: {model: "sst",', 'turbulence: {model: "sst", LESorRANS: 2,', 1))
+    code, _, err = run_main([ref, new, "--dry-run"])
+    check("(u#2) 旧乱流キー turbulence.LESorRANS → 停止", code == 2 and "LESorRANS" in err, err[-300:])
+    done(ref, new)
+    ref, new = make_ref(edit_cfg=lambda t: t.replace('turbulence: {model: "sst",', 'turbulence: {model: "sst", sstSigmaBlend: 0,', 1))
+    p = plan_of([ref, new])
+    check("(u#2) 旧既定 sstSigmaBlend: 0 → 拒否せず警告", any("sstSigmaBlend" in w for w in p["warnings"]), p["warnings"])
+    done(ref, new)
+    ref, new = make_ref()
+    p = plan_of([ref, new, *PT08, "--scale-ic", "pt"])
+    check("(u#2) 正常な参照の生成 config に bndFirstOrder が無い", "bndFirstOrder" not in p["new_cfg_text"])
+    done(ref, new)
+
+    # --- #3 --steps / --out-interval / --cfl は YAML 上の位置の値だけを書き換え、読み直して要求値・他の不変を検査
+    def eff(t):
+        return yaml_strict.load(t)
+
+    def expect(t0, upd):
+        d = yaml_strict.load(t0)
+        for path, v in upd.items():
+            node = d
+            for k in path[:-1]:
+                node = node[k]
+            node[path[-1]] = v
+        return d
+
+    cmt = "# previous nStepOuter: 6000\n# outStepInterval: 1000\n# cfl: 5.0, cfl_pseudo: 5.0\n"
+    variants = {
+        "flow + コロン前の空白 + コメント": lambda t: cmt + t.replace("last: {nStepOuter: 6000}", "last: {nStepOuter : 6000}", 1),
+        "引用符付きキー": lambda t: t.replace("last: {nStepOuter: 6000}", 'last: {"nStepOuter": 6000}', 1)
+                                     .replace("outStepInterval: 1000", '"outStepInterval" : 1000', 1)
+                                     .replace("cfl: 5.0, cfl_pseudo: 5.0", '"cfl": 5.0, \'cfl_pseudo\' : 5.0', 1),
+        "block 形式": lambda t: t.replace("  last: {nStepOuter: 6000}", "  last:\n    nStepOuter: 6000  # nStepOuter: 6000", 1),
+    }
+    for label, fx in variants.items():
+        ref, new = make_ref(edit_cfg=fx)
+        t0 = open(os.path.join(ref, "solverConfig.yaml")).read()
+        try:
+            p = plan_of([ref, new, "--steps", "12000", "--out-interval", "2000", "--cfl", "3"])
+            got, err = eff(p["new_cfg_text"]), None
+        except rc.RerunError as e:
+            p, got, err = None, None, str(e)
+        want = expect(t0, {("time", "last", "nStepOuter"): 12000, ("time", "outStepInterval"): 2000,
+                           ("time", "deltaT", "cfl"): 3.0, ("time", "deltaT", "cfl_pseudo"): 3.0})
+        ok = err is None and got == want and p["cfg_changes"] == {"nStepOuter": 12000, "outStepInterval": 2000, "cfl": 3.0}
+        # コメント行は書き換えない
+        ok = ok and all(ln in p["new_cfg_text"].splitlines() for ln in t0.splitlines() if ln.lstrip().startswith("#"))
+        check(f"(u#3) --steps/--out-interval/--cfl ({label}) → 実効値が要求どおり・他の値とコメントは不変",
+              ok, err or (p and p["cfg_changes"]))
+        done(ref, new)
+    # 対象パスが無い → 作成前に停止
+    ref, new = make_ref(edit_cfg=lambda t: t.replace("  last: {nStepOuter: 6000}\n", "", 1))
+    code, _, err = run_main([ref, new, "--steps", "12000", "--dry-run"])
+    check("(u#3) time.last.nStepOuter が無い config に --steps → 停止", code == 2 and not os.path.exists(new), err[-300:])
+    done(ref, new)
+    # replace_scalars 単体: コメント・flow のコロン前空白
+    t = "time:\n  # previous nStepOuter: 6000\n  last: {nStepOuter : 6000}\n"
+    t2 = yaml_strict.replace_scalars(t, {("time", "last", "nStepOuter"): "12000"})
+    check("(u#3) replace_scalars: コメントは不変・flow の値だけ 12000",
+          t2 == "time:\n  # previous nStepOuter: 6000\n  last: {nStepOuter : 12000}\n", t2)
+
+    # --- #4 species_meta.yaml は無変更の rerun でも検査する
+    ref, new = make_ref()
+    mp = os.path.join(ref, "species_meta.yaml")
+    if os.path.exists(mp):
+        mt = open(mp).read()
+        assert mt.startswith("mode: lumped\nspecies:\n")
+        open(mp, "w").write(mt.replace("species:\n", "species: [MIXDRY, H2O]\nspecies:\n", 1))
+        code, _, err = run_main([ref, new, "--dry-run"])
+        check("(u#4) species_meta.yaml の重複 species キー → 無変更 rerun でも停止",
+              code == 2 and "species_meta.yaml" in err and "重複キー" in err and not os.path.exists(new), err[-300:])
+    else:
+        skip("(u#4) species_meta.yaml の重複キー", "参照 run に species_meta.yaml が無い")
+    done(ref, new)
+
+
 def test_run_staged_euler_gate(ram):
     """codex result 段 3 回目 #3: run_staged (Euler) も各段の restart 前に段終了ゲートをかけ、段ごとの履歴と manifest を残す。"""
     cfg_e = cfg_inviscid(open(os.path.join(BASE, "solverConfig.yaml")).read())
@@ -921,19 +1031,32 @@ def test_stage_config_structured(ram):
             check(f"run_staged_ns 段の config ({label}): soft 1 次・cfl 0.5、mid 1 次・cfl 1、nStepInner 10、本段は元のまま",
                   ok, err or [eff(x) for x in seen])
 
-        # 置換が 1 回に定まらない (コメントに同じ key) → forge を起動せずに停止
+        # コメントに同じ key があっても値トークンだけを書き換える (旧: 正規表現が 2 回当たって停止; codex result 段 4 回目 #3)
         rd = os.path.join(TMP, "staged_fmt")
         shutil.rmtree(rd, ignore_errors=True)
         os.makedirs(rd)
         shutil.copy2(os.path.join(BASE, "bcondConfig.yaml"), os.path.join(rd, "bcondConfig.yaml"))
-        open(os.path.join(rd, "solverConfig.yaml"), "w").write(base + "# 旧設定 cfl: 2.0\n")
+        tc = base + "# 旧設定 cfl: 2.0\n"
+        open(os.path.join(rd, "solverConfig.yaml"), "w").write(tc)
+        seen.clear()
+        try:
+            r = ram.run_staged_ns(rd, stages="full")
+            err = None
+        except Exception as e:  # noqa: BLE001
+            r, err = None, repr(e)
+        ok = err is None and r == 0 and len(seen) == 3 and all(x.endswith("# 旧設定 cfl: 2.0\n") for x in seen)
+        ok = ok and eff(seen[0])["cfl"] == 0.5 and eff(seen[1])["cfl"] == 1.0 and seen[2] == tc
+        check("run_staged_ns: コメントに `cfl:` がある config → コメントは不変・実効値だけ 0.5/1.0", ok, err or [eff(x) for x in seen])
+        # 書き換える値が alias で共有されている (cfl_pseudo: *c) → 例外・forge を起動しない
+        open(os.path.join(rd, "solverConfig.yaml"), "w").write(
+            base.replace("cfl: 5.0, cfl_pseudo: 5.0", "cfl: &c 5.0, cfl_pseudo: *c", 1))
         seen.clear()
         try:
             ram.run_staged_ns(rd, stages="full")
             raised = False
         except ValueError:
             raised = True
-        check("run_staged_ns: `cfl:` が 2 回当たる config → 例外・forge を起動しない", raised and not seen, len(seen))
+        check("run_staged_ns: cfl を alias で共有する config → 例外・forge を起動しない", raised and not seen, len(seen))
         # convMethod が無い → 前段を 1 次化できないので停止
         open(os.path.join(rd, "solverConfig.yaml"), "w").write(base.replace("space: {convMethod: 1, limiter: 2}", "space: {limiter: 2}", 1))
         seen.clear()
