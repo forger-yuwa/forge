@@ -25,6 +25,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [tooling-nozzle-throat-monotone-r2.md](active/tooling-nozzle-throat-monotone-r2.md) | `tooling` | **draft 2026-10-06**: joint 壁のスロート直後 r″ の山 (+0.010, x 0.014 r_t) を r‴ ≤ 0 の不等式拘束で消す。形状ゲート → 生産 Euler 格子で現行壁との非劣化 A/B (各 3 回) → 生産キー化 |
 | [tooling-stage-manifest-launch-binding.md](active/tooling-stage-manifest-launch-binding.md) | `tooling` | **段の区間判定を起動記録に結び付ける** (2026-09-27 起票、gradient-scalar-lsq #2g): 同じ YAML を旧→新バイナリで起動すると最後の起動の実効値で全段が上書きされ、別作用素の段が 1 区間に連結される欠陥 (codex M7)。起動記録にバイナリ id、段と起動を設定ハッシュ + 起動順で単調対応、実効 `scalarGradient`・`slauWallNormalChi`・バイナリを hard キーに。draft・**後回し (2026-09-27 ユーザ決定)**: 起動 ID と履歴の直接対応で §4/§6 は確定済み、codex plan 段 GO-with-changes (Major 4) の反映は再開時 |
 | [boundary-node-rotational-periodic.md](active/boundary-node-rotational-periodic.md) | `boundary` | **node 周期 (seam 合算経路) の回転周期対応** (2026-09-26 ユーザ指示)。member ごとの root 相対角でベクトル量 (運動量・勾配・速度勾配テンソル・陰解法対角) にだけ回転をはさむ、スカラーは恒等。90° 環状セクタ vs 全周で同値性、SLAU + slauWallNormalChi を検証。draft・codex plan 段が先 |
 | [verification-m6-axis-wave-mesh-su2.md](active/verification-m6-axis-wave-mesh-su2.md) | `verification` | **M6 ノズル試験部の軸 M の山 (x≈70, +0.24 %pt) は軸近傍の数値解か物理か** (2026-10-04 起票, draft): 軸側の半径方向細分 2 水準 (腕 A, TP) と同一メッシュ・CPG の forge vs SU2 (腕 B) で切り分ける。判定基準は §6 に事前登録 |
