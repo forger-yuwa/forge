@@ -73,7 +73,7 @@ for lab, ls in ((oc, "-"), (nc, "--")):
     axs[0].plot(xq, C2[lab][("g_0", 0.0)], color="#0f766e", ls=ls, lw=1.2, label=lab)
     axs[1].plot(xq, C2[lab][("condS_0", 0.0)], color="#c2410c", ls=ls, lw=1.2, label=lab)
 axs[0].set_title("軸の凝縮質量分率 g_0"); axs[1].set_title("軸の過飽和度 S")
-axs[1].set_yscale("log")
+axs[1].set_yscale("log"); axs[1].set_ylim(1.0, 30.0)
 for ax in axs:
     ax.set_xlabel("x / r_t"); ax.grid(alpha=.3); ax.legend(fontsize=8); ax.set_xlim(40, 95)
 fig.tight_layout(); fig.savefig(OUT / "fig_compare_cond_axis.png", dpi=150); plt.close(fig)
