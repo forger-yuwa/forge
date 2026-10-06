@@ -84,7 +84,8 @@ problem YAML を書き換えて runner/deltastar_loop に通すと `design_chain
 | 5 | 検証 run (i)(ii)(iv) | §6、AWS、粗格子 run_0094 系列。case README 台帳に run を追記 (主セッション) | O |
 | 6 | 文書同期 | `procedures/nozzle-design-workflow.md` §3a・skill `nozzle-design` | O |
 | 7 | codex result 段レビュー | `codex_review.py --stage result` | O |
-| 8 | 「スケール IC + none」を Pt のみ変更の推奨に昇格するか | §6 (ii) の結果で判断 | F |
+| 8 | ~~「スケール IC + none」を Pt のみ変更の推奨に昇格するか~~ 決着 2026-10-06 (diagnostician): 昇格しない ((ii) で両腕とも none・cfl 5 で発散) | 完了 | F |
+| 10 | スケール IC の残置/推奨/削除 — (ii′) の事前登録表で決める | run_0129/0130 (AWS) | F |
 | 9 | (本 plan 外) lump 変更対応・物理受入れ (iii) | `convert_species_field` に lump 同名・輸送 Y 保持のモード; (iii) は最初の生産利用で | F |
 
 ## 6. 検証 (事前登録; diagnostician 2026-10-06 の改訂版)
@@ -121,6 +122,18 @@ problem YAML を書き換えて runner/deltastar_loop に通すと `design_chain
   ゲート: NaN 0; δ_E・出口コア M・流量が規約で STEADY; 壁解像 PASS; 値は報告 (参照値が無いので合否なし)。
 - **方針が誤りと言える観測**: (i) の M 差 > 1e−4 または δ_E 差 > 0.01 %; (iv) で段ゲートが非有限を通した、または実効入力が要求値と違う; (ii) 腕 E の不合格。
 
+- **(ii′) スケール IC の残置判定 (diagnostician 2026-10-06、(ii) 両腕発散を受けた事前登録)**: 起点 run_0094 res_6000、`--Pt 4.4e6 --Ps 1789.6`、
+  `run_staged_ns(stages="full")` (soft 3000・mid 3000・本段 cfl 5・12000 step・1000 ごと = §4.7 既定)。腕 A2 `--scale-ic pt` (`run_0129_rerun_pt08_scale_full`) / 腕 B2 `--scale-ic none` (`run_0130_rerun_pt08_noscale_full`)。δ_E は腕 E (run_0120) を参照に抽出。
+  ゲート: 全段で段ゲート停止なし・NaN 0; 本段の δ_E・出口コア M・流量が規約で STEADY; |A2−B2| が δ_E ≤ 0.02 %・M ≤ 5e−5。
+  診断量 (合否外): `mdot_ratio_vs_euler` (run_0120 基準)、δ_E(A2)/0.725280、本段で |δ_E − 末尾平均| ≤ 0.01 % に初めて入って以後出ないスナップショット番号。
+  解釈 (先に固定): (a) A2・B2 とも STEADY で一致 → scale-ic pt は **opt-in 残置** (「T・U・Y・k・ω を保つ IC 変換であって起動補助ではない」と §4.4 に明記)、§4.7 不変;
+  (b) A2 STEADY・B2 が破綻または延長 1 回でも STEADY 不達 → §4.7 に「Pt 変更時は `--scale-ic pt` を推奨 (stages は full のまま)」、ツールは Pt 変更 + scale none に警告;
+  (c) A2 が段を問わず破綻 → **スケール機能を削除** (`--scale-ic` CLI・`scale_fields`・単体 (g)(j)・§4.4(3)・methods 節・記録の scale 項目を撤去し、腕 E の結果は §9 に残す)。B2 も破綻なら Pt 0.8 の BC/粗格子側の問題として再諮問;
+  (d) 両腕 STEADY だが不一致 → 延長 1 回 (6000) → なお不一致は保留・再諮問。
+  補足 (今は回さない): (c) のうち soft/mid は通り本段 cfl 5 だけが出口角で破綻した場合は run_0098/0101 と同指紋なので、削除の前に本段 cfl 1・60000 step の A3 を 1 本だけ登録して回す (A3 STEADY → §4.7 を「Pt 変更の本段は cfl 1」とし (a)/(b) を A3 に適用; A3 も破綻 → 削除)。
+- **(iv) の決着規約 (延長 run_0128 の結果を見る前に固定)**: 延長後 STEADY → 合格。不達のとき: `classify` の detail が単調・増分減衰 (漸近値あり) で NaN 0・残差 rising でなければ「経路合格・量は漸近中 (漸近値 X・最終比 ±Y %)」と記録して plan 完了の妨げにしない (経路試験で値は報告に使わない; 量の定常性は (iii) で確認)。OSCILLATING・残差 rising・漸近値なしの DRIFTING → 保留・再諮問。これ以上延長しない。
+- **方針が誤りと言える観測 (追記)**: (ii′) で A2 が soft/mid 段で破綻 (スケール場が NS で不整合) または B2 のみ健全。
+
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -150,3 +163,4 @@ problem YAML を書き換えて runner/deltastar_loop に通すと `design_chain
 - `2026-10-06` — 検証バッチが Euler 対参照 (run_0086、壁 `kind: slip`) で「対応外の境界種別」により作成前に停止 (forge 未起動; run_0119 は作成済み)。§4.2 の入力契約に `slip` (Euler の滑り壁、壁温なし) を追加し、P_exit_ref の除外にも含めた。単体 (f′) 追加、FAIL 0。バッチは既存の run_0119 を作り直さずに再開。
 - `2026-10-06` — 再開した検証バッチが Euler 対参照の作成で再停止: run_0086 の `nozzle.h5` に乱流モデルなしでも変換器が作る roK/roOmega の入れ物があり、§4.4 (1) の「必要保存量と wall_dist 以外は拒否」に当たった。乱流モデルなし (Euler・層流) の run に限り roK/roOmega を「使われない余りの量」として許し警告に記録 (スケールしない; 他の未知の量は従来どおり拒否)。単体 (f″) 追加、FAIL 0。
 - `2026-10-06` — **検証 run の結果** (AWS、粗格子 run_0094 系列): **(i) 合格** — `case/45.isobutane_m6_d155/run_0119_rerun_ctrl` δ_E 末尾 5 枚 0.7252822 (run_0104 の 0.725280 に +0.0003 % ≤ 0.01 %)、出口コア M 5.999261 (5.999265 に −4e−6 ≤ 2e−5)、δ_E・M・流量 STEADY (§6 の閾値)。**(ii) 腕 E 合格** — `run_0120_rerun_euler_pt08` 出口コア M 5.999998 (run_0086 の 5.999998 に |Δ| < 1e−6)・流量 13344.97 = 0.8 × run_0086 の 16681.20 に相対 7.5e−7 (≤ 1e−4)、STEADY → 状態変換 (scale-ic pt) は Euler 解を保つ。**(ii) 腕 A・B は両方発散** — A `run_0121_rerun_pt08_scale` (scale あり) は step 334 で ro NaN、非有限 54 節点が x/r_t 94.7〜95.2・r/r_t 10.09〜10.10 (出口の壁際の角、T → 6000 K); B `run_0122_rerun_pt08_noscale` (scale なし) は step 120、x/r_t −12.5〜−12.0 (入口、T → 50 K の膨張)。いずれも §6 で「実験として明示」した stages none・cfl 5。登録解釈「A 発散 → スケール機能を削除候補に」に当たる → 諮問 (diagnostician)。**(iv)** `run_0123_rerun_fullpath` は経路のゲート (stage_manifest 3 段・段ごとの残差履歴・段ゲート停止なし・NaN 0・実効入力 Tt 1500/Y 0.9,0.1/Y_transport) 合格、本段 6000 step の出口コア M・流量は DRIFTING → 登録どおり 6000 step 延長 1 回 (`run_0128_rerun_fullpath_ext`)。集計スクリプトの欠陥: 発散 run (スナップショットなし) で `rerun_series.py` が例外 → `set -e` でバッチが残りの集計を飛ばした (手で再実行)。AWS は別セッションの 3D 変換の OOM で不通になり、ユーザ許可で停止・起動 (IP 100.54.10.165)。
+- `2026-10-06` — diagnostician に諮った (エスカレーション条件 3): 「A 発散 → 削除候補」は発火したが、(ii) は両腕とも stages none・cfl 5 で発散し scale の良否を識別していない (B は入口 step 120、A は出口角 step 334; 出口 BC の ghost 構築はスケール不変 `boundaryCond_d.cu:614-624`、config に Pt 依存定数なし)。第 1 仮説 = 非固定点 IC からの本段 cfl 5 の安定限界超え (run_0098/0101 と同指紋、run_0031 は full なら Euler IC からでも cfl 5 完走) — 原因の確定は (ii′) の後。#8 は「昇格しない」で決着。残置/推奨/削除は (ii′) [scale-ic pt/none × full] の事前登録表で決める (§6)。(iv) の延長不達時の扱いを事前登録。
