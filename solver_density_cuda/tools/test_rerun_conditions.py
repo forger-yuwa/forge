@@ -327,6 +327,15 @@ def main():
           "roK" not in p["required"] and any("未使用量" in w for w in p["warnings"]), (p["required"], p["warnings"]))
     done(ref, new)
 
+    # ------------------------------------------------------------------ (n) Pt 変更の推奨 (2026-10-06、§6 (ii′)・A3)
+    ref, new = make_ref()
+    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt"])
+    check("(n) Pt 変更 → recommended_stages full・本段 cfl 1", p["recommended_stages"].get("stages") == "full" and p["recommended_stages"].get("cfl") == 1.0, p["recommended_stages"])
+    check("(n) scale-ic pt なら none 警告なし", not any("--scale-ic none" in w for w in p["warnings"]), p["warnings"])
+    p = plan_of([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "none"])
+    check("(n) Pt 変更 + scale-ic none → 警告", any("--scale-ic none" in w for w in p["warnings"]), p["warnings"])
+    done(ref, new)
+
     # ------------------------------------------------------------------ (g)
     ref, new = make_ref(edit_cfg=lambda t: t + "condensation: {condensation: 1, nCondSpecies: 1, condensationSpecies: H2O}\n")
     code, _, err = run_main([ref, new, "--Pt", "4.4e6", "--Ps", "1789.6", "--scale-ic", "pt"])

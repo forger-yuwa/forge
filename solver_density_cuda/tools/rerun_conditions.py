@@ -598,7 +598,15 @@ def build_plan(a):
         meta_text_new, meta_note = _sync_species_meta(open(meta_path, encoding="utf-8").read(), names, Y_new)
 
     cond_changed = bool(changes)
-    if cond_changed:
+    if cond_changed and "Pt" in changes:
+        # plan tooling-rerun-conditions §6 (ii′)・A3 (2026-10-06): Pt 0.8 倍は stages full でも本段 cfl 5 で出口壁際の角から発散
+        # (scale あり step 468、なし step 2 で入口)、scale あり + full + 本段 cfl 1 は STEADY → Pt 変更の本段は cfl 1、scale-ic pt を推奨
+        rec = {"stages": "full", "cfl": 1.0,
+               "note": "Pt を変えた → run_staged_ns(stages='full') (soft→mid→本段) で本段 cfl 1、--scale-ic pt を推奨 (plan §4.7、§6 (ii′)・A3)"}
+        if a.scale_ic != "pt":
+            warnings.append("Pt 変更で --scale-ic none: 検証では stages full・本段 cfl 5 で入口から step 2 で発散した (plan §6 (ii′) 腕 B2)。"
+                            "--scale-ic pt を推奨 (none の本段 cfl 1 は未検証)")
+    elif cond_changed:
         rec = {"stages": "full",
                "note": "条件を変えた → run_staged_ns(stages='full') (soft→mid→本段)。細分格子は本段 cfl 1 (plan §4.7)"}
     else:
