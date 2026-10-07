@@ -1,7 +1,9 @@
 """runner_axismach.mesh_params の試験 (plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11f 手順 1, 2026-10-06)。
 (a) 既存の Euler 問題 (格子キーが ni/nj/wall_first_frac/throat_refine だけ) で修正前の Euler 経路と同じ Mesh2DParams になる。
 (b) NS の細分格子のキー (throat_width・wall_first_frac_throat・前後ブレンド) を Euler 経路でも読む。
-(c) 同じ壁で Euler 経路と NS 経路の格子パラメータから生成した座標が一致する。"""
+(c) 同じ壁で Euler 経路と NS 経路の格子パラメータから生成した座標が一致する。
+2026-10-07 (plan verification-case45-euler-total-enthalpy §6 E3) から Euler の prepare は mesh_euler を読む (`mesh_params_euler`;
+試験は run_mesh_euler_tests.py)。ここの (a)〜(d) は mesh を読む `mesh_params` (NS の経路。E3 以前は Euler も同じ関数) の試験として残す。"""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

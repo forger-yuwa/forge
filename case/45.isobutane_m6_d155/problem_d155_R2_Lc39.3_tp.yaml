@@ -54,6 +54,15 @@ mesh:
   wall_first_frac: 5.0e-3
   throat_refine: 3.0
 
+# Euler の格子 (runner_axismach.prepare が読む)。2026-10-07 の移行 (plan verification-case45-euler-total-enthalpy §6 E3) で、
+#   この問題の記録の格子 (上の mesh と同じ) をそのまま明示した (記録の再現のため)。全断面 0.005 の配点は新しい Euler の既定と
+#   同じ則だが、ni・nj は今の case/45 の評価条件 (2000 × 97) ではない。
+mesh_euler:
+  ni: 1100
+  nj: 65
+  wall_first_frac: 5.0e-3
+  throat_refine: 3.0
+
 evaluate:
   nStepOuter: 12000
   outStepInterval: 4000

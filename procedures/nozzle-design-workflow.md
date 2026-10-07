@@ -26,7 +26,8 @@
 | `dv` | `L_c.value` | 軸 law の長さ。runner は `min/max` を使わない |
 | `geometry` | `R` (スロート曲率半径/r_t)、`r_inlet` (入口配管半径/**r_t 単位**)、`L_U` (縮流部長)、`L_pipe`、`axis_law: knot`、`M_knot`、`Lc_mode`、`start_line: throat_char`、`wall_mode: cplus`、`n_axis_inv` | `Lc_mode`: `explicit` (L_c を使う、許容窓の外は例外) / `max` / `from_length` (`dv.L_total` から L_c を解く)。r_t を変えても r_inlet・L_total は r_t 単位のまま (実寸がずれる) |
 | `geometry` (生産レシピ) | `initial_line: cfd` + `initial_line_run`/`initial_line_res`、`wall_repr: joint`、`Md_moc_offset`、`pw_upstream: poly` | §2 ⑤ 参照。新規設計の初回は `initial_line: hall`・`wall_repr: interp` (既定) でよい。`pw_ramp` は旧設定 (`pw_upstream: ramp` と組で使う。`poly` と併記すると例外) |
-| `mesh` | `ni`, `nj`, `wall_first_frac` (+ `_throat`・ブレンド)、`throat_refine`、`throat_width`、`ar_max` | Euler と NS で同じキーが効く (2026-10-06 修正)。NS は壁解像 PASS の格子を使う (§2 ⑥) |
+| `mesh` | `ni`, `nj`, `wall_first_frac` (+ `_throat`・ブレンド)、`throat_refine`、`throat_width`、`axis_cap_frac`、`ar_max` | **NS (`prepare_ns`) の格子**。壁解像 PASS の格子を使う (§2 ⑥)。Euler には効かない (2026-10-07 から) |
+| `mesh_euler` | `mesh` と同じキー (未知のキーは例外) | **Euler (`prepare`) の格子** (2026-10-07、plan `verification-case45-euler-total-enthalpy` §4)。`mesh` からは補完しない。既定は全断面で `wall_first_frac` 0.005 の等比 (スロートの別指定なし・軸側の cap なし、ni × nj は 321 × 65)。**`mesh_euler` の無い問題は Euler の `prepare` が移行先を示して止まる** (旧格子の記録を再現するなら `mesh` の全キーを写す)。case/45 は ni 2000 × nj 97・軸方向は G1 と同じ (`throat_refine 4`・`throat_width 3`)・全域 0.005 |
 | `evaluate` | `nStepOuter`, `outStepInterval`, `cfl_main`, `tp_species`, `condensation` | 凝縮は `tp_species: split_h2o` + `condensation` |
 
 新しい問題は既存の YAML を複製して作る。複製元のコメントに残る古い設定 (`M_design` の試作較正値、
@@ -113,8 +114,15 @@ M6 (case/45) で実際に通した順番。各段の「何で判定するか」�
    - `wall_repr: joint` — MOC 点を位置 + 壁角で同時に当てはめた 5 次 B-spline (壁の r″ が連続でなめらか)。
    - `initial_line: cfd` — スロート初期線と軸アンカーを Hall 解でなく Euler の遷音速場から取る
      (`initial_line_run`/`initial_line_res` で凍結源を指定; 凍結源は Hall 初期線の当てはめ壁を Euler で解いた場)。
-   - `Md_moc_offset` — Euler の出口コア M を 6 に合わせる 1 係数の較正。**生産 NS と同じ格子パラメータの Euler で決める**
-     (粗い Euler 格子で決めると細分格子の NS で出口 M が約 −0.0008 ずれる; plan §5.1 #11f)。
+   - `Md_moc_offset` — Euler の出口コア M を 6 に合わせる 1 係数の較正。**Euler は `mesh_euler` の壁に寄せない配点で決める**
+     (2026-10-07 から。case/45 は 2000 × 97・軸方向は NS の G1 と同じ・全断面で壁の第 1 間隔の比 0.005)。NS と同じ壁に寄せた
+     G1 の配点 (1.3e-5・スロート 4.5e-6) の Euler は、スロート付近の全温が Tt を数百 K 超えたまま整定しなかった
+     (plan `verification-case45-euler-total-enthalpy` §9 E2。全域 0.005 の配点は同じ窓で全領域 |T₀ − Tt| ≤ 0.103 K)。出口コア M は最終断面の
+     η ∈ [0.05, 0.7] で、NS の基準格子 G1 の固定の η の列に線形補間した平均 (M_common) で較正し、自格子の平均も残す (同 plan §6 E4)。
+     Euler の較正の合格を NS に移せるとは限らない (配点も粘性も違う) ので、**NS の出口 M は NS で判定する**。
+     旧手順「生産 NS と同じ格子パラメータの Euler で決める」(plan `tooling-nozzle-cfd-pinned-initial-line` §5.1 #11f。粗い Euler 格子
+     1100 × 65 で決めると細分格子の NS で出口 M が約 −0.0008 ずれた経緯) は、G1 の Euler の全温が整定しない (E2) ため取り下げた。
+     case/45 の +3.770e-4 は G1 の Euler (run_0113+0114) 由来で、新しい配点でやり直す (同 plan §6 E4)。
    - `pw_upstream: poly` (既定。新しい YAML には明記する) — スロートより上流に δ_r を足さず、配管〜設計スロートを 5 次多項式 1 本にする
      (plan `tooling-nozzle-upstream-poly-and-throat-sizing`、2026-10-07)。`pw_ramp` は書かない (併記すると例外)。
      旧設定: `pw_upstream: ramp` + `pw_ramp: [−11, −6]` (縮流部側で δ_r をなめらかに入れる区間)。case/45 の生産 YAML は NS・凝縮の再評価
@@ -125,11 +133,12 @@ M6 (case/45) で実際に通した順番。各段の「何で判定するか」�
      `deltastar_loop --init-integral` も読む (書かないと k_f = 1 の物理壁になる)。最終 NS の数値レシピ (CFL 1・60000 step など) は
      YAML ではなく投入スクリプトが持つ (case/45 の手本 `run_mono_ns_chain.sh`、延長 `run_mono_ns_ext.sh`)。
 6. **NS の格子** — 壁解像 (y1+ ≤ 1、`check_wall_resolution.py --over-frac 5`) を満たす細分格子を使い、
-   格子ゲート (細分前後で δ_E(x_F) の差 ≤ 1 %、三水準目で確認) を通す。case/45 の生産格子:
+   格子ゲート (細分前後で δ_E(x_F) の差 ≤ 1 %、三水準目で確認) を通す。case/45 の生産格子 (NS の `mesh`、G1):
    ni 2000 × nj 97、第 1 セル 1.3e-5 (スロート 4.5e-6)、`throat_refine 4`・`throat_width 3`、AR ≤ 5000 (境界層層の例外)。
+   この壁に寄せた配点は NS 用で、Euler には使わない (Euler は `mesh_euler`、§0)。
    **細分格子の NS は本段 CFL 5 で発散する** — 段階起動 (soft → mid → 本段) + 本段 cfl 1・60000 step
    (累積 CFL を cfl 5 × 12000 にそろえる)。
-7. **最終判定** — 事前登録したゲート (case/45 の例: 出口半径 ±0.1 mm、δ_E/δ_C 1 ± 0.5 %、出口コア M 6.000 ± 0.02 %、
+7. **最終判定** — 事前登録したゲート (case/45 の例: 出口半径 0.775 m ± 0.1 mm、δ_E/δ_C 1 ± 0.5 %、出口コア M 6.000 ± 0.02 %、
    r/r_w = 0.1 の波 ≤ 0.01 %・オーバーシュート ≤ 0.035 %、壁解像 PASS) を、各量の時系列に
    `check_quasisteady.py --series-csv` をかけて判定する (`nozzle_report` の末尾幅は VERDICT の代わりにならない)。
    時系列は `case/45.isobutane_m6_d155/exitM_sampling_ab.py` (環境変数 `EULER_REF`・`SOLVE_JSON`・`FINAL_PROBLEM`)。

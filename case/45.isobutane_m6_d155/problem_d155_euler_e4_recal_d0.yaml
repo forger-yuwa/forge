@@ -1,4 +1,12 @@
-# plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11f 手順 2 腕 G1: 生産 NS 細分格子と同じ格子パラメータ (problem_d155_ns_finemesh_pin.yaml の mesh ブロック)。壁・凍結線・ガス・BC は G0/G1 で同一 (2026-10-06)
+# plan verification-case45-euler-total-enthalpy §5.1 #5b・§6 E4 (2026-10-07 登録 99431498): 出口較正のやり直しの段 1 (δ₀)。
+#   problem_d155_euler_pin_G1_recal_mono.yaml (単調壁・legacy + fixed2 [MOC のキー無し]・凍結の初期線 run_0062・Md_moc_offset +3.770e-4) の
+#   写しで、name だけが違う。Euler の格子は mesh_euler (2000 × 97・全域 0.005; E3)。上の mesh (G1) は NS 用で prepare は読まない。
+#   段 2 (δ₁) の問題 problem_d155_euler_e4_recal_d1.yaml は e4_recal.py make-d1 がこのファイルから Md_moc_offset と name だけを変えて作る。
+#   他のキーが元の問題と同じことは e4_recal.py check-problem が検査し、違えば止める。
+# plan tooling-nozzle-throat-monotone-r2 §5.1 #5・§6 E1 (2026-10-06): Euler A/B の腕 B (単調壁)。problem_d155_euler_pin_G1_recal.yaml (腕 A = 現行壁) の写しに
+#   geometry.wall_fit_mono_r2: [0.0, 1.5] (joint 壁の当てはめで [0, 1.5] r_t の r″ を単調非増加に拘束) だけを足したもの。他は腕 A と同一。
+#   name も腕 A と同じにしない (run の来歴で取り違えないため)。
+# plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11f E2: G1 の出口較正をやり直した壁 (Md_moc_offset = −4.16e-4 − (5.999207 − 6) = +3.770e-04; G1 run_0111+0112 の末尾 5 枚平均)。元は §5.1 #11f 手順 2 腕 G1: 生産 NS 細分格子と同じ格子パラメータ (problem_d155_ns_finemesh_pin.yaml の mesh ブロック)。壁・凍結線・ガス・BC は G0/G1 で同一 (2026-10-06)
 # plan verification-m6-axis-wave-mesh-su2 §5.1 #15 (補間壁 vs 同時当てはめ壁の Euler A/B): run_0037 の Euler 問題を r_t 0.0768075 (C2 最終) と n_axis_inv 2400 にした版 (2026-10-05)
 # ② イソブタン燃焼ガス M6 / 出口径 1.55 m (物理壁定義) — 最短ロバスト点の Euler 検証
 # 条件 (2026-08-31 ユーザ指示): Pt 5.5 MPa / Tt 1600 K / φ=0.9 組成 (case/42 と同一) /
@@ -14,7 +22,7 @@
 # 凝縮の事前見積り: 出口 T 233.5 K vs H2O 飽和 263.9 K (x_H2O 0.1356, pH2O 303 Pa)
 #   = −30 K 過冷却 → dry 前提は出口近傍で破れる。方針 (a): 本 run は dry、採用点で
 #   凝縮 ON restart 再評価 (split_h2o は最初から有効にしておく)。
-name: isobutane_m6_d155_euler_pin_G1
+name: isobutane_m6_d155_euler_e4_recal_d0
 type: wind_tunnel_axisym_axismach
 gas:
   model: semiperfect
@@ -54,7 +62,8 @@ geometry:
   initial_line_run: run_0062_euler_wallfit_fit_r1_ext6k
   initial_line_res: res_6000.h5
   wall_repr: joint
-  Md_moc_offset: -4.16e-4
+  wall_fit_mono_r2: [0.0, 1.5]   # r″ 単調拘束の区間 [a, b] r_t (plan tooling-nozzle-throat-monotone-r2 §4.1)
+  Md_moc_offset: 3.7700e-04
 
 mesh:
   discretization: node
@@ -70,20 +79,16 @@ mesh:
   throat_width: 3.0
   ar_max: 5000
 
-# Euler の格子 (runner_axismach.prepare が読む)。2026-10-07 の移行 (plan verification-case45-euler-total-enthalpy §6 E3) で、
-#   この問題が意図した G1 の配点 (上の mesh と同じ) をそのまま明示した (記録の再現のため。新しい Euler の既定 [全域 0.005] ではない)。
+# Euler の格子 (runner_axismach.prepare が読む。NS の prepare_ns は上の mesh を読む)。2026-10-07 の移行 (plan
+#   verification-case45-euler-total-enthalpy §4・§6 E3): 壁に寄せない配点 = 全断面で壁の第 1 間隔の比 0.005 の等比
+#   (スロートの別指定なし・軸側の cap なし)。ni 2000 × nj 97 と軸方向の配置 (throat_refine・throat_width) は今の評価条件
+#   (G1 の軸方向と同じ; 全ケースの既定ではない)。壁に寄せた G1 の Euler はスロート付近の全温が整定しなかった (同 plan §9 E2)。
 mesh_euler:
   ni: 2000
   nj: 97
-  wall_first_frac: 1.3e-5
-  wall_first_frac_throat: 4.5e-6
-  wall_first_up_x0: -9.0
-  wall_first_up_x1: -4.0
-  wall_first_blend_x0: 1.0
-  wall_first_blend_x1: 17.0
   throat_refine: 4.0
   throat_width: 3.0
-  ar_max: 5000
+  wall_first_frac: 0.005
 
 evaluate:
   nStepOuter: 12000

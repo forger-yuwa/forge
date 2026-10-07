@@ -85,6 +85,21 @@ mesh:
   throat_width: 3.0
   ar_max: 5000
 
+# Euler の格子 (runner_axismach.prepare が読む)。2026-10-07 の移行 (plan verification-case45-euler-total-enthalpy §6 E3) で、
+#   この問題が意図した G1 の配点 (上の mesh と同じ) をそのまま明示した (記録の再現のため。新しい Euler の既定 [全域 0.005] ではない)。
+mesh_euler:
+  ni: 2000
+  nj: 97
+  wall_first_frac: 1.3e-5
+  wall_first_frac_throat: 4.5e-6
+  wall_first_up_x0: -9.0
+  wall_first_up_x1: -4.0
+  wall_first_blend_x0: 1.0
+  wall_first_blend_x1: 17.0
+  throat_refine: 4.0
+  throat_width: 3.0
+  ar_max: 5000
+
 evaluate:
   nStepOuter: 12000
   outStepInterval: 1000

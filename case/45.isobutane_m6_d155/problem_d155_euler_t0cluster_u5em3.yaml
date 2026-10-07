@@ -85,6 +85,18 @@ mesh:
   throat_width: 3.0
   ar_max: 5000
 
+# Euler の格子 (runner_axismach.prepare が読む。NS の prepare_ns は上の mesh を読む)。2026-10-07 の移行 (plan
+#   verification-case45-euler-total-enthalpy §4・§6 E3): 壁に寄せない配点 = 全断面で壁の第 1 間隔の比 0.005 の等比
+#   (スロートの別指定なし・軸側の cap なし)。ni 2000 × nj 97 と軸方向の配置 (throat_refine・throat_width) は今の評価条件
+#   (G1 の軸方向と同じ; 全ケースの既定ではない)。壁に寄せた G1 の Euler はスロート付近の全温が整定しなかった (同 plan §9 E2)。
+#   この問題では、上の mesh (E2 の腕 B: 両 wall_first_frac 0.005 + ブレンドの鍵) と同じ座標・接続になる (E3 の合格条件 (1))。
+mesh_euler:
+  ni: 2000
+  nj: 97
+  throat_refine: 4.0
+  throat_width: 3.0
+  wall_first_frac: 0.005
+
 evaluate:
   nStepOuter: 12000
   outStepInterval: 1000

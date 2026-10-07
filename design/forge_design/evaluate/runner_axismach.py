@@ -18,9 +18,12 @@ CFD-in-the-loop アンカー更新 (A5) は problem YAML の geometry キーで�
 'vertical' = M_start の縦線 [旧構成])。壁の決め方は geometry.wall_mode
 ('flux' = 断面の質量流束閉包 [A9] / 'streamline' = 流線積分 [旧構成])。
 
+格子: Euler (`prepare`) は問題 YAML の `mesh_euler`、NS (`prepare_ns`) は `mesh` を読む (2026-10-07 から。混ぜて補完しない。
+`mesh_euler` の無い問題は Euler の prepare で移行先を示して止まる; `mesh_euler_block`)。
+
 使い方:
   design/.venv-opt/bin/python -m forge_design.evaluate.runner_axismach \
-      case/41.wind_tunnel_design/problem_m4_axismach.yaml run_dir [--prepare-only]
+      case/45.isobutane_m6_d155/problem_d155_euler_pin_G1_recal_mono.yaml run_dir [--prepare-only]
 """
 from __future__ import annotations
 
@@ -644,11 +647,10 @@ def design_chain(p: Problem) -> dict:
             "cd_series": float(ht.cd_series())}
 
 
-def mesh_params(p, scale, ni, nj, wall_first_frac):
-    """problem の mesh ブロック → Mesh2DParams。Euler (`prepare`) と NS (`prepare_ns`) で同じキーを読む
+def _mesh_params_from(m: dict, scale, ni, nj, wall_first_frac) -> Mesh2DParams:
+    """格子のブロック (dict) → Mesh2DParams。既定値は呼び出し側の ni/nj/wall_first_frac だけが違う
     (2026-10-06 codex diagnose: 以前の Euler 経路は ni/nj/wall_first_frac/throat_refine しか渡さず、throat_width・
-    wall_first_frac_throat・前後ブレンド等を黙って無視していた)。既定値は経路ごとの ni/nj/wall_first_frac だけが違う。"""
-    m = p.mesh
+    wall_first_frac_throat・前後ブレンド等を黙って無視していた)。"""
     opt = lambda k: None if m.get(k) is None else float(m[k])  # noqa: E731
     return Mesh2DParams(ni=int(m.get("ni", ni)), nj=int(m.get("nj", nj)),
                         wall_first_frac=float(m.get("wall_first_frac", wall_first_frac)),
@@ -659,6 +661,105 @@ def mesh_params(p, scale, ni, nj, wall_first_frac):
                         wall_first_blend_x1=float(m.get("wall_first_blend_x1", 6.0)),
                         wall_first_up_x0=opt("wall_first_up_x0"), wall_first_up_x1=opt("wall_first_up_x1"),
                         axis_gap_frac=opt("axis_gap_frac"), axis_cap_frac=opt("axis_cap_frac"), scale=scale)
+
+
+def mesh_params(p, scale, ni, nj, wall_first_frac):
+    """problem の mesh ブロック → Mesh2DParams。**NS (`prepare_ns`) の格子**。
+    2026-10-07 (plan verification-case45-euler-total-enthalpy §4「E3 以降の対処」) から Euler (`prepare`) は `mesh_euler` を読む
+    (`mesh_params_euler`)。それ以前は Euler と NS が同じ mesh を読んでいた。"""
+    return _mesh_params_from(p.mesh, scale, ni, nj, wall_first_frac)
+
+
+# Euler 専用の格子の設定 `mesh_euler` (2026-10-07, plan verification-case45-euler-total-enthalpy §4「E3 以降の対処」、
+# 諮問 notes/reviews/2026-10-07-euler-grid-switch-plan-diagnose.md):
+# - prepare (Euler) は mesh_euler、prepare_ns (NS) は mesh を読む。2 つのブロックを混ぜて補完しない (Euler への mesh の暗黙の継承を禁止)。
+# - 既定は全断面で wall_first_frac 0.005 の等比の配点、スロートの別指定なし、軸側の cap なし (ni・nj の既定は従来の Euler の 321 × 65)。
+#   NS 向けに壁へ寄せた配点 (case/45 の G1: 1.3e-5・スロート 4.5e-6) の Euler は、スロート付近の全温が Tt を数百 K 超えたまま整定しなかった
+#   (同 plan §9 E2。全域 0.005 の配点は同じ窓で全領域 |T₀ − Tt| ≤ 0.103 K)。
+# - mesh だけがあって mesh_euler が無い問題は移行先を示して止める (黙って NS の配点を使わない・指定を無視して既定に落とさない)。
+MESH_EULER_DEFAULTS = {"ni": 321, "nj": 65, "wall_first_frac": 5.0e-3}
+# mesh_euler に書けるキー (_mesh_params_from が読むもの + 品質検査の ar_max + node 固定の discretization)。それ以外は書き誤りとして止める
+MESH_EULER_KEYS = ("ni", "nj", "wall_first_frac", "throat_refine", "throat_width", "wall_first_frac_throat",
+                   "wall_first_blend_x0", "wall_first_blend_x1", "wall_first_up_x0", "wall_first_up_x1",
+                   "axis_gap_frac", "axis_cap_frac", "ar_max", "discretization")
+
+
+def mesh_euler_block(p) -> dict:
+    """Euler の格子のブロック `mesh_euler` (dict の写し)。無い・dict でない・未知のキー・node でない discretization は ValueError。
+    mesh だけの問題には、旧格子を再現する写し方と新しい既定の書き方を示して止める。"""
+    m = (p.raw or {}).get("mesh_euler")
+    if m is None:
+        old = p.raw.get("mesh") or {}
+        flow = lambda d: "{" + ", ".join(f"{k}: {v}" for k, v in d.items()) + "}"  # noqa: E731  (YAML の flow 形式で示す)
+        axial = {k: old[k] for k in ("ni", "nj", "throat_refine", "throat_width") if k in old}
+        raise ValueError(
+            "prepare (Euler) は問題 YAML の mesh_euler を読む (2026-10-07 から。plan verification-case45-euler-total-enthalpy §4)。"
+            "この問題には mesh だけがあり mesh_euler が無い — NS の mesh を Euler に流用しない。移行先: "
+            "(1) 新しい既定 (全断面 wall_first_frac 0.005・スロートの別指定なし・軸側の cap なし) なら "
+            f"mesh_euler: {flow({**axial, 'wall_first_frac': 0.005})}、"
+            f"(2) 旧格子の記録を再現するなら mesh の全キーを mesh_euler に写す (mesh_euler: {flow(old)})")
+    if not isinstance(m, dict):
+        raise ValueError(f"mesh_euler は辞書 (受け取った値: {m!r})")
+    bad = sorted(str(k) for k in m if k not in MESH_EULER_KEYS)
+    if bad:
+        raise ValueError(f"mesh_euler の未知のキー {bad} (書けるのは {list(MESH_EULER_KEYS)}; 黙って無視しない)")
+    if "discretization" in m and str(m["discretization"]) != "node":
+        raise ValueError(f"mesh_euler.discretization は node だけ (axis-Mach の Euler は node; 受け取った値: {m['discretization']!r})")
+    return dict(m)
+
+
+def mesh_params_euler(p, scale) -> Mesh2DParams:
+    """problem の mesh_euler ブロック → Mesh2DParams。**Euler (`prepare`) の格子** (既定は MESH_EULER_DEFAULTS と Mesh2DParams の
+    スロートの別指定なし・軸側の cap なし)。mesh は読まない。"""
+    return _mesh_params_from(mesh_euler_block(p), scale, **MESH_EULER_DEFAULTS)
+
+
+# 格子の座標と接続のハッシュ (prepare_info.json の mesh 欄)。式は case/45.isobutane_m6_d155/euler_t0_e2.py の E2_MESH.json
+# (`_sha_bytes(/MESH/COORD)`・`_topology_digest`) と同じ (データセット名・dtype・形・バイト列) なので、E2 の記録と直接比べられる
+_MESH_TOPOLOGY = ("MESH/CONNE", "VIZMESH/CONNE", "CELLS/STRUCT", "PLANES/STRUCT", "CELLS/regionId")
+_MESH_BCOND_TOPO = ("iBPlanes", "iCells", "iPlanes", "vizBfaceNodes", "vizBfaceSizes")
+
+
+def _mesh_hashes(run_dir: Path, coords, quads, bedges) -> dict:
+    """変換後の nozzle.h5 の座標 (/MESH/COORD) と接続 (_MESH_TOPOLOGY + 境界の位相) の sha256、nozzle.msh の sha256、
+    生成器の出力 (coords float64・quads・境界辺; 変換器に依らない) の sha256。"""
+    import hashlib
+
+    import h5py
+
+    def _upd(h, name, a):
+        a = np.ascontiguousarray(a)
+        h.update(name.encode() + str(a.dtype).encode() + str(a.shape).encode() + a.tobytes())
+
+    with h5py.File(run_dir / "nozzle.h5", "r") as f:
+        c = f["/MESH/COORD"][:]
+        hc = hashlib.sha256()
+        hc.update(str(c.dtype).encode() + str(c.shape).encode() + np.ascontiguousarray(c).tobytes())
+        ht = hashlib.sha256()
+        names = [t for t in _MESH_TOPOLOGY if t in f]
+        names += sorted(f"BCONDS/{b}/{k}" for b in f["BCONDS"] for k in _MESH_BCOND_TOPO if k in f["BCONDS"][b])
+        for n in names:
+            a = np.asarray(f[n])
+            ht.update(n.encode() + str(a.dtype).encode() + str(a.shape).encode() + a.tobytes())
+    hg = hashlib.sha256()
+    _upd(hg, "coords", np.asarray(coords, dtype=np.float64))
+    _upd(hg, "quads", np.asarray(quads, dtype=np.int64))
+    for g in ("inlet", "outlet", "wall", "axis"):
+        _upd(hg, g, np.asarray(bedges[g], dtype=np.int64))
+    hm = hashlib.sha256((run_dir / "nozzle.msh").read_bytes())
+    return {"coord_sha256": hc.hexdigest(), "coord_dtype": str(c.dtype), "topology_sha256": ht.hexdigest(),
+            "topology_datasets": names, "msh_sha256": hm.hexdigest(), "generator_sha256": hg.hexdigest()}
+
+
+def _mesh_record(p, mp: Mesh2DParams, source: str, nj: int, run_dir: Path, coords, quads, bedges) -> dict:
+    """prepare_info.json の mesh 欄: 従来の ni・nj・wall_first_frac (読む側: nozzle_report・metrics.deltastar・cfd_initial_line) に、
+    全 Mesh2DParams・採用元のブロック名・問題に書かれたブロックの有無と中身・座標と接続のハッシュを足す
+    (plan verification-case45-euler-total-enthalpy §4、2026-10-07)。"""
+    import dataclasses
+    return {"ni": mp.ni, "nj": int(nj), "wall_first_frac": mp.wall_first_frac,
+            "source": source, "blocks_present": {b: (b in (p.raw or {})) for b in ("mesh", "mesh_euler")},
+            "block": dict((p.raw or {}).get(source) or {}), "params": dataclasses.asdict(mp),
+            "hashes": _mesh_hashes(run_dir, coords, quads, bedges)}
 
 
 def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, implicit_relax=None) -> dict:
@@ -676,12 +777,14 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
             raise ValueError(f"geometry.pw_upstream は {' / '.join(repr(c) for c in PW_UPSTREAMS)} のどれか (受け取った値: {v!r})")
         if v == "poly":
             raise ValueError("geometry.pw_upstream: poly は prepare_ns (joint 壁の物理壁) 専用 — Euler の prepare には物理壁が無い")
+    # Euler の格子は mesh_euler (mesh は読まない)。無い・不正なら run dir を作る前・設計チェーンの前に止める (2026-10-07)
+    m_eu = mesh_euler_block(p)
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=False)
     d = design_chain(p)
     wall = d["wall"]
     scale = float(p.spec["r_throat"])
-    mp = mesh_params(p, scale, ni=321, nj=65, wall_first_frac=5.0e-3)
+    mp = mesh_params_euler(p, scale)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
     # 記録: 目標軸分布 (x0 → x_E) と設計壁
@@ -703,7 +806,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     subprocess.run([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
-                            "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
+                            "nozzle_qc.h5", "--ar-max", str(int(m_eu.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
                        capture_output=True, text=True)
     (run_dir / "MESH_QUALITY.txt").write_text(
         "# cell 変換コピーで検査 (品質は primal の性質)\n" + q.stdout + q.stderr)
@@ -719,6 +822,8 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     (run_dir / "solverConfig.yaml").write_text(cfg_e)
     subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    # IC を入れる前 (座標・接続は以後変わらない)。nj は実際の値 (axis_gap_frac では導出値になる)
+    mesh_rec = _mesh_record(p, mp, "mesh_euler", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
                         float(p.spec["Pt"]), float(p.spec["Tt"]), p.gamma, p.cp,
                         gas=(None if str(p.evaluate.get('cfd_gas', 'same')) == 'cpg' else p.gas_model),
@@ -748,7 +853,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
             "exit": d["exit"],
             "mdot_ratio_moc": d["mdot_ratio_moc"], "cd_series": d["cd_series"],
             "nStepOuter": n, "scale_m": scale, "ic_from": str(ic_from) if ic_from else None,
-            "mesh": {"ni": mp.ni, "nj": mp.nj, "wall_first_frac": mp.wall_first_frac}}
+            "mesh": mesh_rec}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 
@@ -1231,6 +1336,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     (run_dir / "solverConfig.yaml").write_text(cfg_ns)
     subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    # 記録だけ (NS の格子は mesh のまま、座標・接続は変えない; 2026-10-07 plan verification-case45-euler-total-enthalpy §4)
+    mesh_rec = _mesh_record(p, mp, "mesh", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
                         float(p.spec["Pt"]), float(p.spec["Tt"]), p.gamma, p.cp,
                         gas=(None if str(p.evaluate.get('cfd_gas', 'same')) == 'cpg' else p.gas_model),
@@ -1287,8 +1394,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "nStepOuter": n, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
             "wall_thermal": p.wall_thermal,
             "ic_from": str(ic_from) if ic_from else None,
-            "mesh": {"ni": mp.ni, "nj": int(coords.shape[0] // mp.ni), "wall_first_frac": mp.wall_first_frac,
-                     "axis_gap_frac": mp.axis_gap_frac}}
+            "mesh": {**mesh_rec, "axis_gap_frac": mp.axis_gap_frac}}
     if transport is not None:
         # 来歴: 種ごとの輸送物性の指定 (solverConfig の physProp.transport と同じ; 解決結果はソルバの resolved_species 記録)
         info["transport"] = {"source": "gas.transport", "viscMethod": 2, "models": transport}
