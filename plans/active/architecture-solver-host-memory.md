@@ -128,7 +128,7 @@ R1 → R2 → R3 の各段階で効果を測る。
 | ~~2~~ (**済 2026-10-07**: [監査全文](../../notes/investigations/2026-10-07-host-memory-audit.md)、要点は §4.3。R2 に `pdeSize` の fallback 修正を追加) | **監査** (M1・M2・M5) | ホスト側 `c`/`p` の全参照を、**名前・有効条件・最初の利用箇所 (ファイル:行)・書くか読むか・保護の要否**の表に (§4.3)。出力と checkpoint の依存名 (`h0` ← `Ht`/`k`、`/CHECKPOINT` 履歴、`FORGE_OUT_RESIDUALS`・`FORGE_RESID_SNAP` 等の環境変数) を含める。表の各行に対応する**試験 (入力・確認する成果物・判定)** を割り当てる (§6 の構成表の元)。触るファイル: なし (読むだけ)。合格: 表が本 plan に入り、§6 の構成表と対応している | O |
 | 3 | **基準入力の確定と回帰ハーネス** (M3・M5。**2026-10-07 途中**: `case/66.hostmem_regression/` に入力 23・構成 30 [forge 25・変換器 5] とハーネス `matrix_spec.py`・`prepare_inputs.py`・`run_matrix.py`・`compare_runs.py`・`memlog_summary.py`。base r1 は 28 構成が完走・NaN 0、SERN g3 base 3 回 [`case/46` run_1072–1074] 完走。**base r2/r3 の途中で AWS が idle 自動停止** — base バイナリを `forge_9c9f623c` の名前で起動していたため `idle_autostop.sh` の `pgrep -x forge` に掛からず、短い 2D run の合間を idle と数えられた。ハーネスは `.bin/<ビルド>/forge` の symlink 経由に修正済み (未実行)。**g4 は最終場が AWS に残っておらず不可** → メモリの傾きはローカル s070/s085 の 2 点 (変更前後とも同じ入力) で取り、g3 は外挿の確認点とする [§6 の「g3・g4」からの変更、理由: 入力の消失]。保留: NaN ダンプ (入力が別セッションの scratch)、case/13 の cell) | **専用 case `case/66.hostmem_regression/`** に、§6 の構成表の各構成の入力を (元 case から**複製して**。元の case・他セッションの作業ディレクトリには書かない) 置き、変更前バイナリ (AWS `~/bin-hostmem/forge_9c9f623c`) で各 3 回・N step を回すハーネス (投入と比較のスクリプト) を作る。各構成が現行バイナリで起動し NaN 無く N step 走ることを確認 (古い config の廃止キーは複製側だけ直し、直した内容を README に書く)。SERN g3/g4 は `case/46.sern_design` に run_1072 以降で。2026-10-07 の縮小格子 3 点は**発散前までのメモリ観測**として保持し、回帰の基準には使わない (`s050` は step 9 で `roe` 非有限、3 点とも `check_convergence` は NOT CONVERGED)。変更後も同じハーネスで回す | O |
 | 4 | R1–R3 の実装 (**R1・R2 は済 2026-10-07**: gpu: 1 で `mat_ns` とホスト `p` を確保しない、`pdeSize` の面 fallback を `nPlanes` に、面配列の長さガード `requireHostPlaneLength`。ローカル縮小格子 s070/s085 でホスト HWM の傾き 2737 → 2227 B/節点 [−510、期待 −507]、GPU は不変、s070 の step 0 は既知の 1 ulp 列を除き一致・`res_0.h5` は全 25 データセット一致、`FORGE_DIAG_PSI_DUALEVAL` の退避は 543/543 で base と同じ。`variables.hpp` にメンバ `nPlanesAlloc` を追加 = **構造体レイアウトが変わったので他のビルドはクリーンビルド**。本格回帰は #5 の AWS ハーネスで。R3 も済 2026-10-07 (ローカル): 共通関数 `output/outputFieldNames.{hpp,cpp}` [出力名・h0 依存・checkpoint・初期場・診断・H]、順序「登録 → `registerOutputDiagnostics` → `applyEnvGatedRemovals` → `hostCellSet` → `allocVariables(…, H)`」、アクセサ `hostCell` [キー無し・長さ違いで名前つき停止] を転送・出力・初期場読込・checkpoint 復元・診断・lineImplicit に。s070/s085 でホスト HWM の傾き 2737 → **1371 B/節点** [R3 単独 −856、合計 −1366]、ピークは `setStructuralVariables` (1371) と `readMesh` 末尾 (1362) がほぼ並ぶ、GPU 不変。既定構成 (level 1) の H は 223 本中 23 本、**level 2 では大きい** (case/09 で 241 本中 98 本)。s070 の step 0・`res_0.h5` (25 本) 一致、case/09 dual-time の `res_0` (level 2、100 本) 一致・checkpoint 14 本と属性一致・再開直後の `/CHECKPOINT` が入力とビット一致、env 変種の `res_0` (106 本) 一致。負例 2 つ (`P`・`roN` を H から外す) は書込み/転送の前に名前つきで停止。変換器は旧 (7637528e) と新で s070 の変換結果 398 データセットが一致。**本格回帰 (#5、AWS ハーネス) が残り**) | §5 の 2〜4。各段階でメモリを測る (g3/g4、`FORGE_MEMLOG=1`) | O |
-| 5 | 回帰 | §6 の全項目。負例 2 つ (出力用変数を H から外す・checkpoint 履歴変数を外す → いずれも書込み/転送の前に名前つきで停止) | O |
+| 5 | 回帰 (**2026-10-07 実施: 登録判定は (a) と (b) 4 構成 7 量が FAIL、他は PASS — §6.2**。追加診断 B [絶対 L∞、追加実行なし] を事前登録して実施中) | §6 の全項目。負例 2 つ (出力用変数を H から外す・checkpoint 履歴変数を外す → いずれも書込み/転送の前に名前つきで停止) | O |
 
 ## 6. 検証
 
@@ -166,6 +166,33 @@ R1 → R2 → R3 の各段階で効果を測る。
 - **ガード (負例 2 つ)**: (1) `case/36` で H から `P` を外したビルド → `writeInitialOutputs` の D2H より前で、(2) `case/09` の再開で H から `roN` を外したビルド → `main.cpp:1148` の書込みより前で、いずれも**変数名つきで停止**すること (確認後に戻す)。
 - **ビルド**: `forge`・`convertGmshToForge` とも成功、構造体レイアウトを変えたらクリーンビルド ([[stale-build-struct-layout-trap]])。
 
+### 6.2 回帰の結果と追加診断 (2026-10-07)
+
+**登録判定の結果 (base 9c9f623c 対 new 93e55957、各 3 回、`case/66.hostmem_regression/`、原本 `results/2026-10-07_base9c9f623c_vs_new93e55957/`)**:
+(c) NaN・初期出力 (保存量・原始量・幾何量のビット一致)・出力互換・ログ行・変換器 5 構成は全構成 PASS。**(a) step 0 は 1 構成を除き FAIL**、**(b) D ≤ 2S は 4 構成・7 量で FAIL**
+(c44dual_ckpt100 `condClampCorrQ_0`・`condR30_0`、c44dual_restart100 `condClampCorrQ_0`、c20cell_rk3 `rms_roUz`、c20cell_dual `Uz`・`roUz`・`CHECKPOINT/roUzN`)。
+SERN g3 のホスト VmHWM 5157 → 2630 MiB (2816 → 1436 B/節点)、GPU 不変 (メモリの合格条件は満たす)。**登録判定は FAIL のまま記録する** (書き換えない)。
+
+**判断: 2026-10-07 codex (diagnose) [記録](../../notes/reviews/2026-10-07-hostmem-regression-fail-diagnose.md) — 全件採用**:
+(1) 比較器に欠陥がある (呼び出し側で確認済み): `compare_runs.py` の `metric` は `max|A−B|/max|A|` で**分母がペアの片側**、同ビルド内は `i<j` の片方向・ビルド間は base→new の全組合せなので**S と D の尺度が揃わず、反復の並び順で判定が変わる**
+(最小再現: base `[100,2,1]` new `[100,2,1]` が FAIL、new を `[1,2,100]` に並べ替えると PASS)。さらに `inf ≤ 2·inf` が真になり**比較不能を PASS にする** (base `[0,1,1]` new `[100,100,100]` が PASS)。
+(2) (a) の前提 (1 ulp の 2 値) は誤りで、base 自身が 19–75 ulp (2D 定常)、52 ulp (SERN)、1e6 ulp 級 (dual-time は step 0 に内反復 22 行) に割れていた — **(a) は判別力を持たなかった**。(a) は「初回組立」と「最初の物理 step 全体」を混同している。
+(3) 提案した「初期化直後の全デバイス配列のハッシュ」は却下 (一部配列は 0 初期化されず未初期化領域を含む、初期化中の境界勾配に `atomicAdd` がある [`calcGradient_d.cu:251`]、`qacc_d` 等 `c_d` 外の状態もある)。反復を増やした順位和検定も今は却下 (比較指標の修正が先、非有意は同等の証明にならない)。
+(4) 「差はすべて非決定性」はまだ解釈。`roUz`・`CHECKPOINT/roUzN` は名目ゼロでも保存量で、診断量として除外できない。
+
+**追加診断 (事前登録 2026-10-07、追加の forge 実行なし)**: 既存の base 3 本・new 3 本の同じ保存時点・同じ配列・同じ CSV 行で、尺度だけを替える。
+- **A**: 登録済みの `m(A,B)` の結果 (上)。
+- **B**: `d(A,B) = max|A − B|` (絶対 L∞)。同ビルド内 6 対の最大を `S_abs`、ビルド間 9 対の最大を `D_abs`。**FAIL の 7 量だけでなく従来 PASS の全量を再評価**。
+- 条件: 全入力が有限で、shape・列・行キーが対応すること (比較不能は FAIL、PASS にしない)。`D_abs ≤ 2·S_abs`、`S_abs = 0` なら `D_abs = 0`。整数・構造情報は厳密一致。
+  **反復の並べ替えと base/new の交換で結果が変わらない**こと (比較器の自己検査)。
+- B で超過が消える量: その量の登録 FAIL は**尺度依存で説明できる**と記録 (「追加診断で反復内差の 2 倍以内」)。B でも超過する量: 比較器だけでは説明できない → 変更起因の差を候補に戻す (諮る)。
+- **この追加診断の PASS は、登録判定の書換えや「非決定性だけだった」証明には使わない**。R1–R3 を合格にするかは、B の結果を見て result 段 (codex `--stage result`) と上位の判断で決める。
+- やらない: run の順序を選んで PASS にする、FAIL 量を事後に除外する、S が増えるまで反復を足す、全配列を 0 初期化してハッシュを揃える。
+
+**今後の回帰の作法 (同判断)**: 初期化済みの決定的状態のビット一致と、最初の組立後の残差比較を**別ゲート**にする。残差は `(step, inner, phase)` を固定し、
+方程式別の絶対・相対許容差を、独立した base の校正と必要な検出幅から事前に決める (「観測した 2 値のどちらか」や全列共通の最大 ulp 幅を使わない)。
+比較尺度はペアに対称で、反復の並べ替えに不変なもの (絶対差か、全ペア共通の分母) にし、比較不能は FAIL にする。完了時に `procedures/verification/` へ移す。
+
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -191,6 +218,7 @@ R1 → R2 → R3 の各段階で効果を測る。
 
 ## 9. 変更ログ
 
+- `2026-10-07` — 回帰 (各 3 回): 登録判定は (a) step 0 と (b) 4 構成 7 量が FAIL、NaN・初期出力・出力互換・変換器は PASS、SERN g3 ホスト 5157 → 2630 MiB。codex diagnose: 比較器の尺度の欠陥 (非対称な分母・inf を PASS) を確認、登録 FAIL は維持し、絶対 L∞ の追加診断 B を事前登録 (§6.2)。
 - `2026-10-07` — R3 を実装 (ローカル: ホスト HWM 2737 → 1371 B/節点、出力・checkpoint 一致、負例 2 つ停止、変換器の出力一致)。回帰ハーネス (`case/66.hostmem_regression/`) を作成、base r1 完走、AWS の idle 自動停止で r2/r3 が中断。
 - `2026-10-07` — R1・R2 を実装 (ローカル計測でホスト HWM −510 B/節点、GPU 不変、step 0 と初期出力は一致)。本格回帰は AWS ハーネスで。
 - `2026-10-07` — §5.1 #2 監査済み (ホスト `c` の GPU 経路の参照は 5 か所、probe 等は不要、R2 に `pdeSize` の fallback 修正を追加、試験構成を具体化)。回帰は専用 case `case/66.hostmem_regression/` で。
