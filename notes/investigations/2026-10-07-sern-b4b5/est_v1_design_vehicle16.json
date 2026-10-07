@@ -1,0 +1,92 @@
+{
+ "VERDICT": "ESTIMATE",
+ "nodes": 4034091,
+ "hexes": 3949416,
+ "stations": 151,
+ "counts": {
+  "NL": 30,
+  "NL_co": 30,
+  "NL_so": 22,
+  "NL_END": {
+   "sidewall_end": 20,
+   "cowl_base": 20
+  },
+  "NR": 62,
+  "NY": 85,
+  "NZ": 50,
+  "NSW": 12,
+  "NTC": 19,
+  "NFY": 22,
+  "NFZ": 22
+ },
+ "wall_h1": {
+  "ramp": 0.00016,
+  "vehicle": 0.00016,
+  "sidewall_in": 0.00016,
+  "sidewall_out": 0.00064,
+  "cowl_in": 0.00016,
+  "cowl_out": 0.00016,
+  "cowl_side": 0.00064,
+  "sidewall_end": 0.001,
+  "cowl_base": 0.001
+ },
+ "wall_h1_um": {
+  "ramp": 16.000000000000004,
+  "vehicle": 16.000000000000004,
+  "sidewall_in": 16.000000000000004,
+  "sidewall_out": 64.00000000000001,
+  "cowl_in": 16.000000000000004,
+  "cowl_out": 16.000000000000004,
+  "cowl_side": 64.00000000000001,
+  "sidewall_end": 100.0,
+  "cowl_base": 100.0
+ },
+ "wall_layers": {
+  "ramp": 30,
+  "vehicle": 30,
+  "sidewall_in": 30,
+  "sidewall_out": 22,
+  "cowl_in": 30,
+  "cowl_out": 30,
+  "cowl_side": 22,
+  "sidewall_end": 20,
+  "cowl_base": 20
+ },
+ "asymmetric_classes": {
+  "SW": true,
+  "TC": false,
+  "Y": false
+ },
+ "asym_ranges": {
+  "SW 列 (hz?1)": [
+   11,
+   13
+  ]
+ },
+ "preset": "design",
+ "far_spacing_max": {
+  "y": 0.09521525338498552,
+  "z": 0.09805648677856087,
+  "limit": 0.1
+ },
+ "conflicts_text": "",
+ "nx": [
+  8,
+  28,
+  20,
+  23,
+  25,
+  20,
+  26
+ ],
+ "phys_regions": [
+  "A",
+  "A",
+  "B",
+  "B",
+  "B",
+  "C",
+  "C"
+ ],
+ "time_s": 5.394538164138794
+}

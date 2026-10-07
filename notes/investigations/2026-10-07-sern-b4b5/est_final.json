@@ -1,0 +1,87 @@
+{
+ "VERDICT": "ESTIMATE",
+ "nodes": 15559061,
+ "hexes": 15326600,
+ "stations": 154,
+ "counts": {
+  "NL": 41,
+  "NL_co": 30,
+  "NL_so": 22,
+  "NL_END": {
+   "sidewall_end": 20,
+   "cowl_base": 20
+  },
+  "NR": 92,
+  "NY": 337,
+  "NZ": 65,
+  "NSW": 43,
+  "NTC": 39,
+  "NFY": 22,
+  "NFZ": 22
+ },
+ "wall_h1": {
+  "ramp": 7e-05,
+  "vehicle": 0.00064,
+  "sidewall_in": 2e-05,
+  "sidewall_out": 0.00064,
+  "cowl_in": 3e-05,
+  "cowl_out": 0.00016,
+  "cowl_side": 0.00064,
+  "sidewall_end": 0.001,
+  "cowl_base": 0.001
+ },
+ "wall_h1_um": {
+  "ramp": 7.0,
+  "vehicle": 64.00000000000001,
+  "sidewall_in": 2.0000000000000004,
+  "sidewall_out": 64.00000000000001,
+  "cowl_in": 3.0,
+  "cowl_out": 16.000000000000004,
+  "cowl_side": 64.00000000000001,
+  "sidewall_end": 100.0,
+  "cowl_base": 100.0
+ },
+ "wall_layers": {
+  "ramp": 34,
+  "vehicle": 22,
+  "sidewall_in": 41,
+  "sidewall_out": 22,
+  "cowl_in": 39,
+  "cowl_out": 30,
+  "cowl_side": 22,
+  "sidewall_end": 20,
+  "cowl_base": 20
+ },
+ "asymmetric_classes": {
+  "SW": true,
+  "TC": true,
+  "Y": true
+ },
+ "asym_ranges": {},
+ "preset": "final",
+ "far_spacing_max": {
+  "y": 0.09521525338498552,
+  "z": 0.09805648677856087,
+  "limit": 0.1
+ },
+ "conflicts_text": "[corner] WU (ramp × sidewall_in): x/H 0..1.5 (154 station) h1 2/7 µm ratio_sidewall_in 2.265..2.312, ratio_wall 0.638..0.6416 (許容 ±0.05) — 隅の対角の第一節点 1 つで 2 壁の目標 (第一内部点距離) を同時に満たせない (リングの補間で隅の比が壁全体へ運ばれる)\n  [corner] WL (cowl_in × sidewall_in): x/H 0..1.5 (154 station) h1 2/3 µm ratio_sidewall_in 1.253..1.253, ratio_wall 0.8321..0.8321 (許容 ±0.05) — 隅の対角の第一節点 1 つで 2 壁の目標 (第一内部点距離) を同時に満たせない (リングの補間で隅の比が壁全体へ運ばれる)\n  [seam] 継ぎ目の間隔の連動 (match_spacing): x/H 0..1.5 (154 station)  (許容 ±-) — 継ぎ目の間隔を比 1.2 以内で連動できない: 隣の間隔 [7.255424204381556e-06, 3.1094675161635243e-06, 6.40742227121349e-06, 3.543637005022535e-06, 3.5182307471078958e-06] (比 2.3333 > 1.4400)\n  [coplanar] ramp | vehicle (y = y_r, z = z_o, x >= L_sw): x/H 0.8..1.5 (115 station) h1 7/64 µm ratio_ramp 3.067..3.067, ratio_vehicle 0.3355..0.3355 (許容 ±0.1) — 同一平面の 2 タグの継ぎ目の節点は両タグの検査を受け、第一内部点が 1 つなので 1 つの間隔で両目標の ±10 % に入れない",
+ "nx": [
+  11,
+  28,
+  20,
+  23,
+  25,
+  20,
+  26
+ ],
+ "phys_regions": [
+  "A",
+  "A",
+  "B",
+  "B",
+  "B",
+  "C",
+  "C"
+ ],
+ "time_s": 21.292009115219116
+}

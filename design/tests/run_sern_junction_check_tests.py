@@ -8,6 +8,9 @@ B4-2: 継ぎ目の分布則 (片側等比 `prog_nodes`・継ぎ目の間隔の�
 B4-4: リング対角辺の非対称分布 `ring_diag_spacing` (壁側端の保持・コア側端の比・全長・区間数・内部隣接比) — (j)。
 B4-4 (§6.5): SW 端間隔の選定則 `sw_end_spacing` (A = match_spacing・B = s/2^(1/4)) — (k)、全長診断の評価位置 `section_targets`
 (要求 x = 評価 x、station に丸めない、物理 station 上は両側の領域) — (l)。
+B4b-4: 1D 分布の桁あふれ (prog_r・geo_sum・march・prog_spacing) と安全な二分区間、旧と同じビット、遠方帯の実間隔列での判定 far_n — (m)。
+B4b-5: 壁別の第一内部点距離 (wall_h1・プリセット・cowl_side = sidewall_out)、隅の対角の連動と解けない組合せの検出 (diag_first・corner_ratios・
+station_conflicts)、SW 列などの両端分布 (two_end_*)、first_layer_check の壁別目標、事前見積もり count_mesh — (n)。
 
 山場: 旧検査は対向節点が別の壁上の節点でも除外せず、層数も設定の記録だけだったので、全 6 面が壁で内部節点 0 の立方体でも
 6 壁 ok になった (2026-10-06 plan レビュー M1)。人工の格子を渡して
@@ -28,7 +31,10 @@ except ImportError:                       # 検査の中核は gmsh を使わな
     sys.modules["gmsh"] = types.ModuleType("gmsh")
 from hex_junction_model import (first_layer_check, adjacent_spacing_check, wake_dx_check, shape_check, Geom, P0,  # noqa: E402
                                 prog_nodes, prog_r, prog_n, match_spacing, ring_diag_spacing, sw_end_spacing, section_targets,
-                                END_TAGS, WALL_TAGS)
+                                END_TAGS, WALL_TAGS,
+                                prog_spacing, geo_sum, far_n, march,                                           # B4b-4
+                                wall_h1, PRESETS, WALL_GENERAL, WALL_ENDS, diag_first, corner_ratios, station_conflicts,  # B4b-5
+                                CORNER_TOL, two_end_spacing, two_end_n_range, two_end_law, count_mesh, edge_counts)
 
 FAIL = 0
 
@@ -311,6 +317,147 @@ try:
 except ValueError:
     bad = True
 check("(l3) 診断範囲 (参照輪郭の終端) の外は ValueError", bad)
+
+# ---------------------------------------------------------------- B4b-4 (plan §5.1、§4.15 Minor・§4.16 (6)): 1D 分布の桁あふれと最大間隔の判定
+def prog_r_legacy(L, n, h):
+    """B4b-4 より前の prog_r (比較用の写し)。r**n があふれると OverflowError、区間 [1+1e-12, 50] / [1e-3, 1-1e-12] の外の根には端を返す"""
+    if abs(n * h - L) < 1e-12 * L: return 1.0
+    lo, hi = (1.0 + 1e-12, 50.0) if n * h < L else (1e-3, 1.0 - 1e-12)
+    for _ in range(200):
+        r = 0.5 * (lo + hi)
+        lo, hi = (r, hi) if h * (r ** n - 1) / (r - 1) < L else (lo, r)
+    return 0.5 * (lo + hi)
+
+
+try:
+    prog_r_legacy(1.224, 220, 0.001); ovf = False
+except OverflowError:
+    ovf = True
+r220 = prog_r(1.224, 220, 0.001); s220 = sum(0.001 * r220 ** i for i in range(220))
+check("(m1) prog_r(1.224, 220, 0.001): 旧は OverflowError、新は解けて Σ h r^i = L (相対 1e-12)", ovf and r220 > 1 and abs(s220 / 1.224 - 1) < 1e-12,
+      f"r {r220:.12f} Σ {s220:.15g}")
+r2 = prog_r(1.0, 2, 0.001)
+check("(m2) 安全な二分区間: prog_r(1.0, 2, 0.001) = 999 (旧は区間の端 50 を返していた)", abs(r2 - 999.0) < 1e-9 and prog_r_legacy(1.0, 2, 0.001) == 50.0, f"{r2:.12g}")
+r3 = prog_r(1.0005, 5, 1.0); s3 = sum(r3 ** i for i in range(5))
+check("(m3) r < 1e-3 の根 (旧の下端 1e-3 の外): prog_r(1.0005, 5, 1.0) で Σ = L", r3 < 1e-3 and abs(s3 - 1.0005) < 1e-12, f"r {r3:.6g}")
+bad = 0
+for args in ((1.0, 1, 0.5), (1.0, 3, 1.5)):
+    try:
+        prog_r(*args)
+    except ValueError:
+        bad += 1
+check("(m4) 解の無い入力 (n = 1 で h != L、h >= L) は ValueError (旧は区間の端を黙って返した)", bad == 2 and prog_r(0.5, 1, 0.5) == 1.0)
+# 既定の生成で使う範囲 (L: 壁帯 DR・z 幅 W/2・遠方帯・端面区間、h: 2 µm〜1 mm の /H 相当) で、旧が桁あふれせず根が旧区間内なら旧と同じビット
+nd = ne = 0
+for L in (0.008, 0.0915, 0.1, 0.03, 0.002, 1.0e-3):
+    for h in (2e-6, 7e-6, 1.6e-5, 6.4e-5, 1e-4, 3e-4):
+        for n in range(2, 90):
+            try:
+                old = prog_r_legacy(L, n, h)
+            except OverflowError:
+                continue
+            if old in (50.0,) or old <= 1.0005e-3: continue
+            ne += 1; nd += prog_r(L, n, h) != old
+check("(m5) 旧が桁あふれせず根が旧区間内の入力では旧と同じビット (既定の生成結果のビット同一の前提)", nd == 0 and ne > 1000, f"{ne} 組中 不一致 {nd}")
+d = prog_spacing(1.224, 220, 0.001)
+check("(m6) prog_spacing(1.224, 220, 0.001): 有限・第一間隔 h・全長 L", np.isfinite(d).all() and abs(d[0] / 0.001 - 1) < 1e-12 and abs(d.sum() / 1.224 - 1) < 1e-14,
+      f"末尾 {d[-1]:.6g} 最大 {d.max():.6g}")
+check("(m7) geo_sum: q^n があふれる所は inf (旧式は OverflowError)、それ以外は旧式 (q^n - 1)/(q - 1) と同じ値",
+      geo_sum(1.2, 5000) == float("inf") and geo_sum(1.15, 40) == (1.15 ** 40 - 1) / (1.15 - 1))
+# 遠方帯の区間数: 旧は 1 組の概算と末尾の近似式 L (1 - 1/r) で判定 (既定の接続模型で近似 0.0991 H、実際は 0.110 H > HFAR 0.10 H)。新は実間隔列の最大
+Lf, h0, hmax, gt = 0.915, 0.012, 0.10, 1.15                     # /H。帯長 0.915 H・第一間隔 0.012 H (壁帯の外の間隔の桁)
+n_old = prog_n(Lf, h0, gt) + 1
+while Lf * (1 - 1 / prog_r_legacy(Lf, n_old, h0)) > hmax and n_old < 400: n_old += 1
+n_new, mx = far_n([(Lf, h0)], hmax, gt)
+check("(m8) far_n は実間隔列の最大で判定: 旧の近似判定の区間数では実最大が上限を超え、新は上限以内",
+      prog_spacing(Lf, n_old, h0).max() > hmax and mx <= hmax and n_new > n_old and abs(mx - prog_spacing(Lf, n_new, h0).max()) < 1e-15,
+      f"旧 n {n_old} (実最大 {prog_spacing(Lf, n_old, h0).max():.4f}) → 新 n {n_new} (実最大 {mx:.4f})")
+n2_, mx2 = far_n([(Lf, h0), (0.5, 0.012), (0.915, 0.03)], hmax, gt)
+check("(m9) far_n は全組の最大で判定 (帯長・第一間隔の違う組を同じ区間数で)", mx2 <= hmax and all(prog_spacing(L_, n2_, h_).max() <= hmax for L_, h_ in ((Lf, h0), (0.5, 0.012), (0.915, 0.03))),
+      f"n {n2_} 最大 {mx2:.4f}")
+try:
+    res = march([0.002, 8.6], 1e-4, 1.15, 1.2, 1e-3); ovf_m = False
+except OverflowError:
+    ovf_m = True
+check("(m10) march: 長い区間 (8.6、上限 1e-3 で 1 万区間級) でも OverflowError にならない (旧の (q^n - 1)/(q - 1) はあふれる)", not ovf_m and res[1][0] > 3890,
+      f"区間数 {res[1][0] if not ovf_m else '-'}")
+
+# ---------------------------------------------------------------- B4b-5 (plan §5.1、§4.16): 壁別の第一内部点距離
+P_ = dict(P0); hw0 = wall_h1(P_)
+check("(n1) 既定: 一般壁は H1、端面 (sidewall_end・cowl_base) は H1_END", all(hw0[t] == P0["H1"] for t in WALL_GENERAL) and all(hw0[t] == P0["H1_END"] for t in WALL_ENDS))
+P_ = dict(P0, H1_sidewall_out=6.4e-4); hw1 = wall_h1(P_)
+check("(n2) cowl_side を指定しなければ sidewall_out に従う (同一平面 z = z_o で z 分布を共有)", hw1["cowl_side"] == 6.4e-4 and hw1["sidewall_out"] == 6.4e-4)
+bad = 0
+for extra in (dict(H1_sidewall_out=6.4e-4, H1_cowl_side=1.6e-4), dict(H1_vehicle_top=1e-4), dict(H1_ramp=1.6e-4, H1_vehicle=6.4e-4)):
+    try:
+        wall_h1(dict(P0, **extra))
+    except ValueError:
+        bad += 1
+check("(n3) cowl_side と sidewall_out・vehicle と ramp (同一平面) に違う値 / 未知の壁タグの指定は ValueError", bad == 3)
+_wv = wall_h1(dict(P0, H1_ramp=1.6e-4))
+check("(n3b) vehicle は指定しなければ ramp に従う (plan §4.16 の仕様訂正)", _wv["vehicle"] == _wv["ramp"] == 1.6e-4)
+um = lambda d, t: round(d["H1_" + t] * 0.1 * 1e6, 9)          # /H -> µm (H = 0.1 m)
+pd, pf = PRESETS["design"], PRESETS["final"]
+check("(n4) プリセット design (plan §4.16 の表): 細かくする壁 16 µm、緩める壁 64 µm (帯 vehicle は ramp に従う)、端面 0.1 mm、後流 Δx <= 0.1 mm を 0.02 H、HX 0.10・HX_FAR 0.16 H",
+      all(um(pd, t) == 16 for t in ("ramp", "cowl_in", "cowl_out", "sidewall_in")) and all(um(pd, t) == 64 for t in ("sidewall_out", "cowl_side")) and "H1_vehicle" not in pd
+      and wall_h1(dict(P0, **pd))["vehicle"] == pd["H1_ramp"]
+      and all(um(pd, t) == 100 for t in WALL_ENDS) and pd["LWAKE"] == 0.02 and pd["DXW"] == 1e-3 and pd["HX"] == 0.10 and pd["HX_FAR"] == 0.16 and pd["TC"] == 0.005)
+check("(n5) プリセット final (暫定): cowl_in 3・ramp 7・sidewall_in 2・cowl_out 16 µm、緩める壁・端面・後流は design と同じ、HX 0.05・HX_FAR 0.08 H",
+      (um(pf, "cowl_in"), um(pf, "ramp"), um(pf, "sidewall_in"), um(pf, "cowl_out")) == (3, 7, 2, 16)
+      and all(pf[k] == pd[k] for k in pd if k not in ("H1_ramp", "H1_cowl_in", "H1_cowl_out", "H1_sidewall_in", "HX", "HX_FAR")) and (pf["HX"], pf["HX_FAR"]) == (0.05, 0.08))
+# 隅の対角の壁側端: 全壁が等しければ旧式 h1 0.5 (1 + c) k elen/dr と同じビット、違えば 2 壁の目標の算術平均
+h_, c_, el_, dr_ = 1.6e-5, 1.0352761804106076, 0.008 * np.sqrt(2), 0.008
+check("(n6) diag_first: 全壁が等しいとき旧式と同じビット", diag_first(h_, h_, c_, 1.0, el_, dr_) == h_ * 0.5 * (1 + c_) * 1.0 * el_ / dr_)
+s_ = diag_first(2e-6, 7e-6, c_, 1.0, el_, dr_); rs, rw = corner_ratios(s_, el_, dr_, 2e-6, 7e-6, c_)
+check("(n7) 隅の比: 対角の第一節点の法線成分 = 2 壁の目標の算術平均 (sidewall_in 2・ramp 7 µm では比 2.31 / 0.64 で ±5 % の外)",
+      abs(s_ * dr_ / el_ - 0.5 * (2e-6 + c_ * 7e-6)) < 1e-18 and rs > 1 + CORNER_TOL and rw < 1 - CORNER_TOL, f"sidewall_in {rs:.4f} ramp {rw:.4f}")
+rs, rw = corner_ratios(diag_first(h_, h_, c_, 1.0, el_, dr_), el_, dr_, h_, h_, c_)
+check("(n8) 全壁 16 µm (既定) の隅の比は ±5 % 以内 (ランプ傾き c = 1.035 で sidewall_in 1.018・ramp 0.983)", abs(rs - 1) <= CORNER_TOL and abs(rw - 1) <= CORNER_TOL, f"{rs:.4f} {rw:.4f}")
+el = dict(e2=el_, e6=el_)
+# 同一平面の継ぎ目の検出そのものを試す: vehicle を ramp に従わせる前の組 (ramp 16・vehicle 64 µm) を直接与える (wall_h1 は今は止める、n3)
+hwd = {k: v * 0.1 for k, v in wall_h1(dict(P0, **PRESETS["design"])).items()}; hwd["vehicle"] = 6.4e-4 * 0.1
+sd = dict(e2=diag_first(hwd["sidewall_in"], hwd["ramp"], c_, 1.0, el_, dr_), e6=diag_first(hwd["sidewall_in"], hwd["cowl_in"], 1.0038, 1.0, el_, dr_))
+at, av = (0.5 * hwd[t] * (c_ + 1.0038) * P0["E5K"] for t in ("ramp", "vehicle"))
+iss = station_conflicts(1.0, c_, 1.0038, sd, el, dr_, hwd, at, av, True)
+check("(n9) design (ramp 16・vehicle 64 µm): x >= L_sw の同一平面の継ぎ目 ramp | vehicle を解けない組合せとして止める (隅は解ける)",
+      [i["kind"] for i in iss] == ["coplanar"] and iss[0]["ratio_ramp"] > 1.1 and iss[0]["ratio_vehicle"] < 0.9, str([(i["kind"], round(i.get("ratio_ramp", 0), 3), round(i.get("ratio_vehicle", 0), 3)) for i in iss]))
+check("(n10) 同じ値の組で SW の無い区間 (x < L_sw) は止めない (側壁が ramp と vehicle を隔てる)", station_conflicts(0.5, c_, 1.0038, sd, el, dr_, hwd, at, av, False) == [])
+hwf = {k: v * 0.1 for k, v in wall_h1(dict(P0, **PRESETS["final"])).items()}
+sf = dict(e2=diag_first(hwf["sidewall_in"], hwf["ramp"], c_, 1.0, el_, dr_), e6=diag_first(hwf["sidewall_in"], hwf["cowl_in"], 1.0038, 1.0, el_, dr_))
+iss = station_conflicts(0.5, c_, 1.0038, sf, el, dr_, hwf, 0.5 * hwf["ramp"] * 2.04, 0.5 * hwf["vehicle"] * 2.04, False)
+check("(n11) final (cowl_in 3・ramp 7・sidewall_in 2 µm): 隅 WU・WL の両方を止める", sorted(i["where"][:2] for i in iss) == ["WL", "WU"], str([i["where"] for i in iss]))
+# 両端分布 (SW 列: z = W/2 側 a4 ≈ 19 µm、z = z_o 側 kv = 1.02 × 64 µm、長さ t_sw 0.5 mm)
+a4_, kv_, Ls, gtw = 1.9364e-5, 1.02 * 6.4e-5, 5.0e-4, 1.19
+rng_ = two_end_n_range(Ls, a4_, kv_, gtw); d = two_end_spacing(Ls, rng_[0], a4_, kv_, gtw); q = np.maximum(d[1:] / d[:-1], d[:-1] / d[1:]).max()
+check("(n12) SW 列の両端分布: 端の間隔が a4・kv (相対 1e-12)、全長、隣接比 <= 1.19", abs(d[0] / a4_ - 1) < 1e-12 and abs(d[-1] / kv_ - 1) < 1e-12 and abs(d.sum() / Ls - 1) < 1e-14 and q <= gtw * (1 + 1e-12),
+      f"区間数 {rng_} 最大比 {q:.5f} 最大間隔 {d.max() * 1e6:.2f} µm")
+ok_rng = all(two_end_spacing(Ls, n_, a4_, kv_, gtw) is not None for n_ in range(rng_[0], rng_[1] + 1))
+bad = 0
+for n_ in (rng_[0] - 1, rng_[1] + 1):
+    try:
+        two_end_spacing(Ls, n_, a4_, kv_, gtw)
+    except ValueError:
+        bad += 1
+check("(n13) two_end_n_range の範囲内は全部解け、範囲の外 (1 少ない / 1 多い) は ValueError", ok_rng and bad == 2, f"範囲 {rng_}")
+d = two_end_spacing(0.09, 90, 1.66e-5, 6.6e-5, gtw); q = np.maximum(d[1:] / d[:-1], d[:-1] / d[1:]).max()
+check("(n14) 長い辺 (側壁帯の y、90 区間) は中央を一定の M で頭打ちにして全長に合わせる (端 a・b、隣接比 <= 1.19)",
+      abs(d[0] / 1.66e-5 - 1) < 1e-12 and abs(d[-1] / 6.6e-5 - 1) < 1e-12 and q <= gtw * (1 + 1e-12) and np.isclose(d.max(), d[45]), f"M {d.max() * 1e3:.3f} mm")
+law = two_end_law(Ls, rng_[0] + 1, a4_, kv_, gtw)
+check("(n15) two_end_law: 節点数 n、相対位置 0..1 の単調列 (apply_node_laws で直線辺に置く)", law[0] == rng_[0] + 1 and law[1] == "Nodes" and law[2][0] == 0.0 and abs(law[2][-1] - 1) < 1e-15
+      and all(b > a for a, b in zip(law[2][:-1], law[2][1:])))
+# first_layer_check の壁別目標: 2 壁 (y = 0 の ramp は第一層 H1、x = 0 の sidewall_in は 2 H1) の箱
+xs_ = prog(2 * H1, 1.15, NL + 3, tail=2); ys_ = prog(H1, 1.15, NL + 3, tail=2)
+xyz, hx, F_ = box(xs_, ys_, np.linspace(0, 20 * H1, 5))
+bq = {"ramp": F_["ymin"], "sidewall_in": F_["xmin"]}
+fl = first_layer_check(xyz, hx, bq, {"ramp": H1, "sidewall_in": 2 * H1}, None, {"ramp": NL, "sidewall_in": NL}, None, DR, expected_tags=("ramp", "sidewall_in"))
+check("(n16) 壁別の目標 (ramp H1・sidewall_in 2 H1) で両壁 PASS、report に目標を記録", fl["ramp"]["ok"] and fl["sidewall_in"]["ok"] and fl["sidewall_in"]["target_h1"] == 2 * H1,
+      f"ramp {fl['ramp']['ratio_min']:.3f}–{fl['ramp']['ratio_max']:.3f} sidewall_in {fl['sidewall_in']['ratio_min']:.3f}–{fl['sidewall_in']['ratio_max']:.3f}")
+fl = first_layer_check(xyz, hx, bq, H1, H1, NL, NL, DR, expected_tags=("ramp", "sidewall_in"))
+check("(n17) 同じ格子を共通の h1 で判定すると sidewall_in は FAIL (目標が壁別に効いている)", fl["ramp"]["ok"] and not fl["sidewall_in"]["ok"])
+# 事前見積もり: 節点数の数え方 (count_mesh) を記録済みの接続模型 (B4a 板厚 0.005 H、scale 1: 4,349,372 節点・4,259,394 ヘキサ) で
+cnt = dict(NZ=50, NR=62, NY=85, NSW=19, NTC=19, NL_co=30, NL_so=30, NFY=20, NFZ=20)
+regs = [rg for rg, n_ in zip("AABBBCC", [11, 28, 20, 23, 25, 20, 26]) for _ in range(n_)]
+check("(n18) count_mesh: 記録済み模型 (scale 1・板厚 0.005 H) の節点数・ヘキサ数を再現", count_mesh(regs, edge_counts(cnt)) == (4349372, 4259394), str(count_mesh(regs, edge_counts(cnt))))
 
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)

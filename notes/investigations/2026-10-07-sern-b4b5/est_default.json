@@ -1,0 +1,87 @@
+{
+ "VERDICT": "ESTIMATE",
+ "nodes": 4433456,
+ "hexes": 4342320,
+ "stations": 154,
+ "counts": {
+  "NL": 30,
+  "NL_co": 30,
+  "NL_so": 30,
+  "NL_END": {
+   "sidewall_end": 20,
+   "cowl_base": 20
+  },
+  "NR": 62,
+  "NY": 85,
+  "NZ": 50,
+  "NSW": 19,
+  "NTC": 19,
+  "NFY": 22,
+  "NFZ": 22
+ },
+ "wall_h1": {
+  "ramp": 0.00016,
+  "vehicle": 0.00016,
+  "sidewall_in": 0.00016,
+  "sidewall_out": 0.00016,
+  "cowl_in": 0.00016,
+  "cowl_out": 0.00016,
+  "cowl_side": 0.00016,
+  "sidewall_end": 0.001,
+  "cowl_base": 0.001
+ },
+ "wall_h1_um": {
+  "ramp": 16.000000000000004,
+  "vehicle": 16.000000000000004,
+  "sidewall_in": 16.000000000000004,
+  "sidewall_out": 16.000000000000004,
+  "cowl_in": 16.000000000000004,
+  "cowl_out": 16.000000000000004,
+  "cowl_side": 16.000000000000004,
+  "sidewall_end": 100.0,
+  "cowl_base": 100.0
+ },
+ "wall_layers": {
+  "ramp": 30,
+  "vehicle": 30,
+  "sidewall_in": 30,
+  "sidewall_out": 30,
+  "cowl_in": 30,
+  "cowl_out": 30,
+  "cowl_side": 30,
+  "sidewall_end": 20,
+  "cowl_base": 20
+ },
+ "asymmetric_classes": {
+  "SW": false,
+  "TC": false,
+  "Y": false
+ },
+ "asym_ranges": {},
+ "preset": null,
+ "far_spacing_max": {
+  "y": 0.09521525338498552,
+  "z": 0.09544511210546824,
+  "limit": 0.1
+ },
+ "conflicts_text": "",
+ "nx": [
+  11,
+  28,
+  20,
+  23,
+  25,
+  20,
+  26
+ ],
+ "phys_regions": [
+  "A",
+  "A",
+  "B",
+  "B",
+  "B",
+  "C",
+  "C"
+ ],
+ "time_s": 6.395322799682617
+}
