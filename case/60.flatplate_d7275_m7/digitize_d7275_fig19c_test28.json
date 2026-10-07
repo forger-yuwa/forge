@@ -1,0 +1,122 @@
+{
+ "_source": "TN D-7275 Fig 19(c) (α = 10°) の △ (R_L,∞ 4.9×10⁶/m = 試験 28、α 9.8°、鋭い前縁・0.24 cm トリップ・フェンス)。PyMuPDF 600 dpi で描画し、軸目盛から較正 (x: 10⁶ = 635 px、1102 px/decade; y: 10⁻³ = 558 px、1104 px/decade)、記号の重心を 4〜8 倍拡大の格子で読んだ (2026-09-28)",
+ "reading_uncertainty": "重心の読み ±2 px (St ±0.4 %、R ±0.4 %)。◇ (試験 24) と重なる 3〜5 点目は ±5 px (St ±1 %)",
+ "x_mapping": "Table I の中心線 (y = −3.0 cm) 熱電対 11 点 (236.0 cm には中心線が無い) に 1 対 1 対応: R*/(0.611×4.888e6) で出した x は Table I の 0.970〜0.990 倍 (平均 0.98) で一様。x は鈍い前縁の先端基準 (p.5)、鋭い前縁は半径 0.96 cm だけ短いので、鋭い前縁からの距離は x_TableI − 0.0096 m。比較の一次座標は x_sharp_m",
+ "note_test26": "同じ方法で試験 26 の 10 点 (Fig 20) を Table I に当てると R*/(0.180×4.757e6) の x は Table I の 1.025〜1.044 倍 (平均 1.03) で一様 (146.9 cm の点が欠け)。以前『最下流点がパネル端より 3 % 下流』とした食い違いの正体",
+ "test28_table": {
+  "TableII": {
+   "Tt_K": 1817,
+   "Pt_MPa": 17.79,
+   "pt_prime_kPa": 122.7,
+   "p_inf_kPa": 2.144,
+   "Re_inf_per_m": 4888000.0,
+   "rhoVcp_inf_kW_m2K": 69.91,
+   "M_inf": 6.6,
+   "alpha_deg": 9.8,
+   "leading_edge": "sharp",
+   "fence": "attached",
+   "trip_cm": 0.24
+  },
+  "TableIII": {
+   "T_l_K": 363.3,
+   "p_l_kPa": 8.412,
+   "Taw_K": 1689,
+   "T_star_K": 627.8,
+   "RLl_over_RLinf": 1.61,
+   "rhoVcp_l_over_inf": 2.44,
+   "RstarLl_over_RLinf": 0.611,
+   "rhoVcp_star_l_over_inf": 1.46
+  }
+ },
+ "own_shock_calc": "forge と同じ燃焼ガスモデル (case/56 gas_htst、Tt 1817 K) で M∞ 6.60・p∞ 2144 Pa から T∞ 222.52 K、Re∞ 4.873e6/m (Table −0.3 %)、(ρVc_p)∞ 69.06 kW/m²K (−1.2 %)。熱的完全気体の斜め衝撃波 (θ 9.8°): β 16.53°、p_l 8451 Pa (Table 8412、+0.5 %)、T_l 348.6 K (Table 363.3、−4.0 %)、M_l 5.107、U_l 1924.0 m/s、Re_l/Re∞ 1.718 (Table 1.61)、(ρVc_p)_l/∞ 2.472 (Table 2.44)。試験 26 では T_l が 0.6 K で合ったので、試験 28 の Table III の T_l は原報側の衝撃波計算の違いと見る (未確認)",
+ "points": [
+  {
+   "R_star_l": 3249000.0,
+   "St_star_l": 0.0013447,
+   "x_tc_cm": 110.8,
+   "x_sharp_m": 1.0984,
+   "read_px": 2,
+   "x_from_R_m": 1.088
+  },
+  {
+   "R_star_l": 3555000.0,
+   "St_star_l": 0.0012871,
+   "x_tc_cm": 121.4,
+   "x_sharp_m": 1.2044,
+   "read_px": 2,
+   "x_from_R_m": 1.1903
+  },
+  {
+   "R_star_l": 3889000.0,
+   "St_star_l": 0.00125,
+   "x_tc_cm": 134.0,
+   "x_sharp_m": 1.3304,
+   "read_px": 5,
+   "x_from_R_m": 1.3022
+  },
+  {
+   "R_star_l": 4246000.0,
+   "St_star_l": 0.0012579,
+   "x_tc_cm": 146.9,
+   "x_sharp_m": 1.4594,
+   "read_px": 5,
+   "x_from_R_m": 1.4216
+  },
+  {
+   "R_star_l": 4645000.0,
+   "St_star_l": 0.001194,
+   "x_tc_cm": 159.5,
+   "x_sharp_m": 1.5854,
+   "read_px": 5,
+   "x_from_R_m": 1.5552
+  },
+  {
+   "R_star_l": 5039000.0,
+   "St_star_l": 0.0011865,
+   "x_tc_cm": 172.2,
+   "x_sharp_m": 1.7124,
+   "read_px": 2,
+   "x_from_R_m": 1.6873
+  },
+  {
+   "R_star_l": 5433000.0,
+   "St_star_l": 0.0011865,
+   "x_tc_cm": 185.0,
+   "x_sharp_m": 1.8404,
+   "read_px": 2,
+   "x_from_R_m": 1.8191
+  },
+  {
+   "R_star_l": 5748000.0,
+   "St_star_l": 0.0012015,
+   "x_tc_cm": 197.7,
+   "x_sharp_m": 1.9674,
+   "read_px": 2,
+   "x_from_R_m": 1.9247
+  },
+  {
+   "R_star_l": 6158000.0,
+   "St_star_l": 0.0012293,
+   "x_tc_cm": 210.2,
+   "x_sharp_m": 2.0924,
+   "read_px": 2,
+   "x_from_R_m": 2.0621
+  },
+  {
+   "R_star_l": 6530000.0,
+   "St_star_l": 0.0011915,
+   "x_tc_cm": 223.0,
+   "x_sharp_m": 2.2204,
+   "read_px": 2,
+   "x_from_R_m": 2.1863
+  },
+  {
+   "R_star_l": 7279000.0,
+   "St_star_l": 0.0010915,
+   "x_tc_cm": 248.5,
+   "x_sharp_m": 2.4754,
+   "read_px": 2,
+   "x_from_R_m": 2.4372
+  }
+ ]
+}

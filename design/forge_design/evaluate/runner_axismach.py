@@ -18,9 +18,12 @@ CFD-in-the-loop アンカー更新 (A5) は problem YAML の geometry キーで�
 'vertical' = M_start の縦線 [旧構成])。壁の決め方は geometry.wall_mode
 ('flux' = 断面の質量流束閉包 [A9] / 'streamline' = 流線積分 [旧構成])。
 
+格子: Euler (`prepare`) は問題 YAML の `mesh_euler`、NS (`prepare_ns`) は `mesh` を読む (2026-10-07 から。混ぜて補完しない。
+`mesh_euler` の無い問題は Euler の prepare で移行先を示して止まる; `mesh_euler_block`)。
+
 使い方:
   design/.venv-opt/bin/python -m forge_design.evaluate.runner_axismach \
-      case/41.wind_tunnel_design/problem_m4_axismach.yaml run_dir [--prepare-only]
+      case/45.isobutane_m6_d155/problem_d155_euler_pin_G1_recal_mono.yaml run_dir [--prepare-only]
 """
 from __future__ import annotations
 
@@ -35,8 +38,8 @@ import numpy as np
 from ..geometry.axis_law import QuinticHermiteAxisLaw, KnotQuinticAxisLaw
 from ..geometry.moc_inverse import inverse_design
 from ..geometry.transonic import HallThroat
-from ..geometry.wall_axismach import (AxisMachCFDWall, area_ratio_isentropic,
-                                      wall_qa)
+from ..geometry.wall_axismach import (PHYSICAL_WALL_REPRS, PW_UPSTREAM_DEFAULT, PW_UPSTREAMS, AxisMachCFDWall,
+                                      area_ratio_isentropic, wall_qa)
 from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
 from .ic import paste_isentropic_ic, stamp_isentropic_ic_species
@@ -228,12 +231,121 @@ def _bcond_with_species(txt: str, Ys) -> str:
 
 
 
+# 問題 YAML のキーの選択肢。先頭が既定: 2026-10-07 ユーザ決定 (生産採用) で analytic・converge を既定にした (旧方式は legacy・fixed2 を
+# 明示して再現する。plan discretization-moc-axis-limit-and-corrector §9)。MOC の関数 (moc_kernel・moc_inverse) の引数の既定は legacy・fixed2 のまま
+_MOC_KEYS = {"moc_axis_limit": ("analytic", "legacy"), "moc_corrector": ("converge", "fixed2")}
+
+
+def _moc_keys(geometry: dict) -> tuple:
+    """geometry.moc_axis_limit / geometry.moc_corrector を読む (plans/accepted/discretization-moc-axis-limit-and-corrector.md
+    §4.3)。キーが無ければ既定 (analytic, converge — 2026-10-07 から。それ以前は legacy, fixed2)。値は文字列で選択肢のどれかに完全一致すること — null・大文字違い・
+    前後の空白・数値・真偽値は既定に読み替えず例外にする (黙って既定で設計しない)。"""
+    out = []
+    for key, choices in _MOC_KEYS.items():
+        if key not in geometry:
+            out.append(choices[0])
+            continue
+        v = geometry[key]
+        if not isinstance(v, str) or v not in choices:
+            raise ValueError(f"geometry.{key} は {' / '.join(repr(c) for c in choices)} のどれか "
+                             f"(受け取った値: {v!r}。既定にするならキーを書かない)")
+        out.append(v)
+    return tuple(out)
+
+
+def _physical_wall_repr(geometry: dict):
+    """geometry.physical_wall_repr を読む (plans/accepted/tooling-nozzle-wall-single-bspline.md §4.4)。キーが無ければ None
+    (既定 = 今の物理壁 `legacy`、壁ファイルを書かない — 変更前とビット同一)。値は 'legacy' / 'single_bspline' に完全一致
+    すること — null・大文字違い・前後の空白・数値・真偽値は既定に読み替えず例外にする。"""
+    if "physical_wall_repr" not in geometry:
+        return None
+    v = geometry["physical_wall_repr"]
+    if not isinstance(v, str) or v not in PHYSICAL_WALL_REPRS:
+        raise ValueError(f"geometry.physical_wall_repr は {' / '.join(repr(c) for c in PHYSICAL_WALL_REPRS)} のどれか "
+                         f"(受け取った値: {v!r}。既定にするならキーを書かない)")
+    return v
+
+
+def _pw_upstream(geometry: dict) -> dict:
+    """geometry.pw_upstream を読んで検査する (plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1)。重い処理・
+    run dir を作る前に呼ぶ。戻り: {"value": 物理壁に渡す値 (None = 解析経路でない), "source": "explicit" | "default" | None,
+    "requested": 書かれた値 (キー無しは None)}。
+
+    - joint 壁 (`wall_repr: joint`) の物理壁は解析経路で、キー無しは既定 `poly` (ユーザ決定 2026-10-07)。`ramp` は明示したときだけ。
+    - 値は 'ramp' / 'poly' に完全一致すること — null・大文字違い・前後の空白・数値・真偽値は例外 (既定に読み替えない)。
+    - `poly` (明示・既定とも) と `pw_ramp` の併記は例外 (`pw_ramp` のキーがあれば値が null でも併記とみなす)。
+    - 解析経路でない (joint でない) 壁に `poly` を明示したら例外。キー無しは今の振る舞いのまま (上流は従来経路)。
+    - `physical_wall_repr: single_bspline` は `poly` だけ (`ramp` との組み合わせは例外; §4.1b)。"""
+    joint = str(geometry.get("wall_repr", "interp")) == "joint"
+    if "pw_upstream" in geometry:
+        v = geometry["pw_upstream"]
+        if not isinstance(v, str) or v not in PW_UPSTREAMS:
+            raise ValueError(f"geometry.pw_upstream は {' / '.join(repr(c) for c in PW_UPSTREAMS)} のどれか "
+                             f"(受け取った値: {v!r}。既定 '{PW_UPSTREAM_DEFAULT}' にするならキーを書かない)")
+        requested, source = v, "explicit"
+    else:
+        requested, source = None, ("default" if joint else None)
+    if not joint:
+        if requested == "poly":
+            raise ValueError("geometry.pw_upstream: poly は joint 壁 (wall_repr: joint) の物理壁の解析経路専用 "
+                             f"(wall_repr = {geometry.get('wall_repr', 'interp')!r})")
+        return {"value": None, "source": (None if requested is None else "explicit (解析経路でないので無効)"),
+                "requested": requested}
+    value = requested if requested is not None else PW_UPSTREAM_DEFAULT
+    if value == "poly" and "pw_ramp" in geometry:
+        raise ValueError(f"geometry.pw_upstream: poly ({'明示' if requested else '既定'}) と geometry.pw_ramp "
+                         f"{geometry['pw_ramp']!r} の併記は不可 — 旧来のランプを使うなら pw_upstream: ramp を明示する、"
+                         "poly にするなら pw_ramp を消す (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1)")
+    if value == "ramp" and _physical_wall_repr(geometry) == "single_bspline":
+        raise ValueError("geometry.physical_wall_repr: single_bspline は pw_upstream: poly の壁だけ (ramp のランプ区間は 5 次の "
+                         "B-spline で厳密に表せない; plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1b)")
+    return {"value": value, "source": source, "requested": requested}
+
+
+def _sizing_spec(spec: dict) -> dict | None:
+    """spec.sizing (任意) を読む: 寸法 (spec.r_throat) をどちらで決めたかの記録 (plan tooling-nozzle-upstream-poly-and-throat-sizing
+    §4.2)。{method: exit | throat, target_m: 目標の出口半径 / 物理スロート半径 [m], note: 任意}。prepare_ns が prepare_info.json の
+    `sizing` に、実際の壁の値と目標との差を並べて書く。無ければ None (寸法の決め方は未記録)。不正な値は例外。"""
+    if "sizing" not in spec:
+        return None
+    s = spec["sizing"]
+    if not isinstance(s, dict) or s.get("method") not in ("exit", "throat"):
+        raise ValueError(f"spec.sizing は {{method: exit | throat, target_m: 数値}} (受け取った値: {s!r})")
+    t = s.get("target_m")
+    if isinstance(t, bool) or not isinstance(t, (int, float)) or not np.isfinite(float(t)) or float(t) <= 0.0:
+        raise ValueError(f"spec.sizing.target_m は正の有限の数値 [m] (受け取った値: {t!r})")
+    return {"method": s["method"], "target_m": float(t), "note": s.get("note")}
+
+
+def require_moc_gate(p: Problem, d: dict) -> None:
+    """計算準備 (`prepare`・`prepare_ns`) の入口で MOC の単位過程のゲートを必須にする (plan discretization-moc-axis-limit-and-corrector
+    §4.2「反復失敗が 1 対でもあれば検証・生産は不合格」、2026-10-07 result 段レビュー M1: 以前は design_chain の診断に記録するだけで、
+    不合格の MOC でもメッシュ生成へ進んでいた)。設計の経路 (design_chain) は止めない (診断を取れるように残す)。
+    - `moc_corrector: converge` のとき: 診断 (`d["moc"]["gate"]`) が無い・`applicable` でない・`pass` が True でなければ ValueError。
+    - `fixed2` (収束を判定しない) のときは合否を出さないので通す (ゲートの `pass` は None)。"""
+    _, corrector = _moc_keys(p.geometry)
+    moc = d.get("moc")
+    gate = (moc or {}).get("gate")
+    if corrector != "converge":
+        return
+    if not isinstance(gate, dict) or not gate.get("applicable"):
+        raise ValueError(f"MOC のゲートの診断が無い (moc_corrector: converge; d['moc']['gate'] = {gate!r}) — 計算準備を止める")
+    if gate.get("pass") is not True:
+        raise ValueError(f"MOC のゲートが不合格 ({'; '.join(gate.get('reasons') or []) or gate.get('pass')}) — 計算準備を止める "
+                         "(plan discretization-moc-axis-limit-and-corrector §4.2)")
+
+
 def design_chain(p: Problem) -> dict:
     """Hall (+CFD アンカー) → Hermite law → 逆 MOC → 壁 QA → CFD 壁。決定的。
 
     ガス: `p.gas_model` (cpg なら float γ と等価 / semiperfect なら NASA-9 テーブル)。
     Hall 遷音速級数は定数 γ 前提なので**スロートの局所 γ* を渡す。MOC の ν↔M・
     質量流束・面積比はガスモデル経由 (`moc_kernel._is_gas` 規約)。"""
+    if "wall_fit_mono_r2" in p.geometry and str(p.geometry.get("wall_repr", "interp")) != "joint":
+        # 単調拘束 (plan tooling-nozzle-throat-monotone-r2 §4.2) は joint 壁の当てはめのオプション。他の壁表現で黙って無視しない
+        raise ValueError("geometry.wall_fit_mono_r2 は wall_repr: joint 専用 "
+                         f"(wall_repr = {p.geometry.get('wall_repr', 'interp')!r})")
+    moc_axis_limit, moc_corrector = _moc_keys(p.geometry)     # 不正値は重い処理 (CFD ピンの読込) の前に例外
     gas = p.gas_model
     # cfd_gas: cpg のときは**設計も** CPG(γ 参照値) で作る。設計だけ semi-perfect にすると
     # 壁 (A/A*=13.1) と CFD (CPG γ=1.309 なら A/A*=15.3) の熱力学が食い違い、出口 M が
@@ -244,14 +356,47 @@ def design_chain(p: Problem) -> dict:
     use_gas = getattr(gas, "kind", "cpg") == "semiperfect"
     g = gas if use_gas else p.gamma                   # MOC/面積比に渡す「γ or ガス」
     g_hall = float(gas.gamma_throat(float(p.spec["Tt"])))
-    Md = float(p.spec["M_design"])
+    # 報告・評価の M_d は spec.M_design のまま。MOC・軸 law・壁 QA には出口較正 Md_moc_offset を足した値を渡す
+    # (plan tooling-nozzle-cfd-pinned-initial-line §5.1 #6; 既定 0 で従来と同一)
+    Md_report = float(p.spec["M_design"])
+    Md_moc_offset = float(p.geometry.get("Md_moc_offset", 0.0))
+    Md = Md_report + Md_moc_offset if Md_moc_offset != 0.0 else Md_report
     R = float(p.geometry.get("R", 2.0))
     M_start = float(p.geometry.get("M_start", 1.05))
     n_start = int(p.geometry.get("n_start", 41))
-    ht = HallThroat(R=R, gamma=g_hall)
+    # 初期線の出所 (methods/design/overview.md「初期線の出所: Hall / CFD ピン」):
+    # 'hall' (既定) = Hall 級数 / 'cfd' = 凍結源の node Euler 場 (CFDPinnedThroat, 線・軸アンカー・場の M)
+    initial_line = str(p.geometry.get("initial_line", "hall"))
+    il_src = None
+    if initial_line == "hall":
+        ht = HallThroat(R=R, gamma=g_hall)
+    elif initial_line == "cfd":
+        from ..feedback.cfd_initial_line import pinned_factory
+        il_run = p.geometry.get("initial_line_run")
+        if not il_run:
+            raise ValueError("geometry.initial_line: cfd には geometry.initial_line_run が必須")
+        il_run = Path(str(il_run))
+        if not il_run.is_absolute() and p.path:
+            il_run = (Path(p.path).resolve().parent / il_run).resolve()
+        il_res = p.geometry.get("initial_line_res")
+        if not il_res:
+            raise ValueError("geometry.initial_line: cfd には geometry.initial_line_res (凍結源の snapshot) が必須")
+        # 凍結源の形・ガスを使う側と照合 (codex result M2): 縮流部 (r_U・L_U・L_pipe・R の U→T Hermite)・組成・Tt・γ_Hall
+        expect = {"gas": (gas.summary() if hasattr(gas, "summary") else {"kind": "cpg"}),
+                  "r_U": float(p.geometry.get("r_inlet", 2.5)), "L_U": float(p.geometry.get("L_U", 3.5)),
+                  "L_pipe": float(p.geometry.get("L_pipe", 0.5))}
+        # 実効入口 (BC の Pt・Tt・組成) と熱力学条件 (thermalMethod・species・thermoHrefTemp) も照合 (codex diagnose 2026-10-06)
+        from ..feedback.cfd_initial_line import expected_inlet_thermo
+        expect["inlet_thermo"] = expected_inlet_thermo(p)
+        ht = pinned_factory(il_run, il_res, expect=expect)(R, g_hall)
+        il_src = dict(ht.source)
+    else:
+        raise ValueError("geometry.initial_line は 'hall' か 'cfd'")
     # 初期値線: 'throat_char' = スロート壁点発 C⁻ (CONTUR 流、壁が T から MOC 出力に
     # なる) / 'vertical' = M_start の縦線 (旧構成、回帰対照)。x0 = その軸着地点。
     start_line = str(p.geometry.get("start_line", "vertical"))
+    if initial_line == "cfd" and start_line != "throat_char":
+        raise ValueError("geometry.initial_line: cfd は start_line: throat_char 専用 (CFD 線の軸アンカーは線の軸着地でだけ定義)")
     if start_line == "throat_char":
         x0 = float(ht.throat_characteristic(n=n_start)[0][0])
     elif start_line == "vertical":
@@ -274,6 +419,13 @@ def design_chain(p: Problem) -> dict:
     else:
         x_A = x0
         M_A, Mp_A, Mpp_A = ht.axis_anchor(x0)
+    # アンカーの出所を成分別に (codex result m6): CFD ピンは M・M′ が CFD 場、M″ は Hall の式を CFD の x0 で評価
+    if x_reach_cfd is not None:
+        anchor_src = {"M": "cfd_reach", "Mp": "cfd_reach", "Mpp": "cfd_reach"}
+    elif initial_line == "cfd":
+        anchor_src = {"M": "cfd", "Mp": "cfd", "Mpp": "hall@x0_cfd"}
+    else:
+        anchor_src = {"M": "hall", "Mp": "hall", "Mpp": "hall"}
 
     # --- 軸 M 則: 'quintic' = 単一 5 次 Hermite (DOF L_c) / 'knot' = 内部 knot 1 個の
     # 区分 C² (A6, DOF L_c + M_knot)。高マッハ (M6) では単一 quintic の L_c 上限
@@ -336,6 +488,10 @@ def design_chain(p: Problem) -> dict:
         return law
 
     rF_pred = float(np.sqrt(area_ratio_isentropic(Md, g)))
+    # 逆 MOC の単位過程 (plans/accepted/discretization-moc-axis-limit-and-corrector.md §4.3):
+    # geometry.moc_axis_limit = analytic (既定、軸則から解析極限 θ_r) | legacy (軸端点の sinθ/r は相手の値で代用)
+    # geometry.moc_corrector = fixed2 (既定、予測 1 + 修正 2 回) | converge (更新量 ≤ 1e-12 まで、上限 50 回)
+    # キーが無ければ従来とビット同一。キーの検査は design_chain の冒頭 (`_moc_keys`)
 
     def _run_inverse(law):
         # target: [x0, x_A) は実測 (反復時) / [x_A, x_E] law / 以降 M_d
@@ -346,8 +502,24 @@ def design_chain(p: Problem) -> dict:
                     return float(seg(np.float64(x)))
                 return float(ht.mach(x, 0.0)) if x_reach_cfd is None else float(law(x_A))
             return float(law(x))
+
+        def target_dM(x: float) -> float:
+            """target_moc の dM/dx (analytic の θ_r 用。軸則の解析微分)。区間の分け方は target_moc と同じ。"""
+            x = float(x)
+            if x < x_A:
+                if seg is not None:
+                    return float(seg(np.float64(x), 1))
+                if x_reach_cfd is None:
+                    # x_A = x0 なので軸節点 (x > x0) では通らない。Hall の級数なら解析微分、他 (CFD ピン) は未定義
+                    return float(ht.axis_anchor(x)[1]) if type(ht) is HallThroat else float("nan")
+                return 0.0                                  # target = law(x_A) の定数
+            return float(law.deriv(x, 1))
         x_end = law.x_E + float(p.geometry.get("x_end_margin", 2.3)) \
             * rF_pred * float(np.sqrt(Md * Md - 1.0))
+        kw_moc = {}
+        if (moc_axis_limit, moc_corrector) != ("legacy", "fixed2"):
+            kw_moc = dict(axis_limit=moc_axis_limit, corrector=moc_corrector, target_dM=target_dM,
+                          axis_anchor=(x_A, M_A, Mp_A))
         return inverse_design(ht, target_moc, x_axis_end=float(x_end),
                               n_axis=int(p.geometry.get("n_axis_inv", 500)),
                               n_start=n_start, gamma=g,
@@ -357,7 +529,7 @@ def design_chain(p: Problem) -> dict:
                               x_E=law.x_E, M_d=Md, start_line=start_line,
                               wall_mode=str(p.geometry.get("wall_mode", "streamline")),
                               blend_width=float(p.geometry.get("wall_blend_width", 1.0)),
-                              axis_dx0=p.geometry.get("axis_dx0"))
+                              axis_dx0=p.geometry.get("axis_dx0"), **kw_moc)
 
     mode = str(p.geometry.get("Lc_mode", "explicit"))
     solve_diag = None
@@ -439,7 +611,8 @@ def design_chain(p: Problem) -> dict:
     if qa["violations"]:
         raise ValueError("壁 QA 不合格: " + "; ".join(qa["violations"]))
     # 壁表現 (A14): 'interp' = 補間 5 次 B-spline (現行・比較基準) /
-    # 'lsq' = 制約付き最小二乗 B-spline (n_cp は誤差ゲートで自動、または wall_ncp)
+    # 'lsq' = 制約付き最小二乗 B-spline (n_cp は誤差ゲートで自動、または wall_ncp) /
+    # 'joint' = 位置 + 壁角の同時当てはめ (V0 型壁, plan tooling-nozzle-cfd-pinned-initial-line §4.5)
     wall_repr = str(p.geometry.get("wall_repr", "interp"))
     wkw = dict(R=R, r_U=float(p.geometry.get("r_inlet", 2.5)),
                L_U=float(p.geometry.get("L_U", 3.5)),
@@ -452,8 +625,13 @@ def design_chain(p: Problem) -> dict:
                                  **wkw)
     elif wall_repr == "interp":
         wall = AxisMachCFDWall(res["wall"], **wkw)
+    elif wall_repr == "joint":
+        from ..geometry.wall_axismach import JointFitCFDWall
+        # geometry.wall_fit_mono_r2 = [a, b]: [a, b] r_t で r″ を単調非増加に拘束 (plan tooling-nozzle-throat-monotone-r2 §4.2)。
+        # 無い (または null) なら拘束なし = 従来とビット同一
+        wall = JointFitCFDWall(res["wall"], mono_r2=p.geometry.get("wall_fit_mono_r2"), **wkw)
     else:
-        raise ValueError("geometry.wall_repr は 'interp' か 'lsq'")
+        raise ValueError("geometry.wall_repr は 'interp' / 'lsq' / 'joint'")
     msgs = wall.validate()
     if msgs:
         raise ValueError("axis-Mach 壁フィルタ不合格: " + "; ".join(msgs))
@@ -465,33 +643,171 @@ def design_chain(p: Problem) -> dict:
             "axis_law": axis_law, "M_knot": M_K,
             "x_K": (float(law.x_K) if axis_law == "knot" else None),
             "anchor": (float(M_A), float(Mp_A), float(Mpp_A)),
-            "anchor_source": ("cfd" if x_reach_cfd is not None else "hall"),
+            "anchor_source": anchor_src,
             "start_line": start_line, "wall_mode": res["wall_mode"],
             "wall_repr": wall_repr,
+            # 逆 MOC の単位過程の診断 (plan discretization-moc-axis-limit-and-corrector §4.2): キーの値・対の 5 分類・反復回数・
+            # 最終残差・源項の分岐 (AXIS_LIMIT_FRAC の発火の数と位置)・θ_r の出所と軸端の接続検査・ゲート (converge のとき合否)
+            "moc": res.get("moc"),
             "gas": (gas.summary() if hasattr(gas, "summary")
                     else {"kind": "cpg", "gamma": p.gamma, "cp": p.cp}),
             "gamma_hall": g_hall,
             "wall_fit": getattr(wall, "fit_diag", None),
-            "Md": Md, "R": R, "gates": gates,
+            "Md": Md_report, "Md_moc_offset": Md_moc_offset, "Md_moc": Md, "R": R, "gates": gates,
+            "initial_line": {"source": initial_line,
+                             "run": (il_src or {}).get("run"), "res": (il_src or {}).get("res"),
+                             "x0": float(x0), "anchor": [float(M_A), float(Mp_A), float(Mpp_A)],
+                             "mstar": float(res["mdot_start"]),
+                             "sha256_16": (il_src or {}).get("sha256_16"),
+                             "config": (il_src or {}).get("config"),
+                             "match": (il_src or {}).get("match")},
             # cplus 閉包では構成的に 1 になる循環指標なので出さない (A9 の教訓)
             "mdot_ratio_moc": (None if not np.isfinite(res["mdot_exit"])
                                else float(res["mdot_exit"] / res["mdot_start"])),
             "cd_series": float(ht.cd_series())}
 
 
+def _mesh_params_from(m: dict, scale, ni, nj, wall_first_frac) -> Mesh2DParams:
+    """格子のブロック (dict) → Mesh2DParams。既定値は呼び出し側の ni/nj/wall_first_frac だけが違う
+    (2026-10-06 codex diagnose: 以前の Euler 経路は ni/nj/wall_first_frac/throat_refine しか渡さず、throat_width・
+    wall_first_frac_throat・前後ブレンド等を黙って無視していた)。"""
+    opt = lambda k: None if m.get(k) is None else float(m[k])  # noqa: E731
+    return Mesh2DParams(ni=int(m.get("ni", ni)), nj=int(m.get("nj", nj)),
+                        wall_first_frac=float(m.get("wall_first_frac", wall_first_frac)),
+                        throat_refine=float(m.get("throat_refine", 3.0)),
+                        throat_width=float(m.get("throat_width", 1.5)),
+                        wall_first_frac_throat=opt("wall_first_frac_throat"),
+                        wall_first_blend_x0=float(m.get("wall_first_blend_x0", 0.5)),
+                        wall_first_blend_x1=float(m.get("wall_first_blend_x1", 6.0)),
+                        wall_first_up_x0=opt("wall_first_up_x0"), wall_first_up_x1=opt("wall_first_up_x1"),
+                        axis_gap_frac=opt("axis_gap_frac"), axis_cap_frac=opt("axis_cap_frac"), scale=scale)
+
+
+def mesh_params(p, scale, ni, nj, wall_first_frac):
+    """problem の mesh ブロック → Mesh2DParams。**NS (`prepare_ns`) の格子**。
+    2026-10-07 (plan verification-case45-euler-total-enthalpy §4「E3 以降の対処」) から Euler (`prepare`) は `mesh_euler` を読む
+    (`mesh_params_euler`)。それ以前は Euler と NS が同じ mesh を読んでいた。"""
+    return _mesh_params_from(p.mesh, scale, ni, nj, wall_first_frac)
+
+
+# Euler 専用の格子の設定 `mesh_euler` (2026-10-07, plan verification-case45-euler-total-enthalpy §4「E3 以降の対処」、
+# 諮問 notes/reviews/2026-10-07-euler-grid-switch-plan-diagnose.md):
+# - prepare (Euler) は mesh_euler、prepare_ns (NS) は mesh を読む。2 つのブロックを混ぜて補完しない (Euler への mesh の暗黙の継承を禁止)。
+# - 既定は全断面で wall_first_frac 0.005 の等比の配点、スロートの別指定なし、軸側の cap なし (ni・nj の既定は従来の Euler の 321 × 65)。
+#   NS 向けに壁へ寄せた配点 (case/45 の G1: 1.3e-5・スロート 4.5e-6) の Euler は、スロート付近の全温が Tt を数百 K 超えたまま整定しなかった
+#   (同 plan §9 E2。全域 0.005 の配点は同じ窓で全領域 |T₀ − Tt| ≤ 0.103 K)。
+# - mesh だけがあって mesh_euler が無い問題は移行先を示して止める (黙って NS の配点を使わない・指定を無視して既定に落とさない)。
+MESH_EULER_DEFAULTS = {"ni": 321, "nj": 65, "wall_first_frac": 5.0e-3}
+# mesh_euler に書けるキー (_mesh_params_from が読むもの + 品質検査の ar_max + node 固定の discretization)。それ以外は書き誤りとして止める
+MESH_EULER_KEYS = ("ni", "nj", "wall_first_frac", "throat_refine", "throat_width", "wall_first_frac_throat",
+                   "wall_first_blend_x0", "wall_first_blend_x1", "wall_first_up_x0", "wall_first_up_x1",
+                   "axis_gap_frac", "axis_cap_frac", "ar_max", "discretization")
+
+
+def mesh_euler_block(p) -> dict:
+    """Euler の格子のブロック `mesh_euler` (dict の写し)。無い・dict でない・未知のキー・node でない discretization は ValueError。
+    mesh だけの問題には、旧格子を再現する写し方と新しい既定の書き方を示して止める。"""
+    m = (p.raw or {}).get("mesh_euler")
+    if m is None:
+        old = p.raw.get("mesh") or {}
+        flow = lambda d: "{" + ", ".join(f"{k}: {v}" for k, v in d.items()) + "}"  # noqa: E731  (YAML の flow 形式で示す)
+        axial = {k: old[k] for k in ("ni", "nj", "throat_refine", "throat_width") if k in old}
+        raise ValueError(
+            "prepare (Euler) は問題 YAML の mesh_euler を読む (2026-10-07 から。plan verification-case45-euler-total-enthalpy §4)。"
+            "この問題には mesh だけがあり mesh_euler が無い — NS の mesh を Euler に流用しない。移行先: "
+            "(1) 新しい既定 (全断面 wall_first_frac 0.005・スロートの別指定なし・軸側の cap なし) なら "
+            f"mesh_euler: {flow({**axial, 'wall_first_frac': 0.005})}、"
+            f"(2) 旧格子の記録を再現するなら mesh の全キーを mesh_euler に写す (mesh_euler: {flow(old)})")
+    if not isinstance(m, dict):
+        raise ValueError(f"mesh_euler は辞書 (受け取った値: {m!r})")
+    bad = sorted(str(k) for k in m if k not in MESH_EULER_KEYS)
+    if bad:
+        raise ValueError(f"mesh_euler の未知のキー {bad} (書けるのは {list(MESH_EULER_KEYS)}; 黙って無視しない)")
+    if "discretization" in m and str(m["discretization"]) != "node":
+        raise ValueError(f"mesh_euler.discretization は node だけ (axis-Mach の Euler は node; 受け取った値: {m['discretization']!r})")
+    return dict(m)
+
+
+def mesh_params_euler(p, scale) -> Mesh2DParams:
+    """problem の mesh_euler ブロック → Mesh2DParams。**Euler (`prepare`) の格子** (既定は MESH_EULER_DEFAULTS と Mesh2DParams の
+    スロートの別指定なし・軸側の cap なし)。mesh は読まない。"""
+    return _mesh_params_from(mesh_euler_block(p), scale, **MESH_EULER_DEFAULTS)
+
+
+# 格子の座標と接続のハッシュ (prepare_info.json の mesh 欄)。式は case/45.isobutane_m6_d155/euler_t0_e2.py の E2_MESH.json
+# (`_sha_bytes(/MESH/COORD)`・`_topology_digest`) と同じ (データセット名・dtype・形・バイト列) なので、E2 の記録と直接比べられる
+_MESH_TOPOLOGY = ("MESH/CONNE", "VIZMESH/CONNE", "CELLS/STRUCT", "PLANES/STRUCT", "CELLS/regionId")
+_MESH_BCOND_TOPO = ("iBPlanes", "iCells", "iPlanes", "vizBfaceNodes", "vizBfaceSizes")
+
+
+def _mesh_hashes(run_dir: Path, coords, quads, bedges) -> dict:
+    """変換後の nozzle.h5 の座標 (/MESH/COORD) と接続 (_MESH_TOPOLOGY + 境界の位相) の sha256、nozzle.msh の sha256、
+    生成器の出力 (coords float64・quads・境界辺; 変換器に依らない) の sha256。"""
+    import hashlib
+
+    import h5py
+
+    def _upd(h, name, a):
+        a = np.ascontiguousarray(a)
+        h.update(name.encode() + str(a.dtype).encode() + str(a.shape).encode() + a.tobytes())
+
+    with h5py.File(run_dir / "nozzle.h5", "r") as f:
+        c = f["/MESH/COORD"][:]
+        hc = hashlib.sha256()
+        hc.update(str(c.dtype).encode() + str(c.shape).encode() + np.ascontiguousarray(c).tobytes())
+        ht = hashlib.sha256()
+        names = [t for t in _MESH_TOPOLOGY if t in f]
+        names += sorted(f"BCONDS/{b}/{k}" for b in f["BCONDS"] for k in _MESH_BCOND_TOPO if k in f["BCONDS"][b])
+        for n in names:
+            a = np.asarray(f[n])
+            ht.update(n.encode() + str(a.dtype).encode() + str(a.shape).encode() + a.tobytes())
+    hg = hashlib.sha256()
+    _upd(hg, "coords", np.asarray(coords, dtype=np.float64))
+    _upd(hg, "quads", np.asarray(quads, dtype=np.int64))
+    for g in ("inlet", "outlet", "wall", "axis"):
+        _upd(hg, g, np.asarray(bedges[g], dtype=np.int64))
+    hm = hashlib.sha256((run_dir / "nozzle.msh").read_bytes())
+    return {"coord_sha256": hc.hexdigest(), "coord_dtype": str(c.dtype), "topology_sha256": ht.hexdigest(),
+            "topology_datasets": names, "msh_sha256": hm.hexdigest(), "generator_sha256": hg.hexdigest()}
+
+
+def _mesh_record(p, mp: Mesh2DParams, source: str, nj: int, run_dir: Path, coords, quads, bedges) -> dict:
+    """prepare_info.json の mesh 欄: 従来の ni・nj・wall_first_frac (読む側: nozzle_report・metrics.deltastar・cfd_initial_line) に、
+    全 Mesh2DParams・採用元のブロック名・問題に書かれたブロックの有無と中身・座標と接続のハッシュを足す
+    (plan verification-case45-euler-total-enthalpy §4、2026-10-07)。"""
+    import dataclasses
+    return {"ni": mp.ni, "nj": int(nj), "wall_first_frac": mp.wall_first_frac,
+            "source": source, "blocks_present": {b: (b in (p.raw or {})) for b in ("mesh", "mesh_euler")},
+            "block": dict((p.raw or {}).get(source) or {}), "params": dataclasses.asdict(mp),
+            "hashes": _mesh_hashes(run_dir, coords, quads, bedges)}
+
+
 def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, implicit_relax=None) -> dict:
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
         raise ValueError("runner_axismach は wind_tunnel_axisym_axismach 専用")
+    if _physical_wall_repr(p.geometry) == "single_bspline":
+        # 物理壁の表現 (plan tooling-nozzle-wall-single-bspline §4.2) は NS の物理壁 (prepare_ns) だけ。Euler の設計壁で黙って無視しない
+        raise ValueError("geometry.physical_wall_repr: single_bspline は prepare_ns (物理壁) 専用 — Euler の prepare には物理壁が無い")
+    if "pw_upstream" in p.geometry:
+        # 上流の作り方 (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1) は joint 壁の物理壁の解析経路だけ。
+        # 値は検査し、poly の明示は例外 (Euler の設計壁で黙って無視しない)。ramp (移行で明示した旧来の作り方) は通す
+        v = p.geometry["pw_upstream"]
+        if not isinstance(v, str) or v not in PW_UPSTREAMS:
+            raise ValueError(f"geometry.pw_upstream は {' / '.join(repr(c) for c in PW_UPSTREAMS)} のどれか (受け取った値: {v!r})")
+        if v == "poly":
+            raise ValueError("geometry.pw_upstream: poly は prepare_ns (joint 壁の物理壁) 専用 — Euler の prepare には物理壁が無い")
+    # Euler の格子は mesh_euler (mesh は読まない)。無い・不正なら run dir を作る前・設計チェーンの前に止める (2026-10-07)
+    m_eu = mesh_euler_block(p)
     run_dir = Path(run_dir)
-    run_dir.mkdir(parents=True, exist_ok=False)
+    if run_dir.exists():
+        raise FileExistsError(f"{run_dir} が既にある")
     d = design_chain(p)
+    require_moc_gate(p, d)                        # MOC の不合格は run dir を作る前に止める (2026-10-07)
+    run_dir.mkdir(parents=True, exist_ok=False)
     wall = d["wall"]
     scale = float(p.spec["r_throat"])
-    mp = Mesh2DParams(ni=int(p.mesh.get("ni", 321)), nj=int(p.mesh.get("nj", 65)),
-                      wall_first_frac=float(p.mesh.get("wall_first_frac", 5.0e-3)),
-                      throat_refine=float(p.mesh.get("throat_refine", 3.0)),
-                      scale=scale)
+    mp = mesh_params_euler(p, scale)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
     # 記録: 目標軸分布 (x0 → x_E) と設計壁
@@ -513,7 +829,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     subprocess.run([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
-                            "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
+                            "nozzle_qc.h5", "--ar-max", str(int(m_eu.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
                        capture_output=True, text=True)
     (run_dir / "MESH_QUALITY.txt").write_text(
         "# cell 変換コピーで検査 (品質は primal の性質)\n" + q.stdout + q.stderr)
@@ -529,6 +845,8 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     (run_dir / "solverConfig.yaml").write_text(cfg_e)
     subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    # IC を入れる前 (座標・接続は以後変わらない)。nj は実際の値 (axis_gap_frac では導出値になる)
+    mesh_rec = _mesh_record(p, mp, "mesh_euler", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
                         float(p.spec["Pt"]), float(p.spec["Tt"]), p.gamma, p.cp,
                         gas=(None if str(p.evaluate.get('cfd_gas', 'same')) == 'cpg' else p.gas_model),
@@ -551,14 +869,103 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
             "L_U": float(p.geometry.get("L_U", 3.5)),
             "gas": d["gas"], "species": _species_info(p), "gamma_hall": d["gamma_hall"],
             "wall_fit": d["wall_fit"],
-            "Md": d["Md"], "R": d["R"],
+            "Md": d["Md"], "Md_moc_offset": d["Md_moc_offset"], "R": d["R"],
+            "initial_line": d["initial_line"],
+            "moc": d["moc"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},
             "exit": d["exit"],
             "mdot_ratio_moc": d["mdot_ratio_moc"], "cd_series": d["cd_series"],
             "nStepOuter": n, "scale_m": scale, "ic_from": str(ic_from) if ic_from else None,
-            "mesh": {"ni": mp.ni, "nj": mp.nj, "wall_first_frac": mp.wall_first_frac}}
+            "mesh": mesh_rec}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
+
+
+# 段階起動の段 config の変更 (plan tooling-rerun-conditions §4.9、codex result 段 #2)。
+# 旧実装は `cfl: [\d.]+, cfl_pseudo: [\d.]+` などの正規表現置換で、`convMethod:  2` (空白 2)・`cfl: 5.0e+0`
+# (指数表記)・block 形式の deltaT では黙って当たらず、soft 段が 2 次・CFL 5 のまま回りえた。
+# ここでは YAML 上の位置 (_CFG_PATHS) で値を読み、その値トークンだけを書き換え、読み直して実効値と
+# 「他の値が変わっていないこと」を検査する (コメント・書式は保つ)。
+_CFG_PATHS = {"cfl": ("time", "deltaT", "cfl"), "cfl_pseudo": ("time", "deltaT", "cfl_pseudo"),
+              "convMethod": ("space", "convMethod"), "nStepOuter": ("time", "last", "nStepOuter"),
+              "outStepInterval": ("time", "outStepInterval"), "nStepInner": ("time", "nStepInner")}
+_CFG_INT_KEYS = ("convMethod", "nStepOuter", "outStepInterval", "nStepInner")
+
+
+def _cfg_num(v):
+    """YAML の値を数値として読む (`5e+0` は PyYAML では文字列だが forge は数値として読む)。数値でなければ None。"""
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _yaml_strict():
+    """重複キーを拒否する YAML ローダー (`solver_density_cuda/tools/yaml_strict.py`)。solver の yaml-cpp は先勝ち・
+    PyYAML は後勝ちなので、重複キーのある段 config を PyYAML で検査すると solver と違う値を照合してしまう
+    (plan tooling-rerun-conditions、codex result 段 3 回目 #1)。"""
+    if str(FORGE_TOOLS) not in sys.path:
+        sys.path.insert(0, str(FORGE_TOOLS))
+    import yaml_strict
+    return yaml_strict
+
+
+def _cfg_load(cfg_text: str) -> dict:
+    """solverConfig を読む (重複キーは yaml_strict.DuplicateKeyError)。辞書でなければ ValueError。"""
+    doc = _yaml_strict().load(cfg_text)
+    if not isinstance(doc, dict):
+        raise ValueError("solverConfig が YAML の辞書でない")
+    return doc
+
+
+def _cfg_get(doc: dict, key: str):
+    """YAML 上の位置 _CFG_PATHS[key] の値 (無ければ None)。"""
+    v = doc
+    for k in _CFG_PATHS[key]:
+        if not isinstance(v, dict) or k not in v:
+            return None
+        v = v[k]
+    return v
+
+
+def _cfg_value(cfg_text: str, key: str):
+    """config 本文の key の実効値 (数値)。無い・数値でなければ ValueError。"""
+    v = _cfg_num(_cfg_get(_cfg_load(cfg_text), key))
+    if v is None:
+        raise ValueError(f"solverConfig の {'.'.join(_CFG_PATHS[key])} が無い・数値でない")
+    return int(v) if key in _CFG_INT_KEYS else v
+
+
+def _cfg_set(cfg_text: str, updates: dict) -> str:
+    """updates {key: 値} を YAML 上の位置 _CFG_PATHS[key] に書く (yaml_strict.replace_scalars: その位置の値トークンだけを
+    置換)。書き換え後に読み直し、(1) 各 key の実効値が要求値、(2) それ以外の値が変わっていない ことを検査する。
+    違反は ValueError (黙って当たらない置換を起こさない)。"""
+    ys = _yaml_strict()
+    before = _cfg_load(cfg_text)
+    for key in updates:
+        if _cfg_get(before, key) is None:
+            raise ValueError(f"solverConfig に {'.'.join(_CFG_PATHS[key])} が無い (段の {key} を書けない)")
+    # 値トークンの位置は YAML の構造から決める (正規表現だとコメント・引用符付きキー・`key :` に当たり外れが出る;
+    # codex result 段 4 回目 #3)。replace_scalars が読み直して要求値・他の値の不変を検査する
+    toks = {_CFG_PATHS[k]: (str(int(v)) if k in _CFG_INT_KEYS else repr(float(v))) for k, v in updates.items()}
+    text = ys.replace_scalars(cfg_text, toks)
+    after = _cfg_load(text)
+    for key, val in updates.items():
+        got = _cfg_num(_cfg_get(after, key))
+        if got is None or got != float(val):
+            raise ValueError(f"段の config を読み直したら {'.'.join(_CFG_PATHS[key])} = {_cfg_get(after, key)!r} (要求 {val})")
+    return text
+
+
+def _cfg_check(cfg_text: str, want: dict, label: str) -> None:
+    """起動前の検査: config の実効値 (YAML 上の位置で読む) が want {key: 要求値} と一致しなければ RuntimeError。"""
+    doc = _cfg_load(cfg_text)
+    bad = {k: _cfg_get(doc, k) for k, v in want.items() if _cfg_num(_cfg_get(doc, k)) != float(v)}
+    if bad:
+        raise RuntimeError(f"段 {label} の config の実効値が要求と違う — forge を起動しない: "
+                           + ", ".join(f"{'.'.join(_CFG_PATHS[k])} = {bad[k]!r} (要求 {want[k]})" for k in bad))
 
 
 def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, stages: str = "full",
@@ -566,38 +973,59 @@ def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, 
     """soft 段 (1次+cfl0.5, 3000 step) → [mid 段 (2次+cfl1, 3000 step)] → 本段。
     walldriven W3 と同方式・段階起動必須。`cfl_main` で本段 CFL を上書き
     (semi-perfect TP は cfl4 で本段 step ~60 に爆発 — case/42 実測。TP は cfl≤2 が実績
-    [[cutler-cpg-vs-tp-dplur-sst]])。`mid_stage=True` で 2 次化と CFL 上げを分離する。"""
-    import re
+    [[cutler-cpg-vs-tp-dplur-sst]])。`mid_stage=True` で 2 次化と CFL 上げを分離する。
+    `run_staged_ns` と同じく、段ごとの実効設定を `stage_manifest.json` に記録し、段の残差履歴を
+    `residual_history_<tag>.csv` に残す (tag = soft / mid / main)。段の最終 res の必要保存量が非有限・ρ≤0 なら
+    次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9、codex result 段 3 回目 #3)。"""
+    import shutil
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
+    bc_path = run_dir / "bcondConfig.yaml"
+    bc_text = bc_path.read_text() if bc_path.exists() else ""
     if cfl_main is not None:
-        cfg_main = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+",
-                          f"cfl: {cfl_main}, cfl_pseudo: {cfl_main}", cfg_main)
+        cfg_main = _cfg_set(cfg_main, {"cfl": cfl_main, "cfl_pseudo": cfl_main})
+    main_want = {k: _cfg_value(cfg_main, k) for k in ("convMethod", "cfl", "cfl_pseudo", "nStepOuter", "outStepInterval")}
+    sm = _stage_manifest_cls()(run_dir)
 
-    def _stage(cfg, nsteps, label):
-        cfg = re.sub(r"nStepOuter: \d+", f"nStepOuter: {nsteps}", cfg)
-        cfg = re.sub(r"outStepInterval: \d+", f"outStepInterval: {nsteps}", cfg)
+    def _record(cfg, tag):
+        """段の残差履歴を段名つきで残し、manifest に段を足して書く (失敗した段も診断用に残す; run_staged_ns と同じ)。"""
+        hist = run_dir / "residual_history.csv"
+        if hist.exists():
+            shutil.copy(hist, run_dir / f"residual_history_{tag}.csv")
+        sm.add(tag, cfg, bc_text, history=f"residual_history_{tag}.csv")
+        sm.write()
+
+    def _stage(cfg, nsteps, label, want):
+        cfg = _cfg_set(cfg, {"nStepOuter": nsteps, "outStepInterval": nsteps})
+        _cfg_check(cfg, {**want, "nStepOuter": nsteps, "outStepInterval": nsteps}, label)
         (run_dir / "solverConfig.yaml").write_text(cfg)
+        (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
         rc = run_forge(run_dir)
+        _record(cfg, label)
         res = sorted(run_dir.glob("res_[0-9]*.h5"),
                      key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res or int("".join(c for c in res[-1].stem if c.isdigit())) < nsteps:
             raise RuntimeError(f"{label} 段が失敗 (発散切り分けは res_nan_*.h5 を見る)")
+        probs = stage_gate(res[-1], cfg)                    # restart_field のビット一致検査は Inf・負密度を排除しない
+        if probs:
+            raise RuntimeError(f"段 {label} の最終場 {res[-1].name} が段終了ゲートで不合格 — 次段へ進まない:\n    "
+                               + "\n    ".join(probs))
         _restart_same_mesh(res[-1], run_dir / mesh_h5)      # 同一メッシュ: index コピー (旧: interp_field.py)
         for f in run_dir.glob("res_*"):
             f.unlink()
 
-    if stages == "none":
-        (run_dir / "solverConfig.yaml").write_text(cfg_main)
-        return run_forge(run_dir)
-    soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 0.5, cfl_pseudo: 0.5", cfg_main)
-    soft = soft.replace("convMethod: 1", "convMethod: 0")
-    _stage(soft, 3000, "soft")
-    if mid_stage and stages == "full":
-        mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 1.0, cfl_pseudo: 1.0", cfg_main)
-        _stage(mid, 3000, "mid")
+    if stages != "none":
+        soft = _first_order(_cfg_set(cfg_main, {"cfl": 0.5, "cfl_pseudo": 0.5}))   # 旧: `convMethod: 1` だけを 0 に置換
+        _stage(soft, 3000, "soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
+        if mid_stage and stages == "full":
+            mid = _cfg_set(cfg_main, {"cfl": 1.0, "cfl_pseudo": 1.0})
+            _stage(mid, 3000, "mid", {"convMethod": main_want["convMethod"], "cfl": 1.0, "cfl_pseudo": 1.0})
+    _cfg_check(cfg_main, main_want, "main")
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
-    return run_forge(run_dir)
+    (run_dir / "residual_history.csv").unlink(missing_ok=True)
+    rc = run_forge(run_dir)
+    _record(cfg_main, "main")
+    return rc
 
 
 def collect(problem_path, run_dir) -> dict:
@@ -679,11 +1107,102 @@ def main(argv=None) -> int:
     return rc
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
 
 # --- A12: 粘性 δ* 補正 (RANS 経路) ------------------------------------------------
+def delta_r_from_table(x, d):
+    """δ_r の表 (P-spline 平滑化済みの `delta_r_next.csv`) を壁に渡す関数にする: 5 次補間スプライン、範囲外は端値。
+
+    2026-10-05 (plan verification-m6-axis-wave-mesh-su2 §5.1 #8a): 旧実装は np.interp (直線補間) で、表の点ごと
+    (0.09 r_t) の傾きの折れ目を補間 5 次 B-spline の壁が通るため r″ が点間隔の周期で波打っていた (高周波 3〜6e-4 [1/r_t])。
+    平滑化前の生値を渡すと 5 次補間はリンギングするので、平滑化済みの表に限る。
+
+    `f(xq, deriv)` で導関数 (deriv=1..3) も返す (plan tooling-nozzle-cfd-pinned-initial-line §5.1 #6b: joint 壁の
+    物理壁は r′・r″・r‴ を解析的に足す)。表の範囲外は値が端値クリップなので導関数は 0。"""
+    from scipy.interpolate import make_interp_spline
+    x = np.asarray(x, dtype=float); d = np.asarray(d, dtype=float)
+    spl = make_interp_spline(x, d, k=5)
+    lo, hi = float(x[0]), float(x[-1])
+
+    def f(xq, deriv: int = 0, _s=spl, _lo=lo, _hi=hi):
+        xq = np.asarray(xq, dtype=float)
+        if deriv == 0:
+            return _s(np.clip(xq, _lo, _hi))
+        if deriv not in (1, 2, 3):
+            raise ValueError("deriv は 0..3")
+        return np.where((xq >= _lo) & (xq <= _hi), _s(np.clip(xq, _lo, _hi), deriv), 0.0)
+    f.supports_deriv = True
+    f.spline = spl          # ノット (区分の境界) を形状の厳密評価に渡すため (plan tooling-nozzle-throat-monotone-r2 §6 S6)
+    f.x_range = (lo, hi)    # 表の範囲 (1 本の B-spline の物理壁は、ランプ開始〜出口を覆うことを要求する; plan tooling-nozzle-wall-single-bspline §4.1)
+    return f
+
+
+def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = None, rtol: float | None = None):
+    """積分法初期壁の δ_r (`prepare_ns` の initializer 経路): `integral_bl` → 5 次 P-spline 平滑化 → 壁に渡す δ_r 関数。
+    戻り: (res_init, delta_r_x, init_info)。`prepare_ns` から切り出したもの (振る舞いは同一; plan
+    tooling-nozzle-throat-monotone-r2 §6 S6 の形状ゲートが同じ経路で物理壁を作るために共有する)。
+    scale: スロート半径 r_t [m] (None = spec.r_throat)。寸法の逆算 (`deltastar_loop.solve_rt`・`solve_rt_throat`) が、反復のたびに
+    同じ経路 (k_f の cf_scale・熱条件・平滑化) で δ_r を作り直すために渡す (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.2)。
+    rtol: **診断用** (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2c)。`integral_bl` の RK45 の相対許容差を明示の引数で
+    注入する。None = 渡さない (`integral_bl` の既定 1e-6、今の振る舞いのまま)。YAML のキーにはしない。実効値は
+    `res_init["solve_ivp"]["rtol"]` (solve_ivp に渡した値) に残る。"""
+    from ..feedback.deltastar_integral import integral_bl
+    scale = float(p.spec["r_throat"]) if scale is None else float(scale)
+    wall_inv = d["wall_inv"]
+    model = str(init_cfg.get("model", "contur"))
+    if model not in ("contur", "contur_momentum_integral"):
+        raise ValueError(f"deltastar_initializer.model={model!r} は未対応 (contur のみ)")
+    # 熱境界条件は spec.wall_thermal が単一ソース (plan tooling-nozzle-isothermal-wall-chain §4.1)。
+    # initializer/YAML の thermal_bc 指定は無視し、食い違えば警告する (NS と積分法が別の壁温を読む状態を作らない)。
+    tbc = p.wall_thermal_bc_integral
+    if init_cfg.get("thermal_bc") and dict(init_cfg["thermal_bc"]) != tbc:
+        print(f"[prepare_ns] warning: initializer.thermal_bc={init_cfg['thermal_bc']} は無視 (spec.wall_thermal={p.wall_thermal} を使用)")
+    res_init = integral_bl(d["wall"], wall_inv, _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]),
+                           scale, thermal_bc=tbc,
+                           theta0_m=init_cfg.get("theta0_m"), x_virtual_m=init_cfg.get("x_virtual_m"),
+                           a_crocco=float(init_cfg.get("a_crocco", 1.0)), closure=str(init_cfg.get("closure", "contur")),
+                           cf_scale=float(init_cfg.get("cf_scale", 1.0)), n_scale=float(init_cfg.get("n_scale", 1.0)),
+                           **({} if rtol is None else {"rtol": float(rtol)}))
+    # 積分法の出力も同じ 5 次 P-spline で平滑化 (N(Re) テーブルの折れ目などを壁曲率に持ち込まない)
+    from ..metrics.deltastar import smooth_delta_quintic
+    f_s, sm_diag = smooth_delta_quintic(res_init["x"], res_init["delta_r"], knot_spacing=2.0, lam=1.0,
+                                        positive=(p.wall_thermal["mode"] == "adiabatic"))  # 等温は符号付き
+    res_init["delta_r_raw_integral"] = res_init["delta_r"].copy()
+    res_init["delta_r"] = f_s(res_init["x"])
+    # 壁には平滑化関数そのものを渡す (2026-10-05, plan verification-m6-axis-wave-mesh-su2 §5.1 #8a):
+    # 1500 点の表を np.interp で渡すと点ごとの傾きの折れ目を補間 5 次スプラインが通り、r″ が点間隔で波打つ
+    delta_r_x = f_s
+    if getattr(d["wall"], "wall_repr", None) == "joint" or type(d["wall"]).__name__ == "JointFitCFDWall":
+        # joint 壁の物理壁 (解析経路) は δ_r の導関数を要る (plan tooling-nozzle-cfd-pinned-initial-line §5.1 #6b)。
+        # 平滑化済みの値 (5 次 P-spline) を表にし、導関数を返せる 5 次補間 (delta_r_from_table) で渡す。
+        delta_r_x = delta_r_from_table(res_init["x"], f_s(res_init["x"]))
+    init_info = dict(res_init["settings"])
+    init_info["smooth"] = {"kind": "quintic_pspline", **sm_diag}
+    init_info["delta_r_throat"] = float(np.interp(0.0, res_init["x"], res_init["delta_r"]))
+    init_info["delta_r_exit"] = float(res_init["delta_r"][-1])
+    return res_init, delta_r_x, init_info
+
+
+def build_physical_wall(p: Problem, d: dict, scale: float, delta_r_x=None, dstar_x=None, offset: str = "normal",
+                        pwu: dict | None = None):
+    """物理壁の構築 (`prepare_ns` と寸法の逆算 `deltastar_loop.solve_rt`・`solve_rt_throat` が共有する; plan
+    tooling-nozzle-upstream-poly-and-throat-sizing §4.2「同じ壁の構築」)。`PhysicalNozzleWall` に `geometry.pw_ramp`・
+    `geometry.pw_upstream` (`_pw_upstream` の解決済みの値) を渡し、`physical_wall_repr: single_bspline` なら 1 本の B-spline に
+    作り直す。scale: r_t [m] (相関 δ* の診断に使う。壁の形は r_t 単位)。"""
+    from ..geometry.wall_axismach import PhysicalNozzleWall, SingleBSplinePhysicalWall
+    pwu = _pw_upstream(p.geometry) if pwu is None else pwu
+    # joint 壁の物理壁 (解析経路) の δ_r ランプ区間: geometry.pw_ramp (None = 既定、default_pw_ramp)。ゲート不合格は例外
+    pw_ramp = p.geometry.get("pw_ramp")
+    wall = PhysicalNozzleWall(d["wall"], d["wall_inv"], float(scale), float(p.spec["Pt"]),
+                              float(p.spec["Tt"]), _gam_or_gas(p), p.cp, dstar_x=dstar_x,
+                              offset=offset, delta_r_x=delta_r_x,
+                              ramp=(None if pw_ramp is None else tuple(float(v) for v in pw_ramp)),
+                              upstream=pwu["value"])
+    if _physical_wall_repr(p.geometry) == "single_bspline":
+        # 今の物理壁 (pw_upstream poly) を全域 1 本の 5 次 B-spline にノット挿入で作り直す (許容誤差・ゲート不合格は例外)
+        wall = SingleBSplinePhysicalWall(wall)
+    return wall
+
+
 def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                dstar_csv=None, dstar_blend=(6.0, 9.0),
                delta_r_csv=None, offset: str = "normal", euler_ref=None,
@@ -704,17 +1223,39 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       半径方向補正 δ_r(x) [r_t] の CSV (列 x_rt, delta_r; `feedback.deltastar_loop` が作る
       `delta_r_next.csv`) を全域そのまま使い、`offset="radial"` で壁を作る。`dstar_csv`/`dstar_blend`
       (旧 v3 継ぎはぎ) とは排他。`euler_ref` (固定 Euler 参照 run) は帳簿用に prepare_info へ記録。
+    - **`geometry.physical_wall_repr`** (plans/accepted/tooling-nozzle-wall-single-bspline.md §4.4): 物理壁の表現。キー無し = 今の壁
+      (変更前とビット同一、壁ファイルを書かない) / `legacy` = 今の壁 + 壁ファイル (復元に要る全要素) / `single_bspline` = 入口から
+      出口まで 1 本の 5 次 B-spline に作り直した壁 (`SingleBSplinePhysicalWall`) + 壁ファイル。キーを書いたときは壁ファイル
+      `wall_repr.json` (形式の版・表現の種類・有効域・単位・設計壁と物理壁の係数) を run に置き、prepare_info.json の
+      `physical_wall` にも写す。joint 壁 + 物理壁の解析経路 (offset radial) 専用で、それ以外にキーを書いたら例外。
+    - **`geometry.pw_upstream`** (plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1): joint 壁の物理壁の上流の作り方。
+      キー無し = `poly` (配管〜設計スロートの 5 次多項式、上流に δ_r を足さない) / `ramp` = 旧来の δ_r ランプ (`pw_ramp`)。
+      `poly` と `pw_ramp` の併記・不正値・joint でない壁への `poly`・`ramp` + `single_bspline` は run dir を作る前に例外。
+      解決済みの値は prepare_info.json の `pw_upstream` に、`poly` のゲートは `pw_upstream_gate` に書く。
+    - **`spec.sizing`** (任意、§4.2): 寸法の決め方 {method: exit | throat, target_m}。prepare_info.json の `sizing` に、実際の物理壁の
+      物理スロート半径・出口半径 [m] と目標との差を書く (キー無しは method = null = 未記録)。
     """
     from ..feedback.deltastar import _sutherland
-    from ..geometry.wall_axismach import PhysicalNozzleWall
+    from ..geometry.wall_axismach import PhysicalNozzleWall, check_required_attrs, save_wall_file
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
         raise ValueError("runner_axismach は wind_tunnel_axisym_axismach 専用")
+    # 物理壁の表現 (§4.4): 不正値と未対応の設計壁は run dir を作る前・設計チェーンの前に例外
+    pw_repr = _physical_wall_repr(p.geometry)
+    if pw_repr is not None and str(p.geometry.get("wall_repr", "interp")) != "joint":
+        raise ValueError(f"geometry.physical_wall_repr: {pw_repr} は joint 壁 (wall_repr: joint) + 物理壁の解析経路専用 "
+                         f"(wall_repr = {p.geometry.get('wall_repr', 'interp')!r})")
+    # 上流の作り方 (pw_upstream) と寸法の記録 (spec.sizing): 不正値・併記は run dir を作る前に例外
+    pwu = _pw_upstream(p.geometry)
+    sizing = _sizing_spec(p.spec)
     # 種ごとの輸送物性 (#9b): TP の NS は gas.transport 必須。run dir を作る前・設計チェーンの前に検査する
     transport = p.transport_for_ns()
     run_dir = Path(run_dir)
-    run_dir.mkdir(parents=True, exist_ok=False)
+    if run_dir.exists():
+        raise FileExistsError(f"{run_dir} が既にある")
     d = design_chain(p)
+    require_moc_gate(p, d)                        # MOC の不合格は run dir を作る前に止める (2026-10-07)
+    run_dir.mkdir(parents=True, exist_ok=False)
     scale = float(p.spec["r_throat"])
     wall_inv = d["wall_inv"]                      # (n,4) [x,r,th,M] r_t 単位
     # 物理壁 (A13): 上流履歴込み δ* + 真のスロート探索 + 上流 Hermite 再生成。
@@ -738,31 +1279,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     init_cfg = initializer if initializer is not None else p.raw.get("deltastar_initializer")
     if init_cfg and delta_r_csv is None and dstar_csv is None:
         # 積分法初期壁 (plan §4.1): 初回 NS 専用。断熱 / 指定壁温は thermal_bc で。
-        from ..feedback.deltastar_integral import integral_bl, delta_r_function
-        model = str(init_cfg.get("model", "contur"))
-        if model not in ("contur", "contur_momentum_integral"):
-            raise ValueError(f"deltastar_initializer.model={model!r} は未対応 (contur のみ)")
-        # 熱境界条件は spec.wall_thermal が単一ソース (plan tooling-nozzle-isothermal-wall-chain §4.1)。
-        # initializer/YAML の thermal_bc 指定は無視し、食い違えば警告する (NS と積分法が別の壁温を読む状態を作らない)。
-        tbc = p.wall_thermal_bc_integral
-        if init_cfg.get("thermal_bc") and dict(init_cfg["thermal_bc"]) != tbc:
-            print(f"[prepare_ns] warning: initializer.thermal_bc={init_cfg['thermal_bc']} は無視 (spec.wall_thermal={p.wall_thermal} を使用)")
-        res_init = integral_bl(d["wall"], wall_inv, _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]),
-                               scale, thermal_bc=tbc,
-                               theta0_m=init_cfg.get("theta0_m"), x_virtual_m=init_cfg.get("x_virtual_m"),
-                               a_crocco=float(init_cfg.get("a_crocco", 1.0)), closure=str(init_cfg.get("closure", "contur")))
-        # 積分法の出力も同じ 5 次 P-spline で平滑化 (N(Re) テーブルの折れ目などを壁曲率に持ち込まない)
-        from ..metrics.deltastar import smooth_delta_quintic
-        f_s, sm_diag = smooth_delta_quintic(res_init["x"], res_init["delta_r"], knot_spacing=2.0, lam=1.0,
-                                            positive=(p.wall_thermal["mode"] == "adiabatic"))  # 等温は符号付き
-        res_init["delta_r_raw_integral"] = res_init["delta_r"].copy()
-        res_init["delta_r"] = f_s(res_init["x"])
-        delta_r_x = delta_r_function(res_init)
+        res_init, delta_r_x, init_info = integral_delta_r(p, d, init_cfg)
         offset = "radial"
-        init_info = dict(res_init["settings"])
-        init_info["smooth"] = {"kind": "quintic_pspline", **sm_diag}
-        init_info["delta_r_throat"] = float(np.interp(0.0, res_init["x"], res_init["delta_r"]))
-        init_info["delta_r_exit"] = float(res_init["delta_r"][-1])
         (run_dir / "delta_r_initial.csv").write_text("")   # 後で上書き (run_dir は下で作る)
     if delta_r_csv is not None:
         if dstar_csv is not None:
@@ -770,11 +1288,12 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         tbl_r = np.loadtxt(delta_r_csv, delimiter=",", skiprows=1)
         if not np.all(np.isfinite(tbl_r[:, 1])):
             raise ValueError("delta_r_csv に非有限値がある (deltastar_loop.extract_and_merge で前回値保持済みの CSV を渡す)")
-        delta_r_x = lambda x, _t=tbl_r: np.interp(x, _t[:, 0], _t[:, 1])
+        delta_r_x = delta_r_from_table(tbl_r[:, 0], tbl_r[:, 1])
         offset = "radial"
-    wall = PhysicalNozzleWall(d["wall"], wall_inv, scale, float(p.spec["Pt"]),
-                              float(p.spec["Tt"]), _gam_or_gas(p), p.cp, dstar_x=dstar_x,
-                              offset=offset, delta_r_x=delta_r_x)
+    # 物理壁 (pw_ramp・pw_upstream・physical_wall_repr に従う。寸法の逆算と同じ構築; build_physical_wall)。ゲート不合格は例外
+    wall = build_physical_wall(p, d, scale, delta_r_x=delta_r_x, dstar_x=dstar_x, offset=offset, pwu=pwu)
+    if wall.pw_upstream is not None:
+        check_required_attrs(wall)          # 方式別の必須属性 (ramp: ramp_gate / poly: upstream_gate・upstream_poly)
     if init_info is not None:
         np.savetxt(run_dir / "delta_r_initial.csv",
                    np.c_[res_init["x"], res_init["delta_r"], res_init["dstar_n"], res_init["theta"] * scale,
@@ -791,17 +1310,15 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     msgs = wall.validate()
     if msgs:
         raise ValueError("物理壁フィルタ不合格: " + "; ".join(msgs))
-    mp = Mesh2DParams(ni=int(p.mesh.get("ni", 561)), nj=int(p.mesh.get("nj", 97)),
-                      wall_first_frac=float(p.mesh.get("wall_first_frac", 4.5e-5)),
-                      throat_refine=float(p.mesh.get("throat_refine", 3.0)),
-                      throat_width=float(p.mesh.get("throat_width", 1.5)),
-                      wall_first_frac_throat=(None if p.mesh.get("wall_first_frac_throat") is None
-                                              else float(p.mesh["wall_first_frac_throat"])),
-                      wall_first_blend_x0=float(p.mesh.get("wall_first_blend_x0", 0.5)),
-                      wall_first_blend_x1=float(p.mesh.get("wall_first_blend_x1", 6.0)),
-                      wall_first_up_x0=(None if p.mesh.get("wall_first_up_x0") is None else float(p.mesh["wall_first_up_x0"])),
-                      wall_first_up_x1=(None if p.mesh.get("wall_first_up_x1") is None else float(p.mesh["wall_first_up_x1"])),
-                      scale=scale)
+    pw_info = None
+    if pw_repr is not None:
+        # 壁ファイル (保存した壁の復元の取り決め §4.2): 書いて読み直し、復元した物理壁が今の壁と一致することを確かめる
+        wpath, wrec, wsha = save_wall_file(run_dir, wall, scale, pw_repr)
+        pw_info = {"repr": pw_repr, "file": wpath.name, "sha256": wsha,
+                   **{k: wrec[k] for k in ("format", "version", "units", "origin", "domain", "domain_m", "physical_wall")}}
+        if pw_repr == "single_bspline":
+            pw_info["fit"] = wall.fit_diag
+    mp = mesh_params(p, scale, ni=561, nj=97, wall_first_frac=4.5e-5)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
     law = d["law"]
@@ -845,6 +1362,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     (run_dir / "solverConfig.yaml").write_text(cfg_ns)
     subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    # 記録だけ (NS の格子は mesh のまま、座標・接続は変えない; 2026-10-07 plan verification-case45-euler-total-enthalpy §4)
+    mesh_rec = _mesh_record(p, mp, "mesh", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
                         float(p.spec["Pt"]), float(p.spec["Tt"]), p.gamma, p.cp,
                         gas=(None if str(p.evaluate.get('cfd_gas', 'same')) == 'cpg' else p.gas_model),
@@ -886,6 +1405,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                                 "dstar_throat_correlation": float(wall._dstar_hist(0.0)),
                                 "delta_r_throat_applied": float(wall.r_throat - 1.0)},
             "offset": wall.offset_mode, "euler_ref": (str(euler_ref) if euler_ref else None),
+            "pw_ramp_gate": (wall.ramp_gate if wall.pw_upstream == "ramp" else None),
             "initializer": init_info,
             "omega": omega, "prev_run": (str(prev_run) if prev_run else None),
             "delta_r_csv": (str(delta_r_csv) if delta_r_csv else None),
@@ -893,17 +1413,72 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "Lc_mode": d["Lc_mode"], "Lc_solve": d["Lc_solve"],
             "anchor": list(d["anchor"]), "anchor_source": d["anchor_source"],
             "start_line": d["start_line"], "wall_mode": d["wall_mode"],
-            "Md": d["Md"], "R": d["R"],
+            "wall_repr": d["wall_repr"], "initial_line": d["initial_line"], "moc": d["moc"],
+            "wall_fit": d["wall_fit"],      # 設計壁の当てはめ (joint: spline・mono_r2 ほか; plan tooling-nozzle-throat-monotone-r2 §5.1 #5 M4)
+            "Md": d["Md"], "Md_moc_offset": d["Md_moc_offset"], "R": d["R"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},
             "nStepOuter": n, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
             "wall_thermal": p.wall_thermal,
             "ic_from": str(ic_from) if ic_from else None,
-            "mesh": {"ni": mp.ni, "nj": mp.nj, "wall_first_frac": mp.wall_first_frac}}
+            "mesh": {**mesh_rec, "axis_gap_frac": mp.axis_gap_frac}}
     if transport is not None:
         # 来歴: 種ごとの輸送物性の指定 (solverConfig の physProp.transport と同じ; 解決結果はソルバの resolved_species 記録)
         info["transport"] = {"source": "gas.transport", "viscMethod": 2, "models": transport}
+    if pw_info is not None:
+        # 物理壁の表現と係数 (キーを書いたときだけ。キー無しの prepare_info.json は変更前と同じ)
+        info["physical_wall"] = pw_info
+    # 上流の作り方の解決済みの値とゲート、寸法の記録 (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1・§4.2)
+    info["pw_upstream"] = {"value": wall.pw_upstream, "source": pwu["source"], "requested": pwu["requested"]}
+    info["pw_upstream_gate"] = (wall.upstream_gate if wall.pw_upstream == "poly" else None)
+    info["sizing"] = _sizing_record(sizing, wall, scale)
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
+
+
+def _sizing_record(sizing: dict | None, wall, scale: float) -> dict:
+    """prepare_info.json の `sizing`: 寸法の決め方 (spec.sizing、無ければ未記録) と、実際の物理壁の物理スロート半径・出口半径 [m]、
+    目標との差 (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.2)。"""
+    x_e = float(wall.x_e)
+    got = {"throat": float(wall.r_throat) * scale, "exit": float(wall.r(np.array([x_e]))[0]) * scale}
+    rec = {"method": None if sizing is None else sizing["method"], "target_m": None if sizing is None else sizing["target_m"],
+           "note": None if sizing is None else sizing.get("note"), "r_throat_design_m": float(scale),
+           "physical_throat_radius_m": got["throat"], "physical_throat_x_m": float(wall.x_throat) * scale,
+           "exit_radius_m": got["exit"], "residual_m": None,
+           "status": "未記録 (spec.sizing が無い)" if sizing is None else "記録あり"}
+    if sizing is not None:
+        rec["residual_m"] = got[sizing["method"]] - sizing["target_m"]
+    return rec
+
+
+def _first_order(cfg: str) -> str:
+    """段階起動の前段用に空間 1 次化する (space.convMethod 1 / 2 → 0、0 はそのまま)。旧実装は `convMethod: 1` しか置換せず、
+    2 次 (`convMethod: 2`) の config では前段が 2 次のまま回っていた (plan tooling-rerun-conditions §4.9)。
+    YAML 上の位置で読み書きする (空白数・書式に依らない; codex result 段 #2)。convMethod が無い・0/1/2 以外は ValueError。"""
+    conv = _cfg_num(_cfg_get(_cfg_load(cfg), "convMethod"))
+    if conv == 0.0:
+        return cfg
+    if conv not in (1.0, 2.0):
+        raise ValueError(f"space.convMethod = {_cfg_get(_cfg_load(cfg), 'convMethod')!r} — 前段を 1 次化できない")
+    return _cfg_set(cfg, {"convMethod": 0})
+
+
+def stage_gate(res_h5, cfg_text: str) -> list:
+    """段終了ゲート: 段の最終 res で必要保存量 (config から決める; `rerun_conditions.required_conserved_from_cfg`)
+    が揃い、有限で ρ>0 か。問題のリストを返す (空なら次段へ進んでよい)。
+    forge の rc と最終 step だけを見ていた旧実装は、非有限の場を `restart_field` で次段の初期場へ写しえた (§4.9)。"""
+    if str(FORGE_TOOLS) not in sys.path:
+        sys.path.insert(0, str(FORGE_TOOLS))
+    from rerun_conditions import field_problems, required_conserved_from_cfg
+    req = required_conserved_from_cfg(_cfg_load(cfg_text))
+    probs, _ = field_problems(res_h5, req, species_bounds=False)
+    return probs
+
+
+def _stage_manifest_cls():
+    if str(FORGE_TOOLS) not in sys.path:
+        sys.path.insert(0, str(FORGE_TOOLS))
+    from stage_manifest import StageManifest
+    return StageManifest
 
 
 def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 1000) -> int:
@@ -912,47 +1487,76 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     - "none": 本段だけ (収束済み NS 場からの warm start 用)。
     - "ramp": 2 次のまま cfl を `ramp` (例 (1, 2, 3.5)) の順に各 ramp_steps だけ回して本段 cfl_main へ
       (forge に CFL ランプ機能は無いので restart で段階化する。本段の step 数はランプ分を差し引く)。
-    各段の最終場を IC に引き継ぐ。"""
-    import re
+    各段の最終場を IC に引き継ぐ。
+    段ごとの実効設定を `stage_manifest.json` に記録し (`check_convergence.py --segment` 用)、段の残差履歴を
+    `residual_history_<tag>.csv` に残す (段の res_* は従来どおり消す)。段の最終 res の必要保存量が非有限・ρ≤0 なら
+    次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9)。"""
+    import shutil
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
-    n_main = int(re.search(r"nStepOuter: (\d+)", cfg_main).group(1))
+    bc_path = run_dir / "bcondConfig.yaml"
+    bc_text = bc_path.read_text() if bc_path.exists() else ""
+    n_main = _cfg_value(cfg_main, "nStepOuter")
+    main_want = {k: _cfg_value(cfg_main, k) for k in ("convMethod", "cfl", "cfl_pseudo", "outStepInterval")}
+    sm = _stage_manifest_cls()(run_dir)
 
-    def _stage(cfg, nsteps):
-        cfg = re.sub(r"nStepOuter: \d+", f"nStepOuter: {nsteps}", cfg)
-        cfg = re.sub(r"outStepInterval: \d+", f"outStepInterval: {nsteps}", cfg)
+    def _record(cfg, tag):
+        """段の残差履歴を段名つきで残し、manifest に段を足して書く (失敗した段も診断用に残す)。"""
+        hist = run_dir / "residual_history.csv"
+        if hist.exists():
+            shutil.copy(hist, run_dir / f"residual_history_{tag}.csv")
+        sm.add(tag, cfg, bc_text, history=f"residual_history_{tag}.csv")
+        sm.write()
+
+    def _stage(cfg, nsteps, tag, want):
+        cfg = _cfg_set(cfg, {"nStepOuter": nsteps, "outStepInterval": nsteps})
+        _cfg_check(cfg, {**want, "nStepOuter": nsteps, "outStepInterval": nsteps}, tag)   # 起動前に実効値を検査
         (run_dir / "solverConfig.yaml").write_text(cfg)
+        (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
         rc = run_forge(run_dir)
+        _record(cfg, tag)
         res = sorted(run_dir.glob("res_[0-9]*.h5"),
                      key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res or int("".join(c for c in res[-1].stem if c.isdigit())) < nsteps:
             raise RuntimeError(f"段階起動が失敗 (rc={rc}, res={res[-1].name if res else None})")
+        probs = stage_gate(res[-1], cfg)
+        if probs:
+            raise RuntimeError(f"段 {tag} の最終場 {res[-1].name} が段終了ゲートで不合格 — 次段へ進まない:\n    "
+                               + "\n    ".join(probs))
         _restart_same_mesh(res[-1], run_dir / "nozzle.h5")    # 同一メッシュ: index コピー (旧: interp_field.py)
         for f in run_dir.glob("res_*"):
             f.unlink()
 
+    def _pre(cfg, cfl):
+        """前段: CFL を cfl に、空間 1 次、nStepInner 5 → 10 (従来どおり; 5 以外は据え置き)。"""
+        cfg = _first_order(_cfg_set(cfg, {"cfl": cfl, "cfl_pseudo": cfl}))
+        if _cfg_num(_cfg_get(_cfg_load(cfg), "nStepInner")) == 5.0:
+            cfg = _cfg_set(cfg, {"nStepInner": 10})
+        return cfg
+
     if stages == "full":
-        soft = cfg_main
-        soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 0.5, cfl_pseudo: 0.5", soft)
-        soft = soft.replace("convMethod: 1", "convMethod: 0")
-        soft = soft.replace("nStepInner: 5", "nStepInner: 10")
-        _stage(soft, 3000)
-        mid = cfg_main
-        mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", "cfl: 1.0, cfl_pseudo: 1.0", mid)
-        mid = mid.replace("convMethod: 1", "convMethod: 0")
-        mid = mid.replace("nStepInner: 5", "nStepInner: 10")
-        _stage(mid, 3000)
+        _stage(_pre(cfg_main, 0.5), 3000, "S1_soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
+        _stage(_pre(cfg_main, 1.0), 3000, "S2_mid", {"convMethod": 0, "cfl": 1.0, "cfl_pseudo": 1.0})
     elif stages == "ramp":
         ramp = tuple(ramp or (1.0, 2.0, 3.5))
-        for c in ramp:
-            st = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", cfg_main)
-            _stage(st, int(ramp_steps))
+        for i, c in enumerate(ramp):
+            st = _cfg_set(cfg_main, {"cfl": c, "cfl_pseudo": c})
+            _stage(st, int(ramp_steps), f"R{i + 1}_cfl{c:g}",
+                   {"convMethod": main_want["convMethod"], "cfl": c, "cfl_pseudo": c})
         n_main = max(n_main - int(ramp_steps) * len(ramp), int(ramp_steps))
         # 最終 res が書かれるよう outStepInterval の倍数に丸める (forge は outStepInterval の倍数でしか res を書かない)
-        out_int = int(re.search(r"outStepInterval: (\d+)", cfg_main).group(1))
+        out_int = main_want["outStepInterval"]
         n_main = max((n_main // out_int) * out_int, out_int)
-        cfg_main = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_main}", cfg_main)
+        cfg_main = _cfg_set(cfg_main, {"nStepOuter": n_main})
     elif stages != "none":
         raise ValueError("stages は 'full' / 'none' / 'ramp'")
+    _cfg_check(cfg_main, {**main_want, "nStepOuter": n_main}, "main")
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
-    return run_forge(run_dir)
+    (run_dir / "residual_history.csv").unlink(missing_ok=True)
+    rc = run_forge(run_dir)
+    _record(cfg_main, "main")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

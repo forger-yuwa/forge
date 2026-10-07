@@ -31,6 +31,21 @@ if claims.runs_forge(cmd):
 exec_forge = re.search(r'(^|[;&|]|\bnohup\s+|bash\s+-c\s+["\']?)\s*\S*build/forge\b', cmd) is not None
 benign = ("run_case.sh" in cmd) or ("-newer" in cmd) or (re.search(r'\bfind\b', cmd) is not None)
 
+# codex 外部レビュー (codex_review.py、所要 5〜20 分) は Bash の run_in_background: true で起動させる。
+# `( … &)` や nohup のシェル背景だと harness の完了通知が来ず、終わっても気づかないまま止まって見える
+# (2026-10-06 ユーザ指摘「レビュー待ってる間に固まってること多い」)。--help / --dry-run は即時に終わるので対象外。
+ti = data.get("tool_input") or {}
+if (re.search(r'\bcodex_review\.py\b', cmd) and not re.search(r'--(help|dry-run)\b|\s-h\b', cmd)
+        and not ti.get("run_in_background")):
+    out = {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": (
+            "codex_review.py は Bash ツールの run_in_background: true (timeout 1800000 以上) で起動すること。"
+            "`( … &)`・`&`・nohup のシェル背景だと完了通知が来ず、終わっても気づけない "
+            "(procedures/codex-review.md、AGENTS.md「codex 諮問」)。")}}
+    print(json.dumps(out)); sys.exit(0)
+
 if exec_forge and not benign:
     out = {"hookSpecificOutput": {
         "hookEventName": "PreToolUse",

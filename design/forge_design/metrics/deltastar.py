@@ -287,6 +287,90 @@ def band_local_deficit(r, q_ns, q_e, rw_e: float, delta_in: float | None = None,
                 reason=reason)
 
 
+def pspline_uniform(x, v, knot: float, lam: float = 1.0, weights=None, k: int = 3, penalty_order: int = 2):
+    """一様ノット (間隔 knot) の B-spline + 係数差分ペナルティ。weights=0 / 非有限の点は無視。戻り: x での値。"""
+    from scipy.interpolate import BSpline
+    x = np.asarray(x, dtype=float); v = np.asarray(v, dtype=float)
+    w = np.ones_like(v) if weights is None else np.asarray(weights, dtype=float)
+    ok = np.isfinite(v) & (w > 0)
+    lo, hi = float(x.min()), float(x.max())
+    n_int = max(int(np.ceil((hi - lo) / knot)) - 1, 1)
+    inner = np.linspace(lo, hi, n_int + 2)[1:-1]
+    t = np.concatenate([[lo] * (k + 1), inner, [hi] * (k + 1)])
+    n_cp = len(t) - k - 1
+    B = BSpline.design_matrix(x[ok], t, k).toarray()
+    D = np.diff(np.eye(n_cp), n=penalty_order, axis=0)
+    W = w[ok][:, None]
+    c = np.linalg.solve(B.T @ (W * B) + lam * (D.T @ D), B.T @ (w[ok] * v[ok]))
+    return BSpline(t, c, k, extrapolate=True)(x)
+
+
+def edge_band_positions(x, y_ladders, d_ladders, d_in, r_w, eps: float = 0.003, c: float = 1.25,
+                        window: float = 3.0, knot: float = 6.0, edge_ratio: float = 1.25,
+                        ref_min_frac: float = 0.0133, lam: float = 1.0, crossing: str = "quadratic",
+                        hold_lo: float | None = 3.0, hold_hi_from_end: float | None = 3.0) -> dict:
+    r"""帯の位置を「境界層の縁の連続推定 → x 方向平滑化 → その c 倍」で決める (band_select="edge"、純関数)。
+
+    plan verification-m6-axis-wave-mesh-su2 §5.1 #7a (diagnostician 2026-10-04 推薦 E)。各断面 i で、帯を固定した
+    δ_r の梯子 (y_ladders[i], d_ladders[i]) から $R(y)=\delta_r(\text{edge\_ratio}\,y)/\delta_r(y)-1$ を作り
+    (log y で線形補間)、$|R|<\varepsilon$ を初めて満たす y を**格子点間の線形補間で**求めて縁 $y^*$ とする (無ければ NaN)。
+    $\kappa=\ln(y^*/y_{ref})$, $y_{ref}=\max(\delta_{in}, f\,r_w)$ を x 方向に移動中央値 (半幅 window) → 3 次 P-spline
+    (ノット knot, λ) で平滑化し、$y_b=c\,y_{ref}e^{\tilde\kappa}$。NaN の断面は y_b 側をスプラインで埋める (δ_r 側の穴にしない)。"""
+    x = np.asarray(x, dtype=float); n = len(x)
+    d_in = np.asarray(d_in, dtype=float); r_w = np.asarray(r_w, dtype=float)
+    y_ref = np.maximum(np.maximum(d_in, 0.0), ref_min_frac * r_w)
+    y_star = np.full(n, np.nan)
+    for i in range(n):
+        y = np.asarray(y_ladders[i], dtype=float); d = np.asarray(d_ladders[i], dtype=float)
+        fin = np.isfinite(d) & (d > 0)
+        if fin.sum() < 3:
+            continue
+        ly, dd = np.log(y[fin]), d[fin]
+        lq = ly + np.log(edge_ratio)
+        m = lq <= ly[-1] + 1e-12
+        if m.sum() < 2:
+            continue
+        Rabs = np.abs(np.interp(lq[m], ly, dd) / dd[m] - 1.0) - eps
+        j = int(np.argmax(Rabs < 0.0)) if np.any(Rabs < 0.0) else -1
+        if j < 0:
+            continue
+        L = ly[m]
+        if j == 0:
+            y_star[i] = float(np.exp(L[0]))
+            continue
+        lin = None
+        a, b = Rabs[j - 1], Rabs[j]
+        t = a / (a - b) if a != b else 0.0
+        lin = L[j - 1] + t * (L[j] - L[j - 1])
+        y_star[i] = float(np.exp(lin))
+        if crossing == "quadratic" and len(L) >= 3:
+            # 隣接 3 点 (交点を挟む 2 点 + もう 1 点) の 2 次フィットの交点 (位相に鈍感にする; diagnostician 2 回目)
+            k0 = j - 1 if j + 1 < len(L) else j - 2
+            k0 = max(k0, 0)
+            pts = slice(k0, k0 + 3)
+            cf = np.polyfit(L[pts] - L[j - 1], Rabs[pts], 2)
+            rts = np.roots(cf)
+            span = L[j] - L[j - 1]
+            ok = [float(np.real(r_)) for r_ in rts if abs(np.imag(r_)) < 1e-12 and -1e-9 <= np.real(r_) <= span + 1e-9]
+            if ok:
+                y_star[i] = float(np.exp(L[j - 1] + min(ok, key=lambda v: abs(v - (lin - L[j - 1])))))
+    kappa = np.log(y_star / y_ref)
+    med = np.full(n, np.nan)
+    fin = np.isfinite(kappa)
+    for i in range(n):
+        w = fin & (np.abs(x - x[i]) <= window)
+        if w.sum() >= 3:
+            med[i] = float(np.median(kappa[w]))
+    ks = pspline_uniform(x, med, knot=knot, lam=lam, weights=np.isfinite(med).astype(float))
+    # 端の値保持 (P-spline の端を無拘束にしない; diagnostician 2 回目)
+    if hold_lo is not None and np.any(x >= hold_lo):
+        ks = np.where(x < hold_lo, float(np.interp(hold_lo, x, ks)), ks)
+    if hold_hi_from_end is not None:
+        xh = float(x.max()) - hold_hi_from_end
+        ks = np.where(x > xh, float(np.interp(xh, x, ks)), ks)
+    return dict(y_b=c * y_ref * np.exp(ks), y_star=y_star, kappa=kappa, kappa_med=med, kappa_s=ks, y_ref=y_ref)
+
+
 def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30,
                                       core_frac_sens=(0.25, 0.35), n_axis_skip: int = 1,
                                       outer_frac: float = 0.25, smooth_lam: float = 1e-3,
@@ -296,7 +380,12 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                                       band_min_frac: float = 0.02, band_width: float = 0.5,
                                       gate_band_rms: float = 0.005, slope_max: float = 0.01,
                                       band_growth: float = 1.25, max_retry: int = 14, fit_from: float = 1.0,
-                                      band_smooth_x: float = 0.0) -> dict:
+                                      band_smooth_x: float = 0.0, band_select: str = "adaptive",
+                                      plateau_tol: float = 0.003, plateau_kmax: int = 9,
+                                      edge_eps: float = 0.003, edge_c: float = 1.25, edge_window: float = 3.0,
+                                      edge_knot: float = 6.0, edge_step: float = 1.25 ** 0.125, edge_y0_fac: float = 1.2,
+                                      edge_min_frac: float = 0.016, edge_ymax_frac: float = 0.5, edge_ref_min_frac: float = 0.0133,
+                                      edge_y0_shift: float = 1.0, return_ladders: bool = False) -> dict:
     r"""**固定 Euler 基準・コア整合**の半径方向等価排除厚 $\delta_r(x)$ を NS 全列で抽出する。
 
     定義 (plan §4.2–4.4):
@@ -308,6 +397,19 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     - 符号付き欠損 $D = 2\pi\int_0^{r_{w,NS}}(q_{ref}-q_{NS})\,r\,dr$ (クリップなし)。
       $2\pi\int_{r_{eff}}^{r_{w,NS}} q_{ref}\,r\,dr = D$ の根から $\delta_r = r_{w,NS}-r_{eff}$。
     - ゲート (診断; 値は捨てない): コア相対 RMS、コア範囲感度、$D<0$、根なし、欠損のコア分布。
+
+    帯の選び方 `band_select` (method="band" のみ):
+
+    - "adaptive" (既定): `band_local_deficit` の自動選択 (帯内比の変化・残留欠損で 1.25 倍ずつ広げる)。
+    - "plateau" (2026-10-04, plan verification-m6-axis-wave-mesh-su2 §4.4): 帯を
+      $y_{b,k}=\max(k_{band}\delta_{in}, f_{min} r_w)\,g^k$ ($k=0..$plateau_kmax) と外へ並べて各 k で δ_r を測り、
+      **連続 2 段の相対変化がともに plateau_tol 未満になった最初の k** の中央 δ_r,k+1 を採る (感度は δ_r,k / δ_r,k+2)。
+      見つからなければ `no_plateau` (hard、前回値保持)。adaptive は帯の比の形で止めるので、境界層の縁にかかった帯を
+      通してしまい x 方向に 1.25 倍刻みで跳ぶ (case/45 x≈20 で δ_r −1.8 %)。plateau は「答えが帯の位置に依存しなくなったか」で止める。
+      **不採用** (離散 k のまま、no_plateau の穴が平滑化段を壊す; plan §9 2026-10-04)。比較用に残置。
+    - "edge" (2026-10-04, diagnostician 推薦 E, plan §5.1 #7a): 帯を細かい梯子 (比 edge_step) で固定して δ_r(y) を測り、
+      `edge_band_positions` で縁 y* を連続推定 → x 平滑 → y_b = edge_c × 縁 に帯を固定して測る。感度欄は c×0.8 / c×1.25。
+      edge_y0_shift は梯子の位相試験用 (始点の倍率)。return_ladders=True で梯子と縁を戻り値に含める (試験用)。
 
     戻り値: dict of arrays (x, r_wall_euler, r_wall_ns, delta_in, alpha, core_rms, core_rms_noaxis,
     core_maxdev, mass_deficit, delta_r_raw, delta_r_smooth, delta_r_sens (n,2), ok, reason) と mdot 帳簿。
@@ -368,8 +470,86 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
             if w.sum() >= 3:
                 sm[i] = np.median(lyb[w])
         yb_fixed = np.exp(sm)
+    if band_select not in ("adaptive", "plateau", "edge"):
+        raise ValueError(f"band_select={band_select!r} は 'adaptive' / 'plateau' / 'edge'")
+    if band_select in ("plateau", "edge") and (method != "band" or band_smooth_x > 0):
+        raise ValueError(f"band_select={band_select!r} は method='band' かつ band_smooth_x=0 でのみ使える")
+    edge = None
+    if band_select == "edge":
+        ii, xs_e, din_e, rw_e_l, yl, dl = [], [], [], [], [], []
+        for i in range(N["x"].shape[0]):
+            x = float(N["x"][i, 0])
+            if x < xE[0] - 1e-9 or x > xE[-1] + 1e-9:
+                continue
+            _, rwE = euler_q_at(x, N["r"][i][:1])
+            rwN = float(N["r"][i][-1]); d_in = rwN - float(rwE)
+            y0 = max(edge_y0_fac * max(d_in, 0.0), edge_min_frac * rwN) * edge_y0_shift
+            ys = []
+            y = y0
+            while y <= edge_ymax_frac * rwN:
+                ys.append(y); y *= edge_step
+            ds = []
+            for yb in ys:
+                rk = extract_one(i, main_par, y_b_fixed=yb)
+                ds.append(rk["delta_r"] if (rk is not None and np.isfinite(rk["delta_r"])) else np.nan)
+            ii.append(i); xs_e.append(x); din_e.append(d_in); rw_e_l.append(rwN); yl.append(np.array(ys)); dl.append(np.array(ds))
+        pos = edge_band_positions(np.array(xs_e), yl, dl, np.array(din_e), np.array(rw_e_l), eps=edge_eps, c=edge_c,
+                                  window=edge_window, knot=edge_knot, edge_ratio=1.25, ref_min_frac=edge_ref_min_frac)
+        edge = dict(i=ii, x=np.array(xs_e), y_b=pos["y_b"], y_star=pos["y_star"], kappa_s=pos["kappa_s"],
+                    kappa_med=pos["kappa_med"], y_ref=pos["y_ref"], ladders_y=yl, ladders_d=dl)
+        edge_map = {i: k for k, i in enumerate(ii)}
+
+    def extract_plateau(i):
+        x = float(N["x"][i, 0])
+        if x < xE[0] - 1e-9 or x > xE[-1] + 1e-9:
+            return None
+        _, rwE = euler_q_at(x, N["r"][i][:1])
+        rwN = float(N["r"][i][-1]); d_in = rwN - float(rwE)
+        y0 = max(k_band * max(d_in, 0.0), band_min_frac * rwN)
+        lad, res_k = [], []
+        for k in range(plateau_kmax + 1):
+            rk = extract_one(i, main_par, y_b_fixed=y0 * band_growth ** k)
+            res_k.append(rk)
+            lad.append(rk["delta_r"] if (rk is not None and np.isfinite(rk["delta_r"])) else np.nan)
+        lad = np.array(lad)
+        for k in range(len(lad) - 2):
+            v = lad[k:k + 3]
+            if np.all(np.isfinite(v)) and v[0] > 0 and abs(v[1] / v[0] - 1) < plateau_tol and abs(v[2] / v[1] - 1) < plateau_tol:
+                res = dict(res_k[k + 1]); res["band_retry"] = k + 1
+                return res, [float(v[0]), float(v[2])]
+        # プラトー無し: 中央段の値を入れ、hard 不合格として前回値を保持させる
+        fin = [kk for kk in range(len(lad)) if np.isfinite(lad[kk]) and res_k[kk] is not None]
+        if not fin:
+            return None
+        k = min(fin, key=lambda kk: abs(kk - len(lad) // 2))
+        base = dict(res_k[k])
+        if base is None:
+            return None
+        base["reason"] = list(base["reason"]) + ["no_plateau"]
+        return base, [np.nan, np.nan]
+
     rows = []
     for i in range(N["x"].shape[0]):
+        if band_select == "edge":
+            if i not in edge_map:
+                continue
+            yb = float(edge["y_b"][edge_map[i]])
+            base = extract_one(i, main_par, y_b_fixed=yb)
+            if base is None:
+                continue
+            sens = [extract_one(i, main_par, y_b_fixed=yb * f) for f in (0.8, 1.25)]
+            base["delta_r_sens"] = [s_["delta_r"] if s_ else np.nan for s_ in sens]
+            base["edge_y_star"] = float(edge["y_star"][edge_map[i]])
+            rows.append(base)
+            continue
+        if band_select == "plateau":
+            got = extract_plateau(i)
+            if got is None:
+                continue
+            base, sens_v = got
+            base["delta_r_sens"] = sens_v
+            rows.append(base)
+            continue
         if yb_fixed is not None and np.isfinite(yb_fixed[i]):
             base = extract_one(i, main_par, y_b_fixed=float(yb_fixed[i]))
             sens = [extract_one(i, main_par, y_b_fixed=float(yb_fixed[i]) * f) for f in (0.8, 1.25)]
@@ -384,7 +564,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     draw = np.array([r_["delta_r"] for r_ in rows])
     sens = np.array([r_["delta_r_sens"] for r_ in rows])
     # negative_deficit は 2026-09-12 から soft (符号付き δ_r を採用: 冷却壁では物理)。hard は根なし/NaN のみ
-    HARD = ("no_root", "nan")
+    HARD = ("no_root", "nan", "no_plateau")
     ok = np.ones(len(rows), bool); hard_ok = np.ones(len(rows), bool); reasons = []
     for k, r_ in enumerate(rows):
         rs = list(r_["reason"])
@@ -425,7 +605,12 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                ok=ok, hard_ok=hard_ok, reason=np.array(reasons),
                settings=dict(method=method, k_band=k_band, k_band_sens=list(k_band_sens), band_min_frac=band_min_frac,
                              band_width=band_width, slope_max=slope_max, band_growth=band_growth, max_retry=max_retry, fit_from=fit_from,
-                             band_smooth_x=band_smooth_x,
+                             band_smooth_x=band_smooth_x, band_select=band_select,
+                             plateau_tol=plateau_tol, plateau_kmax=plateau_kmax,
+                             edge=(dict(eps=edge_eps, c=edge_c, window=edge_window, knot=edge_knot, step=edge_step,
+                                        y0_fac=edge_y0_fac, min_frac=edge_min_frac, ymax_frac=edge_ymax_frac,
+                                        ref_min_frac=edge_ref_min_frac, y0_shift=edge_y0_shift)
+                                   if band_select == "edge" else None),
                              gate_band_rms=gate_band_rms,
                              core_frac=core_frac, core_frac_sens=list(core_frac_sens), n_axis_skip=n_axis_skip,
                              outer_frac=outer_frac, smooth_lam=smooth_lam, gate_core_rms=gate_core_rms,
@@ -433,6 +618,10 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                              ns_res=N["res"], euler_res=E["res"],
                              ns_run=str(ns_run), euler_run=str(euler_run)))
     out["massflow"] = massflow_ratio(ns_run, euler_run)
+    if edge is not None:
+        out["edge_y_star"] = np.array([r_.get("edge_y_star", np.nan) for r_ in rows])
+        if return_ladders:
+            out["edge_detail"] = edge
     if out_dir is not None:
         od = Path(out_dir); od.mkdir(parents=True, exist_ok=True)
         np.savetxt(od / "delta_r_equiv.csv",
@@ -441,7 +630,10 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                          ok.astype(int), hard_ok.astype(int)],
                    delimiter=",", comments="",
                    header="x_rt,delta_r_raw,delta_r_smooth,delta_r_use,delta_in,alpha,core_rms_noaxis,delta_r_sens1,delta_r_sens2,band_y_b,band_slope,band_rms,band_deficit_share,ok,hard_ok")
-        diag = {k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in out.items()}
+        if edge is not None:
+            np.savetxt(od / "delta_r_edge.csv", np.c_[edge["x"], edge["y_ref"], edge["y_star"], edge["kappa_med"], edge["kappa_s"], edge["y_b"]],
+                       delimiter=",", comments="", header="x_rt,y_ref,y_star,kappa_med,kappa_s,y_b")
+        diag = {k: (v.tolist() if isinstance(v, np.ndarray) else v) for k, v in out.items() if k != "edge_detail"}
         (od / "delta_r_equiv_diag.json").write_text(json.dumps(diag))
     return out
 

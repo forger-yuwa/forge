@@ -42,6 +42,8 @@ v2 Euler 帰還 [凍結特性線マップ] → v3 NS トレース) で決まる�
 | `evaluate` | バッチ評価 CLI: run ディレクトリ準備 → forge 起動 → 収束/NaN 自動判定 |
 | `metrics` | `res_*.h5` からの目的関数抽出 (固定サンプリング格子補間) |
 | `feedback` | 帰還エンジン (**v1/v2 実装済み** — 親計画 §4.7): `deltastar` (δ* 経験式 = Eckert 参照温度 + 乱流平板相関) / `euler_loop` (v2: 凍結 C⁻ マップ + PM 換算 + trust-region ω + 同一トポロジ再メッシュ + warm restart。case/41 で 0.45% Md 収束実証)。`geometry/moc_inverse` (逆 MOC 三角充填 + 壁流線抽出) と `geometry/wall_modef` (モード F 複合壁)、`evaluate/runner_wt` (①評価: Euler cell/slip) が対 |
+| `report` | ノズル設計の標準出力 (図・評価量・条件表、`nozzle_report`) |
+| `export` | CAD 書き出し: 物理壁の STEP (`wall_step`、FreeCAD の `freecadcmd` で書き出し・読み直し・回転面の検査) |
 | `opt` | サロゲート MOO ループ (**実装済み**): `ehvi` (2目的 EHVI 閉形式・MC照合済) / `doe` (LHS) / `surrogate` (SMT KRG) / `moo` (NSGA-II+EHVI infill) / `driver` (バッチ評価: 2段起動・VERDICT/物理ゲート・warm seed) / `polish` (チャンク継続+ηドリフトゲート)。実行は `design/.venv-opt` |
 | `menu` | 特殊解析メニュー (凝縮・高度スイープ — Phase 3〜) |
 
@@ -307,6 +309,58 @@ $n_{\rm axis}$=2000・終端特性線出口・差分は `start_line` と `ni` �
 **アンカー更新なしの 1 パスで 0.5% $M_d$ ゲートを通る** (旧構成は 3 パス required で
 0.451%)。CFD アンカー更新 (下記) は引き続き使えるが、必須ではなくなった。
 
+#### 初期線の出所: Hall / CFD ピン (`geometry.initial_line`, 2026-10-05)
+
+計画: [`plans/accepted/tooling-nozzle-cfd-pinned-initial-line.md`](../../plans/accepted/tooling-nozzle-cfd-pinned-initial-line.md)。
+
+スロート特性線 (MOC の初期線) とそこでの軸アンカーの出所を problem YAML の 1 キーで選ぶ。
+
+| `geometry.initial_line` | 初期線 $(x, r, M, \theta)$ | 軸アンカー $(M_A, M'_A, M''_A)$ と $x_A$ |
+| --- | --- | --- |
+| `hall` (既定) | Hall 級数場の中で壁足 $(0,1)$ から C⁻ を軸まで追跡 | Hall の解析微分 `axis_anchor(x_0)` |
+| `cfd` (CFD ピン) | **凍結源の node Euler 場**の中で同じ C⁻ を追跡 | 下記 (線と同じ場から) |
+
+- **凍結源の定義**: 同じ形 (縮流部・$R$)・同じガスで、**Hall 初期線の V0 型壁を Euler で解いた場**
+  (`geometry.initial_line_run` + `initial_line_res`; run は problem ファイルの場所からの相対パスも可)。
+  ピン壁自身の Euler から線を取り直すと循環定義になるので使わない。線は無次元で $r_t$・Re に依らないので
+  $r_t$ を解き直しても同じ凍結源を使える。固定点反復はしない (基準 run から 1 回抽出して凍結)。
+- **抽出** (`feedback/cfd_initial_line.py::CFDPinnedThroat`, `HallThroat` を継承し
+  `throat_characteristic`・`axis_anchor`・`mach`・`theta` だけを上書き): 構造格子 (断面は $x$ 一定) の
+  $M,\theta$ を $(x,\ \eta=r/r_w(x))$ 平面の 3 次スプラインで補間し、壁足は $(0,1,\theta=0)$ に厳密に置く。
+  追跡は壁足の $10^{-6}$ 内側から $dr/dx=\tan(\theta-\mu)$ を RK4 ($ds=2\times10^{-4}$) で軸を跨ぐまで。
+  壁足の $M$ は内側 10 点の線形外挿、軸端 ($r=0$) の $x_0, M, \theta$ は追跡点の $r\le0.05$ の 2 次多項式
+  (偶関数当てはめは使わない — C⁻ は軸を斜めに横切る)。$r$ 等間隔の $n_{\rm start}$ 点へ再標本化する。
+- **軸アンカー**: $x_A = x_0$ (線の軸着地)。$M_A$ = 線の軸端の $M$ (線と同じ出所)、
+  $M'_A$ = 軸の evenfit (各断面の $r>0$ の 4 点に $M=a_0+a_2r^2$) の $x_0\pm0.25$ 窓 4 次フィットの 1 階微分、
+  **$M''_A$ = Hall の式を $x_0$ で評価した値** (CFD の局所 4 次フィットの $M''$ は law を実測軸から離すので使わない)。
+  CFD ピンでは 3 成分とも評価位置が Hall の $x_0$ から動く (case/45: 0.520 → 0.509)。
+- **$m^*$**: 線上の $M,\theta$ を MOC のガスモデルへ写像した等エントロピー流束 (`_flux_along`)。CFD の保存量 $\rho u$
+  の積分ではない。
+- **入力の拒否**: node・軸対称・Euler の run でない、断面が $x$ 一定でない、追跡点が場の窓 ($-2\le x\le2.5$) の外、
+  非有限、亜音速 ($M\le1$)、軸に到達しない — いずれも例外で止める。
+- **凍結入力の契約** (2026-10-05, codex result M2): 凍結源の `solverConfig.yaml`・`bcondConfig.yaml` を YAML の構造として読み、
+  node・軸対称・Euler (`viscMethod: 0` かつ `visc: 0`・`turbulence.model: none`・物理壁はすべて `slip`) を照合する。snapshot
+  (`initial_line_res`) は必須 (省略すると最新場を黙って選ぶので拒否)。凍結源の `initial_line.source` が `cfd` (ピン壁自身の場 = 循環定義)
+  なら拒否。使う側と**同じ形・ガス**かを照合する: $R$・$\gamma_{\rm Hall}$ (凍結源の `prepare_info`)、ガス (種類・$T_t$・組成 $Y$)、
+  入口位置 ($L_U+L_{pipe}$)・$r_U$・縮流部の形 (凍結源メッシュの壁節点と使う側の U→T Hermite の差 ≤ 5e-6 $r_t$; メッシュ座標は float32 で
+  case/45 の実測残差 5.1e-7)。食い違えば拒否する。
+- **記録**: `prepare_info.json` の `initial_line` に出所 (`hall`/`cfd`)・run・res・$x_0$・アンカー・$m^*$ (線上の写像流束)・
+  照合した設定と項目・snapshot/抽出線/熱力学条件 (ガス・$\gamma_{\rm Hall}$・`physProp`) の sha256 先頭 16 桁 (`sha256_16`) を残す。
+  `anchor_source` は成分別 (CFD ピン `{"M": "cfd", "Mp": "cfd", "Mpp": "hall@x0_cfd"}`、Hall は全成分 `hall`)。
+- **抽出器の検証** (`design/tests/run_cfd_initial_line_tests.py`): 合成 Hall 場 (Euler 格子に Hall 場を載せる)
+  から Hall の線を 線 $|\Delta M|\le2\times10^{-4}$・$|\Delta\theta|\le0.004°$・$|\Delta x_0|\le2\times10^{-4}$、
+  アンカー $|\Delta M|\le2\times10^{-5}$・$|\Delta M'|\le10^{-4}$・$|\Delta M''|\le10^{-3}$、$m^*$ 相対 $\le10^{-4}$ で再現する。
+
+**出口較正 `geometry.Md_moc_offset`** (既定 0): MOC と軸 law (と壁 QA) に渡す設計マッハを
+$M_{d,\rm MOC}=M_d+\Delta M_{\rm cal}$ にする 1 係数較正。CFD ピンでは $m^*$ が Hall 比 $+4.2\times10^{-4}$ 動き、
+Euler の出口コア $M$ が設計値からずれる (case/45: 6.000416) ので、その偏差を打ち消す
+(粗い Euler 格子 [ni 1100 × nj 65] での当初値 $\Delta M_{\rm cal}=-4.16\times10^{-4}$)。**較正は Euler 専用の格子 `mesh_euler` (壁に寄せない配点) で行う** (2026-10-07、plan verification-case45-euler-total-enthalpy §4)。
+Euler の `prepare` は問題 YAML の `mesh_euler` を、NS の `prepare_ns` は `mesh` を読み、混ぜて補完しない (`mesh_euler` の無い問題は Euler の `prepare` が移行先を示して止まる)。`mesh_euler` の既定は全断面で壁の第 1 間隔の比 `wall_first_frac` 0.005 の等比 (スロートの別指定なし・軸側の cap なし)。
+理由: NS と同じ壁に寄せた配点 (case/45 の G1: 1.3e-5・スロート 4.5e-6) の Euler は、スロート付近の全温が $T_t$ を数百 K 超えたまま整定せず、全域 0.005 の配点では同じ窓で全領域 $|T_0-T_t|\le0.103$ K だった (同 plan §9 E2。原因 [薄いセル・縦横比か、整定しない収束か] は切り分けていない)。
+旧方針「生産 NS と同じ格子パラメータの Euler で較正」(plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11f。Euler の出口コア $M$ は格子に依存し、case/45 で 1100 × 65 → G1 で $-7.9\times10^{-4}$) は取り下げた。case/45 の旧値 $\Delta M_{\rm cal}=+3.770\times10^{-4}$ は G1 の Euler 由来で、2000 × 97・全域 0.005 の `mesh_euler` でやり直した (同 plan §6 E4・E4V: 出口コア $M$ は最終断面の $\eta\in[0.05,0.7]$ を NS の基準格子 G1 の固定の $\eta$ の列に線形補間した平均)。**現行値は $\Delta M_{\rm cal}=6.8825\times10^{-6}$** (2026-10-07、E4V run_0164 で 13 枚すべて $|M-6|\le3.1\times10^{-6}$。適用範囲: legacy MOC・単調壁・凍結の初期線 run_0062・`mesh_euler` 2000 × 97 の Euler)。Euler の較正の合格を NS に移せるとは限らないので、NS の出口 $M$ は NS で判定する。**報告・評価の $M_d$ (`prepare_info` の `Md`、`collect` の基準) は
+`spec.M_design` のまま**で、較正値は `prepare_info` の `Md_moc_offset` に別記録する。Euler の性質として据え置き、
+NS では較正し直さない。
+
 ### 軸 Mach law: 5次 Hermite (`geometry/axis_law.py`)
 
 $s=(x-x_A)/L_c\in[0,1]$、$M(s)=\sum a_i s^i$。両端 6 条件
@@ -527,6 +581,32 @@ U→T Hermite の端点条件の一致で $C^2$。
 $[T,\,x_A]$ を Hall 模型が仮定する骨接放物線 $r=r_t+x^2/(2\rho_t)$ で埋めていた
 (幾何 DOF ではない)。`AxisMachCFDWall` は壁テーブルの先頭点でどちらかを自動判定する。
 
+**設計区間の壁表現 `geometry.wall_repr`**: `interp` (既定、上記の補間 5 次 B-spline) / `lsq` (A14、下記) /
+**`joint`** (位置 + 壁角の同時当てはめ、`JointFitCFDWall` / `joint_fit_wall`, 2026-10-05)。`joint` は MOC 壁点
+$(x_j, r_j, \theta_j)$ に 5 次 B-spline $r(x)$ を当てはめる:
+
+$$
+\min_c\ \sum_j w_j\left[\frac{(r(x_j)-r_j)^2}{\sigma_r^2}+\frac{(r'(x_j)-\tan\theta_j)^2}{\sigma_\theta^2}\right]
++\frac{\lambda}{\sigma_r^2}\int (r''')^2\,dx
+$$
+
+($w_j\propto\Delta x_j$、$\sigma_r=10^{-6}$、$\sigma_\theta=10^{-4}$、$\lambda=10^{-9}$)。ハード拘束 (KKT) は
+始点 $r(x_0)=r_0$・$r'(x_0)=x_0/R$・$r''(x_0)=1/R$ (スロート始点では $r'=0$・$r''=1/R$ で U→T Hermite と $C^2$) と
+出口 $r(x_e)=r_e$・$r'(x_e)=\tan\theta_e$。ノットは始点から間隔 $h_0=0.0125$ → $h_1=0.5$ を $x_G=6$ まで
+smoothstep で広げ、以降 $h_1$ (V0 型壁。case/45 の r″ の山 [x∈[0,0.3]] は Hall 初期線 0.534、CFD ピン 0.510)。
+入口直管・U→T Hermite は `interp` と同じで、`validate()` のリンギング検査 (テーブル点上 $|\Delta\theta|\le0.2°$) も同じ。
+
+**単調拘束オプション (2026-10-07 生産採用 (case/45 の M6)、plan [tooling-nozzle-throat-monotone-r2](../../plans/accepted/tooling-nozzle-throat-monotone-r2.md))**: `geometry.wall_fit_mono_r2: [a, b]` で、台が $[a,b]$ にかかる $r'''$ の B-spline 係数を $\le0$ に拘束する (凸包性により $r''$ が $[a,b]$ で単調非増加の十分条件、有効制約法)。
+目的は上記の r″ の山の除去: MOC 壁点の始点付近の角度差 (case/45 で第 1 区間の曲率 0.515 相当) が $1/R$ の曲線を上回るため、始点 $r''=1/R$ 固定の当てはめは山を作る (高さは λ 依存)。
+拘束すると第 1 点の流れ角ずれは下限 $\theta_1-\arctan(x_1/R)$ (case/45 で 0.022°) になる。未指定なら現行とビット同一。
+case/45 では [0, 1.5] で、設計壁の r″ の最大 0.5102 → 0.5000、壁の差は最大 0.5 µm (物理壁 0.6 µm)。Euler (実務判定)・dry NS (ゲート)・凝縮 NS (準定常) に合格した。
+始点付近の角度差そのものは、MOC の軸側の最初の間隔 `axis_dx0` に連れて減る (生産の MOC 単位過程の軸の 1 段目の誤差) — 原因側の修正は別 plan。
+
+**積分法初期化の k_f (`deltastar_initializer`)**: C2 方式で較正した摩擦係数倍率 k_f は、問題 YAML の最上位キー
+`deltastar_initializer: {model: contur, a_crocco: 1.0, cf_scale: k_f, n_scale: 1.0}` に書く。`prepare_ns` は initializer 引数が無いときにこれを読み、
+`deltastar_loop --init-integral` も読む (2026-10-07 まで後者は YAML を読まず cf_scale 1 を使っていた: case/45 で出口半径 −2.4 mm)。
+`prep_c2pin.py RUN K_F` は k_f を明示で渡す (同じ値なら同じ物理壁)。
+
 ### CFD-in-the-loop アンカー更新
 
 反復 $k$: node Euler run → 壁始点発の C⁻ を CFD 場でトレースし $x_A^{(k+1)}=x_{\rm reach,CFD}$
@@ -597,10 +677,67 @@ n=4000 で 1.32e-3 と素直に減る)。採否の最終判定は CFD の軸 M /
 **A5 で「逆 MOC の質量流束リーク (離散化誤差)」と診断し `n_axis_inv: 2000` を要求した根拠は
 実際にはこのバグだった** — 修正後は流線壁と C⁺ 流束閉包の $r_F$ が 5 桁一致し
 (3.26760 / 3.26759、修正前は 3.26550 / 3.26757)、両壁の差は 2.09e-3 → 2.33e-5 に縮む。
-軸に寄りすぎた点だけは $\theta$ の誤差が $1/r$ で増幅されるため
+軸に寄りすぎた**軸外の点** ($r>10^{-9}$) だけは $\theta$ の誤差が $1/r$ で増幅されるため
 `AXIS_LIMIT_FRAC` (相手点の半径に対する比、既定 0.05) を下回るときのみ相手から極限を
-代用する。**生産ノズル経路では 1 度も発火しない** (n=2000 で 2695 万回中 0 回)。
+代用する。**この軸外の代用は生産ノズル経路では 1 度も発火しない** (n=2000 で 2695 万回中 0 回。
+case/45 の生産問題 n_axis 2400・n_start 41 でも 298 万対中 0 回、2026-10-07)。
+一方、**軸上の端点** ($r\le10^{-9}$: 軸節点と初期線の軸端) は $0/0$ なので**常に**代用の分岐に入る:
+相手が軸外なら相手の $\sin\theta/r$ を借り、相手も軸上なら 0 にする。軸の第 1 段 (軸節点 2 個の対) は
+両端とも 0 で評価されていた (case/45 で 4798 端点が 0、1 端点が借用)。
 詳細は [`plans/accepted/discretization-moc-axisymmetric-source-term.md`](../../plans/accepted/discretization-moc-axisymmetric-source-term.md)。
+
+**軸上の解析極限と予測修正の収束 (選択式、2026-10-07)**: 問題 YAML の 2 キーで単位過程を選ぶ
+(`InverseMOC` / `moc_kernel.interior_vec`。axis-Mach の問題でキーが無ければ analytic + converge (2026-10-07 から; それ以前はキー無し = 従来とビット同一の legacy + fixed2)。計画
+[discretization-moc-axis-limit-and-corrector](../../plans/accepted/discretization-moc-axis-limit-and-corrector.md))。
+
+| キー | 値 | 意味 |
+| --- | --- | --- |
+| `geometry.moc_axis_limit` | `analytic` (既定、2026-10-07 から) / `legacy` | 軸上の端点の $\sin\theta/r$ を、その点の解析極限 $\theta_r$ にする / 相手の値で代用 |
+| `geometry.moc_corrector` | `converge` (既定、2026-10-07 から) / `fixed2` | θ・ν の更新量 $\le10^{-12}$ rad まで (上限 50 回) / 予測 1 回 + 修正 2 回 |
+
+不正値 (null・大文字違い・前後の空白・数値・真偽値) は既定に読み替えず例外にする。
+
+`converge` の単位過程のゲート (反復の失敗・最終残差・壁の内側の幾何的棄却・軸端の接続) は設計チェーン (`design_chain`) では止めずに診断に記録し、**計算準備 (`prepare`・`prepare_ns`) の入口で合格を必須にする** (`require_moc_gate`。不合格・診断の欠損は run dir を作る前に例外。`fixed2` は合否を出さないので通す。2026-10-07)。
+
+- **解析極限**: 軸の近くで $\theta\approx\theta_r r$。軸近傍の質量保存 $2\rho u\,\theta_r=-d(\rho u)/dx$ と、
+  等エントロピー流の $d\nu=\sqrt{M^2-1}\,d\ln u$・$d\ln(\rho u)=(1-M^2)\,d\ln u$ から
+  $$\theta_r=\tfrac12\sqrt{M^2-1}\,\nu_M(M)\,M'(x)$$
+  (`moc_kernel.axis_theta_r`)。比熱一定なら $\tfrac12(M^2-1)M'/[M(1+\frac{\gamma-1}2M^2)]$ で、上の
+  $-\tfrac12 d\ln F/dx$ と同じ量。semi-perfect の $\nu_M$ は MOC 本体と同じ ν(M) 表の 3 次スプライン微分
+  (本体の ν と逆関数は線形補間なので補間関数は違う。case/45 のアンカーで勾配の差 0.0156 %、
+  $\theta_r=0.104146$ rad/$r_t$。反復の許容差とは別の熱力学近似誤差として扱う)。
+  $M,M'$ は軸則 (target) の値と解析微分 (`law.deriv`)、初期線の軸端はアンカー $(M_A,M'_A)$
+  (`moc_inverse.axis_theta_r_init`)。CFD 反復のアンカーで $x_A\ne x_0$ のときは初期線の軸端を $x_A$ と扱わず、
+  初期線の軸端の M と target の $dM/dx$ を使う。軸則に微分が無いときの代わりは軸端点の ν の 3 次スプライン微分で
+  $\theta_r=\tfrac12\sqrt{M^2-1}\,d\nu/dx$ ($\nu_M$ を掛けない)。どちらを使ったか (`theta_r.source`) と、
+  target (軸節点) と throat (初期線の軸端) の x・M・ν・$M'$ の接続検査 (`theta_r.connection`、許容差 $10^{-9}$) を記録する。
+  既知の軸端点の $\theta_r$ は予測・修正を通じて固定 (反復中の $\theta/r$ から更新しない)。軸外の点は従来どおり点自身で
+  評価し、`AXIS_LIMIT_FRAC` の分岐も変えない (真の軸端点の判定が先)。
+- **収束する修正子**: 対ごとに更新量が $10^{-12}$ 以下になった時点で止める (同じ段の他の対の反復回数に結果が依存しない)。
+  停止判定は入力が有限の対だけで行う。
+- **診断** (`inverse_design(...)["moc"]` → `design_chain(...)["moc"]` → `prepare_info.json` の `moc`):
+  対の 5 分類 (入力時点の対象 = もともとの欠損 + 幾何的棄却 [平行な特性線・軸より下] + 反復の失敗
+  [反復中の NaN・Inf、上限到達] + 収束)、反復回数の分布、最終状態で幾何の交点式と適合式を再評価した残差の最大、
+  源項の分岐の数 (軸端点の解析極限・借用・0、`AXIS_LIMIT_FRAC` の発火の数と位置)。
+- **ゲート** (`moc["gate"]`、`converge` のときだけ合否): 反復の失敗が 1 対でもある・最終残差 $>10^{-10}$・
+  幾何的棄却が壁の内側 (許す領域 = 対の両端が設計壁より上、または壁の x 範囲の外) ・`analytic` で軸端の接続不一致、
+  のどれかで不合格。**設計自体は止めない** (検証・生産の手順がこの合否を読む)。
+
+**放射源流の厳密解** (`design/tests/moc_axis_limit_radial.py`、壁の誤差 = x 1.4〜2.4 の 21 標本の最大相対誤差、
+第 1 段 = 軸節点 2 個の対から作る点の θ の厳密解からの誤差、2026-10-07):
+
+| n_axis × n_start | 壁: legacy+fixed2 (現行) | 壁: legacy+converge | 壁: **analytic+converge** | 第 1 段 θ の相対誤差 (現行 / legacy+converge / analytic+converge) |
+| --- | --- | --- | --- | --- |
+| 140 × 25 | 1.057e-4 | 9.765e-5 | **7.037e-5** | 50 % / 33 % / 1.8e-4 |
+| 280 × 49 | 3.470e-5 | 2.949e-5 | **1.743e-5** | 50 % / 33 % / 4.8e-5 |
+| 560 × 97 | 1.094e-5 | 8.738e-6 | **4.369e-6** | 50 % / 33 % / 1.2e-5 |
+| 1120 × 193 | 3.314e-6 | 2.526e-6 | **1.100e-6** | 50 % / 33 % / 3.1e-6 |
+| 最細区間の次数 | 1.72 | 1.79 | **1.99** | |
+
+修正子をそろえても (legacy+converge) 第 1 段の θ は 1/3 ずれたままで、軸端の源項を解析極限にすると
+$O(h^2)$ で消え、壁全体が 2 次になる。いずれも未収束の対 0 (修正子の回数 最大 31〜34、平均 3.6〜5.9)。
+case/45 の生産問題 (n_axis 2400・n_start 41) では analytic+converge の修正子は平均 1.99 回・最大 34 回、
+最終残差 5.0e-13 (適合式) / 2.2e-13 (幾何)。2026-10-07 にユーザ決定で生産に採用し、axis-Mach の問題の既定を analytic + converge に切り替えた (V5d の保留を明示した限定採用。旧方式は `legacy`・`fixed2` の明示で再現。MOC の関数の引数の既定は legacy + fixed2 のまま)。
 
 **CFD 実測** (case/41。`wall_mode`・解像度・源項修正の有無以外は同一):
 
@@ -656,7 +793,11 @@ $x<x_{lo}$ を相関×比で補完) は**スロート δ\* を NS 実効値の 3
    (同じ $x$ でコア全体を合わせる方式は、上流の壁 δ 誤差が特性線で下流の軸へ運ぶ波を欠損に取り込み反復が収縮しなかった —
    case/45 run_0019)。実測: 壁の異なる 3 つの NS 場から同じ $\delta_r(x)$ が ±1 % で出る。
    壁更新は半径方向 $r^{k+1}_{phys} = r_{inv} + (1-\omega)\delta^k_{in} + \omega\,\delta^k_{ext}$ ($\omega$=0.5 → 1.0)。
-   真のスロート探索 (A13) と上流 Hermite 再生成は維持。反復ドライバは `feedback/deltastar_loop.py`。
+   真のスロート探索 (A13) と上流 Hermite 再生成は維持 (joint 壁は下記「joint 壁の物理壁」の解析経路)。反復ドライバは `feedback/deltastar_loop.py`。
+   **`delta_r_next.csv` の列** (2026-10-05 明示): 第 2 列 `delta_target` = 緩和・再平滑化後の次 pass の壁入力 $\delta^{k+1}_{in}$、
+   第 4 列 `delta_E` = 未緩和の平滑化抽出値 $\delta^k_{ext}$ (`read_delta_r_next` で列名で読む; 旧ファイルは同じ並びで旧称)。
+   **出口の閉包 ($\delta_E/\delta_C$、`solve_rt` の $r_t$ 解き) は `delta_E` で取る** — 第 2 列を読むと ω=0.5 で偏差が約半分に見える
+   (case/45 run_0090: 1.0036 と誤報 → 正 1.0072、run_0092: 1.0019 → 1.0038; codex result M1)。
 3. **帳簿 (必須)**: NS/Euler 質量流量比 (= 有効音速スロート面積比) と質量流量由来の等価スロート補正量 $r_{t,W}-\sqrt{\dot m_{NS}/\dot m_E}$
    を `collect` が出す。ゲート $|\dot m_{NS}/\dot m_E - 1| \le 0.3\,\%$。
 
@@ -695,6 +836,142 @@ B-spline、**上流はその点へ Hermite を作り直す** (下流がマスタ
 変化は CFD で測り、必要ならアンカー帰還 (Codex 整理)。NS v1 で overshoot +0.30% →
 +0.03%、残差は x≈5.4 の設計側の谷のみ (run_0073)。
 
+**joint 壁の物理壁 (解析経路, 2026-10-05)**: 設計壁が `wall_repr: joint` (`JointFitCFDWall`) のとき、`PhysicalNozzleWall` は
+上記のスロート再推定 ($\kappa_t$ の窓 LSQ)・上流 Hermite の作り直し・オフセット点群の補間スプラインでの作り直しを**しない**
+(計画: [`plans/accepted/tooling-nozzle-cfd-pinned-initial-line.md`](../../plans/accepted/tooling-nozzle-cfd-pinned-initial-line.md) §5.1 #6b)。
+物理壁は
+
+$$
+r_W(x) = r_{\rm design}(x) + s(x)\,\delta_r(x),\qquad
+s(x)=\begin{cases}0 & x\le x_{lo}\\ u^3(10-15u+6u^2),\ u=\frac{x-x_{lo}}{x_{hi}-x_{lo}} & x_{lo}<x<x_{hi}\\ 1 & x\ge x_{hi}\end{cases}
+$$
+
+で、$r_W', r_W'', r_W'''$ も設計壁の解析微分 + $(s\,\delta_r)$ の解析微分 (Leibniz) で返す。**この式は上流の作り方 `pw_upstream: ramp`
+(旧来、2026-10-07 から明示したときだけ) のもので、既定の `poly` は下の「上流の作り方」(上流に $\delta_r$ を足さず $Q$ 1 本)**。ランプ区間 $[x_{lo}, x_{hi}]$ は
+problem の **`geometry.pw_ramp`** (`prepare_ns` が渡す)。省略時の既定は「直管接合の直後 (設計縮流部で $r'<-0.05$ になる最初の $x$)
+から $-0.5\,L_U$」(`default_pw_ramp`; case/45 の $L_U=12$ で $[-10.71, -6]$)。case/45 の CFD ピン設計は `pw_ramp: [-11, -6]` を明記する
+(run_0090〜0094 と同じ壁: run の δ_r 表から作り直すと `wall_physical.csv` と 8.9e-16 m で一致)。$x\le x_{lo}$ (入口直管と縮流部の入口側) は
+設計のまま、$x\ge x_{hi}$ (スロート直上流) には δ_r を全量入れる。**ランプのゲート**: $[x_{lo}, x_{hi}]$ で
+$|r_W''-r_{\rm design}''|\le5\times10^{-3}$ かつ $r_W'<0$ でなければ例外で chain を止める (結果は `prepare_info.json` の `pw_ramp_gate`)。
+短い縮流部では $\delta_r s''$ が縮流部の曲率を壊す — 標準の $L_U=3.5$ ($r_U=2.5$) では既定ランプ $[-3.24, -1.75]$ で 6.2e-3 になり
+ゲートで止まる (`design/tests/run_physical_wall_analytic_tests.py`)。その形状で joint を使うには `pw_ramp` を広げるか $L_U$ を見直す。δ_r は導関数を返せる関数 (`delta_r_from_table(x, d)(x, deriv)`、
+表の範囲外は値を端値クリップ・導関数 0) に限り、返せない関数 (積分法の `smooth_delta_quintic`) や δ_r 無しは例外で止める
+(差分で代用しない)。物理スロート $(x_t, r_t, \kappa_t)$ は $r_W'=0$ の根 (IC の 1D 等エントロピー用)。
+$x=0$ では設計壁の $C^2$ がそのまま残り、$r_W''(0)=1/R+\delta_r''(0)$。非 joint の壁は従来経路のまま
+(`analytic=False` で joint にも従来経路を強制できる)。
+
+**上流の作り方 `geometry.pw_upstream` (`poly` が既定、2026-10-07)**
+(計画: [`plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md`](../../plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md) §4.1)。
+上のランプ式 (`ramp`) はスロートより上流の縮流部にも $\delta_r$ を足す。**既定の `poly` は上流に $\delta_r$ を足さず**、配管〜設計スロートを
+5 次多項式 $Q$ 1 本にする:
+
+$$
+r_W(x)=\begin{cases}r_U & x_{in}\le x<-L_U\\ Q(x) & -L_U\le x<0\\ S(x)+\delta_r(x) & 0\le x\le x_e\end{cases}
+$$
+
+$Q$ の端条件は $x=-L_U$ で $(r_U, 0, 0)$、$x=0$ で下流の物理壁 $S+\delta_r$ の $x=0^+$ の $(r, r', r'')$ (6 条件で一意、
+$\xi=(x+L_U)/L_U$ 基底の 5 次 Hermite)。接続点は**設計スロート** $x=0$ で、物理スロートではない。$[0, x_e]$ は `ramp` とビット同一。
+$Q$ は接続端の $\delta_r, \delta_r', \delta_r''$ に依存するので、上流の形が $\delta_r$ と無関係になるわけではない。
+
+- **キー**: `ramp` (旧来、`pw_ramp` を使う) | `poly`。joint 壁の物理壁の解析経路でだけ有効で、キー無しは `poly`。`ramp` は明示したときだけ。
+  `poly` (明示・既定とも) と `pw_ramp` の併記・不正値 (null・大文字・空白・数値)・joint でない壁への `poly`・`ramp` + `physical_wall_repr:
+  single_bspline` は run dir を作る前に例外。Euler の `prepare` (物理壁が無い) に `poly` を明示しても例外。解決済みの値は `prepare_info.json` の
+  `pw_upstream` (`value`・`source` = explicit / default) に書く。
+- **物理スロート = 物理壁の大域最小** (`wall_global_min`): $Q$ と下流の $S+\delta_r$ の**全ノット区間**で、$r'$ を区間ごとの 4 次式として
+  復元し (区間内の別の 2 点で照合、合わなければ区切り不足として例外)、その実根・区間の端・継ぎ目を候補にして $r$ を比べる。固定の
+  囲い込み (旧 $(-0.3, 0.2)$) や「最小は $Q$ の中」の仮定は使わない ($\delta_r'(0)<0$ なら $x=0$ より下流にもなる)。
+- **ゲート** (`prepare_info.json` の `pw_upstream_gate`、不合格は例外): 正の半径・最小点が一意・その前で $r'\le0$・後で $r'\ge0$ (根で切った
+  小区間の中点で符号、丸めの許容 $10^{-12}$)、$[-L_U, 0)$ で $|Q''-H''|\le5\times10^{-3}$ ($H$ は設計の上流 Hermite。差は 3 次式なので区間端と
+  極値で厳密。今のランプのゲートと同じ値の**幾何の変化の上限**で、流れの品質の保証ではない)、継ぎ目 ($-L_U$・0) の値・1 階・2 階微分の
+  跳び $\le10^{-8}$ (左右の極限)。診断として既定ランプの壁との差の最大と位置 (`vs_ramp_default`)。
+- case/45 の単調壁 (run_0147 の入力) では、物理スロートの今との差が位置 $-1.46\times10^{-9}\,r_t$・半径 $-3.8\times10^{-13}\,r_t$、
+  $\max|Q''-H''|=1.184\times10^{-3}$ ($x\to0^-$)、今の壁 (`pw_ramp: [-11, -6]`) との差は縮流部で最大 $-0.52$ mm ($x=-7.08$、$Q$ の方が細い)。
+- Euler の評価は設計壁を使うので、上流の変更は Euler では検出できない (物理壁の NS で確かめる)。
+- 移行: `pw_ramp` を書いた問題 YAML は `pw_upstream: ramp` を明示しないと止まる (case/45 の 12 本は明示済み)。
+
+**寸法の決め方: 出口径から (`solve_rt`) / 物理スロート径から (`solve_rt_throat`)** (同 plan §4.2)。設計は $r_t$ 無次元で不変なので、
+寸法は $r_t$ の 1 変数で決まる。
+
+- `feedback/deltastar_loop.solve_rt(problem, R_exit_m, prev_run=None)`: $r_t\,r_W(x_e; r_t)=R_{exit}$。
+- `feedback/deltastar_loop.solve_rt_throat(problem, R_throat_m, prev_run=None, delta_r_out=None, delta_next=None)`:
+  $r_t\cdot\min_x r_W(x; r_t)=R_{throat}$ (最小は上の大域最小)。スロート径を固定するときは出口径を同時に固定条件にしない
+  (そのとき決まる出口半径は戻り値に記録するだけ)。
+- **CFD 前** (prev_run なし、両関数): 反復のたびに `prepare_ns` と同じ経路 (`integral_delta_r`: `deltastar_initializer` の $k_f$
+  (`cf_scale`)・熱条件・5 次 P-spline の平滑化・`delta_r_from_table`) で $\delta_r$ を作り、同じ壁の構築 (`runner_axismach.build_physical_wall`、
+  `pw_upstream`・`physical_wall_repr` に従う) で $r_W$ を求める。2026-10-07 までの `solve_rt` は未較正・未平滑化の `integral_bl` を直接
+  呼んでいて、生産の壁と $\delta_r$ が違った (同じ $r_t=0.0766539$ m で出口の補正 0.70149 対 0.73276 $r_t$、出口半径で 2.40 mm)。
+  $k_f$ を較正し直したら寸法も解き直す ($k_f$ はスロートの $\delta_r$ も変える)。
+- **NS 後**: `solve_rt` は抽出 $\delta_E(x_F)$ 1 点の $Re^{-0.2}$ 換算 (C2 方式、変えていない)。`solve_rt_throat` は
+  `delta_r_next.csv` の **$\delta_E$ の全分布** から補正関数 $\delta(x; r_t)=\delta_E(x)(r_t/S_{prev})^{-0.2}$ を作り、同じ関数で寸法と壁を作る
+  (解いた $r_t$ での表を `delta_r_out` に書き、次の壁は `prepare_ns(delta_r_csv=...)` でその表から作る)。$Re^{-0.2}$ は予測の近似。
+- **反復**: 各反復で今の $r_t$ の残差 $r_t\,r - R$ を評価し、\|残差\| ≤ 許容差で止める (返す残差 = 最終の寸法で評価し直した値)。
+  30 回で収まらなければ `SizingNotConverged` (不合格)。許容差は経路で違う (`deltastar_loop._resolve_sizing_tol`、引数 `tol_R_m` で明示も可):
+  CFD 前は**初期見積もり**として、スロート `SIZING_TOL_PRE_CFD_THROAT_M` ($10^{-7}$ m)・出口 `SIZING_TOL_PRE_CFD_EXIT_M` ($10^{-5}$ m)。
+  NS 後の `solve_rt_throat` は `SIZING_TOL_M` ($10^{-9}$ m)。NS 後の `solve_rt` は固定回数の反復で許容差を判定しない。
+- **CFD 前の寸法の既知の制約**: CFD 前の $\delta_r$ (`integral_bl` の RK45 rtol $10^{-6}$ → P-spline) は $r_t$ に対して滑らかでなく、
+  寸法を少し変えたときの物理半径の局所の散らばりはスロートで $7.4\times10^{-9}$ m、出口で $2.6\times10^{-6}$ m (2026-10-07、U2c)。
+  rtol を $10^{-10}$ にしても出口に $5\times10^{-8}$ m 残り (計算費は約 20 倍)、原因は確定していない。そのため $10^{-9}$ m では止まらず、
+  CFD 前の許容差を上のとおり初期見積もり用に分けた (未使用の目標で 3 評価で収まり、近傍 11 点でも許容差内、U2d)。
+  **CFD 前の寸法は初期見積もりで、精密な寸法・感度の評価には未検証**。計画 [tooling-nozzle-upstream-poly-and-throat-sizing](../../plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md) §6 U2〜U2d。
+- 寸法の決め方は問題 YAML の `spec.sizing: {method: exit | throat, target_m}` (任意) に書くと、`prepare_ns` が `prepare_info.json` の `sizing` に
+  実際の壁の物理スロート半径・出口半径と目標との差を並べる (無ければ `method: null` = 未記録)。
+- CLI: `python -m forge_design.feedback.deltastar_loop --problem P --euler-ref X --run-dir Y --solve-rt-throat R [--prev RUN --delta-next CSV --delta-r-out CSV]`。
+
+**物理壁の表現: 全域 1 本の 5 次 B-spline と STEP (`geometry.physical_wall_repr`, 2026-10-07 実装、生産未採用)**
+(計画: [`plans/accepted/tooling-nozzle-wall-single-bspline.md`](../../plans/accepted/tooling-nozzle-wall-single-bspline.md)、係数の求め方は
+[`tooling-nozzle-upstream-poly-and-throat-sizing.md`](../../plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md) §4.1b)。
+上の解析経路の `poly` の物理壁は、区間ごとに別の式 (直管の定数・$Q$・S + $\delta_r$) で、**全区間が $x$ の 5 次の区分多項式**である。
+これを、設計の中身を変えずに、入口から出口まで **1 本の $x$ の 5 次 B-spline** に**ノット挿入で代数的に**作り直し (当てはめなし)、
+メッシュ・初期値・報告・CAD が同じものを使えるようにした (`SingleBSplinePhysicalWall`, `geometry/wall_axismach.py`)。
+**`pw_upstream: poly` の壁だけ**が対象で、`ramp` の壁 (ランプ区間の $s\,\delta_r$ は区間ごとに 10 次で厳密に表せない) との組み合わせは例外
+(最小二乗の版は 2026-10-07 のユーザ決定で外した)。
+
+- **キー**: 問題 YAML の `geometry.physical_wall_repr` = `legacy` | `single_bspline`。**キー無しは今の壁で、変更前とビット同一**
+  (壁ファイルも書かない)。`legacy` を明示すると今の壁のまま壁ファイルを書く。joint 壁 + 解析経路 (offset radial) 専用で、他の壁・
+  Euler の `prepare` に `single_bspline` を書くと例外。値は完全一致 (大文字・空白・null は例外)。
+- **作り直し** (ノット挿入): 直管は定数の係数、$Q$ は 5 次多項式の Bernstein 係数 ($[-L_U, 0]$ の Bézier)。$[0, x_e]$ は S と $\delta_r$
+  (`delta_r_from_table` の補間スプライン) を、$\delta_r$ は $x=0$・$x_e$ で重複度 6 まで挿入して切り出し、内部ノットの和集合
+  (重複度は大きい方) にノット挿入 (Boehm、係数の凸結合だけ) で揃えて係数を足す。区間ごとの表現を重複度 6 で並べたものから、継ぎ目
+  ($-L_U$・0) のノットを 3 回ずつ除去して重複度 3 ($C^2$) にする (NURBS Book A5.8、除去の誤差を記録し $10^{-12}\,r_t$ を超えたら例外)。
+  次数 5、両端の重複度 6、他の内部ノットは重複度 1。$\delta_r$ の表が $[0, x_e]$ を覆わなければ例外。case/45 の単調壁 (plan U3、
+  2026-10-07) で係数 1588・異なるノット 1580、ノット除去の誤差 $\le8.1\times10^{-15}$、元の区分表現との差は各ノット区間の内部と継ぎ目の
+  左右の極限で半径 $1.1\times10^{-14}$・$r'$ $1.0\times10^{-13}$・$r''$ $3.6\times10^{-11}$ ($r_t$ 単位、組み立て 0.5 s)。区分表現と 1 本の
+  B-spline で `prepare_ns` まで作ったソルバ入力 (`nozzle.h5` の全データセット・設定) はビット同一 (全域 1 本の plan の W3)。
+- **許容誤差** (元の壁との差、各ノット区間の内部の密な点と区間多項式の極値で検査): 要求の上限 $|\Delta r|\le1.3\times10^{-7}\,r_t$、
+  $|\Delta r'|\le10^{-7}$、$|\Delta r''|\le10^{-5}$ を超えたら例外 (ノットを足して合わせ込む処理は持たない)。
+- **スロートとゲート**: 物理スロートと曲率を 1 本の B-spline から大域最小 (`wall_global_min`、ノット区間ごと) で求め直す。上流のゲート
+  (一意な最小・前後の単調性・$|r''-H''|\le5\times10^{-3}$・継ぎ目の跳び) も 1 本で評価し直し、不合格なら例外。
+- **下流への属性**: `PhysicalNozzleWall` と同じ属性 (`x_in`・`x_e`・`r(x, deriv)`・`theta`・`validate()`・`x_throat`・`r_throat`・
+  `kappa_throat`・`offset_mode`・`pw_upstream`・`_dstar_hist` ほか) を必須属性として構築時と `validate()` で検査する。必須属性は
+  上流の方式別 (`required_attrs`: `ramp` は `_ramp`・`ramp_gate`、`poly` は `upstream_gate`・`upstream_poly`、1 本の B-spline はさらに
+  `spline`・`joints`・`fit_diag`)
+  (下流に `getattr(..., None)` で読まれて欠けても止まらない属性があるため)。`r(x)` は定義域の外を外挿しない (座標の float32 丸め分
+  だけ外れた点は端で評価、それより外は例外)。IC (`evaluate/ic.py`) は物理壁のスロート属性が欠けたら例外 (設計スロート (0, 1) に黙って戻さない)。
+- **保存した壁の復元 (壁ファイル `wall_repr.json`、版 2)**: キーを書いた run は、形式 (`forge_design.nozzle_wall`)・版・表現の種類・
+  **上流の方式 `pw_upstream`**・単位 (長さは $r_t$、`scale_m`)・定義域、設計壁 (直管 $r_U$・上流 Hermite の係数と区間 $[-L_U, 0]$・S のノットと
+  係数と有効域 $[0, x_e]$)、物理壁 (1 本の B-spline / `legacy` の `ramp` なら ランプと $\delta_r$ の B-spline と表の範囲 / `legacy` の `poly` なら
+  $Q$ の係数・基底・区間と $\delta_r$) を書き、`prepare_info.json` の `physical_wall` にも写す。必須要素は方式別。**版 1 (方式の記録が無い)
+  は `ramp` として読む**。版 2 の `single_bspline` は `poly` だけ。`poly` の復元は $Q$ の端条件 (継ぎ目の跳び $\le10^{-8}$) も確かめる。
+  読み込みは共通の `load_wall_file`: 要素の欠損・版・種類の違いは例外、復元した評価関数は有効域の外で例外 (scipy の BSpline の既定の
+  外挿をしない — 保存済みの `wall_fit.spline` は S だけで、上流で評価すると黙って誤った値を返す: case/45 で $x=-6$ が 10.0 $r_t$、正しくは
+  上流 Hermite の 4.8675)。
+- **報告** (`report/nozzle_report.py` の壁の図): 壁ファイルがあれば保存した係数から物理壁と設計壁 (直管 + 上流 Hermite + S) を復元して入口から
+  評価し、無い旧 run は旧経路 (`wall_physical.csv`・`wall_design.csv` の再補間) で図にその旨を書く。評価量 (2 階微分の高周波) の格子は
+  両経路で同じ (物理スロート〜出口)。
+- **STEP** (`export/wall_step.py`): 平面の B-spline 曲線 $C(u)=(x(u), r(u), 0)$ を 1 本だけ書く。助変数 $u=x$ [mm] (ノットも mm、
+  換算 $1000\cdot$`scale_m`)、制御点 $P_i=(\bar x_i, c_i)$ ($\bar x_i$ はグレビル点 — B-spline は 1 次関数を正確に表すので $x(u)=u$)、
+  次数 5・重み 1。原点は設計スロート、物理スロートの位置・入口端と出口端・全壁辺の「弦 − 曲線」の分布は添え書き (JSON) に書く。
+  書き出し・読み直し・回転面の作成は FreeCAD (`freecadcmd`) で行い、読み直した曲線を自前の de Boor (scipy を使わない) と比べる
+  (位置は z を含む 3 次元で $\le10^{-6}$ mm、接線方向の角度 $\le10^{-9}$ rad、曲率 $\le10^{-9}$/mm または相対 $10^{-9}$)。構造の検査は
+  次数・ノット・重複度・制御点数・非有理・辺 1 本に加え、平面性 (全制御点の $|z|\le10^{-6}$ mm)・辺の助変数の範囲が定義域の全体・
+  辺の頂点 (実際の端点) が曲線の両端と一致すること (2026-10-07 result 段レビューで追加: z の移動と途中で切れた辺を検出していなかった)。
+  CLI の終了コードは転送の判定と回転面の妥当性 (`isValid`・面 1 枚以上・面積 > 0) の両方で決まる。STEP の実数は 13 桁で書かれ、
+  case/45 の転送誤差は位置 $5\times10^{-10}$ mm。回転体 (内面) にするのは CAD 側の作業。
+- **CAD の形と CFD の形**: STEP の曲線と 1 本の B-spline は丸めの範囲で一致し、1 本の B-spline と今の物理壁の差は許容誤差 (半径
+  0.01 µm) まで。CFD が解くのは壁の上の節点を直線でつないだ多角形で、曲線との差 (弦 − 曲線) は case/45 の生産メッシュ
+  (ni 2000) で $-5.6$〜$+1.1$ µm (縮流部で内側、スロートで外側)。加工公差との比較は指定された公差で行う。
+- 試験: `design/tests/run_wall_single_bspline_tests.py`。
+
 **壁表現の A/B (A14, 2026-08-17)**: 制約付き最小二乗 B-spline (`LSQBsplineCFDWall`、
 拘束 $r,r',r''$@T + $r,r'$@F、弧長重み、KKT) を CFD で補間壁と比較。LSQ は曲率振動を
 50 倍抑える ($\int\kappa'^2ds$ 11.4 → 0.2) が、壁角の系統乖離 (32 CP で 0.34°) が
@@ -725,6 +1002,7 @@ MOC カーネル (`pm_nu`/`pm_mach`/`_mass_flux_density`/`area_ratio_isentropic`
 RANS 軸 M の law 側帰還 / 粘性の出口一様性 (BL 除外) 評価 / 出口 $\varepsilon_M$ の差の原因究明 / MOC の 2 次精度化 (軸上の解析極限
 $\partial\theta/\partial r|_{r=0}=-\frac12 d\ln F/dx$・適合式の Simpson 化・軸点の非一様配置) /
 `AXIS_LIMIT_FRAC` のしきい値不要化。
+軸上の解析極限と予測修正の収束は plan [discretization-moc-axis-limit-and-corrector](../../plans/accepted/discretization-moc-axis-limit-and-corrector.md) で選択式として実装した (2026-10-07、上の「軸上の解析極限と予測修正の収束」。既定は従来のまま)。
 なお **ΔM の支配残差 (x≈6.2 の谷) は壁の抽出法に依存しない** ため、
 これ以上は逆 MOC ではなくアンカー/軸 Mach law 側の課題。
 
@@ -790,6 +1068,129 @@ evaluate:
 - **熱力学の等価性**: `full` ≡ `lumped` は「同じ解決済み DB・同じ温度域処理・同じ datum・非粘性 frozen・各 lump の内部比が空間的に一定」のときのみ厳密
   (質量分率線形混合)。粘性 run は種ごとの拡散係数と種エンタルピー拡散で一般に異なる (仕様として記録)。SERN 3D SST の `full` は輸送式 2 → 11–13 本で
   step 時間 +50–100 % の見込みなので、MOO 探索は `lumped`、最終評価や凝縮・化学の前段は `full` と run ごとに選ぶ (既定は変えない)。
+
+## 既存 run の条件変更 (rerun_conditions)
+
+作成済みのノズル (既存 run の `nozzle.h5` に物理壁の格子が入っている) で、**形状を変えずに**入口条件・背圧・入口分率だけを変えた
+run を作るツール `solver_density_cuda/tools/rerun_conditions.py`
+(plan [`tooling-rerun-conditions.md`](../../plans/accepted/tooling-rerun-conditions.md) §4)。problem YAML を書き換えて runner に通すと
+`design_chain` が壁を作り直すので、run ディレクトリを直接複製・編集する。**run の準備までを行い、forge は起動しない**
+(起動は `runner_axismach.run_staged_ns` / `run_staged`、判定は既存の `check_*`)。
+
+```
+python3 solver_density_cuda/tools/rerun_conditions.py REF_RUN NEW_RUN [--res res_N.h5]
+    [--Pt P] [--Tt T] [--Y NAME=v ... | --Y1 v] [--balance NAME] [--k K] [--omega W]
+    [--Ps P | --keep-Ps] [--Tw T | --keep-Tw] [--steps N] [--out-interval M] [--cfl C]
+    [--scale-ic none|pt] [--override-recommended] [--forge BIN] [--dry-run]
+```
+
+### 対応入力 (v1 の入力契約; NEW_RUN を作る前に検査)
+
+- `bcondConfig.yaml` は 1 行 1 境界の flow 形式で、境界種別は **単一の `inlet_Pressure`**・**単一の `outlet_statPress`**・
+  `wall` / `wall_isothermal` (floats に `Ts`)・`slip` (Euler 対参照の滑り壁、壁温なし)・`axis` だけ。
+  入口組成は floats の `Y{s}` 形式で全輸送種 `Y0..Y{n-1}` がそろうこと。
+- 値の範囲: 指定値と参照の実効値が有限で、$P_t$・$T_t$・$P_s$ (出口の逆流用 $P_t$・$T_t$ も)・等温壁 $T_s$ > 0、$k \ge 0$、$\omega > 0$、
+  `cfl`・`cfl_pseudo` > 0、`--steps`・`--out-interval` > 0。入口 $Y$ は**変えないときも**参照の値を各成分 $[0,1]$・
+  $|\sum_s Y_s - 1| \le 10^{-9}$ で検査する (参照 BC の $\sum Y = 1.0001$ は forge が黙って正規化するので拒否; `--Y` で全種を書き直せば通る)。
+- `solverConfig.yaml` の `mesh.meshFileName == mesh.valueFileName == "nozzle.h5"`。ファイル参照は run 内相対で複製の許可リストにあるもの
+  (`physProp.speciesDBFile` → `species_db_external.yaml` 等) だけ。
+- 複製は**許可リスト**: `nozzle.h5`・`nozzle.xmf`・`bcondConfig.yaml`・`solverConfig.yaml`・`species_meta.yaml`・`resolved_species_*.yaml`・
+  `species_db_external.yaml`・`probe.yaml`・`prepare_info.json`・`wall_*.csv`・`target_axis_M.csv`・`delta_r_initial.*`・`MESH_QUALITY.txt`。
+  系譜・ログ・VERDICT・series・report・`res_*` は持ち込まない。NEW_RUN が既にあれば失敗、途中で失敗したら NEW_RUN ごと消す。
+
+### 書き換え
+
+- bcond は**対象行の floats の当該トークンだけ**を置換し (他の行はバイト一致)、書き換え後に YAML で読み直して要求値と照合する。
+- 入口: `--Pt`・`--Tt`・`--k`・`--omega` (k・ω は指定時だけ。設計チェーン自身も固定値)。参照と同じ値の指定は変更に数えない。
+- 組成: `--Y NAME=v` (名前は `physProp.species`) / `--Y1 v`。**全種を書き** $\sum_s Y_s = 1$ を $10^{-12}$ で検査する
+  (forge の起動検査は $10^{-3}$ で、入口カーネルが黙って正規化するため、書いた値と実効値がずれうる)。吸収種は 2 種なら自動、
+  3 種以上は `--balance` 必須。`species_meta.yaml` の `streams.inflow.Y_transport` と実種 `Y` (lump の展開行列で展開) を同期し、
+  `X` は実種の MW が内蔵表でそろうときだけ作り直す。
+- 出口: `--Ps` は `outlet_statPress` の `Ps` と `Pt` をそれぞれ照合し、違うほうを指定値に揃える (`Tt` は据え置き; Pt だけ違っても変更として記録)。現行の出口カーネルは逆流時も静圧で拘束する (`boundaryCond_d.cu:593` 付近) ので、`Pt` は旧来の書式として Ps と同値にそろえておくだけ。
+- 等温壁: `--Tw` は全 `wall_isothermal` の `Ts` を書く。
+- `solverConfig.yaml`: `--steps` (`nStepOuter`)・`--out-interval` (`outStepInterval`) は `nStepOuter % outStepInterval == 0` を強制、
+  `--cfl` は `time.deltaT.cfl`・`cfl_pseudo` の両方を書く。いずれも YAML の値ノードの位置だけを書き換え (`yaml_strict.replace_scalars`; コメント・引用符付きキー・空白の揺れ・flow/block 形式に対応)、読み直して要求値との一致と他の値の不変を検査する。
+
+### Pt を変えたら出口 Ps の指定が必須
+
+node 離散化の出口は壁列が常に亜音速で `Ps` を見る (`boundaryCond_d.cu` の `outlet_statPress`)。Pt だけ下げて Ps を据え置くと、
+出口列の不安定要因になる。そこで Pt を変えるときは `--Ps P` か `--keep-Ps` を必須にし、無ければ止めて
+$f = P_{t,\rm new}/P_{t,\rm ref}$、参照の出口圧 $P_{\rm exit,ref}$ (参照 res の**出口断面 (最終 $x$ の節点列) の内部節点の静圧 $P$ の中央値**。
+壁 (`wall`/`wall_isothermal`/`slip`)・軸の BC 節点は除く。出口が単一 $x$ に並ばなければ出口 BC の節点と同じ $x$ の節点で代替し、
+それも取れなければ停止せず `P_exit_ref: null` と警告を記録する。`res_outlet_*` の `Ps` は課した値そのものなので使わない)、
+`--keep-Ps` のときの比 $P_s/(f\,P_{\rm exit,ref})$ と、参照と同じ比になる $P_s = f\,P_{s,\rm ref}$ を表示する。指定したときもこの比を記録する。
+
+### 初期場: 状態変換であって境界値問題の相似ではない
+
+1. config から**必要保存量集合**を決める: `forge_species.required_conserved` ($\rho$, $\rho\mathbf{U}$, $\rho e$, $\rho Y_s$, トレーサ $\rho\xi$) +
+   SST → `roK`・`roOmega` + 遷移 → `roGamma`・`roReth` + 凝縮 → `rog_*`・`roQ2_*`・`roQ1_*`・`roQ0_*`。
+   参照 res (SRC) と参照 `nozzle.h5` (DST) で、存在・形・有限・$\rho>0$・$0 \le \rho Y_s/\rho \le 1+10^{-6}$・
+   $|\sum_s \rho Y_s - \rho| \le 10^{-6}\rho$ を検査する。DST の `/VALUE` に集合と `wall_dist` 以外があれば拒否
+   (`restart_field` は SRC に同名があれば写すので、設定と食い違う量が持ち込まれうる)。ただし**乱流モデルなし (Euler・層流) の run** では、
+   変換器が既定で作る `roK`・`roOmega` の入れ物を「使われない余りの量」として許し警告に記録する (必要保存量に含めず、スケールもしない。
+   `restart_field` はそのまま写すが forge は読まない)。
+2. `restart_field.py REF_res NEW/nozzle.h5 --dst-run NEW` で保存量を index コピーする (`VERDICT: OK` 行と、SRC と同じ `species_hash` が必須。
+   SRC が倍精度なら `--keep-src-dtype`)。化学種の照合に `forge --resolve-species` を使う。
+3. **`--scale-ic pt` のときだけ** (明示 opt-in) 必要保存量を全部 $f$ 倍する:
+   $$(\rho,\ \rho\mathbf{U},\ \rho e,\ \rho Y_s,\ \rho k,\ \rho\omega,\ \dots)_{\rm new} = f\,(\cdots)_{\rm ref}$$
+   これは $T$・$\mathbf{U}$・$Y_s$・$k$・$\omega$ (と $e(T)$) を保ち圧力と密度だけを $f$ 倍する**初期場の状態変換**であって、
+   境界値問題の相似ではない。Re が $f$ 倍になるので境界層は変わり、出口 Ps・壁温は別の境界条件として与える。
+   検査は `allclose(d_new, f·d_ref, rtol=1e-6, atol=0)` (比で検査しない — ゼロ成分で NaN になる; ゼロはゼロのまま)。
+   `allclose` は掛け算の正確さしか見ないので、変換後の場にも 1. と同じ検査 (有限・$\rho>0$・$Y$ の範囲) をかける。
+   凝縮 block・Tt 変更・組成変更と同時には使えない (凝縮モーメントと温度・組成は状態変換で保てない)。
+
+### 拒否条件 (いずれも非ゼロ終了・NEW_RUN なし)
+
+- `--lump` (乾き成分 lump の組成変更): restart_field (互換ハッシュ不一致)・`convert_species_field` conserve (実種ごとの $\rho Y$ 保存検査)・
+  reinit ($\xi$ の出所なし)・forge (旧ハッシュ属性) の全経路が拒否するので v1 では停止する。
+- 入力契約違反: `X{s}` 形式・`inletProfile: 1`・inlet / outlet が複数・対応外の境界種別・`valueFileName` が別名・外部参照・flow 形式でない bcond。
+- 条件の不整合: Pt 変更で `--Ps`/`--keep-Ps` なし、等温壁で Tt 変更なのに `--Tw`/`--keep-Tw` なし、`--Tw` なのに等温壁なし、
+  3 種以上で `--balance` なし、$Y$ が $[0,1]$ の外・参照の $\sum Y$ が 1 から外れる、`--scale-ic pt` の併用禁止条件、
+  値の範囲 (上記) の違反、NS 参照で `recommended_stages` と生成 config の本段 cfl・step 数が食い違う (下記; `--override-recommended` なしのとき)。
+- 初期場の検査不合格、`restart_field` の失敗、スケール検査の不合格 (後 2 つは作成後なので NEW_RUN を消す)。
+
+### 記録と recommended_stages
+
+`NEW_RUN/RERUN_CONDITIONS.json` に参照 run/res、bcond の変更前後の全 floats、solverConfig の変更、必要保存量集合、`scale_ic` と $f$・スケール検査、
+$P_{\rm exit,ref}$ と $P_s/(f\,P_{\rm exit,ref})$、restart_field の VERDICT 行、forge の sha256、ツールの commit、`recommended_stages` を残す。
+`prepare_info.json` は幾何を据え置き、`ic_from` を参照 res で上書きし `rerun_of` を足す (`nozzle_report` が読む)。
+
+`recommended_stages` は、条件 (Pt・Tt・Y・k・ω・Ps・出口 Pt・Tw) を変えなければ `none` (参照の `cfl`・`cfl_pseudo` をそれぞれそのまま保持して参照場から継続; 推奨 cfl との照合はしない)、
+**Pt を変えれば `full`・本段 cfl 1・60000 step・`--scale-ic pt` 推奨** (下記の検証で確定; scale none には警告)、
+Tt・Y などそれ以外を変えれば `full` (本段は参照 cfl; 整定長は生産利用で確定する — plan §5.1 #11)。
+`--steps`・`--out-interval`・`--cfl` は条件に数えない。`run_staged_ns(stages="full")` の本段は**生成 config の cfl・nStepOuter で回る**ので、
+NS 参照で推奨の本段 cfl・step 数 (Pt 変更なら cfl 1・≥ 60000) と生成 config が食い違えば、必要な引数 (`--cfl 1.0 --steps 60000` 等) を
+示して作成前に停止する (意図して違う config で作るなら `--override-recommended`; 警告と `config_effective.override` に残る)。
+Euler 参照 (分類は下の「NS / Euler の分類」の条件) は `run_staged` で回し、推奨と生成 config の食い違いは停止せず警告だけ記録する
+(Euler 対参照の実績は plan §6 (ii) 腕 E: stages none・cfl 2・6000 step)。記録の `recommended_stages.runner` と表示する回し方は
+`run_staged_ns` / `run_staged` を区別する。
+NS run の条件を変えたときは、δ_E の評価に**同条件の Euler rerun を対で作る** (旧条件の Euler 参照では edge 帯の判定が動く;
+旧条件参照の `mdot_ratio_vs_euler` は診断量として記録するだけ)。
+
+### `run_staged_ns` の段の記録と段終了ゲート
+
+`runner_axismach.run_staged_ns` は段 (`S1_soft`・`S2_mid`・ランプ段 `R<i>_cfl<c>`・`main`) ごとに実効設定を
+`stage_manifest.json` (`solver_density_cuda/tools/stage_manifest.py`) に書き、残差履歴を `residual_history_<tag>.csv` に残す
+(段の `res_*` は従来どおり消す)。`check_convergence.py <run> --segment` はこの manifest の最後の区間 (1 次の前段は別区間) で判定する。
+前段の 1 次化は `convMethod: 1`/`2` → 0。段の最終 res の必要保存量が非有限・$\rho \le 0$ なら次段へ進まず停止する
+(非有限の場を `restart_field` で次段の初期場へ写さない)。段の CFL・step 数は変えていない。
+段の config の変更 (`cfl`・`cfl_pseudo`・`convMethod`・`nStepOuter`・`outStepInterval`・`nStepInner`) は YAML 上の位置で値を読み、
+その値トークンだけを書き換えて読み直し、要求値と「他の値が変わっていないこと」を検査する。起動前に各段の実効値
+(convMethod・cfl・cfl_pseudo・nStepOuter・outStepInterval) を照合し、違えば forge を起動せずに例外。旧実装の正規表現置換は
+`convMethod:  2` (空白 2)・`cfl: 5.0e+0` (指数表記)・block 形式の `deltaT` で黙って外れ、前段が 2 次・CFL 5 のまま回りえた。
+`run_staged` (Euler) も同じ方式 (前段の 1 次化は旧来 `convMethod: 1` だけだったのを 1/2 → 0 に)。
+
+**Pt を変える rerun の起動 (2026-10-06 の検証)**: 粗格子 NS の Pt 0.8 倍では、段階起動 (full) でも本段 cfl 5 で出口の壁際の角 (scale あり) / 入口 (scale なし) から発散し、`--scale-ic pt` + full + 本段 cfl 1 は準定常に達した。ツールは Pt 変更に `recommended_stages` = full・本段 cfl 1 と `--scale-ic pt` を推奨し、scale none には警告を出す。scale none + full + 本段 cfl 1 は入口配管の壁際に逆流域を残したまま別の状態に向かった (2026-10-06)。
+
+
+**NS / Euler の分類と Euler 参照の推奨 (2026-10-06)**: NS か Euler かは実効 config で決める (粘着壁 `wall`/`wall_isothermal` があれば NS、壁が全部 `slip` なら Euler; `prepare_info.viscous` は照合のみ)。Euler と扱うのは、全壁 `slip` に加えて輸送が無効と確認できる設定だけ: 乱流・遷移モデルなし、`viscMethod: 0` かつ `visc: 0` (viscMethod 0 の μ は定数 `visc` で、粘性流束は viscMethod によらず毎反復評価される)、`thermCondMethod: 0` なら `thermCond: 0`、`physProp.transport` なし (化学種・受動種の拡散は `viscMethod ≠ 0` のときだけ働く)。全壁 `slip` でも輸送が有効な config (例 `viscMethod: 2` + `transport`) は未対応として作成前に拒否する。Euler 参照の `stages: none`・cfl 2・6000 step は「Pt だけを変え、`--scale-ic pt` で Ps も同じ比」の条件でしか検証していない (run_0120)。Tt・組成を変えた Euler 参照は同じ設定では準定常に達しなかった (run_0134) ので、full で STEADY まで回す。NS で Pt と Tt・組成・壁温を同時に変える (または凝縮 run で Pt を変える) 複合条件は、起動・整定が未検証で推奨対象外 (`recommended_stages` は full・本段 cfl 1・60000 step と警告を記録)。`--scale-ic pt` の禁止条件は Tt・組成・凝縮だけで、壁温 Tw は禁止条件でない (Pt + Tw は `--scale-ic pt` を受理する)。
+
+**入力 YAML の重複キー**: solverConfig・bcondConfig・species_meta と、`run_staged`/`run_staged_ns` の段 config 検査は `solver_density_cuda/tools/yaml_strict.py` で読み、全階層 (flow・block 形式) の重複キーを拒否する (PyYAML は後勝ち・solver の yaml-cpp は先勝ちなので、PyYAML で読んだ値は solver の実効設定と違いうる)。 **merge key (`<<`) も全階層で拒否する** (yaml-cpp は merge を展開しないので、PyYAML で展開した値と solver の実効値が食い違う)。**使用禁止・廃止キー** (`mesh.bndFirstOrder`、`procedures/recommended-settings.md` §9 の削除キー・node 廃止キー・旧乱流キー) を持つ参照 run は作成前に拒否し、旧既定・非推奨の値 (sst の旧既定、`wallTreatmentSST: 1` など) は警告する。
+
+`run_staged` (Euler) も `run_staged_ns` と同じく、各段 (soft・mid) の restart 前に段終了ゲート (`stage_gate`) をかけ、段ごとの `residual_history_<tag>.csv` (tag = soft / mid / main) と `stage_manifest.json` を残す。段の CFL・step 数は変えていない。
+
+
+**外部ファイル参照 (2026-10-06)**: ファイル名を取る設定キーは完全修飾パスで検査する (拡張子では判定しない)。`mesh.meshFileName`/`valueFileName` は `nozzle.h5` だけ、`physProp.speciesDBFile` は run 内の実在する `species_db_external.yaml` か空だけを通し、`physProp.chemistry.mechanismFile`・`conjugate:` ブロック (暗黙に `conjugate_state_<id>.h5` を読む)・bcond の `inletProfile`/`wallProfile`・その他ファイル参照に見えるキーは値によらず作成前に拒否する (v1 対象外)。
 
 ## メッシュ (構造化・トポロジ固定)
 

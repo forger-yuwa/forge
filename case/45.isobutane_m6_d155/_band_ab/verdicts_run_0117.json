@@ -1,0 +1,6 @@
+{
+ "wave_eta0.1": {"verdict": "DRIFTING", "window": "run_0117 res_40000–60000 (quantities_series.csv)", "note": "値 0.0065 % は閾値 0.01 % 内。延長 1 回後も DRIFTING (標本間隔 A/B #11g で探索の粗さは原因でない)。ユーザ決定 2026-10-06「A」: 未達のまま記録して凝縮評価へ。軸付近を細分した格子 (nj 257・cap 0.02) では ≈ 0.004 % (#11h)"},
+ "overshoot_eta0.1": {"verdict": "STEADY", "window": "run_0117 res_40000–60000", "note": "細分格子 (#11h) では ≈ −0.022 %"},
+ "exit_core_M": {"verdict": "STEADY", "window": "run_0117 res_40000–60000", "note": "5.998887 = 目標比 −0.019 %、許容 ±0.02 % の下限境界上 (格子・標本による不確かさ ±1e-4 と同程度)。ユーザ決定 2026-10-06「B」: 記録して設計は変えない"},
+ "dE_over_dC": {"verdict": "STEADY", "window": "run_0117 res_40000–60000", "note": "0.99983 (登録 1 ± 0.5 %)"}
+}
