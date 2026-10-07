@@ -97,7 +97,9 @@ def massflow_ratio(ns_run, euler_run) -> dict:
     for tag, rd in (("ns", ns_run), ("euler", euler_run)):
         d = _load_structured(rd)
         S = d["S"]
-        m = 2 * np.pi * np.trapezoid(d["q"] * d["r"] * S * S, d["r"] * S, axis=1)
+        # 実寸の流量 2π∫ρU_x r dr [kg/s]: 被積分 q·(r S) と積分変数 (r S) で S は 2 乗 (2026-10-08 修正: 以前は被積分にも S² を掛けて
+        # 3 乗になり、絶対値が S 倍に小さく、r_t の違う run どうしの比も S の比だけずれていた。診断の帳簿だけで使う値)
+        m = 2 * np.pi * np.trapezoid(d["q"] * d["r"] * S, d["r"] * S, axis=1)
         xs = d["x"][:, 0]
         sel = (xs > -2.5) & (xs < d["info"]["x_E"])
         out[f"mdot_{tag}"] = float(np.median(m[sel]))
