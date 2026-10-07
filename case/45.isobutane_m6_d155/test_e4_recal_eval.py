@@ -339,6 +339,19 @@ check("結合: 段 2 の Md_moc_offset が δ₁ と違う → 判別不能・�
       out["stages"]["d1"]["judgment"]["verdict"] == EV.LBL_UNDET and out["final"]["status"] == "保留")
 out = run_evaluate({"d0": flat(5.99980), "d1": flat(6.00030)}, stages=("d0", "d1"), delta_d1=d1v)
 check("結合: 段 2 でも外れる → 保留 (補正を重ねない)", out["stages"]["d1"]["judgment"]["verdict"] == EV.LBL_HOLD2 and out["final"]["status"] == "保留")
+# E4V の結合: 段 1 が判別不能 (facts の δ₁ が登録の候補) で、段 2 の run が候補の値 → 固定の条件の期待値も候補 (2026-10-07 の修正の回帰)
+_j1_orig = EV.judge_stage1
+EV.judge_stage1 = lambda series, ok, reasons: {"verdict": EV.LBL_UNDET, "reasons": ["前提の未達"],
+                                               "facts": {"delta1": float(EV.E4V_DELTA_CAND_REPR), "delta1_repr": EV.E4V_DELTA_CAND_REPR}}
+try:
+    out = run_evaluate({"d0": flat(6.00037), "d1": flat(6.000001)}, stages=("d0", "d1"), delta_d1=float(EV.E4V_DELTA_CAND_REPR))
+    fx = out["stages"]["d1"]["fixed"]
+    check("E4V 結合: 段 2 の固定の条件の期待値が候補 (「None でない」で落ちない)",
+          not any("None" in str(x) for x in (fx.get("problems") or [])) and out["stages"]["d1"]["expected_delta"] == float(EV.E4V_DELTA_CAND_REPR))
+    check("E4V 結合: 全前提・目標内 → 最終は E4V 合格・参照 run_0164", out["final"]["status"].startswith("E4V 合格") and out["final"]["reference_run"] == EV.RUNS["d1"])
+finally:
+    EV.judge_stage1 = _j1_orig
+
 out = run_evaluate({"d0": flat(6.00004)})
 check("結合: 段 1 が +4e-5 → 据え置き (最終 Md_moc_offset = δ₀、参照 run_0163)",
       out["stages"]["d0"]["judgment"]["verdict"] == EV.LBL_KEEP and out["final"] == {"status": "据え置き", "Md_moc_offset": EV.DELTA0,

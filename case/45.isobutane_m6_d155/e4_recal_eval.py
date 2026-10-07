@@ -604,6 +604,10 @@ def evaluate(case: Path) -> dict:
     j1 = st["d0"]["judgment"]
     if (case / RUNS["d1"]).is_dir():
         d1 = j1.get("delta1")
+        if d1 is None and j1.get("verdict") == LBL_UNDET and (j1.get("facts") or {}).get("delta1_repr") == E4V_DELTA_CAND_REPR:
+            # E4V (登録 6b5b2cdb): 段 1 が判別不能でも、登録の候補 δcand を段 2 の固定の条件の期待値にする
+            # (2026-10-07 修正: 初版の E4V の改修でここを直し忘れ、固定の条件が「None でない」で不成立になっていた)
+            d1 = float(E4V_DELTA_CAND_REPR)
         s2 = evaluate_stage(case, "d1", d1, eta_c, eta_rec)
         info2 = {}
         try:
