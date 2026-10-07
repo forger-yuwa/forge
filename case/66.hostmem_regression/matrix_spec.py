@@ -299,3 +299,79 @@ CONFIGS = {
     "v52":                dict(input="v52", env={}, kind="convert", group="変換器 node (CHT 用スラブ)"),
     "v44":                dict(input="v44", env={}, kind="convert", group="変換器 軸対称・種・凝縮"),
 }
+
+# ---- 比較器の完全性検査が使う「予定」 (plan §5.1 #6、2026-10-07 result レビュー M1) -----------------
+# compare_runs.py (登録判定 A・追加診断 B) と fixedwidth_eval.py は、比較の前に構成ごとに
+# 「予定した反復数・実行成功・必要ファイル・最終 step = 予定 N・物理時刻・必須列」を検査する。予定はここから決める
+# (run ディレクトリに「存在するもの」から決めない — 全反復が同じ所で止まっても合格にしないため)。
+REPS = 3   # 構成ごとの予定反復数 (base・new とも)。構成に reps= があればそれを使う
+
+# 初期出力・最終出力・残差 CSV のほかに必要な出力 ({N} は予定 step)。README 構成表の「確認する成果物」を名前で固定したもの。
+# 中間出力 res_{k·outStepInterval}.h5 は planned() が N と出力間隔から足す。
+_WALL4 = ["res_wall_4_{N}.h5"]
+_PROBE3 = ["point_probe_0.out", "point_probe_1.out", "point_probe_2.out"]
+EXTRA_OUTPUTS = {
+    "c36node": _WALL4 + _PROBE3,
+    "c36node_impdiag": _WALL4 + _PROBE3 + ["diag.csv"],
+    "c36node_psidual": _WALL4 + _PROBE3 + ["psi_dualeval.csv"],
+    "c44steady": ["res_outlet_2_{N}.h5", "res_wall_3_{N}.h5"],
+    "c44dual_ckpt100": ["res_outlet_2_{N}.h5", "res_wall_3_{N}.h5"],
+    "c44dual_restart100": ["res_outlet_2_{N}.h5", "res_wall_3_{N}.h5"],
+    "c44dual_pindiag": ["res_outlet_2_{N}.h5", "res_wall_3_{N}.h5"],
+    "c52cht": ["res_wall_bot_3_{N}.h5", "res_wall_top_4_{N}.h5", "conjugate_Tw_3.csv", "conjugate_history.csv"],
+    "c20cell_rk3": ["res_wall_5_{N}.h5"],
+    "c20cell_dual": ["res_wall_5_{N}.h5"],
+    "c20cell_impdiag": ["res_wall_5_{N}.h5", "diag.csv"],
+    "c57lm": _WALL4,
+    "c57lm_fromsst": _WALL4,
+    "c56lineimp": ["res_gap_6_{N}.h5", "res_plate_4_{N}.h5"],
+    "c56extra": ["res_gap_6_{N}.h5", "res_plate_4_{N}.h5"],
+    "c48absorb": _WALL4,
+    "c26optin": _WALL4,
+    "c26optin_env": _WALL4,
+}
+
+
+def _edit_int(edits, key):
+    """steps() が作った置換 (「key: 値」) から値を取る。無ければ None。"""
+    import re
+    for pat, rep, _n in edits:
+        if key in pat:
+            m = re.search(rf"{key}:\s*(\d+)", rep)
+            if m:
+                return int(m.group(1))
+    return None
+
+
+def plan_from(cfg, kind="forge", reps=REPS, n=None, out=None, extra=()):
+    """予定の dict を組む (planned() と、compare_runs.py の --base/--new 直接指定 [SERN g3 など] が共用)。
+
+    forge: 必要ファイルは初期出力 res_0.h5・res_{k·out}.h5 (k = 1..N/out、最後が最終出力 res_N.h5)・
+    residual_history.csv と extra ({N} を展開。*?[ を含むものは glob で 1 つ以上)。n が None なら N は未定
+    (完全性検査が FAIL にする)。変換器: N は無く、必要ファイルは converted.h5 と extra。
+    """
+    if kind == "convert":
+        return dict(cfg=cfg, kind=kind, reps=int(reps), N=None, out=None, required=["converted.h5"] + list(extra))
+    if n is None:
+        return dict(cfg=cfg, kind=kind, reps=int(reps), N=None, out=None, required=["res_0.h5", "residual_history.csv"])
+    out = out or n
+    if n % out:
+        raise ValueError(f"[matrix_spec] {cfg}: nStepOuter {n} が出力間隔 {out} で割り切れない")
+    req = ["res_0.h5"] + [f"res_{k * out}.h5" for k in range(1, n // out + 1)] + ["residual_history.csv"]
+    req += [x.replace("{N}", str(n)) for x in extra]
+    return dict(cfg=cfg, kind=kind, reps=int(reps), N=n, out=out, required=req)
+
+
+def planned(cfg):
+    """構成 cfg の予定: kind・reps・N・出力間隔・必要ファイル (名前の list、{N} 展開済み)。
+    forge の N と出力間隔は入力の solverConfig.yaml の修正 (steps()) から取る。"""
+    cs = CONFIGS[cfg]
+    kind = cs.get("kind", "forge")
+    reps = int(cs.get("reps", REPS))
+    if kind == "convert":
+        return plan_from(cfg, kind, reps)
+    edits = INPUTS[cs["input"]].get("edits", {}).get("solverConfig.yaml", [])
+    n = _edit_int(edits, "nStepOuter")
+    if n is None:
+        raise ValueError(f"[matrix_spec] {cfg}: 入力 {cs['input']} の nStepOuter が steps() で決まっていない")
+    return plan_from(cfg, kind, reps, n, _edit_int(edits, "outStepInterval"), EXTRA_OUTPUTS.get(cfg, []))

@@ -22,13 +22,13 @@ plan [architecture-solver-host-memory](../../plans/active/architecture-solver-ho
 
 | ファイル | 役割 |
 | --- | --- |
-| `matrix_spec.py` | **構成表の正本** (入力の元 run・複製するファイル・設定の修正・種・checkpoint・構成ごとの環境変数) |
+| `matrix_spec.py` | **構成表の正本** (入力の元 run・複製するファイル・設定の修正・種・checkpoint・構成ごとの環境変数)。比較器の完全性検査の予定 (`REPS`・`EXTRA_OUTPUTS`・`planned()`: 反復数・予定 N・必要ファイル) もここ |
 | `prepare_inputs.py` | (ローカル) 元 run から `inputs/<入力名>/` を作る。修正は正規表現 + 期待一致数で行い、PyYAML で期待値を検査。`mesh.bndFirstOrder`・`wallTreatmentSST: 1` が残れば失敗 |
 | `run_matrix.py` | (AWS) `seed` (restart_field.py を種に掛ける)・`set-ckpt`・`launch` (run を作って 1 本ずつ順に回すワーカーを裏で起動)・`resume`・`status`・`verify` (RUN_PROVENANCE の forge_bin/sha256 照合)・`note` (README の状態・比較から除外)・`table` (下の run 一覧の行) |
-| `compare_runs.py` | (AWS) §6 の判定 (登録判定 A、既定 `--metric m`)。`--cfg X` / `--all` (registry.tsv から run を選ぶ)、`--base … --new …` (直接指定)、`--diff2 A.h5 B.h5` (分割と連続など 2 ファイル)。`--metric abs` で追加診断 B (plan §6.2) |
-| `fixedwidth_eval.py` | 固定幅の独立 A/B (plan §6.3): `freeze` (既存 base 3 本から T = 2·S0 を凍結) と `eval` (段階 2 の 12 本を凍結した T で評価、§6.3 の判定表) |
+| `compare_runs.py` | (AWS) §6 の判定 (登録判定 A、既定 `--metric m`)。`--cfg X` / `--all` (registry.tsv から run を選ぶ)、`--base … --new …` (直接指定)、`--diff2 A.h5 B.h5` (分割と連続など 2 ファイル)。`--metric abs` で追加診断 B (plan §6.2)。A・B とも比較の前に**完全性検査** (下の「判定」節。直接指定は `--steps N` [`--out-interval`・`--reps`・`--require`] で予定を与える) |
+| `fixedwidth_eval.py` | 固定幅の独立 A/B (plan §6.3): `freeze --cfg <構成>` (既存 base 3 本から T = 2·S0 を凍結) と `eval` (段階 2 の 12 本を凍結した T で評価、§6.3 の判定表)。どちらも run ごとに完全性検査 (不完全な run は欠けた run と同じ「判定不能」) |
 | `fixedwidth_c44dual_ckpt100/` | §6.3 の段階 1 の成果物 (`T_frozen.tsv`・`T_frozen.sha256`・`PLAN.txt`・`plan.json`・`notes.txt`)。段階 2 は `run_matrix.py launch-plan fixedwidth_c44dual_ckpt100/plan.json` |
-| `test_compare_abs.py` | 追加診断 B の判定関数 `judge_abs`・自己検査 `self_check_abs` の単体試験 (codex の最小再現 2 つを含む)。`python3 test_compare_abs.py` |
+| `test_compare_abs.py` | 追加診断 B の判定関数 `judge_abs`・自己検査 `self_check_abs` の単体試験 (codex の最小再現 2 つを含む) と、完全性検査の負例の単体試験 (`test_complete_*`・`test_fw_*`、合成した小さな run で)。`python3 test_compare_abs.py` |
 | `memlog_summary.py` | (AWS) `FORGE_MEMLOG=1` の工程別 RSS/HWM/GPU と `--memwatch` の 1 s 採取 (`mem_samples.csv`) を表にする |
 | `split_vs_cont.py` | (AWS) dual-time の分割 (ckpt100 → 再開 100) と連続 200 の差を、ビルドごとに反復内の差と並べる (判定はしない) |
 | `results/<日付>_<base>_vs_<new>_abs/` | 追加診断 B のテキスト (構成ごと・`all_quantities.tsv`・`summary.txt`・`selfcheck.txt`・`test_compare_abs.txt`・`sern_g3/`) |
@@ -128,6 +128,61 @@ S と D の尺度が揃わず、**反復の並び順で判定が変わる** (bas
   SERN g3 は `sern_g3/` (`--base … --new … --tag sern_g3`)。
 - **読み方 (plan §6.2)**: B で超過が消えた量は、その A の FAIL を「尺度依存で説明できる (追加診断で反復内差の 2 倍以内)」と記録する。
   B でも超過する量は変更起因の差を候補に戻す。**B の PASS は A の書換えや「非決定性だけだった」証明には使わない**。
+
+### 完全性検査 (plan §5.1 #6、2026-10-07 result レビュー M1。A・B・固定幅に共通の前提)
+
+result レビュー ([`notes/reviews/2026-10-07-architecture-solver-host-memory-result.md`](../../notes/reviews/2026-10-07-architecture-solver-host-memory-result.md) 指摘 1) で、
+比較器が**比較対象の欠落を FAIL にしない**ことが分かった: 最終出力を「存在する最大 step の h5」と見なし予定 N への到達を見ない、
+存在しないディレクトリを base/new 各 3 本で渡すと「量 0、FAIL 0」、registry からの選択 (`runs_for`) は終了コードによらず `done` を選び
+終わっていない run は黙って落とす。全反復が同じ所で止まっても、反復の間では一致するので合格し得た。
+そこで A (`compare_runs.py`)・B (`--metric abs`)・固定幅 (`fixedwidth_eval.py`) とも、**値を比べる前に構成ごとに完全性を検査し、
+満たさなければその構成を FAIL** にする (値の比較はしない。固定幅では不完全な run を欠けた run と同じ「判定不能」に)。
+予定は構成表 (`matrix_spec.planned()`。直接指定は `--steps` 等) から決め、run ディレクトリに「存在するもの」からは決めない。
+
+- **反復数**: base・new とも予定の本数 (`matrix_spec.REPS` = 3、構成に `reps=` があればそれ)。registry の rep 1..3 を 1 本ずつ
+  (`.exclude` を除く)。rep が無い・同じ rep が除外されずに複数・ディレクトリが無いのは FAIL。予定外の rep (c52cht の r4–r7 等) は使わない (情報として出す)。
+  直接指定は渡した本数が予定と違えば FAIL、同じ run の重複指定も FAIL。
+- **実行成功**: `.state` が `done`・rc 0、`NANCHECK.txt` の最終行が `NANCHECK: PASS`。変換器は既知の終了時 rc 1 を今の扱いのまま許す
+  (rc 0/1 かつ `converted.h5` に `/VALUE`・`/MESH`。`written=0` は FAIL、`written` の記録が無い古い `.state` は h5 の検査だけで判定)。
+- **必要ファイル**: forge は初期出力 `res_0.h5`・`res_{k·出力間隔}.h5` (最後が最終出力 `res_N.h5`)・`residual_history.csv` と、
+  構成ごとの境界出力・probe・診断 CSV (`EXTRA_OUTPUTS`: 上の構成表の「確認する成果物」を名前で固定したもの)。変換器は `converted.h5`。
+- **最終出力の step = 予定 N**: `res_N.h5` がある、N より後の `res_*.h5` が無い、run の `solverConfig.yaml` の `nStepOuter` = N、
+  残差 CSV の step が 0..N−1 で最後の行の phase が `outer_end`、境界出力の属性 `step` = N。
+  **物理時刻**: 最終出力の属性 (`/CHECKPOINT` の `totalTime`・`dt`、境界出力の `step`・`step_abs`) が構成内の全 run で一致。
+- **必須の列**: 残差 CSV に `step`・`inner`・`phase`・`rms_ro`/`roUx`/`roUy`/`roUz`/`roe`、SST なら `rms_roK`/`rms_roOmega`、
+  遷移モデルなら `rms_roGamma`/`rms_roReth` (有無は run の `solverConfig.yaml` から)。
+- **比較量 0 は FAIL**: A は (b) の量が 0 なら `NSTEP FAIL (比較した量 0)`、初期出力の比べた量が 0 なら `INIT_OUT FAIL`。B は「(比較量)」の FAIL 行を足す。
+- **出力**: A は構成ごとの報告の先頭に完全性の節 (run ごとの OK/FAIL と理由)、`summary.txt` の各行に `COMPLETE PASS` / `COMPLETE FAIL (理由)` と
+  末尾に構成数、`--out-dir` に `completeness.tsv` (構成・判定・本数・予定 N・理由)。B は `summary.txt` の各行に `完全性 PASS/FAIL`、
+  `completeness.tsv`、完全性 FAIL の構成は `all_quantities.tsv` に「(完全性)」の FAIL 行を 1 つ。
+- 単体試験 (`test_compare_abs.py` の `test_complete_*`・`test_fw_*`、一時ディレクトリに合成した run で): 存在しないディレクトリ (codex の再現を含む)・
+  予定 N が無い・反復不足・registry の選択 (rep 欠け・重複・ディレクトリ無し)・実行失敗 (rc・未終了・`.state`/NANCHECK 無し・NaN)・
+  初期出力だけ・予定 N 未到達 (全反復が同じ所で停止・設定の N 違い・N より後の出力・最後の行が outer_end でない)・必須列の欠落 (SST 列を含む)・
+  構成ごとの必要ファイルの欠落・比較量 0・変換器の rc・物理時刻の不一致・固定幅 eval の不完全な run と既存 base、がいずれも FAIL (判定不能)、
+  陽性対照 (そろった run) は PASS。registry から選ぶ通しの経路 (`--cfg`・`--root`、A と B) も試験する。既存 8 試験を含め 23 試験 ALL PASS (2026-10-07、ローカル)。
+- **既存成果物への掛け直しは未実施** (2026-10-07 時点)。上の「結果」「追加診断 B の結果」と `results/` の原本は完全性検査の**前**の比較器で作ったもので、
+  書き換えていない。掛け直しは AWS で行い、新しい出力先 (`recheck_*`) に書く (合格条件 [plan §5.1 #6]: 全構成と SERN g3 で完全性 PASS、
+  かつ B の `all_quantities.tsv` が原本と同じ)。コマンド:
+
+  ```bash
+  cd ~/forge-b4/case/66.hostmem_regression
+  python3 test_compare_abs.py                                                   # ALL PASS を確認
+  python3 compare_runs.py --all --new-build new --out-dir recheck_A             # A (30 構成)
+  python3 compare_runs.py --metric abs --all --new-build new --out-dir recheck_B   # B (30 構成)
+  S=~/forge-r8/case/46.sern_design
+  SB="$S/run_1072_hm_g3_base_r1 $S/run_1073_hm_g3_base_r2 $S/run_1074_hm_g3_base_r3"
+  SN="$S/run_1075_hm_g3_new_r1 $S/run_1076_hm_g3_new_r2 $S/run_1077_hm_g3_new_r3"
+  SREQ="res_cowl_in_5_{N}.h5 res_cowl_out_6_{N}.h5 res_ramp_4_{N}.h5 res_sidewall_in_11_{N}.h5 res_sidewall_out_12_{N}.h5 res_vehicle_base_18_{N}.h5 res_vehicle_side_17_{N}.h5 res_vehicle_top_15_{N}.h5"
+  python3 compare_runs.py --base $SB --new $SN --steps 100 --require $SREQ --tag sern_g3 --out-dir recheck_A_sern      # A (SERN g3)
+  python3 compare_runs.py --metric abs --base $SB --new $SN --steps 100 --require $SREQ --tag sern_g3 --out-dir recheck_B/sern_g3   # B (SERN g3)
+  grep -c "COMPLETE PASS" recheck_A/summary.txt recheck_A_sern/summary.txt; cat recheck_B/completeness.tsv recheck_B/sern_g3/completeness.tsv
+  # B の値が変わらないこと (原本は手元の results/…_abs/。AWS に原本が無ければ recheck_B を持ち帰って手元で diff)
+  diff <(sort results/2026-10-07_base9c9f623c_vs_new93e55957_abs/all_quantities.tsv) <(sort recheck_B/all_quantities.tsv)
+  diff <(sort results/2026-10-07_base9c9f623c_vs_new93e55957_abs/sern_g3/all_quantities.tsv) <(sort recheck_B/sern_g3/all_quantities.tsv)
+  # (任意) 固定幅の段階 2 にも掛け直す。--out を必ず別にする (既定の result/ は原本)
+  python3 fixedwidth_eval.py eval --plan fixedwidth_c44dual_ckpt100/plan.json --out fixedwidth_c44dual_ckpt100/recheck
+  ```
+
 ## 使い方 (変更後のビルドで回す手順)
 
 前提: AWS が `running` (`bash solver_density_cuda/tools/aws_instance.sh status`、start/stop は自分でしない)、`pgrep -x forge` の cwd で他セッションを確認。
@@ -158,7 +213,8 @@ python3 run_matrix.py table   # → 下の「計算 run 一覧」を置き換え
 
 SERN g3 (メモリ): `case/46` に `run_1072` と同じ作り方で run を作り (sern.h5 はハードリンクで共有・読み取り専用)、
 `python3 run_matrix.py launch-dir <run ...> --bin <bin> --label <ビルド名> --env FORGE_MEMLOG=1 --memwatch`、
-`python3 memlog_summary.py <run ...> --items` で工程別の表。比較は `compare_runs.py --base <base 3 本> --new <new 3 本>`。
+`python3 memlog_summary.py <run ...> --items` で工程別の表。比較は `compare_runs.py --base <base 3 本> --new <new 3 本> --steps 100 --require <境界出力 …>`
+(直接指定は構成表に無いので、完全性検査の予定 N・必要ファイルを引数で与える。下の「完全性検査」の掛け直しのコマンド)。
 
 ## 結果 (2026-10-07、base 9c9f623c 3 回 対 new 93e55957 3 回)
 

@@ -4,10 +4,20 @@
     # 構成ごと (registry.tsv から run を選ぶ。base だけなら同ビルド内のばらつきだけを出す)
     python3 compare_runs.py --cfg c36node [--base-build base] [--new-build new] [--out report.txt]
     python3 compare_runs.py --all [--new-build new] --out-dir compare/       # 全構成 (構成ごとの報告 + summary.txt)
-    # run を直接指定
-    python3 compare_runs.py --base RUN RUN RUN [--new RUN RUN RUN]
+    # run を直接指定 (予定 N は --steps で与える。--reps 既定 3、--require で追加の必要ファイル)
+    python3 compare_runs.py --base RUN RUN RUN [--new RUN RUN RUN] --steps N [--out-interval K] [--require F ...]
     # 2 ファイルの単純比較 (dual-time の分割 res_100 と連続 res_200 など)
     python3 compare_runs.py --diff2 A.h5 B.h5
+
+完全性検査 (plan §5.1 #6、2026-10-07 result レビュー M1。A・B とも比較の前に構成ごとに行い、満たさなければ**その構成を FAIL**、
+値の比較はしない): 予定は matrix_spec.planned() (直接指定は --steps 等) から決め、run に「存在するもの」からは決めない。
+  - 予定の反復数 (base・new とも、既定 3) の run がそろう (registry の rep 1..reps が 1 本ずつ、.exclude を除く。ディレクトリが実在)
+  - 各 run が実行成功 (.state が done・rc 0 [変換器は既知の終了時 rc 1 も可、converted.h5 に /VALUE・/MESH、written=0 は不可]・NANCHECK: PASS)
+  - 必要ファイル (初期出力 res_0・res_{k·out}・最終出力 res_N・残差 CSV・構成ごとの境界出力/probe/診断 CSV) がある
+  - 最終出力の step = 予定 N (res_N がある・N より後の res が無い・solverConfig の nStepOuter = N・残差 CSV の step が 0..N−1 で
+    最後の行が outer_end・境界出力の属性 step = N)。物理時刻 (CHECKPOINT の totalTime/dt 等の属性) が全 run で一致
+  - 残差 CSV の必須列 (step・inner・phase・rms_ro/roUx/roUy/roUz/roe、SST なら rms_roK/roOmega、遷移なら rms_roGamma/roReth)
+  - 比較した量の数が 0 なら FAIL
 
 判定の定義 (§6。結果を見てから変えない):
   (a) step 0 の残差行 (residual_history.csv の最初の step の全行) を全列ビット一致で比べる。base 反復の間で値が割れる列
@@ -24,6 +34,7 @@
 """
 import argparse
 import csv
+import fnmatch
 import glob
 import itertools
 import os
@@ -35,6 +46,8 @@ import h5py
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import matrix_spec as ms  # noqa: E402
 
 # 初期出力で比べる量 (保存量・原始量・幾何量)。/VALUE 以外 (/MESH・/CHECKPOINT・/BCONDS 等) は幾何・状態として全部比べる。
 T0_VALUE = re.compile(
@@ -55,8 +68,8 @@ LOG_NEW_INFO = re.compile(r"\[variables\] host cell arrays \(gpu: \d\): \d+ of \
 
 
 # ------------------------------------------------------------------ run の選択
-def read_registry():
-    p = os.path.join(HERE, "registry.tsv")
+def read_registry(root=HERE):
+    p = os.path.join(root, "registry.tsv")
     if not os.path.exists(p):
         return []
     with open(p) as f:
@@ -100,6 +113,251 @@ def res_steps(d):
         if m:
             st.append(int(m.group(1)))
     return sorted(st)
+
+
+# ------------------------------------------------------------------ 完全性検査 (plan §5.1 #6、result レビュー M1)
+# 予定 (plan) は matrix_spec.plan_from() の dict: cfg・kind・reps・N・out・required。
+RES_REQUIRED_COLS = ("step", "inner", "phase", "rms_ro", "rms_roUx", "rms_roUy", "rms_roUz", "rms_roe")
+RES_SST_COLS = ("rms_roK", "rms_roOmega")             # main.cpp scalarResidualEnabled (SST) のとき
+RES_TRANSITION_COLS = ("rms_roGamma", "rms_roReth")   # 遷移モデルが有効なとき (check_convergence.py と同じ)
+# 最終出力から拾う「物理時刻・step」の属性 (全 run で一致すること。step / step_abs は境界出力の属性で、step は N と一致すること)
+TIME_ROOT_ATTRS = ("step", "step_abs", "time", "totalTime")
+TIME_CKPT_ATTRS = ("totalTime", "dt")
+
+
+def select_runs(cfg, build, plan, root=HERE):
+    """registry から構成 cfg・ビルド build の予定の反復 (rep 1..reps) を 1 本ずつ選ぶ。
+    返り値 (run ディレクトリの list, FAIL の理由の list, 情報の list)。.exclude の run は使わない。
+    ある rep が無い・除外されていない run が同じ rep に複数あるのは FAIL (runs_for と違い、終わっていない run も黙って落とさない)。"""
+    dirs, why, notes = [], [], []
+    by_rep = {}
+    for r in read_registry(root):
+        if r["cfg"] != cfg or r["build"] != build:
+            continue
+        d = os.path.join(root, r["run"])
+        if os.path.exists(os.path.join(d, ".exclude")):
+            notes.append(f"{r['run']}: 除外 (.exclude) — 比較に使わない")
+            continue
+        try:
+            k = int(r["rep"])
+        except (TypeError, ValueError):
+            why.append(f"{r['run']}: registry の rep が整数でない ({r.get('rep')!r})")
+            continue
+        by_rep.setdefault(k, []).append(d)
+    for k in range(1, plan["reps"] + 1):
+        c = by_rep.get(k, [])
+        if not c:
+            why.append(f"{build} r{k} の run が registry に無い (除外分を除く; 予定 {plan['reps']} 本)")
+        elif len(c) > 1:
+            why.append(f"{build} r{k} が複数ある ({', '.join(os.path.basename(x) for x in c)}) — どれを使うか決まらない")
+        else:
+            dirs.append(c[0])
+    extra = sorted(k for k in by_rep if not 1 <= k <= plan["reps"])
+    if extra:
+        notes.append(f"{build}: 予定外の反復 r{extra} は比較に使わない")
+    return dirs, why, notes
+
+
+def parse_state(d):
+    """run_matrix.py のワーカーが書く .state ("done rc=0 nan=PASS [written=1] wall=…s") を読む。無ければ None。"""
+    p = os.path.join(d, ".state")
+    if not os.path.exists(p):
+        return None
+    raw = open(p).read().strip()
+    m_rc = re.search(r"\brc=(-?\d+)", raw)
+    m_w = re.search(r"\bwritten=(\d+)", raw)
+    return dict(raw=raw, done=raw.startswith("done"), rc=int(m_rc.group(1)) if m_rc else None,
+                written=int(m_w.group(1)) if m_w else None)
+
+
+def _find_key(obj, key):
+    """入れ子の dict から最初に見つかった key の値 (無ければ None)。"""
+    if isinstance(obj, dict):
+        if key in obj:
+            return obj[key]
+        for v in obj.values():
+            r = _find_key(v, key)
+            if r is not None:
+                return r
+    return None
+
+
+def solver_config_info(d):
+    """run の solverConfig.yaml から nStepOuter・SST・遷移の有無。読めなければ None。PyYAML が無ければ正規表現で読む。"""
+    p = os.path.join(d, "solverConfig.yaml")
+    if not os.path.exists(p):
+        return None
+    txt = open(p, encoding="utf-8", errors="replace").read()
+    try:
+        import yaml
+        c = yaml.safe_load(txt) or {}
+        n = _find_key(c, "nStepOuter")
+        tu = c.get("turbulence") or {}
+        model = str(tu.get("model", "")).strip().lower()
+        sst = model == "sst" or (tu.get("LESorRANS") == 2 and tu.get("RANSmodel") == 1)
+        tr = str(tu.get("transition", "none")).strip().lower()
+        return dict(N=int(n) if n is not None else None, sst=sst, transition=tr not in ("none", "0", "false", ""))
+    except ImportError:
+        t = re.sub(r"#.*", "", txt)
+        m = re.search(r"\bnStepOuter\s*:\s*(\d+)", t)
+        sst = bool(re.search(r"\bmodel\s*:\s*[\"']?sst\b", t, re.I)) or bool(
+            re.search(r"\bLESorRANS\s*:\s*2\b", t) and re.search(r"\bRANSmodel\s*:\s*1\b", t))
+        mt = re.search(r"\btransition\s*:\s*[\"']?([A-Za-z0-9_]+)", t)
+        return dict(N=int(m.group(1)) if m else None, sst=sst,
+                    transition=bool(mt) and mt.group(1).lower() not in ("none", "0", "false"))
+
+
+def _required_present(d, name):
+    if any(ch in name for ch in "*?["):
+        return bool(fnmatch.filter(os.listdir(d), name))
+    return os.path.exists(os.path.join(d, name))
+
+
+def check_run(d, plan):
+    """1 本の run の完全性。返り値 (FAIL の理由の list [空なら合格], 最終出力の物理時刻・step の属性 dict)。"""
+    if not os.path.isdir(d):
+        return [f"ディレクトリが無い ({d})"], {}
+    why, tinfo = [], {}
+    kind, n = plan["kind"], plan.get("N")
+    # ---- 実行成功 (.state の rc と NANCHECK)
+    st = parse_state(d)
+    if st is None:
+        why.append(".state が無い (ワーカーが終了を記録していない)")
+    elif not st["done"]:
+        why.append(f"終了していない (.state: {st['raw']})")
+    elif kind == "convert":
+        # 変換器は終了時の cudaFree で exit 1 になる既知の罠 (出力は完全)。完了は rc でなく出力 h5 で判定する (run_matrix.py の扱いのまま):
+        # written=0 は FAIL。written の無い .state (記録を足す前のワーカー) は下の converted.h5 の検査 (/VALUE・/MESH) だけで判定する
+        if st["written"] == 0:
+            why.append(f"変換結果が書かれていない (.state: {st['raw']})")
+        if st["rc"] not in (0, 1):
+            why.append(f"終了コード {st['rc']} (変換器で許すのは 0 と既知の終了時 1 だけ)")
+    elif st["rc"] != 0:
+        why.append(f"終了コード {st['rc']} (.state: {st['raw']})")
+    p = os.path.join(d, "NANCHECK.txt")
+    if not os.path.exists(p):
+        why.append("NANCHECK.txt が無い")
+    else:
+        lines = open(p).read().strip().splitlines()
+        last = lines[-1] if lines else ""
+        if last.strip() != "NANCHECK: PASS":
+            why.append(f"NaN 検査が合格でない ({last or '空'})")
+    # ---- 必要ファイル
+    if kind == "forge" and n is None:
+        why.append("予定 N が無い (構成表 matrix_spec か --steps で与える)")
+    miss = [f for f in plan["required"] if not _required_present(d, f)]
+    if miss:
+        why.append(f"必要ファイルが無い: {', '.join(miss)}")
+    if kind == "convert":
+        try:
+            with h5py.File(os.path.join(d, "converted.h5"), "r") as f:
+                if "VALUE" not in f or "MESH" not in f:
+                    why.append("converted.h5 に /VALUE か /MESH が無い")
+        except Exception as e:  # 開けない h5 は合格にしない
+            if "converted.h5" not in miss:
+                why.append(f"converted.h5 が開けない ({e})")
+        return why, tinfo
+    if n is None:
+        return why, tinfo
+    # ---- 最終出力の step = 予定 N (存在する最大 step を最終と見なさない)。入力として複製した h5 (INPUT_FILES) は数えない
+    inp = input_files(d)
+    steps = [s for s in res_steps(d) if f"res_{s}.h5" not in inp]
+    late = [s for s in steps if s > n]
+    if late:
+        why.append(f"予定 N {n} より後の出力がある (res_{late}.h5) — 予定と違う run")
+    if n not in steps:
+        why.append(f"最終出力 res_{n}.h5 が無い (存在する res の step: {steps or 'なし'})")
+    sc = solver_config_info(d)
+    if sc is None:
+        why.append("solverConfig.yaml が無い")
+    elif sc["N"] != n:
+        why.append(f"solverConfig.yaml の nStepOuter {sc['N']} が予定 N {n} と違う")
+    # ---- 残差 CSV: 必須列と step の範囲
+    rp = os.path.join(d, "residual_history.csv")
+    if os.path.exists(rp):
+        with open(rp) as f:
+            rd = csv.reader(f)
+            hdr = [h.strip() for h in next(rd, [])]
+            rows = [r for r in rd if r]
+        need = list(RES_REQUIRED_COLS)
+        if sc and sc["sst"]:
+            need += RES_SST_COLS
+        if sc and sc["transition"]:
+            need += RES_TRANSITION_COLS
+        lack = [c for c in need if c not in hdr]
+        if lack:
+            why.append(f"residual_history.csv に必須の列が無い: {', '.join(lack)}")
+        if not rows:
+            why.append("residual_history.csv にデータ行が無い")
+        elif "step" in hdr:
+            i = hdr.index("step")
+            try:
+                ss = {int(r[i]) for r in rows}
+                if ss != set(range(n)):
+                    why.append(f"residual_history.csv の step が 0..{n - 1} でない (最小 {min(ss)}、最大 {max(ss)}、{len(ss)} 種類)")
+            except (ValueError, IndexError):
+                why.append("residual_history.csv の step 列が整数でない")
+            if "phase" in hdr:
+                j = hdr.index("phase")
+                if len(rows[-1]) <= j or rows[-1][j].strip() != "outer_end":
+                    why.append(f"residual_history.csv の最後の行が outer_end でない ({rows[-1][:3]})")
+    # ---- 最終出力の物理時刻・step の属性
+    finals = sorted(b for b in (os.path.basename(x) for x in glob.glob(os.path.join(d, f"*_{n}.h5"))) if b not in inp)
+    for fn in finals:
+        try:
+            with h5py.File(os.path.join(d, fn), "r") as f:
+                for k in TIME_ROOT_ATTRS:
+                    if k in f.attrs:
+                        tinfo[f"{fn}:/@{k}"] = _attr(f.attrs[k])
+                if "CHECKPOINT" in f:
+                    for k in TIME_CKPT_ATTRS:
+                        if k in f["CHECKPOINT"].attrs:
+                            tinfo[f"{fn}:/CHECKPOINT@{k}"] = _attr(f["CHECKPOINT"].attrs[k])
+        except Exception as e:
+            why.append(f"{fn} が開けない ({e})")
+    for k, v in tinfo.items():
+        if k.endswith("/@step") and v != n:
+            why.append(f"{k} = {v} が予定 N {n} と違う")
+    return why, tinfo
+
+
+def completeness(plan, base, new, pre_why=(), need_new=True):
+    """構成の完全性。base / new は run ディレクトリの list (選択済み)。pre_why は選択の段階の FAIL 理由。
+    返り値 dict(verdict "PASS"/"FAIL", reasons, lines)。"""
+    why = list(pre_why)
+    lines = [f"[完全性] 予定: kind {plan['kind']}、反復 {plan['reps']} 本 (base"
+             + (" と new" if need_new else "") + f")、N {plan.get('N')}、出力間隔 {plan.get('out')}、"
+             f"必要ファイル {', '.join(plan['required'])}"]
+    for label, dirs in (("base", base), ("new", new)):
+        if label == "new" and not need_new:
+            if dirs:
+                why.append(f"new の run が {len(dirs)} 本あるが new を比較しない指定")
+            continue
+        if len(dirs) != plan["reps"]:
+            why.append(f"{label} {len(dirs)} 本 (予定 {plan['reps']} 本)")
+    real = [os.path.realpath(d) for d in base + new]
+    if len(set(real)) != len(real):
+        why.append("同じ run が 2 回以上指定されている")
+    tinfo = {}
+    for d in base + new:
+        w, ti = check_run(d, plan)
+        lines.append(f"  {os.path.basename(os.path.normpath(d))}: {'OK' if not w else 'FAIL — ' + '; '.join(w)}")
+        why += [f"{os.path.basename(os.path.normpath(d))}: {x}" for x in w]
+        if not w:
+            tinfo[d] = ti
+    if tinfo:
+        d0 = next(iter(tinfo))
+        for d, ti in tinfo.items():
+            if ti != tinfo[d0]:
+                ks = sorted(k for k in set(ti) | set(tinfo[d0]) if ti.get(k) != tinfo[d0].get(k))
+                why.append(f"{os.path.basename(d)}: 物理時刻・step の属性が {os.path.basename(d0)} と違う "
+                           f"({', '.join(f'{k} {tinfo[d0].get(k)} vs {ti.get(k)}' for k in ks[:4])})")
+        lines.append(f"  最終出力の物理時刻・step の属性 ({os.path.basename(d0)}): "
+                     + (", ".join(f"{k}={v}" for k, v in sorted(tinfo[d0].items())) or "(属性なし)"))
+    verdict = "PASS" if not why else "FAIL"
+    lines += [f"  FAIL の理由: {x}" for x in why]
+    lines.append(f"  >> COMPLETE: {verdict}" + (f" ({len(why)} 件)" if why else ""))
+    return dict(verdict=verdict, reasons=why, lines=lines)
 
 
 # ------------------------------------------------------------------ h5
@@ -222,7 +480,8 @@ class Report:
         self.p(f"  >> {key}: {val}")
 
 
-def compare(base, new, rep, cfgname=""):
+def compare(base, new, rep, cfgname, plan):
+    """登録判定 A。plan (matrix_spec.plan_from の dict) の N を最終出力の step に使う (完全性検査を通った run だけを渡す)。"""
     allruns = base + new
     tag = {d: ("B" if d in base else "N") + str((base if d in base else new).index(d) + 1) for d in allruns}
     rep.p(f"=== 構成 {cfgname}")
@@ -344,8 +603,8 @@ def compare(base, new, rep, cfgname=""):
     else:
         rep.p("  residual_history.csv が無い (変換器など)")
 
-    # ---- 初期出力 (保存量・原始量・幾何量のビット一致)
-    steps = res_steps(allruns[0])
+    # ---- 初期出力 (保存量・原始量・幾何量のビット一致)。初期出力は res_0、最終出力は予定 N (存在する最大 step ではない)
+    steps = [0, plan["N"]] if plan["kind"] == "forge" else []
     if steps:
         fn0 = f"res_{steps[0]}.h5"
         rep.p(f"\n[a] 初期出力 {fn0}: 保存量・原始量・幾何量のビット一致 (他の量は情報として不一致の数だけ)")
@@ -367,18 +626,14 @@ def compare(base, new, rep, cfgname=""):
             rep.p(f"  不一致 {t} {n}: m={m:.3e}")
         if info_diff:
             rep.p(f"  (情報) 比べない量で B1 と違うもの: {sorted(info_diff)[:20]}")
-        rep.v("INIT_OUT", "PASS" if not t0_bad else f"FAIL ({len(t0_bad)} 件)")
-        if len(steps) == 1:
-            rep.p("  (出力が 1 回だけ)")
+        rep.v("INIT_OUT", ("PASS" if not t0_bad else f"FAIL ({len(t0_bad)} 件)") if cmp_names else "FAIL (比べた量 0)")
 
     # ---- (b) 最後の出力・境界出力・CSV・残差履歴
-    rep.p("\n[b] N step 後: m = max|A−B|/max|A|。S = 同ビルド内ペアの最大、D = base×new の最大、合格 D ≤ 2·S")
+    rep.p(f"\n[b] N step 後 (予定 N = {plan.get('N')}): m = max|A−B|/max|A|。S = 同ビルド内ペアの最大、D = base×new の最大、合格 D ≤ 2·S")
     finals = []
     if steps:
         last = steps[-1]
-        finals = [f for f in h5s if re.search(rf"_{last}\.h5$", f) and (len(steps) > 1 or True)]
-        if len(steps) > 1:
-            finals = [f for f in finals if f != f"res_{steps[0]}.h5"]
+        finals = [f for f in h5s if re.search(rf"_{last}\.h5$", f) and f != f"res_{steps[0]}.h5"]
     if not steps:
         finals = h5s   # 変換器
     tables = sorted(f for f in common if f.endswith((".csv", ".out")))
@@ -448,7 +703,9 @@ def compare(base, new, rep, cfgname=""):
         if r[0] == "residual_history.csv" and r[1] in ("rms_ro", "rms_roe"):
             key["csv:" + r[1]] = r[2]
     rep.p("  主要量の S_base: " + ", ".join(f"{k}={v:.2e}" for k, v in key.items()))
-    if new:
+    if not rows_out:
+        rep.v("NSTEP", "FAIL (比較した量 0)")     # 量 0・FAIL 0 を合格にしない
+    elif new:
         rep.v("NSTEP", "PASS" if not b_fail else f"FAIL ({len(b_fail)} 量)")
         # 情報: D/(2S) が最大のデータセット (1 を超えると FAIL)。S = 0 で D = 0 の量は除く
         cand = [(r[4] / (2 * max(r[2], r[3])), r) for r in rows_out
@@ -559,10 +816,11 @@ def self_check_abs(base_arrs, new_arrs, ref):
     return n_perm, n_bad, swap_ok
 
 
-def final_files(d):
-    """B の比較対象 (A と同じ保存時点): 最終ステップの h5 (初期出力を除く) と CSV/probe 出力。変換器は全 h5。"""
+def final_files(d, n=None):
+    """B の比較対象 (A と同じ保存時点): 最終ステップの h5 (初期出力を除く) と CSV/probe 出力。変換器は全 h5。
+    n = 予定 N (完全性検査と同じ値)。n を渡さないと「存在する最大 step」を最終と見なす旧い挙動 (fixedwidth の凍結の再現用だけ)。"""
     fs = out_files(d)
-    steps = res_steps(d)
+    steps = [0, n] if n is not None else res_steps(d)
     h5s = sorted(f for f in fs if f.endswith(".h5"))
     if steps:
         last = steps[-1]
@@ -575,8 +833,9 @@ def final_files(d):
     return finals, tables
 
 
-def compare_abs(base, new, cfgname=""):
-    """追加診断 B。返り値 (報告の行, 量ごとの行の list[dict], 自己検査の集計 dict)。"""
+def compare_abs(base, new, cfgname, plan):
+    """追加診断 B。返り値 (報告の行, 量ごとの行の list[dict], 自己検査の集計 dict)。
+    plan の N を最終出力の step に使う (完全性検査を通った run だけを渡す)。比較した量が 0 なら FAIL の行を 1 つ足す。"""
     allruns = base + new
     tag = {d: ("B" if d in base else "N") + str((base if d in base else new).index(d) + 1) for d in allruns}
     lines = [f"=== 構成 {cfgname} (追加診断 B: d = max|A−B|、S_abs = 同ビルド内 6 対の最大、D_abs = ビルド間 9 対の最大、合格 D_abs ≤ 2·S_abs)"]
@@ -619,7 +878,7 @@ def compare_abs(base, new, cfgname=""):
                          reason=r["reason"], detail=det))
 
     # ---- ファイル集合
-    sets = {d: final_files(d) for d in allruns}
+    sets = {d: final_files(d, plan["N"]) for d in allruns}
     f_ref = sets[allruns[0]]
     for d in allruns[1:]:
         if sets[d] != f_ref:
@@ -664,6 +923,9 @@ def compare_abs(base, new, cfgname=""):
             data = [tabs[d][0].get(n) for d in allruns]
             add(fn, n, data[:len(base)], data[len(base):], ("比較不能: " + bad) if bad else "")
 
+    if sc["quantities"] == 0:   # 量 0・FAIL 0 を合格にしない
+        rows.append(dict(cfg=cfgname, file="(比較量)", name="-", S=float("nan"), D=float("nan"), ratio=float("inf"),
+                         verdict="FAIL", reason="比較した量が 0", detail=""))
     nfail = sum(1 for r in rows if r["verdict"] == "FAIL")
     lines.append(f"\n  量 {len(rows)}、FAIL {nfail}")
     lines.append(f"  自己検査: {sc['quantities']} 量 × 並べ替え {sc['orderings'] // max(sc['quantities'], 1)} 通り = {sc['orderings']} 評価で"
@@ -691,6 +953,50 @@ def diff2(a, b):
     print(f"  ({len(names)} 共通データセット、差 0 でないものだけ表示)")
 
 
+def build_jobs(a, need_new):
+    """比較の単位 (構成) ごとに予定と run を決める。返り値は dict(cfg, plan, base, new, why, notes) の list。
+    --all / --cfg は構成表 (matrix_spec.planned) の予定と registry の rep 1..reps。--base/--new の直接指定は --steps 等の予定。"""
+    jobs = []
+    direct_opts = [o for o, v in (("--steps", a.steps), ("--out-interval", a.out_interval), ("--require", a.require),
+                                  ("--kind", a.kind), ("--reps", a.reps)) if v]
+    root = os.path.abspath(os.path.expanduser(a.root)) if a.root else HERE
+    if a.all or a.cfg:
+        if direct_opts:
+            sys.exit(f"{', '.join(direct_opts)} は --base/--new の直接指定のときだけ使う (構成表の予定を上書きしない)")
+        for c in (list(ms.CONFIGS) if a.all else [a.cfg]):
+            why, notes = [], []
+            if c not in ms.CONFIGS:
+                plan = ms.plan_from(c)
+                why.append(f"構成 {c} が構成表 (matrix_spec.CONFIGS) に無い")
+            else:
+                plan = ms.planned(c)
+            base, wb, nb = select_runs(c, a.base_build, plan, root)
+            why += wb
+            notes += nb
+            new = []
+            if need_new:
+                if not a.new_build:
+                    why.append("new のビルド名 (--new-build) が無い")
+                else:
+                    new, wn, nn = select_runs(c, a.new_build, plan, root)
+                    why += wn
+                    notes += nn
+            jobs.append(dict(cfg=c, plan=plan, base=base, new=new, why=why, notes=notes))
+    else:
+        plan = ms.plan_from(a.tag, a.kind or "forge", a.reps or ms.REPS, a.steps, a.out_interval, a.require or [])
+        why = [] if a.base else ["--base の run が指定されていない"]
+        jobs.append(dict(cfg=a.tag, plan=plan, base=[os.path.abspath(os.path.expanduser(x)) for x in a.base],
+                         new=[os.path.abspath(os.path.expanduser(x)) for x in a.new], why=why, notes=[]))
+    return jobs
+
+
+def write_completeness_tsv(path, results):
+    with open(path, "w") as f:
+        f.write("cfg\tverdict\tbase\tnew\treps\tN\treasons\n")
+        for c, comp, nb, nn, plan in results:
+            f.write(f"{c}\t{comp['verdict']}\t{nb}\t{nn}\t{plan['reps']}\t{plan.get('N')}\t{' / '.join(comp['reasons'])}\n")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cfg")
@@ -705,6 +1011,13 @@ def main():
     ap.add_argument("--metric", choices=["m", "abs"], default="m",
                     help="m = 登録判定 A (max|A−B|/max|A|)、abs = 追加診断 B (max|A−B|、plan §6.2)")
     ap.add_argument("--tag", default="(指定)", help="--base/--new 直接指定のときの構成名")
+    ap.add_argument("--root", help="--all/--cfg: registry.tsv と run_* の置き場 (既定はこのスクリプトのディレクトリ)")
+    # 直接指定のときの予定 (完全性検査)。--all/--cfg では構成表 (matrix_spec.planned) を使い、これらは受け付けない
+    ap.add_argument("--steps", type=int, help="直接指定: 予定 N (最終出力 res_N.h5)。無ければ完全性 FAIL")
+    ap.add_argument("--out-interval", type=int, help="直接指定: 出力間隔 (既定 N)")
+    ap.add_argument("--reps", type=int, help=f"直接指定: 予定の反復数 (base・new とも、既定 {ms.REPS})")
+    ap.add_argument("--kind", choices=["forge", "convert"], help="直接指定: forge (既定) / convert")
+    ap.add_argument("--require", nargs="*", default=[], help="直接指定: 追加の必要ファイル ({N} を展開、*?[ は glob)")
     a = ap.parse_args()
     if a.diff2:
         diff2(*a.diff2)
@@ -712,22 +1025,27 @@ def main():
     if a.metric == "abs":
         main_abs(a)
         return
-    jobs = []
-    if a.all:
-        import matrix_spec as ms
-        for c in ms.CONFIGS:
-            jobs.append((c, runs_for(c, a.base_build), runs_for(c, a.new_build) if a.new_build else []))
-    elif a.cfg:
-        jobs.append((a.cfg, runs_for(a.cfg, a.base_build), runs_for(a.cfg, a.new_build) if a.new_build else []))
-    else:
-        jobs.append(("(指定)", [os.path.abspath(x) for x in a.base], [os.path.abspath(x) for x in a.new]))
-    summary = []
-    for c, base, new in jobs:
-        if len(base) < 2:
-            summary.append(f"{c:22s} base {len(base)} 本 (2 本未満のため比較しない)")
-            continue
-        rep = compare(base, new, Report(), c)
-        txt = "\n".join(rep.lines) + "\n"
+    need_new = bool(a.new_build) if (a.all or a.cfg) else bool(a.new)
+    jobs = build_jobs(a, need_new)
+    summary, comps = [], []
+    for j in jobs:
+        c, plan, base, new = j["cfg"], j["plan"], j["base"], j["new"]
+        comp = completeness(plan, base, new, j["why"], need_new)
+        comps.append((c, comp, len(base), len(new), plan))
+        head = [f"=== 構成 {c} — 完全性検査 (比較の前。FAIL なら値の比較はしない)"] + [f"  (情報) {x}" for x in j["notes"]] + comp["lines"]
+        if comp["verdict"] != "PASS":
+            txt = "\n".join(head + ["  (完全性 FAIL のため値の比較はしない)"]) + "\n"
+            r0 = comp["reasons"]
+            summary.append(f"{c:22s} base {len(base)} new {len(new)} | COMPLETE FAIL ({len(r0)} 件: {r0[0]}{' …' if len(r0) > 1 else ''})"
+                           " | 比較しない")
+        else:
+            rep = Report()
+            rep.lines += head + [""]
+            rep.verdicts["COMPLETE"] = "PASS"
+            rep = compare(base, new, rep, c, plan)
+            txt = "\n".join(rep.lines) + "\n"
+            summary.append(f"{c:22s} base {len(base)} new {len(new)} | " +
+                           " | ".join(f"{k} {v}" for k, v in rep.verdicts.items()))
         if a.out_dir:
             os.makedirs(a.out_dir, exist_ok=True)
             open(os.path.join(a.out_dir, f"{c}.txt"), "w").write(txt)
@@ -735,39 +1053,48 @@ def main():
             open(a.out, "w").write(txt)
         else:
             print(txt)
-        summary.append(f"{c:22s} base {len(base)} new {len(new)} | " +
-                       " | ".join(f"{k} {v}" for k, v in rep.verdicts.items()))
+    nfc = sum(1 for x in comps if x[1]["verdict"] != "PASS")
+    summary.append(f"\n完全性検査 (plan §5.1 #6): PASS {len(comps) - nfc} 構成、FAIL {nfc} 構成"
+                   + (" — FAIL の構成は値を比較していない (構成ごとの報告に理由)" if nfc else ""))
     s = "\n".join(summary) + "\n"
     if a.out_dir:
         open(os.path.join(a.out_dir, "summary.txt"), "w").write(s)
+        write_completeness_tsv(os.path.join(a.out_dir, "completeness.tsv"), comps)
     print(s)
 
 
 def main_abs(a):
-    """追加診断 B を回し、構成ごとの報告・全量の表 (all_quantities.tsv)・summary.txt・selfcheck.txt を out-dir に書く。"""
+    """追加診断 B を回し、構成ごとの報告・全量の表 (all_quantities.tsv)・完全性の表 (completeness.tsv)・summary.txt・
+    selfcheck.txt を out-dir に書く。完全性 FAIL の構成は値を比較せず、all_quantities.tsv に「(完全性)」の FAIL 行を 1 つ置く。"""
     t0 = time.time()
-    jobs = []
-    if a.all:
-        import matrix_spec as ms
-        for c in ms.CONFIGS:
-            jobs.append((c, runs_for(c, a.base_build), runs_for(c, a.new_build)))
-    elif a.cfg:
-        jobs.append((a.cfg, runs_for(a.cfg, a.base_build), runs_for(a.cfg, a.new_build)))
-    else:
-        jobs.append((a.tag, [os.path.abspath(x) for x in a.base], [os.path.abspath(x) for x in a.new]))
+    jobs = build_jobs(a, True)
     od = a.out_dir or "."
     os.makedirs(od, exist_ok=True)
-    allrows, summ, scl = [], [], []
-    for c, base, new in jobs:
+    allrows, summ, scl, comps = [], [], [], []
+    nq_all = 0
+    for j in jobs:
+        c, plan, base, new = j["cfg"], j["plan"], j["base"], j["new"]
         t1 = time.time()
-        lines, rows, sc = compare_abs(base, new, c)
+        comp = completeness(plan, base, new, j["why"], True)
+        comps.append((c, comp, len(base), len(new), plan))
+        head = [f"  (情報) {x}" for x in j["notes"]] + comp["lines"]
+        if comp["verdict"] != "PASS":
+            lines = [f"=== 構成 {c} (追加診断 B)"] + head + ["  (完全性 FAIL のため値の比較はしない)"]
+            rows = [dict(cfg=c, file="(完全性)", name="-", S=float("nan"), D=float("nan"), ratio=float("inf"), verdict="FAIL",
+                         reason="完全性: " + " / ".join(comp["reasons"]), detail="")]
+            sc = dict(quantities=0, orderings=0, perm_bad=0, swap_bad=0)
+        else:
+            lines, rows, sc = compare_abs(base, new, c, plan)
+            lines = lines[:1] + head + lines[1:]
         open(os.path.join(od, f"{c}.txt"), "w").write("\n".join(lines) + "\n")
         allrows += rows
+        nq_all += sc["quantities"]
         nf = sum(1 for r in rows if r["verdict"] == "FAIL")
-        fin = [r for r in rows if r["ratio"] == r["ratio"]]
+        fin = [r for r in rows if r["ratio"] == r["ratio"] and r["file"] not in ("(完全性)", "(比較量)")]
         worst = max(fin, key=lambda r: r["ratio"]) if fin else None
         ws = f"{worst['file']}:{worst['name']} D/2S={worst['ratio']:.3f}" if worst else "-"
-        summ.append(f"{c:30s} base {len(base)} new {len(new)} | 量 {len(rows):4d} | FAIL {nf:3d} | 最大 {ws}")
+        cv = comp["verdict"] + ("" if comp["verdict"] == "PASS" else f" ({len(comp['reasons'])} 件: {comp['reasons'][0]})")
+        summ.append(f"{c:30s} base {len(base)} new {len(new)} | 完全性 {cv} | 量 {sc['quantities']:4d} | FAIL {nf:3d} | 最大 {ws}")
         scl.append(f"{c:30s} 量 {sc['quantities']:4d} | 並べ替え {sc['orderings']:6d} 評価で変化 {sc['perm_bad']} | "
                    f"base/new 交換で変化 {sc['swap_bad']} | {time.time() - t1:.1f} s")
         print(summ[-1], flush=True)
@@ -775,9 +1102,12 @@ def main_abs(a):
         f.write("cfg\tfile\tname\tS_abs\tD_abs\tD_over_2S\tverdict\treason\tdetail\n")
         for r in allrows:
             f.write(f"{r['cfg']}\t{r['file']}\t{r['name']}\t{r['S']:.6e}\t{r['D']:.6e}\t{r['ratio']:.6g}\t{r['verdict']}\t{r['reason']}\t{r['detail']}\n")
+    write_completeness_tsv(os.path.join(od, "completeness.tsv"), comps)
     fails = [r for r in allrows if r["verdict"] == "FAIL"]
+    nfc = sum(1 for x in comps if x[1]["verdict"] != "PASS")
     top = sorted([r for r in allrows if r["ratio"] == r["ratio"] and r["verdict"] == "PASS"], key=lambda r: -r["ratio"])[:10]
-    tail = [f"\n全体: {len(allrows)} 量、FAIL {len(fails)}、所要 {time.time() - t0:.0f} s"]
+    tail = [f"\n完全性検査 (plan §5.1 #6): PASS {len(comps) - nfc} 構成、FAIL {nfc} 構成 (completeness.tsv)",
+            f"全体: {nq_all} 量、FAIL {len(fails)} (完全性 FAIL の構成は値を比較せず 1 行の FAIL として数える)、所要 {time.time() - t0:.0f} s"]
     for r in fails:
         tail.append(f"  FAIL {r['cfg']} {r['file']}:{r['name']} S_abs {r['S']:.3e} D_abs {r['D']:.3e} D/2S {r['ratio']:.3f} ({r['reason']}) {r['detail']}")
     tail.append("D/2S の上位 10 (PASS の量):")
