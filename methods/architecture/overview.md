@@ -187,6 +187,22 @@
 
 境界条件は単に「名前だけ」を持つのではなく、対象面集合、入力値、出力対象フラグまでまとめて 1 つのオブジェクトにして扱っている。
 
+### 6.4 メモリの置き場所と計測 (`FORGE_MEMLOG`)
+
+GPU 経路 (`gpu: 1`) でも、`variables::allocVariables` (`variables.cpp`) は登録された**全セル変数・全面変数**をホストにも
+`nCells_all` / `nPlanes` 長で確保し、同じ長さをデバイスに `cudaMalloc` する。格子の構造体 (`mesh` の `nodes`・`planes`・`cells`、
+要素ごとに内側の `vector` を持つ) と、使っていない行列 `mat_ns` (`initMatrix`、起動ログ "Init Matrix (but not used now)") も
+初期化の後までホストに残る。2026-10-07 の計測 (生産 SERN 3D と同じ設定: node・SST・2 成分・陰解法 block-DPLUR、
+`notes/investigations/2026-10-07-forge-memlog/`) では、ホストの常駐は約 2.6 kB/節点で、内訳は
+ホストの `c` 約 960 B (223 本)、`planes` 約 700 B、`mat_ns` 約 310 B、`cells` 約 250 B、ホストの `p` 約 195 B (16 本)、`nodes` 約 100 B。
+GPU は約 1.4 kB/節点 (`c_d` 223 本で約 960 B、`p_d` 約 195 B、格子マップ約 94 B ほか) + 定数。
+ホストのピーク (VmHWM) は初期化の終わり (`setStructuralVariables`) で、常駐 + 約 150 MB。
+
+`FORGE_MEMLOG=1` を付けて起動すると、変換器 (`convertGmshToForge`) と本体の工程の境目で `/proc/self/status` の VmRSS/VmHWM、
+主要コンテナの推定バイト、`cudaMemGetInfo` を `[memlog]` 行として出す (`mesh/memlog.hpp`、`main.cpp` の `MEMLOG_SOLVER`)。
+既定 (未設定) では何も出さず、計算にも触れない。ホストに置く量を減らす変更は
+[`plans/active/architecture-solver-host-memory.md`](../../plans/active/architecture-solver-host-memory.md) で進める。
+
 ## 7. 設定ファイルの読み方
 
 ### 7.1 `solverConfig.yaml`

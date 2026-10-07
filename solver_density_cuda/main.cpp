@@ -27,6 +27,7 @@
 #include "input/setInitial.hpp"
 
 #include "mesh/gmshReader.hpp"
+#include "mesh/memlog.hpp"
 #include "output/output.hpp"
 #include "conjugateWall.hpp"
 #include "boundaryCond.hpp"
@@ -129,6 +130,65 @@ static void appendLaunchRecord(const solverConfig& cfg)
     if (out) out << os.str() << "\n";
 }
 
+// FORGE_MEMLOG=1 の工程別メモリ計測 (mesh/memlog.hpp) で forge 本体の主要コンテナと GPU 使用量を 1 行にまとめる。
+// 計測専用で挙動・出力には影響しない (MEMLOG マクロの extra 引数としてだけ評価されるので、既定では呼ばれもしない)。
+// ホスト側は size/capacity × sizeof と glibc のチャンク概算 (memlog::heapChunk)。GPU 側は cudaMemGetInfo の
+// (total − free) と、最初の呼び出し時点 (= CUDA context 作成直後) からの増分、c_d/p_d の確保済み本数からの推定。
+static std::string memSolverSummary(const mesh& msh, const variables& var, const matrix* mat)
+{
+    using namespace memlog;
+    std::ostringstream os;
+    // var.c / var.p (ホストの cell / plane 変数): 確保済み (capacity > 0) の本数と合計
+    size_t nc = 0, bc = 0, np = 0, bp = 0;
+    for (const auto& kv : var.c) if (kv.second.capacity() > 0) { ++nc; bc += flatBytes(kv.second); }
+    for (const auto& kv : var.p) if (kv.second.capacity() > 0) { ++np; bp += flatBytes(kv.second); }
+    os << item("var.c(host)", nc, bc) << " " << item("var.p(host)", np, bp);
+    // msh の格子構造 (vector-of-structs、要素ごとに内側 vector のヒープ確保を持つ)
+    auto nodeIn  = [](const node& n)  { return innerVec(n.iCells) + innerVec(n.iPlanes) + innerVec(n.coords); };
+    auto planeIn = [](const plane& p) { return innerVec(p.iNodes) + innerVec(p.iCells) + innerVec(p.surfVect) + innerVec(p.centCoords); };
+    auto cellIn  = [](const cell& c)  { return innerVec(c.iNodes) + innerVec(c.iPlanes) + innerVec(c.iPlanesDir) + innerVec(c.centCoords); };
+    os << " " << item("msh.nodes", msh.nodes.size(), nestedBytes(msh.nodes, nodeIn))
+       << " " << item("msh.planes", msh.planes.size(), nestedBytes(msh.planes, planeIn))
+       << " " << item("msh.cells", msh.cells.size(), nestedBytes(msh.cells, cellIn));
+    if (!msh.vizCONNE.empty()) os << " " << item("msh.vizCONNE", msh.vizCONNE.size(), flatBytes(msh.vizCONNE));
+    // 境界: 面 index 列・可視化面・bvar/bint (host)・出力用の局所格子
+    size_t bIdx = 0, bViz = 0, bVar = 0, bLoc = 0, nBvar = 0;
+    for (const auto& b : msh.bconds) {
+        bIdx += flatBytes(b.iPlanes) + flatBytes(b.iBPlanes) + flatBytes(b.iCells) + flatBytes(b.iCells_ghst);
+        bViz += nestedBytes(b.vizBfaceNodes, [](const std::vector<geom_int>& f) { return innerVec(f); });
+        for (const auto& kv : b.bvar) { bVar += flatBytes(kv.second); ++nBvar; }
+        for (const auto& kv : b.bint) bVar += flatBytes(kv.second);
+        bLoc += nestedBytes(b.nodes_local, nodeIn) + nestedBytes(b.planes_local, planeIn)
+              + flatBytes(b.inodes_l2g) + flatBytes(b.inodes_g2l);
+    }
+    os << " " << item("bconds.idx", msh.bconds.size(), bIdx) << " " << item("bconds.vizBface", msh.bconds.size(), bViz)
+       << " " << item("bconds.bvar+bint(host)", nBvar, bVar) << " " << item("bconds.local(output)", msh.bconds.size(), bLoc);
+    // 計算に使っていない行列 (initializeSimulation の "Init Matrix (but not used now)")
+    if (mat != nullptr) {
+        const size_t bMat = nestedBytes(mat->structure, [](const std::vector<geom_int>& v) { return innerVec(v); })
+                          + nestedBytes(mat->lhs, [](const std::vector<flow_float>& v) { return innerVec(v); })
+                          + flatBytes(mat->rhs)
+                          + nestedBytes(mat->localPlnOfCell, [](const std::vector<geom_int>& v) { return innerVec(v); });
+        os << " " << item("mat_ns", mat->structure.size(), bMat);
+    }
+    if (!msh.periodicRoot.empty() || !msh.rEff.empty())
+        os << " " << item("msh.periodicRoot+rEff", msh.periodicRoot.size(), flatBytes(msh.periodicRoot) + flatBytes(msh.rEff));
+    // GPU: c_d / p_d の確保済み本数からの推定と、cudaMemGetInfo の実使用量 (デバイス全体。他プロセス分を含む)
+    size_t ncd = 0, npd = 0;
+    for (const auto& kv : var.c_d) if (kv.second != nullptr) ++ncd;
+    for (const auto& kv : var.p_d) if (kv.second != nullptr) ++npd;
+    const size_t bcd = ncd * (size_t)msh.nCells_all * sizeof(flow_float), bpd = npd * (size_t)msh.nPlanes * sizeof(flow_float);
+    os << " | " << item("var.c_d(est)", ncd, bcd) << " " << item("var.p_d(est)", npd, bpd);
+    size_t fr = 0, tot = 0;
+    if (cudaMemGetInfo(&fr, &tot) == cudaSuccess) {
+        static const size_t used0 = tot - fr;   // 最初の呼び出し (context 作成直後) の使用量
+        const size_t used = tot - fr;
+        os << " GPU used=" << used / 1048576 << "MB (since first memlog +" << ((long long)used - (long long)used0) / 1048576 << "MB)";
+    }
+    return os.str();
+}
+// 工程の境目に置く 1 行 (msh / var / mat_ns がスコープにある所で使う)
+#define MEMLOG_SOLVER(label) MEMLOG((label), memSolverSummary(msh, var, &mat_ns))
 
 #define CHECK_LAST_CUDA_ERROR() checkLast(__FILE__, __LINE__)
 void checkLast(const char* const file, const int line)
@@ -1529,9 +1589,11 @@ cudaConfig initializeSimulation(
     fluct_variables& fluct,
     point_probes& pprobes)
 {
+    MEMLOG_SOLVER("start");
     cout << "Read Solver Config \n";
     cfg.read("solverConfig.yaml");
     appendLaunchRecord(cfg);
+    MEMLOG_SOLVER("after cfg.read");
 
     // 化学種 DB の host 側解決 (GPU 非依存; 未知種名はここで exit)。bcond の X{s}→Y{s} 換算と
     // 起動ログ (種表) が使う。thermo_init_db は同じ結果を device へ上げる。
@@ -1560,6 +1622,7 @@ cudaConfig initializeSimulation(
     cout << "Init Thermo DB \n";
     thermo_init_db(cfg);   // NASA-9/LJ 化学種 DB を構築し device へアップロード (thermalMethod==2 用)
     chemistry_init(cfg);   // 有限速度化学: 反応機構を読み device へ (chemistry.enabled==1 のみ)
+    MEMLOG_SOLVER("after thermo/chemistry init");
 
     cout << "Read Mesh \n";
     if (cfg.meshFormat == "hdf5") {
@@ -1570,11 +1633,14 @@ cudaConfig initializeSimulation(
         std::exit(EXIT_FAILURE);
     }
 
+    MEMLOG_SOLVER("after readMesh");
     cout << "Init Matrix (but not used now) \n";
     mat_ns.initMatrix(msh);
+    MEMLOG_SOLVER("after initMatrix");
 
     cout << "Read Boundary Conditions \n";
     readBcondConfig(cfg , msh.bconds);
+    MEMLOG_SOLVER("after readBcondConfig");
 
     // 凝縮セルの二相 frozen 音速 (condSonicModel) の自動解決: bcond 種別が揃った後に確定し理由をログに出す
     // (plans/active/condensation-kantrowitz-gamma-twophase-sonic.md §4.2)。
@@ -1630,6 +1696,7 @@ cudaConfig initializeSimulation(
     conjugateWall::checkWallTemperatureSharing(cfg , msh);
     // ソルバ内 CHT (conjugate: ブロック + bcond ints: {conjugate: 1}) の対応範囲を検査する。
     conjugateWall::initConjugateWalls(cfg , msh);
+    MEMLOG_SOLVER("after inlet/wall profiles, conjugate init");
 
     // 化学種変数を登録 (allocVariables より前)。nSpecies<=1 では no-op。
     var.registerSpecies(cfg.nSpecies, cfg.chemEnabled);
@@ -1646,6 +1713,7 @@ cudaConfig initializeSimulation(
     var.registerTransition(cfg.transitionEnabled() ? 1 : 0, (cfg.outputLevel >= 2) ? 1 : 0);
 
     var.allocVariables(cfg.gpu , msh);
+    MEMLOG_SOLVER("after allocVariables");
 
     // device roY[] ポインタ配列を構築 (c_d 確保後, dependentVariables より前)。
     speciesInit_d(cfg , var);
@@ -1659,12 +1727,15 @@ cudaConfig initializeSimulation(
     // TP (thermalMethod 2) だけが対象。数値には触れない (記録と照合のみ)。
     checkInputSpeciesAndWriteRecord(cfg);
 
+    MEMLOG_SOLVER("after species/condensation/passive init_d");
     cout << "Read Initial Values \n";
     var.readValueHDF5(cfg.valueFileName , msh, cfg.kInit, cfg.omegaInit);
+    MEMLOG_SOLVER("after readValueHDF5");
 
     cout << "Set mesh connection map for cuda \n";
     cudaConfig cuda_cfg(msh);
     msh.setMeshMap_d();
+    MEMLOG_SOLVER("after setMeshMap_d (mesh maps H2D)");
     // node × 回転周期 (bcond periodic の type != 0) は**起動エラー** (plan boundary-node-rotational-periodic §5.1 #0a)。
     // node の seam 経路は速度・勾配・陰解法の dq を回さず、NS の periodicGradientGather も並進を前提に部分和を足すので、
     // 走らせると黙って誤った解になる。回転の実装 (同 plan #2–#4) が入るまで止める。周期対の構築 (失敗すると例外) より前に判定する。
@@ -1696,7 +1767,9 @@ cudaConfig initializeSimulation(
         }
     }
 
+    MEMLOG_SOLVER("after setPeriodicPartner");
     var.setStructuralVariables(cfg , cuda_cfg , msh);
+    MEMLOG_SOLVER("after setStructuralVariables");
     // node-centered 周期境界 DOF 同一視 (median-dual M4, §4.5): partnerCellID から周期ノード group(union-find)
     // を構築し、各 group の合併体積を var.c_d["volume"] へ書き戻す。setDT より前 (volume を使うため)。
     // cell モード / 非周期では no-op。
@@ -1718,6 +1791,7 @@ cudaConfig initializeSimulation(
     enforceWallNoSlip_d_wrapper(cfg , cuda_cfg , msh , var);
     gasProperties_d_wrapper(cfg , cuda_cfg , msh , var);
 
+    MEMLOG_SOLVER("after initial EOS/gasProperties");
     fluct.allocVariables();
     fluct.set_fluctVelocity(cfg , cuda_cfg , msh , var);
 
@@ -1754,8 +1828,10 @@ cudaConfig initializeSimulation(
     tracerUpdateOuter_d_wrapper(cfg , cuda_cfg , msh , var);  // トレーサ N/M ベースライン
     initDualTimeHistory(cfg , cuda_cfg , msh , var);   // dual-time: 前物理レベルの復元 (checkpoint) または BDF1 再開 (§4.4)
     setDT_d_wrapper(cfg , cuda_cfg , msh , var);
+    MEMLOG_SOLVER("after initial BC/gradient/updateOuter/setDT");
 
     pprobes.init(cfg , cuda_cfg , msh);
+    MEMLOG_SOLVER("after pprobes.init");
 
 
     // リミッタの無次元化基準 (plan convection-node-wall-reconstruction §4.13)。**run 中固定**。
@@ -1817,6 +1893,7 @@ cudaConfig initializeSimulation(
         }
     }
 
+    MEMLOG_SOLVER("end of initializeSimulation");
     return cuda_cfg;
 }
 
@@ -1828,8 +1905,11 @@ void writeStepOutputs(
     point_probes& pprobes,
     int iStep)
 {
+    MEMLOG("before writeStepOutputs", memSolverSummary(msh, var, nullptr));
     outputH5_XDMF(cfg , msh, var, iStep);
+    MEMLOG("after outputH5_XDMF", memSolverSummary(msh, var, nullptr));
     outputBconds_H5_XDMF(cfg , msh, var, iStep);
+    MEMLOG("after outputBconds_H5_XDMF", memSolverSummary(msh, var, nullptr));
     pprobes.outputProbes(cfg , cuda_cfg , msh , var , iStep);
     // ソルバ内 CHT の壁温を残す (再開時は wall_profile_<physID>.csv にコピーして使う)。
     conjugateWall::writeConjugateState(cfg , msh , iStep);
@@ -3427,6 +3507,7 @@ int main(int argc, char** argv) {
         exit(1);
     }
     ResidualCsvLogger residual_logger("residual_history.csv", cfg, msh, var);
+    MEMLOG_SOLVER("after lineImplicit/ResidualCsvLogger");
 
     // 診断 D1 (FORGE_DIAG_TP_FACES=<出力 h5>; 既定 off): 組立を 1 回だけ通した状態の面作用素 A/B を書いて終了する (時間更新・res_0 出力なし)。
     if (const char* e = getenv("FORGE_DIAG_TP_FACES"); e != nullptr && *e != '\0') {
@@ -3441,7 +3522,9 @@ int main(int argc, char** argv) {
         return runTpUpdateDiag(e, cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger);
     }
 
+    MEMLOG_SOLVER("before writeInitialOutputs");
     writeInitialOutputs(cfg , msh , var);
+    MEMLOG_SOLVER("after writeInitialOutputs");
 
     StepMonitor monitor(cfg, residual_logger);
     monitor.printHeader();
@@ -3462,7 +3545,11 @@ int main(int argc, char** argv) {
         if (iStep % cfg.monitorInterval == 0) passiveFloorCorrLog_d_wrapper(cfg, cuda_cfg, msh, var, iStep);
         // 凝縮の理由別の補正量 (plan condensation-two-phase-transport §4.3; 凝縮なしは no-op)
         if (iStep % cfg.monitorInterval == 0) condCorrectionLog_d_wrapper(cfg, cuda_cfg, msh, var, iStep);
+        // 1 step 目の後 (陰解法・SST・化学種などの遅延確保はここまでに入る) と 2 step 目の後 (定常に達したか)
+        if (iStep == 0) MEMLOG_SOLVER("after step 1");
+        if (iStep == 1) MEMLOG_SOLVER("after step 2");
     }
+    MEMLOG_SOLVER("after main loop");
     // 終了時に受動種の収支を必ず出す (最終 step が monitorInterval に乗らないと末尾の補正が記録されない; plan-8 M1)
     if (cfg.mainLoopCount() > 0 && ((cfg.mainLoopCount() - 1) % cfg.monitorInterval) != 0) {
         passiveFloorCorrLog_d_wrapper(cfg, cuda_cfg, msh, var, cfg.mainLoopCount() - 1);
@@ -3479,6 +3566,7 @@ int main(int argc, char** argv) {
     printf("Time = %.3f s (wall, %d steps, %.2f ms/step)\n", monitor.elapsedSeconds(), cfg.mainLoopCount(),
            monitor.elapsedSeconds() * 1.0e3 / std::max(1, cfg.mainLoopCount())); 
     profiler.printSummary();
+    MEMLOG_SOLVER("end");
 
 	return 0;
 }

@@ -1,0 +1,89 @@
+nodes: {'s050': 254251, 's070': 672871, 's085': 1188542}
+stage                                                      | RSS MB s050/s070/s085 | HWM MB s050/s070/s085 | GPUΔ MB | RSS fit B/node + MB | HWM fit | GPUΔ fit
+start                                                      |   106   106   106 |   106   106   106 |     0     0     0 |      0 +  106 |      0 +  106 |      0 +    0
+after cfg.read                                             |   106   106   106 |   106   106   106 |     0     0     0 |      0 +  106 |      0 +  106 |      0 +    0
+after thermo/chemistry init                                |   110   110   110 |   110   110   110 |     2     2     2 |      0 +  110 |      0 +  110 |     -0 +    2
+readMesh: after planes/cells (flat read buffers alive)     |   438   966  1614 |   438   966  1614 |     -     -     - |   1320 +  118 |   1320 +  118 | 
+readMesh: end (before local buffers are freed)             |   453  1000  1669 |   453  1000  1669 |     -     -     - |   1365 +  123 |   1365 +  123 | 
+after readMesh                                             |   392   834  1377 |   453  1000  1669 |     2     2     2 |   1105 +  124 |   1365 +  123 |     -0 +    2
+after initMatrix                                           |   465  1035  1734 |   465  1035  1734 |     2     2     2 |   1424 +  120 |   1424 +  120 |     -0 +    2
+after readBcondConfig                                      |   468  1041  1742 |   468  1041  1742 |     6     8    10 |   1430 +  122 |   1430 +  122 |      4 +    5
+after inlet/wall profiles, conjugate init                  |   468  1042  1742 |   468  1042  1742 |     6     8    10 |   1430 +  123 |   1430 +  123 |      4 +    5
+after allocVariables                                       |   772  1812  3078 |   772  1812  3078 |   514  1028  1572 |   2588 +  147 |   2588 +  147 |   1184 +  241
+after species/condensation/passive init_d                  |   773  1813  3079 |   773  1813  3079 |   514  1028  1572 |   2588 +  148 |   2588 +  148 |   1184 +  241
+after readValueHDF5                                        |   781  1836  3120 |   781  1836  3120 |   514  1028  1572 |   2625 +  147 |   2625 +  147 |   1184 +  241
+after setMeshMap_d (mesh maps H2D)                         |   781  1837  3120 |   781  1837  3147 |   536  1090  1678 |   2624 +  148 |   2656 +  136 |   1278 +  242
+after setPeriodicPartner                                   |   781  1837  3120 |   781  1837  3147 |   536  1090  1678 |   2624 +  148 |   2656 +  136 |   1278 +  242
+after setStructuralVariables                               |   773  1821  3093 |   813  1919  3265 |   536  1090  1678 |   2603 +  145 |   2751 +  149 |   1278 +  242
+after initial EOS/gasProperties                            |   795  1839  3107 |   813  1919  3265 |   582  1136  1724 |   2594 +  169 |   2751 +  149 |   1278 +  288
+after initial BC/gradient/updateOuter/setDT                |   804  1847  3115 |   813  1919  3265 |   600  1184  1806 |   2593 +  178 |   2751 +  149 |   1350 +  289
+after pprobes.init                                         |   804  1847  3115 |   813  1919  3265 |   600  1184  1806 |   2593 +  178 |   2751 +  149 |   1350 +  289
+end of initializeSimulation                                |   806  1855  3128 |   813  1919  3265 |   600  1184  1806 |   2605 +  177 |   2751 +  149 |   1350 +  289
+after lineImplicit/ResidualCsvLogger                       |   806  1855  3128 |   813  1919  3265 |   600  1184  1806 |   2605 +  177 |   2751 +  149 |   1350 +  289
+before writeInitialOutputs                                 |   806  1855  3128 |   813  1919  3265 |   600  1184  1806 |   2605 +  177 |   2751 +  149 |   1350 +  289
+after writeInitialOutputs                                  |   819  1885  3145 |   819  1919  3265 |   600  1184  1806 |   2609 +  195 |   2745 +  155 |   1350 +  289
+before writeStepOutputs                                    |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+after outputH5_XDMF                                        |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+after outputBconds_H5_XDMF                                 |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+after step 1                                               |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+before writeStepOutputs#2                                  |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+after outputH5_XDMF#2                                      |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+after outputBconds_H5_XDMF#2                               |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+after step 2                                               |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+before writeStepOutputs#3                                  |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+after outputH5_XDMF#3                                      |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+after outputBconds_H5_XDMF#3                               |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+before writeStepOutputs#4                                  |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+after outputH5_XDMF#4                                      |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+after outputBconds_H5_XDMF#4                               |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+before writeStepOutputs#5                                  |   828  1893  3153 |   828  1919  3265 |   626  1226  1872 |   2608 +  204 |   2735 +  164 |   1395 +  303
+after outputH5_XDMF#5                                      |   837  1904  3164 |   837  1919  3265 |   626  1226  1872 |   2610 +  213 |   2725 +  174 |   1395 +  303
+after outputBconds_H5_XDMF#5                               |   839  1904  3180 |   839  1919  3265 |   626  1226  1872 |   2626 +  208 |   2723 +  176 |   1395 +  303
+before writeStepOutputs#6                                  |   839  1904  3180 |   839  1919  3265 |   626  1226  1872 |   2626 +  208 |   2723 +  176 |   1395 +  303
+after outputH5_XDMF#6                                      |   839  1904  3180 |   839  1919  3265 |   626  1226  1872 |   2626 +  208 |   2723 +  176 |   1395 +  303
+after outputBconds_H5_XDMF#6                               |   839  1904  3180 |   839  1919  3265 |   626  1226  1872 |   2626 +  208 |   2723 +  176 |   1395 +  303
+before writeStepOutputs#7                                  |   839  1904  3180 |   839  1919  3265 |   626  1226  1872 |   2626 +  208 |   2723 +  176 |   1395 +  303
+after outputH5_XDMF#7                                      |   839  1904  3180 |   839  1919  3265 |   626  1226  1872 |   2626 +  208 |   2723 +  176 |   1395 +  303
+after outputBconds_H5_XDMF#7                               |   839  1904  3180 |   839  1919  3265 |   626  1226  1872 |   2626 +  208 |   2723 +  176 |   1395 +  303
+before writeStepOutputs#8                                  |   839  1904  3180 |   839  1919  3265 |   626  1226  1872 |   2626 +  208 |   2723 +  176 |   1395 +  303
+after outputH5_XDMF#8                                      |   839  1904  3180 |   839  1919  3265 |   626  1226  1872 |   2626 +  208 |   2723 +  176 |   1395 +  303
+after outputBconds_H5_XDMF#8                               |   839  1904  3180 |   839  1919  3265 |   626  1226  1872 |   2626 +  208 |   2723 +  176 |   1395 +  303
+before writeStepOutputs#9                                  |   839  1904  3180 |   839  1919  3265 |   626  1226  1872 |   2626 +  208 |   2723 +  176 |   1395 +  303
+after outputH5_XDMF#9                                      |   839  1904  3180 |   839  1919  3265 |   626  1226  1872 |   2626 +  208 |   2723 +  176 |   1395 +  303
+after outputBconds_H5_XDMF#9                               |   839  1904  3180 |   839  1919  3265 |   626  1226  1872 |   2626 +  208 |   2723 +  176 |   1395 +  303
+before writeStepOutputs#10                                 | (missing in some run)
+after outputH5_XDMF#10                                     | (missing in some run)
+after outputBconds_H5_XDMF#10                              | (missing in some run)
+after main loop                                            | (missing in some run)
+end                                                        | (missing in some run)
+
+var.c(host)                                  255.1     644.7    1114.4 MB  ->   964.0 B/node +   23.1 MB
+var.p(host)                                   48.0     125.8     221.4 MB  ->   194.6 B/node +    0.8 MB
+msh.nodes                                     25.2      66.7     117.9 MB  ->   104.0 B/node +    0.0 MB
+msh.planes                                   173.9     456.2     802.5 MB  ->   705.4 B/node +    3.1 MB
+msh.cells                                     65.9     168.3     292.4 MB  ->   254.2 B/node +    4.6 MB
+msh.vizCONNE                                   8.0      21.7      38.8 MB  ->    34.6 B/node +   -0.4 MB
+bconds.idx                                     0.7       1.3       1.9 MB  ->     1.3 B/node +    0.4 MB
+bconds.vizBface                                2.7       5.2       7.9 MB  ->     5.8 B/node +    1.3 MB
+bconds.bvar+bint(host)                         3.0       5.5       7.8 MB  ->     5.4 B/node +    1.8 MB
+bconds.local(output)                          10.4      25.2      42.6 MB  ->    36.0 B/node +    1.9 MB
+mat_ns                                         0.0     199.3     353.2 MB  ->   393.2 B/node +  -80.3 MB
+msh.periodicRoot+rEff                          1.9       5.1       9.1 MB  ->     8.0 B/node +    0.0 MB
+var.c_d(est)                                 255.1     644.7    1114.4 MB  ->   964.0 B/node +   23.0 MB
+var.p_d(est)                                  48.0     125.8     221.4 MB  ->   194.6 B/node +    0.8 MB
+== containers at 'end of initializeSimulation'
+var.c(host)                                  255.1     644.7    1114.4 MB  ->   964.0 B/node +   23.1 MB
+var.p(host)                                   48.0     125.8     221.4 MB  ->   194.6 B/node +    0.8 MB
+msh.nodes                                     25.2      66.7     117.9 MB  ->   104.0 B/node +    0.0 MB
+msh.planes                                   173.9     456.2     802.5 MB  ->   705.4 B/node +    3.1 MB
+msh.cells                                     65.9     168.3     292.4 MB  ->   254.2 B/node +    4.6 MB
+msh.vizCONNE                                   8.0      21.7      38.8 MB  ->    34.6 B/node +   -0.4 MB
+bconds.idx                                     0.7       1.3       1.9 MB  ->     1.3 B/node +    0.4 MB
+bconds.vizBface                                2.7       5.2       7.9 MB  ->     5.8 B/node +    1.3 MB
+bconds.bvar+bint(host)                         3.0       5.5       7.8 MB  ->     5.4 B/node +    1.8 MB
+bconds.local(output)                           0.0       0.0       0.0 MB  ->     0.0 B/node +    0.0 MB
+mat_ns                                        74.8     199.3     353.2 MB  ->   312.5 B/node +   -1.1 MB
+msh.periodicRoot+rEff                          1.9       5.1       9.1 MB  ->     8.0 B/node +    0.0 MB
+var.c_d(est)                                 255.1     644.7    1114.4 MB  ->   964.0 B/node +   23.0 MB
+var.p_d(est)                                  48.0     125.8     221.4 MB  ->   194.6 B/node +    0.8 MB
+host containers total                        659.0    1699.8    2967.1 MB  ->  2589.8 B/node +   33.5 MB

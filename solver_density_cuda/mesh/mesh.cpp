@@ -1,5 +1,6 @@
 #include "mesh.hpp"
 #include "cuda_forge/cudaWrapper.cuh"
+#include "memlog.hpp"   // FORGE_MEMLOG=1 の工程別メモリ計測 (既定は無出力)
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -374,6 +375,13 @@ void mesh::readMesh(string fname)
              << " CVs (max centroid shift " << maxShift << "), dual-centroid r kept in rEff" << endl;
     }
 
+    // FORGE_MEMLOG=1 の計測 (読込用の平坦配列 strct/strct2/surfVect/centCoords 等がまだ生きている時点)
+    MEMLOG("readMesh: after planes/cells (flat read buffers alive)",
+           memlog::item("flat buffers", strct.size() + strct2.size(),
+                        memlog::flatBytes(coord) + memlog::flatBytes(strct) + memlog::flatBytes(surfVect) + memlog::flatBytes(surfArea)
+                        + memlog::flatBytes(centCoords) + memlog::flatBytes(strct2) + memlog::flatBytes(volume)
+                        + memlog::flatBytes(centCoords2) + memlog::flatBytes(regionIds)));
+
     // boundary conditions
     Group grp = file.getGroup("/BCONDS");
     geom_int nb = grp.getNumberObjects();
@@ -506,6 +514,7 @@ void mesh::readMesh(string fname)
         file.getDataSet("/VIZMESH/CONNE").read(this->vizCONNE);
         cout << "readMesh: loaded /VIZMESH (node-centered viz, nVizCells=" << this->nVizCells << ")" << endl;
     }
+    MEMLOG("readMesh: end (before local buffers are freed)", std::string());
 }
 
 
