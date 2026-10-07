@@ -366,6 +366,7 @@ python3 solver_density_cuda/tools/interp_field.py <past_run>/res_NNNN.h5 <new_ru
   **`interp_field.py` は同一メッシュに使わない** — cross-mesh 用で原始量から保存量を組み直すため、
   `roUx = ρ·Ux` の丸めで元の保存量に戻らない (2026-09-23, case/56 で `roUy` が最大 1.6 % ずれた)。
   `case/*/restart_field.py` の古い実装も原始量から組み直すので使わないこと。
+- 節点の並びが同じで壁だけ µm 動いたメッシュへの初期値は、skill `forge-aws-run` §3 の検査付き番号写像 (`case/45.isobutane_m6_d155/ic_index_map.py`) を使う。
 
 ## メッシュ品質チェック (計算前・必須)
 

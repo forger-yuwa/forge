@@ -36,7 +36,7 @@ python3 solver_density_cuda/tools/codex_review.py PLAN --stage plan --focus "§4
 python3 solver_density_cuda/tools/codex_review.py PLAN --stage plan --dry-run
 ```
 
-- 所要 5〜15 分。Claude Code からは **`run_in_background` + timeout 1200 s 以上**で呼ぶ。進捗は
+- 所要 5〜15 分。Claude Code からは **`run_in_background` + timeout 1200 s 以上**で呼ぶ。`( … &)`・nohup のシェル背景は不可 (完了通知が来ない; PreToolUse フック `hook_forge_guard.py` が拒否する、2026-10-06)。進捗は
   `notes/reviews/<名前>.log` のサイズ、または `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` の末尾 timestamp で見る。
   フリーズ疑いでも kill する前に `ps -o pid,etime,time` の CPU 時間で進行中か確かめる。
 - ツールが守っている作法 (手で `codex exec` を打つときも同じ): `--sandbox read-only`、**stdin は `/dev/null`**

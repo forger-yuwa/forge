@@ -28,6 +28,9 @@ class Problem:
     evaluate: dict
     raw: dict = field(repr=False, default_factory=dict)
     path: str | None = field(repr=False, default=None)   # 問題 YAML の所在 (gas.species_db の相対パス基準)
+    # Euler 専用の格子 (axis-Mach の prepare だけが読む。NS の prepare_ns は mesh; 2026-10-07, plan verification-case45-euler-total-enthalpy §4)。
+    # 中身の検査 (未知のキー・既定) は runner_axismach.mesh_euler_block
+    mesh_euler: dict | None = field(repr=False, default=None)
 
     @property
     def R_gas(self) -> float:
@@ -193,6 +196,7 @@ def load_problem(path) -> Problem:
         evaluate=raw["evaluate"],
         raw=raw,
         path=str(path),
+        mesh_euler=raw.get("mesh_euler"),
     )
     _validate(prob)
     return prob
@@ -244,6 +248,12 @@ def _validate(p: Problem) -> None:
     elif "composition_basis" in gs or "species_db" in gs or "condensing_species" in gs:
         if str(gs.get("model", "cpg")) not in ("semiperfect", "frozen_tp"):
             errs.append("gas.composition_basis / species_db / condensing_species は gas.model semiperfect | frozen_tp でのみ有効")
+    if "mesh_euler" in p.raw:
+        # Euler 専用の格子 (2026-10-07): 読むのは axis-Mach の prepare だけ。他の type に書いても効かないので黙って無視しない
+        if p.type != "wind_tunnel_axisym_axismach":
+            errs.append(f"mesh_euler は type wind_tunnel_axisym_axismach だけで有効 (type {p.type} の runner は mesh を読む)")
+        elif not isinstance(p.raw["mesh_euler"], dict):
+            errs.append(f"mesh_euler は辞書 (受け取った値: {p.raw['mesh_euler']!r})")
     if "transport" in gs and str(gs.get("model", "cpg")) not in ("semiperfect", "frozen_tp"):
         # frozen_tp (SERN) は 2026-09-30 に lump 記法へ切り替えた (R8) ので、lump の構成実種に輸送モデルを当てられる。
         # 実種との突き合わせは runner_sern (frozen_gases の layout で resolve_transport)

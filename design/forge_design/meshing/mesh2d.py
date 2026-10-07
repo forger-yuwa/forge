@@ -39,6 +39,15 @@ class Mesh2DParams:
     # 上流側 (収縮部) も同様に戻す: x <= up_x0 で wall_first_frac、up_x1 以上で wall_first_frac_throat (None = 上流は全域 throat 値)
     wall_first_up_x0: float | None = None
     wall_first_up_x1: float | None = None
+    # --- 軸側の最大間隔の上限 (2026-10-04, plan verification-m6-axis-wave-mesh-su2 §4.1) ---
+    # None なら従来どおり nj 点の等比。指定すると、壁側は nj から決まる同じ第一セル・同じ比 q で伸ばし、
+    # 間隔 (/ r_w) がこの値に達したら軸まで一様にする。nj は導出値になる (壁・境界層の格子は不変)。
+    axis_gap_frac: float | None = None
+    # --- 軸側の間隔の上限・nj 固定版 (2026-10-06, plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11h) ---
+    # None なら従来どおり。指定すると各断面で、壁の第一セル (wall_first_frac / 断面ごとの値) から比 q_i の等比で伸ばし、
+    # 間隔 (/ r_w) がこの値 c に達したら軸まで一様にする。nj は全断面で同じ (Σ_j min(fr_i q^j, c) = 1 を q_i について解く)。
+    # axis_gap_frac (nj が導出値) とは併用しない。
+    axis_cap_frac: float | None = None
 
 
 def _x_stations(x0: float, x1: float, ni: int, refine: float, width: float,
@@ -80,6 +89,57 @@ def _radial_fracs(nj: int, first_frac: float) -> np.ndarray:
     return s / s[-1]
 
 
+def _radial_fracs_capped(nj_base: int, first_frac: float, cap: float) -> np.ndarray:
+    """壁側は `_radial_fracs(nj_base, first_frac)` と同じ第一セル・比 q の等比、間隔が `cap` に達したら軸まで一様。"""
+    s0 = _radial_fracs(nj_base, first_frac)
+    g0 = np.diff(s0)[::-1]                      # 壁側から
+    q = g0[1] / g0[0]
+    gaps = []
+    g = g0[0]
+    while g < cap and sum(gaps) + g < 1.0:
+        gaps.append(g)
+        g *= q
+    rest = 1.0 - sum(gaps)
+    m = int(np.ceil(rest / cap - 1e-12))
+    gaps = gaps + [rest / m] * m
+    s = np.concatenate([[0.0], np.cumsum(gaps[::-1])])
+    return s / s[-1]
+
+
+def _radial_fracs_capfixed(nj: int, first_frac: float, cap: float) -> tuple[np.ndarray, float]:
+    """s_0=0 (軸) → s_{nj-1}=1 (壁)。壁側から first_frac·q^j、上限 cap で頭打ち、総数 nj−1 で和 1 になる q を二分法で解く。
+    戻り値 (s, 隣接比の最大)。実現不能 (first > cap、n·first > 1、first + (n−1)·cap < 1) は例外。"""
+    n = nj - 1
+    fr, c = float(first_frac), float(cap)
+    if not (np.isfinite(fr) and np.isfinite(c) and fr > 0 and c > 0):
+        raise ValueError(f"axis_cap_frac: 不正な値 first {fr} cap {c}")
+    if fr > c:
+        raise ValueError(f"axis_cap_frac: 第一セル {fr} が上限 {c} より大きい")
+    if n * fr > 1.0 or fr + (n - 1) * c < 1.0:
+        raise ValueError(f"axis_cap_frac: nj {nj}・第一セル {fr}・上限 {c} では和が 1 にならない (n·fr ≤ 1 ≤ fr + (n−1)c が必要)")
+    j = np.arange(n)
+    total = lambda q: float(np.minimum(fr * q ** j, c).sum())  # noqa: E731
+    lo, hi = 1.0, 2.0
+    while total(hi) < 1.0:
+        hi *= 2.0
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if total(mid) < 1.0:
+            lo = mid
+        else:
+            hi = mid
+    gaps = np.minimum(fr * hi ** j, c)          # 壁側から
+    gaps = gaps / gaps.sum()
+    if not (np.all(np.isfinite(gaps)) and np.all(gaps > 0)):
+        raise ValueError("axis_cap_frac: 間隔が不正")
+    ratio = float(np.max(np.maximum(gaps[1:] / gaps[:-1], gaps[:-1] / gaps[1:])))
+    s = np.concatenate([[0.0], np.cumsum(gaps[::-1])])
+    s = s / s[-1]
+    if not np.all(np.diff(s) > 0):
+        raise ValueError("axis_cap_frac: 節点が単調でない")
+    return s, ratio
+
+
 def generate_axisym_mesh(wall, prm: Mesh2DParams):
     """wall: NozzleWall。戻り値 (coords (N,3) [m], quads (M,4), 境界辺 dict)。"""
     xs = _x_stations(wall.x_in, wall.x_e, prm.ni, prm.throat_refine, prm.throat_width,
@@ -87,7 +147,31 @@ def generate_axisym_mesh(wall, prm: Mesh2DParams):
     rw = wall.r(xs)
     ni, nj = prm.ni, prm.nj
     X = np.repeat(xs[:, None], nj, axis=1)
-    if prm.wall_first_frac_throat is None:
+    if prm.axis_cap_frac is not None:
+        if prm.axis_gap_frac is not None:
+            raise ValueError("axis_cap_frac と axis_gap_frac は同時に指定できない")
+        if prm.wall_first_frac_throat is None:
+            fr = np.full(ni, float(prm.wall_first_frac))
+        else:
+            t = np.clip((xs - prm.wall_first_blend_x0) / max(prm.wall_first_blend_x1 - prm.wall_first_blend_x0, 1e-9), 0.0, 1.0)
+            t = t * t * (3.0 - 2.0 * t)
+            if prm.wall_first_up_x0 is not None and prm.wall_first_up_x1 is not None:
+                tu = np.clip((prm.wall_first_up_x1 - xs) / max(prm.wall_first_up_x1 - prm.wall_first_up_x0, 1e-9), 0.0, 1.0)
+                tu = tu * tu * (3.0 - 2.0 * tu)
+                t = np.maximum(t, tu)
+            fr = prm.wall_first_frac_throat + (prm.wall_first_frac - prm.wall_first_frac_throat) * t
+        R = np.empty((ni, nj))
+        for i in range(ni):
+            si, _ = _radial_fracs_capfixed(nj, float(fr[i]), float(prm.axis_cap_frac))
+            R[i, :] = rw[i] * si
+    elif prm.axis_gap_frac is not None:
+        if prm.wall_first_frac_throat is not None:
+            raise ValueError("axis_gap_frac と wall_first_frac_throat の併用は未対応")
+        s = _radial_fracs_capped(nj, prm.wall_first_frac, prm.axis_gap_frac)
+        nj = len(s)
+        X = np.repeat(xs[:, None], nj, axis=1)
+        R = rw[:, None] * s[None, :]
+    elif prm.wall_first_frac_throat is None:
         s = _radial_fracs(nj, prm.wall_first_frac)
         R = rw[:, None] * s[None, :]
     else:

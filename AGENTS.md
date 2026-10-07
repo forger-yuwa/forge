@@ -19,6 +19,8 @@
 | [`procedures/codex-review.md`](procedures/codex-review.md) | 計画立案時・検証結果時の **codex 外部レビュー**の手順 (`codex_review.py`、記録の残し方、指摘の採否ルール)。Claude はプロンプト作法・禁止事項を skill `codex-review` |
 | [`plans/active/tooling-nozzle-sern-chain.md`](plans/active/tooling-nozzle-sern-chain.md) | ⑤ SERN の設計チェーン。起動レシピ (§4.12/§4.16)・収束判定 (§4.16.1)・残作業 (§5.1)。Claude は skill `sern-eval` |
 | [`procedures/inlet-profile.md`](procedures/inlet-profile.md) | 入口に分布 (全温・全圧・組成・k/ω・超音速入口の ρ,U,Ps) を与える手順 (`inletProfile` CSV + `gen_inlet_profile.py`)。Claude は skill `forge-inlet-profile` |
+| [`procedures/nozzle-design-outputs.md`](procedures/nozzle-design-outputs.md) | ノズル設計の結果は**標準出力 (コンタ・軸/出口/壁の線グラフ・評価量) を `design/forge_design/report/nozzle_report.py` で作り PowerPoint にまとめる** (境界条件・解析領域・解析設定を含む)。設計チェーンの NS pass の後に自動実行 |
+| [`procedures/nozzle-design-workflow.md`](procedures/nozzle-design-workflow.md) | 軸対称風洞ノズル (axismach) の作業手順: 新規 MOC 設計 / 軸長パラスタ → Euler → NS → 形状調整 → 凝縮 / 既存形状の Euler・NS。Claude は skill `nozzle-design` |
 | [`procedures/development-environment.md`](procedures/development-environment.md) | 開発環境とビルド (Docker / WSL native) の方針 |
 | [`procedures/coding-conventions.md`](procedures/coding-conventions.md) | ソース構成・C++/CUDA 命名規約・ビルド/テスト実行手順 |
 | [`procedures/verification/`](procedures/verification/README.md) | 検証ケース選定 (`README.md`) と各標準検証ケースの個別手順 |
@@ -271,7 +273,7 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
 - `diagnostician` (上位・既定。指示上の編集禁止。Edit/Write は持たないが Bash は持つ): 下のエスカレーション条件に当たったら諮る。
   ブリーフの書き方は次項の codex 諮問と同じ。
 - **codex 諮問 (上位・代替)**: 上の切り替え条件に当たったら `codex_review.py --stage diagnose` で諮る
-  (read-only サンドボックス、所要 5〜15 分なので `run_in_background` + timeout 1200 s 以上。難所は `--effort xhigh`)。
+  (read-only サンドボックス、所要 5〜15 分なので `run_in_background` + timeout 1200 s 以上。難所は `--effort xhigh`)。**`( … &)`・nohup のシェル背景で起動しない** — 完了通知が来ず、終わっても気づけない (2026-10-06 ユーザ指摘)。PreToolUse フック `hook_forge_guard.py` が `codex_review.py` の `run_in_background` なし起動を拒否する。
   ブリーフは `notes/reviews/briefs/<日付>-<slug>.md` に書き (codex がリポジトリ内で読めるよう、また記録として残すため)、
   関連 plan を位置引数、case README 等を `--extra` で渡す。出力は `notes/reviews/<日付>-<slug>-diagnose.md`。
   セッションの文脈は引き継がれないので、ブリーフは**観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 / 仮説**を

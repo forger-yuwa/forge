@@ -1,0 +1,84 @@
+# plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11h (codex diagnose 2026-10-06 axis-refined-grid、事前登録): 最終壁 (run_0117) を固定し nj 257 + axis_cap_frac 0.0133 (A/B は cap だけを変える)
+# §5.1 #11f NS 連鎖 (2026-10-06): 出口較正を細分格子の Euler でやり直した壁 (Md_moc_offset +3.770e-4、E2 run_0113+0114 で出口コア M 5.999998)。r_t は前回 ② の 76.6715 mm から始める。元は §5.1 #11 ①: 細分メッシュ版 (壁と設計は problem_d155_ns_c2pin_final.yaml = run_0092 と同一; r_t 76.7531 mm)
+# plan tooling-nozzle-cfd-pinned-initial-line §5.1 #7 (P5): C2 方式の最終設計を CFD ピン + joint 壁 + 物理壁解析経路で作り直す (2026-10-05)。r_t は c2final の値から始め solve_rt で解き直す
+# ② イソブタン燃焼ガス M6 / 出口径 1.55 m (物理壁定義) — 最短ロバスト点の Euler 検証
+# 条件 (2026-08-31 ユーザ指示): Pt 5.5 MPa / Tt 1600 K / φ=0.9 組成 (case/42 と同一) /
+#   出口径 1.55 m は δ* 込み物理壁で定義 / 全長最小化 / 出口 M ≈ 6 厳密。
+# 最短探索 (search_shortest.py, 基準 = plans/accepted/tooling-nozzle-shortest-robust-axis.md
+#   margin≥1°・topo≥0.02・hard gate・単峰, n1200 確認):
+#   R2: L_c=39.3/M_K=2.7 x_F=95.104 r_t (勝者) / R3: 39.7/2.8 x_F=95.433 → R2 採用。
+# r_t 導出: 物理出口半径 0.775 m = r_t·(A/A*)^0.5 + δ*_exit。semi-perfect Tt1600 の
+#   A/A*(M6)=88.21 (r_F/r_t=9.392)。δ*_exit 初期推定 0.66 r_t (case/42 run_0105 実測
+#   0.783 r_t を Re・全長でスケール) → r_t = 0.775/(9.392+0.66) = 0.0771 m。
+#   NS v3 の δ* 実測後に r_t を 1 回補正する (設計は r_t 単位で不変)。
+# p_ambient: P/Pt(M6, semi-perfect Tt1600) = 4.067e-4 × 5.5 MPa = 2237 Pa。
+# 凝縮の事前見積り: 出口 T 233.5 K vs H2O 飽和 263.9 K (x_H2O 0.1356, pH2O 303 Pa)
+#   = −30 K 過冷却 → dry 前提は出口近傍で破れる。方針 (a): 本 run は dry、採用点で
+#   凝縮 ON restart 再評価 (split_h2o は最初から有効にしておく)。
+name: isobutane_m6_d155_ns_recal_final_cap0133
+type: wind_tunnel_axisym_axismach
+gas:
+  model: semiperfect
+  transport: {CO2: cea, O2: cea, N2: cea, H2O: custom:h2o_iapws_cea_v1}   # 2026-09-27: 種ごとの輸送物性 (viscMethod 2 既定; plan thermophysics-solver-owned-species-db §4.3c)。H2O は IAPWS/CEA つなぎ
+  species: {CO2: 0.1677, H2O: 0.0858, O2: 0.0220, N2: 0.7245}
+  # 参照値 (semi-perfect では NASA-9 が優先。IC 初期推定と CPG フォールバック):
+  gamma: 1.27354        # γ* (スロート 1409 K, Tt 1600)
+  cp: 1360.0            # cp(T*=1409 K)
+
+spec:
+  Pt: 5.5e6
+  Tt: 1600.0
+  p_ambient: 2237.0
+  r_throat: 0.0766539      # [m] C2 方式 (CONTUR を出口 δ で較正) の最終補正: 出口半径 0.775 m (plan verification-m6-axis-wave-mesh-su2 §5.1 #9, 2026-10-05)
+  M_design: 6.0
+
+dv:
+  L_c: {value: 39.3, min: 20.0, max: 80.0}   # 最短ロバスト境界 (margin 1.002°)
+
+geometry:
+  R: 2.0
+  r_inlet: 6.485        # 入口配管の物理半径 0.5 m / r_t (収縮比 A_in/A* = 42.1)
+  L_U: 12.0             # μ = L_U²/(RΔr) = 13.1 ≤ 20 (単調収縮 OK)
+  L_pipe: 0.5
+  start_line: throat_char
+  n_start: 41
+  n_axis_inv: 2400
+  axis_dx0: 0.03
+  x_end_margin: 2.3
+  wall_mode: cplus
+  # CFD ピン (plan tooling-nozzle-cfd-pinned-initial-line, ユーザ採用 2026-10-05): 初期線・m*・軸アンカーを凍結源 (Hall 初期線の V0 型壁の Euler, main 統合ビルド) から
+  initial_line: cfd
+  initial_line_run: run_0062_euler_wallfit_fit_r1_ext6k
+  initial_line_res: res_6000.h5
+  wall_repr: joint             # 位置+壁角の同時当てはめ (V0 型始点)、物理壁は解析経路
+  pw_ramp: [-11.0, -6.0]      # 物理壁の δ_r ランプ区間 (run_0090〜0094 と同じ)
+  pw_upstream: ramp           # 上流は旧来の δ_r ランプ (pw_ramp) のまま。2026-10-07 にコードの既定が poly になったので明示 (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1・§5 の 7)
+  Md_moc_offset: 3.7700e-04       # 出口較正 (細分格子の Euler G1 で 5.999207 → 6; plan §5.1 #11f E2)
+  exit_mode: characteristic
+  axis_law: knot
+  M_knot: 2.7
+  Lc_mode: explicit
+
+mesh:
+  discretization: node
+  ni: 2000
+  nj: 257
+  # plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11 ① (2026-10-05): スロート近傍の第 1 セルを細分し y1+ ≤ 1 を狙う (run_0094 の y1+ 最大: スロート ±2 で 9.0、x −6〜−2 で 6.3、x 2〜6 で 5.4、x 6〜12 で 2.0)。
+  # 壁法線に沿った構造格子の境界層層なので AR ≤ 5000 (AGENTS.md の例外、check_mesh_quality --ar-max 5000)。x 方向も細分して AR を抑える。
+  wall_first_frac: 1.3e-5        # 局所半径比 (旧 4.5e-5)
+  wall_first_frac_throat: 4.5e-6 # スロート近傍 (旧の 1/10)
+  wall_first_up_x0: -9.0
+  wall_first_up_x1: -4.0
+  wall_first_blend_x0: 1.0
+  wall_first_blend_x1: 17.0
+  throat_refine: 4.0
+  throat_width: 3.0
+  ar_max: 5000
+  axis_cap_frac: 0.0133   # 軸側の間隔の上限 (/ r_w)、nj 固定で断面ごとに比を解く
+
+evaluate:
+  nStepOuter: 12000
+  outStepInterval: 1000
+  cfl_main: 1.0
+  mid_stage: true
+  tp_species: split_h2o   # dry でも pseudo と同一 (M4.2 検証済)。凝縮 restart を可能にしておく

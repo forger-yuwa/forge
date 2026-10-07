@@ -20,8 +20,12 @@ from __future__ import annotations
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator
 
-from .moc_kernel import (KernelMOC, _Pt, interior_vec, pm_mach,
-                         pm_mach_vec, pm_nu)
+from . import moc_kernel as _mk
+from .moc_kernel import (AXIS_LIMIT_MODES, AXIS_R_EPS, CORR_MAX, CORR_TOL,
+                         CORRECTOR_MODES, PAIR_BELOW_AXIS, PAIR_CONVERGED, PAIR_DONE,
+                         PAIR_GEOM, PAIR_MAXITER, PAIR_MISSING, PAIR_NONFINITE,
+                         RESID_TOL, KernelMOC, _Pt, axis_theta_r, interior_vec,
+                         pm_mach, pm_mach_vec, pm_nu, source_branches)
 
 
 def field_interpolator(pts):
@@ -48,11 +52,166 @@ def _mass_flux_density(M, g):
     return M * t ** (-0.5 * (g + 1.0) / (g - 1.0))
 
 
+class MocFillDiag:
+    r"""充填 1 回分の単位過程の集計 (plans/accepted/discretization-moc-axis-limit-and-corrector.md §4.2)。
+
+    対の 5 分類: 入力時点の対象 (`input`) = もともとの欠損 (`missing`) + 幾何的棄却 (`geom_parallel`・
+    `geom_below_axis`) + 反復の失敗 (`iter_nonfinite`・`iter_maxiter`) + 収束 (`converged`、fixed2 は
+    固定回数を回し終えた `done_fixed`)。反復回数の分布、最終残差の最大、源項の分岐 (`source_branches`) の数と
+    `AXIS_LIMIT_FRAC` が発火した位置、幾何的棄却・反復の失敗の位置も持つ。値は変えない (記録専用)。"""
+
+    CAP = 200          # 位置の記録の上限 (数は全数)
+
+    def __init__(self, axis_limit: str, corrector: str, n_corr: int, tol: float, max_corr: int):
+        self.cfg = {"axis_limit": axis_limit, "corrector": corrector, "n_corr": int(n_corr),
+                    "tol": float(tol), "max_corr": int(max_corr), "resid_tol": RESID_TOL}
+        self.counts = dict.fromkeys(("input", "missing", "geom_parallel", "geom_below_axis",
+                                     "iter_nonfinite", "iter_maxiter", "converged", "done_fixed"), 0)
+        self.iter_hist: dict = {}
+        self.resid = {"geom_max": 0.0, "comp_max": 0.0, "at_geom": None, "at_comp": None}
+        self.branch = dict.fromkeys(("axis_analytic", "axis_borrow", "axis_zero", "frac_A", "frac_B",
+                                     "frac_PA", "frac_PB", "P_on_axis"), 0)
+        self.frac_pos: list = []           # [level, i, 評価, x_p, r_p, r_相手]
+        self.frac_rng = [np.inf, -np.inf, np.inf, -np.inf]     # x_min, x_max, r_min, r_max
+        self.geom = []                     # 幾何的棄却 (全数): (level, i, kind, xA, rA, xB, rB)
+        self.fail: list = []               # 反復の失敗: [level, i, kind, n_iter, xA, rA, xB, rB]
+        self.n_levels = 0
+
+    def add(self, level: int, Ax, Ar, Bx, Br, xP, rP, st: dict, below):
+        status = np.array(st["status"], dtype=np.int8)
+        status[(status == PAIR_CONVERGED) & below] = PAIR_BELOW_AXIS
+        status[(status == PAIR_DONE) & below] = PAIR_BELOW_AXIS
+        n_it = st["n_iter"]
+        c = self.counts
+        c["input"] += int(status.size)
+        for key, code in (("missing", PAIR_MISSING), ("geom_parallel", PAIR_GEOM),
+                          ("geom_below_axis", PAIR_BELOW_AXIS), ("iter_nonfinite", PAIR_NONFINITE),
+                          ("iter_maxiter", PAIR_MAXITER), ("converged", PAIR_CONVERGED),
+                          ("done_fixed", PAIR_DONE)):
+            c[key] += int(np.sum(status == code))
+        self.n_levels = max(self.n_levels, int(level))
+        done = (status == PAIR_CONVERGED) | (status == PAIR_DONE)
+        if np.any(done):
+            v, cnt = np.unique(n_it[done], return_counts=True)
+            for a, b in zip(v.tolist(), cnt.tolist()):
+                self.iter_hist[int(a)] = self.iter_hist.get(int(a), 0) + int(b)
+        for key, arr in (("geom_max", st["resid_geom"]), ("comp_max", st["resid_comp"])):
+            fa = np.where(np.isfinite(arr), arr, -1.0)
+            if fa.size and fa.max() > self.resid[key]:
+                j = int(np.argmax(fa))
+                self.resid[key] = float(fa[j])
+                self.resid["at_" + key.split("_")[0]] = [int(level), j, float(xP[j]), float(rP[j])]
+        b = st["branch"]
+        valid = status != PAIR_MISSING
+        for key in ("axis_analytic", "axis_borrow", "axis_zero"):
+            self.branch[key] += int(np.sum(np.where(valid, b[key], 0)))
+        for key, (xp, rp, ro) in (("frac_A", (Ax, Ar, Br)), ("frac_B", (Bx, Br, Ar)),
+                                  ("frac_PA", (xP, np.maximum(rP, 0.0), Ar)),
+                                  ("frac_PB", (xP, np.maximum(rP, 0.0), Br))):
+            m = b[key] & valid
+            nm = int(np.sum(m))
+            self.branch[key] += nm
+            if nm:
+                idx = np.flatnonzero(m)
+                self.frac_rng = [min(self.frac_rng[0], float(xp[idx].min())), max(self.frac_rng[1], float(xp[idx].max())),
+                                 min(self.frac_rng[2], float(rp[idx].min())), max(self.frac_rng[3], float(rp[idx].max()))]
+                for j in idx[: max(self.CAP - len(self.frac_pos), 0)]:
+                    self.frac_pos.append([int(level), int(j), key, float(xp[j]), float(rp[j]), float(ro[j])])
+        self.branch["P_on_axis"] += int(np.sum(b["P_on_axis"] & ((status == PAIR_CONVERGED) | (status == PAIR_DONE))))
+        for code, kind in ((PAIR_GEOM, "parallel"), (PAIR_BELOW_AXIS, "below_axis")):
+            for j in np.flatnonzero(status == code):
+                self.geom.append((int(level), int(j), kind, float(Ax[j]), float(Ar[j]), float(Bx[j]), float(Br[j])))
+        for code, kind in ((PAIR_NONFINITE, "nonfinite"), (PAIR_MAXITER, "maxiter")):
+            for j in np.flatnonzero(status == code)[: max(self.CAP - len(self.fail), 0)]:
+                self.fail.append([int(level), int(j), kind, int(n_it[j]), float(Ax[j]), float(Ar[j]),
+                                  float(Bx[j]), float(Br[j])])
+
+    def summary(self) -> dict:
+        h = self.iter_hist
+        n = sum(h.values())
+        it = ({"max": int(max(h)), "mean": float(sum(k * v for k, v in h.items()) / n), "n_pairs": int(n),
+               "hist": {str(k): int(h[k]) for k in sorted(h)}} if n else
+              {"max": None, "mean": None, "n_pairs": 0, "hist": {}})
+        fr = None if not np.isfinite(self.frac_rng[0]) else {
+            "x_min": self.frac_rng[0], "x_max": self.frac_rng[1], "r_min": self.frac_rng[2], "r_max": self.frac_rng[3]}
+        return {**self.cfg, "pairs": dict(self.counts), "iters": it,
+                "resid": (dict(self.resid) if self.cfg["corrector"] == "converge" else None),
+                "branch": dict(self.branch),
+                "axis_limit_frac": {"frac": float(_mk.AXIS_LIMIT_FRAC), "n_evals": int(sum(self.branch[k] for k in
+                                                                     ("frac_A", "frac_B", "frac_PA", "frac_PB"))),
+                                    "range": fr, "positions": self.frac_pos,
+                                    "positions_note": f"[level, i, 評価, x_p, r_p, r_相手] (先頭 {self.CAP} 件)"},
+                "geom_rejects": [list(g) for g in self.geom[: self.CAP]],
+                "_geom_all": list(self.geom),         # moc_gate の判定用 (記録からは外す)
+                "iter_failures": self.fail, "n_levels": int(self.n_levels)}
+
+
+def _posthoc_stats(A, B, out, n_corr: int) -> dict:
+    """既定 (legacy + fixed2) の対の分類を、従来の呼び出しの入出力から作る (値は変えない)。
+    `interior_vec` を位置引数だけで呼ぶ (試験スクリプトが単位過程を差し替える経路との互換) ため、
+    幾何的棄却と反復中の非有限の区別は出力の有限性で付ける (棄却対は den=1 で続行されるので通常は有限)。"""
+    xP, rP, thP, nuP, ok = out
+    fin_in = np.ones(np.shape(xP), dtype=bool)
+    for a in (*A, *B):
+        fin_in &= np.isfinite(a)
+    fin_out = np.isfinite(xP) & np.isfinite(rP) & np.isfinite(thP) & np.isfinite(nuP)
+    st = np.full(np.shape(xP), PAIR_DONE, dtype=np.int8)
+    st[fin_in & ~ok & fin_out] = PAIR_GEOM
+    st[fin_in & ~ok & ~fin_out] = PAIR_NONFINITE
+    st[~fin_in] = PAIR_MISSING
+    return {"status": st, "n_iter": np.full(np.shape(xP), int(n_corr), dtype=np.int16),
+            "resid_geom": np.full(np.shape(xP), np.nan), "resid_comp": np.full(np.shape(xP), np.nan),
+            "branch": source_branches(A[1], B[1], rP)}
+
+
 class InverseMOC(KernelMOC):
-    """軸 Cauchy データからの三角充填と壁流線抽出。"""
+    """軸 Cauchy データからの三角充填と壁流線抽出。
+
+    `axis_limit` / `corrector` は `moc_kernel.interior_vec` の選択肢 (既定 legacy + fixed2 = 従来とビット同一。
+    plans/accepted/discretization-moc-axis-limit-and-corrector.md)。充填のたびに対の集計を `last_diag` に置く。"""
+
+    def __init__(self, gamma=1.4, delta=1.0, n_corr=2, axis_limit: str = "legacy",
+                 corrector: str = "fixed2", tol: float = CORR_TOL, max_corr: int = CORR_MAX):
+        super().__init__(gamma=gamma, delta=delta, n_corr=n_corr)
+        if axis_limit not in AXIS_LIMIT_MODES:
+            raise ValueError(f"axis_limit は {AXIS_LIMIT_MODES} のどれか (受け取った値: {axis_limit!r})")
+        if corrector not in CORRECTOR_MODES:
+            raise ValueError(f"corrector は {CORRECTOR_MODES} のどれか (受け取った値: {corrector!r})")
+        _mk._check_corr_params(tol, max_corr)
+        self.axis_limit, self.corrector = axis_limit, corrector
+        self.tol, self.max_corr = float(tol), int(max_corr)
+        self.last_diag: dict | None = None
+
+    def _new_diag(self) -> MocFillDiag:
+        return MocFillDiag(self.axis_limit, self.corrector, self.n_corr, self.tol, self.max_corr)
+
+    def _front_thr(self, n: int, axis_thr):
+        """初期前線の θ_r (analytic のときだけ。軸端点以外は NaN)。legacy では使わない (None)。"""
+        if self.axis_limit != "analytic":
+            return None
+        if axis_thr is None:
+            raise ValueError("axis_limit='analytic' には初期前線の軸端点の θ_r (axis_thr) が必要")
+        thr = np.asarray(axis_thr, dtype=float)
+        if thr.shape != (n,):
+            raise ValueError(f"axis_thr の長さ {thr.shape} が初期前線 ({n}) と違う")
+        return thr
+
+    def _pairs(self, x, r, th, nu, M, thr):
+        """隣接対 (B=front[:-1] が C⁻ 担体、A=front[1:] が C⁺ 担体) を単位過程に通す。戻り: 5 値 + 集計用 stats。"""
+        A = (x[1:], r[1:], th[1:], nu[1:], M[1:])
+        B = (x[:-1], r[:-1], th[:-1], nu[:-1], M[:-1])
+        if self.axis_limit == "legacy" and self.corrector == "fixed2":
+            # 既定: 従来と同じ呼び出し (位置引数だけ — 単位過程を差し替える試験スクリプトとの互換)
+            out = interior_vec(*A, *B, self.g, self.delta, self.n_corr)
+            return out + (_posthoc_stats(A, B, out, self.n_corr),)
+        st: dict = {}
+        out = interior_vec(*A, *B, self.g, self.delta, self.n_corr, axis_limit=self.axis_limit,
+                           thrA=None if thr is None else thr[1:], thrB=None if thr is None else thr[:-1],
+                           corrector=self.corrector, tol=self.tol, max_corr=self.max_corr, stats=st)
+        return out + (st,)
 
     # -- 場充填 ---------------------------------------------------------------
-    def fill(self, init_front) -> list:
+    def fill(self, init_front, axis_thr=None) -> list:
         """init_front: _Pt 列。**最下流軸点 → 上流軸点 → starting line を壁へ**
         の順 (L 字に沿って単調)。戻り値: 全計算点 (init 含む)。
 
@@ -71,13 +230,15 @@ class InverseMOC(KernelMOC):
 
         よって**本実装 (楔を空のまま残す) を維持**する。なお初期値線をスロート
         特性線にした (A8) 時点で縦線区間が無くなり、この楔自体が構造的に消えた。
-        壁を古典的に閉じる経路は `cplus_flux_wall` (A10) を使う。"""
-        arr = self.fill_arrays(init_front)
+        壁を古典的に閉じる経路は `cplus_flux_wall` (A10) を使う。
+
+        `axis_thr`: `axis_limit='analytic'` のときの初期前線の θ_r (`fill_arrays` と同じ)。"""
+        arr = self.fill_arrays(init_front, axis_thr=axis_thr)
         g = self.g
         return [_Pt(float(a[0]), float(a[1]), float(a[2]), float(a[3]), g, float(a[4]))
                 for a in arr]
 
-    def fill_arrays(self, init_front) -> np.ndarray:
+    def fill_arrays(self, init_front, axis_thr=None) -> np.ndarray:
         r"""`fill` の**フロント一括ベクトル版**。戻り: (n,5) [x, r, th, nu, M]。
 
         レベルごとに隣接ペアを**まとめて**単位過程に通す (計算内容はスカラー版と
@@ -86,28 +247,36 @@ class InverseMOC(KernelMOC):
         (実測: $n_{axis}$=2000 で 369 秒)。ベクトル版は**レベル数 $n$ 回**の
         numpy 呼び出しで済む (同 2.4 秒, 150 倍)。numba/C++ を持ち込まずに済むのは、
         1 レベル内のペアが互いに独立だから (レベル間の依存だけが逐次)。
+
+        `axis_thr`: `axis_limit='analytic'` のときの初期前線の各点の θ_r (長さ = 初期前線、
+        軸端点以外は NaN)。生成した点 (軸外) は θ_r を持たない。対の集計は `self.last_diag`。
         """
         x = np.array([p.x for p in init_front], dtype=float)
         r = np.array([p.r for p in init_front], dtype=float)
         th = np.array([p.th for p in init_front], dtype=float)
         nu = np.array([p.nu for p in init_front], dtype=float)
         M = np.array([p.M for p in init_front], dtype=float)
+        thr = self._front_thr(len(x), axis_thr)
+        diag = self._new_diag()
         out = [np.column_stack([x, r, th, nu, M])]
+        k = 0
         while len(x) >= 2:
+            k += 1
             # B=右(下流)側 C⁻ 担体 = front[:-1], A=左側 C⁺ 担体 = front[1:]
-            xP, rP, thP, nuP, ok = interior_vec(
-                x[1:], r[1:], th[1:], nu[1:], M[1:],
-                x[:-1], r[:-1], th[:-1], nu[:-1], M[:-1],
-                self.g, self.delta, self.n_corr)
+            xP, rP, thP, nuP, ok, st = self._pairs(x, r, th, nu, M, thr)
+            below = ~(rP >= -1e-12)
             ok &= rP >= -1e-12
+            diag.add(k, x[1:], r[1:], x[:-1], r[:-1], xP, rP, st, below & np.isfinite(rP))
             if not np.any(ok):
                 break
             x, r, th, nu = xP[ok], rP[ok], thP[ok], nuP[ok]
             M = pm_mach_vec(nu, self.g)
+            thr = None if thr is None else np.full(len(x), np.nan)
             out.append(np.column_stack([x, r, th, nu, M]))
+        self.last_diag = diag.summary()
         return np.vstack(out)
 
-    def fill_levels(self, init_front) -> np.ndarray:
+    def fill_levels(self, init_front, axis_thr=None) -> np.ndarray:
         r"""`fill_arrays` の**レベル構造を保ったまま**返す版。戻り: (n_lev, n_pt, 5)。
 
         `[k, i]` = レベル $k$ の位置 $i$ の点 $[x, r, \theta, \nu, M]$、
@@ -120,6 +289,8 @@ class InverseMOC(KernelMOC):
         - **C⁺ 線** = 反対角線 $L_k[m-k],\ k=0,1,\dots,m$ (起点 $L_0[m]$)
 
         つまり三角充填の網と特性線網は同じもので、走査順が違うだけ。
+
+        `axis_thr`: `fill_arrays` と同じ。対の集計 (欠損 = 死んだ対を含む) は `self.last_diag`。
         """
         x = np.array([p.x for p in init_front], dtype=float)
         r = np.array([p.r for p in init_front], dtype=float)
@@ -127,6 +298,8 @@ class InverseMOC(KernelMOC):
         nu = np.array([p.nu for p in init_front], dtype=float)
         M = np.array([p.M for p in init_front], dtype=float)
         n = len(x)
+        thr = self._front_thr(n, axis_thr)
+        diag = self._new_diag()
         out = np.full((n, n, 5), np.nan)
         out[0] = np.column_stack([x, r, th, nu, M])
         live = np.ones(n, dtype=bool)          # レベル k で有効な添字
@@ -135,11 +308,10 @@ class InverseMOC(KernelMOC):
             pair = live[:-1] & live[1:]
             if not np.any(pair):
                 break
-            xP, rP, thP, nuP, ok = interior_vec(
-                x[1:], r[1:], th[1:], nu[1:], M[1:],
-                x[:-1], r[:-1], th[:-1], nu[:-1], M[:-1],
-                self.g, self.delta, self.n_corr)
+            xP, rP, thP, nuP, ok, st = self._pairs(x, r, th, nu, M, thr)
+            diag.add(k, x[1:], r[1:], x[:-1], r[:-1], xP, rP, st, pair & np.isfinite(rP) & ~(rP >= -1e-12))
             ok &= pair & (rP >= -1e-12)
+            thr = None if thr is None else np.full(len(x) - 1, np.nan)    # 生成した点は軸外 (θ_r なし)
             if not np.any(ok):
                 break
             MP = pm_mach_vec(np.where(ok, nuP, 0.0), self.g)
@@ -150,6 +322,7 @@ class InverseMOC(KernelMOC):
             M = np.where(ok, MP, np.nan)
             out[k, :len(x)] = np.column_stack([x, r, th, nu, M])
             live = ok
+        self.last_diag = diag.summary()
         return out
 
     # -- 壁流線 ---------------------------------------------------------------
@@ -397,7 +570,7 @@ def terminal_exit(pts, wall, x_E: float, M_d: float, gamma: float = 1.4,
 
 
 def _design_cplus(inv, init, n_ax, ax, mdot_star, g, x0, x_wall0,
-                  exit_mode, x_E, M_d, start_line) -> dict:
+                  exit_mode, x_E, M_d, start_line, axis_thr=None) -> dict:
     r"""`wall_mode='cplus'` の設計本体 — **補間構造を一切作らない**経路。
 
     壁は各 C⁺ 線上の流束閉包 (`cplus_flux_wall`)、物理出口 $F$ は $E=(x_E,0)$ を
@@ -407,8 +580,10 @@ def _design_cplus(inv, init, n_ax, ax, mdot_star, g, x0, x_wall0,
     診断は `mdot_ratio_moc` を返さない — 本閉包では構成的に 1 になる**循環指標**に
     なるため (A9 の教訓)。代わりに**流線整合残差** $\max|dr/dx-\tan\theta_{\rm net}|$
     を返す: 壁は流線でもあるはずなので、独立な 2 つの閉包の食い違いを測っている。
+
+    `axis_thr`: `axis_limit='analytic'` のときの初期前線の θ_r (`axis_theta_r_init`)。
     """
-    lev = inv.fill_levels(init)
+    lev = inv.fill_levels(init, axis_thr=axis_thr)
     cum0 = np.zeros(len(init))
     cum0[n_ax:] = _flux_along(init[n_ax:], g)
     wall = cplus_flux_wall(lev, cum0, mdot_star, g)
@@ -499,26 +674,156 @@ def _axis_grid(x0: float, x_end: float, n: int, dx0: float | None,
     return x
 
 
+# 軸端の接続検査 (target の軸節点と throat の初期線の軸端) の許容差。どちらも同じ量を別経路で作っているので
+# 構成上は丸め誤差で一致するはずの量 (plan §4.1)。M・ν は絶対値、M′ は max(1, |M′|) に対する相対値
+CONN_TOL = 1e-9
+
+
+def axis_theta_r_init(init, n_ax: int, target, g, target_dM=None, axis_anchor=None,
+                      M_line_axis: float | None = None):
+    r"""初期前線の軸端点の解析極限 $\theta_r$ (plans/accepted/discretization-moc-axis-limit-and-corrector.md §4.1)。
+
+    - 軸節点 `init[:n_ax]` ($r=0$): $M$ = `target(x)`、$M'$ = `target_dM(x)` (軸則の解析微分) →
+      $\theta_r=\frac12\sqrt{M^2-1}\,\nu_M(M)M'$ (`moc_kernel.axis_theta_r`)。
+    - 初期線の軸端 `init[n_ax]` ($r\le$ `AXIS_R_EPS` のとき): アンカー `axis_anchor` = (x_A, M_A, M′_A) が
+      その x にあれば (M_A, M′_A)。一般経路 ($x_A\ne x_0$、`runner_axismach` の CFD 反復アンカー) では
+      初期線の軸端を $x_A$ と扱わず、$M$ = 初期線の軸端の M (`M_line_axis`)、$M'$ = `target_dM(x_0)`。
+    - `target_dM` が無い (軸則に微分が無い) ときの代わり: 軸端点の ν を x の 3 次スプラインにして
+      $\theta_r=\frac12\sqrt{M^2-1}\,d\nu/dx$ ($\nu_M$ を掛けない)。
+    戻り: (thr [len(init)、軸端点以外 NaN], info)。info: `source` (軸節点・初期線の軸端それぞれの出所)、
+    `connection` (target と throat の軸端の x・M・ν・M′ の差と `ok`)。"""
+    xs = np.array([p.x for p in init[:n_ax]], dtype=float)
+    M_ax = np.array([float(target(float(x))) for x in xs], dtype=float)
+    p_end = init[n_ax] if len(init) > n_ax else None
+    on_end = p_end is not None and p_end.r <= AXIS_R_EPS
+    M_l = (float(M_line_axis) if M_line_axis is not None else float(p_end.M)) if p_end is not None else None
+    thr = np.full(len(init), np.nan)
+    src: dict = {}
+    spl = None
+    if target_dM is None:
+        from scipy.interpolate import CubicSpline
+        xx = np.r_[[p_end.x] if on_end else [], xs[::-1]]
+        nn = np.r_[[float(pm_nu(M_l, g))] if on_end else [], np.array([p.nu for p in init[:n_ax]])[::-1]]
+        spl = CubicSpline(xx, nn).derivative()
+        thr[:n_ax] = 0.5 * np.sqrt(np.maximum(M_ax ** 2 - 1.0, 0.0)) * spl(xs)
+        src["axis_nodes"] = "nu_spline"
+    else:
+        thr[:n_ax] = axis_theta_r(M_ax, np.array([float(target_dM(float(x))) for x in xs]), g)
+        src["axis_nodes"] = "law_derivative"
+    conn: dict = {"x_line_axis": None if p_end is None else float(p_end.x),
+                  "r_line_axis": None if p_end is None else float(p_end.r), "tol": CONN_TOL}
+    if on_end:
+        x_l = float(p_end.x)
+        M_t = float(target(x_l))
+        Mp_t = None if target_dM is None else float(target_dM(x_l))
+        conn.update(x_axis_node_first=(float(xs[-1]) if n_ax else None), M_line=M_l, M_target=M_t,
+                    dM=M_l - M_t, dnu=float(pm_nu(M_l, g)) - float(pm_nu(M_t, g)), Mp_target=Mp_t)
+        okc = abs(conn["dM"]) <= CONN_TOL and abs(conn["dnu"]) <= CONN_TOL
+        same_x = False
+        if axis_anchor is not None:
+            x_A, M_A, Mp_A = (float(v) for v in axis_anchor)
+            same_x = abs(x_l - x_A) <= AXIS_R_EPS
+            conn.update(x_A=x_A, dx_line_minus_xA=x_l - x_A, line_axis_is_x_A=bool(same_x))
+            if same_x:
+                conn.update(dM_anchor=M_A - M_l)
+                okc = okc and abs(M_A - M_l) <= CONN_TOL
+                if Mp_t is not None:
+                    conn.update(dMp_anchor_minus_target=Mp_A - Mp_t)
+                    okc = okc and abs(Mp_A - Mp_t) <= CONN_TOL * max(1.0, abs(Mp_A))
+        conn["ok"] = bool(okc)
+        if same_x:
+            thr[n_ax] = float(axis_theta_r(M_A, Mp_A, g))
+            src["line_axis_end"] = "anchor"
+            conn["Mp_used"] = Mp_A
+        elif target_dM is not None:
+            thr[n_ax] = float(axis_theta_r(M_l, Mp_t, g))
+            src["line_axis_end"] = "target_derivative@x_line"
+            conn["Mp_used"] = Mp_t
+        else:
+            thr[n_ax] = 0.5 * np.sqrt(max(M_l * M_l - 1.0, 0.0)) * float(spl(x_l))
+            src["line_axis_end"] = "nu_spline"
+            conn["Mp_used"] = None
+    else:
+        conn["ok"] = True
+        src["line_axis_end"] = None            # 初期線の始点が軸上にない (θ_r 不要)
+    if not np.all(np.isfinite(thr[:n_ax])) or (on_end and not np.isfinite(thr[n_ax])):
+        raise ValueError("axis_theta_r_init: 軸端点の θ_r が非有限 (軸則・アンカーの微分を確認)")
+    info = {"source": src, "connection": conn,
+            "first": {"x": float(xs[-1]) if n_ax else None, "theta_r": float(thr[n_ax - 1]) if n_ax else None},
+            "line_axis_end": {"x": conn["x_line_axis"], "theta_r": float(thr[n_ax]) if on_end else None}}
+    return thr, info
+
+
+def moc_gate(diag: dict, thr_info: dict | None, wall_full=None) -> dict:
+    r"""単位過程のゲート (plan §4.2)。**設計は止めない** (診断に記録し、検証・生産のゲートが読む)。
+
+    `corrector='converge'` のときだけ合否を出す (fixed2 は収束を判定しないので `pass` = None):
+    - 反復の失敗 (反復中の NaN・Inf、上限到達) が 1 対でもあれば不合格
+    - 最終状態の残差 (幾何の交点式・適合式) の最大が `RESID_TOL` を超えたら不合格
+    - 幾何的棄却 (平行な特性線・軸より下) が許す領域の外で起きたら不合格。許す領域は従来どおり
+      「壁の外」(対の両端が設計壁 `wall_full` [x, r] 以上の半径にある、または壁の x 範囲の外 = 網の端)
+    - `axis_limit='analytic'` で軸端の接続 (target と throat の x・M・ν・M′) が一致しなければ不合格"""
+    reasons = []
+    applicable = diag["corrector"] == "converge"
+    n_fail = diag["pairs"]["iter_nonfinite"] + diag["pairs"]["iter_maxiter"]
+    rmax = None
+    if applicable:
+        if n_fail:
+            reasons.append(f"反復の失敗 {n_fail} 対 (非有限 {diag['pairs']['iter_nonfinite']}・"
+                           f"上限到達 {diag['pairs']['iter_maxiter']})")
+        rmax = max(diag["resid"]["geom_max"], diag["resid"]["comp_max"])
+        if not rmax <= RESID_TOL:
+            reasons.append(f"最終残差 {rmax:.3e} > {RESID_TOL:g}")
+    n_geom = diag["pairs"]["geom_parallel"] + diag["pairs"]["geom_below_axis"]
+    inside = None
+    if n_geom:
+        inside = 0
+        for (_lev, _i, _kind, xa, ra, xb, rb) in diag["_geom_all"]:
+            if wall_full is None or len(wall_full) < 2:
+                inside += 1
+                continue
+            wx, wr = wall_full[:, 0], wall_full[:, 1]
+            out_x = (min(xa, xb) > wx[-1]) or (max(xa, xb) < wx[0])
+            above = (ra >= np.interp(xa, wx, wr)) and (rb >= np.interp(xb, wx, wr))
+            if not (out_x or above):
+                inside += 1
+        if inside:
+            reasons.append(f"幾何的棄却 {inside} 対が壁の内側 (許す領域 = 壁の外・網の端の外)")
+    conn_ok = None
+    if diag["axis_limit"] == "analytic" and thr_info is not None:
+        conn_ok = bool(thr_info["connection"]["ok"])
+        if not conn_ok:
+            reasons.append("軸端の接続不一致 (target と throat の x・M・ν・M′)")
+    return {"applicable": applicable, "pass": (not reasons) if applicable else None, "reasons": reasons,
+            "n_iter_fail": int(n_fail), "resid_max": rmax, "n_geom_reject": int(n_geom),
+            "n_geom_reject_inside_wall": inside, "connection_ok": conn_ok}
+
+
 def inverse_design(throat, target, x_axis_end: float, n_axis: int = 260,
                    n_start: int = 41, gamma: float = 1.4, dx_wall: float = 0.02,
                    th_wall0: float | None = None, M_start: float = 1.05,
                    exit_mode: str = "lip", x_E: float | None = None,
                    M_d: float | None = None, start_line: str = "vertical",
                    wall_mode: str = "streamline", blend_width: float = 1.0,
-                   axis_dx0: float | None = None):
+                   axis_dx0: float | None = None, axis_limit: str = "legacy",
+                   corrector: str = "fixed2", target_dM=None, axis_anchor=None):
     """starting line (throat: SauerThroat) + 軸目標 target(x) から壁を逆設計する。
 
     target: 呼び出し可能 M(x) — starting line の軸点 x0 で場に C1 整合していること
     (モード F: MachBezier.from_constraints の start に Sauer 軸微分を渡す)。
     x_axis_end: 軸目標の下流端 (壁端の C⁻ 足より下流まで — 一様出口なら
     M_d 一定を伸ばすだけ)。
-    戻り値 dict: wall (n,4 [x,r,θ,M]), pts, mdot_start, mdot_exit。
+    axis_limit / corrector: 単位過程の選択肢 (`moc_kernel.interior_vec`。既定 legacy + fixed2 は従来とビット同一。
+    plans/accepted/discretization-moc-axis-limit-and-corrector.md)。`analytic` では軸端点の θ_r を
+    `axis_theta_r_init` で作る — `target_dM` (軸則の dM/dx。無ければ ν の 3 次スプライン微分で代用) と
+    `axis_anchor` = (x_A, M_A, M′_A) (初期線の軸端が x_A にあるとき、その θ_r に使う)。
+    戻り値 dict: wall (n,4 [x,r,θ,M]), pts, mdot_start, mdot_exit, moc (単位過程の集計・θ_r の出所・ゲート)。
     """
     # wall_mode: 'cplus' = 壁点を C⁺ 線上の流束閉包で決める古典法 (A10, `_design_cplus`。
     # Delaunay も流線 ODE も通らない) / 'streamline' = 三角充填 + 補間場の流線積分 (旧既定。
     # 向き非依存 fill への「修正」は出口指標を悪化させ撤回 — plan §9.1)。
     # streamline の既知の限界: 壁足の曲率が円弧 1/R でなく ~0 に寝る。
-    inv = InverseMOC(gamma=gamma, delta=1.0)
+    inv = InverseMOC(gamma=gamma, delta=1.0, axis_limit=axis_limit, corrector=corrector)
     g = gamma
     if start_line == "throat_char":
         # **スロート特性線を初期値線にする** (CONTUR 流, 2026-08-15 ユーザ指摘)。
@@ -541,10 +846,16 @@ def inverse_design(throat, target, x_axis_end: float, n_axis: int = 260,
         # throat_char では壁足 = 幾何スロートで θ=0 が厳密に成り立つので不要。
         init[-1].th = float(th_wall0)
     mdot_star = float(_flux_along(init[len(ax):], g)[-1])
+    axis_thr, thr_info = None, None
+    if axis_limit == "analytic":
+        axis_thr, thr_info = axis_theta_r_init(init, len(ax), target, g, target_dM=target_dM,
+                                               axis_anchor=axis_anchor, M_line_axis=float(MM[0]))
     if wall_mode == "cplus":
-        return _design_cplus(inv, init, len(ax), ax, mdot_star, g, x0,
-                             float(x_line[-1]), exit_mode, x_E, M_d, start_line)
-    pts = inv.fill(init)
+        res = _design_cplus(inv, init, len(ax), ax, mdot_star, g, x0,
+                            float(x_line[-1]), exit_mode, x_E, M_d, start_line, axis_thr=axis_thr)
+        res["moc"] = _moc_record(inv, thr_info, res["wall_full"])
+        return res
+    pts = inv.fill(init, axis_thr=axis_thr)
     # Delaunay は充填ベクトル化後の支配コスト → 1 個だけ作って全診断で使い回す
     itp = field_interpolator(pts)
     wall = inv.wall_streamline(pts, float(x_line[-1]), float(rr[-1]), dx=dx_wall,
@@ -612,4 +923,13 @@ def inverse_design(throat, target, x_axis_end: float, n_axis: int = 260,
     return {"wall": wall, "wall_full": wall_full, "pts": pts, "x0": float(x0),
             "start_line": start_line, "x_wall0": float(x_line[-1]),
             "wall_mode": wall_diag,
-            "exit": exit_info, "mdot_start": mdot_star, "mdot_exit": mdot1}
+            "exit": exit_info, "mdot_start": mdot_star, "mdot_exit": mdot1,
+            "moc": _moc_record(inv, thr_info, wall_full)}
+
+
+def _moc_record(inv, thr_info: dict | None, wall_full) -> dict:
+    """`inverse_design` の戻り値 `moc`: 単位過程の集計 (`InverseMOC.last_diag`)・θ_r の出所と接続検査・ゲート。"""
+    diag = dict(inv.last_diag)
+    gate = moc_gate(diag, thr_info, wall_full)
+    diag.pop("_geom_all", None)
+    return {**diag, "theta_r": thr_info, "gate": gate}

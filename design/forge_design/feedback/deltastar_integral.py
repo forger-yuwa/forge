@@ -140,13 +140,13 @@ def _wall_temperature(thermal_bc: dict | None, x: float, Taw: float) -> float:
     raise ValueError(f"thermal_bc.mode = {thermal_bc.get('mode')} は未対応")
 
 
-def closure_contur(theta_m: float, e: dict, Tw: float, a: float = 1.0) -> dict:
+def closure_contur(theta_m: float, e: dict, Tw: float, a: float = 1.0, cf_scale: float = 1.0, n_scale: float = 1.0) -> dict:
     """θ (物理 [m]) と縁条件から δ, N, δ*, H, θ_c, C_f を決める (CONTUR 閉包)。長さは [m]。"""
     rw_m = e["rw_m"]; Te = e["Te"]; Taw = e["Taw"]; cos_phi = e["cos_phi"]
     rho_e, ue, mu_e = e["rho_e"], e["ue"], e["mu_e"]
 
     def theta_of_delta(delta):
-        N = N_of_Redelta(rho_e * ue * delta / mu_e)
+        N = n_scale * N_of_Redelta(rho_e * ue * delta / mu_e)
         return _profile_integrals(delta, N, Tw, Taw, Te, rw_m, cos_phi, a)[0] - theta_m
 
     # 探索区間は壁半径と 1 m の小さい方で切る (平面入口 flat_plate_integral は rw_m=1e30 を渡す)
@@ -158,14 +158,14 @@ def closure_contur(theta_m: float, e: dict, Tw: float, a: float = 1.0) -> dict:
         delta = lo
     else:
         delta = brentq(theta_of_delta, lo, hi, xtol=1e-12 * L, maxiter=200)
-    N = N_of_Redelta(rho_e * ue * delta / mu_e)
+    N = n_scale * N_of_Redelta(rho_e * ue * delta / mu_e)
     th, ds, th_c, Fc = _profile_integrals(delta, N, Tw, Taw, Te, rw_m, cos_phi, a)
     Re_theta_c = rho_e * ue * th_c / mu_e
     F_Rd = mu_e / float(_sutherland(Tw))
     Re_theta_i = max(F_Rd * Re_theta_c, 300.0)                 # Eq. 75 の有効域下限で床
     lg = np.log10(Re_theta_i)
     Cfi = 0.0773 / ((lg + 4.561) * (lg - 0.546))
-    Cf = Cfi / Fc
+    Cf = cf_scale * Cfi / Fc
     return dict(delta=delta, N=N, dstar=ds, H=ds / max(th, 1e-30), theta_c=th_c, Cf=Cf, Cfi=Cfi,
                 Fc=Fc, F_Rdelta=F_Rd, Re_theta_c=Re_theta_c, Re_delta=rho_e * ue * delta / mu_e)
 
@@ -173,11 +173,14 @@ def closure_contur(theta_m: float, e: dict, Tw: float, a: float = 1.0) -> dict:
 def integral_bl(design_wall, wall_tbl, gas, cp: float, Pt: float, Tt: float, rt_m: float,
                 thermal_bc: dict | None = None, theta0_m: float | None = None,
                 x_virtual_m: float | None = None, a_crocco: float = 1.0, closure: str = "contur",
-                x_out=None, rtol: float = 1e-6) -> dict:
+                x_out=None, rtol: float = 1e-6, cf_scale: float = 1.0, n_scale: float = 1.0) -> dict:
     r"""入口 $x_{in}$ から $x_F$ まで Eq. (61) を前進積分し、δ*_n(x) と半径方向補正 δ_r = δ*_n/cos φ_w を返す。
 
+    cf_scale / n_scale: CFD 較正用の C_f 倍率と N 倍率 (既定 1 = CONTUR そのまま; plan verification-m6-axis-wave-mesh-su2 §5.1 #8b)。
     theta0_m: 入口の運動量厚さ [m]。None なら仮想発達長 x_virtual_m (None = 入口直管長) の乱流平板
-    θ0 = 0.036 x_v Re_{x_v}^{-0.2}。戻り値の x, δ 系は r_t 単位、θ 等の物理量は [m] も併記。"""
+    θ0 = 0.036 x_v Re_{x_v}^{-0.2}。戻り値の x, δ 系は r_t 単位、θ 等の物理量は [m] も併記。
+    rtol: RK45 の相対許容差。戻り値の `solve_ivp` に実際に渡した値と評価回数を残す (`settings` には入れない —
+    prepare_ns の `delta_r_initial.json` を変えないため; plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2c)。"""
     if closure != "contur":
         raise NotImplementedError(f"closure={closure!r} は未実装 (contur のみ)")
     ec = EdgeConditions(design_wall, wall_tbl, gas, cp, Pt, Tt, rt_m)
@@ -195,7 +198,7 @@ def integral_bl(design_wall, wall_tbl, gas, cp: float, Pt: float, Tt: float, rt_
     def station(x, theta_rt):
         e = ec.at(x); e["rw_m"] = e["rw"] * rt_m
         Tw = _wall_temperature(thermal_bc, x, e["Taw"])
-        c = closure_contur(theta_rt * rt_m, e, Tw, a=a_crocco)
+        c = closure_contur(theta_rt * rt_m, e, Tw, a=a_crocco, cf_scale=cf_scale, n_scale=n_scale)
         return e, Tw, c
 
     def rhs(x, y):
@@ -206,8 +209,8 @@ def integral_bl(design_wall, wall_tbl, gas, cp: float, Pt: float, Tt: float, rt_
             + e["drwdx"] / e["rw"]
         return [0.5 * c["Cf"] / e["cos_phi"] - theta_rt * term]
 
-    sol = solve_ivp(rhs, (x0, x1), [theta0_m / rt_m], method="RK45", rtol=rtol, atol=1e-14,
-                    dense_output=True, max_step=(x1 - x0) / 400.0)
+    ivp = dict(method="RK45", rtol=rtol, atol=1e-14, max_step=(x1 - x0) / 400.0)
+    sol = solve_ivp(rhs, (x0, x1), [theta0_m / rt_m], dense_output=True, **ivp)
     if not sol.success:
         raise RuntimeError(f"integral_bl: 積分失敗 ({sol.message})")
     xs = np.asarray(x_out, dtype=float) if x_out is not None else np.linspace(x0, x1, 1500)
@@ -223,9 +226,12 @@ def integral_bl(design_wall, wall_tbl, gas, cp: float, Pt: float, Tt: float, rt_
     out["x"] = xs
     out["delta_r"] = out["dstar_n"] / out["cos_phi"]
     out["settings"] = dict(model="contur_momentum_integral", closure=closure, a_crocco=a_crocco,
+                           cf_scale=cf_scale, n_scale=n_scale,
                            thermal_bc=(thermal_bc or {"mode": "adiabatic"}), theta0_m=float(theta0_m),
                            theta0_source=theta0_source, x_virtual_m=x_virtual_m, rt_m=rt_m, Pt=Pt, Tt=Tt,
                            gas=("semiperfect" if ec.gas_obj is not None else f"cpg gamma={ec.gamma_cpg}"))
+    # 積分の実効の設定 (solve_ivp に渡した値) と手間。settings とは分ける (上の docstring の rtol の項)
+    out["solve_ivp"] = dict(ivp, nfev=int(sol.nfev), n_steps=int(len(sol.t) - 1))
     return out
 
 

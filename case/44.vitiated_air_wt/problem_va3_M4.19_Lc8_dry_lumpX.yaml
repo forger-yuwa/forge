@@ -46,6 +46,14 @@ mesh:
   nj: 65
   wall_first_frac: 0.005
   throat_refine: 3.0
+
+# Euler の格子 (runner_axismach.prepare が読む)。2026-10-07 の移行 (plan verification-case45-euler-total-enthalpy §6 E3) で、
+#   この問題の記録の格子 (上の mesh と同じ) をそのまま明示した (記録の再現のため。design/tests/run_species_attrs_ic_tests.py が使う)。
+mesh_euler:
+  ni: 365
+  nj: 65
+  wall_first_frac: 0.005
+  throat_refine: 3.0
 evaluate:
   nStepOuter: 24000
   outStepInterval: 4000
