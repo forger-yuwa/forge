@@ -1,0 +1,14 @@
+sern_g3                        base 3 new 3 | 量  255 | FAIL   0 | 最大 res_vehicle_base_18_100.h5:VALUE/twall_z D/2S=1.000
+
+全体: 255 量、FAIL 0、所要 31 s
+D/2S の上位 10 (PASS の量):
+  sern_g3 res_vehicle_base_18_100.h5:VALUE/twall_z D/2S 1.000 (S_abs 7.812e-03, D_abs 1.562e-02)
+  sern_g3 res_sidewall_in_11_100.h5:VALUE/utau D/2S 0.957 (S_abs 1.446e-02, D_abs 2.769e-02)
+  sern_g3 res_cowl_in_5_100.h5:VALUE/ypls D/2S 0.950 (S_abs 1.417e-03, D_abs 2.693e-03)
+  sern_g3 res_sidewall_in_11_100.h5:VALUE/omegab D/2S 0.914 (S_abs 2.049e+05, D_abs 3.745e+05)
+  sern_g3 res_sidewall_out_12_100.h5:VALUE/twall_y D/2S 0.827 (S_abs 9.353e+00, D_abs 1.547e+01)
+  sern_g3 res_vehicle_side_17_100.h5:VALUE/twall_x D/2S 0.792 (S_abs 8.174e-01, D_abs 1.295e+00)
+  sern_g3 res_100.h5:VALUE/omega D/2S 0.759 (S_abs 2.651e+07, D_abs 4.024e+07)
+  sern_g3 res_cowl_in_5_100.h5:VALUE/omegab D/2S 0.759 (S_abs 2.651e+07, D_abs 4.024e+07)
+  sern_g3 res_vehicle_base_18_100.h5:VALUE/twall_y D/2S 0.750 (S_abs 3.125e-02, D_abs 4.688e-02)
+  sern_g3 res_cowl_in_5_100.h5:VALUE/twall_z D/2S 0.692 (S_abs 1.288e+00, D_abs 1.783e+00)

@@ -25,7 +25,9 @@
 import argparse
 import csv
 import glob
+import itertools
 import os
+import time
 import re
 import sys
 
@@ -461,6 +463,221 @@ def compare(base, new, rep, cfgname=""):
     return rep
 
 
+# ================================================================== 追加診断 B (plan §6.2、2026-10-07 事前登録)
+# 尺度だけを替える: d(A,B) = max|A − B| (float64、絶対 L∞)。ペアに対称で、反復の並べ替えに不変。
+# S_abs = 同ビルド内 6 対 (base 3 対 + new 3 対) の最大、D_abs = ビルド間 9 対の最大。合格は D_abs ≤ 2·S_abs (S_abs = 0 なら D_abs = 0)。
+# 全入力が有限で shape・列・行キーが対応すること (比較不能は FAIL)。整数・文字列は全 run で厳密一致。
+# 登録判定 A (上の metric / compare) は書き換えない。
+TABLE_KEYS = ("step", "inner", "phase", "Step", "var", "physID")
+
+
+def dabs(a, b):
+    """d(A,B) = max|A − B| を float64 で。shape が違う・非有限を含むときは None (比較不能)。"""
+    a64 = np.asarray(a, dtype=np.float64)
+    b64 = np.asarray(b, dtype=np.float64)
+    if a64.shape != b64.shape:
+        return None
+    if not (np.all(np.isfinite(a64)) and np.all(np.isfinite(b64))):
+        return None
+    if a64.size == 0:
+        return 0.0
+    return float(np.max(np.abs(a64 - b64)))
+
+
+def judge_abs(base_arrs, new_arrs, dfun=None):
+    """B の判定。base_arrs / new_arrs は run ごとの配列 (欠落は None)。
+    返り値 dict(S, D, verdict, reason, worst_S, worst_D) — worst_* は (base/new の列での位置の組)。"""
+    nan = float("nan")
+    dfun = dfun or dabs
+    allv = list(base_arrs) + list(new_arrs)
+    nb = len(base_arrs)
+    out = dict(S=nan, D=nan, verdict="FAIL", reason="", worst_S=None, worst_D=None)
+    if nb < 2 or len(new_arrs) < 1:
+        out["reason"] = "比較不能: 反復が足りない"
+        return out
+    if any(x is None for x in allv):
+        out["reason"] = "比較不能: 欠落した run がある"
+        return out
+    arrs = [np.asarray(x) for x in allv]
+    if len({a.shape for a in arrs}) != 1:
+        out["reason"] = "比較不能: shape が違う"
+        return out
+    if any(a.dtype.kind != "f" for a in arrs):
+        ok = all(a.dtype == arrs[0].dtype and np.array_equal(a, arrs[0]) for a in arrs[1:])
+        out.update(S=0.0 if ok else nan, D=0.0 if ok else nan, verdict="PASS" if ok else "FAIL",
+                   reason="整数・文字列は厳密一致" + ("" if ok else ": 不一致"))
+        return out
+    if any(not np.all(np.isfinite(a)) for a in arrs):
+        out["reason"] = "比較不能: 非有限を含む"
+        return out
+    idx = list(range(len(arrs)))
+    within = [(i, j) for g in (idx[:nb], idx[nb:]) for k, i in enumerate(g) for j in g[k + 1:]]
+    cross = [(i, j) for i in idx[:nb] for j in idx[nb:]]
+    dv = {}
+    for p in within + cross:
+        v = dfun(arrs[p[0]], arrs[p[1]])
+        if v is None:
+            out["reason"] = "比較不能: d が定義できない"
+            return out
+        dv[p] = v
+    ws = max(within, key=lambda p: dv[p]) if within else None
+    wd = max(cross, key=lambda p: dv[p])
+    S = dv[ws] if ws else nan
+    D = dv[wd]
+    ok = (D == 0.0) if S == 0.0 else (D <= 2.0 * S)
+    out.update(S=S, D=D, verdict="PASS" if ok else "FAIL", reason="" if ok else ("S_abs = 0 で D_abs > 0" if S == 0.0 else "D_abs > 2·S_abs"),
+               worst_S=ws, worst_D=wd)
+    return out
+
+
+def self_check_abs(base_arrs, new_arrs, ref):
+    """自己検査: (i) base・new それぞれの全順列 (3!×3! = 36 通り) と (ii) base/new の交換で S・D・判定が ref と同じか。
+    d は (配列, 配列) の**順序つき**の組でキャッシュする (逆順の組は別に計算するので、対称でなければ検出される)。"""
+    cache = {}
+
+    def dfun(a, b):
+        k = (id(a), id(b))
+        if k not in cache:
+            cache[k] = dabs(a, b)
+        return cache[k]
+
+    def same(r):
+        def eq(x, y):
+            return (x != x and y != y) or x == y
+        return eq(r["S"], ref["S"]) and eq(r["D"], ref["D"]) and r["verdict"] == ref["verdict"]
+
+    arrs_b = [None if x is None else np.asarray(x) for x in base_arrs]
+    arrs_n = [None if x is None else np.asarray(x) for x in new_arrs]
+    n_perm = n_bad = 0
+    for pb in itertools.permutations(range(len(arrs_b))):
+        for pn in itertools.permutations(range(len(arrs_n))):
+            r = judge_abs([arrs_b[i] for i in pb], [arrs_n[i] for i in pn], dfun)
+            n_perm += 1
+            n_bad += 0 if same(r) else 1
+    sw = judge_abs(arrs_n, arrs_b, dfun)        # (ii) base と new を入れ替える (S は同じ集合、D は逆順の組)
+    swap_ok = same(sw)
+    return n_perm, n_bad, swap_ok
+
+
+def final_files(d):
+    """B の比較対象 (A と同じ保存時点): 最終ステップの h5 (初期出力を除く) と CSV/probe 出力。変換器は全 h5。"""
+    fs = out_files(d)
+    steps = res_steps(d)
+    h5s = sorted(f for f in fs if f.endswith(".h5"))
+    if steps:
+        last = steps[-1]
+        finals = [f for f in h5s if re.search(rf"_{last}\.h5$", f)]
+        if len(steps) > 1:
+            finals = [f for f in finals if f != f"res_{steps[0]}.h5"]
+    else:
+        finals = h5s
+    tables = sorted(f for f in fs if f.endswith((".csv", ".out")))
+    return finals, tables
+
+
+def compare_abs(base, new, cfgname=""):
+    """追加診断 B。返り値 (報告の行, 量ごとの行の list[dict], 自己検査の集計 dict)。"""
+    allruns = base + new
+    tag = {d: ("B" if d in base else "N") + str((base if d in base else new).index(d) + 1) for d in allruns}
+    lines = [f"=== 構成 {cfgname} (追加診断 B: d = max|A−B|、S_abs = 同ビルド内 6 対の最大、D_abs = ビルド間 9 対の最大、合格 D_abs ≤ 2·S_abs)"]
+    for d in allruns:
+        lines.append(f"  {tag[d]}: {d}")
+    rows = []
+    sc = dict(quantities=0, orderings=0, perm_bad=0, swap_bad=0)
+
+    def add(fname, name, barrs, narrs, struct_bad=""):
+        r = judge_abs(barrs, narrs)
+        if struct_bad:
+            r.update(verdict="FAIL", reason=("構造: " + struct_bad + ("; " + r["reason"] if r["reason"] else "")))
+        n_perm, n_bad, swap_ok = self_check_abs(barrs, narrs, judge_abs(barrs, narrs))
+        sc["quantities"] += 1
+        sc["orderings"] += n_perm
+        sc["perm_bad"] += n_bad
+        sc["swap_bad"] += 0 if swap_ok else 1
+        S, D = r["S"], r["D"]
+        ratio = (D / (2 * S)) if (S == S and S > 0) else (0.0 if (D == 0.0) else float("inf"))
+        det = ""
+        if r["verdict"] == "FAIL":
+            mx = []
+            for d, x in zip(allruns, list(barrs) + list(narrs)):
+                if x is None:
+                    mx.append(f"{tag[d]} 欠落")
+                elif np.asarray(x).dtype.kind == "f":
+                    a = np.asarray(x, dtype=np.float64)
+                    mx.append(f"{tag[d]} max|x| {np.max(np.abs(a)) if a.size else 0:.3e}"
+                              + ("" if np.all(np.isfinite(a)) else " (非有限あり)"))
+                else:
+                    mx.append(f"{tag[d]} (整数・文字列)")
+            if r["worst_D"]:
+                i, j = r["worst_D"]
+                det += f"最悪のビルド間ペア {tag[allruns[i]]}-{tag[allruns[j]]} d={D:.3e}; "
+            if r["worst_S"]:
+                i, j = r["worst_S"]
+                det += f"最悪の同ビルド内ペア {tag[allruns[i]]}-{tag[allruns[j]]} d={S:.3e}; "
+            det += "; ".join(mx)
+        rows.append(dict(cfg=cfgname, file=fname, name=name, S=S, D=D, ratio=ratio, verdict=r["verdict"],
+                         reason=r["reason"], detail=det))
+
+    # ---- ファイル集合
+    sets = {d: final_files(d) for d in allruns}
+    f_ref = sets[allruns[0]]
+    for d in allruns[1:]:
+        if sets[d] != f_ref:
+            rows.append(dict(cfg=cfgname, file="(ファイル集合)", name=tag[d], S=float("nan"), D=float("nan"),
+                             ratio=float("inf"), verdict="FAIL", reason="比較不能: 出力ファイルの集合が違う",
+                             detail=f"{sets[d]} vs {f_ref}"))
+    h5f = sorted(set.intersection(*[set(sets[d][0]) for d in allruns]))
+    tbf = sorted(set.intersection(*[set(sets[d][1]) for d in allruns]))
+    # ---- h5
+    for fn in h5f:
+        its = {d: h5_items(os.path.join(d, fn)) for d in allruns}
+        names = sorted(set().union(*[set(its[d][0]) for d in allruns]))
+        grp_bad = "" if all(its[d][1] == its[allruns[0]][1] for d in allruns) else "グループ属性が違う"
+        if grp_bad:
+            rows.append(dict(cfg=cfgname, file=fn, name="(グループ属性)", S=float("nan"), D=float("nan"),
+                             ratio=float("inf"), verdict="FAIL", reason="構造: " + grp_bad, detail=""))
+        for n in names:
+            meta = [its[d][0].get(n) for d in allruns]
+            sb = ""
+            if any(m is None for m in meta):
+                sb = "データセットが無い run がある"
+            elif any(m[:2] != meta[0][:2] for m in meta):
+                sb = "shape/dtype が違う"
+            elif any(m[2] != meta[0][2] for m in meta):
+                sb = "属性が違う"
+            data = []
+            for d in allruns:
+                data.append(h5_data(os.path.join(d, fn), [n])[n] if its[d][0].get(n) is not None else None)
+            add(fn, n, data[:len(base)], data[len(base):], sb)
+    # ---- 表 (CSV・probe)
+    for fn in tbf:
+        tabs = {d: read_table(os.path.join(d, fn)) for d in allruns}
+        cols0 = list(tabs[allruns[0]][0].keys())
+        keys0 = tabs[allruns[0]][1]
+        bad = ""
+        if any(list(tabs[d][0].keys()) != cols0 for d in allruns):
+            bad = "列が違う"
+        elif any(tabs[d][1] != keys0 for d in allruns):
+            bad = "行キー (step・inner・phase 等) が対応しない"
+        names = sorted(set().union(*[set(tabs[d][0].keys()) for d in allruns]) - set(TABLE_KEYS))
+        for n in names:
+            data = [tabs[d][0].get(n) for d in allruns]
+            add(fn, n, data[:len(base)], data[len(base):], ("比較不能: " + bad) if bad else "")
+
+    nfail = sum(1 for r in rows if r["verdict"] == "FAIL")
+    lines.append(f"\n  量 {len(rows)}、FAIL {nfail}")
+    lines.append(f"  自己検査: {sc['quantities']} 量 × 並べ替え {sc['orderings'] // max(sc['quantities'], 1)} 通り = {sc['orderings']} 評価で"
+                 f"判定・S_abs・D_abs が変わったもの {sc['perm_bad']}、base/new 交換で変わったもの {sc['swap_bad']}")
+    lines.append(f"\n  {'ファイル':28s} {'量':30s} {'S_abs':>11s} {'D_abs':>11s} {'D/2S':>8s}  判定  理由")
+    for r in sorted(rows, key=lambda r: (r["verdict"] != "FAIL", -(r["ratio"] if r["ratio"] == r["ratio"] else 1e300))):
+        def f(x):
+            return "        -  " if x != x else f"{x:11.3e}"
+        lines.append(f"  {r['file'][:28]:28s} {r['name'][:30]:30s} {f(r['S'])} {f(r['D'])} {r['ratio']:8.3f}  {r['verdict']:4s}  {r['reason']}")
+        if r["detail"]:
+            lines.append(f"      {r['detail']}")
+    return lines, rows, sc
+
+
 def diff2(a, b):
     da, _ = h5_items(a)
     db, _ = h5_items(b)
@@ -485,9 +702,15 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--out-dir")
     ap.add_argument("--diff2", nargs=2)
+    ap.add_argument("--metric", choices=["m", "abs"], default="m",
+                    help="m = 登録判定 A (max|A−B|/max|A|)、abs = 追加診断 B (max|A−B|、plan §6.2)")
+    ap.add_argument("--tag", default="(指定)", help="--base/--new 直接指定のときの構成名")
     a = ap.parse_args()
     if a.diff2:
         diff2(*a.diff2)
+        return
+    if a.metric == "abs":
+        main_abs(a)
         return
     jobs = []
     if a.all:
@@ -518,6 +741,53 @@ def main():
     if a.out_dir:
         open(os.path.join(a.out_dir, "summary.txt"), "w").write(s)
     print(s)
+
+
+def main_abs(a):
+    """追加診断 B を回し、構成ごとの報告・全量の表 (all_quantities.tsv)・summary.txt・selfcheck.txt を out-dir に書く。"""
+    t0 = time.time()
+    jobs = []
+    if a.all:
+        import matrix_spec as ms
+        for c in ms.CONFIGS:
+            jobs.append((c, runs_for(c, a.base_build), runs_for(c, a.new_build)))
+    elif a.cfg:
+        jobs.append((a.cfg, runs_for(a.cfg, a.base_build), runs_for(a.cfg, a.new_build)))
+    else:
+        jobs.append((a.tag, [os.path.abspath(x) for x in a.base], [os.path.abspath(x) for x in a.new]))
+    od = a.out_dir or "."
+    os.makedirs(od, exist_ok=True)
+    allrows, summ, scl = [], [], []
+    for c, base, new in jobs:
+        t1 = time.time()
+        lines, rows, sc = compare_abs(base, new, c)
+        open(os.path.join(od, f"{c}.txt"), "w").write("\n".join(lines) + "\n")
+        allrows += rows
+        nf = sum(1 for r in rows if r["verdict"] == "FAIL")
+        fin = [r for r in rows if r["ratio"] == r["ratio"]]
+        worst = max(fin, key=lambda r: r["ratio"]) if fin else None
+        ws = f"{worst['file']}:{worst['name']} D/2S={worst['ratio']:.3f}" if worst else "-"
+        summ.append(f"{c:30s} base {len(base)} new {len(new)} | 量 {len(rows):4d} | FAIL {nf:3d} | 最大 {ws}")
+        scl.append(f"{c:30s} 量 {sc['quantities']:4d} | 並べ替え {sc['orderings']:6d} 評価で変化 {sc['perm_bad']} | "
+                   f"base/new 交換で変化 {sc['swap_bad']} | {time.time() - t1:.1f} s")
+        print(summ[-1], flush=True)
+    with open(os.path.join(od, "all_quantities.tsv"), "w") as f:
+        f.write("cfg\tfile\tname\tS_abs\tD_abs\tD_over_2S\tverdict\treason\tdetail\n")
+        for r in allrows:
+            f.write(f"{r['cfg']}\t{r['file']}\t{r['name']}\t{r['S']:.6e}\t{r['D']:.6e}\t{r['ratio']:.6g}\t{r['verdict']}\t{r['reason']}\t{r['detail']}\n")
+    fails = [r for r in allrows if r["verdict"] == "FAIL"]
+    top = sorted([r for r in allrows if r["ratio"] == r["ratio"] and r["verdict"] == "PASS"], key=lambda r: -r["ratio"])[:10]
+    tail = [f"\n全体: {len(allrows)} 量、FAIL {len(fails)}、所要 {time.time() - t0:.0f} s"]
+    for r in fails:
+        tail.append(f"  FAIL {r['cfg']} {r['file']}:{r['name']} S_abs {r['S']:.3e} D_abs {r['D']:.3e} D/2S {r['ratio']:.3f} ({r['reason']}) {r['detail']}")
+    tail.append("D/2S の上位 10 (PASS の量):")
+    for r in top:
+        tail.append(f"  {r['cfg']} {r['file']}:{r['name']} D/2S {r['ratio']:.3f} (S_abs {r['S']:.3e}, D_abs {r['D']:.3e})")
+    open(os.path.join(od, "summary.txt"), "w").write("\n".join(summ + tail) + "\n")
+    open(os.path.join(od, "selfcheck.txt"), "w").write(
+        "比較器の自己検査 (追加診断 B): 各量で base・new の全順列 (3!×3!) と base/new の交換で S_abs・D_abs・判定が変わらないこと\n"
+        + "\n".join(scl) + "\n")
+    print("\n".join(tail))
 
 
 if __name__ == "__main__":

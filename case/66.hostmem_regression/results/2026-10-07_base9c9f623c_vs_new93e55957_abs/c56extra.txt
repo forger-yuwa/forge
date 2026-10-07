@@ -1,0 +1,105 @@
+=== 構成 c56extra (追加診断 B: d = max|A−B|、S_abs = 同ビルド内 6 対の最大、D_abs = ビルド間 9 対の最大、合格 D_abs ≤ 2·S_abs)
+  B1: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0020_c56extra_base_r1
+  B2: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0056_c56extra_base_r2
+  B3: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0086_c56extra_base_r3
+  N1: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0117_c56extra_new_r1
+  N2: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0147_c56extra_new_r2
+  N3: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0177_c56extra_new_r3
+
+  量 93、FAIL 0
+  自己検査: 93 量 × 並べ替え 36 通り = 3348 評価で判定・S_abs・D_abs が変わったもの 0、base/new 交換で変わったもの 0
+
+  ファイル                         量                                    S_abs       D_abs     D/2S  判定  理由
+  res_200.h5                   VALUE/roOmega                    1.320e+03   2.006e+03    0.760  PASS  
+  res_200.h5                   VALUE/res_roe                    3.719e+02   5.150e+02    0.692  PASS  
+  res_plate_4_200.h5           VALUE/ypls                       2.229e-05   3.016e-05    0.676  PASS  
+  res_200.h5                   VALUE/omega                      1.398e+06   1.852e+06    0.663  PASS  
+  res_plate_4_200.h5           VALUE/omegab                     1.398e+06   1.852e+06    0.663  PASS  
+  res_plate_4_200.h5           VALUE/ro                         3.580e-06   4.742e-06    0.662  PASS  
+  res_plate_4_200.h5           VALUE/Ps                         3.181e-01   4.214e-01    0.662  PASS  
+  res_plate_4_200.h5           VALUE/roe                        8.252e-01   1.093e+00    0.662  PASS  
+  res_plate_4_200.h5           VALUE/qwall                      6.605e+01   8.745e+01    0.662  PASS  
+  res_200.h5                   VALUE/res_roUx                   4.079e-01   5.366e-01    0.658  PASS  
+  res_gap_6_200.h5             VALUE/twall_y                    1.144e-04   1.497e-04    0.654  PASS  
+  res_200.h5                   VALUE/res_ro                     2.089e-04   2.706e-04    0.648  PASS  
+  res_plate_4_200.h5           VALUE/twall_y                    3.973e-02   5.020e-02    0.632  PASS  
+  res_gap_6_200.h5             VALUE/qwall                      4.531e-01   5.625e-01    0.621  PASS  
+  res_plate_4_200.h5           VALUE/twall_x                    5.463e-02   6.746e-02    0.617  PASS  
+  res_plate_4_200.h5           VALUE/utau                       5.219e-03   6.401e-03    0.613  PASS  
+  res_gap_6_200.h5             VALUE/ypls                       9.578e-05   1.152e-04    0.601  PASS  
+  residual_history.csv         rms_ro                           3.848e-07   4.509e-07    0.586  PASS  
+  res_200.h5                   VALUE/P                          1.897e+01   2.181e+01    0.575  PASS  
+  res_gap_6_200.h5             VALUE/roe                        7.812e-03   8.789e-03    0.562  PASS  
+  res_200.h5                   VALUE/roK                        5.130e-02   5.669e-02    0.552  PASS  
+  res_200.h5                   VALUE/roe                        5.494e+02   5.948e+02    0.541  PASS  
+  res_gap_6_200.h5             VALUE/Ps                         3.174e-03   3.418e-03    0.538  PASS  
+  residual_history.csv         rms_roUx                         7.008e-04   7.486e-04    0.534  PASS  
+  res_200.h5                   VALUE/k                          6.431e-01   6.858e-01    0.533  PASS  
+  residual_history.csv         rms_roe                          6.104e-01   6.480e-01    0.531  PASS  
+  res_200.h5                   VALUE/h0                         5.676e+03   5.980e+03    0.527  PASS  
+  res_200.h5                   VALUE/T                          3.841e+00   4.037e+00    0.526  PASS  
+  res_200.h5                   VALUE/thermCond                  3.382e-04   3.554e-04    0.525  PASS  
+  res_200.h5                   VALUE/vis_lam                    2.183e-07   2.294e-07    0.525  PASS  
+  res_200.h5                   VALUE/sonic                      2.745e+00   2.885e+00    0.525  PASS  
+  res_200.h5                   VALUE/ro                         2.640e-04   2.773e-04    0.525  PASS  
+  res_200.h5                   VALUE/roUx                       5.342e-01   5.609e-01    0.525  PASS  
+  res_200.h5                   VALUE/Ux                         7.932e-01   8.324e-01    0.525  PASS  
+  residual_history.csv         rms_roK                          3.591e-05   3.724e-05    0.519  PASS  
+  residual_history.csv         rms_roUy                         1.250e-04   1.255e-04    0.502  PASS  
+  res_200.h5                   VALUE/res_roUy                   5.951e-02   5.959e-02    0.501  PASS  
+  res_200.h5                   VALUE/vis_turb                   3.645e-05   3.648e-05    0.500  PASS  
+  res_200.h5                   VALUE/Uy                         2.015e+00   2.016e+00    0.500  PASS  
+  res_gap_6_200.h5             VALUE/omegab                     7.680e+03   7.680e+03    0.500  PASS  
+  res_gap_6_200.h5             VALUE/ro                         3.725e-08   3.725e-08    0.500  PASS  
+  res_gap_6_200.h5             VALUE/twall_x                    2.441e-04   2.441e-04    0.500  PASS  
+  res_200.h5                   VALUE/roUy                       6.728e-02   6.718e-02    0.499  PASS  
+  residual_history.csv         rms_roOmega                      6.481e+00   6.436e+00    0.497  PASS  
+  res_gap_6_200.h5             VALUE/utau                       3.246e-02   2.920e-02    0.450  PASS  
+  res_200.h5                   MESH/CONNE                       0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  res_200.h5                   MESH/COORD                       0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/Uz                         0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/res_roUz                   0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/roUz                       0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/wall_dist                  0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             MESH/CONNE                       0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  res_gap_6_200.h5             MESH/COORD                       0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/Pt                         0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/Ts                         0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/Tt                         0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/Ux                         0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/Uy                         0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/Uz                         0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/ifaceFw                    0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/ifaceRconv                 0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/ifaceRpre                  0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/ifaceRraw                  0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/ifaceRro                   0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/kb                         0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/roUx                       0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/roUy                       0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/roUz                       0.000e+00   0.000e+00    0.000  PASS  
+  res_gap_6_200.h5             VALUE/twall_z                    0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           MESH/CONNE                       0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  res_plate_4_200.h5           MESH/COORD                       0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/Pt                         0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/Ts                         0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/Tt                         0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/Ux                         0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/Uy                         0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/Uz                         0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/ifaceFw                    0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/ifaceRconv                 0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/ifaceRpre                  0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/ifaceRraw                  0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/ifaceRro                   0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/kb                         0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/roUx                       0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/roUy                       0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/roUz                       0.000e+00   0.000e+00    0.000  PASS  
+  res_plate_4_200.h5           VALUE/twall_z                    0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_ro                        0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_roUx                      0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_roUy                      0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_roUz                      0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_roe                       0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_roUz                         0.000e+00   0.000e+00    0.000  PASS  

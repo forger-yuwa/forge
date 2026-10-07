@@ -25,9 +25,11 @@ plan [architecture-solver-host-memory](../../plans/active/architecture-solver-ho
 | `matrix_spec.py` | **構成表の正本** (入力の元 run・複製するファイル・設定の修正・種・checkpoint・構成ごとの環境変数) |
 | `prepare_inputs.py` | (ローカル) 元 run から `inputs/<入力名>/` を作る。修正は正規表現 + 期待一致数で行い、PyYAML で期待値を検査。`mesh.bndFirstOrder`・`wallTreatmentSST: 1` が残れば失敗 |
 | `run_matrix.py` | (AWS) `seed` (restart_field.py を種に掛ける)・`set-ckpt`・`launch` (run を作って 1 本ずつ順に回すワーカーを裏で起動)・`resume`・`status`・`verify` (RUN_PROVENANCE の forge_bin/sha256 照合)・`note` (README の状態・比較から除外)・`table` (下の run 一覧の行) |
-| `compare_runs.py` | (AWS) §6 の判定。`--cfg X` / `--all` (registry.tsv から run を選ぶ)、`--base … --new …` (直接指定)、`--diff2 A.h5 B.h5` (分割と連続など 2 ファイル) |
+| `compare_runs.py` | (AWS) §6 の判定 (登録判定 A、既定 `--metric m`)。`--cfg X` / `--all` (registry.tsv から run を選ぶ)、`--base … --new …` (直接指定)、`--diff2 A.h5 B.h5` (分割と連続など 2 ファイル)。`--metric abs` で追加診断 B (plan §6.2) |
+| `test_compare_abs.py` | 追加診断 B の判定関数 `judge_abs`・自己検査 `self_check_abs` の単体試験 (codex の最小再現 2 つを含む)。`python3 test_compare_abs.py` |
 | `memlog_summary.py` | (AWS) `FORGE_MEMLOG=1` の工程別 RSS/HWM/GPU と `--memwatch` の 1 s 採取 (`mem_samples.csv`) を表にする |
 | `split_vs_cont.py` | (AWS) dual-time の分割 (ckpt100 → 再開 100) と連続 200 の差を、ビルドごとに反復内の差と並べる (判定はしない) |
+| `results/<日付>_<base>_vs_<new>_abs/` | 追加診断 B のテキスト (構成ごと・`all_quantities.tsv`・`summary.txt`・`selfcheck.txt`・`test_compare_abs.txt`・`sern_g3/`) |
 | `results/<日付>_<base>_vs_<new>/` | AWS から持ち帰った判定のテキスト (`summary.txt`・構成ごとの報告・`sern_g3.txt`・`sern_g3_memlog.txt`・`split_vs_cont_c09.txt`・`registry.tsv`) |
 | `inputs/<入力名>/` | 入力テンプレート。`SOURCE.txt` (元・sha256・修正の全記録)、`FILES` (run に写すファイル)、AWS では `SEEDED.txt` (種の適用記録)・`CKPT_FROM.txt` |
 
@@ -101,6 +103,29 @@ N は入力の `nStepOuter`。出力は `outStepInterval = N` で初期出力 `r
 - 空白区切りの CSV (`conjugate_Tw_*.csv`) を列に分けられず比較から漏れていた → `,` が無い表は空白で切る。
 - `mem_samples.csv` (ハーネスの採取で forge の出力ではない) は比較しない。
 - 判定には使わない情報を足した: (a) の base 内 ulp 幅と new の最近傍 base 値までの ulp 距離、(b) の D/2S 最大のデータセット、FAIL の量の max|A|・max|A−B|。
+
+上の (a)〜ログを**登録判定 A** と呼ぶ (2026-10-07 の結果は下の「結果」、FAIL のまま記録し書き換えない)。
+
+### 追加診断 B (plan §6.2 で事前登録、2026-10-07。`compare_runs.py --metric abs`)
+
+A の (b) の尺度 m = max|A−B|/max|A| は**分母がペアの片側**で、同ビルド内は `i<j` の片方向・ビルド間は base→new の全組合せなので
+S と D の尺度が揃わず、**反復の並び順で判定が変わる** (base [100,2,1]・new [100,2,1] が FAIL、new を [1,2,100] に並べ替えると PASS)。
+さらに `inf ≤ 2·inf` が真になり、**比較不能を PASS にする** (base [0,1,1]・new [100,100,100] が PASS)。codex (diagnose)
+[`notes/reviews/2026-10-07-hostmem-regression-fail-diagnose.md`](../../notes/reviews/2026-10-07-hostmem-regression-fail-diagnose.md) の指摘、
+最小再現は `test_compare_abs.py` に入れた。B は**既存の base 3 本・new 3 本の同じ保存時点・同じ配列・同じ CSV 行で尺度だけを替える** (forge の追加実行なし):
+
+- d(A,B) = max|A − B| (float64、絶対 L∞。ペアに対称)。S_abs = 同ビルド内 6 対 (base 3 対 + new 3 対) の最大、D_abs = ビルド間 9 対の最大。
+- 合格は **D_abs ≤ 2·S_abs** (S_abs = 0 なら D_abs = 0)。全入力が有限で shape・列・行キー (`step`・`inner`・`phase`・`Step`・`var`・`physID`) が
+  対応すること — **比較不能は FAIL** (inf を PASS にしない)。整数・文字列の配列・列は全 run で厳密一致。データセットの集合・shape・dtype・属性も全 run で一致。
+- 対象は A の (b) と同じ (最終出力 h5 の全データセット・境界出力・CSV/probe 出力・残差履歴の全列)。FAIL の 7 量だけでなく全量・全構成と SERN g3 を再評価。
+- **自己検査**: 各量で (i) base・new それぞれの全順列 (3!×3! = 36 通り) と (ii) base/new の交換で S_abs・D_abs・判定が変わらないこと
+  (d は**順序つき**の組で計算するので、非対称なら検出される)。(iii) 単体試験 `test_compare_abs.py` (codex の最小再現 2 つ、比較不能・欠落・
+  shape 違い・S = 0・境界値・整数の厳密一致・乱数での並べ替え不変)。
+- 出力: `results/<日付>_<base>_vs_<new>_abs/` に構成ごとの報告 (`<構成>.txt`、全量を D/2S の大きい順、FAIL には各 run の max|x| と最悪ペア)、
+  全量の表 `all_quantities.tsv` (構成・ファイル・量・S_abs・D_abs・D/2S・判定・理由)、`summary.txt`、`selfcheck.txt`、`test_compare_abs.txt`。
+  SERN g3 は `sern_g3/` (`--base … --new … --tag sern_g3`)。
+- **読み方 (plan §6.2)**: B で超過が消えた量は、その A の FAIL を「尺度依存で説明できる (追加診断で反復内差の 2 倍以内)」と記録する。
+  B でも超過する量は変更起因の差を候補に戻す。**B の PASS は A の書換えや「非決定性だけだった」証明には使わない**。
 ## 使い方 (変更後のビルドで回す手順)
 
 前提: AWS が `running` (`bash solver_density_cuda/tools/aws_instance.sh status`、start/stop は自分でしない)、`pgrep -x forge` の cwd で他セッションを確認。
@@ -221,6 +246,35 @@ base 3.31e-6 / 2.81e-6 / 6.0e-7、new 2.71e-6 / 2.76e-6 / 6.0e-7 (checkpoint の
 c36node 19/191・impdiag 20/191・c09ckpt100 98/241 (outres 114/241・rawdiag 100/243・pindiag 102/241)・c44steady 120/303・c44dual 133/303 (pindiag 140/303)・
 c52cht・c36cell・c20cell_rk3 19/191・c20cell_dual 26/191・c57lm 92/211・c57lm_fromsst 24/202・c56lineimp 23/191・c56extra 25/191・c48absorb 29/191・
 c26optin 20/191 (env 23/212)・SERN g3 23/223。
+
+### 追加診断 B の結果 (2026-10-07、同じ 6 本、forge の追加実行なし)
+
+原本: [`results/2026-10-07_base9c9f623c_vs_new93e55957_abs/`](results/2026-10-07_base9c9f623c_vs_new93e55957_abs/summary.txt)
+(AWS で `compare_runs.py --metric abs --all --new-build new` と SERN g3 の直接指定、所要 66 s = 30 構成 35 s + SERN 31 s)。
+
+- **全 30 構成 3147 量・SERN g3 255 量、FAIL 0** (比較不能 0、整数・文字列の厳密一致 185 量はすべて一致)。
+- **自己検査**: 全 3402 量 × 並べ替え 36 通り (計 122472 評価) で S_abs・D_abs・判定が変わったもの 0、base/new の交換で変わったもの 0
+  ([`selfcheck.txt`](results/2026-10-07_base9c9f623c_vs_new93e55957_abs/selfcheck.txt)・[`sern_g3/selfcheck.txt`](results/2026-10-07_base9c9f623c_vs_new93e55957_abs/sern_g3/selfcheck.txt))。
+  単体試験 `test_compare_abs.py` は AWS・ローカルとも ALL PASS (8 試験。A の 2 つの欠陥も再現する)。
+- **A で FAIL だった 7 量の B の値** (いずれも B では PASS。A の FAIL は**尺度依存で説明できる**と記録する):
+
+  | 構成 | 量 | S_abs | D_abs | D/2S | S・D を決めている run (各 run の max|x| は「結果」の (b) の表) |
+  | --- | --- | --- | --- | --- | --- |
+  | c44dual_ckpt100 | `res_100:condClampCorrQ_0` | 1.462e23 | 1.462e23 | 0.50 | new r1 (1.46e23) が S (new 内) と D の両方を決める |
+  | c44dual_ckpt100 | `res_100:condR30_0` | 4.203e-5 | 4.203e-5 | 0.50 | new r1 (4.2e-5) |
+  | c44dual_restart100 | `res_100:condClampCorrQ_0` | 1.433e10 | 1.433e10 | 0.50 | base r1 (1.4e10) |
+  | c20cell_rk3 | `residual_history.csv:rms_roUz` | 3.277e-7 | 3.277e-7 | 0.50 | (残差履歴の列) |
+  | c20cell_dual | `res_100:roUz` | 4.315e-7 | 4.314e-7 | 0.50 | base r2 (4.3e-7) と new r1 (4.2e-7) |
+  | c20cell_dual | `res_100:Uz` | 3.654e-7 | 3.653e-7 | 0.50 | 同上 |
+  | c20cell_dual | `CHECKPOINT/roUzN` | 4.316e-7 | 4.315e-7 | 0.50 | 同上 |
+
+  D/2S = 0.50 は「1 本だけ飛び抜けた run が S と D の両方を決めている」形で、B はこの量について base と new を区別できていない
+  (その run が base 側か new 側かに依らず同じ値になる)。plan §6.2 のとおり、B の PASS を「非決定性だけだった」証明には使わない。
+- **D/2S の上位 10** (全部 PASS): SERN g3 `res_vehicle_base_18_100:twall_z` **1.000** (S_abs 7.812e-3、D_abs 1.562e-2 = 2·S_abs ちょうど。
+  float32 の値の刻みでちょうど 2 倍になっている)、SERN g3 `res_sidewall_in_11_100:utau` 0.957、SERN g3 `res_cowl_in_5_100:ypls` 0.950、
+  SERN g3 `res_sidewall_in_11_100:omegab` 0.914、c44dual_pindiag `CHECKPOINT/rog_0_fctH` 0.866、c44dual_pindiag `CHECKPOINT/rog_0_fctHsrc` 0.856、
+  c56lineimp `res_200:roOmega` 0.850、c56lineimp `res_gap_6_200:qwall` 0.845、SERN g3 `res_sidewall_out_12_100:twall_y` 0.827、
+  c44dual_restart100 `res_100:sonic` 0.820。30 構成だけの上位と SERN の上位は `summary.txt`・`sern_g3/summary.txt`。
 
 ## 既知の注意
 

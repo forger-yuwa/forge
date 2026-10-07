@@ -1,0 +1,92 @@
+=== 構成 c36node_impdiag (追加診断 B: d = max|A−B|、S_abs = 同ビルド内 6 対の最大、D_abs = ビルド間 9 対の最大、合格 D_abs ≤ 2·S_abs)
+  B1: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0004_c36node_impdiag_base_r1
+  B2: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0041_c36node_impdiag_base_r2
+  B3: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0071_c36node_impdiag_base_r3
+  N1: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0097_c36node_impdiag_new_r1
+  N2: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0127_c36node_impdiag_new_r2
+  N3: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0157_c36node_impdiag_new_r3
+
+  量 80、FAIL 0
+  自己検査: 80 量 × 並べ替え 36 通り = 2880 評価で判定・S_abs・D_abs が変わったもの 0、base/new 交換で変わったもの 0
+
+  ファイル                         量                                    S_abs       D_abs     D/2S  判定  理由
+  point_probe_2.out            T                                6.110e-05   9.150e-05    0.749  PASS  
+  res_200.h5                   VALUE/Ux                         8.690e-02   1.246e-01    0.717  PASS  
+  res_wall_4_200.h5            VALUE/ypls                       3.707e-06   4.790e-06    0.646  PASS  
+  res_200.h5                   VALUE/roUy                       1.014e+00   1.272e+00    0.627  PASS  
+  residual_history.csv         rms_roK                          4.623e-03   5.791e-03    0.626  PASS  
+  point_probe_2.out            P                                5.000e-01   6.250e-01    0.625  PASS  
+  diag.csv                     mean_dt_local                    3.322e-14   3.983e-14    0.600  PASS  
+  residual_history.csv         rms_roUx                         2.536e-04   3.040e-04    0.599  PASS  
+  res_200.h5                   VALUE/roUx                       8.859e-01   1.030e+00    0.581  PASS  
+  point_probe_2.out            Uy                               4.601e-05   5.245e-05    0.570  PASS  
+  diag.csv                     mean_pseudo_diag                 4.066e-08   4.620e-08    0.568  PASS  
+  point_probe_0.out            P                                5.000e-01   5.625e-01    0.562  PASS  
+  res_wall_4_200.h5            VALUE/utau                       2.690e-03   2.998e-03    0.557  PASS  
+  point_probe_0.out            Uy                               1.249e-04   1.392e-04    0.557  PASS  
+  point_probe_1.out            T                                1.373e-04   1.525e-04    0.555  PASS  
+  res_200.h5                   VALUE/Uy                         1.843e-01   2.025e-01    0.550  PASS  
+  res_200.h5                   VALUE/roOmega                    1.753e+05   1.924e+05    0.549  PASS  
+  res_wall_4_200.h5            VALUE/twall_y                    1.034e+01   1.120e+01    0.542  PASS  
+  diag.csv                     mean_pseudo_ratio                4.561e-08   4.903e-08    0.537  PASS  
+  diag.csv                     max_pseudo_ratio                 1.453e-04   1.537e-04    0.529  PASS  
+  res_wall_4_200.h5            VALUE/roe                        2.591e+03   2.727e+03    0.526  PASS  
+  res_200.h5                   VALUE/P                          1.036e+03   1.091e+03    0.526  PASS  
+  res_wall_4_200.h5            VALUE/Ps                         1.036e+03   1.091e+03    0.526  PASS  
+  res_200.h5                   VALUE/vis_lam                    8.906e-09   9.257e-09    0.520  PASS  
+  res_200.h5                   VALUE/T                          1.884e-01   1.958e-01    0.520  PASS  
+  res_wall_4_200.h5            VALUE/Ts                         1.884e-01   1.958e-01    0.520  PASS  
+  res_200.h5                   VALUE/h0                         1.892e+02   1.967e+02    0.520  PASS  
+  res_200.h5                   VALUE/sonic                      1.087e-01   1.130e-01    0.520  PASS  
+  res_200.h5                   VALUE/roe                        2.611e+03   2.691e+03    0.515  PASS  
+  diag.csv                     mean_face_to_pseudo              1.245e-06   1.283e-06    0.515  PASS  
+  res_wall_4_200.h5            VALUE/ro                         9.108e-03   9.341e-03    0.513  PASS  
+  residual_history.csv         rms_roUy                         6.194e-04   6.339e-04    0.512  PASS  
+  diag.csv                     mean_face_diag                   1.489e-06   1.522e-06    0.511  PASS  
+  res_200.h5                   VALUE/omega                      2.390e+04   2.428e+04    0.508  PASS  
+  res_wall_4_200.h5            VALUE/omegab                     2.390e+04   2.428e+04    0.508  PASS  
+  residual_history.csv         rms_roe                          1.905e+00   1.920e+00    0.504  PASS  
+  diag.csv                     min_pseudo_ratio                 4.487e-08   4.503e-08    0.502  PASS  
+  point_probe_1.out            Ux                               1.221e-04   1.221e-04    0.500  PASS  
+  point_probe_2.out            Ux                               4.578e-05   4.578e-05    0.500  PASS  
+  res_200.h5                   VALUE/ro                         8.746e-03   8.688e-03    0.497  PASS  
+  res_200.h5                   VALUE/k                          9.255e+00   8.998e+00    0.486  PASS  
+  res_wall_4_200.h5            VALUE/twall_x                    1.375e+01   1.324e+01    0.481  PASS  
+  residual_history.csv         rms_roOmega                      7.448e+01   6.835e+01    0.459  PASS  
+  res_200.h5                   VALUE/vis_turb                   1.447e-05   1.323e-05    0.457  PASS  
+  res_200.h5                   VALUE/roK                        5.220e+01   4.675e+01    0.448  PASS  
+  point_probe_0.out            T                                1.220e-04   1.069e-04    0.438  PASS  
+  point_probe_1.out            P                                1.000e+00   8.750e-01    0.438  PASS  
+  point_probe_1.out            Uy                               6.914e-05   6.008e-05    0.434  PASS  
+  point_probe_0.out            Ux                               2.136e-04   1.832e-04    0.429  PASS  
+  residual_history.csv         rms_ro                           1.002e-05   7.393e-06    0.369  PASS  
+  res_200.h5                   MESH/CONNE                       0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  res_200.h5                   MESH/COORD                       0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/Uz                         0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/roUz                       0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/wall_dist                  0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_4_200.h5            MESH/CONNE                       0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  res_wall_4_200.h5            MESH/COORD                       0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_4_200.h5            VALUE/Pt                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_4_200.h5            VALUE/Tt                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_4_200.h5            VALUE/Ux                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_4_200.h5            VALUE/Uy                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_4_200.h5            VALUE/Uz                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_4_200.h5            VALUE/kb                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_4_200.h5            VALUE/qwall                      0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_4_200.h5            VALUE/roUx                       0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_4_200.h5            VALUE/roUy                       0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_4_200.h5            VALUE/roUz                       0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_4_200.h5            VALUE/twall_z                    0.000e+00   0.000e+00    0.000  PASS  
+  point_probe_0.out            TotalTime                        0.000e+00   0.000e+00    0.000  PASS  
+  point_probe_0.out            Uz                               0.000e+00   0.000e+00    0.000  PASS  
+  point_probe_1.out            TotalTime                        0.000e+00   0.000e+00    0.000  PASS  
+  point_probe_1.out            Uz                               0.000e+00   0.000e+00    0.000  PASS  
+  point_probe_2.out            TotalTime                        0.000e+00   0.000e+00    0.000  PASS  
+  point_probe_2.out            Uz                               0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_ro                        0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_roUx                      0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_roUy                      0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_roUz                      0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_roe                       0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_roUz                         0.000e+00   0.000e+00    0.000  PASS  

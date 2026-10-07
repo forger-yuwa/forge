@@ -1,0 +1,9 @@
+PASS test_bound_is_inclusive
+PASS test_codex_repro_inf_pass
+PASS test_codex_repro_order_dependence
+PASS test_dabs_symmetric
+PASS test_incomparable_is_fail
+PASS test_integer_exact
+PASS test_self_check_random
+PASS test_zero_spread
+ALL PASS
