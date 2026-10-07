@@ -23,7 +23,7 @@ scale = float(p.spec["r_throat"]); um = scale * 1e6
 tbl = np.loadtxt(RUNS / "run_0147_ns_mono_final/delta_r_initial.csv", delimiter=",", skiprows=1)
 f = delta_r_from_table(tbl[:, 0], tbl[:, 1])
 W = PhysicalNozzleWall(d["wall"], d["wall_inv"], scale, float(p.spec["Pt"]), float(p.spec["Tt"]),
-                       _gam_or_gas(p), p.cp, offset="radial", delta_r_x=f, ramp=tuple(float(v) for v in p.geometry["pw_ramp"]))
+                       _gam_or_gas(p), p.cp, offset="radial", delta_r_x=f, ramp=tuple(float(v) for v in p.geometry["pw_ramp"]), upstream="ramp")   # 今の物理壁 (ランプ); 2026-10-07 に既定が poly
 dw = d["wall"]; LU = float(dw.up.L_U); rU = float(dw.up.r_U)
 x0 = 0.0
 e0 = [float(W.r(np.r_[x0 + 1e-12], n)[0]) for n in range(3)]   # 下流側の値 (x=0⁺)

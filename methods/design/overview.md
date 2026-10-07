@@ -841,7 +841,8 @@ r_W(x) = r_{\rm design}(x) + s(x)\,\delta_r(x),\qquad
 s(x)=\begin{cases}0 & x\le x_{lo}\\ u^3(10-15u+6u^2),\ u=\frac{x-x_{lo}}{x_{hi}-x_{lo}} & x_{lo}<x<x_{hi}\\ 1 & x\ge x_{hi}\end{cases}
 $$
 
-で、$r_W', r_W'', r_W'''$ も設計壁の解析微分 + $(s\,\delta_r)$ の解析微分 (Leibniz) で返す。ランプ区間 $[x_{lo}, x_{hi}]$ は
+で、$r_W', r_W'', r_W'''$ も設計壁の解析微分 + $(s\,\delta_r)$ の解析微分 (Leibniz) で返す。**この式は上流の作り方 `pw_upstream: ramp`
+(旧来、2026-10-07 から明示したときだけ) のもので、既定の `poly` は下の「上流の作り方」(上流に $\delta_r$ を足さず $Q$ 1 本)**。ランプ区間 $[x_{lo}, x_{hi}]$ は
 problem の **`geometry.pw_ramp`** (`prepare_ns` が渡す)。省略時の既定は「直管接合の直後 (設計縮流部で $r'<-0.05$ になる最初の $x$)
 から $-0.5\,L_U$」(`default_pw_ramp`; case/45 の $L_U=12$ で $[-10.71, -6]$)。case/45 の CFD ピン設計は `pw_ramp: [-11, -6]` を明記する
 (run_0090〜0094 と同じ壁: run の δ_r 表から作り直すと `wall_physical.csv` と 8.9e-16 m で一致)。$x\le x_{lo}$ (入口直管と縮流部の入口側) は
@@ -854,34 +855,93 @@ $|r_W''-r_{\rm design}''|\le5\times10^{-3}$ かつ $r_W'<0$ でなければ例�
 $x=0$ では設計壁の $C^2$ がそのまま残り、$r_W''(0)=1/R+\delta_r''(0)$。非 joint の壁は従来経路のまま
 (`analytic=False` で joint にも従来経路を強制できる)。
 
+**上流の作り方 `geometry.pw_upstream` (`poly` が既定、2026-10-07)**
+(計画: [`plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md`](../../plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md) §4.1)。
+上のランプ式 (`ramp`) はスロートより上流の縮流部にも $\delta_r$ を足す。**既定の `poly` は上流に $\delta_r$ を足さず**、配管〜設計スロートを
+5 次多項式 $Q$ 1 本にする:
+
+$$
+r_W(x)=\begin{cases}r_U & x_{in}\le x<-L_U\\ Q(x) & -L_U\le x<0\\ S(x)+\delta_r(x) & 0\le x\le x_e\end{cases}
+$$
+
+$Q$ の端条件は $x=-L_U$ で $(r_U, 0, 0)$、$x=0$ で下流の物理壁 $S+\delta_r$ の $x=0^+$ の $(r, r', r'')$ (6 条件で一意、
+$\xi=(x+L_U)/L_U$ 基底の 5 次 Hermite)。接続点は**設計スロート** $x=0$ で、物理スロートではない。$[0, x_e]$ は `ramp` とビット同一。
+$Q$ は接続端の $\delta_r, \delta_r', \delta_r''$ に依存するので、上流の形が $\delta_r$ と無関係になるわけではない。
+
+- **キー**: `ramp` (旧来、`pw_ramp` を使う) | `poly`。joint 壁の物理壁の解析経路でだけ有効で、キー無しは `poly`。`ramp` は明示したときだけ。
+  `poly` (明示・既定とも) と `pw_ramp` の併記・不正値 (null・大文字・空白・数値)・joint でない壁への `poly`・`ramp` + `physical_wall_repr:
+  single_bspline` は run dir を作る前に例外。Euler の `prepare` (物理壁が無い) に `poly` を明示しても例外。解決済みの値は `prepare_info.json` の
+  `pw_upstream` (`value`・`source` = explicit / default) に書く。
+- **物理スロート = 物理壁の大域最小** (`wall_global_min`): $Q$ と下流の $S+\delta_r$ の**全ノット区間**で、$r'$ を区間ごとの 4 次式として
+  復元し (区間内の別の 2 点で照合、合わなければ区切り不足として例外)、その実根・区間の端・継ぎ目を候補にして $r$ を比べる。固定の
+  囲い込み (旧 $(-0.3, 0.2)$) や「最小は $Q$ の中」の仮定は使わない ($\delta_r'(0)<0$ なら $x=0$ より下流にもなる)。
+- **ゲート** (`prepare_info.json` の `pw_upstream_gate`、不合格は例外): 正の半径・最小点が一意・その前で $r'\le0$・後で $r'\ge0$ (根で切った
+  小区間の中点で符号、丸めの許容 $10^{-12}$)、$[-L_U, 0)$ で $|Q''-H''|\le5\times10^{-3}$ ($H$ は設計の上流 Hermite。差は 3 次式なので区間端と
+  極値で厳密。今のランプのゲートと同じ値の**幾何の変化の上限**で、流れの品質の保証ではない)、継ぎ目 ($-L_U$・0) の値・1 階・2 階微分の
+  跳び $\le10^{-8}$ (左右の極限)。診断として既定ランプの壁との差の最大と位置 (`vs_ramp_default`)。
+- case/45 の単調壁 (run_0147 の入力) では、物理スロートの今との差が位置 $-1.46\times10^{-9}\,r_t$・半径 $-3.8\times10^{-13}\,r_t$、
+  $\max|Q''-H''|=1.184\times10^{-3}$ ($x\to0^-$)、今の壁 (`pw_ramp: [-11, -6]`) との差は縮流部で最大 $-0.52$ mm ($x=-7.08$、$Q$ の方が細い)。
+- Euler の評価は設計壁を使うので、上流の変更は Euler では検出できない (物理壁の NS で確かめる)。
+- 移行: `pw_ramp` を書いた問題 YAML は `pw_upstream: ramp` を明示しないと止まる (case/45 の 12 本は明示済み)。
+
+**寸法の決め方: 出口径から (`solve_rt`) / 物理スロート径から (`solve_rt_throat`)** (同 plan §4.2)。設計は $r_t$ 無次元で不変なので、
+寸法は $r_t$ の 1 変数で決まる。
+
+- `feedback/deltastar_loop.solve_rt(problem, R_exit_m, prev_run=None)`: $r_t\,r_W(x_e; r_t)=R_{exit}$。
+- `feedback/deltastar_loop.solve_rt_throat(problem, R_throat_m, prev_run=None, delta_r_out=None, delta_next=None)`:
+  $r_t\cdot\min_x r_W(x; r_t)=R_{throat}$ (最小は上の大域最小)。スロート径を固定するときは出口径を同時に固定条件にしない
+  (そのとき決まる出口半径は戻り値に記録するだけ)。
+- **CFD 前** (prev_run なし、両関数): 反復のたびに `prepare_ns` と同じ経路 (`integral_delta_r`: `deltastar_initializer` の $k_f$
+  (`cf_scale`)・熱条件・5 次 P-spline の平滑化・`delta_r_from_table`) で $\delta_r$ を作り、同じ壁の構築 (`runner_axismach.build_physical_wall`、
+  `pw_upstream`・`physical_wall_repr` に従う) で $r_W$ を求める。2026-10-07 までの `solve_rt` は未較正・未平滑化の `integral_bl` を直接
+  呼んでいて、生産の壁と $\delta_r$ が違った (同じ $r_t=0.0766539$ m で出口の補正 0.70149 対 0.73276 $r_t$、出口半径で 2.40 mm)。
+  $k_f$ を較正し直したら寸法も解き直す ($k_f$ はスロートの $\delta_r$ も変える)。
+- **NS 後**: `solve_rt` は抽出 $\delta_E(x_F)$ 1 点の $Re^{-0.2}$ 換算 (C2 方式、変えていない)。`solve_rt_throat` は
+  `delta_r_next.csv` の **$\delta_E$ の全分布** から補正関数 $\delta(x; r_t)=\delta_E(x)(r_t/S_{prev})^{-0.2}$ を作り、同じ関数で寸法と壁を作る
+  (解いた $r_t$ での表を `delta_r_out` に書き、次の壁は `prepare_ns(delta_r_csv=...)` でその表から作る)。$Re^{-0.2}$ は予測の近似。
+- **反復**: 各反復で今の $r_t$ の残差 $r_t\,r - R$ を評価し、$|{\rm 残差}|\le$ `SIZING_TOL_M` ($10^{-9}$ m) で止める (返す残差 = 最終の
+  寸法で評価し直した値)。30 回で収まらなければ `SizingNotConverged` (不合格)。**CFD 前の $\delta_r$ は $r_t$ に対して滑らかでない**
+  (`integral_bl` の RK45 rtol $10^{-6}$ 等: $r_t$ を $10^{-12}$ m 変えただけで $\delta_r(x_e)$ が $\sim10^{-5}\,r_t$、$\delta_r(0)$ が $\sim10^{-7}\,r_t$
+  揺れる、2026-10-07 実測) ので、残差はスロートで $\sim10^{-8}$ m、出口で $\sim10^{-7}$ m の床より下がらない。
+- 寸法の決め方は問題 YAML の `spec.sizing: {method: exit | throat, target_m}` (任意) に書くと、`prepare_ns` が `prepare_info.json` の `sizing` に
+  実際の壁の物理スロート半径・出口半径と目標との差を並べる (無ければ `method: null` = 未記録)。
+- CLI: `python -m forge_design.feedback.deltastar_loop --problem P --euler-ref X --run-dir Y --solve-rt-throat R [--prev RUN --delta-next CSV --delta-r-out CSV]`。
+
 **物理壁の表現: 全域 1 本の 5 次 B-spline と STEP (`geometry.physical_wall_repr`, 2026-10-07 実装、生産未採用)**
-(計画: [`plans/active/tooling-nozzle-wall-single-bspline.md`](../../plans/active/tooling-nozzle-wall-single-bspline.md))。
-上の解析経路の物理壁は、区間ごとに別の式の和 (直管の定数・上流 Hermite・$s\,\delta_r$・S + $\delta_r$) である。これを、設計の中身
-(MOC・当てはめ・$\delta_r$ の平滑化・ランプ) を変えずに、入口から出口まで **1 本の $x$ の 5 次 B-spline** に作り直し、メッシュ・初期値・
-報告・CAD が同じものを使えるようにした (`SingleBSplinePhysicalWall`, `geometry/wall_axismach.py`)。
+(計画: [`plans/active/tooling-nozzle-wall-single-bspline.md`](../../plans/active/tooling-nozzle-wall-single-bspline.md)、係数の求め方は
+[`tooling-nozzle-upstream-poly-and-throat-sizing.md`](../../plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md) §4.1b)。
+上の解析経路の `poly` の物理壁は、区間ごとに別の式 (直管の定数・$Q$・S + $\delta_r$) で、**全区間が $x$ の 5 次の区分多項式**である。
+これを、設計の中身を変えずに、入口から出口まで **1 本の $x$ の 5 次 B-spline** に**ノット挿入で代数的に**作り直し (当てはめなし)、
+メッシュ・初期値・報告・CAD が同じものを使えるようにした (`SingleBSplinePhysicalWall`, `geometry/wall_axismach.py`)。
+**`pw_upstream: poly` の壁だけ**が対象で、`ramp` の壁 (ランプ区間の $s\,\delta_r$ は区間ごとに 10 次で厳密に表せない) との組み合わせは例外
+(最小二乗の版は 2026-10-07 のユーザ決定で外した)。
 
 - **キー**: 問題 YAML の `geometry.physical_wall_repr` = `legacy` | `single_bspline`。**キー無しは今の壁で、変更前とビット同一**
   (壁ファイルも書かない)。`legacy` を明示すると今の壁のまま壁ファイルを書く。joint 壁 + 解析経路 (offset radial) 専用で、他の壁・
   Euler の `prepare` に `single_bspline` を書くと例外。値は完全一致 (大文字・空白・null は例外)。
-- **作り直し**: 定義域 $[x_{in}, x_e]$ (壁の属性)、次数 5、両端のノットの重複度 6。継ぎ目 ($x=-L_U$、ランプの両端、設計スロート $x=0$)
-  は重複度 3 (元の壁と同じ $C^2$)、位置は壁の属性から取る。区間内のノット (重複度 1) は、その区間で効く成分のノットの和集合
-  ($\delta_r$ の補間スプライン [ランプ開始以降]、設計壁 S [$x\ge0$])。壁が使う $\delta_r$ は `delta_r_from_table` の $x$ の 5 次補間
-  スプラインなので、ランプ以外は元の壁を厳密に表せる空間で、ランプ $[x_{lo}, x_{hi}]$ の $s\,\delta_r$ (区間ごとに 10 次) だけが近似になる。
-  係数は全ノット区間の Gauss 点 (各 8 点、重みなし) の最小二乗 (特異値分解) — 最小化するのは採用点での離散二乗和。
-- **許容誤差** (元の壁との差、各ノット区間の内部の密な点と区間多項式の極値で検査): $|\Delta r|\le1.3\times10^{-7}\,r_t$、
-  $|\Delta r'|\le10^{-7}$、$|\Delta r''|\le10^{-5}$。超えたら例外 (ノットを足して合わせ込む処理は持たない)。$\delta_r$ の表
-  (`delta_r_from_table(...).x_range`) がランプ開始から出口までを覆わなければ例外 (表の外は端値延長で導関数 0、$C^2$ が壊れる)。
-  case/45 の単調壁で係数 1747・異なるノット 1735、差の最大は半径 $1.4\times10^{-13}$・$r'$ $4.6\times10^{-12}$・$r''$ $7.3\times10^{-10}$
-  (計画 §9 の W1)。
-- **スロートとランプのゲート**: 物理スロート ($r'=0$、囲い込み $(-0.3, 0.2)$ は解析経路と同じ) と曲率を 1 本の B-spline から求め直す。
-  ランプのゲート ($|r''-r''_{\rm design}|\le5\times10^{-3}$、$r'<0$) も 1 本で評価し直し、不合格なら例外。
+- **作り直し** (ノット挿入): 直管は定数の係数、$Q$ は 5 次多項式の Bernstein 係数 ($[-L_U, 0]$ の Bézier)。$[0, x_e]$ は S と $\delta_r$
+  (`delta_r_from_table` の補間スプライン) を、$\delta_r$ は $x=0$・$x_e$ で重複度 6 まで挿入して切り出し、内部ノットの和集合
+  (重複度は大きい方) にノット挿入 (Boehm、係数の凸結合だけ) で揃えて係数を足す。区間ごとの表現を重複度 6 で並べたものから、継ぎ目
+  ($-L_U$・0) のノットを 3 回ずつ除去して重複度 3 ($C^2$) にする (NURBS Book A5.8、除去の誤差を記録し $10^{-12}\,r_t$ を超えたら例外)。
+  次数 5、両端の重複度 6、他の内部ノットは重複度 1。$\delta_r$ の表が $[0, x_e]$ を覆わなければ例外。case/45 の単調壁 (plan U3、
+  2026-10-07) で係数 1588・異なるノット 1580、ノット除去の誤差 $\le8.1\times10^{-15}$、元の区分表現との差は各ノット区間の内部と継ぎ目の
+  左右の極限で半径 $1.1\times10^{-14}$・$r'$ $1.0\times10^{-13}$・$r''$ $3.6\times10^{-11}$ ($r_t$ 単位、組み立て 0.5 s)。区分表現と 1 本の
+  B-spline で `prepare_ns` まで作ったソルバ入力 (`nozzle.h5` の全データセット・設定) はビット同一 (全域 1 本の plan の W3)。
+- **許容誤差** (元の壁との差、各ノット区間の内部の密な点と区間多項式の極値で検査): 要求の上限 $|\Delta r|\le1.3\times10^{-7}\,r_t$、
+  $|\Delta r'|\le10^{-7}$、$|\Delta r''|\le10^{-5}$ を超えたら例外 (ノットを足して合わせ込む処理は持たない)。
+- **スロートとゲート**: 物理スロートと曲率を 1 本の B-spline から大域最小 (`wall_global_min`、ノット区間ごと) で求め直す。上流のゲート
+  (一意な最小・前後の単調性・$|r''-H''|\le5\times10^{-3}$・継ぎ目の跳び) も 1 本で評価し直し、不合格なら例外。
 - **下流への属性**: `PhysicalNozzleWall` と同じ属性 (`x_in`・`x_e`・`r(x, deriv)`・`theta`・`validate()`・`x_throat`・`r_throat`・
-  `kappa_throat`・`offset_mode`・`ramp_gate`・`_dstar_hist` ほか) を必須属性 (`REQUIRED_ATTRS`) として構築時と `validate()` で検査する
+  `kappa_throat`・`offset_mode`・`pw_upstream`・`_dstar_hist` ほか) を必須属性として構築時と `validate()` で検査する。必須属性は
+  上流の方式別 (`required_attrs`: `ramp` は `_ramp`・`ramp_gate`、`poly` は `upstream_gate`・`upstream_poly`、1 本の B-spline はさらに
+  `spline`・`joints`・`fit_diag`)
   (下流に `getattr(..., None)` で読まれて欠けても止まらない属性があるため)。`r(x)` は定義域の外を外挿しない (座標の float32 丸め分
   だけ外れた点は端で評価、それより外は例外)。IC (`evaluate/ic.py`) は物理壁のスロート属性が欠けたら例外 (設計スロート (0, 1) に黙って戻さない)。
-- **保存した壁の復元 (壁ファイル `wall_repr.json`)**: キーを書いた run は、形式 (`forge_design.nozzle_wall`)・版・表現の種類・単位
-  (長さは $r_t$、`scale_m`)・定義域、設計壁 (直管 $r_U$・上流 Hermite の係数と区間 $[-L_U, 0]$・S のノットと係数と有効域 $[0, x_e]$)、
-  物理壁 (1 本の B-spline、`legacy` なら ランプと $\delta_r$ の B-spline と表の範囲) を書き、`prepare_info.json` の `physical_wall` にも写す。
+- **保存した壁の復元 (壁ファイル `wall_repr.json`、版 2)**: キーを書いた run は、形式 (`forge_design.nozzle_wall`)・版・表現の種類・
+  **上流の方式 `pw_upstream`**・単位 (長さは $r_t$、`scale_m`)・定義域、設計壁 (直管 $r_U$・上流 Hermite の係数と区間 $[-L_U, 0]$・S のノットと
+  係数と有効域 $[0, x_e]$)、物理壁 (1 本の B-spline / `legacy` の `ramp` なら ランプと $\delta_r$ の B-spline と表の範囲 / `legacy` の `poly` なら
+  $Q$ の係数・基底・区間と $\delta_r$) を書き、`prepare_info.json` の `physical_wall` にも写す。必須要素は方式別。**版 1 (方式の記録が無い)
+  は `ramp` として読む**。版 2 の `single_bspline` は `poly` だけ。`poly` の復元は $Q$ の端条件 (継ぎ目の跳び $\le10^{-8}$) も確かめる。
   読み込みは共通の `load_wall_file`: 要素の欠損・版・種類の違いは例外、復元した評価関数は有効域の外で例外 (scipy の BSpline の既定の
   外挿をしない — 保存済みの `wall_fit.spline` は S だけで、上流で評価すると黙って誤った値を返す: case/45 で $x=-6$ が 10.0 $r_t$、正しくは
   上流 Hermite の 4.8675)。

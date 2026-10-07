@@ -8,6 +8,8 @@
   x=0 の r″ 跳び ≤ 1e-8、r″(0⁺) = 0.5 + δ_r″(0) ± 1e-3 / [0, 0.3] の r″ max ≤ 0.52 + max δ_r″ /
   r‴ max ([0, 0.3]) ≤ 設計壁の r‴ max + 0.05 / validate の非単調 0 件 (δ_r 表の範囲内)。
 加えて δ_r の導関数 (差分との照合・表の範囲外 0) と入力の拒否。
+2026-10-07 (plan tooling-nozzle-upstream-poly-and-throat-sizing §5 の 5): コードの既定が `pw_upstream: poly` になったので、ランプの
+振る舞いを試す箇所は `upstream="ramp"` を明示する (poly は design/tests/run_pw_upstream_poly_tests.py)。
 
 usage: design/.venv-opt/bin/python design/tests/run_physical_wall_analytic_tests.py [凍結源の run]
   凍結源の既定: $FORGE_CFDPIN_GRID_RUN か /home/sano/work/forge/case/45.isobutane_m6_d155/run_0062_euler_wallfit_fit_r1_ext6k
@@ -65,8 +67,9 @@ d = design_chain(p)
 w = d["wall"]
 check("設計壁は JointFitCFDWall", isinstance(w, JointFitCFDWall))
 args = (w, d["wall_inv"], float(p.spec["r_throat"]), float(p.spec["Pt"]), float(p.spec["Tt"]), _gam_or_gas(p), p.cp)
-PW = PhysicalNozzleWall(*args, offset="radial", delta_r_x=f, ramp=(-11.0, -6.0))   # case/45 の pw_ramp
+PW = PhysicalNozzleWall(*args, offset="radial", delta_r_x=f, ramp=(-11.0, -6.0), upstream="ramp")   # case/45 の pw_ramp
 check("joint 壁では解析経路が自動で選ばれる", PW.analytic)
+check("upstream='ramp' の明示で旧来のランプ (pw_upstream ramp, source explicit)", PW.pw_upstream == "ramp" and PW.pw_upstream_source == "explicit")
 
 xa = np.linspace(w.x_in, -11.0, 30001)
 e1 = float(np.max(np.abs(PW.r(xa) - w.r(xa))))
@@ -111,19 +114,19 @@ for name, kw in (("δ_r 無し", {}), ("導関数を返せない δ_r", {"delta_
     except ValueError:
         check(f"解析経路で {name} を拒否", True)
 PWo = PhysicalNozzleWall(*args, offset="radial", delta_r_x=f, analytic=False)
-check("analytic=False で従来経路 (κ_t 再推定) を選べる", (not PWo.analytic) and hasattr(PWo, "_herm_c"))
+check("analytic=False で従来経路 (κ_t 再推定) を選べる", (not PWo.analytic) and hasattr(PWo, "_herm_c") and PWo.pw_upstream is None)
 
 # --- pw_ramp (plan §5.1 #9, codex result M5) -----------------------------------------
 check(f"pw_ramp ゲート (case/45 [−11, −6]) を記録: {PW.ramp_gate}", PW.ramp_gate["pass"] and PW.ramp_gate["source"] == "pw_ramp")
 from forge_design.geometry.wall_axismach import default_pw_ramp  # noqa: E402
-PD = PhysicalNozzleWall(*args, offset="radial", delta_r_x=f)
+PD = PhysicalNozzleWall(*args, offset="radial", delta_r_x=f, upstream="ramp")
 x_on = default_pw_ramp(w)[0]
 check(f"既定 pw_ramp = (r′ < −0.05 の最初の x {x_on:.4f}, −0.5·L_U = {-0.5 * w.up.L_U:g}) でゲート合格 ({PD.ramp_gate})",
       PD._ramp == (x_on, -0.5 * w.up.L_U) and PD.ramp_gate["pass"]
       and float(w.r(np.r_[x_on], 1)[0]) < -0.05 <= float(w.r(np.r_[x_on - 1e-4], 1)[0]))
 for bad in ((-13.0, -6.0), (-6.0, -11.0), (-11.0,)):
     try:
-        PhysicalNozzleWall(*args, offset="radial", delta_r_x=f, ramp=bad)
+        PhysicalNozzleWall(*args, offset="radial", delta_r_x=f, ramp=bad, upstream="ramp")
         check(f"不正な pw_ramp {bad} を拒否", False)
     except ValueError:
         check(f"不正な pw_ramp {bad} を拒否", True)
@@ -134,10 +137,32 @@ d35 = design_chain(p35)
 args35 = (d35["wall"], d35["wall_inv"], float(p35.spec["r_throat"]), float(p35.spec["Pt"]), float(p35.spec["Tt"]),
           _gam_or_gas(p35), p35.cp)
 try:
-    P35 = PhysicalNozzleWall(*args35, offset="radial", delta_r_x=f)
+    P35 = PhysicalNozzleWall(*args35, offset="radial", delta_r_x=f, upstream="ramp")
     check(f"L_U 3.5: 既定 pw_ramp のゲートで止まる (通ってしまった: {P35.ramp_gate})", False)
 except ValueError as e:
     check(f"L_U 3.5: 既定 pw_ramp {default_pw_ramp(d35['wall'])} のゲートで止まる ({str(e)[:120]}…)", "ゲート不合格" in str(e))
+
+# --- 既定は poly (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1) -------------------------------
+# この δ_r 表 (run0051) は出口 x_e の手前 (x = 95.10) で終わり、その先は δ_r 一定・導関数 0 なので、物理壁 = 設計壁の r′ が出口直前で
+# わずかに負 (−1.3e-8) になる。poly のゲート (スロートの後で r′ ≥ 0、丸めの許容 1e-12) はこれを不合格にする (ランプの壁の validate は
+# 4000 点の差分の −1e-9 の許容で通していた)。既定が poly であることは、このゲートで止まることで確かめる。
+try:
+    PhysicalNozzleWall(*args, offset="radial", delta_r_x=f)
+    check("upstream 省略 (既定 poly): 表の外で r′ < 0 になる壁をゲートで止める", False)
+except ValueError as e:
+    check(f"upstream 省略 (既定 poly): 表の外で r′ < 0 になる壁をゲートで止める ({str(e)[:110]}…)",
+          "pw_upstream poly" in str(e) and "後で r′ ≥ 0 False" in str(e))
+tb2 = tb[tb[:, 0] <= 95.0]
+x_ext = np.linspace(tb2[-1, 0], w.x_e, 6)[1:]
+f2 = delta_r_from_table(np.r_[tb2[:, 0], x_ext], np.r_[tb2[:, 1], tb2[-1, 1] + 5.15e-3 * (x_ext - tb2[-1, 0])])   # 出口まで覆う表
+PP = PhysicalNozzleWall(*args, offset="radial", delta_r_x=f2)
+check(f"upstream 省略は poly (既定): {PP.pw_upstream} / {PP.pw_upstream_source}, ゲート {PP.upstream_gate['pass']}",
+      PP.pw_upstream == "poly" and PP.pw_upstream_source == "default" and PP.upstream_gate["pass"])
+try:
+    PhysicalNozzleWall(*args, offset="radial", delta_r_x=f, ramp=(-11.0, -6.0))
+    check("既定 (poly) と pw_ramp の併記を拒否", False)
+except ValueError as e:
+    check(f"既定 (poly) と pw_ramp の併記を拒否 ({str(e)[:60]}…)", "併記" in str(e))
 
 print("FAIL 件数:", FAIL)
 sys.exit(1 if FAIL else 0)

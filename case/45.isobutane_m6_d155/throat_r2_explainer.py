@@ -98,7 +98,7 @@ c0_deg = float(np.degrees(np.arctan((r[1] - r[0]) / (x[1] - x[0])) - 0.5 * (th[0
 dr_tbl = np.loadtxt(RUN / "delta_r_initial.csv", delimiter=",", skiprows=1)
 PW = PhysicalNozzleWall(W, tb, float(p.spec["r_throat"]), float(p.spec["Pt"]), float(p.spec["Tt"]), _gam_or_gas(p), p.cp,
                         offset="radial", delta_r_x=delta_r_from_table(dr_tbl[:, 0], dr_tbl[:, 1]),
-                        ramp=tuple(float(v) for v in p.geometry["pw_ramp"]))
+                        ramp=tuple(float(v) for v in p.geometry["pw_ramp"]), upstream="ramp")   # 2026-10-07 に既定が poly
 # 計算格子の壁節点 (run_0117 の nozzle.h5)
 with h5py.File(RUN / "nozzle.h5") as f:
     xyz = np.asarray(f["MESH/COORD"]).reshape(-1, 3); wn = np.unique(np.asarray(f["BCONDS/3/vizBfaceNodes"]))

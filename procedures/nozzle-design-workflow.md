@@ -21,11 +21,11 @@
 
 | ブロック | 主なキー | 注意 |
 | --- | --- | --- |
-| `spec` | `Pt`, `Tt`, `p_ambient`, `r_throat` [m], `M_design` | **出口径は直接書けない** (`D_e` は未実装)。出口半径は `r_throat` × MOC の面積比 + δ で決まる。物理出口径に合わせるには `solve_rt` (§2 ④) |
+| `spec` | `Pt`, `Tt`, `p_ambient`, `r_throat` [m], `M_design`、任意で `sizing` | **出口径は直接書けない** (`D_e` は未実装)。出口半径は `r_throat` × MOC の面積比 + δ で決まる。物理出口径に合わせるには `solve_rt`、物理スロート径から決めるには `solve_rt_throat` (§1 ④)。どちらで決めたかを `sizing: {method: exit \| throat, target_m: …}` に書くと `prepare_info.json` の `sizing` に目標との差が出る |
 | `gas` | `model: semiperfect`, `species` (組成), `transport` | Tt > 600 K・燃焼ガスは semiperfect。条件を変えたら `geometry.r_inlet` も付け替える |
 | `dv` | `L_c.value` | 軸 law の長さ。runner は `min/max` を使わない |
 | `geometry` | `R` (スロート曲率半径/r_t)、`r_inlet` (入口配管半径/**r_t 単位**)、`L_U` (縮流部長)、`L_pipe`、`axis_law: knot`、`M_knot`、`Lc_mode`、`start_line: throat_char`、`wall_mode: cplus`、`n_axis_inv` | `Lc_mode`: `explicit` (L_c を使う、許容窓の外は例外) / `max` / `from_length` (`dv.L_total` から L_c を解く)。r_t を変えても r_inlet・L_total は r_t 単位のまま (実寸がずれる) |
-| `geometry` (生産レシピ) | `initial_line: cfd` + `initial_line_run`/`initial_line_res`、`wall_repr: joint`、`Md_moc_offset`、`pw_ramp` | §2 ⑤ 参照。新規設計の初回は `initial_line: hall`・`wall_repr: interp` (既定) でよい |
+| `geometry` (生産レシピ) | `initial_line: cfd` + `initial_line_run`/`initial_line_res`、`wall_repr: joint`、`Md_moc_offset`、`pw_upstream: poly` | §2 ⑤ 参照。新規設計の初回は `initial_line: hall`・`wall_repr: interp` (既定) でよい。`pw_ramp` は旧設定 (`pw_upstream: ramp` と組で使う。`poly` と併記すると例外) |
 | `mesh` | `ni`, `nj`, `wall_first_frac` (+ `_throat`・ブレンド)、`throat_refine`、`throat_width`、`ar_max` | Euler と NS で同じキーが効く (2026-10-06 修正)。NS は壁解像 PASS の格子を使う (§2 ⑥) |
 | `evaluate` | `nStepOuter`, `outStepInterval`, `cfl_main`, `tp_species`, `condensation` | 凝縮は `tp_species: split_h2o` + `condensation` |
 
@@ -51,12 +51,27 @@
    スロート曲率、`wall.validate()`: スプラインのうねり・C¹/C² 接続、縮流部 μ ≤ 20)。
    **fold・特性線トポロジ・壁マージン (μ_w − θ_w ≥ 1°) は `design_chain` に入っていない** —
    `design/forge_design/geometry/moc_diagnostics.py` で別に確認する (§2 ①)。
-4. **出口径に合わせる** — 非粘性の出口半径は r_t × r_F。物理出口径 (境界層込み) に合わせるときは
-   `solve_rt` で r_t を解き、`spec.r_throat` を手で書き換える:
+4. **寸法 (r_t) を決める** — 設計は r_t 単位なので、寸法は r_t の 1 変数。**出口径から**決めるか、**物理スロート径から**決めるかを選ぶ
+   (同時に両方を固定条件にしない)。解いた r_t で `spec.r_throat` を手で書き換え、`spec.sizing` とコメントにどちらで決めたかを残す
+   (plan `tooling-nozzle-upstream-poly-and-throat-sizing` §4.2):
    ```
+   # 出口径から (物理出口半径 0.775 m)
    .venv-opt/bin/python -m forge_design.feedback.deltastar_loop --problem ../case/NN/problem.yaml --euler-ref X --run-dir Y --solve-rt 0.775
+   # 物理スロート径から (物理スロート半径 [m])
+   .venv-opt/bin/python -m forge_design.feedback.deltastar_loop --problem ../case/NN/problem.yaml --euler-ref X --run-dir Y --solve-rt-throat 0.07676
    ```
-   (`--euler-ref`/`--run-dir` は必須引数だがこのモードでは使われない。δ は CONTUR 積分法の見積もり。)
+   ```yaml
+   spec:
+     r_throat: 0.0766539     # [m] solve_rt_throat (物理スロート半径 0.07676 m) で決めた (YYYY-MM-DD)
+     sizing: {method: throat, target_m: 0.07676}
+   ```
+   (`--euler-ref`/`--run-dir` は必須引数だがこのモードでは使われない。) CFD 前の δ は `prepare_ns` と同じ経路 (YAML の
+   `deltastar_initializer` の k_f・熱条件・平滑化、2026-10-07 から。以前の `solve_rt` は未較正・未平滑化で、生産の壁と出口半径が 2.4 mm
+   ずれた) で、物理壁も `prepare_ns` と同じ構築 (`pw_upstream` に従う)。**k_f を較正し直したら寸法も解き直す** (k_f はスロートの δ も変える)。
+   残差は `SIZING_TOL_M` (1e-9 m) で止め、30 回で収まらなければ不合格 (例外)。CFD 前の δ (積分法) は r_t に対して滑らかでなく
+   (r_t を 1e-12 m 変えるだけで出口の δ が ~1e-5 r_t 揺れる)、残差の床はスロートで ~1e-8 m、出口で ~1e-7 m (2026-10-07 実測)。
+   NS 後に物理スロート径から決め直すときは `--prev RUN --delta-next RUN/_extract_edge/delta_r_next.csv --delta-r-out FILE`
+   (δ_E の全分布で寸法を決め、同じ補正の表を FILE に書く。次の壁は `prepare_ns(delta_r_csv=FILE)` でその表から作る)。
 5. **形を見る・出す** — 作図・CAD 用の全輪郭出力は case 側のスクリプトしかない
    (`case/42.isobutane_wt/export_wall_m42.py`、`case/44.vitiated_air_wt/export_wall_va.py`、
    `case/45.isobutane_m6_d155/viz_*.py`)。**中に `/home/sano/work/forge/...` の絶対パスが書かれているものがある**
@@ -97,7 +112,10 @@ M6 (case/45) で実際に通した順番。各段の「何で判定するか」�
      (`initial_line_run`/`initial_line_res` で凍結源を指定; 凍結源は Hall 初期線の当てはめ壁を Euler で解いた場)。
    - `Md_moc_offset` — Euler の出口コア M を 6 に合わせる 1 係数の較正。**生産 NS と同じ格子パラメータの Euler で決める**
      (粗い Euler 格子で決めると細分格子の NS で出口 M が約 −0.0008 ずれる; plan §5.1 #11f)。
-   - `pw_ramp` — 縮流部側で δ_r をなめらかに入れる区間 (case/45 は [−11, −6])。
+   - `pw_upstream: poly` (既定。新しい YAML には明記する) — スロートより上流に δ_r を足さず、配管〜設計スロートを 5 次多項式 1 本にする
+     (plan `tooling-nozzle-upstream-poly-and-throat-sizing`、2026-10-07)。`pw_ramp` は書かない (併記すると例外)。
+     旧設定: `pw_upstream: ramp` + `pw_ramp: [−11, −6]` (縮流部側で δ_r をなめらかに入れる区間)。case/45 の生産 YAML は NS・凝縮の再評価
+     (同 plan §6 U4) で採否を決めるまでこの旧設定を明示している。
    - `wall_fit_mono_r2: [0.0, 1.5]` — joint 壁のスロート直後の r″ の山を消す単調拘束 (case/45 の生産、2026-10-07)。
      Euler は実務判定 (全量で 差 + 2SE ≤ 許容幅) に合格、dry NS は登録したゲートに合格、凝縮 NS は 4 量の準定常に合格。新旧の場の差は参考値 (plan `tooling-nozzle-throat-monotone-r2`)。
    - `deltastar_initializer: {model: contur, a_crocco: 1.0, cf_scale: <k_f>, n_scale: 1.0}` — C2 で較正した k_f を YAML に書く。
@@ -174,7 +192,7 @@ axismach パイプラインに取り込むキーは**未実装** (`wall_csv` 相
 
 - MOC パラスタ・壁出力・作図・C2 の k_f・凝縮の引き継ぎは **case スクリプト頼み** (汎用 CLI・YAML キーなし)。
   統一は campaign-recipe plan の残作業 (#6〜#8・#14・#15)。
-- 出口径を spec に書けない (r_throat + M_design → `solve_rt` → 手で書き換え)。
+- 出口径・スロート径を spec に書けない (r_throat + M_design → `solve_rt` / `solve_rt_throat` → 手で書き換え。`spec.sizing` は記録だけ)。
 - `design_chain` には fold・トポロジ・壁マージンの検査が入っていない。
 - AWS の共有バイナリは他セッションが作り直すことがある — 自分の worktree でビルドしたバイナリを使い、
   `RUN_PROVENANCE.txt` の sha256 を記録する (case/45 は `~/forge-wallfit-bin`)。

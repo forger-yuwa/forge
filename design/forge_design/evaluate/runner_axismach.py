@@ -35,8 +35,8 @@ import numpy as np
 from ..geometry.axis_law import QuinticHermiteAxisLaw, KnotQuinticAxisLaw
 from ..geometry.moc_inverse import inverse_design
 from ..geometry.transonic import HallThroat
-from ..geometry.wall_axismach import (PHYSICAL_WALL_REPRS, AxisMachCFDWall, area_ratio_isentropic,
-                                      wall_qa)
+from ..geometry.wall_axismach import (PHYSICAL_WALL_REPRS, PW_UPSTREAM_DEFAULT, PW_UPSTREAMS, AxisMachCFDWall,
+                                      area_ratio_isentropic, wall_qa)
 from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
 from .ic import paste_isentropic_ic, stamp_isentropic_ic_species
@@ -259,6 +259,57 @@ def _physical_wall_repr(geometry: dict):
         raise ValueError(f"geometry.physical_wall_repr は {' / '.join(repr(c) for c in PHYSICAL_WALL_REPRS)} のどれか "
                          f"(受け取った値: {v!r}。既定にするならキーを書かない)")
     return v
+
+
+def _pw_upstream(geometry: dict) -> dict:
+    """geometry.pw_upstream を読んで検査する (plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1)。重い処理・
+    run dir を作る前に呼ぶ。戻り: {"value": 物理壁に渡す値 (None = 解析経路でない), "source": "explicit" | "default" | None,
+    "requested": 書かれた値 (キー無しは None)}。
+
+    - joint 壁 (`wall_repr: joint`) の物理壁は解析経路で、キー無しは既定 `poly` (ユーザ決定 2026-10-07)。`ramp` は明示したときだけ。
+    - 値は 'ramp' / 'poly' に完全一致すること — null・大文字違い・前後の空白・数値・真偽値は例外 (既定に読み替えない)。
+    - `poly` (明示・既定とも) と `pw_ramp` の併記は例外 (`pw_ramp` のキーがあれば値が null でも併記とみなす)。
+    - 解析経路でない (joint でない) 壁に `poly` を明示したら例外。キー無しは今の振る舞いのまま (上流は従来経路)。
+    - `physical_wall_repr: single_bspline` は `poly` だけ (`ramp` との組み合わせは例外; §4.1b)。"""
+    joint = str(geometry.get("wall_repr", "interp")) == "joint"
+    if "pw_upstream" in geometry:
+        v = geometry["pw_upstream"]
+        if not isinstance(v, str) or v not in PW_UPSTREAMS:
+            raise ValueError(f"geometry.pw_upstream は {' / '.join(repr(c) for c in PW_UPSTREAMS)} のどれか "
+                             f"(受け取った値: {v!r}。既定 '{PW_UPSTREAM_DEFAULT}' にするならキーを書かない)")
+        requested, source = v, "explicit"
+    else:
+        requested, source = None, ("default" if joint else None)
+    if not joint:
+        if requested == "poly":
+            raise ValueError("geometry.pw_upstream: poly は joint 壁 (wall_repr: joint) の物理壁の解析経路専用 "
+                             f"(wall_repr = {geometry.get('wall_repr', 'interp')!r})")
+        return {"value": None, "source": (None if requested is None else "explicit (解析経路でないので無効)"),
+                "requested": requested}
+    value = requested if requested is not None else PW_UPSTREAM_DEFAULT
+    if value == "poly" and "pw_ramp" in geometry:
+        raise ValueError(f"geometry.pw_upstream: poly ({'明示' if requested else '既定'}) と geometry.pw_ramp "
+                         f"{geometry['pw_ramp']!r} の併記は不可 — 旧来のランプを使うなら pw_upstream: ramp を明示する、"
+                         "poly にするなら pw_ramp を消す (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1)")
+    if value == "ramp" and _physical_wall_repr(geometry) == "single_bspline":
+        raise ValueError("geometry.physical_wall_repr: single_bspline は pw_upstream: poly の壁だけ (ramp のランプ区間は 5 次の "
+                         "B-spline で厳密に表せない; plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1b)")
+    return {"value": value, "source": source, "requested": requested}
+
+
+def _sizing_spec(spec: dict) -> dict | None:
+    """spec.sizing (任意) を読む: 寸法 (spec.r_throat) をどちらで決めたかの記録 (plan tooling-nozzle-upstream-poly-and-throat-sizing
+    §4.2)。{method: exit | throat, target_m: 目標の出口半径 / 物理スロート半径 [m], note: 任意}。prepare_ns が prepare_info.json の
+    `sizing` に、実際の壁の値と目標との差を並べて書く。無ければ None (寸法の決め方は未記録)。不正な値は例外。"""
+    if "sizing" not in spec:
+        return None
+    s = spec["sizing"]
+    if not isinstance(s, dict) or s.get("method") not in ("exit", "throat"):
+        raise ValueError(f"spec.sizing は {{method: exit | throat, target_m: 数値}} (受け取った値: {s!r})")
+    t = s.get("target_m")
+    if isinstance(t, bool) or not isinstance(t, (int, float)) or not np.isfinite(float(t)) or float(t) <= 0.0:
+        raise ValueError(f"spec.sizing.target_m は正の有限の数値 [m] (受け取った値: {t!r})")
+    return {"method": s["method"], "target_m": float(t), "note": s.get("note")}
 
 
 def design_chain(p: Problem) -> dict:
@@ -617,6 +668,14 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     if _physical_wall_repr(p.geometry) == "single_bspline":
         # 物理壁の表現 (plan tooling-nozzle-wall-single-bspline §4.2) は NS の物理壁 (prepare_ns) だけ。Euler の設計壁で黙って無視しない
         raise ValueError("geometry.physical_wall_repr: single_bspline は prepare_ns (物理壁) 専用 — Euler の prepare には物理壁が無い")
+    if "pw_upstream" in p.geometry:
+        # 上流の作り方 (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1) は joint 壁の物理壁の解析経路だけ。
+        # 値は検査し、poly の明示は例外 (Euler の設計壁で黙って無視しない)。ramp (移行で明示した旧来の作り方) は通す
+        v = p.geometry["pw_upstream"]
+        if not isinstance(v, str) or v not in PW_UPSTREAMS:
+            raise ValueError(f"geometry.pw_upstream は {' / '.join(repr(c) for c in PW_UPSTREAMS)} のどれか (受け取った値: {v!r})")
+        if v == "poly":
+            raise ValueError("geometry.pw_upstream: poly は prepare_ns (joint 壁の物理壁) 専用 — Euler の prepare には物理壁が無い")
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=False)
     d = design_chain(p)
@@ -949,12 +1008,14 @@ def delta_r_from_table(x, d):
     return f
 
 
-def integral_delta_r(p: Problem, d: dict, init_cfg: dict):
+def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = None):
     """積分法初期壁の δ_r (`prepare_ns` の initializer 経路): `integral_bl` → 5 次 P-spline 平滑化 → 壁に渡す δ_r 関数。
     戻り: (res_init, delta_r_x, init_info)。`prepare_ns` から切り出したもの (振る舞いは同一; plan
-    tooling-nozzle-throat-monotone-r2 §6 S6 の形状ゲートが同じ経路で物理壁を作るために共有する)。"""
+    tooling-nozzle-throat-monotone-r2 §6 S6 の形状ゲートが同じ経路で物理壁を作るために共有する)。
+    scale: スロート半径 r_t [m] (None = spec.r_throat)。寸法の逆算 (`deltastar_loop.solve_rt`・`solve_rt_throat`) が、反復のたびに
+    同じ経路 (k_f の cf_scale・熱条件・平滑化) で δ_r を作り直すために渡す (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.2)。"""
     from ..feedback.deltastar_integral import integral_bl
-    scale = float(p.spec["r_throat"])
+    scale = float(p.spec["r_throat"]) if scale is None else float(scale)
     wall_inv = d["wall_inv"]
     model = str(init_cfg.get("model", "contur"))
     if model not in ("contur", "contur_momentum_integral"):
@@ -989,6 +1050,27 @@ def integral_delta_r(p: Problem, d: dict, init_cfg: dict):
     return res_init, delta_r_x, init_info
 
 
+def build_physical_wall(p: Problem, d: dict, scale: float, delta_r_x=None, dstar_x=None, offset: str = "normal",
+                        pwu: dict | None = None):
+    """物理壁の構築 (`prepare_ns` と寸法の逆算 `deltastar_loop.solve_rt`・`solve_rt_throat` が共有する; plan
+    tooling-nozzle-upstream-poly-and-throat-sizing §4.2「同じ壁の構築」)。`PhysicalNozzleWall` に `geometry.pw_ramp`・
+    `geometry.pw_upstream` (`_pw_upstream` の解決済みの値) を渡し、`physical_wall_repr: single_bspline` なら 1 本の B-spline に
+    作り直す。scale: r_t [m] (相関 δ* の診断に使う。壁の形は r_t 単位)。"""
+    from ..geometry.wall_axismach import PhysicalNozzleWall, SingleBSplinePhysicalWall
+    pwu = _pw_upstream(p.geometry) if pwu is None else pwu
+    # joint 壁の物理壁 (解析経路) の δ_r ランプ区間: geometry.pw_ramp (None = 既定、default_pw_ramp)。ゲート不合格は例外
+    pw_ramp = p.geometry.get("pw_ramp")
+    wall = PhysicalNozzleWall(d["wall"], d["wall_inv"], float(scale), float(p.spec["Pt"]),
+                              float(p.spec["Tt"]), _gam_or_gas(p), p.cp, dstar_x=dstar_x,
+                              offset=offset, delta_r_x=delta_r_x,
+                              ramp=(None if pw_ramp is None else tuple(float(v) for v in pw_ramp)),
+                              upstream=pwu["value"])
+    if _physical_wall_repr(p.geometry) == "single_bspline":
+        # 今の物理壁 (pw_upstream poly) を全域 1 本の 5 次 B-spline にノット挿入で作り直す (許容誤差・ゲート不合格は例外)
+        wall = SingleBSplinePhysicalWall(wall)
+    return wall
+
+
 def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                dstar_csv=None, dstar_blend=(6.0, 9.0),
                delta_r_csv=None, offset: str = "normal", euler_ref=None,
@@ -1014,9 +1096,15 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       出口まで 1 本の 5 次 B-spline に作り直した壁 (`SingleBSplinePhysicalWall`) + 壁ファイル。キーを書いたときは壁ファイル
       `wall_repr.json` (形式の版・表現の種類・有効域・単位・設計壁と物理壁の係数) を run に置き、prepare_info.json の
       `physical_wall` にも写す。joint 壁 + 物理壁の解析経路 (offset radial) 専用で、それ以外にキーを書いたら例外。
+    - **`geometry.pw_upstream`** (plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1): joint 壁の物理壁の上流の作り方。
+      キー無し = `poly` (配管〜設計スロートの 5 次多項式、上流に δ_r を足さない) / `ramp` = 旧来の δ_r ランプ (`pw_ramp`)。
+      `poly` と `pw_ramp` の併記・不正値・joint でない壁への `poly`・`ramp` + `single_bspline` は run dir を作る前に例外。
+      解決済みの値は prepare_info.json の `pw_upstream` に、`poly` のゲートは `pw_upstream_gate` に書く。
+    - **`spec.sizing`** (任意、§4.2): 寸法の決め方 {method: exit | throat, target_m}。prepare_info.json の `sizing` に、実際の物理壁の
+      物理スロート半径・出口半径 [m] と目標との差を書く (キー無しは method = null = 未記録)。
     """
     from ..feedback.deltastar import _sutherland
-    from ..geometry.wall_axismach import PhysicalNozzleWall, SingleBSplinePhysicalWall, save_wall_file
+    from ..geometry.wall_axismach import PhysicalNozzleWall, check_required_attrs, save_wall_file
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
         raise ValueError("runner_axismach は wind_tunnel_axisym_axismach 専用")
@@ -1025,6 +1113,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     if pw_repr is not None and str(p.geometry.get("wall_repr", "interp")) != "joint":
         raise ValueError(f"geometry.physical_wall_repr: {pw_repr} は joint 壁 (wall_repr: joint) + 物理壁の解析経路専用 "
                          f"(wall_repr = {p.geometry.get('wall_repr', 'interp')!r})")
+    # 上流の作り方 (pw_upstream) と寸法の記録 (spec.sizing): 不正値・併記は run dir を作る前に例外
+    pwu = _pw_upstream(p.geometry)
+    sizing = _sizing_spec(p.spec)
     # 種ごとの輸送物性 (#9b): TP の NS は gas.transport 必須。run dir を作る前・設計チェーンの前に検査する
     transport = p.transport_for_ns()
     run_dir = Path(run_dir)
@@ -1064,15 +1155,10 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             raise ValueError("delta_r_csv に非有限値がある (deltastar_loop.extract_and_merge で前回値保持済みの CSV を渡す)")
         delta_r_x = delta_r_from_table(tbl_r[:, 0], tbl_r[:, 1])
         offset = "radial"
-    # joint 壁の物理壁 (解析経路) の δ_r ランプ区間: geometry.pw_ramp (None = 既定、default_pw_ramp)。ゲート不合格は例外
-    pw_ramp = p.geometry.get("pw_ramp")
-    wall = PhysicalNozzleWall(d["wall"], wall_inv, scale, float(p.spec["Pt"]),
-                              float(p.spec["Tt"]), _gam_or_gas(p), p.cp, dstar_x=dstar_x,
-                              offset=offset, delta_r_x=delta_r_x,
-                              ramp=(None if pw_ramp is None else tuple(float(v) for v in pw_ramp)))
-    if pw_repr == "single_bspline":
-        # 今の物理壁を全域 1 本の 5 次 B-spline に作り直す (設計の中身は変えない; 許容誤差・ランプのゲート不合格は例外)
-        wall = SingleBSplinePhysicalWall(wall)
+    # 物理壁 (pw_ramp・pw_upstream・physical_wall_repr に従う。寸法の逆算と同じ構築; build_physical_wall)。ゲート不合格は例外
+    wall = build_physical_wall(p, d, scale, delta_r_x=delta_r_x, dstar_x=dstar_x, offset=offset, pwu=pwu)
+    if wall.pw_upstream is not None:
+        check_required_attrs(wall)          # 方式別の必須属性 (ramp: ramp_gate / poly: upstream_gate・upstream_poly)
     if init_info is not None:
         np.savetxt(run_dir / "delta_r_initial.csv",
                    np.c_[res_init["x"], res_init["delta_r"], res_init["dstar_n"], res_init["theta"] * scale,
@@ -1182,7 +1268,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                                 "dstar_throat_correlation": float(wall._dstar_hist(0.0)),
                                 "delta_r_throat_applied": float(wall.r_throat - 1.0)},
             "offset": wall.offset_mode, "euler_ref": (str(euler_ref) if euler_ref else None),
-            "pw_ramp_gate": getattr(wall, "ramp_gate", None),
+            "pw_ramp_gate": (wall.ramp_gate if wall.pw_upstream == "ramp" else None),
             "initializer": init_info,
             "omega": omega, "prev_run": (str(prev_run) if prev_run else None),
             "delta_r_csv": (str(delta_r_csv) if delta_r_csv else None),
@@ -1205,8 +1291,27 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     if pw_info is not None:
         # 物理壁の表現と係数 (キーを書いたときだけ。キー無しの prepare_info.json は変更前と同じ)
         info["physical_wall"] = pw_info
+    # 上流の作り方の解決済みの値とゲート、寸法の記録 (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1・§4.2)
+    info["pw_upstream"] = {"value": wall.pw_upstream, "source": pwu["source"], "requested": pwu["requested"]}
+    info["pw_upstream_gate"] = (wall.upstream_gate if wall.pw_upstream == "poly" else None)
+    info["sizing"] = _sizing_record(sizing, wall, scale)
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
+
+
+def _sizing_record(sizing: dict | None, wall, scale: float) -> dict:
+    """prepare_info.json の `sizing`: 寸法の決め方 (spec.sizing、無ければ未記録) と、実際の物理壁の物理スロート半径・出口半径 [m]、
+    目標との差 (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.2)。"""
+    x_e = float(wall.x_e)
+    got = {"throat": float(wall.r_throat) * scale, "exit": float(wall.r(np.array([x_e]))[0]) * scale}
+    rec = {"method": None if sizing is None else sizing["method"], "target_m": None if sizing is None else sizing["target_m"],
+           "note": None if sizing is None else sizing.get("note"), "r_throat_design_m": float(scale),
+           "physical_throat_radius_m": got["throat"], "physical_throat_x_m": float(wall.x_throat) * scale,
+           "exit_radius_m": got["exit"], "residual_m": None,
+           "status": "未記録 (spec.sizing が無い)" if sizing is None else "記録あり"}
+    if sizing is not None:
+        rec["residual_m"] = got[sizing["method"]] - sizing["target_m"]
+    return rec
 
 
 def _first_order(cfg: str) -> str:

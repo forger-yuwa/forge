@@ -239,6 +239,12 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 `timeIntegration 11, blockDPLUR 1, cfl_pseudo 4`, `nStepInner 5`, `lowMachPrecond 0`, 壁 `slip`。
 δ* (排除厚) は CONTUR 初期壁 + 固定 Euler 基準・帯局所抽出 1 pass ([deltastar-production-recipe])、質量流量ゲート必須。
 
+**軸対称ノズルの物理壁 (NS) — 現行 (2026-10-07)**: joint 壁 (`wall_repr: joint`) の物理壁の上流は **`geometry.pw_upstream: poly`**
+(既定。新しい YAML・テンプレートには明記する): スロートより上流に δ_r を足さず、配管〜設計スロートを 5 次多項式 1 本にする。
+`pw_ramp` は書かない (`poly` と併記すると例外)。寸法 (`spec.r_throat`) は出口径から (`solve_rt`) か物理スロート径から (`solve_rt_throat`)
+決め、`spec.sizing` に残す。手順は [`nozzle-design-workflow.md`](nozzle-design-workflow.md) §1 ④・§2 ⑤、仕様は
+`methods/design/overview.md`「上流の作り方」(plan [tooling-nozzle-upstream-poly-and-throat-sizing](../plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md))。
+
 ## 5. 軸対称 — 現行 (2026-08)
 
 - `isAxisymmetric: 1`, `axisymMethod: 0` (r 重み方式) が既定。SU2 流 `axisymMethod: 1` は実装済みだが implicit 深収束未達。
@@ -335,6 +341,8 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 | 旧設定 | 状態 | 代替 |
 |---|---|---|
 | `mesh.bndFirstOrder: 1` | **禁止** (粘性応力破壊・疑似 2D で全域に効く) | 段階起動 (§1.2) |
+| 設計 YAML の `geometry.pw_ramp` (物理壁の上流に δ_r をランプで足す) | **2026-10-06 まで既定の作り方** (2026-10-07 からコードの既定は `pw_upstream: poly`。`pw_ramp` を書くなら `pw_upstream: ramp` の明示が必須、`poly` と併記すると例外) | `pw_upstream: poly` (キー無しと同じ)、`pw_ramp` を消す。旧壁の再現・case/45 の生産 (U4 で採否を決めるまで) だけ `pw_upstream: ramp` + `pw_ramp` |
+| `solve_rt` (CFD 前) の δ = 未較正・未平滑化の `integral_bl` 直接 | **2026-10-06 まで** (生産の壁と出口半径が 2.4 mm ずれた) | 2026-10-07 から `prepare_ns` と同じ経路 (コード側、キー無し)。旧値の再現はできない |
 | `nodeAxisDirichlet` / `nodeMidpointFx` / `nodeValueAtNode` / `nodeReconEdgeMidpoint` / `nodeAxisUrDirichlet` | 廃止 (2026-08-16, 書くと起動エラー) | node は固定スキーム (§1) |
 | `turbulence: {LESorRANS: 2, RANSmodel: 1}` 旧キー体系 | 旧 config に残存 | `turbulence: {model: "sst", ...}` |
 | `space.slauWallNormalChi` 省略 = 0 | **2026-09-25 まで既定** (2026-09-26 から auto = node+nodeWallDirichlet+SLAU で 1、plan [convection-slau-wall-normal-chi-default](../plans/accepted/convection-slau-wall-normal-chi-default.md)) | 旧結果の再現は `slauWallNormalChi: 0` を明記 |
@@ -351,6 +359,8 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 | 内蔵種の LJ = #14 前の単一の値 (GRI-Mech 3.0 と Svehla 1962 の混在、`physProp.ljSource` 無し) | 2026-10-01 まで既定 | 既定 `[gri30, svehla1962]` (書かない)。旧 run の再現・継続だけ `ljSource: [legacy_v1]` |
 
 ## 変更ログ
+
+- `2026-10-07` — §4 に軸対称ノズルの物理壁 (NS) の現行 (`geometry.pw_upstream: poly`、寸法は `solve_rt` / `solve_rt_throat`) を追加、§9 に `geometry.pw_ramp`・CFD 前の旧 `solve_rt` を旧設定として (plan [tooling-nozzle-upstream-poly-and-throat-sizing](../plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md))。
 
 - `2026-10-01` — §3 に LJ の出典 `physProp.ljSource` (既定 `[gri30, svehla1962]`、旧 run の再現は `[legacy_v1]`) を追加、§9 に旧既定 (plan [thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §4.10 #14)。
 - `2026-09-25` — §1.0a に `space.slauWallNormalChi` の適用規則 (3D 側壁接続のみ 1、新構成は診断可能性の検査 + 3 条件) を追加 (plan [convection-slau-wall-normal-chi-usage-rule](../plans/accepted/convection-slau-wall-normal-chi-usage-rule.md))。

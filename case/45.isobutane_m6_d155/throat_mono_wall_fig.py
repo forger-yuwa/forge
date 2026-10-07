@@ -34,7 +34,7 @@ def walls(prob):
     _, drx, _ = integral_delta_r(p, d, {"model": "contur", "a_crocco": 1.0, "cf_scale": KF, "n_scale": 1.0})
     pw = PhysicalNozzleWall(d["wall"], d["wall_inv"], float(p.spec["r_throat"]), float(p.spec["Pt"]), float(p.spec["Tt"]),
                             _gam_or_gas(p), p.cp, offset="radial", delta_r_x=drx,
-                            ramp=tuple(float(v) for v in p.geometry["pw_ramp"]))
+                            ramp=tuple(float(v) for v in p.geometry["pw_ramp"]), upstream="ramp")   # 2026-10-07 に既定が poly
     return d["wall"], pw, float(d["R"])
 
 

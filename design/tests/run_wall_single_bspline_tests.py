@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""物理壁の全域 1 本の 5 次 B-spline と保存した壁の復元・STEP の試験 (plans/active/tooling-nozzle-wall-single-bspline.md §4・§6 W4・W5)。
+"""物理壁の全域 1 本の 5 次 B-spline と保存した壁の復元・STEP の試験 (plans/active/tooling-nozzle-wall-single-bspline.md §4・§6 W4・W5、
+係数の求め方は plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1b のノット挿入 — 2026-10-07 に最小二乗の版から直した)。
 
-壁は case/45 の単調壁の生産問題 (`problem_d155_ns_finemesh_recal_final_mono.yaml`) の初期線だけ Hall に差し替えて作る
-(CFD ピンの凍結源 run に依存しない)。δ_r は prepare_ns と同じ積分法の経路 (`integral_delta_r`、YAML の deltastar_initializer)。
+壁は case/45 の単調壁の生産問題 (`problem_d155_ns_finemesh_recal_final_mono.yaml`) の初期線だけ Hall に差し替え、`pw_ramp`・
+`pw_upstream` を外して上流を既定の `poly` にして作る (CFD ピンの凍結源 run に依存しない)。δ_r は prepare_ns と同じ積分法の経路
+(`integral_delta_r`、YAML の deltastar_initializer)。
 
-1. 構築: 継ぎ目・定義域が壁の属性から決まる / ノットの重複度 (端 6・継ぎ目 3・他 1) / 許容誤差内 / スロート / ランプのゲート / 必須属性
-2. 一般性 (plan §6 W4): 違う scale_m・L_U・L_pipe と既定ランプ (pw_ramp 無し) で、継ぎ目・定義域・mm 換算が壁の属性から決まる
-3. 拒否: δ_r の表がランプ開始〜出口を覆わない (出口側・入口側) / 解析経路でない壁 / キーの不正値 / 定義域の外 (float32 丸めを超える)
+1. 構築: 継ぎ目 (−L_U・0)・定義域が壁の属性から決まる / ノットの重複度 (端 6・継ぎ目 3・他 1) / 元の区分表現との差が丸めの範囲
+   (半径 ≤ 1e-12・r′ ≤ 1e-10・r″ ≤ 1e-8) / ノット除去の誤差 ≤ 1e-12 / スロート (大域最小) / 上流のゲート / 必須属性 (方式別)
+2. 一般性 (plan §6 W4): 違う scale_m・L_U・L_pipe で、継ぎ目・定義域・mm 換算が壁の属性から決まる
+3. 拒否: δ_r の表が [0, x_e] を覆わない (出口側・入口側) / 解析経路でない壁 / ランプの壁 (ramp + single_bspline) / キーの不正値 /
+   定義域の外 (float32 丸めを超える)
 4. ic.py: 物理壁のスロート属性が欠けたら例外 (黙って (0, 1) に戻らない)、設計壁は従来どおり (0, 1)
-5. 壁ファイル: 書いて読み直し (single_bspline・legacy) が元の壁とビット一致 / 復元した評価関数は有効域の外で例外 /
-   要素の欠損・版・種類・形式で例外
+5. 壁ファイル (版 2): 書いて読み直し (single_bspline・legacy poly・legacy ramp) が元の壁とビット一致 / 版 1 はランプとして読む /
+   復元した評価関数は有効域の外で例外 / 要素の欠損・版・種類・形式・方式で例外
 6. 報告の単体検査 (plan §6 W4 の 4 種): 旧 run (壁ファイル無し → 旧経路、図にその旨) / 新しい形式 (保存した係数から評価、CSV を読まない) /
    係数の欠損 (例外) / 上流を含む差分図 (x = −6 で設計壁が上流 Hermite の値、S を有効域の外で外挿しない)
 7. STEP: グレビル点で x(u) = u・ノットの mm 換算 (1000·scale_m)・自前の de Boor と scipy の一致 /
@@ -31,7 +35,7 @@ from forge_design.evaluate import ic as ic_mod  # noqa: E402
 from forge_design.evaluate.runner_axismach import (_gam_or_gas, _physical_wall_repr, delta_r_from_table,  # noqa: E402
                                                    design_chain, integral_delta_r, load_problem)
 from forge_design.geometry.wall_axismach import (WALL_FILE, PhysicalNozzleWall, SingleBSplinePhysicalWall,  # noqa: E402
-                                                 check_required_attrs, default_pw_ramp, load_wall_file, save_wall_file)
+                                                 check_required_attrs, load_wall_file, required_attrs, save_wall_file)
 
 ROOT = Path(__file__).resolve().parents[2]
 PROB = ROOT / "case/45.isobutane_m6_d155/problem_d155_ns_finemesh_recal_final_mono.yaml"
@@ -60,15 +64,15 @@ def build(cfg: str):
     g["initial_line"] = "hall"
     g.pop("initial_line_run", None)
     g.pop("initial_line_res", None)
+    g.pop("pw_ramp", None)                 # 上流は既定の poly (ノット挿入の版は poly の壁だけ)
+    g.pop("pw_upstream", None)
     if cfg == "gen":
-        g.pop("pw_ramp")
         g["L_U"], g["L_pipe"], g["n_axis_inv"] = 10.0, 1.0, 800
         p.spec["r_throat"] = 0.05
     d = design_chain(p)
     res_init, drx, _ = integral_delta_r(p, d, p.raw["deltastar_initializer"])
-    pw = g.get("pw_ramp")
     args = (d["wall"], d["wall_inv"], float(p.spec["r_throat"]), float(p.spec["Pt"]), float(p.spec["Tt"]), _gam_or_gas(p), p.cp)
-    PW = PhysicalNozzleWall(*args, offset="radial", delta_r_x=drx, ramp=(None if pw is None else tuple(float(v) for v in pw)))
+    PW = PhysicalNozzleWall(*args, offset="radial", delta_r_x=drx)
     return p, d, res_init, drx, args, PW, SingleBSplinePhysicalWall(PW)
 
 
@@ -76,65 +80,85 @@ if not PROB.exists():
     print(f"問題 YAML {PROB} が無い — 全体を飛ばす (合格扱いにしない)")
     sys.exit(2)
 
-# --- 1. 構築 (case/45 の形、pw_ramp [−11, −6]) -------------------------------------------------------------------
+# --- 1. 構築 (case/45 の形、上流 poly) -----------------------------------------------------------------------------
 p, d, res_init, drx, args, PW, B = build("c45")
 w = d["wall"]
 S = float(p.spec["r_throat"])
 t = np.asarray(B.spline.t)
 dist, mult = np.unique(t, return_counts=True)
-jt = [-float(w.up.L_U), -11.0, -6.0, 0.0]
-check(f"継ぎ目 = [−L_U, ランプ両端, 0] (壁の属性から): {B.joints}", B.joints == jt)
+jt = [-float(w.up.L_U), 0.0]
+check(f"元の壁は poly (既定): {PW.pw_upstream} / {PW.pw_upstream_source}", PW.pw_upstream == "poly" and PW.pw_upstream_source == "default")
+check(f"継ぎ目 = [−L_U, 0] (壁の属性から): {B.joints}", B.joints == jt)
 check(f"定義域 = 壁の属性 [x_in, x_e] = [{B.x_in}, {B.x_e:.6f}]", (B.x_in, B.x_e) == (float(PW.x_in), float(PW.x_e)) and B.x_in == -12.5)
 isj = np.isin(dist, jt)
 check(f"重複度: 端 6・継ぎ目 3・他 1 (異なるノット {len(dist)}, 係数 {len(B.spline.c)})",
       mult[0] == 6 and mult[-1] == 6 and np.all(mult[isj] == 3) and np.all(mult[~isj][1:-1] == 1))
 fe = B.fit_diag["max_err"]
-check(f"元の壁との差 (密な点 + 区間多項式の極値): r {fe['d0']:.2e} ≤ 1.3e-7, r′ {fe['d1']:.2e} ≤ 1e-7, r″ {fe['d2']:.2e} ≤ 1e-5",
-      fe["d0"] <= 1.3e-7 and fe["d1"] <= 1e-7 and fe["d2"] <= 1e-5)
+check(f"元の区分表現との差 (密な点 + 区間多項式の極値) が丸めの範囲: r {fe['d0']:.2e} ≤ 1e-12, r′ {fe['d1']:.2e} ≤ 1e-10, r″ {fe['d2']:.2e} ≤ 1e-8",
+      fe["d0"] <= 1e-12 and fe["d1"] <= 1e-10 and fe["d2"] <= 1e-8)
+kr = B.fit_diag["knot_removal"]
+check(f"継ぎ目のノット除去の誤差 ≤ 1e-12 r_t: {[(k_['x'], k_['max_rt']) for k_ in kr]}", all(k_["max_rt"] <= 1e-12 for k_ in kr) and len(kr) == 2)
+check(f"構成はノット挿入 (最小二乗なし): {B.fit_diag['construction']}, 挿入 {B.fit_diag['insertion']}",
+      B.fit_diag["construction"] == "knot_insertion" and "lstsq_rank" not in B.fit_diag)
 xs = np.linspace(-12.5, B.x_e, 20001)
-check(f"r(x) が元の壁と一致 (均等 20001 点の max |Δr| {np.abs(B.r(xs) - PW.r(xs)).max():.2e} ≤ 1.3e-7)",
-      np.abs(B.r(xs) - PW.r(xs)).max() <= 1.3e-7)
+check(f"r(x) が元の壁と一致 (均等 20001 点の max |Δr| {np.abs(B.r(xs) - PW.r(xs)).max():.2e} ≤ 1e-12)",
+      np.abs(B.r(xs) - PW.r(xs)).max() <= 1e-12)
 jj = B.fit_diag["joint_jumps"]
 check(f"継ぎ目の r・r′・r″ の跳び ≤ 1e-8 (区間多項式の左右の極限): max {max(max(j['jump_d0'], j['jump_d1'], j['jump_d2']) for j in jj):.1e}",
       all(max(j["jump_d0"], j["jump_d1"], j["jump_d2"]) <= 1e-8 for j in jj))
-check(f"スロートを 1 本から求め直す: Δx {B.x_throat - PW.x_throat:.1e}, Δr {B.r_throat - PW.r_throat:.1e}, Δκ {B.kappa_throat - PW.kappa_throat:.1e}",
-      abs(B.x_throat - PW.x_throat) <= 1e-6 and abs(B.r_throat - PW.r_throat) <= 1.3e-7 and abs(B.kappa_throat - PW.kappa_throat) <= 1e-5)
-check(f"ランプのゲートを 1 本で評価し直して合格 ({B.ramp_gate['max_abs_d2_change']:.4e} ≤ {B.ramp_gate['limit_d2']}, max r′ {B.ramp_gate['max_r1']:.3f})",
-      B.ramp_gate["pass"] and B.ramp_gate["repr"] == "single_bspline" and B.ramp_gate["source_wall"] == PW.ramp_gate)
+check(f"継ぎ目の左右の極限が元の壁の左右の極限と一致 (≤ 1e-10): max {max(v for j in jj for k_, v in j.items() if '_vs_source_' in k_):.1e}",
+      all(v <= 1e-10 for j in jj for k_, v in j.items() if "_vs_source_" in k_))
+check(f"スロートを 1 本から大域最小で求め直す: Δx {B.x_throat - PW.x_throat:.1e}, Δr {B.r_throat - PW.r_throat:.1e}, Δκ {B.kappa_throat - PW.kappa_throat:.1e}",
+      abs(B.x_throat - PW.x_throat) <= 1e-9 and abs(B.r_throat - PW.r_throat) <= 1e-12 and abs(B.kappa_throat - PW.kappa_throat) <= 1e-8)
+ug = B.upstream_gate
+check(f"上流のゲートを 1 本で評価し直して合格 (|r″ − H″| {ug['max_abs_d2_change_vs_H']:.4e} ≤ {ug['limit_d2']}, 継ぎ目 {ug['max_seam_jump']:.1e}, "
+      f"一意 {ug['unique_min']}, 単調 {ug['monotone_before']}/{ug['monotone_after']})",
+      ug["pass"] and ug["repr"] == "single_bspline" and ug["source_wall"]["pass"]
+      and abs(ug["max_abs_d2_change_vs_H"] - PW.upstream_gate["max_abs_d2_change_vs_H"]) <= 1e-9)
 check(f"validate() が空 ({B.validate()})", B.validate() == [])
-check("必須属性 (REQUIRED_ATTRS) が全部ある", raises(lambda: check_required_attrs(B)) is None)
+check("必須属性 (poly + 1 本の B-spline) が全部ある", raises(lambda: check_required_attrs(B)) is None
+      and set(required_attrs(B)) >= {"upstream_gate", "upstream_poly", "spline", "joints", "fit_diag"} and "ramp_gate" not in required_attrs(B))
 Bm = copy.copy(B)
-del Bm.ramp_gate
-check("必須属性が欠けたら check_required_attrs が例外 (ramp_gate を消す)", raises(lambda: check_required_attrs(Bm)) is not None)
+del Bm.upstream_gate
+check("必須属性が欠けたら check_required_attrs が例外 (upstream_gate を消す)", raises(lambda: check_required_attrs(Bm)) is not None)
 check("validate() も必須属性の欠落を報告する", any("必須属性" in m for m in Bm.validate()))
+Bp = copy.copy(B)
+del Bp.pw_upstream
+check("pw_upstream が無ければ必須属性の検査が例外 (方式が分からないまま既定に落とさない)", raises(lambda: check_required_attrs(Bp)) is not None)
 check("_dstar_hist は元の壁のもの (prepare_info の dstar_throat_correlation が同じ)", float(B._dstar_hist(0.0)) == float(PW._dstar_hist(0.0)))
 check(f"r の定義域外: float32 丸め分 ({B._dom_tol:.1e}) の内側は端で評価", float(B.r(np.array([B.x_in - 0.5 * B._dom_tol]))[0]) == float(B.r(np.array([B.x_in]))[0]))
 check("r の定義域外: それより外は例外 (外挿しない)", raises(lambda: B.r(np.array([B.x_e + 1e-3]))) is not None)
 
-# --- 2. 一般性: 違う scale_m (0.05 m)・L_U 10・L_pipe 1・既定ランプ ----------------------------------------------
+# --- 2. 一般性: 違う scale_m (0.05 m)・L_U 10・L_pipe 1 ------------------------------------------------------------
 pg, dg, _, drg, argsg, PWg, Bg = build("gen")
-lo_d, hi_d = default_pw_ramp(dg["wall"])
-check(f"既定ランプ (pw_ramp 無し) の継ぎ目 = [−L_U, 既定 lo {lo_d:.5f}, −0.5·L_U, 0]: {Bg.joints}",
-      Bg.joints == [-10.0, lo_d, -5.0, 0.0] and PWg._ramp_source == "default")
+check(f"継ぎ目 = [−L_U, 0] = {Bg.joints}", Bg.joints == [-10.0, 0.0])
 check(f"定義域 [x_in, x_e] = [−L_U − L_pipe, 設計壁の x_e] = [{Bg.x_in}, {Bg.x_e:.5f}]", Bg.x_in == -11.0 and Bg.x_e == float(dg["wall"].x_e))
-check(f"一般性の壁も許容誤差内 ({Bg.fit_diag['max_err']['d0']:.1e}, {Bg.fit_diag['max_err']['d1']:.1e}, {Bg.fit_diag['max_err']['d2']:.1e})",
-      Bg.fit_diag["max_err"]["d0"] <= 1.3e-7 and Bg.fit_diag["max_err"]["d1"] <= 1e-7 and Bg.fit_diag["max_err"]["d2"] <= 1e-5)
+check(f"一般性の壁も丸めの範囲 ({Bg.fit_diag['max_err']['d0']:.1e}, {Bg.fit_diag['max_err']['d1']:.1e}, {Bg.fit_diag['max_err']['d2']:.1e})",
+      Bg.fit_diag["max_err"]["d0"] <= 1e-12 and Bg.fit_diag["max_err"]["d1"] <= 1e-10 and Bg.fit_diag["max_err"]["d2"] <= 1e-8)
 
 # --- 3. 拒否 ------------------------------------------------------------------------------------------------------
 xt, dt_ = res_init["x"], drx(res_init["x"])
 short_hi = delta_r_from_table(xt[xt < B.x_e - 1.0], dt_[xt < B.x_e - 1.0])
-PWs = PhysicalNozzleWall(*args, offset="radial", delta_r_x=short_hi, ramp=(-11.0, -6.0))
+# 表が出口の手前で終わると、その先は δ_r 一定で物理壁 = 設計壁の r′ が出口直前でわずかに負になり、poly の壁そのものがゲートで止まる
+e = raises(lambda: PhysicalNozzleWall(*args, offset="radial", delta_r_x=short_hi))
+check(f"δ_r の表が出口まで覆わない poly の壁: ゲート (後で r′ ≥ 0) で止まる ({(e or '')[:40]}…)", e is not None and "後で r′ ≥ 0 False" in e)
+# 1 本の B-spline 側の範囲の検査は、元の壁の δ_r だけを差し替えて試す (元の壁のゲートとは独立に)
+PWs = copy.copy(PW); PWs._dr = short_hi
 e = raises(lambda: SingleBSplinePhysicalWall(PWs))
-check(f"δ_r の表が出口まで覆わない → 例外 ({(e or '')[:60]}…)", e is not None and "覆わない" in e)
-short_lo = delta_r_from_table(xt[xt > -10.0], dt_[xt > -10.0])
-PWl = PhysicalNozzleWall(*args, offset="radial", delta_r_x=short_lo, ramp=(-11.0, -6.0))
-check("δ_r の表がランプ開始 (−11) より後から始まる → 例外", raises(lambda: SingleBSplinePhysicalWall(PWl)) is not None)
+check(f"δ_r の表が出口まで覆わない → 1 本の B-spline は例外 ({(e or '')[:60]}…)", e is not None and "覆わない" in e)
+short_lo = delta_r_from_table(xt[xt > 0.5], dt_[xt > 0.5])
+PWl = copy.copy(PW); PWl._dr = short_lo
+e = raises(lambda: SingleBSplinePhysicalWall(PWl))
+check(f"δ_r の表が設計スロート 0 より後 (0.5) から始まる → 例外 ({(e or '')[:50]}…)", e is not None and "覆わない" in e)
 PWo = PhysicalNozzleWall(*args, offset="radial", delta_r_x=drx, analytic=False)
 check("解析経路でない PhysicalNozzleWall → 例外", raises(lambda: SingleBSplinePhysicalWall(PWo)) is not None)
+PWr = PhysicalNozzleWall(*args, offset="radial", delta_r_x=drx, ramp=(-11.0, -6.0), upstream="ramp")
+e = raises(lambda: SingleBSplinePhysicalWall(PWr))
+check(f"ランプの壁 (pw_upstream ramp) → 例外 ({(e or '')[:70]}…)", e is not None and "ramp" in e)
 nodr = lambda x, deriv=0: drx(x, deriv)  # noqa: E731
 nodr.supports_deriv = True
-PWn = PhysicalNozzleWall(*args, offset="radial", delta_r_x=nodr, ramp=(-11.0, -6.0))
-check("δ_r の関数に spline・x_range が無い → 例外 (黙って既定にしない)", raises(lambda: SingleBSplinePhysicalWall(PWn)) is not None)
+check("δ_r の関数に spline・x_range が無い → poly の壁を作らない (区切りが決まらない、黙って既定にしない)",
+      raises(lambda: PhysicalNozzleWall(*args, offset="radial", delta_r_x=nodr)) is not None)
 check("キー無し → None (既定 = legacy、壁ファイルなし)", _physical_wall_repr({}) is None)
 check("キー legacy / single_bspline を受ける", _physical_wall_repr({"physical_wall_repr": "legacy"}) == "legacy"
       and _physical_wall_repr({"physical_wall_repr": "single_bspline"}) == "single_bspline")
@@ -153,45 +177,76 @@ Bn = copy.copy(B)
 Bn.r_throat = float("nan")
 check("ic: 物理壁のスロートが非有限なら例外", raises(lambda: ic_mod._throat_of(Bn)) is not None)
 
-# --- 5. 壁ファイル ------------------------------------------------------------------------------------------------
+# --- 5. 壁ファイル (版 2) -----------------------------------------------------------------------------------------
 with tempfile.TemporaryDirectory() as td:
     td = Path(td)
-    (td / "sb").mkdir(); (td / "lg").mkdir()
+    (td / "sb").mkdir(); (td / "lg").mkdir(); (td / "lr").mkdir()
     path_sb, rec_sb, sha_sb = save_wall_file(td / "sb", B, S, "single_bspline")
     path_lg, rec_lg, sha_lg = save_wall_file(td / "lg", PW, S, "legacy")
-    Wsb, Wlg = load_wall_file(td / "sb"), load_wall_file(path_lg)
+    path_lr, rec_lr, sha_lr = save_wall_file(td / "lr", PWr, S, "legacy")
+    Wsb, Wlg, Wlr = load_wall_file(td / "sb"), load_wall_file(path_lg), load_wall_file(path_lr)
     xq = np.linspace(B.x_in, B.x_e, 50001)
     check("single_bspline: 復元した物理壁が元とビット一致 (r, r′, r″)",
           all(np.array_equal(Wsb["physical"].r(xq, n), B.r(xq, n)) for n in range(3)))
-    check("legacy: 復元した物理壁が PhysicalNozzleWall とビット一致 (r, r′, r″, r‴)",
+    check("legacy (poly): 復元した物理壁が PhysicalNozzleWall とビット一致 (r, r′, r″, r‴)",
           all(np.array_equal(Wlg["physical"].r(xq, n), PW.r(xq, n)) for n in range(4)))
+    check("legacy (ramp): 復元した物理壁が PhysicalNozzleWall とビット一致 (r, r′, r″, r‴)",
+          all(np.array_equal(Wlr["physical"].r(xq, n), PWr.r(xq, n)) for n in range(4)))
     check("復元した設計壁 (直管 + 上流 Hermite + S) が設計壁とビット一致 (r, r′, r″)",
           all(np.array_equal(Wsb["design"].r(xq, n), w.r(xq, n)) for n in range(3)))
-    check("記録: 形式・版・表現の種類・単位 (r_t と scale_m)・有効域",
-          rec_sb["format"] == "forge_design.nozzle_wall" and rec_sb["version"] == 1 and rec_sb["physical_wall_repr"] == "single_bspline"
+    check("記録: 形式・版 2・表現の種類・上流の方式・単位 (r_t と scale_m)・有効域",
+          rec_sb["format"] == "forge_design.nozzle_wall" and rec_sb["version"] == 2 and rec_sb["physical_wall_repr"] == "single_bspline"
+          and rec_sb["pw_upstream"] == "poly" and rec_sb["physical_wall"]["pw_upstream"] == "poly"
           and rec_sb["units"]["length"] == "r_t" and rec_sb["units"]["scale_m"] == S
           and rec_sb["domain"] == [B.x_in, B.x_e] and rec_sb["domain_m"] == [B.x_in * S, B.x_e * S])
+    up = rec_lg["physical_wall"]["upstream_poly"]
+    check(f"legacy (poly): Q の係数・基底・区間を保存 ({up['basis']}, {up['domain']})",
+          rec_lg["pw_upstream"] == "poly" and len(up["coef"]) == 6 and up["domain"] == [-float(w.up.L_U), 0.0]
+          and up["coef"] == [float(v) for v in PW._q_c] and "ramp" not in rec_lg["physical_wall"])
+    check("読み込みの戻りに方式と版", (Wsb["pw_upstream"], Wlg["pw_upstream"], Wlr["pw_upstream"]) == ("poly", "poly", "ramp")
+          and Wsb["version"] == 2)
+    # 版 1 (方式の記録が無い) はランプとして読む
+    r1 = json.loads(path_lr.read_text())
+    r1["version"] = 1
+    r1.pop("pw_upstream"); r1["physical_wall"].pop("pw_upstream")
+    (td / "v1").mkdir(); (td / "v1" / WALL_FILE).write_text(json.dumps(r1))
+    W1 = load_wall_file(td / "v1")
+    check("版 1 (方式の記録なし) は ramp として読み、復元した壁がランプの壁とビット一致",
+          W1["pw_upstream"] == "ramp" and W1["version"] == 1 and np.array_equal(W1["physical"].r(xq), PWr.r(xq)))
     check("復元した物理壁は有効域の外で例外 (外挿しない)", raises(lambda: Wsb["physical"].r(np.array([B.x_e + 1e-9]))) is not None
           and raises(lambda: Wlg["physical"].r(np.array([B.x_in - 1e-9]))) is not None)
     check("復元した設計壁 S は自分の有効域 [0, x_e] の外で例外", raises(lambda: Wsb["design"].S(np.array([-6.0]))) is not None)
 
-    def broken(mut, name):
-        r = json.loads(path_sb.read_text())
+    def broken(src, mut, name):
+        r = json.loads(src.read_text())
         mut(r)
         q = td / name
         q.write_text(json.dumps(r))
         return raises(lambda: load_wall_file(q))
-    check("要素の欠損: physical_wall.c → 例外", broken(lambda r: r["physical_wall"].pop("c"), "m1.json") is not None)
-    check("要素の欠損: 係数を 1 個減らす → 例外", broken(lambda r: r["physical_wall"]["c"].pop(), "m2.json") is not None)
-    check("要素の欠損: design_wall.upstream_hermite → 例外", broken(lambda r: r["design_wall"].pop("upstream_hermite"), "m3.json") is not None)
-    check("要素の欠損: design_wall.S.t → 例外", broken(lambda r: r["design_wall"]["S"].pop("t"), "m4.json") is not None)
+    check("要素の欠損: physical_wall.c → 例外", broken(path_sb, lambda r: r["physical_wall"].pop("c"), "m1.json") is not None)
+    check("要素の欠損: 係数を 1 個減らす → 例外", broken(path_sb, lambda r: r["physical_wall"]["c"].pop(), "m2.json") is not None)
+    check("要素の欠損: design_wall.upstream_hermite → 例外", broken(path_sb, lambda r: r["design_wall"].pop("upstream_hermite"), "m3.json") is not None)
+    check("要素の欠損: design_wall.S.t → 例外", broken(path_sb, lambda r: r["design_wall"]["S"].pop("t"), "m4.json") is not None)
     check("上流 Hermite の係数が (r_U, R_t, L_U) と合わない → 例外",
-          broken(lambda r: r["design_wall"]["upstream_hermite"]["coef"].__setitem__(1, 1e-3), "m5.json") is not None)
-    check("版が違う → 例外", broken(lambda r: r.__setitem__("version", 2), "m6.json") is not None)
-    check("表現の種類が違う → 例外", broken(lambda r: r.__setitem__("physical_wall_repr", "bspline"), "m7.json") is not None)
-    check("形式が違う → 例外", broken(lambda r: r.__setitem__("format", "x"), "m8.json") is not None)
+          broken(path_sb, lambda r: r["design_wall"]["upstream_hermite"]["coef"].__setitem__(1, 1e-3), "m5.json") is not None)
+    check("版が未対応 (3) → 例外", broken(path_sb, lambda r: r.__setitem__("version", 3), "m6.json") is not None)
+    check("表現の種類が違う → 例外", broken(path_sb, lambda r: r.__setitem__("physical_wall_repr", "bspline"), "m7.json") is not None)
+    check("形式が違う → 例外", broken(path_sb, lambda r: r.__setitem__("format", "x"), "m8.json") is not None)
     check("physical_wall.kind と physical_wall_repr の食い違い → 例外",
-          broken(lambda r: r["physical_wall"].__setitem__("kind", "legacy"), "m9.json") is not None)
+          broken(path_sb, lambda r: r["physical_wall"].__setitem__("kind", "legacy"), "m9.json") is not None)
+    check("版 2 で pw_upstream が無い → 例外", broken(path_sb, lambda r: r.pop("pw_upstream"), "m10.json") is not None)
+    check("版 2 の single_bspline で pw_upstream ramp → 例外 (ramp + single_bspline は作れない)",
+          broken(path_sb, lambda r: (r.__setitem__("pw_upstream", "ramp"), r["physical_wall"].__setitem__("pw_upstream", "ramp")), "m11.json") is not None)
+    check("pw_upstream の不正値 → 例外", broken(path_lg, lambda r: r.__setitem__("pw_upstream", "Poly"), "m12.json") is not None)
+    check("最上位と物理壁の pw_upstream の食い違い → 例外",
+          broken(path_lg, lambda r: r["physical_wall"].__setitem__("pw_upstream", "ramp"), "m13.json") is not None)
+    check("legacy (poly) で upstream_poly が無い → 例外", broken(path_lg, lambda r: r["physical_wall"].pop("upstream_poly"), "m14.json") is not None)
+    check("legacy (poly) の Q の係数が端条件と合わない (継ぎ目の跳び) → 例外",
+          broken(path_lg, lambda r: r["physical_wall"]["upstream_poly"]["coef"].__setitem__(3, r["physical_wall"]["upstream_poly"]["coef"][3] + 1e-6),
+                 "m15.json") is not None)
+    check("legacy (ramp) で ramp が無い → 例外", broken(path_lr, lambda r: r["physical_wall"].pop("ramp"), "m16.json") is not None)
+    check("版 1 なのに pw_upstream がある → 例外",
+          broken(path_lr, lambda r: r.__setitem__("version", 1), "m17.json") is not None)
     check("壁ファイルの書き出しは legacy に解析経路でない壁を受けない", raises(lambda: save_wall_file(td, PWo, S, "legacy")) is not None)
 
     # --- 6. 報告の単体検査 (W4) ---------------------------------------------------------------------------------

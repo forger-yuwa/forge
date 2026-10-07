@@ -33,7 +33,7 @@ W = {}
 for k, init in INIT.items():
     _, drx, info = integral_delta_r(p, d, init)
     W[k] = (PhysicalNozzleWall(d["wall"], d["wall_inv"], S, float(p.spec["Pt"]), float(p.spec["Tt"]), _gam_or_gas(p), p.cp,
-                               offset="radial", delta_r_x=drx, ramp=tuple(float(v) for v in p.geometry["pw_ramp"])), drx, info)
+                               offset="radial", delta_r_x=drx, ramp=tuple(float(v) for v in p.geometry["pw_ramp"]), upstream="ramp"), drx, info)   # upstream: 2026-10-07 に既定が poly
 x = np.linspace(-12.0, float(d["wall_inv"][-1, 0]), 200001)
 rA, rB = W["A_prep_c2pin"][0].r(x), W["B_deltastar_loop"][0].r(x)
 out = {"k_f": KF, "initializers": INIT,

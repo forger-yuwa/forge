@@ -26,7 +26,7 @@ tbl = np.loadtxt(RUN / "delta_r_initial.csv", delimiter=",", skiprows=1)
 f = delta_r_from_table(tbl[:, 0], tbl[:, 1])
 ramp = tuple(float(v) for v in p.geometry["pw_ramp"])
 W = PhysicalNozzleWall(d["wall"], d["wall_inv"], scale, float(p.spec["Pt"]), float(p.spec["Tt"]),
-                       _gam_or_gas(p), p.cp, offset="radial", delta_r_x=f, ramp=ramp)
+                       _gam_or_gas(p), p.cp, offset="radial", delta_r_x=f, ramp=ramp, upstream="ramp")   # 2026-10-07 に既定が poly
 wp = np.loadtxt(RUN / "wall_physical.csv", delimiter=",", skiprows=1)
 rep = float(np.abs(W.r(wp[:, 0] / scale) * scale - wp[:, 1]).max())
 

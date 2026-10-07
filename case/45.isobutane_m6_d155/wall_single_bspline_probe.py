@@ -27,7 +27,7 @@ tbl = np.loadtxt(RUNS / "run_0147_ns_mono_final/delta_r_initial.csv", delimiter=
 f = delta_r_from_table(tbl[:, 0], tbl[:, 1])
 W = PhysicalNozzleWall(d["wall"], d["wall_inv"], scale, float(p.spec["Pt"]), float(p.spec["Tt"]),
                        _gam_or_gas(p), p.cp, offset="radial", delta_r_x=f,
-                       ramp=tuple(float(v) for v in p.geometry["pw_ramp"]))
+                       ramp=tuple(float(v) for v in p.geometry["pw_ramp"]), upstream="ramp")   # 2026-10-07 に既定が poly
 
 # 生産壁の再現確認 (run_0147 の wall_physical.csv、m 単位)
 wp = np.loadtxt(RUNS / "run_0147_ns_mono_final/wall_physical.csv", delimiter=",", skiprows=1)

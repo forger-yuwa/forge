@@ -132,7 +132,8 @@ def physical(p, d):
     pw = p.geometry.get("pw_ramp")
     PW = PhysicalNozzleWall(d["wall"], d["wall_inv"], float(p.spec["r_throat"]), float(p.spec["Pt"]), float(p.spec["Tt"]),
                             _gam_or_gas(p), p.cp, dstar_x=None, offset="radial", delta_r_x=drx,
-                            ramp=(None if pw is None else tuple(float(v) for v in pw)))
+                            ramp=(None if pw is None else tuple(float(v) for v in pw)),
+                            upstream="ramp")   # 旧来のランプ (2026-10-07 に既定が poly になったので明示)
     return PW, drx, res_init, info
 
 
