@@ -56,6 +56,10 @@ WIN = 5
 EXIT_M_LO, EXIT_M_HI = 5.997, 6.003
 WAVE_MAX = 0.01            # [%]
 OVERSHOOT_MAX = 0.035      # [%]
+# オーバーシュートの準定常: 平均が零に近く check_quasisteady の相対の drift が大きく出るので、窓 5 枚の絶対の幅が
+# ゲートの 1/10 (0.0035 %) 以下なら準定常とみなす (2026-10-07 ユーザ決定「絶対の幅で可とする」。延長の後も 3 条件とも
+# DRIFTING、窓の動きは約 0.0005 %。plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U4)。判定の VERDICT はそのまま残す
+OVERSHOOT_QS_ABS = OVERSHOOT_MAX / 10.0
 DE_DC_TOL = 0.005          # |δ_E/δ_C − 1|
 EXIT_R_M, EXIT_R_TOL = 0.775, 1.0e-4
 WALL_OVER_PCT = 5.0
@@ -351,7 +355,13 @@ def gate_dry(case: Path, cond: str, base: Path, ext: Path | None, out_dir: Path)
                                  (abs(d["mean"] - 1.0) <= DE_DC_TOL) if d["finite"] else None, None))
         for c, key in QS_DRY.items():
             v = qs[c]["verdict"]
-            res["items"].append(item(f"準定常 {key}", v, "STEADY", None if v is None else (v == "STEADY"), qs[c]["detail"]))
+            if c == "overshoot01" and v is not None and v != "STEADY" and o["finite"]:
+                ok = o["range"] <= OVERSHOOT_QS_ABS
+                res["items"].append(item(f"準定常 {key}", v, f"STEADY または窓の幅 ≤ {OVERSHOOT_QS_ABS:g} %", ok,
+                                         f"{qs[c]['detail']}; 窓 5 枚の絶対の幅 {o['range']:.3g} % "
+                                         f"({'≤' if ok else '>'} {OVERSHOOT_QS_ABS:g} %、2026-10-07 ユーザ決定の絶対の幅の条件)"))
+            else:
+                res["items"].append(item(f"準定常 {key}", v, "STEADY", None if v is None else (v == "STEADY"), qs[c]["detail"]))
     # 出口半径 (幾何。prepare_info の sizing と report.json の一致を前提に)
     try:
         info = jload(base / "prepare_info.json")
