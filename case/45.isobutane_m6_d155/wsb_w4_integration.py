@@ -132,10 +132,22 @@ def judge():
     S = float(ir["scale_m"])
     ws = new["metrics"]["wall_shape"]
     exit_eval = float(W["physical"].r(np.r_[W["domain"][1]])[0] * S)
-    m_new = {k: v for k, v in new["metrics"].items() if k != "wall_shape"}
+    # 場所のラベル (run のパス・親ディレクトリ名) は写しで必ず変わるので比べない: パスの文字列は元の run に置き換え、
+    # conditions の run・run_name・case は除く (2026-10-07 修正。初版は case と wall_resolution.cmd のパスまで比べて FAIL、
+    # 初版の出力は _band_ab/wsb/W4_integration_v1_pathlabels.json に残した)
+    def _norm(o):
+        if isinstance(o, str):
+            return o.replace(str(R), str(RUN))
+        if isinstance(o, dict):
+            return {k: _norm(v) for k, v in o.items()}
+        if isinstance(o, list):
+            return [_norm(v) for v in o]
+        return o
+    LOC = ("run", "run_name", "case")
+    m_new = {k: _norm(v) for k, v in new["metrics"].items() if k != "wall_shape"}
     m_ref = {k: v for k, v in ref["metrics"].items() if k != "wall_shape"}
-    c_new = {k: v for k, v in new["conditions"].items() if k not in ("run", "run_name")}
-    c_ref = {k: v for k, v in ref["conditions"].items() if k not in ("run", "run_name")}
+    c_new = {k: _norm(v) for k, v in new["conditions"].items() if k not in LOC}
+    c_ref = {k: v for k, v in ref["conditions"].items() if k not in LOC}
     ck["report"] = {"pass": bool(ws.get("wall_source") == "saved_coefficients" and ws.get("wall_repr") == "single_bspline"
                                  and ws.get("exit_radius_m") == exit_eval and m_new == m_ref and c_new == c_ref),
                     "wall_source": ws.get("wall_source"), "wall_repr": ws.get("wall_repr"), "wall_file": ws.get("wall_file"),

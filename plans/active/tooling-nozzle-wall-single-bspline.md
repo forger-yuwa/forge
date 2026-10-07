@@ -110,7 +110,7 @@
 | 2 | ~~codex plan 段レビュー~~ 完了 | 2026-10-07、GO-with-changes C0/M1/m3、全件採用 (§6.1) | O |
 | 2b | ~~基準成果物の確保~~ 完了 (2026-10-07) | `case/45.isobutane_m6_d155/_band_ab/wsb/base_legacy/` (HEAD 7a505415 の design/ の写し・キー無し・ローカルの変換器)、ハッシュ `base_legacy.hashes.json`、固定入力 `fixed_inputs.json`。W4 の統合検査に使う run_0147 の結果は AWS にあり未取得 | O |
 | 3 | ~~実装~~ 完了 (最小二乗の版、2026-10-07) | 壁クラス・壁ファイル・キー・報告・STEP・テスト (§9)。係数の求め方は上流の多項式化の plan §4.1b のノット挿入に置き換える (同 plan の §5.1 #3) | O |
-| 4 | 検証 (CFD 0 step) | 最小二乗の版で W0〜W5 済み (基盤の確認、§9)。**残り: W1・W5 をノット挿入の版でやり直す (上流の plan の U3 と合わせる)、W4 の統合検査 (run_0147 の結果を AWS から取る)** | O (解釈は F) |
+| 4 | ~~検証 (CFD 0 step)~~ 完了 (2026-10-07) | W0〜W5 PASS (ノット挿入の版で W1・W2・W3・W5 をやり直し、W4 の統合検査は run_0166 で PASS。§9) | O (解釈は F) |
 | 5 | codex result 段レビュー | `--stage result` (機能実装の完了でも必須) | O |
 | 6 | 生産への反映 | case/45 の問題 YAML にキーを入れるか (ユーザ判断)。W3 でソルバ入力がビット同一なら、表現の変更による CFD のやり直しは要らない。MOC の plan の変更に要る NS・凝縮の再評価は、本 plan の免除条件で省かない | ユーザ |
 
@@ -182,3 +182,6 @@
   - **未解決の観測**: ローカルで作り直した積分法の δ_r が run_0147 の `delta_r_initial.csv` と最大 2.9e-6 r_t (x = 70.95) 違った (M_e・Tw・Taw は同一、δ*・θ・H・N・Cf が違う)。原因は未確認 (計算環境の numpy・scipy の版の違いを疑うが確かめていない)。基準は「ローカルで作り直した固定入力」で、run_0147 の入力の再現ではない。
   - IC の化学種の属性は付けていない (ローカルの forge が `--resolve-species` を持たない。全腕 `FORGE_ALLOW_UNVERIFIED_SPECIES=1`、CFD 0 step の比較には影響しない)。
 - `2026-10-07` — **ノット挿入の版で W1・W2・W3・W5 と保存 → 復元 → 報告の往復をやり直して PASS** (上流の多項式化の plan の §5.1 #4、commit a382f37d、出力 `case/45.isobutane_m6_d155/_band_ab/upoly/`)。W3: `poly` の区分表現と `single_bspline` でソルバ入力がビット同一。W5: STEP の転送誤差は位置 5.0e-10 mm・角度 2.6e-11 rad・曲率 7.4e-12 /mm、FreeCAD で回転面が作れる。残りは W4 の統合検査 (run_0147 の結果を AWS から取る) と result 段レビュー。
+- `2026-10-07` — **W4 の統合検査: PASS** (§6.0 W4 の 2026-10-07 改訂の登録、AWS、run_0166 と同じコード a6ce9390・同じ変換器、CFD 0 step)。出力 `case/45.isobutane_m6_d155/_band_ab/wsb/W4_integration.json`、図 `W4_integration_fig_wall_shape.png`、道具 `wsb_w4_integration.py`。
+  - (1) N1 の問題で腕 A (キー無し)・腕 B (`single_bspline`) のソルバ入力が全項目ビット同一。(2) 腕 A が run_0166 の壁を再現 (`wall_physical.csv`・`wall_design.csv`・`delta_r_initial.csv` がバイト同一、`nozzle.h5` の幾何 30 データセットがビット同一、`throat_physical` 一致)。(3) run_0166 の結果に腕 B の壁ファイルを添えた写しの報告は `wall_source: saved_coefficients`・`wall_repr: single_bspline`、出口半径 0.7749987272573589 m が保存した係数の評価値と一致、壁形状以外の評価量が run_0166 自身の報告と一致。壁形状の図の r″ の高周波の最大 (x > 2) は CSV の再補間 1.72251e-4・保存した係数 1.72265e-4 (参考)。
+  - **判定器の修正を 1 回した**: 初版の判定は FAIL。違いは場所のラベルの文字列 2 か所 (`metrics.wall_resolution.cmd` に入る run のパス、`conditions.case` の親ディレクトリ名) だけで、数値の評価量はすべて一致していた。登録の比較対象は「評価量」なので、判定器がパスの文字列まで比べていたのは実装の誤り。パスを元の run に置き換え、`case` を場所のラベルとして除く修正をして、判定だけをやり直した (prepare・報告は回し直していない)。初版の出力は `W4_integration_v1_pathlabels.json` に残した。
