@@ -98,6 +98,21 @@ check("段 2: 段 1 が据え置きなら段 2 は登録外 → 判別不能", r
 r = EV.judge_stage2(series(lambda s: 6.00002), False, ["[P1] 合成"], j1, d1)
 check("段 2: 前提未達 → 判別不能", r["verdict"] == EV.LBL_UNDET)
 
+# E4V (plan §6 E4V、登録 6b5b2cdb): 段 1 が判別不能でも、facts の δ₁ の repr が登録の候補と一致し、run の値も一致するときだけ判定する
+cand = float(EV.E4V_DELTA_CAND_REPR)
+j1u = {"verdict": EV.LBL_UNDET, "reasons": ["前提の未達"], "facts": {"delta1": cand, "delta1_repr": EV.E4V_DELTA_CAND_REPR}}
+r = EV.judge_stage2(series(lambda s: 6.00002), True, [], j1u, cand)
+check("E4V: 段 1 が判別不能・候補一致・全前提成立・目標内 → E4V 合格", r["verdict"] == EV.LBL_PASS_E4V and r["mode"] == "E4V")
+r = EV.judge_stage2(series(lambda s: 6.0003), True, [], j1u, cand)
+check("E4V: 全前提成立で目標外 → E4V 保留", r["verdict"] == EV.LBL_HOLD_E4V)
+r = EV.judge_stage2(series(lambda s: 6.00002), False, ["[P2] 合成"], j1u, cand)
+check("E4V: 前提の未達 → 判別不能", r["verdict"] == EV.LBL_UNDET)
+r = EV.judge_stage2(series(lambda s: 6.00002), True, [], j1u, cand + 1e-12)
+check("E4V: run の値が候補と違う → 判別不能", r["verdict"] == EV.LBL_UNDET)
+j1x = {"verdict": EV.LBL_UNDET, "reasons": ["前提の未達"], "facts": {"delta1": 1e-5, "delta1_repr": "1e-05"}}
+r = EV.judge_stage2(series(lambda s: 6.00002), True, [], j1x, 1e-5)
+check("E4V: 段 1 の δ₁ が登録の候補でない判別不能 → 段 2 は登録外 (判別不能)", r["verdict"] == EV.LBL_UNDET and "登録外" in " ".join(r["reasons"]))
+
 # --- 出口の評価量 ---------------------------------------------------------------------------------------------------------------
 eta_own = np.r_[0.0, np.linspace(0.05, 0.7, 14), 0.8, 0.9, 1.0]
 eta_c = np.array([0.0887581, 0.2, 0.45, 0.6722])
@@ -311,7 +326,7 @@ check(f"結合: 段 1 が -2e-4 で整定 → 前提成立・更新 (δ₁ {j.ge
       and j["delta1"] == EV.DELTA0 - (float(np.mean([flat(5.99980)(s) for s in W])) - 6.0)
       and out["stages"]["d1"]["judgment"]["verdict"] == EV.LBL_NOTRUN)
 check("結合: 出力に評価器の sha256・登録の commit 99431498・η の列・定義・停滞のみの表示",
-      out["evaluator_sha256"] == EV._sha(Path(EV.__file__)) and out["plan_reg_commit"] == "99431498"
+      out["evaluator_sha256"] == EV._sha(Path(EV.__file__)) and out["plan_reg_commit"] == "6b5b2cdb" and out["plan_reg_commit_e4"] == "99431498"
       and out["eta_common"]["n"] == 12 and out["eta_common"]["sha256"] == EV.ETA_COMMON_SHA256
       and "PASS ではない" in out["stages"]["d0"]["convergence"]["label"])
 d1v = j["delta1"]

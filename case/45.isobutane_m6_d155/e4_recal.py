@@ -113,9 +113,11 @@ def make_d1(delta_s: str, eval_json: Path = C / EV.OUT_JSON, case: Path = C) -> 
     """段 1 の評価が「更新」で、その δ₁ の repr が delta_s と同じときだけ、d0 から d1 の問題を作る (name と Md_moc_offset の行だけを書き換える)。"""
     ev = json.loads(Path(eval_json).read_text())
     j1 = ((ev.get("stages") or {}).get("d0") or {}).get("judgment") or {}
-    if j1.get("verdict") != EV.LBL_UPDATE:
-        raise SystemExit(f"段 1 の判定が「更新」でない ({j1.get('verdict')!r}) — 段 2 は登録外。作らない")
-    if j1.get("delta1_repr") != delta_s or float(delta_s) != float(j1.get("delta1")):
+    e4v = (j1.get("verdict") == EV.LBL_UNDET and (j1.get("facts") or {}).get("delta1_repr") == EV.E4V_DELTA_CAND_REPR
+           and delta_s == EV.E4V_DELTA_CAND_REPR)
+    if j1.get("verdict") != EV.LBL_UPDATE and not e4v:
+        raise SystemExit(f"段 1 の判定が「更新」でなく、E4V の登録の候補 ({EV.E4V_DELTA_CAND_REPR}) とも一致しない ({j1.get('verdict')!r}) — 作らない")
+    if not e4v and (j1.get("delta1_repr") != delta_s or float(delta_s) != float(j1.get("delta1"))):
         raise SystemExit(f"--delta {delta_s} が段 1 の δ₁ ({j1.get('delta1_repr')}) と一致しない — 作らない")
     if ev.get("evaluator_sha256") != _sha(C / "e4_recal_eval.py"):
         raise SystemExit("段 1 の評価器の sha256 が今の e4_recal_eval.py と違う — 作らない")
@@ -126,7 +128,7 @@ def make_d1(delta_s: str, eval_json: Path = C / EV.OUT_JSON, case: Path = C) -> 
     if len(i_name) != 1 or len(i_off) != 1:
         raise SystemExit("d0 の name・Md_moc_offset の行が 1 本ずつでない")
     lines[i_name[0]] = "name: isobutane_m6_d155_euler_e4_recal_d1\n"
-    lines[i_off[0]] = (f"  Md_moc_offset: {yaml_float(delta_s)}   # δ₁ = δ₀ − (平均 M_common − 6) (段 1 run_0163 の評価; "
+    lines[i_off[0]] = (f"  Md_moc_offset: {yaml_float(delta_s)}   # {'E4V の候補 δcand (plan §6 E4V、登録 6b5b2cdb); ' if e4v else ''}δ₁ = δ₀ − (平均 M_common − 6) (段 1 run_0163 の評価; "
                        f"評価器 {ev.get('evaluator_sha256', '')[:16]})\n")
     hdr = (f"# plan verification-case45-euler-total-enthalpy §6 E4 段 2 (δ₁): e4_recal.py make-d1 が {EV.PROBLEMS['d0']} から name と\n"
            f"#   geometry.Md_moc_offset だけを書き換えて作った (段 1 の判定 {j1.get('verdict')[:2]}、δ₁ = {delta_s})。\n")

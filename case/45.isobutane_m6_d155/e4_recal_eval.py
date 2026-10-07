@@ -59,7 +59,8 @@ sys.path.insert(0, str(HERE))
 import euler_t0_e2_eval as EV2  # noqa: E402  (全温の主指標・幅の条件・残差の列ごとの内訳・check_quasisteady の読みを流用する)
 
 PLAN = "plans/active/verification-case45-euler-total-enthalpy.md §6 E4"
-PLAN_REG_COMMIT = "99431498"
+PLAN_REG_COMMIT = "6b5b2cdb"                       # E4V の登録 (E4 の登録は 99431498)
+PLAN_REG_COMMIT_E4 = "99431498"
 STAGES = ("d0", "d1")
 RUNS = {"d0": "run_0163_euler_e4_recal_d0", "d1": "run_0164_euler_e4_recal_d1"}
 PROBLEMS = {"d0": "problem_d155_euler_e4_recal_d0.yaml", "d1": "problem_d155_euler_e4_recal_d1.yaml"}
@@ -108,6 +109,11 @@ LBL_PASS2 = "合格: δ₁ の壁で 13 枚すべて |M_common − 6| ≤ 1e-4 �
 LBL_HOLD2 = "保留: δ₁ の壁でも |M_common − 6| ≤ 1e-4 を満たさない — 補正を重ねない (係数 1 の 1 回補正の則を棄却)"
 LBL_UNDET = "判別不能 (前提の未達・保留)"
 LBL_NOTRUN = "未実施"
+# E4V (plan §6 E4V、2026-10-07 登録 6b5b2cdb): 段 1 が判別不能のまま、段 1 の結果から得た候補 δcand を固定して 1 回だけ独立に検証する。
+# 段 2 の run がこの値のときだけ E4V として判定する (段 1 の合格を開始条件にしない)。
+E4V_DELTA_CAND_REPR = "6.8825162455159465e-06"
+LBL_PASS_E4V = "E4V 合格: 候補 δcand の壁で全前提を満たし 13 枚すべて |M_common − 6| ≤ 1e-4 → 今回の実務の較正として δcand を採る (段 1 は判別不能のまま)"
+LBL_HOLD_E4V = "E4V 保留: 候補 δcand の壁で全前提を満たしたが |M_common − 6| ≤ 1e-4 を満たさない — 係数 1 の 1 回の補正で足りる、を退ける"
 SCOPE_NOTE = ("Euler の出口較正 (登録の計算手順・固定の予算 soft 3000 + 本段 54000・窓 42000〜54000) についての判定。停滞のみの NOT CONVERGED は"
               "収束の証明ではない。Euler の較正の合格を NS に移せるとは限らない (配点も粘性も違う) — NS の出口 M は NS で判定する")
 
@@ -309,21 +315,25 @@ def judge_stage1(series: dict, pre_ok: bool, pre_reasons=()) -> dict:
 def judge_stage2(series: dict, pre_ok: bool, pre_reasons, stage1: dict, delta_run) -> dict:
     """段 2 (δ₁)。段 1 が「更新」で、run の Md_moc_offset (delta_run) が段 1 の δ₁ と一致することを要求する。"""
     why = list(pre_reasons)
-    if (stage1 or {}).get("verdict") != LBL_UPDATE:
-        return {"verdict": LBL_UNDET, "reasons": why + [f"段 1 が「更新」でない ({(stage1 or {}).get('verdict')!r}) — 段 2 は登録外"], "facts": {}}
-    if delta_run is None or float(delta_run) != float(stage1["delta1"]):
-        why.append(f"run の Md_moc_offset {delta_run!r} が段 1 の δ₁ {stage1['delta1_repr']} と一致しない")
+    s1v = (stage1 or {}).get("verdict")
+    e4v = (s1v == LBL_UNDET and ((stage1 or {}).get("facts") or {}).get("delta1_repr") == E4V_DELTA_CAND_REPR)
+    if s1v != LBL_UPDATE and not e4v:
+        return {"verdict": LBL_UNDET, "reasons": why + [f"段 1 が「更新」でなく、E4V の登録の候補とも一致しない ({s1v!r}) — 段 2 は登録外"], "facts": {}}
+    target = float(E4V_DELTA_CAND_REPR) if e4v else float(stage1["delta1"])
+    if delta_run is None or float(delta_run) != target:
+        why.append(f"run の Md_moc_offset {delta_run!r} が {'E4V の候補' if e4v else '段 1 の δ₁'} {target!r} と一致しない")
         pre_ok = False
     if _window_values(series) is None:
         return {"verdict": LBL_UNDET, "reasons": why + ["判定窓の M_common が欠ける・非有限"], "facts": {}}
     ok, dev = within_target(series)
     facts = {"abs_dev_by_step": dev, "max_abs_dev": max(dev.values()), "all_within_1e-4": ok,
-             "mean_win13": float(np.mean(_window_values(series))), "delta1": stage1["delta1"]}
+             "mean_win13": float(np.mean(_window_values(series))), "delta1": target, "mode": "E4V" if e4v else "stage2"}
     if not pre_ok:
-        return {"verdict": LBL_UNDET, "reasons": ["前提の未達"] + why, "facts": facts}
+        return {"verdict": LBL_UNDET, "reasons": ["前提の未達"] + why, "facts": facts, "mode": facts["mode"]}
     if ok:
-        return {"verdict": LBL_PASS2, "reasons": [], "facts": facts, "adopted_delta": stage1["delta1"]}
-    return {"verdict": LBL_HOLD2, "reasons": [f"|M_common − 6| の最大 {facts['max_abs_dev']:.3e} > {M_TOL:g}"], "facts": facts}
+        return {"verdict": LBL_PASS_E4V if e4v else LBL_PASS2, "reasons": [], "facts": facts, "adopted_delta": target, "mode": facts["mode"]}
+    return {"verdict": LBL_HOLD_E4V if e4v else LBL_HOLD2, "reasons": [f"|M_common − 6| の最大 {facts['max_abs_dev']:.3e} > {M_TOL:g}"],
+            "facts": facts, "mode": facts["mode"]}
 
 
 # --- 本段の step 数の同期 (実行側 e4_recal.py と共有) ------------------------------------------------------------------------------
@@ -568,7 +578,7 @@ def evaluate_stage(case: Path, stage: str, expected_delta, eta_c, eta_rec) -> di
 
 def evaluate(case: Path) -> dict:
     case = Path(case).resolve()
-    out = {"plan": PLAN, "plan_reg_commit": PLAN_REG_COMMIT, "evaluator": Path(__file__).name, "evaluator_sha256": _sha(Path(__file__)),
+    out = {"plan": PLAN, "plan_reg_commit": PLAN_REG_COMMIT, "plan_reg_commit_e4": PLAN_REG_COMMIT_E4, "e4v_delta_cand": E4V_DELTA_CAND_REPR, "evaluator": Path(__file__).name, "evaluator_sha256": _sha(Path(__file__)),
            "deps_sha256": {**{n: _sha(HERE / n) for n in ("euler_t0_e2_eval.py", "euler_t0_stage_ab.py", "moc_v5c_thermo_ab.py",
                                                          "throat_mono_judge.py", "ic_index_map.py")},
                            **{n: _sha(TOOLS / n) for n in ("check_quasisteady.py", "check_convergence.py", "forge_species.py")},
@@ -613,6 +623,9 @@ def evaluate(case: Path) -> dict:
         final = {"status": "据え置き", "Md_moc_offset": DELTA0, "reference_run": RUNS["d0"]}
     elif v1 == LBL_UPDATE and v2 == LBL_PASS2:
         final = {"status": "更新して合格", "Md_moc_offset": st["d0"]["judgment"]["delta1"], "reference_run": RUNS["d1"]}
+    elif v1 == LBL_UNDET and v2 == LBL_PASS_E4V:
+        final = {"status": "E4V 合格 (独立の検証。段 1 は判別不能のまま)", "Md_moc_offset": float(E4V_DELTA_CAND_REPR),
+                 "Md_moc_offset_repr": E4V_DELTA_CAND_REPR, "reference_run": RUNS["d1"]}
     elif v1 == LBL_UPDATE and v2 == LBL_NOTRUN:
         final = {"status": "段 2 待ち", "delta1": st["d0"]["judgment"]["delta1"], "delta1_repr": st["d0"]["judgment"]["delta1_repr"]}
     else:
