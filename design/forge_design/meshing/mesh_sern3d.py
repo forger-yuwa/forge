@@ -82,6 +82,12 @@ class SernMesh3DParams:
     wall_frac_blend_len: float = 0.5   # ブレンドの**物理長** /H。格子間隔から決めない
     first_z_frac: float = 4.0e-3
     interface_angle: float = 0.0
+    # 後縁下流の中間線の局所変形 (plan convection-zero-thickness-edge-reconstruction §4.2、codex diagnose 2026-10-08 te-grid-kink)。
+    # 長さ L_b / H。x ∈ (L_cowl, L_cowl + L_b] の中間線を 3 次 Hermite に置き換える: 後縁で**下側壁面 (cowl_out) の接線**で出て、
+    # L_cowl + L_b で旧中間線 (後縁から `interface_angle` の直線) の**位置と勾配の両方**に戻る。旧格子は壁法線の層が後縁で
+    # 約 36° 折れていた (下側壁面 −4.4° → 中間線 θ_b −40.2°)。x・z 配列・接続・節点数・上流形状・板厚・外部境界
+    # (`y_bot` は旧中間線の x_out の値) は変えない。**0 = 無効 (既定・旧格子とビット一致)**
+    te_wake_blend_H: float = 0.0
     top_ext_angle: float = 0.0
     scale: float = 1.0
     cowl_thickness: float = 0.0  # カウル板厚 /H (0 = 厚さ 0 のスリット)。2D と同じ x 分布で TE に向け 0 に絞る。
@@ -171,6 +177,13 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
         if np.any(dd <= 0.0) or np.max(np.maximum(dd / dd0, dd0 / dd)) > L_SW_EXACT_MAX_RATIO:
             raise ValueError(f"L_sw_exact: 写像で間隔比が {np.max(np.maximum(dd / dd0, dd0 / dd)):.3f} (上限 {L_SW_EXACT_MAX_RATIO})")
         xs = xs_new
+    # カウル板厚 (2D の `cowl_thickness` と同じ法則): 入口から 0.8 L_cowl まで t、TE で 0。
+    # 厚さ 0 のスリットは node で双子ノードになり、2D では m6_on/m10_on とも発散した (case/46 run_0035)。
+    # 板は z <= W/2 にしか無いので、内側 (k <= k_sw) だけ ym±t/2 に割り、外側は単一の ym にする。
+    # (後縁の下側壁面の接線 = 後縁下流の中間線の局所変形の始点の勾配に要るので、中間線より先に作る)
+    t_c = float(prm.cowl_thickness)
+    tk = (np.interp(xs, [-prm.L_up, 0.8 * L_cowl, L_cowl], [t_c, t_c, 0.0], left=t_c, right=0.0)
+          if t_c > 0.0 else np.zeros_like(xs))
 
     def y_top(x):
         x = np.asarray(x, dtype=float)
@@ -181,11 +194,19 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
             y = np.where((x >= xf1) & (x <= xf2), np.maximum(y, arc), y)
         return y
 
-    def y_mid(x):
+    def y_mid_line(x):
+        """旧中間線 (上流 = カウル平均線、下流 = 後縁から `interface_angle` の直線)。"""
         x = np.asarray(x, dtype=float)
         return np.where(x < 0.0, 0.0, np.where(x <= L_cowl, -x * tan_c, y_te + (x - L_cowl) * np.tan(prm.interface_angle)))
-    y_bot = float(y_mid(x_out)) - prm.bot_depth
+    # 外部領域の下端は**旧中間線**の x_out の値で決める (後縁下流の局所変形では動かさない。plan §4.2)
+    y_bot = float(y_mid_line(x_out)) - prm.bot_depth
+    y_mid, te_wake = _te_wake_midline(y_mid_line, xs, tk, i_te, L_cowl, y_te, x_out, prm)
     yt, ym = y_top(xs), y_mid(xs)
+    if te_wake:
+        _iw = np.arange(te_wake["te_wake_i_first"], te_wake["te_wake_i_last"] + 1)
+        if np.any(ym[_iw] >= yt[_iw]) or np.any(ym[_iw] <= y_bot):
+            raise ValueError("mesh_sern3d: te_wake_blend_H の中間線が上線 (ランプ/プルーム線) か下端を越える")
+        te_wake["te_wake_max_dy"] = float(np.max(np.abs(ym[_iw] - y_mid_line(xs[_iw]))))
     ni, njt, njb = len(xs), prm.nj_top, prm.nj_bot
     NJ = njb + njt - 1; jm = njb - 1
     # z 分布: [0, W/2] は側壁側 (z=W/2) にクラスタ、(W/2, Z_far] は側壁側にクラスタ
@@ -205,12 +226,7 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
     nz = len(zs); k_sw = prm.nz_in - 1
     no_outer = prm.nz_out == 0
     # --- 2D 断面 (各 station の y 列) ---
-    # カウル板厚 (2D の `cowl_thickness` と同じ法則): 入口から 0.8 L_cowl まで t、TE で 0。
-    # 厚さ 0 のスリットは node で双子ノードになり、2D では m6_on/m10_on とも発散した (case/46 run_0035)。
-    # 板は z <= W/2 にしか無いので、内側 (k <= k_sw) だけ ym±t/2 に割り、外側は単一の ym にする。
-    t_c = float(prm.cowl_thickness)
-    tk = (np.interp(xs, [-prm.L_up, 0.8 * L_cowl, L_cowl], [t_c, t_c, 0.0], left=t_c, right=0.0)
-          if t_c > 0.0 else np.zeros_like(xs))
+    # (カウル板厚 t_c・tk は中間線より先に作ってある)
     Y2 = np.zeros((ni, NJ))       # 板の外側 (z > W/2) 用: 中間線は単一
     Yin = np.zeros((ni, NJ))      # 板の内側 (z <= W/2) 用: 中間線は ym ± t/2
     # --- 壁第 1 層の x ブレンド (plan sern-3d §4.41) ---
@@ -396,8 +412,64 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
             "first_wall_frac_far": float(_ff), "wall_frac_blend_len": float(_bl),
             "nodes": int(coords.shape[0]), "W": prm.W, "Z_far": float(zs[-1]), "L_sw": L_sw, "cowl_thickness": t_c, "x_out": x_out, "y_bot": y_bot,
             "L_cowl": L_cowl, "L_ramp": L_ramp, "n_dup_cowl": len(dup1), "n_dup_side": len(dup2),
-            "W_vehicle": prm.W_vehicle, "n_vehicle_faces": len(B["vehicle"]), "ramp_fillet": R_f, **ext}
+            "W_vehicle": prm.W_vehicle, "n_vehicle_faces": len(B["vehicle"]), "ramp_fillet": R_f,
+            "te_wake_blend_H": float(prm.te_wake_blend_H), **te_wake, **ext}
     return coords, hexes, B, info, y_mid
+
+
+def _te_wake_midline(y_mid_line, xs, tk, i_te, L_cowl, y_te, x_out, prm):
+    """後縁下流の中間線の局所変形 (plan convection-zero-thickness-edge-reconstruction §4.2)。戻り = (y_mid, info)。
+
+    無効 (`te_wake_blend_H` = 0) なら旧中間線そのもの (同じ関数) と空の info を返す = 旧格子とビット一致。
+    有効なら x ∈ (L_cowl, L_cowl + L_b) を 3 次 Hermite に置き換える (端点 L_cowl + L_b は旧中間線と同じ値):
+
+        y(t) = y_te + L_b·( m0·t(1 − t)² + m1·t²(2 − t) ),  t = (x − L_cowl)/L_b
+
+    t = 0 で位置 y_te・勾配 m0、t = 1 で位置 y_te + L_b·m1 (= 旧中間線)・勾配 m1 = tan(interface_angle)。
+    m0 は**下側壁面 (cowl_out) の後縁での接線**で、座標の組み立てと同じ式で求めた z = 0 (板の内側、板厚の z 方向の絞り
+    sz = 1) の下側壁面の節点 2 つ (i_te − 1, i_te) の傾き = 実際の最後の上流の辺の傾き。上側壁面 (cowl_in) は板厚の分だけ
+    別の傾き (g3 で約 −5.6°、下側は約 −4.4°) なので使わない。側壁へ向けて板厚を絞る最後の 2 セルと板の外 (z > W/2) は
+    上流の辺が平均線 (−tan_c) と m0 の間になる (中間線は z によらず 1 本)。
+
+    注意: 終端で位置も旧中間線に戻すので、Hermite の勾配は途中 (t = 2/3) で (4 m1 − m0)/3 まで旧より急になる
+    (θ_b −40.2°・m0 −4.4° で約 −47.8°)。実際の最初の下流の辺の向きは解析曲線の接線でなく最初の station 間の弦で決まる
+    (弦の傾き = m0 + (m1 − m0)(2t₁ − t₁²)、t₁ = 最初の間隔 / L_b) ので、投入前に実際の辺を測ること
+    (`case/46.sern_design/diag/te_wake_grid_check.py`)。"""
+    L_b = float(prm.te_wake_blend_H)
+    if L_b < 0.0:
+        raise ValueError(f"mesh_sern3d: te_wake_blend_H は 0 以上 ({L_b})")
+    if L_b == 0.0:
+        return y_mid_line, {}
+    x1 = L_cowl + L_b
+    if not (x1 < x_out):
+        raise ValueError(f"mesh_sern3d: te_wake_blend_H {L_b} の終端 {x1} が出口 x_out {x_out} に届く (外部領域の下端が動く)")
+    inner = np.where((xs > L_cowl) & (xs < x1))[0]
+    if inner.size == 0:
+        raise ValueError(f"mesh_sern3d: te_wake_blend_H {L_b} の区間 ({L_cowl}, {x1}) に station が無い (変形が効かない)")
+    if i_te < 1:
+        raise ValueError("mesh_sern3d: te_wake_blend_H は後縁より上流に station が要る")
+
+    def _y_lower_k0(i):
+        """下側壁面の節点 base(i, jm, k=0) の y。座標の組み立て (generate_sern_mesh3d の coords) と同じ式:
+        Y2[i, jm] (= ym) + (Yin[i, jm] − Y2[i, jm])·_szw[i, 0]、Yin[i, jm] = ym − tk/2、_szw = 0 (閉じた列) / sz[0] = 1。"""
+        y = float(y_mid_line(xs[i]))
+        if float(prm.cowl_thickness) > 0.0 and tk[i] > 0.0:
+            h = 0.5 * tk[i]
+            szw = 0.0 if h < 1.0e-5 * max(1.0, abs(y)) else 1.0
+            y = y + ((y - h) - y) * szw
+        return y
+    m0 = float((_y_lower_k0(i_te) - _y_lower_k0(i_te - 1)) / (xs[i_te] - xs[i_te - 1]))
+    m1 = float(np.tan(prm.interface_angle))
+
+    def y_mid(x):
+        x = np.asarray(x, dtype=float)
+        t = (x - L_cowl) / L_b
+        h = y_te + L_b * (m0 * t * (1.0 - t) ** 2 + m1 * t * t * (2.0 - t))
+        return np.where((x > L_cowl) & (x < x1), h, y_mid_line(x))
+    info = {"te_wake_x_end": float(x1), "te_wake_slope_te_deg": float(np.degrees(np.arctan(m0))),
+            "te_wake_slope_end_deg": float(np.degrees(np.arctan(m1))), "te_wake_n_stations": int(inner.size),
+            "te_wake_i_first": int(inner[0]), "te_wake_i_last": int(inner[-1])}
+    return y_mid, info
 
 
 def _vehicle_top_line(xs, yt, L_ramp, y_e, prm):
