@@ -189,22 +189,26 @@
 
 ### 6.4 メモリの置き場所と計測 (`FORGE_MEMLOG`)
 
-GPU 経路 (`gpu: 1`) でも、`variables::allocVariables` (`variables.cpp`) は登録された**全セル変数・全面変数**をホストにも
-`nCells_all` / `nPlanes` 長で確保し、同じ長さをデバイスに `cudaMalloc` する。格子の構造体 (`mesh` の `nodes`・`planes`・`cells`、
-要素ごとに内側の `vector` を持つ) と、使っていない行列 `mat_ns` (`initMatrix`) も
-初期化の後までホストに残っていた (2026-10-07 から `gpu: 1` では `mat_ns` とホストの面変数 `p` を確保せず、ホストのセル変数 `c` は**ホストで読み書きする名前 H だけ**を確保する。
-H は `output/outputFieldNames.cpp` の `hostCellSet` が、出力・`h0` の依存・dual-time の checkpoint・初期場の読込・ホストで読む診断・`lineImplicit` から作り、
-出力側も同じ関数で名前を決める。H に無いセル変数はホストでは長さ 0 で、ホストから触ると `variables::hostCell` が変数名つきで停止する。
-起動ログに `[variables] host cell arrays (gpu: 1): N of M registered` が出る)。2026-10-07 の計測 (生産 SERN 3D と同じ設定: node・SST・2 成分・陰解法 block-DPLUR、
-`notes/investigations/2026-10-07-forge-memlog/`) では、ホストの常駐は約 2.6 kB/節点で、内訳は
-ホストの `c` 約 960 B (223 本)、`planes` 約 700 B、`mat_ns` 約 310 B、`cells` 約 250 B、ホストの `p` 約 195 B (16 本)、`nodes` 約 100 B。
-GPU は約 1.4 kB/節点 (`c_d` 223 本で約 960 B、`p_d` 約 195 B、格子マップ約 94 B ほか) + 定数。
-ホストのピーク (VmHWM) は初期化の終わり (`setStructuralVariables`) で、常駐 + 約 150 MB。
+**現在の仕様 (2026-10-07 から)**: GPU 経路 (`gpu: 1`) では、`variables::allocVariables` (`variables.cpp`) は登録された全セル変数・全面変数をデバイスに
+`nCells_all` / `nPlanes` 長で `cudaMalloc` する。ホスト側は、セル変数 `c` のうち**ホストで読み書きする名前 H だけ**を `nCells_all` 長・0 初期化で確保し、
+面変数 `p` と、使っていない行列 `mat_ns` は確保しない (起動ログ "Init Matrix: skipped"、`[variables] host cell arrays (gpu: 1): N of M registered`)。
+H は `output/outputFieldNames.cpp` の `hostCellSet` が、出力 (`output.level`・`extraFields`・`h0` の依存 `Ht`/`k`)・dual-time の checkpoint 履歴・初期場の読込・
+ホストで読む診断 (`FORGE_IMPLICIT_DIAG_CSV`・`FORGE_PIN_DIAG`)・`lineImplicit` から作り、出力側も同じ関数で名前を決める。H に無いセル変数はホストでは長さ 0 で、
+ホストから触ると `variables::hostCell` が変数名つきで停止する。初期化は「変数・診断の登録 → 出力と checkpoint の依存名の確定 → H の構築 → 確保」の順。
+`gpu: 0` (CPU 経路) は全変数をホストにも確保する。格子の構造体 (`mesh` の `nodes`・`planes`・`cells`) は初期化の後もホストに残る。
 
-`FORGE_MEMLOG=1` を付けて起動すると、変換器 (`convertGmshToForge`) と本体の工程の境目で `/proc/self/status` の VmRSS/VmHWM、
-主要コンテナの推定バイト、`cudaMemGetInfo` を `[memlog]` 行として出す (`mesh/memlog.hpp`、`main.cpp` の `MEMLOG_SOLVER`)。
-既定 (未設定) では何も出さず、計算にも触れない。ホストに置く量を減らす変更は
-[`plans/active/architecture-solver-host-memory.md`](../../plans/active/architecture-solver-host-memory.md) で進める。
+**計測値 (生産 SERN 3D と同じ設定: node・SST・2 成分・陰解法 block-DPLUR、level 1)**: SERN g3 (192 万節点) でホストのピーク VmHWM 2630 MiB (切片込みの単点で 1436 B/節点)、
+縮小格子 2 点の傾き 1371 B/節点。ピークは `setStructuralVariables` の時点と `readMesh` の末尾がほぼ並ぶ。GPU は約 1.4 kB/節点 + 定数 (変更で不変)。
+**level 2 では H が大きくなり** (出力名の大半が H に入る)、ホストの削減は小さい。
+原本: `case/66.hostmem_regression/results/2026-10-07_base9c9f623c_vs_new93e55957/sern_g3_memlog.txt`、`notes/investigations/2026-10-07-host-memory-local-evidence/`。
+
+**変更前 (2026-10-06 まで) の測定**: 全セル変数・全面変数をホストにも確保し、`mat_ns` も作っていた。ホストの常駐は約 2.6 kB/節点
+(ホストの `c` 約 960 B [223 本]、`planes` 約 700 B、`mat_ns` 約 310 B、`cells` 約 250 B、ホストの `p` 約 195 B、`nodes` 約 100 B)、ピークは常駐 + 約 150 MB
+(`setStructuralVariables` の作業配列、面数・セル数に比例)。g3 でホスト VmHWM 5157 MiB。原本 `notes/investigations/2026-10-07-forge-memlog/`。
+
+`FORGE_MEMLOG=1` を付けて起動すると、変換器 (`convertGmshToForge`) と本体の工程の境目で `/proc/self/status` の VmRSS/VmHWM、主要コンテナの推定バイト、
+`cudaMemGetInfo` を `[memlog]` 行として出す (`mesh/memlog.hpp`、`main.cpp` の `MEMLOG_SOLVER`)。既定 (未設定) では何も出さず、計算にも触れない。
+経緯と検証は [`plans/active/architecture-solver-host-memory.md`](../../plans/active/architecture-solver-host-memory.md)。
 
 ## 7. 設定ファイルの読み方
 
