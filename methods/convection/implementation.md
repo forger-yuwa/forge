@@ -61,6 +61,16 @@ limiter = (duc > 0.8) ? max(0.0, (1.0 - duc) * limiter) : limiter;
 
 を適用する (Ducros 値が高い、すなわち圧縮性ショック近傍で再構成を抑制)。
 
+### 厚さ 0 の板の自由端の近傍で速度の再構成をセル値にする (opt-in、2026-10-08 計画中)
+
+厚さ 0 の板 (上下の壁面が**同じ節点 ID の辺を共有する自由端**: SERN のカウル後縁の線と露出した側端) の近傍では、温度差の大きい 2 流れが 1 本の節点列で接する。
+node + SLAU の 2 次再構成で、後流側の面の速度の外挿 (例: セル 10 m/s → 再構成 1333 m/s) が高い全エンタルピーを運び出し、端の近くの内部節点を非物理に冷やすことが観測された
+(SERN m6_on で 95–105 K、m10_on で温度床 50 K に到達。診断の記録は `plans/active/tooling-nozzle-sern-3d.md` §4.35・§5.1 R5h)。
+**計画中の扱い** ([`plans/active/convection-zero-thickness-edge-reconstruction.md`](../../plans/active/convection-zero-thickness-edge-reconstruction.md)):
+自由端の節点集合 E から内部面の接続で距離 2 以下の節点集合 $S_2$ を作り、$S_2$ の節点に接する内部面で**その節点側の速度 3 成分だけ**再構成をセル値に戻す
+(相手も $S_2$ なら両側)。勾配配列・粘性・壁 BC・密度/圧力/組成の再構成は変えない。速度二乗・面エンタルピー・質量流束を計算する前に適用し、面流束は両節点へ逆符号で加算する。
+明示 opt-in (node + SLAU のみ)、対象が空なら旧経路 (ビット不変)。**まだ実装していない** — 判別試験の結果で設計を決める。
+
 ### 多成分 TP の face 組成整合 (`speciesFaceReconstruction`)
 
 `convectiveFlux_d.cu` の `thermalMethod==2` (TP) 分岐で、face thermo ($R_\mathrm{mix}, T, h$) に使う
