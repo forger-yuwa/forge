@@ -521,15 +521,17 @@ with tempfile.TemporaryDirectory() as tmp:
 # verify-set の r_t (3 条件で同じ・指定値と一致・問題の記録と一致)。乾式の印つきの模擬 run で (forge・変換器は使わない)
 
 
-def fake_prep(root, name, cond, scale):
+def fake_prep(root, name, cond, scale, gate_pass=True):
     d = Path(root) / name
     d.mkdir(parents=True)
     sp = MK.SPEC[cond]
+    conv = sp["moc_corrector"] == "converge"
+    gate = {"applicable": conv, "pass": (gate_pass if conv else None), "reasons": ([] if gate_pass or not conv else ["反復の失敗 1 対"])}
     (d / NS.RECORD).write_text(json.dumps({"condition": cond, "role": "dry", "dry": True, "ic": {"src_run": "x"}, "stages": "full",
                                             "main_steps": 80000, "out_interval": 5000, "cfl_main": 1.0, "implicit_relax": 0.7,
                                             "k_f": 1.05, "md_offset": MD}))
     (d / "prepare_info.json").write_text(json.dumps({"DRY": True, "pw_upstream": {"value": sp["pw_upstream"]},
-                                                     "moc": {"axis_limit": sp["moc_axis_limit"], "corrector": sp["moc_corrector"]},
+                                                     "moc": {"axis_limit": sp["moc_axis_limit"], "corrector": sp["moc_corrector"], "gate": gate},
                                                      "Md_moc_offset": MD, "scale_m": scale, "initializer": {"cf_scale": 1.05},
                                                      "mesh": {"ni": 2000, "nj": 97}}))
     (d / NS.IC_CHECK).write_text(json.dumps({"VERDICT": "OK"}))
@@ -538,9 +540,9 @@ def fake_prep(root, name, cond, scale):
     return d
 
 
-def vset(scales, rt_arg, rec_rt_val):
+def vset(scales, rt_arg, rec_rt_val, gate_pass=True):
     with tempfile.TemporaryDirectory() as tmp:
-        runs = [fake_prep(tmp, f"run_990{i}_x", c, sc) for i, (c, sc) in enumerate(zip(MK.CONDS, scales))]
+        runs = [fake_prep(tmp, f"run_990{i}_x", c, sc, gate_pass) for i, (c, sc) in enumerate(zip(MK.CONDS, scales))]
         recp = Path(tmp) / "rec.json"
         recp.write_text(json.dumps({"r_throat": rec_rt_val, "base_r_throat": 0.0766539}))
         return NS.verify_set(runs, repr(MD), True, Path(tmp) / "out.json", rt_arg, recp)
@@ -552,6 +554,7 @@ check("verify-set: 1 本だけ r_t が違う → NG", vset([RT, RT, 0.0767], rep
 check("verify-set: 3 本同じだが指定値と違う → NG", vset([0.0767] * 3, repr(RT), RT)["VERDICT"] == "NG")
 check("verify-set: 問題の記録の r_t が指定値と違う → NG", vset([RT] * 3, repr(RT), None)["VERDICT"] == "NG")
 check("verify-set: r_t 省略なのに 3 本が元の r_t でない → NG", vset([RT] * 3, None, None)["VERDICT"] == "NG")
+check("verify-set: N2 (converge) の MOC のゲートが不合格 → NG (2026-10-07 result 段レビュー M1)", vset([RT] * 3, repr(RT), RT, gate_pass=False)["VERDICT"] == "NG")
 
 # 評価器の前提の r_t
 with tempfile.TemporaryDirectory() as tmp:

@@ -688,7 +688,7 @@ case/45 の生産問題 n_axis 2400・n_start 41 でも 298 万対中 0 回、20
 
 **軸上の解析極限と予測修正の収束 (選択式、2026-10-07)**: 問題 YAML の 2 キーで単位過程を選ぶ
 (`InverseMOC` / `moc_kernel.interior_vec`。キーが無ければ従来とビット同一。計画
-[discretization-moc-axis-limit-and-corrector](../../plans/active/discretization-moc-axis-limit-and-corrector.md))。
+[discretization-moc-axis-limit-and-corrector](../../plans/accepted/discretization-moc-axis-limit-and-corrector.md))。
 
 | キー | 値 | 意味 |
 | --- | --- | --- |
@@ -696,6 +696,8 @@ case/45 の生産問題 n_axis 2400・n_start 41 でも 298 万対中 0 回、20
 | `geometry.moc_corrector` | `fixed2` (既定) / `converge` | 予測 1 回 + 修正 2 回 / θ・ν の更新量 $\le10^{-12}$ rad まで (上限 50 回) |
 
 不正値 (null・大文字違い・前後の空白・数値・真偽値) は既定に読み替えず例外にする。
+
+`converge` の単位過程のゲート (反復の失敗・最終残差・壁の内側の幾何的棄却・軸端の接続) は設計チェーン (`design_chain`) では止めずに診断に記録し、**計算準備 (`prepare`・`prepare_ns`) の入口で合格を必須にする** (`require_moc_gate`。不合格・診断の欠損は run dir を作る前に例外。`fixed2` は合否を出さないので通す。2026-10-07)。
 
 - **解析極限**: 軸の近くで $\theta\approx\theta_r r$。軸近傍の質量保存 $2\rho u\,\theta_r=-d(\rho u)/dx$ と、
   等エントロピー流の $d\nu=\sqrt{M^2-1}\,d\ln u$・$d\ln(\rho u)=(1-M^2)\,d\ln u$ から
@@ -1000,7 +1002,7 @@ MOC カーネル (`pm_nu`/`pm_mach`/`_mass_flux_density`/`area_ratio_isentropic`
 RANS 軸 M の law 側帰還 / 粘性の出口一様性 (BL 除外) 評価 / 出口 $\varepsilon_M$ の差の原因究明 / MOC の 2 次精度化 (軸上の解析極限
 $\partial\theta/\partial r|_{r=0}=-\frac12 d\ln F/dx$・適合式の Simpson 化・軸点の非一様配置) /
 `AXIS_LIMIT_FRAC` のしきい値不要化。
-軸上の解析極限と予測修正の収束は plan [discretization-moc-axis-limit-and-corrector](../../plans/active/discretization-moc-axis-limit-and-corrector.md) で選択式として実装した (2026-10-07、上の「軸上の解析極限と予測修正の収束」。既定は従来のまま)。
+軸上の解析極限と予測修正の収束は plan [discretization-moc-axis-limit-and-corrector](../../plans/accepted/discretization-moc-axis-limit-and-corrector.md) で選択式として実装した (2026-10-07、上の「軸上の解析極限と予測修正の収束」。既定は従来のまま)。
 なお **ΔM の支配残差 (x≈6.2 の谷) は壁の抽出法に依存しない** ため、
 これ以上は逆 MOC ではなくアンカー/軸 Mach law 側の課題。
 

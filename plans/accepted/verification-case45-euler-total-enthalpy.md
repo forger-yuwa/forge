@@ -8,7 +8,7 @@
   - `procedures/solver-settings.md` (Euler・node・SLAU・block-DPLUR の設定)
   - `solver_density_cuda/tools/total_quantities.py` (全温・全圧の求め方)
 - **related_plans**:
-  - [discretization-moc-axis-limit-and-corrector.md](../active/discretization-moc-axis-limit-and-corrector.md) (V5・V5b・V5c でこの異常が見つかった。MOC の生産採用の判断は本 plan の切り分けを待つ)
+  - [discretization-moc-axis-limit-and-corrector.md](discretization-moc-axis-limit-and-corrector.md) (V5・V5b・V5c でこの異常が見つかった。MOC の生産採用の判断は本 plan の切り分けを待つ)
   - [tooling-nozzle-throat-monotone-r2.md](../accepted/tooling-nozzle-throat-monotone-r2.md) (単調壁の採用の E′ も同じ種類の Euler の比較)
 - **created**: `2026-10-07`
 - **owner**: `Claude (Opus 5.5)`

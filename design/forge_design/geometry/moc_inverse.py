@@ -53,7 +53,7 @@ def _mass_flux_density(M, g):
 
 
 class MocFillDiag:
-    r"""充填 1 回分の単位過程の集計 (plans/active/discretization-moc-axis-limit-and-corrector.md §4.2)。
+    r"""充填 1 回分の単位過程の集計 (plans/accepted/discretization-moc-axis-limit-and-corrector.md §4.2)。
 
     対の 5 分類: 入力時点の対象 (`input`) = もともとの欠損 (`missing`) + 幾何的棄却 (`geom_parallel`・
     `geom_below_axis`) + 反復の失敗 (`iter_nonfinite`・`iter_maxiter`) + 収束 (`converged`、fixed2 は
@@ -168,7 +168,7 @@ class InverseMOC(KernelMOC):
     """軸 Cauchy データからの三角充填と壁流線抽出。
 
     `axis_limit` / `corrector` は `moc_kernel.interior_vec` の選択肢 (既定 legacy + fixed2 = 従来とビット同一。
-    plans/active/discretization-moc-axis-limit-and-corrector.md)。充填のたびに対の集計を `last_diag` に置く。"""
+    plans/accepted/discretization-moc-axis-limit-and-corrector.md)。充填のたびに対の集計を `last_diag` に置く。"""
 
     def __init__(self, gamma=1.4, delta=1.0, n_corr=2, axis_limit: str = "legacy",
                  corrector: str = "fixed2", tol: float = CORR_TOL, max_corr: int = CORR_MAX):
@@ -681,7 +681,7 @@ CONN_TOL = 1e-9
 
 def axis_theta_r_init(init, n_ax: int, target, g, target_dM=None, axis_anchor=None,
                       M_line_axis: float | None = None):
-    r"""初期前線の軸端点の解析極限 $\theta_r$ (plans/active/discretization-moc-axis-limit-and-corrector.md §4.1)。
+    r"""初期前線の軸端点の解析極限 $\theta_r$ (plans/accepted/discretization-moc-axis-limit-and-corrector.md §4.1)。
 
     - 軸節点 `init[:n_ax]` ($r=0$): $M$ = `target(x)`、$M'$ = `target_dM(x)` (軸則の解析微分) →
       $\theta_r=\frac12\sqrt{M^2-1}\,\nu_M(M)M'$ (`moc_kernel.axis_theta_r`)。
@@ -814,7 +814,7 @@ def inverse_design(throat, target, x_axis_end: float, n_axis: int = 260,
     x_axis_end: 軸目標の下流端 (壁端の C⁻ 足より下流まで — 一様出口なら
     M_d 一定を伸ばすだけ)。
     axis_limit / corrector: 単位過程の選択肢 (`moc_kernel.interior_vec`。既定 legacy + fixed2 は従来とビット同一。
-    plans/active/discretization-moc-axis-limit-and-corrector.md)。`analytic` では軸端点の θ_r を
+    plans/accepted/discretization-moc-axis-limit-and-corrector.md)。`analytic` では軸端点の θ_r を
     `axis_theta_r_init` で作る — `target_dM` (軸則の dM/dx。無ければ ν の 3 次スプライン微分で代用) と
     `axis_anchor` = (x_A, M_A, M′_A) (初期線の軸端が x_A にあるとき、その θ_r に使う)。
     戻り値 dict: wall (n,4 [x,r,θ,M]), pts, mdot_start, mdot_exit, moc (単位過程の集計・θ_r の出所・ゲート)。

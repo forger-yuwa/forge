@@ -9,7 +9,7 @@
   - `procedures/nozzle-design-workflow.md` (寸法の決め方、`pw_ramp`)
 - **related_plans**:
   - [tooling-nozzle-wall-single-bspline.md](tooling-nozzle-wall-single-bspline.md) (物理壁の表現。本 plan の上流多項式ではランプの当てはめが消え、全域が厳密になる)
-  - [discretization-moc-axis-limit-and-corrector.md](../active/discretization-moc-axis-limit-and-corrector.md) (設計壁の変更。本 plan は設計壁を変えない)
+  - [discretization-moc-axis-limit-and-corrector.md](discretization-moc-axis-limit-and-corrector.md) (設計壁の変更。本 plan は設計壁を変えない)
   - [tooling-nozzle-throat-monotone-r2.md](../accepted/tooling-nozzle-throat-monotone-r2.md) (現行の生産壁)
 - **created**: `2026-10-07`
 - **owner**: `Claude (Opus 5.5)`

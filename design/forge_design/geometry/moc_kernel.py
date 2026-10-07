@@ -91,7 +91,7 @@ def dnu_dM(M, g=1.4, order: int = 1):
 def axis_theta_r(M, Mp, g=1.4):
     r"""軸上の解析極限 $\theta_r=\lim_{r\to0}\sin\theta/r=\partial\theta/\partial r|_{r=0}$。
 
-    計画: plans/active/discretization-moc-axis-limit-and-corrector.md §3・§4.1。
+    計画: plans/accepted/discretization-moc-axis-limit-and-corrector.md §3・§4.1。
     軸近傍の質量保存 $2\rho u\,\theta_r=-d(\rho u)/dx$ と、等エントロピー流の
     $d\nu=\sqrt{M^2-1}\,d\ln u$・$d\ln(\rho u)=(1-M^2)\,d\ln u$ から
 
@@ -149,7 +149,7 @@ def _sin_over_r(p: "_Pt", other: "_Pt"):
     (ここが残る 1 次要因。連続の式から $\partial\theta/\partial r|_{r=0}
     = -\frac12 d\ln F(M_{\rm axis})/dx$ を与えれば除ける)。
     逆 MOC の配列版 (`interior_vec`) には `axis_limit="analytic"` でこの解析極限
-    (`axis_theta_r`) を入れた (2026-10-07, plans/active/discretization-moc-axis-limit-and-corrector.md)。
+    (`axis_theta_r`) を入れた (2026-10-07, plans/accepted/discretization-moc-axis-limit-and-corrector.md)。
     本スカラー版 (kernel マーチ `KernelMOC` 専用) は従来のまま。
     """
     if p.r > 1e-9 and p.r >= AXIS_LIMIT_FRAC * other.r:
@@ -434,7 +434,7 @@ def _sin_over_r_vec(r_p, th_p, r_o, th_o):
 
 
 # --- 軸上の解析極限と予測修正の収束 (2026-10-07) ---------------------------------
-# 計画: plans/active/discretization-moc-axis-limit-and-corrector.md §4.1・§4.2。
+# 計画: plans/accepted/discretization-moc-axis-limit-and-corrector.md §4.1・§4.2。
 # 問題 YAML の geometry.moc_axis_limit / geometry.moc_corrector で選ぶ。既定 (legacy + fixed2) は従来とビット同一。
 AXIS_R_EPS = 1e-9            # 軸上の判定 r ≤ これ (`_sin_over_r_vec` と同じ値)
 AXIS_LIMIT_MODES = ("legacy", "analytic")
@@ -571,7 +571,7 @@ def interior_vec(Ax, Ar, Ath, Anu, AM, Bx, Br, Bth, Bnu, BM,
     スカラー版と同一の予測子-修正子・同一の係数平均・同一の軸対称源項評価。
     戻り: (xP, rP, thP, nuP, ok) — ok=False は特性線が平行/非有限 (converge では未収束も) で棄却すべき対。
 
-    **選択肢** (plans/active/discretization-moc-axis-limit-and-corrector.md §4。既定はビット同一):
+    **選択肢** (plans/accepted/discretization-moc-axis-limit-and-corrector.md §4。既定はビット同一):
 
     - `axis_limit`: `"legacy"` = 真の軸端点の $\sin\theta/r$ は相手の値で代用 (相手も軸上なら 0) /
       `"analytic"` = その点の解析極限 $\theta_r$ (`thrA`・`thrB`、対ごと。軸外の点は NaN でよい)。

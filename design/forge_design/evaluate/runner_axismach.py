@@ -235,7 +235,7 @@ _MOC_KEYS = {"moc_axis_limit": ("legacy", "analytic"), "moc_corrector": ("fixed2
 
 
 def _moc_keys(geometry: dict) -> tuple:
-    """geometry.moc_axis_limit / geometry.moc_corrector を読む (plans/active/discretization-moc-axis-limit-and-corrector.md
+    """geometry.moc_axis_limit / geometry.moc_corrector を読む (plans/accepted/discretization-moc-axis-limit-and-corrector.md
     §4.3)。キーが無ければ既定 (legacy, fixed2)。値は文字列で選択肢のどれかに完全一致すること — null・大文字違い・
     前後の空白・数値・真偽値は既定に読み替えず例外にする (黙って既定で設計しない)。"""
     out = []
@@ -313,6 +313,24 @@ def _sizing_spec(spec: dict) -> dict | None:
     if isinstance(t, bool) or not isinstance(t, (int, float)) or not np.isfinite(float(t)) or float(t) <= 0.0:
         raise ValueError(f"spec.sizing.target_m は正の有限の数値 [m] (受け取った値: {t!r})")
     return {"method": s["method"], "target_m": float(t), "note": s.get("note")}
+
+
+def require_moc_gate(p: Problem, d: dict) -> None:
+    """計算準備 (`prepare`・`prepare_ns`) の入口で MOC の単位過程のゲートを必須にする (plan discretization-moc-axis-limit-and-corrector
+    §4.2「反復失敗が 1 対でもあれば検証・生産は不合格」、2026-10-07 result 段レビュー M1: 以前は design_chain の診断に記録するだけで、
+    不合格の MOC でもメッシュ生成へ進んでいた)。設計の経路 (design_chain) は止めない (診断を取れるように残す)。
+    - `moc_corrector: converge` のとき: 診断 (`d["moc"]["gate"]`) が無い・`applicable` でない・`pass` が True でなければ ValueError。
+    - `fixed2` (収束を判定しない) のときは合否を出さないので通す (ゲートの `pass` は None)。"""
+    _, corrector = _moc_keys(p.geometry)
+    moc = d.get("moc")
+    gate = (moc or {}).get("gate")
+    if corrector != "converge":
+        return
+    if not isinstance(gate, dict) or not gate.get("applicable"):
+        raise ValueError(f"MOC のゲートの診断が無い (moc_corrector: converge; d['moc']['gate'] = {gate!r}) — 計算準備を止める")
+    if gate.get("pass") is not True:
+        raise ValueError(f"MOC のゲートが不合格 ({'; '.join(gate.get('reasons') or []) or gate.get('pass')}) — 計算準備を止める "
+                         "(plan discretization-moc-axis-limit-and-corrector §4.2)")
 
 
 def design_chain(p: Problem) -> dict:
@@ -468,7 +486,7 @@ def design_chain(p: Problem) -> dict:
         return law
 
     rF_pred = float(np.sqrt(area_ratio_isentropic(Md, g)))
-    # 逆 MOC の単位過程 (plans/active/discretization-moc-axis-limit-and-corrector.md §4.3):
+    # 逆 MOC の単位過程 (plans/accepted/discretization-moc-axis-limit-and-corrector.md §4.3):
     # geometry.moc_axis_limit = legacy (既定、軸端点の sinθ/r は相手の値で代用) | analytic (軸則から解析極限 θ_r)
     # geometry.moc_corrector = fixed2 (既定、予測 1 + 修正 2 回) | converge (更新量 ≤ 1e-12 まで、上限 50 回)
     # キーが無ければ従来とビット同一。キーの検査は design_chain の冒頭 (`_moc_keys`)
@@ -780,8 +798,11 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     # Euler の格子は mesh_euler (mesh は読まない)。無い・不正なら run dir を作る前・設計チェーンの前に止める (2026-10-07)
     m_eu = mesh_euler_block(p)
     run_dir = Path(run_dir)
-    run_dir.mkdir(parents=True, exist_ok=False)
+    if run_dir.exists():
+        raise FileExistsError(f"{run_dir} が既にある")
     d = design_chain(p)
+    require_moc_gate(p, d)                        # MOC の不合格は run dir を作る前に止める (2026-10-07)
+    run_dir.mkdir(parents=True, exist_ok=False)
     wall = d["wall"]
     scale = float(p.spec["r_throat"])
     mp = mesh_params_euler(p, scale)
@@ -1228,8 +1249,11 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     # 種ごとの輸送物性 (#9b): TP の NS は gas.transport 必須。run dir を作る前・設計チェーンの前に検査する
     transport = p.transport_for_ns()
     run_dir = Path(run_dir)
-    run_dir.mkdir(parents=True, exist_ok=False)
+    if run_dir.exists():
+        raise FileExistsError(f"{run_dir} が既にある")
     d = design_chain(p)
+    require_moc_gate(p, d)                        # MOC の不合格は run dir を作る前に止める (2026-10-07)
+    run_dir.mkdir(parents=True, exist_ok=False)
     scale = float(p.spec["r_throat"])
     wall_inv = d["wall_inv"]                      # (n,4) [x,r,th,M] r_t 単位
     # 物理壁 (A13): 上流履歴込み δ* + 真のスロート探索 + 上流 Hermite 再生成。

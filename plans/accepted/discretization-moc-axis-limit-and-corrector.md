@@ -3,12 +3,12 @@
 ## メタ
 
 - **area**: `discretization`
-- **status**: `in_progress`
+- **status**: `done`  <!-- 2026-10-07 機能実装の完了 (生産採用は V5d の保留を明示した限定採用としてユーザ判断、§5.1 #5) -->
 - **related_docs**:
   - `methods/design/overview.md` (逆 MOC の軸対称源項 A11、「今後の課題」の軸上の解析極限)
 - **related_plans**:
   - [discretization-moc-axisymmetric-source-term.md](../accepted/discretization-moc-axisymmetric-source-term.md) (A11: 源項を点自身で評価。軸上だけ相手から極限を代用する現行の形を決めた plan)
-  - [tooling-nozzle-throat-monotone-r2.md](../accepted/tooling-nozzle-throat-monotone-r2.md) (§3 仮説 H、§5.1 #10、§9 2026-10-06〜07: 始点付近の角度差の切り分けと事前試算)
+  - [tooling-nozzle-throat-monotone-r2.md](tooling-nozzle-throat-monotone-r2.md) (§3 仮説 H、§5.1 #10、§9 2026-10-06〜07: 始点付近の角度差の切り分けと事前試算)
 - **created**: `2026-10-07`
 - **owner**: `Claude (Opus 5.5)`
 
@@ -108,11 +108,11 @@
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | 1 | ~~§4・§6 の諮問~~ 完了 | 判断: 2026-10-07 codex (diagnose) — 式は採用、放射源流の判別 A/B を先行し、修正子の未収束はゲート不合格、V4 の基準を新しく、生産化には NS・凝縮の再評価。全件採用 (§6.1) | F |
-| 2 | codex plan 段レビュー | `codex_review.py <本 plan> --stage plan` | O |
+| 2 | ~~codex plan 段レビュー~~ 完了 | 2026-10-07、GO-with-changes C0/M4/m1、全件採用 (§6.1) | O |
 | 3 | ~~実装~~ 完了 (2026-10-07) | §5 の 1〜4 と、§4.0 の判別 A/B の試験。新テスト 106 件 PASS、既存テスト FAIL 0 (§9) | O |
 | 4 | ~~検証 (順序固定)~~ 完了 | V0 → 実装・回帰 (V1・V3・V6) → V4 (§9)。ユーザ決定 2026-10-07「MOC の軸処理も生産候補にして進めて」 | O (解釈は F) |
-| 5 | **case/45 の生産への反映 (候補、2026-10-07 ユーザ決定)** | **G1 の Euler の V5・V5b は保留、V5c で全温の超過が保存状態にあると判明 → Euler の格子を切り替え (plan verification-case45-euler-total-enthalpy の E3)、出口較正 E4V 合格 (6.88e-6)。5d V5d (新しい格子・共通の較正値) を回す → NS の N2 (V5′)** → 5a V5 (IC の検査 → Euler の比較と出口較正。Euler は設計壁を使うので、物理壁の上流の変更 (plan tooling-nozzle-upstream-poly-and-throat-sizing) と独立に今すぐ回せる)。5b V5′ (NS・凝縮) は、上流の多項式化の NS (同 plan §6 U4、今の MOC に固定) が済んでから、その run を基準にして MOC の変更だけを評価する (2 つの変更を同じ A/B に入れない。2026-10-07 諮問 `notes/reviews/2026-10-07-upstream-poly-throat-sizing-diagnose.md`)。→ codex result 段レビュー → 生産採用の判断 (ユーザ)。採用したら、コードの既定も `analytic`・`converge` に切り替える (標準と決めた方式は既定にする、2026-10-07 ユーザ方針) | ユーザ・O |
-| 6 | codex result 段レビュー | `--stage result` | O |
+| 5 | case/45 の生産への反映 | V5d (新しい格子の Euler) は**保留 (前提不成立)** のまま: 腕 M の全温の時間の幅 0.113〜0.126 K > 0.1 K。NS の V5′ (N2、run_0167+0179・凝縮 run_0170) は dry・凝縮の登録のゲートに合格 (ユーザ決定 2 件を適用)、N2 − N1 は参考値で性能の改善は確定しない (§9)。**生産採用 (と、採用したらコードの既定を `analytic`・`converge` にすること) は、V5d の保留を明示した限定採用としてユーザ判断** | ユーザ |
+| 6 | ~~codex result 段レビュー~~ 完了 | 2026-10-07、GO-with-changes C0/M1/m2、全件採用し対応済み (§6.1) | O |
 
 ## 6. 検証
 
@@ -183,11 +183,12 @@
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
 | diagnose | `2026-10-07` | [`notes/reviews/2026-10-07-moc-axis-limit-diagnose.md`](../../notes/reviews/2026-10-07-moc-axis-limit-diagnose.md) (ブリーフ [`briefs/2026-10-07-moc-axis-limit.md`](../../notes/reviews/briefs/2026-10-07-moc-axis-limit.md)) | C0/M5/m1 + 判別 A/B 1 件 | 全件採用: θ_r の式は採用 / semi-perfect の ν_M は spline 微分と本体の線形補間の差を記録 (m) / 軸端点の θ_r は反復中固定、target と throat の接続検査 (M) / 修正子の未収束はゲート不合格 (M) / AXIS_LIMIT_FRAC の発火を記録、初稿の「軸外は生産と同じ」は誤り (M) / V2 は修正子をそろえた A/B (V0) を先行、V3 は記録に格下げ (M) / V4 の S3・S4 を本変更用に置き換え、V5 は不確かさ込み、生産化には NS・凝縮の再評価 (M) |
+| result | `2026-10-07` | [`notes/reviews/2026-10-07-discretization-moc-axis-limit-and-corrector-result.md`](../../notes/reviews/2026-10-07-discretization-moc-axis-limit-and-corrector-result.md) | GO-with-changes, C0/M1/m2 | 全件採用。Major の採否は上位に諮らずに決めた (検査の追加で設計方針を変えないため)。M1 不合格の MOC が計算準備で止まらなかった → `runner_axismach.require_moc_gate` を `prepare`・`prepare_ns` の入口に (converge で不合格・診断の欠損は run dir を作る前に例外、fixed2 は通す)、`ns_n012.py verify-set` に converge の条件のゲートの合格を追加。試験: `run_moc_axis_limit_tests.py` に入口のゲートの 5 件と prepare・prepare_ns の負例 (ALL PASS)、`test_ns_n012_eval.py` に N2 のゲート不合格 → NG (FAIL 0)、`run_mesh_euler_tests.py`・`run_pw_upstream_poly_tests.py` も rc 0。今回の N2 の設計は手元で作り直してゲート合格 (反復の失敗 0) / m2 V5d の「悪化の向きの量は無い」を訂正 (exit_M_dev は 4.12e-6 → 4.49e-5 で増える向き) / m3 §5.1・plans/README.md を現在の状態に、完了の区分は機能実装の完了 |
 | plan | `2026-10-07` | [`notes/reviews/2026-10-07-discretization-moc-axis-limit-and-corrector-plan.md`](../../notes/reviews/2026-10-07-discretization-moc-axis-limit-and-corrector-plan.md) | GO-with-changes, C0/M4/m1 | 全件採用: M1 V5 の前に変換後メッシュの移動・接続・反転・品質を検査し、番号写像の上限を数値だけ上げない、IC 依存の確認 run を追加 / M2 V5 の採否を E′ と同じ方法で本 plan に事前登録 (波・傾き・オーバーシュート・出口 M、前提の VERDICT、判別不能は保留) / M3 対の集計を 5 分類にし反復失敗は不合格、最終残差 ≤ 1e-10、負例テスト / M4 順序を V0 → 実装 → V4 → V5 → V5′ → result → 生産判断に固定し、完了の区分を分ける / m 「山は 4 割残る」を削除。レビュー内の独立試算: 放射源流で analytic + converge の壁の誤差は全解像度で legacy + converge 以下、最細区間の次数 1.990、第 1 段の θ 誤差は 4.37e-4 倍以下。case/45 で第 1 点の角度差 0.0219 → 0.0054°、設計壁の変化最大 6.18 µm (x ≈ 0.40) |
 | diagnose (V5 の判定器) | `2026-10-07` | [`notes/reviews/2026-10-07-moc-v5-eval-interpretation-diagnose.md`](../../notes/reviews/2026-10-07-moc-v5-eval-interpretation-diagnose.md) (ブリーフ [`briefs/2026-10-07-moc-v5-eval-interpretation.md`](../../notes/reviews/briefs/2026-10-07-moc-v5-eval-interpretation.md)) | M4/m2 | 全件採用 (結果を読む前): 全量 STEADY 必須は却下し、STEADY を原則に出口誤差だけ E4 の絶対許容内を全 7 本に対称に (M) / 準定常は末尾 5 枚と全 13 枚の両方 (M、末尾だけでは ISEN の過渡を含む平均が IC 合格に化ける反例を諮問が再現) / IC 依存は両側 + 出口 M そのものの差 ≤ 1e-4 (M) / C1〜C5 の 5 キーを個別に必須 (M) / 出口較正の 3 区分 (m) / 1e-6 r_t は座標の整合の許容差と明記、感度を記録 (m)。§6 V5 の追加登録に反映 |
 | diagnose (V5 の保留の次の手) | `2026-10-07` | [`notes/reviews/2026-10-07-moc-v5-hold-next-step-diagnose.md`](../../notes/reviews/2026-10-07-moc-v5-hold-next-step-diagnose.md) (ブリーフ [`briefs/2026-10-07-moc-v5-hold-next-step.md`](../../notes/reviews/briefs/2026-10-07-moc-v5-hold-next-step.md)) | M3 + 判別 A/B 1 件 | 採用: V5 は保留のまま / 既存の時系列からは有界な振動と認定できない (出口誤差は後半で幅 0.10〜0.16 倍に減衰、オーバーシュートは 0.78〜1.18 倍で減衰しない、諮問の独立計算) / 全 7 本を追加 36000 step 延長する診断 V5b を別登録 (§6 V5b)。却下 (諮問の推奨どおり): ISEN だけの延長、直ちに E′ 相当の実務判定へ切り替え。Major 3 件 (OSCILLATING を有界振動の証明にしない・今の 2SE を振動平均の不確かさに流用しない・既存の延長評価器の 12000 固定加算を使わない) は §6 V5b に反映 |
 | diagnose (V5b の解釈) | `2026-10-07` | [`notes/reviews/2026-10-07-moc-v5b-interpretation-diagnose.md`](../../notes/reviews/2026-10-07-moc-v5b-interpretation-diagnose.md) (ブリーフ [`briefs/2026-10-07-moc-v5b-interpretation.md`](../../notes/reviews/briefs/2026-10-07-moc-v5b-interpretation.md)) | M4/m1 | 採用: 「IC で別の定常状態」は要再検証で「未整定の状態の差」と書く (M) / V5 を閉じて直ちに NS へ進む案は今は却下し、全温超過の生成経路を 0 step A/B (V5c) で先に判別 (M) / MOC の変更を不採用にする案は却下、候補を維持し生産採用・既定の切り替えは保留 (M) / 単調壁の採用根拠は一括撤回せず、Euler の差を定常な形状の効果と認定できないと限定 (M) / ブリーフの数値の訂正: 窓 B の腕 B の P 傾き平均は 0.208242 (ブリーフの 0.207 は丸め)、E′ の「37 %」は (D + 2SE)/Δq で D 自体は約 27 % (m)。§6 V5c と位置づけに反映 |
-| diagnose (V5c の次の手) | `2026-10-07` | [`notes/reviews/2026-10-07-moc-v5c-next-step-diagnose.md`](../../notes/reviews/2026-10-07-moc-v5c-next-step-diagnose.md) (ブリーフ [`briefs/2026-10-07-moc-v5c-next-step.md`](../../notes/reviews/briefs/2026-10-07-moc-v5c-next-step.md)) | M5 | 採用: MOC の採用判断は保留のまま、Euler の全エンタルピーの異常を別 plan ([verification-case45-euler-total-enthalpy.md](../accepted/verification-case45-euler-total-enthalpy.md)) に切り出し、その最初の 0 step A/B (起動前の prep 対 soft 段の後) を先に行う / 「等エントロピー IC 自体に 1915 K」は却下 (res_0 は soft 段の後、§9 で訂正) / Euler の異常を棚上げして V5′ を採否の評価として進める案は却下 (初期線と出口較正も Euler に依存) / 異なる run の最大値の列を同じ節点の時間変化として読まない / 全温の超過から直ちにエネルギーの非保存や設計の誤差量を断定しない |
+| diagnose (V5c の次の手) | `2026-10-07` | [`notes/reviews/2026-10-07-moc-v5c-next-step-diagnose.md`](../../notes/reviews/2026-10-07-moc-v5c-next-step-diagnose.md) (ブリーフ [`briefs/2026-10-07-moc-v5c-next-step.md`](../../notes/reviews/briefs/2026-10-07-moc-v5c-next-step.md)) | M5 | 採用: MOC の採用判断は保留のまま、Euler の全エンタルピーの異常を別 plan ([verification-case45-euler-total-enthalpy.md](verification-case45-euler-total-enthalpy.md)) に切り出し、その最初の 0 step A/B (起動前の prep 対 soft 段の後) を先に行う / 「等エントロピー IC 自体に 1915 K」は却下 (res_0 は soft 段の後、§9 で訂正) / Euler の異常を棚上げして V5′ を採否の評価として進める案は却下 (初期線と出口較正も Euler に依存) / 異なる run の最大値の列を同じ節点の時間変化として読まない / 全温の超過から直ちにエネルギーの非保存や設計の誤差量を断定しない |
 
 ## 7. 影響範囲
 
@@ -197,10 +198,10 @@
 
 ## 8. 完了条件
 
-- [ ] `methods/design/overview.md` を更新
-- [ ] 完了の区分を §9 に明記する: **機能実装の完了** (V0・V1・V2・V3・V4・V6、生産には入れない) か **生産採用** (加えて V5・V5′ と result レビュー、ユーザ判断)
-- [ ] codex レビュー 2 回 (plan / result) を §6.1 に記録
-- [ ] `status: done` にして accepted へ移動し、`plans/README.md` を同期
+- [x] `methods/design/overview.md` を更新 (キー・ゲート・入口の検査)
+- [x] 完了の区分を §9 に明記する: **機能実装の完了** (V0・V1・V2・V3・V4・V6、生産には入れない) か **生産採用** (加えて V5・V5′ と result レビュー、ユーザ判断) — 2026-10-07 は機能実装の完了
+- [x] codex レビュー 2 回 (plan / result) を §6.1 に記録
+- [x] `status: done` にして accepted へ移動し、`plans/README.md` を同期 (2026-10-07)
 
 ## 9. 変更ログ
 
@@ -250,9 +251,11 @@
   - 実装時に決めた細部 (結果を見る前、主セッションで採用): 本番は E4 の採用 (最終が E4V 合格・値が同じ・評価器の sha256 が同じ) を要求 / 準定常は窓の CSV に check_quasisteady の既定 (drift 0.05・osc 0.10) を当て、系列全体の末尾 5 枚の記録ファイルは記録だけ (V5 は要求していた) / 幅の条件は 6 量に Δq/10、「符号付き出口 M」は exit_core_M (面積平均、V5・V5b と同じ定義) / **出口較正の 3 区分は exit_core_M の D で判定し、M_common による 3 区分は参考値** (解釈が分かれうる点) / 腕 M の M = 6 の判定には E4 の P3 も課す / 全温の復元は窓の 13 枚だけ / 前提に RUN_RC 0・EARLY_STOP なし・腕の中の spline と格子の同一・設定ファイルの同一・壁の自腕一致・起動の記録の一致を加えた / 評価座標の感度は step 54000 で記録だけ。
 - `2026-10-07` — **V5d の判定: 保留 (前提不成立)**。評価器 c4411de5… (登録 99431498)、出力 `case/45.isobutane_m6_d155/_band_ab/moc_v5d_eval.json`・`moc_v5d_run.log`。腕 B = run_0171・run_0172・run_0164 (E4V を共用)、腕 M = run_0174〜0176、全 run RUN_RC 0、本段 NOT CONVERGED stalled/plateau (停滞だけ)。
   - 前提不成立の内訳: 各量の 13 枚の窓の幅 ≤ Δq/10 が、腕 B で M 波 (0.00026〜0.00037 > 0.0001)・オーバーシュート (0.00033〜0.00037 > 0.0003)、腕 M で全温の時間の幅 (`max_dn_wall` 0.113〜0.126 K > 0.1 K) とオーバーシュート・P 傾きの準定常 (TRANSIENT-UNSETTLED など) で不成立。
-  - 参考値 (前提不成立なので判定ではない): (D + 2SE)/Δq は M 波 0.02・P 波 −0.02・オーバーシュート −2.01 (B 0.0103 → M 0.0042)・出口規格化オーバーシュート −2.24 (0.0102 → 0.0034)・P 傾き −1.65 (0.0571 → 0.0075)・exit_M_dev 0.23。悪化の向きの量は無い。出口コア M は腕 B 6.000004・腕 M 6.000045 (D +4.1e-5)。腕 M の M_common は 3 本とも 13 枚で \|M − 6\| ≤ 5.3e-5 (共通の較正値で目標の 1e-4 に入る値)。出口較正は exit_core_M で「保留 (前提不成立)」、M_common の参考では「据え置き」。
+  - 参考値 (前提不成立なので判定ではない): (D + 2SE)/Δq は M 波 0.02・P 波 −0.02・オーバーシュート −2.01 (B 0.0103 → M 0.0042)・出口規格化オーバーシュート −2.24 (0.0102 → 0.0034)・P 傾き −1.65 (0.0571 → 0.0075)・exit_M_dev 0.23。全量の (D + 2SE) は許容幅の内だが、**出口 M の誤差 `exit_M_dev` は増える向き** (腕 B 4.12e-6 → 腕 M 4.49e-5、+4.07e-5)。(2026-10-07 result 段レビュー m2 で訂正: 初稿は「悪化の向きの量は無い」と書いていた — 誤り。許容幅の内であることと、悪化の向きの差が無いことは別)出口コア M は腕 B 6.000004・腕 M 6.000045 (D +4.1e-5)。腕 M の M_common は 3 本とも 13 枚で \|M − 6\| ≤ 5.3e-5 (共通の較正値で目標の 1e-4 に入る値)。出口較正は exit_core_M で「保留 (前提不成立)」、M_common の参考では「据え置き」。
   - NS の開始の条件 (「腕 M が再較正を要する場合は NS を始めない」) には当たらない (値は目標内)。そのため NS の 3 条件 (N0・N1・N2) を投入した (plan tooling-nozzle-upstream-poly-and-throat-sizing §9)。V5d の保留の扱い (G1 の Euler と同じく窓の中の時間変動で前提が成立しない) は、NS の結果と合わせてユーザに判断を仰ぐ。
 - `2026-10-07` — **NS の V5′ (N2 − N1) の結果** (上流の多項式化の plan §9 の同日の記録と同じ評価、3 条件とも dry 未達)。N2 − N1 (判定なし、窓の平均の差、括弧は両窓の幅の大きい方): 出口コア M +2.7e-5 (2.1e-5)、オーバーシュート η0.1 −3.66e-3 % (4.9e-4; N1 +0.00229 % → N2 −0.00136 %)、波 −5.2e-5 % (4.8e-4)、δ_E/δ_C +1.7e-5 (3.2e-5)。オーバーシュートは幅の約 7.5 倍下がった (Euler の V5d の参考値と同じ向き)。出口コア M の未達は N0・N1 と共通で、MOC の変更によるものではない。次の手は上位に諮ってから決める。
 - `2026-10-07` — **NS の 3 条件の延長** (諮問 `notes/reviews/2026-10-07-ns-n012-exitM-deficit-diagnose.md`、上流の多項式化の plan §9 に詳細): N2 の延長 run_0179_ns_n012_N2_ext。V5′ は候補として維持し、生産採用は保留 (差が時間の幅以下でも採用の根拠にしない)。
 - `2026-10-07` — **出口コア M のゲートをユーザ決定で 6.000 ± 0.05 % に変更** (上流の多項式化の plan §9)。N2 の出口コア M 5.99854 は新しい帯に入る。V5′ の判断は延長 run_0179 の準定常の結果を待つ。
 - `2026-10-07` — **NS の 3 条件の凝縮の結果** (上流の多項式化の plan §9 に表): N2 (run_0170) は合格。V5′ (N2 − N1、判定なし) 開始 -0.0539 (0.045)、S_max +0.0124 (0.0054)、g -3.15e-06 (1.8e-07)、M +0.000155 (6.9e-06)。dry は延長の後に 3 条件とも全ゲート合格 (ユーザ決定の 2 件を適用)、dry の V5′ はオーバーシュート −3.56e-3 % (幅 8.0e-4)。
+- `2026-10-07` — **codex result 段レビュー**: `notes/reviews/2026-10-07-discretization-moc-axis-limit-and-corrector-result.md` (GO-with-changes、C0/M1/m2)。全件採用 (§6.1)。レビューは V0・V2 (最細区間の次数 1.990)・V1 (変更前とビット同一)・V4・V6 (第 1 点の角度差 0.00544°、反復の最大 34) を独立に再現。
+  - **完了の区分: 機能実装の完了**。`moc_axis_limit: analytic`・`moc_corrector: converge` は実装・検証済みの opt-in (コードの既定は legacy・fixed2 のまま)。V5d は保留 (前提不成立)、V5′ の N2 は登録のゲートに合格で N2 − N1 は参考値。生産採用とコードの既定の切り替えはユーザ判断 (§5.1 #5)。

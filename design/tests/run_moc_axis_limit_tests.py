@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """逆 MOC の軸上の解析極限 θ_r と予測修正の収束 (`geometry.moc_axis_limit` / `geometry.moc_corrector`) の試験。
-plan: plans/active/discretization-moc-axis-limit-and-corrector.md §5.1 #3 (§4.0〜§4.3)。
+plan: plans/accepted/discretization-moc-axis-limit-and-corrector.md §5.1 #3 (§4.0〜§4.3)。
 
 1. θ_r の式: CPG の閉形式と一致 / 放射源流で 1/x / semi-perfect (case/45 のガス) で ν(M) 表の差分・
    連続の式 −½ d ln(ρu)/dx の数値微分と一致 (表の補間の違いによる差を記録)
@@ -420,6 +420,51 @@ with tempfile.TemporaryDirectory() as td:
                       same("c") and same("t"))
             else:
                 SKIPPED.append(f"8 (b) case/45 のビット同一 (凍結源 {RUNS} が無い)")
+
+# --- 9. 計算準備の入口でゲートを必須にする (2026-10-07 result 段レビュー M1) ---------------------------------------
+import types as _types
+import tempfile as _tempfile
+from forge_design.evaluate import runner_axismach as _RA
+_PC = _types.SimpleNamespace(geometry={"moc_corrector": "converge"})
+_PF = _types.SimpleNamespace(geometry={})
+_ok = {"moc": {"gate": {"applicable": True, "pass": True, "reasons": []}}}
+_ng = {"moc": {"gate": {"applicable": True, "pass": False, "reasons": ["反復の失敗 1 対 (非有限 0・上限到達 1)"]}}}
+try:
+    _RA.require_moc_gate(_PC, _ok)
+    check("入口のゲート: converge で合格なら通す", True)
+except ValueError as e:
+    check(f"入口のゲート: converge で合格なら通す ({e})", False)
+rejects("入口のゲート: converge で不合格 (反復の失敗 1 対)", lambda: _RA.require_moc_gate(_PC, _ng), must="不合格")
+rejects("入口のゲート: converge で診断が無い", lambda: _RA.require_moc_gate(_PC, {"moc": None}), must="診断が無い")
+rejects("入口のゲート: converge で gate.applicable が偽", lambda: _RA.require_moc_gate(_PC, {"moc": {"gate": {"applicable": False, "pass": None}}}), must="診断が無い")
+try:
+    _RA.require_moc_gate(_PF, {"moc": {"gate": {"applicable": False, "pass": None, "reasons": []}}})
+    check("入口のゲート: fixed2 (合否を出さない) は通す", True)
+except ValueError as e:
+    check(f"入口のゲート: fixed2 は通す ({e})", False)
+# prepare (Euler) は design_chain の不合格で run dir を作らずに止まる (design_chain を差し替えて確かめる)
+_PROB = C45 / "problem_d155_euler_t0cluster_u5em3.yaml"
+if _PROB.is_file() and (C45 / "problem_d155_ns_n012_N2.yaml").is_file():
+    _orig = _RA.design_chain
+    try:
+        _RA.design_chain = lambda p: _ng
+        with _tempfile.TemporaryDirectory() as _td:
+            _rd = Path(_td) / "run_x"
+            try:
+                _RA.prepare(_PROB, _rd, nsteps=10)
+                check("prepare: MOC のゲート不合格で止まる (通ってしまった)", False)
+            except ValueError as e:
+                check(f"prepare: MOC のゲート不合格で止まり run dir を作らない ({str(e)[:60]})", not _rd.exists())
+            _rn = Path(_td) / "run_y"
+            try:
+                _RA.prepare_ns(C45 / "problem_d155_ns_n012_N2.yaml", _rn, nsteps=10)
+                check("prepare_ns: MOC のゲート不合格で止まる (通ってしまった)", False)
+            except ValueError as e:
+                check(f"prepare_ns: MOC のゲート不合格で止まり run dir を作らない ({str(e)[:60]})", not _rn.exists() and "MOC" in str(e))
+    finally:
+        _RA.design_chain = _orig
+else:
+    SKIPPED.append("9 prepare の入口のゲート (case/45 の converge の Euler 問題が無い)")
 
 if not HAVE45:
     SKIPPED.append("case/45 依存の項目 (凍結源または問題 YAML が無い)")

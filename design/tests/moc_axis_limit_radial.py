@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""放射源流 (厳密解) での軸上の極限 θ_r と予測修正の収束の判別 A/B (plan §4.0 / §6 V0・V2)。CFD 0 step。
 
-計画: plans/active/discretization-moc-axis-limit-and-corrector.md §4.0・§6.0 V0・V2。
+計画: plans/accepted/discretization-moc-axis-limit-and-corrector.md §4.0・§6.0 V0・V2。
 設定は `run_inverse_tests.py` §8 (c) と同じ放射源流 (γ 1.4、半角 10°、初期線 x = 1.2 の縦線、軸 5.5 → 1.2、
 壁 = C⁺ 線上の流束閉包 `cplus_flux_wall`、壁の誤差は x = 1.4〜2.4 の 21 標本の最大相対誤差)。
 軸上の厳密解は θ_r = 1/x (A/A* = x² から θ_r = −½ d ln(ρu)/dx = 1/x)。
@@ -233,7 +233,7 @@ def main(argv):
     commit = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     dirty = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain", "design/forge_design"],
                            capture_output=True, text=True).stdout.strip()
-    doc = {"plan": "plans/active/discretization-moc-axis-limit-and-corrector.md §4.0 (V0)・§6 V2",
+    doc = {"plan": "plans/accepted/discretization-moc-axis-limit-and-corrector.md §4.0 (V0)・§6 V2",
            "commit": commit, "design_tree_dirty": dirty,
            "setup": {"gamma": G, "half_angle_deg": 10.0, "x_line": X1, "x_axis_start": X_AX0, "xq": XQ.tolist(),
                      "wall": "cplus_flux_wall", "theta_r_exact": "1/x",

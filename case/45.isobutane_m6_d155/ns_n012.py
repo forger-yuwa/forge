@@ -575,6 +575,10 @@ def verify_set(runs: list, md_offset: str, dry: bool, out_path: Path | None = No
         for k, v in (("axis_limit", sp["moc_axis_limit"]), ("corrector", sp["moc_corrector"])):
             if moc.get(k) != v:
                 why.append(f"{run.name}: prepare_info の moc.{k} = {moc.get(k)!r} ({v!r} であること)")
+        g = moc.get("gate") or {}
+        if sp["moc_corrector"] == "converge" and not (g.get("applicable") and g.get("pass") is True):
+            # converge の MOC はゲートの合格を要る (2026-10-07 result 段レビュー M1、plan discretization-moc-axis-limit-and-corrector §4.2)
+            why.append(f"{run.name}: MOC のゲートが合格でない (applicable {g.get('applicable')}, pass {g.get('pass')}, {g.get('reasons')})")
         if info.get("Md_moc_offset") != value:
             why.append(f"{run.name}: 実効の Md_moc_offset {info.get('Md_moc_offset')!r} ({value!r} であること)")
         if rt_want is not None and info.get("scale_m") != rt_want:

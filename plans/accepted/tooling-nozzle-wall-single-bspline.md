@@ -8,7 +8,7 @@
   - `methods/design/overview.md` (joint 壁、物理壁の解析経路)
 - **related_plans**:
   - [tooling-nozzle-throat-monotone-r2.md](../accepted/tooling-nozzle-throat-monotone-r2.md) (現行の生産壁)
-  - [discretization-moc-axis-limit-and-corrector.md](../active/discretization-moc-axis-limit-and-corrector.md) (並行する設計壁の変更。本 plan は設計を変えないので独立)
+  - [discretization-moc-axis-limit-and-corrector.md](discretization-moc-axis-limit-and-corrector.md) (並行する設計壁の変更。本 plan は設計を変えないので独立)
 - **created**: `2026-10-07`
 - **owner**: `Claude (Opus 5.5)`
 
