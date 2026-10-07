@@ -318,6 +318,17 @@ def _sizing_spec(spec: dict) -> dict | None:
     return {"method": s["method"], "target_m": float(t), "note": s.get("note")}
 
 
+def environment_record() -> dict:
+    """設計チェーンを回した Python の環境 (prepare_info.json の `environment`)。積分法の δ_r (scipy の RK45) は numpy・scipy の版で
+    1e-6 r_t の桁で動く (2026-10-07 実測: 同じ問題・同じコードで scipy 1.11.4 と 1.18.0 の差が出口付近で 7e-6 r_t)。壁・メッシュの
+    ビット同一を要する照合は同じ環境どうしで行う (procedures/nozzle-design-workflow.md「計算環境」)。"""
+    import platform
+    import sys as _sys
+    import scipy
+    return {"python": platform.python_version(), "executable": _sys.executable, "numpy": np.__version__, "scipy": scipy.__version__,
+            "host": platform.node()}
+
+
 def require_moc_gate(p: Problem, d: dict) -> None:
     """計算準備 (`prepare`・`prepare_ns`) の入口で MOC の単位過程のゲートを必須にする (plan discretization-moc-axis-limit-and-corrector
     §4.2「反復失敗が 1 対でもあれば検証・生産は不合格」、2026-10-07 result 段レビュー M1: 以前は design_chain の診断に記録するだけで、
@@ -877,7 +888,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
             "exit": d["exit"],
             "mdot_ratio_moc": d["mdot_ratio_moc"], "cd_series": d["cd_series"],
             "nStepOuter": n, "scale_m": scale, "ic_from": str(ic_from) if ic_from else None,
-            "mesh": mesh_rec}
+            "mesh": mesh_rec, "environment": environment_record()}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 
@@ -1448,6 +1459,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     info["pw_upstream"] = {"value": wall.pw_upstream, "source": pwu["source"], "requested": pwu["requested"]}
     info["pw_upstream_gate"] = (wall.upstream_gate if wall.pw_upstream == "poly" else None)
     info["sizing"] = _sizing_record(sizing, wall, scale)
+    info["environment"] = environment_record()     # 照合は同じ環境どうしで (2026-10-07)
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 

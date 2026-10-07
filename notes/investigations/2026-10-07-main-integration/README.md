@@ -41,3 +41,4 @@ PR #4 (integrate/main-2026-10-07) の作成後に feature へ積んだ commit �
 
 追加分の確認: design の試験 (`.venv-opt`、1 本ずつ) は 32 本中、非 0 が既知の 3 本だけ (main と同じ)。`check_plans.py` の FAIL 件数は 28 のまま (下の行)。Python のソルバ側の試験・生産の問題 (`physical_wall_repr: single_bspline` を明示済み) は変更の影響を受けない。
 `check_plans.py`: VERDICT: FAIL  (22/50 plans OK) — FAIL 28 件で main と同じ。
+- 追加 (2): `prepare_info.json` に計算環境 `environment` を記録 (`runner_axismach.environment_record`、記録だけで振る舞いは変えない) と手順書の「計算環境」。関連する design の試験 (`run_mesh_euler`・`run_pw_upstream_poly`・`run_wall_single_bspline`・`run_moc_axis_limit`) は rc 0。
