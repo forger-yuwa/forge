@@ -164,6 +164,9 @@ forge (素 SST, `run_0013` から index コピー warm start) と SU2 (`MARKER_I
 | 6 | ~~`wallProfile` CSV ($T_w(x)$ 分布の NS 入力)~~ **[boundary-conjugate-heat-transfer](boundary-conjugate-heat-transfer.md) へ移管 (2026-09-19)** | 同 plan §4.5 / §5.1 #4。`applyInletProfiles` を一般化して `ints: {wallProfile: 1}` で `wall_isothermal` の per-face `Ts` を埋める (Ts は `valueTypes==1` なのでカーネル無改修で効く) |
 | 7 | ~~弱 CHT ループ (1D 壁伝導 + 冷却剤モデル)~~ **[boundary-conjugate-heat-transfer](boundary-conjugate-heat-transfer.md) へ移管 (2026-09-19)** | §4.6-4 の方針を同 plan が引き取り、Phase 1 (外部弱連成) → Phase 2 (ソルバ内薄肉シェル) の 2 段に具体化した。**種別は `wall_isothermal` のままで `ints: {conjugate: 1}` 属性**とする (新種別 `wall_conjugate` は codex レビューで撤回: `iso_wall_flag`・T ピン・粘性壁・壁距離・DPLUR エネルギー行切離しの 5 経路から漏れるため) |
 | 8 | SERN (⑤) の等温評価 | 配管は #1 で共通化。検証は SERN plan R1–R7 の後 |
+| 10 | **CONTUR の物性をどの温度・どのモデルで評価するか (2026-10-08 起票、担当 F)** — 壁温が頻繁に変わる前提 (§8-4) で、積分法の初期壁が壁温に正しく追随するようにする。**方針は codex (diagnose) に諮問中** (ブリーフ `notes/reviews/briefs/2026-10-08-contur-property-temperature.md`)。諮問の結論を受けて §4.7 を書く (plan 未反映の部分はここだけ) | 実測 (case/45、CFD 0 step、[verification-m6-axis-wave-mesh-su2](verification-m6-axis-wave-mesh-su2.md) §9 の 2026-10-08): (i) 断熱壁温 T_aw = T_e(1 + r(γ_e − 1)/2 M²) が局所 γ_e のため全温を超える (試験部 1654〜1663 K、Tt 1600 K、NS 1470〜1482 K)。エンタルピー形 h_aw = h_e + r(h_0 − h_e) (r = 0.72^{1/3}) なら NS と +1.5〜4 K。(ii) T_aw の式の違いで δ_r が 3〜5.5 % 動き (等温でも Eq. 69 の (T_aw − T_w) 項で残る)、現行の式では冷やすと出口 δ_r が厚くなる (+0.95 %、全温基準では −1.1 %)。(iii) μ は空気の Sutherland で、NS (種ごとの CEA) と 250 K で −4.4 %、1470 K で +8.9 % ずれる。案: 第 1 層 = NS と同じ気体での整合 (エンタルピー形の Walz・h_aw・NS と同じ μ(T))、第 2 層 = 圧縮性変換の参照温度を壁温を跨いだ交差検証で選ぶ |
+| 11 | **較正の壁温条件の記録とガード (2026-10-08 起票、担当 F)** | `deltastar_initializer` (k_f 等) は較正した壁温条件でしか意味を持たない (case/45 で NS の壁温を与えるだけで出口合わせの k_f が 1.0565 → 1.0682)。較正時の `wall_thermal` を記録し、prepare で `spec.wall_thermal` と照合する案。形は #10 の諮問の結論で決める |
+| 12 | **壁温分布の単一ソース (2026-10-08 起票、担当 O、#10 の後)** | `spec.wall_thermal` に分布 (表) を足し、NS の `wallProfile` CSV (ソルバは実装済み、`methods/boundary.md`「壁温分布の入力」) と CONTUR の `Tw_table` の両方をそこから作る。座標の基準 (物理長 [m] か r_t 単位か) は #10 の諮問で決める |
 
 ## 6. 検証
 
@@ -199,6 +202,7 @@ forge (素 SST, `run_0013` から index コピー warm start) と SU2 (`MARKER_I
 1. **公称 $T_w$**: 初版は 300 K (ユーザ発言 2026-09-12「壁面温度 300 K くらいでまずは」)。実機の冷却方式が決まったら $T_w^{\rm nom}$ を差し替える。
 2. **CHT の要否**: §4.6-4 の判断基準 (弱 CHT ループが収束するか) で決める。フル CHT の実装は本計画の外。
 3. ~~**AR ゲートと y₁⁺**: 冷却壁で y₁⁺ ≤ 上限を守ると AR が 1000 を超える形状があり得る。その場合 `ni` を増やす (計算時間 ×数倍) か、AR 上限を「壁法線方向の構造格子は AR 2000 まで可」に緩めるかは S2/S3 の結果でユーザ判断。~~ **決着 (2026-09-12, ユーザ決定「AR 上限緩めようか」)**: 壁法線の構造格子層に限り **AR ≤ 5000** まで緩和 (AGENTS.md / calculation-workflow / recommended-settings に反映、`check_mesh_quality.py --ar-max`、問題 YAML `mesh.ar_max`)。裏付け = §5.1-9 の A/B (AR 846 メッシュ run_0108/0114 vs AR 4140 メッシュ run_0116/0117): **確定 — 出口 M・ṁ の差 0.02 %、熱負荷は y₁⁺ 改善分 +8〜10 %、発散なし。冷却壁ノズルの生産メッシュは `problem_va_R2_LU6_Lc8_ns_ar5k*.yaml` (AR ≤ 5000, スロート y₁⁺ ≈ 1) とする。**
+4. **壁温は頻繁に変わる前提で設計チェーンを作る (2026-10-08 ユーザ発言)**: 「これから壁温設定はガンガン変わり得る」「等温壁にするかもしれないし、壁温分布を与えるかも」「CONTUR で物性をどの温度で評価するかは任意性がある話なので、どうするべきかは考えて」。対応は §5.1 #10〜#12。
 
 ## 9. 完了条件
 
@@ -209,6 +213,7 @@ forge (素 SST, `run_0013` から index コピー warm start) と SU2 (`MARKER_I
 
 ## 10. 変更ログ
 
+- `2026-10-08` — **壁温が頻繁に変わる前提 (§8-4、ユーザ発言) を受けて §5.1 #10〜#12 を起票**。case/45 の実測で、CONTUR の断熱壁温の式が燃焼ガスで全温を超えること (+190 K)・その式の違いで δ_r が 3〜5.5 % 動くこと・μ が NS と最大 9 % ずれること・出口合わせの k_f が壁温条件で変わることを確認した (数値は §5.1 #10、詳細は [verification-m6-axis-wave-mesh-su2](verification-m6-axis-wave-mesh-su2.md) §9 の 2026-10-08)。物性の評価の方針は codex (diagnose) に諮問中で、§4 は未反映。
 - `2026-09-12` — **AR 上限を壁法線構造層で ≤5000 に緩和 (ユーザ決定)**。AGENTS.md・手順書・runner (`mesh.ar_max`) に反映。A/B (§5.1-9) で平均流 0.02 %・熱負荷 +8〜10 % (y₁⁺ 改善分)・発散なしを確認し確定。冷却壁の生産メッシュを AR 5000 版 (スロート y₁⁺ ≈ 1) に切替。
 - `2026-09-12` — **S4 完了 (case/44)**: S4a 固定形状の壁温感度 (run_0108 断熱 vs run_0109/0114 300 K, 同壁同メッシュ): 出口コア M +0.35〜0.48 %・ṁ +0.35 %・出口質量平均 T0 −1.5 %・Q_w 6.4〜7.8 MW (q_w ピーク 2.3〜2.8 MW/m² @ スロート直前)。S4b 300 K 再設計 (run_0110 pass 0 → run_0115 pass 1): ṁ 比 1.0002・出口コア M +0.02 % で生産ゲート達成、積分法初期壁は冷却効果を過小評価するが pass 1 で固定点近傍。S3 は run_0112 (CPG 断熱) 完了・SU2 対は実行中。
 - `2026-09-12` — S1 配管・符号付き δ\*・平板評価ツール実装、case/48 run A/B/C 完了 (§5.1-2 に数値)。y₁⁺ の冷却倍率は実測 ×5.7 (3 µm: 断熱 0.08 → 300 K 0.46)。

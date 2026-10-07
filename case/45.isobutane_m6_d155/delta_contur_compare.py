@@ -11,9 +11,12 @@
     - CONTUR: 生産の問題 (problem_d155_ns_prod.yaml) の設計壁で integral_bl を k_f = 1 (較正なし) と生産の k_f で。δ_r・C_f・H・N・θ。
     → _band_ab/delta_contur/extract.npz と extract.json
   plot (手元): 図 3 枚 → _band_ab/delta_contur/fig_*.png と summary.json (試験部 [40, 94] の δ_E/δ_C の 1 次の傾き・端から端の振れ)。
+  tw (手元): CONTUR に NS の壁温 (ns_wall_T.csv) を与えた場合と断熱の式の場合を、k_f = 1 と出口合わせの k_f で比べる
+    → fig4_wall_temperature.png・fig5_wall_T.png・tw_experiment.json。
+  taw (手元): T_aw の式 (局所 γ_e の現行 / 全温基準) の違いが δ_r を動かす量を、断熱と等温 1000/600/300 K で → taw_sensitivity.json。
 
 usage: python3 delta_contur_compare.py extract   (AWS の case dir)
-       /home/sano/work/forge/design/.venv-opt/bin/python delta_contur_compare.py plot   (手元)
+       /home/sano/work/forge/design/.venv-opt/bin/python delta_contur_compare.py {plot|tw|taw}   (手元)
 """
 import json
 import os
@@ -208,5 +211,116 @@ def plot():
     print(json.dumps(summ, indent=1, ensure_ascii=False))
 
 
+def tw_experiment():
+    """CONTUR に NS の実際の壁温 (ns_wall_T.csv、断熱壁の NS の窓の平均) を与えると δ のずれと傾きがどう変わるか (手元、CFD 0 step)。
+    断熱壁の式の T_aw = T_e(1 + Pr^(1/3)(γ_e − 1)/2 M²) は局所の γ_e を使うため、燃焼ガスでは全温を超える (試験部で約 +190 K)。"""
+    from forge_design.evaluate.runner_axismach import design_chain, load_problem, _gam_or_gas
+    from forge_design.feedback.deltastar_integral import integral_bl
+    from forge_design.metrics.deltastar import smooth_delta_quintic
+    runs = Path("/home/sano/work/forge/case/45.isobutane_m6_d155")
+    txt = (HERE / PROB).read_text().replace("initial_line_run: run_0062_euler_wallfit_fit_r1_ext6k",
+                                            f"initial_line_run: {runs / 'run_0062_euler_wallfit_fit_r1_ext6k'}")
+    tmp = OUT / "prod_local.yaml"; tmp.write_text(txt)
+    p = load_problem(tmp); d = design_chain(p); rt = float(p.spec["r_throat"])
+    tw = np.loadtxt(OUT / "ns_wall_T.csv", delimiter=",", skiprows=1)
+    Z = np.load(OUT / "extract.npz"); n = len(json.loads((OUT / "extract.json").read_text())["snaps"])
+    xs = Z["snap0_x"]
+    Dm = np.array([np.interp(xs, Z[f"snap{i}_x"], Z[f"snap{i}_duse"]) for i in range(n)]).mean(0)
+    xF = float(d["wall_inv"][-1, 0])
+    res = {}
+    def run(lab, k, tbc):
+        r = integral_bl(d["wall"], d["wall_inv"], _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]), rt, thermal_bc=tbc, cf_scale=k)
+        f_s, _ = smooth_delta_quintic(r["x"], r["delta_r"], knot_spacing=2.0, lam=1.0, positive=True)
+        dc = np.asarray(f_s(xs))
+        ratio = Dm / dc
+        t = (xs >= TEST[0]) & (xs <= TEST[1])
+        co = np.polyfit(xs[t], ratio[t], 1)
+        res[lab] = {"k_f": k, "ratio_test_mean": float(ratio[t].mean()), "slope_per_rt": float(co[0]),
+                    "swing": float(abs(co[0]) * (TEST[1] - TEST[0])), "ratio_xF": float(np.interp(xF, xs, ratio)),
+                    "Tw_test": [float(np.interp(TEST[0], r["x"], r["Tw"])), float(np.interp(TEST[1], r["x"], r["Tw"]))],
+                    "Cf_test_mean": float(np.interp(np.linspace(*TEST, 50), r["x"], r["Cf"]).mean()), "_ratio": ratio}
+        return res[lab]
+    ad = {"mode": "adiabatic"}
+    nsT = {"mode": "prescribed_temperature", "Tw_table": tw.tolist()}
+    run("adiabatic_k1", 1.0, ad)
+    run("nsTw_k1", 1.0, nsT)
+    # 出口で δ を合わせる k_f (C2 と同じ考え): ratio_xF ∝ 1/δ_C(k)。2 点の割線で解く
+    for lab, tbc in (("adiabatic_kfit", ad), ("nsTw_kfit", nsT)):
+        k0, k1 = 1.0, 1.06
+        f0 = run(lab, k0, tbc)["ratio_xF"] - 1.0
+        f1 = run(lab, k1, tbc)["ratio_xF"] - 1.0
+        for _ in range(4):
+            k2 = k1 - f1 * (k1 - k0) / (f1 - f0)
+            k0, f0, k1 = k1, f1, k2
+            f1 = run(lab, k1, tbc)["ratio_xF"] - 1.0
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import font_manager
+    fp = Path.home() / ".fonts" / "NotoSansCJKjp-Regular.otf"
+    if fp.is_file():
+        font_manager.fontManager.addfont(str(fp)); plt.rcParams["font.family"] = font_manager.FontProperties(fname=str(fp)).get_name()
+    plt.rcParams["axes.unicode_minus"] = False
+    fig, a = plt.subplots(figsize=(10, 4.8), constrained_layout=True)
+    sel = xs >= 2.0
+    sty = {"adiabatic_k1": ("#c0392b", "--", "断熱の式の壁温、k_f = 1"), "adiabatic_kfit": ("#0b6e4f", "-", "断熱の式の壁温、k_f を出口に合わせる (= 生産)"),
+           "nsTw_k1": ("#8e44ad", "--", "NS の壁温を与える、k_f = 1"), "nsTw_kfit": ("#1f6fb2", "-", "NS の壁温を与える、k_f を出口に合わせる")}
+    for lab, (c, ls, t_) in sty.items():
+        a.plot(xs[sel], res[lab]["_ratio"][sel], color=c, ls=ls, lw=1.5, label=f"{t_} (k_f {res[lab]['k_f']:.4f}、試験部の振れ {res[lab]['swing']*100:.2f} %)")
+    a.axhline(1.0, color="0.5", lw=0.8); a.axvspan(*TEST, color="0.93", zorder=0)
+    a.set_ylim(0.9, 1.12); a.set_xlabel("x / r_t"); a.set_ylabel("δ_E (NS) / δ_C (CONTUR)"); a.grid(alpha=0.3)
+    a.legend(loc="upper right", frameon=False, fontsize=8.5)
+    fig.savefig(OUT / "fig4_wall_temperature.png", dpi=150); plt.close(fig)
+    fig, a = plt.subplots(figsize=(10, 3.8), constrained_layout=True)
+    from forge_design.feedback.deltastar_integral import EdgeConditions
+    ec = EdgeConditions(d["wall"], d["wall_inv"], _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]), rt)
+    xx = np.linspace(0.5, xF, 400)
+    taw = [ec.at(float(x))["Te"] * (1 + ec.Pr ** (1 / 3) * 0.5 * (ec.at(float(x))["gam"] - 1) * ec.at(float(x))["M"] ** 2) for x in xx]
+    a.plot(xx, taw, color="#c0392b", lw=1.5, label="CONTUR の断熱壁温 T_aw (一定 γ の式に局所 γ_e)")
+    a.plot(tw[:, 0][tw[:, 0] >= 0.5], tw[:, 1][tw[:, 0] >= 0.5], color="#1f3b73", lw=1.5, label="NS の壁温 (断熱壁、窓の平均)")
+    a.axhline(float(p.spec["Tt"]), color="0.4", lw=0.9, ls=":", label=f"全温 T_t = {float(p.spec['Tt']):.0f} K")
+    a.set_xlabel("x / r_t"); a.set_ylabel("壁温 [K]"); a.grid(alpha=0.3); a.legend(loc="lower right", frameon=False, fontsize=9)
+    fig.savefig(OUT / "fig5_wall_T.png", dpi=150); plt.close(fig)
+    out = {k: {kk: vv for kk, vv in v.items() if not kk.startswith("_")} for k, v in res.items()}
+    (OUT / "tw_experiment.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    print(json.dumps(out, indent=1, ensure_ascii=False))
+
+
+def taw_sensitivity():
+    """T_aw の式の違いが CONTUR の δ_r をどれだけ動かすか (断熱と等温 1000/600/300 K、生産の k_f、手元、CFD 0 step)。
+    現行: T_aw = T_e(1 + Pr^(1/3)(γ_e − 1)/2 M²) (局所 γ_e)。比較: T_aw = T_e + Pr^(1/3)(T_t − T_e) (全温基準)。
+    等温壁でも T_aw は Crocco の温度分布の (T_aw − T_w) の項に入るので、壁温を与えても式の差は残る。
+    比較の式は EdgeConditions.at の戻り値を差し替えて試すだけ (コードの既定は変えない)。"""
+    from forge_design.evaluate.runner_axismach import design_chain, load_problem, _gam_or_gas
+    from forge_design.feedback import deltastar_integral as DI
+    p = load_problem(OUT / "prod_local.yaml"); d = design_chain(p); rt = float(p.spec["r_throat"])
+    Tt = float(p.spec["Tt"]); k = float(p.raw["deltastar_initializer"]["cf_scale"])
+    orig_at = DI.EdgeConditions.at
+
+    def at_tt(self, x):
+        e = orig_at(self, x)
+        e["Taw"] = e["Te"] + self.Pr ** (1 / 3) * (Tt - e["Te"])
+        return e
+    xF = float(d["wall_inv"][-1, 0]); xq = np.array([TEST[0], 70.0, xF])
+    out = {"x_query_rt": xq.tolist(), "k_f": k}
+    cases = (("adiabatic", {"mode": "adiabatic"}), ("Tw1000", {"mode": "prescribed_temperature", "Tw": 1000.0}),
+             ("Tw600", {"mode": "prescribed_temperature", "Tw": 600.0}), ("Tw300", {"mode": "prescribed_temperature", "Tw": 300.0}))
+    try:
+        for lab, tbc in cases:
+            row = {}
+            for form in ("current", "tt"):
+                DI.EdgeConditions.at = orig_at if form == "current" else at_tt
+                r = DI.integral_bl(d["wall"], d["wall_inv"], _gam_or_gas(p), p.cp, float(p.spec["Pt"]), Tt, rt, thermal_bc=tbc, cf_scale=k)
+                row[form] = {"delta_r_mm": [float(np.interp(x, r["x"], r["delta_r"])) * rt * 1e3 for x in xq],
+                             "Taw_test": [float(np.interp(x, r["x"], r["Taw"])) for x in xq[:2]],
+                             "Tw_test": [float(np.interp(x, r["x"], r["Tw"])) for x in xq[:2]]}
+            row["rel_change_tt_vs_current"] = [b / a - 1 for a, b in zip(row["current"]["delta_r_mm"], row["tt"]["delta_r_mm"])]
+            out[lab] = row
+    finally:
+        DI.EdgeConditions.at = orig_at
+    (OUT / "taw_sensitivity.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    print(json.dumps(out, indent=1, ensure_ascii=False))
+
+
 if __name__ == "__main__":
-    {"extract": extract, "plot": plot}[sys.argv[1]]()
+    {"extract": extract, "plot": plot, "tw": tw_experiment, "taw": taw_sensitivity}[sys.argv[1]]()
