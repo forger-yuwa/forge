@@ -14,9 +14,12 @@
   tw (手元): CONTUR に NS の壁温 (ns_wall_T.csv) を与えた場合と断熱の式の場合を、k_f = 1 と出口合わせの k_f で比べる
     → fig4_wall_temperature.png・fig5_wall_T.png・tw_experiment.json。
   taw (手元): T_aw の式 (局所 γ_e の現行 / 全温基準) の違いが δ_r を動かす量を、断熱と等温 1000/600/300 K で → taw_sensitivity.json。
+  knobs (手元): 較正の係数 (k_f・k_N・a・Δm) と第 1 層の一部 (T_aw のエンタルピー化 + 混合気の μ) の効き方を、出口で合わせ直して比べる
+    → knobs.json・knobs_profiles.json (説明ページ用)。
+  hform (手元): 熱閉包の A/B (温度形 / エンタルピー形、isothermal plan §5.1 #10a の事前登録) → hform_ab.json。
 
 usage: python3 delta_contur_compare.py extract   (AWS の case dir)
-       /home/sano/work/forge/design/.venv-opt/bin/python delta_contur_compare.py {plot|tw|taw}   (手元)
+       /home/sano/work/forge/design/.venv-opt/bin/python delta_contur_compare.py {plot|tw|taw|knobs|hform}   (手元)
 """
 import json
 import os
@@ -96,7 +99,7 @@ def extract():
         r, drx, _ = integral_delta_r(p, d, {**init, "cf_scale": k})
         xr = np.asarray(r["x"])
         cont[lab] = {"x": xr, "delta_r": np.asarray(r["delta_r_raw_integral"]), "delta_r_smooth": np.asarray(drx(xr)),
-                     "Cf": np.asarray(r["Cf"]), "H": np.asarray(r["H"]), "N": np.asarray(r["N"]), "theta_rt": np.asarray(r["theta"]) / rt, "k_f": k}
+                     "Cf": np.asarray(r["Cf"]), "H": np.asarray(r["H"]), "N": np.asarray(r["N"]), "theta_rt": np.asarray(r["theta"]), "k_f": k}  # integral_bl の theta は既に θ/r_t (2026-10-08 codex 指摘で修正: 以前は r_t でもう一度割っていた。それで作った extract.npz の cont_*_theta_rt は 1/r_t = 13.04 倍)
     # 縁の状態 (CONTUR と同じ非粘性の縁): integral_bl の EdgeConditions
     from forge_design.feedback.deltastar_integral import EdgeConditions
     ec = EdgeConditions(d["wall"], d["wall_inv"], _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]), rt)
@@ -322,5 +325,190 @@ def taw_sensitivity():
     print(json.dumps(out, indent=1, ensure_ascii=False))
 
 
+# 混合気 (case/45 の組成) の μ_mix/μ_Sutherland(空気)。solver_density_cuda/tests/unit/transport_reference.py (NS と同じ CEA 輸送物性の
+# 独立参照実装) で 2026-10-08 に計算した値。knobs の「第 1 層の一部」の試算にだけ使う
+MU_RATIO_T = [250, 300, 350, 400, 600, 800, 1000, 1200, 1400, 1470, 1600]
+MU_RATIO = [0.956, 0.965, 0.973, 0.980, 1.007, 1.030, 1.050, 1.068, 1.084, 1.089, 1.099]
+
+
+def knobs():
+    """較正の係数ごとの効き方 (説明用、手元、CFD 0 step)。生産の CONTUR (k_f 1.0541, k_N 1, a 1) を基準に、係数を 1 つ動かしたときの
+    δ_r の変化を x に沿って出す。k_f 以外は出口の δ_r を基準と同じに戻すよう k_f を解き直す (生産の C2 と同じく出口で合わせる)。
+    Δm (C_f の Re 指数ずらし、#8d の案) と第 1 層 (T_aw のエンタルピー化 + 混合気の μ) は実装に無いので、ここで差し替えて試す。"""
+    from forge_design.evaluate.runner_axismach import design_chain, load_problem, _gam_or_gas
+    from forge_design.feedback import deltastar_integral as DI
+    from forge_design.metrics.deltastar import smooth_delta_quintic
+    p = load_problem(OUT / "prod_local.yaml"); d = design_chain(p); rt = float(p.spec["r_throat"]); Tt = float(p.spec["Tt"])
+    k0 = float(p.raw["deltastar_initializer"]["cf_scale"])
+    orig_closure, orig_at, orig_mu = DI.closure_contur, DI.EdgeConditions.at, DI._sutherland
+    st = {"dm": 0.0, "re_ref": 1.0e4}
+
+    def closure_dm(theta_m, e, Tw, a=1.0, cf_scale=1.0, n_scale=1.0):
+        c = orig_closure(theta_m, e, Tw, a=a, cf_scale=cf_scale, n_scale=n_scale)
+        if st["dm"]:
+            rei = max(c["F_Rdelta"] * c["Re_theta_c"], 300.0)
+            c["Cf"] *= (rei / st["re_ref"]) ** (-st["dm"])
+        return c
+    ec0 = DI.EdgeConditions(d["wall"], d["wall_inv"], _gam_or_gas(p), p.cp, float(p.spec["Pt"]), Tt, rt)
+    Tg = np.linspace(150.0, 1700.0, 6000); cpg = np.asarray(ec0.gas_obj.cp_mass(Tg))
+    hg = np.concatenate([[0.0], np.cumsum(0.5 * (cpg[1:] + cpg[:-1]) * np.diff(Tg))])
+
+    def at_h(self, x):
+        e = orig_at(self, x); he = np.interp(e["Te"], Tg, hg); h0 = np.interp(Tt, Tg, hg)
+        e["Taw"] = float(np.interp(he + self.Pr ** (1 / 3) * (h0 - he), hg, Tg)); return e
+    mu_mix = lambda T: orig_mu(T) * np.interp(T, MU_RATIO_T, MU_RATIO)
+    xF = float(d["wall_inv"][-1, 0])
+
+    def run(kf, kN=1.0, a=1.0, dm=0.0, layer1=False):
+        st["dm"] = dm
+        DI.closure_contur = closure_dm
+        if layer1:
+            DI.EdgeConditions.at = at_h; DI._sutherland = mu_mix
+        try:
+            return DI.integral_bl(d["wall"], d["wall_inv"], _gam_or_gas(p), p.cp, float(p.spec["Pt"]), Tt, rt,
+                                  thermal_bc={"mode": "adiabatic"}, a_crocco=a, cf_scale=kf, n_scale=kN)
+        finally:
+            DI.closure_contur, DI.EdgeConditions.at, DI._sutherland = orig_closure, orig_at, orig_mu
+    base = run(k0); xs = base["x"]; dF0 = float(np.interp(xF, xs, base["delta_r"]))
+
+    def pinned(**kw):
+        g = lambda k: float(np.interp(xF, xs, run(k, **kw)["delta_r"])) / dF0 - 1.0
+        ka, kb = k0, k0 * 1.03; fa, fb = g(ka), g(kb)
+        for _ in range(5):
+            kc = kb - fb * (kb - ka) / (fb - fa); ka, fa, kb = kb, fb, kc; fb = g(kb)
+            if abs(fb) < 1e-7: break
+        return kb, run(kb, **kw)
+    variants = {"kf_plus5": (k0 * 1.05, run(k0 * 1.05))}
+    for lab, kw in (("kN_plus10", dict(kN=1.1)), ("a_0p5", dict(a=0.5)), ("dm_plus0p05", dict(dm=0.05)), ("dm_minus0p05", dict(dm=-0.05)),
+                    ("layer1", dict(layer1=True))):
+        variants[lab] = pinned(**kw)
+    Z = np.load(OUT / "extract.npz"); n = len(json.loads((OUT / "extract.json").read_text())["snaps"])
+    xe = Z["snap0_x"]
+    Dm = np.array([np.interp(xe, Z[f"snap{i}_x"], Z[f"snap{i}_duse"]) for i in range(n)]).mean(0)
+    sm = lambda r: np.asarray(smooth_delta_quintic(r["x"], r["delta_r"], knot_spacing=2.0, lam=1.0, positive=True)[0](xe))
+    dC0 = sm(base); ratio0 = Dm / dC0
+    t = (xe >= TEST[0]) & (xe <= TEST[1])
+    out = {"k_f_base": k0, "x_F": xF, "test": list(TEST), "variants": {}}
+    sel = (xs >= 2.0)
+    prof = {"x": xs[sel].tolist(), "base": {k: base[k][sel].tolist() for k in ("delta_r", "H", "N", "Cf", "Re_theta_c")}}
+    for lab, (kf, r) in variants.items():
+        rel = r["delta_r"] / base["delta_r"] - 1.0
+        ratio = Dm / sm(r); co = np.polyfit(xe[t], ratio[t], 1)
+        out["variants"][lab] = {"k_f": kf, "rel_at": {str(xq): float(np.interp(xq, xs, rel)) for xq in (5.0, 20.0, 40.0, 70.0, xF)},
+                                "ratio_swing_test": float(abs(co[0]) * (TEST[1] - TEST[0])), "ratio_slope_per_rt": float(co[0]),
+                                "ratio_xF": float(np.interp(xF, xe, ratio))}
+        prof[lab] = {"rel": rel[sel].tolist(), "ratio": ratio.tolist()}
+    co0 = np.polyfit(xe[t], ratio0[t], 1)
+    out["base"] = {"ratio_swing_test": float(abs(co0[0]) * (TEST[1] - TEST[0])), "ratio_slope_per_rt": float(co0[0])}
+    prof["xe"] = xe.tolist(); prof["ratio0"] = ratio0.tolist()
+    (OUT / "knobs.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    (OUT / "knobs_profiles.json").write_text(json.dumps(prof))
+    print(json.dumps(out, indent=1, ensure_ascii=False))
+
+
+def hform():
+    """熱閉包の A/B (plan tooling-nozzle-isothermal-wall-chain §5.1 #10a、2026-10-08 事前登録、codex diagnose の判別 A/B)。CFD 0 step。
+    A = 今の温度形 (Eq. 69 を T で、T_aw = T_e(1 + r(γ_e−1)/2 M²))。
+    B = エンタルピー形: h_aw = h_e + r(h_0 − h_e)、h(v) = h_w + a(h_aw − h_w)v + [h_e − a(h_aw − h_w) − h_w]v²、T(v) = h⁻¹(h(v))。
+    変える因子は熱閉包の表現だけ (r = 0.72^(1/3)、a = 1、k_f = k_N = 1、今の μ・入口 θ₀・縁条件・運動量式・求積は固定)。
+    判定: 試験部 [40, 94] で |(δ_r(300 K)/δ_r(断熱))_B / (同)_A − 1| の最大 ≥ 1 % なら第 1 仮説を支持、< 1 % なら棄却。
+    前提: CPG 極限で A と B の差 < 0.1 %、積分精度 (rtol 1e-6 と 1e-8) の差 < 0.1 %。"""
+    from forge_design.evaluate.runner_axismach import design_chain, load_problem, _gam_or_gas
+    from forge_design.feedback import deltastar_integral as DI
+    from forge_design.metrics.deltastar import smooth_delta_quintic
+    p = load_problem(OUT / "prod_local.yaml"); d = design_chain(p); rt = float(p.spec["r_throat"]); Tt = float(p.spec["Tt"])
+    orig_prof, orig_at = DI._profile_integrals, DI.EdgeConditions.at
+    gas_sp = _gam_or_gas(p)
+
+    def h_table(gas):
+        Tg = np.linspace(100.0, 1800.0, 8000)
+        cp = np.asarray(gas.cp_mass(Tg)) if hasattr(gas, "cp_mass") else np.full_like(Tg, float(p.cp))
+        return Tg, np.concatenate([[0.0], np.cumsum(0.5 * (cp[1:] + cp[:-1]) * np.diff(Tg))])
+
+    def patches(Tg, hg):
+        H = lambda T: np.interp(T, Tg, hg)
+        Hinv = lambda h: np.interp(h, hg, Tg)
+
+        def at_h(self, x):
+            e = orig_at(self, x); he = H(e["Te"]); h0 = H(Tt)
+            e["Taw"] = float(Hinv(he + self.Pr ** (1.0 / 3.0) * (h0 - he)))
+            return e
+
+        def prof_h(delta, N, Tw, Taw, Te, rw, cos_phi, a):
+            u = DI._GL_U; w = DI._GL_W
+            hw, haw, he = H(Tw), H(Taw), H(Te)
+            T = Hinv(hw + a * (haw - hw) * u + (he - a * (haw - hw) - hw) * u ** 2)
+            rho_rel = Te / np.maximum(T, 1e-30)
+            z = delta * u ** N
+            dz = N * delta * u ** (N - 1.0)
+            curv = 1.0 - z * cos_phi / rw
+            theta = float(np.sum(w * curv * rho_rel * u * (1.0 - u) * dz))
+            dstar = float(np.sum(w * curv * (1.0 - rho_rel * u) * dz))
+            theta_c = float(np.sum(w * rho_rel * u * (1.0 - u) * dz))
+            Fc = float(np.sum(w * np.sqrt(rho_rel))) ** -2
+            return theta, dstar, theta_c, Fc
+        return at_h, prof_h
+
+    def run(arm, tbc, gas=gas_sp, rtol=1e-6):
+        if arm == "B":
+            DI.EdgeConditions.at, DI._profile_integrals = patches(*h_table(gas))
+        try:
+            return DI.integral_bl(d["wall"], d["wall_inv"], gas, p.cp, float(p.spec["Pt"]), Tt, rt, thermal_bc=tbc, rtol=rtol)
+        finally:
+            DI.EdgeConditions.at, DI._profile_integrals = orig_at, orig_prof
+    walls = {"adiabatic": {"mode": "adiabatic"}, "Tw1000": {"mode": "prescribed_temperature", "Tw": 1000.0},
+             "Tw600": {"mode": "prescribed_temperature", "Tw": 600.0}, "Tw300": {"mode": "prescribed_temperature", "Tw": 300.0}}
+    R = {arm: {k: run(arm, tbc) for k, tbc in walls.items()} for arm in ("A", "B")}
+    xs = R["A"]["adiabatic"]["x"]; t = (xs >= TEST[0]) & (xs <= TEST[1])
+    out = {"test": list(TEST), "r": 0.72 ** (1 / 3), "k_f": 1.0, "k_N": 1.0, "a": 1.0}
+    # 前提 1: CPG 極限 (気体を設計点の γ・c_p 一定にすると、温度形とエンタルピー形は式として一致する)
+    pre = {}
+    for k in ("adiabatic", "Tw300"):
+        a_, b_ = run("A", walls[k], gas=float(p.gamma)), run("B", walls[k], gas=float(p.gamma))
+        pre[f"cpg_{k}_max_rel"] = float(np.max(np.abs(b_["delta_r"] / a_["delta_r"] - 1.0)[xs >= 0.5]))
+    # 前提 2: 積分精度
+    for k in ("adiabatic", "Tw300"):
+        fine = run("A", walls[k], rtol=1e-8)
+        pre[f"rtol_{k}_max_rel_test"] = float(np.max(np.abs(fine["delta_r"] / R["A"][k]["delta_r"] - 1.0)[t]))
+    pre["ok"] = bool(max(pre.values()) < 1e-3)
+    out["preconditions"] = pre
+    # 判定
+    ch = {}
+    for k in ("Tw1000", "Tw600", "Tw300"):
+        ra = R["A"][k]["delta_r"] / R["A"]["adiabatic"]["delta_r"]
+        rb = R["B"][k]["delta_r"] / R["B"]["adiabatic"]["delta_r"]
+        c = rb / ra - 1.0
+        ch[k] = {"max_abs_change_test": float(np.max(np.abs(c[t]))), "x_at_max": float(xs[t][np.argmax(np.abs(c[t]))]),
+                 "ratio_A_at": {str(xq): float(np.interp(xq, xs, ra)) for xq in (40.0, 70.0, 94.0)},
+                 "ratio_B_at": {str(xq): float(np.interp(xq, xs, rb)) for xq in (40.0, 70.0, 94.0)}}
+    out["cooling_ratio_change"] = ch
+    out["verdict"] = ("第 1 仮説を支持 (≥ 1 %)" if ch["Tw300"]["max_abs_change_test"] >= 0.01 else "第 1 仮説を棄却 (< 1 %)") if pre["ok"] else "判定不能 (前提を満たさない)"
+    # 記録のみ: 試験部の平均の量と、NS (断熱) との比
+    stat = {}
+    for arm in ("A", "B"):
+        for k in walls:
+            r = R[arm][k]
+            stat[f"{arm}_{k}"] = {q: float(np.mean(np.asarray(r[q])[t])) for q in ("delta_r", "theta", "H", "Cf", "Tw", "Taw")}
+    out["test_means"] = stat
+    Z = np.load(OUT / "extract.npz"); n = len(json.loads((OUT / "extract.json").read_text())["snaps"])
+    xe = Z["snap0_x"]; te = (xe >= TEST[0]) & (xe <= TEST[1])
+    Dm = np.array([np.interp(xe, Z[f"snap{i}_x"], Z[f"snap{i}_duse"]) for i in range(n)]).mean(0)
+    xF = float(d["wall_inv"][-1, 0]); ns = {}
+    for arm in ("A", "B"):
+        r = R[arm]["adiabatic"]
+        dc = np.asarray(smooth_delta_quintic(r["x"], r["delta_r"], knot_spacing=2.0, lam=1.0, positive=True)[0](xe))
+        ratio = Dm / dc; co = np.polyfit(xe[te], ratio[te], 1)
+        ns[arm] = {"ratio_test_mean": float(ratio[te].mean()), "swing_test": float(abs(co[0]) * (TEST[1] - TEST[0])),
+                   "ratio_xF": float(np.interp(xF, xe, ratio))}
+    out["ns_adiabatic_k1_record_only"] = ns
+    prof = {"x": xs.tolist()}
+    for arm in ("A", "B"):
+        for k in walls:
+            prof[f"{arm}_{k}"] = {q: np.asarray(R[arm][k][q]).tolist() for q in ("delta_r", "H", "Cf", "Taw", "Tw")}
+    (OUT / "hform_ab.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    (OUT / "hform_ab_profiles.json").write_text(json.dumps(prof))
+    print(json.dumps(out, indent=1, ensure_ascii=False))
+
+
 if __name__ == "__main__":
-    {"extract": extract, "plot": plot, "tw": tw_experiment, "taw": taw_sensitivity}[sys.argv[1]]()
+    {"extract": extract, "plot": plot, "tw": tw_experiment, "taw": taw_sensitivity, "knobs": knobs, "hform": hform}[sys.argv[1]]()
